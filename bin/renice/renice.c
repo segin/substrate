@@ -10,12 +10,13 @@
  * super-user may lower a nice value or renice another user's processes; the
  * kernel enforces this and renice reports the resulting EPERM.
  */
+#include <errno.h>
 #include <limits.h>
+#include <pwd.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <errno.h>
-#include <pwd.h>
+
 #include <sys/resource.h>
 
 static const char *which_name(int which)

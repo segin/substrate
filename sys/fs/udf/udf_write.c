@@ -4,10 +4,11 @@
  * Block allocation, file creation, directory operations.
  */
 
-#include <fs/udf/udf.h>
-#include <vfs/vfs.h>
-#include <kern/console.h>
 #include <string.h>
+
+#include <fs/udf/udf.h>
+#include <kern/console.h>
+#include <vfs/vfs.h>
 #include <vm/vm_kmem.h>
 
 /* External context from udf.c */
@@ -18,20 +19,48 @@
  * Write space bitmap back to disk
  */
 static void udf_write_space_bitmap(struct udf_fs *fs) {
-    if (!fs->space_bitmap || !fs->device) return;
-    
-    struct udf_space_bitmap *sbm = (struct udf_space_bitmap *)fs->space_bitmap;
+    if (!fs->space_bitmap || !fs->space_bitmap_base || !fs->device) return;
 
-    if (sbm->tag.desc_crc_len > 0) {
-        sbm->tag.desc_crc = udf_crc(fs->space_bitmap, sbm->tag.desc_crc_len);
+    /*
+     * UDF-01: this used to cast fs->space_bitmap -- which points at the BIT
+     * ARRAY, 24 bytes past the descriptor -- to the header type.  The header
+     * fields were therefore read out of raw allocation bits: desc_crc_len came
+     * from bitmap bytes 14-15 and drove udf_crc far past the allocation, and
+     * num_bytes came from bytes 20-23 and drove a write of hundreds of
+     * sectors of unallocated heap onto the disc.  Use the allocation base,
+     * and bound both fields by what we actually allocated.
+     */
+    struct udf_space_bitmap *sbm = (struct udf_space_bitmap *)fs->space_bitmap_base;
+
+    /* A descriptor CRC covers the bytes AFTER the 16-byte tag, for
+     * desc_crc_len bytes -- the convention udf_ext_write_aed() already uses.
+     * The old code passed fs->space_bitmap (the bit array) as both the header
+     * AND the CRC start, so it hashed the wrong bytes for a length read out
+     * of the bit array itself. */
+    uint32_t crc_len = sbm->tag.desc_crc_len;
+    if ((uint64_t)sizeof(struct udf_tag) + crc_len > fs->space_bitmap_alloc) {
+        kprint("UDF: space bitmap desc_crc_len out of range; not writing\n");
+        return;
+    }
+    if (crc_len > 0) {
+        sbm->tag.desc_crc = udf_crc(fs->space_bitmap_base + sizeof(struct udf_tag),
+                                    crc_len);
     }
 
     /* Recalculate tag checksum */
     sbm->tag.tag_checksum = udf_tag_checksum(&sbm->tag);
 
     /* Calculate number of sectors */
-    uint32_t total_size = sizeof(struct udf_space_bitmap) + sbm->num_bytes;
+    uint32_t nbytes = sbm->num_bytes;
+    if (nbytes > fs->space_bitmap_alloc - sizeof(struct udf_space_bitmap)) {
+        kprint("UDF: space bitmap num_bytes out of range; not writing\n");
+        return;
+    }
+    uint32_t total_size = sizeof(struct udf_space_bitmap) + nbytes;
     uint32_t sectors = (total_size + UDF_SECTOR_SIZE - 1) / UDF_SECTOR_SIZE;
+    if (sectors * UDF_SECTOR_SIZE > fs->space_bitmap_alloc) {
+        sectors = fs->space_bitmap_alloc / UDF_SECTOR_SIZE;
+    }
 
     /* Write to disk.  Don't drop write errors silently — a partial
      * bitmap update leaves the on-disk state inconsistent with the
@@ -62,6 +91,7 @@ int udf_read_space_bitmap(struct udf_fs *fs, uint32_t bitmap_loc, uint32_t bitma
     
     if (sectors > 4) {
         kprint("UDF: Space bitmap too large\n");
+        kfree(sector_buf, UDF_SECTOR_SIZE * 4);
         return -1;
     }
     
@@ -78,7 +108,9 @@ int udf_read_space_bitmap(struct udf_fs *fs, uint32_t bitmap_loc, uint32_t bitma
         return -1;
     }
     
-    fs->space_bitmap = sector_buf + sizeof(struct udf_space_bitmap);
+    fs->space_bitmap       = sector_buf + sizeof(struct udf_space_bitmap);
+    fs->space_bitmap_base  = sector_buf;                  /* UDF-01 */
+    fs->space_bitmap_alloc = UDF_SECTOR_SIZE * 4;
     fs->space_bitmap_sector = sector;
 
     /* Validate num_bits against actual buffer capacity */
@@ -86,6 +118,7 @@ int udf_read_space_bitmap(struct udf_fs *fs, uint32_t bitmap_loc, uint32_t bitma
     if (sbm->num_bits > max_bitmap_bytes * 8) {
         kprint("UDF: Space bitmap num_bits exceeds buffer capacity\n");
         fs->space_bitmap = NULL;
+        fs->space_bitmap_base = NULL;
         kfree(sector_buf, UDF_SECTOR_SIZE * 4);
         return -1;
     }
@@ -100,22 +133,30 @@ int udf_read_space_bitmap(struct udf_fs *fs, uint32_t bitmap_loc, uint32_t bitma
  */
 uint32_t udf_alloc_block(struct udf_fs *fs) {
     if (!fs->space_bitmap) return 0;
-    
-    /* Find first zero bit in bitmap */
+
+    /*
+     * UDF-03: the polarity was inverted.  ECMA-167 4/14.12.1.1 (and Linux's
+     * udf_bitmap_new_block) define a SET bit as FREE and a clear bit as
+     * allocated; this scanned for a ZERO bit and set it, i.e. it treated
+     * allocated blocks as free.  On a real mkudffs volume the first "free"
+     * block it found was therefore the first block already holding data --
+     * typically the FSD/root FE region -- and udf_vfs_mkdir wrote straight
+     * over it.  A single mkdir destroyed existing files.
+     */
     for (uint32_t byte = 0; byte < fs->space_bitmap_size / 8; byte++) {
-        if (fs->space_bitmap[byte] != 0xFF) {
-            /* Found byte with free bit */
+        if (fs->space_bitmap[byte] != 0x00) {
+            /* Found a byte with at least one free (set) bit */
             for (int bit = 0; bit < 8; bit++) {
-                if (!(fs->space_bitmap[byte] & (1 << bit))) {
-                    /* Mark as allocated */
-                    fs->space_bitmap[byte] |= (1 << bit);
+                if (fs->space_bitmap[byte] & (1 << bit)) {
+                    /* Mark as allocated: clear the bit */
+                    fs->space_bitmap[byte] &= ~(1 << bit);
                     udf_write_space_bitmap(fs);
                     return byte * 8 + bit;
                 }
             }
         }
     }
-    
+
     kprint("UDF: No free blocks\n");
     return 0;
 }
@@ -128,8 +169,9 @@ void udf_free_block(struct udf_fs *fs, uint32_t block) {
     
     uint32_t byte = block / 8;
     uint8_t bit = block % 8;
-    
-    fs->space_bitmap[byte] &= ~(1 << bit);
+
+    /* UDF-03: freeing means marking FREE, which is setting the bit. */
+    fs->space_bitmap[byte] |= (1 << bit);
     udf_write_space_bitmap(fs);
 }
 
@@ -225,11 +267,72 @@ static void udf_ext_write_aed(struct udf_fs *fs, uint32_t block, uint8_t *buf, u
 }
 
 /*
+ * UDF-05: ext_attr_length is an untrusted on-disk field, and nearly every
+ * write path computes both an allocation-descriptor pointer
+ * (fe + sizeof(fe) + ext_attr_length) and an UNSIGNED remaining length
+ * (UDF_SECTOR_SIZE - sizeof(fe) - ext_attr_length) from it.  Only the inline
+ * branch validated it; everywhere else an oversized value made the pointer
+ * land past the sector while max_len UNDERFLOWED to near 4 GiB, turning a
+ * bounds check into a no-op and putting a controlled 8-byte descriptor write
+ * at a controlled ~1 MiB heap offset.  udf_read_file already validates this
+ * on the read side; this is the same test, applied once per write/truncate.
+ *
+ * Returns 1 when the FE's descriptor area lies wholly inside one sector.
+ */
+/*
+ * UDF-06: alloc_desc_length inside an Allocation Extent Descriptor is taken
+ * straight off the disc.  0xFFFFFFFF divided by 8 is 536 million iterations
+ * of a loop that both READS and WRITES ads[i] in a single-sector buffer.  An
+ * AED can only describe what fits in the sector that holds it.
+ */
+static uint32_t udf_aed_len_ok(uint32_t len) {
+    uint32_t max = UDF_SECTOR_SIZE - sizeof(struct udf_aed);
+    if (len > max) {
+        kprint("UDF: AED alloc_desc_length out of range; clamping\n");
+        return max;
+    }
+    return len;
+}
+
+/*
+ * UDF-06: an AED chain is a linked list read from the disc, so a
+ * self-referencing or cyclic link makes every walker spin forever.  Nothing
+ * legitimate needs more links than there are sectors in a partition, and far
+ * fewer in practice; this is the guard rail, not a real limit.
+ */
+#define UDF_AED_CHAIN_MAX 64
+
+static int udf_fe_area_ok(const struct udf_fe *fe) {
+    uint64_t base = (uint64_t)sizeof(struct udf_fe) + fe->ext_attr_length;
+    if (base >= UDF_SECTOR_SIZE) {
+        kprint("UDF: FE ext_attr_length out of range\n");
+        return 0;
+    }
+    if ((uint64_t)fe->alloc_desc_length > (uint64_t)UDF_SECTOR_SIZE - base) {
+        kprint("UDF: FE alloc_desc_length out of range\n");
+        return 0;
+    }
+    return 1;
+}
+
+/*
  * Convert inline data to Short Allocation Descriptor
  */
 static int udf_convert_inline_to_short_ad(struct udf_fs *fs, struct udf_fe *fe) {
+    if (!udf_fe_area_ok(fe)) return -1;                       /* UDF-05 */
+
     uint32_t len = (uint32_t)fe->info_length;
     uint8_t *inline_data = (uint8_t *)fe + sizeof(struct udf_fe) + fe->ext_attr_length;
+
+    /*
+     * UDF-04: info_length is on-disk and unbounded, but the inline data it
+     * describes lives inside a single 2048-byte FE sector and is copied into
+     * a UDF_SECTOR_SIZE buffer.  Bound it by both.
+     */
+    uint32_t inline_max = UDF_SECTOR_SIZE -
+                          (uint32_t)(sizeof(struct udf_fe) + fe->ext_attr_length);
+    if (len > inline_max) len = inline_max;
+    if (len > UDF_SECTOR_SIZE) len = UDF_SECTOR_SIZE;
 
     /* Allocate new block */
     uint32_t block = udf_alloc_block(fs);
@@ -270,6 +373,7 @@ static int udf_convert_inline_to_short_ad(struct udf_fs *fs, struct udf_fe *fe) 
  */
 static int udf_write_extent_data_long(struct udf_fs *fs, struct udf_fe *fe,
                                       uint32_t offset, uint32_t size, const uint8_t *data) {
+    if (!udf_fe_area_ok(fe)) return -1;                       /* UDF-05 */
     uint8_t *ad_area = (uint8_t *)fe + sizeof(struct udf_fe) + fe->ext_attr_length;
     struct udf_long_ad *ads = (struct udf_long_ad *)ad_area;
 
@@ -402,6 +506,7 @@ static int udf_write_extent_data_long(struct udf_fs *fs, struct udf_fe *fe,
  */
 static int udf_write_extent_data(struct udf_fs *fs, struct udf_fe *fe,
                                  uint32_t offset, uint32_t size, const uint8_t *data) {
+    if (!udf_fe_area_ok(fe)) return -1;                       /* UDF-05 */
     /* Pointers to current AD container */
     uint8_t *cur_buf = NULL;     /* If NULL, using FE */
     uint32_t cur_block = 0;      /* Block of current AED */
@@ -411,9 +516,17 @@ static int udf_write_extent_data(struct udf_fs *fs, struct udf_fe *fe,
 
     uint32_t logical_pos = 0;
     uint32_t cur_idx = 0;
+    /* UDF-06: bound the AED chain walk -- a self-referencing link on disc
+     * otherwise spins here forever, holding a live kmalloc each pass. */
+    uint32_t chain_hops = 0;
 
     /* Iterate to find start position */
     while (1) {
+        if (++chain_hops > UDF_AED_CHAIN_MAX) {
+            kprint("UDF: AED chain too long (cycle?); aborting\n");
+            if (cur_buf) kfree(cur_buf, UDF_SECTOR_SIZE);
+            return -1;
+        }
         uint32_t num_ads = cur_len / sizeof(struct udf_short_ad);
 
         if (cur_idx >= num_ads) {
@@ -444,7 +557,7 @@ static int udf_write_extent_data(struct udf_fs *fs, struct udf_fe *fe,
             cur_block = next_block;
 
             struct udf_aed *aed = (struct udf_aed *)cur_buf;
-            cur_len = aed->alloc_desc_length;
+            cur_len = udf_aed_len_ok(aed->alloc_desc_length);   /* UDF-06 */
             ads = (struct udf_short_ad *)(cur_buf + sizeof(struct udf_aed));
             max_len = UDF_SECTOR_SIZE - sizeof(struct udf_aed);
 
@@ -609,7 +722,7 @@ static int udf_write_extent_data(struct udf_fs *fs, struct udf_fe *fe,
             cur_block = next_block;
 
             struct udf_aed *aed = (struct udf_aed *)cur_buf;
-            cur_len = aed->alloc_desc_length;
+            cur_len = udf_aed_len_ok(aed->alloc_desc_length);   /* UDF-06 */
             ads = (struct udf_short_ad *)(cur_buf + sizeof(struct udf_aed));
             max_len = UDF_SECTOR_SIZE - sizeof(struct udf_aed);
 
@@ -684,14 +797,21 @@ int udf_write_file(struct udf_fs *fs, struct udf_fe *fe, uint32_t fe_block,
     }
     
     struct udf_fe *disk_fe = (struct udf_fe *)sector_buf;
-    uint32_t total_needed = offset + size;
+    /* A85: compute in 64-bit so offset+size cannot wrap, and validate the
+     * untrusted on-disk ext_attr_length before using it as an offset into
+     * the fixed UDF_SECTOR_SIZE-byte sector buffer.  inline_base + 40 must
+     * fit within the sector or the original bound underflowed and let a
+     * bogus ext_attr_length steer the memcpy past sector_buf. */
+    uint64_t total_needed = (uint64_t)offset + size;
     uint8_t ad_type = disk_fe->icb_tag.flags & 0x7;
+    uint64_t inline_base = (uint64_t)sizeof(struct udf_fe) + disk_fe->ext_attr_length;
 
     /* For small files, try to use inline data */
     if (ad_type == UDF_ICB_FLAG_AD_INLINE &&
-        total_needed <= UDF_SECTOR_SIZE - sizeof(struct udf_fe) - disk_fe->ext_attr_length - 40) {
-        
-        uint8_t *alloc_area = sector_buf + sizeof(struct udf_fe) + disk_fe->ext_attr_length;
+        inline_base + 40 <= UDF_SECTOR_SIZE &&
+        total_needed <= UDF_SECTOR_SIZE - inline_base - 40) {
+
+        uint8_t *alloc_area = sector_buf + inline_base;
         memcpy(alloc_area + offset, data, size);
         
         if (total_needed > disk_fe->info_length) {
@@ -777,24 +897,34 @@ int udf_add_fid(struct udf_fs *fs, struct udf_fe *dir_fe, uint32_t dir_block,
     uint8_t *dir_buf = kmalloc(4096);
     if (!dir_buf) return -1;
     
-    /* Read directory data */
     off_t disk_off = (off_t)(fs->partition_start + dir_block) * UDF_SECTOR_SIZE;
-    fs->device->read(fs->device, disk_off, UDF_SECTOR_SIZE, dir_buf);
-    
     uint32_t dir_size = (uint32_t)dir_fe->info_length;
-    
+
     /* Calculate new FID size */
     uint8_t name_len = strlen(name);
     uint32_t fid_size = 38 + 0 + (name_len + 1);  /* +1 for compression type */
     fid_size = (fid_size + 3) & ~3;  /* Pad to 4 bytes */
-    
-    /* Bounds check: ensure FID fits in buffer */
-    if (dir_size + fid_size > 4096) {
+
+    /* Bounds check: ensure FID fits in buffer (guard each term so a bogus
+     * info_length cannot wrap the sum). */
+    if (dir_size > 4096 || fid_size > 4096 || dir_size + fid_size > 4096) {
         kprint("UDF: Directory full, cannot add entry\n");
         kfree(dir_buf, 4096);
         return -1;
     }
-    
+
+    /* A39: the directory may span more than one sector (info_length up to
+     * 4096 = 2 sectors).  Read every sector we will index into — not just
+     * the first — so the FID is never written into uninitialised heap, and
+     * persist that same span below.  Otherwise a multi-sector directory
+     * gets a garbage-checksummed, half-persisted entry. */
+    uint32_t used_sectors = (dir_size + fid_size + UDF_SECTOR_SIZE - 1) / UDF_SECTOR_SIZE;
+    if (used_sectors == 0) used_sectors = 1;
+    for (uint32_t i = 0; i < used_sectors; i++) {
+        fs->device->read(fs->device, disk_off + (off_t)i * UDF_SECTOR_SIZE,
+                         UDF_SECTOR_SIZE, dir_buf + i * UDF_SECTOR_SIZE);
+    }
+
     /* Create FID at end of directory */
     struct udf_fid *fid = (struct udf_fid *)(dir_buf + dir_size);
     memset(fid, 0, fid_size);
@@ -820,10 +950,13 @@ int udf_add_fid(struct udf_fs *fs, struct udf_fe *dir_fe, uint32_t dir_block,
     
     /* Update directory size */
     dir_fe->info_length = dir_size + fid_size;
-    
-    /* Write back */
-    fs->device->write(fs->device, disk_off, UDF_SECTOR_SIZE, dir_buf);
-    
+
+    /* Write back every sector we touched (see A39 above). */
+    for (uint32_t i = 0; i < used_sectors; i++) {
+        fs->device->write(fs->device, disk_off + (off_t)i * UDF_SECTOR_SIZE,
+                          UDF_SECTOR_SIZE, dir_buf + i * UDF_SECTOR_SIZE);
+    }
+
     return 0;
 }
 
@@ -832,15 +965,24 @@ int udf_add_fid(struct udf_fs *fs, struct udf_fe *dir_fe, uint32_t dir_block,
  */
 int udf_remove_fid(struct udf_fs *fs, struct udf_fe *dir_fe, uint32_t dir_block,
                    const char *name) {
-    uint8_t *dir_buf = kmalloc(4096);
+    enum { UDF_REMOVE_FID_BUFSZ = 4096 };
+    uint8_t *dir_buf = kmalloc(UDF_REMOVE_FID_BUFSZ);
     if (!dir_buf) return -1;
-    
+
     off_t disk_off = (off_t)(fs->partition_start + dir_block) * UDF_SECTOR_SIZE;
     fs->device->read(fs->device, disk_off, UDF_SECTOR_SIZE, dir_buf);
-    
+
+    /* dir_buf is a POINTER, so the old `sizeof(dir_buf)` was 4 -- dir_size was
+     * clamped to 4 bytes and the `pos + 38 <= dir_size` scan below never
+     * executed, so udf_remove_fid() always reported "not found" and unlink()
+     * and rmdir() on UDF ALWAYS failed.  (The same sizeof-on-a-pointer bug was
+     * already fixed in udf_vfs_readdir/finddir; this site was missed.)
+     *
+     * Only one sector was read, so bound by that as well as by the buffer --
+     * scanning past what we actually read would walk uninitialised heap. */
     uint32_t dir_size = (uint32_t)dir_fe->info_length;
-    if (dir_size > sizeof(dir_buf))
-        dir_size = sizeof(dir_buf);
+    if (dir_size > UDF_SECTOR_SIZE)
+        dir_size = UDF_SECTOR_SIZE;
     uint32_t pos = 0;
     
     while (pos + 38 <= dir_size) {
@@ -888,7 +1030,12 @@ static void udf_free_short_ad_chain(struct udf_fs *fs, uint32_t aed_block) {
     uint8_t *buf = kmalloc(UDF_SECTOR_SIZE);
     if (!buf) return;
 
+    uint32_t aed_hops = 0;      /* UDF-06: cycle guard */
     while (aed_block != 0) {
+        if (++aed_hops > UDF_AED_CHAIN_MAX) {
+            kprint("UDF: AED chain too long (cycle?); aborting\n");
+            break;
+        }
         off_t offset = (off_t)(fs->partition_start + aed_block) * UDF_SECTOR_SIZE;
         if (fs->device->read(fs->device, offset, UDF_SECTOR_SIZE, buf) != UDF_SECTOR_SIZE) {
             break;
@@ -900,7 +1047,8 @@ static void udf_free_short_ad_chain(struct udf_fs *fs, uint32_t aed_block) {
         }
 
         struct udf_short_ad *ads = (struct udf_short_ad *)(buf + sizeof(struct udf_aed));
-        uint32_t num_ads = aed->alloc_desc_length / sizeof(struct udf_short_ad);
+        uint32_t num_ads = udf_aed_len_ok(aed->alloc_desc_length) /
+                           sizeof(struct udf_short_ad);        /* UDF-06 */
         uint32_t next_aed_block = 0;
 
         for (uint32_t i = 0; i < num_ads; i++) {
@@ -930,9 +1078,17 @@ static void udf_free_short_ad_chain(struct udf_fs *fs, uint32_t aed_block) {
  * Returns new length of ADs in bytes.
  */
 static uint32_t udf_process_short_ads(struct udf_fs *fs, uint8_t *ad_buf, uint32_t ad_len,
-                                      uint64_t *current_offset, uint64_t new_size) {
+                                      uint64_t *current_offset, uint64_t new_size,
+                                      uint32_t depth) {
+    /* UDF-06: this recurses once per AED link with a live kmalloc held in
+     * every frame, and the link comes off the disc -- a cycle exhausts the
+     * kernel stack.  Same bound as the iterative chain walkers. */
+    if (depth > UDF_AED_CHAIN_MAX) {
+        kprint("UDF: AED nesting too deep (cycle?); aborting\n");
+        return 0;
+    }
     struct udf_short_ad *ads = (struct udf_short_ad *)ad_buf;
-    uint32_t num_ads = ad_len / sizeof(struct udf_short_ad);
+    uint32_t num_ads = udf_aed_len_ok(ad_len) / sizeof(struct udf_short_ad);
     uint32_t new_num_ads = 0;
 
     for (uint32_t i = 0; i < num_ads; i++) {
@@ -957,7 +1113,8 @@ static uint32_t udf_process_short_ads(struct udf_fs *fs, uint8_t *ad_buf, uint32
                              uint32_t new_aed_len = udf_process_short_ads(fs,
                                             aed_buf + sizeof(struct udf_aed),
                                             aed->alloc_desc_length,
-                                            current_offset, new_size);
+                                            current_offset, new_size,
+                                            depth + 1);
 
                              if (new_aed_len == 0) {
                                  /* AED became empty */
@@ -1027,7 +1184,12 @@ static void udf_free_long_ad_chain(struct udf_fs *fs, uint32_t aed_block) {
     uint8_t *buf = kmalloc(UDF_SECTOR_SIZE);
     if (!buf) return;
 
+    uint32_t aed_hops = 0;      /* UDF-06: cycle guard */
     while (aed_block != 0) {
+        if (++aed_hops > UDF_AED_CHAIN_MAX) {
+            kprint("UDF: AED chain too long (cycle?); aborting\n");
+            break;
+        }
         off_t offset = (off_t)(fs->partition_start + aed_block) * UDF_SECTOR_SIZE;
         if (fs->device->read(fs->device, offset, UDF_SECTOR_SIZE, buf) != UDF_SECTOR_SIZE) {
             break;
@@ -1039,7 +1201,8 @@ static void udf_free_long_ad_chain(struct udf_fs *fs, uint32_t aed_block) {
         }
 
         struct udf_long_ad *ads = (struct udf_long_ad *)(buf + sizeof(struct udf_aed));
-        uint32_t num_ads = aed->alloc_desc_length / sizeof(struct udf_long_ad);
+        uint32_t num_ads = udf_aed_len_ok(aed->alloc_desc_length) /
+                           sizeof(struct udf_long_ad);         /* UDF-06 */
         uint32_t next_aed_block = 0;
 
         for (uint32_t i = 0; i < num_ads; i++) {
@@ -1069,9 +1232,14 @@ static void udf_free_long_ad_chain(struct udf_fs *fs, uint32_t aed_block) {
  * Returns new length of ADs in bytes.
  */
 static uint32_t udf_process_long_ads(struct udf_fs *fs, uint8_t *ad_buf, uint32_t ad_len,
-                                     uint64_t *current_offset, uint64_t new_size) {
+                                     uint64_t *current_offset, uint64_t new_size,
+                                     uint32_t depth) {
+    if (depth > UDF_AED_CHAIN_MAX) {           /* UDF-06 */
+        kprint("UDF: AED nesting too deep (cycle?); aborting\n");
+        return 0;
+    }
     struct udf_long_ad *ads = (struct udf_long_ad *)ad_buf;
-    uint32_t num_ads = ad_len / sizeof(struct udf_long_ad);
+    uint32_t num_ads = udf_aed_len_ok(ad_len) / sizeof(struct udf_long_ad);
     uint32_t new_num_ads = 0;
 
     for (uint32_t i = 0; i < num_ads; i++) {
@@ -1096,7 +1264,8 @@ static uint32_t udf_process_long_ads(struct udf_fs *fs, uint8_t *ad_buf, uint32_
                              uint32_t new_aed_len = udf_process_long_ads(fs,
                                             aed_buf + sizeof(struct udf_aed),
                                             aed->alloc_desc_length,
-                                            current_offset, new_size);
+                                            current_offset, new_size,
+                                            depth + 1);
 
                              if (new_aed_len == 0) {
                                  /* AED became empty */
@@ -1173,11 +1342,20 @@ int udf_truncate_file(struct udf_fs *fs, struct udf_fe *fe, uint32_t fe_block,
     fs->device->read(fs->device, disk_off, UDF_SECTOR_SIZE, sector_buf);
     
     struct udf_fe *disk_fe = (struct udf_fe *)sector_buf;
-    
+
+    /* UDF-05: both descriptor branches below derive alloc_area and an
+     * unsigned max_ad_len from disk_fe->ext_attr_length; validate the FE we
+     * just read off the disc before either of them uses it. */
+    if (!udf_fe_area_ok(disk_fe)) {
+        kfree(sector_buf, UDF_SECTOR_SIZE);
+        return -1;
+    }
+
     /* For inline files, just update size */
     if ((disk_fe->icb_tag.flags & 0x7) == UDF_ICB_FLAG_AD_INLINE) {
         if (new_size > UDF_SECTOR_SIZE - sizeof(struct udf_fe) - 100) {
             kprint("UDF: Cannot extend inline file beyond sector\n");
+            kfree(sector_buf, UDF_SECTOR_SIZE);
             return -1;
         }
         
@@ -1217,7 +1395,7 @@ int udf_truncate_file(struct udf_fs *fs, struct udf_fe *fe, uint32_t fe_block,
 
             /* Zero buffer for clearing new blocks */
             uint8_t *zero_buf = kmalloc(UDF_SECTOR_SIZE);
-            if (!zero_buf) return -1;
+            if (!zero_buf) { kfree(sector_buf, UDF_SECTOR_SIZE); return -1; }
             memset(zero_buf, 0, UDF_SECTOR_SIZE);
 
             /* Try to extend the last extent first */
@@ -1260,6 +1438,7 @@ int udf_truncate_file(struct udf_fs *fs, struct udf_fe *fe, uint32_t fe_block,
                 /* printf("DEBUG: Allocated block %u, needed %llu\n", new_block, (unsigned long long)needed); */
                 if (new_block == 0) {
                     kfree(zero_buf, UDF_SECTOR_SIZE);
+                    kfree(sector_buf, UDF_SECTOR_SIZE);
                     return -1;
                 }
 
@@ -1326,7 +1505,7 @@ int udf_truncate_file(struct udf_fs *fs, struct udf_fe *fe, uint32_t fe_block,
 
         disk_fe->alloc_desc_length = udf_process_short_ads(fs, alloc_area,
                                         disk_fe->alloc_desc_length,
-                                        &current_offset, new_size);
+                                        &current_offset, new_size, 0);
 
         disk_fe->info_length = new_size;
 
@@ -1352,7 +1531,7 @@ int udf_truncate_file(struct udf_fs *fs, struct udf_fe *fe, uint32_t fe_block,
             uint64_t needed = new_size - disk_fe->info_length;
 
             uint8_t *zero_buf = kmalloc(UDF_SECTOR_SIZE);
-            if (!zero_buf) return -1;
+            if (!zero_buf) { kfree(sector_buf, UDF_SECTOR_SIZE); return -1; }
             memset(zero_buf, 0, UDF_SECTOR_SIZE);
 
             /* Try to extend the last extent first */
@@ -1391,6 +1570,7 @@ int udf_truncate_file(struct udf_fs *fs, struct udf_fe *fe, uint32_t fe_block,
                 uint32_t new_block = udf_alloc_block(fs);
                 if (new_block == 0) {
                     kfree(zero_buf, UDF_SECTOR_SIZE);
+                    kfree(sector_buf, UDF_SECTOR_SIZE);
                     return -1;
                 }
 
@@ -1454,7 +1634,9 @@ int udf_truncate_file(struct udf_fs *fs, struct udf_fe *fe, uint32_t fe_block,
 
             fs->device->write(fs->device, disk_off, UDF_SECTOR_SIZE, sector_buf);
             memcpy(fe, disk_fe, sizeof(struct udf_fe));
-            kfree(zero_buf, UDF_SECTOR_SIZE);
+            /* zero_buf was already freed above, before the checksum/write --
+             * freeing it again here corrupted the allocator on every successful
+             * long-AD extend.  The short-AD sibling frees exactly once. */
             kfree(sector_buf, UDF_SECTOR_SIZE);
             return 0;
         }
@@ -1464,7 +1646,7 @@ int udf_truncate_file(struct udf_fs *fs, struct udf_fe *fe, uint32_t fe_block,
 
         disk_fe->alloc_desc_length = udf_process_long_ads(fs, alloc_area,
                                         disk_fe->alloc_desc_length,
-                                        &current_offset, new_size);
+                                        &current_offset, new_size, 0);
 
         disk_fe->info_length = new_size;
 

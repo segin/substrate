@@ -15,13 +15,14 @@
  *   SCSI Primary Commands (SPC-3)
  */
 
-#include <drivers/usb/usb.h>
+#include <stdio.h>
+#include <string.h>
+
 #include <drivers/storage/scsi/scsi.h>
+#include <drivers/usb/usb.h>
 #include <kern/console.h>
 #include <sys/dma.h>
 #include <sys/lock.h>
-#include <stdio.h>
-#include <string.h>
 
 /*
  * ============================================================
@@ -176,9 +177,13 @@ static int usb_msc_bot_transfer(usb_msc_dev_t *msc, uint8_t lun,
     cbw->dCBWDataTransferLength = data_len;
     cbw->bmCBWFlags = is_read ? 0x80 : 0x00;
     cbw->bCBWLUN = lun;
-    cbw->bCBWCBLength = cdb_len;
+    /* Clamp BEFORE recording it: the wire field used to carry the unclamped
+     * length while only 16 bytes were copied.  BOT restricts bCBWCBLength to
+     * 1-16 and a device receiving more must treat the CBW as invalid, stalling
+     * both endpoints and dragging us through reset recovery. [USB-15] */
     if (cdb_len > 16)
         cdb_len = 16;
+    cbw->bCBWCBLength = cdb_len;
     memcpy(cbw->CBWCB, cdb, cdb_len);
 
     /* Send CBW via Bulk-OUT */
@@ -228,6 +233,8 @@ static int usb_msc_bot_transfer(usb_msc_dev_t *msc, uint8_t lun,
                     goto cleanup;
                 }
 
+                if (actual > chunk_size)
+                    actual = chunk_size;   /* never walk past the request [USB-17] */
                 ptr += actual;
                 remaining -= actual;
 
@@ -260,6 +267,8 @@ static int usb_msc_bot_transfer(usb_msc_dev_t *msc, uint8_t lun,
                     goto cleanup;
                 }
 
+                if (actual > chunk_size)
+                    actual = chunk_size;   /* [USB-17] */
                 ptr += actual;
                 remaining -= actual;
 
@@ -299,6 +308,14 @@ static int usb_msc_bot_transfer(usb_msc_dev_t *msc, uint8_t lun,
         goto cleanup;
     }
 
+    /* BOT requires dCSWDataResidue <= dCBWDataTransferLength.  A device
+     * reporting more makes the caller's (data_len - residue) underflow into a
+     * ~4 GB transfer count, so clamp rather than trust. [USB-16] */
+    if (csw->dCSWDataResidue > data_len) {
+        kprintf("usb_msc: CSW residue %u exceeds transfer length %u; clamping\n",
+                csw->dCSWDataResidue, data_len);
+        csw->dCSWDataResidue = data_len;
+    }
     if (residue)
         *residue = csw->dCSWDataResidue;
 

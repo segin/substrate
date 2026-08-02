@@ -1,4 +1,4 @@
-#include "elf_private.h"
+#include <elf_private.h>
 
 typedef struct {
     uint32_t tag;

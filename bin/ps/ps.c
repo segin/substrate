@@ -1,14 +1,11 @@
+#include <pwd.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <pwd.h>
-
-#include <sys/sysinfo.h>
 
 #include "ps_impl.h"
-
-extern int sys_proc_cmdline(pid_t pid, char **argv, size_t *argc);
+#include <sys/sysinfo.h>
 
 static void print_usage(const char *progname) {
     fprintf(stderr, "usage: %s [auxleb]\n", progname);

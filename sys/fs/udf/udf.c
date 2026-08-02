@@ -4,16 +4,17 @@
  * Read-write UDF implementation based on ECMA-167 and OSTA UDF 2.60.
  */
 
-#include <vfs/vnode.h>
-#include <vfs/vfs.h>
+#include <string.h>
+
+#include <drivers/storage/blkdev.h>
+#include <fs/udf/udf.h>
 #include <kern/console.h>
 #include <sys/errno.h>
-#include <vm/vm_kmem.h>
 #include <sys/namei.h>
-#include <fs/udf/udf.h>
 #include <sys/proc.h>
-#include <string.h>
-#include <drivers/storage/blkdev.h>
+#include <vfs/vfs.h>
+#include <vfs/vnode.h>
+#include <vm/vm_kmem.h>
 
 /* UDF filesystem structure registration */
 static filesystem_t udf_filesystem;
@@ -175,6 +176,15 @@ int udf_read_vds(fs_node_t *dev, struct udf_extent_ad *vds_extent,
     
     uint32_t start = vds_extent->location;
     uint32_t count = vds_extent->length / UDF_SECTOR_SIZE;
+
+    /* length comes from the AVDP with no bound: 0xFFFFFFFF asks for two
+     * million device reads at mount time, with the mount lock held.  A VDS
+     * is a handful of descriptors; udf_read_label() already caps this at 64
+     * for exactly this reason. */
+    if (count > UDF_VDS_MAX_SECTORS)
+        count = UDF_VDS_MAX_SECTORS;
+    if (start > 0xFFFFFFFFU - count)
+        return -1;
     
     int found_pvd = 0, found_pd = 0, found_lvd = 0;
     
@@ -370,6 +380,7 @@ uint32_t udf_read_file(struct udf_fs *fs, struct udf_fe *fe,
                 offset += ext_read;
                 ext_read = 0;
             } else if (type == 3) {
+                kfree(sector_buf, UDF_SECTOR_SIZE);
                 return total_read;
             }
 
@@ -394,6 +405,7 @@ uint32_t udf_read_file(struct udf_fs *fs, struct udf_fe *fe,
             
             file_pos += ext_len;
         }
+        kfree(sector_buf, UDF_SECTOR_SIZE);
         return total_read;
     }
     
@@ -432,6 +444,7 @@ uint32_t udf_read_file(struct udf_fs *fs, struct udf_fe *fe,
                 offset += ext_read;
                 ext_read = 0;
             } else if (type == 3) {
+                kfree(sector_buf, UDF_SECTOR_SIZE);
                 return total_read;
             }
 
@@ -456,9 +469,11 @@ uint32_t udf_read_file(struct udf_fs *fs, struct udf_fe *fe,
 
             file_pos += ext_len;
         }
+        kfree(sector_buf, UDF_SECTOR_SIZE);
         return total_read;
     }
 
+    kfree(sector_buf, UDF_SECTOR_SIZE);
     return 0;
 }
 
@@ -666,14 +681,14 @@ static fs_node_t *udf_vfs_finddir(fs_node_t *node, char *name) {
 }
 
 static int udf_vfs_mkdir(fs_node_t *parent, const char *name, uint16_t permission) {
-    if (!parent || !name) return -1;
+    if (!parent || !name) return -EINVAL;
     
     udf_node_t *pctx = (udf_node_t *)(uintptr_t)parent->impl;
     struct udf_fs *fs = pctx->fs;
     
     /* Allocate block for new directory */
     uint32_t block = udf_alloc_block(fs);
-    if (block == 0) return -1; // No space
+    if (block == 0) return -ENOSPC; // No space
 
     // Get current process credentials
     uint32_t uid = current_process ? current_process->uid : 0;
@@ -682,7 +697,7 @@ static int udf_vfs_mkdir(fs_node_t *parent, const char *name, uint16_t permissio
     /* Create new directory FE */
     if (udf_create_fe(fs, block, UDF_FILETYPE_DIR, uid, gid, permission) != 0) {
         udf_free_block(fs, block);
-        return -1;
+        return -EIO;
     }
     
     /* Create ICB to point to new directory */
@@ -696,14 +711,14 @@ static int udf_vfs_mkdir(fs_node_t *parent, const char *name, uint16_t permissio
     struct udf_fe *pfe = (struct udf_fe *)pctx->fe_sector;
     if (udf_add_fid(fs, pfe, pctx->icb.block, name, &new_icb, UDF_FID_DIRECTORY) != 0) {
         udf_free_block(fs, block);
-        return -1;
+        return -EIO;
     }
     
     /* Add . and .. to new directory */
     struct udf_fe new_fe;
     struct udf_long_ad fe_icb = new_icb;
     // Read the newly created FE so we can add to it
-    if (udf_read_fe(fs, &fe_icb, &new_fe) != 0) return -1;
+    if (udf_read_fe(fs, &fe_icb, &new_fe) != 0) return -EIO;
     
     // Add .. (parent)
     if (udf_add_fid(fs, &new_fe, block, "..", &pctx->icb, UDF_FID_DIRECTORY | UDF_FID_PARENT) != 0) {
@@ -748,11 +763,11 @@ static int udf_vop_mkdir(struct vnode *dvp, struct vnode **vpp, struct component
 }
 
 static int udf_unmount(fs_node_t *root) {
-    if (!root) return -1;
+    if (!root) return -EINVAL;
     udf_node_t *ctx = (udf_node_t *)(uintptr_t)root->impl;
-    if (!ctx) return -1;
+    if (!ctx) return -EINVAL;
     struct udf_fs *fs = ctx->fs;
-    if (!fs) return -1;
+    if (!fs) return -EINVAL;
 
     // Invalidate node cache for this filesystem
     for (int i = 0; i < UDF_NODE_CACHE_SIZE; i++) {

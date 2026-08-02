@@ -4,11 +4,12 @@
  * Centralized user-kernel copy functions.
  */
 
+#include <string.h>
+
 #include <sys/copy.h>
+#include <sys/errno.h>
 #include <sys/param.h>
 #include <sys/proc.h>
-#include <sys/errno.h>
-#include <string.h>
 
 /*
  * validate_user_addr - Check if address range is valid user-space
@@ -24,8 +25,14 @@ int validate_user_addr(const void *addr, size_t size) {
     if (end < start)
         return EFAULT;
 
-    /* Must be above minimum user address (avoid NULL region) */
-    if (start < USER_STACK_MIN)
+    /* Must be above minimum user address (avoid NULL region).  Exception:
+     * Linux a.out ZMAGIC/OMAGIC images map their text at virtual address 0,
+     * so the first page is legitimately mapped and low pointers (e.g. a string
+     * constant in .text) are valid.  For those processes, skip the up-front
+     * NULL-region rejection; a genuinely unmapped low access still faults and
+     * is caught by the on_fault handler. */
+    if (start < USER_STACK_MIN &&
+        !(current_process && current_process->low_va_valid))
         return EFAULT;
 
     /* Must be below kernel space */

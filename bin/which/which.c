@@ -39,14 +39,15 @@
  */
 
 #include <errno.h>
-#include <getopt.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
 #include <unistd.h>
+
+#include "getopt.h"
+#include <sys/stat.h>
 
 #define PROGRAM_VERSION "substrate-1.0"
 

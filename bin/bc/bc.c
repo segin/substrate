@@ -4,14 +4,15 @@
  * Implements POSIX.1-2024 and GNU extensions.
  */
 
+#include <ctype.h>
+#include <limits.h>
+#include <setjmp.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <ctype.h>
-#include <stdarg.h>
 #include <unistd.h>
-#include <setjmp.h>
-#include <limits.h>
+
 #include "num.h"
 
 void runtime_error(const char *msg);

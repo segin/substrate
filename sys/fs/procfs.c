@@ -9,35 +9,36 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <arch/i386/pmap.h>
+#include <arch/i386/pmm.h>
+#include <drivers/console/console.h>
+#include <exec/perso/personality.h>
+#include <fs/procfs.h>
+#include <kern/bus.h>
+#include <kern/cmdline.h>
+#include <kern/memtrack.h>
+#include <kern/pci.h>
+#include <kern/resource.h>
+#include <kern/sched.h>
+#include <kern/time.h>
+#include <pm/pm.h>
 #include <sys/file.h>
+#include <sys/kobject.h>
+#include <sys/lock.h>
+#include <sys/errno.h>
 #include <sys/mount.h>
+#include <sys/param.h>
 #include <sys/proc.h>
 #include <sys/session.h>
 #include <sys/tty.h>
+#include <vfs/buf.h>
+#include <vfs/vfs.h>
 #include <vm/vm_commit.h>
 #include <vm/vm_kmem.h>
 #include <vm/vm_map.h>
 #include <vm/vm_object.h>
 #include <vm/vm_page.h>
-#include <vfs/vfs.h>
-#include <vfs/buf.h>
-#include <sys/param.h>
 #include <vm/vm_swap.h>
-#include <fs/procfs.h>
-#include <pm/pm.h>
-#include <kern/cmdline.h>
-#include <kern/sched.h>
-#include <kern/time.h>
-#include <arch/i386/pmap.h>
-#include <arch/i386/pmm.h>
-#include <exec/perso/personality.h>
-#include <drivers/console/console.h>
-#include <kern/memtrack.h>
-#include <sys/lock.h>
-#include <kern/bus.h>
-#include <kern/pci.h>
-#include <kern/resource.h>
-#include <sys/kobject.h>
 
 /* Forward declarations */
 static size_t procfs_generic_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer);
@@ -668,7 +669,7 @@ static procfs_pid_nodes_t *procfs_get_pid_nodes(int pid) {
 
     strlcpy(nodes->maps.name, "maps", sizeof(nodes->maps.name));
     nodes->maps.flags = FS_FILE;
-    nodes->maps.mask = 0444;
+    nodes->maps.mask = 0400;   /* PROCFS-16: was 0444 — world-readable ASLR oracle */
     nodes->maps.uid = target->uid;
     nodes->maps.gid = target->gid;
     nodes->maps.read = &proc_pid_maps_read;
@@ -735,14 +736,45 @@ static fs_node_t *procfs_get_driver_node(struct procfs_runtime_entry *entry) {
     return NULL;
 }
 
+/*
+ * PROCFS-16: may the caller inspect `target`'s address space?
+ *
+ * /proc/<pid>/maps was mode 0444, so any user could read another process's
+ * full address-space layout -- which is exactly what defeats ASLR when
+ * preparing an attack on a setuid binary.  proc_pid_cmdline_read has the same
+ * exposure by a different route: it reads the target's LIVE argv out of its
+ * address space with pmap_copyin_other and no credential check at all.
+ *
+ * Linux gates both behind ptrace_may_access().  There is no such helper here,
+ * so this mirrors the predicate sys_ptrace already uses for PTRACE_ATTACH
+ * (sys/kern/ptrace.c): root, or a caller whose euid/egid match every one of
+ * the target's uids/gids.  Reading a process's memory layout is the same
+ * privilege as attaching to it, so the same test is the right one.
+ */
+static int proc_may_inspect(process_t *target) {
+    process_t *me = current_process;
+
+    if (!target) return 0;
+    if (!me) return 1;               /* kernel context */
+    if (me == target) return 1;      /* always your own */
+    if (me->euid == 0) return 1;
+    return (me->euid == target->uid  && me->euid == target->euid &&
+            me->euid == target->suid &&
+            me->egid == target->gid  && me->egid == target->egid &&
+            me->egid == target->sgid);
+}
+
 static int proc_self_readlink(fs_node_t *node, char *buf, size_t size) {
     (void)node;
-    if (!buf || size == 0) return -1;
+    if (!buf || size == 0) return -EINVAL;
 
     int pid = (current_process && current_process->pid > 0) ? current_process->pid : 0;
     char target[32];
-    int len = snprintf(target, sizeof(target), "/proc/%d/", pid);
-    if (len < 0) return -1;
+    /* PROCFS-29: Linux returns "/proc/<pid>" with NO trailing slash.  With one,
+     * anything that appends produces "/proc/42//exe" and every string compare
+     * against a readlink("/proc/self") result fails. */
+    int len = snprintf(target, sizeof(target), "/proc/%d", pid);
+    if (len < 0) return -EINVAL;
 
     size_t copy_len = (size_t)len;
     if (copy_len >= size) copy_len = size - 1;
@@ -755,8 +787,8 @@ static int proc_self_readlink(fs_node_t *node, char *buf, size_t size) {
 static int proc_copy_process_link_target(process_t *p, const char *src, char *buf, size_t size) {
     size_t copy_len;
 
-    if (!p || !buf || size == 0) return -1;
-    if (!src || src[0] == '\0') return -1;
+    if (!p || !buf || size == 0) return -EINVAL;
+    if (!src || src[0] == '\0') return -ENOENT;
 
     copy_len = strnlen(src, size);
     if (copy_len >= size) copy_len = size - 1;
@@ -765,15 +797,25 @@ static int proc_copy_process_link_target(process_t *p, const char *src, char *bu
     return (int)copy_len;
 }
 
+/*
+ * PROCFS-15: /proc/<pid>/{exe,cwd,fd/<n>} carry 0500/0700 modes, but those are
+ * only consulted by vfs_may_open -- kern_readlinkat calls readlink_fs with NO
+ * permission check, and vfs_lookup does not test search permission on
+ * intermediate components either.  So an unprivileged user could readlink a
+ * root daemon's fds and learn every path it has open.  The mode alone cannot
+ * carry this; the content has to be gated where it is produced.
+ */
 static int proc_pid_exe_readlink(fs_node_t *node, char *buf, size_t size) {
     process_t *p = proc_find((int)node->inode);
-    if (!p) return -1;
+    if (!p) return -ENOENT;
+    if (!proc_may_inspect(p)) return -EACCES;
     return proc_copy_process_link_target(p, p->exec_path, buf, size);
 }
 
 static int proc_pid_cwd_readlink(fs_node_t *node, char *buf, size_t size) {
     process_t *p = proc_find((int)node->inode);
-    if (!p) return -1;
+    if (!p) return -ENOENT;
+    if (!proc_may_inspect(p)) return -EACCES;
     if (!p->cwd_path[0]) {
         return proc_copy_process_link_target(p, "/", buf, size);
     }
@@ -787,12 +829,13 @@ static int proc_pid_fd_readlink(fs_node_t *node, char *buf, size_t size) {
     const char *target;
 
     if (!p || fd < 0 || fd >= MAX_FD) {
-        return -1;
+        return -ENOENT;
     }
+    if (!proc_may_inspect(p)) return -EACCES;
 
     file = p->fds[fd];
     if (!file) {
-        return -1;
+        return -ENOENT;
     }
 
     target = file->f_path[0] ? file->f_path : NULL;
@@ -843,6 +886,13 @@ void procfs_release_pid_nodes(int pid) {
  * The entry pointer is stored in node->impl
  */
 static size_t procfs_generic_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
+    /* sys_lseek() accepts a negative offset and read_fs() passes f_offset
+     * through unchanged, so a signed off_t can arrive negative here.  Every
+     * bound below compares it against an int/uint32 length, which a negative
+     * value passes, leaving read_len == size and memcpy reading from
+     * buf + offset -- i.e. kernel memory BEFORE the buffer, copied out to
+     * userspace. */
+    if (offset < 0) return 0;
     struct procfs_runtime_entry *entry = (struct procfs_runtime_entry *)(uintptr_t)node->impl;
     if (!entry || !entry->generator) return 0;
     
@@ -864,6 +914,21 @@ static size_t procfs_generic_read(fs_node_t *node, off_t offset, size_t size, ui
             alloc_buf = kmalloc(alloc_size);
             if (alloc_buf) {
                 len = entry->generator(alloc_buf, alloc_size, entry->opaque);
+                /*
+                 * PROCFS-09: the retry's return was used unclamped, but
+                 * "returned more than the buffer holds" is exactly the
+                 * truncation protocol these generators use -- gen_kmsg
+                 * returns klog_size() whenever size < total, and gen_mounts
+                 * and gen_filesystems behave the same way.  The content can
+                 * grow between the two calls (read /proc/kmsg while the
+                 * kernel is logging: 5000 -> alloc 5001 -> log now 6000), and
+                 * the memcpy below then copied up to 999 bytes past the
+                 * allocation straight out to userspace.  Trust the buffer we
+                 * allocated, not the length the generator claims.
+                 */
+                if (len >= alloc_size) {
+                    len = alloc_size - 1;
+                }
                 buf = alloc_buf;
             } else {
                 len = sizeof(tmp) - 1;
@@ -896,7 +961,7 @@ static fs_node_t procfs_root_node;
 static int procfs_statfs(fs_node_t *node, struct statfs *buf)
 {
     (void)node;
-    if (!buf) return -1;
+    if (!buf) return -EINVAL;   /* was a bare -1, i.e. EPERM to userspace */
     memset(buf, 0, sizeof(*buf));
     buf->f_bsize  = 4096;
     buf->f_iosize = 4096;
@@ -1002,9 +1067,20 @@ static int proc_generate_maps(char *b, size_t s, process_t *proc) {
 }
 
 static size_t proc_pid_maps_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
+    /* sys_lseek() accepts a negative offset and read_fs() passes f_offset
+     * through unchanged, so a signed off_t can arrive negative here.  Every
+     * bound below compares it against an int/uint32 length, which a negative
+     * value passes, leaving read_len == size and memcpy reading from
+     * buf + offset -- i.e. kernel memory BEFORE the buffer, copied out to
+     * userspace. */
+    if (offset < 0) return 0;
     int pid = node->inode;
     process_t *p = proc_find(pid);
     if (!p) return 0;
+    /* PROCFS-16: the 0400 mode is only consulted by vfs_may_open, and an fd
+     * inherited across a setuid exec would keep working; gate the content
+     * itself too. */
+    if (!proc_may_inspect(p)) return 0;
 
     size_t cap = 16384;
     char *buf = kmalloc(cap);
@@ -1028,6 +1104,13 @@ static size_t proc_pid_maps_read(fs_node_t *node, off_t offset, size_t size, uin
 }
 
 static size_t proc_pid_status_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
+    /* sys_lseek() accepts a negative offset and read_fs() passes f_offset
+     * through unchanged, so a signed off_t can arrive negative here.  Every
+     * bound below compares it against an int/uint32 length, which a negative
+     * value passes, leaving read_len == size and memcpy reading from
+     * buf + offset -- i.e. kernel memory BEFORE the buffer, copied out to
+     * userspace. */
+    if (offset < 0) return 0;
     int pid = node->inode;
     process_t *p = proc_find(pid);
     if (!p) return 0;
@@ -1051,7 +1134,20 @@ static size_t proc_pid_status_read(fs_node_t *node, off_t offset, size_t size, u
     }
 
     if (len < 0) len = 0;
-    if (len >= (int)sizeof(buf)) len = sizeof(buf) - 1;
+    /*
+     * PROCFS-19: the clamp was unconditionally back to sizeof(buf) - 1, which
+     * made the whole retry above dead code -- the moment /proc/<pid>/status
+     * grew past 1024 bytes every reader silently got a truncated 1023-byte
+     * file even though the larger allocation had succeeded and been filled.
+     * Clamp to whichever buffer we are actually reading from.  (Bounding the
+     * retry's own return matters for the same reason as PROCFS-09.)
+     * proc_pid_stat_read already got this right.
+     */
+    if (alloc_buf) {
+        if (len >= (int)alloc_size) len = (int)alloc_size - 1;
+    } else if (len >= (int)sizeof(buf)) {
+        len = sizeof(buf) - 1;
+    }
     
     size_t read_len = 0;
     if (offset < (uint32_t)len) {
@@ -1161,6 +1257,10 @@ static size_t proc_pid_cmdline_read(fs_node_t *node, off_t offset, size_t size, 
     size_t total_len;
 
     if (!p) return 0;
+    /* PROCFS-16: the live-argv path below reads the target's address space
+     * with pmap_copyin_other.  That is a cross-process memory read and needs
+     * the same permission as attaching to it. */
+    if (!proc_may_inspect(p)) return 0;
 
     /* Preferred path: read the LIVE argv region straight out of the process's
      * address space, so the result reflects any in-place argv rewrite
@@ -1437,8 +1537,17 @@ static fs_node_t *procfs_finddir(fs_node_t *node, char *name) {
         return node;
     }
     if (strcmp(name, "..") == 0) {
+        /*
+         * PROCFS-30: this returned `node` for "..", so `cd /proc; cd ..`
+         * stayed in /proc and "../etc/passwd" from a /proc cwd resolved
+         * inside procfs instead of reaching /etc.  ".." at a mount root
+         * belongs to the covered directory -- devfs already does this.
+         */
+        if (node->mp && node->mp->mnt_node_covered) {
+            return node->mp->mnt_node_covered;
+        }
         procfs_refresh_timestamps(node);
-        return node;
+        return node;    /* not mounted anywhere — self is the only answer */
     }
     
     /* Search static entries table */
@@ -1702,6 +1811,9 @@ static int procfs_task_collect(fs_node_t *node, struct procfs_tid_lookup *l) {
 static size_t procfs_emit_slice(const char *src, int len, off_t offset,
                                 size_t size, uint8_t *buffer) {
     if (len < 0) return 0;
+    /* A negative offset passes the `offset >= len` test below and makes the
+     * memcpy read before src.  See procfs_generic_read(). */
+    if (offset < 0) return 0;
     if (offset >= (off_t)len) return 0;
     size_t n = size;
     if ((off_t)(offset + n) > (off_t)len) n = (size_t)(len - offset);

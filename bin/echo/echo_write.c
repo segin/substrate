@@ -1,7 +1,7 @@
-#include "echo_write.h"
-
 #include <errno.h>
 #include <unistd.h>
+
+#include "echo_write.h"
 
 int
 echo_write_all(int fd, const unsigned char *data, size_t len)

@@ -1,5 +1,4 @@
 #include "mode_parser.h"
-
 #include "modeparse.h"
 
 struct chmod_mode *

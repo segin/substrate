@@ -1,3 +1,9 @@
+#include <string.h>
+
+#include <arch/i386/intr.h>
+#include <kern/console.h>
+#include <kern/sched.h>
+#include <kern/time.h>
 #include <sys/copy.h>
 #include <sys/errno.h>
 #include <sys/file.h>
@@ -7,13 +13,8 @@
 #include <sys/time.h>
 #include <sys/vt.h>
 #include <sys/vtio.h>
-#include <vm/vm_kmem.h>
 #include <vfs/vfs.h>
-#include <kern/console.h>
-#include <kern/sched.h>
-#include <kern/time.h>
-#include <string.h>
-#include <arch/i386/intr.h>
+#include <vm/vm_kmem.h>
 
 /* Global input event ring.  This was 64, which is far too small for a
  * relative pointing device: a real mouse emits X+Y(+wheel)+SYN every

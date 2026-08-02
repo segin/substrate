@@ -1,12 +1,13 @@
-#include <arch/i386/cpu.h>
-#include <fs/procfs.h>
-#include <sys/smp.h>
-#include <kern/console.h>
-#include <stdint.h>
-#include <stddef.h>
 #include <stdarg.h>
+#include <stddef.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+
+#include <arch/i386/cpu.h>
+#include <fs/procfs.h>
+#include <kern/console.h>
+#include <sys/smp.h>
 
 struct cpuid_feature_desc {
     uint8_t reg; /* 0 = EDX, 1 = ECX */

@@ -6,7 +6,6 @@
 
 #include <drivers/storage/ide/ide.h>
 #include <drivers/storage/ide/ide_priv.h>
-
 #include <kern/console.h>
 #include <kern/sched.h>
 #include <kern/time.h>
@@ -136,6 +135,11 @@ int ide_wait_drq(uint8_t channel, uint32_t timeout_ms, const char *op) {
  * never came and the per-sector wait burned its full timeout.
  */
 int ide_wait_ready(uint8_t channel, int timeout_ms, const char *op) {
+    return ide_wait_ready_ex(channel, timeout_ms, op, 1);
+}
+
+int ide_wait_ready_ex(uint8_t channel, int timeout_ms, const char *op,
+                      int honor_err) {
     uint64_t start_ms = get_uptime_ms();
     int spins = 0;
     int yield_count = 0;
@@ -146,7 +150,16 @@ int ide_wait_ready(uint8_t channel, int timeout_ms, const char *op) {
     for (;;) {
         uint8_t status = ide_read_reg(channel, ATA_REG_STATUS);
 
-        if (status & (ATA_SR_ERR | ATA_SR_DF)) {
+        /*
+         * [IDE-09] Only a post-data-phase wait may treat ERR/DF as this
+         * command's failure.  Before issuing a command these bits are still
+         * whatever the PREVIOUS command left latched -- ATA does not clear
+         * them until the command register is written -- so failing here made
+         * one media error poison the channel: every later command returned
+         * -1, three retries drove ide_mark_offline(), and a repeat dropped
+         * the disk for good.
+         */
+        if (honor_err && (status & (ATA_SR_ERR | ATA_SR_DF))) {
             uint8_t error = ide_read_reg(channel, ATA_REG_ERROR);
             char decoded[64];
 
@@ -175,6 +188,33 @@ int ide_wait_ready(uint8_t channel, int timeout_ms, const char *op) {
     }
 }
 
+/*
+ * [IDE-12/IDE-13] Abandon an in-flight command.
+ *
+ * Stopping the bus master is not enough.  The DRIVE is still executing the
+ * command and will raise INTRQ when it finishes, at which point:
+ *
+ *  - it may still be streaming into the very buffer the caller is about to
+ *    reuse for the PIO fallback (IDE-12), and
+ *  - that late interrupt sets ide_irq_complete[channel], which the NEXT
+ *    command's waiter reads as its own completion and reports torn data as
+ *    a successful transfer (IDE-13).
+ *
+ * Reading the (non-alternate) status register acknowledges and clears the
+ * drive's pending INTRQ, so the interrupt is consumed here rather than
+ * landing on an unrelated command.  The completion flag is cleared last, so
+ * anything the ISR set while we were tidying up is discarded too.
+ */
+static void ide_abandon_command(uint8_t channel) {
+    ide_bm_stop(channel);
+    ide_bm_clear_interrupt(channel);
+
+    /* Consume the drive's pending interrupt, if any. */
+    (void)ide_read_reg(channel, ATA_REG_STATUS);
+
+    ide_irq_complete[channel] = 0;
+}
+
 int ide_wait_irq_completion(uint8_t channel, uint32_t timeout_ms,
                             const char *op) {
     uint64_t ticks = ((uint64_t)timeout_ms * get_hz() + 999ULL) / 1000ULL;
@@ -199,8 +239,7 @@ int ide_wait_irq_completion(uint8_t channel, uint32_t timeout_ms,
                 kprintf("ide: %s aborted status=%02x bm=%02x error=%02x (%s) on channel %u\n",
                         op ? op : "dma", ata_status, bm_status, error, decoded,
                         channel);
-                ide_bm_stop(channel);
-                ide_bm_clear_interrupt(channel);
+                ide_abandon_command(channel);
                 return -1;
             }
         }
@@ -210,8 +249,7 @@ int ide_wait_irq_completion(uint8_t channel, uint32_t timeout_ms,
                     op ? op : "dma", channel,
                     ide_read_reg(channel, ATA_REG_STATUS),
                     ide_bm_status(channel));
-            ide_bm_stop(channel);
-            ide_bm_clear_interrupt(channel);
+            ide_abandon_command(channel);
             return -1;
         }
 
@@ -221,8 +259,7 @@ int ide_wait_irq_completion(uint8_t channel, uint32_t timeout_ms,
                         op ? op : "dma", channel,
                         ide_read_reg(channel, ATA_REG_STATUS),
                         ide_bm_status(channel));
-                ide_bm_stop(channel);
-                ide_bm_clear_interrupt(channel);
+                ide_abandon_command(channel);
                 return -1;
             }
         } else {

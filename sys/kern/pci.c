@@ -1,9 +1,10 @@
-#include <kern/pci.h>
-#include <kern/device.h>
-#include <kern/driver.h>
-#include <kern/console.h>
 #include <stdio.h>
 #include <string.h>
+
+#include <kern/console.h>
+#include <kern/device.h>
+#include <kern/driver.h>
+#include <kern/pci.h>
 #include <sys/errno.h>
 #include <vm/vm_kmem.h>
 

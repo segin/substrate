@@ -27,10 +27,12 @@
 #include <fcntl.h>
 #include <signal.h>
 #include <stdarg.h>
-#include <stdio.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
+
 #include <sys/mman.h>
 #include <sys/resource.h>
 #include <sys/stat.h>
@@ -38,7 +40,6 @@
 #include <sys/types.h>
 #include <sys/uio.h>
 #include <sys/wait.h>
-#include <unistd.h>
 
 /* ============================================================
  * unistd.h

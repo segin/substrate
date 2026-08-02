@@ -36,7 +36,8 @@ vgcore.*
 
 # Top-level temporary outputs and scratch files
 /.agents/
-/.claude/
+/.claude/*
+!/.claude/skills/
 /.tmp/
 /conftest*
 /boot_output.txt

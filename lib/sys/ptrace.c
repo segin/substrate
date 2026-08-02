@@ -10,11 +10,12 @@
  * genuine word of -1.
  */
 
-#include <sys/syscall.h>
-#include <sys/ptrace.h>
-#include <sys/types.h>
-#include <unistd.h>
 #include <errno.h>
+#include <unistd.h>
+
+#include <sys/ptrace.h>
+#include <sys/syscall.h>
+#include <sys/types.h>
 
 long ptrace(int request, pid_t pid, void *addr, void *data) {
     errno = 0;

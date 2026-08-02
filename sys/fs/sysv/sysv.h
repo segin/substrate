@@ -26,6 +26,7 @@
 #define _SYSV_FS_H
 
 #include <stdint.h>
+#include <sys/lock.h>
 #include <vfs/vfs.h>
 
 /* Variant selected by the mount-time magic probe. */
@@ -153,6 +154,28 @@ typedef struct sysv_fs {
     uint32_t         inode_block_start;/* first block of the inode table */
     uint8_t          inode_size;       /* 64 for Xenix/SysV */
     uint8_t          name_len;         /* SYSV_NAMELEN today */
+
+    /*
+     * [SYSV-23] Live sysv_node_t count, including the root's.  sysv_unmount
+     * used to kfree() this struct unconditionally while every node produced
+     * by finddir still held a pointer to it -- so a read through any open
+     * file after unmount dereferenced freed memory to find the block size and
+     * device.  Unmount now refuses while nodes are outstanding.
+     */
+    int              live_nodes;
+
+    /*
+     * [SYSV-23] Shared scratch for one disk block.
+     *
+     * sysv_file_read had a 2048-byte blkbuf on the stack and called
+     * sysv_resolve_block, which had its own 2048-byte indir -- ~4 KiB of a
+     * kernel stack live at once for a plain read, on top of whatever the VFS
+     * and syscall frames already used.  One heap buffer per mount instead,
+     * serialised by io_lock because it is shared by every reader.
+     */
+    uint8_t         *blkbuf;           /* block_size bytes */
+    uint8_t         *indirbuf;         /* block_size bytes */
+    mutex_t          io_lock;
 } sysv_fs_t;
 
 /* Per-node state carried in fs_node_t::impl_data (no allocation

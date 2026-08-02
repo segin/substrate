@@ -1,21 +1,22 @@
-#include <stdio.h>
-#include <unistd.h>
-#include <string.h>
-#include <stdlib.h>
-#include <stdint.h>
-#include "lexer.h"
-#include "parser.h"
-#include <sys/wait.h>
+#include <pwd.h>
 #include <signal.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <termios.h>
+#include <unistd.h>
+
 #include "exec.h"
 #include "expand.h"
+#include "histedit.h"
 #include "job.h"
+#include "lexer.h"
+#include "parser.h"
+#include "prompt.h"
 #include "shell_var.h"
 #include "util.h"
-#include <termios.h>
-#include <pwd.h>
-#include "prompt.h"
-#include <histedit.h>
+#include <sys/wait.h>
 
 static int command_count = 1;
 int shell_promptvars = 1;   /* bash default: prompt performs $ expansion */

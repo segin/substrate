@@ -31,6 +31,7 @@ enum personality_type {
     /* Values >= 128 reserved for non-ELF personalities */
     PERS_SUNOS   = 129,
     PERS_ELKS    = 130,
+    PERS_XENIX   = 131,
     PERS_MAX     = 256
 };
 
@@ -66,6 +67,7 @@ extern struct personality personality_openbsd;
 extern struct personality personality_solaris;
 extern struct personality personality_sunos;
 extern struct personality personality_elks;
+extern struct personality personality_xenix;
 
 void elks_personality_init(void);
 

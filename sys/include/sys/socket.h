@@ -60,6 +60,7 @@ struct sockaddr_un {
  * include/sys/socket.h; keep both in sync. */
 #define SCM_RIGHTS       1
 #define SCM_CREDENTIALS  2
+#define MSG_PEEK         0x0002
 #define MSG_CTRUNC       0x0008
 #define MSG_TRUNC        0x0020
 #define MSG_DONTWAIT     0x0040

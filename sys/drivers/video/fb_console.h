@@ -20,6 +20,7 @@
 
 /* Initialize framebuffer console and register with console subsystem */
 void fb_console_init(void);
+void fb_console_resize(void);
 
 /* Write string to framebuffer console */
 void fb_write(const char *s, size_t n);

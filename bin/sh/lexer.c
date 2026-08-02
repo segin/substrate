@@ -1,9 +1,10 @@
-#include "lexer.h"
-#include "util.h"
-#include <string.h>
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+
+#include "lexer.h"
+#include "util.h"
 
 /* ctype wrappers: the classification functions are only defined for an int
  * that is representable as unsigned char (or EOF); passing a plain, possibly

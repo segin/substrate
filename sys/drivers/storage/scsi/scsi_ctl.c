@@ -8,16 +8,17 @@
  *   /dev/storage/scsiN      - High-level block device alias
  */
 
-#include <string.h>
 #include <stdio.h>
-#include <kern/console.h>
-#include <vfs/vfs.h>
+#include <string.h>
+
 #include <drivers/storage/blkdev.h>
-#include <sys/kern_syscalls.h>
-#include <sys/errno.h>
-#include <sys/proc.h>
-#include <vm/vm_kmem.h>
 #include <drivers/storage/scsi/scsi.h>
+#include <kern/console.h>
+#include <sys/errno.h>
+#include <sys/kern_syscalls.h>
+#include <sys/proc.h>
+#include <vfs/vfs.h>
+#include <vm/vm_kmem.h>
 
 /*
  * ============================================================
@@ -74,6 +75,16 @@ typedef struct scsi_generic_node {
     fs_node_t node;
     scsi_device_t *dev;
     struct scsi_generic_node *next;
+    /*
+     * SCSI-06: slots were allocated by bumping sg_count and never released,
+     * so 64 hotplug cycles exhausted the pool -- and, worse, sg->dev outlived
+     * the scsi_device_t it pointed at, so after an unplug+replug a stale
+     * /dev/storage/scsi/B:T:L node delivered CDBs to whatever device now
+     * occupied that memory.  Slots are reclaimed now, and a re-registration
+     * at the same address rebinds the existing node rather than burning a
+     * new one.
+     */
+    int in_use;
 } scsi_generic_node_t;
 
 static scsi_generic_node_t *sg_list = NULL;
@@ -142,6 +153,13 @@ static int sg_ioctl(fs_node_t *node, uint32_t request, void *arg) {
         if (kcmd.data_len > 0) {
             kdata = kmalloc(kcmd.data_len);
             if (!kdata) return -ENOMEM;
+            /* kmalloc does not zero (kzalloc is the zeroing variant), and the
+             * READ copy-out below is bounded by the transport's reported
+             * data_xfer -- which the in-tree transports set to the full
+             * requested length regardless of the real residual.  An INQUIRY
+             * returning 36 bytes with data_len 65536 would otherwise copy
+             * ~65 KB of whatever this allocation last held to userspace. */
+            memset(kdata, 0, kcmd.data_len);
 
             if (kcmd.direction == 2) { /* WRITE */
                 if (copyin(kcmd.data, kdata, kcmd.data_len) != 0) {
@@ -214,18 +232,58 @@ static int sg_ioctl(fs_node_t *node, uint32_t request, void *arg) {
 /*
  * Create /dev/storage/scsi/B:T:L node for a device
  */
+/*
+ * SCSI-06: release the generic node for a device that is going away.  Called
+ * from the device teardown path so the slot and the devfs entry do not
+ * outlive the scsi_device_t they name.
+ */
+void scsi_destroy_generic_node(scsi_device_t *dev) {
+    if (!dev) return;
+    scsi_generic_node_t **link = &sg_list;
+    while (*link) {
+        scsi_generic_node_t *sg = *link;
+        if (sg->dev == dev) {
+            *link = sg->next;
+            devfs_unregister_device(&sg->node);
+            sg->dev    = NULL;
+            sg->next   = NULL;
+            sg->in_use = 0;
+            if (sg_count) sg_count--;
+            return;
+        }
+        link = &sg->next;
+    }
+}
+
 static int scsi_create_generic_node(scsi_device_t *dev) {
-    if (!dev || sg_count >= 64) return -1;
-    
-    scsi_generic_node_t *sg = &sg_pool[sg_count];
-    memset(sg, 0, sizeof(*sg));
-    
-    sg->dev = dev;
-    
-    /* Name format: storage/scsi/B:T:L */
-    snprintf(sg->node.name, sizeof(sg->node.name), "storage/scsi/%d:%d:%d",
+    if (!dev) return -1;
+
+    char want[sizeof(((fs_node_t *)0)->name)];
+    snprintf(want, sizeof(want), "storage/scsi/%d:%d:%d",
              dev->bus, dev->target, dev->lun);
-    
+
+    /* SCSI-06: a re-probe of an address we already publish rebinds the
+     * existing node instead of consuming another slot with a duplicate
+     * name -- which is what made a replug leak and alias. */
+    for (scsi_generic_node_t *e = sg_list; e; e = e->next) {
+        if (e->in_use && strcmp(e->node.name, want) == 0) {
+            e->dev = dev;
+            return 0;
+        }
+    }
+
+    scsi_generic_node_t *sg = NULL;
+    for (uint32_t i = 0; i < 64; i++) {
+        if (!sg_pool[i].in_use) { sg = &sg_pool[i]; break; }
+    }
+    if (!sg) return -1;                 /* pool genuinely full */
+
+    memset(sg, 0, sizeof(*sg));
+    sg->dev    = dev;
+    sg->in_use = 1;
+
+    strlcpy(sg->node.name, want, sizeof(sg->node.name));
+
     sg->node.flags = FS_CHARDEVICE;
     sg->node.impl = (uint32_t)(uintptr_t)sg;
     sg->node.ioctl = sg_ioctl;
@@ -258,6 +316,23 @@ static int bus_ioctl(fs_node_t *node, uint32_t request, void *arg) {
     scsi_bus_node_t *bn = (scsi_bus_node_t *)node->impl;
     if (!bn || !bn->link) return -1;
     
+    /*
+     * SCSI-13: SCAN_BUS and RESET_BUS drive the bus itself -- a rescan
+     * replays TEST UNIT READY and READ CAPACITY against every target and
+     * can disturb media state, and a reset aborts every outstanding command
+     * on the bus including another process's.  Neither needed any privilege.
+     * The per-device ioctl path above is already euid-0 gated; this one was
+     * missed.
+     */
+    switch (request) {
+    case SCSI_IOCTL_SCAN_BUS:
+    case SCSI_IOCTL_RESET_BUS:
+        if (!current_process || current_process->euid != 0) return -EPERM;
+        break;
+    default:
+        break;
+    }
+
     switch (request) {
     case SCSI_IOCTL_SCAN_BUS: {
         char log_buf[48];

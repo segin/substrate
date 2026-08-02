@@ -1,12 +1,11 @@
-#include <drivers/storage/nvme/nvme.h>
+#include <stdio.h>
+#include <string.h>
 
+#include <drivers/storage/nvme/nvme.h>
 #include <kern/console.h>
 #include <kern/device.h>
 #include <kern/pci.h>
 #include <kern/time.h>
-
-#include <stdio.h>
-#include <string.h>
 #include <sys/dma.h>
 
 #define NVME_PCI_CLASS_STORAGE 0x01
@@ -78,7 +77,20 @@ static uint32_t nvme_mmio_read32(volatile uint8_t *mmio, uint32_t reg) {
 #endif
 }
 
+/*
+ * NVME-06: a doorbell offset that does not fit the mapped register window is
+ * an error, not something to substitute for.  The guards below used to
+ * return NVME_REG_DBS -- the ADMIN submission-queue doorbell -- so an
+ * out-of-range qid silently rang the admin queue instead, corrupting its
+ * state rather than failing the operation.  They now return this sentinel
+ * and nvme_mmio_write32 drops the write.
+ */
+#define NVME_REG_INVALID 0xFFFFFFFFU
+
 static void nvme_mmio_write32(volatile uint8_t *mmio, uint32_t reg, uint32_t value) {
+    if (reg == NVME_REG_INVALID) {
+        return;                     /* NVME-06: refuse, never alias */
+    }
 #ifdef HOST_TEST
     nvme_test_mmio_write32(mmio, reg, value);
 #else
@@ -92,16 +104,24 @@ static void nvme_mmio_write64(volatile uint8_t *mmio, uint32_t reg, uint64_t val
     nvme_mmio_write32(mmio, reg + 4U, (uint32_t)(value >> 32));
 }
 
-static uint32_t nvme_sq_doorbell_reg(const nvme_controller_t *ctrl, uint16_t qid) {
-    uint32_t offset = (uint32_t)(2U * qid) * ctrl->cap.doorbell_stride_bytes;
-    if (offset > 0x100000U) return NVME_REG_DBS; /* overflow guard */
+/* NVME-06: `>=`, not `>` -- an offset exactly at the bound is already past
+ * the last addressable doorbell.  And the mapped window must actually cover
+ * it, which the old guard never checked at all. */
+static uint32_t nvme_doorbell_reg(const nvme_controller_t *ctrl, uint32_t index) {
+    uint32_t offset = index * ctrl->cap.doorbell_stride_bytes;
+    if (offset >= 0x100000U) return NVME_REG_INVALID;
+    if (ctrl->mmio_size != 0 &&
+        (uint64_t)NVME_REG_DBS + offset + 4U > (uint64_t)ctrl->mmio_size)
+        return NVME_REG_INVALID;
     return NVME_REG_DBS + offset;
 }
 
+static uint32_t nvme_sq_doorbell_reg(const nvme_controller_t *ctrl, uint16_t qid) {
+    return nvme_doorbell_reg(ctrl, (uint32_t)2U * qid);
+}
+
 static uint32_t nvme_cq_doorbell_reg(const nvme_controller_t *ctrl, uint16_t qid) {
-    uint32_t offset = (uint32_t)(2U * qid + 1U) * ctrl->cap.doorbell_stride_bytes;
-    if (offset > 0x100000U) return NVME_REG_DBS; /* overflow guard */
-    return NVME_REG_DBS + offset;
+    return nvme_doorbell_reg(ctrl, (uint32_t)2U * qid + 1U);
 }
 
 static uint32_t nvme_sq0_doorbell_reg(const nvme_controller_t *ctrl) {
@@ -189,16 +209,30 @@ static int nvme_admin_submit_sync(nvme_controller_t *ctrl,
     }
 
     *cqe = cq[head];
-    if ((cqe->status & NVME_CQE_STATUS_MASK) != 0 || cqe->cid != cid) {
-        return -1;
-    }
 
-    memset(&cq[head], 0, sizeof(*cq));
+    /*
+     * NVME-03: CONSUME the entry before judging it.  A non-zero status or a
+     * cid mismatch used to return here -- before advancing cq_head, flipping
+     * the phase, or ringing the doorbell -- so the CQE was never consumed and
+     * every subsequent admin command re-read the same stale completion.  The
+     * first non-fatal device error killed bring-up permanently.
+     *
+     * NVME-02: and do NOT memset the consumed entry.  Zeroing it makes an
+     * unwritten slot indistinguishable from a phase-0 completion, so on the
+     * second lap of the queue the poll above exits immediately on a zeroed
+     * slot with status 0 and a matching cid.  The phase bit is the only
+     * valid liveness indicator; the controller overwrites the entry when it
+     * reuses the slot.
+     */
     ctrl->admin_cq_head = (uint16_t)((head + 1U) % ctrl->admin_cq_entries);
     if (ctrl->admin_cq_head == 0) {
         ctrl->admin_cq_phase ^= 1U;
     }
     nvme_mmio_write32(ctrl->mmio, nvme_cq0_doorbell_reg(ctrl), ctrl->admin_cq_head);
+
+    if ((cqe->status & NVME_CQE_STATUS_MASK) != 0 || cqe->cid != cid) {
+        return -1;
+    }
     return 0;
 }
 
@@ -510,7 +544,20 @@ int nvme_identify_namespaces(nvme_controller_t *ctrl) {
     memset(ctrl->namespaces, 0, sizeof(ctrl->namespaces));
     ctrl->namespace_count = 0;
     found = 0;
-    for (nsid = 1; nsid <= ctrl->namespace_total; nsid++) {
+    /*
+     * NVME-05: Identify's NN field is a COUNT of namespaces, not the highest
+     * valid NSID, and it was used verbatim as an unbounded loop bound -- a
+     * controller reporting 0xFFFFFFFF sent us into 4.29 billion admin
+     * commands.  Proper enumeration is the Active Namespace ID list
+     * (CNS 0x02), which this driver does not implement; until it does,
+     * sweeping a small fixed range covers every real device and cannot be
+     * turned into a hang by a lying or misparsed NN.
+     */
+    uint32_t sweep = ctrl->namespace_total;
+    if (sweep == 0 || sweep > NVME_MAX_NAMESPACES) {
+        sweep = NVME_MAX_NAMESPACES;
+    }
+    for (nsid = 1; nsid <= sweep; nsid++) {
         uint64_t nsze;
         uint8_t flbas;
         uint8_t lbaf_index;
@@ -537,13 +584,33 @@ int nvme_identify_namespaces(nvme_controller_t *ctrl) {
             break;
         }
 
+        /*
+         * NVME-01: LBA Format descriptors are FOUR bytes each, not sixteen.
+         * The 16-byte stride meant only LBAF 0 landed on a real descriptor;
+         * a 4096-byte-block drive (FLBAS=1) read garbage, yielding either
+         * block_size 0 (drive looks dead) or 512 while the medium is really
+         * 4096, in which case every transfer is at the wrong offset.
+         * NLBAF (byte 25) is the index of the LAST valid format, so a
+         * FLBAS naming anything past it is invalid.
+         *
+         * NVME-09: bound the shift to what a block device can actually be.
+         * The old `>= 32` guard admitted absurd values; a 512-byte to 4 KiB
+         * sector is the real range, and anything else is a parse error.
+         */
         flbas = id_data[26];
         lbaf_index = (uint8_t)(flbas & 0x0FU);
-        lba_shift = id_data[128 + (lbaf_index * 16U) + 2U];
-        if (lba_shift >= 32U) {
-            block_size = 0;
-        } else {
-            block_size = 1U << lba_shift;
+        {
+            uint8_t nlbaf = id_data[25];        /* index of last valid LBAF */
+            if (lbaf_index > nlbaf || lbaf_index > 15U) {
+                block_size = 0;
+            } else {
+                lba_shift = id_data[128 + (lbaf_index * 4U) + 2U];
+                if (lba_shift < 9U || lba_shift > 12U) {
+                    block_size = 0;
+                } else {
+                    block_size = 1U << lba_shift;
+                }
+            }
         }
 
         ctrl->namespaces[found].nsid = nsid;
@@ -611,16 +678,19 @@ static int nvme_io_submit_sync(nvme_controller_t *ctrl,
     }
 
     *cqe = cq[head];
-    if ((cqe->status & NVME_CQE_STATUS_MASK) != 0 || cqe->cid != cid) {
-        return -1;
-    }
 
-    memset(&cq[head], 0, sizeof(*cq));
+    /* NVME-02/03 (I/O-queue twin of the admin path): consume the CQE before
+     * judging it, and never zero a consumed entry -- the phase bit is the
+     * only valid liveness indicator. */
     q->cq_head = (uint16_t)((head + 1U) % q->cq_entries);
     if (q->cq_head == 0) {
         q->cq_phase ^= 1U;
     }
     nvme_mmio_write32(ctrl->mmio, nvme_cq_doorbell_reg(ctrl, q->qid), q->cq_head);
+
+    if ((cqe->status & NVME_CQE_STATUS_MASK) != 0 || cqe->cid != cid) {
+        return -1;
+    }
     return 0;
 }
 
@@ -906,7 +976,21 @@ static int nvme_io_rw(nvme_controller_t *ctrl, uint8_t opcode, uint32_t nsid,
         return -1;
     }
 
-    expected_bytes = (size_t)nblocks * (size_t)ns->block_size;
+    /*
+     * NVME-09: compute in 64 bits.  This was a 32-bit multiply, so a large
+     * block_size combined with a non-trivial nblocks wrapped -- and a wrapped
+     * (small) expected_bytes passes the buffer_len check below while the
+     * device is asked to transfer far more than the buffer holds.  The
+     * lba_shift is now bounded to [9,12] at parse time, which makes the
+     * overflow unreachable, but the multiply should not depend on that.
+     */
+    {
+        uint64_t want = (uint64_t)nblocks * (uint64_t)ns->block_size;
+        if (want > (uint64_t)SIZE_MAX) {
+            return -1;
+        }
+        expected_bytes = (size_t)want;
+    }
     if (buffer_len < expected_bytes) {
         return -1;
     }

@@ -2,22 +2,23 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <arch/i386/intr.h>
+#include <arch/x86-common/lapic.h>
+#include <drivers/console/uart/uart.h>
+#include <kern/console.h>
+#include <kern/file.h>
+#include <kern/sched.h>
+#include <kern/version.h>
 #include <sys/file.h>
 #include <sys/lock.h>
 #include <sys/major.h>
 #include <sys/proc.h>
 #include <sys/session.h>
+#include <sys/smp.h>
 #include <sys/tty.h>
 #include <sys/vt.h>
-#include <vm/vm_kmem.h>
 #include <vfs/vfs.h>
-#include <kern/console.h>
-#include <kern/sched.h>
-#include <kern/version.h>
-#include <arch/i386/intr.h>
-#include <drivers/console/uart/uart.h>
-#include <sys/smp.h>
-#include <arch/x86-common/lapic.h>
+#include <vm/vm_kmem.h>
 
 // Globals
 static console_backend_t *backends = NULL;
@@ -49,27 +50,66 @@ static spinlock_t console_input_lock = SPINLOCK_INIT("console_input");
  */
 static spinlock_t console_out_lock = SPINLOCK_INIT("console_out");
 static volatile int console_out_owner = -1;     /* LAPIC id emitting; -1 = none */
+static volatile int console_out_depth;          /* UP reentry depth */
 
+/*
+ * UP is NOT safe without this.  The original code returned immediately when
+ * smp_get_cpu_count() <= 1, on the assumption that one CPU means one writer.
+ * It does not: the kernel is preemptible, so the timer can interrupt a thread
+ * midway through emitting a line and schedule another that also kprints, and
+ * ISRs print too.  The result is exactly the shredded output seen at boot --
+ *
+ *   VFS: Mounted sysfs on /sys
+ *   Freeing setup mekinitmory... :D one.
+ *   SFreeingtarting init process...
+ *
+ * -- kinit's line spliced through kmain's, one character group at a time.
+ *
+ * On UP, disabling interrupts around the emit IS the mutual exclusion: with
+ * IF clear neither preemption nor an ISR can enter, so no lock is needed and
+ * none can deadlock.  Reentry (a backend whose own write path kprints) is
+ * then detectable with a plain depth counter, because with interrupts off
+ * only we can be touching it.
+ *
+ * A sleeping mutex would be wrong here whatever the CPU count: kprint() is
+ * called from interrupt handlers, and sleeping in one is fatal.
+ */
 static int console_out_enter(unsigned long *pflags) {
-    *pflags = 0;
-    if (smp_get_cpu_count() <= 1)
-        return 0;                                /* UP: unchanged */
-    int id = (int)lapic_get_id();
-    if (console_out_owner == id)
-        return 0;                                /* reentry: we already own it */
     unsigned long flags;
     __asm__ volatile("pushfl; popl %0; cli" : "=r"(flags) :: "memory");
+    *pflags = flags;
+
+    if (smp_get_cpu_count() <= 1) {
+        if (console_out_depth) {
+            /* Reentry.  Interrupts were already off from the outer enter, so
+             * restoring `flags` here is a no-op; leave() must not undo them. */
+            __asm__ volatile("pushl %0; popfl" :: "r"(flags) : "memory", "cc");
+            return 0;
+        }
+        console_out_depth = 1;
+        return 1;
+    }
+
+    int id = (int)lapic_get_id();
+    if (console_out_owner == id) {
+        /* Reentry on this CPU: we already hold the lock. */
+        __asm__ volatile("pushl %0; popfl" :: "r"(flags) : "memory", "cc");
+        return 0;
+    }
     spinlock_acquire(&console_out_lock);
     console_out_owner = id;
-    *pflags = flags;
     return 1;
 }
 
 static void console_out_leave(int held, unsigned long flags) {
     if (!held)
-        return;                                  /* UP or reentry: nothing to undo */
-    console_out_owner = -1;
-    spinlock_release(&console_out_lock);
+        return;                                  /* reentry: nothing to undo */
+    if (smp_get_cpu_count() <= 1) {
+        console_out_depth = 0;
+    } else {
+        console_out_owner = -1;
+        spinlock_release(&console_out_lock);
+    }
     __asm__ volatile("pushl %0; popfl" :: "r"(flags) : "memory", "cc");
 }
 
@@ -427,8 +467,17 @@ void kprint(const char *str) {
     size_t len = 0;
     const char *s = str;
     while (*s++) len++;
+
+    /* Hold the console across BOTH halves.  Serialising only backend_write
+     * still let a preemption land between the ring-buffer append and the
+     * emit, so dmesg and the console disagreed on ordering even when each
+     * line reached the console whole.  console_out_enter is reentrant, so the
+     * nested acquire inside backend_write is a no-op. */
+    unsigned long f;
+    int held = console_out_enter(&f);
     klog_append(str, len);
     backend_write(str, len);
+    console_out_leave(held, f);
 }
 
 int kprintf(const char *fmt, ...) {
@@ -442,10 +491,7 @@ int kprintf(const char *fmt, ...) {
     return ret;
 }
 
-#include <kern/file.h>
-#include <sys/proc.h>
-#include <sys/tty.h>
-#include <string.h>
+
 
 int console_read(char *data, size_t len) {
     return (int)console_node_read(&console_node, 0, len, (uint8_t *)data);

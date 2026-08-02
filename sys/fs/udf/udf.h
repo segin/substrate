@@ -12,6 +12,10 @@
 #include <stddef.h>   /* size_t (udf_read_label declaration) */
 
 /* UDF Constants */
+/* Upper bound on the Volume Descriptor Sequence scan.  A VDS holds a handful
+ * of descriptors; the extent length that drives the walk is untrusted. */
+#define UDF_VDS_MAX_SECTORS 64
+
 #define UDF_SECTOR_SIZE     2048
 #define UDF_AVDP_SECTOR     256     /* Anchor at sector 256 */
 
@@ -367,8 +371,19 @@ struct udf_fs {
     uint32_t logical_block_size;    /* From LVD */
     struct udf_long_ad root_icb;    /* Root directory location */
 
-    /* Space bitmap */
-    uint8_t *space_bitmap;
+    /* Space bitmap.
+     *
+     * UDF-01: space_bitmap points at the BIT ARRAY, i.e. past the 24-byte
+     * struct udf_space_bitmap header.  The writer used to cast that pointer
+     * back to the header type, reinterpreting raw allocation bits as
+     * tag+counters -- so bitmap bytes 14-15 became desc_crc_len (driving
+     * udf_crc ~57 KiB past an 8 KiB allocation) and bytes 20-23 became
+     * num_bytes (driving a 513-sector write of unallocated heap onto the
+     * disc).  Even with benign bit patterns every write landed 24 bytes
+     * shifted.  Keep the allocation base separately. */
+    uint8_t *space_bitmap;          /* bit array (base + header) */
+    uint8_t *space_bitmap_base;     /* start of the allocation = the header */
+    uint32_t space_bitmap_alloc;    /* bytes actually kmalloc'd for it */
     uint32_t space_bitmap_size;
     uint32_t space_bitmap_sector;
 };

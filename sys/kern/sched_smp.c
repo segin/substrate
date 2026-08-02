@@ -4,12 +4,13 @@
  * Per-CPU runqueues, load balancing, and CPU affinity handling.
  */
 
-#include <kern/sched.h>
-#include <kern/runqueue.h>
-#include <sys/proc.h>
-#include <sys/lock.h>
 #include <string.h>
+
 #include <arch/i386/percpu.h>
+#include <kern/runqueue.h>
+#include <kern/sched.h>
+#include <sys/lock.h>
+#include <sys/proc.h>
 
 /* MAX_CPUS defined in sched.h */
 

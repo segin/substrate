@@ -20,6 +20,7 @@ struct freebsd11_stat;
 int freebsd_sys_uname(void *buf);
 int freebsd_sys_uname_v4(void *buf);
 int64_t freebsd_sys_lseek(int fd, int pad, uint32_t off_lo, uint32_t off_hi, int whence);
+int64_t freebsd_sys_olseek(int fd, int32_t offset, int whence);
 int64_t freebsd_sys_lseek13(int fd, uint32_t off_lo, uint32_t off_hi, int whence);
 void *freebsd_sys_mmap(void *addr, size_t len, int prot, int flags, int fd, uint32_t off_lo, uint32_t off_hi);
 int freebsd_sys_ioctl(int fd, uint32_t request, void *arg);
@@ -49,6 +50,10 @@ int freebsd_sys_rtprio_thread(int function, long lwpid, void *rtp);
 /* clock_gettime(2) with FreeBSD clockid translation (CLOCK_MONOTONIC=4 etc.
  * -> substrate native 0/1).  std::chrono::steady_clock depends on this. */
 int freebsd_sys_clock_gettime(int clk_id, void *tp);
+int freebsd_sys_gettimeofday(void *tv, void *tz);
+int freebsd_sys_getrusage(int who, void *usage);
+int freebsd_sys_getitimer(int which, void *curr_value);
+int freebsd_sys_wait4(int pid, int *status, int options, void *rusage);
 
 /* clock_getres(2) with the same FreeBSD clockid translation; reports the
  * 1/HZ tick resolution (substrate has no native sys_clock_getres). */

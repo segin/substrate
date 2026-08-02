@@ -1,5 +1,6 @@
-#include <elfobj.h>
 #include <stdio.h>
+
+#include <elfobj.h>
 
 int main(int argc, char **argv) {
     elfobj_t *obj;

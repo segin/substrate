@@ -12,27 +12,31 @@
  * automatic ephemeral port allocation on first sendto if not bound.
  */
 
-#include <vfs/vfs.h>
-#include <sys/proc.h>
-#include <sys/file.h>
-#include <sys/fcntl.h>
-#include <sys/poll.h>
-#include <sys/socket.h>
-#include <sys/netdev.h>
-#include <net/inet.h>
+#include <errno.h>
+#include <stddef.h>
+#include <string.h>
+
+#include <kern/console.h>
+#include <kern/file.h>
+#include <kern/sched.h>
+#include <kern/sleepq.h>
+#include <kern/time.h>
 #include <net/if.h>
+#include <net/inet.h>
 #include <netinet/ip.h>
 #include <netinet/ip6.h>
 #include <netinet/udp.h>
-#include <kern/sched.h>
-#include <kern/file.h>
-#include <kern/console.h>
-#include <vm/vm_kmem.h>
 #include <sys/copy.h>
+#include <sys/fcntl.h>
+#include <sys/file.h>
 #include <sys/lock.h>
-#include <string.h>
-#include <stddef.h>
-#include <errno.h>
+#include <sys/netdev.h>
+#include <sys/poll.h>
+#include <sys/proc.h>
+#include <sys/socket.h>
+#include <sys/termios.h>
+#include <vfs/vfs.h>
+#include <vm/vm_kmem.h>
 
 #ifndef AF_INET
 #define AF_INET  2
@@ -74,14 +78,37 @@ struct sin6_kern {
 /* ------------------------------------------------------------------ */
 
 #define AFI_RING_LEN 32
-#define AFI_DATA_MAX 1500
+/*
+ * UDP-04: the largest UDP payload that can actually cross this stack.
+ *
+ * This was 1500, which silently truncated on receive and refused on send
+ * anything between 1501 and the real link maximum -- a datagram that the
+ * NIC delivered whole was cut short with no indication to the caller.
+ *
+ * The audit asked for 65507 (the protocol maximum), and that is NOT what
+ * this is, deliberately: reaching it requires IP fragmentation on send and
+ * reassembly on receive, and this stack has neither -- ip4_input drops every
+ * fragment outright (inet.c: "Drop fragments -- we don't reassemble yet")
+ * and ip4_output emits a single unfragmented packet.  A >MTU datagram
+ * therefore cannot arrive or leave regardless of what this constant says,
+ * and raising it to 65507 would cost 32x that per socket ring for no
+ * behavioural gain.  What it CAN do is stop truncating what does fit, so it
+ * is now exactly MTU minus the IPv4 and UDP headers.  Real 65507 support is
+ * an IP-fragmentation feature, not a socket-layer one.
+ */
+#define AFI_DATA_MAX (NETDEV_MTU_MAX - 20 - 8)
 
 typedef struct afi_pkt {
     uint8_t  family;    /* AF_INET or AF_INET6 */
     uint8_t  proto;
     uint16_t port;      /* source port for UDP, 0 for RAW */
     uint8_t  addr[16];  /* source address (4 bytes for v4) */
-    uint16_t len;
+    uint16_t len;       /* bytes stored in data[] */
+    /* SOCK-06: the datagram's length as it arrived, which can exceed `len`
+     * if it did not fit.  recv(MSG_TRUNC) reports this so a caller can tell
+     * "your buffer was too small" from "the datagram really was this short";
+     * without it the two were indistinguishable. */
+    uint16_t truelen;
     uint8_t  data[AFI_DATA_MAX];
 } afi_pkt_t;
 
@@ -163,6 +190,31 @@ static uint16_t afinet_alloc_ephemeral(void) {
     return port;
 }
 
+static int afinet_port_taken(const afi_sock_t *self, uint16_t port);
+
+/*
+ * UDP-05: hand out an ephemeral port that is not already in use.
+ *
+ * The bare counter above is incremented without any check that the port it
+ * lands on is free, so two sockets could be handed the same one -- after
+ * which the demux (even the fixed best-match one) has an ambiguous key and
+ * one of them quietly receives the other's traffic.  Sweep the whole
+ * dynamic range rather than trusting the counter; 16384 candidates is a
+ * bounded walk and the common case exits on the first.
+ *
+ * Callers must also record the result in s->local_port BEFORE anyone else
+ * can allocate, and set s->bound -- an implicitly-bound socket that leaves
+ * `bound` clear is invisible to afinet_port_taken(), which is how the
+ * collision persisted even once a check existed.
+ */
+static uint16_t afinet_alloc_ephemeral_free(afi_sock_t *s) {
+    for (int i = 0; i < 16384; i++) {
+        uint16_t port = afinet_alloc_ephemeral();
+        if (!afinet_port_taken(s, port)) return port;
+    }
+    return 0;   /* range exhausted; caller reports EADDRINUSE */
+}
+
 /* ------------------------------------------------------------------ */
 /* SIOC* ioctls — interface configuration via an AF_INET socket fd.   */
 /* ------------------------------------------------------------------ */
@@ -173,8 +225,26 @@ static netdev_t *afinet_find_dev(const char *name) {
 }
 
 static int afinet_ioctl(fs_node_t *node, uint32_t request, void *arg) {
-    (void)node;
     if (!arg) return -EFAULT;
+
+    /* FIONREAD: bytes available to read without blocking.  Xlib (and many
+     * socket clients) call this on the connection to size the next read;
+     * returning ENOTTY makes Xlib declare the display dead ("XIO: fatal IO
+     * error ... (Not a typewriter)").  TCP reports its rx-ring occupancy;
+     * UDP/RAW reports the next datagram's length (BSD/Linux semantics). */
+    if (request == FIONREAD) {
+        afi_sock_t *s = node ? (afi_sock_t *)(uintptr_t)node->impl : NULL;
+        int avail = 0;
+        if (s) {
+            if (s->tcp) {
+                avail = (int)tcp_recv_avail(s->tcp);
+            } else if (s->count > 0) {
+                avail = (int)s->ring[s->tail].len;
+            }
+        }
+        if (copyout(&avail, arg, sizeof(avail)) != 0) return -EFAULT;
+        return 0;
+    }
 
     /* SIOCGIFCONF takes struct ifconf; everything else takes struct ifreq.
      * Both `arg` and (for SIOCGIFCONF) the ifc_req array it points at are
@@ -204,6 +274,13 @@ static int afinet_ioctl(fs_node_t *node, uint32_t request, void *arg) {
      * by ifindex).  Handle them before the by-name lookup. */
     if (request == SIOCGIFADDR_IN6 || request == SIOCSIFADDR_IN6 ||
         request == SIOCDIFADDR_IN6 || request == SIOCSIFGW_IN6) {
+        /* CFG-01: same rule as the IPv4 setters below -- these mutate the
+         * interface address and the v6 gateway, which is the whole of the
+         * IPv6 routing state. */
+        if (request != SIOCGIFADDR_IN6 &&
+            (!current_process || current_process->euid != 0))
+            return -EPERM;
+
         struct in6_ifreq kr6;
         if (copyin(arg, &kr6, sizeof(kr6)) != 0) return -EFAULT;
         struct in6_ifreq *r6 = &kr6;
@@ -239,6 +316,30 @@ static int afinet_ioctl(fs_node_t *node, uint32_t request, void *arg) {
     struct ifreq *r = &kr;
     netdev_t *dev = afinet_find_dev(r->ifr_name);
     if (!dev) return -ENODEV;
+
+    /*
+     * CFG-01: the SIOCSIF* commands mutate dev->ip4_addr / ip4_netmask /
+     * ip4_gateway / hwaddr / mtu / flags directly, and on this stack those
+     * fields ARE the routing table -- route_for_v4() reads nothing else.
+     * With no privilege check any unprivileged process could repoint the
+     * default gateway, change the interface address, or set IFF_PROMISC and
+     * have the IP/ARP layers ingest every frame on the segment.  Interface
+     * configuration is a root operation; the SIOCGIF* queries stay open.
+     */
+    switch (request) {
+        case SIOCSIFFLAGS:
+        case SIOCSIFMTU:
+        case SIOCSIFHWADDR:
+        case SIOCSIFADDR:
+        case SIOCSIFNETMASK:
+        case SIOCSIFBRDADDR:
+        case SIOCSIFGATEWAY:
+            if (!current_process || current_process->euid != 0)
+                return -EPERM;
+            break;
+        default:
+            break;
+    }
 
     /* "Get" commands fill the kernel copy `kr` and fall through to the
      * copyout at out_get; "set"/no-op commands mutate the device and
@@ -378,8 +479,86 @@ static int afi_node_nonblock(const fs_node_t *node) {
     return 0;
 }
 
+/*
+ * UDP-06: register on the sleep queue BEFORE dropping the ring lock.
+ *
+ * The receive loops used to do
+ *      spinlock_release_irq(&afi_lock, fl);
+ *      sched_sleep(s->wait_chan);
+ * with a window in between.  A datagram delivered in that window ran
+ * enqueue() -> sched_wakeup() against a thread that was not yet asleep, so
+ * the wakeup hit nothing and the reader then slept on an already-full ring
+ * -- woken only by the next datagram or the ~50 ms fallback deadline.  For a
+ * request/response protocol that is up to a full extra deadline of latency
+ * per exchange, and with no further traffic it is an outright hang until the
+ * deadline fires.
+ *
+ * afunix_wait() already had the right shape: add to the sleep queue with
+ * interrupts disabled, THEN release the lock, so a wakeup racing the release
+ * finds us queued.  This is the AF_INET twin, with the ring's IRQ-safe
+ * spinlock in place of the mutex.  Returns 0 normally, -EINTR if a signal is
+ * pending on wake.  On return afi_lock is held again with `*fl` refreshed.
+ */
+static int afi_wait(afi_sock_t *s, unsigned long *fl) {
+    if (!current_thread) {
+        spinlock_release_irq(&afi_lock, *fl);
+        sched_yield();
+        *fl = spinlock_acquire_irq(&afi_lock);
+        return 0;
+    }
+    current_thread->flags |= THREAD_F_INTERRUPTIBLE;
+    /* afi_lock was taken with spinlock_acquire_irq, so interrupts are
+     * already off here -- the enqueue path cannot run between the
+     * sleepq_add and the release below. */
+    sleepq_add(s->wait_chan, current_thread);
+    if (current_thread->sleep_expiry == 0) {
+        uint32_t hz = get_hz();
+        uint64_t span = hz ? (hz / 20u) : 8u;   /* ~50 ms backstop */
+        if (span == 0) span = 1;
+        current_thread->sleep_expiry = get_ticks() + span;
+    }
+    spinlock_release_irq(&afi_lock, *fl);
+    if (current_thread->wait_chan == s->wait_chan)
+        sched_yield();
+    current_thread->sleep_expiry = 0;
+    sleepq_remove_thread(current_thread);
+    *fl = spinlock_acquire_irq(&afi_lock);
+    current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
+    if (current_thread->sig_pending & ~current_thread->sig_mask)
+        return -EINTR;
+    return 0;
+}
+
+/*
+ * SOCK-03: pin the socket BEFORE the first dereference, not after.
+ *
+ * NET-01 already added a reference around the datagram ring walk, but it
+ * was taken well down the function -- after s->closed / s->rd_shut / s->tcp
+ * had been read, and, for a stream socket, after tcp_recv() had been
+ * entered and blocked.  A concurrent close() in that window frees the
+ * struct out from under a sleeping reader, which is the same defect NET-01
+ * fixed for the ring.  Taking the reference at entry closes the window for
+ * every path through the function; the inner acquire/release stays as it
+ * is (nested references are fine) so the ring code keeps working unchanged.
+ */
+static size_t afinet_node_read_body(fs_node_t *node, size_t size, uint8_t *buf);
+
 size_t afinet_node_read(fs_node_t *node, off_t off, size_t size, uint8_t *buf) {
     (void)off;
+    afi_sock_t *s = (afi_sock_t *)(uintptr_t)node->impl;
+    if (!s) return 0;
+    unsigned long fl0 = spinlock_acquire_irq(&afi_lock);
+    s->refcount++;
+    spinlock_release_irq(&afi_lock, fl0);
+
+    size_t r = afinet_node_read_body(node, size, buf);
+
+    unsigned long fl1 = spinlock_acquire_irq(&afi_lock);
+    afi_rele_unlock(s, fl1);            /* may free; s must not be touched */
+    return r;
+}
+
+static size_t afinet_node_read_body(fs_node_t *node, size_t size, uint8_t *buf) {
     afi_sock_t *s = (afi_sock_t *)(uintptr_t)node->impl;
     if (!s || s->closed) return 0;
     if (s->rd_shut) return 0;            /* shutdown(SHUT_RD): EOF */
@@ -415,14 +594,9 @@ size_t afinet_node_read(fs_node_t *node, off_t off, size_t size, uint8_t *buf) {
             return n;
         }
         if (nb) { afi_rele_unlock(s, fl); return (size_t)-EAGAIN; }
-        spinlock_release_irq(&afi_lock, fl);
-        /* Make the sleep signal-interruptible so SIGINT (and friends)
-         * yank ping/etc out of a blocked recv. */
-        current_thread->flags |= THREAD_F_INTERRUPTIBLE;
-        sched_sleep(s->wait_chan);
-        current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
-        fl = spinlock_acquire_irq(&afi_lock);
-        if (current_thread->sig_pending & ~current_thread->sig_mask) {
+        /* UDP-06: queue-then-release, and signal-interruptible so SIGINT
+         * (and friends) yank ping/etc out of a blocked recv. */
+        if (afi_wait(s, &fl) == -EINTR) {
             afi_rele_unlock(s, fl);
             return (size_t)-EINTR;
         }
@@ -430,8 +604,64 @@ size_t afinet_node_read(fs_node_t *node, off_t off, size_t size, uint8_t *buf) {
     }
 }
 
+/*
+ * UDP-03: compute the transmit checksum.
+ *
+ * Every UDP send path wrote `uh->check = 0` and left it there.  Over IPv4
+ * that is legal-but-lazy (a zero checksum means "not computed", so silent
+ * corruption of our datagrams went undetected on the wire); over IPv6 a zero
+ * checksum is ILLEGAL (RFC 8200 8.1), so a conformant peer discarded every
+ * v6 datagram we ever sent.  The primitives already existed and TCP, ICMPv6
+ * and inet6 all used them -- UDP simply never did.
+ *
+ * The source address is the one routing will pick, which is why this needs
+ * ip4_source_for()/ip6_source_for(): the socket does not know it.  RFC 768
+ * reserves the value 0 to mean "no checksum", so a genuine 0 is transmitted
+ * as 0xFFFF (the equivalent one's-complement representation).
+ *
+ * `dgram` covers the UDP header AND payload, so these must be called after
+ * the payload has been copied in.
+ */
+static void udp_csum4(struct udphdr *uh, uint32_t daddr, size_t dgram_len) {
+    uh->check = 0;
+    uint32_t saddr = ip4_source_for(daddr);
+    uint16_t c = inet_csum_pseudo4(saddr, daddr, IPPROTO_UDP_NUM,
+                                   (uint16_t)dgram_len, uh);
+    uh->check = c ? c : 0xFFFF;
+}
+
+static void udp_csum6(struct udphdr *uh, const uint8_t daddr[16],
+                      size_t dgram_len) {
+    uint8_t saddr[16];
+    uh->check = 0;
+    if (ip6_source_for(daddr, saddr) != 0) return;  /* unroutable; send fails */
+    uint16_t c = inet_csum_pseudo6(saddr, daddr, IPPROTO_UDP_NUM,
+                                   (uint32_t)dgram_len, uh);
+    uh->check = c ? c : 0xFFFF;
+}
+
+/* SOCK-03 (write twin of afinet_node_read): tcp_send() blocks on a full
+ * send window with nothing holding the socket, so pin at entry here too. */
+static size_t afinet_node_write_body(fs_node_t *node, size_t size,
+                                     const uint8_t *buf);
+
 static size_t afinet_node_write(fs_node_t *node, off_t off, size_t size, const uint8_t *buf) {
     (void)off;
+    afi_sock_t *s = (afi_sock_t *)(uintptr_t)node->impl;
+    if (!s) return 0;
+    unsigned long fl0 = spinlock_acquire_irq(&afi_lock);
+    s->refcount++;
+    spinlock_release_irq(&afi_lock, fl0);
+
+    size_t r = afinet_node_write_body(node, size, buf);
+
+    unsigned long fl1 = spinlock_acquire_irq(&afi_lock);
+    afi_rele_unlock(s, fl1);            /* may free; s must not be touched */
+    return r;
+}
+
+static size_t afinet_node_write_body(fs_node_t *node, size_t size,
+                                     const uint8_t *buf) {
     afi_sock_t *s = (afi_sock_t *)(uintptr_t)node->impl;
     if (!s || s->closed) return 0;
     if (s->type == SOCK_STREAM && s->tcp) {
@@ -450,14 +680,22 @@ static size_t afinet_node_write(fs_node_t *node, off_t off, size_t size, const u
             /* NET-07: allocate via afinet_alloc_ephemeral() — the inline
              * ++g_ephemeral_next bypassed its wrap-to-49152 guard and is
              * non-atomic, yielding port 0 / low ports past 65535. */
-            uh->source = __builtin_bswap16(s->local_port ? s->local_port : afinet_alloc_ephemeral());
-            if (!s->local_port) s->local_port = __builtin_bswap16(uh->source);
+            /* UDP-05: an implicit bind must pick a FREE port and record it
+             * as bound, or the socket stays invisible to the collision
+             * check and a later bind() can hand the same port out again. */
+            if (!s->local_port) {
+                uint16_t eph = afinet_alloc_ephemeral_free(s);
+                if (eph == 0) return (size_t)-EADDRINUSE;
+                s->local_port = eph;
+                s->bound = 1;
+            }
+            uh->source = __builtin_bswap16(s->local_port);
             uh->dest   = __builtin_bswap16(s->peer_port);
             uh->len    = __builtin_bswap16((uint16_t)(sizeof(*uh) + size));
-            uh->check  = 0;
             memcpy(pkt + sizeof(*uh), buf, size);
             uint32_t daddr;
             memcpy(&daddr, s->peer_addr, 4);
+            udp_csum4(uh, daddr, sizeof(*uh) + size);
             int rc = ip4_output(daddr, IPPROTO_UDP_NUM, pkt, sizeof(*uh) + size);
             return rc < 0 ? (size_t)rc : size;
         } else {
@@ -474,12 +712,20 @@ static size_t afinet_node_write(fs_node_t *node, off_t off, size_t size, const u
             /* NET-07: allocate via afinet_alloc_ephemeral() — the inline
              * ++g_ephemeral_next bypassed its wrap-to-49152 guard and is
              * non-atomic, yielding port 0 / low ports past 65535. */
-            uh->source = __builtin_bswap16(s->local_port ? s->local_port : afinet_alloc_ephemeral());
-            if (!s->local_port) s->local_port = __builtin_bswap16(uh->source);
+            /* UDP-05: an implicit bind must pick a FREE port and record it
+             * as bound, or the socket stays invisible to the collision
+             * check and a later bind() can hand the same port out again. */
+            if (!s->local_port) {
+                uint16_t eph = afinet_alloc_ephemeral_free(s);
+                if (eph == 0) return (size_t)-EADDRINUSE;
+                s->local_port = eph;
+                s->bound = 1;
+            }
+            uh->source = __builtin_bswap16(s->local_port);
             uh->dest   = __builtin_bswap16(s->peer_port);
             uh->len    = __builtin_bswap16((uint16_t)(sizeof(*uh) + size));
-            uh->check  = 0;
             memcpy(pkt + sizeof(*uh), buf, size);
+            udp_csum6(uh, s->peer_addr, sizeof(*uh) + size);
             int rc = ip6_output(s->peer_addr, IPPROTO_UDP_NUM, pkt, sizeof(*uh) + size);
             return rc < 0 ? (size_t)rc : size;
         } else {
@@ -562,6 +808,17 @@ int afinet_socket(int family, int type, int protocol) {
     if (family != AF_INET) return -EAFNOSUPPORT;
     if (type != SOCK_RAW && type != SOCK_DGRAM && type != SOCK_STREAM)
         return -EPROTONOSUPPORT;
+    /*
+     * UDP-07: a raw socket is a privileged object -- it reads every packet
+     * of its protocol regardless of who they were for, and writes
+     * caller-composed IP payloads straight onto the wire.  Creating one
+     * required no privilege at all, so any unprivileged process could sniff
+     * and forge.  (It is also the path the SOCK_RAW length bugs fixed under
+     * #432 were reachable through.)  Every Unix restricts this to root; the
+     * companion check for AF_PACKET is in af_packet.c.
+     */
+    if (type == SOCK_RAW && (!current_process || current_process->euid != 0))
+        return -EACCES;
     /* Validate protocol against the type (POSIX): STREAM takes 0 or TCP,
      * DGRAM takes 0 or UDP; RAW takes any.  A bogus protocol is rejected
      * at socket() rather than silently ignored. */
@@ -643,7 +900,13 @@ int afinet_bind(int fd, const void *addr, socklen_t len) {
             return -EADDRINUSE;
         /* bind(port 0): assign an ephemeral port now so getsockname()
          * reflects it (POSIX/BSD) — see afinet_alloc_ephemeral(). */
-        s->local_port = req ? req : afinet_alloc_ephemeral();
+        if (req) {
+            s->local_port = req;
+        } else {
+            uint16_t eph = afinet_alloc_ephemeral_free(s);
+            if (eph == 0) return -EADDRINUSE;
+            s->local_port = eph;
+        }
         memcpy(s->local_addr, &sin->sin_addr, 4);
         if (s->tcp) {
             uint32_t la; memcpy(&la, s->local_addr, 4);
@@ -654,8 +917,11 @@ int afinet_bind(int fd, const void *addr, socklen_t len) {
         const struct sin6_kern *sin6 = (const struct sin6_kern *)addr;
         if (sin6->sin6_family != AF_INET6) return -EAFNOSUPPORT;
         s->local_port = __builtin_bswap16(sin6->sin6_port);
-        if (s->local_port == 0)
-            s->local_port = afinet_alloc_ephemeral();
+        if (s->local_port == 0) {
+            uint16_t eph = afinet_alloc_ephemeral_free(s);
+            if (eph == 0) return -EADDRINUSE;
+            s->local_port = eph;
+        }
         memcpy(s->local_addr, sin6->sin6_addr, 16);
         /* tcp_pcb_t is IPv4-only today; the v6 bind still has to
          * propagate the PORT into the PCB or the LISTEN socket
@@ -703,8 +969,14 @@ int afinet_shutdown(int fd, int how) {
     if (!s) return -ENOTSOCK;
     if (how != SHUT_RD && how != SHUT_WR && how != SHUT_RDWR)
         return -EINVAL;
-    /* shutdown on a socket that was never connected -> ENOTCONN (TCP). */
-    if (s->tcp && !s->connected) return -ENOTCONN;
+    /*
+     * SOCK-10: POSIX requires ENOTCONN when the socket is not connected.
+     * The check only covered TCP, so shutdown() on an unconnected datagram
+     * or raw socket reported success and did nothing -- a caller using the
+     * return value to decide whether a teardown happened was misled.  A
+     * datagram socket becomes "connected" via connect(), same as a stream.
+     */
+    if (!s->connected) return -ENOTCONN;
     if (how == SHUT_RD || how == SHUT_RDWR) {
         s->rd_shut = 1;
         sched_wakeup(s->wait_chan);          /* UDP/RAW blocked readers */
@@ -780,15 +1052,75 @@ int afinet_accept(int fd, void *addr, socklen_t *addrlen) {
     g_afi_head = c;
     spinlock_release_irq(&afi_lock, fl);
 
-    /* Fill the accept() out-param with the peer's address, BSD/POSIX
-     * convention.  addr may be NULL if the caller doesn't want it. */
-    if (addr && addrlen && *addrlen > 0) {
-        socklen_t cap = *addrlen;
-        (void)afinet_pack_sockaddr(c->family, c->peer_port, c->peer_addr,
-                                   addr, &cap);
-        *addrlen = cap;
+    /*
+     * Fill the accept() out-param with the peer's address, BSD/POSIX
+     * convention.  addr may be NULL if the caller doesn't want it.
+     *
+     * SOCK-01: addr/addrlen are raw userspace pointers straight off the
+     * syscall table.  This used to pack the sockaddr directly through `addr`
+     * and assign through `*addrlen`, so
+     *     accept(lfd, (void *)0xC0100000, &len)
+     * wrote a sockaddr wherever the caller pointed -- an arbitrary kernel
+     * write from an unprivileged process -- and an addrlen pointing into
+     * kernel memory read it back out.  Build in a kernel buffer, then copy
+     * out under length validation.
+     */
+    {
+        uint8_t kaddr[SOCK_UADDR_MAX];
+        socklen_t klen = sizeof(kaddr);
+
+        memset(kaddr, 0, sizeof(kaddr));
+        if (afinet_pack_sockaddr(c->family, c->peer_port, c->peer_addr,
+                                 kaddr, &klen) == 0) {
+            if (klen > (socklen_t)sizeof(kaddr)) klen = sizeof(kaddr);
+            /* A bad user pointer must not cost us the connection we just
+             * accepted: report the failure but keep the fd installed, since
+             * the peer is already connected and unwinding it here would
+             * silently drop an established connection. */
+            (void)sock_copyout_sockaddr(kaddr, klen, addr, addrlen);
+        }
     }
     return newfd;
+}
+
+/*
+ * Userspace boundary helpers shared by the socket syscalls.  See the
+ * commentary in <net/inet.h> for why these exist; the short version is that
+ * accept/sendto/recvfrom were writing and reading through raw user pointers,
+ * which is an arbitrary kernel write and an unrecoverable kernel fault on a
+ * bad pointer respectively.
+ */
+int sock_copyin_addrlen(const socklen_t *ulen, socklen_t *out)
+{
+    socklen_t v;
+
+    if (!ulen || !out) return -EINVAL;
+    if (copyin(ulen, &v, sizeof(v)) != 0) return -EFAULT;
+    /* socklen_t is signed on some ABIs and userspace controls this value;
+     * a negative capacity must not become a huge unsigned copy length. */
+    if ((int)v < 0) return -EINVAL;
+    *out = v;
+    return 0;
+}
+
+int sock_copyout_sockaddr(const void *src, socklen_t srclen,
+                          void *addr, socklen_t *ulen)
+{
+    socklen_t cap, cpy;
+    int rc;
+
+    /* accept(2): a caller that does not want the peer address passes NULL. */
+    if (!addr || !ulen) return 0;
+    if (!src) return -EINVAL;
+
+    rc = sock_copyin_addrlen(ulen, &cap);
+    if (rc != 0) return rc;
+
+    cpy = (cap < srclen) ? cap : srclen;
+    if (cpy > 0 && copyout(src, addr, cpy) != 0) return -EFAULT;
+    /* Untruncated length, per POSIX -- see the header comment. */
+    if (copyout(&srclen, ulen, sizeof(srclen)) != 0) return -EFAULT;
+    return 0;
 }
 
 /* Common helper: fill a struct sockaddr_in / sockaddr_in6 from
@@ -922,8 +1254,14 @@ int afinet_connect(int fd, const void *addr, socklen_t len) {
     return 0;
 }
 
-ssize_t afinet_sendto(int fd, const void *buf, size_t len, int flags,
-                      const void *addr, socklen_t addrlen) {
+/*
+ * Kernel-buffer core of afinet_sendto().  `buf` MUST already be kernel
+ * memory: everything below memcpy()s it into a packet or hands it to
+ * tcp_send / ip4_output / ip6_output, none of which can take a fault.  The
+ * public entry point below is what copies the caller's payload in.
+ */
+static ssize_t afinet_sendto_k(int fd, const void *buf, size_t len, int flags,
+                               const void *addr, socklen_t addrlen) {
     (void)flags;
     afi_sock_t *s = afi_from_fd(fd);
     if (!s) return -ENOTSOCK;
@@ -973,18 +1311,24 @@ ssize_t afinet_sendto(int fd, const void *buf, size_t len, int flags,
         /* DGRAM/UDP */
         /* NET-07: use the wrap-guarded ephemeral allocator, not the raw
          * (non-atomic, unguarded) ++g_ephemeral_next. */
-        uint16_t sport = s->local_port ? s->local_port : afinet_alloc_ephemeral();
-        if (!s->local_port) s->local_port = sport;
+        /* UDP-05: as above -- free port, recorded, marked bound. */
+        if (!s->local_port) {
+            uint16_t eph = afinet_alloc_ephemeral_free(s);
+            if (eph == 0) return -EADDRINUSE;
+            s->local_port = eph;
+            s->bound = 1;
+        }
+        uint16_t sport = s->local_port;
         uint8_t pkt[AFI_DATA_MAX + sizeof(struct udphdr)];
         if (len > AFI_DATA_MAX) return -EMSGSIZE;
         struct udphdr *uh = (struct udphdr *)pkt;
         uh->source = __builtin_bswap16(sport);
         uh->dest   = __builtin_bswap16(dport);
         uh->len    = __builtin_bswap16((uint16_t)(sizeof(*uh) + len));
-        uh->check  = 0;
         memcpy(pkt + sizeof(*uh), buf, len);
         uint32_t d;
         memcpy(&d, daddr_buf, 4);
+        udp_csum4(uh, d, sizeof(*uh) + len);
         int rc = ip4_output(d, IPPROTO_UDP_NUM, pkt, sizeof(*uh) + len);
         return rc < 0 ? rc : (ssize_t)len;
     } else {
@@ -994,19 +1338,86 @@ ssize_t afinet_sendto(int fd, const void *buf, size_t len, int flags,
         }
         /* NET-07: use the wrap-guarded ephemeral allocator, not the raw
          * (non-atomic, unguarded) ++g_ephemeral_next. */
-        uint16_t sport = s->local_port ? s->local_port : afinet_alloc_ephemeral();
-        if (!s->local_port) s->local_port = sport;
+        /* UDP-05: as above -- free port, recorded, marked bound. */
+        if (!s->local_port) {
+            uint16_t eph = afinet_alloc_ephemeral_free(s);
+            if (eph == 0) return -EADDRINUSE;
+            s->local_port = eph;
+            s->bound = 1;
+        }
+        uint16_t sport = s->local_port;
         uint8_t pkt[AFI_DATA_MAX + sizeof(struct udphdr)];
         if (len > AFI_DATA_MAX) return -EMSGSIZE;
         struct udphdr *uh = (struct udphdr *)pkt;
         uh->source = __builtin_bswap16(sport);
         uh->dest   = __builtin_bswap16(dport);
         uh->len    = __builtin_bswap16((uint16_t)(sizeof(*uh) + len));
-        uh->check  = 0;
         memcpy(pkt + sizeof(*uh), buf, len);
+        udp_csum6(uh, daddr_buf, sizeof(*uh) + len);
         int rc = ip6_output(daddr_buf, IPPROTO_UDP_NUM, pkt, sizeof(*uh) + len);
         return rc < 0 ? rc : (ssize_t)len;
     }
+}
+
+/*
+ * SOCK-02: bounce the caller's payload into kernel memory before it reaches
+ * the transmit path.
+ *
+ * send/sendto/sendmsg used to hand the raw user pointer all the way down to
+ * memcpy(pkt + sizeof(*uh), buf, len) / ip4_output() / tcp_send(), so
+ *     sendto(fd, (void *)0xC0000000, 1400, 0, &dst, 16)
+ * put 1400 bytes of kernel memory on the wire -- remote kernel memory
+ * disclosure from an unprivileged process -- and an unmapped buf took an
+ * unrecoverable kernel fault ("Unhandled Kernel Exception") instead of
+ * returning EFAULT.  write(2) was never affected because kern_write()
+ * already bounces.
+ *
+ * A datagram must be copied whole (it is one packet, and the per-family size
+ * limits below reject anything oversized anyway); a stream may be chunked,
+ * which is what keeps a multi-megabyte TCP send working without a
+ * multi-megabyte kernel allocation.
+ */
+#define AFI_SEND_CHUNK (64U * 1024U)
+
+ssize_t afinet_sendto(int fd, const void *ubuf, size_t len, int flags,
+                      const void *addr, socklen_t addrlen) {
+    afi_sock_t *s = afi_from_fd(fd);
+    if (!s) return -ENOTSOCK;
+    if (!ubuf && len) return -EINVAL;   /* len==0 is a valid empty datagram */
+    if (len == 0)
+        return afinet_sendto_k(fd, ubuf, 0, flags, addr, addrlen);
+
+    int stream = (s->type == SOCK_STREAM && s->tcp) ? 1 : 0;
+
+    /* Reject an oversized datagram before allocating for it. */
+    if (!stream && len > AFI_DATA_MAX)
+        return -EMSGSIZE;
+
+    size_t cap = stream ? (len < AFI_SEND_CHUNK ? len : AFI_SEND_CHUNK) : len;
+    uint8_t *kbuf = kmalloc(cap);
+    if (!kbuf) return -ENOMEM;
+
+    ssize_t total = 0;
+    while ((size_t)total < len) {
+        size_t chunk = len - (size_t)total;
+        if (chunk > cap) chunk = cap;
+        if (copyin((const uint8_t *)ubuf + total, kbuf, chunk) != 0) {
+            kfree(kbuf, cap);
+            return total ? total : -EFAULT;
+        }
+        ssize_t w = afinet_sendto_k(fd, kbuf, chunk, flags, addr, addrlen);
+        if (w < 0) {
+            kfree(kbuf, cap);
+            return total ? total : w;
+        }
+        total += w;
+        if ((size_t)w < chunk)   /* partial send (nonblock / window full) */
+            break;
+        if (!stream)             /* exactly one datagram */
+            break;
+    }
+    kfree(kbuf, cap);
+    return total;
 }
 
 ssize_t afinet_recvfrom(int fd, void *buf, size_t len, int flags,
@@ -1027,9 +1438,9 @@ ssize_t afinet_recvfrom(int fd, void *buf, size_t len, int flags,
         if (tcp_is_listening(s->tcp)) return -ENOTCONN;
         file_t *f = (fd >= 0 && fd < MAX_FD)
                         ? current_process->fds[fd] : NULL;
-        int nb = (flags & 0x40 /*MSG_DONTWAIT*/) ||
+        int nb = (flags & MSG_DONTWAIT) ||
                  (f && (f->f_flag & FNONBLOCK));
-        if (flags & 0x02 /*MSG_PEEK*/)
+        if (flags & MSG_PEEK)
             return nb ? tcp_peek_nb(s->tcp, buf, len)
                       : tcp_peek   (s->tcp, buf, len);
         return nb ? tcp_recv_nb(s->tcp, buf, len)
@@ -1041,6 +1452,25 @@ ssize_t afinet_recvfrom(int fd, void *buf, size_t len, int flags,
      * kernel-local storage under the lock; the fill-out of the caller's
      * buffers runs unlocked.  `addr`/`addrlen` here are the kernel bounce
      * buffers supplied by recv_into_kbuf(), so the copy is safe. */
+    /*
+     * Resolve non-blocking BEFORE taking the ring lock, and honour both the
+     * per-call MSG_DONTWAIT and the fd's FNONBLOCK -- exactly what the TCP arm
+     * above already does.  The datagram path used to test MSG_DONTWAIT only,
+     * so a socket made non-blocking with fcntl(F_SETFL, O_NONBLOCK) and then
+     * read with recv(..., 0) slept in sched_sleep() forever instead of
+     * returning EAGAIN.  That silently breaks every poll/deadline-driven UDP
+     * client (DNS resolvers, rpcbind, DHCP), which believe the read cannot
+     * block; the AF_PACKET twin of this bug is what hung dhclient at
+     * "DHCPDISCOVER ... (try 1/4)".
+     */
+    int nb_dgram;
+    {
+        file_t *nf = (current_process && fd >= 0 && fd < MAX_FD)
+                         ? current_process->fds[fd] : NULL;
+        nb_dgram = (flags & MSG_DONTWAIT) ||
+                   (nf && (nf->f_flag & FNONBLOCK));
+    }
+
     unsigned long fl = spinlock_acquire_irq(&afi_lock);
     s->refcount++;
     int fam = s->family;
@@ -1051,10 +1481,21 @@ ssize_t afinet_recvfrom(int fd, void *buf, size_t len, int flags,
             uint8_t tmp[AFI_DATA_MAX];
             uint8_t paddr[16];
             uint16_t pport = p->port;
+            uint16_t ptrue = p->truelen;
             memcpy(tmp, p->data, n);
             memcpy(paddr, p->addr, 16);
-            s->tail = (s->tail + 1) % AFI_RING_LEN;
-            s->count--;
+            /*
+             * SOCK-05: MSG_PEEK has to LEAVE the datagram queued.  The ring
+             * was advanced unconditionally, so a peek consumed it -- the
+             * caller got its look at the data and the datagram was gone,
+             * which is the exact opposite of what MSG_PEEK means and
+             * silently loses a message for anyone who peeks before deciding
+             * how large a buffer to allocate.
+             */
+            if (!(flags & MSG_PEEK)) {
+                s->tail = (s->tail + 1) % AFI_RING_LEN;
+                s->count--;
+            }
             afi_rele_unlock(s, fl);
             memcpy(buf, tmp, n);
             if (addr && addrlen) {
@@ -1074,16 +1515,20 @@ ssize_t afinet_recvfrom(int fd, void *buf, size_t len, int flags,
                     *addrlen = sizeof(*sin6);
                 }
             }
+            /*
+             * SOCK-06: with MSG_TRUNC, report the datagram's real length
+             * rather than how much of it fitted.  Without it a short buffer
+             * and a short datagram are indistinguishable, so a caller can
+             * never tell that it lost the tail of a message.
+             */
+            if (flags & MSG_TRUNC) return (ssize_t)ptrue;
             return (ssize_t)n;
         }
-        /* Non-blocking via MSG_DONTWAIT (Linux convention). */
-        if (flags & 0x40 /* MSG_DONTWAIT */) { afi_rele_unlock(s, fl); return -EAGAIN; }
-        spinlock_release_irq(&afi_lock, fl);
-        current_thread->flags |= THREAD_F_INTERRUPTIBLE;
-        sched_sleep(s->wait_chan);
-        current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
-        fl = spinlock_acquire_irq(&afi_lock);
-        if (current_thread->sig_pending & ~current_thread->sig_mask) {
+        /* Non-blocking: MSG_DONTWAIT (Linux convention) or the fd's
+         * FNONBLOCK, resolved above. */
+        if (nb_dgram) { afi_rele_unlock(s, fl); return -EAGAIN; }
+        /* UDP-06: queue-then-release; see afi_wait(). */
+        if (afi_wait(s, &fl) == -EINTR) {
             afi_rele_unlock(s, fl);
             return -EINTR;
         }
@@ -1095,30 +1540,60 @@ ssize_t afinet_recvfrom(int fd, void *buf, size_t len, int flags,
 /* Upper-half delivery — called from IP/UDP input paths               */
 /* ------------------------------------------------------------------ */
 
-static int sock_matches_v4(afi_sock_t *s, uint8_t proto, uint16_t dport) {
-    if (s->closed) return 0;
-    if (s->family != AF_INET) return 0;
-    if (s->type == SOCK_RAW) {
-        return s->protocol == 0 || s->protocol == (int)proto;
-    }
-    /* DGRAM/UDP: only a datagram socket bound to the destination port
-     * receives.  A SOCK_STREAM socket never matches here, and an unbound
-     * socket (local_port==0) is NOT a promiscuous catch-all — that made
-     * every stray TCP/UDP socket swallow a copy of every datagram and
-     * corrupted delivery (duplicate/out-of-order receives). */
-    if (s->type != SOCK_DGRAM) return 0;
-    if (proto != IPPROTO_UDP_NUM) return 0;
-    return s->local_port != 0 && s->local_port == dport;
+/*
+ * UDP-01: score a datagram socket against a received datagram's full
+ * 4-tuple, not just its local port.
+ *
+ * The demux used to be "local_port == dport" and nothing else -- daddr was
+ * explicitly thrown away ("(void)daddr;") and the delivery loop enqueued a
+ * COPY into every socket that matched.  Three separate defects fell out of
+ * that:
+ *
+ *   - a connect()ed UDP socket accepted datagrams from any source, so a
+ *     spoofed reply beat the real server's; POSIX requires that a connected
+ *     datagram socket receive only from its peer;
+ *   - bind(127.0.0.1, X) received datagrams that arrived on a real
+ *     interface, because the bound local address was never compared;
+ *   - two sockets sharing a port each got the whole datagram, so two
+ *     resolvers read each other's answers.
+ *
+ * Returns -1 for "does not match at all", otherwise a specificity score;
+ * the caller delivers a unicast datagram to the single highest-scoring
+ * socket, which is the BSD best-match rule.  A wildcard bind (0.0.0.0/::)
+ * and an unconnected socket both still match -- they just lose to a socket
+ * that named the address or the peer.
+ */
+static int addr_is_wild(const uint8_t *a, size_t n) {
+    for (size_t i = 0; i < n; i++) if (a[i]) return 0;
+    return 1;
 }
-static int sock_matches_v6(afi_sock_t *s, uint8_t proto, uint16_t dport) {
-    if (s->closed) return 0;
-    if (s->family != AF_INET6) return 0;
-    if (s->type == SOCK_RAW) {
-        return s->protocol == 0 || s->protocol == (int)proto;
+
+static int sock_score(afi_sock_t *s, int family, uint8_t proto,
+                      const void *saddr, const void *daddr,
+                      uint16_t sport, uint16_t dport, size_t alen) {
+    if (s->closed) return -1;
+    if (s->family != family) return -1;
+    if (s->type == SOCK_RAW)
+        return (s->protocol == 0 || s->protocol == (int)proto) ? 0 : -1;
+    /* DGRAM/UDP: a SOCK_STREAM socket never matches here, and an unbound
+     * socket (local_port==0) is NOT a promiscuous catch-all — that made
+     * every stray TCP/UDP socket swallow a copy of every datagram. */
+    if (s->type != SOCK_DGRAM) return -1;
+    if (proto != IPPROTO_UDP_NUM) return -1;
+    if (s->local_port == 0 || s->local_port != dport) return -1;
+
+    int score = 0;
+    if (!addr_is_wild(s->local_addr, alen)) {
+        if (memcmp(s->local_addr, daddr, alen) != 0) return -1;
+        score += 1;
     }
-    if (s->type != SOCK_DGRAM) return 0;
-    if (proto != IPPROTO_UDP_NUM) return 0;
-    return s->local_port != 0 && s->local_port == dport;
+    if (s->connected) {
+        if (s->peer_port != sport) return -1;
+        if (!addr_is_wild(s->peer_addr, alen) &&
+            memcmp(s->peer_addr, saddr, alen) != 0) return -1;
+        score += 2;
+    }
+    return score;
 }
 
 static void enqueue(afi_sock_t *s, uint8_t family, uint8_t proto, uint16_t port,
@@ -1133,6 +1608,7 @@ static void enqueue(afi_sock_t *s, uint8_t family, uint8_t proto, uint16_t port,
     size_t n = len > AFI_DATA_MAX ? AFI_DATA_MAX : len;
     memcpy(p->data, data, n);
     p->len = (uint16_t)n;
+    p->truelen = (uint16_t)(len > 0xFFFF ? 0xFFFF : len);
     s->head = (s->head + 1) % AFI_RING_LEN;
     s->count++;
     sched_wakeup(s->wait_chan);
@@ -1141,7 +1617,7 @@ static void enqueue(afi_sock_t *s, uint8_t family, uint8_t proto, uint16_t port,
 int afinet_deliver_v4(uint32_t saddr, uint32_t daddr,
                       uint8_t protocol,
                       const uint8_t *pkt, size_t len, int for_dgram) {
-    (void)daddr;
+    /* UDP-01: daddr is now part of the demux key (see sock_score). */
     int delivered = 0;
     uint16_t sport = 0, dport = 0;
 
@@ -1175,21 +1651,31 @@ int afinet_deliver_v4(uint32_t saddr, uint32_t daddr,
      * about to enqueue into its ring, and enqueue()'s ring-counter
      * mutation is serialised against process-context readers. */
     unsigned long fl = spinlock_acquire_irq(&afi_lock);
+    afi_sock_t *best = NULL;
+    int best_score = -1;
     for (afi_sock_t *s = g_afi_head; s; s = s->next) {
-        if (!sock_matches_v4(s, protocol, dport)) continue;
+        int score = sock_score(s, AF_INET, protocol, &saddr, &daddr,
+                               sport, dport, 4);
+        if (score < 0) continue;
         if (s->type == SOCK_RAW) {
             /* RAW gets the full IP packet, delivered only via the ip4_input
              * path (for_dgram==0) — NOT also from udp_input, else every
-             * datagram is enqueued twice. */
+             * datagram is enqueued twice.  RAW legitimately fans out: every
+             * subscriber to a protocol sees every packet of it. */
             if (for_dgram) continue;
             enqueue(s, AF_INET, protocol, sport, &saddr, pkt, len);
+            delivered = 1;
         } else {
-            /* DGRAM: payload after UDP header, delivered only via udp_input. */
+            /* DGRAM: delivered only via udp_input, to the single best match
+             * (UDP-01) rather than to every socket on the port. */
             if (!for_dgram) continue;
-            enqueue(s, AF_INET, protocol, sport, &saddr,
-                    payload + sizeof(struct udphdr),
-                    payload_len - sizeof(struct udphdr));
+            if (score > best_score) { best_score = score; best = s; }
         }
+    }
+    if (best) {
+        enqueue(best, AF_INET, protocol, sport, &saddr,
+                payload + sizeof(struct udphdr),
+                payload_len - sizeof(struct udphdr));
         delivered = 1;
     }
     spinlock_release_irq(&afi_lock, fl);
@@ -1199,7 +1685,7 @@ int afinet_deliver_v4(uint32_t saddr, uint32_t daddr,
 int afinet_deliver_v6(const uint8_t saddr[16], const uint8_t daddr[16],
                       uint8_t protocol,
                       const uint8_t *pkt, size_t len, int for_dgram) {
-    (void)daddr;
+    /* UDP-01: daddr is now part of the demux key (see sock_score). */
     int delivered = 0;
     uint16_t sport = 0, dport = 0;
 
@@ -1222,8 +1708,12 @@ int afinet_deliver_v6(const uint8_t saddr[16], const uint8_t daddr[16],
 
     /* NET-01: walk + enqueue under afi_lock — see afinet_deliver_v4. */
     unsigned long fl = spinlock_acquire_irq(&afi_lock);
+    afi_sock_t *best = NULL;
+    int best_score = -1;
     for (afi_sock_t *s = g_afi_head; s; s = s->next) {
-        if (!sock_matches_v6(s, protocol, dport)) continue;
+        int score = sock_score(s, AF_INET6, protocol, saddr, daddr,
+                               sport, dport, 16);
+        if (score < 0) continue;
         if (s->type == SOCK_RAW) {
             if (for_dgram) continue;
             /* RAW v6 traditionally gets the payload (no IPv6 hdr).
@@ -1235,12 +1725,17 @@ int afinet_deliver_v6(const uint8_t saddr[16], const uint8_t daddr[16],
                 blen = len - sizeof(struct ip6_hdr);
             }
             enqueue(s, AF_INET6, protocol, sport, saddr, body, blen);
+            delivered = 1;
         } else {
+            /* UDP-01: single best match, not a copy to every socket. */
             if (!for_dgram) continue;
-            enqueue(s, AF_INET6, protocol, sport, saddr,
-                    payload + sizeof(struct udphdr),
-                    payload_len - sizeof(struct udphdr));
+            if (score > best_score) { best_score = score; best = s; }
         }
+    }
+    if (best) {
+        enqueue(best, AF_INET6, protocol, sport, saddr,
+                payload + sizeof(struct udphdr),
+                payload_len - sizeof(struct udphdr));
         delivered = 1;
     }
     spinlock_release_irq(&afi_lock, fl);

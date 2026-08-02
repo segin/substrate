@@ -4,12 +4,12 @@
  * Process group and session management wrappers.
  */
 
-#include <sys/syscall.h>
-#include <unistd.h>
-#include <sys/types.h>
 #include <errno.h>
+#include <unistd.h>
 
-#include "sysret.h"
+#include <sys/syscall.h>
+#include <sys/types.h>
+#include <sysret.h>
 
 long syscall(long number, ...);
 

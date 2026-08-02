@@ -169,6 +169,12 @@ typedef struct process {
     uint8_t  ac_flag;
     uint8_t  is_kernel_task; // 1 if kernel thread, 0 if user process
     uint8_t  bitness;        // Process execution mode (16/32/64)
+    /* Set by the a.out loader for Linux ZMAGIC/OMAGIC images, whose text
+     * segment is mapped at virtual address 0.  Tells validate_user_addr()
+     * that the low page region is legitimately mapped for this process, so
+     * copyin/copyinstr must not reject sub-USER_STACK_MIN pointers up front
+     * (an unmapped low access is still caught by the on_fault path). */
+    uint8_t  low_va_valid;
     struct rlimit rlimits[RLIM_NLIMITS];
     /* RLIMIT_MEMLOCK soft/hard limit, tracked directly (rlimits[] is only
      * sized for RLIMIT_CORE).  RLIM_INFINITY == "unset/no limit". */
@@ -360,12 +366,29 @@ typedef struct thread {
 #define THREAD_F_WAKE_PENDING  0x0004 // thr_wake() seen before thr_suspend() — latched
 #define THREAD_F_DETACHED      0x0008 // Detached LWP: self-reap on exit, no join
 #define THREAD_F_SUSPENDED     0x0010 // _lwp_suspend: off-CPU until _lwp_continue
+/*
+ * SOCK-08: per-call MSG_DONTWAIT, scoped to the calling thread.
+ *
+ * recv/send used to implement MSG_DONTWAIT by OR-ing FNONBLOCK into the
+ * file_t's f_flag for the duration of the call and restoring it after.
+ * f_flag belongs to the open file DESCRIPTION, which is shared across
+ * threads and across dup()/fork(), so one thread's MSG_DONTWAIT made every
+ * other user of that description non-blocking for the window, and the
+ * wholesale restore afterwards silently reverted a concurrent
+ * fcntl(F_SETFL) -- a lost update on a flag userland believes it owns.
+ * The flag lives on the thread instead, where its scope actually is.
+ */
+#define THREAD_F_IO_NONBLOCK   0x0020 // MSG_DONTWAIT for the in-flight socket call
                                       // (distinct from job-control THREAD_STOPPED)
 
     // Scheduling - Runqueue linkage
     struct thread *rq_next;       // Next in runqueue level
     struct thread *rq_prev;       // Prev in runqueue level
     struct runqueue *current_queue; // The runqueue this thread is currently on
+    int16_t        rq_level;      // Level index this thread was enqueued at.
+                                  // priority/sched_class can be mutated in
+                                  // place after enqueue, so removal must use
+                                  // the stored level, not a recomputed one.
     uint32_t       cpu_affinity;  // CPU affinity mask (bitmask)
     int16_t        bound_cpu;     // Hard CPU binding (-1 = floating)
     int16_t        exec_saved_bound_cpu; // Saved binding across exec pin window
@@ -374,6 +397,15 @@ typedef struct thread {
     uint8_t        exec_pin_active; // Exec path temporarily pinned this thread
     uint8_t        exec_saved_no_preempt; // Preserve preempt state across exec pin
     uint8_t        vfs_symlink_depth; // Current symlink-follow recursion depth
+    /*
+     * [VFS-06] Set when a lookup gave up because the symlink chain was too
+     * long.  finddir_fs_internal()/vfs_lookup() report every failure as
+     * NULL, which callers map to ENOENT, so a symlink loop was reported as
+     * "no such file" -- indistinguishable from a genuinely missing path and
+     * useless for diagnosing one.  The flag lets the syscall layer return
+     * ELOOP instead.  Cleared by the caller before a top-level lookup.
+     */
+    uint8_t        vfs_symlink_eloop;
     uint32_t       preempt_count; // Non-preemptible nesting depth (spinlocks).
                                   // Kernel preemption only fires when 0.
     

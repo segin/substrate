@@ -1,7 +1,8 @@
+#include <stdio.h>
+#include <string.h>
+
 #include <sys/kobject.h>
 #include <sys/lock.h>
-#include <string.h>
-#include <stdio.h>
 
 #define KOBJECT_EVENT_COUNT 64
 #define KOBJECT_EVENT_SIZE  128

@@ -5,10 +5,11 @@
  * (syscalls via int 0x80 for compatibility, though syscall/sysret preferred).
  */
 
-#include <arch/x86_64/idt.h>
-#include <arch/x86_64/gdt.h>
 #include <stdint.h>
 #include <string.h>
+
+#include <arch/x86_64/gdt.h>
+#include <arch/x86_64/idt.h>
 
 
 static struct idt_entry idt[IDT_ENTRIES] __attribute__((aligned(16)));

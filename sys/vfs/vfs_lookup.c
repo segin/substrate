@@ -1,15 +1,16 @@
-#include <sys/types.h>
-#include <sys/namei.h>
-#include <vfs/vnode.h>
-#include <sys/mount.h>
-#include <sys/proc.h>
-#include <sys/uio.h>
-#include <vm/vm_kmem.h>
-#include <sys/errno.h>
-#include <sys/signal.h>
 #include <string.h>
+
 #include <kern/panic.h>
+#include <sys/errno.h>
+#include <sys/mount.h>
+#include <sys/namei.h>
+#include <sys/proc.h>
+#include <sys/signal.h>
+#include <sys/types.h>
+#include <sys/uio.h>
+#include <vfs/vnode.h>
 #include <vm/uma.h>
+#include <vm/vm_kmem.h>
 
 /* MAXSYMLINKS defined in <sys/namei.h> */
 
@@ -48,7 +49,7 @@ namei(struct nameidata *ndp)
         cnp->cn_pnbuf = kmalloc(1024);
     }
     if (cnp->cn_pnbuf == NULL)
-        return ENOMEM;
+        return -ENOMEM;
 
     /*
      * Copy the pathname from user or kernel space.
@@ -64,7 +65,7 @@ namei(struct nameidata *ndp)
         size_t len = strlen(ndp->ni_dirp);
         if (len >= 1024) {
             if (namei_zone) uma_zfree(namei_zone, cnp->cn_pnbuf); else kfree(cnp->cn_pnbuf, 1024);
-            return ENAMETOOLONG;
+            return -ENAMETOOLONG;
         }
         strlcpy(cnp->cn_pnbuf, ndp->ni_dirp, 1024);
         cnp->cn_pnbuf[1023] = '\0';
@@ -92,7 +93,7 @@ namei(struct nameidata *ndp)
 
     if (dp == NULL) {
         if (namei_zone) uma_zfree(namei_zone, cnp->cn_pnbuf); else kfree(cnp->cn_pnbuf, 1024);
-        return ENOENT;
+        return -ENOENT;
     }
 
     vref(dp);
@@ -102,7 +103,11 @@ namei(struct nameidata *ndp)
      */
     for (;;) {
         if (*ndp->ni_dirp == '\0') {
+            /* [VNODE-21] Lookup of "/" (or a path that is all slashes)
+             * returned here without freeing cn_pnbuf. */
             ndp->ni_vp = dp;
+            if (namei_zone) uma_zfree(namei_zone, cnp->cn_pnbuf);
+            else kfree(cnp->cn_pnbuf, 1024);
             return 0;
         }
 
@@ -113,8 +118,11 @@ namei(struct nameidata *ndp)
         
         cnp->cn_namelen = p - ndp->ni_dirp;
         if (cnp->cn_namelen >= sizeof(component)) {
+            /* [VNODE-21] ...and on an over-long component. */
             vrele(dp);
-            return ENAMETOOLONG;
+            if (namei_zone) uma_zfree(namei_zone, cnp->cn_pnbuf);
+            else kfree(cnp->cn_pnbuf, 1024);
+            return -ENAMETOOLONG;
         }
         memcpy(component, ndp->ni_dirp, cnp->cn_namelen);
         component[cnp->cn_namelen] = '\0';
@@ -139,7 +147,10 @@ namei(struct nameidata *ndp)
          */
         if (cnp->cn_namelen == 2 && component[0] == '.' && component[1] == '.') {
             for (;;) {
-                if (dp->v_flag & VROOT) {
+                /* [VNODE-22] VROOT without a v_mount faulted here.  The
+                 * fs_node_t bridge publishes vnodes with no struct mount at
+                 * all, so this is now reachable rather than theoretical. */
+                if ((dp->v_flag & VROOT) && dp->v_mount != NULL) {
                     struct vnode *tvp = dp->v_mount->mnt_vnodecovered;
                     if (tvp != NULL) {
                         vref(tvp);
@@ -160,7 +171,12 @@ namei(struct nameidata *ndp)
             /* Cache miss - perform full lookup */
             error = VOP_LOOKUP(dp, &ndp->ni_vp, cnp);
             if (error) {
+                /* [VNODE-21] This is the ENOENT path -- i.e. EVERY failed
+                 * lookup -- and it leaked the 1024-byte cn_pnbuf every
+                 * time. */
                 vrele(dp);
+                if (namei_zone) uma_zfree(namei_zone, cnp->cn_pnbuf);
+                else kfree(cnp->cn_pnbuf, 1024);
                 return error;
             }
             /* Enter into cache if successful */
@@ -176,8 +192,11 @@ namei(struct nameidata *ndp)
             
             error = VFS_ROOT(mp, &tvp);
             if (error) {
+                /* [VNODE-21] Same leak on the VFS_ROOT failure path. */
                 vrele(ndp->ni_vp);
                 vrele(dp);
+                if (namei_zone) uma_zfree(namei_zone, cnp->cn_pnbuf);
+                else kfree(cnp->cn_pnbuf, 1024);
                 return error;
             }
             vrele(ndp->ni_vp);
@@ -194,7 +213,7 @@ namei(struct nameidata *ndp)
                 vrele(ndp->ni_vp);
                 vrele(dp);
                 if (namei_zone) uma_zfree(namei_zone, cnp->cn_pnbuf); else kfree(cnp->cn_pnbuf, 1024);
-                return ELOOP;
+                return -ELOOP;
             }
 
             /* Read symlink target */
@@ -203,7 +222,7 @@ namei(struct nameidata *ndp)
                 vrele(ndp->ni_vp);
                 vrele(dp);
                 if (namei_zone) uma_zfree(namei_zone, cnp->cn_pnbuf); else kfree(cnp->cn_pnbuf, 1024);
-                return ENOMEM;
+                return -ENOMEM;
             }
 
             struct iovec aiov;
@@ -232,7 +251,7 @@ namei(struct nameidata *ndp)
                 vrele(ndp->ni_vp);
                 vrele(dp);
                 if (namei_zone) uma_zfree(namei_zone, cnp->cn_pnbuf); else kfree(cnp->cn_pnbuf, 1024);
-                return ENAMETOOLONG;
+                return -ENAMETOOLONG;
             }
             target[target_len] = '\0';
 
@@ -245,7 +264,7 @@ namei(struct nameidata *ndp)
                 vrele(ndp->ni_vp);
                 vrele(dp);
                 if (namei_zone) uma_zfree(namei_zone, cnp->cn_pnbuf); else kfree(cnp->cn_pnbuf, 1024);
-                return ENAMETOOLONG;
+                return -ENAMETOOLONG;
             }
 
             char *new_path = namei_zone ? uma_zalloc(namei_zone, 0) : kmalloc(1024);
@@ -254,7 +273,7 @@ namei(struct nameidata *ndp)
                 vrele(ndp->ni_vp);
                 vrele(dp);
                 if (namei_zone) uma_zfree(namei_zone, cnp->cn_pnbuf); else kfree(cnp->cn_pnbuf, 1024);
-                return ENOMEM;
+                return -ENOMEM;
             }
 
             memcpy(new_path, target, target_len);
@@ -292,8 +311,12 @@ namei(struct nameidata *ndp)
 
         /* Terminal check: must be a directory to continue */
         if (dp->v_type != VDIR) {
+            /* [VNODE-21] ...and when a mid-path component is not a
+             * directory, which is a perfectly ordinary lookup failure. */
             vrele(dp);
-            return ENOTDIR;
+            if (namei_zone) uma_zfree(namei_zone, cnp->cn_pnbuf);
+            else kfree(cnp->cn_pnbuf, 1024);
+            return -ENOTDIR;
         }
     }
 

@@ -76,6 +76,33 @@ struct freebsd_timespec {
     int32_t tv_nsec;
 };
 
+/* FreeBSD i386 struct itimerval / rusage: built from the 8-byte timeval, so
+ * they are smaller than the native structs (64-bit time_t).  Used to marshal
+ * getitimer/getrusage/wait4 results into the caller's buffer without overrun. */
+struct freebsd_itimerval {
+    struct freebsd_timeval it_interval;
+    struct freebsd_timeval it_value;
+};
+
+struct freebsd_rusage {
+    struct freebsd_timeval ru_utime;
+    struct freebsd_timeval ru_stime;
+    int32_t ru_maxrss;
+    int32_t ru_ixrss;
+    int32_t ru_idrss;
+    int32_t ru_isrss;
+    int32_t ru_minflt;
+    int32_t ru_majflt;
+    int32_t ru_nswap;
+    int32_t ru_inblock;
+    int32_t ru_oublock;
+    int32_t ru_msgsnd;
+    int32_t ru_msgrcv;
+    int32_t ru_nsignals;
+    int32_t ru_nvcsw;
+    int32_t ru_nivcsw;
+};
+
 /*
  * FreeBSD iovec (for readv/writev)
  */
@@ -167,19 +194,23 @@ struct freebsd11_stat {
 
 
 /*
- * FreeBSD 13+ stat structure (i386 ABI, FreeBSD 14.x layout)
- * Verified against FreeBSD 14.3/i386 /usr/include/sys/stat.h offsets:
- *   dev=0 ino=8 nlink=16 mode=24 bsdflags=26 uid=28 gid=32
- *   rdev=40 atim=48 size=96 blocks=104 total=208
- * dev_t, ino_t, nlink_t are all uint64_t on FreeBSD 14.
- * struct timespec on FreeBSD 14 i386: time_t (int64_t, 8B) + long (4B) = 12B.
+ * FreeBSD 13+ stat structure (i386 ABI, FreeBSD 14.x layout).
+ *
+ * On i386 __STAT_TIME_T_EXT is defined (freebsd sys/sys/stat.h:155-157), so
+ * the released struct stat interleaves a zeroed 4-byte st_*_ext word BEFORE
+ * each `struct timespec` (stat.h:169-184).  i386 __time_t is 32-bit
+ * (freebsd sys/x86/include/_types.h:80), so each timespec is 8 bytes
+ * (tv_sec int32 + tv_nsec long).  The seconds therefore live at byte offsets
+ * 52/64/76/88, and the _ext words at 48/60/72/84 are always zero (the kernel
+ * clears them, freebsd sys/kern/vfs_syscalls.c:2488-2493).
+ *
+ * The struct is 208 bytes (0xD0) either way, but a 64-bit-tv_sec / no-_ext
+ * layout puts every seconds field 4 bytes too low: the low 32 bits of the
+ * seconds land in the st_*_ext slot and the (zero) high 32 bits land in the
+ * real tv_sec, so every timestamp reads as 0 (Thu Jan 1 1970).  dev_t, ino_t,
+ * nlink_t are all uint64_t on FreeBSD 14.
  * Used by fstat_freebsd13 (551), lstat_freebsd13, stat_freebsd13 syscalls.
  */
-struct freebsd13_timespec {
-    int64_t  tv_sec;   /* 8 bytes (time_t is 64-bit even on i386 FreeBSD 14) */
-    int32_t  tv_nsec;  /* 4 bytes */
-};
-
 #if defined(__i386__) || defined(__x86_64__)
 struct freebsd13_stat {
     uint64_t st_dev;          /* offset   0 */
@@ -191,20 +222,14 @@ struct freebsd13_stat {
     uint32_t st_gid;          /* offset  32 */
     int32_t  st_padding1;     /* offset  36 */
     uint64_t st_rdev;         /* offset  40 */
-    /* FreeBSD 14.3-RELEASE i386 ships struct stat WITHOUT
-     * __STAT_TIME_T_EXT — verified by inspecting libc.so.7's _fstat
-     * which only writes 0xD0 = 208 bytes total to the caller's buffer
-     * (it advances %edi by 0x88 then `rep stos` 0x12 dwords = 72 more
-     * bytes).  HEAD/CURRENT defines the _ext fields, but the released
-     * binaries don't see them.  Adding _ext fields here makes our
-     * fstat write 224 bytes — overflowing libelf's 208-byte stack
-     * buffer in _libelf_open_object and corrupting its stack canary,
-     * crashing ldd with "stack overflow detected; terminated" at
-     * function epilogue. */
-    struct freebsd13_timespec st_atim;     /* offset  48 (12 bytes) */
-    struct freebsd13_timespec st_mtim;     /* offset  60 */
-    struct freebsd13_timespec st_ctim;     /* offset  72 */
-    struct freebsd13_timespec st_birthtim; /* offset  84 */
+    int32_t  st_atim_ext;                  /* offset  48 (zero-filled) */
+    struct freebsd_timespec st_atim;       /* offset  52 (8 bytes) */
+    int32_t  st_mtim_ext;                  /* offset  60 (zero-filled) */
+    struct freebsd_timespec st_mtim;       /* offset  64 */
+    int32_t  st_ctim_ext;                  /* offset  72 (zero-filled) */
+    struct freebsd_timespec st_ctim;       /* offset  76 */
+    int32_t  st_btim_ext;                  /* offset  84 (zero-filled) */
+    struct freebsd_timespec st_birthtim;   /* offset  88 */
     int64_t  st_size;         /* offset  96 */
     int64_t  st_blocks;       /* offset 104 */
     int32_t  st_blksize;      /* offset 112 */
@@ -558,6 +583,19 @@ struct freebsd_sigaction {
 void freebsd_sendsig(void *handler, int sig, uint32_t mask, uint32_t flags, void *regs);
 int  freebsd_sys_sigreturn(void *regs);
 int  freebsd_sys_sigaction(int sig, const void *act, void *oact);
+
+/* FreeBSD <-> substrate-native signal number / mask translation. */
+int      freebsd_to_native_signo(int sig);
+int      native_to_freebsd_signo(int sig);
+uint32_t freebsd_to_native_sigmask(uint32_t m);
+uint32_t native_to_freebsd_sigmask(uint32_t m);
+
+/* FreeBSD signal syscall wrappers that translate the number/mask. */
+int freebsd_sys_kill(int pid, int sig);
+int freebsd_sys_thr_kill(long tid, int sig);
+int freebsd_sys_sigprocmask(int how, const void *set, void *oset);
+int freebsd_sys_sigsuspend(const void *mask);
+int freebsd_sys_sigpending(void *set);
 
 /* Additional FreeBSD syscall wrappers (freebsd_user.c). */
 int     freebsd_sys_zero(void);

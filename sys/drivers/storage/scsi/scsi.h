@@ -73,6 +73,26 @@
 #define SCSI_SENSE_MISCOMPARE       0xE
 #define SCSI_SENSE_COMPLETED        0xF
 
+/*
+ * Additional Sense Codes / Qualifiers (SPC-3 Table 28) needed to tell a
+ * transient NOT READY from a permanent one.  Only ASC 0x04 with one of the
+ * "in progress" qualifiers below describes a unit that becomes ready on its
+ * own; everything else under NOT READY -- no medium (0x3A), or 0x04 with
+ * "manual intervention required" / "initializing command required", which is
+ * what an empty removable slot actually reports -- stays that way until
+ * somebody inserts media, so retrying only burns the retry delay.  An
+ * all-in-one card reader presents one LUN per slot with most slots empty,
+ * which is where this cost shows up.
+ */
+#define SCSI_ASC_LUN_NOT_READY      0x04
+#define SCSI_ASCQ_LUN_BECOMING_READY    0x01
+#define SCSI_ASCQ_LUN_FORMAT_IN_PROG    0x04
+#define SCSI_ASCQ_LUN_REBUILD_IN_PROG   0x05
+#define SCSI_ASCQ_LUN_RECALC_IN_PROG    0x06
+#define SCSI_ASCQ_LUN_OPERATION_IN_PROG 0x07
+#define SCSI_ASCQ_LUN_SELF_TEST_IN_PROG 0x09
+#define SCSI_ASC_MEDIUM_NOT_PRESENT 0x3A
+
 /* Device Type Codes (SPC-3 Table 82) */
 #define SCSI_TYPE_DISK              0x00  /* Direct Access (SBC) */
 #define SCSI_TYPE_TAPE              0x01  /* Sequential Access (SSC) */
@@ -364,6 +384,10 @@ void scsi_complete_request(scsi_request_t *req, int status);  /* Mark complete *
 
 /* Discovery */
 int scsi_scan_bus(scsi_link_t *link, uint8_t bus);
+
+/* SCSI-06: release the generic (/dev/storage/scsi/B:T:L) node for a device
+ * that is going away, so the slot and the devfs entry cannot outlive it. */
+void scsi_destroy_generic_node(scsi_device_t *dev);
 int scsi_probe_lun(scsi_link_t *link, uint8_t bus, uint8_t target, uint16_t lun);
 int scsi_create_bus_node(scsi_link_t *link, uint8_t bus_id);
 void scsi_auto_attach(scsi_device_t *dev);
@@ -383,6 +407,32 @@ int scsi_sense_key(const uint8_t *sense, uint8_t len);
 int scsi_sense_asc(const uint8_t *sense, uint8_t len);
 int scsi_sense_ascq(const uint8_t *sense, uint8_t len);
 const char *scsi_sense_string(uint8_t key, uint8_t asc, uint8_t ascq);
+
+/*
+ * Is a NOT READY sense worth retrying?  True only for the ASC/ASCQ pairs that
+ * describe a unit which becomes ready without outside help, so that a
+ * permanently-not-ready unit (an empty card-reader slot, an open tray) is
+ * probed once instead of once per retry.  Takes the int results of
+ * scsi_sense_asc()/scsi_sense_ascq() directly, including their -1 for
+ * unparseable sense, which is treated as non-transient.
+ */
+static inline int scsi_not_ready_is_transient(int asc, int ascq)
+{
+    if (asc != SCSI_ASC_LUN_NOT_READY) {
+        return 0;
+    }
+    switch (ascq) {
+    case SCSI_ASCQ_LUN_BECOMING_READY:
+    case SCSI_ASCQ_LUN_FORMAT_IN_PROG:
+    case SCSI_ASCQ_LUN_REBUILD_IN_PROG:
+    case SCSI_ASCQ_LUN_RECALC_IN_PROG:
+    case SCSI_ASCQ_LUN_OPERATION_IN_PROG:
+    case SCSI_ASCQ_LUN_SELF_TEST_IN_PROG:
+        return 1;
+    default:
+        return 0;
+    }
+}
 
 /* CDB Helpers */
 void scsi_cdb_read_10(uint8_t *cdb, uint32_t lba, uint16_t count);
@@ -413,6 +463,43 @@ static inline uint64_t scsi_be64(const uint8_t *p) {
            ((uint64_t)p[2] << 40) | ((uint64_t)p[3] << 32) |
            ((uint64_t)p[4] << 24) | ((uint64_t)p[5] << 16) |
            ((uint64_t)p[6] << 8) | p[7];
+}
+
+/*
+ * Decode one 8-byte REPORT LUNS descriptor (SPC-3 6.21.2).
+ *
+ * The descriptor is big-endian on the wire, so it must be read a byte at a
+ * time: loading it as a native uint64_t on a little-endian host reverses it
+ * and lands on the always-zero trailing bytes, which decodes every entry as
+ * LUN 0 and makes multi-LUN devices (USB card readers, enclosures) look
+ * single-LUN.
+ *
+ * Only the two first-level addressing methods yield a flat LUN number:
+ *   00b peripheral device - byte 0 bits 5-0 = bus, byte 1 = LUN
+ *   01b flat space        - 14-bit LUN spanning bytes 0-1
+ * The rest are multi-level; report them as undecodable rather than
+ * inventing a single-level number.
+ *
+ * Returns 0 and stores the LUN on success, -1 if the addressing method is
+ * not single-level.
+ */
+static inline int scsi_lun_from_report_desc(const uint8_t *d, uint16_t *lun_out) {
+    uint8_t method;
+
+    if (!d || !lun_out) {
+        return -1;
+    }
+
+    method = (uint8_t)((d[0] >> 6) & 0x3);
+    if (method == 0x0) {
+        *lun_out = d[1];
+        return 0;
+    }
+    if (method == 0x1) {
+        *lun_out = (uint16_t)(((uint16_t)(d[0] & 0x3F) << 8) | d[1]);
+        return 0;
+    }
+    return -1;
 }
 
 static inline void scsi_put_be16(uint8_t *p, uint16_t val) {

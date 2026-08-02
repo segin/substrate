@@ -6,14 +6,12 @@
 #include <string.h>
 #include <unistd.h>
 
-#include "modeparse.h"
-
-#include <sys/stat.h>
-#include <sys/types.h>
-
 #include "mkdir.h"
 #include "mkdir_opts.h"
 #include "mkdir_parents.h"
+#include "modeparse.h"
+#include <sys/stat.h>
+#include <sys/types.h>
 
 static void
 print_usage(FILE *stream, const char *progname)

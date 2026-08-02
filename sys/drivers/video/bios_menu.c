@@ -4,11 +4,12 @@
 
 #include <stddef.h>
 #include <stdint.h>
-#include <string.h>
 #include <stdio.h>
+#include <string.h>
+
 #include <drivers/console/console.h>
-#include <sys/vm86.h>
 #include <drivers/video/fb.h>
+#include <sys/vm86.h>
 
 /* Fix implicit declaration of vm86_bios_call if header failed */
 int vm86_bios_call(int int_no, struct vm86_regs *regs);

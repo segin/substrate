@@ -1,10 +1,10 @@
 #include <stdint.h>
 #include <string.h>
 
-#include <kern/console.h>
 #include <arch/x86-common/io.h>
 #include <drivers/video/fb.h>
 #include <drivers/video/vga.h>
+#include <kern/console.h>
 
 /* Global framebuffer state (declared in fb.h) */
 

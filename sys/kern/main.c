@@ -3,6 +3,54 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <arch/i386/cpu.h>
+#include <arch/i386/early_boot.h>
+#include <arch/i386/fpu/fpu_emu.h>
+#include <arch/i386/gdt.h>
+#include <arch/i386/idt.h>
+#include <arch/i386/intr.h>
+#include <arch/i386/pci.h>
+#include <arch/i386/percpu.h>
+#include <arch/i386/pmap.h>
+#include <arch/i386/pmm.h>
+#include <arch/i386/smp.h>
+#include <arch/x86-common/lapic.h>
+#include <arch/x86-common/multiboot.h>
+#include <arch/x86-common/rtc.h>
+#include <drivers/audio/audio.h>
+#include <drivers/console/uart/uart.h>
+#include <drivers/input/keyboard.h>
+#include <drivers/input/mouse.h>
+#include <drivers/storage/ahci/ahci.h>
+#include <drivers/storage/floppy/floppy.h>
+#include <drivers/storage/ide/ide.h>
+#include <drivers/storage/nvme/nvme.h>
+#include <drivers/storage/ramdisk.h>
+#include <drivers/storage/scsi/scsi.h>
+#include <drivers/usb/ehci.h>
+#include <drivers/usb/uhci.h>
+#include <drivers/usb/usb.h>
+#include <drivers/usb/xhci.h>
+#include <drivers/video/fb.h>
+#include <drivers/video/hw_text.h>
+#include <drivers/video/vga.h>
+#include <drivers/virtio/virtio.h>
+#include <exec/formats/elf.h>
+#include <fs/9p.h>
+#include <fs/fuse.h>
+#include <fs/procfs.h>
+#include <fs/pseudofs.h>
+#include <fs/sysfs.h>
+#include <kern/cmdline.h>
+#include <kern/console.h>
+#include <kern/efi_runtime.h>
+#include <kern/geom/geom.h>
+#include <kern/isa.h>
+#include <kern/panic.h>
+#include <kern/sched.h>
+#include <kern/time.h>
+#include <kern/version.h>
+#include <net/inet.h>
 #include <sys/crc32.h>
 #include <sys/exec.h>
 #include <sys/freebsd_boot.h>
@@ -20,66 +68,13 @@
 #include <sys/tests.h>
 #include <sys/tty.h>
 #include <sys/vt.h>
-#include <net/inet.h>
-
+#include <vfs/vfs.h>
+#include <vfs/vnode.h>
 #include <vm/uma.h>
 #include <vm/vm_kmem.h>
 #include <vm/vm_object.h>
 #include <vm/vm_page.h>
 #include <vm/vm_zone.h>
-
-#include <vfs/vfs.h>
-#include <fs/9p.h>
-#include <fs/fuse.h>
-#include <fs/procfs.h>
-#include <fs/pseudofs.h>
-#include <fs/sysfs.h>
-
-#include <exec/formats/elf.h>
-
-#include <kern/cmdline.h>
-#include <kern/console.h>
-#include <kern/efi_runtime.h>
-#include <kern/isa.h>
-#include <kern/panic.h>
-#include <kern/sched.h>
-#include <kern/time.h>
-#include <kern/version.h>
-#include <kern/geom/geom.h>
-
-#include <arch/i386/cpu.h>
-#include <arch/i386/early_boot.h>
-#include <arch/i386/fpu/fpu_emu.h>
-#include <arch/i386/gdt.h>
-#include <arch/i386/idt.h>
-#include <arch/i386/intr.h>
-#include <arch/i386/pci.h>
-#include <arch/i386/percpu.h>
-#include <arch/i386/pmap.h>
-#include <arch/i386/pmm.h>
-#include <arch/i386/smp.h>
-#include <arch/x86-common/lapic.h>
-#include <arch/x86-common/multiboot.h>
-#include <arch/x86-common/rtc.h>
-
-#include <drivers/audio/audio.h>
-#include <drivers/console/uart/uart.h>
-#include <drivers/input/keyboard.h>
-#include <drivers/input/mouse.h>
-#include <drivers/storage/ahci/ahci.h>
-#include <drivers/storage/floppy/floppy.h>
-#include <drivers/storage/ide/ide.h>
-#include <drivers/storage/nvme/nvme.h>
-#include <drivers/storage/ramdisk.h>
-#include <drivers/storage/scsi/scsi.h>
-#include <drivers/usb/uhci.h>
-#include <drivers/usb/ehci.h>
-#include <drivers/usb/xhci.h>
-#include <drivers/usb/usb.h>
-#include <drivers/video/fb.h>
-#include <drivers/video/hw_text.h>
-#include <drivers/video/vga.h>
-#include <drivers/virtio/virtio.h>
 
 // Simple string functions to avoid depending on libc in core if not available
 int serial_debug_enabled = 0;
@@ -564,7 +559,7 @@ static void init_core_subsystems(multiboot_info_t *mboot_info) {
 
     if (i386_cpu_has_apic()) {
         lapic_init();
-        lapic_enable(0xFF);
+        lapic_enable(LAPIC_SPURIOUS_VECTOR);
     } else {
         kprint("SMP: Running in PIC/UP mode.\n");
     }
@@ -662,9 +657,12 @@ static void init_storage_and_vfs(multiboot_info_t *mboot_info) {
     floppy_init();
     ide_init();
     ahci_init();
+    /* xHCI first: on Intel PCHs its attach reroutes the shared USB2 ports away
+     * from the companion EHCI.  If EHCI bound first it would have enumerated
+     * devices on ports that are about to be taken out from under it. */
+    xhci_init();
     uhci_init();
     ehci_init();
-    xhci_init();
     usb_msc_init();
     uas_init();
     usb_hid_init();
@@ -675,17 +673,31 @@ static void init_storage_and_vfs(multiboot_info_t *mboot_info) {
     usb_init();
     virtio_init();
         rtl8139_init();
+        e1000_init();
+        r8168_init();
         loopback_init();
         inet_init();
     register_boot_ramdisks(mboot_info);
     ntsync_init();
 
-    run_kernel_tests();
-
     vfs_init();
     console_register_devfs();
     init_root_fs();
 
+    /*
+     * Run the in-kernel test suite last.  It used to run before vfs_init(),
+     * which meant every VFS and filesystem test executed against subsystems
+     * that had not been brought up yet: getnewvnode() hit "uma_zalloc: zone
+     * is NULL", and the bio-cache and ext2 tests dereferenced NULL and took
+     * the kernel down with a page fault.  Nothing in the suite depends on
+     * running early -- the VM and pmap groups only need what is already up
+     * by this point -- so the tests now see a fully initialised kernel.
+     *
+     * (In a normal build this is kern/tests_stub.c's no-op, and even under
+     * KERNEL_TESTS=1 it returns immediately unless test= is on the command
+     * line, so the position of this call does not affect a real boot.)
+     */
+    run_kernel_tests();
 }
 
 static void reclaim_bootloader_state(void) {
@@ -866,6 +878,27 @@ static void init_root_fs(void) {
     } else {
         kprint("VFS: Mounted sysfs on /sys\n");
     }
+
+    /*
+     * Publish rootvnode now that the tree is fully assembled.
+     *
+     * The BSD vnode layer (vnode.c / vfs_lookup.c / vfs_cache.c) has been
+     * present but unreachable: namei() starts every absolute path at
+     * rootvnode, and rootvnode was only ever assigned NULL, so nothing could
+     * use it.  vnode_bridge_init() wraps fs_root in a vnode backed by the
+     * fs_node_t bridge (vnode_fsnode.c), which is what makes namei() work
+     * against every mounted filesystem without each one growing its own
+     * vnodeops vector.
+     *
+     * It goes AFTER the pseudo-filesystem mounts, not before: run earlier and
+     * the first namei() of /dev or /proc caches the bare ext2 mountpoint
+     * directory, and the namecache would then keep serving that stale answer
+     * after devfs and procfs had covered it.
+     *
+     * Failure here is not fatal: nothing in the boot path depends on the
+     * vnode layer yet, so a failed bridge just leaves it as it was.
+     */
+    (void)vnode_bridge_init();
 }
 
 // kinit - kernel init task (becomes PID 1 after exec)
@@ -952,9 +985,22 @@ void kinit_task(void) {
     };
     for (int i = 0; init_paths[i] != NULL; i++) {
         char *default_argv[] = { (char *)init_paths[i], NULL };
+        /*
+         * Name the candidate BEFORE trying it.  Without this a hang inside
+         * the exec (or inside the new program before its own first output)
+         * is indistinguishable from a hang in this loop -- the last thing on
+         * screen is "Trying default init paths..." either way, which is
+         * exactly the report from real hardware that prompted this.
+         */
+        kprint("kinit: exec ");
+        kprint(init_paths[i]);
+        kprint("\n");
         if (kern_execve(init_paths[i], default_argv, init_envp) == 0) {
             goto exec_success;
         }
+        kprint("kinit: ");
+        kprint(init_paths[i]);
+        kprint(" failed, trying next\n");
     }
 
     panic("kinit: No init found. Try passing init= option to kernel.");

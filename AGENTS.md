@@ -13,51 +13,10 @@ This is the Substrate operating system project targeting x86 32-bit architecture
 
 A terse reference of what exists. Full history: `docs/CHANGELOG.md`.
 Design/structure: `ARCHITECTURE.md`. Toolchain detail: `docs/toolchain.md`.
-Third-party ports: `docs/contrib-ports.md`.
-
-### Kernel Core
-- PMM buddy allocator (Phase 2), UMA-backed kmalloc, per-process pmap with COW.
-- MLFQ + SMP scheduler: per-CPU runqueues, work stealing, CPU affinity, IPI preemption.
-- Turnstiles (priority inheritance), hashed sleep queues, sleepq-backed mutex/semaphore; BSD `lockmgr()` (shared/exclusive/upgrade/drain) over vnode, namecache, and mount locks.
-- Process model: Swapper (PID 0) / Init (PID 1), process groups, sessions; dynamic process registry (no fixed cap).
-- TTY signals (SIGINT/SIGQUIT/SIGTSTP), VMIN/VTIME, per-process controlling terminal.
-- 64-bit `time_t`; POSIX atime/mtime/ctime across VFS and ext2.
-- Syscall tracing with typed arguments and personality detail.
-- FreeBSD-compatible thread syscall set (`thr_new`/`thr_exit`/`thr_self`/`thr_kill`/`thr_suspend`/`thr_wake`/`thr_join`/`thr_set_name`/`thr_kill2`) driving libpthread cancellation, naming, and parking.
-- Demand-paged user stack (128 KiB mapped at exec, grown one page at a time to an 8 MiB ceiling).
-- `memtrack` per-call-site physical-page accounting via `/proc/memtrack` and `sys_vm_slabs(2)`.
-- 16 KiB per-process kernel stacks (absorb the deepest nested syscall + IRQ chains).
-- Always-on VM kernel-heap corruption tripwires: vm_object magic canary, buddy double-allocation detector, UMA per-item double-free guard, `vm_map_audit`.
-- `psignal()` discards ignore-disposition signals instead of leaving them pending (avoids aborting interruptible sleeps).
-- System V IPC: semaphores (`ipc_sem.c`) and shared memory (`ipc_shm.c`), wired into the Linux/FreeBSD/NetBSD personalities; `SEM_UNDO` reversed at `proc_exit`.
-- POSIX message queues (`posix_mqueue.c`) — a named cross-process kernel object; userspace `mq_*` wrappers in librt.
-
-### Networking
-- TCP/IPv4 (`sys/net/tcp.c`): full open + close handshake, retransmit, dup-ACK fast-retransmit, zero-window persist timer, `snd_wnd` send-side flow control, leak-free PCB reaping.
-- BSD sockets (`af_inet.c`, `af_unix.c`): socket/bind/listen/accept/connect/send/recv, `shutdown(2)`, `O_NONBLOCK` accept, backlog enforcement; AF_UNIX STREAM/DGRAM with SCM_RIGHTS fd passing.
-- Loopback via a dedicated drain kthread (no TX→RX stack recursion); 256 KiB AF_UNIX socket buffers.
-- `sbin/telnetd`: thread-per-connection telnet server bridging each socket to a PTY running `/bin/login`.
-
-### Filesystems
-- VFS: link/unlink, readdir atime, chmod/chown ctime; readdir/getdents 64-bit `d_off` byte-offset cookies.
-- ext2 (read-write, POSIX timestamps); exFAT read-write (`sys/fs/exfat/`: readdir/finddir/read plus write, truncate, mkdir, mknod/`O_CREAT`, unlink, rmdir, rename — maintains the allocation bitmap, FAT chains, directory entry-set `SetChecksum` + `NameHash`, and an up-case table loaded at mount); UDF read-write; FAT; minix; 9P.
-- Buffer cache (bio): hash lookup, queueing, delayed write, syncer kthread. Block-level read cache keyed at the block-device layer — transparent to every storage driver and filesystem (`docs/design/block-cache-consolidation.md`).
-
-### Drivers
-- Framebuffer: linear FB, BGA, `vga=WxH@BPP` mode selection, multi-device registry.
-- Rendering: PSF1/PSF2/BDF/PCF font parsers, glyph cache, fb_fillrect/fb_copyarea/fb_imageblit, bold/italic/underline/strikethrough/reverse attributes.
-- VirtIO (block + 9P), PS/2 dual-channel, FPU lazy save.
-- PS/2 mouse: IntelliMouse and IntelliMouse Explorer (3/5-button + wheel); PS/2 keyboard: runtime-switchable Set 1 (translated XT) and Set 2 (AT) decoders.
-- Audio: Sun-compatible framework over Intel HDA / AC'97 / SB16 / null backends with IRQ-driven DMA-ring refill.
-- USB: HID boot-protocol mouse; `lsusb` via `/proc/devtree` + `/dev/usb` nodes.
-- Block device registration logs its size as a 64-bit value (a 4 GiB disk no longer logs "0 bytes").
-- TTY write path has real write-side flow control (blocks instead of dropping output); PTY delivers a writer's final bufferful across last-close via a per-pair linger buffer.
-
-### Boot & Architecture
-- GRUB boot, early boot debugging, LAPIC identity mapping.
-- Shebang `#!` script execution, PT_TLS support.
-- EFI boot stub with GOP framebuffer.
-- ISA discovery: legacy fixed-resource probes + ISA Plug-and-Play isolation, both registered on the ISA bus.
+Third-party ports: `docs/contrib-ports.md`.  Kernel-side capability
+inventory (core, networking, filesystems, drivers, boot) lives in
+`ARCHITECTURE.md` and `docs/CHANGELOG.md` — consult those rather than
+duplicating the list here.
 
 ### Libraries & Build
 - libsys is the sole owner of the raw `syscall()` dispatcher and the `sys_*` typed wrappers; every binary links it (static via `-l:libsys.a`, dynamic via `-l:libsys.so.0`).
@@ -165,86 +124,10 @@ pmm_free_block(virt);  // CORRECT - convert first
     - Host builds link against the host's standard C library (e.g., glibc on Linux) via normal `cc` invocation without `-nostdlib`.
     - The `bin/sh/Makefile` and similar use `NATIVE_BUILD=1` to toggle between target and host compilation modes.
 
-## Directory Structure Overview
-- `sys/`: Kernel source.
-    - `core/`: Main entry (`kmain`).
-    - `arch/`: Architecture specific (`i386`, `x86_64`).
-        - `i386/pmap.c`: Virtual memory management (pmap layer)
-        - `i386/gdt.c`: GDT with verified segments (0x1B/0x23/0x33)
-        - `i386/fpu/`: FPU emulation and state management
-    - `drivers/`: Hardware drivers (`video`, `serial`, `input`, `storage`).
-    - `fs/`: Filesystems (`ext2`, `fat`, `minix`, `exec`).
-    - `kern/`: Kernel core subsystems (Scheduler, Time, Acct).
-    - `exec/perso/`: Personality implementations.
-    - `sys/`: System headers (`proc.h`).
-- `bin/`: User-space utilities (`ls`, `sh`, `vi`, etc.). Test sources live in `tests/bin/<program>/`; each program's `Makefile` references them via `TESTS = ../../tests/bin/<program>`.
-- `include/`: Userspace C library headers (shared by all libraries).
-- `lib/`:
-    - `c/`: LibC implementation **(Substrate target ONLY, never for Linux/host)**.  Builds `libc.a` AND `libc.so.0`.
-    - `sys/`: System call wrapper library (libsys). Raw `syscall()` and typed wrappers **(Substrate target ONLY)**.
-    - `m/`: Math library — `libm.a` + `libm.so.0`.
-    - `edit/`: Command-line editing — `libedit.a` + `libedit.so.0` (DT_NEEDED libc.so.0).
-    - `pthreads/`: Threading support — `libpthread.a` + `libpthread.so.0`.
-    - `pwdb/`: passwd / group / shadow database helpers — `libpwdb.a`
-      + `libpwdb.so.0`.  Public interface in `<sys/pwdb.h>`.  Used
-      by the `useradd` / `usermod` / `userdel` / `groupadd` /
-      `groupmod` / `groupdel` admin tools under `usr.sbin/` and
-      by `bin/groups`.  Provides `pwdb_lock`, `pwdb_unlock`,
-      `pwdb_atomic_rewrite` (write to `<file>~` + rename),
-      `pwdb_next_free_id`, `pwdb_split`, `pwdb_valid_name`,
-      `pwdb_today_days`, `pwdb_require_root`, `pwdb_die`.
-    - `dbm/`: Database library (currently broken upstream — missing `SEEK_SET` include in `dbm.c`).
-- `sbin/`: System binaries.
-    - `ld.so/`: **Substrate native dynamic linker.**  Position-independent
-      ET_DYN with no DT_NEEDED.  Loaded by the kernel at AT_BASE =
-      0x40000000 for every PIE binary that lists `/sbin/ld.so` in its
-      PT_INTERP.  Exec ABI documented in `docs/kernel-ldso-abi-substrate.md`.
-- `contrib/`: Third-party components as patch series against
-  upstream releases — nothing in `contrib/*/build/` is vendored,
-  `fetch.sh` downloads + patches.  Full catalog in `docs/contrib-ports.md`.
-    - `binutils/`: GNU binutils 2.46.0 patch series + build script.
-      Adds the `elf32-i386-substrate` / `elf64-x86-64-substrate` BFD
-      output vecs, the `elf_i386_substrate` ld emulation, the
-      ELFOSABI_SUBSTRATE constant in `include/elf/common.h`, and
-      readelf's name-resolution for OSABI=64.
-    - `gcc/`: GCC 16.1.0 patch series + build script.  Configures
-      `i386-unknown-substrate` as a target and a libstdc++-v3 OS
-      port at `libstdc++-v3/config/os/substrate/`.
-    - `build-toolchain.sh`: orchestrates both at stages 1 and 2.
-    - `ext2-boot/`: third-party BIOS ext2 bootloader (submodule).
-- `tests/`:
-    - `bin/`: Per-program test suites for `bin/` utilities.
-    - `lib/pthread/`: portable POSIX `torture_kernel.c` +
-      substrate-specific `torture_pthread.c` (scheduler stress + libpthread surface).
-    - `lib/m/`: unit + property tests for libm including
-      `test_bessel.c` / `prop_bessel.c` and the rest.
-
-### Kernel Debugging
-When debugging kernel crashes (including triple faults):
-
-1. **QEMU with GDB:**
-   ```bash
-   # Terminal 1: Start QEMU with debugging, -no-reboot stops on triple fault
-   qemu-system-i386 -kernel sys/kernel.bin -no-reboot -s -S
-   
-   # Terminal 2: Connect GDB
-   gdb -ex "file sys/kernel.bin" -ex "target remote :1234"
-   ```
-
-2. **Single-Step Debugging:**
-   - Use `si` (step instruction) one at a time in gdb
-   - Use `break <function>` to set breakpoints
-   - Use `info registers` to check CPU state
-   - When QEMU hits triple fault with `-no-reboot`, it halts and gdb shows connection closed
-
-3. **Exception Trapping:**
-   - Set breakpoints on IDT handlers: `break isr_common_stub`, `break double_fault_handler`
-   - Use QEMU monitor (`Ctrl+Alt+2`) for low-level CPU inspection
-
-4. **Debugging Principles:**
-   - **Never recreate code** - always restore from git history when reverting changes
-   - **Single-step from crash point** - triple faults don't return to gdb, so step one instruction at a time
-   - **Check BSS/stack** - large static arrays can cause stack overflow or memory corruption
+## Kernel Debugging
+Kernel crash / triple-fault debugging workflow (QEMU + GDB setup,
+single-stepping, exception trapping, debugging principles):
+see `.claude/skills/kernel-debugging/SKILL.md`.
 
 ### Debugging Note
 If the kernel hangs in `hlt`, check `eflags` bit 9. If `IF=1`, the IRQ may be masked at the PIC or the controller state is stuck.

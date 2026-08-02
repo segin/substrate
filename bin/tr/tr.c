@@ -30,16 +30,15 @@
  * SUCH DAMAGE.
  */
 
-#include <sys/types.h>
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
 #include <unistd.h>
-#include <err.h>
 
+#include "err.h"
 #include "extern.h"
+#include <sys/types.h>
 
 int delete[NCHARS], squeeze[NCHARS];
 int translate[NCHARS] = {

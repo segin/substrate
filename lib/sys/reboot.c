@@ -4,11 +4,11 @@
  * reboot syscall wrapper.
  */
 
-#include <sys/syscall.h>
-#include <unistd.h>
 #include <errno.h>
+#include <unistd.h>
 
-#include "sysret.h"
+#include <sys/syscall.h>
+#include <sysret.h>
 
 long syscall(long number, ...);
 

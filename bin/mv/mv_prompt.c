@@ -1,8 +1,8 @@
-#include "mv_prompt.h"
-
 #include <ctype.h>
 #include <stdarg.h>
 #include <stdio.h>
+
+#include "mv_prompt.h"
 
 bool mv_prompt_yn(const char *fmt, ...)
 {

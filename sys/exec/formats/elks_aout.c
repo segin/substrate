@@ -1,6 +1,15 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <arch/i386/pmap.h>
+#include <arch/i386/pmm.h>
+#include <exec/formats/elks_aout.h>
+#include <exec/perso/personality.h>
+#include <kern/arch.h>
+#include <kern/cmdline.h>
+#include <kern/console.h>
+#include <kern/panic.h>
+#include <pm/pm.h>
 #include <sys/compiler.h>
 #include <sys/copy.h>
 #include <sys/errno.h>
@@ -13,19 +22,10 @@
 #include <sys/stat.h>
 #include <sys/sysctl.h>
 #include <sys/sysinfo.h>
+#include <vfs/vfs.h>
 #include <vm/vm_kmem.h>
 #include <vm/vm_map.h>
 #include <vm/vm_object.h>
-#include <vfs/vfs.h>
-#include <pm/pm.h>
-#include <kern/arch.h>
-#include <kern/cmdline.h>
-#include <kern/console.h>
-#include <kern/panic.h>
-#include <arch/i386/pmap.h>
-#include <arch/i386/pmm.h>
-#include <exec/formats/elks_aout.h>
-#include <exec/perso/personality.h>
 
 #define ELKS_ARG_MAX_BYTES (32 * 1024)
 #define ELKS_ARG_MAX_COUNT 4096

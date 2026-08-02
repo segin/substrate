@@ -1,10 +1,12 @@
-#include <stdio.h>
-#include <unistd.h>
-#include <stdlib.h>
-#include <fcntl.h>
 #include <errno.h>
-#include <string.h>
+#include <fcntl.h>
 #include <stdatomic.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+
+#include <sys/wait.h>
 
 static FILE *g_file_list_head = NULL;
 
@@ -695,8 +697,7 @@ char *tempnam(const char *dir, const char *pfx) {
 	return NULL;
 }
 
-/* --- popen / pclose --- */
-#include <sys/wait.h>
+
 
 #define POPEN_TABLE_SIZE 16
 static struct { FILE *fp; pid_t pid; } popen_table[POPEN_TABLE_SIZE];

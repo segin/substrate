@@ -21,14 +21,15 @@
  * sched_priority — there is no runtime budget replenishment.
  */
 
-#include <include/sys/proc.h>
+#include <stddef.h>
+
 #include <pm/pm.h>
 #include <sys/copy.h>
 #include <sys/errno.h>
+#include <sys/proc.h>
 #include <sys/sched.h>
 #include <sys/syscall_impl.h>
 #include <sys/time.h>
-#include <stddef.h>
 
 /* Does substrate recognize this scheduling policy?  An unknown value is
  * rejected — never faulted. */

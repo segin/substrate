@@ -9,15 +9,17 @@
 #include <stdint.h>
 #include <string.h>
 
+#include <arch/i386/syscall.h>
+#include <exec/perso/openbsd/openbsd_syscalls.h>
+#include <exec/perso/openbsd/openbsd_user.h>
+#include <exec/perso/personality.h>
+#include <sys/copy.h>
 #include <sys/errno.h>
 #include <sys/futex.h>
+#include <sys/kern_syscalls.h>
 #include <sys/resource.h>
 #include <sys/syscall_impl.h>
 #include <sys/times.h>
-#include <arch/i386/syscall.h>
-#include <exec/perso/personality.h>
-#include <exec/perso/openbsd/openbsd_syscalls.h>
-#include <exec/perso/openbsd/openbsd_user.h>
 
 /*
  * OpenBSD futex(2) (syscall 331), OpenBSD 6.2+.  Prototype:
@@ -48,27 +50,50 @@ int openbsd_sys_futex(int *uaddr, int op, int val, void *timeout, int *uaddr2) {
     return sys_futex(uaddr, nat_op, val, timeout, uaddr2, 0);
 }
 
-// OpenBSD uses same logic as NetBSD for getrusage via times() wrapper if times syscall is missing
+/*
+ * getrusage(who, rusage): OpenBSD i386 struct rusage is 80 bytes, not
+ * substrate's native 88.  OpenBSD uses a 64-bit time_t but keeps a 32-bit
+ * suseconds_t (long), so its struct timeval is 12 bytes (int64 sec + int32
+ * usec) -- unlike substrate's 16-byte timeval (suseconds_t = int64_t).
+ * Copying out substrate's `struct rusage` overruns the 80-byte caller
+ * buffer by 8 bytes and misplaces ru_stime (offset 12 vs substrate's 16),
+ * so marshal an explicitly-laid-out OpenBSD rusage instead.  We only have
+ * aggregate user/system tick counts (HZ=128); the cpu-time fields are
+ * filled and the rest zeroed.  Mirrors netbsd_sys_getrusage50.
+ */
+struct obsd_rusage {
+    int64_t  ru_utime_sec;  int32_t ru_utime_usec;
+    int64_t  ru_stime_sec;  int32_t ru_stime_usec;
+    int32_t  ru_maxrss, ru_ixrss, ru_idrss, ru_isrss;
+    int32_t  ru_minflt, ru_majflt, ru_nswap;
+    int32_t  ru_inblock, ru_oublock;
+    int32_t  ru_msgsnd, ru_msgrcv, ru_nsignals;
+    int32_t  ru_nvcsw, ru_nivcsw;
+};
+
 int openbsd_sys_getrusage(int who, struct rusage *rusage) {
-    if (who != RUSAGE_SELF && who != RUSAGE_CHILDREN) return -1;
+    if (who != RUSAGE_SELF && who != RUSAGE_CHILDREN) return -EINVAL;
 
+    /* Fill a kernel struct via the kern helper, then copyout — `rusage` is a
+     * raw USER pointer, so building the result in it directly (memset + field
+     * writes) would fault the kernel on a bad/unmapped pointer.  sys_times()
+     * would also mis-copyout to the kernel-stack tms, so use kern_times(). */
     struct tms t;
-    if ((clock_t)sys_times(&t) == (clock_t)-1) return -1;
+    if (kern_times(&t) == (clock_t)-1) return -EFAULT;
 
-
-    memset(rusage, 0, sizeof(struct rusage));
+    struct obsd_rusage r;
+    memset(&r, 0, sizeof(r));
 
     // Ticks to timeval. HZ=128.
-    // user time
     clock_t ut = (who == RUSAGE_SELF) ? t.tms_utime : t.tms_cutime;
-    rusage->ru_utime.tv_sec = ut / 128;
-    rusage->ru_utime.tv_usec = ((ut % 128) * 1000000) / 128;
+    r.ru_utime_sec  = ut / 128;
+    r.ru_utime_usec = ((ut % 128) * 1000000) / 128;
 
-    // system time
     clock_t st = (who == RUSAGE_SELF) ? t.tms_stime : t.tms_cstime;
-    rusage->ru_stime.tv_sec = st / 128;
-    rusage->ru_stime.tv_usec = ((st % 128) * 1000000) / 128;
+    r.ru_stime_sec  = st / 128;
+    r.ru_stime_usec = ((st % 128) * 1000000) / 128;
 
+    if (copyout(&r, rusage, sizeof(r)) != 0) return -EFAULT;
     return 0;
 }
 
@@ -113,22 +138,22 @@ static void *openbsd_syscalls[MAX_SYSCALLS] = {
     [OPENBSD_SYS_chflags]        = NULL,            /* chflags */
     [OPENBSD_SYS_fchflags]       = NULL,            /* fchflags */
     [OPENBSD_SYS_sync]           = &sys_sync,
-    [OPENBSD_SYS_kill]           = &sys_kill,
+    [OPENBSD_SYS_kill]           = (void *)&openbsd_sys_kill,
     [OPENBSD_SYS_compat_stat]    = &sys_stat,       /* compat_stat */
-    [OPENBSD_SYS_getppid]        = &sys_getpid,     /* getppid */
+    [OPENBSD_SYS_getppid]        = &sys_getppid,    /* getppid */
     [OPENBSD_SYS_compat_lstat]   = &sys_lstat,      /* compat_lstat */
     [OPENBSD_SYS_dup]            = &sys_dup,
     [OPENBSD_SYS_pipe]           = &sys_pipe,
     [OPENBSD_SYS_getegid]        = &sys_getegid,
     [OPENBSD_SYS_profil]         = NULL,            /* profil */
     [OPENBSD_SYS_ktrace]         = NULL,            /* ktrace */
-    [OPENBSD_SYS_sigaction]      = &sys_sigaction,
+    [OPENBSD_SYS_sigaction]      = (void *)&openbsd_sys_sigaction,
     [OPENBSD_SYS_getgid]         = &sys_getgid,
-    [OPENBSD_SYS_sigprocmask]    = &sys_sigprocmask,
+    [OPENBSD_SYS_sigprocmask]    = (void *)&openbsd_sys_sigprocmask,
     [OPENBSD_SYS_getlogin]       = NULL,            /* getlogin */
     [OPENBSD_SYS_setlogin]       = NULL,            /* setlogin */
     [OPENBSD_SYS_acct]           = &sys_acct,
-    [OPENBSD_SYS_sigpending]     = NULL,            /* sigpending */
+    [OPENBSD_SYS_sigpending]     = (void *)&openbsd_sys_sigpending,
     [OPENBSD_SYS_sigaltstack]    = &sys_sigaltstack,
     [OPENBSD_SYS_ioctl]          = &sys_ioctl,
     [OPENBSD_SYS_reboot]         = NULL,            /* reboot */
@@ -185,7 +210,7 @@ static void *openbsd_syscalls[MAX_SYSCALLS] = {
     [OPENBSD_SYS_compat_sigvec]  = NULL,            /* compat_sigvec */
     [OPENBSD_SYS_compat_sigblk]  = NULL,            /* compat_sigblk */
     [OPENBSD_SYS_compat_sigset]  = NULL,            /* compat_sigset */
-    [OPENBSD_SYS_sigsuspend]     = NULL,            /* sigsuspend */
+    [OPENBSD_SYS_sigsuspend]     = (void *)&openbsd_sys_sigsuspend,
     [OPENBSD_SYS_compat_sigstk]  = NULL,            /* compat_sigstk */
     [OPENBSD_SYS_compat_recvmsg] = &sys_recvmsg,
     [OPENBSD_SYS_compat_sendmsg] = &sys_sendmsg,
@@ -307,7 +332,7 @@ static struct syscall_fmt openbsd_fmts[MAX_SYSCALLS] = {
     [OPENBSD_SYS_dup]            = { 1, { ARG_INT } },
     [OPENBSD_SYS_pipe]           = { 1, { ARG_PTR } },
     [OPENBSD_SYS_sigaction]      = { 3, { ARG_INT, ARG_PTR, ARG_PTR } },
-    [OPENBSD_SYS_sigprocmask]    = { 3, { ARG_INT, ARG_PTR, ARG_PTR } },
+    [OPENBSD_SYS_sigprocmask]    = { 2, { ARG_INT, ARG_HEX } },
     [OPENBSD_SYS_ioctl]          = { 3, { ARG_INT, ARG_HEX, ARG_HEX } },
     [OPENBSD_SYS_symlink]        = { 2, { ARG_STR, ARG_STR } },
     [OPENBSD_SYS_readlink]       = { 3, { ARG_STR, ARG_PTR, ARG_INT } },

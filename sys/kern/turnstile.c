@@ -8,9 +8,10 @@
 #include <stdint.h>
 #include <string.h>
 
-#include <sys/proc.h>
 #include <kern/panic.h>
 #include <kern/turnstile.h>
+#include <sys/preempt.h>
+#include <sys/proc.h>
 
 // Turnstile structure
 typedef struct turnstile {
@@ -40,7 +41,16 @@ static inline int turnstile_hash_func(void *lockobj) {
 }
 
 // Lock the turnstile subsystem
+//
+// A70: disable preemption for the whole (short, non-sleeping) critical section
+// (preempt.h contract: a held spinlock must keep preempt_count != 0).  A raw
+// test_and_set that left preempt_count at 0 could be preempted by the timer
+// tick while holding turnstile_lock; a peer that then spins here (e.g. a
+// lockmgr release path) waits on a holder the scheduler switched away from —
+// on a single CPU the holder never runs again (hard livelock).  Turnstiles are
+// never touched from hard-interrupt context, so IRQ masking is not required.
 static inline void ts_lock(void) {
+    preempt_disable();
     while (__sync_lock_test_and_set(&turnstile_lock, 1)) {
         while (turnstile_lock)
             __asm__ volatile("pause");
@@ -50,6 +60,7 @@ static inline void ts_lock(void) {
 // Unlock the turnstile subsystem
 static inline void ts_unlock(void) {
     __sync_lock_release(&turnstile_lock);
+    preempt_enable_noresched();
 }
 
 // Allocate a turnstile
@@ -127,8 +138,16 @@ void turnstile_block(void *lockobj, thread_t *owner) {
     if (!ts) {
         ts = turnstile_alloc();
         if (!ts) {
+            /*
+             * A43: turnstile pool exhausted under extreme lock contention.
+             * The turnstile exists ONLY for priority inheritance; the waiter
+             * still enqueues on the lock's sleepq (in the caller, right after
+             * this returns) and is woken normally.  Skip the PI boost for this
+             * contended lock rather than panicking, so heavy-but-legitimate
+             * filesystem contention (>128 distinct contended locks at once)
+             * degrades gracefully instead of taking down the whole kernel.
+             */
             ts_unlock();
-            panic("turnstile_block: pool exhausted");
             return;
         }
         ts->ts_lockobj = lockobj;
@@ -191,16 +210,39 @@ void turnstile_release(void *lockobj) {
         return;
     }
 
-    // Restore original priority if we inherited.  ts_owner is the releasing
-    // thread (the lock holder) running this code, so it is live.
-    if (ts->ts_owner && ts->ts_inherited_prio != 0)
-        ts->ts_owner->priority = ts->ts_owner->base_priority;
+    // A69: if this turnstile carried an inherited boost, recompute the owner's
+    // priority from any OTHER turnstiles it still owns instead of dropping it
+    // straight to base_priority.  Releasing one contended lock must not discard
+    // a boost still owed for a different lock the same thread continues to hold
+    // — doing so reintroduces the unbounded priority inversion turnstiles exist
+    // to prevent.  ts_owner is the releasing thread running this code, so it is
+    // live.
+    thread_t *owner = ts->ts_owner;
+    int had_boost = (ts->ts_inherited_prio != 0);
 
-    // Remove and recycle turnstile.  Waiters are woken by the sleepq_wake_all()
-    // lockmgr() issues immediately after this call; we intentionally do NOT
-    // touch waiter->state / waiter->next here (see comment above).
+    // Remove and recycle turnstile first, so the recompute below does not count
+    // the turnstile we are releasing.  Waiters are woken by the
+    // sleepq_wake_all() lockmgr() issues immediately after this call; we
+    // intentionally do NOT touch waiter->state / waiter->next here (see comment
+    // above).
     turnstile_remove(ts);
     turnstile_free_entry(ts);
+
+    if (owner && had_boost) {
+        // Lower number = higher priority within SCHED_TIMESHARE; start at base
+        // and keep the strongest boost still owed by a remaining turnstile.
+        int best = owner->base_priority;
+        for (int i = 0; i < TURNSTILE_HASH_SIZE; i++) {
+            turnstile_t *t = turnstile_hash[i];
+            while (t) {
+                if (t->ts_owner == owner && t->ts_inherited_prio != 0 &&
+                    t->ts_inherited_prio < best)
+                    best = t->ts_inherited_prio;
+                t = t->ts_next;
+            }
+        }
+        owner->priority = best;
+    }
 
     ts_unlock();
 }

@@ -5,16 +5,20 @@
  * No autoconf or DAD yet — static config only.
  */
 
-#include <net/inet.h>
-#include <sys/netdev.h>
-#include <netinet/ip.h>      /* IPPROTO_* constants */
-#include <netinet/ip6.h>
-#include <netinet/icmp.h>
+#include <errno.h>
+#include <stddef.h>
+#include <string.h>
+
+#include <arch/i386/intr.h>
 #include <kern/console.h>
 #include <kern/sched.h>
-#include <string.h>
-#include <stddef.h>
-#include <errno.h>
+#include <net/inet.h>
+#include <netinet/icmp.h>
+#include <netinet/ip.h>
+#include <netinet/ip6.h>
+#include <sys/lock.h>
+#include <sys/netdev.h>
+#include <vm/vm_kmem.h>
 
 /* ------------------------------------------------------------------ */
 /* ND6 cache                                                          */
@@ -31,6 +35,16 @@ struct nd6_entry {
 static struct nd6_entry g_nd6_cache[ND6_CACHE_SIZE];
 static unsigned          g_nd6_next;
 
+/*
+ * ND-02: the cache is written by icmp6_input() in IRQ/RX context and read
+ * by nd6_lookup() from process context, with non-atomic 16-byte and 6-byte
+ * memcpy()s on both sides -- so a reader could observe half of one binding
+ * and half of another and send to a torn MAC.  The ARP cache was given an
+ * IRQ-safe spinlock as NET-09; this is the mirror that was missed.
+ * Critical sections stay tiny: no transmit happens under the lock.
+ */
+static spinlock_t g_nd6_lock = SPINLOCK_INIT("nd6_cache");
+
 static int ip6_zero(const uint8_t a[16]) {
     for (int i = 0; i < 16; i++) if (a[i]) return 0;
     return 1;
@@ -38,24 +52,57 @@ static int ip6_zero(const uint8_t a[16]) {
 
 int nd6_lookup(netdev_t *dev, const uint8_t ip6[16], uint8_t mac[6]) {
     if (!dev) return -1;
+    unsigned long f = spinlock_acquire_irq(&g_nd6_lock);   /* ND-02 */
     for (unsigned i = 0; i < ND6_CACHE_SIZE; i++) {
         struct nd6_entry *e = &g_nd6_cache[i];
         if (e->ifindex == dev->ifindex &&
             memcmp(e->ip6, ip6, 16) == 0 &&
             !ip6_zero(e->ip6)) {
             memcpy(mac, e->mac, 6);
+            spinlock_release_irq(&g_nd6_lock, f);
             return 0;
         }
     }
+    spinlock_release_irq(&g_nd6_lock, f);
     return -1;
+}
+
+/*
+ * Update the MAC of an existing binding.  Returns 1 if one was updated, 0
+ * if no entry exists for (ip6, ifindex).
+ *
+ * ND-03: this exists so an unsolicited Neighbor Advertisement can refresh a
+ * binding we already believed without being able to CREATE one.  Previously
+ * icmp6_input handed every NA straight to nd6_insert(), which creates, with
+ * no solicitation match and no source check -- so a single forged NA naming
+ * the router redirected all IPv6 traffic, and 32 of them flushed the cache.
+ * The ARP path already draws this create/update distinction; ND did not.
+ */
+int nd6_update_existing(netdev_t *dev, const uint8_t ip6[16],
+                        const uint8_t mac[6]) {
+    if (!dev || ip6_zero(ip6)) return 0;
+    unsigned long f = spinlock_acquire_irq(&g_nd6_lock);
+    for (unsigned i = 0; i < ND6_CACHE_SIZE; i++) {
+        struct nd6_entry *e = &g_nd6_cache[i];
+        if (e->ifindex == dev->ifindex && !ip6_zero(e->ip6) &&
+            memcmp(e->ip6, ip6, 16) == 0) {
+            memcpy(e->mac, mac, 6);
+            spinlock_release_irq(&g_nd6_lock, f);
+            return 1;
+        }
+    }
+    spinlock_release_irq(&g_nd6_lock, f);
+    return 0;
 }
 
 void nd6_insert(netdev_t *dev, const uint8_t ip6[16], const uint8_t mac[6]) {
     if (!dev || ip6_zero(ip6)) return;
+    unsigned long f = spinlock_acquire_irq(&g_nd6_lock);   /* ND-02 */
     for (unsigned i = 0; i < ND6_CACHE_SIZE; i++) {
         struct nd6_entry *e = &g_nd6_cache[i];
         if (e->ifindex == dev->ifindex && memcmp(e->ip6, ip6, 16) == 0) {
             memcpy(e->mac, mac, 6);
+            spinlock_release_irq(&g_nd6_lock, f);
             return;
         }
     }
@@ -64,6 +111,7 @@ void nd6_insert(netdev_t *dev, const uint8_t ip6[16], const uint8_t mac[6]) {
     memcpy(slot->ip6, ip6, 16);
     memcpy(slot->mac, mac, 6);
     slot->ifindex = dev->ifindex;
+    spinlock_release_irq(&g_nd6_lock, f);
 }
 
 /* RFC 4861: NS goes to the solicited-node multicast — ff02::1:ffXX:XXXX
@@ -157,14 +205,53 @@ static netdev_t *route_for_v6(const uint8_t daddr[16], int *via_gw_out) {
     return NULL;
 }
 
+/* STACK-01: v6 transmit scratch.  Separate slot from the v4 one purely for
+ * clarity -- a single hard IRQ only ever runs one of the two -- and, like
+ * them, this must become per-CPU when APs start scheduling. */
+#define NETBUF6_SIZE (NETDEV_MTU_MAX + ETH_HLEN)
+static uint8_t g_irq_pktbuf6[NETBUF6_SIZE];
+
+static uint8_t *netbuf_get_v6(int *heap) {
+    if (!intr_enabled()) { *heap = 0; return g_irq_pktbuf6; }
+    *heap = 1;
+    return (uint8_t *)kmalloc(NETBUF6_SIZE);
+}
+
+static void netbuf_put_v6(uint8_t *b, int heap) {
+    if (heap && b) kfree(b, NETBUF6_SIZE);
+}
+
+/* UDP-03 (v6 twin of ip4_source_for): the source address routing will pick,
+ * so the UDP send path can compute the mandatory IPv6 pseudo-header
+ * checksum.  A zero UDP checksum is illegal over IPv6, so conformant peers
+ * were discarding every v6 datagram we sent. */
+int ip6_source_for(const uint8_t daddr[16], uint8_t out[16]) {
+    int via_gw = 0;
+    netdev_t *dev = route_for_v6(daddr, &via_gw);
+    if (!dev) return -1;
+    memcpy(out, dev->ip6_addr, 16);
+    return 0;
+}
+
 int ip6_output(const uint8_t daddr[16], uint8_t next_header,
                const void *payload, size_t payload_len) {
     int via_gw = 0;
     netdev_t *dev = route_for_v6(daddr, &via_gw);
     if (!dev) return -ENETUNREACH;
-    if (payload_len + sizeof(struct ip6_hdr) > NETDEV_MTU_MAX) return -EMSGSIZE;
+    /*
+     * Subtract rather than add: payload_len is a size_t, so the old
+     * `payload_len + sizeof(struct ip6_hdr) > NETDEV_MTU_MAX` wrapped for
+     * payload_len >= 0xFFFFFFD0 and let the memcpy below run off the end of
+     * pkt[] and up the kernel stack.  Same defect as the IPv4 path.
+     */
+    if (payload_len > NETDEV_MTU_MAX - sizeof(struct ip6_hdr)) return -EMSGSIZE;
 
-    uint8_t pkt[NETDEV_MTU_MAX];
+    /* STACK-01 (v6 twin): off the interrupt stack -- see netbuf_get() in
+     * inet.c.  This path is reached from hard IRQ via
+     * ip6_input -> icmp6_input -> ip6_output. */
+    int heap = 0;
+    uint8_t *pkt = netbuf_get_v6(&heap);
+    if (!pkt) return -ENOMEM;
     struct ip6_hdr *h = (struct ip6_hdr *)pkt;
     memset(h, 0, sizeof(*h));
     h->vtcfl = __builtin_bswap32(6u << 28);
@@ -188,16 +275,37 @@ int ip6_output(const uint8_t daddr[16], uint8_t next_header,
         const uint8_t *nh = via_gw ? dev->ip6_gateway : daddr;
         if (nd6_lookup(dev, nh, mac) != 0) {
             nd6_solicit(dev, nh);
+            /*
+             * ND-01: the same rule ip4_output got as NET-05, which this
+             * path never received.  ip6_output is reachable from hard IRQ
+             * context with IF=0 -- rtl_irq -> netdev_rx -> ip6_input ->
+             * icmp6_input -> icmp6_handle_echo/ns -> ip6_output -- and the
+             * sched_yield() spin below sleeps.  Switching away from an
+             * interrupt handler corrupts the interrupted thread's state,
+             * and a single ICMPv6 echo from a source not already in the
+             * 32-entry ND cache was enough to reach it.  Only wait for the
+             * advertisement when interrupts are enabled; otherwise drop the
+             * packet after firing the solicitation and let the upper layer
+             * resend once the cache is populated.
+             */
+            if (!intr_enabled()) {
+                netbuf_put_v6(pkt, heap);
+                return -EHOSTUNREACH;
+            }
             for (int i = 0; i < 32; i++) {
                 sched_yield();
                 if (nd6_lookup(dev, nh, mac) == 0) break;
             }
-            if (nd6_lookup(dev, nh, mac) != 0)
+            if (nd6_lookup(dev, nh, mac) != 0) {
+                netbuf_put_v6(pkt, heap);
                 return -EHOSTUNREACH;
+            }
         }
     }
-    return eth_send(dev, mac, __builtin_bswap16(0x86DD),
-                    pkt, sizeof(*h) + payload_len);
+    int rc = eth_send(dev, mac, __builtin_bswap16(0x86DD),
+                      pkt, sizeof(*h) + payload_len);
+    netbuf_put_v6(pkt, heap);
+    return rc;
 }
 
 /* ------------------------------------------------------------------ */

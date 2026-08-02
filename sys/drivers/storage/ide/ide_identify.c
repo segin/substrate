@@ -1,7 +1,7 @@
-#include <drivers/storage/ide/ide.h>
-
 #include <stdio.h>
 #include <string.h>
+
+#include <drivers/storage/ide/ide.h>
 
 static void ide_copy_identify_string(char *dst, size_t dst_size,
                                      const uint16_t *src, size_t words) {
@@ -81,7 +81,17 @@ void ide_parse_identify_data(ide_device_t *dev, const uint16_t *buffer,
     }
 
     if (type == 0) {
-        if ((feature_flags & IDE_FEATURE_LBA48) != 0) {
+        /*
+         * [IDE-20] Word 83's contents are only meaningful when its validity
+         * bits (15:14) read 01; on a floating bus every word reads 0xFFFF,
+         * which sets bits 15:14 to 11 and made the LBA48 branch fire with
+         * words 100-103 all 0xFFFF -- a reported capacity of
+         * 0xFFFFFFFFFFFF sectors.  Require the validity pattern before
+         * trusting the 48-bit capacity, and fall back to the 28-bit words.
+         */
+        int word83_valid = ((buffer[83] & 0xC000U) == 0x4000U);
+
+        if ((feature_flags & IDE_FEATURE_LBA48) != 0 && word83_valid) {
             total_sectors = (uint64_t)buffer[100] |
                             ((uint64_t)buffer[101] << 16) |
                             ((uint64_t)buffer[102] << 32) |
@@ -90,10 +100,29 @@ void ide_parse_identify_data(ide_device_t *dev, const uint16_t *buffer,
             total_sectors = (uint64_t)buffer[60] |
                             ((uint64_t)buffer[61] << 16);
         }
+
+        /* A 48-bit command cannot address beyond 2^48 sectors, and an
+         * all-ones IDENTIFY must not be believed. */
+        if (total_sectors >= (1ULL << 48)) {
+            total_sectors = 0;
+        }
     }
 
     mwdma_modes = (uint8_t)(buffer[63] & 0xFF);
-    udma_modes = (uint8_t)(buffer[88] & 0xFF);
+    /*
+     * [IDE-15] UDMA modes come from word 88, but modes above UDMA2 (i.e.
+     * faster than 33 MB/s) require an 80-conductor cable, which word 93
+     * bit 13 reports.  Selecting UDMA5 across a 40-conductor cable does not
+     * fail cleanly -- it produces intermittent CRC-corrupted reads, which is
+     * far worse than running slower.  Also mask off bit 7, which is reserved
+     * (there is no UDMA7).
+     */
+    udma_modes = (uint8_t)(buffer[88] & 0x7F);
+
+    if ((buffer[93] & (1U << 13)) == 0) {
+        /* 40-conductor cable (or word 93 not reported): cap at UDMA2. */
+        udma_modes &= 0x07;
+    }
 
     dev->size = total_sectors;
     dev->feature_flags = feature_flags;

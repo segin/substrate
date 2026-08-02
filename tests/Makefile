@@ -437,8 +437,5 @@ test_ext2_write_block: unit/fs/test_ext2_write_block_host.c
 test_bm: test_bm.c
 	$(CC) $(CFLAGS_COMMON) $< -o $@
 
-test_boot_lib: contrib/ext2-boot/test_lib.c
-	$(CC) $(CFLAGS_COMMON) -Wno-int-conversion -I../contrib/ext2-boot/stage2 $< -o $@
-
 test_bc_num: usr.lib/bc/test_num.c ../usr.lib/bc/arith.c
 	$(CC) $(CFLAGS_COMMON) -I../usr.lib/bc $< ../usr.lib/bc/arith.c -o $@

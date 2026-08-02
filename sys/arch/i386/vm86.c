@@ -1,14 +1,15 @@
+#include <errno.h>
+#include <string.h>
+
+#include <arch/i386/idt.h>
+#include <arch/i386/pmap.h>
+#include <arch/i386/vm86.h>
+#include <kern/console.h>
+#include <sys/copy.h>
+#include <sys/proc.h>
+#include <sys/sysarch.h>
 #include <sys/types.h>
 #include <sys/vm86.h>
-#include <sys/sysarch.h>
-#include <sys/copy.h>
-#include <string.h>
-#include <errno.h>
-#include <kern/console.h>
-#include <sys/proc.h>
-#include <arch/i386/idt.h> 
-#include <arch/i386/pmap.h>
-#include <arch/i386/vm86.h> 
 
 
 /*

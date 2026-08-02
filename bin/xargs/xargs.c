@@ -3,17 +3,17 @@
  *
  * POSIX.1-2024 + GNU + BSD; BSD wins on conflict.  See docs/specs/xargs-spec.md.
  */
-#include "xargs.h"
-
+#include <errno.h>
+#include <limits.h>
+#include <stdarg.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdarg.h>
-#include <errno.h>
-#include <limits.h>
-#include <stdint.h>
 #include <unistd.h>
-#include <getopt.h>
+
+#include "getopt.h"
+#include "xargs.h"
 
 extern char **environ;
 

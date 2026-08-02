@@ -13,8 +13,22 @@ static int kmalloc_ready = 0;
 static spinlock_t vm_object_teardown_lock = SPINLOCK_INIT("vmobj_teardown");
 
 static vm_object_t *alloc_object(void) {
-    if (next_bootstrap_object < MAX_BOOTSTRAP_OBJECTS)
-        return &bootstrap_objects[next_bootstrap_object++];
+    /*
+     * Reserve a bootstrap slot atomically (A80): vm_object_allocate is
+     * reachable at runtime (mmap, fork shadow creation) on multiple CPUs,
+     * not just single-threaded boot.  A plain post-increment lets two CPUs
+     * read the same index and receive the same vm_object_t, which each then
+     * reinitializes — aliasing two mappings onto one object.  CAS only while
+     * the pool is unexhausted so the counter never runs past the array.
+     */
+    for (;;) {
+        int idx = __atomic_load_n(&next_bootstrap_object, __ATOMIC_RELAXED);
+        if (idx >= MAX_BOOTSTRAP_OBJECTS)
+            break;
+        if (__sync_bool_compare_and_swap(&next_bootstrap_object, idx, idx + 1))
+            return &bootstrap_objects[idx];
+        /* lost the race with another CPU — retry */
+    }
     if (kmalloc_ready)
         return kmalloc(sizeof(vm_object_t));
     return NULL;
@@ -171,7 +185,20 @@ void vm_object_add_page(vm_object_t *object, vm_page_t *page) {
     vm_page_t *stale = vm_object_lookup_page(object, page->pindex);
     if (stale && stale != page) {
         vm_object_remove_page(object, stale);
-        vm_page_free(stale);
+        /* Reclaim the evicted frame ONLY when nothing still maps, holds, or
+         * wires it — mirroring the VM-09 guard in vm_fault().  vm_page_free()
+         * force-zeroes the frame's hold accounting and returns it to the buddy
+         * allocator WITHOUT clearing any hardware PTE, so freeing a still-
+         * mapped stale page (the in-place COW case: the source is still mapped
+         * read-only in the faulting/sibling pmaps when it is evicted here)
+         * would leave live PTEs pointing at a recycled frame — cross-
+         * allocation corruption, and a later pmap_enter's pv_remove would
+         * unhold the frame's NEW owner.  A still-mapped stale page is left for
+         * the pmap teardown to reclaim when its last mapping is removed. */
+        if (stale->pv_list == NULL && stale->wire_count == 0 &&
+            stale->ref_count <= 1) {
+            vm_page_free(stale);
+        }
     }
 
     page->object = object;

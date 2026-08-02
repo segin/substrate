@@ -1,7 +1,7 @@
-#include "mkdir_opts.h"
-
 #include <stddef.h>
 #include <string.h>
+
+#include "mkdir_opts.h"
 
 void
 mkdir_options_init(struct mkdir_options *opts, const char *progname)

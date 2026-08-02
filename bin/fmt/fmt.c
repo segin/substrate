@@ -21,11 +21,12 @@
 
 #include <ctype.h>
 #include <errno.h>
-#include <getopt.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include "getopt.h"
 
 #define FMT_VERSION "fmt (Substrate) 1.0"
 

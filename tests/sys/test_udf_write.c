@@ -7,13 +7,20 @@
 #include <fs/udf/udf.h>
 #include <vfs/vfs.h>
 
-/* External symbols from UDF driver */
-extern struct udf_fs udf_ctx;
-extern int udf_read_space_bitmap(fs_node_t *dev, uint32_t partition_start, uint32_t bitmap_loc, uint32_t bitmap_len);
-extern uint32_t udf_alloc_block(void);
-extern int udf_write_file(fs_node_t *dev, struct udf_fe *fe, uint32_t fe_block,
-                   uint32_t offset, uint32_t size, const uint8_t *data);
-extern int udf_truncate(fs_node_t *dev, struct udf_fe *fe, uint32_t fe_block, uint64_t new_size);
+/*
+ * External symbols from the UDF driver.
+ *
+ * #425: these used to be hand-written externs taking (fs_node_t *dev,
+ * uint32_t partition_start, ...).  The driver was refactored to pass the
+ * whole `struct udf_fs` -- which carries exactly those two fields -- and the
+ * local copies were never updated, so every one of them conflicted with the
+ * real declaration the moment the tests were built again.  Take the
+ * prototypes from the header instead of restating them here, which is what
+ * stops them drifting a second time.
+ */
+/* #425: udf_ctx used to be a global in udf.c; mount state is now per-fs.
+ * These tests drive a mock device, so the test owns the context. */
+static struct udf_fs udf_ctx;
 
 /* Mock Device */
 static uint8_t mock_disk[UDF_SECTOR_SIZE * 16];
@@ -60,12 +67,27 @@ static void test_udf_allocation_writeback(void) {
     /* Data starts at sizeof(struct udf_space_bitmap) */
     uint8_t *data = mock_disk + sizeof(struct udf_space_bitmap);
 
-    /* Pre-allocate bit 0 to ensure we get block 1, distinguishing from error 0 */
-    data[0] = 1;
+    /*
+     * UDF-03: this fixture used to encode the driver's INVERTED polarity --
+     * an all-zero bitmap read as "everything free" and a set bit as
+     * "allocated".  ECMA-167 4/14.12.1.1 (and Linux's udf_bitmap_new_block,
+     * which tests for a set bit to find a free block and clears it to
+     * allocate) define the opposite: a SET bit is FREE.  Mark everything free
+     * and then clear bit 0, so block 0 is taken and the allocator must return
+     * block 1 -- which also keeps 0 usable as the error sentinel.
+     */
+    memset(data, 0xFF, 8);
+    data[0] &= (uint8_t)~1u;
 
-    /* Calculate initial CRC/Checksum */
-    sbm->tag.desc_crc_len = 8;
-    sbm->tag.desc_crc = udf_crc(data, 8);
+    /* Calculate initial CRC/Checksum.
+     * UDF-01: a descriptor CRC covers everything AFTER the 16-byte tag, so
+     * here that is num_bits + num_bytes (8 bytes) plus the 8-byte bit array.
+     * The old fixture hashed only the bit array, matching the driver's
+     * then-confused pointer rather than the format. */
+    uint8_t *desc_body = (uint8_t *)sbm + sizeof(struct udf_tag);
+    uint32_t body_len = 8 + 8;          /* num_bits, num_bytes, bitmap */
+    sbm->tag.desc_crc_len = body_len;
+    sbm->tag.desc_crc = udf_crc(desc_body, body_len);
     sbm->tag.tag_checksum = udf_tag_checksum(&sbm->tag);
 
     /* Setup UDF context */
@@ -73,7 +95,7 @@ static void test_udf_allocation_writeback(void) {
 
     /* Load Bitmap */
     /* partition_start=0, loc=0, len=sizeof(header)+8 */
-    int res = udf_read_space_bitmap(&mock_dev, 0, 0, sizeof(struct udf_space_bitmap) + 8);
+    int res = udf_read_space_bitmap(&udf_ctx, 0, sizeof(struct udf_space_bitmap) + 8);
     if (res != 0) {
         kprintf("FAILED: udf_read_space_bitmap returned error\n");
         return;
@@ -81,7 +103,7 @@ static void test_udf_allocation_writeback(void) {
 
     /* Allocate a block */
     /* Should return block 1 (next free bit) */
-    uint32_t block = udf_alloc_block();
+    uint32_t block = udf_alloc_block(&udf_ctx);
 
     if (block != 1) {
         kprintf("FAILED: Expected block 1, got %d\n", block);
@@ -94,15 +116,16 @@ static void test_udf_allocation_writeback(void) {
         return;
     }
 
-    /* Verify bit 1 is set in mock_disk */
-    /* data[0] should be 1 | 2 = 3 */
-    if (data[0] != 3) {
-        kprintf("FAILED: Bit 1 not set in disk. Byte is 0x%x\n", data[0]);
+    /* UDF-03: allocating marks a block IN USE, which under ECMA-167 means
+     * CLEARING its bit.  Bit 0 was cleared by the fixture and bit 1 by the
+     * allocation, so the byte must read 0xFC. */
+    if (data[0] != 0xFC) {
+        kprintf("FAILED: bit 1 not cleared on disk. Byte is 0x%x\n", data[0]);
         return;
     }
 
-    /* Verify CRC updated */
-    uint16_t new_crc = udf_crc(data, 8);
+    /* Verify CRC updated (same span as the fixture set up). */
+    uint16_t new_crc = udf_crc(desc_body, body_len);
     if (sbm->tag.desc_crc != new_crc) {
         kprintf("FAILED: CRC not updated correctly. Got 0x%x, expected 0x%x\n", sbm->tag.desc_crc, new_crc);
         return;
@@ -129,16 +152,18 @@ static void test_udf_large_file_write(void) {
     sbm->num_bits = 64; /* 8 bytes */
     sbm->num_bytes = 8;
 
-    /* Mark sector 0 (SBM) and 1 (FE) as allocated */
+    /* Mark sector 0 (SBM) and 1 (FE) as allocated.
+     * UDF-03: free == set, so "allocated" means the bit is CLEAR. */
     uint8_t *bitmap_data = mock_disk + sizeof(struct udf_space_bitmap);
-    bitmap_data[0] = 0x03; // Bits 0 and 1 set
+    memset(bitmap_data, 0xFF, 8);
+    bitmap_data[0] &= (uint8_t)~0x03u;   /* blocks 0 and 1 in use */
 
     /* Setup UDF context */
     udf_ctx.device = &mock_dev;
     udf_ctx.partition_start = 0;
 
     /* Load Bitmap */
-    udf_read_space_bitmap(&mock_dev, 0, 0, sizeof(struct udf_space_bitmap) + 8);
+    udf_read_space_bitmap(&udf_ctx, 0, sizeof(struct udf_space_bitmap) + 8);
 
     /* Create a File Entry at sector 1 */
     struct udf_fe fe;
@@ -157,7 +182,7 @@ static void test_udf_large_file_write(void) {
     for (int i = 0; i < 4096; i++) large_data[i] = (uint8_t)(i % 256);
 
     /* Attempt to write 4KB to file */
-    int res = udf_write_file(&mock_dev, &fe, 1, 0, 4096, large_data);
+    int res = udf_write_file(&udf_ctx, &fe, 1, 0, 4096, large_data);
 
     if (res != 0) {
         kprintf("test_udf_large_file_write: FAILED (Expected success, got %d)\n", res);
@@ -212,9 +237,10 @@ static void test_udf_truncate_extent(void) {
     sbm->num_bytes = 4;
 
     uint8_t *bitmap_data = mock_disk + sizeof(struct udf_space_bitmap);
-    /* Mark block 2, 3 as allocated (where we put our file data) */
-    /* Block 2 -> byte 0, bit 2. Block 3 -> byte 0, bit 3. */
-    bitmap_data[0] |= (1 << 2) | (1 << 3);
+    /* Mark block 2, 3 as allocated (where we put our file data).
+     * UDF-03: free == set, so allocated means the bit is CLEAR. */
+    memset(bitmap_data, 0xFF, 4);
+    bitmap_data[0] &= (uint8_t)~((1 << 2) | (1 << 3));
 
     /* Calculate CRC */
     sbm->tag.desc_crc_len = 4;
@@ -223,7 +249,7 @@ static void test_udf_truncate_extent(void) {
 
     /* Load bitmap */
     udf_ctx.device = &mock_dev;
-    if (udf_read_space_bitmap(&mock_dev, 0, 0, sizeof(struct udf_space_bitmap) + 4) != 0) {
+    if (udf_read_space_bitmap(&udf_ctx, 0, sizeof(struct udf_space_bitmap) + 4) != 0) {
         kprintf("FAILED: Setup bitmap failed\n");
         return;
     }
@@ -261,7 +287,7 @@ static void test_udf_truncate_extent(void) {
     struct udf_fe fe_copy;
     memcpy(&fe_copy, fe, sizeof(struct udf_fe));
 
-    int res = udf_truncate(&mock_dev, &fe_copy, fe_sector, 3000);
+    int res = udf_truncate_file(&udf_ctx, &fe_copy, fe_sector, 3000);
 
     if (res != 0) {
         kprintf("FAILED: udf_truncate returned %d (expected 0)\n", res);
@@ -287,8 +313,8 @@ static void test_udf_truncate_extent(void) {
         return;
     }
 
-    /* Verify Block 3 still allocated (bit 3 set) */
-    if (!(bitmap_data[0] & (1 << 3))) {
+    /* Verify Block 3 still allocated.  UDF-03: allocated == bit CLEAR. */
+    if (bitmap_data[0] & (1 << 3)) {
          kprintf("FAILED: Block 3 was freed incorrectly\n");
          return;
     }
@@ -297,7 +323,7 @@ static void test_udf_truncate_extent(void) {
     /* Should keep Block 2 (partial), Remove Block 3 */
     /* Block 3 should be freed */
 
-    res = udf_truncate(&mock_dev, &fe_copy, fe_sector, 1024);
+    res = udf_truncate_file(&udf_ctx, &fe_copy, fe_sector, 1024);
 
     if (res != 0) {
         kprintf("FAILED: udf_truncate (2) returned %d\n", res);
@@ -327,7 +353,8 @@ static void test_udf_truncate_extent(void) {
     /* Verify Block 3 Freed */
     /* Reload bitmap from disk (since udf_free_block writes it back) */
     /* udf_free_block updates the mock_disk directly */
-    if (bitmap_data[0] & (1 << 3)) {
+    /* UDF-03: freed == bit SET. */
+    if (!(bitmap_data[0] & (1 << 3))) {
         kprintf("FAILED: Block 3 was NOT freed\n");
         return;
     }
@@ -353,9 +380,10 @@ static void test_udf_truncate_extent_long(void) {
     sbm->num_bytes = 4;
 
     uint8_t *bitmap_data = mock_disk + sizeof(struct udf_space_bitmap);
-    /* Mark block 2, 3 as allocated (where we put our file data) */
-    /* Block 2 -> byte 0, bit 2. Block 3 -> byte 0, bit 3. */
-    bitmap_data[0] |= (1 << 2) | (1 << 3);
+    /* Mark block 2, 3 as allocated (where we put our file data).
+     * UDF-03: free == set, so allocated means the bit is CLEAR. */
+    memset(bitmap_data, 0xFF, 4);
+    bitmap_data[0] &= (uint8_t)~((1 << 2) | (1 << 3));
 
     /* Calculate CRC */
     sbm->tag.desc_crc_len = 4;
@@ -364,7 +392,7 @@ static void test_udf_truncate_extent_long(void) {
 
     /* Load bitmap */
     udf_ctx.device = &mock_dev;
-    if (udf_read_space_bitmap(&mock_dev, 0, 0, sizeof(struct udf_space_bitmap) + 4) != 0) {
+    if (udf_read_space_bitmap(&udf_ctx, 0, sizeof(struct udf_space_bitmap) + 4) != 0) {
         kprintf("FAILED: Setup bitmap failed\n");
         return;
     }
@@ -404,7 +432,7 @@ static void test_udf_truncate_extent_long(void) {
     struct udf_fe fe_copy;
     memcpy(&fe_copy, fe, sizeof(struct udf_fe));
 
-    int res = udf_truncate(&mock_dev, &fe_copy, fe_sector, 3000);
+    int res = udf_truncate_file(&udf_ctx, &fe_copy, fe_sector, 3000);
 
     if (res != 0) {
         kprintf("FAILED: udf_truncate returned %d (expected 0)\n", res);
@@ -430,8 +458,8 @@ static void test_udf_truncate_extent_long(void) {
         return;
     }
 
-    /* Verify Block 3 still allocated (bit 3 set) */
-    if (!(bitmap_data[0] & (1 << 3))) {
+    /* Verify Block 3 still allocated.  UDF-03: allocated == bit CLEAR. */
+    if (bitmap_data[0] & (1 << 3)) {
          kprintf("FAILED: Block 3 was freed incorrectly\n");
          return;
     }
@@ -440,7 +468,7 @@ static void test_udf_truncate_extent_long(void) {
     /* Should keep Block 2 (partial), Remove Block 3 */
     /* Block 3 should be freed */
 
-    res = udf_truncate(&mock_dev, &fe_copy, fe_sector, 1024);
+    res = udf_truncate_file(&udf_ctx, &fe_copy, fe_sector, 1024);
 
     if (res != 0) {
         kprintf("FAILED: udf_truncate (2) returned %d\n", res);
@@ -470,7 +498,8 @@ static void test_udf_truncate_extent_long(void) {
     /* Verify Block 3 Freed */
     /* Reload bitmap from disk (since udf_free_block writes it back) */
     /* udf_free_block updates the mock_disk directly */
-    if (bitmap_data[0] & (1 << 3)) {
+    /* UDF-03: freed == bit SET. */
+    if (!(bitmap_data[0] & (1 << 3))) {
         kprintf("FAILED: Block 3 was NOT freed\n");
         return;
     }
@@ -478,7 +507,8 @@ static void test_udf_truncate_extent_long(void) {
     kprintf("test_udf_truncate_extent_long: PASSED\n");
 }
 
-extern int udf_remove_fid(fs_node_t *dev, struct udf_fe *dir_fe, uint32_t dir_block, const char *name);
+/* #425: declared by <fs/udf/udf.h>; the local copy predated the
+ * struct udf_fs refactor and conflicted with it. */
 
 static void test_udf_remove_fid(void) {
     kprintf("Running test_udf_remove_fid...\n");
@@ -542,7 +572,7 @@ static void test_udf_remove_fid(void) {
     dir_fe.info_length = pos; /* Directory length is the total FID sizes */
 
     /* Remove "file2" */
-    int res = udf_remove_fid(&mock_dev, &dir_fe, dir_block, "file2");
+    int res = udf_remove_fid(&udf_ctx, &dir_fe, dir_block, "file2");
 
     if (res != 0) {
         kprintf("test_udf_remove_fid: FAILED (udf_remove_fid returned %d, expected 0)\n", res);
@@ -562,7 +592,7 @@ static void test_udf_remove_fid(void) {
     }
 
     /* Verify removing non-existent file returns -1 */
-    res = udf_remove_fid(&mock_dev, &dir_fe, dir_block, "nonexistent");
+    res = udf_remove_fid(&udf_ctx, &dir_fe, dir_block, "nonexistent");
     if (res != -1) {
         kprintf("test_udf_remove_fid: FAILED (udf_remove_fid returned %d for nonexistent file, expected -1)\n", res);
         return;

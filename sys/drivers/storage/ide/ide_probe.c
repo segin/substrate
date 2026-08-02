@@ -8,10 +8,10 @@
 #include <string.h>
 
 #include <arch/i386/cpu.h>
+#include <arch/x86-common/io.h>
 #include <drivers/storage/blkdev.h>
 #include <drivers/storage/ide/ide.h>
 #include <drivers/storage/ide/ide_priv.h>
-#include <arch/x86-common/io.h>
 #include <kern/console.h>
 #include <kern/device.h>
 #include <kern/driver.h>
@@ -62,11 +62,21 @@ void ide_refresh_device_slot(uint8_t channel, uint8_t drive) {
         uint32_t lba;
         uint32_t blk_size;
 
-        if (ide_atapi_read_capacity(channel, drive, &lba, &blk_size) == 0) {
+        /*
+         * IDE-06: validate what the device reports.  blk_size was stored
+         * verbatim, so a drive answering 0 (or a parse error yielding 0)
+         * published sector_size 0 to the block layer, which divides by it in
+         * every geometry calculation.  An absurd value is equally a lie.
+         * Same class as SCSI-09; fall back to the ATAPI default rather than
+         * trusting it.
+         */
+        if (ide_atapi_read_capacity(channel, drive, &lba, &blk_size) == 0 &&
+            blk_size >= 512U && blk_size <= 65536U &&
+            (blk_size & (blk_size - 1U)) == 0U) {
             total_sectors = (uint64_t)lba + 1;
             sector_size = blk_size;
         } else {
-            sector_size = 2048;
+            sector_size = ATAPI_DEFAULT_SECTOR_SIZE;
         }
     }
 
@@ -303,7 +313,8 @@ int ide_program_dma_mode(ide_device_t *dev) {
     }
 
     ide_select_drive(dev->channel, dev->drive);
-    if (ide_wait_ready(dev->channel, IDE_TIMEOUT_READY_MS, "set-features") < 0) {
+    if (ide_wait_ready_ex(dev->channel, IDE_TIMEOUT_READY_MS, "set-features", 0) < 0) {
+        dev->dma_mode = 0;   /* [IDE-10] never programmed: don't claim a mode */
         return -1;
     }
 
@@ -312,12 +323,14 @@ int ide_program_dma_mode(ide_device_t *dev) {
     ide_write_reg(dev->channel, ATA_REG_COMMAND, ATA_CMD_SET_FEATURES);
 
     if (ide_wait_bsy(dev->channel, IDE_TIMEOUT_READY_MS, "set-features") < 0) {
+        dev->dma_mode = 0;   /* [IDE-10] */
         ide_bm_set_drive_dma_capable(dev->channel, dev->drive, 0);
         return -1;
     }
 
     status = ide_read_reg(dev->channel, ATA_REG_STATUS);
     if ((status & (ATA_SR_ERR | ATA_SR_DF)) != 0) {
+        dev->dma_mode = 0;   /* [IDE-10] SET FEATURES was rejected */
         ide_bm_set_drive_dma_capable(dev->channel, dev->drive, 0);
         return -1;
     }
@@ -371,11 +384,46 @@ void ide_register_irqs(void) {
     for (uint8_t channel = 0; channel < MAX_IDE_CHANNELS; channel++) {
         unsigned long flags = 0;
 
-        if (!ide_channels[channel].dma_capable || ide_channel_irq_registered[channel]) {
+        /*
+         * [IDE-04] This used to require dma_capable, which NOTHING ever sets
+         * -- ide_dma_init()/ide_dma_init_pair() have no callers anywhere in
+         * sys/ -- so no handler was ever registered for IRQ 14/15.  Probe
+         * then cleared nIEN at the end (see below), leaving device
+         * interrupts ENABLED with nothing to service them: every PIO
+         * completion raised an unhandled interrupt, and on a shared
+         * level-triggered PCI line that is an IRQ storm (the same failure
+         * mode as the reverted AHCI/NIC shared-INTx work).
+         *
+         * Registration no longer depends on DMA.  A channel needs a usable
+         * IRQ line and a device present; whether it goes on to do DMA is a
+         * separate question.
+         */
+        if (ide_channel_irq_registered[channel]) {
+            continue;
+        }
+        if (ide_channels[channel].io_base == 0 ||
+            ide_channels[channel].irq == 0 ||
+            ide_channels[channel].irq == 0xFF) {
             continue;
         }
 
-        if (ide_channel_irq_shared[channel]) {
+        /*
+         * Share unless this is a legacy ISA line.
+         *
+         * ide_channel_irq_shared[] is set by ide_pci_apply_channel() when a
+         * channel takes its IRQ from PCI, but a channel can reach here with
+         * a PCI-routed line by other paths and then claim it EXCLUSIVELY --
+         * which locks every other device on that line out of request_irq()
+         * with -EBUSY.  Observed: "ide: channel 2 IRQ 11 handler installed"
+         * took IRQ 11 first and the e1000 on the same line got no handler,
+         * so the interface never registered.
+         *
+         * Only IRQ 14 and 15 are the legacy ATA lines, which are ISA-style
+         * edge-triggered and genuinely unshareable.  Anything else came from
+         * PCI interrupt routing and is level-triggered and shared by design.
+         */
+        if (ide_channel_irq_shared[channel] ||
+            (ide_channels[channel].irq != 14 && ide_channels[channel].irq != 15)) {
             flags |= IRQF_SHARED;
         }
 
@@ -383,7 +431,53 @@ void ide_register_irqs(void) {
         if (request_irq(ide_channels[channel].irq, ide_irq_dispatch, flags,
                         name, &ide_channels[channel]) == 0) {
             ide_channel_irq_registered[channel] = 1;
+            kprintf("ide: channel %u IRQ %u handler installed%s\n",
+                    (unsigned)channel, (unsigned)ide_channels[channel].irq,
+                    (flags & IRQF_SHARED) ? " (shared)" : "");
+        } else {
+            /* [IDE-04] Say so: the channel will be left with nIEN set and
+             * driven purely by polling, which is a materially different
+             * operating mode and used to be invisible. */
+            kprintf("ide: channel %u could not claim IRQ %u; "
+                    "interrupts stay masked (polled)\n",
+                    (unsigned)channel, (unsigned)ide_channels[channel].irq);
         }
+    }
+
+    /*
+     * [IDE-04] Enable bus-master DMA, now that a handler exists to complete
+     * it.
+     *
+     * dma_capable was never set by anything -- ide_dma_init() and
+     * ide_dma_init_pair() have no callers -- so ide_dma_read()/write()
+     * returned -1 at their first line and every transfer went through PIO,
+     * even though ide_pci_configure_channels() had already found the
+     * bus-master base and set PCI_COMMAND_MASTER on the controller.
+     *
+     * Two conditions, both necessary:
+     *   - a bus-master I/O base from PCI BAR 4, which is what the PRDT and
+     *     the BM command/status registers are addressed through;
+     *   - an installed IRQ handler, because ide_dma_read()/write() wait on
+     *     ide_wait_irq_completion().  On a polled channel that wait can only
+     *     ever time out, so leaving DMA off there is not a limitation, it is
+     *     the only correct choice.
+     *
+     * A device that then fails a DMA transfer is demoted to PIO by
+     * ide_disable_device_dma(); a transfer this driver's PRDT simply cannot
+     * describe falls back to PIO for that request alone (IDE_DMA_UNSUPPORTED,
+     * see IDE-16) without condemning the drive.
+     */
+    for (uint8_t channel = 0; channel < MAX_IDE_CHANNELS; channel++) {
+        if (ide_channels[channel].bm_base == 0)
+            continue;
+        if (!ide_channel_irq_registered[channel])
+            continue;
+        if (ide_channels[channel].dma_capable)
+            continue;
+
+        ide_channels[channel].dma_capable = 1;
+        kprintf("ide: channel %u bus-master DMA enabled (bm_base 0x%x)\n",
+                (unsigned)channel, (unsigned)ide_channels[channel].bm_base);
     }
 }
 
@@ -504,7 +598,7 @@ int ide_check_power_mode(uint16_t bus, uint8_t drive, uint8_t *mode) {
         return -1;
     }
 
-    if (ide_wait_ready(channel, IDE_TIMEOUT_READY_MS, "check-power-mode") < 0) {
+    if (ide_wait_ready_ex(channel, IDE_TIMEOUT_READY_MS, "check-power-mode", 0) < 0) {
         return -1;
     }
 
@@ -536,7 +630,7 @@ int ide_configure_spindown_timer(uint16_t bus, uint8_t drive, uint8_t timer_code
         return -1;
     }
 
-    if (ide_wait_ready(channel, IDE_TIMEOUT_READY_MS, "standby-timer") < 0) {
+    if (ide_wait_ready_ex(channel, IDE_TIMEOUT_READY_MS, "standby-timer", 0) < 0) {
         return -1;
     }
 
@@ -650,12 +744,17 @@ int ide_scan_controller(void) {
                     /* ATAPI size calculation */
                     uint32_t lba, blk_size;
                     /* Try to read capacity. If fails (no media), size=0 */
-                    if (ide_atapi_read_capacity(ch, d, &lba, &blk_size) == 0) {
+                    /* IDE-06: same validation as the refresh path above --
+                     * a reported block size of 0 publishes sector_size 0 to
+                     * the block layer, which divides by it. */
+                    if (ide_atapi_read_capacity(ch, d, &lba, &blk_size) == 0 &&
+                        blk_size >= 512U && blk_size <= 65536U &&
+                        (blk_size & (blk_size - 1U)) == 0U) {
                         total_sectors = (uint64_t)lba + 1;
                         sector_size = blk_size;
                     } else {
-                        /* Default for CD-ROM if no media */
-                        sector_size = 2048;
+                        /* Default for CD-ROM if no media or a bogus report */
+                        sector_size = ATAPI_DEFAULT_SECTOR_SIZE;
                     }
                 }
 
@@ -683,7 +782,19 @@ int ide_scan_controller(void) {
                 bdev->read = ide_blkdev_read;
                 bdev->write = ide_blkdev_write;
 
-                blkdev_register_disk(bdev);
+                /*
+                 * ATAPI (optical) media carries no MBR/GPT/BSD label -- it
+                 * is ISO9660 -- so register it without a partition scan.
+                 * blkdev_register_disk() would scan, which is both pointless
+                 * and, before the sniffers were bounded, fatal: a 2048-byte
+                 * sector read overran their 512-byte stack buffers.  ATA
+                 * disks are scanned below via partition_scan[].
+                 */
+                if (type == 1) {
+                    blkdev_register(bdev);
+                } else {
+                    blkdev_register_disk(bdev);
+                }
                 kprint("  ");
                 kprint(bdev->name);
                 kprint(": ");
@@ -702,9 +813,19 @@ int ide_scan_controller(void) {
         }
     }
 
-    /* Re-enable interrupts */
+    /*
+     * [IDE-04] Unmask device interrupts ONLY on channels whose handler was
+     * actually installed.  Clearing nIEN unconditionally is what turned an
+     * unregistered IRQ into a storm; a channel with no handler stays masked
+     * and is driven purely by polling, which is what the PIO paths already
+     * do.
+     */
     for (int ch = 0; ch < MAX_IDE_CHANNELS; ch++) {
-        ide_write_ctrl((uint8_t)ch, 0);
+        if (ide_channel_irq_registered[ch]) {
+            ide_write_ctrl((uint8_t)ch, 0);
+        } else {
+            ide_write_ctrl((uint8_t)ch, ATA_CTRL_NIEN);
+        }
     }
 
     for (size_t i = 0; i < partition_scan_count; i++) {

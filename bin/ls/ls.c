@@ -1,6 +1,6 @@
+#include <locale.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <locale.h>
 
 #include "ls.h"
 #include "ls_colors.h"

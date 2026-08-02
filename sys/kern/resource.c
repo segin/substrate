@@ -1,6 +1,7 @@
-#include <kern/resource.h>
-#include <string.h>
 #include <stdio.h>
+#include <string.h>
+
+#include <kern/resource.h>
 #include <vm/vm_kmem.h>
 
 static struct resource ioport_root = {

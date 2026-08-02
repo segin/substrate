@@ -5,11 +5,12 @@
  * allocation tracking for debugging memory corruption.
  */
 
-#include <vm/uma.h>
-#include <kern/console.h>
-#include <kern/panic.h>
 #include <stdint.h>
 #include <string.h>
+
+#include <kern/console.h>
+#include <kern/panic.h>
+#include <vm/uma.h>
 
 
 /*

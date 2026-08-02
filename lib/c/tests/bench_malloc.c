@@ -1,43 +1,12 @@
 #define _GNU_SOURCE
+#include <assert.h>
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
-#include <sys/mman.h>
-#include <assert.h>
 #include <unistd.h>
 
-// Rename functions to avoid conflict with host libc
-#define malloc my_malloc
-#define free my_free
-#define calloc my_calloc
-#define realloc my_realloc
-#define aligned_alloc my_aligned_alloc
-#define exit my_exit
-#define abort my_abort
-#define __stack_chk_fail my_stack_chk_fail
-#define quick_exit my_quick_exit
-#define at_quick_exit my_at_quick_exit
-#define strtol my_strtol
-#define atoi my_atoi
-#define atol my_atol
-#define atoll my_atoll
-#define atof my_atof
-#define getenv my_getenv
-#define system my_system
-#define abs my_abs
-#define labs my_labs
-#define llabs my_llabs
-#define qsort my_qsort
-#define bsearch my_bsearch
-#define srand my_srand
-#define rand my_rand
-#define arc4random_buf my_arc4random_buf
-#define arc4random my_arc4random
-#define arc4random_uniform my_arc4random_uniform
-
-// Include the source file directly
-// We use -I include to pick repo headers which match implementation
-#include "../src/stdlib.c"
+#include <../src/stdlib.c>
+#include <sys/mman.h>
 
 #undef malloc
 #undef free

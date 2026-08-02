@@ -8,11 +8,13 @@
  * Reference: FreeBSD's kern_resource.c, POSIX getrusage(2)
  */
 
+#include <string.h>
+
+#include <sys/copy.h>
+#include <sys/param.h>
 #include <sys/proc.h>
 #include <sys/resource.h>
 #include <sys/time.h>
-#include <sys/param.h>
-#include <string.h>
 
 /*
  * rusage_add_tick - Add one timer tick to rusage
@@ -279,7 +281,7 @@ void timeval_add(struct timeval *result, const struct timeval *a,
  *
  * Returns: 0 on success, -EINVAL on invalid who value
  */
-#include <sys/copy.h>
+
 
 int
 sys_getrusage(int who, struct rusage *usage)

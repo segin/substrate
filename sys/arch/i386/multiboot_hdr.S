@@ -37,8 +37,8 @@
 /* Video mode fields (offsets 32-44): used since bit 2 (VIDEO) is set. */
 #ifdef SUBSTRATE_MB_FB_MODE
 .long 0         /* mode_type: 0 = linear framebuffer */
-.long 0         /* width  (0 = loader picks) */
-.long 0         /* height (0 = loader picks) */
+.long 1280      /* width  (0 = loader picks) */
+.long 800       /* height (0 = loader picks) */
 .long 32        /* depth  (preferred bpp; 0 = loader picks) */
 #else
 .long 1         /* mode_type: 1 = EGA text mode */
@@ -87,8 +87,8 @@ mb2_fb_start:
     .short MULTIBOOT2_HEADER_TAG_FRAMEBUFFER
     .short 1
     .long mb2_fb_end - mb2_fb_start
-    .long 0                 /* width  (0 = loader picks) */
-    .long 0                 /* height (0 = loader picks) */
+    .long 1280              /* width  (0 = loader picks) */
+    .long 800               /* height (0 = loader picks) */
     .long 32                /* depth  (preferred bpp) */
 mb2_fb_end:
 #else

@@ -1,4 +1,4 @@
-#include "elf_private.h"
+#include <elf_private.h>
 
 static int is_mutable_obj(elfobj_t *obj) {
     if (obj == NULL) {

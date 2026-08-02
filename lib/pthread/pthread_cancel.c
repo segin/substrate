@@ -38,11 +38,12 @@
  * Other pthread functions live in pthread_create.c, pthread_mutex.c,
  * pthread_cond.c, pthread_extra.c, pthread_barrier.c, pthread_spin.c.
  */
-#include "pthread.h"
-#include "pthread_internal.h"
 #include <errno.h>
+#include <pthread.h>
 #include <signal.h>
 #include <unistd.h>
+
+#include <pthread_internal.h>
 #include <sys/syscall.h>
 #include <sys/thr.h>
 

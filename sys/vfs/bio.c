@@ -43,9 +43,13 @@ uint32_t pmm_get_free_memory(void);
  * The old fixed 8192-buffer ceiling was a 4 MiB cache (8192 * 512 B) — far
  * too small for build/grep/link workloads, so hot data was evicted almost
  * immediately and nearly every demand-page fault fell through to a
- * synchronous device read.  bio_reclaim() is not yet wired to the VM
- * pressure path, so the cache never shrinks once grown; keep the ceiling at
- * 1/8 of RAM so the other 7/8 stays available to userland regardless.
+ * synchronous device read.
+ *
+ * The ceiling stays at 1/8 of RAM so the other 7/8 remains available to
+ * userland.  Note this is no longer forced: bio_reclaim() IS wired to the VM
+ * pressure path (vm_page.c calls it from vm_pageout()), so the cache does
+ * shrink once grown, and the fraction could be revisited.  An earlier version
+ * of this comment claimed the opposite -- do not re-derive the policy from it.
  */
 #define BIO_CACHE_RAM_SHIFT 3        /* total_ram >> 3 == 1/8 of RAM */
 static uint32_t bio_nbuf_ceiling = BIO_NBUF_FLOOR;
@@ -117,6 +121,16 @@ bio_ensure_size(struct buf *bp, size_t size)
         bp->b_resid = 0;
         return 0;
     }
+
+    /*
+     * Past this point the buffer's contents do not survive: either we drop
+     * the existing allocation, or there never was one and the allocation
+     * below is zero-filled.  B_CACHE means "b_data holds this block's real
+     * contents", so it must never outlive the data it describes -- leaving
+     * it set here is what let a zero-filled page be handed to a reader as
+     * the contents of a disk sector.
+     */
+    bp->b_flags &= ~B_CACHE;
 
     if (bp->b_data) {
         if (bio_resident_bytes >= bp->b_bcount)
@@ -236,6 +250,42 @@ incore(struct vnode *vp, int64_t blkno)
     return bp;
 }
 
+/*
+ * Detach a buffer that could not be given valid storage and park it on
+ * BQ_EMPTY for reuse.  Mirrors brelse()'s B_INVAL arm, but callable from
+ * inside getblk() while bio_lock is already held.
+ *
+ * The point is that a buffer with no data must not stay reachable through
+ * the hash: a later lookup would find it, and any caller that trusts the
+ * hit would read whatever the next allocation happens to contain.
+ */
+static void
+bio_discard_locked(struct buf *bp)
+{
+    if (bp->b_qindex != -1)
+        bio_remove_from_queue(bp);
+
+    bp->b_flags &= ~(B_BUSY | B_CACHE);
+
+    if (bp->b_vp) {
+        bio_hash_remove(bp);
+        bp->b_vp = NULL;
+    }
+    bp->b_blkno = 0;
+    bp->b_lblkno = 0;
+
+    if (bp->b_data) {
+        if (bio_resident_bytes >= bp->b_bcount)
+            bio_resident_bytes -= bp->b_bcount;
+        kfree(bp->b_data, bp->b_bcount);
+        bp->b_data = NULL;
+        bp->b_bcount = 0;
+    }
+    bp->b_resid = 0;
+
+    bio_insert_queue(bp, BQ_EMPTY);
+}
+
 struct buf *
 getblk(struct vnode *vp, int64_t blkno, size_t size, int slpflag, int slptimeo)
 {
@@ -271,14 +321,26 @@ retry_lookup:
         if (bp->b_qindex != -1)
             bio_remove_from_queue(bp);
 
-        bp->b_flags |= B_BUSY | B_CACHE;
+        /*
+         * Do NOT assert B_CACHE here.  A hash hit only means some buffer is
+         * keyed to this block, not that it ever held the block's contents --
+         * a buffer whose fill failed can still be on the hash.  B_CACHE is
+         * carried over from the previous successful fill, and bio_ensure_size()
+         * clears it if it has to (re)allocate.
+         */
+        bp->b_flags |= B_BUSY;
         bp->b_flags &= ~(B_DONE | B_ERROR | B_ASYNC | B_READ | B_WRITE);
         bio_insert_queue(bp, BQ_LOCKED);
 
         error = bio_ensure_size(bp, size);
         if (error) {
-            bp->b_error = error;
-            bp->b_flags |= B_ERROR;
+            /* No storage: drop it rather than leave a dataless buffer on the
+             * hash.  Callers treat NULL as "bypass the cache" and read the
+             * device directly, which is correct here. */
+            bio_discard_locked(bp);
+            spinlock_release(&bio_lock);
+            sleepq_wake_all(bp);
+            return NULL;
         }
 
         bio_hits++;
@@ -329,8 +391,18 @@ retry_lookup:
 
     error = bio_ensure_size(bp, size);
     if (error) {
-        bp->b_error = error;
-        bp->b_flags |= B_ERROR;
+        /* Never publish a buffer we could not back with storage: hashing it
+         * here is what allowed a later lookup to hit it, force B_CACHE on,
+         * and serve a zero-filled page as the block's contents.
+         *
+         * b_vp is set but bio_hash_insert() has not run yet, and
+         * bio_hash_remove() does an unconditional LIST_REMOVE -- clear the
+         * key first so the discard does not unlink an entry that was never
+         * linked. */
+        bp->b_vp = NULL;
+        bio_discard_locked(bp);
+        spinlock_release(&bio_lock);
+        return NULL;
     }
 
     bio_hash_insert(bp);
@@ -469,6 +541,13 @@ bwrite(struct buf *bp)
     if (error) {
         bp->b_error = error;
         bp->b_flags |= B_ERROR;
+        /* B_DELWRI was cleared above, before the I/O was attempted.  Leaving
+         * it clear on failure files the buffer on BQ_CLEAN via brelse(), so
+         * the block stays cached, valid and "already written" while its
+         * contents never reached the device -- the write is lost silently
+         * (bufsync's EIO is discarded by syncer_daemon).  Put it back so the
+         * block is retried rather than believed. */
+        bp->b_flags |= B_DELWRI;
         biodone(bp);
     } else if ((bp->b_flags & B_DONE) == 0) {
         biodone(bp);
@@ -515,7 +594,11 @@ brelse(struct buf *bp)
 
     spinlock_acquire(&bio_lock);
 
-    if (bp->b_qindex == BQ_LOCKED)
+    /* Unlink from whichever queue it is on, not just BQ_LOCKED: a second
+     * brelse() would otherwise insert an already-queued buffer into the same
+     * TAILQ again, producing a self-linked node that spins the next
+     * TAILQ_FOREACH in bufsync/bio_get_stats/bio_reclaim forever. */
+    if (bp->b_qindex != -1)
         bio_remove_from_queue(bp);
 
     bp->b_flags &= ~B_BUSY;
@@ -796,8 +879,10 @@ bio_reclaim(size_t target_bytes)
     struct buf *next;
     size_t freed;
     size_t bsize;
+    size_t reclaimed;
 
     freed = 0;
+    reclaimed = 0;
     spinlock_acquire(&bio_lock);
 
     /* Drain BQ_EMPTY first — these have no data so we mainly recover bp
@@ -815,7 +900,11 @@ bio_reclaim(size_t target_bytes)
             kfree(bp->b_data, bsize);
             freed += bsize;
         }
+        /* The struct buf itself goes back too; the caller is asking for bytes,
+         * so credit them rather than reporting only the data pages. */
         kfree(bp, sizeof(*bp));
+        freed += sizeof(*bp);
+        reclaimed++;
         if (bio_nbuf > 0)
             bio_nbuf--;
         if (target_bytes && freed >= target_bytes)
@@ -836,7 +925,11 @@ bio_reclaim(size_t target_bytes)
             kfree(bp->b_data, bsize);
             freed += bsize;
         }
+        /* The struct buf itself goes back too; the caller is asking for bytes,
+         * so credit them rather than reporting only the data pages. */
         kfree(bp, sizeof(*bp));
+        freed += sizeof(*bp);
+        reclaimed++;
         if (bio_nbuf > 0)
             bio_nbuf--;
         if (target_bytes && freed >= target_bytes)
@@ -844,7 +937,9 @@ bio_reclaim(size_t target_bytes)
     }
 
 done:
-    bio_reclaims++;
+    /* Count buffers reclaimed, not calls -- the stat exported through
+     * bio_get_stats() was previously a call count wearing a buffer name. */
+    bio_reclaims += reclaimed;
     spinlock_release(&bio_lock);
     return freed;
 }

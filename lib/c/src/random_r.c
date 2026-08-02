@@ -18,9 +18,9 @@
  * setstate_r() can resume a saved array.
  */
 
-#include <stdlib.h>
-#include <stdint.h>
 #include <errno.h>
+#include <stdint.h>
+#include <stdlib.h>
 
 #define TYPE_0   0
 #define BREAK_0  8

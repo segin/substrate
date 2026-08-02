@@ -392,6 +392,16 @@ void proc_destroy(process_t *p) {
      * (ARCH-01). */
     fpu_forget_process(p);
 
+    /* Release the chroot-root vnode reference taken in proc_create() when the
+     * process inherited a non-default root (open_fs).  proc_exit() closes and
+     * NULLs it on the normal path; this covers the fork() failure paths that
+     * jump straight here (pmap_fork/vm_map_fork/ldt_clone/sched_fork_thread),
+     * which otherwise leak the reference and pin the chroot dir's mount. */
+    if (p->root_node && p->root_node != fs_root) {
+        close_fs(p->root_node);
+        p->root_node = NULL;
+    }
+
     spinlock_acquire(&pid_lock);
     proc_unlink_locked(p);
     spinlock_release(&pid_lock);
@@ -477,7 +487,7 @@ process_t *proc_create(int perso_id) {
 
 static int proc_fork_common(process_t *parent, void *stack, int is_vfork) {
     process_t *child_proc = proc_create(parent->perso_id);
-    if (!child_proc) return -1;
+    if (!child_proc) return -ENOMEM;
     
     // Inherit process name
     strncpy(child_proc->comm, parent->comm, AC_COMM_LEN);
@@ -488,7 +498,7 @@ static int proc_fork_common(process_t *parent, void *stack, int is_vfork) {
         child_proc->pmap = pmap_fork(parent->pmap);
         if (!child_proc->pmap) {
             proc_destroy(child_proc);
-            return -1;
+            return -ENOMEM;
         }
     } else {
         child_proc->pmap = NULL; // Kernel process (shouldn't fork)
@@ -500,7 +510,7 @@ static int proc_fork_common(process_t *parent, void *stack, int is_vfork) {
             pmap_release(child_proc->pmap);
             child_proc->pmap = NULL;
             proc_destroy(child_proc);
-            return -1;
+            return -ENOMEM;
         }
     }
 
@@ -521,9 +531,9 @@ static int proc_fork_common(process_t *parent, void *stack, int is_vfork) {
             child_proc->pmap = NULL;
         }
         proc_destroy(child_proc);
-        return -1;
+        return -ENOMEM;
     }
-    
+
     // Copy cwd_node
     child_proc->cwd_node = parent->cwd_node;
     if (child_proc->cwd_node) {
@@ -559,7 +569,9 @@ static int proc_fork_common(process_t *parent, void *stack, int is_vfork) {
     for(int j=0; j<MAX_FD; j++) {
         if (parent->fds[j]) {
             child_proc->fds[j] = parent->fds[j];
-            child_proc->fds[j]->f_count++;
+            /* Atomic: a sibling thread of the parent may be close()ing/dup()ing
+             * this same file_t concurrently on another CPU. */
+            __sync_fetch_and_add(&child_proc->fds[j]->f_count, 1);
         }
     }
     
@@ -619,7 +631,7 @@ static int proc_fork_common(process_t *parent, void *stack, int is_vfork) {
 
         for (int j = 0; j < MAX_FD; j++) {
             if (child_proc->fds[j]) {
-                child_proc->fds[j]->f_count--;
+                __sync_fetch_and_sub(&child_proc->fds[j]->f_count, 1);
                 child_proc->fds[j] = NULL;
             }
         }
@@ -1269,7 +1281,7 @@ int proc_fcntl(process_t *p, int fd, int cmd, int arg) {
         }
         proc_set_fd(p, newfd, f);
         fdset_clear(p->fd_cloexec, newfd);
-        f->f_count++;
+        __sync_fetch_and_add(&f->f_count, 1);   /* atomic vs racing close (A48) */
         return newfd;
     case F_GETFD:
         return fdset_test(p->fd_cloexec, fd) ? FD_CLOEXEC : 0;
@@ -1664,8 +1676,17 @@ void proc_exit(int code) {
         /* Cleanup robust futexes for this thread */
         futex_thread_exit(thread);
 
-        if (mutex_release_owned_by_thread(thread) > 0) {
-            kprint("proc_exit: force-releasing mutexes held by exiting thread.\n");
+        /* Force-release this thread's kernel mutexes — but ONLY if it is not
+         * still executing on another CPU.  Walking/unlinking a running
+         * sibling's held_mutexes while it concurrently mutates the list on its
+         * own core corrupts it (A22).  A sibling still on a remote CPU has its
+         * mutexes released later at sched_reap_thread(), which waits for it to
+         * leave the CPU first.  The exiting thread itself is on THIS CPU, so it
+         * is never "remote" and is handled here as before. */
+        if (!sched_thread_running_remote(thread)) {
+            if (mutex_release_owned_by_thread(thread) > 0) {
+                kprint("proc_exit: force-releasing mutexes held by exiting thread.\n");
+            }
         }
 
         /* Remove sleepers from sleep queues before they become zombies. */

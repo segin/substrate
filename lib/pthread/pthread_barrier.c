@@ -19,8 +19,8 @@
  * Other pthread functions live in pthread_create.c, pthread_mutex.c,
  * pthread_cond.c, pthread_extra.c, pthread_spin.c, pthread_atfork.c.
  */
-#include "pthread.h"
 #include <errno.h>
+#include <pthread.h>
 #include <sched.h>
 
 int pthread_barrier_init(pthread_barrier_t *b,

@@ -1,13 +1,14 @@
-#include <sys/types.h>
-#include <sys/namei.h>
-#include <vfs/vnode.h>
-#include <sys/mount.h>
-#include <sys/queue.h>
-#include <sys/errno.h>
-#include <vm/vm_kmem.h>
-#include <kern/panic.h>
-#include <sys/lock.h>
 #include <string.h>
+
+#include <kern/panic.h>
+#include <sys/errno.h>
+#include <sys/lock.h>
+#include <sys/mount.h>
+#include <sys/namei.h>
+#include <sys/queue.h>
+#include <sys/types.h>
+#include <vfs/vnode.h>
+#include <vm/vm_kmem.h>
 
 /*
  * Name Cache structure
@@ -74,7 +75,7 @@ cache_lookup(struct vnode *dvp, struct vnode **vpp, const char *name, size_t len
                 TAILQ_REMOVE(&nclru, ncp, nc_lru);
                 TAILQ_INSERT_TAIL(&nclru, ncp, nc_lru);
                 rw_wunlock(&nchash_lock);
-                return ENOENT;
+                return -ENOENT;
             }
             *vpp = ncp->nc_vp;
             vref(*vpp);
@@ -88,7 +89,7 @@ cache_lookup(struct vnode *dvp, struct vnode **vpp, const char *name, size_t len
     }
 
     rw_wunlock(&nchash_lock);
-    return ENOENT;
+    return -ENOENT;
 }
 
 /*

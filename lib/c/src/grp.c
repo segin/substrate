@@ -8,14 +8,15 @@
  * invalidate previous return values.
  */
 
-#include <grp.h>
 #include <errno.h>
+#include <grp.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/types.h>
 #include <unistd.h>
+
+#include <sys/types.h>
 
 #define GR_LINE_MAX 1024
 #define GR_MEM_MAX  64

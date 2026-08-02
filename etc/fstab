@@ -1,2 +1,10 @@
-# <device>       <mount>  <type>  <options>  <dump> <pass>
-/dev/storage/ide0  /        ext2    rw         0      1
+# <device>        <mount>  <type>  <options>  <dump> <pass>
+#
+# Mount by volume LABEL, not by device name.  On a USB stick the disk turns
+# up as whatever the controller probe order makes it (sata0, ide0, virtio0,
+# ...) and the partition suffix moves with it; the label travels with the
+# filesystem instead.  vfs_mount_legacy() resolves LABEL=<name> by scanning
+# every registered block device for a matching on-disk volume label, so this
+# works for the kernel's own root= as well as for mount(8).
+LABEL=sub-root    /        ext2    rw         0      1
+LABEL=sub-boot    /boot    fat     rw         0      2

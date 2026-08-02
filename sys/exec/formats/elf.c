@@ -23,6 +23,7 @@
 #include <sys/errno.h>
 #include <sys/stat.h>
 #include <sys/mount.h>   /* struct mount, MNT_NOSUID */
+#include <sys/lock.h>    /* elf_image_cache spinlock */
 #include <arch/i386/pmm.h>
 #if defined(__i386__) || defined(HOST_TEST)
 #include <arch/i386/pmap.h>
@@ -65,6 +66,11 @@ typedef struct elf_image_cache_entry {
 #define ELF_IMAGE_CACHE_SIZE 16
 static elf_image_cache_entry_t elf_image_cache[ELF_IMAGE_CACHE_SIZE];
 static uint32_t elf_image_cache_hand;
+/* Serialises the cache: the image struct is ~8.7 KB, so an unlocked lookup
+ * racing an insert (concurrent execs on different CPUs, or a preempted exec)
+ * would copy out a half-overwritten entry — a torn phdr table that then
+ * drives out-of-bounds segment loading. */
+static spinlock_t elf_image_cache_lock = SPINLOCK_INIT("elf_img_cache");
 
 static int elf_debug_enabled(void) {
     return cmdline_debug_enabled("elf");
@@ -279,17 +285,22 @@ static int elf_get_image_info(fs_node_t *file, elf_image_info_t *image) {
 
     elf_cache_identity(file, &fsid, &ino);
 
+    spinlock_acquire(&elf_image_cache_lock);
     for (int i = 0; i < ELF_IMAGE_CACHE_SIZE; i++) {
         if (elf_cache_matches(&elf_image_cache[i], file, fsid, ino)) {
             *image = elf_image_cache[i].image;
+            spinlock_release(&elf_image_cache_lock);
             return 0;
         }
     }
+    spinlock_release(&elf_image_cache_lock);
 
+    /* Read metadata from the file with the lock dropped (file I/O may sleep). */
     if (elf_read_image_info(file, image) != 0) {
         return -ENOEXEC;
     }
 
+    spinlock_acquire(&elf_image_cache_lock);
     {
         elf_image_cache_entry_t *entry = &elf_image_cache[elf_image_cache_hand++ % ELF_IMAGE_CACHE_SIZE];
         entry->valid = 1;
@@ -300,6 +311,7 @@ static int elf_get_image_info(fs_node_t *file, elf_image_info_t *image) {
         entry->ctime = file->ctime;
         entry->image = *image;
     }
+    spinlock_release(&elf_image_cache_lock);
 
     return 0;
 }
@@ -748,10 +760,14 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, int is_main_image,
                 void *pa = pmm_alloc_block();
                 if (!pa) {
                     kprint("ELF: Out of physical memory\n");
-                    /* Free already-mapped pages for this segment (finding #11) */
+                    /* Free already-mapped pages for this segment (finding #11).
+                     * Pages already handed to seg_obj (vm_page_insert below)
+                     * are owned by it — free them ONLY via vm_object_deallocate,
+                     * never also via pmm_free_block, or the frame is freed
+                     * twice. */
                     for (int pi = 0; pi < num_pages; pi++) {
                         pmap_remove(pmap, page_maps[pi].va);
-                        pmm_free_block(page_maps[pi].pa);
+                        if (!seg_obj) pmm_free_block(page_maps[pi].pa);
                     }
                     if (seg_obj) vm_object_deallocate(seg_obj);
                     kfree(page_maps, segment_pages * sizeof(*page_maps));
@@ -764,10 +780,10 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, int is_main_image,
                 uint32_t pa_phys = (uint32_t)(uintptr_t)pa - 0xC0000000;
                 if (pmap_enter(pmap, va, pa_phys, prot, 0) < 0) {
                     kprint("ELF: Failed to map page\n");
-                    pmm_free_block(pa);
+                    pmm_free_block(pa);   /* current page: not yet owned by seg_obj */
                     for (int pi = 0; pi < num_pages; pi++) {
                         pmap_remove(pmap, page_maps[pi].va);
-                        pmm_free_block(page_maps[pi].pa);
+                        if (!seg_obj) pmm_free_block(page_maps[pi].pa);
                     }
                     if (seg_obj) vm_object_deallocate(seg_obj);
                     kfree(page_maps, segment_pages * sizeof(*page_maps));
@@ -832,7 +848,7 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, int is_main_image,
                             kprint("ELF: Failed to read segment data directly\n");
                             for (int ri = 0; ri < num_pages; ri++) {
                                 pmap_remove(pmap, page_maps[ri].va);
-                                pmm_free_block(page_maps[ri].pa);
+                                if (!seg_obj) pmm_free_block(page_maps[ri].pa);
                             }
                             if (seg_obj && !seg_obj_inserted) vm_object_deallocate(seg_obj);
                             kfree(page_maps, segment_pages * sizeof(*page_maps));
@@ -1493,9 +1509,18 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
     int old_perso_id = current_process ? current_process->perso_id : PERS_NATIVE;
     int switched_pmap = 0;
     int vm_state_committed = 0;
+    /* Saved credentials, restored on a pre-commit failure.  A setuid/setgid
+     * image must not leave the (still-running old) image with raised euid/egid
+     * if a later fallible step (exec_setup_stack) fails — that would be a
+     * privilege escalation.  Signal dispositions are handled by deferring
+     * exec_reset_signals() until after the commit point. */
+    uint32_t old_euid = current_process ? current_process->euid : 0;
+    uint32_t old_egid = current_process ? current_process->egid : 0;
+    uint32_t old_suid = current_process ? current_process->suid : 0;
+    uint32_t old_sgid = current_process ? current_process->sgid : 0;
     if (!root) {
         if (fd >= 0) kern_close(fd);
-        return -1;
+        return -ENOENT;
     }
 
     // ARG_MAX: Maximum bytes for arguments + environment
@@ -1505,7 +1530,7 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
     char *arg_buffer = NULL;
     int argc = 0;
     int envc = 0;
-    int error_code = -1;
+    int error_code = -ENOEXEC;  /* meaningful default for any goto cleanup */
     int ret;
 
     fs_node_t *file = NULL;
@@ -1527,7 +1552,7 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
     if ((file->flags & 0x7) != FS_FILE) {
         kprint("execve: Not a regular file\n");
         if (fd >= 0) kern_close(fd);
-        return -1;
+        return -EACCES;
     }
 
     image = elf_image_alloc();
@@ -1590,7 +1615,7 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
     pmap_t new_pmap = pmap_create();
     if (!new_pmap) {
         kprint("execve: Failed to create pmap\n");
-        error_code = -1;
+        error_code = -ENOMEM;
         goto cleanup;
     }
 
@@ -1611,7 +1636,7 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
     new_vm_map = vm_map_create(new_pmap, 0x10000, 0xC0000000);
     if (!new_vm_map) {
         kprint("execve: Failed to create vm_map\n");
-        error_code = -1;
+        error_code = -ENOMEM;
         goto cleanup;
     }
     if (current_process) {
@@ -1627,6 +1652,7 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
     uint32_t main_entry = elf_load(file, main_load_base, 1, interp_path, &interp_len);
     if (main_entry == 0) {
         kprint("execve: Failed to load ELF\n");
+        error_code = -ENOEXEC;
         goto cleanup;
     }
 
@@ -1667,6 +1693,7 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
         fs_node_t *interp_file = elf_lookup_interpreter(root, interp_path, perso_prefix);
         if (!interp_file) {
             kprint("execve: Interpreter not found\n");
+            error_code = -ENOENT;
             goto cleanup;
         }
 
@@ -1674,6 +1701,7 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
         uint32_t interp_entry = elf_load(interp_file, interp_base, 0, NULL, NULL);
         if (interp_entry == 0) {
             kprint("execve: Failed to load interpreter\n");
+            error_code = -ENOEXEC;
             goto cleanup;
         }
 
@@ -1688,8 +1716,9 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
 
 
     if (current_process) {
-        // Reset signal handlers on successful exec (POSIX requirement)
-        exec_reset_signals();
+        // NB: signal dispositions are reset only AFTER the commit point
+        // below, so a pre-commit failure (exec_setup_stack) leaves the old
+        // image's handlers intact.
 
         // Handle setuid/setgid bits (POSIX exec credential change).
         // Honor MNT_NOSUID: a filesystem mounted nosuid must never let a
@@ -1740,6 +1769,7 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
     if (exec_setup_stack(new_pmap, &sp, k_argv, argc, k_envp, envc,
                          main_entry, at_base, at_phdr, image,
                          &ps_strings_user) < 0) {
+        error_code = -ENOMEM;
         goto cleanup;
     }
 
@@ -1769,6 +1799,13 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
         old_vm_map = NULL;
     }
     vm_state_committed = 1;
+
+    /* Committed: the new image will run.  Reset signal handlers now (POSIX
+     * requirement) — deferred to here so a pre-commit failure could not have
+     * wiped the old image's dispositions. */
+    if (current_process) {
+        exec_reset_signals();
+    }
 
     char hexbuf[16];
     uint32_t val;
@@ -1862,6 +1899,12 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
 cleanup:
     if (!vm_state_committed && current_process) {
         current_process->perso_id = old_perso_id;
+        /* Roll back any setuid/setgid credential change: the old image keeps
+         * running, so it must keep its original credentials. */
+        current_process->euid = old_euid;
+        current_process->egid = old_egid;
+        current_process->suid = old_suid;
+        current_process->sgid = old_sgid;
     }
     if (!vm_state_committed && switched_pmap) {
         if (old_pmap) {

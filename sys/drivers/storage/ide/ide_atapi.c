@@ -10,6 +10,7 @@
 #include <drivers/storage/ide/ide_priv.h>
 
 #include <arch/x86-common/io.h>
+#include <kern/console.h>
 
 /* SCSI Command Codes (subset for CD-ROM) */
 #define SCSI_TEST_UNIT_READY   0x00
@@ -42,15 +43,34 @@ int ide_atapi_packet(uint8_t channel, uint8_t drive,
 
     /* Select drive */
     ide_select_drive(channel, drive);
-    if (ide_wait_ready(channel, IDE_TIMEOUT_PACKET_MS, "packet-select") < 0) return -1;
+    if (ide_wait_ready_ex(channel, IDE_TIMEOUT_PACKET_MS, "packet-select", 0) < 0) return -1;
 
-    /* Set byte count limit (in LBA_MID and LBA_HIGH) */
-    /* This tells the device the maximum transfer size */
-    ide_write_reg(channel, ATA_REG_LBA_MID, buffer_len & 0xFF);
-    ide_write_reg(channel, ATA_REG_LBA_HIGH, (buffer_len >> 8) & 0xFF);
+    /*
+     * [IDE-07] The byte-count limit is a 16-bit field split across LBA_MID
+     * and LBA_HIGH.  buffer_len is 32-bit and was written straight in with
+     * `& 0xFF` / `>> 8 & 0xFF`, discarding bits 16 and up: a 256-sector CD
+     * read-ahead (524288 bytes) programmed a BCL of 0x0000, which is
+     * illegal, so the transfer failed spuriously -- and three of those drove
+     * ide_mark_offline() and reset the channel.  Clamp to the largest legal
+     * even value instead of silently truncating.
+     */
+    uint32_t bcl = buffer_len;
+    if (bcl > 0xFFFEU)
+        bcl = 0xFFFEU;
+    bcl &= ~1U;                     /* BCL must be even */
+    if (bcl == 0)
+        return -1;                  /* a zero limit is not expressible */
+
+    ide_write_reg(channel, ATA_REG_LBA_MID, bcl & 0xFF);
+    ide_write_reg(channel, ATA_REG_LBA_HIGH, (bcl >> 8) & 0xFF);
 
     /* Issue PACKET command */
     ide_write_reg(channel, ATA_REG_COMMAND, ATA_CMD_PACKET);
+
+    /* [IDE-17] The command register write needs the 400 ns settle before
+     * STATUS is meaningful; without it the first read can still show the
+     * pre-command state and the ATAPI path returns a spurious error. */
+    ide_400ns(channel);
 
     /* Wait for DRQ to send the command packet */
     if (ide_wait_bsy(channel, IDE_TIMEOUT_PACKET_MS, "packet-command") < 0) {
@@ -83,6 +103,7 @@ int ide_atapi_packet(uint8_t channel, uint8_t drive,
     /* Data transfer phase */
     uint16_t *buf = (uint16_t *)buffer;
     uint32_t transferred = 0;
+    int short_transfer = 0;   /* [IDE-08] */
 
     while (transferred < buffer_len) {
         /* Wait for DRQ or completion */
@@ -105,11 +126,20 @@ int ide_atapi_packet(uint8_t channel, uint8_t drive,
                              (ide_read_reg(channel, ATA_REG_LBA_HIGH) << 8);
 
         /* Transfer data */
-        uint16_t words = byte_count / 2;
+        /*
+         * [IDE-08] The device dictates byte_count; it can exceed what is
+         * left of the caller's buffer, or be odd.  The old code clamped
+         * `words` and then `break`'d when the clamp reached zero -- walking
+         * away with DRQ still asserted and data pending in the drive, so the
+         * NEXT command was issued into a desynchronised device.  Whatever we
+         * cannot store must still be pulled off the bus (or padded out on a
+         * write) before the command can be considered over.
+         */
+        uint16_t dev_words = byte_count / 2;
+        uint16_t words = dev_words;
 
-        /* Ensure we don't overflow the buffer */
-        if (transferred + words * 2 > buffer_len) {
-             words = (buffer_len - transferred) / 2;
+        if (transferred + (uint32_t)words * 2 > buffer_len) {
+            words = (uint16_t)((buffer_len - transferred) / 2);
         }
 
         if (words > 0) {
@@ -119,10 +149,30 @@ int ide_atapi_packet(uint8_t channel, uint8_t drive,
                 insw(bus + ATA_REG_DATA, buf, words);
             }
             buf += words;
-            transferred += words * 2;
-        } else {
-            /* No words to transfer in this chunk? (odd length/zero) */
-            break;
+            transferred += (uint32_t)words * 2;
+        }
+
+        /* Drain (or pad) the remainder of the drive's declared byte count so
+         * the data phase completes and DRQ drops. */
+        for (uint16_t i = words; i < dev_words; i++) {
+            if (write) {
+                uint16_t zero = 0;
+                outsw(bus + ATA_REG_DATA, &zero, 1);
+            } else {
+                uint16_t discard;
+                insw(bus + ATA_REG_DATA, &discard, 1);
+            }
+            short_transfer = 1;
+        }
+
+        /* An odd byte_count leaves a trailing byte the word loop cannot
+         * express; the drive still expects the full transfer. */
+        if (byte_count & 1) {
+            short_transfer = 1;
+        }
+
+        if (dev_words == 0) {
+            break;      /* device declared a zero-length chunk */
         }
     }
 
@@ -132,7 +182,23 @@ int ide_atapi_packet(uint8_t channel, uint8_t drive,
     }
     status = ide_read_reg(channel, ATA_REG_STATUS);
 
-    return (status & ATA_SR_ERR) ? -1 : 0;
+    if (status & ATA_SR_ERR)
+        return -1;
+
+    /*
+     * [IDE-08] The data phase completed (DRQ has dropped, because everything
+     * the drive declared was consumed above), but some of it could not be
+     * stored in the caller's buffer.  Report that rather than claiming a
+     * full transfer -- the drive is now in a sane state either way, which is
+     * the part that used to be broken.
+     */
+    if (short_transfer) {
+        kprintf("ide: ATAPI short transfer on channel %u (%u of %u bytes)\n",
+                channel, (unsigned)transferred, (unsigned)buffer_len);
+        return -1;
+    }
+
+    return 0;
 }
 
 /*
@@ -174,7 +240,29 @@ int ide_atapi_read_capacity(uint8_t channel, uint8_t drive,
  */
 int ide_atapi_read_sectors(uint8_t channel, uint8_t drive,
                            uint32_t lba, uint16_t count, void *buffer) {
+    return ide_atapi_read_sectors_ss(channel, drive, lba, count, buffer,
+                                     ATAPI_DEFAULT_SECTOR_SIZE);
+}
+
+/*
+ * IDE-02: the transfer length has to come from the device's OWN sector size.
+ *
+ * This used to compute `count * 2048` unconditionally while the probe path
+ * (ide_refresh_device_slot) correctly takes the size from READ CAPACITY and
+ * publishes it as blkdev.sector_size.  A device reporting anything other
+ * than 2048 therefore had its block count multiplied by the wrong figure:
+ * the caller sized its buffer from the negotiated size and this asked the
+ * drive for a different number of bytes, so either the tail of every
+ * transfer was dropped or the drive was told to write past the buffer.
+ */
+int ide_atapi_read_sectors_ss(uint8_t channel, uint8_t drive,
+                              uint32_t lba, uint16_t count, void *buffer,
+                              uint32_t sector_size) {
     uint8_t packet[12] = {0};
+
+    if (sector_size == 0) {
+        sector_size = ATAPI_DEFAULT_SECTOR_SIZE;
+    }
 
     /* All uint16_t counts fit in READ10 (max 65535 sectors) */
     /* Use READ10 - 10-byte CDB */
@@ -193,8 +281,7 @@ int ide_atapi_read_sectors(uint8_t channel, uint8_t drive,
     packet[9] = 0;
     /* Remaining bytes are zeros */
 
-    /* CD-ROM sectors are typically 2048 bytes */
-    uint32_t buffer_len = (uint32_t)count * 2048;
+    uint32_t buffer_len = (uint32_t)count * sector_size;
 
     return ide_atapi_packet(channel, drive, packet, 12,
                             buffer, buffer_len, 0);

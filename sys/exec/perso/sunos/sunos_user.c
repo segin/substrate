@@ -1,9 +1,10 @@
+#include <stddef.h>
+#include <string.h>
+
 #include <exec/perso/sunos/sunos_user.h>
+#include <sys/errno.h>
 #include <sys/kern_syscalls.h>
 #include <sys/stat.h>
-#include <string.h>
-#include <sys/errno.h>
-#include <stddef.h>
 
 /* Helper to translate native stat to SunOS stat */
 static void translate_stat_to_sunos(const struct stat *native, struct sunos_stat *sunos) {

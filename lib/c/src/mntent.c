@@ -7,9 +7,10 @@
  * caller's scratch buffer.  Blank lines and '#' comments are skipped.
  */
 
-#include <mntent.h>
-#include <string.h>
 #include <stdlib.h>
+#include <string.h>
+
+#include <mntent.h>
 
 FILE *
 setmntent(const char *filename, const char *type)

@@ -6,8 +6,8 @@
  * 32bpp linear framebuffers (fast path) with putpixel fallback.
  */
 
-#include <stdint.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <string.h>
 
 #include <drivers/video/fb.h>

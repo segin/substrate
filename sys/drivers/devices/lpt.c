@@ -1,3 +1,6 @@
+#include <stdio.h>
+#include <string.h>
+
 #include <arch/x86-common/io.h>
 #include <kern/console.h>
 #include <kern/device.h>
@@ -7,8 +10,6 @@
 #include <sys/errno.h>
 #include <sys/poll.h>
 #include <vfs/vfs.h>
-#include <string.h>
-#include <stdio.h>
 
 #define LPT_PORT_COUNT 3
 #define LPT_MAJOR      6

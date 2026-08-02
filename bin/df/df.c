@@ -28,16 +28,17 @@
 #define _DEFAULT_SOURCE 1
 #include <ctype.h>
 #include <errno.h>
-#include <getopt.h>
 #include <limits.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
+
+#include "getopt.h"
 #include <sys/stat.h>
 #include <sys/statvfs.h>
-#include <unistd.h>
 
 #define DF_VERSION "df (Substrate) 1.0"
 

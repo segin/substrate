@@ -3,13 +3,14 @@
  *
  * Minimal implementation for basic select() usage with timeouts.
  */
+#include <errno.h>
 #include <limits.h>
 #include <stdint.h>
-#include <sys/syscall.h>
-#include <sys/select.h>
-#include <sys/poll.h>
 #include <unistd.h>
-#include <errno.h>
+
+#include <sys/poll.h>
+#include <sys/select.h>
+#include <sys/syscall.h>
 
 int sys_select(int nfds, fd_set * __restrict readfds, fd_set * __restrict writefds,
            fd_set * __restrict exceptfds, struct timeval * __restrict timeout) {

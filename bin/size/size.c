@@ -15,12 +15,13 @@
  * is missing or not an ELF object.
  */
 
-#include <elf.h>
 #include <errno.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include "elf.h"
 
 static const char *prog = "size";
 

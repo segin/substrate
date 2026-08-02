@@ -1,13 +1,13 @@
 #include <string.h>
 
+#include <arch/i386/idt.h>
+#include <arch/i386/signal_arch.h>
+#include <exec/perso/netbsd/netbsd_user.h>
 #include <sys/copy.h>
 #include <sys/kern_syscalls.h>
 #include <sys/proc.h>
 #include <sys/signal.h>
 #include <sys/syscall_impl.h>
-#include <arch/i386/idt.h>
-#include <arch/i386/signal_arch.h>
-#include <exec/perso/netbsd/netbsd_user.h>
 
 /*
  * NetBSD <-> substrate-native signal-number translation.
@@ -153,11 +153,11 @@ void netbsd_sendsig(void *handler, int sig, uint32_t mask, uint32_t flags, void 
     (void)flags;
     registers_t *regs = (registers_t *)regs_ptr;
     uint32_t esp = regs->useresp;
-    
-    struct netbsd_sigframe frame;
+
+    struct netbsd_sigframe_si frame;
     memset(&frame, 0, sizeof(frame));
 
-    esp -= sizeof(struct netbsd_sigframe);
+    esp -= sizeof(frame);
     esp &= ~0xFUL;
 
     if (validate_user_addr((void*)(uintptr_t)esp, sizeof(frame)) != 0) {
@@ -165,32 +165,47 @@ void netbsd_sendsig(void *handler, int sig, uint32_t mask, uint32_t flags, void 
         return;
     }
 
-    /* The handler is invoked with the NetBSD signal number, and the saved
-     * mask in the sigcontext is the NetBSD-numbered set to restore.  The
-     * first word is the return address: the NetBSD sigreturn trampoline,
-     * which the handler returns into. */
-    frame.sf_ra = NBSD_SIG_TRAMPOLINE_ADDR;
-    frame.sf_sig = native_to_netbsd_signo(sig);
-    frame.sf_code = 0;
-    frame.sf_scp = esp + offsetof(struct netbsd_sigframe, sf_sc);
+    uint32_t uva = esp;
 
-    frame.sf_sc.sc_eip = regs->eip;
-    frame.sf_sc.sc_eax = regs->eax;
-    frame.sf_sc.sc_ebx = regs->ebx;
-    frame.sf_sc.sc_ecx = regs->ecx;
-    frame.sf_sc.sc_edx = regs->edx;
-    frame.sf_sc.sc_edi = regs->edi;
-    frame.sf_sc.sc_esi = regs->esi;
-    frame.sf_sc.sc_ebp = regs->ebp;
-    frame.sf_sc.sc_esp = regs->useresp;
-    frame.sf_sc.sc_eflags = regs->eflags;
-    frame.sf_sc.sc_cs = regs->cs;
-    frame.sf_sc.sc_ss = regs->ss;
-    frame.sf_sc.sc_ds = regs->ds;
-    frame.sf_sc.sc_es = regs->es;
-    frame.sf_sc.sc_fs = regs->fs;
-    frame.sf_sc.sc_gs = regs->gs;
-    frame.sf_sc.sc_mask = native_to_netbsd_sigmask(mask);
+    /*
+     * New-style (sendsig_siginfo) frame: the handler is entered as
+     *   handler(signum, siginfo_t *sip, ucontext_t *ucp)
+     * so arg2/arg3 must be valid pointers into this very frame (sf_si/sf_uc).
+     * sf_ra is the sigreturn trampoline, which loads EBX = sf_ucp and issues
+     * sigreturn.  The saved registers live in uc_mcontext.__gregs[], laid out
+     * by the _REG_* indices.
+     */
+    frame.sf_ra     = NBSD_SIG_TRAMPOLINE_ADDR;
+    frame.sf_signum = native_to_netbsd_signo(sig);
+    frame.sf_sip    = uva + offsetof(struct netbsd_sigframe_si, sf_si);
+    frame.sf_ucp    = uva + offsetof(struct netbsd_sigframe_si, sf_uc);
+
+    frame.sf_si.si_signo = frame.sf_signum;
+    frame.sf_si.si_code  = 0;
+    frame.sf_si.si_errno = 0;
+
+    /* The restored mask (uc_sigmask) is the NetBSD-numbered set to reinstate. */
+    frame.sf_uc.uc_flags = NBSD_UC_SIGMASK | NBSD_UC_STACK | NBSD_UC_CPU;
+    frame.sf_uc.uc_sigmask[0] = native_to_netbsd_sigmask(mask);
+
+    uint32_t *g = frame.sf_uc.uc_mcontext.__gregs;
+    g[NBSD_REG_GS]   = regs->gs;
+    g[NBSD_REG_FS]   = regs->fs;
+    g[NBSD_REG_ES]   = regs->es;
+    g[NBSD_REG_DS]   = regs->ds;
+    g[NBSD_REG_EDI]  = regs->edi;
+    g[NBSD_REG_ESI]  = regs->esi;
+    g[NBSD_REG_EBP]  = regs->ebp;
+    g[NBSD_REG_ESP]  = regs->useresp;
+    g[NBSD_REG_EBX]  = regs->ebx;
+    g[NBSD_REG_EDX]  = regs->edx;
+    g[NBSD_REG_ECX]  = regs->ecx;
+    g[NBSD_REG_EAX]  = regs->eax;
+    g[NBSD_REG_EIP]  = regs->eip;
+    g[NBSD_REG_CS]   = regs->cs;
+    g[NBSD_REG_EFL]  = regs->eflags;
+    g[NBSD_REG_UESP] = regs->useresp;
+    g[NBSD_REG_SS]   = regs->ss;
 
     if (copyout(&frame, (void*)(uintptr_t)esp, sizeof(frame)) != 0) {
         sigexit(current_process, SIGSEGV);
@@ -203,33 +218,35 @@ void netbsd_sendsig(void *handler, int sig, uint32_t mask, uint32_t flags, void 
 
 int netbsd_sys_sigreturn(void *regs_ptr) {
     registers_t *regs = (registers_t *)regs_ptr;
-    struct netbsd_sigcontext *scp_user = (struct netbsd_sigcontext *)regs->ebx;
-    
-    struct netbsd_sigcontext sc;
-    if (copyin(scp_user, &sc, sizeof(sc)) != 0) return -1;
+    /* The trampoline loaded EBX with the ucontext_t pointer (sf_ucp). */
+    struct netbsd_ucontext_sig *ucp = (struct netbsd_ucontext_sig *)regs->ebx;
 
-    regs->eip = sc.sc_eip;
-    regs->eax = sc.sc_eax;
-    regs->ebx = sc.sc_ebx;
-    regs->ecx = sc.sc_ecx;
-    regs->edx = sc.sc_edx;
-    regs->edi = sc.sc_edi;
-    regs->esi = sc.sc_esi;
-    regs->ebp = sc.sc_ebp;
-    regs->useresp = sc.sc_esp;
+    struct netbsd_ucontext_sig uc;
+    if (copyin(ucp, &uc, sizeof(uc)) != 0) return -1;
+
+    const uint32_t *g = uc.uc_mcontext.__gregs;
+    regs->eip     = g[NBSD_REG_EIP];
+    regs->eax     = g[NBSD_REG_EAX];
+    regs->ebx     = g[NBSD_REG_EBX];
+    regs->ecx     = g[NBSD_REG_ECX];
+    regs->edx     = g[NBSD_REG_EDX];
+    regs->edi     = g[NBSD_REG_EDI];
+    regs->esi     = g[NBSD_REG_ESI];
+    regs->ebp     = g[NBSD_REG_EBP];
+    regs->useresp = g[NBSD_REG_UESP];
     /* EFLAGS sanitize: keep kernel-owned bits (IOPL/VM/RF/NT), take only
      * user bits from the frame — a raw assignment is an IOPL privilege
      * escalation.  Mirrors native sys_sigreturn. */
-    regs->eflags = (regs->eflags & 0x00033200u) | (sc.sc_eflags & 0xFFCCCDFFu);
-    regs->cs = sc.sc_cs | 3;
-    regs->ss = sc.sc_ss | 3;
-    regs->ds = sc.sc_ds | 3;
-    regs->es = sc.sc_es | 3;
-    regs->fs = sc.sc_fs | 3;
-    regs->gs = sc.sc_gs | 3;
+    regs->eflags  = (regs->eflags & 0x00033200u) | (g[NBSD_REG_EFL] & 0xFFCCCDFFu);
+    regs->cs      = g[NBSD_REG_CS] | 3;
+    regs->ss      = g[NBSD_REG_SS] | 3;
+    regs->ds      = g[NBSD_REG_DS] | 3;
+    regs->es      = g[NBSD_REG_ES] | 3;
+    regs->fs      = g[NBSD_REG_FS] | 3;
+    regs->gs      = g[NBSD_REG_GS] | 3;
 
-    /* sc_mask is a NetBSD-numbered set; the kernel mask is native. */
-    current_thread->sig_mask = netbsd_to_native_sigmask(sc.sc_mask);
+    /* uc_sigmask is a NetBSD-numbered set; the kernel mask is native. */
+    current_thread->sig_mask = netbsd_to_native_sigmask(uc.uc_sigmask[0]);
     /* Trapframe is now the restored user context — the dispatcher must
      * not apply its eax/edx/CF writebacks (see sys_sigreturn). */
     current_thread->frame_replaced = 1;
@@ -303,8 +320,11 @@ int netbsd_sys_sigprocmask(int how, const void *set, void *oset) {
     if (ret != 0) return ret;
 
     if (oset) {
-        uint32_t nold = native_to_netbsd_sigmask(koset);
-        if (copyout(&nold, oset, sizeof(nold)) != 0) return -14;
+        /* NetBSD sigset_t is 128 bits (4 words -- sys/sigtypes.h); only
+         * signals 1..31 live in word 0.  Write all 16 bytes so the caller's
+         * oset is fully defined, not just the low word. */
+        uint32_t nold[4] = { native_to_netbsd_sigmask(koset), 0, 0, 0 };
+        if (copyout(nold, oset, sizeof(nold)) != 0) return -14;
     }
     return 0;
 }
@@ -323,8 +343,10 @@ int netbsd_sys_sigpending(void *set) {
     int ret = kern_sigpending(&kset);
     if (ret != 0) return ret;
     if (set) {
-        uint32_t nset = native_to_netbsd_sigmask(kset);
-        if (copyout(&nset, set, sizeof(nset)) != 0) return -14;
+        /* sigset_t is 128 bits; write all 16 bytes (word 0 carries the
+         * pending set for signals 1..31, upper words are zero). */
+        uint32_t nset[4] = { native_to_netbsd_sigmask(kset), 0, 0, 0 };
+        if (copyout(nset, set, sizeof(nset)) != 0) return -14;
     }
     return 0;
 }

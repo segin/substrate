@@ -2,10 +2,11 @@
  * getopt - POSIX-like getopt and GNU-like getopt_long implementation
  */
 
-#include <unistd.h>
-#include <getopt.h>
 #include <stdio.h>
 #include <string.h>
+#include <unistd.h>
+
+#include <getopt.h>
 
 char *optarg = NULL;
 int optind = 1;

@@ -21,18 +21,19 @@
 
 #define _GNU_SOURCE
 #include <errno.h>
+#include <netdb.h>
+#include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
-#include <signal.h>
 #include <time.h>
-#include <sys/time.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
+#include <unistd.h>
+
 #include <arpa/inet.h>
-#include <netdb.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <sys/time.h>
 
 #define IPPROTO_ICMP   1
 #define IPPROTO_ICMPV6 58

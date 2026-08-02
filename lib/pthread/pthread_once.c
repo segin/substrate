@@ -19,8 +19,8 @@
  */
 
 #include <pthread.h>
-#include <stddef.h>
 #include <sched.h>
+#include <stddef.h>
 
 /* Reset once_control to "not yet run" if init_routine is canceled. */
 static void once_cancel_cleanup(void *arg) {

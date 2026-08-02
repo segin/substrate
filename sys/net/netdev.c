@@ -2,15 +2,16 @@
  * netdev.c — global registry + AF_PACKET fan-out plumbing.
  */
 
-#include <sys/netdev.h>
-#include <sys/lock.h>
-#include <net/inet.h>
-#include <kern/sched.h>
-#include <kern/console.h>
-#include <vm/vm_kmem.h>
-#include <string.h>
-#include <stddef.h>
 #include <errno.h>
+#include <stddef.h>
+#include <string.h>
+
+#include <kern/console.h>
+#include <kern/sched.h>
+#include <net/inet.h>
+#include <sys/lock.h>
+#include <sys/netdev.h>
+#include <vm/vm_kmem.h>
 
 /* ------------------------------------------------------------------ */
 /* netdev registry                                                    */

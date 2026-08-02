@@ -9,6 +9,9 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <drivers/audio/audio.h>
+#include <kern/cmdline.h>
+#include <kern/console.h>
 #include <sys/audioio.h>
 #include <sys/copy.h>
 #include <sys/errno.h>
@@ -16,9 +19,6 @@
 #include <sys/major.h>
 #include <sys/proc.h>
 #include <vfs/vfs.h>
-#include <kern/cmdline.h>
-#include <kern/console.h>
-#include <drivers/audio/audio.h>
 
 static audio_dev_t *audio_devices_head;
 static spinlock_t audio_dev_lock = SPINLOCK_INIT("audio_dev");

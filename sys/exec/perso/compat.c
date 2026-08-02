@@ -2,8 +2,17 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
-#include <termios.h>
 
+#include <arch/i386/pmap.h>
+#include <drivers/console/console.h>
+#include <exec/perso/compat.h>
+#include <exec/perso/freebsd/freebsd_syscalls.h>
+#include <exec/perso/freebsd/freebsd_user.h>
+#include <exec/perso/personality.h>
+#include <kern/file.h>
+#include <kern/sched.h>
+#include <kern/version.h>
+#include <pm/pm.h>
 #include <sys/compiler.h>
 #include <sys/copy.h>
 #include <sys/fcntl.h>
@@ -13,80 +22,33 @@
 #include <sys/param.h>
 #include <sys/proc.h>
 #include <sys/random.h>
+#include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/syscall_impl.h>
+#include <sys/sysinfo.h>
+#include <sys/time.h>
 #include <sys/tty.h>
 #include <sys/umtx.h>
 #include <sys/vt.h>
-#include <sys/sysinfo.h>
+#include <termios.h>
+#include <vfs/vfs.h>
 #include <vm/vm_kmem.h>
 #include <vm/vm_map.h>
-#include <vfs/vfs.h>
-#include <pm/pm.h>
-#include <kern/file.h>
-#include <kern/sched.h>
-#include <kern/version.h>
-#include <arch/i386/pmap.h>
-#include <drivers/console/console.h>
-#include <exec/perso/compat.h>
-#include <exec/perso/personality.h>
-#include <exec/perso/freebsd/freebsd_syscalls.h>
-#include <exec/perso/freebsd/freebsd_user.h>
 
-
-
-
-/*
- * compat_lseek32 - 32-bit lseek wrapper for foreign personalities
- *
- * Foreign personalities (Linux i386 old ABI, BSD compat, etc.) use 32-bit offsets.
- * This wrapper accepts a 32-bit signed offset and calls the native 64-bit lseek.
- * Returns: 32-bit offset on success, -1 on error (truncates large offsets!)
- *
- * Note: This is inherently limited to 2GB files. Personalities wanting LFS
- * should use llseek/lseek64 syscalls instead.
- */
-int32_t compat_lseek32(int fd, int32_t offset, int whence) {
-    /* Sign-extend 32-bit offset to 64-bit via hi/lo split */
-    uint32_t off_lo = (uint32_t)offset;
-    uint32_t off_hi = (offset < 0) ? 0xFFFFFFFF : 0;  /* Sign extend */
-    
-    int64_t result = sys_lseek(fd, off_lo, off_hi, whence);
-    
-    /* Check for overflow - if result > 2GB, return error */
-    if (result > 0x7FFFFFFF || result < -0x80000000LL) {
-        return -1;  /* EOVERFLOW */
-    }
-    return (int32_t)result;
-}
-
-/*
- * compat_time32 - 32-bit time() wrapper for Y2038-unsafe personalities
- *
- * Some old ABIs use 32-bit time_t. This wrapper calls native 64-bit time
- * and truncates the result.
- *
- * WARNING: This will overflow after 2038-01-19 03:14:07 UTC!
- */
-int32_t compat_time32(int32_t *tloc) {
-    int64_t t64;
-    int64_t result = sys_time(&t64);
-    
-    if (result < 0) return (int32_t)result;
-    
-    /* Truncate to 32-bit */
-    int32_t t32 = (int32_t)(t64 & 0xFFFFFFFF);
-    if (tloc) *tloc = t32;
-    return t32;
-}
-
-#include <sys/kern_syscalls.h>
-#include <string.h>
-
-/* Old lseek (syscall 19): (fd, pad, off_lo, off_hi, whence) with alignment pad */
+/* COMPAT6 lseek (syscall 199): (fd, pad, off_lo, off_hi, whence) with alignment pad */
 int64_t freebsd_sys_lseek(int fd, int pad, uint32_t off_lo, uint32_t off_hi, int whence) {
     (void)pad;
     return sys_lseek(fd, off_lo, off_hi, whence);
+}
+
+/* Ancient lseek (syscall 19): "long lseek(int fd, long offset, int whence)" —
+ * three args, a SIGNED 32-bit offset, no pad slot (FreeBSD syscalls.master:229).
+ * The padded COMPAT6 handler above misreads this form (it takes the offset as
+ * the pad and off_hi as whence), so syscall 19 needs its own 3-arg wrapper.
+ * Sign-extend the 32-bit offset into the split 64-bit form sys_lseek expects. */
+int64_t freebsd_sys_olseek(int fd, int32_t offset, int whence) {
+    int64_t off = (int64_t)offset;
+    return sys_lseek(fd, (uint32_t)off, (uint32_t)((uint64_t)off >> 32), whence);
 }
 
 /* lseek_freebsd13 (syscall 478): pad-less ABI - (fd, off_lo, off_hi, whence) */
@@ -239,6 +201,16 @@ int sys_mprotect(void *addr, size_t len, int prot) {
     /* Length 0 is a no-op */
     if (len == 0)
         return 0;
+
+    /*
+     * Guard the page round-up against 32-bit wrap (audit A60).  A huge len
+     * makes (start + len + 0xFFF) overflow to a small value; the end <=
+     * 0xC0000000 check below would then pass with end < start, and
+     * vm_map_protect's loops terminate immediately — silently reporting
+     * success while changing no protections.
+     */
+    if (len > (uintptr_t)-1 - 0xFFF - start)
+        return -EINVAL;
 
     /* Round up to page boundary */
     uintptr_t end = (start + len + 0xFFF) & ~0xFFF;
@@ -708,6 +680,108 @@ int freebsd_sys_clock_getres(int clk_id, void *res) {
     r.tv_sec  = 0;
     r.tv_nsec = (int32_t)(1000000000UL / HZ);
     return copyout(&r, res, sizeof(r));
+}
+
+/*
+ * freebsd_sys_gettimeofday - gettimeofday(2) with FreeBSD i386 struct layout.
+ *
+ * FreeBSD i386 `struct timeval` is 8 bytes (int32 tv_sec + int32 tv_usec),
+ * but the native sys_gettimeofday copies out a 12/16-byte native timeval
+ * (64-bit time_t), overrunning the caller's buffer by 4-8 bytes — the same
+ * hazard fixed for clock_gettime above.  Marshal into the 8-byte FreeBSD
+ * layout explicitly.  The timezone struct (two ints) is identical, so it is
+ * copied out natively.
+ */
+int freebsd_sys_gettimeofday(void *tv, void *tz) {
+    struct timeval ktv;
+    struct timezone ktz;
+    int ret = kern_gettimeofday(&ktv, tz ? &ktz : NULL);
+    if (ret != 0) return ret;
+    if (tv) {
+        struct freebsd_timeval ftv;
+        ftv.tv_sec  = (int32_t)ktv.tv_sec;
+        ftv.tv_usec = (int32_t)ktv.tv_usec;
+        if (copyout(&ftv, tv, sizeof(ftv)) != 0) return -EFAULT;
+    }
+    if (tz && copyout(&ktz, tz, sizeof(ktz)) != 0) return -EFAULT;
+    return 0;
+}
+
+/* Marshal a native struct rusage into the 8-byte-timeval FreeBSD layout. */
+static void freebsd_marshal_rusage(const struct rusage *k, struct freebsd_rusage *f) {
+    f->ru_utime.tv_sec  = (int32_t)k->ru_utime.tv_sec;
+    f->ru_utime.tv_usec = (int32_t)k->ru_utime.tv_usec;
+    f->ru_stime.tv_sec  = (int32_t)k->ru_stime.tv_sec;
+    f->ru_stime.tv_usec = (int32_t)k->ru_stime.tv_usec;
+    f->ru_maxrss   = (int32_t)k->ru_maxrss;
+    f->ru_ixrss    = (int32_t)k->ru_ixrss;
+    f->ru_idrss    = (int32_t)k->ru_idrss;
+    f->ru_isrss    = (int32_t)k->ru_isrss;
+    f->ru_minflt   = (int32_t)k->ru_minflt;
+    f->ru_majflt   = (int32_t)k->ru_majflt;
+    f->ru_nswap    = (int32_t)k->ru_nswap;
+    f->ru_inblock  = (int32_t)k->ru_inblock;
+    f->ru_oublock  = (int32_t)k->ru_oublock;
+    f->ru_msgsnd   = (int32_t)k->ru_msgsnd;
+    f->ru_msgrcv   = (int32_t)k->ru_msgrcv;
+    f->ru_nsignals = (int32_t)k->ru_nsignals;
+    f->ru_nvcsw    = (int32_t)k->ru_nvcsw;
+    f->ru_nivcsw   = (int32_t)k->ru_nivcsw;
+}
+
+/*
+ * getrusage / getitimer / wait4 all embed struct timeval, so the native
+ * handlers copy out oversized structs (64-bit time_t) that overrun the
+ * FreeBSD caller's 8-byte-timeval buffers.  Marshal into the FreeBSD layout.
+ */
+int freebsd_sys_getrusage(int who, void *usage) {
+    struct rusage kru;
+
+    if (!usage || !current_process) return -EINVAL;
+    switch (who) {
+    case RUSAGE_SELF:
+    case RUSAGE_THREAD:  kru = current_process->rusage; break;
+    case RUSAGE_CHILDREN: kru = current_process->rusage_children; break;
+    default: return -EINVAL;
+    }
+
+    struct freebsd_rusage fru;
+    memset(&fru, 0, sizeof(fru));
+    freebsd_marshal_rusage(&kru, &fru);
+    if (copyout(&fru, usage, sizeof(fru)) != 0) return -EFAULT;
+    return 0;
+}
+
+int freebsd_sys_getitimer(int which, void *curr_value) {
+    struct itimerval kit;
+    int ret = kern_getitimer(which, &kit);
+    if (ret != 0) return ret;
+    if (curr_value) {
+        struct freebsd_itimerval fit;
+        fit.it_interval.tv_sec  = (int32_t)kit.it_interval.tv_sec;
+        fit.it_interval.tv_usec = (int32_t)kit.it_interval.tv_usec;
+        fit.it_value.tv_sec     = (int32_t)kit.it_value.tv_sec;
+        fit.it_value.tv_usec    = (int32_t)kit.it_value.tv_usec;
+        if (copyout(&fit, curr_value, sizeof(fit)) != 0) return -EFAULT;
+    }
+    return 0;
+}
+
+int freebsd_sys_wait4(int pid, int *status, int options, void *rusage) {
+    int kstatus = 0;
+    struct rusage kru;
+    memset(&kru, 0, sizeof(kru));
+    int ret = kern_wait4(pid, status ? &kstatus : NULL, options,
+                         rusage ? &kru : NULL);
+    if (ret < 0) return ret;
+    if (status && copyout(&kstatus, status, sizeof(int)) != 0) return -EFAULT;
+    if (rusage) {
+        struct freebsd_rusage fru;
+        memset(&fru, 0, sizeof(fru));
+        freebsd_marshal_rusage(&kru, &fru);
+        if (copyout(&fru, rusage, sizeof(fru)) != 0) return -EFAULT;
+    }
+    return ret;
 }
 
 int freebsd_sys_rtprio_thread(int function, long lwpid, void *rtp) {
@@ -1246,8 +1320,8 @@ static const struct flag_pair fbsd_lflag[] = {
     { 0x00000100, 0000002 },  /* ICANON */
     { 0x00000400, 0100000 },  /* IEXTEN */
     { 0x00000800, 0040000 },  /* EXTPROC */
-    { 0x00008000, 0000400 },  /* TOSTOP */
-    { 0x00010000, 0000020 },  /* FLUSHO */
+    { 0x00400000, 0000400 },  /* TOSTOP  (FreeBSD _termios.h:175 == 0x00400000) */
+    { 0x00800000, 0010000 },  /* FLUSHO  (FreeBSD 0x00800000; native FLUSHO == 0010000) */
 };
 
 static uint32_t translate_flags(uint32_t in, const struct flag_pair *table, size_t n,

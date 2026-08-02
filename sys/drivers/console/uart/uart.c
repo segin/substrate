@@ -1,21 +1,22 @@
+#include <stdio.h>
+#include <string.h>
+
+#include <arch/i386/idt.h>
+#include <arch/x86-common/io.h>
+#include <drivers/console/uart/uart.h>
 #include <kern/console.h>
 #include <kern/device.h>
-#include <kern/sysrq.h>
-#include <drivers/console/uart/uart.h>
-#include <arch/x86-common/io.h>
-#include <arch/i386/idt.h>
 #include <kern/isa.h>
 #include <kern/isapnp.h>
 #include <kern/resource.h>
-#include <sys/termios.h>
-#include <sys/major.h>
+#include <kern/sysrq.h>
+#include <sys/copy.h>
 #include <sys/errno.h>
 #include <sys/lock.h>
+#include <sys/major.h>
 #include <sys/poll.h>
+#include <sys/termios.h>
 #include <vfs/vfs.h>
-#include <sys/copy.h>
-#include <string.h>
-#include <stdio.h>
 
 int uart_received(void);
 

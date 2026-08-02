@@ -24,17 +24,18 @@
  * that is not the current address space.
  */
 
-#include <sys/proc.h>
-#include <sys/signal.h>
-#include <sys/ptrace.h>
+#include <string.h>
+
+#include <arch/i386/idt.h>
+#include <arch/i386/pmap.h>
+#include <pm/pm.h>
 #include <sys/copy.h>
 #include <sys/errno.h>
 #include <sys/lock.h>
-#include <arch/i386/idt.h>
-#include <arch/i386/pmap.h>
+#include <sys/proc.h>
+#include <sys/ptrace.h>
+#include <sys/signal.h>
 #include <vm/vm_fault.h>
-#include <pm/pm.h>
-#include <string.h>
 
 #define EFLAGS_TF 0x00000100u   /* trap flag — single-step after each insn */
 

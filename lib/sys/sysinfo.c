@@ -38,16 +38,16 @@
  *     already done by the parser).
  */
 
-#include <sys/sysinfo.h>
-#include <sys/syscall.h>
-#include <unistd.h>
-#include <string.h>
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <errno.h>
+#include <string.h>
 #include <time.h>
+#include <unistd.h>
 
-#include "sysret.h"
+#include <sys/syscall.h>
+#include <sys/sysinfo.h>
+#include <sysret.h>
 
 /* ===========================================================
  * sysinfo(2): legacy Linux-style aggregate.

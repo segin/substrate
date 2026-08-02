@@ -15,10 +15,14 @@
 #include <fcntl.h>
 #include <setjmp.h>
 #include <signal.h>
-#include <stdio.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <termios.h>
+#include <time.h>
+#include <unistd.h>
+
 #include <sys/ioctl.h>
 #include <sys/ipc.h>
 #include <sys/msg.h>
@@ -26,10 +30,11 @@
 #include <sys/shm.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
+#include <sys/sysctl.h>
 #include <sys/time.h>
-#include <termios.h>
-#include <time.h>
-#include <unistd.h>
+#include <sys/times.h>
+#include <sys/types.h>
+#include <sys_local.h>
 #include <utime.h>
 
 /* ============================================================
@@ -261,7 +266,7 @@ int sigaltstack(const stack_t *ss, stack_t *oss) {
 int sigqueue(pid_t pid, int sig, const union sigval value) {
     /* Carry the union sigval payload to the kernel; it surfaces in an
      * SA_SIGINFO handler as siginfo.si_value (si_code == SI_QUEUE). */
-    extern int64_t _syscall3(int, uintptr_t, uintptr_t, uintptr_t);
+
     int64_t r = _syscall3(SYS_SIGQUEUE, (uintptr_t)pid, (uintptr_t)sig,
                           (uintptr_t)value.sival_ptr);
     if (r < 0) { errno = (int)-r; return -1; }
@@ -329,7 +334,7 @@ int sigtimedwait(const sigset_t *set, siginfo_t *info, const struct timespec *ti
      * is pending, drains the RT-signal queue for it, and fills siginfo
      * (si_value/si_code).  It returns the signal number on success or a
      * negative errno (-EAGAIN on timeout, -EINTR, -EINVAL, -EFAULT). */
-    extern int64_t _syscall3(int, uintptr_t, uintptr_t, uintptr_t);
+
     int64_t r = _syscall3(SYS_SIGTIMEDWAIT, (uintptr_t)set, (uintptr_t)info,
                           (uintptr_t)timeout);
     if (r < 0) { errno = (int)-r; return -1; }
@@ -347,7 +352,7 @@ int sigwait(const sigset_t *set, int *sig) {
      * NUMBER (not -1/errno) on failure; the kernel returns 0 / a positive
      * POSIX error, or a negative errno for a bad pointer. */
     if (!set || !sig) return EINVAL;
-    extern int64_t _syscall2(int, uintptr_t, uintptr_t);
+
     int64_t r = _syscall2(SYS_SIGWAIT, (uintptr_t)set, (uintptr_t)sig);
     if (r < 0) return (int)-r;   /* normalize -errno (e.g. EFAULT) */
     return (int)r;               /* 0 on success, else positive POSIX error */

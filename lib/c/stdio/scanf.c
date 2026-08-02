@@ -2,14 +2,15 @@
  * scanf.c - scanf family implementation for Substrate libc
  */
 
-#include <stdio.h>
-#include <stdarg.h>
-#include <string.h>
-#include <stdlib.h>
-#include <stdint.h>
-#include <stddef.h>
-#include <limits.h>
 #include <ctype.h>
+#include <limits.h>
+#include <stdarg.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
 #include <sys/types.h>
 
 typedef int (*scan_getc_fn)(void *ctx);

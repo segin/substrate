@@ -1,16 +1,17 @@
-#include <fs/ext2/ext2.h>
-#include <vfs/vfs.h>
-#include <drivers/storage/blkdev.h>
-#include <kern/console.h>
-#include <kern/cmdline.h>
-#include <kern/time.h>
 #include <string.h>
-#include <vm/vm_kmem.h>
-#include <vm/uma.h>
-#include <sys/errno.h>
-#include <sys/stat.h>
-#include <sys/mount.h>
+
 #include <crc32c.h>
+#include <drivers/storage/blkdev.h>
+#include <fs/ext2/ext2.h>
+#include <kern/cmdline.h>
+#include <kern/console.h>
+#include <kern/time.h>
+#include <sys/errno.h>
+#include <sys/mount.h>
+#include <sys/stat.h>
+#include <vfs/vfs.h>
+#include <vm/uma.h>
+#include <vm/vm_kmem.h>
 
 /*
  * ext2trace — gated on `debug=ext2trace` on the kernel command line.
@@ -76,24 +77,50 @@ static mutex_t ext2_inode_table_lock;
  * definitions live below alongside the rest of the inode allocator. */
 static int ext2_free_inode_blocks(ext2_fs_t *fs, ext2_inode_t *inode);
 
+/*
+ * EXT2-18: pin_count is what stops ext2_alloc_node() from recycling a slot
+ * out from under a live fs_node, but it was a plain uint16_t incremented and
+ * decremented with no lock while the allocator scanned it under
+ * ext2_node_cache_lock.  Two hazards: a lost update between concurrent
+ * open()s (read-modify-write on a non-atomic field) undercounts the pin and
+ * lets the slot be recycled while it is still open, and a decrement to 0
+ * racing the allocator's scan lets the allocator claim a slot the closer is
+ * still working on.  Both mutations now happen under the same lock the
+ * allocator uses, so the scan sees a stable count.
+ */
 static void ext2_node_open(fs_node_t *node) {
     if (!node) return;
     ext2_node_t *ctx = (ext2_node_t *)(uintptr_t)node->impl;
     if (!ctx) return;
+    mutex_lock(&ext2_node_cache_lock);
     ctx->pin_count++;
+    mutex_unlock(&ext2_node_cache_lock);
 }
 
 static void ext2_node_close(fs_node_t *node) {
     if (!node) return;
     ext2_node_t *ctx = (ext2_node_t *)(uintptr_t)node->impl;
     if (!ctx) return;
+
+    mutex_lock(&ext2_node_cache_lock);
     if (ctx->pin_count > 0) {
         ctx->pin_count--;
     }
+    int finish_delete = (ctx->pin_count == 0 && ctx->orphaned && ctx->fs);
+    if (finish_delete) {
+        /* Re-pin across the teardown.  The block/inode frees below take
+         * fs->alloc_lock and do I/O, so they must not run holding the cache
+         * lock -- but a slot at pin_count 0 is fair game for the allocator,
+         * which would hand this half-torn-down slot to another lookup.  The
+         * pin keeps it reserved; it is dropped again at the end. */
+        ctx->pin_count = 1;
+    }
+    mutex_unlock(&ext2_node_cache_lock);
+
     /* Deferred unlink: ext2_unlink saw open FDs and set ctx->orphaned
      * instead of freeing the inode + data blocks.  Now that the last
      * FD has closed, complete the delete the unlink path skipped. */
-    if (ctx->pin_count == 0 && ctx->orphaned && ctx->fs) {
+    if (finish_delete) {
         (void)ext2_free_inode_blocks(ctx->fs, &ctx->inode);
         ext2_free_inode(ctx->fs, ctx->inode_num,
                         ctx->was_dir_at_unlink ? 1 : 0);
@@ -110,8 +137,11 @@ static void ext2_node_close(fs_node_t *node) {
          * Clearing fs/inode_num forces the alloc path to recycle
          * this slot and copy in the on-disk inode that ext2_finddir
          * just read.  */
+        mutex_lock(&ext2_node_cache_lock);
         ctx->fs = NULL;
         ctx->inode_num = 0;
+        ctx->pin_count = 0;     /* release the teardown re-pin */
+        mutex_unlock(&ext2_node_cache_lock);
     }
 }
 
@@ -376,13 +406,49 @@ static int is_sparse_backup(uint32_t group) {
     return 0;
 }
 
+/*
+ * The on-disk superblock is 1024 bytes, but ext2_superblock_t only describes
+ * the leading fields this driver actually models -- it ends at s_algo_bitmap.
+ * Writing 1024 bytes straight out of &fs->sb therefore read far past the
+ * struct (and past the ext2_fs_t allocation holding it), publishing kernel
+ * heap -- including the fs->bgd / fs->device pointers -- into the filesystem
+ * image, and overwriting every extended field we do not model: s_hash_seed,
+ * s_desc_size, s_checksum_seed, s_default_mount_opts and s_checksum.  On a
+ * metadata_csum volume that alone makes the next mount fail validation.
+ *
+ * So the superblock is always written read-modify-write: pull the existing
+ * 1024 bytes, patch in the sizeof(fs->sb) prefix we own, and put it back.
+ */
+static int ext2_super_rmw(ext2_fs_t *fs, uint8_t *buf, size_t buf_len) {
+    if (buf_len < sizeof(fs->sb)) return -EIO;
+
+    if (!fs->device->read ||
+        fs->device->read(fs->device, 1024, buf_len, buf) != buf_len) {
+        /* Nothing readable to preserve: start from zeros rather than from
+         * whatever the allocator last left in this buffer. */
+        memset(buf, 0, buf_len);
+    }
+    memcpy(buf, &fs->sb, sizeof(fs->sb));
+    return 0;
+}
+
 static int ext2_flush_super(ext2_fs_t *fs) {
     if (!fs || !fs->device || !fs->device->write) return -EIO;
-    
+
     // Write primary superblock
-    if (fs->device->write(fs->device, 1024, 1024, (uint8_t *)&fs->sb) != 1024) {
+    uint8_t *sb_buf = kmalloc(1024);
+    if (!sb_buf) return -ENOMEM;
+
+    if (ext2_super_rmw(fs, sb_buf, 1024) != 0) {
+        kfree(sb_buf, 1024);
         return -EIO;
     }
+
+    if (fs->device->write(fs->device, 1024, 1024, sb_buf) != 1024) {
+        kfree(sb_buf, 1024);
+        return -EIO;
+    }
+    kfree(sb_buf, 1024);
 
     // Write backups if necessary (EXT2_FEATURE_RO_COMPAT_SPARSE_SUPER = 0x0001)
     int sparse = (fs->sb.s_feature_ro_compat & 0x0001);
@@ -398,8 +464,13 @@ static int ext2_flush_super(ext2_fs_t *fs) {
             backup_err = -ENOMEM;
             continue;
         }
-        memset(tmp, 0, fs->block_size);
-        memcpy(tmp, &fs->sb, 1024);
+        /* Same read-modify-write as the primary: copying 1024 bytes out of
+         * a 204-byte struct over-reads, and blindly zeroing the rest of the
+         * block would wipe the backup's extended superblock fields too. */
+        if (ext2_read_block(fs, block, tmp) != fs->block_size) {
+            memset(tmp, 0, fs->block_size);
+        }
+        memcpy(tmp, &fs->sb, sizeof(fs->sb));
         /* Don't drop write errors silently — a failed backup write
          * leaves the on-disk image inconsistent with the primary. */
         if (ext2_write_block(fs, block, tmp) != fs->block_size) {
@@ -655,9 +726,25 @@ static uint32_t ext4_extent_resolve(ext2_fs_t *fs, ext2_inode_t *inode,
      * index whose ei_blk <= logical — that's the child covering this
      * logical block.  */
     uint8_t *node = (uint8_t *)&inode->i_block[0];
+    /* Bound the on-disk entry count to what the containing buffer can hold:
+     * the root header lives in the 60-byte i_block area, deeper nodes in a
+     * block-sized scratch buffer.  eh_ecount is an unbounded u16 from disk, so
+     * a corrupt filesystem could otherwise drive the idx[i]/ex[i] loops far
+     * past the buffer — an out-of-bounds read. */
+    size_t node_cap = sizeof(inode->i_block);
+    /* EXT2-13: eh_depth is an unbounded u16 from disk and drives this descent.
+     * A corrupt inode claiming depth 65535, with an index entry pointing back
+     * at its own block, made every logical-block lookup do 65535 block reads.
+     * ext4 itself caps the tree at EXT4_EXT_DEPTH_MAX levels, so anything
+     * deeper is corruption, not a filesystem we should try to walk. */
+    if (eh->eh_depth > EXT4_EXT_DEPTH_MAX) return 0;
     for (int depth = eh->eh_depth; depth > 0; depth--) {
         ext4_extent_idx_t *idx = (ext4_extent_idx_t *)(node + sizeof(*eh));
         int n = eh->eh_ecount;
+        if (n <= 0) return 0;
+        size_t max_idx = (node_cap > sizeof(*eh))
+                       ? (node_cap - sizeof(*eh)) / sizeof(ext4_extent_idx_t) : 0;
+        if ((size_t)n > max_idx) n = (int)max_idx;
         if (n <= 0) return 0;
         int pick = -1;
         for (int i = 0; i < n; i++) {
@@ -670,14 +757,25 @@ static uint32_t ext4_extent_resolve(ext2_fs_t *fs, ext2_inode_t *inode,
         if (child == 0 || child >> 32) return 0;
         ext2_read_block(fs, (uint32_t)child, scratch);
         node = scratch;
+        node_cap = fs->block_size;
         eh = (ext4_extent_header_t *)node;
         if (eh->eh_magic != EXT4_EXT_MAGIC) return 0;
+        /* EXT2-13: a well-formed tree strictly decreases in depth on the way
+         * down.  Without this an index pointing at its own block (or at any
+         * node of equal-or-greater depth) satisfies the magic check and the
+         * loop just keeps re-reading it. */
+        if (eh->eh_depth != depth - 1) return 0;
     }
 
     /* Leaf level: array of extents.  Each extent covers
      * [e_blk, e_blk + e_len).  Find the one containing `logical`.  */
     ext4_extent_t *ex = (ext4_extent_t *)(node + sizeof(*eh));
     int n = eh->eh_ecount;
+    {
+        size_t max_ex = (node_cap > sizeof(*eh))
+                      ? (node_cap - sizeof(*eh)) / sizeof(ext4_extent_t) : 0;
+        if ((size_t)n > max_ex) n = (int)max_ex;
+    }
     for (int i = 0; i < n; i++) {
         uint32_t ext_start = ex[i].e_blk;
         /* Uninitialised extent's e_len has the high bit set; mask
@@ -795,6 +893,15 @@ void ext2_get_blocks_extent(ext2_fs_t *fs, ext2_inode_t *inode, uint32_t block_i
 
 // Read data from an inode at a given offset
 uint32_t ext2_inode_read(ext2_node_t *node, off_t offset, uint32_t size, void *buffer) {
+    /* off_t is signed and sys_lseek() accepts a negative offset, which
+     * read_fs()/write_fs() pass straight through.  Every bound below is an
+     * unsigned comparison that a negative value silently passes, after which
+     * block_offset = (uint32_t)(offset % block_size) is huge and
+     * memcpy(block_buf + block_offset, ...) lands BEFORE the kmalloc'd block
+     * buffer -- an attacker-controlled write (or heap disclosure on read)
+     * reachable from any unprivileged process via
+     * lseek(fd, -100, SEEK_SET); write(fd, buf, 64). */
+    if (offset < 0) return 0;
     ext2_fs_t *fs = node->fs;
     ext2_inode_t *inode = &node->inode;
 
@@ -928,6 +1035,22 @@ static int ext4_extent_alloc_inode_block(ext2_fs_t *fs, ext2_inode_t *inode,
     uint16_t n = eh->eh_ecount;
     uint16_t max = eh->eh_max;
 
+    /*
+     * eh_ecount and eh_max come straight off the disk and are used below as
+     * indices into the inline extent array, which lives inside the 60-byte
+     * i_block[].  ext4_extent_resolve() clamps them; this allocator did not,
+     * so an inode claiming eh_ecount = 500 made `&exts[n-1]` a read and
+     * `&exts[n]` a 12-byte WRITE several kilobytes past the inode -- straight
+     * through the static ext2_node_cache[] into neighbouring slots.
+     */
+    uint16_t capacity = (uint16_t)((sizeof(inode->i_block) - sizeof(*eh)) /
+                                   sizeof(ext4_extent_t));
+    if (max > capacity || n > max) {
+        kprintf("ext2: bogus inline extent header (ecount=%u max=%u cap=%u)\n",
+                n, max, capacity);
+        return -1;
+    }
+
     if (n == 0) {
         if (max == 0) return -1;
         uint32_t blk = ext2_alloc_block(fs);
@@ -949,8 +1072,12 @@ static int ext4_extent_alloc_inode_block(ext2_fs_t *fs, ext2_inode_t *inode,
     uint32_t logical_end = last->e_blk + last->e_len;
     if (logical_end != block_idx) return -1;    /* sparse — refuse */
 
-    uint32_t phys_end = ((uint32_t)last->e_start_hi << 16) |
-                        last->e_start_lo;
+    /* EXT2-11: e_start_lo holds the low 32 bits and e_start_hi the *high 16*
+     * of a 48-bit physical block number, which is how ext4_extent_resolve()
+     * reads it back ((hi << 32) | lo).  This shifted hi by 16 instead, so on
+     * any volume that actually used the high word the contiguity test
+     * compared against a garbage address. */
+    uint64_t phys_end = ((uint64_t)last->e_start_hi << 32) | last->e_start_lo;
     phys_end += last->e_len;
 
     uint32_t blk = ext2_alloc_block(fs);
@@ -978,8 +1105,15 @@ static int ext4_extent_alloc_inode_block(ext2_fs_t *fs, ext2_inode_t *inode,
     ext4_extent_t *ne = &exts[n];
     ne->e_blk      = block_idx;
     ne->e_len      = 1;
-    ne->e_start_hi = (blk >> 16) & 0xFFFFu;
-    ne->e_start_lo = blk & 0xFFFFFFFFu;
+    /* EXT2-11: `blk` is a 32-bit block number, so it belongs entirely in
+     * e_start_lo with a zero high word.  Writing (blk >> 16) into e_start_hi
+     * meant ext4_extent_resolve() read it back as bits 32-47 of a 48-bit
+     * address: for any block above 65535 the resolved address had a non-zero
+     * high word, hit the `if (phys >> 32) return 0` guard and was reported as
+     * a hole -- the data was unreadable and the block leaked, then got
+     * re-allocated on the next write. */
+    ne->e_start_hi = 0;
+    ne->e_start_lo = blk;
     eh->eh_ecount  = n + 1;
     return 0;
 }
@@ -1121,7 +1255,26 @@ int ext2_alloc_inode_block(ext2_fs_t *fs, ext2_inode_t *inode, uint32_t block_id
 }
 
 // Write data to an inode at a given offset
-uint32_t ext2_inode_write(ext2_node_t *node, off_t offset, uint32_t size, const void *buffer) {
+uint32_t ext2_inode_write(ext2_node_t *node, off_t offset, uint32_t size,
+                          const void *buffer, int *errp) {
+    /* EXT2-15: every early return below used to yield a bare 0, which
+     * ext2_file_write() handed straight back to write(2).  POSIX forbids a 0
+     * return for a non-zero count, and stdio's fwrite() retry loop treats it
+     * as "try again" -- so a full filesystem spun forever instead of
+     * reporting ENOSPC.  Report the reason through errp. */
+    if (errp) *errp = 0;
+    /* off_t is signed and sys_lseek() accepts a negative offset, which
+     * read_fs()/write_fs() pass straight through.  Every bound below is an
+     * unsigned comparison that a negative value silently passes, after which
+     * block_offset = (uint32_t)(offset % block_size) is huge and
+     * memcpy(block_buf + block_offset, ...) lands BEFORE the kmalloc'd block
+     * buffer -- an attacker-controlled write (or heap disclosure on read)
+     * reachable from any unprivileged process via
+     * lseek(fd, -100, SEEK_SET); write(fd, buf, 64). */
+    if (offset < 0) {
+        if (errp) *errp = -EINVAL;
+        return 0;
+    }
     ext2_fs_t *fs = node->fs;
     ext2_inode_t *inode = &node->inode;
 
@@ -1146,6 +1299,7 @@ uint32_t ext2_inode_write(ext2_node_t *node, off_t offset, uint32_t size, const 
 
     if (!node->block_buf || !node->indirect_buf || !node->dindirect_buf || !node->tindirect_buf) {
         mutex_unlock(&node->lock);
+        if (errp) *errp = -ENOMEM;
         return 0;
     }
 
@@ -1166,10 +1320,14 @@ uint32_t ext2_inode_write(ext2_node_t *node, off_t offset, uint32_t size, const 
         if (block_num == 0) {
             if (ext2_alloc_inode_block(fs, inode, block_idx, indirect, dindirect, tindirect) != 0) {
                 // Out of space
+                if (errp) *errp = -ENOSPC;
                 break;
             }
             block_num = ext2_get_block_num(fs, inode, block_idx, indirect, dindirect, tindirect);
-            if (block_num == 0) break;
+            if (block_num == 0) {
+                if (errp) *errp = -ENOSPC;
+                break;
+            }
             
             // Zero the newly allocated block
             memset(block_buf, 0, fs->block_size);
@@ -1478,7 +1636,16 @@ static int ext2_chmod(fs_node_t *node, uint32_t mode) {
     if (EXT2_RO_REFUSE(ctx->fs)) return -EROFS;
 
     ctx->inode.i_mode = (uint16_t)((ctx->inode.i_mode & 0xF000U) | (mode & 0x0FFFU));
-    ctx->inode.i_ctime = (uint32_t)node->ctime;
+    /* EXT2-22: this copied the *existing* cached ctime back over itself, so
+     * chmod() never advanced it.  POSIX requires a successful chmod to set
+     * ctime to the current time -- tools that detect metadata changes by
+     * ctime (backup programs, `find -newerct`, intrusion detection) saw
+     * nothing happen. */
+    {
+        time_t now = get_time();
+        ctx->inode.i_ctime = (uint32_t)now;
+        node->ctime        = now;
+    }
 
     if (ext2_write_inode(ctx->fs, ctx->inode_num, &ctx->inode) != 0) {
         return -EIO;
@@ -1500,6 +1667,16 @@ static int ext2_setattr(fs_node_t *node, const struct fs_attr *a) {
     if (!ctx || !ctx->fs) return -EINVAL;
     if (EXT2_RO_REFUSE(ctx->fs)) return -EROFS;
     if (a->mask == 0) return 0;
+
+    /* SIZE — truncation needs to free data blocks; route through the existing
+     * truncate path.  EXT2-19: this refusal used to sit at the *end* of the
+     * function, after every other selected field had already been written into
+     * ctx->inode and the cached fs_node.  The call returned -EINVAL without
+     * reaching ext2_write_inode(), so the caller saw a clean rejection while
+     * the in-core inode had silently changed -- and the next unrelated write
+     * to that inode committed the mutation to disk.  Reject before touching
+     * anything. */
+    if (a->mask & FS_ATTR_SIZE) return -EINVAL;
 
     /* Whether the on-disk inode has room for nsec extras depends on
      * the mount-wide inode_size (256 vs 128 bytes).  ext2_write_inode
@@ -1539,13 +1716,6 @@ static int ext2_setattr(fs_node_t *node, const struct fs_attr *a) {
         ctx->inode.i_gid = (uint16_t)a->gid;
         node->gid        = a->gid;
     }
-    /* SIZE — truncation needs to free data blocks; route through
-     * the existing truncate path.  Refuse here so the caller
-     * doesn't silently get half-truncated data.  */
-    if (a->mask & FS_ATTR_SIZE) {
-        return -EINVAL;
-    }
-
     if (ext2_write_inode(ctx->fs, ctx->inode_num, &ctx->inode) != 0)
         return -EIO;
     return 0;
@@ -1628,20 +1798,42 @@ size_t ext2_file_write(fs_node_t *node, off_t offset, size_t size, const uint8_t
     ext2_node_t *ctx = (ext2_node_t *)(uintptr_t)node->impl;
     ext2_fs_t *fs = ctx->fs;
     if (EXT2_RO_REFUSE(fs)) return (size_t)-EROFS;
+
+    /*
+     * EXT2-12: i_size is a 32-bit field and this driver never touches
+     * i_size_high, but ext2_inode_write() assigns a 64-bit off_t straight
+     * into it.  A write past 4 GiB therefore landed on disk correctly and
+     * then recorded the length modulo 2^32 -- the file came back looking
+     * a few bytes long with gigabytes of orphaned blocks attached.
+     * ext2_truncate() already refuses to cross the same boundary with
+     * -EFBIG; do the same here rather than corrupt the length silently.
+     */
+    if (offset >= 0 &&
+        (uint64_t)offset + (uint64_t)size > 0xFFFFFFFFULL)
+        return (size_t)-EFBIG;
+
     /* Extent-tree files: now go through the partial extent-write
      * path inside ext2_inode_write -> ext4_extent_alloc_inode_block.
      * Append-only (sparse / multi-level still bail with -EROFS
      * inside the allocator) so a write that "succeeds" up to N
      * bytes and then fails will leave a consistent file at length
      * N.  */
-    uint32_t written = ext2_inode_write(ctx, offset, size, buffer);
-    
+    int werr = 0;
+    uint32_t written = ext2_inode_write(ctx, offset, size, buffer, &werr);
+
     // Write updated inode back to disk
     if (written > 0) {
         ext2_write_inode(fs, ctx->inode_num, &ctx->inode);
         node->length = ctx->inode.i_size; // Update VFS node size
     }
-    
+
+    /* EXT2-15: a partial write is a success -- the caller retries from where
+     * we stopped.  Writing *nothing* when something was asked for is not: it
+     * has to surface as an error, or write(2) returns 0 and the caller loops
+     * forever on a full filesystem. */
+    if (written == 0 && size > 0)
+        return (size_t)(werr ? werr : -ENOSPC);
+
     return written;
 }
 
@@ -1732,8 +1924,18 @@ struct dirent *ext2_readdir(fs_node_t *node, uint64_t index) {
             block_off += de->rec_len;
             pos += de->rec_len;
         }
+
+        /* Same guard ext2_add_entry() carries: the inner loop `break`s on a
+         * malformed record (rec_len < 8, or one running past the block) WITHOUT
+         * advancing pos.  The outer loop then recomputes the identical
+         * block_idx, re-reads the same block, breaks again -- an unkillable
+         * 100%-CPU kernel spin, here with ctx->lock held so every other user of
+         * this directory blocks behind it.  Skip to the next block instead. */
+        uint32_t block_end = (block_idx + 1) * fs->block_size;
+        if (pos < block_end)
+            pos = block_end;
     }
-    
+
 cleanup:
     mutex_unlock(&ctx->lock);
     return result;
@@ -1754,7 +1956,14 @@ static uint32_t ext2_scan_leaf(uint8_t *block, uint32_t block_size,
     while (off + 8 <= block_size) {
         ext2_dirent_t *de = (ext2_dirent_t *)(block + off);
         if (de->rec_len < 8 || off + de->rec_len > block_size) return 0;
-        if (de->inode != 0 && de->name_len == name_len &&
+/* de->name_len is on-disk and unbounded; only rec_len was checked against the
+ * block.  A last-in-block record with rec_len 8 and name_len 200 made the
+ * memcmp below read 200 bytes past the kmalloc'd directory block.  The name
+ * has to fit in the record, after the 8-byte header.  (ext2_readdir already
+ * clamps this way; these three comparison sites did not.) */
+        if (de->inode != 0 && de->rec_len >= 8 &&
+            de->name_len <= (uint32_t)(de->rec_len - 8) &&
+            de->name_len == name_len &&
             memcmp(de->name, name, name_len) == 0) {
             return de->inode;
         }
@@ -1882,8 +2091,13 @@ fs_node_t *ext2_finddir(fs_node_t *node, char *name) {
      * walk.  The ext2_alloc_node() call we make for a matching child scans
      * for a pin_count==0 slot to recycle, and would otherwise be free to
      * recycle THIS slot out from under us mid-lookup (the parent is not
-     * necessarily pinned by the caller).  Balanced at the cleanup label. */
+     * necessarily pinned by the caller).  Balanced at the cleanup label.
+     * EXT2-18: under ext2_node_cache_lock, the lock the recycling scan
+     * itself holds -- an unsynchronised bump can be lost against a
+     * concurrent close and leave the slot recyclable mid-walk. */
+    mutex_lock(&ext2_node_cache_lock);
     ctx->pin_count++;
+    mutex_unlock(&ext2_node_cache_lock);
 
     mutex_lock(&ctx->lock);
 
@@ -1966,10 +2180,22 @@ fs_node_t *ext2_finddir(fs_node_t *node, char *name) {
                 }
             }
         } else if (htr == 0) {
-            /* htree said "not here" — trust the indexer and return
-             * NULL.  This is the FreeBSD behaviour; linear-scanning
-             * after a successful htree miss is a waste.  */
-            goto cleanup;
+            /*
+             * [EXT2-08] This used to `goto cleanup` -- treating the htree
+             * miss as authoritative, which is correct ONLY if every entry in
+             * the directory is actually present in the index.  Substrate has
+             * no write-side htree support at all: ext2_add_entry appends to
+             * a leaf (or a fresh block) and never inserts into the index.  A
+             * file created here is therefore missed by the index and, with
+             * the miss trusted, becomes invisible -- open() returns ENOENT
+             * for a name that plainly exists in the directory.
+             *
+             * An htree leaf block is an ordinary linear dirent block, so a
+             * full linear scan always finds every entry.  Fall through to it
+             * until index insertion exists; the cost is a slow lookup on the
+             * miss path, which is much cheaper than a lost file.
+             */
+            ext2_finddir_htree_bypass++;
         }
         if (htr < 0) ext2_finddir_htree_bypass++;
         /* fall through to linear scan */
@@ -1997,7 +2223,9 @@ fs_node_t *ext2_finddir(fs_node_t *node, char *name) {
 
             if (de->inode != 0 && de->name_len > 0) {
                 // Compare names
-                if (de->name_len == name_len &&
+                if (de->rec_len >= 8 &&
+                    de->name_len <= (uint32_t)(de->rec_len - 8) &&
+                    de->name_len == name_len &&
                     memcmp(de->name, name, de->name_len) == 0) {
                     // Found it - read the inode and return a node
                     ext2_inode_t inode;
@@ -2073,7 +2301,9 @@ cleanup:
     /* FS-05: release the parent pin taken on entry.  Done after dropping
      * ctx->lock so the slot is fully quiescent; the returned child node is
      * a distinct slot and is unaffected. */
+    mutex_lock(&ext2_node_cache_lock);
     if (ctx->pin_count > 0) ctx->pin_count--;
+    mutex_unlock(&ext2_node_cache_lock);
     return result_node;
 }
 
@@ -2210,7 +2440,12 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
 
     fs->inodes_per_group = fs->sb.s_inodes_per_group;
     fs->blocks_per_group = fs->sb.s_blocks_per_group;
-    if (fs->blocks_per_group == 0) {
+    /* The block bitmap for a group is a single block, so it holds at most
+     * block_size*8 bits — one per block in the group.  A blocks_per_group
+     * larger than that (attacker-controlled on-disk value) makes the free-block
+     * scan walk past the one-block bitmap buffer: an out-of-bounds read. */
+    if (fs->blocks_per_group == 0 ||
+        fs->blocks_per_group > fs->block_size * 8) {
         kprint("EXT2: Invalid blocks_per_group\n");
         kfree(fs, sizeof(ext2_fs_t));
         return NULL;
@@ -2221,16 +2456,46 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
      * kernel with a divide error on the first inode read; an absurdly
      * large value yields nonsensical group math.  Reject both. */
     if (fs->inodes_per_group == 0 ||
-        fs->inodes_per_group > fs->sb.s_inodes_count) {
+        fs->inodes_per_group > fs->sb.s_inodes_count ||
+        fs->inodes_per_group > fs->block_size * 8) {
         kprint("EXT2: Invalid inodes_per_group\n");
         kfree(fs, sizeof(ext2_fs_t));
         return NULL;
     }
-    fs->group_count = (fs->sb.s_blocks_count + fs->blocks_per_group - 1) / fs->blocks_per_group;
+    /* EXT2-24: block numbering starts at s_first_data_block (1 on a 1 KiB-block
+     * filesystem, 0 otherwise), so the number of groups is derived from the
+     * count of *addressable* blocks.  Including the pre-first_data_block gap
+     * could yield one group too many, and the extra bgd slot -- plus its
+     * metadata_csum check -- then read past the real group descriptor table. */
+    {
+        uint32_t first = fs->sb.s_first_data_block;
+        uint32_t addressable = (fs->sb.s_blocks_count > first)
+                             ? (fs->sb.s_blocks_count - first) : 0;
+        fs->group_count = (addressable + fs->blocks_per_group - 1) /
+                          fs->blocks_per_group;
+    }
+    if (fs->group_count == 0) {
+        kprint("EXT2: filesystem has no block groups\n");
+        kfree(fs, sizeof(ext2_fs_t));
+        return NULL;
+    }
     
     fs->inode_size = (fs->sb.s_rev_level >= 1) ? fs->sb.s_inode_size : EXT2_GOOD_OLD_INODE_SIZE;
 
     // Validate inode_size is non-zero and fits within a block
+    /* ext2_read_inode() unconditionally memcpy's EXT2_GOOD_OLD_INODE_SIZE
+     * bytes out of the block, and the csum helpers touch fixed offsets up to
+     * 130, so anything smaller reads (and, with metadata_csum, WRITES) past
+     * the block buffer.  A non-divisor also makes the last inode of a block
+     * straddle its end. */
+    if (fs->inode_size < EXT2_GOOD_OLD_INODE_SIZE ||
+        (fs->inode_size & (fs->inode_size - 1)) != 0 ||
+        (fs->block_size % fs->inode_size) != 0) {
+        kprintf("ext2: bad inode size %u (block size %u)\n",
+                fs->inode_size, fs->block_size);
+        kfree(fs, sizeof(ext2_fs_t));
+        return NULL;
+    }
     if (fs->inode_size == 0 || fs->inode_size > fs->block_size) {
         kprint("EXT2: Invalid inode_size\n");
         kfree(fs, sizeof(ext2_fs_t));
@@ -2252,12 +2517,23 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
     uint32_t bgd_blocks = (raw_bgd_size + fs->block_size - 1) / fs->block_size;
     uint32_t bgd_size = bgd_blocks * fs->block_size;
 
+    /* Declared up here so the shared `fail:` label below can free them
+     * whichever failure path jumps to it. */
+    uint8_t *gdt_raw = NULL;
+    uint32_t on_disk_size = 0;
+
     fs->bgd = kmalloc(bgd_size);
     if (!fs->bgd) {
         kfree(fs, sizeof(ext2_fs_t));
         return NULL;
     }
     memset(fs->bgd, 0, bgd_size);
+    /* EXT2-21: bgd is allocated rounded up to whole blocks, but unmount used
+     * to free it as group_count * sizeof(ext2_group_desc_t).  kfree derives
+     * the true size from the pointer so nothing was corrupted, but kmem_stats
+     * drifted by the rounding on every mount/unmount cycle.  Keep the real
+     * size so the free matches the alloc. */
+    fs->bgd_size = bgd_size;
 
     /* Per-group dirty bitmap for deferred metadata flush (see ext2_fs_t).
      * Tiny (group_count/8 bytes); if it ever fails to allocate,
@@ -2289,9 +2565,7 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
         if (on_disk < 32 || on_disk > 1024 || (on_disk & 3)) {
 
             kprintf("ext2: implausible s_desc_size %u\n", on_disk);
-            kfree(fs->bgd, bgd_size);
-            kfree(fs, sizeof(ext2_fs_t));
-            return NULL;
+            goto fail;
         }
         fs->desc_size = on_disk;
     }
@@ -2302,14 +2576,22 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
      * staging buffer, copy the first 32 bytes of each, and reject
      * the mount if any high-half field is non-zero (we have no way
      * to address those blocks with uint32_t internals).  */
-    uint32_t on_disk_total = fs->group_count * fs->desc_size;
+    /* EXT2-28: the ceiling above bounded group_count * 32 (the in-memory slot
+     * size).  The staging buffer is group_count * desc_size, and desc_size is
+     * accepted up to 1024 -- so a superblock that passed the first check could
+     * still ask for 32x more here, up to half a gigabyte.  Bound what we are
+     * about to allocate, not a proxy for it. */
+    uint64_t on_disk_total64 = (uint64_t)fs->group_count * fs->desc_size;
+    if (on_disk_total64 > (16ULL << 20)) {
+        kprint("EXT2: on-disk group descriptor table too large; refusing mount\n");
+        goto fail;
+    }
+    uint32_t on_disk_total = (uint32_t)on_disk_total64;
     uint32_t on_disk_blocks = (on_disk_total + fs->block_size - 1) / fs->block_size;
-    uint32_t on_disk_size   = on_disk_blocks * fs->block_size;
-    uint8_t *gdt_raw = kmalloc(on_disk_size);
+    on_disk_size   = on_disk_blocks * fs->block_size;
+    gdt_raw = kmalloc(on_disk_size);
     if (!gdt_raw) {
-        kfree(fs->bgd, bgd_size);
-        kfree(fs, sizeof(ext2_fs_t));
-        return NULL;
+        goto fail;
     }
     for (uint32_t i = 0; i < on_disk_blocks; i++) {
         ext2_read_block(fs, bgd_block + i, gdt_raw + i * fs->block_size);
@@ -2325,10 +2607,7 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
 
                 kprintf("ext2: bg %u uses >32-bit addresses (bb_hi=%x ib_hi=%x it_hi=%x) — refuse mount\n",
                         g, bb_hi, ib_hi, it_hi);
-                kfree(gdt_raw, on_disk_size);
-                kfree(fs->bgd, bgd_size);
-                kfree(fs, sizeof(ext2_fs_t));
-                return NULL;
+                goto fail;
             }
         }
         memcpy(&fs->bgd[g], src, sizeof(ext2_group_desc_t));
@@ -2358,10 +2637,7 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
             if (expect != actual) {
                 kprintf("ext2: bg descriptor %u csum mismatch want=%04x got=%04x — refuse mount\n",
                         g, expect, actual);
-                kfree(gdt_raw, on_disk_size);
-                kfree(fs->bgd, bgd_size);
-                kfree(fs, sizeof(ext2_fs_t));
-                return NULL;
+                goto fail;
             }
         }
         kprintf("ext2: %u group descriptor csums verified (desc_size=%u)\n",
@@ -2373,18 +2649,14 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
     ext2_inode_t root_inode;
     if (ext2_read_inode(fs, EXT2_ROOT_INO, &root_inode) != 0) {
         kprint("EXT2: Failed to read root inode\n");
-        kfree(fs->bgd, bgd_size);
-        kfree(fs, sizeof(ext2_fs_t));
-        return NULL;
+        goto fail;
     }
 
     // Initialize active block bitmap cache
     fs->active_bg_group = (uint32_t)-1;
     fs->active_bg_bitmap = kmalloc(fs->block_size);
     if (!fs->active_bg_bitmap) {
-        kfree(fs->bgd, bgd_size);
-        kfree(fs, sizeof(ext2_fs_t));
-        return NULL;
+        goto fail;
     }
     memset(fs->active_bg_bitmap, 0, fs->block_size);
 
@@ -2392,10 +2664,7 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
     fs->active_inode_bg_group = (uint32_t)-1;
     fs->active_inode_bg_bitmap = kmalloc(fs->block_size);
     if (!fs->active_inode_bg_bitmap) {
-        kfree(fs->active_bg_bitmap, fs->block_size);
-        kfree(fs->bgd, bgd_size);
-        kfree(fs, sizeof(ext2_fs_t));
-        return NULL;
+        goto fail;
     }
     memset(fs->active_inode_bg_bitmap, 0, fs->block_size);
 
@@ -2403,11 +2672,7 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
     fs_node_t *root_node = ext2_alloc_node(fs, EXT2_ROOT_INO, &root_inode);
     if (!root_node) {
         kprint("EXT2: Failed to allocate root node\n");
-        kfree(fs->active_inode_bg_bitmap, fs->block_size);
-        kfree(fs->active_bg_bitmap, fs->block_size);
-        kfree(fs->bgd, bgd_size);
-        kfree(fs, sizeof(ext2_fs_t));
-        return NULL;
+        goto fail;
     }
 
     strlcpy(root_node->name, "/", sizeof(root_node->name));
@@ -2418,6 +2683,27 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
     
     kprint("EXT2: Mounted successfully\n");
     return root_node;
+
+    /*
+     * EXT2-20: every one of the failure paths above used to unwind by hand,
+     * and not one of them freed fs->bgd_dirty -- so each rejected mount
+     * (bad descriptor size, csum mismatch, unreadable root inode, any failed
+     * allocation) leaked (group_count+7)/8 bytes.  A mount that fails is
+     * retried, so this repeated per attempt.  One label, one unwind order,
+     * every allocation released exactly once.
+     */
+fail:
+    if (gdt_raw)                    kfree(gdt_raw, on_disk_size);
+    if (fs->active_inode_bg_bitmap) kfree(fs->active_inode_bg_bitmap, fs->block_size);
+    if (fs->active_bg_bitmap)       kfree(fs->active_bg_bitmap, fs->block_size);
+    if (fs->bgd_dirty) {
+        uint32_t dsz = (fs->group_count + 7u) / 8u;
+        if (dsz == 0) dsz = 1;
+        kfree(fs->bgd_dirty, dsz);
+    }
+    if (fs->bgd)                    kfree(fs->bgd, fs->bgd_size);
+    kfree(fs, sizeof(ext2_fs_t));
+    return NULL;
 }
 
 /*
@@ -2493,13 +2779,40 @@ uint32_t ext2_alloc_block(ext2_fs_t *fs) {
         uint32_t found_idx = 0;
         int found = 0;
 
-        // Pass 1: Search from start_bit to end
-        if (ext2_find_next_zero_bit(bitmap_buf, bits_in_group, start_bit, bits_in_group, &found_idx)) {
-            found = 1;
-        }
-        // Pass 2: Search from 0 to start_bit (wrap around within group)
-        else if (start_bit > 0 && ext2_find_next_zero_bit(bitmap_buf, bits_in_group, 0, start_bit, &found_idx)) {
-            found = 1;
+        /*
+         * EXT2-17: the returned block number was never checked against
+         * s_blocks_count.  The last group's bitmap is padded out to
+         * blocks_per_group bits, and those tail bits describe blocks that do
+         * not exist -- mkfs sets them to 1, but nothing here required that.
+         * A zero left in the padding was handed back as a normal allocation;
+         * ext2_write_block() then silently declined to write it (returning 0,
+         * which no caller checks) and the file ended up owning a block that
+         * reads back as zeros with no error anywhere.
+         *
+         * Skip past any such bit and keep looking within the group.  The
+         * in-memory bitmap is marked so the scan makes forward progress, but
+         * nothing is written back: the mismatch is the filesystem's, and
+         * repairing on-disk metadata from a corrupt image is fsck's job.
+         */
+        for (;;) {
+            found = 0;
+            // Pass 1: Search from start_bit to end
+            if (ext2_find_next_zero_bit(bitmap_buf, bits_in_group, start_bit, bits_in_group, &found_idx)) {
+                found = 1;
+            }
+            // Pass 2: Search from 0 to start_bit (wrap around within group)
+            else if (start_bit > 0 && ext2_find_next_zero_bit(bitmap_buf, bits_in_group, 0, start_bit, &found_idx)) {
+                found = 1;
+            }
+            if (!found) break;
+
+            uint32_t cand = group * fs->blocks_per_group + found_idx +
+                            fs->sb.s_first_data_block;
+            if (cand < fs->sb.s_blocks_count) break;    /* a real block */
+
+            bitmap_buf[found_idx / 8] |= (1 << (found_idx % 8));
+            if (found_idx + 1 >= bits_in_group) { found = 0; break; }
+            start_bit = found_idx + 1;
         }
 
         if (found) {
@@ -2597,8 +2910,23 @@ uint32_t ext2_alloc_inode(ext2_fs_t *fs, int is_dir) {
         
         uint8_t *bitmap_buf = fs->active_inode_bg_bitmap;
 
-        // Find the first free bit (skip reserved inodes in first group)
-        uint32_t start = (group == 0) ? fs->sb.s_first_ino : 0;
+        /*
+         * Find the first free bit (skip reserved inodes in first group).
+         *
+         * EXT2-23: two bugs here.  Bit i of group 0 describes inode i+1, so
+         * using s_first_ino directly as the bit index skipped one bit too
+         * many and permanently wasted the first usable inode.  And
+         * s_first_ino was taken raw off the disk: revision-0 filesystems do
+         * not have the field at all (it reads as whatever is at that offset,
+         * often 0), and a value of 0 combined with cleared reserved bits let
+         * this loop hand out inode 2 -- the root directory.  Default it for
+         * rev 0 and never go below the reserved range.
+         */
+        uint32_t first_ino = (fs->sb.s_rev_level >= 1) ? fs->sb.s_first_ino
+                                                       : EXT2_GOOD_OLD_FIRST_INO;
+        if (first_ino < EXT2_GOOD_OLD_FIRST_INO)
+            first_ino = EXT2_GOOD_OLD_FIRST_INO;
+        uint32_t start = (group == 0) ? (first_ino - 1) : 0;
         uint32_t bits_in_group = fs->inodes_per_group;
         
         for (uint32_t i = start; i < bits_in_group; i++) {
@@ -2679,7 +3007,14 @@ void ext2_free_inode(ext2_fs_t *fs, uint32_t inode_num, int was_dir) {
      * loop will hand back the OLD node — same inode_num but with the
      * old mode bits and the old node->flags (FS_FILE vs FS_PIPE vs
      * FS_CHARDEVICE).  That manifested as torture_ipc tests 7 and 9
-     * failing S_ISFIFO/S_ISCHR after mknod-of-a-recycled-inode. */
+     * failing S_ISFIFO/S_ISCHR after mknod-of-a-recycled-inode.
+     *
+     * FS-01: take ext2_node_cache_lock across the whole scan.  Slot
+     * selection + kfree() of the scratch buffers + zeroing the slot must
+     * be atomic with respect to ext2_alloc_node(), which holds the same
+     * lock while it selects and populates a slot; otherwise the two race
+     * onto the same slot (double-free / half-populated node). */
+    mutex_lock(&ext2_node_cache_lock);
     for (int i = 0; i < EXT2_NODE_CACHE_SIZE; i++) {
         if (ext2_node_cache[i].fs == fs &&
             ext2_node_cache[i].inode_num == inode_num &&
@@ -2708,6 +3043,7 @@ void ext2_free_inode(ext2_fs_t *fs, uint32_t inode_num, int was_dir) {
             memset(&ext2_fs_node_cache[i], 0, sizeof(ext2_fs_node_cache[i]));
         }
     }
+    mutex_unlock(&ext2_node_cache_lock);
 
     // Calculate which group this inode belongs to
     uint32_t group = (inode_num - 1) / fs->inodes_per_group;
@@ -2811,6 +3147,23 @@ static int ext2_free_indirect_tree(ext2_fs_t *fs, uint32_t block_num, uint32_t d
 static int ext2_free_inode_blocks(ext2_fs_t *fs, ext2_inode_t *inode) {
     if (!fs || !inode) return -EINVAL;
 
+    /*
+     * For an ext4 extent inode, i_block[] is NOT an array of block pointers:
+     * it holds the packed ext4_extent_header plus up to four extents.  Walking
+     * it as direct/indirect pointers frees blocks that belong to other files
+     * (i_block[0] is magic|entry-count, i_block[1] is max|depth, and with four
+     * extents i_block[12..14] -- the "indirect" slots -- are extent payload,
+     * every non-zero word of which would then be read as an indirect block and
+     * its contents freed too).  One unlink corrupts the whole filesystem.
+     *
+     * Extent-tree teardown is not implemented, so refuse rather than destroy:
+     * the blocks leak, which fsck can reclaim, instead of being handed to the
+     * next allocator while another file still points at them.
+     */
+    if (inode->i_flags & EXT4_EXTENTS_FL) {
+        return -EOPNOTSUPP;
+    }
+
     for (uint32_t i = 0; i < 12; i++) {
         if (inode->i_block[i] != 0) {
             ext2_free_block(fs, inode->i_block[i]);
@@ -2903,6 +3256,22 @@ int ext2_truncate(fs_node_t *node, off_t length) {
 }
 
 // Add directory entry
+/*
+ * [EXT2-08] Does this directory carry EXT2_INDEX_FL (an htree)?
+ *
+ * Substrate honours the flag on the READ side only (ext2_htree_lookup) and
+ * has no index maintenance at all, so any structural change would corrupt
+ * the tree.  The check lives at the ENTRY points, before an inode is
+ * allocated -- refusing after allocation leaks the inode, which is what an
+ * e2fsck of the test volume caught ("Inode bitmap differences: +3014").
+ */
+static int ext2_dir_is_indexed(fs_node_t *dir) {
+    ext2_node_t *c;
+    if (!dir) return 0;
+    c = (ext2_node_t *)(uintptr_t)dir->impl;
+    return c && (c->inode.i_flags & EXT2_INDEX_FL);
+}
+
 static int ext2_add_entry(fs_node_t *dir, const char *name, uint32_t inode, uint8_t file_type) {
     if (!dir || !name || inode == 0) return -1;
     
@@ -2916,6 +3285,27 @@ static int ext2_add_entry(fs_node_t *dir, const char *name, uint32_t inode, uint
     uint32_t required_size = ((8 + name_len + 3) / 4) * 4;
     
     mutex_lock(&ctx->lock);
+
+    /*
+     * [EXT2-08] Refuse to modify an indexed (htree) directory.
+     *
+     * EXT2_INDEX_FL is honoured on the READ side (ext2_htree_lookup) and
+     * nowhere on the write side.  An htree root block is "." (rec_len 12)
+     * followed by ".." with rec_len = block_size - 12, where that oversized
+     * ".." record HIDES dx_root_info and the index array.  The linear
+     * insert below sees a 12-byte "." and enormous slack, takes the split
+     * path, and writes a fresh dirent at byte offset 24 -- directly over
+     * h_hash_version / h_info_len / h_ind_levels and the first index
+     * entries.  The directory is then structurally corrupt to every other
+     * ext2 implementation.
+     *
+     * Until index maintenance exists, fail cleanly instead.  Reads still
+     * work: ext2_finddir falls back to a linear scan.
+     */
+    if (ctx->inode.i_flags & EXT2_INDEX_FL) {
+        mutex_unlock(&ctx->lock);
+        return -EOPNOTSUPP;
+    }
 
     // Invalidate dcache entry if it matches
     for (int k = 0; k < EXT2_DCACHE_SIZE; k++) {
@@ -3086,6 +3476,9 @@ cleanup:
 
 // Implement ext2_link
 int ext2_link(fs_node_t *parent, fs_node_t *source, const char *name) {
+    if (ext2_dir_is_indexed(parent))
+        return -EOPNOTSUPP;   /* [EXT2-08] */
+
     if (!parent || !source || !name || !name[0]) return -EINVAL;
     if ((parent->flags & 0x7) != FS_DIRECTORY) return -ENOTDIR;
     if ((source->flags & 0x7) == FS_DIRECTORY) return -EPERM; // POSIX doesn't allow hard links to directories
@@ -3127,6 +3520,9 @@ int ext2_link(fs_node_t *parent, fs_node_t *source, const char *name) {
 
 // Implement ext2_rename
 int ext2_rename(fs_node_t *old_parent, const char *old_name, fs_node_t *new_parent, const char *new_name) {
+    if (ext2_dir_is_indexed(old_parent) || ext2_dir_is_indexed(new_parent))
+        return -EOPNOTSUPP;   /* [EXT2-08] */
+
     if (!old_parent || !old_name || !new_parent || !new_name) return -EINVAL;
     {
         ext2_node_t *oc = (ext2_node_t *)(uintptr_t)old_parent->impl;
@@ -3232,10 +3628,20 @@ int ext2_rename(fs_node_t *old_parent, const char *old_name, fs_node_t *new_pare
             if (dotdot_block != 0) {
                 ext2_read_block(fs, dotdot_block, old_node_ctx->block_buf);
                 ext2_dirent_t *dot = (ext2_dirent_t *)old_node_ctx->block_buf;
-                ext2_dirent_t *dotdot = (ext2_dirent_t *)(old_node_ctx->block_buf + dot->rec_len);
-                if (dotdot->name_len == 2 && dotdot->name[0] == '.' && dotdot->name[1] == '.') {
-                    dotdot->inode = new_p_ctx->inode_num;
-                    ext2_write_block(fs, dotdot_block, old_node_ctx->block_buf);
+                /* A63: dot->rec_len is an untrusted uint16 read from disk.
+                 * Bound it so the '..' entry (8-byte dirent header + its
+                 * 2-char name) lies wholly inside the block buffer before
+                 * we dereference or write through dotdot.  A corrupt '.'
+                 * rec_len (e.g. 0xFFFA) would otherwise point far past
+                 * block_buf and read/write out of bounds. */
+                uint32_t dot_reclen = dot->rec_len;
+                if (dot_reclen >= sizeof(ext2_dirent_t) &&
+                    dot_reclen + sizeof(ext2_dirent_t) + 2 <= fs->block_size) {
+                    ext2_dirent_t *dotdot = (ext2_dirent_t *)(old_node_ctx->block_buf + dot_reclen);
+                    if (dotdot->name_len == 2 && dotdot->name[0] == '.' && dotdot->name[1] == '.') {
+                        dotdot->inode = new_p_ctx->inode_num;
+                        ext2_write_block(fs, dotdot_block, old_node_ctx->block_buf);
+                    }
                 }
             }
         }
@@ -3264,6 +3670,27 @@ static int ext2_remove_entry(fs_node_t *dir, const char *name) {
     size_t name_len = strlen(name);
 
     mutex_lock(&ctx->lock);
+
+    /*
+     * [EXT2-08] Refuse to modify an indexed (htree) directory.
+     *
+     * EXT2_INDEX_FL is honoured on the READ side (ext2_htree_lookup) and
+     * nowhere on the write side.  An htree root block is "." (rec_len 12)
+     * followed by ".." with rec_len = block_size - 12, where that oversized
+     * ".." record HIDES dx_root_info and the index array.  The linear
+     * insert below sees a 12-byte "." and enormous slack, takes the split
+     * path, and writes a fresh dirent at byte offset 24 -- directly over
+     * h_hash_version / h_info_len / h_ind_levels and the first index
+     * entries.  The directory is then structurally corrupt to every other
+     * ext2 implementation.
+     *
+     * Until index maintenance exists, fail cleanly instead.  Reads still
+     * work: ext2_finddir falls back to a linear scan.
+     */
+    if (ctx->inode.i_flags & EXT2_INDEX_FL) {
+        mutex_unlock(&ctx->lock);
+        return -EOPNOTSUPP;
+    }
 
     // Invalidate dcache entry if it matches
     for (int k = 0; k < EXT2_DCACHE_SIZE; k++) {
@@ -3312,7 +3739,9 @@ static int ext2_remove_entry(fs_node_t *dir, const char *name) {
             if (de->rec_len < 8 || block_off + de->rec_len > fs->block_size) break;
             
             // Is this the entry to remove?
-            if (de->inode != 0 && de->name_len == name_len &&
+            if (de->inode != 0 && de->rec_len >= 8 &&
+            de->name_len <= (uint32_t)(de->rec_len - 8) &&
+            de->name_len == name_len &&
                 memcmp(de->name, name, de->name_len) == 0) {
 
                 uint32_t removed_inode = de->inode;
@@ -3351,14 +3780,27 @@ static int ext2_remove_entry(fs_node_t *dir, const char *name) {
             block_off += de->rec_len;
             pos += de->rec_len;
         }
+
+        /* Same guard ext2_add_entry() carries: the inner loop `break`s on a
+         * malformed record (rec_len < 8, or one running past the block) WITHOUT
+         * advancing pos.  The outer loop then recomputes the identical
+         * block_idx, re-reads the same block, breaks again -- an unkillable
+         * 100%-CPU kernel spin, here with ctx->lock held so every other user of
+         * this directory blocks behind it.  Skip to the next block instead. */
+        uint32_t block_end = (block_idx + 1) * fs->block_size;
+        if (pos < block_end)
+            pos = block_end;
     }
-    
+
 cleanup:
     mutex_unlock(&ctx->lock);
     return result;
 }
 
 static int ext2_mknod(fs_node_t *dir, const char *name, uint16_t mode, uint32_t dev) {
+    if (ext2_dir_is_indexed(dir))
+        return -EOPNOTSUPP;   /* [EXT2-08] */
+
     ext2_node_t *dir_ctx;
     ext2_fs_t *fs;
     ext2_inode_t inode;
@@ -3368,6 +3810,14 @@ static int ext2_mknod(fs_node_t *dir, const char *name, uint16_t mode, uint32_t 
 
     if (!dir || !name || !name[0]) return -EINVAL;
     if ((dir->flags & 0x7) != FS_DIRECTORY) return -ENOTDIR;
+    {
+        /* Every other mutating op checks this; mknod and symlink did not, so
+         * they allocated inodes and blocks and rewrote the superblock counts
+         * on a volume mounted -o ro, or force-mounted read-only because it
+         * carries RO_COMPAT features this driver does not implement. */
+        ext2_node_t *roc = (ext2_node_t *)(uintptr_t)dir->impl;
+        if (roc && EXT2_RO_REFUSE(roc->fs)) return -EROFS;
+    }
     if (!strcmp(name, ".") || !strcmp(name, "..")) return -EINVAL;
     if (ext2_finddir(dir, (char *)name) != NULL) return -EEXIST;
 
@@ -3410,8 +3860,16 @@ static int ext2_mknod(fs_node_t *dir, const char *name, uint16_t mode, uint32_t 
 }
 
 static int ext2_symlink(fs_node_t *dir, const char *target, const char *name) {
+    if (ext2_dir_is_indexed(dir))
+        return -EOPNOTSUPP;   /* [EXT2-08] */
+
     if (!dir || !target || !name || !name[0]) return -EINVAL;
     if ((dir->flags & 0x7) != FS_DIRECTORY) return -ENOTDIR;
+    {
+        /* See ext2_mknod(): read-only mounts must refuse this too. */
+        ext2_node_t *roc = (ext2_node_t *)(uintptr_t)dir->impl;
+        if (roc && EXT2_RO_REFUSE(roc->fs)) return -EROFS;
+    }
     if (!strcmp(name, ".") || !strcmp(name, "..")) return -EINVAL;
     if (ext2_finddir(dir, (char *)name) != NULL) return -EEXIST;
 
@@ -3453,7 +3911,7 @@ static int ext2_symlink(fs_node_t *dir, const char *target, const char *name) {
             return -EIO;
         }
         ext2_node_t *lctx = (ext2_node_t *)(uintptr_t)lnode->impl;
-        uint32_t written = ext2_inode_write(lctx, 0, target_len, target);
+        uint32_t written = ext2_inode_write(lctx, 0, target_len, target, NULL);
         lctx->inode.i_size = target_len;
         ext2_write_inode(fs, inode_num, &lctx->inode);
         if (written < target_len) {
@@ -3475,6 +3933,14 @@ static int ext2_symlink(fs_node_t *dir, const char *target, const char *name) {
     }
 
     if (ext2_add_entry(dir, name, inode_num, EXT2_FT_SYMLINK) != 0) {
+        /* EXT2-27: a slow symlink (target > 60 bytes) has a data block
+         * allocated and written above.  Freeing only the inode here left that
+         * block marked in-use with nothing referencing it -- an unreachable
+         * block that only fsck could recover.  Re-read the inode we just
+         * committed and release its blocks too. */
+        ext2_inode_t li;
+        if (target_len > 60 && ext2_read_inode(fs, inode_num, &li) == 0)
+            (void)ext2_free_inode_blocks(fs, &li);
         ext2_free_inode(fs, inode_num, 0);
         return -EIO;
     }
@@ -3483,6 +3949,9 @@ static int ext2_symlink(fs_node_t *dir, const char *target, const char *name) {
 }
 
 int ext2_mkdir(fs_node_t *dir, const char *name, uint16_t permission) {
+    if (ext2_dir_is_indexed(dir))
+        return -EOPNOTSUPP;   /* [EXT2-08] */
+
     ext2_node_t *dir_ctx;
     ext2_fs_t *fs;
     ext2_inode_t inode;
@@ -3590,6 +4059,9 @@ int ext2_mkdir(fs_node_t *dir, const char *name, uint16_t permission) {
 }
 
 int ext2_unlink(fs_node_t *dir, const char *name) {
+    if (ext2_dir_is_indexed(dir))
+        return -EOPNOTSUPP;   /* [EXT2-08] */
+
     fs_node_t *victim;
     ext2_node_t *victim_ctx;
     ext2_fs_t *fs;
@@ -3680,6 +4152,9 @@ static int ext2_dir_is_empty(fs_node_t *node) {
 }
 
 int ext2_rmdir(fs_node_t *dir, const char *name) {
+    if (ext2_dir_is_indexed(dir))
+        return -EOPNOTSUPP;   /* [EXT2-08] */
+
     fs_node_t *victim;
     ext2_node_t *dir_ctx;
     ext2_node_t *victim_ctx;
@@ -3719,6 +4194,27 @@ int ext2_rmdir(fs_node_t *dir, const char *name) {
 
     victim_ctx->inode.i_links_count = 0;
     victim_ctx->inode.i_dtime = (uint32_t)get_time();
+
+    /*
+     * EXT2-16: this used to free the blocks and the inode unconditionally,
+     * with no equivalent of the unlink-while-open handling a few functions
+     * up.  An open DIR fd (opendir() holds the node pinned) therefore went on
+     * reading directory blocks that were already back on the free list and
+     * could have been handed to another file -- the readdir loop would walk
+     * whatever landed there.  POSIX requires rmdir of a directory with open
+     * references to unlink the name now and defer the inode teardown, exactly
+     * as unlink does.  ext2_node_close() already knows how to finish a
+     * deferred delete for a directory (was_dir_at_unlink picks the is_dir
+     * argument to ext2_free_inode); rmdir simply never set it up.
+     */
+    if (victim_ctx->pin_count > 0) {
+        victim_ctx->orphaned = 1;
+        victim_ctx->was_dir_at_unlink = 1;
+        if (ext2_write_inode(fs, victim_ctx->inode_num, &victim_ctx->inode) != 0)
+            return -EIO;
+        return 0;
+    }
+
     ret = ext2_free_inode_blocks(fs, &victim_ctx->inode);
     if (ret != 0) return ret;
     if (ext2_write_inode(fs, victim_ctx->inode_num, &victim_ctx->inode) != 0) {
@@ -3727,6 +4223,11 @@ int ext2_rmdir(fs_node_t *dir, const char *name) {
     ext2_free_inode(fs, victim_ctx->inode_num, 1);
     memset(&victim_ctx->inode, 0, sizeof(victim_ctx->inode));
     victim->length = 0;
+    /* Invalidate the cache slot, as ext2_unlink does: inode numbers get
+     * reused quickly, and a later finddir for this one would otherwise hit
+     * this stale slot holding a zeroed inode. */
+    victim_ctx->fs = NULL;
+    victim_ctx->inode_num = 0;
 
     return 0;
 }
@@ -3742,7 +4243,13 @@ int ext2_statfs(fs_node_t *node, struct statfs *buf) {
     buf->f_iosize       = fs->block_size;
     buf->f_blocks       = fs->sb.s_blocks_count;
     buf->f_bfree        = fs->sb.s_free_blocks_count;
-    buf->f_bavail       = fs->sb.s_free_blocks_count;
+    /* EXT2-26: f_bfree is every free block; f_bavail is what an unprivileged
+     * writer may actually use, which excludes the s_r_blocks_count reserve.
+     * Reporting the reserve as available made df(1) promise space that write()
+     * refused with ENOSPC. */
+    buf->f_bavail       = (fs->sb.s_free_blocks_count > fs->sb.s_r_blocks_count)
+                        ? (fs->sb.s_free_blocks_count - fs->sb.s_r_blocks_count)
+                        : 0;
     buf->f_files        = fs->sb.s_inodes_count;
     buf->f_ffree        = fs->sb.s_free_inodes_count;
     buf->f_fsid         = 0;
@@ -3799,7 +4306,9 @@ int ext2_unmount(fs_node_t *node) {
 
     if (fs->active_bg_bitmap) kfree(fs->active_bg_bitmap, fs->block_size);
     if (fs->active_inode_bg_bitmap) kfree(fs->active_inode_bg_bitmap, fs->block_size);
-    if (fs->bgd) kfree(fs->bgd, fs->group_count * sizeof(ext2_group_desc_t));
+    /* EXT2-21: free with the size actually allocated (rounded up to whole
+     * blocks), not the unrounded descriptor-array size. */
+    if (fs->bgd) kfree(fs->bgd, fs->bgd_size);
     if (fs->bgd_dirty) {
         uint32_t sz = (fs->group_count + 7u) / 8u;
         if (sz == 0) sz = 1;

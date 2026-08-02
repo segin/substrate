@@ -1,10 +1,11 @@
+#include <errno.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdbool.h>
-#include <getopt.h>
-#include <errno.h>
-#include <libjoin.h>
+
+#include "getopt.h"
+#include "libjoin.h"
 
 static void usage(FILE *f, const char *progname) {
     fprintf(f, "Usage: %s [options] file1 file2\n", progname);

@@ -74,6 +74,13 @@
 #define LAPIC_ICR_PENDING       0x00001000
 
 // TLB Shootdown IPI vector (must not conflict with hardware IRQs)
+/* LAPIC spurious-interrupt vector.  Passed to lapic_enable() on the BSP and
+ * every AP, and installed in the IDT by idt_init().  The low nibble must be
+ * 0xF on P6/Pentium-era LAPICs. */
+#define LAPIC_SPURIOUS_VECTOR   0xFF
+
+/* Bumped by isr_spurious (isr.S).  Diagnostic only. */
+extern volatile uint32_t lapic_spurious_count;
 #define TLB_SHOOTDOWN_VECTOR    0xFE
 // Scheduler preemption IPI (defined in kern/sched.h, value 0xFD)
 // Panic IPI: one CPU panics, sends this to every other CPU so they

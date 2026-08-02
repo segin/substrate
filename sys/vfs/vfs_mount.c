@@ -1,11 +1,12 @@
-#include <sys/types.h>
-#include <sys/mount.h>
-#include <vfs/vnode.h>
-#include <sys/namei.h>
-#include <vm/vm_kmem.h>
-#include <sys/errno.h>
 #include <string.h>
+
 #include <kern/console.h>
+#include <sys/errno.h>
+#include <sys/mount.h>
+#include <sys/namei.h>
+#include <sys/types.h>
+#include <vfs/vnode.h>
+#include <vm/vm_kmem.h>
 
 
 /*
@@ -34,7 +35,7 @@ vfs_mount(struct mount *mp, const char *path, void *data, struct nameidata *ndp,
      */
     if (vp->v_type != VDIR) {
         vrele(vp);
-        return ENOTDIR;
+        return -ENOTDIR;
     }
 
     /*
@@ -45,7 +46,7 @@ vfs_mount(struct mount *mp, const char *path, void *data, struct nameidata *ndp,
         mp = kmalloc(sizeof(struct mount));
         if (mp == NULL) {
             vrele(vp);
-            return ENOMEM;
+            return -ENOMEM;
         }
         memset(mp, 0, sizeof(struct mount));
         mp_allocated = 1;
@@ -65,7 +66,7 @@ vfs_mount(struct mount *mp, const char *path, void *data, struct nameidata *ndp,
         vrele(vp);
         if (mp_allocated)
             kfree(mp, sizeof(struct mount));
-        return EBUSY; /* Already mounted */
+        return -EBUSY; /* Already mounted */
     }
     vp->v_mountedhere = mp;
     spinlock_release(&vp->v_interlock);
@@ -127,10 +128,31 @@ vfs_unmount(struct mount *mp, int mntflags, struct thread *td)
             spinlock_release(&vp->v_interlock);
             if (busy) {
                 rw_wunlock(&mp->mnt_lock);
-                return EBUSY;
+                return -EBUSY;
             }
         }
     }
+
+    /*
+     * [VNODE-24] Tear the vnodes down before the mount goes away.
+     *
+     * This used to free `mp` with its vnodes still live and still on the
+     * namecache, leaving dangling nc_dvp/nc_vp entries and v_mount pointers
+     * into freed memory -- the next lookup that hit one of those cache
+     * entries dereferenced a freed mount.
+     *
+     * vflush() reclaims every vnode on the mount (FORCECLOSE tears down even
+     * referenced ones, which is what MNT_FORCE means), and cache_purgevfs()
+     * drops any namecache entry still naming this mount.  Order matters:
+     * flush first so the vnodes are gone, then purge whatever the flush did
+     * not already remove.
+     */
+    error = vflush(mp, NULL, (mntflags & MNT_FORCE) ? FORCECLOSE : 0);
+    if (error) {
+        rw_wunlock(&mp->mnt_lock);
+        return -EBUSY;
+    }
+    cache_purgevfs(mp);
 
     /*
      * Call filesystem specific unmount
@@ -196,7 +218,7 @@ vfs_root(struct mount *mp, struct vnode **vpp)
     }
     
     rw_runlock(&mp->mnt_lock);
-    return EOPNOTSUPP;
+    return -EOPNOTSUPP;
 }
 
 /*
@@ -208,7 +230,7 @@ vfs_statfs(struct mount *mp, struct statfs *sbp, struct thread *td)
 {
     if (mp->mnt_op && mp->mnt_op->vfs_statfs)
         return mp->mnt_op->vfs_statfs(mp, sbp, td);
-    return EOPNOTSUPP;
+    return -EOPNOTSUPP;
 }
 
 /*

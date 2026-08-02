@@ -1,7 +1,9 @@
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "elf_private.h"
+
+#include <elf_private.h>
 
 static void fail(const char *msg) {
     fprintf(stderr, "test_strtab: %s\n", msg);
@@ -50,13 +52,12 @@ int main(void) {
     if (tab.data[off3] != '\0') {
         fail("empty string content is incorrect");
     }
-
     /* Test 5: NULL cases for add */
-    if (elf__strtab_add(NULL, "test") != 0) {
-        fail("elf__strtab_add(NULL, ...) should return 0");
+    if (elf__strtab_add(NULL, "test") != UINT32_MAX) {
+        fail("elf__strtab_add(NULL, ...) should return UINT32_MAX");
     }
-    if (elf__strtab_add(&tab, NULL) != 0) {
-        fail("elf__strtab_add(..., NULL) should return 0");
+    if (elf__strtab_add(&tab, NULL) != UINT32_MAX) {
+        fail("elf__strtab_add(..., NULL) should return UINT32_MAX");
     }
 
     /* Test 6: Resize trigger */

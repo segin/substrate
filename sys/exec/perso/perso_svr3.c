@@ -2,11 +2,12 @@
  * perso_svr3.c - AT&T UNIX System V Release 3 Personality
  */
 
-#include <exec/perso/personality.h>
 #include <stddef.h>
+
 #include <arch/i386/syscall.h>
-#include <sys/syscall_impl.h>
+#include <exec/perso/personality.h>
 #include <exec/perso/svr3/svr3_syscalls.h>
+#include <sys/syscall_impl.h>
 
 static void *svr3_syscalls[MAX_SYSCALLS] = {
     [SVR3_SYS_exit]     = &sys_exit,
@@ -43,7 +44,7 @@ static void *svr3_syscalls[MAX_SYSCALLS] = {
     [SVR3_SYS_execve]   = &sys_execve,
     [SVR3_SYS_chroot]   = &sys_chroot,
     [SVR3_SYS_fcntl]    = &sys_fcntl,
-    [SVR3_SYS_ulimit]   = &sys_dup2,
+    [SVR3_SYS_ulimit]   = &sys_ulimit,
     [SVR3_SYS_rmdir]    = &sys_rmdir,
     [SVR3_SYS_mkdir]    = &sys_mkdir,
     [SVR3_SYS_getdents] = &sys_getdents,

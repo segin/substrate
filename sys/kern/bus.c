@@ -4,16 +4,16 @@
  * Bus Subsystem Implementation
  */
 
-#include <sys/types.h>
-#include <sys/errno.h>
-#include <sys/lock.h>
 #include <stddef.h>
-#include <string.h>
 #include <stdio.h>
+#include <string.h>
 
 #include <kern/bus.h>
-#include <kern/driver.h>
 #include <kern/device.h>
+#include <kern/driver.h>
+#include <sys/errno.h>
+#include <sys/lock.h>
+#include <sys/types.h>
 
 static struct bus_type *bus_registry_head;
 static spinlock_t bus_registry_lock = SPINLOCK_INIT("bus_registry");

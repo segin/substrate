@@ -5,9 +5,10 @@
  * Sampled every 5 seconds (500 ticks).
  */
 
+#include <stdint.h>
+
 #include <kern/sched.h>
 #include <sys/proc.h>
-#include <stdint.h>
 
 /*
  * Constants for averages over 1, 5, and 15 minutes

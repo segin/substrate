@@ -8,10 +8,10 @@
  *   7 no template matched the input
  */
 
-#include <time.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 int getdate_err;        /* set by the non-reentrant getdate(); see SUSv4 */
 

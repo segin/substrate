@@ -5,13 +5,14 @@
  * Provides kmalloc/kfree for general kernel allocations.
  */
 
-#include <vm/vm_kmem.h>
-#include <vm/uma.h>
+#include <stdint.h>
+#include <string.h>
+
 #include <arch/i386/pmm.h>
 #include <kern/console.h>
 #include <sys/lock.h>
-#include <stdint.h>
-#include <string.h>
+#include <vm/uma.h>
+#include <vm/vm_kmem.h>
 
 /* UMA zones for power-of-two sizes */
 static uma_zone_t *kmem_zones[KMEM_ZONES];
@@ -174,6 +175,19 @@ void *kmalloc(size_t size) {
 void kfree(void *ptr, size_t size) {
     if (!ptr) return;
 
+    /*
+     * Determine the true owning zone from the pointer itself, NOT from the
+     * caller-supplied size (A51).  Trusting `size` lets a caller that frees
+     * with a size in a different power-of-two bucket than it allocated with
+     * push the item into the WRONG zone's per-CPU free bucket (and skip the
+     * large-vs-small decision entirely), silently bypassing UMA's ownership
+     * and double-free checks.  uma_item_size() walks the slab hash under the
+     * slab lock and returns the real item size, or 0 when the pointer is not
+     * a UMA slab item (i.e. it is a large/contiguous allocation).
+     */
+    size_t real_size = uma_item_size(ptr);
+    int idx = (real_size != 0) ? kmem_zone_index(real_size) : -1;
+
     /* IRQ-save spinlock — see kmalloc() commentary. */
     unsigned long _kf;
     _kf = spinlock_acquire_irq(&kmem_stats_lock);
@@ -185,7 +199,6 @@ void kfree(void *ptr, size_t size) {
     }
 
     /* Small allocation via UMA zone */
-    int idx = kmem_zone_index(size);
     if (idx >= 0) {
         kmem_stats.buckets[idx].frees++;
         if (kmem_stats.buckets[idx].bytes_outstanding >= size) {
@@ -297,11 +310,14 @@ void *krealloc(void *ptr, size_t size) {
  * Get allocator statistics
  */
 void kmem_get_stats(uint64_t *allocs, uint64_t *frees, uint64_t *bytes) {
-    spinlock_acquire(&kmem_stats_lock);
+    /* IRQ-save: kfree() runs from IRQ context (netstack RX) and takes this
+     * same lock; a plain spinlock_acquire disables only preemption, so an
+     * IRQ landing here on the same CPU would deadlock-panic (A79). */
+    unsigned long _kf = spinlock_acquire_irq(&kmem_stats_lock);
     if (allocs) *allocs = kmem_stats.allocs;
     if (frees) *frees = kmem_stats.frees;
     if (bytes) *bytes = kmem_stats.bytes_allocated;
-    spinlock_release(&kmem_stats_lock);
+    spinlock_release_irq(&kmem_stats_lock, _kf);
 }
 
 void kmem_get_snapshot(kmem_stat_snapshot_t *snapshot) {
@@ -309,7 +325,8 @@ void kmem_get_snapshot(kmem_stat_snapshot_t *snapshot) {
         return;
     }
 
-    spinlock_acquire(&kmem_stats_lock);
+    /* IRQ-save: see kmem_get_stats() (A79). */
+    unsigned long _kf = spinlock_acquire_irq(&kmem_stats_lock);
     memset(snapshot, 0, sizeof(*snapshot));
     snapshot->total_allocs = kmem_stats.allocs;
     snapshot->total_frees = kmem_stats.frees;
@@ -320,5 +337,5 @@ void kmem_get_snapshot(kmem_stat_snapshot_t *snapshot) {
     snapshot->large_bytes_requested = kmem_stats.large_bytes_requested;
     snapshot->large_bytes_outstanding = kmem_stats.large_bytes_outstanding;
     memcpy(snapshot->buckets, kmem_stats.buckets, sizeof(snapshot->buckets));
-    spinlock_release(&kmem_stats_lock);
+    spinlock_release_irq(&kmem_stats_lock, _kf);
 }

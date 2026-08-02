@@ -18,8 +18,8 @@
  * Feature-test guard: __STDC_VERSION__ >= 202311L  (C23)
  */
 
-#include <math.h>
 #include <fenv.h>
+#include <math.h>
 
 /*
  * Single-rounding on x87 (FLT_EVAL_METHOD == 2 / 80-bit evaluation).

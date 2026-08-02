@@ -2,7 +2,6 @@
 #include <drivers/console/console.h>
 #include <sys/types.h>
 
-extern thread_t threads[];
 
 static inline uint64_t rdtsc(void) {
     uint32_t lo, hi;
@@ -12,10 +11,17 @@ static inline uint64_t rdtsc(void) {
 
 // Replica of old sched_affinity.c logic (Linear Scan) for comparison
 uint32_t sched_get_affinity_linear(int tid) {
+    /*
+     * #425: this replicated the OLD lookup, a linear scan over the static
+     * threads[MAX_THREADS] array -- which no longer exists.  The point of the
+     * benchmark is linear-scan vs O(1), so scan the registry list instead:
+     * still O(n) over the same population, and it compiles against the
+     * kernel as it is rather than as it was.
+     */
     thread_t *t = NULL;
-    for (int i = 0; i < MAX_THREADS; i++) {
-        if (threads[i].tid == tid) {
-            t = &threads[i];
+    for (thread_t *it = thread_first(); it != NULL; it = thread_next(it)) {
+        if (it->tid == tid) {
+            t = it;
             break;
         }
     }

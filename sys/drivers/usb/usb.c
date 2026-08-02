@@ -5,16 +5,18 @@
  * and class driver matching for the Substrate kernel USB subsystem.
  */
 
-#include <drivers/usb/usb.h>
-#include <kern/console.h>
-#include <kern/time.h>
-#include <kern/device.h>
-#include <kern/bus.h>
-#include <kern/sched.h>
-#include <sys/kthread.h>
-#include <vm/vm_kmem.h>
 #include <stdio.h>
 #include <string.h>
+
+#include <drivers/usb/usb.h>
+#include <kern/bus.h>
+#include <kern/console.h>
+#include <kern/device.h>
+#include <kern/sched.h>
+#include <kern/time.h>
+#include <sys/kthread.h>
+#include <sys/lock.h>
+#include <vm/vm_kmem.h>
 
 /* The USB bus in the kernel device tree (/proc/devtree).  Enumerated devices
  * are published here so userspace can see them alongside pci/isa. */
@@ -66,7 +68,21 @@ static usb_device_t *usb_devices[USB_MAX_DEVICES];
  * monotonic counter that would have run out of addresses after ~127
  * cumulative hot-plug attach cycles. */
 static uint32_t      usb_addr_bitmap[4];   /* 128 bits */
-static inline int    usb_addr_alloc(void) {
+
+/*
+ * Guards usb_devices[] and usb_addr_bitmap[].  The hot-plug kthread walks the
+ * table while enumeration adds to it and class-driver detach paths remove from
+ * it, and none of that was serialised. [USB-19]
+ *
+ * Held only across the table and bitmap operations themselves -- never across
+ * a control transfer or a class driver's probe/attach/detach, which sleep and
+ * take locks of their own.  usb_disconnect_device() therefore snapshots a
+ * device's children under the lock and recurses with it dropped.
+ */
+static mutex_t usb_devtab_lock;
+
+/* Caller holds usb_devtab_lock. */
+static inline int    usb_addr_alloc_locked(void) {
     for (int a = 1; a < 128; a++) {
         if (!(usb_addr_bitmap[a >> 5] & (1U << (a & 31)))) {
             usb_addr_bitmap[a >> 5] |= (1U << (a & 31));
@@ -75,9 +91,18 @@ static inline int    usb_addr_alloc(void) {
     }
     return -1;
 }
+static inline int    usb_addr_alloc(void) {
+    int a;
+    mutex_lock(&usb_devtab_lock);
+    a = usb_addr_alloc_locked();
+    mutex_unlock(&usb_devtab_lock);
+    return a;
+}
 static inline void   usb_addr_free(uint8_t a) {
     if (a == 0 || a >= 128) return;
+    mutex_lock(&usb_devtab_lock);
     usb_addr_bitmap[a >> 5] &= ~(1U << (a & 31));
+    mutex_unlock(&usb_devtab_lock);
 }
 
 static usb_hcd_t           *usb_hcd_list;
@@ -161,26 +186,33 @@ usb_device_t *usb_alloc_device(usb_hcd_t *hcd)
     usb_device_t *dev;
     int slot;
 
-    /* Find free slot */
+    dev = kzalloc(sizeof(usb_device_t));
+    if (!dev)
+        return NULL;
+
+    /* Claim a slot under the lock so two enumerations cannot pick the same
+     * one; the allocation above is done first so it stays outside. */
+    mutex_lock(&usb_devtab_lock);
     for (slot = 0; slot < USB_MAX_DEVICES; slot++) {
         if (!usb_devices[slot])
             break;
     }
-    if (slot >= USB_MAX_DEVICES)
+    if (slot >= USB_MAX_DEVICES) {
+        mutex_unlock(&usb_devtab_lock);
+        kfree(dev, sizeof(usb_device_t));
         return NULL;
-
-    dev = kzalloc(sizeof(usb_device_t));
-    if (!dev)
-        return NULL;
+    }
+    usb_devices[slot] = dev;
+    mutex_unlock(&usb_devtab_lock);
 
     dev->hcd = hcd;
     dev->slot = (uint8_t)slot;
     dev->ep0.address = 0;
     dev->ep0.type = USB_EP_TYPE_CONTROL;
     dev->ep0.max_packet = 8;    /* Default until descriptor read */
+    dev->ep0.mult = 1;          /* control endpoints are never high-bandwidth */
     dev->ep0.toggle = 0;
 
-    usb_devices[slot] = dev;
     return dev;
 }
 
@@ -195,8 +227,16 @@ void usb_free_device(usb_device_t *dev)
     if (dev->address)
         usb_addr_free(dev->address);
 
-    if (dev->slot < USB_MAX_DEVICES)
+    mutex_lock(&usb_devtab_lock);
+    if (dev->slot < USB_MAX_DEVICES && usb_devices[dev->slot] == dev)
         usb_devices[dev->slot] = NULL;
+    mutex_unlock(&usb_devtab_lock);
+
+    if (dev->config_data) {
+        kfree(dev->config_data, dev->config_len);
+        dev->config_data = NULL;
+        dev->config_len = 0;
+    }
 
     kfree(dev, sizeof(usb_device_t));
 }
@@ -207,13 +247,17 @@ void usb_free_device(usb_device_t *dev)
  * ============================================================
  */
 
-int usb_control_transfer(usb_device_t *dev,
-                         uint8_t bmRequestType, uint8_t bRequest,
-                         uint16_t wValue, uint16_t wIndex,
-                         void *data, uint16_t wLength)
+int usb_control_transfer_actual(usb_device_t *dev,
+                                uint8_t bmRequestType, uint8_t bRequest,
+                                uint16_t wValue, uint16_t wIndex,
+                                void *data, uint16_t wLength,
+                                uint32_t *actual_length)
 {
     usb_transfer_t xfer;
+    int ret;
 
+    if (actual_length)
+        *actual_length = 0;
     if (!dev || !dev->hcd || !dev->hcd->submit)
         return USB_XFER_ERROR;
 
@@ -230,7 +274,46 @@ int usb_control_transfer(usb_device_t *dev,
     xfer.setup.wIndex = wIndex;
     xfer.setup.wLength = wLength;
 
-    return dev->hcd->submit(dev->hcd, &xfer);
+    ret = dev->hcd->submit(dev->hcd, &xfer);
+
+    if (actual_length)
+        *actual_length = xfer.actual_length;
+    return ret;
+}
+
+int usb_control_transfer(usb_device_t *dev,
+                         uint8_t bmRequestType, uint8_t bRequest,
+                         uint16_t wValue, uint16_t wIndex,
+                         void *data, uint16_t wLength)
+{
+    return usb_control_transfer_actual(dev, bmRequestType, bRequest,
+                                       wValue, wIndex, data, wLength, NULL);
+}
+
+int usb_interrupt_transfer(usb_device_t *dev, usb_endpoint_t *ep,
+                           void *data, uint32_t length,
+                           uint32_t *actual_length, uint32_t timeout_ms)
+{
+    usb_transfer_t xfer;
+    int ret;
+
+    if (!dev || !dev->hcd || !dev->hcd->submit || !ep)
+        return USB_XFER_ERROR;
+
+    memset(&xfer, 0, sizeof(xfer));
+    xfer.dev = dev;
+    xfer.ep = ep;
+    xfer.is_control = 0;
+    xfer.data = data;
+    xfer.length = length;
+    xfer.timeout_ms = timeout_ms;
+
+    ret = dev->hcd->submit(dev->hcd, &xfer);
+
+    if (actual_length)
+        *actual_length = xfer.actual_length;
+
+    return ret;
 }
 
 int usb_bulk_transfer(usb_device_t *dev, usb_endpoint_t *ep,
@@ -394,7 +477,13 @@ int usb_set_configuration(usb_device_t *dev, uint8_t config)
                                0, NULL, 0);
     if (ret == USB_XFER_OK) {
         dev->config_value = config;
-        dev->configured = 1;
+        /*
+         * SET_CONFIGURATION(0) *un*configures the device -- it returns to
+         * Address state with no interfaces active.  Recording that as
+         * configured told every later caller the device was ready when it was
+         * not. [USB-22]
+         */
+        dev->configured = (config != 0);
     }
 
     return ret;
@@ -438,15 +527,145 @@ int usb_clear_halt(usb_device_t *dev, usb_endpoint_t *ep)
  * ============================================================
  */
 
-usb_endpoint_t *usb_find_endpoint(usb_device_t *dev, uint8_t type, uint8_t dir)
+usb_endpoint_t *usb_find_endpoint_iface(usb_device_t *dev, uint8_t ifnum,
+                                        uint8_t alt, uint8_t type, uint8_t dir)
 {
-    for (int i = 0; i < dev->num_endpoints; i++) {
-        usb_endpoint_t *ep = &dev->endpoints[i];
-        if ((ep->address & USB_EP_DIR_MASK) == dir &&
-            ep->type == type)
-            return ep;
+    if (!dev)
+        return NULL;
+
+    for (int i = 0; i < dev->num_interfaces; i++) {
+        usb_interface_t *iface = &dev->interfaces[i];
+
+        if (iface->number != ifnum || iface->alt_setting != alt)
+            continue;
+
+        for (int j = 0; j < iface->ep_count; j++) {
+            int idx = iface->ep_first + j;
+            if (idx >= dev->num_endpoints)
+                break;
+            usb_endpoint_t *ep = &dev->endpoints[idx];
+            if ((ep->address & USB_EP_DIR_MASK) == dir && ep->type == type)
+                return ep;
+        }
     }
     return NULL;
+}
+
+usb_endpoint_t *usb_find_endpoint(usb_device_t *dev, uint8_t type, uint8_t dir)
+{
+    usb_endpoint_t *ep;
+
+    if (!dev)
+        return NULL;
+
+    /*
+     * Prefer an endpoint belonging to the interface this device is bound to.
+     * Before interfaces were tracked, this searched every endpoint in the
+     * whole configuration in descriptor order, so on a composite device a
+     * driver could be handed an endpoint owned by an interface it does not
+     * drive.
+     */
+    ep = usb_find_endpoint_iface(dev, dev->if_number, 0, type, dir);
+    if (ep)
+        return ep;
+
+    /*
+     * Fall back to the flat scan.  A device whose interface descriptors we
+     * failed to record (more than USB_MAX_INTERFACES, or a malformed config)
+     * still gets the old behaviour rather than no endpoint at all.
+     */
+    for (int i = 0; i < dev->num_endpoints; i++) {
+        usb_endpoint_t *e = &dev->endpoints[i];
+        if ((e->address & USB_EP_DIR_MASK) == dir && e->type == type)
+            return e;
+    }
+    return NULL;
+}
+
+/*
+ * ============================================================
+ * Bus Topology
+ * ============================================================
+ *
+ * dev->parent / dev->port already describe where a device sits; these turn
+ * that chain into the forms the controllers need.  The walks are bounded by
+ * USB_MAX_ENUM_DEPTH so a corrupted parent pointer cannot loop forever.
+ */
+
+uint8_t usb_root_port(const usb_device_t *dev)
+{
+    const usb_device_t *d = dev;
+    int guard;
+
+    if (!d)
+        return 0;
+    for (guard = 0; d->parent && guard < USB_MAX_ENUM_DEPTH; guard++)
+        d = d->parent;
+    return d->port;
+}
+
+uint32_t usb_route_string(const usb_device_t *dev)
+{
+    uint8_t ports[USB_MAX_ENUM_DEPTH];
+    int n = 0;
+    uint32_t route = 0;
+    const usb_device_t *d = dev;
+
+    if (!d)
+        return 0;
+
+    /* Collect the port at each tier, nearest-the-device first.  The device's
+     * own port only counts when it has a parent: a root-port device routes to
+     * 0, which is what tells the controller "this port's direct attachment". */
+    for (; d->parent && n < USB_MAX_ENUM_DEPTH; d = d->parent)
+        ports[n++] = d->port;
+
+    /* Emit deepest-last: tier 1 (the port on the root hub's downstream hub)
+     * lands in bits 3:0.  ports[n-1] is the topmost tier. */
+    for (int i = n - 1; i >= 0; i--) {
+        uint8_t p = ports[i];
+        if (p > 15)
+            p = 15;             /* xHCI 1.1 s4.5.2: >15 encodes as 15 */
+        route = (route << 4) | p;
+    }
+    return route & 0xFFFFF;     /* 20 bits, five tiers */
+}
+
+usb_device_t *usb_tt_hub(const usb_device_t *dev, uint8_t *ttport)
+{
+    const usb_device_t *child;
+    usb_device_t *hub;
+    int guard;
+
+    if (ttport)
+        *ttport = 0;
+    if (!dev || dev->speed == USB_SPEED_HIGH)
+        return NULL;            /* high-speed devices need no translator */
+
+    /* Walk up until a high-speed hub is found; the child we came through is
+     * the branch occupying its downstream port. */
+    child = dev;
+    hub = dev->parent;
+    for (guard = 0; hub && guard < USB_MAX_ENUM_DEPTH; guard++) {
+        if (hub->speed == USB_SPEED_HIGH && hub->is_hub) {
+            if (ttport)
+                *ttport = child->port;
+            return hub;
+        }
+        child = hub;
+        hub = hub->parent;
+    }
+    return NULL;                /* on a root port, or no HS hub in the path */
+}
+
+void usb_set_hub(usb_device_t *dev, uint8_t nports)
+{
+    if (!dev)
+        return;
+    dev->is_hub = 1;
+    dev->hub_nports = nports;
+    if (dev->hcd && dev->hcd->set_hub)
+        (void)dev->hcd->set_hub(dev->hcd, dev, nports);
 }
 
 /*
@@ -460,8 +679,13 @@ static void usb_parse_config(usb_device_t *dev)
     uint8_t *ptr = dev->config_data;
     uint8_t *end = ptr + dev->config_len;
     uint8_t first_iface_seen = 0;
+    usb_interface_t *cur_iface = NULL;   /* interface currently being filled */
 
     dev->num_endpoints = 0;
+    dev->num_interfaces = 0;
+
+    if (!ptr)
+        return;
 
     while (ptr + 2 <= end) {
         uint8_t bLength = ptr[0];
@@ -470,13 +694,48 @@ static void usb_parse_config(usb_device_t *dev)
         if (bLength < 2 || ptr + bLength > end)
             break;
 
-        if (bType == USB_DT_INTERFACE && bLength >= 9 && !first_iface_seen) {
+        if (bType == USB_DT_INTERFACE && bLength >= 9) {
             struct usb_interface_descriptor *iface =
                 (struct usb_interface_descriptor *)ptr;
-            dev->if_class = iface->bInterfaceClass;
-            dev->if_subclass = iface->bInterfaceSubClass;
-            dev->if_protocol = iface->bInterfaceProtocol;
-            first_iface_seen = 1;
+
+            /*
+             * Record every interface, alternate settings included, so each
+             * endpoint below can be attributed to the interface that declared
+             * it.  Endpoints are appended to the flat dev->endpoints[] array
+             * in descriptor order, so an interface's endpoints are exactly the
+             * ones added between its descriptor and the next one -- which is
+             * what ep_first/ep_count capture.
+             */
+            if (dev->num_interfaces < USB_MAX_INTERFACES) {
+                cur_iface = &dev->interfaces[dev->num_interfaces++];
+                cur_iface->number      = iface->bInterfaceNumber;
+                cur_iface->alt_setting = iface->bAlternateSetting;
+                cur_iface->if_class    = iface->bInterfaceClass;
+                cur_iface->if_subclass = iface->bInterfaceSubClass;
+                cur_iface->if_protocol = iface->bInterfaceProtocol;
+                cur_iface->ep_first    = dev->num_endpoints;
+                cur_iface->ep_count    = 0;
+            } else {
+                /* Out of interface slots: stop attributing endpoints rather
+                 * than attributing them to the wrong interface. */
+                cur_iface = NULL;
+            }
+
+            /*
+             * dev->if_* still defaults to the first interface so a device
+             * with no matching driver reports something meaningful, but
+             * usb_match_driver() overwrites these with whichever interface
+             * actually binds.  It used to be first-interface-only, which is
+             * why a composite device whose interface 0 was not the functional
+             * one never matched any driver.
+             */
+            if (!first_iface_seen) {
+                dev->if_number   = iface->bInterfaceNumber;
+                dev->if_class    = iface->bInterfaceClass;
+                dev->if_subclass = iface->bInterfaceSubClass;
+                dev->if_protocol = iface->bInterfaceProtocol;
+                first_iface_seen = 1;
+            }
         }
 
         if (bType == USB_DT_ENDPOINT && bLength >= 7) {
@@ -498,13 +757,30 @@ static void usb_parse_config(usb_device_t *dev)
                 }
                 if (!duplicate) {
                     usb_endpoint_t *ep = &dev->endpoints[dev->num_endpoints];
+                    uint16_t wmps = ep_desc->wMaxPacketSize;
+
                     ep->address = addr;
                     ep->type = ep_desc->bmAttributes & USB_EP_TYPE_MASK;
-                    ep->max_packet = ep_desc->wMaxPacketSize;
+                    /*
+                     * Split the size from the transaction count.  Only
+                     * high-speed (and above) interrupt/isochronous endpoints
+                     * use bits 12:11; everywhere else they are zero, so the
+                     * mask is a no-op and mult comes out 1. [USB-06]
+                     */
+                    ep->max_packet = wmps & USB_EP_MPS_MASK;
+                    if (dev->speed == USB_SPEED_HIGH &&
+                        (ep->type == USB_EP_TYPE_INTERRUPT ||
+                         ep->type == USB_EP_TYPE_ISO)) {
+                        ep->mult = (uint8_t)USB_EP_MPS_MULT(wmps);
+                    } else {
+                        ep->mult = 1;
+                    }
                     ep->interval = ep_desc->bInterval;
                     ep->toggle = 0;
                     ep->max_streams = 0;
                     dev->num_endpoints++;
+                    if (cur_iface)
+                        cur_iface->ep_count++;
                 }
             }
         }
@@ -547,12 +823,94 @@ int usb_bulk_stream_transfer(usb_device_t *dev, usb_endpoint_t *ep,
  * ============================================================
  */
 
+/*
+ * Try to bind one driver to one interface.  Returns 1 if the device is now
+ * bound.  dev->if_* is published before probe() so the driver sees the
+ * interface being offered -- probe() and attach() read dev->if_class and
+ * friends, and every USB_RECIP_INTERFACE control request needs
+ * dev->if_number as its wIndex.
+ */
+static int usb_try_bind(usb_device_t *dev, usb_class_driver_t *drv,
+                        const usb_interface_t *iface)
+{
+    uint8_t save_number   = dev->if_number;
+    uint8_t save_class    = dev->if_class;
+    uint8_t save_subclass = dev->if_subclass;
+    uint8_t save_protocol = dev->if_protocol;
+
+    uint8_t if_class = iface->if_class;
+    if (if_class == 0)
+        if_class = dev->dev_desc.bDeviceClass;
+
+    if (drv->if_class != if_class)
+        return 0;
+    if (drv->if_subclass != 0xFF && drv->if_subclass != iface->if_subclass)
+        return 0;
+    if (drv->if_protocol != 0xFF && drv->if_protocol != iface->if_protocol)
+        return 0;
+
+    dev->if_number   = iface->number;
+    dev->if_class    = iface->if_class;
+    dev->if_subclass = iface->if_subclass;
+    dev->if_protocol = iface->if_protocol;
+
+    if (drv->probe && drv->probe(dev) != 0)
+        goto restore;
+
+    if (drv->attach) {
+        dev->driver_data = NULL;
+        if (drv->attach(dev) == 0) {
+            dev->driver = drv;       /* remember for disconnect dispatch */
+            kprintf("usb: device %u:%u interface %u bound to driver '%s'\n",
+                    dev->hcd->hcd_index, dev->address,
+                    iface->number, drv->name);
+            return 1;
+        }
+        /* Defensive: if attach failed but left a dangling pointer, clear it
+         * so a future driver match doesn't dereference freed memory. */
+        dev->driver_data = NULL;
+    }
+
+restore:
+    dev->if_number   = save_number;
+    dev->if_class    = save_class;
+    dev->if_subclass = save_subclass;
+    dev->if_protocol = save_protocol;
+    return 0;
+}
+
 static void usb_match_driver(usb_device_t *dev)
 {
     usb_class_driver_t *drv;
 
+    /*
+     * Offer every interface (alternate setting 0 only -- we never issue
+     * SET_INTERFACE during enumeration, so the alt-0 descriptors describe the
+     * device as it is right now) to every driver.  This used to consider only
+     * the first interface descriptor in the configuration, so a composite
+     * device -- a keyboard with a separate consumer-control interface, a
+     * headset, a dock -- was matched on whatever function happened to be
+     * listed first and its other functions were unreachable.
+     */
+    for (int i = 0; i < dev->num_interfaces; i++) {
+        usb_interface_t *iface = &dev->interfaces[i];
+
+        if (iface->alt_setting != 0)
+            continue;
+
+        for (drv = usb_class_drivers; drv; drv = drv->next) {
+            if (usb_try_bind(dev, drv, iface))
+                return;
+        }
+    }
+
+    /*
+     * Nothing matched by interface.  Fall back to the device-descriptor class
+     * for devices that declare their class at the device level and leave the
+     * interface class zero, and for the degenerate case of a configuration we
+     * could not parse any interface out of at all.
+     */
     for (drv = usb_class_drivers; drv; drv = drv->next) {
-        /* Check class/subclass/protocol match */
         uint8_t dev_class = dev->if_class;
         if (dev_class == 0) dev_class = dev->dev_desc.bDeviceClass;
 
@@ -607,7 +965,6 @@ static void usb_match_driver(usb_device_t *dev)
  * stack puts us within margin of overflow at the deepest legal tree;
  * a malicious or buggy hub claiming to be deeper still would push us
  * over.  Bound it explicitly. */
-#define USB_MAX_ENUM_DEPTH 7
 static int usb_enum_depth = 0;
 
 static int usb_enumerate_device_inner(usb_hcd_t *hcd, uint8_t port, uint8_t speed,
@@ -633,6 +990,29 @@ int usb_enumerate_device(usb_hcd_t *hcd, uint8_t port, uint8_t speed)
     return usb_enumerate_device_parent(hcd, port, speed, NULL);
 }
 
+/* Busy-wait; enumeration runs on the boot thread and on the hot-plug kthread,
+ * and the waits here are short and infrequent. */
+static void usb_delay_ms(uint32_t ms)
+{
+    uint64_t deadline = (uint64_t)get_uptime_ms() + ms;
+    while ((uint64_t)get_uptime_ms() < deadline)
+        __asm__ volatile("pause");
+}
+
+/*
+ * Reset the port this device sits on, whichever kind of port that is.  A root
+ * port is a register write the HCD owns; a downstream port is a hub class
+ * request only the hub driver can issue.
+ */
+static int usb_enum_reset_port(usb_hcd_t *hcd, uint8_t port, usb_device_t *parent)
+{
+    if (parent)
+        return usb_hub_reset_port(parent, port);
+    if (hcd && hcd->port_reset)
+        return hcd->port_reset(hcd, port);
+    return -1;
+}
+
 static int usb_enumerate_device_inner(usb_hcd_t *hcd, uint8_t port, uint8_t speed,
                                       usb_device_t *parent)
 {
@@ -654,18 +1034,97 @@ static int usb_enumerate_device_inner(usb_hcd_t *hcd, uint8_t port, uint8_t spee
     /* Set EP0 max packet size based on speed */
     dev->ep0.max_packet = (speed == USB_SPEED_LOW) ? 8 : 64;
 
-    /* Get first 8 bytes of device descriptor to learn max packet size */
-    ret = usb_get_descriptor(dev, USB_DT_DEVICE, 0, &dd, 8);
+    /*
+     * Get the first 8 bytes of the device descriptor to learn the real EP0 max
+     * packet size.  Retry: a device outside spec timing does not answer the
+     * first request, and a single failure used to make the port permanently
+     * unenumerable.  Re-reset the port every fourth attempt, which is what
+     * shakes loose a device whose state machine is wedged rather than merely
+     * slow.  Mirrors NetBSD usbd_new_device(). [USB-03]
+     */
+    ret = USB_XFER_ERROR;
+    for (int attempt = 0; attempt < USB_ENUM_DESC_TRIES; attempt++) {
+        ret = usb_get_descriptor(dev, USB_DT_DEVICE, 0, &dd, 8);
+        if (ret == USB_XFER_OK)
+            break;
+        if (attempt + 1 == USB_ENUM_DESC_TRIES)
+            break;                  /* out of tries: don't pay the last delay */
+        usb_delay_ms(USB_ENUM_DESC_DELAY_MS);
+        if ((attempt & 3) == 3)
+            (void)usb_enum_reset_port(hcd, port, parent);
+    }
     if (ret != USB_XFER_OK) {
-        kprintf("usb: port %u: failed to get device descriptor (initial, err=%d)\n",
-                port, ret);
+        kprintf("usb: port %u: failed to get device descriptor after %d tries "
+                "(initial, err=%d)\n", port, USB_ENUM_DESC_TRIES, ret);
         usb_free_device(dev);
         return -1;
     }
 
-    dev->ep0.max_packet = dd.bMaxPacketSize0;
-    if (dev->ep0.max_packet == 0)
+    /*
+     * Validate what came back before trusting it.  A glitched read that returns
+     * plausible garbage would otherwise set an EP0 packet size like 0x2A and
+     * mis-frame every later control transfer -- which presents as a device that
+     * "sometimes fails to enumerate" rather than as a bad read. [USB-13]
+     */
+    if (dd.bDescriptorType != USB_DT_DEVICE) {
+        kprintf("usb: port %u: initial descriptor has type %u, not DEVICE\n",
+                port, dd.bDescriptorType);
+        usb_free_device(dev);
+        return -1;
+    }
+
+    /*
+     * For SuperSpeed, bMaxPacketSize0 is log2(size) and the only legal value
+     * is 9, meaning 512 (USB 3.2 s9.6.1).  Taken literally it yields an EP0
+     * packet size of 9. [USB-12]
+     */
+    if (speed == USB_SPEED_SUPER) {
+        if (dd.bMaxPacketSize0 != 9) {
+            kprintf("usb: port %u: SuperSpeed device reports EP0 exponent %u, "
+                    "forcing 9\n", port, dd.bMaxPacketSize0);
+            dd.bMaxPacketSize0 = 9;
+        }
+        dev->ep0.max_packet = 512;
+    } else {
+        dev->ep0.max_packet = dd.bMaxPacketSize0;
+    }
+    /*
+     * Legal control-endpoint packet sizes are 8/16/32/64 (USB 2.0 s5.5.3), and
+     * a high-speed device must use 64.  Anything else is a misread, so fall
+     * back to the conservative 8 rather than framing transfers to a size the
+     * device never agreed to.
+     */
+    if (speed == USB_SPEED_SUPER) {
+        /* already resolved above */
+    } else if (speed == USB_SPEED_HIGH && dev->ep0.max_packet != 64) {
+        kprintf("usb: port %u: high-speed device reports EP0 max packet %u, "
+                "forcing 64\n", port, dev->ep0.max_packet);
+        dev->ep0.max_packet = 64;
+    } else if (dev->ep0.max_packet != 8 && dev->ep0.max_packet != 16 &&
+               dev->ep0.max_packet != 32 && dev->ep0.max_packet != 64) {
+        kprintf("usb: port %u: implausible EP0 max packet %u, using 8\n",
+                port, dev->ep0.max_packet);
         dev->ep0.max_packet = 8;
+    }
+
+    /*
+     * Tell the controller the real EP0 packet size.  xHCI baked the core's
+     * guess into the endpoint context when the slot was addressed, so a
+     * full-speed device with an 8-byte EP0 would otherwise be driven with a
+     * context claiming 64. [USB-11]
+     */
+    if (hcd->set_ep0_mps)
+        (void)hcd->set_ep0_mps(hcd, dev, dev->ep0.max_packet);
+
+    /*
+     * Reset the port once more before addressing the device.  Windows does
+     * this and devices are tuned against the Windows sequence, so ones that
+     * depend on it exist in quantity; NetBSD copies the behaviour for the same
+     * reason.  The device stays in Default state at address 0 either way, so
+     * nothing learned above is invalidated.  TRSTRCY is 10 ms. [USB-04]
+     */
+    (void)usb_enum_reset_port(hcd, port, parent);
+    usb_delay_ms(10);
 
     /* Assign unique address from the bitmap; address is freed on detach
      * via usb_free_device, so hot-plug cycles don't leak addresses. */
@@ -682,6 +1141,15 @@ static int usb_enumerate_device_inner(usb_hcd_t *hcd, uint8_t port, uint8_t spee
     ret = usb_set_address(dev, addr);
     if (ret != USB_XFER_OK) {
         kprintf("usb: port %u: SET_ADDRESS failed (err=%d)\n", port, ret);
+        /*
+         * Return the address by hand.  usb_free_device() only frees it when
+         * dev->address is set, and usb_set_address() only sets that on
+         * success -- so a failure here used to burn one of the 127 addresses
+         * for the rest of the boot.  A machine with a few ports that report a
+         * device they cannot enumerate walks the space down and eventually
+         * hits "address space exhausted". [USB-07]
+         */
+        usb_addr_free(addr);
         usb_free_device(dev);
         return -1;
     }
@@ -718,14 +1186,22 @@ static int usb_enumerate_device_inner(usb_hcd_t *hcd, uint8_t port, uint8_t spee
         return -1;
     }
 
-    /* Read full configuration descriptor.  USB_MAX_CONFIG_SIZE bounds
-     * the per-device cache so a hostile/buggy device can't make us
-     * allocate unbounded memory; reject the device if its config
-     * legitimately exceeds the cache so we don't silently lose
-     * trailing endpoints / interfaces. */
-    if (cd.wTotalLength > USB_MAX_CONFIG_SIZE) {
-        kprintf("usb: addr %u: config descriptor %u B exceeds cache (%u); skipping\n",
+    /* Read the full configuration descriptor into a cache sized to this
+     * device.  USB_MAX_CONFIG_SIZE is only a sanity bound against a
+     * hostile/wedged device claiming an absurd wTotalLength -- a device
+     * within it gets exactly the space it asked for, so we never silently
+     * lose trailing interfaces or endpoints. */
+    if (cd.wTotalLength < sizeof(cd) || cd.wTotalLength > USB_MAX_CONFIG_SIZE) {
+        kprintf("usb: addr %u: implausible config descriptor length %u B "
+                "(max %u); skipping\n",
                 addr, cd.wTotalLength, USB_MAX_CONFIG_SIZE);
+        usb_free_device(dev);
+        return -1;
+    }
+    dev->config_data = kzalloc(cd.wTotalLength);
+    if (!dev->config_data) {
+        kprintf("usb: addr %u: out of memory for %u B config descriptor\n",
+                addr, cd.wTotalLength);
         usb_free_device(dev);
         return -1;
     }
@@ -743,7 +1219,15 @@ static int usb_enumerate_device_inner(usb_hcd_t *hcd, uint8_t port, uint8_t spee
     /* Parse config: extract endpoints and interface class */
     usb_parse_config(dev);
 
-    /* Set configuration */
+    /* Set configuration.  A device whose only configuration is numbered 0 has
+     * no usable configuration at all -- selecting it unconfigures the device
+     * -- so refuse rather than proceeding with a device that is not
+     * configured. [USB-22] */
+    if (cd.bConfigurationValue == 0) {
+        kprintf("usb: addr %u: configuration value 0 is not selectable\n", addr);
+        usb_free_device(dev);
+        return -1;
+    }
     ret = usb_set_configuration(dev, cd.bConfigurationValue);
     if (ret != USB_XFER_OK) {
         kprintf("usb: addr %u: SET_CONFIGURATION failed (err=%d)\n", addr, ret);
@@ -808,7 +1292,9 @@ void usb_enumerate_bus(usb_hcd_t *hcd)
             continue;
 
         /* Determine speed */
-        if (status & USB_PORT_STAT_LOW_SPEED)
+        if (status & USB_PORT_STAT_SUPER_SPEED)
+            speed = USB_SPEED_SUPER;
+        else if (status & USB_PORT_STAT_LOW_SPEED)
             speed = USB_SPEED_LOW;
         else if (status & USB_PORT_STAT_HIGH_SPEED)
             speed = USB_SPEED_HIGH;
@@ -839,12 +1325,18 @@ void usb_enumerate_bus(usb_hcd_t *hcd)
 /* The ROOT device (parent == NULL) currently enumerated on hcd:port, or NULL. */
 static usb_device_t *usb_root_device_on_port(usb_hcd_t *hcd, uint8_t port)
 {
+    usb_device_t *found = NULL;
+
+    mutex_lock(&usb_devtab_lock);
     for (int i = 0; i < USB_MAX_DEVICES; i++) {
         usb_device_t *d = usb_devices[i];
-        if (d && d->hcd == hcd && d->parent == NULL && d->port == port)
-            return d;
+        if (d && d->hcd == hcd && d->parent == NULL && d->port == port) {
+            found = d;
+            break;
+        }
     }
-    return NULL;
+    mutex_unlock(&usb_devtab_lock);
+    return found;
 }
 
 /* Detach a vanished device.  Ordering matters: the bound driver must detach
@@ -852,10 +1344,44 @@ static usb_device_t *usb_root_device_on_port(usb_hcd_t *hcd, uint8_t port)
  * published node that stores a back-pointer to this usb_device_t must be
  * removed BEFORE the struct is freed, or those consumers dereference freed
  * memory. [DRV-01][DRV-02][DRV-20] */
-static void usb_disconnect_device(usb_device_t *dev)
+void usb_disconnect_device(usb_device_t *dev)
 {
     if (!dev)
         return;
+
+    /* 0. Recursively disconnect any devices enumerated behind this one (it may
+     * be a hub).  They are recorded with parent == dev (usb_enumerate_device_
+     * parent) and share the hub's root-port CCS, so the root-port hot-plug scan
+     * never sees them go away.  Unplugging a hub — or a whole sub-tree of nested
+     * hubs — must therefore quiesce and free its children here, or each
+     * downstream device's class-driver .detach (force-unmount, DMA-buffer free,
+     * thread quiesce) is skipped and its usb_device_t + USB address leak.
+     * Children go first so their in-flight I/O drains before the parent hub
+     * (which they depend on for transfers) is torn down. [A33] */
+    /*
+     * Take one child at a time: look it up under the lock, then recurse with
+     * the lock dropped, because the child's teardown runs its class driver's
+     * .detach, which sleeps.  Snapshotting the whole list instead would put a
+     * 512-byte array on a stack that recurses to the hub-tier limit. [USB-19]
+     * Each pass removes a child, so the loop terminates.
+     */
+    for (;;) {
+        usb_device_t *child = NULL;
+
+        mutex_lock(&usb_devtab_lock);
+        for (int i = 0; i < USB_MAX_DEVICES; i++) {
+            usb_device_t *d = usb_devices[i];
+            if (d && d != dev && d->parent == dev) {
+                child = d;
+                break;
+            }
+        }
+        mutex_unlock(&usb_devtab_lock);
+
+        if (!child)
+            break;
+        usb_disconnect_device(child);
+    }
 
     /* 1. Driver detach first: it drains outstanding I/O before we free. */
     if (dev->driver && dev->driver->detach)
@@ -876,6 +1402,30 @@ static void usb_disconnect_device(usb_device_t *dev)
     usb_free_device(dev);
 }
 
+/*
+ * The device enumerated behind `parent` on downstream port `port`, or NULL.
+ * The hub driver uses this to reconcile physical port state against what is
+ * actually enumerated, the same way usb_root_device_on_port does for the
+ * root hub.
+ */
+usb_device_t *usb_child_device_on_port(usb_device_t *parent, uint8_t port)
+{
+    usb_device_t *found = NULL;
+
+    if (!parent)
+        return NULL;
+    mutex_lock(&usb_devtab_lock);
+    for (int i = 0; i < USB_MAX_DEVICES; i++) {
+        usb_device_t *d = usb_devices[i];
+        if (d && d->parent == parent && d->port == port) {
+            found = d;
+            break;
+        }
+    }
+    mutex_unlock(&usb_devtab_lock);
+    return found;
+}
+
 static void usb_hotplug_scan(void)
 {
     for (usb_hcd_t *hcd = usb_hcd_list; hcd; hcd = hcd->next) {
@@ -886,23 +1436,55 @@ static void usb_hotplug_scan(void)
             int connected = (st & USB_PORT_STAT_CONNECTION) != 0;
             usb_device_t *dev = usb_root_device_on_port(hcd, port);
 
+            /* Ports are 1-based; index from 0 so the last port is covered
+             * too. [USB-20] */
+            uint8_t *fails = (port >= 1 && port <= USB_MAX_ROOT_PORTS)
+                             ? &hcd->enum_fail[port - 1] : NULL;
+
+            if (!connected && fails)
+                *fails = 0;      /* gone: a re-plug deserves a fresh try */
+
             if (dev && !connected) {
                 kprintf("usb: device removed from %s port %u\n",
                         hcd->name, port);
                 usb_disconnect_device(dev);
             } else if (!dev && connected && hcd->port_reset) {
-                if (hcd->port_reset(hcd, port) != 0)
+                /* Parked after repeated failures: a port that reports a
+                 * device it cannot enumerate must not be reset and re-probed
+                 * forever.  Only a disconnect clears this. */
+                if (fails && *fails >= USB_ENUM_MAX_TRIES)
                     continue;
+
+                if (hcd->port_reset(hcd, port) != 0) {
+                    if (fails) (*fails)++;
+                    continue;
+                }
                 st = hcd->port_status(hcd, port);
-                if (!(st & USB_PORT_STAT_ENABLE))
+                if (!(st & USB_PORT_STAT_ENABLE)) {
+                    if (fails) (*fails)++;
                     continue;
-                uint8_t speed = (st & USB_PORT_STAT_LOW_SPEED)  ? USB_SPEED_LOW  :
-                                (st & USB_PORT_STAT_HIGH_SPEED) ? USB_SPEED_HIGH :
-                                                                  USB_SPEED_FULL;
-                usb_enumerate_device(hcd, port, speed);
+                }
+                uint8_t speed = (st & USB_PORT_STAT_SUPER_SPEED) ? USB_SPEED_SUPER :
+                                (st & USB_PORT_STAT_LOW_SPEED)   ? USB_SPEED_LOW   :
+                                (st & USB_PORT_STAT_HIGH_SPEED)  ? USB_SPEED_HIGH  :
+                                                                   USB_SPEED_FULL;
+                if (usb_enumerate_device(hcd, port, speed) != 0 && fails) {
+                    if (++(*fails) >= USB_ENUM_MAX_TRIES)
+                        kprintf("usb: %s port %u: enumeration failed %u times,"
+                                " giving up until re-plug\n",
+                                hcd->name, port, USB_ENUM_MAX_TRIES);
+                }
             }
         }
     }
+
+    /*
+     * Root ports only cover what is plugged directly into the controller.
+     * Everything behind a hub shares its hub's root-port connection bit, so
+     * the loop above can never see those come and go -- the hub driver has
+     * to walk its own downstream ports.
+     */
+    usb_hub_scan_ports();
 }
 
 static int usb_hotplug_chan;
@@ -929,6 +1511,7 @@ void usb_init(void)
 {
     usb_hcd_t *hcd;
 
+    mutex_init(&usb_devtab_lock, "usb_devtab");
     memset(usb_devices, 0, sizeof(usb_devices));
     memset(usb_addr_bitmap, 0, sizeof(usb_addr_bitmap));
     usb_enum_depth = 0;

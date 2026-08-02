@@ -4,30 +4,34 @@
  * Manages registration and invocation of binary format handlers.
  */
 
-#include <sys/exec.h>
 #include <stddef.h>
+#include <stdio.h>
 #include <string.h>
-#include <sys/errno.h>
-#include <sys/file.h>
-#include <vfs/vfs.h>
-#include <sys/types.h>
-#include <sys/proc.h>
-#include <sys/stat.h>
-#include <kern/console.h>
+
+#include <exec/formats/aout.h>
 #include <exec/formats/elf.h>
 #include <exec/formats/elks_aout.h>
 #include <exec/formats/script.h>
-struct thr_param;
-#include <sys/syscall_impl.h>
-#include <sys/kern_syscalls.h>
-#include <sys/fcntl.h>
+#include <exec/formats/xout.h>
+#include <kern/console.h>
 #include <kern/sched.h>
-#include <stdio.h>
+#include <sys/errno.h>
+#include <sys/exec.h>
+#include <sys/fcntl.h>
+#include <sys/file.h>
+#include <sys/kern_syscalls.h>
+#include <sys/proc.h>
+#include <sys/stat.h>
+#include <sys/syscall_impl.h>
+#include <sys/types.h>
+#include <vfs/vfs.h>
 
 static struct exec_binary_handler *exec_handlers = NULL;
 
 void exec_init(void) {
     elks_init_handler();
+    xout_init_handler();
+    aout_init_handler();
     script_init_handler();
 }
 

@@ -5,15 +5,16 @@
  * Based on 4.4BSD design patterns.
  */
 
-#include <sys/proc.h>
-#include <sys/session.h>
-#include <sys/lock.h>
-#include <sys/copy.h>
-#include <sys/errno.h>
-#include <sys/signal.h>
-#include <pm/pm.h>
 #include <stddef.h>
 #include <string.h>
+
+#include <pm/pm.h>
+#include <sys/copy.h>
+#include <sys/errno.h>
+#include <sys/lock.h>
+#include <sys/proc.h>
+#include <sys/session.h>
+#include <sys/signal.h>
 #include <vm/vm_kmem.h>
 
 
@@ -193,33 +194,42 @@ void pgrp_remove_proc(struct process *proc) {
     struct session *free_sess = NULL;
     int orphaned = 0;
     int has_stopped = 0;
+    int do_free = 0;
 
     if (!proc) return;
 
     old_pgrp = proc->p_pgrp;
     mutex_lock(&proctree_lock);
     __pgrp_remove_proc(proc);
-    if (old_pgrp && old_pgrp->pg_members) {
-        orphaned = __pgrp_is_orphaned(old_pgrp);
-        has_stopped = __pgrp_has_stopped(old_pgrp);
-    } else if (old_pgrp) {
-        free_sess = __pgrp_unlink_locked(old_pgrp);
+    if (old_pgrp) {
+        if (old_pgrp->pg_members == NULL) {
+            /* We removed the last member: unlink and take ownership to free,
+             * all under the lock.  Deciding this here — rather than re-reading
+             * old_pgrp->pg_members AFTER the unlock — is essential: two
+             * concurrent removers of the last two members would otherwise both
+             * observe the group empty post-unlock and double-free it (and one
+             * would read pg_members from freed memory). */
+            free_sess = __pgrp_unlink_locked(old_pgrp);
+            do_free = 1;
+        } else {
+            orphaned = __pgrp_is_orphaned(old_pgrp);
+            has_stopped = __pgrp_has_stopped(old_pgrp);
+        }
     }
     mutex_unlock(&proctree_lock);
 
     if (!old_pgrp) {
         return;
     }
-    if (free_sess || old_pgrp->pg_members == NULL) {
+    if (do_free) {
+        /* We hold the sole reference (unlinked under the lock). */
         kfree(old_pgrp, sizeof(struct pgrp));
         if (free_sess) {
             session_free(free_sess);
         }
-    } else {
-        if (orphaned && has_stopped) {
-            pgrp_signal(old_pgrp, 1);  /* SIGHUP */
-            pgrp_signal(old_pgrp, 18); /* SIGCONT */
-        }
+    } else if (orphaned && has_stopped) {
+        pgrp_signal(old_pgrp, 1);  /* SIGHUP */
+        pgrp_signal(old_pgrp, 18); /* SIGCONT */
     }
 }
 
@@ -235,17 +245,17 @@ int sys_setsid(void) {
     /* L522: Check if already a process group leader */
     if (current_process->p_pgrp && 
         current_process->p_pgrp->pg_id == current_process->pid) {
-        return -1; /* EPERM - already a group leader */
+        return -EPERM; /* already a group leader */
     }
     
     /* L523: Allocate new session and pgrp */
     struct session *sess = session_alloc(current_process);
-    if (!sess) return -1; /* ENOMEM */
+    if (!sess) return -ENOMEM;
     
     struct pgrp *pgrp = pgrp_alloc(current_process, sess);
     if (!pgrp) {
         session_free(sess);
-        return -1; /* ENOMEM */
+        return -ENOMEM;
     }
     
     /* Remove from current group (if any) implicitly handled by pgrp_add_proc */
@@ -275,11 +285,11 @@ int sys_getsid(int pid) {
         target = proc_find(pid);
     }
     
-    if (!target) return -1; /* ESRCH */
+    if (!target) return -ESRCH;
     
     /* Return session ID from pgrp->session */
     if (!target->p_pgrp || !target->p_pgrp->pg_session) {
-        return -1; /* No session */
+        return -ESRCH; /* No session */
     }
     
     return target->p_pgrp->pg_session->s_sid;
@@ -325,10 +335,10 @@ int sys_getpgid(int pid) {
         target = proc_find(pid);
     }
     
-    if (!target) return -1; /* ESRCH */
+    if (!target) return -ESRCH;
     
-    if (!target->p_pgrp) return -1;
-    
+    if (!target->p_pgrp) return -ESRCH;
+
     return target->p_pgrp->pg_id;
 }
 
@@ -349,9 +359,9 @@ int sys_setpgid(int pid, int pgid) {
         target = proc_find(pid);
     }
     
-    if (!target) return -1; /* ESRCH */
+    if (!target) return -ESRCH;
     
-    if (pgid < 0) return -1; /* EINVAL */
+    if (pgid < 0) return -EINVAL;
     if (pgid == 0) pgid = pid;
     
     /* L530: Must be in same session */
@@ -369,11 +379,11 @@ int sys_setpgid(int pid, int pgid) {
     if (target != current_process) {
         /* Must be a child of caller */
         if (target->ppid != current_process->pid) {
-            return -1; /* ESRCH - not a child */
+            return -ESRCH; /* not a child */
         }
         /* Must be in same session */
         if (target_sess != caller_sess) {
-            return -1; /* EPERM - different session */
+            return -EPERM; /* different session */
         }
     }
     
@@ -383,24 +393,30 @@ int sys_setpgid(int pid, int pgid) {
     if (new_pgrp) {
         /* L530: Verify same session */
         if (new_pgrp->pg_session != caller_sess) {
-            return -1; /* EPERM - pgrp in different session */
+            return -EPERM; /* pgrp in different session */
         }
         pgrp_add_proc(new_pgrp, target);
     } else if (pgid == target->pid) {
         /* Create new pgrp with target as leader */
+        int new_sess = 0;
         if (!caller_sess) {
             /* Create a default session if none exists */
             caller_sess = session_alloc(target);
-            if (!caller_sess) return -1;
+            if (!caller_sess) return -ENOMEM;
+            new_sess = 1;
         }
         new_pgrp = pgrp_alloc(target, caller_sess);
-        if (!new_pgrp) return -1;
+        if (!new_pgrp) {
+            /* Don't orphan a session we just allocated (mirrors sys_setsid). */
+            if (new_sess) session_free(caller_sess);
+            return -ENOMEM;
+        }
         pgrp_add_proc(new_pgrp, target);
     } else {
         /* pgid must be an existing group or target->pid */
-        return -1; /* EPERM */
+        return -EPERM;
     }
-    
+
     return 0;
 }
 

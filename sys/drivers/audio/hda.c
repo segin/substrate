@@ -12,10 +12,12 @@
  * keeps playing across scheduling jitter instead of underrunning to silence.
  */
 
-#include <drivers/audio/hda.h>
+#include <stdio.h>
+#include <string.h>
+
 #include <drivers/audio/audio.h>
 #include <drivers/audio/audio_fifo.h>
-
+#include <drivers/audio/hda.h>
 #include <kern/console.h>
 #include <kern/device.h>
 #include <kern/pci.h>
@@ -26,8 +28,6 @@
 #include <sys/errno.h>
 #include <sys/irq.h>
 #include <sys/lock.h>
-#include <stdio.h>
-#include <string.h>
 
 #define HDA_PCI_CLASS_MULTIMEDIA   0x04
 #define HDA_PCI_SUBCLASS_HDA       0x03
@@ -793,8 +793,9 @@ static int hda_attach(pci_device_t *pdev)
 	}
 
 	if (d->irq >= 0) {
+		/* Shared PCI INTx -- see the note in ac97.c. */
 		(void)request_irq((unsigned int)d->irq, hda_irq_handler,
-		                  0, "hda", d);
+		                  IRQF_SHARED, "hda", d);
 	}
 
 	d->audio.ops = &hda_ops;

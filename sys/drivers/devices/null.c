@@ -1,11 +1,12 @@
-#include <sys/types.h>
+#include <string.h>
+
+#include <drivers/devices/null.h>
+#include <kern/console.h>
 #include <sys/errno.h>
 #include <sys/poll.h>
 #include <sys/stat.h>
+#include <sys/types.h>
 #include <vfs/vfs.h>
-#include <string.h>
-#include <kern/console.h>
-#include <drivers/devices/null.h>
 
 /*
  * /dev/null Implementation

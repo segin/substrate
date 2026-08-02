@@ -8,13 +8,23 @@
 #include <arch/x86-common/io.h>
 
 int ide_read_sectors(uint16_t bus, uint8_t drive, uint32_t lba,
-                     uint8_t count, void *buffer) {
+                     uint16_t count, void *buffer) {
     uint8_t channel;
 
     if (ide_channel_index_from_io(bus, &channel) < 0) {
         return -1;
     }
+    if (count == 0 || count > 256) {
+        return -1;
+    }
 
+    /* ATA encodes a 256-sector transfer as a sector-count register of 0.
+     * ide_issue_rw() writes the low byte, so passing 256 through gives the
+     * right register value -- but the data loop below must iterate the true
+     * count.  Narrowing to uint8_t before the loop made it run zero times
+     * while the drive still transferred 128 KiB: the caller got a success
+     * return with its buffer untouched, and the drive was left with DRQ
+     * asserted, desynchronising the channel. */
     if (ide_issue_rw(channel, drive, lba, count, ATA_CMD_READ_PIO, 0,
                      "pio-read") < 0) {
         return -1;
@@ -62,13 +72,19 @@ int ide_read_sectors_ext(uint16_t bus, uint8_t drive, uint64_t lba,
 }
 
 int ide_write_sectors(uint16_t bus, uint8_t drive, uint32_t lba,
-                      uint8_t count, const void *buffer) {
+                      uint16_t count, const void *buffer) {
     uint8_t channel;
 
     if (ide_channel_index_from_io(bus, &channel) < 0) {
         return -1;
     }
+    if (count == 0 || count > 256) {
+        return -1;
+    }
 
+    /* See ide_read_sectors(): 256 is encoded as a sector-count register of 0,
+     * so the loop below must iterate the true count.  Narrowing beforehand
+     * made the write report success having sent nothing. */
     if (ide_issue_rw(channel, drive, lba, count, ATA_CMD_WRITE_PIO, 0,
                      "pio-write") < 0) {
         return -1;

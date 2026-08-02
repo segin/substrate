@@ -7,8 +7,10 @@
 
 #include <stdint.h>
 #include <stdio.h>
+
 #include <kern/console.h>
 #include <kern/ksyms.h>
+#include <kern/panic.h>
 
 /* Maximum number of frames to trace */
 #define MAX_STACK_FRAMES 16
@@ -47,6 +49,21 @@ void stack_trace(void) {
         /* Check alignment (EBP should be 4-byte aligned) */
         if ((uint32_t)frame & 0x3) {
             snprintf(buf, sizeof(buf), "  #%d: [Misaligned frame 0x%08x]\n", depth, (uint32_t)frame);
+            kprint(buf);
+            break;
+        }
+
+        /*
+         * [USB-HW-03 lead (c)] The range and alignment checks above say the
+         * frame pointer LOOKS like a kernel address; they do not say it is
+         * mapped.  Dereferencing an in-range but unmapped frame faults, and
+         * we are already inside a fault handler -- so the stack trace of the
+         * first fault becomes a second fault.  That is the reported hardware
+         * case exactly: its dump has ebp = 0x1B232B00, a garbage value a
+         * corrupted frame chain can easily walk into.
+         */
+        if (!panic_addr_readable((uintptr_t)frame, sizeof(*frame))) {
+            snprintf(buf, sizeof(buf), "  #%d: [Unmapped frame 0x%08x]\n", depth, (uint32_t)frame);
             kprint(buf);
             break;
         }
@@ -102,7 +119,18 @@ void stack_trace_from(uint32_t ebp, uint32_t eip) {
             kprint(buf);
             break;
         }
-        
+
+        /* [USB-HW-03 lead (c)] In range and aligned is not the same as
+         * mapped; see the matching guard in stack_trace().  This walker is
+         * the one exception handlers call, with the frame pointer taken
+         * straight from the faulting trap frame, so it is the likeliest of
+         * the two to be handed a corrupted chain. */
+        if (!panic_addr_readable((uintptr_t)frame, sizeof(*frame))) {
+            snprintf(buf, sizeof(buf), "  #%d: [Unmapped frame 0x%08x]\n", depth, (uint32_t)frame);
+            kprint(buf);
+            break;
+        }
+
         /* Resolve symbol */
         ksym_resolve(frame->eip, sym_buf, sizeof(sym_buf));
         snprintf(buf, sizeof(buf), "  #%d: %s\n", depth, sym_buf);

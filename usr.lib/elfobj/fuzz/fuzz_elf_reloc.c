@@ -1,6 +1,7 @@
-#include <elfobj.h>
 #include <stddef.h>
 #include <stdint.h>
+
+#include <elfobj.h>
 
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     elfobj_t *obj = NULL;

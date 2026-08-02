@@ -40,6 +40,7 @@
 #include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <sys/utsname.h>
 #include <termios.h>
 #include <time.h>
 #include <unistd.h>
@@ -193,6 +194,18 @@ print_issue(const char *tty_name)
     FILE *f = fopen("/etc/issue", "r");
     char  host[64];
     int   c;
+    /*
+     * \s and \r come from the running kernel, not from a literal here.  They
+     * used to be hardcoded, and the hardcoded release drifted: /etc/issue said
+     * 0.1 while uname(2) said 0.2, so the login banner advertised a version
+     * that had not existed for two releases.  Asking the kernel is both what
+     * the escapes mean and the only way they stay true across a version bump.
+     */
+    struct utsname uts;
+    if (uname(&uts) != 0) {
+        uts.sysname[0] = '\0';
+        uts.release[0] = '\0';
+    }
 
     if (f == NULL) {
         return 1;
@@ -215,13 +228,13 @@ print_issue(const char *tty_name)
                 putchar('\n');
                 break;
             case 's':
-                fputs("Substrate", stdout);
+                fputs(uts.sysname[0] ? uts.sysname : "Substrate", stdout);
                 break;
             case 'h':
                 fputs(host, stdout);
                 break;
             case 'r':
-                fputs("0.1", stdout);
+                fputs(uts.release[0] ? uts.release : "unknown", stdout);
                 break;
             case 'l':
                 fputs(tty_name ? tty_name : "tty", stdout);

@@ -6,12 +6,12 @@
  * PSF2: 32-byte header; variable width/height, optional Unicode table.
  */
 
-#include <stdint.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <string.h>
 
-#include <drivers/video/psf.h>
 #include <drivers/video/font.h>
+#include <drivers/video/psf.h>
 
 int psf1_parse(const void *data, size_t size, struct font_info *out)
 {
@@ -66,6 +66,12 @@ int psf2_parse(const void *data, size_t size, struct font_info *out)
         return -1;
 
     if (hdr->headersize < sizeof(struct psf2_header))
+        return -1;
+
+    /* headersize is attacker-controlled; if it exceeds the buffer the
+     * `size - hdr->headersize` below underflows to a near-SIZE_MAX value
+     * and the glyph-data bounds check always passes.  Reject first. */
+    if (hdr->headersize > size)
         return -1;
 
     /* Validate glyph data fits.  numglyph and bytesperglyph are

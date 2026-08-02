@@ -1,4 +1,4 @@
-#include "elf_private.h"
+#include <elf_private.h>
 
 /* Cap the string table's growth (mirrors ELFOBJ_MAX_ALLOC_BYTES in
  * elf_util.c). elf__strtab_add grew via a raw doubling realloc with no

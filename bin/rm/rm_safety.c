@@ -1,9 +1,9 @@
-#include "rm_safety.h"
-
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+
+#include "rm_safety.h"
 
 static char *
 rm_dup_range(const char *text, size_t length)

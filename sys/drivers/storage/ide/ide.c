@@ -23,16 +23,16 @@
 #include <string.h>
 
 #include <arch/i386/cpu.h>
-#include <sys/random.h>
+#include <drivers/storage/blkdev.h>
+#include <drivers/storage/ide/ide.h>
+#include <drivers/storage/ide/ide_priv.h>
+#include <kern/cmdline.h>
 #include <kern/console.h>
 #include <kern/driver.h>
 #include <kern/isa.h>
 #include <kern/pci.h>
-#include <kern/cmdline.h>
 #include <kern/sched.h>
-#include <drivers/storage/blkdev.h>
-#include <drivers/storage/ide/ide.h>
-#include <drivers/storage/ide/ide_priv.h>
+#include <sys/random.h>
 
 /*
  * ============================================================
@@ -126,20 +126,34 @@ int ide_transfer_read_once(ide_drive_ctx_t *ctx, uint64_t sector,
     ide_device_t *dev = &ide_devices[ctx->index];
 
     if (ctx->type == 1) {
-        return ide_atapi_read_sectors(channel, drive, (uint32_t)sector,
-                                      (uint16_t)count, buffer);
+        /* [IDE-19] count is uint32 and was narrowed to uint16 with no bound
+         * check, so a request for exactly 65536 sectors became 0. */
+        if (count == 0 || count > 0xFFFFU) {
+            return -1;
+        }
+        /* IDE-02: use the size negotiated at probe time, not a constant. */
+        return ide_atapi_read_sectors_ss(channel, drive, (uint32_t)sector,
+                                         (uint16_t)count, buffer,
+                                         ide_blkdevs[ctx->index].sector_size);
     }
 
     if (ide_attached && ide_channels[channel].dma_capable &&
         !dev->dma_forced_pio && dev->dma_mode != 0 && count <= 256) {
-        if (ide_dma_read(channel, drive, sector, (uint16_t)count, buffer) == 0) {
+        int dr = ide_dma_read(channel, drive, sector, (uint16_t)count, buffer);
+        if (dr == 0) {
             return 0;
         }
-        ide_disable_device_dma(dev, "read");
+        /* [IDE-16] A PRDT that could not describe THIS buffer is a limit of
+         * our descriptor table, not evidence the device cannot do DMA.  Fall
+         * back to PIO for this request only; ide_disable_device_dma() is
+         * permanent. */
+        if (dr != IDE_DMA_UNSUPPORTED) {
+            ide_disable_device_dma(dev, "read");
+        }
     }
 
     if (sector < 0x10000000ULL && count <= 256) {
-        return ide_read_sectors(bus, drive, (uint32_t)sector, (uint8_t)count, buffer);
+        return ide_read_sectors(bus, drive, (uint32_t)sector, (uint16_t)count, buffer);
     }
 
     return ide_read_sectors_ext(bus, drive, sector, (uint16_t)count, buffer);
@@ -158,19 +172,24 @@ int ide_transfer_write_once(ide_drive_ctx_t *ctx, uint64_t sector,
 
     if (ide_attached && ide_channels[channel].dma_capable &&
         !dev->dma_forced_pio && dev->dma_mode != 0 && count <= 256) {
-        if (ide_dma_write(channel, drive, sector, (uint16_t)count, buffer) == 0) {
+        int dw = ide_dma_write(channel, drive, sector, (uint16_t)count, buffer);
+        if (dw == 0) {
             return 0;
         }
         /*
          * Mirror the read path: on a DMA write failure, disable DMA for
          * this device and fall through to the PIO write path rather than
-         * failing the whole transfer.
+         * failing the whole transfer.  [IDE-16] -- except when the failure
+         * was only our PRDT running out of entries, which says nothing about
+         * the device.
          */
-        ide_disable_device_dma(dev, "write");
+        if (dw != IDE_DMA_UNSUPPORTED) {
+            ide_disable_device_dma(dev, "write");
+        }
     }
 
     if (sector < 0x10000000ULL && count <= 256) {
-        return ide_write_sectors(bus, drive, (uint32_t)sector, (uint8_t)count, buffer);
+        return ide_write_sectors(bus, drive, (uint32_t)sector, (uint16_t)count, buffer);
     }
 
     return ide_write_sectors_ext(bus, drive, sector, (uint16_t)count, buffer);

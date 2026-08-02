@@ -3,17 +3,17 @@
  */
 
 #include <errno.h>
-#include <getopt.h>
 #include <limits.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/types.h>
 #include <unistd.h>
 
+#include "getopt.h"
 #include "tail.h"
+#include <sys/types.h>
 
 /* -------------------------------------------------------------------------
  * Numeric suffix parser

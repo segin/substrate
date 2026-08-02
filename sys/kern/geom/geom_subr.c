@@ -8,12 +8,13 @@
  * - Sector I/O helpers
  */
 
-#include <kern/geom/geom.h>
-#include <kern/console.h>
-#include <drivers/storage/blkdev.h>
-#include <vm/vm_kmem.h>
-#include <string.h>
 #include <stdio.h>
+#include <string.h>
+
+#include <drivers/storage/blkdev.h>
+#include <kern/console.h>
+#include <kern/geom/geom.h>
+#include <vm/vm_kmem.h>
 
 /*
  * ============================================================
@@ -69,6 +70,32 @@ void geom_register_class(geom_class_t *cls) {
  * Sector I/O Helpers
  * ============================================================
  */
+
+/*
+ * A sector read transfers disk->sector_size bytes per sector, which is NOT
+ * always 512: an ATAPI optical drive reports 2048.  The partition sniffers
+ * all read into fixed 512-byte stack buffers, so reading one sector off a
+ * CD-ROM overran them by 1536 bytes and smashed the kernel stack -- merely
+ * attaching a CD triple-faulted the machine during boot-time partition
+ * scanning.  Take the destination size and refuse a transfer that cannot
+ * fit; a caller whose buffer is too small simply sees "no partition table",
+ * which is the right answer for optical media anyway.
+ */
+int geom_read_sector_bounded(geom_disk_t *disk, uint64_t lba, void *buf,
+                             size_t bufsz) {
+    if (!disk || !disk->read || !buf) return -1;
+    if (disk->sector_size == 0 || disk->sector_size > bufsz) return -1;
+    return disk->read(disk, lba, 1, buf);
+}
+
+int geom_read_sectors_bounded(geom_disk_t *disk, uint64_t lba, size_t count,
+                              void *buf, size_t bufsz) {
+    if (!disk || !disk->read || !buf || count == 0) return -1;
+    if (disk->sector_size == 0) return -1;
+    /* count * sector_size must fit, without overflowing the multiply. */
+    if (count > bufsz / disk->sector_size) return -1;
+    return disk->read(disk, lba, count, buf);
+}
 
 int geom_read_sector(geom_disk_t *disk, uint64_t lba, void *buf) {
     if (!disk || !disk->read || !buf) return -1;
@@ -168,6 +195,10 @@ geom_partition_t *geom_add_partition(geom_disk_t *disk, const char *name,
         bdev->priv = part;
         bdev->read = geom_part_read;
         bdev->write = geom_part_write;
+        /* BLK-03: record where this partition starts on the raw disk.  The
+         * parent pointer itself is wired by blkdev_register_disk(), which is
+         * the only place that has both the raw blkdev and the geom_disk. */
+        bdev->part_offset = start;
 
         blkdev_register(bdev);
         /* Remember the child blkdev so the parent disk can invalidate its

@@ -1,9 +1,9 @@
-#include "mv.h"
-
-#include <getopt.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include "getopt.h"
+#include "mv.h"
 
 enum {
     MV_OPT_BACKUP = 256,

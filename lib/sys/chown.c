@@ -13,11 +13,12 @@
  *   260 fchownat
  */
 
+#include <errno.h>
+#include <unistd.h>
+
+#include <sys/stat.h>
 #include <sys/syscall.h>
 #include <sys/types.h>
-#include <sys/stat.h>
-#include <unistd.h>
-#include <errno.h>
 
 static int __set_errno(int rc) {
     if (rc < 0) { errno = -rc; return -1; }

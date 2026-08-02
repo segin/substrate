@@ -12,17 +12,18 @@
  * - Linux kernel Documentation/locking/futex-requeue-pi.txt
  */
 
-#include <sys/futex.h>
-#include <sys/proc.h>
-#include <sys/errno.h>
-#include <sys/time.h>
+#include <stddef.h>
+#include <stdint.h>
+
+#include <arch/i386/pmap.h>
 #include <kern/sched.h>
 #include <kern/sleepq.h>
 #include <kern/time.h>
-#include <arch/i386/pmap.h>
+#include <sys/errno.h>
+#include <sys/futex.h>
+#include <sys/proc.h>
+#include <sys/time.h>
 #include <vm/vm_kmem.h>
-#include <stddef.h>
-#include <stdint.h>
 
 /*
  * User address validation

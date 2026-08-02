@@ -5,11 +5,12 @@
  * No artificial sd/sr split - just SCSI devices with type-specific handling.
  */
 
-#include <string.h>
 #include <stdio.h>
-#include <kern/console.h>
+#include <string.h>
+
 #include <drivers/storage/blkdev.h>
 #include <drivers/storage/scsi/scsi.h>
+#include <kern/console.h>
 
 /*
  * ============================================================
@@ -109,6 +110,18 @@ retry:
             scsi->online = 1;
             scsi->media_present = 1;
             scsi->removable = 1;
+            /*
+             * SCSI-05: push the NEW medium's geometry into the block device.
+             * The refresh updated scsi->capacity and scsi->sector_size but
+             * stopped there, so blkdev kept the size of the disc that had
+             * just been ejected -- every subsequent read was bounded by the
+             * old capacity and the partition table cached from the old disc
+             * stayed live.  Insert a smaller disc and reads ran off its end;
+             * insert a larger one and most of it was unreachable.
+             */
+            dev->sector_size   = scsi->sector_size ? scsi->sector_size
+                                                   : dev->sector_size;
+            dev->total_sectors = scsi->capacity;
             goto retry;
         }
     }
@@ -244,20 +257,83 @@ int scsi_dev_attach(scsi_device_t *scsi_dev) {
     /* Create device name: scsi0, scsi1, etc. */
     snprintf(sbd->blkdev.name, sizeof(sbd->blkdev.name), "scsi%u", sbd->dev_num);
     
-    /* Set sector size based on device type */
-    if (scsi_dev->type == SCSI_TYPE_ROM) {
+    /*
+     * SCSI-04: reconcile the block layer's sector size with what the DEVICE
+     * reported, instead of hardcoding 2048 for every optical unit.
+     *
+     * total_sectors comes from READ CAPACITY and is counted in the device's
+     * own blocks, so pairing it with a sector_size the device did not report
+     * describes a disk that does not exist: with a real 512-byte optical
+     * device the geometry came out 4x wrong, and with a 2048-byte one that
+     * reported its size correctly the pairing happened to work only by
+     * coincidence.  Trust the reported size when there is one -- 2048 stays
+     * the fallback for optical media that answers READ CAPACITY with
+     * nothing useful, which is the case the constant was there for.
+     */
+    if (scsi_dev->sector_size) {
+        sbd->blkdev.sector_size = scsi_dev->sector_size;
+    } else if (scsi_dev->type == SCSI_TYPE_ROM ||
+               scsi_dev->type == SCSI_TYPE_OPTICAL ||
+               scsi_dev->type == SCSI_TYPE_WORM) {
         sbd->blkdev.sector_size = CD_SECTOR_SIZE;
     } else {
-        sbd->blkdev.sector_size = scsi_dev->sector_size ? scsi_dev->sector_size : 512;
+        sbd->blkdev.sector_size = 512;
     }
-    
+
     sbd->blkdev.total_sectors = scsi_dev->capacity;
     sbd->blkdev.priv = sbd;
     sbd->blkdev.read = scsi_blk_read;
     sbd->blkdev.write = scsi_blk_write;
     
-    /* Register raw disk node and scan for partitions. */
-    blkdev_register_disk(&sbd->blkdev);
+    /*
+     * Register the raw node, and only hand the device to GEOM for a partition
+     * scan when scanning it actually makes sense.
+     *
+     * Two cases are skipped:
+     *
+     * 1. OPTICAL MEDIA (ROM / OPTICAL / WORM).  Never scanned, regardless of
+     *    whether a disc is present.  Optical media carries no MBR/GPT/BSD
+     *    label -- it is ISO9660 -- so the scan is pointless, and it is
+     *    actively hazardous: these devices use 2048-byte sectors, and a
+     *    2048-byte sector read overran the sniffers' 512-byte stack buffers
+     *    before they were bounded (the CD-ROM boot crash).  The IDE probe has
+     *    always done this for ATAPI -- see the matching comment in
+     *    ide_probe.c -- and the SCSI attach path simply never got the same
+     *    rule, so every SATAPI/USB/ATAPI-over-SCSI drive was being sniffed.
+     *
+     * 2. NO MEDIA (capacity still zero).  scsi_dev_refresh_capacity() above
+     *    has already had its retry, so a zero capacity means the slot is
+     *    genuinely empty.  Sniffing it issues reads that cannot succeed:
+     *    every one fails, each is retried, and on a USB Bulk-Only reader the
+     *    resulting timeout drives a Mass Storage Reset of the whole device,
+     *    disturbing the other LUNs -- including a slot with a working card.
+     *
+     * The /dev/storage/scsiN node is created either way, so nothing that
+     * expects the device to exist breaks; only the scan is skipped, and the
+     * reason is logged rather than being silent.
+     */
+    {
+        int optical = (scsi_dev->type == SCSI_TYPE_ROM ||
+                       scsi_dev->type == SCSI_TYPE_OPTICAL ||
+                       scsi_dev->type == SCSI_TYPE_WORM);
+        const char *skip = NULL;
+
+        if (optical) {
+            skip = "optical media, partition scan skipped";
+        } else if (sbd->blkdev.total_sectors == 0) {
+            skip = "no media, partition scan skipped";
+        }
+
+        if (skip) {
+            blkdev_register(&sbd->blkdev);
+            char nm_buf[96];
+            snprintf(nm_buf, sizeof(nm_buf), "  %s: %s\n",
+                     sbd->blkdev.name, skip);
+            kprint(nm_buf);
+        } else {
+            blkdev_register_disk(&sbd->blkdev);
+        }
+    }
     
     /* Add to list */
     sbd->next = scsi_dev_list;

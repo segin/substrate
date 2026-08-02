@@ -8,10 +8,11 @@
  * - GPT protective MBR detection (type 0xEE)
  */
 
-#include <kern/geom/geom.h>
-#include <kern/console.h>
-#include <string.h>
 #include <stdio.h>
+#include <string.h>
+
+#include <kern/console.h>
+#include <kern/geom/geom.h>
 
 
 
@@ -59,10 +60,21 @@ static int parse_extended(geom_disk_t *disk, uint64_t ext_start, uint64_t ext_si
     uint64_t ebr_lba = ext_start;
     uint8_t buf[512];
     int logical_count = 0;
-    
-    while (ebr_lba < ext_start + ext_size && logical_count < 60) {
+    /*
+     * Independent iteration cap on the number of EBRs walked.  logical_count
+     * only advances for non-empty logical partitions, so a crafted chain whose
+     * entry[0] is always empty but whose entry[1] cycles back to an in-range
+     * EBR would spin forever under the logical_count guard alone.  A real MBR
+     * has at most one EBR per logical partition, so bounding the walk at the
+     * same 60-entry ceiling terminates any cycle without truncating valid media.
+     */
+    int ebr_iterations = 0;
+
+    while (ebr_lba < ext_start + ext_size && logical_count < 60 &&
+           ebr_iterations < 60) {
+        ebr_iterations++;
         /* Read EBR */
-        if (geom_read_sector(disk, ebr_lba, buf) != 0) {
+        if (geom_read_sector_bounded(disk, ebr_lba, buf, sizeof(buf)) != 0) {
             kprintf("GEOM: failed to read EBR at LBA %llu\n", (unsigned long long)ebr_lba);
             break;
         }
@@ -135,7 +147,7 @@ static int geom_mbr_sniff(geom_disk_t *disk, uint64_t offset, int depth, const c
     mbr_logical_part_t logicals[60];
     
     /* Read sector at offset */
-    if (geom_read_sector(disk, offset, buf) != 0) {
+    if (geom_read_sector_bounded(disk, offset, buf, sizeof(buf)) != 0) {
         return -1;
     }
     

@@ -14,7 +14,8 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
-#include <utmp.h>
+
+#include "utmp.h"
 
 static double read_uptime_seconds(void) {
     int fd = open("/proc/uptime", O_RDONLY);

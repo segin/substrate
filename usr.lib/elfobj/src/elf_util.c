@@ -1,9 +1,10 @@
-#include "elf_private.h"
 #include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
-#include <sys/mman.h>
 #include <unistd.h>
+
+#include <elf_private.h>
+#include <sys/mman.h>
 
 #define ELFOBJ_MAX_ALLOC_BYTES (256u * 1024u * 1024u)
 #define ELFOBJ_MAX_DIAG_BYTES (1u * 1024u * 1024u)

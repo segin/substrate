@@ -22,14 +22,15 @@
  */
 #include <errno.h>
 #include <fcntl.h>
-#include <getopt.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
-#include <sys/time.h>
 #include <time.h>
 #include <unistd.h>
+
+#include "getopt.h"
+#include <sys/stat.h>
+#include <sys/time.h>
 
 #ifndef UTIME_NOW
 #define UTIME_NOW  ((1L << 30) - 1L)

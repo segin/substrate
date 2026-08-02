@@ -5,11 +5,11 @@
  * single/double-quote grouping and backslash escaping (CR-6); NUL mode (-0);
  * single-byte delimiter mode (-d); and the -E/-e logical EOF string.
  */
-#include "xargs.h"
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include "xargs.h"
 
 /* Source list: stdin, or the -a files in order. */
 static FILE **xa_src;

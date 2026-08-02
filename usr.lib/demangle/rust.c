@@ -1,5 +1,3 @@
-#include "demangle_internal.h"
-
 #include <ctype.h>
 #include <limits.h>
 #include <stddef.h>
@@ -9,6 +7,7 @@
 #include <string.h>
 
 #include <demangle.h>
+#include <demangle_internal.h>
 
 #define RUST_RECURSION_DEFAULT_LIMIT 128
 

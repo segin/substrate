@@ -1410,7 +1410,14 @@ static int vt_tty_ioctl(struct tty *tty, uint32_t cmd, unsigned long arg) {
         if (copyout(&kvalue, (void *)arg, sizeof(int)) != 0) return -EFAULT;
         return 0;
     case KDSETMODE:
-        if (copyin((void *)arg, &kvalue, sizeof(int)) != 0) return -EFAULT;
+        /* Linux KDSETMODE / KDSKBMODE pass the value directly as the ioctl
+         * argument, NOT as a pointer to an int -- the usual asymmetry in
+         * the KD family (GET takes a pointer-to-int out, SET takes an int
+         * in by value).  copyin()ing `arg` here treated KD_GRAPHICS (1) as
+         * a userspace address, returned EFAULT, and the X server aborted
+         * with "LinuxInit: KDSETMODE KD_GRAPHICS failed".  fb_console.c
+         * already had this right. */
+        kvalue = (int)arg;
         if (kvalue != KD_TEXT && kvalue != KD_GRAPHICS) return -EINVAL;
         vt->graphics_mode = (kvalue == KD_GRAPHICS) ? 1 : 0;
         /* hw_text path only matters on a VGA-text console (0xB8000);
@@ -1423,15 +1430,61 @@ static int vt_tty_ioctl(struct tty *tty, uint32_t cmd, unsigned long arg) {
         if (copyout(&kvalue, (void *)arg, sizeof(int)) != 0) return -EFAULT;
         return 0;
     case KDSKBMODE:
-        if (copyin((void *)arg, &kvalue, sizeof(int)) != 0) return -EFAULT;
+        /* Same value-by-arg convention as KDSETMODE above. */
+        kvalue = (int)arg;
         if (kvalue != K_RAW && kvalue != K_XLATE &&
             kvalue != K_MEDIUMRAW && kvalue != K_UNICODE && kvalue != K_OFF) {
             return -EINVAL;
         }
         vt->kbd_mode = kvalue;
         return 0;
+
+    /*
+     * VT ioctls.  hw_text_init() runs from kmain() before the framebuffer
+     * is probed, so this driver -- not fb_console -- is what actually owns
+     * /dev/tty1..N (and therefore /dev/tty0, which devfs aliases to tty1).
+     * An X server walks VT_OPENQRY -> VT_GETMODE -> VT_SETMODE on /dev/tty0
+     * during startup, so without these it dies before ever looking at the
+     * framebuffer:
+     *
+     *     (EE) xf86OpenConsole: Cannot find a free VT
+     *     (EE) LinuxInit: VT_GETMODE failed
+     *
+     * Semantics deliberately match fb_console.c's copies: substrate does
+     * not ration VTs and does not implement the relsig/acqsig switch
+     * protocol, so report auto-switch mode and accept-and-ignore the
+     * switching calls.  KDSETMODE(KD_GRAPHICS) above is the real handover.
+     */
+    case VT_OPENQRY: {
+        int free_vt = vt->id + 1;
+        if (copyout(&free_vt, (void *)arg, sizeof(int)) != 0) return -EFAULT;
+        return 0;
+    }
+    case VT_GETMODE: {
+        struct vt_mode mode;
+        memset(&mode, 0, sizeof(mode));
+        mode.mode = VT_AUTO;
+        if (copyout(&mode, (void *)arg, sizeof(mode)) != 0) return -EFAULT;
+        return 0;
+    }
+    case VT_GETSTATE: {
+        struct vt_stat st;
+        memset(&st, 0, sizeof(st));
+        st.v_active = (unsigned short)(vt_get_active() + 1);
+        st.v_state = (unsigned short)((1u << (vt->id + 1)));
+        if (copyout(&st, (void *)arg, sizeof(st)) != 0) return -EFAULT;
+        return 0;
+    }
+    case VT_SETMODE:
+    case VT_ACTIVATE:
+    case VT_WAITACTIVE:
+    case VT_RELDISP:
+    case VT_DISALLOCATE:
+        return 0;
+
     default:
-        return -1;
+        /* Unknown ioctl on a tty is ENOTTY, not EPERM (bare -1). */
+        return -ENOTTY;
     }
 }
 

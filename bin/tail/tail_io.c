@@ -8,10 +8,10 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/types.h>
 #include <unistd.h>
 
 #include "tail.h"
+#include <sys/types.h>
 
 /* -------------------------------------------------------------------------
  * I/O helpers

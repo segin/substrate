@@ -1,9 +1,8 @@
-#include "rmdir.h"
+#include <stdio.h>
 
+#include "rmdir.h"
 #include "rmdir_opts.h"
 #include "rmdir_parents.h"
-
-#include <stdio.h>
 
 static void
 rmdir_print_usage(FILE *stream, const char *progname)

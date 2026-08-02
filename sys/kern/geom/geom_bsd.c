@@ -8,10 +8,11 @@
  * - Filesystem type identification
  */
 
-#include <kern/geom/geom.h>
-#include <kern/console.h>
-#include <string.h>
 #include <stdio.h>
+#include <string.h>
+
+#include <kern/console.h>
+#include <kern/geom/geom.h>
 
 
 
@@ -27,7 +28,7 @@ static int geom_bsd_sniff(geom_disk_t *disk, uint64_t offset, int depth, const c
     uint64_t whole_size = 0;
     
     /* BSD disklabel is usually at sector 1 relative to partition start */
-    if (geom_read_sector(disk, offset + 1, buf) != 0) {
+    if (geom_read_sector_bounded(disk, offset + 1, buf, sizeof(buf)) != 0) {
         return -1;
     }
     

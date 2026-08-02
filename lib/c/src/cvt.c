@@ -10,10 +10,10 @@
  *   fcvt_r  ndigit = digits after the decimal point  ("%.*f")
  */
 
-#include <stdlib.h>
-#include <stdio.h>
-#include <string.h>
 #include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 /* Pull the digit run and exponent out of a "d.ddde±xx" string produced by
  * "%.*e", writing the significant digits into buf and the decimal exponent

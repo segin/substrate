@@ -15,12 +15,13 @@
  */
 
 #include <errno.h>
-#include <getopt.h>
 #include <stdbool.h>
-#include <stdio.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include "getopt.h"
 
 #define PASTE_VERSION "paste (Substrate) 1.0"
 

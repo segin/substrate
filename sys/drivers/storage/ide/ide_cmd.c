@@ -25,7 +25,7 @@ int ide_issue_non_data_command(uint8_t channel, uint8_t drive,
         return -1;
     }
 
-    if (ide_wait_ready(channel, IDE_TIMEOUT_READY_MS, op) < 0) {
+    if (ide_wait_ready_ex(channel, IDE_TIMEOUT_READY_MS, op, 0) < 0) {
         return -1;
     }
 
@@ -63,7 +63,7 @@ int ide_issue_rw(uint8_t channel, uint8_t drive, uint64_t lba,
 
     /* Ensure the drive is ready before touching the command block. */
     ide_select_drive(channel, drive);
-    if (ide_wait_ready(channel, IDE_TIMEOUT_READY_MS, op) < 0) {
+    if (ide_wait_ready_ex(channel, IDE_TIMEOUT_READY_MS, op, 0) < 0) {
         return -1;
     }
 

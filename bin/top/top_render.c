@@ -12,13 +12,14 @@
  * (REQ-23-0036).
  */
 
-#include "top.h"
-#include <stdio.h>
+#include <pwd.h>
 #include <stdarg.h>
+#include <stdio.h>
 #include <string.h>
 #include <time.h>
-#include <pwd.h>
 #include <unistd.h>
+
+#include "top.h"
 
 /*
  * Render an untrusted process name safe for a terminal: printable bytes

@@ -4,9 +4,10 @@
  * O(1) scheduler with separate queues for RT, Timeshare, and Idle classes.
  */
 
+#include <string.h>
+
 #include <kern/runqueue.h>
 #include <sys/lock.h>
-#include <string.h>
 
 // Find first set bit (1-indexed, 0 if none)
 static inline int ffs64(uint64_t x) {
@@ -53,7 +54,9 @@ int runqueue_level_for_thread(thread_t *t) {
             // Nice -20 to +19 maps to levels 32-71
             // Lower nice = higher priority = lower level index
             // priority is stored as 0-39, where 0 is highest
-            return RQ_TIMESHARE_BASE + (t->priority & 39);
+            return RQ_TIMESHARE_BASE + (t->priority < 0 ? 0 :
+                (t->priority >= RQ_TIMESHARE_LEVELS ? RQ_TIMESHARE_LEVELS - 1
+                                                    : t->priority));
             
         case SCHED_IDLE:
         default:
@@ -87,6 +90,10 @@ void runqueue_add(runqueue_t *rq, thread_t *t) {
     t->rq_next = NULL;
     t->rq_prev = q->tail;
     t->current_queue = rq;
+    // Remember the level we physically linked into: the thread's priority
+    // and sched_class can be mutated in place (decay, PI boost) before it is
+    // dequeued, so runqueue_remove must not recompute the level (audit A86).
+    t->rq_level = (int16_t)level;
     
     if (q->tail) {
         q->tail->rq_next = t;
@@ -107,7 +114,11 @@ void runqueue_add(runqueue_t *rq, thread_t *t) {
 }
 
 void runqueue_remove(runqueue_t *rq, thread_t *t) {
-    int level = runqueue_level_for_thread(t);
+    // Use the level the thread was actually enqueued at, NOT one recomputed
+    // from its (possibly since-mutated) priority/sched_class — recomputing can
+    // pick a different queue and corrupt both lists' head/tail/count/bitmap
+    // (audit A86).
+    int level = t->rq_level;
     runqueue_level_t *q = &rq->queues[level];
     
     // Unlink from queue

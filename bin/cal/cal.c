@@ -1,12 +1,11 @@
-#include "cal.h"
-
-#include "cal_math.h"
-#include "cal_opts.h"
-#include "cal_render.h"
-
 #include <locale.h>
 #include <stdio.h>
 #include <stdlib.h>
+
+#include "cal.h"
+#include "cal_math.h"
+#include "cal_opts.h"
+#include "cal_render.h"
 
 static void
 cal_print_usage(FILE *stream, const char *progname)

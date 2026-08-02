@@ -1,9 +1,9 @@
-#include <drivers/virtio/virtio.h>
+#include <string.h>
 
 #include <arch/i386/pmm.h>
 #include <arch/x86-common/io.h>
+#include <drivers/virtio/virtio.h>
 #include <kern/console.h>
-#include <string.h>
 
 #define VIRTIO_GPU_CTRLQ_INDEX   0
 #define VIRTIO_GPU_CURSORQ_INDEX 1

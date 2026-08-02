@@ -39,7 +39,6 @@
  * hashes with passwd(1) before deploying.)
  */
 
-#include <crypt.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <grp.h>
@@ -48,12 +47,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <termios.h>
+#include <unistd.h>
+
+#include "crypt.h"
+#include "utmp.h"
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
-#include <termios.h>
-#include <unistd.h>
-#include <utmp.h>
 
 #define LOGIN_MAX_USER  64
 #define LOGIN_MAX_PASS  64

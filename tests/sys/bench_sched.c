@@ -34,6 +34,12 @@ void run_sched_bench(void) {
     uint64_t end = rdtsc();
     uint64_t diff = end - start;
 
+    /* #425: `dummy` exists purely to keep the loop from being optimised
+     * away; -Werror=unused-but-set-variable rejects a value that is never
+     * read.  Consume it (it is volatile, so this cannot be folded) rather
+     * than deleting it and letting the compiler elide the benchmark. */
+    (void)dummy;
+
     // kprintf might not support %llu, so we split it or cast
     kprintf("Benchmark loops: %d\n", count);
     kprintf("Total Cycles: %u\n", (uint32_t)diff);

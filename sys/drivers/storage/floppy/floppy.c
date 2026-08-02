@@ -1,7 +1,11 @@
-#include <drivers/storage/floppy/floppy.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
 
 #include <arch/x86-common/io.h>
 #include <drivers/storage/blkdev.h>
+#include <drivers/storage/floppy/floppy.h>
 #include <kern/console.h>
 #include <kern/isa.h>
 #include <kern/resource.h>
@@ -16,11 +20,6 @@
 #include <sys/param.h>
 #include <vm/phys_mem.h>
 #include <vm/vm_page.h>
-
-#include <stdint.h>
-#include <stddef.h>
-#include <stdio.h>
-#include <string.h>
 
 #define FDC_DMA_ADDR_PORT 0x04
 #define FDC_DMA_COUNT_PORT 0x05
@@ -37,7 +36,6 @@
 #define FDC_MOTOR_IDLE_MS 2500U
 #define FDC_DMA_BUFFER_SIZE 4096U
 #define FDC_RETRY_LIMIT 3
-#define FDC_POLL_SPINS_PER_MS 100U
 
 typedef struct fdc_controller {
     uint16_t base;
@@ -78,14 +76,21 @@ static inline uint16_t fdc_reg(const fdc_controller_t *ctlr, uint8_t offset) {
     return (uint16_t)(ctlr->base + offset);
 }
 
-static uint32_t fdc_spin_budget(uint32_t timeout_ms) {
-    uint32_t spins = timeout_ms * FDC_POLL_SPINS_PER_MS;
-
-    if (spins < FDC_POLL_SPINS_PER_MS) {
-        spins = FDC_POLL_SPINS_PER_MS;
-    }
-    return spins;
-}
+/*
+ * FDC-03: every wait here used to be bounded by BOTH a monotonic deadline and
+ * a spin count, exiting on whichever came first -- and the spin count was a
+ * raw `pause` loop with no clock reference at all, so it always came first.
+ *
+ * fdc_delay_ms(400) for motor spin-up executed ~40000 `pause` instructions,
+ * which is one to two milliseconds on any real CPU, so reads were issued
+ * against a drive that had not spun up and failed all three retries on
+ * perfectly good media.  The same fallback cut fdc_wait_fifo_ready and
+ * fdc_wait_irq far short of their advertised 1000 ms.
+ *
+ * Everything now waits on get_uptime_ms() alone.  The spin budget is gone
+ * rather than merely enlarged: a CPU-speed-derived count cannot express a
+ * time, and having it there only reintroduces the same bug on faster silicon.
+ */
 
 static int fdc_command_result_ready(const fdc_controller_t *ctlr) {
     uint8_t msr = inb(fdc_reg(ctlr, FDC_MSR_OFFSET));
@@ -93,9 +98,9 @@ static int fdc_command_result_ready(const fdc_controller_t *ctlr) {
 }
 
 static int fdc_delay_ms(uint32_t delay_ms) {
-    uint32_t spins = fdc_spin_budget(delay_ms);
+    uint64_t deadline = (uint64_t)get_uptime_ms() + delay_ms;
 
-    while (spins-- > 0) {
+    while ((uint64_t)get_uptime_ms() < deadline) {
         __asm__ volatile("pause");
     }
     return 0;
@@ -103,7 +108,6 @@ static int fdc_delay_ms(uint32_t delay_ms) {
 
 static int fdc_wait_fifo_ready(const fdc_controller_t *ctlr, int want_read, uint32_t timeout_ms) {
     uint64_t deadline = (uint64_t)get_uptime_ms() + timeout_ms;
-    uint32_t spins = fdc_spin_budget(timeout_ms);
 
     for (;;) {
         uint8_t msr = inb(fdc_reg(ctlr, FDC_MSR_OFFSET));
@@ -118,7 +122,7 @@ static int fdc_wait_fifo_ready(const fdc_controller_t *ctlr, int want_read, uint
             }
         }
 
-        if ((uint64_t)get_uptime_ms() >= deadline || spins-- == 0) {
+        if ((uint64_t)get_uptime_ms() >= deadline) {
             return -ETIMEDOUT;
         }
 
@@ -151,14 +155,23 @@ static int fdc_read_fifo(const fdc_controller_t *ctlr, uint8_t *value) {
 
 static int fdc_wait_irq(fdc_controller_t *ctlr, uint32_t timeout_ms) {
     uint64_t deadline = (uint64_t)get_uptime_ms() + timeout_ms;
-    uint32_t spins = fdc_spin_budget(timeout_ms);
 
     while (!ctlr->irq_seen) {
         if (fdc_command_result_ready(ctlr)) {
+            /*
+             * FDC-05: clear irq_seen on EVERY exit, not just the normal one.
+             * Both early returns used to leave it set, and the seek paths did
+             * not clear it before issuing, so a late IRQ from a command that
+             * had already timed out made the NEXT seek return success before
+             * the head had moved.
+             */
+            ctlr->irq_seen = 0;
             return 0;
         }
-        if ((uint64_t)get_uptime_ms() >= deadline || spins-- == 0) {
-            return fdc_command_result_ready(ctlr) ? 0 : -ETIMEDOUT;
+        if ((uint64_t)get_uptime_ms() >= deadline) {
+            int ready = fdc_command_result_ready(ctlr);
+            ctlr->irq_seen = 0;               /* FDC-05 */
+            return ready ? 0 : -ETIMEDOUT;
         }
         __asm__ volatile("pause");
     }
@@ -320,6 +333,10 @@ static int fdc_seek_drive(fdc_drive_t *drive, uint8_t cylinder) {
         return 0;
     }
 
+    /* FDC-05: discard any IRQ left over from a previous command before
+     * issuing, or a late one satisfies this wait before the head moves. */
+    ctlr->irq_seen = 0;
+
     ret = fdc_write_fifo(ctlr, FDC_CMD_SEEK);
     if (ret < 0) {
         return ret;
@@ -354,6 +371,8 @@ static int fdc_recalibrate_drive(fdc_drive_t *drive) {
     uint8_t st0;
     uint8_t sensed_cyl;
     int ret;
+
+    ctlr->irq_seen = 0;                 /* FDC-05: see fdc_seek_drive */
 
     ret = fdc_write_fifo(ctlr, FDC_CMD_RECALIBRATE);
     if (ret < 0) {
@@ -525,7 +544,8 @@ static int fdc_transfer_sectors(fdc_drive_t *drive, uint32_t lba, uint32_t count
 
     byte_count = sectors_this_cmd * 512U;
     command = write_to_drive ? FDC_CMD_WRITE_DATA : FDC_CMD_READ_DATA;
-    gap3 = drive->geom->data_rate == 0 ? FDC_GAP3_HD : FDC_GAP3_DD;
+    /* FDC-04: from the format, not from the rate code. */
+    gap3 = drive->geom->gap3;
     mt = (((uint32_t)chs.sector - 1U) + sectors_this_cmd > sectors_per_track) ? 0x80U : 0x00U;
 
     spinlock_acquire(&ctlr->lock);
@@ -838,7 +858,6 @@ static int floppy_write(blkdev_t *dev, uint64_t sector, uint32_t count, const vo
 static int floppy_ioctl(blkdev_t *dev, uint32_t request, void *arg) {
     fdc_drive_t *drive = (fdc_drive_t *)dev->priv;
     struct floppy_format_track fmt;
-    int kernel_arg;
 
     if (drive == NULL || !drive->present) {
         return -EINVAL;
@@ -849,10 +868,20 @@ static int floppy_ioctl(blkdev_t *dev, uint32_t request, void *arg) {
         if (arg == NULL) {
             return -EINVAL;
         }
-        kernel_arg = ((uintptr_t)arg >= KERN_BASE);
-        if (kernel_arg) {
-            fmt = *(struct floppy_format_track *)arg;
-        } else if (copyin(arg, &fmt, sizeof(fmt)) != 0) {
+        /*
+         * FDC-02: never dereference `arg` because it looks like a kernel
+         * address.  sys_ioctl rejects arg >= KERN_BASE, but the FreeBSD
+         * personality (compat.c freebsd_sys_ioctl) and the ELKS default case
+         * both reach kern_ioctl with the raw user pointer and NO such check,
+         * so a foreign-personality process could hand in any kernel address
+         * and have the driver read it -- a fault, or an -EINVAL-vs-proceed
+         * memory-disclosure oracle.
+         *
+         * ALWAYS copyin.  An in-kernel caller that genuinely needs to pass a
+         * kernel struct should call fdc_format_track() directly, which is
+         * where the two cases actually differ.
+         */
+        if (copyin(arg, &fmt, sizeof(fmt)) != 0) {
             return -EFAULT;
         }
         return fdc_format_track(drive, &fmt);
@@ -949,7 +978,24 @@ void floppy_poll(void) {
         }
 
         ctlr = &fdc_controllers[drive->controller_index];
-        spinlock_acquire(&ctlr->lock);
+        /*
+         * This runs in the timer ISR (timer_tick_context -> floppy_poll), and
+         * ctlr->lock is held in process context by fdc_transfer_sectors() /
+         * fdc_format_track() across seeks, per-byte FIFO waits and the IRQ
+         * wait -- all busy-waits that can exceed the motor-idle threshold.
+         *
+         * spinlock_acquire() disables preemption but NOT interrupts, and
+         * panics on a same-CPU recursive acquire, so a blocking acquire here
+         * turns a stalled floppy read into "Deadlock: Spinlock already held by
+         * current CPU".  On SMP it would instead spin inside the ISR for
+         * seconds, stalling timekeeping.
+         *
+         * Dropping the motor is pure housekeeping: if the lock is busy the
+         * drive is in use anyway, and the next tick will retry.
+         */
+        if (!spinlock_try_acquire(&ctlr->lock)) {
+            continue;
+        }
         if (drive->motor_on && drive->last_activity_ms != 0 &&
             (now - drive->last_activity_ms) >= FDC_MOTOR_IDLE_MS) {
             fdc_motor_set(drive, 0);

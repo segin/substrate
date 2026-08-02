@@ -1,9 +1,9 @@
 #include <stddef.h>
 
+#include <arch/i386/pmm.h>
+#include <kern/sched.h>
 #include <sys/kthread.h>
 #include <sys/proc.h>
-#include <kern/sched.h>
-#include <arch/i386/pmm.h>
 
 int kthread_create(void (*func)(void *), void *arg, thread_t **tdp, const char *name) {
     // 1. Threads created by kthread_create belong to the Kernel Process (PID 0)

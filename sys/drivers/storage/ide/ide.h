@@ -150,7 +150,23 @@
 
 /* Bus Master Command Register bits */
 #define BM_CMD_START       0x01  /* Start/Stop DMA */
-#define BM_CMD_WRITE       0x08  /* Direction: 0=read, 1=write */
+/*
+ * [IDE-03] Bus Master IDE Command register bit 3, "Read or Write Control"
+ * (RWCON) in SFF-8038i.  It names the direction of the PCI-SIDE transfer,
+ * not the disk-side one, and the two are opposites:
+ *
+ *   RWCON = 1  the bus master WRITES to memory   -> reading FROM the disk
+ *   RWCON = 0  the bus master READS from memory  -> writing TO the disk
+ *
+ * The old name (BM_CMD_WRITE) and comment said "1 = write", which read
+ * naturally as "set it for a disk write" -- and that is exactly what the
+ * driver did, inverting every transfer.  On real hardware a disk READ then
+ * programmed the engine to pump the buffer out to the device (hang, or
+ * BM_STAT_ERROR) and a disk WRITE programmed it to write INTO the caller's
+ * buffer, corrupting the source.  qemu derives direction from the ATA
+ * opcode and ignores RWCON entirely, which is why this survived.
+ */
+#define BM_CMD_RWCON       0x08  /* 1 = bus master writes memory = disk read */
 
 /* Bus Master Status Register bits */
 #define BM_STAT_ACTIVE     0x01  /* DMA Active */
@@ -178,6 +194,14 @@ typedef struct __attribute__((packed)) {
 
 /* Maximum PRD entries (enough for 256 sectors = 128KB) */
 #define MAX_PRD_ENTRIES 32
+
+/*
+ * [IDE-16] ide_dma_read/ide_dma_write return this when the transfer could not
+ * be described by a PRDT of MAX_PRD_ENTRIES entries.  Distinct from -1 so the
+ * caller retries in PIO for that one request instead of calling
+ * ide_disable_device_dma(), which is permanent.
+ */
+#define IDE_DMA_UNSUPPORTED  (-2)
 
 /*
  * ============================================================
@@ -270,12 +294,14 @@ static inline int ide_channel_index_from_io(uint16_t bus, uint8_t *channel) {
 }
 
 /* PIO Transfers */
-int ide_read_sectors(uint16_t bus, uint8_t drive, uint32_t lba, 
-                     uint8_t count, void *buffer);
+/* count is 1..256; 256 is encoded on the wire as a sector-count register of
+ * 0, so it must not be narrowed to uint8_t before the transfer loop. */
+int ide_read_sectors(uint16_t bus, uint8_t drive, uint32_t lba,
+                     uint16_t count, void *buffer);
 int ide_read_sectors_ext(uint16_t bus, uint8_t drive, uint64_t lba, 
                          uint16_t count, void *buffer);
-int ide_write_sectors(uint16_t bus, uint8_t drive, uint32_t lba, 
-                      uint8_t count, const void *buffer);
+int ide_write_sectors(uint16_t bus, uint8_t drive, uint32_t lba,
+                      uint16_t count, const void *buffer);
 int ide_write_sectors_ext(uint16_t bus, uint8_t drive, uint64_t lba, 
                           uint16_t count, const void *buffer);
 
@@ -307,6 +333,13 @@ int ide_atapi_packet(uint8_t channel, uint8_t drive,
                      void *buffer, uint32_t buffer_len, int write);
 int ide_atapi_read_capacity(uint8_t channel, uint8_t drive, 
                             uint32_t *lba, uint32_t *block_size);
+/* IDE-02: ATAPI media is not always 2048-byte-sectored; the _ss form takes
+ * the size the probe negotiated from READ CAPACITY.  The plain form keeps
+ * the historical 2048 default for callers that have no better answer. */
+#define ATAPI_DEFAULT_SECTOR_SIZE 2048u
+int ide_atapi_read_sectors_ss(uint8_t channel, uint8_t drive,
+                              uint32_t lba, uint16_t count, void *buffer,
+                              uint32_t sector_size);
 int ide_atapi_read_sectors(uint8_t channel, uint8_t drive, 
                            uint32_t lba, uint16_t count, void *buffer);
 int ide_atapi_read_toc(uint8_t channel, uint8_t drive,

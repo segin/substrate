@@ -1,10 +1,10 @@
-#include "rm_scrub.h"
-
 #include <errno.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+
+#include "rm_scrub.h"
 
 static int pass(int fd, off_t len, uint8_t byte)
 {

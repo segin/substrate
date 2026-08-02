@@ -4,17 +4,18 @@
  * Core Device Management Implementation
  */
 
-#include <kern/device.h>
+#include <stdio.h>
+#include <string.h>
+
 #include <kern/bus.h>
+#include <kern/device.h>
 #include <kern/driver.h>
 #include <sys/errno.h>
 #include <sys/kobject.h>
 #include <sys/lock.h>
-#include <string.h>
-#include <stdio.h>
-#include <vm/vm_kmem.h> 
 #include <sys/types.h>
 #include <vfs/vfs.h>
+#include <vm/vm_kmem.h>
 
 static spinlock_t deferred_probe_lock = SPINLOCK_INIT("deferred_probe");
 static struct device *deferred_probe_head;
@@ -322,7 +323,9 @@ void device_unpublish(struct device *dev) {
         return;
     }
     if (dev->devfs_alias[0] != '\0') {
-        devfs_unregister_alias(dev->devfs_alias);
+        /* device_publish registers through devfs_register_alias(), i.e. a
+         * universal (mask 0) alias -- remove that one specifically. */
+        devfs_unregister_alias(dev->devfs_alias, 0);
         dev->devfs_alias[0] = '\0';
     }
     if (dev->devnode != NULL) {

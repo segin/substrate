@@ -1,0 +1,116 @@
+#!/usr/bin/env python3
+"""grub-embed-mbr — install GRUB's BIOS boot path into a disk *image*.
+
+This is what `grub-bios-setup` does, minus its insistence on resolving the
+image back to a real block device.  That insistence is why it cannot be used
+here: given a plain file it tries to guess the "root device" holding it,
+falls back to the partition the file happens to live on (/dev/sda1), and then
+fails because opening that device needs root:
+
+    grub-bios-setup: warning: disk does not exist, so falling back to
+                     partition device /dev/sda1.
+    grub-bios-setup: error: guessing the root device failed ...
+
+Requiring root to bake a rootfs image would be a real regression, so we write
+the two well-specified pieces ourselves:
+
+  1. boot.img -> LBA 0, preserving everything the partition table owns.
+     Only bytes 0x000-0x1B7 come from boot.img; the disk signature (0x1B8),
+     the partition table (0x1BE-0x1FD) and the 0x55AA signature stay as the
+     partitioner wrote them.  Clobbering those would destroy the layout.
+
+  2. core.img -> the post-MBR gap, contiguously, starting at LBA 1.  A
+     1 MiB-aligned first partition leaves 2047 free sectors there, which is
+     ample (core.img is ~170 KiB / ~340 sectors).
+
+Two pointers then have to agree with where we actually put things:
+
+  * boot.img's kernel_sector field (offset 0x5C, u64 LE) = LBA of core.img.
+  * core.img's first sector ends with a blocklist describing the *rest* of
+    core.img, since sector 0 is diskboot.img which loads the remainder:
+    {u64 start; u16 len; u16 segment} at offset 512-12, i.e. start = LBA+1,
+    len = core_sectors-1, segment = 0x820 (kernel seg 0x800 + 512>>4).
+
+Offsets are from GRUB's include/grub/i386/pc/boot.h and util/grub-setup.c and
+are stable ABI — diskboot.img in the field has parsed this layout unchanged
+for the whole GRUB 2 series.
+"""
+
+import argparse
+import struct
+import sys
+
+SECTOR = 512
+
+# include/grub/i386/pc/boot.h
+BOOT_MACHINE_KERNEL_SECTOR = 0x5C   # u64: LBA where core.img starts
+BOOT_MACHINE_WINDOWS_NT_MAGIC = 0x1B8  # start of the disk-signature area
+BOOT_MACHINE_LIST_SIZE = 12         # sizeof(struct grub_pc_bios_boot_blocklist)
+
+# util/grub-setup.c: GRUB_BOOT_I386_PC_KERNEL_SEG + (GRUB_DISK_SECTOR_SIZE >> 4)
+KERNEL_SEGMENT = 0x0800 + (SECTOR >> 4)
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("image", help="disk image to install into")
+    ap.add_argument("--boot-img", required=True, help="path to boot.img")
+    ap.add_argument("--core-img", required=True, help="path to core.img")
+    ap.add_argument("--core-lba", type=int, default=1,
+                    help="LBA to place core.img at (default 1)")
+    ap.add_argument("--first-partition-lba", type=int, default=2048,
+                    help="LBA of the first partition; bounds the gap (default 2048)")
+    args = ap.parse_args()
+
+    boot = open(args.boot_img, "rb").read()
+    core = bytearray(open(args.core_img, "rb").read())
+
+    if len(boot) != SECTOR:
+        sys.exit(f"grub-embed-mbr: boot.img is {len(boot)} bytes, expected {SECTOR}")
+    if len(core) < SECTOR:
+        sys.exit("grub-embed-mbr: core.img is shorter than one sector")
+
+    core_sectors = (len(core) + SECTOR - 1) // SECTOR
+    gap_sectors = args.first_partition_lba - args.core_lba
+    if core_sectors > gap_sectors:
+        sys.exit(f"grub-embed-mbr: core.img needs {core_sectors} sectors but the "
+                 f"post-MBR gap only has {gap_sectors} "
+                 f"(first partition at LBA {args.first_partition_lba}). "
+                 f"Align the first partition to 1 MiB (LBA 2048).")
+
+    # Pad core.img out to a whole number of sectors so the tail of the last
+    # sector is deterministic rather than whatever was on the disk.
+    core += b"\0" * (core_sectors * SECTOR - len(core))
+
+    # Point diskboot.img (core sector 0) at the remaining core sectors.
+    blocklist_off = SECTOR - BOOT_MACHINE_LIST_SIZE
+    struct.pack_into("<QHH", core, blocklist_off,
+                     args.core_lba + 1, core_sectors - 1, KERNEL_SEGMENT)
+
+    with open(args.image, "r+b") as img:
+        # Read the existing MBR so the partition table survives verbatim.
+        img.seek(0)
+        mbr = bytearray(img.read(SECTOR))
+        if len(mbr) != SECTOR:
+            sys.exit("grub-embed-mbr: image is smaller than one sector")
+
+        # boot code only: everything from 0x1B8 up is the partitioner's.
+        mbr[0:BOOT_MACHINE_WINDOWS_NT_MAGIC] = boot[0:BOOT_MACHINE_WINDOWS_NT_MAGIC]
+
+        # Tell boot.img where to find core.img.
+        struct.pack_into("<Q", mbr, BOOT_MACHINE_KERNEL_SECTOR, args.core_lba)
+
+        img.seek(0)
+        img.write(mbr)
+
+        img.seek(args.core_lba * SECTOR)
+        img.write(core)
+
+    print(f"grub-embed-mbr: {args.image}: boot.img -> LBA 0, "
+          f"core.img -> LBA {args.core_lba} ({core_sectors} sectors, "
+          f"gap holds {gap_sectors})")
+
+
+if __name__ == "__main__":
+    main()

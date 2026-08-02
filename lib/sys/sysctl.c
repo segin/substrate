@@ -4,12 +4,12 @@
  * sysctl syscall wrapper.
  */
 
+#include <errno.h>
+#include <stddef.h>
+
 #include <sys/syscall.h>
 #include <sys/sysctl.h>
-#include <stddef.h>
-#include <errno.h>
-
-#include "sysret.h"
+#include <sysret.h>
 
 long syscall(long number, ...);
 

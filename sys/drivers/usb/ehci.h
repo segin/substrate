@@ -26,6 +26,25 @@ void ehci_init(void);
 
 #define EHCI_HCSPARAMS_N_PORTS(x)   ((x) & 0x0F)
 #define EHCI_HCCPARAMS_64BIT        0x01
+/* EECP: PCI *config-space* offset of the extended capability list (0 = none). */
+#define EHCI_HCCPARAMS_EECP(x)      (((x) >> 8) & 0xFF)
+
+/*
+ * ---- Extended capabilities (PCI config space, walked from EECP) ----
+ *
+ * Unlike xHCI's, EHCI's extended capabilities live in PCI config space and use
+ * the standard capability-list encoding: ID in the low byte, config offset of
+ * the next entry in the second byte.
+ */
+#define EHCI_EECP_ID(x)             ((x) & 0xFF)
+#define EHCI_EECP_NEXT(x)           (((x) >> 8) & 0xFF)
+#define EHCI_ECAP_ID_LEGACY         0x01   /* USB Legacy Support */
+
+/* USB Legacy Support: bit 16 = HC BIOS Owned, bit 24 = HC OS Owned, both
+ * addressed as bytes; USBLEGCTLSTS follows at +0x04. */
+#define EHCI_LEGSUP_BIOS_SEM        0x02
+#define EHCI_LEGSUP_OS_SEM          0x03
+#define EHCI_LEGSUP_CTLSTS          0x04
 
 /* ---- Operational registers (offsets from opbase = mmio + CAPLENGTH) ---- */
 #define EHCI_OP_USBCMD       0x00
@@ -45,6 +64,10 @@ void ehci_init(void);
 #define EHCI_CMD_ASE         0x00000020   /* asynchronous schedule enable */
 #define EHCI_CMD_IAAD        0x00000040   /* interrupt on async advance doorbell */
 #define EHCI_CMD_ITC_SHIFT   16           /* interrupt threshold control */
+#define EHCI_CMD_FLS_1024    0x00000000   /* frame list size: 1024 entries */
+
+/* Periodic frame list: one link pointer per frame, walked from FRINDEX. */
+#define EHCI_FRAMELIST_ENTRIES 1024
 
 /* USBSTS bits */
 #define EHCI_STS_HCHALTED    0x00001000
@@ -135,5 +158,18 @@ struct ehci_qh {
 /* QH endpoint-capabilities fields */
 #define EHCI_QH_MULT_SHIFT       30          /* high-bandwidth pipe multiplier */
 #define EHCI_QH_MULT_ONE         (1u << 30)
+
+/*
+ * Split-transaction fields.  A full- or low-speed device reached through a
+ * high-speed hub is not addressed directly: the controller issues a start-split
+ * to the hub's transaction translator and later a complete-split, and it needs
+ * the hub's address and the port the device hangs off to do that.  Without
+ * these (and with EPS left at HIGH) such a device is simply unreachable.
+ */
+#define EHCI_QH_SMASK_SHIFT      0           /* endp_cap: interrupt schedule mask */
+#define EHCI_QH_CMASK_SHIFT      8           /* endp_cap: split completion mask */
+#define EHCI_QH_HUBA_SHIFT       16          /* endp_cap: TT hub address (7 bits) */
+#define EHCI_QH_PORT_SHIFT       23          /* endp_cap: TT hub port (7 bits) */
+#define EHCI_QH_NRL_SHIFT        28          /* endp_char: NAK count reload */
 
 #endif /* _EHCI_H */

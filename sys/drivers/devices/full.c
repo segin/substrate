@@ -19,11 +19,11 @@
 
 #include <string.h>
 
+#include <kern/console.h>
 #include <sys/copy.h>
 #include <sys/errno.h>
 #include <sys/poll.h>
 #include <vfs/vfs.h>
-#include <kern/console.h>
 
 /* Helper for safe kernel-to-user copy (declared in copy.h) */
 

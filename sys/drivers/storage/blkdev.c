@@ -1,11 +1,13 @@
+#include <kern/sched.h>
+#include <string.h>
+
 #include <drivers/storage/blkdev.h>
-#include <vfs/buf.h>
-#include <vfs/vfs.h>
-#include <kern/geom/geom.h>
 #include <kern/console.h>
+#include <kern/geom/geom.h>
 #include <sys/errno.h>
 #include <sys/lock.h>
-#include <string.h>
+#include <vfs/buf.h>
+#include <vfs/vfs.h>
 #include <vm/vm_kmem.h>
 
 #define STACK_BUF_SIZE 512
@@ -19,8 +21,24 @@
  */
 #define BLKDEV_RA_MIN   16
 #define BLKDEV_RA_MAX   256
+/* BLK-09: past this many sectors, invalidating a range one sector at a time
+ * costs more than purging the device's whole cache. */
+#define BLKDEV_INVAL_MAX 1024
 
 static blkdev_t *blkdev_list = NULL;
+
+/*
+ * Serialises the registration list.  There is a live asynchronous producer:
+ * USB unplug (usb_msc / uas -> scsi_unregister_link -> scsi_dev_detach ->
+ * blkdev_unregister, which then memsets the embedded blkdev_t) runs against
+ * VFS mount lookups walking the same list via blkdev_get().  Unsynchronised,
+ * a walker could step into a node being unlinked and zeroed, or two
+ * registrations could lose one another's head update.
+ *
+ * Held only across list mutation and traversal -- never across device I/O,
+ * force-unmount or kfree, all of which can block.  No ISR touches the list.
+ */
+static spinlock_t blkdev_list_lock = SPINLOCK_INIT("blkdev_list");
 
 typedef struct blkdev_geom_provider {
     blkdev_t *blkdev;
@@ -79,8 +97,10 @@ void blkdev_register(blkdev_t *dev) {
     devfs_register_device(&dev->node);
     
     // Add to list
+    spinlock_acquire(&blkdev_list_lock);
     dev->next = blkdev_list;
     blkdev_list = dev;
+    spinlock_release(&blkdev_list_lock);
     
     kprintf("Block device /dev/storage/%s registered (%llu bytes)\n",
             dev->name, (unsigned long long)dev->node.length);
@@ -99,11 +119,18 @@ void blkdev_unregister(blkdev_t *dev) {
      * (DRV-14).  Partition blkdevs have dev->geom == NULL, so this does not
      * recurse. */
     if (dev->geom) {
+        geom_disk_t *disk = dev->geom;
         blkdev_geom_provider_t *provider =
-            (blkdev_geom_provider_t *)((char *)dev->geom -
+            (blkdev_geom_provider_t *)((char *)disk -
                 offsetof(blkdev_geom_provider_t, disk));
-        geom_unregister_disk(dev->geom);
+        /* Clear dev->geom BEFORE the walk.  geom_unregister_disk() unregisters
+         * each partition, which force-unmounts it and flushes dirty buffers
+         * back through blkdev_do_write() on this raw device -- and that calls
+         * blkdev_invalidate_partitions(), which re-reads dev->geom and walks
+         * the partition list currently being freed.  With the field already
+         * NULL that walk is a no-op. */
         dev->geom = NULL;
+        geom_unregister_disk(disk);
         kfree(provider, sizeof(*provider));
     }
 
@@ -118,6 +145,7 @@ void blkdev_unregister(blkdev_t *dev) {
     dev->dead = 1;
     vfs_force_unmount_dev(dev);
 
+    spinlock_acquire(&blkdev_list_lock);
     pp = &blkdev_list;
     while (*pp) {
         if (*pp == dev) {
@@ -126,6 +154,7 @@ void blkdev_unregister(blkdev_t *dev) {
         }
         pp = &(*pp)->next;
     }
+    spinlock_release(&blkdev_list_lock);
 
     devfs_unregister_device(&dev->node);
 
@@ -133,10 +162,34 @@ void blkdev_unregister(blkdev_t *dev) {
      * freed and a future device reusing the pointer starts clean. */
     bio_dev_purge(dev);
 
-    /* Release the read-ahead scratch (allocated lazily on first prefetch). */
+    /*
+     * BLK-04: wait for any in-flight prefetch to let go of ra_buf first.
+     *
+     * blkdev_prefetch checks dev->dead only on entry and then holds ra_busy
+     * across a BLOCKING dev->read into dev->ra_buf.  Freeing here without
+     * consulting ra_busy meant that on an unplug mid-stream the driver went
+     * on to write up to 128 KiB into freed memory and then memcpy'd back out
+     * of it.  The prefetch is bounded (one device read), so a spin with
+     * preemption allowed is enough; the bound below is a backstop against a
+     * driver that never returns, in which case leaking the buffer is far
+     * better than freeing it underneath one.
+     */
     if (dev->ra_buf) {
-        kfree(dev->ra_buf, (size_t)BLKDEV_RA_MAX * dev->sector_size);
+        int spins = 0;
+        while (__atomic_load_n(&dev->ra_busy, __ATOMIC_ACQUIRE)) {
+            if (++spins > 100000) {
+                kprintf("blkdev: %s unregistered with a prefetch still in "
+                        "flight; leaking its read-ahead buffer\n", dev->name);
+                dev->ra_buf = NULL;     /* deliberately not freed */
+                break;
+            }
+            sched_yield();
+        }
+    }
+    if (dev->ra_buf) {
+        kfree(dev->ra_buf, (size_t)BLKDEV_RA_MAX * dev->ra_ss);
         dev->ra_buf = NULL;
+        dev->ra_ss  = 0;
     }
 
     dev->next = NULL;
@@ -184,12 +237,25 @@ static void blkdev_prefetch(blkdev_t *dev, uint64_t start, uint32_t window) {
     if (__atomic_exchange_n(&dev->ra_busy, 1, __ATOMIC_ACQUIRE))
         return;
 
+    /*
+     * BLK-07: the scratch was sized from the sector size at FIRST prefetch and
+     * never revalidated, so an ATAPI device switching between 512 and 2048
+     * either overflowed it (2048 after being sized for 512) or had its kfree
+     * mis-sized on teardown.  Remember what it was sized for and re-allocate
+     * when the device's sector size changes underneath us.
+     */
+    if (dev->ra_buf && dev->ra_ss != ss) {
+        kfree(dev->ra_buf, (size_t)BLKDEV_RA_MAX * dev->ra_ss);
+        dev->ra_buf = NULL;
+        dev->ra_ss  = 0;
+    }
     if (!dev->ra_buf) {
         dev->ra_buf = kmalloc((size_t)BLKDEV_RA_MAX * ss);
         if (!dev->ra_buf) {
             __atomic_store_n(&dev->ra_busy, 0, __ATOMIC_RELEASE);
             return;
         }
+        dev->ra_ss = ss;
     }
 
     /* Only fetch the leading contiguous run of not-yet-cached sectors: past
@@ -314,7 +380,28 @@ static void blkdev_invalidate_partitions(blkdev_t *dev, uint64_t sector, uint32_
     geom_disk_t *disk = dev->geom;
     uint64_t w_start, w_end;
 
-    if (!disk) return;
+    /*
+     * BLK-03: the partition -> raw direction.  A write through a partition
+     * node leaves the RAW device's cache of those same physical sectors
+     * stale, and this used to return right here because a partition blkdev
+     * has no ->geom.
+     *
+     * BLK-09: invalidate per sector only for small ranges.  A large raw
+     * write (up to UINT32_MAX sectors) turned this into ~500K hash lookups
+     * per call; past a threshold, purge the device wholesale instead.
+     */
+    if (!disk) {
+        if (dev->parent) {
+            if (count > BLKDEV_INVAL_MAX) {
+                bio_dev_purge(dev->parent);
+            } else {
+                for (uint32_t i = 0; i < count; i++)
+                    bio_dev_invalidate(dev->parent,
+                                       (int64_t)(dev->part_offset + sector + i));
+            }
+        }
+        return;
+    }
 
     w_start = sector;
     w_end   = sector + count;               /* exclusive */
@@ -326,6 +413,11 @@ static void blkdev_invalidate_partitions(blkdev_t *dev, uint64_t sector, uint32_
         p_end   = p->start_lba + p->size_sectors;
         lo = (w_start > p_start) ? w_start : p_start;
         hi = (w_end   < p_end)   ? w_end   : p_end;
+        if (hi <= lo) continue;
+        if (hi - lo > BLKDEV_INVAL_MAX) {      /* BLK-09 */
+            bio_dev_purge(p->bdev);
+            continue;
+        }
         for (uint64_t s = lo; s < hi; s++)
             bio_dev_invalidate(p->bdev, (int64_t)(s - p_start));
     }
@@ -367,8 +459,10 @@ static int blkdev_do_write(blkdev_t *dev, uint64_t sector, uint32_t count, const
 
 static int blkdev_geom_read(struct geom_disk *disk, uint64_t sector, size_t count, void *buf) {
     blkdev_geom_provider_t *provider = (blkdev_geom_provider_t *)disk->priv;
-    if (!provider || !provider->blkdev || !provider->blkdev->read) return -1;
-    if (count > 0xFFFFFFFFU) return -1;
+    /* BLK-08: a bare -1 reaches userland as EPERM ("operation not
+     * permitted") for what is really a missing device or a bad argument. */
+    if (!provider || !provider->blkdev || !provider->blkdev->read) return -ENXIO;
+    if (count > 0xFFFFFFFFU) return -EINVAL;
     /* Honour the `dead` short-circuit (DRV-13) but read directly from the
      * driver: geom_read runs during partition scan at registration time
      * (before the raw device has any mount/bio context), and its reads are
@@ -381,8 +475,8 @@ static int blkdev_geom_read(struct geom_disk *disk, uint64_t sector, size_t coun
 
 static int blkdev_geom_write(struct geom_disk *disk, uint64_t sector, size_t count, const void *buf) {
     blkdev_geom_provider_t *provider = (blkdev_geom_provider_t *)disk->priv;
-    if (!provider || !provider->blkdev || !provider->blkdev->write) return -1;
-    if (count > 0xFFFFFFFFU) return -1;
+    if (!provider || !provider->blkdev || !provider->blkdev->write) return -ENXIO;
+    if (count > 0xFFFFFFFFU) return -EINVAL;
     return blkdev_do_write(provider->blkdev, sector, (uint32_t)count, buf);
 }
 
@@ -415,23 +509,100 @@ void blkdev_scan_partitions(blkdev_t *dev) {
 void blkdev_register_disk(blkdev_t *dev) {
     if (!dev) return;
 
+    /*
+     * BLK-05: blkdev_register() refuses a device with sector_size == 0, but
+     * the scan ran regardless, publishing a geom_disk_t (and partition
+     * blkdevs) for a device the block layer does not know about.  And a
+     * second scan overwrote dev->geom, orphaning the previous provider.
+     */
+    if (dev->sector_size == 0)
+        return;                 /* blkdev_register() would refuse it too */
     blkdev_register(dev);
+    if (dev->geom)
+        return;                 /* already scanned; re-scan would leak */
+
     blkdev_scan_partitions(dev);
+
+    /*
+     * BLK-03: give each partition blkdev a back-pointer to this raw device.
+     *
+     * blkdev_invalidate_partitions() only ever walked raw -> partition, and
+     * returned immediately when dev->geom was NULL -- which is exactly the
+     * case for every partition blkdev.  So a write through ide0p1 never
+     * invalidated the raw ide0 cache entry for the same physical sector, and
+     * raw reads kept serving pre-write bytes indefinitely.  This is the
+     * mirror direction; part_offset was recorded at partition creation.
+     */
+    if (dev->geom) {
+        for (geom_partition_t *p = dev->geom->partitions; p; p = p->next) {
+            if (p->bdev) p->bdev->parent = dev;
+        }
+    }
 }
 
 blkdev_t *blkdev_get(const char *name) {
-    blkdev_t *dev = blkdev_list;
-    while (dev) {
-        if (strcmp(dev->name, name) == 0) return dev;
-        dev = dev->next;
+    blkdev_t *dev;
+
+    spinlock_acquire(&blkdev_list_lock);
+    for (dev = blkdev_list; dev; dev = dev->next) {
+        if (strcmp(dev->name, name) == 0) break;
     }
-    return NULL;
+    spinlock_release(&blkdev_list_lock);
+    /* NOTE: the caller gets an unreferenced pointer.  The list walk is now
+     * safe, but nothing yet stops the device being unregistered between this
+     * return and the caller's use -- that needs refcounting on blkdev_t and
+     * is deliberately left for a follow-up (#403). */
+    return dev;
 }
 
 /* First device in the registration list; walk with ->next.  Used by the
  * VFS to scan every block device when resolving a LABEL=<name> mount. */
 blkdev_t *blkdev_first(void) {
     return blkdev_list;
+}
+
+/*
+ * [AHCI-18] Push every device's own write cache to media.
+ *
+ * bufsync() drains the kernel's bio cache INTO the devices; it does not make
+ * the devices durable.  A disk with write caching enabled acknowledges a
+ * write as soon as it is in the drive's DRAM, so after sync(2) returned,
+ * everything above the driver believed the data was safe while the disk had
+ * not necessarily written a byte of it.  Drivers that can flush implement
+ * BLKIOC_FLUSH; the rest report -ENOTTY and are skipped.
+ *
+ * Only raw disks are asked: a partition blkdev shares its parent's cache, so
+ * flushing each partition would issue the same FLUSH CACHE N times.
+ */
+int blkdev_flush_all(void) {
+    blkdev_t *dev;
+    int failures = 0;
+
+    /*
+     * The list is walked without the lock held across the ioctl: flushing is
+     * a sleeping operation (it issues a command and waits) and
+     * blkdev_list_lock is a spinlock that disables preemption.  Registration
+     * only ever appends, and unregistration is not concurrent with sync in
+     * practice; the same caveat as blkdev_get() applies until blkdev_t is
+     * refcounted (#403).
+     */
+    for (dev = blkdev_list; dev; dev = dev->next) {
+        int r;
+
+        if (!dev->ioctl || dev->dead)
+            continue;
+        if (dev->parent)                /* partition: parent covers it */
+            continue;
+
+        r = dev->ioctl(dev, BLKIOC_FLUSH, NULL);
+        if (r < 0 && r != -ENOTTY) {
+            kprintf("blkdev: %s: cache flush failed (%d)\n",
+                    dev->name[0] ? dev->name : "(unnamed)", r);
+            failures++;
+        }
+    }
+
+    return failures;
 }
 
 // Byte-oriented read - handles sector alignment
@@ -491,7 +662,24 @@ size_t blkdev_read_bytes(blkdev_t *dev, uint64_t offset, size_t size, void *buff
         if (sectors > UINT32_MAX) sectors = UINT32_MAX;
         if (sectors > dev->total_sectors - start_sector)
             sectors = dev->total_sectors - start_sector;
-        if (sectors == 0) break;
+        /*
+         * BLK-06: leaving the bulk loop with size still >= sector_size means
+         * the tail copy below would memcpy size >= 512 bytes out of the
+         * 512-byte stack_buf.  The clamps above currently maintain the
+         * invariant that this cannot happen, but that depends on
+         * dev->total_sectors being stable, and fdc_refresh_geometry rewrites
+         * it mid-I/O on a media change.  Make the violation an explicit stop
+         * rather than a silent overrun, and let the tail clamp below bound
+         * the copy regardless.
+         */
+        if (sectors == 0) {
+            if (size >= sector_size) {
+                kprintf("blkdev: %s geometry changed mid-transfer; "
+                        "truncating request\n", dev->name);
+                size = 0;
+            }
+            break;
+        }
         uint32_t sector_count = (uint32_t)sectors;
 
         // Cached + coalesced read straight into the user buffer.
@@ -522,8 +710,11 @@ size_t blkdev_read_bytes(blkdev_t *dev, uint64_t offset, size_t size, void *buff
             if (sector_buf && sector_buf != stack_buf) kfree(sector_buf, sector_size);
             return total_read;
         }
-        memcpy(buf, sector_buf, size);
-        total_read += size;
+        /* BLK-06: the tail is by definition a partial sector; clamp so the
+         * copy can never exceed the buffer even if `size` arrived larger. */
+        size_t tail = size < sector_size ? size : sector_size;
+        memcpy(buf, sector_buf, tail);
+        total_read += tail;
     }
 
     if (sector_buf && sector_buf != stack_buf) kfree(sector_buf, sector_size);
@@ -591,7 +782,24 @@ size_t blkdev_write_bytes(blkdev_t *dev, uint64_t offset, size_t size, const voi
         if (sectors > UINT32_MAX) sectors = UINT32_MAX;
         if (sectors > dev->total_sectors - start_sector)
             sectors = dev->total_sectors - start_sector;
-        if (sectors == 0) break;
+        /*
+         * BLK-06: leaving the bulk loop with size still >= sector_size means
+         * the tail copy below would memcpy size >= 512 bytes out of the
+         * 512-byte stack_buf.  The clamps above currently maintain the
+         * invariant that this cannot happen, but that depends on
+         * dev->total_sectors being stable, and fdc_refresh_geometry rewrites
+         * it mid-I/O on a media change.  Make the violation an explicit stop
+         * rather than a silent overrun, and let the tail clamp below bound
+         * the copy regardless.
+         */
+        if (sectors == 0) {
+            if (size >= sector_size) {
+                kprintf("blkdev: %s geometry changed mid-transfer; "
+                        "truncating request\n", dev->name);
+                size = 0;
+            }
+            break;
+        }
         uint32_t sector_count = (uint32_t)sectors;
 
         // Write-through the cache from the user buffer.

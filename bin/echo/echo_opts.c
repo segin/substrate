@@ -1,7 +1,7 @@
-#include "echo_opts.h"
-
 #include <stdlib.h>
 #include <string.h>
+
+#include "echo_opts.h"
 
 static int
 echo_parse_short_bundle(const char *arg, struct echo_options *options)

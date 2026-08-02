@@ -54,6 +54,12 @@ void arp_input(netdev_t *dev, const uint8_t *arp_pkt, size_t len);
 
 int  nd6_lookup(netdev_t *dev, const uint8_t ip6[16], uint8_t mac[6]);
 void nd6_insert(netdev_t *dev, const uint8_t ip6[16], const uint8_t mac[6]);
+/* Refresh an existing binding only; never creates.  ND-03: an unsolicited
+ * Neighbor Advertisement may update what we already believe but must not be
+ * able to introduce a new neighbour, which is how one forged NA could
+ * redirect all IPv6 traffic. */
+int  nd6_update_existing(netdev_t *dev, const uint8_t ip6[16],
+                         const uint8_t mac[6]);
 int  nd6_solicit(netdev_t *dev, const uint8_t target_ip6[16]);
 
 /* -- Ethernet send wrapper ------------------------------------------ */
@@ -77,6 +83,11 @@ void ip4_input(netdev_t *dev, const uint8_t *pkt, size_t len);
  * 0 on success. */
 int  ip4_output(uint32_t daddr, uint8_t protocol,
                 const void *payload, size_t payload_len);
+
+/* Source address routing will choose for `daddr` — needed to build a UDP
+ * pseudo-header checksum before the packet reaches ip4_output/ip6_output. */
+uint32_t ip4_source_for(uint32_t daddr);
+int      ip6_source_for(const uint8_t daddr[16], uint8_t out[16]);
 
 /* -- IPv6 input/output ---------------------------------------------- */
 
@@ -132,6 +143,8 @@ int afinet_deliver_v6(const uint8_t saddr[16], const uint8_t daddr[16],
 void inet_init(void);
 void loopback_init(void);
 void rtl8139_init(void);
+void e1000_init(void);
+void r8168_init(void);
 
 /* -- TCP Control Block (PCB) API ------------------------------------ */
 struct tcp_pcb;
@@ -153,6 +166,8 @@ ssize_t    tcp_send_nb(tcp_pcb_t *p, const void *buf, size_t len);
 ssize_t    tcp_recv(tcp_pcb_t *p, void *buf, size_t len);
 void       tcp_endpoints(const tcp_pcb_t *p, uint32_t *laddr, uint16_t *lport, uint32_t *raddr, uint16_t *rport);
 ssize_t    tcp_recv_nb(tcp_pcb_t *p, void *buf, size_t len);
+/* Bytes currently sitting in the receive ring (for ioctl(FIONREAD)). */
+size_t     tcp_recv_avail(const tcp_pcb_t *p);
 ssize_t    tcp_peek(tcp_pcb_t *p, void *buf, size_t len);
 ssize_t    tcp_peek_nb(tcp_pcb_t *p, void *buf, size_t len);
 int        tcp_close(tcp_pcb_t *p);
@@ -178,5 +193,40 @@ ssize_t afpacket_sendto(int fd, const void *buf, size_t len, int flags,
 ssize_t afpacket_recvfrom(int fd, void *buf, size_t len, int flags,
                           void *sll, socklen_t *addrlen);
 size_t  afpkt_node_read(struct fs_node *, off_t, size_t, uint8_t *);
+
+/* -- userspace boundary helpers for the socket syscalls --------------- *
+ *
+ * The socket syscalls receive raw userspace pointers.  Dereferencing one
+ * directly is both a security hole (a caller-chosen kernel address gets
+ * written or read) and a stability hole (an unmapped pointer takes an
+ * unrecoverable kernel fault instead of returning EFAULT).  Task #156
+ * (NET-03) fixed this for bind/getsockname/getsockopt; these helpers exist
+ * so accept/sendto/recvfrom get the same treatment without each call site
+ * re-deriving the copyin/copyout dance.
+ *
+ * SOCK_UADDR_MAX bounds the on-stack sockaddr copy.  It covers
+ * sockaddr_un (2 + 108), sockaddr_in6 (28) and sockaddr_ll (20) with room
+ * to spare; a caller naming more than this gets its address truncated to
+ * the bound, which is exactly what the BSD API says may happen.
+ */
+#define SOCK_UADDR_MAX 128
+
+/* Read a user socklen_t.  Returns 0 and stores the value, or -EFAULT. */
+int sock_copyin_addrlen(const socklen_t *ulen, socklen_t *out);
+
+/*
+ * Copy a kernel-built sockaddr out to a user buffer whose capacity is named
+ * by *ulen, then write back the address length.
+ *
+ * At most *ulen bytes are copied, but the value written back is `srclen` --
+ * the full, untruncated size.  That is deliberate and required: POSIX says
+ * the returned length "shall refer to the value before truncation", which is
+ * the only way a caller can tell that its buffer was too small.  Reporting
+ * the copied length instead would silently hide truncation.
+ *
+ * addr == NULL or ulen == NULL is a no-op success, matching accept(2).
+ */
+int sock_copyout_sockaddr(const void *src, socklen_t srclen,
+                          void *addr, socklen_t *ulen);
 
 #endif /* _SYS_NET_INET_H */

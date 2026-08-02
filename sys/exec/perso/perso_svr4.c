@@ -2,11 +2,12 @@
  * perso_svr4.c - AT&T UNIX System V Release 4 Personality
  */
 
-#include <exec/perso/personality.h>
 #include <stddef.h>
+
 #include <arch/i386/syscall.h>
-#include <sys/syscall_impl.h>
+#include <exec/perso/personality.h>
 #include <exec/perso/svr4/svr4_syscalls.h>
+#include <sys/syscall_impl.h>
 
 static void *svr4_syscalls[MAX_SYSCALLS] = {
     [SVR4_SYS_exit]        = &sys_exit,
@@ -45,7 +46,7 @@ static void *svr4_syscalls[MAX_SYSCALLS] = {
     [SVR4_SYS_execve]      = &sys_execve,
     [SVR4_SYS_chroot]      = &sys_chroot,
     [SVR4_SYS_fcntl]       = &sys_fcntl,
-    [SVR4_SYS_ulimit]      = &sys_dup2,
+    [SVR4_SYS_ulimit]      = &sys_ulimit,
     [SVR4_SYS_rmdir]       = &sys_rmdir,
     [SVR4_SYS_mkdir]       = &sys_mkdir,
     [SVR4_SYS_getdents]    = &sys_getdents,

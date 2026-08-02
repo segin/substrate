@@ -12,12 +12,13 @@
  * Per POSIX, callers must re-check the predicate after wait — FUTEX_WAIT
  * can return early on a signal.  We don't loop here. */
 
-#include "pthread.h"
-#include <unistd.h>
 #include <errno.h>
+#include <pthread.h>
 #include <time.h>
-#include <sys/syscall.h>
+#include <unistd.h>
+
 #include <sys/futex.h>
+#include <sys/syscall.h>
 
 #define FUTEX_WAIT 0
 #define FUTEX_WAKE 1

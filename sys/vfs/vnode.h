@@ -79,6 +79,7 @@ enum vtagtype {
 #define VMODIFIED   0x1000  /* Vnode has been modified */
 #define VACCESSTIME 0x2000  /* Access time needs update */
 #define VEXECMAP    0x4000  /* Vnode mapped for exec */
+#define VONMNTLIST  0x8000  /* Vnode is linked on mp->mnt_vnodelist */
 
 /* Lock operations for vn_lock are defined in <sys/lock.h> */
 
@@ -120,9 +121,17 @@ struct vnode {
     struct vnode    *v_freelist_next;
     struct vnode    *v_freelist_prev;
     
-    /* Hash chain for vnode lookup */
+    /* Hash chain for vnode lookup.
+     *
+     * v_hash_bucket records WHICH bucket this vnode was linked into, or -1
+     * when it is not hashed.  Removal must not recompute the bucket from
+     * (v_mount, v_ino): vclean() nulls v_mount, so a recomputed key would
+     * miss -- that is exactly how a recycled vnode used to stay linked and
+     * turn its bucket into a cycle [VNODE-16].  It also lets vnodes with no
+     * mount at all (the fs_node_t bridge) be cached. */
     struct vnode    *v_hash_next;
-    
+    int32_t         v_hash_bucket;
+
     /* Vnode list entry for mount point */
     TAILQ_ENTRY(vnode) v_mntlist;
     
@@ -340,6 +349,13 @@ void vclean(struct vnode *vp, int flags);
 int vinvalbuf(struct vnode *vp, int flags);
 
 /* Flush all vnodes for a mount point */
+/* vflush() flags.  These were defined inside vnode.c, so callers outside
+ * that file could not name them. */
+#define FORCECLOSE  0x01    /* tear down even referenced vnodes */
+
+/* vinvalbuf() flags. */
+#define V_SAVE      0x01    /* sync dirty data before invalidating */
+
 int vflush(struct mount *mp, struct vnode *skipvp, int flags);
 
 /* Increment hold count (weak reference for caching) */
@@ -449,5 +465,15 @@ int vop_pathconf(struct vnode *vp, int name, register_t *retval);
 int vop_print(struct vnode *vp);
 
 extern struct vnode *rootvnode;
+
+/*
+ * fs_node_t bridge (vnode_fsnode.c): one vnodeops vector that forwards VOP_*
+ * to the live VFS's fs_node_t hooks, so the vnode layer works against every
+ * existing filesystem without a per-filesystem vnodeops implementation.
+ */
+struct fs_node;
+extern struct vnodeops fsnode_vnodeops;
+int fsnode_vget(struct mount *mp, struct fs_node *n, struct vnode **vpp);
+int vnode_bridge_init(void);
 
 #endif /* _SYS_VNODE_H */

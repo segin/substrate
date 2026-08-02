@@ -9,12 +9,13 @@
  * - CDB construction helpers
  */
 
-#include <string.h>
 #include <stdio.h>
+#include <string.h>
+
+#include <drivers/storage/scsi/scsi.h>
 #include <kern/console.h>
 #include <kern/time.h>
 #include <sys/lock.h>
-#include <drivers/storage/scsi/scsi.h>
 
 /* Serialises the request free-list and the device lists below.  Two threads
  * driving I/O on different disks (e.g. AHCI + USB) enter scsi_request_alloc()
@@ -264,6 +265,10 @@ int scsi_device_register(scsi_device_t *dev) {
 
 void scsi_device_unregister(scsi_device_t *dev) {
     if (!dev) return;
+
+    /* SCSI-06: drop the /dev/storage/scsi/B:T:L node first, so no ioctl can
+     * reach a scsi_device_t that is on its way out. */
+    scsi_destroy_generic_node(dev);
     
     unsigned long flags = spinlock_acquire_irq(&scsi_pool_lock);
     scsi_device_t **pp = &scsi_device_list;
@@ -414,8 +419,19 @@ int scsi_execute(scsi_request_t *req) {
                 should_retry = 1;
                 break;
             case SCSI_SENSE_NOT_READY:
-                should_retry = 1;
-                retry_delay_ms = 250;
+                /*
+                 * Only retry a NOT READY that can clear by itself.  An empty
+                 * removable slot reports 0x04/0x03 "manual intervention
+                 * required" (or 0x3A "medium not present"), neither of which
+                 * changes until somebody inserts media -- so the retries just
+                 * burned 3 x retry_delay_ms and logged a failed command per
+                 * attempt.  A card reader with four empty slots paid that
+                 * four times over on every boot.
+                 */
+                should_retry = scsi_not_ready_is_transient(
+                        scsi_sense_asc(req->sense, req->sense_len),
+                        scsi_sense_ascq(req->sense, req->sense_len));
+                retry_delay_ms = should_retry ? 250 : 0;
                 break;
             case SCSI_SENSE_ABORTED_COMMAND:
                 should_retry = 1;
@@ -450,15 +466,45 @@ int scsi_execute(scsi_request_t *req) {
         req->callback(req);
     }
     
+    /*
+     * SCSI-11: report the REQUEST's outcome, not the transport's.
+     *
+     * `ret` is what the transport returned for the last attempt.  A command
+     * that exhausted its retries and landed in SCSI_REQ_STATE_ERROR still
+     * returned 0 whenever the final transport call itself succeeded -- which
+     * is the normal shape of a CHECK CONDITION: the transport delivered the
+     * CDB and collected sense perfectly well, and the COMMAND failed.  So
+     * a caller saw success for a command that never completed, and read
+     * whatever was (or was not) in its buffer.
+     */
+    if (req->state == SCSI_REQ_STATE_ERROR)
+        return req->error ? req->error : -1;
+
     return ret;
 }
 
 int scsi_execute_sync(scsi_device_t *dev, uint8_t *cdb, uint8_t cdb_len,
                       void *data, uint32_t data_len, uint16_t flags,
                       uint32_t timeout_ms) {
+    /*
+     * cdb_len is a uint8_t, so a caller can name up to 255 bytes, but
+     * req->cdb is SCSI_MAX_CDB_LEN (16).  Every in-tree caller passes a
+     * literal 6/10/12/16, but this is an exported symbol and the copy below
+     * had no bound, so one caller computing a length from a device-supplied
+     * field would overflow the request struct.
+     *
+     * Reject rather than clamp: silently truncating a CDB does not produce a
+     * shorter version of the same command, it produces a different command
+     * with the tail of the opcode's operands missing, which the target may
+     * well execute.
+     */
+    if (!cdb || cdb_len == 0 || cdb_len > SCSI_MAX_CDB_LEN) {
+        return -1;
+    }
+
     scsi_request_t *req = scsi_request_alloc();
     if (!req) return -1;
-    
+
     scsi_request_init(req, dev);
     memcpy(req->cdb, cdb, cdb_len);
     req->cdb_len = cdb_len;
@@ -637,33 +683,73 @@ int scsi_inquiry(scsi_device_t *dev, struct scsi_inquiry_data *inq) {
                             SCSI_REQ_READ, 5000);
 }
 
+/*
+ * SCSI-09: a capacity is device-supplied data and has to be treated as such.
+ *
+ * A sector size of 0 divides by zero in every geometry calculation above
+ * this; 0xFFFFFFFF (or any absurd value) multiplies out to a nonsense
+ * device size; and a non-power-of-two size breaks the shift-based block
+ * arithmetic the block layer uses.  None of it was checked.
+ */
+static int scsi_capacity_sane(uint64_t sectors, uint32_t ss) {
+    if (ss < 512 || ss > 65536) return 0;
+    if (ss & (ss - 1)) return 0;              /* not a power of two */
+    if (sectors == 0) return 0;
+    /* Reject a total that cannot be addressed as bytes in 64 bits with room
+     * to spare -- a real device this large does not exist, and the value is
+     * far more likely to be a parse error or a lying target. */
+    if (sectors > (uint64_t)1 << 48) return 0;
+    return 1;
+}
+
 int scsi_read_capacity(scsi_device_t *dev, uint64_t *sectors, uint32_t *sector_size) {
     uint8_t cdb[10];
     struct scsi_read_capacity_10 cap;
-    
+
+    /*
+     * SCSI-09: zero the buffer first.  A transport that reports success
+     * without actually transferring data (a short read, or a stub that only
+     * checks the command) left this stack struct uninitialised and its
+     * contents were parsed as a capacity -- so the device size came from
+     * whatever the previous stack frame happened to contain.
+     */
+    memset(&cap, 0, sizeof(cap));
+
     scsi_cdb_read_capacity_10(cdb);
     int ret = scsi_execute_sync(dev, cdb, 10, &cap, sizeof(cap), SCSI_REQ_READ, 5000);
-    
+
     if (ret == 0) {
         uint32_t last_lba = scsi_be32((uint8_t *)&cap.lba);
-
-        *sectors = (uint64_t)last_lba + 1U;
-        *sector_size = scsi_be32((uint8_t *)&cap.block_size);
+        uint64_t nsect    = (uint64_t)last_lba + 1U;
+        uint32_t ss       = scsi_be32((uint8_t *)&cap.block_size);
 
         if (last_lba == 0xFFFFFFFFU) {
             uint8_t cdb16[16];
             struct scsi_read_capacity_16 cap16;
 
+            memset(&cap16, 0, sizeof(cap16));
             scsi_cdb_read_capacity_16(cdb16, sizeof(cap16));
             ret = scsi_execute_sync(dev, cdb16, 16, &cap16, sizeof(cap16),
                                     SCSI_REQ_READ, 5000);
             if (ret == 0) {
-                *sectors = scsi_be64(cap16.last_lba) + 1U;
-                *sector_size = scsi_be32(cap16.block_size);
+                nsect = scsi_be64(cap16.last_lba) + 1U;
+                ss    = scsi_be32(cap16.block_size);
             }
         }
+
+        if (ret == 0 && !scsi_capacity_sane(nsect, ss)) {
+            kprintf("scsi: %u:%u:%u reported an implausible capacity "
+                    "(%u-byte sectors); ignoring\n",
+                    dev ? dev->bus : 0, dev ? dev->target : 0,
+                    dev ? dev->lun : 0, ss);
+            return -1;
+        }
+        if (ret == 0) {
+            *sectors     = nsect;
+            *sector_size = ss;
+        }
     }
-    
+
     return ret;
 }
 
@@ -1084,22 +1170,38 @@ int scsi_probe_lun(scsi_link_t *link, uint8_t bus, uint8_t target, uint16_t lun)
         dev->revision[i] = '\0';
     }
     
-    /* For block devices, get capacity */
-    if (dtype == SCSI_TYPE_DISK || dtype == SCSI_TYPE_ROM || 
+    /*
+     * For block devices, get capacity.
+     *
+     * A removable device with an empty slot answers INQUIRY perfectly well
+     * but fails READ CAPACITY with "medium not present" (sense key 2, ASC
+     * 0x3A), so a successful capacity read -- not the INQUIRY -- is what
+     * tells us there is anything to talk to.  An all-in-one card reader
+     * presents one LUN per slot and most of them are usually empty; a
+     * CD/DVD drive with no disc is the same case.
+     */
+    int have_media = 1;
+
+    if (dtype == SCSI_TYPE_DISK || dtype == SCSI_TYPE_ROM ||
         dtype == SCSI_TYPE_OPTICAL || dtype == SCSI_TYPE_RBC) {
         uint64_t sectors = 0;
         uint32_t sector_sz = 0;
-        if (scsi_read_capacity(dev, &sectors, &sector_sz) == 0) {
+        if (scsi_read_capacity(dev, &sectors, &sector_sz) == 0 && sectors > 0) {
             dev->capacity = sectors;
             dev->sector_size = sector_sz;
         } else {
             /* Default to 512-byte sectors if capacity read fails */
             dev->sector_size = 512;
+            dev->capacity = 0;
+            have_media = 0;
         }
     }
-    
+
     dev->online = 1;
-    dev->media_present = 1;  /* Assume present, will be updated by TUR later */
+    /* Report what the capacity read actually found rather than assuming;
+     * claiming media on an empty slot makes the block layer issue reads
+     * that cannot succeed. */
+    dev->media_present = (uint8_t)have_media;
     dev->flags |= SCSI_DEV_ONLINE;
     
     /* Register device */
@@ -1133,6 +1235,17 @@ int scsi_scan_bus(scsi_link_t *link, uint8_t bus) {
      * - If LUN 0 responds, optionally probe more LUNs (REPORT LUNS in L621)
      */
     for (uint8_t target = 0; target < link->max_targets; target++) {
+        /*
+         * Don't re-probe an address we already have.  The per-LUN sweep below
+         * already skips registered addresses, but LUN 0 did not: a rescan of
+         * the same link replayed TEST UNIT READY plus a full READ CAPACITY
+         * retry series against LUN 0 only to throw the answer away at
+         * scsi_device_register(), which is where the stray "Device already
+         * registered at N:0:0" plus its BOT transfer failures came from.
+         */
+        if (scsi_device_lookup(bus, target, 0)) {
+            continue;
+        }
         /* Probe LUN 0 first */
         if (scsi_probe_lun(link, bus, target, 0) == 0) {
             devices_found++;
@@ -1143,47 +1256,50 @@ int scsi_scan_bus(scsi_link_t *link, uint8_t bus) {
              */
             scsi_device_t *lun0_dev = scsi_device_lookup(bus, target, 0);
             if (lun0_dev) {
-                int have_report_luns = 0;
                 struct scsi_report_luns_data luns_data;
                 if (scsi_report_luns(lun0_dev, &luns_data) == 0) {
                     uint32_t list_len = scsi_be32((uint8_t*)&luns_data.length);
                     uint32_t num_luns = list_len / 8;  /* Each LUN is 8 bytes */
-                    have_report_luns = 1;
-                    
+
                     /* Cap at reasonable limit */
                     if (num_luns > SCSI_MAX_LUNS_RESPONSE) {
                         num_luns = SCSI_MAX_LUNS_RESPONSE;
                     }
-                    
+
                     /* Probe each reported LUN (skip LUN 0, already probed) */
                     for (uint32_t i = 0; i < num_luns; i++) {
-                        /*
-                         * LUN descriptor format (SPC-3 6.21.2):
-                         * Bytes 0-1: Address method and LUN
-                         * For simple single-level LUNs, byte 1 is the LUN number
-                         */
-                        uint64_t lun_desc = luns_data.luns[i];
-                        /* Extract LUN from first two bytes (big-endian) */
-                        uint16_t lun = (uint16_t)((lun_desc >> 48) & 0xFFFF);
-                        /* Simple addressing: second byte is LUN number */
-                        uint8_t lun_num = (lun >> 8) & 0xFF;
-                        if ((lun & 0xC000) == 0) {
-                            /* Peripheral device addressing */
-                            lun_num = lun & 0xFF;
+                        uint16_t lun_num;
+
+                        if (scsi_lun_from_report_desc(
+                                (const uint8_t *)&luns_data.luns[i],
+                                &lun_num) != 0) {
+                            continue;  /* Multi-level address, not a flat LUN */
                         }
-                        
-                        if (lun_num != 0) {  /* Skip LUN 0, already done */
-                            if (scsi_probe_lun(link, bus, target, lun_num) == 0) {
-                                devices_found++;
-                            }
+
+                        if (lun_num == 0) {
+                            continue;  /* Already probed */
+                        }
+                        if (scsi_probe_lun(link, bus, target, lun_num) == 0) {
+                            devices_found++;
                         }
                     }
                 }
-                if (!have_report_luns) {
-                    for (uint16_t lun = 1; lun < link->max_luns; lun++) {
-                        if (scsi_probe_lun(link, bus, target, lun) == 0) {
-                            devices_found++;
-                        }
+
+                /*
+                 * REPORT LUNS is advisory, not exhaustive.  USB Bulk-Only
+                 * multi-slot card readers declare their slot count through
+                 * GET MAX LUN (which is what set link->max_luns) and then
+                 * either STALL REPORT LUNS or answer it with LUN 0 alone,
+                 * so keying the sweep off REPORT LUNS alone leaves every
+                 * slot but the first invisible.  Probe the declared range
+                 * as well, skipping addresses already registered above.
+                 */
+                for (uint16_t lun = 1; lun < link->max_luns; lun++) {
+                    if (scsi_device_lookup(bus, target, lun)) {
+                        continue;
+                    }
+                    if (scsi_probe_lun(link, bus, target, lun) == 0) {
+                        devices_found++;
                     }
                 }
             }

@@ -18,14 +18,16 @@
  * releases per-mount state and leaves the device alone.
  */
 
-#include <fs/sysv/sysv.h>
-#include <string.h>
 #include <stdio.h>
-#include <vm/vm_kmem.h>
+#include <string.h>
+
+#include <fs/sysv/sysv.h>
 #include <kern/console.h>
-#include <sys/statfs.h>
 #include <sys/dirent.h>
 #include <sys/stat.h>
+#include <sys/statfs.h>
+#include <vm/vm_kmem.h>
+#include <sys/errno.h>
 
 /* ===================================================================
  * Forward decls
@@ -39,6 +41,8 @@ static fs_node_t       *sysv_alloc_node(sysv_fs_t *fs, uint32_t ino);
 static size_t           sysv_file_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer);
 static struct dirent   *sysv_readdir(fs_node_t *node, uint64_t index);
 static fs_node_t       *sysv_finddir(fs_node_t *node, char *name);
+static void             sysv_close(fs_node_t *node);
+static void             sysv_free_fs(sysv_fs_t *fs);
 
 static filesystem_t sysv_filesystem = {
     .name = "sysv",
@@ -111,8 +115,10 @@ static uint32_t sysv_resolve_block(sysv_fs_t *fs, sysv_node_t *node,
 
     /* Helper closure: read the i-th 3-byte entry from a given
      * physical block. */
-    uint8_t indir[2048];   /* big enough for the largest block size we accept */
-    if (fs->block_size > sizeof(indir)) return 0;
+    /* [SYSV-23] Shared per-mount scratch instead of 2 KiB of stack.  The
+     * caller (sysv_file_read) holds fs->io_lock across this. */
+    uint8_t *indir = fs->indirbuf;
+    if (!indir) return 0;
 
     if (logical < ppb) {
         /* single indirect at node->addr[10] */
@@ -135,6 +141,22 @@ static uint32_t sysv_resolve_block(sysv_fs_t *fs, sysv_node_t *node,
         return sysv_unpack_zone(indir + (logical % ppb) * 3);
     }
     logical -= ppb * ppb;
+
+    /*
+     * [SYSV-22] The single and double branches above are guarded by
+     * `logical < ppb` and `logical < ppb*ppb`, but the triple branch had no
+     * bound at all: whatever was left simply fell through to here.  With
+     * 512-byte blocks (ppb = 170) and an i_size of 0xFFFFFFFF, the top index
+     * logical/(ppb*ppb) reaches 289, so indir + 289*3 reads at indir[867..869]
+     * -- still inside the 2048-byte array, so no overflow is detected, but far
+     * past the 512 bytes actually read from disk.  The block number then comes
+     * out of uninitialised kernel stack and is handed to the block layer.
+     *
+     * Refuse offsets the triple-indirect tree cannot address.  The division
+     * form avoids computing ppb*ppb*ppb, which can overflow 32 bits.
+     */
+    if (ppb == 0 || logical / ppb / ppb >= ppb)
+        return 0;
 
     /* triple indirect at node->addr[12] */
     if (node->addr[12] == 0) return 0;
@@ -176,11 +198,16 @@ static int sysv_read_inode(sysv_fs_t *fs, uint32_t ino, fs_node_t *node) {
     memset(nd, 0, sizeof(*nd));
     nd->fs  = fs;
     nd->ino = ino;
+    /* [SYSV-23] See sysv_fs_t::live_nodes -- unmount must not free the
+     * mount state out from under this node. */
+    fs->live_nodes++;
     for (int i = 0; i < 13; i++) {
         nd->addr[i] = sysv_unpack_zone(&raw.i_addr[i * 3]);
     }
     node->ptr = (fs_node_t *)nd;        /* impl-private */
-    node->impl = (uint32_t)(uintptr_t)fs;
+    /* [9P-26 class] impl is uintptr_t; the old (uint32_t) cast truncated a
+     * kernel pointer on any 64-bit build. */
+    node->impl = (uintptr_t)fs;
     node->inode = ino;
     node->mask = raw.i_mode & 07777;
     node->uid  = raw.i_uid;
@@ -200,6 +227,7 @@ static int sysv_read_inode(sysv_fs_t *fs, uint32_t ino, fs_node_t *node) {
     else                       node->flags = FS_FILE;
 
     node->read    = sysv_file_read;
+    node->close   = sysv_close;
     node->readdir = (node->flags == FS_DIRECTORY) ? sysv_readdir : NULL;
     node->finddir = (node->flags == FS_DIRECTORY) ? sysv_finddir : NULL;
     return 0;
@@ -229,8 +257,16 @@ static size_t sysv_file_read(fs_node_t *node, off_t offset, size_t size, uint8_t
     if (size == 0) return 0;
 
     size_t total = 0;
-    uint8_t blkbuf[2048];
-    if (fs->block_size > sizeof(blkbuf)) return 0;
+    uint8_t *blkbuf;
+
+    /* [SYSV-23] See sysv_fs_t::blkbuf.  The lock covers both scratch buffers,
+     * including the one sysv_resolve_block() uses. */
+    mutex_lock(&fs->io_lock);
+    blkbuf = fs->blkbuf;
+    if (!blkbuf) {
+        mutex_unlock(&fs->io_lock);
+        return 0;
+    }
 
     while (size > 0) {
         uint32_t lblk    = (uint32_t)(offset / fs->block_size);
@@ -254,6 +290,7 @@ static size_t sysv_file_read(fs_node_t *node, off_t offset, size_t size, uint8_t
         size   -= chunk;
         total  += chunk;
     }
+    mutex_unlock(&fs->io_lock);
     return total;
 }
 
@@ -266,15 +303,36 @@ static struct dirent *sysv_readdir(fs_node_t *node, uint64_t index) {
     if (!node || !node->ptr) return NULL;
     sysv_node_t *nd = (sysv_node_t *)node->ptr;
     sysv_fs_t   *fs = nd->fs;
-    off_t        off = (off_t)index * (off_t)sizeof(struct sysv_dirent);
-    if (off >= node->length) return NULL;
-
+    /*
+     * [SYSV-21] This used to compute one slot from `index` and give up the
+     * moment it found d_ino == 0:
+     *
+     *     if (de.d_ino == 0) return NULL;
+     *
+     * V7/Xenix delete a directory entry by zeroing its inode number IN PLACE,
+     * leaving a hole rather than compacting the directory.  So any directory
+     * that has ever had a file removed stopped listing at the hole, hiding
+     * every entry after it -- while sysv_finddir correctly skips holes, which
+     * is why such a file stayed openable by name but invisible to ls.
+     *
+     * Free slots are skipped instead, and `index` counts entries that exist:
+     * the caller walks 0,1,2,... and gets successive real entries.  The only
+     * terminating condition is running off the end of the directory.
+     */
     struct sysv_dirent de;
-    if (sysv_file_read(node, off, sizeof(de), (uint8_t *)&de) != sizeof(de)) {
-        return NULL;
-    }
-    if (de.d_ino == 0) {
-        return NULL;
+    off_t off = 0;
+    uint64_t seen = 0;
+
+    for (;;) {
+        if (off >= node->length) return NULL;
+        if (sysv_file_read(node, off, sizeof(de), (uint8_t *)&de) != sizeof(de))
+            return NULL;
+        off += (off_t)sizeof(de);
+        if (de.d_ino == 0)
+            continue;                  /* deleted slot -- keep scanning */
+        if (seen == index)
+            break;                     /* this is the entry asked for */
+        seen++;
     }
     memset(&g_dirent, 0, sizeof(g_dirent));
     g_dirent.d_ino = de.d_ino;
@@ -313,6 +371,37 @@ static fs_node_t *sysv_finddir(fs_node_t *node, char *name) {
         }
     }
     return NULL;
+}
+
+/*
+ * [SYSV-23] Release the per-node state.
+ *
+ * sysv_read_inode kmalloc's a sysv_node_t for every node it fills in, and
+ * nothing ever freed it -- so each finddir() that resolved a name leaked one.
+ * close_fs() calls this for a node that was actually opened, which covers the
+ * common file/directory case.
+ *
+ * NOT covered: an intermediate node the path walk creates and discards
+ * without ever opening.  That is the VFS-wide node-lifetime contract tracked
+ * in #393/#407, not something this driver can decide on its own -- freeing
+ * here unilaterally would be guessing about who owns the fs_node_t.
+ */
+static void sysv_close(fs_node_t *node) {
+    sysv_node_t *nd;
+    sysv_fs_t *fs;
+
+    if (!node)
+        return;
+    nd = (sysv_node_t *)node->ptr;
+    if (!nd)
+        return;
+
+    fs = nd->fs;
+    node->ptr = NULL;
+    kfree(nd, sizeof(*nd));
+
+    if (fs && fs->live_nodes > 0)
+        fs->live_nodes--;
 }
 
 /* ===================================================================
@@ -383,6 +472,18 @@ fs_node_t *sysv_mount(const char *device, uint32_t flags, void *data) {
     fs->ninodes          = (uint32_t)s_isize * (fs->block_size / fs->inode_size);
     fs->first_data_block = 2 + s_isize;
 
+    /* [SYSV-23] One block-sized scratch buffer each for the data path and the
+     * indirect-block walk, on the heap rather than ~4 KiB of kernel stack. */
+    mutex_init(&fs->io_lock, "sysv_io");
+    fs->blkbuf   = (uint8_t *)kmalloc(fs->block_size);
+    fs->indirbuf = (uint8_t *)kmalloc(fs->block_size);
+    if (!fs->blkbuf || !fs->indirbuf) {
+        if (fs->blkbuf)   kfree(fs->blkbuf, fs->block_size);
+        if (fs->indirbuf) kfree(fs->indirbuf, fs->block_size);
+        kfree(fs, sizeof(*fs));
+        return NULL;
+    }
+
     kprintf("sysv: %s, %u-byte blocks, %u inodes, %u blocks total\n",
             variant == SYSV_VARIANT_XENIX ? "Xenix" : "SystemV",
             (unsigned)fs->block_size, (unsigned)fs->ninodes,
@@ -390,13 +491,13 @@ fs_node_t *sysv_mount(const char *device, uint32_t flags, void *data) {
 
     fs_node_t *root = (fs_node_t *)kmalloc(sizeof(fs_node_t));
     if (!root) {
-        kfree(fs, sizeof(*fs));
+        sysv_free_fs(fs);
         return NULL;
     }
     memset(root, 0, sizeof(*root));
     if (sysv_read_inode(fs, SYSV_ROOT_INO, root) != 0) {
         kfree(root, sizeof(*root));
-        kfree(fs, sizeof(*fs));
+        sysv_free_fs(fs);
         return NULL;
     }
     snprintf(root->name, sizeof(root->name), "sysv_root");
@@ -404,13 +505,41 @@ fs_node_t *sysv_mount(const char *device, uint32_t flags, void *data) {
     return root;
 }
 
+/* Free a mount's state and its scratch buffers.  Only ever called when no
+ * node references it. */
+static void sysv_free_fs(sysv_fs_t *fs) {
+    if (!fs) return;
+    if (fs->blkbuf)   kfree(fs->blkbuf, fs->block_size);
+    if (fs->indirbuf) kfree(fs->indirbuf, fs->block_size);
+    kfree(fs, sizeof(*fs));
+}
+
 static int sysv_unmount(fs_node_t *root) {
-    if (!root) return -1;
+    if (!root) return -EINVAL;
     sysv_node_t *nd = (sysv_node_t *)root->ptr;
     if (nd) {
         sysv_fs_t *fs = nd->fs;
+
+        /*
+         * [SYSV-23] This used to kfree(fs) unconditionally.  Every node
+         * finddir ever produced holds a sysv_node_t pointing at it, and
+         * sysv_file_read reads fs->block_size / fs->device / fs->blkbuf on
+         * every call -- so a read through a file still open across the
+         * unmount walked freed heap.  Refuse while anything but the root
+         * is still live; the caller reports EBUSY.
+         */
+        if (fs && fs->live_nodes > 1) {
+            kprintf("sysv: refusing unmount, %d nodes still live\n",
+                    fs->live_nodes);
+            return -EBUSY;
+        }
+
+        root->ptr = NULL;
         kfree(nd, sizeof(*nd));
-        if (fs) kfree(fs, sizeof(*fs));
+        if (fs) {
+            if (fs->live_nodes > 0) fs->live_nodes--;
+            sysv_free_fs(fs);
+        }
     }
     kfree(root, sizeof(*root));
     return 0;

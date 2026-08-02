@@ -58,6 +58,10 @@ typedef struct mutex {
     void     *owner; // thread_t*
     const char *name;
     struct mutex *owned_next; // Next mutex in owner thread's held list
+    /* Return address of whoever last acquired this mutex.  Only read when
+     * reporting a recursive-acquire deadlock, where knowing which call site
+     * still holds the lock is the whole diagnosis. */
+    const void *acq_pc;
 } mutex_t;
 
 void mutex_init(mutex_t *m, const char *name);

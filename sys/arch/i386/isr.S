@@ -182,9 +182,33 @@ isr_panic_ipi:
 1:  hlt
     jmp 1b
 
+# LAPIC spurious interrupt (vector 0xFF).
+#
+# [USB-HW-03] lapic_enable(0xFF) programs this vector into the SVR on the BSP
+# (main.c) and on every AP (smp_ap_entry), but idt_init() never installed a
+# gate for it -- the entry stayed zeroed by the initial memset, i.e. NOT
+# PRESENT.  A spurious interrupt therefore took #GP instead of being ignored.
+# Real hardware raises these (that is what the vector is FOR: a level-triggered
+# IRQ deasserted between the CPU accepting it and reading the vector); QEMU
+# essentially never does, which is why this only ever bit on the Lenovo.
+#
+# Per the SDM a spurious interrupt must NOT be EOI'd, so this deliberately
+# bypasses the common stub: count it and iret.  `lock incl` touches only
+# EFLAGS, which iret restores.
+.global isr_spurious
+isr_spurious:
+    lock incl lapic_spurious_count
+    iret
+
 .extern isr_handler
 .extern syscall_handler
 
+/* Global so stack traces can name it.  It is the return path for EVERY
+ * interrupt and exception, so an unnamed symbol here means the nearest
+ * PRECEDING global absorbs its addresses -- which is exactly what happened
+ * when isr_spurious was added just above: real faults in this epilogue
+ * started reporting as "isr_spurious+0x36" and sent debugging the wrong way. */
+.global isr_common_stub
 isr_common_stub:
     pusha
     

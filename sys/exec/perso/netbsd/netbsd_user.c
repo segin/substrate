@@ -6,6 +6,7 @@
 #include <sys/fcntl.h>
 #include <sys/kern_syscalls.h>
 #include <sys/namei.h>
+#include <sys/posix_sem.h>
 #include <sys/preempt.h>
 #include <sys/proc.h>
 #include <sys/random.h>
@@ -337,6 +338,125 @@ int netbsd_oflags_to_native(int f) {
 
 int netbsd_sys_open(const char *path, int flags, int mode) {
     return sys_open(path, netbsd_oflags_to_native(flags), mode);
+}
+
+/* ===================================================================
+ * NetBSD _ksem_*(2) — the kernel semaphore objects behind <semaphore.h>.
+ *
+ * NetBSD librt/libpthread implement the whole POSIX sem_* surface on top of
+ * these: sem_init() unconditionally calls _ksem_init (there is no userspace
+ * fast path), so SDL_CreateSemaphore -> sem_init died with ENOSYS
+ * ("Unable to init SDL: sem_init() failed").  They map cleanly onto
+ * substrate's native ksem layer (sys/kern/posix_sem.c), which already models
+ * anonymous and named kernel semaphores.
+ *
+ * Differences to reconcile:
+ *   - _ksem_init / _ksem_open return the id via *idp (copyout) and return 0,
+ *     whereas kern_ksem_open returns the id as its value.
+ *   - id type: NetBSD ids are intptr_t; a NON-pshared id is a plain small
+ *     value that librt wraps in a userspace struct, and substrate's small
+ *     integer ids (< KSEM_MARKER_MIN) serve directly.  A PSHARED id must
+ *     satisfy SEMID_IS_KSEMID(id) == ((id & 0xff000001) == 0x70000001), so we
+ *     fold the substrate id into the free middle bits of the marker and strip
+ *     it back out on every id-taking call.  librt requests pshared by passing
+ *     'PSRD' in *idp to _ksem_init.
+ * =================================================================== */
+#define NETBSD_KSEM_PSHARED        0x50535244U  /* 'PSRD' sentinel in *idp   */
+#define NETBSD_KSEM_MARKER_MASK    0xff000001U
+#define NETBSD_KSEM_PSHARED_MARKER 0x70000001U  /* 'p'<<24 | 1               */
+
+static int ksem_pshared_encode(int k) {
+    return (int)(NETBSD_KSEM_PSHARED_MARKER | (((uint32_t)k & 0x7fffff) << 1));
+}
+
+/* Map a NetBSD ksem id back to a substrate ksem id: strip the pshared marker
+ * if present, else pass the (plain, non-pshared) id straight through. */
+static int ksem_decode(int nbid) {
+    if (((uint32_t)nbid & NETBSD_KSEM_MARKER_MASK) == NETBSD_KSEM_PSHARED_MARKER)
+        return (int)(((uint32_t)nbid >> 1) & 0x7fffff);
+    return nbid;
+}
+
+/* _ksem_init(unsigned int value, intptr_t *idp) — create an anonymous ksem.
+ * librt passes KSEM_PSHARED ('PSRD') in *idp to request a process-shared
+ * semaphore; otherwise it is a plain anonymous one. */
+long netbsd_sys_ksem_init(unsigned int value, int *idp) {
+    int want = 0;
+    if (copyin(idp, &want, sizeof(want)) != 0)
+        return -EFAULT;
+    int pshared = ((uint32_t)want == NETBSD_KSEM_PSHARED);
+
+    int k = kern_ksem_open(NULL, O_CREAT, 0, value);   /* anonymous */
+    if (k < 0)
+        return k;
+
+    int nbid = pshared ? ksem_pshared_encode(k) : k;
+    if (copyout(&nbid, idp, sizeof(nbid)) != 0) {
+        kern_ksem_close(k);
+        return -EFAULT;
+    }
+    return 0;
+}
+
+/* _ksem_open(const char *name, int oflag, mode_t mode, unsigned int value,
+ *            intptr_t *idp) — open/create a named ksem. */
+long netbsd_sys_ksem_open(const char *name, int oflag, int mode,
+                          unsigned int value, int *idp) {
+    char kname[KSEM_NAME_MAX];
+    if (copyinstr(name, kname, sizeof(kname), NULL) != 0)
+        return -EFAULT;
+    int k = kern_ksem_open(kname, netbsd_oflags_to_native(oflag), mode, value);
+    if (k < 0)
+        return k;
+    /* A named ksem id is used plainly by librt (wrapped in a userspace
+     * struct), like the non-pshared case. */
+    if (copyout(&k, idp, sizeof(k)) != 0) {
+        kern_ksem_close(k);
+        return -EFAULT;
+    }
+    return 0;
+}
+
+long netbsd_sys_ksem_unlink(const char *name) {
+    char kname[KSEM_NAME_MAX];
+    if (copyinstr(name, kname, sizeof(kname), NULL) != 0)
+        return -EFAULT;
+    return kern_ksem_unlink(kname);
+}
+
+/* _ksem_close and _ksem_destroy both drop this reference; substrate frees an
+ * anonymous ksem once its last reference goes away. */
+long netbsd_sys_ksem_close(int id)   { return kern_ksem_close(ksem_decode(id)); }
+long netbsd_sys_ksem_destroy(int id) { return kern_ksem_close(ksem_decode(id)); }
+long netbsd_sys_ksem_post(int id)    { return kern_ksem_post(ksem_decode(id)); }
+long netbsd_sys_ksem_wait(int id)    { return kern_ksem_wait(ksem_decode(id)); }
+long netbsd_sys_ksem_trywait(int id) { return kern_ksem_trywait(ksem_decode(id)); }
+
+/* _ksem_getvalue(intptr_t id, unsigned int *value). */
+long netbsd_sys_ksem_getvalue(int id, unsigned int *value) {
+    int kv = 0;
+    int rc = kern_ksem_getvalue(ksem_decode(id), &kv);
+    if (rc != 0)
+        return rc;
+    unsigned int uv = (unsigned int)kv;
+    if (copyout(&uv, value, sizeof(uv)) != 0)
+        return -EFAULT;
+    return 0;
+}
+
+/* _ksem_timedwait(intptr_t id, const struct timespec *abstime).  NetBSD passes
+ * an absolute CLOCK_REALTIME deadline, which is exactly what
+ * kern_ksem_timedwait expects; the i386 struct timespec is 12 bytes on both
+ * sides (64-bit time_t), so it copies in directly. */
+long netbsd_sys_ksem_timedwait(int id, const struct timespec *abstime) {
+    struct timespec kts;
+    struct timespec *ktsp = NULL;
+    if (abstime) {
+        if (copyin(abstime, &kts, sizeof(kts)) != 0)
+            return -EFAULT;
+        ktsp = &kts;
+    }
+    return kern_ksem_timedwait(ksem_decode(id), ktsp);
 }
 
 /* _lwp_setprivate(addr) — NetBSD's i386 TLS install.  ld.elf_so calls
@@ -1144,7 +1264,7 @@ struct netbsd_rusage50 {
 int netbsd_sys_getrusage50(int who, void *urusage) {
     if (who != RUSAGE_SELF && who != RUSAGE_CHILDREN) return -EINVAL;
     struct tms t;
-    if ((clock_t)kern_times(&t) == (clock_t)-1) return -1;
+    if ((clock_t)kern_times(&t) == (clock_t)-1) return -EFAULT;
 
     struct netbsd_rusage50 r;
     memset(&r, 0, sizeof(r));

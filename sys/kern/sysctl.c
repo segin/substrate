@@ -8,14 +8,15 @@
 #include <stdint.h>
 #include <string.h>
 
+#include <arch/i386/early_boot.h>
+#include <kern/console.h>
+#include <kern/osversion.h>
 #include <sys/copy.h>
 #include <sys/errno.h>
 #include <sys/lock.h>
 #include <sys/proc.h>
 #include <sys/smp.h>
 #include <sys/sysctl.h>
-#include <kern/console.h>
-#include <arch/i386/early_boot.h>
 
 /* Global lock for sysctl tree operations */
 static mutex_t sysctl_mutex;
@@ -37,8 +38,8 @@ struct sysctl_oid sysctl_debug= { &sysctl__children, NULL, "debug",CTL_DEBUG,CTL
 /* Basic Variables */
 int securelevel = 0;
 static char kernel_ostype[] = "Substrate";
-static char kernel_osrelease[] = "0.2-ALPHA";
-static char kernel_version[] = "Substrate 0.2-ALPHA (GENERIC) #0: Fri Jun 26 00:00:00 UTC 2026";
+static char kernel_osrelease[] = OS_OSRELEASE;
+static char kernel_version[] = OS_VERSION_LONG;
 static int kernel_maxproc = 1000; // placeholder
 static char kernel_hostname[256] = "localhost";
 static char kernel_domainname[256] = "localdomain";

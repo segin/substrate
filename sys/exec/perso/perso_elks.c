@@ -1,36 +1,37 @@
-#include <exec/perso/personality.h>
-#include <exec/perso/elks_syscall_table.h>
-#include <exec/perso/elks_kmem.h>
-#include <exec/formats/elks_aout.h>
-#include <sys/exec.h>
-#include <sys/errno.h>
-#include <sys/core.h>
-#include <sys/termios.h>
-#include <sys/time.h>
-#include <sys/syscall_impl.h>
-#include <sys/kern_syscalls.h>
-#include <sys/compiler.h>
-#include <sys/ldt.h>
-#include <arch/i386/idt.h>
-#include <kern/console.h>
-#include <vfs/vfs.h>
-#include <sys/file.h>
-#include <sys/proc.h>
-#include <sys/session.h>
-#include <sys/dirent.h>
-#include <sys/mount.h>
-#include <sys/stat.h>
-#include <sys/utsname.h>
-#include <sys/poll.h>
-#include <pm/pm.h>
-#include <kern/time.h>
-#include <kern/cmdline.h>
-#include <vm/vm_kmem.h>
-#include <vm/phys_mem.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+
+#include <arch/i386/idt.h>
+#include <exec/formats/elks_aout.h>
+#include <exec/perso/elks_kmem.h>
+#include <exec/perso/elks_syscall_table.h>
+#include <exec/perso/personality.h>
+#include <kern/cmdline.h>
+#include <kern/console.h>
+#include <kern/time.h>
+#include <pm/pm.h>
+#include <sys/compiler.h>
+#include <sys/core.h>
+#include <sys/dirent.h>
+#include <sys/errno.h>
+#include <sys/exec.h>
+#include <sys/file.h>
+#include <sys/kern_syscalls.h>
+#include <sys/ldt.h>
+#include <sys/mount.h>
+#include <sys/poll.h>
+#include <sys/proc.h>
+#include <sys/session.h>
+#include <sys/stat.h>
+#include <sys/syscall_impl.h>
+#include <sys/termios.h>
+#include <sys/time.h>
+#include <sys/utsname.h>
+#include <vfs/vfs.h>
+#include <vm/phys_mem.h>
+#include <vm/vm_kmem.h>
 
 static int SUB_NODISCARD SUB_NONNULL(2)
 elks_ds_pointer(uint32_t offset, uintptr_t *linear_out) {
@@ -1903,7 +1904,8 @@ static int elks_sys_readdir(uint32_t fd, uint32_t buf_off, uint32_t count,
         return -EFAULT;
     }
 
-    d = readdir_fs(node, f->f_offset);
+    struct dirent dent;
+    d = readdir_fs(node, f->f_offset, &dent);
     if (!d) {
         return 0;
     }

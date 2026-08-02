@@ -1,5 +1,6 @@
-#include "ln.h"
 #include <stdio.h>
+
+#include "ln.h"
 
 int
 main(int argc, char **argv)

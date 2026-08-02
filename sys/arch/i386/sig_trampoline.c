@@ -74,7 +74,37 @@ unsigned char sig_trampoline_code[4096] __attribute__((aligned(4096))) = {
     0xB8, 0x77, 0x00, 0x00, 0x00, // mov $119, %eax      ; SYS_sigreturn
     0xCD, 0x80,                   // int $0x80           ; Syscall
     0xEB, 0xFE,                   // jmp .               ; Halt if return
-    0x90, 0x90, 0x90              // padding (total 16 bytes)
+    0x90, 0x90, 0x90,             // padding (total 16 bytes)
+
+    /* Offset 0x40: Linux legacy sigreturn trampoline (__kernel_sigreturn).
+     *
+     * Linux passes NOTHING to sigreturn on the stack -- the kernel recovers
+     * the frame from ESP alone (linux_sys_sigreturn: frame = ESP - 8).  A
+     * Linux handler returns here with ESP at [ sig ][ sigcontext... ]; the
+     * pop discards `sig` so ESP lands on the sigcontext, i.e. frame + 8.
+     *
+     * Do NOT push an argument the way the native slot at 0x00 does: that
+     * lowers ESP by 8 and the kernel then reads the sigcontext 12 bytes
+     * below the real frame, restoring GS from the pushed dummy return
+     * address and FS from the pushed pointer -- a garbage selector that
+     * faults on the IRET path, in the kernel, with the trap frame already
+     * half-restored (unrecoverable GP, not a signal). */
+    0x58,                         // popl %eax           ; discard sig
+    0xB8, 0x77, 0x00, 0x00, 0x00, // mov $119, %eax      ; SYS_sigreturn
+    0xCD, 0x80,                   // int $0x80           ; Syscall
+    0xEB, 0xFE,                   // jmp .               ; Halt if return
+    0x90, 0x90, 0x90, 0x90, 0x90, 0x90, // padding (total 16 bytes)
+
+    /* Offset 0x50: Linux rt_sigreturn trampoline (__kernel_rt_sigreturn).
+     *
+     * Same rule, one word less: an SA_SIGINFO handler returns with ESP at
+     * [ sig ][ pinfo ][ puc ][ ... ] and Linux's rt frame starts one word
+     * back (linux_sys_rt_sigreturn: frame = ESP - 4), so there is nothing
+     * to pop and nothing to push. */
+    0xB8, 0xF7, 0x00, 0x00, 0x00, // mov $247, %eax      ; SYS_rt_sigreturn
+    0xCD, 0x80,                   // int $0x80           ; Syscall
+    0xEB, 0xFE,                   // jmp .               ; Halt if return
+    0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90 // padding (total 16 bytes)
 };
 
 unsigned int sig_trampoline_size = 4096;

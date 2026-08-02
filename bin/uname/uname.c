@@ -1,9 +1,10 @@
 #include <stdio.h>
-#include <unistd.h>
-#include <getopt.h>
-#include <sys/utsname.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
+
+#include "getopt.h"
+#include <sys/utsname.h>
 
 #define FLAG_SYSNAME       0x01
 #define FLAG_NODENAME      0x02

@@ -48,6 +48,13 @@
 #define VRING_DESC_F_WRITE     2
 #define VRING_DESC_F_INDIRECT  4
 
+/* avail->flags: ask the device not to raise an interrupt on completion.
+ * Mandatory for a driver that polls the used ring and registers no IRQ
+ * handler: virtio-pci INTx is level-triggered, so a completion interrupt
+ * nobody acknowledges leaves the line asserted and the PIC re-delivers it
+ * forever. */
+#define VRING_AVAIL_F_NO_INTERRUPT 1
+
 struct vring_desc {
     uint64_t addr;
     uint32_t len;

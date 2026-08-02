@@ -8,13 +8,13 @@
  *      convert hex bitmap data to binary glyph storage.
  */
 
-#include <stdint.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <string.h>
-#include <vm/vm_kmem.h>
 
-#include <drivers/video/psf.h>
 #include <drivers/video/bdf_pcf.h>
+#include <drivers/video/psf.h>
+#include <vm/vm_kmem.h>
 
 /* ==================== PCF Helpers ==================== */
 
@@ -88,7 +88,11 @@ int pcf_parse(const void *data, size_t size, struct font_info *out)
     int metrics_msb = (metrics_format & PCF_BYTE_MASK) ? 1 : 0;
     int compressed = (metrics_format & PCF_COMPRESSED_METRICS) ? 1 : 0;
 
-    if (metrics_offset + 8 > size)
+    /* metrics_offset is an attacker-controlled uint32 from the TOC; the
+     * additions below must be done in 64-bit or an offset near UINT32_MAX
+     * wraps to a small value that passes the bounds check, leaving mp a
+     * wild pointer that is then dereferenced. */
+    if ((uint64_t)metrics_offset + 8 > (uint64_t)size)
         return -1;
 
     /* Read metrics format and count */
@@ -110,7 +114,7 @@ int pcf_parse(const void *data, size_t size, struct font_info *out)
     uint32_t glyph_width = 0, glyph_height = 0;
     if (compressed) {
         /* Compressed: 5 bytes per metric, values biased by 0x80 */
-        if (metrics_offset + 6 + 5 > size)
+        if ((uint64_t)metrics_offset + 6 + 5 > (uint64_t)size)
             return -1;
         /* left_bearing, right_bearing, width, ascent, descent */
         uint8_t cwidth = mp[2];
@@ -124,7 +128,7 @@ int pcf_parse(const void *data, size_t size, struct font_info *out)
         if (glyph_height == 0) glyph_height = 16;
     } else {
         /* Uncompressed: 12 bytes per metric (6 x int16) */
-        if (metrics_offset + 8 + 12 > size)
+        if ((uint64_t)metrics_offset + 8 + 12 > (uint64_t)size)
             return -1;
         int16_t left = (int16_t)pcf_read16(mp, metrics_msb);
         int16_t right = (int16_t)pcf_read16(mp + 2, metrics_msb);
@@ -150,7 +154,7 @@ int pcf_parse(const void *data, size_t size, struct font_info *out)
     (void)bitmaps_msb;
     int glyph_pad = 1 << (bitmaps_format & PCF_GLYPH_PAD_MASK);
 
-    if (bitmaps_offset + 8 > size)
+    if ((uint64_t)bitmaps_offset + 8 > (uint64_t)size)
         return -1;
 
     const uint8_t *bp = base + bitmaps_offset + 4;
@@ -172,8 +176,13 @@ int pcf_parse(const void *data, size_t size, struct font_info *out)
     uint32_t bitmap_size = pcf_read32(bp + pad_idx * 4, 0);
     bp += 16;
 
-    /* bp now points to bitmap data */
-    if ((uintptr_t)(bp + bitmap_size) > (uintptr_t)(base + size))
+    /* bp now points to bitmap data.  bitmap_size is attacker-controlled;
+     * a pointer comparison (bp + bitmap_size) can wrap past the top of the
+     * address space and defeat the check, so validate in 64-bit offset
+     * space instead of with pointer arithmetic. */
+    uint64_t bitmap_data_off = (uint64_t)bitmaps_offset + 8 +
+                               (uint64_t)num_glyphs * 4 + 16;
+    if (bitmap_data_off + (uint64_t)bitmap_size > (uint64_t)size)
         return -1;
 
     const uint8_t *bitmap_data = bp;
@@ -292,10 +301,20 @@ int bdf_parse(const void *data, size_t size, struct font_info *out)
     if (bb_width == 0 || bb_height == 0 || num_chars == 0)
         return -1;
 
-    /* Allocate glyph storage */
+    /* Allocate glyph storage.  bb_width, bb_height and num_chars come
+     * straight from the (attacker-controlled) text header with no upper
+     * bound, so row_bytes*bb_height and num_chars*bytesperglyph can wrap
+     * a 32-bit size_t on i386, yielding an undersized allocation that the
+     * second pass then overruns.  Compute in 64-bit and reject any font
+     * whose per-glyph or total size would overflow. */
     uint32_t row_bytes = (bb_width + 7) / 8;
-    uint32_t bytesperglyph = row_bytes * bb_height;
-    size_t total_glyph_size = (size_t)num_chars * bytesperglyph;
+    uint64_t bytesperglyph64 = (uint64_t)row_bytes * bb_height;
+    uint64_t total_glyph_size64 = bytesperglyph64 * (uint64_t)num_chars;
+    if (bytesperglyph64 == 0 || bytesperglyph64 > SIZE_MAX ||
+        total_glyph_size64 == 0 || total_glyph_size64 > SIZE_MAX)
+        return -1;
+    uint32_t bytesperglyph = (uint32_t)bytesperglyph64;
+    size_t total_glyph_size = (size_t)total_glyph_size64;
     uint8_t *glyph_data = kmalloc(total_glyph_size);
     if (!glyph_data)
         return -1;

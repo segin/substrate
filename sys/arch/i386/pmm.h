@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include <arch/i386/signal_arch.h>
 #include <arch/x86-common/e820.h>
 #include <arch/x86-common/multiboot.h>
 #include <sys/param.h>
@@ -15,11 +16,27 @@
 #define PMM_BLOCKS_PER_BYTE 8
 #define PMM_PHYS_VIRT_BASE KERN_BASE
 /*
- * The higher-half direct map is contiguous only until the LAPIC PDE slot.
- * Generic PMM callers that expect phys+KERN_BASE to be valid must stay below
- * this physical ceiling.
+ * Physical ceiling for the higher-half direct map: generic PMM callers that
+ * expect phys+KERN_BASE to be a valid kernel address must stay below it.
+ *
+ * The first thing above the direct map is the signal trampoline page, which
+ * pmap_map_signal_trampoline() pins at SIG_TRAMPOLINE_ADDR so every
+ * personality's sigreturn stub has a fixed address to return through.  Derive
+ * the ceiling from that address rather than hardcoding one: the two are the
+ * same boundary, and when they disagree the machine corrupts itself.
+ *
+ * They did disagree.  The limit used to be 0x3EC00000 (the IOAPIC PDE, the
+ * next landmark up), which puts the top of the direct map at 0xFEC00000 --
+ * straight through the trampoline at 0xFE000000.  Below ~992 MiB of RAM
+ * nothing notices, because no physical frame maps that high.  At or above it
+ * the frame at 0x3E000000 is ordinary free RAM, the buddy allocator hands it
+ * out, and the new owner's first write through the direct map lands on the
+ * trampoline.  The next signal to return finds shredded code at a fixed
+ * address, so the process dies with eip exactly SIG_TRAMPOLINE_ADDR -- and
+ * since init's shell takes that path during rc.d, the boot dies with it.
  */
-#define PMM_DIRECTMAP_PHYS_LIMIT 0x3EC00000U
+#define PMM_DIRECTMAP_PHYS_LIMIT \
+        ((uint32_t)(SIG_TRAMPOLINE_ADDR - PMM_PHYS_VIRT_BASE))
 
 typedef uint32_t phys_addr_t;
 

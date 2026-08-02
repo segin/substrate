@@ -1,12 +1,13 @@
-#include <exec/perso/personality.h>
 #include <stddef.h>
+
 #include <arch/i386/syscall.h>
-#include <sys/syscall_impl.h>
-#include <sys/resource.h>
-#include <sys/times.h>
-#include <include/sys/sysinfo.h>
+#include <exec/perso/personality.h>
 #include <kern/time.h>
+#include <sys/resource.h>
 #include <sys/signal.h>
+#include <sys/syscall_impl.h>
+#include <sys/sysinfo.h>
+#include <sys/times.h>
 
 
 

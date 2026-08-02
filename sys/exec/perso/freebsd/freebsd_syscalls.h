@@ -51,7 +51,7 @@ struct freebsd13_stat;
 #define FREEBSD_SYS_getgid     47
 #define FREEBSD_SYS_getlogin   49
 #define FREEBSD_SYS_setlogin   50
-#define FREEBSD_SYS_setgid     46
+#define FREEBSD_SYS_setgid     181  /* 46 is the obsolete COMPAT sigaction */
 #define FREEBSD_SYS_ioctl      54
 #define FREEBSD_SYS_symlink    57
 #define FREEBSD_SYS_readlink   58
@@ -63,7 +63,7 @@ struct freebsd13_stat;
 #define FREEBSD_SYS_munmap     73
 #define FREEBSD_SYS_mprotect   74
 #define FREEBSD_SYS_madvise    75
-#define FREEBSD_SYS_mincore    76
+#define FREEBSD_SYS_mincore    78  /* 76 is the obsolete vhangup */
 #define FREEBSD_SYS_getgroups  79
 #define FREEBSD_SYS_setgroups  80
 #define FREEBSD_SYS_getpgrp    81
@@ -127,8 +127,9 @@ struct freebsd13_stat;
 #define FREEBSD_SYS_nanosleep  240
 #define FREEBSD_SYS_clock_nanosleep 244
 #define FREEBSD_SYS_issetugid  253
-#define FREEBSD_SYS_umtx_lock  310
-#define FREEBSD_SYS_umtx_unlock 311
+#define FREEBSD_SYS_setresuid  311  /* 311 is setresuid; 310 is getsid */
+#define FREEBSD_SYS_umtx_lock  434  /* COMPAT10 _umtx_lock */
+#define FREEBSD_SYS_umtx_unlock 435 /* COMPAT10 _umtx_unlock */
 #define FREEBSD_SYS_unknown_315 315
 #define FREEBSD_SYS___getcwd   326
 #define FREEBSD_SYS_sched_setparam 327
@@ -274,6 +275,7 @@ struct freebsd11_stat;
 int freebsd_sys_open(const char *path, int flags, int mode);
 int freebsd_sys_openat(int dirfd, const char *path, int flags, int mode);
 int freebsd_sys_pipe2(int *fds, int flags);
+int64_t freebsd_sys_pipe(void);
 int freebsd_sys_dup3(int oldfd, int newfd, int flags);
 int freebsd_sys_stat(const char *path, struct freebsd_stat *buf);
 int freebsd_sys_lstat(const char *path, struct freebsd_stat *buf);

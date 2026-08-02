@@ -1,7 +1,8 @@
-#include <arch/i386/gdt.h>
-#include <arch/i386/percpu.h>
 #include <stdint.h>
 #include <string.h>
+
+#include <arch/i386/gdt.h>
+#include <arch/i386/percpu.h>
 
 
 

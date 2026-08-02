@@ -1,43 +1,41 @@
-#include <unistd.h>
-#include <stdint.h>
-#include <string.h>
-#include <fcntl.h>
-#include <stdlib.h>
-#include <stdio.h>
-#include <stdarg.h>
-#include <errno.h>
 #include <ctype.h>
-#include <wchar.h>
-#include <wctype.h>
+#include <dirent.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <langinfo.h>
 #include <limits.h>
 #include <locale.h>
-#include <sys/syscall.h>
-#include <sys/sem.h>
-#include <sys/timeb.h>
-#include <sys/file.h>
-#include <sys/stat.h>
-#include <sys/utsname.h>
-#include <sys/time.h>
-#include <sys/times.h>
-#include <time.h>
+#include <sched.h>
 #include <signal.h>
-#include <sys/wait.h>
-#include <sys/mman.h>
-#include <sys/ioctl.h>
-#include <sys/resource.h>
+#include <stdarg.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <termios.h>
-#include <sys/sysctl.h>
-#include <sys/select.h>
-#include <sys/poll.h>
-#include <dirent.h>
+#include <time.h>
+#include <unistd.h>
+#include <wchar.h>
+#include <wctype.h>
 
-extern int64_t _syscall0(int);
-extern int64_t _syscall1(int, uintptr_t);
-extern int64_t _syscall2(int, uintptr_t, uintptr_t);
-extern int64_t _syscall3(int, uintptr_t, uintptr_t, uintptr_t);
-extern int64_t _syscall4(int, uintptr_t, uintptr_t, uintptr_t, uintptr_t);
-extern int64_t _syscall5(int, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t);
-extern int64_t _syscall6(int, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t);
+#include <sys/file.h>
+#include <sys/ioctl.h>
+#include <sys/mman.h>
+#include <sys/poll.h>
+#include <sys/resource.h>
+#include <sys/select.h>
+#include <sys/sem.h>
+#include <sys/stat.h>
+#include <sys/statfs.h>
+#include <sys/statvfs.h>
+#include <sys/syscall.h>
+#include <sys/sysctl.h>
+#include <sys/time.h>
+#include <sys/timeb.h>
+#include <sys/times.h>
+#include <sys/utsname.h>
+#include <sys/wait.h>
+#include <sys_local.h>
 
 #undef errno
 /*
@@ -1247,7 +1245,7 @@ char *getlogin(void) {
  * xterm key their UTF-8 mode off CODESET == "UTF-8".
  */
 
-#include <langinfo.h>
+
 
 /* Storage for categories LC_COLLATE(1) .. LC_MESSAGES(6); index 0
  * (LC_ALL) is the "apply to all" sentinel, never stored. */
@@ -1558,9 +1556,7 @@ long sysconf(int name) {
     }
 }
 
-#include <sys/statvfs.h>
-#include <sys/statfs.h>
-#include <errno.h>
+
 
 int statvfs(const char *path, struct statvfs *buf) {
     return __set_errno((int)_syscall2(SYS_STATVFS,
@@ -1665,7 +1661,7 @@ wint_t towctrans(wint_t wc, wctrans_t desc) {
     }
 }
 
-#include <sched.h>
+
 int sched_yield(void) {
     /* SYS_SCHED_YIELD is a 0-arg syscall that always succeeds. */
     syscall(SYS_SCHED_YIELD);

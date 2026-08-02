@@ -12,12 +12,13 @@
  * caller-supplied buffer.
  */
 
-#include <pwd.h>
 #include <errno.h>
+#include <pwd.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
 #include <sys/types.h>
 
 #define PW_LINE_MAX 1024

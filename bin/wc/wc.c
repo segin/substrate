@@ -1,9 +1,8 @@
-#include <sys/types.h>
-#include <sys/stat.h>
 #include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
-#include <getopt.h>
+#include <locale.h>
+#include <signal.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -12,8 +11,10 @@
 #include <unistd.h>
 #include <wchar.h>
 #include <wctype.h>
-#include <signal.h>
-#include <locale.h>
+
+#include "getopt.h"
+#include <sys/stat.h>
+#include <sys/types.h>
 
 #define BUF_SIZE 65536
 

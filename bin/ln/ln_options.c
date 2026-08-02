@@ -1,10 +1,10 @@
-#include "ln.h"
-
 #include <errno.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include "ln.h"
 
 static const char g_ln_usage[] =
     "Usage: ln [OPTION]... [-T] TARGET LINK_NAME\n"

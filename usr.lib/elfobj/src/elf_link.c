@@ -1,4 +1,4 @@
-#include "elf_private.h"
+#include <elf_private.h>
 
 static int is_internal_section_name(const char *name) {
     if (name == NULL) {

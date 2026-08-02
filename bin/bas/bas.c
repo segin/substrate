@@ -1,5 +1,5 @@
 #include "bas.h"
-#include <getopt.h>
+#include "getopt.h"
 
 /* Global Storage */
 Instruction space[SZ_SPACE];

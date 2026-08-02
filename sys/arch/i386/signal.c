@@ -32,12 +32,12 @@
 
 #include <string.h>
 
-#include <sys/proc.h>
-#include <sys/signal.h>
-#include <kern/cmdline.h>
-#include <kern/console.h>
 #include <arch/i386/idt.h>
 #include <arch/i386/signal_arch.h>
+#include <kern/cmdline.h>
+#include <kern/console.h>
+#include <sys/proc.h>
+#include <sys/signal.h>
 
 /* Signal-delivery trace, gated behind the `xsig` kernel cmdline flag
  * (or `debug=xsig`).  Logs every sendsig() and sys_sigreturn() pair —
@@ -348,9 +348,17 @@ void sendsig(void *handler_ptr, int sig, uint32_t mask, uint32_t flags, void *re
         
         /* Reserve space for siginfo frame */
         esp -= sizeof(struct siginfo_frame);
-        
-        /* Align stack to 16-byte boundary */
-        esp &= ~0xFUL;
+
+        /*
+         * Align so the handler is entered with ESP % 16 == 12.  The i386
+         * System V ABI requires ESP to be 16-byte aligned at a `call` site;
+         * the pushed return address then leaves the callee seeing ESP+4 as
+         * 16-aligned (ESP % 16 == 12).  esp points at retaddr (the trampoline
+         * address), which is exactly the state at the handler's first
+         * instruction, so retaddr must sit at ESP % 16 == 12 — otherwise a
+         * handler using movaps on a 16-byte-aligned stack local #GPs.
+         */
+        esp = ((esp + 4) & ~0xFUL) - 4;
         
         /* Validate stack address */
         if (validate_user_addr((void*)(uintptr_t)esp, sizeof(struct siginfo_frame)) != 0) {
@@ -400,9 +408,15 @@ void sendsig(void *handler_ptr, int sig, uint32_t mask, uint32_t flags, void *re
     
     /* Reserve space for signal frame */
     esp -= sizeof(struct sigframe);
-    
-    /* Align stack to 16-byte boundary */
-    esp &= ~0xFUL;
+
+    /*
+     * Align so the handler is entered with ESP % 16 == 12 (i386 SysV ABI:
+     * 16-byte aligned at the call site; the pushed return address leaves the
+     * callee at ESP % 16 == 12).  esp points at retaddr, i.e. the handler's
+     * entry state, so retaddr must land at ESP % 16 == 12 or a movaps on an
+     * aligned stack local inside the handler faults.
+     */
+    esp = ((esp + 4) & ~0xFUL) - 4;
     
     /* Validate stack address */
     if (validate_user_addr((void*)(uintptr_t)esp, sizeof(struct sigframe)) != 0) {

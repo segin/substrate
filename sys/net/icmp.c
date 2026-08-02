@@ -11,14 +11,15 @@
  * ping(8) sees the reply.
  */
 
+#include <stddef.h>
+#include <string.h>
+
+#include <kern/console.h>
 #include <net/inet.h>
-#include <sys/netdev.h>
+#include <netinet/icmp.h>
 #include <netinet/ip.h>
 #include <netinet/ip6.h>
-#include <netinet/icmp.h>
-#include <kern/console.h>
-#include <string.h>
-#include <stddef.h>
+#include <sys/netdev.h>
 
 /* ------------------------------------------------------------------ */
 /* ICMPv4                                                             */
@@ -26,10 +27,45 @@
 
 void icmp_input(netdev_t *dev, uint32_t saddr, uint32_t daddr,
                 const uint8_t *pkt, size_t len) {
-    (void)dev; (void)daddr;
     if (len < sizeof(struct icmphdr)) return;
     const struct icmphdr *ih = (const struct icmphdr *)pkt;
     if (ih->type != ICMP_ECHO) return;
+
+    /*
+     * ICMP-02: verify the received checksum.  It was never checked, so a
+     * corrupted echo request was reflected back as a perfectly-formed
+     * reply carrying the corrupted payload -- we became a laundering
+     * service for bit errors, and the sender saw a valid response for data
+     * it never sent.  ICMP's checksum covers the whole message, so this is
+     * a straight one's-complement check over len.
+     */
+    if (inet_csum(pkt, len) != 0) return;
+
+    /*
+     * ICMP-01: never answer an echo request sent to a broadcast address.
+     * daddr used to be discarded outright ("(void)daddr"), so a request
+     * addressed to 255.255.255.255 or the subnet broadcast was answered by
+     * every host that saw it, with the reply going to the attacker-chosen
+     * source -- a classic smurf amplifier, and one that ran inside the NIC
+     * ISR at that.  RFC 1122 3.2.2.6 requires silent discard.
+     */
+    if (dev) {
+        uint32_t bcast = (dev->ip4_addr & dev->ip4_netmask) | ~dev->ip4_netmask;
+        if (daddr == 0xFFFFFFFFu || daddr == bcast) return;
+    }
+
+    /*
+     * And never reply to a request that claims an unusable source, since the
+     * reply is addressed to it: 0.0.0.0, loopback from off-box, a broadcast
+     * address (the reply would itself be broadcast), or multicast.
+     */
+    {
+        uint32_t s = __builtin_bswap32(saddr);
+        if (s == 0 ||                       /* "this host" */
+            (s >> 24) == 127 ||             /* 127/8 arriving on a NIC */
+            (s >> 28) == 0xE ||             /* 224/4 multicast */
+            saddr == 0xFFFFFFFFu) return;
+    }
 
     /* Build a reply with type=0 (reply), same id/sequence, same data. */
     uint8_t reply[1500];
@@ -92,11 +128,32 @@ static void icmp6_handle_ns(netdev_t *dev, const uint8_t saddr[16],
 
 static void icmp6_handle_na(netdev_t *dev, const uint8_t *pkt, size_t len) {
     if (len < sizeof(struct icmp6_hdr) + 16 + 8) return;
+    const struct icmp6_hdr *nh = (const struct icmp6_hdr *)pkt;
     const uint8_t *target = pkt + sizeof(struct icmp6_hdr);
     const struct nd_opt_lladdr *opt =
         (const struct nd_opt_lladdr *)(pkt + sizeof(struct icmp6_hdr) + 16);
-    if (opt->type == 2 && opt->len == 1)
-        nd6_insert(dev, target, opt->mac);
+    if (opt->type != 2 || opt->len != 1) return;
+
+    /*
+     * ND-03: an advertisement may REFRESH a binding we already hold; it may
+     * not CREATE one.  This used to call nd6_insert() unconditionally, which
+     * creates -- with no solicitation match, no source check and without
+     * even looking at the Solicited/Override flags -- so one forged NA
+     * naming the router redirected all IPv6 traffic, and 32 of them evicted
+     * the whole cache.  The ARP path already restricts creation this way
+     * (arp.c: only a reply to a request we sent creates an entry); ND did
+     * not.  An address we have never resolved is simply not interesting to
+     * us, so dropping the NA costs nothing: if we later need that neighbour
+     * we send our own solicitation and take the answer to it.
+     *
+     * RFC 4861 4.4: the Override flag (0x20000000 in the flags word) says
+     * whether the sender may replace a cached link-layer address at all.
+     * Honour it rather than overwriting unconditionally.
+     */
+    uint32_t flags = __builtin_bswap32(nh->data);
+    if (!(flags & 0x20000000u)) return;      /* O=0: do not override */
+
+    (void)nd6_update_existing(dev, target, opt->mac);
 }
 
 static void icmp6_handle_echo(const uint8_t saddr[16], const uint8_t daddr[16],

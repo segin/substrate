@@ -59,6 +59,13 @@ typedef struct fdc_geometry {
     uint8_t heads;
     uint8_t sectors_per_track;
     uint8_t data_rate;
+    /*
+     * FDC-04: the read/write GAP3 length for this format.  It used to be
+     * derived as `data_rate == 0 ? HD : DD`, which mis-assigns 2.88M now
+     * that it correctly runs at 1 Mbps (code 3) rather than 500 kbps.  The
+     * gap belongs to the FORMAT, not to the rate code, so carry it here.
+     */
+    uint8_t gap3;
 } fdc_geometry_t;
 
 typedef struct fdc_chs {

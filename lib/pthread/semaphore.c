@@ -20,14 +20,15 @@
  *                  are heap-allocated by sem_open and freed by sem_close;
  *                  __SEM_KANON sem_t's are supplied by the caller (sem_init).
  */
-#include <semaphore.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
+#include <semaphore.h>
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+
 #include <sys/syscall.h>
 
 long syscall(long number, ...);

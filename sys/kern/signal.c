@@ -1,6 +1,15 @@
 #include <stddef.h>
 #include <string.h>
 
+#include <arch/i386/idt.h>
+#include <exec/perso/personality.h>
+#include <kern/cmdline.h>
+#include <kern/console.h>
+#include <kern/panic.h>
+#include <kern/sched.h>
+#include <kern/sleepq.h>
+#include <kern/time.h>
+#include <pm/pm.h>
 #include <sys/copy.h>
 #include <sys/core.h>
 #include <sys/errno.h>
@@ -10,15 +19,6 @@
 #include <sys/session.h>
 #include <sys/signal.h>
 #include <sys/time.h>
-#include <pm/pm.h>
-#include <kern/console.h>
-#include <kern/cmdline.h>
-#include <kern/panic.h>
-#include <kern/sched.h>
-#include <kern/sleepq.h>
-#include <kern/time.h>
-#include <arch/i386/idt.h>
-#include <exec/perso/personality.h>
 
 /*
  * POSIX real-time signal queue (the per-process rtsig_q[] in sys/proc.h).
@@ -474,6 +474,44 @@ static int signal_core_dump_permitted(process_t *p) {
     return p->rlimits[RLIMIT_CORE].rlim_cur != 0;
 }
 
+/*
+ * proc_exec_reset_signals - POSIX execve() signal-disposition reset.
+ *
+ * On exec(), every *caught* signal is reset to SIG_DFL (ignored signals stay
+ * ignored, defaulted signals stay defaulted); the per-process signal-restorer
+ * table, the sig_catch bitmask, the alternate signal stack, and per-process
+ * timers are all cleared.  Skipping this lets the new image inherit a stale
+ * handler pointer from the previous image and jump into now-unmapped code when
+ * that signal is delivered — e.g. an a.out program inheriting the shell's
+ * SIGCHLD handler and crashing when a child exits.  Called from every exec
+ * loader.
+ */
+void proc_exec_reset_signals(void) {
+    if (!current_process) return;
+
+    for (int sig = 1; sig <= NSIG; sig++) {
+        struct sigaction *act = &current_process->sig_actions[sig - 1];
+        if (act->sa_handler != SIG_IGN && act->sa_handler != SIG_DFL) {
+            act->sa_handler = SIG_DFL;
+            memset(&act->sa_mask, 0, sizeof(act->sa_mask));
+            act->sa_flags = 0;
+        }
+    }
+
+    memset(current_process->linux_sig_restorer, 0,
+           sizeof(current_process->linux_sig_restorer));
+    current_process->sig_catch = 0;   /* ignored signals stay ignored */
+
+    if (current_thread) {
+        current_thread->sig_alt_stack.ss_sp    = NULL;
+        current_thread->sig_alt_stack.ss_size  = 0;
+        current_thread->sig_alt_stack.ss_flags = SS_DISABLE;
+        current_thread->sig_on_stack           = 0;
+    }
+
+    proc_ptimers_clear(current_process);
+}
+
 // Signal System Calls
 int kern_sigaction(int sig, const struct sigaction *act, struct sigaction *oact) {
     if (sig <= 0 || sig >= NSIG) return -EINVAL;
@@ -489,7 +527,7 @@ int kern_sigaction(int sig, const struct sigaction *act, struct sigaction *oact)
     
     if (act) {
         current_process->sig_actions[sig - 1] = *act;
-        
+
         /* Update sig_catch and sig_ignore bitmasks */
         if (act->sa_handler == SIG_IGN) {
             current_process->sig_ignore |= mask;
@@ -1328,6 +1366,37 @@ void trapsignal(process_t *p, int sig, int code) {
     /* For trap signals, deliver to current thread specifically.
      * current_thread is the faulting thread that caused the exception. */
     if (current_thread && current_thread->proc == p) {
+        /*
+         * A hardware trap is synchronous: returning to userspace re-executes
+         * the faulting instruction.  So if this signal is blocked or ignored
+         * we would fault again immediately, forever, with the process
+         * spinning and unkillable -- signal_handle_pending() gates on
+         * `sig_pending & ~sig_mask`, so a masked SIGSEGV is simply never
+         * dequeued.  That is easy to hit by accident: a handler installed
+         * with sigfillset(&sa.sa_mask) runs with *every* signal masked
+         * (see the new_mask computation in the delivery path), so any fault
+         * inside such a handler livelocks the machine's console with
+         * repeated identical traps.
+         *
+         * POSIX leaves a blocked hardware-generated SIGSEGV/SIGBUS/SIGILL/
+         * SIGFPE undefined; Linux resolves it in force_sig_info() by
+         * resetting the disposition to SIG_DFL and unblocking, so the
+         * default action -- terminate -- always wins.  Do the same.  Only
+         * trap-generated signals come through here (every caller is a fault
+         * handler in idt.c), so kill(2)/raise(2) semantics are untouched:
+         * blocking SIGSEGV and then being sent one asynchronously still
+         * leaves it pending, as it should.
+         */
+        uint32_t tsig_mask = sigmask(sig);
+        struct sigaction *tact = &p->sig_actions[sig - 1];
+
+        if ((current_thread->sig_mask & tsig_mask) ||
+            tact->sa_handler == SIG_IGN) {
+            tact->sa_handler = SIG_DFL;
+            tact->sa_flags = 0;
+            current_thread->sig_mask &= ~tsig_mask;
+        }
+
         /* Store trap info in thread's pending siginfo for later
          * delivery.  trap_addr is the caller's responsibility — the
          * trap dispatch site has cr2 / instruction pointer / etc.

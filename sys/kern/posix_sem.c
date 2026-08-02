@@ -28,23 +28,24 @@
  * wrappers do the copyin/copyout.
  */
 
-#include <sys/posix_sem.h>
-#include <sys/ipc.h>
-#include <sys/fcntl.h>
-#include <sys/types.h>
-#include <sys/time.h>
-#include <sys/proc.h>
-#include <sys/lock.h>
-#include <sys/copy.h>
-#include <sys/kern_syscalls.h>
-#include <vm/vm_kmem.h>
-#include <kern/sleepq.h>
-#include <kern/sched.h>
-#include <arch/i386/intr.h>
-#include <kern/time.h>
 #include <errno.h>
-#include <string.h>
 #include <stdint.h>
+#include <string.h>
+
+#include <arch/i386/intr.h>
+#include <kern/sched.h>
+#include <kern/sleepq.h>
+#include <kern/time.h>
+#include <sys/copy.h>
+#include <sys/fcntl.h>
+#include <sys/ipc.h>
+#include <sys/kern_syscalls.h>
+#include <sys/lock.h>
+#include <sys/posix_sem.h>
+#include <sys/proc.h>
+#include <sys/time.h>
+#include <sys/types.h>
+#include <vm/vm_kmem.h>
 
 struct kposix_sem {
     int             in_use;                 /* slot occupied */

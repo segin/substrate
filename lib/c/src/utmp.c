@@ -12,17 +12,17 @@
  * not found → append.
  */
 
-#include <utmp.h>
-
 #include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
 #include <string.h>
+#include <unistd.h>
+
 #include <sys/file.h>
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <sys/types.h>
-#include <unistd.h>
+#include <utmp.h>
 
 static const char *ut_path = UTMP_FILE;
 static int         ut_fd   = -1;

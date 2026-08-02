@@ -1,10 +1,9 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <drivers/storage/ide/ide.h>
 #include <kern/device.h>
 #include <kern/pci.h>
-
-#include <drivers/storage/ide/ide.h>
 
 static uintptr_t ide_pci_bar_base(const pci_device_t *pdev, int bar) {
     uint32_t value;
@@ -20,10 +19,18 @@ static uintptr_t ide_pci_bar_base(const pci_device_t *pdev, int bar) {
     }
 
     if (value & 1U) {
-        return (uintptr_t)(value & ~0x3U);
+        return (uintptr_t)(value & ~0x3U);      /* I/O space BAR */
     }
 
-    return (uintptr_t)(value & ~0xFU);
+    /*
+     * [IDE-14] Bit 0 clear means this is a MEMORY BAR.  The old code masked
+     * off the low nibble and returned it anyway, and ide_pci_apply_channel
+     * truncates the result to uint16_t -- so a memory BAR at 0xFEBF1F00
+     * became "io_base 0x1F00" and the driver started doing inb/outb against
+     * whatever unrelated device lives at that I/O port.  An IDE channel is
+     * only ever addressed through I/O space; refuse anything else.
+     */
+    return 0;
 }
 
 static void ide_pci_apply_channel(ide_channel_t *channel, uint8_t *irq_shared,

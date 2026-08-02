@@ -1,4 +1,4 @@
-#include "elf_private.h"
+#include <elf_private.h>
 
 /* Symbol names are expected NUL-terminated (the parser guarantees every
  * SHT_STRTAB ends in '\0'). This is a defensive ceiling so that a caller

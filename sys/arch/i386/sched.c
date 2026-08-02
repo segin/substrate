@@ -2,19 +2,19 @@
 #include <stdint.h>
 #include <string.h>
 
-#include <sys/acct.h>
-#include <sys/ldt.h>
-#include <sys/smp.h>
-#include <vfs/vfs.h>
-#include <kern/sched.h>
-#include <kern/time.h>
-#include <pm/pm.h>
+#include <arch/i386/fpu/fpu_emu.h>
 #include <arch/i386/intr.h>
 #include <arch/i386/percpu.h>
 #include <arch/i386/pmap.h>
 #include <arch/i386/pmm.h>
-#include <arch/i386/fpu/fpu_emu.h>
 #include <exec/perso/personality.h>
+#include <kern/sched.h>
+#include <kern/time.h>
+#include <pm/pm.h>
+#include <sys/acct.h>
+#include <sys/ldt.h>
+#include <sys/smp.h>
+#include <vfs/vfs.h>
 
 // Exposed to Generic Scheduler
 void arch_switch_to(thread_t *prev, thread_t *next) {

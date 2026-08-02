@@ -31,6 +31,7 @@
 #define USB_SPEED_LOW           0   /* 1.5 Mbps */
 #define USB_SPEED_FULL          1   /* 12 Mbps */
 #define USB_SPEED_HIGH          2   /* 480 Mbps */
+#define USB_SPEED_SUPER         3   /* 5 Gbps -- USB 3.x */
 
 /* Descriptor Types */
 #define USB_DT_DEVICE           1
@@ -40,6 +41,7 @@
 #define USB_DT_ENDPOINT         5
 #define USB_DT_SS_EP_COMP     0x30  /* SuperSpeed endpoint companion */
 #define USB_DT_HUB             0x29
+#define USB_DT_SS_HUB          0x2A  /* SuperSpeed hubs answer to this, not 0x29 */
 
 /* Standard Request Codes */
 #define USB_REQ_GET_STATUS      0x00
@@ -121,6 +123,11 @@
 #define USB_HUB_FEAT_C_PORT_ENABLE  17
 #define USB_HUB_FEAT_C_PORT_RESET   20
 
+/* Root-port status extras.  The core learns a port's speed from these bits;
+ * SuperSpeed has no encoding in the USB 2.0 hub status word, so it gets a
+ * private one the HCDs set and usb_enumerate_* reads. */
+#define USB_PORT_STAT_SUPER_SPEED   0x0800
+
 /* Hub port status bits */
 #define USB_PORT_STAT_CONNECTION    0x0001
 #define USB_PORT_STAT_ENABLE        0x0002
@@ -134,9 +141,75 @@
 #define USB_PORT_STAT_C_RESET       0x0010
 
 /* Limits */
-#define USB_MAX_DEVICES         32
+/*
+ * Total devices tracked across all controllers.  Raised with the hub limits:
+ * 16 hubs would otherwise consume half of a 32-entry table before a single
+ * peripheral was plugged in, so lifting the hub caps without this one would
+ * not actually let you attach more.  128 matches the USB address space that
+ * usb_addr_bitmap already covers (1..127); usb_devices[] is a pointer array,
+ * so the whole increase costs 512 bytes.
+ */
+#define USB_MAX_DEVICES         128
+
+/*
+ * A port that reports a device but fails to enumerate is retried this many
+ * times and then PARKED until its connection state actually changes.
+ *
+ * Without this the hot-plug scan is an infinite retry loop: the port still
+ * reads connected, no device is tracked on it, so every pass resets it and
+ * re-runs enumeration -- printing a fresh failure each time.  On the Lenovo
+ * C460 that produced descriptor-read errors at exactly the scan rate (4 Hz)
+ * and took the kernel down within seconds of reaching userspace.
+ */
+#define USB_ENUM_MAX_TRIES      3
+/*
+ * Attempts at the initial 8-byte device-descriptor read before a port is
+ * declared unenumerable, and the pause between them.  A device slower than
+ * spec -- which describes most cheap hubs and keyboards in the window right
+ * after a port reset -- does not answer the first request, and giving up there
+ * made such a device permanently invisible.  NetBSD (usb_subr.c,
+ * usbd_new_device) uses exactly these numbers and re-resets the port every
+ * fourth attempt; FreeBSD re-enumerates twice.  Only a port that is failing
+ * pays the cost, and USB_ENUM_MAX_TRIES then bounds how often that repeats.
+ */
+#define USB_ENUM_DESC_TRIES     10
+#define USB_ENUM_DESC_DELAY_MS  200
+/*
+ * Root ports the per-port enumeration-failure counter covers.  Ports are
+ * 1-based and the array is indexed [port - 1], so this is the highest port
+ * number that can be throttled.  It used to be indexed [port] against a
+ * 32-entry array, which both wasted slot 0 and left port 32 and up with no
+ * counter at all -- and a port with no counter is one the retry cap cannot
+ * stop from re-probing forever, which is the exact loop USB_ENUM_MAX_TRIES
+ * exists to break.  xHCI encodes up to 255 ports; 128 covers every real
+ * controller at one byte per port per HCD.
+ */
+#define USB_MAX_ROOT_PORTS      128
+/* USB allows at most 7 tiers of hubs; every parent-chain walk is bounded by
+ * this so a corrupted pointer cannot loop forever. */
+#define USB_MAX_ENUM_DEPTH      7
 #define USB_MAX_ENDPOINTS       16
-#define USB_MAX_CONFIG_SIZE     512
+/*
+ * A device's configuration can expose many interfaces, and many alternate
+ * settings per interface.  We record every interface descriptor we see (alt
+ * settings included) so each endpoint can be attributed to the interface that
+ * declared it; matching only ever considers alternate setting 0, since we do
+ * not issue SET_INTERFACE during enumeration.  8 covers real composite
+ * devices (a keyboard with a consumer-control interface, a UVC webcam, a UAC
+ * headset) without making usb_device_t unreasonably large.
+ */
+#define USB_MAX_INTERFACES      8
+/*
+ * Sanity cap on a device's total configuration-descriptor length.  This is
+ * not a buffer size -- config_data is allocated at the device's actual
+ * wTotalLength -- only a bound so a hostile or wedged device can't make us
+ * allocate up to the 64 KiB the field can encode.  It used to be 512, the
+ * size of a fixed inline array, and any device with a larger config
+ * descriptor was refused outright: real composite devices (UVC webcams, USB
+ * audio, docking stations, keyboards with extra HID interfaces) commonly
+ * report 1-3 KiB, and one reporting 1093 bytes is what exposed this.
+ */
+#define USB_MAX_CONFIG_SIZE     8192
 #define USB_MAX_HCDS            4
 
 /*
@@ -218,14 +291,43 @@ struct usb_setup_packet {
  * USB Endpoint
  * ============================================================
  */
+/*
+ * wMaxPacketSize is not just a size: for a high-speed (or SuperSpeed)
+ * interrupt or isochronous endpoint, bits 12:11 hold "additional transactions
+ * per microframe" and only bits 10:0 are the packet size.  Storing the raw
+ * field meant a high-bandwidth endpoint declaring 2 x 1024 was read as a
+ * 5120-byte packet -- which xHCI wrote straight into the EP context's Max
+ * Packet Size field, a value no controller will accept.  Keep the two apart.
+ */
+#define USB_EP_MPS_MASK         0x07FF
+#define USB_EP_MPS_MULT(x)      ((((x) >> 11) & 0x3) + 1)
+
 typedef struct usb_endpoint {
     uint8_t  address;       /* bEndpointAddress (dir | num) */
     uint8_t  type;          /* USB_EP_TYPE_* */
-    uint16_t max_packet;    /* wMaxPacketSize */
+    uint16_t max_packet;    /* wMaxPacketSize bits 10:0 -- the size alone */
+    uint8_t  mult;          /* transactions per microframe (1..3; 1 = normal) */
     uint8_t  interval;      /* bInterval */
     uint8_t  toggle;        /* Data toggle (0 or 1) */
     uint8_t  max_streams;   /* SS companion MaxStreams exponent (0 = no streams) */
 } usb_endpoint_t;
+
+/*
+ * One interface descriptor from the active configuration.  ep_first/ep_count
+ * delimit this interface's endpoints inside the device's flat endpoints[]
+ * array, so a driver can ask for "the interrupt IN endpoint of MY interface"
+ * rather than "the first interrupt IN endpoint anywhere in the config" --
+ * which on a composite device is frequently a different interface's.
+ */
+typedef struct usb_interface {
+    uint8_t  number;        /* bInterfaceNumber */
+    uint8_t  alt_setting;   /* bAlternateSetting */
+    uint8_t  if_class;      /* bInterfaceClass */
+    uint8_t  if_subclass;   /* bInterfaceSubClass */
+    uint8_t  if_protocol;   /* bInterfaceProtocol */
+    uint8_t  ep_first;      /* index of first endpoint in dev->endpoints[] */
+    uint8_t  ep_count;      /* number of endpoints belonging to it */
+} usb_interface_t;
 
 /*
  * ============================================================
@@ -251,8 +353,9 @@ typedef struct usb_device {
     /* Cached full device descriptor */
     struct usb_device_descriptor dev_desc;
 
-    /* Raw config descriptor data */
-    uint8_t  config_data[USB_MAX_CONFIG_SIZE];
+    /* Raw config descriptor data, allocated at config_len bytes during
+     * enumeration and freed by usb_free_device().  NULL until then. */
+    uint8_t  *config_data;
     uint16_t config_len;
 
     /* Parsed endpoints (excluding EP0) */
@@ -262,7 +365,22 @@ typedef struct usb_device {
     /* Control endpoint (EP0) */
     usb_endpoint_t ep0;
 
-    /* Interface class info from first interface */
+    /*
+     * Every interface descriptor in the active configuration, in descriptor
+     * order, alternate settings included.
+     */
+    usb_interface_t interfaces[USB_MAX_INTERFACES];
+    uint8_t  num_interfaces;
+
+    /*
+     * The interface this device is bound to -- set by usb_match_driver()
+     * before it calls a driver's probe(), so probe/attach and every
+     * USB_RECIP_INTERFACE control request see the interface actually being
+     * driven rather than always interface 0.  Defaults to the first
+     * interface so a device with no matching driver still reports something
+     * meaningful.
+     */
+    uint8_t  if_number;
     uint8_t  if_class;
     uint8_t  if_subclass;
     uint8_t  if_protocol;
@@ -289,6 +407,12 @@ typedef struct usb_device {
     void          *usbfs_node;
     void          *usbfs_meta_node;
 
+    /* Hub topology.  Set by usb_set_hub() when the hub driver attaches; the
+     * xHCI slot context needs both before it will route to anything behind
+     * this device. */
+    uint8_t  is_hub;
+    uint8_t  hub_nports;
+
     /* State */
     uint8_t  slot;              /* Index in device table */
     uint8_t  configured;        /* Device has been configured */
@@ -311,6 +435,15 @@ typedef struct usb_transfer {
     struct usb_setup_packet setup;
     uint8_t  is_control;    /* 1 for control transfers */
     uint16_t stream_id;     /* xHCI bulk stream ID (0 = no stream) */
+
+    /*
+     * Per-transfer completion timeout in milliseconds; 0 means "use the HCD's
+     * default".  An interrupt IN endpoint NAKs continuously while the device
+     * has nothing to report, so a poll of one must give up after a few
+     * milliseconds rather than sitting on the controller's multi-second bulk
+     * timeout.
+     */
+    uint32_t timeout_ms;
 } usb_transfer_t;
 
 /*
@@ -339,9 +472,29 @@ typedef struct usb_hcd {
      * port_enable: enable/disable port
      */
     uint8_t  nports;
+    /* Consecutive failed enumeration attempts per root port; cleared when the
+     * port goes disconnected so a re-plug always gets a fresh try. */
+    uint8_t  enum_fail[USB_MAX_ROOT_PORTS];
     uint32_t (*port_status)(struct usb_hcd *hcd, uint8_t port);
     int      (*port_reset)(struct usb_hcd *hcd, uint8_t port);
     int      (*port_enable)(struct usb_hcd *hcd, uint8_t port, int enable);
+
+    /*
+     * Optional: the core has learned this device is a hub with `nports`
+     * downstream ports.  xHCI must set the Hub bit and port count in the slot
+     * context or the controller will not route transfers past it; UHCI and
+     * EHCI need nothing and leave this NULL.
+     */
+    int      (*set_hub)(struct usb_hcd *hcd, usb_device_t *dev, uint8_t nports);
+
+    /*
+     * Optional: the real EP0 max packet size has been read from the device
+     * descriptor.  xHCI programs an endpoint context at Address Device time
+     * from the core's guess and must be corrected once the true value is known
+     * (xHCI 1.1 s4.3.4); UHCI and EHCI read ep0.max_packet per transfer and
+     * need nothing.
+     */
+    int      (*set_ep0_mps)(struct usb_hcd *hcd, usb_device_t *dev, uint16_t mps);
 
     /*
      * Optional isochronous-OUT streaming ops (USB audio).  frame_number()
@@ -420,6 +573,28 @@ int usb_control_transfer(usb_device_t *dev,
                          uint16_t wValue, uint16_t wIndex,
                          void *data, uint16_t wLength);
 
+/*
+ * As above, but also reports how many bytes actually moved.  The plain form
+ * returns only a USB_XFER_* status (USB_XFER_OK is 0), so a caller that needs
+ * a length -- usbfs relaying a control transfer to userspace -- cannot get one
+ * from it.
+ */
+int usb_control_transfer_actual(usb_device_t *dev,
+                                uint8_t bmRequestType, uint8_t bRequest,
+                                uint16_t wValue, uint16_t wIndex,
+                                void *data, uint16_t wLength,
+                                uint32_t *actual_length);
+
+/*
+ * Poll an interrupt endpoint once.  timeout_ms bounds how long to wait for the
+ * device to produce a packet; a device with nothing to report NAKs for the
+ * whole window and the call returns USB_XFER_NAK (or USB_XFER_TIMEOUT), which
+ * is the normal idle result and not an error.
+ */
+int usb_interrupt_transfer(usb_device_t *dev, usb_endpoint_t *ep,
+                           void *data, uint32_t length,
+                           uint32_t *actual_length, uint32_t timeout_ms);
+
 int usb_bulk_transfer(usb_device_t *dev, usb_endpoint_t *ep,
                       void *data, uint32_t length,
                       uint32_t *actual_length);
@@ -466,12 +641,70 @@ int usb_enumerate_device(usb_hcd_t *hcd, uint8_t port, uint8_t speed);
 int usb_enumerate_device_parent(usb_hcd_t *hcd, uint8_t port, uint8_t speed,
                                 usb_device_t *parent);
 
+/* Hot-plug plumbing.  usb_hub_scan_ports() is called by usb_hotplug_scan()
+ * on the hot-plug kthread; the other two let the hub driver reconcile its
+ * downstream ports using the core's device table and teardown path. */
+void usb_hub_scan_ports(void);
+/* Reset one downstream port of an attached hub (a class request, so only the
+ * hub driver can issue it).  Used by the core enumeration path to retry a slow
+ * device and to re-reset the port before SET_ADDRESS. */
+int  usb_hub_reset_port(usb_device_t *hubdev, uint8_t port);
+void usb_disconnect_device(usb_device_t *dev);
+usb_device_t *usb_child_device_on_port(usb_device_t *parent, uint8_t port);
+
+/*
+ * ---- Bus topology ----
+ *
+ * A device behind a hub cannot be addressed from its port number alone: xHCI
+ * needs a Route String naming the port at every tier, and EHCI needs the
+ * address and port of the nearest upstream high-speed hub so it can wrap the
+ * transfer in split transactions.  Both are derived from the dev->parent chain,
+ * which enumeration already records.
+ */
+
+/* Root-hub port this device ultimately hangs off, walking up through any hubs. */
+uint8_t usb_root_port(const usb_device_t *dev);
+
+/*
+ * xHCI Route String (xHCI 1.1 s4.5.2): 4 bits per tier, the port on the
+ * root-hub's immediate downstream hub in bits 3:0 and each deeper tier above
+ * it.  0 for a device attached straight to a root port.  Port numbers above 15
+ * cannot be encoded and clamp to 15, as the spec requires.
+ */
+uint32_t usb_route_string(const usb_device_t *dev);
+
+/*
+ * The nearest upstream high-speed hub for a low/full-speed device -- the one
+ * whose transaction translator has to bridge it onto the high-speed bus.  NULL
+ * when the device is high-speed itself, or is on a root port, or no high-speed
+ * hub is in its path.  *ttport, when non-NULL, gets the port number this
+ * device's branch occupies on that hub.
+ */
+usb_device_t *usb_tt_hub(const usb_device_t *dev, uint8_t *ttport);
+
+/*
+ * Record that a device is a hub with `nports` downstream ports.  Called by the
+ * hub driver at attach.  xHCI has to be told before it will route transfers to
+ * anything behind the hub; other controllers do not care.
+ */
+void usb_set_hub(usb_device_t *dev, uint8_t nports);
+
 /* Publish/unpublish a device under /dev/usb (libusb/lsusb backend). */
 void usbdevfs_publish(usb_device_t *dev);
 void usbdevfs_unpublish(usb_device_t *dev);
 void usb_enumerate_bus(usb_hcd_t *hcd);
 
 /* Endpoint Lookup Helpers */
+/*
+ * Find an endpoint of the given type and direction belonging to the interface
+ * the device is bound to (dev->if_number, alternate setting 0).  Scoping to
+ * the bound interface is what stops a composite device from handing a driver
+ * a different interface's endpoint.
+ */
 usb_endpoint_t *usb_find_endpoint(usb_device_t *dev, uint8_t type, uint8_t dir);
+
+/* As above, but for an explicit interface number and alternate setting. */
+usb_endpoint_t *usb_find_endpoint_iface(usb_device_t *dev, uint8_t ifnum,
+                                        uint8_t alt, uint8_t type, uint8_t dir);
 
 #endif /* _USB_H */

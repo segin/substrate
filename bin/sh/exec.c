@@ -1,21 +1,22 @@
-#include "exec.h"
-#include "expand.h"
-#include "shell_var.h"
+#include <ctype.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <termios.h>
 #include <unistd.h>
-#include <sys/wait.h>
-#include <fcntl.h>
+
+#include "exec.h"
+#include "expand.h"
+#include "job.h"
+#include "parser.h"
+#include "shell_var.h"
+#include "util.h"
 #include <sys/stat.h>
 #include <sys/times.h>
-#include <ctype.h>
-#include "job.h"
-#include "util.h"
-#include "parser.h"
-#include <signal.h>
-#include <termios.h>
-#include <errno.h>
+#include <sys/wait.h>
 
 int shell_is_interactive = 0;
 int shell_errexit = 0;

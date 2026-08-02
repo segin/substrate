@@ -1,11 +1,11 @@
-#include "cp_opts.h"
-
 #include <ctype.h>
 #include <errno.h>
 #include <limits.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include "cp_opts.h"
 
 static void cp_enable_preserve_basic(struct cp_options *opts)
 {

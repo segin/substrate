@@ -77,6 +77,7 @@ static thread_t *rr_last = NULL;
 #include <arch/i386/percpu.h>
 #include <arch/i386/intr.h>
 #include <sys/preempt.h>
+#include <sys/smp.h>
 
 #ifdef HOST_TEST
 static thread_t *sched_storage_alloc(void) {
@@ -400,6 +401,15 @@ rescan:
     highest_prio = -1;
     best_class = SCHED_IDLE;
 
+    /* KERN-06: the allthread pick walk below dereferences t->state and
+     * t->t_allthread_next.  sched_reap_thread()/sched_unlink_locked() unlink and
+     * free a thread_t under tid_lock, so on SMP another CPU can reap a thread
+     * mid-scan — intr_disable() alone only bars the local reaper.  Hold the
+     * registry lock across the walk (released before the context switch, which
+     * cannot run with a spinlock held).  Matches sched_tick()/sched_wakeup_n().
+     */
+    unsigned long rr_flags = thread_registry_lock();
+
     /* If rr_last has been unlinked, fall back to the head. */
     thread_t *start = NULL;
     if (rr_last && rr_last->t_allthread_next) {
@@ -484,6 +494,8 @@ rescan:
         if (t == start) break;
     }
 
+    thread_registry_unlock(rr_flags);
+
     /* Publish the minimum vruntime (the picked timeshare thread is the lowest,
      * i.e. the CFS leftmost) so waking/new timeshare threads can rebase to it
      * and neither starve nor monopolise the core. */
@@ -558,11 +570,17 @@ thread_t *sched_get_thread(int tid) {
 }
 
 void sched_set_priority(int tid, sched_class_t cls, int prio) {
-    thread_t *t = sched_get_thread(tid);
-    if (!t) return;
+    /* RMW under tid_lock to avoid racing a reaper freeing the thread_t (A49). */
+    unsigned long tf = spinlock_acquire_irq(&tid_lock);
+    thread_t *t = sched_lookup_tid_locked(tid);
+    if (!t) {
+        spinlock_release_irq(&tid_lock, tf);
+        return;
+    }
     t->sched_class = cls;
     t->priority = prio;
     t->base_priority = prio;
+    spinlock_release_irq(&tid_lock, tf);
 }
 
 void sched_sleep(void *chan) {
@@ -862,8 +880,50 @@ void sched_reap_process_threads(process_t *proc) {
     }
 }
 
+/* Non-zero if t is currently the running thread on some CPU other than the
+ * caller's — i.e. still executing on another core. */
+int sched_thread_running_remote(thread_t *t) {
+    int self = percpu_get_cpu_id();
+    int n = smp_get_cpu_count();
+    if (n > MAX_CPUS) n = MAX_CPUS;
+    for (int c = 0; c < n; c++) {
+        if (c == self) continue;
+        if (percpu_get_cpu(c)->current == t) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* Bounded spin until t is off every remote CPU.  A thread marked
+ * THREAD_ZOMBIE is dropped by the remote scheduler on its next reschedule
+ * (<= one timer tick), so this normally returns almost immediately; the cap
+ * prevents a wedge if a remote CPU is stuck.  On a uniprocessor — or with the
+ * APs parked — it is a no-op.  Callers use it to avoid freeing or force-
+ * mutating a sibling thread that is still live on another core. */
+void sched_wait_thread_offcpu(thread_t *t) {
+    if (!t) return;
+    int spins = 0;
+    while (sched_thread_running_remote(t) && spins++ < 20000000) {
+        __asm__ volatile("pause");
+    }
+}
+
 void sched_reap_thread(thread_t *t) {
     if (!t) return;
+
+    /* Never free a thread that is still executing on another CPU: proc_exit
+     * marks siblings THREAD_ZOMBIE without forcing them off remote cores, so a
+     * concurrent wait4 reap could otherwise free the kstack/thread_t out from
+     * under a running sibling (A26).  Wait for it to leave the CPU first. */
+    sched_wait_thread_offcpu(t);
+
+    /* Release any kernel mutexes this thread still holds, now that it is
+     * guaranteed off-CPU.  proc_exit defers a still-running sibling's release
+     * to here rather than force-releasing (and corrupting held_mutexes) while
+     * the sibling concurrently mutates it on another core (A22).  Idempotent
+     * if proc_exit already released them. */
+    mutex_release_owned_by_thread(t);
 
     /* A thread can still be linked on a sleepq at reap time: proc_exit
      * dequeues each thread once, but a thread killed mid-sleep can re-block
@@ -954,11 +1014,20 @@ void sched_reap_detached_zombies(void) {
 /* Mark tid detached.  If it has already exited (a joinable thread that
  * zombied before the detach), hand it to the deferred reaper. */
 int sched_lwp_detach(tid_t tid) {
-    thread_t *t = sched_get_thread((int)tid);
-    if (!t || t->proc != current_process)
+    /* Look up and read-modify-write under tid_lock: sched_get_thread() drops
+     * the lock before returning, so a reaper on another CPU (or a nested
+     * reap) could unlink+free the thread_t between the lookup and the store
+     * (A49 write-after-free).  Hold the lock across the whole RMW. */
+    unsigned long tf = spinlock_acquire_irq(&tid_lock);
+    thread_t *t = sched_lookup_tid_locked((int)tid);
+    if (!t || t->proc != current_process) {
+        spinlock_release_irq(&tid_lock, tf);
         return -ESRCH;
+    }
     t->flags |= THREAD_F_DETACHED;
-    if (t->state == THREAD_ZOMBIE)
+    int zombie = (t->state == THREAD_ZOMBIE);
+    spinlock_release_irq(&tid_lock, tf);
+    if (zombie)
         sched_mark_detached_zombie();
     return 0;
 }
@@ -979,25 +1048,37 @@ int sched_lwp_set_detached(tid_t tid) {
  * scheduler skips it; a blocked target just carries the flag and parks when it
  * would next become runnable. */
 int sched_lwp_suspend(tid_t tid) {
-    thread_t *t = sched_get_thread((int)tid);
-    if (!t || t->proc != current_process)
+    /* RMW under tid_lock to avoid racing a reaper freeing the thread_t (A49). */
+    unsigned long tf = spinlock_acquire_irq(&tid_lock);
+    thread_t *t = sched_lookup_tid_locked((int)tid);
+    if (!t || t->proc != current_process) {
+        spinlock_release_irq(&tid_lock, tf);
         return -ESRCH;
-    if (t == current_thread)
+    }
+    if (t == current_thread) {
+        spinlock_release_irq(&tid_lock, tf);
         return -EDEADLK;              /* suspending self is not supported here */
+    }
     t->flags |= THREAD_F_SUSPENDED;
     if (t->state == THREAD_READY || t->state == THREAD_RUNNING)
         t->state = THREAD_STOPPED;
+    spinlock_release_irq(&tid_lock, tf);
     return 0;
 }
 
 /* _lwp_continue: undo _lwp_suspend and make the LWP runnable again. */
 int sched_lwp_continue(tid_t tid) {
-    thread_t *t = sched_get_thread((int)tid);
-    if (!t || t->proc != current_process)
+    /* RMW under tid_lock to avoid racing a reaper freeing the thread_t (A49). */
+    unsigned long tf = spinlock_acquire_irq(&tid_lock);
+    thread_t *t = sched_lookup_tid_locked((int)tid);
+    if (!t || t->proc != current_process) {
+        spinlock_release_irq(&tid_lock, tf);
         return -ESRCH;
+    }
     t->flags &= ~THREAD_F_SUSPENDED;
     if (t->state == THREAD_STOPPED)
         t->state = THREAD_READY;
+    spinlock_release_irq(&tid_lock, tf);
     return 0;
 }
 
@@ -1056,10 +1137,17 @@ int sched_has_waitable_siblings(void) {
  * process, EINVAL if it is detached (NetBSD returns EINVAL for a detached
  * target rather than waiting on it), else 0. */
 int sched_lwp_wait_check(tid_t tid) {
-    thread_t *t = sched_get_thread((int)tid);
-    if (!t || t->proc != current_process)
+    /* Read t->flags under tid_lock so a concurrent reaper cannot free the
+     * thread_t between the lookup and the flag test (A49). */
+    unsigned long tf = spinlock_acquire_irq(&tid_lock);
+    thread_t *t = sched_lookup_tid_locked((int)tid);
+    if (!t || t->proc != current_process) {
+        spinlock_release_irq(&tid_lock, tf);
         return -ESRCH;
-    if (t->flags & THREAD_F_DETACHED)
+    }
+    int detached = (t->flags & THREAD_F_DETACHED) != 0;
+    spinlock_release_irq(&tid_lock, tf);
+    if (detached)
         return -EINVAL;
     return 0;
 }

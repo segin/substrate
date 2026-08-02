@@ -7,16 +7,17 @@
  * sqlite, ...) references them directly; provide them as thin forwarders.
  */
 
-#include <sys/types.h>
+#include <dirent.h>
+#include <fcntl.h>
+#include <stdarg.h>
+#include <unistd.h>
+
+#include <sys/mman.h>
+#include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/statfs.h>
 #include <sys/statvfs.h>
-#include <sys/resource.h>
-#include <sys/mman.h>
-#include <dirent.h>
-#include <fcntl.h>
-#include <unistd.h>
-#include <stdarg.h>
+#include <sys/types.h>
 
 int open64(const char *path, int flags, ...)
 {

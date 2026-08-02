@@ -7,63 +7,61 @@
  */
 
 /* Kernel internal includes */
-#include <kern/sched.h>
-#include <kern/sleepq.h>
-#include <sys/preempt.h>
-#include <kern/version.h>
-#include <kern/panic.h>
-#include <kern/console.h>
-#include <kern/cmdline.h>
-#include <exec/perso/personality.h>
-#include <exec/formats/elf.h>
-#include <pm/pm.h>
-#include <vm/vm_kmem.h>
-#include <vm/uma.h>
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdio.h>
+#include <string.h>
+
 #include <arch/i386/pmap.h>
-#include <sys/thr.h>
-#include <sys/acct.h>
-#include <sys/file.h>
-#include <sys/proc.h>
-#include <sys/signal.h>
-#include <sys/session.h>
-#include <sys/tty.h>
-#include <vfs/buf.h>
-#include <kern/version.h>
-#include <kern/file.h>
-#include <vfs/vfs.h>
-#include <drivers/console/uart/uart.h>
+#include <arch/x86-common/io.h>
 #include <drivers/console/console.h>
 #include <drivers/console/pty.h>
-#include <include/sys/sysinfo.h>
-#include <sys/kern_syscalls.h>
-#include <sys/utsname.h>
-
-#include <sys/smp.h>
-#include <sys/lock.h>
-#include <sys/types.h>
-#include <sys/param.h>
-#include <sys/mount.h>
-#include <sys/statvfs.h>
-#include <sys/stat.h>
+#include <drivers/console/uart/uart.h>
+#include <drivers/storage/blkdev.h>
+#include <exec/formats/elf.h>
+#include <exec/perso/personality.h>
+#include <kern/cmdline.h>
+#include <kern/console.h>
+#include <kern/file.h>
+#include <kern/panic.h>
+#include <kern/sched.h>
+#include <kern/sleepq.h>
+#include <kern/time.h>
+#include <kern/version.h>
+#include <pm/pm.h>
+#include <sys/acct.h>
 #include <sys/errno.h>
+#include <sys/exec.h>
 #include <sys/fcntl.h>
+#include <sys/file.h>
 #include <sys/ioctl.h>
+#include <sys/kern_syscalls.h>
+#include <sys/lock.h>
+#include <sys/mount.h>
+#include <sys/namei.h>
+#include <sys/param.h>
+#include <sys/poll.h>
+#include <sys/preempt.h>
+#include <sys/proc.h>
 #include <sys/random.h>
 #include <sys/reboot.h>
-#include <sys/exec.h>
-#include <sys/namei.h>
-#include <arch/x86-common/io.h>
-#include <string.h>
-#include <stdbool.h>
-#include <stdio.h>
-#include <stddef.h>
-#include <vm/vm_map.h>
-#include <vm/vm_area.h>
-
-#include <sys/kern_syscalls.h>
-#include <sys/utsname.h>
+#include <sys/session.h>
+#include <sys/signal.h>
+#include <sys/smp.h>
+#include <sys/stat.h>
+#include <sys/statvfs.h>
+#include <sys/sysinfo.h>
+#include <sys/thr.h>
 #include <sys/time.h>
-#include <kern/time.h>
+#include <sys/tty.h>
+#include <sys/types.h>
+#include <sys/utsname.h>
+#include <vfs/buf.h>
+#include <vfs/vfs.h>
+#include <vm/uma.h>
+#include <vm/vm_area.h>
+#include <vm/vm_kmem.h>
+#include <vm/vm_map.h>
 
 // File structure allocator
 static uma_zone_t *file_zone = NULL;
@@ -184,7 +182,10 @@ static int elf_dt_needs_substrate_libc(fs_node_t *node, const Elf32_Ehdr *eh) {
     if (eh->e_phentsize != sizeof(Elf32_Phdr) || phnum == 0 || phnum > 32)
         return 0;
     phbytes = (size_t)phnum * sizeof(Elf32_Phdr);
-    if (read_fs(node, eh->e_phoff, phbytes, (uint8_t *)ph) < phbytes)
+    /* [VFS-28] read_fs is signed now: a short read AND an error both fail
+     * this test, where an error used to compare as a huge unsigned value and
+     * pass it. */
+    if (read_fs(node, eh->e_phoff, phbytes, (uint8_t *)ph) < (ssize_t)phbytes)
         return 0;
 
     for (uint16_t i = 0; i < phnum; i++) {
@@ -197,7 +198,7 @@ static int elf_dt_needs_substrate_libc(fs_node_t *node, const Elf32_Ehdr *eh) {
         return 0;
     if (dyn_sz > sizeof(dyn))
         dyn_sz = sizeof(dyn);
-    if (read_fs(node, dyn_off, dyn_sz, dyn) < dyn_sz)
+    if (read_fs(node, dyn_off, dyn_sz, dyn) < (ssize_t)dyn_sz)
         return 0;
 
     /* First pass: locate DT_STRTAB (a virtual address) and map it to a file
@@ -243,7 +244,7 @@ static int vfs_node_is_substrate_object(fs_node_t *node) {
     const Elf32_Ehdr *eh = (const Elf32_Ehdr *)hdr;
     if (!node || (node->flags & 0x7) != FS_FILE)
         return 0;
-    if (read_fs(node, 0, sizeof(hdr), hdr) < sizeof(hdr))
+    if (read_fs(node, 0, sizeof(hdr), hdr) < (ssize_t)sizeof(hdr))
         return 0;
     if (hdr[0] != 0x7f || hdr[1] != 'E' || hdr[2] != 'L' || hdr[3] != 'F')
         return 0;
@@ -624,11 +625,28 @@ static int kern_open_from(const char *path, int flags, int mode, fs_node_t *root
     // Lookup file
     fs_node_t *node = 0;
 
+    /*
+     * [VFS-06] Clear the per-thread ELOOP marker before the lookup so what
+     * we read afterwards belongs to THIS lookup.  vfs_lookup() reports every
+     * failure as NULL, so without it a symlink loop was reported as ENOENT
+     * -- the same answer as a genuinely missing file, and useless for
+     * diagnosing the loop.
+     */
+    if (current_thread) current_thread->vfs_symlink_eloop = 0;
     node = vfs_perso_lookup(root, cwd, path);
 
     if (!node) {
         fs_node_t *parent = NULL;
         int error;
+
+        /* A chain too long to follow is ELOOP, and stays ELOOP even with
+         * O_CREAT -- the path could not be resolved, so there is nothing to
+         * create it relative to. */
+        if (current_thread && current_thread->vfs_symlink_eloop) {
+            current_thread->vfs_symlink_eloop = 0;
+            proc_clear_fd(current_process, fd);
+            return -ELOOP;
+        }
 
         if (!(flags & O_CREAT)) {
             proc_clear_fd(current_process, fd);
@@ -939,8 +957,10 @@ void file_close_ptr(file_t *f) {
      */
     if (current_process)
         advlock_release_by_owner(f, current_process->pid);
-    f->f_count--;
-    if (f->f_count <= 0) {
+    /* Atomic decrement-and-test: a plain RMW here races fork's concurrent
+     * f_count increment (A48) — the lost update could free a file still
+     * referenced by the child, or double-free. */
+    if (__sync_sub_and_fetch(&f->f_count, 1) <= 0) {
         close_fs((fs_node_t*)f->f_data);
         if (f->f_ops && f->f_ops->fo_close) {
             f->f_ops->fo_close(f, current_thread);
@@ -1123,7 +1143,8 @@ int kern_getdents(unsigned int fd, void *dirp, unsigned int count) {
     
     while (bpos < count) {
         // Read one entry
-        struct dirent *d = readdir_fs((fs_node_t*)f->f_data, f->f_offset);
+        struct dirent dent;
+        struct dirent *d = readdir_fs((fs_node_t*)f->f_data, f->f_offset, &dent);
         if (!d) {
             // EOF
             if (bpos == 0) return 0; // EOF on first try
@@ -1177,7 +1198,8 @@ int kern_getdents64(unsigned int fd, void *dirp, unsigned int count) {
     struct linux_dirent64 *kld = (struct linux_dirent64 *)temp_buf;
 
     while (bpos < count) {
-        struct dirent *d = readdir_fs((fs_node_t *)f->f_data, f->f_offset);
+        struct dirent dent;
+        struct dirent *d = readdir_fs((fs_node_t *)f->f_data, f->f_offset, &dent);
         if (!d) {
             if (bpos == 0) return 0;
             break;
@@ -1249,7 +1271,7 @@ int kern_uname(struct utsname *buf) {
     buf->sysname[255] = '\0';
     strlcpy(buf->nodename, kernel_hostname, sizeof(buf->nodename));
     buf->nodename[255] = '\0';
-    strlcpy(buf->release, "0.2", sizeof(buf->release));
+    strlcpy(buf->release, OS_RELEASE, sizeof(buf->release));
     buf->release[255] = '\0';
     strlcpy(buf->version, "Kernel", sizeof(buf->version));
     buf->version[255] = '\0';
@@ -2182,8 +2204,7 @@ int sys_removexattr(const char *path, const char *name)  { (void)path; (void)nam
 int sys_lremovexattr(const char *path, const char *name) { (void)path; (void)name; return -ENOSYS; }
 int sys_fremovexattr(int fd, const char *name)           { (void)fd;   (void)name; return -ENOSYS; }
 
-// poll() implementation
-#include <sys/poll.h>
+
 
 int sys_poll(struct pollfd *fds, unsigned int nfds, int timeout) {
     if (nfds > 1024) return -22;
@@ -2934,6 +2955,14 @@ int sys_sync(void) {
      * stat() reports.  */
 
     (void)bufsync(0);
+
+    /*
+     * [AHCI-18] bufsync() only gets the data as far as the DEVICE.  A disk
+     * with write caching enabled acknowledges from its own DRAM, so without
+     * this the guarantee sync(2) is supposed to give -- "on-disk state
+     * matches what stat() reports" -- stopped one power failure short.
+     */
+    (void)blkdev_flush_all();
     return 0;
 }
 
@@ -3017,7 +3046,7 @@ int sys_dup(int oldfd) {
 
     proc_set_fd(current_process, newfd, f);
     fdset_clear(current_process->fd_cloexec, newfd);
-    f->f_count++;
+    __sync_fetch_and_add(&f->f_count, 1);   /* atomic vs racing close (A48) */
     return newfd;
 }
 
@@ -3036,7 +3065,7 @@ int sys_dup2(int oldfd, int newfd) {
 
     proc_set_fd(current_process, newfd, f);
     fdset_clear(current_process->fd_cloexec, newfd);
-    f->f_count++;
+    __sync_fetch_and_add(&f->f_count, 1);   /* atomic vs racing close (A48) */
     return newfd;
 }
 
@@ -3407,8 +3436,6 @@ int kern_waitpid(int pid, int *status, int options) {
 
 int sys_getpid(void) { if(current_process) return current_process->pid; return 0; }
 
-#include <sys/exec.h>
-
 int sys_execve(const char *f, char *const a[], char *const e[]) {
     char kf[256];
     if (copyinstr(f, kf, sizeof(kf), NULL) != 0) return -14;
@@ -3699,7 +3726,8 @@ static char *find_name_by_inode(fs_node_t *dir, uint64_t inode) {
     // caps a broken FS independently of the cursor's unit.
     uint64_t index = 0;
     for (int guard = 0; guard < 1000000; guard++) {
-        struct dirent *d = readdir_fs(dir, index);
+        struct dirent dent;
+        struct dirent *d = readdir_fs(dir, index, &dent);
         if (!d) break; // End of directory
 
         uint64_t next = (d->d_off > index) ? d->d_off : index + 1;

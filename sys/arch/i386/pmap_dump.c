@@ -1,7 +1,8 @@
 // Debug function to dump process memory mappings
+#include <stdio.h>
+
 #include <arch/i386/pmap.h>
 #include <kern/console.h>
-#include <stdio.h>
 #include <sys/proc.h>
 
 void pmap_dump(pmap_t pmap) {

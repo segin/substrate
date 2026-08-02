@@ -16,8 +16,11 @@
 # DISPLAY set but no X server up yet, its ToolTalk init blocks ~20s per
 # file trying to reach the X-display session before falling back — so
 # compiling all ptypes at boot would otherwise add minutes of dead time.
-# With DISPLAY unset it uses the host session and compiles all of them in
-# a few seconds.
+#
+# Measured on the serial console (timestamped, virtio root, KVM): the
+# compile costs ~6-8s for all 7 ptypes on an otherwise idle host, i.e.
+# ~1s per file.  It is not free, and it is paid on every single boot, so
+# the loop below is gated on a stamp; see the comment there.
 
 TTDB=/usr/dt/bin/rpc.ttdbserver
 TTC=/usr/dt/bin/tt_type_comp
@@ -31,18 +34,54 @@ case "${1:-start}" in
             "$TTDB" > /var/log/ttdbserver.log 2>&1 &
             echo $! > "$PIDFILE"
         fi
-        # Compile the CDE ptypes into the ToolTalk type DB.  tt_type_comp -m
-        # merges idempotently, so re-running each boot is cheap (a few
-        # seconds total) and avoids depending on the DB's on-disk path.
+        # Compile the CDE ptypes into the ToolTalk type DB.
+        #
+        # MEASURED (timestamped serial, virtio root, KVM, idle host): 7
+        # ptypes (9 files less the 2 dtinfo ones) cost ~6-8s in total, and
+        # were being recompiled on every single boot.  With the gate below a
+        # warm boot spends ~1s here instead.
+        #
+        # The merge is idempotent and the DB persists in $TTPATH (types.xdr),
+        # so re-doing it every boot is pure waste after the first.  Gate on a
+        # stamp recording which ptypes were compiled.
+        #
+        # Deliberately kept SYNCHRONOUS rather than backgrounded: 60-sdm
+        # consumes these types, so a background compile would race it and
+        # trade a slower boot for intermittent "Cannot communicate with the
+        # session manager".
+        #
+        # The stamp lives INSIDE $TTPATH so that removing the type DB also
+        # removes the stamp and forces a recompile, and a CDE update that
+        # adds or renames a ptype changes the list and forces one too.
+        #
+        # NOTE for anyone chasing boot time here: under heavy host CPU
+        # contention this phase can appear to take 90s+.  That is the host,
+        # not ToolTalk -- measured directly, cold is ~6-8s across snapshot /
+        # no-snapshot, with and without the USB+AHCI+AC97 device set, and at
+        # both 2G and 8G (the 32-bit kernel caps at ~2047 MiB either way).
+        # Do not infer a per-file timeout from a wall-clock measurement taken
+        # on a loaded machine.
+        #
+        # First boot still pays the ~6-8s; taking that to zero needs the
+        # compiled DB baked into the image at build time, and tt_type_comp is
+        # a target binary, so that would need a run under emulation.
         if [ -x "$TTC" ]; then
-            ( unset DISPLAY
-              export HOME=/root TTPATH="$TTPATH"
-              mkdir -p "$TTPATH"
-              for f in /usr/dt/appconfig/tttypes/*.ptype; do
-                  # dtinfo*.ptype use #include and don't compile; skip them.
-                  case "$f" in *dtinfo*) continue ;; esac
-                  "$TTC" -sd user -m "$f" > /dev/null 2>&1
-              done )
+            ptypes=$(cd /usr/dt/appconfig/tttypes 2>/dev/null &&
+                     ls *.ptype 2>/dev/null | grep -v dtinfo | sort |
+                     tr '\n' ' ')
+            stamp="$TTPATH/.substrate-ptypes"
+            if [ -n "$ptypes" ] &&
+               [ "$ptypes" != "$(cat "$stamp" 2>/dev/null)" ]; then
+                ( unset DISPLAY
+                  export HOME=/root TTPATH="$TTPATH"
+                  mkdir -p "$TTPATH"
+                  for f in /usr/dt/appconfig/tttypes/*.ptype; do
+                      # dtinfo*.ptype use #include and don't compile; skip them.
+                      case "$f" in *dtinfo*) continue ;; esac
+                      "$TTC" -sd user -m "$f" > /dev/null 2>&1
+                  done )
+                mkdir -p "$TTPATH" && printf '%s\n' "$ptypes" > "$stamp"
+            fi
         fi
         ;;
     stop)

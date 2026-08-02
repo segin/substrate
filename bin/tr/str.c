@@ -30,19 +30,18 @@
  * SUCH DAMAGE.
  */
 
-#include <sys/types.h>
-
 #include <assert.h>
+#include <ctype.h>
 #include <errno.h>
 #include <limits.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <ctype.h>
-#include <err.h>
 
+#include "err.h"
 #include "extern.h"
+#include <sys/types.h>
 
 static int	backslash(STR *);
 static int	bracket(STR *);

@@ -4,12 +4,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
 #include <unistd.h>
 
 #include "ls_print.h"
 #include "ls_sort.h"
 #include "ls_traverse.h"
+#include <sys/stat.h>
 
 #ifndef ELOOP
 #define ELOOP 40

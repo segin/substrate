@@ -28,11 +28,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
-#include <sys/types.h>
 #include <unistd.h>
 
 #include "tail.h"
+#include <sys/stat.h>
+#include <sys/types.h>
 
 /* -------------------------------------------------------------------------
  * Header emission (same POSIX rule as head: no leading NL before first).

@@ -2,17 +2,17 @@
 #include <stdint.h>
 #include <string.h>
 
+#include <arch/i386/syscall.h>
+#include <exec/perso/compat.h>
+#include <exec/perso/freebsd/freebsd_syscalls.h>
+#include <exec/perso/freebsd/freebsd_user.h>
+#include <exec/perso/perso_ipc_sem.h>
+#include <exec/perso/perso_ipc_shm.h>
+#include <exec/perso/personality.h>
+#include <kern/version.h>
 #include <sys/copy.h>
 #include <sys/kern_syscalls.h>
 #include <sys/syscall_impl.h>
-#include <kern/version.h>
-#include <arch/i386/syscall.h>
-#include <exec/perso/compat.h>
-#include <exec/perso/personality.h>
-#include <exec/perso/perso_ipc_sem.h>
-#include <exec/perso/perso_ipc_shm.h>
-#include <exec/perso/freebsd/freebsd_syscalls.h>
-#include <exec/perso/freebsd/freebsd_user.h>
 
 static void *freebsd_syscalls[MAX_SYSCALLS] = {
     [FREEBSD_SYS_semget]   = (void *)&freebsd_sys_semget,
@@ -28,7 +28,7 @@ static void *freebsd_syscalls[MAX_SYSCALLS] = {
     [FREEBSD_SYS_write]    = &sys_write,
     [FREEBSD_SYS_open]     = (void *)&freebsd_sys_open,
     [FREEBSD_SYS_close]    = &sys_close,
-    [FREEBSD_SYS_wait4]    = &sys_wait4,
+    [FREEBSD_SYS_wait4]    = (void *)&freebsd_sys_wait4,
     [FREEBSD_SYS_link]     = &sys_link,
     [FREEBSD_SYS_unlink]   = &sys_unlink,
     [FREEBSD_SYS_chdir]    = &sys_chdir,
@@ -41,7 +41,7 @@ static void *freebsd_syscalls[MAX_SYSCALLS] = {
     [FREEBSD_SYS_lchown]   = (void *)&sys_lchown,             /* 254  no follow */
     [FREEBSD_SYS_lchmod]   = (void *)&freebsd_sys_lchmod,     /* 274  no follow */
     [FREEBSD_SYS_break]    = (void *)&sys_brk,
-    [FREEBSD_SYS_lseek]    = (void *)&freebsd_sys_lseek,
+    [FREEBSD_SYS_lseek]    = (void *)&freebsd_sys_olseek,  /* syscall 19: ancient 3-arg 32-bit lseek */
     [FREEBSD_SYS_getpid]   = &sys_getpid,
     [FREEBSD_SYS_mount]    = &sys_mount,
     /* FreeBSD unmount(2) is (path, flags); use the 2-arg native form. */
@@ -57,12 +57,12 @@ static void *freebsd_syscalls[MAX_SYSCALLS] = {
     [FREEBSD_SYS_getsockname] = &sys_getsockname,
     [FREEBSD_SYS_access]   = &sys_access,
     [FREEBSD_SYS_sync]     = &sys_sync,
-    [FREEBSD_SYS_kill]     = &sys_kill,
+    [FREEBSD_SYS_kill]     = (void *)&freebsd_sys_kill,
     [FREEBSD_SYS_stat]     = (void *)&freebsd_sys_ostat,    /* 38: pre-FreeBSD-5 ostat */
     [FREEBSD_SYS_getppid]  = &sys_getppid,
     [FREEBSD_SYS_lstat]    = (void *)&freebsd_sys_olstat,   /* 40: pre-FreeBSD-5 ostat */
     [FREEBSD_SYS_dup]      = &sys_dup,
-    [FREEBSD_SYS_pipe]     = (void *)&sys_pipe,
+    [FREEBSD_SYS_pipe]     = (void *)&freebsd_sys_pipe,
     [FREEBSD_SYS_getegid]  = &sys_getegid,
     [FREEBSD_SYS_profil]   = &sys_profil,
     [FREEBSD_SYS_getgid]   = &sys_getgid,
@@ -87,7 +87,7 @@ static void *freebsd_syscalls[MAX_SYSCALLS] = {
     [FREEBSD_SYS_getpgrp]  = &sys_getpgrp,
     [FREEBSD_SYS_setpgid]  = &sys_setpgid,
     [FREEBSD_SYS_setitimer] = &sys_setitimer,
-    [FREEBSD_SYS_getitimer] = &sys_getitimer,
+    [FREEBSD_SYS_getitimer] = (void *)&freebsd_sys_getitimer,
     [FREEBSD_SYS_getdtablesize] = &sys_getdtablesize,
     [FREEBSD_SYS_dup2_new] = &sys_dup2,
     /* FreeBSD pipe2 — translates FreeBSD's O_CLOEXEC / O_NONBLOCK
@@ -103,8 +103,8 @@ static void *freebsd_syscalls[MAX_SYSCALLS] = {
     [FREEBSD_SYS_bind]     = &sys_bind,
     [FREEBSD_SYS_setsockopt] = &sys_setsockopt,
     [FREEBSD_SYS_listen]   = &sys_listen,
-    [FREEBSD_SYS_gettimeofday] = &sys_gettimeofday,
-    [FREEBSD_SYS_getrusage] = &sys_getrusage,
+    [FREEBSD_SYS_gettimeofday] = (void *)&freebsd_sys_gettimeofday,
+    [FREEBSD_SYS_getrusage] = (void *)&freebsd_sys_getrusage,
     [FREEBSD_SYS_getsockopt] = &sys_getsockopt,
     [FREEBSD_SYS_readv]    = &sys_readv,
     [FREEBSD_SYS_writev]   = &sys_writev,
@@ -131,16 +131,16 @@ static void *freebsd_syscalls[MAX_SYSCALLS] = {
     [FREEBSD_SYS_nanosleep] = &sys_nanosleep,
     [FREEBSD_SYS_clock_nanosleep] = &sys_clock_nanosleep,
     [FREEBSD_SYS_issetugid] = &sys_issetugid,
-    [FREEBSD_SYS_sigprocmask] = &sys_sigprocmask,
-    [FREEBSD_SYS_sigsuspend] = &sys_sigsuspend,
-    [FREEBSD_SYS_sigpending] = &sys_sigpending,
+    [FREEBSD_SYS_sigprocmask] = (void *)&freebsd_sys_sigprocmask,
+    [FREEBSD_SYS_sigsuspend] = (void *)&freebsd_sys_sigsuspend,
+    [FREEBSD_SYS_sigpending] = (void *)&freebsd_sys_sigpending,
     [FREEBSD_SYS_sigwaitinfo] = &sys_sigwaitinfo,
     [FREEBSD_SYS___getcwd] = (void *)&sys_getcwd,
     [FREEBSD_SYS_sigaction] = (void *)&freebsd_sys_sigaction,
     [FREEBSD_SYS_sigreturn] = (void *)&freebsd_sys_sigreturn,
     [FREEBSD_SYS_thr_exit] = (void *)&freebsd_sys_thr_exit,
     [FREEBSD_SYS_thr_self] = (void *)&freebsd_sys_thr_self,
-    [FREEBSD_SYS_thr_kill] = &sys_thr_kill,
+    [FREEBSD_SYS_thr_kill] = (void *)&freebsd_sys_thr_kill,
     [FREEBSD_SYS_thr_wake] = (void *)&sys_thr_wake,
     [FREEBSD_SYS_thr_suspend] = (void *)&sys_thr_suspend,
     [FREEBSD_SYS_rtprio_thread] = (void *)&freebsd_sys_rtprio_thread,
@@ -214,6 +214,7 @@ static void *freebsd_syscalls[MAX_SYSCALLS] = {
     [FREEBSD_SYS_setregid]       = (void *)&sys_setregid,
     [FREEBSD_SYS_setegid]        = (void *)&sys_setegid,
     [FREEBSD_SYS_seteuid]        = (void *)&sys_seteuid,
+    [FREEBSD_SYS_setresuid]      = (void *)&sys_setresuid,
     [FREEBSD_SYS_setresgid]      = (void *)&sys_setresgid,
     [FREEBSD_SYS_getresuid]      = (void *)&sys_getresuid,
     [FREEBSD_SYS_getresgid]      = (void *)&sys_getresgid,
@@ -453,7 +454,7 @@ static struct syscall_fmt freebsd_fmts[MAX_SYSCALLS] = {
     [FREEBSD_SYS_fchmod] = { 2, { ARG_INT, ARG_INT } },
     [FREEBSD_SYS_lchown] = { 3, { ARG_STR, ARG_INT, ARG_INT } },
     [FREEBSD_SYS_lchmod] = { 2, { ARG_STR, ARG_INT } },
-    [FREEBSD_SYS_lseek]  = { 5, { ARG_INT, ARG_INT, ARG_LONG, ARG_INT } },
+    [FREEBSD_SYS_lseek]  = { 3, { ARG_INT, ARG_LONG, ARG_INT } },
     [FREEBSD_SYS_mount]  = { 5, { ARG_STR, ARG_STR, ARG_STR, ARG_HEX, ARG_PTR } },
     [FREEBSD_SYS_umount] = { 2, { ARG_STR, ARG_HEX } },
     [FREEBSD_SYS_setuid] = { 1, { ARG_INT } },

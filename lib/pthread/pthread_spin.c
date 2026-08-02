@@ -10,8 +10,8 @@
  * Other pthread functions live in pthread_create.c, pthread_mutex.c,
  * pthread_cond.c, pthread_extra.c, pthread_barrier.c, pthread_atfork.c.
  */
-#include "pthread.h"
 #include <errno.h>
+#include <pthread.h>
 #include <sched.h>
 
 int pthread_spin_init(pthread_spinlock_t *lock, int pshared) {

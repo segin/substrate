@@ -1,11 +1,11 @@
 include ../../Makefile.inc
 
 ifeq ($(NATIVE_BUILD),1)
-MATH_CFLAGS = $(CFLAGS) -I../../include
+MATH_CFLAGS = $(CFLAGS) -I../../include -Isrc
 PIC_MATH_CFLAGS = $(MATH_CFLAGS)
 else
-MATH_CFLAGS     = $(USER_CFLAGS)  -fno-builtin
-PIC_MATH_CFLAGS = $(SHLIB_CFLAGS) -fno-builtin
+MATH_CFLAGS     = $(USER_CFLAGS) -fno-builtin -Isrc
+PIC_MATH_CFLAGS = $(SHLIB_CFLAGS) -fno-builtin -Isrc
 endif
 
 SRCS = src/math_exp.c src/math_trig.c src/math_rem_pio2.c src/math_special.c \

@@ -11,6 +11,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <kern/console.h>
 #include <sys/copy.h>
 #include <sys/errno.h>
 #include <sys/fcntl.h>
@@ -20,7 +21,6 @@
 #include <sys/tests.h>
 #include <sys/types.h>
 #include <vfs/vfs.h>
-#include <kern/console.h>
 
 /* Policy configuration */
 static int kmem_allow_read = 1;   /* Allow reading by default (if privileged) */

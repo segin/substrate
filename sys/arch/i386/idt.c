@@ -183,6 +183,13 @@ void idt_init(void) {
     idt_set_gate(TLB_SHOOTDOWN_VECTOR, (uint32_t)(uintptr_t)isr254,
                  KERNEL_CODE_SELECTOR, IDT_FLAG_KERNEL_INT_GATE);
 
+    /* [USB-HW-03] LAPIC spurious-interrupt vector.  lapic_enable(0xFF) puts
+     * 0xFF in the SVR on the BSP and on every AP, but nothing ever installed
+     * a gate for it, so the entry stayed not-present and a spurious interrupt
+     * raised #GP.  See isr_spurious in isr.S for why it does not EOI. */
+    idt_set_gate(LAPIC_SPURIOUS_VECTOR, (uint32_t)(uintptr_t)isr_spurious,
+                 KERNEL_CODE_SELECTOR, IDT_FLAG_KERNEL_INT_GATE);
+
     /* Dynamic (MSI/MSI-X) vectors 0x50..0xBF: install a gate per vector so
      * LAPIC-delivered messages reach isr_handler, which routes them to
      * irq_dispatch() + a LAPIC EOI. */
@@ -504,6 +511,26 @@ void isr_handler(registers_t *regs) {
         }
 
         char buf[256];
+
+        /*
+         * [USB-HW-03] Only the USER-mode path prints this block.
+         *
+         * It is ~6 separate kprint() calls with no arbitration between them.
+         * A kernel-mode fault then printed it AND called panic_with_regs(),
+         * which prints strictly more of the same thing -- so two CPUs
+         * faulting together produced two register sets woven line-by-line
+         * into each other, which is exactly the unreadable hardware dump
+         * this bug is reported from ("EXCEPTION: Unhandled Kernel
+         * ExceptionPage Fault" is this header interleaved with the panic
+         * header).  Serialising panic() alone did not fix it because this
+         * block runs BEFORE panic() is entered.
+         *
+         * For a kernel fault we now go straight to panic_with_regs(), which
+         * is arbitrated per-CPU and emits one coherent dump.
+         */
+        if (!is_usermode)
+            goto kernel_fault;
+
         kprint("\nEXCEPTION: ");
         if (regs->int_no < 32) {
             kprint(exception_messages[regs->int_no]);
@@ -527,7 +554,9 @@ void isr_handler(registers_t *regs) {
             kprint("Instruction bytes at EIP: ");
             uint8_t *eip_ptr = (uint8_t *)regs->eip;
             /* Dump up to 16 bytes if address is valid */
-            if (regs->eip >= 0xC0000000 || !is_usermode) {
+            /* [USB-HW-03 lead (c)] in-range is not mapped; see
+             * panic_addr_readable(). */
+            if (panic_addr_readable((uintptr_t)regs->eip, 16)) {
                 for (int i = 0; i < 16; i++) {
                     snprintf(buf, sizeof(buf), "%02X ", (unsigned int)eip_ptr[i]);
                     kprint(buf);
@@ -542,6 +571,7 @@ void isr_handler(registers_t *regs) {
             kprint(buf);
         }
         
+kernel_fault:
         if (is_usermode) {
             // User-mode crash - kill the process
             kprint("Killing user process.\n\n");

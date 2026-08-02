@@ -16,8 +16,9 @@
 #define ANSI_RESPONSE_DSR_OK "\x1b[0n"
 #define ANSI_RESPONSE_DSR_OK_LEN 4
 
-#include <kern/ansi_handler.h>
 #include <stdio.h>
+
+#include <kern/ansi_handler.h>
 
 static void ansi_respond(const struct ansi_callbacks *cb,
                          const char *buf,

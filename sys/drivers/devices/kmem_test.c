@@ -7,12 +7,13 @@
  * for regression testing of /dev/kmem.
  */
 
-#include <sys/types.h>
-#include <sys/sysctl.h>
-#include <vm/vm_kmem.h>
-#include <kern/console.h>
-#include <string.h>
 #include <stdio.h>
+#include <string.h>
+
+#include <kern/console.h>
+#include <sys/sysctl.h>
+#include <sys/types.h>
+#include <vm/vm_kmem.h>
 
 static void *kmem_test_buffer = NULL;
 static int kmem_test_size = 4096;

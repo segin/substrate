@@ -1,5 +1,3 @@
-#include "demangle_internal.h"
-
 #include <ctype.h>
 #include <stdarg.h>
 #include <stdint.h>
@@ -8,6 +6,7 @@
 #include <string.h>
 
 #include <demangle.h>
+#include <demangle_internal.h>
 
 #define DM_SUBST_INITIAL_CAP 256u
 #define DM_TEMPLATE_STACK_INITIAL_CAP 64u

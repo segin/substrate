@@ -1,12 +1,11 @@
-#include "rmdir_parents.h"
-
 #include <errno.h>
 #include <fcntl.h>
-#include <stdlib.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
+#include "rmdir_parents.h"
 #include <sys/stat.h>
 
 static char *

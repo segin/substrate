@@ -7,15 +7,16 @@
  *
  *   wall [file]
  */
+#include <errno.h>
+#include <fcntl.h>
+#include <pwd.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <errno.h>
-#include <unistd.h>
-#include <fcntl.h>
 #include <time.h>
-#include <pwd.h>
-#include <utmp.h>
+#include <unistd.h>
+
+#include "utmp.h"
 #include <sys/types.h>
 
 /* Collect the message into `buf` (NUL-terminated); return its length. */

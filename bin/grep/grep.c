@@ -8,16 +8,16 @@
  *
  * Requirement IDs (REQ-GREP-*) are in docs/specs/grep-spec.md.
  */
-#include "grep.h"
-
 #include <dirent.h>
 #include <errno.h>
 #include <fnmatch.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
 #include <unistd.h>
+
+#include "grep.h"
+#include <sys/stat.h>
 
 #define COLOR_START "\033[01;31m\033[K"
 #define COLOR_END   "\033[m\033[K"

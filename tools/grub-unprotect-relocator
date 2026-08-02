@@ -1,0 +1,134 @@
+#!/usr/bin/env python3
+"""grub-unprotect-relocator — make GRUB's EFI relocator survive its own W^X.
+
+The bug
+-------
+GRUB boots a multiboot kernel through the "relocator": a thunk in
+grub-core/lib/i386/relocator*.S that drops to the kernel's entry point with
+the architected register state.  That state is passed in variables which
+relocator32.S defines *between* grub_relocator32_start and
+grub_relocator32_end -- i.e. inside .text:
+
+    $ readelf -sW /usr/lib/grub/x86_64-efi/relocator.mod | grep relocator32
+       12: 0000000000000848  OBJECT GLOBAL DEFAULT  1 grub_relocator32_eax
+       14: 00000000000007a0  OBJECT GLOBAL DEFAULT  1 grub_relocator32_start
+       40: 0000000000000890  OBJECT GLOBAL DEFAULT  1 grub_relocator32_end
+                                                    ^ section 1 = .text (AX)
+
+grub_relocator32_boot() assigns those variables and only then copies the
+whole block to the scratch chunk it will jump through.  On BIOS nothing
+objects.  On EFI, GRUB 2.12+ enforces W^X on the modules it loads: .text
+carries SHF_EXECINSTR without SHF_WRITE, so the dynamic loader maps it
+read-only and executable.  GRUB's own store into .text then faults, and the
+firmware dies before the kernel is entered at all:
+
+    !!!! X64 Exception Type - 0E(#PF - Page-Fault) ...
+    ExceptionData - 0000000000000003   I:0 R:0 U:0 W:1 P:1
+    RAX - 0000000036D76289   <- MULTIBOOT2_BOOTLOADER_MAGIC, mid-store
+    CR0 - 0000000080010033   <- WP set
+    CR2 - ...848             <- exactly grub_relocator32_eax
+    R14 - ...7A0             <- exactly grub_relocator32_start
+
+The fault address's low bits identify the variable outright, which is how
+this was pinned down: it is GRUB writing to GRUB, not anything the loaded
+kernel did.
+
+The workaround
+--------------
+Add SHF_WRITE to the relocator module's .text so GRUB's loader maps it
+writable, restoring the behaviour the relocator was written against.  This
+only relaxes GRUB's own protection of its own code during the last moments
+before the handoff; nothing about the booted kernel changes.
+
+Operating on a *copy* of the module tree keeps the system GRUB untouched --
+point grub-mkimage at the patched directory with -d.
+
+The real fix belongs upstream in GRUB (put the relocator's state in .data,
+not .text).  When a GRUB that does that ships, this step becomes a no-op
+worth deleting.
+"""
+
+import argparse
+import struct
+import sys
+
+SHF_WRITE = 0x1
+
+
+def patch(path, section):
+    with open(path, "rb") as f:
+        elf = bytearray(f.read())
+
+    if elf[:4] != b"\x7fELF":
+        sys.exit(f"grub-unprotect-relocator: {path}: not an ELF file")
+
+    is64 = elf[4] == 2
+    if is64:
+        e_shoff, = struct.unpack_from("<Q", elf, 0x28)
+        e_shentsize, = struct.unpack_from("<H", elf, 0x3A)
+        e_shnum, = struct.unpack_from("<H", elf, 0x3C)
+        e_shstrndx, = struct.unpack_from("<H", elf, 0x3E)
+        flags_off, name_off_in_hdr = 0x08, 0x00
+        str_off_field = 0x18
+    else:
+        e_shoff, = struct.unpack_from("<I", elf, 0x20)
+        e_shentsize, = struct.unpack_from("<H", elf, 0x2E)
+        e_shnum, = struct.unpack_from("<H", elf, 0x30)
+        e_shstrndx, = struct.unpack_from("<H", elf, 0x32)
+        flags_off, name_off_in_hdr = 0x08, 0x00
+        str_off_field = 0x10
+
+    def hdr(i):
+        return e_shoff + i * e_shentsize
+
+    if is64:
+        strtab, = struct.unpack_from("<Q", elf, hdr(e_shstrndx) + str_off_field)
+    else:
+        strtab, = struct.unpack_from("<I", elf, hdr(e_shstrndx) + str_off_field)
+
+    want = section.encode()
+    for i in range(e_shnum):
+        h = hdr(i)
+        nameoff, = struct.unpack_from("<I", elf, h + name_off_in_hdr)
+        end = elf.index(b"\0", strtab + nameoff)
+        if elf[strtab + nameoff:end] != want:
+            continue
+
+        if is64:
+            flags, = struct.unpack_from("<Q", elf, h + flags_off)
+        else:
+            flags, = struct.unpack_from("<I", elf, h + flags_off)
+
+        if flags & SHF_WRITE:
+            print(f"grub-unprotect-relocator: {path}: {section} already "
+                  f"writable")
+            return
+
+        new = flags | SHF_WRITE
+        if is64:
+            struct.pack_into("<Q", elf, h + flags_off, new)
+        else:
+            struct.pack_into("<I", elf, h + flags_off, new)
+
+        with open(path, "wb") as f:
+            f.write(elf)
+        print(f"grub-unprotect-relocator: {path}: {section} sh_flags "
+              f"0x{flags:x} -> 0x{new:x} (+SHF_WRITE)")
+        return
+
+    sys.exit(f"grub-unprotect-relocator: {path}: no section named {section}")
+
+
+def main():
+    ap = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("module", help="relocator.mod to patch, in place")
+    ap.add_argument("--section", default=".text",
+                    help="section to make writable (default .text)")
+    args = ap.parse_args()
+    patch(args.module, args.section)
+
+
+if __name__ == "__main__":
+    main()

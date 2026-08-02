@@ -6,30 +6,55 @@
  * Outbound IPv4 frames look up the cache via arp_lookup; on miss the
  * caller issues an arp_request() and may retry.
  *
- * Cache is a small fixed table per netdev — 32 entries, LRU by
- * insertion order.  No timeouts in this first cut; an entry stays
- * until evicted.  Fine for SLIRP/LAN test scenarios.
+ * Cache is a small fixed table per netdev — 32 entries.  Entries carry a
+ * last-touched timestamp: lookups treat an entry older than ARP_TTL_MS as
+ * stale, and eviction takes the least-recently-used slot (ARP-01).
  */
 
+#include <stddef.h>
+#include <string.h>
+
+#include <kern/console.h>
+#include <kern/time.h>
 #include <net/inet.h>
-#include <sys/netdev.h>
 #include <netinet/if_arp.h>
 #include <netinet/ip.h>
-#include <kern/console.h>
 #include <sys/lock.h>
-#include <string.h>
-#include <stddef.h>
+#include <sys/netdev.h>
 
 #define ARP_CACHE_SIZE 32
+
+/*
+ * ARP-01: entries used to be evicted by a blind round-robin cursor with no
+ * aging, no timeout and no in-use protection, so 32 forged requests
+ * addressed to our IP with distinct sender addresses evicted everything
+ * including the gateway -- and because ip4_output cannot wait for ARP in IRQ
+ * context, every transmit from the RX path then failed -EHOSTUNREACH.  The
+ * converse was just as bad: an entry never expired, so a peer that changed
+ * MAC was unreachable forever.
+ *
+ * A timestamp per entry fixes both halves: a stale entry is ignored on
+ * lookup (and so gets re-resolved), and eviction picks the oldest entry
+ * rather than the next slot in line, which makes an entry in active use far
+ * harder to displace than one an attacker just injected.
+ */
+#define ARP_TTL_MS (5u * 60u * 1000u)   /* 5 minutes, as on BSD */
 
 struct arp_entry {
     uint32_t ip;             /* network byte order; 0 = unused */
     uint8_t  mac[6];
     uint32_t ifindex;
+    uint64_t touched_ms;     /* 0 = unused; last insert/refresh */
 };
 
 static struct arp_entry g_arp_cache[ARP_CACHE_SIZE];
-static unsigned          g_arp_next;   /* LRU pointer */
+
+static uint64_t arp_now_ms(void) { return (uint64_t)get_uptime_ms(); }
+
+static int arp_entry_fresh(const struct arp_entry *e, uint64_t now) {
+    if (e->touched_ms == 0) return 0;
+    return (now - e->touched_ms) < ARP_TTL_MS;
+}
 
 /* NET-09: the cache is written by arp_input() in IRQ/RX context and read
  * by arp_lookup() in process context; guard it with an IRQ-safe spinlock
@@ -41,10 +66,15 @@ static spinlock_t g_arp_lock = SPINLOCK_INIT("arp_cache");
 
 int arp_lookup(netdev_t *dev, uint32_t ip, uint8_t mac[6]) {
     if (!dev) return -1;
+    uint64_t now = arp_now_ms();
     unsigned long f = spinlock_acquire_irq(&g_arp_lock);   /* NET-09 */
     for (unsigned i = 0; i < ARP_CACHE_SIZE; i++) {
         struct arp_entry *e = &g_arp_cache[i];
         if (e->ip == ip && e->ifindex == dev->ifindex) {
+            /* ARP-01: an expired binding must not be handed out — the peer
+             * may have changed MAC.  Report a miss so the caller
+             * re-resolves; the slot is reclaimed by the next insert. */
+            if (!arp_entry_fresh(e, now)) break;
             memcpy(mac, e->mac, 6);
             spinlock_release_irq(&g_arp_lock, f);
             return 0;
@@ -66,6 +96,7 @@ static int arp_update_existing(netdev_t *dev, uint32_t ip,
         struct arp_entry *e = &g_arp_cache[i];
         if (e->ip == ip && e->ifindex == dev->ifindex) {
             memcpy(e->mac, mac, 6);
+            e->touched_ms = arp_now_ms();
             return 1;
         }
     }
@@ -77,11 +108,23 @@ static void arp_insert_raw(netdev_t *dev, uint32_t ip, const uint8_t mac[6]) {
     if (!dev || !ip) return;
     /* Update if already present. */
     if (arp_update_existing(dev, ip, mac)) return;
-    struct arp_entry *slot = &g_arp_cache[g_arp_next % ARP_CACHE_SIZE];
-    g_arp_next++;
+
+    /* ARP-01: take a free or expired slot first; only if every slot holds a
+     * live binding do we evict, and then the oldest one rather than whatever
+     * the round-robin cursor happened to point at. */
+    uint64_t now = arp_now_ms();
+    struct arp_entry *slot = NULL;
+    for (unsigned i = 0; i < ARP_CACHE_SIZE; i++) {
+        struct arp_entry *e = &g_arp_cache[i];
+        if (e->ip == 0 || !arp_entry_fresh(e, now)) { slot = e; break; }
+        if (!slot || e->touched_ms < slot->touched_ms) slot = e;
+    }
+    if (!slot) slot = &g_arp_cache[0];   /* unreachable; keeps the compiler happy */
+
     slot->ip = ip;
     slot->ifindex = dev->ifindex;
     memcpy(slot->mac, mac, 6);
+    slot->touched_ms = now;
 }
 
 void arp_insert(netdev_t *dev, uint32_t ip, const uint8_t mac[6]) {
@@ -125,8 +168,14 @@ void arp_input(netdev_t *dev, const uint8_t *pkt, size_t len) {
 
     /*
      * Anti-poisoning (RFC 826 "merge" rule): do NOT blindly insert the
-     * sender into the cache — an off-path host could otherwise overwrite
-     * any (or fill the whole) cache with a forged unsolicited reply.
+     * sender into the cache — an off-path host could otherwise fill the
+     * whole cache with forged unsolicited replies.  Note precisely what
+     * this does and does not buy (ARP-02): only CREATION is restricted.
+     * Per the RFC merge rule an existing binding is refreshed by ANY ARP
+     * packet naming it, request or reply, solicited or not, so a
+     * gratuitous ARP from an on-link host can still repoint an entry we
+     * already hold.  That is inherent to RFC 826 and is not claimed to be
+     * prevented here.
      *
      *   - Always update an entry we already hold (a host whose MAC we are
      *     already tracking is allowed to refresh it).

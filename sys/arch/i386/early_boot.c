@@ -1,4 +1,5 @@
 #include <stdint.h>
+
 #include <arch/i386/early_boot.h>
 
 /* Hex digit lookup */

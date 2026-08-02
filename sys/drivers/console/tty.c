@@ -1,19 +1,20 @@
-#include <sys/tty.h>
+#include <stdio.h>
+#include <string.h>
+
+#include <intr.h>
+#include <kern/console.h>
+#include <kern/sched.h>
+#include <kern/time.h>
+#include <sys/errno.h>
+#include <sys/major.h>
+#include <sys/param.h>
+#include <sys/poll.h>
 #include <sys/proc.h>
 #include <sys/session.h>
 #include <sys/signal.h>
-#include <sys/major.h>
+#include <sys/tty.h>
 #include <vfs/vfs.h>
-#include <string.h>
-#include <stdio.h>
 #include <vm/vm_kmem.h>
-#include <kern/sched.h>
-#include <kern/time.h>
-#include <sys/poll.h>
-#include <sys/errno.h>
-#include <sys/param.h>
-#include <kern/console.h>
-#include <intr.h>
 
 #define TTY_MAGIC 0x5401
 

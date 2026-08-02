@@ -1,8 +1,9 @@
-#include "util.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+
+#include "util.h"
 
 /* Upper bound on a single read_stream_all() result (script / stdin size). */
 #define READ_STREAM_MAX (64u * 1024 * 1024)
