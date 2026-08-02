@@ -642,13 +642,19 @@ search --no-floppy --label $ROOT_LABEL --set=subroot
 
 # One function per handoff protocol so each menu entry is a single line and
 # the option list is impossible to get out of step between BIOS and UEFI.
+# Every menu entry boots the root read-only.  The kernel's own default is
+# read-write -- a direct-kernel boot that passes nothing still comes up rw --
+# but a GRUB boot is the one that has a chance to run e2fsck before anything
+# has written to the filesystem, so "ro" belongs here rather than in the
+# kernel.  Bring it up read-write afterwards with:
+#     mount -o remount,rw /
 function substrate_boot {
     set root=\$subroot
-    echo "Loading /vmunix from $ROOT_LABEL \$*"
+    echo "Loading /vmunix from $ROOT_LABEL ro \$*"
     if [ "\$grub_platform" = "efi" ]; then
-        multiboot2 /vmunix root=LABEL=$ROOT_LABEL \$*
+        multiboot2 /vmunix root=LABEL=$ROOT_LABEL ro \$*
     else
-        multiboot /vmunix root=LABEL=$ROOT_LABEL \$*
+        multiboot /vmunix root=LABEL=$ROOT_LABEL ro \$*
     fi
     boot
 }

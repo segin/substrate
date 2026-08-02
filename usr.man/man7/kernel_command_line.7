@@ -235,6 +235,35 @@ These exist because the paths they control touch state that only real firmware
 sets up, and cannot be exercised under emulation.
 A machine that one of them wedges has to stay bootable.
 .TP
+.B ro
+Mount the root filesystem read-only.
+The kernel's own default is read-write, so a direct kernel boot that says
+nothing comes up writable; every GRUB menu entry passes
+.B ro
+explicitly, because a bootloader boot is the one that can run
+.BR e2fsck (8)
+before anything has written to the filesystem.
+Bring it up read-write once the check passes:
+.PP
+.RS
+.EX
+mount \-o remount,rw /
+.EE
+.RE
+.PP
+.RS
+ext2 honours this at mount time \(em writes are refused with
+.B EROFS
+\(em and refuses a read-write remount outright if the volume was flagged
+unsafe, so a filesystem needing repair cannot be quietly written to.
+.RE
+.TP
+.B rw
+Mount the root filesystem read-write.
+This is the default and the option exists to override a
+.B ro
+inherited from a GRUB entry when editing the command line at the menu.
+.TP
 .B nousbhandoff
 Skip the USB Legacy Support BIOS-to-OS handoff on both xHCI and EHCI.
 Normally the kernel claims each controller from SMM before resetting it, since
