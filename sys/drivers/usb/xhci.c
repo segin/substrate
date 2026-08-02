@@ -1134,11 +1134,26 @@ static int xhci_pci_attach(struct device *dev)
         phys64 |= (uint64_t)bar1 << 32;
     }
     if (phys64 >> 32) {
-        /* Nothing this kernel can do with it: the direct map is 32-bit. */
-        kprintf("xhci: BAR0 at 0x%x%08x is above 4 GiB and unreachable "
-                "from a 32-bit kernel\n",
+        /*
+         * Above 4 GiB and unmappable here, so move it.  Firmware is free to
+         * put a 64-bit BAR anywhere, and UEFI on a large-memory machine does
+         * exactly that; nothing else has claimed the controller yet, so
+         * reassigning it into the PCI hole is safe at this point.
+         */
+        kprintf("xhci: BAR0 at 0x%x%08x is above 4 GiB; relocating\n",
                 (unsigned)(phys64 >> 32), (unsigned)(uint32_t)phys64);
-        return -1;
+        if (pci_relocate_bar32(pdev, 0) != 0) {
+            kprintf("xhci: cannot bring BAR0 below 4 GiB; giving up\n");
+            return -1;
+        }
+        bar0 = pci_read_config32(pdev->bus, pdev->slot, pdev->func, 0x10);
+        phys64 = (uint64_t)(bar0 & ~0xFUL);
+        if (bt == PCI_BAR_MEM64) {
+            uint32_t hi = pci_read_config32(pdev->bus, pdev->slot, pdev->func, 0x14);
+            phys64 |= (uint64_t)hi << 32;
+        }
+        if (phys64 >> 32)
+            return -1;
     }
     uintptr_t phys = (uintptr_t)phys64;
 

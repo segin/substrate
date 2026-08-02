@@ -85,6 +85,17 @@ int pci_hotplug_remove(pci_device_t *dev);
 void pci_scan(void);
 pci_device_t *pci_find_device(uint16_t vendor_id, uint16_t device_id, pci_device_t *from);
 pci_device_t *pci_find_device_by_kdev(struct device *kdev);
+/*
+ * 32-bit MMIO allocation.
+ *
+ * A 64-bit BAR may be placed anywhere in the 64-bit address space, and UEFI
+ * firmware on a large-memory machine routinely puts one above 4 GiB.  A
+ * 32-bit kernel cannot map that, so the BAR has to be reassigned into the
+ * PCI hole before the driver touches it.
+ */
+uint32_t pci_alloc_mmio32(uint64_t size, uint64_t align);
+int pci_relocate_bar32(pci_device_t *dev, int bar);
+
 pci_device_t *pci_first_device(void);
 pci_device_t *pci_next_device(pci_device_t *dev);
 size_t pci_dump_devices(char *buf, size_t size);
