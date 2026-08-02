@@ -601,6 +601,20 @@ if [ "$DEBUG" -eq 1 ]; then
     echo "    connect: gdb -ex 'symbol-file $SYMFILE' -ex 'target remote :$GDBPORT'"
 fi
 
+# Serial console.  Always mirrored to a file, because the interesting output is
+# routinely the output you cannot read: a triple fault reboots the machine, and
+# the firmware and GRUB2 that come up next emit ANSI clear/reset sequences that
+# wipe the panic text out of the terminal scrollback before it can be read.  A
+# logfile is not subject to somebody else's escape codes.
+#
+# The chardev keeps stdio interactive (signal=off so ^C still reaches qemu
+# rather than the guest), and logfile= captures the same stream.  $SERIALLOG
+# overrides the path; the default is timestamped so consecutive runs do not
+# clobber each other.
+SERIALLOG=${SERIALLOG:-serial-$(date +%Y%m%d-%H%M%S).log}
+SERIAL_ARGS="-chardev stdio,id=serial0,logfile=$SERIALLOG,signal=off -serial chardev:serial0"
+echo "run-networking.sh: serial console mirrored to $SERIALLOG (override with \$SERIALLOG)"
+
 # Find the rootfs image. Decompress rootfs.img.zst in place if only the
 # compressed form exists; a present rootfs.img takes precedence.
 if [ -f rootfs.img ]; then
@@ -740,5 +754,5 @@ esac
   $NETDEV_ARGS \
   $GFX_ARGS \
   $DEBUG_ARGS \
-  -serial stdio \
+  $SERIAL_ARGS \
   $AUDIO_ARGS
