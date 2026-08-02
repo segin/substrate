@@ -962,8 +962,26 @@ static int xhci_start(xhci_hc_t *hc)
 
     XHCI_STEP("starting controller");
     wr32(hc->op, XHCI_OP_USBCMD, XHCI_CMD_RUN);
-    for (int i = 0; i < 100 && (rd32(hc->op, XHCI_OP_USBSTS) & XHCI_STS_HCH); i++)
-        xhci_delay_ms(1);
+    /*
+     * Setting RUN only requests the start; HCH clearing is the controller
+     * reporting it actually left the halted state.  This used to announce
+     * "controller running" whether or not that ever happened, so a controller
+     * that never started looked identical to one that did -- and every command
+     * issued afterwards then timed out with no completion event at all
+     * ("enable slot failed (cc=0)").  FreeBSD fails the attach here with a
+     * "Run timeout" (sys/dev/usb/controller/xhci.c); do the same.
+     */
+    {
+        int i;
+        for (i = 0; i < 100 && (rd32(hc->op, XHCI_OP_USBSTS) & XHCI_STS_HCH); i++)
+            xhci_delay_ms(1);
+        if (rd32(hc->op, XHCI_OP_USBSTS) & XHCI_STS_HCH) {
+            wr32(hc->op, XHCI_OP_USBCMD, 0);
+            kprintf("xhci: run timeout (still halted, usbsts=0x%x)\n",
+                    (unsigned)rd32(hc->op, XHCI_OP_USBSTS));
+            return -1;
+        }
+    }
     XHCI_STEP("controller running");
     return 0;
 }
@@ -1071,7 +1089,23 @@ static int xhci_pci_attach(struct device *dev)
      * has to stay bootable.
      */
     xhci_power_ports(hc);
-    if (!cmdline_has("noxhciroute")) {
+
+    /*
+     * Opt-in, not opt-out.  On a Lenovo C460 (Lynx Point) the XUSB2PR write
+     * wedges the machine dead under a legacy BIOS boot -- the trace stops on
+     * the line announcing it and "USB2 ports routed" never prints.  That is
+     * with the bare four-access sequence both BSDs use, before the controller
+     * and after it, so no sequencing avoids it; the machine survives the same
+     * write under UEFI, which points at the firmware's legacy USB emulation
+     * servicing it in SMM rather than at anything the driver does.
+     *
+     * Nothing is lost by leaving the ports alone: they stay with the EHCI,
+     * which drives them perfectly well.  The reroute only decides which
+     * controller owns a USB2 port, not whether it works.  A wedged machine is
+     * a far worse outcome than a USB2 device on the companion, so it takes an
+     * explicit "xhciroute" to ask for it.
+     */
+    if (cmdline_has("xhciroute")) {
         xhci_intel_port_switch(pdev);
         xhci_power_ports(hc);
     }

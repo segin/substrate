@@ -242,17 +242,33 @@ firmware that emulates a PS/2 keyboard from a USB one keeps driving the same
 registers otherwise.
 Use this if claiming the controller is itself what hangs the boot.
 .TP
-.B noxhciroute
-Skip the Intel port reroute.
+.B xhciroute
+Perform the Intel port reroute, which is otherwise
+.I not
+done.
 On Intel PCHs the shared USB2 ports come out of reset wired to the companion
-EHCI, and the kernel moves them to the xHCI so devices on them are visible.
-Use this to determine whether the reroute is what a boot failure depends on,
-or to leave the ports with the EHCI deliberately.
+EHCI; this moves them to the xHCI.
+It is opt-in because the
+.B XUSB2PR
+write wedges some machines outright \(em on a Lenovo C460 under a legacy BIOS
+boot the kernel stops dead on it, while the identical write survives under
+UEFI, which implicates the firmware's legacy USB emulation handling it in SMM.
+Leaving the ports with the EHCI costs nothing: the reroute decides only which
+controller owns a USB2 port, not whether the port works.
+Enable it if you want USB2 devices driven by the xHCI and your firmware
+tolerates the switch.
 .TP
 .B noehci
 Do not attach the EHCI driver at all.
-On a PCH where the reroute has already moved every USB2 port to the xHCI this
-costs nothing \(em the controller has no ports left to drive.
+Since the reroute is opt-in, the USB2 ports normally stay with the companion
+EHCI, so this makes every device on them \(em including a root filesystem on a
+USB stick \(em invisible.
+Combining it with a boot that does not also pass
+.B xhciroute
+is how you get a kernel that panics for want of a root device.
+It costs nothing only when
+.B xhciroute
+has moved every USB2 port to the xHCI.
 .TP
 .B xhcidebug
 Trace xHCI bring-up: controller reset, ring allocation, run, and port power.

@@ -671,12 +671,20 @@ menuentry "Substrate (USB bring-up trace)" {
     substrate_boot xhcidebug ehcidebug
 }
 
-menuentry "Substrate (USB quirks disabled)" {
-    substrate_boot noehci noxhciroute nousbhandoff
+menuentry "Substrate (no USB BIOS handoff)" {
+    substrate_boot nousbhandoff
 }
 
-menuentry "Substrate (USB quirks disabled + trace)" {
-    substrate_boot noehci noxhciroute nousbhandoff xhcidebug ehcidebug
+menuentry "Substrate (no USB BIOS handoff + trace)" {
+    substrate_boot nousbhandoff xhcidebug ehcidebug
+}
+
+# The Intel USB2 reroute is opt-in: it wedges a C460 on legacy BIOS at the
+# XUSB2PR write.  Without it the USB2 ports stay on the companion EHCI, which
+# drives them fine -- so never pair xhciroute with noehci, or a root
+# filesystem on a USB stick disappears and the kernel panics.
+menuentry "Substrate (Intel USB2 reroute + trace)" {
+    substrate_boot xhciroute xhcidebug ehcidebug
 }
 
 EOF
