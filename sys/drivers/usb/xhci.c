@@ -1049,15 +1049,21 @@ static int xhci_start(xhci_hc_t *hc)
     for (int i = 0; i < 100 && (rd32(hc->op, XHCI_OP_USBSTS) & XHCI_STS_HCH); i++)
         xhci_delay_ms(1);
     XHCI_STEP("controller running");
+    return 0;
+}
 
-    /* Power all ports. */
+/*
+ * Assert PP on every port.  Idempotent, and run a second time after the
+ * Intel reroute so that ports which only just became ours get powered too.
+ */
+static void xhci_power_ports(xhci_hc_t *hc)
+{
     for (uint8_t p = 1; p <= hc->nports; p++) {
         uint32_t psc = portsc_rd(hc, p) & ~XHCI_PORT_CHANGE_MASK;
         portsc_wr(hc, p, psc | XHCI_PORT_PP);
     }
     xhci_delay_ms(20);
     XHCI_STEP("ports powered");
-    return 0;
 }
 
 /*
@@ -1124,20 +1130,34 @@ static int xhci_pci_attach(struct device *dev)
     mutex_init(&hc->submit_lock, "xhci_submit");
 
     /*
-     * Both have to happen before the controller is reset and its ports are
-     * powered: one settles who owns the controller, the other decides which
-     * ports it owns.  Each is separately defeatable from the kernel command
-     * line — they poke firmware-owned state that cannot be exercised under
-     * emulation, so a machine they wedge has to stay bootable.
+     * The BIOS handoff has to come first: it settles who owns the controller,
+     * and we must own it before we reset it.
      */
     if (!cmdline_has("nousbhandoff"))
         xhci_take_controller(hc);
-    if (!cmdline_has("noxhciroute"))
-        xhci_intel_port_switch(pdev);
 
     if (xhci_start(hc) != 0) {
         xhci_teardown(hc);
         return -1;
+    }
+
+    /*
+     * Only now hand the USB2 ports over.  Rerouting them while the controller
+     * is halted wedges Lynx Point: the write lands on a controller that is not
+     * running, and the machine stops on the subsequent USBCMD.RUN.  FreeBSD
+     * reroutes at the very end of xhci_start_controller() for the same reason
+     * (sys/dev/usb/controller/xhci.c, after the run-timeout loop), so do it
+     * here, once the controller is confirmed out of HCH.  Ports that only just
+     * became ours have not been powered yet, hence the second PP pass.
+     *
+     * Separately defeatable from the command line: it pokes firmware-owned
+     * state that cannot be exercised under emulation, so a machine it wedges
+     * has to stay bootable.
+     */
+    xhci_power_ports(hc);
+    if (!cmdline_has("noxhciroute")) {
+        xhci_intel_port_switch(pdev);
+        xhci_power_ports(hc);
     }
 
     snprintf(hc->name, sizeof(hc->name), "xhci%u", xhci_instances);
