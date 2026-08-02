@@ -495,6 +495,38 @@ static uint8_t xhci_slot_for(xhci_hc_t *hc, usb_transfer_t *xfer)
 
 /* Ensure a bulk/interrupt endpoint's transfer ring + context exist (lazy
  * Configure Endpoint), then return its DCI. */
+/*
+ * Endpoint service interval, xHCI encoding (spec 6.2.3.6).
+ *
+ * The controller polls a periodic endpoint only as often as its Interval
+ * field says; leaving the field at zero is not "poll as fast as possible",
+ * it is an out-of-range value for a full-speed interrupt endpoint, and the
+ * reports simply never arrive.  A keyboard then enumerates perfectly and
+ * types nothing -- which is exactly how this presented.
+ *
+ * The units differ by speed.  Low/full speed report bInterval in 1 ms
+ * frames, and xHCI wants a 125 us exponent, valid range 3..10.  High and
+ * super speed already report an exponent (1..16), so it is bInterval-1.
+ * Bulk and control endpoints are asynchronous and take 0.
+ */
+static uint32_t xhci_ep_interval(const usb_device_t *dev, const usb_endpoint_t *ep)
+{
+    uint8_t bi;
+    uint32_t iv;
+
+    if (!ep || ep->type != USB_EP_TYPE_INTERRUPT)
+        return 0;
+
+    bi = ep->interval ? ep->interval : 1;
+    if (!dev || dev->speed == USB_SPEED_LOW || dev->speed == USB_SPEED_FULL) {
+        for (iv = 3; iv < 10 && (1u << (iv - 3)) < bi; iv++)
+            ;
+        return iv;
+    }
+    iv = (uint32_t)bi - 1u;
+    return iv > 15u ? 15u : iv;
+}
+
 static int xhci_ensure_ep(xhci_hc_t *hc, uint8_t slot, usb_transfer_t *xfer)
 {
     uint8_t epaddr = xfer->ep->address;
@@ -544,6 +576,11 @@ static int xhci_ensure_ep(xhci_hc_t *hc, uint8_t slot, usb_transfer_t *xfer)
         epc[2] = (uint32_t)s->stream_ctx_dma[dci];
         epc[3] = (uint32_t)((uint64_t)s->stream_ctx_dma[dci] >> 32);
     } else {
+        /* Write DW0 rather than inheriting it: the input context is reused
+         * across Configure Endpoint commands, so a previously-streamed DCI
+         * would leave MaxPStreams/LSA set and the controller would read the
+         * TR-dequeue field below as a stream-context-array base. */
+        epc[0] = xhci_ep_interval(xfer->dev, xfer->ep) << XHCI_EP_INTERVAL_SHIFT;
         epc[2] = (uint32_t)s->ep_ring[dci].dma | s->ep_ring[dci].cycle;
         epc[3] = (uint32_t)((uint64_t)s->ep_ring[dci].dma >> 32);
     }

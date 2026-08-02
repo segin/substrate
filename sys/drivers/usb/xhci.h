@@ -200,6 +200,7 @@ struct xhci_ep_ctx {
 #define XHCI_EP_STATE_MASK   0x7
 /* EP context field[0] stream fields */
 #define XHCI_EP_MAXPSTREAMS_SHIFT 10          /* MaxPStreams (array = 2^(k+1)) */
+#define XHCI_EP_INTERVAL_SHIFT 16             /* EP context DW0 bits 23:16 */
 #define XHCI_EP_LSA          (1u << 15)       /* Linear Stream Array */
 /* Stream context (16B): qwSctx0 = DCS(bit0) | SCT(bits1-3) | TR_DQ_PTR */
 #define XHCI_SCTX_SCT_PRIM_TR (1u << 1)       /* SCT = primary transfer ring */
