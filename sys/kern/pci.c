@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <arch/i386/pmm.h>
 #include <kern/console.h>
 #include <kern/device.h>
 #include <kern/driver.h>
@@ -377,7 +378,15 @@ size_t pci_bar_size(pci_device_t *dev, int bar) {
  * APIC, none of which appear as BARs and none of which may be overlapped.
  */
 #define PCI_MMIO32_TOP    0xFEC00000U
-#define PCI_MMIO32_FLOOR  0xC0000000U   /* only if no 32-bit BAR exists */
+/*
+ * Floor when no 32-bit BAR exists to infer the hole from -- which is what
+ * UEFI leaves when it places every 64-bit-capable BAR high.  This is not a
+ * guess: PMM_PHYS_RAM_CAP is the ceiling on physical RAM the kernel will
+ * manage, deliberately set at 3 GiB rather than chasing the last fraction
+ * below the PCI hole, so nothing at or above it is ever memory.  The two
+ * constants are the same number by design; see the comment on the cap.
+ */
+#define PCI_MMIO32_FLOOR  ((uint32_t)PMM_PHYS_RAM_CAP)
 #define PCI_MMIO32_GRAIN  0x00100000U   /* keep assignments 1 MiB-tidy */
 
 static uint32_t pci_mmio32_next;
@@ -434,19 +443,8 @@ static void pci_mmio32_init(void) {
         }
     }
 
-    if (top < PCI_MMIO32_FLOOR) {
-        /*
-         * No 32-bit memory BAR anywhere, so there is nothing to infer the
-         * hole from -- UEFI that places every 64-bit-capable BAR high leaves
-         * us in exactly this state.  The floor is a convention, not a fact:
-         * on a machine whose low RAM extends past it this would hand out
-         * addresses over memory.  Say so, so a bad assignment is traceable
-         * rather than mysterious.
-         */
-        kprintf("pci: no 32-bit MMIO BAR to anchor the hole; "
-                "assuming it starts at 0x%x\n", PCI_MMIO32_FLOOR);
+    if (top < PCI_MMIO32_FLOOR)
         top = PCI_MMIO32_FLOOR;
-    }
     top = (top + (PCI_MMIO32_GRAIN - 1)) & ~(uint64_t)(PCI_MMIO32_GRAIN - 1);
     pci_mmio32_next = (uint32_t)top;
 }

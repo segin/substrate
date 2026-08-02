@@ -38,6 +38,22 @@
 #define PMM_DIRECTMAP_PHYS_LIMIT \
         ((uint32_t)(SIG_TRAMPOLINE_ADDR - PMM_PHYS_VIRT_BASE))
 
+/*
+ * Ceiling on physical RAM this kernel will manage.
+ *
+ * Not an approximation of what the hardware has: it is a deliberate cap.
+ * Almost nothing hands a 32-bit machine the full 3.125 GiB that could
+ * theoretically sit below the PCI hole, and chasing the last fraction buys
+ * nothing, so 3 GiB is the line.
+ *
+ * It is exported because it is now load-bearing outside the PMM.  The PCI
+ * layer allocates 32-bit MMIO windows for BARs that firmware placed above
+ * 4 GiB, and it needs a floor it can hand out from without landing on RAM.
+ * That floor is exactly this cap -- RAM never reaches it, by construction --
+ * so the two must stay the same number.  See pci_alloc_mmio32().
+ */
+#define PMM_PHYS_RAM_CAP 0xC0000000ULL
+
 typedef uint32_t phys_addr_t;
 
 /* Iterator callback for memory regions */
