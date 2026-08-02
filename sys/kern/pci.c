@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <arch/i386/pmm.h>
 #include <kern/console.h>
 #include <kern/device.h>
 #include <kern/driver.h>
@@ -359,6 +360,172 @@ size_t pci_bar_size(pci_device_t *dev, int bar) {
     }
 
     return (size_t)(~(mask_low & ~0xFU) + 1U);
+}
+
+/* ---- 32-bit MMIO allocation -------------------------------------------
+ *
+ * Firmware assigns BARs; the kernel normally just reads them.  The exception
+ * is a 64-bit BAR placed above 4 GiB, which a 32-bit kernel has no way to
+ * map -- UEFI on a large-memory guest does this to the xHCI controller, and
+ * the driver then mapped whatever the low dword aliased.  Such a BAR has to
+ * be moved into the 32-bit PCI hole before anyone touches the device.
+ *
+ * The window is derived from the BARs firmware already placed rather than
+ * from a memory map: everything it assigned below 4 GiB is by definition in
+ * the PCI hole, so allocating above the highest such BAR is both inside MMIO
+ * space and free of collisions, without needing to know where RAM ends.  The
+ * top bound is the IOAPIC -- 0xFEC00000 and up is the IOAPIC, HPET and local
+ * APIC, none of which appear as BARs and none of which may be overlapped.
+ */
+#define PCI_MMIO32_TOP    0xFEC00000U
+/*
+ * Floor when no 32-bit BAR exists to infer the hole from -- which is what
+ * UEFI leaves when it places every 64-bit-capable BAR high.  This is not a
+ * guess: PMM_PHYS_RAM_CAP is the ceiling on physical RAM the kernel will
+ * manage, deliberately set at 3 GiB rather than chasing the last fraction
+ * below the PCI hole, so nothing at or above it is ever memory.  The two
+ * constants are the same number by design; see the comment on the cap.
+ */
+#define PCI_MMIO32_FLOOR  ((uint32_t)PMM_PHYS_RAM_CAP)
+#define PCI_MMIO32_GRAIN  0x00100000U   /* keep assignments 1 MiB-tidy */
+
+static uint32_t pci_mmio32_next;
+static int      pci_mmio32_ready;
+
+/* Base of a memory BAR as firmware left it, full width.  Returns 0 for an
+ * unassigned or non-memory BAR; *is64 says whether it consumed two slots. */
+static uint64_t pci_bar_base64(pci_device_t *dev, int bar, int *is64) {
+    int type = pci_bar_type(dev, bar);
+    uint32_t lo;
+    uint64_t base;
+
+    if (is64) *is64 = 0;
+    if (type != PCI_BAR_MEM32 && type != PCI_BAR_MEM64)
+        return 0;
+
+    lo = pci_read_config32(dev->bus, dev->slot, dev->func,
+                           (uint16_t)(0x10 + bar * 4));
+    base = (uint64_t)(lo & ~0xFU);
+    if (type == PCI_BAR_MEM64 && bar + 1 < PCI_BAR_COUNT) {
+        base |= (uint64_t)pci_read_config32(dev->bus, dev->slot, dev->func,
+                                            (uint16_t)(0x10 + (bar + 1) * 4)) << 32;
+        if (is64) *is64 = 1;
+    }
+    return base;
+}
+
+static void pci_mmio32_init(void) {
+    pci_device_t *dev;
+    uint64_t top = 0;
+
+    if (pci_mmio32_ready)
+        return;
+    pci_mmio32_ready = 1;
+
+    for (dev = pci_first_device(); dev != NULL; dev = pci_next_device(dev)) {
+        int bar;
+        for (bar = 0; bar < PCI_BAR_COUNT; bar++) {
+            int is64 = 0;
+            uint64_t base = pci_bar_base64(dev, bar, &is64);
+            uint64_t end;
+            size_t size;
+
+            if (base != 0 && (base >> 32) == 0) {
+                size = pci_bar_size(dev, bar);
+                if (size != 0) {
+                    end = base + (uint64_t)size;
+                    if (end <= PCI_MMIO32_TOP && end > top)
+                        top = end;
+                }
+            }
+            if (is64)
+                bar++;              /* upper half is not a BAR of its own */
+        }
+    }
+
+    if (top < PCI_MMIO32_FLOOR)
+        top = PCI_MMIO32_FLOOR;
+    top = (top + (PCI_MMIO32_GRAIN - 1)) & ~(uint64_t)(PCI_MMIO32_GRAIN - 1);
+    pci_mmio32_next = (uint32_t)top;
+}
+
+uint32_t pci_alloc_mmio32(uint64_t size, uint64_t align) {
+    uint64_t base;
+
+    if (size == 0)
+        return 0;
+    pci_mmio32_init();
+
+    /* PCI requires a BAR to be naturally aligned to its own size. */
+    if (align < size)
+        align = size;
+    if (align < 0x1000U)
+        align = 0x1000U;
+
+    base = ((uint64_t)pci_mmio32_next + (align - 1)) & ~(align - 1);
+    if (base + size > PCI_MMIO32_TOP) {
+        kprintf("pci: no 32-bit MMIO space left for a %u-byte window "
+                "(next=0x%x, top=0x%x)\n",
+                (unsigned)size, (unsigned)pci_mmio32_next, PCI_MMIO32_TOP);
+        return 0;
+    }
+    pci_mmio32_next = (uint32_t)(base + size);
+    return (uint32_t)base;
+}
+
+int pci_relocate_bar32(pci_device_t *dev, int bar) {
+    uint16_t off, cmd;
+    uint32_t lo, newbase, readback;
+    uint64_t size;
+    int type;
+
+    if (dev == NULL || bar < 0 || bar >= PCI_BAR_COUNT)
+        return -1;
+    type = pci_bar_type(dev, bar);
+    if (type != PCI_BAR_MEM32 && type != PCI_BAR_MEM64)
+        return -1;
+
+    size = (uint64_t)pci_bar_size(dev, bar);
+    if (size == 0)
+        return -1;
+
+    newbase = pci_alloc_mmio32(size, size);
+    if (newbase == 0)
+        return -1;
+
+    off = (uint16_t)(0x10 + bar * 4);
+    lo  = pci_read_config32(dev->bus, dev->slot, dev->func, off);
+
+    /*
+     * Stop the device decoding while the address is in flux -- a half-written
+     * 64-bit BAR briefly names an address that belongs to something else.
+     */
+    cmd = pci_read_config16(dev->bus, dev->slot, dev->func, PCI_CONFIG_COMMAND);
+    pci_write_config16(dev->bus, dev->slot, dev->func, PCI_CONFIG_COMMAND,
+                       (uint16_t)(cmd & ~0x0002U));
+
+    if (type == PCI_BAR_MEM64 && bar + 1 < PCI_BAR_COUNT)
+        pci_write_config32(dev->bus, dev->slot, dev->func,
+                           (uint16_t)(off + 4), 0);
+    pci_write_config32(dev->bus, dev->slot, dev->func, off,
+                       newbase | (lo & 0xFU));
+
+    pci_write_config16(dev->bus, dev->slot, dev->func, PCI_CONFIG_COMMAND, cmd);
+
+    /* Confirm the device actually took it: a BAR can be read-only. */
+    readback = pci_read_config32(dev->bus, dev->slot, dev->func, off) & ~0xFU;
+    if (readback != newbase) {
+        kprintf("pci: %02x:%02x.%u BAR%d would not move to 0x%x "
+                "(reads back 0x%x)\n",
+                dev->bus, dev->slot, dev->func, bar,
+                (unsigned)newbase, (unsigned)readback);
+        return -1;
+    }
+
+    kprintf("pci: %02x:%02x.%u BAR%d relocated below 4 GiB to 0x%x "
+            "(%u KiB)\n", dev->bus, dev->slot, dev->func, bar,
+            (unsigned)newbase, (unsigned)(size / 1024));
+    return 0;
 }
 
 int pci_request_region(pci_device_t *dev, int bar, const char *name) {

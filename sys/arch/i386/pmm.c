@@ -37,7 +37,6 @@ static vm_page_t pmm_page_array_static[PMM_STATIC_METADATA_BLOCKS];
 #define PMM_MAX_BOOT_REGIONS 16
 #define PMM_BOOTSTRAP_LOWMEM_LIMIT (8U * 1024U * 1024U)
 #define PMM_CONSTRAINED_RAM_LIMIT (4U * 1024U * 1024U)
-#define PMM_PHYS_RAM_CAP 0xC0000000ULL
 
 typedef struct pmm_region {
     phys_addr_t start;

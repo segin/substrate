@@ -35,6 +35,12 @@
 #define XHCI_MAX_SLOTS     16
 #define XHCI_BOUNCE_SIZE   (64 * 1024)
 #define XHCI_CMD_TIMEOUT_MS 1000
+/* Reset-path waits.  Generous rather than tight: a controller handed over by
+ * UEFI firmware with transfers in flight takes noticeably longer to quiesce
+ * than one nothing has touched. */
+#define XHCI_CNR_WAIT_MS    1000
+#define XHCI_HALT_WAIT_MS   1000
+#define XHCI_RESET_WAIT_MS  1000
 /* Bulk streams (USB 3.0 / UAS): MaxPStreams=1 -> 4 stream contexts, IDs 0-3
  * (0 reserved).  A stream-less serial UAS uses stream ID 1. */
 #define XHCI_MAXP_STREAMS  1
@@ -931,21 +937,63 @@ static void xhci_intel_port_switch(pci_device_t *pdev)
     }
 }
 
+/*
+ * Reset the controller into a known state.
+ *
+ * Ordering matters and is not optional: HCRST may only be asserted while
+ * HCHalted is set (xHCI 5.4.1).  Writing it to a running controller is
+ * undefined, and on a firmware-initialised part it simply never completes --
+ * which is exactly how this failed.  UEFI runs its own xHCI driver so the
+ * boot keyboard works in the firmware menus, and hands the controller over
+ * still running; the old code cleared RUN, waited a fixed 100 ms without
+ * checking the result, then asserted HCRST regardless.  The reset timed out,
+ * xhci_pci_attach gave up, and the machine had no USB at all -- while the
+ * same image booted from a legacy BIOS, where nothing had touched the
+ * controller, reset cleanly and worked.
+ *
+ * Every wait now has a real bound and says what it saw, because "reset
+ * timeout" on its own does not distinguish "never halted" from "halted but
+ * the reset bit never cleared", and those have different causes.
+ */
 static int xhci_reset(xhci_hc_t *hc)
 {
-    /* wait CNR clear */
-    for (int i = 0; i < 100 && (rd32(hc->op, XHCI_OP_USBSTS) & XHCI_STS_CNR); i++)
+    int i;
+
+    /* Controller Not Ready: the part is still bringing itself up. */
+    for (i = 0; i < XHCI_CNR_WAIT_MS &&
+                (rd32(hc->op, XHCI_OP_USBSTS) & XHCI_STS_CNR); i++)
         xhci_delay_ms(1);
+    if (rd32(hc->op, XHCI_OP_USBSTS) & XHCI_STS_CNR) {
+        kprintf("xhci: controller not ready after %d ms (usbsts=0x%x)\n",
+                XHCI_CNR_WAIT_MS, (unsigned)rd32(hc->op, XHCI_OP_USBSTS));
+        return -1;
+    }
+
+    /* Stop it, and confirm it stopped before touching HCRST. */
     wr32(hc->op, XHCI_OP_USBCMD, rd32(hc->op, XHCI_OP_USBCMD) & ~XHCI_CMD_RUN);
-    for (int i = 0; i < 100 && !(rd32(hc->op, XHCI_OP_USBSTS) & XHCI_STS_HCH); i++)
+    for (i = 0; i < XHCI_HALT_WAIT_MS &&
+                !(rd32(hc->op, XHCI_OP_USBSTS) & XHCI_STS_HCH); i++)
         xhci_delay_ms(1);
+    if (!(rd32(hc->op, XHCI_OP_USBSTS) & XHCI_STS_HCH)) {
+        kprintf("xhci: will not halt after %d ms "
+                "(usbcmd=0x%x usbsts=0x%x); not asserting HCRST\n",
+                XHCI_HALT_WAIT_MS,
+                (unsigned)rd32(hc->op, XHCI_OP_USBCMD),
+                (unsigned)rd32(hc->op, XHCI_OP_USBSTS));
+        return -1;
+    }
+
     wr32(hc->op, XHCI_OP_USBCMD, XHCI_CMD_HCRST);
-    for (int i = 0; i < 500; i++) {
+    for (i = 0; i < XHCI_RESET_WAIT_MS; i++) {
         if (!(rd32(hc->op, XHCI_OP_USBCMD) & XHCI_CMD_HCRST) &&
             !(rd32(hc->op, XHCI_OP_USBSTS) & XHCI_STS_CNR))
             return 0;
         xhci_delay_ms(1);
     }
+    kprintf("xhci: reset did not complete in %d ms "
+            "(usbcmd=0x%x usbsts=0x%x)\n", XHCI_RESET_WAIT_MS,
+            (unsigned)rd32(hc->op, XHCI_OP_USBCMD),
+            (unsigned)rd32(hc->op, XHCI_OP_USBSTS));
     return -1;
 }
 
@@ -1070,7 +1118,44 @@ static int xhci_pci_attach(struct device *dev)
     int bt = pci_bar_type(pdev, 0);
     if (bt != PCI_BAR_MEM32 && bt != PCI_BAR_MEM64) return -1;
     uint32_t bar0 = pci_read_config32(pdev->bus, pdev->slot, pdev->func, 0x10);
-    uintptr_t phys = bar0 & ~0xFUL;
+    /*
+     * A 64-bit BAR is two dwords, and the upper one was being ignored: the
+     * type check above accepts PCI_BAR_MEM64 but only 0x10 was ever read.
+     * A legacy BIOS assigns this controller a low address, so the upper dword
+     * is zero and the bug is invisible -- but UEFI firmware on a large-memory
+     * guest is free to place it above 4 GiB, and then we mapped whatever the
+     * low half happened to alias.  The symptom was a controller whose reset
+     * never completed and whose USBSTS came back with reserved bits set,
+     * i.e. not that controller's registers at all.
+     */
+    uint64_t phys64 = (uint64_t)(bar0 & ~0xFUL);
+    if (bt == PCI_BAR_MEM64) {
+        uint32_t bar1 = pci_read_config32(pdev->bus, pdev->slot, pdev->func, 0x14);
+        phys64 |= (uint64_t)bar1 << 32;
+    }
+    if (phys64 >> 32) {
+        /*
+         * Above 4 GiB and unmappable here, so move it.  Firmware is free to
+         * put a 64-bit BAR anywhere, and UEFI on a large-memory machine does
+         * exactly that; nothing else has claimed the controller yet, so
+         * reassigning it into the PCI hole is safe at this point.
+         */
+        kprintf("xhci: BAR0 at 0x%x%08x is above 4 GiB; relocating\n",
+                (unsigned)(phys64 >> 32), (unsigned)(uint32_t)phys64);
+        if (pci_relocate_bar32(pdev, 0) != 0) {
+            kprintf("xhci: cannot bring BAR0 below 4 GiB; giving up\n");
+            return -1;
+        }
+        bar0 = pci_read_config32(pdev->bus, pdev->slot, pdev->func, 0x10);
+        phys64 = (uint64_t)(bar0 & ~0xFUL);
+        if (bt == PCI_BAR_MEM64) {
+            uint32_t hi = pci_read_config32(pdev->bus, pdev->slot, pdev->func, 0x14);
+            phys64 |= (uint64_t)hi << 32;
+        }
+        if (phys64 >> 32)
+            return -1;
+    }
+    uintptr_t phys = (uintptr_t)phys64;
 
     uint16_t cmd = pci_read_config16(pdev->bus, pdev->slot, pdev->func, PCI_CONFIG_COMMAND);
     pci_write_config16(pdev->bus, pdev->slot, pdev->func, PCI_CONFIG_COMMAND,
