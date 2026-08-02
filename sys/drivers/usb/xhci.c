@@ -889,9 +889,17 @@ static void xhci_release_companion_ehci(void)
         uint32_t bar0, hcc;
         uint8_t off;
 
-        /* class 0x0C, subclass 0x03, prog-if 0x20 = EHCI */
-        if ((d->class_code >> 8) != 0x000C03u || (d->class_code & 0xFF) != 0x20)
-            continue;
+        /*
+         * pci_device_t.class_code is (class << 8) | subclass and carries NO
+         * prog-if (sys/kern/pci.c:166), so the interface byte has to come from
+         * config space.  Matching on a 24-bit class here made this whole walk
+         * dead code -- it never selected a single device, which is why no
+         * "releasing companion EHCI" line ever appeared.
+         */
+        if (d->class_code != 0x0C03u)
+            continue;                        /* not a USB controller */
+        if (pci_read_config8(d->bus, d->slot, d->func, 0x09) != 0x20)
+            continue;                        /* prog-if 0x20 = EHCI */
 
         bar0 = pci_read_config32(d->bus, d->slot, d->func, 0x10);
         if ((bar0 & 1) || (bar0 & ~0xFUL) == 0)

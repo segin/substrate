@@ -282,6 +282,27 @@ static int ahci_port_start(hba_port_t *port) {
 
     port->cmd |= HBA_PXCMD_FRE;
     port->cmd |= HBA_PXCMD_ST;
+
+    /*
+     * Wait for the HBA to acknowledge that the command engine is running
+     * before anyone issues into it.  Setting ST only *requests* the start;
+     * PxCMD.CR is the HBA saying it has begun fetching from the command list.
+     *
+     * Issuing before that is what made the first command on each port return
+     * nothing on a Lenovo C460: IDENTIFY completed clean (DRDY, no DRQ, no
+     * ERR, PxSERR and PxIS zero) having moved 0 of 512 bytes, while a retry
+     * 50 ms later succeeded and returned the real model and capacity.  The
+     * retry is what identified this as a start-up race rather than anything
+     * about the PIO protocol.
+     */
+    deadline = ahci_time_ms() + 500;
+    while (!(port->cmd & HBA_PXCMD_CR)) {
+        if (ahci_time_ms() > deadline) {
+            kprint("ahci: port start timeout (CR never set)\n");
+            return -1;
+        }
+        __asm__ volatile("pause");
+    }
     return 0;
 }
 
