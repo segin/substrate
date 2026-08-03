@@ -1,0 +1,20 @@
+ttsession: repeat libtt after libstt in the static link
+
+ttsession lists libtt before libstt, but libstt references libtt's API
+and both are static archives on substrate (upstream links libtt shared,
+where order doesn't matter) — so libtt must also follow libstt for the
+single-pass linker to resolve libstt's references.
+
+diff --git a/cde/lib/tt/bin/ttsession/Makefile.am b/cde/lib/tt/bin/ttsession/Makefile.am
+index 226a9468..c1ba622a 100644
+--- a/cde/lib/tt/bin/ttsession/Makefile.am
++++ b/cde/lib/tt/bin/ttsession/Makefile.am
+@@ -7,7 +7,7 @@ bin_PROGRAMS = ttsession
+ 
+ ttsession_CXXFLAGS = -I../../slib -I../../lib $(TT_VERSION_DEFINE)
+ 
+-ttsession_LDADD = $(LIBTT) $(X_LIBS) ../../slib/libstt.a
++ttsession_LDADD = $(LIBTT) $(X_LIBS) ../../slib/libstt.a ../../../../lib/tt/lib/.libs/libtt.a
+ 
+ if LINUX
+ ttsession_LDADD += $(TIRPCLIB) $(XTOOLLIB)

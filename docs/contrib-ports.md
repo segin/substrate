@@ -114,13 +114,17 @@ All build shared + static.  Porting them added the POSIX
 
 ## CDE (Common Desktop Environment)
 
-**CDE** (`contrib/cde/`) is cross-built from the cdesktopenv tree.
-`hosttools/build.sh` builds the build-host programs CDE's
-configure/build need (rpcgen, mksh-as-ksh, compress, sessreg,
-mkfontdir, bdftopcf, onsgmls, tradcpp); `build.sh` assembles a Motif +
-X11 + libXinerama + libXScrnSaver + Tcl + libtirpc sysroot, configures
-`-D__linux__`, host-builds the in-tree generator tools (lineToData,
-mk_fonts_alias), and cross-builds.  Prerequisite ports:
+**CDE** (`contrib/cde/`) is cross-built from the cdesktopenv tree,
+pinned to an exact commit on the `C23-GCC15-Changes` branch (CDE is a
+git repo, not a tarball; the pin replaces SHA verification).  Substrate
+source changes are a `patches/` series applied by `fetch.sh` before
+`autogen.sh`; only *generated* files (config.sub, configure, Makefiles)
+are adjusted by seds.  `hosttools/build.sh` builds the build-host
+programs CDE's configure/build need (rpcgen, mksh-as-ksh, compress,
+sessreg, mkfontdir, bdftopcf, onsgmls, tradcpp); `build.sh` assembles a
+Motif + X11 + libXinerama + libXScrnSaver + Tcl + libtirpc sysroot,
+configures `-D__linux__`, host-builds the in-tree generator tools
+(lineToData, mk_fonts_alias), and cross-builds.  Prerequisite ports:
 **libXScrnSaver** (libXss), **libtirpc** (Sun RPC for ToolTalk),
 **lmdb**, **libjpeg**, **Tcl**, **mksh**.
 
@@ -168,8 +172,11 @@ in qemu, relays stdout/exit over @@IFFE@@-framed serial) — so ksh93's
 FEATURE headers reflect real substrate behavior; needs a baked
 rootfs.img (fresh checkouts: bake, re-run build.sh).
 
-Still deferred: tttypes/types (host tt_type_comp), the rest of
-`localized` (only the C-locale types slice is staged), dthelp parser.
+Still deferred: the tt_type_comp compilation of the ToolTalk type DB
+(the `.ptype` sources themselves ARE staged, and `build.sh` runs the
+pure-GENCPP `.dt`/`.fp` generation in programs/types so the full
+DTTYPES set + dtwm.fp installs), the rest of `localized` (only the
+C-locale types slice is staged), dthelp parser.
 The Motif port (`contrib/motif/`) builds libUil via Motif's WML
 meta-compiler (host wml/wmluiltok) and installs the uil/ headers.
 

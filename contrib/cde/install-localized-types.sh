@@ -62,4 +62,14 @@ done
 # $LANG (en_US.UTF-8), falling back to C.
 ln -sfn C "${DESTDIR}/usr/dt/appconfig/types/en_US.UTF-8"
 
+# ToolTalk process-type SOURCES.  The `tttypes` cluster is deferred (its
+# build compiles the .ptype files with the cross-built tt_type_comp, which
+# can't run here), but the artifacts CDE installs into appconfig/tttypes are
+# the .ptype text files themselves — the runtime type DB is compiled on the
+# target.  Stage them by copy.
+if [ -d "${CDESRC}/programs/tttypes" ]; then
+    mkdir -p "${DESTDIR}/usr/dt/appconfig/tttypes"
+    cp -f "${CDESRC}/programs/tttypes/"*.ptype "${DESTDIR}/usr/dt/appconfig/tttypes/"
+fi
+
 echo "  installed $(ls "${OUT}" 2>/dev/null | wc -l) datatype/action files + dtwm.fp Front Panel"

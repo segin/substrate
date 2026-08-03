@@ -1,0 +1,2 @@
+# CDE substrate patch series — applied with patch -p1 from build/cdesktopenv
+0001-ttsession-link-libtt-after-libstt.patch

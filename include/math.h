@@ -565,8 +565,15 @@ double pow10(double x);
 float pow10f(float x);
 long double pow10l(long double x);
 
-/* Obsolescent: matherr(x) — SVID error hook (no-op stub) */
+/* Obsolescent: matherr(x) — SVID error hook (no-op stub).
+ * In C++ the tag is __exception: `struct exception` at global scope is
+ * ambiguous against std::exception after `using namespace std;` (glibc
+ * made the same rename before dropping the hook altogether). */
+#ifdef __cplusplus
+struct __exception {
+#else
 struct exception {
+#endif
     char   *name;
     char   *arith;
     char   *type;
@@ -574,7 +581,11 @@ struct exception {
     double  arg2;
     double  retval;
 };
+#ifdef __cplusplus
+int matherr(struct __exception *e);
+#else
 int matherr(struct exception *e);
+#endif
 
 #endif /* obsolescent guards */
 
