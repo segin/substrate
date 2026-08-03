@@ -16,6 +16,7 @@
  */
 
 #include <stdio.h>
+#include <arch/i386/pmm.h>
 #include <string.h>
 
 #include <drivers/storage/scsi/scsi.h>
@@ -214,7 +215,23 @@ static int usb_msc_bot_transfer(usb_msc_dev_t *msc, uint8_t lun,
         usb_endpoint_t *data_ep = is_read ? msc->ep_in : msc->ep_out;
         uint32_t remaining = data_len;
         uint8_t *ptr = (uint8_t *)data;
-        int direct = ((uintptr_t)data >= USB_MSC_KERN_BASE);
+        /*
+         * The direct-map test needs both bounds.  Testing only ">= KERN_BASE"
+         * accepts every kernel address, but the direct map stops at
+         * PMM_DIRECTMAP_PHYS_LIMIT -- kernel VAs above that are kmem/vmalloc
+         * mappings whose physical pages are neither contiguous nor at
+         * (va - PMM_PHYS_VIRT_BASE).  Handing one to the HCD gave DMA the
+         * wrong physical address, and touching it here could fault, inside
+         * the msc->lock region.  On a machine whose root filesystem is this
+         * device that fault pages in through the same path and deadlocks on
+         * the lock we already hold: usb_msc_bot_transfer re-entered from
+         * usb_msc_bot_transfer, same thread.
+         *
+         * pmm_virt_is_direct_mapped() is the predicate that was always meant
+         * here; anything else takes the bounce-buffer path, which is correct
+         * for kmem buffers and merely slower.
+         */
+        int direct = pmm_virt_is_direct_mapped((uintptr_t)data);
 
         if (direct) {
             while (remaining > 0) {
