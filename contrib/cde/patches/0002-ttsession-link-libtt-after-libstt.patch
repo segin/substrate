@@ -1,0 +1,18 @@
+diff --git a/lib/tt/bin/ttsession/Makefile.am b/lib/tt/bin/ttsession/Makefile.am
+index 226a9468..4e96a575 100644
+--- a/lib/tt/bin/ttsession/Makefile.am
++++ b/lib/tt/bin/ttsession/Makefile.am
+@@ -7,7 +7,12 @@ bin_PROGRAMS = ttsession
+ 
+ ttsession_CXXFLAGS = -I../../slib -I../../lib $(TT_VERSION_DEFINE)
+ 
+-ttsession_LDADD = $(LIBTT) $(X_LIBS) ../../slib/libstt.a
++# libstt calls back into libtt's API, so libtt has to be available to the
++# linker again after libstt has been scanned.  Upstream gets away with
++# listing it once because it links libtt shared, where the executable's
++# copy interposes; a static libtt (which is what a substrate cross-build
++# produces) leaves the references unresolved.
++ttsession_LDADD = $(LIBTT) $(X_LIBS) ../../slib/libstt.a $(LIBTT)
+ 
+ if LINUX
+ ttsession_LDADD += $(TIRPCLIB) $(XTOOLLIB)

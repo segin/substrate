@@ -1,4 +1,5 @@
-# Host build-tool artifacts — sources, tarballs, and the built prefix.
-# Only build.sh is tracked.
+# Host build-tool artifacts: fetched sources, the built prefix, and the
+# native CDE objdir.  Only build.sh and crossexec.d/ are tracked.
 build/
 prefix/
+cde-host/

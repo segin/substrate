@@ -1,15 +1,31 @@
 #!/bin/sh
 #
-# contrib/cde/hosttools/build.sh — build, from source, the BUILD-HOST programs
-# CDE's configure requires (rpcgen, ksh, compress, sessreg, mkfontdir,
-# bdftopcf, onsgmls) into a self-contained prefix.  These run on the Linux
-# build host during the CDE cross-build; none are installed on substrate.
+# contrib/cde/hosttools/build.sh — build, from source, every program that has
+# to run on the BUILD HOST during CDE's cross-build, into a self-contained
+# prefix.  None of these are installed on substrate; they exist only so the
+# cross-build can complete.
 #
-# CDE's build.sh prepends ${PREFIX}/bin to PATH so configure finds them.
-# Reproducible: every tool is fetched (SHA-256 verified), built and installed;
-# anything already present in the prefix is skipped.  The X apps build against
-# the host's system X protos (xproto/fontsproto/fontenc via pkg-config) plus
-# util-macros built here.
+# Three distinct kinds of tool live here:
+#
+#   1. Plain build dependencies CDE's configure looks for on the host:
+#      rpcgen, ksh, compress, sessreg, mkfontdir, bdftopcf, onsgmls.
+#
+#   2. tradcpp — CDE's own traditional C preprocessor.  CDE builds it and
+#      then RUNS it to expand its *.cpp config templates.  A cross-build
+#      compiles it for the target, where it cannot execute, so it is built
+#      here for the host instead.
+#
+#   3. Generators CDE builds and runs mid-build against its own libraries:
+#      dtcodegen (AppBuilder UI generator), pmaker/dfiles/msgsets (dtinfo),
+#      mkdbd (dtsr), mkcatdefs/merge (message catalogs), tt_type_comp
+#      (ToolTalk type compiler), lineToData, mk_fonts_alias and the dthelp
+#      SGML parser tools.  Several of these link CDE's own libDt*/libtt, so
+#      host copies mean building a whole second, native objdir of the CDE
+#      tree (cde-host/).  build.sh does not copy binaries out of it: it
+#      points CDE's own generator variables at that tree, so each Makefile
+#      picks up the native build of the generator it would have run.
+#
+# Everything is fetched with a SHA-256 check and skipped if already present.
 #
 # Env:  JOBS  parallel jobs (default `nproc`)
 
@@ -18,8 +34,11 @@ set -eu
 HERE="$(cd "$(dirname "$0")" && pwd)"
 WORK="${HERE}/build"
 PREFIX="${HERE}/prefix"
+
 SUBSTRATE_TOP="$(cd "${HERE}/../../.." && pwd)"
+SRC="${HERE}/../build/cdesktopenv/cde"
 : "${JOBS:=$(nproc 2>/dev/null || echo 4)}"
+
 mkdir -p "${WORK}" "${PREFIX}/bin"
 
 export PATH="${PREFIX}/bin:${PATH}"
@@ -36,7 +55,13 @@ get() {
     case "$1" in *.tar.*) tar xf "$1" ;; esac
 }
 
-# --- util-macros: XORG_* m4 macros, build-time dep of the X apps ------------
+[ -d "${SRC}" ] || { echo "hosttools: CDE source tree missing — run cde/fetch.sh first" >&2; exit 1; }
+
+# ===========================================================================
+# 1. Host build dependencies
+# ===========================================================================
+
+# util-macros: the XORG_* m4 macros the X apps below need at autoconf time.
 if [ ! -f "${PREFIX}/share/aclocal/xorg-macros.m4" ]; then
     get util-macros-1.20.2.tar.xz \
         https://www.x.org/releases/individual/util/util-macros-1.20.2.tar.xz \
@@ -45,7 +70,8 @@ if [ ! -f "${PREFIX}/share/aclocal/xorg-macros.m4" ]; then
     echo "==> util-macros ready"
 fi
 
-# --- ksh: build mksh for the host from the contrib/mksh source --------------
+# ksh: CDE's build scripts are ksh scripts.  Reuse contrib/mksh's source and
+# build it for the host.
 if ! have ksh; then
     MK="${SUBSTRATE_TOP}/contrib/mksh/build/mksh"
     [ -d "${MK}" ] || ( cd "${SUBSTRATE_TOP}/contrib/mksh" && ./fetch.sh )
@@ -54,7 +80,7 @@ if ! have ksh; then
     echo "==> ksh (host mksh) ready"
 fi
 
-# --- rpcgen (rpcsvc-proto): ToolTalk RPC stub generator ---------------------
+# rpcgen: ToolTalk's RPC stub generator.
 if ! have rpcgen; then
     get rpcsvc-proto-1.4.4.tar.xz \
         https://github.com/thkukuk/rpcsvc-proto/releases/download/v1.4.4/rpcsvc-proto-1.4.4.tar.xz \
@@ -64,19 +90,20 @@ if ! have rpcgen; then
     echo "==> rpcgen ready"
 fi
 
-# --- compress/uncompress (ncompress) ----------------------------------------
+# compress/uncompress: CDE compresses parts of its help/info data.
 if ! have compress; then
     get ncompress-5.0.tar.gz \
         https://github.com/vapier/ncompress/archive/refs/tags/v5.0.tar.gz \
         96ec931d06ab827fccad377839bfb91955274568392ddecf809e443443aead46
-    # K&R definitions: GCC 15+/C23 rejects them, build as gnu89.
+    # K&R definitions throughout; GCC 15+ defaults to C23 and rejects them.
     ( cd "${WORK}/ncompress-5.0" && make CC="cc -std=gnu89" -j"${JOBS}" >/dev/null )
     cp "${WORK}/ncompress-5.0/compress" "${PREFIX}/bin/compress"
     ln -sf compress "${PREFIX}/bin/uncompress"
     echo "==> compress ready"
 fi
 
-# --- sessreg + mkfontscale (provides mkfontdir) + bdftopcf ------------------
+# sessreg / mkfontdir / bdftopcf: X apps configure probes for.  They build
+# against the host's system X protos via pkg-config.
 if ! have sessreg; then
     get sessreg-1.1.3.tar.xz \
         https://www.x.org/releases/individual/app/sessreg-1.1.3.tar.xz \
@@ -101,26 +128,12 @@ if ! have bdftopcf; then
     echo "==> bdftopcf ready"
 fi
 
-# --- tradcpp: CDE's traditional C preprocessor (a build-time tool) ----------
-# CDE builds util/tradcpp and runs it during the build to expand its *.cpp
-# config templates (UNIXbindings, action/datatype dbs, app-defaults, ...).
-# Under a cross-build it gets compiled for the target and can't run on the
-# host, so build it here for the host from the same CDE sources.  config.h is
-# fully portable (compile-time OS detection only), so the in-tree one is fine.
-if ! have tradcpp; then
-    TC="${SUBSTRATE_TOP}/contrib/cde/build/cdesktopenv/cde/util/tradcpp"
-    [ -d "${TC}" ] || { echo "hosttools: CDE source tree missing — run cde/fetch.sh first" >&2; exit 1; }
-    ( cd "${TC}" && cc -O2 -w -I. -o "${PREFIX}/bin/tradcpp" \
-        array.c directive.c eval.c files.c macro.c main.c output.c place.c utils.c )
-    echo "==> tradcpp (host) ready"
-fi
-
-# --- onsgmls (OpenSP): SGML parser used by dthelp --------------------------
+# onsgmls (OpenSP): the SGML parser dthelp's document compiler drives.
 if ! have onsgmls; then
     get OpenSP-1.5.2.tar.gz \
         https://downloads.sourceforge.net/project/openjade/opensp/1.5.2/OpenSP-1.5.2.tar.gz \
         57f4898498a368918b0d49c826aa434bb5b703d2c3b169beb348016ab25617ce
-    # ~2005 C++; demote what GCC 16 would reject.
+    # ~2005 C++; demote what GCC 16 would reject outright.
     ( cd "${WORK}/OpenSP-1.5.2" && ./configure --prefix="${PREFIX}" \
         --disable-nls --disable-doc-build --disable-shared \
         CXXFLAGS="-std=gnu++98 -fpermissive -O2 -w" CFLAGS="-std=gnu89 -O2 -w" >/dev/null && \
@@ -128,24 +141,31 @@ if ! have onsgmls; then
     echo "==> onsgmls (OpenSP) ready"
 fi
 
-# --- dtcodegen: AppBuilder code generator (a build-time tool) ---------------
-# programs/dtappbuilder/src/ab and programs/ttsnoop RUN dtcodegen during the
-# build to generate their *_ui.c/_ui.h sources.  The cross-built one links
-# target Motif and can't execute on the host, so build a native one here
-# against the host's Motif (openmotif) + Xt/X11 + tirpc.  This needs a whole
-# native objdir of the CDE tree (dtcodegen links libtt + the Dt libs), built
-# in hosttools/cde-host out of a pristine copy of the fetched source.
-# Skipped (with a warning) when no host Motif is installed — cde/build.sh
-# then leaves dtappbuilder/ttsnoop out of the build, as before.
-# --- native CDE objdir: shared by dtcodegen-host and the dtinfo/dtdocbook ---
-# build tools below.  A pristine copy of the fetched tree, configured for the
-# build host; util/ (in-tree tradcpp is lib/DtWidget's GENCPP) and lib/ are
-# built once (-k: the DtMmdb/dtinfo C++ bits fail natively and aren't needed).
+# ===========================================================================
+# 2. tradcpp — CDE's own preprocessor, built for the host
+# ===========================================================================
+# config.h here is compile-time OS detection only, so the in-tree one is
+# portable and no separate configure run is needed.
+if ! have tradcpp; then
+    ( cd "${SRC}/util/tradcpp" && cc -O2 -w -I. -o "${PREFIX}/bin/tradcpp" \
+        array.c directive.c eval.c files.c macro.c main.c output.c place.c utils.c )
+    echo "==> tradcpp (host) ready"
+fi
+
+# ===========================================================================
+# 3. The native CDE objdir
+# ===========================================================================
+# A pristine copy of the fetched tree, configured for and built on the build
+# host.  Everything CDE builds and then RUNS during its own build lives in
+# here as a runnable native binary; the cross build points its generator
+# variables at this tree (CDE_HOST) instead of copying binaries around.
+#
+# The build is -k: the target-only parts and the DtMmdb C++ bits do not build
+# natively, and none of them are generators.  What matters is that the
+# generator binaries listed at the end exist afterwards.
 HB="${HERE}/cde-host"
-if [ ! -f "${HB}/lib/DtTerm/libDtTerm.la" ]; then
-    SRC="${SUBSTRATE_TOP}/contrib/cde/build/cdesktopenv/cde"
-    [ -d "${SRC}" ] || { echo "hosttools: CDE source tree missing — run cde/fetch.sh first" >&2; exit 1; }
-    echo "==> native CDE objdir at ${HB}"
+if [ ! -f "${HB}/.substrate-hostbuild-done" ]; then
+    echo "==> native CDE objdir at ${HB} (this takes a while)"
     rm -rf "${HB}"
     cp -a "${SRC}" "${HB}"
     ( cd "${HB}" && make distclean >/dev/null 2>&1 || true )
@@ -162,60 +182,65 @@ if [ ! -f "${HB}/lib/DtTerm/libDtTerm.la" ]; then
               DtHelp/libDtHelp.la DtTerm/libDtTerm.la; do
         [ -f "${HB}/lib/${la}" ] || { echo "hosttools: native CDE objdir: lib/${la} failed to build" >&2; exit 1; }
     done
-fi
-
-# --- dtcodegen: AppBuilder code generator (needs a host Motif) --------------
-if ! have dtcodegen-host; then
-    if [ ! -f /usr/include/Xm/Xm.h ]; then
-        echo "hosttools: WARNING: no host Motif (/usr/include/Xm/Xm.h) — skipping dtcodegen-host" >&2
-        echo "hosttools:          install it (e.g. pacman -S openmotif) to enable dtappbuilder/ttsnoop" >&2
-    else
-        if [ ! -x "${HB}/programs/dtappbuilder/src/abmf/dtcodegen" ] || \
-           ! "${HB}/programs/dtappbuilder/src/abmf/dtcodegen" </dev/null >/dev/null 2>&1; then
-            # -static-libtool-libs: link the in-tree Dt/tt libtool libs
-            # statically so the staged binary is relocatable (system Xm/Xt/
-            # X11/tirpc stay dynamic); also leaves no .libs wrapper script.
-            ( cd "${HB}" && make -C programs/dtappbuilder/src -j"${JOBS}" \
-                LDFLAGS=-static-libtool-libs >/dev/null )
-        fi
-        install -m755 "${HB}/programs/dtappbuilder/src/abmf/dtcodegen" "${PREFIX}/bin/dtcodegen-host"
-        echo "==> dtcodegen-host ready"
-    fi
-fi
-
-# --- dtinfo / dtdocbook build-time generators -------------------------------
-# pmaker (Prelude.h), dfiles (.d dependency lists), msgsets, and dtsr's mkdbd
-# are RUN during the cross build of dtinfo/dtdocbook; build them natively and
-# stage into prefix/cde-tools for cde/build.sh to swap in.
-if [ ! -x "${PREFIX}/cde-tools/pmaker" ]; then
-    mkdir -p "${PREFIX}/cde-tools"
-    ( cd "${HB}" && make -C programs/dtinfo/tools -j"${JOBS}" \
-        LDFLAGS=-static-libtool-libs LIBS="-ltirpc -lstdc++" >/dev/null )
-    ( cd "${HB}" && make -C programs/dtdocbook -k -j"${JOBS}" \
+    # -static-libtool-libs: link CDE's own libtool libraries into each
+    # generator so it runs standalone; the system X/Motif/tirpc libraries
+    # stay dynamic.
+    ( cd "${HB}" && make -C programs -k -j"${JOBS}" \
         LDFLAGS=-static-libtool-libs LIBS="-ltirpc -lstdc++" >/dev/null 2>&1 || true )
-    for t in pmaker dfiles msgsets; do
-        install -m755 "${HB}/programs/dtinfo/tools/misc/${t}" "${PREFIX}/cde-tools/${t}"
-    done
-    install -m755 "${HB}/programs/dtdocbook/dtsr/mkdbd" "${PREFIX}/cde-tools/mkdbd"
-    echo "==> cde-tools (pmaker dfiles msgsets mkdbd) ready"
+    touch "${HB}/.substrate-hostbuild-done"
 fi
 
-# --- crossexec: run substrate binaries during builds (AST iffe probes) ------
-# Boots a private copy of the substrate root image headlessly in qemu and
-# relays the binary's stdout/exit status over a noise-proof serial protocol.
-# The dtksh/ksh93 cross build points iffe at it (IFFEFLAGS="-x linux.i386").
-# Needs a baked rootfs.img — on a fresh checkout run build.sh again after the
-# first image bake to pick dtksh up.
-install -m755 "${HERE}/crossexec.d/crossexec" "${PREFIX}/bin/crossexec"
-EXEC_IMG="${SUBSTRATE_EXEC_IMG:-/tmp/sub-exec.img}"
+# Report which generators came out of it.  A missing one is not fatal here —
+# build.sh decides what it can build from what is present — but it is the
+# thing to look at when a cross-build stage turns out to be skipped.
+echo "==> native generators:"
+for g in lib/DtTerm/util/lineToData \
+         programs/fontaliases/mk_fonts_alias \
+         programs/localized/util/merge \
+         programs/localized/util/mkcatdefs \
+         lib/tt/bin/tt_type_comp/tt_type_comp \
+         programs/dtdocbook/dtsr/mkdbd \
+         programs/dtinfo/tools/misc/pmaker \
+         programs/dtinfo/tools/misc/dfiles \
+         programs/dtinfo/tools/misc/msgsets \
+         programs/dtappbuilder/src/abmf/dtcodegen \
+         programs/dthelp/parser/pass1/eltdef/eltdef \
+         programs/dthelp/parser/pass1/build/build \
+         programs/dthelp/parser/pass1/util/context; do
+    if [ -x "${HB}/${g}" ]; then echo "    ok      ${g}"; else echo "    MISSING ${g}"; fi
+done
+if [ ! -f /usr/include/Xm/Xm.h ]; then
+    echo "hosttools: NOTE: no host Motif (/usr/include/Xm/Xm.h) — dtcodegen cannot be" >&2
+    echo "hosttools:       built here, so dtappbuilder and ttsnoop will be skipped." >&2
+    echo "hosttools:       Install one (e.g. pacman -S openmotif) to enable them." >&2
+fi
+
+# ===========================================================================
+# 4. crossexec — run substrate binaries during the build
+# ===========================================================================
+# ksh93's build system (AST package/mamake) compiles feature probes with iffe
+# and then RUNS them, so its FEATURE headers describe whatever machine the
+# probe executed on.  crossexec boots a private copy of the substrate root
+# image headlessly in qemu, runs the probe there, and relays stdout and exit
+# status back — so the headers describe substrate.  Needs a baked rootfs.img:
+# on a fresh checkout, bake one and re-run this script to pick dtksh up.
+install -m755 "${HERE}/crossexec-harness/crossexec" "${PREFIX}/bin/crossexec"
+EXEC_IMG="${SUBSTRATE_EXEC_IMG:-${WORK}/sub-exec.img}"
 if [ ! -f "${EXEC_IMG}" ] && [ -f "${SUBSTRATE_TOP}/rootfs.img" ]; then
     echo "==> crossexec: preparing exec image at ${EXEC_IMG}"
     cp --reflink=auto "${SUBSTRATE_TOP}/rootfs.img" "${EXEC_IMG}"
 fi
 if [ -f "${EXEC_IMG}" ]; then
-    debugfs -w -R "rm /root/iffe-run.sh" "${EXEC_IMG}" >/dev/null 2>&1 || true
-    debugfs -w -R "write ${HERE}/crossexec.d/iffe-run.sh /root/iffe-run.sh" "${EXEC_IMG}" >/dev/null 2>&1
-    debugfs -w -R "sif /root/iffe-run.sh mode 0100755" "${EXEC_IMG}" >/dev/null 2>&1
+    # rootfs.img is a partitioned GRUB disk; the ext2 root starts at this
+    # offset, which debugfs takes as a suffix on the device name.
+    EXT2="${EXEC_IMG}?offset=53477376"
+    debugfs -w -R "rm /root/iffe-run.sh" "${EXT2}" >/dev/null 2>&1 || true
+    debugfs -w -R "write ${HERE}/crossexec-harness/iffe-run.sh /root/iffe-run.sh" "${EXT2}" >/dev/null 2>&1
+    debugfs -w -R "sif /root/iffe-run.sh mode 0100755" "${EXT2}" >/dev/null 2>&1
+    debugfs -R "stat /root/iffe-run.sh" "${EXT2}" >/dev/null 2>&1 || {
+        echo "hosttools: crossexec: could not inject /root/iffe-run.sh into ${EXEC_IMG}" >&2
+        exit 1
+    }
     echo "==> crossexec ready (exec image: ${EXEC_IMG})"
 else
     echo "hosttools: NOTE: no rootfs.img yet — crossexec installed but unusable until an image is baked (dtksh will be skipped)" >&2
@@ -223,3 +248,4 @@ fi
 
 echo "==> host tools ready in ${PREFIX}/bin:"
 echo "    $(cd "${PREFIX}/bin" && ls | tr '\n' ' ')"
+echo "==> native CDE objdir (generators): ${HB}"

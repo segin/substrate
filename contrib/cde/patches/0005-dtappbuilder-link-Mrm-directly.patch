@@ -1,0 +1,13 @@
+diff --git a/programs/dtappbuilder/src/ab/Makefile.am b/programs/dtappbuilder/src/ab/Makefile.am
+index 38302f72..e97bb9fe 100644
+--- a/programs/dtappbuilder/src/ab/Makefile.am
++++ b/programs/dtappbuilder/src/ab/Makefile.am
+@@ -46,7 +46,7 @@ SOURCES.msg = \
+ dtbuilder_LDADD = ../libABil/libABil.a  ../libABobjXm/libABobjXm.a  \
+         ../libABobj/libABobj.a ../libAButil/libAButil.a \
+         $(LIBWIDGET) $(LIBTERM) $(LIBHELP) $(LIBSVC) \
+-        $(LIBTT) $(LIBXIN) -lUil $(MRESOURCELIB) $(XTOOLLIB) ${X_LIB} \
++        $(LIBTT) $(LIBXIN) -lUil -lMrm $(XTOOLLIB) ${X_LIB} \
+ 	$(UTILLIB)
+ 
+ dtbuilder_CFLAGS = -DPIXMAP_WORKAROUND $(ABINCLUDES)

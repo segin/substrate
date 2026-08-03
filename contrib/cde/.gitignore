@@ -1,1 +1,2 @@
-hosttools/cde-host/
+# Upstream checkout and build artifacts.
+build/

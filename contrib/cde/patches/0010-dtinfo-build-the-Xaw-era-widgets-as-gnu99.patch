@@ -1,0 +1,18 @@
+diff --git a/programs/dtinfo/dtinfo/src/Widgets/Makefile.am b/programs/dtinfo/dtinfo/src/Widgets/Makefile.am
+index 9029a942..84e134c2 100644
+--- a/programs/dtinfo/dtinfo/src/Widgets/Makefile.am
++++ b/programs/dtinfo/dtinfo/src/Widgets/Makefile.am
+@@ -7,6 +7,13 @@ include $(top_srcdir)/programs/dtinfo/dtinfo_env.mk
+ 
+ libWidgets_a_CXXFLAGS = $(DTINFO_DEFINES) $(DTINFO_INCLUDES)
+ 
++# These are Xaw-era widgets: they forward-declare their class methods with
++# empty parens and then define them with arguments.  C23 — gcc 15's and 16's
++# default — reads the empty parens as (void) and rejects every definition as a
++# conflicting type.  Build them as the K&R-adjacent dialect they were written
++# for.
++libWidgets_a_CFLAGS = $(DTINFO_DEFINES) $(DTINFO_INCLUDES) -std=gnu99
++
+ libWidgets_a_SOURCES = Pixmap.c Tree.c Panner.c Simple.c Porthole.c	\
+ 	XawInitFake.c TabButton.c Restraint.c WXmOpButton.C
+ 

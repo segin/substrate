@@ -1,0 +1,36 @@
+diff --git a/configure.ac b/configure.ac
+index 07efdac9..0f603b13 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -72,7 +72,30 @@ EXTRA_INCS=""
+ # pam currently only works on netbsd (9.2 tested) and linux
+ supports_pam=no
+ 
+-case "${build_os}" in
++dnl This selects the OS the built code will RUN on, so it keys off host_os,
++dnl not build_os.  For a native build the two are the same; for a cross build
++dnl only host_os is meaningful.
++case "${host_os}" in
++	dnl Substrate is a Unix-alike: pthreads, ELF, BSD sockets and a
++	dnl glibc-shaped libc, so CDE's Linux code paths are the right ones for
++	dnl it and the LINUX automake conditional should hold.  The sources
++	dnl select those paths on compiler predefines, and the substrate cross
++	dnl compiler defines neither the modern __linux__ nor the legacy
++	dnl `linux`, so define both.  Without them CDE falls back to pre-POSIX
++	dnl declarations that clash with substrate's own headers (its extern
++	dnl ioctl, the BSD-only SO_USELOOPBACK, ...).
++	dnl
++	dnl This arm comes FIRST deliberately.  A substrate build post-processes
++	dnl the generated configure to teach libtool's host_os cases about the
++	dnl target, by adding substrate* to every arm that offers plain linux*.
++	dnl That pass cannot tell this case apart from libtool's, so the linux*
++	dnl arm below ends up matching substrate too; being second, it never
++	dnl gets the chance.
++	substrate*)
++		build_linux=yes
++                SOURCE_CPP_DEFINES="${SOURCE_CPP_DEFINES} -D__linux__ -Dlinux \
++-D_POSIX_SOURCE -D_DEFAULT_SOURCE -D_BSD_SOURCE -D_SVID_SOURCE"
++		;;
+ 	linux*)
+ 		build_linux=yes
+                 SOURCE_CPP_DEFINES="${SOURCE_CPP_DEFINES} -D_POSIX_SOURCE \

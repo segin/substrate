@@ -1,6 +1,10 @@
 #ifndef _SYS_TIMES_H
 #define _SYS_TIMES_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <sys/types.h>
 
 struct tms {
@@ -16,4 +20,7 @@ clock_t times(struct tms *buf);
 #define CLK_TCK 100
 #endif
 
+#ifdef __cplusplus
+}
+#endif
 #endif

@@ -1,0 +1,44 @@
+diff --git a/configure.ac b/configure.ac
+index 07efdac9..0f603b13 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -234,6 +257,17 @@ AC_ARG_ENABLE([docs],
+ )
+ AM_CONDITIONAL([BUILD_DOCS], [test -z "$disable_docs"])
+ 
++dnl Build dtksh?  It is the one program whose build is not CDE's own: it
++dnl drives AST's package/mamake system over the bundled ksh93, which compiles
++dnl feature probes and RUNS them.  A cross build therefore needs a way to
++dnl execute target binaries, and where there is none dtksh has to be left out
++dnl rather than silently built for the wrong architecture.
++AC_ARG_ENABLE([dtksh],
++        AS_HELP_STRING([--disable-dtksh], [Disable building dtksh (default=no)]),
++        [disable_dtksh="yes"], [disable_dtksh=""]
++)
++AM_CONDITIONAL([BUILD_DTKSH], [test -z "$disable_dtksh"])
++
+ dnl Xrender usage
+ AC_ARG_ENABLE([xrender],
+         AS_HELP_STRING([--disable-xrender], [Disable use of the Xrender extension (default=auto)]),
+diff --git a/programs/Makefile.am b/programs/Makefile.am
+index 77bb1d60..6ff506ac 100644
+--- a/programs/Makefile.am
++++ b/programs/Makefile.am
+@@ -2,12 +2,16 @@ MAINTAINERCLEANFILES = Makefile.in
+ 
+ SUBDIRS = backdrops icons dsdm dtmail dtpad dtfile dtwm dtlogin		\
+         dtsession dthello dtstyle dtexec dtdbcache dticon dtterm	\
+-        dtcalc dtaction dtspcd dtscreen dtksh dtcm dtsearchpath		\
++        dtcalc dtaction dtspcd dtscreen dtcm dtsearchpath		\
+         dtappbuilder palettes dtappintegrate dtprintegrate dtconfig	\
+         dtcreate dtprintinfo fontaliases dtdspmsg ttsnoop dtimsstart	\
+         dtpdm dtsr dtpdmd dtinfo types tttypes util dtopen localized	\
+         dthelp dtdocbook
+ 
++if BUILD_DTKSH
++SUBDIRS += dtksh
++endif
++
+ install-data-hook:
+ 	-if [ $(CDE_INSTALLATION_TOP)/bin != $(bindir) ];then \
+ 		cd $(DESTDIR)$(CDE_INSTALLATION_TOP) && $(LN_S) $(bindir) bin ; fi
