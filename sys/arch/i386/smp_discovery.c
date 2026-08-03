@@ -1,4 +1,5 @@
 #include <stdint.h>
+#include <kern/cmdline.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -380,6 +381,21 @@ void smp_discover_cores(void) {
     
     // Default to 1 CPU (Bootstrap Processor)
     cpu_count = 1;
+
+    /*
+     * "nosmp" (or "up") stops here with the BSP only.  Worth having as a
+     * first-class option rather than an emulator flag: it is the cheapest
+     * way to decide whether a fault or corruption needs more than one CPU
+     * to happen, and on real hardware there is no other way to ask.
+     * Discovery is skipped entirely, so no AP is ever started.
+     */
+    if (cmdline_has("nosmp") || cmdline_has("up")) {
+        early_uart_print("SMP: nosmp/up requested, staying uniprocessor.\n");
+        cpus[0].lapic_id = 0;
+        cpus[0].processor_id = 0;
+        cpus[0].flags = 1;
+        return;
+    }
 
     if (!i386_cpu_has_apic()) {
         early_uart_print("SMP: CPU/chipset has no local APIC, falling back to UP.\n");

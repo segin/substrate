@@ -235,6 +235,17 @@ These exist because the paths they control touch state that only real firmware
 sets up, and cannot be exercised under emulation.
 A machine that one of them wedges has to stay bootable.
 .TP
+.B nosmp
+.TQ
+.B up
+Boot uniprocessor: stop after the bootstrap processor and start no
+application processors.
+Discovery is skipped entirely rather than the extra CPUs being started and
+parked, so nothing runs on them at any point.
+This is the cheapest way to establish whether a fault, a lock-up or a
+corruption needs more than one CPU to reproduce \(em on an emulator you could
+pass a CPU count instead, but on real hardware there is no other way to ask.
+.TP
 .B ro
 Mount the root filesystem read-only.
 The kernel's own default is read-write, so a direct kernel boot that says
