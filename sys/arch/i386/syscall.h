@@ -249,6 +249,7 @@ void syscall_init(void);
 #define GDT_TLS_START 6
 
 extern int syscall_trace_pid;
+extern char syscall_trace_name[16];
 extern int syscall_trace_serial;
 
 #endif

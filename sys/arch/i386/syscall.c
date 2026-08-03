@@ -278,6 +278,10 @@ void syscall_stats_dump(int reset) {
  * SYSCALL: ... lines to a single process.  0 = trace all (legacy).
  */
 int syscall_trace_pid = 0;
+/* trace_name=<comm>: gate the trace on the process name instead of a PID.
+ * A PID is only knowable after the fact and shifts run to run; the name of
+ * the process you want to watch is known in advance. */
+char syscall_trace_name[16] = { 0 };
 
 /*
  * Serial-only trace gate.  When non-zero, the trace path writes
@@ -365,7 +369,10 @@ void syscall_handler(registers_t *regs) {
     /* If `trace_pid=N` was set, only emit trace lines for that PID. */
     int trace_this = syscall_trace_enabled &&
                      (syscall_trace_pid == 0 ||
-                      current_process->pid == syscall_trace_pid);
+                      current_process->pid == syscall_trace_pid) &&
+                     (syscall_trace_name[0] == '\0' ||
+                      strncmp(current_process->comm, syscall_trace_name,
+                              sizeof(syscall_trace_name) - 1) == 0);
 
     if (trace_this) {
         char buf[512];

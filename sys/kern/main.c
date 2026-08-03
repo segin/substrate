@@ -530,13 +530,25 @@ static void init_runtime_console(int serial_console) {
     {
 
         char vbuf[16];
-        if (cmdline_get("trace_pid", vbuf, sizeof(vbuf)) > 0) {
+        if (cmdline_get("trace_pid", vbuf, sizeof(vbuf)) == 0) {
             int pid = 0;
             for (const char *q = vbuf; *q >= '0' && *q <= '9'; q++) {
                 pid = pid * 10 + (*q - '0');
             }
             syscall_trace_pid = pid;
             kprintf("Syscall trace gated to PID %d\n", pid);
+        }
+    }
+
+    /* trace_name=<comm> restricts SYSCALL: ... trace lines to processes
+     * whose name matches.  Unlike trace_pid this survives the PID moving
+     * between runs, and it follows a daemon across its fork. */
+    {
+        char nbuf[16];
+        if (cmdline_get("trace_name", nbuf, sizeof(nbuf)) == 0) {
+            strlcpy(syscall_trace_name, nbuf, sizeof(syscall_trace_name));
+            kprintf("Syscall trace gated to process name '%s'\n",
+                    syscall_trace_name);
         }
     }
 
