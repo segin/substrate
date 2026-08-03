@@ -429,9 +429,18 @@ static uint32_t gen_mounts(char *buf, size_t size, void *opaque) {
         if (off < size) off += (size_t)snprintf(buf + off, size - off, " ");
         else off += 1;
 
+        /*
+         * Report the real mount flags.  This field was hardcoded to "rw",
+         * so a read-only mount announced itself as writable and anything
+         * that consulted /proc/mounts to decide whether to remount -- which
+         * is exactly what /etc/rc.d/00-fsck does before running e2fsck --
+         * got the opposite of the truth.
+         */
+        const char *opts = (mp->mnt_flag & MNT_RDONLY) ? " ro" : " rw";
+
         off = procfs_append_mount_field(buf, size, off, type);
-        if (off < size) off += (size_t)snprintf(buf + off, size - off, " rw 0 0\n");
-        else off += strlen(" rw 0 0\n");
+        if (off < size) off += (size_t)snprintf(buf + off, size - off, "%s 0 0\n", opts);
+        else off += strlen(opts) + strlen(" 0 0\n");
     }
 
     return (uint32_t)off;

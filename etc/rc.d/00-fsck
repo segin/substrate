@@ -15,47 +15,38 @@
 # checking it, since e2fsck would be reading blocks that are actively
 # changing underneath it.
 
-. /etc/rc.subr
-
-name="fsck"
-
-# Is / currently read-only?  Ask the kernel rather than guessing from the
-# command line: the two can disagree if someone already remounted.
-root_is_ro() {
-    grep -q ' / .*[ ,]ro[ ,]' /proc/mounts 2>/dev/null
-}
-
-fsck_start() {
-    if ! root_is_ro; then
-        echo "fsck: / is already read-write, skipping check"
-        return 0
-    fi
-
-    rootdev=$(awk '$2 == "/" { print $1; exit }' /proc/mounts 2>/dev/null)
-    if [ -n "$rootdev" ] && [ -x /usr/sbin/e2fsck ]; then
-        echo "fsck: checking $rootdev"
-        # -p: preen, fix only what is unambiguously safe without asking.
-        # Exit 0 = clean, 1 = errors corrected; both are fine to continue on.
-        # 4 and above mean uncorrected errors, so leave / read-only rather
-        # than remounting rw over a filesystem we know is damaged.
-        /usr/sbin/e2fsck -p "$rootdev"
-        rc=$?
-        if [ "$rc" -ge 4 ]; then
-            echo "fsck: $rootdev has uncorrected errors (status $rc)"
-            echo "fsck: leaving / read-only -- repair it by hand, then:"
-            echo "        mount -o remount,rw /"
-            return 1
+case "${1:-start}" in
+    start)
+        # Ask the kernel whether / is really read-only rather than trusting
+        # the command line: the two disagree once someone has remounted.
+        if ! grep -q ' / .*[ ,]ro[ ,]' /proc/mounts 2>/dev/null; then
+            echo "fsck: / is already read-write, skipping check"
+            exit 0
         fi
-    else
-        echo "fsck: no e2fsck or no root device in /proc/mounts, skipping check"
-    fi
 
-    echo "fsck: remounting / read-write"
-    mount -o remount,rw /
-}
+        rootdev=$(awk '$2 == "/" { print $1; exit }' /proc/mounts 2>/dev/null)
+        if [ -n "$rootdev" ] && [ -x /usr/sbin/e2fsck ]; then
+            echo "fsck: checking $rootdev"
+            # -p: preen, fix only what is unambiguously safe without asking.
+            # 0 = clean, 1 = errors corrected; both fine to continue on.
+            # 4 and above means uncorrected errors, so leave / read-only
+            # rather than remounting rw over a filesystem known to be
+            # damaged -- that is how a recoverable problem stops being one.
+            /usr/sbin/e2fsck -p "$rootdev"
+            rc=$?
+            if [ "$rc" -ge 4 ]; then
+                echo "fsck: $rootdev has uncorrected errors (status $rc)"
+                echo "fsck: leaving / read-only -- repair it, then:"
+                echo "        mount -o remount,rw /"
+                exit 1
+            fi
+        else
+            echo "fsck: no e2fsck or no root device in /proc/mounts, skipping check"
+        fi
 
-fsck_stop() {
-    return 0
-}
-
-run_rc_command "$@"
+        echo "fsck: remounting / read-write"
+        mount -o remount,rw /
+        ;;
+    stop)
+        ;;
+esac
