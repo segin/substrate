@@ -515,13 +515,33 @@ int fb_console_active(void) {
  * lets the console keep painting the one framebuffer X is drawing into --
  * kernel CORE dumps land on top of a running X session.
  *
- * Until VT_ACTIVATE really switches, ownership is a property of the display,
- * not of a VT: if anyone holds it, nobody in the kernel draws.
+ * Ownership is therefore a property of the display, not of a VT.  But it is
+ * not simply "does any VT hold KD_GRAPHICS": a VT switch redirects the
+ * client's mapping to an offscreen shadow (fb_set_offscreen), and once that
+ * has happened the client cannot reach the visible screen at all, so the
+ * console owns it again and MUST repaint — otherwise switching away from X
+ * leaves its last frame on screen and the text console never appears.
+ *
+ * So the display is owned by userland when either
+ *   - the VT being presented is itself in KD_GRAPHICS (X is in front), or
+ *   - a client's mapping still points at real video memory: it is in front,
+ *     or the redirect degraded gracefully with no shadow available.
+ * In every other case — the client is parked offscreen, or there is no
+ * client — the kernel may draw.
  */
 static int fbcon_graphics_owners = 0;
 
 static inline int fb_console_fb_owned_by_userland(void) {
-    return fbcon_graphics_owners > 0;
+    vt_state_t *active;
+
+    if (fbcon_graphics_owners <= 0) {
+        return 0;
+    }
+    active = vt_get_state(vt_get_active());
+    if (active && active->graphics_mode) {
+        return 1;
+    }
+    return fb_client_onscreen();
 }
 
 static inline int fb_console_vt_visible(const vt_state_t *vt) {
@@ -2136,6 +2156,16 @@ static void fb_console_flush_dirty_internal(void) {
         return;
     }
 
+    /* Presenting is the one step that reaches the visible screen, so it
+     * answers to the same rule as every draw: not while a graphics client
+     * owns the framebuffer.  Writes to a hidden VT still update its cells
+     * and can mark a dirty rect (fb_console_clear() marks the whole
+     * screen); dropping the rect here is what keeps them invisible. */
+    if (fb_console_fb_owned_by_userland()) {
+        fb_console_reset_dirty();
+        return;
+    }
+
     fb_console_get_dirty_rect(&x, &y, &w, &h);
     if (fbcon_shadow_ok()) {
         fbcon_present(x, y, w, h);
@@ -2195,17 +2225,16 @@ static void fb_console_backend_write(const char *data, size_t len) {
         return;
     }
 
-    /* X server (or any framebuffer-owning userland) has put a VT into
-     * KD_GRAPHICS mode.  Drop console writes silently so we don't paint text
-     * over its pixel output.  Output still goes to the UART backend via
-     * console_write's backend iteration, so serial logging continues to work.
-     *
-     * Check both this VT and the global owner count: X owns a VT that is not
-     * the active one (see fb_console_fb_owned_by_userland), so testing only
-     * the active VT let kernel CORE dumps scribble over a running session. */
-    if (vt->graphics_mode || fb_console_fb_owned_by_userland()) {
-        return;
-    }
+    /* A framebuffer-owning userland (X server) may hold the screen while
+     * this write happens.  Keep writing anyway: the text belongs in the
+     * VT's cell buffer whether or not anybody can see it right now, so a
+     * later switch to this VT — or X exiting and the console repainting —
+     * shows what was written while it was hidden.  Whether to PAINT is a
+     * separate decision, taken per operation against
+     * fb_console_vt_visible(), which is false for exactly as long as a
+     * graphics client owns the framebuffer.  Returning here instead (as
+     * this used to) threw the output away: every kernel message printed
+     * during an X session was lost, not merely deferred. */
 
     /* If the current CPU is already inside an FB-locked section,
      * re-entering would tripwire spinlock_acquire's deadlock check

@@ -759,6 +759,22 @@ void fb_set_offscreen(int offscreen) {
     pager  = fb_client.pager;
     target = (offscreen ? fb_shadow_phys : fb.phys) + fb_client.fb_offset;
     present = !offscreen;
+
+    /* Going offscreen: seed the shadow with the frame that is on screen
+     * right now, before the redirect takes effect.  From here on the
+     * shadow IS this VT's screen, so it has to start out holding what the
+     * VT was displaying.  A client only redraws in response to damage, and
+     * nothing damages an invisible screen, so without this the client
+     * typically draws nothing at all while backgrounded and the switch
+     * back presents a shadow that has never held a frame — a black
+     * screen instead of the session the user left. */
+    if (offscreen && fb_shadow_virt && fb.addr) {
+        size_t n = fb_shadow_size;
+        size_t fb_size = (size_t)fb.pitch * (size_t)fb.height;
+        if (n > fb_size) n = fb_size;
+        memcpy(fb_shadow_virt, (const void *)fb.addr, n);
+    }
+
     vm_pager_device_set_phys_base(pager, target);
     fb_is_offscreen = offscreen;
     spinlock_release(&fb_shadow_lock);
@@ -776,6 +792,25 @@ void fb_set_offscreen(int offscreen) {
      * switch the client is not the running process, so its TLB is flushed
      * naturally by the CR3 reload when it is next scheduled. */
     pmap_remove_range(pmap, (uint32_t)va, (uint32_t)(va + len));
+}
+
+/*
+ * Is a framebuffer client's mapping currently pointed at real video memory?
+ *
+ * This is what the console needs in order to decide whether it may paint:
+ * a client that has been redirected to the offscreen shadow cannot reach
+ * the visible screen any more, so the console owns it and must repaint.  A
+ * client that is still onscreen — because it is in the foreground, or
+ * because the redirect degraded gracefully when no shadow could be
+ * allocated — means the console must stay off the framebuffer.
+ */
+int fb_client_onscreen(void) {
+    int onscreen;
+
+    spinlock_acquire(&fb_shadow_lock);
+    onscreen = fb_client.active && !fb_is_offscreen;
+    spinlock_release(&fb_shadow_lock);
+    return onscreen;
 }
 
 /* Drop the registration when the owning process exits (called from the

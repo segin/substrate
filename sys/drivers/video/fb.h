@@ -69,6 +69,7 @@ int fb_register_device(fb_info_t *info);
  * real framebuffer (0); fb_client_clear() drops the registration when the
  * owning process exits.  See fb.c for details. */
 void fb_set_offscreen(int offscreen);
+int fb_client_onscreen(void);
 void fb_client_clear(void *owner);
 
 /* Convert the linear /dev/fb0 shim to the planes (planar VGA/EGA only); a
