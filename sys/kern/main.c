@@ -42,6 +42,7 @@
 #include <fs/pseudofs.h>
 #include <fs/sysfs.h>
 #include <kern/cmdline.h>
+#include <sys/mount.h>
 #include <kern/console.h>
 #include <kern/efi_runtime.h>
 #include <kern/geom/geom.h>
@@ -231,7 +232,18 @@ static int root_mount_with_type(const char *device, const char *fstype) {
     kprint(fstype);
     kprint("\n");
 
-    return vfs_mount_legacy(device, "/", fstype, 0, NULL);
+    /*
+     * "ro" mounts the root read-only so a boot can fsck it before anyone
+     * writes to it; the kernel's own default stays read-write, so nothing
+     * changes for a direct-kernel boot that says nothing.  ext2 honours
+     * MNT_RDONLY at mount time (fs->readonly, refusing writes with -EROFS)
+     * and ext2_remount() brings it back to read-write, which is what
+     * `mount -o remount,rw /` drives once fsck is happy.
+     */
+    uint32_t mntflags = cmdline_has("ro") ? MNT_RDONLY : 0;
+    if (mntflags & MNT_RDONLY)
+        kprint("VFS: mounting root read-only (ro)\n");
+    return vfs_mount_legacy(device, "/", fstype, mntflags, NULL);
 }
 
 static int root_mount_auto(const char *device) {

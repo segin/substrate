@@ -1,0 +1,15 @@
+diff --git a/programs/ttsnoop/Makefile.am b/programs/ttsnoop/Makefile.am
+index 3783388d..4185292d 100644
+--- a/programs/ttsnoop/Makefile.am
++++ b/programs/ttsnoop/Makefile.am
+@@ -1,5 +1,10 @@
+ MAINTAINERCLEANFILES = Makefile.in
+ 
++# ttsnoop.C carries its own portable copy of _tt_sigset, which libtt also
++# defines.  Linking against a shared libtt hides the clash; against a static
++# one — what a substrate cross-build produces — the two collide.
++AM_CPPFLAGS = -D_tt_sigset=ttsnoop_local_sigset
++
+ appdefaultsdir = $(CDE_INSTALLATION_TOP)/app-defaults/C
+ 
+ dist_appdefaults_DATA = Ttsnoop

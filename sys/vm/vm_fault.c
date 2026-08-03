@@ -8,6 +8,7 @@
 #include <kern/panic.h>
 #include <kern/console.h>
 #include <sys/lock.h>
+#include <sys/smp.h>
 
 /*
  * Serialises the object-resolution + page-fill + COW + pmap_enter region of
@@ -28,6 +29,47 @@ static mutex_t vm_fault_object_lock;
 static int vm_fault_lock_ready = 0;
 static spinlock_t vm_fault_lock_init = SPINLOCK_INIT("vm_fault_init");
 
+/*
+ * In-flight fault record, for diagnosing vm_fault re-entering itself.
+ *
+ * vm_fault_object_lock is not recursive, and the fault path is not
+ * re-entrant: if anything between the acquire and the release faults, the
+ * page-fault ISR calls vm_fault again and it deadlocks against its own lock.
+ * That is what happens on a C460 -- "acquired from" and "re-entered from"
+ * were the same address, both inside vm_fault_object_lock_acquire(), which
+ * has exactly one caller.
+ *
+ * The panic itself cannot say which access faulted: by the time the second
+ * acquire fails, the inner fault's address is only in the register the ISR
+ * already consumed.  So record the outer fault here on entry and report both
+ * the moment a nested entry is seen while the lock is held -- that names the
+ * address the locked region touched, which is the whole question.
+ *
+ * Per CPU rather than per thread: nesting is by definition on one CPU, and a
+ * fixed array needs no allocation on the fault path.
+ */
+#define VM_FAULT_MAXCPU 8
+struct vm_fault_inflight {
+    int       depth;      /* nesting count for this CPU */
+    int       locked;     /* outer frame currently holds the object lock */
+    uintptr_t va;         /* outer fault address (CR2) */
+    uint32_t  pc;         /* outer faulting eip, if the ISR supplied one */
+    uint8_t   prot;
+};
+static struct vm_fault_inflight vm_fault_ctx[VM_FAULT_MAXCPU];
+static uint32_t vm_fault_pending_pc[VM_FAULT_MAXCPU];
+
+static inline int vm_fault_cpu(void) {
+    int c = smp_get_cpu_id();
+    return (c >= 0 && c < VM_FAULT_MAXCPU) ? c : 0;
+}
+
+/* Called by the page-fault ISR just before vm_fault so the faulting eip is
+ * available to the report; harmless to skip (the pc simply prints as 0). */
+void vm_fault_note_pc(uint32_t pc) {
+    vm_fault_pending_pc[vm_fault_cpu()] = pc;
+}
+
 static void vm_fault_object_lock_acquire(void) {
     if (!__atomic_load_n(&vm_fault_lock_ready, __ATOMIC_ACQUIRE)) {
         unsigned long f = spinlock_acquire_irq(&vm_fault_lock_init);
@@ -38,9 +80,11 @@ static void vm_fault_object_lock_acquire(void) {
         spinlock_release_irq(&vm_fault_lock_init, f);
     }
     mutex_lock(&vm_fault_object_lock);
+    vm_fault_ctx[vm_fault_cpu()].locked = 1;
 }
 
 static void vm_fault_object_lock_release(void) {
+    vm_fault_ctx[vm_fault_cpu()].locked = 0;
     mutex_unlock(&vm_fault_object_lock);
 }
 
@@ -108,6 +152,26 @@ static void page_zero(uintptr_t pa) {
 }
 
 int vm_fault(vm_map_t *map, uintptr_t va, uint8_t prot) {
+    int vf_cpu = vm_fault_cpu();
+    struct vm_fault_inflight *vf = &vm_fault_ctx[vf_cpu];
+    uint32_t vf_pc = vm_fault_pending_pc[vf_cpu];
+
+    vm_fault_pending_pc[vf_cpu] = 0;
+    if (vf->depth > 0 && vf->locked) {
+        /* The deadlock, one instruction before it happens.  Report the outer
+         * fault (whose locked region is still on the stack) and the inner one
+         * (the access that faulted inside it) -- the inner address is the
+         * thing to fix. */
+        kprintf("VM: vm_fault re-entered while holding its own lock\n"
+                "  outer: va=0x%x prot=0x%x eip=0x%x (depth %d)\n"
+                "  inner: va=0x%x prot=0x%x eip=0x%x\n",
+                (unsigned)vf->va, (unsigned)vf->prot, (unsigned)vf->pc,
+                vf->depth, (unsigned)va, (unsigned)prot, (unsigned)vf_pc);
+    }
+    if (vf->depth == 0) {
+        vf->va = va; vf->prot = prot; vf->pc = vf_pc;
+    }
+    vf->depth++;
     uintptr_t page_va = va & ~0xFFF;
     int result = VM_FAULT_ERROR;
     vm_map_entry_t *entry = NULL;
@@ -422,6 +486,8 @@ int vm_fault(vm_map_t *map, uintptr_t va, uint8_t prot) {
 
     result = VM_FAULT_SUCCESS;
 out:
+    if (vm_fault_ctx[vf_cpu].depth > 0)
+        vm_fault_ctx[vf_cpu].depth--;
     if (fault_locked) {
         vm_fault_object_lock_release();
     }

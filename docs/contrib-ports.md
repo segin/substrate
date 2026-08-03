@@ -114,69 +114,93 @@ All build shared + static.  Porting them added the POSIX
 
 ## CDE (Common Desktop Environment)
 
-**CDE** (`contrib/cde/`) is cross-built from the cdesktopenv tree,
-pinned to an exact commit on the `C23-GCC15-Changes` branch (CDE is a
-git repo, not a tarball; the pin replaces SHA verification).  Substrate
-source changes are a `patches/` series applied by `fetch.sh` before
-`autogen.sh`; only *generated* files (config.sub, configure, Makefiles)
-are adjusted by seds.  `hosttools/build.sh` builds the build-host
-programs CDE's configure/build need (rpcgen, mksh-as-ksh, compress,
-sessreg, mkfontdir, bdftopcf, onsgmls, tradcpp); `build.sh` assembles a
-Motif + X11 + libXinerama + libXScrnSaver + Tcl + libtirpc sysroot,
-configures `-D__linux__`, host-builds the in-tree generator tools
-(lineToData, mk_fonts_alias), and cross-builds.  Prerequisite ports:
-**libXScrnSaver** (libXss), **libtirpc** (Sun RPC for ToolTalk),
-**lmdb**, **libjpeg**, **Tcl**, **mksh**.
+**CDE** (`contrib/cde/`) is cross-built from the cdesktopenv git tree,
+pinned to a commit on the `C23-GCC15-Changes` branch (substrate's GCC 16
+defaults to C23, which rejects the empty-paren prototypes the 30-year-old
+sources are full of; that branch is upstream's fix).  There is no release
+tarball, so the commit is the reproducibility anchor instead of a SHA-256.
 
-The CDE core desktop builds end-to-end — all libraries, ToolTalk, and
-the programs dtwm, dtfile, dtsession, dtterm, dtpad, dtstyle, dtcalc,
-dtmail, dtcm, dtprintinfo, dtsearchpath, dtspcd, dtscreen, dtsr,
-dticon, dtcreate, dtlogin, ...  The full desktop **comes up live**:
-dtsession starts ToolTalk (needs the kernel msg_name fix + the
-`/etc/hosts` hostname→127.0.0.1 mapping), dtwm decorates clients and
-**draws the Front Panel** (clock, calendar, file manager, mail,
-workspace switch, trash, ...), and dtterm renders cleanly.
+The hard part is not the compiler.  CDE builds roughly two dozen small
+programs and then **runs them mid-build** to generate source, message
+catalogs, ToolTalk type databases, font aliases and help volumes — none of
+which can execute when cross-compiled.  The port answers that once rather
+than case by case:
 
-Three substrate fixes were needed beyond the build:
+- `hosttools/build.sh` builds a complete **native** objdir of the same CDE
+  tree at `hosttools/cde-host`, so every generator exists as a runnable
+  host binary in the same relative location it occupies in the cross tree.
+  It also builds the ordinary build-host dependencies from source (rpcgen,
+  mksh-as-ksh, compress, sessreg, mkfontdir, bdftopcf, onsgmls, tradcpp).
+- `build.sh` points CDE's own generator variables at that tree.  Because
+  automake defines `subdir` in every Makefile, one set of command-line
+  variables — `ELTDEF='$(CDE_HOST)/$(subdir)/eltdef'` and friends —
+  redirects every generator in every directory.  Nothing is copied into
+  the cross tree and nothing races make's timestamps.
 
-- the ld.so canonical-PLT fix (function-pointer equality — see Dynamic
-  Linking Phase 4g; dtwm's front-panel widget class otherwise aborts
-  with "Unresolved inheritance operation");
-- the libc `MB_CUR_MAX` fix (it was hardcoded 4 while substrate is a
-  single-byte locale, so dtterm took the `wchar_t`/`XwcDrawString` path
-  and drew each ASCII cell as a glyph + 3 tofu boxes);
-- `contrib/cde/install-localized-types.sh` (+ `cdemerge.py`, a
-  `merge(1)` replica) which expands the `%|nls|` placeholders and
-  installs the `/usr/dt/appconfig/types` Front Panel + datatype/action
-  database that the skipped `localized`/`types` clusters never staged.
+Upstream already keeps most of these paths in variables (`GENCPP`,
+`DTCODEGEN`, `TT_TYPE_COMP`, `MERGE`, `MKCATDEFS`, `MSGSETS`, `TREERES`);
+the patch series does the same for the handful still hardcoded.  This is
+why the port no longer skips the `types`, `localized` and `tttypes`
+clusters, and why the Python `merge(1)` replica the previous port needed
+(`cdemerge.py` + `install-localized-types.sh`) is gone.
 
-dtappbuilder (dtbuilder) + ttsnoop also build: their `*_ui.c/_ui.h`
-are generated at build time by RUNNING dtcodegen, which links Motif —
-`hosttools/build.sh` builds a native `dtcodegen-host` against the build
-host's Motif (e.g. Arch `openmotif`) in a separate native CDE objdir
-(`hosttools/cde-host`, `-static-libtool-libs` so it is relocatable),
-and `build.sh` swaps it over the cross-built wrapper before src/ab and
-ttsnoop run the generator.  Static-link fixups: `MRESOURCELIB=-lMrm`
-(referenced by dtbuilder_LDADD, never set by configure), libABil's yacc
-globals renamed (collide with Motif libUil.a's), ttsnoop's local
-`_tt_sigset` renamed (collides with libtt.a's).  Without a host Motif
-both programs are skipped.
+The substrate patch series (`patches/`, applied **before** `autogen.sh`, so
+the generated `configure` and Makefiles come out correct and `build.sh`
+never seds them):
 
-dtinfo + dtdocbook build via host-native generators
-(pmaker/dfiles/msgsets/mkdbd in hosttools prefix/cde-tools).  dtksh
-builds through the AST package/mamake cross harness: an INIT
-cc.linux.i386 intercept compiles with the cross gcc (-std=gnu99),
-mamake runs natively, and iffe's output{}/run feature probes EXECUTE ON
-SUBSTRATE via hosttools `crossexec` (boots a rootfs.img copy headlessly
-in qemu, relays stdout/exit over @@IFFE@@-framed serial) — so ksh93's
-FEATURE headers reflect real substrate behavior; needs a baked
-rootfs.img (fresh checkouts: bake, re-run build.sh).
+| patch | what |
+|---|---|
+| 0001 | `configure.ac`: select the OS from `host_os`, not `build_os` — only the former means anything in a cross build — and add a `substrate*` arm. |
+| 0002 | ttsession: list libtt again after libstt (upstream relies on libtt being shared). |
+| 0003 | libABil: private prefix for its yacc globals; they collide with Motif's libUil when both are static. |
+| 0004 | ttsnoop: rename its private `_tt_sigset`, which libtt also defines. |
+| 0005 | dtappbuilder: link `-lMrm` directly — `MRESOURCELIB` is referenced but never substituted. |
+| 0006 | dtdocbook/instant: keep the Tcl paths as make variables so a cross build can aim them at its sysroot. |
+| 0007 | Make the remaining in-tree build-time generators overridable. |
+| 0008 | Do not hardcode the build host's `/usr/include/tirpc` into CFLAGS. |
+| 0009 | `--disable-dtksh`, for hosts that cannot run target binaries. |
 
-Still deferred: the tt_type_comp compilation of the ToolTalk type DB
-(the `.ptype` sources themselves ARE staged, and `build.sh` runs the
-pure-GENCPP `.dt`/`.fp` generation in programs/types so the full
-DTTYPES set + dtwm.fp installs), the rest of `localized` (only the
-C-locale types slice is staged), dthelp parser.
+Two ordering hazards are worth knowing about, both recorded in comments at
+the site:
+
+- The `substrate*` arm in patch 0001 must come **before** `linux*`.  A
+  substrate build post-processes the generated `configure` to teach
+  libtool's `host_os` cases about the target, adding `substrate*` to every
+  arm offering plain `linux*`; that pass cannot tell CDE's own OS case
+  apart from libtool's, so the `linux*` arm inevitably absorbs substrate
+  and has to lose the race.
+- `LIBS` must carry `-lpthread` after `-lstdc++`: substrate's
+  `libstdc++.so` has hard references to the pthread API but no DT_NEEDED
+  on libpthread, so every C++-touching link otherwise fails on
+  `pthread_mutex_init`.
+
+Prerequisite ports: **motif** (libXm/libMrm/libUil), the X client stack
+(libX11, libXt, libXext, libXmu, libXpm, libXaw, libICE, libSM,
+**libXinerama**, **libXScrnSaver**), plus **libjpeg**, **lmdb**, **Tcl**,
+**libtirpc** (Sun RPC, for ToolTalk) and **mksh** (the target `/bin/ksh`).
+
+`--disable-docs` is passed: the `doc/` tree renders CDE's manual pages by
+running the freshly built `dtdocbook` and `instant`, which are programs
+rather than generators with an overridable path, so there is nothing to
+redirect at the native objdir.
+
+dtksh drives AST's own `package`/`mamake` build over the bundled ksh93 and
+needs a compiler intercept that separates the product (cross-compiled) from
+AST's build machinery — mamake, proto, probe, ratz — which must run on the
+build host.  `hosttools/crossexec.d/crossexec` exists so iffe's run-type
+probes can execute on substrate (headless qemu boot, results relayed over
+an `@@IFFE@@`-framed serial protocol); it works standalone, but no qemu
+boot was observed across a full ksh93 build, so those probe answers should
+be treated as defaults.  See `contrib/cde/README.SUBSTRATE.md`.
+
+Three substrate fixes CDE surfaced, all in the kernel and libraries rather
+than here: the ld.so canonical-PLT fix (function-pointer equality — without
+it dtwm aborts building the Front Panel with "Unresolved inheritance
+operation"), the libc `MB_CUR_MAX` fix (hardcoded 4 on a single-byte
+locale, so dtterm took the `XwcDrawString` path and drew every ASCII cell
+as a glyph plus three tofu boxes), and `SO_PEERCRED` in the AF_UNIX
+`getsockopt`.
+
 The Motif port (`contrib/motif/`) builds libUil via Motif's WML
 meta-compiler (host wml/wmluiltok) and installs the uil/ headers.
 

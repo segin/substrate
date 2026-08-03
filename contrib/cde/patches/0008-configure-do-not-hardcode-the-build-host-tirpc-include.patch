@@ -1,0 +1,24 @@
+diff --git a/configure.ac b/configure.ac
+index 07efdac9..0f603b13 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -471,9 +505,17 @@ AC_CHECK_LIB(Xinerama, XineramaQueryScreens,
+                 [AC_MSG_ERROR([libXinerama not found])], $X_LIBS)
+ 
+ dnl Special check for tirpc...
++dnl /usr/include/tirpc is where the BUILD host keeps its headers, which is
++dnl the wrong tree entirely for a cross build.  Add it only if <rpc/rpc.h>
++dnl cannot already be found — on a native build it cannot, and the path goes
++dnl on exactly as before; on a cross build the sysroot has already supplied
++dnl it and nothing host-side is pulled in.
+ AC_CHECK_LIB(tirpc, svc_register,
+-      [CFLAGS="${CFLAGS} -DOPT_TIRPC -I/usr/include/tirpc";
+-       CXXFLAGS="${CXXFLAGS} -DOPT_TIRPC -I/usr/include/tirpc";
++      [CFLAGS="${CFLAGS} -DOPT_TIRPC";
++       CXXFLAGS="${CXXFLAGS} -DOPT_TIRPC";
++       AC_CHECK_HEADER([rpc/rpc.h], [],
++           [CFLAGS="${CFLAGS} -I/usr/include/tirpc";
++            CXXFLAGS="${CXXFLAGS} -I/usr/include/tirpc"])
+        TIRPCLIB=-ltirpc])
+ AC_SUBST(TIRPCLIB)
+ 

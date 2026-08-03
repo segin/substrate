@@ -474,6 +474,18 @@ int vfs_mount_legacy(const char *device, const char *path, const char *type, uin
             mp->mnt_stat.f_fstypename[sizeof(mp->mnt_stat.f_fstypename)-1] = '\0';
         }
 
+        /*
+         * Record the flags the mount was made with.  Only vfs_remount() ever
+         * set mnt_flag, so a filesystem mounted read-only at boot looked
+         * read-write to everything that consulted the mount table -- most
+         * visibly /proc/mounts, which is what /etc/rc.d/00-fsck reads to
+         * decide whether the root still needs checking.  ext2 had the flag
+         * (writes really were refused); the generic layer did not.
+         */
+        mp->mnt_flag = flags;
+        if (flags & MNT_RDONLY)
+            mp->mnt_stat.f_flags |= MNT_RDONLY;
+
         mp->mnt_node_root = root;
         mp->mnt_node_covered = mountpoint;
 

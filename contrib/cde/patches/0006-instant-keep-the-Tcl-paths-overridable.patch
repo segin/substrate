@@ -1,0 +1,23 @@
+diff --git a/programs/dtdocbook/instant/Makefile.am b/programs/dtdocbook/instant/Makefile.am
+index 784904ce..3fde0c86 100644
+--- a/programs/dtdocbook/instant/Makefile.am
++++ b/programs/dtdocbook/instant/Makefile.am
+@@ -10,8 +10,16 @@ instant_CFLAGS = $(DT_INCDIR)
+ 
+ instant_LDADD = $(DTCLIENTLIBS) $(XTOOLLIB)
+ 
+-instant_CFLAGS += @TCL_INCLUDE_SPEC@
+-instant_LDADD += @TCL_LIB_SPEC@
++# tclConfig.sh records the paths Tcl was INSTALLED to, which for a cross
++# build are target paths (/usr/include, /usr/lib).  Substituted straight into
++# the compile line they resolve against the build host's own headers and
++# libraries instead.  Keep them as make variables so a cross-build can point
++# them at its sysroot from the command line.
++TCL_INCLUDE_SPEC = @TCL_INCLUDE_SPEC@
++TCL_LIB_SPEC = @TCL_LIB_SPEC@
++
++instant_CFLAGS += $(TCL_INCLUDE_SPEC)
++instant_LDADD += $(TCL_LIB_SPEC)
+ 
+ instant_SOURCES = main.c util.c info.c translate.c traninit.c tranvar.c \
+ 		  tables.c browse.c

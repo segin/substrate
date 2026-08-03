@@ -33,4 +33,8 @@
 // Resolves a page fault at 'va' in the given 'map' with requested 'prot'.
 int vm_fault(vm_map_t *map, uintptr_t va, uint8_t prot);
 
+/* Hand the faulting eip to vm_fault's in-flight record so the re-entrancy
+ * report can name it.  Optional: skipping the call only blanks that field. */
+void vm_fault_note_pc(uint32_t pc);
+
 #endif

@@ -1,0 +1,78 @@
+#!/bin/bash
+#
+# crossexec — run a cross-compiled substrate binary and report what it did.
+#
+# ksh93's build system (AST package/mamake) uses iffe, which compiles small
+# feature probes and then RUNS them; its FEATURE headers therefore describe
+# whichever machine executed the probe.  Cross-compiling, that machine is the
+# build host, and ksh93 ends up configured for Linux.  This script boots a
+# private copy of the substrate root image headlessly in qemu, runs the probe
+# there, and relays its stdout and exit status back, so the headers describe
+# substrate instead.
+#
+# The command and its arguments travel in on a scratch ext2 disk; the results
+# come back over the serial line, where the kernel is also talking.  Payload
+# lines are therefore prefixed @@IFFE@@ and the exit status rides @@IFFE-RC@@ —
+# kernel noise carries neither, so it filters out cleanly.
+#
+# The root image is opened snapshot=on, so nothing the guest does can reach it.
+#
+# Usage: crossexec <crosstype> <command> [arg...]
+
+set -u
+
+shift                       # crosstype (iffe passes it; we only target one)
+CMD="${1:-}"; shift || true
+[ -n "${CMD}" ] || { echo "crossexec: no command given" >&2; exit 125; }
+
+HERE="$(cd "$(dirname "$0")" && pwd)"
+# installed at <top>/contrib/cde/hosttools/prefix/bin/crossexec
+TOP="${SUBSTRATE_TOP:-$(cd "${HERE}/../../../../.." && pwd)}"
+IMG="${SUBSTRATE_EXEC_IMG:-${HERE}/../../build/sub-exec.img}"
+KERNEL="${SUBSTRATE_KERNEL:-${TOP}/sys/kernel.multiboot}"
+
+[ -f "${IMG}" ] || { echo "crossexec: exec image ${IMG} missing — run hosttools/build.sh after baking rootfs.img" >&2; exit 125; }
+[ -f "${KERNEL}" ] || { echo "crossexec: kernel ${KERNEL} missing — build sys/ first" >&2; exit 125; }
+
+W=$(mktemp -d "${TMPDIR:-/tmp}/crossexec.XXXXXX")
+trap 'rm -rf "$W"' EXIT
+
+# Scratch disk carrying the command in and nothing out.
+dd if=/dev/zero of="$W/scratch.img" bs=1M count=32 status=none
+/usr/bin/mke2fs -q -F -b 1024 "$W/scratch.img"
+debugfs -w -R "write $CMD cmd" "$W/scratch.img" >/dev/null 2>&1
+{ printf '%s ' "$@"; } > "$W/args"
+debugfs -w -R "write $W/args args" "$W/scratch.img" >/dev/null 2>&1
+
+# AHCI, not virtio: attaching two virtio-blk-pci disks makes the driver
+# register both under the same /dev/storage/virtio0 name, and it finds no
+# partition table on the (definitely partitioned) root image.  Emulated SATA
+# is slower per boot but gets both disks addressable.
+timeout 90 qemu-system-i386 -cpu qemu32,+sse,+sse2,+rdrand -accel kvm \
+  -kernel "${KERNEL}" -m 256M -display none -no-reboot \
+  -device ahci,id=ahci0 \
+  -drive file="$IMG",format=raw,if=none,id=rd,snapshot=on,file.locking=off \
+  -device ide-hd,drive=rd,bus=ahci0.0 \
+  -drive file="$W/scratch.img",format=raw,if=none,id=sd \
+  -device ide-hd,drive=sd,bus=ahci0.1 \
+  -serial file:"$W/ser.txt" \
+  -append "serial_debug root=/dev/storage/sata0p2 init=/root/iffe-run.sh" &
+QP=$!
+for _ in $(seq 1 80); do
+  grep -qa '@@IFFE-RC@@' "$W/ser.txt" 2>/dev/null && break
+  sleep 1
+done
+sleep 1
+kill -9 $QP 2>/dev/null; wait $QP 2>/dev/null
+
+if ! grep -qa '@@IFFE-RC@@' "$W/ser.txt" 2>/dev/null; then
+    K=$(mktemp -d "${TMPDIR:-/tmp}/crossexec-fail.XXXXXX")
+    cp -a "$W/." "$K" 2>/dev/null
+    cp -f "$CMD" "$K/cmd.host" 2>/dev/null
+    echo "crossexec: guest run failed (evidence: $K)" >&2
+    exit 124
+fi
+
+tr -d '\r' < "$W/ser.txt" | sed -n 's/^@@IFFE@@//p'
+RC=$(tr -d '\r' < "$W/ser.txt" | sed -n 's/^@@IFFE-RC@@\([0-9]*\).*/\1/p' | head -1)
+exit "${RC:-124}"

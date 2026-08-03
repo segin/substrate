@@ -1,2 +1,17 @@
-# CDE substrate patch series — applied with patch -p1 from build/cdesktopenv
-0001-ttsession-link-libtt-after-libstt.patch
+# substrate patch series for cdesktopenv.
+#
+# Applied by fetch.sh in this order, BEFORE autogen.sh — these patch
+# configure.ac and Makefile.am, so the generated configure and Makefiles come
+# out already correct and build.sh never has to sed them afterwards.
+0001-configure-recognise-the-substrate-host-OS.patch
+0002-ttsession-link-libtt-after-libstt.patch
+0003-libABil-give-its-yacc-globals-a-private-prefix.patch
+0004-ttsnoop-rename-its-private-_tt_sigset.patch
+0005-dtappbuilder-link-Mrm-directly.patch
+0006-instant-keep-the-Tcl-paths-overridable.patch
+0007-make-the-in-tree-build-time-generators-overridable.patch
+0008-configure-do-not-hardcode-the-build-host-tirpc-include.patch
+0009-make-dtksh-optional.patch
+0010-dtinfo-build-the-Xaw-era-widgets-as-gnu99.patch
+0011-dthelp-use-toupper-not-the-SVR4-_toupper.patch
+0012-dthelp-include-the-POSIX-fcntl.h.patch

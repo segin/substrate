@@ -1,0 +1,17 @@
+diff --git a/programs/dthelp/parser/pass1/helptag/help.c b/programs/dthelp/parser/pass1/helptag/help.c
+index 6af835d4..fc3af4ce 100644
+--- a/programs/dthelp/parser/pass1/helptag/help.c
++++ b/programs/dthelp/parser/pass1/helptag/help.c
+@@ -1880,7 +1880,11 @@ M_WCHAR wc_toupper(M_WCHAR wc)
+ {
+ if ((wc >= 0) && (wc <= 255))
+     {
+-    return _toupper(wc);
++    /* toupper(), not the SVR4 _toupper(): the caller admits any byte in
++       0..255, and _toupper is only defined for lower-case input — it
++       corrupts everything else.  canon1/helptag/help.c, which is otherwise
++       the same function, already gets this right. */
++    return toupper(wc);
+     }
+ return wc;
+ }

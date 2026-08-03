@@ -1,0 +1,16 @@
+diff --git a/programs/dthelp/parser/pass2/htag2/sdl.c b/programs/dthelp/parser/pass2/htag2/sdl.c
+index 53f990e4..3cd06920 100644
+--- a/programs/dthelp/parser/pass2/htag2/sdl.c
++++ b/programs/dthelp/parser/pass2/htag2/sdl.c
+@@ -27,7 +27,10 @@
+ #include <sys/stat.h>
+ #include <sys/wait.h>
+ #if defined(__linux__)
+-#  include <sys/fcntl.h>
++/* <fcntl.h>, not <sys/fcntl.h>: the latter is a glibc compatibility header
++   for the old SVR4 spelling, and this block is reached by anything that
++   defines __linux__ — including substrate, which ships only the POSIX one. */
++#  include <fcntl.h>
+ #endif
+ 
+ #include <errno.h>

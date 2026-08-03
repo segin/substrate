@@ -1,0 +1,23 @@
+diff --git a/programs/dtappbuilder/src/libABil/Makefile.am b/programs/dtappbuilder/src/libABil/Makefile.am
+index a9873fca..66074471 100644
+--- a/programs/dtappbuilder/src/libABil/Makefile.am
++++ b/programs/dtappbuilder/src/libABil/Makefile.am
+@@ -12,7 +12,17 @@ noinst_LIBRARIES = libABil.a
+ 
+ #noinst_PROGRAMS = bil_test
+ 
+-libABil_a_CFLAGS = $(EXTRA_DEFINES) -I$(ABINCLUDES)
++# The BIL parser and Motif's libUil both export the unprefixed yacc globals.
++# Linking them together only works when one of the two is a shared library,
++# whose copy then interposes silently; with both static — which is what a
++# substrate build produces — the duplicate definitions collide.  Give this
++# parser its own prefix.
++ABIL_YY_PREFIX = -Dyyparse=abil_yyparse -Dyylex=abil_yylex \
++		 -Dyyerror=abil_yyerror -Dyylval=abil_yylval \
++		 -Dyychar=abil_yychar -Dyynerrs=abil_yynerrs \
++		 -Dyyin=abil_yyin -Dyyout=abil_yyout -Dyydebug=abil_yydebug
++
++libABil_a_CFLAGS = $(EXTRA_DEFINES) $(ABIL_YY_PREFIX) -I$(ABINCLUDES)
+ 
+ libABil_a_LIBADD =
+ 

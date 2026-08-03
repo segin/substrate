@@ -1,0 +1,52 @@
+#!/bin/sh
+# /etc/rc.d/00-fsck — check the root filesystem, then bring it read-write.
+#
+# Every GRUB entry boots with "ro" (see substrate_boot in build-rootfs.sh),
+# which is the whole point of this script: a filesystem can only be repaired
+# safely while nothing is writing to it, and once init starts services that
+# window is gone.  So the order is fixed — fsck first, remount second, and
+# every later rc.d script can assume a writable root.
+#
+# Sorts before 00-hostname because "f" < "h", and 01-run-clean immediately
+# after wants to unlink stale pidfiles, which needs the root writable.
+#
+# If the root was booted rw (a direct kernel boot passing nothing), there is
+# nothing to do: checking a mounted-writable filesystem is worse than not
+# checking it, since e2fsck would be reading blocks that are actively
+# changing underneath it.
+
+case "${1:-start}" in
+    start)
+        # Ask the kernel whether / is really read-only rather than trusting
+        # the command line: the two disagree once someone has remounted.
+        if ! grep -q ' / .*[ ,]ro[ ,]' /proc/mounts 2>/dev/null; then
+            echo "fsck: / is already read-write, skipping check"
+            exit 0
+        fi
+
+        rootdev=$(awk '$2 == "/" { print $1; exit }' /proc/mounts 2>/dev/null)
+        if [ -n "$rootdev" ] && [ -x /usr/sbin/e2fsck ]; then
+            echo "fsck: checking $rootdev"
+            # -p: preen, fix only what is unambiguously safe without asking.
+            # 0 = clean, 1 = errors corrected; both fine to continue on.
+            # 4 and above means uncorrected errors, so leave / read-only
+            # rather than remounting rw over a filesystem known to be
+            # damaged -- that is how a recoverable problem stops being one.
+            /usr/sbin/e2fsck -p "$rootdev"
+            rc=$?
+            if [ "$rc" -ge 4 ]; then
+                echo "fsck: $rootdev has uncorrected errors (status $rc)"
+                echo "fsck: leaving / read-only -- repair it, then:"
+                echo "        mount -o remount,rw /"
+                exit 1
+            fi
+        else
+            echo "fsck: no e2fsck or no root device in /proc/mounts, skipping check"
+        fi
+
+        echo "fsck: remounting / read-write"
+        mount -o remount,rw /
+        ;;
+    stop)
+        ;;
+esac

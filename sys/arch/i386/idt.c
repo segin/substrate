@@ -327,6 +327,7 @@ void isr_handler(registers_t *regs) {
                 uint8_t fault_prot = VM_PROT_READ;
                 if (regs->err_code & 0x02) fault_prot |= VM_PROT_WRITE;
                 if (regs->err_code & 0x10) fault_prot |= VM_PROT_EXEC;
+                vm_fault_note_pc(regs->eip);
                 int vfr = vm_fault(current_process->vm_map, cr2, fault_prot);
                 if (vfr == VM_FAULT_SUCCESS) {
                     return;

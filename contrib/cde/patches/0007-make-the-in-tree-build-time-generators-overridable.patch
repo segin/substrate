@@ -1,0 +1,570 @@
+diff --git a/lib/DtTerm/Term/Makefile.am b/lib/DtTerm/Term/Makefile.am
+index 08499bbc..5ff766c6 100644
+--- a/lib/DtTerm/Term/Makefile.am
++++ b/lib/DtTerm/Term/Makefile.am
+@@ -1,5 +1,10 @@
+ MAINTAINERCLEANFILES = Makefile.in
+ 
++# lineToData is built here and then run.  Cross-building compiles it for
++# the target, where the build host cannot execute it; keep the path in a
++# variable so a cross build can substitute a host copy.
++LINETODATA = ../util/lineToData
++
+ CLEANFILES = TermLineData.c
+ 
+ noinst_LTLIBRARIES = libTerm.la
+@@ -8,7 +13,7 @@ libTerm_la_CFLAGS = -I../TermPrim @DT_INCDIR@
+ 
+ TermLineData.c: TermLineData.data
+ 	$(RM) $@
+-	../util/lineToData -p _DtTerm -f TermLineData.data > $@
++	$(LINETODATA) -p _DtTerm -f TermLineData.data > $@
+ 
+ includes:: TermLineData.c
+ 
+diff --git a/programs/dtdocbook/dtsr/Makefile.am b/programs/dtdocbook/dtsr/Makefile.am
+index 19535360..0ac3d69a 100644
+--- a/programs/dtdocbook/dtsr/Makefile.am
++++ b/programs/dtdocbook/dtsr/Makefile.am
+@@ -1,5 +1,8 @@
+ MAINTAINERCLEANFILES = Makefile.in
+ 
++# Built here and then run — see LINETODATA in lib/DtTerm/Term.
++MKDBD = ./mkdbd
++
+ include ../dtdocbook.am
+ 
+ dtsrdir = $(dtdocbookdatadir)/dtsr
+@@ -31,4 +34,4 @@ mkdbd.c: $(dtsearch)/tiny.c
+ 	$(RM) $@ && $(LN_S) $< $@
+ 
+ dtsearch.dbd: mkdbd
+-	./$< > $@
++	$(MKDBD) > $@
+diff --git a/programs/dthelp/parser/canon1/build/Makefile.am b/programs/dthelp/parser/canon1/build/Makefile.am
+index 8d9897c0..4d733b39 100644
+--- a/programs/dthelp/parser/canon1/build/Makefile.am
++++ b/programs/dthelp/parser/canon1/build/Makefile.am
+@@ -1,5 +1,13 @@
+ MAINTAINERCLEANFILES = Makefile.in
+ 
++# These are built here and then run during the build.  Cross-building
++# compiles them for the target, where the build host cannot execute
++# them; keep the paths in variables so a cross build can substitute
++# host copies.
++HELPBUILD = ./build
++CONTEXT = $(HELPUTILSRC)/context
++
++
+ .NOTPARALLEL:
+ 
+ noinst_PROGRAMS = build
+@@ -44,14 +52,14 @@ $(BPRODS): BDONE
+ $(CPRODS): CDONE
+ 
+ # build the BRPODS
+-BDONE: ./build $(HELPDTDFILE)
+-	$(RM) $(BPRODS) $(BTRASH) && ./build -m < $(HELPDTDFILE) && touch BDONE
++BDONE: $(HELPBUILD) $(HELPDTDFILE)
++	$(RM) $(BPRODS) $(BTRASH) && $(HELPBUILD) -m < $(HELPDTDFILE) && touch BDONE
+ 
+ 
+ # build the CRPODS
+-CDONE: $(HELPUTILSRC)/context $(HELPTAGSRC)/delim.bld context.dat
++CDONE: $(CONTEXT) $(HELPTAGSRC)/delim.bld context.dat
+ 	$(RM) $(CPRODS) $(CTRASH)
+ 	$(CP) $(HELPTAGSRC)/delim.bld delim.dat # appl.-specific delim.dat
+-	$(HELPUTILSRC)/context sparse
++	$(CONTEXT) sparse
+ 	touch CDONE
+ 
+diff --git a/programs/dthelp/parser/canon1/eltdef/Makefile.am b/programs/dthelp/parser/canon1/eltdef/Makefile.am
+index a6988839..184deb36 100644
+--- a/programs/dthelp/parser/canon1/eltdef/Makefile.am
++++ b/programs/dthelp/parser/canon1/eltdef/Makefile.am
+@@ -1,5 +1,13 @@
+ MAINTAINERCLEANFILES = Makefile.in
+ 
++# These are built here and then run during the build.  Cross-building
++# compiles them for the target, where the build host cannot execute
++# them; keep the paths in variables so a cross build can substitute
++# host copies.
++ELTDEF = ./eltdef
++CONTEXT = $(HELPUTILSRC)/context
++
++
+ .NOTPARALLEL:
+ 
+ noinst_PROGRAMS = eltdef
+@@ -45,12 +53,12 @@ $(EPRODS): EDONE
+ 
+ EDONE: eltdef  $(HELPIFFILE) $(HELPTSSFILE)
+ 	$(RM) $(EPRODS) $(ETRASH)
+-	./eltdef $(HELPIFFILE)
++	$(ELTDEF) $(HELPIFFILE)
+ 	touch EDONE
+ 
+-CDONE:  $(HELPUTILSRC)/context $(HELPTAGSRC)/delim.elt context.dat
++CDONE:  $(CONTEXT) $(HELPTAGSRC)/delim.elt context.dat
+ 	$(RM) $(CPRODS) $(CTRASH)
+ 	$(CP) $(HELPTAGSRC)/delim.elt delim.dat  # appl.-specific delim.dat
+-	$(HELPUTILSRC)/context
++	$(CONTEXT)
+ 	touch CDONE
+ 
+diff --git a/programs/dthelp/parser/canon1/parser/Makefile.am b/programs/dthelp/parser/canon1/parser/Makefile.am
+index 4dd76cea..a53884d7 100644
+--- a/programs/dthelp/parser/canon1/parser/Makefile.am
++++ b/programs/dthelp/parser/canon1/parser/Makefile.am
+@@ -1,5 +1,12 @@
+ MAINTAINERCLEANFILES = Makefile.in
+ 
++# These are built here and then run during the build.  Cross-building
++# compiles them for the target, where the build host cannot execute
++# them; keep the paths in variables so a cross build can substitute
++# host copies.
++CONTEXT = $(HELPUTILSRC)/context
++
++
+ bin_PROGRAMS = dthelp_ctag1
+ 
+ # Due to the wierd interdepencencies between helptag and parser,
+@@ -42,9 +49,9 @@ CLEANFILES = $(BUILT_SOURCES) $(CTRASH) CDONE
+ 
+ $(CPRODS): CDONE
+ 
+-CDONE:  $(HELPUTILSRC)/context $(HELPTAGSRC)/delim.par context.dat
++CDONE:  $(CONTEXT) $(HELPTAGSRC)/delim.par context.dat
+ 	$(RM) $(CPRODS) $(CTRASH)
+ 	$(CP) $(HELPTAGSRC)/delim.par delim.dat  # appl.-specific delim.dat
+-	$(HELPUTILSRC)/context
++	$(CONTEXT)
+ 	touch CDONE
+ 
+diff --git a/programs/dthelp/parser/pass1/build/Makefile.am b/programs/dthelp/parser/pass1/build/Makefile.am
+index af927202..bdf6639c 100644
+--- a/programs/dthelp/parser/pass1/build/Makefile.am
++++ b/programs/dthelp/parser/pass1/build/Makefile.am
+@@ -1,5 +1,13 @@
+ MAINTAINERCLEANFILES = Makefile.in
+ 
++# These are built here and then run during the build.  Cross-building
++# compiles them for the target, where the build host cannot execute
++# them; keep the paths in variables so a cross build can substitute
++# host copies.
++HELPBUILD = ./build
++CONTEXT = $(HELPUTILSRC)/context
++
++
+ noinst_PROGRAMS = build
+ 
+ .NOTPARALLEL:
+@@ -44,14 +52,14 @@ $(BPRODS): BDONE
+ $(CPRODS): CDONE
+ 
+ # build the BRPODS
+-BDONE: ./build $(HELPDTDFILE)
+-	$(RM) $(BPRODS) $(BTRASH) && ./build < $(HELPDTDFILE) && touch BDONE
++BDONE: $(HELPBUILD) $(HELPDTDFILE)
++	$(RM) $(BPRODS) $(BTRASH) && $(HELPBUILD) < $(HELPDTDFILE) && touch BDONE
+ 
+ 
+ # build the CRPODS
+-CDONE: $(HELPUTILSRC)/context $(HELPTAGSRC)/delim.bld context.dat
++CDONE: $(CONTEXT) $(HELPTAGSRC)/delim.bld context.dat
+ 	$(RM) $(CPRODS) $(CTRASH)
+ 	$(CP) $(HELPTAGSRC)/delim.bld delim.dat # appl.-specific delim.dat
+-	$(HELPUTILSRC)/context sparse
++	$(CONTEXT) sparse
+ 	touch CDONE
+ 
+diff --git a/programs/dthelp/parser/pass1/eltdef/Makefile.am b/programs/dthelp/parser/pass1/eltdef/Makefile.am
+index 7f360018..242eee1f 100644
+--- a/programs/dthelp/parser/pass1/eltdef/Makefile.am
++++ b/programs/dthelp/parser/pass1/eltdef/Makefile.am
+@@ -1,5 +1,13 @@
+ MAINTAINERCLEANFILES = Makefile.in
+ 
++# These are built here and then run during the build.  Cross-building
++# compiles them for the target, where the build host cannot execute
++# them; keep the paths in variables so a cross build can substitute
++# host copies.
++ELTDEF = ./eltdef
++CONTEXT = $(HELPUTILSRC)/context
++
++
+ noinst_PROGRAMS = eltdef
+ 
+ HELPTAG       = ..
+@@ -43,12 +51,12 @@ $(EPRODS): EDONE
+ 
+ EDONE: eltdef  $(HELPIFFILE) $(HELPTSSFILE)
+ 	$(RM) $(EPRODS) $(ETRASH)
+-	./eltdef $(HELPIFFILE)
++	$(ELTDEF) $(HELPIFFILE)
+ 	touch EDONE
+ 
+-CDONE:  $(HELPUTILSRC)/context $(HELPTAGSRC)/delim.elt context.dat
++CDONE:  $(CONTEXT) $(HELPTAGSRC)/delim.elt context.dat
+ 	$(RM) $(CPRODS) $(CTRASH)
+ 	$(CP) $(HELPTAGSRC)/delim.elt delim.dat  # appl.-specific delim.dat
+-	$(HELPUTILSRC)/context
++	$(CONTEXT)
+ 	touch CDONE
+ 
+diff --git a/programs/dthelp/parser/pass1/helptag/help.c b/programs/dthelp/parser/pass1/helptag/help.c
+index 6af835d4..fc3af4ce 100644
+--- a/programs/dthelp/parser/pass1/helptag/help.c
++++ b/programs/dthelp/parser/pass1/helptag/help.c
+@@ -1880,7 +1880,11 @@ M_WCHAR wc_toupper(M_WCHAR wc)
+ {
+ if ((wc >= 0) && (wc <= 255))
+     {
+-    return _toupper(wc);
++    /* toupper(), not the SVR4 _toupper(): the caller admits any byte in
++       0..255, and _toupper is only defined for lower-case input — it
++       corrupts everything else.  canon1/helptag/help.c, which is otherwise
++       the same function, already gets this right. */
++    return toupper(wc);
+     }
+ return wc;
+ }
+diff --git a/programs/dthelp/parser/pass1/parser/Makefile.am b/programs/dthelp/parser/pass1/parser/Makefile.am
+index dc17b796..bd5eff8d 100644
+--- a/programs/dthelp/parser/pass1/parser/Makefile.am
++++ b/programs/dthelp/parser/pass1/parser/Makefile.am
+@@ -1,5 +1,12 @@
+ MAINTAINERCLEANFILES = Makefile.in
+ 
++# These are built here and then run during the build.  Cross-building
++# compiles them for the target, where the build host cannot execute
++# them; keep the paths in variables so a cross build can substitute
++# host copies.
++CONTEXT = $(HELPUTILSRC)/context
++
++
+ bin_PROGRAMS = dthelp_htag1
+ 
+ # Due to the wierd interdepencencies between helptag and parser,
+@@ -42,9 +49,9 @@ CLEANFILES = $(BUILT_SOURCES) $(CTRASH) CDONE
+ 
+ $(CPRODS): CDONE
+ 
+-CDONE:  $(HELPUTILSRC)/context $(HELPTAGSRC)/delim.par context.dat
++CDONE:  $(CONTEXT) $(HELPTAGSRC)/delim.par context.dat
+ 	$(RM) $(CPRODS) $(CTRASH)
+ 	$(CP) $(HELPTAGSRC)/delim.par delim.dat  # appl.-specific delim.dat
+-	$(HELPUTILSRC)/context
++	$(CONTEXT)
+ 	touch CDONE
+ 
+diff --git a/programs/dthelp/parser/pass2/build/Makefile.am b/programs/dthelp/parser/pass2/build/Makefile.am
+index c0d54e4d..81a82a12 100644
+--- a/programs/dthelp/parser/pass2/build/Makefile.am
++++ b/programs/dthelp/parser/pass2/build/Makefile.am
+@@ -1,5 +1,17 @@
+ MAINTAINERCLEANFILES = Makefile.in
+ 
++# Built here and then run during the build; keep the path in a variable
++# so a cross build can substitute a host copy.  pass2 spells the util
++# directory SDLUTILSRC where canon1 and pass1 call it HELPUTILSRC; both
++# resolve to ../util.
++CONTEXT = $(SDLUTILSRC)/context
++
++# These are built here and then run during the build.  Cross-building
++# compiles them for the target, where the build host cannot execute
++# them; keep the paths in variables so a cross build can substitute
++# host copies.
++HELPBUILD = ./build
++
+ .NOTPARALLEL:
+ 
+ noinst_PROGRAMS = build
+@@ -45,14 +57,13 @@ $(BPRODS): BDONE
+ $(CPRODS): CDONE
+ 
+ # build the BRPODS
+-BDONE: ./build $(SDLDTDFILE)
+-	$(RM) $(BPRODS) $(BTRASH) && ./build < $(SDLDTDFILE) && touch BDONE
+-
++BDONE: $(HELPBUILD) $(SDLDTDFILE)
++	$(RM) $(BPRODS) $(BTRASH) && $(HELPBUILD) < $(SDLDTDFILE) && touch BDONE
+ 
+ # build the CRPODS
+-CDONE: $(SDLUTILSRC)/context $(HTAG2SRC)/delim.bld context.dat
++CDONE: $(CONTEXT) $(HTAG2SRC)/delim.bld context.dat
+ 	$(RM) $(CPRODS) $(CTRASH)
+ 	$(CP) $(HTAG2SRC)/delim.bld delim.dat # appl.-specific delim.dat
+-	$(SDLUTILSRC)/context sparse
++	$(CONTEXT) sparse
+ 	touch CDONE
+ 
+diff --git a/programs/dthelp/parser/pass2/eltdef/Makefile.am b/programs/dthelp/parser/pass2/eltdef/Makefile.am
+index 927f9212..01fe16f5 100644
+--- a/programs/dthelp/parser/pass2/eltdef/Makefile.am
++++ b/programs/dthelp/parser/pass2/eltdef/Makefile.am
+@@ -1,5 +1,17 @@
+ MAINTAINERCLEANFILES = Makefile.in
+ 
++# Built here and then run during the build; keep the path in a variable
++# so a cross build can substitute a host copy.  pass2 spells the util
++# directory SDLUTILSRC where canon1 and pass1 call it HELPUTILSRC; both
++# resolve to ../util.
++CONTEXT = $(SDLUTILSRC)/context
++
++# These are built here and then run during the build.  Cross-building
++# compiles them for the target, where the build host cannot execute
++# them; keep the paths in variables so a cross build can substitute
++# host copies.
++ELTDEF = ./eltdef
++
+ .NOTPARALLEL:
+ 
+ noinst_PROGRAMS = eltdef
+@@ -41,15 +53,14 @@ $(CPRODS): CDONE
+ 
+ $(EPRODS): EDONE
+ 
+-
+ EDONE: eltdef  $(SDLIFFILE)
+ 	$(RM) $(EPRODS) $(ETRASH)
+-	./eltdef $(SDLIFFILE)
++	$(ELTDEF) $(SDLIFFILE)
+ 	touch EDONE
+ 
+-CDONE:  $(SDLUTILSRC)/context $(HTAG2SRC)/delim.elt context.dat
++CDONE:  $(CONTEXT) $(HTAG2SRC)/delim.elt context.dat
+ 	$(RM) $(CPRODS) $(CTRASH)
+ 	$(CP) $(HTAG2SRC)/delim.elt delim.dat  # appl.-specific delim.dat
+-	$(SDLUTILSRC)/context
++	$(CONTEXT)
+ 	touch CDONE
+ 
+diff --git a/programs/dthelp/parser/pass2/parser/Makefile.am b/programs/dthelp/parser/pass2/parser/Makefile.am
+index 61f27dfc..238eb002 100644
+--- a/programs/dthelp/parser/pass2/parser/Makefile.am
++++ b/programs/dthelp/parser/pass2/parser/Makefile.am
+@@ -1,5 +1,11 @@
+ MAINTAINERCLEANFILES = Makefile.in
+ 
++# Built here and then run during the build; keep the path in a variable
++# so a cross build can substitute a host copy.  pass2 spells the util
++# directory SDLUTILSRC where canon1 and pass1 call it HELPUTILSRC; both
++# resolve to ../util.
++CONTEXT = $(SDLUTILSRC)/context
++
+ bin_PROGRAMS = dthelp_htag2
+ 
+ # Due to the wierd interdepencencies between helptag and parser,
+@@ -42,9 +48,9 @@ CLEANFILES = $(BUILT_SOURCES) $(CTRASH) CDONE
+ 
+ $(CPRODS): CDONE
+ 
+-CDONE:  $(SDLUTILSRC)/context $(HTAG2SRC)/delim.par context.dat
++CDONE:  $(CONTEXT) $(HTAG2SRC)/delim.par context.dat
+ 	$(RM) $(CPRODS) $(CTRASH)
+ 	$(CP) $(HTAG2SRC)/delim.par delim.dat  # appl.-specific delim.dat
+-	$(SDLUTILSRC)/context
++	$(CONTEXT)
+ 	touch CDONE
+ 
+diff --git a/programs/dtinfo/dtinfo/src/Makefile.am b/programs/dtinfo/dtinfo/src/Makefile.am
+index 62fbfb9f..f6cc6b65 100644
+--- a/programs/dtinfo/dtinfo/src/Makefile.am
++++ b/programs/dtinfo/dtinfo/src/Makefile.am
+@@ -1,5 +1,9 @@
+ MAINTAINERCLEANFILES = Makefile.in
+ 
++# Built in programs/dtinfo/tools and then run — see LINETODATA in
++# lib/DtTerm/Term.
++PMAKER = $(top_builddir)/programs/dtinfo/tools/misc/pmaker
++
+ # get our env variables
+ include $(top_srcdir)/programs/dtinfo/dtinfo_env.mk
+ 
+@@ -16,7 +20,6 @@ RESFILES = Macros.res Strings.res Messages.res Query/QueryEditor.res	\
+ 	Agents/NodeHistoryAgent.res Agents/NodeWindowAgent.res		\
+ 	Agents/GraphicAgent.res Query/QueryTermView.res
+ 
+-
+ BUILT_SOURCES = Prelude.h Support/Support.d Support/Support.h		\
+ 	UAS/UAS.d UAS/UAS.h Basic/Basic.d Basic/Basic.h			\
+ 	OliasSearch/OliasSearch.d OliasSearch/OliasSearch.h		\
+@@ -32,7 +35,7 @@ BUILT_SOURCES = Prelude.h Support/Support.d Support/Support.h		\
+ CLEANFILES = $(BUILT_SOURCES)
+ 
+ Prelude.h:
+-	$(top_builddir)/programs/dtinfo/tools/misc/pmaker $(CLASSLIBS)
++	$(PMAKER) $(CLASSLIBS)
+ 
+ Dtinfo: Dtinfo.res $(RESFILES)
+ 	$(CPP_PROGRAM) -traditional -nostdinc -C Dtinfo.res | $(TREERES) > $@
+diff --git a/programs/dtinfo/dtinfo/src/dtinfo_dfiles_hfiles.mk b/programs/dtinfo/dtinfo/src/dtinfo_dfiles_hfiles.mk
+index 94406e04..2e72d0b6 100644
+--- a/programs/dtinfo/dtinfo/src/dtinfo_dfiles_hfiles.mk
++++ b/programs/dtinfo/dtinfo/src/dtinfo_dfiles_hfiles.mk
+@@ -1,3 +1,7 @@
++## Built in programs/dtinfo/tools and then run — see LINETODATA in
++## lib/DtTerm/Term.
++DFILES = $(top_builddir)/../programs/dtinfo/tools/misc/dfiles
++
+ ## Build the dfiles and hfiles components for each of the class
+ ## modules.  Moved into this file to keep Makefile.am in dtinfo/src
+ ## somewhat morereadable
+@@ -5,106 +9,106 @@
+ # Support
+ include Support/Classlist.mk
+ Support/Support.d: Support/Classlist.mk
+-	cd Support && $(top_builddir)/../programs/dtinfo/tools/misc/dfiles d Support $(Support_CLASSES)
++	cd Support && $(DFILES) d Support $(Support_CLASSES)
+ 
+ Support/Support.h: Support/Classlist.mk
+-	cd Support && $(top_builddir)/../programs/dtinfo/tools/misc/dfiles h Support $(Support_CLASSES)
++	cd Support && $(DFILES) h Support $(Support_CLASSES)
+ 
+ 
+ # UAS
+ include UAS/Classlist.mk
+ UAS/UAS.d: UAS/Classlist.mk
+-	cd UAS && $(top_builddir)/../programs/dtinfo/tools/misc/dfiles d UAS $(UAS_CLASSES)
++	cd UAS && $(DFILES) d UAS $(UAS_CLASSES)
+ 
+ UAS/UAS.h: UAS/Classlist.mk
+-	cd UAS && $(top_builddir)/../programs/dtinfo/tools/misc/dfiles h UAS $(UAS_CLASSES)
++	cd UAS && $(DFILES) h UAS $(UAS_CLASSES)
+ 
+ 
+ # Basic
+ include Basic/Classlist.mk
+ Basic/Basic.d: Basic/Classlist.mk
+-	cd Basic && $(top_builddir)/../programs/dtinfo/tools/misc/dfiles d Basic $(Basic_CLASSES)
++	cd Basic && $(DFILES) d Basic $(Basic_CLASSES)
+ 
+ Basic/Basic.h: Basic/Classlist.mk
+-	cd Basic && $(top_builddir)/../programs/dtinfo/tools/misc/dfiles h Basic $(Basic_CLASSES)
++	cd Basic && $(DFILES) h Basic $(Basic_CLASSES)
+ 
+ 
+ # OliasSearch
+ include OliasSearch/Classlist.mk
+ OliasSearch/OliasSearch.d: OliasSearch/Classlist.mk
+-	cd OliasSearch && $(top_builddir)/../programs/dtinfo/tools/misc/dfiles d OliasSearch $(OliasSearch_CLASSES)
++	cd OliasSearch && $(DFILES) d OliasSearch $(OliasSearch_CLASSES)
+ 
+ OliasSearch/OliasSearch.h: OliasSearch/Classlist.mk
+-	cd OliasSearch && $(top_builddir)/../programs/dtinfo/tools/misc/dfiles h OliasSearch $(OliasSearch_CLASSES)
++	cd OliasSearch && $(DFILES) h OliasSearch $(OliasSearch_CLASSES)
+ 
+ 
+ # Marks
+ include Marks/Classlist.mk
+ Marks/Marks.d: Marks/Classlist.mk
+-	cd Marks && $(top_builddir)/../programs/dtinfo/tools/misc/dfiles d Marks $(Marks_CLASSES)
++	cd Marks && $(DFILES) d Marks $(Marks_CLASSES)
+ 
+ Marks/Marks.h: Marks/Classlist.mk
+-	cd Marks && $(top_builddir)/../programs/dtinfo/tools/misc/dfiles h Marks $(Marks_CLASSES)
++	cd Marks && $(DFILES) h Marks $(Marks_CLASSES)
+ 
+ 
+ # Graphics
+ include Graphics/Classlist.mk
+ Graphics/Graphics.d: Graphics/Classlist.mk
+-	cd Graphics && $(top_builddir)/../programs/dtinfo/tools/misc/dfiles d Graphics $(Graphics_CLASSES)
++	cd Graphics && $(DFILES) d Graphics $(Graphics_CLASSES)
+ 
+ Graphics/Graphics.h: Graphics/Classlist.mk
+-	cd Graphics && $(top_builddir)/../programs/dtinfo/tools/misc/dfiles h Graphics $(Graphics_CLASSES)
++	cd Graphics && $(DFILES) h Graphics $(Graphics_CLASSES)
+ 
+ 
+ # Preferences
+ include Preferences/Classlist.mk
+ Preferences/Preferences.d: Preferences/Classlist.mk
+-	cd Preferences && $(top_builddir)/../programs/dtinfo/tools/misc/dfiles d Preferences $(Preferences_CLASSES)
++	cd Preferences && $(DFILES) d Preferences $(Preferences_CLASSES)
+ 
+ Preferences/Preferences.h: Preferences/Classlist.mk
+-	cd Preferences && $(top_builddir)/../programs/dtinfo/tools/misc/dfiles h Preferences $(Preferences_CLASSES)
++	cd Preferences && $(DFILES) h Preferences $(Preferences_CLASSES)
+ 
+ 
+ # Managers
+ include Managers/Classlist.mk
+ Managers/Managers.d: Managers/Classlist.mk
+-	cd Managers && $(top_builddir)/../programs/dtinfo/tools/misc/dfiles d Managers $(Managers_CLASSES)
++	cd Managers && $(DFILES) d Managers $(Managers_CLASSES)
+ 
+ Managers/Managers.h: Managers/Classlist.mk
+-	cd Managers && $(top_builddir)/../programs/dtinfo/tools/misc/dfiles h Managers $(Managers_CLASSES)
++	cd Managers && $(DFILES) h Managers $(Managers_CLASSES)
+ 
+ 
+ # Other
+ include Other/Classlist.mk
+ Other/Other.d: Other/Classlist.mk
+-	cd Other && $(top_builddir)/../programs/dtinfo/tools/misc/dfiles d Other $(Other_CLASSES)
++	cd Other && $(DFILES) d Other $(Other_CLASSES)
+ 
+ Other/Other.h: Other/Classlist.mk
+-	cd Other && $(top_builddir)/../programs/dtinfo/tools/misc/dfiles h Other $(Other_CLASSES)
++	cd Other && $(DFILES) h Other $(Other_CLASSES)
+ 
+ 
+ # Query
+ include Query/Classlist.mk
+ Query/Query.d: Query/Classlist.mk
+-	cd Query && $(top_builddir)/../programs/dtinfo/tools/misc/dfiles d Query $(Query_CLASSES)
++	cd Query && $(DFILES) d Query $(Query_CLASSES)
+ 
+ Query/Query.h: Query/Classlist.mk
+-	cd Query && $(top_builddir)/../programs/dtinfo/tools/misc/dfiles h Query $(Query_CLASSES)
++	cd Query && $(DFILES) h Query $(Query_CLASSES)
+ 
+ 
+ # Agents
+ include Agents/Classlist.mk
+ Agents/Agents.d: Agents/Classlist.mk
+-	cd Agents && $(top_builddir)/../programs/dtinfo/tools/misc/dfiles d Agents $(Agents_CLASSES)
++	cd Agents && $(DFILES) d Agents $(Agents_CLASSES)
+ 
+ Agents/Agents.h: Agents/Classlist.mk
+-	cd Agents && $(top_builddir)/../programs/dtinfo/tools/misc/dfiles h Agents $(Agents_CLASSES)
++	cd Agents && $(DFILES) h Agents $(Agents_CLASSES)
+ 
+ 
+ # OnlineRender
+ include OnlineRender/Classlist.mk
+ OnlineRender/OnlineRender.d: OnlineRender/Classlist.mk
+-	cd OnlineRender && $(top_builddir)/../programs/dtinfo/tools/misc/dfiles d OnlineRender $(OnlineRender_CLASSES)
++	cd OnlineRender && $(DFILES) d OnlineRender $(OnlineRender_CLASSES)
+ 
+ OnlineRender/OnlineRender.h: OnlineRender/Classlist.mk
+-	cd OnlineRender && $(top_builddir)/../programs/dtinfo/tools/misc/dfiles h OnlineRender $(OnlineRender_CLASSES)
++	cd OnlineRender && $(DFILES) h OnlineRender $(OnlineRender_CLASSES)
+diff --git a/programs/fontaliases/Makefile.am b/programs/fontaliases/Makefile.am
+index 6a51e33b..fc4a5fa3 100644
+--- a/programs/fontaliases/Makefile.am
++++ b/programs/fontaliases/Makefile.am
+@@ -1,5 +1,8 @@
+ MAINTAINERCLEANFILES = Makefile.in
+ 
++# Built here and then run — see LINETODATA in lib/DtTerm/Term.
++MK_FONTS_ALIAS = ./mk_fonts_alias
++
+ fontaliasesconfdir = $(sysconfdir)/$(PACKAGE_TARNAME)/fontaliases
+ fontaliasesdatadir = $(pkgdatadir)/fontaliases
+ 
+@@ -23,10 +26,10 @@ dtinfo.pcf.gz: dtinfo.bdf
+ 	$(BDFTOPCF) -t $< |$(GZIP) > $@
+ 
+ fixed.alias: mk_fonts_alias
+-	./$< > $@
++	$(MK_FONTS_ALIAS) > $@
+ 
+ mixed.alias: mk_fonts_alias
+-	./$< 1 > $@
++	$(MK_FONTS_ALIAS) 1 > $@
+ 
+ fonts.dir: dtinfo.pcf.gz
+ 	$(MKFONTDIR) -x bdf .
