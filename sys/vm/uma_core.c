@@ -669,22 +669,35 @@ static uma_slab_t *uma_slab_alloc(uma_zone_t *zone) {
         }
     }
     
-    /* Insert into global hash */
-    uma_hash_insert(slab);
-    
     /* Initialize free list (sequential indices) */
-    
+
     /*
      * Freelist map follows the slab structure in memory.
      * For OFF_PAGE: allocated via kzalloc(sizeof(uma_slab_t) + ipers)
      * For ON_PAGE: placed at end of page, space included in slab_overhead
      */
     slab->us_freelist = (uint8_t *)(slab + 1);
-    
+
     for (uint32_t i = 0; i < zone->uz_ipers; i++) {
         slab->us_freelist[i] = (i + 1 < zone->uz_ipers) ? (i + 1) : 0xFF;
     }
-    
+
+    /*
+     * Insert into the global hash LAST.  uma_hash_insert() is what makes this
+     * slab findable by every other path, and until the loop above has run the
+     * slab is only half-built: us_freecount is already zone->uz_ipers and
+     * us_firstfree is 0, but us_freelist is still NULL from the zeroed
+     * header.  A lookup landing in that window sails past both guards in
+     * uma_slab_alloc_item() -- freecount is not zero, and index 0 is within
+     * uz_ipers -- and then dereferences us_freelist[0] at address 0.
+     *
+     * That is a kernel NULL read with CR2=0 inside uma_zalloc, reached from
+     * kmalloc on any allocation path (it was seen under sys_poll).  Nothing
+     * between here and the top of the function needs the slab to be hashed,
+     * so publishing it after it is fully built closes the window entirely.
+     */
+    uma_hash_insert(slab);
+
     /* Call init callback and initialize debug patterns on each object. */
     if (zone->uz_init || (zone->uz_flags & (UMA_ZONE_REDZONE | UMA_ZONE_TRASH))) {
         for (uint32_t i = 0; i < zone->uz_ipers; i++) {
