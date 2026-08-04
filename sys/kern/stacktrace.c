@@ -13,7 +13,7 @@
 #include <kern/panic.h>
 
 /* Maximum number of frames to trace */
-#define MAX_STACK_FRAMES 16
+#define MAX_STACK_FRAMES 48
 
 /* Stack frame structure (standard x86 calling convention) */
 struct stack_frame {
