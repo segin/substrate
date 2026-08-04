@@ -839,18 +839,59 @@ static void uma_slab_free_item(uma_zone_t *zone, uma_slab_t *slab, void *item) {
 static uma_slab_t *uma_find_slab(uma_zone_t *zone, void *item) {
     uintptr_t page_addr = (uintptr_t)item & ~(uintptr_t)0xFFF;
     uint32_t bucket = uma_hash((void*)page_addr);
-    
+    uma_slab_t *found = NULL;
+    uint32_t steps = 0;
+
+    /*
+     * Walk the page hash under the slab lock, exactly as uma_item_size()
+     * does -- this walk was the one hash reader still doing it unlocked.
+     *
+     * The writers (uma_hash_insert/uma_hash_remove) hold this lock, which
+     * disables interrupts, so they cannot be interrupted mid-update.  A
+     * READER without the lock has no such protection: an interrupt landing
+     * in the middle of this loop can free a slab and unlink it -- the
+     * network RX path does exactly that, calling kfree() from IRQ context
+     * (see the comment in kmalloc()) -- and when the walk resumes,
+     * s->us_hnext points into freed memory.
+     *
+     * That is a kernel page fault on a garbage slab pointer inside
+     * uma_find_slab, reached from kfree/uma_zfree, and it was seen from
+     * netdev_rx -> ip4_input -> tcp_input -> kmalloc.  The lock is
+     * recursive per-CPU, so callers already holding it nest safely.
+     */
+#ifndef HOST_TEST
+    unsigned long f = uma_slab_lock_acquire();
+#endif
     for (uma_slab_t *s = uma_page_hash[bucket]; s; s = s->us_hnext) {
+        /* Bound the walk: a recycled header poisons us_hnext, and a cycle
+         * or a chain of corrupt links would otherwise spin here forever. */
+        if (++steps > UMA_HASH_MAX_CHAIN) {
+            uma_hash_report_runaway(bucket);
+            break;
+        }
+
+        /* us_zone is written once at slab creation and never cleared, so
+         * NULL means this header's memory was recycled while still linked.
+         * Report the chain and keep walking rather than dereferencing it. */
+        if (!s->us_zone) {
+            uma_hash_report_corrupt(bucket, s, steps);
+            continue;
+        }
+
         if ((uintptr_t)s->us_data == page_addr) {
             if (s->us_zone != zone) {
                 kprint("uma_find_slab: slab zone mismatch!\n");
-                return NULL;
+                break;
             }
-            return s;
+            found = s;
+            break;
         }
     }
-    
-    return NULL;
+#ifndef HOST_TEST
+    uma_slab_lock_release(f);
+#endif
+
+    return found;
 }
 
 size_t uma_item_size(void *item) {
