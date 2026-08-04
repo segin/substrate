@@ -10,6 +10,10 @@
 #include <kern/ioremap_host.h>
 #endif
 
+/* Must match PMM_IOREMAP_VA_BASE: the PMM refuses to hand out any frame whose
+ * direct-map address would land in this window, because ioremap() replaces the
+ * direct map's PTEs here.  If these two ever disagree, the allocator starts
+ * returning RAM that device mappings have taken over. */
 #define IOREMAP_BASE  0xF7000000U
 #define IOREMAP_LIMIT 0xF8000000U
 

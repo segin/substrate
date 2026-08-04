@@ -650,6 +650,31 @@ static uma_slab_t *uma_slab_alloc(uma_zone_t *zone) {
 
         /* Allocate separate slab header */
         slab = kzalloc(sizeof(uma_slab_t) + zone->uz_ipers);
+        /*
+         * Reject an implausible header, not just a NULL one.
+         *
+         * A garbage non-NULL pointer here is worse than a failed allocation.
+         * With slab = 0xFFFFFFE0, "slab + 1" wraps to 0, so us_freelist is
+         * legitimately stored as NULL, the store lands in the recursive
+         * page-directory mapping (writable, no fault), and the freelist init
+         * loop then writes to address 0 -- an unhandled kernel exception at
+         * uma_slab_alloc with CR2=0 that names neither the allocator that
+         * produced the bad pointer nor the zone.  Seen under memory pressure
+         * on an 8GB guest.
+         *
+         * Every slab header lives in the kernel direct map, so anything below
+         * KERN_BASE cannot be one.  Treat it as an allocation failure: the
+         * caller already handles that path, and the frame is released below.
+         */
+        if (!uma_slab_ptr_plausible(slab)) {
+            if (slab) {
+                kprintf("uma: zone '%s': kzalloc returned implausible slab "
+                        "header %p -- refusing\n",
+                        zone->uz_name ? zone->uz_name : "<unnamed>",
+                        (void *)slab);
+            }
+            slab = NULL;
+        }
         if (!slab) {
             if (pages_needed > 1) {
                 pmm_free_contiguous(page, pages_needed);
@@ -704,6 +729,49 @@ static uma_slab_t *uma_slab_alloc(uma_zone_t *zone) {
      * For ON_PAGE: placed at end of page, space included in slab_overhead
      */
     slab->us_freelist = (uint8_t *)(slab + 1);
+
+    /*
+     * Read it straight back before trusting it.
+     *
+     * The loop below faults with CR2=0 on an 8GB guest: us_freelist reads as
+     * NULL immediately after this store, with interrupts disabled, no calls
+     * in between, no DMA into this memory (e1000 removed, virtio-blk uses a
+     * driver-owned bounce buffer) and a plausible slab pointer.  The register
+     * dump proves the VALUE is zero but says nothing about WHICH slab, zone
+     * or page, so the cause cannot be told apart from the symptom.
+     *
+     * This says which: if the readback disagrees with what was just written,
+     * report the slab, its zone, the backing page and the layout, then fail
+     * the allocation instead of writing through a NULL freelist.  A caller
+     * that gets NULL simply retries or reports out-of-memory; a kernel that
+     * writes to address 0 does not come back.
+     */
+    if (slab->us_freelist != (uint8_t *)(slab + 1)) {
+        kprintf("uma: zone '%s': freelist readback mismatch -- "
+                "slab=%p wrote=%p read=%p\n",
+                zone->uz_name ? zone->uz_name : "<unnamed>",
+                (void *)slab, (void *)(slab + 1),
+                (void *)slab->us_freelist);
+        kprintf("uma:   page=%p ipers=%u rsize=%u offpage=%d "
+                "us_data=%p us_zone=%p\n",
+                (void *)page, (unsigned)zone->uz_ipers,
+                (unsigned)zone->uz_rsize,
+                (zone->uz_flags & UMA_ZONE_OFFPAGE) ? 1 : 0,
+                slab->us_data, (void *)slab->us_zone);
+        if (zone->uz_flags & UMA_ZONE_OFFPAGE) {
+            /* Same sizing the off-page path used to allocate the run. */
+            size_t np = (zone->uz_rsize * zone->uz_ipers + 4095) / 4096;
+            kfree(slab, sizeof(uma_slab_t) + zone->uz_ipers);
+            if (np > 1) {
+                pmm_free_contiguous(page, np);
+            } else {
+                pmm_free_block(page);
+            }
+        } else {
+            pmm_free_block(page);
+        }
+        return NULL;
+    }
 
     for (uint32_t i = 0; i < zone->uz_ipers; i++) {
         slab->us_freelist[i] = (i + 1 < zone->uz_ipers) ? (i + 1) : 0xFF;

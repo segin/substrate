@@ -35,8 +35,29 @@
  * address, so the process dies with eip exactly SIG_TRAMPOLINE_ADDR -- and
  * since init's shell takes that path during rc.d, the boot dies with it.
  */
-#define PMM_DIRECTMAP_PHYS_LIMIT \
-        ((uint32_t)(SIG_TRAMPOLINE_ADDR - PMM_PHYS_VIRT_BASE))
+/*
+ * The ioremap VA window is the OTHER thing carved out of the higher half, and
+ * it sits BELOW the trampoline: kern/ioremap.c hands out kernel VA from
+ * 0xF7000000-0xF8000000 and installs its own PTEs there, replacing whatever
+ * the direct map had.  Physical frames at 0x37000000-0x38000000 map to exactly
+ * those VAs, so once RAM reaches 880 MiB the allocator starts handing out
+ * frames whose direct-map address a device mapping has taken over.  Writes to
+ * them reach the device instead of RAM and reads come back as zero -- with no
+ * fault, because the VA is perfectly well mapped.
+ *
+ * That is invisible below 880 MiB of RAM, which is why every small guest was
+ * fine and an 8GB one corrupted UMA slab headers: uma_slab_alloc() would write
+ * us_zone, us_data and us_freelist into a slab header and read all three back
+ * as zero, then fault writing through the NULL freelist.
+ *
+ * So the ceiling is the LOWER of the two carve-outs, not just the trampoline.
+ */
+#define PMM_IOREMAP_VA_BASE     0xF7000000U
+
+#define PMM_DIRECTMAP_PHYS_LIMIT                                        \
+        ((uint32_t)((SIG_TRAMPOLINE_ADDR < PMM_IOREMAP_VA_BASE          \
+                     ? SIG_TRAMPOLINE_ADDR                              \
+                     : PMM_IOREMAP_VA_BASE) - PMM_PHYS_VIRT_BASE))
 
 /*
  * Ceiling on physical RAM this kernel will manage.
