@@ -72,6 +72,7 @@ void pmm_free_contiguous(void* p, size_t count);
 void pmm_reclaim_range(uint32_t start, uint32_t end);
 void pmm_reclaim_setup(void);
 void pmm_dump_map(void);
+void pmm_dump_managed(void);
 void pmm_dump_mmap(uint32_t mmap_addr, uint32_t mmap_length);
 uint32_t pmm_get_total_memory(void);
 uint32_t pmm_get_free_memory(void);

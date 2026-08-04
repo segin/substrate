@@ -518,6 +518,7 @@ static void init_runtime_console(int serial_console) {
         serial_debug_enabled = 1;
         console_register(uart_get_console());
         kprint("Serial Debug Enabled.\n");
+        pmm_dump_managed();
     }
 
     if (cmdline_has("syscall_trace") || cmdline_has("syscall_log") ||

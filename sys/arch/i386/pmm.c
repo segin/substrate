@@ -940,6 +940,34 @@ static int pmm_promote_metadata(void) {
     return 0;
 }
 
+/*
+ * Report what the PMM actually ended up managing.
+ *
+ * pmm_report_memory_stats() runs from pmm_init(), long before the console is
+ * up, so its output never reaches the serial log -- which is why "how much RAM
+ * did it really take?" could only be inferred from bio's cache-sizing line.
+ * This one is callable once the console works.
+ */
+void pmm_dump_managed(void)
+{
+    kprintf("PMM: seed limit %u MiB, detected max phys %u MiB, cap %u MiB\n",
+            (unsigned)(pmm_seed_phys_limit >> 20),
+            (unsigned)(pmm_detected_max_phys >> 20),
+            (unsigned)((uint32_t)PMM_PHYS_RAM_CAP >> 20));
+    kprintf("PMM: direct-map limit %u MiB, %d usable range(s):\n",
+            (unsigned)(PMM_DIRECTMAP_PHYS_LIMIT >> 20), pmm_usable_range_count);
+    for (int i = 0; i < pmm_usable_range_count; i++) {
+        kprintf("PMM:   [%d] 0x%08x-0x%08x (%u MiB)\n", i,
+                (unsigned)pmm_usable_ranges[i].start,
+                (unsigned)pmm_usable_ranges[i].end,
+                (unsigned)((pmm_usable_ranges[i].end -
+                            pmm_usable_ranges[i].start) >> 20));
+    }
+    kprintf("PMM: managed now: %u MiB total, %u MiB free\n",
+            (unsigned)(pmm_get_total_memory() >> 20),
+            (unsigned)(pmm_get_free_memory() >> 20));
+}
+
 void pmm_enable_highmem(void) {
     uint32_t seed_limit = PMM_DIRECTMAP_PHYS_LIMIT;
 

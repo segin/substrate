@@ -269,14 +269,59 @@ void pmap_bootstrap(void) {
             kernel_page_directory[pt_idx] = pt_phys | PTE_P | PTE_W;
         }
 
-        // Map the first higher-half 4MB window as a single large page so the
-        // kernel image itself benefits from PSE even while low identity PTs
-        // stay in place for early boot and NULL-page control.
-        if (pt_idx == 0 && has_pse) {
-            kernel_page_directory[768] = 0x00000000 | PTE_P | PTE_W | PTE_PS |
-                ((kernel_pte_flags & PTE_G) ? PTE_G : 0);
+        /*
+         * Map the WHOLE higher-half direct map with 4MB large pages when the
+         * CPU has PSE, not just the first window.
+         *
+         * The direct map is a flat, permanent, page-aligned identity range --
+         * the textbook case for superpages, and what every other i386 kernel
+         * does with it.  Using 251 separate 4KiB page tables instead costs a
+         * megabyte of tables and, far more importantly, one TLB entry per 4KiB
+         * of kernel memory touched.  On a small guest that is invisible
+         * because the working set is small; with a large guest the kernel
+         * walks far more of the direct map (the vm_page array alone is ~50MiB
+         * at 8GB against ~12MiB at 768MB) and the 4KiB entries thrash.
+         *
+         * One PDE per 4MB drops the direct map from 257k TLB-mappable entries
+         * to 251, and removes the page tables from the walk entirely.
+         *
+         * The low identity mapping below still uses the 4KiB tables: it is
+         * only the first 16MB, it is torn down after early boot, and keeping
+         * it at 4KiB granularity is what lets the NULL page stay unmapped.
+         */
+        /*
+         * STOP the large-page mapping at PMM_DIRECTMAP_PHYS_LIMIT, not at the
+         * end of the direct map.  The window above that limit (992MB..1004MB)
+         * is where the signal trampoline lives at 0xFE000000, and it is
+         * mapped separately with a 4KiB table.  Covering it with a 4MB page
+         * here replaces the trampoline's own mapping, and every process then
+         * dies on its first signal return with eip exactly at
+         * SIG_TRAMPOLINE_ADDR -- including init's shell during rc.d, which
+         * takes the boot down with it.  That is the same collision
+         * PMM_DIRECTMAP_PHYS_LIMIT exists to prevent on the allocator side
+         * (see the comment on it in pmm.h); the mapping side has to respect
+         * it too.
+         */
+        /*
+         * ...and skip the ioremap window too.  ioremap() hands out kernel VA
+         * from IOREMAP_BASE..IOREMAP_LIMIT (0xF7000000-0xF8000000), which
+         * falls inside the direct map, and it installs 4KiB PTEs there.  A
+         * PDE covering that VA as a 4MB page leaves nowhere to put the page
+         * table, so every ioremap silently maps nothing -- the framebuffer
+         * LFB included, which boots to a black screen while the kernel runs
+         * on happily behind it.
+         */
+        uint32_t win_va   = 0xC0000000U + (uint32_t)(pt_idx * 0x400000);
+        int in_ioremap    = (win_va + 0x400000 > 0xF7000000U) &&
+                            (win_va < 0xF8000000U);
+
+        if (has_pse && !in_ioremap &&
+            (uint32_t)(pt_idx * 0x400000) + 0x400000 <= PMM_DIRECTMAP_PHYS_LIMIT) {
+            kernel_page_directory[768 + pt_idx] =
+                (uint32_t)(pt_idx * 0x400000) | PTE_P | PTE_W | PTE_PS;
         } else {
-            // Also map to Higher Half (0xC0000000+)
+            // Above the limit (or no PSE): keep the 4KiB tables built above,
+            // so the trampoline's own mapping can sit inside this window.
             kernel_page_directory[768 + pt_idx] = pt_phys | PTE_P | PTE_W;
         }
     }
@@ -313,7 +358,8 @@ void pmap_bootstrap(void) {
     // Enable Paging (Reload CR3)
     __asm__ volatile("mov %0, %%cr3" :: "r"(kernel_pmap_store.pdir_phys));
     
-    kprint("PMAP: Paging Enabled (Higher Half, 1004MB direct map)\n");
+    kprintf("PMAP: Paging Enabled (Higher Half, 1004MB direct map, %s)\n",
+            has_pse ? "4MB large pages" : "4KB pages");
 
     // Bootstrap stage is complete: allow PMM to expose high memory ranges.
     pmm_enable_highmem();
