@@ -534,14 +534,61 @@ static int fbcon_graphics_owners = 0;
 static inline int fb_console_fb_owned_by_userland(void) {
     vt_state_t *active;
 
-    if (fbcon_graphics_owners <= 0) {
-        return 0;
-    }
     active = vt_get_state(vt_get_active());
     if (active && active->graphics_mode) {
         return 1;
     }
+
+    /*
+     * Ask the MAPPING, not just the KD_GRAPHICS count.
+     *
+     * This used to short-circuit on "fbcon_graphics_owners <= 0" and declare
+     * the console the owner without consulting fb_client_onscreen() at all.
+     * A client that mmaps /dev/fb0 and draws without ever issuing
+     * KDSETMODE(KD_GRAPHICS) -- or whose owner count is dropped while its
+     * mapping is still live -- was painted straight over.  What lands on
+     * screen is not even legible text: fbcon_present() reads the shadow at
+     * fbcon_shadow_w stride and writes at the device's current fb.pitch, so
+     * once a client has changed the mode the two disagree and the result is
+     * a band of colour noise across the session.
+     *
+     * A live mapping onto real video memory is ownership whatever the count
+     * says.  Consulting it unconditionally can only suppress console
+     * painting, never enable it, so this cannot make the console scribble
+     * anywhere it previously did not.
+     */
     return fb_client_onscreen();
+}
+
+/*
+ * Device-touching blits, gated on framebuffer ownership.
+ *
+ * fb_copyarea()/fb_fillrect() go straight at the hardware, bypassing the
+ * shadow and therefore the gate in fb_console_flush_dirty_internal().  The
+ * scroll path uses them for the planar fast path and whenever no shadow is
+ * available, so console output while an X server owns the screen scrolled
+ * and filled regions of ITS pixels -- painting bands of colour noise over a
+ * live session, which is what a kernel message or a panic during X looked
+ * like.
+ *
+ * Console writes have to keep updating the VT's cells regardless (that is
+ * the point of deferring rather than dropping them), so the right place to
+ * stop is the device itself: drop the blit, keep the bookkeeping.  When the
+ * console owns the screen again these are no-ops in the way, and the VT
+ * repaints from its cell buffer on the switch back.
+ */
+static inline void fbcon_dev_copyarea(struct fb_copyarea_info *area) {
+    if (fb_console_fb_owned_by_userland()) {
+        return;
+    }
+    fb_copyarea(area);
+}
+
+static inline void fbcon_dev_fillrect(struct fb_fillrect_info *rect) {
+    if (fb_console_fb_owned_by_userland()) {
+        return;
+    }
+    fb_fillrect(rect);
 }
 
 static inline int fb_console_vt_visible(const vt_state_t *vt) {
@@ -706,10 +753,10 @@ static void fb_console_pixel_scroll_region_locked(int top, int bottom,
                                       (int)clear.width, (int)clear.height);
             } else {
                 /* Planar: clear the framebuffer directly via fast Set/Reset. */
-                fb_fillrect(&clear);
+                fbcon_dev_fillrect(&clear);
             }
         } else {
-            fb_fillrect(&clear);
+            fbcon_dev_fillrect(&clear);
             fb_console_mark_dirty((int)clear.dx, (int)clear.dy,
                                   (int)clear.width, (int)clear.height);
         }
@@ -757,7 +804,7 @@ static void fb_console_pixel_scroll_region_locked(int top, int bottom,
          * carries whatever is already there upward — so the framebuffer must
          * match the *pre-scroll* shadow first.  Flush pending dirty (against
          * the not-yet-scrolled shadow) before fbcon_shadow_copy() moves it. */
-        if (fbcon_is_planar() && dirty_valid) {
+        if (fbcon_is_planar() && dirty_valid && !fb_console_fb_owned_by_userland()) {
             int fx, fy, fw, fh;
             fb_console_get_dirty_rect(&fx, &fy, &fw, &fh);
             fbcon_present(fx, fy, fw, fh);
@@ -775,13 +822,13 @@ static void fb_console_pixel_scroll_region_locked(int top, int bottom,
             /* Planar: scroll the framebuffer in place with the fast latch
              * copy (re-blitting the whole region would cost a VM-exit per
              * planar VRAM write), then present only the freshly exposed band. */
-            fb_copyarea(&area);
+            fbcon_dev_copyarea(&area);
             fb_console_mark_dirty((int)clear.dx, (int)clear.dy,
                                   (int)clear.width, (int)clear.height);
         }
     } else {
-        fb_copyarea(&area);
-        fb_fillrect(&clear);
+        fbcon_dev_copyarea(&area);
+        fbcon_dev_fillrect(&clear);
         fb_console_mark_dirty(0, top_px, width_px, bottom_px - top_px);
     }
 
