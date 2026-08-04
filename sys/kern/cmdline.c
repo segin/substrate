@@ -150,6 +150,35 @@ int cmdline_has(const char *key) {
     return 0;
 }
 
+/*
+ * Token position of the last occurrence of `key`, or -1 when absent.
+ *
+ * Two flags that contradict each other (ro and rw) are resolved by
+ * comparing positions, so the later one wins.  That is what lets someone
+ * editing a GRUB entry at the menu append `rw` to override the `ro` the
+ * entry already carries, rather than having to hunt down and delete it.
+ */
+int cmdline_last_index(const char *key) {
+    const char *cursor;
+    const char *token;
+    size_t token_len;
+    size_t key_len;
+    int index = 0;
+    int last = -1;
+
+    if (!initialized || !key || !*key) return -1;
+
+    key_len = strlen(key);
+    cursor = kernel_cmdline;
+    while ((cursor = cmdline_next_token(cursor, &token, &token_len)) != NULL) {
+        if (cmdline_token_matches_key(token, token_len, key, key_len, NULL, NULL)) {
+            last = index;
+        }
+        index++;
+    }
+    return last;
+}
+
 int cmdline_get(const char *key, char *buf, size_t buf_len) {
     const char *cursor;
     const char *token;

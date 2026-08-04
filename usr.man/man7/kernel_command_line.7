@@ -81,6 +81,11 @@ VM growth diagnostics.
 .B perso:linux
 Enable Linux-personality-specific loader diagnostics.
 .TP
+.B perso:linux:aout
+Enable Linux a.out loader tracing: ZMAGIC/QMAGIC/OMAGIC layout decisions and
+.BR uselib (2)
+DLL mapping.
+.TP
 .B perso:elks
 Enable ELKS personality diagnostics broadly.
 This parent channel also enables more specific ELKS channels.
@@ -104,6 +109,27 @@ Enable native-personality ELF loader/exec diagnostics.
 .TP
 .B perso:freebsd
 Enable FreeBSD-personality loader diagnostics.
+.TP
+.B perso:xenix:xout
+Enable Xenix/386 x.out loader tracing: segment layout and the split-fragment
+size decisions the loader has to make from a truncated binary.
+.TP
+.B perso:xenix:syscall
+Enable Xenix syscall tracing through the
+.B lcall $7
+trap emulation path.
+.TP
+.B perso_lookup
+Log personality lookups made on the syscall dispatch path, naming the
+personality selected for the calling process.
+Note the underscore: this channel predates the colon convention and is
+.I not
+a child of
+.BR perso ,
+so
+.B debug=perso
+does not enable it.
+Ask for it by name.
 .TP
 .B syscall_stats
 Enable per-syscall statistics accounting (counts/timing) in addition to the
@@ -143,6 +169,21 @@ is separate from
 .BR debug= .
 It selects serial console mirroring; it does not by itself enable any debug
 channel.
+.PP
+Four names are additionally accepted as bare flags, so
+.B trap
+means the same as
+.BR debug=trap :
+.BR trap ,
+.BR xsig ,
+.B xfd
+and
+.BR nosigalrm .
+Prefer the
+.B debug=
+form for the first three; only
+.B nosigalrm
+is primarily a bare flag, since it changes behaviour rather than logging.
 .SH RELATED PARAMETERS
 .TP
 .B console=console0
@@ -220,31 +261,19 @@ Select the root block device.
 .TP
 .BI rootfstype= type [ ,type ... ]
 Select one or more root filesystem probe targets.
-.TP
-.BI init= path
-Select the initial userspace program.
-.TP
-.BI initarg= argument
-Pass a single argument to the program selected by
-.BR init= .
-Ignored unless
-.B init=
-is also given.
-.SH USB CONTROLLER OPTIONS
-These exist because the paths they control touch state that only real firmware
-sets up, and cannot be exercised under emulation.
-A machine that one of them wedges has to stay bootable.
-.TP
-.B nosmp
-.TQ
-.B up
-Boot uniprocessor: stop after the bootstrap processor and start no
-application processors.
-Discovery is skipped entirely rather than the extra CPUs being started and
-parked, so nothing runs on them at any point.
-This is the cheapest way to establish whether a fault, a lock-up or a
-corruption needs more than one CPU to reproduce \(em on an emulator you could
-pass a CPU count instead, but on real hardware there is no other way to ask.
+Each is tried in the order given and the first that mounts wins.
+The value
+.B auto
+probes the built-in list
+.RB ( ext2 ,
+.BR fat ,
+.BR minix ,
+.BR udf ,
+in that order) and may appear on its own or among named types.
+Omitting
+.B rootfstype=
+entirely is the same as
+.BR auto .
 .TP
 .B ro
 Mount the root filesystem read-only.
@@ -271,9 +300,32 @@ unsafe, so a filesystem needing repair cannot be quietly written to.
 .TP
 .B rw
 Mount the root filesystem read-write.
-This is the default and the option exists to override a
+This is the default.
 .B ro
-inherited from a GRUB entry when editing the command line at the menu.
+and
+.B rw
+are resolved last-one-wins, which is what makes the option useful at the
+GRUB menu: press
+.B e
+on an entry, append
+.B rw
+to the line, and it overrides the
+.B ro
+the entry already carries without your having to find and delete it.
+.TP
+.BI init= path
+Select the initial userspace program.
+.TP
+.BI initarg= argument
+Pass a single argument to the program selected by
+.BR init= .
+Ignored unless
+.B init=
+is also given.
+.SH USB CONTROLLER OPTIONS
+These exist because the paths they control touch state that only real firmware
+sets up, and cannot be exercised under emulation.
+A machine that one of them wedges has to stay bootable.
 .TP
 .B nousbhandoff
 Skip the USB Legacy Support BIOS-to-OS handoff on both xHCI and EHCI.
@@ -318,6 +370,17 @@ that did it rather than going silent.
 .B ehcidebug
 The same for EHCI bring-up: reset, DMA structure allocation, run, port power.
 .SH DIAGNOSTIC AND WORKAROUND FLAGS
+.TP
+.B nosmp
+.TQ
+.B up
+Boot uniprocessor: stop after the bootstrap processor and start no
+application processors.
+Discovery is skipped entirely rather than the extra CPUs being started and
+parked, so nothing runs on them at any point.
+This is the cheapest way to establish whether a fault, a lock-up or a
+corruption needs more than one CPU to reproduce \(em on an emulator you could
+pass a CPU count instead, but on real hardware there is no other way to ask.
 .TP
 .BI trace_pid= pid
 Restrict syscall tracing to a single process.
