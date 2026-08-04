@@ -94,6 +94,29 @@ Storage
                      kernel still finds it by label.  The boot ich9-ahci is
                      created empty so --drive keeps working, and since port 0 is
                      free, --drive images start there.
+  --ide              Put the root filesystem on the machine's built-in IDE
+                     controller (piix3-ide), primary master -- guest
+                     /dev/storage/ide0.  Needs the 'pc' machine, so it cannot
+                     be combined with --boot=uefi (which uses q35).
+  --ums              Put the root filesystem on a USB Mass Storage device
+                     (Bulk-Only Transport).  It arrives through the SCSI
+                     midlayer, so the guest names it /dev/storage/scsiN.
+  --uas              Put the root filesystem on a USB Attached SCSI device
+                     (usb-uas carrying a scsi-hd).  Also /dev/storage/scsiN.
+                     Both USB modes attach to the --usb-version controller, so
+                     the guest needs a working driver for that controller.
+
+  --virtio, --ide, --ums and --uas each say where the root disk goes, so at
+  most one may be given.
+  --rw               Append "rw" to the kernel command line, mounting the root
+                     filesystem read-write.  Added last, since the kernel reads
+                     it as a trailing mode word rather than a key=value.
+  --shell            Append init=/bin/sh, so the kernel starts a shell on the
+                     console instead of /sbin/init -- no rc.d, no getty.  Handy
+                     when init or a service is what you are debugging.  Pair
+                     with --rw to be able to write anything.
+                     Both only apply to --boot=kernel: in bios/uefi the command
+                     line comes from the image's grub.cfg.
 
 USB and audio
   --usb-version=VER  Emulated USB host controller: 1.1 = UHCI (default),
@@ -165,6 +188,13 @@ EXTRA_CTRL_DRIVES=""
 FLOPPY_IMAGES=""           # newline-separated floppy diskette images (fd0, fd1)
 USB_VERSION="1.1"          # 1.1=UHCI (default), 2.0=EHCI, 3.0=xHCI
 VIRTIO=0                   # 1 = root on virtio-blk instead of AHCI
+IDE=0                      # 1 = root on the machine's built-in IDE controller
+UMS=0                      # 1 = root on USB Mass Storage (Bulk-Only Transport)
+UAS=0                      # 1 = root on USB Attached SCSI
+RW=0                       # 1 = append "rw" (mount the root read-write)
+SHELL_INIT=0               # 1 = append init=/bin/sh instead of /sbin/init
+ROOT_DEV_ARGS=""           # root disk device (AHCI/virtio/IDE)
+USB_ROOT_ARGS=""           # root disk devices that must follow $USB_CTRL
 while [ $# -gt 0 ]; do
     case "$1" in
         --help|-h)  usage; exit 0 ;;
@@ -231,6 +261,11 @@ $1" ;;
             FLOPPY_IMAGES="$FLOPPY_IMAGES
 ${1#--floppy=}" ;;
         --virtio)   VIRTIO=1 ;;
+        --ide)      IDE=1 ;;
+        --ums)      UMS=1 ;;
+        --uas)      UAS=1 ;;
+        --rw)       RW=1 ;;
+        --shell)    SHELL_INIT=1 ;;
         --usb-version=*)
             USB_VERSION="${1#--usb-version=}"
             case "$USB_VERSION" in
@@ -263,6 +298,24 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
+# Where the root disk lives.  These are alternatives to the default (AHCI port
+# 0), so at most one may be given.
+ROOT_TRANSPORTS=$((VIRTIO + IDE + UMS + UAS))
+if [ "$ROOT_TRANSPORTS" -gt 1 ]; then
+    echo "run-networking.sh: --virtio, --ide, --ums and --uas are mutually exclusive" \
+         "-- they each say where the root disk goes" >&2
+    exit 1
+fi
+# --boot=uefi switches the machine to q35, which has no piix3-ide: its
+# built-in controller IS the AHCI, and 'ide.0' names a SATA port rather than
+# the primary IDE channel.  Refuse rather than silently attaching to AHCI and
+# reporting IDE.
+if [ "$IDE" -eq 1 ] && [ "$BOOTMODE" = uefi ]; then
+    echo "run-networking.sh: --ide needs the 'pc' machine (piix3-ide); --boot=uefi uses q35," \
+         "which has no IDE controller" >&2
+    exit 1
+fi
+
 # USB host controller (--usb-version). All USB devices attach to its bus
 # (id=usbctl). substrate only drives UHCI today.
 case "$USB_VERSION" in
@@ -277,9 +330,10 @@ echo "run-networking.sh: USB $USB_VERSION host controller (${USB_CTRL#-device })
 # controller, enumerated as guest /dev/storage/sata1, sata2, ... The list is
 # newline-separated so paths with spaces survive.
 EXTRA_DRIVE_ARGS=""
-# With --virtio the root disk is not on AHCI, so port 0 is free and the first
-# extra drive can use it -- keeping AHCI port N == guest sataN.
-if [ "$VIRTIO" -eq 1 ]; then port=0; else port=1; fi
+# With --virtio/--ide/--ums/--uas the root disk is not on AHCI, so port 0 is
+# free and the first extra drive can use it -- keeping AHCI port N == guest
+# sataN.
+if [ "$ROOT_TRANSPORTS" -eq 1 ]; then port=0; else port=1; fi
 OLDIFS=$IFS
 IFS='
 '
@@ -290,11 +344,11 @@ for f in $EXTRA_DRIVES; do
         exit 1
     fi
     if [ "$port" -gt 5 ]; then
-        # ICH9 AHCI has 6 ports; the boot disk holds port 0 unless --virtio
-        # moved the root filesystem off AHCI entirely.
-        if [ "$VIRTIO" -eq 1 ]; then
-            echo "run-networking.sh: at most 6 --drive images with --virtio (AHCI ports 0-5);" \
-                 "use --drive-ctrl for more" >&2
+        # ICH9 AHCI has 6 ports; the boot disk holds port 0 unless --virtio,
+        # --ide, --ums or --uas moved the root filesystem off AHCI entirely.
+        if [ "$ROOT_TRANSPORTS" -eq 1 ]; then
+            echo "run-networking.sh: at most 6 --drive images when the root disk is off AHCI" \
+                 "(ports 0-5); use --drive-ctrl for more" >&2
         else
             echo "run-networking.sh: at most 5 extra --drive images (AHCI ports 1-5);" \
                  "add a second '-device ich9-ahci' for more" >&2
@@ -386,6 +440,24 @@ IFS=$OLDIFS
 if [ "$VIRTIO" -eq 1 ]; then
     ROOT_DEV_ARGS="-device virtio-blk-pci,drive=drive0,id=vblk0"
     echo "run-networking.sh: rootfs.img on virtio-blk"
+elif [ "$IDE" -eq 1 ]; then
+    # The machine's own IDE controller (piix3-ide on 'pc'), bus ide.0 unit 0 --
+    # primary master.  Guest sees /dev/storage/ide0.  q35 has no piix3, so this
+    # is rejected above for --boot=uefi.
+    ROOT_DEV_ARGS="-device ide-hd,bus=ide.0,unit=0,drive=drive0"
+    echo "run-networking.sh: rootfs.img on IDE (primary master)"
+elif [ "$UMS" -eq 1 ]; then
+    # USB Mass Storage, Bulk-Only Transport.  The guest reaches it through the
+    # SCSI midlayer, so it registers as /dev/storage/scsiN, not umsN.
+    # Emitted via USB_ROOT_ARGS, after the host controller -- qemu resolves
+    # bus=usbctl.0 at parse time and errors out if the controller comes later.
+    USB_ROOT_ARGS="-device usb-storage,drive=drive0,id=ums0$USB_BUS"
+    echo "run-networking.sh: rootfs.img on USB Mass Storage (BOT, $USB_VERSION)"
+elif [ "$UAS" -eq 1 ]; then
+    # USB Attached SCSI: a usb-uas HBA carrying a scsi-hd.  Also arrives via
+    # the SCSI midlayer as /dev/storage/scsiN.
+    USB_ROOT_ARGS="-device usb-uas,id=uas0$USB_BUS -device scsi-hd,bus=uas0.0,drive=drive0"
+    echo "run-networking.sh: rootfs.img on USB Attached SCSI (UAS, $USB_VERSION)"
 else
     ROOT_DEV_ARGS="-device ide-hd,bus=sata0.0,unit=0,drive=drive0"
 fi
@@ -400,6 +472,11 @@ fi
 #   ROOT=/dev/storage/sata0 ./run-networking.sh
 ROOT_DEV=${ROOT:-LABEL=sub-root}
 APPEND="root=$ROOT_DEV trap"
+if [ "$SHELL_INIT" -eq 1 ]; then
+    # Straight to a shell instead of /sbin/init -- no getty, no rc.d.
+    APPEND="$APPEND init=/bin/sh"
+    echo "run-networking.sh: init=/bin/sh (no init, no getty)"
+fi
 if [ "$BOOTMODE" = kernel ]; then
     echo "run-networking.sh: root=$ROOT_DEV"
 fi
@@ -724,6 +801,15 @@ fi
 # spaces and the firmware paths could too, and only the positional parameters
 # survive that intact through an unquoted expansion.  They are free to reuse --
 # the script's own arguments were consumed by the parser above.
+# "rw" goes on last, after every other APPEND edit above, because the kernel
+# takes it as a trailing mode word for the root mount rather than a key=value.
+if [ "$RW" -eq 1 ]; then
+    APPEND="$APPEND rw"
+    if [ "$BOOTMODE" = kernel ]; then
+        echo "run-networking.sh: root mounted read-write (rw)"
+    fi
+fi
+
 set --
 case "$BOOTMODE" in
     kernel)
@@ -749,7 +835,7 @@ esac
   $EXTRA_DRIVE_ARGS \
   $EXTRA_CTRL_ARGS \
   $FLOPPY_ARGS \
-  $USB_CTRL -device usb-kbd$USB_BUS -device usb-mouse$USB_BUS \
+  $USB_CTRL $USB_ROOT_ARGS -device usb-kbd$USB_BUS -device usb-mouse$USB_BUS \
   $USB_HOST_ARGS \
   $NETDEV_ARGS \
   $GFX_ARGS \
