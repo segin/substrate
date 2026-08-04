@@ -18,6 +18,7 @@
 #endif
 
 #include <kern/panic.h>
+#include <sys/param.h>   /* KERN_BASE */
 
 
 static uma_zone_t *uma_zones = NULL;
@@ -117,11 +118,37 @@ static inline uint32_t uma_hash(void *addr) {
 static int uma_hash_corrupt_reports = 0;
 #define UMA_HASH_MAX_REPORTS 8
 
+/*
+ * Is this even a plausible slab header address?
+ *
+ * The us_zone==NULL check below catches a header whose memory was zeroed, but
+ * not one that was overwritten with a fill pattern or a stale value: a chain
+ * entry of 0xaa000000 passes it and then faults on slab->us_data at CR2
+ * 0xaa00000c.  That was seen during poweroff, walking the hash from kfree()
+ * under proc_destroy(), with 0xAA fill in the registers.
+ *
+ * Every slab header lives in the kernel direct map -- an on-page header at
+ * page + PAGE_SIZE - overhead, an off-page one from kzalloc -- so anything
+ * below KERN_BASE cannot be one.  Checking the POINTER before dereferencing
+ * it is what turns "unhandled kernel exception" into a report naming the
+ * bucket.
+ */
+static inline int uma_slab_ptr_plausible(const uma_slab_t *s) {
+    return s != NULL && (uintptr_t)s >= (uintptr_t)KERN_BASE;
+}
+
 static void uma_hash_report_corrupt(uint32_t bucket, uma_slab_t *slab, uint32_t depth) {
     if (uma_hash_corrupt_reports >= UMA_HASH_MAX_REPORTS) {
         return;
     }
     uma_hash_corrupt_reports++;
+    if (!uma_slab_ptr_plausible(slab)) {
+        /* The pointer itself is the wreckage -- do not dereference it. */
+        kprintf("UMA: hash bucket %u entry %u has an implausible slab pointer "
+                "%p (below KERN_BASE) -- chain corrupted\n",
+                bucket, depth, (void *)slab);
+        return;
+    }
     /* us_data is part of the wreckage, so report the page containing the header
      * too: an on-page header lives at page + 4096 - overhead, so that address
      * still identifies the slab's own page even when every field reads zero.
@@ -870,6 +897,14 @@ static uma_slab_t *uma_find_slab(uma_zone_t *zone, void *item) {
             break;
         }
 
+        /* Reject an implausible header address before touching any field:
+         * a fill pattern in the chain (0xaa000000) is not NULL and would
+         * otherwise fault on us_data. */
+        if (!uma_slab_ptr_plausible(s)) {
+            uma_hash_report_corrupt(bucket, s, steps);
+            break;
+        }
+
         /* us_zone is written once at slab creation and never cleared, so
          * NULL means this header's memory was recycled while still linked.
          * Report the chain and keep walking rather than dereferencing it. */
@@ -927,6 +962,16 @@ size_t uma_item_size(void *item) {
          * skipped below. */
         if (++steps > UMA_HASH_MAX_CHAIN) {
             uma_hash_report_runaway(bucket);
+            break;
+        }
+
+        /* Reject an implausible header address before touching any field.
+         * The us_zone test below only catches a ZEROED header; a chain entry
+         * overwritten with fill (0xaa000000) is non-NULL and would fault on
+         * us_data instead -- which is the poweroff panic from kfree() under
+         * proc_destroy(), CR2 0xaa00000c. */
+        if (!uma_slab_ptr_plausible(slab)) {
+            uma_hash_report_corrupt(bucket, slab, steps);
             break;
         }
 
