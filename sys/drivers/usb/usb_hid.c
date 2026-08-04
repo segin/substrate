@@ -108,6 +108,14 @@ typedef struct usb_hid_dev {
  */
 #define USB_HID_INTR_TIMEOUT_MS     4
 
+/*
+ * Most reports drained from the interrupt endpoint in one poll cycle.
+ * Deep enough that a burst of keystrokes never backs up in the device,
+ * bounded so a device with data always ready cannot starve the sleep
+ * below (and with it, detach).
+ */
+#define USB_HID_MAX_DRAIN           16
+
 #define USB_HID_REPEAT_DELAY_TICKS  (HZ / 2)        /* 500 ms */
 #define USB_HID_REPEAT_PERIOD_TICKS (HZ / 30 ? HZ / 30 : 1)  /* ~30 Hz */
 
@@ -362,14 +370,44 @@ static void usb_hid_poll_thread(void *arg)
              * An idle device NAKs for the whole window; that is the normal
              * result, not an error, so a short timeout keeps the loop cheap.
              */
-            uint32_t got = 0;
-            memset(&report, 0, sizeof(report));
-            ret = usb_interrupt_transfer(hid->udev, hid->intr_ep,
-                                         &report, sizeof(report), &got,
-                                         USB_HID_INTR_TIMEOUT_MS);
-            /* A short packet still carries a valid boot report prefix. */
-            if ((ret == USB_XFER_OK || ret == USB_XFER_SHORT) && got == 0)
-                ret = USB_XFER_NAK;
+            /*
+             * DRAIN the endpoint, do not take a single report per cycle.
+             *
+             * A device queues a report per state change and hands them out one
+             * per IN token.  Fetching only one per ~8 ms poll cycle meant a
+             * burst -- a fast keystroke, a chord, key repeat -- drained slower
+             * than it arrived, so the queue backed up and eventually dropped
+             * reports.  Losing one is worse than losing one keystroke: the
+             * diff below is against prev_report, so a dropped release leaves
+             * that key logically held down and it repeats until the next
+             * report happens to mention it.  That is the "janky, sometimes
+             * loses keyup/keydown" behaviour, and it shows up on real hardware
+             * and qemu alike because both queue reports.
+             *
+             * So keep pulling until the device NAKs (nothing left), then
+             * sleep.  An idle keyboard NAKs on the first attempt, which costs
+             * exactly what one poll cost before.
+             */
+            int drained = 0;
+            for (;;) {
+                uint32_t got = 0;
+                memset(&report, 0, sizeof(report));
+                ret = usb_interrupt_transfer(hid->udev, hid->intr_ep,
+                                             &report, sizeof(report), &got,
+                                             USB_HID_INTR_TIMEOUT_MS);
+                /* A short packet still carries a valid boot report prefix. */
+                if ((ret == USB_XFER_OK || ret == USB_XFER_SHORT) && got == 0)
+                    ret = USB_XFER_NAK;
+                if (ret != USB_XFER_OK && ret != USB_XFER_SHORT)
+                    break;
+                usb_hid_process_kbd_report(hid, &report);
+                /* Bound the drain so a device that always has data ready
+                 * cannot hold this thread off the sleep below forever. */
+                if (++drained >= USB_HID_MAX_DRAIN)
+                    break;
+            }
+            /* Reports for this cycle are already processed above. */
+            ret = USB_XFER_NAK;
         } else {
             /*
              * No interrupt IN endpoint on this interface (or the descriptors
