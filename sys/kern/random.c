@@ -13,6 +13,7 @@
 #include <string.h>
 
 #include <arch/i386/cpu.h>
+#include <arch/x86-common/io.h>
 #include <arch/i386/percpu.h>
 #include <kern/console.h>
 #include <kern/random.h>
@@ -341,6 +342,87 @@ int random_harvest_hwrng(void) {
     }
     
     return harvested;
+}
+
+/*
+ * Boot-time entropy WITHOUT a hardware RNG.
+ *
+ * random_init() used to seed the pool only from RDRAND/RDSEED, so on any CPU
+ * without them -- qemu's default qemu32 model, a 486, most pre-2012 hardware --
+ * the pool stayed empty, the CSPRNG was never seeded, and the first reader of
+ * /dev/random blocked forever.  The boot hangs right after init starts, with
+ * "RNG: Waiting for entropy" as the last thing on the console.  The kernel must
+ * not depend on an opcode the target CPU may not implement.
+ *
+ * The portable fallback is timing jitter.  Sampling a free-running counter
+ * around variable-latency work yields deltas whose low bits vary from cache
+ * state, DRAM refresh, bus contention and interrupt skew.  This is weaker than
+ * a real HWRNG and is credited conservatively, but it unblocks the boot and is
+ * exactly what every other kernel does when no HWRNG is present.
+ *
+ * Two counters, because the TSC is itself a CPU feature substrate cannot
+ * assume (i386_cpu_cycle_counter() degrades to a plain ++counter without it,
+ * which carries no entropy at all):
+ *
+ *   TSC present  -- read it directly.
+ *   otherwise    -- latch and read i8254 PIT channel 0.  It runs at 1.193 MHz
+ *                   off its own crystal, asynchronous to the CPU, so the phase
+ *                   between them is what varies.  Counter-latch (command 0x00)
+ *                   only snapshots the count; it does not disturb the channel's
+ *                   mode or reload value, so this is safe with the timer
+ *                   driver running.
+ */
+static uint32_t jitter_counter(int have_tsc) {
+    if (have_tsc) {
+        return (uint32_t)i386_cpu_cycle_counter();
+    }
+    /* Counter-latch channel 0, then read LSB then MSB. */
+    outb(0x43, 0x00);
+    uint8_t lo = inb(0x40);
+    uint8_t hi = inb(0x40);
+    return (uint32_t)lo | ((uint32_t)hi << 8);
+}
+
+int random_harvest_jitter(unsigned int want_bits) {
+    const int have_tsc = i386_cpu_has_tsc();
+    uint32_t prev_delta = 0;
+    unsigned int credited = 0;
+    unsigned int rounds = 0;
+    /* Cap the work: 1 bit per usable sample, and give up rather than spin
+     * forever on a source that turns out to be stuck. */
+    const unsigned int max_rounds = want_bits * 64u + 4096u;
+
+    while (credited < want_bits && rounds++ < max_rounds) {
+        uint32_t t0 = jitter_counter(have_tsc);
+        uint32_t delta;
+        volatile uint32_t churn = 0;
+        int spin;
+
+        /* Variable-latency work between reads.  The loop bound is derived
+         * from the counter itself so the work is not a fixed pattern. */
+        for (spin = 0; spin < (int)((t0 & 0x3f) + 8); spin++) {
+            churn += churn * 3 + (uint32_t)spin + t0;
+        }
+
+        delta = jitter_counter(have_tsc) - t0;
+
+        /* A source that never changes (or a PIT read that keeps landing on
+         * the same count) contributes nothing -- skip it rather than credit
+         * entropy that is not there. */
+        if (delta != 0 && delta != prev_delta) {
+            uint32_t sample = delta ^ (churn << 16);
+            pool_mix_bytes(&rng_state.input_pool, &sample, sizeof(sample));
+            /* One bit per sample: the deltas are small and correlated, so
+             * crediting the full width would badly overstate them. */
+            credited++;
+            prev_delta = delta;
+        }
+    }
+
+    if (credited) {
+        rng_state.input_pool.entropy_count += credited;
+    }
+    return (int)credited;
 }
 
 /*
@@ -854,6 +936,18 @@ void random_init(void) {
         }
     }
     
+    /*
+     * No hardware RNG, or not enough from it: fall back to timing jitter so
+     * the pool reaches its seed threshold.  Without this the CSPRNG stays
+     * unseeded on any CPU lacking RDRAND and the first /dev/random reader
+     * blocks forever -- the boot stops just after init starts.
+     */
+    if (rng_state.input_pool.entropy_count < 256) {
+        int got = random_harvest_jitter(256 - rng_state.input_pool.entropy_count);
+        kprintf("RNG: no hardware RNG usable, harvested %d bits of timing "
+                "jitter (%s)\n", got, i386_cpu_has_tsc() ? "TSC" : "i8254 PIT");
+    }
+
     /* Try to seed the CSPRNG */
     if (rng_state.input_pool.entropy_count >= 256) {
         random_reseed();

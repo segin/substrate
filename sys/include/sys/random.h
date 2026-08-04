@@ -98,6 +98,11 @@ void random_harvest_fast(const void *data, size_t len);
 /* High-quality entropy harvesting (trusted source, full credit) */
 void random_harvest_direct(const void *data, size_t len, unsigned int bits);
 
+/* Boot-time entropy for CPUs without RDRAND/RDSEED: harvest timing jitter
+ * (TSC where present, i8254 PIT channel 0 otherwise) until `want_bits` have
+ * been credited.  Returns the number of bits actually credited. */
+int random_harvest_jitter(unsigned int want_bits);
+
 /*
  * Hardware RNG detection and usage
  */
