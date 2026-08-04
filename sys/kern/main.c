@@ -239,8 +239,15 @@ static int root_mount_with_type(const char *device, const char *fstype) {
      * MNT_RDONLY at mount time (fs->readonly, refusing writes with -EROFS)
      * and ext2_remount() brings it back to read-write, which is what
      * `mount -o remount,rw /` drives once fsck is happy.
+     *
+     * ro and rw are resolved last-one-wins.  Every GRUB entry passes ro,
+     * so the way to get a writable root from the menu is to press `e` and
+     * append rw; that has to beat the ro already on the line.  With
+     * neither present both positions are -1, the comparison is false, and
+     * we land on the read-write default.
      */
-    uint32_t mntflags = cmdline_has("ro") ? MNT_RDONLY : 0;
+    uint32_t mntflags = (cmdline_last_index("ro") > cmdline_last_index("rw"))
+                        ? MNT_RDONLY : 0;
     if (mntflags & MNT_RDONLY)
         kprint("VFS: mounting root read-only (ro)\n");
     return vfs_mount_legacy(device, "/", fstype, mntflags, NULL);

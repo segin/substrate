@@ -140,12 +140,59 @@ void test_cmdline_debug_enabled(void) {
     printf("PASS\n");
 }
 
+/*
+ * cmdline_last_index() exists so contradictory flags resolve last-one-wins.
+ * The case that matters is a GRUB entry that already says "ro" and a user
+ * appending "rw" at the menu: the appended flag has to win.
+ */
+void test_cmdline_last_index(void) {
+    printf("Running test_cmdline_last_index...\n");
+
+    cmdline_init("root=/dev/sda1 ro quiet");
+    assert(cmdline_last_index("ro") == 1);
+    assert(cmdline_last_index("rw") == -1);
+    assert(cmdline_last_index("ro") > cmdline_last_index("rw"));
+
+    // Appending rw at the GRUB menu must override the entry's ro.
+    cmdline_init("root=/dev/sda1 ro quiet rw");
+    assert(cmdline_last_index("ro") > 0);
+    assert(cmdline_last_index("rw") == 3);
+    assert(!(cmdline_last_index("ro") > cmdline_last_index("rw")));
+
+    // ...and the reverse order still selects read-only.
+    cmdline_init("rw ro");
+    assert(cmdline_last_index("ro") > cmdline_last_index("rw"));
+
+    // Neither present: both -1, so the read-write default stands.
+    cmdline_init("root=/dev/sda1 quiet");
+    assert(cmdline_last_index("ro") == -1);
+    assert(cmdline_last_index("rw") == -1);
+    assert(!(cmdline_last_index("ro") > cmdline_last_index("rw")));
+
+    // Repeats report the last one, not the first.
+    cmdline_init("ro foo ro bar ro");
+    assert(cmdline_last_index("ro") == 4);
+
+    // "root=" and "rootfstype=" must not be mistaken for "ro".
+    cmdline_init("root=/dev/sda1 rootfstype=ext2");
+    assert(cmdline_last_index("ro") == -1);
+
+    // Absent key, empty key, and NULL are all -1 rather than a stray 0.
+    cmdline_init("");
+    assert(cmdline_last_index("ro") == -1);
+    assert(cmdline_last_index("") == -1);
+    assert(cmdline_last_index(NULL) == -1);
+
+    printf("PASS\n");
+}
+
 int main(void) {
     printf("Starting host_test_cmdline...\n");
     test_cmdline_init();
     test_cmdline_has();
     test_cmdline_get();
     test_cmdline_debug_enabled();
+    test_cmdline_last_index();
     printf("All tests passed!\n");
     return 0;
 }
