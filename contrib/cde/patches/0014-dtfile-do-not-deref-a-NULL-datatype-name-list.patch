@@ -1,0 +1,47 @@
+dtfile: do not dereference a NULL datatype name list
+
+ReadInFiletypes() walks the result of DtDtsDataTypeNames() without
+checking it:
+
+    file_types = (char **) DtDtsDataTypeNames();
+    i = 0;
+    while(file_types[i])          <-- NULL deref
+
+DtDtsDataTypeNames() returns NULL whenever the data-attribute database is
+unavailable -- get_da_db() returning NULL is an ordinary path in Dts.c,
+not an assertion -- so dtfile dies on SIGSEGV reading address 0 before it
+draws anything.  That is what "dtfile crashes on launch" looks like when
+the datatype database has not loaded:
+
+    TRAP: dtfile exception 14 -> signal 11 code 1 addr 0x0
+    eax=0x00000000  code @eip: 8b 00   (mov (%eax),%eax)
+
+With no type names there is nothing to filter, so return the same zero
+count the normal path returns for an empty set.  Verified: dtfile now
+reaches display setup and ToolTalk initialisation instead of faulting.
+
+diff --git a/programs/dtfile/Filter.c b/programs/dtfile/Filter.c
+index 76e05feb..1bbd5b3e 100644
+--- a/programs/dtfile/Filter.c
++++ b/programs/dtfile/Filter.c
+@@ -1488,6 +1488,20 @@ ReadInFiletypes(
+    }
+ 
+    file_types = (char **) DtDtsDataTypeNames();
++   /*
++    * DtDtsDataTypeNames() returns NULL whenever the data-attribute database
++    * is unavailable -- get_da_db() failing is an ordinary path in Dts.c, not
++    * an assertion -- and this walk dereferenced the result unconditionally.
++    * dtfile then died on SIGSEGV reading address 0 before it drew anything,
++    * which is what "dtfile crashes on launch" looks like when the datatype
++    * database has not loaded.  With no type names there is simply nothing to
++    * filter: leave the (already emptied) filter list alone and report a
++    * count of zero, which is what the normal path returns for an empty set.
++    */
++   if (file_types == NULL)
++   {
++      return(0);
++   }
+    i = 0;
+    while(file_types[i])
+    {

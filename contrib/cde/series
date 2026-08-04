@@ -16,3 +16,4 @@
 0011-dthelp-use-toupper-not-the-SVR4-_toupper.patch
 0012-dthelp-include-the-POSIX-fcntl.h.patch
 0013-DtSvc-keep-num_db-in-step-with-db_list.patch
+0014-dtfile-do-not-deref-a-NULL-datatype-name-list.patch
