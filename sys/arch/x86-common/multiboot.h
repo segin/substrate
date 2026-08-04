@@ -32,6 +32,23 @@
 #define MULTIBOOT2_TAG_TYPE_EFI_MMAP              17
 #define MULTIBOOT2_TAG_TYPE_EFI64_IMAGE_HANDLE    20
 
+/*
+ * RSDP handed over by the bootloader (multiboot2 tags 14/15).
+ *
+ * Under UEFI the ACPI RSDP is reachable only through the EFI configuration
+ * table -- it is NOT in the legacy 0xE0000-0xFFFFF window that BIOS systems
+ * put it in, so the classic signature scan finds nothing.  GRUB already
+ * copies the RSDP into the multiboot2 info for us; this hands that copy to
+ * the ACPI code.  Returns NULL when the bootloader supplied none (a BIOS
+ * boot, where the legacy scan works).
+ *
+ * Guarded: this header is included from boot.S, where a C declaration is a
+ * syntax error to the assembler.
+ */
+#ifndef __ASSEMBLER__
+const void *multiboot_get_acpi_rsdp(void);
+#endif
+
 #define MULTIBOOT_INFO_MEMORY           0x00000001
 #define MULTIBOOT_INFO_BOOTDEV          0x00000002
 #define MULTIBOOT_INFO_CMDLINE          0x00000004

@@ -2,6 +2,7 @@
 #include <kern/cmdline.h>
 #include <stdio.h>
 #include <string.h>
+#include <arch/x86-common/multiboot.h>
 
 #include <arch/i386/cpu.h>
 #include <arch/i386/early_boot.h>
@@ -446,6 +447,25 @@ void smp_discover_cores(void) {
         if (memcmp(P2V(addr), "RSD PTR ", 8) == 0) {
             rsdp = (struct rsdp_desc*)P2V(addr);
             break;
+        }
+    }
+
+    if (!rsdp) {
+        /*
+         * No RSDP in the legacy window.  That is the normal case under UEFI:
+         * firmware publishes it through the EFI configuration table instead,
+         * and nothing is left at 0xE0000-0xFFFFF to scan for.  Without this
+         * fallback a UEFI boot reports "ACPI RSDP not found", never locates
+         * the MADT, registers no IO-APIC and is stuck at UP even on an SMP
+         * machine -- while the very same image boots BIOS with full ACPI.
+         *
+         * GRUB already copied the RSDP into the multiboot2 info, and
+         * main.c kept a copy of it (the info itself is reclaimed early).
+         */
+        const void *mb_rsdp = multiboot_get_acpi_rsdp();
+        if (mb_rsdp && memcmp(mb_rsdp, "RSD PTR ", 8) == 0) {
+            rsdp = (struct rsdp_desc *)mb_rsdp;
+            kprint("SMP: ACPI RSDP from bootloader (UEFI).\n");
         }
     }
 

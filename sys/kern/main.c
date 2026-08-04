@@ -104,6 +104,15 @@ typedef struct multiboot_module {
 #define PHYSICAL_d(x) ((uint32_t)(x) - KERN_BASE)
 #define VIRTUAL_d(x)  ((void*)(uintptr_t)((uint32_t)(x) + KERN_BASE))
 
+/* RSDP copied out of the multiboot2 ACPI tag; see multiboot_get_acpi_rsdp(). */
+static uint8_t mboot_acpi_rsdp[36];
+static uint32_t mboot_acpi_rsdp_len = 0;
+
+const void *multiboot_get_acpi_rsdp(void)
+{
+    return mboot_acpi_rsdp_len ? (const void *)mboot_acpi_rsdp : NULL;
+}
+
 static void init_memory(multiboot_info_t *mboot_info) {
     uint32_t mmap_addr = 0;
     uint32_t mmap_length = 0;
@@ -422,10 +431,36 @@ static void parse_multiboot2(unsigned long addr, multiboot_info_t *out) {
             out->flags |= MULTIBOOT_INFO_FRAMEBUFFER_INFO;
             break;
         }
+        case MULTIBOOT2_TAG_TYPE_ACPI_OLD:
+        case MULTIBOOT2_TAG_TYPE_ACPI_NEW: {
+            /*
+             * Keep the RSDP the bootloader found.
+             *
+             * Under UEFI the RSDP lives in the EFI configuration table, not
+             * the legacy 0xE0000-0xFFFFF window, so smp_discovery's signature
+             * scan comes up empty ("SMP: ACPI RSDP not found") and the kernel
+             * loses the MADT -- no IO-APIC, no CPU topology, UP only, on a
+             * machine that may well be SMP.  GRUB hands us a COPY of the RSDP
+             * in this tag, so take it.
+             *
+             * It has to be copied out: the multiboot info itself is reclaimed
+             * during boot ("Freeing Multiboot info"), long before ACPI is
+             * parsed, so a pointer into the tag would dangle.
+             */
+            uint32_t payload = tag->size > 8 ? tag->size - 8 : 0;
+            if (payload > sizeof(mboot_acpi_rsdp)) {
+                payload = sizeof(mboot_acpi_rsdp);
+            }
+            if (payload >= 20) {   /* RSDPv1 is 20 bytes; v2 is 36 */
+                memcpy(mboot_acpi_rsdp, (const uint8_t *)tag + 8, payload);
+                mboot_acpi_rsdp_len = payload;
+            }
+            break;
+        }
         default:
-            /* Tags we don't (yet) translate: modules, ELF sections, ACPI
-             * RSDPs, EFI mmap, EFI image handle, etc.  Ignored for now —
-             * the kernel's existing code paths don't consume them. */
+            /* Tags we don't (yet) translate: modules, ELF sections, EFI
+             * mmap, EFI image handle, etc.  Ignored for now — the kernel's
+             * existing code paths don't consume them. */
             break;
         }
 
