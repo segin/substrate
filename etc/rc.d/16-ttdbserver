@@ -78,7 +78,35 @@ case "${1:-start}" in
                   for f in /usr/dt/appconfig/tttypes/*.ptype; do
                       # dtinfo*.ptype use #include and don't compile; skip them.
                       case "$f" in *dtinfo*) continue ;; esac
-                      "$TTC" -sd user -m "$f" > /dev/null 2>&1
+                      #
+                      # BOUNDED.  tt_type_comp talks to ttsession, which in
+                      # turn talks to rpc.ttdbserver over Sun RPC with
+                      # TT_RPC_TMOUT set to 1,000,000 seconds.  If that RPC
+                      # wedges, tt_type_comp never returns -- and because this
+                      # phase is deliberately synchronous (60-sdm consumes the
+                      # types), the whole boot stops here and the desktop
+                      # never starts.  That is reproducible under -smp 2:
+                      # rc.d reaches 16-ttdbserver and the console goes quiet
+                      # for good.
+                      #
+                      # A measured compile is ~1s per file, so 15s is far
+                      # outside normal and only trips on a real wedge.  Give
+                      # up on that file and carry on: missing a ToolTalk type
+                      # costs an action or two, whereas hanging here costs the
+                      # entire session.  There is no timeout(1) in the guest,
+                      # hence the explicit poll.
+                      "$TTC" -sd user -m "$f" > /dev/null 2>&1 &
+                      _ttc=$!
+                      _n=0
+                      while kill -0 "$_ttc" 2>/dev/null && [ "$_n" -lt 15 ]; do
+                          sleep 1
+                          _n=$((_n+1))
+                      done
+                      if kill -0 "$_ttc" 2>/dev/null; then
+                          echo "ttdbserver: $f wedged, skipping" >&2
+                          kill "$_ttc" 2>/dev/null
+                      fi
+                      wait "$_ttc" 2>/dev/null
                   done )
                 mkdir -p "$TTPATH" && printf '%s\n' "$ptypes" > "$stamp"
             fi
