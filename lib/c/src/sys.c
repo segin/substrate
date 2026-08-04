@@ -533,7 +533,14 @@ int sigismember(const sigset_t *set, int signo) {
 off_t lseek(int fd, off_t offset, int whence) {
     uint32_t off_lo = (uint32_t)(offset & 0xFFFFFFFF);
     uint32_t off_hi = (uint32_t)((offset >> 32) & 0xFFFFFFFF);
-    int64_t r = _syscall4(SYS_LSEEK, fd, off_lo, off_hi, whence);
+    /*
+     * _syscall4_ll, not _syscall4: lseek is the one native syscall returning
+     * a real 64-bit value, and _syscall4's cdq would sign-extend EAX over the
+     * kernel's EDX.  That capped every seek at 2 GiB -- an offset of 2^31 came
+     * back as 0xFFFFFFFF80000000, i.e. negative, so this wrapper reported a
+     * failure on a perfectly good seek.
+     */
+    int64_t r = _syscall4_ll(SYS_LSEEK, fd, off_lo, off_hi, whence);
     if (r < 0) { errno = (int)(-r); return (off_t)-1; }
     return (off_t)r;
 }

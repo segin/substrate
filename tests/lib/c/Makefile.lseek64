@@ -1,0 +1,42 @@
+# tests/lib/c/Makefile.lseek64
+#
+# lseek() past 2 GiB.  Same conventions as tests/lib/c/Makefile.fcntl.
+#
+# Host build (default):       make -f Makefile.lseek64 ; ./torture_lseek64
+# Substrate cross build:      make -f Makefile.lseek64 CROSS=/opt/substrate/bin/i386-unknown-substrate-
+#
+# The cross toolchain links against its own sysroot libc.  To test a libc
+# built from this tree -- which is what you want when the fix is IN libc --
+# link it statically against the tree instead:
+#
+#   cc -m32 -nostdlib -fno-pie -no-pie -std=c2x -nostdinc \
+#      -I$(TOP)/include -I$(TOP)/sys/include -I$(TOP)/sys \
+#      torture_lseek64.c $(TOP)/lib/c/crt0.o \
+#      -Wl,--start-group -L$(TOP)/lib/c -lc -L$(TOP)/lib/m -lm \
+#      -L$(TOP)/lib/sys -l:libsys.a -Wl,--end-group \
+#      $$(cc -m32 -print-libgcc-file-name) -o torture_lseek64
+
+CROSS  ?=
+ifeq ($(CROSS),)
+  CC      = cc
+else
+  CC      = $(CROSS)gcc
+endif
+CFLAGS  = -Wall -Wextra -O2 -g
+
+ifneq ($(CROSS),)
+  CFLAGS += -march=i486 -mtune=i486
+  LDFLAGS += -Wl,--copy-dt-needed-entries -Wl,-rpath-link,/opt/substrate/i386-unknown-substrate/lib
+endif
+
+TESTS = torture_lseek64
+
+all: $(TESTS)
+
+torture_lseek64: torture_lseek64.c
+	$(CC) $(CFLAGS) $(LDFLAGS) $< -o $@
+
+clean:
+	rm -f $(TESTS)
+
+.PHONY: all clean
