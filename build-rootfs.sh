@@ -515,6 +515,29 @@ install_to_dist() {
         (cd "$stage" && tar -cf - .) | (cd "$DIST" && tar -xf -)
     done
 
+    # /usr/var -> /var.
+    #
+    # contrib/dbus was configured with a localstatedir that kept the /usr
+    # prefix, so everything built against it looks for the system bus at
+    # /usr/var/run/dbus/system_bus_socket instead of /var/run/... .  Under TDE
+    # that is a permanent error loop -- kdesktop retries every 4 seconds:
+    #   ERROR: Failed to open connection to system message bus: Failed to
+    #   connect to socket /usr/var/run/dbus/system_bus_socket
+    #
+    # The overlay ships /usr/var/{run,lib}/dbus as EMPTY directories (0 files
+    # in the tree), so replacing them with a link loses nothing and makes the
+    # baked-in path resolve to the real /var.  This has to run after the
+    # overlay loop above, because that is what recreates the directory.
+    if [ -d "$DIST/usr/var" ] && [ ! -L "$DIST/usr/var" ]; then
+        if [ -z "$(find "$DIST/usr/var" -type f -o -type l 2>/dev/null | head -1)" ]; then
+            rm -rf "$DIST/usr/var"
+            ln -sfn ../var "$DIST/usr/var"
+            echo "Linked /usr/var -> /var (dbus localstatedir compat)"
+        else
+            echo "WARNING: $DIST/usr/var has real files; leaving it alone" >&2
+        fi
+    fi
+
     # gcc stage 2 lives in /tmp/gcc-stage2-staging (see contrib/gcc/
     # build.sh — the gcc build doesn't cooperate with a custom
     # DESTDIR the way binutils does, so it stages to /tmp instead of
