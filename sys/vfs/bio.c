@@ -100,13 +100,56 @@ bio_hash_remove(struct buf *bp)
     LIST_REMOVE(bp, b_hash);
 }
 
+/* No legitimate chain is anywhere near this long: the table has BIO_HASH_SIZE
+ * buckets, so a walk this deep means the links themselves are garbage. */
+#define BIO_HASH_MAX_CHAIN 4096
+
+static int bio_hash_reports = 0;
+#define BIO_HASH_MAX_REPORTS 8
+
+/*
+ * Is this even a plausible struct buf address?
+ *
+ * Every buf comes from kmalloc and so lives in the kernel direct map;
+ * anything below KERN_BASE cannot be one.  This matters because a corrupt
+ * chain entry is not merely wrong, it is fatal in a way that hides its own
+ * cause: bio_lookup_locked() runs underneath vnode_pager_getpages(), which
+ * runs underneath vm_fault() holding the vm_fault mutex.  Dereferencing a
+ * bad link there takes a SECOND fault, re-enters vm_fault, and panics on a
+ * recursive mutex_lock -- so the report says "recursive mutex" and says
+ * nothing at all about the block cache.  Observed with a user-range address
+ * (0x9999b5) sitting in a bucket, i.e. a buf whose memory had been reused.
+ */
+static inline int bio_buf_plausible(const struct buf *bp)
+{
+    return bp != NULL && (uintptr_t)bp >= (uintptr_t)KERN_BASE;
+}
+
 static struct buf *
 bio_lookup_locked(struct vnode *vp, int64_t blkno)
 {
     struct buf *bp;
     uint32_t hash = bio_hash(vp, blkno);
+    uint32_t steps = 0;
 
     LIST_FOREACH(bp, &bio_hashtbl[hash], b_hash) {
+        if (++steps > BIO_HASH_MAX_CHAIN) {
+            if (bio_hash_reports < BIO_HASH_MAX_REPORTS) {
+                bio_hash_reports++;
+                kprintf("bio: hash bucket %u chain exceeds %u entries -- "
+                        "walk truncated\n", hash, BIO_HASH_MAX_CHAIN);
+            }
+            break;
+        }
+        if (!bio_buf_plausible(bp)) {
+            if (bio_hash_reports < BIO_HASH_MAX_REPORTS) {
+                bio_hash_reports++;
+                kprintf("bio: hash bucket %u entry %u is an implausible buf "
+                        "%p (below KERN_BASE) -- chain corrupted, walk "
+                        "truncated\n", hash, steps, (const void *)bp);
+            }
+            break;
+        }
         if (bp->b_vp == vp && bp->b_blkno == blkno)
             return bp;
     }

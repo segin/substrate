@@ -37,6 +37,16 @@ Boot mode
                        bios    boot rootfs.img as real hardware would: the BIOS
                                runs GRUB from the MBR + post-MBR gap, GRUB finds
                                the root by LABEL and loads /vmunix from it.
+                       uefi32  the same image booted by 32-bit UEFI: IA32 OVMF
+                               on qemu-system-i386, running the BOOTIA32.EFI
+                               that is already installed on the ESP next to
+                               BOOTX64.EFI.  This is the firmware side a
+                               32-bit-only machine presents, and unlike
+                               --boot=uefi it is debuggable: the gdb stub
+                               reports i386, so symbols load and breakpoints
+                               work.  Needs IA32 OVMF, which is a DIFFERENT
+                               package from the x64 one and is missing on
+                               some distros even when x64 OVMF is installed.
                        uefi    same image, firmware side: OVMF runs
                                /EFI/BOOT/BOOTX64.EFI off the FAT32 ESP, which
                                loads /vmunix via multiboot2.  Needs edk2/OVMF,
@@ -200,8 +210,8 @@ while [ $# -gt 0 ]; do
         --help|-h)  usage; exit 0 ;;
         --boot=*)   BOOTMODE="${1#--boot=}"
                     case "$BOOTMODE" in
-                        kernel|bios|uefi) : ;;
-                        *) echo "run-networking.sh: --boot must be kernel, bios, or uefi (got '$BOOTMODE')" >&2; exit 1 ;;
+                        kernel|bios|uefi|uefi32) : ;;
+                        *) echo "run-networking.sh: --boot must be kernel, bios, uefi, or uefi32 (got '$BOOTMODE')" >&2; exit 1 ;;
                     esac ;;
         --gfx)      GFX=1 ;;
         --gfx=*)    GFX=1; GFX_MODE="${1#--gfx=}"
@@ -310,8 +320,8 @@ fi
 # built-in controller IS the AHCI, and 'ide.0' names a SATA port rather than
 # the primary IDE channel.  Refuse rather than silently attaching to AHCI and
 # reporting IDE.
-if [ "$IDE" -eq 1 ] && [ "$BOOTMODE" = uefi ]; then
-    echo "run-networking.sh: --ide needs the 'pc' machine (piix3-ide); --boot=uefi uses q35," \
+if [ "$IDE" -eq 1 ] && { [ "$BOOTMODE" = uefi ] || [ "$BOOTMODE" = uefi32 ]; }; then
+    echo "run-networking.sh: --ide needs the 'pc' machine (piix3-ide); --boot=$BOOTMODE uses q35," \
          "which has no IDE controller" >&2
     exit 1
 fi
@@ -783,6 +793,61 @@ case "$BOOTMODE" in
         echo "run-networking.sh: firmware $OVMF_CODE"
         echo "run-networking.sh: kernel + boot args come from the image's grub.cfg, not this script"
         ;;
+    uefi32)
+        # 32-bit UEFI: IA32 OVMF on the 32-bit emulator, booting the
+        # BOOTIA32.EFI that build-rootfs.sh already installs on the ESP
+        # alongside BOOTX64.EFI.
+        #
+        # Worth having for two reasons.  It is the firmware side a 32-bit-only
+        # machine would present, which --boot=uefi cannot exercise at all; and
+        # it is DEBUGGABLE, which --boot=uefi is not.  x64 OVMF forces
+        # qemu-system-x86_64, whose gdb stub advertises the CPU as
+        # i386:x86-64, so loading substrate's 32-bit kernel ELF is rejected
+        # ("Selected architecture i386 is not compatible with reported target
+        # architecture i386:x86-64") and gdb loses its registers -- only raw
+        # address reads work there.  Under qemu-system-i386 the stub reports
+        # i386, symbols load, and breakpoints and backtraces work normally.
+        QEMU_BIN=qemu-system-i386
+        QEMU_CPU="qemu32,+rdrand"
+        QEMU_MACHINE="q35,i8042=off"
+
+        command -v "$QEMU_BIN" >/dev/null 2>&1 || {
+            echo "run-networking.sh: --boot=uefi32 needs $QEMU_BIN" >&2; exit 1; }
+
+        OVMF_CODE=""
+        OVMF_VARS_TEMPLATE=""
+        for d in /usr/share/edk2/ia32 /usr/share/OVMF/ia32 /usr/share/ovmf/ia32 \
+                 /usr/share/edk2-ovmf/ia32 /usr/share/qemu/edk2-i386; do
+            for c in OVMF_CODE.4m.fd OVMF_CODE.fd OVMF32_CODE.fd edk2-i386-code.fd; do
+                if [ -z "$OVMF_CODE" ] && [ -f "$d/$c" ]; then
+                    OVMF_CODE="$d/$c"
+                fi
+            done
+            for v in OVMF_VARS.4m.fd OVMF_VARS.fd OVMF32_VARS.fd edk2-i386-vars.fd; do
+                if [ -z "$OVMF_VARS_TEMPLATE" ] && [ -f "$d/$v" ]; then
+                    OVMF_VARS_TEMPLATE="$d/$v"
+                fi
+            done
+        done
+        if [ -z "$OVMF_CODE" ] || [ -z "$OVMF_VARS_TEMPLATE" ]; then
+            echo "run-networking.sh: --boot=uefi32 needs IA32 OVMF firmware, which is" \
+                 "NOT the same package as the x64 one." >&2
+            echo "  Arch's edk2-ovmf ships /usr/share/edk2/x64/* and the IA32 qemu" \
+                 "firmware DESCRIPTORS" >&2
+            echo "  (/usr/share/qemu/firmware/8*-edk2-ovmf-ia32-*.json), but not the" \
+                 "/usr/share/edk2/ia32/*.fd they point at." >&2
+            echo "  Looked under /usr/share/{edk2,OVMF,ovmf,edk2-ovmf}/ia32 for" \
+                 "OVMF_CODE*.fd / OVMF32_CODE.fd." >&2
+            exit 1
+        fi
+
+        OVMF_VARS=$(mktemp -t substrate-ovmf32-vars-XXXXXX.fd)
+        cp "$OVMF_VARS_TEMPLATE" "$OVMF_VARS"
+
+        echo "run-networking.sh: 32-bit UEFI boot (IA32 OVMF -> /EFI/BOOT/BOOTIA32.EFI -> /vmunix)"
+        echo "run-networking.sh: firmware $OVMF_CODE"
+        echo "run-networking.sh: kernel + boot args come from the image's grub.cfg, not this script"
+        ;;
 esac
 
 if [ "$BOOTMODE" != kernel ] && [ "$GFX" -eq 1 ]; then
@@ -815,7 +880,7 @@ case "$BOOTMODE" in
     kernel)
         set -- -kernel "$KERNEL" -append "$APPEND"
         ;;
-    uefi)
+    uefi|uefi32)
         # unit=0 is the firmware (read-only), unit=1 the variable store. The
         # variable store must be writable, hence the throwaway copy.
         set -- -drive "if=pflash,format=raw,unit=0,readonly=on,file=$OVMF_CODE" \
