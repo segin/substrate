@@ -83,6 +83,26 @@ Follow-up (still true): substrate's gthr-posix uses hard (non-weak)
 pthread refs, so C++ programs using `std::mutex` must link
 `-lpthread` (the gcc driver should auto-link it).
 
+### The `specs` override must re-state `--eh-frame-hdr`
+
+`<libdir>/specs` (installed by `contrib/gcc/install-specs.sh`) appends
+`--copy-dt-needed-entries` and `-rpath-link` to the built-in `*link:`
+spec.  GCC concatenates such a `+ ` append against `link_spec` *as it
+stands before* `LINK_EH_SPEC` is prepended to it — so an override that
+does not name `--eh-frame-hdr` itself silently drops it.  The built-in
+`LINK_SPEC` half (`-m elf_i386_substrate` …) still comes through, which
+makes the loss easy to miss.
+
+Symptom when it is lost: the linked object has an `.eh_frame` section
+but no `.eh_frame_hdr` / `PT_GNU_EH_FRAME`, so `dl_iterate_phdr` finds
+no unwind table for that module and **every** C++ throw out of it hits
+`std::terminate` — including a `try`/`catch (...)` in the same
+function.  Check with:
+
+```
+readelf -l <binary> | grep GNU_EH_FRAME     # must print one line
+```
+
 ## gdb
 
 `gdb` (`contrib/gdb/`) runs on substrate end-to-end: the libsys
