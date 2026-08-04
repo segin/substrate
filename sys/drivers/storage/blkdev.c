@@ -87,6 +87,17 @@ void blkdev_register(blkdev_t *dev) {
     memset(&dev->node, 0, sizeof(fs_node_t));
     strlcpy(dev->node.name, dev->name, sizeof(dev->node.name));
     dev->node.flags = FS_BLOCKDEVICE;
+    /*
+     * The memset above left mask/uid/gid at zero, so every disk node came out
+     * mode 000 -- `ls -l /dev/storage` showed "b---------" for ide0, sata0,
+     * scsi0 and friends alike.  Root bypasses the check so mounting still
+     * worked, which is why this went unnoticed, but nothing running without
+     * privilege could open a disk at all.  Use the same 0660 root:root the
+     * character devices in drivers/devices/ set explicitly.
+     */
+    dev->node.mask = 0660;
+    dev->node.uid = 0;
+    dev->node.gid = 0;
     dev->node.length = dev->total_sectors * dev->sector_size;
     dev->node.impl = (uint32_t)(uintptr_t)dev;
     dev->node.read = blkdev_vfs_read;
