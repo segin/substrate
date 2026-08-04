@@ -1,0 +1,172 @@
+Keep num_db in step with db_list, and survive an unmapped datatype cache.
+
+dtwm dies with SIGSEGV on address 0 while building the memory-mapped
+datatype database, before it ever draws the Front Panel:
+
+    DtActionLabel -> _DtDtsMMGet -> _DtDtsMMInit -> _DtDtsMMCreateDb
+                  -> _DtDtsMMCreateFile -> _MMWriteDb -> build_new_db
+                     (MMDb.c:387, `db_ptr->databaseName` with db_ptr NULL)
+
+`db_list` is kept two ways at once: as a NULL-terminated vector, and as a
+separate count in `num_db`.  `_DtDtsDbDeleteDb()` compacts the vector over
+the entry it removes but never decrements the count, so after any partial
+delete `num_db` is one greater than the number of live databases.
+`_DtDtsMMCreateFile()` hands that count straight to `_MMWriteDb()`, which
+walks `db_list[0 .. num_db-1]` and so reads the NULL terminator and
+dereferences it.
+
+The partial delete is not hypothetical — `_DtDtsMMCreateDb()` does it to
+itself.  On every call after the first it runs `_DtFreeActionDB()` (which
+deletes the action database) and then `_DtDtsDbAddDatabase(_DtACTION_NAME)`
+to re-add it, so the count runs one further ahead of the vector per pass.
+
+The second hunk is a safety net for the failure this used to cause.  When
+`_DtDtsMMInit()` cannot map the cache it reports that by leaving `head` and
+`mmaped_db` NULL, but every accessor in DtsMM.c dereferences them anyway
+and faults.  Return "nothing there" — the value each caller already tests
+for — so an unavailable cache degrades to the in-memory database instead of
+killing the process.
+
+diff --git a/lib/DtSvc/DtUtil1/DtsDb.c b/lib/DtSvc/DtUtil1/DtsDb.c
+index 51e97a86..c9932e1a 100644
+--- a/lib/DtSvc/DtUtil1/DtsDb.c
++++ b/lib/DtSvc/DtUtil1/DtsDb.c
+@@ -269,6 +269,21 @@ _DtDtsDbDeleteDb(DtDtsDbDatabase *db)
+ 		{
+ 			flag = 1;
+ 			db_list[i] = 0;
++			/*
++			 * db_list is both NULL-terminated and separately
++			 * counted by num_db, and compacting the vector here
++			 * used to leave num_db untouched.  _DtDtsMMCreateFile
++			 * passes num_db straight to _MMWriteDb, which then
++			 * reads one entry past the last live database — the
++			 * NULL terminator — and dereferences it.  That is a
++			 * SIGSEGV on address 0, and it is how dtwm dies while
++			 * building the memory-mapped datatype database on its
++			 * way to drawing the Front Panel: _DtDtsMMCreateDb
++			 * deletes the action database and re-adds it on every
++			 * call after the first, so the count runs ahead of the
++			 * vector by one for each pass.
++			 */
++			num_db--;
+ 		}
+ 		if(flag)
+ 		{
+diff --git a/lib/DtSvc/DtUtil1/DtsMM.c b/lib/DtSvc/DtUtil1/DtsMM.c
+index 8c5c2fcf..bea714ef 100644
+--- a/lib/DtSvc/DtUtil1/DtsMM.c
++++ b/lib/DtSvc/DtUtil1/DtsMM.c
+@@ -80,6 +80,15 @@ _DtDtsMMGetPtr(int index)
+ 	{
+ 		_DtDtsMMInit(0);
+ 	}
++
++	/* _DtDtsMMInit() leaves head/mmaped_db NULL when the mapped
++	 * datatype database is unavailable; every dereference below
++	 * assumes otherwise.  Report 'nothing there' instead of
++	 * faulting (see _DtDtsMMStringToBoson). */
++	if (!mmaped_db || !head) {
++		_DtSvcProcessUnlock();
++		return((void *)0);
++	}
+ 	int_list = (DtShmIntList)&mmaped_db[sizeof(DtDtsMMHeader)];
+ 	_DtSvcProcessUnlock();
+ 	return((void *)&int_list[index]);
+@@ -95,6 +104,15 @@ _DtDtsMMGetPtrSize(int index)
+ 	{
+ 		_DtDtsMMInit(0);
+ 	}
++
++	/* _DtDtsMMInit() leaves head/mmaped_db NULL when the mapped
++	 * datatype database is unavailable; every dereference below
++	 * assumes otherwise.  Report 'nothing there' instead of
++	 * faulting (see _DtDtsMMStringToBoson). */
++	if (!mmaped_db || !head) {
++		_DtSvcProcessUnlock();
++		return(0);
++	}
+ 	int_list = (DtShmIntList)&mmaped_db[sizeof(DtDtsMMHeader)];
+ 	_DtSvcProcessUnlock();
+ 	return(int_list[index-1]);
+@@ -178,6 +196,13 @@ _DtDtsMMBosonToString(DtShmBoson boson)
+ 		_DtDtsMMInit(0);
+ 	}
+ 
++	/* Same NULL-mapped-database guard as _DtDtsMMStringToBoson(); this
++	 * one answers with no string at all. */
++	if (!head) {
++		_DtSvcProcessUnlock();
++		return((const char *)0);
++	}
++
+ 	str_table = (DtShmStrtab)_DtDtsMMGetPtr(head->str_tbl_offset);
+ 	_DtSvcProcessUnlock();
+ 
+@@ -198,6 +223,18 @@ _DtDtsMMStringToBoson(const char *string)
+ 		_DtDtsMMInit(0);
+ 	}
+ 
++	/*
++	 * _DtDtsMMInit() can fail (no cache file, mapping refused), and it
++	 * reports that by leaving `head` and `mmaped_db` NULL — every
++	 * accessor here then dereferences it anyway, faulting on address 0.
++	 * Report "no such string" (-1), which is what the callers already
++	 * test for.
++	 */
++	if (!mmaped_db || !head) {
++		_DtSvcProcessUnlock();
++		return(-1);
++	}
++
+ 	str_table = (DtShmStrtab)_DtDtsMMGetPtr(head->str_tbl_offset);
+ 	_DtSvcProcessUnlock();
+ 
+@@ -279,6 +316,15 @@ _DtDtsMMPrint(FILE *org_fd)
+ 		_DtDtsMMInit(0);
+ 	}
+ 
++	/* _DtDtsMMInit() leaves head/mmaped_db NULL when the mapped
++	 * datatype database is unavailable; every dereference below
++	 * assumes otherwise.  Report 'nothing there' instead of
++	 * faulting (see _DtDtsMMStringToBoson). */
++	if (!mmaped_db || !head) {
++		_DtSvcProcessUnlock();
++		return(0);
++	}
++
+ 	for(db = 0; db < head->num_db; db++)
+ 	{
+ 		db_ptr = &db_list[db];
+@@ -378,6 +424,15 @@ _DtsMMListDb(void)
+ 		_DtDtsMMInit(0);
+ 	}
+ 
++	/* _DtDtsMMInit() leaves head/mmaped_db NULL when the mapped
++	 * datatype database is unavailable; every dereference below
++	 * assumes otherwise.  Report 'nothing there' instead of
++	 * faulting (see _DtDtsMMStringToBoson). */
++	if (!mmaped_db || !head) {
++		_DtSvcProcessUnlock();
++		return((void *)0);
++	}
++
+ 	list = (char **)malloc((head->num_db+1)*sizeof(char *));
+ 	for ( i = 0; i < head->num_db; i++ )
+ 	{
+@@ -401,6 +456,15 @@ _DtDtsMMGet(const char *name)
+ 	{
+ 		_DtDtsMMInit(0);
+ 	}
++
++	/* _DtDtsMMInit() leaves head/mmaped_db NULL when the mapped
++	 * datatype database is unavailable; every dereference below
++	 * assumes otherwise.  Report 'nothing there' instead of
++	 * faulting (see _DtDtsMMStringToBoson). */
++	if (!mmaped_db || !head) {
++		_DtSvcProcessUnlock();
++		return(0);
++	}
+ 	for(i = 0; i < head->num_db; i++)
+ 	{
+ 		if(db_list[i].databaseName == boson)

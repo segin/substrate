@@ -15,3 +15,4 @@
 0010-dtinfo-build-the-Xaw-era-widgets-as-gnu99.patch
 0011-dthelp-use-toupper-not-the-SVR4-_toupper.patch
 0012-dthelp-include-the-POSIX-fcntl.h.patch
+0013-DtSvc-keep-num_db-in-step-with-db_list.patch
