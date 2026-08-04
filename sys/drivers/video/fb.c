@@ -807,7 +807,29 @@ void fb_set_offscreen(int offscreen) {
 int fb_client_onscreen(void) {
     int onscreen;
 
-    spinlock_acquire(&fb_shadow_lock);
+    /*
+     * TRY the lock: this runs in IRQ context.
+     *
+     * fb_console_tick() -> fb_console_active() -> here is reached from the
+     * timer interrupt, while fb_set_offscreen() can be holding fb_shadow_lock
+     * in process context for the whole VT switch -- including the
+     * full-framebuffer memcpy that seeds the shadow.  substrate's spinlocks
+     * disable preemption but NOT interrupts, so a plain acquire here is the
+     * classic process+ISR deadlock: the tick lands mid-switch, re-acquires a
+     * lock this CPU already holds, and panics.  Reproduced by switching out
+     * of X, back in, and out again.
+     *
+     * Making fb_shadow_lock IRQ-safe instead would mean running that memcpy
+     * with interrupts off for milliseconds, which is worse.  So fail soft:
+     * if the lock is busy the switch is in flight, and the honest answer for
+     * the console is "userland owns the screen" -- do not paint.  Painting is
+     * the only thing this answer gates, and skipping a tick's worth of it
+     * during a VT switch costs nothing; the VT repaints from its cell buffer
+     * when the switch completes.
+     */
+    if (!spinlock_try_acquire(&fb_shadow_lock)) {
+        return 1;
+    }
     onscreen = fb_client.active && !fb_is_offscreen;
     spinlock_release(&fb_shadow_lock);
     return onscreen;
