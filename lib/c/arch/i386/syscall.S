@@ -14,6 +14,7 @@
 .global _syscall2
 .global _syscall3
 .global _syscall4
+.global _syscall4_ll
 .global _syscall5
 .global _syscall6
 
@@ -76,6 +77,30 @@ _syscall4:
     int $0x80
     cdq                     # sign-extend eax into edx for int64_t return
     add $20, %esp           # pop dummy + args
+    ret
+
+# int64_t _syscall4_ll(int num, int arg1, int arg2, int arg3, int arg4)
+#
+# Same as _syscall4 but WITHOUT the cdq: the kernel's EDX is the real high
+# half of a 64-bit return, so sign-extending EAX over it would destroy the
+# value.  Only for syscalls the kernel genuinely returns 64 bits from --
+# see the edx_is_retval1 list in sys/arch/i386/syscall.c.  Those return
+# negative errnos as a full int64, so EDX is already 0xFFFFFFFF on error
+# and the caller's `r < 0` test still works.
+#
+# Every other syscall must keep using _syscall4: for those the kernel
+# forces EDX to 0, so a 32-bit negative errno would read back as a large
+# positive int64 and the error would go unnoticed.  That is what the cdq
+# is for, and why this cannot simply replace it.
+_syscall4_ll:
+    mov 4(%esp), %eax       # syscall number
+    push 20(%esp)           # arg4
+    push 20(%esp)           # arg3
+    push 20(%esp)           # arg2
+    push 20(%esp)           # arg1
+    push $0                 # dummy return address
+    int $0x80
+    add $20, %esp           # pop dummy + args (edx:eax preserved)
     ret
 
 # int _syscall5(int num, int arg1, int arg2, int arg3, int arg4, int arg5)

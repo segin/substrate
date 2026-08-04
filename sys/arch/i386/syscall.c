@@ -636,9 +636,19 @@ void syscall_handler(registers_t *regs) {
          * child): a stray non-zero edx makes the PARENT believe it is the child
          * and run the child code path.  Default edx to 0 and only propagate the
          * high word for the syscalls that genuinely return one.
+         *
+         * The native lseek belongs on that list for the same reason the BSD
+         * ones do: sys_lseek is the one native handler actually declared
+         * int64_t, and forcing edx to 0 threw away the top half of every
+         * offset.  Userland then saw only the low word, so any seek at or past
+         * 2 GiB came back looking negative and libc reported it as an error --
+         * which is how e2fsck concluded a 4 GiB partition was exactly 2 GiB
+         * (it sizes a device by binary-searching lseek).  Anything else
+         * seeking a large file hit the same wall.
          */
         int edx_is_retval1 =
             (syscall_num == 42) ||                                  /* pipe (both BSD) */
+            (p->id == PERS_NATIVE  && syscall_num == SYS_LSEEK) ||  /* native lseek */
             (p->id == PERS_NETBSD  && syscall_num == 199) ||        /* NetBSD lseek */
             (p->id == PERS_FREEBSD && syscall_num == 478) ||        /* FreeBSD lseek */
             (p->id == PERS_OPENBSD && syscall_num == 199);          /* OpenBSD lseek */
