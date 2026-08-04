@@ -760,7 +760,35 @@ static void uma_slab_free(uma_zone_t *zone, uma_slab_t *slab) {
  */
 static void *uma_slab_alloc_item(uma_zone_t *zone, uma_slab_t *slab) {
     if (slab->us_freecount == 0) return NULL;
-    
+
+    /*
+     * Validate the slab BEFORE trusting any of its fields.
+     *
+     * A slab reached here with us_freelist == NULL faults immediately below
+     * on us_freelist[idx] -- a kernel NULL read with CR2=0 inside
+     * uma_zalloc, reachable from kmalloc on any path.  That has been seen in
+     * the field, and the slab it came from had us_freecount = 0xffff for a
+     * zone whose uz_ipers is 31, with the slab's page holding unrelated
+     * repeating data: the page had been reused while the slab was still
+     * linked on a zone list.
+     *
+     * Faulting three dereferences later loses the evidence -- the trap shows
+     * only address 0.  Refuse the slab and say which zone it belonged to and
+     * what was wrong with it, so the next occurrence names the moment the
+     * bad slab entered the list instead of the moment it was dereferenced.
+     * Returning NULL is safe: every caller treats it as "this slab has
+     * nothing", and uma_zalloc falls through to allocating a fresh slab.
+     */
+    if (slab->us_freelist == NULL || slab->us_freecount > zone->uz_ipers) {
+        kprintf("uma: rejecting corrupt slab %p in zone '%s': "
+                "freelist=%p freecount=%u (uz_ipers=%u firstfree=%u)\n",
+                (void *)slab, zone->uz_name ? zone->uz_name : "<unnamed>",
+                (void *)slab->us_freelist,
+                (unsigned)slab->us_freecount, (unsigned)zone->uz_ipers,
+                (unsigned)slab->us_firstfree);
+        return NULL;
+    }
+
     uint32_t idx = slab->us_firstfree;
     /* Bounds check index before use (finding #23) */
     if (idx >= zone->uz_ipers) return NULL;
