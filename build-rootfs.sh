@@ -115,6 +115,10 @@ build_components() {
     make -C "$TOP/lib/pthread" -j4
     make -C "$TOP/lib/dl" -j4
     make -C "$TOP/lib/edit" -j4
+    # usr.bin/at links -lat, so libat has to exist before the usr.bin pass.
+    # Without this a tree that has never built lib/at (a fresh clone or a new
+    # worktree) dies at "cannot find -lat" instead of producing a dist/.
+    make -C "$TOP/lib/at" -j4
 
     echo "Building usr.lib helper libraries (libelfobj, libregex,"
     echo "libexvi, libbc, libdemangle, libjoin, libuu, ...)"
