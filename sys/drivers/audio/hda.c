@@ -709,7 +709,24 @@ static int hda_codec_configure(hda_dev_t *d)
  * d->feed_lock (IRQ-safe), which makes this the sole writer of the ring
  * state across the IRQ handler, the priming path, and other CPUs.
  */
-static void hda_feed(hda_dev_t *d)
+/*
+ * Stage PCM from the software FIFO into free ring slots.  Caller must hold
+ * d->feed_lock (IRQ-safe).
+ *
+ * Only ever queues a FULL slot unless flush_tail says otherwise.  Every BDL
+ * entry is a fixed HDA_CHUNK_BYTES and the controller plays all of it, so
+ * topping up a short slot with zeros splices silence into the middle of the
+ * stream.  Writers hand us whatever size they like -- a player doing 2 KiB
+ * writes against 4 KiB slots produced a stream that was half silence, one
+ * gap every slot, which at 44.1 kHz is a ~43 Hz chop: audibly a cyclic
+ * guttural stutter, and it halves the apparent pitch.  Waiting for a full
+ * chunk costs at most one slot of latency and keeps the audio contiguous.
+ *
+ * Genuine underrun is handled elsewhere: the completion interrupt zeroes the
+ * slot it just drained, so a starved ring plays silence rather than looping
+ * over stale audio.
+ */
+static void hda_feed(hda_dev_t *d, int flush_tail)
 {
 	if (d->chunk[0] == NULL || d->fifo_buf == NULL) {
 		return;
@@ -729,18 +746,16 @@ static void hda_feed(hda_dev_t *d)
 		if (avail == 0) {
 			break;
 		}
+		if (avail < HDA_CHUNK_BYTES && !flush_tail) {
+			break;   /* wait for a whole slot's worth */
+		}
 		copy_len = (avail > HDA_CHUNK_BYTES) ? HDA_CHUNK_BYTES : avail;
 
 		slot = d->next_idx;
 		(void)audio_fifo_read(&d->fifo, (uint8_t *)d->chunk[slot],
 		                      copy_len);
-		/*
-		 * Every BDL entry is a fixed HDA_CHUNK_BYTES, so a partial
-		 * fill must be padded rather than shortening the entry: the
-		 * ring length is fixed at CBL and the controller will play the
-		 * whole slot regardless.  Padding with zeros makes the tail
-		 * silence instead of whatever the slot held last time round.
-		 */
+		/* Only reachable on the drain path, where the padding is the
+		 * genuine end of the stream rather than a mid-stream gap. */
 		if (copy_len < HDA_CHUNK_BYTES) {
 			memset((uint8_t *)d->chunk[slot] + copy_len, 0,
 			       HDA_CHUNK_BYTES - copy_len);
@@ -781,7 +796,7 @@ static void hda_kick(hda_dev_t *d)
 	 * completion interrupt -- one missed IOC and playback deadlocks
 	 * permanently with the software FIFO full and the ring starved.
 	 */
-	hda_feed(d);
+	hda_feed(d, 0);
 
 	if (!d->running) {
 		uint32_t in_flight;
@@ -886,7 +901,24 @@ static int hda_irq_handler(unsigned int irq, void *dev_id, void *frame)
 			}
 			/* Autonomously refill freed ring slot(s) from the
 			 * software FIFO so playback survives producer jitter. */
-			hda_feed(d);
+			hda_feed(d, 0);
+			/*
+			 * A cyclic stream never stops on its own: with RUN set
+			 * the controller keeps walking the ring and raising a
+			 * completion per slot forever, replaying whatever the
+			 * slots hold.  Once nothing is outstanding, halt it --
+			 * otherwise a 2 s clip plays for as long as the machine
+			 * is up, and slots_played runs away past writes_queued
+			 * so the unsigned in_flight wraps and every consumer of
+			 * it (back-pressure, drain) misreads a drained ring as
+			 * a full one.  hda_kick restarts from its halted path
+			 * when the next write arrives.
+			 */
+			if (d->writes_queued ==
+			    __atomic_load_n(&d->slots_played, __ATOMIC_ACQUIRE)) {
+				hda_write32(d, d->sd_base + HDA_SD_CTL, 0);
+				d->running = 0;
+			}
 			spinlock_release_irq(&d->feed_lock, f);
 			(void)sleepq_wake_all(d);
 		}
@@ -1020,9 +1052,49 @@ static int hda_open(audio_dev_t *adev, int mode)
 	return 0;
 }
 
+static int hda_drain(audio_dev_t *adev);
+
 static int hda_close(audio_dev_t *adev)
 {
 	hda_dev_t *d = adev->driver_data;
+	int budget;
+
+	/*
+	 * Play out what the application already handed us before stopping.
+	 * Without this, close() truncates: the writer only blocks once the
+	 * 256 KiB software FIFO fills, so a short clip is fully accepted, the
+	 * process exits, and killing the stream here discards nearly all of
+	 * it -- a two second tone came out as 720 bytes.  The completion
+	 * interrupt already wakes us on every drained slot, so wait on the
+	 * same sleep channel the writer uses.  Bounded, and interruptible, so
+	 * a wedged controller cannot make close() unkillable.
+	 */
+	hda_drain(adev);
+	for (budget = 0; budget < 4000; budget++) {
+		unsigned long f = spinlock_acquire_irq(&d->feed_lock);
+		int32_t in_flight = (int32_t)(d->writes_queued -
+		                     __atomic_load_n(&d->slots_played,
+		                                     __ATOMIC_ACQUIRE));
+		size_t pending = audio_fifo_used(&d->fifo);
+		spinlock_release_irq(&d->feed_lock, f);
+
+		/* Signed: a completion racing past writes_queued must read as
+		 * "drained", not as ~4 billion still outstanding. */
+		if (in_flight <= 0 && pending == 0) {
+			break;
+		}
+		if (!current_thread) {
+			__asm__ volatile("pause");
+			continue;
+		}
+		if (current_thread->sig_pending & ~current_thread->sig_mask) {
+			break;
+		}
+		sleepq_add(d, current_thread);
+		current_thread->flags |= THREAD_F_INTERRUPTIBLE;
+		sched_sleep(d);
+		current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
+	}
 
 	/*
 	 * Stop the stream and reset the ring/FIFO state under feed_lock
@@ -1128,7 +1200,17 @@ static int hda_write(audio_dev_t *adev, const void *buf, size_t len)
 
 static int hda_drain(audio_dev_t *adev)
 {
-	(void)adev;
+	hda_dev_t *d = adev->driver_data;
+	unsigned long flags;
+
+	/* End of stream: the residue left in the FIFO is shorter than a slot
+	 * and would otherwise sit there forever, since the normal path only
+	 * queues whole slots.  Padding is correct here -- it really is the
+	 * end of the audio. */
+	flags = spinlock_acquire_irq(&d->feed_lock);
+	hda_feed(d, 1);
+	spinlock_release_irq(&d->feed_lock, flags);
+	hda_kick(d);
 	return 0;
 }
 
