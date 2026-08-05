@@ -9,6 +9,7 @@
 #include <kern/console.h>
 #include <sys/lock.h>
 #include <sys/smp.h>
+#include <sys/proc.h>
 
 /*
  * Serialises the object-resolution + page-fill + COW + pmap_enter region of
@@ -41,22 +42,31 @@ static spinlock_t vm_fault_lock_init = SPINLOCK_INIT("vm_fault_init");
  *
  * The panic itself cannot say which access faulted: by the time the second
  * acquire fails, the inner fault's address is only in the register the ISR
- * already consumed.  So record the outer fault here on entry and report both
- * the moment a nested entry is seen while the lock is held -- that names the
- * address the locked region touched, which is the whole question.
+ * already consumed.  So record the outer fault when the lock is taken and
+ * report both the moment the holder faults again -- that names the address
+ * the locked region touched, which is the whole question.
  *
- * Per CPU rather than per thread: nesting is by definition on one CPU, and a
- * fixed array needs no allocation on the fault path.
+ * Keyed on the owning THREAD, not the CPU.  Per-CPU state would be correct
+ * only if the locked region never slept, and it does: the pager fill path
+ * blocks on device I/O.  While it sleeps the CPU runs another thread, whose
+ * own fault is a different thread arriving at a held mutex -- ordinary
+ * contention that resolves itself, not recursion.  Keying on the CPU
+ * reported every one of those as a deadlock-in-waiting, which on a slow
+ * enough backing store (USB Mass Storage, where a bulk transfer through a
+ * hub takes milliseconds) is most faults on the system: the console filled
+ * with warnings about a deadlock that was not happening.
+ *
+ * One global record rather than an array: a mutex has exactly one holder
+ * system-wide, and the holder can be descheduled and resumed on a different
+ * CPU, so a per-CPU slot would be left behind by the very sleep that makes
+ * this interesting.
  */
+static thread_t *vm_fault_lock_owner;   /* thread inside the locked region */
+static uintptr_t vm_fault_lock_va;      /* the fault that took the lock */
+static uint32_t  vm_fault_lock_pc;
+static uint8_t   vm_fault_lock_prot;
+
 #define VM_FAULT_MAXCPU 8
-struct vm_fault_inflight {
-    int       depth;      /* nesting count for this CPU */
-    int       locked;     /* outer frame currently holds the object lock */
-    uintptr_t va;         /* outer fault address (CR2) */
-    uint32_t  pc;         /* outer faulting eip, if the ISR supplied one */
-    uint8_t   prot;
-};
-static struct vm_fault_inflight vm_fault_ctx[VM_FAULT_MAXCPU];
 static uint32_t vm_fault_pending_pc[VM_FAULT_MAXCPU];
 
 static inline int vm_fault_cpu(void) {
@@ -70,7 +80,8 @@ void vm_fault_note_pc(uint32_t pc) {
     vm_fault_pending_pc[vm_fault_cpu()] = pc;
 }
 
-static void vm_fault_object_lock_acquire(void) {
+static void vm_fault_object_lock_acquire(uintptr_t va, uint8_t prot,
+                                         uint32_t pc) {
     if (!__atomic_load_n(&vm_fault_lock_ready, __ATOMIC_ACQUIRE)) {
         unsigned long f = spinlock_acquire_irq(&vm_fault_lock_init);
         if (!vm_fault_lock_ready) {
@@ -80,11 +91,15 @@ static void vm_fault_object_lock_acquire(void) {
         spinlock_release_irq(&vm_fault_lock_init, f);
     }
     mutex_lock(&vm_fault_object_lock);
-    vm_fault_ctx[vm_fault_cpu()].locked = 1;
+    /* Written under the mutex, so only the holder ever publishes here. */
+    vm_fault_lock_owner = current_thread;
+    vm_fault_lock_va    = va;
+    vm_fault_lock_prot  = prot;
+    vm_fault_lock_pc    = pc;
 }
 
 static void vm_fault_object_lock_release(void) {
-    vm_fault_ctx[vm_fault_cpu()].locked = 0;
+    vm_fault_lock_owner = NULL;
     mutex_unlock(&vm_fault_object_lock);
 }
 
@@ -153,25 +168,23 @@ static void page_zero(uintptr_t pa) {
 
 int vm_fault(vm_map_t *map, uintptr_t va, uint8_t prot) {
     int vf_cpu = vm_fault_cpu();
-    struct vm_fault_inflight *vf = &vm_fault_ctx[vf_cpu];
     uint32_t vf_pc = vm_fault_pending_pc[vf_cpu];
 
     vm_fault_pending_pc[vf_cpu] = 0;
-    if (vf->depth > 0 && vf->locked) {
-        /* The deadlock, one instruction before it happens.  Report the outer
-         * fault (whose locked region is still on the stack) and the inner one
-         * (the access that faulted inside it) -- the inner address is the
-         * thing to fix. */
+    /* The deadlock, one instruction before it happens: THIS thread is already
+     * inside the locked region, so the acquire below is a recursive lock on a
+     * non-recursive mutex.  Another thread being in there is not this -- it
+     * just waits.  Report the outer fault (whose locked region is still on the
+     * stack) and the inner one (the access that faulted inside it); the inner
+     * address is the thing to fix. */
+    if (vm_fault_lock_owner != NULL && vm_fault_lock_owner == current_thread) {
         kprintf("VM: vm_fault re-entered while holding its own lock\n"
-                "  outer: va=0x%x prot=0x%x eip=0x%x (depth %d)\n"
+                "  outer: va=0x%x prot=0x%x eip=0x%x\n"
                 "  inner: va=0x%x prot=0x%x eip=0x%x\n",
-                (unsigned)vf->va, (unsigned)vf->prot, (unsigned)vf->pc,
-                vf->depth, (unsigned)va, (unsigned)prot, (unsigned)vf_pc);
+                (unsigned)vm_fault_lock_va, (unsigned)vm_fault_lock_prot,
+                (unsigned)vm_fault_lock_pc,
+                (unsigned)va, (unsigned)prot, (unsigned)vf_pc);
     }
-    if (vf->depth == 0) {
-        vf->va = va; vf->prot = prot; vf->pc = vf_pc;
-    }
-    vf->depth++;
     uintptr_t page_va = va & ~0xFFF;
     int result = VM_FAULT_ERROR;
     vm_map_entry_t *entry = NULL;
@@ -253,7 +266,7 @@ int vm_fault(vm_map_t *map, uintptr_t va, uint8_t prot) {
     /* Serialize object mutation from here through pmap_enter (VM-02).
      * Acquired under the map read lock; released at `out` before the map
      * read lock is dropped. */
-    vm_fault_object_lock_acquire();
+    vm_fault_object_lock_acquire(va, prot, vf_pc);
     fault_locked = 1;
 
     vm_object_t *obj = first_obj;
@@ -486,8 +499,6 @@ int vm_fault(vm_map_t *map, uintptr_t va, uint8_t prot) {
 
     result = VM_FAULT_SUCCESS;
 out:
-    if (vm_fault_ctx[vf_cpu].depth > 0)
-        vm_fault_ctx[vf_cpu].depth--;
     if (fault_locked) {
         vm_fault_object_lock_release();
     }
