@@ -140,14 +140,25 @@ USB and audio
                      from its host driver, so this needs root or access to the
                      matching /dev/bus/usb/BUS/DEV node.  These share the root
                      hub with usb-kbd/usb-mouse, so grab only a couple.
-  --usb-audio        Replace the emulated AC'97 with QEMU's USB Audio Class
-                     device (UAC 1.0); substrate's uac driver binds it as
-                     /dev/audio0.
+  --audio=DEV        Which audio device to emulate.  Substrate has a driver for
+                     each, all four wired into audio_init(), so this picks which
+                     one is exercised:
+                       ac97  (default) Intel 82801AA AC'97, PCI.
+                       hda   Intel HD Audio (ich6) plus a duplex codec, PCI.
+                       sb16  Creative Sound Blaster 16, ISA.
+                       usb   USB Audio Class 1.0.  Unlike the other three this
+                             hangs off the --usb-version controller, so it only
+                             enumerates if substrate drives that controller
+                             (UHCI today) -- with 2.0/3.0 the guest may see no
+                             audio at all.
+                     Only the selected device is created, so whichever driver
+                     binds it owns /dev/audio0.
+  --usb-audio        Alias for --audio=usb.
   --usb-audio-host[=VID:PID]
-                     A --usb-host passthrough that also drops the AC'97, so a
-                     real USB audio device is the guest's only audio device and
-                     sound plays on the physical hardware.  Defaults to
-                     05ac:110b (Apple EarPods).  Excludes --usb-audio.
+                     A --usb-host passthrough that also drops the emulated
+                     device, so a real USB audio device is the guest's only
+                     audio device and sound plays on the physical hardware.
+                     Defaults to 05ac:110b (Apple EarPods).  Excludes --audio.
 
 Debugging
   --debug            Enable the serial_debug boot argument (verbose kernel
@@ -190,7 +201,10 @@ SMP=1
 USERNET=0
 DEBUG=0
 SNAPSHOT=0
-USB_AUDIO=0
+AUDIO_MODEL=ac97          # ac97 (default) | hda | sb16 | usb
+AUDIO_SET=0               # 1 = --audio/--usb-audio given, so it can conflict
+                          #     with --usb-audio-host rather than being the
+                          #     default silently losing to it
 USB_AUDIO_HOST=0
 USB_HOST_DEVICES=""        # newline-separated VID:PID / BUS.ADDR passthrough specs
 EXTRA_DRIVES=""
@@ -229,7 +243,13 @@ while [ $# -gt 0 ]; do
         --user)     USERNET=1 ;;
         --debug)    DEBUG=1 ;;
         --snapshot) SNAPSHOT=1 ;;
-        --usb-audio)        USB_AUDIO=1 ;;
+        --audio)
+            shift
+            [ $# -gt 0 ] || { echo "run-networking.sh: --audio needs a device (sb16, ac97, hda, usb)" >&2; exit 1; }
+            AUDIO_MODEL="$1"; AUDIO_SET=1 ;;
+        --audio=*)
+            AUDIO_MODEL="${1#--audio=}"; AUDIO_SET=1 ;;
+        --usb-audio)        AUDIO_MODEL=usb; AUDIO_SET=1 ;;
         --usb-host)
             shift
             [ $# -gt 0 ] || { echo "run-networking.sh: --usb-host needs a VID:PID or BUS.ADDR argument" >&2; exit 1; }
@@ -307,6 +327,21 @@ cleanup() {
     return 0
 }
 trap cleanup EXIT INT TERM
+
+# Audio device choice.  Validated here rather than where the qemu arguments are
+# assembled, because that happens after macvtap setup -- a typo should fail
+# before anything asks for sudo.
+case "$AUDIO_MODEL" in
+    sb16|ac97|hda|usb) : ;;
+    *) echo "run-networking.sh: --audio must be sb16, ac97, hda, or usb (got '$AUDIO_MODEL')" >&2; exit 1 ;;
+esac
+# --usb-audio-host makes a real device the guest's only audio hardware, which
+# is precisely what --audio asks to emulate instead.
+if [ "$AUDIO_SET" -eq 1 ] && [ "$USB_AUDIO_HOST" -eq 1 ]; then
+    echo "run-networking.sh: --audio (or its --usb-audio alias) and --usb-audio-host are" \
+         "mutually exclusive -- the passthrough device replaces the emulated one" >&2
+    exit 1
+fi
 
 # Where the root disk lives.  These are alternatives to the default (AHCI port
 # 0), so at most one may be given.
@@ -551,14 +586,23 @@ for spec in $USB_HOST_DEVICES; do
 done
 IFS=$OLDIFS
 
-# Audio device selection. Default: emulated AC'97 with a host backend.
-#   --usb-audio       emulated USB Audio Class device (UAC 1.0); the uac driver
-#                     binds it as /dev/audio0.
+# Audio device selection ($AUDIO_MODEL, from --audio; default ac97).
+#
+# sb16/ac97/hda all go through qemu's `-audio driver=,model=` shorthand, which
+# creates the device and its backend together -- for hda that means the
+# intel-hda controller plus a duplex codec, which would otherwise be two
+# -device arguments.  usb is the exception: usb-audio has to be placed on the
+# USB bus explicitly, so it needs the longhand -audiodev + -device pair.
+#
+# Substrate has a driver for each (audio_init() calls hda_init, ac97_init and
+# sb16_init; uac binds through USB enumeration), and only the selected device
+# is created, so whichever driver binds it is the one that owns /dev/audio0.
+#
 #   --usb-audio-host  a --usb-host passthrough (queued above) that also drops
-#                     the AC'97, so a real USB audio device (default EarPods)
-#                     is the guest's only audio_dev (/dev/audio0), playing on
-#                     the physical hardware.
-# Both USB audio modes drop the AC'97; generic --usb-host passthrough does not.
+#                     the emulated device, so a real USB audio device (default
+#                     EarPods) is the guest's only audio_dev (/dev/audio0),
+#                     playing on the physical hardware.  Generic --usb-host
+#                     passthrough does NOT drop it.
 #
 # Host backend ($AUDIODRV): 'pa' when a PulseAudio/PipeWire server is reachable
 # (routes to the host mixer on both), else 'sdl'. 'sdl' often does not feed a
@@ -572,21 +616,28 @@ if [ -z "${AUDIODRV:-}" ]; then
     fi
 fi
 echo "run-networking.sh: host audio backend: $AUDIODRV (override with \$AUDIODRV)"
-if [ "$USB_AUDIO" -eq 1 ] && [ "$USB_AUDIO_HOST" -eq 1 ]; then
-    echo "run-networking.sh: --usb-audio and --usb-audio-host are mutually exclusive" >&2
-    exit 1
-fi
 if [ "$USB_AUDIO_HOST" -eq 1 ]; then
-    # The passthrough device is already in USB_HOST_ARGS; drop the AC'97 so it
-    # is the guest's sole audio_dev (/dev/audio0), playing on the physical
-    # device with no host backend.
+    # The passthrough device is already in USB_HOST_ARGS; emit no emulated
+    # device so it is the guest's sole audio_dev (/dev/audio0), playing on the
+    # physical device with no host backend.
     AUDIO_ARGS=""
     echo "run-networking.sh: real USB audio device passed through -> guest /dev/audio0 (plays on the physical device)"
-elif [ "$USB_AUDIO" -eq 1 ]; then
+elif [ "$AUDIO_MODEL" = usb ]; then
+    # usb-audio has to be named on the USB bus, so it cannot use the -audio
+    # shorthand the other models share.
     AUDIO_ARGS="-audiodev $AUDIODRV,id=audio0 -device usb-audio,audiodev=audio0$USB_BUS"
-    echo "run-networking.sh: emulated USB Audio Class device (UAC 1.0) -> guest /dev/audio0"
+    echo "run-networking.sh: audio: emulated USB Audio Class device (UAC 1.0) on the $USB_VERSION controller -> guest /dev/audio0"
+    if [ "$USB_VERSION" != "1.1" ]; then
+        echo "run-networking.sh: note: --audio=usb hangs off the $USB_VERSION controller;" \
+             "substrate only drives UHCI (1.1) today, so the guest may see no audio device"
+    fi
 else
-    AUDIO_ARGS="-audio driver=$AUDIODRV,model=ac97,id=audio0"
+    AUDIO_ARGS="-audio driver=$AUDIODRV,model=$AUDIO_MODEL,id=audio0"
+    case "$AUDIO_MODEL" in
+        ac97) echo "run-networking.sh: audio: emulated AC'97 (PCI) -> guest /dev/audio0" ;;
+        hda)  echo "run-networking.sh: audio: emulated Intel HD Audio (PCI, ich6 + duplex codec) -> guest /dev/audio0" ;;
+        sb16) echo "run-networking.sh: audio: emulated Sound Blaster 16 (ISA) -> guest /dev/audio0" ;;
+    esac
 fi
 
 # NETDEV_ARGS: the -netdev/-device pair for the chosen back-end. In macvtap
