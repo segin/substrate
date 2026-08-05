@@ -210,6 +210,7 @@ typedef struct hda_dev {
 	 * iss=4, so the base is 0x80 + 4*0x20 = 0x100.
 	 */
 	uint32_t         sd_base;
+	uint8_t          sd_index;     /* descriptor number, for INTCTL.SIE */
 
 	/* Codec output path, found by hda_codec_configure(). */
 	uint8_t          afg_nid;
@@ -913,9 +914,20 @@ static int hda_irq_handler(unsigned int irq, void *dev_id, void *frame)
 			 * it (back-pressure, drain) misreads a drained ring as
 			 * a full one.  hda_kick restarts from its halted path
 			 * when the next write arrives.
+			 *
+			 * Tested signed and <=, not ==: BCIS is a single
+			 * status bit, so two buffers completing before the
+			 * handler runs coalesce into one interrupt and
+			 * slots_played permanently lags the ring.  An equality
+			 * test would then never land -- the counters cross
+			 * instead of meeting -- and the clip loops forever.
+			 * The FIFO check keeps this from halting a stream that
+			 * still has data staged but not yet in the ring.
 			 */
-			if (d->writes_queued ==
-			    __atomic_load_n(&d->slots_played, __ATOMIC_ACQUIRE)) {
+			if (audio_fifo_used(&d->fifo) == 0 &&
+			    (int32_t)(d->writes_queued -
+			              __atomic_load_n(&d->slots_played,
+			                              __ATOMIC_ACQUIRE)) <= 0) {
 				hda_write32(d, d->sd_base + HDA_SD_CTL, 0);
 				d->running = 0;
 			}
@@ -1304,7 +1316,8 @@ static int hda_attach(pci_device_t *pdev)
 		return -ENODEV;
 	}
 	/* Output stream 0 sits after the input descriptors. */
-	d->sd_base = HDA_SD_BASE + ((uint32_t)d->iss * HDA_SD_STRIDE);
+	d->sd_index = d->iss;
+	d->sd_base = HDA_SD_BASE + ((uint32_t)d->sd_index * HDA_SD_STRIDE);
 
 	if (hda_controller_reset(d) != 0) {
 		kprintf("hda: controller reset timed out\n");
@@ -1355,9 +1368,17 @@ static int hda_attach(pci_device_t *pdev)
 	}
 
 	/* Now safe to arm.  Some controllers only latch a codec response with
-	 * CIE armed, so this has to precede the first verb. */
+	 * CIE armed, so this has to precede the first verb.
+	 *
+	 * SIE for our output descriptor has to be armed here too.  Without it
+	 * SDCTL.IOCE still sets SDSTS.BCIS on every completed buffer, but the
+	 * controller never raises the interrupt, so no completion is ever
+	 * credited: the ring is refilled from the completion path, so a cyclic
+	 * stream just replays its 32 slots forever and a writer wedges as soon
+	 * as the FIFO fills. */
 	hda_write32(d, HDA_REG_INTCTL,
-	            HDA_INTCTL_GIE | HDA_INTCTL_CIE | 0x40000000U);
+	            HDA_INTCTL_GIE | HDA_INTCTL_CIE |
+	            HDA_INTCTL_SIE(d->sd_index));
 
 	vendor_id = hda_send_verb(d, d->codec_addr, 0,
 	                          HDA_VERB_GET_PARAMETER,

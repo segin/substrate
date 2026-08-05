@@ -81,6 +81,15 @@
 /* INTCTL bits */
 #define HDA_INTCTL_GIE           0x80000000U
 #define HDA_INTCTL_CIE           0x40000000U
+/*
+ * Bits 0..29 are Stream Interrupt Enable, one per stream descriptor index.
+ * SDCTL.IOCE only decides whether a completed buffer sets SDSTS.BCIS; it is
+ * this bit that lets that status reach the PCI interrupt line.  With it
+ * clear the driver still sees BCIS if it polls, but no interrupt ever
+ * fires -- so a cyclic stream replays its ring forever and any writer
+ * blocks once the FIFO fills.
+ */
+#define HDA_INTCTL_SIE(n)        (1U << ((n) & 0x1F))
 
 /* CORBCTL bits */
 #define HDA_CORBCTL_MEIE         0x01
