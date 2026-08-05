@@ -113,17 +113,29 @@
 /* Verb format                                                         */
 /* ------------------------------------------------------------------- */
 
-/* Long form (12-bit verb + 8-bit data): GET_PARAMETER, GET_CONFIG_DEFAULT */
-#define HDA_VERB_GET_PARAMETER   0xF00
-#define HDA_VERB_GET_CONFIG_DEFAULT 0xF1C
-#define HDA_VERB_GET_PIN_WIDGET_CONTROL 0xF07
-#define HDA_VERB_GET_CONNECTION_LIST_LEN  0xF0A
+/*
+ * Two payload widths exist, and picking the wrong one puts the payload on
+ * top of the command bits.  Only commands 2h, 3h, Ah and Bh take a 16-bit
+ * payload (spelled 0xN00 below); every other command is 12 bits wide with
+ * an 8-bit payload.  hda_verb_is_short() is the single place that decides.
+ */
 
-/* Short form (4-bit verb + 16-bit data): SET_CONVERTER_FORMAT, etc. */
+/* 4-bit command + 16-bit payload */
 #define HDA_VERB_SET_CONV_FORMAT 0x200
+#define HDA_VERB_SET_AMP_GAIN_MUTE       0x300
+#define HDA_VERB_GET_CONV_FORMAT 0xA00
+#define HDA_VERB_GET_AMP_GAIN_MUTE       0xB00
+
+/* 12-bit command + 8-bit payload */
+#define HDA_VERB_SET_CONN_SELECT 0x701
+#define HDA_VERB_SET_POWER_STATE 0x705
 #define HDA_VERB_SET_CONV_STREAM 0x706
 #define HDA_VERB_SET_PIN_WIDGET_CONTROL 0x707
-#define HDA_VERB_SET_AMP_GAIN_MUTE       0x300
+#define HDA_VERB_SET_EAPD_BTL    0x70C
+#define HDA_VERB_GET_PARAMETER   0xF00
+#define HDA_VERB_GET_CONN_LIST   0xF02
+#define HDA_VERB_GET_PIN_WIDGET_CONTROL 0xF07
+#define HDA_VERB_GET_CONFIG_DEFAULT 0xF1C
 
 /* GET_PARAMETER parameter IDs */
 #define HDA_PARAM_VENDOR_ID         0x00
@@ -135,11 +147,67 @@
 #define HDA_PARAM_SUPPORTED_RATES   0x0A
 #define HDA_PARAM_SUPPORTED_FORMATS 0x0B
 #define HDA_PARAM_PIN_CAPS          0x0C
+#define HDA_PARAM_CONN_LIST_LEN     0x0E
 #define HDA_PARAM_OUTPUT_AMP_CAPS   0x12
 
 /* Function group types (GET_PARAMETER 0x05) */
 #define HDA_FGT_AUDIO            0x01
 #define HDA_FGT_MODEM            0x02
+
+/* SUBNODE_COUNT response: start node in 23:16, count in 7:0 */
+#define HDA_SUBNODE_START(r)     (((r) >> 16) & 0xFF)
+#define HDA_SUBNODE_COUNT(r)     ((r) & 0xFF)
+
+/* AUDIO_WIDGET_CAPS (GET_PARAMETER 0x09) */
+#define HDA_AW_TYPE(caps)        (((caps) >> 20) & 0x0F)
+#define HDA_AW_TYPE_DAC          0x0   /* audio output converter */
+#define HDA_AW_TYPE_ADC          0x1
+#define HDA_AW_TYPE_MIXER        0x2
+#define HDA_AW_TYPE_SELECTOR     0x3
+#define HDA_AW_TYPE_PIN          0x4
+#define HDA_AW_OUT_AMP           0x00000004U  /* output amp present */
+#define HDA_AW_CONN_LIST         0x00000100U  /* connection list present */
+
+/* SET_AMP_GAIN_MUTE payload */
+#define HDA_AMP_SET_OUTPUT       0x8000
+#define HDA_AMP_SET_INPUT        0x4000
+#define HDA_AMP_SET_LEFT         0x2000
+#define HDA_AMP_SET_RIGHT        0x1000
+#define HDA_AMP_SET_INDEX_SHIFT  8
+#define HDA_AMP_MUTE             0x0080
+#define HDA_AMP_GAIN_MASK        0x007F
+
+/* OUTPUT_AMP_CAPS (GET_PARAMETER 0x12) */
+#define HDA_AMPCAP_OFFSET(c)     ((c) & 0x7F)          /* the 0 dB setting */
+#define HDA_AMPCAP_NUMSTEPS(c)   (((c) >> 16) & 0x7F)
+
+/* SET_PIN_WIDGET_CONTROL payload */
+#define HDA_PIN_CTRL_HP_ENABLE   0x80
+#define HDA_PIN_CTRL_OUT_ENABLE  0x40
+#define HDA_PIN_CTRL_IN_ENABLE   0x20
+
+/* PIN_CAPS (GET_PARAMETER 0x0C) */
+#define HDA_PINCAP_OUTPUT        0x00000010U
+#define HDA_PINCAP_EAPD          0x00010000U
+
+/* CONFIG_DEFAULT (verb 0xF1C) */
+#define HDA_CONFIG_PORTCONN(cd)  (((cd) >> 30) & 0x3)
+#define HDA_PORTCONN_NONE        0x1   /* no physical connection: skip */
+#define HDA_CONFIG_DEVICE(cd)    (((cd) >> 20) & 0xF)
+#define HDA_DEVICE_LINE_OUT      0x0
+#define HDA_DEVICE_SPEAKER       0x1
+#define HDA_DEVICE_HP_OUT        0x2
+
+/* CONN_LIST_LEN (GET_PARAMETER 0x0E) */
+#define HDA_CONNLIST_LEN(r)      ((r) & 0x7F)
+#define HDA_CONNLIST_LONG        0x80
+
+/* SET_POWER_STATE payload */
+#define HDA_PS_D0                0x00
+#define HDA_PS_D3                0x03
+
+/* SET_EAPD_BTL_ENABLE payload */
+#define HDA_EAPD_ENABLE          0x02
 
 /* ------------------------------------------------------------------- */
 /* Helpers exported for host tests                                     */

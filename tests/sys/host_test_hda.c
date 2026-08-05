@@ -13,7 +13,13 @@
 
 #define HDA_VERB_GET_PARAMETER 0xF00
 #define HDA_VERB_SET_CONV_FORMAT 0x200
+#define HDA_VERB_SET_AMP_GAIN_MUTE 0x300
+#define HDA_VERB_SET_CONN_SELECT 0x701
+#define HDA_VERB_SET_POWER_STATE 0x705
 #define HDA_VERB_SET_CONV_STREAM 0x706
+#define HDA_VERB_SET_PIN_WIDGET_CONTROL 0x707
+#define HDA_VERB_SET_EAPD_BTL  0x70C
+#define HDA_VERB_GET_CONV_FORMAT 0xA00
 #define HDA_BDL_F_IOC          0x01
 
 typedef struct hda_bdl_entry {
@@ -22,18 +28,31 @@ typedef struct hda_bdl_entry {
 	uint32_t flags;
 } __attribute__((packed)) hda_bdl_entry_t;
 
+static int hda_verb_is_short(uint16_t verb)
+{
+	if ((verb & 0x00FF) != 0) {
+		return 0;
+	}
+	switch ((verb >> 8) & 0x0F) {
+	case 0x2: case 0x3: case 0xA: case 0xB:
+		return 1;
+	default:
+		return 0;
+	}
+}
+
 static uint32_t hda_pack_verb(uint8_t cad, uint8_t nid, uint16_t verb,
                               uint16_t payload)
 {
 	uint32_t v = 0;
 	v |= ((uint32_t)(cad & 0x0F)) << 28;
 	v |= ((uint32_t)nid) << 20;
-	if (verb >= 0xF00) {
-		v |= ((uint32_t)(verb & 0x0FFF)) << 8;
-		v |= (uint32_t)(payload & 0x00FF);
-	} else {
+	if (hda_verb_is_short(verb)) {
 		v |= ((uint32_t)(verb & 0xF00)) << 8;
 		v |= (uint32_t)(payload & 0xFFFF);
+	} else {
+		v |= ((uint32_t)(verb & 0x0FFF)) << 8;
+		v |= (uint32_t)(payload & 0x00FF);
 	}
 	return v;
 }
@@ -189,7 +208,60 @@ static void test_bdl_build_null_safe(void) {
 	hda_build_bdl_entry(NULL, 0, 0, 0);
 }
 
+/*
+ * The 0x7xx block is every command that configures a codec.  These are
+ * 12-bit commands with an 8-bit payload; encoding them as short form put
+ * the payload on top of the command bits and produced a verb the codec
+ * would never act on.  The driver sent none of them, so nothing caught it.
+ */
+static void test_pack_verb_0x7xx_is_long_form(void)
+{
+	/* SET_CONVERTER_STREAM_CHANNEL, nid 2, stream tag 1 channel 0. */
+	uint32_t v = hda_pack_verb(0, 2, HDA_VERB_SET_CONV_STREAM, 0x10);
+	assert(v == ((2u << 20) | (0x706u << 8) | 0x10u));
+
+	/* The old rule would have produced this instead -- verb bits 19:16
+	 * = 7 and the payload smeared across 15:0. */
+	assert(v != ((2u << 20) | ((0x706u & 0xF00u) << 8) | 0x10u));
+}
+
+static void test_pack_verb_power_pin_eapd_conn_long_form(void)
+{
+	assert(hda_pack_verb(0, 1, HDA_VERB_SET_POWER_STATE, 0x00) ==
+	       ((1u << 20) | (0x705u << 8)));
+	assert(hda_pack_verb(0, 3, HDA_VERB_SET_PIN_WIDGET_CONTROL, 0x40) ==
+	       ((3u << 20) | (0x707u << 8) | 0x40u));
+	assert(hda_pack_verb(0, 3, HDA_VERB_SET_EAPD_BTL, 0x02) ==
+	       ((3u << 20) | (0x70Cu << 8) | 0x02u));
+	assert(hda_pack_verb(0, 3, HDA_VERB_SET_CONN_SELECT, 0x01) ==
+	       ((3u << 20) | (0x701u << 8) | 0x01u));
+}
+
+/* 3h takes a 16-bit payload: the amp target bits live above bit 7 and
+ * must survive.  Truncating to 8 bits would drop OUTPUT/LEFT/RIGHT and
+ * leave only the gain, which sets an amp nobody selected. */
+static void test_pack_verb_amp_gain_keeps_16bit_payload(void)
+{
+	uint16_t payload = 0x8000 | 0x2000 | 0x1000 | 0x2A;  /* out, L, R, gain */
+	uint32_t v = hda_pack_verb(0, 2, HDA_VERB_SET_AMP_GAIN_MUTE, payload);
+
+	assert(v == ((2u << 20) | (0x300u << 8) | payload));
+	assert((v & 0xFFFFu) == payload);
+}
+
+/* Ah/Bh are the 16-bit-payload getters; they sit above 0xF00's old
+ * threshold in value but must still be short form. */
+static void test_pack_verb_getter_ah_is_short_form(void)
+{
+	uint32_t v = hda_pack_verb(0, 2, HDA_VERB_GET_CONV_FORMAT, 0xBEEF);
+	assert(v == ((2u << 20) | (0xA00u << 8) | 0xBEEFu));
+}
+
 int main(void) {
+	test_pack_verb_0x7xx_is_long_form();
+	test_pack_verb_power_pin_eapd_conn_long_form();
+	test_pack_verb_amp_gain_keeps_16bit_payload();
+	test_pack_verb_getter_ah_is_short_form();
 	test_pack_verb_long_form();
 	test_pack_verb_long_form_payload_truncated_to_8_bits();
 	test_pack_verb_short_form_full_16bit_payload();

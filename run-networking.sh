@@ -131,8 +131,11 @@ Storage
 USB and audio
   --usb-version=VER  Emulated USB host controller: 1.1 = UHCI (default),
                      2.0 = EHCI, 3.0 = xHCI.  All USB devices attach to it.
-                     Substrate only drives UHCI today; 2.0/3.0 need the
-                     in-progress drivers or the guest sees no USB at all.
+                     Substrate drives all three (main.c inits xhci, uhci and
+                     ehci), so any of them is a usable boot target -- which is
+                     the point of being able to pick, since they are three
+                     independent drivers and a device that works on one can
+                     still be broken on another.
   --usb-host SPEC    Pass a real host USB device through (storage, HID, serial,
                      audio, ...).  SPEC is VID:PID in hex (05ac:110b, from
                      lsusb) or BUS.ADDR in decimal (1.5, to pick one of several
@@ -147,10 +150,8 @@ USB and audio
                        hda   Intel HD Audio (ich6) plus a duplex codec, PCI.
                        sb16  Creative Sound Blaster 16, ISA.
                        usb   USB Audio Class 1.0.  Unlike the other three this
-                             hangs off the --usb-version controller, so it only
-                             enumerates if substrate drives that controller
-                             (UHCI today) -- with 2.0/3.0 the guest may see no
-                             audio at all.
+                             hangs off whichever controller --usb-version
+                             selected, so it also exercises that HCD driver.
                      Only the selected device is created, so whichever driver
                      binds it owns /dev/audio0.
   --usb-audio        Alias for --audio=usb.
@@ -627,10 +628,6 @@ elif [ "$AUDIO_MODEL" = usb ]; then
     # shorthand the other models share.
     AUDIO_ARGS="-audiodev $AUDIODRV,id=audio0 -device usb-audio,audiodev=audio0$USB_BUS"
     echo "run-networking.sh: audio: emulated USB Audio Class device (UAC 1.0) on the $USB_VERSION controller -> guest /dev/audio0"
-    if [ "$USB_VERSION" != "1.1" ]; then
-        echo "run-networking.sh: note: --audio=usb hangs off the $USB_VERSION controller;" \
-             "substrate only drives UHCI (1.1) today, so the guest may see no audio device"
-    fi
 else
     AUDIO_ARGS="-audio driver=$AUDIODRV,model=$AUDIO_MODEL,id=audio0"
     case "$AUDIO_MODEL" in
