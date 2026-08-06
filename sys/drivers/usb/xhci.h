@@ -145,6 +145,8 @@ struct xhci_trb {
 #define TRB_ADDRESS_DEVICE   11
 #define TRB_CONFIGURE_EP     12
 #define TRB_EVAL_CONTEXT     13
+#define TRB_RESET_ENDPOINT   14
+#define TRB_SET_TR_DEQUEUE   16
 #define TRB_NOOP_CMD         23
 #define TRB_TRANSFER_EVENT   32
 #define TRB_CMD_COMPLETE     33
@@ -157,7 +159,23 @@ struct xhci_trb {
 #define TRB_DIR_IN           (1u << 16)   /* Data/Status stage direction */
 
 #define XHCI_CC_SUCCESS      1
+#define XHCI_CC_BABBLE       3
+#define XHCI_CC_USB_TX_ERROR 4
+#define XHCI_CC_TRB_ERROR    5
+#define XHCI_CC_STALL        6
 #define XHCI_CC_SHORT_PACKET 13
+
+/*
+ * Completion codes that leave the endpoint Halted.  The controller stops
+ * processing that endpoint's transfer ring entirely until a Reset Endpoint
+ * command runs, so without recovery the FIRST such error silently kills the
+ * endpoint for the rest of the session and every later transfer just times
+ * out.  A multi-slot card reader reaches this on ordinary traffic -- an
+ * empty slot answers some SCSI commands with a STALL.
+ */
+#define XHCI_CC_HALTS_EP(cc) \
+    ((cc) == XHCI_CC_BABBLE || (cc) == XHCI_CC_USB_TX_ERROR || \
+     (cc) == XHCI_CC_STALL)
 
 /* ---- Contexts (32-byte here; CSZ=1 doubles to 64 -- we handle both via a
  * runtime stride).  Slot context + endpoint context layouts. ---- */

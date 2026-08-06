@@ -193,10 +193,10 @@ static int xhci_wait_event(xhci_hc_t *hc, uint64_t *out_param, uint32_t *out_ctr
 }
 
 /* Run a command TRB on the command ring; return (completion code, slot id). */
-static int xhci_run_command(xhci_hc_t *hc, uint64_t param, uint32_t ctrl,
-                            uint8_t *out_slot)
+static int xhci_run_command_st(xhci_hc_t *hc, uint64_t param, uint32_t status,
+                               uint32_t ctrl, uint8_t *out_slot)
 {
-    xhci_ring_push(&hc->cmd_ring, param, 0, ctrl);
+    xhci_ring_push(&hc->cmd_ring, param, status, ctrl);
     xhci_doorbell(hc, 0, 0);   /* ring the command doorbell */
     uint64_t ep; uint32_t ec;
     for (int guard = 0; guard < 8; guard++) {
@@ -211,6 +211,59 @@ static int xhci_run_command(xhci_hc_t *hc, uint64_t param, uint32_t ctrl,
     return 0;
 }
 
+static int xhci_run_command(xhci_hc_t *hc, uint64_t param, uint32_t ctrl,
+                            uint8_t *out_slot)
+{
+    return xhci_run_command_st(hc, param, 0, ctrl, out_slot);
+}
+
+/*
+ * Bring a Halted endpoint back into service.
+ *
+ * A transfer that ends in STALL, Babble or a USB Transaction Error leaves the
+ * endpoint Halted, and the controller then stops processing that endpoint's
+ * transfer ring completely: no further TD ever runs and no event is ever
+ * raised, so every subsequent transfer simply times out.  One STALL therefore
+ * kills the endpoint for the rest of the session.
+ *
+ * usb_msc already sends CLEAR_FEATURE(ENDPOINT_HALT) to the *device*, which is
+ * all EHCI and UHCI need -- their halt state lives in the device.  xHCI also
+ * keeps the state in the controller, and only Reset Endpoint clears it, which
+ * is why the same card reader recovers on EHCI and wedges on xHCI.
+ *
+ * Reset Endpoint leaves the dequeue pointer on the TD that failed, so follow
+ * it with Set TR Dequeue Pointer aimed at where the next TD will be written,
+ * otherwise the controller re-runs the failed transfer as soon as the doorbell
+ * rings.  The Dequeue Cycle State must match the ring's current cycle.
+ */
+static int xhci_recover_ep(xhci_hc_t *hc, uint8_t slot, int dci,
+                           struct xhci_ring *ring, uint16_t stream_id)
+{
+    uint32_t ep_field = ((uint32_t)slot << 24) | ((uint32_t)dci << 16);
+    int cc;
+
+    cc = xhci_run_command(hc, 0,
+                          XHCI_TRB_TYPE(TRB_RESET_ENDPOINT) | ep_field, NULL);
+    if (cc != XHCI_CC_SUCCESS) {
+        kprintf("xhci: reset endpoint slot %u dci %d failed cc=%d\n",
+                slot, dci, cc);
+        return -1;
+    }
+
+    uint64_t deq = (uint64_t)ring->dma +
+                   (uint64_t)ring->enq * sizeof(struct xhci_trb);
+    cc = xhci_run_command_st(hc, deq | (ring->cycle ? 1u : 0u),
+                             (uint32_t)stream_id << 16,
+                             XHCI_TRB_TYPE(TRB_SET_TR_DEQUEUE) | ep_field,
+                             NULL);
+    if (cc != XHCI_CC_SUCCESS) {
+        kprintf("xhci: set TR dequeue slot %u dci %d failed cc=%d\n",
+                slot, dci, cc);
+        return -1;
+    }
+    return 0;
+}
+
 /* [DRV-03] Wait for the Transfer Event addressed to (slot, dci); skip unrelated
  * events (port-status changes from the hotplug scanner, other slots/endpoints).
  * Without this filter a routine Port-Status-Change event is consumed as the
@@ -218,20 +271,59 @@ static int xhci_run_command(xhci_hc_t *hc, uint64_t param, uint32_t ctrl,
  * waiter.  Mirrors xhci_run_command's TRB-type filtering.  Returns the completion
  * code (0 on timeout); on a match *out_status gets the event's status dword.
  * Transfer Event control dword: [31:24] slot id, [20:16] endpoint id (DCI). */
-static int xhci_wait_transfer(xhci_hc_t *hc, uint8_t slot, int dci,
-                              uint32_t *out_status, uint32_t timeout_ms)
+/*
+ * Wait for the Transfer Event that belongs to one specific TD.
+ *
+ * A Transfer Event carries, in its parameter field, the address of the TRB
+ * that completed -- and that pointer is the only thing tying an event to the
+ * transfer that produced it.  Matching on slot and endpoint alone is not
+ * enough, because those are identical for every transfer on the endpoint: a
+ * single leftover event on the ring then makes each subsequent transfer
+ * complete on its predecessor's event.  Every one of them returns before its
+ * own data stage has run, reports Success with residue 0, and hands back
+ * whatever the previous transfer left in the shared bounce buffer.
+ *
+ * That is exactly what a real device hits.  Emulated devices complete with
+ * no latency, so the data is already in the buffer when the driver copies it
+ * and the bug is invisible -- which is why enumeration worked in QEMU with
+ * emulated devices and failed on a passed-through USB 2.0 card reader, and
+ * on real hardware on an xHCI-only machine.
+ *
+ * Checking the TRB pointer also makes the driver self-synchronising: a stale
+ * event is dropped here rather than being consumed by the next transfer, so
+ * one lost or duplicated event can no longer desynchronise the endpoint for
+ * the rest of the session.
+ */
+#define XHCI_EVENT_SCAN_MAX 16
+
+static int xhci_wait_td(xhci_hc_t *hc, uint8_t slot, int dci,
+                        const uint64_t *trbs, int ntrbs,
+                        uint32_t *out_status, int *out_which,
+                        uint32_t timeout_ms)
 {
+    uint64_t ep_trb;
     uint32_t ec, est;
-    for (int guard = 0; guard < 8; guard++) {
-        int cc = xhci_wait_event(hc, NULL, &ec, &est, timeout_ms);
+
+    for (int guard = 0; guard < XHCI_EVENT_SCAN_MAX; guard++) {
+        int cc = xhci_wait_event(hc, &ep_trb, &ec, &est, timeout_ms);
         if (cc == 0) return 0;   /* timeout */
-        if (XHCI_TRB_GET_TYPE(ec) == TRB_TRANSFER_EVENT &&
-            XHCI_TRB_GET_SLOT(ec) == slot &&
-            (int)((ec >> 16) & 0x1F) == dci) {
-            if (out_status) *out_status = est;
-            return cc;
+
+        /* Not a transfer event for this endpoint at all (port status change,
+         * another slot, another EP): drop it and keep looking. */
+        if (XHCI_TRB_GET_TYPE(ec) != TRB_TRANSFER_EVENT ||
+            XHCI_TRB_GET_SLOT(ec) != slot ||
+            (int)((ec >> 16) & 0x1F) != dci) {
+            continue;
         }
-        /* non-matching event (port status, other slot/endpoint): drop, keep looking */
+        for (int i = 0; i < ntrbs; i++) {
+            if (trbs[i] != 0 && ep_trb == trbs[i]) {
+                if (out_status) *out_status = est;
+                if (out_which) *out_which = i;
+                return cc;
+            }
+        }
+        /* Right endpoint, but an older TD's TRB: a leftover.  Drop it --
+         * consuming it as ours is the bug described above. */
     }
     return 0;
 }
@@ -733,30 +825,58 @@ static int xhci_control(xhci_hc_t *hc, usb_transfer_t *xfer)
     uint64_t setup_param;
     memcpy(&setup_param, &xfer->setup, 8);
     uint32_t trt = len ? (in ? TRB_TRT_IN : TRB_TRT_OUT) : TRB_TRT_NO_DATA;
-    xhci_ring_push(ring, setup_param, 8,
+    /* Remember each stage's TRB address: the completion is identified by
+     * which of them the event points at (see xhci_wait_td). */
+    uint64_t td[3];
+    int ntd = 0;
+
+    td[ntd++] = xhci_ring_push(ring, setup_param, 8,
                    XHCI_TRB_TYPE(TRB_SETUP) | XHCI_TRB_IDT | trt);
     if (len) {
-        xhci_ring_push(ring, hc->bounce_dma, len,
-                       XHCI_TRB_TYPE(TRB_DATA) | (in ? TRB_DIR_IN : 0));
+        /* ISP: a device that answers with less than we asked for completes
+         * the data stage early, and without this that raises no event at
+         * all -- the status stage then reports residue 0 and the short read
+         * is indistinguishable from a full one. */
+        td[ntd++] = xhci_ring_push(ring, hc->bounce_dma, len,
+                       XHCI_TRB_TYPE(TRB_DATA) | XHCI_TRB_ISP |
+                       (in ? TRB_DIR_IN : 0));
     }
     /* Status stage: opposite direction, IOC so we get a Transfer Event. */
     uint32_t status_dir = (in && len) ? 0 : TRB_DIR_IN;
-    xhci_ring_push(ring, 0, 0,
+    td[ntd++] = xhci_ring_push(ring, 0, 0,
                    XHCI_TRB_TYPE(TRB_STATUS) | status_dir | XHCI_TRB_IOC);
 
     xhci_doorbell(hc, slot, 1);   /* DCI 1 = EP0 */
 
-    uint32_t evst;
     /* Honour the caller's timeout.  A HID poll asks to give up in a few
      * milliseconds; making it wait out the bulk timeout instead put the USB
      * thread in a permanent 1-second stall per idle poll. [USB-09] */
-    int cc = xhci_wait_transfer(hc, slot, 1, &evst,
-                                xfer->timeout_ms ? xfer->timeout_ms
-                                                 : XHCI_CMD_TIMEOUT_MS);
-    if (cc != XHCI_CC_SUCCESS && cc != XHCI_CC_SHORT_PACKET)
-        return (cc == 0) ? USB_XFER_TIMEOUT : USB_XFER_STALL;
+    uint32_t tmo = xfer->timeout_ms ? xfer->timeout_ms : XHCI_CMD_TIMEOUT_MS;
+    uint32_t evst = 0;
+    uint32_t residue = 0;
+    int cc;
 
-    uint32_t residue = XHCI_TRB_GET_XLEN(evst);
+    /*
+     * The transfer is done when the STATUS stage completes.  A short data
+     * stage reports first (ISP) and is the only place the real residue
+     * appears -- the status event's length is always 0 -- so take it and
+     * keep waiting rather than returning, which would leave the status
+     * event on the ring for the next transfer to trip over.
+     */
+    for (;;) {
+        int which = -1;
+        cc = xhci_wait_td(hc, slot, 1, td, ntd, &evst, &which, tmo);
+        if (cc != XHCI_CC_SUCCESS && cc != XHCI_CC_SHORT_PACKET) {
+            if (XHCI_CC_HALTS_EP(cc))
+                (void)xhci_recover_ep(hc, slot, 1, ring, 0);
+            return (cc == 0) ? USB_XFER_TIMEOUT : USB_XFER_STALL;
+        }
+        if (len && which == 1) {           /* data stage, short */
+            residue = XHCI_TRB_GET_XLEN(evst);
+            continue;
+        }
+        break;                             /* status stage: transfer complete */
+    }
     xfer->actual_length = (len > residue) ? (len - residue) : len;
     if (in && len) memcpy(xfer->data, hc->bounce, xfer->actual_length);
     xfer->status = USB_XFER_OK;
@@ -798,16 +918,27 @@ static int xhci_bulk(xhci_hc_t *hc, usb_transfer_t *xfer)
     if (len > XHCI_BOUNCE_SIZE) return USB_XFER_ERROR;
     if (!in && len) memcpy(hc->bounce, xfer->data, len);
 
-    xhci_ring_push(ring, len ? hc->bounce_dma : 0, len,
+    uint64_t td[1];
+    td[0] = xhci_ring_push(ring, len ? hc->bounce_dma : 0, len,
                    XHCI_TRB_TYPE(TRB_NORMAL) | XHCI_TRB_IOC | XHCI_TRB_ISP);
     xhci_doorbell(hc, slot, db_target);
 
     uint32_t evst;
-    int cc = xhci_wait_transfer(hc, slot, dci, &evst,   /* [DRV-03] this EP's DCI */
-                                xfer->timeout_ms ? xfer->timeout_ms
-                                                 : XHCI_CMD_TIMEOUT_MS); /* [USB-09] */
-    if (cc != XHCI_CC_SUCCESS && cc != XHCI_CC_SHORT_PACKET)
+    int cc = xhci_wait_td(hc, slot, dci, td, 1, &evst,  /* [DRV-03] this EP's DCI */
+                          NULL,
+                          xfer->timeout_ms ? xfer->timeout_ms
+                                           : XHCI_CMD_TIMEOUT_MS); /* [USB-09] */
+    if (cc != XHCI_CC_SUCCESS && cc != XHCI_CC_SHORT_PACKET) {
+        /* Clear the controller-side halt before returning, so the class
+         * driver's retry (after its own CLEAR_FEATURE) has a live endpoint
+         * to retry on rather than timing out forever. */
+        if (XHCI_CC_HALTS_EP(cc)) {
+            uint16_t sid = (xfer->ep->max_streams > 0)
+                           ? (xfer->stream_id ? xfer->stream_id : 1) : 0;
+            (void)xhci_recover_ep(hc, slot, dci, ring, sid);
+        }
         return (cc == 0) ? USB_XFER_TIMEOUT : USB_XFER_STALL;
+    }
 
     uint32_t residue = XHCI_TRB_GET_XLEN(evst);
     xfer->actual_length = (len > residue) ? (len - residue) : len;
