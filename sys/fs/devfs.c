@@ -129,12 +129,27 @@ fs_node_t *devfs_root_node_ptr = NULL;
  * during driver init, which runs before vfs_init() → devfs_init().
  * At that point root_entry is still NULL so registrations silently fail.
  * Queue them here and replay after devfs_init() creates the tree.
+ *
+ * Sized for the worst real machine rather than the smallest: the queue used
+ * to hold 32, and going over it dropped the excess with no message at all.
+ * A dropped block device is not a cosmetic loss -- the root filesystem is
+ * still found, because vfs_root_resolve() reads the blkdev registry directly
+ * rather than going through /dev, so the system boots normally and only
+ * userspace notices, when /dev/storage turns out to be missing the disk it
+ * booted from and fsck cannot open the root device.
+ *
+ * USB storage is the usual casualty: it enumerates late, so it is last into
+ * the queue and first over the edge.  A QEMU config gets ~18 entries here; a
+ * laptop with several USB controllers, HID devices and more ttys goes past
+ * 32, which is why this only ever bit on real hardware.
  */
-#define DEVFS_DEFERRED_MAX 32
+#define DEVFS_DEFERRED_MAX 256
 static struct {
     fs_node_t *nodes[DEVFS_DEFERRED_MAX];
     uint32_t   mask[DEVFS_DEFERRED_MAX];
     int count;
+    int high_water;   /* peak occupancy, reported once at replay */
+    int dropped;      /* registrations lost to overflow */
 } devfs_deferred = { .count = 0 };
 
 /* Same problem for aliases: drivers like the audio framework wire up
@@ -647,6 +662,18 @@ void devfs_register_device_perso(fs_node_t *node, uint32_t perso_mask) {
         if (devfs_deferred.count < DEVFS_DEFERRED_MAX) {
             devfs_deferred.mask[devfs_deferred.count] = perso_mask;
             devfs_deferred.nodes[devfs_deferred.count++] = node;
+            if (devfs_deferred.count > devfs_deferred.high_water) {
+                devfs_deferred.high_water = devfs_deferred.count;
+            }
+        } else {
+            /* Never silent: the device simply would not exist in /dev, and
+             * the failure surfaces far away as an unrelated open() error. */
+            devfs_deferred.dropped++;
+            spinlock_release(&devfs_lock);
+            kprintf("devfs: deferred queue full (%d), dropping '%s' -- "
+                    "it will be missing from /dev\n",
+                    DEVFS_DEFERRED_MAX, node->name);
+            return;
         }
         spinlock_release(&devfs_lock);
         return;
@@ -862,6 +889,13 @@ void devfs_init(void) {
                                     devfs_deferred.mask[i]);
     }
     devfs_deferred.count = 0;
+    /* One line naming the peak, so the headroom on a given machine is a
+     * matter of record rather than of guesswork -- this queue overflowing
+     * is invisible from userspace except as a device that is not there. */
+    kprintf("devfs: replayed %d deferred registrations (peak %d of %d)%s\n",
+            devfs_deferred.high_water, devfs_deferred.high_water,
+            DEVFS_DEFERRED_MAX,
+            devfs_deferred.dropped ? " -- SOME WERE DROPPED" : "");
 
     /* Same for aliases queued before the tree existed. */
     for (int i = 0; i < devfs_deferred_alias.count; i++) {
