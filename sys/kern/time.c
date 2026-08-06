@@ -110,6 +110,50 @@ static void tsc_calibrate(void) {
 }
 
 /*
+ * Millisecond busy-wait that does not depend on interrupts.
+ *
+ * get_uptime_ms() counts timer-tick interrupts, so it cannot be used to pace
+ * anything that runs with interrupts disabled -- and much of kernel init
+ * does, which is why a tick-based version of the console "slow" option
+ * produced no delay at all during boot.
+ *
+ * Polls PIT channel 2 the same way tsc_calibrate() above does.  Channel 2 is
+ * not the system tick (that is channel 0), so borrowing it does not disturb
+ * timekeeping; its normal job is the PC speaker, idle during boot.  The count
+ * is 16-bit, capping a single shot near 54ms, so longer waits are split.
+ *
+ * The spin is bounded: on hardware where OUT2 never rises this returns early
+ * rather than hanging the machine.
+ */
+void timer_busywait_ms(unsigned ms) {
+    while (ms > 0) {
+        unsigned chunk = (ms > 50U) ? 50U : ms;
+        uint32_t count = (uint32_t)(((uint64_t)PIT_FREQUENCY * chunk) / 1000U);
+        uint32_t guard = 0;
+        uint8_t prev;
+
+        if (count == 0 || count > 0xFFFFU) {
+            return;
+        }
+
+        prev = inb(NMI_STATUS_CONTROL);
+        outb(NMI_STATUS_CONTROL, (uint8_t)((prev & ~0x02U) | 0x01U));
+        outb(PIT_COMMAND, PIT_MODE2_ONESHOT);
+        outb(PIT_CHANNEL2, (uint8_t)(count & 0xFFU));
+        outb(PIT_CHANNEL2, (uint8_t)((count >> 8) & 0xFFU));
+
+        while ((inb(NMI_STATUS_CONTROL) & 0x20U) == 0) {
+            if (++guard > 100000000U) {
+                break;      /* no PIT: give up rather than spin forever */
+            }
+        }
+        outb(NMI_STATUS_CONTROL, prev);
+
+        ms -= chunk;
+    }
+}
+
+/*
  * Sub-tick nanoseconds since the most recent timer tick, computed from
  * the TSC.  Returns 0 if calibration hasn't run or TSC isn't available.
  * Clamped to one tick's worth of nanoseconds so a missed snapshot

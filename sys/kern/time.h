@@ -23,6 +23,9 @@ time_t get_uptime(void);
 
 // Get uptime in milliseconds since boot (monotonic)
 int64_t get_uptime_ms(void);
+/* Busy-wait `ms` milliseconds without relying on the timer tick, for callers
+ * that run with interrupts disabled (where get_uptime_ms() cannot advance). */
+void timer_busywait_ms(unsigned ms);
 
 // Get system HZ
 uint32_t get_hz(void);

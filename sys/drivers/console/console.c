@@ -5,9 +5,11 @@
 #include <arch/i386/intr.h>
 #include <arch/x86-common/lapic.h>
 #include <drivers/console/uart/uart.h>
+#include <kern/cmdline.h>
 #include <kern/console.h>
 #include <kern/file.h>
 #include <kern/sched.h>
+#include <kern/time.h>
 #include <kern/version.h>
 #include <sys/file.h>
 #include <sys/lock.h>
@@ -175,6 +177,38 @@ int console_get_terminal_size(int *cols, int *rows) {
     return -1;
 }
 
+/*
+ * "slow" boot option: pause after every line of console output.
+ *
+ * On a machine with no serial port the boot log scrolls past far faster than
+ * it can be read, and the interesting part is the last screenful before a
+ * hang -- exactly the part that cannot be scrolled back to.  This spaces the
+ * output out so it can be read, or photographed, as it goes.
+ */
+#define CONSOLE_SLOW_MS 500
+
+static int console_slow_state = -1;   /* -1 = command line not parsed yet */
+
+static int console_slow_enabled(void) {
+    if (console_slow_state < 0) {
+        /* Do not cache an answer from before the command line existed: every
+         * line printed during early boot would otherwise latch "off". */
+        if (!cmdline_is_initialized()) {
+            return 0;
+        }
+        console_slow_state = cmdline_has("slow") ? 1 : 0;
+    }
+    return console_slow_state;
+}
+
+static void console_slow_pause(void) {
+    /* Not get_uptime_ms(): that counts timer-tick interrupts, and most of the
+     * boot output this option exists to pace is printed with interrupts
+     * disabled, where the tick can never advance.  timer_busywait_ms() polls
+     * the PIT directly and so works in that window. */
+    timer_busywait_ms(CONSOLE_SLOW_MS);
+}
+
 // Low-level backend write (used by kprint directly or via TTY)
 static void backend_write(const char *data, size_t len) {
     unsigned long f;
@@ -191,6 +225,20 @@ static void backend_write(const char *data, size_t len) {
         b = b->next;
     }
     console_out_leave(held, f);
+
+    /*
+     * Deliberately outside the output lock: console_out_enter() disables
+     * interrupts, so waiting on the timer tick while holding it would wait
+     * for a tick that cannot arrive.
+     */
+    if (console_slow_enabled()) {
+        for (size_t i = 0; i < len; i++) {
+            if (data[i] == '\n') {
+                console_slow_pause();
+                break;
+            }
+        }
+    }
 }
 
 // Public wrapper for kernel printing

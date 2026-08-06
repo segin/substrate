@@ -132,6 +132,18 @@ void cmdline_init(const char *cmdline) {
     kprint("\n");
 }
 
+/*
+ * Has the command line been handed over yet?
+ *
+ * cmdline_has() answers "no" both for an option that is absent and for one
+ * asked about before cmdline_init() ran.  A caller that wants to resolve an
+ * option once and cache the answer has to tell those apart, or it caches the
+ * early "no" forever and the option silently stops working.
+ */
+int cmdline_is_initialized(void) {
+    return initialized;
+}
+
 int cmdline_has(const char *key) {
     const char *cursor;
     const char *token;

@@ -371,6 +371,19 @@ that did it rather than going silent.
 The same for EHCI bring-up: reset, DMA structure allocation, run, port power.
 .SH DIAGNOSTIC AND WORKAROUND FLAGS
 .TP
+.B slow
+Pause for half a second after every line of console output.
+On a machine with no serial port the boot log scrolls past faster than it can
+be read, and the part worth reading is the last screenful before a hang \(em
+exactly the part that cannot be scrolled back to.
+This spaces the output out so it can be read, or photographed, as it happens.
+.IP
+The pause is driven by polling the PIT rather than by the timer tick, because
+much of kernel initialisation runs with interrupts disabled and a tick-based
+delay produces no pause at all there.
+Lines emitted before the command line itself is parsed are not affected, since
+nothing has yet said to slow down.
+.TP
 .B nosmp
 .TQ
 .B up

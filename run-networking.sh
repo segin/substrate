@@ -121,6 +121,11 @@ Storage
   --rw               Append "rw" to the kernel command line, mounting the root
                      filesystem read-write.  Added last, since the kernel reads
                      it as a trailing mode word rather than a key=value.
+  --slow             Append "slow", which makes the kernel pause half a second
+                     after every line of console output.  For reading a boot
+                     that scrolls past too fast to follow, or catching the last
+                     lines before a hang.  Only meaningful for --boot=kernel;
+                     bios/uefi take the command line from the image's grub.cfg.
   --shell            Append init=/bin/sh, so the kernel starts a shell on the
                      console instead of /sbin/init -- no rc.d, no getty.  Handy
                      when init or a service is what you are debugging.  Pair
@@ -217,6 +222,7 @@ IDE=0                      # 1 = root on the machine's built-in IDE controller
 UMS=0                      # 1 = root on USB Mass Storage (Bulk-Only Transport)
 UAS=0                      # 1 = root on USB Attached SCSI
 RW=0                       # 1 = append "rw" (mount the root read-write)
+SLOW=0                     # 1 = append "slow" (half-second pause per output line)
 SHELL_INIT=0               # 1 = append init=/bin/sh instead of /sbin/init
 ROOT_DEV_ARGS=""           # root disk device (AHCI/virtio/IDE)
 USB_ROOT_ARGS=""           # root disk devices that must follow $USB_CTRL
@@ -296,6 +302,7 @@ ${1#--floppy=}" ;;
         --ums)      UMS=1 ;;
         --uas)      UAS=1 ;;
         --rw)       RW=1 ;;
+        --slow)     SLOW=1 ;;
         --shell)    SHELL_INIT=1 ;;
         --usb-version=*)
             USB_VERSION="${1#--usb-version=}"
@@ -916,6 +923,13 @@ fi
 # the script's own arguments were consumed by the parser above.
 # "rw" goes on last, after every other APPEND edit above, because the kernel
 # takes it as a trailing mode word for the root mount rather than a key=value.
+if [ "$SLOW" -eq 1 ]; then
+    APPEND="$APPEND slow"
+    if [ "$BOOTMODE" = kernel ]; then
+        echo "run-networking.sh: console paced at one line per half second (slow)"
+    fi
+fi
+
 if [ "$RW" -eq 1 ]; then
     APPEND="$APPEND rw"
     if [ "$BOOTMODE" = kernel ]; then
