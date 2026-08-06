@@ -675,13 +675,22 @@ search --no-floppy --label $ROOT_LABEL --set=subroot
 # has written to the filesystem, so "ro" belongs here rather than in the
 # kernel.  Bring it up read-write afterwards with:
 #     mount -o remount,rw /
+# Uniprocessor by default: the APs are brought up but never scheduled on, so
+# SMP buys nothing today and costs a class of bring-up failures that only
+# show up on real hardware.
+#
+# nosmp is baked into this function rather than passed per entry, so every
+# menuentry below inherits it.  It cannot be overridden by appending a token,
+# because the kernel tests for nosmp with cmdline_has() -- presence, not
+# last-one-wins -- so the SMP entry at the bottom of this file repeats the
+# multiboot lines instead of calling this function.
 function substrate_boot {
     set root=\$subroot
-    echo "Loading /vmunix from $ROOT_LABEL ro \$*"
+    echo "Loading /vmunix from $ROOT_LABEL ro nosmp \$*"
     if [ "\$grub_platform" = "efi" ]; then
-        multiboot2 /vmunix root=LABEL=$ROOT_LABEL ro \$*
+        multiboot2 /vmunix root=LABEL=$ROOT_LABEL ro nosmp \$*
     else
-        multiboot /vmunix root=LABEL=$ROOT_LABEL ro \$*
+        multiboot /vmunix root=LABEL=$ROOT_LABEL ro nosmp \$*
     fi
     boot
 }
@@ -718,6 +727,20 @@ menuentry "Substrate (no USB BIOS handoff + trace)" {
 # filesystem on a USB stick disappears and the kernel panics.
 menuentry "Substrate (Intel USB2 reroute + trace)" {
     substrate_boot xhciroute xhcidebug ehcidebug
+}
+
+# The one entry that does NOT go through substrate_boot, because that function
+# hard-codes nosmp and no appended token can undo it.  Selecting this is the
+# only way to bring the APs up from the menu.
+menuentry "Substrate (SMP)" {
+    set root=\$subroot
+    echo "Loading /vmunix from $ROOT_LABEL ro (SMP)"
+    if [ "\$grub_platform" = "efi" ]; then
+        multiboot2 /vmunix root=LABEL=$ROOT_LABEL ro
+    else
+        multiboot /vmunix root=LABEL=$ROOT_LABEL ro
+    fi
+    boot
 }
 
 EOF
