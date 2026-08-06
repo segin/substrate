@@ -142,9 +142,18 @@ void timer_busywait_ms(unsigned ms) {
         outb(PIT_CHANNEL2, (uint8_t)(count & 0xFFU));
         outb(PIT_CHANNEL2, (uint8_t)((count >> 8) & 0xFFU));
 
+        /*
+         * Bound the poll.  Each iteration is a port read costing on the order
+         * of a microsecond on real hardware, so the ceiling has to be sized in
+         * reads, not in "a big number": at 100 million this took about a
+         * hundred seconds per chunk when OUT2 never rose, which does not look
+         * like a slow machine, it looks like a dead one.  A 50ms chunk needs
+         * roughly 50k reads, so this is several times the expected count and
+         * still gives up in a fraction of a second.
+         */
         while ((inb(NMI_STATUS_CONTROL) & 0x20U) == 0) {
-            if (++guard > 100000000U) {
-                break;      /* no PIT: give up rather than spin forever */
+            if (++guard > 200000U) {
+                break;      /* no usable PIT: give up rather than spin on */
             }
         }
         outb(NMI_STATUS_CONTROL, prev);

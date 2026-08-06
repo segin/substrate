@@ -133,12 +133,16 @@ static struct tty *console_resolve_tty(void) {
     return console_tty;
 }
 
+/* Set once console_init() has run; gates the "slow" pacing below. */
+static int console_ready;
+
 void console_init(void) {
     backends = NULL;
     console_input_head = 0;
     console_input_tail = 0;
     console_input_count = 0;
     tty_init();
+    console_ready = 1;
 }
 
 void console_set_tty(struct tty *tty) {
@@ -190,6 +194,17 @@ int console_get_terminal_size(int *cols, int *rows) {
 static int console_slow_state = -1;   /* -1 = command line not parsed yet */
 
 static int console_slow_enabled(void) {
+    /*
+     * Nothing is paced before console_init().  Output that early is emitted
+     * from a machine that is still being assembled -- the PIT this pauses on
+     * has not necessarily been left in a sane state by the firmware, and a
+     * wait that does not complete there reads as a dead machine rather than
+     * as a slow one.  The pacing is for watching a boot, and there is nothing
+     * to watch until the console exists.
+     */
+    if (!console_ready) {
+        return 0;
+    }
     if (console_slow_state < 0) {
         /* Do not cache an answer from before the command line existed: every
          * line printed during early boot would otherwise latch "off". */
