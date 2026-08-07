@@ -530,20 +530,34 @@ static int xhci_port_reset(usb_hcd_t *hcd, uint8_t port)
 
     psc = portsc_rd(hc, port) & ~XHCI_PORT_CLEAR;
     portsc_wr(hc, port, psc | XHCI_PORT_PR);
+
+    /*
+     * PR self-clears when the reset finishes, and it is that 1->0 transition
+     * which sets PRC.  Watch PR: it is the controller stating the reset is
+     * over, rather than a change flag that may already have been latched.
+     * NetBSD polls the same bit (UHF_PORT_RESET in xhci_roothub_ctrl).
+     */
     for (int i = 0; i < 100; i++) {
         xhci_delay_ms(2);
         psc = portsc_rd(hc, port);
-        if (psc & XHCI_PORT_PRC) {           /* reset complete */
-            /* Acknowledge PRC *without* writing PED back.  The reset has just
-             * succeeded, so PED reads 1 here, and PED is RW1CS: carrying it
-             * into the write disables the port we are in the middle of
-             * bringing up.  The PED test below then reads 0 and this function
-             * reports a failed reset, so the port is skipped and nothing on it
-             * ever enumerates.  See XHCI_PORT_CLEAR. */
-            portsc_wr(hc, port, (psc & ~XHCI_PORT_CLEAR) | XHCI_PORT_PRC);
+        if (!(psc & XHCI_PORT_PR))
             break;
-        }
     }
+    if (psc & XHCI_PORT_PRC) {
+        /* Acknowledge PRC *without* writing PED back.  The reset has just
+         * succeeded, so PED reads 1 here, and PED is RW1CS: carrying it into
+         * the write disables the port we are in the middle of bringing up.
+         * The PED test below then reads 0 and this function reports a failed
+         * reset, so the port is skipped and nothing on it ever enumerates.
+         * See XHCI_PORT_CLEAR. */
+        portsc_wr(hc, port, (psc & ~XHCI_PORT_CLEAR) | XHCI_PORT_PRC);
+    }
+
+    /* Let the device finish coming out of reset before anyone talks to it.
+     * usb_scan_ports() goes straight from here into enumeration, so if this
+     * wait is not taken here it is not taken anywhere. [X-07] */
+    xhci_delay_ms(XHCI_PORT_RESET_RECOVERY_MS);
+
     psc = portsc_rd(hc, port);
     return (psc & XHCI_PORT_PED) ? 0 : -1;
 }
@@ -944,6 +958,9 @@ static int xhci_control(xhci_hc_t *hc, usb_transfer_t *xfer)
         uint32_t ctrl = XHCI_TRB_TYPE(TRB_ADDRESS_DEVICE) | ((uint32_t)slot << 24);
         int cc = xhci_run_command(hc, s->in_ctx_dma, ctrl, NULL);
         if (cc != XHCI_CC_SUCCESS) return USB_XFER_ERROR;
+        /* A device is allowed a settling period after being addressed before
+         * it has to answer on the new address (USB 2.0 s9.2.6.3). [X-07] */
+        xhci_delay_ms(XHCI_SET_ADDRESS_SETTLE_MS);
         hc->addr_slot[xfer->setup.wValue & 0x7F] = slot;
         hc->enum_slot = 0;
         xfer->actual_length = 0;
@@ -1088,11 +1105,59 @@ static int xhci_bulk(xhci_hc_t *hc, usb_transfer_t *xfer)
     return USB_XFER_OK;
 }
 
+/*
+ * Report a controller that has faulted, and drop any events nobody claimed.
+ *
+ * The event ring is only ever read while a transfer or command is in flight,
+ * so Port Status Change events -- which the controller posts on every port
+ * transition and which no code path here consumes -- just pile up.  The ring
+ * is 64 entries; once it fills, the controller can no longer post the
+ * Transfer Events we are waiting for and every transfer times out with no
+ * clue as to why.  A flapping port or a marginal cable is enough to get there.
+ *
+ * USBSTS is checked at the same time because a controller that has taken a
+ * Host System Error or Host Controller Error otherwise looks exactly like one
+ * that is merely slow.  FreeBSD reports both (xhci_interrupt).
+ */
+static void xhci_drain_events(xhci_hc_t *hc)
+{
+    uint32_t sts = rd32(hc->op, XHCI_OP_USBSTS);
+    int drained = 0;
+
+    if (sts & (XHCI_STS_HSE | XHCI_STS_HCE | XHCI_STS_HCH)) {
+        kprintf("xhci: %s: controller fault (usbsts=0x%x%s%s%s)\n",
+                hc->name, (unsigned)sts,
+                (sts & XHCI_STS_HCH) ? " halted" : "",
+                (sts & XHCI_STS_HSE) ? " host-system-error" : "",
+                (sts & XHCI_STS_HCE) ? " host-controller-error" : "");
+        /* HSE is RW1C; acknowledge so a single fault is not reported forever. */
+        if (sts & XHCI_STS_HSE)
+            wr32(hc->op, XHCI_OP_USBSTS, XHCI_STS_HSE);
+    }
+
+    /*
+     * Consume whatever is already pending.  The cycle bit is tested directly
+     * rather than leaning on a zero timeout, because xhci_wait_event() with
+     * no budget still spins until the millisecond counter ticks -- which
+     * would cost far more than the drain saves.  Bounded by the ring size so
+     * a controller producing events faster than we retire them cannot trap us
+     * here holding submit_lock.
+     */
+    while (drained < XHCI_RING_TRBS) {
+        struct xhci_trb *e = &hc->event_ring[hc->event_deq];
+        if ((e->control & XHCI_TRB_CYCLE) != hc->event_cycle)
+            break;
+        (void)xhci_wait_event(hc, NULL, NULL, NULL, 0);
+        drained++;
+    }
+}
+
 static int xhci_submit(usb_hcd_t *hcd, usb_transfer_t *xfer)
 {
     xhci_hc_t *hc = hcd->priv;
     int ret;
     mutex_lock(&hc->submit_lock);
+    xhci_drain_events(hc);   /* [X-08] */
     if (xfer->is_control)
         ret = xhci_control(hc, xfer);
     else if (xfer->ep && (xfer->ep->type == USB_EP_TYPE_BULK ||

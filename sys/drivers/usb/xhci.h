@@ -93,6 +93,8 @@ void xhci_init(void);
 #define XHCI_CMD_HCRST       0x00000002
 #define XHCI_CMD_INTE        0x00000004
 #define XHCI_STS_HCH         0x00000001   /* HC halted */
+#define XHCI_STS_HSE         0x00000004   /* host system error */
+#define XHCI_STS_HCE         0x00001000   /* host controller error */
 #define XHCI_STS_CNR         0x00000800   /* controller not ready */
 #define XHCI_CRCR_RCS        0x00000001   /* ring cycle state */
 #define XHCI_CRCR_CA         0x00000004   /* command abort (RW1S) */
@@ -132,6 +134,17 @@ void xhci_init(void);
  * so survive a writeback, which is what we want.
  */
 #define XHCI_PORT_CLEAR      0x80FF01FFU
+
+/*
+ * Post-reset recovery.  USB 2.0 s7.1.7.5 gives a device 10ms (TRSTRCY) after
+ * the reset ends before it has to answer anything; talking to it sooner is
+ * simply out of spec.  FreeBSD budgets double the minimum
+ * (USB_PORT_RESET_RECOVERY, usb.h) and so do we.  Likewise a device is
+ * allowed 2ms to take up a new address; FreeBSD waits 10
+ * (USB_SET_ADDRESS_SETTLE).
+ */
+#define XHCI_PORT_RESET_RECOVERY_MS  20
+#define XHCI_SET_ADDRESS_SETTLE_MS   10
 
 /* ---- Runtime registers (from rtbase = mmio + RTSOFF) ---- */
 #define XHCI_RT_MFINDEX      0x00
