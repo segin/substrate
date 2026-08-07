@@ -96,6 +96,9 @@ typedef struct xhci_hc {
     volatile uint8_t *db;      /* doorbell array */
     uint8_t  nports;
     uint8_t  maxslots;
+    /* Protocol major revision per root port (2 or 3), from the Supported
+     * Protocol capability; 0 = the capability said nothing about it. */
+    uint8_t  port_major[USB_MAX_ROOT_PORTS];
     uint32_t ctx_size;         /* 32 or 64 */
     int      initialized;
 
@@ -526,12 +529,29 @@ static uint32_t xhci_port_status(usb_hcd_t *hcd, uint8_t port)
          * FS/LS/HS/SS assignments (xHCI 1.1 s7.2.2.1.1). [USB-12]
          */
         uint32_t psid = (psc & XHCI_PORT_SPEED_MASK) >> XHCI_PORT_SPEED_SHIFT;
-        switch (psid) {
-        case 1: break;                                      /* full speed */
-        case 2: out |= USB_PORT_STAT_LOW_SPEED;   break;
-        case 3: out |= USB_PORT_STAT_HIGH_SPEED;  break;
-        case 4: out |= USB_PORT_STAT_SUPER_SPEED; break;
-        default: out |= USB_PORT_STAT_HIGH_SPEED; break;    /* unknown: assume HS */
+        uint8_t major = (port >= 1 && port <= USB_MAX_ROOT_PORTS)
+                        ? hc->port_major[port - 1] : 0;
+
+        if (major == 3) {
+            /* Every speed a USB3 protocol port can train at -- SuperSpeed and
+             * the SuperSpeedPlus gears above it -- is SuperSpeed as far as the
+             * core is concerned.  Reading the PSID against the default table
+             * here is what reported a Gen 2 port as high speed. [X-10] */
+            out |= USB_PORT_STAT_SUPER_SPEED;
+        } else {
+            switch (psid) {
+            case 1: break;                                      /* full speed */
+            case 2: out |= USB_PORT_STAT_LOW_SPEED;   break;
+            case 3: out |= USB_PORT_STAT_HIGH_SPEED;  break;
+            case 4: out |= USB_PORT_STAT_SUPER_SPEED; break;
+            default:
+                /* Unknown ID on a port whose protocol we never learned: at or
+                 * above the SuperSpeed default is at least SuperSpeed, below
+                 * it assume high speed as before. */
+                out |= (psid >= 4) ? USB_PORT_STAT_SUPER_SPEED
+                                   : USB_PORT_STAT_HIGH_SPEED;
+                break;
+            }
         }
     }
     /*
@@ -545,6 +565,46 @@ static uint32_t xhci_port_status(usb_hcd_t *hcd, uint8_t port)
     return out;
 }
 
+/* Drive one reset of `port` using `reset_bit` (PR for a hot reset, WPR for a
+ * warm one) and report whether the port came out enabled. */
+static int xhci_do_reset(xhci_hc_t *hc, uint8_t port, uint32_t reset_bit)
+{
+    uint32_t psc = portsc_rd(hc, port) & ~XHCI_PORT_CLEAR;
+    uint32_t ack;
+
+    portsc_wr(hc, port, psc | reset_bit);
+
+    /*
+     * The reset bit self-clears when the reset finishes, and it is that 1->0
+     * transition which sets the matching change flag.  Watch the reset bit:
+     * it is the controller stating the reset is over, rather than a change
+     * flag that may already have been latched.  NetBSD polls the same bit
+     * (UHF_PORT_RESET in xhci_roothub_ctrl).
+     */
+    for (int i = 0; i < 100; i++) {
+        xhci_delay_ms(2);
+        psc = portsc_rd(hc, port);
+        if (!(psc & reset_bit))
+            break;
+    }
+
+    /* Acknowledge whichever change flags latched, *without* writing PED back.
+     * A successful reset leaves PED set, and PED is RW1CS: carrying it into
+     * the write disables the port we are in the middle of bringing up.  The
+     * PED test below would then read 0 and report a failed reset, so the port
+     * gets skipped and nothing on it ever enumerates.  See XHCI_PORT_CLEAR. */
+    ack = psc & (XHCI_PORT_PRC | XHCI_PORT_WRC);
+    if (ack)
+        portsc_wr(hc, port, (psc & ~XHCI_PORT_CLEAR) | ack);
+
+    /* Let the device finish coming out of reset before anyone talks to it.
+     * usb_scan_ports() goes straight from here into enumeration, so if this
+     * wait is not taken here it is not taken anywhere. [X-07] */
+    xhci_delay_ms(XHCI_PORT_RESET_RECOVERY_MS);
+
+    return (portsc_rd(hc, port) & XHCI_PORT_PED) ? 0 : -1;
+}
+
 static int xhci_port_reset(usb_hcd_t *hcd, uint8_t port)
 {
     xhci_hc_t *hc = hcd->priv;
@@ -555,38 +615,25 @@ static int xhci_port_reset(usb_hcd_t *hcd, uint8_t port)
     if (psc & XHCI_PORT_PED)
         return 0;
 
-    psc = portsc_rd(hc, port) & ~XHCI_PORT_CLEAR;
-    portsc_wr(hc, port, psc | XHCI_PORT_PR);
+    if (xhci_do_reset(hc, port, XHCI_PORT_PR) == 0)
+        return 0;
 
     /*
-     * PR self-clears when the reset finishes, and it is that 1->0 transition
-     * which sets PRC.  Watch PR: it is the controller stating the reset is
-     * over, rather than a change flag that may already have been latched.
-     * NetBSD polls the same bit (UHF_PORT_RESET in xhci_roothub_ctrl).
+     * A SuperSpeed port that will not come up under a hot reset can still
+     * recover from a warm one, which retrains the link from scratch instead
+     * of assuming it is already up: that is the way out of Inactive,
+     * Compliance, or a port stuck in Polling after a failed negotiation.
+     * Both BSDs expose it (FreeBSD UHF_BH_PORT_RESET -> XHCI_PS_WPR).
+     * Meaningless on a USB2 port, and PSID only says SuperSpeed or better
+     * once the port has trained, so require both that and a live connection.
      */
-    for (int i = 0; i < 100; i++) {
-        xhci_delay_ms(2);
-        psc = portsc_rd(hc, port);
-        if (!(psc & XHCI_PORT_PR))
-            break;
-    }
-    if (psc & XHCI_PORT_PRC) {
-        /* Acknowledge PRC *without* writing PED back.  The reset has just
-         * succeeded, so PED reads 1 here, and PED is RW1CS: carrying it into
-         * the write disables the port we are in the middle of bringing up.
-         * The PED test below then reads 0 and this function reports a failed
-         * reset, so the port is skipped and nothing on it ever enumerates.
-         * See XHCI_PORT_CLEAR. */
-        portsc_wr(hc, port, (psc & ~XHCI_PORT_CLEAR) | XHCI_PORT_PRC);
-    }
-
-    /* Let the device finish coming out of reset before anyone talks to it.
-     * usb_scan_ports() goes straight from here into enumeration, so if this
-     * wait is not taken here it is not taken anywhere. [X-07] */
-    xhci_delay_ms(XHCI_PORT_RESET_RECOVERY_MS);
-
     psc = portsc_rd(hc, port);
-    return (psc & XHCI_PORT_PED) ? 0 : -1;
+    if ((psc & XHCI_PORT_CCS) &&
+        ((psc & XHCI_PORT_SPEED_MASK) >> XHCI_PORT_SPEED_SHIFT) >= 4) {
+        kprintf("xhci: port %u would not enable; trying a warm reset\n", port);
+        return xhci_do_reset(hc, port, XHCI_PORT_WPR);   /* [X-15] */
+    }
+    return -1;
 }
 
 static int xhci_port_enable(usb_hcd_t *hcd, uint8_t port, int enable)
@@ -1419,6 +1466,59 @@ static int xhci_trace;
  * rather than one call per page: memory is unfragmented at driver-attach time,
  * and it keeps teardown to a single free.
  */
+/*
+ * Record which USB protocol each root port speaks.
+ *
+ * The Protocol Speed IDs in PORTSC are only meaningful against a protocol:
+ * xHCI 1.2 s7.2 defines a *default* mapping (1=FS, 2=LS, 3=HS, 4=SS) which a
+ * controller is free to redefine per Supported Protocol block.  Without
+ * reading the capability, everything above the defaults falls off the end of
+ * the table -- a USB 3.1 Gen 2 port reports PSID 5 and was being handed to
+ * the core as high speed.
+ *
+ * NetBSD parses the same capability in xhci_id_protocols(), where it also
+ * builds a controller-port to root-hub-port map and splits the USB2 and USB3
+ * buses.  We only need enough to interpret the speed field, so this records
+ * the major revision per port and nothing more. [X-10]
+ */
+static void xhci_parse_protocols(xhci_hc_t *hc)
+{
+    uint32_t hcc = rd32(hc->mmio, XHCI_CAP_HCCPARAMS1);
+    uint32_t off = XHCI_HCC1_XECP(hcc) * 4;
+
+    for (int guard = 0; off != 0 && guard < 64; guard++) {
+        uint32_t cap;
+
+        if (off + 16 > XHCI_MMIO_SIZE)
+            break;
+        cap = rd32(hc->mmio, off);
+        if (cap == 0xFFFFFFFFu)
+            break;
+
+        /* Dword 1 must read "USB "; anything else is a vendor protocol we
+         * have no business interpreting. */
+        if (XHCI_XECP_ID(cap) == XHCI_ECAP_ID_PROTOCOL &&
+            rd32(hc->mmio, off + 4) == XHCI_XECP_SP_NAME_USB) {
+            uint32_t w2 = rd32(hc->mmio, off + 8);
+            unsigned first = XHCI_XECP_SP_PORT_OFF(w2);
+            unsigned count = XHCI_XECP_SP_PORT_CNT(w2);
+            unsigned major = XHCI_XECP_SP_MAJOR(cap);
+
+            for (unsigned p = first; count && p < first + count; p++) {
+                if (p >= 1 && p <= hc->nports && p <= USB_MAX_ROOT_PORTS)
+                    hc->port_major[p - 1] = (uint8_t)major;
+            }
+            if (xhci_trace && count)
+                kprintf("xhci: USB %u.x on ports %u-%u\n",
+                        major, first, first + count - 1);
+        }
+
+        if (XHCI_XECP_NEXT(cap) == 0)
+            break;
+        off += XHCI_XECP_NEXT(cap) * 4;
+    }
+}
+
 static int xhci_alloc_scratchpad(xhci_hc_t *hc)
 {
     uint32_t ps, i;
@@ -1722,6 +1822,11 @@ static int xhci_pci_attach(struct device *dev)
      */
     if (!cmdline_has("nousbhandoff"))
         xhci_take_controller(hc);
+
+    /* Which protocol each port speaks; needed to read PORTSC's speed
+     * field correctly.  Static capability data, safe to read before the
+     * controller is started. [X-10] */
+    xhci_parse_protocols(hc);
 
     if (xhci_start(hc) != 0) {
         xhci_teardown(hc);

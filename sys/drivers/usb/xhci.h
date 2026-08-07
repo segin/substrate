@@ -52,6 +52,19 @@ void xhci_init(void);
 #define XHCI_XECP_ID(x)        ((x) & 0xFF)
 #define XHCI_XECP_NEXT(x)      (((x) >> 8) & 0xFF)
 #define XHCI_ECAP_ID_LEGACY    0x01   /* USB Legacy Support */
+#define XHCI_ECAP_ID_PROTOCOL  0x02   /* Supported Protocol */
+
+/*
+ * Supported Protocol capability (xHCI 1.2 s7.2).  Dword 0 carries the protocol
+ * revision in its top half, dword 1 the ASCII name ("USB "), and dword 2 the
+ * range of root-hub ports this block describes.  Without it the Protocol Speed
+ * IDs in PORTSC can only be interpreted against the default table, which is
+ * merely the *default* -- a controller may redefine them per protocol.
+ */
+#define XHCI_XECP_SP_NAME_USB  0x20425355u  /* "USB " little-endian */
+#define XHCI_XECP_SP_MAJOR(w0) (((w0) >> 24) & 0xFF)
+#define XHCI_XECP_SP_PORT_OFF(w2) ((w2) & 0xFF)         /* 1-based */
+#define XHCI_XECP_SP_PORT_CNT(w2) (((w2) >> 8) & 0xFF)
 
 /*
  * USB Legacy Support capability: USBLEGSUP at +0x00 (bit 16 = HC BIOS Owned,
@@ -110,7 +123,9 @@ void xhci_init(void);
 #define XHCI_PORT_SPEED_SHIFT 10
 #define XHCI_PORT_SPEED_MASK 0x00003C00
 #define XHCI_PORT_CSC        0x00020000   /* connect status change (W1C) */
+#define XHCI_PORT_WRC        0x00080000   /* warm port reset change (W1C) */
 #define XHCI_PORT_PRC        0x00200000   /* port reset change (W1C) */
+#define XHCI_PORT_WPR        0x80000000U  /* warm port reset (USB3 only) */
 /*
  * Bits that must be cleared out of a PORTSC value before writing it back.
  *
