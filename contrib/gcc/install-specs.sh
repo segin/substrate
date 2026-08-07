@@ -47,9 +47,34 @@ LIBDIR="${STAGE1_PREFIX}/lib/gcc/${TARGET}/${GCC_VERSION}"
     exit 1
 }
 
+# The *lib spec (LIB_SPEC) is the library list the driver expands *after* the
+# user's objects, which is where -lpthread has to land to satisfy a static
+# archive's references.
+#
+# libstdc++.a's exception-allocation pool (eh_alloc.o) calls
+# __gthread_mutex_lock/unlock, i.e. pthread_mutex_lock/unlock.  Substrate keeps
+# those in libpthread rather than libc -- glibc 2.34 merged them into libc
+# precisely so this stops happening -- and libstdc++ records no dependency of
+# its own, so every C++ link arrives at ld with them unresolved:
+#
+#   libstdc++.a(eh_alloc.o): in function `__gthread_mutex_lock(int*)':
+#   gthr-default.h:795: undefined reference to `pthread_mutex_lock'
+#
+# Naming it here rather than per-project is what makes it stop recurring.  The
+# GCC build alone hit it twice in two different subdirectories (isl's
+# isl_test_cpp, then c++tools' g++-mapper-server), and c++tools has a
+# hand-written link rule that uses neither LIBS nor LDFLAGS, so there is no
+# configure-level knob that reaches every case.  Contrib ports, TDE and cmake
+# have each needed the same flag bolted on separately.
+#
+# This is a workaround for the split, not a fix: moving the pthread symbols
+# into libc would remove the need entirely.
 cat > "${LIBDIR}/specs" <<EOF
 *link:
 + %{!static:--eh-frame-hdr} --copy-dt-needed-entries -rpath-link ${SR}/lib
+
+*lib:
++ -lpthread
 EOF
 
 echo "==> installed ${LIBDIR}/specs"

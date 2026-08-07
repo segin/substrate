@@ -175,6 +175,61 @@ if [ "$STAGE" = 2 ]; then
     # is little-endian, has 8-bit chars, etc.  Without ac_cv_c_bigendian
     # the mpc subbuild dies with "configure: error: unknown endianness".
     export ac_cv_c_bigendian=no
+    # Every C++ program linked with the substrate toolchain needs -lpthread.
+    # libstdc++.a's exception-allocation pool (eh_alloc.o) calls
+    # __gthread_mutex_lock/unlock, and our libstdc++ carries no libpthread
+    # dependency of its own, so the references arrive unresolved at the final
+    # link:
+    #
+    #   libstdc++.a(eh_alloc.o): in function `__gthread_mutex_lock(int*)':
+    #   gthr-default.h:795: undefined reference to `pthread_mutex_lock'
+    #
+    # That bites every C++ binary this build produces -- isl_test_cpp is
+    # simply the first one in dependency order, and cc1plus would be next.
+    # It goes in LIBS rather than LDFLAGS because autoconf puts LDFLAGS
+    # *before* the objects on the link line, where a static archive
+    # contributes nothing; LIBS is placed last, after the objects that
+    # reference it.  Exported so every subdirectory configure and make
+    # inherits it, and repeated on the configure and make lines because
+    # GCC's Makefiles re-derive it per subdirectory.
+    export LIBS="-lpthread"
+    # The target libraries (libgcc first) are GCC's own runtime, and GCC 16
+    # writes its sources in C23 -- gcc/config/i386/i386.h:1722 declares a bare
+    # `bool preserve_none_abi;`.  patches/0011-c-default-gnu17.patch makes the
+    # C front end default to gnu17 so that old K&R contrib ports still build,
+    # and under gnu17 `bool` is not a keyword:
+    #
+    #   gcc/config/i386/i386.h:1722:3: error: unknown type name 'bool'
+    #
+    # libgcc is compiled by the stage-1 cross compiler (a Canadian cross cannot
+    # run the stage-2 one on the build host), so it inherits that default and
+    # dies.  The gnu17 default is a policy for *user* code; GCC's own runtime
+    # wants the dialect GCC was written in.  Ask for it explicitly here rather
+    # than narrowing patch 0011, which cannot tell whose source it is reading.
+    CFLAGS_FOR_TARGET="-g -O2 -std=gnu23"
+
+    # libstdc++ must not see the *stage-1* C++ headers already installed in
+    # the sysroot.  A native GCC build compiles the target libraries with an
+    # in-tree xg++ that carries -nostdinc++; a Canadian cross has no runnable
+    # in-tree compiler, so CXX_FOR_TARGET is the installed stage-1 driver and
+    # that flag is absent.  Two copies of libstdc++'s compat headers then sit
+    # on one search path, and #include_next dead-ends on the shared guard:
+    #
+    #   include-fixed/math.h  ->  #include <fenv.h>
+    #     -> build-stage2/.../libstdc++-v3/include/fenv.h   sets _GLIBCXX_FENV_H,
+    #                                                       then #include_next
+    #       -> <sysroot>/include/c++/16.1.0/fenv.h          guard already set,
+    #                                                       expands to nothing
+    #
+    # so Substrate's real <fenv.h> is never reached and every declaration in
+    # math.h that names fenv_t (fromfp, ufromfpx, ...) fails to compile:
+    #
+    #   include-fixed/math.h:622:33: error: 'fenv_t' has not been declared
+    #
+    # It has to be set here, not on the make line: config.status bakes CXX
+    # into each target library's Makefile, where a make-level CXX_FOR_TARGET
+    # override no longer reaches it.
+    CXX_FOR_TARGET="${TARGET_TRIPLE}-c++ -nostdinc++"
     "$SRC_TREE/configure" \
         --build="$BUILD_TRIPLE" \
         --host="$TARGET_TRIPLE" \
@@ -197,7 +252,10 @@ if [ "$STAGE" = 2 ]; then
         CC_FOR_BUILD=gcc \
         CXX_FOR_BUILD=g++ \
         ac_cv_c_bigendian=no \
-        LDFLAGS=""
+        LDFLAGS="" \
+        LIBS="-lpthread" \
+        CFLAGS_FOR_TARGET="$CFLAGS_FOR_TARGET" \
+        CXX_FOR_TARGET="$CXX_FOR_TARGET"
 
     echo "==> Building (-j $PARALLEL)"
     # Pass through again on the make line — GCC's Makefiles re-derive
@@ -205,14 +263,16 @@ if [ "$STAGE" = 2 ]; then
     # cleanest way to keep them honest is to repeat the override.
     make -j "$PARALLEL" \
         CC_FOR_BUILD=gcc \
-        CXX_FOR_BUILD=g++
+        CXX_FOR_BUILD=g++ \
+        CFLAGS_FOR_TARGET="$CFLAGS_FOR_TARGET"
 
     echo "==> Staging to $STAGE2_DESTDIR"
     rm -rf "$STAGE2_DESTDIR"
     mkdir -p "$STAGE2_DESTDIR"
     make install DESTDIR="$STAGE2_DESTDIR" \
         CC_FOR_BUILD=gcc \
-        CXX_FOR_BUILD=g++
+        CXX_FOR_BUILD=g++ \
+        CFLAGS_FOR_TARGET="$CFLAGS_FOR_TARGET"
 
     # lto-dump isn't part of the default install target — copy it
     # explicitly so it lands in $STAGE2_DESTDIR/usr/libexec/...
