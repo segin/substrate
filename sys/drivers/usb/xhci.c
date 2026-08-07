@@ -51,12 +51,31 @@
  * of contiguous memory during boot. */
 #define XHCI_MAX_SCRATCHPADS 128
 
+/*
+ * Ring memory is shared with the controller, so every access to it goes
+ * through a volatile pointer: these are not ordinary variables the compiler
+ * may cache, fold or reorder among themselves.  The ownership handoff in
+ * particular depends on the cycle bit becoming visible *after* the rest of
+ * the TRB, which xhci_trb_commit() enforces. [X-11]
+ */
 struct xhci_ring {
-    struct xhci_trb *trb;
+    volatile struct xhci_trb *trb;
     dma_addr_t       dma;
     uint32_t         enq;      /* enqueue index */
     uint8_t          cycle;    /* producer cycle state */
 };
+
+/* Publish a TRB the controller may consume the instant the cycle bit flips.
+ * x86 will not reorder the stores, but nothing stops the compiler from
+ * sinking the payload writes past the control write, so state the dependency
+ * rather than relying on how this happens to be compiled today.  Both BSDs
+ * bracket their ring updates with an explicit sync for the same reason. */
+static inline void xhci_trb_commit(volatile struct xhci_trb *t, uint32_t ctrl)
+{
+    __asm__ volatile("" ::: "memory");
+    t->control = ctrl;
+    __asm__ volatile("" ::: "memory");
+}
 
 struct xhci_slot {
     int      in_use;
@@ -90,7 +109,7 @@ typedef struct xhci_hc {
     uint64_t *scratch_arr;  dma_addr_t scratch_arr_dma;   /* pointer array */
     void     *scratch_buf;  dma_addr_t scratch_buf_dma;   /* the pages */
     struct xhci_ring cmd_ring;
-    struct xhci_trb  *event_ring;  dma_addr_t event_ring_dma;
+    volatile struct xhci_trb *event_ring;  dma_addr_t event_ring_dma;
     uint8_t          *erst;        dma_addr_t erst_dma;
     uint32_t         event_deq;    uint8_t event_cycle;
     void             *bounce;      dma_addr_t bounce_dma;
@@ -133,11 +152,11 @@ static int xhci_ring_alloc(struct xhci_ring *r)
 {
     r->trb = dma_alloc_coherent(XHCI_RING_TRBS * sizeof(struct xhci_trb), &r->dma);
     if (!r->trb) return -1;
-    memset(r->trb, 0, XHCI_RING_TRBS * sizeof(struct xhci_trb));
+    memset((void *)r->trb, 0, XHCI_RING_TRBS * sizeof(struct xhci_trb));
     /* Last TRB is a Link back to the start (toggle cycle). */
-    struct xhci_trb *link = &r->trb[XHCI_RING_TRBS - 1];
+    volatile struct xhci_trb *link = &r->trb[XHCI_RING_TRBS - 1];
     link->param = r->dma;
-    link->control = XHCI_TRB_TYPE(TRB_LINK) | XHCI_TRB_TC;
+    xhci_trb_commit(link, XHCI_TRB_TYPE(TRB_LINK) | XHCI_TRB_TC);
     r->enq = 0;
     r->cycle = 1;
     return 0;
@@ -148,18 +167,19 @@ static int xhci_ring_alloc(struct xhci_ring *r)
 static uint64_t xhci_ring_push(struct xhci_ring *r, uint64_t param, uint32_t status,
                                uint32_t ctrl_type_flags)
 {
-    struct xhci_trb *t = &r->trb[r->enq];
+    volatile struct xhci_trb *t = &r->trb[r->enq];
     uint64_t phys = r->dma + (dma_addr_t)r->enq * sizeof(struct xhci_trb);
     t->param = param;
     t->status = status;
     /* set the type/flags, then the cycle bit last (ownership handoff) */
-    t->control = ctrl_type_flags | (r->cycle ? XHCI_TRB_CYCLE : 0);
+    xhci_trb_commit(t, ctrl_type_flags | (r->cycle ? XHCI_TRB_CYCLE : 0));
 
     r->enq++;
     if (r->enq == XHCI_RING_TRBS - 1) {
         /* hit the Link TRB: flip its cycle to hand it to the controller */
-        struct xhci_trb *link = &r->trb[XHCI_RING_TRBS - 1];
-        link->control = (link->control & ~XHCI_TRB_CYCLE) | (r->cycle ? XHCI_TRB_CYCLE : 0);
+        volatile struct xhci_trb *link = &r->trb[XHCI_RING_TRBS - 1];
+        xhci_trb_commit(link, (link->control & ~XHCI_TRB_CYCLE) |
+                              (r->cycle ? XHCI_TRB_CYCLE : 0));
         r->enq = 0;
         r->cycle ^= 1;
     }
@@ -178,7 +198,7 @@ static int xhci_wait_event(xhci_hc_t *hc, uint64_t *out_param, uint32_t *out_ctr
 {
     uint64_t deadline = (uint64_t)get_uptime_ms() + timeout_ms;
     for (;;) {
-        struct xhci_trb *e = &hc->event_ring[hc->event_deq];
+        volatile struct xhci_trb *e = &hc->event_ring[hc->event_deq];
         uint32_t ctrl = e->control;
         if ((ctrl & XHCI_TRB_CYCLE) == hc->event_cycle) {
             uint32_t cc = XHCI_TRB_GET_CC(e->status);
@@ -236,9 +256,9 @@ static void xhci_abort_command(xhci_hc_t *hc)
         kprintf("xhci: command ring still running after abort\n");
 
     /* Rewind to the top of the ring: nothing on it is ours any more. */
-    memset(hc->cmd_ring.trb, 0,
+    memset((void *)hc->cmd_ring.trb, 0,
            XHCI_RING_TRBS * sizeof(struct xhci_trb));
-    struct xhci_trb *link = &hc->cmd_ring.trb[XHCI_RING_TRBS - 1];
+    volatile struct xhci_trb *link = &hc->cmd_ring.trb[XHCI_RING_TRBS - 1];
     link->param = hc->cmd_ring.dma;
     link->control = XHCI_TRB_TYPE(TRB_LINK) | XHCI_TRB_TC;
     hc->cmd_ring.enq = 0;
@@ -590,13 +610,13 @@ static void xhci_free_slot(xhci_hc_t *hc, uint8_t slot)
      * [A34] */
     for (int dci = 0; dci < 32; dci++) {
         if (s->ep_ring[dci].trb) {
-            dma_free_coherent(s->ep_ring[dci].trb,
+            dma_free_coherent((void *)s->ep_ring[dci].trb,
                               XHCI_RING_TRBS * sizeof(struct xhci_trb));
             s->ep_ring[dci].trb = NULL;
         }
         for (int sid = 0; sid < XHCI_NUM_STREAMS; sid++) {
             if (s->stream_ring[dci][sid].trb) {
-                dma_free_coherent(s->stream_ring[dci][sid].trb,
+                dma_free_coherent((void *)s->stream_ring[dci][sid].trb,
                                   XHCI_RING_TRBS * sizeof(struct xhci_trb));
                 s->stream_ring[dci][sid].trb = NULL;
             }
@@ -1144,7 +1164,7 @@ static void xhci_drain_events(xhci_hc_t *hc)
      * here holding submit_lock.
      */
     while (drained < XHCI_RING_TRBS) {
-        struct xhci_trb *e = &hc->event_ring[hc->event_deq];
+        volatile struct xhci_trb *e = &hc->event_ring[hc->event_deq];
         if ((e->control & XHCI_TRB_CYCLE) != hc->event_cycle)
             break;
         (void)xhci_wait_event(hc, NULL, NULL, NULL, 0);
@@ -1462,7 +1482,7 @@ static int xhci_start(xhci_hc_t *hc)
                                         &hc->event_ring_dma);
     hc->erst = dma_alloc_coherent(64, &hc->erst_dma);
     if (!hc->event_ring || !hc->erst) return -1;
-    memset(hc->event_ring, 0, XHCI_RING_TRBS * sizeof(struct xhci_trb));
+    memset((void *)hc->event_ring, 0, XHCI_RING_TRBS * sizeof(struct xhci_trb));
     memset(hc->erst, 0, 64);
     *(uint64_t *)(hc->erst + 0) = hc->event_ring_dma;
     *(uint32_t *)(hc->erst + 8) = XHCI_RING_TRBS;
@@ -1545,10 +1565,10 @@ static void xhci_teardown(xhci_hc_t *hc)
     if (hc->erst)
         dma_free_coherent(hc->erst, 64);
     if (hc->event_ring)
-        dma_free_coherent(hc->event_ring,
+        dma_free_coherent((void *)hc->event_ring,
                           XHCI_RING_TRBS * sizeof(struct xhci_trb));
     if (hc->cmd_ring.trb)
-        dma_free_coherent(hc->cmd_ring.trb,
+        dma_free_coherent((void *)hc->cmd_ring.trb,
                           XHCI_RING_TRBS * sizeof(struct xhci_trb));
     if (hc->scratch_buf)
         dma_free_coherent(hc->scratch_buf,
