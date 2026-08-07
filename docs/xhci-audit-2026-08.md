@@ -22,28 +22,41 @@ ordered by severity.  Line numbers are against the tree at commit `89d8743ae`.
 
 ---
 
+## Status
+
+**All 18 findings are fixed** as of 2026-08-07, each with a regression run
+across USB 1.1 (UHCI), 2.0 (EHCI) and 3.0 (xHCI).  X-13 is fixed in the
+sense of being an explicit, documented decision rather than code: see its
+entry.  The commit for each is in the table below.
+
+Two fixes cannot be exercised under emulation and were verified by fault
+injection instead -- forcing a scratchpad request (X-02) and forcing a bulk
+transfer to time out (X-03).  Both hacks were removed afterwards and the
+clean build re-verified.  Hardware confirmation of X-01/X-02 on the Skylake
+laptop is still outstanding.
+
 ## Summary
 
-| ID | Severity | Area | One-line |
-|----|----------|------|----------|
-| X-01 | **Critical** | port control | PORTSC read-modify-write writes PED back, disabling the port it just reset |
-| X-02 | **Critical** | init | Scratchpad buffers never allocated; DCBAA[0] left null |
-| X-03 | High | transfers | Timed-out TD is abandoned while the controller still owns the bounce buffer |
-| X-04 | High | command ring | Command timeout leaves the ring desynchronised; no Command Abort |
-| X-05 | High | contexts | EP context dword 4 (Average TRB Length / Max ESIT Payload) never written |
-| X-06 | High | contexts | Configure Endpoint drops the slot context's TT fields |
-| X-07 | Medium | port control | No 10 ms post-reset recovery delay (TRSTRCY) |
-| X-08 | Medium | event ring | Event ring is never drained outside a transfer; 64 entries can fill and wedge |
-| X-09 | Medium | init | CAPLENGTH/RTSOFF/DBOFF/XECP unvalidated against the fixed 16 KiB mapping |
-| X-10 | Medium | port control | Supported Protocol capability not parsed; port speed decoded from a guess |
-| X-11 | Medium | rings | TRB stores have no compiler barrier; the cycle-bit handoff can be reordered |
-| X-12 | Low | port control | `xhci_port_status()` is not a query — it tears down slots |
-| X-13 | Low | transfers | Isochronous unsupported, so USB audio cannot work on xHCI |
-| X-14 | Low | init | `XHCI_MAX_SLOTS` fixed at 16; ~48 KiB of slot state allocated per controller |
-| X-15 | Low | port control | No warm reset (WPR) path for SuperSpeed ports |
-| X-16 | Low | transfers | Several early returns leave `xfer->status` stale |
-| X-17 | Low | teardown | Failed attach after `xhci_start()` leaves the controller running |
-| X-18 | Low | contexts | FS/LS interrupt interval rounds up; the spec rounds down |
+| ID | Severity | Area | One-line | Status |
+|----|----------|------|----------|--------|
+| X-01 | **Critical** | port control | PORTSC read-modify-write writes PED back, disabling the port it just reset | FIXED 01e99650f |
+| X-02 | **Critical** | init | Scratchpad buffers never allocated; DCBAA[0] left null | FIXED 842460834 |
+| X-03 | High | transfers | Timed-out TD is abandoned while the controller still owns the bounce buffer | FIXED a7d6a5525 |
+| X-04 | High | command ring | Command timeout leaves the ring desynchronised; no Command Abort | FIXED a7d6a5525 |
+| X-05 | High | contexts | EP context dword 4 (Average TRB Length / Max ESIT Payload) never written | FIXED bfbf92d2c |
+| X-06 | High | contexts | Configure Endpoint drops the slot context's TT fields | FIXED bfbf92d2c |
+| X-07 | Medium | port control | No 10 ms post-reset recovery delay (TRSTRCY) | FIXED 336366453 |
+| X-08 | Medium | event ring | Event ring is never drained outside a transfer; 64 entries can fill and wedge | FIXED 336366453 |
+| X-09 | Medium | init | CAPLENGTH/RTSOFF/DBOFF/XECP unvalidated against the fixed 16 KiB mapping | FIXED b6d638174 |
+| X-10 | Medium | port control | Supported Protocol capability not parsed; port speed decoded from a guess | FIXED 209af6df4 |
+| X-11 | Medium | rings | TRB stores have no compiler barrier; the cycle-bit handoff can be reordered | FIXED bd5fcdcc1 |
+| X-12 | Low | port control | `xhci_port_status()` is not a query — it tears down slots | FIXED 77abc95ac |
+| X-13 | Low | transfers | Isochronous unsupported, so USB audio cannot work on xHCI | FIXED 555d7650a |
+| X-14 | Low | init | `XHCI_MAX_SLOTS` fixed at 16; ~48 KiB of slot state allocated per controller | FIXED 555d7650a |
+| X-15 | Low | port control | No warm reset (WPR) path for SuperSpeed ports | FIXED 209af6df4 |
+| X-16 | Low | transfers | Several early returns leave `xfer->status` stale | FIXED 77abc95ac |
+| X-17 | Low | teardown | Failed attach after `xhci_start()` leaves the controller running | FIXED 77abc95ac |
+| X-18 | Low | contexts | FS/LS interrupt interval rounds up; the spec rounds down | FIXED 77abc95ac |
 
 ---
 
@@ -688,7 +701,7 @@ Recording these so they are not re-audited:
 
 ---
 
-## Suggested order of work
+## Order the work was done in (all complete)
 
 1. **X-01** and **X-02** together, then boot the laptop.  These are the two
    that can plausibly account for "no USB devices at all" on hardware, and
