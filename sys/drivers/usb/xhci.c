@@ -1189,9 +1189,22 @@ static void xhci_take_controller(xhci_hc_t *hc)
     uint32_t hcc = rd32(hc->mmio, XHCI_CAP_HCCPARAMS1);
     uint32_t off = XHCI_HCC1_XECP(hcc) * 4;
 
-    /* Each entry needs USBLEGSUP and USBLEGCTLSTS to be inside the mapping. */
-    while (off != 0 && off + 8 <= XHCI_MMIO_SIZE) {
-        uint32_t cap = rd32(hc->mmio, off);
+    /* Each entry needs USBLEGSUP and USBLEGCTLSTS to be inside the mapping.
+     * Bounded iteration as well: the list is controller-supplied, and a
+     * malformed next-pointer that walks backwards would otherwise loop. */
+    for (int guard = 0; off != 0 && guard < 64; guard++) {
+        uint32_t cap;
+
+        if (off + 8 > XHCI_MMIO_SIZE) {
+            /* Say so rather than silently giving up: stopping here means the
+             * BIOS handoff below may never run, and we would then reset a
+             * controller that SMM still owns. [X-09] */
+            kprintf("xhci: extended capabilities continue past the mapped "
+                    "window (at 0x%x); BIOS handoff may be incomplete\n",
+                    (unsigned)off);
+            break;
+        }
+        cap = rd32(hc->mmio, off);
 
         if (cap == 0xFFFFFFFFu)
             break;
@@ -1612,15 +1625,39 @@ static int xhci_pci_attach(struct device *dev)
         return -1;
     }
     uint8_t caplen = *(volatile uint8_t *)(hc->mmio + XHCI_CAP_CAPLENGTH);
-    hc->op = hc->mmio + caplen;
-    hc->rt = hc->mmio + (rd32(hc->mmio, XHCI_CAP_RTSOFF) & ~0x1Fu);
-    hc->db = hc->mmio + (rd32(hc->mmio, XHCI_CAP_DBOFF) & ~0x3u);
+    uint32_t rtsoff = rd32(hc->mmio, XHCI_CAP_RTSOFF) & ~0x1Fu;
+    uint32_t dboff  = rd32(hc->mmio, XHCI_CAP_DBOFF) & ~0x3u;
     uint32_t hcs1 = rd32(hc->mmio, XHCI_CAP_HCSPARAMS1);
     hc->nports = XHCI_HCS1_MAXPORTS(hcs1);
     hc->maxslots = XHCI_HCS1_MAXSLOTS(hcs1);
     if (hc->maxslots > XHCI_MAX_SLOTS) hc->maxslots = XHCI_MAX_SLOTS;
     hc->ctx_size = (rd32(hc->mmio, XHCI_CAP_HCCPARAMS1) & XHCI_HCC1_CSZ) ? 64 : 32;
     if (hc->nports == 0) hc->nports = 1;
+
+    /*
+     * Every one of these offsets comes from the controller, and we map a fixed
+     * window rather than the BAR's real size.  Unchecked, a part that places
+     * its runtime or doorbell region past the window -- or a bad read that
+     * returns all-ones -- would have us writing doorbells and ERDP updates
+     * into whatever happens to follow the mapping.  Bound them and refuse the
+     * attach instead, naming the register that was out of range. [X-09]
+     */
+    /* CAPLENGTH is 8-bit, so it cannot itself leave the window; it only has
+     * to be big enough to cover the capability registers we read above. */
+    if (caplen < 0x20 ||
+        (uint32_t)caplen + XHCI_OP_PORTSC(hc->nports) > XHCI_MMIO_SIZE ||
+        rtsoff + XHCI_RT_IR0 + 0x20 > XHCI_MMIO_SIZE ||
+        dboff + ((uint32_t)hc->maxslots + 1) * 4 > XHCI_MMIO_SIZE) {
+        kprintf("xhci: register map does not fit the %u-byte window "
+                "(caplen=0x%x rtsoff=0x%x dboff=0x%x ports=%u)\n",
+                XHCI_MMIO_SIZE, caplen, (unsigned)rtsoff, (unsigned)dboff,
+                hc->nports);
+        xhci_teardown(hc);
+        return -1;
+    }
+    hc->op = hc->mmio + caplen;
+    hc->rt = hc->mmio + rtsoff;
+    hc->db = hc->mmio + dboff;
 
     mutex_init(&hc->submit_lock, "xhci_submit");
 
