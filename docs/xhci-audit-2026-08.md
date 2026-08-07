@@ -559,8 +559,15 @@ else
 
 Isochronous falls to `USB_XFER_ERROR`.  We have a USB Audio Class driver
 (`uac`) with isochronous support on UHCI, so USB audio works on UHCI/EHCI and
-cannot work on xHCI — which is every modern machine.  Worth recording as a
-known gap even if implementing Isoch TRBs is out of scope for now.
+cannot work on xHCI — which is every modern machine.
+
+**Decision: recorded as a known gap, not fixed here.**  Isochronous on xHCI is
+a feature rather than a defect to repair — Isoch TRBs carry a frame number and
+Transfer Burst Count, and the driver must keep a window of TDs scheduled ahead
+of MFINDEX through the `iso_schedule`/`iso_reclaim` HCD hooks that `uhci.c`
+implements and this driver does not.  That is new functionality, outside the
+scope of an audit fix pass.  The dispatch in `xhci_submit()` now says so
+explicitly, so the next reader does not mistake it for an oversight.
 
 ---
 

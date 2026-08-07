@@ -32,7 +32,10 @@
 
 #define XHCI_MMIO_SIZE     0x4000  /* cap + op(0) + runtime(0x1000) + doorbell(0x2000) */
 #define XHCI_RING_TRBS     64      /* TRBs per ring segment */
-#define XHCI_MAX_SLOTS     16
+/* Upper bound on the controller's MaxSlots that we are willing to honour.
+ * Per-slot state is allocated on demand, so this only sizes the DCBAA and
+ * the slot pointer array; 64 covers any real part. */
+#define XHCI_MAX_SLOTS     64
 #define XHCI_BOUNCE_SIZE   (64 * 1024)
 #define XHCI_CMD_TIMEOUT_MS 1000
 /* Reset-path waits.  Generous rather than tight: a controller handed over by
@@ -117,7 +120,10 @@ typedef struct xhci_hc {
     uint32_t         event_deq;    uint8_t event_cycle;
     void             *bounce;      dma_addr_t bounce_dma;
 
-    struct xhci_slot slots[XHCI_MAX_SLOTS + 1];   /* indexed by slot id (1-based) */
+    /* Indexed by slot id (1-based).  Each entry is ~3 KiB and most are
+     * never used, so they are allocated when the controller hands us the
+     * slot and freed with it. [X-14] */
+    struct xhci_slot *slots[XHCI_MAX_SLOTS + 1];
     uint8_t  addr_slot[128];       /* usb address -> slot id */
     uint8_t  enum_slot;            /* slot of the current address-0 device */
     uint8_t  enum_port;
@@ -486,7 +492,8 @@ static void xhci_port_gone(usb_hcd_t *hcd, uint8_t port)
     /* Cheap lock-free pre-check: the common case is an empty port with no slot,
      * polled several times a second — don't take submit_lock for it. */
     for (uint8_t slot = 1; slot <= XHCI_MAX_SLOTS; slot++) {
-        if (hc->slots[slot].in_use && hc->slots[slot].port == port) {
+        if (hc->slots[slot] && hc->slots[slot]->in_use &&
+            hc->slots[slot]->port == port) {
             found = 1;
             break;
         }
@@ -496,8 +503,8 @@ static void xhci_port_gone(usb_hcd_t *hcd, uint8_t port)
 
     mutex_lock(&hc->submit_lock);
     for (uint8_t slot = 1; slot <= XHCI_MAX_SLOTS; slot++) {
-        struct xhci_slot *s = &hc->slots[slot];
-        if (!s->in_use || s->port != port)
+        struct xhci_slot *s = hc->slots[slot];
+        if (!s || !s->in_use || s->port != port)
             continue;
         for (int a = 0; a < 128; a++)
             if (hc->addr_slot[a] == slot)
@@ -648,7 +655,10 @@ static int xhci_port_enable(usb_hcd_t *hcd, uint8_t port, int enable)
  * failures would otherwise exhaust every slot the controller has. */
 static void xhci_free_slot(xhci_hc_t *hc, uint8_t slot)
 {
-    struct xhci_slot *s = &hc->slots[slot];
+    struct xhci_slot *s = hc->slots[slot];
+
+    if (!s)
+        return;
 
     /* Tell the controller to release the slot before we free its contexts. */
     xhci_run_command(hc, 0,
@@ -688,7 +698,9 @@ static void xhci_free_slot(xhci_hc_t *hc, uint8_t slot)
         dma_free_coherent(s->dev_ctx, 32 * hc->ctx_size);
         s->dev_ctx = NULL;
     }
-    memset(s, 0, sizeof(*s));
+    /* And the per-slot state itself, which is allocated on demand. [X-14] */
+    hc->slots[slot] = NULL;
+    kfree(s, sizeof(*s));
 }
 
 /* ---- slot setup: Enable Slot + Address Device ---- */
@@ -700,7 +712,18 @@ static int xhci_setup_slot(xhci_hc_t *hc, usb_transfer_t *xfer, uint8_t port)
         kprintf("xhci: enable slot failed (cc=%d slot=%u)\n", cc, slot);
         return -1;
     }
-    struct xhci_slot *s = &hc->slots[slot];
+    /* Per-slot state is ~3 KiB and most slots are never used, so it is
+     * allocated now that the controller has actually given us one. [X-14] */
+    if (!hc->slots[slot]) {
+        hc->slots[slot] = kzalloc(sizeof(struct xhci_slot));
+        if (!hc->slots[slot]) {
+            kprintf("xhci: out of memory for slot %u\n", slot);
+            xhci_run_command(hc, 0, XHCI_TRB_TYPE(TRB_DISABLE_SLOT) |
+                                    ((uint32_t)slot << 24), NULL);
+            return -1;
+        }
+    }
+    struct xhci_slot *s = hc->slots[slot];
     memset(s, 0, sizeof(*s));
     s->in_use = 1;
     s->port = port;
@@ -786,7 +809,8 @@ static uint8_t xhci_slot_for(xhci_hc_t *hc, usb_transfer_t *xfer)
     if (addr != 0 && hc->addr_slot[addr])
         return hc->addr_slot[addr];
     if (hc->enum_slot &&
-        hc->slots[hc->enum_slot].port == usb_root_port(xfer->dev))
+        hc->slots[hc->enum_slot] &&
+        hc->slots[hc->enum_slot]->port == usb_root_port(xfer->dev))
         return hc->enum_slot;
     return 0;
 }
@@ -841,7 +865,7 @@ static int xhci_ensure_ep(xhci_hc_t *hc, uint8_t slot, usb_transfer_t *xfer)
     uint8_t epnum = epaddr & 0x0F;
     int in = (epaddr & 0x80) != 0;
     int dci = epnum * 2 + (in ? 1 : 0);
-    struct xhci_slot *s = &hc->slots[slot];
+    struct xhci_slot *s = hc->slots[slot];
     int streamed = (xfer->ep->max_streams > 0);
 
     if (streamed ? (s->stream_ctx[dci] != NULL) : (s->ep_ring[dci].trb != NULL))
@@ -943,21 +967,22 @@ static int xhci_set_hub(usb_hcd_t *hcd, usb_device_t *dev, uint8_t nports)
     if (!dev->address)
         return -1;
     slot = hc->addr_slot[dev->address & 0x7F];
-    if (slot == 0 || slot > XHCI_MAX_SLOTS || !hc->slots[slot].in_ctx)
+    if (slot == 0 || slot > XHCI_MAX_SLOTS || !hc->slots[slot] ||
+        !hc->slots[slot]->in_ctx)
         return -1;
 
     mutex_lock(&hc->submit_lock);
 
     /* Evaluate Context looks at the Add flags: slot context only (A0). */
-    icc = (uint32_t *)in_ctrl_of(hc->slots[slot].in_ctx);
+    icc = (uint32_t *)in_ctrl_of(hc->slots[slot]->in_ctx);
     icc[0] = 0;
     icc[1] = 0x1;
 
-    sc = (uint32_t *)in_slot_of(hc, hc->slots[slot].in_ctx);
+    sc = (uint32_t *)in_slot_of(hc, hc->slots[slot]->in_ctx);
     sc[0] |= XHCI_SLOT_HUB;
     sc[1] = (sc[1] & 0x00FFFFFFu) | ((uint32_t)nports << XHCI_SLOT_NPORTS_SHIFT);
 
-    cc = xhci_run_command(hc, hc->slots[slot].in_ctx_dma,
+    cc = xhci_run_command(hc, hc->slots[slot]->in_ctx_dma,
                           XHCI_TRB_TYPE(TRB_EVAL_CONTEXT) |
                           ((uint32_t)slot << 24), NULL);
 
@@ -991,20 +1016,21 @@ static int xhci_set_ep0_mps(usb_hcd_t *hcd, usb_device_t *dev, uint16_t mps)
 
     /* Pre-SET_ADDRESS the device is still the one being enumerated. */
     slot = dev->address ? hc->addr_slot[dev->address & 0x7F] : hc->enum_slot;
-    if (slot == 0 || slot > XHCI_MAX_SLOTS || !hc->slots[slot].in_ctx)
+    if (slot == 0 || slot > XHCI_MAX_SLOTS || !hc->slots[slot] ||
+        !hc->slots[slot]->in_ctx)
         return -1;
 
     mutex_lock(&hc->submit_lock);
 
-    icc = (uint32_t *)in_ctrl_of(hc->slots[slot].in_ctx);
+    icc = (uint32_t *)in_ctrl_of(hc->slots[slot]->in_ctx);
     icc[0] = 0;
     icc[1] = 0x2;               /* A1: EP0 context only */
 
-    ep0 = (uint32_t *)in_ep_of(hc, hc->slots[slot].in_ctx, 1);
+    ep0 = (uint32_t *)in_ep_of(hc, hc->slots[slot]->in_ctx, 1);
     ep0[1] = (ep0[1] & ~(0xFFFFu << XHCI_EP_MPS_SHIFT)) |
              ((uint32_t)mps << XHCI_EP_MPS_SHIFT);
 
-    cc = xhci_run_command(hc, hc->slots[slot].in_ctx_dma,
+    cc = xhci_run_command(hc, hc->slots[slot]->in_ctx_dma,
                           XHCI_TRB_TYPE(TRB_EVAL_CONTEXT) |
                           ((uint32_t)slot << 24), NULL);
 
@@ -1042,7 +1068,7 @@ static int xhci_control(xhci_hc_t *hc, usb_transfer_t *xfer)
     /* Intercept SET_ADDRESS: satisfy it with Address Device (BSR=0). */
     if ((xfer->setup.bmRequestType == 0x00) &&
         xfer->setup.bRequest == USB_REQ_SET_ADDRESS) {
-        struct xhci_slot *s = &hc->slots[slot];
+        struct xhci_slot *s = hc->slots[slot];
         uint32_t ctrl = XHCI_TRB_TYPE(TRB_ADDRESS_DEVICE) | ((uint32_t)slot << 24);
         int cc = xhci_run_command(hc, s->in_ctx_dma, ctrl, NULL);
         if (cc != XHCI_CC_SUCCESS) return USB_XFER_ERROR;
@@ -1056,7 +1082,7 @@ static int xhci_control(xhci_hc_t *hc, usb_transfer_t *xfer)
         return USB_XFER_OK;
     }
 
-    struct xhci_ring *ring = &hc->slots[slot].ep_ring[1];
+    struct xhci_ring *ring = &hc->slots[slot]->ep_ring[1];
     uint32_t len = xfer->length;
     int in = (xfer->setup.bmRequestType & 0x80) != 0;
     if (len > XHCI_BOUNCE_SIZE) return USB_XFER_ERROR;
@@ -1135,7 +1161,7 @@ static int xhci_bulk(xhci_hc_t *hc, usb_transfer_t *xfer)
     if (slot == 0) return USB_XFER_ERROR;
     int dci = xhci_ensure_ep(hc, slot, xfer);
     if (dci < 0) return USB_XFER_ERROR;
-    struct xhci_slot *s = &hc->slots[slot];
+    struct xhci_slot *s = hc->slots[slot];
 
     struct xhci_ring *ring;
     uint32_t db_target;
@@ -1253,6 +1279,21 @@ static int xhci_submit(usb_hcd_t *hcd, usb_transfer_t *xfer)
                           xfer->ep->type == USB_EP_TYPE_INTERRUPT))
         ret = xhci_bulk(hc, xfer);
     else
+        /*
+         * Isochronous is not implemented here.  It is a different shape from
+         * everything above: Isoch TRBs carry a frame number and a Transfer
+         * Burst Count, the driver has to keep a window of TDs scheduled ahead
+         * of MFINDEX, and the HCD-level iso_schedule/iso_reclaim hooks in
+         * usb_hcd_t exist for exactly that -- uhci.c implements them, this
+         * driver does not.
+         *
+         * The practical consequence is that USB Audio (uac) plays through
+         * UHCI and EHCI but not through xHCI, i.e. not on any machine new
+         * enough to have dropped its companion controllers.  Recorded as a
+         * known gap rather than papered over: returning an error here is at
+         * least honest, where pretending otherwise would hand the class
+         * driver silence. [X-13]
+         */
         ret = USB_XFER_ERROR;
     mutex_unlock(&hc->submit_lock);
     return ret;
