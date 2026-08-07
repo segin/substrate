@@ -1212,7 +1212,20 @@ static void xhci_power_ports(xhci_hc_t *hc)
         uint32_t psc = portsc_rd(hc, p) & ~XHCI_PORT_CHANGE_MASK;
         portsc_wr(hc, p, psc | XHCI_PORT_PP);
     }
-    xhci_delay_ms(20);
+    /*
+     * Power-on to power-good.  USB 2.0 allows a port up to 100ms before it
+     * reports a connection, and that is what FreeBSD waits: its hub driver
+     * sleeps bPwrOn2PwrGood after setting PORT_POWER, floored by
+     * USB_PORT_POWERUP_DELAY_SPEC (usb.h), which is 100ms.
+     *
+     * This was 20ms, and every emulator was happy with it -- QEMU asserts CCS
+     * the instant the port is powered, so the scan that follows always found
+     * the device.  Real silicon does not, and there is only one synchronous
+     * scan before the root filesystem is mounted, so a port that had not
+     * settled yet was simply never seen: an Intel Sunrise Point laptop
+     * enumerated nothing at all and panicked with no root device.
+     */
+    xhci_delay_ms(100);
     XHCI_STEP("ports powered");
 }
 
