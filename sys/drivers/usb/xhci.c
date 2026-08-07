@@ -423,13 +423,19 @@ static int xhci_port_reset(usb_hcd_t *hcd, uint8_t port)
     if (psc & XHCI_PORT_PED)
         return 0;
 
-    psc = portsc_rd(hc, port) & ~XHCI_PORT_CHANGE_MASK;
+    psc = portsc_rd(hc, port) & ~XHCI_PORT_CLEAR;
     portsc_wr(hc, port, psc | XHCI_PORT_PR);
     for (int i = 0; i < 100; i++) {
         xhci_delay_ms(2);
         psc = portsc_rd(hc, port);
         if (psc & XHCI_PORT_PRC) {           /* reset complete */
-            portsc_wr(hc, port, (psc & ~XHCI_PORT_CHANGE_MASK) | XHCI_PORT_PRC);
+            /* Acknowledge PRC *without* writing PED back.  The reset has just
+             * succeeded, so PED reads 1 here, and PED is RW1CS: carrying it
+             * into the write disables the port we are in the middle of
+             * bringing up.  The PED test below then reads 0 and this function
+             * reports a failed reset, so the port is skipped and nothing on it
+             * ever enumerates.  See XHCI_PORT_CLEAR. */
+            portsc_wr(hc, port, (psc & ~XHCI_PORT_CLEAR) | XHCI_PORT_PRC);
             break;
         }
     }
@@ -1209,7 +1215,7 @@ static int xhci_start(xhci_hc_t *hc)
 static void xhci_power_ports(xhci_hc_t *hc)
 {
     for (uint8_t p = 1; p <= hc->nports; p++) {
-        uint32_t psc = portsc_rd(hc, p) & ~XHCI_PORT_CHANGE_MASK;
+        uint32_t psc = portsc_rd(hc, p) & ~XHCI_PORT_CLEAR;
         portsc_wr(hc, p, psc | XHCI_PORT_PP);
     }
     /*

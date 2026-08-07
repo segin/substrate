@@ -98,8 +98,29 @@ void xhci_init(void);
 #define XHCI_PORT_SPEED_MASK 0x00003C00
 #define XHCI_PORT_CSC        0x00020000   /* connect status change (W1C) */
 #define XHCI_PORT_PRC        0x00200000   /* port reset change (W1C) */
-/* Bits that are RW1CS/change flags -- preserve them cleared when we RMW. */
-#define XHCI_PORT_CHANGE_MASK 0x00FE0000
+/*
+ * Bits that must be cleared out of a PORTSC value before writing it back.
+ *
+ * PORTSC cannot be read-modify-written naively: several of its bits act on a
+ * write of 1 rather than storing one.  The critical one is PED (bit 1), which
+ * xHCI 1.2 Table 5-27 defines as RW1CS:
+ *
+ *   "Ports may only be enabled by the xHC.  Software cannot enable a port by
+ *    writing a '1' to this flag.  A port may be disabled by software writing a
+ *    '1' to this flag. [...] PED shall automatically be [...] set to '1' when
+ *    PR transitions from '1' to '0' after a successful reset."
+ *
+ * So a writeback that preserves PED disables the port -- and PED is guaranteed
+ * to be set at exactly the moment we acknowledge a completed reset, which is
+ * where it bit us.  Footnote 82 adds that writing PED and PR together is
+ * undefined behaviour, so both have to go.
+ *
+ * The value is the same one FreeBSD and NetBSD both use (XHCI_PS_CLEAR in
+ * their xhcireg.h): bits 8:0 (CCS, PED, OCA, PR, PLS), 23:16 (LWS and every
+ * change bit), and 31 (WPR).  PP, PIC and the wake enables are outside it and
+ * so survive a writeback, which is what we want.
+ */
+#define XHCI_PORT_CLEAR      0x80FF01FFU
 
 /* ---- Runtime registers (from rtbase = mmio + RTSOFF) ---- */
 #define XHCI_RT_MFINDEX      0x00
