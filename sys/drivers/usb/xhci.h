@@ -95,6 +95,8 @@ void xhci_init(void);
 #define XHCI_STS_HCH         0x00000001   /* HC halted */
 #define XHCI_STS_CNR         0x00000800   /* controller not ready */
 #define XHCI_CRCR_RCS        0x00000001   /* ring cycle state */
+#define XHCI_CRCR_CA         0x00000004   /* command abort (RW1S) */
+#define XHCI_CRCR_CRR        0x00000008   /* command ring running (RO) */
 
 /* PORTSC */
 #define XHCI_PORT_CCS        0x00000001   /* current connect status */
@@ -176,6 +178,7 @@ struct xhci_trb {
 #define TRB_CONFIGURE_EP     12
 #define TRB_EVAL_CONTEXT     13
 #define TRB_RESET_ENDPOINT   14
+#define TRB_STOP_ENDPOINT    15
 #define TRB_SET_TR_DEQUEUE   16
 #define TRB_NOOP_CMD         23
 #define TRB_TRANSFER_EVENT   32

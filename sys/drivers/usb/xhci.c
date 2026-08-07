@@ -203,6 +203,49 @@ static int xhci_wait_event(xhci_hc_t *hc, uint64_t *out_param, uint32_t *out_ctr
     }
 }
 
+/*
+ * Recover a command ring whose command never completed (xHCI 1.2 s4.6.1.2).
+ *
+ * Returning from a command timeout without doing this leaves the TRB on the
+ * ring with the controller still running it, while our enqueue pointer has
+ * already moved past.  The next command is then issued behind a command the
+ * controller may still be chewing on, and when the stale completion finally
+ * arrives it is matched to the wrong request -- so a single slow command
+ * poisons every command for the rest of the session.
+ *
+ * Setting CA asks the controller to stop; CRR clearing is it confirming it
+ * has.  Then the ring is empty by definition, so reset our own producer state
+ * and republish CRCR with a fresh cycle.  NetBSD's xhci_abort_command() does
+ * exactly this.
+ */
+static void xhci_abort_command(xhci_hc_t *hc)
+{
+    int i;
+
+    kprintf("xhci: command timeout; aborting the command ring\n");
+    /* Only the low dword, and only to set CA: the Command Ring Pointer field
+     * reads as zero and is ignored while CRR is set, so writing a pointer
+     * here would be meaningless.  It is republished below once CRR clears. */
+    wr32(hc->op, XHCI_OP_CRCR, rd32(hc->op, XHCI_OP_CRCR) | XHCI_CRCR_CA);
+    for (i = 0; i < 500; i++) {
+        if (!(rd32(hc->op, XHCI_OP_CRCR) & XHCI_CRCR_CRR))
+            break;
+        xhci_delay_ms(1);
+    }
+    if (rd32(hc->op, XHCI_OP_CRCR) & XHCI_CRCR_CRR)
+        kprintf("xhci: command ring still running after abort\n");
+
+    /* Rewind to the top of the ring: nothing on it is ours any more. */
+    memset(hc->cmd_ring.trb, 0,
+           XHCI_RING_TRBS * sizeof(struct xhci_trb));
+    struct xhci_trb *link = &hc->cmd_ring.trb[XHCI_RING_TRBS - 1];
+    link->param = hc->cmd_ring.dma;
+    link->control = XHCI_TRB_TYPE(TRB_LINK) | XHCI_TRB_TC;
+    hc->cmd_ring.enq = 0;
+    hc->cmd_ring.cycle = 1;
+    wr64(hc->op, XHCI_OP_CRCR, hc->cmd_ring.dma | XHCI_CRCR_RCS);
+}
+
 /* Run a command TRB on the command ring; return (completion code, slot id). */
 static int xhci_run_command_st(xhci_hc_t *hc, uint64_t param, uint32_t status,
                                uint32_t ctrl, uint8_t *out_slot)
@@ -212,13 +255,19 @@ static int xhci_run_command_st(xhci_hc_t *hc, uint64_t param, uint32_t status,
     uint64_t ep; uint32_t ec;
     for (int guard = 0; guard < 8; guard++) {
         int cc = xhci_wait_event(hc, &ep, &ec, NULL, XHCI_CMD_TIMEOUT_MS);
-        if (cc == 0) return 0;   /* timeout */
+        if (cc == 0) {                      /* [X-04] */
+            xhci_abort_command(hc);
+            return 0;
+        }
         if (XHCI_TRB_GET_TYPE(ec) == TRB_CMD_COMPLETE) {
             if (out_slot) *out_slot = XHCI_TRB_GET_SLOT(ec);
             return cc;
         }
         /* skip unrelated events (e.g. port status) and keep looking */
     }
+    /* Eight events came back and none was ours: the ring is out of step with
+     * us, so put it back in a known state rather than pressing on. */
+    xhci_abort_command(hc);
     return 0;
 }
 
@@ -247,6 +296,31 @@ static int xhci_run_command(xhci_hc_t *hc, uint64_t param, uint32_t ctrl,
  * otherwise the controller re-runs the failed transfer as soon as the doorbell
  * rings.  The Dequeue Cycle State must match the ring's current cycle.
  */
+/*
+ * Point the controller's dequeue pointer at where the next TD will be written.
+ * Both Reset Endpoint and Stop Endpoint leave it on the TD that just went
+ * wrong, so without this the controller re-runs that TD the moment the
+ * doorbell rings.  The Dequeue Cycle State in bit 0 has to match the ring's
+ * current producer cycle.
+ */
+static int xhci_set_tr_dequeue(xhci_hc_t *hc, uint8_t slot, int dci,
+                               struct xhci_ring *ring, uint16_t stream_id)
+{
+    uint32_t ep_field = ((uint32_t)slot << 24) | ((uint32_t)dci << 16);
+    uint64_t deq = (uint64_t)ring->dma +
+                   (uint64_t)ring->enq * sizeof(struct xhci_trb);
+    int cc = xhci_run_command_st(hc, deq | (ring->cycle ? 1u : 0u),
+                                 (uint32_t)stream_id << 16,
+                                 XHCI_TRB_TYPE(TRB_SET_TR_DEQUEUE) | ep_field,
+                                 NULL);
+    if (cc != XHCI_CC_SUCCESS) {
+        kprintf("xhci: set TR dequeue slot %u dci %d failed cc=%d\n",
+                slot, dci, cc);
+        return -1;
+    }
+    return 0;
+}
+
 static int xhci_recover_ep(xhci_hc_t *hc, uint8_t slot, int dci,
                            struct xhci_ring *ring, uint16_t stream_id)
 {
@@ -260,19 +334,39 @@ static int xhci_recover_ep(xhci_hc_t *hc, uint8_t slot, int dci,
                 slot, dci, cc);
         return -1;
     }
+    return xhci_set_tr_dequeue(hc, slot, dci, ring, stream_id);
+}
 
-    uint64_t deq = (uint64_t)ring->dma +
-                   (uint64_t)ring->enq * sizeof(struct xhci_trb);
-    cc = xhci_run_command_st(hc, deq | (ring->cycle ? 1u : 0u),
-                             (uint32_t)stream_id << 16,
-                             XHCI_TRB_TYPE(TRB_SET_TR_DEQUEUE) | ep_field,
-                             NULL);
+/*
+ * Abandon a transfer that never completed.
+ *
+ * A timeout does not halt the endpoint, so unlike the error paths above the
+ * controller is still running it: our TD is on the ring, and the data buffer
+ * it points at is still controller-owned.  Simply returning left that TD live.
+ * With one bounce buffer shared by the whole controller, the very next
+ * transfer -- for some other device, on some other endpoint -- would memcpy
+ * into memory the abandoned TD could still be writing, and its late event
+ * would additionally burn a slot in the next TD's event scan.
+ *
+ * Stop Endpoint takes the endpoint out of Running so nothing further is
+ * consumed; Set TR Dequeue Pointer then moves the controller past the dead TD
+ * to where the next one will be written.  Both BSDs quiesce the same way
+ * before completing a transfer with an error (FreeBSD xhci_cmd_stop_ep()).
+ */
+static int xhci_stop_ep(xhci_hc_t *hc, uint8_t slot, int dci,
+                        struct xhci_ring *ring, uint16_t stream_id)
+{
+    uint32_t ep_field = ((uint32_t)slot << 24) | ((uint32_t)dci << 16);
+    int cc;
+
+    cc = xhci_run_command(hc, 0,
+                          XHCI_TRB_TYPE(TRB_STOP_ENDPOINT) | ep_field, NULL);
     if (cc != XHCI_CC_SUCCESS) {
-        kprintf("xhci: set TR dequeue slot %u dci %d failed cc=%d\n",
+        kprintf("xhci: stop endpoint slot %u dci %d failed cc=%d\n",
                 slot, dci, cc);
         return -1;
     }
-    return 0;
+    return xhci_set_tr_dequeue(hc, slot, dci, ring, stream_id);
 }
 
 /* [DRV-03] Wait for the Transfer Event addressed to (slot, dci); skip unrelated
@@ -911,7 +1005,10 @@ static int xhci_control(xhci_hc_t *hc, usb_transfer_t *xfer)
         if (cc != XHCI_CC_SUCCESS && cc != XHCI_CC_SHORT_PACKET) {
             if (XHCI_CC_HALTS_EP(cc))
                 (void)xhci_recover_ep(hc, slot, 1, ring, 0);
-            return (cc == 0) ? USB_XFER_TIMEOUT : USB_XFER_STALL;
+            else if (cc == 0)
+                (void)xhci_stop_ep(hc, slot, 1, ring, 0);  /* [X-03] */
+            xfer->status = (cc == 0) ? USB_XFER_TIMEOUT : USB_XFER_STALL;
+            return xfer->status;
         }
         if (len && which == 1) {           /* data stage, short */
             residue = XHCI_TRB_GET_XLEN(evst);
@@ -974,12 +1071,14 @@ static int xhci_bulk(xhci_hc_t *hc, usb_transfer_t *xfer)
         /* Clear the controller-side halt before returning, so the class
          * driver's retry (after its own CLEAR_FEATURE) has a live endpoint
          * to retry on rather than timing out forever. */
-        if (XHCI_CC_HALTS_EP(cc)) {
-            uint16_t sid = (xfer->ep->max_streams > 0)
-                           ? (xfer->stream_id ? xfer->stream_id : 1) : 0;
+        uint16_t sid = (xfer->ep->max_streams > 0)
+                       ? (xfer->stream_id ? xfer->stream_id : 1) : 0;
+        if (XHCI_CC_HALTS_EP(cc))
             (void)xhci_recover_ep(hc, slot, dci, ring, sid);
-        }
-        return (cc == 0) ? USB_XFER_TIMEOUT : USB_XFER_STALL;
+        else if (cc == 0)
+            (void)xhci_stop_ep(hc, slot, dci, ring, sid);   /* [X-03] */
+        xfer->status = (cc == 0) ? USB_XFER_TIMEOUT : USB_XFER_STALL;
+        return xfer->status;
     }
 
     uint32_t residue = XHCI_TRB_GET_XLEN(evst);
