@@ -1489,9 +1489,28 @@ static void usb_hotplug_scan(void)
 
 static int usb_hotplug_chan;
 
+/*
+ * Runs as a kernel process, the same shape as the page daemon: named in
+ * `comm` so it is identifiable in ps, flagged is_kernel_task, and given an
+ * explicit scheduling class rather than inheriting whatever the spawner had.
+ * It is a long-lived system service that outlives every consumer of it, not
+ * a helper thread belonging to whoever happened to call usb_init().
+ */
 static void usb_hotplug_monitor(void *arg)
 {
     (void)arg;
+
+    if (current_process) {
+        strncpy(current_process->comm, "usbhotplug", AC_COMM_LEN);
+        current_process->comm[AC_COMM_LEN - 1] = '\0';
+        current_process->is_kernel_task = 1;
+    }
+    if (current_thread) {
+        current_thread->sched_class = SCHED_TIMESHARE;
+        current_thread->priority = 1;
+        current_thread->base_priority = 1;
+    }
+
     uint64_t interval = get_hz() / 4;  /* ~250 ms between scans */
     if (interval == 0)
         interval = 1;
@@ -1526,10 +1545,26 @@ void usb_init(void)
     }
 
     /* Start the hot-plug monitor so devices attached/removed after boot
-     * (qemu device_add/device_del, a physical (un)plug) are handled. */
-    {
-        thread_t *td;
-        if (kthread_create(usb_hotplug_monitor, NULL, &td, "usb-hotplug") != 0)
-            kprintf("usb: failed to start hot-plug monitor\n");
+     * (qemu device_add/device_del, a physical (un)plug) are handled --
+     * but not from here: see usb_late_init(). */
+}
+
+/*
+ * Start the hot-plug monitor.  Separate from usb_init() purely because of
+ * when it runs: usb_init() happens during device bring-up, long before kmain
+ * spawns init, so spawning a process there hands the monitor PID 1 -- the
+ * pid init itself is supposed to get.  Called instead from kmain after
+ * init_task and the page daemon, which puts it at PID 3 where it belongs.
+ */
+static int usb_hotplug_started;
+
+void usb_late_init(void)
+{
+    if (usb_hotplug_started)
+        return;
+    if (sched_spawn_kernel_process(usb_hotplug_monitor, NULL) < 0) {
+        kprintf("usb: failed to start hot-plug monitor\n");
+        return;
     }
+    usb_hotplug_started = 1;
 }

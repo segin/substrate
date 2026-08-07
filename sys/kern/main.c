@@ -1127,6 +1127,9 @@ void kmain(unsigned long magic, unsigned long addr) {
         kprint("kmain: FATAL: failed to spawn kinit thread\n");
     }
     vm_page_late_init();
+    /* After init (pid 1) and the page daemon (pid 2): spawning this during
+     * usb_init() would have claimed pid 1 for a driver daemon. */
+    usb_late_init();
     reclaim_bootloader_state();
     enter_kernel_idle_loop();
 }

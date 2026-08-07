@@ -548,6 +548,9 @@ typedef struct usb_class_driver {
 
 /* Initialization */
 void usb_init(void);
+/* Starts the hot-plug monitor.  Must run after kmain has spawned init, or
+ * the monitor takes PID 1.  See the note in usb.c. */
+void usb_late_init(void);
 void usb_msc_init(void);
 void uas_init(void);
 void uac_init(void);
