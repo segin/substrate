@@ -580,6 +580,7 @@ static int xhci_setup_slot(xhci_hc_t *hc, usb_transfer_t *xfer, uint8_t port)
              (3u << XHCI_EP_CERR_SHIFT);
     ep0[2] = (uint32_t)(s->ep_ring[1].dma) | s->ep_ring[1].cycle;  /* DCS */
     ep0[3] = (uint32_t)((uint64_t)s->ep_ring[1].dma >> 32);
+    ep0[4] = XHCI_EP_AVG_TRB_LEN(XHCI_EP_AVG_TRB_CTRL);   /* [X-05] */
 
     /* Address Device with BSR=1: sets up the slot but leaves the device in
      * Default state so the core can read the initial 8-byte descriptor. */
@@ -676,6 +677,18 @@ static int xhci_ensure_ep(xhci_hc_t *hc, uint8_t slot, usb_transfer_t *xfer)
     insc[0] = (dsc[0] & ~(0x1Fu << XHCI_SLOT_CTX_ENTRIES_SHIFT)) |
               ((uint32_t)dci << XHCI_SLOT_CTX_ENTRIES_SHIFT);
     insc[1] = dsc[1];
+    /*
+     * Carry the transaction-translator fields over too.  in_ctx was just
+     * memset, so anything not copied back from the device context is zero --
+     * and dword 2 is where xhci_setup_slot put the TT Hub Slot ID and TT Port
+     * Number for a low/full-speed device sitting behind a high-speed hub.
+     * Dropping them here tells the controller there is no TT in the path, so
+     * the endpoint we are configuring gets scheduled as if the device were
+     * high-speed.  EP0 keeps working (it was addressed with the fields intact)
+     * and only the endpoint added by this command misbehaves, which is why it
+     * looks like a device that enumerates fine and then goes quiet. [X-06]
+     */
+    insc[2] = dsc[2];
 
     uint32_t type = xfer->ep->type == USB_EP_TYPE_BULK
                         ? (in ? EP_TYPE_BULK_IN : EP_TYPE_BULK_OUT)
@@ -698,6 +711,18 @@ static int xhci_ensure_ep(xhci_hc_t *hc, uint8_t slot, usb_transfer_t *xfer)
         epc[0] = xhci_ep_interval(xfer->dev, xfer->ep) << XHCI_EP_INTERVAL_SHIFT;
         epc[2] = (uint32_t)s->ep_ring[dci].dma | s->ep_ring[dci].cycle;
         epc[3] = (uint32_t)((uint64_t)s->ep_ring[dci].dma >> 32);
+    }
+    /*
+     * Bandwidth parameters.  A periodic endpoint moves at most one max-packet
+     * per service interval here (we set neither Mult nor Max Burst), so that
+     * is its Max ESIT Payload; an async endpoint reserves nothing and only
+     * needs a representative TRB length. [X-05]
+     */
+    if (xfer->ep->type == USB_EP_TYPE_INTERRUPT) {
+        uint32_t avg = mps < XHCI_EP_AVG_TRB_BULK ? mps : XHCI_EP_AVG_TRB_BULK;
+        epc[4] = XHCI_EP_AVG_TRB_LEN(avg) | XHCI_EP_MAX_ESIT_LO(mps);
+    } else {
+        epc[4] = XHCI_EP_AVG_TRB_LEN(XHCI_EP_AVG_TRB_BULK);
     }
 
     uint32_t ctrl = XHCI_TRB_TYPE(TRB_CONFIGURE_EP) | ((uint32_t)slot << 24);

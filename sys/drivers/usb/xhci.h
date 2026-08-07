@@ -244,6 +244,21 @@ struct xhci_ep_ctx {
 #define EP_TYPE_BULK_IN      6
 #define EP_TYPE_INT_OUT      3
 #define EP_TYPE_INT_IN       7
+/*
+ * EP context field[4]: Average TRB Length [15:0], Max ESIT Payload Lo [31:16].
+ *
+ * Not optional.  xHCI 1.2 Table 6-9: the Average TRB Length "value of this
+ * field shall be greater than '0'.  The xHC shall use this parameter to
+ * calculate system bus bandwidth requirements", and s4.14.1.1 warns that a
+ * Configure Endpoint Command "may be rejected by the xHC with a Bandwidth
+ * Error" when the numbers do not add up.  The same table requires the value 8
+ * for control endpoints specifically.  Max ESIT Payload is the bytes moved per
+ * service interval and is only meaningful for periodic endpoints.
+ */
+#define XHCI_EP_AVG_TRB_LEN(x)  ((uint32_t)(x) & 0xFFFFu)
+#define XHCI_EP_MAX_ESIT_LO(x)  (((uint32_t)(x) & 0xFFFFu) << 16)
+#define XHCI_EP_AVG_TRB_CTRL    8      /* spec-mandated for control EPs */
+#define XHCI_EP_AVG_TRB_BULK    4096   /* a page, as both BSDs use */
 /* EP context field[0] */
 #define XHCI_EP_STATE_MASK   0x7
 /* EP context field[0] stream fields */
