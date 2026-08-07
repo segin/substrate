@@ -1441,8 +1441,14 @@ static void usb_hotplug_scan(void)
             uint8_t *fails = (port >= 1 && port <= USB_MAX_ROOT_PORTS)
                              ? &hcd->enum_fail[port - 1] : NULL;
 
-            if (!connected && fails)
-                *fails = 0;      /* gone: a re-plug deserves a fresh try */
+            if (!connected) {
+                if (fails)
+                    *fails = 0;  /* gone: a re-plug deserves a fresh try */
+                /* Let the HCD reap whatever it still has bound to this port
+                 * (xHCI: the device slot and its rings). [X-12] */
+                if (hcd->port_gone)
+                    hcd->port_gone(hcd, port);
+            }
 
             if (dev && !connected) {
                 kprintf("usb: device removed from %s port %u\n",

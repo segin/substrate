@@ -475,8 +475,9 @@ static void xhci_free_slot(xhci_hc_t *hc, uint8_t slot);
  * enumeration bookkeeping that pointed at it (so a re-plugged device can't route
  * through a stale slot).  submit_lock is taken because xhci_free_slot drives the
  * command/event rings, exactly like a submit. */
-static void xhci_port_disconnect(xhci_hc_t *hc, uint8_t port)
+static void xhci_port_gone(usb_hcd_t *hcd, uint8_t port)
 {
+    xhci_hc_t *hc = hcd->priv;
     int found = 0;
 
     /* Cheap lock-free pre-check: the common case is an empty port with no slot,
@@ -532,9 +533,15 @@ static uint32_t xhci_port_status(usb_hcd_t *hcd, uint8_t port)
         case 4: out |= USB_PORT_STAT_SUPER_SPEED; break;
         default: out |= USB_PORT_STAT_HIGH_SPEED; break;    /* unknown: assume HS */
         }
-    } else {
-        xhci_port_disconnect(hc, port);   /* [A34] reap the departed slot */
     }
+    /*
+     * Nothing else.  This used to reap the departed slot here, which meant a
+     * routine status poll took submit_lock and ran Disable Slot commands --
+     * and a poll loop added elsewhere in this driver duly fired hundreds of
+     * teardowns and broke enumeration.  The reaping now hangs off the
+     * port_gone hook, called from the hot-plug scan.  Keep this a pure
+     * read. [X-12]
+     */
     return out;
 }
 
@@ -763,7 +770,17 @@ static uint32_t xhci_ep_interval(const usb_device_t *dev, const usb_endpoint_t *
 
     bi = ep->interval ? ep->interval : 1;
     if (!dev || dev->speed == USB_SPEED_LOW || dev->speed == USB_SPEED_FULL) {
-        for (iv = 3; iv < 10 && (1u << (iv - 3)) < bi; iv++)
+        /*
+         * Round DOWN, not up.  Table 6-12 footnote 113: "For FS/LS Interrupt
+         * endpoints software shall round the computed value of Endpoint
+         * Context Interval field down to the nearest base 2 multiple of
+         * bInterval * 8."  Rounding up polls at half the requested rate for
+         * any bInterval that is not already a power of two -- a mouse asking
+         * for 10ms was serviced every 16ms.  Valid range for this form is
+         * 3..10.
+         */
+        uint32_t units = (uint32_t)bi * 8u;     /* bInterval in 125us units */
+        for (iv = 3; iv < 10 && (1u << (iv + 1)) <= units; iv++)
             ;
         return iv;
     }
@@ -958,6 +975,10 @@ static int xhci_set_ep0_mps(usb_hcd_t *hcd, usb_device_t *dev, uint16_t mps)
 /* ---- transfers ---- */
 static int xhci_control(xhci_hc_t *hc, usb_transfer_t *xfer)
 {
+    /* Default to failure so the several early returns below cannot leave the
+     * caller reading whatever the previous transfer left here.  Every path
+     * that actually succeeds overwrites it. [X-16] */
+    xfer->status = USB_XFER_ERROR;
     /* The ROOT port, not the device's own port number: for anything behind a
      * hub those differ, and the slot context wants the root one (the rest of
      * the path is the Route String). [USB-01] */
@@ -1062,6 +1083,7 @@ static int xhci_control(xhci_hc_t *hc, usb_transfer_t *xfer)
 
 static int xhci_bulk(xhci_hc_t *hc, usb_transfer_t *xfer)
 {
+    xfer->status = USB_XFER_ERROR;          /* [X-16], see xhci_control() */
     uint8_t slot = xhci_slot_for(hc, xfer);
     if (slot == 0) return USB_XFER_ERROR;
     int dci = xhci_ensure_ep(hc, slot, xfer);
@@ -1560,6 +1582,19 @@ static void xhci_power_ports(xhci_hc_t *hc)
  */
 static void xhci_teardown(xhci_hc_t *hc)
 {
+    /*
+     * Stop the controller before handing back memory it may still be reading.
+     * A failure after xhci_start() succeeded would otherwise leave it running
+     * with DCBAAP, CRCR and ERSTBA all pointing into pages we are about to
+     * free.  hc->op is NULL if we never got as far as decoding CAPLENGTH. [X-17]
+     */
+    if (hc->op) {
+        wr32(hc->op, XHCI_OP_USBCMD,
+             rd32(hc->op, XHCI_OP_USBCMD) & ~XHCI_CMD_RUN);
+        for (int i = 0; i < XHCI_HALT_WAIT_MS &&
+                        !(rd32(hc->op, XHCI_OP_USBSTS) & XHCI_STS_HCH); i++)
+            xhci_delay_ms(1);
+    }
     if (hc->bounce)
         dma_free_coherent(hc->bounce, XHCI_BOUNCE_SIZE);
     if (hc->erst)
@@ -1740,6 +1775,7 @@ static int xhci_pci_attach(struct device *dev)
     hc->hcd.port_enable = xhci_port_enable;
     hc->hcd.set_hub = xhci_set_hub;
     hc->hcd.set_ep0_mps = xhci_set_ep0_mps;
+    hc->hcd.port_gone = xhci_port_gone;
     usb_register_hcd(&hc->hcd);
     hc->initialized = 1;
     xhci_instances++;

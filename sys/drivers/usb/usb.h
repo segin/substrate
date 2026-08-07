@@ -497,6 +497,19 @@ typedef struct usb_hcd {
     int      (*set_ep0_mps)(struct usb_hcd *hcd, usb_device_t *dev, uint16_t mps);
 
     /*
+     * Optional: a root port has gone disconnected, so the HCD may release any
+     * controller-side state still bound to it.  Called from the hot-plug scan
+     * for every unoccupied port, so it must be cheap when there is nothing to
+     * do.  xHCI uses it to disable the device slot and free its contexts and
+     * transfer rings; UHCI and EHCI keep no such state and leave this NULL.
+     *
+     * This exists so that port_status() can be a pure read.  It used to do the
+     * teardown itself, which made a routine status poll take the submit lock
+     * and run commands on the command ring -- a trap for any future caller.
+     */
+    void     (*port_gone)(struct usb_hcd *hcd, uint8_t port);
+
+    /*
      * Optional isochronous-OUT streaming ops (USB audio).  frame_number()
      * returns the controller's current frame index; iso_schedule() arms one
      * packet from a (coherent) DMA buffer at a future frame and returns an
