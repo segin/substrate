@@ -23,13 +23,22 @@ void xhci_init(void);
 #define XHCI_CAP_CAPLENGTH   0x00   /* 8-bit: bytes to operational regs */
 #define XHCI_CAP_HCIVERSION  0x02
 #define XHCI_CAP_HCSPARAMS1  0x04   /* MaxSlots[7:0], MaxIntrs, MaxPorts[31:24] */
-#define XHCI_CAP_HCSPARAMS2  0x08
+#define XHCI_CAP_HCSPARAMS2  0x08   /* IST, ERST Max, Max Scratchpad Buffers */
 #define XHCI_CAP_HCCPARAMS1  0x10   /* bit2 = CSZ (64-byte contexts) */
 #define XHCI_CAP_DBOFF       0x14   /* doorbell array offset */
 #define XHCI_CAP_RTSOFF      0x18   /* runtime register-space offset */
 
 #define XHCI_HCS1_MAXSLOTS(x)  ((x) & 0xFF)
 #define XHCI_HCS1_MAXPORTS(x)  (((x) >> 24) & 0xFF)
+/*
+ * Max Scratchpad Buffers is a split field: the low five bits live at 31:27 and
+ * the high five at 25:21, so it cannot be extracted with a single shift+mask.
+ * Same expression FreeBSD and NetBSD use.  Value is a count of PAGESIZE pages
+ * the controller wants handed to it; see xhci_alloc_scratchpad().
+ */
+#define XHCI_HCS2_SPB_MAX(x)   ((((x) >> 16) & 0x3E0) | (((x) >> 27) & 0x1F))
+/* PAGESIZE (operational 0x08): bit n set => the xHC's page size is 2^(n+12). */
+#define XHCI_PAGESIZE_MASK     0x0000FFFFu
 #define XHCI_HCC1_CSZ          0x04
 #define XHCI_HCC1_XECP(x)      (((x) >> 16) & 0xFFFF)  /* ext-cap ptr, in dwords */
 

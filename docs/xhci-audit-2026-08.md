@@ -143,8 +143,9 @@ Not yet verified on hardware — it needs a boot on the laptop to confirm.
 
 **`sys/drivers/usb/xhci.c:1149-1152`, `:1323-1327`**
 
-`HCSPARAMS2` is never read.  `XHCI_CAP_HCSPARAMS2` is not even defined in
-`xhci.h` — only HCSPARAMS1 at 0x04 and HCCPARAMS1 at 0x10 are.
+`HCSPARAMS2` is never read.  (`XHCI_CAP_HCSPARAMS2` *is* defined, at
+`xhci.h:26` — an earlier revision of this document claimed otherwise, which was
+wrong.  The constant exists; nothing ever reads the register through it.)
 
 A controller advertises in `HCSPARAMS2` how many scratchpad pages it needs the
 OS to hand it.  Software must allocate that many pages, build an array of

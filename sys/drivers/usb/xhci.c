@@ -45,6 +45,11 @@
  * (0 reserved).  A stream-less serial UAS uses stream ID 1. */
 #define XHCI_MAXP_STREAMS  1
 #define XHCI_NUM_STREAMS   4
+/* Sanity bound on the controller's scratchpad request (spec allows up to
+ * 1023).  Real parts ask for a handful; anything wilder is a bad register
+ * read, and we would rather fail the attach loudly than try to find megabytes
+ * of contiguous memory during boot. */
+#define XHCI_MAX_SCRATCHPADS 128
 
 struct xhci_ring {
     struct xhci_trb *trb;
@@ -78,6 +83,12 @@ typedef struct xhci_hc {
     mutex_t  submit_lock;
 
     uint64_t *dcbaa;   dma_addr_t dcbaa_dma;
+    /* Scratchpad: the controller's own scratch memory, which we own but must
+     * never touch.  nscratch == 0 on a part that asks for none. */
+    uint32_t  nscratch;
+    uint32_t  scratch_pagesize;
+    uint64_t *scratch_arr;  dma_addr_t scratch_arr_dma;   /* pointer array */
+    void     *scratch_buf;  dma_addr_t scratch_buf_dma;   /* the pages */
     struct xhci_ring cmd_ring;
     struct xhci_trb  *event_ring;  dma_addr_t event_ring_dma;
     uint8_t          *erst;        dma_addr_t erst_dma;
@@ -1144,6 +1155,80 @@ static int xhci_reset(xhci_hc_t *hc)
 static int xhci_trace;
 #define XHCI_STEP(msg) do { if (xhci_trace) kprintf("xhci: " msg "\n"); } while (0)
 
+/*
+ * Hand the controller its scratchpad pages.
+ *
+ * An xHC may require some number of PAGESIZE buffers of system memory to keep
+ * its own internal state in.  This is not a hint and not an optimisation:
+ * xHCI 1.2 s4.20 says software "shall allocate the Scratchpad Buffer(s) before
+ * placing the xHC in to Run mode", and the controller reaches them through
+ * entry 0 of the DCBAA -- the one entry in that array that names no device.
+ *
+ * We never allocated any, and left DCBAA[0] holding the zero that the memset
+ * put there, so a controller that asked for scratch space was pointed at
+ * physical address 0.  Emulated controllers request none, which is why this
+ * survived: HCSPARAMS2 reads back 0 under QEMU and the whole path is skipped.
+ *
+ * Once handed over the pages belong to the controller -- "System software
+ * shall not read or write a Scratchpad buffer" -- but software does have to
+ * zero them first (s4.20 step 4b).  They are allocated as one contiguous run
+ * rather than one call per page: memory is unfragmented at driver-attach time,
+ * and it keeps teardown to a single free.
+ */
+static int xhci_alloc_scratchpad(xhci_hc_t *hc)
+{
+    uint32_t ps, i;
+
+    hc->nscratch = XHCI_HCS2_SPB_MAX(rd32(hc->mmio, XHCI_CAP_HCSPARAMS2));
+    if (hc->nscratch == 0)
+        return 0;
+    if (hc->nscratch > XHCI_MAX_SCRATCHPADS) {
+        kprintf("xhci: controller asks for %u scratchpad pages (max %u)\n",
+                (unsigned)hc->nscratch, XHCI_MAX_SCRATCHPADS);
+        return -1;
+    }
+
+    /* PAGESIZE is a bitmap of the sizes the xHC supports; use the smallest. */
+    ps = rd32(hc->op, XHCI_OP_PAGESIZE) & XHCI_PAGESIZE_MASK;
+    hc->scratch_pagesize = 4096;
+    for (i = 0; i < 16; i++) {
+        if (ps & (1u << i)) {
+            hc->scratch_pagesize = 1u << (i + 12);
+            break;
+        }
+    }
+
+    hc->scratch_arr = dma_alloc_coherent(hc->nscratch * sizeof(uint64_t),
+                                         &hc->scratch_arr_dma);
+    if (!hc->scratch_arr)
+        return -1;
+    hc->scratch_buf = dma_alloc_coherent(hc->nscratch * hc->scratch_pagesize,
+                                         &hc->scratch_buf_dma);
+    if (!hc->scratch_buf)
+        return -1;              /* xhci_teardown frees the array */
+
+    /*
+     * "A Scratchpad Buffer is a PAGESIZE block of system memory located on a
+     * PAGESIZE boundary."  dma_alloc_coherent returns page-aligned memory,
+     * which satisfies the usual 4KB case; if a controller reports a larger
+     * page size than our allocator can align to, refuse rather than quietly
+     * hand it a misaligned buffer.
+     */
+    if (hc->scratch_buf_dma & (dma_addr_t)(hc->scratch_pagesize - 1)) {
+        kprintf("xhci: scratchpad not aligned to the %u-byte xHC page size\n",
+                (unsigned)hc->scratch_pagesize);
+        return -1;
+    }
+
+    memset(hc->scratch_buf, 0, hc->nscratch * hc->scratch_pagesize);
+    for (i = 0; i < hc->nscratch; i++)
+        hc->scratch_arr[i] = (uint64_t)hc->scratch_buf_dma +
+                             (uint64_t)i * hc->scratch_pagesize;
+
+    hc->dcbaa[0] = hc->scratch_arr_dma;
+    return 0;
+}
+
 static int xhci_start(xhci_hc_t *hc)
 {
     XHCI_STEP("resetting controller");
@@ -1155,6 +1240,16 @@ static int xhci_start(xhci_hc_t *hc)
     hc->dcbaa = dma_alloc_coherent((XHCI_MAX_SLOTS + 1) * 8, &hc->dcbaa_dma);
     if (!hc->dcbaa) return -1;
     memset(hc->dcbaa, 0, (XHCI_MAX_SLOTS + 1) * 8);
+
+    /* Fills in dcbaa[0], so it has to happen before DCBAAP is published --
+     * and, either way, before RUN is set below. */
+    if (xhci_alloc_scratchpad(hc) != 0) {
+        kprintf("xhci: cannot allocate scratchpad buffers\n");
+        return -1;
+    }
+    if (hc->nscratch)
+        XHCI_STEP("scratchpad allocated");
+
     wr64(hc->op, XHCI_OP_DCBAAP, hc->dcbaa_dma);
 
     if (xhci_ring_alloc(&hc->cmd_ring) != 0) return -1;
@@ -1253,6 +1348,11 @@ static void xhci_teardown(xhci_hc_t *hc)
     if (hc->cmd_ring.trb)
         dma_free_coherent(hc->cmd_ring.trb,
                           XHCI_RING_TRBS * sizeof(struct xhci_trb));
+    if (hc->scratch_buf)
+        dma_free_coherent(hc->scratch_buf,
+                          hc->nscratch * hc->scratch_pagesize);
+    if (hc->scratch_arr)
+        dma_free_coherent(hc->scratch_arr, hc->nscratch * sizeof(uint64_t));
     if (hc->dcbaa)
         dma_free_coherent(hc->dcbaa, (XHCI_MAX_SLOTS + 1) * 8);
     if (hc->mmio)
@@ -1397,8 +1497,10 @@ static int xhci_pci_attach(struct device *dev)
     usb_register_hcd(&hc->hcd);
     hc->initialized = 1;
     xhci_instances++;
-    kprintf("xhci: %s: USB 3.x controller at 0x%x, %u ports, %u slots, ctx=%u\n",
-            hc->name, (unsigned)phys, hc->nports, hc->maxslots, hc->ctx_size);
+    kprintf("xhci: %s: USB 3.x controller at 0x%x, %u ports, %u slots, ctx=%u, "
+            "scratch=%u\n",
+            hc->name, (unsigned)phys, hc->nports, hc->maxslots, hc->ctx_size,
+            (unsigned)hc->nscratch);
     return 0;
 }
 
