@@ -538,14 +538,15 @@ typedef struct usb_hcd {
     void     (*iso_reclaim)(struct usb_hcd *hcd, void *handle);
     /*
      * Optional: the iso stream on `ep` has gone idle and no further packets
-     * are coming for a while.  xHCI needs this: a Running isochronous
-     * endpoint with an empty transfer ring raises a Ring Underrun Transfer
-     * Event at EVERY interval boundary (xHCI 1.2 s4.10.3.2) -- 1000 events/s
-     * into a 64-entry event ring that is only drained under submit_lock, so
-     * a quiet bus wedges the ring full within 64ms of playback ending.
-     * Stopping the endpoint silences it; the next iso_schedule()'s doorbell
-     * restarts a Stopped endpoint (s4.8.3).  UHCI reclaims its frame-list
-     * slots individually and leaves this NULL. [P5-03]
+     * are coming for a while.  On xHCI this parks the endpoint cleanly: an
+     * empty ring raises one Ring Underrun Transfer Event when first detected
+     * and the xHC then removes the endpoint from its Pipe Schedule until the
+     * next doorbell (xHCI 1.2 s4.11.2.3, s4.10.3.1) -- P5-03's original
+     * claim of an event per interval flooding the event ring was WRONG, see
+     * the pass-6 audit -- so this is tidiness (quiesce + dequeue resync at
+     * a known point), not flood protection.  The next iso_schedule()'s
+     * doorbell restarts a Stopped endpoint (s4.8.3).  UHCI reclaims its
+     * frame-list slots individually and leaves this NULL. [P5-03, P6-ISO-01]
      */
     void     (*iso_stop)(struct usb_hcd *hcd, usb_device_t *dev,
                          usb_endpoint_t *ep);

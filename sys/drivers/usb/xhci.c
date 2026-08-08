@@ -400,7 +400,13 @@ static int xhci_set_tr_dequeue(xhci_hc_t *hc, uint8_t slot, int dci,
     uint32_t ep_field = ((uint32_t)slot << 24) | ((uint32_t)dci << 16);
     uint64_t deq = (uint64_t)ring->dma +
                    (uint64_t)ring->enq * sizeof(struct xhci_trb);
-    int cc = xhci_run_command_st(hc, deq | (ring->cycle ? 1u : 0u),
+    /* Param bits 3:1 are the Stream Context Type.  Table 6-68 requires
+     * SCT=1 (Primary Transfer Ring) when a Stream ID is named on a
+     * linear-array endpoint; 0 is only for stream-less endpoints.  Same
+     * encoding as the stream context's own SCT field, hence the shared
+     * constant. [P6-SLOT-03] */
+    uint64_t sct = stream_id ? (uint64_t)XHCI_SCTX_SCT_PRIM_TR : 0;
+    int cc = xhci_run_command_st(hc, deq | sct | (ring->cycle ? 1u : 0u),
                                  (uint32_t)stream_id << 16,
                                  XHCI_TRB_TYPE(TRB_SET_TR_DEQUEUE) | ep_field,
                                  NULL);
@@ -459,43 +465,62 @@ static int xhci_recover_ep(xhci_hc_t *hc, uint8_t slot, int dci,
                            struct xhci_ring *ring, uint16_t stream_id)
 {
     uint32_t ep_field = ((uint32_t)slot << 24) | ((uint32_t)dci << 16);
-    uint32_t state = xhci_ep_state(hc, slot, dci);
     int cc;
 
-    switch (state) {
-    case XHCI_EP_STATE_HALTED:
-        cc = xhci_run_command(hc, 0,
-                              XHCI_TRB_TYPE(TRB_RESET_ENDPOINT) | ep_field, NULL);
-        if (cc != XHCI_CC_SUCCESS) {
-            kprintf("xhci: reset endpoint slot %u dci %d failed cc=%d\n",
-                    slot, dci, cc);
+    /*
+     * Re-dispatch on Context State Error rather than giving up.  The state
+     * this loop reads is the controller's own, but s4.8.3 warns the output
+     * write "may be delayed" relative to the error that caused it and that
+     * software "should not depend on EP State" being current -- so the
+     * first read can say Running for an endpoint already Halted, Stop
+     * Endpoint then bounces with Context State Error, and bailing out
+     * there (as this first did) leaves the endpoint unrecovered for the
+     * session.  A bounce means precisely "the state moved"; by the time
+     * the completion arrives the output context has long settled, so
+     * re-reading and re-dispatching converges -- one extra lap in the
+     * race, two more as insurance. [P6-SLOT-02]
+     */
+    for (int attempt = 0; attempt < 3; attempt++) {
+        uint32_t state = xhci_ep_state(hc, slot, dci);
+
+        switch (state) {
+        case XHCI_EP_STATE_HALTED:
+            cc = xhci_run_command(hc, 0,
+                                  XHCI_TRB_TYPE(TRB_RESET_ENDPOINT) | ep_field,
+                                  NULL);
+            break;
+
+        case XHCI_EP_STATE_RUNNING:
+            cc = xhci_run_command(hc, 0,
+                                  XHCI_TRB_TYPE(TRB_STOP_ENDPOINT) | ep_field,
+                                  NULL);
+            break;
+
+        case XHCI_EP_STATE_ERROR:
+        case XHCI_EP_STATE_STOPPED:
+            /* Set TR Dequeue on its own is the documented recovery. */
+            return xhci_set_tr_dequeue(hc, slot, dci, ring, stream_id);
+
+        case XHCI_EP_STATE_DISABLED:
+        default:
+            /* Nothing to recover, and Set TR Dequeue would be rejected. */
+            kprintf("xhci: slot %u dci %d is in state %u; not recovering\n",
+                    slot, dci, (unsigned)state);
             return -1;
         }
-        break;
 
-    case XHCI_EP_STATE_RUNNING:
-        cc = xhci_run_command(hc, 0,
-                              XHCI_TRB_TYPE(TRB_STOP_ENDPOINT) | ep_field, NULL);
-        if (cc != XHCI_CC_SUCCESS) {
-            kprintf("xhci: stop endpoint slot %u dci %d failed cc=%d\n",
-                    slot, dci, cc);
+        if (cc == XHCI_CC_SUCCESS)
+            return xhci_set_tr_dequeue(hc, slot, dci, ring, stream_id);
+        if (cc != XHCI_CC_CONTEXT_STATE) {
+            kprintf("xhci: recover slot %u dci %d (state %u) failed cc=%d\n",
+                    slot, dci, (unsigned)state, cc);
             return -1;
         }
-        break;
-
-    case XHCI_EP_STATE_ERROR:
-    case XHCI_EP_STATE_STOPPED:
-        break;      /* Set TR Dequeue on its own is the documented recovery */
-
-    case XHCI_EP_STATE_DISABLED:
-    default:
-        /* Nothing to recover, and Set TR Dequeue would be rejected too. */
-        kprintf("xhci: slot %u dci %d is in state %u; not recovering\n",
-                slot, dci, (unsigned)state);
-        return -1;
+        /* Context State Error: the state moved under us; re-read and retry. */
     }
-
-    return xhci_set_tr_dequeue(hc, slot, dci, ring, stream_id);
+    kprintf("xhci: slot %u dci %d state would not settle; not recovering\n",
+            slot, dci);
+    return -1;
 }
 
 /* [DRV-03] Wait for the Transfer Event addressed to (slot, dci); skip unrelated
@@ -1311,6 +1336,31 @@ static int xhci_control(xhci_hc_t *hc, usb_transfer_t *xfer)
         xfer->setup.bRequest == USB_REQ_SET_ADDRESS) {
         struct xhci_slot *s = hc->slots[slot];
         uint32_t ctrl = XHCI_TRB_TYPE(TRB_ADDRESS_DEVICE) | ((uint32_t)slot << 24);
+        /*
+         * Refresh the input EP0 context's dequeue pointer FIRST.  s4.6.5:
+         * an Address Device with BSR=0 "copies all fields of the Input
+         * Endpoint 0 Context to the Output" -- including the TR Dequeue
+         * Pointer, which in this reused input context still holds the ring
+         * BASE with DCS=1 from xhci_setup_slot().  EP0 has been running
+         * since (the pre-address descriptor reads), so installing that
+         * rewinds the controller onto already-consumed TRBs whose cycle
+         * bits still read as owned, and it re-executes every pre-address
+         * TD on the bus at the new address before reaching anything new.
+         * How badly that ends scales with how much pre-address traffic
+         * there was -- i.e. it is per-device, and invisible under QEMU,
+         * which recomputes its dequeue lazily.  Point it at the CURRENT
+         * enqueue + cycle instead: that is where the next TD will actually
+         * be written.  Linux does the equivalent copy-forward of the
+         * enqueue into the input context on every Address Device.
+         * [P6-SLOT-01]
+         */
+        {
+            uint32_t *ep0 = (uint32_t *)in_ep_of(hc, s->in_ctx, 1);
+            uint64_t deq = (uint64_t)s->ep_ring[1].dma +
+                           (uint64_t)s->ep_ring[1].enq * sizeof(struct xhci_trb);
+            ep0[2] = (uint32_t)deq | (s->ep_ring[1].cycle ? 1u : 0u);
+            ep0[3] = (uint32_t)(deq >> 32);
+        }
         int cc = xhci_run_command(hc, s->in_ctx_dma, ctrl, NULL);
         if (cc != XHCI_CC_SUCCESS) return USB_XFER_ERROR;
         /* A device is allowed a settling period after being addressed before
@@ -1608,14 +1658,16 @@ static void xhci_iso_reclaim(usb_hcd_t *hcd, void *handle)
 }
 
 /*
- * The stream has gone idle: quiesce the endpoint so it stops raising Ring
- * Underrun at every interval boundary (s4.10.3.2 -- one event per millisecond
- * against an empty ring, which wedges the 64-entry event ring full within
- * 64ms on a bus with no other traffic to drain it).  xhci_recover_ep()'s
- * state dispatch does exactly the right thing here: the endpoint is Running,
- * so it gets Stop Endpoint + Set TR Dequeue to the producer cursor.  The next
- * iso_schedule() rings the doorbell, and a doorbell restarts a Stopped
- * endpoint (s4.8.3), so resume needs nothing further. [P5-03]
+ * The stream has gone idle: park the endpoint at a known point.  (Not flood
+ * protection, as this first claimed -- an empty ring raises Ring Underrun
+ * once on first detection and the xHC removes the endpoint from the Pipe
+ * Schedule until the next doorbell, s4.11.2.3/s4.10.3.1.  The quiesce is
+ * still worth doing: it retires the underrun state and resyncs the dequeue
+ * to the producer cursor while nothing is in flight.)  xhci_recover_ep()'s
+ * state dispatch does the right thing here: the endpoint is Running, so it
+ * gets Stop Endpoint + Set TR Dequeue.  The next iso_schedule() rings the
+ * doorbell, and a doorbell restarts a Stopped endpoint (s4.8.3), so resume
+ * needs nothing further. [P5-03, P6-ISO-01]
  */
 static void xhci_iso_stop(usb_hcd_t *hcd, usb_device_t *dev, usb_endpoint_t *ep)
 {
@@ -1845,10 +1897,18 @@ static int xhci_reset(xhci_hc_t *hc)
 
     wr32(hc->op, XHCI_OP_USBCMD, XHCI_CMD_HCRST);
     for (i = 0; i < XHCI_RESET_WAIT_MS; i++) {
+        /*
+         * Delay BEFORE the first read-back, not after.  Intel xHCI (Sunrise
+         * Point among them) has an erratum where any register access within
+         * 1ms of asserting HCRST can hang the host; NetBSD carries the same
+         * 1ms ("Existing Intel xHCI requires 1ms delay... (Errata)"),
+         * FreeBSD pauses 10ms, Linux gates a 1ms delay on XHCI_INTEL_HOST.
+         * The old loop read USBCMD back immediately. [P6-INIT-02]
+         */
+        xhci_delay_ms(1);
         if (!(rd32(hc->op, XHCI_OP_USBCMD) & XHCI_CMD_HCRST) &&
             !(rd32(hc->op, XHCI_OP_USBSTS) & XHCI_STS_CNR))
             return 0;
-        xhci_delay_ms(1);
     }
     kprintf("xhci: reset did not complete in %d ms "
             "(usbcmd=0x%x usbsts=0x%x)\n", XHCI_RESET_WAIT_MS,
@@ -2185,7 +2245,23 @@ static int xhci_pci_attach(struct device *dev)
     }
     uintptr_t phys = (uintptr_t)phys64;
 
+    /*
+     * Size BAR0 with memory decode DISABLED, before anything enables it.
+     *
+     * The probe writes all-ones into the live BAR and restores it; PCI 3.0
+     * s6.2.5.1 requires decode off around exactly that, and both BSDs and
+     * Linux comply.  As first written this probed after decode was enabled
+     * -- and, worse, before the BIOS handoff, so the four config writes
+     * landed on a controller SMM still owned and was actively driving as
+     * the boot disk's HCD.  A transient all-ones BAR under a firmware
+     * driver mid-transfer is precisely the kind of poke that leaves it
+     * wedged in ways that look like random per-device failures
+     * downstream. [P6-INIT-01]
+     */
     uint16_t cmd = pci_read_config16(pdev->bus, pdev->slot, pdev->func, PCI_CONFIG_COMMAND);
+    pci_write_config16(pdev->bus, pdev->slot, pdev->func, PCI_CONFIG_COMMAND,
+                       cmd & (uint16_t)~0x0002);
+    size_t barsz = pci_bar_size(pdev, 0);
     pci_write_config16(pdev->bus, pdev->slot, pdev->func, PCI_CONFIG_COMMAND,
                        cmd | 0x0002 | 0x0004);
 
@@ -2202,12 +2278,9 @@ static int xhci_pci_attach(struct device *dev)
      * Clamped to a floor that covers the architectural minimum and a ceiling
      * so a garbage size-probe cannot eat the kernel's mapping space. [HW-01]
      */
-    {
-        size_t barsz = pci_bar_size(pdev, 0);
-        if (barsz < XHCI_MMIO_MIN) barsz = XHCI_MMIO_MIN;
-        if (barsz > XHCI_MMIO_MAX) barsz = XHCI_MMIO_MAX;
-        hc->mmio_size = (uint32_t)barsz;
-    }
+    if (barsz < XHCI_MMIO_MIN) barsz = XHCI_MMIO_MIN;
+    if (barsz > XHCI_MMIO_MAX) barsz = XHCI_MMIO_MAX;
+    hc->mmio_size = (uint32_t)barsz;
     hc->mmio = ioremap(phys, hc->mmio_size);
     if (!hc->mmio) {
         kprintf("xhci: ioremap failed\n");

@@ -163,9 +163,8 @@ static void uac_feeder(void *arg)
 
 		if (!d->active) {
 			/* Idle: stop scheduling (device plays silence), wait to be
-			 * woken by a write.  Tell the HCD once, on the transition:
-			 * an xHCI endpoint left Running on an empty ring raises a
-			 * Ring Underrun event every millisecond. [P5-03] */
+			 * woken by a write.  Tell the HCD once, on the transition,
+			 * so it can park the endpoint at a known point. [P5-03] */
 			if (d->started)
 				usb_iso_stop(d->udev, &d->iso_ep);
 			uac_reclaim_all(d);
