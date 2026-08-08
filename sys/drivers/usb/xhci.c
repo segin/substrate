@@ -1584,6 +1584,37 @@ static void xhci_iso_reclaim(usb_hcd_t *hcd, void *handle)
     (void)hcd; (void)handle;
 }
 
+/*
+ * The stream has gone idle: quiesce the endpoint so it stops raising Ring
+ * Underrun at every interval boundary (s4.10.3.2 -- one event per millisecond
+ * against an empty ring, which wedges the 64-entry event ring full within
+ * 64ms on a bus with no other traffic to drain it).  xhci_recover_ep()'s
+ * state dispatch does exactly the right thing here: the endpoint is Running,
+ * so it gets Stop Endpoint + Set TR Dequeue to the producer cursor.  The next
+ * iso_schedule() rings the doorbell, and a doorbell restarts a Stopped
+ * endpoint (s4.8.3), so resume needs nothing further. [P5-03]
+ */
+static void xhci_iso_stop(usb_hcd_t *hcd, usb_device_t *dev, usb_endpoint_t *ep)
+{
+    xhci_hc_t *hc = hcd->priv;
+    uint8_t slot;
+    int dci;
+
+    if (!dev || !ep)
+        return;
+    slot = hc->addr_slot[dev->address & 0x7F];
+    if (slot == 0 || slot > XHCI_MAX_SLOTS || !hc->slots[slot])
+        return;
+    dci = (ep->address & 0x0F) * 2 + ((ep->address & 0x80) ? 1 : 0);
+
+    mutex_lock(&hc->submit_lock);
+    xhci_drain_events(hc);   /* [R-05] */
+    if (hc->slots[slot] && hc->slots[slot]->ep_ring[dci].trb)
+        (void)xhci_recover_ep(hc, slot, dci,
+                              &hc->slots[slot]->ep_ring[dci], 0);
+    mutex_unlock(&hc->submit_lock);
+}
+
 static int xhci_submit(usb_hcd_t *hcd, usb_transfer_t *xfer)
 {
     xhci_hc_t *hc = hcd->priv;
@@ -2251,6 +2282,7 @@ static int xhci_pci_attach(struct device *dev)
     hc->hcd.frame_number = xhci_frame_number;
     hc->hcd.iso_schedule = xhci_iso_schedule;
     hc->hcd.iso_reclaim = xhci_iso_reclaim;
+    hc->hcd.iso_stop = xhci_iso_stop;
     usb_register_hcd(&hc->hcd);
     hc->initialized = 1;
     xhci_instances++;

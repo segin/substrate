@@ -468,6 +468,25 @@ static int usb_hub_attach(usb_device_t *dev)
 	usb_set_hub(dev, hub->nports,
 	            USB_HUB_TT_THINK(hdesc.wHubCharacteristics));
 
+	/*
+	 * Touch the status-change endpoint once BEFORE walking the downstream
+	 * ports.  On xHCI the hub fields (Hub, Number of Ports, TTT) only truly
+	 * latch on the Configure Endpoint that takes the slot from Addressed to
+	 * Configured (xHCI 1.2 s4.5.2), and under the lazy endpoint-configure
+	 * model that command runs on the first transfer to this endpoint --
+	 * which used to be the first hot-plug poll, long after every downstream
+	 * device had enumerated past a slot still declaring itself a non-hub.
+	 * One throwaway poll drives the configure now; the NAK an idle hub
+	 * answers with is expected and ignored.  Costs one NAK'd IN on
+	 * UHCI/EHCI. [P5-02]
+	 */
+	if (hub->intr_ep) {
+		uint8_t scratch[8];
+		uint32_t got = 0;
+		(void)usb_interrupt_transfer(dev, hub->intr_ep, scratch,
+		                             sizeof(scratch), &got, 2);
+	}
+
 	kprintf("usb_hub: %04x:%04x hub with %u port(s)\n",
 	        dev->vendor_id, dev->product_id, hub->nports);
 

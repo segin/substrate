@@ -365,6 +365,13 @@ void usb_iso_reclaim(usb_device_t *dev, void *handle)
     dev->hcd->iso_reclaim(dev->hcd, handle);
 }
 
+void usb_iso_stop(usb_device_t *dev, usb_endpoint_t *ep)
+{
+    if (!dev || !ep || !dev->hcd || !dev->hcd->iso_stop)
+        return;
+    dev->hcd->iso_stop(dev->hcd, dev, ep);
+}
+
 int usb_iso_transfer(usb_device_t *dev, usb_endpoint_t *ep,
                      void *data, uint32_t length,
                      uint32_t *actual_length)
