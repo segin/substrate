@@ -868,7 +868,36 @@ static void init_root_fs(void) {
         kprint(root_dev);
         kprint("\n");
 
-        if (root_mount_from_spec(root_dev, have_root_type ? root_type : NULL) != 0) {
+        int mounted = (root_mount_from_spec(root_dev,
+                            have_root_type ? root_type : NULL) == 0);
+        if (!mounted) {
+            /*
+             * rootwait: the root device may live on a hot-pluggable bus and
+             * simply not exist yet.  The concrete case is the HP Pavilion,
+             * whose SD reader is a USB device the firmware was still driving
+             * as its own boot disk until the xHCI BIOS handoff -- it drops
+             * off the bus and re-announces itself seconds later, after the
+             * one synchronous boot scan has already passed its port.  The
+             * hot-plug monitor kthread does not exist yet at this point
+             * (usb_late_init runs after init and the page daemon are
+             * spawned, at the tail of kmain), so this loop does the
+             * scanning itself: one usb_hotplug_poll() + mount retry every
+             * ~500ms.  Proven by hot-adding the root USB device mid-wait
+             * under QEMU.  Bounded: a genuinely absent device still falls
+             * through to the fallback and the panic. [HW-02]
+             */
+            kprint("VFS: root not present yet; waiting for hot-plug (15s)...\n");
+            int64_t deadline = get_uptime_ms() + 15000;
+            while (!mounted && get_uptime_ms() < deadline) {
+                int64_t next_try = get_uptime_ms() + 500;
+                while (get_uptime_ms() < next_try)
+                    sched_yield();
+                usb_hotplug_poll();
+                mounted = (root_mount_from_spec(root_dev,
+                                have_root_type ? root_type : NULL) == 0);
+            }
+        }
+        if (!mounted) {
             kprint("VFS: Cannot mount root ");
             kprint(root_dev);
             kprint("\n");

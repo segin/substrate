@@ -1314,15 +1314,26 @@ void usb_enumerate_bus(usb_hcd_t *hcd)
         if (!(status & USB_PORT_STAT_CONNECTION))
             continue;
 
-        /* Reset port to enable it */
-        if (hcd->port_reset(hcd, port) != 0)
+        /* Reset port to enable it.  A connected port that fails here is
+         * NOT silent any more: the HP Pavilion's SD reader -- the boot
+         * device -- vanished into one of these bare continues while it
+         * re-announced itself after the xHCI BIOS handoff, and nothing on
+         * the console said so.  The hot-plug scanner retries it later;
+         * these lines are what let a boot photo prove that story. */
+        if (hcd->port_reset(hcd, port) != 0) {
+            kprintf("usb: %s port %u: connected but reset failed; "
+                    "left to the hot-plug scan\n", hcd->name, port);
             continue;
+        }
 
         /* Re-read status after reset */
         status = hcd->port_status(hcd, port);
 
-        if (!(status & USB_PORT_STAT_ENABLE))
+        if (!(status & USB_PORT_STAT_ENABLE)) {
+            kprintf("usb: %s port %u: connected but did not enable; "
+                    "left to the hot-plug scan\n", hcd->name, port);
             continue;
+        }
 
         /* Determine speed */
         if (status & USB_PORT_STAT_SUPER_SPEED)
@@ -1524,6 +1535,20 @@ static void usb_hotplug_scan(void)
      * to walk its own downstream ports.
      */
     usb_hub_scan_ports();
+}
+
+/*
+ * One synchronous hot-plug scan, for callers that cannot wait for the monitor
+ * kthread -- which does not exist until kmain's tail (usb_late_init runs
+ * after init and the page daemon so it cannot steal pid 1).  The concrete
+ * caller is the rootwait loop: a USB root device that re-announces itself
+ * after the boot scan needs SOMETHING scanning while root-mount waits, and
+ * during that window the waiting thread is the only candidate.  Same thread
+ * context the synchronous boot enumeration already ran in. [HW-02]
+ */
+void usb_hotplug_poll(void)
+{
+    usb_hotplug_scan();
 }
 
 static int usb_hotplug_chan;
