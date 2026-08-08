@@ -20,17 +20,44 @@ No other operating system's source was consulted.
 
 ---
 
-## Status of the earlier passes — read this first
+## Status
+
+**All five findings are fixed** as of 2026-08-08:
+
+| ID | Commit |
+|----|--------|
+| P3-01 | `ea5837183` — xhci: fix the slot context for devices behind a hub |
+| P3-02 | `ea5837183` — as above |
+| P3-03 | `ea5837183` — as above |
+| P3-04 | `1461c9942` — xhci: correct the ENT flag value and stop Context Entries shrinking |
+| P3-05 | `1461c9942` — as above |
+
+Pass 2's six were fixed in the same series; see that document's Status
+section.  The driver was boot-tested to multi-user under `qemu-xhci` in two
+topologies after each group: root-on-USB-MSC (`--usb-version=3.0 --ums`), and
+a `usb-hub` carrying a `usb-kbd` and `usb-mouse`, where the hub and both
+full-speed devices behind it enumerate and bind with no xHCI failures logged.
+
+**P3-01 and P3-02 are not *proven* by that.**  QEMU's xHCI models neither the
+Slot Context Speed field nor the Hub bit, so the boot tests show the change
+does not regress anything; confirming the fix needs real silicon with a low-
+or full-speed device under an external hub.  That is the outstanding hardware
+check, alongside pass 1's X-01/X-02 on the Skylake laptop.
+
+---
+
+## Status of the earlier passes — as found at the start of this pass
 
 **Pass 1 (`docs/xhci-audit-2026-08.md`, X-01..X-18): fixed.**  Ten commits,
 `e1ee410cd`..`555d7650a`.  Each was re-verified present in the tree during this
 pass.
 
-**Pass 2 (`docs/xhci-audit-2026-08-pass2.md`, R-01..R-06): NOT fixed — all six
-are still open.**  The last commit to touch `sys/drivers/usb/xhci.c` is
-`555d7650a`, which *precedes* `f94df6c90` (the commit that added the pass-2
-document).  That document ends in a "Suggested order" section, i.e. it is a
-to-do list that was never worked.  Re-confirmed against the current source:
+**Pass 2 (`docs/xhci-audit-2026-08-pass2.md`, R-01..R-06): all six were still
+open.**  The last commit to touch `sys/drivers/usb/xhci.c` was `555d7650a`,
+which *precedes* `f94df6c90` (the commit that added the pass-2 document).  That
+document ends in a "Suggested order" section, i.e. it was a to-do list that had
+never been worked.  Re-confirmed against the source as it stood, and all six
+have since been fixed:
 
 | ID | Severity | Still open? | Evidence in the tree today |
 |----|----------|-------------|----------------------------|

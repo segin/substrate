@@ -28,6 +28,34 @@ of them (R-01) substantially undermines the fix it belongs to.**
 
 ---
 
+## Status
+
+**All six findings are fixed** as of 2026-08-08, in three commits alongside
+pass 3's:
+
+| ID | Commit |
+|----|--------|
+| R-01 | `0f022fe1b` — xhci: consume the command ring abort's own completion events |
+| R-02 | `33d2f2155` — xhci: close the two gaps pass 2 found in pass 1's fixes |
+| R-03 | `0e3dbef9d` — xhci: clamp nports, commit the abort's link TRB, drain on every lock |
+| R-04 | `0e3dbef9d` — as above |
+| R-05 | `0e3dbef9d` — as above |
+| R-06 | `33d2f2155` — as R-02 |
+
+They sat open for a day: this document's closing section is a suggested order,
+not a completion record, and nothing acted on it until the pass-3 audit
+(`docs/xhci-audit-2026-08-pass3.md`) noticed that the last commit to touch
+`xhci.c` predated the commit that added this file.
+
+R-01 was fixed with both remedies the entry suggests, since they cover
+different entry points: `xhci_abort_command()` now drains to the Command Ring
+Stopped event, *and* `xhci_run_command_st()` skips completion codes 0x18/0x19
+rather than returning them.  Verified by boot only — as the entry notes, a
+healthy emulated boot never times out a command, so the abort path does not
+run.
+
+---
+
 ## Summary
 
 | ID | Severity | Area | One-line |
