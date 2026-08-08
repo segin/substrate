@@ -50,7 +50,15 @@
  * Per-slot state is allocated on demand, so this only sizes the DCBAA and
  * the slot pointer array; 64 covers any real part. */
 #define XHCI_MAX_SLOTS     64
-#define XHCI_BOUNCE_SIZE   (64 * 1024)
+/*
+ * One bounce buffer serves every transfer on the controller (submit_lock
+ * serialises them).  256K = four max-size TRBs: a transfer larger than 64K
+ * becomes one chained multi-TRB TD, since a single transfer TRB may describe
+ * at most 64K of data (s3.2.8).  Contiguous 64-page allocation, made once at
+ * attach when memory is unfragmented.
+ */
+#define XHCI_BOUNCE_SIZE   (256 * 1024)
+#define XHCI_TD_MAX_TRBS   (XHCI_BOUNCE_SIZE / XHCI_TRB_MAX_XFER)
 #define XHCI_CMD_TIMEOUT_MS 1000
 /* How many events we will step over looking for the one that is ours before
  * concluding the ring is out of step with us.  Shared by the transfer-event
@@ -221,6 +229,23 @@ static uint64_t xhci_ring_push(struct xhci_ring *r, uint64_t param, uint32_t sta
 static void xhci_doorbell(xhci_hc_t *hc, uint32_t slot, uint32_t target)
 {
     wr32(hc->db, slot * 4, target);
+}
+
+/*
+ * Make room for a TD of `ntrbs` TRBs without it spanning the Link TRB.
+ *
+ * A multi-TRB TD is held together by the Chain bit, and a TD that wraps the
+ * ring needs CH set in the Link TRB itself (s4.11.5.1) -- which our link
+ * does not carry, and setting it per-TD would leave a stale CH behind for
+ * the next single-TRB TD.  So when a TD would meet the link mid-body, pad
+ * with No Op transfer TRBs up to the wrap and start the TD at slot 0.  The
+ * no-ops are real TRBs the controller executes and retires silently (no
+ * IOC set, so no events either).
+ */
+static void xhci_ring_make_room(struct xhci_ring *r, int ntrbs)
+{
+    while (r->enq + (uint32_t)ntrbs > XHCI_RING_TRBS - 1)
+        xhci_ring_push(r, 0, 0, XHCI_TRB_TYPE(TRB_NOOP_XFER));
 }
 
 /* Wait for and consume the next event; returns the completion code, and (if
@@ -1480,14 +1505,51 @@ static int xhci_bulk(xhci_hc_t *hc, usb_transfer_t *xfer)
     if (len > XHCI_BOUNCE_SIZE) return USB_XFER_ERROR;
     if (!in && len) memcpy(hc->bounce, xfer->data, len);
 
-    uint64_t td[1];
-    td[0] = xhci_ring_push(ring, len ? hc->bounce_dma : 0, len,
-                   XHCI_TRB_TYPE(TRB_NORMAL) | XHCI_TRB_IOC | XHCI_TRB_ISP);
+    /*
+     * Build one TD from as many <=64K TRBs as the length needs (s3.2.8 caps
+     * a single transfer TRB's buffer at 64K).  Chain bit on every TRB but
+     * the last; IOC only on the last, so a fully-successful TD raises one
+     * event, naming that TRB.  ISP on every TRB of an IN: a device may
+     * answer short anywhere in the TD, and the short packet both raises the
+     * event (naming the TRB it landed in) and retires the remainder of the
+     * TD.  TD Size counts the max-packets still to move after each TRB
+     * (s4.11.2.4, capped at 31 by the macro) and must be an explicit 0 in
+     * the last. [T1]
+     */
+    uint32_t mps = xfer->ep->max_packet ? xfer->ep->max_packet : 512;
+    uint64_t td[XHCI_TD_MAX_TRBS];
+    uint32_t tdoff[XHCI_TD_MAX_TRBS], tdlen[XHCI_TD_MAX_TRBS];
+    int ntrbs = 0;
+    uint32_t off = 0;
+    do {
+        uint32_t chunk = (len - off > XHCI_TRB_MAX_XFER) ? XHCI_TRB_MAX_XFER
+                                                         : len - off;
+        tdoff[ntrbs] = off;
+        tdlen[ntrbs] = chunk;
+        ntrbs++;
+        off += chunk;
+    } while (off < len);
+
+    xhci_ring_make_room(ring, ntrbs);
+    uint32_t tdpkts = (len + mps - 1) / mps;
+    for (int i = 0; i < ntrbs; i++) {
+        int last = (i == ntrbs - 1);
+        uint32_t donepkts = (tdoff[i] + tdlen[i]) / mps;
+        uint32_t tdsz = last ? 0
+                             : (tdpkts > donepkts ? tdpkts - donepkts : 0);
+        uint32_t flags = XHCI_TRB_TYPE(TRB_NORMAL) |
+                         (last ? XHCI_TRB_IOC : XHCI_TRB_CH) |
+                         (in ? XHCI_TRB_ISP : 0);
+
+        td[i] = xhci_ring_push(ring, len ? hc->bounce_dma + tdoff[i] : 0,
+                               tdlen[i] | XHCI_TRB_TD_SIZE(tdsz), flags);
+    }
     xhci_doorbell(hc, slot, db_target);
 
     uint32_t evst;
-    int cc = xhci_wait_td(hc, slot, dci, td, 1, &evst,  /* [DRV-03] this EP's DCI */
-                          NULL,
+    int which = ntrbs - 1;
+    int cc = xhci_wait_td(hc, slot, dci, td, ntrbs, &evst,  /* [DRV-03] */
+                          &which,
                           xfer->timeout_ms ? xfer->timeout_ms
                                            : XHCI_CMD_TIMEOUT_MS); /* [USB-09] */
     if (cc != XHCI_CC_SUCCESS && cc != XHCI_CC_SHORT_PACKET) {
@@ -1501,8 +1563,20 @@ static int xhci_bulk(xhci_hc_t *hc, usb_transfer_t *xfer)
         return xfer->status;
     }
 
+    /*
+     * The event names the TRB it stopped at (`which`) and its residue is
+     * per-TRB (Table 6-38: "residual number of bytes not transferred" for
+     * that TRB).  Everything before that TRB moved in full; on a clean
+     * completion the event names the last TRB with residue 0, making this
+     * the whole length. [T1]
+     */
     uint32_t residue = XHCI_TRB_GET_XLEN(evst);
-    xfer->actual_length = (len > residue) ? (len - residue) : len;
+    if (which < 0 || which >= ntrbs)
+        which = ntrbs - 1;
+    xfer->actual_length = tdoff[which] +
+        ((tdlen[which] > residue) ? (tdlen[which] - residue) : 0);
+    if (xfer->actual_length > len)
+        xfer->actual_length = len;
     if (in && xfer->actual_length) memcpy(xfer->data, hc->bounce, xfer->actual_length);
     xfer->status = USB_XFER_OK;
     return USB_XFER_OK;

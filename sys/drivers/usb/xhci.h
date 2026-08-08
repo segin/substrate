@@ -221,6 +221,19 @@ struct xhci_trb {
 #define XHCI_TRB_GET_CC(s)   (((s) >> 24) & 0xFF)   /* completion code */
 #define XHCI_TRB_GET_SLOT(c) (((c) >> 24) & 0xFF)
 #define XHCI_TRB_GET_XLEN(s) ((s) & 0x00FFFFFF)     /* transfer-event residue */
+/*
+ * Transfer TRB status dword, bits 21:17: TD Size (s4.11.2.4) -- the number of
+ * max-packets still to move AFTER this TRB, capped at 31, and required to be
+ * an explicit 0 in the last TRB of the TD so the controller knows where the
+ * TD ends even before it meets the un-chained control word.
+ */
+#define XHCI_TRB_TD_SIZE(n)  ((uint32_t)((n) > 31 ? 31 : (n)) << 17)
+/*
+ * A single transfer TRB may describe at most 64K of data (s3.2.8: buffers
+ * "reference from 1 to 64K bytes of contiguous physical data"); anything
+ * larger is a chained multi-TRB TD.
+ */
+#define XHCI_TRB_MAX_XFER    0x10000u
 
 /* TRB types */
 #define TRB_NORMAL           1
@@ -229,6 +242,7 @@ struct xhci_trb {
 #define TRB_STATUS           4
 #define TRB_ISOCH            5
 #define TRB_LINK             6
+#define TRB_NOOP_XFER        8   /* No Op transfer TRB: consumes a slot, moves no data */
 #define TRB_ENABLE_SLOT      9
 #define TRB_DISABLE_SLOT     10
 #define TRB_ADDRESS_DEVICE   11
