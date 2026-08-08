@@ -397,51 +397,89 @@ static int xhci_set_tr_dequeue(xhci_hc_t *hc, uint8_t slot, int dci,
     return 0;
 }
 
+/*
+ * The endpoint's own state, from the OUTPUT device context the controller
+ * maintains.  Volatile because the xHC writes it behind our back -- it is
+ * updated as part of halting or stopping the endpoint, before the event that
+ * tells us about it.
+ */
+static uint32_t xhci_ep_state(xhci_hc_t *hc, uint8_t slot, int dci)
+{
+    const struct xhci_slot *s = hc->slots[slot];
+    const volatile uint32_t *epc =
+        (const volatile uint32_t *)(s->dev_ctx + (uint32_t)dci * hc->ctx_size);
+
+    return epc[0] & XHCI_EP_STATE_MASK;
+}
+
+/*
+ * Put an endpoint back into service after a transfer failed on it.
+ *
+ * Which command is needed depends on what state the endpoint is actually in,
+ * and the state machine (s4.8.3) gives a different answer for each -- issuing
+ * the wrong one does not merely fail, it fails with Context State Error and
+ * takes the Set TR Dequeue that follows down with it, leaving the ring
+ * desynchronised, which is the very thing this path exists to prevent:
+ *
+ *   Halted   a Reset Endpoint Command "shall be used to clear the Halt
+ *            condition"; the endpoint lands in Stopped.
+ *   Error    reached on a TRB Error.  Reset Endpoint is NOT valid here --
+ *            s4.6.8 rejects it unless the endpoint is Halted -- and s4.8.3
+ *            says instead that "a Set TR Dequeue Pointer Command shall be
+ *            used to transition the endpoint to the Stopped state".
+ *   Running  a timeout, where the controller still owns our TD.  Stop
+ *            Endpoint takes it out of Running so nothing further is consumed.
+ *   Stopped  already quiesced; the dequeue update alone finishes the job.
+ *
+ * The two states that are not Running are also the two where Stop Endpoint is
+ * explicitly a no-op that reports Context State Error (s4.8.3, stated for both
+ * Halted and Error), so dispatching on the completion code -- which is what
+ * this used to do -- got it wrong in exactly the cases that matter most.
+ *
+ * Every path ends at Set TR Dequeue Pointer: Reset and Stop both leave the
+ * dequeue pointer on the TD that went wrong, so without it the controller
+ * re-runs that TD the moment the doorbell rings.
+ */
 static int xhci_recover_ep(xhci_hc_t *hc, uint8_t slot, int dci,
                            struct xhci_ring *ring, uint16_t stream_id)
 {
     uint32_t ep_field = ((uint32_t)slot << 24) | ((uint32_t)dci << 16);
+    uint32_t state = xhci_ep_state(hc, slot, dci);
     int cc;
 
-    cc = xhci_run_command(hc, 0,
-                          XHCI_TRB_TYPE(TRB_RESET_ENDPOINT) | ep_field, NULL);
-    if (cc != XHCI_CC_SUCCESS) {
-        kprintf("xhci: reset endpoint slot %u dci %d failed cc=%d\n",
-                slot, dci, cc);
+    switch (state) {
+    case XHCI_EP_STATE_HALTED:
+        cc = xhci_run_command(hc, 0,
+                              XHCI_TRB_TYPE(TRB_RESET_ENDPOINT) | ep_field, NULL);
+        if (cc != XHCI_CC_SUCCESS) {
+            kprintf("xhci: reset endpoint slot %u dci %d failed cc=%d\n",
+                    slot, dci, cc);
+            return -1;
+        }
+        break;
+
+    case XHCI_EP_STATE_RUNNING:
+        cc = xhci_run_command(hc, 0,
+                              XHCI_TRB_TYPE(TRB_STOP_ENDPOINT) | ep_field, NULL);
+        if (cc != XHCI_CC_SUCCESS) {
+            kprintf("xhci: stop endpoint slot %u dci %d failed cc=%d\n",
+                    slot, dci, cc);
+            return -1;
+        }
+        break;
+
+    case XHCI_EP_STATE_ERROR:
+    case XHCI_EP_STATE_STOPPED:
+        break;      /* Set TR Dequeue on its own is the documented recovery */
+
+    case XHCI_EP_STATE_DISABLED:
+    default:
+        /* Nothing to recover, and Set TR Dequeue would be rejected too. */
+        kprintf("xhci: slot %u dci %d is in state %u; not recovering\n",
+                slot, dci, (unsigned)state);
         return -1;
     }
-    return xhci_set_tr_dequeue(hc, slot, dci, ring, stream_id);
-}
 
-/*
- * Abandon a transfer that never completed.
- *
- * A timeout does not halt the endpoint, so unlike the error paths above the
- * controller is still running it: our TD is on the ring, and the data buffer
- * it points at is still controller-owned.  Simply returning left that TD live.
- * With one bounce buffer shared by the whole controller, the very next
- * transfer -- for some other device, on some other endpoint -- would memcpy
- * into memory the abandoned TD could still be writing, and its late event
- * would additionally burn a slot in the next TD's event scan.
- *
- * Stop Endpoint takes the endpoint out of Running so nothing further is
- * consumed; Set TR Dequeue Pointer then moves the controller past the dead TD
- * to where the next one will be written.  Both BSDs quiesce the same way
- * before completing a transfer with an error (FreeBSD xhci_cmd_stop_ep()).
- */
-static int xhci_stop_ep(xhci_hc_t *hc, uint8_t slot, int dci,
-                        struct xhci_ring *ring, uint16_t stream_id)
-{
-    uint32_t ep_field = ((uint32_t)slot << 24) | ((uint32_t)dci << 16);
-    int cc;
-
-    cc = xhci_run_command(hc, 0,
-                          XHCI_TRB_TYPE(TRB_STOP_ENDPOINT) | ep_field, NULL);
-    if (cc != XHCI_CC_SUCCESS) {
-        kprintf("xhci: stop endpoint slot %u dci %d failed cc=%d\n",
-                slot, dci, cc);
-        return -1;
-    }
     return xhci_set_tr_dequeue(hc, slot, dci, ring, stream_id);
 }
 
@@ -1322,10 +1360,10 @@ static int xhci_control(xhci_hc_t *hc, usb_transfer_t *xfer)
         int which = -1;
         cc = xhci_wait_td(hc, slot, 1, td, ntd, &evst, &which, tmo);
         if (cc != XHCI_CC_SUCCESS && cc != XHCI_CC_SHORT_PACKET) {
-            if (XHCI_CC_HALTS_EP(cc))
-                (void)xhci_recover_ep(hc, slot, 1, ring, 0);
-            else if (cc == 0)
-                (void)xhci_stop_ep(hc, slot, 1, ring, 0);  /* [X-03] */
+            /* Quiesce the endpoint whatever went wrong: the completion code
+             * says what happened, but the endpoint's own state says what it
+             * needs, and xhci_recover_ep() dispatches on that. [X-03] */
+            (void)xhci_recover_ep(hc, slot, 1, ring, 0);
             xfer->status = (cc == 0) ? USB_XFER_TIMEOUT : USB_XFER_STALL;
             return xfer->status;
         }
@@ -1393,10 +1431,7 @@ static int xhci_bulk(xhci_hc_t *hc, usb_transfer_t *xfer)
          * to retry on rather than timing out forever. */
         uint16_t sid = (xfer->ep->max_streams > 0)
                        ? (xfer->stream_id ? xfer->stream_id : 1) : 0;
-        if (XHCI_CC_HALTS_EP(cc))
-            (void)xhci_recover_ep(hc, slot, dci, ring, sid);
-        else if (cc == 0)
-            (void)xhci_stop_ep(hc, slot, dci, ring, sid);   /* [X-03] */
+        (void)xhci_recover_ep(hc, slot, dci, ring, sid);   /* [X-03] */
         xfer->status = (cc == 0) ? USB_XFER_TIMEOUT : USB_XFER_STALL;
         return xfer->status;
     }

@@ -265,6 +265,12 @@ struct xhci_trb {
 #define XHCI_CC_CMD_RING_STOPPED 0x18
 #define XHCI_CC_CMD_ABORTED      0x19
 
+#define XHCI_CC_INVALID_STREAM_TYPE 10
+#define XHCI_CC_CONTEXT_STATE       19   /* command issued from an illegal state */
+#define XHCI_CC_EVENT_LOST          32
+#define XHCI_CC_INVALID_STREAM_ID   34
+#define XHCI_CC_SPLIT_TRANSACTION   36
+
 /*
  * Completion codes that leave the endpoint Halted.  The controller stops
  * processing that endpoint's transfer ring entirely until a Reset Endpoint
@@ -272,10 +278,19 @@ struct xhci_trb {
  * endpoint for the rest of the session and every later transfer just times
  * out.  A multi-slot card reader reaches this on ordinary traffic -- an
  * empty slot answers some SCSI commands with a STALL.
+ *
+ * The full list is xHCI 1.2 s4.8.3: "a Stall Error, Invalid Stream Type Error,
+ * Invalid Stream ID Error, Babble Detected Error, Event Lost Error, USB
+ * Transaction Error, or a Split Transaction Error detected on a USB pipe shall
+ * cause a Running Endpoint to transition to the Halted state."  Note TRB Error
+ * is NOT here -- it goes to the Error state instead, which needs different
+ * recovery; see xhci_recover_ep().
  */
 #define XHCI_CC_HALTS_EP(cc) \
     ((cc) == XHCI_CC_BABBLE || (cc) == XHCI_CC_USB_TX_ERROR || \
-     (cc) == XHCI_CC_STALL)
+     (cc) == XHCI_CC_STALL || (cc) == XHCI_CC_INVALID_STREAM_TYPE || \
+     (cc) == XHCI_CC_INVALID_STREAM_ID || (cc) == XHCI_CC_EVENT_LOST || \
+     (cc) == XHCI_CC_SPLIT_TRANSACTION)
 
 /* ---- Contexts (32-byte here; CSZ=1 doubles to 64 -- we handle both via a
  * runtime stride).  Slot context + endpoint context layouts. ---- */
@@ -360,8 +375,18 @@ struct xhci_ep_ctx {
 #define XHCI_EP_MAX_ESIT_LO(x)  (((uint32_t)(x) & 0xFFFFu) << 16)
 #define XHCI_EP_AVG_TRB_CTRL    8      /* spec-mandated for control EPs */
 #define XHCI_EP_AVG_TRB_BULK    4096   /* a page, as both BSDs use */
-/* EP context field[0] */
+/*
+ * EP context field[0]: Endpoint State, bits 2:0 (Table 6-8, state machine in
+ * s4.8.3).  This is the controller's own account of the endpoint in the
+ * OUTPUT device context, and it is the authority on what recovery an endpoint
+ * needs -- the completion code that surfaced the problem is only a hint.
+ */
 #define XHCI_EP_STATE_MASK   0x7
+#define XHCI_EP_STATE_DISABLED 0
+#define XHCI_EP_STATE_RUNNING  1
+#define XHCI_EP_STATE_HALTED   2   /* needs Reset Endpoint */
+#define XHCI_EP_STATE_STOPPED  3
+#define XHCI_EP_STATE_ERROR    4   /* TRB Error; Set TR Dequeue is the way out */
 /* EP context field[0] stream fields */
 #define XHCI_EP_MAXPSTREAMS_SHIFT 10          /* MaxPStreams (array = 2^(k+1)) */
 #define XHCI_EP_INTERVAL_SHIFT 16             /* EP context DW0 bits 23:16 */
