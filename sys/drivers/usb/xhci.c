@@ -991,8 +991,21 @@ static int xhci_ensure_ep(xhci_hc_t *hc, uint8_t slot, usb_transfer_t *xfer)
     /* slot ctx: bump context-entries to include this DCI */
     uint32_t *insc = (uint32_t *)in_slot_of(hc, s->in_ctx);
     uint32_t *dsc = (uint32_t *)slot_ctx_of(hc, s->dev_ctx);
+    /*
+     * Context Entries is the index of the LAST valid endpoint context
+     * (s6.2.2.2: "the index of the last valid Endpoint Context that is
+     * defined by the target configuration"), so it can only ever grow.
+     * Writing the DCI being added would shrink it whenever endpoints are
+     * configured out of order -- a function whose interrupt IN is polled
+     * before its bulk OUT is touched sets it back below a context that is
+     * still live.  FreeBSD tracks the same running maximum
+     * (xhci.c, sc_hw.devs[].context_num). [P3-05]
+     */
+    uint32_t entries = (dsc[0] >> XHCI_SLOT_CTX_ENTRIES_SHIFT) & 0x1F;
+    if ((uint32_t)dci > entries)
+        entries = (uint32_t)dci;
     insc[0] = (dsc[0] & ~(0x1Fu << XHCI_SLOT_CTX_ENTRIES_SHIFT)) |
-              ((uint32_t)dci << XHCI_SLOT_CTX_ENTRIES_SHIFT);
+              (entries << XHCI_SLOT_CTX_ENTRIES_SHIFT);
     insc[1] = dsc[1];
     /*
      * Carry the transaction-translator fields over too.  in_ctx was just

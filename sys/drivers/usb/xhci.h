@@ -180,9 +180,17 @@ struct xhci_trb {
     uint32_t control;
 } __attribute__((packed));
 
+/*
+ * Control-word flags, from Table 6-22.  Bit 1 carries two different fields
+ * depending on the TRB type -- Toggle Cycle in a Link TRB, Evaluate Next TRB
+ * in a transfer TRB -- hence the two names for one value.  XHCI_TRB_ENT was
+ * 0x10, which is the Chain bit; harmless while nothing used it, and a silent
+ * mis-set of CH the moment a multi-TRB TD (a data stage over 64K, or
+ * isochronous) reached for it. [P3-04]
+ */
 #define XHCI_TRB_CYCLE       0x00000001
 #define XHCI_TRB_TC          0x00000002   /* toggle cycle (link TRB) */
-#define XHCI_TRB_ENT         0x00000010   /* evaluate next TRB / chain-ish */
+#define XHCI_TRB_ENT         0x00000002   /* evaluate next TRB (transfer TRB) */
 #define XHCI_TRB_ISP         0x00000004   /* interrupt on short packet */
 #define XHCI_TRB_CH          0x00000010   /* chain bit */
 #define XHCI_TRB_IOC         0x00000020   /* interrupt on complete */
