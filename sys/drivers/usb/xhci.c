@@ -516,6 +516,59 @@ static uint8_t *in_ep_of(xhci_hc_t *hc, uint8_t *in_ctx, int dci)
 
 static void xhci_free_slot(xhci_hc_t *hc, uint8_t slot);
 
+/*
+ * The Slot Context Speed field for a device.
+ *
+ * This is the device's own speed, which for anything behind a hub is not the
+ * speed its root port trained at: a full-speed device below a high-speed hub
+ * sits on a root port reporting high speed.  Reading PORTSC here described
+ * every such device to the controller as high-speed -- while the TT fields
+ * right below, which only mean anything for a low/full-speed device, were
+ * filled in correctly.  The slot context contradicted itself, and on a
+ * controller that acts on the field the device got no service at all.
+ *
+ * xHCI 1.2 deprecates the field ("shall be Reserved"), but 1.0 and 1.1 do not
+ * and neither do the parts implementing them; FreeBSD (xhci_configure_device)
+ * and NetBSD (xhci_speed2xspeed) both still populate it from the device.
+ * The encoding is the default Protocol Speed ID assignment and does not line
+ * up with substrate's USB_SPEED_*, so this is a mapping, not a cast. [P3-01]
+ */
+static uint32_t xhci_slot_speed(const usb_device_t *dev)
+{
+    if (!dev)
+        return XHCI_SLOT_SPEED_HIGH;
+    switch (dev->speed) {
+    case USB_SPEED_LOW:   return XHCI_SLOT_SPEED_LOW;
+    case USB_SPEED_FULL:  return XHCI_SLOT_SPEED_FULL;
+    case USB_SPEED_SUPER: return XHCI_SLOT_SPEED_SUPER;
+    case USB_SPEED_HIGH:
+    default:              return XHCI_SLOT_SPEED_HIGH;
+    }
+}
+
+/*
+ * Apply a device's hub fields to an input slot context.
+ *
+ * Hub, Number of Ports and TT Think Time are Configure Endpoint parameters
+ * (xHCI 1.2 s6.2.2.2), and that section requires the Hub field to be
+ * initialized on *every* Configure Endpoint Command -- not just the first --
+ * so every site that builds an input slot context calls this.  TTT is only
+ * meaningful on a high-speed hub, which is the condition the spec attaches to
+ * it. [P3-02, P3-03]
+ */
+static void xhci_slot_hub_fields(const usb_device_t *dev, uint32_t *sc)
+{
+    if (!dev || !dev->is_hub)
+        return;
+
+    sc[0] |= XHCI_SLOT_HUB;
+    sc[1] = (sc[1] & 0x00FFFFFFu) |
+            ((uint32_t)dev->hub_nports << XHCI_SLOT_NPORTS_SHIFT);
+    if (dev->speed == USB_SPEED_HIGH)
+        sc[2] = (sc[2] & ~(0x3u << XHCI_SLOT_TTT_SHIFT)) |
+                ((uint32_t)(dev->hub_ttt & 0x3) << XHCI_SLOT_TTT_SHIFT);
+}
+
 /* [A34] Release any slot still bound to a root port that has lost its
  * connection.  The USB core has no HCD-level disconnect callback — it only runs
  * the class driver's .detach — so a successfully-enumerated device's slot was
@@ -792,8 +845,9 @@ static int xhci_setup_slot(xhci_hc_t *hc, usb_transfer_t *xfer, uint8_t port)
      * number is only one tier of the route. [USB-01]
      */
     uint32_t *sc = (uint32_t *)in_slot_of(hc, s->in_ctx);
-    uint32_t speed = (portsc_rd(hc, port) & XHCI_PORT_SPEED_MASK) >> XHCI_PORT_SPEED_SHIFT;
     usb_device_t *udev = xfer->dev;
+    /* The device's own speed, not the root port's -- see xhci_slot_speed. */
+    uint32_t speed = xhci_slot_speed(udev);        /* [P3-01] */
     uint32_t route = usb_route_string(udev);
 
     sc[0] = (1u << XHCI_SLOT_CTX_ENTRIES_SHIFT) | (speed << XHCI_SLOT_SPEED_SHIFT) |
@@ -948,6 +1002,14 @@ static int xhci_ensure_ep(xhci_hc_t *hc, uint8_t slot, usb_transfer_t *xfer)
      */
     insc[2] = dsc[2];
 
+    /*
+     * And the hub fields.  s6.2.2.2 requires the Hub field to be initialized
+     * on every Configure Endpoint Command, and this is the command that
+     * transitions the slot Addressed -> Configured -- the one point at which
+     * s4.5.2 lets the xHC latch Hub, Number of Ports and TTT at all. [P3-02]
+     */
+    xhci_slot_hub_fields(xfer->dev, insc);
+
     uint32_t type = xfer->ep->type == USB_EP_TYPE_BULK
                         ? (in ? EP_TYPE_BULK_IN : EP_TYPE_BULK_OUT)
                         : (in ? EP_TYPE_INT_IN : EP_TYPE_INT_OUT);
@@ -994,17 +1056,37 @@ static int xhci_ensure_ep(xhci_hc_t *hc, uint8_t slot, usb_transfer_t *xfer)
 }
 
 /*
- * The core has learned this device is a hub.  Re-issue its slot context with
- * the Hub bit and downstream port count set: xHCI will not route a transfer
- * past a slot that does not declare itself one.  Evaluate Context is the
- * command for amending an already-addressed slot (xHCI 1.1 s4.6.7). [USB-01]
+ * The core has learned this device is a hub.  Declare it one to the
+ * controller: xHCI will not route a transfer past a slot whose Hub bit is
+ * clear. [USB-01]
+ *
+ * This used to issue Evaluate Context, which cannot do it.  xHCI 1.2 s6.2.2.3
+ * is explicit -- an Evaluate Context Command that flags the Slot Context
+ * evaluates the Interrupter Target and Max Exit Latency and nothing else, and
+ * "only the Output Interrupter Target and Max Exit Latency fields are updated"
+ * by it.  Hub, Number of Ports and TT Think Time belong to Configure Endpoint
+ * (s6.2.2.2).  The command returned Success and the Hub bit stayed clear, on
+ * every hub, forever -- and s4.5.2 adds that once a slot has been Addressed
+ * the hub fields can only be latched by a Configure Endpoint, so nothing later
+ * recovered it either. [P3-02]
+ *
+ * Issued here rather than left to the Configure Endpoint that opens the hub's
+ * status-change endpoint, because usb_hub_attach() walks the downstream ports
+ * immediately after this returns: the bit has to be set before anything below
+ * the hub is enumerated.  xhci_ensure_ep() carries the same fields on every
+ * later Configure Endpoint, as s6.2.2.2 requires.
  */
-static int xhci_set_hub(usb_hcd_t *hcd, usb_device_t *dev, uint8_t nports)
+static int xhci_set_hub(usb_hcd_t *hcd, usb_device_t *dev, uint8_t nports,
+                        uint8_t ttt)
 {
     xhci_hc_t *hc = hcd->priv;
     uint8_t slot;
-    uint32_t *icc, *sc;
+    uint32_t *icc, *insc, *dsc;
     int cc;
+
+    /* usb_set_hub() records nports and ttt on the device before calling us,
+     * and xhci_slot_hub_fields() reads them from there. */
+    (void)nports; (void)ttt;
 
     if (!dev->address)
         return -1;
@@ -1015,17 +1097,25 @@ static int xhci_set_hub(usb_hcd_t *hcd, usb_device_t *dev, uint8_t nports)
 
     mutex_lock(&hc->submit_lock);
 
-    /* Evaluate Context looks at the Add flags: slot context only (A0). */
+    /* Configure Endpoint, slot context only (A0): no endpoint is being added
+     * or dropped, so the drop flags and every endpoint add flag stay clear. */
     icc = (uint32_t *)in_ctrl_of(hc->slots[slot]->in_ctx);
     icc[0] = 0;
     icc[1] = 0x1;
 
-    sc = (uint32_t *)in_slot_of(hc, hc->slots[slot]->in_ctx);
-    sc[0] |= XHCI_SLOT_HUB;
-    sc[1] = (sc[1] & 0x00FFFFFFu) | ((uint32_t)nports << XHCI_SLOT_NPORTS_SHIFT);
+    /* Rebuild the input slot context from the output one the controller
+     * maintains, so Route String, Speed and Context Entries are whatever the
+     * slot actually has rather than whatever this buffer last held. */
+    insc = (uint32_t *)in_slot_of(hc, hc->slots[slot]->in_ctx);
+    dsc  = (uint32_t *)slot_ctx_of(hc, hc->slots[slot]->dev_ctx);
+    insc[0] = dsc[0];
+    insc[1] = dsc[1];
+    insc[2] = dsc[2];
+    insc[3] = dsc[3];
+    xhci_slot_hub_fields(dev, insc);
 
     cc = xhci_run_command(hc, hc->slots[slot]->in_ctx_dma,
-                          XHCI_TRB_TYPE(TRB_EVAL_CONTEXT) |
+                          XHCI_TRB_TYPE(TRB_CONFIGURE_EP) |
                           ((uint32_t)slot << 24), NULL);
 
     /* Restore the add flags the transfer path expects (slot + EP0). */

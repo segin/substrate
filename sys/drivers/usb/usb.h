@@ -412,6 +412,9 @@ typedef struct usb_device {
      * this device. */
     uint8_t  is_hub;
     uint8_t  hub_nports;
+    /* TT Think Time, as the 0..3 code the xHCI slot context wants (0 = 8 FS
+     * bit times, 3 = 32).  Straight out of wHubCharacteristics bits 6:5. */
+    uint8_t  hub_ttt;
 
     /* State */
     uint8_t  slot;              /* Index in device table */
@@ -485,7 +488,8 @@ typedef struct usb_hcd {
      * context or the controller will not route transfers past it; UHCI and
      * EHCI need nothing and leave this NULL.
      */
-    int      (*set_hub)(struct usb_hcd *hcd, usb_device_t *dev, uint8_t nports);
+    int      (*set_hub)(struct usb_hcd *hcd, usb_device_t *dev, uint8_t nports,
+                        uint8_t ttt);
 
     /*
      * Optional: the real EP0 max packet size has been read from the device
@@ -703,7 +707,11 @@ usb_device_t *usb_tt_hub(const usb_device_t *dev, uint8_t *ttport);
  * hub driver at attach.  xHCI has to be told before it will route transfers to
  * anything behind the hub; other controllers do not care.
  */
-void usb_set_hub(usb_device_t *dev, uint8_t nports);
+void usb_set_hub(usb_device_t *dev, uint8_t nports, uint8_t ttt);
+
+/* TT Think Time sub-field of wHubCharacteristics (USB 2.0 Table 11-13),
+ * already scaled to the 0..3 code xHCI's slot context uses. */
+#define USB_HUB_TT_THINK(wHubChar)   (((wHubChar) >> 5) & 0x3)
 
 /* Publish/unpublish a device under /dev/usb (libusb/lsusb backend). */
 void usbdevfs_publish(usb_device_t *dev);

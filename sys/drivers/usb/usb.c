@@ -658,14 +658,15 @@ usb_device_t *usb_tt_hub(const usb_device_t *dev, uint8_t *ttport)
     return NULL;                /* on a root port, or no HS hub in the path */
 }
 
-void usb_set_hub(usb_device_t *dev, uint8_t nports)
+void usb_set_hub(usb_device_t *dev, uint8_t nports, uint8_t ttt)
 {
     if (!dev)
         return;
     dev->is_hub = 1;
     dev->hub_nports = nports;
+    dev->hub_ttt = ttt & 0x3;
     if (dev->hcd && dev->hcd->set_hub)
-        (void)dev->hcd->set_hub(dev->hcd, dev, nports);
+        (void)dev->hcd->set_hub(dev->hcd, dev, nports, dev->hub_ttt);
 }
 
 /*

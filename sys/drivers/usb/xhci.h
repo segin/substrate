@@ -274,6 +274,27 @@ struct xhci_ep_ctx {
 #define XHCI_SLOT_NPORTS_SHIFT 24           /* dword 1, bits 31:24 */
 #define XHCI_SLOT_TT_HUB_SHIFT 0            /* dword 2, bits 7:0 */
 #define XHCI_SLOT_TT_PORT_SHIFT 8           /* dword 2, bits 15:8 */
+/*
+ * TT Think Time, dword 2 bits 17:16 (Table 6-6).  Required whenever Hub=1 and
+ * Speed=High-Speed (s6.2.2.2); the encoding is the same 0..3 scale as the
+ * wHubCharacteristics sub-field it comes from, 0 meaning "at most 8 FS bit
+ * times of inter-transaction gap" and 3 meaning 32.  Left at 0 the controller
+ * schedules a hub's TT transactions more tightly than the hub can service,
+ * which shows up as intermittent transaction errors on the low/full-speed
+ * devices below it.
+ */
+#define XHCI_SLOT_TTT_SHIFT   16
+/*
+ * Slot context Speed (dword 0, bits 23:20).  Deprecated in xHCI 1.2 but live
+ * on every 1.0/1.1 part, and it is the *device's* speed, not the speed the
+ * root port trained at -- those differ for anything behind a hub.  The
+ * encoding is the default Protocol Speed ID assignment, which does not match
+ * substrate's USB_SPEED_*, hence xhci_slot_speed().
+ */
+#define XHCI_SLOT_SPEED_FULL  1
+#define XHCI_SLOT_SPEED_LOW   2
+#define XHCI_SLOT_SPEED_HIGH  3
+#define XHCI_SLOT_SPEED_SUPER 4
 /* Slot context field[1] */
 #define XHCI_SLOT_RHPORT_SHIFT 16
 /* EP context field[1] */
