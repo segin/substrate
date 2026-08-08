@@ -304,7 +304,10 @@ static void xhci_abort_command(xhci_hc_t *hc)
            XHCI_RING_TRBS * sizeof(struct xhci_trb));
     volatile struct xhci_trb *link = &hc->cmd_ring.trb[XHCI_RING_TRBS - 1];
     link->param = hc->cmd_ring.dma;
-    link->control = XHCI_TRB_TYPE(TRB_LINK) | XHCI_TRB_TC;
+    /* Through xhci_trb_commit() like every other ring write, even though the
+     * controller is stopped here and CRCR is republished below, so there is no
+     * handoff to order.  The rule is worth more than the exception. [R-04] */
+    xhci_trb_commit(link, XHCI_TRB_TYPE(TRB_LINK) | XHCI_TRB_TC);
     hc->cmd_ring.enq = 0;
     hc->cmd_ring.cycle = 1;
     wr64(hc->op, XHCI_OP_CRCR, hc->cmd_ring.dma | XHCI_CRCR_RCS);
@@ -515,6 +518,10 @@ static uint8_t *in_ep_of(xhci_hc_t *hc, uint8_t *in_ctx, int dci)
 }
 
 static void xhci_free_slot(xhci_hc_t *hc, uint8_t slot);
+/* Every path that takes submit_lock and drives the controller drains first,
+ * so none of them can start a command sequence against an event ring that is
+ * already full. [R-05] */
+static void xhci_drain_events(xhci_hc_t *hc);
 
 /*
  * The Slot Context Speed field for a device.
@@ -597,6 +604,7 @@ static void xhci_port_gone(usb_hcd_t *hcd, uint8_t port)
         return;
 
     mutex_lock(&hc->submit_lock);
+    xhci_drain_events(hc);   /* [R-05] */
     for (uint8_t slot = 1; slot <= XHCI_MAX_SLOTS; slot++) {
         struct xhci_slot *s = hc->slots[slot];
         if (!s || !s->in_use || s->port != port)
@@ -1114,6 +1122,7 @@ static int xhci_set_hub(usb_hcd_t *hcd, usb_device_t *dev, uint8_t nports,
         return -1;
 
     mutex_lock(&hc->submit_lock);
+    xhci_drain_events(hc);   /* [R-05] */
 
     /* Configure Endpoint, slot context only (A0): no endpoint is being added
      * or dropped, so the drop flags and every endpoint add flag stay clear. */
@@ -1171,6 +1180,7 @@ static int xhci_set_ep0_mps(usb_hcd_t *hcd, usb_device_t *dev, uint16_t mps)
         return -1;
 
     mutex_lock(&hc->submit_lock);
+    xhci_drain_events(hc);   /* [R-05] */
 
     icc = (uint32_t *)in_ctrl_of(hc->slots[slot]->in_ctx);
     icc[0] = 0;
@@ -1979,6 +1989,15 @@ static int xhci_pci_attach(struct device *dev)
     uint32_t dboff  = rd32(hc->mmio, XHCI_CAP_DBOFF) & ~0x3u;
     uint32_t hcs1 = rd32(hc->mmio, XHCI_CAP_HCSPARAMS1);
     hc->nports = XHCI_HCS1_MAXPORTS(hcs1);
+    /* MaxPorts is 8-bit, so it can name more ports than port_major[] has room
+     * for and more than the core will ever scan.  Clamp before anything
+     * indexes by port: hcd.nports, port_major[] and the core's per-port arrays
+     * all have to agree on the same bound. [R-03] */
+    if (hc->nports > USB_MAX_ROOT_PORTS) {
+        kprintf("xhci: controller reports %u ports; using %u\n",
+                hc->nports, USB_MAX_ROOT_PORTS);
+        hc->nports = USB_MAX_ROOT_PORTS;
+    }
     hc->maxslots = XHCI_HCS1_MAXSLOTS(hcs1);
     if (hc->maxslots > XHCI_MAX_SLOTS) hc->maxslots = XHCI_MAX_SLOTS;
     hc->ctx_size = (rd32(hc->mmio, XHCI_CAP_HCCPARAMS1) & XHCI_HCC1_CSZ) ? 64 : 32;
