@@ -627,13 +627,25 @@ uint32_t usb_route_string(const usb_device_t *dev)
     for (; d->parent && n < USB_MAX_ENUM_DEPTH; d = d->parent)
         ports[n++] = d->port;
 
-    /* Emit deepest-last: tier 1 (the port on the root hub's downstream hub)
-     * lands in bits 3:0.  ports[n-1] is the topmost tier. */
-    for (int i = n - 1; i >= 0; i--) {
+    /*
+     * ports[] is nearest-the-device first; the route string is the opposite
+     * order.  Tier 1 (bits 3:0) is the TOPMOST hop -- the downstream port on
+     * the hub attached to the root port -- and each deeper tier occupies the
+     * next nibble up (xHCI 1.2 s8.9.1 via USB3 s8.9; FreeBSD builds it the
+     * same way, `route |= port << (4 * (depth - 1))`).
+     *
+     * This used to fold ports[0] -- the device's own port, the DEEPEST tier
+     * -- into bits 3:0, i.e. the nibbles came out tier-reversed.  A single
+     * hub has one nibble and nothing to reverse, which is why every one-deep
+     * test passed; the first device behind a second hub handed the controller
+     * a route through the wrong ports and its Address Device failed outright
+     * (QEMU: TRB Error, the walk hits an empty port). [P5-06]
+     */
+    for (int i = 0; i < n; i++) {
         uint8_t p = ports[i];
         if (p > 15)
             p = 15;             /* xHCI 1.1 s4.5.2: >15 encodes as 15 */
-        route = (route << 4) | p;
+        route |= (uint32_t)p << (4 * (n - 1 - i));
     }
     return route & 0xFFFFF;     /* 20 bits, five tiers */
 }

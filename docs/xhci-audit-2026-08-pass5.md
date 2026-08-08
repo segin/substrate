@@ -29,6 +29,33 @@ three real findings turn out to live.
 | P5-03 | `845b86231` — as above |
 | P5-04 | contract documented at both sites (`UAC_WINDOW`, `xhci_iso_schedule()`); no runtime check is possible without a dequeue, see the entry |
 | P5-05 | **open** — accepted for now; the fix is to read HCSPARAMS2's IST and advertise a minimum lead the way `iso_frame_modulus` is advertised, and it should ride along with whatever next touches the iso contract |
+| P5-06 | `usb.c`: Route String nibbles were tier-reversed — fixed, see below |
+
+## P5-06 — High — the Route String was built tier-reversed (found post-close)
+
+**`sys/drivers/usb/usb.c`, `usb_route_string()`**
+
+Added after the pass closed, when the question "does this prove all devices
+enumerate?" prompted testing the first topology outside the covered matrix — a
+hub behind a hub — and it failed on the spot: the device two tiers deep died in
+Address Device with a TRB Error, on every retry, in QEMU.
+
+`ports[]` is collected nearest-the-device first, and the emit loop folded
+`ports[0]` — the *deepest* tier — into bits 3:0.  The route string is defined
+the other way: tier 1 (bits 3:0) is the topmost hop, the downstream port on
+the hub attached to the root port (FreeBSD: `route |= port << (4*(depth-1))`).
+For a keyboard on hub2 port 2, hub2 on hub1 port 4, the correct route is
+`0x24`; the code produced `0x42`, sending the controller through hub1's empty
+port 2.  A single hub yields one nibble, which reverses to itself — so every
+one-tier test in passes 3–5 passed while every multi-tier topology was broken,
+and pass 3's "Route String checked and found correct" entry was simply wrong:
+it verified the clamp and the mask and misread the emit direction, and nothing
+had ever executed the multi-tier path.
+
+Fixed and verified at two and three tiers under `qemu-xhci` (keyboard at
+`1.4.2` and at `1.4.3.5` enumerates, binds, boot reaches init).  The lesson
+recorded for the next pass: an audit "found correct" claim about code with an
+untested dominant path is worth exactly one boot with that path exercised.
 
 P5-01's verification turned out stronger than expected: the wrap-arithmetic
 half is pure software and reproduces under QEMU, and re-running the pass-4
