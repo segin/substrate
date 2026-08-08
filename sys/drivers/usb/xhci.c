@@ -902,7 +902,12 @@ static int xhci_setup_slot(xhci_hc_t *hc, usb_transfer_t *xfer, uint8_t port)
 static uint8_t xhci_slot_for(xhci_hc_t *hc, usb_transfer_t *xfer)
 {
     uint8_t addr = xfer->dev->address & 0x7F;
-    if (addr != 0 && hc->addr_slot[addr])
+    /* The slot id has to still have state behind it.  A device unplugged
+     * between one transfer and the next has had xhci_free_slot() NULL its
+     * entry, and every caller dereferences hc->slots[] without rechecking --
+     * the enum_slot branch below has always guarded this and this one had
+     * not. [R-06] */
+    if (addr != 0 && hc->addr_slot[addr] && hc->slots[hc->addr_slot[addr]])
         return hc->addr_slot[addr];
     if (hc->enum_slot &&
         hc->slots[hc->enum_slot] &&
@@ -1425,8 +1430,12 @@ static int xhci_submit(usb_hcd_t *hcd, usb_transfer_t *xfer)
          * known gap rather than papered over: returning an error here is at
          * least honest, where pretending otherwise would hand the class
          * driver silence. [X-13]
+         *
+         * xfer->status is set here as well as ret: X-16 gave every other exit
+         * from this driver an explicit status so a caller could not read the
+         * previous transfer's, and this branch was the one it missed. [R-02]
          */
-        ret = USB_XFER_ERROR;
+        ret = xfer->status = USB_XFER_ERROR;
     mutex_unlock(&hc->submit_lock);
     return ret;
 }
