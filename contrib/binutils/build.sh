@@ -192,6 +192,8 @@ EOF
     # all host subdirs and installs the binaries we actually want.
     make install-host DESTDIR="$STAGE2_DESTDIR"
 
+    "$HERE/../strip-staging.sh" "$STAGE2_DESTDIR" "binutils stage-2"
+
     echo ""
     echo "==> Stage 2 complete."
     echo "    Substrate-ELF binaries staged at: $STAGE2_DESTDIR/usr/bin/"

@@ -282,6 +282,11 @@ if [ "$STAGE" = 2 ]; then
         install -m 755 "$LTO_DUMP_SRC" "$LTO_DUMP_DST"
     fi
 
+    # Strip after lto-dump lands, so it gets stripped too.  GCC's install
+    # targets never strip and everything here was built -g, which is how
+    # cc1/cc1plus/lto1/lto-dump reached ~370 MB apiece.
+    "$HERE/../strip-staging.sh" "$STAGE2_DESTDIR" "gcc stage-2"
+
     cat <<EOF
 
 ==> Stage 2 complete.
