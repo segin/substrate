@@ -162,10 +162,12 @@ If the kernel hangs in `hlt`, check `eflags` bit 9. If `IF=1`, the IRQ may be ma
   covered — init writes the `DEAD_PROCESS` record when it reaps a
   getty line — but telnetd/sshd sessions are supervised by those
   daemons and would each need to write their own pts logout.
-- Build a shared `libstdc++.so.6` once a real userland is up
-  (currently shipping `libstdc++.a` only — `--disable-shared`).
-  Requires ld.so to handle C++ symbol versioning, vague linkage
-  dedup, and TLS GD/LD models.
+- Make the shared `libstdc++.so.6` usable at runtime.  Stage 2 now
+  *builds* it — `--disable-shared` is gone and the staged tree carries
+  `libstdc++.so.6.0.35` beside `libstdc++.a` (0aa22e42f) — but nothing
+  has yet linked against it and run on target.  Doing so needs ld.so to
+  handle C++ symbol versioning, vague linkage dedup, and the TLS GD/LD
+  models; until then, keep linking C++ against `libstdc++.a`.
 - Rebuild stage 2 GCC with `--with-arch=i486` to drop the
   pentium-pro default and produce binaries that run on plain i486
   QEMU CPUs.
