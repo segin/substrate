@@ -151,6 +151,25 @@ typedef struct xhci_hc {
     uint32_t         event_deq;    uint8_t event_cycle;
     void             *bounce;      dma_addr_t bounce_dma;
 
+    /*
+     * In-flight isochronous IN packets.  An IN packet's received length is
+     * only knowable from its Transfer Event, so unlike iso OUT (fire-and-
+     * forget, no IOC) each IN TRB requests an event and owns one of these
+     * records until the caller collects it via iso_in_status() or abandons
+     * it via iso_reclaim().  Events are matched to records by TRB address
+     * wherever the driver would otherwise discard an unrecognised event.
+     * Sized above uac's 48-packet window; all access is under submit_lock.
+     * [T3]
+     */
+#define XHCI_ISO_RECS 64
+    struct xhci_iso_rec {
+        uint64_t trb;          /* TRB phys addr; 0 = record free */
+        uint32_t sched_len;
+        uint32_t got_len;
+        uint8_t  done;
+        uint8_t  failed;
+    } iso_rec[XHCI_ISO_RECS];
+
     /* Indexed by slot id (1-based).  Each entry is ~3 KiB and most are
      * never used, so they are allocated when the controller hands us the
      * slot and freed with it. [X-14] */
@@ -353,15 +372,50 @@ static void xhci_abort_command(xhci_hc_t *hc)
     wr64(hc->op, XHCI_OP_CRCR, hc->cmd_ring.dma | XHCI_CRCR_RCS);
 }
 
+/*
+ * Offer an event that is about to be discarded to the iso-IN records.
+ * Called from every path that consumes events it does not recognise; a
+ * Transfer Event naming an armed IN TRB is that packet's completion, and
+ * dropping it would lose the received length forever. [T3]
+ */
+static void xhci_iso_note(xhci_hc_t *hc, uint64_t param, uint32_t ctrl,
+                          uint32_t status)
+{
+    if (XHCI_TRB_GET_TYPE(ctrl) != TRB_TRANSFER_EVENT)
+        return;
+    for (int i = 0; i < XHCI_ISO_RECS; i++) {
+        struct xhci_iso_rec *r = &hc->iso_rec[i];
+
+        if (!r->trb || r->trb != param || r->done)
+            continue;
+        uint32_t cc = XHCI_TRB_GET_CC(status);
+        uint32_t residue = XHCI_TRB_GET_XLEN(status);
+
+        r->done = 1;
+        if (cc == XHCI_CC_SUCCESS || cc == XHCI_CC_SHORT_PACKET) {
+            /* Short is the NORM for capture -- a packet holds whatever the
+             * device had this interval, residue says how much it did not. */
+            r->got_len = (r->sched_len > residue) ? r->sched_len - residue
+                                                  : 0;
+        } else {
+            r->failed = 1;
+            r->got_len = 0;
+        }
+        return;
+    }
+}
+
 /* Run a command TRB on the command ring; return (completion code, slot id). */
 static int xhci_run_command_st(xhci_hc_t *hc, uint64_t param, uint32_t status,
                                uint32_t ctrl, uint8_t *out_slot)
 {
     xhci_ring_push(&hc->cmd_ring, param, status, ctrl);
     xhci_doorbell(hc, 0, 0);   /* ring the command doorbell */
-    uint64_t ep; uint32_t ec;
+    uint64_t ep; uint32_t ec, est;
     for (int guard = 0; guard < 8; guard++) {
-        int cc = xhci_wait_event(hc, &ep, &ec, NULL, XHCI_CMD_TIMEOUT_MS);
+        int cc = xhci_wait_event(hc, &ep, &ec, &est, XHCI_CMD_TIMEOUT_MS);
+        if (cc != 0)
+            xhci_iso_note(hc, ep, ec, est);   /* [T3] */
         if (cc == 0) {                      /* [X-04] */
             xhci_abort_command(hc);
             return 0;
@@ -589,6 +643,7 @@ static int xhci_wait_td(xhci_hc_t *hc, uint8_t slot, int dci,
     for (int guard = 0; guard < XHCI_EVENT_SCAN_MAX; guard++) {
         int cc = xhci_wait_event(hc, &ep_trb, &ec, &est, timeout_ms);
         if (cc == 0) return 0;   /* timeout */
+        xhci_iso_note(hc, ep_trb, ec, est);   /* [T3] */
 
         /* Not a transfer event for this endpoint at all (port status change,
          * another slot, another EP): drop it and keep looking. */
@@ -1638,9 +1693,12 @@ static void xhci_drain_events(xhci_hc_t *hc)
      */
     while (drained < XHCI_RING_TRBS) {
         volatile struct xhci_trb *e = &hc->event_ring[hc->event_deq];
+        uint64_t ep; uint32_t ec, est;
+
         if ((e->control & XHCI_TRB_CYCLE) != hc->event_cycle)
             break;
-        (void)xhci_wait_event(hc, NULL, NULL, NULL, 0);
+        if (xhci_wait_event(hc, &ep, &ec, &est, 0) != 0)
+            xhci_iso_note(hc, ep, ec, est);   /* [T3] */
         drained++;
     }
 }
@@ -1684,13 +1742,15 @@ static int xhci_iso_schedule(usb_hcd_t *hcd, usb_device_t *dev,
     uint8_t slot;
     int dci;
     uint64_t trb;
+    int in = (ep->address & USB_EP_DIR_MASK) == USB_EP_DIR_IN;
+    struct xhci_iso_rec *rec = NULL;
 
     if (handle)
         *handle = NULL;
     if (!dev || !ep || len == 0)
         return USB_XFER_ERROR;
-    if ((ep->address & USB_EP_DIR_MASK) != USB_EP_DIR_OUT)
-        return USB_XFER_ERROR;   /* iso IN (capture) is not wired up */
+    if (in && !handle)
+        return USB_XFER_ERROR;   /* an IN packet's fate must be collectable */
 
     slot = hc->addr_slot[dev->address & 0x7F];
     if (slot == 0 || slot > XHCI_MAX_SLOTS || !hc->slots[slot])
@@ -1720,31 +1780,110 @@ static int xhci_iso_schedule(usb_hcd_t *hcd, usb_device_t *dev,
      * (62) packets outstanding per endpoint; uac's UAC_WINDOW (48) is the
      * number to check against it when either changes. [P5-04]
      */
+    /*
+     * An IN packet needs a completion record before the TRB exists: the
+     * received length only arrives in the Transfer Event (hence IOC on IN
+     * and not on OUT), and the event must find its record armed.  ISP too:
+     * a capture packet holding less than max is the norm, not an error.
+     * [T3]
+     */
+    if (in) {
+        for (int i = 0; i < XHCI_ISO_RECS; i++) {
+            if (hc->iso_rec[i].trb == 0) {
+                rec = &hc->iso_rec[i];
+                break;
+            }
+        }
+        if (!rec) {
+            mutex_unlock(&hc->submit_lock);
+            return USB_XFER_ERROR;   /* window wider than the record pool */
+        }
+        rec->sched_len = len;
+        rec->got_len = 0;
+        rec->done = 0;
+        rec->failed = 0;
+    }
+
     trb = xhci_ring_push(&hc->slots[slot]->ep_ring[dci], (uint64_t)buf_phys,
                          len,
                          XHCI_TRB_TYPE(TRB_ISOCH) |
                          XHCI_TRB_FRAME_ID(frame) |
-                         XHCI_TRB_TLBPC(0) | XHCI_TRB_TBC(0));
+                         XHCI_TRB_TLBPC(0) | XHCI_TRB_TBC(0) |
+                         (in ? (XHCI_TRB_IOC | XHCI_TRB_ISP) : 0));
+    if (rec)
+        rec->trb = trb;              /* arm only once the TRB address exists */
     xhci_doorbell(hc, slot, (uint32_t)dci);
     mutex_unlock(&hc->submit_lock);
 
-    /* Non-NULL token: the caller only tests it for occupancy.  The TRB's own
-     * address makes it unique and traceable if this ever needs debugging. */
+    /* OUT: a non-NULL token the caller only tests for occupancy (the TRB's
+     * own address, unique and traceable).  IN: the completion record, to be
+     * polled with iso_in_status() or released with iso_reclaim(). */
     if (handle)
-        *handle = (void *)(uintptr_t)trb;
+        *handle = rec ? (void *)rec : (void *)(uintptr_t)trb;
     return USB_XFER_OK;
+}
+
+/* Is this handle an IN completion record (vs an OUT token)?  Records live
+ * in the hc's own array, so pointer range answers it. [T3] */
+static struct xhci_iso_rec *xhci_iso_rec_of(xhci_hc_t *hc, void *handle)
+{
+    struct xhci_iso_rec *r = handle;
+
+    if (r >= &hc->iso_rec[0] && r < &hc->iso_rec[XHCI_ISO_RECS])
+        return r;
+    return NULL;
 }
 
 static void xhci_iso_reclaim(usb_hcd_t *hcd, void *handle)
 {
+    xhci_hc_t *hc = hcd->priv;
+    struct xhci_iso_rec *rec = xhci_iso_rec_of(hc, handle);
+
     /*
-     * Nothing to undo.  The controller consumed the Isoch TRB when its frame
-     * came round and the ring's dequeue pointer moved past it on its own; the
-     * caller reuses its packet buffer only after that frame has passed, which
-     * is the same condition.  Present so the HCD contract is complete and the
-     * caller does not have to special-case a controller with no reclaim.
+     * For an OUT token there is nothing to undo: the controller consumed the
+     * Isoch TRB when its frame came round and the dequeue moved on by
+     * itself; the caller reuses its packet buffer only after that frame has
+     * passed, which is the same condition.  An IN handle is a completion
+     * record, released here whether or not its packet ever completed
+     * (stream teardown reclaims pending packets). [T3]
      */
-    (void)hcd; (void)handle;
+    if (rec) {
+        mutex_lock(&hc->submit_lock);
+        rec->trb = 0;
+        mutex_unlock(&hc->submit_lock);
+    }
+}
+
+/*
+ * Poll one armed IN packet.  Draining first is what makes this progress:
+ * completions sit on the event ring until someone consumes them, and the
+ * capture caller may be the only USB activity on the machine. [T3]
+ */
+static int xhci_iso_in_status(usb_hcd_t *hcd, void *handle, uint32_t *out_len)
+{
+    xhci_hc_t *hc = hcd->priv;
+    struct xhci_iso_rec *rec = xhci_iso_rec_of(hc, handle);
+    int ret;
+
+    if (!rec)
+        return -1;
+    mutex_lock(&hc->submit_lock);
+    xhci_drain_events(hc);
+    if (!rec->trb) {
+        ret = -1;                      /* already reclaimed */
+    } else if (!rec->done) {
+        ret = 0;                       /* still pending */
+    } else if (rec->failed) {
+        rec->trb = 0;                  /* consumed */
+        ret = -1;
+    } else {
+        if (out_len)
+            *out_len = rec->got_len;
+        rec->trb = 0;                  /* consumed; handle is dead now */
+        ret = 1;
+    }
+    mutex_unlock(&hc->submit_lock);
+    return ret;
 }
 
 /*
@@ -2493,6 +2632,7 @@ static int xhci_pci_attach(struct device *dev)
     hc->hcd.iso_schedule = xhci_iso_schedule;
     hc->hcd.iso_reclaim = xhci_iso_reclaim;
     hc->hcd.iso_stop = xhci_iso_stop;
+    hc->hcd.iso_in_status = xhci_iso_in_status;
     usb_register_hcd(&hc->hcd);
     hc->initialized = 1;
     xhci_instances++;

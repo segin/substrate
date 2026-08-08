@@ -551,6 +551,20 @@ typedef struct usb_hcd {
      */
     void     (*iso_stop)(struct usb_hcd *hcd, usb_device_t *dev,
                          usb_endpoint_t *ep);
+    /*
+     * Optional, required for iso IN: poll one armed IN packet's fate.
+     * Returns 1 and the received byte count once the packet's frame has
+     * been serviced (consuming the handle -- it is dead afterwards), 0
+     * while still pending, negative if the packet failed or the endpoint
+     * stopped.  Iso IN differs from OUT in that the caller cannot infer
+     * completion from the frame counter alone: a capture packet's LENGTH
+     * is only knowable from the completion, so IN packets are armed with
+     * an event requested and this is how the caller collects it.  A
+     * handle abandoned without polling must still be released with
+     * iso_reclaim(). [T3]
+     */
+    int      (*iso_in_status)(struct usb_hcd *hcd, void *handle,
+                              uint32_t *out_len);
 
     /* Private HC driver data */
     void *priv;
@@ -663,6 +677,7 @@ int      usb_iso_schedule(usb_device_t *dev, usb_endpoint_t *ep, uint16_t frame,
                           uint32_t buf_phys, uint16_t len, void **handle);
 void     usb_iso_reclaim(usb_device_t *dev, void *handle);
 void     usb_iso_stop(usb_device_t *dev, usb_endpoint_t *ep);
+int      usb_iso_in_status(usb_device_t *dev, void *handle, uint32_t *out_len);
 
 /* Standard Requests */
 /*

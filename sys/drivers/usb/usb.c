@@ -372,6 +372,15 @@ void usb_iso_stop(usb_device_t *dev, usb_endpoint_t *ep)
     dev->hcd->iso_stop(dev->hcd, dev, ep);
 }
 
+int usb_iso_in_status(usb_device_t *dev, void *handle, uint32_t *out_len)
+{
+    if (out_len)
+        *out_len = 0;
+    if (!dev || !handle || !dev->hcd || !dev->hcd->iso_in_status)
+        return -1;
+    return dev->hcd->iso_in_status(dev->hcd, handle, out_len);
+}
+
 int usb_iso_transfer(usb_device_t *dev, usb_endpoint_t *ep,
                      void *data, uint32_t length,
                      uint32_t *actual_length)
