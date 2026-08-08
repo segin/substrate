@@ -1557,6 +1557,14 @@ static int xhci_iso_schedule(usb_hcd_t *hcd, usb_device_t *dev,
      * as possible" would discard the pacing the caller went to the trouble of
      * computing, and the stream would drift.
      */
+    /*
+     * No ring-full check is possible here: iso TDs carry no IOC, so the
+     * driver never learns the controller's dequeue pointer (the output EP
+     * context's copy is only valid in Halted/Stopped, s6.2.3.2).  The caller
+     * carries the capacity contract instead -- at most XHCI_RING_TRBS - 2
+     * (62) packets outstanding per endpoint; uac's UAC_WINDOW (48) is the
+     * number to check against it when either changes. [P5-04]
+     */
     trb = xhci_ring_push(&hc->slots[slot]->ep_ring[dci], (uint64_t)buf_phys,
                          len,
                          XHCI_TRB_TYPE(TRB_ISOCH) |

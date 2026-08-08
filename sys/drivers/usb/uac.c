@@ -69,6 +69,14 @@
 /* Streaming window: keep [LEAD, WINDOW) frames scheduled ahead of the
  * controller; RING_SLOTS (> WINDOW) packet buffers cycle through it. */
 #define UAC_LEAD                  4U
+/*
+ * WINDOW is also a promise to the HCD: at most this many iso packets are
+ * outstanding on one endpoint at a time, and the xHCI transfer ring gives a
+ * TD no completion event, so the driver cannot detect overwrite of TRBs the
+ * controller has not consumed.  It must stay below the HCD's per-endpoint
+ * ring capacity (XHCI_RING_TRBS - 2 = 62; UHCI's frame list is far larger).
+ * [P5-04]
+ */
 #define UAC_WINDOW                48U
 #define UAC_RING_SLOTS            64U
 /* Fallback frame-space modulus, used only if the HCD does not advertise one

@@ -20,8 +20,24 @@ three real findings turn out to live.
 
 ## Status
 
-Open at time of writing; fixes follow in this series, and this section is
-updated as they land.
+**P5-01, P5-02 and P5-03 are fixed** as of 2026-08-08, same day:
+
+| ID | Commit |
+|----|--------|
+| P5-01 | `830e17455` — usb: make the iso frame modulus a property of the HCD |
+| P5-02 | `845b86231` — usb: latch hub fields before the downstream walk; stop idle iso endpoints |
+| P5-03 | `845b86231` — as above |
+| P5-04 | contract documented at both sites (`UAC_WINDOW`, `xhci_iso_schedule()`); no runtime check is possible without a dequeue, see the entry |
+| P5-05 | **open** — accepted for now; the fix is to read HCSPARAMS2's IST and advertise a minimum lead the way `iso_frame_modulus` is advertised, and it should ride along with whatever next touches the iso contract |
+
+P5-01's verification turned out stronger than expected: the wrap-arithmetic
+half is pure software and reproduces under QEMU, and re-running the pass-4
+tone test against the fix moved the capture from 0.475 s (stalled at the first
+MFINDEX wrap — the pass-4 audit's "FIFO overrun" explanation for that number
+was wrong) to 5.236 s spanning at least two wraps with zero silence and the
+sample count conserved exactly.  P5-03's stop and doorbell-restart were both
+traced live in a play/idle/replay run.  P5-02 remains verifiable only on real
+hardware, like P3-01/P3-02 before it.
 
 | ID | Severity | Area | One-line |
 |----|----------|------|----------|
