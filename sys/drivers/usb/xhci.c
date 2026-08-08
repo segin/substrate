@@ -30,7 +30,21 @@
 #include <sys/lock.h>
 #include <vm/vm_kmem.h>
 
-#define XHCI_MMIO_SIZE     0x4000  /* cap + op(0) + runtime(0x1000) + doorbell(0x2000) */
+/*
+ * Fallback register-window size, used only when the BAR's real size cannot be
+ * read.  The mapping is normally sized from the BAR itself: a fixed 16K
+ * window covered QEMU but truncated real controllers -- Sunrise Point-LP
+ * carries a 64K BAR with its extended capabilities continuing past 0x8000,
+ * and the USB Legacy Support capability out there was never reached.  No
+ * BIOS handoff means SMM keeps driving the controller under us: on the HP
+ * Pavilion that surfaced as a config-descriptor read timing out on one
+ * device and the SD card reader (the root device!) never enumerating at
+ * all, exactly the failure mode xhci_take_controller()'s comment predicts.
+ * The Supported Protocol capabilities live out there too, so the port
+ * speed map was silently incomplete. [HW-01]
+ */
+#define XHCI_MMIO_MIN      0x4000  /* cap + op(0) + runtime(0x1000) + doorbell(0x2000) */
+#define XHCI_MMIO_MAX      0x100000
 #define XHCI_RING_TRBS     64      /* TRBs per ring segment */
 /* Upper bound on the controller's MaxSlots that we are willing to honour.
  * Per-slot state is allocated on demand, so this only sizes the DCBAA and
@@ -111,6 +125,7 @@ typedef struct xhci_hc {
      * Protocol capability; 0 = the capability said nothing about it. */
     uint8_t  port_major[USB_MAX_ROOT_PORTS];
     uint32_t ctx_size;         /* 32 or 64 */
+    uint32_t mmio_size;        /* mapped register window, from the BAR [HW-01] */
     int      initialized;
 
     mutex_t  submit_lock;
@@ -1680,7 +1695,7 @@ static void xhci_take_controller(xhci_hc_t *hc)
     for (int guard = 0; off != 0 && guard < 64; guard++) {
         uint32_t cap;
 
-        if (off + 8 > XHCI_MMIO_SIZE) {
+        if (off + 8 > hc->mmio_size) {
             /* Say so rather than silently giving up: stopping here means the
              * BIOS handoff below may never run, and we would then reset a
              * controller that SMM still owns. [X-09] */
@@ -1885,7 +1900,7 @@ static void xhci_parse_protocols(xhci_hc_t *hc)
     for (int guard = 0; off != 0 && guard < 64; guard++) {
         uint32_t cap;
 
-        if (off + 16 > XHCI_MMIO_SIZE)
+        if (off + 16 > hc->mmio_size)
             break;
         cap = rd32(hc->mmio, off);
         if (cap == 0xFFFFFFFFu)
@@ -2169,7 +2184,21 @@ static int xhci_pci_attach(struct device *dev)
         kprintf("xhci: out of memory allocating controller state\n");
         return -1;
     }
-    hc->mmio = ioremap(phys, XHCI_MMIO_SIZE);
+    /*
+     * Map what the BAR actually decodes, not a guess.  Everything
+     * controller-relative -- the extended-capability walk above all -- is
+     * bounded by this, and a window smaller than the hardware truncates that
+     * list: the BIOS handoff and the protocol/speed map both live in it.
+     * Clamped to a floor that covers the architectural minimum and a ceiling
+     * so a garbage size-probe cannot eat the kernel's mapping space. [HW-01]
+     */
+    {
+        size_t barsz = pci_bar_size(pdev, 0);
+        if (barsz < XHCI_MMIO_MIN) barsz = XHCI_MMIO_MIN;
+        if (barsz > XHCI_MMIO_MAX) barsz = XHCI_MMIO_MAX;
+        hc->mmio_size = (uint32_t)barsz;
+    }
+    hc->mmio = ioremap(phys, hc->mmio_size);
     if (!hc->mmio) {
         kprintf("xhci: ioremap failed\n");
         xhci_teardown(hc);
@@ -2205,12 +2234,12 @@ static int xhci_pci_attach(struct device *dev)
     /* CAPLENGTH is 8-bit, so it cannot itself leave the window; it only has
      * to be big enough to cover the capability registers we read above. */
     if (caplen < 0x20 ||
-        (uint32_t)caplen + XHCI_OP_PORTSC(hc->nports) > XHCI_MMIO_SIZE ||
-        rtsoff + XHCI_RT_IR0 + 0x20 > XHCI_MMIO_SIZE ||
-        dboff + ((uint32_t)hc->maxslots + 1) * 4 > XHCI_MMIO_SIZE) {
+        (uint32_t)caplen + XHCI_OP_PORTSC(hc->nports) > hc->mmio_size ||
+        rtsoff + XHCI_RT_IR0 + 0x20 > hc->mmio_size ||
+        dboff + ((uint32_t)hc->maxslots + 1) * 4 > hc->mmio_size) {
         kprintf("xhci: register map does not fit the %u-byte window "
                 "(caplen=0x%x rtsoff=0x%x dboff=0x%x ports=%u)\n",
-                XHCI_MMIO_SIZE, caplen, (unsigned)rtsoff, (unsigned)dboff,
+                hc->mmio_size, caplen, (unsigned)rtsoff, (unsigned)dboff,
                 hc->nports);
         xhci_teardown(hc);
         return -1;
