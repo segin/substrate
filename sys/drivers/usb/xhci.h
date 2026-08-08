@@ -225,6 +225,16 @@ struct xhci_trb {
 #define XHCI_CC_TRB_ERROR    5
 #define XHCI_CC_STALL        6
 #define XHCI_CC_SHORT_PACKET 13
+/*
+ * Completion codes an *abort* produces on the command ring.  Neither is the
+ * result of a command we are waiting on: xHCI 1.2 s4.6.1.2 says aborting
+ * completes the command that was executing with Command Aborted, and then
+ * always posts Command Ring Stopped for the ring itself.  Both land on the
+ * event ring after the abort, where a matcher that keys on TRB type alone
+ * would take the first of them as the *next* command's result. [R-01]
+ */
+#define XHCI_CC_CMD_RING_STOPPED 0x18
+#define XHCI_CC_CMD_ABORTED      0x19
 
 /*
  * Completion codes that leave the endpoint Halted.  The controller stops

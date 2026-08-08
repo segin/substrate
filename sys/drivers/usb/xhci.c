@@ -38,6 +38,14 @@
 #define XHCI_MAX_SLOTS     64
 #define XHCI_BOUNCE_SIZE   (64 * 1024)
 #define XHCI_CMD_TIMEOUT_MS 1000
+/* How many events we will step over looking for the one that is ours before
+ * concluding the ring is out of step with us.  Shared by the transfer-event
+ * matcher and the command-abort drain. */
+#define XHCI_EVENT_SCAN_MAX 16
+/* An abort's own events are already queued by the time CRR clears, so this
+ * only has to cover a controller that is slow to post them -- not the full
+ * command timeout, which would make a failed abort take 16 seconds. */
+#define XHCI_ABORT_EVENT_MS 50
 /* Reset-path waits.  Generous rather than tight: a controller handed over by
  * UEFI firmware with transfers in flight takes noticeably longer to quiesce
  * than one nothing has touched. */
@@ -264,6 +272,33 @@ static void xhci_abort_command(xhci_hc_t *hc)
     if (rd32(hc->op, XHCI_OP_CRCR) & XHCI_CRCR_CRR)
         kprintf("xhci: command ring still running after abort\n");
 
+    /*
+     * Consume the events the abort itself just produced.
+     *
+     * s4.6.1.2: the command that was executing completes with Command
+     * Aborted, and the ring then always posts Command Ring Stopped.  Leaving
+     * those queued is what reintroduced, one command later, exactly the
+     * desynchronisation this function exists to prevent: the next command
+     * matches on TRB type alone and would take one of them as its own result,
+     * report a spurious failure, and leave its real completion behind for the
+     * command after that. [R-01]
+     *
+     * Anything else met on the way (a late transfer event for the TD we are
+     * abandoning, a port-status change) is discarded with them -- this is a
+     * recovery path, the transfer is already lost, and port state is
+     * re-derivable by polling PORTSC.
+     */
+    for (i = 0; i < XHCI_EVENT_SCAN_MAX; i++) {
+        uint32_t ec;
+        int cc = xhci_wait_event(hc, NULL, &ec, NULL, XHCI_ABORT_EVENT_MS);
+
+        if (cc == 0)
+            break;                      /* nothing further is coming */
+        if (XHCI_TRB_GET_TYPE(ec) == TRB_CMD_COMPLETE &&
+            cc == XHCI_CC_CMD_RING_STOPPED)
+            break;                      /* the ring has confirmed the stop */
+    }
+
     /* Rewind to the top of the ring: nothing on it is ours any more. */
     memset((void *)hc->cmd_ring.trb, 0,
            XHCI_RING_TRBS * sizeof(struct xhci_trb));
@@ -289,6 +324,15 @@ static int xhci_run_command_st(xhci_hc_t *hc, uint64_t param, uint32_t status,
             return 0;
         }
         if (XHCI_TRB_GET_TYPE(ec) == TRB_CMD_COMPLETE) {
+            /*
+             * An abort's leavings rather than a result: Command Ring Stopped
+             * is posted by the ring itself, and Command Aborted belongs to a
+             * command we have already given up waiting for.  xhci_abort_command
+             * drains both, so reaching one here means an abort happened
+             * somewhere else -- skip rather than report it as this command's
+             * outcome. [R-01] */
+            if (cc == XHCI_CC_CMD_RING_STOPPED || cc == XHCI_CC_CMD_ABORTED)
+                continue;
             if (out_slot) *out_slot = XHCI_TRB_GET_SLOT(ec);
             return cc;
         }
@@ -428,8 +472,6 @@ static int xhci_stop_ep(xhci_hc_t *hc, uint8_t slot, int dci,
  * one lost or duplicated event can no longer desynchronise the endpoint for
  * the rest of the session.
  */
-#define XHCI_EVENT_SCAN_MAX 16
-
 static int xhci_wait_td(xhci_hc_t *hc, uint8_t slot, int dci,
                         const uint64_t *trbs, int ntrbs,
                         uint32_t *out_status, int *out_which,
