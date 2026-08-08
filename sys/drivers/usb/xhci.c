@@ -945,10 +945,24 @@ static uint32_t xhci_ep_interval(const usb_device_t *dev, const usb_endpoint_t *
     uint8_t bi;
     uint32_t iv;
 
-    if (!ep || ep->type != USB_EP_TYPE_INTERRUPT)
+    if (!ep || (ep->type != USB_EP_TYPE_INTERRUPT && ep->type != USB_EP_TYPE_ISO))
         return 0;
 
     bi = ep->interval ? ep->interval : 1;
+    /*
+     * Full-speed isochronous is the one periodic case that is not on the
+     * interrupt schedule above: USB 2.0 s5.6.4 fixes its period at bInterval
+     * frames with bInterval itself already a power-of-two exponent, so the
+     * xHCI Interval is bInterval-1 in 1 ms units -- i.e. +3 to reach the 125us
+     * units the field counts in.  Rounding it through the interrupt path
+     * instead would place a 1 ms audio endpoint on an 8 ms service interval
+     * and drop seven of every eight packets.
+     */
+    if (ep->type == USB_EP_TYPE_ISO && dev &&
+        (dev->speed == USB_SPEED_LOW || dev->speed == USB_SPEED_FULL)) {
+        iv = (uint32_t)bi - 1u + 3u;
+        return iv > 15u ? 15u : iv;
+    }
     if (!dev || dev->speed == USB_SPEED_LOW || dev->speed == USB_SPEED_FULL) {
         /*
          * Round DOWN, not up.  Table 6-12 footnote 113: "For FS/LS Interrupt
@@ -968,14 +982,21 @@ static uint32_t xhci_ep_interval(const usb_device_t *dev, const usb_endpoint_t *
     return iv > 15u ? 15u : iv;
 }
 
-static int xhci_ensure_ep(xhci_hc_t *hc, uint8_t slot, usb_transfer_t *xfer)
+/*
+ * Takes the device and endpoint rather than a usb_transfer_t: the isochronous
+ * path arrives through the iso_schedule() HCD hook, which has no transfer to
+ * hand over -- it arms one packet at a future frame and returns.
+ */
+static int xhci_ensure_ep(xhci_hc_t *hc, uint8_t slot, usb_device_t *dev,
+                          const usb_endpoint_t *ep)
 {
-    uint8_t epaddr = xfer->ep->address;
+    uint8_t epaddr = ep->address;
     uint8_t epnum = epaddr & 0x0F;
     int in = (epaddr & 0x80) != 0;
     int dci = epnum * 2 + (in ? 1 : 0);
     struct xhci_slot *s = hc->slots[slot];
-    int streamed = (xfer->ep->max_streams > 0);
+    int streamed = (ep->max_streams > 0);
+    int isoch = (ep->type == USB_EP_TYPE_ISO);
 
     if (streamed ? (s->stream_ctx[dci] != NULL) : (s->ep_ring[dci].trb != NULL))
         return dci;   /* already configured */
@@ -1034,15 +1055,22 @@ static int xhci_ensure_ep(xhci_hc_t *hc, uint8_t slot, usb_transfer_t *xfer)
      * transitions the slot Addressed -> Configured -- the one point at which
      * s4.5.2 lets the xHC latch Hub, Number of Ports and TTT at all. [P3-02]
      */
-    xhci_slot_hub_fields(xfer->dev, insc);
+    xhci_slot_hub_fields(dev, insc);
 
-    uint32_t type = xfer->ep->type == USB_EP_TYPE_BULK
-                        ? (in ? EP_TYPE_BULK_IN : EP_TYPE_BULK_OUT)
-                        : (in ? EP_TYPE_INT_IN : EP_TYPE_INT_OUT);
-    uint32_t mps = xfer->ep->max_packet ? xfer->ep->max_packet : 512;
+    uint32_t type;
+    if (isoch)
+        type = in ? EP_TYPE_ISOCH_IN : EP_TYPE_ISOCH_OUT;
+    else if (ep->type == USB_EP_TYPE_BULK)
+        type = in ? EP_TYPE_BULK_IN : EP_TYPE_BULK_OUT;
+    else
+        type = in ? EP_TYPE_INT_IN : EP_TYPE_INT_OUT;
+    uint32_t mps = ep->max_packet ? ep->max_packet : 512;
     uint32_t *epc = (uint32_t *)in_ep_of(hc, s->in_ctx, dci);
+    /* CErr must be 0 on an isochronous endpoint (Table 6-9): iso has no
+     * retries, so a non-zero count is a malformed context, not just moot. */
     epc[1] = (type << XHCI_EP_TYPE_SHIFT) | (mps << XHCI_EP_MPS_SHIFT) |
-             (3u << XHCI_EP_CERR_SHIFT);
+             ((isoch ? XHCI_EP_CERR_ISOCH : XHCI_EP_CERR_DEFAULT)
+              << XHCI_EP_CERR_SHIFT);
     if (streamed) {
         /* Streamed EP: MaxPStreams + Linear Stream Array; the TR-dequeue field
          * holds the Stream Context Array base (no DCS -- that is per-stream). */
@@ -1054,7 +1082,7 @@ static int xhci_ensure_ep(xhci_hc_t *hc, uint8_t slot, usb_transfer_t *xfer)
          * across Configure Endpoint commands, so a previously-streamed DCI
          * would leave MaxPStreams/LSA set and the controller would read the
          * TR-dequeue field below as a stream-context-array base. */
-        epc[0] = xhci_ep_interval(xfer->dev, xfer->ep) << XHCI_EP_INTERVAL_SHIFT;
+        epc[0] = xhci_ep_interval(dev, ep) << XHCI_EP_INTERVAL_SHIFT;
         epc[2] = (uint32_t)s->ep_ring[dci].dma | s->ep_ring[dci].cycle;
         epc[3] = (uint32_t)((uint64_t)s->ep_ring[dci].dma >> 32);
     }
@@ -1064,7 +1092,7 @@ static int xhci_ensure_ep(xhci_hc_t *hc, uint8_t slot, usb_transfer_t *xfer)
      * is its Max ESIT Payload; an async endpoint reserves nothing and only
      * needs a representative TRB length. [X-05]
      */
-    if (xfer->ep->type == USB_EP_TYPE_INTERRUPT) {
+    if (ep->type == USB_EP_TYPE_INTERRUPT || isoch) {
         uint32_t avg = mps < XHCI_EP_AVG_TRB_BULK ? mps : XHCI_EP_AVG_TRB_BULK;
         epc[4] = XHCI_EP_AVG_TRB_LEN(avg) | XHCI_EP_MAX_ESIT_LO(mps);
     } else {
@@ -1319,7 +1347,7 @@ static int xhci_bulk(xhci_hc_t *hc, usb_transfer_t *xfer)
     xfer->status = USB_XFER_ERROR;          /* [X-16], see xhci_control() */
     uint8_t slot = xhci_slot_for(hc, xfer);
     if (slot == 0) return USB_XFER_ERROR;
-    int dci = xhci_ensure_ep(hc, slot, xfer);
+    int dci = xhci_ensure_ep(hc, slot, xfer->dev, xfer->ep);
     if (dci < 0) return USB_XFER_ERROR;
     struct xhci_slot *s = hc->slots[slot];
 
@@ -1427,6 +1455,100 @@ static void xhci_drain_events(xhci_hc_t *hc)
     }
 }
 
+/*
+ * ---- Isochronous OUT streaming ----
+ *
+ * The iso hooks are a different shape from submit(): the caller (uac) keeps a
+ * sliding window of packets armed a few frames ahead of the controller and
+ * never waits for one, so these arm a single packet at a named frame and
+ * return.  This is what X-13 recorded as missing, and its absence is why USB
+ * audio played through UHCI and EHCI but not through xHCI -- i.e. not on any
+ * machine new enough to have dropped its companion controllers.
+ *
+ * Two things make this fit a driver that is otherwise synchronous:
+ *
+ *   - No IOC on the Isoch TRB.  A 1 ms audio stream would otherwise post a
+ *     thousand Transfer Events a second onto a 64-entry event ring that is
+ *     only drained when somebody takes submit_lock, and it would overrun in
+ *     well under a second.  Without IOC a successful iso TD is retired
+ *     silently; the errors that matter (Ring Underrun/Overrun) still post
+ *     events, and xhci_drain_events() collects them.
+ *
+ *   - Nothing to reclaim.  Unlike UHCI, where iso_reclaim has to put the
+ *     frame-list slot back, an Isoch TRB is consumed by the controller and the
+ *     ring pointer moves on by itself, so the handle is just a token proving
+ *     the packet was armed.
+ */
+static uint16_t xhci_frame_number(usb_hcd_t *hcd)
+{
+    xhci_hc_t *hc = hcd->priv;
+
+    return (uint16_t)XHCI_MFINDEX_FRAME(rd32(hc->rt, XHCI_RT_MFINDEX));
+}
+
+static int xhci_iso_schedule(usb_hcd_t *hcd, usb_device_t *dev,
+                             usb_endpoint_t *ep, uint16_t frame,
+                             uint32_t buf_phys, uint16_t len, void **handle)
+{
+    xhci_hc_t *hc = hcd->priv;
+    uint8_t slot;
+    int dci;
+    uint64_t trb;
+
+    if (handle)
+        *handle = NULL;
+    if (!dev || !ep || len == 0)
+        return USB_XFER_ERROR;
+    if ((ep->address & USB_EP_DIR_MASK) != USB_EP_DIR_OUT)
+        return USB_XFER_ERROR;   /* iso IN (capture) is not wired up */
+
+    slot = hc->addr_slot[dev->address & 0x7F];
+    if (slot == 0 || slot > XHCI_MAX_SLOTS || !hc->slots[slot])
+        return USB_XFER_ERROR;
+
+    mutex_lock(&hc->submit_lock);
+    xhci_drain_events(hc);   /* [R-05] */
+
+    dci = xhci_ensure_ep(hc, slot, dev, ep);
+    if (dci < 0) {
+        mutex_unlock(&hc->submit_lock);
+        return USB_XFER_ERROR;
+    }
+
+    /*
+     * Frame ID is matched against MFINDEX bits 13:3, so it is 11 bits and
+     * wraps every 2048 ms; the caller works in the same modulus.  SIA is
+     * deliberately NOT set -- letting the controller place the packet "as soon
+     * as possible" would discard the pacing the caller went to the trouble of
+     * computing, and the stream would drift.
+     */
+    trb = xhci_ring_push(&hc->slots[slot]->ep_ring[dci], (uint64_t)buf_phys,
+                         len,
+                         XHCI_TRB_TYPE(TRB_ISOCH) |
+                         XHCI_TRB_FRAME_ID(frame) |
+                         XHCI_TRB_TLBPC(0) | XHCI_TRB_TBC(0));
+    xhci_doorbell(hc, slot, (uint32_t)dci);
+    mutex_unlock(&hc->submit_lock);
+
+    /* Non-NULL token: the caller only tests it for occupancy.  The TRB's own
+     * address makes it unique and traceable if this ever needs debugging. */
+    if (handle)
+        *handle = (void *)(uintptr_t)trb;
+    return USB_XFER_OK;
+}
+
+static void xhci_iso_reclaim(usb_hcd_t *hcd, void *handle)
+{
+    /*
+     * Nothing to undo.  The controller consumed the Isoch TRB when its frame
+     * came round and the ring's dequeue pointer moved past it on its own; the
+     * caller reuses its packet buffer only after that frame has passed, which
+     * is the same condition.  Present so the HCD contract is complete and the
+     * caller does not have to special-case a controller with no reclaim.
+     */
+    (void)hcd; (void)handle;
+}
+
 static int xhci_submit(usb_hcd_t *hcd, usb_transfer_t *xfer)
 {
     xhci_hc_t *hc = hcd->priv;
@@ -1440,19 +1562,14 @@ static int xhci_submit(usb_hcd_t *hcd, usb_transfer_t *xfer)
         ret = xhci_bulk(hc, xfer);
     else
         /*
-         * Isochronous is not implemented here.  It is a different shape from
-         * everything above: Isoch TRBs carry a frame number and a Transfer
-         * Burst Count, the driver has to keep a window of TDs scheduled ahead
-         * of MFINDEX, and the HCD-level iso_schedule/iso_reclaim hooks in
-         * usb_hcd_t exist for exactly that -- uhci.c implements them, this
-         * driver does not.
+         * Isochronous does not come through submit() at all.  It is a
+         * different shape -- a sliding window of packets armed ahead of
+         * MFINDEX rather than one transfer waited on -- and it arrives
+         * through the frame_number/iso_schedule/iso_reclaim hooks in
+         * usb_hcd_t, which this driver now implements. [X-13]
          *
-         * The practical consequence is that USB Audio (uac) plays through
-         * UHCI and EHCI but not through xHCI, i.e. not on any machine new
-         * enough to have dropped its companion controllers.  Recorded as a
-         * known gap rather than papered over: returning an error here is at
-         * least honest, where pretending otherwise would hand the class
-         * driver silence. [X-13]
+         * Reaching here means a caller submitted an iso transfer as though it
+         * were bulk, which those hooks exist to avoid.
          *
          * xfer->status is set here as well as ret: X-16 gave every other exit
          * from this driver an explicit status so a caller could not read the
@@ -2095,6 +2212,9 @@ static int xhci_pci_attach(struct device *dev)
     hc->hcd.set_hub = xhci_set_hub;
     hc->hcd.set_ep0_mps = xhci_set_ep0_mps;
     hc->hcd.port_gone = xhci_port_gone;
+    hc->hcd.frame_number = xhci_frame_number;
+    hc->hcd.iso_schedule = xhci_iso_schedule;
+    hc->hcd.iso_reclaim = xhci_iso_reclaim;
     usb_register_hcd(&hc->hcd);
     hc->initialized = 1;
     xhci_instances++;

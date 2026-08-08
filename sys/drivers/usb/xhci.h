@@ -161,8 +161,28 @@ void xhci_init(void);
 #define XHCI_PORT_RESET_RECOVERY_MS  20
 #define XHCI_SET_ADDRESS_SETTLE_MS   10
 
+/*
+ * Isoch TRB control-word fields (Table 6-34).  Frame ID names the 1 ms frame
+ * the transfer starts in and is matched against bits 13:3 of MFINDEX, so it is
+ * 11 bits wide and wraps every 2048 ms.  With SIA set the controller schedules
+ * the TD as soon as it can and ignores Frame ID -- convenient, but it gives up
+ * the caller's placement, which for a paced audio stream is the whole point.
+ *
+ * TBC (Transfer Burst Count) and TLBPC (Transfer Last Burst Packet Count) both
+ * count from zero, so a single-packet-per-interval transfer leaves them 0.
+ */
+#define XHCI_TRB_SIA          0x80000000U     /* start isoch ASAP */
+#define XHCI_TRB_FRAME_ID(f)  (((uint32_t)(f) & 0x7FFu) << 20)
+#define XHCI_TRB_TLBPC(n)     (((uint32_t)(n) & 0xFu) << 16)
+#define XHCI_TRB_TBC(n)       (((uint32_t)(n) & 0x3u) << 7)
+
 /* ---- Runtime registers (from rtbase = mmio + RTSOFF) ---- */
 #define XHCI_RT_MFINDEX      0x00
+/*
+ * MFINDEX counts 125us microframes in bits 13:0; bits 13:3 are the 1 ms frame
+ * number an Isoch TRB's Frame ID is compared against (Table 6-34, s5.5.1).
+ */
+#define XHCI_MFINDEX_FRAME(m) (((m) >> 3) & 0x7FFu)
 #define XHCI_RT_IR0          0x20   /* interrupter 0 */
 #define XHCI_IR_IMAN         0x00
 #define XHCI_IR_IMOD         0x04
@@ -207,6 +227,7 @@ struct xhci_trb {
 #define TRB_SETUP            2
 #define TRB_DATA             3
 #define TRB_STATUS           4
+#define TRB_ISOCH            5
 #define TRB_LINK             6
 #define TRB_ENABLE_SLOT      9
 #define TRB_DISABLE_SLOT     10
@@ -314,6 +335,16 @@ struct xhci_ep_ctx {
 #define EP_TYPE_BULK_IN      6
 #define EP_TYPE_INT_OUT      3
 #define EP_TYPE_INT_IN       7
+#define EP_TYPE_ISOCH_OUT    1
+#define EP_TYPE_ISOCH_IN     5
+/*
+ * "CErr does not apply to Isoch endpoints and shall be set to '0' if EP Type =
+ * Isoch Out ('1') or Isoch In ('5')" -- Table 6-9.  Isochronous has no
+ * retries by definition, so a non-zero error count is not merely pointless
+ * here, it is a malformed endpoint context.
+ */
+#define XHCI_EP_CERR_ISOCH   0
+#define XHCI_EP_CERR_DEFAULT 3
 /*
  * EP context field[4]: Average TRB Length [15:0], Max ESIT Payload Lo [31:16].
  *
