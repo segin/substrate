@@ -149,7 +149,8 @@ Running, so the new dispatch issues Stop Endpoint — the same command the old
 `cc == 0` branch did, now reached by observing the state rather than inferring
 it.  The fault-injection boot shows this firing repeatedly and harmlessly on an
 idle HID interrupt endpoint, which is pre-existing behaviour (each idle poll
-that times out costs a Stop + Set TR Dequeue) and not a regression.
+that times out costs a Stop + Set TR Dequeue) and not a regression.  Quantified
+below.
 
 **Isochronous endpoints.**  The iso path added in `01287f3a7` never waits on a
 transfer event and so never enters this recovery; Ring Underrun and Ring
@@ -172,3 +173,43 @@ X-02 and X-03:
    endpoint was recovered and kept working.
 2. Injection removed, clean rebuild, same boot repeated: no trace output, no
    xHCI failures, root mounted, multi-user reached.
+
+---
+
+## Follow-up investigated and ruled out — late Transfer Events during recovery
+
+Recorded so it is not re-derived.  `xhci_run_command_st()` discards every
+Transfer Event it steps over while waiting for a command completion, and the
+timeout path issues two commands (Stop Endpoint, Set TR Dequeue) after
+declaring failure.  That suggests a data-loss race: a device satisfying the TD
+during those two round trips would complete it, post a Transfer Event, and have
+that event thrown away — which for a HID interrupt IN, where a timeout is the
+*normal* idle result on every poll cycle, would be a lost keystroke.  It is a
+plausible contributor to the known HID burst loss (~2 of 16 events).
+
+**It does not happen.**  A watch was built that stashes the in-flight TD's TRB
+addresses across the recovery and offers each about-to-be-discarded event to
+them.  Instrumented, on a `qemu-xhci` boot with a keyboard and a mouse:
+
+* An idle boot to multi-user caught **142** events — every one of them
+  completion code **26 (Stopped)** with the full residue, i.e. Stop Endpoint's
+  own artifact event for the TD it cancelled (s4.6.9), carrying no data.
+* **400 keystrokes** injected over QMP `send-key` at 4 ms intervals — chosen to
+  straddle `USB_HID_INTR_TIMEOUT_MS` exactly — caught **zero** data-bearing
+  completions.
+
+The reason is that `xhci_wait_event()` tests the cycle bit before checking its
+deadline, so any event already on the ring is seen; the window in which a
+completion can be both late and discarded turns out to be too narrow to hit.
+The watch was reverted rather than committed: it is ~40 lines of state on the
+controller for a race with no demonstrated occurrence.
+
+What the exercise did establish is the **cost** of the existing design: 142
+Stop Endpoint + Set TR Dequeue pairs, i.e. ~284 command-ring round trips, on a
+single idle boot, purely from two HID endpoints being polled with a short
+timeout.  Every one cancels a TD that was doing nothing wrong.  The design that
+removes this is to leave an interrupt-IN TD armed across poll cycles and check
+it for completion instead of cancelling and re-posting — which also closes the
+interval where the endpoint has no TD posted at all.  That is a change to the
+synchronous submit contract, not a local fix, and is the same architectural
+work the HID burst-loss note calls for (real HCD completion callbacks).
