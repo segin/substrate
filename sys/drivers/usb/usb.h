@@ -521,6 +521,16 @@ typedef struct usb_hcd {
      * caller keeps a window of packets scheduled a few frames ahead of
      * frame_number() for gapless playback.  NULL if the HCD has no iso support.
      */
+    /*
+     * The modulus of the frame space frame_number() counts in and
+     * iso_schedule() targets: 1024 on UHCI (the frame-list size), 2048 on
+     * xHCI (the Frame Index portion of MFINDEX, and xHCI 1.2 s4.11.2.5:
+     * "The Frame ID value is calculated as the modulus of 2048").  The two
+     * differ, so a scheduler that hard-codes one breaks on the other --
+     * uac's wrap arithmetic must add THIS, not a constant.  0 is read as
+     * 1024 so an HCD that predates the field keeps its old behaviour.
+     */
+    uint16_t iso_frame_modulus;
     uint16_t (*frame_number)(struct usb_hcd *hcd);
     int      (*iso_schedule)(struct usb_hcd *hcd, usb_device_t *dev,
                              usb_endpoint_t *ep, uint16_t frame,

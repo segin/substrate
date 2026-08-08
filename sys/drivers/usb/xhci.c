@@ -2247,6 +2247,7 @@ static int xhci_pci_attach(struct device *dev)
     hc->hcd.set_hub = xhci_set_hub;
     hc->hcd.set_ep0_mps = xhci_set_ep0_mps;
     hc->hcd.port_gone = xhci_port_gone;
+    hc->hcd.iso_frame_modulus = 2048;  /* MFINDEX frame index, s4.11.2.5 */
     hc->hcd.frame_number = xhci_frame_number;
     hc->hcd.iso_schedule = xhci_iso_schedule;
     hc->hcd.iso_reclaim = xhci_iso_reclaim;

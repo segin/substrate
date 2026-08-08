@@ -71,7 +71,11 @@
 #define UAC_LEAD                  4U
 #define UAC_WINDOW                48U
 #define UAC_RING_SLOTS            64U
-#define UAC_NFRAMES               1024U   /* UHCI frame-list size           */
+/* Fallback frame-space modulus, used only if the HCD does not advertise one
+ * (hcd->iso_frame_modulus == 0).  UHCI's value; xHCI advertises 2048, and
+ * assuming 1024 there stalled the stream for the half of every 2048ms cycle
+ * in which the two moduli disagree. [P5-01] */
+#define UAC_NFRAMES               1024U
 
 #define UAC_FIFO_BYTES            (64U * 1024U)   /* ~340 ms cushion          */
 #define UAC_STAGE_FRAMES          256U
@@ -159,9 +163,20 @@ static void uac_feeder(void *arg)
 			continue;
 		}
 
+		/*
+		 * The frame counter's modulus belongs to the controller: 1024 on
+		 * UHCI, 2048 on xHCI.  The wrap increment must add the real
+		 * modulus, or dev_frame jumps backwards at every wrap and the
+		 * window test below goes quiet for the difference -- adding 1024
+		 * on xHCI's 2048-frame counter silenced the stream for ~1s of
+		 * every 2s. [P5-01]
+		 */
+		uint32_t fmod = d->udev->hcd->iso_frame_modulus
+		                    ? d->udev->hcd->iso_frame_modulus : UAC_NFRAMES;
+
 		fr = usb_frame_number(d->udev);
 		if (fr < d->last_fr) {
-			d->frame_hi += UAC_NFRAMES;     /* frame counter wrapped */
+			d->frame_hi += fmod;            /* frame counter wrapped */
 		}
 		d->last_fr = fr;
 		dev_frame = d->frame_hi + fr;
@@ -211,8 +226,14 @@ static void uac_feeder(void *arg)
 			} else {
 				memcpy(buf, src, UAC_PKT_BYTES);
 			}
+			/*
+			 * No mask: uint16_t truncation is exact mod any power-of-two
+			 * modulus up to 65536, and each HCD masks to its own space
+			 * (UHCI to its frame list, xHCI's Frame ID field to 2048).
+			 * Masking here to the WRONG modulus is what [P5-01] was.
+			 */
 			usb_iso_schedule(d->udev, &d->iso_ep,
-			    (uint16_t)(d->sched & (UAC_NFRAMES - 1)),
+			    (uint16_t)d->sched,
 			    (uint32_t)(d->ring_phys + slot * UAC_PKT_MAX),
 			    d->pkt_bytes, &d->handles[slot]);
 			d->sched++;

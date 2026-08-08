@@ -1126,6 +1126,7 @@ static int uhci_pci_attach(struct device *dev)
     hc->hcd.port_status = uhci_port_status;
     hc->hcd.port_reset = uhci_port_reset;
     hc->hcd.port_enable = uhci_port_enable;
+    hc->hcd.iso_frame_modulus = UHCI_FRAME_LIST_SIZE;
     hc->hcd.frame_number = uhci_hcd_frame_number;
     hc->hcd.iso_schedule = uhci_hcd_iso_schedule;
     hc->hcd.iso_reclaim = uhci_hcd_iso_reclaim;
