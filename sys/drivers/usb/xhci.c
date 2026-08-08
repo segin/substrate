@@ -1688,6 +1688,7 @@ static void xhci_take_controller(xhci_hc_t *hc)
 {
     uint32_t hcc = rd32(hc->mmio, XHCI_CAP_HCCPARAMS1);
     uint32_t off = XHCI_HCC1_XECP(hcc) * 4;
+    int found = 0;
 
     /* Each entry needs USBLEGSUP and USBLEGCTLSTS to be inside the mapping.
      * Bounded iteration as well: the list is controller-supplied, and a
@@ -1713,6 +1714,13 @@ static void xhci_take_controller(xhci_hc_t *hc)
             volatile uint8_t *os_sem   = hc->mmio + off + XHCI_LEGSUP_OS_SEM;
             uint32_t ctl;
 
+            /* One line, always: whether the handoff HAPPENED (and from
+             * where) is the first question every hardware failure photo
+             * needs answered, and it used to be silent unless the BIOS
+             * semaphore was set. [HW-01] */
+            found = 1;
+            kprintf("xhci: legacy-support cap at 0x%x, bios_sem=%u\n",
+                    (unsigned)off, (unsigned)*bios_sem);
             if (*bios_sem) {
                 kprintf("xhci: waiting for the BIOS to release the controller\n");
                 *os_sem = 1;
@@ -1738,6 +1746,8 @@ static void xhci_take_controller(xhci_hc_t *hc)
             break;
         off += XHCI_XECP_NEXT(cap) * 4;
     }
+    if (!found)
+        kprintf("xhci: no legacy-support capability found; nothing to hand off\n");
 }
 
 /*
@@ -2324,9 +2334,23 @@ static int xhci_pci_attach(struct device *dev)
     hc->initialized = 1;
     xhci_instances++;
     kprintf("xhci: %s: USB 3.x controller at 0x%x, %u ports, %u slots, ctx=%u, "
-            "scratch=%u\n",
+            "scratch=%u, win=0x%x\n",
             hc->name, (unsigned)phys, hc->nports, hc->maxslots, hc->ctx_size,
-            (unsigned)hc->nscratch);
+            (unsigned)hc->nscratch, (unsigned)hc->mmio_size);
+    /*
+     * One-shot survey of every port showing a connection, raw.  The
+     * enumeration roster says which devices came UP; this says which ports
+     * have something ATTACHED -- and for a device that never enumerates, the
+     * difference (present here, absent there) plus the raw PLS/speed bits is
+     * the entire diagnosis a photo can carry.  Runs once, after the 100ms
+     * power settle; a device that connects later shows up through the
+     * hot-plug scan instead. [HW-01]
+     */
+    for (uint8_t p = 1; p <= hc->nports; p++) {
+        uint32_t psc = portsc_rd(hc, p);
+        if (psc & XHCI_PORT_CCS)
+            kprintf("xhci: port %u: portsc=0x%08x\n", p, (unsigned)psc);
+    }
     return 0;
 }
 
