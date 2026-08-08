@@ -1168,10 +1168,25 @@ static int xhci_ensure_ep(xhci_hc_t *hc, uint8_t slot, usb_device_t *dev,
     else
         type = in ? EP_TYPE_INT_IN : EP_TYPE_INT_OUT;
     uint32_t mps = ep->max_packet ? ep->max_packet : 512;
+    /*
+     * Max Burst Size (Table 6-9): SuperSpeed endpoints take the companion
+     * descriptor's bMaxBurst; high-speed periodic endpoints encode their
+     * additional transactions per microframe (ep->mult is 1..3, the field
+     * wants transactions-1); everything else bursts one packet.  Left at 0
+     * on SuperSpeed -- as this was -- every SS endpoint ran at a fraction
+     * of its negotiated bandwidth. [T2]
+     */
+    uint32_t burst = 0;
+    if (dev && dev->speed == USB_SPEED_SUPER)
+        burst = ep->max_burst;
+    else if (dev && dev->speed == USB_SPEED_HIGH &&
+             (ep->type == USB_EP_TYPE_INTERRUPT || isoch) && ep->mult > 1)
+        burst = (uint32_t)ep->mult - 1;
     uint32_t *epc = (uint32_t *)in_ep_of(hc, s->in_ctx, dci);
     /* CErr must be 0 on an isochronous endpoint (Table 6-9): iso has no
      * retries, so a non-zero count is a malformed context, not just moot. */
     epc[1] = (type << XHCI_EP_TYPE_SHIFT) | (mps << XHCI_EP_MPS_SHIFT) |
+             (burst << XHCI_EP_MAXBURST_SHIFT) |
              ((isoch ? XHCI_EP_CERR_ISOCH : XHCI_EP_CERR_DEFAULT)
               << XHCI_EP_CERR_SHIFT);
     if (streamed) {
@@ -1190,14 +1205,15 @@ static int xhci_ensure_ep(xhci_hc_t *hc, uint8_t slot, usb_device_t *dev,
         epc[3] = (uint32_t)((uint64_t)s->ep_ring[dci].dma >> 32);
     }
     /*
-     * Bandwidth parameters.  A periodic endpoint moves at most one max-packet
-     * per service interval here (we set neither Mult nor Max Burst), so that
-     * is its Max ESIT Payload; an async endpoint reserves nothing and only
-     * needs a representative TRB length. [X-05]
+     * Bandwidth parameters.  A periodic endpoint's Max ESIT Payload is the
+     * bytes it may move per service interval: max-packet times the burst
+     * (Table 6-9's formula, MaxPacketSize * (MaxBurst+1)); an async endpoint
+     * reserves nothing and only needs a representative TRB length. [X-05, T2]
      */
     if (ep->type == USB_EP_TYPE_INTERRUPT || isoch) {
+        uint32_t esit = mps * (burst + 1);
         uint32_t avg = mps < XHCI_EP_AVG_TRB_BULK ? mps : XHCI_EP_AVG_TRB_BULK;
-        epc[4] = XHCI_EP_AVG_TRB_LEN(avg) | XHCI_EP_MAX_ESIT_LO(mps);
+        epc[4] = XHCI_EP_AVG_TRB_LEN(avg) | XHCI_EP_MAX_ESIT_LO(esit);
     } else {
         epc[4] = XHCI_EP_AVG_TRB_LEN(XHCI_EP_AVG_TRB_BULK);
     }

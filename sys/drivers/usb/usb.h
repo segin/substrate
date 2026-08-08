@@ -310,6 +310,7 @@ typedef struct usb_endpoint {
     uint8_t  interval;      /* bInterval */
     uint8_t  toggle;        /* Data toggle (0 or 1) */
     uint8_t  max_streams;   /* SS companion MaxStreams exponent (0 = no streams) */
+    uint8_t  max_burst;     /* SS companion bMaxBurst: packets per burst - 1 */
 } usb_endpoint_t;
 
 /*

@@ -359,6 +359,15 @@ struct xhci_ep_ctx {
 #define XHCI_EP_TYPE_SHIFT   3
 #define XHCI_EP_MPS_SHIFT    16
 #define XHCI_EP_CERR_SHIFT   1
+/*
+ * EP context dword 1 bits 15:8: Max Burst Size, packets per burst minus one
+ * (Table 6-9).  SuperSpeed takes it from the endpoint companion's bMaxBurst;
+ * high-speed periodic endpoints derive it from the wMaxPacketSize
+ * additional-transactions bits (our ep->mult - 1); everything else is 0.
+ * Left at 0 a SuperSpeed endpoint moves one packet per burst -- correct but
+ * a fraction of the negotiated bandwidth.
+ */
+#define XHCI_EP_MAXBURST_SHIFT 8
 #define EP_TYPE_CONTROL      4
 #define EP_TYPE_BULK_OUT     2
 #define EP_TYPE_BULK_IN      6

@@ -798,16 +798,20 @@ static void usb_parse_config(usb_device_t *dev)
                     ep->interval = ep_desc->bInterval;
                     ep->toggle = 0;
                     ep->max_streams = 0;
+                    ep->max_burst = 0;
                     dev->num_endpoints++;
                     if (cur_iface)
                         cur_iface->ep_count++;
                 }
             }
         }
-        /* SuperSpeed endpoint companion follows its endpoint: for a bulk EP,
-         * bmAttributes bits 4:0 are the MaxStreams exponent (0 = no streams). */
+        /* SuperSpeed endpoint companion follows its endpoint (USB 3.2
+         * s9.6.7): bMaxBurst at byte 2 is packets-per-burst minus one and
+         * applies to every transfer type; for a bulk EP, bmAttributes bits
+         * 4:0 are additionally the MaxStreams exponent (0 = no streams). */
         if (bType == USB_DT_SS_EP_COMP && bLength >= 6 && dev->num_endpoints > 0) {
             usb_endpoint_t *ep = &dev->endpoints[dev->num_endpoints - 1];
+            ep->max_burst = ptr[2] & 0x0F;         /* bMaxBurst, 0..15 */
             if (ep->type == USB_EP_TYPE_BULK)
                 ep->max_streams = ptr[3] & 0x1F;   /* bmAttributes.MaxStreams */
         }
