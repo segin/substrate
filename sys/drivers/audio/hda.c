@@ -64,6 +64,8 @@
 #define HDA_CODEC_DISCOVERY_MS     1U
 /* GCAP allows 15 input + 15 output + 30 bidirectional descriptors. */
 #define HDA_MAX_STREAMS            60U
+/* Backstop on the INTSTS re-read loop; see hda_irq_handler(). */
+#define HDA_INTR_MAX_ROUNDS        64
 
 /* ------------------------------------------------------------------- */
 /* Pure helpers (also reachable from host tests)                       */
@@ -1311,26 +1313,16 @@ static void hda_kick(hda_dev_t *d)
 /* IRQ                                                                 */
 /* ------------------------------------------------------------------- */
 
-static int hda_irq_handler(unsigned int irq, void *dev_id, void *frame)
+/* One pass over a nonzero INTSTS.  Every acknowledgement here goes to the
+ * source register, never to INTSTS itself, which is read-only. */
+static void hda_one_intr(hda_dev_t *d, uint32_t status)
 {
-	hda_dev_t *d = dev_id;
-	uint32_t status;
 	uint8_t  sdsts;
-
-	(void)irq;
-	(void)frame;
-	if (d == NULL) {
-		return 0;
-	}
-	status = hda_read32(d, HDA_REG_INTSTS);
-	if (status == 0) {
-		return 0;
-	}
 
 	/*
 	 * Controller interrupt: a codec state change (STATESTS).  This MUST be
 	 * acknowledged at the source.  INTSTS bit 30 is only a summary of it,
-	 * so writing INTSTS alone leaves STATESTS set, the summary re-asserts
+	 * so clearing nothing else leaves STATESTS set, the summary re-asserts
 	 * immediately, and because PCI INTx is level triggered the line never
 	 * drops -- the handler is re-entered forever and the machine wedges
 	 * inside it.  STATESTS is RW1C: write the bits back to clear.
@@ -1339,7 +1331,7 @@ static int hda_irq_handler(unsigned int irq, void *dev_id, void *frame)
 	 * codec-present bit latched, so this is not a rare path -- it is the
 	 * first interrupt the controller ever raises.
 	 */
-	if (status & HDA_INTCTL_CIE) {
+	if (status & HDA_INTSTS_CIS) {
 		uint16_t sts = hda_read16(d, HDA_REG_STATESTS);
 		uint8_t rsts = hda_read8(d, HDA_REG_RIRBSTS);
 
@@ -1432,9 +1424,51 @@ static int hda_irq_handler(unsigned int irq, void *dev_id, void *frame)
 		           sdsts & (HDA_SDSTS_BCIS | HDA_SDSTS_FIFOE |
 		                    HDA_SDSTS_DESE));
 	}
-	/* INTSTS is RW1C — write back to clear. */
-	hda_write32(d, HDA_REG_INTSTS, status);
-	return 1;
+	/*
+	 * INTSTS deliberately not written.  All of GIS, CIS and SIS are RO
+	 * (spec table 15); they are an OR of the real status bits and go away
+	 * only when those do.  The write that used to be here did nothing --
+	 * every acknowledgement that matters happened above.
+	 */
+}
+
+static int hda_irq_handler(unsigned int irq, void *dev_id, void *frame)
+{
+	uint32_t status;
+	hda_dev_t *d = dev_id;
+	int handled = 0;
+	int rounds;
+
+	(void)irq;
+	(void)frame;
+	if (d == NULL) {
+		return 0;
+	}
+
+	/*
+	 * Re-read INTSTS until GIS goes away rather than servicing one
+	 * snapshot.  FreeBSD's hdac_intr_handler() explains why: "It is
+	 * plausible that hardware interrupts a host only when GIS goes from
+	 * zero to one.  GIS is formed by OR-ing multiple hardware statuses,
+	 * so it's possible that a previously cleared status gets set again
+	 * while another status has not been cleared yet.  Thus, there will be
+	 * no new interrupt as GIS always stayed set.  If we don't re-examine
+	 * GIS then we can leave it set and never get an interrupt again."
+	 *
+	 * All-ones means the device has gone away (surprise removal, or the
+	 * BAR unmapped); stop rather than spin on it.  The round cap is a
+	 * backstop -- a source this driver cannot clear would otherwise hang
+	 * the CPU in here, which this controller has managed before.
+	 */
+	for (rounds = 0; rounds < HDA_INTR_MAX_ROUNDS; rounds++) {
+		status = hda_read32(d, HDA_REG_INTSTS);
+		if (status == 0xFFFFFFFFu || (status & HDA_INTSTS_GIS) == 0) {
+			break;
+		}
+		hda_one_intr(d, status);
+		handled = 1;
+	}
+	return handled;
 }
 
 /* ------------------------------------------------------------------- */

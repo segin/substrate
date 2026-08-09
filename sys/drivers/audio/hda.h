@@ -99,6 +99,16 @@
  */
 #define HDA_INTCTL_SIE(n)        (1U << ((n) & 0x1F))
 
+/*
+ * INTSTS bits.  Same positions as INTCTL's enables, but a different
+ * register with different semantics -- all of these are READ ONLY (spec
+ * rev 1.0a table 15).  They cannot be acknowledged here; they clear only
+ * when the underlying source does (SDnSTS, RIRBSTS, STATESTS).
+ */
+#define HDA_INTSTS_GIS           0x80000000U
+#define HDA_INTSTS_CIS           0x40000000U
+#define HDA_INTSTS_SIS(n)        (1U << ((n) & 0x1F))
+
 /* CORBCTL bits */
 #define HDA_CORBCTL_MEIE         0x01
 #define HDA_CORBCTL_RUN          0x02
