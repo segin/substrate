@@ -546,6 +546,44 @@ static void hda_amp_unmute_out(hda_dev_t *d, uint8_t nid, uint32_t wcaps)
 }
 
 /*
+ * Unmute one *input* of a widget -- the amp on the connection at
+ * `index`, not the widget's single output amp.
+ *
+ * Spec 7.3.3.7: "Index is only used when programming the input
+ * amplifiers on Selector Widgets and Sum Widgets, where each input may
+ * have an individual amplifier.  The index corresponds to the input's
+ * offset in the Connection List."
+ *
+ * A mixer sums every input it has, so selecting a source is not enough:
+ * the input carrying our DAC has to be unmuted explicitly, and like
+ * every other amp it comes up muted.  Nothing in this driver touched
+ * input amps at all, which is the textbook "the graph is routed
+ * correctly and there is still no sound" case on the Realtek and
+ * Conexant codecs that interpose a mixer between DAC and pin.
+ *
+ * Setting an amp that does not exist is defined as a no-op ("Any attempt
+ * to set a non-existent amplifier is ignored"), so a widget whose input
+ * amp is really a capture-path amp loses nothing by this.
+ */
+static void hda_amp_unmute_in(hda_dev_t *d, uint8_t nid, uint32_t wcaps,
+                              uint8_t index)
+{
+	uint32_t caps = hda_amp_caps(d, nid, wcaps, 0);
+	uint8_t gain = (uint8_t)HDA_AMPCAP_OFFSET(caps);
+	uint8_t steps = (uint8_t)HDA_AMPCAP_NUMSTEPS(caps);
+
+	if (gain > steps) {
+		gain = steps;
+	}
+	/* Mute bit deliberately left clear. */
+	hda_send_verb(d, d->codec_addr, nid, HDA_VERB_SET_AMP_GAIN_MUTE,
+	              (uint16_t)(HDA_AMP_SET_INPUT | HDA_AMP_SET_LEFT |
+	                         HDA_AMP_SET_RIGHT |
+	                         ((uint16_t)index << HDA_AMP_SET_INDEX_SHIFT) |
+	                         (gain & HDA_AMP_GAIN_MASK)));
+}
+
+/*
  * Index of `target` in `nid`'s connection list, or -1.  Short-form lists
  * pack four 8-bit entries per response, long-form two 16-bit ones.  Range
  * entries (high bit set on a short entry) are not expanded: they only
@@ -589,6 +627,7 @@ static int hda_conn_index(hda_dev_t *d, uint8_t nid, uint8_t target)
  */
 static int hda_route_pin_to_dac(hda_dev_t *d, uint8_t pin, uint8_t dac)
 {
+	uint32_t pincaps = hda_get_param(d, pin, HDA_PARAM_AUDIO_WIDGET_CAPS);
 	uint32_t lenr;
 	uint8_t len, i;
 	int idx;
@@ -597,6 +636,9 @@ static int hda_route_pin_to_dac(hda_dev_t *d, uint8_t pin, uint8_t dac)
 	if (idx >= 0) {
 		hda_send_verb(d, d->codec_addr, pin, HDA_VERB_SET_CONN_SELECT,
 		              (uint16_t)idx);
+		if (pincaps & HDA_AW_IN_AMP) {
+			hda_amp_unmute_in(d, pin, pincaps, (uint8_t)idx);
+		}
 		return 0;
 	}
 
@@ -610,6 +652,8 @@ static int hda_route_pin_to_dac(hda_dev_t *d, uint8_t pin, uint8_t dac)
 		uint32_t caps;
 		int type;
 
+		int midx;
+
 		if (mid == 0) {
 			continue;
 		}
@@ -618,19 +662,29 @@ static int hda_route_pin_to_dac(hda_dev_t *d, uint8_t pin, uint8_t dac)
 		if (type != HDA_AW_TYPE_MIXER && type != HDA_AW_TYPE_SELECTOR) {
 			continue;
 		}
-		if (hda_conn_index(d, mid, dac) < 0) {
+		/* Resolved once: every hda_conn_index() call walks the list
+		 * over the CORB, and this used to be asked for twice. */
+		midx = hda_conn_index(d, mid, dac);
+		if (midx < 0) {
 			continue;
 		}
 		if (type == HDA_AW_TYPE_SELECTOR) {
 			hda_send_verb(d, d->codec_addr, mid,
 			              HDA_VERB_SET_CONN_SELECT,
-			              (uint16_t)hda_conn_index(d, mid, dac));
+			              (uint16_t)midx);
+		}
+		/* Open the intermediate's input for the DAC, then its output. */
+		if (caps & HDA_AW_IN_AMP) {
+			hda_amp_unmute_in(d, mid, caps, (uint8_t)midx);
 		}
 		if (caps & HDA_AW_OUT_AMP) {
 			hda_amp_unmute_out(d, mid, caps);
 		}
 		hda_send_verb(d, d->codec_addr, pin, HDA_VERB_SET_CONN_SELECT,
 		              (uint16_t)i);
+		if (pincaps & HDA_AW_IN_AMP) {
+			hda_amp_unmute_in(d, pin, pincaps, i);
+		}
 		return 0;
 	}
 	return -ENODEV;
