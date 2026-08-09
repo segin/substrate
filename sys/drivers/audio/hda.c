@@ -94,20 +94,79 @@ uint32_t hda_pack_verb(uint8_t cad, uint8_t nid, uint16_t verb,
 	return v;
 }
 
-uint16_t hda_encode_format(uint32_t sample_rate, uint32_t bits_per_sample,
-                           uint32_t channels)
-{
-	uint16_t fmt = 0;
-	uint16_t bits;
-	uint16_t chan;
-	uint32_t base_rate;
-	uint16_t mult;
-	uint16_t div;
+/*
+ * Every rate SDnFMT can express, as (BASE, MULT, DIV) field values.
+ *
+ * The link rate is BASE * (MULT + 1) / (DIV + 1), but only MULT 0..3
+ * (x1..x4) and DIV 0..7 are legal -- spec table 40 marks MULT 100b-111b
+ * reserved -- so this is not an arithmetic identity to be computed on the
+ * fly.  Anything absent here has no legal encoding at all and must be
+ * refused rather than approximated.
+ *
+ * The arithmetic version this replaces got that backwards in both
+ * directions.  It only ever emitted a nonzero MULT or a nonzero DIV,
+ * never both, so 32 kHz (48 kHz x2 / 3) was unreachable; its `else`
+ * fell back to a perfectly valid 48 kHz encoding, so 8000, 11025, 16000
+ * and 32000 all silently played at 48 kHz -- three to six times too
+ * fast -- with no error anywhere for set_params to catch; and it clamped
+ * an out-of-range multiplier to 7 rather than rejecting it, handing the
+ * controller a reserved MULT for any rate above 192 kHz.
+ */
+static const struct hda_rate_enc {
+	uint32_t rate;
+	uint8_t  base;   /* SDnFMT bit 14:    0 = 48 kHz, 1 = 44.1 kHz */
+	uint8_t  mult;   /* SDnFMT bits 13:11 (x1..x4 as 0..3)         */
+	uint8_t  div;    /* SDnFMT bits 10:8  (/1../8 as 0..7)         */
+} hda_rate_tab[] = {
+	/* 48 kHz base */
+	{      6000, 0, 0, 7 },
+	{      8000, 0, 0, 5 },
+	{      9600, 0, 0, 4 },
+	{     12000, 0, 0, 3 },
+	{     16000, 0, 0, 2 },
+	{     18000, 0, 2, 7 },
+	{     19200, 0, 1, 4 },
+	{     24000, 0, 0, 1 },
+	{     28800, 0, 2, 4 },
+	{     32000, 0, 1, 2 },
+	{     36000, 0, 2, 3 },
+	{     38400, 0, 3, 4 },
+	{     48000, 0, 0, 0 },
+	{     64000, 0, 3, 2 },
+	{     72000, 0, 2, 1 },
+	{     96000, 0, 1, 0 },
+	{    144000, 0, 2, 0 },
+	{    192000, 0, 3, 0 },
+	/* 44.1 kHz base */
+	{      8820, 1, 0, 4 },
+	{     11025, 1, 0, 3 },
+	{     12600, 1, 1, 6 },
+	{     14700, 1, 0, 2 },
+	{     17640, 1, 1, 4 },
+	{     18900, 1, 2, 6 },
+	{     22050, 1, 0, 1 },
+	{     25200, 1, 3, 6 },
+	{     26460, 1, 2, 4 },
+	{     29400, 1, 1, 2 },
+	{     33075, 1, 2, 3 },
+	{     35280, 1, 3, 4 },
+	{     44100, 1, 0, 0 },
+	{     58800, 1, 3, 2 },
+	{     66150, 1, 2, 1 },
+	{     88200, 1, 1, 0 },
+	{    132300, 1, 2, 0 },
+	{    176400, 1, 3, 0 },
+};
 
-	if (channels == 0 || channels > 16) {
-		return 0;
+int hda_encode_format(uint32_t sample_rate, uint32_t bits_per_sample,
+                      uint32_t channels, uint16_t *out)
+{
+	uint16_t bits;
+	size_t i;
+
+	if (out == NULL || channels == 0 || channels > 16) {
+		return -EINVAL;
 	}
-	chan = (uint16_t)((channels - 1) & 0x0F);
 
 	switch (bits_per_sample) {
 	case 8:  bits = 0; break;
@@ -115,37 +174,23 @@ uint16_t hda_encode_format(uint32_t sample_rate, uint32_t bits_per_sample,
 	case 20: bits = 2; break;
 	case 24: bits = 3; break;
 	case 32: bits = 4; break;
-	default: return 0;
+	default: return -EINVAL;
 	}
 
-	/* Determine the 48 kHz vs 44.1 kHz family and the multiplier/divisor
-	 * pair.  Substrate currently exposes the canonical commercial rates;
-	 * unsupported rates fall back to 48 kHz. */
-	if (sample_rate % 44100U == 0) {
-		base_rate = 1;   /* BASE = 44.1 kHz */
-		mult = (uint16_t)((sample_rate / 44100U) - 1);
-		div = 0;
-	} else if (sample_rate % 48000U == 0) {
-		base_rate = 0;   /* BASE = 48 kHz */
-		mult = (uint16_t)((sample_rate / 48000U) - 1);
-		div = 0;
-	} else if (sample_rate == 22050U) {
-		base_rate = 1; mult = 0; div = 1;
-	} else if (sample_rate == 24000U || sample_rate == 32000U) {
-		base_rate = 0; mult = 0;
-		div = (sample_rate == 24000U) ? 1 : 0;
-	} else {
-		base_rate = 0; mult = 0; div = 0;
-	}
-	if (mult > 7) mult = 7;
-	if (div > 7)  div = 7;
+	for (i = 0; i < sizeof(hda_rate_tab) / sizeof(hda_rate_tab[0]); i++) {
+		const struct hda_rate_enc *r = &hda_rate_tab[i];
 
-	fmt |= (uint16_t)(base_rate << 14);
-	fmt |= (uint16_t)(mult << 11);
-	fmt |= (uint16_t)(div << 8);
-	fmt |= (uint16_t)(bits << 4);
-	fmt |= chan;
-	return fmt;
+		if (r->rate != sample_rate) {
+			continue;
+		}
+		*out = (uint16_t)(((uint16_t)r->base << HDA_FMT_BASE_SHIFT) |
+		                  ((uint16_t)r->mult << HDA_FMT_MULT_SHIFT) |
+		                  ((uint16_t)r->div  << HDA_FMT_DIV_SHIFT)  |
+		                  (bits << HDA_FMT_BITS_SHIFT) |
+		                  (uint16_t)((channels - 1) & 0x0F));
+		return 0;
+	}
+	return -EINVAL;
 }
 
 void hda_build_bdl_entry(hda_bdl_entry_t *entry, uint64_t buf_phys,
@@ -1048,8 +1093,16 @@ static int hda_output_stream_init(hda_dev_t *d)
 	hda_write16(d, d->sd_base + HDA_SD_LVI, HDA_BDL_ENTRIES - 1);
 	hda_write32(d, d->sd_base + HDA_SD_CBL,
 	            (uint32_t)(HDA_BDL_ENTRIES * HDA_CHUNK_BYTES));
-	hda_write16(d, d->sd_base + HDA_SD_FMT,
-	            hda_encode_format(HDA_DEFAULT_RATE, 16, 2));
+	{
+		uint16_t fmt;
+
+		/* The compiled-in default must be encodable; if it somehow is
+		 * not, leave SDnFMT at its reset value rather than writing
+		 * garbage. */
+		if (hda_encode_format(HDA_DEFAULT_RATE, 16, 2, &fmt) == 0) {
+			hda_write16(d, d->sd_base + HDA_SD_FMT, fmt);
+		}
+	}
 	return 0;
 }
 
@@ -1141,11 +1194,13 @@ static int hda_set_params(audio_dev_t *adev, audio_info_t *info)
 {
 	hda_dev_t *d = adev->driver_data;
 	uint16_t fmt;
+	int rc;
 
-	fmt = hda_encode_format(info->play.sample_rate,
-	                        info->play.precision, info->play.channels);
-	if (fmt == 0) {
-		return -EINVAL;
+	rc = hda_encode_format(info->play.sample_rate,
+	                       info->play.precision, info->play.channels,
+	                       &fmt);
+	if (rc != 0) {
+		return rc;
 	}
 	hda_write16(d, d->sd_base + HDA_SD_FMT, fmt);
 	/* The converter has its own copy of the format; leaving it on the

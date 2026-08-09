@@ -233,12 +233,28 @@ uint32_t hda_pack_verb(uint8_t cad, uint8_t nid, uint16_t verb,
                        uint16_t payload);
 
 /*
- * Encode the 16-bit stream format register value from PCM parameters.
- * Returns the SDFMT value: BASE bit 14, MULT bits 11..13, DIV bits 8..10,
- * BITS bits 4..6, CHAN-1 bits 0..3.  Unsupported combinations return 0.
+ * Encode the 16-bit stream format register value (SDnFMT) from PCM
+ * parameters: BASE bit 14, MULT bits 13..11, DIV bits 10..8, BITS bits
+ * 6..4, CHAN-1 bits 3..0 (spec rev 1.0a section 3.3.41, table 40).
+ *
+ * Stores the encoding through *out and returns 0, or returns -EINVAL and
+ * leaves *out untouched when the rate / sample width / channel count has
+ * no legal encoding.
+ *
+ * The status cannot be folded into the return value the way it used to
+ * be: 48 kHz 8-bit mono is BASE=0 MULT=0 DIV=0 BITS=0 CHAN=0, i.e. the
+ * all-zero encoding, so a 0 return is a legal format and was
+ * indistinguishable from "unsupported" -- which made set_params reject
+ * that one combination outright.
  */
-uint16_t hda_encode_format(uint32_t sample_rate, uint32_t bits_per_sample,
-                           uint32_t channels);
+int hda_encode_format(uint32_t sample_rate, uint32_t bits_per_sample,
+                      uint32_t channels, uint16_t *out);
+
+/* SDnFMT field shifts (spec table 40). */
+#define HDA_FMT_BASE_SHIFT       14
+#define HDA_FMT_MULT_SHIFT       11
+#define HDA_FMT_DIV_SHIFT        8
+#define HDA_FMT_BITS_SHIFT       4
 
 /*
  * Buffer Descriptor List entry (16 bytes per the spec: u64 buf_phys,

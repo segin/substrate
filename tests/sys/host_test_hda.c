@@ -1,6 +1,7 @@
 #define HOST_TEST 1
 
 #include <assert.h>
+#include <errno.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -57,51 +58,60 @@ static uint32_t hda_pack_verb(uint8_t cad, uint8_t nid, uint16_t verb,
 	return v;
 }
 
-static uint16_t hda_encode_format(uint32_t sample_rate,
-                                  uint32_t bits_per_sample, uint32_t channels)
-{
-	uint16_t fmt = 0;
-	uint16_t bits;
-	uint16_t chan;
-	uint32_t base_rate;
-	uint16_t mult;
-	uint16_t div;
+#define HDA_FMT_BASE_SHIFT 14
+#define HDA_FMT_MULT_SHIFT 11
+#define HDA_FMT_DIV_SHIFT  8
+#define HDA_FMT_BITS_SHIFT 4
 
-	if (channels == 0 || channels > 16) return 0;
-	chan = (uint16_t)((channels - 1) & 0x0F);
+static const struct hda_rate_enc {
+	uint32_t rate;
+	uint8_t  base;
+	uint8_t  mult;
+	uint8_t  div;
+} hda_rate_tab[] = {
+	/* 48 kHz base */
+	{      6000, 0, 0, 7 }, {      8000, 0, 0, 5 }, {   9600, 0, 0, 4 },
+	{     12000, 0, 0, 3 }, {     16000, 0, 0, 2 }, {  18000, 0, 2, 7 },
+	{     19200, 0, 1, 4 }, {     24000, 0, 0, 1 }, {  28800, 0, 2, 4 },
+	{     32000, 0, 1, 2 }, {     36000, 0, 2, 3 }, {  38400, 0, 3, 4 },
+	{     48000, 0, 0, 0 }, {     64000, 0, 3, 2 }, {  72000, 0, 2, 1 },
+	{     96000, 0, 1, 0 }, {    144000, 0, 2, 0 }, { 192000, 0, 3, 0 },
+	/* 44.1 kHz base */
+	{      8820, 1, 0, 4 }, {     11025, 1, 0, 3 }, {  12600, 1, 1, 6 },
+	{     14700, 1, 0, 2 }, {     17640, 1, 1, 4 }, {  18900, 1, 2, 6 },
+	{     22050, 1, 0, 1 }, {     25200, 1, 3, 6 }, {  26460, 1, 2, 4 },
+	{     29400, 1, 1, 2 }, {     33075, 1, 2, 3 }, {  35280, 1, 3, 4 },
+	{     44100, 1, 0, 0 }, {     58800, 1, 3, 2 }, {  66150, 1, 2, 1 },
+	{     88200, 1, 1, 0 }, {    132300, 1, 2, 0 }, { 176400, 1, 3, 0 },
+};
+
+static int hda_encode_format(uint32_t sample_rate, uint32_t bits_per_sample,
+                             uint32_t channels, uint16_t *out)
+{
+	uint16_t bits;
+	size_t i;
+
+	if (out == NULL || channels == 0 || channels > 16) return -EINVAL;
 	switch (bits_per_sample) {
 	case 8:  bits = 0; break;
 	case 16: bits = 1; break;
 	case 20: bits = 2; break;
 	case 24: bits = 3; break;
 	case 32: bits = 4; break;
-	default: return 0;
+	default: return -EINVAL;
 	}
-	if (sample_rate % 44100U == 0) {
-		base_rate = 1;
-		mult = (uint16_t)((sample_rate / 44100U) - 1);
-		div = 0;
-	} else if (sample_rate % 48000U == 0) {
-		base_rate = 0;
-		mult = (uint16_t)((sample_rate / 48000U) - 1);
-		div = 0;
-	} else if (sample_rate == 22050U) {
-		base_rate = 1; mult = 0; div = 1;
-	} else if (sample_rate == 24000U || sample_rate == 32000U) {
-		base_rate = 0; mult = 0;
-		div = (sample_rate == 24000U) ? 1 : 0;
-	} else {
-		base_rate = 0; mult = 0; div = 0;
-	}
-	if (mult > 7) mult = 7;
-	if (div > 7)  div = 7;
+	for (i = 0; i < sizeof(hda_rate_tab) / sizeof(hda_rate_tab[0]); i++) {
+		const struct hda_rate_enc *r = &hda_rate_tab[i];
 
-	fmt |= (uint16_t)(base_rate << 14);
-	fmt |= (uint16_t)(mult << 11);
-	fmt |= (uint16_t)(div << 8);
-	fmt |= (uint16_t)(bits << 4);
-	fmt |= chan;
-	return fmt;
+		if (r->rate != sample_rate) continue;
+		*out = (uint16_t)(((uint16_t)r->base << HDA_FMT_BASE_SHIFT) |
+		                  ((uint16_t)r->mult << HDA_FMT_MULT_SHIFT) |
+		                  ((uint16_t)r->div  << HDA_FMT_DIV_SHIFT)  |
+		                  (bits << HDA_FMT_BITS_SHIFT) |
+		                  (uint16_t)((channels - 1) & 0x0F));
+		return 0;
+	}
+	return -EINVAL;
 }
 
 static void hda_build_bdl_entry(hda_bdl_entry_t *e, uint64_t buf_phys,
@@ -148,46 +158,111 @@ static void test_pack_verb_codec_address_clamped_to_4_bits(void) {
 	assert(((v >> 28) & 0xF) == 0xF);
 }
 
-static void test_format_48k_stereo_16bit(void) {
-	uint16_t fmt = hda_encode_format(48000, 16, 2);
-	/* BASE=0, MULT=0, DIV=0, BITS=1 (16-bit), CHAN-1=1 → 0x0011 */
-	assert(fmt == 0x0011);
+/* Decode an SDnFMT back to the link rate it actually asks the codec for.
+ * A format that encodes "successfully" but decodes to a different rate is
+ * the failure mode that matters: it is silent, and it plays the stream at
+ * the wrong speed rather than failing. */
+static uint32_t fmt_rate(uint16_t f) {
+	uint32_t base = ((f >> HDA_FMT_BASE_SHIFT) & 1) ? 44100 : 48000;
+	return base * (((f >> HDA_FMT_MULT_SHIFT) & 7) + 1) /
+	              (((f >> HDA_FMT_DIV_SHIFT) & 7) + 1);
 }
 
-static void test_format_44_1k_stereo_16bit(void) {
-	/* BASE=1, MULT=0, DIV=0, BITS=1, CHAN-1=1 → 0x4011 */
-	uint16_t fmt = hda_encode_format(44100, 16, 2);
+/*
+ * Every rate in the table must round-trip, and no entry may use a
+ * reserved MULT (spec table 40: 100b-111b reserved).
+ */
+static void test_format_every_table_rate_round_trips(void) {
+	size_t i;
+
+	for (i = 0; i < sizeof(hda_rate_tab) / sizeof(hda_rate_tab[0]); i++) {
+		uint16_t fmt = 0xFFFF;
+		uint32_t rate = hda_rate_tab[i].rate;
+
+		assert(hda_encode_format(rate, 16, 2, &fmt) == 0);
+		assert(fmt_rate(fmt) == rate);
+		assert(((fmt >> HDA_FMT_MULT_SHIFT) & 7) <= 3);
+		assert(((fmt >> HDA_FMT_BITS_SHIFT) & 7) == 1);
+		assert((fmt & 0x0F) == 1);
+	}
+}
+
+/*
+ * The rates the old arithmetic encoder silently mis-encoded as 48 kHz.
+ * 32 kHz is the interesting one: it is the only common rate that needs a
+ * nonzero MULT *and* a nonzero DIV (48 kHz x2 / 3), which that encoder
+ * could never produce.
+ */
+static void test_format_rates_the_old_encoder_got_wrong(void) {
+	static const struct { uint32_t rate; uint16_t want; } t[] = {
+		{  8000, 0x0511 },   /* 48k /6            */
+		{ 11025, 0x4311 },   /* 44.1k /4          */
+		{ 16000, 0x0211 },   /* 48k /3            */
+		{ 32000, 0x0A11 },   /* 48k x2 /3         */
+	};
+	size_t i;
+
+	for (i = 0; i < sizeof(t) / sizeof(t[0]); i++) {
+		uint16_t fmt = 0xFFFF;
+
+		assert(hda_encode_format(t[i].rate, 16, 2, &fmt) == 0);
+		assert(fmt == t[i].want);
+		assert(fmt_rate(fmt) == t[i].rate);
+		/* Not the 48 kHz stereo 16-bit encoding it used to collapse to. */
+		assert(fmt != 0x0011);
+	}
+}
+
+static void test_format_canonical_rates(void) {
+	uint16_t fmt = 0xFFFF;
+
+	assert(hda_encode_format(48000, 16, 2, &fmt) == 0);
+	assert(fmt == 0x0011);   /* BASE=0 MULT=0 DIV=0 BITS=1 CHAN-1=1 */
+	assert(hda_encode_format(44100, 16, 2, &fmt) == 0);
 	assert(fmt == 0x4011);
+	assert(hda_encode_format(88200, 16, 2, &fmt) == 0);
+	assert(((fmt >> HDA_FMT_BASE_SHIFT) & 1) == 1);
+	assert(((fmt >> HDA_FMT_MULT_SHIFT) & 7) == 1);
+	assert(hda_encode_format(22050, 16, 2, &fmt) == 0);
+	assert(((fmt >> HDA_FMT_BASE_SHIFT) & 1) == 1);
+	assert(((fmt >> HDA_FMT_DIV_SHIFT) & 7) == 1);
 }
 
-static void test_format_88_2k_uses_mult(void) {
-	/* 88200 = 44100*2 → BASE=1, MULT=1 → bits 11..13 = 1 */
-	uint16_t fmt = hda_encode_format(88200, 16, 2);
-	assert(((fmt >> 14) & 1) == 1);          /* BASE=1 */
-	assert(((fmt >> 11) & 7) == 1);          /* MULT=1 */
-}
+/*
+ * 48 kHz 8-bit mono is the all-zero encoding.  That is a legal format, so
+ * the status has to come back separately -- when it was folded into the
+ * return value this one combination was indistinguishable from
+ * "unsupported" and set_params rejected it.
+ */
+static void test_format_8bit_mono_is_zero_but_valid(void) {
+	uint16_t fmt = 0xFFFF;
 
-static void test_format_22050_uses_div(void) {
-	uint16_t fmt = hda_encode_format(22050, 16, 2);
-	assert(((fmt >> 14) & 1) == 1);          /* BASE=1 */
-	assert(((fmt >> 8) & 7) == 1);           /* DIV=1 */
-}
-
-static void test_format_8bit_mono(void) {
-	uint16_t fmt = hda_encode_format(48000, 8, 1);
-	/* BITS=0, CHAN-1=0 → 0x0000 */
+	assert(hda_encode_format(48000, 8, 1, &fmt) == 0);
 	assert(fmt == 0x0000);
 }
 
 static void test_format_24bit_marks_correct_bits_field(void) {
-	uint16_t fmt = hda_encode_format(48000, 24, 2);
-	assert(((fmt >> 4) & 7) == 3);
+	uint16_t fmt = 0xFFFF;
+
+	assert(hda_encode_format(48000, 24, 2, &fmt) == 0);
+	assert(((fmt >> HDA_FMT_BITS_SHIFT) & 7) == 3);
 }
 
 static void test_format_unsupported_rejected(void) {
-	assert(hda_encode_format(48000, 12, 2) == 0);   /* odd width */
-	assert(hda_encode_format(48000, 16, 0) == 0);   /* zero channels */
-	assert(hda_encode_format(48000, 16, 99) == 0);  /* too many ch */
+	uint16_t fmt = 0xBEEF;
+
+	assert(hda_encode_format(48000, 12, 2, &fmt) == -EINVAL);  /* width */
+	assert(hda_encode_format(48000, 16, 0, &fmt) == -EINVAL);  /* 0 ch  */
+	assert(hda_encode_format(48000, 16, 99, &fmt) == -EINVAL); /* >16ch */
+	assert(hda_encode_format(48000, 16, 2, NULL) == -EINVAL);
+	/* Rates with no legal encoding must be refused, not approximated.
+	 * 352800 = 44.1k x8 needs MULT=7, which is reserved; the old code
+	 * clamped to it and handed the controller a reserved value. */
+	assert(hda_encode_format(352800, 16, 2, &fmt) == -EINVAL);
+	assert(hda_encode_format(37000, 16, 2, &fmt) == -EINVAL);
+	assert(hda_encode_format(0, 16, 2, &fmt) == -EINVAL);
+	/* Untouched on every rejection. */
+	assert(fmt == 0xBEEF);
 }
 
 static void test_bdl_entry_layout_is_packed_16_bytes(void) {
@@ -267,11 +342,10 @@ int main(void) {
 	test_pack_verb_short_form_full_16bit_payload();
 	test_pack_verb_codec_address_field();
 	test_pack_verb_codec_address_clamped_to_4_bits();
-	test_format_48k_stereo_16bit();
-	test_format_44_1k_stereo_16bit();
-	test_format_88_2k_uses_mult();
-	test_format_22050_uses_div();
-	test_format_8bit_mono();
+	test_format_every_table_rate_round_trips();
+	test_format_rates_the_old_encoder_got_wrong();
+	test_format_canonical_rates();
+	test_format_8bit_mono_is_zero_but_valid();
 	test_format_24bit_marks_correct_bits_field();
 	test_format_unsupported_rejected();
 	test_bdl_entry_layout_is_packed_16_bytes();
