@@ -1830,6 +1830,7 @@ static int hda_close(audio_dev_t *adev)
 static int hda_set_params(audio_dev_t *adev, audio_info_t *info)
 {
 	hda_dev_t *d = adev->driver_data;
+	unsigned long flags;
 	uint16_t fmt;
 	int rc;
 
@@ -1839,13 +1840,48 @@ static int hda_set_params(audio_dev_t *adev, audio_info_t *info)
 	if (rc != 0) {
 		return rc;
 	}
+	flags = spinlock_acquire_irq(&d->feed_lock);
+
+	if (fmt == d->fmt && d->running) {
+		/* Nothing to change; do not disturb a running stream. */
+		spinlock_release_irq(&d->feed_lock, flags);
+		return 0;
+	}
+
+	/*
+	 * Stop before touching SDnFMT.  The register is only writable with
+	 * the engine idle -- 3.3.38 and 3.3.41 both restrict descriptor
+	 * programming to a stopped stream, and FreeBSD only writes SDFMT
+	 * inside stream_start with RUN clear.  Rewriting it underneath a
+	 * running engine also left the PCM already queued in the ring to be
+	 * played at the new rate and channel count.
+	 *
+	 * Anything still buffered belongs to the old format, so it goes:
+	 * a format change mid-stream is the application telling us the old
+	 * audio is finished with.
+	 */
+	if (d->running) {
+		(void)hda_stream_stop(d);
+	}
+	hda_write8(d, d->sd_base + HDA_SD_STS,
+	           HDA_SDSTS_BCIS | HDA_SDSTS_FIFOE | HDA_SDSTS_DESE);
+	d->next_idx      = 0;
+	d->writes_queued = 0;
+	d->slots_played  = 0;
+	d->halt_pending  = 0;
+	audio_fifo_reset(&d->fifo);
+
 	/* Remembered because a stream reset clears SDnFMT, and every start
 	 * goes through one. */
 	d->fmt = fmt;
 	hda_write16(d, d->sd_base + HDA_SD_FMT, fmt);
+
+	spinlock_release_irq(&d->feed_lock, flags);
+
 	/* The converter has its own copy of the format; leaving it on the
 	 * old one makes the codec decode the stream wrongly (wrong rate /
-	 * channel count) rather than fall silent, which is worse. */
+	 * channel count) rather than fall silent, which is worse.  Sent
+	 * outside the feed lock because it is a CORB round trip. */
 	hda_codec_bind_stream(d, fmt);
 	return 0;
 }
