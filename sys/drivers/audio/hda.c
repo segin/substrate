@@ -34,8 +34,6 @@
 #define HDA_PCI_CLASS_MULTIMEDIA   0x04
 #define HDA_PCI_SUBCLASS_HDA       0x03
 
-#define HDA_CORB_ENTRIES           256
-#define HDA_RIRB_ENTRIES           256
 #define HDA_BDL_ENTRIES            32
 #define HDA_CHUNK_BYTES            4096U
 #define HDA_DEFAULT_RATE           48000U
@@ -245,6 +243,14 @@ typedef struct hda_dev {
 
 	uint16_t         codec_mask;    /* STATESTS bitmap */
 	uint8_t          codec_addr;    /* first present codec */
+
+	/*
+	 * Ring sizes are what the controller advertises, not a constant --
+	 * see hda_ring_size().  Everything that indexes these rings has to
+	 * use these counts, including the modulo in hda_send_verb().
+	 */
+	unsigned         corb_entries;
+	unsigned         rirb_entries;
 
 	uint32_t        *corb;
 	dma_addr_t       corb_phys;
@@ -490,25 +496,70 @@ static int hda_controller_reset(hda_dev_t *d)
 	return 0;
 }
 
+/*
+ * Pick a ring size the controller actually implements.
+ *
+ * 3.3.24 / 3.3.31: bits 7:4 are a capability *bit mask*, not a maximum
+ * -- "This is implemented as a bit mask; for example, if the controller
+ * supported two entries and 256 entries, this register would have a
+ * value of 0101b" -- and "There is no requirement to support more than
+ * one CORB Size."  Programming an unsupported value is undefined:
+ * "Setting this field to an unsupported size will produce unspecified
+ * results."  The field may even be read-only when only one size exists.
+ *
+ * The driver used to hardcode 256 entries.  That is the common case and
+ * happens to be right on every part it has run on, but it was never
+ * checked.  Returns the entry count and stores the register encoding.
+ */
+static unsigned hda_ring_size(hda_dev_t *d, uint32_t reg, uint8_t *enc)
+{
+	uint8_t cap = (uint8_t)(hda_read8(d, reg) >> 4);
+
+	if (cap & 0x4) {
+		*enc = HDA_RBSIZE_256;
+		return 256;
+	}
+	if (cap & 0x2) {
+		*enc = HDA_RBSIZE_16;
+		return 16;
+	}
+	if (cap & 0x1) {
+		*enc = HDA_RBSIZE_2;
+		return 2;
+	}
+	/*
+	 * No capability bits at all.  Some emulated and older controllers
+	 * leave the field zero; 256 entries is the near-universal default and
+	 * what this driver has always assumed, so keep that behaviour rather
+	 * than refusing to attach.
+	 */
+	*enc = HDA_RBSIZE_256;
+	return 256;
+}
+
 static int hda_corb_rirb_setup(hda_dev_t *d)
 {
 	uint32_t budget;
+	uint8_t corbsize_enc, rirbsize_enc;
 
-	d->corb = dma_alloc_coherent(HDA_CORB_ENTRIES * sizeof(uint32_t),
+	d->corb_entries = hda_ring_size(d, HDA_REG_CORBSIZE, &corbsize_enc);
+	d->rirb_entries = hda_ring_size(d, HDA_REG_RIRBSIZE, &rirbsize_enc);
+
+	d->corb = dma_alloc_coherent(d->corb_entries * sizeof(uint32_t),
 	                             &d->corb_phys);
 	if (d->corb == NULL) {
 		return -ENOMEM;
 	}
-	d->rirb = dma_alloc_coherent(HDA_RIRB_ENTRIES * sizeof(uint64_t),
+	d->rirb = dma_alloc_coherent(d->rirb_entries * sizeof(uint64_t),
 	                             &d->rirb_phys);
 	if (d->rirb == NULL) {
-		dma_free_coherent(d->corb, HDA_CORB_ENTRIES * sizeof(uint32_t));
+		dma_free_coherent(d->corb, d->corb_entries * sizeof(uint32_t));
 		d->corb = NULL;
 		return -ENOMEM;
 	}
 
-	memset(d->corb, 0, HDA_CORB_ENTRIES * sizeof(uint32_t));
-	memset(d->rirb, 0, HDA_RIRB_ENTRIES * sizeof(uint64_t));
+	memset(d->corb, 0, d->corb_entries * sizeof(uint32_t));
+	memset(d->rirb, 0, d->rirb_entries * sizeof(uint64_t));
 
 	/* Stop both before reprogramming. */
 	hda_write8(d, HDA_REG_CORBCTL, 0);
@@ -517,7 +568,7 @@ static int hda_corb_rirb_setup(hda_dev_t *d)
 	/* Program CORB. */
 	hda_write32(d, HDA_REG_CORBLBASE, (uint32_t)d->corb_phys);
 	hda_write32(d, HDA_REG_CORBUBASE, 0);
-	hda_write8(d,  HDA_REG_CORBSIZE, HDA_RBSIZE_256);
+	hda_write8(d,  HDA_REG_CORBSIZE, corbsize_enc);
 	hda_write16(d, HDA_REG_CORBWP, 0);
 
 	/*
@@ -560,9 +611,22 @@ static int hda_corb_rirb_setup(hda_dev_t *d)
 	 * reads back 0 (3.3.27), so there is nothing to verify here. */
 	hda_write32(d, HDA_REG_RIRBLBASE, (uint32_t)d->rirb_phys);
 	hda_write32(d, HDA_REG_RIRBUBASE, 0);
-	hda_write8(d,  HDA_REG_RIRBSIZE, HDA_RBSIZE_256);
+	hda_write8(d,  HDA_REG_RIRBSIZE, rirbsize_enc);
 	hda_write16(d, HDA_REG_RIRBWP, HDA_RIRBWP_RST);
-	hda_write16(d, HDA_REG_RINTCNT, 1);
+	/*
+	 * Interrupt after half the ring rather than after every response.
+	 *
+	 * RINTCNT=1 raised a controller interrupt per verb, which during the
+	 * boot-time codec graph walk is hundreds of them, each one taking the
+	 * shared INTx line and running the whole handler.  The synchronous
+	 * verb path polls RIRBWP and never depended on the interrupt, so this
+	 * only removes work.  FreeBSD uses rirb_size / 2.
+	 *
+	 * 3.3.28: "The DMA engine should be stopped when changing this field
+	 * or else an interrupt may be lost" -- it is, RIRBCTL is not started
+	 * until below.
+	 */
+	hda_write16(d, HDA_REG_RINTCNT, (uint16_t)(d->rirb_entries / 2));
 	d->rirb_rp = 0;
 
 	/* 3.3.22 on CORBRUN says plainly: "Must read the value back". */
@@ -579,11 +643,10 @@ static int hda_corb_rirb_setup(hda_dev_t *d)
 
 	/*
 	 * RUN + RINTCTL.  The response interrupt is only safe because the IRQ
-	 * handler now clears RIRBSTS: with RINTCNT=1 every verb raises one,
-	 * and leaving it unacknowledged latches the controller-interrupt
-	 * summary on so the shared level-triggered INTx never drops -- which
-	 * wedged the machine inside the interrupt handler and was why this
-	 * driver hung the boot outright.
+	 * handler clears RIRBSTS: leaving it unacknowledged latches the
+	 * controller-interrupt summary on so the shared level-triggered INTx
+	 * never drops -- which wedged the machine inside the interrupt
+	 * handler and was why this driver hung the boot outright.
 	 */
 	hda_write8(d, HDA_REG_RIRBCTL, HDA_RIRBCTL_RUN | HDA_RIRBCTL_RINTCTL);
 	for (budget = 0; budget < HDA_RING_TIMEOUT; budget++) {
@@ -610,7 +673,7 @@ static uint32_t hda_send_verb(hda_dev_t *d, uint8_t cad, uint8_t nid,
 	uint16_t wp;
 	uint32_t budget;
 
-	wp = (uint16_t)((d->corb_wp + 1) % HDA_CORB_ENTRIES);
+	wp = (uint16_t)((d->corb_wp + 1) % d->corb_entries);
 	d->corb[wp] = encoded;
 	/* Publish the CORB entry before ringing the doorbell. */
 	__sync_synchronize();
@@ -635,7 +698,7 @@ static uint32_t hda_send_verb(hda_dev_t *d, uint8_t cad, uint8_t nid,
 
 		if (rwp != d->rirb_rp) {
 			d->rirb_rp = (uint16_t)((d->rirb_rp + 1) %
-			                        HDA_RIRB_ENTRIES);
+			                        d->rirb_entries);
 			return (uint32_t)d->rirb[d->rirb_rp];
 		}
 	}
@@ -1957,12 +2020,12 @@ static void hda_detach_partial(hda_dev_t *d)
 	}
 	if (d->corb != NULL) {
 		dma_free_coherent(d->corb,
-		                  HDA_CORB_ENTRIES * sizeof(uint32_t));
+		                  d->corb_entries * sizeof(uint32_t));
 		d->corb = NULL;
 	}
 	if (d->rirb != NULL) {
 		dma_free_coherent(d->rirb,
-		                  HDA_RIRB_ENTRIES * sizeof(uint64_t));
+		                  d->rirb_entries * sizeof(uint64_t));
 		d->rirb = NULL;
 	}
 	if (d->fifo_buf != NULL) {
