@@ -264,6 +264,10 @@ typedef struct hda_dev {
 	dma_addr_t       rirb_phys;
 	uint16_t         rirb_rp;
 	uint32_t         verb_timeouts;
+	/* Stream error tallies, reported on close rather than per event --
+	 * they arrive from interrupt context. */
+	uint32_t         fifo_errors;
+	uint32_t         desc_errors;
 
 	hda_bdl_entry_t *bdl;
 	dma_addr_t       bdl_phys;
@@ -1547,8 +1551,19 @@ static int hda_stream_start(hda_dev_t *d)
 	/* Drop anything latched from the previous run before arming. */
 	hda_write8(d, d->sd_base + HDA_SD_STS,
 	           HDA_SDSTS_BCIS | HDA_SDSTS_FIFOE | HDA_SDSTS_DESE);
+	/*
+	 * IOCE for buffer completions, plus FEIE and DEIE so FIFO and
+	 * descriptor errors are actually reported.  Both were defined and
+	 * never enabled, and the handler acknowledged their status bits in
+	 * silence -- so a descriptor error, which 3.3.36 says "is treated as
+	 * a fatal stream error as the stream cannot continue running.  The
+	 * RUN bit will be cleared and the stream will stop", looked from
+	 * userland like playback mysteriously stopping.  FreeBSD arms all
+	 * three.
+	 */
 	hda_write8(d, d->sd_base + HDA_SD_CTL,
-	           HDA_SDCTL_RUN | HDA_SDCTL_IOCE);
+	           HDA_SDCTL_RUN | HDA_SDCTL_IOCE | HDA_SDCTL_FEIE |
+	           HDA_SDCTL_DEIE);
 	d->running = 1;
 	d->halt_pending = 0;
 	return 0;
@@ -1801,6 +1816,32 @@ static void hda_one_intr(hda_dev_t *d, uint32_t status)
 			spinlock_release_irq(&d->feed_lock, f);
 			(void)sleepq_wake_all(d);
 		}
+		/*
+		 * Stream errors used to be acknowledged without a word.  A
+		 * FIFO underrun means the feeder fell behind; a descriptor
+		 * error is fatal -- 3.3.36: "This error is treated as a fatal
+		 * stream error as the stream cannot continue running.  The RUN
+		 * bit will be cleared and the stream will stop.  Software may
+		 * attempt to restart the stream engine after addressing the
+		 * cause of the error" -- and from userland that looked like
+		 * playback simply stopping for no reason.
+		 *
+		 * Counted rather than printed per event: these arrive from
+		 * interrupt context and an underrun storm would bury the
+		 * console.  DESE additionally forces a restart through the
+		 * normal halt path, since the hardware has already dropped RUN.
+		 */
+		if (sdsts & HDA_SDSTS_FIFOE) {
+			d->fifo_errors++;
+		}
+		if (sdsts & HDA_SDSTS_DESE) {
+			unsigned long f = spinlock_acquire_irq(&d->feed_lock);
+
+			d->desc_errors++;
+			d->running = 0;
+			d->halt_pending = 1;
+			spinlock_release_irq(&d->feed_lock, f);
+		}
 		hda_write8(d, d->sd_base + HDA_SD_STS,
 		           sdsts & (HDA_SDSTS_BCIS | HDA_SDSTS_FIFOE |
 		                    HDA_SDSTS_DESE));
@@ -2021,6 +2062,16 @@ static int hda_close(audio_dev_t *adev)
 	audio_fifo_reset(&d->fifo);
 
 	spinlock_release_irq(&d->feed_lock, flags);
+
+	/* Surface anything the completion handler counted but could not
+	 * print.  Underruns point at the feeder, descriptor errors at the
+	 * BDL or the bus. */
+	if (d->fifo_errors != 0 || d->desc_errors != 0) {
+		kprintf("hda: %u FIFO underrun(s), %u descriptor error(s)\n",
+		        d->fifo_errors, d->desc_errors);
+		d->fifo_errors = 0;
+		d->desc_errors = 0;
+	}
 	return 0;
 }
 
