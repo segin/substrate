@@ -180,6 +180,57 @@ Detailed record of major implementation milestones. For current system status, s
   session leader (`${SDM_SESSION:-matwm2}`).
 
 ## Drivers
+- **Intel HDA — full audit against the 1.0a specification (Aug 2026):**
+  `sys/drivers/audio/hda.{c,h}` reviewed line by line against the
+  *High Definition Audio Specification, Revision 1.0a* and the FreeBSD
+  (`sys/dev/sound/pci/hda`) and NetBSD (`sys/dev/hdaudio`) drivers.
+  Thirty-one defects fixed across sixteen commits.  Highlights:
+  - **Sample rates were silently wrong.**  `hda_encode_format()` computed
+    BASE/MULT/DIV arithmetically, but SDnFMT only permits MULT ×1–×4 and
+    DIV ÷1–÷8 (table 40), and it never emitted a nonzero MULT *and* DIV
+    together — so 32 kHz (48 k ×2 ÷3) was unreachable.  Worse, its
+    fallback returned a valid 48 kHz encoding rather than an error, so
+    8000, 11025, 16000 and 32000 all played at 48 kHz, three to six times
+    too fast, with nothing on the path able to notice.  Replaced with a
+    table of every legal encoding; status now returns separately from the
+    value, because 48 kHz 8-bit mono legitimately encodes to 0x0000.
+  - **Codec setup.**  AMP_CAPS NumSteps was read from the StepSize field
+    (14:8, not 22:16); widget amp and format parameters are now taken
+    from the function group unless the widget sets the corresponding
+    override bit (7.3.4.6); input amps along the routed path are unmuted
+    (the classic "routed correctly, still silent" case on Realtek and
+    Conexant parts); connection lists are parsed per their actual form
+    with ranges expanded, where long-form entries had been truncated to
+    8 bits; EAPD is read-modify-written; `SET_CONNECTION_SELECT` is no
+    longer sent to single-connection widgets.
+  - **Stream engine.**  RUN does not drop on write (4.5.4, ≤40 µs) and was
+    never polled; CBL was rewritten on a merely-stopped engine where
+    3.3.38 requires a reset first; and BCIS means *fetched into the DMA
+    FIFO*, not played (3.3.36), so halting on the final completion
+    truncated every clip.  Stop/reset/start are now sequenced properly and
+    the halt is deferred out of the ISR, which 4.5.6 asks for anyway.
+  - **Controller bring-up.**  DMA engines are quiesced before CRST as
+    3.3.7 requires, the link reset pulse is held, and codec enumeration
+    waits the mandated 521 µs (25 frames) instead of a ~50 µs spin loop.
+    CORB/RIRB are sized from the capability mask and their reset and RUN
+    readbacks verified.
+  - **Interrupts.**  INTSTS is read-only (table 15) — the write "to clear"
+    it did nothing; the handler now re-reads until GIS clears, which
+    FreeBSD documents as necessary to avoid wedging a level-triggered
+    shared INTx permanently.  FEIE/DEIE are enabled and errors counted.
+  - **Robustness.**  Verbs are serialised and responses filtered by codec
+    address and the unsolicited flag; a failed attach unwinds its IRQ and
+    DMA instead of leaving a live handler pointing at reused softc memory;
+    every codec is tried, not just the first; digital pins are skipped;
+    and formats the converter does not advertise are refused rather than
+    rendered wrongly.
+  Verified: `tests/sys/host_test_hda` (rate table round-trip, connection
+  list parsing incl. long-form ranges), clean `make -C sys`, and boot under
+  QEMU on both `intel-hda` (ICH6) and `ich9-intel-hda` with playback at
+  44.1/32/16 kHz rendering to within 1.3% of the exact expected duration —
+  where the pre-fix driver would have played 16 k and 32 k at 48 kHz — and
+  an unsupported rate (8 kHz, which QEMU's codec does not advertise)
+  correctly refused.  Driver documentation: `usr.man/man4/hda.4`.
 - **AC'97 / Intel HDA — IRQ-driven ring refill:** Both audio drivers now
   decouple the `write()` producer from the DMA-ring consumer with a deep
   software PCM FIFO (`sys/drivers/audio/audio_fifo.h`, a single-producer /

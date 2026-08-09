@@ -1,0 +1,170 @@
+.TH HDA 4 "August 2026" "Substrate Kernel" "Kernel Interfaces"
+.SH NAME
+hda \- Intel High Definition Audio controller driver
+.SH SYNOPSIS
+.B device hda
+.SH DESCRIPTION
+The
+.B hda
+driver supports audio controllers conforming to the
+.I Intel High Definition Audio Specification
+revision 1.0a \(em PCI class 0x04, subclass 0x03, the successor to
+AC'97.  It attaches to any such controller found on the PCI bus and
+registers the first codec with a usable analog output path as an
+.BR audio (4)
+device, published as
+.B /dev/audio0
+and
+.BR /dev/dsp0 .
+.PP
+Playback only.  The driver programs one output stream descriptor; it
+does not implement capture, so
+.B AUDIO_GETPROPS
+reports
+.B AUDIO_PROP_PLAYBACK
+alone.
+.SS Controller
+All registers live in a single MMIO BAR.  At attach the driver stops
+every DMA engine, resets the controller, waits the 521 microseconds the
+specification requires for codec enumeration, and brings up the CORB and
+RIRB command rings at whatever size the controller advertises in
+.B CORBSIZE
+and
+.BR RIRBSIZE .
+.PP
+Output stream descriptors follow the input ones in the register block, so
+the descriptor driven is index
+.IR ISS ,
+not zero.  Playback uses a cyclic ring of 32 buffer-descriptor entries of
+4 KiB each, refilled from a 256 KiB software FIFO by the completion
+interrupt.
+.PP
+An interrupt line is mandatory.  The ring is refilled from the completion
+path, so a controller with no usable IRQ is not attached rather than
+being published as a device that would stop after its first few buffers.
+.SS Codec
+Every codec reported in
+.B STATESTS
+is tried in turn until one yields an output path.  Within a codec the
+driver locates the audio function group, collects the analog output
+converters and the output pins that
+.B CONFIG_DEFAULT
+reports as physically connected, ranks the pins (speaker, then line out,
+then headphone, then anything else), and selects the best-ranked pin that
+some converter can actually reach \(em directly or through one
+intermediate mixer or selector.
+.PP
+Digital widgets are skipped.  An HDMI or DisplayPort path additionally
+needs digital converter control, channel mapping and ELD handling, none
+of which is implemented, so such a pin would appear configured and stay
+silent.
+.PP
+Amplifiers along the chosen path are unmuted and set to their 0 dB step.
+Amplifier parameters come from the widget only when it sets
+.RB \(lq "Amp Param Override" \(rq;
+otherwise the function group's defaults apply.  Where the pin reports the
+capability, its external amplifier (EAPD) is enabled.
+.SS Formats
+Linear PCM, 8/16/20/24/32 bits, 1 to 16 channels, at the rates the
+selected converter advertises in its
+.RB \(lq "Supported PCM Size, Rates" \(rq
+parameter \(em a subset of 8, 11.025, 16, 22.05, 32, 44.1, 48, 88.2, 96,
+176.4 and 192 kHz.  48 kHz is mandatory for all codecs.
+.PP
+A rate, sample width or channel count the converter does not claim is
+rejected with
+.B EINVAL
+rather than programmed and rendered at the wrong speed.  Changing the
+format stops the stream and discards anything still queued, which was
+recorded in the previous format.
+.PP
+Encoding is not converted.  The framework accepts
+.BR AUDIO_ENCODING_ULAW ,
+.BR AUDIO_ENCODING_ALAW
+and the unsigned and big-endian variants, but this driver hands the bytes
+to the controller unchanged, so only
+.B AUDIO_ENCODING_SLINEAR_LE
+renders correctly.
+.SH DEVICE NODES
+.TP
+.B /dev/audio0 , /dev/audioctl0
+Sun/NetBSD-compatible sample and control devices; see
+.BR audio (4).
+.TP
+.B /dev/dsp0
+OSS-compatible sample device.
+.SH DIAGNOSTICS
+.TP
+.B hda: \fIvendor\fB:\fIdevice\fB oss=\fIn\fB iss=\fIn\fB codecs=\fImask\fB cad=\fIn\fB vid=\fIid\fB corb=\fIn\fB rirb=\fIn
+Attach succeeded.  Reports the PCI IDs, the output and input stream
+counts from
+.BR GCAP ,
+the codec presence mask, the codec address in use, its vendor ID, and the
+negotiated command-ring sizes.
+.TP
+.B hda: codec \fIn\fB afg=\fInid\fB dac=\fInid\fB pin=\fInid\fB tag=\fIn\fB chan=\fIn\fB pcm=\fIcaps
+The selected output path and the converter's channel count and PCM
+capability word.
+.TP
+.B hda: no codec detected
+.B STATESTS
+was empty after reset.  No codec is attached to the link, or the
+controller never left reset.
+.TP
+.B hda: no analog output widgets (dacs=\fIn\fB pins=\fIn\fB)
+The codec has no analog converter, or no output pin that
+.B CONFIG_DEFAULT
+reports as connected.  Common on display-audio-only controllers.
+.TP
+.B hda: no explicit route to any pin; assuming pin \fIn\fB is hard-wired to dac \fIn
+No connection list joins any candidate pair within one intermediate
+widget.  A pin with a single hard-wired source and no connection list is
+legitimate, so the best-ranked pair is used anyway.
+.TP
+.B hda: no usable IRQ line; not attaching
+.BR pci_get_irq (9)
+returned no line.  See
+.B Controller
+above.
+.TP
+.B hda: \fIn\fB verb timeout(s) during configuration
+The codec failed to answer within the per-verb budget.  The graph was
+configured from incomplete information and playback may be silent.
+.TP
+.B hda: \fIn\fB FIFO underrun(s), \fIn\fB descriptor error(s)
+Reported on close.  Underruns mean the software FIFO was not refilled in
+time; a descriptor error is fatal to the stream and forces a restart.
+.TP
+.B hda: could not enable PCIe snoop on \fIvendor\fB; DMA may read stale data
+An ATI, AMD or NVIDIA controller refused the snoop-enable bit.  The
+driver's DMA memory is cacheable, so the controller may fetch stale ring
+contents.
+.SH SEE ALSO
+.BR audio (4),
+.BR uac (4),
+.BR audioctl (1)
+.PP
+.I High Definition Audio Specification, Revision 1.0a
+(Intel Corporation, 17 June 2010).
+.SH HISTORY
+The
+.B hda
+driver first appeared in Substrate alongside the
+.BR audio (4)
+framework.  It was audited against the 1.0a specification and the
+FreeBSD and NetBSD drivers in August 2026.
+.SH BUGS
+Capture is not implemented.
+.PP
+HDMI and DisplayPort output are not implemented; digital pins are
+ignored during path selection.
+.PP
+Only the first controller-supported analog path is used.  There is no
+mixer control beyond the framework's gain and balance, and no runtime
+selection between speaker and headphone pins \(em jack-presence
+unsolicited responses are discarded rather than acted on.
+.PP
+DMA buffers are ordinary cacheable memory.  This is correct on Intel
+controllers and on any controller whose PCIe snoop bit could be set, but
+the kernel cannot currently allocate uncacheable memory for the cases
+where neither holds.
