@@ -47,6 +47,13 @@
 #define HDA_DEFAULT_RATE           48000U
 #define HDA_FIFO_BYTES             (256U * 1024U) /* deep software PCM FIFO */
 #define HDA_PREBUFFER_SLOTS        8U     /* DMA slots staged before start */
+/*
+ * Slots the completion handler may refill in one interrupt.  Each
+ * completion frees exactly one, so one is enough to keep pace; the point
+ * of the cap is that hda_feed() runs there with interrupts masked and an
+ * unbounded refill could copy the whole 128 KiB ring in one go.
+ */
+#define HDA_FEED_SLOTS_PER_IRQ     2
 /* Per-verb spin budget.  Bounded low enough that a codec that never
  * answers costs a visible pause rather than minutes of boot. */
 #define HDA_VERB_TIMEOUT           20000U
@@ -1602,13 +1609,21 @@ static int hda_stream_start(hda_dev_t *d)
  * Genuine underrun is handled elsewhere: the completion interrupt zeroes the
  * slot it just drained, so a starved ring plays silence rather than looping
  * over stale audio.
+ *
+ * max_slots caps how much copying one call will do.  This runs from the
+ * completion handler with local interrupts masked, and unbounded it could
+ * memcpy the better part of 128 KiB -- the whole ring -- out of the software
+ * FIFO in one interrupt, on top of the 4 KiB memset the handler already does
+ * per completion.  One completion frees one slot, so refilling one slot per
+ * interrupt keeps up by construction; the producer path passes the full ring
+ * because it runs in process context where a long copy is merely slow.
  */
-static void hda_feed(hda_dev_t *d, int flush_tail)
+static void hda_feed(hda_dev_t *d, int flush_tail, int max_slots)
 {
 	if (d->chunk[0] == NULL || d->fifo_buf == NULL) {
 		return;
 	}
-	for (;;) {
+	for (; max_slots > 0; max_slots--) {
 		uint32_t played = __atomic_load_n(&d->slots_played,
 		                                  __ATOMIC_ACQUIRE);
 		uint32_t in_flight = d->writes_queued - played;
@@ -1696,7 +1711,7 @@ static void hda_kick(hda_dev_t *d)
 	 * completion interrupt -- one missed IOC and playback deadlocks
 	 * permanently with the software FIFO full and the ring starved.
 	 */
-	hda_feed(d, 0);
+	hda_feed(d, 0, HDA_BDL_ENTRIES);
 
 	if (!d->running) {
 		uint32_t in_flight;
@@ -1764,9 +1779,11 @@ static void hda_one_intr(hda_dev_t *d, uint32_t status)
 				memset(d->chunk[done % HDA_BDL_ENTRIES], 0,
 				       HDA_CHUNK_BYTES);
 			}
-			/* Autonomously refill freed ring slot(s) from the
-			 * software FIFO so playback survives producer jitter. */
-			hda_feed(d, 0);
+			/* Autonomously refill the slot this completion
+			 * freed, so playback survives producer jitter.
+			 * Bounded: one completion frees one slot, and this
+			 * runs with interrupts masked. */
+			hda_feed(d, 0, HDA_FEED_SLOTS_PER_IRQ);
 			/*
 			 * A cyclic stream never stops on its own: with RUN set
 			 * the controller keeps walking the ring and raising a
@@ -2251,7 +2268,7 @@ static int hda_drain(audio_dev_t *adev)
 		 * or restarts the engine and retires any pending halt.
 		 */
 		f = spinlock_acquire_irq(&d->feed_lock);
-		hda_feed(d, 1);
+		hda_feed(d, 1, HDA_BDL_ENTRIES);
 		spinlock_release_irq(&d->feed_lock, f);
 		hda_kick(d);
 
