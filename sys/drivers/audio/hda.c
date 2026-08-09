@@ -233,6 +233,7 @@ typedef struct hda_dev {
 	pci_device_t   *pdev;
 	volatile uint8_t *mmio;
 	int              irq;
+	int              irq_claimed;   /* request_irq() succeeded */
 
 	uint8_t          oss;           /* output streams */
 	uint8_t          iss;           /* input streams */
@@ -1824,6 +1825,61 @@ static audio_dev_ops_t hda_ops = {
 /* Discovery / init                                                    */
 /* ------------------------------------------------------------------- */
 
+/*
+ * Undo a partially-completed attach.
+ *
+ * Every failure return after the IRQ is claimed used to just return.
+ * hda_device_count is only bumped on success, so the next controller
+ * reused hda_devices[0] and memset() it out from under a handler that
+ * was still registered and still pointing at it: d->mmio became NULL and
+ * the first shared-line interrupt faulted inside the handler.  The DMA
+ * rings and the software FIFO leaked along with it.
+ *
+ * Disarm the controller before dropping the handler, not after, so the
+ * level-triggered INTx cannot be left asserted with nothing to service
+ * it.
+ */
+static void hda_detach_partial(hda_dev_t *d)
+{
+	int i;
+
+	if (d->mmio != NULL) {
+		hda_write32(d, HDA_REG_INTCTL, 0);
+		hda_write8(d, HDA_REG_CORBCTL, 0);
+		hda_write8(d, HDA_REG_RIRBCTL, 0);
+	}
+	if (d->irq_claimed) {
+		free_irq((unsigned int)d->irq, d);
+		d->irq_claimed = 0;
+	}
+
+	for (i = 0; i < HDA_BDL_ENTRIES; i++) {
+		if (d->chunk[i] != NULL) {
+			dma_free_coherent(d->chunk[i], HDA_CHUNK_BYTES);
+			d->chunk[i] = NULL;
+		}
+	}
+	if (d->bdl != NULL) {
+		dma_free_coherent(d->bdl,
+		                  HDA_BDL_ENTRIES * sizeof(hda_bdl_entry_t));
+		d->bdl = NULL;
+	}
+	if (d->corb != NULL) {
+		dma_free_coherent(d->corb,
+		                  HDA_CORB_ENTRIES * sizeof(uint32_t));
+		d->corb = NULL;
+	}
+	if (d->rirb != NULL) {
+		dma_free_coherent(d->rirb,
+		                  HDA_RIRB_ENTRIES * sizeof(uint64_t));
+		d->rirb = NULL;
+	}
+	if (d->fifo_buf != NULL) {
+		kfree(d->fifo_buf, HDA_FIFO_BYTES);
+		d->fifo_buf = NULL;
+	}
+}
+
 static int hda_attach(pci_device_t *pdev)
 {
 	hda_dev_t *d;
@@ -1868,6 +1924,7 @@ static int hda_attach(pci_device_t *pdev)
 	 */
 	if (hda_controller_reset(d) != 0) {
 		kprintf("hda: controller reset timed out\n");
+		hda_detach_partial(d);
 		return -EIO;
 	}
 
@@ -1877,6 +1934,7 @@ static int hda_attach(pci_device_t *pdev)
 	d->bss = (uint8_t)((gcap >> 3) & 0x1F);
 	if (d->oss == 0) {
 		kprintf("hda: controller advertises no output streams\n");
+		hda_detach_partial(d);
 		return -ENODEV;
 	}
 	/* Output stream 0 sits after the input descriptors. */
@@ -1886,6 +1944,7 @@ static int hda_attach(pci_device_t *pdev)
 	d->codec_mask = hda_read16(d, HDA_REG_STATESTS);
 	if (d->codec_mask == 0) {
 		kprintf("hda: no codec detected\n");
+		hda_detach_partial(d);
 		return -ENODEV;
 	}
 	{
@@ -1903,6 +1962,7 @@ static int hda_attach(pci_device_t *pdev)
 	hda_write16(d, HDA_REG_STATESTS, d->codec_mask);
 
 	if (hda_corb_rirb_setup(d) != 0) {
+		hda_detach_partial(d);
 		return -ENOMEM;
 	}
 
@@ -1920,11 +1980,29 @@ static int hda_attach(pci_device_t *pdev)
 	 * actually present.  Registering first means the very first assertion
 	 * has somewhere to go.
 	 */
-	if (d->irq >= 0) {
-		/* Shared PCI INTx -- see the note in ac97.c. */
-		(void)request_irq((unsigned int)d->irq, hda_irq_handler,
-		                  IRQF_SHARED, "hda", d);
+	/*
+	 * No usable interrupt line means the controller must not be armed at
+	 * all.  GIE with no handler registered is the wedge described above,
+	 * just with nobody at all to service the line instead of the wrong
+	 * driver -- STATESTS and RIRBSTS would never be acknowledged and the
+	 * level-triggered INTx would stay asserted forever.  Since this
+	 * driver refills the DMA ring from the completion path, it cannot run
+	 * usefully without interrupts anyway; fail the attach rather than
+	 * register a device that can never play past its first buffers.
+	 */
+	if (d->irq < 0) {
+		kprintf("hda: no usable IRQ line; not attaching\n");
+		hda_detach_partial(d);
+		return -ENXIO;
 	}
+	/* Shared PCI INTx -- see the note in ac97.c. */
+	if (request_irq((unsigned int)d->irq, hda_irq_handler,
+	                IRQF_SHARED, "hda", d) != 0) {
+		kprintf("hda: could not claim IRQ %d\n", d->irq);
+		hda_detach_partial(d);
+		return -EBUSY;
+	}
+	d->irq_claimed = 1;
 
 	/* Now safe to arm.  Some controllers only latch a codec response with
 	 * CIE armed, so this has to precede the first verb.
@@ -1944,6 +2022,7 @@ static int hda_attach(pci_device_t *pdev)
 	                          HDA_PARAM_VENDOR_ID);
 
 	if (hda_output_stream_init(d) != 0) {
+		hda_detach_partial(d);
 		return -ENOMEM;
 	}
 
@@ -1953,6 +2032,7 @@ static int hda_attach(pci_device_t *pdev)
 	 * /dev/audio0 that silently swallows everything. */
 	if (hda_codec_configure(d) != 0) {
 		kprintf("hda: codec configuration failed; not registering\n");
+		hda_detach_partial(d);
 		return -ENODEV;
 	}
 
@@ -1962,6 +2042,7 @@ static int hda_attach(pci_device_t *pdev)
 	d->audio.driver_data = d;
 	snprintf(d->audio.name, sizeof(d->audio.name), "hda");
 	if (audio_register_device(&d->audio) != 0) {
+		hda_detach_partial(d);
 		return -EBUSY;
 	}
 
