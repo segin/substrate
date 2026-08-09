@@ -53,6 +53,24 @@ negotiated per device with
 a backend may clamp the request to what the hardware supports and report
 the effective values back through
 .BR AUDIO_GETINFO .
+.PP
+Backends only ever receive signed 16-bit little-endian PCM.  The
+framework converts anything else on the way through:
+.B AUDIO_ENCODING_ULAW
+and
+.B AUDIO_ENCODING_ALAW
+are expanded per G.711,
+.BR AUDIO_ENCODING_PCM8 " and the " ULINEAR
+variants are recentred on zero and widened, and
+.B AUDIO_ENCODING_SLINEAR_BE
+is byte-swapped.  Because the 8-bit encodings widen to 16, the hardware
+is programmed for 16-bit even when the application selected 8 \(em which
+is also what lets those encodings play on codecs that offer no 8-bit
+format at all.
+.BR AUDIO_GETINFO
+reports the encoding and precision the application asked for, not the
+converted ones.  A stream that is already signed 16-bit little-endian is
+passed to the backend untouched.
 .SS Exclusive Access
 Playback is exclusive.  The per-device software FIFO and DMA path are
 single-producer; if two processes wrote concurrently the FIFO would

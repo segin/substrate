@@ -78,13 +78,17 @@ rather than programmed and rendered at the wrong speed.  Changing the
 format stops the stream and discards anything still queued, which was
 recorded in the previous format.
 .PP
-Encoding is not converted.  The framework accepts
+Encoding is converted by the framework, not by this driver.
 .BR AUDIO_ENCODING_ULAW ,
-.BR AUDIO_ENCODING_ALAW
-and the unsigned and big-endian variants, but this driver hands the bytes
-to the controller unchanged, so only
-.B AUDIO_ENCODING_SLINEAR_LE
-renders correctly.
+.BR AUDIO_ENCODING_ALAW ,
+the unsigned encodings and
+.B AUDIO_ENCODING_SLINEAR_BE
+are translated to signed 16-bit little-endian on the way through, and the
+driver is programmed for the converted format \(em so an 8-bit companded
+stream runs the codec at 16 bits.
+.BR AUDIO_GETINFO
+continues to report the encoding the application selected.  See
+.BR audio (4).
 .SH DEVICE NODES
 .TP
 .B /dev/audio0 , /dev/audioctl0

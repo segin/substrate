@@ -22,6 +22,16 @@
 #define AUDIO_DEFAULT_HIWAT      8U
 #define AUDIO_DEFAULT_LOWAT      4U
 
+/*
+ * Staging buffer for encoding conversion.  Backends are handed signed
+ * 16-bit little-endian PCM whatever the application wrote, so anything
+ * else is translated on the way through.  The worst case is a companded
+ * or 8-bit unsigned stream, which doubles in size, hence the 2:1 ratio
+ * between these two.
+ */
+#define AUDIO_CONV_IN            2048U
+#define AUDIO_CONV_OUT           (AUDIO_CONV_IN * 2U)
+
 struct audio_dev;
 
 typedef struct audio_dev_ops {
@@ -125,8 +135,34 @@ typedef struct audio_dev {
 	 * process_t* (current_thread->proc).
 	 */
 	void            *play_owner;
+	/*
+	 * Encoding-conversion staging.  Only touched by the exclusive
+	 * playback owner (see play_owner), so no additional locking.
+	 */
+	uint8_t          conv_buf[AUDIO_CONV_OUT];
 	struct audio_dev *next;
 } audio_dev_t;
+
+/*
+ * Translate a requested playback format into the one the backend is
+ * actually programmed for.  Backends only ever see signed 16-bit
+ * little-endian PCM (or the caller's format unchanged when it already is
+ * that), so companded and unsigned and big-endian streams are converted
+ * by the framework rather than handed to hardware that cannot render
+ * them.  Exposed for tests.
+ */
+void audio_hw_prinfo(const audio_prinfo_t *sw, audio_prinfo_t *hw);
+
+/*
+ * Convert up to `in_len` bytes of `enc`/`prec` PCM into signed 16-bit
+ * little-endian in `out`, returning the number of output bytes.  `out`
+ * must have room for in_len * audio_conv_ratio(enc, prec) bytes.
+ */
+size_t audio_convert(uint32_t enc, uint32_t prec, const uint8_t *in,
+		     size_t in_len, uint8_t *out);
+
+/* Output bytes produced per input byte: 2 for 8-bit sources, else 1. */
+unsigned audio_conv_ratio(uint32_t enc, uint32_t prec);
 
 void audio_init(void);
 int  audio_register_device(audio_dev_t *dev);

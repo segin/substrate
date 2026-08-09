@@ -252,7 +252,21 @@ int audio_ioctl_dispatch(audio_dev_t *dev, uint32_t request, void *arg)
 			return rc;
 		}
 		if (dev->ops != NULL && dev->ops->set_params != NULL) {
-			rc = dev->ops->set_params(dev, &merged);
+			/*
+			 * Program the hardware for the format it will
+			 * actually receive.  The framework converts ULAW,
+			 * ALAW, unsigned and big-endian streams to signed
+			 * 16-bit LE on the way through, so handing the
+			 * backend the application's encoding would set the
+			 * codec up to decode something it is never sent --
+			 * and, for the 8-bit encodings, at half the sample
+			 * width the converted data actually carries.
+			 */
+			audio_info_t hw = merged;
+
+			audio_hw_prinfo(&merged.play, &hw.play);
+			audio_hw_prinfo(&merged.record, &hw.record);
+			rc = dev->ops->set_params(dev, &hw);
 			if (rc != 0) {
 				return rc;
 			}
@@ -371,6 +385,130 @@ int audio_ioctl_dispatch(audio_dev_t *dev, uint32_t request, void *arg)
 /* fs_node_t glue                                                    */
 /* ----------------------------------------------------------------- */
 
+/* ----------------------------------------------------------------- */
+/* Encoding conversion                                               */
+/* ----------------------------------------------------------------- */
+/*
+ * The framework accepts every encoding audio_validate_prinfo() knows
+ * about, but no backend ever looked at the field: ULAW, ALAW, unsigned
+ * and big-endian streams were handed to the hardware as though they were
+ * signed little-endian PCM, and came out as noise.  Convert here instead,
+ * once, so every backend sees one format.
+ *
+ * The validator constrains the problem usefully: companded and unsigned
+ * encodings are 8-bit, signed linear ones are 16-bit.  So the whole
+ * matrix is "expand 8-bit to signed 16-bit LE", "byteswap", or "nothing".
+ */
+
+/* G.711 mu-law expansion (CCITT / Sun reference implementation). */
+static int16_t audio_ulaw_to_pcm(uint8_t u)
+{
+	int t;
+
+	u = (uint8_t)~u;
+	t = ((u & 0x0F) << 3) + 0x84;
+	t <<= ((unsigned)u & 0x70) >> 4;
+	return (int16_t)((u & 0x80) ? (0x84 - t) : (t - 0x84));
+}
+
+/* G.711 A-law expansion. */
+static int16_t audio_alaw_to_pcm(uint8_t a)
+{
+	int t, seg;
+
+	a ^= 0x55;
+	t = (a & 0x0F) << 4;
+	seg = ((unsigned)a & 0x70) >> 4;
+	switch (seg) {
+	case 0:  t += 8;                       break;
+	case 1:  t += 0x108;                   break;
+	default: t += 0x108; t <<= seg - 1;    break;
+	}
+	return (int16_t)((a & 0x80) ? t : -t);
+}
+
+/* True when the encoding is already what backends expect. */
+static int audio_enc_is_native(uint32_t enc, uint32_t prec)
+{
+	/* i386 is little-endian, so the "native" spellings are LE. */
+	return prec == 16 && (enc == AUDIO_ENCODING_SLINEAR_LE ||
+	                      enc == AUDIO_ENCODING_SLINEAR ||
+	                      enc == AUDIO_ENCODING_PCM16);
+}
+
+unsigned audio_conv_ratio(uint32_t enc, uint32_t prec)
+{
+	if (audio_enc_is_native(enc, prec)) {
+		return 1;
+	}
+	/* Every non-native encoding this framework validates is 8-bit
+	 * except the big-endian signed ones, which only need a swap. */
+	return prec == 8 ? 2 : 1;
+}
+
+void audio_hw_prinfo(const audio_prinfo_t *sw, audio_prinfo_t *hw)
+{
+	*hw = *sw;
+	if (audio_enc_is_native(sw->encoding, sw->precision)) {
+		return;
+	}
+	hw->encoding = AUDIO_ENCODING_SLINEAR_LE;
+	/*
+	 * 8-bit sources are widened rather than converted in place.  Signed
+	 * 8-bit is a format plenty of codecs decline -- QEMU's HDA codec
+	 * advertises 16-bit only -- and widening costs one shift, so it is
+	 * both simpler and more portable than asking for 8-bit output.
+	 */
+	if (sw->precision == 8) {
+		hw->precision = 16;
+	}
+}
+
+size_t audio_convert(uint32_t enc, uint32_t prec, const uint8_t *in,
+		     size_t in_len, uint8_t *out)
+{
+	size_t i;
+	size_t n = 0;
+
+	if (audio_enc_is_native(enc, prec)) {
+		memcpy(out, in, in_len);
+		return in_len;
+	}
+
+	if (prec == 8) {
+		for (i = 0; i < in_len; i++) {
+			int16_t s;
+
+			switch (enc) {
+			case AUDIO_ENCODING_ULAW:
+				s = audio_ulaw_to_pcm(in[i]);
+				break;
+			case AUDIO_ENCODING_ALAW:
+				s = audio_alaw_to_pcm(in[i]);
+				break;
+			default:
+				/* PCM8 / ULINEAR{,_LE,_BE}: unsigned, so
+				 * recentre on zero and widen.  Byte order is
+				 * meaningless at one byte per sample. */
+				s = (int16_t)(((int)in[i] - 128) << 8);
+				break;
+			}
+			out[n++] = (uint8_t)(s & 0xFF);
+			out[n++] = (uint8_t)((s >> 8) & 0xFF);
+		}
+		return n;
+	}
+
+	/* 16-bit big-endian: swap into little-endian.  A trailing odd byte
+	 * cannot be swapped on its own; drop it rather than emit a sample
+	 * built from the next write's first byte. */
+	for (i = 0; i + 1 < in_len; i += 2) {
+		out[n++] = in[i + 1];
+		out[n++] = in[i];
+	}
+	return n;
+}
+
 size_t audio_node_write(fs_node_t *node, off_t offset, size_t size,
 			       const uint8_t *buffer)
 {
@@ -407,15 +545,70 @@ size_t audio_node_write(fs_node_t *node, off_t offset, size_t size,
 		spinlock_release(&audio_dev_lock);
 	}
 
-	rc = dev->ops->write(dev, buffer, size);
-	if (rc < 0) {
-		/* Propagate the backend errno (e.g. -EINTR from a killed wait,
-		 * -EBUSY) so write() fails instead of silently returning 0 and
-		 * spinning the caller. */
+	/*
+	 * Fast path: the application is already writing what the backend
+	 * wants, so hand the buffer straight down.  This is every ordinary
+	 * player, and it is byte-for-byte what happened before conversion
+	 * existed.
+	 */
+	if (audio_conv_ratio(dev->current.play.encoding,
+	                     dev->current.play.precision) == 1 &&
+	    dev->current.play.encoding != AUDIO_ENCODING_SLINEAR_BE) {
+		rc = dev->ops->write(dev, buffer, size);
+		if (rc < 0) {
+			/* Propagate the backend errno (e.g. -EINTR from a
+			 * killed wait, -EBUSY) so write() fails instead of
+			 * silently returning 0 and spinning the caller. */
+			return (size_t)rc;
+		}
+		dev->current.play.samples += (uint32_t)rc;
 		return (size_t)rc;
 	}
-	dev->current.play.samples += (uint32_t)rc;
-	return (size_t)rc;
+
+	/*
+	 * Otherwise translate in bounded chunks through the device's staging
+	 * buffer.  The byte count returned is always in the *caller's*
+	 * units, so a partial backend write has to be scaled back down.
+	 */
+	{
+		uint32_t enc = dev->current.play.encoding;
+		uint32_t prec = dev->current.play.precision;
+		unsigned ratio = audio_conv_ratio(enc, prec);
+		size_t done = 0;
+
+		while (done < size) {
+			size_t chunk = size - done;
+			size_t outn;
+
+			if (chunk > AUDIO_CONV_IN) {
+				chunk = AUDIO_CONV_IN;
+			}
+			/* Keep 16-bit samples whole across chunks. */
+			if (prec == 16 && (chunk & 1) != 0) {
+				chunk--;
+			}
+			if (chunk == 0) {
+				break;
+			}
+			outn = audio_convert(enc, prec, buffer + done, chunk,
+			                     dev->conv_buf);
+			if (outn == 0) {
+				break;
+			}
+			rc = dev->ops->write(dev, dev->conv_buf, outn);
+			if (rc < 0) {
+				/* Report the error only if nothing landed;
+				 * otherwise report the short write. */
+				return done ? done : (size_t)rc;
+			}
+			dev->current.play.samples += (uint32_t)rc;
+			done += (size_t)rc / ratio;
+			if ((size_t)rc < outn) {
+				break;   /* backend took less than offered */
+			}
+		}
+		return done;
+	}
 }
 
 size_t audio_node_read(fs_node_t *node, off_t offset, size_t size,
@@ -539,7 +732,11 @@ int audio_register_device(audio_dev_t *dev)
 	 * kernel-side defaults.
 	 */
 	if (dev->ops != NULL && dev->ops->set_params != NULL) {
-		(void)dev->ops->set_params(dev, &dev->current);
+		audio_info_t hw = dev->current;
+
+		audio_hw_prinfo(&dev->current.play, &hw.play);
+		audio_hw_prinfo(&dev->current.record, &hw.record);
+		(void)dev->ops->set_params(dev, &hw);
 	}
 
 	audio_n = &audio_nodes[unit];

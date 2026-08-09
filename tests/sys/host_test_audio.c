@@ -61,6 +61,21 @@ int devfs_register_alias(const char *path, const char *target) {
  * search at the directory below.
  */
 #include "../../sys/drivers/audio/audio.h"
+
+/*
+ * audio_register_device() publishes an OSS frontend for every backend.
+ * oss.c drags in the personality-aware ioctl translation and its own
+ * kernel glue, none of which this test exercises, so stub the entry
+ * point.  Without it the link fails outright -- which it had been doing
+ * silently since the OSS frontend landed, leaving a stale binary behind.
+ */
+struct audio_dev;
+void oss_register_device(struct audio_dev *dev, int unit);
+void oss_register_device(struct audio_dev *dev, int unit) {
+	(void)dev;
+	(void)unit;
+}
+
 #include "../../sys/drivers/audio/audio.c"
 #include "../../sys/drivers/audio/null_audio.c"
 
@@ -290,6 +305,179 @@ static void test_ioctl_null_args_rejected(void) {
 	assert(audio_ioctl_dispatch(dev, AUDIO_GETDEV, NULL) == -EINVAL);
 }
 
+/* ----------------------------------------------------------------- */
+/* Encoding conversion                                               */
+/* ----------------------------------------------------------------- */
+
+static int16_t s16le(const uint8_t *p) {
+	return (int16_t)((uint16_t)p[0] | ((uint16_t)p[1] << 8));
+}
+
+/* Signed 16-bit LE is what backends want, so it must pass through
+ * untouched and unexpanded -- this is the path every ordinary player
+ * takes and it must stay a straight memcpy. */
+static void test_conv_native_is_passthrough(void) {
+	const uint8_t in[8] = { 0x01, 0x80, 0xFF, 0x7F, 0x00, 0x00, 0x34, 0x12 };
+	uint8_t out[16];
+	size_t n;
+
+	assert(audio_conv_ratio(AUDIO_ENCODING_SLINEAR_LE, 16) == 1);
+	n = audio_convert(AUDIO_ENCODING_SLINEAR_LE, 16, in, sizeof(in), out);
+	assert(n == sizeof(in));
+	assert(memcmp(out, in, sizeof(in)) == 0);
+	/* The native aliases behave identically. */
+	assert(audio_conv_ratio(AUDIO_ENCODING_SLINEAR, 16) == 1);
+	assert(audio_conv_ratio(AUDIO_ENCODING_PCM16, 16) == 1);
+}
+
+/* Big-endian signed: byteswap, same size. */
+static void test_conv_slinear_be_swaps(void) {
+	const uint8_t in[4] = { 0x12, 0x34, 0xFF, 0x80 };
+	uint8_t out[8];
+	size_t n;
+
+	assert(audio_conv_ratio(AUDIO_ENCODING_SLINEAR_BE, 16) == 1);
+	n = audio_convert(AUDIO_ENCODING_SLINEAR_BE, 16, in, sizeof(in), out);
+	assert(n == 4);
+	assert(s16le(&out[0]) == (int16_t)0x1234);
+	assert(s16le(&out[2]) == (int16_t)0xFF80);
+}
+
+/* An odd trailing byte cannot be swapped alone; it must be dropped
+ * rather than paired with whatever arrives next. */
+static void test_conv_slinear_be_drops_odd_tail(void) {
+	const uint8_t in[3] = { 0x12, 0x34, 0x56 };
+	uint8_t out[8];
+
+	assert(audio_convert(AUDIO_ENCODING_SLINEAR_BE, 16, in, 3, out) == 2);
+}
+
+/* 8-bit unsigned recentres on zero and widens to 16-bit. */
+static void test_conv_unsigned8_widens(void) {
+	const uint8_t in[3] = { 0x80, 0x00, 0xFF };
+	uint8_t out[8];
+	size_t n;
+
+	assert(audio_conv_ratio(AUDIO_ENCODING_PCM8, 8) == 2);
+	n = audio_convert(AUDIO_ENCODING_PCM8, 8, in, sizeof(in), out);
+	assert(n == 6);
+	assert(s16le(&out[0]) == 0);        /* 0x80 is silence */
+	assert(s16le(&out[2]) == -32768);   /* 0x00 is full negative */
+	assert(s16le(&out[4]) == 32512);    /* 0xFF is near full positive */
+}
+
+/*
+ * G.711 anchor values.  Both laws encode silence and full scale at
+ * known points; a table that is subtly wrong still "works" and just
+ * sounds bad, so pin the ends and the monotonicity.
+ */
+static void test_conv_ulaw_anchors(void) {
+	uint8_t out[4];
+
+	assert(audio_conv_ratio(AUDIO_ENCODING_ULAW, 8) == 2);
+	/* 0xFF is mu-law zero; 0x7F is zero with the sign bit set. */
+	audio_convert(AUDIO_ENCODING_ULAW, 8, (const uint8_t[]){ 0xFF }, 1, out);
+	assert(s16le(out) == 0);
+	audio_convert(AUDIO_ENCODING_ULAW, 8, (const uint8_t[]){ 0x7F }, 1, out);
+	assert(s16le(out) == 0);
+	/* 0x00 / 0x80 are the extremes.  Note the sign: in mu-law the sign
+	 * bit is inverted along with everything else, so 0x00 is full
+	 * negative and 0x80 full positive. */
+	audio_convert(AUDIO_ENCODING_ULAW, 8, (const uint8_t[]){ 0x00 }, 1, out);
+	assert(s16le(out) == -32124);
+	audio_convert(AUDIO_ENCODING_ULAW, 8, (const uint8_t[]){ 0x80 }, 1, out);
+	assert(s16le(out) == 32124);
+}
+
+static void test_conv_alaw_anchors(void) {
+	uint8_t out[4];
+
+	assert(audio_conv_ratio(AUDIO_ENCODING_ALAW, 8) == 2);
+	audio_convert(AUDIO_ENCODING_ALAW, 8, (const uint8_t[]){ 0xD5 }, 1, out);
+	assert(s16le(out) == 8);
+	audio_convert(AUDIO_ENCODING_ALAW, 8, (const uint8_t[]){ 0x55 }, 1, out);
+	assert(s16le(out) == -8);
+	audio_convert(AUDIO_ENCODING_ALAW, 8, (const uint8_t[]){ 0xAA }, 1, out);
+	assert(s16le(out) == 32256);
+	audio_convert(AUDIO_ENCODING_ALAW, 8, (const uint8_t[]){ 0x2A }, 1, out);
+	assert(s16le(out) == -32256);
+}
+
+/* Both laws must be monotonic across each half of their range -- the
+ * cheapest check that catches a transposed segment or bias. */
+static void test_conv_g711_monotonic(void) {
+	int i;
+	int16_t prev;
+	uint8_t out[4];
+
+	/* mu-law 0x00..0x7F runs from full negative up to zero. */
+	audio_convert(AUDIO_ENCODING_ULAW, 8, (const uint8_t[]){ 0x00 }, 1, out);
+	prev = s16le(out);
+	assert(prev == -32124);
+	for (i = 1; i < 128; i++) {
+		int16_t v;
+		uint8_t b = (uint8_t)i;
+
+		audio_convert(AUDIO_ENCODING_ULAW, 8, &b, 1, out);
+		v = s16le(out);
+		assert(v > prev);
+		prev = v;
+	}
+	assert(prev == 0);   /* 0x7F is mu-law negative zero */
+
+	/* 0x80..0xFF is the mirror image, running down to zero. */
+	audio_convert(AUDIO_ENCODING_ULAW, 8, (const uint8_t[]){ 0x80 }, 1, out);
+	prev = s16le(out);
+	assert(prev == 32124);
+	for (i = 129; i < 256; i++) {
+		int16_t v;
+		uint8_t b = (uint8_t)i;
+
+		audio_convert(AUDIO_ENCODING_ULAW, 8, &b, 1, out);
+		v = s16le(out);
+		assert(v < prev);
+		prev = v;
+	}
+	assert(prev == 0);   /* 0xFF is mu-law positive zero */
+}
+
+/*
+ * The whole point of the exercise: a backend must be programmed for the
+ * format it will actually be handed, not the one the application asked
+ * for.  8-bit sources are widened, so the hardware has to be told 16.
+ */
+static void test_hw_prinfo_maps_to_backend_format(void) {
+	audio_prinfo_t sw, hw;
+
+	memset(&sw, 0, sizeof(sw));
+	sw.sample_rate = 8000;
+	sw.channels = 1;
+
+	sw.encoding = AUDIO_ENCODING_ULAW;
+	sw.precision = 8;
+	audio_hw_prinfo(&sw, &hw);
+	assert(hw.encoding == AUDIO_ENCODING_SLINEAR_LE);
+	assert(hw.precision == 16);
+	assert(hw.sample_rate == 8000 && hw.channels == 1);
+
+	sw.encoding = AUDIO_ENCODING_PCM8;
+	audio_hw_prinfo(&sw, &hw);
+	assert(hw.encoding == AUDIO_ENCODING_SLINEAR_LE);
+	assert(hw.precision == 16);
+
+	sw.encoding = AUDIO_ENCODING_SLINEAR_BE;
+	sw.precision = 16;
+	audio_hw_prinfo(&sw, &hw);
+	assert(hw.encoding == AUDIO_ENCODING_SLINEAR_LE);
+	assert(hw.precision == 16);
+
+	/* Already native: untouched. */
+	sw.encoding = AUDIO_ENCODING_SLINEAR_LE;
+	audio_hw_prinfo(&sw, &hw);
+	assert(hw.encoding == AUDIO_ENCODING_SLINEAR_LE);
+	assert(hw.precision == 16);
+}
+
 int main(void) {
 	test_initinfo_marks_all_fields_unset();
 	test_default_info_populates_sensible_defaults();
@@ -310,6 +498,14 @@ int main(void) {
 	test_ioctl_unknown_returns_enotty();
 	test_ioctl_drain_and_flush_succeed();
 	test_ioctl_null_args_rejected();
+	test_conv_native_is_passthrough();
+	test_conv_slinear_be_swaps();
+	test_conv_slinear_be_drops_odd_tail();
+	test_conv_unsigned8_widens();
+	test_conv_ulaw_anchors();
+	test_conv_alaw_anchors();
+	test_conv_g711_monotonic();
+	test_hw_prinfo_maps_to_backend_format();
 	puts("host_test_audio: PASS");
 	return 0;
 }

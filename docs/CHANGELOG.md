@@ -180,6 +180,25 @@ Detailed record of major implementation milestones. For current system status, s
   session leader (`${SDM_SESSION:-matwm2}`).
 
 ## Drivers
+- **Audio framework — encoding conversion:** `audio_validate_prinfo()` had
+  always accepted ULAW, ALAW, the unsigned encodings and the big-endian
+  ones, but no backend ever looked at the field — the bytes went to the
+  hardware as though they were signed 16-bit LE, so anything else played
+  as noise.  `sys/drivers/audio/audio.c` now converts on the way through
+  (G.711 expansion for the companded laws, recentre-and-widen for
+  unsigned, byteswap for big-endian), so every backend sees one format.
+  Because 8-bit sources widen to 16, `ops->set_params` is given the
+  *converted* format while `AUDIO_GETINFO` keeps reporting what the
+  application selected — which also lets 8-bit encodings play on codecs
+  that offer no 8-bit format at all (QEMU's HDA codec advertises 16-bit
+  only).  A stream that is already SLINEAR_LE takes an untouched fast
+  path.  Verified: `tests/sys/host_test_audio` (G.711 anchors and
+  monotonicity over both halves, widening, byteswap, odd-tail handling,
+  format mapping) and a QEMU boot playing mu-law at 16 kHz, which renders
+  6.144 s of audio to within 1% — where the same bytes previously
+  produced 3.07 s of noise.  That test binary had also been failing to
+  link since the OSS frontend landed and was silently stale; it now
+  builds.
 - **Intel HDA — full audit against the 1.0a specification (Aug 2026):**
   `sys/drivers/audio/hda.{c,h}` reviewed line by line against the
   *High Definition Audio Specification, Revision 1.0a* and the FreeBSD
