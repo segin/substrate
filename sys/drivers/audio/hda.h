@@ -156,6 +156,7 @@
 #define HDA_PARAM_SUPPORTED_RATES   0x0A
 #define HDA_PARAM_SUPPORTED_FORMATS 0x0B
 #define HDA_PARAM_PIN_CAPS          0x0C
+#define HDA_PARAM_INPUT_AMP_CAPS    0x0D
 #define HDA_PARAM_CONN_LIST_LEN     0x0E
 #define HDA_PARAM_OUTPUT_AMP_CAPS   0x12
 
@@ -174,7 +175,14 @@
 #define HDA_AW_TYPE_MIXER        0x2
 #define HDA_AW_TYPE_SELECTOR     0x3
 #define HDA_AW_TYPE_PIN          0x4
+#define HDA_AW_IN_AMP            0x00000002U  /* input amp present */
 #define HDA_AW_OUT_AMP           0x00000004U  /* output amp present */
+/*
+ * Amp Param Override: the widget carries its own AMP_CAPS.  When clear,
+ * the widget's own 0x0D/0x12 response is meaningless and the audio
+ * function group's defaults apply instead (spec rev 1.0a 7.3.4.6).
+ */
+#define HDA_AW_AMP_OVERRIDE      0x00000008U
 #define HDA_AW_CONN_LIST         0x00000100U  /* connection list present */
 
 /* SET_AMP_GAIN_MUTE payload */

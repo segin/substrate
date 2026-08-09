@@ -259,6 +259,13 @@ typedef struct hda_dev {
 
 	/* Codec output path, found by hda_codec_configure(). */
 	uint8_t          afg_nid;
+	/*
+	 * The AFG's amp capabilities, which stand in for every widget that
+	 * does not set Amp Param Override.  Read once at configure time
+	 * because hda_amp_caps() needs them for most widgets on real codecs.
+	 */
+	uint32_t         afg_outamp_caps;
+	uint32_t         afg_inamp_caps;
 	uint8_t          dac_nid;
 	uint8_t          pin_nid;
 	int              have_path;
@@ -484,19 +491,54 @@ static uint32_t hda_get_param(hda_dev_t *d, uint8_t nid, uint8_t param)
 }
 
 /*
- * Unmute a widget's output amp and set it to its 0 dB point.  Amps power
- * up muted on most codecs, so skipping this is silence even with a
- * perfectly routed graph.  AMPCAP offset is the 0 dB setting; when a codec
- * reports none, use the top step rather than 0, which is the quietest.
+ * Amplifier capabilities for `nid`, whose AUDIO_WIDGET_CAPS are `wcaps`.
+ *
+ * Spec 7.3.4.6: a widget only carries its own amp parameters when Amp
+ * Param Override is set.  "If this bit is a 0, then the Audio Function
+ * node must contain default amplifier parameters, and they should be
+ * used to define all amplifier parameters (both input and output) in
+ * this widget."
+ *
+ * Querying the widget unconditionally -- which is what this used to do
+ * -- returns 0 on most real codecs, and an all-zero AMPCAP reads as
+ * offset 0, num steps 0.  QEMU's codec happens to answer per widget, so
+ * emulation never showed it.
  */
-static void hda_amp_unmute_out(hda_dev_t *d, uint8_t nid)
+static uint32_t hda_amp_caps(hda_dev_t *d, uint8_t nid, uint32_t wcaps,
+                             int output)
 {
-	uint32_t caps = hda_get_param(d, nid, HDA_PARAM_OUTPUT_AMP_CAPS);
-	uint8_t gain = HDA_AMPCAP_OFFSET(caps);
-
-	if (gain == 0) {
-		gain = (uint8_t)HDA_AMPCAP_NUMSTEPS(caps);
+	if (wcaps & HDA_AW_AMP_OVERRIDE) {
+		return hda_get_param(d, nid, output ?
+		                     HDA_PARAM_OUTPUT_AMP_CAPS :
+		                     HDA_PARAM_INPUT_AMP_CAPS);
 	}
+	return output ? d->afg_outamp_caps : d->afg_inamp_caps;
+}
+
+/*
+ * Unmute a widget's output amp and park it on its 0 dB step.
+ *
+ * The mute bit is the thing that actually has to change here: spec
+ * 7.3.3.7 says "generally, mute should default to 1 on codec reset",
+ * while the gain "must default to the Offset value, meaning that all
+ * amplifiers, by default, are configured to 0 dB gain".  So Offset is
+ * the correct gain, not a starting point to be second-guessed -- the
+ * old code substituted a fallback whenever Offset read 0, which on a
+ * codec where step 0 genuinely is 0 dB drove the amp to maximum instead.
+ *
+ * Offset is clamped to NumSteps because "if a value outside the
+ * amplifier's range is set, the results are undetermined".
+ */
+static void hda_amp_unmute_out(hda_dev_t *d, uint8_t nid, uint32_t wcaps)
+{
+	uint32_t caps = hda_amp_caps(d, nid, wcaps, 1);
+	uint8_t gain = (uint8_t)HDA_AMPCAP_OFFSET(caps);
+	uint8_t steps = (uint8_t)HDA_AMPCAP_NUMSTEPS(caps);
+
+	if (gain > steps) {
+		gain = steps;
+	}
+	/* Mute bit deliberately left clear. */
 	hda_send_verb(d, d->codec_addr, nid, HDA_VERB_SET_AMP_GAIN_MUTE,
 	              (uint16_t)(HDA_AMP_SET_OUTPUT | HDA_AMP_SET_LEFT |
 	                         HDA_AMP_SET_RIGHT |
@@ -585,7 +627,7 @@ static int hda_route_pin_to_dac(hda_dev_t *d, uint8_t pin, uint8_t dac)
 			              (uint16_t)hda_conn_index(d, mid, dac));
 		}
 		if (caps & HDA_AW_OUT_AMP) {
-			hda_amp_unmute_out(d, mid);
+			hda_amp_unmute_out(d, mid, caps);
 		}
 		hda_send_verb(d, d->codec_addr, pin, HDA_VERB_SET_CONN_SELECT,
 		              (uint16_t)i);
@@ -637,6 +679,14 @@ static int hda_codec_configure(hda_dev_t *d)
 	d->afg_nid = afg;
 	hda_send_verb(d, d->codec_addr, afg, HDA_VERB_SET_POWER_STATE,
 	              HDA_PS_D0);
+
+	/*
+	 * The AFG's amp capabilities are the defaults for every widget that
+	 * does not set Amp Param Override, which on real codecs is most of
+	 * them.  Cache them before walking the widgets.
+	 */
+	d->afg_outamp_caps = hda_get_param(d, afg, HDA_PARAM_OUTPUT_AMP_CAPS);
+	d->afg_inamp_caps  = hda_get_param(d, afg, HDA_PARAM_INPUT_AMP_CAPS);
 
 	/* The AFG's subnodes are the widgets.  Take the first DAC, and the
 	 * best-ranked output pin that is physically connected. */
@@ -729,13 +779,18 @@ static int hda_codec_configure(hda_dev_t *d)
 		              HDA_EAPD_ENABLE);
 	}
 
-	if (hda_get_param(d, dac, HDA_PARAM_AUDIO_WIDGET_CAPS) &
-	    HDA_AW_OUT_AMP) {
-		hda_amp_unmute_out(d, dac);
-	}
-	if (hda_get_param(d, pin, HDA_PARAM_AUDIO_WIDGET_CAPS) &
-	    HDA_AW_OUT_AMP) {
-		hda_amp_unmute_out(d, pin);
+	{
+		uint32_t dcaps = hda_get_param(d, dac,
+		                               HDA_PARAM_AUDIO_WIDGET_CAPS);
+		uint32_t pcaps = hda_get_param(d, pin,
+		                               HDA_PARAM_AUDIO_WIDGET_CAPS);
+
+		if (dcaps & HDA_AW_OUT_AMP) {
+			hda_amp_unmute_out(d, dac, dcaps);
+		}
+		if (pcaps & HDA_AW_OUT_AMP) {
+			hda_amp_unmute_out(d, pin, pcaps);
+		}
 	}
 
 	d->have_path = 1;
