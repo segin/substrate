@@ -2318,8 +2318,16 @@ static void hda_get_devinfo(audio_dev_t *adev, audio_device_t *out)
 static int hda_get_props(audio_dev_t *adev)
 {
 	(void)adev;
-	return AUDIO_PROP_PLAYBACK | AUDIO_PROP_CAPTURE |
-	       AUDIO_PROP_FULLDUPLEX | AUDIO_PROP_INDEPENDENT;
+	/*
+	 * Playback only.  This claimed CAPTURE, FULLDUPLEX and INDEPENDENT
+	 * as well, with hda_ops.read left NULL -- so AUDIO_GETPROPS told
+	 * applications they could record, and every read() on /dev/audio0
+	 * then failed in the framework.  Nothing here drives an input
+	 * stream; the descriptor this driver programs is an output one.
+	 *
+	 * ac97.c makes the same overstatement with the same NULL read op.
+	 */
+	return AUDIO_PROP_PLAYBACK;
 }
 
 static audio_dev_ops_t hda_ops = {
