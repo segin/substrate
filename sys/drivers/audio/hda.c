@@ -2094,8 +2094,14 @@ static int hda_write(audio_dev_t *adev, const void *buf, size_t len)
 	const uint8_t *src = buf;
 	size_t total_consumed = 0;
 
-	if (len == 0 || d->chunk[0] == NULL || d->fifo_buf == NULL) {
-		return (int)len;
+	if (len == 0) {
+		return 0;
+	}
+	/* No ring and no FIFO means nothing can ever be played.  Returning
+	 * len here reported a full successful write and threw the audio
+	 * away. */
+	if (d->chunk[0] == NULL || d->fifo_buf == NULL) {
+		return -ENXIO;
 	}
 
 	/*
