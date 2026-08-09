@@ -62,7 +62,15 @@
 #define HDA_SD_BASE              0x80
 #define HDA_SD_STRIDE            0x20
 
-#define HDA_SD_CTL               0x00   /* 24-bit (treat as 32-bit) */
+/*
+ * SDnCTL is three bytes at +0x00 with SDnSTS immediately after at +0x03,
+ * so a 32-bit access to SDnCTL straddles the status byte.  Address the
+ * two control bytes we care about separately: SRST/RUN/IOCE/FEIE/DEIE
+ * live in byte 0, and the stream tag in byte 2.  Spec 4.5.6 asks for byte
+ * access from interrupt context specifically for this reason.
+ */
+#define HDA_SD_CTL               0x00   /* byte: SRST/RUN/IOCE/FEIE/DEIE */
+#define HDA_SD_CTL2              0x02   /* byte: stripe/TP/DIR/stream tag */
 #define HDA_SD_STS               0x03   /* 8-bit */
 #define HDA_SD_LPIB              0x04
 #define HDA_SD_CBL               0x08
@@ -112,6 +120,8 @@
 #define HDA_SDCTL_FEIE           0x00000008U
 #define HDA_SDCTL_DEIE           0x00000010U
 #define HDA_SDCTL_STREAM_SHIFT   20         /* stream tag in bits 20-23 */
+#define HDA_SDCTL2_STRM_SHIFT    4          /* ... i.e. bits 7-4 of byte 2 */
+#define HDA_SDCTL2_STRM_MASK     0xF0
 
 /* Stream status bits (in SDSTS, byte at SD_BASE + 0x03) */
 #define HDA_SDSTS_BCIS           0x04
