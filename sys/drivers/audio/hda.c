@@ -584,35 +584,90 @@ static void hda_amp_unmute_in(hda_dev_t *d, uint8_t nid, uint32_t wcaps,
 }
 
 /*
- * Index of `target` in `nid`'s connection list, or -1.  Short-form lists
- * pack four 8-bit entries per response, long-form two 16-bit ones.  Range
- * entries (high bit set on a short entry) are not expanded: they only
- * appear on large mixers, and picking the explicit match is enough.
+ * Read `nid`'s connection list into `conns`, expanding ranges, and return
+ * how many entries were stored.  That count is the index space that
+ * SET_CONNECTION_SELECT and the amp Index field address.
+ *
+ * Entry width and the range flag both depend on the list's form (spec
+ * figure 51): a short-form entry is 8 bits, range indicator at bit 7 over
+ * a 7-bit NID; a long-form entry is 16 bits, flag at bit 15 over a 15-bit
+ * NID.  One response carries four short entries or two long ones, and the
+ * requested index has to land on that boundary -- 7.3.3.3: "n must be a
+ * multiple of four" short-form, "n must be even" long-form.
+ *
+ * A set range indicator means this entry and the previous one bound a
+ * continuous run of NIDs: "if the range bit were set on the third list
+ * entry, then the second and third entries form a range".  The NIDs in
+ * between occupy real connection indices.
+ *
+ * All of which the previous code got wrong in one line.  It masked every
+ * entry -- long form included -- to 8 bits and compared the raw value
+ * with the range flag still in it.  A long-form entry lost its high byte
+ * outright, so 0x8005 compared equal to NID 5; a short-form range entry
+ * could never match anything; and because ranges were not expanded, any
+ * widget with a range ahead of the match reported an index short of the
+ * real one, which then selected the wrong source and unmuted the wrong
+ * input amp.
  */
-static int hda_conn_index(hda_dev_t *d, uint8_t nid, uint8_t target)
+#define HDA_MAX_CONNS 32
+
+static int hda_conn_list(hda_dev_t *d, uint8_t nid, uint8_t *conns, int max)
 {
 	uint32_t lenr = hda_get_param(d, nid, HDA_PARAM_CONN_LIST_LEN);
-	uint8_t len = (uint8_t)HDA_CONNLIST_LEN(lenr);
+	int len = (int)HDA_CONNLIST_LEN(lenr);
 	int is_long = (lenr & HDA_CONNLIST_LONG) != 0;
-	uint8_t i;
+	int per = is_long ? 2 : 4;
+	uint16_t nmask = is_long ? 0x7FFF : 0x7F;
+	uint16_t rmask = is_long ? 0x8000 : 0x80;
+	uint16_t prev = 0;
+	int n = 0;
+	int i;
 
-	for (i = 0; i < len; i++) {
-		uint32_t resp;
-		uint8_t entry;
+	for (i = 0; i < len && n < max; i += per) {
+		uint32_t resp = hda_send_verb(d, d->codec_addr, nid,
+		                              HDA_VERB_GET_CONN_LIST,
+		                              (uint16_t)i);
+		int j;
 
-		if (is_long) {
-			resp = hda_send_verb(d, d->codec_addr, nid,
-			                     HDA_VERB_GET_CONN_LIST,
-			                     (uint16_t)(i & ~1u));
-			entry = (uint8_t)((resp >> ((i & 1) * 16)) & 0xFF);
-		} else {
-			resp = hda_send_verb(d, d->codec_addr, nid,
-			                     HDA_VERB_GET_CONN_LIST,
-			                     (uint16_t)(i & ~3u));
-			entry = (uint8_t)((resp >> ((i & 3) * 8)) & 0xFF);
+		for (j = 0; j < per && (i + j) < len && n < max; j++) {
+			int shift = j * (is_long ? 16 : 8);
+			uint16_t raw = (uint16_t)((resp >> shift) &
+			                          (is_long ? 0xFFFFU : 0xFFU));
+			uint16_t cnid = raw & nmask;
+			uint16_t first;
+
+			/* "the number of entries beyond the end of the list
+			 * would be reported as 0's" */
+			if (cnid == 0 || cnid > 0xFF) {
+				continue;
+			}
+			if ((raw & rmask) == 0 || prev == 0 || prev >= cnid) {
+				/* Plain entry, or a range the codec described
+				 * backwards -- take it as a single NID. */
+				first = cnid;
+			} else {
+				first = (uint16_t)(prev + 1);
+			}
+			while (first <= cnid && n < max) {
+				conns[n++] = (uint8_t)first;
+				first++;
+			}
+			prev = cnid;
 		}
-		if (entry == target) {
-			return (int)i;
+	}
+	return n;
+}
+
+/* Index of `target` in `nid`'s connection list, or -1. */
+static int hda_conn_index(hda_dev_t *d, uint8_t nid, uint8_t target)
+{
+	uint8_t conns[HDA_MAX_CONNS];
+	int n = hda_conn_list(d, nid, conns, HDA_MAX_CONNS);
+	int i;
+
+	for (i = 0; i < n; i++) {
+		if (conns[i] == target) {
+			return i;
 		}
 	}
 	return -1;
@@ -628,12 +683,17 @@ static int hda_conn_index(hda_dev_t *d, uint8_t nid, uint8_t target)
 static int hda_route_pin_to_dac(hda_dev_t *d, uint8_t pin, uint8_t dac)
 {
 	uint32_t pincaps = hda_get_param(d, pin, HDA_PARAM_AUDIO_WIDGET_CAPS);
-	uint32_t lenr;
-	uint8_t len, i;
+	uint8_t pconns[HDA_MAX_CONNS];
+	int pn;
+	int i;
 	int idx;
 
-	idx = hda_conn_index(d, pin, dac);
-	if (idx >= 0) {
+	pn = hda_conn_list(d, pin, pconns, HDA_MAX_CONNS);
+
+	for (idx = 0; idx < pn; idx++) {
+		if (pconns[idx] != dac) {
+			continue;
+		}
 		hda_send_verb(d, d->codec_addr, pin, HDA_VERB_SET_CONN_SELECT,
 		              (uint16_t)idx);
 		if (pincaps & HDA_AW_IN_AMP) {
@@ -642,16 +702,10 @@ static int hda_route_pin_to_dac(hda_dev_t *d, uint8_t pin, uint8_t dac)
 		return 0;
 	}
 
-	lenr = hda_get_param(d, pin, HDA_PARAM_CONN_LIST_LEN);
-	len = (uint8_t)HDA_CONNLIST_LEN(lenr);
-	for (i = 0; i < len; i++) {
-		uint32_t resp = hda_send_verb(d, d->codec_addr, pin,
-		                              HDA_VERB_GET_CONN_LIST,
-		                              (uint16_t)(i & ~3u));
-		uint8_t mid = (uint8_t)((resp >> ((i & 3) * 8)) & 0xFF);
+	for (i = 0; i < pn; i++) {
+		uint8_t mid = pconns[i];
 		uint32_t caps;
 		int type;
-
 		int midx;
 
 		if (mid == 0) {
@@ -662,8 +716,8 @@ static int hda_route_pin_to_dac(hda_dev_t *d, uint8_t pin, uint8_t dac)
 		if (type != HDA_AW_TYPE_MIXER && type != HDA_AW_TYPE_SELECTOR) {
 			continue;
 		}
-		/* Resolved once: every hda_conn_index() call walks the list
-		 * over the CORB, and this used to be asked for twice. */
+		/* Resolved once: hda_conn_index() walks the whole list over
+		 * the CORB, and this used to be asked for twice. */
 		midx = hda_conn_index(d, mid, dac);
 		if (midx < 0) {
 			continue;
@@ -683,7 +737,7 @@ static int hda_route_pin_to_dac(hda_dev_t *d, uint8_t pin, uint8_t dac)
 		hda_send_verb(d, d->codec_addr, pin, HDA_VERB_SET_CONN_SELECT,
 		              (uint16_t)i);
 		if (pincaps & HDA_AW_IN_AMP) {
-			hda_amp_unmute_in(d, pin, pincaps, i);
+			hda_amp_unmute_in(d, pin, pincaps, (uint8_t)i);
 		}
 		return 0;
 	}

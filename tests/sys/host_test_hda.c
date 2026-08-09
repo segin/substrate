@@ -123,6 +123,181 @@ static void hda_build_bdl_entry(hda_bdl_entry_t *e, uint64_t buf_phys,
 	e->flags    = (uint32_t)(ioc ? HDA_BDL_F_IOC : 0);
 }
 
+/*
+ * Connection list walker, mirrored from hda.c with the CORB round trip
+ * replaced by a table of canned responses.  Entry width, the range flag
+ * position and the request-index stride all depend on the list's form
+ * (spec figure 51 / 7.3.3.3), and getting any of them wrong yields an
+ * index that still looks plausible -- it just selects the wrong source
+ * and unmutes the wrong input amp.
+ */
+#define HDA_MAX_CONNS 32
+
+static uint32_t conn_resp[64];
+static int conn_len;
+static int conn_is_long;
+
+static int hda_conn_list(uint8_t *conns, int max)
+{
+	int per = conn_is_long ? 2 : 4;
+	uint16_t nmask = conn_is_long ? 0x7FFF : 0x7F;
+	uint16_t rmask = conn_is_long ? 0x8000 : 0x80;
+	uint16_t prev = 0;
+	int n = 0, i;
+
+	for (i = 0; i < conn_len && n < max; i += per) {
+		uint32_t resp = conn_resp[i];
+		int j;
+
+		for (j = 0; j < per && (i + j) < conn_len && n < max; j++) {
+			int shift = j * (conn_is_long ? 16 : 8);
+			uint16_t raw = (uint16_t)((resp >> shift) &
+			                          (conn_is_long ? 0xFFFFU : 0xFFU));
+			uint16_t cnid = raw & nmask;
+			uint16_t first;
+
+			if (cnid == 0 || cnid > 0xFF) continue;
+			if ((raw & rmask) == 0 || prev == 0 || prev >= cnid)
+				first = cnid;
+			else
+				first = (uint16_t)(prev + 1);
+			while (first <= cnid && n < max)
+				conns[n++] = (uint8_t)first, first++;
+			prev = cnid;
+		}
+	}
+	return n;
+}
+
+static int conn_index_of(const uint8_t *c, int n, uint8_t target) {
+	int i;
+	for (i = 0; i < n; i++) if (c[i] == target) return i;
+	return -1;
+}
+
+static void conn_setup(int is_long, int len) {
+	memset(conn_resp, 0, sizeof(conn_resp));
+	conn_is_long = is_long;
+	conn_len = len;
+}
+
+static void test_conn_short_form_plain(void) {
+	uint8_t c[HDA_MAX_CONNS];
+	int n;
+
+	conn_setup(0, 4);
+	conn_resp[0] = 0x05040302;
+	n = hda_conn_list(c, HDA_MAX_CONNS);
+	assert(n == 4);
+	assert(c[0] == 2 && c[1] == 3 && c[2] == 4 && c[3] == 5);
+}
+
+static void test_conn_short_form_spans_responses(void) {
+	uint8_t c[HDA_MAX_CONNS];
+	int n, i;
+
+	/* Four entries per response; index 4 must be a second request. */
+	conn_setup(0, 8);
+	conn_resp[0] = 0x04030201;
+	conn_resp[4] = 0x08070605;
+	n = hda_conn_list(c, HDA_MAX_CONNS);
+	assert(n == 8);
+	for (i = 0; i < 8; i++) assert(c[i] == (uint8_t)(i + 1));
+}
+
+/* "the number of entries beyond the end of the list would be reported
+ * as 0's" -- padding must not become connections. */
+static void test_conn_zero_padding_ignored(void) {
+	uint8_t c[HDA_MAX_CONNS];
+	int n;
+
+	conn_setup(0, 2);
+	conn_resp[0] = 0x00000302;
+	n = hda_conn_list(c, HDA_MAX_CONNS);
+	assert(n == 2);
+	assert(c[0] == 2 && c[1] == 3);
+}
+
+/* A range entry forms a run with the entry before it, and every NID in
+ * between takes a real connection index. */
+static void test_conn_short_form_range_expands(void) {
+	uint8_t c[HDA_MAX_CONNS];
+	int n;
+
+	conn_setup(0, 2);
+	conn_resp[0] = 0x00008502;   /* 2, then 5 with the range bit set */
+	n = hda_conn_list(c, HDA_MAX_CONNS);
+	assert(n == 4);
+	assert(c[0] == 2 && c[1] == 3 && c[2] == 4 && c[3] == 5);
+}
+
+static void test_conn_long_form_plain(void) {
+	uint8_t c[HDA_MAX_CONNS];
+	int n;
+
+	conn_setup(1, 2);
+	conn_resp[0] = 0x00050002;
+	n = hda_conn_list(c, HDA_MAX_CONNS);
+	assert(n == 2);
+	assert(c[0] == 2 && c[1] == 5);
+}
+
+/*
+ * The exact shape the old code mis-parsed: a long-form range entry.  It
+ * masked every entry to 8 bits regardless of form, so 0x8005 read as
+ * plain NID 5 -- the range bit vanished into the NID and the run was
+ * never expanded.  NID 5 then reported index 1 instead of 3, which is
+ * the index handed to SET_CONNECTION_SELECT and to the amp Index field.
+ */
+static void test_conn_long_form_range_and_index(void) {
+	uint8_t c[HDA_MAX_CONNS];
+	int n;
+
+	conn_setup(1, 2);
+	conn_resp[0] = 0x80050002;
+	n = hda_conn_list(c, HDA_MAX_CONNS);
+	assert(n == 4);
+	assert(c[0] == 2 && c[1] == 3 && c[2] == 4 && c[3] == 5);
+	assert(conn_index_of(c, n, 5) == 3);
+	assert(conn_index_of(c, n, 5) != 1);   /* what the old code returned */
+}
+
+/* Short-form NIDs are 7 bits: bit 7 is the range flag, so a raw compare
+ * against the whole byte never matches a range entry. */
+static void test_conn_range_flag_is_not_part_of_the_nid(void) {
+	uint8_t c[HDA_MAX_CONNS];
+	int n;
+
+	conn_setup(0, 2);
+	conn_resp[0] = 0x00008502;
+	n = hda_conn_list(c, HDA_MAX_CONNS);
+	assert(conn_index_of(c, n, 5) == 3);
+	assert(conn_index_of(c, n, 0x85) == -1);
+}
+
+/* A codec describing a range backwards is malformed; take the entry as a
+ * lone NID rather than looping or emitting garbage. */
+static void test_conn_backwards_range_is_single_nid(void) {
+	uint8_t c[HDA_MAX_CONNS];
+	int n;
+
+	conn_setup(0, 2);
+	conn_resp[0] = 0x00008105;   /* 5, then 1 with the range bit set */
+	n = hda_conn_list(c, HDA_MAX_CONNS);
+	assert(n == 2);
+	assert(c[0] == 5 && c[1] == 1);
+}
+
+static void test_conn_respects_max(void) {
+	uint8_t c[4];
+	int n;
+
+	conn_setup(0, 2);
+	conn_resp[0] = 0x0000FF02;   /* 2, range up to 127 */
+	n = hda_conn_list(c, 4);
+	assert(n == 4);
+}
+
 /* ------------------------------------------------------------------- */
 
 static void test_pack_verb_long_form(void) {
@@ -351,6 +526,15 @@ int main(void) {
 	test_bdl_entry_layout_is_packed_16_bytes();
 	test_bdl_build_with_and_without_ioc();
 	test_bdl_build_null_safe();
+	test_conn_short_form_plain();
+	test_conn_short_form_spans_responses();
+	test_conn_zero_padding_ignored();
+	test_conn_short_form_range_expands();
+	test_conn_long_form_plain();
+	test_conn_long_form_range_and_index();
+	test_conn_range_flag_is_not_part_of_the_nid();
+	test_conn_backwards_range_is_single_nid();
+	test_conn_respects_max();
 	puts("host_test_hda: PASS");
 	return 0;
 }
