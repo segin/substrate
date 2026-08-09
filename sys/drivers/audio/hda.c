@@ -53,6 +53,15 @@
 #define HDA_DRAIN_POLL_MS          10U
 #define HDA_DRAIN_STALL_POLLS      150U  /* ~1.5 s of no progress -> stop */
 #define HDA_DRAIN_POLL_MAX         6000U /* ~60 s absolute ceiling        */
+/*
+ * Controller reset timing.  The link RESET# pulse width is software's
+ * responsibility (spec 3.3.7), and codec enumeration needs at least
+ * 521 us / 25 frames after CRST reads back 1 (4.3).  Millisecond
+ * granularity is the finest this kernel offers a tick-independent busy
+ * wait for, and rounding up costs 2 ms once per controller at boot.
+ */
+#define HDA_RESET_HOLD_MS          1U
+#define HDA_CODEC_DISCOVERY_MS     1U
 
 /* ------------------------------------------------------------------- */
 /* Pure helpers (also reachable from host tests)                       */
@@ -366,7 +375,10 @@ static int hda_controller_reset(hda_dev_t *d)
 {
 	uint32_t budget;
 
-	/* Drop CRST to enter reset, wait for clear. */
+	/* Drop CRST to enter reset, wait for clear.  3.3.7: "After the
+	 * hardware has completed sequencing into the reset state, it will
+	 * report a 0 in this bit.  Software must read a 0 from this bit to
+	 * verify that the controller is in reset." */
 	hda_write32(d, HDA_REG_GCTL,
 	            hda_read32(d, HDA_REG_GCTL) & ~HDA_GCTL_CRST);
 	for (budget = 0; budget < 1000000; budget++) {
@@ -374,6 +386,20 @@ static int hda_controller_reset(hda_dev_t *d)
 			break;
 		}
 	}
+	if (hda_read32(d, HDA_REG_GCTL) & HDA_GCTL_CRST) {
+		kprintf("hda: controller will not enter reset\n");
+		return -EIO;
+	}
+
+	/*
+	 * Hold the link in reset.  3.3.7 makes the pulse width our problem:
+	 * "Software is responsible for setting/clearing this bit such that
+	 * the minimum link RESET# signal assertion pulse width specification
+	 * is met."  There was no delay here at all -- CRST was lowered and
+	 * raised back to back.  FreeBSD waits 100 us, NetBSD 1 ms.
+	 */
+	timer_busywait_ms(HDA_RESET_HOLD_MS);
+
 	/* Raise CRST to leave reset, wait for set. */
 	hda_write32(d, HDA_REG_GCTL,
 	            hda_read32(d, HDA_REG_GCTL) | HDA_GCTL_CRST);
@@ -383,15 +409,25 @@ static int hda_controller_reset(hda_dev_t *d)
 		}
 	}
 	if ((hda_read32(d, HDA_REG_GCTL) & HDA_GCTL_CRST) == 0) {
+		kprintf("hda: controller stuck in reset\n");
 		return -EIO;
 	}
 
-	/* The spec mandates ~521 us for codecs to assert STATESTS; the
-	 * pause loop above drains plenty of time on physical hardware and
-	 * QEMU returns instantly. */
-	for (budget = 0; budget < 1000; budget++) {
-		__asm__ volatile("pause");
-	}
+	/*
+	 * Give the codecs time to enumerate themselves before STATESTS is
+	 * believed.  4.3: "From RESET# de-assertion until codecs requesting
+	 * the enumeration can be as late as 25 frames.  The software must
+	 * wait at least 521 us (25 frames) after reading CRST as a 1 before
+	 * assuming that codecs have all made status change requests and have
+	 * been registered by the controller."  Revision 1.0a lists this as an
+	 * erratum fix -- earlier text said 250 us.
+	 *
+	 * What was here was a 1000-iteration `pause` loop, on the order of
+	 * tens of microseconds on a modern part: short by more than an order
+	 * of magnitude, and the reason codec probing was occasionally coming
+	 * up empty.
+	 */
+	timer_busywait_ms(HDA_CODEC_DISCOVERY_MS);
 	return 0;
 }
 
