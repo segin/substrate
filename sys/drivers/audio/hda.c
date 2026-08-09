@@ -23,6 +23,7 @@
 #include <kern/pci.h>
 #include <kern/sched.h>
 #include <kern/sleepq.h>
+#include <kern/time.h>
 #include <sys/audioio.h>
 #include <sys/dma.h>
 #include <sys/errno.h>
@@ -47,6 +48,11 @@
  * (4.5.4); each MMIO read here costs hundreds of ns, so this is a wide
  * margin that still cannot hang the boot. */
 #define HDA_STREAM_TIMEOUT         10000
+/* Drain polling, mirroring ac97.c: give up on a stalled controller
+ * rather than blocking close() forever. */
+#define HDA_DRAIN_POLL_MS          10U
+#define HDA_DRAIN_STALL_POLLS      150U  /* ~1.5 s of no progress -> stop */
+#define HDA_DRAIN_POLL_MAX         6000U /* ~60 s absolute ceiling        */
 
 /* ------------------------------------------------------------------- */
 /* Pure helpers (also reachable from host tests)                       */
@@ -1454,44 +1460,21 @@ static int hda_drain(audio_dev_t *adev);
 static int hda_close(audio_dev_t *adev)
 {
 	hda_dev_t *d = adev->driver_data;
-	int budget;
 
 	/*
 	 * Play out what the application already handed us before stopping.
 	 * Without this, close() truncates: the writer only blocks once the
 	 * 256 KiB software FIFO fills, so a short clip is fully accepted, the
 	 * process exits, and killing the stream here discards nearly all of
-	 * it -- a two second tone came out as 720 bytes.  The completion
-	 * interrupt already wakes us on every drained slot, so wait on the
-	 * same sleep channel the writer uses.  Bounded, and interruptible, so
-	 * a wedged controller cannot make close() unkillable.
+	 * it -- a two second tone came out as 720 bytes.
+	 *
+	 * hda_drain() is the whole wait now.  close() used to follow it with
+	 * a second, weaker loop of its own -- no re-kick, no stall detection,
+	 * and it tested the drained condition before registering on the sleep
+	 * channel, so a completion landing in that window was lost and the
+	 * thread only woke on the scheduler's ~250 ms lost-wakeup fallback.
 	 */
-	hda_drain(adev);
-	for (budget = 0; budget < 4000; budget++) {
-		unsigned long f = spinlock_acquire_irq(&d->feed_lock);
-		int32_t in_flight = (int32_t)(d->writes_queued -
-		                     __atomic_load_n(&d->slots_played,
-		                                     __ATOMIC_ACQUIRE));
-		size_t pending = audio_fifo_used(&d->fifo);
-		spinlock_release_irq(&d->feed_lock, f);
-
-		/* Signed: a completion racing past writes_queued must read as
-		 * "drained", not as ~4 billion still outstanding. */
-		if (in_flight <= 0 && pending == 0) {
-			break;
-		}
-		if (!current_thread) {
-			__asm__ volatile("pause");
-			continue;
-		}
-		if (current_thread->sig_pending & ~current_thread->sig_mask) {
-			break;
-		}
-		sleepq_add(d, current_thread);
-		current_thread->flags |= THREAD_F_INTERRUPTIBLE;
-		sched_sleep(d);
-		current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
-	}
+	(void)hda_drain(adev);
 
 	/*
 	 * Stop the stream and reset the ring/FIFO state under feed_lock
@@ -1602,19 +1585,87 @@ static int hda_write(audio_dev_t *adev, const void *buf, size_t len)
 	return (int)total_consumed;
 }
 
+/*
+ * Block until everything queued has been played out.
+ *
+ * This used to stage the FIFO tail into the ring and return immediately,
+ * which is not a drain at all -- AUDIO_DRAIN and SNDCTL_DSP_SYNC are
+ * defined to block until output completes, and hda_close() had to
+ * open-code a weaker wait of its own to stop truncating clips.
+ *
+ * Same shape as ac97_drain(): re-kick every pass so the queue actually
+ * moves, track a monotonically decreasing byte count so a wedged
+ * controller gives up instead of hanging, and bail on a pending unmasked
+ * signal so a killed player exits promptly.
+ */
 static int hda_drain(audio_dev_t *adev)
 {
 	hda_dev_t *d = adev->driver_data;
-	unsigned long flags;
+	uint32_t poll;
+	uint32_t stall = 0;
+	uint32_t last_remaining = 0xFFFFFFFFu;
+	uint32_t hz = get_hz();
+	uint64_t step = hz ? (hz * HDA_DRAIN_POLL_MS) / 1000U : 1U;
 
-	/* End of stream: the residue left in the FIFO is shorter than a slot
-	 * and would otherwise sit there forever, since the normal path only
-	 * queues whole slots.  Padding is correct here -- it really is the
-	 * end of the audio. */
-	flags = spinlock_acquire_irq(&d->feed_lock);
-	hda_feed(d, 1);
-	spinlock_release_irq(&d->feed_lock, flags);
-	hda_kick(d);
+	if (d == NULL || d->fifo_buf == NULL || d->chunk[0] == NULL) {
+		return 0;
+	}
+	if (step == 0) {
+		step = 1;
+	}
+
+	for (poll = 0; poll < HDA_DRAIN_POLL_MAX; poll++) {
+		unsigned long f;
+		int32_t in_flight;
+		size_t used;
+		uint32_t remaining;
+
+		/*
+		 * End of stream: the residue left in the FIFO is shorter than
+		 * a slot and the normal path only queues whole slots, so it
+		 * would sit there forever.  Padding it out is correct here --
+		 * it really is the end of the audio.  Then kick, which starts
+		 * or restarts the engine and retires any pending halt.
+		 */
+		f = spinlock_acquire_irq(&d->feed_lock);
+		hda_feed(d, 1);
+		spinlock_release_irq(&d->feed_lock, f);
+		hda_kick(d);
+
+		f = spinlock_acquire_irq(&d->feed_lock);
+		used = audio_fifo_used(&d->fifo);
+		/* Signed: a completion racing past writes_queued must read as
+		 * drained, not as ~4 billion still outstanding. */
+		in_flight = (int32_t)(d->writes_queued -
+		                      __atomic_load_n(&d->slots_played,
+		                                      __ATOMIC_ACQUIRE));
+		spinlock_release_irq(&d->feed_lock, f);
+
+		if (used == 0 && in_flight <= 0) {
+			break;
+		}
+		if (current_thread &&
+		    (current_thread->sig_pending & ~current_thread->sig_mask)) {
+			break;                 /* interrupted -- drop the tail */
+		}
+
+		remaining = (uint32_t)used +
+		            (uint32_t)in_flight * HDA_CHUNK_BYTES;
+		if (remaining < last_remaining) {
+			last_remaining = remaining;
+			stall = 0;
+		} else if (++stall >= HDA_DRAIN_STALL_POLLS) {
+			break;                 /* controller wedged */
+		}
+
+		if (current_thread) {
+			(void)sched_sleep_until((void *)d, get_ticks() + step);
+		} else {
+			for (volatile int i = 0; i < 200000; i++) {
+				__asm__ volatile("pause");
+			}
+		}
+	}
 	return 0;
 }
 
