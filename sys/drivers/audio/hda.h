@@ -186,9 +186,21 @@
 #define HDA_AMP_MUTE             0x0080
 #define HDA_AMP_GAIN_MASK        0x007F
 
-/* OUTPUT_AMP_CAPS (GET_PARAMETER 0x12) */
+/*
+ * AMP_CAPS (GET_PARAMETER 0x0D input amp / 0x12 output amp).  Field
+ * layout, spec rev 1.0a figure 91:
+ *
+ *    31       30:23   22:16      15     14:8       7      6:0
+ *    MuteCap  Rsvd    StepSize   Rsvd   NumSteps   Rsvd   Offset
+ *
+ * NUMSTEPS used to be spelled (c) >> 16, which is StepSize -- the gain
+ * granularity in 0.25 dB units, not the number of steps.  Offset is the
+ * step that corresponds to 0 dB.
+ */
 #define HDA_AMPCAP_OFFSET(c)     ((c) & 0x7F)          /* the 0 dB setting */
-#define HDA_AMPCAP_NUMSTEPS(c)   (((c) >> 16) & 0x7F)
+#define HDA_AMPCAP_NUMSTEPS(c)   (((c) >> 8) & 0x7F)
+#define HDA_AMPCAP_STEPSIZE(c)   (((c) >> 16) & 0x7F)
+#define HDA_AMPCAP_MUTE_CAP(c)   (((c) >> 31) & 0x1)
 
 /* SET_PIN_WIDGET_CONTROL payload */
 #define HDA_PIN_CTRL_HP_ENABLE   0x80
