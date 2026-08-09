@@ -1083,8 +1083,23 @@ static int usb_enumerate_device_inner(usb_hcd_t *hcd, uint8_t port, uint8_t spee
         if (attempt + 1 == USB_ENUM_DESC_TRIES)
             break;                  /* out of tries: don't pay the last delay */
         usb_delay_ms(USB_ENUM_DESC_DELAY_MS);
-        if ((attempt & 3) == 3)
+        if ((attempt & 3) == 3) {
+            /*
+             * Escalate on the second re-reset: a device that has ignored a
+             * bus reset is wedged rather than slow, and only losing power
+             * puts it back at its own reset vector.  Root ports only --
+             * per-port power is an HCD register there, where on a hub it
+             * would be a class request to a device we are mid-enumeration
+             * of. [HW-03]
+             */
+            if (attempt == USB_ENUM_DESC_POWER_AT && !parent &&
+                hcd && hcd->port_power_cycle) {
+                kprintf("usb: port %u: no descriptor after %d tries; "
+                        "power-cycling the port\n", port, attempt + 1);
+                (void)hcd->port_power_cycle(hcd, port);
+            }
             (void)usb_enum_reset_port(hcd, port, parent);
+        }
     }
     if (ret != USB_XFER_OK) {
         kprintf("usb: port %u: failed to get device descriptor after %d tries "
@@ -1548,6 +1563,16 @@ static void usb_hotplug_scan(void)
  */
 void usb_hotplug_poll(void)
 {
+    /*
+     * Clear the per-port failure parking first.  USB_ENUM_MAX_TRIES exists to
+     * stop a permanently-unenumerable port from re-probing forever once the
+     * system is up -- but during rootwait the system is not up, the caller is
+     * blocked on precisely one of these ports, and parking it after ~6s of
+     * trying only guarantees the panic that follows.  The wait's own deadline
+     * is the bound here, so the counter has nothing left to protect. [HW-03]
+     */
+    for (usb_hcd_t *h = usb_hcd_list; h; h = h->next)
+        memset(h->enum_fail, 0, sizeof(h->enum_fail));
     usb_hotplug_scan();
 }
 

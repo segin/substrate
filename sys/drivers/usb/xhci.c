@@ -910,6 +910,45 @@ static int xhci_port_enable(usb_hcd_t *hcd, uint8_t port, int enable)
     return 0;   /* xHCI enables ports via reset; nothing to do */
 }
 
+/*
+ * Cut power to a port and bring it back.
+ *
+ * PP is one of the few PORTSC bits that is plain read-write (Table 5-27) and
+ * survives the XHCI_PORT_CLEAR writeback mask, so this is two ordinary
+ * read-modify-writes.  Dropping it removes VBUS: the device sees an unplug,
+ * forgets any address and any state some other software left it in, and comes
+ * back through the normal attach path.  That is strictly more than a bus
+ * reset can do, and it is what a device abandoned mid-conversation by
+ * firmware needs.
+ *
+ * The off time has to be long enough for the device to actually observe the
+ * loss through its own bulk capacitance; the on time is the same
+ * power-on-to-power-good budget xhci_power_ports() waits. [HW-03]
+ */
+static int xhci_port_power_cycle(usb_hcd_t *hcd, uint8_t port)
+{
+    xhci_hc_t *hc = hcd->priv;
+    uint32_t psc;
+
+    if (port < 1 || port > hc->nports)
+        return -1;
+
+    psc = portsc_rd(hc, port) & ~XHCI_PORT_CLEAR;
+    portsc_wr(hc, port, psc & ~XHCI_PORT_PP);
+    xhci_delay_ms(XHCI_PORT_POWER_OFF_MS);
+
+    psc = portsc_rd(hc, port) & ~XHCI_PORT_CLEAR;
+    portsc_wr(hc, port, psc | XHCI_PORT_PP);
+    xhci_delay_ms(XHCI_PORT_POWER_GOOD_MS);
+
+    /* Acknowledge the connect-status change the cycle itself just caused, so
+     * the scan that follows sees a fresh attach rather than a stale flag. */
+    psc = portsc_rd(hc, port);
+    if (psc & XHCI_PORT_CSC)
+        portsc_wr(hc, port, (psc & ~XHCI_PORT_CLEAR) | XHCI_PORT_CSC);
+    return 0;
+}
+
 /* [DRV-19] Release everything a (partially) set-up slot allocated and hand the
  * slot id back to the controller.  Every failure path in xhci_setup_slot funnels
  * here so a flaky enumeration doesn't leak the slot + its DMA contexts — 16 such
@@ -2625,6 +2664,7 @@ static int xhci_pci_attach(struct device *dev)
     hc->hcd.port_reset = xhci_port_reset;
     hc->hcd.port_enable = xhci_port_enable;
     hc->hcd.set_hub = xhci_set_hub;
+    hc->hcd.port_power_cycle = xhci_port_power_cycle;   /* [HW-03] */
     hc->hcd.set_ep0_mps = xhci_set_ep0_mps;
     hc->hcd.port_gone = xhci_port_gone;
     hc->hcd.iso_frame_modulus = 2048;  /* MFINDEX frame index, s4.11.2.5 */

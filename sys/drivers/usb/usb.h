@@ -175,6 +175,13 @@
 #define USB_ENUM_DESC_TRIES     10
 #define USB_ENUM_DESC_DELAY_MS  200
 /*
+ * Attempt index at which a failing ROOT port escalates from a bus reset to a
+ * port power cycle.  The re-reset at attempt 3 has already had its chance by
+ * then; a device that still will not answer is not merely slow, it is wedged,
+ * and only losing power puts it back at its own reset vector. [HW-03]
+ */
+#define USB_ENUM_DESC_POWER_AT  7
+/*
  * Root ports the per-port enumeration-failure counter covers.  Ports are
  * 1-based and the array is indexed [port - 1], so this is the highest port
  * number that can be throttled.  It used to be indexed [port] against a
@@ -491,6 +498,17 @@ typedef struct usb_hcd {
      */
     int      (*set_hub)(struct usb_hcd *hcd, usb_device_t *dev, uint8_t nports,
                         uint8_t ttt);
+
+    /*
+     * Optional: cut power to a root port and restore it.  The escalation
+     * beyond a bus reset -- a reset asks a device to restart its state
+     * machine, a power cycle removes the choice.  It is the recovery for a
+     * device left mid-conversation by other software, which on the HP
+     * Pavilion is the SD-card reader the firmware was driving as its own
+     * boot disk until the xHCI BIOS handoff took the controller away.
+     * NULL on HCDs with no per-port power control. [HW-03]
+     */
+    int      (*port_power_cycle)(struct usb_hcd *hcd, uint8_t port);
 
     /*
      * Optional: the real EP0 max packet size has been read from the device

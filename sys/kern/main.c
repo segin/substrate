@@ -886,8 +886,24 @@ static void init_root_fs(void) {
              * under QEMU.  Bounded: a genuinely absent device still falls
              * through to the fallback and the panic. [HW-02]
              */
-            kprint("VFS: root not present yet; waiting for hot-plug (15s)...\n");
-            int64_t deadline = get_uptime_ms() + 15000;
+            /*
+             * Default 45s: one enumeration attempt is ~2s (ten descriptor
+             * reads at 200ms), the port power-cycle escalation adds ~0.2s
+             * plus another reset recovery, and a stubborn device deserves
+             * several of those rounds before we give up.  "rootwait=N"
+             * overrides in seconds.
+             */
+            char rw_buf[16];
+            unsigned rootwait_s = 45;
+            if (cmdline_get("rootwait", rw_buf, sizeof(rw_buf)) == 0) {
+                unsigned v = 0;
+                for (const char *p = rw_buf; *p >= '0' && *p <= '9'; p++)
+                    v = v * 10 + (unsigned)(*p - '0');
+                if (v)
+                    rootwait_s = v;
+            }
+            kprint("VFS: root not present yet; waiting for hot-plug...\n");
+            int64_t deadline = get_uptime_ms() + (int64_t)rootwait_s * 1000;
             while (!mounted && get_uptime_ms() < deadline) {
                 int64_t next_try = get_uptime_ms() + 500;
                 while (get_uptime_ms() < next_try)

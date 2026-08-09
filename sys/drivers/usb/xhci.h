@@ -160,6 +160,13 @@ void xhci_init(void);
  */
 #define XHCI_PORT_RESET_RECOVERY_MS  20
 #define XHCI_SET_ADDRESS_SETTLE_MS   10
+/*
+ * Port power cycle (see xhci_port_power_cycle).  The off time must outlast the
+ * device's own supply capacitance or it never notices the gap; the on time is
+ * the USB 2.0 power-on-to-power-good budget xhci_power_ports() already uses.
+ */
+#define XHCI_PORT_POWER_OFF_MS       100
+#define XHCI_PORT_POWER_GOOD_MS      100
 
 /*
  * Isoch TRB control-word fields (Table 6-34).  Frame ID names the 1 ms frame
