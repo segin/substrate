@@ -34,6 +34,14 @@
 #define HDA_PCI_CLASS_MULTIMEDIA   0x04
 #define HDA_PCI_SUBCLASS_HDA       0x03
 
+/* Vendors whose controllers need coaxing before DMA; see hda_pci_quirks(). */
+#define HDA_PCI_VENDOR_INTEL       0x8086
+#define HDA_PCI_VENDOR_ATI         0x1002
+#define HDA_PCI_VENDOR_AMD         0x1022
+#define HDA_PCI_VENDOR_NVIDIA      0x10DE
+/* Intel: Traffic Class Select, in device-specific PCI config space. */
+#define HDA_PCI_REG_TCSEL          0x44
+
 #define HDA_BDL_ENTRIES            32
 #define HDA_CHUNK_BYTES            4096U
 #define HDA_DEFAULT_RATE           48000U
@@ -2401,6 +2409,74 @@ static void hda_detach_partial(hda_dev_t *d)
 	}
 }
 
+/*
+ * Vendor-specific setup that has to happen before any DMA.
+ *
+ * TCSEL: Intel controllers default to a traffic class other than TC0 on
+ * some chipsets, which can be routed to a virtual channel the chipset
+ * does not service for audio.  FreeBSD forces TC0 unconditionally on
+ * Intel parts and so do we.
+ *
+ * Snooping: this driver allocates its rings as ordinary write-back
+ * cacheable memory, which is only safe if the controller's DMA snoops
+ * the caches.  Intel parts do.  ATI, AMD and NVIDIA need a
+ * vendor-specific bit set, and if that cannot be done the correct answer
+ * is uncacheable DMA memory -- which this kernel has no way to allocate
+ * yet.  Warn rather than pretend: a controller reading stale CORB or BDL
+ * contents fails in ways that look nothing like a coherency problem.
+ */
+static void hda_pci_quirks(hda_dev_t *d, pci_device_t *pdev)
+{
+	static const struct {
+		uint16_t vendor;
+		uint8_t  reg;     /* 0 = snoops by default, nothing to do */
+		uint8_t  mask;
+		uint8_t  enable;
+	} snoop[] = {
+		{ HDA_PCI_VENDOR_INTEL,  0x00, 0x00, 0x00 },
+		{ HDA_PCI_VENDOR_ATI,    0x42, 0xf8, 0x02 },
+		{ HDA_PCI_VENDOR_AMD,    0x42, 0xf8, 0x02 },
+		{ HDA_PCI_VENDOR_NVIDIA, 0x4e, 0xf0, 0x0f },
+	};
+	uint16_t vendor = pdev->vendor_id;
+	size_t i;
+	uint8_t v;
+
+	if (vendor == HDA_PCI_VENDOR_INTEL) {
+		v = pci_read_config8(pdev->bus, pdev->slot, pdev->func,
+		                     HDA_PCI_REG_TCSEL);
+		pci_write_config8(pdev->bus, pdev->slot, pdev->func,
+		                  HDA_PCI_REG_TCSEL, (uint8_t)(v & 0xF8));
+	}
+
+	for (i = 0; i < sizeof(snoop) / sizeof(snoop[0]); i++) {
+		if (snoop[i].vendor != vendor) {
+			continue;
+		}
+		if (snoop[i].reg == 0x00) {
+			return;          /* coherent without help */
+		}
+		v = pci_read_config8(pdev->bus, pdev->slot, pdev->func,
+		                     snoop[i].reg);
+		if ((v & snoop[i].enable) == snoop[i].enable) {
+			return;          /* firmware already enabled it */
+		}
+		v = (uint8_t)((v & snoop[i].mask) | snoop[i].enable);
+		pci_write_config8(pdev->bus, pdev->slot, pdev->func,
+		                  snoop[i].reg, v);
+		v = pci_read_config8(pdev->bus, pdev->slot, pdev->func,
+		                     snoop[i].reg);
+		if ((v & snoop[i].enable) != snoop[i].enable) {
+			kprintf("hda: could not enable PCIe snoop on "
+			        "%04x; DMA may read stale data\n", vendor);
+		}
+		return;
+	}
+
+	kprintf("hda: unknown vendor %04x; assuming coherent DMA\n", vendor);
+	(void)d;
+}
+
 static int hda_attach(pci_device_t *pdev)
 {
 	hda_dev_t *d;
@@ -2422,6 +2498,9 @@ static int hda_attach(pci_device_t *pdev)
 	cmd |= PCI_COMMAND_MEMORY | PCI_COMMAND_MASTER;
 	pci_write_config16(pdev->bus, pdev->slot, pdev->func,
 	                   PCI_CONFIG_COMMAND, cmd);
+
+	/* Traffic class and cache-snooping, before anything is DMA'd. */
+	hda_pci_quirks(d, pdev);
 
 	d->mmio = pci_iomap(pdev, 0, 16384);
 	if (d->mmio == NULL) {
