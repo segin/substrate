@@ -1852,6 +1852,25 @@ static int hda_attach(pci_device_t *pdev)
 	}
 	d->irq = pci_get_irq(pdev);
 
+	/*
+	 * Capabilities are only trustworthy once the controller is out of
+	 * reset.  3.3.7: "Software must read a 1 from this bit before
+	 * accessing any controller registers", and while CRST is 0 "most
+	 * registers will return their default values on reads."
+	 *
+	 * GCAP is RO/HwInit, so on most parts its "default" is the real
+	 * capability value and reading early happens to work -- but nothing
+	 * guarantees that, and both BSDs reset before reading it (FreeBSD
+	 * hdac_reset() then hdac_get_capabilities(), NetBSD hdaudio_reset()
+	 * then hdaudio_init()).  hda_quiesce() takes its own provisional
+	 * read to bound the loop that stops the stream engines; this is the
+	 * authoritative one.
+	 */
+	if (hda_controller_reset(d) != 0) {
+		kprintf("hda: controller reset timed out\n");
+		return -EIO;
+	}
+
 	gcap = hda_read16(d, HDA_REG_GCAP);
 	d->oss = (uint8_t)((gcap >> 12) & 0x0F);
 	d->iss = (uint8_t)((gcap >> 8) & 0x0F);
@@ -1863,11 +1882,6 @@ static int hda_attach(pci_device_t *pdev)
 	/* Output stream 0 sits after the input descriptors. */
 	d->sd_index = d->iss;
 	d->sd_base = HDA_SD_BASE + ((uint32_t)d->sd_index * HDA_SD_STRIDE);
-
-	if (hda_controller_reset(d) != 0) {
-		kprintf("hda: controller reset timed out\n");
-		return -EIO;
-	}
 
 	d->codec_mask = hda_read16(d, HDA_REG_STATESTS);
 	if (d->codec_mask == 0) {
