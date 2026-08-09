@@ -66,6 +66,10 @@
 #define HDA_INTR_MAX_ROUNDS        64
 /* Spin budget for CORB/RIRB pointer-reset and RUN readbacks. */
 #define HDA_RING_TIMEOUT           10000U
+/* Output converters / pins considered when picking a path. */
+#define HDA_MAX_CANDIDATES         16
+/* STATESTS reports codec presence on SDI[14:0]. */
+#define HDA_MAX_CODECS             15
 
 /* ------------------------------------------------------------------- */
 /* Pure helpers (also reachable from host tests)                       */
@@ -298,6 +302,13 @@ typedef struct hda_dev {
 	 */
 	uint32_t         afg_outamp_caps;
 	uint32_t         afg_inamp_caps;
+	/* Likewise for the rate/format parameters, which default to the
+	 * AFG's unless the converter sets Format Override. */
+	uint32_t         afg_pcm_caps;
+	uint32_t         afg_fmt_caps;
+	uint32_t         dac_pcm_caps;
+	uint32_t         dac_fmt_caps;
+	uint8_t          dac_max_chan;
 	uint8_t          dac_nid;
 	uint8_t          pin_nid;
 	int              have_path;
@@ -991,8 +1002,16 @@ static void hda_conn_select(hda_dev_t *d, uint8_t nid, int nconns, int idx)
  * wires pin straight to DAC, while physical codecs usually interpose a
  * mixer.  Mixers take every input at once and need no selection, so only a
  * selector's index is actually committed.
+ *
+ * With `commit` clear this only reports whether the path exists, touching
+ * nothing.  Pin and DAC used to be chosen independently and the pairing
+ * discovered afterwards -- if it did not hold, the driver had already
+ * committed to both and simply shrugged ("assuming hard-wired").  The
+ * caller now probes candidates first and only programs a pair it knows
+ * connects.
  */
-static int hda_route_pin_to_dac(hda_dev_t *d, uint8_t pin, uint8_t dac)
+static int hda_route_pin_to_dac(hda_dev_t *d, uint8_t pin, uint8_t dac,
+                                int commit)
 {
 	uint32_t pincaps = hda_get_param(d, pin, HDA_PARAM_AUDIO_WIDGET_CAPS);
 	uint8_t pconns[HDA_MAX_CONNS];
@@ -1004,6 +1023,9 @@ static int hda_route_pin_to_dac(hda_dev_t *d, uint8_t pin, uint8_t dac)
 
 	idx = hda_conn_find(pconns, pn, dac);
 	if (idx >= 0) {
+		if (!commit) {
+			return 0;
+		}
 		hda_conn_select(d, pin, pn, idx);
 		if (pincaps & HDA_AW_IN_AMP) {
 			hda_amp_unmute_in(d, pin, pincaps, (uint8_t)idx);
@@ -1029,6 +1051,9 @@ static int hda_route_pin_to_dac(hda_dev_t *d, uint8_t pin, uint8_t dac)
 		midx = hda_conn_find(mconns, mn, dac);
 		if (midx < 0) {
 			continue;
+		}
+		if (!commit) {
+			return 0;
 		}
 		/* A mixer sums everything it has and offers no selection; only
 		 * a selector picks one input. */
@@ -1065,14 +1090,84 @@ static void hda_codec_bind_stream(hda_dev_t *d, uint16_t fmt)
 	              (uint16_t)((d->stream_tag << 4) | 0));
 }
 
-static int hda_codec_configure(hda_dev_t *d)
+/*
+ * Does the chosen converter actually support this format?
+ *
+ * SDnFMT being able to express a rate says nothing about the codec being
+ * able to render it.  Nothing consulted the converter's capabilities at
+ * all, so an unsupported rate was programmed and simply came out wrong.
+ *
+ * The capability bits (7.3.4.7 table 139) only cover the eleven standard
+ * rates, so a rate outside that set cannot be advertised and is refused
+ * here even though hda_encode_format() can encode it -- the encoder
+ * describes the register, this describes the hardware.
+ */
+static int hda_codec_supports(hda_dev_t *d, uint32_t rate, uint32_t bits,
+                              uint32_t channels)
+{
+	static const struct { uint32_t rate; uint8_t bit; } ratebits[] = {
+		{   8000,  0 }, {  11025,  1 }, {  16000,  2 }, {  22050,  3 },
+		{  32000,  4 }, {  44100,  5 }, {  48000,  6 }, {  88200,  7 },
+		{  96000,  8 }, { 176400,  9 }, { 192000, 10 },
+	};
+	uint32_t sizebit;
+	size_t i;
+
+	/* Nothing reported: the codec did not answer, so do not second-guess
+	 * a format the encoder already accepted. */
+	if (d->dac_pcm_caps == 0) {
+		return 0;
+	}
+
+	switch (bits) {
+	case 8:  sizebit = HDA_PCM_SIZE_8;  break;
+	case 16: sizebit = HDA_PCM_SIZE_16; break;
+	case 20: sizebit = HDA_PCM_SIZE_20; break;
+	case 24: sizebit = HDA_PCM_SIZE_24; break;
+	case 32: sizebit = HDA_PCM_SIZE_32; break;
+	default: return -EINVAL;
+	}
+	if ((d->dac_pcm_caps & sizebit) == 0) {
+		return -EINVAL;
+	}
+
+	for (i = 0; i < sizeof(ratebits) / sizeof(ratebits[0]); i++) {
+		if (ratebits[i].rate != rate) {
+			continue;
+		}
+		if ((d->dac_pcm_caps &
+		     HDA_PCM_RATE_BIT(ratebits[i].bit)) == 0) {
+			return -EINVAL;
+		}
+		break;
+	}
+	if (i == sizeof(ratebits) / sizeof(ratebits[0])) {
+		return -EINVAL;   /* no capability bit exists for this rate */
+	}
+
+	/* Channel count is capped by the converter, not by SDnFMT's 4-bit
+	 * field (7.3.4.6). */
+	if (d->dac_max_chan != 0 && channels > d->dac_max_chan) {
+		return -EINVAL;
+	}
+	if (d->dac_fmt_caps != 0 &&
+	    (d->dac_fmt_caps & HDA_STREAM_FMT_PCM) == 0) {
+		return -EINVAL;   /* converter does not do linear PCM */
+	}
+	return 0;
+}
+
+static int hda_configure_codec(hda_dev_t *d)
 {
 	uint32_t sub;
 	uint8_t start, count, i;
 	uint8_t afg = 0;
 	uint8_t dac = 0;
 	uint8_t pin = 0;
-	int best_pin_rank = -1;
+	uint8_t dacs[HDA_MAX_CANDIDATES];
+	uint8_t pins[HDA_MAX_CANDIDATES];
+	int pin_rank[HDA_MAX_CANDIDATES];
+	int ndacs = 0, npins = 0;
 
 	/* Node 0's subnodes are the function groups; we want the audio one. */
 	sub = hda_get_param(d, 0, HDA_PARAM_SUBNODE_COUNT);
@@ -1103,8 +1198,22 @@ static int hda_codec_configure(hda_dev_t *d)
 	d->afg_outamp_caps = hda_get_param(d, afg, HDA_PARAM_OUTPUT_AMP_CAPS);
 	d->afg_inamp_caps  = hda_get_param(d, afg, HDA_PARAM_INPUT_AMP_CAPS);
 
-	/* The AFG's subnodes are the widgets.  Take the first DAC, and the
-	 * best-ranked output pin that is physically connected. */
+	/*
+	 * The AFG's PCM and stream-format capabilities stand in for any
+	 * converter that does not set Format Override, the same way its amp
+	 * caps do (7.3.4.7 / 7.3.4.8: "Audio Function Group (as default for
+	 * all widgets within the Audio Function)").
+	 */
+	d->afg_pcm_caps = hda_get_param(d, afg, HDA_PARAM_SUPPORTED_RATES);
+	d->afg_fmt_caps = hda_get_param(d, afg, HDA_PARAM_SUPPORTED_FORMATS);
+
+	/*
+	 * Collect the candidates.  This used to take the numerically first
+	 * DAC and, independently, the best-ranked pin, then discover
+	 * afterwards whether the two were connected -- and shrug if they were
+	 * not.  Gather both lists instead and pair them by actual
+	 * reachability, best pin first.
+	 */
 	sub = hda_get_param(d, afg, HDA_PARAM_SUBNODE_COUNT);
 	start = (uint8_t)HDA_SUBNODE_START(sub);
 	count = (uint8_t)HDA_SUBNODE_COUNT(sub);
@@ -1113,17 +1222,28 @@ static int hda_codec_configure(hda_dev_t *d)
 		uint32_t caps = hda_get_param(d, nid,
 		                              HDA_PARAM_AUDIO_WIDGET_CAPS);
 
+		/*
+		 * Skip digital widgets.  An HDMI/DisplayPort path needs the
+		 * digital converter control, channel mapping and ELD handling
+		 * this driver has none of, so adopting one would produce a
+		 * device that looks configured and stays silent.  Analog only,
+		 * and say so if that leaves nothing.
+		 */
+		if (caps & HDA_AW_DIGITAL) {
+			continue;
+		}
+
 		switch (HDA_AW_TYPE(caps)) {
 		case HDA_AW_TYPE_DAC:
-			if (dac == 0) {
-				dac = nid;
+			if (ndacs < HDA_MAX_CANDIDATES) {
+				dacs[ndacs++] = nid;
 			}
 			break;
 		case HDA_AW_TYPE_PIN: {
 			uint32_t pcaps = hda_get_param(d, nid,
 			                               HDA_PARAM_PIN_CAPS);
 			uint32_t cfg;
-			int rank;
+			int rank, j;
 
 			if ((pcaps & HDA_PINCAP_OUTPUT) == 0) {
 				break;
@@ -1141,10 +1261,17 @@ static int hda_codec_configure(hda_dev_t *d)
 			case HDA_DEVICE_HP_OUT:   rank = 1; break;
 			default:                  rank = 0; break;
 			}
-			if (rank > best_pin_rank) {
-				best_pin_rank = rank;
-				pin = nid;
+			if (npins >= HDA_MAX_CANDIDATES) {
+				break;
 			}
+			/* Insertion sort, best rank first. */
+			for (j = npins; j > 0 && pin_rank[j - 1] < rank; j--) {
+				pins[j] = pins[j - 1];
+				pin_rank[j] = pin_rank[j - 1];
+			}
+			pins[j] = nid;
+			pin_rank[j] = rank;
+			npins++;
 			break;
 		}
 		default:
@@ -1152,10 +1279,37 @@ static int hda_codec_configure(hda_dev_t *d)
 		}
 	}
 
-	if (dac == 0 || pin == 0) {
-		kprintf("hda: no output path (dac=%u pin=%u)\n", dac, pin);
+	if (ndacs == 0 || npins == 0) {
+		kprintf("hda: no analog output widgets (dacs=%d pins=%d)\n",
+		        ndacs, npins);
 		return -ENODEV;
 	}
+
+	/* Best-ranked pin that some DAC can actually reach. */
+	for (i = 0; i < (uint8_t)npins && pin == 0; i++) {
+		int j;
+
+		for (j = 0; j < ndacs; j++) {
+			if (hda_route_pin_to_dac(d, pins[i], dacs[j], 0) == 0) {
+				pin = pins[i];
+				dac = dacs[j];
+				break;
+			}
+		}
+	}
+	if (pin == 0) {
+		/*
+		 * Nothing reachable within depth two.  A pin with a single
+		 * hard-wired source and no connection list at all still works,
+		 * so fall back to the best pin and first DAC rather than
+		 * refusing outright -- but say that is what happened.
+		 */
+		pin = pins[0];
+		dac = dacs[0];
+		kprintf("hda: no explicit route to any pin; assuming pin %u "
+		        "is hard-wired to dac %u\n", pin, dac);
+	}
+
 	d->dac_nid = dac;
 	d->pin_nid = pin;
 
@@ -1164,12 +1318,29 @@ static int hda_codec_configure(hda_dev_t *d)
 	hda_send_verb(d, d->codec_addr, pin, HDA_VERB_SET_POWER_STATE,
 	              HDA_PS_D0);
 
-	if (hda_route_pin_to_dac(d, pin, dac) != 0) {
-		/* Not fatal: many pins have a single hard-wired source and no
-		 * connection list at all, in which case there is nothing to
-		 * select and the path is already correct. */
-		kprintf("hda: no explicit route pin %u <- dac %u; "
-		        "assuming hard-wired\n", pin, dac);
+	(void)hda_route_pin_to_dac(d, pin, dac, 1);
+
+	/*
+	 * Remember what the converter can actually do, so set_params can
+	 * refuse a format the codec would silently mis-render.  Per 7.3.4.6 a
+	 * widget's own rate/format parameters only apply when Format Override
+	 * is set; otherwise the AFG's defaults do.
+	 */
+	{
+		uint32_t dcaps = hda_get_param(d, dac,
+		                               HDA_PARAM_AUDIO_WIDGET_CAPS);
+		uint32_t pcm = 0, fmts = 0;
+
+		if (dcaps & HDA_AW_FORMAT_OVERRIDE) {
+			pcm = hda_get_param(d, dac, HDA_PARAM_SUPPORTED_RATES);
+			fmts = hda_get_param(d, dac,
+			                     HDA_PARAM_SUPPORTED_FORMATS);
+		}
+		d->dac_pcm_caps = pcm ? pcm : d->afg_pcm_caps;
+		d->dac_fmt_caps = fmts ? fmts : d->afg_fmt_caps;
+		/* Channel count is split across bits 15:13 and bit 0, and is
+		 * the maximum minus one (7.3.4.6). */
+		d->dac_max_chan = (uint8_t)HDA_AW_CHAN_COUNT(dcaps);
 	}
 
 	/* Enable the pin's output driver, keeping bits we did not set. */
@@ -1218,9 +1389,35 @@ static int hda_codec_configure(hda_dev_t *d)
 	d->have_path = 1;
 	hda_codec_bind_stream(d, d->fmt);
 
-	kprintf("hda: codec %u afg=%u dac=%u pin=%u tag=%u\n",
-	        d->codec_addr, afg, dac, pin, d->stream_tag);
+	kprintf("hda: codec %u afg=%u dac=%u pin=%u tag=%u chan=%u "
+	        "pcm=0x%08x\n",
+	        d->codec_addr, afg, dac, pin, d->stream_tag,
+	        d->dac_max_chan, d->dac_pcm_caps);
 	return 0;
+}
+
+/*
+ * Try every codec the controller reported, not just the lowest-numbered
+ * one.  A machine with an analog codec alongside an Intel HDMI codec can
+ * present either first, and stopping at the first one meant a whole
+ * working analog path could go unused because address 0 happened to be
+ * the display audio.
+ */
+static int hda_codec_configure(hda_dev_t *d)
+{
+	int i;
+
+	for (i = 0; i < HDA_MAX_CODECS; i++) {
+		if ((d->codec_mask & (1u << i)) == 0) {
+			continue;
+		}
+		d->codec_addr = (uint8_t)i;
+		if (hda_configure_codec(d) == 0) {
+			return 0;
+		}
+		kprintf("hda: codec %d has no usable output path\n", i);
+	}
+	return -ENODEV;
 }
 
 /* ------------------------------------------------------------------- */
@@ -1837,6 +2034,11 @@ static int hda_set_params(audio_dev_t *adev, audio_info_t *info)
 	rc = hda_encode_format(info->play.sample_rate,
 	                       info->play.precision, info->play.channels,
 	                       &fmt);
+	if (rc != 0) {
+		return rc;
+	}
+	rc = hda_codec_supports(d, info->play.sample_rate,
+	                        info->play.precision, info->play.channels);
 	if (rc != 0) {
 		return rc;
 	}

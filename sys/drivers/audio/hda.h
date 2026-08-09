@@ -216,7 +216,16 @@
  * function group's defaults apply instead (spec rev 1.0a 7.3.4.6).
  */
 #define HDA_AW_AMP_OVERRIDE      0x00000008U
+/* Format Override: as above, but for the rate/format parameters. */
+#define HDA_AW_FORMAT_OVERRIDE   0x00000010U
 #define HDA_AW_CONN_LIST         0x00000100U  /* connection list present */
+#define HDA_AW_DIGITAL           0x00000200U  /* SPDIF / HDMI / DisplayPort */
+/*
+ * Maximum channels the widget supports, as a count.  The 4-bit field is
+ * split: three high bits at 15:13 and the low bit at 0, holding the
+ * count minus one (spec 7.3.4.6).
+ */
+#define HDA_AW_CHAN_COUNT(c)     (((((c) >> 13) & 0x7) << 1 | ((c) & 1)) + 1)
 
 /* SET_AMP_GAIN_MUTE payload */
 #define HDA_AMP_SET_OUTPUT       0x8000
@@ -247,6 +256,27 @@
 #define HDA_PIN_CTRL_HP_ENABLE   0x80
 #define HDA_PIN_CTRL_OUT_ENABLE  0x40
 #define HDA_PIN_CTRL_IN_ENABLE   0x20
+
+/*
+ * SUPPORTED_PCM_SIZE_RATES (GET_PARAMETER 0x0A), spec figure 87 and
+ * table 139.  Rates R1..R12 are bits 0..11; sample widths B8..B32 are
+ * bits 16..20.
+ *
+ * Note R12 (384 kHz) is 8/1 * 48, which SDnFMT cannot express -- MULT
+ * tops out at x4 -- so a codec may advertise a rate this driver still
+ * has to refuse.
+ */
+#define HDA_PCM_RATE_BIT(n)      (1U << (n))    /* n = 0 for R1 */
+#define HDA_PCM_SIZE_8           (1U << 16)
+#define HDA_PCM_SIZE_16          (1U << 17)
+#define HDA_PCM_SIZE_20          (1U << 18)
+#define HDA_PCM_SIZE_24          (1U << 19)
+#define HDA_PCM_SIZE_32          (1U << 20)
+
+/* SUPPORTED_STREAM_FORMATS (GET_PARAMETER 0x0B), figure 88. */
+#define HDA_STREAM_FMT_PCM       0x00000001U
+#define HDA_STREAM_FMT_FLOAT32   0x00000002U
+#define HDA_STREAM_FMT_AC3       0x00000004U
 
 /* PIN_CAPS (GET_PARAMETER 0x0C) */
 #define HDA_PINCAP_OUTPUT        0x00000010U
