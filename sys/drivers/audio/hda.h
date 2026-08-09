@@ -109,6 +109,10 @@
 #define HDA_INTSTS_CIS           0x40000000U
 #define HDA_INTSTS_SIS(n)        (1U << ((n) & 0x1F))
 
+/* CORBRP / RIRBWP pointer-reset bits */
+#define HDA_CORBRP_RST           0x8000
+#define HDA_RIRBWP_RST           0x8000
+
 /* CORBCTL bits */
 #define HDA_CORBCTL_MEIE         0x01
 #define HDA_CORBCTL_RUN          0x02

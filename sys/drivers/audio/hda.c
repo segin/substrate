@@ -66,6 +66,8 @@
 #define HDA_MAX_STREAMS            60U
 /* Backstop on the INTSTS re-read loop; see hda_irq_handler(). */
 #define HDA_INTR_MAX_ROUNDS        64
+/* Spin budget for CORB/RIRB pointer-reset and RUN readbacks. */
+#define HDA_RING_TIMEOUT           10000U
 
 /* ------------------------------------------------------------------- */
 /* Pure helpers (also reachable from host tests)                       */
@@ -490,6 +492,8 @@ static int hda_controller_reset(hda_dev_t *d)
 
 static int hda_corb_rirb_setup(hda_dev_t *d)
 {
+	uint32_t budget;
+
 	d->corb = dma_alloc_coherent(HDA_CORB_ENTRIES * sizeof(uint32_t),
 	                             &d->corb_phys);
 	if (d->corb == NULL) {
@@ -515,20 +519,64 @@ static int hda_corb_rirb_setup(hda_dev_t *d)
 	hda_write32(d, HDA_REG_CORBUBASE, 0);
 	hda_write8(d,  HDA_REG_CORBSIZE, HDA_RBSIZE_256);
 	hda_write16(d, HDA_REG_CORBWP, 0);
-	/* Reset read pointer: write 1 to bit 15, wait, write 0. */
-	hda_write16(d, HDA_REG_CORBRP, 0x8000);
-	hda_write16(d, HDA_REG_CORBRP, 0x0000);
+
+	/*
+	 * Reset the CORB read pointer, verifying both halves of the
+	 * handshake.  3.3.21: "The hardware will physically update this bit
+	 * to 1 when the CORB pointer reset is complete.  Software must read a
+	 * 1 to verify that the reset completed correctly.  Software must
+	 * clear this bit back to 0, by writing a 0, and then read back the 0
+	 * to verify that the clear completed correctly."  Both writes were
+	 * being issued back to back with nothing checked in between.
+	 *
+	 * The engine being stopped first -- also required by 3.3.21, "The
+	 * CORB DMA engine must be stopped prior to resetting the Read Pointer
+	 * or else DMA transfer may be corrupted" -- was already handled above.
+	 *
+	 * Not every controller raises the bit: FreeBSD carries a note that
+	 * "at least the 82801G doesn't reset the bit to zero", and older spec
+	 * text said it always reads as zero.  So the assert half is advisory,
+	 * while failing to clear it really does stall the engine.
+	 */
+	hda_write16(d, HDA_REG_CORBRP, HDA_CORBRP_RST);
+	for (budget = 0; budget < HDA_RING_TIMEOUT; budget++) {
+		if (hda_read16(d, HDA_REG_CORBRP) & HDA_CORBRP_RST) {
+			break;
+		}
+	}
+	hda_write16(d, HDA_REG_CORBRP, 0);
+	for (budget = 0; budget < HDA_RING_TIMEOUT; budget++) {
+		if ((hda_read16(d, HDA_REG_CORBRP) & HDA_CORBRP_RST) == 0) {
+			break;
+		}
+	}
+	if (hda_read16(d, HDA_REG_CORBRP) & HDA_CORBRP_RST) {
+		kprintf("hda: CORB read pointer stuck in reset\n");
+		return -EIO;
+	}
 	d->corb_wp = 0;
 
-	/* Program RIRB. */
+	/* Program RIRB.  The write pointer reset is write-only and always
+	 * reads back 0 (3.3.27), so there is nothing to verify here. */
 	hda_write32(d, HDA_REG_RIRBLBASE, (uint32_t)d->rirb_phys);
 	hda_write32(d, HDA_REG_RIRBUBASE, 0);
 	hda_write8(d,  HDA_REG_RIRBSIZE, HDA_RBSIZE_256);
-	hda_write16(d, HDA_REG_RIRBWP, 0x8000);   /* reset WP */
+	hda_write16(d, HDA_REG_RIRBWP, HDA_RIRBWP_RST);
 	hda_write16(d, HDA_REG_RINTCNT, 1);
 	d->rirb_rp = 0;
 
+	/* 3.3.22 on CORBRUN says plainly: "Must read the value back". */
 	hda_write8(d, HDA_REG_CORBCTL, HDA_CORBCTL_RUN);
+	for (budget = 0; budget < HDA_RING_TIMEOUT; budget++) {
+		if (hda_read8(d, HDA_REG_CORBCTL) & HDA_CORBCTL_RUN) {
+			break;
+		}
+	}
+	if ((hda_read8(d, HDA_REG_CORBCTL) & HDA_CORBCTL_RUN) == 0) {
+		kprintf("hda: CORB engine will not start\n");
+		return -EIO;
+	}
+
 	/*
 	 * RUN + RINTCTL.  The response interrupt is only safe because the IRQ
 	 * handler now clears RIRBSTS: with RINTCNT=1 every verb raises one,
@@ -538,6 +586,15 @@ static int hda_corb_rirb_setup(hda_dev_t *d)
 	 * driver hung the boot outright.
 	 */
 	hda_write8(d, HDA_REG_RIRBCTL, HDA_RIRBCTL_RUN | HDA_RIRBCTL_RINTCTL);
+	for (budget = 0; budget < HDA_RING_TIMEOUT; budget++) {
+		if (hda_read8(d, HDA_REG_RIRBCTL) & HDA_RIRBCTL_RUN) {
+			break;
+		}
+	}
+	if ((hda_read8(d, HDA_REG_RIRBCTL) & HDA_RIRBCTL_RUN) == 0) {
+		kprintf("hda: RIRB engine will not start\n");
+		return -EIO;
+	}
 	return 0;
 }
 
