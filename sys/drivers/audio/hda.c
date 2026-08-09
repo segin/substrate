@@ -1119,7 +1119,18 @@ static void hda_feed(hda_dev_t *d, int flush_tail)
 		size_t copy_len;
 		uint8_t slot;
 
-		if (in_flight >= HDA_BDL_ENTRIES) {
+		/*
+		 * Leave one slot between the producer and the engine.  An
+		 * HDA stream is cyclic and never stops while RUN is set, so
+		 * the controller is always somewhere in the ring; filling all
+		 * HDA_BDL_ENTRIES of them means next_idx wraps onto the slot
+		 * being DMA'd right now and overwrites it mid-fetch.  The
+		 * softc's own back-pressure comment said BDL_ENTRIES - 1 all
+		 * along, and ac97_feed() uses that bound -- AC'97 just
+		 * happens to be LVI-bounded, so it stops at the end of the
+		 * queue instead of lapping it.
+		 */
+		if (in_flight >= (HDA_BDL_ENTRIES - 1)) {
 			break;
 		}
 		avail = audio_fifo_used(&d->fifo);
