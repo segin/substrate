@@ -658,11 +658,9 @@ static int hda_conn_list(hda_dev_t *d, uint8_t nid, uint8_t *conns, int max)
 	return n;
 }
 
-/* Index of `target` in `nid`'s connection list, or -1. */
-static int hda_conn_index(hda_dev_t *d, uint8_t nid, uint8_t target)
+/* Offset of `target` in an already-read connection list, or -1. */
+static int hda_conn_find(const uint8_t *conns, int n, uint8_t target)
 {
-	uint8_t conns[HDA_MAX_CONNS];
-	int n = hda_conn_list(d, nid, conns, HDA_MAX_CONNS);
 	int i;
 
 	for (i = 0; i < n; i++) {
@@ -671,6 +669,21 @@ static int hda_conn_index(hda_dev_t *d, uint8_t nid, uint8_t target)
 		}
 	}
 	return -1;
+}
+
+/*
+ * Select `idx` as `nid`'s input, unless the widget has nothing to select
+ * between.  Spec 7.3.4.11: "If Connection List Length is 1, there is only
+ * one hard-wired input possible, which is read from the Connection List,
+ * and there is no Connection Select Control."  Sending the verb anyway
+ * pokes a control the widget does not implement.
+ */
+static void hda_conn_select(hda_dev_t *d, uint8_t nid, int nconns, int idx)
+{
+	if (nconns > 1) {
+		hda_send_verb(d, d->codec_addr, nid, HDA_VERB_SET_CONN_SELECT,
+		              (uint16_t)idx);
+	}
 }
 
 /*
@@ -690,12 +703,9 @@ static int hda_route_pin_to_dac(hda_dev_t *d, uint8_t pin, uint8_t dac)
 
 	pn = hda_conn_list(d, pin, pconns, HDA_MAX_CONNS);
 
-	for (idx = 0; idx < pn; idx++) {
-		if (pconns[idx] != dac) {
-			continue;
-		}
-		hda_send_verb(d, d->codec_addr, pin, HDA_VERB_SET_CONN_SELECT,
-		              (uint16_t)idx);
+	idx = hda_conn_find(pconns, pn, dac);
+	if (idx >= 0) {
+		hda_conn_select(d, pin, pn, idx);
 		if (pincaps & HDA_AW_IN_AMP) {
 			hda_amp_unmute_in(d, pin, pincaps, (uint8_t)idx);
 		}
@@ -704,9 +714,9 @@ static int hda_route_pin_to_dac(hda_dev_t *d, uint8_t pin, uint8_t dac)
 
 	for (i = 0; i < pn; i++) {
 		uint8_t mid = pconns[i];
+		uint8_t mconns[HDA_MAX_CONNS];
 		uint32_t caps;
-		int type;
-		int midx;
+		int type, mn, midx;
 
 		if (mid == 0) {
 			continue;
@@ -716,16 +726,15 @@ static int hda_route_pin_to_dac(hda_dev_t *d, uint8_t pin, uint8_t dac)
 		if (type != HDA_AW_TYPE_MIXER && type != HDA_AW_TYPE_SELECTOR) {
 			continue;
 		}
-		/* Resolved once: hda_conn_index() walks the whole list over
-		 * the CORB, and this used to be asked for twice. */
-		midx = hda_conn_index(d, mid, dac);
+		mn = hda_conn_list(d, mid, mconns, HDA_MAX_CONNS);
+		midx = hda_conn_find(mconns, mn, dac);
 		if (midx < 0) {
 			continue;
 		}
+		/* A mixer sums everything it has and offers no selection; only
+		 * a selector picks one input. */
 		if (type == HDA_AW_TYPE_SELECTOR) {
-			hda_send_verb(d, d->codec_addr, mid,
-			              HDA_VERB_SET_CONN_SELECT,
-			              (uint16_t)midx);
+			hda_conn_select(d, mid, mn, midx);
 		}
 		/* Open the intermediate's input for the DAC, then its output. */
 		if (caps & HDA_AW_IN_AMP) {
@@ -734,8 +743,7 @@ static int hda_route_pin_to_dac(hda_dev_t *d, uint8_t pin, uint8_t dac)
 		if (caps & HDA_AW_OUT_AMP) {
 			hda_amp_unmute_out(d, mid, caps);
 		}
-		hda_send_verb(d, d->codec_addr, pin, HDA_VERB_SET_CONN_SELECT,
-		              (uint16_t)i);
+		hda_conn_select(d, pin, pn, i);
 		if (pincaps & HDA_AW_IN_AMP) {
 			hda_amp_unmute_in(d, pin, pincaps, (uint8_t)i);
 		}
