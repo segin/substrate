@@ -62,6 +62,8 @@
  */
 #define HDA_RESET_HOLD_MS          1U
 #define HDA_CODEC_DISCOVERY_MS     1U
+/* GCAP allows 15 input + 15 output + 30 bidirectional descriptors. */
+#define HDA_MAX_STREAMS            60U
 
 /* ------------------------------------------------------------------- */
 /* Pure helpers (also reachable from host tests)                       */
@@ -371,9 +373,61 @@ static void hda_write32(hda_dev_t *d, uint32_t off, uint32_t v)
 /* Controller bring-up                                                 */
 /* ------------------------------------------------------------------- */
 
+/*
+ * Bring every DMA engine to a stop and clear the latched status before
+ * the controller is reset.
+ *
+ * 3.3.7 is explicit that this is a precondition, not hygiene: "Note that
+ * the CORB/RIRB RUN bits and all Stream RUN bits must be verified
+ * cleared to 0 before CRST# is written to 0 (asserted) in order to
+ * assure a clean re-start."  None of it was being done, so a controller
+ * inherited mid-stream from firmware or from another OS -- the
+ * warm-reboot path -- was reset with its engines still running.
+ *
+ * WAKEEN and STATESTS need separate attention because they outlive the
+ * reset: 3.3.7 again, "The exceptions are the WAKEEN and STATESTS
+ * registers, which are only cleared on power-on reset".  WAKEEN was
+ * never touched at all, leaving whatever the firmware had set.
+ */
+static void hda_quiesce(hda_dev_t *d)
+{
+	uint16_t gcap = hda_read16(d, HDA_REG_GCAP);
+	unsigned nstreams = (unsigned)(((gcap >> 12) & 0x0F) +
+	                               ((gcap >> 8) & 0x0F) +
+	                               ((gcap >> 3) & 0x1F));
+	unsigned i;
+
+	/* Stream engines.  Byte 0 of each SDnCTL holds RUN. */
+	for (i = 0; i < nstreams && i < HDA_MAX_STREAMS; i++) {
+		uint32_t off = HDA_SD_BASE + (i * HDA_SD_STRIDE);
+
+		hda_write8(d, off + HDA_SD_CTL, 0);
+		hda_write8(d, off + HDA_SD_STS,
+		           HDA_SDSTS_BCIS | HDA_SDSTS_FIFOE | HDA_SDSTS_DESE);
+	}
+
+	/* Command/response engines. */
+	hda_write8(d, HDA_REG_CORBCTL, 0);
+	hda_write8(d, HDA_REG_RIRBCTL, 0);
+
+	/* No interrupts and no wake events across the reset. */
+	hda_write32(d, HDA_REG_INTCTL, 0);
+	hda_write16(d, HDA_REG_WAKEEN, 0);
+
+	/* Both RW1C, and both survive CRST. */
+	hda_write16(d, HDA_REG_STATESTS, hda_read16(d, HDA_REG_STATESTS));
+	hda_write8(d, HDA_REG_RIRBSTS, hda_read8(d, HDA_REG_RIRBSTS));
+
+	/* Position buffer, in case firmware left one programmed. */
+	hda_write32(d, HDA_REG_DPLBASE, 0);
+	hda_write32(d, HDA_REG_DPUBASE, 0);
+}
+
 static int hda_controller_reset(hda_dev_t *d)
 {
 	uint32_t budget;
+
+	hda_quiesce(d);
 
 	/* Drop CRST to enter reset, wait for clear.  3.3.7: "After the
 	 * hardware has completed sequencing into the reset state, it will
