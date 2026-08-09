@@ -1076,34 +1076,41 @@ static int usb_enumerate_device_inner(usb_hcd_t *hcd, uint8_t port, uint8_t spee
      * slow.  Mirrors NetBSD usbd_new_device(). [USB-03]
      */
     ret = USB_XFER_ERROR;
-    for (int attempt = 0; attempt < USB_ENUM_DESC_TRIES; attempt++) {
-        ret = usb_get_descriptor(dev, USB_DT_DEVICE, 0, &dd, 8);
-        if (ret == USB_XFER_OK)
-            break;
-        if (attempt + 1 == USB_ENUM_DESC_TRIES)
-            break;                  /* out of tries: don't pay the last delay */
-        usb_delay_ms(USB_ENUM_DESC_DELAY_MS);
-        if ((attempt & 3) == 3) {
+    for (int round = 0; round < USB_ENUM_DESC_ROUNDS; round++) {
+        if (round > 0) {
             /*
-             * Escalate on the second re-reset: a device that has ignored a
-             * bus reset is wedged rather than slow, and only losing power
-             * puts it back at its own reset vector.  Root ports only --
-             * per-port power is an HCD register there, where on a hub it
-             * would be a class request to a device we are mid-enumeration
-             * of. [HW-03]
+             * The device ignored a full set of reads and two bus resets, so
+             * it is wedged rather than slow: cut power, which is the only
+             * thing that puts it back at its own reset vector.  Root ports
+             * only -- per-port power is an HCD register there, where on a
+             * hub it would be a class request to the very device we are
+             * mid-enumeration of.  Then wait long enough for it to come
+             * back from cold before asking anything of it. [HW-03, HW-04]
              */
-            if (attempt == USB_ENUM_DESC_POWER_AT && !parent &&
-                hcd && hcd->port_power_cycle) {
-                kprintf("usb: port %u: no descriptor after %d tries; "
-                        "power-cycling the port\n", port, attempt + 1);
-                (void)hcd->port_power_cycle(hcd, port);
-            }
+            if (parent || !hcd || !hcd->port_power_cycle)
+                break;
+            kprintf("usb: port %u: no descriptor in round %d; "
+                    "power-cycling the port and retrying\n", port, round);
+            (void)hcd->port_power_cycle(hcd, port);
+            usb_delay_ms(USB_ENUM_POWER_SETTLE_MS);
             (void)usb_enum_reset_port(hcd, port, parent);
         }
+        for (int attempt = 0; attempt < USB_ENUM_DESC_TRIES; attempt++) {
+            ret = usb_get_descriptor(dev, USB_DT_DEVICE, 0, &dd, 8);
+            if (ret == USB_XFER_OK)
+                break;
+            if (attempt + 1 == USB_ENUM_DESC_TRIES)
+                break;              /* out of tries: don't pay the last delay */
+            usb_delay_ms(USB_ENUM_DESC_DELAY_MS);
+            if ((attempt & 3) == 3)
+                (void)usb_enum_reset_port(hcd, port, parent);
+        }
+        if (ret == USB_XFER_OK)
+            break;
     }
     if (ret != USB_XFER_OK) {
-        kprintf("usb: port %u: failed to get device descriptor after %d tries "
-                "(initial, err=%d)\n", port, USB_ENUM_DESC_TRIES, ret);
+        kprintf("usb: port %u: failed to get device descriptor after %d rounds "
+                "(initial, err=%d)\n", port, USB_ENUM_DESC_ROUNDS, ret);
         usb_free_device(dev);
         return -1;
     }

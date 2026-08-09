@@ -175,12 +175,20 @@
 #define USB_ENUM_DESC_TRIES     10
 #define USB_ENUM_DESC_DELAY_MS  200
 /*
- * Attempt index at which a failing ROOT port escalates from a bus reset to a
- * port power cycle.  The re-reset at attempt 3 has already had its chance by
- * then; a device that still will not answer is not merely slow, it is wedged,
- * and only losing power puts it back at its own reset vector. [HW-03]
+ * Rounds of the descriptor-read loop.  Round 2 begins by cutting power to a
+ * root port -- the escalation past a bus reset, for a device left wedged by
+ * whatever software owned it before us.
+ *
+ * A device that has just lost power must then be given the time to come back
+ * from cold, and that is a much bigger number than the retry spacing: a card
+ * reader powers up, initialises whatever media is inserted, and only then
+ * answers USB at all.  The first version of this escalated at attempt 7 of
+ * 10 and so allowed ~500ms after the cycle -- it cut power and gave up
+ * before the device could possibly have returned, on every single retry.
+ * Hence a full fresh round rather than the tail of the old one. [HW-04]
  */
-#define USB_ENUM_DESC_POWER_AT  7
+#define USB_ENUM_DESC_ROUNDS      2
+#define USB_ENUM_POWER_SETTLE_MS  1500
 /*
  * Root ports the per-port enumeration-failure counter covers.  Ports are
  * 1-based and the array is indexed [port - 1], so this is the highest port
