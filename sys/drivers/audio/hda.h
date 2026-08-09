@@ -144,6 +144,7 @@
 #define HDA_VERB_GET_PARAMETER   0xF00
 #define HDA_VERB_GET_CONN_LIST   0xF02
 #define HDA_VERB_GET_PIN_WIDGET_CONTROL 0xF07
+#define HDA_VERB_GET_EAPD_BTL    0xF0C
 #define HDA_VERB_GET_CONFIG_DEFAULT 0xF1C
 
 /* GET_PARAMETER parameter IDs */
@@ -235,8 +236,14 @@
 #define HDA_PS_D0                0x00
 #define HDA_PS_D3                0x03
 
-/* SET_EAPD_BTL_ENABLE payload */
+/*
+ * SET_EAPD_BTL_ENABLE payload.  Three independent bits share this one
+ * byte, so it has to be read-modify-written rather than assigned.
+ */
+#define HDA_EAPD_BTL             0x01
 #define HDA_EAPD_ENABLE          0x02
+#define HDA_EAPD_LR_SWAP         0x04
+#define HDA_EAPD_MASK            0x07
 
 /* ------------------------------------------------------------------- */
 /* Helpers exported for host tests                                     */

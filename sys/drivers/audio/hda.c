@@ -827,10 +827,17 @@ static int hda_codec_configure(hda_dev_t *d)
 	}
 
 	/* External amplifier, where the pin has one -- laptop speakers are
-	 * usually silent without it. */
+	 * usually silent without it.  BTL (bit 0) and L-R swap (bit 2) share
+	 * this byte with the EAPD bit, so assigning 0x02 outright cleared
+	 * whatever the firmware had configured for them. */
 	if (hda_get_param(d, pin, HDA_PARAM_PIN_CAPS) & HDA_PINCAP_EAPD) {
+		uint32_t eapd = hda_send_verb(d, d->codec_addr, pin,
+		                              HDA_VERB_GET_EAPD_BTL, 0);
+
+		eapd &= HDA_EAPD_MASK;
+		eapd |= HDA_EAPD_ENABLE;
 		hda_send_verb(d, d->codec_addr, pin, HDA_VERB_SET_EAPD_BTL,
-		              HDA_EAPD_ENABLE);
+		              (uint16_t)eapd);
 	}
 
 	{
