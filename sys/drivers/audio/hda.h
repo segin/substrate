@@ -109,6 +109,14 @@
 #define HDA_INTSTS_CIS           0x40000000U
 #define HDA_INTSTS_SIS(n)        (1U << ((n) & 0x1F))
 
+/*
+ * RIRB Response Extended (the upper dword of each 8-byte entry).
+ * Bits 3:0 identify the responding codec; bit 4 marks the entry as an
+ * unsolicited response rather than the answer to a command.
+ */
+#define HDA_RIRB_EX_CODEC_MASK   0x0000000FU
+#define HDA_RIRB_EX_UNSOL        0x00000010U
+
 /* CORBRP / RIRBWP pointer-reset bits */
 #define HDA_CORBRP_RST           0x8000
 #define HDA_RIRBWP_RST           0x8000

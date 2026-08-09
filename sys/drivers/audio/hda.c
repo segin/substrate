@@ -339,6 +339,11 @@ typedef struct hda_dev {
 	 * interrupts masked. */
 	spinlock_t       feed_lock;
 
+	/* Serialises CORB submission and RIRB consumption.  IRQ-safe: the
+	 * completion handler does not send verbs, but attach and
+	 * set_params can race on other CPUs. */
+	spinlock_t       verb_lock;
+
 	audio_dev_t      audio;
 } hda_dev_t;
 
@@ -662,12 +667,18 @@ static int hda_corb_rirb_setup(hda_dev_t *d)
 }
 
 /*
- * Send a verb and synchronously wait for the response.  Returns the
- * lower 32 bits of the RIRB response (the upper 32 bits hold response
- * extended data we don't currently consume).  Returns 0 on timeout.
+ * Send a verb and synchronously wait for its response.  Stores the
+ * response's low 32 bits through *resp and returns 0, or returns -EIO on
+ * timeout leaving *resp untouched.  Caller must hold d->verb_lock.
+ *
+ * A zero response is meaningful -- 7.3.3.7 defines a Get against a
+ * non-existent amplifier as returning 00000000h, and plenty of
+ * parameters are legitimately zero -- so a timeout cannot be reported by
+ * returning 0, which is what this used to do.
  */
-static uint32_t hda_send_verb(hda_dev_t *d, uint8_t cad, uint8_t nid,
-                              uint16_t verb, uint16_t payload)
+static int hda_send_verb_locked(hda_dev_t *d, uint8_t cad, uint8_t nid,
+                                uint16_t verb, uint16_t payload,
+                                uint32_t *resp)
 {
 	uint32_t encoded = hda_pack_verb(cad, nid, verb, payload);
 	uint16_t wp;
@@ -682,7 +693,7 @@ static uint32_t hda_send_verb(hda_dev_t *d, uint8_t cad, uint8_t nid,
 
 	/*
 	 * Wait for the RIRB write pointer to move past our own read pointer,
-	 * then consume exactly one response and advance.
+	 * then consume responses until we find the one addressed to us.
 	 *
 	 * This used to compare the RIRB write pointer against the CORB write
 	 * pointer, which assumes the two rings advance in lockstep forever.
@@ -695,15 +706,68 @@ static uint32_t hda_send_verb(hda_dev_t *d, uint8_t cad, uint8_t nid,
 	 */
 	for (budget = 0; budget < HDA_VERB_TIMEOUT; budget++) {
 		uint16_t rwp = hda_read16(d, HDA_REG_RIRBWP) & 0xFF;
+		uint64_t entry;
+		uint32_t ex;
 
-		if (rwp != d->rirb_rp) {
-			d->rirb_rp = (uint16_t)((d->rirb_rp + 1) %
-			                        d->rirb_entries);
-			return (uint32_t)d->rirb[d->rirb_rp];
+		if (rwp == d->rirb_rp) {
+			continue;
 		}
+		d->rirb_rp = (uint16_t)((d->rirb_rp + 1) % d->rirb_entries);
+		/* The RIRBWP read above orders the DMA'd entry against us. */
+		__sync_synchronize();
+		entry = d->rirb[d->rirb_rp];
+		ex = (uint32_t)(entry >> 32);
+
+		/*
+		 * Response Extended: bits 3:0 are the responding codec, bit 4
+		 * marks an unsolicited response (spec 4.4.2).  Neither was
+		 * being looked at, so an unsolicited event -- a jack sense or
+		 * a docking change, which the codec may inject in any frame
+		 * where a solicited response is not present -- would be handed
+		 * back as the answer to whatever verb was outstanding.
+		 * Discard it and keep waiting, like NetBSD's rirb_dequeue().
+		 */
+		if (ex & HDA_RIRB_EX_UNSOL) {
+			continue;
+		}
+		if ((ex & HDA_RIRB_EX_CODEC_MASK) != (uint32_t)(cad & 0x0F)) {
+			continue;   /* another codec's answer */
+		}
+		*resp = (uint32_t)entry;
+		return 0;
 	}
 	d->verb_timeouts++;
-	return 0;
+	return -EIO;
+}
+
+/*
+ * Serialised wrapper.  hda_send_verb() mutates corb_wp / rirb_rp and
+ * rings the controller's doorbell, none of which is safe to do from two
+ * threads at once -- and it is reachable concurrently, since
+ * hda_set_params() binds the converter through the same path that the
+ * boot-time graph walk uses.  NetBSD takes sc_corb_mtx around every
+ * command for the same reason.
+ *
+ * Returns the response, or 0 if the verb timed out.  Callers that need
+ * to tell those apart use hda_try_verb().
+ */
+static int hda_try_verb(hda_dev_t *d, uint8_t cad, uint8_t nid,
+                        uint16_t verb, uint16_t payload, uint32_t *resp)
+{
+	unsigned long flags = spinlock_acquire_irq(&d->verb_lock);
+	int rc = hda_send_verb_locked(d, cad, nid, verb, payload, resp);
+
+	spinlock_release_irq(&d->verb_lock, flags);
+	return rc;
+}
+
+static uint32_t hda_send_verb(hda_dev_t *d, uint8_t cad, uint8_t nid,
+                              uint16_t verb, uint16_t payload)
+{
+	uint32_t resp = 0;
+
+	(void)hda_try_verb(d, cad, nid, verb, payload, &resp);
+	return resp;
 }
 
 /* ------------------------------------------------------------------- */
@@ -2047,6 +2111,7 @@ static int hda_attach(pci_device_t *pdev)
 	d = &hda_devices[hda_device_count];
 	memset(d, 0, sizeof(*d));
 	spinlock_init(&d->feed_lock, "hda_feed");
+	spinlock_init(&d->verb_lock, "hda_verb");
 	d->pdev = pdev;
 
 	cmd = pci_read_config16(pdev->bus, pdev->slot, pdev->func,
@@ -2171,9 +2236,15 @@ static int hda_attach(pci_device_t *pdev)
 	            HDA_INTCTL_GIE | HDA_INTCTL_CIE |
 	            HDA_INTCTL_SIE(d->sd_index));
 
-	vendor_id = hda_send_verb(d, d->codec_addr, 0,
-	                          HDA_VERB_GET_PARAMETER,
-	                          HDA_PARAM_VENDOR_ID);
+	/* First real conversation with the codec.  A timeout here is not the
+	 * same as a vendor ID of zero, and it means nothing that follows will
+	 * work either. */
+	if (hda_try_verb(d, d->codec_addr, 0, HDA_VERB_GET_PARAMETER,
+	                 HDA_PARAM_VENDOR_ID, &vendor_id) != 0) {
+		kprintf("hda: codec %u did not answer\n", d->codec_addr);
+		hda_detach_partial(d);
+		return -EIO;
+	}
 
 	if (hda_output_stream_init(d) != 0) {
 		hda_detach_partial(d);
@@ -2202,9 +2273,16 @@ static int hda_attach(pci_device_t *pdev)
 
 	hda_device_count++;
 	kprintf("hda: %04x:%04x oss=%u iss=%u codecs=0x%04x cad=%u "
-	        "vid=0x%08x\n",
+	        "vid=0x%08x corb=%u rirb=%u\n",
 	        pdev->vendor_id, pdev->device_id, d->oss, d->iss,
-	        d->codec_mask, d->codec_addr, vendor_id);
+	        d->codec_mask, d->codec_addr, vendor_id,
+	        d->corb_entries, d->rirb_entries);
+	/* Silence with a healthy-looking graph usually means verbs are being
+	 * dropped, so say when any were. */
+	if (d->verb_timeouts != 0) {
+		kprintf("hda: %u verb timeout(s) during configuration\n",
+		        d->verb_timeouts);
+	}
 	return 0;
 }
 
