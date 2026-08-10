@@ -1147,14 +1147,33 @@ static int usb_enumerate_device_inner(usb_hcd_t *hcd, uint8_t port, uint8_t spee
             usb_enum_release_hcd(hcd, port, parent);
             usb_delay_ms(USB_ENUM_POWER_SETTLE_MS);
             (void)usb_enum_reset_port(hcd, port, parent);
+            /*
+             * Only believe a speed read from a port that is actually
+             * connected AND enabled.  A port's speed field is meaningless
+             * until a reset has completed, and port_status() reports no
+             * speed bits at all when CCS is clear -- so a device that has
+             * not finished re-attaching decodes as the FULL fallback, and
+             * P3-01 then bakes that into the slot context.  Silently
+             * describing this high-speed card reader as full-speed is worse
+             * than keeping the speed we already knew, so on a doubtful read
+             * we keep it. [HW-08]
+             */
             if (hcd->port_status) {
                 uint32_t st = hcd->port_status(hcd, port);
-                speed = (st & USB_PORT_STAT_SUPER_SPEED) ? USB_SPEED_SUPER :
-                        (st & USB_PORT_STAT_LOW_SPEED)   ? USB_SPEED_LOW   :
-                        (st & USB_PORT_STAT_HIGH_SPEED)  ? USB_SPEED_HIGH  :
-                                                           USB_SPEED_FULL;
-                dev->speed = speed;
-                dev->ep0.max_packet = (speed == USB_SPEED_LOW) ? 8 : 64;
+
+                if ((st & USB_PORT_STAT_CONNECTION) &&
+                    (st & USB_PORT_STAT_ENABLE)) {
+                    speed = (st & USB_PORT_STAT_SUPER_SPEED) ? USB_SPEED_SUPER :
+                            (st & USB_PORT_STAT_LOW_SPEED)   ? USB_SPEED_LOW   :
+                            (st & USB_PORT_STAT_HIGH_SPEED)  ? USB_SPEED_HIGH  :
+                                                               USB_SPEED_FULL;
+                    dev->speed = speed;
+                    dev->ep0.max_packet = (speed == USB_SPEED_LOW) ? 8 : 64;
+                } else {
+                    kprintf("usb: port %u: not ready after power cycle "
+                            "(status 0x%x); keeping speed %u\n",
+                            port, (unsigned)st, dev->speed);
+                }
             }
         }
         for (int attempt = 0; attempt < USB_ENUM_DESC_TRIES; attempt++) {

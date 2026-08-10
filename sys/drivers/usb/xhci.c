@@ -879,10 +879,35 @@ static int xhci_port_reset(usb_hcd_t *hcd, uint8_t port)
     uint32_t psc = portsc_rd(hc, port);
     if (!(psc & XHCI_PORT_CCS)) return -1;
 
-    /* USB3 ports often auto-enable on connect; if already enabled, done. */
-    if (psc & XHCI_PORT_PED)
-        return 0;
-
+    /*
+     * Always drive a real reset.  This used to return success without
+     * touching the port whenever PED was already set, on the theory that an
+     * enabled port needs no reset -- which reads the flag backwards.  On a
+     * USB2 port PED is set BY a reset: Table 5-27, "PED shall automatically
+     * be set to '1' when PR transitions from '1' to '0' after a successful
+     * reset".  So the first enumeration's own reset armed the short-circuit,
+     * and every reset after that -- the retry escalations in
+     * usb_enumerate_device_inner(), the hot-plug scan's reset before
+     * re-enumerating -- silently did nothing.
+     *
+     * That is why a failed enumeration could never be retried successfully.
+     * A device that answered SET_ADDRESS is in the Address state and only
+     * listens on the address the xHC gave it; returning it to Default is the
+     * port reset's job, and nothing else does it.  So the retry built a fresh
+     * slot, addressed the device as 0, and talked to a device that had
+     * stopped listening on 0 -- descriptor reads timed out or came back
+     * malformed, exactly the post-SET_ADDRESS failures the boot logs show,
+     * on any device rather than a particular one.  Only the VBUS power cycle
+     * genuinely recovered it, which is why the reader needed three to five
+     * power-cycle rounds to enumerate.
+     *
+     * Resetting an already-enabled port is what both BSDs do: neither
+     * consults PED in its SET_FEATURE(PORT_RESET) path (FreeBSD
+     * xhci_roothub_exec UHF_PORT_RESET, NetBSD xhci_roothub_ctrl).  It is
+     * also harmless on a SuperSpeed port that auto-enabled on connect: PR
+     * there is a hot reset, which is precisely what re-enumeration wants.
+     * [HW-08]
+     */
     if (xhci_do_reset(hc, port, XHCI_PORT_PR) == 0)
         return 0;
 
@@ -1564,6 +1589,18 @@ static int xhci_control(xhci_hc_t *hc, usb_transfer_t *xfer)
              * says what happened, but the endpoint's own state says what it
              * needs, and xhci_recover_ep() dispatches on that. [X-03] */
             (void)xhci_recover_ep(hc, slot, 1, ring, 0);
+            /*
+             * Name the completion code.  Everything that is not Success or
+             * Short collapses into USB_XFER_STALL on the way out, so the
+             * core's "err=-1" covers Stall (6), USB Transaction Error (4),
+             * Babble (3), TRB Error (5) and Context State Error (19) alike
+             * -- four of which are nothing like a stall, and the difference
+             * decides whether a retry can possibly help.  On a machine whose
+             * only instrument is the boot log, that distinction has to reach
+             * the log. [HW-08]
+             */
+            kprintf("xhci: control transfer failed: slot %u ep0 cc=%d%s\n",
+                    slot, cc, (cc == 0) ? " (no event: timeout)" : "");
             xfer->status = (cc == 0) ? USB_XFER_TIMEOUT : USB_XFER_STALL;
             return xfer->status;
         }
