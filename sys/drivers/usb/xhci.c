@@ -189,6 +189,11 @@ typedef struct xhci_hc {
  */
 static uint8_t xhci_instances;
 
+/* "xhcidebug" on the kernel command line: verbose bring-up trace and
+ * per-failure detail.  Declared here because failure paths far above the
+ * init code consult it. */
+static int xhci_trace;
+
 /* ---- register access ---- */
 static inline uint32_t rd32(volatile uint8_t *b, uint32_t r) { return *(volatile uint32_t *)(b + r); }
 static inline void wr32(volatile uint8_t *b, uint32_t r, uint32_t v) { *(volatile uint32_t *)(b + r) = v; }
@@ -1599,8 +1604,14 @@ static int xhci_control(xhci_hc_t *hc, usb_transfer_t *xfer)
              * only instrument is the boot log, that distinction has to reach
              * the log. [HW-08]
              */
-            kprintf("xhci: control transfer failed: slot %u ep0 cc=%d%s\n",
-                    slot, cc, (cc == 0) ? " (no event: timeout)" : "");
+            /* Behind xhcidebug: a control transfer failing is routine (an
+             * optional request the device declines answers with a stall),
+             * so this is a debugging instrument rather than news.  Printing
+             * it unconditionally turned a device that stalls a poll into a
+             * console full of xhci lines. [HW-09] */
+            if (xhci_trace)
+                kprintf("xhci: control transfer failed: slot %u ep0 cc=%d%s\n",
+                        slot, cc, (cc == 0) ? " (no event: timeout)" : "");
             xfer->status = (cc == 0) ? USB_XFER_TIMEOUT : USB_XFER_STALL;
             return xfer->status;
         }
@@ -2229,7 +2240,6 @@ static int xhci_reset(xhci_hc_t *hc)
  * it instead of just going quiet.  Gated on "xhcidebug" so normal boots stay
  * quiet.
  */
-static int xhci_trace;
 #define XHCI_STEP(msg) do { if (xhci_trace) kprintf("xhci: " msg "\n"); } while (0)
 
 /*

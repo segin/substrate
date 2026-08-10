@@ -85,6 +85,9 @@ typedef struct usb_hid_dev {
      */
     usb_endpoint_t *intr_ep;
     uint8_t  if_number;
+    /* The control-pipe GET_REPORT fallback has been refused by this device
+     * and must not be tried again -- see the poll loop. [HW-09] */
+    uint8_t  ctl_poll_refused;
     uint8_t  active;
     uint8_t  poll_exited;    /* set by poll thread before kthread_exit() */
     int      poll_chan;      /* wait channel for kthread sleep */
@@ -413,13 +416,30 @@ static void usb_hid_poll_thread(void *arg)
              * No interrupt IN endpoint on this interface (or the descriptors
              * did not parse).  Fall back to the control-pipe poll so such a
              * device is no worse off than before.
+             *
+             * GET_REPORT is optional and real devices routinely STALL it.
+             * Asking again every poll cycle then means a protocol stall on
+             * EP0 several times a second for the life of the machine -- it
+             * cannot start working, it burns control bandwidth on a bus that
+             * shares it with the root disk, and it drowns the console.  One
+             * refusal is the device's answer; take it. [HW-09]
              */
-            ret = usb_control_transfer(hid->udev,
-                USB_DIR_IN | USB_TYPE_CLASS | USB_RECIP_INTERFACE,
-                HID_REQ_GET_REPORT,
-                (uint16_t)((HID_REPORT_TYPE_INPUT << 8) | 0),
-                hid->if_number,
-                &report, sizeof(report));
+            if (hid->ctl_poll_refused) {
+                ret = USB_XFER_NAK;
+            } else {
+                ret = usb_control_transfer(hid->udev,
+                    USB_DIR_IN | USB_TYPE_CLASS | USB_RECIP_INTERFACE,
+                    HID_REQ_GET_REPORT,
+                    (uint16_t)((HID_REPORT_TYPE_INPUT << 8) | 0),
+                    hid->if_number,
+                    &report, sizeof(report));
+                if (ret == USB_XFER_STALL) {
+                    kprintf("usb_hid: interface %u refuses GET_REPORT; "
+                            "no input from it (no interrupt endpoint either)\n",
+                            hid->if_number);
+                    hid->ctl_poll_refused = 1;
+                }
+            }
         }
 
         if (ret == USB_XFER_OK || ret == USB_XFER_SHORT)
