@@ -627,10 +627,26 @@ size_t blkdev_read_bytes(blkdev_t *dev, uint64_t offset, size_t size, void *buff
     size_t total_read = 0;
     uint8_t *buf = (uint8_t *)buffer;
 
-    if (start_sector >= dev->total_sectors) {
-        kprintf("blkdev: %s EOF (sector %llu >= %llu)\n", dev->name, start_sector, dev->total_sectors);
+    /*
+     * Past the end is a normal answer, not an error: returning 0 IS the
+     * report, and callers are built around it.  libext2fs's
+     * ext2fs_get_device_size2() -- so every e2fsck the boot runs -- finds a
+     * device's size by binary-searching for the last readable sector, which
+     * means deliberately reading off the end several times per device and
+     * narrowing down.  Announcing each of those printed a descending ladder
+     * of "EOF" lines on every fsck:
+     *
+     *   blkdev: scsi0p2 EOF (sector 8388608 >= 8284160)
+     *   blkdev: scsi0p2 EOF (sector 8323072 >= 8284160)
+     *   ... down to the real end at 8284160
+     *
+     * The same message had already had to be worked around once from the
+     * other side -- see the no-media probe skip in vfs.c's label scan -- and
+     * a diagnostic that callers keep having to avoid tripping is not earning
+     * its place on the console. [HW-06]
+     */
+    if (start_sector >= dev->total_sectors)
         return 0;
-    }
     uint64_t sectors_left = dev->total_sectors - start_sector;
     uint64_t bytes_left = (sectors_left > UINT64_MAX / sector_size) ?
         UINT64_MAX : sectors_left * sector_size;
