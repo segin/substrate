@@ -894,6 +894,10 @@ static int usb_try_bind(usb_device_t *dev, usb_class_driver_t *drv,
         dev->driver_data = NULL;
         if (drv->attach(dev) == 0) {
             dev->driver = drv;       /* remember for disconnect dispatch */
+            /* Durable per-interface copies: a composite device binds more
+             * than one driver, and each keeps its own state. [HW-07] */
+            ((usb_interface_t *)iface)->driver = drv;
+            ((usb_interface_t *)iface)->driver_data = dev->driver_data;
             kprintf("usb: device %u:%u interface %u bound to driver '%s'\n",
                     dev->hcd->hcd_index, dev->address,
                     iface->number, drv->name);
@@ -925,6 +929,8 @@ static void usb_match_driver(usb_device_t *dev)
      * headset, a dock -- was matched on whatever function happened to be
      * listed first and its other functions were unreachable.
      */
+    int bound = 0;
+
     for (int i = 0; i < dev->num_interfaces; i++) {
         usb_interface_t *iface = &dev->interfaces[i];
 
@@ -932,10 +938,24 @@ static void usb_match_driver(usb_device_t *dev)
             continue;
 
         for (drv = usb_class_drivers; drv; drv = drv->next) {
-            if (usb_try_bind(dev, drv, iface))
-                return;
+            if (usb_try_bind(dev, drv, iface)) {
+                /*
+                 * Keep going.  The loop above was introduced to offer EVERY
+                 * interface, but returning on the first successful bind threw
+                 * that away: a composite device got its first function driven
+                 * and the rest ignored.  The SHARKOON 1ea7:0066 dongle is the
+                 * case in hand -- interface 0 is a boot keyboard, interface 1
+                 * is a boot mouse -- so the keyboard bound, the mouse was
+                 * never offered to anyone, and the trackpad was dead while
+                 * the keys worked. [HW-07]
+                 */
+                bound++;
+                break;          /* this interface is taken; try the next one */
+            }
         }
     }
+    if (bound)
+        return;
 
     /*
      * Nothing matched by interface.  Fall back to the device-descriptor class
@@ -1502,9 +1522,40 @@ void usb_disconnect_device(usb_device_t *dev)
         usb_disconnect_device(child);
     }
 
-    /* 1. Driver detach first: it drains outstanding I/O before we free. */
-    if (dev->driver && dev->driver->detach)
-        dev->driver->detach(dev);
+    /*
+     * 1. Driver detach first: it drains outstanding I/O before we free.
+     *
+     * Every bound interface, not just the last one: a composite device has a
+     * driver per function, each with its own private state, and detaching
+     * only dev->driver would leave the others' poll threads running against
+     * a device about to be freed.  The dev->if_ fields and driver_data are
+     * republished per interface so each detach() sees the context its
+     * attach() saw. [HW-07]
+     */
+    for (int i = 0; i < dev->num_interfaces; i++) {
+        usb_interface_t *iface = &dev->interfaces[i];
+
+        if (!iface->driver)
+            continue;
+        dev->if_number   = iface->number;
+        dev->if_class    = iface->if_class;
+        dev->if_subclass = iface->if_subclass;
+        dev->if_protocol = iface->if_protocol;
+        dev->driver_data = iface->driver_data;
+        if (iface->driver->detach)
+            iface->driver->detach(dev);
+        iface->driver = NULL;
+        iface->driver_data = NULL;
+    }
+    /* The device-level fallback bind (no interface matched) is tracked only
+     * by dev->driver; detach it if no interface claimed it above. */
+    if (dev->driver && dev->driver->detach) {
+        int any = 0;
+        for (int i = 0; i < dev->num_interfaces; i++)
+            if (dev->interfaces[i].driver) any = 1;
+        if (!any)
+            dev->driver->detach(dev);
+    }
     dev->driver = NULL;
 
     /* 2. Remove the /proc/devtree bus node (leaked one per hot-plug otherwise). */

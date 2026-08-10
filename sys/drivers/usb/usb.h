@@ -343,6 +343,16 @@ typedef struct usb_interface {
     uint8_t  if_protocol;   /* bInterfaceProtocol */
     uint8_t  ep_first;      /* index of first endpoint in dev->endpoints[] */
     uint8_t  ep_count;      /* number of endpoints belonging to it */
+    /*
+     * Per-interface binding.  A composite device is several functions behind
+     * one address -- the SHARKOON 1ea7:0066 dongle is a keyboard on interface
+     * 0 and a mouse on interface 1 -- and each needs its own driver and its
+     * own private state.  dev->driver/dev->driver_data hold whichever
+     * interface is currently being dispatched; these are the durable copies.
+     * [HW-07]
+     */
+    struct usb_class_driver *driver;
+    void                    *driver_data;
 } usb_interface_t;
 
 /*
