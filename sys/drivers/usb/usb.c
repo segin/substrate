@@ -1046,6 +1046,30 @@ static int usb_enum_reset_port(usb_hcd_t *hcd, uint8_t port, usb_device_t *paren
     return -1;
 }
 
+/*
+ * Give the HCD back whatever it bound to this root port.
+ *
+ * usb_free_device() releases the core's usb_device_t and its address, but the
+ * controller-side state is invisible from here -- on xHCI that is a device
+ * slot, its contexts and its transfer rings, allocated the moment the first
+ * control transfer was submitted.  Nothing released it on a FAILED
+ * enumeration, with two consequences: each retry leaked a slot (the
+ * controller has 64), and the next attempt's slot lookup found the previous
+ * attempt's slot still registered to the port and reused its contexts -- so
+ * a device that had just been power-cycled underneath it was addressed
+ * through a slot describing the device that used to be there.  That is the
+ * shape of "gets an address, then fails on the config descriptor".
+ *
+ * port_gone() is exactly this teardown; it already exists for unplug.  Root
+ * ports only: a device behind a hub has no HCD-level port state. [HW-05]
+ */
+static void usb_enum_release_hcd(usb_hcd_t *hcd, uint8_t port,
+                                 usb_device_t *parent)
+{
+    if (!parent && hcd && hcd->port_gone)
+        hcd->port_gone(hcd, port);
+}
+
 static int usb_enumerate_device_inner(usb_hcd_t *hcd, uint8_t port, uint8_t speed,
                                       usb_device_t *parent)
 {
@@ -1092,8 +1116,26 @@ static int usb_enumerate_device_inner(usb_hcd_t *hcd, uint8_t port, uint8_t spee
             kprintf("usb: port %u: no descriptor in round %d; "
                     "power-cycling the port and retrying\n", port, round);
             (void)hcd->port_power_cycle(hcd, port);
+            /*
+             * The device on the other side is now electrically new, so every
+             * scrap of state describing the old one has to go with it: the
+             * HCD's slot and rings (else the retry addresses the new device
+             * through the old device's contexts), and our cached speed, which
+             * was sampled before the cycle and may not be what the link
+             * re-trains at. [HW-05]
+             */
+            usb_enum_release_hcd(hcd, port, parent);
             usb_delay_ms(USB_ENUM_POWER_SETTLE_MS);
             (void)usb_enum_reset_port(hcd, port, parent);
+            if (hcd->port_status) {
+                uint32_t st = hcd->port_status(hcd, port);
+                speed = (st & USB_PORT_STAT_SUPER_SPEED) ? USB_SPEED_SUPER :
+                        (st & USB_PORT_STAT_LOW_SPEED)   ? USB_SPEED_LOW   :
+                        (st & USB_PORT_STAT_HIGH_SPEED)  ? USB_SPEED_HIGH  :
+                                                           USB_SPEED_FULL;
+                dev->speed = speed;
+                dev->ep0.max_packet = (speed == USB_SPEED_LOW) ? 8 : 64;
+            }
         }
         for (int attempt = 0; attempt < USB_ENUM_DESC_TRIES; attempt++) {
             ret = usb_get_descriptor(dev, USB_DT_DEVICE, 0, &dd, 8);
@@ -1111,6 +1153,7 @@ static int usb_enumerate_device_inner(usb_hcd_t *hcd, uint8_t port, uint8_t spee
     if (ret != USB_XFER_OK) {
         kprintf("usb: port %u: failed to get device descriptor after %d rounds "
                 "(initial, err=%d)\n", port, USB_ENUM_DESC_ROUNDS, ret);
+        usb_enum_release_hcd(hcd, port, parent);
         usb_free_device(dev);
         return -1;
     }
@@ -1124,6 +1167,7 @@ static int usb_enumerate_device_inner(usb_hcd_t *hcd, uint8_t port, uint8_t spee
     if (dd.bDescriptorType != USB_DT_DEVICE) {
         kprintf("usb: port %u: initial descriptor has type %u, not DEVICE\n",
                 port, dd.bDescriptorType);
+        usb_enum_release_hcd(hcd, port, parent);
         usb_free_device(dev);
         return -1;
     }
@@ -1187,6 +1231,7 @@ static int usb_enumerate_device_inner(usb_hcd_t *hcd, uint8_t port, uint8_t spee
         int a = usb_addr_alloc();
         if (a < 0) {
             kprintf("usb: address space exhausted\n");
+            usb_enum_release_hcd(hcd, port, parent);
             usb_free_device(dev);
             return -1;
         }
@@ -1205,6 +1250,7 @@ static int usb_enumerate_device_inner(usb_hcd_t *hcd, uint8_t port, uint8_t spee
          * hits "address space exhausted". [USB-07]
          */
         usb_addr_free(addr);
+        usb_enum_release_hcd(hcd, port, parent);
         usb_free_device(dev);
         return -1;
     }
@@ -1225,6 +1271,7 @@ static int usb_enumerate_device_inner(usb_hcd_t *hcd, uint8_t port, uint8_t spee
     if (ret != USB_XFER_OK) {
         kprintf("usb: addr %u: failed to get full device descriptor (err=%d)\n",
                 addr, ret);
+        usb_enum_release_hcd(hcd, port, parent);
         usb_free_device(dev);
         return -1;
     }
@@ -1237,6 +1284,7 @@ static int usb_enumerate_device_inner(usb_hcd_t *hcd, uint8_t port, uint8_t spee
     if (ret != USB_XFER_OK) {
         kprintf("usb: addr %u: failed to get config descriptor (err=%d)\n",
                 addr, ret);
+        usb_enum_release_hcd(hcd, port, parent);
         usb_free_device(dev);
         return -1;
     }
@@ -1250,6 +1298,7 @@ static int usb_enumerate_device_inner(usb_hcd_t *hcd, uint8_t port, uint8_t spee
         kprintf("usb: addr %u: implausible config descriptor length %u B "
                 "(max %u); skipping\n",
                 addr, cd.wTotalLength, USB_MAX_CONFIG_SIZE);
+        usb_enum_release_hcd(hcd, port, parent);
         usb_free_device(dev);
         return -1;
     }
@@ -1257,6 +1306,7 @@ static int usb_enumerate_device_inner(usb_hcd_t *hcd, uint8_t port, uint8_t spee
     if (!dev->config_data) {
         kprintf("usb: addr %u: out of memory for %u B config descriptor\n",
                 addr, cd.wTotalLength);
+        usb_enum_release_hcd(hcd, port, parent);
         usb_free_device(dev);
         return -1;
     }
@@ -1267,6 +1317,7 @@ static int usb_enumerate_device_inner(usb_hcd_t *hcd, uint8_t port, uint8_t spee
     if (ret != USB_XFER_OK) {
         kprintf("usb: addr %u: failed to get full config descriptor (err=%d)\n",
                 addr, ret);
+        usb_enum_release_hcd(hcd, port, parent);
         usb_free_device(dev);
         return -1;
     }
@@ -1280,12 +1331,14 @@ static int usb_enumerate_device_inner(usb_hcd_t *hcd, uint8_t port, uint8_t spee
      * configured. [USB-22] */
     if (cd.bConfigurationValue == 0) {
         kprintf("usb: addr %u: configuration value 0 is not selectable\n", addr);
+        usb_enum_release_hcd(hcd, port, parent);
         usb_free_device(dev);
         return -1;
     }
     ret = usb_set_configuration(dev, cd.bConfigurationValue);
     if (ret != USB_XFER_OK) {
         kprintf("usb: addr %u: SET_CONFIGURATION failed (err=%d)\n", addr, ret);
+        usb_enum_release_hcd(hcd, port, parent);
         usb_free_device(dev);
         return -1;
     }
@@ -1568,8 +1621,24 @@ static void usb_hotplug_scan(void)
  * during that window the waiting thread is the only candidate.  Same thread
  * context the synchronous boot enumeration already ran in. [HW-02]
  */
-void usb_hotplug_poll(void)
+/* Devices currently in the table -- the cheap "did anything appear?" signal
+ * the rootwait loop gates its mount retries on. */
+static int usb_enumerated_count(void)
 {
+    int n = 0;
+
+    mutex_lock(&usb_devtab_lock);
+    for (int i = 0; i < USB_MAX_DEVICES; i++)
+        if (usb_devices[i])
+            n++;
+    mutex_unlock(&usb_devtab_lock);
+    return n;
+}
+
+int usb_hotplug_poll(void)
+{
+    int before = usb_enumerated_count();
+
     /*
      * Clear the per-port failure parking first.  USB_ENUM_MAX_TRIES exists to
      * stop a permanently-unenumerable port from re-probing forever once the
@@ -1581,6 +1650,7 @@ void usb_hotplug_poll(void)
     for (usb_hcd_t *h = usb_hcd_list; h; h = h->next)
         memset(h->enum_fail, 0, sizeof(h->enum_fail));
     usb_hotplug_scan();
+    return usb_enumerated_count() - before;
 }
 
 static int usb_hotplug_chan;

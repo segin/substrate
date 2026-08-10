@@ -633,7 +633,9 @@ void usb_init(void);
 /* Starts the hot-plug monitor.  Must run after kmain has spawned init, or
  * the monitor takes PID 1.  See the note in usb.c. */
 void usb_late_init(void);
-void usb_hotplug_poll(void);   /* one synchronous scan; see rootwait [HW-02] */
+/* One synchronous scan; returns how many devices it newly enumerated, so a
+ * caller can act only when the bus actually changed.  See rootwait. [HW-02] */
+int  usb_hotplug_poll(void);
 void usb_msc_init(void);
 void uas_init(void);
 void uac_init(void);

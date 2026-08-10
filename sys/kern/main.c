@@ -908,9 +908,17 @@ static void init_root_fs(void) {
                 int64_t next_try = get_uptime_ms() + 500;
                 while (get_uptime_ms() < next_try)
                     sched_yield();
-                usb_hotplug_poll();
-                mounted = (root_mount_from_spec(root_dev,
-                                have_root_type ? root_type : NULL) == 0);
+                /*
+                 * Only re-probe when the bus actually changed.  The probe
+                 * tries every filesystem type in turn and each prints, so
+                 * retrying it twice a second buried the USB errors that
+                 * explain the failure under a thousand lines of its own
+                 * output -- on a screen that is the only diagnostic there
+                 * is. [HW-05]
+                 */
+                if (usb_hotplug_poll() > 0)
+                    mounted = (root_mount_from_spec(root_dev,
+                                    have_root_type ? root_type : NULL) == 0);
             }
         }
         if (!mounted) {
