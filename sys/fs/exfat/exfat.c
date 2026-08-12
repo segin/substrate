@@ -645,6 +645,7 @@ struct exfat_dir_iter {
     uint32_t cur_cluster;         /* cluster number currently in buf */
     int loaded;
     int eof;
+    int io_error;                 /* a device read failed (vs a clean EOF) */
 };
 
 static int exfat_iter_to(struct exfat_dir_iter *it, uint32_t want_chain) {
@@ -664,7 +665,9 @@ static int exfat_iter_to(struct exfat_dir_iter *it, uint32_t want_chain) {
         c = exfat_chain_nth(it->fs, it->start, it->no_fat_chain, want_chain);
         if (c == 0) { it->eof = 1; return -1; }
     }
-    if (exfat_read_cluster(it->fs, c, it->buf) != 0) { it->eof = 1; return -1; }
+    /* audit M4: a failed device read is an I/O error, not a clean end of
+     * directory — flag it so exfat_scan_dir returns -EIO instead of -ENOENT. */
+    if (exfat_read_cluster(it->fs, c, it->buf) != 0) { it->eof = 1; it->io_error = 1; return -1; }
     it->chain_index = want_chain;
     it->cur_cluster = c;
     it->loaded = 1;
@@ -690,6 +693,28 @@ struct exfat_dirinfo {
     uint64_t dir_entry_index;   /* index of the 0x85 primary entry */
     uint8_t  secondary_count;   /* # of secondary entries in the set */
 };
+
+/*
+ * Verify a directory entry set's §6.3.3 SetChecksum by streaming its
+ * (secondary_count+1) 32-byte entries through the 16-bit rotate-right checksum,
+ * skipping the two SetChecksum bytes at offset 2,3 of the primary.  Returns 1
+ * on a match.  Reloads the iterator buffer, so the caller must re-fetch any
+ * entry pointer it still needs afterwards.
+ */
+static int exfat_set_checksum_ok(struct exfat_dir_iter *it, uint64_t primary_ei,
+                                 uint8_t secondary_count, uint16_t want) {
+    uint16_t c = 0;
+    uint32_t nent = 1u + secondary_count;
+    for (uint32_t k = 0; k < nent; k++) {
+        const uint8_t *p = exfat_dir_entry(it, primary_ei + (uint64_t)k);
+        if (!p) return 0;   /* set runs past the allocation -> invalid */
+        for (uint32_t j = 0; j < 32; j++) {
+            if (k == 0 && (j == 2 || j == 3)) continue;
+            c = (uint16_t)(((c << 15) | (c >> 1)) + p[j]);
+        }
+    }
+    return c == want;
+}
 
 /*
  * Scan directory `dir`.  If `want_name` is non-NULL, return the entry set
@@ -719,21 +744,44 @@ static int exfat_scan_dir(exfat_node_t *dir, const char *want_name,
         uint8_t type = e[0];
         if (type == EXFAT_ENTRY_EOD) break;         /* end of directory */
         if (!(type & EXFAT_ENTRY_INUSE)) continue;  /* deleted / unused */
-        if (type != EXFAT_ENTRY_FILE) continue;     /* only 0x85 starts a set */
+        if (type != EXFAT_ENTRY_FILE) {
+            /* audit I1 / §8.2: an unrecognised in-use *critical primary*
+             * ((type & 0xE0) == 0x80) renders the directory invalid.  We reject
+             * major!=1 volumes, so such a type cannot be a future benign entry;
+             * stop rather than misparse past it.  Benign primaries (0xA0-0xBF)
+             * and secondaries are skipped as before. */
+            if ((type & 0xE0) == 0x80 &&
+                type != EXFAT_ENTRY_BITMAP && type != EXFAT_ENTRY_UPCASE &&
+                type != EXFAT_ENTRY_LABEL) {
+                kprintf("exfat: unrecognised critical primary 0x%02x; "
+                        "stopping directory scan\n", type);
+                break;
+            }
+            continue;                               /* only 0x85 starts a set */
+        }
 
         /* Copy primary fields out before the buffer can be reloaded. */
         const exfat_file_entry_t *fe = (const exfat_file_entry_t *)e;
         uint16_t attr = fe->file_attributes;
         uint8_t  secondary_count = fe->secondary_count;
+        uint16_t set_checksum = fe->set_checksum;
         int64_t crt = exfat_time(fe->create_time);
         int64_t mod = exfat_time(fe->modify_time);
         int64_t acc = exfat_time(fe->access_time);
+
+        /* audit H4 / §6.3.3: verify the SetChecksum before using any entry in
+         * the set.  This both rejects corrupt sets and stops a hostile
+         * SecondaryCount from later steering exfat_delete_set across unrelated
+         * neighbouring entries.  (Reloads the iterator buffer.) */
+        if (!exfat_set_checksum_ok(&it, ei, secondary_count, set_checksum))
+            continue;
 
         /* Secondary #1 must be the stream extension (0xC0). */
         const uint8_t *se = exfat_dir_entry(&it, ei + 1);
         if (!se || se[0] != EXFAT_ENTRY_STREAM) continue;
         const exfat_stream_entry_t *st = (const exfat_stream_entry_t *)se;
         uint8_t  nlen   = st->name_length;
+        if (nlen == 0) continue;                    /* audit L5: §7.6 name is 1..255 */
         uint32_t fc     = st->first_cluster;
         uint64_t sz     = st->data_length;
         uint8_t  sflags = st->flags;
@@ -773,6 +821,11 @@ static int exfat_scan_dir(exfat_node_t *dir, const char *want_name,
         /* Secondaries are skipped naturally: they lack the 0x85 type, so the
          * outer loop's per-entry advance walks over them. */
     }
+
+    /* audit M4: a read failure mid-scan must not masquerade as "not found",
+     * or rmdir/rename would treat an unreadable directory as empty and mkdir
+     * would skip its EEXIST check. */
+    if (rc == -ENOENT && it.io_error) rc = -EIO;
 
     kfree(it.buf, fs->cluster_size);
     return rc;
@@ -1083,7 +1136,13 @@ static int exfat_create_set(exfat_node_t *dir, const char *name, uint16_t attr,
     return 0;
 }
 
-/* Delete an entry set: clear the "in use" bit on each of its entries. */
+/* Delete an entry set: clear the "in use" bit on each of its entries.
+ * audit H4: the primary is cleared first (so the set stops enumerating even if
+ * a later write fails), and each entry's type is checked against its expected
+ * category before clearing -- entry 0 an in-use critical primary, the rest
+ * in-use secondaries -- so a bogus secondary_count can never steer this across
+ * unrelated neighbouring entries.  (scan_dir already validates the SetChecksum,
+ * making secondary_count trustworthy; this is defence in depth.) */
 static int exfat_delete_set(exfat_node_t *dir, uint64_t primary_index,
                             uint8_t secondary_count) {
     exfat_fs_t *fs = dir->fs;
@@ -1094,6 +1153,9 @@ static int exfat_delete_set(exfat_node_t *dir, uint64_t primary_index,
         if (off == 0) return -EIO;
         uint8_t type;
         if (exfat_read_bytes(fs, off, 1, &type) != 0) return -EIO;
+        /* (type & 0xC0): 0x80 = in-use primary, 0xC0 = in-use secondary. */
+        uint8_t expect = (i == 0) ? 0x80 : 0xC0;
+        if ((type & 0xC0) != expect) break;       /* not part of this set; stop */
         type &= (uint8_t)~EXFAT_ENTRY_INUSE;      /* 0x85->0x05, 0xC0->0x40, 0xC1->0x41 */
         if (exfat_write_bytes(fs, off, 1, &type) != 0) return -EIO;
     }
@@ -1270,7 +1332,9 @@ static int exfat_mkdir_locked(fs_node_t *parent, const char *name, uint16_t perm
     exfat_fs_t *fs = dir->fs;
 
     struct exfat_dirinfo info;
-    if (exfat_scan_dir(dir, name, 0, &info) == 0) return -EEXIST;
+    int erc = exfat_scan_dir(dir, name, 0, &info);
+    if (erc == 0) return -EEXIST;
+    if (erc != -ENOENT) return erc;             /* audit M4: don't create over an unreadable dir */
 
     /* A new (empty) directory occupies one zeroed cluster (no "." / ".."). */
     uint32_t c = exfat_alloc_cluster(fs);
@@ -1305,7 +1369,9 @@ static int exfat_mknod_locked(fs_node_t *parent, const char *name, uint16_t mode
     if (type != S_IFREG) return -EPERM;   /* exFAT has no device/fifo/socket nodes */
 
     struct exfat_dirinfo info;
-    if (exfat_scan_dir(dir, name, 0, &info) == 0) return -EEXIST;
+    int erc = exfat_scan_dir(dir, name, 0, &info);
+    if (erc == 0) return -EEXIST;
+    if (erc != -ENOENT) return erc;             /* audit M4 */
 
     uint64_t pidx; uint8_t sec;
     return exfat_create_set(dir, name, EXFAT_ATTR_ARCHIVE, 0, 0, 0, &pidx, &sec);
@@ -1343,7 +1409,9 @@ static int exfat_rmdir_locked(fs_node_t *parent, const char *name) {
     tmp.first_cluster = info.first_cluster;
     tmp.no_fat_chain = info.no_fat_chain;
     struct exfat_dirinfo child;
-    if (exfat_scan_dir(&tmp, NULL, 0, &child) == 0) return -ENOTEMPTY;
+    int crc = exfat_scan_dir(&tmp, NULL, 0, &child);
+    if (crc == 0) return -ENOTEMPTY;
+    if (crc != -ENOENT) return crc;             /* audit M4: unreadable != empty */
 
     if (exfat_cluster_valid(fs, info.first_cluster))
         exfat_free_chain(fs, info.first_cluster, info.no_fat_chain, info.size);
