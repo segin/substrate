@@ -1574,6 +1574,56 @@ static int exfat_load_metadata(exfat_fs_t *fs) {
     return 0;
 }
 
+/*
+ * §3.4 Boot Checksum: 32-bit rotate-right sum over the 11 sectors of a boot
+ * region, skipping the VolumeFlags (byte 106,107) and PercentInUse (byte 112)
+ * fields, which implementations mutate without recomputing the checksum.
+ */
+static uint32_t exfat_boot_checksum(const uint8_t *sectors, uint32_t bytes_per_sector) {
+    uint32_t n = bytes_per_sector * 11;
+    uint32_t sum = 0;
+    for (uint32_t i = 0; i < n; i++) {
+        if (i == 106 || i == 107 || i == 112) continue;
+        sum = ((sum & 1) ? 0x80000000u : 0u) + (sum >> 1) + sectors[i];
+    }
+    return sum;
+}
+
+/* Read abstraction so the checksum verifier serves both the fs_node mount path
+ * and the raw-blkdev read_label path.  Returns 0 on a full read. */
+typedef int (*exfat_readfn)(void *ctx, uint64_t byte_off, uint32_t size, uint8_t *buf);
+
+static int exfat_rd_node(void *ctx, uint64_t off, uint32_t size, uint8_t *buf) {
+    fs_node_t *dev = (fs_node_t *)ctx;
+    return (dev->read(dev, (off_t)off, size, buf) == size) ? 0 : -1;
+}
+static int exfat_rd_blk(void *ctx, uint64_t off, uint32_t size, uint8_t *buf) {
+    return (blkdev_read_bytes((blkdev_t *)ctx, off, size, buf) == size) ? 0 : -1;
+}
+
+/*
+ * Verify the §3.4 Boot Checksum of the boot region beginning at `base_sector`
+ * (0 = main region, 12 = backup region).  The checksum sector is base_sector+11
+ * and holds the repeating 4-byte checksum; comparing the first copy suffices.
+ * Returns 0 on match.
+ */
+static int exfat_boot_region_ok(uint32_t bps, uint64_t base_sector,
+                                exfat_readfn rd, void *ctx) {
+    uint32_t region = bps * 11;
+    uint8_t *buf = kmalloc(region);
+    if (!buf) return -1;
+    uint8_t ck[4];
+    int rc = -1;
+    if (rd(ctx, base_sector * bps, region, buf) == 0 &&
+        rd(ctx, (base_sector + 11) * bps, 4, ck) == 0) {
+        uint32_t want = (uint32_t)ck[0] | ((uint32_t)ck[1] << 8) |
+                        ((uint32_t)ck[2] << 16) | ((uint32_t)ck[3] << 24);
+        rc = (exfat_boot_checksum(buf, bps) == want) ? 0 : -1;
+    }
+    kfree(buf, region);
+    return rc;
+}
+
 /* Parse + validate the boot region shared by mount and read_label. */
 static int exfat_parse_boot(const uint8_t *boot, exfat_boot_t *out) {
     const exfat_boot_t *b = (const exfat_boot_t *)boot;
@@ -1639,8 +1689,27 @@ static fs_node_t *exfat_mount(const char *device, uint32_t flags, void *data) {
     uint8_t boot[512];
     if (dev->read(dev, 0, sizeof(boot), boot) != sizeof(boot)) return NULL;
 
+    /* audit M11: verify the §3.4 Boot Checksum before trusting any geometry.
+     * BytesPerSectorShift (needed to size the region read) lives at a fixed
+     * offset inside the first 512 bytes; validate it, then checksum the main
+     * region and fall back to the backup boot region (sectors 12-23). */
+    uint8_t bps_shift = boot[offsetof(exfat_boot_t, bytes_per_sector_shift)];
+    if (bps_shift < 9 || bps_shift > 12) return NULL;
+    uint32_t bps = 1u << bps_shift;
+
     exfat_boot_t b;
-    if (exfat_parse_boot(boot, &b) != 0) return NULL;   /* not a valid exFAT volume */
+    if (exfat_boot_region_ok(bps, 0, exfat_rd_node, dev) == 0) {
+        if (exfat_parse_boot(boot, &b) != 0) return NULL;
+    } else if (exfat_boot_region_ok(bps, 12, exfat_rd_node, dev) == 0) {
+        uint8_t bboot[512];
+        if (dev->read(dev, (off_t)(12u * bps), sizeof(bboot), bboot) != sizeof(bboot))
+            return NULL;
+        if (exfat_parse_boot(bboot, &b) != 0) return NULL;
+        kprint("exFAT: main boot region checksum bad, using backup\n");
+    } else {
+        kprint("exFAT: boot checksum verification failed\n");
+        return NULL;
+    }
 
     exfat_fs_t *fs = kmalloc(sizeof(exfat_fs_t));
     if (!fs) return NULL;
@@ -1702,8 +1771,23 @@ int exfat_read_label(blkdev_t *dev, char *label, size_t len) {
 
     uint8_t boot[512];
     if (blkdev_read_bytes(dev, 0, sizeof(boot), boot) != sizeof(boot)) return -1;
+
+    /* audit M11: verify the §3.4 Boot Checksum (main, then backup) before
+     * trusting the geometry this probe walks. */
+    uint8_t bps_shift = boot[offsetof(exfat_boot_t, bytes_per_sector_shift)];
+    if (bps_shift < 9 || bps_shift > 12) return -1;
+    uint32_t region_bps = 1u << bps_shift;
     exfat_boot_t b;
-    if (exfat_parse_boot(boot, &b) != 0) return -1;
+    if (exfat_boot_region_ok(region_bps, 0, exfat_rd_blk, dev) == 0) {
+        if (exfat_parse_boot(boot, &b) != 0) return -1;
+    } else if (exfat_boot_region_ok(region_bps, 12, exfat_rd_blk, dev) == 0) {
+        uint8_t bboot[512];
+        if (blkdev_read_bytes(dev, (uint64_t)12u * region_bps, sizeof(bboot), bboot)
+                != sizeof(bboot)) return -1;
+        if (exfat_parse_boot(bboot, &b) != 0) return -1;
+    } else {
+        return -1;
+    }
 
     uint32_t bps = 1u << b.bytes_per_sector_shift;
     uint32_t spc = 1u << b.sectors_per_cluster_shift;
