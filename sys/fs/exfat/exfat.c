@@ -74,6 +74,87 @@ static int            exfat_rename(fs_node_t *old_parent, const char *old_name,
 static int            exfat_statfs(fs_node_t *node, struct statfs *buf);
 static int            exfat_unmount(fs_node_t *root);
 
+/* Per-mount-lock-holding implementations behind the public op wrappers below. */
+static size_t         exfat_file_write_locked(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer);
+static int            exfat_truncate_locked(fs_node_t *node, off_t new_size);
+static int            exfat_mkdir_locked(fs_node_t *parent, const char *name, uint16_t perm);
+static int            exfat_mknod_locked(fs_node_t *parent, const char *name, uint16_t mode, uint32_t dev);
+static int            exfat_unlink_locked(fs_node_t *parent, const char *name);
+static int            exfat_rmdir_locked(fs_node_t *parent, const char *name);
+static int            exfat_rename_locked(fs_node_t *old_parent, const char *old_name,
+                                          fs_node_t *new_parent, const char *new_name);
+
+/* Fetch the owning mount from a node (NULL-safe). */
+static exfat_fs_t *exfat_node_fs(fs_node_t *node) {
+    exfat_node_t *ctx = node ? (exfat_node_t *)(uintptr_t)node->impl : NULL;
+    return ctx ? ctx->fs : NULL;
+}
+
+/*
+ * Public mutation ops: take the per-mount lock (audit H3) so allocator +
+ * directory-slot assignment + FAT/bitmap RMW never interleave between two
+ * writers, then delegate to the *_locked body.  The bodies and every helper
+ * they call assume the lock is already held and never re-take it.
+ */
+static size_t exfat_file_write(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer) {
+    exfat_fs_t *fs = exfat_node_fs(node);
+    if (!fs) return 0;
+    mutex_lock(&fs->lock);
+    size_t r = exfat_file_write_locked(node, offset, size, buffer);
+    mutex_unlock(&fs->lock);
+    return r;
+}
+static int exfat_truncate(fs_node_t *node, off_t new_size) {
+    exfat_fs_t *fs = exfat_node_fs(node);
+    if (!fs) return -EINVAL;
+    mutex_lock(&fs->lock);
+    int r = exfat_truncate_locked(node, new_size);
+    mutex_unlock(&fs->lock);
+    return r;
+}
+static int exfat_mkdir(fs_node_t *parent, const char *name, uint16_t perm) {
+    exfat_fs_t *fs = exfat_node_fs(parent);
+    if (!fs) return -EINVAL;
+    mutex_lock(&fs->lock);
+    int r = exfat_mkdir_locked(parent, name, perm);
+    mutex_unlock(&fs->lock);
+    return r;
+}
+static int exfat_mknod(fs_node_t *parent, const char *name, uint16_t mode, uint32_t dev) {
+    exfat_fs_t *fs = exfat_node_fs(parent);
+    if (!fs) return -EINVAL;
+    mutex_lock(&fs->lock);
+    int r = exfat_mknod_locked(parent, name, mode, dev);
+    mutex_unlock(&fs->lock);
+    return r;
+}
+static int exfat_unlink(fs_node_t *parent, const char *name) {
+    exfat_fs_t *fs = exfat_node_fs(parent);
+    if (!fs) return -EINVAL;
+    mutex_lock(&fs->lock);
+    int r = exfat_unlink_locked(parent, name);
+    mutex_unlock(&fs->lock);
+    return r;
+}
+static int exfat_rmdir(fs_node_t *parent, const char *name) {
+    exfat_fs_t *fs = exfat_node_fs(parent);
+    if (!fs) return -EINVAL;
+    mutex_lock(&fs->lock);
+    int r = exfat_rmdir_locked(parent, name);
+    mutex_unlock(&fs->lock);
+    return r;
+}
+static int exfat_rename(fs_node_t *old_parent, const char *old_name,
+                        fs_node_t *new_parent, const char *new_name) {
+    /* VFS guarantees rename is intra-mount, so both dirs share one lock. */
+    exfat_fs_t *fs = exfat_node_fs(old_parent);
+    if (!fs) return -EINVAL;
+    mutex_lock(&fs->lock);
+    int r = exfat_rename_locked(old_parent, old_name, new_parent, new_name);
+    mutex_unlock(&fs->lock);
+    return r;
+}
+
 /* ---------------------------------------------------------------- device I/O */
 
 static int exfat_read_bytes(exfat_fs_t *fs, uint64_t byte_off, uint32_t size, void *buf) {
@@ -1014,8 +1095,8 @@ static int exfat_delete_set(exfat_node_t *dir, uint64_t primary_index,
 
 /* ------------------------------------------------------------ file writes */
 
-static size_t exfat_file_write(fs_node_t *node, off_t offset, size_t size,
-                               const uint8_t *buffer) {
+static size_t exfat_file_write_locked(fs_node_t *node, off_t offset, size_t size,
+                                      const uint8_t *buffer) {
     exfat_node_t *ctx = (exfat_node_t *)(uintptr_t)node->impl;
     if (!ctx || !buffer || offset < 0 || size == 0) return 0;
     exfat_fs_t *fs = ctx->fs;
@@ -1099,7 +1180,7 @@ static size_t exfat_file_write(fs_node_t *node, off_t offset, size_t size,
     return done;
 }
 
-static int exfat_truncate(fs_node_t *node, off_t new_size) {
+static int exfat_truncate_locked(fs_node_t *node, off_t new_size) {
     exfat_node_t *ctx = (exfat_node_t *)(uintptr_t)node->impl;
     if (!ctx || new_size < 0) return -EINVAL;
     exfat_fs_t *fs = ctx->fs;
@@ -1173,7 +1254,7 @@ static int exfat_truncate(fs_node_t *node, off_t new_size) {
 
 /* ----------------------------------------------------- create / delete ops */
 
-static int exfat_mkdir(fs_node_t *parent, const char *name, uint16_t perm) {
+static int exfat_mkdir_locked(fs_node_t *parent, const char *name, uint16_t perm) {
     (void)perm;
     exfat_node_t *dir = (exfat_node_t *)(uintptr_t)parent->impl;
     if (!dir || !name || !name[0]) return -EINVAL;
@@ -1204,7 +1285,7 @@ static int exfat_mkdir(fs_node_t *parent, const char *name, uint16_t perm) {
     return 0;
 }
 
-static int exfat_mknod(fs_node_t *parent, const char *name, uint16_t mode, uint32_t dev) {
+static int exfat_mknod_locked(fs_node_t *parent, const char *name, uint16_t mode, uint32_t dev) {
     (void)dev;
     exfat_node_t *dir = (exfat_node_t *)(uintptr_t)parent->impl;
     if (!dir || !name || !name[0]) return -EINVAL;
@@ -1223,7 +1304,7 @@ static int exfat_mknod(fs_node_t *parent, const char *name, uint16_t mode, uint3
     return exfat_create_set(dir, name, EXFAT_ATTR_ARCHIVE, 0, 0, 0, &pidx, &sec);
 }
 
-static int exfat_unlink(fs_node_t *parent, const char *name) {
+static int exfat_unlink_locked(fs_node_t *parent, const char *name) {
     exfat_node_t *dir = (exfat_node_t *)(uintptr_t)parent->impl;
     if (!dir || !name) return -EINVAL;
     exfat_fs_t *fs = dir->fs;
@@ -1238,7 +1319,7 @@ static int exfat_unlink(fs_node_t *parent, const char *name) {
     return exfat_delete_set(dir, info.dir_entry_index, info.secondary_count);
 }
 
-static int exfat_rmdir(fs_node_t *parent, const char *name) {
+static int exfat_rmdir_locked(fs_node_t *parent, const char *name) {
     exfat_node_t *dir = (exfat_node_t *)(uintptr_t)parent->impl;
     if (!dir || !name) return -EINVAL;
     exfat_fs_t *fs = dir->fs;
@@ -1262,8 +1343,8 @@ static int exfat_rmdir(fs_node_t *parent, const char *name) {
     return exfat_delete_set(dir, info.dir_entry_index, info.secondary_count);
 }
 
-static int exfat_rename(fs_node_t *old_parent, const char *old_name,
-                        fs_node_t *new_parent, const char *new_name) {
+static int exfat_rename_locked(fs_node_t *old_parent, const char *old_name,
+                               fs_node_t *new_parent, const char *new_name) {
     exfat_node_t *odir = (exfat_node_t *)(uintptr_t)old_parent->impl;
     exfat_node_t *ndir = (exfat_node_t *)(uintptr_t)new_parent->impl;
     if (!odir || !ndir || !old_name || !new_name) return -EINVAL;
@@ -1326,12 +1407,20 @@ static int exfat_unmount(fs_node_t *root) {
     if (!ctx || !ctx->fs) return -EINVAL;
     exfat_fs_t *fs = ctx->fs;
 
+    /* audit M1: exclude any in-flight mutation (which holds fs->lock) before
+     * tearing the mount down, and clear this mount's node-cache slots under the
+     * cache lock the allocator/open/close use -- the old teardown raced them. */
+    mutex_lock(&fs->lock);
+    mutex_lock(&exfat_node_cache_lock);
     for (uint32_t i = 0; i < EXFAT_NODE_CACHE_SIZE; i++) {
         if (exfat_node_cache[i].fs == fs) {
             memset(&exfat_node_cache[i], 0, sizeof(exfat_node_t));
             memset(&exfat_fs_node_cache[i], 0, sizeof(fs_node_t));
         }
     }
+    mutex_unlock(&exfat_node_cache_lock);
+    mutex_unlock(&fs->lock);
+
     if (fs->bitmap) kfree(fs->bitmap, fs->bitmap_bytes);
     if (fs->upcase) kfree(fs->upcase, 65536 * sizeof(uint16_t));
     kfree(fs, sizeof(exfat_fs_t));
@@ -1496,6 +1585,7 @@ static fs_node_t *exfat_mount(const char *device, uint32_t flags, void *data) {
     exfat_fs_t *fs = kmalloc(sizeof(exfat_fs_t));
     if (!fs) return NULL;
     memset(fs, 0, sizeof(*fs));
+    mutex_init(&fs->lock, "exfat_fs");
     fs->device = dev;
     fs->bytes_per_sector_shift = b.bytes_per_sector_shift;
     fs->sectors_per_cluster_shift = b.sectors_per_cluster_shift;

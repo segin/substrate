@@ -2,6 +2,7 @@
 #define _EXFAT_H
 
 #include <stdint.h>
+#include <sys/lock.h>
 #include <vfs/vfs.h>
 
 /*
@@ -140,6 +141,12 @@ typedef struct exfat_fs {
     uint8_t   bitmap_no_fat_chain;     /* bitmap uses contiguous clusters */
     uint16_t *upcase;                  /* 65536-entry BMP up-case fold table */
     uint32_t  free_clusters;           /* cached clear-bit count (statfs) */
+
+    /* exFAT-audit H3: serialises every metadata mutation on this mount
+     * (allocate/free clusters, FAT-chain edits, allocation-bitmap RMW,
+     * directory-entry-set create/update/delete, node size updates).  Held at
+     * the top-level VFS mutation op; the helpers it calls never take it. */
+    mutex_t  lock;
 } exfat_fs_t;
 
 /* Per-node context (attached to fs_node.impl). */
