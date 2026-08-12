@@ -177,6 +177,15 @@ typedef struct exfat_node {
      * every other slot: sys_open puts this pointer straight into f->f_data,
      * so recycling a slot redirects an existing fd to a different file. */
     uint32_t pin;
+
+    /* Deferred unlink (audit H6): set when unlink removes the directory entry
+     * while the file is still open (pinned).  The cluster chain is retained and
+     * freed only when the last reference is closed, so a still-open fd can keep
+     * reading/writing its own data instead of clusters the allocator has reused. */
+    uint8_t  orphaned;
+    uint8_t  orphan_nfc;
+    uint32_t orphan_first;
+    uint64_t orphan_size;
 } exfat_node_t;
 
 #define EXFAT_NODE_CACHE_SIZE 128

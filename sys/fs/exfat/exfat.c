@@ -43,6 +43,12 @@ static uint32_t     exfat_node_cache_idx;
  * protecting lock, so two concurrent first-ever mounts double-initialised it. */
 static mutex_t      exfat_node_cache_lock;
 
+static void exfat_free_chain(exfat_fs_t *fs, uint32_t start, int no_fat_chain,
+                             uint64_t nbytes);
+static int  exfat_cluster_valid(exfat_fs_t *fs, uint32_t cluster);
+static uint32_t exfat_le32(const uint8_t *p);
+static uint64_t exfat_le64(const uint8_t *p);
+
 static void exfat_node_open(fs_node_t *node) {
     exfat_node_t *ctx = node ? (exfat_node_t *)(uintptr_t)node->impl : NULL;
     if (!ctx) return;
@@ -56,6 +62,74 @@ static void exfat_node_close(fs_node_t *node) {
     if (!ctx) return;
     mutex_lock(&exfat_node_cache_lock);
     if (ctx->pin > 0) ctx->pin--;
+    /* audit H6: a file unlinked while open kept its chain via ctx->orphaned;
+     * free it now that the last reference has dropped.  Re-pin across the
+     * teardown (which does device I/O under fs->lock, not the cache lock) so
+     * the allocator cannot hand this half-freed slot to another lookup. */
+    int finish = (ctx->pin == 0 && ctx->orphaned && ctx->fs);
+    if (finish) ctx->pin = 1;
+    mutex_unlock(&exfat_node_cache_lock);
+    if (finish) {
+        exfat_fs_t *fs = ctx->fs;
+        mutex_lock(&fs->lock);
+        if (exfat_cluster_valid(fs, ctx->orphan_first))
+            exfat_free_chain(fs, ctx->orphan_first, ctx->orphan_nfc, ctx->orphan_size);
+        mutex_unlock(&fs->lock);
+        mutex_lock(&exfat_node_cache_lock);
+        ctx->orphaned = 0;
+        ctx->orphan_first = 0;
+        ctx->pin = 0;
+        mutex_unlock(&exfat_node_cache_lock);
+    }
+}
+
+/*
+ * audit H6: if the file (fs, inode) is currently open, mark its cached node
+ * orphaned so its cluster chain is freed on the last close, and return 1.
+ * Otherwise return 0 and let the caller free the chain now.  The caller holds
+ * fs->lock; the orphan fields are stamped atomically under the cache lock.
+ */
+static int exfat_defer_or_free(exfat_fs_t *fs, uint64_t inode,
+                               uint32_t first, int nfc, uint64_t size) {
+    int deferred = 0;
+    mutex_lock(&exfat_node_cache_lock);
+    for (uint32_t i = 0; i < EXFAT_NODE_CACHE_SIZE; i++) {
+        if (exfat_node_cache[i].fs == fs && exfat_node_cache[i].pin > 0 &&
+            exfat_fs_node_cache[i].inode == inode) {
+            exfat_node_cache[i].orphaned     = 1;
+            exfat_node_cache[i].orphan_first = first;
+            exfat_node_cache[i].orphan_nfc   = (uint8_t)nfc;
+            exfat_node_cache[i].orphan_size  = size;
+            deferred = 1;
+            break;
+        }
+    }
+    mutex_unlock(&exfat_node_cache_lock);
+    return deferred;
+}
+
+/*
+ * audit H6: after rename relocates a file's directory entry, update any open
+ * cached node so its recorded entry location (and inode) follow the move -- a
+ * stale open fd would otherwise write through the old, now-deleted entry.
+ * Caller holds fs->lock.
+ */
+static void exfat_relocate_cached(exfat_fs_t *fs, uint64_t old_inode,
+                                  uint32_t new_dir_cluster, uint8_t new_dir_nfc,
+                                  uint64_t new_primary, uint8_t new_secondary,
+                                  uint64_t new_inode) {
+    mutex_lock(&exfat_node_cache_lock);
+    for (uint32_t i = 0; i < EXFAT_NODE_CACHE_SIZE; i++) {
+        if (exfat_node_cache[i].fs == fs && exfat_node_cache[i].pin > 0 &&
+            exfat_fs_node_cache[i].inode == old_inode) {
+            exfat_node_cache[i].dir_cluster     = new_dir_cluster;
+            exfat_node_cache[i].dir_no_fat_chain = new_dir_nfc;
+            exfat_node_cache[i].primary_index   = new_primary;
+            exfat_node_cache[i].secondary_count = new_secondary;
+            exfat_fs_node_cache[i].inode        = new_inode;
+            break;
+        }
+    }
     mutex_unlock(&exfat_node_cache_lock);
 }
 
@@ -1491,9 +1565,52 @@ static int exfat_unlink_locked(fs_node_t *parent, const char *name) {
      * pointing at clusters the allocator can reuse (a cross-link). */
     rc = exfat_delete_set(dir, info.dir_entry_index, info.secondary_count);
     if (rc != 0) return rc;
-    if (exfat_cluster_valid(fs, info.first_cluster))
-        exfat_free_chain(fs, info.first_cluster, info.no_fat_chain, info.size);
+    if (exfat_cluster_valid(fs, info.first_cluster)) {
+        /* audit H6: if the file is still open, defer freeing its chain until the
+         * last fd closes -- otherwise the freed clusters get reused and the open
+         * fd scribbles another file's data. */
+        uint64_t ino = ((uint64_t)dir->first_cluster << 32) |
+                       (uint32_t)(info.dir_entry_index + 1);
+        if (!exfat_defer_or_free(fs, ino, info.first_cluster, info.no_fat_chain, info.size))
+            exfat_free_chain(fs, info.first_cluster, info.no_fat_chain, info.size);
+    }
     return 0;
+}
+
+/*
+ * audit L7 / §8.2: when deleting a directory, free the cluster allocations of
+ * any unrecognised *benign primary* entries it holds (in-use, (type&0xE0)==0xA0,
+ * with GeneralPrimaryFlags.AllocationPossible set).  The emptiness check only
+ * looks for 0x85 File entries, so without this those allocations leak.  This
+ * driver never creates such entries; it matters only for foreign-authored
+ * volumes.
+ */
+static void exfat_free_benign_allocs(exfat_fs_t *fs, uint32_t dir_first, int dir_nfc) {
+    struct exfat_dir_iter it;
+    memset(&it, 0, sizeof(it));
+    it.fs = fs;
+    it.start = dir_first;
+    it.no_fat_chain = (uint8_t)dir_nfc;
+    it.entries_per_cluster = fs->cluster_size / 32;
+    if (it.entries_per_cluster == 0) return;
+    it.buf = kmalloc(fs->cluster_size);
+    if (!it.buf) return;
+    for (uint64_t ei = 0; ei < EXFAT_MAX_DIR_ENTRIES; ei++) {
+        const uint8_t *e = exfat_dir_entry(&it, ei);
+        if (!e) break;
+        uint8_t type = e[0];
+        if (type == EXFAT_ENTRY_EOD) break;
+        if (!(type & EXFAT_ENTRY_INUSE)) continue;
+        if ((type & 0xE0) != 0xA0) continue;            /* benign primary only */
+        uint8_t gpflags = e[4];                          /* GeneralPrimaryFlags */
+        if (!(gpflags & EXFAT_FLAG_ALLOC_POSSIBLE)) continue;
+        uint32_t fc = exfat_le32(e + 20);
+        uint64_t dl = exfat_le64(e + 24);
+        int nfc = (gpflags & EXFAT_FLAG_NO_FAT_CHAIN) ? 1 : 0;
+        if (exfat_cluster_valid(fs, fc))
+            exfat_free_chain(fs, fc, nfc, dl);
+    }
+    kfree(it.buf, fs->cluster_size);
 }
 
 static int exfat_rmdir_locked(fs_node_t *parent, const char *name) {
@@ -1520,8 +1637,37 @@ static int exfat_rmdir_locked(fs_node_t *parent, const char *name) {
     /* audit M7 / §8.1: delete the entry before freeing the chain. */
     rc = exfat_delete_set(dir, info.dir_entry_index, info.secondary_count);
     if (rc != 0) return rc;
-    if (exfat_cluster_valid(fs, info.first_cluster))
+    if (exfat_cluster_valid(fs, info.first_cluster)) {
+        /* audit L7: reclaim any benign-primary allocations before the chain. */
+        exfat_free_benign_allocs(fs, info.first_cluster, info.no_fat_chain);
         exfat_free_chain(fs, info.first_cluster, info.no_fat_chain, info.size);
+    }
+    return 0;
+}
+
+/*
+ * audit M5: does directory `target_fc` equal, or lie anywhere inside, the
+ * subtree rooted at `ancestor_fc`?  exFAT records no ".."/parent links, so the
+ * only way to detect "moving a directory into its own subtree" is to walk down.
+ * Bounded by a depth cap; on too-deep nesting (or a pre-existing cycle) it
+ * conservatively returns 1 (refuse the rename) rather than risk a loop.
+ */
+static int exfat_dir_contains(exfat_fs_t *fs, uint32_t ancestor_fc, int ancestor_nfc,
+                              uint32_t target_fc, int depth) {
+    if (ancestor_fc == target_fc) return 1;
+    if (depth > 64) return 1;
+    exfat_node_t tmp;
+    memset(&tmp, 0, sizeof(tmp));
+    tmp.fs = fs;
+    tmp.first_cluster = ancestor_fc;
+    tmp.no_fat_chain = (uint8_t)ancestor_nfc;
+    for (uint64_t idx = 0; ; idx++) {
+        struct exfat_dirinfo di;
+        if (exfat_scan_dir(&tmp, NULL, idx, &di) != 0) break;   /* end or error */
+        if ((di.attr & EXFAT_ATTR_DIRECTORY) &&
+            exfat_dir_contains(fs, di.first_cluster, di.no_fat_chain, target_fc, depth + 1))
+            return 1;
+    }
     return 0;
 }
 
@@ -1530,15 +1676,36 @@ static int exfat_rename_locked(fs_node_t *old_parent, const char *old_name,
     exfat_node_t *odir = (exfat_node_t *)(uintptr_t)old_parent->impl;
     exfat_node_t *ndir = (exfat_node_t *)(uintptr_t)new_parent->impl;
     if (!odir || !ndir || !old_name || !new_name) return -EINVAL;
+    /* audit M12/M5: reserved names must never be recorded. */
+    if (!strcmp(new_name, ".") || !strcmp(new_name, "..")) return -EINVAL;
     exfat_fs_t *fs = odir->fs;
 
     struct exfat_dirinfo src;
     int rc = exfat_scan_dir(odir, old_name, 0, &src);
     if (rc != 0) return rc;
+    uint64_t src_inode = ((uint64_t)odir->first_cluster << 32) |
+                         (uint32_t)(src.dir_entry_index + 1);
 
-    /* Remove an existing destination first (files freed; dirs must be empty). */
+    /* audit M5: refuse to move a directory into itself or its own subtree,
+     * which would orphan it into a disconnected cycle. */
+    if ((src.attr & EXFAT_ATTR_DIRECTORY) &&
+        odir->first_cluster != ndir->first_cluster &&
+        exfat_dir_contains(fs, src.first_cluster, src.no_fat_chain, ndir->first_cluster, 0))
+        return -EINVAL;
+
+    /* Resolve the destination.  audit H5: if it resolves to the SAME entry set
+     * as the source (a case-only or no-op rename, matched up-case-folded), it is
+     * NOT an existing file to remove -- the old code freed the source's own
+     * clusters here.  Skip removal in that case. */
     struct exfat_dirinfo dst;
-    if (exfat_scan_dir(ndir, new_name, 0, &dst) == 0) {
+    int drc = exfat_scan_dir(ndir, new_name, 0, &dst);
+    if (drc != 0 && drc != -ENOENT) return drc;             /* audit M4 */
+    int have_dst = (drc == 0);
+    int same_entry = have_dst &&
+                     odir->first_cluster == ndir->first_cluster &&
+                     dst.dir_entry_index == src.dir_entry_index;
+
+    if (have_dst && !same_entry) {
         if (dst.attr & EXFAT_ATTR_DIRECTORY) {
             exfat_node_t tmp;
             memset(&tmp, 0, sizeof(tmp));
@@ -1546,22 +1713,38 @@ static int exfat_rename_locked(fs_node_t *old_parent, const char *old_name,
             tmp.first_cluster = dst.first_cluster;
             tmp.no_fat_chain = dst.no_fat_chain;
             struct exfat_dirinfo dchild;
-            if (exfat_scan_dir(&tmp, NULL, 0, &dchild) == 0) return -ENOTEMPTY;
+            int cc = exfat_scan_dir(&tmp, NULL, 0, &dchild);
+            if (cc == 0) return -ENOTEMPTY;
+            if (cc != -ENOENT) return cc;                   /* audit M4 */
         }
-        if (exfat_cluster_valid(fs, dst.first_cluster))
-            exfat_free_chain(fs, dst.first_cluster, dst.no_fat_chain, dst.size);
-        exfat_delete_set(ndir, dst.dir_entry_index, dst.secondary_count);
+        /* §8.1 order: delete the entry, then free the chain (deferred if open). */
+        int derc = exfat_delete_set(ndir, dst.dir_entry_index, dst.secondary_count);
+        if (derc != 0) return derc;
+        if (exfat_cluster_valid(fs, dst.first_cluster)) {
+            uint64_t dino = ((uint64_t)ndir->first_cluster << 32) |
+                            (uint32_t)(dst.dir_entry_index + 1);
+            if (!exfat_defer_or_free(fs, dino, dst.first_cluster, dst.no_fat_chain, dst.size))
+                exfat_free_chain(fs, dst.first_cluster, dst.no_fat_chain, dst.size);
+        }
     }
 
-    /* Write a new set in the target directory pointing at the same clusters. */
+    /* Write a new set in the target directory pointing at the SAME clusters.
+     * The source set is still live, so create_set cannot overwrite it. */
     uint64_t pidx; uint8_t sec;
     rc = exfat_create_set(ndir, new_name, src.attr, src.first_cluster,
                           src.size, src.no_fat_chain, &pidx, &sec);
     if (rc != 0) return rc;
 
-    /* Remove the old set without freeing the (reused) cluster chain.  The old
-     * set is still live, so create_set could not have overwritten it. */
-    return exfat_delete_set(odir, src.dir_entry_index, src.secondary_count);
+    /* Remove the old set WITHOUT freeing the (reused) cluster chain. */
+    rc = exfat_delete_set(odir, src.dir_entry_index, src.secondary_count);
+    if (rc != 0) return rc;
+
+    /* audit H6: point any open cached node at the new entry location so a stale
+     * fd keeps updating the right directory entry. */
+    uint64_t new_inode = ((uint64_t)ndir->first_cluster << 32) | (uint32_t)(pidx + 1);
+    exfat_relocate_cached(fs, src_inode, ndir->first_cluster, ndir->no_fat_chain,
+                          pidx, sec, new_inode);
+    return 0;
 }
 
 /*
