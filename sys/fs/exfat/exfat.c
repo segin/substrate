@@ -37,21 +37,15 @@
 static exfat_node_t exfat_node_cache[EXFAT_NODE_CACHE_SIZE];
 static fs_node_t    exfat_fs_node_cache[EXFAT_NODE_CACHE_SIZE];
 static uint32_t     exfat_node_cache_idx;
-/* exFAT-F3: guards slot selection, pin counts and the re-populating memset. */
+/* exFAT-F3: guards slot selection, pin counts, node population and the
+ * re-populating memset.  Initialised once in exfat_init() (single-threaded at
+ * driver registration) — the old lazy "ensure" ran mutex_init() with no
+ * protecting lock, so two concurrent first-ever mounts double-initialised it. */
 static mutex_t      exfat_node_cache_lock;
-static int          exfat_node_cache_lock_ready;
-
-static void exfat_node_cache_lock_ensure(void) {
-    if (!exfat_node_cache_lock_ready) {
-        mutex_init(&exfat_node_cache_lock, "exfat_ncache");
-        exfat_node_cache_lock_ready = 1;
-    }
-}
 
 static void exfat_node_open(fs_node_t *node) {
     exfat_node_t *ctx = node ? (exfat_node_t *)(uintptr_t)node->impl : NULL;
     if (!ctx) return;
-    exfat_node_cache_lock_ensure();
     mutex_lock(&exfat_node_cache_lock);
     ctx->pin++;
     mutex_unlock(&exfat_node_cache_lock);
@@ -60,7 +54,6 @@ static void exfat_node_open(fs_node_t *node) {
 static void exfat_node_close(fs_node_t *node) {
     exfat_node_t *ctx = node ? (exfat_node_t *)(uintptr_t)node->impl : NULL;
     if (!ctx) return;
-    exfat_node_cache_lock_ensure();
     mutex_lock(&exfat_node_cache_lock);
     if (ctx->pin > 0) ctx->pin--;
     mutex_unlock(&exfat_node_cache_lock);
@@ -449,69 +442,56 @@ static fs_node_t *exfat_alloc_node(exfat_fs_t *fs, const char *name, uint64_t in
                                    uint8_t has_dir_entry, uint32_t dir_cluster,
                                    uint8_t dir_no_fat_chain, uint64_t primary_index,
                                    uint8_t secondary_count) {
-    /* Slot 0 is permanently the root node: fs->root_node is held for the whole
-     * mount lifetime, and every path lookup starts by dereferencing it.  The
-     * old code round-robined it like any other slot, so after
-     * EXFAT_NODE_CACHE_SIZE lookups the round-robin recycled the root to some
-     * other file -> the root (and other VFS-held nodes) silently became a
-     * different, often non-directory, inode.  That is what broke reading back
-     * anything substantial (untar onto exFAT failed with ENOTDIR, `ls` came up
-     * empty).  Pin the root to slot 0 and round-robin only the rest. */
     /*
-     * exFAT-F3: the round-robin above the root special case had the same
-     * defect the root comment describes, for every other slot -- and
-     * exfat_node_cache_idx++ was a non-atomic RMW shared by all callers, so
-     * two concurrent lookups could be handed the same slot.  Reuse the slot
-     * already describing this (fs, inode) if there is one, else take an
-     * UNPINNED slot, all under the cache lock.
+     * exFAT-F3 / audit H1+H2+L1: the node cache is a fixed slot ring shared by
+     * all exFAT mounts.  The old code hardcoded the root to slot 0 (shared
+     * across every mount, so a second mount aliased then freed the first
+     * mount's root -> cross-volume writes + use-after-free) and populated the
+     * chosen slot AFTER dropping the cache lock (a torn node whose ->impl and
+     * op-pointers could come from two racing callers).  Mirroring the ext2
+     * driver: the root is keyed by (fs, EXFAT_ROOT_INO) like any other node and
+     * pinned by exfat_mount(), so different mounts never collide; slot
+     * selection AND the full population run as one step under the cache lock.
      */
     exfat_node_t *ctx = NULL;
     fs_node_t *node = NULL;
-    uint32_t idx = 0;
 
-    exfat_node_cache_lock_ensure();
     mutex_lock(&exfat_node_cache_lock);
 
-    if (inode == EXFAT_ROOT_INO) {
-        idx = 0;
-        ctx  = &exfat_node_cache[0];
-        node = &exfat_fs_node_cache[0];
-    } else {
-        for (uint32_t i = 1; i < EXFAT_NODE_CACHE_SIZE; i++) {
-            if (exfat_node_cache[i].fs == fs &&
-                exfat_fs_node_cache[i].inode == inode &&
-                exfat_fs_node_cache[i].name[0] != '\0') {
-                idx = i; ctx = &exfat_node_cache[i];
+    /* Reuse the slot already describing this (fs, inode), if any. */
+    for (uint32_t i = 0; i < EXFAT_NODE_CACHE_SIZE; i++) {
+        if (exfat_node_cache[i].fs == fs &&
+            exfat_fs_node_cache[i].inode == inode &&
+            exfat_fs_node_cache[i].name[0] != '\0') {
+            ctx = &exfat_node_cache[i];
+            node = &exfat_fs_node_cache[i];
+            break;
+        }
+    }
+    /* Else take the next UNPINNED slot, round-robin over the whole ring. */
+    if (!ctx) {
+        uint32_t start = exfat_node_cache_idx;
+        for (uint32_t n = 0; n < EXFAT_NODE_CACHE_SIZE; n++) {
+            uint32_t i = (start + n) % EXFAT_NODE_CACHE_SIZE;
+            if (exfat_node_cache[i].pin == 0) {
+                exfat_node_cache_idx = (i + 1) % EXFAT_NODE_CACHE_SIZE;
+                ctx = &exfat_node_cache[i];
                 node = &exfat_fs_node_cache[i];
                 break;
             }
         }
-        if (!ctx) {
-            uint32_t start = exfat_node_cache_idx;
-            for (uint32_t n = 0; n < EXFAT_NODE_CACHE_SIZE - 1; n++) {
-                uint32_t i = 1 + ((start + n) % (EXFAT_NODE_CACHE_SIZE - 1));
-                if (exfat_node_cache[i].pin == 0) {
-                    exfat_node_cache_idx = (start + n + 1) % (EXFAT_NODE_CACHE_SIZE - 1);
-                    idx = i; ctx = &exfat_node_cache[i];
-                    node = &exfat_fs_node_cache[i];
-                    break;
-                }
-            }
-        }
-        if (!ctx) {
-            mutex_unlock(&exfat_node_cache_lock);
-            kprintf("exfat: node cache exhausted (all %d slots pinned)\n",
-                    EXFAT_NODE_CACHE_SIZE - 1);
-            return NULL;
-        }
     }
-    (void)idx;
+    if (!ctx) {
+        mutex_unlock(&exfat_node_cache_lock);
+        kprintf("exfat: node cache exhausted (all %d slots pinned)\n",
+                EXFAT_NODE_CACHE_SIZE);
+        return NULL;
+    }
 
     uint32_t keep_pin = ctx->pin;
     memset(ctx, 0, sizeof(*ctx));
     memset(node, 0, sizeof(*node));
     ctx->pin = keep_pin;   /* re-populating a slot must not drop its pins */
-    mutex_unlock(&exfat_node_cache_lock);
 
     ctx->fs = fs;
     ctx->first_cluster = first_cluster;
@@ -553,6 +533,8 @@ static fs_node_t *exfat_alloc_node(exfat_fs_t *fs, const char *name, uint64_t in
         node->write = exfat_file_write;
         node->truncate = exfat_truncate;
     }
+    /* Populated fully under the lock: no torn-node window for a racing caller. */
+    mutex_unlock(&exfat_node_cache_lock);
     return node;
 }
 
@@ -1555,6 +1537,10 @@ static fs_node_t *exfat_mount(const char *device, uint32_t flags, void *data) {
         return NULL;
     }
     root->unmount = exfat_unmount;
+    /* Pin the root for the whole mount lifetime (audit H1): keyed by
+     * (fs, EXFAT_ROOT_INO), it is now an ordinary cache slot, so without a pin
+     * the round-robin would eventually recycle it out from under the VFS. */
+    exfat_node_open(root);
     fs->root_node = root;
     kprint("exFAT: mounted volume (read-write)\n");
     return root;
@@ -1623,5 +1609,6 @@ static filesystem_t exfat_filesystem = {
 
 void exfat_init(void) {
     kprint("Initializing exFAT Driver...\n");
+    mutex_init(&exfat_node_cache_lock, "exfat_ncache");
     vfs_register_filesystem(&exfat_filesystem);
 }
