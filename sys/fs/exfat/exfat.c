@@ -241,6 +241,13 @@ static int exfat_fat_set(exfat_fs_t *fs, uint32_t cluster, uint32_t value) {
 
 /* ---------------------------------------------------------- allocation bitmap */
 
+/* Count the set bits in a byte (freestanding: no libgcc __popcountsi2). */
+static inline uint32_t exfat_popcount8(uint8_t x) {
+    x = (uint8_t)(x - ((x >> 1) & 0x55));
+    x = (uint8_t)((x & 0x33) + ((x >> 2) & 0x33));
+    return (uint32_t)((x + (x >> 4)) & 0x0F);
+}
+
 /* In-memory bitmap test: bit i corresponds to cluster i + 2. */
 static int exfat_bitmap_test(exfat_fs_t *fs, uint32_t cluster) {
     uint32_t bit = cluster - EXFAT_FIRST_CLUSTER;
@@ -1499,7 +1506,11 @@ static int exfat_load_metadata(exfat_fs_t *fs) {
     kfree(cbuf, fs->cluster_size);
 
     if (!found_bitmap || !found_upcase) return -1;
-    if (bitmap_len == 0 || bitmap_len > (uint64_t)fs->cluster_count) return -1;
+    /* audit L4: §7.1.5 needs one bit per cluster, so the bitmap DataLength must
+     * be at least ceil(ClusterCount/8) — a too-short bitmap silently marks the
+     * uncovered clusters "used" and loses most of the volume. */
+    if (bitmap_len < (((uint64_t)fs->cluster_count + 7) / 8) ||
+        bitmap_len > (uint64_t)fs->cluster_count) return -1;
     if (upcase_len < 2 || (upcase_len & 1) || upcase_len > (uint64_t)(256 * 1024)) return -1;
 
     /* Allocation bitmap. */
@@ -1514,9 +1525,20 @@ static int exfat_load_metadata(exfat_fs_t *fs) {
         fs->bitmap = NULL;
         return -1;
     }
+    /* audit M9: count free (clear) clusters by byte-popcount over the covering
+     * bitmap bytes instead of a per-cluster loop that spins up to ~2^32 times
+     * on a large volume.  Only the first ClusterCount bits are real clusters;
+     * trailing bits in the final byte are reserved and must not be counted. */
     fs->free_clusters = 0;
-    for (uint32_t c = EXFAT_FIRST_CLUSTER; c < EXFAT_FIRST_CLUSTER + fs->cluster_count; c++)
-        if (!exfat_bitmap_test(fs, c)) fs->free_clusters++;
+    uint32_t full_bytes = fs->cluster_count / 8;
+    for (uint32_t i = 0; i < full_bytes; i++)
+        fs->free_clusters += 8u - exfat_popcount8(fs->bitmap[i]);
+    uint32_t rem_bits = fs->cluster_count & 7;
+    if (rem_bits) {
+        uint8_t last = fs->bitmap[full_bytes];
+        for (uint32_t b = 0; b < rem_bits; b++)
+            if (!((last >> b) & 1)) fs->free_clusters++;
+    }
 
     /* Up-case table: identity by default, then apply the decompressed table. */
     fs->upcase = kmalloc(65536 * sizeof(uint16_t));
@@ -1562,6 +1584,44 @@ static int exfat_parse_boot(const uint8_t *boot, exfat_boot_t *out) {
     if (b->cluster_count == 0) return -1;
     if (b->root_cluster < EXFAT_FIRST_CLUSTER ||
         b->root_cluster >= EXFAT_FIRST_CLUSTER + b->cluster_count) return -1;
+
+    /*
+     * audit M3/M9/L3/L10/L11: the fields above were the only ones validated,
+     * so a corrupt or hostile boot sector could carry geometry that directs
+     * FAT/data writes into the boot region or off the end of the volume, or an
+     * absurd ClusterCount that drives ~2^32-iteration allocation scans.  Cross-
+     * check the §3.1 layout inequalities and version/FAT-count constraints.
+     */
+    uint32_t bps       = 1u << b->bytes_per_sector_shift;
+    uint8_t  spc_shift = b->sectors_per_cluster_shift;
+    uint64_t vol       = b->volume_length;
+    uint64_t fat_off   = b->fat_offset;
+    uint64_t fat_len   = b->fat_length;
+    uint64_t heap_off  = b->cluster_heap_offset;
+    uint64_t ccount    = b->cluster_count;
+    uint32_t nfat      = b->num_fats;
+
+    /* §3.1.12: shall not mount a major revision other than 1. */
+    if ((b->fs_revision >> 8) != 1) return -1;
+    /* §3.1.16: NumberOfFats is 1 (2 only for TexFAT, whose second FAT/bitmap
+     * this driver does not maintain — refuse rather than corrupt it). */
+    if (nfat != 1) return -1;
+    /* §3.1.13.1: with a single FAT the active FAT must be the first. */
+    if (b->volume_flags & EXFAT_VOLFLAG_ACTIVE_FAT) return -1;
+    /* §3.1.9: ClusterCount+1 must not exceed 0xFFFFFFF6, so every FAT sentinel
+     * (>= 0xFFFFFFF7) stays outside the valid cluster-index range. */
+    if (ccount > 0xFFFFFFF5ULL) return -1;
+    /* §3.1.5: volume is at least 1 MB of sectors. */
+    if (vol < ((1ULL << 20) / bps)) return -1;
+    /* §3.1.6: FatOffset accounts for the main+backup boot regions. */
+    if (fat_off < 24) return -1;
+    /* §3.1.7: each FAT must be large enough to describe every cluster. */
+    if (fat_len < (((ccount + 2) * 4) + bps - 1) / bps) return -1;
+    /* §3.1.8: the Cluster Heap begins after all FATs. */
+    if (fat_off + fat_len * nfat > heap_off) return -1;
+    /* §3.1.9: the whole Cluster Heap fits within the volume. */
+    if (heap_off + (ccount << spc_shift) > vol) return -1;
+
     memcpy(out, b, sizeof(*out));
     return 0;
 }
