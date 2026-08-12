@@ -1090,6 +1090,52 @@ static void usb_enum_release_hcd(usb_hcd_t *hcd, uint8_t port,
         hcd->port_gone(hcd, port);
 }
 
+/*
+ * Wait for a root port to report a device again after its power was cut.
+ *
+ * The caller has just removed and restored VBUS, so the device on the other
+ * side is electrically new and is running its own power-on initialisation.
+ * Poll for the connection rather than assuming a duration: see the comment on
+ * USB_ENUM_POWER_WAIT_MS for why a fixed delay mis-serves a card reader.
+ *
+ * Always returns after at most USB_ENUM_POWER_WAIT_MS; a port that never
+ * reports a connection is still handed back to the reset path, which is what
+ * the fixed-delay version did unconditionally.
+ *
+ * Note usb_delay_ms() is a `pause` spin, not a sleep, so the WAIT_MS cap is
+ * spun rather than slept.  That is only reached when the device never comes
+ * back -- a path that already ends in enumeration failure -- and the loop
+ * returns at the first poll that sees a connection, so a working device costs
+ * SETTLE + DEBOUNCE and no more.  Nothing is locked and interrupts stay on,
+ * so the spin is preemptible: it wastes cycles, it does not wedge the box.
+ */
+static void usb_enum_wait_port_connect(usb_hcd_t *hcd, uint8_t port)
+{
+    uint32_t waited = USB_ENUM_POWER_SETTLE_MS;
+
+    /* Dead time: nothing can be reported until the device's own power-on
+     * reset completes, so there is no point polling through this. */
+    usb_delay_ms(USB_ENUM_POWER_SETTLE_MS);
+
+    if (!hcd || !hcd->port_status)
+        return;
+
+    while (waited < USB_ENUM_POWER_WAIT_MS) {
+        uint32_t st = hcd->port_status(hcd, port);
+
+        if (st & USB_PORT_STAT_CONNECTION) {
+            /* Let the link settle before driving a reset into it. */
+            usb_delay_ms(USB_ENUM_POWER_DEBOUNCE_MS);
+            return;
+        }
+        usb_delay_ms(USB_ENUM_POWER_POLL_MS);
+        waited += USB_ENUM_POWER_POLL_MS;
+    }
+
+    kprintf("usb: port %u: still no connection %u ms after power cycle; "
+            "resetting anyway\n", port, (unsigned)waited);
+}
+
 static int usb_enumerate_device_inner(usb_hcd_t *hcd, uint8_t port, uint8_t speed,
                                       usb_device_t *parent)
 {
@@ -1145,7 +1191,7 @@ static int usb_enumerate_device_inner(usb_hcd_t *hcd, uint8_t port, uint8_t spee
              * re-trains at. [HW-05]
              */
             usb_enum_release_hcd(hcd, port, parent);
-            usb_delay_ms(USB_ENUM_POWER_SETTLE_MS);
+            usb_enum_wait_port_connect(hcd, port);
             (void)usb_enum_reset_port(hcd, port, parent);
             /*
              * Only believe a speed read from a port that is actually

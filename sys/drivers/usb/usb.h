@@ -188,7 +188,26 @@
  * Hence a full fresh round rather than the tail of the old one. [HW-04]
  */
 #define USB_ENUM_DESC_ROUNDS      2
-#define USB_ENUM_POWER_SETTLE_MS  1500
+/*
+ * Waiting out a power cycle is a WAIT FOR AN EVENT, not a fixed sleep.  A
+ * blind 1500 ms delay followed by an immediate port reset is a guess, and for
+ * a USB SD-card reader it is the wrong one: the device powers up, brings up
+ * its own controller and initialises the inserted media before it drives D+,
+ * which can take several seconds.  Resetting at a fixed 1.5 s therefore lands
+ * while the device is still coming up -- so it never answers, and the port
+ * enumerates roughly one attempt in thirty.
+ *
+ * So: sleep SETTLE_MS (dead time -- VBUS has only just come back and nothing
+ * can be reported before the device's own power-on reset completes), then
+ * POLL the port until it reports a connection, up to WAIT_MS in total.  A
+ * fast device costs the same as before; a slow one gets the time it actually
+ * needs.  DEBOUNCE_MS after CCS asserts covers the link still settling --
+ * connection status can bounce before the bus is stable.
+ */
+#define USB_ENUM_POWER_SETTLE_MS    1500
+#define USB_ENUM_POWER_WAIT_MS      8000
+#define USB_ENUM_POWER_POLL_MS      100
+#define USB_ENUM_POWER_DEBOUNCE_MS  250
 /*
  * Root ports the per-port enumeration-failure counter covers.  Ports are
  * 1-based and the array is indexed [port - 1], so this is the highest port
