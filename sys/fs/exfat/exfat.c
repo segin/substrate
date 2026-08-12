@@ -1,17 +1,24 @@
 /*
- * exFAT filesystem driver (read-only).
+ * exFAT (Microsoft Extensible File Allocation Table) filesystem driver.
  *
- * Mounts an exFAT volume from a block device and provides directory
- * traversal, file read, statfs and volume-label probing.  The driver follows
- * cluster chains via the FAT, honouring the per-file "NoFatChain" flag that
- * marks contiguously-allocated data (the common case), and parses exFAT's
- * multi-entry directory sets (0x85 file entry + 0xC0 stream + 0xC1 name
- * entries) with UTF-16LE -> UTF-8 name conversion.
+ * Read-write: mount, directory traversal (readdir/finddir), file read/write,
+ * truncate, create (mkdir/mknod/O_CREAT), unlink, rmdir, rename, statfs and
+ * volume-label probing.  Follows the FAT cluster chains, honours the per-file
+ * "NoFatChain" flag for contiguous allocations, parses the multi-entry
+ * directory sets (0x85 file + 0xC0 stream + 0xC1 name) with UTF-16LE<->UTF-8
+ * conversion, and maintains the allocation bitmap, FAT chains, entry-set
+ * SetChecksum, NameHash and the loaded up-case table on writes.
  *
- * Not implemented: writes (allocation bitmap / up-case table / set-checksum
- * maintenance) and the full up-case table for name comparison (finddir folds
- * ASCII case only, which covers the common case; non-ASCII names still read
- * and list correctly, they just aren't case-folded on lookup).
+ * Hardening (see the exfat-audit references below): the boot region is verified
+ * against its §3.4 checksum and geometry bounds (with a backup-region fallback);
+ * directory SetChecksums, the up-case TableChecksum and cluster indices are
+ * validated on read; every metadata mutation runs under a per-mount lock; new
+ * data clusters are zeroed (no freed-residue disclosure); a file unlinked while
+ * open defers its chain free; and rename refuses same-name/subtree cycles.
+ *
+ * Not maintained: ValidDataLength is kept equal to DataLength (new clusters are
+ * zeroed instead); PercentInUse is marked "not available"; TexFAT (two-FAT)
+ * volumes are refused rather than written with a stale second FAT.
  */
 #include <string.h>
 
