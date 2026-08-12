@@ -1896,6 +1896,21 @@ static uint64_t exfat_le64(const uint8_t *p) {
     return (uint64_t)exfat_le32(p) | ((uint64_t)exfat_le32(p + 4) << 32);
 }
 
+/* §7.2.2 up-case TableChecksum: 32-bit rotate-right sum over DataLength bytes. */
+static uint32_t exfat_table_checksum(const uint8_t *t, uint64_t len) {
+    uint32_t c = 0;
+    for (uint64_t i = 0; i < len; i++)
+        c = ((c & 1) ? 0x80000000u : 0u) + (c >> 1) + t[i];
+    return c;
+}
+
+/* Reset the fold table to identity plus the mandatory ASCII a-z -> A-Z fold --
+ * the safe fallback (audit M10) when the on-disk up-case table can't be trusted. */
+static void exfat_upcase_ascii(uint16_t *up) {
+    for (uint32_t i = 0; i < 65536; i++) up[i] = (uint16_t)i;
+    for (uint32_t i = 0x61; i <= 0x7A; i++) up[i] = (uint16_t)(i - 0x20);
+}
+
 /*
  * Mount-time metadata: locate the allocation-bitmap (0x81) and up-case-table
  * (0x82) entries in the root directory, load the bitmap into memory, and load
@@ -1908,7 +1923,8 @@ static int exfat_load_metadata(exfat_fs_t *fs) {
     uint32_t bitmap_cluster = 0, upcase_cluster = 0;
     uint8_t  bitmap_flags = 0, upcase_flags = 0;
     uint64_t bitmap_len = 0, upcase_len = 0;
-    int found_bitmap = 0, found_upcase = 0, done = 0;
+    uint32_t upcase_checksum = 0;
+    int found_bitmap = 0, found_upcase = 0, done = 0, dup = 0;
 
     uint32_t cluster = fs->root_cluster;
     uint32_t guard = 0;
@@ -1918,14 +1934,18 @@ static int exfat_load_metadata(exfat_fs_t *fs) {
             uint8_t type = cbuf[off];
             if (type == EXFAT_ENTRY_EOD) { done = 1; break; }
             if (type == EXFAT_ENTRY_BITMAP) {
+                if (found_bitmap) { dup = 1; done = 1; break; }
                 bitmap_flags   = cbuf[off + 1];
                 bitmap_cluster = exfat_le32(cbuf + off + 20);
                 bitmap_len     = exfat_le64(cbuf + off + 24);
                 found_bitmap = 1;
             } else if (type == EXFAT_ENTRY_UPCASE) {
-                upcase_flags   = cbuf[off + 1];
-                upcase_cluster = exfat_le32(cbuf + off + 20);
-                upcase_len     = exfat_le64(cbuf + off + 24);
+                /* audit M10: exactly one up-case table entry is valid (§7.2). */
+                if (found_upcase) { dup = 1; done = 1; break; }
+                upcase_flags    = cbuf[off + 1];
+                upcase_checksum = exfat_le32(cbuf + off + 4);   /* §7.2.2 TableChecksum */
+                upcase_cluster  = exfat_le32(cbuf + off + 20);
+                upcase_len      = exfat_le64(cbuf + off + 24);
                 found_upcase = 1;
             }
         }
@@ -1936,6 +1956,7 @@ static int exfat_load_metadata(exfat_fs_t *fs) {
     }
     kfree(cbuf, fs->cluster_size);
 
+    if (dup) return -1;                       /* audit M10: duplicate 0x81/0x82 */
     if (!found_bitmap || !found_upcase) return -1;
     /* audit L4: §7.1.5 needs one bit per cluster, so the bitmap DataLength must
      * be at least ceil(ClusterCount/8) — a too-short bitmap silently marks the
@@ -1987,6 +2008,18 @@ static int exfat_load_metadata(exfat_fs_t *fs) {
         return -1;
     }
 
+    /* audit M10 / §7.2.2: verify the TableChecksum before trusting the table --
+     * the fold drives every name comparison and every NameHash we write, so a
+     * hostile table (e.g. mapping every code point to 'A') would make finddir
+     * return the wrong file.  On mismatch, fall back to a built-in
+     * identity + ASCII fold instead of the on-disk data. */
+    if (exfat_table_checksum(table, upcase_len) != upcase_checksum) {
+        kprintf("exfat: up-case TableChecksum mismatch; using ASCII fold\n");
+        exfat_upcase_ascii(fs->upcase);
+        kfree(table, (uint32_t)upcase_len);
+        return 0;
+    }
+
     uint32_t nent = (uint32_t)(upcase_len / 2);
     uint32_t idx = 0;
     for (uint32_t i = 0; i < nent && idx < 65536; ) {
@@ -2002,6 +2035,18 @@ static int exfat_load_metadata(exfat_fs_t *fs) {
         }
     }
     kfree(table, (uint32_t)upcase_len);
+
+    /* audit M10 / §7.2.5: the first 128 mappings are mandatory (identity except
+     * a-z -> A-Z).  A table that decompressed with a valid checksum but violates
+     * them is malformed; fall back to the ASCII fold. */
+    for (uint32_t i = 0; i < 128; i++) {
+        uint16_t expect = (i >= 0x61 && i <= 0x7A) ? (uint16_t)(i - 0x20) : (uint16_t)i;
+        if (fs->upcase[i] != expect) {
+            kprintf("exfat: up-case mandatory first-128 invalid; using ASCII fold\n");
+            exfat_upcase_ascii(fs->upcase);
+            break;
+        }
+    }
     return 0;
 }
 
