@@ -456,8 +456,9 @@ static void exfat_free_chain(exfat_fs_t *fs, uint32_t start, int no_fat_chain,
 
 /*
  * Convert up to `nchars` UTF-16LE code units to UTF-8 into `dst` (`dstsz`
- * includes the NUL).  Surrogate pairs are decoded; a lone surrogate is
- * emitted as its raw code point.  Returns bytes written (excluding NUL).
+ * includes the NUL).  Surrogate pairs are decoded; an UNPAIRED surrogate is
+ * emitted as U+FFFD (audit L6) rather than as an ill-formed 3-byte sequence.
+ * Returns bytes written (excluding NUL).
  */
 static size_t exfat_utf16_to_utf8(const uint8_t *src, int nchars, char *dst, size_t dstsz) {
     size_t o = 0;
@@ -466,12 +467,17 @@ static size_t exfat_utf16_to_utf8(const uint8_t *src, int nchars, char *dst, siz
         /* Read code units as explicit little-endian bytes so the source may be
          * an unaligned / packed on-disk field. */
         uint32_t cp = (uint32_t)src[2 * i] | ((uint32_t)src[2 * i + 1] << 8);
-        if (cp >= 0xD800 && cp <= 0xDBFF && i + 1 < nchars) {
-            uint32_t lo = (uint32_t)src[2 * (i + 1)] | ((uint32_t)src[2 * (i + 1) + 1] << 8);
+        if (cp >= 0xD800 && cp <= 0xDBFF) {
+            uint32_t lo = (i + 1 < nchars)
+                ? ((uint32_t)src[2 * (i + 1)] | ((uint32_t)src[2 * (i + 1) + 1] << 8)) : 0;
             if (lo >= 0xDC00 && lo <= 0xDFFF) {
                 cp = 0x10000 + ((cp - 0xD800) << 10) + (lo - 0xDC00);
                 i++;
+            } else {
+                cp = 0xFFFD;   /* audit L6: unpaired high surrogate */
             }
+        } else if (cp >= 0xDC00 && cp <= 0xDFFF) {
+            cp = 0xFFFD;       /* audit L6: unpaired low surrogate */
         }
         if (cp < 0x80) {
             dst[o++] = (char)cp;
@@ -500,6 +506,11 @@ static size_t exfat_utf16_to_utf8(const uint8_t *src, int nchars, char *dst, siz
  * Convert a UTF-8 string to UTF-16 code units (BMP + surrogate pairs).  Writes
  * up to `cap` code units and returns the count.  Used to build on-disk name
  * entries and to fold a lookup name for comparison.
+ *
+ * audit L6/M12: overlong encodings, UTF-8-encoded surrogates and code points
+ * above U+10FFFF are decoded to U+FFFD, never to their literal code point.
+ * This is what stops an overlong "/" (C0 AF) from being written on disk as a
+ * real U+002F path separator the VFS splitter never saw.
  */
 static int exfat_utf8_to_utf16(const char *s, uint16_t *out, int cap) {
     int n = 0;
@@ -509,15 +520,19 @@ static int exfat_utf8_to_utf16(const char *s, uint16_t *out, int cap) {
         if (p[0] < 0x80) { cp = p[0]; p += 1; }
         else if ((p[0] & 0xE0) == 0xC0 && (p[1] & 0xC0) == 0x80) {
             cp = ((uint32_t)(p[0] & 0x1F) << 6) | (p[1] & 0x3F); p += 2;
+            if (cp < 0x80) cp = 0xFFFD;                 /* overlong 2-byte */
         } else if ((p[0] & 0xF0) == 0xE0 && (p[1] & 0xC0) == 0x80 &&
                    (p[2] & 0xC0) == 0x80) {
             cp = ((uint32_t)(p[0] & 0x0F) << 12) | ((uint32_t)(p[1] & 0x3F) << 6) |
                  (p[2] & 0x3F); p += 3;
+            if (cp < 0x800 || (cp >= 0xD800 && cp <= 0xDFFF))
+                cp = 0xFFFD;                            /* overlong / surrogate */
         } else if ((p[0] & 0xF8) == 0xF0 && (p[1] & 0xC0) == 0x80 &&
                    (p[2] & 0xC0) == 0x80 && (p[3] & 0xC0) == 0x80) {
             cp = ((uint32_t)(p[0] & 0x07) << 18) | ((uint32_t)(p[1] & 0x3F) << 12) |
                  ((uint32_t)(p[2] & 0x3F) << 6) | (p[3] & 0x3F); p += 4;
-        } else { cp = p[0]; p += 1; }   /* invalid byte: pass through */
+            if (cp < 0x10000 || cp > 0x10FFFF) cp = 0xFFFD;  /* overlong / >U+10FFFF */
+        } else { cp = 0xFFFD; p += 1; }   /* invalid lead byte */
 
         if (cp >= 0x10000) {
             cp -= 0x10000;
@@ -529,6 +544,19 @@ static int exfat_utf8_to_utf16(const char *s, uint16_t *out, int cap) {
         }
     }
     return n;
+}
+
+/* audit M12 / §7.7.3: is `c` an invalid FileName character (control code or one
+ * of the reserved punctuation glyphs)? */
+static int exfat_name_char_invalid(uint16_t c) {
+    if (c < 0x0020) return 1;
+    switch (c) {
+        case 0x0022: case 0x002A: case 0x002F: case 0x003A:
+        case 0x003C: case 0x003E: case 0x003F: case 0x005C: case 0x007C:
+            return 1;
+        default:
+            return 0;
+    }
 }
 
 /* Up-case one UTF-16 code unit through the mount's table (identity fallback). */
@@ -922,8 +950,16 @@ static int exfat_scan_dir(exfat_node_t *dir, const char *want_name,
         char utf8[256];
         exfat_utf16_to_utf8((const uint8_t *)utf16, nchars, utf8, sizeof(utf8));
 
-        int match = want_name ? exfat_name_eq_utf16(fs, utf16, nchars, want_name)
-                              : (found == want_index);
+        int match;
+        if (want_name) {
+            match = exfat_name_eq_utf16(fs, utf16, nchars, want_name);
+            /* audit M13: a long non-ASCII name is truncated to <=255 UTF-8 bytes
+             * by readdir; also accept an exact match against that truncated
+             * rendering so a name userspace saw in a listing is resolvable. */
+            if (!match && strcmp(want_name, utf8) == 0) match = 1;
+        } else {
+            match = (found == want_index);
+        }
         if (match) {
             memset(info, 0, sizeof(*info));
             strlcpy(info->name, utf8, sizeof(info->name));
@@ -1207,9 +1243,20 @@ static int exfat_create_set(exfat_node_t *dir, const char *name, uint16_t attr,
                             uint64_t *out_primary, uint8_t *out_secondary) {
     exfat_fs_t *fs = dir->fs;
 
+    /* audit M12: reject the reserved names outright. */
+    if (!strcmp(name, ".") || !strcmp(name, "..")) return -EINVAL;
+
+    /* audit L12: convert with a cap one past the limit so an over-length name
+     * saturates to 256 units and is reported as -ENAMETOOLONG rather than
+     * silently truncated to a different (aliasing) name. */
     uint16_t u16[256];
-    int nlen = exfat_utf8_to_utf16(name, u16, 255);
-    if (nlen <= 0 || nlen > 255) return -EINVAL;
+    int nlen = exfat_utf8_to_utf16(name, u16, 256);
+    if (nlen <= 0) return -EINVAL;
+    if (nlen > 255) return -ENAMETOOLONG;
+
+    /* audit M12 / §7.7.3: reject invalid FileName characters. */
+    for (int i = 0; i < nlen; i++)
+        if (exfat_name_char_invalid(u16[i])) return -EINVAL;
 
     int name_entries = (nlen + 14) / 15;
     uint32_t secondary = 1u + (uint32_t)name_entries;   /* stream + name entries */
