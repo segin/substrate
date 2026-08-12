@@ -38,9 +38,14 @@
 #define EXFAT_FLAG_ALLOC_POSSIBLE 0x01
 #define EXFAT_FLAG_NO_FAT_CHAIN   0x02  /* clusters are contiguous */
 
-/* FAT-entry sentinels (32-bit entries). >= EXFAT_CLUSTER_END means end/bad. */
+/* FAT-entry sentinels (32-bit entries).  Valid next-cluster indices are
+ * 2..ClusterCount+1 (ClusterCount is capped at 0xFFFFFFF5), so any entry >=
+ * EXFAT_CLUSTER_BAD is a non-continuation: the BAD marker (0xFFFFFFF7), the
+ * reserved range, or the end-of-chain marker (0xFFFFFFFF).  audit L3: chain
+ * walks stop at EXFAT_CLUSTER_END so a 0xFFFFFFF7 BAD entry is never followed. */
 #define EXFAT_FIRST_CLUSTER    2U
-#define EXFAT_CLUSTER_END      0xFFFFFFF8U
+#define EXFAT_CLUSTER_BAD      0xFFFFFFF7U  /* "bad cluster" FAT marker */
+#define EXFAT_CLUSTER_END      0xFFFFFFF7U  /* stop-walk threshold (>= is end/bad) */
 #define EXFAT_CLUSTER_EOF      0xFFFFFFFFU  /* end-of-chain marker we write */
 
 /* VolumeFlags bits (Main Boot Sector). */

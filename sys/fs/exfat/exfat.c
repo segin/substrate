@@ -197,15 +197,23 @@ static uint32_t exfat_fat_next(exfat_fs_t *fs, uint32_t cluster) {
 /*
  * Return the cluster number `n` steps along a chain that starts at `start`,
  * or 0 if that is past the end.  Contiguous (NoFatChain) files skip the FAT.
+ *
+ * audit M2/M8: `n` is 64-bit (callers derive it from a 64-bit byte offset, so a
+ * 32-bit parameter truncated the index and returned a valid-looking WRONG
+ * cluster).  A valid chain spans at most ClusterCount clusters, so any index
+ * that far out is past the end -- this both rejects the overflowed offset and
+ * caps the FAT walk (a cyclic FAT can never make the loop exceed ClusterCount).
  */
-static uint32_t exfat_chain_nth(exfat_fs_t *fs, uint32_t start, int no_fat_chain, uint32_t n) {
+static uint32_t exfat_chain_nth(exfat_fs_t *fs, uint32_t start, int no_fat_chain, uint64_t n) {
     if (!exfat_cluster_valid(fs, start)) return 0;
+    if (n >= (uint64_t)fs->cluster_count) return 0;
     if (no_fat_chain) {
-        uint32_t c = start + n;
-        return exfat_cluster_valid(fs, c) ? c : 0;
+        uint64_t c = (uint64_t)start + n;
+        if (c > 0xFFFFFFFFULL || !exfat_cluster_valid(fs, (uint32_t)c)) return 0;
+        return (uint32_t)c;
     }
     uint32_t c = start;
-    for (uint32_t i = 0; i < n; i++) {
+    for (uint64_t i = 0; i < n; i++) {
         uint32_t nx = exfat_fat_next(fs, c);
         if (nx < EXFAT_FIRST_CLUSTER || nx >= EXFAT_CLUSTER_END) return 0;
         c = nx;
@@ -292,6 +300,13 @@ static uint32_t exfat_alloc_cluster(exfat_fs_t *fs) {
     for (uint32_t c = EXFAT_FIRST_CLUSTER;
          c < EXFAT_FIRST_CLUSTER + fs->cluster_count; c++) {
         if (!exfat_bitmap_test(fs, c)) {
+            /* audit I2: never hand out a cluster the FAT marks BAD even if the
+             * bitmap bit is (inconsistently) clear -- reserve it in memory and
+             * keep scanning. */
+            if (exfat_fat_next(fs, c) == EXFAT_CLUSTER_BAD) {
+                exfat_bitmap_set(fs, c, 1);
+                continue;
+            }
             if (exfat_bitmap_set(fs, c, 1) != 0) return 0;
             if (exfat_fat_set(fs, c, EXFAT_CLUSTER_EOF) != 0) {
                 exfat_bitmap_set(fs, c, 0);
@@ -323,6 +338,9 @@ static void exfat_free_chain(exfat_fs_t *fs, uint32_t start, int no_fat_chain,
     uint32_t c = start;
     uint32_t guard = 0;
     while (exfat_cluster_valid(fs, c) && guard++ < fs->cluster_count) {
+        /* audit I3: a corrupt back-linked chain revisits a cluster we already
+         * freed (its bit is now clear) -- stop rather than touch it twice. */
+        if (!exfat_bitmap_test(fs, c)) break;
         uint32_t nx = exfat_fat_next(fs, c);
         exfat_free_cluster(fs, c);
         if (nx < EXFAT_FIRST_CLUSTER || nx >= EXFAT_CLUSTER_END) break;
@@ -880,12 +898,18 @@ static size_t exfat_read(fs_node_t *node, off_t offset, size_t size, uint8_t *bu
     if (!cbuf) return 0;
 
     size_t done = 0;
+    int io_err = 0;
     uint32_t within = (uint32_t)(off % fs->cluster_size);
+    /* audit M2: pass the full 64-bit logical cluster index (was truncated to
+     * uint32, which wrapped for large offsets to a valid-looking wrong cluster). */
     uint32_t cluster = exfat_chain_nth(fs, ctx->first_cluster, ctx->no_fat_chain,
-                                       (uint32_t)(off / fs->cluster_size));
+                                       off / fs->cluster_size);
 
-    while (done < size && cluster != 0) {
-        if (exfat_read_cluster(fs, cluster, cbuf) != 0) break;
+    /* audit M8: a single read cannot legitimately span more than ClusterCount
+     * clusters; the guard stops a cyclic FAT from looping. */
+    uint32_t guard = 0;
+    while (done < size && cluster != 0 && guard++ < fs->cluster_count) {
+        if (exfat_read_cluster(fs, cluster, cbuf) != 0) { io_err = 1; break; }
         uint32_t chunk = fs->cluster_size - within;
         if ((uint64_t)chunk > (uint64_t)(size - done)) chunk = (uint32_t)(size - done);
         memcpy(buffer + done, cbuf + within, chunk);
@@ -901,6 +925,10 @@ static size_t exfat_read(fs_node_t *node, off_t offset, size_t size, uint8_t *bu
         }
     }
     kfree(cbuf, fs->cluster_size);
+    /* audit L2: surface a device error the caller can distinguish from EOF via
+     * the VFS-28 negated-errno channel, but only when no bytes were delivered
+     * (a partial read returns its count so the error lands on the next call). */
+    if (done == 0 && io_err) return (size_t)-EIO;
     return done;
 }
 
@@ -1172,6 +1200,10 @@ static size_t exfat_file_write_locked(fs_node_t *node, off_t offset, size_t size
     uint32_t cs = fs->cluster_size;
 
     uint64_t end = (uint64_t)offset + size;
+    /* audit M2: refuse a write whose last byte lands beyond the last possible
+     * cluster; this also stops need_clusters / the logical index below from
+     * being truncated into a valid-looking wrong cluster. */
+    if ((end - 1) / cs >= (uint64_t)fs->cluster_count) return (size_t)-EFBIG;
     uint32_t need_clusters = (uint32_t)((end + cs - 1) / cs);
     uint32_t have_clusters = (uint32_t)((ctx->size + cs - 1) / cs);
 
@@ -1219,7 +1251,7 @@ static size_t exfat_file_write_locked(fs_node_t *node, off_t offset, size_t size
     size_t done = 0;
     uint32_t within = (uint32_t)((uint64_t)offset % cs);
     uint32_t c = exfat_chain_nth(fs, ctx->first_cluster, ctx->no_fat_chain,
-                                 (uint32_t)((uint64_t)offset / cs));
+                                 (uint64_t)offset / cs);   /* audit M2: 64-bit index */
     while (done < size && c != 0) {
         uint32_t chunk = cs - within;
         if ((uint64_t)chunk > (uint64_t)(size - done)) chunk = (uint32_t)(size - done);
@@ -1255,6 +1287,9 @@ static int exfat_truncate_locked(fs_node_t *node, off_t new_size) {
     exfat_fs_t *fs = ctx->fs;
     uint32_t cs = fs->cluster_size;
     uint64_t ns = (uint64_t)new_size;
+    /* audit M2: cap the new size at the volume's cluster capacity so `need`
+     * cannot be truncated to a bogus (small) cluster count. */
+    if (ns && (ns - 1) / cs >= (uint64_t)fs->cluster_count) return -EFBIG;
     uint32_t need = (uint32_t)((ns + cs - 1) / cs);
     uint32_t have = (uint32_t)((ctx->size + cs - 1) / cs);
 
