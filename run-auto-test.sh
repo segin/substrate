@@ -36,6 +36,9 @@ echo "==> Booting substrate with init=$INIT_PATH (timeout ${TIMEOUT}s)"
 #                    /dev/storage/sata0).  IDE PIO has been flaking under
 #                    -no-reboot with high I/O load.
 # -append init=...   substrate honors init= in cmdline (sys/kern/main.c:712)
+# root=LABEL=sub-root  rootfs.img is a partitioned GRUB disk, so the ext2 root
+#                    is the labelled partition (sata0p2), not the whole disk
+#                    (sata0) — matching the GRUB entries in mkgrub.sh.
 timeout "$TIMEOUT" qemu-system-i386 \
     -cpu qemu32,+sse,+sse2 -accel kvm \
     -kernel sys/kernel.multiboot \
@@ -47,7 +50,7 @@ timeout "$TIMEOUT" qemu-system-i386 \
     -drive file=rootfs.img,format=raw,if=none,id=rootdisk \
     -device ide-hd,drive=rootdisk,bus=ahci0.0 \
     -usb -device usb-kbd \
-    -append "serial_debug root=/dev/storage/sata0 init=$INIT_PATH${INITARG:+ initarg='$INITARG'}${EXTRA_CMDLINE:+ $EXTRA_CMDLINE}" \
+    -append "serial_debug root=LABEL=sub-root init=$INIT_PATH${INITARG:+ initarg='$INITARG'}${EXTRA_CMDLINE:+ $EXTRA_CMDLINE}" \
     > "$LOG" 2>&1 || true
 
 # Strip CR (substrate's serial uses \r\n).  Print only the test-program's
