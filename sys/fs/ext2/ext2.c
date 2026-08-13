@@ -166,6 +166,16 @@ static void ext2_node_close(fs_node_t *node) {
     }
 }
 
+/* Inode flags the write paths must respect (spec 2.4.1). */
+#define EXT2_IMMUTABLE_FL  0x00000010
+#define EXT2_APPEND_FL     0x00000020
+
+/* EXT2-A34 (audit MS-14): an immutable inode may not be modified,
+ * renamed, unlinked or have its metadata changed; an append-only one
+ * may only grow.  Both flags were ignored entirely. */
+#define EXT2_IS_IMMUTABLE(ctx)  ((ctx)->inode.i_flags & EXT2_IMMUTABLE_FL)
+#define EXT2_IS_APPEND(ctx)     ((ctx)->inode.i_flags & EXT2_APPEND_FL)
+
 /* Refuse a write op when the mount is read-only.  Returns the
  * supplied errno from the caller; used as:
  *     if (EXT2_RO_REFUSE(ctx->fs)) return -EROFS;
@@ -204,6 +214,7 @@ static int ext2_chmod(fs_node_t *node, uint32_t mode);
 static int ext2_setattr(fs_node_t *node, const struct fs_attr *a);
 static int ext2_getattr(fs_node_t *node, struct fs_attr *a);
 static int ext2_syncfs(fs_node_t *node);
+static void ext2_touch_atime(ext2_node_t *ctx, fs_node_t *node);
 
 // Helper to find a zero bit in a bitmap range
 int ext2_find_next_zero_bit(void *bitmap, uint32_t total_bits, uint32_t start, uint32_t end, uint32_t *found_idx) {
@@ -1878,10 +1889,17 @@ uint32_t ext2_inode_write(ext2_node_t *node, off_t offset, uint32_t size,
         inode->i_size = offset;
     }
 
-    /* Update modification and change times */
+    /* Update modification and change times.  EXT2-A34 (audit IN-05):
+     * clear the nanosecond extras alongside — leaving the previous
+     * write's nsec attached to a new seconds value reports a timestamp
+     * that never happened. */
     time_t now = get_time();
     inode->i_mtime = (uint32_t)now;
     inode->i_ctime = (uint32_t)now;
+    if (fs->inode_size > EXT2_GOOD_OLD_INODE_SIZE) {
+        inode->i_mtime_extra = 0;
+        inode->i_ctime_extra = 0;
+    }
     
     mutex_unlock(&node->lock);
     return total_written;
@@ -2236,6 +2254,7 @@ static int ext2_chmod(fs_node_t *node, uint32_t mode) {
     ctx = (ext2_node_t *)(uintptr_t)node->impl;
     if (!ctx || !ctx->fs) return -EINVAL;
     if (EXT2_RO_REFUSE(ctx->fs)) return -EROFS;
+    if (EXT2_IS_IMMUTABLE(ctx)) return -EPERM;      /* EXT2-A34 */
 
     ctx->inode.i_mode = (uint16_t)((ctx->inode.i_mode & 0xF000U) | (mode & 0x0FFFU));
     /* EXT2-22: this copied the *existing* cached ctime back over itself, so
@@ -2408,6 +2427,8 @@ int ext2_readlink(fs_node_t *node, char *buf, size_t size) {
         link_size = ctx->fs->block_size;
     if (link_size >= size) link_size = (uint32_t)(size - 1);
 
+    ext2_touch_atime(ctx, node);              /* EXT2-A34 */
+
     if (ext2_symlink_is_fast(ctx->fs, inode)) {
         /* Clamp to sizeof(i_block) to prevent overflow (finding #26) */
         if (link_size > sizeof(inode->i_block)) link_size = sizeof(inode->i_block);
@@ -2424,10 +2445,35 @@ int ext2_readlink(fs_node_t *node, char *buf, size_t size) {
     return link_size;
 }
 
+/*
+ * EXT2-A34 (audit MS-12): atime was never persisted at all.
+ *
+ * Updating it on every read would mean a metadata write per read, so
+ * use Linux's relatime rule: refresh only when the stored atime is
+ * older than mtime or ctime (which is what "has it been read since it
+ * changed?" tooling actually asks), or more than a day stale.
+ */
+#define EXT2_RELATIME_SECS  86400u
+static void ext2_touch_atime(ext2_node_t *ctx, fs_node_t *node) {
+    if (!ctx || !ctx->fs || ctx->fs->readonly) return;
+    uint32_t now = (uint32_t)get_time();
+    uint32_t at  = ctx->inode.i_atime;
+    if (at >= ctx->inode.i_mtime && at >= ctx->inode.i_ctime &&
+        now - at < EXT2_RELATIME_SECS)
+        return;
+    ctx->inode.i_atime = now;
+    if (ctx->fs->inode_size > EXT2_GOOD_OLD_INODE_SIZE)
+        ctx->inode.i_atime_extra = 0;
+    if (node) node->atime = now;
+    (void)ext2_write_inode(ctx->fs, ctx->inode_num, &ctx->inode);
+}
+
 // File read operation
 size_t ext2_file_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
     ext2_node_t *ctx = (ext2_node_t *)(uintptr_t)node->impl;
-    return ext2_inode_read(ctx, offset, size, buffer);
+    size_t got = ext2_inode_read(ctx, offset, size, buffer);
+    if (got > 0) ext2_touch_atime(ctx, node);
+    return got;
 }
 
 // File write operation
@@ -2435,6 +2481,10 @@ size_t ext2_file_write(fs_node_t *node, off_t offset, size_t size, const uint8_t
     ext2_node_t *ctx = (ext2_node_t *)(uintptr_t)node->impl;
     ext2_fs_t *fs = ctx->fs;
     if (EXT2_RO_REFUSE(fs)) return (size_t)-EROFS;
+    /* EXT2-A34 */
+    if (EXT2_IS_IMMUTABLE(ctx)) return (size_t)-EPERM;
+    if (EXT2_IS_APPEND(ctx) && offset != (off_t)ctx->inode.i_size)
+        return (size_t)-EPERM;
 
     /*
      * EXT2-12: i_size is a 32-bit field and this driver never touches
@@ -4263,6 +4313,163 @@ static int ext2_release_inode_blocks(ext2_fs_t *fs, uint32_t inode_num,
     return ext2_free_inode_blocks(fs, &snapshot);
 }
 
+/*
+ * EXT2-A34 (audit BM-09): shrink a file to a smaller, non-zero length.
+ *
+ * This used to return -EOPNOTSUPP — a real POSIX ftruncate(2) gap, and
+ * the reason was that releasing only the blocks past the new end of
+ * file, while collapsing the indirect blocks that become empty, is
+ * fiddly to get right.  The invariant that makes it safe is the same
+ * one ext2_release_inode_blocks uses: a reference is cleared and
+ * written back BEFORE the block it named is freed, so an interruption
+ * can only leak blocks, never leave a live pointer to a free one.
+ *
+ * `keep` is the number of logical blocks to retain.  Returns the count
+ * of blocks freed (metadata included) or a negative errno.
+ */
+static int64_t ext2_trunc_node(ext2_fs_t *fs, uint32_t node_blk, uint32_t depth,
+                               uint64_t base, uint64_t keep, int *emptied) {
+    uint32_t ppb = fs->block_size / 4;
+    uint64_t per = 1;                       /* logical blocks per entry */
+    for (uint32_t d = 1; d < depth; d++) per *= ppb;
+
+    uint32_t *buf  = kmalloc(fs->block_size);
+    uint32_t *orig = kmalloc(fs->block_size);
+    if (!buf || !orig) {
+        if (buf)  kfree(buf,  fs->block_size);
+        if (orig) kfree(orig, fs->block_size);
+        return -ENOMEM;
+    }
+    if (ext2_read_block(fs, node_blk, buf) != fs->block_size) {
+        kfree(buf, fs->block_size);
+        kfree(orig, fs->block_size);
+        return -EIO;
+    }
+    memcpy(orig, buf, fs->block_size);
+
+    int64_t freed = 0;
+    int dirty = 0, remaining = 0;
+    int64_t rec = 0;
+
+    for (uint32_t i = 0; i < ppb; i++) {
+        if (orig[i] == 0) continue;
+        uint64_t start = base + (uint64_t)i * per;
+        if (start >= keep) {
+            buf[i] = 0;                     /* detach; freed below */
+            dirty = 1;
+        } else if (start + per > keep && depth > 1) {
+            int child_empty = 0;
+            rec = ext2_trunc_node(fs, orig[i], depth - 1, start, keep,
+                                  &child_empty);
+            if (rec < 0) goto io_error;
+            freed += rec;
+            if (child_empty) { buf[i] = 0; dirty = 1; }
+            else remaining++;
+        } else {
+            remaining++;
+        }
+    }
+
+    /* Publish the detachments before releasing anything. */
+    if (dirty && ext2_write_block(fs, node_blk, buf) != fs->block_size)
+        goto io_error;
+
+    for (uint32_t i = 0; i < ppb; i++) {
+        if (orig[i] == 0 || buf[i] != 0) continue;
+        uint64_t start = base + (uint64_t)i * per;
+        if (start < keep) continue;         /* collapsed child, freed below */
+        if (depth > 1) {
+            if (ext2_free_indirect_tree(fs, orig[i], depth - 1) != 0) continue;
+            /* Count is approximate for deep subtrees; i_blocks is
+             * recomputed from scratch by the caller for those. */
+            freed++;
+        } else {
+            ext2_free_blocks(fs, orig[i], 1);
+            freed++;
+        }
+    }
+    /* Children that emptied out and were detached above. */
+    for (uint32_t i = 0; i < ppb; i++) {
+        if (orig[i] == 0 || buf[i] != 0) continue;
+        uint64_t start = base + (uint64_t)i * per;
+        if (start >= keep) continue;
+        ext2_free_blocks(fs, orig[i], 1);
+        freed++;
+    }
+
+    if (emptied) *emptied = (remaining == 0);
+    kfree(buf, fs->block_size);
+    kfree(orig, fs->block_size);
+    return freed;
+
+io_error:
+    kfree(buf, fs->block_size);
+    kfree(orig, fs->block_size);
+    return -EIO;
+}
+
+static int ext2_truncate_blocks(ext2_fs_t *fs, uint32_t inode_num,
+                                ext2_inode_t *inode, uint32_t keep,
+                                uint32_t new_size) {
+    if (inode->i_flags & EXT4_EXTENTS_FL)
+        return -EOPNOTSUPP;      /* extent trim: see TASKS.md */
+
+    uint32_t ppb = fs->block_size / 4;
+    uint64_t b1 = 12;
+    uint64_t b2 = b1 + ppb;
+    uint64_t b3 = b2 + (uint64_t)ppb * ppb;
+    uint32_t spb = fs->block_size / 512;
+
+    ext2_inode_t snap = *inode;
+
+    /* Detach every branch that lies wholly past the new end of file,
+     * then commit — nothing is freed until the on-disk inode has
+     * stopped referring to it. */
+    for (uint32_t i = keep; i < 12; i++) inode->i_block[i] = 0;
+    if (b1 >= keep) inode->i_block[12] = 0;
+    if (b2 >= keep) inode->i_block[13] = 0;
+    if (b3 >= keep) inode->i_block[14] = 0;
+    inode->i_size = new_size;
+    if (ext2_write_inode(fs, inode_num, inode) != 0) {
+        *inode = snap;
+        return -EIO;
+    }
+
+    int64_t freed = 0;
+    for (uint32_t i = keep; i < 12; i++) {
+        if (snap.i_block[i]) { ext2_free_blocks(fs, snap.i_block[i], 1); freed++; }
+    }
+    struct { uint32_t blk; uint32_t depth; uint64_t base; } roots[3] = {
+        { snap.i_block[12], 1, b1 },
+        { snap.i_block[13], 2, b2 },
+        { snap.i_block[14], 3, b3 },
+    };
+    for (int r = 0; r < 3; r++) {
+        if (roots[r].blk == 0) continue;
+        if (roots[r].base >= keep) {
+            if (ext2_free_indirect_tree(fs, roots[r].blk, roots[r].depth) == 0)
+                freed++;
+        } else {
+            int empty = 0;
+            int64_t rc = ext2_trunc_node(fs, roots[r].blk, roots[r].depth,
+                                         roots[r].base, keep, &empty);
+            if (rc < 0) return (int)rc;      /* blocks leak; nothing dangles */
+            freed += rc;
+            if (empty) {
+                inode->i_block[12 + r] = 0;
+                if (ext2_write_inode(fs, inode_num, inode) == 0) {
+                    ext2_free_blocks(fs, roots[r].blk, 1);
+                    freed++;
+                }
+            }
+        }
+    }
+
+    uint32_t dec = (uint32_t)freed * spb;
+    inode->i_blocks = (inode->i_blocks > dec) ? (inode->i_blocks - dec) : 0;
+    return 0;
+}
+
 int ext2_truncate(fs_node_t *node, off_t length) {
     ext2_node_t *ctx;
     ext2_fs_t *fs;
@@ -4273,6 +4480,8 @@ int ext2_truncate(fs_node_t *node, off_t length) {
     if (!ctx) return -EINVAL;
     fs = ctx->fs;
     if (EXT2_RO_REFUSE(fs)) return -EROFS;
+    /* EXT2-A34: truncation is forbidden on both flags. */
+    if (EXT2_IS_IMMUTABLE(ctx) || EXT2_IS_APPEND(ctx)) return -EPERM;
 
     /* i_size is tracked as a 32-bit field throughout this driver, so refuse
      * a truncation that could not be represented rather than silently wrap. */
@@ -4306,14 +4515,33 @@ int ext2_truncate(fs_node_t *node, off_t length) {
          */
         ctx->inode.i_size = (uint32_t)length;
     } else {
-        /*
-         * Shrink to a smaller, non-zero length.  Correctly releasing only the
-         * data blocks wholly past the new end-of-file (and collapsing
-         * now-empty indirect blocks) is not implemented; refuse rather than
-         * risk leaking or double-freeing blocks.  Shrink-to-0 takes the fast
-         * path above.
-         */
-        ret = -EOPNOTSUPP;
+        /* Shrink.  Free everything past the new end of file, then zero
+         * the tail of the last surviving block so a later grow reads
+         * zeros there rather than the old contents (EXT2-A34). */
+        uint32_t keep = (uint32_t)((length + fs->block_size - 1) / fs->block_size);
+        ret = ext2_truncate_blocks(fs, ctx->inode_num, &ctx->inode,
+                                   keep, (uint32_t)length);
+        if (ret == 0) {
+            uint32_t tail = (uint32_t)length % fs->block_size;
+            if (tail != 0) {
+                if (!ctx->block_buf)     ctx->block_buf     = kmalloc(fs->block_size);
+                if (!ctx->indirect_buf)  ctx->indirect_buf  = kmalloc(fs->block_size);
+                if (!ctx->dindirect_buf) ctx->dindirect_buf = kmalloc(fs->block_size);
+                if (!ctx->tindirect_buf) ctx->tindirect_buf = kmalloc(fs->block_size);
+                if (ctx->block_buf && ctx->indirect_buf &&
+                    ctx->dindirect_buf && ctx->tindirect_buf) {
+                    uint32_t lb = ext2_get_block_num(fs, &ctx->inode, keep - 1,
+                                                     ctx->indirect_buf,
+                                                     ctx->dindirect_buf,
+                                                     ctx->tindirect_buf);
+                    if (lb && ext2_read_block(fs, lb, ctx->block_buf)
+                                  == fs->block_size) {
+                        memset(ctx->block_buf + tail, 0, fs->block_size - tail);
+                        ext2_write_block(fs, lb, ctx->block_buf);
+                    }
+                }
+            }
+        }
     }
 
     if (ret == 0) {
@@ -4717,6 +4945,12 @@ int ext2_rename(fs_node_t *old_parent, const char *old_name, fs_node_t *new_pare
     ext2_node_open(old_node);
 
     ext2_node_t *old_node_ctx = (ext2_node_t *)(uintptr_t)old_node->impl;
+    /* EXT2-A34: renaming an immutable/append-only file is forbidden. */
+    if (old_node_ctx &&
+        (EXT2_IS_IMMUTABLE(old_node_ctx) || EXT2_IS_APPEND(old_node_ctx))) {
+        ext2_node_close(old_node);
+        return -EPERM;
+    }
     fs_node_t *new_node = NULL;
     int new_node_pinned = 0;
     int rc = -EIO;
@@ -5361,6 +5595,13 @@ int ext2_unlink(fs_node_t *dir, const char *name) {
     if (!victim) return -ENOENT;
     if ((victim->flags & 0x7) == FS_DIRECTORY) return -EISDIR;
 
+    /* EXT2-A34: an immutable or append-only file cannot be unlinked. */
+    {
+        ext2_node_t *vc = (ext2_node_t *)(uintptr_t)victim->impl;
+        if (vc && (EXT2_IS_IMMUTABLE(vc) || EXT2_IS_APPEND(vc)))
+            return -EPERM;
+    }
+
     /* EXT2-A17 (audit CY-02): finddir returns children UNPINNED, and
      * everything below sleeps on disk I/O — the slot recycler is free
      * to hand this slot to another inode in the meantime, after which
@@ -5581,9 +5822,12 @@ int ext2_statfs(fs_node_t *node, struct statfs *buf) {
                         : 0;
     buf->f_files        = fs->sb.s_inodes_count;
     buf->f_ffree        = fs->sb.s_free_inodes_count;
-    buf->f_fsid         = 0;
+    /* EXT2-A34 (audit MS-16): report the mount's real flags (statvfs
+     * derives ST_RDONLY from them — a read-only mount claimed rw) and
+     * give the volume an identity from its UUID. */
+    memcpy(&buf->f_fsid, fs->sb.s_uuid, sizeof(buf->f_fsid));
     buf->f_owner        = 0;
-    buf->f_flags        = 0;
+    buf->f_flags        = fs->mnt_flags | (fs->readonly ? MNT_RDONLY : 0);
     buf->f_syncwrites   = 0;
     buf->f_asyncwrites  = 0;
     strncpy(buf->f_fstypename, "ext2", sizeof(buf->f_fstypename));

@@ -2804,17 +2804,24 @@ int kern_symlink(const char *target, const char *linkpath) {
 int sys_readlink(const char *pathname, char *buf, size_t bufsiz) {
     char kpath[256];
     if (copyinstr(pathname, kpath, sizeof(kpath), NULL) != 0) return -14;
+    if (bufsiz == 0) return -22;                    /* EINVAL */
     if (bufsiz > 4096) bufsiz = 4096;
-    char *kbuf = kmalloc(bufsiz);
+    /* EXT2-A34 (ext2 audit MS-11): readlink(2) fills the caller's
+     * buffer completely and does NOT NUL-terminate, but the in-kernel
+     * readlink op reserves a byte for a terminator (see ext2.h).  Give
+     * it one extra byte so the user still gets bufsiz bytes of target. */
+    size_t kcap = bufsiz + 1;
+    char *kbuf = kmalloc(kcap);
     if (!kbuf) return -12;
-    int ret = kern_readlink(kpath, kbuf, bufsiz);
+    int ret = kern_readlink(kpath, kbuf, kcap);
+    if (ret > (int)bufsiz) ret = (int)bufsiz;
     if (ret > 0) {
         if (copyout(kbuf, buf, ret) != 0) {
-            kfree(kbuf, bufsiz);
+            kfree(kbuf, kcap);
             return -14;
         }
     }
-    kfree(kbuf, bufsiz);
+    kfree(kbuf, kcap);
     return ret;
 }
 
@@ -2822,17 +2829,20 @@ int sys_readlinkat(int dirfd, const char *pathname, char *buf, size_t bufsiz) {
     char kpath[256];
 
     if (copyinstr(pathname, kpath, sizeof(kpath), NULL) != 0) return -14;
+    if (bufsiz == 0) return -22;                    /* EINVAL */
     if (bufsiz > 4096) bufsiz = 4096;
-    char *kbuf = kmalloc(bufsiz);
+    size_t kcap = bufsiz + 1;                       /* see sys_readlink */
+    char *kbuf = kmalloc(kcap);
     if (!kbuf) return -12;
-    int ret = kern_readlinkat(dirfd, kpath, kbuf, bufsiz);
+    int ret = kern_readlinkat(dirfd, kpath, kbuf, kcap);
+    if (ret > (int)bufsiz) ret = (int)bufsiz;
     if (ret > 0) {
         if (copyout(kbuf, buf, ret) != 0) {
-            kfree(kbuf, bufsiz);
+            kfree(kbuf, kcap);
             return -14;
         }
     }
-    kfree(kbuf, bufsiz);
+    kfree(kbuf, kcap);
     return ret;
 }
 
