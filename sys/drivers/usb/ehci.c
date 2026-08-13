@@ -717,12 +717,50 @@ static uint32_t ehci_intr_stride(uint8_t bi, uint8_t speed)
  * The driver is synchronous and holds submit_lock, so a single QH is linked in,
  * polled, and unlinked per transfer rather than kept resident.
  */
+/* Link the interrupt QH into every stride-th frame-list entry. [RF-7] */
+static void ehci_periodic_link(ehci_hc_t *hc, uint32_t stride)
+{
+    uint32_t qh_link = (uint32_t)hc->intr_qh_dma | EHCI_LINK_TYPE_QH;
+
+    for (uint32_t i = 0; i < EHCI_FRAMELIST_ENTRIES; i += stride)
+        hc->periodic[i] = qh_link;
+}
+
+/* Frames of FRINDEX movement that guarantee the controller has advanced
+ * past any frame it was executing when the entries were terminated. */
+#define EHCI_UNLINK_DRAIN_FRAMES 2
+/* Bound on the drain wait, so a stopped controller cannot wedge us. */
+#define EHCI_UNLINK_DRAIN_MS     20
+
+/*
+ * [RF-7] The periodic unlink protocol.  There is no doorbell handshake for
+ * the periodic schedule (IAAD covers the async ring only), so: terminate
+ * the frame-list entries, then let the controller advance
+ * EHCI_UNLINK_DRAIN_FRAMES frames past wherever it was -- any transaction
+ * it had in flight on our QH retires with that frame.  Bounded so a
+ * stopped controller cannot hang us here.
+ */
+static void ehci_periodic_unlink(ehci_hc_t *hc, uint32_t stride)
+{
+    for (uint32_t i = 0; i < EHCI_FRAMELIST_ENTRIES; i += stride)
+        hc->periodic[i] = EHCI_LINK_TERMINATE;
+
+    uint32_t start = ehci_op_rd(hc, EHCI_OP_FRINDEX) >> 3;
+    for (int guard = 0; guard < EHCI_UNLINK_DRAIN_MS; guard++) {
+        uint32_t now = ehci_op_rd(hc, EHCI_OP_FRINDEX) >> 3;
+        if (((now - start) & (EHCI_FRAMELIST_ENTRIES - 1)) >=
+            EHCI_UNLINK_DRAIN_FRAMES)
+            break;
+        ehci_delay_ms(1);
+    }
+}
+
 static int ehci_intr_transfer(ehci_hc_t *hc, usb_transfer_t *xfer)
 {
     uint32_t len = xfer->length;
     int in = xfer->ep && (xfer->ep->address & 0x80);
     struct ehci_qh *qh = hc->intr_qh;
-    uint32_t stride, qh_link;
+    uint32_t stride;
     uint64_t deadline;
     int r = USB_XFER_OK;
 
@@ -751,10 +789,7 @@ static int ehci_intr_transfer(ehci_hc_t *hc, usb_transfer_t *xfer)
     qh->overlay_alt_next = EHCI_LINK_TERMINATE;
     qh->overlay_token = 0;
 
-    /* Link it into every stride-th frame. */
-    qh_link = (uint32_t)hc->intr_qh_dma | EHCI_LINK_TYPE_QH;
-    for (uint32_t i = 0; i < EHCI_FRAMELIST_ENTRIES; i += stride)
-        hc->periodic[i] = qh_link;
+    ehci_periodic_link(hc, stride);   /* [RF-7] */
 
     deadline = (uint64_t)get_uptime_ms() +
                (xfer->timeout_ms ? xfer->timeout_ms : EHCI_XFER_TIMEOUT_MS);
@@ -771,24 +806,8 @@ static int ehci_intr_transfer(ehci_hc_t *hc, usb_transfer_t *xfer)
         }
     }
 
-    /*
-     * Unlink before touching the buffer again.  There is no doorbell handshake
-     * for the periodic schedule (IAAD covers the async ring only), so terminate
-     * the frame-list entries and then let the controller advance past any frame
-     * it might already be executing: two frames of FRINDEX movement is enough,
-     * and the loop is bounded so a stopped controller cannot hang us.
-     */
-    for (uint32_t i = 0; i < EHCI_FRAMELIST_ENTRIES; i += stride)
-        hc->periodic[i] = EHCI_LINK_TERMINATE;
-    {
-        uint32_t start = ehci_op_rd(hc, EHCI_OP_FRINDEX) >> 3;
-        for (int guard = 0; guard < 20; guard++) {
-            uint32_t now = ehci_op_rd(hc, EHCI_OP_FRINDEX) >> 3;
-            if (((now - start) & (EHCI_FRAMELIST_ENTRIES - 1)) >= 2)
-                break;
-            ehci_delay_ms(1);
-        }
-    }
+    /* Unlink before touching the buffer again. [RF-7] */
+    ehci_periodic_unlink(hc, stride);
     /* [EHCI-03] A completion can land between the last poll and the unlink
      * settling above; re-read the token before neutralizing it, or a
      * just-delivered report is discarded as a timeout. */
