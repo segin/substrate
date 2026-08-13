@@ -29,6 +29,14 @@
 #define EXT2_S_IFCHR   0x2000
 #define EXT2_S_IFIFO   0x1000
 
+/* s_state / s_errors (spec 2.3.1). */
+#define EXT2_VALID_FS      0x0001   /* cleanly unmounted */
+#define EXT2_ERROR_FS      0x0002   /* errors detected */
+#define EXT2_ORPHAN_FS     0x0004   /* orphans being recovered */
+#define EXT2_ERRORS_CONTINUE 1
+#define EXT2_ERRORS_RO       2
+#define EXT2_ERRORS_PANIC    3
+
 // Special inodes
 #define EXT2_ROOT_INO      2
 #define EXT2_GOOD_OLD_INODE_SIZE 128

@@ -1274,6 +1274,25 @@ int rename_fs(fs_node_t *old_parent, const char *old_name, fs_node_t *new_parent
     return -ENOSYS;
 }
 
+/*
+ * Flush every mounted filesystem's driver-private deferred metadata.
+ *
+ * bufsync() drains the buffer cache, but a driver may hold committed-
+ * looking state outside it — ext2 coalesces superblock and
+ * group-descriptor free counts in its in-core ext2_fs_t and writes them
+ * on a threshold, on unmount, and (now) here.  Without this, sync(2)
+ * and fsync(2) returned success while those counts were still only in
+ * RAM.
+ */
+void vfs_sync_all(void) {
+    struct mount *mnt;
+    TAILQ_FOREACH(mnt, &mountlist, mnt_list) {
+        fs_node_t *root = mnt->mnt_node_root;
+        if (root && root->syncfs)
+            (void)root->syncfs(root);
+    }
+}
+
 int statfs_fs(fs_node_t *node, struct statfs *buf) {
     if (node && node->statfs) {
         return node->statfs(node, buf);

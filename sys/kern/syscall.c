@@ -2985,6 +2985,11 @@ int sys_sync(void) {
      * scenarios where the user wants on-disk state to match what
      * stat() reports.  */
 
+    /* Driver-private deferred metadata first (ext2's coalesced free
+     * counts and group descriptors), so bufsync below carries it to
+     * the device along with everything else. */
+    vfs_sync_all();
+
     (void)bufsync(0);
 
     /*

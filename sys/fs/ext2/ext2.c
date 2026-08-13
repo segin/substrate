@@ -203,6 +203,7 @@ static int ext2_free_inode_blocks(ext2_fs_t *fs, ext2_inode_t *inode);
 static int ext2_chmod(fs_node_t *node, uint32_t mode);
 static int ext2_setattr(fs_node_t *node, const struct fs_attr *a);
 static int ext2_getattr(fs_node_t *node, struct fs_attr *a);
+static int ext2_syncfs(fs_node_t *node);
 
 // Helper to find a zero bit in a bitmap range
 int ext2_find_next_zero_bit(void *bitmap, uint32_t total_bits, uint32_t start, uint32_t end, uint32_t *found_idx) {
@@ -810,6 +811,7 @@ static int ext2_flush_super(ext2_fs_t *fs) {
     uint8_t *sb_buf = kmalloc(1024);
     if (!sb_buf) return -ENOMEM;
 
+    fs->sb.s_wtime = (uint32_t)get_time();   /* EXT2-A30 */
     if (ext2_super_rmw(fs, sb_buf, 1024) != 0) {
         kfree(sb_buf, 1024);
         return -EIO;
@@ -2000,6 +2002,7 @@ static fs_node_t *ext2_node_build_from_inode(fs_node_t *node, ext2_node_t *ctx,
         node->link = ext2_link;
         node->rename = ext2_rename;
         node->statfs = ext2_statfs;
+        node->syncfs = ext2_syncfs;     /* EXT2-A31 */
         node->unmount = ext2_unmount;
         node->remount = ext2_remount;
         node->symlink = ext2_symlink;
@@ -3076,6 +3079,32 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
 
     fs->device = dev;
 
+    /*
+     * EXT2-A30 (audit MS-04/SB-10/MS-15): mount-state bookkeeping.
+     *
+     * s_state was neither read nor written.  Nothing warned about a
+     * filesystem that was not cleanly unmounted, nothing honored
+     * s_errors, and — worst — the volume was never marked in-use, so a
+     * crash mid-write left a "clean" superblock that fsck skips by
+     * default and the corruption stayed.
+     */
+    if (fs->sb.s_state & EXT2_ERROR_FS) {
+        kprintf("ext2: filesystem has recorded errors (s_errors=%u)\n",
+                fs->sb.s_errors);
+        if (fs->sb.s_errors == EXT2_ERRORS_PANIC) {
+            kprintf("ext2: s_errors=panic — refusing to mount; run e2fsck\n");
+            kfree(fs, sizeof(ext2_fs_t));
+            return NULL;
+        }
+        if (fs->sb.s_errors == EXT2_ERRORS_RO) {
+            kprintf("ext2: mounting read-only (s_errors=remount-ro)\n");
+            fs->readonly = 1;
+            fs->force_readonly = 1;
+        }
+    }
+    if (!(fs->sb.s_state & EXT2_VALID_FS))
+        kprintf("ext2: filesystem was not cleanly unmounted — run e2fsck\n");
+
     /* EXT2-A9: revision 0 has no feature fields at all, so it never
      * carries the filetype feature. */
     fs->has_ftype = (fs->sb.s_rev_level >= 1) &&
@@ -3426,7 +3455,19 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
     
     ext2_node_t *root_ctx = (ext2_node_t *)(uintptr_t)root_node->impl;
     root_ctx->pin_count = 1; // Pin root node
-    
+
+    /* EXT2-A30: publish "mounted, not cleanly unmounted yet" plus the
+     * mount bookkeeping fsck and tune2fs report. */
+    if (!fs->readonly) {
+        fs->sb.s_state &= (uint16_t)~EXT2_VALID_FS;
+        fs->sb.s_mnt_count++;
+        fs->sb.s_mtime = (uint32_t)get_time();
+        fs->sb.s_wtime = fs->sb.s_mtime;
+        fs->sb_dirty = 1;
+        ext2_flush_super(fs);
+        fs->sb_dirty = 0;
+    }
+
     kprint("EXT2: Mounted successfully\n");
     return root_node;
 
@@ -3502,6 +3543,20 @@ void ext2_init(void) {
 uint32_t ext2_alloc_block(ext2_fs_t *fs) {
     if (!fs) return 0;
     mutex_lock(&fs->alloc_lock);
+
+    /* EXT2-A31 (audit BG-06/SB-17): s_r_blocks_count is space the
+     * filesystem holds back so that root can still act — and so the
+     * allocator has room to avoid fragmenting — on a full volume.  It
+     * was never enforced, so any user could run the disk to zero while
+     * statfs's f_bavail (which does subtract the reserve) promised
+     * otherwise. */
+    if (fs->sb.s_free_blocks_count <= fs->sb.s_r_blocks_count) {
+        uint32_t euid = current_process ? current_process->euid : 0;
+        if (euid != 0 && euid != fs->sb.s_def_resuid) {
+            mutex_unlock(&fs->alloc_lock);
+            return 0;
+        }
+    }
 
     // Search each block group for a free block, starting from last allocation
     uint32_t start_group = fs->last_alloc_group;
@@ -5479,6 +5534,23 @@ int ext2_statfs(fs_node_t *node, struct statfs *buf) {
 
     return 0;
 }
+/*
+ * EXT2-A31 (audit BG-05/CY-12/MS-05): sync(2)/fsync(2) hook.
+ *
+ * The block and inode bitmaps are write-through, but the superblock
+ * and group-descriptor free counts are deliberately coalesced in core
+ * and flushed only on a 256-op threshold or at unmount.  Nothing
+ * connected sync(2) to that, so a user who ran sync and pulled the
+ * power still lost the counts; now the VFS walks every mount and calls
+ * this.
+ */
+static int ext2_syncfs(fs_node_t *node) {
+    if (!node) return -EINVAL;
+    ext2_node_t *ctx = (ext2_node_t *)(uintptr_t)node->impl;
+    if (!ctx || !ctx->fs) return -EINVAL;
+    return ext2_sync_meta(ctx->fs);
+}
+
 /* MNT_UPDATE hook: flip the live mount between read-only and read-write.
  * Refuses a read-write remount if the volume was forced read-only for
  * unsupported RO_COMPAT features (writing could corrupt it). */
@@ -5491,7 +5563,22 @@ int ext2_remount(fs_node_t *node, uint32_t flags) {
     int want_ro = !!(flags & MNT_RDONLY);
     if (!want_ro && fs->force_readonly)
         return -EROFS;          /* cannot safely write this volume */
+    /* EXT2-A31 (audit MS-05): flush before going read-only —
+     * ext2_sync_meta returns immediately on a read-only mount, so
+     * flipping the flag first stranded every deferred free count and
+     * left the on-disk superblock permanently stale.  Mark the volume
+     * clean on the way down, too. */
+    if (want_ro && !fs->readonly) {
+        ext2_sync_meta(fs);
+        fs->sb.s_state |= EXT2_VALID_FS;
+        ext2_flush_super(fs);
+    }
     fs->readonly = want_ro;
+    if (!want_ro) {
+        /* Going read-write: the volume is in use again. */
+        fs->sb.s_state &= (uint16_t)~EXT2_VALID_FS;
+        ext2_flush_super(fs);
+    }
     fs->mnt_flags = flags;
     return 0;
 }
@@ -5565,6 +5652,15 @@ int ext2_unmount(fs_node_t *node) {
     /* Reconcile any deferred superblock / group-descriptor free counts to
      * disk before tearing the in-core copies down. */
     ext2_sync_meta(fs);
+
+    /* EXT2-A30: the volume is now consistent on disk — say so, so the
+     * next fsck can skip it (and so a crash BEFORE this point is
+     * distinguishable, which is the whole point of the flag). */
+    if (!fs->readonly) {
+        fs->sb.s_state |= EXT2_VALID_FS;
+        fs->sb.s_wtime = (uint32_t)get_time();
+        ext2_flush_super(fs);
+    }
 
     if (fs->active_bg_bitmap) kfree(fs->active_bg_bitmap, fs->block_size);
     if (fs->active_inode_bg_bitmap) kfree(fs->active_inode_bg_bitmap, fs->block_size);

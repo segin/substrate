@@ -47,6 +47,11 @@ typedef int (*unmount_type_t)(struct fs_node*);
 typedef int (*remount_type_t)(struct fs_node*, uint32_t flags);
 typedef int (*rename_type_t)(struct fs_node *old_parent, const char *old_name, struct fs_node *new_parent, const char *new_name);
 typedef int (*statfs_type_t)(struct fs_node *node, struct statfs *buf);
+/* Flush a filesystem's own deferred in-core metadata to disk.  The
+ * buffer cache is drained separately by bufsync(); this is for state a
+ * driver keeps outside it (ext2's coalesced superblock and
+ * group-descriptor free counts, for one).  Optional. */
+typedef int (*syncfs_type_t)(struct fs_node *node);
 typedef int (*chmod_type_t)(struct fs_node *node, uint32_t mode);
 
 /* set-attribute interface for whole-vnode updates that don't fit
@@ -121,6 +126,7 @@ typedef struct fs_node {
     remount_type_t remount;
     rename_type_t rename;
     statfs_type_t statfs;
+    syncfs_type_t syncfs;
     chmod_type_t chmod;
     setattr_type_t setattr;
     getattr_type_t getattr;
@@ -211,6 +217,8 @@ int unlink_fs(fs_node_t *node, const char *name);
 int rmdir_fs(fs_node_t *node, const char *name);
 int rename_fs(fs_node_t *old_parent, const char *old_name, fs_node_t *new_parent, const char *new_name);
 int statfs_fs(fs_node_t *node, struct statfs *buf);
+/* Walk every mount and flush driver-private deferred metadata. */
+void vfs_sync_all(void);
 int statvfs_fs(fs_node_t *node, struct statvfs *buf);
 int mknod_fs(fs_node_t *node, const char *name, uint16_t mode, uint32_t dev);
 int vfs_mkdir(const char *path, uint16_t permission);
