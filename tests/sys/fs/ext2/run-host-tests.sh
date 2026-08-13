@@ -62,7 +62,12 @@ prep_rootfs() {
     echo "$out"
 }
 
-# Boot substrate with extra disk + serial→file.  Mirrors the user's
+# Boot substrate with extra disk + serial→file.
+#
+# NOTE: rootfs.img is a partitioned disk (EFI/FAT p1 + ext2 root p2),
+# so the root device is sata0p2 — the whole-disk `sata0` this used to
+# pass has an MBR where the superblock should be, and every scenario
+# died at "EXT2: Invalid magic number" before reaching its check.  Mirrors the user's
 # run-networking.sh approach: load the multiboot kernel directly via
 # -kernel and attach the rootfs as SATA AHCI (drive0) and the test
 # disk as second SATA (drive1).  Loading the kernel directly keeps the
@@ -83,7 +88,7 @@ boot_with() {
         -device ide-hd,bus=sata0.0,unit=0,drive=drive0 \
         -device ide-hd,bus=sata0.1,unit=0,drive=drive1 \
         -kernel "$TOP/sys/kernel.bin" \
-        -append "root=/dev/storage/sata0 serial_debug" \
+        -append "root=/dev/storage/sata0p2 serial_debug" \
         -serial file:"$log" >/dev/null 2>&1 || true
 }
 
@@ -100,7 +105,31 @@ assert_log() {
         tail -25 "$log" | sed 's/^/    /'
         echo "    --- end ---"
         FAIL=$((FAIL + 1))
-        return 1
+    fi
+    # Deliberately always succeed: `set -e` at the top of this script
+    # would otherwise abort the whole suite at the first failed
+    # assertion, hiding every scenario after it.  The count in $FAIL
+    # is what the exit status is built from.
+    return 0
+}
+
+# Run e2fsck against an image substrate has written to.  This is the
+# acceptance gate for interoperability: a driver can satisfy every
+# in-guest check and still emit structures Linux and e2fsck reject
+# (stale checksums, bad i_blocks, malformed dirents).  -f forces a
+# full check even when the superblock says clean, -n answers "no" to
+# every repair so the image is left as substrate wrote it.
+assert_fsck() {
+    # assert_fsck <image> <name>
+    local img=$1 name=$2
+    local out
+    if out=$(e2fsck -fn "$img" 2>&1); then
+        echo "  PASS: $name (e2fsck clean)"
+        PASS=$((PASS + 1))
+    else
+        echo "  FAIL: $name (e2fsck reported problems)"
+        echo "$out" | sed 's/^/    /' | head -30
+        FAIL=$((FAIL + 1))
     fi
 }
 
@@ -539,6 +568,182 @@ if [ ! -f "$IMG_SRC" ]; then
     exit 0
 fi
 
+t_rename_self() {
+    echo "==> rename-self (audit DE-02)"
+    # rename(a, a) must be a successful no-op.  The pre-audit driver
+    # unlinked the target, re-added the name, then removed the entry it
+    # had just added — and the deferred delete freed the inode and its
+    # data.  `mv "$f" "$f"` was silent data loss.
+    local img; img=$(mkimg t-rnself ext2)
+    {
+        echo "mkdir /d"
+        echo "close"
+    } | debugfs -w "$img" >/dev/null 2>&1 || true
+    local conf="device=/dev/storage/sata1
+mount=/mnt/test
+fs=ext2
+check='echo KEEPME > /mnt/test/d/f; mv /mnt/test/d/f /mnt/test/d/f; cat /mnt/test/d/f'"
+    local rfs; rfs=$(prep_rootfs t-rnself "$conf")
+    local log="$WORK/t-rnself.log"
+    boot_with "$rfs" "$img" "$log" 30
+    assert_log "$log" "FSTEST: mount OK" "rename-self mount succeeds"
+    assert_log "$log" "KEEPME"           "rename onto itself preserves the file"
+    assert_fsck "$img" "rename-self leaves a clean filesystem"
+}
+
+t_rm_extent_file() {
+    echo "==> rm-extent-file (audit BM-07)"
+    # Every regular file on a default ext4 image is extent-mapped, and
+    # unlink used to remove the dirent and THEN refuse with
+    # -EOPNOTSUPP: the name vanished, rm reported an error, and the
+    # inode plus its blocks leaked.
+    local img; img=$(mkimg t-rmext ext4 -O '^64bit,^metadata_csum')
+    dd if=/dev/urandom of="$WORK/rmext-payload" bs=1K count=64 2>/dev/null
+    {
+        echo "write $WORK/rmext-payload /victim"
+        echo "close"
+    } | debugfs -w "$img" >/dev/null 2>&1 || true
+    local conf="device=/dev/storage/sata1
+mount=/mnt/test
+fs=ext2
+check='rm /mnt/test/victim && echo RM_OK; ls /mnt/test/victim 2>&1 | head -1'"
+    local rfs; rfs=$(prep_rootfs t-rmext "$conf")
+    local log="$WORK/t-rmext.log"
+    boot_with "$rfs" "$img" "$log" 30
+    assert_log "$log" "FSTEST: mount OK" "rm-extent mount succeeds"
+    assert_log "$log" "RM_OK"            "rm of an extent-mapped file succeeds"
+    assert_log "$log" "No such file"     "the removed name is gone"
+    # The real test: no unattached inode, no leaked blocks.
+    assert_fsck "$img" "rm-extent leaves no orphan inode or leaked blocks"
+}
+
+t_csum_rw_remount() {
+    echo "==> metadata-csum rw then remount (audit CK-01/SB-01/SB-02)"
+    # The driver only ever recomputed the per-inode checksum, so the
+    # first deferred free-count flush wrote new counts under the old
+    # superblock and group-descriptor checksums.  The volume then
+    # failed its own next mount, and Linux's.
+    local img; img=$(mkimg t-csumrw ext4 -O '^64bit,metadata_csum')
+    local conf="device=/dev/storage/sata1
+mount=/mnt/test
+fs=ext2
+check='echo HELLO > /mnt/test/newfile; mkdir /mnt/test/newdir; sync; echo WROTE_OK'"
+    local rfs; rfs=$(prep_rootfs t-csumrw "$conf")
+    local log="$WORK/t-csumrw.log"
+    boot_with "$rfs" "$img" "$log" 30
+    assert_log "$log" "FSTEST: mount OK" "metadata_csum mount succeeds"
+    assert_log "$log" "WROTE_OK"         "metadata_csum volume accepts writes"
+    # e2fsck is the authority on whether what we wrote is well-formed:
+    # it checks every checksum we touched (superblock, descriptors,
+    # bitmaps, inodes, directory tails).
+    assert_fsck "$img" "written metadata_csum volume passes e2fsck"
+
+    # And the driver must be able to mount its own output again.
+    local conf2="device=/dev/storage/sata1
+mount=/mnt/test
+fs=ext2
+check='cat /mnt/test/newfile; ls -d /mnt/test/newdir'"
+    local rfs2; rfs2=$(prep_rootfs t-csumrw2 "$conf2")
+    local log2="$WORK/t-csumrw2.log"
+    boot_with "$rfs2" "$img" "$log2" 30
+    assert_log "$log2" "FSTEST: mount OK" "metadata_csum volume remounts after being written"
+    assert_log "$log2" "HELLO"            "file written under metadata_csum reads back"
+}
+
+t_uninit_bg_alloc() {
+    echo "==> uninit block groups (audit BG-01)"
+    # A gdt_csum/metadata_csum image ships unused groups flagged
+    # BLOCK_UNINIT with an uninitialised on-disk bitmap.  The allocator
+    # used to read that block and trust it, handing out the group's own
+    # backup superblock and GDT blocks.
+    local img; img=$(mkimg t-uninit ext4 -O '^64bit,metadata_csum')
+    # Write enough to spill past group 0 (8 MiB of data on a 16 MiB fs).
+    local conf="device=/dev/storage/sata1
+mount=/mnt/test
+fs=ext2
+check='i=0; while [ \$i -lt 40 ]; do dd if=/dev/zero of=/mnt/test/f\$i bs=4096 count=32 2>/dev/null; i=\$((i+1)); done; sync; echo FILL_DONE; ls /mnt/test | wc -l'"
+    local rfs; rfs=$(prep_rootfs t-uninit "$conf")
+    local log="$WORK/t-uninit.log"
+    boot_with "$rfs" "$img" "$log" 60
+    assert_log "$log" "FSTEST: mount OK" "uninit-bg mount succeeds"
+    assert_log "$log" "FILL_DONE"        "allocation across groups completes"
+    # If the allocator handed out metadata blocks, or left BLOCK_UNINIT
+    # set on a group it wrote a bitmap into, e2fsck says so here.
+    assert_fsck "$img" "allocation into uninit groups leaves a clean filesystem"
+}
+
+t_extent_max_len() {
+    echo "==> extent ee_len == 32768 (audit BM-01)"
+    # 32768 is the largest INITIALIZED extent length and Linux writes
+    # it for any sufficiently large contiguous run.  The old resolver
+    # masked with 0x7FFF, turning that length into 0, so the whole
+    # range read as a hole.  Rather than build a 128 MiB file, take a
+    # one-block file and rewrite its extent length to the boundary
+    # value: reading block 0 must still return the data.
+    #
+    # i_block layout for an inline extent: words 0-2 are the header,
+    # then each extent is 3 words — word 3 = ee_block, word 4 =
+    # (ee_start_hi << 16) | ee_len, word 5 = ee_start_lo.
+    local img; img=$(mkimg t-extmax ext4 -O '^64bit,^metadata_csum')
+    printf 'EXTENT32768_OK\n' > "$WORK/extmax-payload"
+    {
+        echo "write $WORK/extmax-payload /target"
+        echo "close"
+    } | debugfs -w "$img" >/dev/null 2>&1 || true
+    debugfs -w -R "set_inode_field /target block[4] 32768" "$img" >/dev/null 2>&1 || true
+    local conf="device=/dev/storage/sata1
+mount=/mnt/test
+fs=ext2
+check='cat /mnt/test/target'"
+    local rfs; rfs=$(prep_rootfs t-extmax "$conf")
+    local log="$WORK/t-extmax.log"
+    boot_with "$rfs" "$img" "$log" 25
+    assert_log "$log" "FSTEST: mount OK"  "max-length-extent mount succeeds"
+    assert_log "$log" "EXTENT32768_OK"    "ee_len 32768 resolves as data, not a hole"
+}
+
+t_no_ftype_write() {
+    echo "==> create on a no-filetype image (audit MS-01)"
+    # Without INCOMPAT_FILETYPE the dirent byte the driver used for the
+    # type is the high half of a 16-bit name_len, so every entry it
+    # created read back on Linux as name_len + 256*type.
+    local img; img=$(mkimg t-noftype ext2 -O '^filetype')
+    local conf="device=/dev/storage/sata1
+mount=/mnt/test
+fs=ext2
+check='echo NF > /mnt/test/plainfile; mkdir /mnt/test/plaindir; sync; ls /mnt/test'"
+    local rfs; rfs=$(prep_rootfs t-noftype "$conf")
+    local log="$WORK/t-noftype.log"
+    boot_with "$rfs" "$img" "$log" 30
+    assert_log "$log" "FSTEST: mount OK" "no-filetype mount succeeds"
+    assert_log "$log" "plainfile"        "created name is listed"
+    # e2fsck pass 2 rejects a dirent whose name_len exceeds its record.
+    assert_fsck "$img" "entries created without filetype are well-formed"
+}
+
+t_truncate_shrink() {
+    echo "==> truncate to a smaller size (audit BM-09)"
+    # Shrinking to a non-zero length used to return -EOPNOTSUPP.
+    local img; img=$(mkimg t-trunc ext2)
+    dd if=/dev/urandom of="$WORK/trunc-payload" bs=1K count=128 2>/dev/null
+    {
+        echo "write $WORK/trunc-payload /big"
+        echo "close"
+    } | debugfs -w "$img" >/dev/null 2>&1 || true
+    local conf="device=/dev/storage/sata1
+mount=/mnt/test
+fs=ext2
+check='dd if=/dev/zero of=/mnt/test/big bs=1 count=0 seek=4096 conv=notrunc 2>/dev/null; truncate -s 4096 /mnt/test/big 2>/dev/null || true; ls -l /mnt/test/big; sync; echo TRUNC_DONE'"
+    local rfs; rfs=$(prep_rootfs t-trunc "$conf")
+    local log="$WORK/t-trunc.log"
+    boot_with "$rfs" "$img" "$log" 30
+    assert_log "$log" "FSTEST: mount OK" "truncate mount succeeds"
+    assert_log "$log" "TRUNC_DONE"       "truncate completes"
+    # The blocks past the new EOF must be released without leaving the
+    # inode pointing at them.
+    assert_fsck "$img" "shrunk file leaves a clean filesystem"
+}
+
 t_mount_ext2
 t_mount_ext3
 t_mount_ext4_extents
@@ -554,6 +759,17 @@ t_xattr_read
 t_extent_append_write
 t_mount_64bit
 t_mount_64bit_with_csum
+
+# Regression scenarios added with the 2026-08 spec audit
+# (docs/ext2-audit-2026-08.md).  Each one reproduces a specific
+# finding; the assert_fsck calls are the interoperability gate.
+t_rename_self
+t_rm_extent_file
+t_csum_rw_remount
+t_uninit_bg_alloc
+t_extent_max_len
+t_no_ftype_write
+t_truncate_shrink
 
 # Restore the production rootfs.img so the user's next interactive
 # boot isn't sitting on whichever test config we ran last.

@@ -1,5 +1,16 @@
 # ext2/3/4 driver audit — 2026-08
 
+> **Status: worked through.** Every finding below has been addressed —
+> fixed in the driver, or (for the handful that are deliberate
+> refusals) verified safe and recorded as a known gap in
+> `sys/fs/ext2/TASKS.md`. The commits reference findings by their ID
+> (`git log --grep 'BM-01'`), and the regression scenarios added to
+> `tests/sys/fs/ext2/run-host-tests.sh` cover the four criticals plus
+> the interoperability highs, each gated on a host-side `e2fsck -fn` of
+> the image substrate wrote. The finding text is kept in the past
+> tense of the audit for traceability; read it as "what was wrong",
+> not "what is wrong".
+
 Comprehensive audit of `sys/fs/ext2/` (ext2.c 4320 + ext2.h 478 +
 ext2_hash.c 209 + ext2_xattr.c 421 lines) against the **ext4 on-disk
 format specification** (kernel.org v4.19, "Data Structures and
