@@ -2305,7 +2305,7 @@ static int ext2_getattr(fs_node_t *node, struct fs_attr *a) {
     if (!ctx) return -EINVAL;
     a->mask  = FS_ATTR_ATIME | FS_ATTR_MTIME | FS_ATTR_CTIME |
                FS_ATTR_MODE  | FS_ATTR_UID   | FS_ATTR_GID   |
-               FS_ATTR_SIZE;
+               FS_ATTR_SIZE  | FS_ATTR_NLINK | FS_ATTR_BLOCKS;
     a->atime = ctx->inode.i_atime;
     a->mtime = ctx->inode.i_mtime;
     a->ctime = ctx->inode.i_ctime;
@@ -2320,6 +2320,11 @@ static int ext2_getattr(fs_node_t *node, struct fs_attr *a) {
     a->uid   = ext2_inode_uid(&ctx->inode);
     a->gid   = ext2_inode_gid(&ctx->inode);
     a->size  = ctx->inode.i_size;
+    /* EXT2-A32: i_blocks is already in 512-byte units, which is what
+     * st_blocks wants, and it counts the indirect/extent metadata and
+     * xattr block too — so a sparse file reports what it really costs. */
+    a->nlink  = ctx->inode.i_links_count;
+    a->blocks = ctx->inode.i_blocks;
     return 0;
 }
 

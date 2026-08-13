@@ -1608,9 +1608,21 @@ static void fill_stat(struct stat *buf, fs_node_t *node) {
     else
         buf->st_mode |= 0100000;  // S_IFREG
     
+    /* EXT2-A32: ask the backend for the real link count and block
+     * usage; fall back to the old estimates when it cannot say. */
     buf->st_nlink = 1;
     buf->st_blksize = 4096;
     buf->st_blocks = (node->length + 511) / 512;
+    if (node->getattr) {
+        struct fs_attr ga;
+        memset(&ga, 0, sizeof(ga));
+        if (node->getattr(node, &ga) == 0) {
+            if ((ga.mask & FS_ATTR_NLINK) && ga.nlink > 0)
+                buf->st_nlink = ga.nlink;
+            if (ga.mask & FS_ATTR_BLOCKS)
+                buf->st_blocks = ga.blocks;
+        }
+    }
     
     // Fill times (assuming node has these fields, derived from fs_node_t extensions)
     // For now, these might be 0 if fs_node_t doesn't have 64-bit timestamps yet, 

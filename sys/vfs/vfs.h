@@ -74,6 +74,12 @@ struct fs_attr {
     uint32_t uid;
     uint32_t gid;
     off_t    size;
+    /* EXT2-A32 (ext2 audit IN-04/MS-18): stat() had no way to learn a
+     * file's real link count or its true storage cost — st_nlink was
+     * hardcoded to 1 and st_blocks derived from the length, so
+     * hardlinks reported wrong and sparse files reported dense. */
+    uint32_t nlink;
+    uint64_t blocks;    /* 512-byte units, as st_blocks */
 };
 #define FS_ATTR_ATIME   0x0001U
 #define FS_ATTR_MTIME   0x0002U
@@ -85,6 +91,8 @@ struct fs_attr {
 /* "use current time for this field" — analogous to UTIME_NOW.  */
 #define FS_ATTR_ATIME_NOW   0x0100U
 #define FS_ATTR_MTIME_NOW   0x0200U
+#define FS_ATTR_NLINK   0x0400U
+#define FS_ATTR_BLOCKS  0x0800U
 
 typedef int (*setattr_type_t)(struct fs_node *node, const struct fs_attr *a);
 typedef int (*getattr_type_t)(struct fs_node *node, struct fs_attr *a);
