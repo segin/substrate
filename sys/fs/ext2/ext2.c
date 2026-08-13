@@ -4008,8 +4008,52 @@ static void ext4_extent_free_node(ext2_fs_t *fs, const uint8_t *node,
     kfree(child, fs->block_size);
 }
 
+/*
+ * EXT2-A27 (audit XA-03): release the inode's extended-attribute block.
+ *
+ * Deleting an inode never touched i_file_acl, so the block leaked on
+ * every delete.  It cannot simply be freed either: mkfs and Linux
+ * share one xattr block between every inode carrying identical
+ * attributes, counting the references in h_refcount — blind-freeing it
+ * would destroy the attributes of every other file pointing at it and
+ * double-free the block on the next delete.  Drop a reference, and
+ * free only when it was the last one.
+ */
+static void ext2_release_xattr_block(ext2_fs_t *fs, ext2_inode_t *inode) {
+    uint32_t blk = inode->i_file_acl;
+    if (blk == 0) return;
+    inode->i_file_acl = 0;
+    if (blk >= fs->sb.s_blocks_count) return;
+
+    uint8_t *buf = kmalloc(fs->block_size);
+    if (!buf) return;                       /* leak rather than guess */
+    if (ext2_read_block(fs, blk, buf) != fs->block_size) {
+        kfree(buf, fs->block_size);
+        return;
+    }
+    /* struct ext2_xattr_block_header: magic, refcount, blocks, ... */
+    uint32_t magic    = *(uint32_t *)(buf + 0);
+    uint32_t refcount = *(uint32_t *)(buf + 4);
+    if (magic != 0xEA020000u) {             /* not an xattr block: leave it */
+        kfree(buf, fs->block_size);
+        return;
+    }
+    if (refcount > 1) {
+        *(uint32_t *)(buf + 4) = refcount - 1;
+        ext2_write_block(fs, blk, buf);
+        kfree(buf, fs->block_size);
+    } else {
+        kfree(buf, fs->block_size);
+        ext2_free_block(fs, blk);
+    }
+    if (inode->i_blocks >= fs->block_size / 512)
+        inode->i_blocks -= fs->block_size / 512;
+}
+
 static int ext2_free_inode_blocks(ext2_fs_t *fs, ext2_inode_t *inode) {
     if (!fs || !inode) return -EINVAL;
+
+    ext2_release_xattr_block(fs, inode);   /* EXT2-A27 */
 
     /*
      * For an ext4 extent inode, i_block[] is NOT an array of block pointers:
@@ -4088,6 +4132,11 @@ static int ext2_release_inode_blocks(ext2_fs_t *fs, uint32_t inode_num,
 
     ext2_inode_t snapshot = *inode;      /* still names the blocks */
 
+    /* EXT2-A27: the xattr block is released from the snapshot, so drop
+     * the live inode's reference here — otherwise the inode we are
+     * about to commit would still point at a block whose refcount we
+     * just decremented (or freed). */
+    inode->i_file_acl = 0;
     memset(inode->i_block, 0, sizeof(inode->i_block));
     if (inode->i_flags & EXT4_EXTENTS_FL) {
         /* Leave a valid empty extent header, as mkfs does for a new

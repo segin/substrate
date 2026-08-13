@@ -2089,11 +2089,34 @@ static int xattr_resolve(int dirfd_or_fd, const char *path, int follow,
     return 0;
 }
 
+/*
+ * EXT2-A29 (ext2 audit XA-06): who may see an attribute.
+ *
+ * Reading an xattr used to require nothing at all: any user could pull
+ * user.* off a file they cannot open, and trusted.* — which Linux
+ * reserves for privileged code — off anything.  Linux's rules:
+ * trusted.* needs privilege; user.* and the rest need read permission
+ * on the file itself (the namespace's own access checks are the
+ * backend's business).
+ */
+static int xattr_permission(fs_node_t *node, const char *kname) {
+    if (strncmp(kname, "trusted.", 8) == 0)
+        return (current_process && current_process->euid == 0) ? 0 : -ENODATA;
+    if (!current_process) return 0;
+    if (current_process->euid == 0) return 0;
+    return vfs_check_permissions(node, current_process->euid,
+                                 current_process->egid, 4 /* read */);
+}
+
 static int kern_getxattr(fs_node_t *node, const char *name,
                          void *value, size_t size) {
     if (!node->getxattr) return -ENOTSUP;
     char kname[256];
     if (copyinstr(name, kname, sizeof(kname), NULL) != 0) return -EFAULT;
+    {
+        int prc = xattr_permission(node, kname);
+        if (prc != 0) return prc;
+    }
     /* Two-call convention: if value==NULL or size==0, return size
      * needed (don't read).  Else write at most `size` bytes; if the
      * value is bigger, return -ERANGE.  */
@@ -2120,6 +2143,13 @@ static int kern_getxattr(fs_node_t *node, const char *name,
 
 static int kern_listxattr(fs_node_t *node, char *list, size_t size) {
     if (!node->listxattr) return -ENOTSUP;
+    /* EXT2-A29: listing requires read permission on the file, same as
+     * fetching an individual attribute. */
+    if (current_process && current_process->euid != 0) {
+        int prc = vfs_check_permissions(node, current_process->euid,
+                                        current_process->egid, 4);
+        if (prc != 0) return prc;
+    }
     size_t actual = 0;
     if (list == NULL || size == 0) {
         int rc = node->listxattr(node, NULL, 0, &actual);

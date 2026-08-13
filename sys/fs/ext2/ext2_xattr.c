@@ -376,7 +376,19 @@ int ext2_xattr_get(fs_node_t *node, const char *full_name,
     int idx = ext2_xattr_split_name(full_name, &suffix);
     if (idx < 0) return -ENOTSUP;
     size_t slen = strlen(suffix);
-    if (slen == 0 || slen > 255) return -ERANGE;
+    /* EXT2-A28 (audit XA-04): the POSIX-ACL names map to their own
+     * indices with a deliberately EMPTY suffix — that is how they are
+     * stored on disk (EXT2-25).  Rejecting an empty suffix here made
+     * getxattr("system.posix_acl_access") fail -ERANGE before it ever
+     * reached the disk, so the walker's empty-name match was dead code
+     * while listxattr happily advertised the name.  -ERANGE also means
+     * "buffer too small" per this file's contract, so grow-and-retry
+     * callers looped forever. */
+    if (slen == 0 &&
+        idx != EXT4_XATTR_INDEX_POSIX_ACL_ACCESS &&
+        idx != EXT4_XATTR_INDEX_POSIX_ACL_DEFAULT)
+        return -ENOTSUP;
+    if (slen > 255) return -ERANGE;
 
     int rc = ext2_xattr_inline_get(ctx->fs, ctx->inode_num,
                                    (uint8_t)idx, suffix, slen,
