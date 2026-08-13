@@ -829,10 +829,20 @@ static int ehci_reset_controller(ehci_hc_t *hc)
     /* Halt, then HCReset. */
     uint32_t cmd = ehci_op_rd(hc, EHCI_OP_USBCMD);
     ehci_op_wr(hc, EHCI_OP_USBCMD, cmd & ~EHCI_CMD_RUN);
+    int halted = 0;
     for (int i = 0; i < 100; i++) {
-        if (ehci_op_rd(hc, EHCI_OP_USBSTS) & EHCI_STS_HCHALTED) break;
+        if (ehci_op_rd(hc, EHCI_OP_USBSTS) & EHCI_STS_HCHALTED) {
+            halted = 1;
+            break;
+        }
         ehci_delay_ms(1);
     }
+    /* Table 2-9 calls HCRESET of a running controller undefined, but a
+     * controller that ignores a halt request leaves nothing else to try --
+     * FreeBSD does the same fall-through.  Name it before doing it, so a
+     * bring-up wedge right after this line is attributable. */
+    if (!halted)
+        kprintf("ehci: controller did not halt; resetting anyway\n");
     ehci_op_wr(hc, EHCI_OP_USBCMD, EHCI_CMD_HCRESET);
     for (int i = 0; i < 250; i++) {
         if (!(ehci_op_rd(hc, EHCI_OP_USBCMD) & EHCI_CMD_HCRESET)) return 0;
@@ -907,8 +917,27 @@ static int ehci_start(ehci_hc_t *hc)
                EHCI_CMD_RUN | EHCI_CMD_ASE | EHCI_CMD_PSE |
                EHCI_CMD_FLS_1024 | (8u << EHCI_CMD_ITC_SHIFT));
     ehci_op_wr(hc, EHCI_OP_CONFIGFLAG, EHCI_CONFIGFLAG_CF);
+    /* [EHCI-INIT-02] Verify the controller actually left the halted state:
+     * HCHalted "is a zero whenever the Run/Stop bit is a one" (Table 2-10)
+     * is the only read-back truth that it started -- RS=1 in USBCMD proves
+     * nothing on wedged hardware.  Registering a stuck-halted controller
+     * as a live HCD made every transfer burn its full 1 s timeout against
+     * a dead schedule with nothing naming the cause.  Both BSDs fail
+     * attach here ("run timeout"). */
+    {
+        int i;
+
+        for (i = 0; i < 100; i++) {
+            if (!(ehci_op_rd(hc, EHCI_OP_USBSTS) & EHCI_STS_HCHALTED))
+                break;
+            ehci_delay_ms(1);
+        }
+        if (i == 100) {
+            kprintf("ehci: run timeout\n");
+            return -1;
+        }
+    }
     EHCI_STEP("controller running");
-    ehci_delay_ms(5);
 
     /* Power all ports on. */
     for (uint8_t p = 1; p <= hc->nports; p++) {
