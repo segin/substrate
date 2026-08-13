@@ -30,7 +30,13 @@
 #include <sys/lock.h>
 #include <vm/vm_kmem.h>
 
-#define EHCI_BOUNCE_SIZE   (20 * 1024)   /* 5 qTD buffer pages */
+/* 5 qTD buffer pages.  Exactly legal only because dma_alloc_coherent is
+ * page-granular, so bounce_dma always lands page-aligned and the 5 buffer
+ * pointers cover the full 20480 bytes (4.10.6: the 20K maximum requires a
+ * zero first-page offset).  If that allocator ever returns unaligned
+ * buffers, every `len > EHCI_BOUNCE_SIZE` check must become
+ * `len > EHCI_BOUNCE_SIZE - (bounce_dma & 0xFFF)`. [ehci-audit] */
+#define EHCI_BOUNCE_SIZE   (20 * 1024)
 #define EHCI_MAX_QTD       8
 #define EHCI_XFER_TIMEOUT_MS 1000
 
@@ -636,6 +642,12 @@ static int ehci_intr_transfer(ehci_hc_t *hc, usb_transfer_t *xfer)
         if (bi == 0)
             bi = 1;
         if (xfer->dev->speed == USB_SPEED_HIGH) {
+            /* bInterval 1-3 encodes a sub-frame period (1/2/4 microframes);
+             * the divide floors those to a 1 ms stride with the single
+             * S-mask bit ehci_endp_cap sets.  Deliberate for a polled
+             * driver, and what the BSDs ship too; lifting it means multiple
+             * S-mask bits (0xFF / 0x55 / 0x11) rather than a stride
+             * change. [ehci-audit note] */
             uint32_t uframes = 1u << (bi > 16 ? 15 : (bi - 1));
             stride = uframes / 8;
         } else {
