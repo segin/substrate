@@ -250,7 +250,15 @@ typedef struct {
     uint32_t i_file_acl;
     uint32_t i_dir_acl;
     uint32_t i_faddr;
-    uint8_t  i_osd2[12];
+    /* osd2, Linux flavor (spec 2.4.1).  Previously an opaque 12 bytes,
+     * which hid the 32-bit uid/gid high halves — ownership above 65535
+     * was silently truncated on every write. */
+    uint16_t l_i_blocks_high;
+    uint16_t l_i_file_acl_high;
+    uint16_t l_i_uid_high;
+    uint16_t l_i_gid_high;
+    uint16_t l_i_checksum_lo;
+    uint16_t l_i_reserved;
     /* --- offset 128: ext4 extended fields, valid iff inode_size > 128 --- */
     uint16_t i_extra_isize;       /* 128: bytes used past offset 128   */
     uint16_t i_checksum_hi;       /* 130: high 16 bits of inode csum   */

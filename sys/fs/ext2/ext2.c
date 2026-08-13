@@ -8,6 +8,7 @@
 #include <kern/console.h>
 #include <kern/time.h>
 #include <sys/errno.h>
+#include <sys/major.h>
 #include <sys/mount.h>
 #include <sys/stat.h>
 #include <vfs/vfs.h>
@@ -1889,6 +1890,49 @@ uint64_t ext2_finddir_break_block0   = 0;
  * we see after the first /bin walk. */
 uint64_t ext2_root_pin_lost          = 0;
 
+/* EXT2-A19 (audit IN-03): ext2 splits an owner id across i_uid/i_gid
+ * (low 16) and osd2's l_i_*_high (high 16).  Only the low halves were
+ * read or written, so a file owned by uid > 65535 stat'd wrong and any
+ * metadata write truncated its ownership on disk. */
+static inline uint32_t ext2_inode_uid(const ext2_inode_t *i) {
+    return ((uint32_t)i->l_i_uid_high << 16) | i->i_uid;
+}
+static inline uint32_t ext2_inode_gid(const ext2_inode_t *i) {
+    return ((uint32_t)i->l_i_gid_high << 16) | i->i_gid;
+}
+static inline void ext2_inode_set_uid(ext2_inode_t *i, uint32_t uid) {
+    i->i_uid = (uint16_t)uid;
+    i->l_i_uid_high = (uint16_t)(uid >> 16);
+}
+static inline void ext2_inode_set_gid(ext2_inode_t *i, uint32_t gid) {
+    i->i_gid = (uint16_t)gid;
+    i->l_i_gid_high = (uint16_t)(gid >> 16);
+}
+
+/* EXT2-A20 (audit MS-06/IN-06): device numbers have two on-disk
+ * encodings.  The old one packs an 8-bit major/minor into i_block[0];
+ * the "new" Linux one lives in i_block[1] and reaches 12-bit majors and
+ * 20-bit minors.  Only the old form was ever read, so any node Linux
+ * wrote in the new form (minor > 255, or a dynamic major) stat'd as
+ * rdev 0. */
+static uint32_t ext2_inode_rdev(const ext2_inode_t *i) {
+    if (i->i_block[0] != 0)
+        return i->i_block[0];                    /* old encoding: already 8:8 */
+    /* New encoding: 12-bit major, 20-bit minor.  substrate's dev_t is
+     * 8:8 (sys/major.h), so anything wider than that cannot be
+     * represented — take the low bits rather than report rdev 0. */
+    uint32_t v = i->i_block[1];
+    uint32_t maj = (v >> 8) & 0xFFF;
+    uint32_t min = (v & 0xFF) | ((v >> 12) & 0xFFF00);
+    return makedev(maj, min);
+}
+static void ext2_inode_set_rdev(ext2_inode_t *i, uint32_t dev) {
+    /* substrate dev_t is 8:8, so the old encoding always fits — which
+     * is also what Linux writes whenever it can. */
+    i->i_block[0] = makedev(major(dev), minor(dev));
+    i->i_block[1] = 0;
+}
+
 /*
  * Populate a cached fs_node from an inode: common fields plus the type-specific
  * flags/callbacks.  Does NOT touch ctx->pin_count, so it can be used both to
@@ -1901,8 +1945,8 @@ static fs_node_t *ext2_node_build_from_inode(fs_node_t *node, ext2_node_t *ctx,
     node->inode = inode_num;
     node->length = inode->i_size;
     node->mask = inode->i_mode & 0xFFF;
-    node->uid = inode->i_uid;
-    node->gid = inode->i_gid;
+    node->uid = ext2_inode_uid(inode);
+    node->gid = ext2_inode_gid(inode);
     node->atime = inode->i_atime;
     node->mtime = inode->i_mtime;
     node->ctime = inode->i_ctime;
@@ -1942,10 +1986,10 @@ static fs_node_t *ext2_node_build_from_inode(fs_node_t *node, ext2_node_t *ctx,
         node->readlink = ext2_readlink;
     } else if (type == EXT2_S_IFCHR) {
         node->flags = FS_CHARDEVICE;
-        node->rdev = inode->i_block[0];
+        node->rdev = ext2_inode_rdev(inode);
     } else if (type == EXT2_S_IFBLK) {
         node->flags = FS_BLOCKDEVICE;
-        node->rdev = inode->i_block[0];
+        node->rdev = ext2_inode_rdev(inode);
     } else if (type == EXT2_S_IFIFO) {
         node->flags = FS_PIPE;
     } else if (type == EXT2_S_IFSOCK) {
@@ -2209,11 +2253,11 @@ static int ext2_setattr(fs_node_t *node, const struct fs_attr *a) {
         node->mask        = a->mode & 0x0FFFU;
     }
     if (a->mask & FS_ATTR_UID) {
-        ctx->inode.i_uid = (uint16_t)a->uid;
+        ext2_inode_set_uid(&ctx->inode, a->uid);   /* EXT2-A19 */
         node->uid        = a->uid;
     }
     if (a->mask & FS_ATTR_GID) {
-        ctx->inode.i_gid = (uint16_t)a->gid;
+        ext2_inode_set_gid(&ctx->inode, a->gid);   /* EXT2-A19 */
         node->gid        = a->gid;
     }
     if (ext2_write_inode(ctx->fs, ctx->inode_num, &ctx->inode) != 0)
@@ -2243,8 +2287,8 @@ static int ext2_getattr(fs_node_t *node, struct fs_attr *a) {
         a->atime_nsec = a->mtime_nsec = a->ctime_nsec = 0;
     }
     a->mode  = ctx->inode.i_mode & 0x0FFFU;
-    a->uid   = ctx->inode.i_uid;
-    a->gid   = ctx->inode.i_gid;
+    a->uid   = ext2_inode_uid(&ctx->inode);
+    a->gid   = ext2_inode_gid(&ctx->inode);
     a->size  = ctx->inode.i_size;
     return 0;
 }
@@ -3779,6 +3823,7 @@ static uint8_t ext2_dirent_type_from_mode(uint16_t mode) {
         case S_IFBLK: return EXT2_FT_BLKDEV;
         case S_IFIFO: return EXT2_FT_FIFO;
         case S_IFLNK: return EXT2_FT_SYMLINK;
+        case S_IFSOCK: return EXT2_FT_SOCK;      /* EXT2-A22 */
         default: return EXT2_FT_UNKNOWN;
     }
 }
@@ -4399,6 +4444,7 @@ int ext2_link(fs_node_t *parent, fs_node_t *source, const char *name) {
     else if (s_flags == FS_BLOCKDEVICE) file_type = EXT2_FT_BLKDEV;
     else if (s_flags == FS_PIPE) file_type = EXT2_FT_FIFO;
     else if (s_flags == FS_SYMLINK) file_type = EXT2_FT_SYMLINK;
+    else if (s_flags == FS_SOCKET) file_type = EXT2_FT_SOCK;   /* EXT2-A22 */
 
     {
         int arc = ext2_add_entry(parent, name, source_ctx->inode_num, file_type);
@@ -4505,6 +4551,7 @@ int ext2_rename(fs_node_t *old_parent, const char *old_name, fs_node_t *new_pare
     else if (flags == FS_CHARDEVICE) file_type = EXT2_FT_CHRDEV;
     else if (flags == FS_BLOCKDEVICE) file_type = EXT2_FT_BLKDEV;
     else if (flags == FS_PIPE) file_type = EXT2_FT_FIFO;
+    else if (flags == FS_SOCKET) file_type = EXT2_FT_SOCK;     /* EXT2-A22 */
 
     // Add new entry
     {
@@ -4781,11 +4828,11 @@ static int ext2_mknod(fs_node_t *dir, const char *name, uint16_t mode, uint32_t 
 
     memset(&inode, 0, sizeof(inode));
     inode.i_mode = mode;
-    inode.i_uid = dir->uid;
-    inode.i_gid = dir->gid;
+    ext2_inode_set_uid(&inode, dir->uid);
+    ext2_inode_set_gid(&inode, dir->gid);
     inode.i_links_count = 1;
     if (type == S_IFCHR || type == S_IFBLK) {
-        inode.i_block[0] = dev;
+        ext2_inode_set_rdev(&inode, dev);          /* EXT2-A20 */
     }
     uint32_t now = (uint32_t)get_time();
     inode.i_atime = now;
@@ -4838,8 +4885,8 @@ static int ext2_symlink(fs_node_t *dir, const char *target, const char *name) {
     ext2_inode_t inode;
     memset(&inode, 0, sizeof(inode));
     inode.i_mode = EXT2_S_IFLNK | 0777;
-    inode.i_uid = 0;
-    inode.i_gid = 0;
+    ext2_inode_set_uid(&inode, dir->uid);
+    ext2_inode_set_gid(&inode, dir->gid);
     inode.i_links_count = 1;
     inode.i_size = target_len;
     uint32_t now = (uint32_t)get_time();
@@ -4957,8 +5004,8 @@ int ext2_mkdir(fs_node_t *dir, const char *name, uint16_t permission) {
     now = (uint32_t)get_time();
 
     inode.i_mode = (uint16_t)(S_IFDIR | (permission & 0777));
-    inode.i_uid = dir->uid;
-    inode.i_gid = dir->gid;
+    ext2_inode_set_uid(&inode, dir->uid);
+    ext2_inode_set_gid(&inode, dir->gid);
     inode.i_size = fs->block_size;
     inode.i_links_count = 2;
     inode.i_blocks = fs->block_size / 512;
