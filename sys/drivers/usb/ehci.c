@@ -181,8 +181,17 @@ static int ehci_port_enable(usb_hcd_t *hcd, uint8_t port, int enable)
 {
     ehci_hc_t *hc = hcd->priv;
     uint32_t psc = ehci_portsc_rd(hc, port);
+
+    if (enable) {
+        /* Table 2-16: "Ports can only be enabled by the host controller as
+         * a part of the reset and enable.  Software cannot enable a port by
+         * writing a one to this field."  Writing PED=1 is a hardware no-op,
+         * so reporting success for it lied to the (currently nonexistent)
+         * caller.  Succeed only if the port is already enabled. */
+        return (psc & EHCI_PORT_ENABLE) ? 0 : -1;
+    }
     psc &= ~EHCI_PORT_CLEAR;
-    if (enable) psc |= EHCI_PORT_ENABLE; else psc &= ~EHCI_PORT_ENABLE;
+    psc &= ~EHCI_PORT_ENABLE;
     ehci_portsc_wr(hc, port, psc);
     return 0;
 }
