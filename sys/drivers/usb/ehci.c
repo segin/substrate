@@ -298,6 +298,30 @@ static int ehci_halt_status(uint32_t tok)
     return USB_XFER_STALL;
 }
 
+/* One MMIO read per 1024 spins: each is a vmexit under KVM. [RF-6] */
+#define EHCI_DEADCHECK_MASK 0x3FF
+
+/* [EHCI-INIT-03] Throttled dead-controller probe, shared by both poll
+ * loops.  An interruptless driver can only learn about a Host System Error
+ * -- a PCI parity error or abort, on which the HC clears its own Run bit
+ * (2.3.2) -- by asking; without this, a dead schedule left every qTD
+ * Active forever and every transfer burned its full timeout, silently.
+ * Detection, one-shot diagnostic, W1C ack and the [RF-2] core latch live
+ * here; CLEANUP stays with each caller (the async path neutralizes its
+ * tokens inline, the periodic path defers to its unlink protocol). */
+static int ehci_check_hc_dead(ehci_hc_t *hc, unsigned *spins)
+{
+    if ((++*spins & EHCI_DEADCHECK_MASK) != 0)
+        return 0;
+    uint32_t sts = ehci_op_rd(hc, EHCI_OP_USBSTS);
+    if (!(sts & (EHCI_STS_HCHALTED | EHCI_STS_HSE)))
+        return 0;
+    kprintf("ehci: host controller halted (USBSTS=0x%x)\n", (unsigned)sts);
+    ehci_op_wr(hc, EHCI_OP_USBSTS, EHCI_STS_HSE);   /* W1C ack */
+    hc->hcd.hc_failed = 1;   /* [RF-2] core latch */
+    return 1;
+}
+
 /* Arm the async QH at a qTD chain and poll to completion.  Returns USB_XFER_*.
  * [DRV-06] n_qtd counts the qTDs this transfer filled/linked (contiguous from
  * first_qtd); only those are polled, so stale qTDs left ACTIVE/HALTED by a prior
@@ -341,26 +365,12 @@ static int ehci_run_qh(ehci_hc_t *hc, int first_qtd, int n_qtd, uint32_t endp_ch
         int active = 0, halted = 0;
         uint32_t htok = 0;
 
-        /* [EHCI-INIT-03] An interruptless driver can only learn about a
-         * Host System Error -- a PCI parity error or abort, on which the
-         * HC clears its own Run bit (2.3.2) -- by asking.  Without this,
-         * the dead schedule leaves every qTD Active forever: this transfer
-         * burns its full timeout and so does every one after it, silently.
-         * Throttled to one MMIO read per 1024 spins (each read is a vmexit
-         * under KVM). */
-        if ((++spins & 0x3FF) == 0) {
-            uint32_t sts = ehci_op_rd(hc, EHCI_OP_USBSTS);
-            if (sts & (EHCI_STS_HCHALTED | EHCI_STS_HSE)) {
-                kprintf("ehci: host controller halted (USBSTS=0x%x)\n",
-                        (unsigned)sts);
-                ehci_op_wr(hc, EHCI_OP_USBSTS, EHCI_STS_HSE);   /* W1C ack */
-                hc->hcd.hc_failed = 1;   /* [RF-2] core latch */
-                /* A halted HC performs no DMA: safe to neutralize the
-                 * tokens without the ASE handshake. */
-                for (int i = first_qtd; i < first_qtd + n_qtd; i++)
-                    hc->qtd[i].token &= ~EHCI_QTD_STATUS_ACTIVE;
-                return USB_XFER_ERROR;
-            }
+        if (ehci_check_hc_dead(hc, &spins)) {   /* [RF-6] */
+            /* A halted HC performs no DMA: safe to neutralize the
+             * tokens without the ASE handshake. */
+            for (int i = first_qtd; i < first_qtd + n_qtd; i++)
+                hc->qtd[i].token &= ~EHCI_QTD_STATUS_ACTIVE;
+            return USB_XFER_ERROR;
         }
         for (int i = first_qtd; i < first_qtd + n_qtd; i++) {   /* [DRV-06] this xfer only */
             uint32_t tok = hc->qtd[i].token;
@@ -707,18 +717,11 @@ static int ehci_intr_transfer(ehci_hc_t *hc, usb_transfer_t *xfer)
         if (tok & EHCI_QTD_STATUS_HALTED) { r = ehci_halt_status(tok); break; }
         if (!(tok & EHCI_QTD_STATUS_ACTIVE)) break;
         if ((uint64_t)get_uptime_ms() > deadline) { r = USB_XFER_TIMEOUT; break; }
-        /* [EHCI-INIT-03] Same dead-controller check as the async poll; the
-         * unlink/drain below is bounded and safe on a halted HC. */
-        if ((++spins & 0x3FF) == 0) {
-            uint32_t sts = ehci_op_rd(hc, EHCI_OP_USBSTS);
-            if (sts & (EHCI_STS_HCHALTED | EHCI_STS_HSE)) {
-                kprintf("ehci: host controller halted (USBSTS=0x%x)\n",
-                        (unsigned)sts);
-                ehci_op_wr(hc, EHCI_OP_USBSTS, EHCI_STS_HSE);   /* W1C ack */
-                hc->hcd.hc_failed = 1;   /* [RF-2] core latch */
-                r = USB_XFER_ERROR;
-                break;
-            }
+        /* Same dead-controller probe as the async poll; the unlink/drain
+         * below is bounded and safe on a halted HC. */
+        if (ehci_check_hc_dead(hc, &spins)) {   /* [RF-6] */
+            r = USB_XFER_ERROR;
+            break;
         }
         __asm__ volatile("pause");
     }
