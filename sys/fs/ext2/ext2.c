@@ -427,6 +427,8 @@ uint32_t ext2_write_block(ext2_fs_t *fs, uint32_t block_num, const void *buffer)
  * after the first free-count flush the driver's own next mount (and
  * Linux, and e2fsck) rejected the volume. */
 static uint32_t ext2_itable_blocks(const ext2_fs_t *fs);
+static int ext2_read_meta(ext2_fs_t *fs, uint32_t blk, void *buf);
+static int ext2_write_meta(ext2_fs_t *fs, uint32_t blk, const void *buf);
 
 static int ext2_has_metadata_csum(const ext2_fs_t *fs) {
     return (fs->sb.s_feature_ro_compat & EXT2F_ROCOMPAT_METADATA_CKSUM) != 0;
@@ -1268,7 +1270,10 @@ uint32_t ext2_get_block_num(ext2_fs_t *fs, ext2_inode_t *inode, uint32_t block_i
     // Indirect block (12)
     if (block_idx < ptrs_per_block) {
         if (inode->i_block[12] == 0) return 0;
-        ext2_read_block(fs, inode->i_block[12], (uint8_t *)indirect_buf);
+        /* EXT2-A16 (audit BM-11): on a failed read the buffer still holds
+         * the PREVIOUS block's image, whose pointers belong to another
+         * file.  Report a hole rather than return one of them. */
+        if (ext2_read_meta(fs, inode->i_block[12], indirect_buf) != 0) return 0;
         return indirect_buf[block_idx];
     }
     block_idx -= ptrs_per_block;
@@ -1276,14 +1281,14 @@ uint32_t ext2_get_block_num(ext2_fs_t *fs, ext2_inode_t *inode, uint32_t block_i
     // Double indirect block (13)
     if (block_idx < ptrs_per_block * ptrs_per_block) {
         if (inode->i_block[13] == 0) return 0;
-        ext2_read_block(fs, inode->i_block[13], (uint8_t *)dindirect_buf);
+        if (ext2_read_meta(fs, inode->i_block[13], dindirect_buf) != 0) return 0;
         uint32_t indirect_idx = block_idx / ptrs_per_block;
         uint32_t direct_idx = block_idx % ptrs_per_block;
         uint32_t indirect_block = dindirect_buf[indirect_idx];
 
         if (indirect_block == 0) return 0;
 
-        ext2_read_block(fs, indirect_block, (uint8_t *)indirect_buf);
+        if (ext2_read_meta(fs, indirect_block, indirect_buf) != 0) return 0;
         return indirect_buf[direct_idx];
     }
     block_idx -= ptrs_per_block * ptrs_per_block;
@@ -1291,7 +1296,7 @@ uint32_t ext2_get_block_num(ext2_fs_t *fs, ext2_inode_t *inode, uint32_t block_i
     // Triple indirect block (14)
     if (block_idx < ptrs_per_block * ptrs_per_block * ptrs_per_block) {
         if (inode->i_block[14] == 0) return 0;
-        ext2_read_block(fs, inode->i_block[14], (uint8_t *)tindirect_buf);
+        if (ext2_read_meta(fs, inode->i_block[14], tindirect_buf) != 0) return 0;
         
         uint32_t tindirect_idx = block_idx / (ptrs_per_block * ptrs_per_block);
         uint32_t remaining = block_idx % (ptrs_per_block * ptrs_per_block);
@@ -1301,11 +1306,11 @@ uint32_t ext2_get_block_num(ext2_fs_t *fs, ext2_inode_t *inode, uint32_t block_i
         uint32_t dindirect_block = tindirect_buf[tindirect_idx];
         if (dindirect_block == 0) return 0;
 
-        ext2_read_block(fs, dindirect_block, (uint8_t *)dindirect_buf);
+        if (ext2_read_meta(fs, dindirect_block, dindirect_buf) != 0) return 0;
         uint32_t indirect_block = dindirect_buf[dindirect_idx];
         if (indirect_block == 0) return 0;
 
-        ext2_read_block(fs, indirect_block, (uint8_t *)indirect_buf);
+        if (ext2_read_meta(fs, indirect_block, indirect_buf) != 0) return 0;
         return indirect_buf[indirect_idx];
     }
     
@@ -2385,8 +2390,14 @@ struct dirent *ext2_readdir(fs_node_t *node, uint64_t index) {
         uint32_t block_num = ext2_get_block_num(fs, &ctx->inode, block_idx, indirect, dindirect, tindirect);
         
         if (block_num == 0) break;
-        ext2_read_block(fs, block_num, ext2_dir_buf);
-        
+        /* EXT2-A16: a failed read leaves the previous block's image in
+         * the scratch buffer — skip the block rather than report its
+         * neighbour's entries a second time. */
+        if (ext2_read_block(fs, block_num, ext2_dir_buf) != fs->block_size) {
+            pos = (block_idx + 1) * fs->block_size;
+            continue;
+        }
+
         // Parse entries in this block
         while (block_off + 8 <= fs->block_size && pos < dir_size) {
             ext2_dirent_t *de = (ext2_dirent_t *)(ext2_dir_buf + block_off);
@@ -2708,7 +2719,14 @@ fs_node_t *ext2_finddir(fs_node_t *node, char *name) {
         uint32_t block_num = ext2_get_block_num(fs, &ctx->inode, block_idx, indirect, dindirect, tindirect);
 
         if (block_num == 0) { walk_break_block0 = 1; break; }
-        ext2_read_block(fs, block_num, ext2_dir_buf);
+        /* EXT2-A16: an unreadable block must not be answered from the
+         * previous block's image, and must not let a miss be cached as
+         * an authoritative negative. */
+        if (ext2_read_block(fs, block_num, ext2_dir_buf) != fs->block_size) {
+            walk_break_malformed = 1;
+            pos = (block_idx + 1) * fs->block_size;
+            continue;
+        }
 
         while (block_off + 8 <= fs->block_size && pos < dir_size) {
             ext2_dirent_t *de = (ext2_dirent_t *)(ext2_dir_buf + block_off);
@@ -4115,8 +4133,16 @@ static int ext2_add_entry(fs_node_t *dir, const char *name, uint32_t inode, uint
         uint32_t block_num = ext2_get_block_num(fs, &ctx->inode, block_idx, indirect, dindirect, tindirect);
         
         if (block_num == 0) break;
-        ext2_read_block(fs, block_num, block_buf);
-        
+        /* EXT2-A16 (audit CY-07/DE-07): splicing an entry into a buffer
+         * whose refresh failed would commit the PREVIOUS block's image
+         * over this block — destroying its entries and duplicating the
+         * other block's.  One transient read error, permanent directory
+         * corruption. */
+        if (ext2_read_block(fs, block_num, block_buf) != fs->block_size) {
+            result = -EIO;
+            goto cleanup;
+        }
+
         /* EXT2-A8: stop before the ext4_dir_entry_tail on a
          * metadata_csum filesystem — it is a fake dirent (inode 0,
          * rec_len 12) that the reuse path below would otherwise claim
@@ -4434,8 +4460,9 @@ int ext2_rename(fs_node_t *old_parent, const char *old_name, fs_node_t *new_pare
                                                        old_node_ctx->indirect_buf,
                                                        old_node_ctx->dindirect_buf,
                                                        old_node_ctx->tindirect_buf);
-            if (dotdot_block != 0) {
-                ext2_read_block(fs, dotdot_block, old_node_ctx->block_buf);
+            if (dotdot_block != 0 &&
+                ext2_read_block(fs, dotdot_block, old_node_ctx->block_buf)
+                    == fs->block_size) {   /* EXT2-A16 */
                 ext2_dirent_t *dot = (ext2_dirent_t *)old_node_ctx->block_buf;
                 /* A63: dot->rec_len is an untrusted uint16 read from disk.
                  * Bound it so the '..' entry (8-byte dirent header + its
@@ -4539,8 +4566,11 @@ static int ext2_remove_entry(fs_node_t *dir, const char *name) {
         uint32_t block_num = ext2_get_block_num(fs, &ctx->inode, block_idx, indirect, dindirect, tindirect);
         
         if (block_num == 0) break;
-        ext2_read_block(fs, block_num, block_buf);
-        
+        if (ext2_read_block(fs, block_num, block_buf) != fs->block_size) {
+            result = -EIO;              /* EXT2-A16: never modify a stale buffer */
+            goto cleanup;
+        }
+
         ext2_dirent_t *prev_de = NULL;
         uint32_t dir_limit = ext2_dir_limit(fs);
 
