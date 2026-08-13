@@ -166,6 +166,7 @@ HOST_TESTS += host_test_random_ioctl
 HOST_TESTS += host_test_sb16
 HOST_TESTS += host_test_uhci
 HOST_TESTS += host_test_usb_hid_mouse
+HOST_TESTS += host_test_xhci
 
 # Bus / resource — PCI, ioremap
 HOST_TESTS += host_test_ioremap
@@ -346,6 +347,9 @@ host_test_ehci: host_test_ehci.c ../../sys/drivers/usb/ehci.c
 
 host_test_uhci: host_test_uhci.c ../../sys/drivers/usb/uhci.c
 	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_uhci.c -o $@
+
+host_test_xhci: host_test_xhci.c ../../sys/drivers/usb/xhci.c
+	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_xhci.c -o $@
 
 host_test_random_ioctl: host_test_random_ioctl.c ../../sys/kern/random.c
 	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_random_ioctl.c -o $@
