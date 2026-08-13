@@ -403,6 +403,8 @@ uint32_t ext2_write_block(ext2_fs_t *fs, uint32_t block_num, const void *buffer)
  * METADATA_CKSUM filesystem went out with its mount-time checksum —
  * after the first free-count flush the driver's own next mount (and
  * Linux, and e2fsck) rejected the volume. */
+static uint32_t ext2_itable_blocks(const ext2_fs_t *fs);
+
 static int ext2_has_metadata_csum(const ext2_fs_t *fs) {
     return (fs->sb.s_feature_ro_compat & EXT2F_ROCOMPAT_METADATA_CKSUM) != 0;
 }
@@ -497,12 +499,41 @@ static void ext2_bitmap_csum_set(ext2_fs_t *fs, uint32_t group,
 
 static uint32_t ext2_write_block_bitmap(ext2_fs_t *fs, uint32_t group,
                                         uint8_t *bitmap) {
+    /* EXT2-A7: the bitmap we are about to commit is now the authority
+     * for this group, so it is no longer "uninitialized".  Leaving the
+     * flag set would make Linux ignore what we just wrote. */
+    fs->bgd[group].bg_flags &= (uint16_t)~EXT2_BG_BLOCK_UNINIT;
     ext2_bitmap_csum_set(fs, group, bitmap, fs->blocks_per_group, 0);
     return ext2_write_block(fs, fs->bgd[group].bg_block_bitmap, bitmap);
 }
 
+/* Zero a group's inode table before its first use.  An INODE_UNINIT
+ * group's table was never initialized on disk; once we clear the flag,
+ * every reader (Linux, e2fsck) treats the table as meaningful, so the
+ * garbage has to go.  One-time cost per group. */
+static void ext2_zero_inode_table(ext2_fs_t *fs, uint32_t group) {
+    uint32_t itb = ext2_itable_blocks(fs);
+    uint32_t base = fs->bgd[group].bg_inode_table;
+    uint8_t *zero = kmalloc(fs->block_size);
+    if (!zero) return;                  /* leave INODE_ZEROED clear */
+    memset(zero, 0, fs->block_size);
+    for (uint32_t i = 0; i < itb; i++) {
+        if (ext2_write_block(fs, base + i, zero) != fs->block_size) {
+            kfree(zero, fs->block_size);
+            return;
+        }
+    }
+    kfree(zero, fs->block_size);
+    fs->bgd[group].bg_flags |= EXT2_BG_INODE_ZEROED;
+}
+
 static uint32_t ext2_write_inode_bitmap(ext2_fs_t *fs, uint32_t group,
                                         uint8_t *bitmap) {
+    if (fs->bgd[group].bg_flags & EXT2_BG_INODE_UNINIT) {
+        if (!(fs->bgd[group].bg_flags & EXT2_BG_INODE_ZEROED))
+            ext2_zero_inode_table(fs, group);
+        fs->bgd[group].bg_flags &= (uint16_t)~EXT2_BG_INODE_UNINIT;
+    }
     ext2_bitmap_csum_set(fs, group, bitmap, fs->inodes_per_group, 1);
     return ext2_write_block(fs, fs->bgd[group].bg_inode_bitmap, bitmap);
 }
@@ -514,6 +545,144 @@ static int is_sparse_backup(uint32_t group) {
         while (val < group) val *= p;
         if (val == group) return 1;
     }
+    return 0;
+}
+
+/* Does `group` carry a superblock + group-descriptor-table backup?
+ * Three layouts: no sparse_super (every group), sparse_super (group 0,
+ * 1 and the powers of 3/5/7), sparse_super2 (group 0 plus the at most
+ * two groups named in s_backup_bgs).  EXT2-A7 (audit SB-07): the
+ * sparse_super2 case was ignored, so the backup-flush loop wrote
+ * superblock images over ordinary file data at group starts. */
+static int ext2_group_has_super(const ext2_fs_t *fs, uint32_t group) {
+    if (fs->sparse_super2) {
+        return group == 0 ||
+               group == fs->backup_bgs[0] ||
+               group == fs->backup_bgs[1];
+    }
+    if (fs->sb.s_feature_ro_compat & EXT2F_ROCOMPAT_SPARSESUPER)
+        return is_sparse_backup(group);
+    return 1;
+}
+
+/* First (lowest-numbered) block belonging to `group`. */
+static uint32_t ext2_group_first_block(const ext2_fs_t *fs, uint32_t group) {
+    return group * fs->blocks_per_group + fs->sb.s_first_data_block;
+}
+
+/* Blocks occupied by one group's inode table. */
+static uint32_t ext2_itable_blocks(const ext2_fs_t *fs) {
+    uint64_t bytes = (uint64_t)fs->inodes_per_group * fs->inode_size;
+    return (uint32_t)((bytes + fs->block_size - 1) / fs->block_size);
+}
+
+static inline void ext2_bitmap_set(uint8_t *bm, uint32_t bit) {
+    bm[bit / 8] |= (uint8_t)(1u << (bit % 8));
+}
+
+/*
+ * EXT2-A7 (audit BG-01/SB-03/CK-02): lazy-init block groups.
+ *
+ * On a GDT_CSUM or METADATA_CKSUM filesystem — every default mkfs.ext4
+ * image — a group that has never been used carries EXT2_BG_BLOCK_UNINIT
+ * and its on-disk block-bitmap block is DELIBERATELY not initialized
+ * (spec 2.2.5).  The allocator used to read that block and scan it as
+ * the authoritative bitmap: on a zeroed device it read all-free and the
+ * first allocation handed out the group's own backup superblock / GDT
+ * blocks.  And because the flag was never cleared, a subsequent Linux
+ * mount ignored the bitmap this driver wrote and re-allocated the same
+ * blocks to another file — silent cross-linked corruption.
+ *
+ * Synthesize the bitmap instead, exactly as Linux's
+ * ext4_init_block_bitmap does: mark the group's fixed metadata (backup
+ * superblock + GDT + reserved GDT when this group carries one, plus
+ * this group's own bitmap/inode-table blocks wherever flex_bg placed
+ * them) and the tail bits that describe blocks past the end of the
+ * filesystem.  The flag is cleared when the bitmap is first written.
+ */
+static void ext2_init_block_bitmap(ext2_fs_t *fs, uint32_t group,
+                                   uint8_t *bm) {
+    uint32_t bpg   = fs->blocks_per_group;
+    uint32_t first = ext2_group_first_block(fs, group);
+
+    memset(bm, 0, fs->block_size);
+
+    if (ext2_group_has_super(fs, group)) {
+        uint32_t meta = 1 + fs->gdt_blocks + fs->reserved_gdt_blocks;
+        if (meta > bpg) meta = bpg;
+        for (uint32_t i = 0; i < meta; i++)
+            ext2_bitmap_set(bm, i);
+    }
+
+    /* This group's own metadata blocks, if they live inside it (under
+     * flex_bg they usually live in the flex group's first group). */
+    uint32_t itb = ext2_itable_blocks(fs);
+    uint32_t marks[3] = { fs->bgd[group].bg_block_bitmap,
+                          fs->bgd[group].bg_inode_bitmap,
+                          fs->bgd[group].bg_inode_table };
+    for (int m = 0; m < 3; m++) {
+        uint32_t nblk = (m == 2) ? itb : 1;
+        for (uint32_t i = 0; i < nblk; i++) {
+            uint32_t b = marks[m] + i;
+            if (b >= first && b < first + bpg)
+                ext2_bitmap_set(bm, b - first);
+        }
+    }
+
+    /* Bits describing blocks that do not exist: the tail of the last
+     * group, and the padding out to the end of the bitmap block. */
+    for (uint32_t i = 0; i < bpg; i++) {
+        if (first + i >= fs->sb.s_blocks_count)
+            ext2_bitmap_set(bm, i);
+    }
+    for (uint32_t i = bpg; i < fs->block_size * 8; i++)
+        ext2_bitmap_set(bm, i);
+}
+
+/* Inode-bitmap counterpart for EXT2_BG_INODE_UNINIT groups: no inode in
+ * such a group is in use, so only the out-of-range padding is set. */
+static void ext2_init_inode_bitmap(ext2_fs_t *fs, uint32_t group,
+                                   uint8_t *bm) {
+    memset(bm, 0, fs->block_size);
+    if (group == 0) {
+        /* Reserved inodes 1..s_first_ino-1 (bit i describes inode i+1). */
+        uint32_t first_ino = (fs->sb.s_rev_level >= 1) ? fs->sb.s_first_ino
+                                                       : EXT2_GOOD_OLD_FIRST_INO;
+        if (first_ino < EXT2_GOOD_OLD_FIRST_INO)
+            first_ino = EXT2_GOOD_OLD_FIRST_INO;
+        for (uint32_t i = 0; i + 1 < first_ino && i < fs->inodes_per_group; i++)
+            ext2_bitmap_set(bm, i);
+    }
+    for (uint32_t i = fs->inodes_per_group; i < fs->block_size * 8; i++)
+        ext2_bitmap_set(bm, i);
+}
+
+/* Load a group's block/inode bitmap into the per-mount cache, reading
+ * it from disk or synthesizing it for an uninit group.  Caller holds
+ * fs->alloc_lock.  Returns 0 on success, -EIO if the read failed. */
+static int ext2_load_block_bitmap(ext2_fs_t *fs, uint32_t group) {
+    if (fs->active_bg_group == group) return 0;
+    fs->active_bg_group = (uint32_t)-1;
+    if (fs->bgd[group].bg_flags & EXT2_BG_BLOCK_UNINIT) {
+        ext2_init_block_bitmap(fs, group, fs->active_bg_bitmap);
+    } else if (ext2_read_block(fs, fs->bgd[group].bg_block_bitmap,
+                               fs->active_bg_bitmap) != fs->block_size) {
+        return -EIO;
+    }
+    fs->active_bg_group = group;
+    return 0;
+}
+
+static int ext2_load_inode_bitmap(ext2_fs_t *fs, uint32_t group) {
+    if (fs->active_inode_bg_group == group) return 0;
+    fs->active_inode_bg_group = (uint32_t)-1;
+    if (fs->bgd[group].bg_flags & EXT2_BG_INODE_UNINIT) {
+        ext2_init_inode_bitmap(fs, group, fs->active_inode_bg_bitmap);
+    } else if (ext2_read_block(fs, fs->bgd[group].bg_inode_bitmap,
+                               fs->active_inode_bg_bitmap) != fs->block_size) {
+        return -EIO;
+    }
+    fs->active_inode_bg_group = group;
     return 0;
 }
 
@@ -2566,6 +2735,15 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
             kprintf("ext2: superblock metadata_csum verified (%08x)\n", got);
         }
 
+        /* Layout facts needed to synthesize uninit-group bitmaps and to
+         * place superblock backups (EXT2-A7). */
+        fs->reserved_gdt_blocks = *(uint16_t *)(sb_buf + 0xCE);
+        if (fs->sb.s_feature_compat & EXT2F_COMPAT_SPARSESUPER2) {
+            fs->sparse_super2 = 1;
+            fs->backup_bgs[0] = *(uint32_t *)(sb_buf + 0x24C);
+            fs->backup_bgs[1] = *(uint32_t *)(sb_buf + 0x250);
+        }
+
         /* Stash htree hash seed (sb_buf+236, four u32 words).  Used
          * by ext2_htree_hash() — initial state for the half_md4 and
          * tea hash functions.  Always loaded if rev_level >= 1
@@ -2811,6 +2989,7 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
     }
     uint32_t on_disk_total = (uint32_t)on_disk_total64;
     uint32_t on_disk_blocks = (on_disk_total + fs->block_size - 1) / fs->block_size;
+    fs->gdt_blocks = on_disk_blocks;
     on_disk_size   = on_disk_blocks * fs->block_size;
     gdt_raw = kmalloc(on_disk_size);
     if (!gdt_raw) {
@@ -2987,14 +3166,10 @@ uint32_t ext2_alloc_block(ext2_fs_t *fs) {
             continue;
         }
         
-        // Read the block bitmap if it's not cached
-        if (fs->active_bg_group != group) {
-            fs->active_bg_group = (uint32_t)-1;
-            if (ext2_read_block(fs, fs->bgd[group].bg_block_bitmap, fs->active_bg_bitmap) != fs->block_size) {
-                group = (group + 1) % fs->group_count;
-                continue;
-            }
-            fs->active_bg_group = group;
+        // Load the block bitmap (synthesized when the group is uninit)
+        if (ext2_load_block_bitmap(fs, group) != 0) {
+            group = (group + 1) % fs->group_count;
+            continue;
         }
         
         uint8_t *bitmap_buf = fs->active_bg_bitmap;
@@ -3085,14 +3260,10 @@ void ext2_free_block(ext2_fs_t *fs, uint32_t block_num) {
     if (group >= fs->group_count) return;
     mutex_lock(&fs->alloc_lock);
 
-    // Read the block bitmap if it's not cached
-    if (fs->active_bg_group != group) {
-        fs->active_bg_group = (uint32_t)-1;
-        if (ext2_read_block(fs, fs->bgd[group].bg_block_bitmap, fs->active_bg_bitmap) != fs->block_size) {
-            mutex_unlock(&fs->alloc_lock);
-            return;
-        }
-        fs->active_bg_group = group;
+    // Load the block bitmap (synthesized when the group is uninit)
+    if (ext2_load_block_bitmap(fs, group) != 0) {
+        mutex_unlock(&fs->alloc_lock);
+        return;
     }
 
     uint8_t *bitmap_buf = fs->active_bg_bitmap;
@@ -3132,14 +3303,9 @@ void ext2_free_blocks(ext2_fs_t *fs, uint32_t block_num, uint32_t count) {
         if (span > count) span = count;
 
         mutex_lock(&fs->alloc_lock);
-        if (fs->active_bg_group != group) {
-            fs->active_bg_group = (uint32_t)-1;
-            if (ext2_read_block(fs, fs->bgd[group].bg_block_bitmap,
-                                fs->active_bg_bitmap) != fs->block_size) {
-                mutex_unlock(&fs->alloc_lock);
-                return;
-            }
-            fs->active_bg_group = group;
+        if (ext2_load_block_bitmap(fs, group) != 0) {
+            mutex_unlock(&fs->alloc_lock);
+            return;
         }
         uint8_t *bm = fs->active_bg_bitmap;
         uint32_t freed = 0;
@@ -3174,14 +3340,8 @@ uint32_t ext2_alloc_inode(ext2_fs_t *fs, int is_dir) {
     for (uint32_t group = 0; group < fs->group_count; group++) {
         if (fs->bgd[group].bg_free_inodes_count == 0) continue;
         
-        // Read the inode bitmap if it's not cached
-        if (fs->active_inode_bg_group != group) {
-            fs->active_inode_bg_group = (uint32_t)-1;
-            if (ext2_read_block(fs, fs->bgd[group].bg_inode_bitmap, fs->active_inode_bg_bitmap) != fs->block_size) {
-                continue;
-            }
-            fs->active_inode_bg_group = group;
-        }
+        // Load the inode bitmap (synthesized when the group is uninit)
+        if (ext2_load_inode_bitmap(fs, group) != 0) continue;
         
         uint8_t *bitmap_buf = fs->active_inode_bg_bitmap;
 
@@ -3235,7 +3395,17 @@ uint32_t ext2_alloc_inode(ext2_fs_t *fs, int is_dir) {
                 if (is_dir) {
                     fs->bgd[group].bg_used_dirs_count++;
                 }
-                
+                /* EXT2-A7 (audit BG-07): bg_itable_unused counts the
+                 * inode-table entries at the END of the group that have
+                 * never been used, letting fsck skip them.  Allocating
+                 * inode i means entries i+1..inodes_per_group-1 are the
+                 * most that can still be untouched. */
+                if (ext2_has_metadata_csum(fs) || ext2_has_gdt_csum(fs)) {
+                    uint32_t unused_max = fs->inodes_per_group - (i + 1);
+                    if (fs->bgd[group].bg_itable_unused > unused_max)
+                        fs->bgd[group].bg_itable_unused = (uint16_t)unused_max;
+                }
+
                 // Calculate absolute inode number
                 uint32_t inode_num = group * fs->inodes_per_group + i + 1;
                 
@@ -3327,14 +3497,10 @@ void ext2_free_inode(ext2_fs_t *fs, uint32_t inode_num, int was_dir) {
     if (group >= fs->group_count) return;
     mutex_lock(&fs->alloc_lock);
 
-    // Read the inode bitmap if it's not cached
-    if (fs->active_inode_bg_group != group) {
-        fs->active_inode_bg_group = (uint32_t)-1;
-        if (ext2_read_block(fs, fs->bgd[group].bg_inode_bitmap, fs->active_inode_bg_bitmap) != fs->block_size) {
-            mutex_unlock(&fs->alloc_lock);
-            return;
-        }
-        fs->active_inode_bg_group = group;
+    // Load the inode bitmap (synthesized when the group is uninit)
+    if (ext2_load_inode_bitmap(fs, group) != 0) {
+        mutex_unlock(&fs->alloc_lock);
+        return;
     }
 
     uint8_t *bitmap_buf = fs->active_inode_bg_bitmap;

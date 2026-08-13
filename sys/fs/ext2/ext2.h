@@ -363,6 +363,16 @@ typedef struct {
      * end of our truncated ext2_superblock_t struct.  */
     uint32_t hash_seed[4];
 
+    /* Layout facts lifted from the superblock at mount, needed to
+     * synthesize the bitmap of a lazy-init (uninit) block group and to
+     * place superblock backups: how many blocks the group-descriptor
+     * table occupies, how many reserved GDT blocks follow it, and which
+     * groups carry a backup on a sparse_super2 filesystem. */
+    uint32_t gdt_blocks;
+    uint32_t reserved_gdt_blocks;
+    int      sparse_super2;
+    uint32_t backup_bgs[2];
+
     /* On-disk group-descriptor size.  32 for legacy ext2/3 + ext4
      * without INCOMPAT_64BIT; 64 when 64BIT is on.  The bgd table
      * is read with this stride from disk; we still only KEEP 32
