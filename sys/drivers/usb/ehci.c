@@ -489,16 +489,25 @@ static int ehci_bulk_transfer(ehci_hc_t *hc, usb_transfer_t *xfer)
         xfer->actual_length = len - residue;
         if (in && xfer->actual_length)
             memcpy(xfer->data, hc->bounce, xfer->actual_length);
-        if (xfer->ep) {
-            /* [DRV-07] One qTD moves many max-packet packets; the ending data
-             * toggle is initial ^ (npackets & 1).  Advance by the parity of the
-             * packets actually moved, not unconditionally by one (an even packet
-             * count, e.g. 1024 B at MPS 512, must leave the toggle unchanged). */
-            uint32_t mps = xfer->ep->max_packet ? xfer->ep->max_packet : 512;
-            uint32_t moved = xfer->actual_length;
-            uint32_t npkts = moved ? ((moved + mps - 1) / mps) : 1; /* ZLP = 1 packet */
-            xfer->ep->toggle ^= (npkts & 1);
-        }
+    }
+    if ((r == USB_XFER_OK || r == USB_XFER_TIMEOUT) && xfer->ep &&
+        hc->async_qh->current_qtd) {
+        /* [EHCI-04] The ending toggle used to be computed as
+         * initial ^ (npackets & 1) from actual_length -- which misses a
+         * device's terminating ZLP (a bulk IN holding exactly k*MPS bytes
+         * but fewer than requested sends k full packets plus a ZLP: k+1
+         * toggles, parity of k computed) and was never run on timeouts even
+         * though packets may have moved before the deadline.  The QH
+         * overlay dt is written back after every transaction (4.10.3) and
+         * IS the next expected toggle; the qTD copy is not guaranteed to
+         * carry dt (4.10.4 requires only Total Bytes/CErr/Status).  Gate on
+         * current_qtd != 0: if the controller never advanced into our
+         * chain, the overlay token still holds the driver's own arming
+         * value and says nothing.  Leave STALL to usb_clear_halt's toggle
+         * reset. */
+        xfer->ep->toggle =
+            (*(volatile uint32_t *)&hc->async_qh->overlay_token &
+             EHCI_QTD_TOGGLE) ? 1 : 0;
     }
     xfer->status = r;
     return r;
@@ -612,6 +621,10 @@ static int ehci_intr_transfer(ehci_hc_t *hc, usb_transfer_t *xfer)
             r = (tok & EHCI_QTD_STATUS_HALTED) ? ehci_halt_status(tok)
                                                : USB_XFER_OK;
     }
+    /* [EHCI-04] Capture the overlay before neutralizing it below -- the
+     * write-back overlay dt is the authoritative ending toggle. */
+    uint32_t ov_tok = *(volatile uint32_t *)&qh->overlay_token;
+    uint32_t ov_cur = qh->current_qtd;
     hc->qtd[0].token &= ~EHCI_QTD_STATUS_ACTIVE;
     qh->overlay_next = EHCI_LINK_TERMINATE;
     qh->overlay_alt_next = EHCI_LINK_TERMINATE;
@@ -622,12 +635,11 @@ static int ehci_intr_transfer(ehci_hc_t *hc, usb_transfer_t *xfer)
         xfer->actual_length = (len > residue) ? (len - residue) : 0;
         if (in && xfer->actual_length)
             memcpy(xfer->data, hc->bounce, xfer->actual_length);
-        if (xfer->ep) {
-            uint32_t mps = xfer->ep->max_packet ? xfer->ep->max_packet : 64;
-            uint32_t npkts = xfer->actual_length
-                             ? ((xfer->actual_length + mps - 1) / mps) : 1;
-            xfer->ep->toggle ^= (npkts & 1);   /* [DRV-07] parity, not +1 */
-        }
+    }
+    if ((r == USB_XFER_OK || r == USB_XFER_TIMEOUT) && xfer->ep && ov_cur) {
+        /* [EHCI-04] Same overlay-dt readback as the bulk path: parity from
+         * actual_length misses a terminating ZLP and skips timeouts. */
+        xfer->ep->toggle = (ov_tok & EHCI_QTD_TOGGLE) ? 1 : 0;
     }
     xfer->status = r;
     return r;
