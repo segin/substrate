@@ -166,15 +166,25 @@ static int ehci_port_enable(usb_hcd_t *hcd, uint8_t port, int enable)
 
 /* ---- qTD helpers ---- */
 
-/* Program one qTD: PID, byte count, toggle, buffer pointers into `bounce`. */
+/* Program one qTD: PID, byte count, toggle, buffer pointers into `bounce`.
+ *
+ * alt_dma is the Alternate Next qTD pointer, followed after a SHORT packet.
+ * The spec contradicts itself about an alt pointer with the T-bit set:
+ * 4.10.2 falls back to the Next pointer, but 3.5.2 says the controller
+ * "will always use this pointer when the current qTD is retired due to
+ * short packet" -- i.e. 3.5.2-literal silicon treats alt=T as end-of-queue
+ * and never fetches the qTDs behind it.  QEMU and ICH implement the 4.10.2
+ * reading, which is why bare alt=T worked here; both BSDs still refuse to
+ * rely on it (NetBSD points altnext at the real next stage, FreeBSD at a
+ * pre-halted dummy).  Pass 0 for end-of-chain semantics. [ehci-audit 6] */
 static void ehci_fill_qtd(ehci_hc_t *hc, int idx, uint32_t next_dma,
-                          uint32_t pid, uint32_t bytes, int toggle,
-                          dma_addr_t data_dma, int ioc)
+                          uint32_t alt_dma, uint32_t pid, uint32_t bytes,
+                          int toggle, dma_addr_t data_dma, int ioc)
 {
     struct ehci_qtd *q = &hc->qtd[idx];
     memset(q, 0, sizeof(*q));
     q->next = next_dma ? next_dma : EHCI_LINK_TERMINATE;
-    q->alt_next = EHCI_LINK_TERMINATE;
+    q->alt_next = alt_dma ? alt_dma : EHCI_LINK_TERMINATE;
     q->token = EHCI_QTD_STATUS_ACTIVE | pid |
                (3u << EHCI_QTD_CERR_SHIFT) |
                ((bytes & 0x7FFF) << EHCI_QTD_BYTES_SHIFT) |
@@ -441,15 +451,22 @@ static int ehci_control_transfer(ehci_hc_t *hc, usb_transfer_t *xfer)
     /* status stage direction is opposite the data stage (IN if no data). */
     uint32_t status_pid = (in && len) ? EHCI_QTD_PID_OUT : EHCI_QTD_PID_IN;
 
-    ehci_fill_qtd(hc, status_i, 0, status_pid, 0, 1, 0, 1);
+    ehci_fill_qtd(hc, status_i, 0, 0, status_pid, 0, 1, 0, 1);
     if (data_i >= 0) {
         uint32_t dpid = in ? EHCI_QTD_PID_IN : EHCI_QTD_PID_OUT;
-        ehci_fill_qtd(hc, data_i, ehci_qtd_dma(hc, status_i), dpid, len, 1,
+        /* The data qTD's alt_next points at the STATUS qTD: a short IN data
+         * stage then reaches the status stage under both spec readings
+         * (4.10.2-HCs take Next, 3.5.2-HCs take Alt -- same destination).
+         * With bare alt=T, 3.5.2-literal silicon abandoned EP0 mid-transfer
+         * after any short read (concrete trigger: the 11-byte hub
+         * descriptor request that a small hub answers with 9). */
+        ehci_fill_qtd(hc, data_i, ehci_qtd_dma(hc, status_i),
+                      ehci_qtd_dma(hc, status_i), dpid, len, 1,
                       hc->bounce_dma, 0);
-        ehci_fill_qtd(hc, setup_i, ehci_qtd_dma(hc, data_i),
+        ehci_fill_qtd(hc, setup_i, ehci_qtd_dma(hc, data_i), 0,
                       EHCI_QTD_PID_SETUP, 8, 0, hc->setup_dma, 0);
     } else {
-        ehci_fill_qtd(hc, setup_i, ehci_qtd_dma(hc, status_i),
+        ehci_fill_qtd(hc, setup_i, ehci_qtd_dma(hc, status_i), 0,
                       EHCI_QTD_PID_SETUP, 8, 0, hc->setup_dma, 0);
     }
 
@@ -484,7 +501,7 @@ static int ehci_bulk_transfer(ehci_hc_t *hc, usb_transfer_t *xfer)
 
     uint32_t pid = in ? EHCI_QTD_PID_IN : EHCI_QTD_PID_OUT;
     int toggle = xfer->ep ? xfer->ep->toggle : 0;
-    ehci_fill_qtd(hc, 0, 0, pid, len, toggle, len ? hc->bounce_dma : 0, 1);
+    ehci_fill_qtd(hc, 0, 0, 0, pid, len, toggle, len ? hc->bounce_dma : 0, 1);
 
     int r = ehci_run_qh(hc, 0, 1, ehci_endp_char(xfer, 0), /* [DRV-06] single qTD */
                         xfer->timeout_ms ? xfer->timeout_ms
@@ -572,7 +589,7 @@ static int ehci_intr_transfer(ehci_hc_t *hc, usb_transfer_t *xfer)
 
     /* One qTD, at the front of the pool -- submit_lock serialises us against
      * the async path that also uses it. */
-    ehci_fill_qtd(hc, 0, 0, in ? EHCI_QTD_PID_IN : EHCI_QTD_PID_OUT, len,
+    ehci_fill_qtd(hc, 0, 0, 0, in ? EHCI_QTD_PID_IN : EHCI_QTD_PID_OUT, len,
                   xfer->ep ? xfer->ep->toggle : 0, len ? hc->bounce_dma : 0, 1);
 
     /* A periodic QH is NOT the head of a reclamation list: EHCI_QH_HEAD is an
