@@ -110,13 +110,27 @@ static void ext2_node_close(fs_node_t *node) {
         ctx->pin_count--;
     }
     int finish_delete = (ctx->pin_count == 0 && ctx->orphaned && ctx->fs);
+    ext2_fs_t *dead_fs = NULL;
+    uint32_t   dead_ino = 0;
     if (finish_delete) {
         /* Re-pin across the teardown.  The block/inode frees below take
          * fs->alloc_lock and do I/O, so they must not run holding the cache
          * lock -- but a slot at pin_count 0 is fair game for the allocator,
          * which would hand this half-torn-down slot to another lookup.  The
-         * pin keeps it reserved; it is dropped again at the end. */
+         * pin keeps it reserved; it is dropped again at the end.
+         *
+         * EXT2-A17 (audit CY-15): unlink the slot from lookup NOW, while
+         * the cache lock is still held.  ext2_free_inode below makes the
+         * inode number reallocatable, and a lookup of the new file that
+         * receives it used to match this slot (fs/inode_num were still
+         * set) and take the pinned-refresh path — handing back a node
+         * this teardown was in the middle of gutting, leaving that
+         * caller with ctx->fs == NULL. */
         ctx->pin_count = 1;
+        dead_fs  = ctx->fs;
+        dead_ino = ctx->inode_num;
+        ctx->fs = NULL;
+        ctx->inode_num = 0;
     }
     mutex_unlock(&ext2_node_cache_lock);
 
@@ -125,9 +139,11 @@ static void ext2_node_close(fs_node_t *node) {
      * FD has closed, complete the delete the unlink path skipped. */
     if (finish_delete) {
         /* EXT2-A15: commits the emptied inode before releasing its
-         * blocks, so a failure here can only leak. */
-        (void)ext2_release_inode_blocks(ctx->fs, ctx->inode_num, &ctx->inode);
-        ext2_free_inode(ctx->fs, ctx->inode_num,
+         * blocks, so a failure here can only leak.  The slot is already
+         * unlinked from lookup (EXT2-A17), so work from the saved
+         * identity rather than the cleared fields. */
+        (void)ext2_release_inode_blocks(dead_fs, dead_ino, &ctx->inode);
+        ext2_free_inode(dead_fs, dead_ino,
                         ctx->was_dir_at_unlink ? 1 : 0);
         memset(&ctx->inode, 0, sizeof(ctx->inode));
         node->length = 0;
@@ -143,8 +159,6 @@ static void ext2_node_close(fs_node_t *node) {
          * this slot and copy in the on-disk inode that ext2_finddir
          * just read.  */
         mutex_lock(&ext2_node_cache_lock);
-        ctx->fs = NULL;
-        ctx->inode_num = 0;
         ctx->pin_count = 0;     /* release the teardown re-pin */
         mutex_unlock(&ext2_node_cache_lock);
     }
@@ -3682,9 +3696,17 @@ void ext2_free_inode(ext2_fs_t *fs, uint32_t inode_num, int was_dir) {
      * onto the same slot (double-free / half-populated node). */
     mutex_lock(&ext2_node_cache_lock);
     for (int i = 0; i < EXT2_NODE_CACHE_SIZE; i++) {
+        /* EXT2-A17 (audit CY-04): the recycler requires pin_count==0
+         * AND lock.locked==0; this scan checked only the pin.  A node
+         * can be locked while unpinned — finddir hands children back
+         * unpinned and ext2_dir_is_empty/readdir then hold that lock
+         * across sleeping disk I/O — so freeing the scratch buffers
+         * here pulled the buffer out from under a live reader and
+         * memset the mutex it was holding. */
         if (ext2_node_cache[i].fs == fs &&
             ext2_node_cache[i].inode_num == inode_num &&
-            ext2_node_cache[i].pin_count == 0) {
+            ext2_node_cache[i].pin_count == 0 &&
+            ext2_node_cache[i].lock.locked == 0) {
             uint32_t bs = fs->block_size;
             if (ext2_node_cache[i].block_buf) {
                 kfree(ext2_node_cache[i].block_buf, bs);
@@ -4125,13 +4147,28 @@ static int ext2_add_entry(fs_node_t *dir, const char *name, uint32_t inode, uint
     uint32_t dir_size = ctx->inode.i_size;
     uint32_t pos = 0;
     int result = -1;
-    
-    // Search for space in existing blocks
+
+    /*
+     * EXT2-A17 (audit CY-05): scan the WHOLE directory before inserting.
+     *
+     * The callers' EEXIST probe (finddir) runs in a separate critical
+     * section from this insert, so two concurrent creates of the same
+     * name could both see it absent and both add a record — leaving two
+     * live entries with identical names, which e2fsck flags and which
+     * makes lookups non-deterministic.  Checking as we go is not enough:
+     * the first block with room may precede the block holding the
+     * duplicate.  So pass one looks for the name and remembers the first
+     * usable slot; pass two commits into that slot.
+     */
+    uint32_t fit_block = 0;      /* physical block holding the slot */
+    uint32_t fit_off = 0;        /* offset of the record to split/reuse */
+    int      fit_reuse = 0;      /* 1 = claim a deleted record as-is */
+
     while (pos < dir_size) {
         uint32_t block_idx = pos / fs->block_size;
         uint32_t block_off = pos % fs->block_size;
         uint32_t block_num = ext2_get_block_num(fs, &ctx->inode, block_idx, indirect, dindirect, tindirect);
-        
+
         if (block_num == 0) break;
         /* EXT2-A16 (audit CY-07/DE-07): splicing an entry into a buffer
          * whose refresh failed would commit the PREVIOUS block's image
@@ -4162,44 +4199,29 @@ static int ext2_add_entry(fs_node_t *dir, const char *name, uint32_t inode, uint
              * buffer (heap overflow).  Treat it as a malformed entry. */
             if (actual_size > de->rec_len) break;
             uint32_t slack = de->rec_len - actual_size;
-            
-            // Can we fit the new entry in the slack space?
-            if (slack >= required_size && de->inode != 0) {
-                // Split this entry
-                de->rec_len = actual_size;
 
-                ext2_dirent_t *new_de = (ext2_dirent_t *)(block_buf + block_off + actual_size);
-                new_de->inode = inode;
-                new_de->rec_len = slack;
-                new_de->name_len = name_len;
-                new_de->file_type = file_type;
-                memcpy(new_de->name, name, name_len);
-
-                ext2_write_dir_block(fs, ctx, block_num, block_buf);
-                if (ext2_trace_on() && ctx->inode_num <= EXT2_TRACE_PARENT_LIMIT) {
-                    kprintf("ext2trace: ADD    parent=%u name='%s' child=%u ft=%u (split)\n",
-                            ctx->inode_num, name, inode, file_type);
-                }
-                result = 0;
-                goto done;
+            if (de->inode != 0 && de->name_len == name_len &&
+                de->name_len <= (uint32_t)(de->rec_len - 8) &&
+                memcmp(de->name, name, name_len) == 0) {
+                result = -EEXIST;
+                goto cleanup;
             }
 
-            // Can we reuse a deleted entry?
-            if (de->inode == 0 && de->rec_len >= required_size) {
-                de->inode = inode;
-                de->name_len = name_len;
-                de->file_type = file_type;
-                memcpy(de->name, name, name_len);
-
-                ext2_write_dir_block(fs, ctx, block_num, block_buf);
-                if (ext2_trace_on() && ctx->inode_num <= EXT2_TRACE_PARENT_LIMIT) {
-                    kprintf("ext2trace: ADD    parent=%u name='%s' child=%u ft=%u (reuse)\n",
-                            ctx->inode_num, name, inode, file_type);
+            if (fit_block == 0) {
+                // Room in this entry's slack?
+                if (slack >= required_size && de->inode != 0) {
+                    fit_block = block_num;
+                    fit_off   = block_off;
+                    fit_reuse = 0;
                 }
-                result = 0;
-                goto done;
+                // Or a deleted entry big enough to take over?
+                else if (de->inode == 0 && de->rec_len >= required_size) {
+                    fit_block = block_num;
+                    fit_off   = block_off;
+                    fit_reuse = 1;
+                }
             }
-            
+
             block_off += de->rec_len;
             pos += de->rec_len;
         }
@@ -4219,19 +4241,70 @@ static int ext2_add_entry(fs_node_t *dir, const char *name, uint32_t inode, uint
             pos = block_end;
     }
 
+    /* Pass two: commit into the slot pass one picked. */
+    if (fit_block != 0) {
+        if (ext2_read_block(fs, fit_block, block_buf) != fs->block_size) {
+            result = -EIO;
+            goto cleanup;
+        }
+        ext2_dirent_t *de = (ext2_dirent_t *)(block_buf + fit_off);
+        if (fit_reuse) {
+            de->inode = inode;
+            de->name_len = name_len;
+            de->file_type = file_type;
+            memcpy(de->name, name, name_len);
+        } else {
+            uint32_t actual_size = ((8 + de->name_len + 3) / 4) * 4;
+            uint32_t slack = de->rec_len - actual_size;
+            de->rec_len = actual_size;
+
+            ext2_dirent_t *new_de = (ext2_dirent_t *)(block_buf + fit_off + actual_size);
+            new_de->inode = inode;
+            new_de->rec_len = slack;
+            new_de->name_len = name_len;
+            new_de->file_type = file_type;
+            memcpy(new_de->name, name, name_len);
+        }
+
+        if (ext2_write_dir_block(fs, ctx, fit_block, block_buf) != fs->block_size) {
+            result = -EIO;
+            goto cleanup;
+        }
+        if (ext2_trace_on() && ctx->inode_num <= EXT2_TRACE_PARENT_LIMIT) {
+            kprintf("ext2trace: ADD    parent=%u name='%s' child=%u ft=%u (%s)\n",
+                    ctx->inode_num, name, inode, file_type,
+                    fit_reuse ? "reuse" : "split");
+        }
+        /* EXT2-A23 (audit DE-08/MS-09): the parent's mtime/ctime were
+         * only refreshed on the grow-a-block path, so the common
+         * insertion left the directory's timestamps stale. */
+        {
+            uint32_t tnow = (uint32_t)get_time();
+            ctx->inode.i_mtime = tnow;
+            ctx->inode.i_ctime = tnow;
+        }
+        result = 0;
+        ext2_write_inode(fs, ctx->inode_num, &ctx->inode);
+        goto cleanup;
+    }
+
     // No space found - need to allocate a new block
     uint32_t new_block_idx = dir_size / fs->block_size;
 
     // Use ext2_alloc_inode_block to allocate and attach the block
-    if (ext2_alloc_inode_block(fs, &ctx->inode, new_block_idx, indirect, dindirect, tindirect) != 0) {
-        result = -1; // Out of space
-        goto cleanup;
+    {
+        int arc = ext2_alloc_inode_block(fs, &ctx->inode, new_block_idx,
+                                         indirect, dindirect, tindirect);
+        if (arc != 0) {
+            result = (arc < 0) ? arc : -ENOSPC;   /* EXT2-A18 */
+            goto cleanup;
+        }
     }
 
     // Get the block number of the newly allocated block
     uint32_t new_block = ext2_get_block_num(fs, &ctx->inode, new_block_idx, indirect, dindirect, tindirect);
     if (new_block == 0) {
-        result = -1;
+        result = -EIO;
         goto cleanup;
     }
 
@@ -4259,7 +4332,7 @@ static int ext2_add_entry(fs_node_t *dir, const char *name, uint32_t inode, uint
         kprintf("ext2trace: ADD    parent=%u name='%s' child=%u ft=%u (new block)\n",
                 ctx->inode_num, name, inode, file_type);
     }
-    
+
     // Update directory size and timestamps
     /* EXT2-A4 (audit BM-06): i_blocks is NOT bumped here —
      * ext2_alloc_inode_block already accounted the new block (and any
@@ -4271,17 +4344,13 @@ static int ext2_add_entry(fs_node_t *dir, const char *name, uint32_t inode, uint
     uint32_t now = (uint32_t)get_time();
     ctx->inode.i_mtime = now;
     ctx->inode.i_ctime = now;
-    
+
     ext2_write_inode(fs, ctx->inode_num, &ctx->inode);
     result = 0;
-    
+
     // Invalidate readdir cache
     ctx->last_readdir_idx = (uint64_t)-1;
     ctx->last_readdir_pos = 0;
-    goto cleanup;
-
-done:
-    ext2_write_inode(fs, ctx->inode_num, &ctx->inode);
 
 cleanup:
     mutex_unlock(&ctx->lock);
@@ -4307,13 +4376,16 @@ int ext2_link(fs_node_t *parent, fs_node_t *source, const char *name) {
 
     if (ext2_finddir(parent, (char *)name) != NULL) return -EEXIST;
 
-    // Increment links_count
+    // Increment links_count (EXT2-A17/CY-09: RMW + commit under the lock)
+    mutex_lock(&source_ctx->lock);
     source_ctx->inode.i_links_count++;
     source_ctx->inode.i_ctime = (uint32_t)get_time();
     if (ext2_write_inode(fs, source_ctx->inode_num, &source_ctx->inode) != 0) {
         source_ctx->inode.i_links_count--;
+        mutex_unlock(&source_ctx->lock);
         return -EIO;
     }
+    mutex_unlock(&source_ctx->lock);
 
     // Add entry to directory
     uint8_t file_type = EXT2_FT_REG_FILE;
@@ -4323,10 +4395,15 @@ int ext2_link(fs_node_t *parent, fs_node_t *source, const char *name) {
     else if (s_flags == FS_PIPE) file_type = EXT2_FT_FIFO;
     else if (s_flags == FS_SYMLINK) file_type = EXT2_FT_SYMLINK;
 
-    if (ext2_add_entry(parent, name, source_ctx->inode_num, file_type) != 0) {
-        source_ctx->inode.i_links_count--;
-        ext2_write_inode(fs, source_ctx->inode_num, &source_ctx->inode);
-        return -EIO;
+    {
+        int arc = ext2_add_entry(parent, name, source_ctx->inode_num, file_type);
+        if (arc != 0) {
+            mutex_lock(&source_ctx->lock);
+            source_ctx->inode.i_links_count--;
+            ext2_write_inode(fs, source_ctx->inode_num, &source_ctx->inode);
+            mutex_unlock(&source_ctx->lock);
+            return (arc < 0) ? arc : -EIO;    /* EXT2-A18 */
+        }
     }
 
     return 0;
@@ -4443,19 +4520,32 @@ int ext2_rename(fs_node_t *old_parent, const char *old_name, fs_node_t *new_pare
         ext2_node_t *new_p_ctx = (ext2_node_t *)(uintptr_t)new_parent->impl;
         ext2_fs_t *fs = old_node_ctx->fs;
 
-        old_p_ctx->inode.i_links_count--;
+        /* EXT2-A17/CY-09: each parent's count under its own lock. */
+        mutex_lock(&old_p_ctx->lock);
+        if (old_p_ctx->inode.i_links_count > 0)
+            old_p_ctx->inode.i_links_count--;
         ext2_write_inode(fs, old_p_ctx->inode_num, &old_p_ctx->inode);
+        mutex_unlock(&old_p_ctx->lock);
 
+        mutex_lock(&new_p_ctx->lock);
         new_p_ctx->inode.i_links_count++;
         ext2_write_inode(fs, new_p_ctx->inode_num, &new_p_ctx->inode);
+        mutex_unlock(&new_p_ctx->lock);
 
-        // Update ".." in the moved directory
+        /* Update ".." in the moved directory.  EXT2-A17 (audit CY-08):
+         * this walks and rewrites through old_node_ctx's scratch
+         * buffers, which every other user of that node also shares —
+         * take its lock, as readdir/finddir/add_entry do. */
+        mutex_lock(&old_node_ctx->lock);
         if (!old_node_ctx->indirect_buf) old_node_ctx->indirect_buf = kmalloc(fs->block_size);
         if (!old_node_ctx->dindirect_buf) old_node_ctx->dindirect_buf = kmalloc(fs->block_size);
         if (!old_node_ctx->tindirect_buf) old_node_ctx->tindirect_buf = kmalloc(fs->block_size);
         if (!old_node_ctx->block_buf) old_node_ctx->block_buf = kmalloc(fs->block_size);
 
-        if (old_node_ctx->block_buf) {
+        if (old_node_ctx->block_buf && old_node_ctx->indirect_buf &&
+            old_node_ctx->dindirect_buf && old_node_ctx->tindirect_buf) {
+            /* EXT2-A33 (audit BM-13): all four buffers must exist —
+             * ext2_get_block_num dereferences the indirect ones. */
             uint32_t dotdot_block = ext2_get_block_num(fs, &old_node_ctx->inode, 0,
                                                        old_node_ctx->indirect_buf,
                                                        old_node_ctx->dindirect_buf,
@@ -4482,6 +4572,13 @@ int ext2_rename(fs_node_t *old_parent, const char *old_name, fs_node_t *new_pare
                 }
             }
         }
+        /* EXT2-A24 (audit DE-12): the moved directory's own dcache may
+         * hold ".." pointing at the OLD parent — the rename cycle check
+         * itself populates it.  Drop the whole cache; a stale ".." here
+         * misdirects path resolution and later cycle checks. */
+        memset(old_node_ctx->dcache, 0, sizeof(old_node_ctx->dcache));
+        old_node_ctx->dcache_idx = 0;
+        mutex_unlock(&old_node_ctx->lock);
     }
 
     rc = 0;
@@ -4900,16 +4997,21 @@ int ext2_mkdir(fs_node_t *dir, const char *name, uint16_t permission) {
         return -EIO;
     }
 
+    mutex_lock(&dir_ctx->lock);         /* EXT2-A17/CY-09 */
     dir_ctx->inode.i_links_count++;
     dir_ctx->inode.i_mtime = now;
     dir_ctx->inode.i_ctime = now;
     if (ext2_write_inode(fs, dir_ctx->inode_num, &dir_ctx->inode) != 0) {
+        mutex_unlock(&dir_ctx->lock);
         ext2_remove_entry(dir, name);
         ext2_release_inode_blocks(fs, inode_num, &inode);
         ext2_free_inode(fs, inode_num, 1);
+        mutex_lock(&dir_ctx->lock);
         dir_ctx->inode.i_links_count--;
+        mutex_unlock(&dir_ctx->lock);
         return -EIO;
     }
+    mutex_unlock(&dir_ctx->lock);
 
     return 0;
 }
@@ -4936,55 +5038,51 @@ int ext2_unlink(fs_node_t *dir, const char *name) {
     if (!victim) return -ENOENT;
     if ((victim->flags & 0x7) == FS_DIRECTORY) return -EISDIR;
 
+    /* EXT2-A17 (audit CY-02): finddir returns children UNPINNED, and
+     * everything below sleeps on disk I/O — the slot recycler is free
+     * to hand this slot to another inode in the meantime, after which
+     * we would decrement a stranger's link count.  Hold it. */
+    ext2_node_open(victim);
+
     victim_ctx = (ext2_node_t *)(uintptr_t)victim->impl;
     fs = victim_ctx->fs;
 
     ret = ext2_remove_entry(dir, name);
-    if (ret != 0) return -EIO;
+    if (ret != 0) { ext2_node_close(victim); return -EIO; }
+
+    /* EXT2-A17 (audit CY-09): the link-count read-modify-write and the
+     * inode commit belong together under the victim's own lock, or two
+     * concurrent unlinks of two names for one inode can both read the
+     * same count and one decrement is lost. */
+    mutex_lock(&victim_ctx->lock);
 
     if (victim_ctx->inode.i_links_count > 0) {
         victim_ctx->inode.i_links_count--;
     }
 
     if (victim_ctx->inode.i_links_count == 0) {
+        /* POSIX unlink-while-open: the name is already gone, but the
+         * inode and its blocks must stay valid until the last FD
+         * closes.  Mark it orphaned and let ext2_node_close finish the
+         * delete when the final pin drops — including OUR pin, taken
+         * above, which is released at the end of this function.  (This
+         * used to branch on pin_count and open-code the immediate
+         * case; routing both through the close path means one
+         * implementation, and it is the one that already gets the
+         * commit-then-free ordering right.) */
         victim_ctx->inode.i_dtime = (uint32_t)get_time();
-        if (victim_ctx->pin_count > 0) {
-            /* POSIX unlink-while-open semantics: the directory entry
-             * is gone (already removed above) so the file is no
-             * longer reachable by name, but the inode and its data
-             * blocks must remain valid for the open FDs.  Mark the
-             * in-memory state as orphaned; ext2_node_close will free
-             * the blocks and inode once pin_count drops to 0. */
-            victim_ctx->orphaned = 1;
-            victim_ctx->was_dir_at_unlink = 0;
-            if (ext2_write_inode(fs, victim_ctx->inode_num, &victim_ctx->inode) != 0) {
-                return -EIO;
-            }
-        } else {
-            /* EXT2-A15: inode committed (links 0, dtime set, block
-             * map cleared) before the bitmap bits are released. */
-            ret = ext2_release_inode_blocks(fs, victim_ctx->inode_num,
-                                            &victim_ctx->inode);
-            if (ret != 0) return ret;
-            ext2_free_inode(fs, victim_ctx->inode_num, 0);
-            memset(&victim_ctx->inode, 0, sizeof(victim_ctx->inode));
-            victim->length = 0;
-            /* Invalidate the cache slot — see matching comment in
-             * ext2_node_close.  Same hazard: inode_num gets reused
-             * fast and the next finddir for it would otherwise hit
-             * the stale slot. */
-            victim_ctx->fs = NULL;
-            victim_ctx->inode_num = 0;
-        }
+        victim_ctx->orphaned = 1;
+        victim_ctx->was_dir_at_unlink = 0;
+        ret = ext2_write_inode(fs, victim_ctx->inode_num, &victim_ctx->inode);
     } else {
         /* Update ctime: link count changed */
         victim_ctx->inode.i_ctime = (uint32_t)get_time();
-        if (ext2_write_inode(fs, victim_ctx->inode_num, &victim_ctx->inode) != 0) {
-            return -EIO;
-        }
+        ret = ext2_write_inode(fs, victim_ctx->inode_num, &victim_ctx->inode);
     }
 
-    return 0;
+    mutex_unlock(&victim_ctx->lock);
+    ext2_node_close(victim);          /* may complete the deferred delete */
+    return (ret != 0) ? -EIO : 0;
 }
 
 /*
@@ -5086,24 +5184,31 @@ int ext2_rmdir(fs_node_t *dir, const char *name) {
     victim = ext2_finddir(dir, (char *)name);
     if (!victim) return -ENOENT;
     if ((victim->flags & 0x7) != FS_DIRECTORY) return -ENOTDIR;
-    if (!ext2_dir_is_empty(victim)) return -ENOTEMPTY;
+
+    /* EXT2-A17 (audit CY-02): pin before the emptiness scan — that scan
+     * sleeps on disk I/O with the slot unpinned, so the recycler could
+     * hand it to another inode and we would go on to delete that one. */
+    ext2_node_open(victim);
+
+    if (!ext2_dir_is_empty(victim)) { ext2_node_close(victim); return -ENOTEMPTY; }
 
     dir_ctx = (ext2_node_t *)(uintptr_t)dir->impl;
     victim_ctx = (ext2_node_t *)(uintptr_t)victim->impl;
     fs = victim_ctx->fs;
 
     ret = ext2_remove_entry(dir, name);
-    if (ret != 0) return -EIO;
+    if (ret != 0) { ext2_node_close(victim); return -EIO; }
 
+    /* Parent loses the child's ".." link (EXT2-A17/CY-09: under lock). */
+    mutex_lock(&dir_ctx->lock);
     if (dir_ctx->inode.i_links_count > 0) {
         dir_ctx->inode.i_links_count--;
     }
-
     dir_ctx->inode.i_mtime = (uint32_t)get_time();
     dir_ctx->inode.i_ctime = dir_ctx->inode.i_mtime;
-    if (ext2_write_inode(fs, dir_ctx->inode_num, &dir_ctx->inode) != 0) {
-        return -EIO;
-    }
+    ret = ext2_write_inode(fs, dir_ctx->inode_num, &dir_ctx->inode);
+    mutex_unlock(&dir_ctx->lock);
+    if (ret != 0) { ext2_node_close(victim); return -EIO; }
 
     victim_ctx->inode.i_links_count = 0;
     victim_ctx->inode.i_dtime = (uint32_t)get_time();
@@ -5120,28 +5225,17 @@ int ext2_rmdir(fs_node_t *dir, const char *name) {
      * deferred delete for a directory (was_dir_at_unlink picks the is_dir
      * argument to ext2_free_inode); rmdir simply never set it up.
      */
-    if (victim_ctx->pin_count > 0) {
-        victim_ctx->orphaned = 1;
-        victim_ctx->was_dir_at_unlink = 1;
-        if (ext2_write_inode(fs, victim_ctx->inode_num, &victim_ctx->inode) != 0)
-            return -EIO;
-        return 0;
-    }
+    /* Mark orphaned and let ext2_node_close complete the teardown when
+     * the last pin — ours included — is dropped.  An open DIR fd keeps
+     * the directory's blocks valid for its readdir, as POSIX requires
+     * (EXT2-16), and the close path is the one with the correct
+     * commit-then-free ordering (EXT2-A15). */
+    victim_ctx->orphaned = 1;
+    victim_ctx->was_dir_at_unlink = 1;
+    ret = ext2_write_inode(fs, victim_ctx->inode_num, &victim_ctx->inode);
 
-    /* EXT2-A15: see ext2_unlink — commit first, then free. */
-    ret = ext2_release_inode_blocks(fs, victim_ctx->inode_num,
-                                    &victim_ctx->inode);
-    if (ret != 0) return ret;
-    ext2_free_inode(fs, victim_ctx->inode_num, 1);
-    memset(&victim_ctx->inode, 0, sizeof(victim_ctx->inode));
-    victim->length = 0;
-    /* Invalidate the cache slot, as ext2_unlink does: inode numbers get
-     * reused quickly, and a later finddir for this one would otherwise hit
-     * this stale slot holding a zeroed inode. */
-    victim_ctx->fs = NULL;
-    victim_ctx->inode_num = 0;
-
-    return 0;
+    ext2_node_close(victim);
+    return (ret != 0) ? -EIO : 0;
 }
 
 int ext2_statfs(fs_node_t *node, struct statfs *buf) {
@@ -5199,9 +5293,54 @@ int ext2_unmount(fs_node_t *node) {
     ext2_fs_t *fs = ctx->fs;
     if (!fs) return -EINVAL;
 
+    /*
+     * EXT2-A17 (audit CY-03/MS-03): tear the node cache down under the
+     * cache lock, and only when nothing is using it.
+     *
+     * This loop used to free every slot's scratch buffers and memset the
+     * ext2_node_t — mutex included — with no lock and no regard for
+     * pin_count, then kfree(fs).  MNT_FORCE bypasses the VFS busy check
+     * and a thread mid-lookup holds no fd for vfs_is_busy to see, so a
+     * reader sleeping inside ext2_readdir could resume parsing freed
+     * heap and unlock a destroyed mutex.
+     *
+     * The root node this unmount was called through is itself pinned, so
+     * it is excluded from the busy test.
+     */
+    ext2_node_t *root_ctx = ctx;
+    mutex_lock(&ext2_node_cache_lock);
+    for (int i = 0; i < EXT2_NODE_CACHE_SIZE; i++) {
+        if (ext2_node_cache[i].fs != fs) continue;
+        if (&ext2_node_cache[i] == root_ctx) continue;
+        if (ext2_node_cache[i].pin_count != 0 ||
+            ext2_node_cache[i].lock.locked != 0) {
+            mutex_unlock(&ext2_node_cache_lock);
+            kprintf("ext2: unmount refused — inode %u still in use "
+                    "(pin=%u locked=%u)\n",
+                    ext2_node_cache[i].inode_num,
+                    ext2_node_cache[i].pin_count,
+                    ext2_node_cache[i].lock.locked);
+            return -EBUSY;
+        }
+        /* An orphaned-but-unpinned slot still owes its deferred delete;
+         * completing it here keeps the volume from leaking the inode. */
+        if (ext2_node_cache[i].orphaned) {
+            ext2_node_t *o = &ext2_node_cache[i];
+            uint32_t onum = o->inode_num;
+            int was_dir = o->was_dir_at_unlink;
+            o->fs = NULL;
+            o->inode_num = 0;
+            o->orphaned = 0;
+            mutex_unlock(&ext2_node_cache_lock);
+            (void)ext2_release_inode_blocks(fs, onum, &o->inode);
+            ext2_free_inode(fs, onum, was_dir);
+            mutex_lock(&ext2_node_cache_lock);
+        }
+    }
+
     // Free all active cached nodes for this fs
     for (int i = 0; i < EXT2_NODE_CACHE_SIZE; i++) {
-        if (ext2_node_cache[i].fs == fs) {
+        if (ext2_node_cache[i].fs == fs || &ext2_node_cache[i] == root_ctx) {
             uint32_t old_block_size = fs->block_size;
             if (ext2_node_cache[i].block_buf) kfree(ext2_node_cache[i].block_buf, old_block_size);
             if (ext2_node_cache[i].indirect_buf) kfree(ext2_node_cache[i].indirect_buf, old_block_size);
@@ -5211,6 +5350,7 @@ int ext2_unmount(fs_node_t *node) {
             memset(&ext2_fs_node_cache[i], 0, sizeof(fs_node_t));
         }
     }
+    mutex_unlock(&ext2_node_cache_lock);
 
     /* Reconcile any deferred superblock / group-descriptor free counts to
      * disk before tearing the in-core copies down. */
