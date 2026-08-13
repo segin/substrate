@@ -152,6 +152,16 @@ static int ehci_port_reset(usb_hcd_t *hcd, uint8_t port)
             break;
     }
     psc = ehci_portsc_rd(hc, port);
+    if (psc & EHCI_PORT_RESET) {
+        /* [PORT-02] Reset never completed -- the spec bound is 2 ms after
+         * the PR deassert, so a PR still set here means a faulted/halted
+         * controller (Table 2-16: the HC may hold Port Reset asserted when
+         * HCHalted is one).  PED is meaningless before PR reads 0 (4.2.2);
+         * falling through misread it as "not high-speed" and handed a port
+         * with PR STILL ASSERTED to a companion. */
+        kprintf("ehci: port %u reset timeout\n", port);
+        return -1;
+    }
     if (!(psc & EHCI_PORT_ENABLE)) {
         /* Not high-speed: release to a companion controller. */
         ehci_portsc_wr(hc, port, psc | EHCI_PORT_OWNER);
