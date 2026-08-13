@@ -637,6 +637,32 @@ static int xhci_recover_ep(xhci_hc_t *hc, uint8_t slot, int dci,
  * one lost or duplicated event can no longer desynchronise the endpoint for
  * the rest of the session.
  */
+/*
+ * [RF-1a] Map a transfer completion code to a USB_XFER_* status.
+ *
+ * Every non-success code used to collapse into USB_XFER_STALL, so a
+ * transient USB Transaction Error (4), Babble (3), TRB Error (5) or Context
+ * State Error (19) reported the same as a device's deliberate STALL
+ * handshake -- and callers act on precisely that distinction: usb_msc runs
+ * usb_clear_halt on STALL but full reset recovery on transport errors, and
+ * usb_hid / usb_hid_mouse permanently latch ctl_poll_refused when a
+ * GET_REPORT poll "stalls".  One flaky bus transaction on the polled
+ * control path could therefore silently kill a HID device's input for the
+ * life of the machine.  EHCI grew the same classifier in [ehci-audit 2];
+ * the taxonomy (STALL = the device said no; ERROR = the transport broke;
+ * TIMEOUT = nothing answered) is shared, the encodings are per-driver.
+ * xhci_recover_ep() runs unconditionally on these paths either way, so
+ * recovery behavior is unchanged -- only the caller-visible verdict.
+ */
+static int xhci_xfer_status(uint32_t cc)
+{
+    if (cc == 0)
+        return USB_XFER_TIMEOUT;        /* no event arrived at all */
+    if (cc == XHCI_CC_STALL)
+        return USB_XFER_STALL;
+    return USB_XFER_ERROR;
+}
+
 static int xhci_wait_td(xhci_hc_t *hc, uint8_t slot, int dci,
                         const uint64_t *trbs, int ntrbs,
                         uint32_t *out_status, int *out_which,
@@ -1594,16 +1620,6 @@ static int xhci_control(xhci_hc_t *hc, usb_transfer_t *xfer)
              * says what happened, but the endpoint's own state says what it
              * needs, and xhci_recover_ep() dispatches on that. [X-03] */
             (void)xhci_recover_ep(hc, slot, 1, ring, 0);
-            /*
-             * Name the completion code.  Everything that is not Success or
-             * Short collapses into USB_XFER_STALL on the way out, so the
-             * core's "err=-1" covers Stall (6), USB Transaction Error (4),
-             * Babble (3), TRB Error (5) and Context State Error (19) alike
-             * -- four of which are nothing like a stall, and the difference
-             * decides whether a retry can possibly help.  On a machine whose
-             * only instrument is the boot log, that distinction has to reach
-             * the log. [HW-08]
-             */
             /* Behind xhcidebug: a control transfer failing is routine (an
              * optional request the device declines answers with a stall),
              * so this is a debugging instrument rather than news.  Printing
@@ -1612,7 +1628,7 @@ static int xhci_control(xhci_hc_t *hc, usb_transfer_t *xfer)
             if (xhci_trace)
                 kprintf("xhci: control transfer failed: slot %u ep0 cc=%d%s\n",
                         slot, cc, (cc == 0) ? " (no event: timeout)" : "");
-            xfer->status = (cc == 0) ? USB_XFER_TIMEOUT : USB_XFER_STALL;
+            xfer->status = xhci_xfer_status(cc);   /* [RF-1a] */
             return xfer->status;
         }
         if (len && which == 1) {           /* data stage, short */
@@ -1717,7 +1733,7 @@ static int xhci_bulk(xhci_hc_t *hc, usb_transfer_t *xfer)
         uint16_t sid = (xfer->ep->max_streams > 0)
                        ? (xfer->stream_id ? xfer->stream_id : 1) : 0;
         (void)xhci_recover_ep(hc, slot, dci, ring, sid);   /* [X-03] */
-        xfer->status = (cc == 0) ? USB_XFER_TIMEOUT : USB_XFER_STALL;
+        xfer->status = xhci_xfer_status(cc);   /* [RF-1a] */
         return xfer->status;
     }
 
