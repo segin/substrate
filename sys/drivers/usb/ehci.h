@@ -86,6 +86,11 @@ void ehci_init(void);
 #define EHCI_PORT_OVERCURRENT  0x00000010
 #define EHCI_PORT_OC_CH        0x00000020
 #define EHCI_PORT_RESET        0x00000100   /* port reset */
+/* Write-1-to-clear change bits: mask these out of every PORTSC
+ * read-modify-write so an unrelated write does not silently acknowledge a
+ * pending connect/enable/overcurrent change. [ehci-audit 10] */
+#define EHCI_PORT_CLEAR        (EHCI_PORT_CONNECT_CH | EHCI_PORT_ENABLE_CH | \
+                                EHCI_PORT_OC_CH)
 #define EHCI_PORT_LINESTATUS   0x00000C00   /* bits 11:10: D+/D- line state */
 #define EHCI_PORT_POWER        0x00001000
 #define EHCI_PORT_OWNER        0x00002000   /* 1 = companion owns the port */

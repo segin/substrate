@@ -133,14 +133,14 @@ static int ehci_port_reset(usb_hcd_t *hcd, uint8_t port)
      * high-speed device to a companion that may not exist. [PORT-01] */
     if (!(psc & EHCI_PORT_ENABLE) &&
         (psc & EHCI_PORT_LINESTATUS) == EHCI_PORT_LS_KSTATE) {
-        ehci_portsc_wr(hc, port, psc | EHCI_PORT_OWNER);
+        ehci_portsc_wr(hc, port, (psc & ~EHCI_PORT_CLEAR) | EHCI_PORT_OWNER);
         return -1;
     }
 
     /* Assert reset for 50ms (clear Enable + preserve W1C-safe bits). */
     psc = ehci_portsc_rd(hc, port);
     psc &= ~EHCI_PORT_ENABLE;
-    psc &= ~(EHCI_PORT_CONNECT_CH | EHCI_PORT_ENABLE_CH | EHCI_PORT_OC_CH);
+    psc &= ~EHCI_PORT_CLEAR;
     psc |= EHCI_PORT_RESET;
     ehci_portsc_wr(hc, port, psc);
     ehci_delay_ms(50);
@@ -148,7 +148,7 @@ static int ehci_port_reset(usb_hcd_t *hcd, uint8_t port)
     /* Deassert; the controller completes the reset and sets Enable if the
      * device is high-speed (else it releases the port to a companion). */
     psc = ehci_portsc_rd(hc, port);
-    psc &= ~EHCI_PORT_RESET;
+    psc &= ~(EHCI_PORT_RESET | EHCI_PORT_CLEAR);
     ehci_portsc_wr(hc, port, psc);
 
     /* Wait up to 50ms for the reset to finish + the port to enable. */
@@ -171,7 +171,7 @@ static int ehci_port_reset(usb_hcd_t *hcd, uint8_t port)
     }
     if (!(psc & EHCI_PORT_ENABLE)) {
         /* Not high-speed: release to a companion controller. */
-        ehci_portsc_wr(hc, port, psc | EHCI_PORT_OWNER);
+        ehci_portsc_wr(hc, port, (psc & ~EHCI_PORT_CLEAR) | EHCI_PORT_OWNER);
         return -1;
     }
     return 0;
@@ -181,7 +181,7 @@ static int ehci_port_enable(usb_hcd_t *hcd, uint8_t port, int enable)
 {
     ehci_hc_t *hc = hcd->priv;
     uint32_t psc = ehci_portsc_rd(hc, port);
-    psc &= ~(EHCI_PORT_CONNECT_CH | EHCI_PORT_ENABLE_CH | EHCI_PORT_OC_CH);
+    psc &= ~EHCI_PORT_CLEAR;
     if (enable) psc |= EHCI_PORT_ENABLE; else psc &= ~EHCI_PORT_ENABLE;
     ehci_portsc_wr(hc, port, psc);
     return 0;
@@ -876,7 +876,7 @@ static int ehci_start(ehci_hc_t *hc)
     /* Power all ports on. */
     for (uint8_t p = 1; p <= hc->nports; p++) {
         uint32_t psc = ehci_portsc_rd(hc, p);
-        ehci_portsc_wr(hc, p, psc | EHCI_PORT_POWER);
+        ehci_portsc_wr(hc, p, (psc & ~EHCI_PORT_CLEAR) | EHCI_PORT_POWER);
     }
     ehci_delay_ms(20);
     EHCI_STEP("ports powered");
