@@ -3618,9 +3618,13 @@ static int ext2_add_entry(fs_node_t *dir, const char *name, uint32_t inode, uint
     }
     
     // Update directory size and timestamps
+    /* EXT2-A4 (audit BM-06): i_blocks is NOT bumped here —
+     * ext2_alloc_inode_block already accounted the new block (and any
+     * indirect blocks).  The old extra increment double-counted every
+     * directory block past the first, failing e2fsck on every grown
+     * directory. */
     ctx->inode.i_size += fs->block_size;
-    ctx->inode.i_blocks += (fs->block_size / 512);
-    
+
     uint32_t now = (uint32_t)get_time();
     ctx->inode.i_mtime = now;
     ctx->inode.i_ctime = now;
