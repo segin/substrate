@@ -10,6 +10,7 @@
 #include <sys/errno.h>
 #include <sys/major.h>
 #include <sys/mount.h>
+#include <sys/proc.h>
 #include <sys/stat.h>
 #include <vfs/vfs.h>
 #include <vm/uma.h>
@@ -1908,6 +1909,32 @@ static inline void ext2_inode_set_gid(ext2_inode_t *i, uint32_t gid) {
     i->i_gid = (uint16_t)gid;
     i->l_i_gid_high = (uint16_t)(gid >> 16);
 }
+
+/*
+ * EXT2-A21 (audit MS-07): ownership of a newly created object.
+ *
+ * POSIX: a new file belongs to the creating process's effective uid.
+ * The group is the parent directory's when the directory is set-gid
+ * (and a new directory then inherits the set-gid bit), otherwise the
+ * creator's effective gid.  The driver used to copy the PARENT's owner
+ * onto every file and directory, and hardcode root:root onto every
+ * symlink, so an unprivileged user's files in /tmp came out owned by
+ * root — unremovable under the sticky bit — and root's files in a user
+ * directory came out owned by that user.
+ */
+static void ext2_set_creator_owner(ext2_inode_t *inode, fs_node_t *dir,
+                                   uint16_t *mode) {
+    uint32_t uid = current_process ? current_process->euid : 0;
+    uint32_t gid = current_process ? current_process->egid : 0;
+    if (dir && (dir->mask & S_ISGID)) {
+        gid = dir->gid;
+        if (mode && (*mode & S_IFMT) == S_IFDIR)
+            *mode |= S_ISGID;          /* set-gid directories propagate */
+    }
+    ext2_inode_set_uid(inode, uid);
+    ext2_inode_set_gid(inode, gid);
+}
+
 
 /* EXT2-A20 (audit MS-06/IN-06): device numbers have two on-disk
  * encodings.  The old one packs an 8-bit major/minor into i_block[0];
@@ -4828,8 +4855,8 @@ static int ext2_mknod(fs_node_t *dir, const char *name, uint16_t mode, uint32_t 
 
     memset(&inode, 0, sizeof(inode));
     inode.i_mode = mode;
-    ext2_inode_set_uid(&inode, dir->uid);
-    ext2_inode_set_gid(&inode, dir->gid);
+    ext2_set_creator_owner(&inode, dir, &mode);   /* EXT2-A21 */
+    inode.i_mode = mode;
     inode.i_links_count = 1;
     if (type == S_IFCHR || type == S_IFBLK) {
         ext2_inode_set_rdev(&inode, dev);          /* EXT2-A20 */
@@ -4885,8 +4912,7 @@ static int ext2_symlink(fs_node_t *dir, const char *target, const char *name) {
     ext2_inode_t inode;
     memset(&inode, 0, sizeof(inode));
     inode.i_mode = EXT2_S_IFLNK | 0777;
-    ext2_inode_set_uid(&inode, dir->uid);
-    ext2_inode_set_gid(&inode, dir->gid);
+    ext2_set_creator_owner(&inode, dir, NULL);   /* EXT2-A21 */
     inode.i_links_count = 1;
     inode.i_size = target_len;
     uint32_t now = (uint32_t)get_time();
@@ -5003,9 +5029,11 @@ int ext2_mkdir(fs_node_t *dir, const char *name, uint16_t permission) {
 
     now = (uint32_t)get_time();
 
-    inode.i_mode = (uint16_t)(S_IFDIR | (permission & 0777));
-    ext2_inode_set_uid(&inode, dir->uid);
-    ext2_inode_set_gid(&inode, dir->gid);
+    {
+        uint16_t dmode = (uint16_t)(S_IFDIR | (permission & 0777));
+        ext2_set_creator_owner(&inode, dir, &dmode);   /* EXT2-A21 */
+        inode.i_mode = dmode;
+    }
     inode.i_size = fs->block_size;
     inode.i_links_count = 2;
     inode.i_blocks = fs->block_size / 512;
