@@ -1227,6 +1227,7 @@ static int uhci_pci_attach(struct device *dev)
     hc->hcd.iso_reclaim = uhci_hcd_iso_reclaim;
     hc->hcd.priv = hc;
 
+    hc->hcd.kdev = dev;                  /* shutdown dispatch [RF-5] */
     usb_register_hcd(&hc->hcd);
 
     uhci_instances++;
@@ -1249,10 +1250,39 @@ static const device_id_t uhci_pci_ids[] = {
     { 0, 0, 0, 0, 0 }, /* sentinel */
 };
 
+/*
+ * Reboot/shutdown: stop the schedule walk and reset the controller.
+ *
+ * The frame list stays permanently linked (every entry points at the async
+ * QH), so a running UHCI keeps DMAing this kernel's schedule pages straight
+ * through a warm reboot -- the [ehci-audit 7] hazard, UHCI edition.
+ * HCRESET returns the controller (and port ownership) to power-on
+ * state. [RF-5]
+ */
+static void uhci_pci_shutdown(struct device *dev)
+{
+    usb_hcd_t *hcd = usb_hcd_by_kdev(dev);
+    uhci_hc_t *hc;
+    uint64_t deadline;
+
+    if (!hcd)
+        return;
+    hc = hcd->priv;
+    uhci_writew(hc, UHCI_USBCMD, 0);            /* clear Run/Stop */
+    deadline = (uint64_t)get_uptime_ms() + 50;
+    while (!(uhci_readw(hc, UHCI_USBSTS) & UHCI_STS_HCH)) {
+        if ((uint64_t)get_uptime_ms() > deadline)
+            break;
+        __asm__ volatile("pause");
+    }
+    uhci_writew(hc, UHCI_USBCMD, UHCI_CMD_HCRESET);
+}
+
 static struct driver uhci_pci_driver = {
     .name     = "uhci",
     .id_table = uhci_pci_ids,
     .attach   = uhci_pci_attach,
+    .shutdown = uhci_pci_shutdown,
 };
 
 void uhci_init(void)

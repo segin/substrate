@@ -2500,6 +2500,45 @@ static void xhci_power_ports(xhci_hc_t *hc)
  * allocation: dropping the xhci_hc_t on a failed attach would otherwise
  * strand its DMA rings with no pointer left to free them through.
  */
+/* Stop the controller: clear Run, wait for HCHalted.  Shared by the failed-
+ * attach teardown and the reboot shutdown hook. [RF-5] */
+static void xhci_halt(xhci_hc_t *hc)
+{
+    if (!hc->op)
+        return;
+    wr32(hc->op, XHCI_OP_USBCMD,
+         rd32(hc->op, XHCI_OP_USBCMD) & ~XHCI_CMD_RUN);
+    for (int i = 0; i < XHCI_HALT_WAIT_MS &&
+                    !(rd32(hc->op, XHCI_OP_USBSTS) & XHCI_STS_HCH); i++)
+        xhci_delay_ms(1);
+}
+
+/*
+ * Reboot/shutdown: stop the controller's DMA and reset it.
+ *
+ * Left running, the xHC keeps walking its command/event/transfer rings --
+ * CRCR, DCBAAP and ERSTBA all point into THIS kernel's memory -- straight
+ * through a warm reboot, and the next kernel reuses those pages
+ * immediately.  On the xHCI-only HP Pavilion this controller also carries
+ * the root disk, making it the highest-stakes instance of the hazard
+ * [ehci-audit 7] closed for EHCI.  HCRST returns all operational state to
+ * power-on defaults so firmware can reclaim the ports.  QEMU resets its
+ * device models itself; this is for real hardware. [RF-5]
+ */
+static void xhci_pci_shutdown(struct device *dev)
+{
+    usb_hcd_t *hcd = usb_hcd_by_kdev(dev);
+    xhci_hc_t *hc;
+
+    if (!hcd)
+        return;
+    hc = hcd->priv;
+    if (!hc->op)
+        return;
+    xhci_halt(hc);
+    wr32(hc->op, XHCI_OP_USBCMD, XHCI_CMD_HCRST);
+}
+
 static void xhci_teardown(xhci_hc_t *hc)
 {
     /*
@@ -2508,13 +2547,7 @@ static void xhci_teardown(xhci_hc_t *hc)
      * with DCBAAP, CRCR and ERSTBA all pointing into pages we are about to
      * free.  hc->op is NULL if we never got as far as decoding CAPLENGTH. [X-17]
      */
-    if (hc->op) {
-        wr32(hc->op, XHCI_OP_USBCMD,
-             rd32(hc->op, XHCI_OP_USBCMD) & ~XHCI_CMD_RUN);
-        for (int i = 0; i < XHCI_HALT_WAIT_MS &&
-                        !(rd32(hc->op, XHCI_OP_USBSTS) & XHCI_STS_HCH); i++)
-            xhci_delay_ms(1);
-    }
+    xhci_halt(hc);
     if (hc->bounce)
         dma_free_coherent(hc->bounce, XHCI_BOUNCE_SIZE);
     if (hc->erst)
@@ -2744,6 +2777,7 @@ static int xhci_pci_attach(struct device *dev)
     hc->hcd.iso_reclaim = xhci_iso_reclaim;
     hc->hcd.iso_stop = xhci_iso_stop;
     hc->hcd.iso_in_status = xhci_iso_in_status;
+    hc->hcd.kdev = dev;                  /* shutdown dispatch [RF-5] */
     usb_register_hcd(&hc->hcd);
     hc->initialized = 1;
     xhci_instances++;
@@ -2774,6 +2808,7 @@ static const device_id_t xhci_pci_ids[] = {
 };
 static struct driver xhci_pci_driver = {
     .name = "xhci", .id_table = xhci_pci_ids, .attach = xhci_pci_attach,
+    .shutdown = xhci_pci_shutdown,
 };
 
 void xhci_init(void)

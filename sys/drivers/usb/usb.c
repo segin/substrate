@@ -127,6 +127,22 @@ int usb_register_hcd(usb_hcd_t *hcd)
     return 0;
 }
 
+/*
+ * [RF-5] Resolve a registered HCD from its bus device.  The one consumer is
+ * .shutdown dispatch: struct device has no driver-private pointer, and each
+ * HCD driver was starting to grow its own device->softc registry
+ * (ehci_hcs[] was the first) to bridge that gap.  The core already owns the
+ * HCD list; look it up here instead.
+ */
+usb_hcd_t *usb_hcd_by_kdev(struct device *dev)
+{
+    for (usb_hcd_t *hcd = usb_hcd_list; hcd; hcd = hcd->next) {
+        if (hcd->kdev == dev)
+            return hcd;
+    }
+    return NULL;
+}
+
 void usb_unregister_hcd(usb_hcd_t *hcd)
 {
     usb_hcd_t **pp;

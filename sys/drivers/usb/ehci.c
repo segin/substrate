@@ -60,14 +60,8 @@ typedef struct ehci_hc {
     void             *bounce;        dma_addr_t bounce_dma;
 
     char              name[8];  /* "ehciN", backs hcd.name */
-    struct device    *kdev;     /* bus device, for shutdown dispatch */
     usb_hcd_t         hcd;
 } ehci_hc_t;
-
-/* struct device carries no driver-private pointer, so shutdown dispatch
- * finds the controller by its device. [ehci-audit 7] */
-#define EHCI_MAX_HCS 4
-static ehci_hc_t *ehci_hcs[EHCI_MAX_HCS];
 
 /*
  * One instance per PCI function.  A PC chipset commonly exposes two EHCI
@@ -1118,11 +1112,9 @@ static int ehci_pci_attach(struct device *dev)
     hc->hcd.port_reset = ehci_port_reset;
     hc->hcd.port_enable = ehci_port_enable;
 
+    hc->hcd.kdev = dev;                  /* shutdown dispatch [RF-5] */
     usb_register_hcd(&hc->hcd);
     hc->initialized = 1;
-    hc->kdev = dev;
-    if (ehci_instances < EHCI_MAX_HCS)
-        ehci_hcs[ehci_instances] = hc;   /* shutdown dispatch [ehci-audit 7] */
     ehci_instances++;
     kprintf("ehci: %s: EHCI USB 2.0 controller at 0x%x, %u ports\n",
             hc->name, (unsigned)phys, hc->nports);
@@ -1142,21 +1134,23 @@ static int ehci_pci_attach(struct device *dev)
  */
 static void ehci_pci_shutdown(struct device *dev)
 {
-    for (unsigned i = 0; i < EHCI_MAX_HCS; i++) {
-        ehci_hc_t *hc = ehci_hcs[i];
+    usb_hcd_t *hcd = usb_hcd_by_kdev(dev);   /* [RF-5] */
+    ehci_hc_t *hc;
 
-        if (!hc || hc->kdev != dev || !hc->initialized)
-            continue;
-        uint32_t cmd = ehci_op_rd(hc, EHCI_OP_USBCMD);
-        ehci_op_wr(hc, EHCI_OP_USBCMD, cmd & ~EHCI_CMD_RUN);
-        for (int j = 0; j < 100; j++) {
-            if (ehci_op_rd(hc, EHCI_OP_USBSTS) & EHCI_STS_HCHALTED)
-                break;
-            ehci_delay_ms(1);
-        }
-        ehci_op_wr(hc, EHCI_OP_CONFIGFLAG, 0);
-        ehci_op_wr(hc, EHCI_OP_USBCMD, EHCI_CMD_HCRESET);
+    if (!hcd)
+        return;
+    hc = hcd->priv;
+    if (!hc->initialized)
+        return;
+    uint32_t cmd = ehci_op_rd(hc, EHCI_OP_USBCMD);
+    ehci_op_wr(hc, EHCI_OP_USBCMD, cmd & ~EHCI_CMD_RUN);
+    for (int j = 0; j < 100; j++) {
+        if (ehci_op_rd(hc, EHCI_OP_USBSTS) & EHCI_STS_HCHALTED)
+            break;
+        ehci_delay_ms(1);
     }
+    ehci_op_wr(hc, EHCI_OP_CONFIGFLAG, 0);
+    ehci_op_wr(hc, EHCI_OP_USBCMD, EHCI_CMD_HCRESET);
 }
 
 static const device_id_t ehci_pci_ids[] = {

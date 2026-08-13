@@ -538,6 +538,11 @@ typedef struct usb_hcd {
      */
     int      hc_failed;
     int      hc_failed_reported;
+
+    /* The bus device this controller attached as.  struct device carries no
+     * driver-private pointer, so .shutdown dispatch resolves the HCD through
+     * usb_hcd_by_kdev() instead of per-driver registries. [RF-5] */
+    struct device *kdev;
     uint32_t (*port_status)(struct usb_hcd *hcd, uint8_t port);
     int      (*port_reset)(struct usb_hcd *hcd, uint8_t port);
     int      (*port_enable)(struct usb_hcd *hcd, uint8_t port, int enable);
@@ -689,6 +694,8 @@ void usb_hub_init(void);
 
 /* HCD Registration */
 int  usb_register_hcd(usb_hcd_t *hcd);
+/* Resolve a registered HCD from its bus device (shutdown dispatch). [RF-5] */
+usb_hcd_t *usb_hcd_by_kdev(struct device *dev);
 void usb_unregister_hcd(usb_hcd_t *hcd);
 
 /* Class Driver Registration */
