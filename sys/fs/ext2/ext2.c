@@ -2288,7 +2288,9 @@ struct dirent *ext2_readdir(fs_node_t *node, uint64_t index) {
                 memcpy(ctx->current_dirent.d_name, de->name, len);
                 ctx->current_dirent.d_name[len] = '\0';
                 ctx->current_dirent.d_namlen = (uint8_t)len;
-                ctx->current_dirent.d_type = ext2_file_type_to_dt(de->file_type);
+                ctx->current_dirent.d_type =
+                    fs->has_ftype ? ext2_file_type_to_dt(de->file_type)
+                                  : DT_UNKNOWN;
                 ctx->current_dirent.d_reclen = (uint16_t)(((8 + len + 1 + 3) / 4) * 4);
                 ctx->current_dirent.d_off = pos + de->rec_len;
                 result = &ctx->current_dirent;
@@ -2813,6 +2815,11 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
     }
 
     fs->device = dev;
+
+    /* EXT2-A9: revision 0 has no feature fields at all, so it never
+     * carries the filetype feature. */
+    fs->has_ftype = (fs->sb.s_rev_level >= 1) &&
+                    (fs->sb.s_feature_incompat & EXT2F_INCOMPAT_FTYPE) != 0;
 
     /* Validate s_log_block_size before shifting.  EXT2-A5 (audit DE-13):
      * cap at 32 KiB (log=5).  64 KiB blocks are legal on-disk but dirent
@@ -3838,7 +3845,14 @@ static int ext2_add_entry(fs_node_t *dir, const char *name, uint32_t inode, uint
     
     uint32_t name_len = strlen(name);
     if (name_len > 255) return -1;
-    
+
+    /* EXT2-A9 (audit MS-01/DE-05/SB-11): without INCOMPAT_FILETYPE the
+     * byte we would store the type in is the high half of a 16-bit
+     * name_len, so every entry this driver created on such a volume
+     * read back on Linux as name_len + 256*type — "directory entry has
+     * invalid length", file unreachable by name. */
+    if (!fs->has_ftype) file_type = 0;
+
     // Calculate required entry size (aligned to 4 bytes)
     uint32_t required_size = ((8 + name_len + 3) / 4) * 4;
     
@@ -4606,7 +4620,7 @@ int ext2_mkdir(fs_node_t *dir, const char *name, uint16_t permission) {
         dot->inode = inode_num;
         dot->rec_len = dot_len;
         dot->name_len = 1;
-        dot->file_type = EXT2_FT_DIR;
+        dot->file_type = fs->has_ftype ? EXT2_FT_DIR : 0;   /* EXT2-A9 */
         dot->name[0] = '.';
 
         dotdot->inode = dir_ctx->inode_num;
@@ -4614,7 +4628,7 @@ int ext2_mkdir(fs_node_t *dir, const char *name, uint16_t permission) {
          * tail on a metadata_csum filesystem (EXT2-A8). */
         dotdot->rec_len = (uint16_t)(ext2_dir_limit(fs) - dot_len);
         dotdot->name_len = 2;
-        dotdot->file_type = EXT2_FT_DIR;
+        dotdot->file_type = fs->has_ftype ? EXT2_FT_DIR : 0;   /* EXT2-A9 */
         dotdot->name[0] = '.';
         dotdot->name[1] = '.';
     }

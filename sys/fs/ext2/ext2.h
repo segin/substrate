@@ -363,6 +363,11 @@ typedef struct {
      * end of our truncated ext2_superblock_t struct.  */
     uint32_t hash_seed[4];
 
+    /* INCOMPAT_FILETYPE: when clear, a dirent has NO file_type byte —
+     * offset 7 is the high byte of a 16-bit name_len (spec 2.4.3.1),
+     * so writing a type there corrupts the name length. */
+    int      has_ftype;
+
     /* Layout facts lifted from the superblock at mount, needed to
      * synthesize the bitmap of a lazy-init (uninit) block group and to
      * place superblock backups: how many blocks the group-descriptor
