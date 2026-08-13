@@ -42,6 +42,10 @@ typedef struct ehci_hc {
     int               initialized;
 
     mutex_t           submit_lock;
+    /* Set when the controller is beyond use: the async schedule refused to
+     * stop, or USBSTS reported the HC halted itself.  Every later submit
+     * fails fast instead of burning its full timeout on a dead schedule. */
+    int               hc_failed;
 
     struct ehci_qh   *async_qh;      dma_addr_t async_qh_dma;
     /* Periodic schedule: the frame list the controller walks once per frame,
@@ -194,31 +198,25 @@ static uint32_t ehci_qtd_dma(ehci_hc_t *hc, int idx)
 
 /* [DRV-05] On a transfer timeout the controller may still own the async QH
  * overlay and keep DMAing into the (reused) bounce buffer / walking the qTDs.
- * Stop it before the caller reclaims that memory: disable the async schedule
- * and wait for the controller to acknowledge it has stopped (ASS clears), then
- * neutralize this transfer's qTDs and the QH overlay so a late visit is a
- * no-op, and finally restart the schedule for subsequent transfers.  Without
- * this, a late completion scribbles over the next transfer's data. */
-static void ehci_quiesce_async(ehci_hc_t *hc, int first_qtd, int n_qtd)
+ * It has to be verifiably stopped before that memory is touched.  4.8 also
+ * forbids modifying ASE unless it equals ASS, so the stop must be confirmed
+ * before anything -- including ASE itself -- is written again.  [ASYNC-04]
+ * Returns 0 only when the schedule is verifiably stopped (ASS clear). */
+static int ehci_async_stop(ehci_hc_t *hc)
 {
     uint32_t cmd = ehci_op_rd(hc, EHCI_OP_USBCMD);
     ehci_op_wr(hc, EHCI_OP_USBCMD, cmd & ~EHCI_CMD_ASE);
     for (int i = 0; i < 100; i++) {
         if (!(ehci_op_rd(hc, EHCI_OP_USBSTS) & EHCI_STS_ASS))
-            break;
+            return 0;
         ehci_delay_ms(1);
     }
+    return -1;
+}
 
-    /* Schedule stopped: the HC no longer touches the QH/qTDs. */
-    for (int i = first_qtd; i < first_qtd + n_qtd; i++)
-        hc->qtd[i].token &= ~EHCI_QTD_STATUS_ACTIVE;
-    struct ehci_qh *qh = hc->async_qh;
-    qh->overlay_next = EHCI_LINK_TERMINATE;
-    qh->overlay_alt_next = EHCI_LINK_TERMINATE;
-    qh->overlay_token &= ~EHCI_QTD_STATUS_ACTIVE;
-
-    /* Re-enable the async schedule for the next transfer. */
-    cmd = ehci_op_rd(hc, EHCI_OP_USBCMD);
+static void ehci_async_restart(ehci_hc_t *hc)
+{
+    uint32_t cmd = ehci_op_rd(hc, EHCI_OP_USBCMD);
     ehci_op_wr(hc, EHCI_OP_USBCMD, cmd | EHCI_CMD_ASE);
     for (int i = 0; i < 100; i++) {
         if (ehci_op_rd(hc, EHCI_OP_USBSTS) & EHCI_STS_ASS)
@@ -296,7 +294,46 @@ static int ehci_run_qh(ehci_hc_t *hc, int first_qtd, int n_qtd, uint32_t endp_ch
         if ((uint64_t)get_uptime_ms() > deadline) {
             /* [DRV-05] Reclaim the descriptors from the hardware before the
              * caller reuses the bounce buffer / qTD pool. */
-            ehci_quiesce_async(hc, first_qtd, n_qtd);
+            if (ehci_async_stop(hc) != 0) {
+                /* [ASYNC-04] Schedule refused to stop: do not scribble on
+                 * memory the HC may still walk, and do not flip ASE against
+                 * the 4.8 ASE==ASS rule.  This controller is done. */
+                hc->hc_failed = 1;
+                kprintf("ehci: async schedule failed to stop; "
+                        "controller disabled\n");
+                return USB_XFER_TIMEOUT;
+            }
+            /* [EHCI-03] A completion may have landed between the last token
+             * sample and the stop: re-read before destroying the evidence,
+             * or a just-finished transfer is thrown away as a timeout. */
+            int late_active = 0, late_halted = 0;
+            uint32_t late_htok = 0;
+            for (int i = first_qtd; i < first_qtd + n_qtd; i++) {
+                uint32_t tok = hc->qtd[i].token;
+                if (!(tok & (EHCI_QTD_STATUS_ACTIVE | EHCI_QTD_STATUS_ERRMASK)))
+                    continue;
+                if (tok & EHCI_QTD_STATUS_ACTIVE) late_active = 1;
+                if (tok & EHCI_QTD_STATUS_HALTED) {
+                    late_halted = 1;
+                    late_htok = tok;
+                }
+            }
+            if (!late_active || late_halted) {
+                ehci_async_restart(hc);
+                return late_halted ? ehci_halt_status(late_htok)
+                                   : USB_XFER_OK;
+            }
+            /* Genuinely incomplete: neutralize so a stale visit is a no-op.
+             * Preserve the overlay dt -- it is the authoritative ending
+             * toggle for the resync in the bulk path ([EHCI-04]). */
+            for (int i = first_qtd; i < first_qtd + n_qtd; i++)
+                hc->qtd[i].token &= ~EHCI_QTD_STATUS_ACTIVE;
+            struct ehci_qh *aqh = hc->async_qh;
+            aqh->overlay_next = EHCI_LINK_TERMINATE;
+            aqh->overlay_alt_next = EHCI_LINK_TERMINATE;
+            aqh->overlay_token = (aqh->overlay_token & EHCI_QTD_TOGGLE) |
+                                 EHCI_QTD_STATUS_HALTED;
+            ehci_async_restart(hc);
             return USB_XFER_TIMEOUT;
         }
         __asm__ volatile("pause");
@@ -566,6 +603,15 @@ static int ehci_intr_transfer(ehci_hc_t *hc, usb_transfer_t *xfer)
             ehci_delay_ms(1);
         }
     }
+    /* [EHCI-03] A completion can land between the last poll and the unlink
+     * settling above; re-read the token before neutralizing it, or a
+     * just-delivered report is discarded as a timeout. */
+    if (r == USB_XFER_TIMEOUT) {
+        uint32_t tok = hc->qtd[0].token;
+        if (!(tok & EHCI_QTD_STATUS_ACTIVE))
+            r = (tok & EHCI_QTD_STATUS_HALTED) ? ehci_halt_status(tok)
+                                               : USB_XFER_OK;
+    }
     hc->qtd[0].token &= ~EHCI_QTD_STATUS_ACTIVE;
     qh->overlay_next = EHCI_LINK_TERMINATE;
     qh->overlay_alt_next = EHCI_LINK_TERMINATE;
@@ -592,6 +638,13 @@ static int ehci_submit(usb_hcd_t *hcd, usb_transfer_t *xfer)
     ehci_hc_t *hc = hcd->priv;
     int ret;
     mutex_lock(&hc->submit_lock);
+    if (hc->hc_failed) {
+        /* Dead controller: fail fast rather than burning the full transfer
+         * timeout against a schedule that will never run it. [ASYNC-04] */
+        xfer->status = USB_XFER_ERROR;
+        mutex_unlock(&hc->submit_lock);
+        return USB_XFER_ERROR;
+    }
     if (xfer->is_control)
         ret = ehci_control_transfer(hc, xfer);
     else if (xfer->ep && xfer->ep->type == USB_EP_TYPE_BULK)
