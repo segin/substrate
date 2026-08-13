@@ -78,9 +78,10 @@ static mutex_t ext2_inode_table_lock;
 /* Forward decls — ext2_node_close needs these to complete a deferred
  * unlink (set up by ext2_unlink when pin_count > 0).  Their full
  * definitions live below alongside the rest of the inode allocator. */
-static int ext2_free_inode_blocks(ext2_fs_t *fs, ext2_inode_t *inode);
+static int ext2_free_inode_blocks(ext2_fs_t *fs, ext2_inode_t *inode,
+                                  int freeing_inode);
 static int ext2_release_inode_blocks(ext2_fs_t *fs, uint32_t inode_num,
-                                     ext2_inode_t *inode);
+                                     ext2_inode_t *inode, int freeing_inode);
 
 /*
  * EXT2-18: pin_count is what stops ext2_alloc_node() from recycling a slot
@@ -144,7 +145,7 @@ static void ext2_node_close(fs_node_t *node) {
          * blocks, so a failure here can only leak.  The slot is already
          * unlinked from lookup (EXT2-A17), so work from the saved
          * identity rather than the cleared fields. */
-        (void)ext2_release_inode_blocks(dead_fs, dead_ino, &ctx->inode);
+        (void)ext2_release_inode_blocks(dead_fs, dead_ino, &ctx->inode, 1);
         ext2_free_inode(dead_fs, dead_ino,
                         ctx->was_dir_at_unlink ? 1 : 0);
         memset(&ctx->inode, 0, sizeof(ctx->inode));
@@ -209,7 +210,8 @@ static int ext2_flush_group_desc(ext2_fs_t *fs, uint32_t group);
 static uint8_t ext2_dirent_type_from_mode(uint16_t mode);
 static uint8_t ext2_file_type_to_dt(uint8_t ext2_type);
 static int ext2_free_indirect_tree(ext2_fs_t *fs, uint32_t block_num, uint32_t depth);
-static int ext2_free_inode_blocks(ext2_fs_t *fs, ext2_inode_t *inode);
+static int ext2_free_inode_blocks(ext2_fs_t *fs, ext2_inode_t *inode,
+                                  int freeing_inode);
 static int ext2_chmod(fs_node_t *node, uint32_t mode);
 static int ext2_setattr(fs_node_t *node, const struct fs_attr *a);
 static int ext2_getattr(fs_node_t *node, struct fs_attr *a);
@@ -459,6 +461,23 @@ uint32_t ext2_write_block(ext2_fs_t *fs, uint32_t block_num, const void *buffer)
 static uint32_t ext2_itable_blocks(const ext2_fs_t *fs);
 static int ext2_read_meta(ext2_fs_t *fs, uint32_t blk, void *buf);
 static int ext2_write_meta(ext2_fs_t *fs, uint32_t blk, const void *buf);
+static int ext2_has_metadata_csum(const ext2_fs_t *fs);
+static int ext2_has_gdt_csum(const ext2_fs_t *fs);
+
+/* SELFREV-RA01: bg_flags only exists on a filesystem that carries
+ * group-descriptor checksums (GDT_CSUM / METADATA_CKSUM).  Everywhere
+ * else those two bytes are the old bg_pad — reserved, and not
+ * guaranteed zero.  Reading them as lazy-init state on a plain ext2
+ * volume let a stray bit make the driver treat a live group as
+ * uninitialized: it would synthesize a bitmap over the real one and,
+ * for INODE_UNINIT, zero a populated inode table.  Gate every
+ * bg_flags consumer on the feature. */
+static int ext2_has_bg_flags(const ext2_fs_t *fs) {
+    return ext2_has_metadata_csum(fs) || ext2_has_gdt_csum(fs);
+}
+static uint16_t ext2_bg_flags(const ext2_fs_t *fs, uint32_t group) {
+    return ext2_has_bg_flags(fs) ? fs->bgd[group].bg_flags : 0;
+}
 
 static int ext2_has_metadata_csum(const ext2_fs_t *fs) {
     return (fs->sb.s_feature_ro_compat & EXT2F_ROCOMPAT_METADATA_CKSUM) != 0;
@@ -601,7 +620,8 @@ static uint32_t ext2_write_block_bitmap(ext2_fs_t *fs, uint32_t group,
     /* EXT2-A7: the bitmap we are about to commit is now the authority
      * for this group, so it is no longer "uninitialized".  Leaving the
      * flag set would make Linux ignore what we just wrote. */
-    fs->bgd[group].bg_flags &= (uint16_t)~EXT2_BG_BLOCK_UNINIT;
+    if (ext2_has_bg_flags(fs))
+        fs->bgd[group].bg_flags &= (uint16_t)~EXT2_BG_BLOCK_UNINIT;
     ext2_bitmap_csum_set(fs, group, bitmap, fs->blocks_per_group, 0);
     return ext2_write_block(fs, fs->bgd[group].bg_block_bitmap, bitmap);
 }
@@ -628,10 +648,15 @@ static void ext2_zero_inode_table(ext2_fs_t *fs, uint32_t group) {
 
 static uint32_t ext2_write_inode_bitmap(ext2_fs_t *fs, uint32_t group,
                                         uint8_t *bitmap) {
-    if (fs->bgd[group].bg_flags & EXT2_BG_INODE_UNINIT) {
+    if (ext2_bg_flags(fs, group) & EXT2_BG_INODE_UNINIT) {
         if (!(fs->bgd[group].bg_flags & EXT2_BG_INODE_ZEROED))
             ext2_zero_inode_table(fs, group);
-        fs->bgd[group].bg_flags &= (uint16_t)~EXT2_BG_INODE_UNINIT;
+        /* SELFREV-RA05: clearing INODE_UNINIT tells every other reader
+         * that the inode table is meaningful.  Only say so if the
+         * zeroing actually completed — ext2_zero_inode_table sets
+         * INODE_ZEROED on success and leaves it clear on failure. */
+        if (fs->bgd[group].bg_flags & EXT2_BG_INODE_ZEROED)
+            fs->bgd[group].bg_flags &= (uint16_t)~EXT2_BG_INODE_UNINIT;
     }
     ext2_bitmap_csum_set(fs, group, bitmap, fs->inodes_per_group, 1);
     return ext2_write_block(fs, fs->bgd[group].bg_inode_bitmap, bitmap);
@@ -762,7 +787,7 @@ static void ext2_init_inode_bitmap(ext2_fs_t *fs, uint32_t group,
 static int ext2_load_block_bitmap(ext2_fs_t *fs, uint32_t group) {
     if (fs->active_bg_group == group) return 0;
     fs->active_bg_group = (uint32_t)-1;
-    if (fs->bgd[group].bg_flags & EXT2_BG_BLOCK_UNINIT) {
+    if (ext2_bg_flags(fs, group) & EXT2_BG_BLOCK_UNINIT) {
         ext2_init_block_bitmap(fs, group, fs->active_bg_bitmap);
     } else if (ext2_read_block(fs, fs->bgd[group].bg_block_bitmap,
                                fs->active_bg_bitmap) != fs->block_size) {
@@ -775,7 +800,7 @@ static int ext2_load_block_bitmap(ext2_fs_t *fs, uint32_t group) {
 static int ext2_load_inode_bitmap(ext2_fs_t *fs, uint32_t group) {
     if (fs->active_inode_bg_group == group) return 0;
     fs->active_inode_bg_group = (uint32_t)-1;
-    if (fs->bgd[group].bg_flags & EXT2_BG_INODE_UNINIT) {
+    if (ext2_bg_flags(fs, group) & EXT2_BG_INODE_UNINIT) {
         ext2_init_inode_bitmap(fs, group, fs->active_inode_bg_bitmap);
     } else if (ext2_read_block(fs, fs->bgd[group].bg_inode_bitmap,
                                fs->active_inode_bg_bitmap) != fs->block_size) {
@@ -1215,7 +1240,13 @@ static uint32_t ext4_extent_resolve(ext2_fs_t *fs, ext2_inode_t *inode,
         uint64_t child = ((uint64_t)idx[pick].ei_leaf_hi << 32)
                        | idx[pick].ei_leaf_lo;
         if (child == 0 || child >> 32) return 0;
-        ext2_read_block(fs, (uint32_t)child, scratch);
+        /* SELFREV-RB05: an unchecked read leaves the previous node's
+         * image in the scratch buffer, which the magic/depth checks
+         * below would then happily accept as this node. */
+        if (ext2_read_block(fs, (uint32_t)child, scratch) != fs->block_size) {
+            ext2_extent_corrupt(fs, "index node read");
+            return 0;
+        }
         node = scratch;
         node_cap = fs->block_size;
         eh = (ext4_extent_header_t *)node;
@@ -1504,9 +1535,13 @@ uint32_t ext2_inode_read(ext2_node_t *node, off_t offset, uint32_t size, void *b
  * Returns 0 on success, -1 on out-of-space / refusal.  */
 static int ext4_extent_alloc_inode_block(ext2_fs_t *fs, ext2_inode_t *inode,
                                          uint32_t block_idx) {
+    /* SELFREV-RB04: every refusal here reaches userspace, so it needs a
+     * real errno — a bare -1 surfaces as EPERM.  -EOPNOTSUPP for the
+     * write shapes this append-only path does not implement, -ENOSPC
+     * when the disk is genuinely full. */
     uint8_t *h = (uint8_t *)inode->i_block;
     ext4_extent_header_t *eh = (ext4_extent_header_t *)h;
-    if (eh->eh_magic != EXT4_EXT_MAGIC)             return -1;
+    if (eh->eh_magic != EXT4_EXT_MAGIC)             return -EOPNOTSUPP;
     if (eh->eh_depth != 0) {
         /*
          * Implementing ext4 multi-level extent tree updates is complex and bug-prone,
@@ -1515,7 +1550,7 @@ static int ext4_extent_alloc_inode_block(ext2_fs_t *fs, ext2_inode_t *inode,
          */
 
         kprintf("ext2: multi-level extent tree updates are unsupported\n");
-        return -1;
+        return -EOPNOTSUPP;
     }
     uint32_t sectors_per_block = fs->block_size / 512;
 
@@ -1536,13 +1571,13 @@ static int ext4_extent_alloc_inode_block(ext2_fs_t *fs, ext2_inode_t *inode,
     if (max > capacity || n > max) {
         kprintf("ext2: bogus inline extent header (ecount=%u max=%u cap=%u)\n",
                 n, max, capacity);
-        return -1;
+        return -EIO;
     }
 
     if (n == 0) {
-        if (max == 0) return -1;
+        if (max == 0) return -EOPNOTSUPP;
         uint32_t blk = ext2_alloc_block(fs);
-        if (blk == 0) return -1;
+        if (blk == 0) return -ENOSPC;
         exts[0].e_blk     = block_idx;
         exts[0].e_len     = 1;
         exts[0].e_start_hi = 0;
@@ -1566,7 +1601,7 @@ static int ext4_extent_alloc_inode_block(ext2_fs_t *fs, ext2_inode_t *inode,
     int last_uninit = (last_raw > 32768);
     uint32_t last_len = last_uninit ? last_raw - 32768 : last_raw;
     uint32_t logical_end = last->e_blk + last_len;
-    if (logical_end != block_idx) return -1;    /* sparse — refuse */
+    if (logical_end != block_idx) return -EOPNOTSUPP;   /* sparse — refuse */
 
     /* EXT2-11: e_start_lo holds the low 32 bits and e_start_hi the *high 16*
      * of a 48-bit physical block number, which is how ext4_extent_resolve()
@@ -1577,7 +1612,7 @@ static int ext4_extent_alloc_inode_block(ext2_fs_t *fs, ext2_inode_t *inode,
     phys_end += last_len;
 
     uint32_t blk = ext2_alloc_block(fs);
-    if (blk == 0) return -1;
+    if (blk == 0) return -ENOSPC;
     inode->i_blocks += sectors_per_block;
 
     if (blk == phys_end && !last_uninit && last_raw < 32768) {
@@ -1594,7 +1629,7 @@ static int ext4_extent_alloc_inode_block(ext2_fs_t *fs, ext2_inode_t *inode,
          * it so the disk doesn't leak.  */
         ext2_free_block(fs, blk);
         inode->i_blocks -= sectors_per_block;
-        return -1;
+        return -EOPNOTSUPP;
     }
 
     /* Case 3: new single-block extent.  */
@@ -1691,8 +1726,17 @@ int ext2_alloc_inode_block(ext2_fs_t *fs, ext2_inode_t *inode, uint32_t block_id
         return -EFBIG;
     }
 
-    /* Everything allocated here, so a failure can hand it all back. */
+    /* Everything allocated here, so a failure can hand it back.
+     *
+     * SELFREV-RB01/RA02: `linked` records whether the allocation has
+     * already been published into a parent block ON DISK.  Once it has,
+     * freeing it would leave that parent pointing at a free block — the
+     * exact cross-linking this rewrite exists to prevent — so those are
+     * left allocated (a leak fsck reclaims) instead.  The root is not
+     * "linked" for this purpose: it lives in the in-core inode, which
+     * the caller has not committed yet and which the unwind clears. */
     uint32_t made[4];
+    int      linked[4];
     int      nmade = 0;
     int      rc = -EIO;
     uint32_t lblk[3];                  /* block number of each level's node */
@@ -1702,6 +1746,7 @@ int ext2_alloc_inode_block(ext2_fs_t *fs, ext2_inode_t *inode, uint32_t block_id
     if (lblk[0] == 0) {
         lblk[0] = ext2_alloc_block(fs);
         if (lblk[0] == 0) { rc = -ENOSPC; goto unwind; }
+        linked[nmade] = 0;
         made[nmade++] = lblk[0];
         inode->i_blocks += spb;
         memset(buf[0], 0, fs->block_size);
@@ -1717,6 +1762,8 @@ int ext2_alloc_inode_block(ext2_fs_t *fs, ext2_inode_t *inode, uint32_t block_id
         if (child == 0) {
             child = ext2_alloc_block(fs);
             if (child == 0) { rc = -ENOSPC; goto unwind; }
+            int slot = nmade;
+            linked[slot] = 0;
             made[nmade++] = child;
             inode->i_blocks += spb;
             /* Initialise the child BEFORE linking it: a crash between
@@ -1726,6 +1773,7 @@ int ext2_alloc_inode_block(ext2_fs_t *fs, ext2_inode_t *inode, uint32_t block_id
             if (ext2_write_meta(fs, child, buf[l + 1]) != 0) goto unwind;
             buf[l][idx[l]] = child;
             if (ext2_write_meta(fs, lblk[l], buf[l]) != 0) goto unwind;
+            linked[slot] = 1;          /* parent now names it on disk */
         } else if (ext2_read_meta(fs, child, buf[l + 1]) != 0) {
             goto unwind;
         }
@@ -1734,6 +1782,7 @@ int ext2_alloc_inode_block(ext2_fs_t *fs, ext2_inode_t *inode, uint32_t block_id
 
     uint32_t data = ext2_alloc_block(fs);
     if (data == 0) { rc = -ENOSPC; goto unwind; }
+    linked[nmade] = 0;
     made[nmade++] = data;
     inode->i_blocks += spb;
     buf[levels - 1][idx[levels - 1]] = data;
@@ -1741,9 +1790,16 @@ int ext2_alloc_inode_block(ext2_fs_t *fs, ext2_inode_t *inode, uint32_t block_id
     return 0;
 
 unwind:
-    for (int i = 0; i < nmade; i++) {
-        ext2_free_block(fs, made[i]);
-        inode->i_blocks -= spb;
+    {
+        unsigned leaked = 0;
+        for (int i = 0; i < nmade; i++) {
+            if (linked[i]) { leaked++; continue; }   /* SELFREV-RB01 */
+            ext2_free_block(fs, made[i]);
+            inode->i_blocks -= spb;
+        }
+        if (leaked)
+            kprintf("ext2: %u block(s) leaked unwinding a failed allocation "
+                    "(already referenced on disk; fsck will reclaim)\n", leaked);
     }
     if (root_created) inode->i_block[root_slot] = 0;
     return rc;
@@ -2398,6 +2454,7 @@ static int ext2_getattr(fs_node_t *node, struct fs_attr *a) {
  * pointers as the target string. */
 static int ext2_symlink_is_fast(const ext2_fs_t *fs,
                                 const ext2_inode_t *inode) {
+    if (!fs) return inode->i_blocks == 0;     /* SELFREV-RI04 */
     uint32_t ea_sectors = inode->i_file_acl ? (fs->block_size / 512) : 0;
     return inode->i_blocks <= ea_sectors;
 }
@@ -3382,8 +3439,7 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
         if (blocks_hi != 0) {
             kprintf("ext2: >2^32 blocks (s_blocks_count_hi=%u) — refuse mount\n",
                     blocks_hi);
-            kfree(fs, sizeof(ext2_fs_t));
-            return NULL;
+            goto fail;          /* SELFREV-RA06: bgd/bgd_dirty are live */
         }
         if (free_blocks_hi != 0)
             kprintf("ext2: warning: s_free_blocks_count_hi=%u with zero "
@@ -3907,7 +3963,14 @@ uint32_t ext2_alloc_inode(ext2_fs_t *fs, int is_dir) {
                  * bits describe inodes that do not exist.  Handing one
                  * out would write an inode past the table. */
                 if (inode_num > fs->sb.s_inodes_count) {
+                    /* SELFREV-RA03: the bit was already set in the
+                     * cached bitmap above; clear it and, since the
+                     * descriptor counts were decremented too, put those
+                     * back before giving up on this group. */
                     bitmap_buf[byte_idx] &= (uint8_t)~(1u << bit_idx);
+                    fs->bgd[group].bg_free_inodes_count++;
+                    if (is_dir) fs->bgd[group].bg_used_dirs_count--;
+                    fs->sb.s_free_inodes_count++;
                     break;      /* nothing usable further up this group */
                 }
                 
@@ -4066,6 +4129,32 @@ static uint8_t ext2_file_type_to_dt(uint8_t ext2_type) {
     }
 }
 
+/* SELFREV-RB02: how many blocks does this indirect subtree occupy,
+ * counting the interior nodes?  Used to keep i_blocks honest when a
+ * partial truncate releases a whole subtree.  Returns -1 if the tree
+ * could not be read (caller falls back to a conservative estimate). */
+static int64_t ext2_count_tree_blocks(ext2_fs_t *fs, uint32_t block_num,
+                                      uint32_t depth) {
+    if (!fs || block_num == 0) return 0;
+    if (depth == 0) return 1;
+    uint32_t *buf = kmalloc(fs->block_size);
+    if (!buf) return -1;
+    if (ext2_read_block(fs, block_num, buf) != fs->block_size) {
+        kfree(buf, fs->block_size);
+        return -1;
+    }
+    int64_t total = 1;                       /* this node */
+    uint32_t per = fs->block_size / sizeof(uint32_t);
+    for (uint32_t i = 0; i < per; i++) {
+        if (buf[i] == 0) continue;
+        int64_t sub = ext2_count_tree_blocks(fs, buf[i], depth - 1);
+        if (sub < 0) { kfree(buf, fs->block_size); return -1; }
+        total += sub;
+    }
+    kfree(buf, fs->block_size);
+    return total;
+}
+
 static int ext2_free_indirect_tree(ext2_fs_t *fs, uint32_t block_num, uint32_t depth) {
     uint32_t entries_per_block;
     uint32_t *block_buf;
@@ -4180,10 +4269,18 @@ static void ext2_release_xattr_block(ext2_fs_t *fs, ext2_inode_t *inode) {
     inode->i_file_acl = 0;
     if (blk >= fs->sb.s_blocks_count) return;
 
+    /* SELFREV-RI03: the refcount is a read-modify-write across sleeping
+     * disk I/O, and one xattr block is shared by every inode carrying
+     * identical attributes — two concurrent deletes could both read the
+     * same count and one decrement would be lost, eventually freeing a
+     * block another inode still points at.  fs->alloc_lock already
+     * serialises the block allocator this path calls into. */
+    mutex_lock(&fs->alloc_lock);
     uint8_t *buf = kmalloc(fs->block_size);
-    if (!buf) return;                       /* leak rather than guess */
+    if (!buf) { mutex_unlock(&fs->alloc_lock); return; }
     if (ext2_read_block(fs, blk, buf) != fs->block_size) {
         kfree(buf, fs->block_size);
+        mutex_unlock(&fs->alloc_lock);
         return;
     }
     /* struct ext2_xattr_block_header: magic, refcount, blocks, ... */
@@ -4191,24 +4288,34 @@ static void ext2_release_xattr_block(ext2_fs_t *fs, ext2_inode_t *inode) {
     uint32_t refcount = *(uint32_t *)(buf + 4);
     if (magic != 0xEA020000u) {             /* not an xattr block: leave it */
         kfree(buf, fs->block_size);
+        mutex_unlock(&fs->alloc_lock);
         return;
     }
     if (refcount > 1) {
         *(uint32_t *)(buf + 4) = refcount - 1;
         ext2_write_block(fs, blk, buf);
         kfree(buf, fs->block_size);
+        mutex_unlock(&fs->alloc_lock);
     } else {
         kfree(buf, fs->block_size);
-        ext2_free_block(fs, blk);
+        mutex_unlock(&fs->alloc_lock);
+        ext2_free_block(fs, blk);       /* takes alloc_lock itself */
     }
     if (inode->i_blocks >= fs->block_size / 512)
         inode->i_blocks -= fs->block_size / 512;
 }
 
-static int ext2_free_inode_blocks(ext2_fs_t *fs, ext2_inode_t *inode) {
+/* `freeing_inode` distinguishes truncate (the inode lives on, keeps its
+ * attributes) from delete.  SELFREV-RB03/RI01: releasing the external
+ * xattr block unconditionally meant truncate(2) and every O_TRUNC open
+ * silently destroyed the file's ACLs and other block-stored
+ * attributes — and decremented a refcount shared with other inodes. */
+static int ext2_free_inode_blocks(ext2_fs_t *fs, ext2_inode_t *inode,
+                                  int freeing_inode) {
     if (!fs || !inode) return -EINVAL;
 
-    ext2_release_xattr_block(fs, inode);   /* EXT2-A27 */
+    if (freeing_inode)
+        ext2_release_xattr_block(fs, inode);   /* EXT2-A27 */
 
     /*
      * For an ext4 extent inode, i_block[] is NOT an array of block pointers:
@@ -4282,7 +4389,7 @@ static int ext2_free_inode_blocks(ext2_fs_t *fs, ext2_inode_t *inode) {
  * referenced by nothing — which is exactly what fsck reclaims.
  */
 static int ext2_release_inode_blocks(ext2_fs_t *fs, uint32_t inode_num,
-                                     ext2_inode_t *inode) {
+                                     ext2_inode_t *inode, int freeing_inode) {
     if (!fs || !inode || inode_num == 0) return -EINVAL;
 
     ext2_inode_t snapshot = *inode;      /* still names the blocks */
@@ -4290,8 +4397,9 @@ static int ext2_release_inode_blocks(ext2_fs_t *fs, uint32_t inode_num,
     /* EXT2-A27: the xattr block is released from the snapshot, so drop
      * the live inode's reference here — otherwise the inode we are
      * about to commit would still point at a block whose refcount we
-     * just decremented (or freed). */
-    inode->i_file_acl = 0;
+     * just decremented (or freed).  Only when the inode itself is
+     * going away (SELFREV-RB03). */
+    if (freeing_inode) inode->i_file_acl = 0;
     memset(inode->i_block, 0, sizeof(inode->i_block));
     if (inode->i_flags & EXT4_EXTENTS_FL) {
         /* Leave a valid empty extent header, as mkfs does for a new
@@ -4306,10 +4414,16 @@ static int ext2_release_inode_blocks(ext2_fs_t *fs, uint32_t inode_num,
     inode->i_blocks = 0;
     inode->i_size   = 0;
 
-    if (ext2_write_inode(fs, inode_num, inode) != 0)
-        return -EIO;                     /* nothing freed yet: consistent */
+    if (ext2_write_inode(fs, inode_num, inode) != 0) {
+        /* SELFREV-RI02: nothing has been freed, so the file is intact
+         * on disk — but the in-core inode has already been emptied.
+         * Returning with it gutted makes the live file look
+         * zero-length to every subsequent operation.  Put it back. */
+        *inode = snapshot;
+        return -EIO;
+    }
 
-    return ext2_free_inode_blocks(fs, &snapshot);
+    return ext2_free_inode_blocks(fs, &snapshot, freeing_inode);
 }
 
 /*
@@ -4378,10 +4492,13 @@ static int64_t ext2_trunc_node(ext2_fs_t *fs, uint32_t node_blk, uint32_t depth,
         uint64_t start = base + (uint64_t)i * per;
         if (start < keep) continue;         /* collapsed child, freed below */
         if (depth > 1) {
+            /* SELFREV-RB02: count what the subtree actually released,
+             * not one block per subtree — the old tally left i_blocks
+             * far above the file's real usage after a partial truncate,
+             * which e2fsck then flags on every shrunk file. */
+            int64_t sub = ext2_count_tree_blocks(fs, orig[i], depth - 1);
             if (ext2_free_indirect_tree(fs, orig[i], depth - 1) != 0) continue;
-            /* Count is approximate for deep subtrees; i_blocks is
-             * recomputed from scratch by the caller for those. */
-            freed++;
+            freed += (sub > 0) ? sub : 1;
         } else {
             ext2_free_blocks(fs, orig[i], 1);
             freed++;
@@ -4446,8 +4563,10 @@ static int ext2_truncate_blocks(ext2_fs_t *fs, uint32_t inode_num,
     for (int r = 0; r < 3; r++) {
         if (roots[r].blk == 0) continue;
         if (roots[r].base >= keep) {
+            int64_t sub = ext2_count_tree_blocks(fs, roots[r].blk,
+                                                 roots[r].depth);
             if (ext2_free_indirect_tree(fs, roots[r].blk, roots[r].depth) == 0)
-                freed++;
+                freed += (sub > 0) ? sub : 1;      /* SELFREV-RB02 */
         } else {
             int empty = 0;
             int64_t rc = ext2_trunc_node(fs, roots[r].blk, roots[r].depth,
@@ -4500,7 +4619,7 @@ int ext2_truncate(fs_node_t *node, off_t length) {
         uint32_t tnow = (uint32_t)get_time();
         ctx->inode.i_mtime = tnow;
         ctx->inode.i_ctime = tnow;
-        ret = ext2_release_inode_blocks(fs, ctx->inode_num, &ctx->inode);
+        ret = ext2_release_inode_blocks(fs, ctx->inode_num, &ctx->inode, 0);
     } else if (length > old_size) {
         /*
          * Grow.  ext2 stores files sparsely: the region between the old and
@@ -4749,6 +4868,31 @@ static int ext2_add_entry(fs_node_t *dir, const char *name, uint32_t inode, uint
             result = -EIO;
             goto cleanup;
         }
+        /* SELFREV-RD03: pass one recorded an offset; this is a freshly
+         * re-read copy of the block.  Re-derive the record's geometry
+         * and re-check it still admits the insertion before writing —
+         * trusting the earlier measurements would place the new dirent
+         * using stale lengths if the block does not read back
+         * identically (corrupt media, or any future path that drops the
+         * lock between passes). */
+        {
+            uint32_t lim = ext2_dir_limit(fs);
+            if (fit_off + 8 > lim) { result = -EIO; goto cleanup; }
+            ext2_dirent_t *chk = (ext2_dirent_t *)(block_buf + fit_off);
+            uint32_t chk_actual = ((8 + chk->name_len + 3) / 4) * 4;
+            if (chk->rec_len < 8 || fit_off + chk->rec_len > lim ||
+                chk_actual > chk->rec_len) { result = -EIO; goto cleanup; }
+            if (fit_reuse) {
+                if (chk->inode != 0 || chk->rec_len < required_size) {
+                    result = -EIO; goto cleanup;
+                }
+            } else {
+                if (chk->inode == 0 ||
+                    chk->rec_len - chk_actual < required_size) {
+                    result = -EIO; goto cleanup;
+                }
+            }
+        }
         ext2_dirent_t *de = (ext2_dirent_t *)(block_buf + fit_off);
         if (fit_reuse) {
             de->inode = inode;
@@ -4826,7 +4970,12 @@ static int ext2_add_entry(fs_node_t *dir, const char *name, uint32_t inode, uint
     if (ext2_write_dir_block(fs, ctx, new_block, block_buf) != fs->block_size) {
         /* EXT2-A14: the block is allocated and linked but its contents
          * never reached the disk — the directory would grow by a block
-         * of garbage.  Report the failure. */
+         * of garbage.  SELFREV-RD04: i_size still describes the old
+         * directory, so the block is referenced by i_block[] and by
+         * nothing else.  Commit the inode as it stands (the block is
+         * accounted in i_blocks) rather than leave i_block[] and i_size
+         * disagreeing; the block is then a clean, fsck-visible leak. */
+        ext2_write_inode(fs, ctx->inode_num, &ctx->inode);
         result = -EIO;
         goto cleanup;
     }
@@ -4944,15 +5093,28 @@ int ext2_rename(fs_node_t *old_parent, const char *old_name, fs_node_t *new_pare
     ext2_node_open(old_node);
 
     ext2_node_t *old_node_ctx = (ext2_node_t *)(uintptr_t)old_node->impl;
-    /* EXT2-A34: renaming an immutable/append-only file is forbidden. */
-    if (old_node_ctx &&
-        (EXT2_IS_IMMUTABLE(old_node_ctx) || EXT2_IS_APPEND(old_node_ctx))) {
-        ext2_node_close(old_node);
-        return -EPERM;
-    }
     fs_node_t *new_node = NULL;
     int new_node_pinned = 0;
     int rc = -EIO;
+
+    /* EXT2-A34: renaming an immutable/append-only file is forbidden.
+     * SELFREV-RD01: release the pins taken above before returning. */
+    if (old_node_ctx &&
+        (EXT2_IS_IMMUTABLE(old_node_ctx) || EXT2_IS_APPEND(old_node_ctx))) {
+        rc = -EPERM;
+        goto out;
+    }
+    /* SELFREV-RD02: moving a directory to a new parent rewrites its
+     * '..' entry in block 0.  For an htree directory that block is the
+     * dx_root — index data, not a dirent block — so writing it back
+     * through the dirent-tail stamper would scribble a fake dirent over
+     * the index.  The driver already refuses every other structural
+     * change to an indexed directory; refuse this one too. */
+    if (old_node_ctx && (old_node_ctx->inode.i_flags & EXT2_INDEX_FL) &&
+        old_parent != new_parent) {
+        rc = -EOPNOTSUPP;
+        goto out;
+    }
 
     /* FS-07: reject moving a directory into itself or into one of its own
      * descendants — that splices a detached cycle out of the tree (POSIX
@@ -5405,7 +5567,7 @@ static int ext2_symlink(fs_node_t *dir, const char *target, const char *name) {
              * populated (fs/inode_num still set) means a later lookup of the
              * recycled inode number hits this stale entry.  Free the data
              * blocks and invalidate the slot before bailing. */
-            ext2_release_inode_blocks(fs, inode_num, &lctx->inode);
+            ext2_release_inode_blocks(fs, inode_num, &lctx->inode, 1);
             ext2_free_inode(fs, inode_num, 0);
             memset(&lctx->inode, 0, sizeof(lctx->inode));
             lnode->length = 0;
@@ -5425,7 +5587,7 @@ static int ext2_symlink(fs_node_t *dir, const char *target, const char *name) {
          * committed and release its blocks too. */
         ext2_inode_t li;
         if (!fast && ext2_read_inode(fs, inode_num, &li) == 0)
-            (void)ext2_release_inode_blocks(fs, inode_num, &li);
+            (void)ext2_release_inode_blocks(fs, inode_num, &li, 1);
         ext2_free_inode(fs, inode_num, 0);
         return (add_rc < 0) ? add_rc : -EIO;    /* EXT2-A18 */
     }
@@ -5531,7 +5693,7 @@ int ext2_mkdir(fs_node_t *dir, const char *name, uint16_t permission) {
     {
         int arc = ext2_add_entry(dir, name, inode_num, EXT2_FT_DIR);
         if (arc != 0) {
-            ext2_release_inode_blocks(fs, inode_num, &inode);
+            ext2_release_inode_blocks(fs, inode_num, &inode, 1);
             ext2_free_inode(fs, inode_num, 1);
             return (arc < 0) ? arc : -EIO;      /* EXT2-A18 */
         }
@@ -5548,7 +5710,7 @@ int ext2_mkdir(fs_node_t *dir, const char *name, uint16_t permission) {
         } else {
             mutex_unlock(&dir_ctx->lock);
             ext2_remove_entry(dir, name);
-            ext2_release_inode_blocks(fs, inode_num, &inode);
+            ext2_release_inode_blocks(fs, inode_num, &inode, 1);
             ext2_free_inode(fs, inode_num, 1);
             return -EMLINK;
         }
@@ -5560,7 +5722,7 @@ int ext2_mkdir(fs_node_t *dir, const char *name, uint16_t permission) {
     if (ext2_write_inode(fs, dir_ctx->inode_num, &dir_ctx->inode) != 0) {
         mutex_unlock(&dir_ctx->lock);
         ext2_remove_entry(dir, name);
-        ext2_release_inode_blocks(fs, inode_num, &inode);
+        ext2_release_inode_blocks(fs, inode_num, &inode, 1);
         ext2_free_inode(fs, inode_num, 1);
         mutex_lock(&dir_ctx->lock);
         dir_ctx->inode.i_links_count--;
@@ -5747,6 +5909,13 @@ int ext2_rmdir(fs_node_t *dir, const char *name) {
     victim = ext2_finddir(dir, (char *)name);
     if (!victim) return -ENOENT;
     if ((victim->flags & 0x7) != FS_DIRECTORY) return -ENOTDIR;
+    /* SELFREV-RD05: the immutable/append guard covered unlink and the
+     * rename source but not rmdir. */
+    {
+        ext2_node_t *vc = (ext2_node_t *)(uintptr_t)victim->impl;
+        if (vc && (EXT2_IS_IMMUTABLE(vc) || EXT2_IS_APPEND(vc)))
+            return -EPERM;
+    }
 
     /* EXT2-A17 (audit CY-02): pin before the emptiness scan — that scan
      * sleeps on disk I/O with the slot unpinned, so the recycler could
@@ -5930,7 +6099,7 @@ int ext2_unmount(fs_node_t *node) {
             o->inode_num = 0;
             o->orphaned = 0;
             mutex_unlock(&ext2_node_cache_lock);
-            (void)ext2_release_inode_blocks(fs, onum, &o->inode);
+            (void)ext2_release_inode_blocks(fs, onum, &o->inode, 1);
             ext2_free_inode(fs, onum, was_dir);
             mutex_lock(&ext2_node_cache_lock);
         }
