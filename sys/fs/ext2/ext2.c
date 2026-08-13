@@ -307,7 +307,9 @@ static uint16_t ext2_valid_extra_isize(const ext2_fs_t *fs, uint16_t extra) {
 
 // Read an inode
 int ext2_read_inode(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inode) {
-    if (!fs || inode_num == 0) return -1;
+    /* EXT2-A18 (audit CY-16): negative errno, never a bare -1 (which
+     * the syscall layer would surface as EPERM). */
+    if (!fs || inode_num == 0) return -EINVAL;
     
     // Calculate which block group the inode is in
     uint32_t group = (inode_num - 1) / fs->inodes_per_group;
@@ -325,11 +327,11 @@ int ext2_read_inode(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inode) {
     
     // Read the block containing the inode
     uint8_t *block_buf = kmalloc(fs->block_size);
-    if (!block_buf) return -1;
+    if (!block_buf) return -ENOMEM;
 
     if (ext2_read_block(fs, inode_table_block + block_offset, block_buf) != fs->block_size) {
         kfree(block_buf, fs->block_size);
-        return -1;
+        return -EIO;
     }
     
     uint8_t *raw = block_buf + inode_offset;
@@ -384,7 +386,7 @@ int ext2_read_inode(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inode) {
             kprintf("ext2: inode %u csum mismatch want=%08x got=%08x\n",
                     inode_num, calc, provided);
             kfree(block_buf, fs->block_size);
-            return -1;
+            return -EIO;
         }
     }
 
@@ -964,7 +966,7 @@ static void ext2_mark_meta_dirty(ext2_fs_t *fs, uint32_t group) {
 // Write an inode back to disk
 static int ext2_write_inode_ex(ext2_fs_t *fs, uint32_t inode_num,
                                ext2_inode_t *inode, int is_new) {
-    if (!fs || inode_num == 0) return -1;
+    if (!fs || inode_num == 0) return -EINVAL;   /* EXT2-A18 */
     
     // Calculate which block group the inode is in
     uint32_t group = (inode_num - 1) / fs->inodes_per_group;
@@ -982,7 +984,7 @@ static int ext2_write_inode_ex(ext2_fs_t *fs, uint32_t inode_num,
     
     // Read the block containing the inode
     uint8_t *block_buf = kmalloc(fs->block_size);
-    if (!block_buf) return -1;
+    if (!block_buf) return -ENOMEM;
 
     /* FS-02: the read..modify..write below touches a whole inode-table block
      * shared by many inodes.  Serialize it so a concurrent writer of a
@@ -994,7 +996,7 @@ static int ext2_write_inode_ex(ext2_fs_t *fs, uint32_t inode_num,
     if (ext2_read_block(fs, inode_table_block + block_offset, block_buf) != fs->block_size) {
         mutex_unlock(&ext2_inode_table_lock);
         kfree(block_buf, fs->block_size);
-        return -1;
+        return -EIO;
     }
 
     /* ext2trace: catch the moment a live inode changes file type
@@ -1108,7 +1110,7 @@ static int ext2_write_inode_ex(ext2_fs_t *fs, uint32_t inode_num,
     if (ext2_write_block(fs, inode_table_block + block_offset, block_buf) != fs->block_size) {
         mutex_unlock(&ext2_inode_table_lock);
         kfree(block_buf, fs->block_size);
-        return -1;
+        return -EIO;
     }
 
     mutex_unlock(&ext2_inode_table_lock);
@@ -4076,13 +4078,16 @@ static int ext2_dir_is_indexed(fs_node_t *dir) {
 }
 
 static int ext2_add_entry(fs_node_t *dir, const char *name, uint32_t inode, uint8_t file_type) {
-    if (!dir || !name || inode == 0) return -1;
+    if (!dir || !name || inode == 0) return -EINVAL;
     
     ext2_node_t *ctx = (ext2_node_t *)(uintptr_t)dir->impl;
     ext2_fs_t *fs = ctx->fs;
     
     uint32_t name_len = strlen(name);
-    if (name_len > 255) return -1;
+    /* EXT2-A18 (audit DE-15): bare -1 became EPERM at the syscall
+     * boundary; both of these have proper errnos. */
+    if (name_len == 0) return -EINVAL;
+    if (name_len > 255) return -ENAMETOOLONG;
 
     /* EXT2-A9 (audit MS-01/DE-05/SB-11): without INCOMPAT_FILETYPE the
      * byte we would store the type in is the high half of a 16-bit
@@ -4136,7 +4141,7 @@ static int ext2_add_entry(fs_node_t *dir, const char *name, uint32_t inode, uint
 
     if (!ctx->block_buf || !ctx->indirect_buf || !ctx->dindirect_buf || !ctx->tindirect_buf) {
         mutex_unlock(&ctx->lock);
-        return -1;
+        return -ENOMEM;
     }
 
     uint8_t *block_buf = ctx->block_buf;
@@ -4146,7 +4151,7 @@ static int ext2_add_entry(fs_node_t *dir, const char *name, uint32_t inode, uint
 
     uint32_t dir_size = ctx->inode.i_size;
     uint32_t pos = 0;
-    int result = -1;
+    int result = -EIO;
 
     /*
      * EXT2-A17 (audit CY-05): scan the WHOLE directory before inserting.
@@ -4502,9 +4507,12 @@ int ext2_rename(fs_node_t *old_parent, const char *old_name, fs_node_t *new_pare
     else if (flags == FS_PIPE) file_type = EXT2_FT_FIFO;
 
     // Add new entry
-    if (ext2_add_entry(new_parent, new_name, old_node_ctx->inode_num, file_type) != 0) {
-        rc = -EIO;
-        goto out;
+    {
+        int arc = ext2_add_entry(new_parent, new_name, old_node_ctx->inode_num, file_type);
+        if (arc != 0) {
+            rc = (arc < 0) ? arc : -EIO;        /* EXT2-A18 */
+            goto out;
+        }
     }
 
     // Remove old entry
@@ -4596,7 +4604,7 @@ out:
 
 // Remove directory entry
 static int ext2_remove_entry(fs_node_t *dir, const char *name) {
-    if (!dir || !name) return -1;
+    if (!dir || !name) return -EINVAL;    /* EXT2-A18 */
     
     ext2_node_t *ctx = (ext2_node_t *)(uintptr_t)dir->impl;
     ext2_fs_t *fs = ctx->fs;
@@ -4655,8 +4663,8 @@ static int ext2_remove_entry(fs_node_t *dir, const char *name) {
 
     uint32_t dir_size = ctx->inode.i_size;
     uint32_t pos = 0;
-    int result = -1;
-    
+    int result = -ENOENT;                 /* EXT2-A18: name not found */
+
     while (pos < dir_size) {
         uint32_t block_idx = pos / fs->block_size;
         uint32_t block_off = pos % fs->block_size;
@@ -4789,9 +4797,12 @@ static int ext2_mknod(fs_node_t *dir, const char *name, uint16_t mode, uint32_t 
         return -EIO;
     }
 
-    if (ext2_add_entry(dir, name, inode_num, ext2_dirent_type_from_mode(mode)) != 0) {
-        ext2_free_inode(fs, inode_num, is_dir);
-        return -EIO;
+    {
+        int arc = ext2_add_entry(dir, name, inode_num, ext2_dirent_type_from_mode(mode));
+        if (arc != 0) {
+            ext2_free_inode(fs, inode_num, is_dir);
+            return (arc < 0) ? arc : -EIO;      /* EXT2-A18 */
+        }
     }
 
     return 0;
@@ -4882,7 +4893,8 @@ static int ext2_symlink(fs_node_t *dir, const char *target, const char *name) {
         ext2_node_close(lnode);
     }
 
-    if (ext2_add_entry(dir, name, inode_num, EXT2_FT_SYMLINK) != 0) {
+    int add_rc = ext2_add_entry(dir, name, inode_num, EXT2_FT_SYMLINK);
+    if (add_rc != 0) {
         /* EXT2-27: a slow symlink (target > 60 bytes) has a data block
          * allocated and written above.  Freeing only the inode here left that
          * block marked in-use with nothing referencing it -- an unreachable
@@ -4892,7 +4904,7 @@ static int ext2_symlink(fs_node_t *dir, const char *target, const char *name) {
         if (!fast && ext2_read_inode(fs, inode_num, &li) == 0)
             (void)ext2_release_inode_blocks(fs, inode_num, &li);
         ext2_free_inode(fs, inode_num, 0);
-        return -EIO;
+        return (add_rc < 0) ? add_rc : -EIO;    /* EXT2-A18 */
     }
 
     return 0;
@@ -4991,10 +5003,13 @@ int ext2_mkdir(fs_node_t *dir, const char *name, uint16_t permission) {
         return -EIO;
     }
 
-    if (ext2_add_entry(dir, name, inode_num, EXT2_FT_DIR) != 0) {
-        ext2_release_inode_blocks(fs, inode_num, &inode);
-        ext2_free_inode(fs, inode_num, 1);
-        return -EIO;
+    {
+        int arc = ext2_add_entry(dir, name, inode_num, EXT2_FT_DIR);
+        if (arc != 0) {
+            ext2_release_inode_blocks(fs, inode_num, &inode);
+            ext2_free_inode(fs, inode_num, 1);
+            return (arc < 0) ? arc : -EIO;      /* EXT2-A18 */
+        }
     }
 
     mutex_lock(&dir_ctx->lock);         /* EXT2-A17/CY-09 */
@@ -5048,7 +5063,7 @@ int ext2_unlink(fs_node_t *dir, const char *name) {
     fs = victim_ctx->fs;
 
     ret = ext2_remove_entry(dir, name);
-    if (ret != 0) { ext2_node_close(victim); return -EIO; }
+    if (ret != 0) { ext2_node_close(victim); return ret; }   /* EXT2-A18 */
 
     /* EXT2-A17 (audit CY-09): the link-count read-modify-write and the
      * inode commit belong together under the victim's own lock, or two
@@ -5197,7 +5212,7 @@ int ext2_rmdir(fs_node_t *dir, const char *name) {
     fs = victim_ctx->fs;
 
     ret = ext2_remove_entry(dir, name);
-    if (ret != 0) { ext2_node_close(victim); return -EIO; }
+    if (ret != 0) { ext2_node_close(victim); return ret; }   /* EXT2-A18 */
 
     /* Parent loses the child's ".." link (EXT2-A17/CY-09: under lock). */
     mutex_lock(&dir_ctx->lock);
