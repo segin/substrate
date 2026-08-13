@@ -10,6 +10,22 @@
 > the image substrate wrote. The finding text is kept in the past
 > tense of the audit for traceability; read it as "what was wrong",
 > not "what is wrong".
+>
+> **A second round was needed.** After the remediation landed, the diff
+> itself was put through the same adversarial treatment — six review
+> lenses over the ~2,500 changed lines, each finding independently
+> verified. That pass raised 33 findings and confirmed about half of
+> them as *bugs the fixes had introduced*, several worse than what they
+> replaced: an allocation unwind that freed blocks already linked from
+> a committed parent (a dangling on-disk pointer, where the old code
+> merely leaked); `bg_flags` consulted on filesystems where those bytes
+> are reserved and not guaranteed zero; and the xattr-block release
+> placed in `ext2_free_inode_blocks`, which also backs truncate — so
+> `truncate(2)` and every `O_TRUNC` open destroyed the file's ACLs.
+> Those are fixed too (`git log --grep SELFREV`). The lesson generalises:
+> on a change set this size, review the remediation as adversarially as
+> the original code — passing `-Werror` and having started from real
+> findings is not evidence of correctness.
 
 Comprehensive audit of `sys/fs/ext2/` (ext2.c 4320 + ext2.h 478 +
 ext2_hash.c 209 + ext2_xattr.c 421 lines) against the **ext4 on-disk
