@@ -311,6 +311,7 @@ int usb_control_transfer_actual(usb_device_t *dev,
     xfer.setup.wValue = wValue;
     xfer.setup.wIndex = wIndex;
     xfer.setup.wLength = wLength;
+    xfer.timeout_ms = USB_TIMEOUT_CONTROL_MS;   /* [RF-13] */
 
     ret = dev->hcd->submit(dev->hcd, &xfer);
     xfer.status = ret;   /* [RF-11] return value is authoritative */
@@ -376,6 +377,7 @@ int usb_bulk_transfer(usb_device_t *dev, usb_endpoint_t *ep,
     xfer.is_control = 0;
     xfer.data = data;
     xfer.length = length;
+    xfer.timeout_ms = USB_TIMEOUT_BULK_MS;      /* [RF-13] */
 
     ret = dev->hcd->submit(dev->hcd, &xfer);
     xfer.status = ret;   /* [RF-11] return value is authoritative */
@@ -894,6 +896,7 @@ int usb_bulk_stream_transfer(usb_device_t *dev, usb_endpoint_t *ep,
     xfer.data = data;
     xfer.length = length;
     xfer.stream_id = stream_id;
+    xfer.timeout_ms = USB_TIMEOUT_BULK_MS;      /* [RF-13] */
     ret = dev->hcd->submit(dev->hcd, &xfer);
     xfer.status = ret;   /* [RF-11] return value is authoritative */
     if (actual_length)

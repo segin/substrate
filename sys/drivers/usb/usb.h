@@ -719,6 +719,18 @@ void usb_hid_init(void);
 void usb_hid_mouse_init(void);
 void usb_hub_init(void);
 
+/*
+ * [RF-13] Per-type transfer deadlines, stamped by the core wrappers when the
+ * caller passes none.  One second covers every conformant control request
+ * with margin (two of three HCDs already used it; UHCI's old 5 s floor made
+ * a wedged EP0 five times as expensive).  Bulk keeps the 5 s UHCI proved
+ * out on full-speed BOT storage, where a large read legitimately takes
+ * seconds.  Interrupt callers always pass their own (a HID poll wants
+ * milliseconds).  HCD-side fallbacks remain for direct submit callers.
+ */
+#define USB_TIMEOUT_CONTROL_MS  1000
+#define USB_TIMEOUT_BULK_MS     5000
+
 /* Millisecond busy-wait (pause spin) shared by the HCDs and hub code. [RF-12] */
 void usb_delay_ms(uint32_t ms);
 
