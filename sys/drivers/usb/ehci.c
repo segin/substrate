@@ -396,13 +396,41 @@ static enum ehci_poll_outcome ehci_poll_qtds(ehci_hc_t *hc, int first, int n,
     }
 }
 
-/* Arm the async QH at a qTD chain and poll to completion.  Returns USB_XFER_*.
+/*
+ * [RF-10] What a finished transfer leaves behind, captured while the QH is
+ * verifiably quiescent so callers stop reaching back into live hardware
+ * state with per-caller phasing.  ending_toggle is the overlay dt -- the
+ * authoritative next expected toggle, written back after every transaction
+ * (4.10.3); it is only meaningful when overlay_valid (current_qtd != 0,
+ * i.e. the controller actually advanced into this transfer's chain, and
+ * the schedule was verifiably stopped or idle at capture time).
+ */
+struct ehci_xfer_result {
+    int overlay_valid;
+    int ending_toggle;
+};
+
+static void ehci_capture_result(ehci_hc_t *hc, struct ehci_xfer_result *res)
+{
+    struct ehci_qh *qh = hc->async_qh;
+
+    res->overlay_valid = qh->current_qtd != 0;
+    res->ending_toggle =
+        (*(volatile uint32_t *)&qh->overlay_token & EHCI_QTD_TOGGLE) ? 1 : 0;
+}
+
+/* Arm the async QH at a qTD chain and poll to completion.  Returns USB_XFER_*
+ * and fills *res while the QH is quiescent.
  * [DRV-06] n_qtd counts the qTDs this transfer filled/linked (contiguous from
  * first_qtd); only those are polled, so stale qTDs left ACTIVE/HALTED by a prior
  * transfer (e.g. a STALLed GET_MAX_LUN) no longer poison this one. */
-static int ehci_run_qh(ehci_hc_t *hc, int first_qtd, int n_qtd, uint32_t endp_char,
-                       uint32_t timeout_ms, uint32_t endp_cap)
+static int ehci_run_qh(ehci_hc_t *hc, uint32_t endp_char, uint32_t endp_cap,
+                       int first_qtd, int n_qtd, uint32_t timeout_ms,
+                       struct ehci_xfer_result *res)
 {
+    res->overlay_valid = 0;
+    res->ending_toggle = 0;
+
     /* [EHCI-01] The async QH is permanently reachable (self-linked, ASE on)
      * and an inactive non-halted overlay is advanceable the instant
      * overlay_next becomes valid (4.10.2), so the old order (next first,
@@ -437,8 +465,12 @@ static int ehci_run_qh(ehci_hc_t *hc, int first_qtd, int n_qtd, uint32_t endp_ch
 
     switch (ehci_poll_qtds(hc, first_qtd, n_qtd, deadline, &htok)) {
     case EHCI_POLL_DONE:
+        /* Retired: the overlay is idle (next=T) and no longer advanced. */
+        ehci_capture_result(hc, res);
         return USB_XFER_OK;
     case EHCI_POLL_HALTED:
+        /* A halted overlay is never advanced; safe to read. */
+        ehci_capture_result(hc, res);
         return ehci_halt_status(htok);
     case EHCI_POLL_HC_DEAD:
         /* A halted HC performs no DMA: safe to neutralize the tokens
@@ -467,12 +499,15 @@ static int ehci_run_qh(ehci_hc_t *hc, int first_qtd, int n_qtd, uint32_t endp_ch
     struct ehci_qtd_scan late;
     ehci_scan_qtds(hc, first_qtd, n_qtd, &late);
     if (!late.active || late.halted) {
+        ehci_capture_result(hc, res);       /* schedule verifiably stopped */
         ehci_async_restart(hc);
         return late.halted ? ehci_halt_status(late.htok) : USB_XFER_OK;
     }
-    /* Genuinely incomplete: neutralize so a stale visit is a no-op.
-     * Preserve the overlay dt -- it is the authoritative ending toggle for
-     * the resync in the bulk path ([EHCI-04]). */
+    /* Genuinely incomplete: capture (packets may have moved before the
+     * deadline; the verified stop makes the overlay safe to read), then
+     * neutralize so a stale visit is a no-op.  The park below preserves
+     * the overlay dt bit as well ([EHCI-04]). */
+    ehci_capture_result(hc, res);
     for (int i = first_qtd; i < first_qtd + n_qtd; i++)
         hc->qtd[i].token &= ~EHCI_QTD_STATUS_ACTIVE;
     struct ehci_qh *aqh = hc->async_qh;
@@ -636,13 +671,17 @@ static int ehci_control_transfer(ehci_hc_t *hc, usb_transfer_t *xfer)
     /* Honour the caller's timeout: a HID poll asks to give up in milliseconds,
      * and making it sit out the bulk timeout stalled the USB thread for a full
      * second per idle poll. [USB-09] */
-    int r = ehci_run_qh(hc, setup_i, idx, ehci_endp_char(xfer, 1), /* [DRV-06] idx qTDs */
-                        xfer->timeout_ms ? xfer->timeout_ms
-                                         : EHCI_XFER_TIMEOUT_MS,
+    struct ehci_xfer_result res;
+    int r = ehci_run_qh(hc, ehci_endp_char(xfer, 1),
                         /* Same mult derivation as bulk/intr: identical for
                          * EP0, whose mult the core pins to 1 (usb.c). */
                         ehci_endp_cap(xfer, xfer->ep && xfer->ep->mult
-                                            ? xfer->ep->mult : 1));
+                                            ? xfer->ep->mult : 1),
+                        setup_i, idx,               /* [DRV-06] idx qTDs */
+                        xfer->timeout_ms ? xfer->timeout_ms
+                                         : EHCI_XFER_TIMEOUT_MS,
+                        &res);
+    (void)res;   /* EP0 toggles are per-stage constants, not tracked */
     if (r == USB_XFER_OK && in && len) {
         /* bytes actually moved = requested - residue from the data qTD */
         ehci_copyout(hc, xfer, in, len - ehci_qtd_residue(hc, data_i));
@@ -665,16 +704,19 @@ static int ehci_bulk_transfer(ehci_hc_t *hc, usb_transfer_t *xfer)
     int toggle = xfer->ep ? xfer->ep->toggle : 0;
     ehci_fill_qtd(hc, 0, 0, 0, pid, len, toggle, len ? hc->bounce_dma : 0, 1);
 
-    int r = ehci_run_qh(hc, 0, 1, ehci_endp_char(xfer, 0), /* [DRV-06] single qTD */
-                        xfer->timeout_ms ? xfer->timeout_ms
-                                         : EHCI_XFER_TIMEOUT_MS,   /* [USB-09] */
+    struct ehci_xfer_result res;
+    int r = ehci_run_qh(hc, ehci_endp_char(xfer, 0),
                         ehci_endp_cap(xfer,
                                       xfer->ep && xfer->ep->mult ? xfer->ep->mult
-                                                                 : 1));
+                                                                 : 1),
+                        0, 1,                       /* [DRV-06] single qTD */
+                        xfer->timeout_ms ? xfer->timeout_ms
+                                         : EHCI_XFER_TIMEOUT_MS,   /* [USB-09] */
+                        &res);
     if (r == USB_XFER_OK)
         ehci_copyout(hc, xfer, in, len - ehci_qtd_residue(hc, 0));
     if ((r == USB_XFER_OK || r == USB_XFER_TIMEOUT) && xfer->ep &&
-        hc->async_qh->current_qtd) {
+        res.overlay_valid) {
         /* [EHCI-04] The ending toggle used to be computed as
          * initial ^ (npackets & 1) from actual_length -- which misses a
          * device's terminating ZLP (a bulk IN holding exactly k*MPS bytes
@@ -688,9 +730,7 @@ static int ehci_bulk_transfer(ehci_hc_t *hc, usb_transfer_t *xfer)
          * chain, the overlay token still holds the driver's own arming
          * value and says nothing.  Leave STALL to usb_clear_halt's toggle
          * reset. */
-        xfer->ep->toggle =
-            (*(volatile uint32_t *)&hc->async_qh->overlay_token &
-             EHCI_QTD_TOGGLE) ? 1 : 0;
+        xfer->ep->toggle = res.ending_toggle;
     }
     xfer->status = r;
     return r;
