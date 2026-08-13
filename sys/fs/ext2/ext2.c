@@ -4529,17 +4529,24 @@ int ext2_rename(fs_node_t *old_parent, const char *old_name, fs_node_t *new_pare
      * ancestry via ".."; each ext2_finddir() pins its own parent for the
      * duration of that lookup (FS-05), so this walk is safe. */
     if ((old_node->flags & 0x7) == FS_DIRECTORY) {
+        /* EXT2-A24 (audit DE-10): the walk must REACH the root to prove
+         * the destination is not inside the directory being moved.  It
+         * used to `break` out on a failed ".." lookup or on running out
+         * of guard iterations and then allow the move, splicing a
+         * detached cycle out of the tree. */
         fs_node_t *anc = new_parent;
         int guard = 0;
+        int proved = 0;
         while (anc && guard++ < EXT2_NODE_CACHE_SIZE) {
             ext2_node_t *ac = (ext2_node_t *)(uintptr_t)anc->impl;
             if (!ac) break;
             if (ac->inode_num == old_node_ctx->inode_num) { rc = -EINVAL; goto out; }
-            if (ac->inode_num == EXT2_ROOT_INO) break;
+            if (ac->inode_num == EXT2_ROOT_INO) { proved = 1; break; }
             fs_node_t *parent = ext2_finddir(anc, "..");
             if (!parent || parent == anc) break;
             anc = parent;
         }
+        if (!proved) { rc = -EINVAL; goto out; }
     }
 
     // Check if new path exists and handle replacement
@@ -4561,14 +4568,19 @@ int ext2_rename(fs_node_t *old_parent, const char *old_name, fs_node_t *new_pare
                 goto out;
             }
         }
+        /* EXT2-A24 (audit DE-09): the removal's result was discarded, so
+         * a failure that left the old entry in place was followed by
+         * add_entry inserting a SECOND record with the same name. */
+        int drc;
         if ((old_node->flags & 0x7) == FS_DIRECTORY) {
             if ((new_node->flags & 0x7) != FS_DIRECTORY) { rc = -ENOTDIR; goto out; }
             if (!ext2_dir_is_empty(new_node)) { rc = -ENOTEMPTY; goto out; }
-            ext2_rmdir(new_parent, new_name);
+            drc = ext2_rmdir(new_parent, new_name);
         } else {
             if ((new_node->flags & 0x7) == FS_DIRECTORY) { rc = -EISDIR; goto out; }
-            ext2_unlink(new_parent, new_name);
+            drc = ext2_unlink(new_parent, new_name);
         }
+        if (drc != 0) { rc = drc; goto out; }
     }
 
     uint8_t file_type = EXT2_FT_REG_FILE;
@@ -5088,7 +5100,23 @@ int ext2_mkdir(fs_node_t *dir, const char *name, uint16_t permission) {
     }
 
     mutex_lock(&dir_ctx->lock);         /* EXT2-A17/CY-09 */
-    dir_ctx->inode.i_links_count++;
+    /* EXT2-A24 (audit DE-11): i_links_count is a uint16 that would wrap
+     * to 0 at 65535 subdirectories.  With RO_COMPAT_DIR_NLINK the
+     * format's answer is to stop counting — store 1, meaning "unknown"
+     * — otherwise the operation has to fail. */
+    if (dir_ctx->inode.i_links_count >= 65000) {
+        if (fs->sb.s_feature_ro_compat & EXT2F_ROCOMPAT_DIR_NLINK) {
+            dir_ctx->inode.i_links_count = 1;
+        } else {
+            mutex_unlock(&dir_ctx->lock);
+            ext2_remove_entry(dir, name);
+            ext2_release_inode_blocks(fs, inode_num, &inode);
+            ext2_free_inode(fs, inode_num, 1);
+            return -EMLINK;
+        }
+    }
+    if (dir_ctx->inode.i_links_count != 1)
+        dir_ctx->inode.i_links_count++;
     dir_ctx->inode.i_mtime = now;
     dir_ctx->inode.i_ctime = now;
     if (ext2_write_inode(fs, dir_ctx->inode_num, &dir_ctx->inode) != 0) {
