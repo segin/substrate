@@ -375,9 +375,17 @@ static uint32_t ehci_endp_char(usb_transfer_t *xfer, int is_control)
     if (is_control && dev->speed != USB_SPEED_HIGH)
         ec |= EHCI_QH_CONTROL_EP;
 
-    /* NAK count reload: 4 for a high-speed asynchronous endpoint, 0 otherwise
-     * -- a split transaction must not be abandoned on NAKs. */
-    if (dev->speed == USB_SPEED_HIGH)
+    /* NAK count reload: 4 for a high-speed ASYNCHRONOUS endpoint, 0
+     * otherwise.  A split transaction must not be abandoned on NAKs -- and
+     * neither may an interrupt endpoint: 4.9 requires RL=0 ("Not Used") for
+     * interrupt queue heads, because the reload machinery (4.9.1) runs only
+     * during the async reclamation-list traversal.  A periodic QH with
+     * RL!=0 on throttling silicon decrements NakCnt to zero after 4 NAKs
+     * and is then never considered for execution again -- the endpoint goes
+     * deaf for the rest of the transfer window.  QEMU does not implement
+     * the throttle, which is why this never showed there. [ehci-audit 5] */
+    int is_intr = xfer->ep && xfer->ep->type == USB_EP_TYPE_INTERRUPT;
+    if (dev->speed == USB_SPEED_HIGH && !is_intr)
         ec |= 4u << EHCI_QH_NRL_SHIFT;
 
     return ec;
