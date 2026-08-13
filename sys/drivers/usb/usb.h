@@ -632,6 +632,12 @@ typedef struct usb_hcd {
      * 1024 so an HCD that predates the field keeps its old behaviour.
      */
     uint16_t iso_frame_modulus;
+    /* Minimum isochronous scheduling lead, in FRAMES, that a scheduled iso
+     * TD must stay ahead of the running frame counter.  xHCI derives it
+     * from HCSPARAMS2's Isochronous Scheduling Threshold: a TD placed
+     * closer than IST to the current microframe may be skipped entirely
+     * (xHCI 1.2 s4.14.2).  0 = no requirement advertised. [P5-05] */
+    uint8_t  iso_min_lead_frames;
     uint16_t (*frame_number)(struct usb_hcd *hcd);
     int      (*iso_schedule)(struct usb_hcd *hcd, usb_device_t *dev,
                              usb_endpoint_t *ep, uint16_t frame,

@@ -192,10 +192,16 @@ static void uac_feeder(void *arg)
 		d->last_fr = fr;
 		dev_frame = d->frame_hi + fr;
 
-		/* (Re)sync the scheduling cursor on start or after an underrun. */
+		/* (Re)sync the scheduling cursor on start or after an underrun.
+		 * The lead honors the controller's advertised minimum (xHCI
+		 * IST, [P5-05]): a packet scheduled inside that window may be
+		 * skipped by the controller outright. */
+		uint32_t lead = UAC_LEAD;
+		if (d->udev->hcd->iso_min_lead_frames > lead)
+			lead = d->udev->hcd->iso_min_lead_frames;
 		if (!d->started ||
-		    (int32_t)(d->sched - (dev_frame + UAC_LEAD)) < 0) {
-			d->sched = dev_frame + UAC_LEAD;
+		    (int32_t)(d->sched - (dev_frame + lead)) < 0) {
+			d->sched = dev_frame + lead;
 			d->started = 1;
 		}
 

@@ -2758,6 +2758,18 @@ static int xhci_pci_attach(struct device *dev)
     hc->hcd.set_ep0_mps = xhci_set_ep0_mps;
     hc->hcd.port_gone = xhci_port_gone;
     hc->hcd.iso_frame_modulus = 2048;  /* MFINDEX frame index, s4.11.2.5 */
+    {
+        /* [P5-05] Advertise the controller's Isochronous Scheduling
+         * Threshold as a minimum lead in frames: a TD scheduled inside the
+         * threshold window may be skipped outright (s4.14.2), which
+         * presents as silently-dropped audio packets.  Microframe ISTs
+         * round up to one full frame.  QEMU reads HCSPARAMS2 IST as 0. */
+        uint32_t ist = XHCI_HCS2_IST(rd32(hc->mmio, XHCI_CAP_HCSPARAMS2));
+        uint8_t lead = XHCI_IST_IS_FRAMES(ist)
+                       ? (uint8_t)XHCI_IST_VALUE(ist)
+                       : (uint8_t)(XHCI_IST_VALUE(ist) ? 1 : 0);
+        hc->hcd.iso_min_lead_frames = lead;
+    }
     hc->hcd.frame_number = xhci_frame_number;
     hc->hcd.iso_schedule = xhci_iso_schedule;
     hc->hcd.iso_reclaim = xhci_iso_reclaim;

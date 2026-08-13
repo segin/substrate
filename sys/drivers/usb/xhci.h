@@ -37,6 +37,11 @@ void xhci_init(void);
  * the controller wants handed to it; see xhci_alloc_scratchpad().
  */
 #define XHCI_HCS2_SPB_MAX(x)   ((((x) >> 16) & 0x3E0) | (((x) >> 27) & 0x1F))
+/* Isochronous Scheduling Threshold (HCSPARAMS2 bits 3:0): bit 3 selects the
+ * unit -- set = IST[2:0] counts FRAMES, clear = microframes. [P5-05] */
+#define XHCI_HCS2_IST(x)        ((x) & 0xF)
+#define XHCI_IST_IS_FRAMES(ist) ((ist) & 0x8)
+#define XHCI_IST_VALUE(ist)     ((ist) & 0x7)
 /* PAGESIZE (operational 0x08): bit n set => the xHC's page size is 2^(n+12). */
 #define XHCI_PAGESIZE_MASK     0x0000FFFFu
 #define XHCI_HCC1_CSZ          0x04
