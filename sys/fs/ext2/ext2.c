@@ -1226,6 +1226,15 @@ static uint32_t ext4_extent_resolve(ext2_fs_t *fs, ext2_inode_t *inode,
                           | ex[i].e_start_lo;
             phys += (logical - ext_start);
             if (phys >> 32) return 0;   /* needs 64-bit block addr */
+            /* EXT2-A14 (audit BM-04): the resolved address is untrusted
+             * on-disk data.  Out of range it would sail past the read/
+             * write primitives' own guards as a "valid" mapping, so the
+             * write silently went nowhere while write(2) reported
+             * success.  Treat it as corruption, not as a mapping. */
+            if ((uint32_t)phys >= fs->sb.s_blocks_count) {
+                ext2_extent_corrupt(fs, "extent block out of range");
+                return 0;
+            }
             return (uint32_t)phys;
         }
     }
@@ -1565,8 +1574,34 @@ static int ext4_extent_alloc_inode_block(ext2_fs_t *fs, ext2_inode_t *inode,
     return 0;
 }
 
-// Allocate and add a block to an inode
-int ext2_alloc_inode_block(ext2_fs_t *fs, ext2_inode_t *inode, uint32_t block_idx, uint32_t *indirect, uint32_t *dindirect, uint32_t *tindirect) {
+/* Metadata block I/O with the result actually checked.  EXT2-A14 /
+ * EXT2-A16 (audit BM-04/BM-11): the indirect-chain code discarded every
+ * return value.  A failed read left the PREVIOUS block's image in the
+ * scratch buffer, whose stale pointers were then dereferenced and
+ * written back as this file's block map; a failed (or range-refused)
+ * write silently dropped the update while the caller reported success. */
+static int ext2_read_meta(ext2_fs_t *fs, uint32_t blk, void *buf) {
+    return (ext2_read_block(fs, blk, buf) == fs->block_size) ? 0 : -EIO;
+}
+static int ext2_write_meta(ext2_fs_t *fs, uint32_t blk, const void *buf) {
+    return (ext2_write_block(fs, blk, buf) == fs->block_size) ? 0 : -EIO;
+}
+
+/*
+ * Allocate the backing block for logical block `block_idx`, creating
+ * whatever indirect blocks the chain needs on the way.
+ *
+ * Rewritten as one generic level walk (EXT2-A14): the three hand-rolled
+ * copies each ignored their I/O results and had no unwind, so an error
+ * partway through left allocated-but-unreferenced blocks charged to
+ * i_blocks and, worse, an inode pointing at an indirect block that was
+ * never initialised.  Every allocation is now recorded and released if
+ * a later step fails, and the inode is left exactly as it was found.
+ *
+ * Returns 0, -ENOSPC, -EFBIG or -EIO.
+ */
+int ext2_alloc_inode_block(ext2_fs_t *fs, ext2_inode_t *inode, uint32_t block_idx,
+                           uint32_t *indirect, uint32_t *dindirect, uint32_t *tindirect) {
     /* Extent-tree files route through the extent allocator instead
      * of the legacy block-pointer arithmetic — i_block[] doesn't
      * hold direct/indirect addresses for these inodes.  Append-only
@@ -1575,130 +1610,103 @@ int ext2_alloc_inode_block(ext2_fs_t *fs, ext2_inode_t *inode, uint32_t block_id
     if (inode->i_flags & EXT4_EXTENTS_FL)
         return ext4_extent_alloc_inode_block(fs, inode, block_idx);
 
-    uint32_t ptrs_per_block = fs->block_size / 4;
-    uint32_t sectors_per_block = fs->block_size / 512;
+    uint32_t ppb = fs->block_size / 4;
+    uint32_t spb = fs->block_size / 512;
 
     // Direct blocks (0-11)
     if (block_idx < 12) {
         uint32_t new_block = ext2_alloc_block(fs);
-        if (new_block == 0) return -1;
+        if (new_block == 0) return -ENOSPC;
         inode->i_block[block_idx] = new_block;
-        inode->i_blocks += sectors_per_block;
+        inode->i_blocks += spb;
         return 0;
     }
     block_idx -= 12;
-    
-    // Indirect block (12)
-    if (block_idx < ptrs_per_block) {
-        if (inode->i_block[12] == 0) {
-            uint32_t new_indirect = ext2_alloc_block(fs);
-            if (new_indirect == 0) return -1;
-            inode->i_block[12] = new_indirect;
-            inode->i_blocks += sectors_per_block;
-            memset(indirect, 0, fs->block_size);
-            ext2_write_block(fs, new_indirect, indirect);
-        } else {
-            ext2_read_block(fs, inode->i_block[12], (uint8_t *)indirect);
-        }
-        
-        uint32_t new_block = ext2_alloc_block(fs);
-        if (new_block == 0) return -1;
-        indirect[block_idx] = new_block;
-        inode->i_blocks += sectors_per_block;
-        ext2_write_block(fs, inode->i_block[12], (uint8_t *)indirect);
-        return 0;
+
+    /* Pick the indirection level and the per-level index path.  The
+     * level bounds are computed in 64-bit: ppb^3 overflows uint32 for
+     * block sizes of 8 KiB and up (audit BM-16). */
+    int       levels;
+    uint32_t  root_slot;
+    uint32_t  idx[3];
+    uint32_t *buf[3];
+    uint64_t  ppb64 = ppb;
+
+    if (block_idx < ppb) {
+        levels = 1; root_slot = 12;
+        idx[0] = block_idx;
+        buf[0] = indirect;
+    } else if ((block_idx -= ppb) < ppb64 * ppb64) {
+        levels = 2; root_slot = 13;
+        idx[0] = block_idx / ppb;
+        idx[1] = block_idx % ppb;
+        buf[0] = dindirect; buf[1] = indirect;
+    } else if ((block_idx -= (uint32_t)(ppb64 * ppb64)) < ppb64 * ppb64 * ppb64) {
+        levels = 3; root_slot = 14;
+        idx[0] = (uint32_t)(block_idx / (ppb64 * ppb64));
+        idx[1] = (block_idx / ppb) % ppb;
+        idx[2] = block_idx % ppb;
+        buf[0] = tindirect; buf[1] = dindirect; buf[2] = indirect;
+    } else {
+        return -EFBIG;
     }
-    block_idx -= ptrs_per_block;
-    
-    // Double indirect block (13)
-    if (block_idx < ptrs_per_block * ptrs_per_block) {
-        if (inode->i_block[13] == 0) {
-            uint32_t new_dindirect = ext2_alloc_block(fs);
-            if (new_dindirect == 0) return -1;
-            inode->i_block[13] = new_dindirect;
-            inode->i_blocks += sectors_per_block;
-            memset(dindirect, 0, fs->block_size);
-            ext2_write_block(fs, new_dindirect, (uint8_t *)dindirect);
-        } else {
-            ext2_read_block(fs, inode->i_block[13], (uint8_t *)dindirect);
-        }
-        
-        uint32_t di_idx = block_idx / ptrs_per_block;
-        uint32_t off = block_idx % ptrs_per_block;
-        
-        if (dindirect[di_idx] == 0) {
-            uint32_t new_indirect = ext2_alloc_block(fs);
-            if (new_indirect == 0) return -1;
-            dindirect[di_idx] = new_indirect;
-            inode->i_blocks += sectors_per_block;
-            ext2_write_block(fs, inode->i_block[13], (uint8_t *)dindirect);
-            memset(indirect, 0, fs->block_size);
-            ext2_write_block(fs, new_indirect, (uint8_t *)indirect);
-        } else {
-            ext2_read_block(fs, dindirect[di_idx], (uint8_t *)indirect);
-        }
-        
-        uint32_t new_block = ext2_alloc_block(fs);
-        if (new_block == 0) return -1;
-        indirect[off] = new_block;
-        inode->i_blocks += sectors_per_block;
-        ext2_write_block(fs, dindirect[di_idx], (uint8_t *)indirect);
-        return 0;
+
+    /* Everything allocated here, so a failure can hand it all back. */
+    uint32_t made[4];
+    int      nmade = 0;
+    int      rc = -EIO;
+    uint32_t lblk[3];                  /* block number of each level's node */
+    int      root_created = 0;
+
+    lblk[0] = inode->i_block[root_slot];
+    if (lblk[0] == 0) {
+        lblk[0] = ext2_alloc_block(fs);
+        if (lblk[0] == 0) { rc = -ENOSPC; goto unwind; }
+        made[nmade++] = lblk[0];
+        inode->i_blocks += spb;
+        memset(buf[0], 0, fs->block_size);
+        if (ext2_write_meta(fs, lblk[0], buf[0]) != 0) goto unwind;
+        inode->i_block[root_slot] = lblk[0];
+        root_created = 1;
+    } else if (ext2_read_meta(fs, lblk[0], buf[0]) != 0) {
+        goto unwind;
     }
-    block_idx -= ptrs_per_block * ptrs_per_block;
-    
-    // Triple indirect block (14)
-    if (block_idx < ptrs_per_block * ptrs_per_block * ptrs_per_block) {
-        if (inode->i_block[14] == 0) {
-            uint32_t new_tindirect = ext2_alloc_block(fs);
-            if (new_tindirect == 0) return -1;
-            inode->i_block[14] = new_tindirect;
-            inode->i_blocks += sectors_per_block;
-            memset(tindirect, 0, fs->block_size);
-            ext2_write_block(fs, new_tindirect, (uint8_t *)tindirect);
-        } else {
-            ext2_read_block(fs, inode->i_block[14], (uint8_t *)tindirect);
+
+    for (int l = 0; l + 1 < levels; l++) {
+        uint32_t child = buf[l][idx[l]];
+        if (child == 0) {
+            child = ext2_alloc_block(fs);
+            if (child == 0) { rc = -ENOSPC; goto unwind; }
+            made[nmade++] = child;
+            inode->i_blocks += spb;
+            /* Initialise the child BEFORE linking it: a crash between
+             * the two must not leave the parent pointing at a block
+             * full of stale pointers. */
+            memset(buf[l + 1], 0, fs->block_size);
+            if (ext2_write_meta(fs, child, buf[l + 1]) != 0) goto unwind;
+            buf[l][idx[l]] = child;
+            if (ext2_write_meta(fs, lblk[l], buf[l]) != 0) goto unwind;
+        } else if (ext2_read_meta(fs, child, buf[l + 1]) != 0) {
+            goto unwind;
         }
-        
-        uint32_t ddi_idx = block_idx / (ptrs_per_block * ptrs_per_block);
-        uint32_t rem = block_idx % (ptrs_per_block * ptrs_per_block);
-        
-        if (tindirect[ddi_idx] == 0) {
-            uint32_t new_dindirect = ext2_alloc_block(fs);
-            if (new_dindirect == 0) return -1;
-            tindirect[ddi_idx] = new_dindirect;
-            inode->i_blocks += sectors_per_block;
-            ext2_write_block(fs, inode->i_block[14], (uint8_t *)tindirect);
-            memset(dindirect, 0, fs->block_size);
-            ext2_write_block(fs, new_dindirect, (uint8_t *)dindirect);
-        } else {
-            ext2_read_block(fs, tindirect[ddi_idx], (uint8_t *)dindirect);
-        }
-        
-        uint32_t di_idx = rem / ptrs_per_block;
-        uint32_t off = rem % ptrs_per_block;
-        
-        if (dindirect[di_idx] == 0) {
-            uint32_t new_indirect = ext2_alloc_block(fs);
-            if (new_indirect == 0) return -1;
-            dindirect[di_idx] = new_indirect;
-            inode->i_blocks += sectors_per_block;
-            ext2_write_block(fs, tindirect[ddi_idx], (uint8_t *)dindirect);
-            memset(indirect, 0, fs->block_size);
-            ext2_write_block(fs, new_indirect, (uint8_t *)indirect);
-        } else {
-            ext2_read_block(fs, dindirect[di_idx], (uint8_t *)indirect);
-        }
-        
-        uint32_t new_block = ext2_alloc_block(fs);
-        if (new_block == 0) return -1;
-        indirect[off] = new_block;
-        inode->i_blocks += sectors_per_block;
-        ext2_write_block(fs, dindirect[di_idx], (uint8_t *)indirect);
-        return 0;
+        lblk[l + 1] = child;
     }
-    
-    return -EFBIG;
+
+    uint32_t data = ext2_alloc_block(fs);
+    if (data == 0) { rc = -ENOSPC; goto unwind; }
+    made[nmade++] = data;
+    inode->i_blocks += spb;
+    buf[levels - 1][idx[levels - 1]] = data;
+    if (ext2_write_meta(fs, lblk[levels - 1], buf[levels - 1]) != 0) goto unwind;
+    return 0;
+
+unwind:
+    for (int i = 0; i < nmade; i++) {
+        ext2_free_block(fs, made[i]);
+        inode->i_blocks -= spb;
+    }
+    if (root_created) inode->i_block[root_slot] = 0;
+    return rc;
 }
 
 // Write data to an inode at a given offset
@@ -1765,9 +1773,13 @@ uint32_t ext2_inode_write(ext2_node_t *node, off_t offset, uint32_t size,
 
         // Allocate block if it doesn't exist
         if (block_num == 0) {
-            if (ext2_alloc_inode_block(fs, inode, block_idx, indirect, dindirect, tindirect) != 0) {
-                // Out of space
-                if (errp) *errp = -ENOSPC;
+            /* EXT2-A14: report the allocator's real reason — -EFBIG
+             * (past the triple-indirect limit) and -EIO (metadata write
+             * failure) were both surfacing to userspace as ENOSPC. */
+            int arc = ext2_alloc_inode_block(fs, inode, block_idx,
+                                             indirect, dindirect, tindirect);
+            if (arc != 0) {
+                if (errp) *errp = (arc < 0) ? arc : -ENOSPC;
                 break;
             }
             block_num = ext2_get_block_num(fs, inode, block_idx, indirect, dindirect, tindirect);
@@ -1778,20 +1790,36 @@ uint32_t ext2_inode_write(ext2_node_t *node, off_t offset, uint32_t size,
             
             // Zero the newly allocated block
             memset(block_buf, 0, fs->block_size);
-            ext2_write_block(fs, block_num, block_buf);
+            if (ext2_write_block(fs, block_num, block_buf) != fs->block_size) {
+                if (errp) *errp = -EIO;
+                break;
+            }
         }
-        
+
         // Read block if we're doing a partial write
         if (block_offset != 0 || size < fs->block_size) {
-            ext2_read_block(fs, block_num, block_buf);
+            /* EXT2-A14: a failed read leaves the previous block's image
+             * in the buffer; merging into it and writing it back would
+             * publish another file's data here. */
+            if (ext2_read_block(fs, block_num, block_buf) != fs->block_size) {
+                if (errp) *errp = -EIO;
+                break;
+            }
         }
-        
+
         uint32_t to_copy = fs->block_size - block_offset;
         if (to_copy > size) to_copy = size;
-        
+
         memcpy(block_buf + block_offset, buf, to_copy);
-        ext2_write_block(fs, block_num, block_buf);
-        
+        /* EXT2-A14 (audit BM-04): the return was discarded, so a
+         * refused or short write still advanced total_written and
+         * write(2) reported full success for data that never landed. */
+        if (ext2_write_block(fs, block_num, block_buf) != fs->block_size) {
+            if (errp) *errp = -EIO;
+            break;
+        }
+
+
         buf += to_copy;
         total_written += to_copy;
         offset += to_copy;
@@ -4144,7 +4172,13 @@ static int ext2_add_entry(fs_node_t *dir, const char *name, uint32_t inode, uint
     de->file_type = file_type;
     memcpy(de->name, name, name_len);
 
-    ext2_write_dir_block(fs, ctx, new_block, block_buf);
+    if (ext2_write_dir_block(fs, ctx, new_block, block_buf) != fs->block_size) {
+        /* EXT2-A14: the block is allocated and linked but its contents
+         * never reached the disk — the directory would grow by a block
+         * of garbage.  Report the failure. */
+        result = -EIO;
+        goto cleanup;
+    }
     if (ext2_trace_on() && ctx->inode_num <= EXT2_TRACE_PARENT_LIMIT) {
         kprintf("ext2trace: ADD    parent=%u name='%s' child=%u ft=%u (new block)\n",
                 ctx->inode_num, name, inode, file_type);
