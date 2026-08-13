@@ -37,6 +37,11 @@
  * buffers, every `len > EHCI_BOUNCE_SIZE` check must become
  * `len > EHCI_BOUNCE_SIZE - (bounce_dma & 0xFFF)`. [ehci-audit] */
 #define EHCI_BOUNCE_SIZE   (20 * 1024)
+/* 8 slots, exactly two chain shapes (SETUP[+DATA]+STATUS, single qTD).
+ * A chain-builder abstraction over this was proposed and rejected: the
+ * alt_next decision is per-shape and load-bearing where it sits, and the
+ * pool is too small to amortize indirection.  Revisit only if multi-qTD
+ * bulk chains or resident periodic QHs ever land. [RF-8] */
 #define EHCI_MAX_QTD       8
 #define EHCI_XFER_TIMEOUT_MS 1000
 
@@ -564,17 +569,42 @@ static uint32_t ehci_endp_cap(usb_transfer_t *xfer, uint8_t mult)
     return cap;
 }
 
+/* [RF-8] Shared bounce staging and result extraction for the three
+ * transfer builders.  ehci_stage_tx: size gate + OUT copy-in.
+ * ehci_qtd_residue: Total Bytes remaining from a retired qTD (4.10.4
+ * guarantees this field's write-back).  ehci_copyout: actual_length + IN
+ * copy-out. */
+static int ehci_stage_tx(ehci_hc_t *hc, usb_transfer_t *xfer, int in)
+{
+    if (xfer->length > EHCI_BOUNCE_SIZE)
+        return -1;
+    if (!in && xfer->length)
+        memcpy(hc->bounce, xfer->data, xfer->length);
+    return 0;
+}
+
+static uint32_t ehci_qtd_residue(ehci_hc_t *hc, int idx)
+{
+    return (hc->qtd[idx].token >> EHCI_QTD_BYTES_SHIFT) & 0x7FFF;
+}
+
+static void ehci_copyout(ehci_hc_t *hc, usb_transfer_t *xfer, int in,
+                         uint32_t actual)
+{
+    xfer->actual_length = actual;
+    if (in && actual)
+        memcpy(xfer->data, hc->bounce, actual);
+}
+
 static int ehci_control_transfer(ehci_hc_t *hc, usb_transfer_t *xfer)
 {
     uint32_t len = xfer->length;
     int in = (xfer->setup.bmRequestType & 0x80) != 0;
-    if (len > EHCI_BOUNCE_SIZE)
+    if (ehci_stage_tx(hc, xfer, in) != 0)
         return USB_XFER_ERROR;
 
     /* SETUP stage */
     memcpy(hc->setup_buf, &xfer->setup, sizeof(struct usb_setup_packet));
-    if (!in && len)
-        memcpy(hc->bounce, xfer->data, len);
 
     int idx = 0;
     int setup_i = idx++;
@@ -609,13 +639,15 @@ static int ehci_control_transfer(ehci_hc_t *hc, usb_transfer_t *xfer)
     int r = ehci_run_qh(hc, setup_i, idx, ehci_endp_char(xfer, 1), /* [DRV-06] idx qTDs */
                         xfer->timeout_ms ? xfer->timeout_ms
                                          : EHCI_XFER_TIMEOUT_MS,
-                        ehci_endp_cap(xfer, 1)); /* control is never high-bandwidth */
+                        /* Same mult derivation as bulk/intr: identical for
+                         * EP0, whose mult the core pins to 1 (usb.c). */
+                        ehci_endp_cap(xfer, xfer->ep && xfer->ep->mult
+                                            ? xfer->ep->mult : 1));
     if (r == USB_XFER_OK && in && len) {
         /* bytes actually moved = requested - residue from the data qTD */
-        uint32_t residue = (hc->qtd[data_i].token >> EHCI_QTD_BYTES_SHIFT) & 0x7FFF;
-        xfer->actual_length = len - residue;
-        memcpy(xfer->data, hc->bounce, xfer->actual_length);
+        ehci_copyout(hc, xfer, in, len - ehci_qtd_residue(hc, data_i));
     } else if (r == USB_XFER_OK) {
+        /* OUT/no-data: the transfer is all-or-nothing at this layer. */
         xfer->actual_length = len;
     }
     xfer->status = r;
@@ -626,11 +658,8 @@ static int ehci_bulk_transfer(ehci_hc_t *hc, usb_transfer_t *xfer)
 {
     uint32_t len = xfer->length;
     int in = xfer->ep && (xfer->ep->address & 0x80);
-    if (len > EHCI_BOUNCE_SIZE)
+    if (ehci_stage_tx(hc, xfer, in) != 0)
         return USB_XFER_ERROR;
-
-    if (!in && len)
-        memcpy(hc->bounce, xfer->data, len);
 
     uint32_t pid = in ? EHCI_QTD_PID_IN : EHCI_QTD_PID_OUT;
     int toggle = xfer->ep ? xfer->ep->toggle : 0;
@@ -642,12 +671,8 @@ static int ehci_bulk_transfer(ehci_hc_t *hc, usb_transfer_t *xfer)
                         ehci_endp_cap(xfer,
                                       xfer->ep && xfer->ep->mult ? xfer->ep->mult
                                                                  : 1));
-    if (r == USB_XFER_OK) {
-        uint32_t residue = (hc->qtd[0].token >> EHCI_QTD_BYTES_SHIFT) & 0x7FFF;
-        xfer->actual_length = len - residue;
-        if (in && xfer->actual_length)
-            memcpy(xfer->data, hc->bounce, xfer->actual_length);
-    }
+    if (r == USB_XFER_OK)
+        ehci_copyout(hc, xfer, in, len - ehci_qtd_residue(hc, 0));
     if ((r == USB_XFER_OK || r == USB_XFER_TIMEOUT) && xfer->ep &&
         hc->async_qh->current_qtd) {
         /* [EHCI-04] The ending toggle used to be computed as
@@ -764,10 +789,8 @@ static int ehci_intr_transfer(ehci_hc_t *hc, usb_transfer_t *xfer)
     uint64_t deadline;
     int r = USB_XFER_OK;
 
-    if (len > EHCI_BOUNCE_SIZE)
+    if (ehci_stage_tx(hc, xfer, in) != 0)
         return USB_XFER_ERROR;
-    if (!in && len)
-        memcpy(hc->bounce, xfer->data, len);
 
     stride = ehci_intr_stride(xfer->ep ? xfer->ep->interval : 1,
                               xfer->dev->speed);
@@ -825,13 +848,18 @@ static int ehci_intr_transfer(ehci_hc_t *hc, usb_transfer_t *xfer)
     hc->qtd[0].token &= ~EHCI_QTD_STATUS_ACTIVE;
     qh->overlay_next = EHCI_LINK_TERMINATE;
     qh->overlay_alt_next = EHCI_LINK_TERMINATE;
-    qh->overlay_token = EHCI_QTD_STATUS_HALTED;
+    /* Park HALTED, preserving dt like the async timeout park does.  The
+     * preserved bit is dead state today (the next arm overwrites it), but
+     * a park that silently discards the toggle is a future-edit trap. */
+    qh->overlay_token = (ov_tok & EHCI_QTD_TOGGLE) | EHCI_QTD_STATUS_HALTED;
 
     if (r == USB_XFER_OK) {
-        uint32_t residue = (hc->qtd[0].token >> EHCI_QTD_BYTES_SHIFT) & 0x7FFF;
-        xfer->actual_length = (len > residue) ? (len - residue) : 0;
-        if (in && xfer->actual_length)
-            memcpy(xfer->data, hc->bounce, xfer->actual_length);
+        uint32_t residue = ehci_qtd_residue(hc, 0);
+
+        /* residue <= len always on a conformant HC (Total Bytes only
+         * counts down from the programmed length, 4.10.4); the clamp is
+         * belt-and-braces against a misbehaving one. */
+        ehci_copyout(hc, xfer, in, (len > residue) ? (len - residue) : 0);
     }
     if ((r == USB_XFER_OK || r == USB_XFER_TIMEOUT) && xfer->ep && ov_cur) {
         /* [EHCI-04] Same overlay-dt readback as the bulk path: parity from
