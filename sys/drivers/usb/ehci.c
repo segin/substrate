@@ -1,8 +1,8 @@
 /*
  * ehci.c — EHCI (USB 2.0) host controller driver.
  *
- * Implements the usb_hcd_t interface (submit / port_status / port_reset /
- * port_enable) for a PCI EHCI controller (class 0x0C0320).  Synchronous,
+ * Implements the usb_hcd_t interface (submit / port_status / port_reset)
+ * for a PCI EHCI controller (class 0x0C0320).  Synchronous,
  * polling model: one transfer at a time under submit_lock, matching uhci.c.
  *
  * A single asynchronous-schedule Queue Head (the "async head") is linked to
@@ -188,25 +188,6 @@ static int ehci_port_reset(usb_hcd_t *hcd, uint8_t port)
         ehci_portsc_wr(hc, port, (psc & ~EHCI_PORT_CLEAR) | EHCI_PORT_OWNER);
         return -1;
     }
-    return 0;
-}
-
-static int ehci_port_enable(usb_hcd_t *hcd, uint8_t port, int enable)
-{
-    ehci_hc_t *hc = hcd->priv;
-    uint32_t psc = ehci_portsc_rd(hc, port);
-
-    if (enable) {
-        /* Table 2-16: "Ports can only be enabled by the host controller as
-         * a part of the reset and enable.  Software cannot enable a port by
-         * writing a one to this field."  Writing PED=1 is a hardware no-op,
-         * so reporting success for it lied to the (currently nonexistent)
-         * caller.  Succeed only if the port is already enabled. */
-        return (psc & EHCI_PORT_ENABLE) ? 0 : -1;
-    }
-    psc &= ~EHCI_PORT_CLEAR;
-    psc &= ~EHCI_PORT_ENABLE;
-    ehci_portsc_wr(hc, port, psc);
     return 0;
 }
 
@@ -1239,7 +1220,6 @@ static int ehci_pci_attach(struct device *dev)
     hc->hcd.submit = ehci_submit;
     hc->hcd.port_status = ehci_port_status;
     hc->hcd.port_reset = ehci_port_reset;
-    hc->hcd.port_enable = ehci_port_enable;
 
     hc->hcd.kdev = dev;                  /* shutdown dispatch [RF-5] */
     usb_register_hcd(&hc->hcd);

@@ -1,7 +1,7 @@
 /*
  * xhci.c — xHCI (USB 3.x) host controller driver.
  *
- * Implements usb_hcd_t (submit / port_status / port_reset / port_enable) for a
+ * Implements usb_hcd_t (submit / port_status / port_reset) for a
  * PCI xHCI controller (class 0x0C0330, MMIO BAR0).  Synchronous polling model
  * like uhci.c/ehci.c: one transfer at a time under submit_lock.
  *
@@ -951,12 +951,6 @@ static int xhci_port_reset(usb_hcd_t *hcd, uint8_t port)
         return xhci_do_reset(hc, port, XHCI_PORT_WPR);   /* [X-15] */
     }
     return -1;
-}
-
-static int xhci_port_enable(usb_hcd_t *hcd, uint8_t port, int enable)
-{
-    (void)hcd; (void)port; (void)enable;
-    return 0;   /* xHCI enables ports via reset; nothing to do */
 }
 
 /*
@@ -2759,7 +2753,6 @@ static int xhci_pci_attach(struct device *dev)
     hc->hcd.submit = xhci_submit;
     hc->hcd.port_status = xhci_port_status;
     hc->hcd.port_reset = xhci_port_reset;
-    hc->hcd.port_enable = xhci_port_enable;
     hc->hcd.set_hub = xhci_set_hub;
     hc->hcd.port_power_cycle = xhci_port_power_cycle;   /* [HW-03] */
     hc->hcd.set_ep0_mps = xhci_set_ep0_mps;

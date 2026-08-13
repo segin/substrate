@@ -6,7 +6,6 @@
  * controller.  Covers the RF-4 parity fixes:
  *
  *   - TD status classification, cause bits before STALLED
- *   - PORTSC W1C preservation in uhci_port_enable
  *   - honest uhci_port_reset (a port that never enables reports failure)
  *   - dead-controller detection in the poll loop (HSE/HCPE/HCH)
  *   - zero-length bulk transfers accepted (BOT terminating ZLP)
@@ -229,25 +228,6 @@ static void test_td_status(void)
     printf("  td_status: ok\n");
 }
 
-static void test_port_enable_w1c(void)
-{
-    uhci_hc_t *hc = make_hc();
-
-    /* Pending connect/enable changes must survive an unrelated enable
-     * write -- writing them back as 1s acknowledges (= loses) them. */
-    fake_regs[UHCI_PORTSC1 / 2] = UHCI_PORTSC_CCS | UHCI_PORTSC_CSC |
-                                  UHCI_PORTSC_PEC;
-    uhci_port_enable(&hc->hcd, 1, 1);
-    assert(portsc1() & UHCI_PORTSC_CSC);
-    assert(portsc1() & UHCI_PORTSC_PEC);
-    assert(portsc1() & UHCI_PORTSC_PE);
-    uhci_port_enable(&hc->hcd, 1, 0);
-    assert(portsc1() & UHCI_PORTSC_CSC);
-    assert(!(portsc1() & UHCI_PORTSC_PE));
-    free_hc(hc);
-    printf("  port_enable_w1c: ok\n");
-}
-
 static void test_port_reset_honest(void)
 {
     uhci_hc_t *hc = make_hc();
@@ -359,7 +339,6 @@ int main(void)
 {
     printf("host_test_uhci:\n");
     test_td_status();
-    test_port_enable_w1c();
     test_port_reset_honest();
     test_dead_hc_poll();
     test_bulk_zlp_accepted();

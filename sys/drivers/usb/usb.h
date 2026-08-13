@@ -544,7 +544,6 @@ typedef struct usb_hcd {
      * nports: number of root hub ports
      * port_status: read port status register (returns wPortStatus | wPortChange << 16)
      * port_reset: issue port reset and wait for completion
-     * port_enable: enable/disable port
      */
     uint8_t  nports;
     /* Consecutive failed enumeration attempts per root port; cleared when the
@@ -572,7 +571,6 @@ typedef struct usb_hcd {
     struct device *kdev;
     uint32_t (*port_status)(struct usb_hcd *hcd, uint8_t port);
     int      (*port_reset)(struct usb_hcd *hcd, uint8_t port);
-    int      (*port_enable)(struct usb_hcd *hcd, uint8_t port, int enable);
 
     /*
      * Optional: the core has learned this device is a hub with `nports`

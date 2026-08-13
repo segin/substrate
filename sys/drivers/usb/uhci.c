@@ -408,30 +408,6 @@ static int uhci_port_reset(usb_hcd_t *hcd, uint8_t port)
     return 0;
 }
 
-static int uhci_port_enable(usb_hcd_t *hcd, uint8_t port, int enable)
-{
-    uhci_hc_t *hc = hcd->priv;
-    uint16_t reg;
-    uint16_t portsc;
-
-    if (port < 1 || port > UHCI_NUM_PORTS)
-        return -1;
-
-    reg = uhci_portsc_reg(port);
-    /* [RF-4] Mask the W1C change bits: writing back a pending CSC/PEC
-     * acknowledges it -- a silently missed hot-plug event.  Same class of
-     * bug as [ehci-audit 10]. */
-    portsc = uhci_readw(hc, reg) & ~UHCI_PORTSC_CLEAR;
-
-    if (enable)
-        portsc |= UHCI_PORTSC_PE;
-    else
-        portsc &= ~UHCI_PORTSC_PE;
-
-    uhci_writew(hc, reg, portsc);
-    return 0;
-}
-
 /*
  * ============================================================
  * Transfer Execution (Synchronous Polling)
@@ -1211,7 +1187,6 @@ static int uhci_pci_attach(struct device *dev)
     hc->hcd.nports = UHCI_NUM_PORTS;
     hc->hcd.port_status = uhci_port_status;
     hc->hcd.port_reset = uhci_port_reset;
-    hc->hcd.port_enable = uhci_port_enable;
     hc->hcd.iso_frame_modulus = UHCI_FRAME_LIST_SIZE;
     hc->hcd.frame_number = uhci_hcd_frame_number;
     hc->hcd.iso_schedule = uhci_hcd_iso_schedule;

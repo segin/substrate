@@ -557,27 +557,8 @@ static void test_w1c_preservation(void)
     assert(portsc(3) & EHCI_PORT_ENABLE_CH);
     assert(portsc(3) & EHCI_PORT_OC_CH);
 
-    /* Same discipline on the disable path. */
-    ehci_port_enable(&hc->hcd, 3, 0);
-    assert(portsc(3) & EHCI_PORT_CONNECT_CH);
     free_hc(hc);
     printf("  w1c_preservation: ok\n");
-}
-
-static void test_port_enable_honest(void)
-{
-    ehci_hc_t *hc = make_hc();
-
-    /* Software cannot set PED (Table 2-16): enable=1 must not lie. */
-    set_portsc(1, EHCI_PORT_CONNECT | EHCI_PORT_POWER);
-    assert(ehci_port_enable(&hc->hcd, 1, 1) == -1);
-    set_portsc(1, EHCI_PORT_CONNECT | EHCI_PORT_POWER | EHCI_PORT_ENABLE);
-    assert(ehci_port_enable(&hc->hcd, 1, 1) == 0);
-    /* Disable really disables. */
-    assert(ehci_port_enable(&hc->hcd, 1, 0) == 0);
-    assert(!(portsc(1) & EHCI_PORT_ENABLE));
-    free_hc(hc);
-    printf("  port_enable_honest: ok\n");
 }
 
 int main(void)
@@ -594,7 +575,6 @@ int main(void)
     test_stuck_pr_no_disown();
     test_kstate_gating();
     test_w1c_preservation();
-    test_port_enable_honest();
     printf("host_test_ehci: all tests passed\n");
     return 0;
 }
