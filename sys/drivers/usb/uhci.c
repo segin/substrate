@@ -15,8 +15,16 @@
 #include <stdio.h>
 #include <string.h>
 
+#ifdef HOST_TEST
+/* The arch headers define these as static-inline asm; the host test build
+ * substitutes plain functions. [RF-4] */
+uint32_t intr_disable(void);
+void intr_restore(uint32_t eflags);
+void intr_enable(void);
+#else
 #include <arch/i386/intr.h>
 #include <arch/x86-common/io.h>
+#endif
 #include <drivers/usb/uhci.h>
 #include <drivers/usb/usb.h>
 #include <kern/bus.h>
@@ -89,25 +97,49 @@ typedef struct uhci_hc {
  */
 static uint8_t uhci_instances;
 
+/* Default per-transfer deadline.  UHCI proved 5 s out on full-speed BOT
+ * storage; callers with tighter needs pass xfer->timeout_ms. [RF-4] */
+#define UHCI_XFER_TIMEOUT_MS 5000
+
 /*
  * ============================================================
  * Register Access
  * ============================================================
  */
 
+/* [RF-4] Register access funnels through these three so a host-side test
+ * build can substitute a scripted fake controller -- the ehci.c/nvme.c
+ * HOST_TEST pattern, over I/O ports instead of MMIO. */
+#ifdef HOST_TEST
+extern uint16_t uhci_test_readw(uhci_hc_t *hc, uint16_t reg);
+extern void uhci_test_writew(uhci_hc_t *hc, uint16_t reg, uint16_t val);
+extern void uhci_test_writel(uhci_hc_t *hc, uint16_t reg, uint32_t val);
+#endif
 static inline void uhci_writew(uhci_hc_t *hc, uint16_t reg, uint16_t val)
 {
+#ifdef HOST_TEST
+    uhci_test_writew(hc, reg, val);
+#else
     outw(hc->iobase + reg, val);
+#endif
 }
 
 static inline uint16_t uhci_readw(uhci_hc_t *hc, uint16_t reg)
 {
+#ifdef HOST_TEST
+    return uhci_test_readw(hc, reg);
+#else
     return inw(hc->iobase + reg);
+#endif
 }
 
 static inline void uhci_writel(uhci_hc_t *hc, uint16_t reg, uint32_t val)
 {
+#ifdef HOST_TEST
+    uhci_test_writel(hc, reg, val);
+#else
     outl(hc->iobase + reg, val);
+#endif
 }
 
 /*
@@ -329,11 +361,8 @@ static int uhci_port_reset(usb_hcd_t *hcd, uint8_t port)
     uint16_t portsc;
     uint64_t deadline;
 
-    /* CSC and PEC are write-1-to-clear: blindly OR-ing into PORTSC
-     * accidentally clears any pending change bits the next layer
-     * still needs to see (= missed hot-plug events).  Mask them out
-     * before every modify. */
-    const uint16_t W1C = UHCI_PORTSC_CSC | UHCI_PORTSC_PEC;
+    /* CSC and PEC are write-1-to-clear: see UHCI_PORTSC_CLEAR. [RF-4] */
+    const uint16_t W1C = UHCI_PORTSC_CLEAR;
 
     if (port < 1 || port > UHCI_NUM_PORTS)
         return -1;
@@ -376,6 +405,15 @@ static int uhci_port_reset(usb_hcd_t *hcd, uint8_t port)
             __asm__ volatile("pause");
     }
 
+    /* [RF-4] Report the truth.  This returned 0 unconditionally, so the
+     * core's enumeration-failure ladder (usb.c enum_fail parking) never
+     * learned that a port cannot enable and re-probed it forever. */
+    portsc = uhci_readw(hc, reg);
+    if (!(portsc & UHCI_PORTSC_PE)) {
+        kprintf("uhci: port %u failed to enable after reset\n", port);
+        return -1;
+    }
+
     return 0;
 }
 
@@ -389,7 +427,10 @@ static int uhci_port_enable(usb_hcd_t *hcd, uint8_t port, int enable)
         return -1;
 
     reg = uhci_portsc_reg(port);
-    portsc = uhci_readw(hc, reg);
+    /* [RF-4] Mask the W1C change bits: writing back a pending CSC/PEC
+     * acknowledges it -- a silently missed hot-plug event.  Same class of
+     * bug as [ehci-audit 10]. */
+    portsc = uhci_readw(hc, reg) & ~UHCI_PORTSC_CLEAR;
 
     if (enable)
         portsc |= UHCI_PORTSC_PE;
@@ -407,6 +448,26 @@ static int uhci_port_enable(usb_hcd_t *hcd, uint8_t port, int enable)
  */
 
 /*
+ * [RF-4] Classify a retired TD's ctrl_status.  Cause bits FIRST: when the
+ * error counter exhausts (three CRC/timeout/bitstuff/databuffer failures)
+ * the controller sets STALLED *alongside* the cause bit, so testing
+ * STALLED first misreported transport errors as functional stalls --
+ * driving usb_clear_halt instead of reset recovery, and falsely latching
+ * a HID device's ctl_poll_refused.  Same taxonomy as ehci_halt_status and
+ * xhci_xfer_status: STALL = the device said no, ERROR = the transport
+ * broke.
+ */
+static int uhci_td_status(uint32_t cs)
+{
+    if (cs & (UHCI_TD_CTRL_DBUFERR | UHCI_TD_CTRL_BABBLE |
+              UHCI_TD_CTRL_CRCTMO | UHCI_TD_CTRL_BITSTUFF))
+        return USB_XFER_ERROR;
+    if (cs & UHCI_TD_CTRL_STALLED)
+        return USB_XFER_STALL;
+    return USB_XFER_OK;
+}
+
+/*
  * Wait for a TD chain to complete by polling the Active bit.
  * Returns 0 on success, negative on error/timeout.
  */
@@ -418,8 +479,6 @@ static int uhci_poll_td(uhci_hc_t *hc, struct uhci_td *td,
     /* Cap the chain walk at the TD pool size — a corrupt link pointing
      * back into already-walked TDs would otherwise loop forever. */
     uint32_t walk_budget = UHCI_MAX_TDS;
-
-    (void)hc;
 
     while (td && walk_budget--) {
         /* Poll until this TD is no longer active.  Run the wait with
@@ -441,10 +500,29 @@ static int uhci_poll_td(uhci_hc_t *hc, struct uhci_td *td,
          * IF-safe from the IF=0 poll kthread; the controller completes the
          * transfer in the background either way. */
         unsigned _spins = 0;
+        unsigned _deadcheck = 0;
         while (td->ctrl_status & UHCI_TD_CTRL_ACTIVE) {
             if ((uint64_t)get_uptime_ms() > deadline) {
                 intr_restore(_saved_if);
                 return USB_XFER_TIMEOUT;
+            }
+            /* [RF-4] A controller that halted itself (Host System Error /
+             * Process Error clears Run) never retires another TD; without
+             * this probe every transfer burned its full 5 s timeout,
+             * forever, silently.  Same throttled-detect + core-latch shape
+             * as ehci_check's [EHCI-INIT-03]. */
+            if ((++_deadcheck & 0x3FF) == 0) {
+                uint16_t sts = uhci_readw(hc, UHCI_USBSTS);
+                if (sts & (UHCI_STS_HSE | UHCI_STS_HCPE | UHCI_STS_HCH)) {
+                    kprintf("uhci: host controller halted (USBSTS=0x%x)\n",
+                            (unsigned)sts);
+                    /* HSE/HCPE are W1C; acknowledge the fault bits. */
+                    uhci_writew(hc, UHCI_USBSTS,
+                                sts & (UHCI_STS_HSE | UHCI_STS_HCPE));
+                    hc->hcd.hc_failed = 1;   /* [RF-2] core fail-fast */
+                    intr_restore(_saved_if);
+                    return USB_XFER_ERROR;
+                }
             }
             if (_spins < UHCI_POLL_SPIN_LIMIT) {
                 _spins++;
@@ -455,16 +533,15 @@ static int uhci_poll_td(uhci_hc_t *hc, struct uhci_td *td,
         }
         intr_restore(_saved_if);
 
-        /* Check for errors */
-        if (td->ctrl_status & UHCI_TD_CTRL_STALLED) {
-            // kprintf("uhci: TD stall (token=0x%08x)\n", td->token);
-            return USB_XFER_STALL;
-        }
-        if (td->ctrl_status & (UHCI_TD_CTRL_DBUFERR | UHCI_TD_CTRL_BABBLE |
-                                UHCI_TD_CTRL_CRCTMO | UHCI_TD_CTRL_BITSTUFF)) {
-            kprintf("uhci: TD error 0x%08x (token=0x%08x)\n", 
-                    td->ctrl_status & UHCI_TD_CTRL_ERRMASK, td->token);
-            return USB_XFER_ERROR;
+        /* Check for errors -- cause bits before STALLED [RF-4]. */
+        {
+            int st = uhci_td_status(td->ctrl_status);
+
+            if (st == USB_XFER_ERROR)
+                kprintf("uhci: TD error 0x%08x (token=0x%08x)\n",
+                        td->ctrl_status & UHCI_TD_CTRL_ERRMASK, td->token);
+            if (st != USB_XFER_OK)
+                return st;
         }
 
         uint32_t actlen = (td->ctrl_status & UHCI_TD_ACTLEN_MASK);
@@ -644,8 +721,13 @@ static int uhci_control_transfer(uhci_hc_t *hc, usb_transfer_t *xfer)
     /* Insert into async QH */
     hc->async_qh->element_link = (uint32_t)setup_phys;
 
-    /* Poll for completion */
-    ret = uhci_poll_td(hc, setup_td, 5000, &actual);
+    /* Poll for completion.  Honor the caller's deadline; note this is
+     * latent parity for now -- nothing in-tree sets a control timeout_ms
+     * yet -- but the moment one does, a 5 s floor here would defeat
+     * it. [RF-4] */
+    ret = uhci_poll_td(hc, setup_td,
+                       xfer->timeout_ms ? xfer->timeout_ms
+                                        : UHCI_XFER_TIMEOUT_MS, &actual);
 
     /* Remove from schedule */
     hc->async_qh->element_link = UHCI_QH_LINK_T;
@@ -698,11 +780,17 @@ static int uhci_bulk_transfer(uhci_hc_t *hc, usb_transfer_t *xfer)
     max_pkt = xfer->ep->max_packet;
     if (max_pkt == 0) max_pkt = 64;
 
-    if (!xfer->data || xfer->length == 0)
+    /* [RF-4] A zero-length bulk transfer is a real protocol element (the
+     * terminating ZLP of a BOT transport, a zero-length OUT heartbeat) and
+     * EHCI/xHCI both accept it; rejecting it here was a UHCI-only
+     * divergence.  Only a missing buffer WITH a length is an error. */
+    if (!xfer->data && xfer->length)
         return USB_XFER_ERROR;
 
-    data_dma = dma_map_single(xfer->data, xfer->length,
-                              is_in ? DMA_FROM_DEVICE : DMA_TO_DEVICE);
+    data_dma = 0;
+    if (xfer->length)
+        data_dma = dma_map_single(xfer->data, xfer->length,
+                                  is_in ? DMA_FROM_DEVICE : DMA_TO_DEVICE);
 
     remaining = xfer->length;
     offset = 0;
@@ -712,7 +800,7 @@ static int uhci_bulk_transfer(uhci_hc_t *hc, usb_transfer_t *xfer)
     // kprintf("uhci: bulk %s addr=%u ep=%u len=%u maxp=%u toggle=%d\n",
     //         is_in ? "IN" : "OUT", addr, ep_num, xfer->length, max_pkt, current_toggle);
 
-    while (remaining > 0) {
+    do {
         struct uhci_td *td;
         dma_addr_t td_phys;
         uint32_t chunk = (remaining > max_pkt) ? max_pkt : remaining;
@@ -727,10 +815,12 @@ static int uhci_bulk_transfer(uhci_hc_t *hc, usb_transfer_t *xfer)
                           (3U << UHCI_TD_CTRL_CERR_SHIFT) |
                           (is_in ? UHCI_TD_CTRL_SPD : 0) |
                           ((xfer->dev->speed == USB_SPEED_LOW) ? UHCI_TD_CTRL_LS : 0);
-        td->token = UHCI_TD_TOKEN(
-            is_in ? UHCI_TD_PID_IN : UHCI_TD_PID_OUT,
-            addr, ep_num, current_toggle, chunk);
-        td->buffer = (uint32_t)(data_dma + offset);
+        td->token = chunk
+            ? UHCI_TD_TOKEN(is_in ? UHCI_TD_PID_IN : UHCI_TD_PID_OUT,
+                            addr, ep_num, current_toggle, chunk)
+            : UHCI_TD_TOKEN_ZERO(is_in ? UHCI_TD_PID_IN : UHCI_TD_PID_OUT,
+                                 addr, ep_num, current_toggle);
+        td->buffer = chunk ? (uint32_t)(data_dma + offset) : 0;
         td->link = UHCI_TD_LINK_T;
 
         current_toggle ^= 1;
@@ -745,7 +835,7 @@ static int uhci_bulk_transfer(uhci_hc_t *hc, usb_transfer_t *xfer)
         prev_td = td;
         offset += chunk;
         remaining -= chunk;
-    }
+    } while (remaining > 0);
 
     /* Mark last TD with IOC */
     if (prev_td)
@@ -758,7 +848,8 @@ static int uhci_bulk_transfer(uhci_hc_t *hc, usb_transfer_t *xfer)
      * for the whole window whenever the device has nothing to report, so its
      * caller passes a short timeout; everything else keeps the 5 s default. */
     ret = uhci_poll_td(hc, first_td,
-                       xfer->timeout_ms ? xfer->timeout_ms : 5000, &actual);
+                       xfer->timeout_ms ? xfer->timeout_ms
+                                        : UHCI_XFER_TIMEOUT_MS, &actual);
 
     /* Remove from schedule */
     hc->async_qh->element_link = UHCI_QH_LINK_T;
@@ -771,8 +862,11 @@ static int uhci_bulk_transfer(uhci_hc_t *hc, usb_transfer_t *xfer)
     xfer->actual_length = actual;
     xfer->status = ret;
 
-    /* Update endpoint toggle based on actual packets transferred */
-    if (ret == USB_XFER_OK || ret == USB_XFER_SHORT || ret == USB_XFER_STALL) {
+    /* Update endpoint toggle based on actual packets transferred.  STALL is
+     * deliberately excluded: usb_clear_halt resets BOTH sides' toggles, so
+     * advancing ours here desynced them -- EHCI and xHCI already leave
+     * stall-toggle ownership to the core. [RF-4] */
+    if (ret == USB_XFER_OK || ret == USB_XFER_SHORT) {
         struct uhci_td *td = first_td;
         while (td) {
             /* If this TD completed (Active bit cleared), it consumed a toggle */
@@ -806,8 +900,9 @@ cleanup:
         }
     }
 
-    dma_unmap_single(data_dma, xfer->length,
-                     is_in ? DMA_FROM_DEVICE : DMA_TO_DEVICE);
+    if (xfer->length)
+        dma_unmap_single(data_dma, xfer->length,
+                         is_in ? DMA_FROM_DEVICE : DMA_TO_DEVICE);
 
     return ret;
 }

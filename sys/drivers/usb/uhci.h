@@ -62,6 +62,10 @@
  */
 #define UHCI_PORTSC_CCS     0x0001  /* Current Connect Status */
 #define UHCI_PORTSC_CSC     0x0002  /* Connect Status Change */
+/* Write-1-to-clear change bits: mask these out of every PORTSC
+ * read-modify-write so an unrelated write does not silently acknowledge a
+ * pending change (a missed hot-plug event).  [RF-4] */
+#define UHCI_PORTSC_CLEAR   (UHCI_PORTSC_CSC | UHCI_PORTSC_PEC)
 #define UHCI_PORTSC_PE      0x0004  /* Port Enabled */
 #define UHCI_PORTSC_PEC     0x0008  /* Port Enable Change */
 #define UHCI_PORTSC_LS      0x0030  /* Line Status (D+/D-) */
