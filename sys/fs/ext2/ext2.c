@@ -2178,6 +2178,23 @@ static int ext2_getattr(fs_node_t *node, struct fs_attr *a) {
     return 0;
 }
 
+/* EXT2-A11 (audit BM-03/MS-02/BM-08): is this symlink's target stored
+ * inline in i_block[]?
+ *
+ * The discriminator is i_blocks, not i_size: a "fast" symlink owns no
+ * data blocks.  An inode that carries an xattr block still has
+ * i_blocks != 0 while being a fast symlink, so that block's worth of
+ * sectors is discounted first — this is exactly what Linux's
+ * ext4_inode_is_fast_symlink does.  Deciding from `i_size <= 60`
+ * instead misread a short SLOW symlink (legal, and what you get
+ * whenever an xattr block exists) as inline and returned raw block
+ * pointers as the target string. */
+static int ext2_symlink_is_fast(const ext2_fs_t *fs,
+                                const ext2_inode_t *inode) {
+    uint32_t ea_sectors = inode->i_file_acl ? (fs->block_size / 512) : 0;
+    return inode->i_blocks <= ea_sectors;
+}
+
 // Read symlink target
 int ext2_readlink(fs_node_t *node, char *buf, size_t size) {
     ext2_node_t *ctx = (ext2_node_t *)(uintptr_t)node->impl;
@@ -2203,14 +2220,17 @@ int ext2_readlink(fs_node_t *node, char *buf, size_t size) {
         link_size = ctx->fs->block_size;
     if (link_size >= size) link_size = (uint32_t)(size - 1);
 
-    // Fast symlink: if i_size <= 60, target is stored in i_block[]
-    if (inode->i_size <= 60) {
+    if (ext2_symlink_is_fast(ctx->fs, inode)) {
         /* Clamp to sizeof(i_block) to prevent overflow (finding #26) */
-        if (link_size > 60) link_size = 60;
+        if (link_size > sizeof(inode->i_block)) link_size = sizeof(inode->i_block);
         memcpy(buf, (char *)inode->i_block, link_size);
     } else {
         // Slow symlink: target is in data blocks
-        ext2_inode_read(ctx, 0, link_size, (uint8_t *)buf);
+        /* EXT2-A11 (audit BM-15): a short read left the tail of the
+         * caller's buffer uninitialised and we reported the full
+         * length anyway — kernel heap bytes handed to userspace. */
+        uint32_t got = ext2_inode_read(ctx, 0, link_size, (uint8_t *)buf);
+        if (got != link_size) return -EIO;
     }
     buf[link_size] = '\0';
     return link_size;
@@ -4566,6 +4586,12 @@ static int ext2_symlink(fs_node_t *dir, const char *target, const char *name) {
     ext2_fs_t *fs = dir_ctx->fs;
     uint32_t target_len = strlen(target);
 
+    /* EXT2-A11 (audit MS-10): a slow symlink's target has to fit in the
+     * single block the read path (and e2fsck) expects; longer targets
+     * produced an inode neither could use. */
+    if (target_len == 0 || target_len > fs->block_size - 1)
+        return -ENAMETOOLONG;
+
     uint32_t inode_num = ext2_alloc_inode(fs, 0);
     if (inode_num == 0) return -ENOSPC;
 
@@ -4581,7 +4607,13 @@ static int ext2_symlink(fs_node_t *dir, const char *target, const char *name) {
     inode.i_mtime = now;
     inode.i_ctime = now;
 
-    if (target_len <= 60) {
+    /* EXT2-A11 (audit BM-03): inline only when the target plus its NUL
+     * fits in the 60-byte i_block area.  Storing a 60-byte target
+     * filled it with no terminator: e2fsck treats such an inode as an
+     * invalid fast symlink and offers to clear it, and Linux's reader
+     * assumes the string is NUL-terminated inside i_block. */
+    int fast = (target_len < sizeof(inode.i_block));
+    if (fast) {
         /* Fast symlink: target stored inline in i_block[] */
         memcpy(inode.i_block, target, target_len);
         inode.i_blocks = 0;
@@ -4592,7 +4624,7 @@ static int ext2_symlink(fs_node_t *dir, const char *target, const char *name) {
         return -EIO;
     }
 
-    if (target_len > 60) {
+    if (!fast) {
         /* Slow symlink: allocate a data block and write target */
         fs_node_t *lnode = ext2_alloc_node(fs, inode_num, &inode);
         if (!lnode) {
@@ -4628,7 +4660,7 @@ static int ext2_symlink(fs_node_t *dir, const char *target, const char *name) {
          * block that only fsck could recover.  Re-read the inode we just
          * committed and release its blocks too. */
         ext2_inode_t li;
-        if (target_len > 60 && ext2_read_inode(fs, inode_num, &li) == 0)
+        if (!fast && ext2_read_inode(fs, inode_num, &li) == 0)
             (void)ext2_free_inode_blocks(fs, &li);
         ext2_free_inode(fs, inode_num, 0);
         return -EIO;
