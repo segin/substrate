@@ -1,5 +1,6 @@
 #include <string.h>
 
+#include <crc16.h>
 #include <crc32c.h>
 #include <drivers/storage/blkdev.h>
 #include <fs/ext2/ext2.h>
@@ -396,6 +397,116 @@ uint32_t ext2_write_block(ext2_fs_t *fs, uint32_t block_num, const void *buffer)
     return fs->device->write(fs->device, offset, fs->block_size, (uint8_t *)buffer);
 }
 
+/* EXT2-A6 (audit CK-01/SB-01/SB-02/BG-03): write-side checksum
+ * stamping.  Until now only the per-inode checksum was recomputed on
+ * write; every other structure the driver flushed on a GDT_CSUM or
+ * METADATA_CKSUM filesystem went out with its mount-time checksum —
+ * after the first free-count flush the driver's own next mount (and
+ * Linux, and e2fsck) rejected the volume. */
+static int ext2_has_metadata_csum(const ext2_fs_t *fs) {
+    return (fs->sb.s_feature_ro_compat & EXT2F_ROCOMPAT_METADATA_CKSUM) != 0;
+}
+static int ext2_has_gdt_csum(const ext2_fs_t *fs) {
+    /* metadata_csum supersedes the old crc16 scheme when both are set. */
+    return !ext2_has_metadata_csum(fs) &&
+           (fs->sb.s_feature_ro_compat & EXT2F_ROCOMPAT_GDT_CSUM) != 0;
+}
+
+/* Stamp s_checksum over a raw superblock image (>= 1024 bytes).  The
+ * superblock checksum does NOT use the uuid seed: it is crc32c(~0)
+ * over the first 1020 bytes, uuid included. */
+static void ext2_super_stamp_csum(ext2_fs_t *fs, uint8_t *sb_bytes) {
+    if (!ext2_has_metadata_csum(fs)) return;
+    *(uint32_t *)(sb_bytes + 0x3FC) =
+        crc32c_update(0xFFFFFFFFu, sb_bytes, 0x3FC);
+}
+
+/* Group-descriptor checksum over the on-disk descriptor bytes `gd`
+ * (fs->desc_size of them) for `group`:
+ *   metadata_csum: crc32c(seed, le32 group, gd[0..29], 0x0000,
+ *                  gd[32..desc_size-1]) & 0xFFFF — csum bytes replayed
+ *                  as zeros;
+ *   gdt_csum:      crc16(~0, uuid, le32 group, gd[0..29],
+ *                  gd[32..desc_size-1]) — csum bytes SKIPPED entirely
+ *                  (that is what Linux/e2fsprogs compute). */
+static uint16_t ext2_group_desc_calc_csum(ext2_fs_t *fs, uint32_t group,
+                                          const uint8_t *gd) {
+    uint32_t le_g = group;
+    if (ext2_has_metadata_csum(fs)) {
+        const uint16_t zero16 = 0;
+        uint32_t c = crc32c_update(fs->csum_seed, &le_g, 4);
+        c = crc32c_update(c, gd, 30);
+        c = crc32c_update(c, &zero16, 2);
+        if (fs->desc_size > 32)
+            c = crc32c_update(c, gd + 32, fs->desc_size - 32);
+        return (uint16_t)(c & 0xFFFFu);
+    }
+    uint16_t c = crc16_update(0xFFFF, fs->sb.s_uuid, sizeof(fs->sb.s_uuid));
+    c = crc16_update(c, &le_g, 4);
+    c = crc16_update(c, gd, 30);
+    if (fs->desc_size > 32)
+        c = crc16_update(c, gd + 32, fs->desc_size - 32);
+    return c;
+}
+
+/* On-disk offsets of the bitmap-checksum high halves within a 64-byte
+ * descriptor (spec 2.3.2); only present when desc_size covers them. */
+#define EXT2_BG_BBITMAP_CSUM_HI_OFF  0x38
+#define EXT2_BG_IBITMAP_CSUM_HI_OFF  0x3A
+
+static void ext2_group_desc_stamp_csum(ext2_fs_t *fs, uint32_t group,
+                                       uint8_t *gd) {
+    if (!ext2_has_metadata_csum(fs) && !ext2_has_gdt_csum(fs)) return;
+    /* Commit the bitmap-csum high halves first: they are part of the
+     * descriptor bytes bg_checksum covers. */
+    if (fs->desc_size >= EXT2_BG_BBITMAP_CSUM_HI_OFF + 2 &&
+        fs->bbitmap_csum_hi)
+        *(uint16_t *)(gd + EXT2_BG_BBITMAP_CSUM_HI_OFF) =
+            fs->bbitmap_csum_hi[group];
+    if (fs->desc_size >= EXT2_BG_IBITMAP_CSUM_HI_OFF + 2 &&
+        fs->ibitmap_csum_hi)
+        *(uint16_t *)(gd + EXT2_BG_IBITMAP_CSUM_HI_OFF) =
+            fs->ibitmap_csum_hi[group];
+    uint16_t c = ext2_group_desc_calc_csum(fs, group, gd);
+    *(uint16_t *)(gd + 30) = c;
+    fs->bgd[group].bg_checksum = c;
+}
+
+/* Write a block/inode bitmap back, refreshing its descriptor checksum
+ * first.  EXT2-A6 (audit BG-03/CK-05): the bitmaps are write-through on
+ * every allocation but bg_{block,inode}_bitmap_csum_lo were never
+ * recomputed, so on a metadata_csum volume every allocation left the
+ * descriptor describing a bitmap that no longer matched.  The caller
+ * holds fs->alloc_lock and must mark the group's descriptor dirty. */
+static void ext2_bitmap_csum_set(ext2_fs_t *fs, uint32_t group,
+                                 const uint8_t *bitmap, uint32_t bits,
+                                 int is_inode_bitmap) {
+    if (!ext2_has_metadata_csum(fs)) return;
+    uint32_t bytes = (bits + 7u) / 8u;
+    uint32_t c = crc32c_update(fs->csum_seed, bitmap, bytes);
+    if (is_inode_bitmap) {
+        fs->bgd[group].bg_inode_bitmap_csum_lo = (uint16_t)(c & 0xFFFFu);
+        if (fs->ibitmap_csum_hi)
+            fs->ibitmap_csum_hi[group] = (uint16_t)(c >> 16);
+    } else {
+        fs->bgd[group].bg_block_bitmap_csum_lo = (uint16_t)(c & 0xFFFFu);
+        if (fs->bbitmap_csum_hi)
+            fs->bbitmap_csum_hi[group] = (uint16_t)(c >> 16);
+    }
+}
+
+static uint32_t ext2_write_block_bitmap(ext2_fs_t *fs, uint32_t group,
+                                        uint8_t *bitmap) {
+    ext2_bitmap_csum_set(fs, group, bitmap, fs->blocks_per_group, 0);
+    return ext2_write_block(fs, fs->bgd[group].bg_block_bitmap, bitmap);
+}
+
+static uint32_t ext2_write_inode_bitmap(ext2_fs_t *fs, uint32_t group,
+                                        uint8_t *bitmap) {
+    ext2_bitmap_csum_set(fs, group, bitmap, fs->inodes_per_group, 1);
+    return ext2_write_block(fs, fs->bgd[group].bg_inode_bitmap, bitmap);
+}
+
 static int is_sparse_backup(uint32_t group) {
     if (group <= 1) return 1;
     for (uint32_t p = 3; p <= 7; p += 2) {
@@ -443,6 +554,9 @@ static int ext2_flush_super(ext2_fs_t *fs) {
         kfree(sb_buf, 1024);
         return -EIO;
     }
+    /* EXT2-A6: the free counts we just patched in are covered by
+     * s_checksum, so it has to be recomputed over the final image. */
+    ext2_super_stamp_csum(fs, sb_buf);
 
     if (fs->device->write(fs->device, 1024, 1024, sb_buf) != 1024) {
         kfree(sb_buf, 1024);
@@ -471,6 +585,7 @@ static int ext2_flush_super(ext2_fs_t *fs) {
             memset(tmp, 0, fs->block_size);
         }
         memcpy(tmp, &fs->sb, sizeof(fs->sb));
+        ext2_super_stamp_csum(fs, tmp);
         /* Don't drop write errors silently — a failed backup write
          * leaves the on-disk image inconsistent with the primary. */
         if (ext2_write_block(fs, block, tmp) != fs->block_size) {
@@ -509,6 +624,10 @@ static int ext2_flush_group_desc(ext2_fs_t *fs, uint32_t group) {
     }
 
     memcpy(block_buf + block_offset, &fs->bgd[group], sizeof(ext2_group_desc_t));
+    /* EXT2-A6: bg_checksum covers the free counts / bg_flags / bitmap
+     * csums we just wrote, and (on 64-byte descriptors) the preserved
+     * high half — stamp it over the final on-disk bytes. */
+    ext2_group_desc_stamp_csum(fs, group, block_buf + block_offset);
     if (ext2_write_block(fs, bgd_block + (desc_offset / fs->block_size), block_buf) != fs->block_size) {
         ret = -EIO;
         goto out;
@@ -2662,6 +2781,18 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
         fs->desc_size = on_disk;
     }
 
+    /* Storage for the bitmap-checksum high halves; only descriptors big
+     * enough to carry them on disk need it (64-byte, INCOMPAT_64BIT). */
+    if ((fs->sb.s_feature_ro_compat & EXT2F_ROCOMPAT_METADATA_CKSUM) &&
+        fs->desc_size >= EXT2_BG_IBITMAP_CSUM_HI_OFF + 2) {
+        uint32_t sz = fs->group_count * sizeof(uint16_t);
+        fs->bbitmap_csum_hi = kmalloc(sz);
+        fs->ibitmap_csum_hi = kmalloc(sz);
+        if (!fs->bbitmap_csum_hi || !fs->ibitmap_csum_hi) goto fail;
+        memset(fs->bbitmap_csum_hi, 0, sz);
+        memset(fs->ibitmap_csum_hi, 0, sz);
+    }
+
     /* Re-size fs->bgd if the on-disk stride differs from 32 — we
      * still keep 32-byte slots in memory but the disk read stride
      * must match.  Read the raw descriptors into a temporary
@@ -2713,18 +2844,13 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
      *                             -> crc32c(state, gd[32..desc_size-1])
      * For 32-byte descriptors the trailing range is empty.  Any
      * mismatch refuses the mount — same argument as superblock-csum.  */
-    if (fs->sb.s_feature_ro_compat & EXT2F_ROCOMPAT_METADATA_CKSUM) {
-
-        const uint16_t zero16 = 0;
+    /* EXT2-A6 (audit CK-04): this now covers the crc16 GDT_CSUM scheme
+     * too — it was accepted in ROCOMPAT_SUPP but neither verified nor
+     * written, so uninit_bg volumes went entirely unchecked. */
+    if (ext2_has_metadata_csum(fs) || ext2_has_gdt_csum(fs)) {
         for (uint32_t g = 0; g < fs->group_count; g++) {
             uint8_t *gd = gdt_raw + g * fs->desc_size;
-            uint32_t le_g = g;
-            uint32_t c = crc32c_update(fs->csum_seed, &le_g, 4);
-            c = crc32c_update(c, gd, 30);
-            c = crc32c_update(c, &zero16, 2);
-            if (fs->desc_size > 32)
-                c = crc32c_update(c, gd + 32, fs->desc_size - 32);
-            uint16_t expect = c & 0xFFFFu;
+            uint16_t expect = ext2_group_desc_calc_csum(fs, g, gd);
             uint16_t actual = *(uint16_t *)(gd + 30);
             if (expect != actual) {
                 kprintf("ext2: bg descriptor %u csum mismatch want=%04x got=%04x — refuse mount\n",
@@ -2732,8 +2858,10 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
                 goto fail;
             }
         }
-        kprintf("ext2: %u group descriptor csums verified (desc_size=%u)\n",
-                fs->group_count, fs->desc_size);
+        kprintf("ext2: %u group descriptor csums verified (%s, desc_size=%u)\n",
+                fs->group_count,
+                ext2_has_metadata_csum(fs) ? "crc32c" : "crc16",
+                fs->desc_size);
     }
     kfree(gdt_raw, on_disk_size);
 
@@ -2788,6 +2916,10 @@ fail:
     if (gdt_raw)                    kfree(gdt_raw, on_disk_size);
     if (fs->active_inode_bg_bitmap) kfree(fs->active_inode_bg_bitmap, fs->block_size);
     if (fs->active_bg_bitmap)       kfree(fs->active_bg_bitmap, fs->block_size);
+    if (fs->bbitmap_csum_hi)
+        kfree(fs->bbitmap_csum_hi, fs->group_count * sizeof(uint16_t));
+    if (fs->ibitmap_csum_hi)
+        kfree(fs->ibitmap_csum_hi, fs->group_count * sizeof(uint16_t));
     if (fs->bgd_dirty) {
         uint32_t dsz = (fs->group_count + 7u) / 8u;
         if (dsz == 0) dsz = 1;
@@ -2915,7 +3047,7 @@ uint32_t ext2_alloc_block(ext2_fs_t *fs) {
             bitmap_buf[byte_idx] |= (1 << bit_idx);
 
             // Write bitmap back
-            ext2_write_block(fs, fs->bgd[group].bg_block_bitmap, bitmap_buf);
+            ext2_write_block_bitmap(fs, group, bitmap_buf);
 
             // Update block group descriptor
             fs->bgd[group].bg_free_blocks_count--;
@@ -2973,7 +3105,7 @@ void ext2_free_block(ext2_fs_t *fs, uint32_t block_num) {
      * later let the allocator hand out the same block twice. */
     if (bitmap_buf[byte_idx] & (1 << bit_idx)) {
         bitmap_buf[byte_idx] &= ~(1 << bit_idx);
-        ext2_write_block(fs, fs->bgd[group].bg_block_bitmap, bitmap_buf);
+        ext2_write_block_bitmap(fs, group, bitmap_buf);
 
         fs->bgd[group].bg_free_blocks_count++;
         fs->sb.s_free_blocks_count++;
@@ -3021,7 +3153,7 @@ void ext2_free_blocks(ext2_fs_t *fs, uint32_t block_num, uint32_t count) {
             }
         }
         if (freed) {
-            ext2_write_block(fs, fs->bgd[group].bg_block_bitmap, bm);
+            ext2_write_block_bitmap(fs, group, bm);
             fs->bgd[group].bg_free_blocks_count += freed;
             fs->sb.s_free_blocks_count += freed;
             ext2_mark_meta_dirty(fs, group);
@@ -3096,7 +3228,7 @@ uint32_t ext2_alloc_inode(ext2_fs_t *fs, int is_dir) {
                 bitmap_buf[byte_idx] |= (1 << bit_idx);
                 
                 // Write bitmap back
-                ext2_write_block(fs, fs->bgd[group].bg_inode_bitmap, bitmap_buf);
+                ext2_write_inode_bitmap(fs, group, bitmap_buf);
                 
                 // Update block group descriptor
                 fs->bgd[group].bg_free_inodes_count--;
@@ -3216,7 +3348,7 @@ void ext2_free_inode(ext2_fs_t *fs, uint32_t inode_num, int was_dir) {
      * allocator over-hand inodes. */
     if (bitmap_buf[byte_idx] & (1 << bit_idx)) {
         bitmap_buf[byte_idx] &= ~(1 << bit_idx);
-        ext2_write_block(fs, fs->bgd[group].bg_inode_bitmap, bitmap_buf);
+        ext2_write_inode_bitmap(fs, group, bitmap_buf);
 
         fs->bgd[group].bg_free_inodes_count++;
         if (was_dir) {
@@ -4547,6 +4679,10 @@ int ext2_unmount(fs_node_t *node) {
 
     if (fs->active_bg_bitmap) kfree(fs->active_bg_bitmap, fs->block_size);
     if (fs->active_inode_bg_bitmap) kfree(fs->active_inode_bg_bitmap, fs->block_size);
+    if (fs->bbitmap_csum_hi)
+        kfree(fs->bbitmap_csum_hi, fs->group_count * sizeof(uint16_t));
+    if (fs->ibitmap_csum_hi)
+        kfree(fs->ibitmap_csum_hi, fs->group_count * sizeof(uint16_t));
     /* EXT2-21: free with the size actually allocated (rounded up to whole
      * blocks), not the unrounded descriptor-array size. */
     if (fs->bgd) kfree(fs->bgd, fs->bgd_size);

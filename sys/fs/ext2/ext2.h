@@ -198,7 +198,11 @@ typedef struct {
     uint32_t s_algo_bitmap;
 } __attribute__((packed)) ext2_superblock_t;
 
-// Block Group Descriptor
+/* Block Group Descriptor — the 32-byte layout (low half of a 64-byte
+ * descriptor on INCOMPAT_64BIT filesystems).  EXT2-A6 (audit BG-01/
+ * SB-02/BG-03): the fields past bg_used_dirs_count were previously
+ * bg_pad + bg_reserved[], hiding bg_flags (lazy-init state) and the
+ * three checksum/accounting fields this driver must maintain. */
 typedef struct {
     uint32_t bg_block_bitmap;
     uint32_t bg_inode_bitmap;
@@ -206,9 +210,18 @@ typedef struct {
     uint16_t bg_free_blocks_count;
     uint16_t bg_free_inodes_count;
     uint16_t bg_used_dirs_count;
-    uint16_t bg_pad;
-    uint32_t bg_reserved[3];
+    uint16_t bg_flags;                 /* EXT2_BG_* lazy-init flags */
+    uint32_t bg_exclude_bitmap_lo;     /* snapshot exclude bitmap (unused) */
+    uint16_t bg_block_bitmap_csum_lo;  /* crc32c(seed, bitmap) & 0xFFFF */
+    uint16_t bg_inode_bitmap_csum_lo;
+    uint16_t bg_itable_unused;         /* unused inode-table tail entries */
+    uint16_t bg_checksum;              /* crc16 (gdt_csum) / crc32c lo16 */
 } __attribute__((packed)) ext2_group_desc_t;
+
+/* bg_flags bits (spec 2.3.2). */
+#define EXT2_BG_INODE_UNINIT  0x0001   /* inode bitmap+table not initialized */
+#define EXT2_BG_BLOCK_UNINIT  0x0002   /* block bitmap not initialized */
+#define EXT2_BG_INODE_ZEROED  0x0004   /* on-disk inode table is zeroed */
 
 /* Inode structure.  The legacy ext2 layout ends at offset 128
  * (i_osd2[]'s last byte).  Modern ext4 (mkfs default) uses 256-byte
@@ -334,6 +347,15 @@ typedef struct {
      * the explicit s_checksum_seed value if EXT2F_INCOMPAT_CSUM_SEED
      * is on.  Used for group-descriptor and (future) inode csums.  */
     uint32_t csum_seed;
+
+    /* High halves of the per-group bitmap checksums, kept only when the
+     * on-disk descriptor is big enough to carry them (desc_size >= 64).
+     * fs->bgd holds just the low 32 bytes of each descriptor, so these
+     * two fields would otherwise have nowhere to live between the
+     * bitmap write that computes them and the deferred descriptor
+     * flush that commits them.  NULL when unused. */
+    uint16_t *bbitmap_csum_hi;
+    uint16_t *ibitmap_csum_hi;
 
     /* htree hash seed — four words at sb_buf+236 on disk.  Initial
      * state for the half_md4 and tea hash functions; legacy ignores
