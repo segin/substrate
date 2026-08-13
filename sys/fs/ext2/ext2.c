@@ -451,6 +451,50 @@ static uint16_t ext2_group_desc_calc_csum(ext2_fs_t *fs, uint32_t group,
     return c;
 }
 
+/*
+ * EXT2-A8 (audit DE-01/CK-06): directory-block checksums.
+ *
+ * On a metadata_csum filesystem every directory leaf block ends in a
+ * 12-byte fake dirent — struct ext4_dir_entry_tail: inode 0, rec_len
+ * 12, name_len 0, file_type 0xDE, then a crc32c over everything before
+ * it, seeded with the directory's inode number and generation.  The
+ * driver mounts such filesystems read-WRITE but never maintained the
+ * tail: every add/remove/rename produced a directory block that Linux
+ * and e2fsck reject, and the "reuse a deleted entry" path could even
+ * consume the tail itself as free space for a short name.
+ */
+#define EXT2_DIRENT_TAIL_FT 0xDE
+
+/* Usable dirent area of a directory block — everything before the tail. */
+static uint32_t ext2_dir_limit(const ext2_fs_t *fs) {
+    return ext2_has_metadata_csum(fs) ? fs->block_size - 12 : fs->block_size;
+}
+
+/* Install/refresh the tail of a directory leaf block and stamp its
+ * checksum.  No-op when the filesystem has no dirent tails. */
+static void ext2_dirent_tail_set(ext2_fs_t *fs, uint32_t inum, uint32_t gen,
+                                 uint8_t *block) {
+    if (!ext2_has_metadata_csum(fs)) return;
+    uint32_t limit = fs->block_size - 12;
+    uint8_t *t = block + limit;
+    *(uint32_t *)(t + 0) = 0;                     /* det_reserved_zero1  */
+    *(uint16_t *)(t + 4) = 12;                    /* det_rec_len         */
+    t[6] = 0;                                     /* det_reserved_zero2  */
+    t[7] = EXT2_DIRENT_TAIL_FT;                   /* det_reserved_ft     */
+    uint32_t le_inum = inum, le_gen = gen;
+    uint32_t c = crc32c_update(fs->csum_seed, &le_inum, 4);
+    c = crc32c_update(c, &le_gen, 4);
+    c = crc32c_update(c, block, limit);
+    *(uint32_t *)(t + 8) = c;
+}
+
+/* Write a directory leaf block, refreshing its tail checksum first. */
+static uint32_t ext2_write_dir_block(ext2_fs_t *fs, ext2_node_t *dir,
+                                     uint32_t block_num, uint8_t *block) {
+    ext2_dirent_tail_set(fs, dir->inode_num, dir->inode.i_generation, block);
+    return ext2_write_block(fs, block_num, block);
+}
+
 /* On-disk offsets of the bitmap-checksum high halves within a 64-byte
  * descriptor (spec 2.3.2); only present when desc_size covers them. */
 #define EXT2_BG_BBITMAP_CSUM_HI_OFF  0x38
@@ -3861,10 +3905,16 @@ static int ext2_add_entry(fs_node_t *dir, const char *name, uint32_t inode, uint
         if (block_num == 0) break;
         ext2_read_block(fs, block_num, block_buf);
         
-        while (block_off + 8 <= fs->block_size && pos < dir_size) {
+        /* EXT2-A8: stop before the ext4_dir_entry_tail on a
+         * metadata_csum filesystem — it is a fake dirent (inode 0,
+         * rec_len 12) that the reuse path below would otherwise claim
+         * as free space for any name of four characters or fewer,
+         * destroying the block's checksum record. */
+        uint32_t dir_limit = ext2_dir_limit(fs);
+        while (block_off + 8 <= dir_limit && pos < dir_size) {
             ext2_dirent_t *de = (ext2_dirent_t *)(block_buf + block_off);
-            
-            if (de->rec_len < 8 || block_off + de->rec_len > fs->block_size) break;
+
+            if (de->rec_len < 8 || block_off + de->rec_len > dir_limit) break;
 
             // Calculate actual size needed by this entry
             uint32_t actual_size = ((8 + de->name_len + 3) / 4) * 4;
@@ -3887,7 +3937,7 @@ static int ext2_add_entry(fs_node_t *dir, const char *name, uint32_t inode, uint
                 new_de->file_type = file_type;
                 memcpy(new_de->name, name, name_len);
 
-                ext2_write_block(fs, block_num, block_buf);
+                ext2_write_dir_block(fs, ctx, block_num, block_buf);
                 if (ext2_trace_on() && ctx->inode_num <= EXT2_TRACE_PARENT_LIMIT) {
                     kprintf("ext2trace: ADD    parent=%u name='%s' child=%u ft=%u (split)\n",
                             ctx->inode_num, name, inode, file_type);
@@ -3903,7 +3953,7 @@ static int ext2_add_entry(fs_node_t *dir, const char *name, uint32_t inode, uint
                 de->file_type = file_type;
                 memcpy(de->name, name, name_len);
 
-                ext2_write_block(fs, block_num, block_buf);
+                ext2_write_dir_block(fs, ctx, block_num, block_buf);
                 if (ext2_trace_on() && ctx->inode_num <= EXT2_TRACE_PARENT_LIMIT) {
                     kprintf("ext2trace: ADD    parent=%u name='%s' child=%u ft=%u (reuse)\n",
                             ctx->inode_num, name, inode, file_type);
@@ -3953,12 +4003,14 @@ static int ext2_add_entry(fs_node_t *dir, const char *name, uint32_t inode, uint
     // Create the new entry
     ext2_dirent_t *de = (ext2_dirent_t *)block_buf;
     de->inode = inode;
-    de->rec_len = fs->block_size; // Entry spans entire block
+    /* Entry spans the whole block, stopping short of the tail when the
+     * filesystem carries dirent checksums (EXT2-A8). */
+    de->rec_len = (uint16_t)ext2_dir_limit(fs);
     de->name_len = name_len;
     de->file_type = file_type;
     memcpy(de->name, name, name_len);
 
-    ext2_write_block(fs, new_block, block_buf);
+    ext2_write_dir_block(fs, ctx, new_block, block_buf);
     if (ext2_trace_on() && ctx->inode_num <= EXT2_TRACE_PARENT_LIMIT) {
         kprintf("ext2trace: ADD    parent=%u name='%s' child=%u ft=%u (new block)\n",
                 ctx->inode_num, name, inode, file_type);
@@ -4179,7 +4231,8 @@ int ext2_rename(fs_node_t *old_parent, const char *old_name, fs_node_t *new_pare
                     ext2_dirent_t *dotdot = (ext2_dirent_t *)(old_node_ctx->block_buf + dot_reclen);
                     if (dotdot->name_len == 2 && dotdot->name[0] == '.' && dotdot->name[1] == '.') {
                         dotdot->inode = new_p_ctx->inode_num;
-                        ext2_write_block(fs, dotdot_block, old_node_ctx->block_buf);
+                        ext2_write_dir_block(fs, old_node_ctx, dotdot_block,
+                                             old_node_ctx->block_buf);
                     }
                 }
             }
@@ -4271,11 +4324,12 @@ static int ext2_remove_entry(fs_node_t *dir, const char *name) {
         ext2_read_block(fs, block_num, block_buf);
         
         ext2_dirent_t *prev_de = NULL;
-        
-        while (block_off + 8 <= fs->block_size && pos < dir_size) {
+        uint32_t dir_limit = ext2_dir_limit(fs);
+
+        while (block_off + 8 <= dir_limit && pos < dir_size) {
             ext2_dirent_t *de = (ext2_dirent_t *)(block_buf + block_off);
-            
-            if (de->rec_len < 8 || block_off + de->rec_len > fs->block_size) break;
+
+            if (de->rec_len < 8 || block_off + de->rec_len > dir_limit) break;
             
             // Is this the entry to remove?
             if (de->inode != 0 && de->rec_len >= 8 &&
@@ -4293,7 +4347,7 @@ static int ext2_remove_entry(fs_node_t *dir, const char *name) {
                     de->inode = 0;
                 }
 
-                ext2_write_block(fs, block_num, block_buf);
+                ext2_write_dir_block(fs, ctx, block_num, block_buf);
 
                 if (ext2_trace_on() && ctx->inode_num <= EXT2_TRACE_PARENT_LIMIT) {
                     kprintf("ext2trace: REMOVE parent=%u name='%s' child=%u\n",
@@ -4556,12 +4610,15 @@ int ext2_mkdir(fs_node_t *dir, const char *name, uint16_t permission) {
         dot->name[0] = '.';
 
         dotdot->inode = dir_ctx->inode_num;
-        dotdot->rec_len = (uint16_t)(fs->block_size - dot_len);
+        /* '..' spans the rest of the usable area — short of the dirent
+         * tail on a metadata_csum filesystem (EXT2-A8). */
+        dotdot->rec_len = (uint16_t)(ext2_dir_limit(fs) - dot_len);
         dotdot->name_len = 2;
         dotdot->file_type = EXT2_FT_DIR;
         dotdot->name[0] = '.';
         dotdot->name[1] = '.';
     }
+    ext2_dirent_tail_set(fs, inode_num, inode.i_generation, block_buf);
 
     if (ext2_write_block(fs, block_num, block_buf) != fs->block_size) {
         kfree(block_buf, fs->block_size);
