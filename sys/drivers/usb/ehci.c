@@ -234,13 +234,33 @@ static void ehci_quiesce_async(ehci_hc_t *hc, int first_qtd, int n_qtd)
 static int ehci_run_qh(ehci_hc_t *hc, int first_qtd, int n_qtd, uint32_t endp_char,
                        uint32_t timeout_ms, uint32_t endp_cap)
 {
-    struct ehci_qh *qh = hc->async_qh;
+    /* [EHCI-01] The async QH is permanently reachable (self-linked, ASE on)
+     * and an inactive non-halted overlay is advanceable the instant
+     * overlay_next becomes valid (4.10.2), so the old order (next first,
+     * token last) let the controller seize the qTD chain mid-update -- and
+     * the trailing overlay_token=0 store then scribbled over an overlay the
+     * controller owned.  A Halted overlay is skipped at every Fetch-QH
+     * (Fig 4-14 / 4.10.5): park it with one atomic store, program the rest,
+     * and publish with one final token store (NetBSD ehci_set_qh_qtd does
+     * the same).  volatile + barriers keep the compiler from reordering or
+     * eliding the park. */
+    volatile struct ehci_qh *qh = hc->async_qh;
+    qh->overlay_token = EHCI_QTD_STATUS_HALTED;
+    __asm__ volatile("" ::: "memory");
+
     qh->endp_char = endp_char | EHCI_QH_HEAD | EHCI_QH_DTC;
     qh->endp_cap  = endp_cap;
     qh->current_qtd = 0;
-    /* Load the overlay: point at the first qTD, clear status. */
     qh->overlay_next = ehci_qtd_dma(hc, first_qtd);
     qh->overlay_alt_next = EHCI_LINK_TERMINATE;
+    for (int p = 0; p < 5; p++) {
+        qh->overlay_buffer[p] = 0;
+        qh->overlay_buffer_hi[p] = 0;
+    }
+
+    /* Barrier: the qTD fills and the stores above must be in memory before
+     * the controller is allowed back into the overlay. */
+    __asm__ volatile("" ::: "memory");
     qh->overlay_token = 0;   /* not active/halted -> controller reloads from next */
 
     /* Poll the qTD chain until none is Active, or a Halt, or timeout. */
