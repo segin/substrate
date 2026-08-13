@@ -77,6 +77,8 @@ static mutex_t ext2_inode_table_lock;
  * unlink (set up by ext2_unlink when pin_count > 0).  Their full
  * definitions live below alongside the rest of the inode allocator. */
 static int ext2_free_inode_blocks(ext2_fs_t *fs, ext2_inode_t *inode);
+static int ext2_release_inode_blocks(ext2_fs_t *fs, uint32_t inode_num,
+                                     ext2_inode_t *inode);
 
 /*
  * EXT2-18: pin_count is what stops ext2_alloc_node() from recycling a slot
@@ -122,7 +124,9 @@ static void ext2_node_close(fs_node_t *node) {
      * instead of freeing the inode + data blocks.  Now that the last
      * FD has closed, complete the delete the unlink path skipped. */
     if (finish_delete) {
-        (void)ext2_free_inode_blocks(ctx->fs, &ctx->inode);
+        /* EXT2-A15: commits the emptied inode before releasing its
+         * blocks, so a failure here can only leak. */
+        (void)ext2_release_inode_blocks(ctx->fs, ctx->inode_num, &ctx->inode);
         ext2_free_inode(ctx->fs, ctx->inode_num,
                         ctx->was_dir_at_unlink ? 1 : 0);
         memset(&ctx->inode, 0, sizeof(ctx->inode));
@@ -3904,6 +3908,49 @@ static int ext2_free_inode_blocks(ext2_fs_t *fs, ext2_inode_t *inode) {
     return 0;
 }
 
+/*
+ * EXT2-A15 (audit BM-05/CY-10): release an inode's blocks, on-disk
+ * inode FIRST.
+ *
+ * ext2_free_inode_blocks clears bitmap bits write-through as it walks,
+ * but the emptied inode was only committed afterwards — and not at all
+ * when the walk returned an error.  Both a crash and a mid-way failure
+ * therefore left the on-disk inode still naming blocks the bitmap had
+ * already published as free: the next allocation handed them to
+ * another file and the two silently shared storage.  The header's
+ * claim that a crash costs "only fsck-fixable free-count
+ * discrepancies, never data or allocation state" was untrue.
+ *
+ * Commit the emptied inode first, then free from a snapshot of the old
+ * pointers.  Now the worst case is leaked blocks — marked in use,
+ * referenced by nothing — which is exactly what fsck reclaims.
+ */
+static int ext2_release_inode_blocks(ext2_fs_t *fs, uint32_t inode_num,
+                                     ext2_inode_t *inode) {
+    if (!fs || !inode || inode_num == 0) return -EINVAL;
+
+    ext2_inode_t snapshot = *inode;      /* still names the blocks */
+
+    memset(inode->i_block, 0, sizeof(inode->i_block));
+    if (inode->i_flags & EXT4_EXTENTS_FL) {
+        /* Leave a valid empty extent header, as mkfs does for a new
+         * empty file, rather than an all-zero i_block[]. */
+        ext4_extent_header_t *eh = (ext4_extent_header_t *)inode->i_block;
+        eh->eh_magic  = EXT4_EXT_MAGIC;
+        eh->eh_ecount = 0;
+        eh->eh_max    = (uint16_t)((sizeof(inode->i_block) - sizeof(*eh)) /
+                                   sizeof(ext4_extent_t));
+        eh->eh_depth  = 0;
+    }
+    inode->i_blocks = 0;
+    inode->i_size   = 0;
+
+    if (ext2_write_inode(fs, inode_num, inode) != 0)
+        return -EIO;                     /* nothing freed yet: consistent */
+
+    return ext2_free_inode_blocks(fs, &snapshot);
+}
+
 int ext2_truncate(fs_node_t *node, off_t length) {
     ext2_node_t *ctx;
     ext2_fs_t *fs;
@@ -3928,9 +3975,12 @@ int ext2_truncate(fs_node_t *node, off_t length) {
     int ret = 0;
 
     if (length == 0) {
-        /* Release every data block; ext2_free_inode_blocks also clears
-         * i_size and i_blocks. */
-        ret = ext2_free_inode_blocks(fs, &ctx->inode);
+        /* Release every data block.  EXT2-A15: the emptied inode is
+         * committed before any bitmap bit is cleared. */
+        uint32_t tnow = (uint32_t)get_time();
+        ctx->inode.i_mtime = tnow;
+        ctx->inode.i_ctime = tnow;
+        ret = ext2_release_inode_blocks(fs, ctx->inode_num, &ctx->inode);
     } else if (length > old_size) {
         /*
          * Grow.  ext2 stores files sparsely: the region between the old and
@@ -4694,7 +4744,7 @@ static int ext2_symlink(fs_node_t *dir, const char *target, const char *name) {
              * populated (fs/inode_num still set) means a later lookup of the
              * recycled inode number hits this stale entry.  Free the data
              * blocks and invalidate the slot before bailing. */
-            ext2_free_inode_blocks(fs, &lctx->inode);
+            ext2_release_inode_blocks(fs, inode_num, &lctx->inode);
             ext2_free_inode(fs, inode_num, 0);
             memset(&lctx->inode, 0, sizeof(lctx->inode));
             lnode->length = 0;
@@ -4713,7 +4763,7 @@ static int ext2_symlink(fs_node_t *dir, const char *target, const char *name) {
          * committed and release its blocks too. */
         ext2_inode_t li;
         if (!fast && ext2_read_inode(fs, inode_num, &li) == 0)
-            (void)ext2_free_inode_blocks(fs, &li);
+            (void)ext2_release_inode_blocks(fs, inode_num, &li);
         ext2_free_inode(fs, inode_num, 0);
         return -EIO;
     }
@@ -4815,7 +4865,7 @@ int ext2_mkdir(fs_node_t *dir, const char *name, uint16_t permission) {
     }
 
     if (ext2_add_entry(dir, name, inode_num, EXT2_FT_DIR) != 0) {
-        ext2_free_inode_blocks(fs, &inode);
+        ext2_release_inode_blocks(fs, inode_num, &inode);
         ext2_free_inode(fs, inode_num, 1);
         return -EIO;
     }
@@ -4825,7 +4875,7 @@ int ext2_mkdir(fs_node_t *dir, const char *name, uint16_t permission) {
     dir_ctx->inode.i_ctime = now;
     if (ext2_write_inode(fs, dir_ctx->inode_num, &dir_ctx->inode) != 0) {
         ext2_remove_entry(dir, name);
-        ext2_free_inode_blocks(fs, &inode);
+        ext2_release_inode_blocks(fs, inode_num, &inode);
         ext2_free_inode(fs, inode_num, 1);
         dir_ctx->inode.i_links_count--;
         return -EIO;
@@ -4881,11 +4931,11 @@ int ext2_unlink(fs_node_t *dir, const char *name) {
                 return -EIO;
             }
         } else {
-            ret = ext2_free_inode_blocks(fs, &victim_ctx->inode);
+            /* EXT2-A15: inode committed (links 0, dtime set, block
+             * map cleared) before the bitmap bits are released. */
+            ret = ext2_release_inode_blocks(fs, victim_ctx->inode_num,
+                                            &victim_ctx->inode);
             if (ret != 0) return ret;
-            if (ext2_write_inode(fs, victim_ctx->inode_num, &victim_ctx->inode) != 0) {
-                return -EIO;
-            }
             ext2_free_inode(fs, victim_ctx->inode_num, 0);
             memset(&victim_ctx->inode, 0, sizeof(victim_ctx->inode));
             victim->length = 0;
@@ -5048,11 +5098,10 @@ int ext2_rmdir(fs_node_t *dir, const char *name) {
         return 0;
     }
 
-    ret = ext2_free_inode_blocks(fs, &victim_ctx->inode);
+    /* EXT2-A15: see ext2_unlink — commit first, then free. */
+    ret = ext2_release_inode_blocks(fs, victim_ctx->inode_num,
+                                    &victim_ctx->inode);
     if (ret != 0) return ret;
-    if (ext2_write_inode(fs, victim_ctx->inode_num, &victim_ctx->inode) != 0) {
-        return -EIO;
-    }
     ext2_free_inode(fs, victim_ctx->inode_num, 1);
     memset(&victim_ctx->inode, 0, sizeof(victim_ctx->inode));
     victim->length = 0;
