@@ -2622,7 +2622,7 @@ static int xhci_pci_attach(struct device *dev)
                        cmd & (uint16_t)~0x0002);
     size_t barsz = pci_bar_size(pdev, 0);
     pci_write_config16(pdev->bus, pdev->slot, pdev->func, PCI_CONFIG_COMMAND,
-                       cmd | 0x0002 | 0x0004);
+                       cmd | PCI_COMMAND_MEMORY | PCI_COMMAND_MASTER);
 
     xhci_hc_t *hc = kzalloc(sizeof(*hc));
     if (!hc) {

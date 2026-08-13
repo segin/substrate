@@ -1183,7 +1183,7 @@ static int ehci_pci_attach(struct device *dev)
     /* Enable memory space + bus mastering. */
     uint16_t cmd = pci_read_config16(pdev->bus, pdev->slot, pdev->func, PCI_CONFIG_COMMAND);
     pci_write_config16(pdev->bus, pdev->slot, pdev->func, PCI_CONFIG_COMMAND,
-                       cmd | 0x0002 | 0x0004);
+                       cmd | PCI_COMMAND_MEMORY | PCI_COMMAND_MASTER);
 
     hc->mmio = ioremap(phys, 0x1000);
     if (!hc->mmio) {

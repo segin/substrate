@@ -440,7 +440,8 @@ static void test_hse_mid_poll(void)
     hc->qtd[0].token = EHCI_QTD_STATUS_ACTIVE;
     beh.hse_after_sts_reads = 1;
 
-    int r = ehci_run_qh(hc, 0, 1, 0, 5000, 0);
+    struct ehci_xfer_result res;
+    int r = ehci_run_qh(hc, 0, 0, 0, 1, 5000, &res);
     assert(r == USB_XFER_ERROR);
     assert(hc->hcd.hc_failed == 1);
     /* A halted HC does no DMA: the token must have been neutralized so a
@@ -465,7 +466,8 @@ static void test_refused_stop_no_scribble(void)
     hc->qtd[0].token = EHCI_QTD_STATUS_ACTIVE | (64u << EHCI_QTD_BYTES_SHIFT);
     beh.refuse_stop = 1;
 
-    int r = ehci_run_qh(hc, 0, 1, 0, 10, 0);
+    struct ehci_xfer_result res;
+    int r = ehci_run_qh(hc, 0, 0, 0, 1, 10, &res);
     assert(r == USB_XFER_TIMEOUT);
     assert(hc->hcd.hc_failed == 1);
     /* No scribble: token still ACTIVE; overlay still holds the ARMING
@@ -491,7 +493,8 @@ static void test_late_completion_rescued(void)
     hc->qtd[0].token = EHCI_QTD_STATUS_ACTIVE;   /* zero residue when done */
     beh.complete_on_stop = 1;
 
-    int r = ehci_run_qh(hc, 0, 1, 0, 10, 0);
+    struct ehci_xfer_result res;
+    int r = ehci_run_qh(hc, 0, 0, 0, 1, 10, &res);
     assert(r == USB_XFER_OK);
     assert(hc->hcd.hc_failed == 0);
     /* Schedule restarted for the next transfer. */

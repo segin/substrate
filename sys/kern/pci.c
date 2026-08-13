@@ -337,12 +337,26 @@ size_t pci_bar_size(pci_device_t *dev, int bar) {
     }
 
     offset = (uint16_t)(0x10 + bar * 4);
+
+    /* [RF-18] Disable decode around the all-ones probe.  PCI 3.0 s6.2.5.1
+     * requires it: while the probe value is in the BAR, the device decodes
+     * a bogus window, and if firmware (SMM) or another agent touches the
+     * device mid-probe the accesses land nowhere -- the xHCI audit
+     * [P6-INIT-01] hit exactly this against a BIOS-owned controller.
+     * Doing it here covers every caller, pci_iomap included. */
+    uint16_t cmd_save = pci_read_config16(dev->bus, dev->slot, dev->func,
+                                          PCI_CONFIG_COMMAND);
+    pci_write_config16(dev->bus, dev->slot, dev->func, PCI_CONFIG_COMMAND,
+                       cmd_save & (uint16_t)~(PCI_COMMAND_MEMORY | PCI_COMMAND_IO));
+
     orig_low = pci_read_config32(dev->bus, dev->slot, dev->func, offset);
     pci_write_config32(dev->bus, dev->slot, dev->func, offset, 0xFFFFFFFFU);
     mask_low = pci_read_config32(dev->bus, dev->slot, dev->func, offset);
     pci_write_config32(dev->bus, dev->slot, dev->func, offset, orig_low);
 
     if (type == PCI_BAR_IO) {
+        pci_write_config16(dev->bus, dev->slot, dev->func,
+                           PCI_CONFIG_COMMAND, cmd_save);
         return (size_t)(~(mask_low & ~0x3U) + 1U);
     }
 
@@ -356,9 +370,13 @@ size_t pci_bar_size(pci_device_t *dev, int bar) {
         pci_write_config32(dev->bus, dev->slot, dev->func, (uint16_t)(offset + 4), orig_high);
 
         mask = ((uint64_t)mask_high << 32) | (uint64_t)(mask_low & ~0xFU);
+        pci_write_config16(dev->bus, dev->slot, dev->func,
+                           PCI_CONFIG_COMMAND, cmd_save);
         return (size_t)(~mask + 1U);
     }
 
+    pci_write_config16(dev->bus, dev->slot, dev->func,
+                       PCI_CONFIG_COMMAND, cmd_save);
     return (size_t)(~(mask_low & ~0xFU) + 1U);
 }
 
