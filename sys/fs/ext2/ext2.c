@@ -1825,6 +1825,25 @@ uint32_t ext2_inode_write(ext2_node_t *node, off_t offset, uint32_t size,
             }
         }
 
+        /* EXT2-A33 (audit BM-14): when the write starts past the
+         * current end of file inside an already-allocated block, the
+         * bytes between old EOF and here must read as zeros — they are
+         * a hole POSIX says is zero-filled, not whatever the block
+         * last held. */
+        if (block_num != 0 && offset > (off_t)inode->i_size &&
+            block_offset != 0) {
+            uint32_t eof_block = inode->i_size / fs->block_size;
+            if (eof_block == block_idx) {
+                uint32_t gap_start = inode->i_size % fs->block_size;
+                if (gap_start < block_offset) {
+                    if (ext2_read_block(fs, block_num, block_buf) == fs->block_size) {
+                        memset(block_buf + gap_start, 0, block_offset - gap_start);
+                        ext2_write_block(fs, block_num, block_buf);
+                    }
+                }
+            }
+        }
+
         // Read block if we're doing a partial write
         if (block_offset != 0 || size < fs->block_size) {
             /* EXT2-A14: a failed read leaves the previous block's image
@@ -2099,6 +2118,15 @@ fs_node_t *ext2_alloc_node(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inod
                  * This was the cause of "cat: stdout: Bad file descriptor"
                  * floods when a configure recycled conftest.c/conftest.dir. */
                 memcpy(&ext2_node_cache[i].inode, inode, sizeof(ext2_inode_t));
+                /* EXT2-A33 (audit DE-17): this slot now describes a
+                 * DIFFERENT file that merely reused the inode number —
+                 * the previous directory's name cache and readdir
+                 * cursor would answer lookups for it. */
+                memset(ext2_node_cache[i].dcache, 0,
+                       sizeof(ext2_node_cache[i].dcache));
+                ext2_node_cache[i].dcache_idx = 0;
+                ext2_node_cache[i].last_readdir_idx = (uint64_t)-1;
+                ext2_node_cache[i].last_readdir_pos = 0;
                 ext2_alloc_node_hits++;
                 fs_node_t *rebuilt = ext2_node_build_from_inode(&ext2_fs_node_cache[i],
                         &ext2_node_cache[i], inode, inode_num, fs, i);
@@ -2290,6 +2318,16 @@ static int ext2_setattr(fs_node_t *node, const struct fs_attr *a) {
         ext2_inode_set_gid(&ctx->inode, a->gid);   /* EXT2-A19 */
         node->gid        = a->gid;
     }
+    /* EXT2-A33 (audit MS-13): POSIX — a successful chown/chgrp/chmod
+     * updates ctime.  Only the dedicated chmod path did.  An explicit
+     * ctime in the request wins. */
+    if ((a->mask & (FS_ATTR_MODE | FS_ATTR_UID | FS_ATTR_GID)) &&
+        !(a->mask & FS_ATTR_CTIME)) {
+        time_t now = get_time();
+        ctx->inode.i_ctime = (uint32_t)now;
+        node->ctime        = now;
+    }
+
     if (ext2_write_inode(ctx->fs, ctx->inode_num, &ctx->inode) != 0)
         return -EIO;
     return 0;
@@ -3815,6 +3853,14 @@ uint32_t ext2_alloc_inode(ext2_fs_t *fs, int is_dir) {
 
                 // Calculate absolute inode number
                 uint32_t inode_num = group * fs->inodes_per_group + i + 1;
+                /* EXT2-A33 (audit BG-08): the last group's bitmap is
+                 * padded out to inodes_per_group bits and those tail
+                 * bits describe inodes that do not exist.  Handing one
+                 * out would write an inode past the table. */
+                if (inode_num > fs->sb.s_inodes_count) {
+                    bitmap_buf[byte_idx] &= (uint8_t)~(1u << bit_idx);
+                    break;      /* nothing usable further up this group */
+                }
                 
                 // Update superblock
                 fs->sb.s_free_inodes_count--;
@@ -5010,7 +5056,14 @@ static int ext2_mknod(fs_node_t *dir, const char *name, uint16_t mode, uint32_t 
         type = S_IFREG;
         mode |= S_IFREG;
     }
-    if (type == S_IFDIR) return -EISDIR;
+    /* EXT2-A33 (audit MS-17): POSIX mknod rejects a directory with
+     * EPERM (mkdir's job), and a symlink has no target here — it would
+     * create a degenerate empty link that resolves to "". */
+    if (type == S_IFDIR)  return -EPERM;
+    if (type == S_IFLNK)  return -EINVAL;
+    if (type != S_IFREG && type != S_IFCHR && type != S_IFBLK &&
+        type != S_IFIFO && type != S_IFSOCK)
+        return -EINVAL;
 
     dir_ctx = (ext2_node_t *)(uintptr_t)dir->impl;
     fs = dir_ctx->fs;
