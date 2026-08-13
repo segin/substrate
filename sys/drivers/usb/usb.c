@@ -1193,6 +1193,51 @@ static void usb_enum_wait_port_connect(usb_hcd_t *hcd, uint8_t port)
             "resetting anyway\n", port, (unsigned)waited);
 }
 
+/*
+ * [ENUM-1] Post-SET_ADDRESS control requests, retried.
+ *
+ * A device that just took an address is allowed to be slow -- it may still
+ * be settling internal state -- and one flaky read here used to abort the
+ * WHOLE enumeration: slot released, address freed, device freed, and the
+ * enum ladder's next attempt redoes the port reset and SET_ADDRESS, which
+ * is far heavier than re-asking, and only three of those are allowed
+ * before the port parks.  Both reference stacks retry exactly these
+ * requests instead: NetBSD re-reads post-address descriptors up to 3 times
+ * with 200 ms spacing (usb_subr.c, usbd_get_desc loop), and FreeBSD's
+ * usbd_req_get_desc takes retries=3 on the same paths.
+ */
+#define USB_ENUM_REQ_TRIES     3
+#define USB_ENUM_REQ_DELAY_MS  200
+
+static int usb_enum_get_descriptor(usb_device_t *dev, uint8_t type,
+                                   uint8_t index, void *buf, uint16_t len)
+{
+    int ret = USB_XFER_ERROR;
+
+    for (int t = 0; t < USB_ENUM_REQ_TRIES; t++) {
+        if (t)
+            usb_delay_ms(USB_ENUM_REQ_DELAY_MS);
+        ret = usb_get_descriptor(dev, type, index, buf, len);
+        if (ret == USB_XFER_OK)
+            return ret;
+    }
+    return ret;
+}
+
+static int usb_enum_set_configuration(usb_device_t *dev, uint8_t config)
+{
+    int ret = USB_XFER_ERROR;
+
+    for (int t = 0; t < USB_ENUM_REQ_TRIES; t++) {
+        if (t)
+            usb_delay_ms(USB_ENUM_REQ_DELAY_MS);
+        ret = usb_set_configuration(dev, config);
+        if (ret == USB_XFER_OK)
+            return ret;
+    }
+    return ret;
+}
+
 static int usb_enumerate_device_inner(usb_hcd_t *hcd, uint8_t port, uint8_t speed,
                                       usb_device_t *parent)
 {
@@ -1408,8 +1453,8 @@ static int usb_enumerate_device_inner(usb_hcd_t *hcd, uint8_t port, uint8_t spee
     dev->ep0.toggle = 0;
 
     /* Read full device descriptor */
-    ret = usb_get_descriptor(dev, USB_DT_DEVICE, 0,
-                             &dev->dev_desc, sizeof(dev->dev_desc));
+    ret = usb_enum_get_descriptor(dev, USB_DT_DEVICE, 0,
+                                  &dev->dev_desc, sizeof(dev->dev_desc));
     if (ret != USB_XFER_OK) {
         kprintf("usb: addr %u: failed to get full device descriptor (err=%d)\n",
                 addr, ret);
@@ -1422,7 +1467,7 @@ static int usb_enumerate_device_inner(usb_hcd_t *hcd, uint8_t port, uint8_t spee
     dev->product_id = dev->dev_desc.idProduct;
 
     /* Read config descriptor header to get total length */
-    ret = usb_get_descriptor(dev, USB_DT_CONFIG, 0, &cd, sizeof(cd));
+    ret = usb_enum_get_descriptor(dev, USB_DT_CONFIG, 0, &cd, sizeof(cd));
     if (ret != USB_XFER_OK) {
         kprintf("usb: addr %u: failed to get config descriptor (err=%d)\n",
                 addr, ret);
@@ -1454,8 +1499,8 @@ static int usb_enumerate_device_inner(usb_hcd_t *hcd, uint8_t port, uint8_t spee
     }
     dev->config_len = cd.wTotalLength;
 
-    ret = usb_get_descriptor(dev, USB_DT_CONFIG, 0,
-                             dev->config_data, dev->config_len);
+    ret = usb_enum_get_descriptor(dev, USB_DT_CONFIG, 0,
+                                  dev->config_data, dev->config_len);
     if (ret != USB_XFER_OK) {
         kprintf("usb: addr %u: failed to get full config descriptor (err=%d)\n",
                 addr, ret);
@@ -1477,7 +1522,7 @@ static int usb_enumerate_device_inner(usb_hcd_t *hcd, uint8_t port, uint8_t spee
         usb_free_device(dev);
         return -1;
     }
-    ret = usb_set_configuration(dev, cd.bConfigurationValue);
+    ret = usb_enum_set_configuration(dev, cd.bConfigurationValue);
     if (ret != USB_XFER_OK) {
         kprintf("usb: addr %u: SET_CONFIGURATION failed (err=%d)\n", addr, ret);
         usb_enum_release_hcd(hcd, port, parent);
