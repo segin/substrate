@@ -8,6 +8,7 @@
 #include <string.h>
 
 #include <kern/bus.h>
+#include <kern/console.h>
 #include <kern/device.h>
 #include <kern/driver.h>
 #include <sys/errno.h>
@@ -518,7 +519,31 @@ void device_shutdown(struct device *dev) {
     }
 
     if (dev->driver && dev->driver->shutdown) {
+        kprintf("device_shutdown: %s\n",
+                dev->name[0] ? dev->name : "(unnamed)");
         dev->driver->shutdown(dev);
+    }
+}
+
+/*
+ * Invoke every driver's shutdown hook, root devices first (device_shutdown
+ * recurses into children before the parent's own hook).  Called from the
+ * reboot path so controllers that master the bus -- a USB host controller
+ * walking its schedule rings, for one -- stop DMAing before the kernel that
+ * owns those rings is torn down.  device_shutdown() existed but nothing
+ * called it on reboot, so every .shutdown hook was dead code. [ehci-audit 7]
+ */
+void device_shutdown_all(void) {
+    struct bus_type *bus;
+
+    for (bus = bus_first(); bus != NULL; bus = bus_next(bus)) {
+        struct device *dev = bus->devices_list;
+        while (dev != NULL) {
+            if (dev->parent == NULL) {
+                device_shutdown(dev);
+            }
+            dev = dev->bus_next;
+        }
     }
 }
 

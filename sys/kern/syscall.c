@@ -22,6 +22,7 @@
 #include <exec/perso/personality.h>
 #include <kern/cmdline.h>
 #include <kern/console.h>
+#include <kern/device.h>
 #include <kern/file.h>
 #include <kern/panic.h>
 #include <kern/sched.h>
@@ -4368,6 +4369,13 @@ int sys_reboot(int cmd) {
      * they sit on and each backing store is left clean. */
     vfs_unmount_all();
 
+    /* Quiesce bus-mastering hardware.  A USB host controller left running
+     * keeps walking its schedule rings in the old kernel's memory straight
+     * through a warm reboot -- untraceable early-boot corruption on real
+     * hardware (an emulator resets its device models, so this only shows
+     * on metal).  Every driver's .shutdown hook runs here. [ehci-audit 7] */
+    device_shutdown_all();
+
     switch (cmd) {
     case RB_POWER_OFF:
         /*
@@ -4393,8 +4401,13 @@ int sys_reboot(int cmd) {
         return -EINVAL;
     }
 
-    // Keyboard controller reset
-    while (inb(0x64) & 0x02);
+    /* Keyboard controller reset -- BOUNDED.  A machine with no i8042
+     * (qemu -machine i8042=off; some modern boards) floats port 0x64 at
+     * 0xFF, so the old unbounded input-buffer-full wait spun forever and
+     * the triple-fault fallback below was unreachable: `reboot -f` hung
+     * the machine instead of resetting it. */
+    for (int i = 0; i < 65536 && (inb(0x64) & 0x02); i++)
+        ;
     outb(0x64, 0xFE);
     
     // Fallback if that fails: Triple fault
