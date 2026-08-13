@@ -124,8 +124,15 @@ static int ehci_port_reset(usb_hcd_t *hcd, uint8_t port)
         return -1;
 
     /* A low-speed device parks the line in K state -- hand it to a companion
-     * controller instead of trying to reset it here (EHCI is high-speed only). */
-    if ((psc & EHCI_PORT_LINESTATUS) == EHCI_PORT_LS_KSTATE) {
+     * controller instead of trying to reset it here (EHCI is high-speed only).
+     * Line Status is only defined while the port is DISABLED (Table 2-16:
+     * "valid only when the port enable bit is zero and the current connect
+     * status bit is set to a one"), so gate on PED: on a re-reset of an
+     * already-enabled port -- routine during enumeration retries -- the field
+     * is meaningless and a garbage K reading here silently routed a working
+     * high-speed device to a companion that may not exist. [PORT-01] */
+    if (!(psc & EHCI_PORT_ENABLE) &&
+        (psc & EHCI_PORT_LINESTATUS) == EHCI_PORT_LS_KSTATE) {
         ehci_portsc_wr(hc, port, psc | EHCI_PORT_OWNER);
         return -1;
     }
