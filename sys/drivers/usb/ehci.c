@@ -80,13 +80,33 @@ static ehci_hc_t *ehci_hcs[EHCI_MAX_HCS];
 static uint8_t ehci_instances;
 
 /* ---- register access ---- */
+/*
+ * [RF-3] Every operational-register access funnels through these two, so a
+ * host-side test build can substitute a scripted fake controller and drive
+ * the poll loops through states QEMU cannot produce (Host System Error,
+ * stuck Port Reset, a schedule that refuses to stop).  Mirrors the nvme.c
+ * HOST_TEST pattern; the capability-region derefs are attach-path only,
+ * which the harness never runs.
+ */
+#ifdef HOST_TEST
+extern uint32_t ehci_test_op_rd(ehci_hc_t *hc, uint32_t reg);
+extern void ehci_test_op_wr(ehci_hc_t *hc, uint32_t reg, uint32_t val);
+#endif
 static inline uint32_t ehci_op_rd(ehci_hc_t *hc, uint32_t reg)
 {
+#ifdef HOST_TEST
+    return ehci_test_op_rd(hc, reg);
+#else
     return *(volatile uint32_t *)(hc->op + reg);
+#endif
 }
 static inline void ehci_op_wr(ehci_hc_t *hc, uint32_t reg, uint32_t val)
 {
+#ifdef HOST_TEST
+    ehci_test_op_wr(hc, reg, val);
+#else
     *(volatile uint32_t *)(hc->op + reg) = val;
+#endif
 }
 static inline uint32_t ehci_portsc_rd(ehci_hc_t *hc, uint8_t port)
 {
@@ -601,6 +621,38 @@ static int ehci_bulk_transfer(ehci_hc_t *hc, usb_transfer_t *xfer)
 }
 
 /*
+ * bInterval -> periodic frame-list stride.  High speed encodes the period as
+ * 2^(bInterval-1) MICROframes (8 per frame); full and low speed give frames
+ * directly.  Clamped into the frame list so the QH is always reachable.
+ *
+ * bInterval 1-3 at high speed encodes a sub-frame period (1/2/4 microframes);
+ * the divide floors those to a 1 ms stride with the single S-mask bit
+ * ehci_endp_cap sets.  Deliberate for a polled driver, and what the BSDs
+ * ship too; lifting it means multiple S-mask bits (0xFF / 0x55 / 0x11)
+ * rather than a stride change. [ehci-audit note]
+ *
+ * Pure function so the host test suite can table-test it. [RF-3]
+ */
+static uint32_t ehci_intr_stride(uint8_t bi, uint8_t speed)
+{
+    uint32_t stride;
+
+    if (bi == 0)
+        bi = 1;
+    if (speed == USB_SPEED_HIGH) {
+        uint32_t uframes = 1u << (bi > 16 ? 15 : (bi - 1));
+        stride = uframes / 8;
+    } else {
+        stride = bi;
+    }
+    if (stride == 0)
+        stride = 1;
+    if (stride > EHCI_FRAMELIST_ENTRIES / 2)
+        stride = EHCI_FRAMELIST_ENTRIES / 2;
+    return stride;
+}
+
+/*
  * Run one interrupt transfer through the PERIODIC schedule.
  *
  * These used to be handed to ehci_bulk_transfer(), i.e. queued on the
@@ -628,32 +680,8 @@ static int ehci_intr_transfer(ehci_hc_t *hc, usb_transfer_t *xfer)
     if (!in && len)
         memcpy(hc->bounce, xfer->data, len);
 
-    /*
-     * bInterval -> frame stride.  High speed encodes it as 2^(bInterval-1)
-     * MICROframes (8 per frame); full and low speed give frames directly.
-     * Clamp into the frame list so the QH is always reachable.
-     */
-    {
-        uint8_t bi = xfer->ep ? xfer->ep->interval : 1;
-        if (bi == 0)
-            bi = 1;
-        if (xfer->dev->speed == USB_SPEED_HIGH) {
-            /* bInterval 1-3 encodes a sub-frame period (1/2/4 microframes);
-             * the divide floors those to a 1 ms stride with the single
-             * S-mask bit ehci_endp_cap sets.  Deliberate for a polled
-             * driver, and what the BSDs ship too; lifting it means multiple
-             * S-mask bits (0xFF / 0x55 / 0x11) rather than a stride
-             * change. [ehci-audit note] */
-            uint32_t uframes = 1u << (bi > 16 ? 15 : (bi - 1));
-            stride = uframes / 8;
-        } else {
-            stride = bi;
-        }
-        if (stride == 0)
-            stride = 1;
-        if (stride > EHCI_FRAMELIST_ENTRIES / 2)
-            stride = EHCI_FRAMELIST_ENTRIES / 2;
-    }
+    stride = ehci_intr_stride(xfer->ep ? xfer->ep->interval : 1,
+                              xfer->dev->speed);
 
     /* One qTD, at the front of the pool -- submit_lock serialises us against
      * the async path that also uses it. */

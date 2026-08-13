@@ -160,6 +160,7 @@ HOST_TESTS += host_test_virtio_scsi
 HOST_TESTS += host_test_ac97
 HOST_TESTS += host_test_audio
 HOST_TESTS += host_test_audio_fifo
+HOST_TESTS += host_test_ehci
 HOST_TESTS += host_test_hda
 HOST_TESTS += host_test_random_ioctl
 HOST_TESTS += host_test_sb16
@@ -338,6 +339,9 @@ host_test_ide_power: host_test_ide_power.c
 
 host_test_nvme: host_test_nvme.c
 	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_nvme.c -o $@
+
+host_test_ehci: host_test_ehci.c ../../sys/drivers/usb/ehci.c
+	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_ehci.c -o $@
 
 host_test_random_ioctl: host_test_random_ioctl.c ../../sys/kern/random.c
 	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_random_ioctl.c -o $@
