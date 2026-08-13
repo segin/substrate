@@ -28,6 +28,7 @@ void intr_enable(void);
 #include <drivers/usb/uhci.h>
 #include <drivers/usb/usb.h>
 #include <kern/bus.h>
+#include <kern/cmdline.h>
 #include <kern/console.h>
 #include <kern/driver.h>
 #include <kern/pci.h>
@@ -100,6 +101,18 @@ static uint8_t uhci_instances;
 /* Default per-transfer deadline.  UHCI proved 5 s out on full-speed BOT
  * storage; callers with tighter needs pass xfer->timeout_ms. [RF-4] */
 #define UHCI_XFER_TIMEOUT_MS 5000
+
+/*
+ * PCI Legacy Support register (config offset 0xC0, 16-bit).  A BIOS that
+ * emulates a PS/2 keyboard from a USB one traps UHCI I/O accesses into SMM
+ * through the enables here; driving the controller while firmware still owns
+ * those traps is the same intermittent-failure mode the EHCI/xHCI handoffs
+ * exist for.  0x8F00 are the write-1-to-clear SMI status bits; writing the
+ * register to 0 afterwards disarms every trap/SMI enable.  Same constants
+ * and sequence as Linux's uhci_check_and_reset_hc(). [UHCI-LEGSUP]
+ */
+#define UHCI_PCI_LEGSUP      0xC0
+#define UHCI_PCI_LEGSUP_RWC  0x8F00
 
 /*
  * ============================================================
@@ -1152,6 +1165,19 @@ static int uhci_pci_attach(struct device *dev)
     kprintf("uhci: PCI %02x:%02x.%x iobase=0x%04x irq=%u\n",
             pdev->bus, pdev->slot, pdev->func,
             hc->iobase, hc->irq);
+
+    /* Take the controller away from the firmware before resetting it:
+     * acknowledge any pending legacy-SMI status, then disarm every trap.
+     * Same off switch as the other HCDs' handoffs; QEMU models no LEGSUP
+     * traps, so this is a no-op there and REAL-HARDWARE-UNVERIFIED until a
+     * machine with a UHCI (the Pavilion is xHCI-only) boots it.
+     * [UHCI-LEGSUP] */
+    if (!cmdline_has("nousbhandoff")) {
+        pci_write_config16(pdev->bus, pdev->slot, pdev->func,
+                           UHCI_PCI_LEGSUP, UHCI_PCI_LEGSUP_RWC);
+        pci_write_config16(pdev->bus, pdev->slot, pdev->func,
+                           UHCI_PCI_LEGSUP, 0);
+    }
 
     /* Reset the HC */
     if (uhci_reset(hc) < 0) {
