@@ -765,12 +765,16 @@ static int ext2_load_inode_bitmap(ext2_fs_t *fs, uint32_t group) {
 static int ext2_super_rmw(ext2_fs_t *fs, uint8_t *buf, size_t buf_len) {
     if (buf_len < sizeof(fs->sb)) return -EIO;
 
+    /* EXT2-A12 (audit CY-14): a failed preservation read used to fall
+     * back to zeros, so ONE transient device error during a routine
+     * free-count flush permanently wiped every extended field this
+     * driver does not model — s_journal_inum (Linux then refuses the
+     * ext3 mount), s_hash_seed, s_desc_size, s_checksum_seed.  Fail the
+     * flush instead; the caller leaves sb_dirty set and retries. */
     if (!fs->device->read ||
-        fs->device->read(fs->device, 1024, buf_len, buf) != buf_len) {
-        /* Nothing readable to preserve: start from zeros rather than from
-         * whatever the allocator last left in this buffer. */
-        memset(buf, 0, buf_len);
-    }
+        fs->device->read(fs->device, 1024, buf_len, buf) != buf_len)
+        return -EIO;
+
     memcpy(buf, &fs->sb, sizeof(fs->sb));
     return 0;
 }
@@ -796,27 +800,35 @@ static int ext2_flush_super(ext2_fs_t *fs) {
     }
     kfree(sb_buf, 1024);
 
-    // Write backups if necessary (EXT2_FEATURE_RO_COMPAT_SPARSE_SUPER = 0x0001)
-    int sparse = (fs->sb.s_feature_ro_compat & 0x0001);
-    
+    /* Backup superblocks.  EXT2-A12 (audit SB-07): which groups carry
+     * one depends on sparse_super AND sparse_super2 — the latter names
+     * its (at most two) backup groups in s_backup_bgs, and the first
+     * block of every other group is ordinary file data that this loop
+     * used to overwrite with a superblock image. */
     int backup_err = 0;
     for (uint32_t i = 1; i < fs->group_count; i++) {
-        if (sparse && !is_sparse_backup(i)) continue;
+        if (!ext2_group_has_super(fs, i)) continue;
 
-        uint32_t block = i * fs->sb.s_blocks_per_group + fs->sb.s_first_data_block;
+        uint32_t block = ext2_group_first_block(fs, i);
         // Superblock backups are at the start of the block
         uint8_t *tmp = kmalloc(fs->block_size);
         if (!tmp) {
             backup_err = -ENOMEM;
             continue;
         }
-        /* Same read-modify-write as the primary: copying 1024 bytes out of
-         * a 204-byte struct over-reads, and blindly zeroing the rest of the
-         * block would wipe the backup's extended superblock fields too. */
+        /* Read-modify-write, and skip the backup entirely if the read
+         * fails — see ext2_super_rmw: substituting zeros would destroy
+         * the extended fields we do not model. */
         if (ext2_read_block(fs, block, tmp) != fs->block_size) {
-            memset(tmp, 0, fs->block_size);
+            kfree(tmp, fs->block_size);
+            backup_err = -EIO;
+            continue;
         }
         memcpy(tmp, &fs->sb, sizeof(fs->sb));
+        /* EXT2-A12 (audit SB-12): each copy records its OWN group
+         * number; blanket-copying the primary's prefix stamped 0 into
+         * every backup and lost that self-identification. */
+        *(uint16_t *)(tmp + 0x5A) = (uint16_t)i;   /* s_block_group_nr */
         ext2_super_stamp_csum(fs, tmp);
         /* Don't drop write errors silently — a failed backup write
          * leaves the on-disk image inconsistent with the primary. */
@@ -882,17 +894,23 @@ int ext2_sync_meta(ext2_fs_t *fs) {
     if (!fs) return -EINVAL;
     if (fs->readonly) return 0;
     int err = 0;
+    /* EXT2-A12: keep the dirty marks on anything that failed to reach
+     * the disk so the next flush retries it, instead of dropping the
+     * update and leaving the on-disk counts permanently stale. */
     if (fs->bgd_dirty) {
         for (uint32_t g = 0; g < fs->group_count; g++) {
             if (fs->bgd_dirty[g >> 3] & (uint8_t)(1u << (g & 7))) {
-                if (ext2_flush_group_desc(fs, g) != 0) err = -EIO;
+                if (ext2_flush_group_desc(fs, g) != 0) {
+                    err = -EIO;
+                    continue;                    /* stays dirty */
+                }
                 fs->bgd_dirty[g >> 3] &= (uint8_t)~(1u << (g & 7));
             }
         }
     }
     if (fs->sb_dirty) {
         if (ext2_flush_super(fs) != 0) err = -EIO;
-        fs->sb_dirty = 0;
+        else fs->sb_dirty = 0;
     }
     fs->meta_dirty_ops = 0;
     return err;
