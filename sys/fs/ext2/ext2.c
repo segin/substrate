@@ -3567,6 +3567,13 @@ int ext2_rename(fs_node_t *old_parent, const char *old_name, fs_node_t *new_pare
         return -EOPNOTSUPP;   /* [EXT2-08] */
 
     if (!old_parent || !old_name || !new_parent || !new_name) return -EINVAL;
+    /* EXT2-A2 (audit DE-04): every other namespace op rejects dot names;
+     * rename did not, so rename("/a/.", "/b/x") deleted a's own "."
+     * entry and gave the directory a second parent — structural
+     * corruption from one syscall.  POSIX prescribes EINVAL. */
+    if (!strcmp(old_name, ".") || !strcmp(old_name, "..") ||
+        !strcmp(new_name, ".") || !strcmp(new_name, ".."))
+        return -EINVAL;
     {
         ext2_node_t *oc = (ext2_node_t *)(uintptr_t)old_parent->impl;
         if (oc && EXT2_RO_REFUSE(oc->fs)) return -EROFS;
@@ -3614,6 +3621,20 @@ int ext2_rename(fs_node_t *old_parent, const char *old_name, fs_node_t *new_pare
     if (new_node) {
         ext2_node_open(new_node);
         new_node_pinned = 1;
+        /* EXT2-A2 (audit DE-02): POSIX — when old and new resolve to the
+         * same existing file (the same entry, or two hard links to one
+         * inode), rename succeeds and performs NO other action.  Without
+         * this, rename(a, a) went unlink-target → re-add → remove-old,
+         * where remove-old deleted the just-re-added entry and the
+         * deferred delete then freed the inode and data: `mv "$f" "$f"`
+         * was silent data loss. */
+        {
+            ext2_node_t *nn_ctx = (ext2_node_t *)(uintptr_t)new_node->impl;
+            if (nn_ctx && nn_ctx->inode_num == old_node_ctx->inode_num) {
+                rc = 0;
+                goto out;
+            }
+        }
         if ((old_node->flags & 0x7) == FS_DIRECTORY) {
             if ((new_node->flags & 0x7) != FS_DIRECTORY) { rc = -ENOTDIR; goto out; }
             if (!ext2_dir_is_empty(new_node)) { rc = -ENOTEMPTY; goto out; }
