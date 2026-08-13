@@ -1,120 +1,104 @@
-# ext2/3/4 driver — FreeBSD-parity roadmap
+# ext2/3/4 driver — roadmap and known gaps
 
-Reference: `~/freebsd/sys/fs/ext2fs/` (~16k LOC across 14 .c files).
-Substrate's current driver: `sys/fs/ext2/` (ext2.c + ext2_hash.c +
-ext2_xattr.c, ~3.2k LOC total).
+Reference: the ext4 on-disk specification (kernel.org
+`Documentation/filesystems/ext4/ondisk/`) and FreeBSD's
+`sys/fs/ext2fs/`.  Substrate's driver: `sys/fs/ext2/` (ext2.c +
+ext2_hash.c + ext2_xattr.c).
 
-The goal was feature parity with FreeBSD's `ext2fs(5)` so we can
-mount any default-format ext2/ext3/ext4 image read-write without
-data loss.  The major-feature work is done; what remains is mostly
-edge-case enrichment and write-path completeness.
+The 2026-08 audit against that spec (`docs/ext2-audit-2026-08.md`, 78
+findings) is fully worked through; what follows is what the driver
+does today and what it still does not do.
 
 ## Done
 
-- [x] Mount-time feature-flag gate — refuse mount on unknown
-      `INCOMPAT`, ro-mount on unknown `ROCOMPAT`.  Per-bit defines
-      and `EXT2F_*_SUPP` masks match FreeBSD's ext2fs.h naming.
-- [x] **64-bit block addresses** (`EXT2F_INCOMPAT_64BIT`) —
-      reads 64-byte group descriptors; rejects the mount if any
-      bg's high-half block address is non-zero (substrate's
-      internal addressing stays uint32_t).  Matches FreeBSD's
-      EXT2F_INCOMPAT_SUPP set.
-- [x] **ext4 extent-tree resolver** (read) — when an inode has
-      `EXT4_EXTENTS_FL` set, `ext2_get_block_num` walks the inline
-      header → index nodes → leaf extents and returns the physical
-      block.  Multi-level (depth ≤ EXT4_EXT_DEPTH_MAX) supported.
-- [x] **ext4 extent-tree append-write** — `ext4_extent_alloc_inode_block`
-      handles empty-list / contiguous-extend / new-single-extent
-      cases for depth-0 inline headers.  Sparse / multi-level /
-      header-full cases refuse cleanly with -EROFS; freed blocks
-      are released on partial-failure.
-- [x] `chmod`, `chown`, `utimes/utimensat/futimens` persist to the
-      on-disk inode through the new `setattr_fs` op.
-- [x] **256-byte inode + nanosecond timestamps** —
-      `EXT2F_ROCOMPAT_EXTRA_ISIZE`.  read_inode loads the extra
-      region (i_extra_isize, i_*time_extra, i_crtime,
-      i_crtime_extra); write_inode preserves the trailing xattr
-      area via read-modify-write.  fs_attr carries `*_nsec` fields
-      and utimensat() forwards `tv_nsec` end-to-end.
-- [x] **Metadata checksums** (`EXT2F_ROCOMPAT_METADATA_CKSUM`):
-      software CRC-32C (Castagnoli) primitive at sys/kern/crc32c.c.
-      Mount-time verify of (a) the superblock, (b) every group
-      descriptor (32-byte and 64-byte layouts).  read_inode verifies
-      each inode's csum; write_inode recomputes chksum_lo / chksum_hi
-      after every write so setattr/chmod/utimes don't leave the
-      inode csum-broken.
-- [x] **htree directory index** (`EXT2F_COMPAT_DIRHASHINDEX`) —
-      finddir hash-routes to the indexed leaf for single-level dirs.
-      Hash functions ported verbatim from FreeBSD (legacy, half_md4,
-      tea, signed and unsigned variants).  Hash seed loaded from
-      superblock at mount.  Falls back to linear scan for multi-
-      level indexes or unknown hash versions.
-- [x] **Extended attributes** (`EXT2F_COMPAT_EXT_ATTR`) — read-side
-      complete.  Inline (in-inode) xattr area + block-stored xattr
-      at i_file_acl, with inline winning when both define a name.
-      12 Linux-shape syscalls plumbed: {l,f}{get,list}xattr
-      implemented; {l,f}{set,remove}xattr stub to -ENOSYS pending
-      a backend write path.
-- [x] **Journal replay refusal** (`EXT2F_INCOMPAT_RECOVER`) —
-      same behaviour as FreeBSD: refuse the mount.  Neither
-      driver replays the JBD2 journal in-kernel; users must run
-      e2fsck -p first.  Parity is by-design refusal.
+- Mount-time feature-flag gate — refuse mount on unknown `INCOMPAT`,
+  ro-mount on unknown `ROCOMPAT`.  META_BG is deliberately NOT in the
+  supported set (the layout is unimplemented; accepting it corrupted
+  such images).  64BIT is accepted only when both the per-descriptor
+  high halves and `s_blocks_count_hi` are zero.
+- **ext4 extent trees** — read (multi-level, spec-correct `ee_len`
+  decode including the 32768 maximum and uninitialized extents, which
+  read as zeros), append-write, and **teardown** (recursive free, so
+  `rm` and truncate-to-zero work on default ext4 images).
+- **Lazy-init block groups** — `bg_flags` is modeled; BLOCK_UNINIT /
+  INODE_UNINIT groups get a synthesized bitmap, the flag is cleared on
+  first write, the inode table is zeroed before first use, and
+  `bg_itable_unused` is maintained.
+- **Checksums, read and write** — superblock, group descriptors
+  (crc32c for metadata_csum, crc16 for the older gdt_csum), block and
+  inode bitmaps, per-inode, and the `ext4_dir_entry_tail` on every
+  directory block.  Volumes stay mountable by Linux and clean under
+  e2fsck after substrate writes to them.
+- **htree directory index** (read) — hash-routed lookup with the
+  signed/unsigned variant taken from the superblock's `s_flags`, all
+  six hash functions ported from FreeBSD, linear-scan fallback.
+- **Extended attributes** (read) — inline and block-stored, POSIX ACL
+  names, permission-gated at the syscall layer; the xattr block is
+  refcount-released when an inode is deleted.
+- 256-byte inodes: spec-correct `i_extra_isize` handling that never
+  writes past the inode's own extension area (so inline xattrs
+  survive), `s_want_extra_isize` honored for new inodes, full-record
+  scrub on allocation.
+- 32-bit uid/gid, both device-number encodings, `S_IFSOCK`, dirent
+  `file_type` gated on INCOMPAT_FILETYPE, creator credentials with
+  set-gid directory semantics, immutable/append inode flags, relatime
+  atime, real `st_nlink`/`st_blocks`.
+- Crash-ordering discipline: an inode is committed before any block it
+  named is freed, so an interruption leaks blocks (fsck reclaims them)
+  rather than cross-linking files.
+- `s_state` management (mount marks the volume in use, unmount marks it
+  clean, `s_errors` honored), `sync(2)`/`fsync(2)` flush deferred
+  metadata through a VFS `syncfs` op, reserved-block enforcement.
+- Journal replay refusal (`INCOMPAT_RECOVER`) — same as FreeBSD;
+  neither driver replays JBD2 in-kernel.  Run `e2fsck -p` first.
 
-## In progress / next
+## Known gaps
 
-- [ ] **htree multi-level (`h_ind_levels` > 0)** — currently we
-      fall back to linear scan.  Rare in practice (>~3M entries
-      per dir) but FreeBSD does walk index nodes.
-- [ ] **Extent-tree split / grow-indepth** — substrate's append
-      path stops when the inline header fills.  FreeBSD's
-      ext4_ext_create_new_leaf / ext4_ext_grow_indepth handle
-      promoting the tree.
-- [ ] **Extent-tree remove / truncate** — currently truncate of
-      extent files goes through the legacy path (and is largely a
-      no-op because i_block[] doesn't hold pointers).  Need
-      ext4_ext_remove_space to free leaf blocks.
-- [ ] **xattr write side** — sys_{l,f}{set,remove}xattr stubbed at
-      -ENOSYS.  Need to grow the inline area / block, recompute the
-      block's stored hash, and (if metadata_csum) refresh the block
-      csum.
-- [ ] **Bitmap + extent-tail checksums** — metadata_csum extends
-      to block bitmaps (csum in bg descriptor), inode bitmaps,
-      and the per-extent-block ext4_extent_tail at the end of each
-      extent index/leaf block.  We don't verify those today.
-- [ ] **htree creation on rename/insert** — once the directory-
-      write path is xattr-aware, it also needs to update or
-      create the htree.
-- [ ] **Multi-mount protection** (`EXT2F_INCOMPAT_MMP`) — block
-      that detects concurrent mounts via shared storage.  Low
-      priority; substrate doesn't ship a multi-node deployment.
+Each is a deliberate refusal or a bounded, documented shortfall — none
+of them corrupts a filesystem.
+
+- **htree write support.** Any structural change to a directory
+  carrying `EXT2_INDEX_FL` is refused with `-EOPNOTSUPP`, because the
+  index is not maintained.  Practical consequence: on a Linux-made
+  image, large directories (`/usr/bin`, `/etc`) are effectively
+  read-only — reads and lookups work fine.  Fixing this means
+  implementing index insertion and node splitting.
+- **htree multi-level** (`h_ind_levels > 0`) falls back to linear scan.
+- **Extent-tree split / grow-in-depth.** The append path stops when the
+  inline header fills; sparse and multi-level writes refuse cleanly.
+- **Extent-file partial truncate.** Shrink-to-zero works (full
+  teardown); shrink to a smaller non-zero length refuses
+  `-EOPNOTSUPP` for extent-mapped files.  The legacy indirect path
+  implements it.
+- **xattr write side.** `{l,f}{set,remove}xattr` are `-ENOSYS`.
+- **Orphan list** (`s_last_orphan`) is not processed at mount, so
+  inodes orphaned by a Linux crash stay allocated until fsck.
+- **Multi-mount protection** (`INCOMPAT_MMP`) unsupported — the bit is
+  outside the supported set, so such volumes are refused.
+- **META_BG** and **BIGALLOC** unsupported (refused at mount).
+- **Read-side checksum tolerance.** Directory-tail, htree-node,
+  extent-block-tail and xattr-block checksums are written correctly
+  but not verified on read; a corrupt block is caught by its structural
+  checks instead.  The xattr reader also accepts some layouts Linux
+  rejects (unaligned `i_extra_isize`, overlapping value offsets).
+- **Node references.** Driver-internal paths pin the nodes they hold
+  across sleeping I/O, but `finddir` still returns an unpinned node to
+  the VFS, which pins only at the end of a path walk.  Closing that
+  fully means changing the VFS lookup protocol to carry a reference
+  per component.
+- **Root-pin watchdog.** `ext2_alloc_node` re-pins the root slot if it
+  ever observes `pin_count == 0` and counts the event in
+  `ext2_root_pin_lost`.  The unbalanced `close_fs` behind it has not
+  been root-caused.
+- 32-bit `i_size` throughout, so files are capped at 4 GiB and
+  timestamps at 2038.
 
 ## Automated test harness
 
-Lives at `tests/sys/fs/ext2/run-host-tests.sh` — invoked on-
-developer-host and boots substrate in QEMU with a generated test
-image attached as the second AHCI drive.  Each scenario
-prep_rootfs's `dist/etc/fstest.conf` with the device/mount/fs
-triple plus a `check=` command.  `etc/rc.d/99-fstest` consumes
-the config in the guest and emits `FSTEST: ...` lines the harness
-greps for.
-
-Current scenarios (47 assertions, all passing):
-- `mount-ext2`, `mount-ext3`, `mount-ext4-extents`,
-  `mount-ext4-64bit`, `mount-ext4-64bit-with-csum` — feature-bit
-  routing per filesystem rev.
-- `htree-listing` + finddir spread-probe — readdir traverses all
-  500 entries of an `e2fsck -fD`-promoted htree dir; finddir
-  resolves 18 representative names across the hash range.
-- `setattr-persist` + `setattr-persist-on-metadata-csum` —
-  utimensat persists across umount/remount, including on
-  metadata_csum'd images (proves the per-inode csum recompute).
-- `ro-mount-on-unsupported-rocompat` — quota ROCOMPAT triggers
-  read-only mount; touch returns EROFS.
-- `extent-large-read` — 1 MiB ext4 file backed by a depth-1
-  extent tree, content + size both match end-to-end.
-- `csum-verify-ok` + `csum-verify-fail` — superblock metadata_csum
-  validates clean images and refuses tampered ones.
-- `bg-csum-verify` — same shape for per-group-descriptor csums.
-- `xattr-read` — block-stored or inline xattrs visible via `ls -@l`.
-- `extent-append-write` — empty extent file accepts write of
-  "EXTENT_PAYLOAD\n"; payload survives umount + re-mount.
+`tests/sys/fs/ext2/run-host-tests.sh` — runs on the developer host and
+boots substrate in QEMU with a generated test image attached as a
+second drive.  Each scenario writes `dist/etc/fstest.conf` with the
+device/mount/fs triple plus a `check=` command; `etc/rc.d/99-fstest`
+consumes it in the guest and emits `FSTEST: ...` lines the harness
+greps for.  Scenarios that write also get a host-side `e2fsck -fn`
+pass, which is what catches interoperability regressions.

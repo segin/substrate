@@ -3061,10 +3061,9 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
      * advertises an INCOMPAT bit we don't understand (writing
      * blindly would corrupt structures we can't parse).  For
      * unsupported ROCOMPAT bits, we'd want to force a ro-mount;
-     * substrate doesn't have a read-only mount flag yet, so we
-     * just warn and proceed — a future commit should plumb
-     * MS_RDONLY through and refuse rw mounts here.  COMPAT bits
-     * never block.  */
+     * an unsupported ROCOMPAT bit forces the mount read-only (and
+     * pins it there: ext2_remount refuses to go back).  COMPAT bits
+     * never block a mount.  */
     if (fs->sb.s_rev_level >= 1) {
         uint32_t bad_inc = fs->sb.s_feature_incompat & ~EXT2F_INCOMPAT_SUPP;
         if (bad_inc) {
