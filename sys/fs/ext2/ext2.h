@@ -133,11 +133,13 @@ typedef struct {
 /* Leaf-level entry: maps logical block range to physical range. */
 typedef struct {
     uint32_t e_blk;        /* first logical block */
-    uint16_t e_len;        /* number of blocks (initialised when
-                              top bit is 0; uninitialised extent
-                              for sparse-region preallocation when
-                              top bit is set — we treat both the
-                              same on read) */
+    uint16_t e_len;        /* raw <= 32768: INITIALIZED extent of
+                              that length (32768 = EXT_INIT_MAX_LEN,
+                              a value Linux routinely writes).
+                              raw > 32768: UNINITIALIZED extent of
+                              length raw - 32768 — covered blocks
+                              are preallocated but never written
+                              and MUST read as zeros. */
     uint16_t e_start_hi;   /* high 16 bits of physical block */
     uint32_t e_start_lo;   /* low 32 bits */
 } __attribute__((packed)) ext4_extent_t;

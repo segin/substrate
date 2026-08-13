@@ -716,11 +716,27 @@ int ext2_write_inode(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inode) {
  * the ext4 48-bit physical address are clamped — fine for any
  * filesystem under 16 TiB.  Add 64-bit-block lookup when we
  * actually grow a >2^32-block target.  */
+/* EXT2-A1 (audit BM-12): a corrupt extent tree resolves every block as a
+ * hole, which reads as an all-zero file — indistinguishable from a sparse
+ * file, with no error anywhere.  Full error plumbing through the resolver
+ * is a larger change; at minimum make the corruption visible.  Capped so a
+ * hot path can't flood the console. */
+static uint64_t ext2_extent_corrupt_logged = 0;
+static void ext2_extent_corrupt(ext2_fs_t *fs, const char *what) {
+    (void)fs;
+    if (++ext2_extent_corrupt_logged <= 8)
+        kprintf("ext2: corrupt extent tree (%s) — file range reads as zeros\n",
+                what);
+}
+
 static uint32_t ext4_extent_resolve(ext2_fs_t *fs, ext2_inode_t *inode,
                                     uint32_t logical, uint8_t *scratch) {
     /* Start at the inline header in the inode itself.  */
     ext4_extent_header_t *eh = (ext4_extent_header_t *)&inode->i_block[0];
-    if (eh->eh_magic != EXT4_EXT_MAGIC) return 0;
+    if (eh->eh_magic != EXT4_EXT_MAGIC) {
+        ext2_extent_corrupt(fs, "root magic");
+        return 0;
+    }
 
     /* Walk indexes down to depth 0.  At each level pick the rightmost
      * index whose ei_blk <= logical — that's the child covering this
@@ -737,7 +753,10 @@ static uint32_t ext4_extent_resolve(ext2_fs_t *fs, ext2_inode_t *inode,
      * at its own block, made every logical-block lookup do 65535 block reads.
      * ext4 itself caps the tree at EXT4_EXT_DEPTH_MAX levels, so anything
      * deeper is corruption, not a filesystem we should try to walk. */
-    if (eh->eh_depth > EXT4_EXT_DEPTH_MAX) return 0;
+    if (eh->eh_depth > EXT4_EXT_DEPTH_MAX) {
+        ext2_extent_corrupt(fs, "root depth");
+        return 0;
+    }
     for (int depth = eh->eh_depth; depth > 0; depth--) {
         ext4_extent_idx_t *idx = (ext4_extent_idx_t *)(node + sizeof(*eh));
         int n = eh->eh_ecount;
@@ -759,12 +778,18 @@ static uint32_t ext4_extent_resolve(ext2_fs_t *fs, ext2_inode_t *inode,
         node = scratch;
         node_cap = fs->block_size;
         eh = (ext4_extent_header_t *)node;
-        if (eh->eh_magic != EXT4_EXT_MAGIC) return 0;
+        if (eh->eh_magic != EXT4_EXT_MAGIC) {
+            ext2_extent_corrupt(fs, "node magic");
+            return 0;
+        }
         /* EXT2-13: a well-formed tree strictly decreases in depth on the way
          * down.  Without this an index pointing at its own block (or at any
          * node of equal-or-greater depth) satisfies the magic check and the
          * loop just keeps re-reading it. */
-        if (eh->eh_depth != depth - 1) return 0;
+        if (eh->eh_depth != depth - 1) {
+            ext2_extent_corrupt(fs, "node depth");
+            return 0;
+        }
     }
 
     /* Leaf level: array of extents.  Each extent covers
@@ -778,11 +803,21 @@ static uint32_t ext4_extent_resolve(ext2_fs_t *fs, ext2_inode_t *inode,
     }
     for (int i = 0; i < n; i++) {
         uint32_t ext_start = ex[i].e_blk;
-        /* Uninitialised extent's e_len has the high bit set; mask
-         * it for length math (data still reads as zeros, but the
-         * extent does cover the range).  */
-        uint32_t len = ex[i].e_len & 0x7FFF;
+        /* EXT2-A1 (audit BM-01/BM-02): e_len <= 32768 is an INITIALIZED
+         * extent of that length — 32768 (0x8000) itself is the spec's
+         * EXT_INIT_MAX_LEN, which Linux writes for every >=128 MiB
+         * contiguous run, and the old `& 0x7FFF` mask decoded it as
+         * length 0 (the whole range read as a hole).  e_len > 32768 is
+         * an UNINITIALIZED (preallocated, never written) extent of
+         * length e_len - 32768: the spec requires those ranges to read
+         * as ZEROS.  The old code returned the mapped block instead,
+         * serving whatever stale data fallocate left on disk — a
+         * cross-file information leak.  Report uninit coverage as a
+         * hole; the caller zero-fills. */
+        uint32_t raw_len = ex[i].e_len;
+        uint32_t len = (raw_len <= 32768) ? raw_len : raw_len - 32768;
         if (logical >= ext_start && logical < ext_start + len) {
+            if (raw_len > 32768) return 0;   /* uninitialized: reads as zeros */
             uint64_t phys = ((uint64_t)ex[i].e_start_hi << 32)
                           | ex[i].e_start_lo;
             phys += (logical - ext_start);
@@ -1067,9 +1102,17 @@ static int ext4_extent_alloc_inode_block(ext2_fs_t *fs, ext2_inode_t *inode,
     /* Append-only check.  The "last extent" is the one whose
      * logical range ends highest.  In a sane on-disk layout the
      * entries are sorted by e_blk so exts[n-1] is the last; we
-     * don't bother verifying.  */
+     * don't bother verifying.
+     * EXT2-A1: decode e_len per spec (raw > 32768 = uninitialized
+     * extent of length raw-32768) so an uninit last extent yields
+     * the right logical end — and is never grown in place, since
+     * extending an uninitialized extent would silently extend the
+     * reads-as-zeros region over the block we are about to write. */
     ext4_extent_t *last = &exts[n - 1];
-    uint32_t logical_end = last->e_blk + last->e_len;
+    uint32_t last_raw = last->e_len;
+    int last_uninit = (last_raw > 32768);
+    uint32_t last_len = last_uninit ? last_raw - 32768 : last_raw;
+    uint32_t logical_end = last->e_blk + last_len;
     if (logical_end != block_idx) return -1;    /* sparse — refuse */
 
     /* EXT2-11: e_start_lo holds the low 32 bits and e_start_hi the *high 16*
@@ -1078,13 +1121,13 @@ static int ext4_extent_alloc_inode_block(ext2_fs_t *fs, ext2_inode_t *inode,
      * any volume that actually used the high word the contiguity test
      * compared against a garbage address. */
     uint64_t phys_end = ((uint64_t)last->e_start_hi << 32) | last->e_start_lo;
-    phys_end += last->e_len;
+    phys_end += last_len;
 
     uint32_t blk = ext2_alloc_block(fs);
     if (blk == 0) return -1;
     inode->i_blocks += sectors_per_block;
 
-    if (blk == phys_end && last->e_len < 0x7FFF) {
+    if (blk == phys_end && !last_uninit && last_raw < 32768) {
         /* Case 2: contiguous extension.  Grow the existing extent's
          * length and call it a day.  No tree-structure change.  */
         last->e_len = last->e_len + 1;
