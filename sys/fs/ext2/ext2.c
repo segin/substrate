@@ -2633,9 +2633,24 @@ static int ext2_htree_lookup(ext2_node_t *ctx, const char *name,
         entries_off + (uint32_t)entries_num * 8 > fs->block_size)
         return -1;
 
+    /*
+     * EXT2-A25 (audit SB-08/DE-16): the root block records the hash
+     * ALGORITHM; whether it hashes `char` as signed or unsigned comes
+     * from the superblock's s_flags (0x1 signed / 0x2 unsigned) — that
+     * is how Linux and e2fsprogs decide.  Taking the base variant
+     * verbatim computed the signed hash on an unsigned-hash filesystem,
+     * so any name with a high-bit byte routed to the wrong leaf.
+     */
+    uint8_t hv = hash_version;
+    if ((fs->sb_flags & 0x2) &&
+        (hv == EXT2_HTREE_LEGACY || hv == EXT2_HTREE_HALF_MD4 ||
+         hv == EXT2_HTREE_TEA)) {
+        hv = (uint8_t)(hv + 3);          /* -> the _UNSIGNED variant */
+    }
+
     uint32_t hash_major = 0, hash_minor = 0;
     if (ext2_htree_hash(name, (int)name_len, fs->hash_seed,
-                        (int)hash_version, &hash_major, &hash_minor) != 0)
+                        (int)hv, &hash_major, &hash_minor) != 0)
         return -1;
 
     /* Binary search entries[1..entries_num-1] for the largest
@@ -3023,6 +3038,9 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
             fs->want_extra_isize = want;
         }
 
+        /* EXT2-A25 (audit SB-08/DE-16): hash signedness lives here. */
+        fs->sb_flags = *(uint32_t *)(sb_buf + 0x160);
+
         /* Layout facts needed to synthesize uninit-group bitmaps and to
          * place superblock backups (EXT2-A7). */
         fs->reserved_gdt_blocks = *(uint16_t *)(sb_buf + 0xCE);
@@ -3327,6 +3345,31 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
      *                             -> crc32c(state, gd[32..desc_size-1])
      * For 32-byte descriptors the trailing range is empty.  Any
      * mismatch refuses the mount — same argument as superblock-csum.  */
+    /* EXT2-A26 (audit SB-09): the per-group metadata block numbers are
+     * untrusted on-disk data used directly for I/O — an out-of-range
+     * bg_inode_table makes every inode read land somewhere arbitrary,
+     * and an out-of-range bitmap pointer makes an allocation write a
+     * "bitmap" over file data.  Reject the mount instead. */
+    {
+        uint32_t itb   = ext2_itable_blocks(fs);
+        uint32_t first = fs->sb.s_first_data_block;
+        uint32_t last  = fs->sb.s_blocks_count;
+        for (uint32_t g = 0; g < fs->group_count; g++) {
+            uint32_t bb = fs->bgd[g].bg_block_bitmap;
+            uint32_t ib = fs->bgd[g].bg_inode_bitmap;
+            uint32_t it = fs->bgd[g].bg_inode_table;
+            if (bb <= first || bb >= last ||
+                ib <= first || ib >= last ||
+                it <= first || it >= last ||
+                itb > last - it) {
+                kprintf("ext2: bg %u metadata out of range "
+                        "(bbitmap=%u ibitmap=%u itable=%u+%u, blocks=%u) — "
+                        "refuse mount\n", g, bb, ib, it, itb, last);
+                goto fail;
+            }
+        }
+    }
+
     /* EXT2-A6 (audit CK-04): this now covers the crc16 GDT_CSUM scheme
      * too — it was accepted in ROCOMPAT_SUPP but neither verified nor
      * written, so uninit_bg volumes went entirely unchecked. */

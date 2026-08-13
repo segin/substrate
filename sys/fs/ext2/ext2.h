@@ -376,6 +376,12 @@ typedef struct {
      * uses.  0 on a 128-byte-inode filesystem. */
     uint16_t want_extra_isize;
 
+    /* Superblock s_flags (0x160) hash-signedness bits: 0x1 = signed
+     * directory hash in use, 0x2 = unsigned.  Linux and e2fsprogs pick
+     * the char signedness of the htree hash from these, NOT from the
+     * root block's hash_version alone. */
+    uint32_t sb_flags;
+
     /* INCOMPAT_FILETYPE: when clear, a dirent has NO file_type byte —
      * offset 7 is the high byte of a 16-bit name_len (spec 2.4.3.1),
      * so writing a type there corrupts the name length. */
