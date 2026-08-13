@@ -247,6 +247,26 @@ void usb_free_device(usb_device_t *dev)
  * ============================================================
  */
 
+/*
+ * [RF-2] One-shot dead-controller guard.  An HCD latches hc_failed when its
+ * controller is beyond use (schedule refused a verified stop, or the
+ * hardware reported itself halted).  Fail every transfer here, fast --
+ * previously each one burned its full timeout, serialized behind the HCD's
+ * submit lock, against hardware that could never answer -- and say so
+ * exactly once rather than on every poll forever.
+ */
+static int usb_hcd_dead(usb_hcd_t *hcd)
+{
+    if (!hcd->hc_failed)
+        return 0;
+    if (!hcd->hc_failed_reported) {
+        hcd->hc_failed_reported = 1;
+        kprintf("usb: %s: controller failed; transfers disabled\n",
+                hcd->name ? hcd->name : "?");
+    }
+    return 1;
+}
+
 int usb_control_transfer_actual(usb_device_t *dev,
                                 uint8_t bmRequestType, uint8_t bRequest,
                                 uint16_t wValue, uint16_t wIndex,
@@ -259,6 +279,8 @@ int usb_control_transfer_actual(usb_device_t *dev,
     if (actual_length)
         *actual_length = 0;
     if (!dev || !dev->hcd || !dev->hcd->submit)
+        return USB_XFER_ERROR;
+    if (usb_hcd_dead(dev->hcd))            /* [RF-2] */
         return USB_XFER_ERROR;
 
     memset(&xfer, 0, sizeof(xfer));
@@ -299,6 +321,8 @@ int usb_interrupt_transfer(usb_device_t *dev, usb_endpoint_t *ep,
 
     if (!dev || !dev->hcd || !dev->hcd->submit || !ep)
         return USB_XFER_ERROR;
+    if (usb_hcd_dead(dev->hcd))            /* [RF-2] */
+        return USB_XFER_ERROR;
 
     memset(&xfer, 0, sizeof(xfer));
     xfer.dev = dev;
@@ -324,6 +348,8 @@ int usb_bulk_transfer(usb_device_t *dev, usb_endpoint_t *ep,
     int ret;
 
     if (!dev || !dev->hcd || !dev->hcd->submit || !ep)
+        return USB_XFER_ERROR;
+    if (usb_hcd_dead(dev->hcd))            /* [RF-2] */
         return USB_XFER_ERROR;
 
     memset(&xfer, 0, sizeof(xfer));
@@ -389,6 +415,8 @@ int usb_iso_transfer(usb_device_t *dev, usb_endpoint_t *ep,
     int ret;
 
     if (!dev || !dev->hcd || !dev->hcd->submit || !ep)
+        return USB_XFER_ERROR;
+    if (usb_hcd_dead(dev->hcd))            /* [RF-2] */
         return USB_XFER_ERROR;
 
     /* The HCD submit path dispatches on ep->type, so an ISO-typed endpoint
@@ -836,6 +864,8 @@ int usb_bulk_stream_transfer(usb_device_t *dev, usb_endpoint_t *ep,
     usb_transfer_t xfer;
     int ret;
     if (!dev || !dev->hcd || !dev->hcd->submit || !ep)
+        return USB_XFER_ERROR;
+    if (usb_hcd_dead(dev->hcd))            /* [RF-2] */
         return USB_XFER_ERROR;
     memset(&xfer, 0, sizeof(xfer));
     xfer.dev = dev;
@@ -1665,6 +1695,12 @@ static void usb_hotplug_scan(void)
 {
     for (usb_hcd_t *hcd = usb_hcd_list; hcd; hcd = hcd->next) {
         if (!hcd->port_status)
+            continue;
+        /* [RF-2] A dead controller's ports are not worth resetting, and
+         * every enumeration attempt against it would burn full transfer
+         * timeouts inside the scan.  Devices on it are unreachable until
+         * the controller is re-attached. */
+        if (hcd->hc_failed)
             continue;
         for (uint8_t port = 1; port <= hcd->nports; port++) {
             uint32_t st = hcd->port_status(hcd, port);

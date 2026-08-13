@@ -1776,11 +1776,19 @@ static void xhci_drain_events(xhci_hc_t *hc)
     int drained = 0;
 
     if (sts & (XHCI_STS_HSE | XHCI_STS_HCE | XHCI_STS_HCH)) {
-        kprintf("xhci: %s: controller fault (usbsts=0x%x%s%s%s)\n",
-                hc->name, (unsigned)sts,
-                (sts & XHCI_STS_HCH) ? " halted" : "",
-                (sts & XHCI_STS_HSE) ? " host-system-error" : "",
-                (sts & XHCI_STS_HCE) ? " host-controller-error" : "");
+        /* [RF-2] Latch it for the core.  This block used to only print --
+         * on every drain, forever, while each transfer still burned its
+         * full timeout against the dead controller.  The one-shot detail
+         * print stays here (it names WHICH fault); the core's
+         * usb_hcd_dead() handles fail-fast and its own one-liner. */
+        if (!hc->hcd.hc_failed) {
+            hc->hcd.hc_failed = 1;
+            kprintf("xhci: %s: controller fault (usbsts=0x%x%s%s%s)\n",
+                    hc->name, (unsigned)sts,
+                    (sts & XHCI_STS_HCH) ? " halted" : "",
+                    (sts & XHCI_STS_HSE) ? " host-system-error" : "",
+                    (sts & XHCI_STS_HCE) ? " host-controller-error" : "");
+        }
         /* HSE is RW1C; acknowledge so a single fault is not reported forever. */
         if (sts & XHCI_STS_HSE)
             wr32(hc->op, XHCI_OP_USBSTS, XHCI_STS_HSE);

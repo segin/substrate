@@ -48,10 +48,6 @@ typedef struct ehci_hc {
     int               initialized;
 
     mutex_t           submit_lock;
-    /* Set when the controller is beyond use: the async schedule refused to
-     * stop, or USBSTS reported the HC halted itself.  Every later submit
-     * fails fast instead of burning its full timeout on a dead schedule. */
-    int               hc_failed;
 
     struct ehci_qh   *async_qh;      dma_addr_t async_qh_dma;
     /* Periodic schedule: the frame list the controller walks once per frame,
@@ -344,7 +340,7 @@ static int ehci_run_qh(ehci_hc_t *hc, int first_qtd, int n_qtd, uint32_t endp_ch
                 kprintf("ehci: host controller halted (USBSTS=0x%x)\n",
                         (unsigned)sts);
                 ehci_op_wr(hc, EHCI_OP_USBSTS, EHCI_STS_HSE);   /* W1C ack */
-                hc->hc_failed = 1;
+                hc->hcd.hc_failed = 1;   /* [RF-2] core latch */
                 /* A halted HC performs no DMA: safe to neutralize the
                  * tokens without the ASE handshake. */
                 for (int i = first_qtd; i < first_qtd + n_qtd; i++)
@@ -369,7 +365,7 @@ static int ehci_run_qh(ehci_hc_t *hc, int first_qtd, int n_qtd, uint32_t endp_ch
                 /* [ASYNC-04] Schedule refused to stop: do not scribble on
                  * memory the HC may still walk, and do not flip ASE against
                  * the 4.8 ASE==ASS rule.  This controller is done. */
-                hc->hc_failed = 1;
+                hc->hcd.hc_failed = 1;   /* [RF-2] core latch */
                 kprintf("ehci: async schedule failed to stop; "
                         "controller disabled\n");
                 return USB_XFER_TIMEOUT;
@@ -697,7 +693,7 @@ static int ehci_intr_transfer(ehci_hc_t *hc, usb_transfer_t *xfer)
                 kprintf("ehci: host controller halted (USBSTS=0x%x)\n",
                         (unsigned)sts);
                 ehci_op_wr(hc, EHCI_OP_USBSTS, EHCI_STS_HSE);   /* W1C ack */
-                hc->hc_failed = 1;
+                hc->hcd.hc_failed = 1;   /* [RF-2] core latch */
                 r = USB_XFER_ERROR;
                 break;
             }
@@ -761,7 +757,7 @@ static int ehci_submit(usb_hcd_t *hcd, usb_transfer_t *xfer)
     ehci_hc_t *hc = hcd->priv;
     int ret;
     mutex_lock(&hc->submit_lock);
-    if (hc->hc_failed) {
+    if (hc->hcd.hc_failed) {
         /* Dead controller: fail fast rather than burning the full transfer
          * timeout against a schedule that will never run it. [ASYNC-04] */
         xfer->status = USB_XFER_ERROR;

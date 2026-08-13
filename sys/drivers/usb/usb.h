@@ -523,6 +523,21 @@ typedef struct usb_hcd {
     /* Consecutive failed enumeration attempts per root port; cleared when the
      * port goes disconnected so a re-plug always gets a fresh try. */
     uint8_t  enum_fail[USB_MAX_ROOT_PORTS];
+
+    /*
+     * Dead-controller latch. [RF-2]
+     *
+     * hc_failed is written by the HCD when the controller is beyond use --
+     * the schedule refused a verified stop, or the hardware reported it
+     * halted itself (EHCI USBSTS HSE/HCHalted, xHCI HSE/HCE).  The core
+     * then fails every transfer fast instead of letting each one burn its
+     * full timeout against hardware that will never answer, and the
+     * hot-plug scanner stops resetting the dead controller's ports.
+     * hc_failed_reported is core-owned: the one-shot flag that keeps a
+     * dead controller from re-logging on every poll forever.
+     */
+    int      hc_failed;
+    int      hc_failed_reported;
     uint32_t (*port_status)(struct usb_hcd *hcd, uint8_t port);
     int      (*port_reset)(struct usb_hcd *hcd, uint8_t port);
     int      (*port_enable)(struct usb_hcd *hcd, uint8_t port, int enable);
