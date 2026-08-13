@@ -322,6 +322,75 @@ static int ehci_check_hc_dead(ehci_hc_t *hc, unsigned *spins)
     return 1;
 }
 
+/* Snapshot of one transfer's qTD tokens. [RF-6] */
+struct ehci_qtd_scan {
+    int      active;
+    int      halted;
+    uint32_t htok;      /* the halting token, when halted */
+};
+
+/* Scan this transfer's qTDs (contiguous from `first`).  The skip guard
+ * only inspects qTDs we linked -- a zeroed pool slot has no status bits.
+ * [DRV-06] */
+static void ehci_scan_qtds(ehci_hc_t *hc, int first, int n,
+                           struct ehci_qtd_scan *s)
+{
+    s->active = s->halted = 0;
+    s->htok = 0;
+    for (int i = first; i < first + n; i++) {
+        uint32_t tok = hc->qtd[i].token;
+
+        if (!(tok & (EHCI_QTD_STATUS_ACTIVE | EHCI_QTD_STATUS_ERRMASK)))
+            continue;
+        if (tok & EHCI_QTD_STATUS_ACTIVE) s->active = 1;
+        if (tok & EHCI_QTD_STATUS_HALTED) { s->halted = 1; s->htok = tok; }
+    }
+}
+
+enum ehci_poll_outcome {
+    EHCI_POLL_DONE,
+    EHCI_POLL_HALTED,
+    EHCI_POLL_TIMEOUT,
+    EHCI_POLL_HC_DEAD,
+};
+
+/*
+ * [RF-6] The one qTD poll loop, shared by the async and periodic paths.
+ * Only the outcome HANDLING differs between them (the async timeout runs
+ * the verified-stop/late-recheck/neutralize protocol, the periodic one its
+ * frame-list unlink), and that stays with the callers.
+ *
+ * Check order is the async path's historical one: dead-probe, scan,
+ * deadline.  The periodic loop used to test its deadline before the probe,
+ * so in the one corner where the controller dies in the same iteration the
+ * deadline lapses, the unified loop now reports HC_DEAD where the old
+ * periodic loop reported TIMEOUT (and then ran its late recheck).  Both
+ * are error paths into the same unlink code; the dead controller is the
+ * more truthful verdict.
+ */
+static enum ehci_poll_outcome ehci_poll_qtds(ehci_hc_t *hc, int first, int n,
+                                             uint64_t deadline, uint32_t *htok)
+{
+    unsigned spins = 0;
+
+    for (;;) {
+        struct ehci_qtd_scan s;
+
+        if (ehci_check_hc_dead(hc, &spins))
+            return EHCI_POLL_HC_DEAD;
+        ehci_scan_qtds(hc, first, n, &s);
+        if (s.halted) {
+            *htok = s.htok;
+            return EHCI_POLL_HALTED;
+        }
+        if (!s.active)
+            return EHCI_POLL_DONE;
+        if ((uint64_t)get_uptime_ms() > deadline)
+            return EHCI_POLL_TIMEOUT;
+        __asm__ volatile("pause");
+    }
+}
+
 /* Arm the async QH at a qTD chain and poll to completion.  Returns USB_XFER_*.
  * [DRV-06] n_qtd counts the qTDs this transfer filled/linked (contiguous from
  * first_qtd); only those are polled, so stale qTDs left ACTIVE/HALTED by a prior
@@ -358,78 +427,56 @@ static int ehci_run_qh(ehci_hc_t *hc, int first_qtd, int n_qtd, uint32_t endp_ch
     __asm__ volatile("" ::: "memory");
     qh->overlay_token = 0;   /* not active/halted -> controller reloads from next */
 
-    /* Poll the qTD chain until none is Active, or a Halt, or timeout. */
     uint64_t deadline = (uint64_t)get_uptime_ms() + timeout_ms;
-    unsigned spins = 0;
-    for (;;) {
-        int active = 0, halted = 0;
-        uint32_t htok = 0;
+    uint32_t htok = 0;
 
-        if (ehci_check_hc_dead(hc, &spins)) {   /* [RF-6] */
-            /* A halted HC performs no DMA: safe to neutralize the
-             * tokens without the ASE handshake. */
-            for (int i = first_qtd; i < first_qtd + n_qtd; i++)
-                hc->qtd[i].token &= ~EHCI_QTD_STATUS_ACTIVE;
-            return USB_XFER_ERROR;
-        }
-        for (int i = first_qtd; i < first_qtd + n_qtd; i++) {   /* [DRV-06] this xfer only */
-            uint32_t tok = hc->qtd[i].token;
-            /* only inspect qTDs we linked (token nonzero means we set it) */
-            if (!(tok & (EHCI_QTD_STATUS_ACTIVE | EHCI_QTD_STATUS_ERRMASK)))
-                continue;
-            if (tok & EHCI_QTD_STATUS_ACTIVE) active = 1;
-            if (tok & EHCI_QTD_STATUS_HALTED) { halted = 1; htok = tok; }
-        }
-        if (halted) return ehci_halt_status(htok);
-        if (!active) break;
-        if ((uint64_t)get_uptime_ms() > deadline) {
-            /* [DRV-05] Reclaim the descriptors from the hardware before the
-             * caller reuses the bounce buffer / qTD pool. */
-            if (ehci_async_stop(hc) != 0) {
-                /* [ASYNC-04] Schedule refused to stop: do not scribble on
-                 * memory the HC may still walk, and do not flip ASE against
-                 * the 4.8 ASE==ASS rule.  This controller is done. */
-                hc->hcd.hc_failed = 1;   /* [RF-2] core latch */
-                kprintf("ehci: async schedule failed to stop; "
-                        "controller disabled\n");
-                return USB_XFER_TIMEOUT;
-            }
-            /* [EHCI-03] A completion may have landed between the last token
-             * sample and the stop: re-read before destroying the evidence,
-             * or a just-finished transfer is thrown away as a timeout. */
-            int late_active = 0, late_halted = 0;
-            uint32_t late_htok = 0;
-            for (int i = first_qtd; i < first_qtd + n_qtd; i++) {
-                uint32_t tok = hc->qtd[i].token;
-                if (!(tok & (EHCI_QTD_STATUS_ACTIVE | EHCI_QTD_STATUS_ERRMASK)))
-                    continue;
-                if (tok & EHCI_QTD_STATUS_ACTIVE) late_active = 1;
-                if (tok & EHCI_QTD_STATUS_HALTED) {
-                    late_halted = 1;
-                    late_htok = tok;
-                }
-            }
-            if (!late_active || late_halted) {
-                ehci_async_restart(hc);
-                return late_halted ? ehci_halt_status(late_htok)
-                                   : USB_XFER_OK;
-            }
-            /* Genuinely incomplete: neutralize so a stale visit is a no-op.
-             * Preserve the overlay dt -- it is the authoritative ending
-             * toggle for the resync in the bulk path ([EHCI-04]). */
-            for (int i = first_qtd; i < first_qtd + n_qtd; i++)
-                hc->qtd[i].token &= ~EHCI_QTD_STATUS_ACTIVE;
-            struct ehci_qh *aqh = hc->async_qh;
-            aqh->overlay_next = EHCI_LINK_TERMINATE;
-            aqh->overlay_alt_next = EHCI_LINK_TERMINATE;
-            aqh->overlay_token = (aqh->overlay_token & EHCI_QTD_TOGGLE) |
-                                 EHCI_QTD_STATUS_HALTED;
-            ehci_async_restart(hc);
-            return USB_XFER_TIMEOUT;
-        }
-        __asm__ volatile("pause");
+    switch (ehci_poll_qtds(hc, first_qtd, n_qtd, deadline, &htok)) {
+    case EHCI_POLL_DONE:
+        return USB_XFER_OK;
+    case EHCI_POLL_HALTED:
+        return ehci_halt_status(htok);
+    case EHCI_POLL_HC_DEAD:
+        /* A halted HC performs no DMA: safe to neutralize the tokens
+         * without the ASE handshake. */
+        for (int i = first_qtd; i < first_qtd + n_qtd; i++)
+            hc->qtd[i].token &= ~EHCI_QTD_STATUS_ACTIVE;
+        return USB_XFER_ERROR;
+    case EHCI_POLL_TIMEOUT:
+        break;                          /* the async timeout protocol below */
     }
-    return USB_XFER_OK;
+
+    /* [DRV-05] Reclaim the descriptors from the hardware before the caller
+     * reuses the bounce buffer / qTD pool. */
+    if (ehci_async_stop(hc) != 0) {
+        /* [ASYNC-04] Schedule refused to stop: do not scribble on memory
+         * the HC may still walk, and do not flip ASE against the 4.8
+         * ASE==ASS rule.  This controller is done. */
+        hc->hcd.hc_failed = 1;   /* [RF-2] core latch */
+        kprintf("ehci: async schedule failed to stop; "
+                "controller disabled\n");
+        return USB_XFER_TIMEOUT;
+    }
+    /* [EHCI-03] A completion may have landed between the last token sample
+     * and the stop: re-read before destroying the evidence, or a
+     * just-finished transfer is thrown away as a timeout. */
+    struct ehci_qtd_scan late;
+    ehci_scan_qtds(hc, first_qtd, n_qtd, &late);
+    if (!late.active || late.halted) {
+        ehci_async_restart(hc);
+        return late.halted ? ehci_halt_status(late.htok) : USB_XFER_OK;
+    }
+    /* Genuinely incomplete: neutralize so a stale visit is a no-op.
+     * Preserve the overlay dt -- it is the authoritative ending toggle for
+     * the resync in the bulk path ([EHCI-04]). */
+    for (int i = first_qtd; i < first_qtd + n_qtd; i++)
+        hc->qtd[i].token &= ~EHCI_QTD_STATUS_ACTIVE;
+    struct ehci_qh *aqh = hc->async_qh;
+    aqh->overlay_next = EHCI_LINK_TERMINATE;
+    aqh->overlay_alt_next = EHCI_LINK_TERMINATE;
+    aqh->overlay_token = (aqh->overlay_token & EHCI_QTD_TOGGLE) |
+                         EHCI_QTD_STATUS_HALTED;
+    ehci_async_restart(hc);
+    return USB_XFER_TIMEOUT;
 }
 
 /*
@@ -711,19 +758,17 @@ static int ehci_intr_transfer(ehci_hc_t *hc, usb_transfer_t *xfer)
 
     deadline = (uint64_t)get_uptime_ms() +
                (xfer->timeout_ms ? xfer->timeout_ms : EHCI_XFER_TIMEOUT_MS);
-    unsigned spins = 0;
-    for (;;) {
-        uint32_t tok = hc->qtd[0].token;
-        if (tok & EHCI_QTD_STATUS_HALTED) { r = ehci_halt_status(tok); break; }
-        if (!(tok & EHCI_QTD_STATUS_ACTIVE)) break;
-        if ((uint64_t)get_uptime_ms() > deadline) { r = USB_XFER_TIMEOUT; break; }
-        /* Same dead-controller probe as the async poll; the unlink/drain
-         * below is bounded and safe on a halted HC. */
-        if (ehci_check_hc_dead(hc, &spins)) {   /* [RF-6] */
-            r = USB_XFER_ERROR;
-            break;
+    {
+        /* Shared poll loop [RF-6]; the unlink/drain below is bounded and
+         * safe on a halted HC, so every outcome funnels through it. */
+        uint32_t htok = 0;
+
+        switch (ehci_poll_qtds(hc, 0, 1, deadline, &htok)) {
+        case EHCI_POLL_DONE:    r = USB_XFER_OK; break;
+        case EHCI_POLL_HALTED:  r = ehci_halt_status(htok); break;
+        case EHCI_POLL_TIMEOUT: r = USB_XFER_TIMEOUT; break;
+        case EHCI_POLL_HC_DEAD: r = USB_XFER_ERROR; break;
         }
-        __asm__ volatile("pause");
     }
 
     /*
@@ -748,10 +793,11 @@ static int ehci_intr_transfer(ehci_hc_t *hc, usb_transfer_t *xfer)
      * settling above; re-read the token before neutralizing it, or a
      * just-delivered report is discarded as a timeout. */
     if (r == USB_XFER_TIMEOUT) {
-        uint32_t tok = hc->qtd[0].token;
-        if (!(tok & EHCI_QTD_STATUS_ACTIVE))
-            r = (tok & EHCI_QTD_STATUS_HALTED) ? ehci_halt_status(tok)
-                                               : USB_XFER_OK;
+        struct ehci_qtd_scan late;
+
+        ehci_scan_qtds(hc, 0, 1, &late);
+        if (!late.active)
+            r = late.halted ? ehci_halt_status(late.htok) : USB_XFER_OK;
     }
     /* [EHCI-04] Capture the overlay before neutralizing it below -- the
      * write-back overlay dt is the authoritative ending toggle. */
