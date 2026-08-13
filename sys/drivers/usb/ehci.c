@@ -416,6 +416,11 @@ static uint32_t ehci_endp_char(usb_transfer_t *xfer, int is_control)
     uint32_t ec;
 
     if (mpl == 0) mpl = is_control ? 64 : 512;
+    /* Table 3-19: the QH Maximum Packet Length field tops out at 0x400.
+     * The field is 11 bits wide, so a malformed or hostile descriptor
+     * declaring up to 2047 would otherwise program a value the spec
+     * forbids (undefined controller behavior). */
+    if (mpl > 1024) mpl = 1024;
 
     switch (dev->speed) {
     case USB_SPEED_LOW:  eps = EHCI_QH_EPS_LOW;  break;
