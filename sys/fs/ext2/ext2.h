@@ -99,8 +99,14 @@
 /* The set we support.  Anything outside SUPP triggers a refuse-mount
  * (INCOMPAT) or ro-only mount (ROCOMPAT).  COMPAT bits never block
  * a mount, they're informational.  */
+/* EXT2-A5 (audit SB-04): META_BG is NOT supported — with meta_bg the
+ * group descriptors are no longer one contiguous run after the
+ * superblock (each metagroup keeps its own descriptor block, cutover at
+ * s_first_meta_bg), and this driver reads AND flushes the GDT as a
+ * contiguous table: on a >1-metagroup image that reads garbage
+ * descriptors and writes descriptor blocks over file data.  Refuse the
+ * mount until the layout is implemented. */
 #define EXT2F_INCOMPAT_SUPP   (EXT2F_INCOMPAT_FTYPE | \
-                               EXT2F_INCOMPAT_META_BG | \
                                EXT2F_INCOMPAT_EXTENTS | \
                                EXT2F_INCOMPAT_FLEX_BG | \
                                EXT2F_INCOMPAT_CSUM_SEED | \

@@ -491,7 +491,7 @@ static int ext2_flush_group_desc(ext2_fs_t *fs, uint32_t group) {
 
     if (!fs || group >= fs->group_count) return -EINVAL;
 
-    bgd_block = (fs->block_size == 1024) ? 2 : 1;
+    bgd_block = fs->sb.s_first_data_block + 1;
     /* On-disk descriptors are fs->desc_size apart (32 normally, 64 on an
      * INCOMPAT_64BIT filesystem) — the GDT read at mount already strides by
      * desc_size, so the write must too, or we'd scatter each group's 32 live
@@ -2473,13 +2473,38 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
 
     fs->device = dev;
 
-    // Validate s_log_block_size before shifting (max 64KB blocks, i.e. log=6)
-    if (fs->sb.s_log_block_size > 6) {
-        kprint("EXT2: Invalid s_log_block_size\n");
+    /* Validate s_log_block_size before shifting.  EXT2-A5 (audit DE-13):
+     * cap at 32 KiB (log=5).  64 KiB blocks are legal on-disk but dirent
+     * rec_len is a uint16 — a full-block record needs the special 0xFFFF
+     * encoding this driver doesn't implement, and `rec_len = block_size`
+     * would truncate to 0 (a malformed entry every parser rejects).
+     * Linux on x86 doesn't mount >4 KiB-block filesystems either. */
+    if (fs->sb.s_log_block_size > 5) {
+        kprint("EXT2: unsupported s_log_block_size\n");
         kfree(fs, sizeof(ext2_fs_t));
         return NULL;
     }
     fs->block_size = 1024 << fs->sb.s_log_block_size;
+
+    /* EXT2-A5 (audit SB-13): s_first_data_block is 1 on a 1 KiB-block
+     * filesystem (the superblock occupies block 1) and 0 otherwise.  All
+     * group/block math and the GDT location derive from it, so refuse
+     * images that lie rather than compute a shifted layout. */
+    {
+        uint32_t want_first = (fs->block_size == 1024) ? 1 : 0;
+        if (fs->sb.s_first_data_block != want_first) {
+            kprintf("ext2: bad s_first_data_block %u (block size %u)\n",
+                    fs->sb.s_first_data_block, fs->block_size);
+            kfree(fs, sizeof(ext2_fs_t));
+            return NULL;
+        }
+    }
+
+    /* EXT2-A5 (audit SB-15): future revisions may relayout the extended
+     * superblock; parse as rev 1 but say so. */
+    if (fs->sb.s_rev_level >= 2)
+        kprintf("ext2: unknown s_rev_level %u — treating as revision 1\n",
+                fs->sb.s_rev_level);
 
     fs->inodes_per_group = fs->sb.s_inodes_per_group;
     fs->blocks_per_group = fs->sb.s_blocks_per_group;
@@ -2592,8 +2617,10 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
     fs->last_alloc_group = 0;
     fs->last_alloc_bit = 0;
 
-    // Read block group descriptor table (starts at block 2 for 1K blocks, block 1 for larger)
-    uint32_t bgd_block = (fs->block_size == 1024) ? 2 : 1;
+    /* The GDT starts in the block after the superblock: block
+     * s_first_data_block + 1 (validated above: 1+1 for 1 KiB blocks,
+     * 0+1 otherwise). */
+    uint32_t bgd_block = fs->sb.s_first_data_block + 1;
 
     /* Pick the on-disk descriptor size.  For ext2/3 and ext4-without-
      * 64BIT, it's 32 bytes (sizeof(ext2_group_desc_t)).  When the
@@ -2603,10 +2630,32 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
      * low half.  s_desc_size lives at superblock offset 0xFE (254).  */
     fs->desc_size = sizeof(ext2_group_desc_t);
     if (fs->sb.s_feature_incompat & EXT2F_INCOMPAT_64BIT) {
+        /* EXT2-A5 (audit SB-05/CK-08): the stated 64BIT policy is
+         * "accepted only if every high half is zero", but only the
+         * per-descriptor high halves were checked.  s_blocks_count_hi
+         * (sb offset 0x150) was never read, so an 18 TiB filesystem
+         * mounted as a silently truncated ~2 TiB view — reads past the
+         * truncated count returned zeros and rw mounts rewrote the free
+         * counts from the truncated view. */
+        uint32_t blocks_hi      = *(uint32_t *)(sb_buf + 0x150);
+        uint32_t free_blocks_hi = *(uint32_t *)(sb_buf + 0x158);
+        if (blocks_hi != 0) {
+            kprintf("ext2: >2^32 blocks (s_blocks_count_hi=%u) — refuse mount\n",
+                    blocks_hi);
+            kfree(fs, sizeof(ext2_fs_t));
+            return NULL;
+        }
+        if (free_blocks_hi != 0)
+            kprintf("ext2: warning: s_free_blocks_count_hi=%u with zero "
+                    "s_blocks_count_hi (inconsistent, ignored)\n",
+                    free_blocks_hi);
+
         uint16_t on_disk = *(uint16_t *)(sb_buf + 0xFE);
         if (on_disk == 0)               on_disk = 64;
-        if (on_disk < 32 || on_disk > 1024 || (on_disk & 3)) {
-
+        /* EXT2-A5 (audit SB-14): with 64BIT the descriptor is at least
+         * 64 bytes and the size must be a power of two (spec 2.3.1). */
+        if (on_disk < 64 || on_disk > 1024 ||
+            (on_disk & (uint16_t)(on_disk - 1))) {
             kprintf("ext2: implausible s_desc_size %u\n", on_disk);
             goto fail;
         }
