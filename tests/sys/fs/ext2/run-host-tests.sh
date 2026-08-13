@@ -50,6 +50,15 @@ prep_rootfs() {
     # prep_rootfs <name> <conf-content>
     local name=$1 conf=$2
     local out="$WORK/rootfs-$name.img"
+    # Each scenario needs its own copy of rootfs.img so the guest's
+    # writes to its own root don't land in the production image — but
+    # only ONE at a time.  Keeping every copy accumulates 4 GiB per
+    # scenario, and $WORK defaults to /tmp, which on this host is a
+    # 32 GiB tmpfs: eight scenarios in, the suite exhausted RAM and
+    # every later scenario died with "Disk quota exceeded" (its boot
+    # log empty, so its assertions failed for reasons that had nothing
+    # to do with the driver).  Drop the previous scenario's copy first.
+    rm -f "$WORK"/rootfs-*.img
     # 99-fstest is test-only infrastructure — lives in this directory,
     # not in etc/rc.d.  Stage it into the rootfs only for the duration
     # of the build, then yank it back out so we don't pollute the
@@ -363,7 +372,12 @@ check='ls -l /mnt/test/big; head -c 40 /mnt/test/big; echo TAIL=\$(wc -c < /mnt/
     # And wc -c reports the right size end-to-end (1048576 bytes),
     # which only happens if every block index 0..1023 resolves to
     # a real on-disk block.
-    assert_log "$log" "TAIL=1048576"                      "extent-walker delivers all 1 MiB"
+    # substrate's `wc -c` prints BSD-style leading whitespace, so the
+    # guest emits "TAIL= 1048576".  Allow it — the byte count itself is
+    # still checked exactly.  (This assertion had been wrong for a
+    # while; nobody noticed because the stale root= killed the suite at
+    # scenario 1 long before reaching it.)
+    assert_log "$log" "TAIL=[[:space:]]*1048576"          "extent-walker delivers all 1 MiB"
 }
 
 t_csum_verify_ok() {
