@@ -239,8 +239,8 @@ static void ehci_fill_qtd(ehci_hc_t *hc, int idx, uint32_t next_dma,
     q->next = next_dma ? next_dma : EHCI_LINK_TERMINATE;
     q->alt_next = alt_dma ? alt_dma : EHCI_LINK_TERMINATE;
     q->token = EHCI_QTD_STATUS_ACTIVE | pid |
-               (3u << EHCI_QTD_CERR_SHIFT) |
-               ((bytes & 0x7FFF) << EHCI_QTD_BYTES_SHIFT) |
+               ((uint32_t)EHCI_QTD_CERR_MAX << EHCI_QTD_CERR_SHIFT) |
+               ((bytes & EHCI_QTD_BYTES_MASK) << EHCI_QTD_BYTES_SHIFT) |
                (toggle ? EHCI_QTD_TOGGLE : 0) |
                (ioc ? EHCI_QTD_IOC : 0);
     if (bytes) {
@@ -585,7 +585,7 @@ static int ehci_stage_tx(ehci_hc_t *hc, usb_transfer_t *xfer, int in)
 
 static uint32_t ehci_qtd_residue(ehci_hc_t *hc, int idx)
 {
-    return (hc->qtd[idx].token >> EHCI_QTD_BYTES_SHIFT) & 0x7FFF;
+    return (hc->qtd[idx].token >> EHCI_QTD_BYTES_SHIFT) & EHCI_QTD_BYTES_MASK;
 }
 
 static void ehci_copyout(ehci_hc_t *hc, usb_transfer_t *xfer, int in,
@@ -931,7 +931,7 @@ static void ehci_take_controller(ehci_hc_t *hc, pci_device_t *pdev)
                         "controller\n");
                 pci_write_config8(pdev->bus, pdev->slot, pdev->func,
                                   off + EHCI_LEGSUP_OS_SEM, 1);
-                for (i = 0; i < 5000; i++) {
+                for (i = 0; i < USB_BIOS_HANDOFF_WAIT_MS; i++) {
                     /* Tick once a second.  Without this the wait looks
                      * indistinguishable from a hang, which is precisely how it
                      * was first reported. */

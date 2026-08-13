@@ -126,9 +126,11 @@ struct ehci_qtd {
 #define EHCI_QTD_PID_OUT         (0u << 8)
 #define EHCI_QTD_PID_IN          (1u << 8)
 #define EHCI_QTD_PID_SETUP       (2u << 8)
-#define EHCI_QTD_CERR_SHIFT      10          /* error-retry counter (3) */
+#define EHCI_QTD_CERR_SHIFT      10          /* error-retry counter */
+#define EHCI_QTD_CERR_MAX        3           /* three strikes per transaction */
 #define EHCI_QTD_IOC             0x00008000  /* interrupt on complete */
 #define EHCI_QTD_BYTES_SHIFT     16          /* total bytes to transfer */
+#define EHCI_QTD_BYTES_MASK      0x7FFF      /* 15-bit field (max legal 0x5000) */
 #define EHCI_QTD_TOGGLE          0x80000000  /* data toggle */
 #define EHCI_QTD_BYTES_MAX       0x5000      /* 5 * 4KiB pages */
 

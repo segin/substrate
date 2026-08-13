@@ -2116,7 +2116,7 @@ static void xhci_take_controller(xhci_hc_t *hc)
             if (*bios_sem) {
                 kprintf("xhci: waiting for the BIOS to release the controller\n");
                 *os_sem = 1;
-                for (int i = 0; i < 5000 && *bios_sem; i++)
+                for (int i = 0; i < USB_BIOS_HANDOFF_WAIT_MS && *bios_sem; i++)
                     xhci_delay_ms(1);
                 if (*bios_sem)
                     kprintf("xhci: BIOS never released the controller; "

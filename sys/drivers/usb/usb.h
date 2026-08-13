@@ -245,6 +245,11 @@
  */
 #define USB_MAX_CONFIG_SIZE     8192
 #define USB_MAX_HCDS            4
+/* How long an HCD waits for firmware to release its controller during the
+ * BIOS/OS ownership handoff before claiming it anyway.  Shared by the EHCI
+ * (PCI-config EECP) and xHCI (MMIO xECP) handoffs -- the walks differ per
+ * spec, the patience does not. [RF-9] */
+#define USB_BIOS_HANDOFF_WAIT_MS 5000
 
 /*
  * ============================================================
