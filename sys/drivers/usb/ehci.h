@@ -74,6 +74,8 @@ void ehci_init(void);
 #define EHCI_STS_ASS         0x00008000   /* async schedule status */
 #define EHCI_STS_PSS         0x00004000   /* periodic schedule status */
 #define EHCI_STS_IAA         0x00000020   /* interrupt on async advance */
+#define EHCI_STS_HSE         0x00000010   /* host system error (W1C):
+                                           * PCI parity/abort; HC clears RUN */
 
 /* CONFIGFLAG: route all ports to the EHCI (vs companion controllers) */
 #define EHCI_CONFIGFLAG_CF   0x00000001
