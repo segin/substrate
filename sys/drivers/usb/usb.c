@@ -1870,6 +1870,12 @@ int usb_hotplug_poll(void)
      * blocked on precisely one of these ports, and parking it after ~6s of
      * trying only guarantees the panic that follows.  The wait's own deadline
      * is the bound here, so the counter has nothing left to protect. [HW-03]
+     *
+     * [ENUM-2] That clear makes this function ROOTWAIT-ONLY in spirit: a
+     * periodic caller would defeat the parking ladder entirely and re-probe
+     * dead ports forever.  Anything that wants a scan without that side
+     * effect calls usb_hotplug_scan() via the monitor instead.  Audited
+     * and kept as-is -- the only caller is the rootwait loop.
      */
     for (usb_hcd_t *h = usb_hcd_list; h; h = h->next)
         memset(h->enum_fail, 0, sizeof(h->enum_fail));
