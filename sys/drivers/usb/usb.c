@@ -313,6 +313,7 @@ int usb_control_transfer_actual(usb_device_t *dev,
     xfer.setup.wLength = wLength;
 
     ret = dev->hcd->submit(dev->hcd, &xfer);
+    xfer.status = ret;   /* [RF-11] return value is authoritative */
 
     if (actual_length)
         *actual_length = xfer.actual_length;
@@ -349,6 +350,7 @@ int usb_interrupt_transfer(usb_device_t *dev, usb_endpoint_t *ep,
     xfer.timeout_ms = timeout_ms;
 
     ret = dev->hcd->submit(dev->hcd, &xfer);
+    xfer.status = ret;   /* [RF-11] return value is authoritative */
 
     if (actual_length)
         *actual_length = xfer.actual_length;
@@ -376,6 +378,7 @@ int usb_bulk_transfer(usb_device_t *dev, usb_endpoint_t *ep,
     xfer.length = length;
 
     ret = dev->hcd->submit(dev->hcd, &xfer);
+    xfer.status = ret;   /* [RF-11] return value is authoritative */
 
     if (actual_length)
         *actual_length = xfer.actual_length;
@@ -445,6 +448,7 @@ int usb_iso_transfer(usb_device_t *dev, usb_endpoint_t *ep,
     xfer.length = length;
 
     ret = dev->hcd->submit(dev->hcd, &xfer);
+    xfer.status = ret;   /* [RF-11] return value is authoritative */
 
     if (actual_length)
         *actual_length = xfer.actual_length;
@@ -891,6 +895,7 @@ int usb_bulk_stream_transfer(usb_device_t *dev, usb_endpoint_t *ep,
     xfer.length = length;
     xfer.stream_id = stream_id;
     ret = dev->hcd->submit(dev->hcd, &xfer);
+    xfer.status = ret;   /* [RF-11] return value is authoritative */
     if (actual_length)
         *actual_length = xfer.actual_length;
     return ret;

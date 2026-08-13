@@ -97,7 +97,29 @@
 #define USB_MSC_PROTO_BOT       0x50  /* Bulk-Only Transport */
 #define USB_MSC_PROTO_UAS       0x62  /* USB Attached SCSI */
 
-/* Transfer status */
+/*
+ * Transfer status taxonomy. [RF-11]
+ *
+ * The distinction callers act on:
+ *   STALL   -- the DEVICE said no (protocol stall / functional halt).
+ *              Recovery is usb_clear_halt; class drivers may treat it as
+ *              a durable answer (usb_hid latches ctl_poll_refused).
+ *   ERROR   -- the TRANSPORT broke (CRC/babble/bitstuff/buffer error,
+ *              error-counter exhaustion, dead controller).  Retrying or
+ *              reset recovery may help; clear-halt will not.
+ *   TIMEOUT -- nothing answered within the caller's deadline.
+ *   NAK     -- polled endpoint had no data.  Synthesized by class-driver
+ *              polling loops (usb_hid); the HCDs themselves never return
+ *              it from submit.
+ *   SHORT   -- reserved: no HCD currently produces it; short reads
+ *              return OK with actual_length < requested.
+ *
+ * Contract: the submit return value is authoritative, and the core's
+ * transfer wrappers stamp xfer.status with it after every submit, so the
+ * two never disagree.  Every HCD classifies with the same policy
+ * (per-driver encodings: ehci_halt_status, uhci_td_status,
+ * xhci_xfer_status).
+ */
 #define USB_XFER_OK             0
 #define USB_XFER_STALL          (-1)
 #define USB_XFER_NAK            (-2)
