@@ -563,7 +563,10 @@ check='echo CSUM64_OK'"
     local log="$WORK/t-64csum.log"
     boot_with "$rfs" "$img" "$log" 30
     assert_log "$log" "FSTEST: mount OK"           "64bit+csum mount succeeds"
-    assert_log "$log" "csums verified .desc_size=64" "csum used 64-byte descriptors"
+    # The driver now names the algorithm in this line — "csums verified
+    # (crc32c, desc_size=64)" — so match both fields rather than a
+    # single wildcard character between them.
+    assert_log "$log" "csums verified \\(crc32c, desc_size=64\\)" "csum used 64-byte descriptors"
     assert_log "$log" "CSUM64_OK"                  "64bit+csum check ran"
 }
 
