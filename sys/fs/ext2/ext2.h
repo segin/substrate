@@ -417,6 +417,8 @@ uint32_t ext2_inode_write(ext2_node_t *node, off_t offset, uint32_t size,
                           const void *buffer, int *errp);
 uint32_t ext2_alloc_block(ext2_fs_t *fs);
 void ext2_free_block(ext2_fs_t *fs, uint32_t block_num);
+/* Range free: one bitmap write per touched group (extent teardown). */
+void ext2_free_blocks(ext2_fs_t *fs, uint32_t block_num, uint32_t count);
 uint32_t ext2_alloc_inode(ext2_fs_t *fs, int is_dir);
 void ext2_free_inode(ext2_fs_t *fs, uint32_t inode_num, int was_dir);
 uint32_t ext2_read_block(ext2_fs_t *fs, uint32_t block_num, void *buffer);

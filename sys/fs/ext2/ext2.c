@@ -2933,6 +2933,57 @@ void ext2_free_block(ext2_fs_t *fs, uint32_t block_num) {
     mutex_unlock(&fs->alloc_lock);
 }
 
+/* Free a contiguous run of blocks with one bitmap write per touched
+ * group.  ext2_free_block() writes the bitmap through on every call,
+ * which is fine for the scattered frees of the legacy indirect
+ * teardown but pathological for extent teardown, where one extent can
+ * span 32768 blocks. */
+void ext2_free_blocks(ext2_fs_t *fs, uint32_t block_num, uint32_t count) {
+    if (!fs || block_num == 0 || count == 0) return;
+    uint32_t first = fs->sb.s_first_data_block;
+    if (block_num < first) return;
+    while (count > 0) {
+        uint32_t rel = block_num - first;
+        uint32_t group = rel / fs->blocks_per_group;
+        uint32_t index = rel % fs->blocks_per_group;
+        if (group >= fs->group_count) return;
+        uint32_t span = fs->blocks_per_group - index;
+        if (span > count) span = count;
+
+        mutex_lock(&fs->alloc_lock);
+        if (fs->active_bg_group != group) {
+            fs->active_bg_group = (uint32_t)-1;
+            if (ext2_read_block(fs, fs->bgd[group].bg_block_bitmap,
+                                fs->active_bg_bitmap) != fs->block_size) {
+                mutex_unlock(&fs->alloc_lock);
+                return;
+            }
+            fs->active_bg_group = group;
+        }
+        uint8_t *bm = fs->active_bg_bitmap;
+        uint32_t freed = 0;
+        for (uint32_t i = 0; i < span; i++) {
+            uint32_t b = index + i;
+            /* Same double-free discipline as ext2_free_block: only
+             * account bits that were actually set. */
+            if (bm[b / 8] & (1u << (b % 8))) {
+                bm[b / 8] &= (uint8_t)~(1u << (b % 8));
+                freed++;
+            }
+        }
+        if (freed) {
+            ext2_write_block(fs, fs->bgd[group].bg_block_bitmap, bm);
+            fs->bgd[group].bg_free_blocks_count += freed;
+            fs->sb.s_free_blocks_count += freed;
+            ext2_mark_meta_dirty(fs, group);
+        }
+        mutex_unlock(&fs->alloc_lock);
+
+        block_num += span;
+        count -= span;
+    }
+}
+
 // Allocate an inode
 uint32_t ext2_alloc_inode(ext2_fs_t *fs, int is_dir) {
     if (!fs) return 0;
@@ -3187,24 +3238,97 @@ static int ext2_free_indirect_tree(ext2_fs_t *fs, uint32_t block_num, uint32_t d
     return 0;
 }
 
+/* EXT2-A3 (audit BM-07/CY-06/DE-03): extent-tree teardown.
+ *
+ * Frees every data block referenced by an extent tree, walking interior
+ * nodes recursively (depth <= EXT4_EXT_DEPTH_MAX, one block-sized scratch
+ * buffer per level) and then freeing the interior blocks themselves.
+ *
+ * Robustness policy: the delete must COMPLETE.  The old behavior refused
+ * extent inodes with -EOPNOTSUPP — but ext2_unlink had already removed
+ * the dirent, so the name vanished, rm reported an error, and the inode
+ * plus all its blocks leaked until fsck.  On a default mkfs.ext4 image
+ * every regular file is extent-mapped, i.e. rm was broken outright.  Now,
+ * when a subtree is corrupt or unreadable we SKIP it (those blocks leak,
+ * marked in-use but unreferenced — exactly what fsck reclaims) rather
+ * than either aborting the delete or freeing memory we cannot prove is
+ * ours.  Uninitialized extents (e_len > 32768) still own real blocks and
+ * are freed like initialized ones. */
+static void ext4_extent_free_node(ext2_fs_t *fs, const uint8_t *node,
+                                  size_t node_cap, unsigned *skipped) {
+    const ext4_extent_header_t *eh = (const ext4_extent_header_t *)node;
+    if (eh->eh_magic != EXT4_EXT_MAGIC ||
+        eh->eh_depth > EXT4_EXT_DEPTH_MAX) {
+        (*skipped)++;
+        return;
+    }
+    size_t n = eh->eh_ecount;
+    size_t max_ent = (node_cap > sizeof(*eh))
+                   ? (node_cap - sizeof(*eh)) / sizeof(ext4_extent_t) : 0;
+    if (n > max_ent) { n = max_ent; (*skipped)++; }
+
+    if (eh->eh_depth == 0) {
+        const ext4_extent_t *ex =
+            (const ext4_extent_t *)(node + sizeof(*eh));
+        for (size_t i = 0; i < n; i++) {
+            uint32_t raw = ex[i].e_len;
+            uint32_t len = (raw <= 32768) ? raw : raw - 32768;
+            uint64_t phys = ((uint64_t)ex[i].e_start_hi << 32)
+                          | ex[i].e_start_lo;
+            if (len == 0 || phys == 0 || (phys >> 32)) { (*skipped)++; continue; }
+            if (phys + len > fs->sb.s_blocks_count) { (*skipped)++; continue; }
+            ext2_free_blocks(fs, (uint32_t)phys, len);
+        }
+        return;
+    }
+
+    const ext4_extent_idx_t *idx =
+        (const ext4_extent_idx_t *)(node + sizeof(*eh));
+    uint8_t *child = kmalloc(fs->block_size);
+    if (!child) { (*skipped)++; return; }
+    for (size_t i = 0; i < n; i++) {
+        uint64_t cb = ((uint64_t)idx[i].ei_leaf_hi << 32) | idx[i].ei_leaf_lo;
+        if (cb == 0 || (cb >> 32)) { (*skipped)++; continue; }
+        if (ext2_read_block(fs, (uint32_t)cb, child) != fs->block_size) {
+            (*skipped)++;
+            continue;
+        }
+        const ext4_extent_header_t *ch = (const ext4_extent_header_t *)child;
+        if (ch->eh_depth != eh->eh_depth - 1) { (*skipped)++; continue; }
+        ext4_extent_free_node(fs, child, fs->block_size, skipped);
+        ext2_free_blocks(fs, (uint32_t)cb, 1);
+    }
+    kfree(child, fs->block_size);
+}
+
 static int ext2_free_inode_blocks(ext2_fs_t *fs, ext2_inode_t *inode) {
     if (!fs || !inode) return -EINVAL;
 
     /*
      * For an ext4 extent inode, i_block[] is NOT an array of block pointers:
      * it holds the packed ext4_extent_header plus up to four extents.  Walking
-     * it as direct/indirect pointers frees blocks that belong to other files
-     * (i_block[0] is magic|entry-count, i_block[1] is max|depth, and with four
-     * extents i_block[12..14] -- the "indirect" slots -- are extent payload,
-     * every non-zero word of which would then be read as an indirect block and
-     * its contents freed too).  One unlink corrupts the whole filesystem.
-     *
-     * Extent-tree teardown is not implemented, so refuse rather than destroy:
-     * the blocks leak, which fsck can reclaim, instead of being handed to the
-     * next allocator while another file still points at them.
+     * it as direct/indirect pointers would free blocks that belong to other
+     * files, so extent inodes go through the extent-tree walker instead.  The
+     * inode is left as a valid EMPTY extent file (fresh inline header), the
+     * same shape mkfs.ext4 gives a new empty file.
      */
     if (inode->i_flags & EXT4_EXTENTS_FL) {
-        return -EOPNOTSUPP;
+        unsigned skipped = 0;
+        ext4_extent_free_node(fs, (const uint8_t *)inode->i_block,
+                              sizeof(inode->i_block), &skipped);
+        if (skipped)
+            kprintf("ext2: extent teardown skipped %u corrupt/unreadable "
+                    "subtrees (blocks leaked for fsck)\n", skipped);
+        memset(inode->i_block, 0, sizeof(inode->i_block));
+        ext4_extent_header_t *eh = (ext4_extent_header_t *)inode->i_block;
+        eh->eh_magic  = EXT4_EXT_MAGIC;
+        eh->eh_ecount = 0;
+        eh->eh_max    = (uint16_t)((sizeof(inode->i_block) - sizeof(*eh)) /
+                                   sizeof(ext4_extent_t));
+        eh->eh_depth  = 0;
+        inode->i_blocks = 0;
+        inode->i_size = 0;
+        return 0;
     }
 
     for (uint32_t i = 0; i < 12; i++) {
