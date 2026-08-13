@@ -145,9 +145,7 @@ static int usb_hub_do_port_reset(usb_device_t *hubdev, uint8_t port)
 
 		/* Brief pause between polls */
 		{
-			uint64_t d = (uint64_t)get_uptime_ms() + 10;
-			while((uint64_t)get_uptime_ms() < d)
-				__asm__ volatile("pause");
+			usb_delay_ms(10);
 		}
 
 		if(usb_hub_get_port_status(hubdev, port, &ps) != USB_XFER_OK)
@@ -217,9 +215,7 @@ static int usb_hub_bringup_port(usb_hub_dev_t *hub, uint8_t port)
 
 	/* Small settle delay after reset */
 	{
-		uint64_t d = (uint64_t)get_uptime_ms() + 10;
-		while((uint64_t)get_uptime_ms() < d)
-			__asm__ volatile("pause");
+		usb_delay_ms(10);
 	}
 
 	/* Enumerate the downstream device through the core USB stack,

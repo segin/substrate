@@ -216,9 +216,7 @@ static int uhci_reset(uhci_hc_t *hc)
 
     /* Global reset (drives USB bus reset for 10ms) */
     uhci_writew(hc, UHCI_USBCMD, UHCI_CMD_GRESET);
-    deadline = (uint64_t)get_uptime_ms() + 50;
-    while ((uint64_t)get_uptime_ms() < deadline)
-        __asm__ volatile("pause");
+    usb_delay_ms(50);
     uhci_writew(hc, UHCI_USBCMD, 0);
 
     /* HC reset */
@@ -359,7 +357,6 @@ static int uhci_port_reset(usb_hcd_t *hcd, uint8_t port)
     uhci_hc_t *hc = hcd->priv;
     uint16_t reg;
     uint16_t portsc;
-    uint64_t deadline;
 
     /* CSC and PEC are write-1-to-clear: see UHCI_PORTSC_CLEAR. [RF-4] */
     const uint16_t W1C = UHCI_PORTSC_CLEAR;
@@ -374,18 +371,14 @@ static int uhci_port_reset(usb_hcd_t *hcd, uint8_t port)
     uhci_writew(hc, reg, portsc | UHCI_PORTSC_PR);
 
     /* Hold reset for 50ms (USB spec minimum 10ms, UHCI recommends 50ms) */
-    deadline = (uint64_t)get_uptime_ms() + 50;
-    while ((uint64_t)get_uptime_ms() < deadline)
-        __asm__ volatile("pause");
+    usb_delay_ms(50);
 
     /* Deassert reset */
     portsc = uhci_readw(hc, reg) & ~W1C;
     uhci_writew(hc, reg, portsc & ~UHCI_PORTSC_PR);
 
     /* Wait for reset to complete and port to stabilize */
-    deadline = (uint64_t)get_uptime_ms() + 100;
-    while ((uint64_t)get_uptime_ms() < deadline)
-        __asm__ volatile("pause");
+    usb_delay_ms(100);
 
     /* Enable port */
     portsc = uhci_readw(hc, reg) & ~W1C;
@@ -400,9 +393,7 @@ static int uhci_port_reset(usb_hcd_t *hcd, uint8_t port)
     if (!(portsc & UHCI_PORTSC_PE)) {
         /* Try enabling again — same masking */
         uhci_writew(hc, reg, (portsc & ~W1C) | UHCI_PORTSC_PE);
-        deadline = (uint64_t)get_uptime_ms() + 50;
-        while ((uint64_t)get_uptime_ms() < deadline)
-            __asm__ volatile("pause");
+        usb_delay_ms(50);
     }
 
     /* [RF-4] Report the truth.  This returned 0 unconditionally, so the

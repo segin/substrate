@@ -1096,7 +1096,10 @@ int usb_enumerate_device(usb_hcd_t *hcd, uint8_t port, uint8_t speed)
 
 /* Busy-wait; enumeration runs on the boot thread and on the hot-plug kthread,
  * and the waits here are short and infrequent. */
-static void usb_delay_ms(uint32_t ms)
+/* [RF-12] The one millisecond busy-wait for the USB stack.  A `pause` spin,
+ * not a sleep: HCD bring-up paths run before the scheduler and enumeration
+ * runs from contexts that must not block.  Was copied per-driver. */
+void usb_delay_ms(uint32_t ms)
 {
     uint64_t deadline = (uint64_t)get_uptime_ms() + ms;
     while ((uint64_t)get_uptime_ms() < deadline)

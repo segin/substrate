@@ -719,6 +719,9 @@ void usb_hid_init(void);
 void usb_hid_mouse_init(void);
 void usb_hub_init(void);
 
+/* Millisecond busy-wait (pause spin) shared by the HCDs and hub code. [RF-12] */
+void usb_delay_ms(uint32_t ms);
+
 /* HCD Registration */
 int  usb_register_hcd(usb_hcd_t *hcd);
 /* Resolve a registered HCD from its bus device (shutdown dispatch). [RF-5] */

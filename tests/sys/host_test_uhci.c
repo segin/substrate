@@ -90,6 +90,7 @@ int driver_register(struct driver *drv, struct bus_type *bus)
 struct bus_type pci_bus_type;
 int usb_register_hcd(usb_hcd_t *hcd) { (void)hcd; return 0; }
 usb_hcd_t *usb_hcd_by_kdev(struct device *dev) { (void)dev; return NULL; }
+void usb_delay_ms(uint32_t ms) { mock_time_ms += ms; }
 
 /* ------------------------------------------------------------------ */
 /* Fake I/O-port register file + scripted behaviors                   */

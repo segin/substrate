@@ -204,13 +204,6 @@ static inline void wr64(volatile uint8_t *b, uint32_t r, uint64_t v) {
 static inline uint32_t portsc_rd(xhci_hc_t *hc, uint8_t p) { return rd32(hc->op, XHCI_OP_PORTSC(p - 1)); }
 static inline void portsc_wr(xhci_hc_t *hc, uint8_t p, uint32_t v) { wr32(hc->op, XHCI_OP_PORTSC(p - 1), v); }
 
-static void xhci_delay_ms(uint32_t ms)
-{
-    uint64_t deadline = (uint64_t)get_uptime_ms() + ms;
-    while ((uint64_t)get_uptime_ms() < deadline)
-        __asm__ volatile("pause");
-}
-
 /* ---- ring helpers ---- */
 static int xhci_ring_alloc(struct xhci_ring *r)
 {
@@ -331,7 +324,7 @@ static void xhci_abort_command(xhci_hc_t *hc)
     for (i = 0; i < 500; i++) {
         if (!(rd32(hc->op, XHCI_OP_CRCR) & XHCI_CRCR_CRR))
             break;
-        xhci_delay_ms(1);
+        usb_delay_ms(1);
     }
     if (rd32(hc->op, XHCI_OP_CRCR) & XHCI_CRCR_CRR)
         kprintf("xhci: command ring still running after abort\n");
@@ -881,7 +874,7 @@ static int xhci_do_reset(xhci_hc_t *hc, uint8_t port, uint32_t reset_bit)
      * (UHF_PORT_RESET in xhci_roothub_ctrl).
      */
     for (int i = 0; i < 100; i++) {
-        xhci_delay_ms(2);
+        usb_delay_ms(2);
         psc = portsc_rd(hc, port);
         if (!(psc & reset_bit))
             break;
@@ -899,7 +892,7 @@ static int xhci_do_reset(xhci_hc_t *hc, uint8_t port, uint32_t reset_bit)
     /* Let the device finish coming out of reset before anyone talks to it.
      * usb_scan_ports() goes straight from here into enumeration, so if this
      * wait is not taken here it is not taken anywhere. [X-07] */
-    xhci_delay_ms(XHCI_PORT_RESET_RECOVERY_MS);
+    usb_delay_ms(XHCI_PORT_RESET_RECOVERY_MS);
 
     return (portsc_rd(hc, port) & XHCI_PORT_PED) ? 0 : -1;
 }
@@ -991,11 +984,11 @@ static int xhci_port_power_cycle(usb_hcd_t *hcd, uint8_t port)
 
     psc = portsc_rd(hc, port) & ~XHCI_PORT_CLEAR;
     portsc_wr(hc, port, psc & ~XHCI_PORT_PP);
-    xhci_delay_ms(XHCI_PORT_POWER_OFF_MS);
+    usb_delay_ms(XHCI_PORT_POWER_OFF_MS);
 
     psc = portsc_rd(hc, port) & ~XHCI_PORT_CLEAR;
     portsc_wr(hc, port, psc | XHCI_PORT_PP);
-    xhci_delay_ms(XHCI_PORT_POWER_GOOD_MS);
+    usb_delay_ms(XHCI_PORT_POWER_GOOD_MS);
 
     /* Acknowledge the connect-status change the cycle itself just caused, so
      * the scan that follows sees a fresh attach rather than a stale flag. */
@@ -1556,7 +1549,7 @@ static int xhci_control(xhci_hc_t *hc, usb_transfer_t *xfer)
         if (cc != XHCI_CC_SUCCESS) return USB_XFER_ERROR;
         /* A device is allowed a settling period after being addressed before
          * it has to answer on the new address (USB 2.0 s9.2.6.3). [X-07] */
-        xhci_delay_ms(XHCI_SET_ADDRESS_SETTLE_MS);
+        usb_delay_ms(XHCI_SET_ADDRESS_SETTLE_MS);
         hc->addr_slot[xfer->setup.wValue & 0x7F] = slot;
         hc->enum_slot = 0;
         xfer->actual_length = 0;
@@ -2117,7 +2110,7 @@ static void xhci_take_controller(xhci_hc_t *hc)
                 kprintf("xhci: waiting for the BIOS to release the controller\n");
                 *os_sem = 1;
                 for (int i = 0; i < USB_BIOS_HANDOFF_WAIT_MS && *bios_sem; i++)
-                    xhci_delay_ms(1);
+                    usb_delay_ms(1);
                 if (*bios_sem)
                     kprintf("xhci: BIOS never released the controller; "
                             "claiming it anyway\n");
@@ -2214,7 +2207,7 @@ static int xhci_reset(xhci_hc_t *hc)
     /* Controller Not Ready: the part is still bringing itself up. */
     for (i = 0; i < XHCI_CNR_WAIT_MS &&
                 (rd32(hc->op, XHCI_OP_USBSTS) & XHCI_STS_CNR); i++)
-        xhci_delay_ms(1);
+        usb_delay_ms(1);
     if (rd32(hc->op, XHCI_OP_USBSTS) & XHCI_STS_CNR) {
         kprintf("xhci: controller not ready after %d ms (usbsts=0x%x)\n",
                 XHCI_CNR_WAIT_MS, (unsigned)rd32(hc->op, XHCI_OP_USBSTS));
@@ -2225,7 +2218,7 @@ static int xhci_reset(xhci_hc_t *hc)
     wr32(hc->op, XHCI_OP_USBCMD, rd32(hc->op, XHCI_OP_USBCMD) & ~XHCI_CMD_RUN);
     for (i = 0; i < XHCI_HALT_WAIT_MS &&
                 !(rd32(hc->op, XHCI_OP_USBSTS) & XHCI_STS_HCH); i++)
-        xhci_delay_ms(1);
+        usb_delay_ms(1);
     if (!(rd32(hc->op, XHCI_OP_USBSTS) & XHCI_STS_HCH)) {
         kprintf("xhci: will not halt after %d ms "
                 "(usbcmd=0x%x usbsts=0x%x); not asserting HCRST\n",
@@ -2245,7 +2238,7 @@ static int xhci_reset(xhci_hc_t *hc)
          * FreeBSD pauses 10ms, Linux gates a 1ms delay on XHCI_INTEL_HOST.
          * The old loop read USBCMD back immediately. [P6-INIT-02]
          */
-        xhci_delay_ms(1);
+        usb_delay_ms(1);
         if (!(rd32(hc->op, XHCI_OP_USBCMD) & XHCI_CMD_HCRST) &&
             !(rd32(hc->op, XHCI_OP_USBSTS) & XHCI_STS_CNR))
             return 0;
@@ -2455,7 +2448,7 @@ static int xhci_start(xhci_hc_t *hc)
     {
         int i;
         for (i = 0; i < 100 && (rd32(hc->op, XHCI_OP_USBSTS) & XHCI_STS_HCH); i++)
-            xhci_delay_ms(1);
+            usb_delay_ms(1);
         if (rd32(hc->op, XHCI_OP_USBSTS) & XHCI_STS_HCH) {
             wr32(hc->op, XHCI_OP_USBCMD, 0);
             kprintf("xhci: run timeout (still halted, usbsts=0x%x)\n",
@@ -2490,7 +2483,7 @@ static void xhci_power_ports(xhci_hc_t *hc)
      * settled yet was simply never seen: an Intel Sunrise Point laptop
      * enumerated nothing at all and panicked with no root device.
      */
-    xhci_delay_ms(100);
+    usb_delay_ms(100);
     XHCI_STEP("ports powered");
 }
 
@@ -2510,7 +2503,7 @@ static void xhci_halt(xhci_hc_t *hc)
          rd32(hc->op, XHCI_OP_USBCMD) & ~XHCI_CMD_RUN);
     for (int i = 0; i < XHCI_HALT_WAIT_MS &&
                     !(rd32(hc->op, XHCI_OP_USBSTS) & XHCI_STS_HCH); i++)
-        xhci_delay_ms(1);
+        usb_delay_ms(1);
 }
 
 /*

@@ -116,13 +116,6 @@ static inline void ehci_portsc_wr(ehci_hc_t *hc, uint8_t port, uint32_t val)
     ehci_op_wr(hc, EHCI_OP_PORTSC + (uint32_t)(port - 1) * 4, val);
 }
 
-static void ehci_delay_ms(uint32_t ms)
-{
-    uint64_t deadline = (uint64_t)get_uptime_ms() + ms;
-    while ((uint64_t)get_uptime_ms() < deadline)
-        __asm__ volatile("pause");
-}
-
 /* ---- port operations ---- */
 static uint32_t ehci_port_status(usb_hcd_t *hcd, uint8_t port)
 {
@@ -164,7 +157,7 @@ static int ehci_port_reset(usb_hcd_t *hcd, uint8_t port)
     psc &= ~EHCI_PORT_CLEAR;
     psc |= EHCI_PORT_RESET;
     ehci_portsc_wr(hc, port, psc);
-    ehci_delay_ms(50);
+    usb_delay_ms(50);
 
     /* Deassert; the controller completes the reset and sets Enable if the
      * device is high-speed (else it releases the port to a companion). */
@@ -174,7 +167,7 @@ static int ehci_port_reset(usb_hcd_t *hcd, uint8_t port)
 
     /* Wait up to 50ms for the reset to finish + the port to enable. */
     for (int i = 0; i < 50; i++) {
-        ehci_delay_ms(1);
+        usb_delay_ms(1);
         psc = ehci_portsc_rd(hc, port);
         if (!(psc & EHCI_PORT_RESET))
             break;
@@ -272,7 +265,7 @@ static int ehci_async_stop(ehci_hc_t *hc)
     for (int i = 0; i < 100; i++) {
         if (!(ehci_op_rd(hc, EHCI_OP_USBSTS) & EHCI_STS_ASS))
             return 0;
-        ehci_delay_ms(1);
+        usb_delay_ms(1);
     }
     return -1;
 }
@@ -284,7 +277,7 @@ static void ehci_async_restart(ehci_hc_t *hc)
     for (int i = 0; i < 100; i++) {
         if (ehci_op_rd(hc, EHCI_OP_USBSTS) & EHCI_STS_ASS)
             break;
-        ehci_delay_ms(1);
+        usb_delay_ms(1);
     }
 }
 
@@ -816,7 +809,7 @@ static void ehci_periodic_unlink(ehci_hc_t *hc, uint32_t stride)
         if (((now - start) & (EHCI_FRAMELIST_ENTRIES - 1)) >=
             EHCI_UNLINK_DRAIN_FRAMES)
             break;
-        ehci_delay_ms(1);
+        usb_delay_ms(1);
     }
 }
 
@@ -981,7 +974,7 @@ static void ehci_take_controller(ehci_hc_t *hc, pci_device_t *pdev)
                                                 off + EHCI_LEGSUP_BIOS_SEM);
                     if (bios_sem == 0)
                         break;
-                    ehci_delay_ms(1);
+                    usb_delay_ms(1);
                 }
                 if (bios_sem) {
                     /* Buggy firmware that never drops the semaphore.  Clear it
@@ -1015,7 +1008,7 @@ static int ehci_reset_controller(ehci_hc_t *hc)
             halted = 1;
             break;
         }
-        ehci_delay_ms(1);
+        usb_delay_ms(1);
     }
     /* Table 2-9 calls HCRESET of a running controller undefined, but a
      * controller that ignores a halt request leaves nothing else to try --
@@ -1026,7 +1019,7 @@ static int ehci_reset_controller(ehci_hc_t *hc)
     ehci_op_wr(hc, EHCI_OP_USBCMD, EHCI_CMD_HCRESET);
     for (int i = 0; i < 250; i++) {
         if (!(ehci_op_rd(hc, EHCI_OP_USBCMD) & EHCI_CMD_HCRESET)) return 0;
-        ehci_delay_ms(1);
+        usb_delay_ms(1);
     }
     return -1;
 }
@@ -1110,7 +1103,7 @@ static int ehci_start(ehci_hc_t *hc)
         for (i = 0; i < 100; i++) {
             if (!(ehci_op_rd(hc, EHCI_OP_USBSTS) & EHCI_STS_HCHALTED))
                 break;
-            ehci_delay_ms(1);
+            usb_delay_ms(1);
         }
         if (i == 100) {
             kprintf("ehci: run timeout\n");
@@ -1124,7 +1117,7 @@ static int ehci_start(ehci_hc_t *hc)
         uint32_t psc = ehci_portsc_rd(hc, p);
         ehci_portsc_wr(hc, p, (psc & ~EHCI_PORT_CLEAR) | EHCI_PORT_POWER);
     }
-    ehci_delay_ms(20);
+    usb_delay_ms(20);
     EHCI_STEP("ports powered");
     return 0;
 }
@@ -1283,7 +1276,7 @@ static void ehci_pci_shutdown(struct device *dev)
     for (int j = 0; j < 100; j++) {
         if (ehci_op_rd(hc, EHCI_OP_USBSTS) & EHCI_STS_HCHALTED)
             break;
-        ehci_delay_ms(1);
+        usb_delay_ms(1);
     }
     ehci_op_wr(hc, EHCI_OP_CONFIGFLAG, 0);
     ehci_op_wr(hc, EHCI_OP_USBCMD, EHCI_CMD_HCRESET);
