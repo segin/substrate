@@ -363,6 +363,11 @@ typedef struct {
      * end of our truncated ext2_superblock_t struct.  */
     uint32_t hash_seed[4];
 
+    /* i_extra_isize to stamp on inodes we create: the filesystem's
+     * s_want_extra_isize when it is sane, else the 32 that mkfs.ext4
+     * uses.  0 on a 128-byte-inode filesystem. */
+    uint16_t want_extra_isize;
+
     /* INCOMPAT_FILETYPE: when clear, a dirent has NO file_type byte —
      * offset 7 is the high byte of a 16-bit name_len (spec 2.4.3.1),
      * so writing a type there corrupts the name length. */
@@ -447,6 +452,10 @@ int ext2_read_label(struct blkdev *dev, char *label, size_t len);
 // Driver operations (non-static for extensibility/testing)
 int ext2_read_inode(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inode);
 int ext2_write_inode(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inode);
+/* Same, but for the first write of a freshly allocated inode: zeroes the
+ * whole on-disk record (a recycled slot still carries the previous
+ * file's inline xattrs) and stamps the filesystem's want_extra_isize. */
+int ext2_write_inode_new(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inode);
 uint32_t ext2_read_block(ext2_fs_t *fs, uint32_t block_num, void *buffer);
 uint32_t ext2_write_block(ext2_fs_t *fs, uint32_t block_num, const void *buffer);
 // Optimized versions taking ext2_node_t for cached buffers

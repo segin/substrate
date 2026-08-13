@@ -270,6 +270,23 @@ uint32_t ext2_read_blocks(ext2_fs_t *fs, uint32_t block_num, uint32_t count, voi
     return fs->device->read(fs->device, offset, fs->block_size * count, buffer);
 }
 
+/* EXT2-A10 (audit IN-01/IN-02/XA-01/XA-02): i_extra_isize discipline.
+ *
+ * The field is "size of this inode - 128", i.e. how many bytes past
+ * offset 128 hold defined extension fields — INCLUDING the two bytes
+ * of the field itself (spec 2.4.1).  It must be 4-byte aligned and fit
+ * inside the inode record.  Anything else means the extension area is
+ * unusable: report 0 so neither the read path nor the write path
+ * touches it.  Returning a validated value here is what keeps a
+ * corrupt (or merely small) value from being treated as a licence to
+ * rewrite the inline xattr area that begins at 128 + extra_isize. */
+static uint16_t ext2_valid_extra_isize(const ext2_fs_t *fs, uint16_t extra) {
+    if (fs->inode_size <= EXT2_GOOD_OLD_INODE_SIZE) return 0;
+    if (extra < 4 || (extra & 3)) return 0;
+    if (extra > fs->inode_size - EXT2_GOOD_OLD_INODE_SIZE) return 0;
+    return extra;
+}
+
 // Read an inode
 int ext2_read_inode(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inode) {
     if (!fs || inode_num == 0) return -1;
@@ -368,15 +385,17 @@ int ext2_read_inode(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inode) {
         uint32_t copy = (want < avail) ? want : avail;
         memcpy((uint8_t *)inode + legacy,
                block_buf + inode_offset + legacy, copy);
-        /* If i_extra_isize claims fewer bytes than we read, zero
-         * the slop so callers don't act on uninitialised on-disk
-         * fields that a future mkfs may repurpose.  */
-        if (inode->i_extra_isize < copy - 2 /* skip i_extra_isize self */) {
-            uint32_t valid = (uint32_t)inode->i_extra_isize + 2;
-            if (valid < copy) {
-                memset((uint8_t *)inode + legacy + valid, 0, copy - valid);
-            }
-        }
+        /* EXT2-A10 (audit IN-02): i_extra_isize says how many bytes
+         * past offset 128 are DEFINED FIELDS (the field counts itself).
+         * Everything after that belongs to the inline xattr area, so
+         * zero it here rather than hand callers xattr bytes decoded as
+         * timestamps.  The old code added 2 to the field's value —
+         * misreading the definition — and never validated it, so a
+         * corrupt or hostile value defeated the zeroing entirely. */
+        uint16_t extra = ext2_valid_extra_isize(fs, inode->i_extra_isize);
+        inode->i_extra_isize = extra;
+        if (extra < copy)
+            memset((uint8_t *)inode + legacy + extra, 0, copy - extra);
     }
     kfree(block_buf, fs->block_size);
     return 0;
@@ -905,7 +924,8 @@ static void ext2_mark_meta_dirty(ext2_fs_t *fs, uint32_t group) {
 }
 
 // Write an inode back to disk
-int ext2_write_inode(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inode) {
+static int ext2_write_inode_ex(ext2_fs_t *fs, uint32_t inode_num,
+                               ext2_inode_t *inode, int is_new) {
     if (!fs || inode_num == 0) return -1;
     
     // Calculate which block group the inode is in
@@ -965,23 +985,45 @@ int ext2_write_inode(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inode) {
         }
     }
 
-    /* Read-modify-write: preserve everything past sizeof(ext2_inode_t)
-     * (xattr area on 256-byte inodes) and everything past inode_size
-     * when we'd otherwise overshoot.  For 128-byte mounts we only
-     * touch the legacy area.  For 256-byte mounts we touch through
-     * i_crtime_extra (offset 148) and leave the xattr block alone.  */
-    uint32_t write_bytes = sizeof(ext2_inode_t);
-    if (write_bytes > fs->inode_size) write_bytes = fs->inode_size;
-    /* Make sure i_extra_isize correctly advertises how many post-128
-     * bytes we are about to commit.  Skip the i_extra_isize field
-     * itself (2 bytes) when counting — the on-disk meaning is "bytes
-     * past offset 130 that are in use".  */
-    if (fs->inode_size > EXT2_GOOD_OLD_INODE_SIZE &&
-        write_bytes > EXT2_GOOD_OLD_INODE_SIZE) {
-        uint16_t want = write_bytes - EXT2_GOOD_OLD_INODE_SIZE - 2;
-        if (inode->i_extra_isize < want) inode->i_extra_isize = want;
+    /*
+     * EXT2-A10 (audit IN-01/IN-02/XA-01/XA-02/XA-05): decide how many
+     * bytes of the on-disk record we may touch.
+     *
+     * The old code always committed sizeof(ext2_inode_t) = 152 bytes
+     * and force-bumped i_extra_isize to 22.  Two bugs: 22 is not
+     * 4-aligned and is 2 short of the correct 24 (e2fsck rejects every
+     * inode we create), and for an inode whose on-disk i_extra_isize is
+     * smaller than 24 the inline xattr area starts INSIDE that 152-byte
+     * window — so a chmod, a utimes, or any plain write silently
+     * overwrote the xattr magic with zeros and moved extra_isize past
+     * it, destroying the attributes with no error.
+     *
+     * Existing inode: write only through 128 + its own (validated)
+     * i_extra_isize, never more, never bumping it.
+     * New inode: zero the WHOLE record first — a recycled slot still
+     * holds the previous file's xattr entries, which come back to life
+     * as the new file's attributes once fsck repairs extra_isize — then
+     * adopt the filesystem's preferred extra_isize.
+     */
+    uint8_t *raw_inode = block_buf + inode_offset;
+    uint32_t write_bytes;
+    if (fs->inode_size <= EXT2_GOOD_OLD_INODE_SIZE) {
+        write_bytes = fs->inode_size;
+    } else {
+        uint16_t extra;
+        if (is_new) {
+            memset(raw_inode, 0, fs->inode_size);
+            extra = fs->want_extra_isize;
+        } else {
+            extra = ext2_valid_extra_isize(fs,
+                        *(uint16_t *)(raw_inode + EXT2_GOOD_OLD_INODE_SIZE));
+        }
+        inode->i_extra_isize = extra;
+        write_bytes = EXT2_GOOD_OLD_INODE_SIZE + extra;
+        if (write_bytes > sizeof(ext2_inode_t)) write_bytes = sizeof(ext2_inode_t);
+        if (write_bytes > fs->inode_size)       write_bytes = fs->inode_size;
     }
-    memcpy(block_buf + inode_offset, inode, write_bytes);
+    memcpy(raw_inode, inode, write_bytes);
 
     /* metadata_csum: recompute the per-inode csum over what we're
      * about to commit, and patch chksum_lo (and chksum_hi if the
@@ -1034,6 +1076,18 @@ int ext2_write_inode(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inode) {
     mutex_unlock(&ext2_inode_table_lock);
     kfree(block_buf, fs->block_size);
     return 0;
+}
+
+int ext2_write_inode(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inode) {
+    return ext2_write_inode_ex(fs, inode_num, inode, 0);
+}
+
+/* First write of a freshly allocated inode: scrubs the whole on-disk
+ * record (see EXT2-A10) and stamps the filesystem's preferred
+ * i_extra_isize. */
+int ext2_write_inode_new(ext2_fs_t *fs, uint32_t inode_num,
+                         ext2_inode_t *inode) {
+    return ext2_write_inode_ex(fs, inode_num, inode, 1);
 }
 
 // Get block number for a given file block index (handles indirect blocks)
@@ -2781,6 +2835,19 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
             kprintf("ext2: superblock metadata_csum verified (%08x)\n", got);
         }
 
+        /* EXT2-A10 (audit SB-06): honor the filesystem's stated
+         * preference for how much extension area new inodes reserve.
+         * mkfs.ext4 asks for 32; fall back to that when the field is
+         * absent or implausible, and never claim more than the record
+         * can hold. */
+        {
+            uint16_t want = *(uint16_t *)(sb_buf + 0x15E);   /* s_want_extra_isize */
+            uint16_t min  = *(uint16_t *)(sb_buf + 0x15C);   /* s_min_extra_isize  */
+            if (want < min) want = min;
+            if (want == 0 || (want & 3)) want = 32;
+            fs->want_extra_isize = want;
+        }
+
         /* Layout facts needed to synthesize uninit-group bitmaps and to
          * place superblock backups (EXT2-A7). */
         fs->reserved_gdt_blocks = *(uint16_t *)(sb_buf + 0xCE);
@@ -2897,6 +2964,17 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
     }
     
     fs->inode_size = (fs->sb.s_rev_level >= 1) ? fs->sb.s_inode_size : EXT2_GOOD_OLD_INODE_SIZE;
+
+    /* Clamp the new-inode extension size to what the record holds; a
+     * 128-byte-inode filesystem has no extension area at all. */
+    if (fs->inode_size <= EXT2_GOOD_OLD_INODE_SIZE) {
+        fs->want_extra_isize = 0;
+    } else {
+        uint16_t room = (uint16_t)(fs->inode_size - EXT2_GOOD_OLD_INODE_SIZE);
+        if (fs->want_extra_isize == 0) fs->want_extra_isize = 32;
+        if (fs->want_extra_isize > room) fs->want_extra_isize = room & (uint16_t)~3u;
+        if (fs->want_extra_isize < 4) fs->want_extra_isize = 0;
+    }
 
     // Validate inode_size is non-zero and fits within a block
     /* ext2_read_inode() unconditionally memcpy's EXT2_GOOD_OLD_INODE_SIZE
@@ -3471,8 +3549,12 @@ uint32_t ext2_alloc_inode(ext2_fs_t *fs, int is_dir) {
                 inode.i_ctime = now;
                 inode.i_mtime = now;
                 inode.i_atime = now;
-                
-                ext2_write_inode(fs, inode_num, &inode);
+
+                /* EXT2-A10 (audit XA-05): the new-inode path scrubs the
+                 * whole on-disk record.  A recycled slot still holds the
+                 * previous file's inline xattrs, which would otherwise
+                 * resurface as this file's attributes. */
+                ext2_write_inode_new(fs, inode_num, &inode);
 
                 if (ext2_trace_on()) {
                     kprintf("ext2trace: IALLOC inode=%u is_dir=%d caller=%p\n",
