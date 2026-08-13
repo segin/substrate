@@ -4873,24 +4873,81 @@ int ext2_unlink(fs_node_t *dir, const char *name) {
     return 0;
 }
 
+/*
+ * EXT2-A13 (audit DE-06): is this directory empty?
+ *
+ * The answer authorises rmdir to free the directory's blocks and
+ * inode, so "I could not tell" must read as NOT empty.  The old
+ * implementation walked via ext2_readdir and treated a NULL return as
+ * emptiness — but readdir abandons the whole walk at the first
+ * unmapped block (`if (block_num == 0) break;`).  A directory with a
+ * hole at block 0 and a hundred live entries in block 1 therefore
+ * reported empty, and rmdir freed the block holding those entries,
+ * orphaning every child.
+ *
+ * Walk the raw blocks instead and refuse on anything we cannot fully
+ * account for: a hole, an unreadable block, or a malformed record.
+ * Returns 1 only after a complete, clean walk that found nothing but
+ * "." , ".." and deleted records.
+ */
 static int ext2_dir_is_empty(fs_node_t *node) {
-    uint64_t off = 0;
-    struct dirent *de;
+    ext2_node_t *ctx;
+    ext2_fs_t *fs;
+    int empty = 1;
 
     if (!node || (node->flags & 0x7) != FS_DIRECTORY) return 0;
+    ctx = (ext2_node_t *)(uintptr_t)node->impl;
+    if (!ctx || !ctx->fs) return 0;
+    fs = ctx->fs;
 
-    /* ext2_readdir takes an opaque BYTE OFFSET and reports the next one in
-     * d_off; advance via that, not a ++ entry counter (a bare increment lands
-     * mid-record and misparses, making a truly empty dir look non-empty and
-     * breaking rmdir/rm -rf). */
-    while ((de = ext2_readdir(node, off)) != NULL) {
-        off = (de->d_off > off) ? de->d_off : off + 1;
-        if (!strcmp(de->d_name, ".") || !strcmp(de->d_name, "..")) {
-            continue;
-        }
-        return 0;
+    mutex_lock(&ctx->lock);
+
+    if (!ctx->block_buf)     ctx->block_buf     = kmalloc(fs->block_size);
+    if (!ctx->indirect_buf)  ctx->indirect_buf  = kmalloc(fs->block_size);
+    if (!ctx->dindirect_buf) ctx->dindirect_buf = kmalloc(fs->block_size);
+    if (!ctx->tindirect_buf) ctx->tindirect_buf = kmalloc(fs->block_size);
+    if (!ctx->block_buf || !ctx->indirect_buf ||
+        !ctx->dindirect_buf || !ctx->tindirect_buf) {
+        mutex_unlock(&ctx->lock);
+        return 0;                        /* cannot tell -> not empty */
     }
-    return 1;
+
+    uint32_t dir_size = ctx->inode.i_size;
+    uint32_t limit    = ext2_dir_limit(fs);
+
+    for (uint32_t pos = 0; pos < dir_size && empty; pos += fs->block_size) {
+        uint32_t block_idx = pos / fs->block_size;
+        uint32_t block_num = ext2_get_block_num(fs, &ctx->inode, block_idx,
+                                                ctx->indirect_buf,
+                                                ctx->dindirect_buf,
+                                                ctx->tindirect_buf);
+        if (block_num == 0) { empty = 0; break; }   /* hole: unaccounted */
+        if (ext2_read_block(fs, block_num, ctx->block_buf) != fs->block_size) {
+            empty = 0;                              /* unreadable */
+            break;
+        }
+
+        uint32_t off = 0;
+        while (off + 8 <= limit) {
+            ext2_dirent_t *de = (ext2_dirent_t *)(ctx->block_buf + off);
+            if (de->rec_len < 8 || (de->rec_len & 3) ||
+                off + de->rec_len > limit) {
+                empty = 0;                          /* malformed */
+                break;
+            }
+            if (de->inode != 0 && de->name_len > 0 &&
+                de->name_len <= (uint32_t)(de->rec_len - 8)) {
+                int dot    = (de->name_len == 1 && de->name[0] == '.');
+                int dotdot = (de->name_len == 2 && de->name[0] == '.' &&
+                              de->name[1] == '.');
+                if (!dot && !dotdot) { empty = 0; break; }
+            }
+            off += de->rec_len;
+        }
+    }
+
+    mutex_unlock(&ctx->lock);
+    return empty;
 }
 
 int ext2_rmdir(fs_node_t *dir, const char *name) {
