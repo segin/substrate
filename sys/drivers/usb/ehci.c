@@ -1002,7 +1002,37 @@ static int ehci_pci_attach(struct device *dev)
     if (bt != PCI_BAR_MEM32 && bt != PCI_BAR_MEM64)
         return -1;
     uint32_t bar0 = pci_read_config32(pdev->bus, pdev->slot, pdev->func, 0x10);
-    uintptr_t phys = bar0 & ~0xFUL;
+    uint64_t phys64 = (uint64_t)(bar0 & ~0xFUL);
+    if (bt == PCI_BAR_MEM64) {
+        /* The high dword was previously never read, so a 64-bit BAR that
+         * firmware assigned above 4 GiB was silently truncated and the
+         * low half mapped as MMIO -- garbage capability registers, then
+         * register writes into an unrelated region.  Dead code on QEMU
+         * usb-ehci and real ICH (32-bit BARs), but 64-bit-BAR EHCIs
+         * exist; handle it the way xhci.c does: relocate below 4 GiB.
+         * [ehci-audit 15] */
+        uint32_t bar1 = pci_read_config32(pdev->bus, pdev->slot, pdev->func,
+                                          0x14);
+        phys64 |= (uint64_t)bar1 << 32;
+    }
+    if (phys64 >> 32) {
+        kprintf("ehci: BAR0 at 0x%x%08x is above 4 GiB; relocating\n",
+                (unsigned)(phys64 >> 32), (unsigned)(uint32_t)phys64);
+        if (pci_relocate_bar32(pdev, 0) != 0) {
+            kprintf("ehci: cannot bring BAR0 below 4 GiB; giving up\n");
+            return -1;
+        }
+        bar0 = pci_read_config32(pdev->bus, pdev->slot, pdev->func, 0x10);
+        phys64 = (uint64_t)(bar0 & ~0xFUL);
+        if (bt == PCI_BAR_MEM64) {
+            uint32_t hi = pci_read_config32(pdev->bus, pdev->slot,
+                                            pdev->func, 0x14);
+            phys64 |= (uint64_t)hi << 32;
+        }
+        if (phys64 >> 32)
+            return -1;
+    }
+    uintptr_t phys = (uintptr_t)phys64;
 
     hc = kzalloc(sizeof(*hc));
     if (!hc) {
