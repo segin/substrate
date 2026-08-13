@@ -227,6 +227,21 @@ static void ehci_quiesce_async(ehci_hc_t *hc, int first_qtd, int n_qtd)
     }
 }
 
+/* [EHCI-05] Classify a halted qTD.  A pure STALL handshake halts the queue
+ * with only the Halted bit set; babble, transaction-error, buffer-error and
+ * missed-microframe halts carry their cause bit alongside it (Table 3-16).
+ * Reporting them all as USB_XFER_STALL made callers run stall recovery
+ * (usb_clear_halt) against endpoints that had a transport error instead --
+ * and let one transient error-counter exhaustion on a GET_REPORT permanently
+ * latch a HID device's ctl_poll_refused. */
+static int ehci_halt_status(uint32_t tok)
+{
+    if (tok & (EHCI_QTD_STATUS_XACTERR | EHCI_QTD_STATUS_BABBLE |
+               EHCI_QTD_STATUS_BUFERR | EHCI_QTD_STATUS_MISSED))
+        return USB_XFER_ERROR;
+    return USB_XFER_STALL;
+}
+
 /* Arm the async QH at a qTD chain and poll to completion.  Returns USB_XFER_*.
  * [DRV-06] n_qtd counts the qTDs this transfer filled/linked (contiguous from
  * first_qtd); only those are polled, so stale qTDs left ACTIVE/HALTED by a prior
@@ -267,15 +282,16 @@ static int ehci_run_qh(ehci_hc_t *hc, int first_qtd, int n_qtd, uint32_t endp_ch
     uint64_t deadline = (uint64_t)get_uptime_ms() + timeout_ms;
     for (;;) {
         int active = 0, halted = 0;
+        uint32_t htok = 0;
         for (int i = first_qtd; i < first_qtd + n_qtd; i++) {   /* [DRV-06] this xfer only */
             uint32_t tok = hc->qtd[i].token;
             /* only inspect qTDs we linked (token nonzero means we set it) */
             if (!(tok & (EHCI_QTD_STATUS_ACTIVE | EHCI_QTD_STATUS_ERRMASK)))
                 continue;
             if (tok & EHCI_QTD_STATUS_ACTIVE) active = 1;
-            if (tok & EHCI_QTD_STATUS_HALTED) halted = 1;
+            if (tok & EHCI_QTD_STATUS_HALTED) { halted = 1; htok = tok; }
         }
-        if (halted) return USB_XFER_STALL;
+        if (halted) return ehci_halt_status(htok);
         if (!active) break;
         if ((uint64_t)get_uptime_ms() > deadline) {
             /* [DRV-05] Reclaim the descriptors from the hardware before the
@@ -526,7 +542,7 @@ static int ehci_intr_transfer(ehci_hc_t *hc, usb_transfer_t *xfer)
                (xfer->timeout_ms ? xfer->timeout_ms : EHCI_XFER_TIMEOUT_MS);
     for (;;) {
         uint32_t tok = hc->qtd[0].token;
-        if (tok & EHCI_QTD_STATUS_HALTED) { r = USB_XFER_STALL; break; }
+        if (tok & EHCI_QTD_STATUS_HALTED) { r = ehci_halt_status(tok); break; }
         if (!(tok & EHCI_QTD_STATUS_ACTIVE)) break;
         if ((uint64_t)get_uptime_ms() > deadline) { r = USB_XFER_TIMEOUT; break; }
         __asm__ volatile("pause");
