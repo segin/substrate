@@ -1285,12 +1285,27 @@ int rename_fs(fs_node_t *old_parent, const char *old_name, fs_node_t *new_parent
  * RAM.
  */
 void vfs_sync_all(void) {
+    /*
+     * SELFREV-RG02/RC005: syncfs sleeps (it writes metadata), so the
+     * walk cannot hold vfs_mount_lock across the call — that lock is a
+     * spinlock and a concurrent umount would TAILQ_REMOVE and kfree the
+     * record we are standing on.  Snapshot the root nodes under the
+     * lock, then call out with it released.
+     */
+    fs_node_t *roots[32];
+    int n = 0;
+
+    spinlock_acquire(&vfs_mount_lock);
     struct mount *mnt;
     TAILQ_FOREACH(mnt, &mountlist, mnt_list) {
-        fs_node_t *root = mnt->mnt_node_root;
-        if (root && root->syncfs)
-            (void)root->syncfs(root);
+        if (n >= (int)(sizeof(roots) / sizeof(roots[0]))) break;
+        if (mnt->mnt_node_root && mnt->mnt_node_root->syncfs)
+            roots[n++] = mnt->mnt_node_root;
     }
+    spinlock_release(&vfs_mount_lock);
+
+    for (int i = 0; i < n; i++)
+        (void)roots[i]->syncfs(roots[i]);
 }
 
 int statfs_fs(fs_node_t *node, struct statfs *buf) {

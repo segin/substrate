@@ -2116,8 +2116,16 @@ static int xattr_permission(fs_node_t *node, const char *kname) {
         return (current_process && current_process->euid == 0) ? 0 : -ENODATA;
     if (!current_process) return 0;
     if (current_process->euid == 0) return 0;
-    return vfs_check_permissions(node, current_process->euid,
-                                 current_process->egid, 4 /* read */);
+    /* SELFREV-RG04: use the supplementary-group-aware check, and map a
+     * denial to EACCES — vfs_check_permissions reports a bare -1, which
+     * reaches userspace as EPERM. */
+    if (vfs_check_permissions_groups(node, current_process->euid,
+                                     current_process->egid,
+                                     current_process->supp_groups,
+                                     current_process->n_supp_groups,
+                                     4 /* read */) != 0)
+        return -EACCES;
+    return 0;
 }
 
 static int kern_getxattr(fs_node_t *node, const char *name,
@@ -2158,9 +2166,11 @@ static int kern_listxattr(fs_node_t *node, char *list, size_t size) {
     /* EXT2-A29: listing requires read permission on the file, same as
      * fetching an individual attribute. */
     if (current_process && current_process->euid != 0) {
-        int prc = vfs_check_permissions(node, current_process->euid,
-                                        current_process->egid, 4);
-        if (prc != 0) return prc;
+        if (vfs_check_permissions_groups(node, current_process->euid,
+                                         current_process->egid,
+                                         current_process->supp_groups,
+                                         current_process->n_supp_groups, 4) != 0)
+            return -EACCES;                 /* SELFREV-RG04 */
     }
     size_t actual = 0;
     if (list == NULL || size == 0) {
@@ -2173,6 +2183,26 @@ static int kern_listxattr(fs_node_t *node, char *list, size_t size) {
     if (!kbuf) return -ENOMEM;
     int rc = node->listxattr(node, kbuf, size, &actual);
     if (rc == 0) {
+        /* SELFREV-RG07: Linux does not enumerate trusted.* to
+         * unprivileged callers.  The XA-06 work gated fetching them but
+         * left them listed, which still discloses their existence.  The
+         * buffer is a run of NUL-terminated names; drop the ones this
+         * caller may not see. */
+        if (current_process && current_process->euid != 0 && actual > 0) {
+            char  *src = (char *)kbuf;
+            size_t ri = 0, wi = 0;
+            while (ri < actual) {
+                size_t len = strnlen(src + ri, actual - ri);
+                if (len >= actual - ri) break;      /* unterminated tail */
+                size_t step = len + 1;
+                if (strncmp(src + ri, "trusted.", 8) != 0) {
+                    if (wi != ri) memmove(src + wi, src + ri, step);
+                    wi += step;
+                }
+                ri += step;
+            }
+            actual = wi;
+        }
         if (copyout(kbuf, list, actual) != 0) { kfree(kbuf, size); return -EFAULT; }
         kfree(kbuf, size);
         return (int)actual;

@@ -544,6 +544,26 @@ static uint32_t ext2_dir_limit(const ext2_fs_t *fs) {
     return ext2_has_metadata_csum(fs) ? fs->block_size - 12 : fs->block_size;
 }
 
+/* SELFREV-RC002: the same question for a block we are holding.
+ *
+ * ext2_dir_limit() answers from the feature bit alone, which is right
+ * for deciding where to WRITE.  For walking an existing block it is too
+ * strict: a metadata_csum volume can still carry a directory block with
+ * no tail (written before the feature was turned on by tune2fs, or by a
+ * tool that omits it), whose last record legitimately runs to the end
+ * of the block.  Bounding the scan at block_size-12 made that record
+ * look malformed, so unlink and rmdir could not find the entry.  Trust
+ * the tail only when one is actually present. */
+static uint32_t ext2_dir_scan_limit(const ext2_fs_t *fs, const uint8_t *block) {
+    if (!ext2_has_metadata_csum(fs)) return fs->block_size;
+    const uint8_t *t = block + fs->block_size - 12;
+    if (*(const uint32_t *)(t + 0) == 0 &&
+        *(const uint16_t *)(t + 4) == 12 &&
+        t[6] == 0 && t[7] == EXT2_DIRENT_TAIL_FT)
+        return fs->block_size - 12;
+    return fs->block_size;
+}
+
 /* Install/refresh the tail of a directory leaf block and stamp its
  * checksum.  No-op when the filesystem has no dirent tails. */
 static void ext2_dirent_tail_set(ext2_fs_t *fs, uint32_t inum, uint32_t gen,
@@ -2415,7 +2435,9 @@ static int ext2_setattr(fs_node_t *node, const struct fs_attr *a) {
 static int ext2_getattr(fs_node_t *node, struct fs_attr *a) {
     if (!node || !a) return -EINVAL;
     ext2_node_t *ctx = (ext2_node_t *)(uintptr_t)node->impl;
-    if (!ctx) return -EINVAL;
+    /* SELFREV-RG06: fill_stat now calls this for every stat(2), and a
+     * torn-down cache slot has fs == NULL. */
+    if (!ctx || !ctx->fs) return -EINVAL;
     a->mask  = FS_ATTR_ATIME | FS_ATTR_MTIME | FS_ATTR_CTIME |
                FS_ATTR_MODE  | FS_ATTR_UID   | FS_ATTR_GID   |
                FS_ATTR_SIZE  | FS_ATTR_NLINK | FS_ATTR_BLOCKS;
@@ -3459,7 +3481,10 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
     }
 
     /* Storage for the bitmap-checksum high halves; only descriptors big
-     * enough to carry them on disk need it (64-byte, INCOMPAT_64BIT). */
+     * enough to carry them on disk need it (64-byte, INCOMPAT_64BIT).
+     * SELFREV-RC001: these are seeded from the on-disk descriptors once
+     * the GDT has been read (below).  Leaving them zero meant the first
+     * descriptor flush stamped a zero over a live checksum half. */
     if ((fs->sb.s_feature_ro_compat & EXT2F_ROCOMPAT_METADATA_CKSUM) &&
         fs->desc_size >= EXT2_BG_IBITMAP_CSUM_HI_OFF + 2) {
         uint32_t sz = fs->group_count * sizeof(uint16_t);
@@ -3512,6 +3537,15 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
             }
         }
         memcpy(&fs->bgd[g], src, sizeof(ext2_group_desc_t));
+        /* SELFREV-RC001: carry the on-disk high halves forward. */
+        if (fs->bbitmap_csum_hi &&
+            fs->desc_size >= EXT2_BG_BBITMAP_CSUM_HI_OFF + 2)
+            fs->bbitmap_csum_hi[g] =
+                *(uint16_t *)(src + EXT2_BG_BBITMAP_CSUM_HI_OFF);
+        if (fs->ibitmap_csum_hi &&
+            fs->desc_size >= EXT2_BG_IBITMAP_CSUM_HI_OFF + 2)
+            fs->ibitmap_csum_hi[g] =
+                *(uint16_t *)(src + EXT2_BG_IBITMAP_CSUM_HI_OFF);
     }
 
     /* Per-group descriptor metadata_csum check.  The on-disk csum
@@ -3968,9 +4002,19 @@ uint32_t ext2_alloc_inode(ext2_fs_t *fs, int is_dir) {
                      * descriptor counts were decremented too, put those
                      * back before giving up on this group. */
                     bitmap_buf[byte_idx] &= (uint8_t)~(1u << bit_idx);
+                    /* SELFREV-RA03: ext2_write_inode_bitmap already
+                     * committed the set bit to disk, so the rollback has
+                     * to reach the disk as well — otherwise the on-disk
+                     * bitmap permanently reserves an inode number that
+                     * does not exist. */
+                    ext2_write_inode_bitmap(fs, group, bitmap_buf);
                     fs->bgd[group].bg_free_inodes_count++;
                     if (is_dir) fs->bgd[group].bg_used_dirs_count--;
-                    fs->sb.s_free_inodes_count++;
+                    ext2_mark_meta_dirty(fs, group);
+                    /* SELFREV-RC007: s_free_inodes_count is decremented
+                     * below this point, so it must NOT be credited here
+                     * — doing so inflated the superblock's free count on
+                     * every last-group tail-bit rejection. */
                     break;      /* nothing usable further up this group */
                 }
                 
@@ -4293,6 +4337,18 @@ static void ext2_release_xattr_block(ext2_fs_t *fs, ext2_inode_t *inode) {
     }
     if (refcount > 1) {
         *(uint32_t *)(buf + 4) = refcount - 1;
+        /* SELFREV-RC003: h_checksum (offset 0x10) covers the whole block
+         * — seeded with the fs UUID and the block's own 64-bit number,
+         * with the checksum field itself zeroed (spec 2.4.4).  Leaving
+         * it stale after touching h_refcount makes Linux and e2fsck
+         * reject the block. */
+        if (ext2_has_metadata_csum(fs)) {
+            uint64_t le_blk = blk;
+            *(uint32_t *)(buf + 0x10) = 0;
+            uint32_t c = crc32c_update(fs->csum_seed, &le_blk, 8);
+            c = crc32c_update(c, buf, fs->block_size);
+            *(uint32_t *)(buf + 0x10) = c;
+        }
         ext2_write_block(fs, blk, buf);
         kfree(buf, fs->block_size);
         mutex_unlock(&fs->alloc_lock);
@@ -4806,7 +4862,7 @@ static int ext2_add_entry(fs_node_t *dir, const char *name, uint32_t inode, uint
          * rec_len 12) that the reuse path below would otherwise claim
          * as free space for any name of four characters or fewer,
          * destroying the block's checksum record. */
-        uint32_t dir_limit = ext2_dir_limit(fs);
+        uint32_t dir_limit = ext2_dir_scan_limit(fs, block_buf);   /* RC002 */
         while (block_off + 8 <= dir_limit && pos < dir_size) {
             ext2_dirent_t *de = (ext2_dirent_t *)(block_buf + block_off);
 
@@ -4876,7 +4932,9 @@ static int ext2_add_entry(fs_node_t *dir, const char *name, uint32_t inode, uint
          * identically (corrupt media, or any future path that drops the
          * lock between passes). */
         {
-            uint32_t lim = ext2_dir_limit(fs);
+            /* Same limit pass one used, so a legitimately tail-less
+             * block does not fail revalidation (SELFREV-RC002). */
+            uint32_t lim = ext2_dir_scan_limit(fs, block_buf);
             if (fit_off + 8 > lim) { result = -EIO; goto cleanup; }
             ext2_dirent_t *chk = (ext2_dirent_t *)(block_buf + fit_off);
             uint32_t chk_actual = ((8 + chk->name_len + 3) / 4) * 4;
@@ -5356,7 +5414,7 @@ static int ext2_remove_entry(fs_node_t *dir, const char *name) {
         }
 
         ext2_dirent_t *prev_de = NULL;
-        uint32_t dir_limit = ext2_dir_limit(fs);
+        uint32_t dir_limit = ext2_dir_scan_limit(fs, block_buf);   /* RC002 */
 
         while (block_off + 8 <= dir_limit && pos < dir_size) {
             ext2_dirent_t *de = (ext2_dirent_t *)(block_buf + block_off);
@@ -5850,7 +5908,6 @@ static int ext2_dir_is_empty(fs_node_t *node) {
     }
 
     uint32_t dir_size = ctx->inode.i_size;
-    uint32_t limit    = ext2_dir_limit(fs);
 
     for (uint32_t pos = 0; pos < dir_size && empty; pos += fs->block_size) {
         uint32_t block_idx = pos / fs->block_size;
@@ -5865,6 +5922,7 @@ static int ext2_dir_is_empty(fs_node_t *node) {
         }
 
         uint32_t off = 0;
+        uint32_t limit = ext2_dir_scan_limit(fs, ctx->block_buf);   /* RC002 */
         while (off + 8 <= limit) {
             ext2_dirent_t *de = (ext2_dirent_t *)(ctx->block_buf + off);
             if (de->rec_len < 8 || (de->rec_len & 3) ||
@@ -6018,7 +6076,16 @@ static int ext2_syncfs(fs_node_t *node) {
     if (!node) return -EINVAL;
     ext2_node_t *ctx = (ext2_node_t *)(uintptr_t)node->impl;
     if (!ctx || !ctx->fs) return -EINVAL;
-    return ext2_sync_meta(ctx->fs);
+    /* SELFREV-RG05/RC004: ext2_sync_meta walks bgd_dirty and publishes
+     * the cached free counts and bitmap checksums — all state the
+     * allocators mutate under this lock.  Without it a concurrent
+     * allocation can clear a dirty bit whose descriptor we have not
+     * written yet, stranding the update (and its bitmap checksum) on
+     * disk in a stale form. */
+    mutex_lock(&ctx->fs->alloc_lock);
+    int rc = ext2_sync_meta(ctx->fs);
+    mutex_unlock(&ctx->fs->alloc_lock);
+    return rc;
 }
 
 /* MNT_UPDATE hook: flip the live mount between read-only and read-write.
@@ -6075,19 +6142,38 @@ int ext2_unmount(fs_node_t *node) {
      * it is excluded from the busy test.
      */
     ext2_node_t *root_ctx = ctx;
+
+    /* SELFREV-RG01: by the time the VFS calls this, it has ALREADY
+     * cleared FS_MOUNTPOINT, dropped mountpoint->ptr and unlinked the
+     * mount record — and it ignores our return value.  Refusing with
+     * -EBUSY here therefore did not keep the filesystem mounted; it
+     * just skipped the flush and the clean-state stamp and leaked the
+     * ext2_fs_t, which is strictly worse than proceeding.
+     *
+     * So: always finish the on-disk work.  What the busy check governs
+     * is only how much in-core state we may destroy.  A slot that is
+     * still pinned or locked belongs to a thread that is mid-operation
+     * (MNT_FORCE bypasses the VFS busy check, and a thread mid-lookup
+     * holds no fd for vfs_is_busy to see); tearing its buffers and its
+     * mutex out from under it is the use-after-free this check exists
+     * to prevent.  Leave those slots — and the ext2_fs_t they point at
+     * — alone, and say so.  A leaked mount structure is recoverable;
+     * a freed one still in use is not.
+     */
+    unsigned busy = 0;
     mutex_lock(&ext2_node_cache_lock);
     for (int i = 0; i < EXT2_NODE_CACHE_SIZE; i++) {
         if (ext2_node_cache[i].fs != fs) continue;
         if (&ext2_node_cache[i] == root_ctx) continue;
         if (ext2_node_cache[i].pin_count != 0 ||
             ext2_node_cache[i].lock.locked != 0) {
-            mutex_unlock(&ext2_node_cache_lock);
-            kprintf("ext2: unmount refused — inode %u still in use "
-                    "(pin=%u locked=%u)\n",
+            busy++;
+            kprintf("ext2: unmount while inode %u is still in use "
+                    "(pin=%u locked=%u) — leaving its state intact\n",
                     ext2_node_cache[i].inode_num,
                     ext2_node_cache[i].pin_count,
                     ext2_node_cache[i].lock.locked);
-            return -EBUSY;
+            continue;
         }
         /* An orphaned-but-unpinned slot still owes its deferred delete;
          * completing it here keeps the volume from leaking the inode. */
@@ -6105,17 +6191,21 @@ int ext2_unmount(fs_node_t *node) {
         }
     }
 
-    // Free all active cached nodes for this fs
+    // Free the quiescent cached nodes for this fs
     for (int i = 0; i < EXT2_NODE_CACHE_SIZE; i++) {
-        if (ext2_node_cache[i].fs == fs || &ext2_node_cache[i] == root_ctx) {
-            uint32_t old_block_size = fs->block_size;
-            if (ext2_node_cache[i].block_buf) kfree(ext2_node_cache[i].block_buf, old_block_size);
-            if (ext2_node_cache[i].indirect_buf) kfree(ext2_node_cache[i].indirect_buf, old_block_size);
-            if (ext2_node_cache[i].dindirect_buf) kfree(ext2_node_cache[i].dindirect_buf, old_block_size);
-            if (ext2_node_cache[i].tindirect_buf) kfree(ext2_node_cache[i].tindirect_buf, old_block_size);
-            memset(&ext2_node_cache[i], 0, sizeof(ext2_node_t));
-            memset(&ext2_fs_node_cache[i], 0, sizeof(fs_node_t));
-        }
+        if (ext2_node_cache[i].fs != fs && &ext2_node_cache[i] != root_ctx)
+            continue;
+        if (&ext2_node_cache[i] != root_ctx &&
+            (ext2_node_cache[i].pin_count != 0 ||
+             ext2_node_cache[i].lock.locked != 0))
+            continue;                       /* still in use — see above */
+        uint32_t old_block_size = fs->block_size;
+        if (ext2_node_cache[i].block_buf) kfree(ext2_node_cache[i].block_buf, old_block_size);
+        if (ext2_node_cache[i].indirect_buf) kfree(ext2_node_cache[i].indirect_buf, old_block_size);
+        if (ext2_node_cache[i].dindirect_buf) kfree(ext2_node_cache[i].dindirect_buf, old_block_size);
+        if (ext2_node_cache[i].tindirect_buf) kfree(ext2_node_cache[i].tindirect_buf, old_block_size);
+        memset(&ext2_node_cache[i], 0, sizeof(ext2_node_t));
+        memset(&ext2_fs_node_cache[i], 0, sizeof(fs_node_t));
     }
     mutex_unlock(&ext2_node_cache_lock);
 
@@ -6130,6 +6220,18 @@ int ext2_unmount(fs_node_t *node) {
         fs->sb.s_state |= EXT2_VALID_FS;
         fs->sb.s_wtime = (uint32_t)get_time();
         ext2_flush_super(fs);
+    }
+
+    /* SELFREV-RG01: a slot still in use holds a pointer to this
+     * ext2_fs_t and will keep dereferencing it (and its bgd, its
+     * bitmaps, its mutexes) until its owner finishes.  The on-disk
+     * state is now consistent, which is what matters; deliberately
+     * leak the in-core mount rather than free memory somebody is
+     * still reading. */
+    if (busy) {
+        kprintf("ext2: %u node(s) still in use at unmount — mount structure "
+                "retained (leaked) to avoid a use-after-free\n", busy);
+        return 0;
     }
 
     if (fs->active_bg_bitmap) kfree(fs->active_bg_bitmap, fs->block_size);
