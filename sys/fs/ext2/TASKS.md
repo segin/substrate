@@ -90,8 +90,15 @@ of them corrupts a filesystem.
   ever observes `pin_count == 0` and counts the event in
   `ext2_root_pin_lost`.  The unbalanced `close_fs` behind it has not
   been root-caused.
-- 32-bit `i_size` throughout, so files are capped at 4 GiB and
-  timestamps at 2038.
+- **File size caps at 2 TiB.** Sizes are 64-bit now (i_size_high), but
+  `i_blocks` counts 512-byte units in a uint32_t, so 2^32 sectors is the
+  ceiling. Going further needs RO_COMPAT_HUGE_FILE's `l_i_blocks_high`
+  plus the per-inode `EXT4_HUGE_FILE_FL` that switches `i_blocks` to
+  filesystem-block units — which also means `st_blocks` is wrong today
+  for any Linux-made file carrying that flag. The block map runs out
+  earlier on small block sizes regardless: the triple-indirect chain
+  reaches ~16 GiB at 1 KiB blocks, ~4 TiB at 4 KiB.
+- 32-bit timestamps, so dates cap at 2038.
 
 ## Automated test harness
 
