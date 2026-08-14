@@ -22,6 +22,7 @@
 #define PCI_COMMAND_IO      0x0001U
 #define PCI_COMMAND_MEMORY  0x0002U
 #define PCI_COMMAND_MASTER  0x0004U
+#define PCI_COMMAND_INTX_DISABLE 0x0400U
 
 #define PCI_STATUS_CAP_LIST      0x0010U
 #define PCI_CAP_ID_PM            0x01U
@@ -76,6 +77,16 @@ size_t pci_bar_size(pci_device_t *dev, int bar);
 int pci_request_region(pci_device_t *dev, int bar, const char *name);
 void *pci_iomap(pci_device_t *dev, int bar, size_t max_len);
 int pci_get_irq(pci_device_t *dev);
+/* Route a device's legacy INTx pin to an I/O APIC input using the
+ * conventional Intel PIRQ swizzle, for machines whose firmware leaves
+ * the Interrupt Line register at 0xFF and describes the real routing
+ * only in the ACPI _PRT.  Returns an irq (== IDT vector) for
+ * request_irq(), or a negative errno.  The mapping is a convention:
+ * callers must confirm interrupts actually arrive and call
+ * pci_unroute_intx() if they do not. */
+int pci_route_intx(pci_device_t *dev);
+void pci_unroute_intx(pci_device_t *dev, int vector);
+
 int pci_enable_msi(pci_device_t *dev, uint8_t vector);
 int pci_disable_msi(pci_device_t *dev);
 int pci_enable_msix(pci_device_t *dev, int nvec);

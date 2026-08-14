@@ -252,6 +252,10 @@ void hda_build_bdl_entry(hda_bdl_entry_t *entry, uint64_t buf_phys,
 
 typedef struct hda_dev {
 	pci_device_t   *pdev;
+	/* Set when d->irq came from pci_route_intx() rather than firmware:
+	 * that mapping is a convention and has to be proven before use. */
+	int             intx_routed;
+	volatile uint32_t intr_count;
 	volatile uint8_t *mmio;
 	int              irq;
 	int              irq_claimed;   /* request_irq() succeeded */
@@ -1891,6 +1895,7 @@ static int hda_irq_handler(unsigned int irq, void *dev_id, void *frame)
 	if (d == NULL) {
 		return 0;
 	}
+	d->intr_count++;      /* proof-of-life for the INTx routing probe */
 
 	/*
 	 * Re-read INTSTS until GIS goes away rather than servicing one
@@ -2398,6 +2403,13 @@ static void hda_detach_partial(hda_dev_t *d)
 		free_irq((unsigned int)d->irq, d);
 		d->irq_claimed = 0;
 	}
+	if (d->intx_routed) {
+		/* Mask the I/O APIC input and set INTx-disable, so a line this
+		 * driver routed by convention cannot sit asserted with no
+		 * handler behind it. */
+		pci_unroute_intx(d->pdev, d->irq);
+		d->intx_routed = 0;
+	}
 
 	for (i = 0; i < HDA_BDL_ENTRIES; i++) {
 		if (d->chunk[i] != NULL) {
@@ -2525,6 +2537,20 @@ static int hda_attach(pci_device_t *pdev)
 		return -ENODEV;
 	}
 	d->irq = pci_get_irq(pdev);
+	if (d->irq < 0) {
+		/*
+		 * No firmware-provided line.  On a UEFI/APIC machine that is
+		 * the normal case, not a fault: config byte 0x3C is a
+		 * PIC-era field the firmware leaves at 0xFF because the real
+		 * routing lives in the ACPI _PRT.  Fall back to the
+		 * conventional PIRQ swizzle and PROVE it below — if no
+		 * interrupt arrives, the attach is abandoned.
+		 */
+		d->irq = pci_route_intx(pdev);
+		if (d->irq >= 0) {
+			d->intx_routed = 1;
+		}
+	}
 
 	/*
 	 * Capabilities are only trustworthy once the controller is out of
@@ -2643,6 +2669,62 @@ static int hda_attach(pci_device_t *pdev)
 		kprintf("hda: codec %u did not answer\n", d->codec_addr);
 		hda_detach_partial(d);
 		return -EIO;
+	}
+
+	/*
+	 * If the IRQ came from pci_route_intx() rather than the firmware,
+	 * the GSI is a guess from the conventional PIRQ swizzle and has to
+	 * be proven before anything relies on it.  Nothing so far has: the
+	 * synchronous verb path polls RIRBWP, so the codec answered above
+	 * whether or not interrupts work.
+	 *
+	 * Provoke one deliberately.  RINTCNT is normally half the ring so
+	 * the boot-time graph walk does not take an interrupt per verb;
+	 * drop it to 1 for a single exchange, which must then raise the
+	 * RIRB response interrupt, and put it back.  3.3.28 wants the DMA
+	 * engine stopped while this field changes.
+	 *
+	 * A silent probe means the guess was wrong.  Give the line back and
+	 * refuse the attach — the alternative is a /dev/audio that accepts
+	 * writes and never completes a buffer, since this driver refills
+	 * the ring from the completion path.
+	 */
+	if (d->intx_routed) {
+		uint32_t before = d->intr_count;
+		uint32_t dummy;
+		unsigned int budget;
+
+		hda_write8(d, HDA_REG_RIRBCTL, 0);
+		hda_write16(d, HDA_REG_RINTCNT, 1);
+		hda_write8(d, HDA_REG_RIRBCTL,
+		           HDA_RIRBCTL_RUN | HDA_RIRBCTL_RINTCTL);
+
+		(void)hda_try_verb(d, d->codec_addr, 0, HDA_VERB_GET_PARAMETER,
+		                   HDA_PARAM_VENDOR_ID, &dummy);
+		for (budget = 0; budget < HDA_VERB_TIMEOUT; budget++) {
+			if (d->intr_count != before) {
+				break;
+			}
+		}
+
+		hda_write8(d, HDA_REG_RIRBCTL, 0);
+		hda_write16(d, HDA_REG_RINTCNT, (uint16_t)(d->rirb_entries / 2));
+		hda_write8(d, HDA_REG_RIRBCTL,
+		           HDA_RIRBCTL_RUN | HDA_RIRBCTL_RINTCTL);
+
+		if (d->intr_count == before) {
+			kprintf("hda: no interrupt on the routed GSI; the PIRQ "
+			        "convention does not hold for this device — "
+			        "not attaching\n");
+			/* Disarm before dropping the handler: a level-triggered
+			 * INTx with nobody to acknowledge it is the wedge the
+			 * note above describes. */
+			hda_write32(d, HDA_REG_INTCTL, 0);
+			hda_detach_partial(d);
+			return -ENXIO;
+		}
+		kprintf("hda: routed GSI verified (%u interrupt(s))\n",
+		        d->intr_count - before);
 	}
 
 	if (hda_output_stream_init(d) != 0) {

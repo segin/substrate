@@ -7,7 +7,15 @@
 #include <kern/driver.h>
 #include <kern/pci.h>
 #include <sys/errno.h>
+#include <sys/irq.h>
 #include <vm/vm_kmem.h>
+
+/* I/O APIC routing — see pci_route_intx(). */
+int  ioapic_get_count(void);
+void ioapic_set_routing_ex(uint32_t gsi, uint8_t vector, uint32_t dest_cpu,
+                           uint8_t delivery_mode, uint8_t dest_mode,
+                           uint8_t polarity, uint8_t trigger);
+void ioapic_set_mask(uint8_t irq, bool mask);
 
 static pci_device_t *pci_devices_head;
 static pci_device_t *pci_devices_tail;
@@ -612,6 +620,119 @@ int pci_get_irq(pci_device_t *dev) {
         return PCI_IRQ_NONE;
     }
     return (int)line;
+}
+
+/*
+ * Route a device's legacy INTx pin to an I/O APIC input, without ACPI.
+ *
+ * WHY THIS EXISTS
+ * ---------------
+ * pci_get_irq() reads config byte 0x3C (Interrupt Line).  That register
+ * is an 8259-era artifact: nothing in hardware reads it, and on a
+ * UEFI/APIC system the firmware routes INTx through the I/O APIC,
+ * describes the mapping in the ACPI _PRT, and leaves 0x3C at 0xFF.  So
+ * pci_get_irq() reports PCI_IRQ_NONE for every device on a modern
+ * machine and drivers that need an interrupt simply do not attach
+ * (see "hda: no usable IRQ line" on the HP Pavilion).
+ *
+ * Reading _PRT properly means an AML interpreter, because it is almost
+ * always a Method with an If(PICMode) branch rather than a static
+ * package.  That is a large subsystem.  This is the cheap 80% instead:
+ * the conventional Intel PIRQ swizzle, where a device's INTx pin lands
+ * on one of the four PCI interrupt router inputs and those appear at
+ * GSI 16..19 in APIC mode:
+ *
+ *     gsi = 16 + ((device + pin - 1) % 4)
+ *
+ * HOW WRONG CAN IT BE
+ * -------------------
+ * This is a convention, not an architectural guarantee.  It is right
+ * for most Intel chipsets and for slot-behind-bridge swizzling; it can
+ * be wrong for PCH-internal devices, whose routing the chipset fixes
+ * and only _PRT actually describes.
+ *
+ * A wrong guess is SAFE here, and deliberately so: nothing else in this
+ * kernel uses the I/O APIC (interrupts are PIC-delivered on vectors
+ * 32..47, MSI on the dynamic range), so GSI 16..19 have no other
+ * owner.  A misrouted device therefore gets silence — its real line
+ * stays masked in its power-on state — rather than storming a line
+ * some other driver shares.  Callers MUST still verify that interrupts
+ * actually arrive before relying on this, and tear down if they do
+ * not; pci_unroute_intx() undoes everything this sets up.
+ *
+ * Returns the irq number to hand request_irq() — which for this path is
+ * the IDT vector itself, exactly as MSI does — or a negative errno.
+ */
+int pci_route_intx(pci_device_t *dev) {
+    uint8_t pin;
+    uint32_t gsi;
+    int vector;
+    uint16_t cmd;
+
+    if (dev == NULL) {
+        return -EINVAL;
+    }
+    if (ioapic_get_count() <= 0) {
+        return -ENODEV;         /* no I/O APIC: nothing to route to */
+    }
+
+    pin = pci_read_config8(dev->bus, dev->slot, dev->func, 0x3DU);
+    if (pin == 0U || pin > 4U) {
+        return -ENODEV;         /* device does not use an INTx pin */
+    }
+
+    gsi = 16U + (((uint32_t)dev->slot + (uint32_t)pin - 1U) & 3U);
+
+    vector = irq_alloc_vector();
+    if (vector < 0) {
+        return -EBUSY;
+    }
+
+    /*
+     * PCI INTx is level-triggered and active low — the defaults in
+     * ioapic_set_routing() are edge/high, which is right for ISA and
+     * wrong for this.  Fixed delivery, physical destination, BSP.
+     */
+    ioapic_set_routing_ex(gsi, (uint8_t)vector, 0,
+                          0 /* fixed */, 0 /* physical */,
+                          1 /* active low */, 1 /* level */);
+
+    /* The pin is useless while INTx is disabled in the command word. */
+    cmd = pci_read_config16(dev->bus, dev->slot, dev->func, PCI_CONFIG_COMMAND);
+    if (cmd & PCI_COMMAND_INTX_DISABLE) {
+        pci_write_config16(dev->bus, dev->slot, dev->func, PCI_CONFIG_COMMAND,
+                           (uint16_t)(cmd & ~PCI_COMMAND_INTX_DISABLE));
+    }
+
+    kprintf("pci: %02x:%02x.%u INT%c# -> GSI %u vector 0x%x (routed by "
+            "convention; verify)\n",
+            dev->bus, dev->slot, dev->func, 'A' + (pin - 1), gsi, vector);
+    return vector;
+}
+
+/*
+ * Undo pci_route_intx(): mask the I/O APIC input so a device that is
+ * about to be abandoned cannot hold a level-triggered line asserted
+ * with no handler left to acknowledge it.
+ */
+void pci_unroute_intx(pci_device_t *dev, int vector) {
+    uint8_t pin;
+    uint32_t gsi;
+
+    if (dev == NULL || vector < 0) {
+        return;
+    }
+    pin = pci_read_config8(dev->bus, dev->slot, dev->func, 0x3DU);
+    if (pin == 0U || pin > 4U) {
+        return;
+    }
+    gsi = 16U + (((uint32_t)dev->slot + (uint32_t)pin - 1U) & 3U);
+    ioapic_set_mask((uint8_t)gsi, true);
+
+    /* And stop the device asserting in the first place. */
+    uint16_t cmd = pci_read_config16(dev->bus, dev->slot, dev->func, PCI_CONFIG_COMMAND);
+    pci_write_config16(dev->bus, dev->slot, dev->func, PCI_CONFIG_COMMAND,
+                       (uint16_t)(cmd | PCI_COMMAND_INTX_DISABLE));
 }
 
 /*
