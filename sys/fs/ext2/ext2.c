@@ -1444,8 +1444,11 @@ uint32_t ext2_inode_read(ext2_node_t *node, off_t offset, uint32_t size, void *b
     ext2_fs_t *fs = node->fs;
     ext2_inode_t *inode = &node->inode;
 
-    if (offset >= inode->i_size) return 0;
-    if (offset + size > inode->i_size) size = inode->i_size - offset;
+    /* EXT2-A37: 64-bit size — a >4 GiB file made by Linux used to
+     * report (and deliver) only size mod 2^32. */
+    uint64_t isize = ext2_inode_get_size(inode);
+    if ((uint64_t)offset >= isize) return 0;
+    if ((uint64_t)offset + size > isize) size = (uint32_t)(isize - offset);
     
     mutex_lock(&node->lock);
 
@@ -1917,11 +1920,12 @@ uint32_t ext2_inode_write(ext2_node_t *node, off_t offset, uint32_t size,
          * bytes between old EOF and here must read as zeros — they are
          * a hole POSIX says is zero-filled, not whatever the block
          * last held. */
-        if (block_num != 0 && offset > (off_t)inode->i_size &&
+        uint64_t cur_size = ext2_inode_get_size(inode);
+        if (block_num != 0 && (uint64_t)offset > cur_size &&
             block_offset != 0) {
-            uint32_t eof_block = inode->i_size / fs->block_size;
+            uint64_t eof_block = cur_size / fs->block_size;
             if (eof_block == block_idx) {
-                uint32_t gap_start = inode->i_size % fs->block_size;
+                uint32_t gap_start = (uint32_t)(cur_size % fs->block_size);
                 if (gap_start < block_offset) {
                     if (ext2_read_block(fs, block_num, block_buf) == fs->block_size) {
                         memset(block_buf + gap_start, 0, block_offset - gap_start);
@@ -1961,8 +1965,16 @@ uint32_t ext2_inode_write(ext2_node_t *node, off_t offset, uint32_t size,
         size -= to_copy;
     }
 
-    if (offset > inode->i_size) {
-        inode->i_size = offset;
+    if ((uint64_t)offset > ext2_inode_get_size(inode)) {
+        ext2_inode_set_size(inode, (uint64_t)offset);   /* EXT2-A37 */
+        /* Linux sets RO_COMPAT_LARGE_FILE the first time any file
+         * exceeds 2 GiB; without it an older reader would refuse the
+         * volume rather than misread the size. */
+        if ((uint64_t)offset > 0x7FFFFFFFULL &&
+            !(fs->sb.s_feature_ro_compat & EXT2F_ROCOMPAT_LARGEFILE)) {
+            fs->sb.s_feature_ro_compat |= EXT2F_ROCOMPAT_LARGEFILE;
+            fs->sb_dirty = 1;
+        }
     }
 
     /* Update modification and change times.  EXT2-A34 (audit IN-05):
@@ -2085,7 +2097,7 @@ static fs_node_t *ext2_node_build_from_inode(fs_node_t *node, ext2_node_t *ctx,
         ext2_inode_t *inode, uint32_t inode_num, ext2_fs_t *fs, int idx) {
     memset(node, 0, sizeof(fs_node_t));
     node->inode = inode_num;
-    node->length = inode->i_size;
+    node->length = (off_t)ext2_inode_get_size(inode);   /* EXT2-A37 */
     node->mask = inode->i_mode & 0xFFF;
     node->uid = ext2_inode_uid(inode);
     node->gid = ext2_inode_gid(inode);
@@ -2454,7 +2466,7 @@ static int ext2_getattr(fs_node_t *node, struct fs_attr *a) {
     a->mode  = ctx->inode.i_mode & 0x0FFFU;
     a->uid   = ext2_inode_uid(&ctx->inode);
     a->gid   = ext2_inode_gid(&ctx->inode);
-    a->size  = ctx->inode.i_size;
+    a->size  = (off_t)ext2_inode_get_size(&ctx->inode);   /* EXT2-A37 */
     /* EXT2-A32: i_blocks is already in 512-byte units, which is what
      * st_blocks wants, and it counts the indirect/extent metadata and
      * xattr block too — so a sparse file reports what it really costs. */
@@ -2562,20 +2574,19 @@ size_t ext2_file_write(fs_node_t *node, off_t offset, size_t size, const uint8_t
     if (EXT2_RO_REFUSE(fs)) return (size_t)-EROFS;
     /* EXT2-A34 */
     if (EXT2_IS_IMMUTABLE(ctx)) return (size_t)-EPERM;
-    if (EXT2_IS_APPEND(ctx) && offset != (off_t)ctx->inode.i_size)
+    if (EXT2_IS_APPEND(ctx) &&
+        (uint64_t)offset != ext2_inode_get_size(&ctx->inode))
         return (size_t)-EPERM;
 
     /*
-     * EXT2-12: i_size is a 32-bit field and this driver never touches
-     * i_size_high, but ext2_inode_write() assigns a 64-bit off_t straight
-     * into it.  A write past 4 GiB therefore landed on disk correctly and
-     * then recorded the length modulo 2^32 -- the file came back looking
-     * a few bytes long with gigabytes of orphaned blocks attached.
-     * ext2_truncate() already refuses to cross the same boundary with
-     * -EFBIG; do the same here rather than corrupt the length silently.
+     * EXT2-A37: sizes are 64-bit now (i_size_high in i_dir_acl), so the
+     * old 4 GiB refusal is gone — EXT2-12 added it only because the
+     * driver dropped the high word and recorded the length modulo 2^32.
+     * What remains is a real structural limit: i_blocks counts 512-byte
+     * units in a uint32_t.
      */
     if (offset >= 0 &&
-        (uint64_t)offset + (uint64_t)size > 0xFFFFFFFFULL)
+        (uint64_t)offset + (uint64_t)size > EXT2_MAX_FILE_SIZE)
         return (size_t)-EFBIG;
 
     /* Extent-tree files: now go through the partial extent-write
@@ -2590,7 +2601,7 @@ size_t ext2_file_write(fs_node_t *node, off_t offset, size_t size, const uint8_t
     // Write updated inode back to disk
     if (written > 0) {
         ext2_write_inode(fs, ctx->inode_num, &ctx->inode);
-        node->length = ctx->inode.i_size; // Update VFS node size
+        node->length = (off_t)ext2_inode_get_size(&ctx->inode);
     }
 
     /* EXT2-15: a partial write is a success -- the caller retries from where
@@ -4396,7 +4407,7 @@ static int ext2_free_inode_blocks(ext2_fs_t *fs, ext2_inode_t *inode,
                                    sizeof(ext4_extent_t));
         eh->eh_depth  = 0;
         inode->i_blocks = 0;
-        inode->i_size = 0;
+        ext2_inode_set_size(inode, 0);
         return 0;
     }
 
@@ -4423,7 +4434,7 @@ static int ext2_free_inode_blocks(ext2_fs_t *fs, ext2_inode_t *inode,
     }
 
     inode->i_blocks = 0;
-    inode->i_size = 0;
+    ext2_inode_set_size(inode, 0);
     return 0;
 }
 
@@ -4468,7 +4479,7 @@ static int ext2_release_inode_blocks(ext2_fs_t *fs, uint32_t inode_num,
         eh->eh_depth  = 0;
     }
     inode->i_blocks = 0;
-    inode->i_size   = 0;
+    ext2_inode_set_size(inode, 0);
 
     if (ext2_write_inode(fs, inode_num, inode) != 0) {
         /* SELFREV-RI02: nothing has been freed, so the file is intact
@@ -4657,11 +4668,11 @@ int ext2_truncate(fs_node_t *node, off_t length) {
     /* EXT2-A34: truncation is forbidden on both flags. */
     if (EXT2_IS_IMMUTABLE(ctx) || EXT2_IS_APPEND(ctx)) return -EPERM;
 
-    /* i_size is tracked as a 32-bit field throughout this driver, so refuse
-     * a truncation that could not be represented rather than silently wrap. */
-    if ((uint64_t)length > 0xFFFFFFFFULL) return -EFBIG;
+    /* EXT2-A37: 64-bit now; the bound is i_blocks' 512-byte-unit
+     * uint32_t, not the size field. */
+    if ((uint64_t)length > EXT2_MAX_FILE_SIZE) return -EFBIG;
 
-    off_t old_size = (off_t)ctx->inode.i_size;
+    off_t old_size = (off_t)ext2_inode_get_size(&ctx->inode);
     if (length == old_size) {
         return 0;
     }
@@ -4687,7 +4698,7 @@ int ext2_truncate(fs_node_t *node, off_t length) {
          * on a freshly created (empty) file does, the precondition for most
          * of the mmap(2) conformance tests.
          */
-        ctx->inode.i_size = (uint32_t)length;
+        ext2_inode_set_size(&ctx->inode, (uint64_t)length);   /* EXT2-A37 */
     } else {
         /* Shrink.  Free everything past the new end of file, then zero
          * the tail of the last surviving block so a later grow reads

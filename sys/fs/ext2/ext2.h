@@ -256,6 +256,10 @@ typedef struct {
     uint32_t i_block[15];  // 0-11: direct, 12: indirect, 13: double indirect, 14: triple indirect
     uint32_t i_generation;
     uint32_t i_file_acl;
+    /* For a REGULAR file this is the high 32 bits of the size
+     * (i_size_high, gated by RO_COMPAT_LARGE_FILE).  For a directory
+     * it is genuinely dir_acl.  Never read it as a size for anything
+     * but S_IFREG — use ext2_inode_get_size(). */
     uint32_t i_dir_acl;
     uint32_t i_faddr;
     /* osd2, Linux flavor (spec 2.4.1).  Previously an opaque 12 bytes,
@@ -276,6 +280,44 @@ typedef struct {
     uint32_t i_crtime;            /* 144: birthtime, seconds            */
     uint32_t i_crtime_extra;      /* 148: birthtime nsec encoding       */
 } __attribute__((packed)) ext2_inode_t;
+
+/*
+ * Largest file this driver can represent.
+ *
+ * Not the on-disk format's limit — it is i_blocks, a uint32_t counting
+ * 512-byte units, so 2^32 sectors = 2 TiB.  (Going beyond needs
+ * RO_COMPAT_HUGE_FILE's l_i_blocks_high plus the per-inode
+ * EXT4_HUGE_FILE_FL that switches i_blocks to filesystem-block units;
+ * see TASKS.md.)  The block map runs out earlier on small block sizes
+ * anyway: the triple-indirect chain reaches 12 + p + p^2 + p^3 blocks,
+ * about 16 GiB at 1 KiB blocks and 4 TiB at 4 KiB.
+ */
+#define EXT2_MAX_FILE_SIZE   (1ULL << 41)   /* 2 TiB */
+
+/*
+ * File size, 64-bit.
+ *
+ * ext2 rev1 has carried 64-bit sizes since RO_COMPAT_LARGE_FILE: the
+ * low word is i_size and the high word overlays i_dir_acl — but ONLY
+ * for regular files.  A directory's i_dir_acl is an ACL block number,
+ * so reading it as a size there would invent enormous directories.
+ *
+ * The driver used to ignore the high word entirely, which is why it
+ * carried a 4 GiB cap.  That was not a deliberate limit: off_t and
+ * fs_node_t.length are both already 64-bit, so the truncation was the
+ * driver's alone — and on the READ side it was silent, since
+ * LARGE_FILE is in ROCOMPAT_SUPP and such volumes mount read-write.
+ */
+static inline uint64_t ext2_inode_get_size(const ext2_inode_t *i) {
+    if ((i->i_mode & 0xF000) == EXT2_S_IFREG)
+        return ((uint64_t)i->i_dir_acl << 32) | i->i_size;
+    return i->i_size;
+}
+static inline void ext2_inode_set_size(ext2_inode_t *i, uint64_t sz) {
+    i->i_size = (uint32_t)sz;
+    if ((i->i_mode & 0xF000) == EXT2_S_IFREG)
+        i->i_dir_acl = (uint32_t)(sz >> 32);
+}
 
 /* Helpers: split / pack the (sec,nsec) pair against the on-disk
  * (i_*time, i_*time_extra) encoding.

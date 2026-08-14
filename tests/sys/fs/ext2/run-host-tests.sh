@@ -738,6 +738,35 @@ check='echo NF > /mnt/test/plainfile; mkdir /mnt/test/plaindir; sync; ls /mnt/te
     assert_fsck "$img" "entries created without filetype are well-formed"
 }
 
+t_size_high() {
+    echo "==> 64-bit file size (i_size_high)"
+    # ext2 rev1 keeps the high 32 bits of a regular file's size in
+    # i_dir_acl, gated by RO_COMPAT_LARGE_FILE.  The driver ignored that
+    # word entirely, so a file Linux created larger than 4 GiB reported
+    # (and delivered) only its size modulo 2^32 — silent truncation, on
+    # a volume that mounts read-write because large_file is in the
+    # supported set.  Rather than build a >4 GiB image, set the size
+    # directly: what is under test is whether the high word is read.
+    local img; img=$(mkimg t-szhigh ext2)
+    printf 'SIZEHIGH_PAYLOAD\n' > "$WORK/szhigh.payload"
+    {
+        echo "write $WORK/szhigh.payload big"
+        echo "close"
+    } | debugfs -w "$img" >/dev/null 2>&1 || true
+    # 4 GiB + 17: low word 17, high word 1.  A driver that drops the
+    # high word reports 17.
+    debugfs -w -R "set_inode_field big size 4294967313" "$img" >/dev/null 2>&1 || true
+    local conf="device=/dev/storage/sata1
+mount=/mnt/test
+fs=ext2
+check='ls -l /mnt/test/big'"
+    local rfs; rfs=$(prep_rootfs t-szhigh "$conf")
+    local log="$WORK/t-szhigh.log"
+    boot_with "$rfs" "$img" "$log" 25
+    assert_log "$log" "FSTEST: mount OK"  "size-high mount succeeds"
+    assert_log "$log" "4294967313"        "size above 4 GiB reported in full"
+}
+
 t_truncate_shrink() {
     echo "==> truncate to a smaller size (audit BM-09)"
     # Shrinking to a non-zero length used to return -EOPNOTSUPP.
@@ -787,6 +816,7 @@ t_uninit_bg_alloc
 t_extent_max_len
 t_no_ftype_write
 t_truncate_shrink
+t_size_high
 
 # Restore the production rootfs.img so the user's next interactive
 # boot isn't sitting on whichever test config we ran last.
