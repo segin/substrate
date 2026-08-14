@@ -5,7 +5,7 @@ FFT spectrum visualizer, by Kirn Gill II (segin).  This port cross-builds it
 for substrate (i386, ELFOSABI_SUBSTRATE).
 
 * Upstream: <https://github.com/segin/psymp3>
-* Pinned tag: `1.99.11-RELEASE` (commit `dce4f64547eb7f25c10c257805949b120755d5c4`)
+* Pinned tag: `1.99.16-RELEASE` (commit `fa24c45a56cc5f8e6497899e6aac6559e7ebe8e5`)
 * License: ISC
 
 ## Build
@@ -17,6 +17,11 @@ for substrate (i386, ELFOSABI_SUBSTRATE).
 
 `build.sh` stages the binary into
 `dist-overlay/dist-psymp3/usr/bin/psymp3` and OSABI-stamps it (byte 7 = 0x40).
+The UI font and window icon go alongside it as
+`usr/share/psymp3/data/{vera.ttf,psymp3.rgba}` — `PSYMP3_DATADIR` is compiled
+in as `/usr/share/psymp3/data` (both `src/Makefile.am` and `res/Makefile.am`
+override `datadir`), so the player will not find its font if only the binary
+is deployed.
 
 ### Build host requirements
 
@@ -96,3 +101,10 @@ git-apply-able against the pinned tree.  Rationale is in the patch headers.
   `-pthread`.  The one substrate-specific link need — 64-bit atomic libcalls,
   which neither libgcc nor a (non-existent) libatomic supplies on the i486 target
   — is met by patch `0002` (`src/core/atomic64.c`).
+* Upstream `configure` now probes "how to link 64-bit atomics" and answers
+  `-march=i586` (i586 has `cmpxchg8b`, so the atomics become inline and no
+  library is needed).  `build.sh` passes `-march=i486` *after* that in
+  `CFLAGS`/`CXXFLAGS`, and GCC honours the last `-march`, so the build stays on
+  i486 and keeps emitting the out-of-line `__atomic_*_8` calls that patch `0002`
+  satisfies.  If that ordering ever changes, the binary would silently gain
+  `cmpxchg8b` and stop running on a plain i486.

@@ -244,7 +244,7 @@ meta-compiler (host wml/wmluiltok) and installs the uil/ headers.
 - **SDL 2.30.9** (`contrib/sdl2/`) — with the X11 video driver and the
   NetBSD `/dev/audio` (Sun/SADA) audio backend.
 - **FreeType2** (`contrib/freetype/`).
-- **PsyMP3** (`contrib/psymp3/`, pinned to the `1.99.11-RELEASE`
+- **PsyMP3** (`contrib/psymp3/`, pinned to the `1.99.16-RELEASE`
   upstream tag with a vendored patch series) — a music player built on SDL2.  Its
   codec dependencies each ship as their own port: `libogg`
   (`contrib/libogg/`), `libvorbis` (`contrib/libvorbis/`), `libopus`
