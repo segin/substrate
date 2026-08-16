@@ -144,6 +144,7 @@ The kernel remains monolithic and is organized into logical layers:
   - USB devices are enumerated under `/proc/devtree` and as `/dev/usb` nodes (`sys/drivers/usb/usbdevfs.c`), which `lsusb` reads.
 - `sys/net/`: Network stack — TCP/IPv4, AF_INET / AF_UNIX sockets, loopback.
 - `sys/exec/`: Executable loading and execution personalities.
+  - Segmented 16-bit personalities run in real LDT segments rather than a flattened address space: ELKS (`elks_aout.c`) and SCO Xenix/286 (`xout286.c`) both give each program segment its own descriptor, so the selectors a 1980s linker baked into the binary resolve as they did on hardware and an out-of-range offset still faults. `x.out` covers the 8086, 80286 and 80386 Xenix targets under one magic number, so it is dispatched on the header's processor field: the 80286 loader is `xout286.c` (16-bit, `int $5` syscalls, `perso_sco_x286.c`) and the 80386 one is `xout.c` (32-bit, `lcall $7,$0`, `perso_xenix.c`). Each vendor/processor pairing has its own personality id, since they are unrelated ABIs.
 - The process registry allocates every `process_t` dynamically and tracks live processes on a pid-hash plus an all-procs list; there is no fixed process-table cap. Live objects are not relocatable.
 
 Detailed subsystem behavior belongs in `docs/specs/`, including:

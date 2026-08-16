@@ -20,18 +20,35 @@
 
 #include <stdint.h>
 
-#define XOUT_MAGIC      0x0206U  /* x_magic: Microsoft x.out, i386 */
+#define XOUT_MAGIC      0x0206U  /* x_magic: Microsoft x.out */
+
+/*
+ * x_cpu: the target processor lives in the low nibble.  This is what tells a
+ * 16-bit segmented Xenix/286 image (loaded by xout286.c, run under the
+ * SCO-X/286 personality) apart from a 32-bit Xenix/386 one (xout.c) -- both
+ * carry x_magic 0x0206, so the magic alone cannot dispatch.
+ */
+#define XC_CPU_MASK     0x0FU
+#define XC_8086         0x04U    /* Intel 8086/8088 */
+#define XC_80286        0x09U    /* Intel 80286, 16-bit protected mode */
+#define XC_80386        0x0AU    /* Intel 80386, 32-bit */
+#define XC_80186        0x0BU    /* Intel 80186 */
+#define XC_MIDDLE       0x20U    /* middle/large model (far code) */
 
 /* x_renv run-time environment flags */
-#define XE_V5           0x8000U  /* Xenix 5 (386) image */
-#define XE_SEG          0x4000U  /* segmented (has a segment table) */
-#define XE_ABS          0x0400U  /* absolute (no relocation) */
-#define XE_ITER         0x0800U  /* has iterated text/data */
-#define XE_VM           0x1000U  /* demand-paged */
-#define XE_FS           0x2000U  /* fixed stack (xe_stksize valid) */
-#define XE_PURE         0x0002U  /* pure (separate I & D) */
-#define XE_SEP          0x0001U  /* separate I & D address spaces */
-#define XE_EXEC         0x0004U  /* executable (fully linked) */
+#define XE_EXEC         0x0001U  /* executable (fully linked) */
+#define XE_SEP          0x0002U  /* separate I & D address spaces */
+#define XE_PURE         0x0004U  /* pure (shareable) text */
+#define XE_FS           0x0008U  /* fixed stack (xe_stksize valid) */
+#define XE_OVER         0x0010U  /* overlay */
+#define XE_LDATA        0x0020U  /* large data model */
+#define XE_LTEXT        0x0040U  /* large text model (many code segments) */
+#define XE_ABS          0x0400U  /* absolute memory image (standalone) */
+#define XE_SEG          0x0800U  /* segmented (has a segment table) */
+#define XE_VMOD         0xC000U  /* version field mask */
+#define XE_V2           0x4000U  /* Xenix 2.3 */
+#define XE_V3           0x8000U  /* Xenix 3.0 */
+#define XE_V5           0xC000U  /* Xenix System V */
 
 /* xs_type segment types */
 #define XS_TEXT         1        /* text (code) segment */

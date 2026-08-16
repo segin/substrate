@@ -13,6 +13,7 @@
 #include <exec/formats/elks_aout.h>
 #include <exec/formats/script.h>
 #include <exec/formats/xout.h>
+#include <exec/formats/xout286.h>
 #include <kern/console.h>
 #include <kern/sched.h>
 #include <sys/errno.h>
@@ -31,6 +32,7 @@ static struct exec_binary_handler *exec_handlers = NULL;
 void exec_init(void) {
     elks_init_handler();
     xout_init_handler();
+    xout286_init_handler();
     aout_init_handler();
     script_init_handler();
 }

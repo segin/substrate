@@ -1,0 +1,260 @@
+.TH SCO_X286 4 "August 2026" "Substrate" "Kernel Interfaces"
+.SH NAME
+sco_x286 \- SCO Xenix/286 execution personality
+.SH DESCRIPTION
+.B SCO-X/286
+.RB ( PERS_SCO_X286 )
+runs SCO Xenix/286 binaries \(em 16-bit protected-mode System V.2 programs in
+the segmented
+.B x.out
+format described in
+.BR xout286 (4).
+.PP
+The x.out world is not one personality.  Each vendor/processor pairing is a
+distinct ABI: the 8086 and 80286 images are 16-bit segmented and trap through
+.BR "int $5" ,
+while the 80386 ones are 32-bit and use the System V
+.B "lcall $7,$0"
+gate, and the Microsoft-branded releases predate SCO's and differ again.
+Substrate reserves a separate personality id for each; this page covers the
+SCO 80286 one.
+.SH SYSTEM CALL INTERFACE
+A Xenix/286 program traps with
+.BR "int $5" .
+Substrate leaves IDT vector 5 at DPL 0, so the instruction faults with
+.B #GP
+before it can reach the
+.B #BR
+handler; the personality catches that fault, confirms the faulting bytes are
+.BR "CD 05" ,
+and emulates the call.
+.PP
+The register convention, taken from the Xenix crt0's
+.B __syscall
+thunk at text offset 2, is:
+.TP
+.B AX
+Call number.  The low byte is the System V call; the high byte is a
+sub-function, used by call 40 (the Xenix multiplexer, which carries
+.BR brkctl ,
+.BR ftime ,
+.BR nap ,
+.BR locking ,
+.BR rdchk ,
+.BR chsize ,
+the shared-data and IPC calls) and by call 57
+.RB ( utssys :
+0 is
+.BR uname ,
+2 is
+.BR ustat ).
+.TP
+.BR BX ", " CX ", " SI ", " DI
+Arguments one through four, one word each.  A long is split across two
+consecutive slots, low half first.
+.TP
+.B AX
+On return, the result \(em or, when the carry flag is set, the positive
+.BR errno .
+.TP
+.B BX
+On return, the high half of a 32-bit result.  The Xenix stubs move it to
+.B DX
+to build the
+.B DX:AX
+that Microsoft C returns longs in.  Calls that yield two values use the same
+pair:
+.B getpid
+returns pid in AX and ppid in BX,
+.B getuid
+returns uid and euid,
+.B pipe
+returns both descriptors, and
+.B wait
+returns the pid in AX and the status in BX.
+.PP
+.BR fork (2)
+is the exception to the AX rule: it returns the
+.I other
+process's pid in AX, and the child is told apart by
+.B BX
+being zero.  The child does not re-enter the trap handler, so its BX is
+staged into the trap frame before the fork and the parent's is restored
+after.
+.SH TRANSLATED INTERFACES
+.IP \(bu 2
+.BR open (2)
+flags.  Xenix uses the System V values \(em
+.B O_NDELAY
+is 0004,
+.B O_CREAT
+0400,
+.B O_TRUNC
+01000,
+.B O_EXCL
+02000 \(em where Substrate uses the Linux ones.  The same translation applies
+to
+.B fcntl(F_GETFL)
+and
+.BR F_SETFL .
+.IP \(bu
+.BR ioctl (2).
+The Xenix termio group
+.RB ( TCGETA
+= 0x5401) sits one lower than Substrate's, which reserves 0x5401\(en0x5404
+for the termios family Xenix has no equivalent of.  The 17-byte
+.B struct termio
+is converted to and from
+.BR "struct termios" ,
+including the System V aliasing of
+.B VMIN
+and
+.B VTIME
+onto
+.B VEOF
+and
+.BR VEOL .
+.IP \(bu
+.BR stat (2)
+and
+.BR fstat (2)
+report the 30-byte Xenix
+.B struct stat
+(16-bit device, inode, mode, link count, uid, gid and rdev; 32-bit size and
+times).
+.IP \(bu
+.BR read (2)
+on a directory.  Xenix/286 has no
+.BR getdents (2):
+a directory is read with
+.BR read (2)
+and returns 16-byte V7
+.B struct direct
+records.  Substrate synthesizes them, which is what makes
+.B ls
+list a directory and
+.BR ttyname (3)
+find the terminal by scanning
+.IR /dev .
+.IP \(bu
+Signal numbers.  Xenix and Substrate both descend from V7 but extended it
+differently above SIGTERM, and at 7 and 10.
+.IP \(bu
+.BR brkctl (2),
+the segmented
+.BR sbrk (2).
+DGROUP's break is the process break; a far data segment carries its break in
+its own descriptor limit, and
+.B BR_NEWSEG
+allocates a fresh LDT slot with a 64 KiB window behind it.
+.SH SIGNALS
+Delivery is V7 style, which is what Xenix/286 is.  The handler's far pointer
+is pushed as a far-call frame on the program's own 16-bit stack:
+.IP
+.nf
+SP+4   signal number   (the handler's int argument)
+SP+2   interrupted CS  \\  the return address, so the handler's
+SP+0   interrupted IP  /  lret resumes the interrupted instruction
+.fi
+.PP
+There is no trampoline and no saved register block, because V7 had none: the
+handler is an ordinary C function, so it preserves what the ABI requires and
+everything else is understood to be clobbered.  The disposition reverts to
+.B SIG_DFL
+as the handler is entered, and the handler re-arms it.
+.SH FILESYSTEM NAMESPACE
+The personality's path prefix is
+.IR /perso/xenix286s .
+An absolute path is resolved there first and then against the root
+filesystem, and the fallback refuses Substrate-native
+.RB ( ELFOSABI_SUBSTRATE )
+objects \(em a Xenix program that execs a bare
+.I /bin/sh
+gets
+.B ENOENT
+unless a Xenix one is staged under the prefix, because a Substrate binary's
+syscall numbers would be misrouted by this personality.
+.SH DEBUGGING
+.TP
+.B debug=perso:x286:xout
+Trace image loading: processor, run-time flags, entry segment, segment count,
+and the selectors and offsets the process is entered with.
+.TP
+.B debug=perso:x286:syscall
+Trace each emulated call as it returns, with its arguments and result.
+.TP
+.B debug=perso:x286:entry
+Also trace each call on the way in.  This is what identifies a program parked
+in a blocking call, which the return-side trace cannot show.
+.SH KNOWN LIMITATIONS
+.IP \(bu 2
+The shared-data
+.RB ( sdget ,
+.BR sdenter ,
+.BR sdleave ,
+.BR sdgetv ,
+.BR sdwaitv ),
+semaphore
+.RB ( creatsem ,
+.BR waitsem ,
+.BR sigsem )
+and System V IPC sub-functions of call 40 return
+.BR ENOSYS .
+.IP \(bu
+.BR fcntl (2)
+record locking
+.RB ( F_GETLK ,
+.BR F_SETLK ,
+.BR F_SETLKW )
+returns
+.BR EINVAL ;
+.B struct flock
+is not translated.
+.IP \(bu
+.BR ptrace (2),
+.BR profil (2)
+and
+.BR uadmin (2)
+are not implemented.
+.IP \(bu
+.BR utssys (2)
+implements only
+.BR uname ;
+.B ustat
+returns
+.BR ENOSYS .
+.IP \(bu
+Large-model programs, which pass far pointers to calls such as
+.BR read (2),
+are untested; the near-pointer arguments are resolved against the trapping
+.BR DS .
+.SH VERIFIED
+SCO Xenix/286
+.BR echo ,
+.BR cat ,
+.B ls -l
+(including the V7 directory-read path),
+.BR sync ,
+.B csh
+and
+.B vi
+(middle model, full screen) run correctly.  Microsoft Word 3.0 for Xenix
+loads, initializes its terminal, grows its heap through
+.BR brkctl (2),
+paints its banner, forks and reaps a child shell, and echoes keystrokes; it
+then stops in its own memory-manager retry loop, issuing no further system
+calls.
+.SH FILES
+.TP
+.I sys/exec/perso/perso_sco_x286.c
+The personality.
+.TP
+.I sys/exec/perso/sco_x286/sco_x286_syscalls.h
+Call numbers and call-40 sub-functions, read out of the SCO Xenix 286
+Development System's own libc.
+.SH SEE ALSO
+.BR xout286 (4),
+.BR elks_compat (4),
+.BR execve (2)
+.SH HISTORY
+Added to Substrate in August 2026.

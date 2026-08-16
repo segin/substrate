@@ -1,0 +1,153 @@
+.TH XOUT286 4 "August 2026" "Substrate" "File Formats"
+.SH NAME
+xout286 \- Microsoft x.out 80286 segmented executable format (SCO Xenix/286)
+.SH DESCRIPTION
+.B x.out
+is the executable format of Microsoft Xenix and SCO Xenix.  One magic number
+covers three unrelated targets \(em 8086, 80286 and 80386 \(em so the
+processor field, not the magic, decides which loader claims a file.  This
+page describes the 80286 flavour, loaded by
+.I sys/exec/formats/xout286.c
+and executed under the
+.B PERS_SCO_X286
+personality (see
+.BR sco_x286 (4)).
+.PP
+An 80286 x.out image is a
+.I 16-bit protected mode
+program.  Xenix gave each of its segments a private LDT descriptor and the
+linker baked the resulting selectors into the binary, so the segments are not
+relocatable: a middle-model program reaches its own code with
+.B lcall $0x47,$off
+and expects selector 0x47 to be the segment the linker assigned.
+.SH HEADER
+The file begins with a 32-byte
+.B struct xexec
+followed by a
+.BR "struct xext" ,
+both shared with the 386 format (see
+.IR sys/exec/formats/xout.h ).
+The fields that select this loader are:
+.TP
+.B x_magic
+0x0206 for every x.out variant.
+.TP
+.B x_cpu
+Processor: the low nibble is 0x04 for the 8086, 0x09 for the 80286 and 0x0a
+for the 80386.  Bit 0x20 marks a middle or large model image \(em one with
+more than one code segment.
+.TP
+.B x_renv
+Run-time environment flags.  This loader requires
+.B XE_SEG
+(0x0800, a segment table is present) and
+.B XE_EXEC
+(0x0001, fully linked).
+.TP
+.B x_entry
+Entry offset within the segment named by
+.BR xe_eseg .
+.TP
+.B xe_segpos ", " xe_segsize
+File offset and byte size of the segment table.  Entries are
+.B struct xseg
+at a 32-byte stride.
+.SH SEGMENTS
+Each
+.B struct xseg
+gives a type
+.RB ( XS_TEXT " or " XS_DATA ),
+the selector the linker assigned
+.RB ( xs_seg ,
+with TI=1 and RPL=3, so 0x3f is LDT slot 7), the file offset and physical
+size of its image, and its virtual size.  No segment may exceed 64 KiB,
+because a 16-bit descriptor cannot describe more.
+.PP
+Substrate maps every segment into its own naturally-aligned 64 KiB linear
+window and fills the LDT slot the binary expects with a 16-bit (D/B clear),
+byte-granular descriptor based there.  Segment-relative offsets are then
+correct by construction, and an out-of-range one still faults as it did on
+real hardware.
+.PP
+The first
+.B XS_DATA
+segment is DGROUP: the program runs with
+.B DS
+==
+.B ES
+==
+.BR SS ,
+and that segment holds initialized data, bss, the malloc arena and the
+process stack.  Substrate gives it the full 64 KiB; the break grows up from
+the end of bss (see
+.BR brkctl (2)
+in the Xenix documentation) and the stack down from the top, with a reserve
+between them.  Later data segments are sized to their contents and grow only
+when
+.B brkctl(BR_ARGSEG)
+raises the descriptor limit.
+.SH PROCESS ENTRY
+The image is entered in 16-bit mode with
+.B CS
+=
+.BR xe_eseg ,
+.B IP
+=
+.BR x_entry ,
+.B DS
+=
+.B ES
+=
+.B SS
+= the DGROUP selector, and
+.B SP
+pointing at a 16-bit form of the classic Unix startup stack:
+.IP
+.nf
+SP+0   argc
+SP+2   argv[0] .. argv[argc-1], NULL
+       envp[0] .. envp[envc-1], NULL
+       the strings themselves, at the top of DGROUP
+.fi
+.PP
+Every pointer there is a 16-bit offset within DGROUP.  Xenix crt0 does
+nothing but
+.B "sub %bp,%bp"
+before calling the C startup, which reads argc at
+.B [bp+4]
+and takes
+.B [bp+6]
+as
+.BR &argv[0] .
+.SH LIMITATIONS
+.IP \(bu 2
+Iterated text and data
+.RB ( XE_ITER )
+are not handled.
+.IP \(bu
+Overlays
+.RB ( XE_OVER )
+are not handled.
+.IP \(bu
+8086 and 80386 x.out images are rejected by this loader; the 386 ones are
+claimed by
+.IR sys/exec/formats/xout.c ,
+and the 8086 ones by nothing yet.
+.SH FILES
+.TP
+.I sys/exec/formats/xout286.c
+The loader.
+.TP
+.I sys/exec/formats/xout.h
+On-disk structures and the
+.BR x_cpu / x_renv
+constants.
+.SH SEE ALSO
+.BR sco_x286 (4),
+.BR elks_aout (4),
+.BR execve (2)
+.SH HISTORY
+Support for 80286 x.out images was added to Substrate in August 2026,
+together with the
+.B SCO-X/286
+personality.

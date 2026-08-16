@@ -226,6 +226,13 @@ static int xout_check_file(const char *path, const char *header, size_t len) {
     if (hdr->x_magic != XOUT_MAGIC) {
         return -ENOEXEC;
     }
+    /* x.out covers the 8086/80286/80386 Xenix targets under one magic.  This
+     * handler is the 32-bit 386 one; the 16-bit segmented images belong to
+     * xout286.c.  Older 386 linkers left x_cpu zero, so accept that too. */
+    if ((hdr->x_cpu & XC_CPU_MASK) != 0U &&
+        (hdr->x_cpu & XC_CPU_MASK) != XC_80386) {
+        return -ENOEXEC;
+    }
     return 0;
 }
 
@@ -252,6 +259,10 @@ static int xout_load(int fd, const char *path, char *const argv[],
     }
     if (hdr.x_magic != XOUT_MAGIC) {
         return xout_fail(fd, -ENOEXEC, "xout: bad magic");
+    }
+    if ((hdr.x_cpu & XC_CPU_MASK) != 0U &&
+        (hdr.x_cpu & XC_CPU_MASK) != XC_80386) {
+        return xout_fail(fd, -ENOEXEC, "xout: not an i386 image");
     }
     if (hdr.x_ext < sizeof(struct xext)) {
         return xout_fail(fd, -ENOEXEC, "xout: missing/short extension header");

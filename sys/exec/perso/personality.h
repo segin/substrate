@@ -31,7 +31,19 @@ enum personality_type {
     /* Values >= 128 reserved for non-ELF personalities */
     PERS_SUNOS   = 129,
     PERS_ELKS    = 130,
-    PERS_XENIX   = 131,
+    /*
+     * The x.out world is not one personality.  Each (vendor x cpu) pairing
+     * is its own ABI: the 8086 and 80286 images are 16-bit segmented and
+     * trap through `int $5` with register arguments, while the 80386 ones
+     * are 32-bit and use the SysV `lcall $7,$0` gate; the Microsoft-branded
+     * releases predate SCO's and differ again.  Each gets its own id.
+     */
+    PERS_XENIX     = 131,   /* SCO-X/386  (implemented: perso_xenix.c)    */
+    PERS_SCO_X286  = 132,   /* SCO-X/286  (implemented: perso_sco_x286.c) */
+    PERS_SCO_X86   = 133,   /* SCO-X/86   (reserved)                      */
+    PERS_MS_X86    = 134,   /* MS-X/86    (reserved)                      */
+    PERS_MS_X286   = 135,   /* MS-X/286   (reserved)                      */
+    PERS_MS_X386   = 136,   /* MS-X/386   (reserved)                      */
     PERS_MAX     = 256
 };
 
@@ -68,6 +80,7 @@ extern struct personality personality_solaris;
 extern struct personality personality_sunos;
 extern struct personality personality_elks;
 extern struct personality personality_xenix;
+extern struct personality personality_sco_x286;
 
 void elks_personality_init(void);
 

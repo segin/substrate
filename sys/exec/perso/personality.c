@@ -14,6 +14,7 @@ static struct personality *personalities[PERS_MAX] = {
     [PERS_SUNOS]   = &personality_sunos,
     [PERS_ELKS]    = &personality_elks,
     [PERS_XENIX]   = &personality_xenix,
+    [PERS_SCO_X286] = &personality_sco_x286,
 };
 
 struct personality *perso_lookup(int id) {
