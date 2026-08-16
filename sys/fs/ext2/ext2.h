@@ -447,6 +447,18 @@ typedef struct {
     int      sparse_super2;
     uint32_t backup_bgs[2];
 
+    /* Every block occupied by filesystem metadata -- superblock and
+     * group-descriptor copies, block/inode bitmaps, inode tables --
+     * as {start, length} pairs sorted by start.  The allocator and the
+     * free path consult this so that a single bad bit in a block bitmap
+     * cannot hand a file the inode table (see ext2_block_is_metadata).
+     * Built once at mount because bg_inode_table & co. never move.
+     * Flat rather than per-group: under flex_bg a group's metadata is
+     * gathered into another group entirely, so "which group is this
+     * block in" does not answer the question. */
+    uint32_t *meta_extents;         /* 2 words per extent: start, len */
+    uint32_t  meta_extent_count;
+
     /* On-disk group-descriptor size.  32 for legacy ext2/3 + ext4
      * without INCOMPAT_64BIT; 64 when 64BIT is on.  The bgd table
      * is read with this stride from disk; we still only KEEP 32

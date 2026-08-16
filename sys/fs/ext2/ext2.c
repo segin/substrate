@@ -715,6 +715,40 @@ static uint32_t ext2_group_first_block(const ext2_fs_t *fs, uint32_t group) {
 }
 
 /* Blocks occupied by one group's inode table. */
+/*
+ * Is `block` occupied by filesystem metadata?
+ *
+ * Binary search over fs->meta_extents, which mount built from the group
+ * descriptors.  Used to keep the allocator and the free path from ever
+ * touching the superblock, the group-descriptor table, a bitmap or an inode
+ * table, however wrong a block bitmap may be.
+ *
+ * This is not belt-and-braces.  A block bitmap says "free" and the allocator
+ * believes it; a single clear bit over the inode table is enough to hand a
+ * file the block its own inode lives in, and the first write to that file
+ * destroys eight inodes at once with nothing to notice it.  That is exactly
+ * what happened on an SD card here: block 48 (group 0's inode table) was
+ * allocated to /var/run/syslogd.pid, whose 3-byte write wiped inodes 225-232
+ * -- /etc/resolv.conf, /var/run/log, the pid file's own inode and
+ * rpcbind.lock -- and the damage only surfaced later as "multiply-claimed
+ * block" in e2fsck.
+ */
+static int ext2_block_is_metadata(const ext2_fs_t *fs, uint32_t block) {
+    if (!fs || !fs->meta_extents) return 0;
+    if (block < fs->sb.s_first_data_block) return 1;
+
+    uint32_t lo = 0, hi = fs->meta_extent_count;
+    while (lo < hi) {
+        uint32_t mid = lo + (hi - lo) / 2;
+        uint32_t start = fs->meta_extents[mid * 2];
+        uint32_t len   = fs->meta_extents[mid * 2 + 1];
+        if (block < start)              hi = mid;
+        else if (block >= start + len)  lo = mid + 1;
+        else                            return 1;
+    }
+    return 0;
+}
+
 static uint32_t ext2_itable_blocks(const ext2_fs_t *fs) {
     uint64_t bytes = (uint64_t)fs->inodes_per_group * fs->inode_size;
     return (uint32_t)((bytes + fs->block_size - 1) / fs->block_size);
@@ -3590,6 +3624,47 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
                 goto fail;
             }
         }
+
+        /* Record those same extents, plus the superblock/GDT copies, so
+         * ext2_block_is_metadata() can veto an allocation or a free that
+         * would land on them.  Up to four extents per group. */
+        fs->meta_extent_count = 0;
+        fs->meta_extents = kmalloc((size_t)fs->group_count * 4u * 2u *
+                                   sizeof(uint32_t));
+        if (!fs->meta_extents) {
+            kprintf("ext2: cannot allocate metadata extent table — refuse mount\n");
+            goto fail;
+        }
+        for (uint32_t g = 0; g < fs->group_count; g++) {
+            uint32_t *e;
+            if (ext2_group_has_super(fs, g)) {
+                uint32_t meta = 1u + fs->gdt_blocks + fs->reserved_gdt_blocks;
+                e = &fs->meta_extents[fs->meta_extent_count++ * 2];
+                e[0] = ext2_group_first_block(fs, g);
+                e[1] = meta;
+            }
+            e = &fs->meta_extents[fs->meta_extent_count++ * 2];
+            e[0] = fs->bgd[g].bg_block_bitmap; e[1] = 1;
+            e = &fs->meta_extents[fs->meta_extent_count++ * 2];
+            e[0] = fs->bgd[g].bg_inode_bitmap; e[1] = 1;
+            e = &fs->meta_extents[fs->meta_extent_count++ * 2];
+            e[0] = fs->bgd[g].bg_inode_table;  e[1] = itb;
+        }
+        /* Sort by start for the binary search.  Insertion sort: the list is
+         * generated in group order and so is already nearly sorted (fully
+         * sorted without flex_bg), which makes this effectively linear. */
+        for (uint32_t i = 1; i < fs->meta_extent_count; i++) {
+            uint32_t s = fs->meta_extents[i * 2];
+            uint32_t l = fs->meta_extents[i * 2 + 1];
+            uint32_t j = i;
+            while (j > 0 && fs->meta_extents[(j - 1) * 2] > s) {
+                fs->meta_extents[j * 2]     = fs->meta_extents[(j - 1) * 2];
+                fs->meta_extents[j * 2 + 1] = fs->meta_extents[(j - 1) * 2 + 1];
+                j--;
+            }
+            fs->meta_extents[j * 2] = s;
+            fs->meta_extents[j * 2 + 1] = l;
+        }
     }
 
     /* EXT2-A6 (audit CK-04): this now covers the crc16 GDT_CSUM scheme
@@ -3674,6 +3749,9 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
      */
 fail:
     if (gdt_raw)                    kfree(gdt_raw, on_disk_size);
+    if (fs->meta_extents)
+        kfree(fs->meta_extents,
+              (size_t)fs->group_count * 4u * 2u * sizeof(uint32_t));
     if (fs->active_inode_bg_bitmap) kfree(fs->active_inode_bg_bitmap, fs->block_size);
     if (fs->active_bg_bitmap)       kfree(fs->active_bg_bitmap, fs->block_size);
     if (fs->bbitmap_csum_hi)
@@ -3802,8 +3880,17 @@ uint32_t ext2_alloc_block(ext2_fs_t *fs) {
 
             uint32_t cand = group * fs->blocks_per_group + found_idx +
                             fs->sb.s_first_data_block;
-            if (cand < fs->sb.s_blocks_count) break;    /* a real block */
+            if (cand < fs->sb.s_blocks_count &&
+                !ext2_block_is_metadata(fs, cand)) break;   /* a real block */
 
+            /* A clear bit over filesystem metadata means this bitmap is
+             * damaged.  Handing the block out would let the next write
+             * destroy a bitmap or a run of inodes, so skip it and say so;
+             * repairing the on-disk bitmap is fsck's job, not ours. */
+            if (cand < fs->sb.s_blocks_count) {
+                kprintf("ext2: bg %u bitmap marks metadata block %u free — "
+                        "skipping (run fsck)\n", group, cand);
+            }
             bitmap_buf[found_idx / 8] |= (1 << (found_idx % 8));
             if (found_idx + 1 >= bits_in_group) { found = 0; break; }
             start_bit = found_idx + 1;
@@ -3847,6 +3934,16 @@ uint32_t ext2_alloc_block(ext2_fs_t *fs) {
 // Free a block
 void ext2_free_block(ext2_fs_t *fs, uint32_t block_num) {
     if (!fs || block_num == 0) return;
+
+    /* Never clear a metadata block's bit.  Freeing is driven by block
+     * numbers read out of inodes and indirect blocks, so a corrupt or
+     * stale pointer arrives here as an ordinary argument; clearing the
+     * bit would publish the inode table as free space and the next
+     * allocation would hand it to a file. */
+    if (ext2_block_is_metadata(fs, block_num)) {
+        kprintf("ext2: refusing to free metadata block %u\n", block_num);
+        return;
+    }
     
     // Calculate which group this block belongs to
     uint32_t group = (block_num - fs->sb.s_first_data_block) / fs->blocks_per_group;
@@ -3906,6 +4003,12 @@ void ext2_free_blocks(ext2_fs_t *fs, uint32_t block_num, uint32_t count) {
         uint32_t freed = 0;
         for (uint32_t i = 0; i < span; i++) {
             uint32_t b = index + i;
+            /* Same rule as ext2_free_block: metadata is never freed. */
+            if (ext2_block_is_metadata(fs, block_num + i)) {
+                kprintf("ext2: refusing to free metadata block %u\n",
+                        block_num + i);
+                continue;
+            }
             /* Same double-free discipline as ext2_free_block: only
              * account bits that were actually set. */
             if (bm[b / 8] & (1u << (b % 8))) {
@@ -6246,6 +6349,9 @@ int ext2_unmount(fs_node_t *node) {
     }
 
     if (fs->active_bg_bitmap) kfree(fs->active_bg_bitmap, fs->block_size);
+    if (fs->meta_extents)
+        kfree(fs->meta_extents,
+              (size_t)fs->group_count * 4u * 2u * sizeof(uint32_t));
     if (fs->active_inode_bg_bitmap) kfree(fs->active_inode_bg_bitmap, fs->block_size);
     if (fs->bbitmap_csum_hi)
         kfree(fs->bbitmap_csum_hi, fs->group_count * sizeof(uint16_t));
