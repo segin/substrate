@@ -34,10 +34,20 @@
 /* Byte-granular 16-bit limit for a full segment. */
 #define XOUT286_SEG_LIMIT_MAX 0xFFFFU
 
-/* Stack headroom reserved at the top of DGROUP; the break may not grow into
- * it.  Xenix itself grew the two toward each other and trapped on collision;
- * a fixed gap is simpler and matches what `__stkgrow` asks for in practice. */
-#define XOUT286_STACK_RESERVE 0x2000U       /* 8 KiB */
+/*
+ * Absolute floor on the stack: the break may never grow above
+ * WINDOW_SIZE - this, no matter what a program asks for.
+ *
+ * Deliberately small.  Xenix let the break and the stack grow toward each
+ * other inside the one 64 KiB DGROUP and left the program to arbitrate --
+ * crt0's _chkstk consults STKHQQ and calls __stkgrow when it needs more.
+ * Programs size their own stack accordingly: Microsoft Word asks for the
+ * whole segment minus exactly 2 KiB.  A larger kernel-side reserve does not
+ * make anything safer, it just starves the heap -- an 8 KiB one capped the
+ * break at 0xE000 and Word looped on "Insufficient memory" forever, because
+ * brkctl(2) is the only way it can get memory at all.
+ */
+#define XOUT286_STACK_RESERVE 0x0800U       /* 2 KiB */
 
 /* Linear base of the window an LDT slot's segment lives at. */
 static inline uint32_t xout286_window_base(unsigned int ldt_index) {

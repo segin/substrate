@@ -702,12 +702,16 @@ static int64_t x286_sys_chown(struct x286_frame *f) {
  */
 /*
  * The break and the stack grow toward each other inside the one 64 KiB
- * DGROUP, so the break is capped by whichever is lower: a fixed reserve
- * below the top of the segment, or a guard band under the live stack
- * pointer.  The fixed reserve is what stops a program from asking for
- * "all the rest of the segment" and then overrunning its own stack a few
- * calls later -- Xenix kept a comparable margin, and without one a deep
- * call chain silently walks into the heap.
+ * DGROUP, so the break is capped by whichever is lower: the absolute floor
+ * under the top of the segment (XOUT286_STACK_RESERVE), or a guard band
+ * below the live stack pointer.
+ *
+ * Both caps are deliberately loose.  brkctl(2) on DGROUP is the only way a
+ * program like Microsoft Word can get memory at all -- it issues no sdget,
+ * no shmget and never asks for a second segment -- and it sizes its own
+ * request to leave itself the stack it wants.  Refusing more than that just
+ * makes it retry smaller for ever; the program, not the kernel, is what
+ * arbitrates this boundary, through crt0's _chkstk/__stkgrow.
  */
 static int64_t x286_set_break(const struct x286_frame *f, uint32_t newbrk) {
     uint32_t sp = f->regs->useresp & 0xFFFFU;
