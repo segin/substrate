@@ -905,23 +905,32 @@ int proc_alloc_fd_from(process_t *p, int start) {
     return -1;
 }
 
+/*
+ * proc_alloc_fd - allocate the LOWEST free descriptor.
+ *
+ * POSIX is explicit that open(2), dup(2), pipe(2) and fcntl(F_DUPFD) hand
+ * back the lowest-numbered descriptor not currently open, and a great deal
+ * of Unix software is built on it.  The canonical case is redirecting a
+ * standard stream without dup2:
+ *
+ *      saved = dup(0); close(0); open(file, O_RDONLY);   // file is now stdin
+ *      ...
+ *      close(0); dup(saved);                             // and now it is not
+ *
+ * This used to scan from a rotating `next_fd` hint, so a process that had
+ * ever opened and closed a few files got some arbitrary descriptor back
+ * instead of 0 -- SCO Xenix's vi does exactly the dance above and ended up
+ * with a permanently dead stdin (EBADF on every later read and ioctl).
+ * The hint is kept only as a scan start for the empty case; correctness
+ * comes from always starting at descriptor 0.
+ */
 int proc_alloc_fd(process_t *p) {
     if (!p) return -1;
 
-    int start = p->next_fd;
-    if (start < 0 || start >= MAX_FD) start = 0;
-
-    /* Word-scan the allocated-fd bitmap from the next_fd hint, wrapping
-     * once.  Each 32-fd word with a free bit is resolved with ctz on
-     * its complement. */
-    for (int w = 0; w < FD_BITMAP_WORDS; w++) {
-        int word = ((start >> 5) + w) % FD_BITMAP_WORDS;
+    /* Word-scan the allocated-fd bitmap from 0.  Each 32-fd word with a
+     * free bit is resolved with ctz on its complement. */
+    for (int word = 0; word < FD_BITMAP_WORDS; word++) {
         uint32_t free_bits = ~p->fd_bitmap[word];
-        if (w == 0) {
-            /* In the starting word, ignore bits below `start`. */
-            int off = start & 31;
-            free_bits &= ~((1u << off) - 1u);
-        }
         if (free_bits == 0) continue;
         int fd = word * 32 + __builtin_ctz(free_bits);
         if (fd >= MAX_FD) continue;
@@ -929,16 +938,6 @@ int proc_alloc_fd(process_t *p) {
         fdset_clear(p->fd_cloexec, fd);
         p->next_fd = (fd + 1) % MAX_FD;
         return fd;
-    }
-    /* The starting word's low bits (below `start`) weren't scanned by
-     * the wrap above; do a final full pass to be safe. */
-    for (int fd = 0; fd < MAX_FD; fd++) {
-        if (!fdset_test(p->fd_bitmap, fd)) {
-            fdset_set(p->fd_bitmap, fd);
-            fdset_clear(p->fd_cloexec, fd);
-            p->next_fd = (fd + 1) % MAX_FD;
-            return fd;
-        }
     }
     return -1;
 }
