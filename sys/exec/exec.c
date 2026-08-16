@@ -169,7 +169,12 @@ int exec_dispatch(const char *path, char *const argv[], char *const envp[]) {
     __sync_synchronize();
     if (!path) return -ENOENT;
 
-    int fd = kern_open(path, O_RDONLY, 0);
+    /* kern_open_exec, not kern_open: the personality prefix still applies (a
+     * Xenix /bin/sh under /perso/xenix286s wins over the native one), but a
+     * foreign process may exec a substrate-native binary -- exec replaces the
+     * image and its personality, so nothing foreign survives to be confused
+     * by native syscall numbers. */
+    int fd = kern_open_exec(path);
     if (fd < 0) return fd;
 
     file_t *f = current_process->fds[fd];

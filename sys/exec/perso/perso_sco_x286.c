@@ -1227,10 +1227,9 @@ static int64_t x286_sys_execve(struct x286_frame *f) {
     if (x286_trace_enabled()) {
         char buf[160];
 
-        /* Worth spelling out: vfs_perso_lookup() refuses substrate-native
-         * ELF to a foreign personality, so a Xenix program exec'ing a bare
-         * /bin/sh gets ENOENT unless a Xenix one is staged under
-         * /perso/xenix286s. */
+        /* The personality prefix still applies -- a Xenix /bin/sh under
+         * /perso/xenix286s wins -- but exec is allowed to fall through to a
+         * substrate-native binary, since exec replaces the personality too. */
         snprintf(buf, sizeof(buf), "X286: [%d] execve \"%s\" argv0=\"%s\"\n",
                  current_process ? (int)current_process->pid : -1,
                  path, (argv && argv[0]) ? argv[0] : "");

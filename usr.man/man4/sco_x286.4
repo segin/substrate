@@ -166,14 +166,25 @@ as the handler is entered, and the handler re-arms it.
 The personality's path prefix is
 .IR /perso/xenix286s .
 An absolute path is resolved there first and then against the root
-filesystem, and the fallback refuses Substrate-native
+filesystem, so a Xenix
+.I /perso/xenix286s/bin/sh
+wins over the native one.
+.PP
+For everything except
+.BR execve (2),
+the bare-path fallback refuses Substrate-native
 .RB ( ELFOSABI_SUBSTRATE )
-objects \(em a Xenix program that execs a bare
+objects, because pulling one into a process that stays Xenix would have its
+Substrate-numbered syscalls misrouted by this personality.
+.BR execve (2)
+is exempt: it replaces the image outright and the loader that claims the new
+file sets the personality with it, so a Xenix program can exec a Substrate
+binary and simply becomes a native process.  Both directions work \(em
+Microsoft Word execs
 .I /bin/sh
-gets
-.B ENOENT
-unless a Xenix one is staged under the prefix, because a Substrate binary's
-syscall numbers would be misrouted by this personality.
+into Substrate's shell, which execs a Xenix
+.I SetWrdKeyMap
+straight back into this personality.
 .SH DEBUGGING
 .TP
 .B debug=perso:x286:xout
@@ -238,7 +249,9 @@ SCO Xenix/286
 .B csh
 and
 .B vi
-(middle model, full screen) run correctly.  Microsoft Word 3.0 for Xenix
+(middle model, full screen) run correctly, as does cross-personality
+.BR execve (2)
+in both directions.  Microsoft Word 3.0 for Xenix
 loads, initializes its terminal, grows its heap through
 .BR brkctl (2),
 paints its banner, forks and reaps a child shell, and echoes keystrokes; it

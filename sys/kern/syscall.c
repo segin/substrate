@@ -265,13 +265,26 @@ static int vfs_node_is_substrate_object(fs_node_t *node) {
  * The bare-path fallback reaches into the substrate-native tree (e.g. the
  * native /lib), which can contain substrate-native shared objects whose
  * SONAMEs collide with a foreign library the rtld is searching for (libgcc_s,
- * libiconv, ...).  Loading such an object into a foreign process is fatal --
- * its substrate-numbered syscalls are misrouted by the foreign personality
- * (see vfs_node_is_substrate_object).  So, for a foreign personality, the
- * fallback refuses substrate-native objects and reports "not found", letting
- * the foreign rtld keep searching its own tree.
+ * libiconv, ...).  Pulling such an object *into* a foreign process is fatal --
+ * its substrate-numbered syscalls would be issued under, and misrouted by, the
+ * foreign personality (see vfs_node_is_substrate_object).  So the fallback
+ * refuses substrate-native objects for a foreign personality, letting the
+ * foreign rtld keep searching its own tree.
+ *
+ * That hazard is specific to loading something into an address space that
+ * stays foreign.  It does NOT apply to execve(2), which replaces the image
+ * outright: the loader that claims the new file also sets the personality
+ * (elf.c from the OSABI, xout286.c to PERS_SCO_X286, ...), so a Xenix or
+ * FreeBSD program that execs a substrate binary ends up as a native process
+ * running native syscalls, with the old LDT freed.  Refusing it there just
+ * made execve("/bin/sh") fail with ENOENT for no reason, so exec lookups pass
+ * VFS_PERSO_EXEC to keep the prefix -- a Xenix /bin/sh still wins over the
+ * native one -- while dropping the refusal.
  */
-fs_node_t *vfs_perso_lookup(fs_node_t *root, fs_node_t *cwd, const char *path) {
+#define VFS_PERSO_EXEC  0x01    /* resolving an execve(2) target */
+
+static fs_node_t *vfs_perso_lookup_flags(fs_node_t *root, fs_node_t *cwd,
+                                         const char *path, int lookup_flags) {
     if (!path) return NULL;
 
     if (path[0] == '/' && current_process) {
@@ -290,7 +303,8 @@ fs_node_t *vfs_perso_lookup(fs_node_t *root, fs_node_t *cwd, const char *path) {
             }
         }
         fs_node_t *bare = vfs_lookup(root, path);
-        if (bare && foreign && vfs_node_is_substrate_object(bare)) {
+        if (bare && foreign && !(lookup_flags & VFS_PERSO_EXEC) &&
+            vfs_node_is_substrate_object(bare)) {
             if (cmdline_debug_enabled("perso_lookup")) {
                 kprintf("PERSO_LOOKUP: %s : refusing substrate-native object for foreign perso %d\n",
                         path, current_process->perso_id);
@@ -301,6 +315,10 @@ fs_node_t *vfs_perso_lookup(fs_node_t *root, fs_node_t *cwd, const char *path) {
     }
 
     return vfs_lookup(cwd ? cwd : root, path);
+}
+
+fs_node_t *vfs_perso_lookup(fs_node_t *root, fs_node_t *cwd, const char *path) {
+    return vfs_perso_lookup_flags(root, cwd, path, 0);
 }
 
 static int kern_resolve_parent_at(const char *path, fs_node_t *root, fs_node_t *cwd,
@@ -613,7 +631,7 @@ int sys_open(const char *path, int flags, int mode) {
 }
 
 static int kern_open_from(const char *path, int flags, int mode, fs_node_t *root, fs_node_t *cwd,
-                          const char *cwd_path) {
+                          const char *cwd_path, int lookup_flags) {
     const char *create_name = NULL;
     char full_path[sizeof(((file_t *)0)->f_path)];
     (void)mode;
@@ -634,7 +652,7 @@ static int kern_open_from(const char *path, int flags, int mode, fs_node_t *root
      * diagnosing the loop.
      */
     if (current_thread) current_thread->vfs_symlink_eloop = 0;
-    node = vfs_perso_lookup(root, cwd, path);
+    node = vfs_perso_lookup_flags(root, cwd, path, lookup_flags);
 
     if (!node) {
         fs_node_t *parent = NULL;
@@ -667,7 +685,7 @@ static int kern_open_from(const char *path, int flags, int mode, fs_node_t *root
             return error;
         }
 
-        node = vfs_perso_lookup(root, cwd, path);
+        node = vfs_perso_lookup_flags(root, cwd, path, lookup_flags);
         if (!node) {
             proc_clear_fd(current_process, fd);
             return -ENOENT;
@@ -798,7 +816,24 @@ int kern_open(const char *path, int flags, int mode) {
     fs_node_t *root = current_process->root_node ? current_process->root_node : fs_root;
     fs_node_t *cwd = current_process->cwd_node ? current_process->cwd_node : root;
 
-    return kern_open_from(path, flags, mode, root, cwd, current_process ? current_process->cwd_path : NULL);
+    return kern_open_from(path, flags, mode, root, cwd, current_process ? current_process->cwd_path : NULL, 0);
+}
+
+/*
+ * kern_open_exec - open an execve(2) target.
+ *
+ * Identical to kern_open(O_RDONLY) except that the personality path prefix
+ * still applies while the substrate-native-object refusal does not: exec
+ * replaces the image and its personality, so there is no foreign process left
+ * to protect.  See vfs_perso_lookup_flags().
+ */
+int kern_open_exec(const char *path) {
+    fs_node_t *root = current_process->root_node ? current_process->root_node : fs_root;
+    fs_node_t *cwd = current_process->cwd_node ? current_process->cwd_node : root;
+
+    return kern_open_from(path, O_RDONLY, 0, root, cwd,
+                          current_process ? current_process->cwd_path : NULL,
+                          VFS_PERSO_EXEC);
 }
 
 int sys_openat(int dirfd, const char *path, int flags, int mode) {
@@ -822,11 +857,11 @@ int kern_openat(int dirfd, const char *path, int flags, int mode) {
     cwd = current_process->cwd_node ? current_process->cwd_node : root;
 
     if (path[0] == '/') {
-        return kern_open_from(path, flags, mode, root, cwd, current_process ? current_process->cwd_path : NULL);
+        return kern_open_from(path, flags, mode, root, cwd, current_process ? current_process->cwd_path : NULL, 0);
     }
 
     if (dirfd == AT_FDCWD) {
-        return kern_open_from(path, flags, mode, root, cwd, current_process ? current_process->cwd_path : NULL);
+        return kern_open_from(path, flags, mode, root, cwd, current_process ? current_process->cwd_path : NULL, 0);
     }
 
     if (dirfd < 0 || dirfd >= MAX_FD) {
@@ -843,7 +878,7 @@ int kern_openat(int dirfd, const char *path, int flags, int mode) {
         return -ENOTDIR;
     }
 
-    return kern_open_from(path, flags, mode, root, cwd, df->f_path[0] ? df->f_path : NULL);
+    return kern_open_from(path, flags, mode, root, cwd, df->f_path[0] ? df->f_path : NULL, 0);
 }
 
 static int
