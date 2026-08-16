@@ -928,22 +928,37 @@ perso_done:
 
         if (component[0] == '.' && component[1] == '.' && component[2] == '\0') {
             /*
-             * ".." at the lookup root stays put.  `root` is the process's
-             * root_node, so for a chroot'ed process this is what confines it:
-             * without the check, ".." followed the filesystem's real parent
-             * link straight out of the jail, and "/../../etc/master.passwd"
-             * resolved outside it for any process inside.  POSIX requires
-             * "/.." to be "/" for the process root; a mount root is already
-             * special-cased below.
+             * ".." at the *process root* stays put.  For a chroot'ed process
+             * that is what confines it: without the check, ".." followed the
+             * filesystem's real parent link straight out of the jail, and
+             * "/../../etc/master.passwd" resolved outside it for any process
+             * inside.  POSIX also requires "/.." to be "/" for the process
+             * root; a mount root is special-cased below.
+             *
+             * The boundary is the process root, NOT `root`.  `root` is only
+             * where this particular lookup started, and for a relative path
+             * that is the cwd -- or, when finddir_fs_internal resolves a
+             * symlink, the directory the link lives in.  Pinning ".." there
+             * made every relative path containing ".." resolve wrongly:
+             * `cd /usr/bin; cat ../../bin/tr` pinned both ".." at /usr/bin
+             * and looked for /usr/bin/bin/tr, which is also why every
+             * /usr/bin/X -> ../../bin/X compat symlink in the image was a
+             * dangling link (CDE's dtsession_res reported "/usr/bin/tr:
+             * inaccessible or not found").  Absolute paths were unaffected,
+             * since there `root` really is the root.
              *
              * Identity is the (mp, inode) tuple rather than the pointer:
              * filesystems such as ext2 hand back a freshly allocated
-             * fs_node_t on every finddir, so `current == root` is not
+             * fs_node_t on every finddir, so pointer equality is not
              * reliable -- the same reasoning the mount-crossing code below
              * spells out.
              */
-            if (root && current &&
-                current->inode == root->inode && current->mp == root->mp) {
+            fs_node_t *proc_root = (current_process && current_process->root_node)
+                                 ? (fs_node_t *)current_process->root_node
+                                 : fs_root;
+            if (proc_root && current &&
+                current->inode == proc_root->inode &&
+                current->mp == proc_root->mp) {
                 if (*p == '/') p++;
                 continue;
             }
