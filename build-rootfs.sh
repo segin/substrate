@@ -78,6 +78,58 @@ overlay_toolchain() {
     echo "Toolchain overlay complete."
 }
 
+# Build the mandoc.db keyword database over dist/usr/share/man.
+#
+# man(1), apropos(1) and whatis(1) on substrate are mandoc (contrib/mandoc,
+# 1.14.6), which resolves pages through a per-tree mandoc.db produced by
+# makewhatis(8).  Without one, every lookup reports
+#
+#     outdated mandoc.db lacks <page>(<sec>) entry, run makewhatis /usr/share/man
+#
+# and apropos/whatis find nothing at all.  The database cannot be generated
+# on the target: the mandoc port stages apropos/whatis/man/mandoc/soelim/
+# demandoc but not makewhatis, so there is nothing on the image to build it
+# with.  It is a build artifact regardless -- the man tree is fixed once the
+# image is baked -- so generate it here.
+#
+# The host's makewhatis writes the same on-disk format as long as it is the
+# same mandoc release as the port.  Rather than parse a version (mandoc has
+# no --version), verify the result functionally: a format mismatch does not
+# fail makewhatis, it produces a database the reader silently ignores, so a
+# lookup that finds nothing is the signal to warn about.
+build_man_db() {
+    local mandir="$DIST/usr/share/man"
+
+    [ -d "$mandir" ] || return 0
+
+    if ! command -v makewhatis >/dev/null 2>&1; then
+        echo "  (skipped mandoc.db: no makewhatis(8) on the build host --" \
+             "man -k / apropos will find nothing on the target)" >&2
+        return 0
+    fi
+
+    echo "Building mandoc.db under dist/usr/share/man..."
+    if ! makewhatis "$mandir" 2>&1 | sed 's/^/  /'; then
+        echo "  WARNING: makewhatis failed; target ships without a man database" >&2
+        return 0
+    fi
+    if [ ! -s "$mandir/mandoc.db" ]; then
+        echo "  WARNING: makewhatis produced no mandoc.db" >&2
+        return 0
+    fi
+
+    # Functional check with the host's own reader, which is the same
+    # implementation the target runs.
+    if command -v apropos >/dev/null 2>&1 &&
+       ! apropos -M "$mandir" mandoc >/dev/null 2>&1; then
+        echo "  WARNING: mandoc.db built but the host apropos cannot read it;" \
+             "host and target mandoc versions may differ" >&2
+        return 0
+    fi
+    echo "  mandoc.db: $(du -h "$mandir/mandoc.db" | cut -f1)," \
+         "$(find "$mandir" -type f -name '*.[1-9]' | wc -l) pages indexed"
+}
+
 clean_dist() {
     echo "Cleaning dist directory..."
     rm -rf "$DIST"
@@ -555,6 +607,7 @@ install_to_dist() {
     fi
 
     finalize_x_fonts
+    build_man_db
 
     # /bin/sh -> /usr/bin/zsh.  Substrate's POSIX shell is zsh in
     # sh-emulation mode; the in-tree bin/sh/ is intentionally not
