@@ -1,0 +1,50 @@
+tttypes: install the .ptype sources alongside types.xdr
+
+programs/tttypes compiles nine .ptype files into types.xdr at build time
+and installs only that:
+
+    BUILT_SOURCES = types.xdr
+    dist_tttypes_DATA = $(BUILT_SOURCES)
+
+That is sufficient for ToolTalk itself -- _Tt_typedb::tt_path() has
+$(CDE_INSTALLATION_TOP)/appconfig/tttypes/types.xdr on its default search
+list (lib/tt/slib/mp_typedb.C), so the compiled database is found and read
+whenever TTPATH is unset.
+
+substrate also wants the sources present on the target, so the ptypes can
+be re-merged into a user or session type database at runtime with
+`tt_type_comp -m`.  /etc/rc.d/16-ttdbserver does exactly that: it globs
+*.ptype in the installed tttypes directory and compiles each one.  With
+only types.xdr installed, that glob is empty, the loop is gated off by
+its own `[ -n "$ptypes" ]` test, and the script silently does nothing
+beyond starting rpc.ttdbserver.
+
+Add the .ptype files to the installed set.  The list is derived from
+LOCALDEPFILES rather than written out again, so it cannot drift from the
+set the build actually compiles.
+
+diff --git a/programs/tttypes/Makefile.am b/programs/tttypes/Makefile.am
+index 47471a49..af0bd996 100644
+--- a/programs/tttypes/Makefile.am
++++ b/programs/tttypes/Makefile.am
+@@ -23,7 +23,19 @@ BUILT_SOURCES = types.xdr
+ CLEANFILES = *.done types.xdr .tt_lock
+ 
+ tttypesdir = $(CDE_INSTALLATION_TOP)/appconfig/tttypes
+-dist_tttypes_DATA = $(BUILT_SOURCES)
++
++# Install the .ptype sources alongside the compiled types.xdr.  Upstream
++# ships only types.xdr, which is enough for ToolTalk itself -- tt_path()
++# has $(CDE_INSTALLATION_TOP)/appconfig/tttypes/types.xdr on its default
++# search list.  substrate additionally wants the sources on the target so
++# that the ptypes can be re-merged into a user or session type database
++# at runtime with `tt_type_comp -m`, which is what /etc/rc.d/16-ttdbserver
++# does; it globs *.ptype in this directory and silently does nothing when
++# only types.xdr is installed.
++#
++# Derived from LOCALDEPFILES so the list cannot drift from the set the
++# build actually compiles.
++dist_tttypes_DATA = $(BUILT_SOURCES) $(LOCALDEPFILES:.done=.ptype)
+ 
+ types.xdr: $(LOCALDEPFILES)
+ 
