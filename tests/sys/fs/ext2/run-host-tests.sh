@@ -25,6 +25,23 @@ mkdir -p "$WORK"
 PASS=0
 FAIL=0
 
+# Restore the production rootfs.img so the user's next interactive boot is not
+# sitting on whichever test config we ran last.
+#
+# Armed here, from a trap, rather than run inline at the end: interrupting the
+# suite (or any scenario dying early) used to leave 99-fstest and fstest.conf
+# baked into rootfs.img, and that hook is not inert -- on every subsequent boot
+# it mounts whatever is on sata1 and then powers the machine off, which looks
+# exactly like an unrelated boot hang.  Yank 99-fstest as well as the conf:
+# only the per-scenario path removed it, so a run that died before a scenario
+# finished left it staged in dist/ for the next --image build to bake in.
+restore_production_image() {
+    echo "==> restoring production rootfs.img"
+    rm -f "$TOP/dist/etc/fstest.conf" "$TOP/dist/etc/rc.d/99-fstest"
+    (cd "$TOP" && ./build-rootfs.sh --image >/dev/null 2>&1)
+}
+trap restore_production_image EXIT
+
 # --- helpers -------------------------------------------------------
 
 mkimg() {
@@ -818,11 +835,6 @@ t_no_ftype_write
 t_truncate_shrink
 t_size_high
 
-# Restore the production rootfs.img so the user's next interactive
-# boot isn't sitting on whichever test config we ran last.
-echo "==> restoring production rootfs.img"
-rm -f "$TOP/dist/etc/fstest.conf"
-(cd "$TOP" && ./build-rootfs.sh --image >/dev/null 2>&1)
 
 echo
 echo "Total: $((PASS + FAIL)) — $PASS passed, $FAIL failed"
