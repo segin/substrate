@@ -1,0 +1,87 @@
+ttdbserverd: do not let an accepted client socket become stderr
+
+rpc.ttdbserver's STARTED_FROM_SHELL path daemonises like this:
+
+    if (0!=fork()) exit(0);
+    setsid();
+    close(0); close(1); close(2);
+    ...
+    transp = svctcp_create(RPC_ANYSOCK, 0, 0);
+
+It closes the three standard descriptors and never reopens them, so the
+RPC transport created immediately afterwards is handed the lowest free
+descriptors: the listening socket becomes fd 0 and the first accepted
+client socket becomes fd 2 -- that is, stderr.
+
+This path also never clears `errstr`, which is initialised to `stderr`
+at file scope.  Both inetd paths in the same function do set
+`errstr = 0` so their diagnostics go to syslog; only this one is
+missing it.
+
+The two together mean every _tt_syslog(errstr, ...) call made while a
+client is connected writes its text straight into that client's RPC
+stream, one byte per character:
+
+    accept(0, ...)                        = 2      <-- fd 2 == stderr
+    write(2, "e", 1) write(2, "r", 1) ...
+    write(2, "_Tt_db_server_db(\"/\"): 4 (/TT_DB/file_table)", 44)
+
+The client's XDR record layer never sees a well-formed record again and
+blocks in poll() waiting for the rest of one.  ToolTalk's RPC timeout is
+TT_RPC_TMOUT, 1,000,000 seconds, so this is indistinguishable from a
+hang: ttsession stalls inside s_init() and so never reaches its
+kill(getppid(), SIGTERM), the parent ttsession never exits, and
+dtsession -- which auto-starts ttsession and then blocks in waitpid()
+with no timeout -- waits forever.  On substrate the visible result was a
+CDE login that came up as a bare hourglass with an undecorated xterm and
+no window manager or Front Panel, indefinitely (verified unchanged over
+20 minutes).  A/B: with rpc.ttdbserver not started, the same login
+produced a complete CDE desktop.
+
+Reopen /dev/null on 0/1/2 after the close() calls so no socket can land
+there, and set errstr = 0 to match what the inetd paths already do.
+Either change alone would fix the symptom; both are correct.
+
+Verified on substrate: with rpc.ttdbserver running, an sgreet login to
+the CDE session now brings up dtwm and the Front Panel.
+
+diff --git a/lib/tt/bin/ttdbserverd/db_server_svc.C b/lib/tt/bin/ttdbserverd/db_server_svc.C
+index af4d4dc5..5681c6dc 100644
+--- a/lib/tt/bin/ttdbserverd/db_server_svc.C
++++ b/lib/tt/bin/ttdbserverd/db_server_svc.C
+@@ -484,6 +484,35 @@ main(int argc, char** argv, char **envp)
+ 
+ 			close(0); close(1); close(2);
+ 
++			// Reopen the standard descriptors on /dev/null, and
++			// stop sending diagnostics to stderr.
++			//
++			// svctcp_create() below takes the lowest free
++			// descriptors, so with 0/1/2 left closed the
++			// listening socket becomes fd 0 and the first
++			// accepted client socket becomes fd 2 -- i.e.
++			// stderr.  errstr is still `stderr` on this path
++			// (the two inetd paths above already clear it), so
++			// every _tt_syslog(errstr, ...) call then writes its
++			// text directly into that client's RPC stream, one
++			// byte per character.  The client's XDR record layer
++			// never sees a well-formed record again and blocks
++			// in poll() forever -- ToolTalk's RPC timeout is
++			// 1,000,000 seconds -- which wedges ttsession before
++			// it can signal its parent, and behind it hangs
++			// dtsession in tt_open()/waitpid(): the CDE desktop
++			// comes up as a bare hourglass with no window
++			// manager.
++			int nullfd = open("/dev/null", O_RDWR);
++			if (nullfd >= 0) {
++				dup2(nullfd, 0);
++				dup2(nullfd, 1);
++				dup2(nullfd, 2);
++				if (nullfd > 2) {
++					close(nullfd);
++				}
++			}
++			errstr = 0;
+ 		}
+ 
+ 		// Evict any previous user of our RPC number and tell

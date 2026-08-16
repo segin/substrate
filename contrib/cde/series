@@ -17,3 +17,4 @@
 0012-dthelp-include-the-POSIX-fcntl.h.patch
 0013-DtSvc-keep-num_db-in-step-with-db_list.patch
 0014-dtfile-do-not-deref-a-NULL-datatype-name-list.patch
+0015-ttdbserverd-do-not-let-a-client-socket-become-stderr.patch
