@@ -45,6 +45,14 @@ rm -rf "${BUILD_DIR}"
 mkdir -p "${BUILD_DIR}"
 cd "${BUILD_DIR}"
 
+# The CA paths are named EXPLICITLY rather than left to configure's probe.
+# configure looks for a trust store on the BUILD host and bakes in whatever it
+# finds; with contrib/ca-certificates not yet built (or the host's store in a
+# different place) it finds nothing, silently compiles in no default, and every
+# https:// URL then fails with "unable to get local issuer certificate" unless
+# the user passes --cacert by hand.  These two paths are substrate's, and match
+# OpenSSL's own defaults for --openssldir=/etc/ssl.
+#
 # Point pkg-config at the staged openssl tree so configure picks up
 # the right -I/-L/-l flags.
 export PKG_CONFIG_PATH="${OPENSSL_STAGE}/usr/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
@@ -71,6 +79,8 @@ echo "==> configure"
     --prefix=/usr \
     --enable-shared --enable-static \
     --with-openssl="${OPENSSL_STAGE}/usr" \
+    --with-ca-bundle=/etc/ssl/cert.pem \
+    --with-ca-path=/etc/ssl/certs \
     --without-libssh2 --without-libssh --without-rustls \
     --without-libpsl --without-libidn2 --without-brotli \
     --without-zstd --without-nghttp2 --without-nghttp3 \

@@ -37,8 +37,21 @@ image.  This document catalogs the current set.
 - **bzip2 1.0.8** (`contrib/bzip2/`)
 - **gzip** (`contrib/gzip/`)
 - **libarchive 3.7.7** + bsdtar (`contrib/libarchive/`)
-- **OpenSSL 3.x** (`contrib/openssl/`)
-- **curl** (`contrib/curl/`)
+- **OpenSSL 3.x** (`contrib/openssl/`) — configured `--openssldir=/etc/ssl`,
+  so its defaults are `/etc/ssl/cert.pem` (CAfile) and `/etc/ssl/certs`
+  (CApath).
+- **ca-certificates** (`contrib/ca-certificates/`) — the system CA trust
+  store: the Mozilla root bundle (via curl.se's NSS extract, pinned to a
+  dated file + SHA256) installed at both of those paths, plus per-root
+  subject-hash entries for CApath lookups, the `ca-certificates.crt`
+  Debian-compatibility path, and an `update-ca-certificates` for adding
+  local roots.  Nothing is compiled — the store is the deliverable.
+  Before this, `/etc/ssl/certs` was empty and every TLS verification
+  failed.
+- **curl** (`contrib/curl/`) — built `--with-ca-bundle`/`--with-ca-path`
+  pointing at the store above.  curl's configure otherwise probes the
+  *build host* and bakes in whatever it finds, which was nothing, leaving
+  `https://` broken even once the store existed.
 - **libiconv 1.17** (`contrib/libiconv/`)
 - **zlib 1.3.1** (`contrib/zlib/`) — DEFLATE/gzip runtime, pulled in as
   a dependency of mandoc.
