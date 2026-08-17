@@ -17,6 +17,13 @@ extern "C" {
 /* Mode flags accepted by dlopen(3). */
 #define RTLD_LAZY       0x0001
 #define RTLD_NOW        0x0002
+/*
+ * RTLD_NOLOAD: do not load the object.  dlopen() returns a handle only if it
+ * is already loaded (bumping its reference count, so the caller still owes a
+ * dlclose), and NULL otherwise.  Used to probe for an optional dependency
+ * without pulling it in.
+ */
+#define RTLD_NOLOAD     0x0004
 #define RTLD_GLOBAL     0x0100
 #define RTLD_LOCAL      0x0000
 

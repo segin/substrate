@@ -681,10 +681,24 @@ void ld_run_init_arrays(void) {
     /* Reverse-iterate so the last-loaded (deepest) object's
      * constructors run first.  Per-object guard `initialized`
      * prevents constructors from re-firing when this is called a
-     * second time after dlopen brings new objects in. */
+     * second time after dlopen brings new objects in.
+     *
+     * The guard is set BEFORE the constructors run, not after, because
+     * this function is re-entrant: a constructor may itself call
+     * dlopen(), and dlopen_locked() ends with another
+     * ld_run_init_arrays().  Setting the flag afterwards left the
+     * in-progress object still marked uninitialized for that nested
+     * walk, which called its constructor again, which dlopen'd again...
+     * until the 8 MiB stack ran out and the process died on the return
+     * address push (SIGSEGV at esp-4, eip inside this function).
+     * sdl2-compat hits this on every startup: its constructor dlopen()s
+     * libSDL3.so.0.  Marking first is also what glibc does with
+     * l_init_called, and it gives the right semantics for a constructor
+     * that re-enters its own object -- run once, never twice. */
     for (ld_size i = n; i > 0; i--) {
         ld_obj_t *o = stack[i - 1];
         if (o->initialized) continue;
+        o->initialized = 1;
         if (o->init) {
             LD_DBG({ ld_puts("ld.so: init "); ld_puts(o->name); ld_puts(" (DT_INIT)\n"); });
             o->init();
@@ -699,6 +713,5 @@ void ld_run_init_arrays(void) {
                 if (o->init_array[j]) o->init_array[j]();
             }
         }
-        o->initialized = 1;
     }
 }

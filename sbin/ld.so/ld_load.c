@@ -115,6 +115,21 @@ static ld_obj_t *find_loaded(const char *name) {
     return 0;
 }
 
+/* Public wrapper over find_loaded(): look up an already-loaded object
+ * WITHOUT loading anything.  dlopen(RTLD_NOLOAD) needs exactly this.
+ * Objects are recorded under their SONAME (or basename), so a probe that
+ * passes a full path is also retried against its basename. */
+ld_obj_t *ld_obj_find_loaded(const char *name) {
+    if (!name) return 0;
+    ld_obj_t *o = find_loaded(name);
+    if (o) return o;
+    const char *base = name;
+    for (const char *p = name; *p; p++) {
+        if (*p == '/') base = p + 1;
+    }
+    return (base != name) ? find_loaded(base) : 0;
+}
+
 /* Walk an Elf32_Dyn array, populating the cached pointers in `o`.
  * `o->base` and `o->dynamic` must already be set; everything else
  * is filled here.  We compute SONAME late because we need DT_STRTAB

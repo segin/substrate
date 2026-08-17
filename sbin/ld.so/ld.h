@@ -421,6 +421,16 @@ int ld_relocate_copy(ld_obj_t *obj);
 /* Public head of the loaded-object list. */
 ld_obj_t *ld_obj_list(void);
 
+/* Look up an already-loaded object by SONAME/basename without loading
+ * anything.  Returns NULL if it is not present.  Backs dlopen(RTLD_NOLOAD). */
+ld_obj_t *ld_obj_find_loaded(const char *name);
+
+/*
+ * dlopen() flag bits ld.so acts on.  ld.so is freestanding and does not
+ * include libc's <dlfcn.h>, so this must be kept in step with it.
+ */
+#define RTLD_NOLOAD 0x0004
+
 /* Re-protect an ld.so-mapped object after relocation: each PT_LOAD to
  * its real ELF flags (dropping the write bit ld.so mapped it with) and
  * PT_GNU_RELRO to read-only.  No-op if already applied or if the object

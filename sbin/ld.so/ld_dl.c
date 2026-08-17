@@ -131,11 +131,29 @@ LD_PUBLIC const char *__ldso_dlerror(void) {
  * -------------------------------------------------------------------- */
 
 static void *dlopen_locked(const char *path, int flags) {
-    (void)flags; /* RTLD_LAZY/NOW/GLOBAL/LOCAL all behave eager+global today */
+    /* RTLD_LAZY/NOW/GLOBAL/LOCAL all behave eager+global today; only
+     * RTLD_NOLOAD changes what we do. */
     if (!path) {
         /* dlopen(NULL) - return a handle representing the main
          * program (== head of loaded-object list). */
         return ld_obj_list();
+    }
+    if (flags & RTLD_NOLOAD) {
+        /* Probe only: map nothing.  Hand back a handle iff the object is
+         * already loaded -- and count the reference, because the caller
+         * still owes a matching dlclose (POSIX treats a successful
+         * RTLD_NOLOAD open like any other).  Callers use this to detect an
+         * optional dependency that some other object already pulled in
+         * without dragging it in themselves. */
+        ld_obj_t *have = ld_obj_find_loaded(path);
+        if (!have) {
+            ld_dl_error("dlopen(\"", path,
+                        "\"): not already loaded (RTLD_NOLOAD)", 0);
+            return 0;
+        }
+        have->refcount++;
+        have->finalized = 0;
+        return have;
     }
     /* Snapshot the list end so any failure below unwinds every object
      * this call appended - leaving unrelocated, half-loaded objects in
