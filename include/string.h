@@ -39,6 +39,13 @@ char *strsignal(int signum);
 _SUBSTRATE_DEPRECATED("use strlcpy()")
 char *strcpy(char *dest, const char *src);
 char *strncpy(char *dest, const char *src, size_t n);
+/*
+ * POSIX.1-2008.  Like strcpy(), but returns a pointer to the terminating NUL
+ * it wrote rather than to the start of dest, so callers can append without
+ * rescanning.  It is as unbounded as strcpy() — prefer strlcpy() unless the
+ * return value is what you are after.
+ */
+char *stpcpy(char *dest, const char *src);
 size_t strlcpy(char *dst, const char *src, size_t size);
 size_t strlcat(char *dst, const char *src, size_t size);
 _SUBSTRATE_DEPRECATED("use strlcat()")

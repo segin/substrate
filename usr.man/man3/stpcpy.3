@@ -1,0 +1,77 @@
+.TH STPCPY 3 2026-08-17 "Substrate LibC" "Substrate Library Functions"
+.SH NAME
+stpcpy \- copy a string, returning a pointer to its end
+.SH LIBRARY
+Standard C library
+.RI ( libc ,
+.BR \-lc )
+.SH SYNOPSIS
+.B #include <string.h>
+.sp
+.BI "char *stpcpy(char *" dest ", const char *" src ");"
+.SH DESCRIPTION
+The
+.BR stpcpy ()
+function copies the string pointed to by
+.I src
+(including the terminating null byte ('\\0')) to the buffer pointed to by
+.IR dest .
+It behaves exactly as
+.BR strcpy (3)
+except for what it returns.
+.sp
+The strings may not overlap, and
+.I dest
+must be large enough to receive the copy.
+.SH RETURN VALUE
+.BR stpcpy ()
+returns a pointer to the terminating null byte it wrote in
+.IR dest ,
+rather than to the start of
+.IR dest .
+This is what makes it useful: a caller appending several pieces can carry the
+returned pointer forward instead of rescanning what it just wrote, turning a
+sequence of
+.BR strcat (3)
+calls from quadratic into linear.
+.SH ERRORS
+No errors are defined.
+.BR stpcpy ()
+does not set
+.IR errno .
+.SH EXAMPLE
+Concatenate three strings with a single pass over the output:
+.sp
+.nf
+.RS
+char buf[64];
+char *p = buf;
+
+p = stpcpy(p, "substrate");
+p = stpcpy(p, "/");
+p = stpcpy(p, "libc");
+/* buf now holds "substrate/libc", p points at its NUL */
+.RE
+.fi
+.SH CONFORMING TO
+POSIX.1-2008.  Also present in glibc and the BSDs.
+.SH BUGS
+.BR stpcpy ()
+is exactly as unbounded as
+.BR strcpy (3):
+it has no idea how large
+.I dest
+is and will happily run off the end of it.  Prefer
+.BR strlcpy (3),
+which takes the destination size, unless the returned end pointer is
+specifically what you need.
+.sp
+The companion function
+.BR stpncpy (3)
+is not implemented.
+.SH SEE ALSO
+.BR strcpy (3),
+.BR strlcpy (3),
+.BR strcat (3),
+.BR strlcat (3),
+.BR memcpy (3)

@@ -265,6 +265,18 @@ char *strcpy(char *dest, const char *src) {
     return ret;
 }
 
+/*
+ * POSIX.1-2008.  Copies src (including the NUL) to dest and returns a pointer
+ * to the terminating NUL in dest, not to its start -- which lets a caller
+ * chain appends without rescanning what it just wrote.  Unbounded, exactly as
+ * strcpy() is.
+ */
+char *stpcpy(char *dest, const char *src) {
+    while ((*dest = *src++))
+        dest++;
+    return dest;
+}
+
 char *strncpy(char *dest, const char *src, size_t n) {
     char *ret = dest;
     while (n) {
