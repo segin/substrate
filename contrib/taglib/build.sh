@@ -26,7 +26,13 @@ export PATH="${STAGE1_PREFIX}/bin:${PATH}"
 
 [ -d "${TREE}" ] || { echo "run ./fetch.sh first" >&2; exit 1; }
 
-CFLAGS="-march=i486 -mtune=i486 -O2 -g -fno-pie -fno-stack-protector"
+# No -g: the debug info roughly doubled the staged library (30 MB vs 14 MB)
+# for no benefit on target.  This does NOT touch unwinding -- .eh_frame and
+# .eh_frame_hdr are SHF_ALLOC sections emitted for C++ exceptions regardless
+# of -g, and PT_GNU_EH_FRAME comes from the linker's --eh-frame-hdr (supplied
+# by the gcc specs override).  Without that segment every throw crossing a DSO
+# boundary lands in std::terminate, so it is checked after the build below.
+CFLAGS="-march=i486 -mtune=i486 -O2 -fno-pie -fno-stack-protector"
 # C++ shared libs: pull libstdc++/libgcc_s/libpthread/libc through and let ld
 # trust the shared libs' own DT_NEEDED (substrate's `g++ -shared` adds no
 # implicit libc, and CMake links libtag with --no-undefined would otherwise
@@ -66,10 +72,37 @@ for so in "${DESTDIR}"/usr/lib/lib*.so.*; do
   case "$so" in
     *.so.*.*)  # real file, not a symlink alias like libtag.so.2
       [ -L "$so" ] && continue
+      # Drop debug info and the static symbol table.  Dropping -g from CFLAGS
+      # is not sufficient on its own -- the link still lands ~5 MB of
+      # .debug_* plus a .symtab in the output -- so strip explicitly and get
+      # a deterministic result regardless of what upstream's CMake injects.
+      #
+      # --strip-unneeded is safe for a shared library: it removes .debug_*
+      # and .symtab but keeps .dynsym/.dynstr/.hash (which ld.so needs to
+      # resolve anything) and every SHF_ALLOC section -- including .eh_frame
+      # and .eh_frame_hdr, which are allocated, not debug, and are what C++
+      # unwinding runs on.  The PT_GNU_EH_FRAME assertion below proves it.
+      #
+      # Runs BEFORE the OSABI stamp: strip rewrites the file, so stamping
+      # first would just have the byte rewritten back to 0.
+      "${STAGE1_PREFIX}/bin/i386-unknown-substrate-strip" --strip-unneeded "$so"
       printf '\100' | dd of="$so" bs=1 seek=7 count=1 conv=notrunc 2>/dev/null
       b=$(od -An -tx1 -j7 -N1 "$so" | tr -d ' ')
       [ "$b" = "40" ] || { echo "OSABI stamp FAILED on $so (got $b)" >&2; exit 1; }
       echo "OSABI 0x40 OK: $so"
+      # Unwind tables.  TagLib is C++ and PsyMP3 throws across the library
+      # boundary, which needs PT_GNU_EH_FRAME for the unwinder to find the
+      # FDEs via dl_iterate_phdr.  Without it every such throw goes straight
+      # to std::terminate even with a catch(...) on the stack -- and it has
+      # gone missing before, silently, when a gcc specs override swallowed
+      # --eh-frame-hdr.  Fail the build rather than ship that again.
+      if ! "${STAGE1_PREFIX}/bin/i386-unknown-substrate-readelf" -l "$so" \
+             2>/dev/null | grep -q GNU_EH_FRAME; then
+        echo "PT_GNU_EH_FRAME MISSING from $so — C++ exceptions would abort;" >&2
+        echo "check the gcc specs override still passes --eh-frame-hdr" >&2
+        exit 1
+      fi
+      echo "PT_GNU_EH_FRAME OK: $so"
       ;;
   esac
 done
