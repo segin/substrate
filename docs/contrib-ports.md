@@ -241,11 +241,31 @@ meta-compiler (host wml/wmluiltok) and installs the uil/ headers.
 
 ## Multimedia / audio stack
 
-- **SDL 2.30.9** (`contrib/sdl2/`) — with the X11 video driver and the
-  NetBSD `/dev/audio` (Sun/SADA) audio backend.
+- **SDL stack** — three layered ports.  SDL3 is the only one that talks to
+  the system; the older APIs are compatibility shims over it, so there is a
+  single video/audio implementation to maintain:
+
+      app -> libSDL-1.2.so.0 -> libSDL2-2.0.so.0 -> libSDL3.so.0 -> X11 / audio
+
+  - **SDL 3.4.14** (`contrib/sdl3/`) — the base.  X11 video driver (dlopens
+    `libX11.so.6`) and the NetBSD `/dev/audio` (Sun/SADA) audio backend;
+    substrate is a first-class CMake platform (`CMAKE_SYSTEM_NAME=Substrate`)
+    rather than being built as Linux.  Build it first.
+  - **sdl2-compat 2.32.70** (`contrib/sdl2-compat/`) — provides the SDL2 ABI
+    (`libSDL2-2.0.so.0`, `sdl2.pc`) on top of SDL3.  **Replaces the former
+    `contrib/sdl2` port**; SDL2 consumers such as PsyMP3 link it unchanged.
+    It dlopens `libSDL3.so.0` at run time.
+  - **sdl12-compat 1.2.76** (`contrib/sdl12-compat/`) — provides the SDL 1.2
+    ABI (`libSDL-1.2.so.0`) on top of SDL2, so 1.2-era software builds and
+    runs without anyone maintaining a real SDL 1.2.  It dlopens
+    `libSDL2-2.0.so.0` at run time.
+
+  Because each layer dlopens the one below it rather than carrying a
+  `DT_NEEDED`, all the layers an application needs must be installed on
+  target, not just the one it links.
 - **FreeType2** (`contrib/freetype/`).
 - **PsyMP3** (`contrib/psymp3/`, pinned to the `1.99.16-RELEASE`
-  upstream tag with a vendored patch series) — a music player built on SDL2.  Its
+  upstream tag with a vendored patch series) — a music player built on SDL2 (now resolved through sdl2-compat).  Its
   codec dependencies each ship as their own port: `libogg`
   (`contrib/libogg/`), `libvorbis` (`contrib/libvorbis/`), `libopus`
   (`contrib/libopus/`), `speex` (`contrib/speex/`), `faad2`

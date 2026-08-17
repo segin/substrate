@@ -82,6 +82,15 @@ sync_native_libs_to_sysroot() {
 }
 
 # Mirror every dist-<pkg> found at the repo root, then the native libs.
+#
+# NOTE: the staging trees actually live under dist-overlay/dist-<pkg> now, so
+# this glob matches only dist-overlay/ itself and mirrors nothing.  Do NOT
+# "fix" it to dist-overlay/dist-*/ without filtering: that set includes
+# dist-freebsd and dist-netbsd, which are foreign-personality userlands for
+# /perso/<os>, not substrate libraries.  Mirroring them into the cross sysroot
+# overwrites lib/libc.so with a NetBSD symlink to libc.so.12 and drags in
+# FreeBSD's libc.so.7, after which the cross compiler cannot link anything.
+# Callers should name the packages they need via sync_to_sysroot instead.
 sync_all_to_sysroot() {
     n=0
     for distdir in "${SUBSTRATE_TOP}"/dist-*/; do

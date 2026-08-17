@@ -1,0 +1,3 @@
+0001-platform-add-SDL_PLATFORM_SUBSTRATE.patch
+0002-audiodev-default-to-dev-audio-on-substrate.patch
+0003-cmake-recognise-substrate-and-route-audio-to-netbsd.patch

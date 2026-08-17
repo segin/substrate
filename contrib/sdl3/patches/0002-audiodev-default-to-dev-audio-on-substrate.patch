@@ -1,0 +1,26 @@
+Subject: [PATCH] audio: use /dev/audio on substrate (Sun/SADA device path)
+
+Substrate's audio device is the Sun/NetBSD-style /dev/audio (an alias for
+/dev/audio0), not the OSS /dev/dsp.  substrate's <sys/audioio.h> matches
+NetBSD 10's audio_info, so the netbsd backend is the one built for it (see
+the CMake patch in this series), but SDL_audiodev.c only maps
+SDL_PATH_DEV_DSP to "/dev/audio" for SDL_PLATFORM_NETBSD / _OPENBSD.
+
+Without this, SDL_EnumUnixAudioDevices() probes /dev/dsp, which does not
+exist, finds zero output devices, and opening the default device fails --
+so no audio thread or callback ever runs.  (That is exactly what happened
+to the SDL2 port before the equivalent fix.)
+
+Add SDL_PLATFORM_SUBSTRATE to the condition.
+
+--- a/src/audio/SDL_audiodev.c
++++ b/src/audio/SDL_audiodev.c
+@@ -32,7 +32,7 @@
+ #include "SDL_audiodev_c.h"
+ 
+ #ifndef SDL_PATH_DEV_DSP
+-#if defined(SDL_PLATFORM_NETBSD) || defined(SDL_PLATFORM_OPENBSD)
++#if defined(SDL_PLATFORM_NETBSD) || defined(SDL_PLATFORM_OPENBSD) || defined(SDL_PLATFORM_SUBSTRATE)
+ #define SDL_PATH_DEV_DSP "/dev/audio"
+ #else
+ #define SDL_PATH_DEV_DSP "/dev/dsp"

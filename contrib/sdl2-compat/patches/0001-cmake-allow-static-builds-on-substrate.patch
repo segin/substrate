@@ -1,0 +1,29 @@
+Subject: [PATCH] cmake: allow static builds on Substrate
+
+The static-library build is gated to Linux only:
+
+    if(SDL2COMPAT_STATIC AND NOT (CMAKE_SYSTEM_NAME MATCHES "Linux"))
+      message(FATAL_ERROR "Static builds are only supported on Linux.")
+
+Substrate is an ELF platform using the same GNU toolchain and the same
+versioned-shared-object conventions CMake implements for Linux (its
+Platform/Substrate module defers to Platform/Linux outright), so the
+restriction does not apply to it for any technical reason -- it is just
+not in the list.
+
+Substrate names its platform honestly rather than masquerading as Linux,
+so add it to the match.  The SDL2 port this replaces shipped both
+libSDL2.a and libSDL2-2.0.so.0, and dropping the static library would be
+a regression for anything that links it.
+
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -93,7 +93,7 @@
+ set(SDL2COMPAT_FRAMEWORK FALSE)
+ #FIXME: should SDL2-compat modify vendor_info/revision information?
+ 
+-if(SDL2COMPAT_STATIC AND NOT (CMAKE_SYSTEM_NAME MATCHES "Linux"))
++if(SDL2COMPAT_STATIC AND NOT (CMAKE_SYSTEM_NAME MATCHES "Linux|Substrate"))
+   message(FATAL_ERROR "Static builds are only supported on Linux.")
+ endif()
+ 

@@ -1,0 +1,33 @@
+Subject: [PATCH] platform: define SDL_PLATFORM_SUBSTRATE
+
+Substrate is an ELF Unix with its own ELFOSABI (0x40) and its own cross
+toolchain, which predefines __substrate__ and __unix__ but NOT __linux__.
+SDL already sets SDL_PLATFORM_UNIX from __unix__, so the build is not
+adrift -- but there is no macro naming the platform itself, and the audio
+code below needs one to pick substrate's device path.
+
+Declare SDL_PLATFORM_SUBSTRATE the same way every other platform is
+declared.  No behaviour changes on any other target.
+
+--- a/include/SDL3/SDL_platform_defines.h
++++ b/include/SDL3/SDL_platform_defines.h
+@@ -126,6 +126,19 @@
+ #define SDL_PLATFORM_UNIX 1
+ #endif
+ 
++#ifdef __substrate__
++
++/**
++ * A preprocessor macro that is only defined if compiling for Substrate.
++ *
++ * Substrate is an ELF Unix with its own OSABI; its cross compiler predefines
++ * `__substrate__` and `__unix__`, so SDL_PLATFORM_UNIX is set as well.
++ *
++ * \since This macro is available since SDL 3.2.0.
++ */
++#define SDL_PLATFORM_SUBSTRATE 1
++#endif
++
+ #ifdef __APPLE__
+ 
+ /**

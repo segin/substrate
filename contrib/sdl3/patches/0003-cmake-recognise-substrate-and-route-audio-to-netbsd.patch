@@ -1,0 +1,51 @@
+Subject: [PATCH] cmake: recognise Substrate and give it the netbsd audio backend
+
+SDL_DetectCMakePlatform() had no case for Substrate, so a cross build with
+CMAKE_SYSTEM_NAME=Substrate fell through to "unknown" and set no platform
+variable.  Most of the build still worked, because the big platform branch
+keys on CMake's UNIX (which Platform/Substrate sets by deferring to
+Platform/Linux) -- X11 video, pthreads and dlopen all came out right.  Two
+things did not:
+
+  - Audio: the driver chain starts `if(NETBSD)`, so substrate got no audio
+    backend at all despite having a NetBSD-compatible audio(4) /dev/audio.
+  - OSS: SDL_OSS_DEFAULT is ON for any UNIX_SYS that is not Linux/NetBSD/
+    OpenBSD, so substrate defaulted to an OSS backend it has no /dev/dsp
+    for.
+
+Add the platform case and use it in both places.  Substrate is spelled as
+its own platform rather than mapped onto Linux because it is not Linux --
+it has no evdev, no ALSA and no OSS -- and pretending otherwise is how the
+build ends up compiling drivers that cannot work.
+
+--- a/cmake/sdlplatform.cmake
++++ b/cmake/sdlplatform.cmake
+@@ -30,6 +30,8 @@
+     set(sdl_cmake_platform RISCOS)
+   elseif(VITA)
+     set(sdl_cmake_platform Vita)
++  elseif(CMAKE_SYSTEM_NAME MATCHES "Substrate.*")
++    set(sdl_cmake_platform Substrate)
+   elseif(CMAKE_SYSTEM_NAME MATCHES ".*Linux")
+     set(sdl_cmake_platform Linux)
+   elseif(CMAKE_SYSTEM_NAME MATCHES "kFreeBSD.*")
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -211,7 +211,7 @@
+   set(SDL_SHARED_AVAILABLE OFF)
+ endif()
+ 
+-if((RISCOS OR UNIX_SYS) AND NOT (LINUX OR NETBSD OR OPENBSD))
++if((RISCOS OR UNIX_SYS) AND NOT (LINUX OR NETBSD OR OPENBSD OR SUBSTRATE))
+   set(SDL_OSS_DEFAULT ON)
+ else()
+   set(SDL_OSS_DEFAULT OFF)
+@@ -1794,7 +1794,7 @@
+   endif()
+ 
+   if(SDL_AUDIO)
+-    if(NETBSD)
++    if(NETBSD OR SUBSTRATE)
+         set(SDL_AUDIO_DRIVER_NETBSD 1)
+         sdl_glob_sources(
+           "${SDL3_SOURCE_DIR}/src/audio/netbsd/*.c"
