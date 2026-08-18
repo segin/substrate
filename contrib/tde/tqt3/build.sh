@@ -45,7 +45,15 @@ reloc_tquic() {  # $1 = dest bin dir
     cp "${HOSTTREE}/lib/libtqt-mt.so.3."* "${d}/" 2>/dev/null || true
     so="$(cd "${d}" && ls libtqt-mt.so.3.* 2>/dev/null | head -1)"
     [ -n "${so}" ] && ln -sf "${so}" "${d}/libtqt-mt.so.3"
-    cp "${HOSTTREE}/bin/tquic" "${d}/tquic"
+    # Called once on HOSTTREE/bin itself (to make the host tquic relocatable)
+    # and again on TREE/bin (to drop it over the cross-built one).  In the
+    # first case source and destination are the SAME FILE: cp refuses, and
+    # with set -e that took the whole build down -- so the port could only
+    # ever be built once, from a clean hostbuild/, and every re-run died
+    # here before compiling anything.
+    if [ "${HOSTTREE}/bin/tquic" != "${d}/tquic" ]; then
+        cp "${HOSTTREE}/bin/tquic" "${d}/tquic"
+    fi
     chrpath -r '$ORIGIN' "${d}/tquic" >/dev/null 2>&1 || true
 }
 
