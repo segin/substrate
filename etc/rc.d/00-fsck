@@ -28,16 +28,47 @@ case "${1:-start}" in
         if [ -n "$rootdev" ] && [ -x /usr/sbin/e2fsck ]; then
             echo "fsck: checking $rootdev"
             # -p: preen, fix only what is unambiguously safe without asking.
-            # 0 = clean, 1 = errors corrected; both fine to continue on.
-            # 4 and above means uncorrected errors, so leave / read-only
-            # rather than remounting rw over a filesystem known to be
-            # damaged -- that is how a recoverable problem stops being one.
+            #
+            # The status is a BITMASK (e2fsck/e2fsck.h), not a scale:
+            #   1  FSCK_NONDESTRUCT  errors corrected
+            #   2  FSCK_REBOOT       corrected, SYSTEM SHOULD BE REBOOTED
+            #   4  FSCK_UNCORRECTED  errors left uncorrected
+            # so it must be tested bit by bit -- rc can be 3 (1|2) or 6 (2|4).
             /usr/sbin/e2fsck -p "$rootdev"
             rc=$?
             if [ "$rc" -ge 4 ]; then
                 echo "fsck: $rootdev has uncorrected errors (status $rc)"
                 echo "fsck: leaving / read-only -- repair it, then:"
                 echo "        mount -o remount,rw /"
+                exit 1
+            fi
+            if [ "$((rc & 2))" -ne 0 ]; then
+                # e2fsck sets this bit only when it MODIFIED the root
+                # filesystem (EXT2_MF_ISROOT in e2fsck/unix.c), and prints
+                # "***** REBOOT SYSTEM *****".  It means: the on-disk
+                # metadata no longer matches what this kernel cached when it
+                # mounted the volume -- superblock, group descriptors,
+                # bitmaps, inodes, all read before the repair.
+                #
+                # Continuing here is what corrupts the filesystem.  The
+                # remount below would bring / read-write with that stale
+                # cache still authoritative, and the kernel would then write
+                # it back over everything e2fsck just fixed.  The symptom is
+                # files that plainly exist becoming unreachable a boot or two
+                # later ("ld.so: main-program needs libz.so.1 - not found")
+                # and the damage compounding on every subsequent boot.
+                #
+                # So reboot instead, WITHOUT remounting: / is still read-only,
+                # nothing has written to it, and the fresh boot re-reads the
+                # repaired metadata and finds the volume clean.  This is what
+                # every other init does with this status.
+                echo "fsck: $rootdev was repaired and the kernel's cached"
+                echo "fsck: metadata is now stale -- rebooting (status $rc)"
+                sync
+                /sbin/reboot -f
+                # Not reached.  If reboot(2) somehow fails, do NOT fall
+                # through to the remount.
+                echo "fsck: reboot failed; leaving / read-only" >&2
                 exit 1
             fi
         else
