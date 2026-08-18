@@ -31,13 +31,24 @@ int pthread_attr_getstacksize(const pthread_attr_t *attr, size_t *s) {
 
 /*
  * pthread_attr_t is a bare int (4-byte ABI, unchanged for already-compiled
- * consumers) with two bit-packed fields:
- *   bit 0 — detach state  (PTHREAD_CREATE_JOINABLE / DETACHED)
- *   bit 1 — inherit sched (PTHREAD_INHERIT_SCHED / EXPLICIT_SCHED)
+ * consumers) with four bit-packed fields:
+ *   bit 0     — detach state  (PTHREAD_CREATE_JOINABLE / DETACHED)
+ *   bit 1     — inherit sched (PTHREAD_INHERIT_SCHED / EXPLICIT_SCHED)
+ *   bits 2-3  — sched policy  (SCHED_OTHER / SCHED_FIFO / SCHED_RR)
+ *   bits 4-11 — sched priority
+ *
+ * The two scheduling fields were added for TQt3, whose TQThread::start()
+ * calls pthread_attr_getschedpolicy() and pthread_attr_setschedparam().
+ * They pack into spare bits of the same int rather than widening the type,
+ * so the 4-byte ABI every already-compiled consumer sees is unchanged.
  */
 #define AT_DETACH_MASK   0x1
 #define AT_INHERIT_MASK  0x2
 #define AT_INHERIT_SHIFT 1
+#define AT_POLICY_MASK   0xC
+#define AT_POLICY_SHIFT  2
+#define AT_PRIO_MASK     0xFF0
+#define AT_PRIO_SHIFT    4
 
 int pthread_attr_setdetachstate(pthread_attr_t *attr, int state) {
     if (!attr) return EINVAL;
@@ -63,6 +74,46 @@ int pthread_attr_setinheritsched(pthread_attr_t *attr, int inheritsched) {
 int pthread_attr_getinheritsched(const pthread_attr_t *attr, int *inheritsched) {
     if (!attr || !inheritsched) return EINVAL;
     *inheritsched = (*attr & AT_INHERIT_MASK) >> AT_INHERIT_SHIFT;
+    return 0;
+}
+/*
+ * Scheduling policy / parameters carried on the attr.
+ *
+ * Stored and reported faithfully so a get() round-trips what was set(), which
+ * is what callers actually test.  As with inherit-sched above, substrate's
+ * scheduler does not yet run threads strictly by POSIX policy and priority —
+ * pthread_create() records them in the per-thread registry (pthread_create.c),
+ * and the places that CAN honour them (rwlock acquisition ordering) consult
+ * that.  Reporting a value we accepted is honest; silently rewriting it to
+ * SCHED_OTHER would not be.
+ */
+int pthread_attr_setschedpolicy(pthread_attr_t *attr, int policy) {
+    if (!attr) return EINVAL;
+    if (policy != SCHED_OTHER && policy != SCHED_FIFO && policy != SCHED_RR)
+        return EINVAL;
+    *attr = (*attr & ~AT_POLICY_MASK) | ((policy << AT_POLICY_SHIFT) & AT_POLICY_MASK);
+    return 0;
+}
+int pthread_attr_getschedpolicy(const pthread_attr_t *attr, int *policy) {
+    if (!attr || !policy) return EINVAL;
+    *policy = (*attr & AT_POLICY_MASK) >> AT_POLICY_SHIFT;
+    return 0;
+}
+int pthread_attr_setschedparam(pthread_attr_t *attr,
+                               const struct sched_param *param) {
+    if (!attr || !param) return EINVAL;
+    int prio = param->sched_priority;
+    /* The field is 8 bits.  Reject anything that would not survive the
+     * round-trip rather than silently truncating it. */
+    if (prio < 0 || prio > (int)(AT_PRIO_MASK >> AT_PRIO_SHIFT))
+        return EINVAL;
+    *attr = (*attr & ~AT_PRIO_MASK) | ((prio << AT_PRIO_SHIFT) & AT_PRIO_MASK);
+    return 0;
+}
+int pthread_attr_getschedparam(const pthread_attr_t *attr,
+                               struct sched_param *param) {
+    if (!attr || !param) return EINVAL;
+    param->sched_priority = (*attr & AT_PRIO_MASK) >> AT_PRIO_SHIFT;
     return 0;
 }
 /* Contention scope: substrate threads are always 1:1 system scope.  Accept
