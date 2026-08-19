@@ -1615,7 +1615,59 @@ int vfs_unmount_legacy(const char *path) {
 
 int vfs_unmount_legacy_flags(const char *path, int flags) {
     if (!path) return -EINVAL;
-    
+
+    /*
+     * The root filesystem, handled here because the generic path below
+     * cannot reach it: it works by looking up the node the filesystem was
+     * mounted ON, and "/" has no such covered node.  Splitting "/" yields an
+     * empty parent and an empty name, so the `if (*name == '\0')` test a few
+     * lines down returned -EINVAL for it -- every time, unconditionally.
+     *
+     * That looked harmless (vfs_unmount_all ignores the return value and
+     * still logs "reboot: unmounting /"), but it meant the root's own
+     * ->unmount hook NEVER RAN on the way down.  For ext2 that hook is what
+     * calls ext2_sync_meta() and sets EXT2_VALID_FS -- the "cleanly
+     * unmounted" flag.  So every single shutdown, however graceful, left the
+     * root marked dirty, and every subsequent boot found:
+     *
+     *     ext2: filesystem was not cleanly unmounted - run e2fsck
+     *     sub-root was not cleanly unmounted, check forced.
+     *
+     * forcing a full repair pass on each boot.  sync() does not substitute
+     * for this: it flushes data buffers, it does not touch s_state.
+     *
+     * Only with MNT_FORCE, which is what sys_reboot()'s vfs_unmount_all()
+     * passes.  A plain `umount /` on a running system still gets -EBUSY, as
+     * it should -- this is a shutdown finaliser, not a way to pull the root
+     * out from under a live machine.
+     */
+    if (path[0] == '/' && path[1] == '\0') {
+        struct mount *root_mp = NULL, *mp_scan;
+        fs_node_t *rootfs = fs_root;
+
+        if (!(flags & MNT_FORCE)) return -EBUSY;
+
+        spinlock_acquire(&vfs_mount_lock);
+        TAILQ_FOREACH(mp_scan, &mountlist, mnt_list) {
+            if (strcmp(mp_scan->mnt_stat_path, "/") == 0) {
+                root_mp = mp_scan;
+                break;
+            }
+        }
+        if (root_mp) TAILQ_REMOVE(&mountlist, root_mp, mnt_list);
+        spinlock_release(&vfs_mount_lock);
+
+        /* Run the filesystem's unmount hook so it can flush metadata and
+         * mark itself clean.  fs_root is deliberately left pointing at the
+         * instance: the rest of the shutdown (device_shutdown_all, the
+         * console) may still walk it, and ext2_unmount already keeps the
+         * in-core mount alive when it is still referenced. */
+        if (rootfs && rootfs->unmount) rootfs->unmount(rootfs);
+        if (root_mp) kfree(root_mp, sizeof(struct mount));
+        return 0;
+    }
+
+
     /*
      * Lookup mount point (the directory that was mounted ON).
      * We need to find the node that has the mount point flag.
@@ -1789,9 +1841,12 @@ static int vfs_mount_depth(const char *p) {
  * backing store is left clean.  Forced, because by reboot time every
  * process is already being killed and a lingering reference must not
  * veto power-off.  /dev is unmounted dead last so device nodes stay
- * usable throughout; the root "/" is declined by
- * vfs_unmount_legacy_flags, which is fine — sync() already flushed it
- * and the machine is about to stop.
+ * usable throughout; the root "/" IS unmounted here (MNT_FORCE takes the
+ * dedicated root branch in vfs_unmount_legacy_flags), which is what runs
+ * ext2's unmount hook and marks the volume cleanly unmounted.  It used to
+ * be declined, on the reasoning that "sync() already flushed it" -- but
+ * sync() writes data buffers and never touches s_state, so the root was
+ * left dirty on every shutdown and every boot forced an fsck.
  */
 void vfs_unmount_all(void) {
     static char paths[32][128];
