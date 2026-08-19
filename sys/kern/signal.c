@@ -1642,6 +1642,11 @@ void signal_handle_pending(registers_t *regs) {
     // (Assuming Ring 3 is 0x1B or similar, but for now we check if cs != 0x08)
     if (regs->cs == 0x08) return;
 
+    /* Last gate before userspace: during a reboot every user thread but the
+     * one that called reboot() parks here for good, so none of them can fault
+     * on the address space proc_teardown_userspace() is busy reclaiming. */
+    sched_park_if_reboot_frozen();
+
     /* Reset the per-thread RT-delivery scratch.  It is set below only when
      * we actually dequeue a queued RT instance, and is read by the arch
      * populate_siginfo() during this same delivery pass. */

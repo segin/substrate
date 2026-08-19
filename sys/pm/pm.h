@@ -67,6 +67,8 @@ void advlock_release_file(struct file *f);
 void advlock_release_by_owner(struct file *f, int owner);
 int proc_fd_set_nonblock(int fd, int on);
 void proc_close_cloexec(process_t *p);
+/* Close every descriptor `p` holds (reboot teardown; see process.c). */
+void proc_close_all_fds(process_t *p);
 
 /*
  * proc_find - O(1) PID lookup via pid_hash[]

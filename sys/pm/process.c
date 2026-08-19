@@ -1371,6 +1371,31 @@ void proc_close_cloexec(process_t *p) {
     }
 }
 
+/*
+ * Close every descriptor a process holds, cloexec or not.
+ *
+ * Used by the reboot path (proc_teardown_userspace): an open descriptor pins
+ * the filesystem node behind it, and those pins are what keep the root mount
+ * busy at unmount time.  Unlike proc_exit()'s teardown this leaves the process
+ * otherwise intact -- it is never going to run again either way.
+ */
+void proc_close_all_fds(process_t *p) {
+    int fd;
+
+    if (!p) {
+        return;
+    }
+
+    for (fd = 0; fd < MAX_FD; fd++) {
+        if (p->fds[fd]) {
+            advlock_release_by_owner(p->fds[fd], p->pid);
+            file_close_ptr(p->fds[fd]);
+        }
+        proc_clear_fd(p, fd);
+    }
+    p->next_fd = 0;
+}
+
 // Reparent children to init
 void proc_reparent_children(process_t *p) {
     process_t *init;
@@ -1479,34 +1504,41 @@ static void proc_release_zombie_resources(process_t *proc) {
  *   ext2: unmount while inode 264 is still in use (pin=4 locked=0)     /lib/libc.so.0
  *   ext2: 6 node(s) still in use at unmount — mount structure retained (leaked)
  *
- * Note libc is pinned four times with no descriptor open on it: mapped
- * executables and shared libraries hold their references in the VNODE PAGER,
- * not in any fd table.  Closing descriptors alone would not have released
- * them -- the address space has to go too, which is what
- * proc_release_zombie_resources() does via vm_map_destroy().
+ * There are two distinct kinds of reference to shed, and both have to go:
  *
- * The caller keeps its address space: it is executing out of it, and
- * unmapping it would fault on the very next instruction.  Its descriptors and
- * directory references still go, since sys_reboot() never returns to
- * userspace.  So init and its libraries stay pinned once each, which is
- * unavoidable and harmless -- everything else is released.
+ *   - Descriptors.  An open file pins its node once per open description.
+ *   - Mapped images.  Note libc above is pinned four times with no descriptor
+ *     open on it: executables and shared libraries hold their references in
+ *     the VNODE PAGER, not in any fd table, so only tearing the address space
+ *     down releases them.
+ *
+ * Both are handled below, for every process including the caller.  The caller
+ * is executing out of its own address space, so that one is done last and only
+ * after switching to the kernel pmap -- see the comment there.
  *
  * Only safe here: sched_halt_userspace() has already made the caller the one
- * runnable thread, so nothing can be using what this frees.
+ * runnable thread, and the copy primitives plus signal_handle_pending() keep
+ * any thread woken by the closes below from touching userspace again.
  */
 void proc_teardown_userspace(process_t *keep) {
     unsigned spaces = 0, procs = 0;
 
+    /*
+     * Descriptors first, for every process including the caller.  Closing one
+     * can wake a thread blocked in poll()/read(), and that thread resumes deep
+     * inside its syscall and copies its result out -- which used to fault in
+     * the kernel on the address space being freed just below.  It no longer
+     * can: the copy primitives fail with EFAULT for a reboot-frozen thread,
+     * and signal_handle_pending() parks it before it could return to user.
+     */
     for (process_t *p = proc_first(); p; p = proc_next(p)) {
         procs++;
+        proc_close_all_fds(p);
+    }
+
+    for (process_t *p = proc_first(); p; p = proc_next(p)) {
         if (p == keep)
             continue;
-        /* Deliberately NOT closing descriptors: close wakes threads blocked
-         * in poll()/read(), and a woken thread resumes in the kernel and
-         * copyout()s into the address space being freed here -- an
-         * unhandled page fault on an unmapped user address, mid-shutdown.
-         * Nothing is waiting on these descriptors anyway; the pins that
-         * matter are pager-held, and vm_map_destroy below releases them. */
         /* Never free an address space the caller is running on.  Distinct
          * process_t's can share one (vfork, CLONE_VM), and freeing it here
          * would pull the memory out from under the thread doing the reboot. */
@@ -1517,8 +1549,40 @@ void proc_teardown_userspace(process_t *keep) {
         spaces++;
     }
 
-    kprintf("reboot: userspace torn down (%u process(es), %u address space(s) "
-            "released)\n", procs, spaces);
+    /*
+     * Finally the caller itself.  Its mapped image -- /sbin/init, ld.so and
+     * every library -- is the last thing pinning the root, and those pins are
+     * held by vnode pagers that only drop when the address space goes.
+     *
+     * It is executing out of that address space, so the order matters: move
+     * off it FIRST by activating the kernel pmap (kernel mappings are present
+     * in every pmap, so the current kernel stack and code stay mapped), then
+     * destroy the map, which frees the user pmap it owns.  sys_reboot() never
+     * returns to userspace, so nothing will touch a user address again.
+     *
+     * proc_exit() already does exactly this switch on a live process, which is
+     * what makes it safe here.
+     */
+    if (keep) {
+        if (keep->cwd_node) {
+            close_fs(keep->cwd_node);
+            keep->cwd_node = NULL;
+        }
+        if (keep->root_node && keep->root_node != fs_root) {
+            close_fs(keep->root_node);
+            keep->root_node = NULL;
+        }
+        if (keep->vm_map) {
+            pmap_activate(pmap_kernel());
+            keep->pmap = pmap_kernel();
+            vm_map_destroy(keep->vm_map);
+            keep->vm_map = NULL;
+            spaces++;
+        }
+    }
+
+    kprintf("reboot: userspace torn down (%u process(es), "
+            "%u address space(s) released)\n", procs, spaces);
 }
 
 void proc_reap_autoreap_zombies(void) {

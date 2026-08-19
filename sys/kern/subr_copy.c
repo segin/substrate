@@ -11,6 +11,8 @@
 #include <sys/param.h>
 #include <sys/proc.h>
 
+#include "sched.h"
+
 /*
  * validate_user_addr - Check if address range is valid user-space
  *
@@ -23,6 +25,12 @@ int validate_user_addr(const void *addr, size_t size) {
 
     /* Check for overflow */
     if (end < start)
+        return EFAULT;
+
+    /* A reboot is reclaiming this thread's address space: nothing in it is
+     * addressable any more, so fail every copy rather than fault in the
+     * kernel.  The syscall unwinds and the thread parks on its way out. */
+    if (sched_reboot_frozen_current())
         return EFAULT;
 
     /* Must be above minimum user address (avoid NULL region).  Exception:

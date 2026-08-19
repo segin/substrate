@@ -111,6 +111,13 @@ void sched_yield(void);
  * dispatches a user thread again except `keep` (the reboot caller).
  * Kernel threads keep running — the unmount/flush path needs them. */
 void sched_halt_userspace(thread_t *keep);
+/*
+ * Called from the return-to-user paths: if a reboot is in progress and the
+ * caller is not the thread that asked for it, the caller never goes back to
+ * userspace (its address space may already be gone).  No-op otherwise.
+ */
+void sched_park_if_reboot_frozen(void);
+int sched_reboot_frozen_current(void);
 
 void sched_switch(thread_t *next);
 int sched_get_current_tid(void);

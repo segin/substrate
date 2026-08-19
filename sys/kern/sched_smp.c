@@ -36,6 +36,43 @@ static int sched_reboot_frozen(thread_t *t) {
            t->proc && !t->proc->is_kernel_task;
 }
 
+/*
+ * Park the calling thread forever if the shutdown freeze applies to it.
+ *
+ * Gating sched_enqueue()/dispatch alone is not enough: a thread already in
+ * the kernel when the freeze went up (mid-syscall, or taking an interrupt)
+ * reaches its return-to-user path without ever consulting the runqueue, and
+ * resumes in userspace.  With proc_teardown_userspace() having freed its
+ * address space out from under it that is an instant fault — which is how
+ * init itself came back as "Init process exited" during a reboot.
+ *
+ * So the return-to-user paths call this as their last gate.  The thread goes
+ * to sleep and stays there: sched_enqueue() refuses to requeue a frozen
+ * thread, so the loop only re-runs on a spurious wakeup.
+ */
+/*
+ * True when the calling thread's userspace is being reclaimed for reboot.
+ * The user/kernel copy primitives consult this: a thread woken out of, say,
+ * poll() by proc_teardown_userspace() closing its descriptors resumes deep
+ * inside a syscall and copies its result out long before it would reach the
+ * return-to-user park below.  By then its address space may be gone, so the
+ * copy has to fail cleanly (EFAULT) instead of faulting in the kernel.
+ */
+int sched_reboot_frozen_current(void) {
+    return sched_reboot_frozen(current_thread);
+}
+
+void sched_park_if_reboot_frozen(void) {
+    thread_t *t = current_thread;
+
+    if (!sched_reboot_frozen(t)) return;
+
+    while (sched_reboot_frozen(t)) {
+        t->state = THREAD_BLOCKED;
+        sched_yield();
+    }
+}
+
 // Initialize per-CPU runqueues
 void sched_smp_init(int cpu_count) {
     if (cpu_count > MAX_CPUS) cpu_count = MAX_CPUS;
