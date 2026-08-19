@@ -60,6 +60,21 @@ static size_t blkdev_vfs_write(fs_node_t *node, off_t offset, size_t size, const
     return blkdev_write_bytes(dev, offset, size, buffer);
 }
 
+/*
+ * Drop every cached buffer for the device behind `node` (see blkdev.h).
+ *
+ * The buffer cache is keyed on the blkdev_t, which is what node->impl holds
+ * for a devfs block node, so this is just the unwrap plus the purge.  Callers
+ * are filesystems re-reading metadata that changed on disk while they were
+ * mounted read-only.
+ */
+void blkdev_invalidate_node(fs_node_t *node) {
+    if (!node) return;
+    blkdev_t *dev = (blkdev_t *)node->impl;
+    if (!dev) return;
+    bio_dev_purge(dev);
+}
+
 static int blkdev_vfs_ioctl(fs_node_t *node, uint32_t request, void *arg) {
     blkdev_t *dev = (blkdev_t *)node->impl;
 

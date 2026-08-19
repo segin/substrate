@@ -79,6 +79,21 @@ typedef struct blkdev {
  * failure. */
 int blkdev_flush_all(void);
 
+/*
+ * Drop every cached buffer for the device behind a devfs node.
+ *
+ * For a filesystem that must re-read metadata which changed underneath it --
+ * the read-only -> read-write remount path, where something else (e2fsck) may
+ * have rewritten the volume while the kernel was not writing to it.  Without
+ * this the block cache keeps serving pre-repair contents and the filesystem
+ * writes its stale copies back.
+ *
+ * Takes the devfs fs_node_t rather than the blkdev_t so callers above the
+ * driver layer (fs/ext2) need not reach into node->impl themselves.
+ * No-op for a node that is not a block device.
+ */
+void blkdev_invalidate_node(fs_node_t *node);
+
 // Register a block device (creates DevFS entry)
 void blkdev_register(blkdev_t *dev);
 void blkdev_unregister(blkdev_t *dev);

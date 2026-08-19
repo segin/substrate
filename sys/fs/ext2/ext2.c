@@ -6202,6 +6202,134 @@ static int ext2_syncfs(fs_node_t *node) {
     return rc;
 }
 
+/*
+ * Re-read every piece of metadata this mount caches, discarding what it holds.
+ *
+ * Called when a mount goes read-only -> read-write.  While the volume was
+ * read-only this kernel wrote nothing to it, so nothing it has cached is
+ * authoritative -- but something ELSE may have rewritten the disk underneath.
+ * That is not hypothetical: /etc/rc.d/00-fsck runs e2fsck against the
+ * still-read-only root on every boot, and e2fsck repairs it in place.
+ *
+ * Without this, the mount-time copies stay live and are actively written
+ * back.  ext2_remount's own "volume is in use again" update calls
+ * ext2_flush_super() on the cached fs->sb, so a single remount undoes every
+ * superblock correction e2fsck just made -- free block/inode counts, state,
+ * the lot -- and the stale group descriptors follow on the next
+ * ext2_sync_meta().  Repair, un-repair, repeat: the volume degrades a little
+ * more on each boot, and files that are intact on disk become unreachable.
+ *
+ * Geometry (block size, group count, descriptor size) cannot change under a
+ * live mount -- fsck repairs a filesystem, it does not reshape one -- so the
+ * allocations sized from it at mount time stay valid and only their contents
+ * are refreshed.
+ */
+static int ext2_reload_meta(ext2_fs_t *fs) {
+    if (!fs || !fs->device || !fs->device->read) return -EINVAL;
+
+    /* Drop the block cache for this device first, so every read below comes
+     * off the platter rather than out of a buffer filled before the repair. */
+    blkdev_invalidate_node(fs->device);
+
+    /* Superblock. */
+    uint8_t sb_buf[1024];
+    if (fs->device->read(fs->device, 1024, 1024, sb_buf) != 1024) {
+        kprintf("ext2: remount rw: cannot re-read superblock\n");
+        return -EIO;
+    }
+    ext2_superblock_t fresh;
+    memcpy(&fresh, sb_buf, sizeof(fresh));
+    if (fresh.s_magic != EXT2_SUPER_MAGIC) {
+        kprintf("ext2: remount rw: bad magic on re-read — refusing\n");
+        return -EIO;
+    }
+    /* Geometry must match what we mounted with; if it does not, something is
+     * badly wrong and continuing would index the existing arrays out of
+     * bounds. */
+    uint32_t new_bs = 1024u << fresh.s_log_block_size;
+    if (new_bs != fs->block_size ||
+        fresh.s_inodes_per_group != fs->inodes_per_group ||
+        fresh.s_blocks_per_group != fs->blocks_per_group) {
+        kprintf("ext2: remount rw: geometry changed on disk — refusing\n");
+        return -EIO;
+    }
+    memcpy(&fs->sb, &fresh, sizeof(fs->sb));
+
+    /* Group descriptor table, read exactly as the mount path does. */
+    if (fs->bgd && fs->gdt_blocks) {
+        uint32_t bgd_block = fs->sb.s_first_data_block + 1;
+        uint32_t raw_sz    = fs->gdt_blocks * fs->block_size;
+        uint8_t *raw = kmalloc(raw_sz);
+        if (!raw) return -ENOMEM;
+        for (uint32_t i = 0; i < fs->gdt_blocks; i++)
+            ext2_read_block(fs, bgd_block + i, raw + i * fs->block_size);
+        for (uint32_t g = 0; g < fs->group_count; g++) {
+            uint8_t *src = raw + g * fs->desc_size;
+            memcpy(&fs->bgd[g], src, sizeof(ext2_group_desc_t));
+            if (fs->bbitmap_csum_hi &&
+                fs->desc_size >= EXT2_BG_BBITMAP_CSUM_HI_OFF + 2)
+                fs->bbitmap_csum_hi[g] =
+                    *(uint16_t *)(src + EXT2_BG_BBITMAP_CSUM_HI_OFF);
+            if (fs->ibitmap_csum_hi &&
+                fs->desc_size >= EXT2_BG_IBITMAP_CSUM_HI_OFF + 2)
+                fs->ibitmap_csum_hi[g] =
+                    *(uint16_t *)(src + EXT2_BG_IBITMAP_CSUM_HI_OFF);
+        }
+        kfree(raw, raw_sz);
+    }
+
+    /* Cached allocation bitmaps: force the next access to fetch them. */
+    fs->active_bg_group       = (uint32_t)-1;
+    fs->active_inode_bg_group = (uint32_t)-1;
+
+    /* Deferred-write bookkeeping.  Everything it referred to has just been
+     * replaced by the on-disk truth, so re-flushing it would put the stale
+     * values straight back. */
+    fs->sb_dirty       = 0;
+    fs->meta_dirty_ops = 0;
+    if (fs->bgd_dirty) {
+        uint32_t n = (fs->group_count + 7u) / 8u;
+        memset(fs->bgd_dirty, 0, n ? n : 1);
+    }
+
+    /* Allocation hints may point into space the repair freed or claimed. */
+    fs->last_alloc_group = 0;
+    fs->last_alloc_bit   = 0;
+
+    /*
+     * Per-node caches.  Purging the block cache is not enough on its own:
+     * every ext2_node_t slot carries its own copy of an on-disk inode plus a
+     * name->inode dcache and a readdir cursor, all populated before the
+     * repair.  A stale directory slot answers lookups from that dcache and
+     * never touches the disk, so a file that is present and intact reports
+     * ENOENT -- which is exactly what "ld.so: main-program needs libz.so.1 -
+     * not found" was, with the library sitting there the whole time.  Worse,
+     * a stale cached inode gets written back on the next update, re-corrupting
+     * what e2fsck had just put right.
+     *
+     * Re-read the inode for every live slot and clear its name caches.  Slots
+     * are refreshed rather than dropped because they may be pinned by an open
+     * file (pin_count) and the fs_node_t handed out to the VFS must stay
+     * valid; refilling from disk keeps the identity and replaces the
+     * contents.
+     */
+    mutex_lock(&ext2_node_cache_lock);
+    for (int i = 0; i < EXT2_NODE_CACHE_SIZE; i++) {
+        ext2_node_t *n = &ext2_node_cache[i];
+        if (n->inode_num == 0) continue;        /* free slot */
+        if (n->fs != fs) continue;              /* another mount */
+        ext2_inode_t fresh_inode;
+        if (ext2_read_inode(fs, n->inode_num, &fresh_inode) == 0)
+            memcpy(&n->inode, &fresh_inode, sizeof(ext2_inode_t));
+        memset(n->dcache, 0, sizeof(n->dcache));
+        n->dcache_idx        = 0;
+        n->last_readdir_idx  = (uint64_t)-1;
+        n->last_readdir_pos  = 0;
+    }
+    mutex_unlock(&ext2_node_cache_lock);
+    return 0;
+}
+
 /* MNT_UPDATE hook: flip the live mount between read-only and read-write.
  * Refuses a read-write remount if the volume was forced read-only for
  * unsupported RO_COMPAT features (writing could corrupt it). */
@@ -6223,6 +6351,19 @@ int ext2_remount(fs_node_t *node, uint32_t flags) {
         ext2_sync_meta(fs);
         fs->sb.s_state |= EXT2_VALID_FS;
         ext2_flush_super(fs);
+    }
+    /* Going read-write: discard everything cached while read-only and re-read
+     * it, BEFORE the s_state update below writes a superblock back.  The disk
+     * may have been repaired underneath us (00-fsck runs e2fsck on the
+     * read-only root at boot); flushing the mount-time copy would undo it.
+     * See ext2_reload_meta(). */
+    if (!want_ro && fs->readonly) {
+        int rc = ext2_reload_meta(fs);
+        if (rc != 0) {
+            kprintf("ext2: refusing rw remount: metadata re-read failed (%d)\n",
+                    rc);
+            return rc;          /* stay read-only rather than write blind */
+        }
     }
     fs->readonly = want_ro;
     if (!want_ro) {
