@@ -93,6 +93,16 @@ process_t *proc_next(process_t *p);
 int proc_get_last_pid(void);
 void proc_reap_autoreap_zombies(void);
 
+/*
+ * Release everything userspace holds, on the way to reboot: every process's
+ * open descriptors, its cwd/root references, and (for all but `keep`) its
+ * address space, whose vnode-pager references are what pin mapped
+ * executables and libraries.  Call after sched_halt_userspace() and before
+ * vfs_unmount_all(), so the filesystems come down unreferenced.
+ * `keep` -- the process calling reboot -- retains its address space.
+ */
+void proc_teardown_userspace(process_t *keep);
+
 void rusage_init(process_t *p);
 void rusage_finalize(process_t *p);
 void proc_exit(int code);

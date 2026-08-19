@@ -4486,6 +4486,13 @@ int sys_reboot(int cmd) {
      * teardown below or touch a filesystem mid-unmount. */
     sched_halt_userspace(current_thread);
 
+    /* Release what userspace still holds — descriptors, cwd/root references
+     * and address spaces — so the filesystems below come down unreferenced.
+     * Without this every mapped executable and library kept its node pinned
+     * (the reference lives in the vnode pager, not in an fd), and the root
+     * unmount had to retain the whole mount structure rather than finish. */
+    proc_teardown_userspace(current_process);
+
     /* Unmount every filesystem before the machine goes down — deepest
      * mount point first, so nested mounts unwind before the parents
      * they sit on and each backing store is left clean. */

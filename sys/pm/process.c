@@ -1466,6 +1466,61 @@ static void proc_release_zombie_resources(process_t *proc) {
     proc->pmap = pmap_kernel();
 }
 
+/*
+ * Tear userspace down on the way to reboot.
+ *
+ * sys_reboot() froze the scheduler and went straight to vfs_unmount_all(),
+ * with every process still holding everything it had open.  Each of those
+ * references pins a filesystem node, so the root unmount found the running
+ * system still using it and had to retain (leak) the mount instead of
+ * finishing cleanly:
+ *
+ *   ext2: unmount while inode 17199 is still in use (pin=3 locked=0)   /sbin/init
+ *   ext2: unmount while inode 264 is still in use (pin=4 locked=0)     /lib/libc.so.0
+ *   ext2: 6 node(s) still in use at unmount — mount structure retained (leaked)
+ *
+ * Note libc is pinned four times with no descriptor open on it: mapped
+ * executables and shared libraries hold their references in the VNODE PAGER,
+ * not in any fd table.  Closing descriptors alone would not have released
+ * them -- the address space has to go too, which is what
+ * proc_release_zombie_resources() does via vm_map_destroy().
+ *
+ * The caller keeps its address space: it is executing out of it, and
+ * unmapping it would fault on the very next instruction.  Its descriptors and
+ * directory references still go, since sys_reboot() never returns to
+ * userspace.  So init and its libraries stay pinned once each, which is
+ * unavoidable and harmless -- everything else is released.
+ *
+ * Only safe here: sched_halt_userspace() has already made the caller the one
+ * runnable thread, so nothing can be using what this frees.
+ */
+void proc_teardown_userspace(process_t *keep) {
+    unsigned spaces = 0, procs = 0;
+
+    for (process_t *p = proc_first(); p; p = proc_next(p)) {
+        procs++;
+        if (p == keep)
+            continue;
+        /* Deliberately NOT closing descriptors: close wakes threads blocked
+         * in poll()/read(), and a woken thread resumes in the kernel and
+         * copyout()s into the address space being freed here -- an
+         * unhandled page fault on an unmapped user address, mid-shutdown.
+         * Nothing is waiting on these descriptors anyway; the pins that
+         * matter are pager-held, and vm_map_destroy below releases them. */
+        /* Never free an address space the caller is running on.  Distinct
+         * process_t's can share one (vfork, CLONE_VM), and freeing it here
+         * would pull the memory out from under the thread doing the reboot. */
+        if (keep && p->vm_map && p->vm_map == keep->vm_map)
+            continue;
+
+        proc_release_zombie_resources(p);
+        spaces++;
+    }
+
+    kprintf("reboot: userspace torn down (%u process(es), %u address space(s) "
+            "released)\n", procs, spaces);
+}
+
 void proc_reap_autoreap_zombies(void) {
     /*
      * INVARIANT: this runs from sched_yield() with interrupts ENABLED (the
