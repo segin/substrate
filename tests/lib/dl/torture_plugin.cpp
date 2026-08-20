@@ -19,6 +19,12 @@ struct PluginError : std::runtime_error {
  * module a real TLS slot rather than offset 0. */
 static thread_local int plugin_tls = 0;
 
+/* Deliberately NON-ZERO, and therefore in .tdata rather than .tbss.  A thread
+ * that reads this correctly proves the loader copied the module's
+ * initialization image into that thread's block -- fresh anonymous memory
+ * would read as 0 and pass a zero-initialized check by accident. */
+static thread_local int plugin_tls_init = 0x1234;
+
 extern "C" void plugin_throw(const char *what) {
     throw PluginError(std::string("plugin: ") + what);
 }
@@ -34,3 +40,6 @@ extern "C" int plugin_tls_roundtrip(int v) {
     plugin_tls = v;
     return plugin_tls;
 }
+
+extern "C" int plugin_tls_get(void)      { return plugin_tls; }
+extern "C" int plugin_tls_initval(void)  { return plugin_tls_init; }

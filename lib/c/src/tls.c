@@ -31,13 +31,43 @@ static inline unsigned long *tls_dtv(void)
     return dtv;
 }
 
+/*
+ * Fill in a DTV slot this thread has never used.
+ *
+ * Defined by ld.so, and weak here so a statically linked program -- which has
+ * no interpreter, and whose TLS is entirely laid out at startup, so it can
+ * never take this path -- still links.
+ *
+ * The DTV is grown lazily per thread.  A module loaded by dlopen gets its slot
+ * initialized eagerly in the threads that exist at that moment (ld.so has to,
+ * for initial-exec references, which compile to a bare %gs offset and so have
+ * no hook at all).  But a thread created concurrently with that dlopen, or one
+ * whose DTV predates it, reaches a general-dynamic reference with the slot
+ * still empty.  That is what this resolves -- on first access, in that thread.
+ */
+extern void *__ldso_tls_update(unsigned long modid) __attribute__((weak));
+
+static inline void *tls_addr(tls_index *ti)
+{
+    unsigned long base = tls_dtv()[ti->ti_module];
+
+    /* A module's block is never at address 0, so an empty slot means "this
+     * thread has not seen that module yet". */
+    if (__builtin_expect(base == 0, 0)) {
+        if (!__ldso_tls_update)
+            return (void *)ti->ti_offset;   /* no interpreter: as before */
+        base = (unsigned long)__ldso_tls_update(ti->ti_module);
+    }
+    return (void *)(base + ti->ti_offset);
+}
+
 void *__tls_get_addr(tls_index *ti)
 {
-    return (void *)(tls_dtv()[ti->ti_module] + ti->ti_offset);
+    return tls_addr(ti);
 }
 
 /* i386 ABI: argument arrives in %eax (regparm(1)); result returned in %eax. */
 __attribute__((regparm(1))) void *___tls_get_addr(tls_index *ti)
 {
-    return (void *)(tls_dtv()[ti->ti_module] + ti->ti_offset);
+    return tls_addr(ti);
 }

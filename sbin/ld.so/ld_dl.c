@@ -54,7 +54,7 @@ static int g_dl_futex = 0;      /* 0=free, 1=held, 2=held+waiters */
 static int g_dl_owner = 0;      /* thr_self() of the holder, 0 if free */
 static int g_dl_depth = 0;      /* recursion count */
 
-static void dl_lock(void) {
+void ld_dl_lock(void) {
     int me = ld_thr_self();
     if (g_dl_owner == me) { g_dl_depth++; return; }   /* re-entrant */
     int c = __sync_val_compare_and_swap(&g_dl_futex, 0, 1);
@@ -69,7 +69,7 @@ static void dl_lock(void) {
     g_dl_depth = 1;
 }
 
-static void dl_unlock(void) {
+void ld_dl_unlock(void) {
     if (--g_dl_depth > 0) return;                       /* still held by us */
     g_dl_owner = 0;
     /* If there were waiters (value was 2), wake one after releasing. */
@@ -221,9 +221,9 @@ static void *dlopen_locked(const char *path, int flags) {
 }
 
 LD_PUBLIC void *__ldso_dlopen(const char *path, int flags) {
-    dl_lock();
+    ld_dl_lock();
     void *r = dlopen_locked(path, flags);
-    dl_unlock();
+    ld_dl_unlock();
     return r;
 }
 
@@ -297,9 +297,9 @@ static void *dlsym_locked(void *handle, const char *name, void *caller_pc) {
 }
 
 LD_PUBLIC void *__ldso_dlsym(void *handle, const char *name, void *caller_pc) {
-    dl_lock();
+    ld_dl_lock();
     void *r = dlsym_locked(handle, name, caller_pc);
-    dl_unlock();
+    ld_dl_unlock();
     return r;
 }
 
@@ -354,9 +354,9 @@ static int dlclose_locked(void *handle) {
 }
 
 LD_PUBLIC int __ldso_dlclose(void *handle) {
-    dl_lock();
+    ld_dl_lock();
     int r = dlclose_locked(handle);
-    dl_unlock();
+    ld_dl_unlock();
     return r;
 }
 

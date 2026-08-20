@@ -467,6 +467,14 @@ int ld_setup_tls(void);
  * object is relocated.  Returns 0 on success, -1 if the surplus is used up. */
 int ld_tls_add_module(ld_obj_t *o);
 
+/*
+ * The dlopen/dlsym/dlclose lock.  Recursive, so a constructor running under
+ * dlopen may take it again.  Exposed because the TLS code mutates the
+ * per-thread block registry, which dlopen also walks.
+ */
+void ld_dl_lock(void);
+void ld_dl_unlock(void);
+
 /* Native syscall: install a TLS base for the current thread.
  * Returns 0 on success or -errno. */
 int ld_sys_set_gsbase(ld_u32 base);

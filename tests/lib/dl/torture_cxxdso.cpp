@@ -68,6 +68,41 @@ static void *tls_worker(void *arg) {
     return 0;
 }
 
+/* ------------------------------------------------------------------ *
+ * A thread that exists BEFORE the plugin is dlopen'd, and reads the
+ * plugin's thread-locals afterwards.
+ *
+ * This is the case a one-shot TLS layout cannot serve.  When the loader lays
+ * TLS out once at startup, this thread's block was sized and filled before the
+ * module existed, so its slot holds neither the module's initialization image
+ * nor a DTV entry.  Getting it right needs the module initialized in every
+ * live thread (for initial-exec, which has no hook) plus a lazily-filled
+ * per-thread DTV (for general-dynamic).
+ * ------------------------------------------------------------------ */
+static pthread_mutex_t pre_mx   = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t  pre_cv   = PTHREAD_COND_INITIALIZER;
+static int             pre_go;          /* set once the plugin is loaded */
+static int             pre_initval;     /* what the pre-existing thread saw */
+static int             pre_roundtrip;
+static int             pre_isolated;
+
+static int (*p_tls_roundtrip)(int);
+static int (*p_tls_initval)(void);
+
+static void *pre_worker(void *arg) {
+    (void)arg;
+    pthread_mutex_lock(&pre_mx);
+    while (!pre_go) pthread_cond_wait(&pre_cv, &pre_mx);
+    pthread_mutex_unlock(&pre_mx);
+
+    /* Must see the module's .tdata image (0x1234), not zeroed memory. */
+    pre_initval = p_tls_initval();
+    /* And its own private copy, distinct from main's. */
+    pre_roundtrip = p_tls_roundtrip(4242);
+    pre_isolated  = p_tls_roundtrip(4242);
+    return 0;
+}
+
 int main(void) {
     /* -------- shared runtime, in this module -------- */
     {
@@ -76,6 +111,12 @@ int main(void) {
         if (os.str() == "iostream 123") ok("ostringstream + locale");
         else                            fail("ostringstream + locale");
     }
+
+    /* Start the pre-dlopen thread FIRST, so its TLS block is allocated while
+     * the plugin is still unknown to the loader. */
+    pthread_t pre;
+    int have_pre = (pthread_create(&pre, 0, pre_worker, 0) == 0);
+    if (!have_pre) fail("pthread_create before dlopen");
 
     /* -------- dlopen a C++ module (needs post-startup TLS) -------- */
     void *h = dlopen(PLUGIN_PATH, RTLD_NOW | RTLD_GLOBAL);
@@ -128,6 +169,37 @@ int main(void) {
     /* -------- the plugin's own TLS is addressable -------- */
     if (plugin_tls(0x5a5a) == 0x5a5a) ok("thread_local inside a dlopen'd module");
     else                              fail("thread_local inside a dlopen'd module");
+
+    /* -------- and reachable from a thread older than the plugin -------- */
+    if (have_pre) {
+        p_tls_roundtrip = plugin_tls;
+        p_tls_initval   = (int (*)(void))dlsym(h, "plugin_tls_initval");
+        if (!p_tls_initval) {
+            failf("dlsym plugin_tls_initval", dlerror());
+        } else {
+            pthread_mutex_lock(&pre_mx);
+            pre_go = 1;
+            pthread_cond_signal(&pre_cv);
+            pthread_mutex_unlock(&pre_mx);
+            pthread_join(pre, 0);
+
+            if (pre_initval == 0x1234)
+                ok("pre-dlopen thread sees the module's TLS init image");
+            else
+                fail("pre-dlopen thread sees the module's TLS init image");
+
+            if (pre_roundtrip == 4242 && pre_isolated == 4242)
+                ok("pre-dlopen thread has its own copy of module TLS");
+            else
+                fail("pre-dlopen thread has its own copy of module TLS");
+
+            /* main's value must be untouched by the other thread's writes. */
+            if (plugin_tls(0x5a5a) == 0x5a5a)
+                ok("module TLS isolated between main and pre-dlopen thread");
+            else
+                fail("module TLS isolated between main and pre-dlopen thread");
+        }
+    }
 
     /* -------- per-thread TLS stays isolated -------- */
     tls_value = 7;
