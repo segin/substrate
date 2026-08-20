@@ -36,10 +36,16 @@ set(_substrate_warn "-Wno-error=incompatible-pointer-types -Wno-error=int-conver
 set(CMAKE_C_FLAGS_INIT   "-march=i486 -mtune=i486 -fcommon ${_substrate_warn}")
 set(CMAKE_CXX_FLAGS_INIT "-march=i486 -mtune=i486 -fcommon ${_substrate_warn}")
 
-# Pull transitive DT_NEEDED libs (libtqt-mt -> Xft/X11/freetype/...; libstdc++
-# -> libpthread) through the link, and point the linker at the sysroot for
-# -rpath-link resolution.  (substrate's libstdc++.so now carries libpthread in
-# its DT_NEEDED, so C++ links resolve pthread_* without an explicit -lpthread.)
+# Pull transitive DT_NEEDED libs (libtqt-mt -> Xft/X11/freetype/...) through
+# the link, and point the linker at the sysroot for -rpath-link resolution.
+#
+# On pthread: substrate's libstdc++.so.6 records NO DT_NEEDED entries at all
+# (the libtool link that built it passed -nostdlib with no -l flags), so it
+# does not pull libpthread in itself -- an earlier comment here claimed it
+# did.  What actually satisfies libstdc++'s __gthread_* references is the
+# toolchain `specs` override, which appends -lpthread to LIB_SPEC for every
+# link; see contrib/gcc/install-specs.sh.  Nothing to do here, but do not
+# "simplify" on the assumption that libstdc++ carries its own dependencies.
 # substrate's `gcc -shared` adds no implicit libc, so a shared library with
 # no other dependency (e.g. tdelibs' libtdefakes) can't resolve plain libc
 # symbols like errno -- and tdelibs links its shared objects with

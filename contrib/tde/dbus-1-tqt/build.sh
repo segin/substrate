@@ -15,6 +15,16 @@ TQ="${MERGED}/opt/trinity"
 MODULES="${TDE_TOP}/tde-cmake/build/tde-cmake-trinity-${VER}/modules"
 TC="${TDE_TOP}/substrate-tde-toolchain.cmake"
 [ -d "${TREE}" ] || { echo "run ./fetch.sh first" >&2; exit 1; }
+
+# Assemble the merged sysroot and the pkg-config build-root this configure
+# reads.  This script used only to *reference* ${TDEROOT}, while tdelibs was
+# the only thing that built it -- so dbus-1-tqt could only configure if
+# tdelibs had already been built, even though it comes BEFORE tdelibs in the
+# dependency order.  From a clean tree it failed with "dbus-1 is required, but
+# was not found" despite dbus being installed correctly, because the build-root
+# the pkg-config paths pointed into did not exist at all.
+"${TDE_TOP}/merge-staging.sh"
+
 export PKG_CONFIG_SYSROOT_DIR="${TDEROOT}"
 export PKG_CONFIG_LIBDIR="${TDEROOT}/usr/lib/pkgconfig:${TDEROOT}/opt/trinity/lib/pkgconfig"
 cd "${TREE}"; rm -rf obj; mkdir obj; cd obj
