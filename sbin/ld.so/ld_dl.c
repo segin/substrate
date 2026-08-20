@@ -185,6 +185,18 @@ static void *dlopen_locked(const char *path, int flags) {
             }
         }
     }
+    /* Hand every newly-loaded PT_TLS module a slot out of the surplus static
+     * TLS before anything is relocated: the TLS relocations below read
+     * tls_modid/tls_offset, and a module that missed the startup layout still
+     * has them at 0, which ld_reloc.c refuses (it would otherwise compute
+     * positive %gs offsets straight over the TCB). */
+    for (ld_obj_t *r = ld_obj_list(); r; r = r->next) {
+        if (ld_tls_add_module(r) != 0) {
+            ld_dl_error("dlopen(\"", path, "\"): no room in static TLS", 0);
+            ld_obj_restore(snap_tail, snap_count);
+            return 0;
+        }
+    }
     for (ld_obj_t *r = ld_obj_list(); r; r = r->next) {
         if (ld_relocate(r) != 0) {
             ld_dl_error("dlopen(\"", path, "\"): relocation failed", 0);

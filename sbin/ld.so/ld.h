@@ -462,6 +462,10 @@ void __ldso_run_fini(void);
  * sys_set_gsbase syscall.  Returns 0 on success or a negative
  * errno.  Called once after relocations and before init arrays. */
 int ld_setup_tls(void);
+/* Lay out a PT_TLS module that arrived after ld_setup_tls() (i.e. via dlopen)
+ * in the surplus static TLS reserved by that pass.  Must run before the
+ * object is relocated.  Returns 0 on success, -1 if the surplus is used up. */
+int ld_tls_add_module(ld_obj_t *o);
 
 /* Native syscall: install a TLS base for the current thread.
  * Returns 0 on success or -errno. */

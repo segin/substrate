@@ -38,6 +38,29 @@
 #define LD_TLS_TCB_SIZE 8       /* TCB[0]=self-ptr, TCB[1]=DTV reserved */
 #define LD_TLS_MAX_BYTES 0x8000 /* sanity cap on total per-thread block */
 
+/*
+ * Surplus static TLS.
+ *
+ * The startup layout below is one-shot: it walks the objects loaded by the
+ * initial BFS and hands each a fixed negative offset from the thread pointer.
+ * A module that arrives later via dlopen missed that pass, so it used to keep
+ * tls_modid 0 / tls_offset 0 and every TLS relocation against it had to fail
+ * (see ld_reloc.c) rather than emit positive %gs offsets over the TCB.
+ *
+ * That made any dlopen of a PT_TLS-carrying object impossible -- which is
+ * every C++ shared module, since linking libstdc++ pulls TLS in.  It is
+ * exactly what a plugin host like TDE's tdeinit/KLibLoader does for a living.
+ *
+ * So reserve a slab below the startup modules and carve dlopen'd modules out
+ * of it (ld_tls_add_module).  This is what glibc calls surplus static TLS, and
+ * it serves the initial-exec model -- R_386_TLS_TPOFF against a fixed offset,
+ * which is what those modules actually emit.  It is deliberately NOT a
+ * growable DTV: a module needing more than the surplus is refused with a
+ * diagnostic instead of silently corrupting a neighbouring module's slot.
+ */
+#define LD_TLS_SURPLUS      0x1000  /* bytes reserved for dlopen'd modules */
+#define LD_TLS_SURPLUS_MODS 16      /* extra DTV slots for the same */
+
 static ld_u32 align_up(ld_u32 v, ld_u32 a) {
     return a <= 1 ? v : (v + a - 1) & ~(a - 1);
 }
@@ -60,8 +83,15 @@ static ld_u32 ld_tp = 0;
  * additional blocks for pthread_create-spawned threads with the
  * same layout. */
 static ld_u32 ld_tls_total = 0;
-static ld_u32 ld_tls_cursor = 0;  /* |offset| of farthest module from TP */
+static ld_u32 ld_tls_cursor = 0;  /* block base to TP: startup modules + surplus */
 static ld_u32 ld_tls_modcount = 0; /* number of PT_TLS modules (DTV length) */
+
+/* Highest |offset| actually handed out so far.  Startup leaves this at the end
+ * of the startup modules; ld_tls_add_module() grows it into the surplus, up to
+ * ld_tls_cursor.  The gap between the two is the free surplus. */
+static ld_u32 ld_tls_alloc_cursor = 0;
+/* Largest module id the DTV has room for (modcount + LD_TLS_SURPLUS_MODS). */
+static ld_u32 ld_tls_modcap = 0;
 
 /* Build the Dynamic Thread Vector for a freshly-laid-out per-thread block and
  * publish it at TCB[1] (gs:4).  DTV[0] is the module count; DTV[modid] is the
@@ -110,13 +140,24 @@ int ld_setup_tls(void) {
      * Without this, a 16-byte-aligned TLS block laid out before a
      * smaller-aligned one could land at tp-offset ≡ 4 (mod 16). */
     cursor = align_up(cursor, max_align);
-    if (cursor == 0) {
-        /* No TLS-using objects.  Skip - gs:0 stays whatever the
-         * kernel left it; libc that doesn't use __thread won't
-         * touch it. */
-        LD_DBG(ld_puts("ld.so: no PT_TLS modules - skipping TLS setup\n"));
-        return 0;
-    }
+
+    /* Everything handed out so far is startup; the surplus starts here. */
+    ld_tls_alloc_cursor = cursor;
+    ld_tls_modcap       = ld_tls_modcount + LD_TLS_SURPLUS_MODS;
+
+    /* Reserve the surplus BELOW the startup modules (i.e. at a larger
+     * |offset|), so the offsets just assigned stay valid: TP moves up by the
+     * surplus and each startup module keeps sitting at TP - its own offset.
+     * Keep it a multiple of max_align so TP stays aligned for every module.
+     *
+     * Note this runs even when cursor == 0 -- a program whose startup objects
+     * carry no PT_TLS at all (a plain C executable: substrate's libc keeps no
+     * __thread state) still needs a thread pointer and a slab if it is later
+     * going to dlopen a C++ module.  That case used to return early with no
+     * TLS block, which is why dlopen'ing even a trivial C++ plugin from a C
+     * host failed. */
+    cursor += align_up(LD_TLS_SURPLUS, max_align);
+
     if (cursor + LD_TLS_TCB_SIZE > LD_TLS_MAX_BYTES) {
         ld_puts("ld.so: TLS region exceeds cap\n");
         return -7; /* -E2BIG */
@@ -127,7 +168,7 @@ int ld_setup_tls(void) {
      * the cursor + total so __ldso_alloc_tls can replicate this
      * layout for new threads later. */
     ld_size total = align_up(cursor + LD_TLS_TCB_SIZE
-                             + (ld_tls_modcount + 1) * 4, 0x1000);
+                             + (ld_tls_modcap + 1) * 4, 0x1000);
     ld_tls_cursor = cursor;
     ld_tls_total  = total;
     void *block = ld_mmap(0, total, LD_PROT_READ | LD_PROT_WRITE,
@@ -207,6 +248,76 @@ static inline ld_u32 current_tp(void) {
     ld_u32 tp;
     __asm__ volatile ("movl %%gs:0, %0" : "=r"(tp));
     return tp;
+}
+
+/*
+ * Give a module loaded after startup (dlopen) a TLS slot out of the surplus.
+ *
+ * Called from the dlopen path once the new objects and their DT_NEEDED
+ * closure are loaded, but BEFORE they are relocated -- the TLS relocations
+ * read tls_modid/tls_offset, and a module still holding 0 is what the
+ * "loaded after startup" failures in ld_reloc.c report.
+ *
+ * Only the CALLING thread's block is initialized here.  Threads created later
+ * pick the module up for free, because __ldso_alloc_tls() copies every object
+ * in the list.  Threads that already exist do NOT: their blocks have the space
+ * (every block is ld_tls_total bytes) but neither the initialized image nor
+ * the DTV entry.  Loading a plugin from one thread and touching its
+ * thread_locals from another that predates the dlopen is therefore not
+ * supported -- the ABI-complete answer is a per-thread lazy DTV, which needs
+ * the GD model and __tls_get_addr on every access.
+ *
+ * Returns 0 on success, -1 if the surplus is exhausted (diagnosed).
+ */
+int ld_tls_add_module(ld_obj_t *o) {
+    if (!o || o->tls_memsz == 0) return 0;   /* nothing to lay out */
+    if (o->tls_modid != 0)       return 0;   /* already placed at startup */
+
+    if (ld_tls_total == 0) {
+        /* ld_setup_tls() never ran or bailed; there is no block to carve. */
+        ld_puts("ld.so: dlopen of TLS module with no TLS block: ");
+        ld_puts(o->name); ld_puts("\n");
+        return -1;
+    }
+
+    ld_u32 align  = o->tls_align ? o->tls_align : 1;
+    ld_u32 newcur = align_up(ld_tls_alloc_cursor + o->tls_memsz, align);
+
+    if (newcur > ld_tls_cursor || ld_tls_modcount + 1 > ld_tls_modcap) {
+        ld_puts("ld.so: surplus static TLS exhausted loading ");
+        ld_puts(o->name);
+        ld_puts(" (need "); ld_putx(o->tls_memsz);
+        ld_puts(", have "); ld_putx(ld_tls_cursor - ld_tls_alloc_cursor);
+        ld_puts(")\n");
+        return -1;
+    }
+
+    o->tls_offset = newcur;
+    o->tls_modid  = ++ld_tls_modcount;
+    ld_tls_alloc_cursor = newcur;
+
+    /* Initialize the slot in the calling thread and publish it in that
+     * thread's DTV, so both IE (fixed %gs offset) and GD (__tls_get_addr,
+     * which reads the DTV) resolve immediately. */
+    ld_u32 tp = current_tp();
+    unsigned char *slot = (unsigned char *)(unsigned long)(tp - o->tls_offset);
+    const unsigned char *src = (const unsigned char *)o->tls_image;
+    ld_u32 i;
+    for (i = 0; i < o->tls_filesz; i++) slot[i] = src[i];
+    for (; i < o->tls_memsz; i++)       slot[i] = 0;
+
+    ld_u32 *dtv = (ld_u32 *)(unsigned long)(tp + LD_TLS_TCB_SIZE);
+    dtv[0] = ld_tls_modcount;
+    dtv[o->tls_modid] = tp - o->tls_offset;
+
+    if (ld_debug) {
+        ld_puts("ld.so: tls(dlopen) "); ld_puts(o->name);
+        ld_puts(" memsz="); ld_putx(o->tls_memsz);
+        ld_puts(" offset=-"); ld_putx(o->tls_offset);
+        ld_puts(" modid="); ld_putd(o->tls_modid);
+        ld_puts("\n");
+    }
+    return 0;
 }
 
 static void *ld_tls_get_addr(tls_index *idx) {

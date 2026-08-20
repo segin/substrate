@@ -78,3 +78,37 @@ cat > "${LIBDIR}/specs" <<EOF
 EOF
 
 echo "==> installed ${LIBDIR}/specs"
+
+# The `libstdc++.so` link name.
+#
+# ld resolves -lstdc++ by looking for libstdc++.so first and libstdc++.a
+# second, so with only the versioned libstdc++.so.6 / .so.6.0.35 present it
+# silently falls through to the archive and links the C++ runtime *statically*
+# -- with no diagnostic, because the link succeeds.
+#
+# That is not a size problem, it is a correctness one.  A stack built that way
+# gives every DSO its own copy of the runtime: its own operator new/delete, its
+# own iostream and locale globals, its own emergency exception pool.  The TDE
+# desktop was staged for months as 125 shared libraries with 125 private
+# libstdc++ copies for exactly this reason.
+#
+# build-libstdcxx-shared.sh creates this link when it installs the shared
+# library, but it is a bare symlink in a directory nothing tracks, and it has
+# gone missing at least once.  Re-assert it here, where it is version
+# controlled and runs after every toolchain (re)install.
+# Match only the real shared object: the directory also holds a
+# libstdc++.so.6.0.35-gdb.py sidecar that a naive glob picks up.
+SHARED_STDCXX=""
+for cand in "${SR}/lib"/libstdc++.so.6.[0-9]*; do
+    case "${cand}" in *-gdb.py) continue ;; esac
+    [ -f "${cand}" ] || continue
+    SHARED_STDCXX="${cand}"
+done
+if [ -n "${SHARED_STDCXX}" ]; then
+    ln -sfn "$(basename "${SHARED_STDCXX}")" "${SR}/lib/libstdc++.so"
+    echo "==> linked ${SR}/lib/libstdc++.so -> $(basename "${SHARED_STDCXX}")"
+else
+    echo "install-specs.sh: warning: no shared libstdc++ in ${SR}/lib;" >&2
+    echo "  -lstdc++ will link the static archive.  Run" >&2
+    echo "  contrib/gcc/build-libstdcxx-shared.sh to build it." >&2
+fi
