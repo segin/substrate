@@ -314,19 +314,34 @@ install_to_dist() {
     # Every PIE binary substrate ships DT_NEEDED at minimum libc.so.0 +
     # libsys.so.0; getty / login also pull libpthread + libm; gcc on
     # substrate pulls libstdc++ + libgcc_s (overlaid from gcc staging).
-    # ld.so searches /lib, /usr/lib, /usr/local/lib — populate both
-    # so resolution succeeds whichever path is hit first.
+    #
+    # libc.so.0 is installed to /lib ONLY, and deliberately.  ld.so searches
+    # its built-in trusted directories /lib, /usr/lib and /usr/local/lib in
+    # that order, so one copy in /lib already resolves for everyone -- the
+    # second copy bought nothing and cost correctness.  Shipping two libcs
+    # means two files that can drift, and they did: an image was found
+    # carrying a current /lib/libc.so.0 beside a twelve-day-old
+    # /usr/lib/libc.so.0.  Only search order kept the stale one from being
+    # loaded, and anything resolving out of /usr/lib first would have got a
+    # libc that did not match the ld.so it was running under.
+    #
+    # lib/c/Makefile's own install target has always done it this way (libc.a
+    # to /usr/lib, libc.so.0 to /lib); this loop was the odd one out.
     for libdir in c sys m pthread dl edit resolv; do
         if [ -f "$TOP/lib/$libdir/lib$libdir.a" ]; then
             cp "$TOP/lib/$libdir/lib$libdir.a" "$DIST/usr/lib/"
         fi
         if [ -f "$TOP/lib/$libdir/lib$libdir.so.0" ]; then
             cp "$TOP/lib/$libdir/lib$libdir.so.0" "$DIST/lib/"
-            cp "$TOP/lib/$libdir/lib$libdir.so.0" "$DIST/usr/lib/"
             ln -sf "lib$libdir.so.0" "$DIST/lib/lib$libdir.so"
-            ln -sf "lib$libdir.so.0" "$DIST/usr/lib/lib$libdir.so"
+            if [ "$libdir" != c ]; then
+                cp "$TOP/lib/$libdir/lib$libdir.so.0" "$DIST/usr/lib/"
+                ln -sf "lib$libdir.so.0" "$DIST/usr/lib/lib$libdir.so"
+            fi
         fi
     done
+    # Sweep any libc left in /usr/lib by an earlier build of this script.
+    rm -f "$DIST/usr/lib/libc.so.0" "$DIST/usr/lib/libc.so"
 
     # libgcc_s.so.1 is the unwind/divide/multiply runtime libm.so.0
     # DT_NEEDEDs.  Without it, ld.so fatal-errors on EVERY dynamic
