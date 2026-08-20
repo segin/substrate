@@ -1359,9 +1359,20 @@ static int64_t x286_brkctl_grow_seg(uint16_t sel, int32_t increment) {
     info.useable = 1;
     fill_ldt_entry(entry, &info);
 
-    /* Positive: base of the new region.  Negative or zero: the new end. */
-    return (int64_t)(((uint32_t)sel << 16) |
-                     (increment > 0 ? old_size : new_size));
+    /* Positive: base of the new region.  Negative or zero: the new end.
+     *
+     * Clamp the offset to 16 bits before packing it beside the selector.  A
+     * segment grown to the full 64 KiB has an end of 0x10000, which would
+     * carry into the selector half and hand the caller a far pointer into
+     * the NEXT descriptor. */
+    {
+        uint32_t off = (increment > 0) ? old_size : new_size;
+
+        if (off > 0xFFFFU) {
+            off = 0xFFFFU;
+        }
+        return (int64_t)(((uint32_t)sel << 16) | off);
+    }
 }
 
 static int64_t x286_brkctl_new_seg(struct x286_frame *f, int32_t increment) {
@@ -1375,10 +1386,31 @@ static int64_t x286_brkctl_new_seg(struct x286_frame *f, int32_t increment) {
     int rc;
 
     (void)f;
-    if (increment <= 0) {
+    if (increment < 0) {
         return -EINVAL;   /* BR_NEWSEG may not shrink */
     }
-    size = (uint32_t)increment;
+    /*
+     * increment == 0 means "a whole new segment", not "nothing".
+     *
+     * This is how a small-data program reaches memory beyond DGROUP.  Word
+     * 3.0 is large-text/small-data (x_renv 0xc847: XE_LTEXT set, XE_LDATA
+     * clear), so every byte it owns lives in the single 64 KiB DGROUP -- and
+     * once the break has climbed as far as it goes, the only way on is a
+     * second segment.  Word asks for exactly that:
+     *
+     *   brkctl(BR_IMPSEG, 0, ...) = 0x6f:f800   -- how far did the break get?
+     *   brkctl(BR_NEWSEG, 0, ...) = -EINVAL     -- may I have another segment?
+     *
+     * Rejecting the second call was read by Word as "no memory left anywhere",
+     * and it printed "Insufficient memory" / "MEMORY ERROR!" and bailed out to
+     * its emergency save.  A zero increment is not a shrink and not a
+     * malformed request; on a 286 a fresh data segment has exactly one useful
+     * size, the 64 KiB architectural maximum, which is also the window this
+     * loader hands every segment.  Give it that; the caller sizes its own
+     * allocations inside it and can trim the descriptor later with
+     * BR_ARGSEG.
+     */
+    size = increment > 0 ? (uint32_t)increment : XOUT286_WINDOW_SIZE;
     if (size > XOUT286_WINDOW_SIZE) {
         return -ENOMEM;
     }
@@ -1426,6 +1458,43 @@ static int64_t x286_brkctl_new_seg(struct x286_frame *f, int32_t increment) {
     return (int64_t)((uint32_t)sel << 16);   /* offset 0 in the new segment */
 }
 
+/*
+ * BR_IMPSEG names "the implied segment": the program's LAST data segment.
+ *
+ * The LDT is laid out by the loader in segment-table order and only ever
+ * appended to, by BR_NEWSEG -- so the last data segment is simply the
+ * highest-numbered present, non-code entry.  That is DGROUP for a program
+ * whose only data segment it is, the trailing far data segment for one built
+ * with several, and the newest arrival once BR_NEWSEG has handed one out.
+ *
+ * Resolving this to DGROUP unconditionally is what stranded Word 3.0.  Having
+ * filled DGROUP it asked for a second segment and then asked the implied
+ * segment how much room it had -- and got DGROUP's maxed-out break back,
+ * every time, no matter how many fresh segments it was given:
+ *
+ *   brkctl(BR_IMPSEG, 0) = 0x6f:f800   -- DGROUP, full
+ *   brkctl(BR_NEWSEG, 0) = 0x7f:0000   -- a whole new segment
+ *   brkctl(BR_IMPSEG, 0) = 0x6f:f800   -- ...and still DGROUP, full
+ */
+static uint16_t x286_last_data_sel(uint16_t dgroup) {
+    unsigned int count = (unsigned int)current_process->ldt_entry_count;
+    const gdt_entry_t *ldt = (const gdt_entry_t *)current_process->ldt;
+    uint16_t last = dgroup;
+
+    if (!ldt) {
+        return dgroup;
+    }
+    for (unsigned int i = 0; i < count; i++) {
+        const gdt_entry_t *e = &ldt[i];
+
+        if ((e->access & 0x80U) == 0U) continue;   /* not present */
+        if ((e->access & 0x10U) == 0U) continue;   /* not a code/data segment */
+        if ((e->access & 0x08U) != 0U) continue;   /* code, not data */
+        last = (uint16_t)((i << 3) | 0x04U | 0x03U);
+    }
+    return last;
+}
+
 static int64_t x286_xsys_brkctl(struct x286_frame *f) {
     int32_t increment = (int32_t)((uint32_t)f->cx | ((uint32_t)f->si << 16));
     uint16_t cmd = f->bx & (uint16_t)~X286_BR_HUGE;
@@ -1433,9 +1502,7 @@ static int64_t x286_xsys_brkctl(struct x286_frame *f) {
     uint16_t sel = f->di;
 
     if (cmd == X286_BR_IMPSEG) {
-        /* "The last data segment" -- for a small or middle model program
-         * that is DGROUP until a BR_NEWSEG has handed out something else. */
-        sel = dgroup;
+        sel = x286_last_data_sel(dgroup);
         cmd = X286_BR_ARGSEG;
     }
 
