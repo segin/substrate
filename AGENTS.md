@@ -162,12 +162,23 @@ If the kernel hangs in `hlt`, check `eflags` bit 9. If `IF=1`, the IRQ may be ma
   covered — init writes the `DEAD_PROCESS` record when it reaps a
   getty line — but telnetd/sshd sessions are supervised by those
   daemons and would each need to write their own pts logout.
-- Make the shared `libstdc++.so.6` usable at runtime.  Stage 2 now
-  *builds* it — `--disable-shared` is gone and the staged tree carries
-  `libstdc++.so.6.0.35` beside `libstdc++.a` (0aa22e42f) — but nothing
-  has yet linked against it and run on target.  Doing so needs ld.so to
-  handle C++ symbol versioning, vague linkage dedup, and the TLS GD/LD
-  models; until then, keep linking C++ against `libstdc++.a`.
+- Relink the C++ ports against the shared `libstdc++.so.6`.  It is
+  usable at runtime as of e2aa3bdee: the blocker was never symbol
+  versioning or vague linkage, it was (1) a missing `libstdc++.so`
+  link name in the cross sysroot, which made `-lstdc++` fall through
+  to `libstdc++.a` silently, and (2) ld.so laying TLS out in one
+  startup pass, so no PT_TLS module — i.e. no C++ module — could be
+  `dlopen`ed.  Both fixed; `tests/lib/dl/torture_cxxdso` covers
+  cross-DSO and cross-`dlopen` throws, typeinfo identity and TLS.
+  **Prefer shared now**: a static libstdc++ gives every `.so` its own
+  operator new/delete, iostream/locale globals and typeinfo, which is
+  what the current TDE staging does across 125 libraries.
+- ld.so implements neither `DT_RPATH` nor `DT_RUNPATH`; a
+  `-Wl,-rpath` is accepted at link time and ignored at runtime, so
+  libraries must sit in a default search dir or one named by
+  `ld.so.conf.d`.  Link `-l:libdl.so.0`, never `-ldl`: the static
+  `libdl.a` resolves its weak `__ldso_dlopen` reference to 0, giving
+  a `dlopen()` that returns NULL without ever entering ld.so.
 - Rebuild stage 2 GCC with `--with-arch=i486` to drop the
   pentium-pro default and produce binaries that run on plain i486
   QEMU CPUs.
