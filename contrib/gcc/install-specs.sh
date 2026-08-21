@@ -79,6 +79,24 @@ EOF
 
 echo "==> installed ${LIBDIR}/specs"
 
+# The `libdl.so` link name.
+#
+# Same silent fallback as libstdc++ below, but it fails far more quietly.
+# libdl.a is nothing but five stubs that forward to ld.so through a WEAK
+# reference to __ldso_dlopen.  In a shared library that reference survives
+# into .dynsym and ld.so binds it at load time, so a statically-linked libdl
+# still works.  In an EXECUTABLE the static linker resolves the weak undef to
+# 0 and emits no relocation at all -- the symbol vanishes from the binary --
+# so dlopen() is a permanent no-op returning NULL, and dlerror() returns NULL
+# with it.  Nothing reports an error at any layer.
+#
+# CMake hands every project -ldl automatically via CMAKE_DL_LIBS, so without
+# this link name an entire desktop links against the dead stub.  That is what
+# broke TDE: tdeinit could not dlopen a single module, so kdesktop, konqueror
+# and every TDEIO slave fell back to exec or simply failed.
+ln -sfn libdl.so.0 "${SR}/lib/libdl.so"
+echo "==> linked ${SR}/lib/libdl.so -> libdl.so.0"
+
 # The `libstdc++.so` link name.
 #
 # ld resolves -lstdc++ by looking for libstdc++.so first and libstdc++.a
