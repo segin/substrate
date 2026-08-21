@@ -64,11 +64,29 @@ struct virtio_blk_dma {
     uint8_t data[VIRTIO_BLK_BOUNCE_BYTES];
 };
 
-// Driver State
-static struct {
+/*
+ * Per-device state.  There is one of these per virtio-blk PCI function.
+ *
+ * This was a single global, and everything in it -- io_base, the split ring,
+ * the DMA staging region, the busy flag -- was shared by every device the
+ * probe found.  A second virtio-blk disk therefore reprogrammed the first
+ * one's registers out from under it, took over its ring and bounce buffer,
+ * and re-registered the SAME blkdev_t under the SAME hardcoded name, so the
+ * block layer ended up holding two references to one struct:
+ *
+ *   VirtIO-Blk: virtio0, 32768 sectors (16 MiB)
+ *   Block device /dev/storage/virtio0 registered (16777216 bytes)
+ *   VirtIO-Blk: virtio0, 8388608 sectors (4096 MiB)
+ *   Block device /dev/storage/virtio0 registered (4294967296 bytes)
+ *   virtio0: no partition table detected        <-- on a disk that has one
+ *
+ * The partition scan failed because by the time GEOM read the second disk the
+ * name and the geometry it was scanning no longer belonged to the same device.
+ */
+struct vblk_dev {
     uint16_t io_base;
     uint32_t capacity; // In sectors (if sector size is 512)
-    
+
     // VirtQueue 0
     uint16_t q_size;
     void *desc_page;
@@ -81,14 +99,24 @@ static struct {
      * contiguous): request header, status byte and bounce buffer. */
     struct virtio_blk_dma *dma;
 
-    /* Serializes the whole request/poll cycle: descriptors 0-2, the avail-ring
-     * publish and the shared last_used_idx poll are a single global resource,
-     * so two concurrent callers (SMP, or two threads that both miss the block
-     * cache) would otherwise clobber each other's descriptor chain / status
-     * byte and mis-attribute completions.  Mirrors virtio_scsi's per-queue
-     * busy flag. */
+    /* Serializes the whole request/poll cycle for THIS device: descriptors
+     * 0-2, the avail-ring publish and the last_used_idx poll are one resource
+     * per device, so two concurrent callers (SMP, or two threads that both
+     * miss the block cache) would otherwise clobber each other's descriptor
+     * chain / status byte and mis-attribute completions.  Mirrors
+     * virtio_scsi's per-queue busy flag.  Per device, not global: two disks
+     * have independent rings and must not serialise against each other. */
     volatile uint32_t io_busy;
-} vblk;
+
+    /* The block-layer handle.  Embedded rather than separately allocated so
+     * the I/O callbacks can find their device through blkdev_t::priv. */
+    blkdev_t bdev;
+};
+
+#define VIRTIO_BLK_MAX_DEVS 8
+
+static struct vblk_dev vblk_devs[VIRTIO_BLK_MAX_DEVS];
+static unsigned int    vblk_ndevs;
 
 /*
  * Interrupts must be masked for the whole request/poll cycle, not just
@@ -110,17 +138,17 @@ static struct {
  * polling the used ring and sets VRING_AVAIL_F_NO_INTERRUPT, so no interrupt
  * is required to make forward progress inside the critical section.
  */
-static inline uint32_t vblk_lock(void) {
+static inline uint32_t vblk_lock(struct vblk_dev *d) {
     uint32_t flags = intr_disable();
 
-    while (__sync_lock_test_and_set(&vblk.io_busy, 1) != 0)
+    while (__sync_lock_test_and_set(&d->io_busy, 1) != 0)
         __asm__ volatile("pause");
 
     return flags;
 }
 
-static inline void vblk_unlock(uint32_t flags) {
-    __sync_lock_release(&vblk.io_busy);
+static inline void vblk_unlock(struct vblk_dev *d, uint32_t flags) {
+    __sync_lock_release(&d->io_busy);
     intr_restore(flags);
 }
 
@@ -136,23 +164,34 @@ static int vblk_bdev_write(blkdev_t *dev, uint64_t sector, uint32_t count,
                            const void *buffer);
 
 /*
- * Registered with blkdev_register_disk(), not geom_register_disk().  The
- * latter only *scans* a disk for partition tables -- it creates no
+ * Devices are registered with blkdev_register_disk(), not geom_register_disk().
+ * The latter only *scans* a disk for partition tables -- it creates no
  * /dev/storage node -- so the previous registration left virtio-blk with no
  * device node at all and it could never be a root device.  Every other
  * storage driver (ahci, ide, scsi, ramdisk) goes through
  * blkdev_register_disk(), which registers /dev/storage/<name> and then hands
  * the disk to GEOM for partition scanning.
  */
-static blkdev_t vblk_bdev;
 
 void virtio_blk_setup(uint8_t bus, uint8_t slot, uint8_t func) {
-    vblk.io_base = virtio_get_io_base(bus, slot, func);
-    if (!vblk.io_base) {
+    struct vblk_dev *vb;
+
+    if (vblk_ndevs >= VIRTIO_BLK_MAX_DEVS) {
+        kprint("VirtIO-Blk: too many devices, ignoring one.\n");
+        return;
+    }
+    /* Claim the next slot, but only publish it (vblk_ndevs++) once the device
+     * is fully brought up -- every early return below leaves the slot free for
+     * the next function the probe finds. */
+    vb = &vblk_devs[vblk_ndevs];
+    memset(vb, 0, sizeof(*vb));
+
+    vb->io_base = virtio_get_io_base(bus, slot, func);
+    if (!vb->io_base) {
         kprint("VirtIO-Blk: No IO Base declared.\n");
         return;
     }
-    
+
     /* Enable PCI I/O decoding + bus-mastering.  Bus-master (bit 2) is
      * mandatory and its absence is silent: config-space reads are plain PIO
      * and work regardless, so the device reports its capacity and accepts the
@@ -167,22 +206,22 @@ void virtio_blk_setup(uint8_t bus, uint8_t slot, uint8_t func) {
     }
 
     // 1. Reset
-    outb(vblk.io_base + VIRTIO_REG_DEVICE_STATUS, 0);
+    outb(vb->io_base + VIRTIO_REG_DEVICE_STATUS, 0);
     
     // 2. ACK
-    outb(vblk.io_base + VIRTIO_REG_DEVICE_STATUS, 
+    outb(vb->io_base + VIRTIO_REG_DEVICE_STATUS, 
          VIRTIO_STATUS_ACKNOWLEDGE | VIRTIO_STATUS_DRIVER);
          
     // 3. Negotiate Features (Skip for now, accept default)
     
     // 4. Setup Queue 0
-    uint16_t q_size = inw(vblk.io_base + VIRTIO_REG_QUEUE_SIZE);
+    uint16_t q_size = inw(vb->io_base + VIRTIO_REG_QUEUE_SIZE);
     if (q_size == 0) {
         kprint("VirtIO-Blk: Device reports no queue 0.\n");
-        outb(vblk.io_base + VIRTIO_REG_DEVICE_STATUS, VIRTIO_STATUS_FAILED);
+        outb(vb->io_base + VIRTIO_REG_DEVICE_STATUS, VIRTIO_STATUS_FAILED);
         return;
     }
-    vblk.q_size = q_size;
+    vb->q_size = q_size;
 
     /*
      * Legacy virtio split-ring layout in ONE physically-contiguous,
@@ -210,15 +249,15 @@ void virtio_blk_setup(uint8_t bus, uint8_t slot, uint8_t func) {
     void *q_mem = pmm_alloc_contiguous(q_pages);  // Returns virtual address
     if (!q_mem) {
         kprint("VirtIO-Blk: Failed to allocate queue memory!\n");
-        outb(vblk.io_base + VIRTIO_REG_DEVICE_STATUS, VIRTIO_STATUS_FAILED);
+        outb(vb->io_base + VIRTIO_REG_DEVICE_STATUS, VIRTIO_STATUS_FAILED);
         return;
     }
     memset(q_mem, 0, q_pages * 4096u);
 
-    vblk.desc_page = q_mem;
-    vblk.desc  = (struct vring_desc *)q_mem;
-    vblk.avail = (struct vring_avail *)((char*)q_mem + 16 * q_size);
-    vblk.used  = (struct vring_used *)((char*)q_mem + used_ring_offset);
+    vb->desc_page = q_mem;
+    vb->desc  = (struct vring_desc *)q_mem;
+    vb->avail = (struct vring_avail *)((char*)q_mem + 16 * q_size);
+    vb->used  = (struct vring_used *)((char*)q_mem + used_ring_offset);
 
     /*
      * This driver polls the used ring and registers no IRQ handler, so tell
@@ -227,7 +266,7 @@ void virtio_blk_setup(uint8_t bus, uint8_t slot, uint8_t func) {
      * the line asserted and the PIC re-delivers it forever, wedging the
      * machine immediately after the first successful transfer.
      */
-    vblk.avail->flags = VRING_AVAIL_F_NO_INTERRUPT;
+    vb->avail->flags = VRING_AVAIL_F_NO_INTERRUPT;
 
     /*
      * DMA staging region: request header, status byte and the bounce
@@ -239,20 +278,20 @@ void virtio_blk_setup(uint8_t bus, uint8_t slot, uint8_t func) {
         void *dma_mem = pmm_alloc_contiguous(dma_pages);
         if (!dma_mem) {
             kprint("VirtIO-Blk: Failed to allocate DMA buffer!\n");
-            outb(vblk.io_base + VIRTIO_REG_DEVICE_STATUS, VIRTIO_STATUS_FAILED);
+            outb(vb->io_base + VIRTIO_REG_DEVICE_STATUS, VIRTIO_STATUS_FAILED);
             return;
         }
         memset(dma_mem, 0, dma_pages * 4096u);
-        vblk.dma = (struct virtio_blk_dma *)dma_mem;
+        vb->dma = (struct virtio_blk_dma *)dma_mem;
     }
 
     // Write PFN to Queue Address - MUST be physical address!
     // pmm_alloc_contiguous returns virtual, convert to physical.
     uint32_t q_phys = (uint32_t)vblk_phys(q_mem);
-    outl(vblk.io_base + VIRTIO_REG_QUEUE_ADDR, q_phys / 4096);
+    outl(vb->io_base + VIRTIO_REG_QUEUE_ADDR, q_phys / 4096);
 
     // 5. Driver OK
-    outb(vblk.io_base + VIRTIO_REG_DEVICE_STATUS,
+    outb(vb->io_base + VIRTIO_REG_DEVICE_STATUS,
          VIRTIO_STATUS_ACKNOWLEDGE | VIRTIO_STATUS_DRIVER | VIRTIO_STATUS_DRIVER_OK);
 
     /*
@@ -263,36 +302,46 @@ void virtio_blk_setup(uint8_t bus, uint8_t slot, uint8_t func) {
      */
     {
         uint64_t capacity =
-            (uint64_t)inl(vblk.io_base + VIRTIO_BLK_CFG_CAPACITY) |
-            ((uint64_t)inl(vblk.io_base + VIRTIO_BLK_CFG_CAPACITY + 4) << 32);
-        uint32_t host_features = inl(vblk.io_base + VIRTIO_REG_HOST_FEATURES);
+            (uint64_t)inl(vb->io_base + VIRTIO_BLK_CFG_CAPACITY) |
+            ((uint64_t)inl(vb->io_base + VIRTIO_BLK_CFG_CAPACITY + 4) << 32);
+        uint32_t host_features = inl(vb->io_base + VIRTIO_REG_HOST_FEATURES);
         char msg[80];
 
         if (capacity == 0) {
             kprint("VirtIO-Blk: device reports zero capacity.\n");
-            outb(vblk.io_base + VIRTIO_REG_DEVICE_STATUS, VIRTIO_STATUS_FAILED);
+            outb(vb->io_base + VIRTIO_REG_DEVICE_STATUS, VIRTIO_STATUS_FAILED);
             return;
         }
-        vblk.capacity = (uint32_t)capacity;
+        vb->capacity = (uint32_t)capacity;
 
-        memset(&vblk_bdev, 0, sizeof(vblk_bdev));
         /* Substrate names storage devices <type><instance> (ide0, sata0,
-         * scsi0), not by the Linux vd* convention. */
-        strlcpy(vblk_bdev.name, "virtio0", sizeof(vblk_bdev.name));
-        vblk_bdev.sector_size = 512;
-        vblk_bdev.total_sectors = capacity;
-        vblk_bdev.read = vblk_bdev_read;
+         * scsi0), not by the Linux vd* convention.  The instance number is
+         * what makes a second disk addressable at all: with it hardcoded to
+         * virtio0 the two registrations collided on one name. */
+        snprintf(vb->bdev.name, sizeof(vb->bdev.name), "virtio%u", vblk_ndevs);
+        vb->bdev.sector_size = 512;
+        vb->bdev.total_sectors = capacity;
+        vb->bdev.read = vblk_bdev_read;
         /* Honour a read-only device (VIRTIO_BLK_F_RO): leaving .write set
          * would let the block layer issue writes the device rejects. */
-        vblk_bdev.write = (host_features & (1u << VIRTIO_BLK_F_RO))
+        vb->bdev.write = (host_features & (1u << VIRTIO_BLK_F_RO))
                               ? NULL : vblk_bdev_write;
+        /* How the I/O callbacks get back to this device's ring and registers.
+         * They used to reach a single global, so on a second disk they drove
+         * the wrong hardware. */
+        vb->bdev.priv = vb;
 
-        snprintf(msg, sizeof(msg), "VirtIO-Blk: virtio0, %u sectors (%u MiB)%s\n",
+        snprintf(msg, sizeof(msg), "VirtIO-Blk: %s, %u sectors (%u MiB)%s\n",
+                 vb->bdev.name,
                  (unsigned)capacity, (unsigned)(capacity / 2048u),
-                 vblk_bdev.write ? "" : ", read-only");
+                 vb->bdev.write ? "" : ", read-only");
         kprint(msg);
 
-        blkdev_register_disk(&vblk_bdev);
+        /* Publish only now: the slot is fully initialised, and
+         * blkdev_register_disk() hands the disk straight to GEOM, which reads
+         * it back through vblk_bdev_read -> priv. */
+        vblk_ndevs++;
+        blkdev_register_disk(&vb->bdev);
     }
 }
 
@@ -301,9 +350,10 @@ void virtio_blk_setup(uint8_t bus, uint8_t slot, uint8_t func) {
  * all pointing into the driver's own DMA region.  Caller holds vblk_lock and
  * has staged write data into the bounce buffer.
  */
-static int virtio_blk_submit(uint64_t lba, uint32_t count, int write) {
-    struct virtio_blk_req_hdr *hdr = &vblk.dma->hdr;
-    volatile uint8_t *status = &vblk.dma->status;
+static int virtio_blk_submit(struct vblk_dev *d, uint64_t lba,
+                             uint32_t count, int write) {
+    struct virtio_blk_req_hdr *hdr = &d->dma->hdr;
+    volatile uint8_t *status = &d->dma->status;
 
     hdr->type = write ? VIRTIO_BLK_T_OUT : VIRTIO_BLK_T_IN;
     hdr->ioprio = 0;
@@ -311,24 +361,24 @@ static int virtio_blk_submit(uint64_t lba, uint32_t count, int write) {
     *status = 0xFF;
 
     /* desc[0]: request header, device-readable. */
-    vblk.desc[0].addr = vblk_phys(hdr);
-    vblk.desc[0].len = sizeof(*hdr);
-    vblk.desc[0].flags = VRING_DESC_F_NEXT;
-    vblk.desc[0].next = 1;
+    d->desc[0].addr = vblk_phys(hdr);
+    d->desc[0].len = sizeof(*hdr);
+    d->desc[0].flags = VRING_DESC_F_NEXT;
+    d->desc[0].next = 1;
 
     /* desc[1]: the data.  F_WRITE means "device writes here", so it is set
      * for reads and clear for writes. */
-    vblk.desc[1].addr = vblk_phys(vblk.dma->data);
-    vblk.desc[1].len = 512u * count;
-    vblk.desc[1].flags = VRING_DESC_F_NEXT |
+    d->desc[1].addr = vblk_phys(d->dma->data);
+    d->desc[1].len = 512u * count;
+    d->desc[1].flags = VRING_DESC_F_NEXT |
                          (write ? 0u : (uint16_t)VRING_DESC_F_WRITE);
-    vblk.desc[1].next = 2;
+    d->desc[1].next = 2;
 
     /* desc[2]: status byte, device-writable. */
-    vblk.desc[2].addr = vblk_phys((void *)status);
-    vblk.desc[2].len = 1;
-    vblk.desc[2].flags = VRING_DESC_F_WRITE;
-    vblk.desc[2].next = 0;
+    d->desc[2].addr = vblk_phys((void *)status);
+    d->desc[2].len = 1;
+    d->desc[2].flags = VRING_DESC_F_WRITE;
+    d->desc[2].next = 0;
 
     // 2. Put in Avail Ring.
     //
@@ -336,28 +386,28 @@ static int virtio_blk_submit(uint64_t lba, uint32_t count, int write) {
     // index bump: on a weakly-ordered host (or with compiler reordering)
     // the device could otherwise observe a bumped idx pointing at a
     // half-written descriptor chain.
-    vblk.avail->ring[vblk.avail->idx % vblk.q_size] = 0;   /* chain head */
+    d->avail->ring[d->avail->idx % d->q_size] = 0;   /* chain head */
     __asm__ volatile("sfence" ::: "memory");
-    __asm__ volatile("lock addw $1, %0" : "+m"(vblk.avail->idx));
+    __asm__ volatile("lock addw $1, %0" : "+m"(d->avail->idx));
 
     // 3. Notify (mfence so the bumped idx is observed before the IO write)
     __asm__ volatile("mfence" ::: "memory");
-    outw(vblk.io_base + VIRTIO_REG_QUEUE_NOTIFY, 0); // Queue 0
+    outw(d->io_base + VIRTIO_REG_QUEUE_NOTIFY, 0); // Queue 0
 
     // 4. Poll Used Ring with an acquire barrier so the load of used->idx
     //    isn't hoisted above the ring-reads we're about to do.
-    while (vblk.last_used_idx == vblk.used->idx) {
+    while (d->last_used_idx == d->used->idx) {
         __asm__ volatile("pause");
     }
     __asm__ volatile("lfence" ::: "memory");
 
-    vblk.last_used_idx++;
+    d->last_used_idx++;
 
     /* Belt and braces alongside VRING_AVAIL_F_NO_INTERRUPT: reading the ISR
      * status register clears it and deasserts INTx, so a device that ignores
      * the no-interrupt hint still cannot leave the (level-triggered) line
      * latched high with no handler to service it. */
-    (void)inb(vblk.io_base + VIRTIO_REG_ISR_STATUS);
+    (void)inb(d->io_base + VIRTIO_REG_ISR_STATUS);
 
     return (*status == 0) ? 0 : -1;
 }
@@ -378,14 +428,15 @@ static int virtio_blk_submit(uint64_t lba, uint32_t count, int write) {
  * not.  The DMA region is allocated from the direct map, so its physical
  * address is a plain subtraction with no page-table walk at all.
  */
-static int virtio_blk_rw(uint64_t lba, uint32_t count, void *buf, int write) {
+static int virtio_blk_rw(struct vblk_dev *d, uint64_t lba, uint32_t count,
+                         void *buf, int write) {
     uint8_t *p = (uint8_t *)buf;
     int rc = 0;
 
     if (!buf || count == 0) {
         return -1;
     }
-    if (!vblk.dma) {
+    if (!d->dma) {
         return -1;
     }
 
@@ -404,21 +455,21 @@ static int virtio_blk_rw(uint64_t lba, uint32_t count, void *buf, int write) {
 
     /* Own the shared ring and bounce buffer for the whole transfer, with
      * interrupts masked so an ISR cannot re-enter the block layer here. */
-    uint32_t vblk_flags = vblk_lock();
+    uint32_t vblk_flags = vblk_lock(d);
 
     while (count > 0) {
         uint32_t chunk = (count > VIRTIO_BLK_BOUNCE_SECTORS)
                              ? VIRTIO_BLK_BOUNCE_SECTORS : count;
 
         if (write) {
-            memcpy(vblk.dma->data, p, 512u * chunk);
+            memcpy(d->dma->data, p, 512u * chunk);
         }
-        rc = virtio_blk_submit(lba, chunk, write);
+        rc = virtio_blk_submit(d, lba, chunk, write);
         if (rc != 0) {
             break;
         }
         if (!write) {
-            memcpy(p, vblk.dma->data, 512u * chunk);
+            memcpy(p, d->dma->data, 512u * chunk);
         }
 
         lba += chunk;
@@ -426,20 +477,34 @@ static int virtio_blk_rw(uint64_t lba, uint32_t count, void *buf, int write) {
         count -= chunk;
     }
 
-    vblk_unlock(vblk_flags);
+    vblk_unlock(d, vblk_flags);
     return rc;
 }
 
+/*
+ * Both callbacks route through the blkdev_t they were handed.  They used to
+ * ignore it and drive a single global instead, so with more than one disk
+ * present every request went to whichever device had been probed last --
+ * reads of one disk returned another's sectors.
+ */
 static int vblk_bdev_read(blkdev_t *dev, uint64_t sector, uint32_t count,
                           void *buffer) {
-    (void)dev;
-    return virtio_blk_rw(sector, count, buffer, 0);
+    struct vblk_dev *d = dev ? (struct vblk_dev *)dev->priv : NULL;
+
+    if (!d) {
+        return -1;
+    }
+    return virtio_blk_rw(d, sector, count, buffer, 0);
 }
 
 static int vblk_bdev_write(blkdev_t *dev, uint64_t sector, uint32_t count,
                            const void *buffer) {
-    (void)dev;
+    struct vblk_dev *d = dev ? (struct vblk_dev *)dev->priv : NULL;
+
+    if (!d) {
+        return -1;
+    }
     /* The device only reads this buffer (VIRTIO_BLK_T_OUT); casting away
      * const is confined to handing the physical address to the ring. */
-    return virtio_blk_rw(sector, count, (void *)(uintptr_t)buffer, 1);
+    return virtio_blk_rw(d, sector, count, (void *)(uintptr_t)buffer, 1);
 }
