@@ -176,9 +176,22 @@ If the kernel hangs in `hlt`, check `eflags` bit 9. If `IF=1`, the IRQ may be ma
 - ld.so implements neither `DT_RPATH` nor `DT_RUNPATH`; a
   `-Wl,-rpath` is accepted at link time and ignored at runtime, so
   libraries must sit in a default search dir or one named by
-  `ld.so.conf.d`.  Link `-l:libdl.so.0`, never `-ldl`: the static
-  `libdl.a` resolves its weak `__ldso_dlopen` reference to 0, giving
-  a `dlopen()` that returns NULL without ever entering ld.so.
+  `ld.so.conf.d`.
+- **Missing `.so` link names in the cross sysroot are the single most
+  expensive trap here**, because ld falls back to the `.a` silently and
+  the link succeeds.  It has now cost two multi-hour hunts: `libstdc++`
+  (every C++ object got a private runtime) and `libdl` (every
+  *executable* got a dead `dlopen`).  `libdl.a` is only a stub
+  forwarding to ld.so via a weak `__ldso_dlopen`; a shared library keeps
+  that reference in `.dynsym` and ld.so binds it, but an executable has
+  it resolved to 0 at link time and `dlopen()` silently returns NULL
+  forever with `dlerror()` NULL too.  `contrib/gcc/install-specs.sh`
+  now asserts both link names -- run it after any toolchain reinstall.
+  `libc`, `libm`, `libpthread` and `libregex` still lack theirs, which
+  is why the TDE toolchain file passes `-l:libc.so.0 -l:libregex.so.0`
+  explicitly; check with
+  `ls /opt/substrate/i386-unknown-substrate/lib/lib*.so` before blaming
+  a port.
 - Rebuild stage 2 GCC with `--with-arch=i486` to drop the
   pentium-pro default and produce binaries that run on plain i486
   QEMU CPUs.
