@@ -79,23 +79,57 @@ EOF
 
 echo "==> installed ${LIBDIR}/specs"
 
-# The `libdl.so` link name.
+# Linker names for the substrate runtime libraries.
 #
-# Same silent fallback as libstdc++ below, but it fails far more quietly.
-# libdl.a is nothing but five stubs that forward to ld.so through a WEAK
-# reference to __ldso_dlopen.  In a shared library that reference survives
-# into .dynsym and ld.so binds it at load time, so a statically-linked libdl
-# still works.  In an EXECUTABLE the static linker resolves the weak undef to
-# 0 and emits no relocation at all -- the symbol vanishes from the binary --
-# so dlopen() is a permanent no-op returning NULL, and dlerror() returns NULL
-# with it.  Nothing reports an error at any layer.
+# A shared library has three names: the real file (libfoo.so.0), the soname
+# recorded in DT_SONAME (what ld.so looks up at RUN time), and the bare
+# `libfoo.so` symlink -- the LINKER name, which exists only so that -lfoo can
+# find it.  Given -lfoo, ld tries exactly two filenames per search directory,
+# `libfoo.so` then `libfoo.a`.  It never considers libfoo.so.0: the versioned
+# name is invisible to -l.
 #
-# CMake hands every project -ldl automatically via CMAKE_DL_LIBS, so without
-# this link name an entire desktop links against the dead stub.  That is what
-# broke TDE: tdeinit could not dlopen a single module, so kdesktop, konqueror
-# and every TDEIO slave fell back to exec or simply failed.
-ln -sfn libdl.so.0 "${SR}/lib/libdl.so"
-echo "==> linked ${SR}/lib/libdl.so -> libdl.so.0"
+# So a missing linker name does not produce an error, it silently redirects
+# the link to the static archive.  That is the single most expensive trap in
+# this tree; it has cost two multi-hour hunts already:
+#
+#   libstdc++  every shared object got a private C++ runtime -- its own
+#              operator new/delete, iostream and locale globals, typeinfo.
+#              The TDE desktop shipped that way across 125 libraries.
+#   libdl      libdl.a is only five stubs forwarding to ld.so through a WEAK
+#              reference to __ldso_dlopen.  A shared library keeps that
+#              reference in .dynsym and ld.so binds it, so static libdl still
+#              works there -- but an EXECUTABLE has it resolved to 0 at link
+#              time and the symbol vanishes entirely, leaving a dlopen() that
+#              returns NULL forever with dlerror() NULL too.  CMake hands
+#              every project -ldl via CMAKE_DL_LIBS, which is how tdeinit
+#              ended up unable to load a single TDE module.
+#
+# libc/libm/libpthread/libregex had the same gap.  It mattered least for them
+# because substrate's own builds name the shared file explicitly
+# (-l:libc.so.0), but the toolchain `specs` above appends -lpthread to every
+# single link, so anything touching pthread symbols got a private copy of the
+# threading runtime -- and two copies of pthread state in one process (an
+# executable's and a .so's) is the same class of bug as the 125 libstdc++es.
+#
+# Assert every linker name here, where it is version controlled and runs after
+# each toolchain (re)install.  Missing shared objects are reported, not
+# silently skipped -- silence is what caused the problem in the first place.
+for _lib in c m pthread regex dl sys; do
+    _so="${SR}/lib/lib${_lib}.so"
+    _real=""
+    for _cand in "${SR}/lib/lib${_lib}.so".[0-9]*; do
+        case "${_cand}" in *-gdb.py|*.py) continue ;; esac
+        [ -f "${_cand}" ] || continue
+        _real="${_cand}"
+    done
+    if [ -z "${_real}" ]; then
+        echo "install-specs.sh: warning: no shared lib${_lib} in ${SR}/lib;" >&2
+        echo "  -l${_lib} will link the static archive." >&2
+        continue
+    fi
+    ln -sfn "$(basename "${_real}")" "${_so}"
+    echo "==> linked ${_so} -> $(basename "${_real}")"
+done
 
 # The `libstdc++.so` link name.
 #

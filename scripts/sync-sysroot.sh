@@ -72,6 +72,25 @@ sync_native_libs_to_sysroot() {
         name=$(basename "$dir")
         [ -f "$dir/lib$name.so.0" ] && cp "$dir/lib$name.so.0" "$SYSROOT/lib/" 2>/dev/null || true
         [ -f "$dir/lib$name.a"    ] && cp "$dir/lib$name.a"    "$SYSROOT/lib/" 2>/dev/null || true
+        # The linker name.  Given -lfoo, ld tries exactly `libfoo.so` then
+        # `libfoo.a` in each search directory -- it never looks at
+        # libfoo.so.0, because the versioned name is what ld.so resolves at
+        # RUN time, not what -l matches at LINK time.  Without this symlink
+        # every -lfoo therefore lands on the static archive, silently, and
+        # the link still succeeds.
+        #
+        # That is not hypothetical: it is how the whole C++ stack ended up
+        # with a private libstdc++ per shared object, and how -ldl gave
+        # tdeinit a dlopen() that returned NULL forever (libdl.a's weak
+        # __ldso_dlopen resolves to 0 in an executable, so TDE could not
+        # load a single module).
+        #
+        # Only in the SYSROOT.  Deliberately not in the build tree: lib/c's
+        # Makefile explains why -- there `-lc` must keep preferring libc.a,
+        # or static-linked binaries pull in undefined symbols.
+        if [ -f "$SYSROOT/lib/lib$name.so.0" ]; then
+            ln -sfn "lib$name.so.0" "$SYSROOT/lib/lib$name.so"
+        fi
     done
     if [ -d "${SUBSTRATE_TOP}/include" ]; then
         # -L: substrate's include/ has symlinked headers (pthread.h ->
