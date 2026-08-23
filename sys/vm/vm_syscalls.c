@@ -302,7 +302,8 @@ void *sys_mmap(void *addr, size_t length, int prot, int flags, int fd, uint64_t 
      * affected; root and processes without MCL_FUTURE skip this entirely.
      */
     if ((p->mlockall_flags & MCL_FUTURE) && p->euid != 0 &&
-        (uint64_t)aligned_length > (uint64_t)p->rlim_memlock_cur)
+        (uint64_t)aligned_length >
+            (uint64_t)p->rlimits[RLIMIT_MEMLOCK].rlim_cur)
         return (void *)(intptr_t)(-EAGAIN);
 
     /*
@@ -315,9 +316,9 @@ void *sys_mmap(void *addr, size_t length, int prot, int flags, int fd, uint64_t 
      * growth (demand-paged stack, COW) does not pass through here, so it is
      * unaffected.
      */
-    if (p->rlim_as_cur != RLIM_INFINITY && p->vm_map &&
+    if (p->rlimits[RLIMIT_AS].rlim_cur != RLIM_INFINITY && p->vm_map &&
         (uint64_t)p->vm_map->size + (uint64_t)aligned_length >
-            (uint64_t)p->rlim_as_cur)
+            (uint64_t)p->rlimits[RLIMIT_AS].rlim_cur)
         return (void *)(intptr_t)(-ENOMEM);
 
     /*
@@ -562,8 +563,23 @@ static void *sys_brk_locked(void *addr) {
     uintptr_t old_brk = (uintptr_t)current_process->brk;
 
     // Don't shrink below start
-    if (new_brk < current_process->brk_start) 
+    if (new_brk < current_process->brk_start)
         return (void *)(uintptr_t)old_brk;
+
+    /*
+     * RLIMIT_DATA caps the data segment, measured from the heap floor that
+     * exec established.  brk(2) reports failure by returning the UNCHANGED
+     * break -- there is no errno path here -- and libc's sbrk turns that into
+     * ENOMEM, which is what malloc is looking for.
+     */
+    {
+        rlim_t soft = current_process->rlimits[RLIMIT_DATA].rlim_cur;
+
+        if (soft != RLIM_INFINITY &&
+            (uint64_t)(new_brk - current_process->brk_start) > (uint64_t)soft) {
+            return (void *)(uintptr_t)old_brk;
+        }
+    }
 
     // Don't allow mapping into kernel address space
     if (new_brk >= 0xC0000000)

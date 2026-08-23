@@ -1,0 +1,191 @@
+.\"
+.\" GETRLIMIT(2) - Substrate Native Personality
+.\"
+.TH GETRLIMIT 2 "August 2026" "Substrate OS" "System Calls"
+.SH NAME
+getrlimit, setrlimit \- get and set resource limits
+.SH LIBRARY
+Standard C library
+.RB ( libc ", " \-l:libc.so.0 )
+.SH SYNOPSIS
+.nf
+.B #include <sys/resource.h>
+.PP
+.BI "int getrlimit(int " resource ", struct rlimit *" rlim ");
+.BI "int setrlimit(int " resource ", const struct rlimit *" rlim ");
+.fi
+.SH DESCRIPTION
+Each process has a soft and a hard limit on the resources it may consume.
+.BR getrlimit ()
+reads the pair for
+.IR resource ,
+and
+.BR setrlimit ()
+replaces it:
+.PP
+.in +4n
+.EX
+struct rlimit {
+    rlim_t rlim_cur;  /* soft limit: the one enforced */
+    rlim_t rlim_max;  /* hard limit: ceiling for rlim_cur */
+};
+.EE
+.in
+.PP
+The soft limit is what the kernel enforces.
+The hard limit is the ceiling the soft limit may be raised to.
+A process may lower either limit, and may raise the soft limit up to the hard
+limit; raising the
+.B hard
+limit requires an effective UID of 0.
+Lowering a hard limit is therefore irreversible for an unprivileged process,
+which is what makes it useful for confining a child before
+.BR execve (2).
+.PP
+.B RLIM_INFINITY
+means no limit.
+.PP
+Limits are inherited by
+.BR fork (2)
+and preserved across
+.BR execve (2).
+.SS Resources
+.TP
+.B RLIMIT_CPU
+CPU seconds, user plus system.
+On reaching the soft limit the process is sent
+.B SIGXCPU
+once per second; on reaching the hard limit it is sent
+.BR SIGKILL ,
+which it cannot decline.
+.TP
+.B RLIMIT_FSIZE
+Largest regular file, in bytes, the process may create.
+A write starting at or beyond the limit fails with
+.B EFBIG
+and raises
+.BR SIGXFSZ ;
+a write that merely crosses the limit is truncated to what fits and succeeds.
+.BR ftruncate (2)
+may not grow a file past it.
+Pipes, sockets and terminals are unaffected.
+.TP
+.B RLIMIT_DATA
+Size of the data segment.
+.BR brk (2)
+will not move the break past this many bytes above its starting value.
+.TP
+.B RLIMIT_STACK
+Size of the stack.
+The kernel will not extend the stack past this limit on a fault, so a process
+that exceeds it takes
+.B SIGSEGV
+rather than growing without bound.
+.TP
+.B RLIMIT_CORE
+Largest core file, in bytes.
+A soft limit of 0 disables core dumps entirely; substrate treats any non-zero
+value as "dump permitted" and does not truncate.
+.TP
+.B RLIMIT_MEMLOCK
+Bytes of memory that may be locked.
+Consulted by
+.BR mlock (2)
+and, for a process that has called
+.BR mlockall (2)
+with
+.BR MCL_FUTURE ,
+by
+.BR mmap (2).
+.TP
+.B RLIMIT_NPROC
+Processes the invoking real UID may have in existence.
+.BR fork (2)
+fails with
+.B EAGAIN
+at the limit.
+A process with an effective UID of 0 is exempt, so a limit set on a user can
+never lock the administrator out of the machine.
+.TP
+.B RLIMIT_NOFILE
+One greater than the highest descriptor number the process may open.
+.BR open (2)
+and friends fail with
+.BR EMFILE .
+The value is silently clamped to the size of the kernel descriptor table.
+.TP
+.B RLIMIT_AS
+.TQ
+.B RLIMIT_VMEM
+Size of the process address space.
+.BR mmap (2)
+fails with
+.B ENOMEM
+when a mapping would push the total past the limit, which is what makes
+.BR malloc (3)
+fail rather than consuming all of memory.
+.TP
+.B RLIMIT_RSS
+.TQ
+.B RLIMIT_SBSIZE
+Stored and reported, but not enforced.
+They exist so that software which sets them still builds and runs.
+.SH RETURN VALUE
+On success, zero is returned.
+On error, \-1 is returned and
+.I errno
+is set to indicate the error.
+.SH ERRORS
+.TP
+.B EFAULT
+.I rlim
+points outside the accessible address space.
+.TP
+.B EINVAL
+.I resource
+is not a valid resource, or the requested
+.I rlim_cur
+exceeds
+.IR rlim_max .
+.TP
+.B EPERM
+An unprivileged process tried to raise its hard limit.
+.SH EXAMPLE
+Confine a child to 64 descriptors and a 1 MiB file size, then exec it.
+Lowering the hard limits means the child cannot undo either:
+.PP
+.in +4n
+.EX
+struct rlimit rl;
+
+rl.rlim_cur = rl.rlim_max = 64;
+if (setrlimit(RLIMIT_NOFILE, &rl) == \-1) {
+    perror("setrlimit");
+    exit(EXIT_FAILURE);
+}
+
+rl.rlim_cur = rl.rlim_max = 1024 * 1024;
+if (setrlimit(RLIMIT_FSIZE, &rl) == \-1) {
+    perror("setrlimit");
+    exit(EXIT_FAILURE);
+}
+
+execv(path, argv);
+.EE
+.in
+.SH NOTES
+The shell's
+.B ulimit
+builtin is the interactive front end to these calls; it is a builtin rather
+than a program precisely because it must change the shell's own limits so
+that children inherit them.
+.PP
+.BR ulimit (2)
+is the older System V interface to the same limits, and remains available.
+.SH SEE ALSO
+.BR ulimit (2),
+.BR fork (2),
+.BR execve (2),
+.BR getrusage (2),
+.BR mlock (2),
+.BR mmap (2)

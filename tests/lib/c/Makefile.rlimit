@@ -1,0 +1,37 @@
+# tests/lib/c/Makefile.rlimit
+#
+# getrlimit/setrlimit and the limits substrate actually enforces.  Same
+# conventions as Makefile.fcntl.
+#
+# Host build (default):       make -f Makefile.rlimit ; ./torture_rlimit
+# Substrate cross build:      make -f Makefile.rlimit CROSS=/opt/substrate/bin/i386-unknown-substrate-
+#
+# The host build is useful as a conformance baseline -- Linux enforces every
+# limit this exercises, so a failure there means the TEST is wrong, not the
+# kernel.  Run it as root on target: the privilege and NPROC cases drop to
+# nobody in a child, and skip themselves if setuid is unavailable.
+
+CROSS  ?=
+ifeq ($(CROSS),)
+  CC      = cc
+else
+  CC      = $(CROSS)gcc
+endif
+CFLAGS  = -Wall -Wextra -O2 -g
+
+ifneq ($(CROSS),)
+  CFLAGS += -march=i486 -mtune=i486
+  LDFLAGS += -Wl,--copy-dt-needed-entries -Wl,-rpath-link,/opt/substrate/i386-unknown-substrate/lib
+endif
+
+TESTS = torture_rlimit
+
+all: $(TESTS)
+
+torture_rlimit: torture_rlimit.c
+	$(CC) $(CFLAGS) $(LDFLAGS) $< -o $@
+
+clean:
+	rm -f $(TESTS)
+
+.PHONY: all clean

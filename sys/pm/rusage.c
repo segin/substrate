@@ -45,9 +45,38 @@ void rusage_add_tick(process_t *p, int is_usermode)
     tv->tv_usec += USEC_PER_TICK;
 
     /* Normalize: carry over to seconds if >= 1000000 usec */
+    int second_elapsed = 0;
     while (tv->tv_usec >= 1000000) {
         tv->tv_sec++;
         tv->tv_usec -= 1000000;
+        second_elapsed = 1;
+    }
+
+    /*
+     * RLIMIT_CPU, checked only when a whole second has just elapsed -- the
+     * limit is denominated in seconds, so testing it on every tick would be
+     * HZ times the work for the same answer.
+     *
+     * Posting a signal from the timer interrupt is established here: the
+     * itimer expiry path does exactly this for SIGALRM/SIGVTALRM/SIGPROF
+     * (kern/time.c).  Like that path, this runs outside any spinlock -- a
+     * process/ISR shared lock would deadlock the machine.
+     *
+     * At the soft limit the process gets SIGXCPU once per second, which it
+     * may catch to wind down; at the hard limit it is killed outright and
+     * cannot decline.
+     */
+    if (second_elapsed && p->state != SDYING && p->state != SZOMB) {
+        rlim_t soft = p->rlimits[RLIMIT_CPU].rlim_cur;
+        rlim_t hard = p->rlimits[RLIMIT_CPU].rlim_max;
+        uint64_t secs = (uint64_t)p->rusage.ru_utime.tv_sec +
+                        (uint64_t)p->rusage.ru_stime.tv_sec;
+
+        if (hard != RLIM_INFINITY && secs >= (uint64_t)hard) {
+            psignal(p, SIGKILL);
+        } else if (soft != RLIM_INFINITY && secs >= (uint64_t)soft) {
+            psignal(p, SIGXCPU);
+        }
     }
 
     /*

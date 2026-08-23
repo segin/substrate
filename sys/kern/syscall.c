@@ -430,7 +430,33 @@ ssize_t kern_write(int fd, const char *buf, size_t len) {
 
     file_t *f = current_process->fds[fd];
     if (!f) return -EBADF;
-    
+
+    /*
+     * RLIMIT_FSIZE.  Regular files only -- a pipe, socket or tty has no size
+     * to exceed, and applying it there would break shells writing to a
+     * terminal under a small `ulimit -f`.
+     *
+     * POSIX splits the two cases: starting AT or past the limit is an error
+     * (EFBIG) and raises SIGXFSZ, while a write that merely CROSSES the limit
+     * is truncated to what fits and succeeds quietly.  Default action for
+     * SIGXFSZ is to terminate, so a runaway writer dies rather than looping
+     * on EFBIG forever.
+     */
+    if (f->f_data && ((fs_node_t *)f->f_data)->write &&
+        (((fs_node_t *)f->f_data)->flags & 0x7) == FS_FILE) {
+        rlim_t soft = current_process->rlimits[RLIMIT_FSIZE].rlim_cur;
+
+        if (soft != RLIM_INFINITY) {
+            if ((uint64_t)f->f_offset >= (uint64_t)soft) {
+                psignal(current_process, SIGXFSZ);
+                return -EFBIG;
+            }
+            if ((uint64_t)f->f_offset + (uint64_t)len > (uint64_t)soft) {
+                len = (size_t)((uint64_t)soft - (uint64_t)f->f_offset);
+            }
+        }
+    }
+
     // Check for node write support
     if (f->f_data && ((fs_node_t*)f->f_data)->write) {
         /*
@@ -1100,6 +1126,17 @@ int sys_ftruncate(int fd, uint32_t lo, uint32_t hi) {
     if (!(f->f_flag & FWRITE)) return -22; // EINVAL (should be EBADF or something else depending on OS)
     
     off_t length = ((off_t)hi << 32) | lo;
+
+    /* RLIMIT_FSIZE applies to growing a file by any route, not just write().
+     * Shrinking is always allowed -- the limit caps size, it does not pin it. */
+    {
+        rlim_t soft = current_process->rlimits[RLIMIT_FSIZE].rlim_cur;
+
+        if (soft != RLIM_INFINITY && (uint64_t)length > (uint64_t)soft) {
+            psignal(current_process, SIGXFSZ);
+            return -EFBIG;
+        }
+    }
     return truncate_fs((fs_node_t*)f->f_data, length);
 }
 
@@ -2997,7 +3034,7 @@ int sys_mlock(const void *addr, size_t len) {
      * unprivileged process whose RLIMIT_MEMLOCK soft limit is 0 tries to
      * lock memory (OPTS mlock/12-1). */
     if (current_process && current_process->euid != 0 &&
-        current_process->rlim_memlock_cur == 0)
+        current_process->rlimits[RLIMIT_MEMLOCK].rlim_cur == 0)
         return -EPERM;
     return 0;
 }
@@ -3010,46 +3047,56 @@ int sys_munlock(const void *addr, size_t len) {
 }
 
 /*
- * Native resource limits + mlockall.  substrate only tracks the state POSIX
- * needs to return the mlock/mmap privilege errors; other limits report
- * RLIM_INFINITY (no enforcement).  These use the substrate <sys/resource.h>
- * ABI (rlim_t == unsigned long) and are distinct from the FreeBSD-ABI
- * sys_getrlimit/sys_setrlimit in exec/perso/compat.c.
+ * Native resource limits.  These use the substrate <sys/resource.h> ABI
+ * (rlim_t == unsigned long) and are distinct from the FreeBSD-ABI
+ * sys_getrlimit/sys_setrlimit in exec/perso/compat.c, which serves the
+ * FreeBSD personality and must keep its own semantics.
+ *
+ * Every resource is stored, whether or not the kernel enforces it: a program
+ * that lowers a limit substrate ignores must still read that value back, or
+ * shell `ulimit` reporting and the many configure probes that round-trip a
+ * limit both misbehave.  What is actually enforced is documented in
+ * usr.man/man2/getrlimit.2.
  */
 int sys_native_getrlimit(int resource, void *rlp) {
     if (!current_process) return -EINVAL;
+    if (resource < 0 || resource >= RLIM_NLIMITS) return -EINVAL;
     if (!rlp) return -EFAULT;
-    struct rlimit k;
-    if (resource == RLIMIT_MEMLOCK) {
-        k.rlim_cur = current_process->rlim_memlock_cur;
-        k.rlim_max = current_process->rlim_memlock_max;
-    } else if (resource == RLIMIT_AS) {
-        k.rlim_cur = current_process->rlim_as_cur;
-        k.rlim_max = current_process->rlim_as_max;
-    } else {
-        k.rlim_cur = RLIM_INFINITY;
-        k.rlim_max = RLIM_INFINITY;
-    }
+
+    struct rlimit k = current_process->rlimits[resource];
+
     if (copyout(&k, rlp, sizeof(k)) != 0) return -EFAULT;
     return 0;
 }
 
 int sys_native_setrlimit(int resource, const void *rlp) {
     if (!current_process) return -EINVAL;
+    if (resource < 0 || resource >= RLIM_NLIMITS) return -EINVAL;
     if (!rlp) return -EFAULT;
+
     struct rlimit k;
     if (copyin(rlp, &k, sizeof(k)) != 0) return -EFAULT;
-    if (resource == RLIMIT_MEMLOCK) {
-        current_process->rlim_memlock_cur = k.rlim_cur;
-        current_process->rlim_memlock_max = k.rlim_max;
-    } else if (resource == RLIMIT_AS) {
-        /* Enforced against the process address-space size (vm_map->size) in
-         * sys_mmap so an explicit RLIMIT_AS makes malloc() fail with ENOMEM
-         * (OPTS pthread_cond_init/4-1, pthread_mutex_init/5-1). */
-        current_process->rlim_as_cur = k.rlim_cur;
-        current_process->rlim_as_max = k.rlim_max;
+
+    /* A soft limit above the hard limit is nonsense, and the check has to
+     * come before the privilege test so it applies to root too. */
+    if (k.rlim_cur > k.rlim_max) return -EINVAL;
+
+    /* Anyone may lower either limit or raise the soft limit up to the hard
+     * one; raising the HARD limit is privileged and irreversible otherwise. */
+    if (k.rlim_max > current_process->rlimits[resource].rlim_max &&
+        current_process->euid != 0)
+        return -EPERM;
+
+    /* RLIMIT_NOFILE cannot exceed the descriptor table: a soft limit above
+     * MAX_FD would promise descriptors the process can never be given. */
+    if (resource == RLIMIT_NOFILE) {
+        if (k.rlim_max == RLIM_INFINITY || k.rlim_max > MAX_FD)
+            k.rlim_max = MAX_FD;
+        if (k.rlim_cur == RLIM_INFINITY || k.rlim_cur > k.rlim_max)
+            k.rlim_cur = k.rlim_max;
     }
-    /* Other resources are accepted but not enforced (as before). */
+
+    current_process->rlimits[resource] = k;
     return 0;
 }
 

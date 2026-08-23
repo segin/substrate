@@ -1,0 +1,110 @@
+.\"
+.\" ULIMIT(2) - Substrate Native Personality
+.\"
+.TH ULIMIT 2 "August 2026" "Substrate OS" "System Calls"
+.SH NAME
+ulimit \- get and set process limits (legacy System V interface)
+.SH LIBRARY
+Standard C library
+.RB ( libc ", " \-l:libc.so.0 )
+.SH SYNOPSIS
+.nf
+.B #include <ulimit.h>
+.PP
+.BI "long ulimit(int " cmd ", long " newlimit ");
+.fi
+.SH DESCRIPTION
+.BR ulimit ()
+is the System V predecessor of
+.BR getrlimit (2)
+and
+.BR setrlimit (2).
+It operates on the very same limits: a change made here is visible through
+.BR getrlimit (2)
+and vice versa.
+New code should use
+.BR setrlimit (2),
+which can express every resource rather than these four commands.
+.PP
+.I cmd
+is one of:
+.TP
+.B UL_GETFSIZE
+Return the file-size limit
+.RB ( RLIMIT_FSIZE )
+in units of 512-byte blocks.
+.TP
+.B UL_SETFSIZE
+Set the file-size limit to
+.I newlimit
+512-byte blocks.
+.TP
+.B UL_GETMAXBRK
+Return the highest value
+.BR brk (2)
+could reach, derived from
+.BR RLIMIT_DATA .
+.TP
+.B UL_GETMAXFDS
+Return the descriptor limit
+.RB ( RLIMIT_NOFILE ).
+.PP
+The file-size commands count
+.B blocks,
+not bytes, which is the classic pitfall of this interface:
+.B UL_SETFSIZE
+with 2 sets a one-kilobyte limit.
+.PP
+As with
+.BR setrlimit (2),
+only a process with an effective UID of 0 may raise a limit above its current
+hard ceiling.
+.SH RETURN VALUE
+On success the value of the requested limit is returned.
+On error, \-1 is returned and
+.I errno
+is set to indicate the error.
+.PP
+Because
+.B RLIM_INFINITY
+cannot be represented in a
+.IR long ,
+an unlimited file size is reported as
+.BR LONG_MAX .
+.SH ERRORS
+.TP
+.B EINVAL
+.I cmd
+is not one of the commands above, or
+.I newlimit
+is negative.
+.TP
+.B EPERM
+An unprivileged process tried to raise the file-size limit above its hard
+ceiling.
+.SH EXAMPLE
+Cap created files at 1 MiB using the legacy interface:
+.PP
+.in +4n
+.EX
+/* 2048 blocks * 512 bytes = 1 MiB */
+if (ulimit(UL_SETFSIZE, 2048) == \-1) {
+    perror("ulimit");
+    exit(EXIT_FAILURE);
+}
+.EE
+.in
+.SH NOTES
+This call is also reached by the SCO Xenix/286 personality, where it is
+system call 63, so Xenix-era binaries that predate
+.BR setrlimit (2)
+get the same limits as native ones.
+.PP
+Do not confuse this with the shell's
+.B ulimit
+builtin, which is a front end to
+.BR setrlimit (2).
+.SH SEE ALSO
+.BR getrlimit (2),
+.BR brk (2),
+.BR open (2)

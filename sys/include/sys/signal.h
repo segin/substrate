@@ -57,6 +57,10 @@ struct thread;
 #define SIGTTOU    22
 #define SIGPOLL    23
 #define SIGIO      SIGPOLL
+/* Resource-limit signals.  Values match include/signal.h; the kernel header
+ * skipped straight from SIGPOLL to SIGVTALRM while nothing raised them. */
+#define SIGXCPU    24
+#define SIGXFSZ    25
 #define SIGVTALRM  26
 #define SIGPROF    27
 #define SIGWINCH   28

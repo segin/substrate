@@ -99,6 +99,21 @@ static int vm_grow_user_stack(uint32_t cr2) {
     if (!p || !p->pmap || p->ustack_top == 0) return 0;
     if (cr2 >= p->ustack_top || cr2 < p->ustack_limit) return 0;
 
+    /*
+     * RLIMIT_STACK: refuse to extend the stack past the soft limit.
+     * Returning 0 lets the fault fall through to normal handling, which
+     * signals the process -- the POSIX outcome, and better than growing
+     * without bound until the machine is out of memory.
+     */
+    {
+        rlim_t soft = p->rlimits[RLIMIT_STACK].rlim_cur;
+
+        if (soft != RLIM_INFINITY &&
+            (uint64_t)(p->ustack_top - cr2) > (uint64_t)soft) {
+            return 0;
+        }
+    }
+
     void *pa = pmm_alloc_block();
     if (!pa) return 0;                      /* genuine OOM */
     uint32_t pa_phys = (uint32_t)(uintptr_t)pa - 0xC0000000u;

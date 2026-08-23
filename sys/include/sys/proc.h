@@ -175,15 +175,17 @@ typedef struct process {
      * copyin/copyinstr must not reject sub-USER_STACK_MIN pointers up front
      * (an unmapped low access is still caught by the on_fault path). */
     uint8_t  low_va_valid;
+    /*
+     * POSIX resource limits, indexed by RLIMIT_* from <sys/resource.h>.
+     * RLIM_INFINITY means no limit.  Inherited by fork() and preserved
+     * across execve(), as POSIX requires.
+     *
+     * This is the single source of truth.  MEMLOCK and AS used to live in
+     * their own process_t fields because the array was sized for exactly one
+     * entry (the core-dump limit); with the array holding every resource,
+     * separate copies would just be a second place to forget to update.
+     */
     struct rlimit rlimits[RLIM_NLIMITS];
-    /* RLIMIT_MEMLOCK soft/hard limit, tracked directly (rlimits[] is only
-     * sized for RLIMIT_CORE).  RLIM_INFINITY == "unset/no limit". */
-    rlim_t   rlim_memlock_cur;
-    rlim_t   rlim_memlock_max;
-    /* RLIMIT_AS (address-space) soft/hard limit, enforced against
-     * vm_map->size in sys_mmap.  RLIM_INFINITY == no limit. */
-    rlim_t   rlim_as_cur;
-    rlim_t   rlim_as_max;
     uint32_t mlockall_flags;   /* MCL_CURRENT/MCL_FUTURE from mlockall(2) */
 
     struct tty *tty;      // Controlling Terminal

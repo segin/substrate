@@ -345,7 +345,72 @@ int sys_utime(const char *path, void *times) {
     return 0;
 }
 
-int sys_ulimit(int cmd, long limit) { (void)cmd; (void)limit; return -ENOSYS; }
+/*
+ * ulimit(2) -- the System V predecessor of getrlimit/setrlimit.
+ *
+ * Expressed in terms of the same rlimits, which is what SysV itself did once
+ * setrlimit arrived: the two interfaces are two views of one set of limits,
+ * and a program that lowers its file-size limit with ulimit(2) must see the
+ * change through getrlimit(2) as well.
+ *
+ * The file-size commands count 512-byte BLOCKS, not bytes -- the classic
+ * gotcha with this call.  RLIM_INFINITY has no representation in a long, so
+ * "unlimited" is reported as LONG_MAX, which is what callers test against.
+ *
+ * Reached natively and by the SCO-X/286 personality, where it is call 63.
+ */
+#define UL_GETFSIZE 1   /* get file size limit, in 512-byte blocks */
+#define UL_SETFSIZE 2   /* set it */
+#define UL_GETMAXBRK 3  /* get the maximum possible break value */
+#define UL_GETMAXFDS 4  /* get the descriptor limit */
+
+int sys_ulimit(int cmd, long limit) {
+    if (!current_process) return -EINVAL;
+
+    switch (cmd) {
+    case UL_GETFSIZE: {
+        rlim_t cur = current_process->rlimits[RLIMIT_FSIZE].rlim_cur;
+
+        if (cur == RLIM_INFINITY || cur / 512u > 0x7FFFFFFFu) return 0x7FFFFFFF;
+        return (int)(cur / 512u);
+    }
+
+    case UL_SETFSIZE: {
+        struct rlimit *rl = &current_process->rlimits[RLIMIT_FSIZE];
+        rlim_t want;
+
+        if (limit < 0) return -EINVAL;
+        want = (rlim_t)limit * 512u;
+        /* Same rule as setrlimit: only a privileged process may raise the
+         * ceiling.  SysV ulimit could only ever lower it for everyone else. */
+        if (rl->rlim_max != RLIM_INFINITY && want > rl->rlim_max &&
+            current_process->euid != 0)
+            return -EPERM;
+        rl->rlim_cur = want;
+        if (rl->rlim_max != RLIM_INFINITY && want > rl->rlim_max)
+            rl->rlim_max = want;
+        return (int)limit;
+    }
+
+    case UL_GETMAXBRK: {
+        rlim_t cur = current_process->rlimits[RLIMIT_DATA].rlim_cur;
+
+        if (cur == RLIM_INFINITY)
+            return (int)(uintptr_t)USER_STACK_MIN;   /* top of the data region */
+        return (int)(current_process->brk_start + cur);
+    }
+
+    case UL_GETMAXFDS: {
+        rlim_t cur = current_process->rlimits[RLIMIT_NOFILE].rlim_cur;
+
+        if (cur == RLIM_INFINITY || cur > MAX_FD) return MAX_FD;
+        return (int)cur;
+    }
+
+    default:
+        return -EINVAL;
+    }
+}
 int sys_prof(void *buf, size_t size, unsigned long offset, unsigned int scale) { (void)buf; (void)size; (void)offset; (void)scale; return -ENOSYS; }
 
 /* SVR-specific multiplexer stubs */

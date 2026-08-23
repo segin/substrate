@@ -326,15 +326,17 @@ static void proc_resource_limits_init(process_t *proc) {
         return;
     }
 
-    proc->rlimits[RLIMIT_CORE].rlim_cur = RLIM_INFINITY;
-    proc->rlimits[RLIMIT_CORE].rlim_max = RLIM_INFINITY;
+    /* Every resource starts unlimited.  init(8) is the only process that
+     * gets these from nowhere; everyone else inherits its parent's. */
+    for (int r = 0; r < RLIM_NLIMITS; r++) {
+        proc->rlimits[r].rlim_cur = RLIM_INFINITY;
+        proc->rlimits[r].rlim_max = RLIM_INFINITY;
+    }
+    /* RLIMIT_NOFILE cannot usefully exceed the descriptor table. */
+    proc->rlimits[RLIMIT_NOFILE].rlim_cur = MAX_FD;
+    proc->rlimits[RLIMIT_NOFILE].rlim_max = MAX_FD;
 
-    /* No memlock limit and no mlockall() by default. */
-    proc->rlim_memlock_cur = RLIM_INFINITY;
-    proc->rlim_memlock_max = RLIM_INFINITY;
-    proc->rlim_as_cur      = RLIM_INFINITY;
-    proc->rlim_as_max      = RLIM_INFINITY;
-    proc->mlockall_flags   = 0;
+    proc->mlockall_flags = 0;   /* no mlockall() by default */
 }
 
 void pm_init(void) {
@@ -485,10 +487,48 @@ process_t *proc_create(int perso_id) {
     return proc;
 }
 
+/*
+ * Live processes owned by `uid`.
+ *
+ * Walks allproc rather than keeping a counter: the list is already walked on
+ * several colder paths, RLIMIT_NPROC is only consulted on fork, and a counter
+ * is one more thing every exit path has to remember to decrement.  Revisit if
+ * fork ever shows up in a profile.
+ *
+ * Counts by REAL uid, which is what the limit is about -- a setuid binary
+ * must not escape the invoking user's process budget.
+ */
+static unsigned proc_count_for_uid(uint32_t uid) {
+    unsigned n = 0;
+
+    for (process_t *p = proc_first(); p; p = proc_next(p)) {
+        if (p->uid == uid) {
+            n++;
+        }
+    }
+    return n;
+}
+
 static int proc_fork_common(process_t *parent, void *stack, int is_vfork) {
+    /*
+     * RLIMIT_NPROC: refuse to create another process once this real uid is at
+     * its soft limit.  Root is exempt, as it traditionally is, so a limit set
+     * on a user can never lock the administrator out of the machine.
+     *
+     * Checked before proc_create() so a refusal allocates nothing.
+     */
+    {
+        rlim_t soft = parent->rlimits[RLIMIT_NPROC].rlim_cur;
+
+        if (soft != RLIM_INFINITY && parent->euid != 0 &&
+            proc_count_for_uid(parent->uid) >= (unsigned)soft) {
+            return -EAGAIN;
+        }
+    }
+
     process_t *child_proc = proc_create(parent->perso_id);
     if (!child_proc) return -ENOMEM;
-    
+
     // Inherit process name
     strncpy(child_proc->comm, parent->comm, AC_COMM_LEN);
     child_proc->comm[AC_COMM_LEN - 1] = '\0';
@@ -596,14 +636,11 @@ static int proc_fork_common(process_t *parent, void *stack, int is_vfork) {
     memcpy(child_proc->sig_actions, parent->sig_actions, sizeof(parent->sig_actions));
     child_proc->sig_catch = parent->sig_catch;
     child_proc->sig_ignore = parent->sig_ignore;
+    /* Resource limits are inherited across fork() -- every resource, since
+     * they all live in this one array now.  Memory locks are NOT inherited,
+     * so the child starts with no mlockall() in effect. */
     memcpy(child_proc->rlimits, parent->rlimits, sizeof(parent->rlimits));
-    /* Resource limits are inherited across fork(); memory locks are not, so
-     * the child starts with no mlockall() in effect. */
-    child_proc->rlim_memlock_cur = parent->rlim_memlock_cur;
-    child_proc->rlim_memlock_max = parent->rlim_memlock_max;
-    child_proc->rlim_as_cur      = parent->rlim_as_cur;
-    child_proc->rlim_as_max      = parent->rlim_as_max;
-    child_proc->mlockall_flags   = 0;
+    child_proc->mlockall_flags = 0;
     child_proc->umask = parent->umask;
     /* Supplementary group list inherits across fork. */
     memcpy(child_proc->supp_groups, parent->supp_groups,
@@ -882,6 +919,7 @@ static void proc_apply_status_flags(file_t *f, int flags) {
 
 int proc_alloc_fd_from(process_t *p, int start) {
     int fd;
+    int ceiling;
 
     if (!p) {
         return -1;
@@ -893,7 +931,29 @@ int proc_alloc_fd_from(process_t *p, int start) {
         return -1;
     }
 
-    for (fd = start; fd < MAX_FD; fd++) {
+    /*
+     * RLIMIT_NOFILE caps the descriptor NUMBER, not a count: POSIX defines it
+     * as one greater than the highest descriptor the process may open, which
+     * is what makes `ulimit -n 3` leave only stdin/stdout/stderr usable.
+     * setrlimit already clamps the stored value to MAX_FD, so the table bound
+     * still holds if the limit is infinite.
+     */
+    ceiling = MAX_FD;
+    {
+        rlim_t soft = p->rlimits[RLIMIT_NOFILE].rlim_cur;
+
+        if (soft != RLIM_INFINITY && soft < (rlim_t)ceiling) {
+            ceiling = (int)soft;
+        }
+    }
+    /* -1, not -EMFILE: every caller tests `fd == -1` and maps that to EMFILE
+     * itself.  Returning the errno here would sail through those checks as a
+     * plausible-looking descriptor number. */
+    if (start >= ceiling) {
+        return -1;
+    }
+
+    for (fd = start; fd < ceiling; fd++) {
         if (!fdset_test(p->fd_bitmap, fd)) {
             fdset_set(p->fd_bitmap, fd);
             fdset_clear(p->fd_cloexec, fd);
@@ -925,7 +985,23 @@ int proc_alloc_fd_from(process_t *p, int start) {
  * comes from always starting at descriptor 0.
  */
 int proc_alloc_fd(process_t *p) {
+    int ceiling;
+
     if (!p) return -1;
+
+    /* RLIMIT_NOFILE, same rule as proc_alloc_fd_from(): the limit is one
+     * greater than the highest descriptor allowed.  This is the allocator
+     * open()/pipe()/socket() actually reach -- proc_alloc_fd_from() serves
+     * fcntl(F_DUPFD) -- so both need the cap or `ulimit -n` binds on only
+     * half the paths. */
+    ceiling = MAX_FD;
+    {
+        rlim_t soft = p->rlimits[RLIMIT_NOFILE].rlim_cur;
+
+        if (soft != RLIM_INFINITY && soft < (rlim_t)ceiling) {
+            ceiling = (int)soft;
+        }
+    }
 
     /* Word-scan the allocated-fd bitmap from 0.  Each 32-fd word with a
      * free bit is resolved with ctz on its complement. */
@@ -933,7 +1009,7 @@ int proc_alloc_fd(process_t *p) {
         uint32_t free_bits = ~p->fd_bitmap[word];
         if (free_bits == 0) continue;
         int fd = word * 32 + __builtin_ctz(free_bits);
-        if (fd >= MAX_FD) continue;
+        if (fd >= ceiling) break;   /* words are scanned in order: done */
         fdset_set(p->fd_bitmap, fd);
         fdset_clear(p->fd_cloexec, fd);
         p->next_fd = (fd + 1) % MAX_FD;
