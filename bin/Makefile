@@ -56,7 +56,6 @@ SUBDIRS = \
 	native_test \
 	newgrp \
 	nice \
-	renice \
 	nproc \
 	od \
 	passwd \
@@ -68,6 +67,7 @@ SUBDIRS = \
 	ps \
 	pwd \
 	readlink \
+	renice \
 	reset \
 	rm \
 	rmdir \
@@ -103,6 +103,7 @@ SUBDIRS = \
 	whoami \
 	write \
 	xargs \
+	xenix \
 	yes
 
 .PHONY: all clean install $(SUBDIRS)
