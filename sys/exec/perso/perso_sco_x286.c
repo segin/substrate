@@ -712,6 +712,27 @@ static int64_t x286_sys_chown(struct x286_frame *f) {
  * request to leave itself the stack it wants.  Refusing more than that just
  * makes it retry smaller for ever; the program, not the kernel, is what
  * arbitrates this boundary, through crt0's _chkstk/__stkgrow.
+ *
+ * If you are here because Word 3.0 printed "Insufficient memory / MEMORY
+ * ERROR!", it is almost certainly NOT this code.  That message is Word
+ * exhausting its own 64 KiB DGROUP, and how close it comes depends on the
+ * size of the terminal description it loads from
+ * /usr/lib/MSTOOLS/termdesc.  Measured, with everything else identical:
+ *
+ *      vt52  5023 B  ok     console.sco    8954 B  ok
+ *      vt100 6803 B  ok     color_console  9793 B  ok
+ *      wyse50 7234 B ok     ansi           9859 B  INSUFFICIENT MEMORY
+ *
+ * 66 bytes decide it.  `ansi` is the largest entry in Word's own termdesc
+ * and the only one that does not fit; every other terminal it knows works.
+ * Word's layout is data+bss 0x6da0, a 0x1258 scratch buffer, then a heap it
+ * asks for as 0x7c00 and accepts down to 0x200 in 512-byte steps (the retry
+ * loop lives at 0x5f:0xb81c), against a ceiling of 0x10000 minus its own
+ * 2 KiB stack reserve -- i.e. 0xf800, which is where its break lands.
+ *
+ * Note substrate's login sets TERM=linux, which Word's termdesc does not
+ * contain at all: it exits with "No termdesc entry for linux" before any of
+ * this.  Run Xenix MSTOOLS programs with TERM=vt100.
  */
 static int64_t x286_set_break(const struct x286_frame *f, uint32_t newbrk) {
     uint32_t sp = f->regs->useresp & 0xFFFFU;
