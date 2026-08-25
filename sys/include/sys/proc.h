@@ -176,16 +176,21 @@ typedef struct process {
      * (an unmapped low access is still caught by the on_fault path). */
     uint8_t  low_va_valid;
     /*
-     * POSIX resource limits, indexed by RLIMIT_* from <sys/resource.h>.
-     * RLIM_INFINITY means no limit.  Inherited by fork() and preserved
-     * across execve(), as POSIX requires.
+     * Dead space where the resource limits used to live: rlimits[1] (the
+     * core-dump limit) plus the separate rlim_memlock_* / rlim_as_* pairs,
+     * 24 bytes in all.  The limits now live in one array at the END of this
+     * struct; this pad stays so that every field below keeps the offset it
+     * has always had.
      *
-     * This is the single source of truth.  MEMLOCK and AS used to live in
-     * their own process_t fields because the array was sized for exactly one
-     * entry (the core-dump limit); with the array holding every resource,
-     * separate copies would just be a second place to forget to update.
+     * That matters more than it looks.  Growing the array in place shifted
+     * everything after it by 64 bytes and produced SIGFPE (FPE_FLTINV, an
+     * x87 stack overflow on the first fld/fldz) in unrelated processes --
+     * /bin/sh, atd -- because something below reads its offset without going
+     * through this header.  Same reason the scheduling and POSIX-timer
+     * fields above are parked at the end; see the offset-stability notes
+     * there.  Do not reuse this pad without checking what moves.
      */
-    struct rlimit rlimits[RLIM_NLIMITS];
+    uint8_t  _rlimit_slot_reserved[24];
     uint32_t mlockall_flags;   /* MCL_CURRENT/MCL_FUTURE from mlockall(2) */
 
     struct tty *tty;      // Controlling Terminal
@@ -299,7 +304,18 @@ typedef struct process {
     uint16_t    rtsig_count;        // occupied slots (0..RTSIG_QUEUE_MAX)
     spinlock_t  rtsig_lock;         // guards rtsig_q/seq/count (IRQ-safe)
 
-    // Resource limits, FDs, etc. would go here
+    /*
+     * POSIX resource limits, indexed by RLIMIT_* from <sys/resource.h>.
+     * RLIM_INFINITY means no limit.  Inherited by fork() and preserved
+     * across execve(), as POSIX requires.  One array is the single source of
+     * truth -- MEMLOCK and AS used to have their own fields because this was
+     * sized for exactly one entry.
+     *
+     * At the END of the struct, like the scheduling and timer fields above,
+     * so that adding a resource never moves an offset something else depends
+     * on.  See _rlimit_slot_reserved.
+     */
+    struct rlimit rlimits[RLIM_NLIMITS];
 } process_t;
 
 // Thread State
