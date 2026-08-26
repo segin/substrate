@@ -166,6 +166,7 @@ bin/*/*
 !bin/*/*.S
 !bin/*/*.awk
 !bin/*/*.c
+!bin/*/*.entry
 !bin/*/*.h
 !bin/*/*.l
 !bin/*/*.md

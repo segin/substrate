@@ -1,0 +1,80 @@
+ansi|terminal that is strictly ansi compatible
+ BACKSPACE                   ^H           Sent by backspace key
+ BACKSPACE=DELETE            \177         Sent by DELETE key
+ UP=UP                       \EA          Sent by terminal up arrow key
+ DELETE                      \177         Erase selection to scrap
+ DOWN=DOWN                   \EB          Sent by terminal down arrow key
+ RIGHT=RIGHT                 \EC          Sent by terminal right arrow key
+ LEFT=LEFT                   \ED          Sent by terminal left arrow key
+ NEXT_WINDOW=F1              \EOS         Sent by other function key s 0-9
+ CALCULATE=F2                \EOT         Sent by other function key s 0-9
+ GLOSSARY=F3                 \EOU         Sent by other function key s 0-9
+ REPEAT=F4                   \EOV         Sent by other function key s 0-9
+ OVERTYPE=F5                 \EOW         Sent by other function key s 0-9
+ EXTEND=F6                   \EOP         Sent by other function key s 0-9
+ WORD_LEFT=F7                \EOQ         Sent by other function key s 0-9
+ WORD_RIGHT=F8               \EOR         Sent by other function key s 0-9
+ SENTENCE=F9                 \EOX         Sent by other function key s 0-9
+ =OUTPUT=BE                  \007         Bell character
+ =OUTPUT=BF                  \E[0m        End bold mode
+ =OUTPUT=CU                  ^\           Unix shell escape sequence
+ =OUTPUT=BO                  \E[1m        Start bold mode
+ =OUTPUT=al                  \E[L         Add new blank line
+ =OUTPUT=cd                  \E[J         Clear to end of display
+ =OUTPUT=ce                  \E[K         Clear to end of line
+ =OUTPUT=cl                  \E[2J\E[H    Clear Screen
+ =OUTPUT=cm                  \E[%i%d;%dH  Cursor motion
+ =OUTPUT=dc                  \E[P         Delete character
+ =OUTPUT=dl                  \E[M         Delete line
+ =OUTPUT=do                  \E[B         Down one line
+ =OUTPUT=ho                  \E[H         Home cursor (if no cm)
+ =OUTPUT=ic                  \E[@         Insert character
+ =OUTPUT=nd                  \E[C         Non-destructive space (cursor right)
+ =OUTPUT=se                  \E[0m        End stand out mode
+ =OUTPUT=sf                  \E[S         Scroll forwards
+ =OUTPUT=so                  \E[7m        Begin stand out mode
+ =OUTPUT=sr                  \E[T         Scroll reverse (backwards)
+ =OUTPUT=ue                  \E[0m        End underscore mode
+ =OUTPUT=up                  \E[A         Upline (cursor up)
+ =OUTPUT=us                  \E[4m        Start underscore mode
+ =NUMBER=co                  80           Number of columns in a line
+ =NUMBER=li                  24           Number of lines on screen or page
+ =BOOLEAN=am                 T            Terminal has automatic margins
+ =BOOLEAN=bs                 T            Terminal can BACKSPACE with control h
+ =BOOLEAN=im                 F            Insert mode (enter); give :im=: if ic
+ =BOOLEAN=pt                 T            Has hardware tabs (may need to be set with is)
+ =OUTPUT=ib                  \E[3m        Start Italic mode
+ =OUTPUT=ie                  \E[0m        End Italic mode
+ =OUTPUT=Cb                  \E[1m        Start Small Caps Mode
+ =OUTPUT=Ce                  \E[0m        End Small Caps Mode
+ =OUTPUT=Sb                  \E[4m        Start subscript mode
+ =OUTPUT=Se                  \E[0m        End subscript mode
+ =OUTPUT=SB                  \E[4m        Start Superscript mode
+ =OUTPUT=SE                  \E[0m        End Superscript mode
+ =OUTPUT=xs                  \E[9m        Start StrikeThrough mode
+ =OUTPUT=xe                  \E[0m        End Strikethrough mode
+ =OUTPUT=db                  \E[21m       Start Double underline mode
+ =OUTPUT=de                  \E[0m        End Double underline mode
+ =OUTPUT=G1                  +            Upper-right (1st Quadrant) corner character
+ =OUTPUT=G2                  +            Upper-left (2nd Quadrant) corner character
+ =OUTPUT=G3                  +            Lower-left (3rd Quadrant) corner character
+ =OUTPUT=G4                  +            Lower-right (4th Quadrant) corner character
+ =OUTPUT=GB                  &            Visible section break
+ =OUTPUT=GC                  @            Visible page reference
+ =OUTPUT=GD                  v            Down tick character
+ =OUTPUT=GF                  $            Visible automatic footnote reference
+ =OUTPUT=GG                  !            Pagination mark
+ =OUTPUT=GH                  -            Horizontal bar character
+ =OUTPUT=GI                  \s           Non breaking space
+ =OUTPUT=GJ                  \s           Blank for non breaking space
+ =OUTPUT=GK                  >            Right field delimeter
+ =OUTPUT=GL                  <            Left field delimeter
+ =OUTPUT=GM                  +            Elevator character
+ =OUTPUT=GN                  !            New line character
+ =OUTPUT=GP                  #            Paragraph mark
+ =OUTPUT=GR                  .            Ruler character
+ =OUTPUT=GT                  >            Visible Tab character
+ =OUTPUT=GU                  ^            Up-tick character
+ =OUTPUT=GV                  |            Vertical bar character
+ =OUTPUT=GW                  -            Non-breaking hyphen
+ =OUTPUT=GZ                  *            End Mark

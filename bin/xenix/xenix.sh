@@ -6,37 +6,30 @@
 # not an emulator wrapper -- it exists purely to fix up the environment, and
 # TERM is the whole reason.
 #
-# Word 3.0 reads its terminal description from /usr/lib/MSTOOLS/termdesc into
-# a near-heap arena of exactly 31744 bytes -- a hard-coded constant at text
-# 0x5f:0xb820 -- inside the single 64 KiB DGROUP a small-data 286 program
-# gets (x_renv 0xc847: XE_LTEXT set, XE_LDATA clear).  It asks for that much
-# and gets it; the kernel is never asked for more, so no amount of generosity
-# on our side changes anything.  Whether Word survives therefore comes down
-# to how big the description is.  Measured on target:
+# Microsoft Word 3.0 looks TERM up in /usr/lib/MSTOOLS/termdesc and dies if it
+# is not there:
 #
-#     vt52    5023  ok      console        8881  ok
-#     vt100   6803  ok      console.sco    8954  ok
-#     wyse50  7234  ok      color_console  9793  ok
-#     h19     5014  ok      z29            7004  ok
-#     ansi    9859  ->  "Insufficient memory / MEMORY ERROR!"
+#     No termdesc entry for linux
 #
-# 66 bytes separate color_console from ansi.  ansi is the largest entry in
-# the file and the only one that does not fit.
+# and substrate's login(1) sets TERM=linux, which that file has never heard
+# of.  So TERM is passed through when termdesc actually describes it, and
+# otherwise replaced with vt100 -- an accurate description of substrate's
+# VT100/ANSI-compatible console, and present in every copy of the file.
 #
-# So TERM is passed through when Word can afford it, and substituted with
-# vt100 when it cannot:
+# Asking termdesc directly rather than carrying a list here means a terminal
+# stays supported for exactly as long as the file describes it.  TERM=ansi in
+# particular used to fail with a bogus "Insufficient memory / MEMORY ERROR!";
+# that was a damaged termdesc entry, repaired by fix-termdesc-ansi.sh in this
+# directory, and it now works with no special case here.
 #
-#   ansi   the description does not fit.  vt100 is an accurate description of
-#          substrate's console either way -- it is VT100/ANSI compatible -- so
-#          the substitution costs nothing in rendering.
-#   linux  what substrate's login(1) sets, and termdesc has no such entry at
-#          all: Word exits with "No termdesc entry for linux".
-#
-# XENIX_TERM overrides the choice outright, for a program with different
-# needs or to test a specific description.
+# XENIX_TERM overrides the choice outright, for a program with different needs
+# or to test a specific description.
 #
 # Usage:  xenix /perso/xenix286s/usr/bin/word [args...]
 #         XENIX_TERM=wyse50 xenix /perso/xenix286s/usr/bin/word
+
+XENIX_ROOT=${XENIX_ROOT:-/perso/xenix286s}
+TERMDESC=$XENIX_ROOT/usr/lib/MSTOOLS/termdesc
 
 if [ $# -lt 1 ]; then
     echo "usage: xenix <program> [args...]" >&2
@@ -47,18 +40,23 @@ fi
 if [ -n "${XENIX_TERM:-}" ]; then
     _term=$XENIX_TERM
 else
+    _term=vt100
+    # Entry names start at column 1 and end at '|'.  Restricted to plain
+    # names so nothing in TERM reaches grep as a pattern.
     case "${TERM:-}" in
-    vt52|vt100|wyse50|console|console.sco|color_console|z29|h19)
-        _term=$TERM ;;          # in termdesc and small enough to load
+    *[!A-Za-z0-9._-]* | '')
+        ;;
     *)
-        _term=vt100 ;;          # ansi (too big), linux (absent), or unknown
+        if [ -r "$TERMDESC" ] && grep -q "^${TERM}|" "$TERMDESC" 2>/dev/null; then
+            _term=$TERM
+        fi
+        ;;
     esac
 fi
 TERM=$_term
 export TERM
 
 # MSTOOLS programs write scratch files here and do not create it themselves.
-# Path is relative to the personality root, so this is the Xenix /usr/tmp.
-[ -d /perso/xenix286s/usr/tmp ] || mkdir -p /perso/xenix286s/usr/tmp 2>/dev/null
+[ -d "$XENIX_ROOT/usr/tmp" ] || mkdir -p "$XENIX_ROOT/usr/tmp" 2>/dev/null
 
 exec "$@"
