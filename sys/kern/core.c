@@ -151,6 +151,20 @@ int coredump(process_t *p) {
         kprintf("CORE: gpr  esi=0x%08x edi=0x%08x ebp=0x%08x\n",
                 last_core_record.regs.esi, last_core_record.regs.edi,
                 last_core_record.regs.ebp);
+        /*
+         * The data segment selectors.  A flat-model crash never needs these --
+         * they are the same three constants every time -- but a segmented
+         * personality (SCO-X/286, ELKS) cannot be debugged without them: the
+         * faulting instruction is typically an ordinary memory reference whose
+         * selector is the whole story.  Diagnosing the Xenix/286 crashers came
+         * down to seeing es=0x0000 on a far strlen, which the dump could not
+         * show.
+         */
+        kprintf("CORE: seg  ds=0x%04x es=0x%04x fs=0x%04x gs=0x%04x\n",
+                (unsigned int)(last_core_record.regs.ds & 0xFFFFU),
+                (unsigned int)(last_core_record.regs.es & 0xFFFFU),
+                (unsigned int)(last_core_record.regs.fs & 0xFFFFU),
+                (unsigned int)(last_core_record.regs.gs & 0xFFFFU));
         /* Dump 8 dwords of user stack, peeked safely via copyin. */
         if (last_core_record.regs.useresp != 0) {
             uint32_t buf[8] = {0};
