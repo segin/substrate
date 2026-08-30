@@ -78,6 +78,16 @@ echo "==> extracting /bin from the install floppy (the only source of sh)"
 "$HERE/xenixfs.py" extract "$MEDIA/rts/n1.img" "$STAGE/n1bin" --path /bin
 cp -a "$STAGE/n1bin"/. "$ROOT/bin/"
 
+# brand(1) is the serialization tool the `custom` installer would normally run
+# as its last step, and it only exists on the install floppy.  The Development
+# System ships ten files as "not serialized" stubs that need it; see the
+# README.  Install it so that can be done on the target.
+"$HERE/xenixfs.py" extract "$MEDIA/rts/n1.img" "$STAGE/n1etc" --path /etc
+mkdir -p "$ROOT/etc"
+for tool in brand custom fixperm; do
+    [ -f "$STAGE/n1etc/$tool" ] && cp -a "$STAGE/n1etc/$tool" "$ROOT/etc/$tool"
+done
+
 if [ -f "$MEDIA/msw/word.img" ]; then
     echo "==> adding Microsoft Word 3.0"
     ( cd "$ROOT" && tar xf "$MEDIA/msw/word.img" )

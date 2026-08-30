@@ -123,6 +123,41 @@ Two wrinkles it handles:
 The result is ~2375 files: 153 entries in `/bin`, 196 in `/usr/bin`, 11 man
 sections.
 
+## Serializing the Development System
+
+SCO shipped ten files of the Development System as copy-protection stubs —
+a shell one-liner saying `This program has not been serialized`, with the real
+content following it in the same file:
+
+    lib/Lcrt0.o  lib/Mcrt0.o  lib/p2      usr/bin/cref  usr/bin/dosld
+    usr/bin/get  usr/bin/lex  usr/bin/yacc  usr/lib/dag  usr/lib/lint1
+
+`lib/p2` is the compiler's second pass, so `cc` cannot link anything until
+this is done. Unstubbing them is the last step of a normal install: the
+`custom` installer runs `brand(1)` with the product's serial number and
+activation key, both of which are printed in the media's own `readme.txt`.
+
+`brand` lives only on the install floppy; `build-image.sh` copies it (with
+`custom` and `fixperm`) to `/etc`. It is a Xenix binary, so run it under the
+personality, once per file:
+
+    xenix /perso/xenix286s/etc/brand <serial> <activationkey> /lib/p2
+
+Paths are relative to the personality root. Afterwards each file is a normal
+x.out and `cc` works end to end:
+
+    $ xenix .../bin/cc -i -o v v.c && xenix .../tmp/v
+    cc-ok 3.141593
+
+`cc -i` matters: without it the linker emits an *impure* (combined I&D)
+image — `x_renv` with `XE_SEP` clear and no text segment at all — which
+xout286.c cannot load ("entry segment not loaded"). Every stock Xenix binary
+is separate I&D. Note also that Xenix libraries are model-prefixed: there is
+no `crt0.o`, only `Scrt0.o` / `Mcrt0.o` / `Lcrt0.o` and `Slibc.a` and friends.
+
+Branding writes through `lseek` and `chsize`, which is how two 16-bit ABI bugs
+in the personality were found — see the commit for `x286_xsys_chsize`.
+
 ## What actually runs
 
 A 43-command sample under `PERS_SCO_X286`: **34 run, 8 crash, 0 fail to

@@ -796,9 +796,19 @@ static int64_t x286_sys_fstat(struct x286_frame *f) {
 }
 
 static int64_t x286_sys_lseek(struct x286_frame *f) {
-    /* off_t is a long: CX is its low half, SI its high half. */
-    uint32_t off = (uint32_t)f->cx | ((uint32_t)f->si << 16);
-    int64_t rc = sys_lseek((int)(int16_t)f->bx, off, 0, (int)(int16_t)f->di);
+    /* off_t is a *signed* long: CX is its low half, SI its high half.  It has
+     * to be sign-extended into the 64-bit offset sys_lseek takes, because
+     * seeking backwards is ordinary -- brand(1) rewrites a header by seeking
+     * to a negative displacement from the current position or the end.
+     * Widening it as unsigned turned every such seek into one of nearly 4 GiB
+     * instead, and the write that followed extended the file past 4 GiB: the
+     * branded binaries came out with correct contents, a correct block count,
+     * and an i_size of 0x1_0000_0166. */
+    int32_t off = (int32_t)((uint32_t)f->cx | ((uint32_t)f->si << 16));
+    int64_t off64 = (int64_t)off;
+    int64_t rc = sys_lseek((int)(int16_t)f->bx, (uint32_t)off64,
+                           (uint32_t)((uint64_t)off64 >> 32),
+                           (int)(int16_t)f->di);
 
     if (rc < 0) {
         return rc;
@@ -1650,8 +1660,18 @@ static int64_t x286_xsys_rdchk(struct x286_frame *f) {
 }
 
 static int64_t x286_xsys_chsize(struct x286_frame *f) {
-    return sys_ftruncate((int)(int16_t)f->bx, (uint32_t)f->cx,
-                         (uint32_t)f->si);
+    /* The new size is one 32-bit long in CX:SI -- CX the low HALFWORD, SI the
+     * high one -- not two 32-bit halves, which is what sys_ftruncate takes.
+     * Passing them straight through put SI into bits 32..47 of a 64-bit
+     * length, so truncating a 135 KiB file (SI == 2) asked for a size of
+     * 0x2_0000_0000 and left an inode claiming 8 GiB.  Files under 64 KiB
+     * came out right only because their SI was zero. */
+    int32_t len = (int32_t)((uint32_t)f->cx | ((uint32_t)f->si << 16));
+
+    if (len < 0) {
+        return -EINVAL;
+    }
+    return sys_ftruncate((int)(int16_t)f->bx, (uint32_t)len, 0);
 }
 
 static int64_t x286_sys_xenix(struct x286_frame *f) {
