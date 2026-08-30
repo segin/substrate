@@ -343,6 +343,33 @@ static int x286_build_stack(uint8_t *dgroup, char *const argv[],
     return 0;
 }
 
+/*
+ * Which x_cpu values this loader claims.
+ *
+ * A real Xenix/286 ran Xenix/86 binaries, so this does too -- the 8086
+ * instruction set is a strict subset of the 286's, and an 8086 x.out is not a
+ * real-mode image: it carries the same protected-mode LDT selectors (0x3f
+ * text / 0x47 data), the same x_renv, and the same segment table as a 286
+ * one.  The only thing the byte records is which instruction subset the
+ * compiler targeted, which a 286 executes natively.
+ *
+ * This matters because SCO shipped the Development System as the *x86*
+ * Development System: cc, masm, ld and cpp are all x_cpu 0x04, as is bc, and
+ * rejecting them left the compiler on the disk but unrunnable.
+ *
+ * 80186 is deliberately NOT accepted: it is equally a subset, but nothing on
+ * the media is built for it, so claiming it would be untested.
+ */
+static int x286_cpu_supported(uint8_t x_cpu) {
+    switch (x_cpu & XC_CPU_MASK) {
+    case XC_80286:
+    case XC_8086:
+        return 1;
+    default:
+        return 0;
+    }
+}
+
 static int x286_check_file(const char *path, const char *header, size_t len) {
     const struct xexec *hdr = (const struct xexec *)header;
 
@@ -353,7 +380,7 @@ static int x286_check_file(const char *path, const char *header, size_t len) {
     if (hdr->x_magic != XOUT_MAGIC) {
         return -ENOEXEC;
     }
-    if ((hdr->x_cpu & XC_CPU_MASK) != XC_80286) {
+    if (!x286_cpu_supported(hdr->x_cpu)) {
         return -ENOEXEC;
     }
     if (!(hdr->x_renv & XE_SEG) || !(hdr->x_renv & XE_EXEC)) {
@@ -386,9 +413,8 @@ static int x286_load(int fd, const char *path, char *const argv[],
     if (kern_read(fd, (char *)&hdr, sizeof(hdr)) != (int)sizeof(hdr)) {
         return x286_fail(fd, -ENOEXEC, "xout286: short read on header");
     }
-    if (hdr.x_magic != XOUT_MAGIC ||
-        (hdr.x_cpu & XC_CPU_MASK) != XC_80286) {
-        return x286_fail(fd, -ENOEXEC, "xout286: not an 80286 x.out");
+    if (hdr.x_magic != XOUT_MAGIC || !x286_cpu_supported(hdr.x_cpu)) {
+        return x286_fail(fd, -ENOEXEC, "xout286: not an 8086/80286 x.out");
     }
     if (hdr.x_ext < sizeof(struct xext)) {
         return x286_fail(fd, -ENOEXEC, "xout286: missing extension header");

@@ -125,25 +125,32 @@ sections.
 
 ## What actually runs
 
-A 43-command sample under `PERS_SCO_X286`: **29 run, 8 crash, 6 will not
-load.** The two failure classes are distinct and neither is an image problem.
+A 43-command sample under `PERS_SCO_X286`: **34 run, 8 crash, 0 fail to
+load.**
 
-**Will not load** — `exec: no handler matched`. These are **8086** binaries
-(`x_cpu` 0x44) and the personality is 286-only (`x_cpu` 0x49). The census of
-the media is 207 i286, 97 8086, 15 `0x69`, 1 i386, and the entire Development
-System is 8086 — which is why `cc`, `masm`, `ld` and `bc` do not run. SCO
-shipped it as the *x86* Development System; the readme says so. Running it
-needs the SCO-X/86 personality (id 133), which is a slot, not an
-implementation.
+The media is 207 i286 binaries, 97 8086, 15 `0x69`, 1 i386. The 8086 ones —
+which include the *entire* Development System, since SCO shipped it as the
+**x86** Development System — used to be rejected outright. They are not
+rejected any more: a real Xenix/286 ran Xenix/86 binaries, so `xout286.c`
+claims `x_cpu` 0x04 as well as 0x09. That is sound because an 8086 x.out is
+not a real-mode image; it carries the same protected-mode LDT selectors
+(0x3f/0x47), the same `x_renv`, and the same segment table as a 286 one, and
+the 8086 instruction set is a strict subset of the 286's. `cc`, `masm`, `ld`,
+`cpp`, `bc` and `what` all load and run now.
 
-**Crash** — SIGSEGV early in text: `units`, `factor`, `uptime`, `tput`,
-`awk`, `emacs`, `kermit`, `adb`. These are i286 with the same `x_renv`
-(0xc80f) and the same two-segment layout as `date`, which works, so this is a
-personality gap rather than anything about the file. Not diagnosed.
+**Still crashing** — SIGSEGV early in text: `units`, `factor`, `uptime`,
+`tput`, `awk`, `emacs`, `kermit`, `adb`. Same `x_renv` (0xc80f) and the same
+two-segment layout as `date`, which works, so this is a personality gap
+rather than anything about the files, and it is unrelated to CPU type — it
+hits both i286 and 8086 images. Not diagnosed.
+
+It is what stops the compiler: `cc` now runs and drives its passes correctly,
+but `/lib/p0`, the first pass, dies in this same way. So the toolchain is
+present and loadable but not yet usable end to end.
 
 Working, among others: `date echo pwd ls cat wc sum uname id basename dirname
-expr cal od hd line env printenv sh who tty sed grep clear random deco`, and
-Word 3.0.
+expr cal od hd line env printenv sh who tty sed grep clear random deco bc
+what cc masm ld`, and Word 3.0.
 
 ## Media layout
 
