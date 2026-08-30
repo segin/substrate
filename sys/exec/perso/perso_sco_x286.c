@@ -1814,6 +1814,95 @@ static int x286_is_syscall_int(registers_t *regs) {
     return insn[0] == 0xCDU && insn[1] == X286_SYSCALL_VEC;
 }
 
+/*
+ * Microsoft 8087-emulator fixup.
+ *
+ * Xenix binaries that do floating point do not contain x87 instructions.  The
+ * compiler emitted them, but the linker rewrote each one into a two-byte
+ * software interrupt so the program would also run on a machine with no
+ * coprocessor, where a trap handler emulates it in software:
+ *
+ *     INT 0xF0+n   <- ESC 0xD8+n       the eight x87 opcodes
+ *     INT 0xF8     <- a raw ESC instruction follows, run it as-is
+ *     INT 0xF9     <- FWAIT
+ *
+ * The ModR/M and displacement bytes are left exactly as the compiler emitted
+ * them and follow the INT, so `fldcw [addr]` becomes CD F1 2E <addr> -- which
+ * is why every FP-using binary died at the identical byte pattern CD F1 2E,
+ * the fldcw in its runtime's FP init, before main ever ran.  See the 8087(HW)
+ * manual page on the distribution media.
+ *
+ * The encoding is two bytes for a one-byte opcode on purpose: it leaves room
+ * to patch the instruction back to its native form in place when a
+ * coprocessor IS present.  `9B <ESC>` -- FWAIT then the real opcode -- is
+ * exactly two bytes and leaves the operands where they already are.  So that
+ * is what this does, once per site, and the CPU runs the program's own
+ * floating point from then on.  substrate has a real x87 with lazy switching
+ * (fpu_init clears CR0.EM), so the first patched instruction takes an #NM,
+ * the FPU handler loads this process's state, and it proceeds.
+ *
+ * Patching is safe here: xout286.c maps text private and writable for exactly
+ * this kind of thing, so a write COWs at worst and never touches another
+ * process's copy.
+ *
+ * Returns 1 when the instruction was rewritten, and the caller must then
+ * return to user mode WITHOUT advancing eip so the patched form executes.
+ */
+#define X286_FPU_ESC_FIRST  0xF0U   /* INT 0xF0..0xF7 == ESC 0xD8..0xDF */
+#define X286_FPU_ESC_LAST   0xF7U
+#define X286_FPU_RAW_ESC    0xF8U   /* a real ESC instruction follows */
+#define X286_FPU_WAIT       0xF9U   /* FWAIT */
+
+static int x286_fixup_fpu_insn(registers_t *regs) {
+    uintptr_t linear;
+    uint8_t insn[2];
+    uint8_t patch[2];
+
+    if (x286_seg_span((uint16_t)regs->cs, regs->eip, sizeof(insn),
+                      &linear) != 0) {
+        return 0;
+    }
+    if (linear >= 0xC0000000U) {
+        return 0;
+    }
+    if (copyin((const void *)linear, insn, sizeof(insn)) != 0) {
+        return 0;
+    }
+    if (insn[0] != 0xCDU || insn[1] < X286_FPU_ESC_FIRST) {
+        return 0;
+    }
+
+    patch[0] = 0x9BU;   /* FWAIT */
+    if (insn[1] <= X286_FPU_ESC_LAST) {
+        patch[1] = (uint8_t)(0xD8U + (insn[1] - X286_FPU_ESC_FIRST));
+    } else if (insn[1] == X286_FPU_RAW_ESC || insn[1] == X286_FPU_WAIT) {
+        /* Nothing of our own to run: for 0xF8 the real ESC is the next
+         * instruction and the CPU reaches it on its own, and 0xF9 is just the
+         * wait.  Either way FWAIT + NOP is the faithful two-byte native form. */
+        patch[1] = 0x90U;   /* NOP */
+    } else {
+        /* 0xFA..0xFF are the emulator's own control entries (startup, far
+         * call thunks).  They are rare -- one or two sites in a whole binary
+         * -- and nothing here knows what they mean, so leave them to fault
+         * rather than guess and corrupt the program quietly. */
+        if (x286_trace_enabled()) {
+            char buf[96];
+
+            snprintf(buf, sizeof(buf),
+                     "X286: unhandled 8087-emulator INT %#04x at %#x:%#x\n",
+                     insn[1], (unsigned)(regs->cs & 0xFFFFU),
+                     (unsigned)regs->eip);
+            kprint(buf);
+        }
+        return 0;
+    }
+
+    if (copyout(patch, (void *)linear, sizeof(patch)) != 0) {
+        return 0;
+    }
+    return 1;
+}
+
 static int x286_handle_trap(void *regs_ptr) {
     registers_t *regs = (registers_t *)regs_ptr;
     struct x286_frame f;
@@ -1832,7 +1921,10 @@ static int x286_handle_trap(void *regs_ptr) {
         return 0;
     }
     if (!x286_is_syscall_int(regs)) {
-        return 0;
+        /* Not a system call.  The other thing that traps here is a floating
+         * point instruction the linker left in its emulator form; rewrite it
+         * and re-execute at the same eip. */
+        return x286_fixup_fpu_insn(regs);
     }
 
     memset(&f, 0, sizeof(f));
