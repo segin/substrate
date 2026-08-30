@@ -28,13 +28,17 @@
 #   read.  They are staged u+r so mke2fs can copy them, then their real modes
 #   are restored inside the image with debugfs.
 #
-# Usage: build-image.sh [-m MEDIA_DIR] [-o OUTPUT] [-s SIZE_MB]
+# Usage: build-image.sh [-m MEDIA_DIR] [-o OUTPUT] [-s SIZE_MB] [--minimal]
+#
+# Installs every product on the media by default; --minimal is the runtime
+# system plus Word only.
 
 set -e
 
 MEDIA=${MEDIA:-$HOME/Downloads/286}
 OUT=""
 SIZE_MB=64
+MINIMAL=no
 HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 TOP=$(CDPATH= cd -- "$HERE/../.." && pwd)
 
@@ -43,6 +47,7 @@ while [ $# -gt 0 ]; do
     -m|--media)  MEDIA=$2; shift 2 ;;
     -o|--output) OUT=$2; shift 2 ;;
     -s|--size)   SIZE_MB=$2; shift 2 ;;
+    --minimal)   MINIMAL=yes; shift ;;
     -h|--help)   sed -n '2,30p' "$0"; exit 0 ;;
     *) echo "$0: unknown argument: $1" >&2; exit 64 ;;
     esac
@@ -60,9 +65,13 @@ ROOT=$STAGE/root
 mkdir -p "$ROOT"
 
 echo "==> staging the runtime system from tar volumes"
+# ./tmp holds the `custom` installer's scaffolding (_lbl volume labels, perms
+# manifests, init.* product hooks, and payloads it would place itself); none
+# of it belongs in a runtime /tmp.
 for vol in b1 b2 x1 x2 x3 x4 ga n2 n3; do
     [ -f "$MEDIA/rts/$vol.img" ] || continue
-    ( cd "$ROOT" && tar xf "$MEDIA/rts/$vol.img" ) 2>/dev/null || true
+    ( cd "$ROOT" && tar xf "$MEDIA/rts/$vol.img" \
+        --exclude='./tmp' --exclude='./tmp/*' ) 2>/dev/null || true
 done
 
 echo "==> extracting /bin from the install floppy (the only source of sh)"
@@ -74,6 +83,97 @@ if [ -f "$MEDIA/msw/word.img" ]; then
     ( cd "$ROOT" && tar xf "$MEDIA/msw/word.img" )
     if [ -f "$ROOT/usr/lib/MSTOOLS/termdesc" ]; then
         "$TOP/bin/xenix/fix-termdesc-ansi.sh" "$ROOT/usr/lib/MSTOOLS/termdesc"
+    fi
+fi
+
+if [ "$MINIMAL" = no ]; then
+    # ---- the rest of the library ------------------------------------
+    #
+    # Three packaging shapes, and only the first can be untarred blindly:
+    #
+    #  1. `custom` format -- real files under ./bin ./etc ./lib ./usr plus
+    #     ./tmp holding the installer's scaffolding (_lbl, perms, fixperm,
+    #     brand, install, init.*).  Take everything but ./tmp.
+    #  2. msinstall format (BASIC) -- members named ../../usr/... , meant to
+    #     be untarred from a directory two levels down.  tar refuses '..'
+    #     without -P; --strip-components=2 then lands them at usr/... .
+    #  3. no paths at all (Multiplan) -- bare MP.HLP, mp, mp.exec, termcap.
+    #     The `mp` wrapper execs /usr/lib/MSTOOLS/mp.exec, which is where
+    #     the payload belongs; mp itself is /usr/bin/mp.
+    install_custom() {
+        for img in "$@"; do
+            [ -f "$img" ] || continue
+            ( cd "$ROOT" && tar xf "$img" --exclude='./tmp' --exclude='./tmp/*' ) \
+                2>/dev/null || true
+        done
+    }
+
+    echo "==> Development System"
+    install_custom "$MEDIA"/dev/dev[1-4].img
+    echo "==> manual pages"
+    install_custom "$MEDIA"/man/m[1-6].img
+    echo "==> text processing"
+    install_custom "$MEDIA"/txt/txt[1-4].img
+    echo "==> CGI graphics"
+    install_custom "$MEDIA"/cgi/cgi[1-4].img
+    echo "==> Lyrix"
+    install_custom "$MEDIA"/lrx/lyrix[1-4].img
+    echo "==> VS COBOL"
+    install_custom "$MEDIA"/vsc/cobol[1-2].img
+    echo "==> FoxBASE"
+    install_custom "$MEDIA"/fox/fox1.img "$MEDIA"/fox/foxplus[1-3].img
+    echo "==> misc (PDS, PET, chat, gnome, tetris)"
+    install_custom "$MEDIA"/msc/pds[1-2].img "$MEDIA"/msc/pet.img \
+                   "$MEDIA"/msc/chat286.img "$MEDIA"/msc/gnome286.img \
+                   "$MEDIA"/msc/tetris286.img
+
+    if [ -f "$MEDIA/msc/utils286.tar.Z" ]; then
+        echo "==> precompiled utilities (emacs, kermit, ...)"
+        ( cd "$ROOT" && zcat "$MEDIA/msc/utils286.tar.Z" | tar xf - ) || true
+    fi
+
+    if [ -f "$MEDIA/msb/basic1.img" ]; then
+        echo "==> Microsoft BASIC"
+        B=$STAGE/basic; mkdir -p "$B"
+        for v in 1 2 3; do
+            [ -f "$MEDIA/msb/basic$v.img" ] || continue
+            ( cd "$B" && tar xPf "$MEDIA/msb/basic$v.img" \
+                --strip-components=2 --wildcards '../../*' ) 2>/dev/null || true
+        done
+        [ -d "$B/usr" ] && cp -a "$B/usr/." "$ROOT/usr/"
+    fi
+
+    if [ -f "$MEDIA/msp/d1.img" ]; then
+        echo "==> Multiplan 2.0"
+        M=$STAGE/mp; mkdir -p "$M"
+        for v in 1 2; do
+            [ -f "$MEDIA/msp/d$v.img" ] || continue
+            ( cd "$M" && tar xf "$MEDIA/msp/d$v.img" ) 2>/dev/null || true
+        done
+        mkdir -p "$ROOT/usr/lib/MSTOOLS" "$ROOT/usr/bin"
+        for f in mp.exec MP.HLP termcap amor.mod deprec.mod price.mod \
+                 startup.mod; do
+            [ -f "$M/$f" ] && cp -a "$M/$f" "$ROOT/usr/lib/MSTOOLS/$f"
+        done
+        if [ -f "$M/mp" ]; then
+            cp -a "$M/mp" "$ROOT/usr/bin/mp"; chmod 755 "$ROOT/usr/bin/mp"
+        fi
+    fi
+
+    if [ -f "$MEDIA/msc/deco286.tar.Z" ]; then
+        echo "==> Demos Commander"
+        D=$STAGE/deco; mkdir -p "$D"
+        ( cd "$D" && zcat "$MEDIA/msc/deco286.tar.Z" | tar xf - ) || true
+        if [ -d "$D/dist286" ]; then
+            mkdir -p "$ROOT/usr/lib/deco/help" "$ROOT/usr/bin"
+            cp -a "$D/dist286/deco" "$ROOT/usr/bin/deco" 2>/dev/null || true
+            chmod 755 "$ROOT/usr/bin/deco" 2>/dev/null || true
+            [ -d "$D/dist286/lib" ]  && cp -a "$D/dist286/lib/."  "$ROOT/usr/lib/deco/"
+            [ -d "$D/dist286/help" ] && cp -a "$D/dist286/help/." "$ROOT/usr/lib/deco/help/"
+            for doc in README RUSREADME ref.man cyrref.man; do
+                [ -f "$D/dist286/$doc" ] && cp -a "$D/dist286/$doc" "$ROOT/usr/lib/deco/"
+            done
+        fi
     fi
 fi
 

@@ -80,13 +80,36 @@ ext2 on purpose: substrate reads it through its own VFS and runs the x.out
 binaries under `PERS_SCO_X286`, so the container is substrate's business and
 only the file contents are Xenix's.
 
-    ./build-image.sh [-m MEDIA_DIR] [-o OUTPUT] [-s SIZE_MB]
+    ./build-image.sh [-m MEDIA_DIR] [-o OUTPUT] [-s SIZE_MB] [--minimal]
 
-Defaults: media `~/Downloads/286`, output `<repo>/xenix286s.img`, 64 MB.
+Defaults: media `~/Downloads/286`, output `<repo>/xenix286s.img`, 64 MB, and
+**every product on the media**. `--minimal` is the runtime system plus Word.
 
 It stages the tar volumes, pulls `/bin` out of `n1.img` with `xenixfs.py`,
-adds Word 3.0 from `msw/word.img`, and runs `bin/xenix/fix-termdesc-ansi.sh`
-over the staged `termdesc`.
+adds Word 3.0 from `msw/word.img`, runs `bin/xenix/fix-termdesc-ansi.sh` over
+the staged `termdesc`, then installs the Development System, manual pages,
+text processing, CGI, Lyrix, COBOL, FoxBASE, BASIC, Multiplan, the public
+domain supplement, PET, Demos Commander and the precompiled utilities.
+
+### Three packaging shapes
+
+Only the first can be untarred blindly:
+
+1. **`custom` format** — real files under `./bin ./etc ./lib ./usr`, plus
+   `./tmp` holding the installer's scaffolding (`_lbl` volume labels, `perms`
+   manifests, `fixperm`, `brand`, `install`, `init.*` hooks, and payloads it
+   would place itself). Everything but `./tmp` is taken. **The rts volumes
+   carry this too** — miss it and the image gets a /tmp full of `init.rts`,
+   `cmds.oa` and friends.
+2. **msinstall format** (BASIC) — members named `../../usr/...`, meant to be
+   untarred from a directory two levels down. `tar` refuses `..` without
+   `-P`; `--strip-components=2` then lands them correctly at `usr/...`.
+3. **no paths at all** (Multiplan) — bare `MP.HLP`, `mp`, `mp.exec`,
+   `termcap`. The `mp` wrapper execs `/usr/lib/MSTOOLS/mp.exec`, which is
+   where the payload goes; `mp` itself is `/usr/bin/mp`.
+
+Demos Commander is its own shape again: a `dist286/` tree whose `INSTALL`
+targets `/usr/bin/deco` and `/usr/lib/deco`.
 
 Two wrinkles it handles:
 
@@ -97,7 +120,30 @@ Two wrinkles it handles:
 - **Ownership.** `fakeroot` makes the staged tree root-owned so the image
   does not inherit the build user's uid.
 
-The result is ~1088 files: 127 entries in `/bin`, 97 in `/usr/bin`.
+The result is ~2375 files: 153 entries in `/bin`, 196 in `/usr/bin`, 11 man
+sections.
+
+## What actually runs
+
+A 43-command sample under `PERS_SCO_X286`: **29 run, 8 crash, 6 will not
+load.** The two failure classes are distinct and neither is an image problem.
+
+**Will not load** — `exec: no handler matched`. These are **8086** binaries
+(`x_cpu` 0x44) and the personality is 286-only (`x_cpu` 0x49). The census of
+the media is 207 i286, 97 8086, 15 `0x69`, 1 i386, and the entire Development
+System is 8086 — which is why `cc`, `masm`, `ld` and `bc` do not run. SCO
+shipped it as the *x86* Development System; the readme says so. Running it
+needs the SCO-X/86 personality (id 133), which is a slot, not an
+implementation.
+
+**Crash** — SIGSEGV early in text: `units`, `factor`, `uptime`, `tput`,
+`awk`, `emacs`, `kermit`, `adb`. These are i286 with the same `x_renv`
+(0xc80f) and the same two-segment layout as `date`, which works, so this is a
+personality gap rather than anything about the file. Not diagnosed.
+
+Working, among others: `date echo pwd ls cat wc sum uname id basename dirname
+expr cal od hd line env printenv sh who tty sed grep clear random deco`, and
+Word 3.0.
 
 ## Media layout
 
