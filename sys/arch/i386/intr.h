@@ -3,14 +3,38 @@
 
 #include <stdint.h>
 
+/*
+ * EFLAGS save/restore.
+ *
+ * The kernel these serve is i386, but the headers are also compiled 64-bit:
+ * tests/ builds the kernel sources natively for its host unit tests.  In long
+ * mode a 32-bit push/pop is not merely mis-suffixed, it is unencodable --
+ * PUSH/POP take a 16- or 64-bit operand only -- so `pushfl; popl %0` with a
+ * uint32_t operand cannot be spelled at all there, and being in a header it
+ * took the whole testsuite down with it.  The 64-bit path therefore goes
+ * through a long temporary and narrows afterwards, which loses nothing:
+ * EFLAGS is by definition the low 32 bits of RFLAGS.  The i386 path is
+ * unchanged apart from dropping the now-redundant suffixes.
+ */
 static inline uint32_t intr_disable(void) {
+#if defined(__x86_64__)
+    unsigned long rflags;
+    __asm__ volatile ("pushf; pop %0; cli" : "=r" (rflags) : : "memory");
+    return (uint32_t)rflags;
+#else
     uint32_t eflags;
-    __asm__ volatile ("pushfl; popl %0; cli" : "=r" (eflags) : : "memory");
+    __asm__ volatile ("pushf; pop %0; cli" : "=r" (eflags) : : "memory");
     return eflags;
+#endif
 }
 
 static inline void intr_restore(uint32_t eflags) {
-    __asm__ volatile ("pushl %0; popfl" : : "r" (eflags) : "memory", "cc");
+#if defined(__x86_64__)
+    unsigned long rflags = eflags;
+    __asm__ volatile ("push %0; popf" : : "r" (rflags) : "memory", "cc");
+#else
+    __asm__ volatile ("push %0; popf" : : "r" (eflags) : "memory", "cc");
+#endif
 }
 
 static inline void intr_enable(void) {
@@ -24,9 +48,15 @@ static inline void intr_enable(void) {
  * critical section — in both cases it MUST NOT sleep or yield.
  */
 static inline int intr_enabled(void) {
+#if defined(__x86_64__)
+    unsigned long rflags;
+    __asm__ volatile ("pushf; pop %0" : "=r" (rflags) : : "memory");
+    return (rflags & 0x200ul) != 0;  /* bit 9 = IF */
+#else
     uint32_t eflags;
-    __asm__ volatile ("pushfl; popl %0" : "=r" (eflags) : : "memory");
+    __asm__ volatile ("pushf; pop %0" : "=r" (eflags) : : "memory");
     return (eflags & 0x200u) != 0;   /* bit 9 = IF */
+#endif
 }
 
 static inline void wait_for_interrupt(void) {
