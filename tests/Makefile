@@ -270,7 +270,7 @@ test_ext2_read_blocks: unit/fs/test_ext2_read_blocks_host.c
 	$(CC) $(CFLAGS_KERN) $< unit/fs/ext2_host_stubs.c -o $@
 
 test_ext2_find_next_zero_bit: unit/fs/test_ext2_find_next_zero_bit.c
-	$(CC) $(CFLAGS_KERN) $< -o $@
+	$(CC) $(CFLAGS_KERN) $< unit/fs/ext2_host_stubs.c -o $@
 
 test_ext2_inode_write: unit/fs/test_ext2_inode_write_host.c
 	$(CC) $(CFLAGS_KERN) $< unit/fs/ext2_host_stubs.c -o $@
