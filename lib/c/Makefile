@@ -19,6 +19,25 @@ PICFLAGS  := $(SHLIB_CFLAGS) -Iinclude -I../../include -I$(TOP)/sys
 CFLAGS    += -fno-omit-frame-pointer
 PICFLAGS  += -fno-omit-frame-pointer
 
+# libc *defines* the functions gcc otherwise treats as builtins, so it must
+# not be compiled with builtin semantics for them.  Two reasons, one cosmetic
+# and one not:
+#
+#   - gcc knows the builtin memcpy/memset take nonnull pointers, so the
+#     deliberate NULL guards in src/string.c are provably-dead code to it.
+#     GCC 13 rejects them outright under -Werror=nonnull-compare (GCC 16 no
+#     longer warns, which is why this only ever broke on CI); worse, being
+#     "dead" the guards are the optimiser's to delete, so the hardening they
+#     provide is not something we should be relying on by luck.
+#   - a byte loop inside memcpy() is exactly the pattern gcc likes to
+#     recognise and rewrite into a call to memcpy(), i.e. into infinite
+#     recursion.  -O0 hides this today; it is a landmine at any other level.
+#
+# tests/Makefile already compiles src/string.c this way for the host unit
+# tests; the library itself simply never got the same treatment.
+CFLAGS    += -fno-builtin
+PICFLAGS  += -fno-builtin
+
 LDFLAGS   := $(USER_LDFLAGS)
 # libc.so.0 declares DT_NEEDED libm.so.0 (for feraiseexcept and
 # friends) and DT_NEEDED libsys.so.0 (libsys is the canonical raw
