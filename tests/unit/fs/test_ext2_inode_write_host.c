@@ -138,7 +138,7 @@ static void run_test_ext2_inode_write(void) {
     inode->i_size = 0;
 
     const char *test_data = "Hello, world!";
-    uint32_t written = ext2_inode_write(&node, 0, (uint32_t)strlen(test_data), test_data);
+    uint32_t written = ext2_inode_write(&node, 0, (uint32_t)strlen(test_data), test_data, NULL);
     if (written != strlen(test_data) || inode->i_block[0] == 0) exit(1);
 
     char read_buf[1024] = {0};
@@ -147,14 +147,14 @@ static void run_test_ext2_inode_write(void) {
 
     char span_data[2048];
     for (int i = 0; i < 2048; i++) span_data[i] = (char)(i % 256);
-    written = ext2_inode_write(&node, 1000, 2048, span_data);
+    written = ext2_inode_write(&node, 1000, 2048, span_data, NULL);
     if (written != 2048 || inode->i_block[1] == 0 || inode->i_block[2] == 0) exit(1);
     ext2_read_block(&fs, inode->i_block[1], read_buf);
     if (read_buf[0] != span_data[24]) exit(1);
 
     char indirect_data[100];
     memset(indirect_data, 0xAB, sizeof(indirect_data));
-    written = ext2_inode_write(&node, 12 * 1024 + 10, 100, indirect_data);
+    written = ext2_inode_write(&node, 12 * 1024 + 10, 100, indirect_data, NULL);
     if (written != 100 || inode->i_block[12] == 0) exit(1);
 
     uint32_t indirect_ptrs[256];

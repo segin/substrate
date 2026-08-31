@@ -264,28 +264,28 @@ test_libc_ctype: lib/c/test_ctype.c ../lib/c/src/ctype.c
 	$(CC) $(CFLAGS_COMMON) -fno-builtin lib/c/test_ctype.c -o $@
 
 test_ext2_perf: unit/fs/test_ext2_perf_host.c
-	$(CC) $(CFLAGS_KERN) $< -o $@
+	$(CC) $(CFLAGS_KERN) $< unit/fs/ext2_host_stubs.c -o $@
 
 test_ext2_read_blocks: unit/fs/test_ext2_read_blocks_host.c
-	$(CC) $(CFLAGS_KERN) $< -o $@
+	$(CC) $(CFLAGS_KERN) $< unit/fs/ext2_host_stubs.c -o $@
 
 test_ext2_find_next_zero_bit: unit/fs/test_ext2_find_next_zero_bit.c
 	$(CC) $(CFLAGS_KERN) $< -o $@
 
 test_ext2_inode_write: unit/fs/test_ext2_inode_write_host.c
-	$(CC) $(CFLAGS_KERN) $< -o $@
+	$(CC) $(CFLAGS_KERN) $< unit/fs/ext2_host_stubs.c -o $@
 
 test_ext2_vfs_ops: unit/fs/test_ext2_vfs_ops_host.c
-	$(CC) $(CFLAGS_KERN) $< -o $@
+	$(CC) $(CFLAGS_KERN) $< unit/fs/ext2_host_stubs.c -o $@
 
 test_ext2_rename: unit/fs/test_ext2_rename_host.c
-	$(CC) $(CFLAGS_KERN) $< -o $@
+	$(CC) $(CFLAGS_KERN) $< unit/fs/ext2_host_stubs.c -o $@
 
 bench_ext2_readdir: unit/fs/bench_ext2_readdir_host.c
-	$(CC) $(CFLAGS_KERN) $< -o $@
+	$(CC) $(CFLAGS_KERN) $< unit/fs/ext2_host_stubs.c -o $@
 
 test_ext2_remove_perf: unit/fs/test_ext2_remove_perf.c
-	$(CC) $(CFLAGS_KERN) $< -o $@
+	$(CC) $(CFLAGS_KERN) $< unit/fs/ext2_host_stubs.c -o $@
 
 test_minix: unit/fs/test_minix_standalone.c
 	$(CC) $(CFLAGS_KERN) $< -o $@
@@ -447,7 +447,7 @@ test_arith: usr.lib/bc/test_arith.c ../usr.lib/bc/num.c ../usr.lib/bc/arith.c
 	$(CC) $(CFLAGS_COMMON) -I../usr.lib/bc $< ../usr.lib/bc/num.c ../usr.lib/bc/arith.c -o $@
 
 test_ext2_write_block: unit/fs/test_ext2_write_block_host.c
-	$(CC) $(CFLAGS_KERN) $< -o $@
+	$(CC) $(CFLAGS_KERN) $< unit/fs/ext2_host_stubs.c -o $@
 
 test_bm: test_bm.c
 	$(CC) $(CFLAGS_COMMON) $< -o $@
