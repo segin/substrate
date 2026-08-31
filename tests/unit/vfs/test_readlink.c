@@ -28,6 +28,11 @@ static struct vnodeops mock_vops_noreadlink = {
     .vop_readlink = NULL,
 };
 
+/*
+ * The vop_* wrappers return NEGATIVE errnos -- sys/vfs/vnode_ops.c does so
+ * at all 41 of its error returns and never a positive one.  These tests
+ * compared against the positive value and so never matched.
+ */
 bool test_vop_readlink_basic(void) {
     struct vnode vp;
     struct uio uio;
@@ -63,7 +68,7 @@ bool test_vop_readlink_notlink(void) {
 
     error = vop_readlink(&vp, &uio, NULL);
 
-    if (error != EINVAL) return false;
+    if (error != -EINVAL) return false;
 
     return true;
 }
@@ -79,7 +84,7 @@ bool test_vop_readlink_notsupp(void) {
 
     error = vop_readlink(&vp, &uio, NULL);
 
-    if (error != EOPNOTSUPP) return false;
+    if (error != -EOPNOTSUPP) return false;
 
     return true;
 }

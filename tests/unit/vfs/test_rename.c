@@ -35,6 +35,11 @@ static struct vnodeops mock_vops_norename = {
     .vop_rename = NULL,
 };
 
+/*
+ * The vop_* wrappers return NEGATIVE errnos -- sys/vfs/vnode_ops.c does so
+ * at all 41 of its error returns and never a positive one.  These tests
+ * compared against the positive value and so never matched.
+ */
 bool test_vop_rename_basic(void) {
     struct vnode fdvp, fvp, tdvp, tvp;
     struct componentname fcnp, tcnp;
@@ -85,7 +90,7 @@ bool test_vop_rename_notsupp(void) {
     
     error = vop_rename(&fdvp, &fvp, &fcnp, &tdvp, &tvp, &tcnp);
 
-    if (error != EOPNOTSUPP) return false;
+    if (error != -EOPNOTSUPP) return false;
 
     return true;
 }
@@ -110,7 +115,7 @@ bool test_vop_rename_bad_mount(void) {
 
     error = vop_rename(&fdvp, &fvp, &fcnp, &tdvp, &tvp, &tcnp);
 
-    if (error != EXDEV) return false;
+    if (error != -EXDEV) return false;
 
     return true;
 }

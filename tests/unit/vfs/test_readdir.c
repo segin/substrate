@@ -61,6 +61,11 @@ static int mock_readdir(struct vnode *vp, struct uio *uio, struct ucred *cred, i
     return 0;
 }
 
+/*
+ * The vop_* wrappers return NEGATIVE errnos -- sys/vfs/vnode_ops.c does so
+ * at all 41 of its error returns and never a positive one.  These tests
+ * compared against the positive value and so never matched.
+ */
 bool test_vop_readdir_basic(void) {
     struct vnode vp;
     memset(&vp, 0, sizeof(vp));
@@ -108,7 +113,7 @@ bool test_vop_readdir_notdir(void) {
 
     int error = vop_readdir(&vp, &uio, &cred, &eofflag, NULL, NULL);
     
-    if (error != ENOTDIR) return false;
+    if (error != -ENOTDIR) return false;
 
     return true;
 }

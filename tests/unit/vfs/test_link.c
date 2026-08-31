@@ -29,6 +29,11 @@ static struct vnodeops mock_vops_nolink = {
     .vop_link = NULL,
 };
 
+/*
+ * The vop_* wrappers return NEGATIVE errnos -- sys/vfs/vnode_ops.c does so
+ * at all 41 of its error returns and never a positive one.  These tests
+ * compared against the positive value and so never matched.
+ */
 bool test_vop_link_basic(void) {
     struct vnode tdvp, vp;
     struct componentname cnp;
@@ -70,7 +75,7 @@ bool test_vop_link_notdir(void) {
 
     error = vop_link(&tdvp, &vp, &cnp);
 
-    if (error != ENOTDIR) return false;
+    if (error != -ENOTDIR) return false;
 
     return true;
 }
@@ -87,7 +92,7 @@ bool test_vop_link_dir_target(void) {
 
     error = vop_link(&tdvp, &vp, &cnp);
 
-    if (error != EPERM) return false;
+    if (error != -EPERM) return false;
 
     return true;
 }
@@ -105,7 +110,7 @@ bool test_vop_link_notsupp(void) {
 
     error = vop_link(&tdvp, &vp, &cnp);
 
-    if (error != EOPNOTSUPP) return false;
+    if (error != -EOPNOTSUPP) return false;
 
     return true;
 }
