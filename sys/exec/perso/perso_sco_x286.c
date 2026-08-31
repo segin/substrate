@@ -554,7 +554,22 @@ static int64_t x286_sys_read(struct x286_frame *f) {
             return x286_read_directory(fd, buf, (uint32_t)f->si);
         }
     }
-    return kern_read(fd, (char *)buf, (size_t)f->si);
+    {
+        int64_t rv = kern_read(fd, (char *)buf, (size_t)f->si);
+
+        /*
+         * System V O_NDELAY, which is what Xenix has, reports "nothing to
+         * read right now" as a zero-length read -- famously indistinguishable
+         * from end of file.  EAGAIN is the later POSIX O_NONBLOCK spelling
+         * and means nothing to a 1987 binary: Word tests only for a positive
+         * count, so handing it -EAGAIN would set carry and look like a hard
+         * error on the keyboard.
+         */
+        if (rv == -EAGAIN) {
+            return 0;
+        }
+        return rv;
+    }
 }
 
 static int64_t x286_sys_write(struct x286_frame *f) {

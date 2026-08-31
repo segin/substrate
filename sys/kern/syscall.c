@@ -581,7 +581,21 @@ ssize_t kern_read(int fd, char *buf, size_t len) {
      * buf is already a kernel pointer here when called from sys_read or internal code.
      * We pass it directly to read_fs to avoid redundant double buffering.
      */
+    /*
+     * Publish the file_t on the thread for the duration of the call, exactly
+     * as sys_read does: driver read callbacks are handed only an fs_node_t*,
+     * so per-fd status flags -- O_NONBLOCK above all -- are unreachable
+     * otherwise.  The personalities call kern_read() rather than sys_read(),
+     * so without this a foreign binary's non-blocking read blocks anyway.
+     * Save and restore rather than clearing, so an inner read cannot strand
+     * an outer one with a NULL io_file.
+     */
+    struct file *prev_io = current_thread ? current_thread->io_file : NULL;
+    if (current_thread) current_thread->io_file = f;
+
     ssize_t bytes = (ssize_t)read_fs((fs_node_t*)f->f_data, f->f_offset, len, (uint8_t*)buf);
+
+    if (current_thread) current_thread->io_file = prev_io;
 
     if (bytes > 0) {
         f->f_offset += bytes;

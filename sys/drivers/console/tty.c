@@ -6,6 +6,7 @@
 #include <kern/sched.h>
 #include <kern/time.h>
 #include <sys/errno.h>
+#include <sys/file.h>
 #include <sys/major.h>
 #include <sys/param.h>
 #include <sys/poll.h>
@@ -834,8 +835,29 @@ int tty_check_change(struct tty *tty) {
     return 0;
 }
 
+/*
+ * Was this read issued through a descriptor marked O_NONBLOCK?
+ *
+ * The read callbacks only ever receive an fs_node_t*, never the file_t, so
+ * per-fd status flags are reachable only through the file_t that read(2)
+ * stashes on the thread for the duration of the call.  That is the same
+ * mechanism af_unix, af_inet, af_packet and the input subsystem already use
+ * to answer this exact question; the tty layer simply never asked.
+ *
+ * Without it every tty read blocks regardless of the flag.  Microsoft Word
+ * polls the keyboard the classic System V way -- fcntl(F_SETFL, O_NDELAY),
+ * read one byte, clear it again -- and that read parked forever, which is
+ * why Word painted its screen and then went dead to the keyboard.
+ */
+static int tty_read_nonblock(void) {
+    return current_thread && current_thread->io_file &&
+           (current_thread->io_file->f_flag & FNONBLOCK);
+}
+
 int tty_read(struct tty *tty, char *buf, int len) {
     if (!tty_valid(tty) || len <= 0) return 0;
+
+    int nonblock = tty_read_nonblock();
 
     TTY_LOCK(tty);
 
@@ -929,6 +951,14 @@ int tty_read(struct tty *tty, char *buf, int len) {
                 break;
             }
 
+            /* O_NONBLOCK: raw_buf is drained and the completion
+             * conditions are unmet, so there is nothing more to be had
+             * without waiting.  Hand back what we have, or EAGAIN. */
+            if (nonblock) {
+                TTY_UNLOCK(tty);
+                return count > 0 ? count : -EAGAIN;
+            }
+
             /* Pending signal at sleep entry: don't park — return so
              * the syscall-exit path delivers the signal.  Mirror
              * after-wake check below. */
@@ -990,7 +1020,16 @@ int tty_read(struct tty *tty, char *buf, int len) {
     /* Canonical mode: use canon() for line-buffered reads */
     while (count < len) {
         if (tty->read_buf.head == tty->read_buf.tail) {
-            int eof = canon(tty, &_flags);
+            int eof;
+
+            /* O_NONBLOCK: no completed line is waiting and canon()
+             * would sleep until one arrives. */
+            if (nonblock) {
+                TTY_UNLOCK(tty);
+                return count > 0 ? count : -EAGAIN;
+            }
+
+            eof = canon(tty, &_flags);
             if (eof < 0) {
                 /* Signal-interrupted.  Return -EINTR if no data, or
                  * the short count if some bytes already landed. */
