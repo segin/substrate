@@ -232,10 +232,10 @@ host_test_linux_signal: sys/host_test_linux_signal.c
 	$(CC) $(CFLAGS_KERN) $< -o $@
 
 host_test_signal_restart: sys/host_test_signal_restart.c ../sys/kern/signal.c
-	$(CC) $(CFLAGS_KERN) $< -o $@
+	$(CC) $(CFLAGS_KERN) $< sys/signal_host_stubs.c -o $@
 
 host_test_signal_integration: sys/host_test_signal_integration.c ../sys/kern/signal.c
-	$(CC) $(CFLAGS_KERN) $< -o $@
+	$(CC) $(CFLAGS_KERN) $< sys/signal_host_stubs.c -o $@
 
 host_test_proc_signal_state: sys/host_test_proc_signal_state.c
 	$(CC) $(CFLAGS_KERN) $< -o $@

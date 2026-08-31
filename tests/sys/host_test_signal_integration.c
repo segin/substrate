@@ -18,6 +18,25 @@
 #define MAX_THREADS 64
 #endif
 thread_t threads[MAX_THREADS];
+
+/*
+ * psignal() marks its target via FOREACH_THREAD(), i.e. thread_first() and
+ * thread_next().  The weak stubs in signal_host_stubs.c report an empty
+ * registry, which would make every delivery a silent no-op here; walk this
+ * file's own table instead.  A slot counts as live once it has a tid.
+ */
+thread_t *thread_first(void) {
+    for (int i = 0; i < MAX_THREADS; i++)
+        if (threads[i].tid) return &threads[i];
+    return NULL;
+}
+
+thread_t *thread_next(thread_t *t) {
+    if (!t) return NULL;
+    for (int i = (int)(t - threads) + 1; i < MAX_THREADS; i++)
+        if (threads[i].tid) return &threads[i];
+    return NULL;
+}
 /* The kernel has no global process table any more, and MAX_PROCS went with
  * it; the array below is this test's own mock storage.  32 matches the
  * value tests/sys/procfs_mocks/include/sys/proc.h already uses. */
@@ -25,6 +44,21 @@ thread_t threads[MAX_THREADS];
 #define MAX_PROCS 32
 #endif
 process_t processes[MAX_PROCS];
+
+/* Same again for the process registry: kill(-1, sig) broadcasts across it. */
+process_t *proc_first(void) {
+    for (int i = 0; i < MAX_PROCS; i++)
+        if (processes[i].pid) return &processes[i];
+    return NULL;
+}
+
+process_t *proc_next(process_t *p) {
+    if (!p) return NULL;
+    for (int i = (int)(p - processes) + 1; i < MAX_PROCS; i++)
+        if (processes[i].pid) return &processes[i];
+    return NULL;
+}
+
 process_t *current_process;
 thread_t *current_thread;
 mutex_t proctree_lock;
