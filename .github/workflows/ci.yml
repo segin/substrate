@@ -117,7 +117,7 @@ jobs:
           sudo apt-get install -y \
             build-essential gcc-multilib python3 \
             e2fsprogs dosfstools mtools fakeroot \
-            grub-common grub-pc-bin util-linux
+            grub-common grub-pc-bin util-linux zstd
 
       - name: Disk space before
         run: df -h /
@@ -158,13 +158,30 @@ jobs:
           debugfs "rootfs.img?offset=$ROOT_OFF" -R "stat /sbin/init" 2>/dev/null \
             | grep -E "Size:|Mode:"
 
-      # The image itself is far too large to upload; the build log plus the
-      # verification above is the artifact.  Ship the kernel it contains.
+      # 4 GiB raw is too big to keep, but the CI image uses only ~1.6% of its
+      # blocks (see the fsck line above) and the rest is zeros, so it
+      # compresses to something an artifact can hold.  --rm drops the raw
+      # file; everything that reads it has already run.
+      #
+      # Level 3 (zstd's default) on purpose: measured on a 4 GiB image, -12
+      # took 3.7x as long as -3 for 9.5% less output.  That is a poor trade
+      # for a step whose only job is to make the image keepable, and it is
+      # worse still here, where the input is mostly zeros and any level
+      # collapses it.
+      - name: Compress the image
+        run: |
+          zstd -T0 -3 --rm -f rootfs.img
+          ls -lh rootfs.img.zst
+
       - uses: actions/upload-artifact@v4
         if: success()
         with:
-          name: rootfs-kernel
-          path: sys/kernel*.bin
+          name: rootfs-image
+          path: |
+            rootfs.img.zst
+            sys/kernel*.bin
+          # Already compressed -- don't spend the time zipping it again.
+          compression-level: 0
           if-no-files-found: warn
           retention-days: 7
 
