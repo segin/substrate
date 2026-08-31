@@ -1,3 +1,4 @@
+#include <stdio.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
@@ -5,18 +6,13 @@
 #include "../../../sys/include/sys/proc.h"
 
 /*
- * The scheduler has no global thread table any more, and MAX_THREADS went
- * with it -- this file was the last reference to the name, leaving it
- * undeclared and the test unbuildable.  The array below is purely this
- * test's own scratch space (create_test_thread indexes it by tid and bounds
- * against this same constant), so size it here.  64 matches what the other
- * host tests that need a thread table pick: fuzz/fuzz_sched.c,
- * sys/bench_idle.c, sys/host_test_wait_bench.c, sys/host_test_futex.c.
+ * These tests used to keep their own threads[] array, back when that array
+ * WAS the scheduler's thread table.  It is not any more: sched_decay_tick()
+ * reaches every thread through FOREACH_THREAD, i.e. the real registry, so a
+ * private array is invisible to it and the decay pass silently updated
+ * nothing.  Threads are allocated through sched_alloc_thread() now, which
+ * registers them.
  */
-#define MAX_THREADS 64
-
-// Mocks - use weak linkage to avoid conflicts if they are defined elsewhere
-thread_t threads[MAX_THREADS] __attribute__((weak));
 thread_t *current_thread __attribute__((weak)) = NULL;
 process_t *current_process __attribute__((weak)) = NULL;
 
@@ -34,23 +30,32 @@ void sched_recalc_all_priorities(uint32_t current_tick);
 void sched_decay_on_voluntary_sleep(thread_t *t);
 void sched_decay_on_yield(thread_t *t);
 
-// Helper to reset threads
+/*
+ * Deliberately does nothing to the registry.
+ *
+ * An earlier version parked every thread it found -- to keep threads left
+ * behind by previous sub-tests from perturbing the decay pass.  That also
+ * parked the idle thread, and with nothing runnable the next sched_yield()
+ * took its idle path and halted waiting for an interrupt no host test will
+ * ever deliver, killing an unrelated futex test three cases later.
+ *
+ * Leaving other threads alone is harmless: the decay pass recalculates them
+ * too, but every assertion here is about a thread this file just created.
+ */
 static void reset_threads(void) {
-    memset(threads, 0, sizeof(threads));
-    for (int i = 0; i < MAX_THREADS; i++) {
-        threads[i].tid = -1; // Mark as free
-    }
 }
 
 static thread_t* create_test_thread(int tid, sched_class_t cls, int base_prio) {
-    if (tid < 0 || tid >= MAX_THREADS) return NULL;
-    threads[tid].tid = tid;
-    threads[tid].sched_class = cls;
-    threads[tid].base_priority = base_prio;
-    threads[tid].priority = base_prio;
-    threads[tid].run_time = 0;
-    threads[tid].sleep_time = 0;
-    return &threads[tid];
+    thread_t *t = sched_alloc_thread(current_process);
+    if (!t) return NULL;
+    (void)tid;                  /* the allocator assigns the real tid */
+    t->sched_class   = cls;
+    t->base_priority = base_prio;
+    t->priority      = base_prio;
+    t->run_time      = 0;
+    t->sleep_time    = 0;
+    t->state         = THREAD_BLOCKED;
+    return t;
 }
 
 bool test_sched_decay_priority(void) {
@@ -177,9 +182,9 @@ bool test_sched_decay_actions(void) {
 }
 
 bool test_sched_decay_suite(void) {
-    if (!test_sched_decay_priority()) return false;
-    if (!test_sched_decay_tick_update()) return false;
-    if (!test_sched_decay_starvation()) return false;
-    if (!test_sched_decay_actions()) return false;
+    if (!test_sched_decay_priority())    { fprintf(stderr, "DBG: priority\n"); return false; }
+    if (!test_sched_decay_tick_update()) { fprintf(stderr, "DBG: tick_update\n"); return false; }
+    if (!test_sched_decay_starvation())  { fprintf(stderr, "DBG: starvation\n"); return false; }
+    if (!test_sched_decay_actions())     { fprintf(stderr, "DBG: actions\n"); return false; }
     return true;
 }
