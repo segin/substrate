@@ -132,7 +132,11 @@ int sched_fork_thread(process_t *proc, void *parent_regs) {
     }
 
     // Stack is at top of these pages (16KB = 0x4000)
-    uint32_t *kstack = (uint32_t *)((uint32_t)kstack_base + 0x4000);
+    /* uintptr_t, not uint32_t: rounding a pointer through a 32-bit integer
+     * truncates it on any host where pointers are wider, which is exactly
+     * what the tests/ host build is.  Identical on i386, where uintptr_t
+     * is 32 bits. */
+    uint32_t *kstack = (uint32_t *)((uintptr_t)kstack_base + 0x4000);
     t->kstack_base = (uintptr_t)kstack_base;
     t->kstack_top = (uintptr_t)kstack;
     t->kstack_units = 4;
@@ -227,7 +231,11 @@ int sched_clone_thread(process_t *proc, void *parent_regs, uint32_t tls_base,
         return -1;
     }
 
-    uint32_t *kstack = (uint32_t *)((uint32_t)kstack_base + 0x4000);
+    /* uintptr_t, not uint32_t: rounding a pointer through a 32-bit integer
+     * truncates it on any host where pointers are wider, which is exactly
+     * what the tests/ host build is.  Identical on i386, where uintptr_t
+     * is 32 bits. */
+    uint32_t *kstack = (uint32_t *)((uintptr_t)kstack_base + 0x4000);
     t->kstack_base = (uintptr_t)kstack_base;
     t->kstack_top = (uintptr_t)kstack;
     t->kstack_units = 4;
@@ -336,7 +344,11 @@ thread_t *sched_create_thread(process_t *proc, void (*entry_point)(void*), void 
         t->state = THREAD_ZOMBIE;
         return NULL;
     }
-    uint32_t *kstack = (uint32_t *)((uint32_t)kstack_base + 0x4000);
+    /* uintptr_t, not uint32_t: rounding a pointer through a 32-bit integer
+     * truncates it on any host where pointers are wider, which is exactly
+     * what the tests/ host build is.  Identical on i386, where uintptr_t
+     * is 32 bits. */
+    uint32_t *kstack = (uint32_t *)((uintptr_t)kstack_base + 0x4000);
     t->kstack_base  = (uintptr_t)kstack_base;
     t->kstack_top   = (uintptr_t)kstack;
     t->kstack_units = 4;
