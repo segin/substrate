@@ -1,0 +1,205 @@
+name: ci
+
+# Basic CI for the Substrate tree.  Everything here builds or runs on the
+# Linux runner itself -- the i386 kernel and userland cross-compile with the
+# host gcc's -m32, and the testsuite under tests/ is host-native by design
+# (NATIVE_BUILD / -DHOST_TEST).  Anything needing the substrate-native GNU
+# toolchain (contrib/ ports, target torture tests) or a booted VM is out of
+# scope: those want /opt/substrate and a qemu run, not a two-minute job.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# A new push to the same ref supersedes the run in flight.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  kernel:
+    name: kernel
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      # gcc-multilib supplies the 32-bit headers and libs that -m32 needs;
+      # the kernel is -nostdinc but still pulls gcc's own include dir, which
+      # Makefile.inc locates with `cc -m32 -print-file-name=include`.
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential gcc-multilib python3
+
+      - name: Toolchain versions
+        run: |
+          cc --version | head -1
+          ld --version | head -1
+          echo "gcc 32-bit include: $(cc -m32 -print-file-name=include)"
+
+      - name: Build kernel
+        run: make -C sys -j"$(nproc)"
+
+      - name: Kernel artifacts
+        run: ls -l sys/kernel*.bin
+
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: kernel
+          path: sys/kernel*.bin
+          if-no-files-found: warn
+          retention-days: 7
+
+  host-tests:
+    name: host testsuite
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential gcc-multilib python3
+
+      # tests/Makefile's `all` both builds and runs every host test, so a
+      # failure here is either a build break or a red test -- the log says
+      # which.  Note it stops at the first failing command in the recipe
+      # rather than reporting every failure in one pass.
+      - name: Build and run host tests
+        run: make -C tests
+
+  userland:
+    name: userland libs and utils
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential gcc-multilib python3
+
+      # AGENTS.md directive 5: `make -C sys`, `make -C lib/c` and
+      # `make -C bin` must always pass.  The kernel half is its own job.
+      - name: Build libc
+        run: make -C lib/c -j"$(nproc)"
+
+      - name: Build bin
+        run: make -C bin -j"$(nproc)"
+
+  image:
+    name: full OS + 4GiB rootfs.img
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      # build-rootfs.sh --image bakes a partitioned GRUB disk: p1 FAT32
+      # (sub-boot) at LBA 2048, p2 ext2 (sub-root) at LBA 104448.  It builds
+      # it as a plain file with offsets -- no loop device, no root -- so the
+      # only requirement is the tools.  grub-mkimage lives in grub-common;
+      # grub-pc-bin supplies the i386-pc modules and boot.img it embeds.
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential gcc-multilib python3 \
+            e2fsprogs dosfstools mtools fakeroot \
+            grub-common grub-pc-bin util-linux
+
+      - name: Disk space before
+        run: df -h /
+
+      # --no-boot is required: sys/boot does not compile, and without the
+      # flag the script stops there and produces nothing.
+      # --toolchain is deliberately omitted -- it only overlays the contrib
+      # stage-2 gcc/binutils staging trees, which take hours to produce and
+      # are not built here.
+      - name: Build userland and bake the image
+        run: ./build-rootfs.sh --dist --image --no-boot
+
+      - name: Disk space after
+        run: df -h /
+
+      # Verify the image is actually an image, not a 4 GiB sparse file that
+      # the bake quietly failed to populate.
+      - name: Verify image
+        run: |
+          set -euo pipefail
+          test -f rootfs.img
+          bytes=$(stat -c%s rootfs.img)
+          echo "rootfs.img: $bytes bytes ($((bytes / 1024 / 1024)) MiB)"
+          test "$bytes" -eq $((4096 * 1024 * 1024))
+
+          echo "--- partition table ---"
+          sfdisk -l rootfs.img
+
+          ROOT_OFF=$((104448 * 512))
+          echo "--- fsck sub-root ---"
+          e2fsck -fn "rootfs.img?offset=$ROOT_OFF"
+
+          echo "--- kernel present in the image? ---"
+          debugfs "rootfs.img?offset=$ROOT_OFF" -R "stat /vmunix" 2>/dev/null \
+            | grep -E "Size:|Mode:"
+
+          echo "--- init present? ---"
+          debugfs "rootfs.img?offset=$ROOT_OFF" -R "stat /sbin/init" 2>/dev/null \
+            | grep -E "Size:|Mode:"
+
+      # The image itself is far too large to upload; the build log plus the
+      # verification above is the artifact.  Ship the kernel it contains.
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: rootfs-kernel
+          path: sys/kernel*.bin
+          if-no-files-found: warn
+          retention-days: 7
+
+  utils:
+    name: per-utility CI scripts
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential gcc-multilib python3
+
+      # Each tests/ci/test-*.sh is self-contained and expects to be run from
+      # the repo root.  Run them all rather than stopping at the first
+      # failure, so one broken utility doesn't hide the state of the rest;
+      # the job still fails if any did.  bench-* are benchmarks, not tests.
+      - name: Run tests/ci scripts
+        env:
+          ASAN_OPTIONS: detect_leaks=1:abort_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: |
+          failed=()
+          for s in tests/ci/test-*.sh; do
+            echo "::group::$s"
+            if bash "$s"; then
+              echo "PASS $s"
+            else
+              echo "FAIL $s"
+              failed+=("$s")
+            fi
+            echo "::endgroup::"
+          done
+          if (( ${#failed[@]} )); then
+            echo "Failed: ${failed[*]}"
+            exit 1
+          fi
+          echo "All tests/ci scripts passed."
