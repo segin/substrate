@@ -176,3 +176,13 @@ int main(void) {
     puts("host_test_pgrp: PASS");
     return 0;
 }
+
+/*
+ * sys/pm/pgrp.c copies the process name in from userland; there is no
+ * userland here.  Signature per sys/include/sys/copy.h.
+ */
+int copyinstr(const void *src, void *dst, size_t maxlen, size_t *len) {
+    (void)src; (void)dst; (void)maxlen;
+    if (len) *len = 0;
+    return -1;
+}
