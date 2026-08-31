@@ -15,7 +15,13 @@
 #include <vm/vm_kmem.h>
 #include <sys/lock.h>
 
-extern process_t processes[MAX_PROCS];
+/*
+ * `extern process_t processes[MAX_PROCS];` used to sit here.  Both the array
+ * and the constant are long gone from the kernel -- there is no global
+ * process table any more -- and nothing in this file ever referenced the
+ * declaration, so all it did was fail to compile once MAX_PROCS stopped
+ * being defined anywhere.
+ */
 extern process_t *current_process;
 
 #include "../../../sys/fs/procfs.c"
