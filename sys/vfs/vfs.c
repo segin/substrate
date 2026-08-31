@@ -690,6 +690,59 @@ static int vfs_is_busy(struct mount *mp) {
     return busy;
 }
 
+/*
+ * Drop every process reference into `mp` before its nodes are freed.
+ *
+ * MNT_FORCE deliberately unmounts a filesystem that vfs_is_busy() says is
+ * still in use, on the grounds that the references left behind will simply
+ * start failing.  They do not: nothing invalidates them, so a cwd_node,
+ * root_node or vnode fd pointing into the filesystem becomes a dangling
+ * pointer the moment its nodes are freed, and the next use is a read of
+ * recycled memory.
+ *
+ * proc_exit() then reaches close_fs(current_process->cwd_node), which does
+ *
+ *     if (node->close != 0) node->close(node);
+ *
+ * an indirect call through a field of that freed node -- so the failure is
+ * not an EIO from a stale fd, it is the kernel jumping to whatever the
+ * recycled memory happened to contain.  Shutdown force-unmounts every
+ * filesystem, so any process still alive with its cwd on one (a Xenix
+ * program under /perso, say) took the kernel with it.
+ *
+ * Clearing the references is safe by construction: close_fs() already
+ * tolerates NULL, proc_exit() skips a NULL cwd_node/root_node, and every
+ * path-resolving caller reads `p->cwd_node ? p->cwd_node : root`, so a
+ * process whose cwd is pulled out from under it falls back to the root
+ * rather than following a corpse.
+ */
+static void vfs_detach_mount_refs(struct mount *mp) {
+    if (!mp) return;
+
+    proc_registry_lock();
+    FOREACH_PROC(p) {
+        if (p->cwd_node && p->cwd_node->mp == mp) {
+            p->cwd_node = NULL;
+        }
+        if (p->root_node && p->root_node->mp == mp) {
+            p->root_node = NULL;
+        }
+        for (int j = 0; j < MAX_FD; j++) {
+            struct file *f = p->fds[j];
+
+            /* f_type is the discriminator: f_data holds other payloads for
+             * sockets and pipes, and is NULL for some of them. */
+            if (!f || f->f_type != DTYPE_VNODE || !f->f_data) {
+                continue;
+            }
+            if (((fs_node_t *)f->f_data)->mp == mp) {
+                f->f_data = NULL;
+            }
+        }
+    }
+    proc_registry_unlock();
+}
+
 fs_node_t *finddir_fs(fs_node_t *node, char *name) {
     return finddir_fs_internal(node, name, 0, 1);
 }
@@ -1772,6 +1825,9 @@ int vfs_unmount_legacy_flags(const char *path, int flags) {
             }
             kprintf("VFS: forced unmount of %s while busy (MNT_FORCE)\n",
                     path);
+            /* Sever the references first: once the nodes are freed, using
+             * one is not a failing fd but a jump through freed memory. */
+            vfs_detach_mount_refs(target_mp);
         }
     }
 
