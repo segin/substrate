@@ -82,8 +82,24 @@ bool test_vm_page_flags(void) {
 
     vm_page_init();
     vm_page_free(&p);
-    
-    if (!(p.flags & PG_FREE)) return false;
-    
+
+    /*
+     * vm_page_free() deliberately does NOT set PG_FREE.  vm_phys_free_page()
+     * reads PG_FREE as "already on the buddy free list" and early-returns to
+     * catch double frees, so setting it here would mean the page never
+     * reached vm_phys_buddy_enqueue() and the frame was silently lost from
+     * the allocator's view.  PG_FREE is buddy_enqueue's to set, once the page
+     * really is on the list -- and this page was never in the buddy allocator
+     * at all, so it does not get there.  What vm_page_free() guarantees is
+     * that the page is off every queue, detached, and quiescent.  This test
+     * asserted PG_FREE, which is the bug that convention was written to stop.
+     */
+    if (p.flags & PG_FREE)     return false;
+    if (p.flags & PG_ACTIVE)   return false;
+    if (p.flags & PG_INACTIVE) return false;
+    if (p.ref_count  != 0)     return false;
+    if (p.wire_count != 0)     return false;
+    if (p.object     != NULL)  return false;
+
     return true;
 }
