@@ -96,6 +96,14 @@ static void test_ext2_read_blocks(void) {
 
     fs.device = &dev_node;
     fs.block_size = 1024;
+    /*
+     * ext2_read_block()/ext2_write_block() reject any block number outside
+     * the filesystem's data range -- block pointers come from on-disk
+     * metadata a crafted image controls, and an unchecked one turns a file
+     * read into an arbitrary device-offset access.  A memset ext2_fs_t leaves
+     * s_blocks_count at 0, which refuses every block.
+     */
+    fs.sb.s_blocks_count = 4096;
 
     uint8_t buffer[4096];
     assert(ext2_read_blocks(NULL, 0, 1, buffer) == 0);

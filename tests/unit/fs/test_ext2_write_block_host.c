@@ -122,6 +122,14 @@ void run_ext2_write_block_test(void) {
 
     fs.device = &dev_node;
     fs.block_size = 1024;
+    /*
+     * ext2_read_block()/ext2_write_block() reject any block number outside
+     * the filesystem's data range -- block pointers come from on-disk
+     * metadata a crafted image controls, and an unchecked one turns a file
+     * read into an arbitrary device-offset access.  A memset ext2_fs_t leaves
+     * s_blocks_count at 0, which refuses every block.
+     */
+    fs.sb.s_blocks_count = 4096;
     fs.group_count = 1;
     fs.blocks_per_group = BLOCKS_COUNT;
 
