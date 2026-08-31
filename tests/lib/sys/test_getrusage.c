@@ -40,7 +40,7 @@ bool test_getrusage_valid_args() {
     mock_syscall_return = 0;
 
     struct rusage usage;
-    int ret = getrusage(RUSAGE_SELF, &usage);
+    int ret = sys_getrusage(RUSAGE_SELF, &usage);
 
     if (ret != 0) {
         printf("getrusage returned %d (expected 0)\n", ret);
@@ -78,10 +78,20 @@ bool test_getrusage_error() {
     mock_syscall_return = -EFAULT;
 
     struct rusage usage;
-    int ret = getrusage(RUSAGE_CHILDREN, &usage);
+    int ret = sys_getrusage(RUSAGE_CHILDREN, &usage);
 
-    if (ret != -EFAULT) {
-        printf("getrusage returned %d (expected %d)\n", ret, -EFAULT);
+    /*
+     * sys_getrusage() runs its result through __sysret(), libsys's documented
+     * normalization of a negated errno into -1 plus errno
+     * (docs/syscalls/error-contract.md, and host_test_libsys_error_contract).
+     * It does not hand the raw -EFAULT back, which is what this expected.
+     */
+    if (ret != -1) {
+        printf("sys_getrusage returned %d (expected -1)\n", ret);
+        return false;
+    }
+    if (errno != EFAULT) {
+        printf("errno was %d (expected %d)\n", errno, EFAULT);
         return false;
     }
 
