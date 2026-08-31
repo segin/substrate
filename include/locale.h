@@ -34,6 +34,18 @@ struct lconv {
     char  n_sign_posn;
 };
 
+/*
+ * POSIX puts locale_t in <locale.h>.  Substrate has no locale machinery, so
+ * it is an opaque pointer; the type exists so that strerror_l(3) and friends
+ * can be declared and defined without each one inventing its own typedef --
+ * which is what src/string.c used to do, and which collided with glibc's
+ * declaration whenever that file was compiled natively for the host tests.
+ */
+#ifndef __locale_t_defined
+#define __locale_t_defined 1
+typedef void *locale_t;
+#endif
+
 char *setlocale(int category, const char *locale);
 struct lconv *localeconv(void);
 

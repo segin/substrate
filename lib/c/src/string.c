@@ -1,4 +1,5 @@
 #include <errno.h>
+#include <locale.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -635,15 +636,10 @@ int strerror_r(int errnum, char *buf, size_t buflen) {
 
 /* POSIX strerror_l(3) — locale-aware variant.  Substrate is C-locale
  * only today, so this returns the same string as strerror(). */
-#ifndef HOST_TEST
-/* Substrate has no locale machinery, so locale_t is an opaque pointer.
- * Not under HOST_TEST: there this file is compiled against glibc's
- * headers, which have already declared both locale_t (as struct
- * __locale_struct *) and strerror_l() in terms of it.  Redefining the
- * typedef made our definition conflict with that declaration and the
- * host test build stopped here. */
-typedef void *locale_t;
-#endif
+/* locale_t comes from <locale.h> -- substrate's declares it, and so does
+ * glibc's when this file is compiled natively for the host tests.  It used
+ * to be typedef'd right here, which conflicted with glibc's declaration of
+ * strerror_l() in terms of its own locale_t. */
 char *strerror_l(int errnum, locale_t locale) {
     (void)locale;
     return (char *)lookup_error_string(errnum);
