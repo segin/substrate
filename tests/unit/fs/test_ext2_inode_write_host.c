@@ -185,13 +185,24 @@ static void run_test_ext2_chmod_persistence(void) {
     if (node->chmod == NULL) exit(1);
 
     node->mask = 0750;
-    node->ctime = 987654321;
+    node->ctime = 987654321;        /* must NOT survive: see below */
     if (node->chmod(node, node->mask) != 0) exit(1);
 
     memset(&disk_inode, 0, sizeof(disk_inode));
     if (ext2_read_inode(&fs, 1, &disk_inode) != 0) exit(1);
     if ((disk_inode.i_mode & 07777) != 0750) exit(1);
-    if (disk_inode.i_ctime != 987654321U) exit(1);
+    /*
+     * POSIX requires a successful chmod to set ctime to the CURRENT time, so
+     * the caller's 987654321 is overwritten, not persisted.  chmod used to
+     * copy the existing cached ctime back over itself and never advance it at
+     * all ([EXT2-22]), which is what this test was written against -- and why
+     * tools that detect metadata changes by ctime (backups, `find -newerct`,
+     * intrusion detection) saw nothing happen.  What must hold is that the
+     * stored ctime moved off its old value and agrees with the vnode.
+     */
+    if (disk_inode.i_ctime == 111U) exit(1);
+    if (disk_inode.i_ctime == 987654321U) exit(1);
+    if (disk_inode.i_ctime != (uint32_t)node->ctime) exit(1);
 }
 
 int main(void) {
