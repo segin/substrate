@@ -307,7 +307,13 @@ test_libc_time: lib/c/test_time_standalone.c ../lib/c/src/time/time.c
 	$(CC) $(CFLAGS_COMMON) -fno-builtin lib/c/test_time_standalone.c -o $@
 
 test_libc_stdlib: lib/c/test_stdlib.c ../lib/c/src/stdlib.c
-	$(CC) $(CFLAGS_COMMON) -fno-builtin lib/c/test_stdlib.c -o $@
+# stdlib.c includes <sys/syscall.h> for SYS_SETSID / SYS_GETRANDOM (daemon(),
+# login_tty(), the entropy path).  Without substrate's include tree that is
+# glibc's header, which spells them SYS_setsid; with it, the header
+# dispatches on __i386__ vs __x86_64__ and a 64-bit host build lands in the
+# barely-scaffolded x86_64 table.  -D__i386__ picks the real one, which is
+# exactly what test_libc_errno does for the same reason.
+	$(CC) $(CFLAGS_COMMON) -fno-builtin -D__i386__ -I../include -I../sys -I../sys/include lib/c/test_stdlib.c -o $@
 
 libc_stdio_prefixed.o: ../lib/c/stdio/stdio_core.c ../lib/c/stdio/stdstreams.c ../lib/c/stdio/printf.c ../lib/c/stdio/scanf.c ../lib/c/src/stdlib.c ../lib/c/src/string.c ../lib/c/src/ctype.c symbols.map
 	$(CC) $(CFLAGS_COMMON) -m32 -fno-builtin -I../lib/c/include -I../include -I../sys -c ../lib/c/stdio/stdio_core.c -o stdio_core_raw.o

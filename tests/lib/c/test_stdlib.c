@@ -30,6 +30,16 @@
 // Include source file directly to test internal allocator state.
 #include "../../../lib/c/src/stdlib.c"
 
+/*
+ * stdlib.c reaches the kernel directly for getrandom(2) and setsid(2).  There
+ * is no kernel here, so answer every raw syscall with failure: the entropy
+ * path falls back to its userspace mixer, which is what this test exercises.
+ */
+int64_t _syscall3(int num, uintptr_t a1, uintptr_t a2, uintptr_t a3) {
+    (void)num; (void)a1; (void)a2; (void)a3;
+    return -1;
+}
+
 #undef malloc
 #undef free
 #undef calloc
@@ -219,12 +229,21 @@ void test_calloc(void) {
     }
     tested_free(arr);
 
-    // Test zero allocation
+    /*
+     * Zero allocation.  C leaves malloc(0) free to return NULL or a unique
+     * freeable pointer, and substrate deliberately picked the latter -- see
+     * the comment on malloc() in lib/c/src/stdlib.c: callers like
+     * mandoc_malloc treat NULL as a fatal allocation failure, so returning
+     * NULL here produced false OOM exits.  calloc inherits that.  This test
+     * still asserted the opposite, from before that decision.
+     */
     void *p = tested_calloc(0, 10);
-    assert(p == NULL);
+    assert(p != NULL);
+    tested_free(p);
 
     p = tested_calloc(10, 0);
-    assert(p == NULL);
+    assert(p != NULL);
+    tested_free(p);
 
     // Test overflow
     assert(tested_calloc(SIZE_MAX, 2) == NULL);
@@ -262,12 +281,15 @@ void test_calloc_overflow(void) {
     void *ptr5 = tested_calloc(2, half_max + 1);
     assert(ptr5 == NULL);
 
-    // Zero allocations
+    /* Zero allocations return a unique freeable pointer, not NULL -- see
+     * test_calloc() above and the malloc() comment in lib/c/src/stdlib.c. */
     void *ptr6 = tested_calloc(0, 10);
-    assert(ptr6 == NULL); // implementation returns NULL for 0 size
+    assert(ptr6 != NULL);
+    tested_free(ptr6);
 
     void *ptr7 = tested_calloc(10, 0);
-    assert(ptr7 == NULL); // implementation returns NULL for 0 size
+    assert(ptr7 != NULL);
+    tested_free(ptr7);
 }
 
 int main(void) {
