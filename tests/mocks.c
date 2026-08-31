@@ -289,7 +289,11 @@ int pgrp_is_orphaned(struct pgrp *pgrp) { (void)pgrp; return 0; }
 void pgrp_remove_proc(struct process *proc) { (void)proc; }
 int sched_interactivity_boost(thread_t *t) { (void)t; return 0; }
 struct personality *perso_lookup(int id) { (void)id; return &personality_native; }
-void sendsig(void *sf, struct process *p, int sig) { (void)sf; (void)p; (void)sig; }
+/* Signature must track sys/include/sys/signal.h -- a mock that disagrees
+ * with the header it stands in for is a conflicting definition at best
+ * and a silently wrong ABI at worst. */
+void sendsig(void *handler, int sig, uint32_t mask, uint32_t flags, void *regs)
+{ (void)handler; (void)sig; (void)mask; (void)flags; (void)regs; }
 
 const uint8_t sigprop[NSIG] = {0}; 
 
@@ -357,7 +361,8 @@ void uma_zone_set_max(uma_zone_t *zone, int max) { (void)zone; (void)max; }
 
 uint32_t pmm_get_total_memory(void) { return 0; }
 uint32_t pmm_get_free_memory(void) { return 0; }
-void cmdline_get(char *buf, size_t buf_len) { buf[0] = '\0'; }
+int cmdline_get(const char *key, char *buf, size_t buf_len)
+{ (void)key; if (buf && buf_len > 0) buf[0] = '\0'; return -1; }
 
 void swapper_request_work(void) {}
 int pmap_page_is_referenced(struct vm_page *m) { (void)m; return 0; }
@@ -384,7 +389,8 @@ int percpu_get_cpu_id(void) { return 0; }
 int sched_can_run_on_cpu(void) { return 1; }
 void host_wait_for_interrupt(void) {}
 __attribute__((weak)) void vm_map_destroy(vm_map_t *map) { (void)map; }
-void cmdline_get_full(char *buf, size_t buf_len) { if(buf && buf_len > 0) buf[0] = '\0'; }
+int cmdline_get_full(char *buf, size_t buf_len)
+{ if (buf && buf_len > 0) buf[0] = '\0'; return -1; }
 
 void wait_for_interrupt() {}
 
