@@ -363,5 +363,7 @@ bool test_namei_maxsymlinks(void)
     free_mock_vnode(root);
     free_mock_vnode(loop);
 
-    return error == ELOOP;
+    /* namei() returns a negative errno (sys/vfs/vfs_lookup.c returns
+     * -ELOOP), so the positive comparison never matched. */
+    return error == -ELOOP;
 }
