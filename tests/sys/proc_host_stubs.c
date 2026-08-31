@@ -22,6 +22,7 @@
 #include "../../sys/include/sys/proc.h"
 #include "../../sys/kern/sched.h"
 #include "../../sys/vfs/buf.h"
+#include "../../sys/vfs/vfs.h"
 
 __attribute__((weak)) void bio_get_stats(struct bio_stats *out) { (void)out; }   /* sys/vfs/buf.h */
 __attribute__((weak)) int cmdline_debug_enabled(const char *channel) { (void)channel; return 0; }   /* sys/kern/cmdline.h */
@@ -75,3 +76,16 @@ __attribute__((weak)) void vt_release_graphics_on_exit(void *exiting_process) { 
 /* Commit accounting (sys/vm/vm_commit.h) -- proc_exit uncharges on teardown. */
 __attribute__((weak)) int vm_commit_charge(size_t npages) { (void)npages; return 0; }
 __attribute__((weak)) void vm_commit_uncharge(size_t npages) { (void)npages; }
+
+/*
+ * exec.c's format-handler registrations, and the two VFS entry points the
+ * exec path uses.  A host test that links exec.c gets these; one that does
+ * not simply never references them.
+ */
+__attribute__((weak)) void aout_init_handler(void) { }
+__attribute__((weak)) void xout_init_handler(void) { }
+__attribute__((weak)) void xout286_init_handler(void) { }
+__attribute__((weak)) int kern_open_exec(const char *path) { (void)path; return -1; }
+__attribute__((weak)) int vfs_check_permissions_groups(fs_node_t *node, uint32_t uid,
+        uint32_t gid, const uint32_t *groups, int ngroups, int mode)
+{ (void)node; (void)uid; (void)gid; (void)groups; (void)ngroups; (void)mode; return 0; }

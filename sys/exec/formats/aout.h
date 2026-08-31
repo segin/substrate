@@ -114,10 +114,15 @@ enum aout_flavor aout_classify(const struct aout_exec *hdr);
  */
 int aout_validate_header(const struct aout_exec *hdr, uint32_t file_size);
 
-#ifndef HOST_TEST
-/* Register the kernel-side a.out (Linux ZMAGIC/QMAGIC/OMAGIC) exec handler. */
+/* Register the kernel-side a.out (Linux ZMAGIC/QMAGIC/OMAGIC) exec handler.
+ *
+ * Declared unconditionally: exec_init() calls it unconditionally, so hiding
+ * the prototype under HOST_TEST did not remove the call, it only left the
+ * host build with an implicit declaration -- an error under C23.  A host test
+ * that links exec.c supplies its own definition. */
 void aout_init_handler(void);
 
+#ifndef HOST_TEST
 /* Linux uselib(2): map an old-style a.out shared library (libc.so.4, ld.so)
  * at its fixed embedded load address into the caller's address space. */
 int aout_sys_uselib(uint32_t upath, uint32_t a1, uint32_t a2, uint32_t a3,

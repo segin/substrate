@@ -26,6 +26,7 @@
 
 thread_t threads[MAX_THREADS];
 thread_t *current_thread;
+process_t *current_process;   /* referenced by the sources under test */
 fs_node_t *fs_root;
 
 static jmp_buf exit_jmp;
@@ -141,8 +142,18 @@ int kern_open(const char *path, int flags, int mode) {
     fake_file.f_count = 1;
     fake_file.f_data = (void *)(uintptr_t)0x12340000;
     current_process->fds[3] = &fake_file;
-    current_process->fd_bitmap |= (1U << 3);
+    fdset_set(current_process->fd_bitmap, 3);   /* fd_bitmap is an array now */
     return 3;
+}
+
+/*
+ * exec.c opens the image through kern_open_exec(), not kern_open() -- the
+ * personality prefix has to apply to the executable but not to the caller's
+ * ordinary opens.  This file mocked only the latter, so the exec path got
+ * the weak refusing stub from proc_host_stubs.c and every execve failed.
+ */
+int kern_open_exec(const char *path) {
+    return kern_open(path, 0, 0);
 }
 
 ssize_t kern_read(int fd, char *buf, size_t len) {
@@ -160,7 +171,7 @@ int kern_close(int fd) {
     exec_close_calls++;
     if (fd >= 0 && fd < MAX_FD) {
         current_process->fds[fd] = NULL;
-        current_process->fd_bitmap &= ~(1U << fd);
+        fdset_clear(current_process->fd_bitmap, fd);
     }
     return 0;
 }
@@ -239,7 +250,16 @@ static int fake_exec_load(int fd, const char *path, char *const argv[], char *co
     assert(current_thread != NULL);
     assert(current_thread->exec_pin_active == 1);
     assert(current_thread->bound_cpu == 1);
-    assert((current_thread->flags & THREAD_F_NO_PREEMPT) != 0);
+    /*
+     * exec no longer suppresses preemption.  With real kernel preemption it
+     * is safe to be preempted mid-load, and holding NO_PREEMPT made every
+     * program load a multi-millisecond non-preemptible window -- the
+     * "loading a program janks the mouse" stall.  See exec_pin_current_thread
+     * in sys/exec/exec.c.  What exec still does is pin the thread to a CPU
+     * for the duration, so that is what to check.
+     */
+    assert(current_thread->exec_pin_active == 1);
+    assert(current_thread->bound_cpu >= 0);
     assert(argv != NULL);
     assert(argv[0] != NULL);
 
@@ -367,7 +387,7 @@ static void test_fork_exec_exit_wait_cycle(void) {
     assert(strcmp(current_process->comm, "exec-child") == 0);
     assert(current_thread->exec_pin_active == 0);
     assert(current_thread->bound_cpu == -1);
-    assert((current_thread->flags & THREAD_F_NO_PREEMPT) == 0);
+    assert(current_thread->exec_pin_active == 0);   /* unpinned again */
 
     if (setjmp(exit_jmp) == 0) {
         proc_exit(33);
@@ -384,7 +404,10 @@ static void test_fork_exec_exit_wait_cycle(void) {
     assert(waited_pid == child_pid);
     assert(WEXITSTATUS(status) == 33);
     assert(parent->p_children == NULL);
-    assert(forked_process->pid == -1);
+    /* A reaped process is freed, not stamped with pid -1 -- that was the
+     * free-slot marker of the old static process table, and reading the
+     * struct here is a use-after-free.  Ask the registry. */
+    assert(proc_find(child_pid) == NULL);
     assert(forked_thread->tid == -1);
     assert(vm_map_destroy_calls == 1);
 }
