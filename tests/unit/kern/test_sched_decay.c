@@ -4,6 +4,17 @@
 #include "../../../sys/kern/sched.h"
 #include "../../../sys/include/sys/proc.h"
 
+/*
+ * The scheduler has no global thread table any more, and MAX_THREADS went
+ * with it -- this file was the last reference to the name, leaving it
+ * undeclared and the test unbuildable.  The array below is purely this
+ * test's own scratch space (create_test_thread indexes it by tid and bounds
+ * against this same constant), so size it here.  64 matches what the other
+ * host tests that need a thread table pick: fuzz/fuzz_sched.c,
+ * sys/bench_idle.c, sys/host_test_wait_bench.c, sys/host_test_futex.c.
+ */
+#define MAX_THREADS 64
+
 // Mocks - use weak linkage to avoid conflicts if they are defined elsewhere
 thread_t threads[MAX_THREADS] __attribute__((weak));
 thread_t *current_thread __attribute__((weak)) = NULL;
