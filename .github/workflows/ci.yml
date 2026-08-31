@@ -89,6 +89,13 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential gcc-multilib python3
 
+      # libc.so.0 links -l:libsys.so.0 and -l:libm.so.0, so both must be built
+      # first.  Neither depends on libc, so there is no cycle.
+      - name: Build libsys and libm
+        run: |
+          make -C lib/sys -j"$(nproc)"
+          make -C lib/m -j"$(nproc)"
+
       # AGENTS.md directive 5: `make -C sys`, `make -C lib/c` and
       # `make -C bin` must always pass.  The kernel half is its own job.
       - name: Build libc

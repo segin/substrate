@@ -158,12 +158,19 @@ build_components() {
     echo "Building kernel..."
     make -C "$TOP/sys" -j4
 
+    # libc.so.0 links -l:libsys.so.0 and -l:libm.so.0, so both have to exist
+    # before libc is built.  Neither depends on libc in turn, so there is no
+    # cycle -- but with libc first, a tree that has never built them (a fresh
+    # clone, a new worktree, CI) died at "cannot find -l:libsys.so.0".  Same
+    # trap as lib/at below.
+    echo "Building runtime libraries libc depends on..."
+    make -C "$TOP/lib/sys" -j4
+    make -C "$TOP/lib/m" -j4
+
     echo "Building libc..."
     make -C "$TOP/lib/c" -j4
 
     echo "Building runtime libraries..."
-    make -C "$TOP/lib/sys" -j4
-    make -C "$TOP/lib/m" -j4
     make -C "$TOP/lib/pthread" -j4
     make -C "$TOP/lib/dl" -j4
     make -C "$TOP/lib/edit" -j4
