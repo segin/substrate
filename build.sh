@@ -131,6 +131,27 @@ else
     step "Stage 0: TOOLCHAIN (contrib/build-toolchain.sh)"
     note "binutils 2.46.0 + GCC 16.1.0, stage 1 cross + stage 2 Canadian cross"
     note "installs into $STAGE1_PREFIX (stage 1) and /tmp/gcc-stage2-staging (stage 2)"
+
+    # Seed the sysroot headers FIRST.  gcc stage 1 is configured
+    # --with-sysroot="$HERE/dist" and its fixincludes pass reads
+    # $sysroot/usr/include while gcc is being BUILT, not after:
+    #
+    #   The directory (BUILD_SYSTEM_HEADER_DIR) that should contain system
+    #   headers does not exist:
+    #     .../dist/usr/include
+    #   make: *** [Makefile:4776: all-gcc] Error 2
+    #
+    # dist/ is not staged until stage 3, so on a genuinely clean checkout --
+    # the case this script's header advertises -- there is nothing there yet
+    # and gcc cannot build.  It only ever worked on a tree that already had a
+    # dist/ from an earlier run.  Stage 3 wipes and repopulates dist/ properly;
+    # this just puts the headers where gcc needs them, at the point it needs
+    # them.  -L because include/ has symlinked headers (pthread.h ->
+    # ../lib/pthread/pthread.h) that must land as real files.
+    note "seeding dist/usr/include for gcc's sysroot"
+    mkdir -p dist/usr/include dist/usr/lib
+    cp -aL include/. dist/usr/include/ 2>/dev/null || true
+
     contrib/build-toolchain.sh
 fi
 
