@@ -37,16 +37,26 @@ bool spinlock_is_held(spinlock_t *lock);
  *     ... critical section ...
  *     spinlock_release_irq(&L, flags);
  */
+/*
+ * The mnemonics are deliberately unsuffixed.  `pushfl`/`popl` are invalid in
+ * 64-bit mode, and this header is compiled there: tests/ builds the kernel
+ * sources natively for the host unit tests, where an i386-only suffix is a
+ * hard assembler error ("invalid instruction suffix for `pushf'") that takes
+ * the whole testsuite with it.  Unsuffixed, gas sizes the push/pop from the
+ * assembly mode and the operand register -- %eax when built -m32, %rax on a
+ * 64-bit host -- which is correct in both, and is what the x86_64 port will
+ * want regardless.
+ */
 static inline unsigned long spinlock_acquire_irq(spinlock_t *lock) {
     unsigned long flags;
-    __asm__ volatile("pushfl; popl %0; cli" : "=r"(flags) :: "memory");
+    __asm__ volatile("pushf; pop %0; cli" : "=r"(flags) :: "memory");
     spinlock_acquire(lock);
     return flags;
 }
 
 static inline void spinlock_release_irq(spinlock_t *lock, unsigned long flags) {
     spinlock_release(lock);
-    __asm__ volatile("pushl %0; popfl" :: "r"(flags) : "memory", "cc");
+    __asm__ volatile("push %0; popf" :: "r"(flags) : "memory", "cc");
 }
 
 struct thread;
