@@ -23,6 +23,10 @@ static jmp_buf panic_jmp;
 static const char *last_panic;
 static int wake_one_calls;
 
+/* mutex.c reports lock-order and ownership violations through kprintf; this
+ * test drives those paths but does not read the output. */
+int kprintf(const char *fmt, ...) { (void)fmt; return 0; }
+
 void spinlock_init(spinlock_t *lock, const char *name) {
     lock->locked = 0;
     lock->cpu_id = 0xFFFFFFFF;
