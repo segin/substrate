@@ -103,12 +103,14 @@ void test_bc_print() {
     assert(strcmp(mock_stdout, "0") == 0);
     bc_free(n);
 
-    // Test zero with scale
+    /* Zero with a scale still prints as a bare "0": GNU bc renders any zero
+     * that way regardless of scale (`scale=5; 0.0` gives "0", not "0.00000"),
+     * and bc_print matches it.  This expected "0.000". */
     reset_mocks();
     n = bc_from_string("0", 10);
     n->scale = 3;
     bc_print(n);
-    assert(strcmp(mock_stdout, "0.000") == 0);
+    assert(strcmp(mock_stdout, "0") == 0);
     bc_free(n);
 
     // Test integer
