@@ -113,6 +113,15 @@ void run_ext2_free_inode_test(void) {
     sb->s_log_block_size = 0; // 1024 bytes
     sb->s_blocks_per_group = BLOCKS_COUNT; // All in one group
     sb->s_inodes_per_group = 1024;
+    /*
+     * [EXT2-A33] ext2_alloc_inode() refuses any inode number past
+     * s_inodes_count -- the last group's bitmap is padded out to
+     * inodes_per_group bits and those tail bits describe inodes that do not
+     * exist, so handing one out would write past the inode table.  A mock
+     * superblock that never sets the field leaves it 0, which rejects every
+     * inode and turns every create into ENOSPC.
+     */
+    sb->s_inodes_count = 1024;
     sb->s_first_data_block = 1;
     sb->s_rev_level = 1;
     sb->s_free_blocks_count = BLOCKS_COUNT - 200;

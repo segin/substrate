@@ -127,6 +127,12 @@ void run_ext2_readdir_bench(void) {
     sb->s_log_block_size = 0; // 1024 bytes
     sb->s_blocks_per_group = BLOCKS_COUNT; // All in one group
     sb->s_inodes_per_group = 2048; // Enough inodes
+    /*
+     * [EXT2-A33] ext2_alloc_inode() refuses any inode number past
+     * s_inodes_count; a mock superblock that leaves it 0 rejects every inode
+     * and turns every create into ENOSPC.
+     */
+    sb->s_inodes_count = 2048;
     sb->s_first_data_block = 1;
     sb->s_rev_level = 1;
     sb->s_free_blocks_count = BLOCKS_COUNT - 200;
