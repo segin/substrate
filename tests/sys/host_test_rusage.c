@@ -43,10 +43,17 @@ static void test_rusage_fields_finalize_correctly(void) {
 
     rusage_finalize(&proc);
 
+    /*
+     * Derived from USEC_PER_TICK rather than hardcoded.  These were 23436 and
+     * 515624, which are 3 and 2 ticks at HZ 128 (1000000/128 = 7812); HZ is
+     * 250 now, so every one of them was wrong by construction and would go
+     * wrong again on the next change.  Three user ticks and two system ticks
+     * were charged above, on top of the children's 1s / 500000us.
+     */
     assert(proc.rusage.ru_utime.tv_sec == 1);
-    assert(proc.rusage.ru_utime.tv_usec == 23436);
+    assert(proc.rusage.ru_utime.tv_usec == 3 * USEC_PER_TICK);
     assert(proc.rusage.ru_stime.tv_sec == 0);
-    assert(proc.rusage.ru_stime.tv_usec == 515624);
+    assert(proc.rusage.ru_stime.tv_usec == 500000 + 2 * USEC_PER_TICK);
     assert(proc.rusage.ru_minflt == 3);
     assert(proc.rusage.ru_majflt == 4);
     assert(proc.rusage.ru_nvcsw == 5);
