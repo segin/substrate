@@ -38,7 +38,20 @@ bool prop_sleep_wakeup_consistency(void) {
     
     void *chan1 = (void*)0x111;
     void *chan2 = (void*)0x222;
-    
+
+    /*
+     * Make the two threads realtime, t1 ahead of t2, so the yields below land
+     * where this test needs them to.  What is under test is sleep/wakeup
+     * consistency, not scheduler selection policy -- and with both threads
+     * left at the default timeshare priority the boot thread is just as
+     * eligible, so the first yield stayed on tid 0 and the test failed on an
+     * assumption about which runnable thread gets picked.  Within the
+     * realtime class sched_yield takes the strictly highest priority value,
+     * so t1 is given the larger number.
+     */
+    sched_set_priority(t1->tid, SCHED_REALTIME, 100);
+    sched_set_priority(t2->tid, SCHED_REALTIME, 50);
+
     // Switch to t1 and sleep; sched_sleep internally yields to the next thread
     sched_yield(); // pick t1
     if (current_thread->tid != t1->tid) return false;
