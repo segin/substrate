@@ -73,7 +73,7 @@ static int          uma_slab_depth;
 
 static unsigned long uma_slab_lock_acquire(void) {
     unsigned long f;
-    __asm__ volatile("pushf; pop %0; cli" : "=r"(f) :: "memory");
+    f = intr_disable();
     int cpu = smp_get_cpu_id();
     if (uma_slab_owner_cpu == cpu) {
         uma_slab_depth++;               /* already ours (nested header alloc) */
@@ -90,7 +90,7 @@ static void uma_slab_lock_release(unsigned long f) {
         uma_slab_owner_cpu = -1;
         spinlock_release(&uma_slab_lock);
     }
-    __asm__ volatile("push %0; popf" :: "r"(f) : "memory", "cc");
+    intr_restore((uint32_t)f);
 }
 #endif
 

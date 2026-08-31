@@ -184,7 +184,7 @@ host_test_proc_tree: sys/host_test_proc_tree.c ../sys/pm/process.c
 	$(CC) $(CFLAGS_KERN) $< -o $@
 
 host_test_proc_exit: sys/host_test_proc_exit.c ../sys/pm/process.c
-	$(CC) $(CFLAGS_KERN) $< -o $@
+	$(CC) $(CFLAGS_KERN) $< sys/proc_host_stubs.c -o $@
 
 host_test_tty_jobctl: sys/host_test_tty_jobctl.c ../sys/drivers/console/tty.c
 	$(CC) $(CFLAGS_KERN) $< -o $@
@@ -223,7 +223,7 @@ host_test_rusage: sys/host_test_rusage.c ../sys/pm/rusage.c
 	$(CC) $(CFLAGS_KERN) $< -o $@
 
 host_test_proc_lifecycle: sys/host_test_proc_lifecycle.c ../sys/pm/process.c ../sys/pm/wait.c
-	$(CC) $(CFLAGS_KERN) $< -o $@
+	$(CC) $(CFLAGS_KERN) $< sys/proc_host_stubs.c -o $@
 
 host_test_i386_signal: sys/host_test_i386_signal.c ../sys/arch/i386/signal.c
 	$(CC) $(CFLAGS_KERN) $< -o $@

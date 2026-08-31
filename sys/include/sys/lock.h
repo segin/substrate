@@ -47,6 +47,23 @@ bool spinlock_is_held(spinlock_t *lock);
  * 64-bit host -- which is correct in both, and is what the x86_64 port will
  * want regardless.
  */
+#ifdef HOST_TEST
+/*
+ * Host unit tests build these kernel sources as an ordinary user program,
+ * where cli is privileged and faults on the spot.  A user process has no
+ * interrupts to mask, so the save/restore is simply dropped and the lock
+ * taken as usual.
+ */
+static inline unsigned long spinlock_acquire_irq(spinlock_t *lock) {
+    spinlock_acquire(lock);
+    return 0;
+}
+
+static inline void spinlock_release_irq(spinlock_t *lock, unsigned long flags) {
+    (void)flags;
+    spinlock_release(lock);
+}
+#else
 static inline unsigned long spinlock_acquire_irq(spinlock_t *lock) {
     unsigned long flags;
     __asm__ volatile("pushf; pop %0; cli" : "=r"(flags) :: "memory");
@@ -58,6 +75,7 @@ static inline void spinlock_release_irq(spinlock_t *lock, unsigned long flags) {
     spinlock_release(lock);
     __asm__ volatile("push %0; popf" :: "r"(flags) : "memory", "cc");
 }
+#endif /* HOST_TEST */
 
 struct thread;
 

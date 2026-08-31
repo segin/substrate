@@ -27,6 +27,30 @@ mutex_t proctree_lock;
 #define MAX_THREADS 64
 #endif
 thread_t threads[MAX_THREADS];
+
+/*
+ * FOREACH_THREAD() walks the thread registry, and the weak stub in
+ * proc_host_stubs.c reports it empty.  Walk this file's own table instead;
+ * a slot counts as live once it has a nonzero tid.  (The process registry
+ * is process.c's own allproc/pid_hash, populated via proc_link_locked in
+ * init_proc below -- proc_exit() reparents orphans to proc_find(1), and an
+ * unpopulated registry sent it to the NULL kernel_process fallback and
+ * straight into a segfault.)
+ */
+
+thread_t *thread_first(void) {
+    for (int i = 0; i < MAX_THREADS; i++)
+        if (threads[i].tid) return &threads[i];
+    return NULL;
+}
+
+thread_t *thread_next(thread_t *t) {
+    if (!t) return NULL;
+    for (int i = (int)(t - threads) + 1; i < MAX_THREADS; i++)
+        if (threads[i].tid) return &threads[i];
+    return NULL;
+}
+
 fs_node_t *fs_root;
 
 static jmp_buf exit_jmp;
@@ -153,6 +177,8 @@ static void reset_env(void) {
     current_process = NULL;
     current_thread = NULL;
     kernel_process = NULL;
+    allproc = NULL;
+    memset(pid_hash, 0, sizeof(pid_hash));
     fs_root = (fs_node_t *)0x11110000;
     yielded = 0;
     acct_calls = 0;
@@ -175,9 +201,6 @@ static void reset_env(void) {
     mutex_release_calls = 0;
     last_kprint_msg = NULL;
 
-    for (int i = 0; i < MAX_PROCS; i++) {
-        processes[i].pid = -1;
-    }
     for (int i = 0; i < MAX_THREADS; i++) {
         threads[i].tid = -1;
     }
@@ -185,10 +208,20 @@ static void reset_env(void) {
     sleepq_init();
 }
 
+/*
+ * Allocate through process.c's own HOST_TEST storage hook rather than handing
+ * out slots of a static array.  proc_reap_autoreap_zombies() ends by calling
+ * proc_storage_free(), which under HOST_TEST is plain free() -- pointing it at
+ * a static array element aborted the run with "free(): invalid pointer".  The
+ * slot argument is kept so callers read unchanged; it no longer indexes
+ * anything.
+ */
 static process_t *init_proc(int slot, int pid) {
-    process_t *p = &processes[slot];
-    memset(p, 0, sizeof(*p));
+    (void)slot;
+    process_t *p = proc_storage_alloc();
+    assert(p != NULL);
     p->pid = pid;
+    proc_link_locked(p);   /* allproc + pid_hash, so proc_find() sees it */
     return p;
 }
 
@@ -232,7 +265,9 @@ static void test_proc_exit_basic_path(void) {
     proc->pmap = (pmap_t)0x4444;
     proc->fds[0] = (file_t *)0x5555;
     proc->fds[1] = (file_t *)0x6666;
-    proc->fd_bitmap = 0x3;
+    /* fd_bitmap is now uint32_t[FD_BITMAP_WORDS], not a scalar: set the two
+     * low descriptors in word 0. */
+    proc->fd_bitmap[0] = 0x3;
     proc->p_parent = parent;
     proc->ppid = parent->pid;
     parent->p_children = proc;
@@ -269,7 +304,8 @@ static void test_proc_exit_basic_path(void) {
     assert(proc->tty == NULL);
     assert(proc->cwd_node == NULL);
     assert(proc->root_node == NULL);
-    assert(proc->fd_bitmap == 0);
+    for (size_t i = 0; i < FD_BITMAP_WORDS; i++)
+        assert(proc->fd_bitmap[i] == 0);
     assert(proc->fds[0] == NULL);
     assert(proc->fds[1] == NULL);
     assert(proc->vm_map == (struct vm_map *)0x3333);
@@ -297,6 +333,10 @@ static void test_proc_exit_reparents_to_swapper_when_init_dead(void) {
     process_t *child = init_proc(4, 32);
 
     init->state = SDYING;
+    /* With init dying, proc_reparent_children() falls back to kernel_process
+     * -- the swapper.  reset_env() clears it, and this test never set it, so
+     * the fallback dereferenced NULL. */
+    kernel_process = swapper;
     proc->p_parent = parent;
     parent->p_children = proc;
     child->p_parent = proc;
@@ -348,7 +388,12 @@ static void test_proc_exit_autoreap_path(void) {
 
     assert(vm_map_destroy_calls == 1);
     assert(pgrp_remove_calls == 0);
-    assert(proc->pid == -1);
+    /*
+     * A reaped process is freed, not marked with pid -1 -- that was the
+     * free-slot convention of the old static table, and reading proc->pid
+     * here is now a use-after-free.  Ask the registry instead.
+     */
+    assert(proc_find(41) == NULL);
     assert(threads[0].tid == -1);
 }
 

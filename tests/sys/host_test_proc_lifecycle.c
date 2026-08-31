@@ -28,6 +28,30 @@ process_t *kernel_process;
 #define MAX_THREADS 64
 #endif
 thread_t threads[MAX_THREADS];
+
+/*
+ * FOREACH_THREAD() walks the thread registry, and the weak stub in
+ * proc_host_stubs.c reports it empty.  Walk this file's own table instead;
+ * a slot counts as live once it has a nonzero tid.  (The process registry
+ * is process.c's own allproc/pid_hash, populated via proc_link_locked in
+ * init_proc below -- proc_exit() reparents orphans to proc_find(1), and an
+ * unpopulated registry sent it to the NULL kernel_process fallback and
+ * straight into a segfault.)
+ */
+
+thread_t *thread_first(void) {
+    for (int i = 0; i < MAX_THREADS; i++)
+        if (threads[i].tid) return &threads[i];
+    return NULL;
+}
+
+thread_t *thread_next(thread_t *t) {
+    if (!t) return NULL;
+    for (int i = (int)(t - threads) + 1; i < MAX_THREADS; i++)
+        if (threads[i].tid) return &threads[i];
+    return NULL;
+}
+
 mutex_t proctree_lock;
 fs_node_t *fs_root;
 
@@ -155,11 +179,10 @@ static void reset_env(void) {
     current_process = NULL;
     current_thread = NULL;
     kernel_process = NULL;
+    allproc = NULL;
+    memset(pid_hash, 0, sizeof(pid_hash));
     fs_root = NULL;
 
-    for (int i = 0; i < MAX_PROCS; i++) {
-        processes[i].pid = -1;
-    }
     for (int i = 0; i < MAX_THREADS; i++) {
         threads[i].tid = -1;
     }
@@ -168,11 +191,21 @@ static void reset_env(void) {
     sleepq_init();
 }
 
+/*
+ * Allocate through process.c's own HOST_TEST storage hook rather than handing
+ * out slots of a static array.  proc_reap_autoreap_zombies() ends by calling
+ * proc_storage_free(), which under HOST_TEST is plain free() -- pointing it at
+ * a static array element aborted the run with "free(): invalid pointer".  The
+ * slot argument is kept so callers read unchanged; it no longer indexes
+ * anything.
+ */
 static process_t *init_proc(int slot, int pid, int ppid) {
-    process_t *p = &processes[slot];
-    memset(p, 0, sizeof(*p));
+    (void)slot;
+    process_t *p = proc_storage_alloc();
+    assert(p != NULL);
     p->pid = pid;
     p->ppid = ppid;
+    proc_link_locked(p);   /* allproc + pid_hash, so proc_find() sees it */
     return p;
 }
 
@@ -209,8 +242,13 @@ static void test_no_zombie_leaks_after_reap_cycles(void) {
         assert(kern_wait4(-1, &status, 0, NULL) == expected_pid);
         assert(WEXITSTATUS(status) == i);
         assert(parent->p_children == NULL);
-        assert(child->pid == -1);
-        assert(child->ldt == NULL);
+        /*
+         * The reaped child has been freed; pid -1 was the old static-table
+         * free-slot marker and both these reads are now use-after-free.  The
+         * registry is the observable fact, and the LDT release is covered by
+         * the ldt_free_calls count asserted after the loop.
+         */
+        assert(proc_find(expected_pid) == NULL);
     }
 
     assert(kmalloc_calls == 0);
@@ -227,6 +265,7 @@ static void test_no_zombie_leaks_after_autoreap_cycles(void) {
 
     for (int i = 0; i < 8; i++) {
         process_t *child = init_proc(2, 200 + i, parent->pid);
+        int child_pid = child->pid;
         thread_t *child_thread = init_thread(1, 300 + i, child);
         child->p_parent = parent;
         child->vm_map = (vm_map_t *)(uintptr_t)(0x3000 + i);
@@ -249,9 +288,9 @@ static void test_no_zombie_leaks_after_autoreap_cycles(void) {
         proc_reap_autoreap_zombies();
 
         assert(parent->p_children == NULL);
-        assert(child->pid == -1);
+        /* Reaped child is freed -- see the note in the wait4 loop above. */
+        assert(proc_find(child_pid) == NULL);
         assert(child_thread->tid == -1);
-        assert(child->ldt == NULL);
     }
 
     assert(kmalloc_calls == 0);
@@ -300,7 +339,8 @@ static void test_waitpid_job_control_lifecycle(void) {
     assert(kern_wait4(child->pid, &status, 0, NULL) == expected_pid);
     assert(WEXITSTATUS(status) == 55);
     assert(parent->p_children == NULL);
-    assert(child->pid == -1);
+    /* Reaped child is freed -- see the note in the wait4 loop above. */
+    assert(proc_find(expected_pid) == NULL);
     assert(kmalloc_calls == 0);
 }
 

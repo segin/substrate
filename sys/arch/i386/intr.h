@@ -16,6 +16,19 @@
  * EFLAGS is by definition the low 32 bits of RFLAGS.  The i386 path is
  * unchanged apart from dropping the now-redundant suffixes.
  */
+#ifdef HOST_TEST
+/*
+ * Host unit tests build these kernel sources as an ordinary user program,
+ * where cli/sti are privileged and fault instantly -- the process-exit test
+ * died on the cli inside sq_lock() the moment it was linkable enough to run.
+ * There are no interrupts to disable in a user process, so the whole family
+ * is a no-op there and intr_enabled() reports the truth: nothing is masked.
+ */
+static inline uint32_t intr_disable(void) { return 0; }
+static inline void intr_restore(uint32_t eflags) { (void)eflags; }
+static inline void intr_enable(void) { }
+static inline int intr_enabled(void) { return 1; }
+#else
 static inline uint32_t intr_disable(void) {
 #if defined(__x86_64__)
     unsigned long rflags;
@@ -58,6 +71,7 @@ static inline int intr_enabled(void) {
     return (eflags & 0x200u) != 0;   /* bit 9 = IF */
 #endif
 }
+#endif /* HOST_TEST */
 
 static inline void wait_for_interrupt(void) {
     /*

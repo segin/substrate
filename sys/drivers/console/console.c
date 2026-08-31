@@ -78,14 +78,14 @@ static volatile int console_out_depth;          /* UP reentry depth */
  */
 static int console_out_enter(unsigned long *pflags) {
     unsigned long flags;
-    __asm__ volatile("pushf; pop %0; cli" : "=r"(flags) :: "memory");
+    flags = intr_disable();
     *pflags = flags;
 
     if (smp_get_cpu_count() <= 1) {
         if (console_out_depth) {
             /* Reentry.  Interrupts were already off from the outer enter, so
              * restoring `flags` here is a no-op; leave() must not undo them. */
-            __asm__ volatile("push %0; popf" :: "r"(flags) : "memory", "cc");
+            intr_restore((uint32_t)flags);
             return 0;
         }
         console_out_depth = 1;
@@ -95,7 +95,7 @@ static int console_out_enter(unsigned long *pflags) {
     int id = (int)lapic_get_id();
     if (console_out_owner == id) {
         /* Reentry on this CPU: we already hold the lock. */
-        __asm__ volatile("push %0; popf" :: "r"(flags) : "memory", "cc");
+        intr_restore((uint32_t)flags);
         return 0;
     }
     spinlock_acquire(&console_out_lock);
@@ -112,7 +112,7 @@ static void console_out_leave(int held, unsigned long flags) {
         console_out_owner = -1;
         spinlock_release(&console_out_lock);
     }
-    __asm__ volatile("push %0; popf" :: "r"(flags) : "memory", "cc");
+    intr_restore((uint32_t)flags);
 }
 
 #define CONSOLE_INPUT_BUF_SIZE 256
