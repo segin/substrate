@@ -245,11 +245,13 @@ host_test_fork_exec_wait: sys/host_test_fork_exec_wait.c
 
 # Duplicate rule removed
 
-test_pthread_join: lib/test_pthread_join.c ../lib/pthread/pthread.c
-	$(CC) $(CFLAGS_COMMON) -Wno-int-conversion -Wno-pointer-to-int-cast -I../include -I../sys/include -I../sys $< -o $@
+test_pthread_join: lib/test_pthread_join.c ../lib/pthread/pthread_create.c
+# -D__i386__ so <sys/syscall.h> picks the real syscall table rather than the
+# x86_64 stub; -I../lib/pthread for the private pthread_internal.h.
+	$(CC) $(CFLAGS_COMMON) -Wno-int-conversion -Wno-pointer-to-int-cast -D__i386__ -I../include -I../sys/include -I../sys -I../lib/pthread $< -o $@
 
-test_libpthread_mutex: lib/test_pthread_mutex.c ../lib/pthread/pthread.c
-	$(CC) $(CFLAGS_COMMON) -I../include -I../sys/include -I../sys $< -o $@
+test_libpthread_mutex: lib/test_pthread_mutex.c ../lib/pthread/pthread_mutex.c
+	$(CC) $(CFLAGS_COMMON) -D__i386__ -I../include -I../sys/include -I../sys -I../lib/pthread $< -o $@
 
 test_history:
 	$(MAKE) -C lib/edit

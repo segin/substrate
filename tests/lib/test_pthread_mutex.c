@@ -35,7 +35,9 @@ void mock_sync_lock_release(int *ptr);
 #define __sync_lock_release mock_sync_lock_release
 
 // Include the source to test
-#include "../../lib/pthread/pthread.c"
+/* libpthread was split into per-feature translation units; the mutex
+ * implementation this test drives now lives in pthread_mutex.c. */
+#include "../../lib/pthread/pthread_mutex.c"
 
 /*
  * Validates the missing edge case for null attributes.
