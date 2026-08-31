@@ -1592,9 +1592,22 @@ static int64_t x286_xsys_brkctl(struct x286_frame *f) {
  */
 static int64_t x286_xsys_stkgrow(struct x286_frame *f) {
     uint32_t want = f->bx;
-    uint32_t floor = current_process->brk + X286_STACK_GUARD;
 
-    if (want <= floor) {
+    /*
+     * The stack may grow down to the break and no further -- they grow toward
+     * each other in the one 64 KiB DGROUP, so the break is the floor.
+     *
+     * This used to demand a further X286_STACK_GUARD (1 KiB) of clearance,
+     * which double-counts: brkctl already refuses to raise the break above
+     * XOUT286_WINDOW_SIZE - XOUT286_STACK_RESERVE, and x286_set_break also
+     * caps it at sp - X286_STACK_GUARD, so the stack is already protected
+     * from the break's side.  Charging the guard again here spends it out of
+     * the stack instead.  Word reserves exactly 2 KiB -- it stops its break
+     * at 0xf800 for precisely that -- and the guard left only 1 KiB of it
+     * usable, so `stkgrow 0xfac0` (a 1344-byte stack, comfortably inside the
+     * reserve) came back ENOMEM and Word killed itself with SIGBUS.
+     */
+    if (want <= current_process->brk) {
         return -ENOMEM;
     }
     return (int64_t)want;

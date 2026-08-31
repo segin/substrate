@@ -1,4 +1,5 @@
 #include <vm/vm_object.h>
+#include <vm/phys_mem.h>
 #include <vm/vm_kmem.h>
 #include <vm/vm_pager.h>
 #include <sys/lock.h>
@@ -238,7 +239,27 @@ void vm_object_remove_page(vm_object_t *object, vm_page_t *page) {
 
 vm_page_t *vm_object_lookup_page(vm_object_t *object, uint64_t pindex) {
     vm_page_t *p;
+
+    /*
+     * Stop at the first link that is not a real page rather than walking
+     * into it.  A single bad pointer in this list used to be handed straight
+     * back to vm_fault, which mapped `m->phys_addr` -- read out of whatever
+     * the pointer happened to address -- into the faulting process.  That put
+     * a PTE pointing at nonexistent physical memory into a live address space
+     * and the process then read and wrote garbage there, which is how
+     * Microsoft Word's free list came apart: the node its head pointed at was
+     * mapped to 0xc011cf2e, a kernel virtual address that is not even page
+     * aligned, so the node read back as rubbish and the allocator's scan for
+     * the head never terminated.
+     *
+     * Truncating the walk loses whatever is past the bad link, which is
+     * already lost; the alternative is mapping arbitrary memory into
+     * userspace.
+     */
     for (p = object->pages; p != NULL; p = p->obj_next) {
+        if (!vm_phys_page_is_valid(p)) {
+            return NULL;
+        }
         if (p->pindex == pindex) return p;
     }
     return NULL;

@@ -31,4 +31,8 @@ int vm_phys_check_integrity(void);
 // Callbacks/Helpers
 vm_page_t *vm_phys_paddr_to_page(uintptr_t pa);
 
+/* True only for a pointer that really is one of the vm_page_t's in the page
+ * array: in bounds, element-aligned, magic intact.  Safe on wild pointers. */
+int vm_phys_page_is_valid(const vm_page_t *p);
+
 #endif

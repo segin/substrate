@@ -1,6 +1,7 @@
 #include <vm/vm_fault.h>
 #include <vm/vm_object.h>
 #include <vm/vm_page.h>
+#include <vm/phys_mem.h>
 #include <vm/vm_pager.h>
 #include <arch/i386/pmap.h>
 #include <arch/i386/pmm.h>
@@ -348,6 +349,21 @@ int vm_fault(vm_map_t *map, uintptr_t va, uint8_t prot) {
     vm_fault_source_t source = vm_fault_resolve_source(first_obj, pindex);
     obj = source.object ? source.object : first_obj;
     m = source.page;
+
+    /*
+     * Never turn a resolved page into a PTE without checking it is a page.
+     * `m->phys_addr` goes straight to pmap_enter, so a bad pointer here maps
+     * whatever it happens to address into the faulting process -- silently,
+     * because the fault still reports success.  Treat an unsound page as
+     * simply not resident and fill a fresh one: that is what the object would
+     * have yielded had the bad link never been there, and it keeps the damage
+     * from reaching userspace.
+     */
+    if (m && !vm_phys_page_is_valid(m)) {
+        m = NULL;
+        source.page = NULL;
+        obj = first_obj;
+    }
 
     // 4. Page not resident yet - page it in or zero-fill it.
     if (!m) {

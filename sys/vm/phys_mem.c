@@ -97,6 +97,33 @@ static void vm_phys_buddy_dequeue(int order, vm_page_t *page) {
     page->flags &= ~PG_FREE;
 }
 
+/*
+ * Is this really one of our vm_page_t's?
+ *
+ * The page array is a flat table, so membership is exactly decidable: the
+ * pointer has to land inside it, on an element boundary, and carry the magic
+ * canaries.  Checking the bounds FIRST matters -- the whole point is to be
+ * callable on a pointer that may be garbage, and vm_page_valid() dereferences.
+ */
+int vm_phys_page_is_valid(const vm_page_t *p) {
+    uintptr_t off;
+
+    if (!p || !vm_phys_page_array || !vm_phys_page_count) {
+        return 0;
+    }
+    if ((uintptr_t)p < (uintptr_t)vm_phys_page_array) {
+        return 0;
+    }
+    off = (uintptr_t)p - (uintptr_t)vm_phys_page_array;
+    if (off >= vm_phys_page_count * sizeof(vm_page_t)) {
+        return 0;
+    }
+    if (off % sizeof(vm_page_t)) {
+        return 0;
+    }
+    return vm_page_valid(p);
+}
+
 static vm_page_t *vm_phys_find_free_block_head(uintptr_t pa, int *out_order) {
     for (int order = PMM_MAX_ORDER - 1; order >= 0; order--) {
         uintptr_t block_size = ((uintptr_t)1 << order) * PMM_BLOCK_SIZE;
