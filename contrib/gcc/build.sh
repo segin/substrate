@@ -117,15 +117,28 @@ if [ "$STAGE" = 1 ]; then
     echo "==> Building cc1 + driver (-j $PARALLEL)"
     make -j "$PARALLEL" all-gcc
 
+    # -std=gnu23 for the target compile.  libgcc is GCC's own code and
+    # expects the modern C default, but patch 0011 makes substrate's cc
+    # default to gnu17 (the K&R-era contrib ports need it), and there `bool`
+    # is not a keyword:
+    #
+    #   gcc/config/i386/i386.h:1722: error: unknown type name 'bool'
+    #
+    # so libgcc did not build.  The script treats that as best-effort and
+    # carries on, which turns a compiler with no runtime into a stage-1
+    # "success" -- and every later link then fails with the far less
+    # informative "C compiler cannot create executables".  The stage-2 block
+    # below already passes this same flag for the same reason.
+    LIBGCC_TARGET_CFLAGS="-g -O2 -std=gnu23"
     echo "==> Building libgcc (best-effort — needs substrate headers in sysroot)"
-    make -j "$PARALLEL" all-target-libgcc || \
+    make -j "$PARALLEL" CFLAGS_FOR_TARGET="$LIBGCC_TARGET_CFLAGS" all-target-libgcc || \
         echo "    libgcc build failed — likely missing headers/libs in sysroot." \
              "    Run again after staging more of dist/usr/include and dist/usr/lib."
 
     echo "==> Installing to $STAGE1_PREFIX"
     if [ -w "$(dirname "$STAGE1_PREFIX")" ]; then
         make install-gcc
-        make install-target-libgcc || true
+        make CFLAGS_FOR_TARGET="$LIBGCC_TARGET_CFLAGS" install-target-libgcc || true
     else
         sudo make install-gcc
         sudo make install-target-libgcc || true
