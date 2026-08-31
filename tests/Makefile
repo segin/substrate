@@ -261,7 +261,10 @@ test_libc_sysctl: lib/c/test_sysctl.c
 	$(CC) $(CFLAGS_COMMON) -fno-builtin -I../include lib/c/test_sysctl.c -o $@
 
 test_libc_ctype: lib/c/test_ctype.c ../lib/c/src/ctype.c
-	$(CC) $(CFLAGS_COMMON) -fno-builtin lib/c/test_ctype.c -o $@
+# ctype.c defines the _ISalnum/_ISblank enumerators itself; against glibc's
+# <ctype.h> those are redeclarations.  Point the include path at substrate's
+# own headers, which is whose ctype this is.
+	$(CC) $(CFLAGS_COMMON) -fno-builtin -D__i386__ -I../include -I../sys -I../sys/include lib/c/test_ctype.c -o $@
 
 test_ext2_perf: unit/fs/test_ext2_perf_host.c
 	$(CC) $(CFLAGS_KERN) $< unit/fs/ext2_host_stubs.c -o $@
