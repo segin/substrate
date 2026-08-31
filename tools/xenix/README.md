@@ -184,6 +184,18 @@ rewrote each one into a two-byte software interrupt (`INT 0xF0+n` for `ESC
 unhandled #GP. They are patched back to `9B <ESC>` in place — the encoding is
 two bytes precisely so that fits — and the real x87 runs them.
 
+**Microsoft Word 3.0** reaches its full editing screen under `TERM=ansi` --
+banner, `COMMAND: Alpha Copy Delete Format Gallery ...`, `Edit document or
+press Esc to use menu`. Two rounds of fixes: the shipped `ansi` termdesc
+entry was incomplete (see `bin/xenix/fix-termdesc-ansi.sh`), which got it to
+the banner, and then two kernel bugs kept it there. `vm_object_lookup_page`
+returned a link that was not a page and `vm_fault` mapped its "phys_addr" --
+a kernel virtual address -- into Word, so its free list read back as rubbish
+and the allocator's scan never terminated; and `stkgrow` charged the stack
+guard a third time, eating half the 2 KiB reserve Word deliberately leaves.
+Note that Word's output is one newline-free stream of escapes, so substrate's
+`grep` finds nothing in it -- split it with `tr '\033' '\n'` first.
+
 **Large-data argv.** A large-data image (`XE_LDATA`) is handed argv and envp as
 arrays of 4-byte far pointers, not 2-byte near offsets; its crt0 walks the
 vector with a stride of 4 and stops on a NULL *far* pointer. Given near
