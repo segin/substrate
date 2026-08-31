@@ -80,6 +80,18 @@ static inline void wait_for_interrupt(void) {
     __asm__ volatile ("sti; hlt");
 }
 
+#ifdef HOST_TEST
+/*
+ * Host stand-in for wait_for_interrupt().  `sti; hlt` is privileged, so the
+ * host unit tests cannot run the real thing; each supplies its own definition
+ * instead (tests/mocks.c, plus several host_test_*.c which longjmp out of the
+ * idle loop from it).  Every one of them defined it and none declared it, so
+ * the sole caller -- proc_idle_wait() in sys/pm/process.c -- had no prototype,
+ * which C23 rejects.  Declared beside the function it substitutes for.
+ */
+void host_wait_for_interrupt(void);
+#endif
+
 struct thread;
 void switch_to(struct thread *prev, struct thread *next);
 void i386_load_gs_for_thread(struct thread *t);
