@@ -9,6 +9,7 @@
 #include <pm/pm.h>
 #include <kern/sched.h>
 #include <exec/perso/personality.h>
+#include <sys/errno.h>
 
 static thread_t *alloc_test_thread(process_t *proc, thread_state_t state,
                                    uint32_t mask, uint32_t flags) {
@@ -81,8 +82,19 @@ bool test_signal_suspend_and_wait(void) {
     current_thread->sig_pending = sigmask(SIGUSR1);
 
     uint32_t suspend_mask = sigmask(SIGINT);
-    if (sys_sigsuspend(&suspend_mask) != -1) return false;
-    if (current_thread->sig_mask != old_mask) return false;
+    /*
+     * POSIX has sigsuspend() always fail with EINTR, and the kernel returns
+     * the negative errno so libc maps it correctly -- a bare -1 would become
+     * EPERM.  It also deliberately does NOT restore sig_mask on the way out:
+     * restoring it here re-blocked the very signal that woke the sleeper, so
+     * signal_handle_pending saw nothing deliverable and a shell's
+     * "block + sigsuspend" loop span in back-to-back syscalls.  The old mask
+     * is stashed in sig_mask_suspend for sigreturn to restore.
+     */
+    if (sys_sigsuspend(&suspend_mask) != -EINTR) return false;
+    if (current_thread->sig_mask != suspend_mask) return false;
+    if (!current_thread->sig_mask_suspend_active) return false;
+    if (current_thread->sig_mask_suspend != old_mask) return false;
 
     uint32_t wait_mask = sigmask(SIGUSR1);
     int sig = 0;
@@ -107,12 +119,31 @@ bool test_signal_suspend_and_wait(void) {
 
 bool test_signal_delivery_default(void) {
     sched_init();
-    current_process->pid = 100;
-    current_thread->proc = current_process;
-    
-    // Send SIGTERM
-    sys_kill(100, SIGTERM);
-    
+
+    /*
+     * kill(2) resolves its target through the pid hash, so the process has to
+     * be registered under the pid being signalled.  This test used to
+     * overwrite current_process->pid after registration, which left the hash
+     * keyed to the old value: the kill found nothing and no bit was ever set.
+     */
+    process_t *target = proc_create(PERS_NATIVE);
+    if (!target) return false;
+    /*
+     * Not pid 1: psignal_info() deliberately drops SIGKILL/SIGTERM/SIGSTOP
+     * aimed at init while its disposition is SIG_DFL, so signalling the first
+     * process proc_create() hands out tests init protection rather than
+     * delivery.
+     */
+    while (target->pid == 1) {
+        target = proc_create(PERS_NATIVE);
+        if (!target) return false;
+    }
+    current_process = target;
+    current_thread->proc = target;
+    current_thread->sig_pending = 0;
+
+    if (sys_kill(target->pid, SIGTERM) != 0) return false;
+
     if (!(current_thread->sig_pending & sigmask(SIGTERM))) return false;
     
     // We expect signal_handle_pending to panic/terminate for SIGTERM default action
@@ -128,9 +159,16 @@ bool test_signal_pending_masked_filter(void) {
     current_thread->sig_pending = sigmask(SIGINT) | sigmask(SIGTERM);
     current_thread->sig_mask = sigmask(SIGINT);
 
+    /*
+     * sigpending(2) reports every signal pending on the thread, INCLUDING
+     * the blocked ones -- observing signals raised while blocked is the
+     * entire point of the call.  Filtering by sig_mask, which this test used
+     * to expect, breaks OPTS sigpending/1-1..1-3 and the sigaction/23-* cases
+     * that raise a signal inside its own handler and then look for it.
+     */
     uint32_t pending = 0;
     if (sys_sigpending(&pending) != 0) return false;
-    if (pending != sigmask(SIGTERM)) return false;
+    if (pending != (sigmask(SIGINT) | sigmask(SIGTERM))) return false;
 
     return true;
 }
