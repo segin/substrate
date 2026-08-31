@@ -71,3 +71,7 @@ __attribute__((weak)) unsigned long vm_map_destroy_entries;   /* sys/vm/vm_map.h
 __attribute__((weak)) unsigned long vm_pager_vnode_alloc_count;   /* sys/vm/vm_pager.h */
 __attribute__((weak)) unsigned long vm_pager_vnode_dealloc_count;   /* sys/vm/vm_pager.h */
 __attribute__((weak)) void vt_release_graphics_on_exit(void *exiting_process) { (void)exiting_process; }   /* sys/include/sys/vt.h */
+
+/* Commit accounting (sys/vm/vm_commit.h) -- proc_exit uncharges on teardown. */
+__attribute__((weak)) int vm_commit_charge(size_t npages) { (void)npages; return 0; }
+__attribute__((weak)) void vm_commit_uncharge(size_t npages) { (void)npages; }

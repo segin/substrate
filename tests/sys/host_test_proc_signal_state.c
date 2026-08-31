@@ -21,6 +21,7 @@ fs_node_t *fs_root;
 
 thread_t threads[MAX_THREADS];
 thread_t *current_thread;
+process_t *current_process;   /* process.c references it; nothing defined it */
 
 void mutex_init(mutex_t *m, const char *name) { (void)m; (void)name; }
 void mutex_lock(mutex_t *m) { (void)m; }
@@ -156,15 +157,21 @@ static void test_proc_create_clears_reused_signal_state(void) {
 
     reset_env();
 
-    for (int i = 0; i < 3; i++) {
-        processes[i].pid = i + 1;
-    }
-
-    memset(&processes[3], 0xA5, sizeof(processes[3]));
-    processes[3].pid = -1;
+    /*
+     * There is no static process table any more -- proc_create() allocates,
+     * so the old "fill slots 0..2, dirty slot 3, expect slot 3 back" shape
+     * cannot work.  Reuse is now memory reuse: make one, scribble over every
+     * field this test cares about, free it, and make another.  The allocator
+     * will very likely hand back the same block, which is precisely the case
+     * worth checking; if it does not, the assertions hold anyway.
+     */
+    proc = proc_create(PERS_NATIVE);
+    assert(proc != NULL);
+    memset(proc, 0xA5, sizeof(*proc));
+    proc_storage_free(proc);
 
     proc = proc_create(PERS_NATIVE);
-    assert(proc == &processes[3]);
+    assert(proc != NULL);
     assert(proc->sig_catch == 0);
     assert(proc->sig_ignore == 0);
     assert(proc->p_parent == NULL);

@@ -238,7 +238,7 @@ host_test_signal_integration: sys/host_test_signal_integration.c ../sys/kern/sig
 	$(CC) $(CFLAGS_KERN) $< sys/signal_host_stubs.c -o $@
 
 host_test_proc_signal_state: sys/host_test_proc_signal_state.c
-	$(CC) $(CFLAGS_KERN) $< -o $@
+	$(CC) $(CFLAGS_KERN) $< sys/proc_host_stubs.c -o $@
 
 host_test_fork_exec_wait: sys/host_test_fork_exec_wait.c
 	$(CC) $(CFLAGS_KERN) $< -o $@
