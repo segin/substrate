@@ -32,7 +32,9 @@ static int mock_errno  = 22; /* EINVAL */
 static void *mock_last_newp = NULL;
 static size_t mock_last_newlen = 0;
 
-int64_t _syscall6(int num, intptr_t a1, intptr_t a2, intptr_t a3, intptr_t a4, intptr_t a5, intptr_t a6) {
+/* uintptr_t, not intptr_t: must match the declaration in
+ * lib/c/include/sys_local.h or this is a conflicting definition. */
+int64_t _syscall6(int num, uintptr_t a1, uintptr_t a2, uintptr_t a3, uintptr_t a4, uintptr_t a5, uintptr_t a6) {
 	if (num == 243) { /* SYS_SYSCTL */
 		mock_last_newp = (void *)(intptr_t)a5;
 		mock_last_newlen = (size_t)a6;

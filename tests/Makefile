@@ -258,7 +258,9 @@ test_libc_assert: lib/c/test_assert.c ../lib/c/src/assert.c
 	$(CC) $(CFLAGS_COMMON) -fno-builtin lib/c/test_assert.c -o $@
 
 test_libc_sysctl: lib/c/test_sysctl.c
-	$(CC) $(CFLAGS_COMMON) -fno-builtin -I../include lib/c/test_sysctl.c -o $@
+# -I../lib/c/include: sysctl_helpers.c includes <sys_local.h>, a libc-private
+# header that lives only there.
+	$(CC) $(CFLAGS_COMMON) -fno-builtin -I../include -I../lib/c/include lib/c/test_sysctl.c -o $@
 
 test_libc_ctype: lib/c/test_ctype.c ../lib/c/src/ctype.c
 # ctype.c defines the _ISalnum/_ISblank enumerators itself; against glibc's
