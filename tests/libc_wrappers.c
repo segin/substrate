@@ -1,3 +1,5 @@
+#include <stdarg.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -17,4 +19,30 @@ int *libc___errno(void) { return &libc_errno_storage; }
 uint32_t libc_arc4random_uniform(uint32_t upper) {
     if (upper == 0) return 0;
     return (uint32_t)rand() % upper;
+}
+
+/*
+ * The NULL guards in memcpy/memset/strdup report to stderr before bailing.
+ * --prefix-symbols rewrites the references as well as the definitions, so
+ * those become libc_fprintf and libc_stderr and nothing defined them.
+ *
+ * libc_stderr cannot simply be initialised to stderr at file scope: glibc's
+ * stderr is an ordinary extern FILE *, not a constant expression.  A
+ * constructor sets it before any test body runs.
+ */
+FILE *libc_stderr;
+
+__attribute__((constructor))
+static void libc_wrappers_init(void) {
+    libc_stderr = stderr;
+}
+
+int libc_fprintf(FILE *stream, const char *fmt, ...) {
+    va_list ap;
+    int n;
+
+    va_start(ap, fmt);
+    n = vfprintf(stream ? stream : stderr, fmt, ap);
+    va_end(ap);
+    return n;
 }
