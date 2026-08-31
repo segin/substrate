@@ -13,16 +13,20 @@
 #include <assert.h>
 
 /* kern/sched.h pulls in proc.h which defines thread_t, process_t,
-/* The kernel's global process/thread tables are gone, and MAX_PROCS /
- * MAX_THREADS went with them; anything sized by them here is this file's
- * own storage.  Values match the other host tests. */
+ * current_thread, current_process, etc. */
+#include <kern/sched.h>
+
+/* The kernel's global thread table is gone and MAX_THREADS went with it;
+ * anything sized by it here is this file's own storage.  Value matches the
+ * other host tests. */
 #ifndef MAX_THREADS
 #define MAX_THREADS 64
 #endif
-
- * current_thread, current_process, MAX_THREADS, etc. */
-#include <kern/sched.h>
 #include <sys/errno.h>
+/* bio.c sizes the cache from total RAM and converts direct-mapped
+ * addresses with KERN_BASE. */
+#include <sys/param.h>
+#include <arch/i386/pmm.h>
 
 /* ---- Kernel stubs -------------------------------------------------- */
 
@@ -105,6 +109,15 @@ static int mock_strategy(struct vnode *vp, void *bpv)
 
     if (bp->b_flags & B_READ) {
         memcpy(bp->b_data, g_store + offset, bp->b_bcount);
+        /*
+         * B_CACHE means "b_data holds this block's real contents", and it is
+         * the filler's job to say so -- getblk() stopped asserting it on a
+         * hash hit in 86c76757a, because a hit only proves some buffer is
+         * keyed to the block, not that anyone ever read it in.  The real
+         * drivers set it here (sys/drivers/storage/blkdev.c); this mock did
+         * not, so nothing in these tests was ever marked cached.
+         */
+        bp->b_flags |= B_CACHE;
     } else {
         memcpy(g_store + offset, bp->b_data, bp->b_bcount);
     }
@@ -127,6 +140,14 @@ static void reset_state(void)
 }
 
 /* ---- bio.c inclusion ----------------------------------------------- */
+/*
+ * bio.c logs cache sizing through kprintf and asks the PMM how much RAM the
+ * machine has.  There is no PMM here; report a fixed 64 MiB so the cache
+ * sizing arithmetic has something plausible to work from.
+ */
+int kprintf(const char *fmt, ...) { (void)fmt; return 0; }
+uint32_t pmm_get_total_memory(void) { return 512u * 1024 * 1024; }
+
 #include "../../sys/vfs/bio.c"
 
 /* ================================================================
@@ -160,10 +181,15 @@ static bool test_getblk_cache_hit(void)
     memset(bp1->b_data, 0xAB, 512);
     brelse(bp1);
 
-    /* Second call with same vp/blkno should be a cache hit (B_CACHE) */
+    /*
+     * Second call with the same vp/blkno must return the same buffer with
+     * its contents intact.  Not B_CACHE: nothing ever filled this buffer
+     * from a device -- the test wrote into b_data itself -- and getblk no
+     * longer claims otherwise on a hash hit.
+     */
     bp2 = getblk(&g_vnode, 7, 512, 0, 0);
     if (!bp2) return false;
-    if (!(bp2->b_flags & B_CACHE)) return false;
+    if (bp2 != bp1) return false;
     /* Data must be preserved */
     uint8_t *d = (uint8_t *)bp2->b_data;
     bool data_ok = (d[0] == 0xAB && d[511] == 0xAB);
@@ -247,11 +273,12 @@ static bool test_brelse_moves_to_clean_queue(void)
     /* After brelse without B_DELWRI, buffer should go to BQ_CLEAN */
     brelse(bp);
 
-    /* Re-acquire should be a cache hit (still cached in clean queue) */
-    bp = getblk(&g_vnode, 4, 512, 0, 0);
-    if (!bp) return false;
-    bool ok = (bp->b_flags & B_CACHE) != 0;
-    brelse(bp);
+    /* Re-acquire must find the same buffer, still on the clean queue.  Again
+     * not B_CACHE -- nothing filled it. */
+    struct buf *bp2 = getblk(&g_vnode, 4, 512, 0, 0);
+    if (!bp2) return false;
+    bool ok = (bp2 == bp);
+    brelse(bp2);
     return ok;
 }
 

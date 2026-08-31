@@ -200,13 +200,6 @@ static void echo_worker(int c)
 
 /* Service `nconn` connections then exit.  The per-connection worker
  * is reaped with a blocking waitpid: callers drive connections one at
-/* The kernel's global process/thread tables are gone, and MAX_PROCS /
- * MAX_THREADS went with them; anything sized by them here is this file's
- * own storage.  Values match the other host tests. */
-#ifndef MAX_PROCS
-#define MAX_PROCS 32
-#endif
-
  * a time, and substrate's small process table (MAX_PROCS) makes the
  * fire-and-forget SIGCHLD approach unsafe for long churn runs. */
 static void echo_server(int lfd, int nconn)

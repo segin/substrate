@@ -13,13 +13,6 @@ static inline uint64_t rdtsc(void) {
 uint32_t sched_get_affinity_linear(int tid) {
     /*
      * #425: this replicated the OLD lookup, a linear scan over the static
-/* The kernel's global process/thread tables are gone, and MAX_PROCS /
- * MAX_THREADS went with them; anything sized by them here is this file's
- * own storage.  Values match the other host tests. */
-#ifndef MAX_THREADS
-#define MAX_THREADS 64
-#endif
-
      * threads[MAX_THREADS] array -- which no longer exists.  The point of the
      * benchmark is linear-scan vs O(1), so scan the registry list instead:
      * still O(n) over the same population, and it compiles against the

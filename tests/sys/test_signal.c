@@ -112,13 +112,6 @@ static int test_init_protection(void) {
     // Find init's thread
     thread_t *it = NULL;
     /*
-/* The kernel's global process/thread tables are gone, and MAX_PROCS /
- * MAX_THREADS went with them; anything sized by them here is this file's
- * own storage.  Values match the other host tests. */
-#ifndef MAX_THREADS
-#define MAX_THREADS 64
-#endif
-
      * #425: the static threads[MAX_THREADS] array no longer exists -- threads
      * live on the t_allthread_next registry, walked with thread_first() /
      * thread_next().  This `extern thread_t threads[]` also declared a symbol

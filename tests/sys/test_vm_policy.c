@@ -299,13 +299,6 @@ void test_vm_pageout_oom_kills_largest_user_process(void) {
     init = proc_find(1);
     if (init) {
         /*
-/* The kernel's global process/thread tables are gone, and MAX_PROCS /
- * MAX_THREADS went with them; anything sized by them here is this file's
- * own storage.  Values match the other host tests. */
-#ifndef MAX_THREADS
-#define MAX_THREADS 64
-#endif
-
          * #425: the static threads[MAX_THREADS] array is long gone -- threads
          * live on the t_allthread_next registry now, walked via
          * thread_first()/thread_next().  This test was never updated, which
