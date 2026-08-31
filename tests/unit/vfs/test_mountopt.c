@@ -78,16 +78,31 @@ bool test_mountopt_apply_generic(void) {
     ASSERT(flags & MNT_NOEXEC);
     mountopt_free(h);
 
-    /* Conflict: ro and rw */
+    /*
+     * "ro,rw" and "sync,async" are not conflicts -- options apply in list
+     * order and the last occurrence wins ([VFS-30]).  Rejecting the pair
+     * contradicted mountopt_lookup(), which documents the same last-wins
+     * rule, and would have made option shorthands unusable: the moment
+     * `defaults` expands to "rw,suid,dev,exec,async", `-o defaults,ro`
+     * becomes "rw,...,ro" and was refused outright.  These two asserted
+     * -EINVAL.
+     */
     h = mountopt_parse("ro,rw", &err);
     flags = 0;
-    ASSERT(mountopt_apply_generic(h, &flags) == -EINVAL);
+    ASSERT(mountopt_apply_generic(h, &flags) == 0);
+    ASSERT(!(flags & MNT_RDONLY));          /* rw came last */
     mountopt_free(h);
 
-    /* Conflict: sync and async */
+    h = mountopt_parse("rw,ro", &err);
+    flags = 0;
+    ASSERT(mountopt_apply_generic(h, &flags) == 0);
+    ASSERT(flags & MNT_RDONLY);             /* ro came last */
+    mountopt_free(h);
+
     h = mountopt_parse("sync,async", &err);
     flags = 0;
-    ASSERT(mountopt_apply_generic(h, &flags) == -EINVAL);
+    ASSERT(mountopt_apply_generic(h, &flags) == 0);
+    ASSERT(!(flags & MNT_SYNCHRONOUS));     /* async came last */
     mountopt_free(h);
 
     return true;
