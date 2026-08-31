@@ -50,6 +50,19 @@ void sched_get_loadavg(unsigned long *loads) { if (loads) loads[0] = loads[1] = 
 uint32_t sched_count_runnable(void) { return 0; }
 uint32_t sched_count_threads(void) { return 0; }
 
+/*
+ * sleepq.c reaches the preemption counters and the poll wakeup hook, and
+ * allocates queues with kmalloc.  None of that is under test here.
+ * Signatures per sys/include/sys/preempt.h, sys/kern/sched.h and
+ * sys/vm/vm_kmem.h.
+ */
+#include <stdlib.h>
+
+void preempt_disable(void) { }
+void preempt_enable_noresched(void) { }
+void poll_notify(void *chan) { (void)chan; }
+void *kmalloc(size_t size) { return malloc(size); }
+
 #include "../../sys/kern/sleepq.c"
 
 static void reset_env(void) {
