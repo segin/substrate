@@ -61,6 +61,18 @@ int64_t _syscall4(int num, uintptr_t a1, uintptr_t a2, uintptr_t a3, uintptr_t a
     return mock_result;
 }
 
+/* lseek() uses the 64-bit-return variant; it arrived after this mock set was
+ * written and nothing stubbed it, so the link failed on it.  Same contract as
+ * _syscall4, it just returns the full int64_t rather than a truncated one. */
+int64_t _syscall4_ll(int num, uintptr_t a1, uintptr_t a2, uintptr_t a3, uintptr_t a4) {
+    mock_num = num;
+    mock_args[0] = a1;
+    mock_args[1] = a2;
+    mock_args[2] = a3;
+    mock_args[3] = a4;
+    return mock_result;
+}
+
 int64_t _syscall5(int num, uintptr_t a1, uintptr_t a2, uintptr_t a3, uintptr_t a4, uintptr_t a5) {
     mock_num = num;
     mock_args[0] = a1;
