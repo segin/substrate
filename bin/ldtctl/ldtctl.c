@@ -33,8 +33,16 @@
 #define LDT_WRITE 1
 #endif
 
-/* Fallback definition for host compilation if <sys/ldt.h> is unavailable */
-#ifndef _SYS_LDT_H
+/*
+ * Fallback definition for host compilation if <sys/ldt.h> is unavailable.
+ *
+ * Test BOTH guards: the tree ships two <sys/ldt.h>, sys/include's (guard
+ * _SYS_LDT_H) and include's (guard _SUBSTRATE_SYS_LDT_H), and which one an
+ * -I order picks up decides which guard is set.  Checking only the first
+ * meant that landing on the second redefined struct user_desc and the build
+ * failed -- on a clean tree, where nothing was already compiled.
+ */
+#if !defined(_SYS_LDT_H) && !defined(_SUBSTRATE_SYS_LDT_H)
 #define _SYS_LDT_H
 struct user_desc {
     unsigned int  entry_number;
