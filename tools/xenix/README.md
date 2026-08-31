@@ -164,32 +164,32 @@ in the personality were found — see the commit for `x286_xsys_chsize`.
 
 ## What actually runs
 
-A 43-command sample under `PERS_SCO_X286`: **34 run, 8 crash, 0 fail to
-load.**
+A 37-command sample under `PERS_SCO_X286`: **all 37 run, none crash, none
+fail to load.**
 
-The media is 207 i286 binaries, 97 8086, 15 `0x69`, 1 i386. The 8086 ones —
-which include the *entire* Development System, since SCO shipped it as the
-**x86** Development System — used to be rejected outright. They are not
-rejected any more: a real Xenix/286 ran Xenix/86 binaries, so `xout286.c`
-claims `x_cpu` 0x04 as well as 0x09. That is sound because an 8086 x.out is
-not a real-mode image; it carries the same protected-mode LDT selectors
-(0x3f/0x47), the same `x_renv`, and the same segment table as a 286 one, and
-the 8086 instruction set is a strict subset of the 286's. `cc`, `masm`, `ld`,
-`cpp`, `bc` and `what` all load and run now.
+Getting there took three fixes, each a case of the loader or the personality
+knowing only one of the shapes these binaries come in.
 
-**Still crashing** — SIGSEGV early in text: `units`, `factor`, `uptime`,
-`tput`, `awk`, `emacs`, `kermit`, `adb`. Same `x_renv` (0xc80f) and the same
-two-segment layout as `date`, which works, so this is a personality gap
-rather than anything about the files, and it is unrelated to CPU type — it
-hits both i286 and 8086 images. Not diagnosed.
+**8086 images.** The media is 207 i286 binaries and 97 8086 — the whole
+Development System is the latter, since SCO shipped it as the *x86* Development
+System. `xout286.c` claimed only `x_cpu` 0x09 and rejected the rest outright.
+A real Xenix/286 ran Xenix/86 binaries and so does this now: an 8086 x.out is
+not a real-mode image, it carries the same protected-mode LDT selectors and
+segment table as a 286 one, and the 8086 instruction set is a strict subset.
 
-It is what stops the compiler: `cc` now runs and drives its passes correctly,
-but `/lib/p0`, the first pass, dies in this same way. So the toolchain is
-present and loadable but not yet usable end to end.
+**Floating point.** These binaries contain no x87 instructions; the linker
+rewrote each one into a two-byte software interrupt (`INT 0xF0+n` for `ESC
+0xD8+n`) so the program would run on a machine with no coprocessor. Only
+`CD 05` was recognised, so the first `fldcw` in a program's FP init took an
+unhandled #GP. They are patched back to `9B <ESC>` in place — the encoding is
+two bytes precisely so that fits — and the real x87 runs them.
 
-Working, among others: `date echo pwd ls cat wc sum uname id basename dirname
-expr cal od hd line env printenv sh who tty sed grep clear random deco bc
-what cc masm ld`, and Word 3.0.
+**Large-data argv.** A large-data image (`XE_LDATA`) is handed argv and envp as
+arrays of 4-byte far pointers, not 2-byte near offsets; its crt0 walks the
+vector with a stride of 4 and stops on a NULL *far* pointer. Given near
+offsets it reads each pair as one pointer and takes the second offset as a
+selector. That is what killed `emacs`, `tput`, `kermit` and `awk` — all four
+large-data — in the C runtime before `main`.
 
 ## Media layout
 

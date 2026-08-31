@@ -280,10 +280,19 @@ static void x286_fill_descriptor(gdt_entry_t *entry, uint32_t base,
  *   argv[argc-1] .. argv[0]
  *   argc                 <- initial SP
  *
- * All pointers are 16-bit offsets within DGROUP.  Returns the initial SP.
+ * The vectors are 16-bit offsets within DGROUP for a small/medium-data image,
+ * and 32-bit far pointers -- offset then DS -- for a large-data one (XE_LDATA).
+ * That is not a detail the C runtime papers over: a large-data crt0 walks the
+ * vector with a stride of 4 and stops on a NULL *far* pointer, so handing it
+ * near offsets makes it read each pair of offsets as one pointer and take the
+ * second as a selector.  emacs died on exactly that -- `les bx,[bp+0xa]` with
+ * 0x4d20, another string's offset, arriving where a selector belonged.
+ *
+ * argc stays a single word in both layouts.  Returns the initial SP.
  */
 static int x286_build_stack(uint8_t *dgroup, char *const argv[],
-                            char *const envp[], uint16_t *sp_out) {
+                            char *const envp[], uint16_t ds_sel, int far_vec,
+                            uint16_t *sp_out) {
     int argc = 0, envc = 0, i;
     uint32_t strtop = XOUT286_WINDOW_SIZE;
     uint32_t strfloor = XOUT286_WINDOW_SIZE - X286_STRING_CAP;
@@ -321,8 +330,12 @@ static int x286_build_stack(uint8_t *dgroup, char *const argv[],
 
     strtop &= ~1U;   /* the 286 wants word alignment, not dword */
 
-    /* argc + argv[] + NULL + envp[] + NULL, all 16-bit. */
-    words = 1U + (uint32_t)argc + 1U + (uint32_t)envc + 1U;
+    /* argc, then argv[] + NULL + envp[] + NULL at one or two words each. */
+    {
+        uint32_t slot = far_vec ? 2U : 1U;
+
+        words = 1U + ((uint32_t)argc + 1U + (uint32_t)envc + 1U) * slot;
+    }
     if (words * 2U > strtop || strtop - words * 2U < strfloor) {
         return -E2BIG;
     }
@@ -332,12 +345,24 @@ static int x286_build_stack(uint8_t *dgroup, char *const argv[],
     vec[w++] = (uint16_t)argc;
     for (i = 0; i < argc; i++) {
         vec[w++] = argv_off[i];
+        if (far_vec) {
+            vec[w++] = ds_sel;
+        }
     }
-    vec[w++] = 0;
+    vec[w++] = 0;                 /* end of argv */
+    if (far_vec) {
+        vec[w++] = 0;             /* ...a full NULL far pointer */
+    }
     for (i = 0; i < envc; i++) {
         vec[w++] = envp_off[i];
+        if (far_vec) {
+            vec[w++] = ds_sel;
+        }
     }
-    vec[w++] = 0;
+    vec[w++] = 0;                 /* end of envp */
+    if (far_vec) {
+        vec[w++] = 0;
+    }
 
     *sp_out = (uint16_t)vec_off;
     return 0;
@@ -694,6 +719,7 @@ static int x286_load(int fd, const char *path, char *const argv[],
 
     /* --- startup stack, written through DGROUP's linear window --- */
     rc = x286_build_stack((uint8_t *)(uintptr_t)dgroup_base, kargv, kenvp,
+                          ds_sel, (hdr.x_renv & XE_LDATA) ? 1 : 0,
                           &user_sp);
     x286_free_vector(kargv);
     x286_free_vector(kenvp);
