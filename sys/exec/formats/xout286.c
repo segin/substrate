@@ -475,6 +475,37 @@ static int x286_load(int fd, const char *path, char *const argv[],
         return x286_fail(fd, -ENOEXEC, "xout286: no loadable segments");
     }
 
+    /*
+     * An impure image -- XE_SEP clear, "combined I & D" -- has no text segment
+     * at all.  Code and data share one segment, and the program reaches them
+     * through two selectors aliased onto it: xe_eseg for CS, the data
+     * segment's own selector for DS/ES/SS.  So the segment table holds a lone
+     * XS_DATA entry (0x47 in practice) while xe_eseg names 0x3f, an index that
+     * appears nowhere in the table.
+     *
+     * This is what `cc` produces without -i, which is its default, so it is
+     * the shape of every program built on the target unless the user knows to
+     * ask otherwise.  Reserve the entry selector's LDT slot here, while
+     * failing is still free -- past pmap_create() there is no caller left to
+     * return to -- and alias the descriptor onto DGROUP once its base is
+     * known.
+     */
+    if (!(hdr.x_renv & XE_SEP)) {
+        unsigned int eidx = XOUT_SEL_INDEX(ext.xe_eseg);
+
+        if ((ext.xe_eseg & 0x04U) == 0U) {
+            return x286_fail(fd, -ENOEXEC,
+                             "xout286: impure image with non-LDT entry selector");
+        }
+        if (eidx == 0 || eidx >= XOUT286_MAX_SEGS) {
+            return x286_fail(fd, -ENOEXEC,
+                             "xout286: impure image entry selector out of range");
+        }
+        if (eidx > max_ldt_index) {
+            max_ldt_index = eidx;
+        }
+    }
+
     /* Snapshot argv/envp while the caller's address space still exists. */
     rc = x286_dup_vector(argv, &kargv);
     if (rc == 0) {
@@ -590,6 +621,30 @@ static int x286_load(int fd, const char *path, char *const argv[],
     if (!have_dgroup) {
         return x286_fail_v(fd, kargv, kenvp, -ENOEXEC, "xout286: no DGROUP data segment");
     }
+
+    /* Impure image: give xe_eseg a code descriptor over the very same bytes
+     * DGROUP already covers.  Executing from a data descriptor is not
+     * possible, so the alias is what makes the program runnable at all -- and
+     * because both descriptors share a base, an offset means the same thing
+     * whether the program computed it as code or as data, which is precisely
+     * what "combined I & D" promises.  Full window: the segment holds text,
+     * data, bss, the break and the stack, and the stack sits at the top. */
+    if (cs_sel == 0 && !(hdr.x_renv & XE_SEP)) {
+        unsigned int eidx = XOUT_SEL_INDEX(ext.xe_eseg);
+
+        x286_fill_descriptor(&entries[eidx], dgroup_base,
+                             XOUT286_WINDOW_SIZE, 1 /* code */);
+        cs_sel = ext.xe_eseg;
+        if (x286_debug_enabled()) {
+            char b[96];
+
+            snprintf(b, sizeof(b),
+                     "xout286: impure image, cs=%04x aliased onto ds=%04x\n",
+                     cs_sel, ds_sel);
+            kprint(b);
+        }
+    }
+
     if (cs_sel == 0) {
         return x286_fail_v(fd, kargv, kenvp, -ENOEXEC, "xout286: entry segment not loaded");
     }

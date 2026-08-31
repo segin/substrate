@@ -144,16 +144,20 @@ personality, once per file:
     xenix /perso/xenix286s/etc/brand <serial> <activationkey> /lib/p2
 
 Paths are relative to the personality root. Afterwards each file is a normal
-x.out and `cc` works end to end:
+x.out and `cc` works end to end, in its default mode:
 
-    $ xenix .../bin/cc -i -o v v.c && xenix .../tmp/v
-    cc-ok 3.141593
+    $ xenix .../bin/cc -o v v.c && xenix .../tmp/v
+    impure argc=1 pi=3.141593
 
-`cc -i` matters: without it the linker emits an *impure* (combined I&D)
-image — `x_renv` with `XE_SEP` clear and no text segment at all — which
-xout286.c cannot load ("entry segment not loaded"). Every stock Xenix binary
-is separate I&D. Note also that Xenix libraries are model-prefixed: there is
-no `crt0.o`, only `Scrt0.o` / `Mcrt0.o` / `Lcrt0.o` and `Slibc.a` and friends.
+That default is an *impure* (combined I&D) image — `x_renv` with `XE_SEP`
+clear, no text segment at all, and `xe_eseg` naming a selector that appears
+nowhere in the segment table. Every stock Xenix binary is separate I&D
+instead, so nothing exercised that shape until the compiler could run;
+xout286.c aliases a code descriptor onto DGROUP for it. `cc -i` asks for
+separate I&D and also works.
+
+Note that Xenix libraries are model-prefixed: there is no `crt0.o`, only
+`Scrt0.o` / `Mcrt0.o` / `Lcrt0.o` and `Slibc.a` and friends.
 
 Branding writes through `lseek` and `chsize`, which is how two 16-bit ABI bugs
 in the personality were found — see the commit for `x286_xsys_chsize`.
