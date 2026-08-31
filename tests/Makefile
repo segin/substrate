@@ -123,7 +123,9 @@ test_getpagesize: lib/sys/test_getpagesize.c ../lib/sys/getpagesize.c
 	$(CC) $(CFLAGS_COMMON) $^ -o $@
 
 test_getuid: lib/sys/test_getuid.c
-	$(CC) $(CFLAGS_COMMON) -D__i386__ -I../sys -I../include -I../sys/include $^ -o $@
+# -I../lib/sys: the test #includes ../../../lib/sys/getuid.c, which pulls in
+# <sysret.h> -- a libsys-private header that only exists in that directory.
+	$(CC) $(CFLAGS_COMMON) -D__i386__ -I../sys -I../include -I../sys/include -I../lib/sys $^ -o $@
 
 test_getrusage: lib/sys/test_getrusage.c
 	$(CC) $(CFLAGS_COMMON) -D__i386__ -I../sys -I../sys/arch/i386 -I../include $^ -o $@
