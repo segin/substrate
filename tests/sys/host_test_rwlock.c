@@ -49,9 +49,20 @@ void panic(const char *msg) {
     longjmp(panic_jmp, 1);
 }
 
+/*
+ * rwlock.c decides writer preference by asking the sleep queue whether a
+ * writer is parked -- not by reading rw->waiting_writers, which it moved off
+ * deliberately so a lost wakeup heals itself (see the comment at rw_rlock).
+ * The tests simulate a waiting writer by setting this.  Signature per
+ * sys/kern/sleepq.h.
+ */
+static int fake_writer_waiters;
+int sleepq_has_waiters(void *chan) { (void)chan; return fake_writer_waiters; }
+
 #include "../../sys/kern/rwlock.c"
 
 static void reset_env(void) {
+    fake_writer_waiters = 0;
     memset(threads, 0, sizeof(threads));
     for (int i = 0; i < NTEST_THREADS; i++) {
         threads[i].tid = -1;
@@ -132,6 +143,7 @@ static void test_rwlock_writer_preference_and_reader_wakeup(void) {
     assert(rw.readers == 1);
 
     rw.waiting_writers = 1;
+    fake_writer_waiters = 1;   /* what rwlock.c actually consults */
     current_thread = blocked_reader;
     assert(!rw_try_rlock(&rw));
 
@@ -140,6 +152,7 @@ static void test_rwlock_writer_preference_and_reader_wakeup(void) {
     assert(wake_one_calls == 1);
 
     rw.waiting_writers = 0;
+    fake_writer_waiters = 0;
     current_thread = writer;
     rw_wlock(&rw);
     assert(rw.writer == 1);
