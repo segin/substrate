@@ -63,15 +63,23 @@ bool test_pthread_mutex_init_null_attr() {
 int spin_count = 0;
 int max_spins = 0;
 
+/*
+ * Stands in for the atomic exchange in pthread_mutex_lock's slow path.
+ *
+ * The first max_spins calls report the word as still held (M_LOCKED), so the
+ * caller goes back to FUTEX_WAIT.  After that it reports M_UNLOCKED, which is
+ * what the exchange returns once the owner has released -- and is the only
+ * value that ends the retry loop.  Returning the word's previous value there
+ * instead never yields 0, so the loop spins forever.
+ */
 int mock_sync_lock_test_and_set(int *ptr, int val) {
     if (spin_count < max_spins) {
         spin_count++;
-        return 1; // Simulate that the lock is already held
+        *ptr = val;                 /* the caller is marking it CONTENDED */
+        return M_LOCKED;            /* ... and someone still holds it */
     }
-    // Simulate successful lock acquisition
-    int old = *ptr;
     *ptr = val;
-    return old;
+    return M_UNLOCKED;              /* released: the loop can exit */
 }
 
 void mock_sync_lock_release(int *ptr) {
@@ -79,25 +87,57 @@ void mock_sync_lock_release(int *ptr) {
 }
 
 /*
- * Validates pthread_mutex_lock acquisition and contention behavior.
+ * pthread_mutex_lock is a futex mutex now, not a spin loop.
+ *
+ * The fast path is a single compare-and-swap 0 -> 1; only when that finds the
+ * word already taken does it mark the mutex CONTENDED and sleep in
+ * FUTEX_WAIT, re-trying the exchange after each wake.  This test used to set
+ * max_spins = 5 and assert the lock had spun exactly five times on
+ * __sync_lock_test_and_set -- which an uncontended lock never touches at all.
  */
-bool test_pthread_mutex_lock_contention() {
+bool test_pthread_mutex_lock_uncontended() {
     local_pthread_mutex_t mutex;
 
-    // Initialize the mutex
     int ret = pthread_mutex_init(&mutex, NULL);
     assert(ret == 0);
 
-    // Test mutex lock - with contention
     spin_count = 0;
-    max_spins = 5; // Should loop 5 times then succeed
+    max_spins = 0;
 
     ret = pthread_mutex_lock(&mutex);
 
-    // Assert success and correct spinning behavior
     assert(ret == 0);
-    assert(mutex == 1);
-    assert(spin_count == 5); // Verify it spun the expected number of times
+    assert(mutex == M_LOCKED);      /* 0 -> 1 via the CAS fast path */
+    assert(spin_count == 0);        /* no exchange, no futex wait */
+
+    assert(pthread_mutex_unlock(&mutex) == 0);
+    assert(mutex == M_UNLOCKED);
+
+    return true;
+}
+
+bool test_pthread_mutex_lock_contention() {
+    local_pthread_mutex_t mutex;
+
+    int ret = pthread_mutex_init(&mutex, NULL);
+    assert(ret == 0);
+
+    /*
+     * Hand the lock word over already held, so the CAS fails and the slow
+     * path runs.  mock_sync_lock_test_and_set reports "still held" for the
+     * first max_spins exchanges -- each costing one FUTEX_WAIT -- then lets
+     * the exchange through, which is what an owner unlocking looks like from
+     * in here.
+     */
+    mutex = M_LOCKED;
+    spin_count = 0;
+    max_spins = 5;
+
+    ret = pthread_mutex_lock(&mutex);
+
+    assert(ret == 0);
+    assert(mutex == M_CONTENDED);   /* the waiter leaves the word marked */
+    assert(spin_count == 5);        /* five failed exchanges, five sleeps */
 
     return true;
 }
@@ -106,6 +146,14 @@ int main() {
     bool passed = true;
     printf("test_pthread_mutex_init_null_attr: ");
     if (test_pthread_mutex_init_null_attr()) {
+        printf("PASS\n");
+    } else {
+        printf("FAIL\n");
+        passed = false;
+    }
+
+    printf("test_pthread_mutex_lock_uncontended: ");
+    if (test_pthread_mutex_lock_uncontended()) {
         printf("PASS\n");
     } else {
         printf("FAIL\n");
