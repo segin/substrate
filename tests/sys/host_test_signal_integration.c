@@ -54,9 +54,12 @@ uint32_t get_hz(void) { return 128; }
 int copyin(const void *src, void *dst, size_t size) { memcpy(dst, src, size); return 0; }
 int copyout(const void *src, void *dst, size_t size) { memcpy(dst, src, size); return 0; }
 const uint8_t sigprop[NSIG] = {
-    [SIGSEGV] = SA_KILL | SA_CORE,
+    [SIGSEGV] = PROP_KILL | PROP_CORE,   /* renamed from SA_*: see sys/include/sys/signal.h */
 };
-void sendsig(sig_t handler, int sig, uint32_t mask, uint32_t flags, registers_t *regs) {
+/* Prototype must match sys/include/sys/signal.h, which passes the handler
+ * and register frame as void * -- a mock that disagrees is a conflicting
+ * definition of the function it stands in for. */
+void sendsig(void *handler, int sig, uint32_t mask, uint32_t flags, void *regs) {
     (void)handler; (void)sig; (void)mask; (void)flags; (void)regs;
 }
 struct personality *perso_lookup(int id) { (void)id; return NULL; }

@@ -64,13 +64,16 @@ const char *perso_name(int id) {
     return (id == (int)test_personality.id) ? test_personality.name : "unknown";
 }
 
-void sendsig(sig_t handler, int sig, uint32_t mask, uint32_t flags, registers_t *regs) {
+/* Prototype must match sys/include/sys/signal.h, which passes the handler
+ * and register frame as void * -- a mock that disagrees is a conflicting
+ * definition of the function it stands in for. */
+void sendsig(void *handler, int sig, uint32_t mask, uint32_t flags, void *regs) {
     sendsig_calls++;
-    last_handler = (void *)handler;
+    last_handler = handler;
     last_sig = sig;
     last_mask = mask;
     last_flags = flags;
-    last_regs = regs;
+    last_regs = (registers_t *)regs;
 }
 
 int kprintf(const char *fmt, ...) { (void)fmt; return 0; }
