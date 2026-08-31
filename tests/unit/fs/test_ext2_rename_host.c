@@ -169,6 +169,15 @@ static void setup_fs(ext2_fs_t *fs, fs_node_t *dev_node, ext2_node_t *root_ctx, 
     memset(ext2_fs_node_cache, 0, sizeof(ext2_fs_node_cache));
     ext2_node_cache_idx = 0;
 
+    /*
+     * Zero it first.  This was a bare stack local with only some fields
+     * assigned, so i_flags was whatever the stack happened to hold -- and if
+     * that carried EXT2_INDEX_FL (0x1000), ext2_dir_is_indexed() reported the
+     * root as an htree directory and every mknod/mkdir returned EOPNOTSUPP.
+     * It changed with the weather: adding a printf moved the stack enough to
+     * flip the result.
+     */
+    memset(&root_inode, 0, sizeof(root_inode));
     root_inode.i_mode = EXT2_S_IFDIR | 0755;
     root_inode.i_uid = 0;
     root_inode.i_gid = 0;
