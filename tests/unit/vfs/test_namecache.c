@@ -39,6 +39,11 @@ static void nc_free_vnode(struct vnode *vp)
 
 /* --- cache_enter / cache_lookup hit --------------------------------------- */
 
+/*
+ * cache_lookup() returns NEGATIVE errnos -- -ENOENT for both a miss and a
+ * negative-cache hit.  These comparisons used the positive value and so
+ * never matched.
+ */
 bool test_namecache_hit(void) {
     vnode_init();
     nchinit();
@@ -86,7 +91,7 @@ bool test_namecache_miss(void) {
     int result = cache_lookup(dvp, &found, "nosuchname", 10);
 
     /* Miss returns ENOENT */
-    bool ok = (result == ENOENT && found == NULL);
+    bool ok = (result == -ENOENT && found == NULL);
 
     nc_free_vnode(dvp);
     return ok;
@@ -111,7 +116,7 @@ bool test_namecache_negative(void) {
     int result = cache_lookup(dvp, &found, name, namelen);
 
     /* Negative hit: returns ENOENT, found unchanged (NULL) */
-    bool ok = (result == ENOENT && found == NULL);
+    bool ok = (result == -ENOENT && found == NULL);
 
     cache_purge(dvp);
     nc_free_vnode(dvp);
@@ -155,7 +160,7 @@ bool test_namecache_purge(void) {
     found = NULL;
     int r2 = cache_lookup(dvp, &found, name, namelen);
 
-    bool ok = (r2 == ENOENT && found == NULL);
+    bool ok = (r2 == -ENOENT && found == NULL);
 
     cache_purge(dvp);
     nc_free_vnode(dvp);
@@ -240,7 +245,7 @@ bool test_namecache_purgevfs(void) {
     found = NULL;
     int r2 = cache_lookup(dvp, &found, "mounted_file", 12);
 
-    bool ok = (r2 == ENOENT && found == NULL);
+    bool ok = (r2 == -ENOENT && found == NULL);
 
     nc_free_vnode(dvp);
     nc_free_vnode(vp);
