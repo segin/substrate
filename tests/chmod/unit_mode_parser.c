@@ -90,7 +90,14 @@ test_umask_interaction(void)
     mode_t old_umask = umask(0022);
 
     expect_success("+w", 0444, 0644);
-    expect_success("=rw", 0777, 0666);
+    /*
+     * POSIX: in a symbolic mode with no `who`, the bits set in the process's
+     * file mode creation mask are cleared from the result.  With umask 022,
+     * `=rw` is rw for the owner and r for group and other -- 0644, which is
+     * what GNU chmod produces too.  This expected 0666, i.e. the umask being
+     * ignored.
+     */
+    expect_success("=rw", 0777, 0644);
 
     (void)umask(old_umask);
 }
