@@ -334,22 +334,22 @@ libc_stdio_prefixed.o: ../lib/c/stdio/stdio_core.c ../lib/c/stdio/stdstreams.c .
 	objcopy --redefine-syms=symbols.map stdio_combined_raw.o $@
 
 test_libc_stdio: lib/c/unit/test_stdio.c libc_stdio_prefixed.o
-	$(CC) $(CFLAGS_COMMON) -m32 $^ -o $@
+	$(CC) $(CFLAGS_COMMON) -m32 $^ lib/c/syscall_stubs.c -o $@
 
 test_libc_printf: lib/c/unit/test_printf.c libc_stdio_prefixed.o
-	$(CC) $(CFLAGS_COMMON) -m32 $^ -o $@
+	$(CC) $(CFLAGS_COMMON) -m32 $^ lib/c/syscall_stubs.c -o $@
 
 test_libc_scanf: lib/c/unit/test_scanf.c libc_stdio_prefixed.o
-	$(CC) $(CFLAGS_COMMON) -m32 $^ -o $@
+	$(CC) $(CFLAGS_COMMON) -m32 $^ lib/c/syscall_stubs.c -o $@
 
 test_libc_prop_stdio: lib/c/property/prop_stdio.c libc_stdio_prefixed.o
-	$(CC) $(CFLAGS_COMMON) -m32 $^ -o $@
+	$(CC) $(CFLAGS_COMMON) -m32 $^ lib/c/syscall_stubs.c -o $@
 
 test_libc_fuzz_scanf: lib/c/fuzz/fuzz_scanf.c libc_stdio_prefixed.o
-	$(CC) $(CFLAGS_COMMON) -m32 $^ -o $@
+	$(CC) $(CFLAGS_COMMON) -m32 $^ lib/c/syscall_stubs.c -o $@
 
 test_libc_fuzz_printf: lib/c/fuzz/fuzz_printf.c libc_stdio_prefixed.o
-	$(CC) $(CFLAGS_COMMON) -m32 $^ -o $@
+	$(CC) $(CFLAGS_COMMON) -m32 $^ lib/c/syscall_stubs.c -o $@
 
 # Rules for objects
 %.o: ../sys/vm/%.c
