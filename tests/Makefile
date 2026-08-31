@@ -1,5 +1,18 @@
 CC = gcc
 CFLAGS_COMMON = -Wall -Wextra -g -DHOST_TEST -D_GNU_SOURCE
+
+# Substrate's own libc sources, when compiled natively so the host tests can
+# exercise them, meet glibc's headers rather than substrate's.  _GNU_SOURCE
+# then makes glibc declare the GNU flavour of functions substrate implements
+# to POSIX, and the definitions collide: strerror_r is the loud one, declared
+# `char *` by glibc against substrate's POSIX `int`.  Ask for POSIX 2008,
+# which is what these sources are actually written to.  Only for the
+# lib/c/src/*.c compiles that lack substrate's -I paths -- the rules that do
+# pass them pick up substrate's headers and need no help.  _DEFAULT_SOURCE
+# rides along for the BSD extensions these sources use (arc4random_uniform);
+# it does not bring back the GNU strerror_r, which needs _GNU_SOURCE proper.
+CFLAGS_LIBC_HOST = $(filter-out -D_GNU_SOURCE,$(CFLAGS_COMMON)) \
+                   -D_POSIX_C_SOURCE=200809L -D_DEFAULT_SOURCE
 CFLAGS_KERN = $(CFLAGS_COMMON) -I../sys -I../sys/arch/i386 -I../sys/drivers/video -I../sys/exec/perso -I../sys/include
 CFLAGS_TEST = $(CFLAGS_COMMON) -I../sys/include -I../sys -I. -DNO_MAIN
 
@@ -276,7 +289,7 @@ test_minix: unit/fs/test_minix_standalone.c
 	$(CC) $(CFLAGS_KERN) $< -o $@
 
 test_libc_string: lib/c/test_libc_string_unit.c ../lib/c/src/string.c string_prefixed.o libc_wrappers.o
-	$(CC) $(CFLAGS_COMMON) -fno-builtin -c ../lib/c/src/string.c -o string_raw.o
+	$(CC) $(CFLAGS_LIBC_HOST) -fno-builtin -c ../lib/c/src/string.c -o string_raw.o
 	objcopy --prefix-symbols=libc_ string_raw.o string_prefixed.o
 	$(CC) $(CFLAGS_COMMON) lib/c/test_libc_string_unit.c string_prefixed.o libc_wrappers.o -o $@
 
@@ -284,7 +297,7 @@ test_libc_errno: lib/c/test_errno.c ../lib/c/src/sys.c
 	$(CC) $(CFLAGS_COMMON) -D__i386__ -fno-builtin -I../lib/c/include -I../include -I../sys -I../sys/include lib/c/test_errno.c ../lib/c/src/sys.c -o $@
 
 test_libc_libgen: lib/c/test_libgen.c ../lib/c/src/libgen.c string_prefixed.o libc_wrappers.o
-	$(CC) $(CFLAGS_COMMON) -fno-builtin -c ../lib/c/src/libgen.c -o libgen_raw.o
+	$(CC) $(CFLAGS_LIBC_HOST) -fno-builtin -c ../lib/c/src/libgen.c -o libgen_raw.o
 	objcopy --prefix-symbols=libc_ libgen_raw.o libgen_prefixed.o
 	$(CC) $(CFLAGS_COMMON) lib/c/test_libgen.c libgen_prefixed.o string_prefixed.o libc_wrappers.o -o $@
 
@@ -402,7 +415,7 @@ test_runner: test_runner.o $(CORE_OBJS) $(UNIT_OBJS) $(MOCKS_OBJ) libc_wrappers.
 	$(CC) $(CFLAGS_COMMON) $^ -o $@
 
 string_prefixed.o: ../lib/c/src/string.c
-	$(CC) $(CFLAGS_COMMON) -fno-builtin -c ../lib/c/src/string.c -o string_raw.o
+	$(CC) $(CFLAGS_LIBC_HOST) -fno-builtin -c ../lib/c/src/string.c -o string_raw.o
 	objcopy --prefix-symbols=libc_ string_raw.o string_prefixed.o
 
 clean:
