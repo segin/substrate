@@ -190,6 +190,24 @@ sync_native_libs_to_sysroot
 "${HERE}/scripts/install-link-specs.sh"
 
 #-----------------------------------------------------------------------
+# Stage 1f2: finish libgcc.
+#
+# libgcc.a builds against headers alone, but the shared libgcc_s.so.1 links
+# with -lc and crtn.o -- and substrate's libc is compiled BY the stage-1 cross
+# compiler, so on a first build it cannot exist yet.  Stage 0's libgcc pass
+# therefore fails its shared link ("ld: cannot find -lc") and carries on.  Now
+# that 1a-1e have built libc and 1f has mirrored it, finish the job.  Reuses
+# the stage-1 build tree rather than reconfiguring, which would be a whole
+# second gcc build for one library.
+#-----------------------------------------------------------------------
+if [ "$SKIP_TOOLCHAIN" = 1 ]; then
+    step "Stage 1f2: libgcc completion (skipped — SKIP_TOOLCHAIN=1)"
+else
+    step "Stage 1f2: finish libgcc now that libc is in the sysroot"
+    contrib/gcc/build.sh --libgcc-only
+fi
+
+#-----------------------------------------------------------------------
 # Stage 1g: toolchain stage 2 -- AFTER the native libs, not with stage 1.
 #
 # Stage 2 is a Canadian cross: the binutils and gcc it produces are

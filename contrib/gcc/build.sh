@@ -26,9 +26,13 @@
 set -eu
 
 STAGE=
+LIBGCC_ONLY=0
 for arg in "$@"; do
     case "$arg" in
         --stage=1) STAGE=1 ;;
+        # Rebuild only libgcc, reusing the existing stage-1 build tree.
+        # See the LIBGCC_ONLY block below for why this exists.
+        --libgcc-only) STAGE=1; LIBGCC_ONLY=1 ;;
         --stage=2) STAGE=2 ;;
         -h|--help)
             sed -n '/^# build\.sh/,/^# Usage:/p; /^# Usage:/,/^$/p' "$0"
@@ -89,6 +93,41 @@ if [ "$STAGE" = 1 ]; then
     fi
 
     BUILD_DIR="$HERE/build-stage1"
+    if [ "$LIBGCC_ONLY" = 1 ]; then
+        # Second pass over libgcc, reusing the tree the first pass left.
+        #
+        # libgcc.a builds against headers alone, but the SHARED libgcc_s.so.1
+        # is linked with -lc and crtn.o, and neither exists on a first build:
+        # substrate's libc is compiled BY this cross compiler, so the first
+        # stage-1 pass necessarily runs before it.  The shared link therefore
+        # fails with
+        #
+        #   ld: cannot find -lc: No such file or directory
+        #   ld: cannot find crtn.o: No such file or directory
+        #
+        # which build.sh reports as "libgcc build failed" and carries past.
+        # Once the native libs are built and mirrored into the sysroot, this
+        # pass finishes the job.  It reuses BUILD_DIR deliberately: a full
+        # --stage=1 wipes and reconfigures, which is another whole gcc build
+        # for the sake of one library.
+        [ -d "$BUILD_DIR" ] || {
+            echo "build.sh: --libgcc-only needs an existing $BUILD_DIR" >&2
+            echo "          (run --stage=1 first)" >&2
+            exit 1
+        }
+        cd "$BUILD_DIR"
+        LIBGCC_TARGET_CFLAGS="-g -O2 -std=gnu23"
+        echo "==> Rebuilding libgcc now that libc is in the sysroot"
+        make -j "$PARALLEL" CFLAGS_FOR_TARGET="$LIBGCC_TARGET_CFLAGS" all-target-libgcc
+        echo "==> Installing libgcc to $STAGE1_PREFIX"
+        if [ -w "$(dirname "$STAGE1_PREFIX")" ]; then
+            make CFLAGS_FOR_TARGET="$LIBGCC_TARGET_CFLAGS" install-target-libgcc
+        else
+            sudo make CFLAGS_FOR_TARGET="$LIBGCC_TARGET_CFLAGS" install-target-libgcc
+        fi
+        echo "==> libgcc complete."
+        exit 0
+    fi
     rm -rf "$BUILD_DIR"
     mkdir -p "$BUILD_DIR"
     cd "$BUILD_DIR"
