@@ -11,6 +11,12 @@
 #include <sys/copy.h>
 
 #define _ARCH_I386_INTR_H
+/* The kernel has no global process table any more, and MAX_PROCS went with
+ * it; the array below is this test's own mock storage.  32 matches the
+ * value tests/sys/procfs_mocks/include/sys/proc.h already uses. */
+#ifndef MAX_PROCS
+#define MAX_PROCS 32
+#endif
 process_t processes[MAX_PROCS];
 process_t *current_process;
 thread_t *current_thread;

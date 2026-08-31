@@ -12,10 +12,21 @@
 #include <arch/i386/pmap.h>
 #include <vm/vm_map.h>
 
+/* The kernel has no global process table any more, and MAX_PROCS went with
+ * it; the array below is this test's own mock storage.  32 matches the
+ * value tests/sys/procfs_mocks/include/sys/proc.h already uses. */
+#ifndef MAX_PROCS
+#define MAX_PROCS 32
+#endif
 process_t processes[MAX_PROCS];
 process_t *current_process;
 thread_t *current_thread;
 process_t *kernel_process;
+/* Likewise MAX_THREADS: the scheduler's global thread table is gone, and the
+ * array below is this test's own.  64 matches the other host tests. */
+#ifndef MAX_THREADS
+#define MAX_THREADS 64
+#endif
 thread_t threads[MAX_THREADS];
 mutex_t proctree_lock;
 fs_node_t *fs_root;
