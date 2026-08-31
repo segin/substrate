@@ -55,6 +55,12 @@ void panic(const char *msg)
     { fprintf(stderr, "PANIC: %s\n", msg); abort(); }
 
 /* ---- lockmgr inclusion --------------------------------------------- */
+/*
+ * lockmgr only wakes sleepers when the queue says there are some; this test
+ * drives the uncontended paths.  Signature per sys/kern/sleepq.h.
+ */
+int sleepq_has_waiters(void *chan) { (void)chan; return 0; }
+
 #include "../../sys/kern/lockmgr.c"
 
 /* ---- Helpers ------------------------------------------------------- */
