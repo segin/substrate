@@ -30,14 +30,16 @@ int64_t get_time(void) { return 0; } // Mock get_time for minix.c
 #include <sys/types.h>
 #include <vfs/vfs.h>
 
-// Mock VFS functions used by minix.c
-size_t read_fs(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
-    if (node->read) return node->read(node, offset, size, buffer);
+// Mock VFS functions used by minix.c.  Return type is ssize_t, matching
+// the declarations in sys/vfs/vfs.h -- these were size_t, which made them
+// conflicting definitions of the very functions they stand in for.
+ssize_t read_fs(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
+    if (node->read) return (ssize_t)node->read(node, offset, size, buffer);
     return 0;
 }
 
-size_t write_fs(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer) {
-    if (node->write) return node->write(node, offset, size, buffer);
+ssize_t write_fs(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer) {
+    if (node->write) return (ssize_t)node->write(node, offset, size, buffer);
     return 0;
 }
 
