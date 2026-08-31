@@ -50,77 +50,77 @@ long syscall(long number, ...) {
 void test_getuid(void) {
     mock_syscall_return = 1000;
     mock_syscall_number = -1;
-    uid_t uid = getuid();
+    uid_t uid = sys_getuid();
     assert(mock_syscall_number == SYS_GETUID);
     assert(uid == 1000);
-    printf("PASS: getuid()\n");
+    printf("PASS: sys_getuid()\n");
 }
 
 void test_getgid(void) {
     mock_syscall_return = 2000;
     mock_syscall_number = -1;
-    gid_t gid = getgid();
+    gid_t gid = sys_getgid();
     assert(mock_syscall_number == SYS_GETGID);
     assert(gid == 2000);
-    printf("PASS: getgid()\n");
+    printf("PASS: sys_getgid()\n");
 }
 
 void test_geteuid(void) {
     mock_syscall_return = 3000;
     mock_syscall_number = -1;
-    uid_t euid = geteuid();
+    uid_t euid = sys_geteuid();
     assert(mock_syscall_number == SYS_GETEUID);
     assert(euid == 3000);
-    printf("PASS: geteuid()\n");
+    printf("PASS: sys_geteuid()\n");
 }
 
 void test_getegid(void) {
     mock_syscall_return = 4000;
     mock_syscall_number = -1;
-    gid_t egid = getegid();
+    gid_t egid = sys_getegid();
     assert(mock_syscall_number == SYS_GETEGID);
     assert(egid == 4000);
-    printf("PASS: getegid()\n");
+    printf("PASS: sys_getegid()\n");
 }
 
 void test_setuid(void) {
     mock_syscall_return = 0;
     mock_syscall_number = -1;
     mock_syscall_arg1 = -1;
-    int res = setuid(1001);
+    int res = sys_setuid(1001);
     assert(mock_syscall_number == SYS_SETUID);
     assert(mock_syscall_arg1 == 1001);
     assert(res == 0);
-    printf("PASS: setuid()\n");
+    printf("PASS: sys_setuid()\n");
 
     mock_syscall_return = -1;
     mock_syscall_number = -1;
     mock_syscall_arg1 = -1;
-    res = setuid(1002);
+    res = sys_setuid(1002);
     assert(mock_syscall_number == SYS_SETUID);
     assert(mock_syscall_arg1 == 1002);
     assert(res == -1);
-    printf("PASS: setuid() error\n");
+    printf("PASS: sys_setuid() error\n");
 }
 
 void test_setgid(void) {
     mock_syscall_return = 0;
     mock_syscall_number = -1;
     mock_syscall_arg1 = -1;
-    int res = setgid(2001);
+    int res = sys_setgid(2001);
     assert(mock_syscall_number == SYS_SETGID);
     assert(mock_syscall_arg1 == 2001);
     assert(res == 0);
-    printf("PASS: setgid()\n");
+    printf("PASS: sys_setgid()\n");
 
     mock_syscall_return = -1;
     mock_syscall_number = -1;
     mock_syscall_arg1 = -1;
-    res = setgid(2002);
+    res = sys_setgid(2002);
     assert(mock_syscall_number == SYS_SETGID);
     assert(mock_syscall_arg1 == 2002);
     assert(res == -1);
-    printf("PASS: setgid() error\n");
+    printf("PASS: sys_setgid() error\n");
 }
 
 int main(void) {
