@@ -158,26 +158,15 @@ build_components() {
     echo "Building kernel..."
     make -C "$TOP/sys" -j4
 
-    # libc.so.0 links -l:libsys.so.0 and -l:libm.so.0, so both have to exist
-    # before libc is built.  Neither depends on libc in turn, so there is no
-    # cycle -- but with libc first, a tree that has never built them (a fresh
-    # clone, a new worktree, CI) died at "cannot find -l:libsys.so.0".  Same
-    # trap as lib/at below.
-    echo "Building runtime libraries libc depends on..."
-    make -C "$TOP/lib/sys" -j4
-    make -C "$TOP/lib/m" -j4
-
-    echo "Building libc..."
-    make -C "$TOP/lib/c" -j4
-
+    # Build the whole lib/ tree rather than a hand-picked list.  Its SUBDIRS
+    # is already in dependency order -- m and sys ahead of c, which links
+    # -l:libsys.so.0 and -l:libm.so.0 -- and it covers the libraries later
+    # passes link against but this list kept omitting: bin/passwd needs
+    # -lpwdb, usr.bin/at needs -lat.  Every dev tree has these lying around
+    # from an earlier build, so the omissions only ever bite a fresh clone, a
+    # new worktree, or CI, and only as "cannot find -lfoo" at the very end.
     echo "Building runtime libraries..."
-    make -C "$TOP/lib/pthread" -j4
-    make -C "$TOP/lib/dl" -j4
-    make -C "$TOP/lib/edit" -j4
-    # usr.bin/at links -lat, so libat has to exist before the usr.bin pass.
-    # Without this a tree that has never built lib/at (a fresh clone or a new
-    # worktree) dies at "cannot find -lat" instead of producing a dist/.
-    make -C "$TOP/lib/at" -j4
+    make -C "$TOP/lib" -j4
 
     echo "Building usr.lib helper libraries (libelfobj, libregex,"
     echo "libexvi, libbc, libdemangle, libjoin, libuu, ...)"

@@ -322,7 +322,12 @@ main(int argc, char *argv[])
             char cmd[PATH_MAX + 32];
             if (snprintf(cmd, sizeof(cmd), "rm -rf %s", tmp_dir) <
                 (int)sizeof(cmd)) {
-                (void)system(cmd);
+                /* A (void) cast does NOT suppress warn_unused_result in gcc;
+                 * the value has to actually land somewhere.  Ubuntu's gcc
+                 * errors on it under -Werror where Arch's does not, so this
+                 * built on the dev box and failed in CI. */
+                int sys_rc = system(cmd);
+                (void)sys_rc;
             }
         }
     }
