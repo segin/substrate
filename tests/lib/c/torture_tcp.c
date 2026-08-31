@@ -35,6 +35,13 @@
 
 #ifdef SUBSTRATE_TARGET
 #include <sys/sysinfo.h>
+/* The kernel's global process/thread tables are gone, and MAX_PROCS /
+ * MAX_THREADS went with them; anything sized by them here is this file's
+ * own storage.  Values match the other host tests. */
+#ifndef MAX_PROCS
+#define MAX_PROCS 32
+#endif
+
 #endif
 
 /* ------------------------------------------------------------------ */

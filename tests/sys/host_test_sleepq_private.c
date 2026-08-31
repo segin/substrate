@@ -44,6 +44,13 @@ uint32_t sched_count_runnable(void) { return 0; }
 uint32_t sched_count_threads(void) { return 0; }
 
 #include "../../sys/kern/sleepq.c"
+/* The kernel's global process/thread tables are gone, and MAX_PROCS /
+ * MAX_THREADS went with them; anything sized by them here is this file's
+ * own storage.  Values match the other host tests. */
+#ifndef MAX_THREADS
+#define MAX_THREADS 64
+#endif
+
 
 static void reset_env(void) {
     memset(threads, 0, sizeof(threads));

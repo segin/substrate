@@ -121,6 +121,13 @@ static void reset_state(void)
 
 /* ---- bio.c inclusion ----------------------------------------------- */
 #include "../../sys/vfs/bio.c"
+/* The kernel's global process/thread tables are gone, and MAX_PROCS /
+ * MAX_THREADS went with them; anything sized by them here is this file's
+ * own storage.  Values match the other host tests. */
+#ifndef MAX_THREADS
+#define MAX_THREADS 64
+#endif
+
 
 /* ================================================================
  * REQ-04-0193: getblk/bread/bwrite/brelse lifecycle

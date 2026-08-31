@@ -16,6 +16,13 @@
 #include <kern/sched.h>
 #include <pm/pm.h>
 #include <vm/phys_mem.h>
+/* The kernel's global process/thread tables are gone, and MAX_PROCS /
+ * MAX_THREADS went with them; anything sized by them here is this file's
+ * own storage.  Values match the other host tests. */
+#ifndef MAX_THREADS
+#define MAX_THREADS 64
+#endif
+
 
 static int tests_passed = 0;
 static int tests_failed = 0;

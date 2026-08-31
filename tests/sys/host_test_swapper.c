@@ -41,6 +41,16 @@ void sched_switch(thread_t *next) {
 }
 
 #include "../../sys/kern/swapper.c"
+/* The kernel's global process/thread tables are gone, and MAX_PROCS /
+ * MAX_THREADS went with them; anything sized by them here is this file's
+ * own storage.  Values match the other host tests. */
+#ifndef MAX_PROCS
+#define MAX_PROCS 32
+#endif
+#ifndef MAX_THREADS
+#define MAX_THREADS 64
+#endif
+
 
 static void reset_env(void) {
     memset(processes, 0, sizeof(processes));
