@@ -99,6 +99,15 @@ void kprint(const char *msg) {
     (void)msg;
 }
 
+/*
+ * signal.c logs delivery diagnostics through kprintf and gates them on the
+ * command line; this test reads neither.  Signatures per
+ * sys/drivers/console/console.h and sys/kern/cmdline.h.
+ */
+int kprintf(const char *fmt, ...) { (void)fmt; return 0; }
+int cmdline_debug_enabled(const char *channel) { (void)channel; return 0; }
+int cmdline_has(const char *key) { (void)key; return 0; }
+
 #include "../../sys/arch/i386/signal.c"
 
 static void test_legacy_sendsig_and_sigreturn(void) {
