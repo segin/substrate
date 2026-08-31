@@ -121,8 +121,6 @@ dist/
 # downloads + extracts into here.  Never vendored.
 /contrib/*/build/
 
-# Per-port build logs from contrib/build-all.sh.
-/contrib/.build-logs/
 
 # Patterns formerly carried in subtree .gitignore files
 /contrib/ext2-boot/*.bin
