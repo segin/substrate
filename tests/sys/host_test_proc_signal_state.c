@@ -12,6 +12,13 @@
 static thread_t *forked_thread;
 static process_t *forked_process;
 fs_node_t *fs_root;
+/* The kernel's global process/thread tables are gone, and MAX_PROCS /
+ * MAX_THREADS went with them; anything sized by them here is this file's
+ * own storage.  Values match the other host tests. */
+#ifndef MAX_THREADS
+#define MAX_THREADS 64
+#endif
+
 thread_t threads[MAX_THREADS];
 thread_t *current_thread;
 
@@ -128,13 +135,6 @@ struct vm_map *vm_map_fork(struct vm_map *src, pmap_t pmap) {
 void random_reseed_on_fork(int child_pid) { (void)child_pid; }
 
 #include "../../sys/pm/process.c"
-/* The kernel's global process/thread tables are gone, and MAX_PROCS /
- * MAX_THREADS went with them; anything sized by them here is this file's
- * own storage.  Values match the other host tests. */
-#ifndef MAX_THREADS
-#define MAX_THREADS 64
-#endif
-
 
 static void reset_env(void) {
     forked_thread = NULL;

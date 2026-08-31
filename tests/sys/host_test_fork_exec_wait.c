@@ -17,6 +17,13 @@
 #include <sys/session.h>
 #include <sys/wait.h>
 
+/* The kernel's global process/thread tables are gone, and MAX_PROCS /
+ * MAX_THREADS went with them; anything sized by them here is this file's
+ * own storage.  Values match the other host tests. */
+#ifndef MAX_THREADS
+#define MAX_THREADS 64
+#endif
+
 thread_t threads[MAX_THREADS];
 thread_t *current_thread;
 fs_node_t *fs_root;
@@ -273,13 +280,6 @@ void random_reseed_on_fork(int child_pid) { (void)child_pid; }
 #include "../../sys/pm/process.c"
 #include "../../sys/pm/wait.c"
 #include "../../sys/exec/exec.c"
-/* The kernel's global process/thread tables are gone, and MAX_PROCS /
- * MAX_THREADS went with them; anything sized by them here is this file's
- * own storage.  Values match the other host tests. */
-#ifndef MAX_THREADS
-#define MAX_THREADS 64
-#endif
-
 
 static int kern_execve_host(const char *path, char *const argv[], char *const envp[]) {
     exec_pin_current_thread();

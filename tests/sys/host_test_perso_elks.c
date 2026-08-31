@@ -474,13 +474,6 @@ size_t proc_emit_cmdline(const process_t *p, char *buf, size_t buf_len, size_t *
 }
 
 #include "../../sys/exec/perso/perso_elks.c"
-/* The kernel's global process/thread tables are gone, and MAX_PROCS /
- * MAX_THREADS went with them; anything sized by them here is this file's
- * own storage.  Values match the other host tests. */
-#ifndef MAX_PROCS
-#define MAX_PROCS 32
-#endif
-
 
 /*
  * perso_elks.c now reads the process registry via proc_find / proc_first /
@@ -805,6 +798,13 @@ int main(void) {
     memset(ds_mem + 0x152, 0, 16);
     /* GETMAXTASKS now reports ELKS_KMEM_MAX_EXPORTED (the count of task
      * slots exported through the emulated /dev/kmem window), not the old
+/* The kernel's global process/thread tables are gone, and MAX_PROCS /
+ * MAX_THREADS went with them; anything sized by them here is this file's
+ * own storage.  Values match the other host tests. */
+#ifndef MAX_PROCS
+#define MAX_PROCS 32
+#endif
+
      * kernel-global MAX_PROCS which no longer exists. */
     if (fn(4, ELKS_MEM_GETMAXTASKS, 0x152, 0, 0, 0, 0, 0) != 0 ||
         *(uint16_t *)(void *)(ds_mem + 0x152) != ELKS_KMEM_MAX_EXPORTED) {
