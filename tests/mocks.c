@@ -10,6 +10,12 @@
 #include "../sys/vm/vm_map.h"
 #include "../sys/include/sys/lock.h"
 #include "../sys/include/sys/proc.h"
+/* Types the mocks below take or dereference: struct bio_stats, blkdev_t,
+ * memtrack_rec_t.  Included rather than hand-declared so the mocks keep
+ * tracking the real definitions. */
+#include "../sys/vfs/buf.h"
+#include "../sys/drivers/storage/blkdev.h"
+#include "../sys/kern/memtrack.h"
 
 // VGA/UART Mocks
 void vga_write(const char *s, size_t n) { (void)s; (void)n; }
@@ -379,7 +385,7 @@ void *vm_phys_alloc_page(void) {
 void vm_phys_free_page(void *p) { (void)p; }
 void cpuid_init(void) {}
 void pty_init(void) {}
-void *blkdev_get(void) { return NULL; }
+blkdev_t *blkdev_get(const char *name) { (void)name; return NULL; }
 void arch_fork_with_stack(void) {}
 void exec_pin_current_thread(void) {}
 void exec_unpin_current_thread(void) {}
@@ -508,3 +514,156 @@ void random_on_exec(void) {}
 void random_reseed_on_fork(int child_pid) { (void)child_pid; }
 void i386_load_gs_for_thread(thread_t *t) { (void)t; }
 const char *perso_name(int id) { (void)id; return "unknown"; }
+
+/* ------------------------------------------------------------------------
+ * Kernel surface the host tests link against but do not exercise.
+ *
+ * test_procfs.c #includes sys/fs/procfs.c, and procfs reports on very nearly
+ * everything, so the link drags in the block layer, the pmap counters, the
+ * commit accounting, the console log, the SysV IPC cleanup hooks and more.
+ * None of it is under test here; these exist so the link resolves.
+ *
+ * Every signature below is copied from the header that declares it.  A mock
+ * that disagrees with its header is worse than a missing one -- see the
+ * sendsig drift that stopped this build earlier -- so if one of these starts
+ * failing to compile, fix the mock to match the header rather than the other
+ * way round.
+ * --------------------------------------------------------------------- */
+
+/* --- block layer / buffer cache (sys/vfs/buf.h, drivers/storage/blkdev.h) */
+void bio_get_stats(struct bio_stats *out)
+{ if (out) memset(out, 0, sizeof(*out)); }
+size_t bio_reclaim(size_t target_bytes) { (void)target_bytes; return 0; }
+int bufsync(int freq) { (void)freq; return 0; }
+blkdev_t *blkdev_first(void) { return NULL; }
+int blkdev_flush_all(void) { return 0; }
+void blkdev_invalidate_node(fs_node_t *node) { (void)node; }
+size_t blkdev_read_bytes(blkdev_t *dev, uint64_t offset, size_t size, void *buffer)
+{ (void)dev; (void)offset; (void)size; (void)buffer; return 0; }
+
+/* --- console / kernel log (drivers/console/console.h) --- */
+fs_node_t *console_get_node(void) { return NULL; }
+int console_revoke(void) { return 0; }
+size_t klog_size(void) { return 0; }
+size_t klog_read(char *dst, size_t dstlen)
+{ if (dst && dstlen) dst[0] = '\0'; return 0; }
+
+/* --- checksums (include/crc16.h, include/crc32c.h) --- */
+uint16_t crc16_update(uint16_t crc, const void *data, size_t len)
+{ (void)data; (void)len; return crc; }
+uint32_t crc32c_update(uint32_t crc, const void *buf, size_t len)
+{ (void)buf; (void)len; return crc; }
+
+/* --- misc kernel services --- */
+int cmdline_has(const char *key) { (void)key; return 0; }
+void device_shutdown_all(void) { }
+void exec_cleanup_drain(void) { }
+void syscall_stats_dump(int reset) { (void)reset; }
+void sysv_init(void) { }
+int i386_cpu_pat_wc_enabled(void) { return 0; }
+int random_get_bytes_flags(void *buf, size_t len, unsigned int flags)
+{ (void)flags; if (buf && len) memset(buf, 0, len); return 0; }
+
+/* --- ext2 (fs/ext2/ext2.h) --- */
+int ext2_htree_hash(const char *name, int len, const uint32_t *hash_seed,
+                    int hash_version, uint32_t *hash_major, uint32_t *hash_minor)
+{ (void)name; (void)len; (void)hash_seed; (void)hash_version;
+  if (hash_major) *hash_major = 0; if (hash_minor) *hash_minor = 0; return 0; }
+int ext2_xattr_get(fs_node_t *node, const char *full_name, void *out,
+                   size_t out_size, size_t *result_size)
+{ (void)node; (void)full_name; (void)out; (void)out_size;
+  if (result_size) *result_size = 0; return -1; }
+int ext2_xattr_list(fs_node_t *node, void *out, size_t out_size, size_t *result_size)
+{ (void)node; (void)out; (void)out_size; if (result_size) *result_size = 0; return -1; }
+
+/* --- FPU (arch/i386/fpu/fpu_emu.h) --- */
+void fpu_forget_process(struct process *p) { (void)p; }
+void fpu_switch(void) { }
+
+/* --- umtx (include/sys/umtx.h) --- */
+int kern_umtx_op(void *obj, int op, unsigned long val, void *uaddr, void *uaddr2)
+{ (void)obj; (void)op; (void)val; (void)uaddr; (void)uaddr2; return 0; }
+int kern_umtx_wake(void *uaddr, int n) { (void)uaddr; (void)n; return 0; }
+
+/* --- per-process IPC teardown hooks --- */
+void ksem_proc_cleanup(int pid) { (void)pid; }
+void mq_proc_cleanup(int pid) { (void)pid; }
+void sem_proc_cleanup(int pid) { (void)pid; }
+void shm_proc_cleanup(int pid) { (void)pid; }
+
+/* --- memtrack (kern/memtrack.h) --- */
+size_t memtrack_snapshot(memtrack_rec_t *out, size_t max)
+{ (void)out; (void)max; return 0; }
+
+/* --- arch entry points (arch/i386/intr.h, percpu.h) --- */
+void new_kernel_thread_trampoline(void) { }
+void new_user_thread_trampoline(void) { }
+struct percpu_data *percpu_get_cpu(int cpu_id) { (void)cpu_id; return NULL; }
+
+/* --- pmap (arch/i386/pmap.h) --- */
+void pmap_clear_modify(pmap_t pmap, uintptr_t va) { (void)pmap; (void)va; }
+int pmap_is_modified(pmap_t pmap, uintptr_t va) { (void)pmap; (void)va; return 0; }
+uint32_t pmap_resident_count(pmap_t pmap) { (void)pmap; return 0; }
+size_t pmap_copyin_other(pmap_t pmap, uintptr_t uva, void *dst, size_t len)
+{ (void)pmap; (void)uva; (void)dst; (void)len; return 0; }
+
+/* procfs prints these counters; they are plain statistics. */
+uint64_t pmap_create_calls;
+uint64_t pmap_destroy_calls;
+uint64_t pmap_destroy_skip_refcnt;
+uint64_t pmap_destroy_skip_wired;
+uint64_t pmap_destroy_skip_obj;
+uint64_t pmap_destroy_anon_skipped;
+uint64_t pmap_destroy_anon_freed;
+uint64_t pmap_destroy_anon_rc0;
+uint64_t pmap_destroy_anon_rc2;
+uint64_t pmap_destroy_anon_rc_big;
+
+/* --- pty (drivers/console/pty.h) --- */
+int pty_bsd_master_open(struct fs_node *node) { (void)node; return -1; }
+int pty_is_bsd_master(struct fs_node *node) { (void)node; return 0; }
+int pty_set_nonblock(struct fs_node *node, int on) { (void)node; (void)on; return 0; }
+
+/* --- scheduler reboot/halt hooks (kern/sched.h) --- */
+void sched_halt_userspace(thread_t *keep) { (void)keep; }
+void sched_park_if_reboot_frozen(void) { }
+
+/* --- shmfs (vfs/vfs.h) --- */
+void shmfs_init(void) { }
+uint64_t shmfs_resident_bytes(void) { return 0; }
+
+/* --- sockets --- */
+int sys_accept(int s, void *name, int *namelen)
+{ (void)s; (void)name; (void)namelen; return -1; }
+
+/* --- tty (include/sys/tty.h) --- */
+int tty_ioctl(struct tty *tty, uint32_t cmd, unsigned long arg)
+{ (void)tty; (void)cmd; (void)arg; return -1; }
+int tty_revoke(struct tty *tty) { (void)tty; return 0; }
+
+/* --- commit accounting (vm/vm_commit.h) --- */
+int vm_commit_charge(size_t npages) { (void)npages; return 0; }
+void vm_commit_uncharge(size_t npages) { (void)npages; }
+size_t vm_commit_current(void) { return 0; }
+size_t vm_commit_limit(void) { return 0; }
+
+/* --- vm_map (vm/vm_map.h) --- */
+void vm_map_lock(vm_map_t *map) { (void)map; }
+void vm_map_unlock(vm_map_t *map) { (void)map; }
+int vm_map_protect(vm_map_t *map, uintptr_t start, uintptr_t end, uint8_t prot)
+{ (void)map; (void)start; (void)end; (void)prot; return 0; }
+unsigned long vm_map_destroy_count;
+unsigned long vm_map_destroy_entries;
+
+/*
+ * Real one lives in sys/vm/phys_mem.c, which the host tests do not build.
+ * It answers "is this pointer really one of the vm_page_t's in the page
+ * array"; the tests hand out pages from their own mock storage, which would
+ * never pass the real bounds check, so say yes and leave their behaviour as
+ * it was before the check existed.
+ */
+int vm_phys_page_is_valid(const vm_page_t *p) { return p != NULL; }
+
+/* --- virtual terminals (include/sys/vt.h) --- */
+int vt_get_active(void) { return 0; }
+void vt_release_graphics_on_exit(void *exiting_process) { (void)exiting_process; }
