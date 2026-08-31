@@ -3,9 +3,11 @@
 # build.sh — end-to-end "whole shebang" build from a clean checkout.
 #
 # Order (each layer depends on the previous):
-#   1.  contrib/build-toolchain.sh — stage-1 cross binutils+GCC
-#       targeting i386-unknown-substrate, then a Canadian-cross
-#       stage 2 that runs ON substrate.
+#   1.  contrib/build-toolchain.sh --stage=1 — cross binutils+GCC
+#       targeting i386-unknown-substrate.  Stage 2 (the Canadian
+#       cross that runs ON substrate) comes later, at 1g: it has to
+#       link test programs with substrate's own libc, which does not
+#       exist until the native libs below are built and mirrored.
 #   2.  Native substrate components (kernel `sys/`, runtime libs
 #       under `lib/`, the dynamic linker `sbin/ld.so/`, base
 #       userland `bin/` + `sbin/`, helper libs under `usr.lib/`,
@@ -129,8 +131,8 @@ if [ "$SKIP_TOOLCHAIN" = 1 ]; then
     note "Reusing the existing cross toolchain at $STAGE1_PREFIX."
 else
     step "Stage 0: TOOLCHAIN (contrib/build-toolchain.sh)"
-    note "binutils 2.46.0 + GCC 16.1.0, stage 1 cross + stage 2 Canadian cross"
-    note "installs into $STAGE1_PREFIX (stage 1) and /tmp/gcc-stage2-staging (stage 2)"
+    note "binutils 2.46.0 + GCC 16.1.0 -- STAGE 1 ONLY (cross, runs on Linux)"
+    note "installs into $STAGE1_PREFIX; stage 2 comes after the native libs exist"
 
     # Seed the sysroot headers FIRST.  gcc stage 1 is configured
     # --with-sysroot="$HERE/dist" and its fixincludes pass reads
@@ -152,7 +154,7 @@ else
     mkdir -p dist/usr/include dist/usr/lib
     cp -aL include/. dist/usr/include/ 2>/dev/null || true
 
-    contrib/build-toolchain.sh
+    contrib/build-toolchain.sh --stage=1
 fi
 
 export PATH="${STAGE1_PREFIX}/bin:${PATH}"
@@ -186,6 +188,27 @@ sync_native_libs_to_sysroot
 # without per-project flags.  Runs here, after the sysroot has the libs the
 # spec's -rpath-link points at.
 "${HERE}/scripts/install-link-specs.sh"
+
+#-----------------------------------------------------------------------
+# Stage 1g: toolchain stage 2 -- AFTER the native libs, not with stage 1.
+#
+# Stage 2 is a Canadian cross: the binutils and gcc it produces are
+# substrate ELFs, so configure has to link a test program with the cross
+# compiler, which needs substrate's libc and crt0 in the sysroot.  Those do
+# not exist until stage 1a-1e have built them and 1f has mirrored them, so
+# running both toolchain stages together at stage 0 -- as this script used
+# to -- fails every time on a tree without a prebuilt sysroot:
+#
+#   configure: error: C compiler cannot create executables
+#
+#-----------------------------------------------------------------------
+if [ "$SKIP_TOOLCHAIN" = 1 ]; then
+    step "Stage 1g: TOOLCHAIN STAGE 2 (skipped — SKIP_TOOLCHAIN=1)"
+else
+    step "Stage 1g: toolchain stage 2 (Canadian cross, runs ON substrate)"
+    note "stages into dist-overlay/dist-toolchain for --toolchain to overlay"
+    contrib/build-toolchain.sh --stage=2
+fi
 
 #-----------------------------------------------------------------------
 # Stage 2: contrib ports
