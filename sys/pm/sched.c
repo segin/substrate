@@ -10,9 +10,16 @@
 #include <stdint.h>
 #include <string.h>
 #include <sys/types.h>
-#ifndef HOST_TEST
+/*
+ * vm_kmem.h is where kmalloc/kfree are declared, and it is host-safe --
+ * vm_pager.c, uma_core.c and futex.c all include it and all build in the
+ * host test tree.  Excluding it under HOST_TEST left kfree() with no
+ * declaration at all, which older C let through as an implicit int-returning
+ * function and C23 does not: the host build failed outright.  tests/mocks.c
+ * supplies the definitions, matching this prototype.
+ */
 #include <vm/vm_kmem.h>
-#else
+#ifdef HOST_TEST
 #include <stdlib.h>
 #endif
 

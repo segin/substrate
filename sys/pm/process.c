@@ -1,9 +1,16 @@
 #include <stddef.h>
 #include <string.h>
-#ifndef HOST_TEST
+/*
+ * Both of these are declaration-only headers and both are host-safe, so the
+ * host test build wants them just as much as the kernel does -- it calls
+ * kmalloc() and cmdline_debug_enabled(), and tests/mocks.c defines both.
+ * Excluding them left the calls with no prototype, which C23 rejects rather
+ * than assuming int, so the host build failed on the implicit declaration
+ * and then again on assigning that "int" to a pointer.
+ */
 #include <kern/cmdline.h>
 #include <vm/vm_kmem.h>
-#else
+#ifdef HOST_TEST
 #include <stdlib.h>
 #endif
 
