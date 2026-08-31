@@ -10,6 +10,11 @@ set -eu
 VERSION="R59c"
 TARBALL="mksh-${VERSION}.tgz"
 URL="http://www.mirbsd.org/MirOS/dist/mir/mksh/${TARBALL}"
+# www.mirbsd.org no longer resolves -- the name has no A or AAAA record,
+# so upstream is unreachable rather than merely slow.  MacPorts mirrors
+# the identical tarball; the SHA256 below is unchanged and was verified
+# byte-for-byte against it.
+URL_FALLBACK="https://distfiles.macports.org/mksh/${TARBALL}"
 SHA256="77ae1665a337f1c48c61d6b961db3e52119b38e58884d1c89684af31f87bc506"
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -23,9 +28,9 @@ if [ ! -f "${TARBALL}" ]; then
     [ "${1:-}" = "--no-network" ] && { echo "fetch.sh: tarball missing" >&2; exit 1; }
     echo "==> Fetching ${URL}"
     if command -v curl >/dev/null 2>&1; then
-        curl -fSL -o "${TARBALL}" "${URL}"
+        curl -fSL -o "${TARBALL}" "${URL}" || curl -fSL -o "${TARBALL}" "${URL_FALLBACK}"
     else
-        wget -O "${TARBALL}" "${URL}"
+        wget -O "${TARBALL}" "${URL}" || wget -O "${TARBALL}" "${URL_FALLBACK}"
     fi
 fi
 
