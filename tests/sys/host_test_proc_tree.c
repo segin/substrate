@@ -8,11 +8,20 @@
 #include <kern/sched.h>
 #include <arch/i386/pmap.h>
 
+/* The kernel has no global process table any more, and MAX_PROCS went with
+ * it; the array below is this test's own mock storage. */
+#ifndef MAX_PROCS
+#define MAX_PROCS 32
+#endif
 process_t processes[MAX_PROCS];
 process_t *current_process;
 thread_t *current_thread;
 process_t *kernel_process;
 mutex_t proctree_lock;
+/* Likewise MAX_THREADS. */
+#ifndef MAX_THREADS
+#define MAX_THREADS 64
+#endif
 thread_t threads[MAX_THREADS];
 fs_node_t *fs_root;
 
@@ -96,6 +105,8 @@ void random_reseed_on_fork(int child_pid) { (void)child_pid; }
 
 static void reset_env(void) {
     memset(processes, 0, sizeof(processes));
+    allproc = NULL;
+    memset(pid_hash, 0, sizeof(pid_hash));
     for (int i = 0; i < MAX_PROCS; i++) {
         processes[i].pid = -1;
     }
@@ -110,6 +121,14 @@ static process_t *init_proc(int slot, int pid) {
     process_t *p = &processes[slot];
     memset(p, 0, sizeof(*p));
     p->pid = pid;
+    /*
+     * Link into process.c's own allproc/pid_hash.  proc_reparent_children()
+     * finds init with proc_find(1); an unregistered process meant that
+     * returned NULL, the code fell back to kernel_process -- also NULL here --
+     * and dereferenced it.  Nothing in this file reaps, so the processes may
+     * stay in the static table.
+     */
+    proc_link_locked(p);
     return p;
 }
 
@@ -148,6 +167,9 @@ static void test_reparent_to_swapper_when_init_dying(void) {
     process_t *child = init_proc(3, 21);
 
     init->state = SDYING;
+    /* With init dying, reparenting falls back to kernel_process -- the
+     * swapper this test asserts against.  It was never set. */
+    kernel_process = swapper;
     parent->p_children = child;
     child->p_parent = parent;
 

@@ -181,7 +181,7 @@ host_test_pgrp: sys/host_test_pgrp.c ../sys/pm/pgrp.c
 	$(CC) $(CFLAGS_KERN) $< -o $@
 
 host_test_proc_tree: sys/host_test_proc_tree.c ../sys/pm/process.c
-	$(CC) $(CFLAGS_KERN) $< -o $@
+	$(CC) $(CFLAGS_KERN) $< sys/proc_host_stubs.c -o $@
 
 host_test_proc_exit: sys/host_test_proc_exit.c ../sys/pm/process.c
 	$(CC) $(CFLAGS_KERN) $< sys/proc_host_stubs.c -o $@
