@@ -42,6 +42,16 @@ bool test_ext2_blocks_extent(void) {
     ext2_fs_t fs;
     memset(&fs, 0, sizeof(fs));
     fs.block_size = 1024;
+    /*
+     * ext2_read_block() rejects any block number outside the filesystem's
+     * data range -- block pointers come from on-disk metadata a crafted image
+     * controls, and an unchecked one turns a file read into an arbitrary
+     * device-offset read.  fs is memset to zero here, so s_blocks_count was 0
+     * and EVERY read was refused: the indirect block never loaded and the
+     * extent walk saw nothing but holes.  Give the mock device a size that
+     * covers the blocks these tests use.
+     */
+    fs.sb.s_blocks_count = 4096;
 
     fs_node_t dev_node;
     memset(&dev_node, 0, sizeof(dev_node));
