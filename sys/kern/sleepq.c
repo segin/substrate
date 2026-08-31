@@ -86,7 +86,7 @@ static inline int sleepq_current_private_pid(void) {
 // un-runnable: the intermittent pipe/mutex/pty hang.
 static inline unsigned long sq_lock(int hash) {
     unsigned long flags;
-    __asm__ volatile("pushfl; popl %0; cli" : "=r"(flags) :: "memory");
+    __asm__ volatile("pushf; pop %0; cli" : "=r"(flags) :: "memory");
     preempt_disable();
     while (__sync_lock_test_and_set(&sleepq_locks[hash], 1)) {
         while (sleepq_locks[hash])
@@ -99,7 +99,7 @@ static inline unsigned long sq_lock(int hash) {
 static inline void sq_unlock(int hash, unsigned long flags) {
     __sync_lock_release(&sleepq_locks[hash]);
     preempt_enable_noresched();
-    __asm__ volatile("pushl %0; popfl" :: "r"(flags) : "memory", "cc");
+    __asm__ volatile("push %0; popf" :: "r"(flags) : "memory", "cc");
 }
 
 // Allocate a sleep queue (free list first, then kmalloc)
