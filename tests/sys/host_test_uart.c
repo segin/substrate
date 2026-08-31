@@ -104,6 +104,14 @@ int copyout(const void *src, void *dst, size_t len) {
     return 0;
 }
 
+/*
+ * The uart driver takes its port lock through spinlock_acquire_irq(), which
+ * is inline in sys/include/sys/lock.h and calls these.  Single-threaded host
+ * test: taking the lock is a no-op, but the symbols must exist.
+ */
+void spinlock_acquire(spinlock_t *lock) { (void)lock; }
+void spinlock_release(spinlock_t *lock) { (void)lock; }
+
 #include "../../sys/drivers/console/uart/uart.c"
 
 static void reset_state(void) {
