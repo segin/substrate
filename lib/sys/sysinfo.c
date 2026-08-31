@@ -277,9 +277,10 @@ int sys_boottime(struct timespec *ts) {
 
 int sys_hostname(char *buf, size_t len) {
     if (!buf || len == 0) { errno = EINVAL; return -1; }
-    /* gethostname() goes through SYS_GETHOSTNAME — the canonical
-     * source.  Falling back through /etc/hostname doesn't belong
-     * here; that's a sysctl-conf level concern. */
+    /* Defer to libc's gethostname(), the canonical source.  Falling
+     * back through /etc/hostname doesn't belong here; that's a
+     * sysctl-conf level concern.  (This used to claim a
+     * SYS_GETHOSTNAME syscall, which has never existed.) */
     return gethostname(buf, len);
 }
 

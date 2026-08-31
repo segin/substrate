@@ -22,7 +22,15 @@ HDR="$ROOT/sys/arch/i386/syscall.h"
 fail=0
 
 # 1. Every SYS_* used must be #define'd in syscall.h.
-used="$(grep -hoE 'SYS_[A-Za-z0-9_]+' "$LIBSYS"/*.c | sort -u)"
+#
+# Comments are stripped first.  The audit is about code, and prose naming a
+# family -- "the SYS_PROC_* family" -- otherwise scans as a reference to a
+# constant called SYS_PROC_, since the * is not part of the identifier
+# pattern.  Three such phantoms were failing this audit.
+strip_comments() {
+    python3 -c 'import re,sys; sys.stdout.write(re.sub(r"/\*.*?\*/|//[^\n]*", " ", sys.stdin.read(), flags=re.S))'
+}
+used="$(cat "$LIBSYS"/*.c | strip_comments | grep -hoE 'SYS_[A-Za-z0-9_]+' | sort -u)"
 defined="$(grep -hoE '^#define[ \t]+SYS_[A-Za-z0-9_]+' "$HDR" \
             | awk '{print $2}' | sort -u)"
 
