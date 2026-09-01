@@ -42,6 +42,16 @@ TARGET="i386-unknown-substrate"
 SR="${STAGE1_PREFIX}/${TARGET}"
 LIBDIR="${STAGE1_PREFIX}/lib/gcc/${TARGET}/${GCC_VERSION}"
 
+# GCC_VERSION's default tracks the pinned toolchain, but fall back to
+# whatever single version is installed so a bump does not silently skip the
+# specs -- the failure mode of a missing specs file is subtle (see above) and
+# only shows up much later, in a C++ link or a throw that never gets caught.
+if [ ! -d "${LIBDIR}" ]; then
+    for _d in "${STAGE1_PREFIX}/lib/gcc/${TARGET}"/*/; do
+        [ -d "$_d" ] || continue
+        LIBDIR="${_d%/}"
+    done
+fi
 [ -d "${LIBDIR}" ] || {
     echo "install-specs.sh: no such gcc libdir: ${LIBDIR}" >&2
     exit 1

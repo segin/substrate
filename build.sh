@@ -187,7 +187,13 @@ sync_native_libs_to_sysroot
 # probe and bare-Makefile contrib port — links against substrate's own libc
 # without per-project flags.  Runs here, after the sysroot has the libs the
 # spec's -rpath-link points at.
-"${HERE}/scripts/install-link-specs.sh"
+#
+# contrib/gcc/install-specs.sh is the one that writes this file; the specs it
+# installs also carry --eh-frame-hdr (without which every C++ throw from a
+# main executable reaches std::terminate) and -lpthread (without which every
+# C++ link fails on pthread_mutex_lock out of libstdc++'s eh_alloc.o), and it
+# asserts the libfoo.so linker names besides.
+"${HERE}/contrib/gcc/install-specs.sh"
 
 #-----------------------------------------------------------------------
 # Stage 1f2: finish the stage-1 target runtime (libgcc + libstdc++).
