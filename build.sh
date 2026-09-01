@@ -213,6 +213,13 @@ if [ "$SKIP_TOOLCHAIN" = 1 ]; then
 else
     step "Stage 1f2: finish libgcc + libstdc++ now that libc is in the sysroot"
     contrib/gcc/build.sh --target-runtime
+
+    # Again, now that libstdc++ exists: the first run could only warn about
+    # it.  This is what creates the libstdc++.so LINKER name, and without it
+    # -lstdc++ falls through to libstdc++.a with no diagnostic at all, giving
+    # every shared object its own operator new/delete, iostream and locale
+    # globals and typeinfo.  Stage 2 links C++ against this sysroot.
+    "${HERE}/contrib/gcc/install-specs.sh"
 fi
 
 #-----------------------------------------------------------------------
