@@ -1,0 +1,69 @@
+Add the substrate BFD output vecs to gdb's bundled bfd.
+
+Ports contrib/binutils/patches/0003 onto gdb-16.2's bfd.  Each vec is the
+stock x86 ELF vec with EI_OSABI stamped ELFOSABI_SUBSTRATE, and
+ELF_OSABI_EXACT=0 so it still accepts OSABI=NONE inputs.
+
+--- a/bfd/elf32-i386.c	2025-02-01 04:14:30.000000000 -0600
++++ b/bfd/elf32-i386.c
+@@ -4545,6 +4545,31 @@
+ 
+ #undef elf_backend_init_file_header
+ 
++/* Substrate support.  Identical to the stock i386-elf BFD vec except
++   that EI_OSABI is stamped with ELFOSABI_SUBSTRATE (64).  No init-
++   file-header callback is needed: ELF_OSABI alone is enough for the
++   ELF backend to write the right byte.  */
++
++#undef	TARGET_LITTLE_SYM
++#define	TARGET_LITTLE_SYM		i386_elf32_substrate_vec
++#undef	TARGET_LITTLE_NAME
++#define	TARGET_LITTLE_NAME		"elf32-i386-substrate"
++#undef	ELF_OSABI
++#define	ELF_OSABI			ELFOSABI_SUBSTRATE
++/*
++ * EXACT=0: the vec writes OSABI=ELFOSABI_SUBSTRATE on output but
++ * accepts inputs with any OSABI (NONE=0, GNU=3, etc.).  Required
++ * during the bootstrap window where pre-substrate libraries
++ * carrying OSABI=NONE are still in the link line; tightening to
++ * EXACT=1 would refuse them with "file in wrong format".
++ */
++#undef	ELF_OSABI_EXACT
++#define	ELF_OSABI_EXACT			0
++#undef	elf32_bed
++#define	elf32_bed			elf32_i386_substrate_bed
++
++#include "elf32-target.h"
++
+ /* Solaris 2.  */
+ 
+ #undef	TARGET_LITTLE_SYM
+--- a/bfd/elf64-x86-64.c	2025-02-01 04:14:30.000000000 -0600
++++ b/bfd/elf64-x86-64.c
+@@ -5906,6 +5906,26 @@
+ 
+ #include "elf64-target.h"
+ 
++/* Substrate support.  Sole delta from the stock vec is EI_OSABI =
++   ELFOSABI_SUBSTRATE (64).  Architecture-specific OSABI slot per the
++   ELF spec — no real collision with ELFOSABI_AMDGPU_HSA for EM_X86_64.  */
++
++#undef	TARGET_LITTLE_SYM
++#define	TARGET_LITTLE_SYM		    x86_64_elf64_substrate_vec
++#undef	TARGET_LITTLE_NAME
++#define	TARGET_LITTLE_NAME		    "elf64-x86-64-substrate"
++
++#undef	ELF_OSABI
++#define	ELF_OSABI			    ELFOSABI_SUBSTRATE
++/* Same EXACT=0 rationale as the i386 vec above. */
++#undef	ELF_OSABI_EXACT
++#define	ELF_OSABI_EXACT			    0
++
++#undef	elf64_bed
++#define elf64_bed			    elf64_x86_64_substrate_bed
++
++#include "elf64-target.h"
++
+ /* Solaris 2 support.  */
+ 
+ #undef  TARGET_LITTLE_SYM

@@ -1,0 +1,20 @@
+Define ELFOSABI_SUBSTRATE in gdb's bundled include/elf/common.h.
+
+Same value and rationale as contrib/binutils/patches/0002: slot 64 is
+scoped per e_machine by the ELF spec, so sharing the number with
+ELFOSABI_AMDGPU_HSA is unambiguous for EM_386 / EM_X86_64.
+
+--- a/include/elf/common.h	2025-02-01 04:14:30.000000000 -0600
++++ b/include/elf/common.h
+@@ -79,6 +79,11 @@
+ #define ELFOSABI_CUDA          51 /* NVIDIA CUDA architecture.  */
+ #define ELFOSABI_C6000_ELFABI  64 /* Bare-metal TMS320C6000 */
+ #define ELFOSABI_AMDGPU_HSA    64 /* AMD HSA Runtime */
++#define ELFOSABI_SUBSTRATE     64 /* Substrate OS — same numeric slot as
++				     ELFOSABI_AMDGPU_HSA / _C6000_ELFABI; the
++				     ELF spec scopes 64..255 per e_machine,
++				     so the meaning is unambiguous given
++				     EM_386 / EM_X86_64.  */
+ #define ELFOSABI_C6000_LINUX   65 /* Linux TMS320C6000 */
+ #define ELFOSABI_AMDGPU_PAL    65 /* AMD PAL Runtime */
+ #define ELFOSABI_ARM_FDPIC     65 /* ARM FDPIC */

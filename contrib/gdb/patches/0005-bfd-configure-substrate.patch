@@ -1,0 +1,40 @@
+Map the substrate vec names to their objects in gdb's bundled bfd.
+Ports contrib/binutils/patches/0005 onto gdb-16.2.  Both configure.ac and
+the generated configure are patched, so no autoreconf is needed.
+
+--- a/bfd/configure.ac	2025-02-01 04:14:30.000000000 -0600
++++ b/bfd/configure.ac
+@@ -480,6 +480,7 @@
+     i386_elf32_vec)		 tb="$tb elf32-i386.lo $elfxx_x86 elf32.lo $elf" ;;
+     i386_elf32_fbsd_vec)	 tb="$tb elf32-i386.lo $elfxx_x86 elf32.lo $elf" ;;
+     i386_elf32_sol2_vec)	 tb="$tb elf32-i386.lo $elfxx_x86 elf32.lo $elf" ;;
++    i386_elf32_substrate_vec)	 tb="$tb elf32-i386.lo $elfxx_x86 elf32.lo $elf" ;;
+     i386_elf32_vxworks_vec)	 tb="$tb elf32-i386.lo $elfxx_x86 elf32.lo $elf" ;;
+     i386_mach_o_vec)		 tb="$tb mach-o-i386.lo" ;;
+     i386_msdos_vec)		 tb="$tb i386msdos.lo" ;;
+@@ -663,6 +664,7 @@
+     x86_64_elf64_cloudabi_vec)	 tb="$tb elf64-x86-64.lo $elfxx_x86 elf64.lo $elf"; target_size=64 ;;
+     x86_64_elf64_fbsd_vec)	 tb="$tb elf64-x86-64.lo $elfxx_x86 elf64.lo $elf"; target_size=64 ;;
+     x86_64_elf64_sol2_vec)	 tb="$tb elf64-x86-64.lo $elfxx_x86 elf64.lo $elf"; target_size=64 ;;
++    x86_64_elf64_substrate_vec)	 tb="$tb elf64-x86-64.lo $elfxx_x86 elf64.lo $elf"; target_size=64 ;;
+     x86_64_mach_o_vec)		 tb="$tb mach-o-x86-64.lo" ;;
+     x86_64_pe_vec)		 tb="$tb pe-x86_64.lo pex64igen.lo $coff"; target_size=64 ;;
+     x86_64_pe_big_vec)		 tb="$tb pe-x86_64.lo pex64igen.lo $coff"; target_size=64 ;;
+--- a/bfd/configure	2025-02-01 04:14:30.000000000 -0600
++++ b/bfd/configure
+@@ -15894,6 +15894,7 @@
+     i386_elf32_vec)		 tb="$tb elf32-i386.lo $elfxx_x86 elf32.lo $elf" ;;
+     i386_elf32_fbsd_vec)	 tb="$tb elf32-i386.lo $elfxx_x86 elf32.lo $elf" ;;
+     i386_elf32_sol2_vec)	 tb="$tb elf32-i386.lo $elfxx_x86 elf32.lo $elf" ;;
++    i386_elf32_substrate_vec)	 tb="$tb elf32-i386.lo $elfxx_x86 elf32.lo $elf" ;;
+     i386_elf32_vxworks_vec)	 tb="$tb elf32-i386.lo $elfxx_x86 elf32.lo $elf" ;;
+     i386_mach_o_vec)		 tb="$tb mach-o-i386.lo" ;;
+     i386_msdos_vec)		 tb="$tb i386msdos.lo" ;;
+@@ -16077,6 +16078,7 @@
+     x86_64_elf64_cloudabi_vec)	 tb="$tb elf64-x86-64.lo $elfxx_x86 elf64.lo $elf"; target_size=64 ;;
+     x86_64_elf64_fbsd_vec)	 tb="$tb elf64-x86-64.lo $elfxx_x86 elf64.lo $elf"; target_size=64 ;;
+     x86_64_elf64_sol2_vec)	 tb="$tb elf64-x86-64.lo $elfxx_x86 elf64.lo $elf"; target_size=64 ;;
++    x86_64_elf64_substrate_vec)	 tb="$tb elf64-x86-64.lo $elfxx_x86 elf64.lo $elf"; target_size=64 ;;
+     x86_64_mach_o_vec)		 tb="$tb mach-o-x86-64.lo" ;;
+     x86_64_pe_vec)		 tb="$tb pe-x86_64.lo pex64igen.lo $coff"; target_size=64 ;;
+     x86_64_pe_big_vec)		 tb="$tb pe-x86_64.lo pex64igen.lo $coff"; target_size=64 ;;

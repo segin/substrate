@@ -1,0 +1,38 @@
+Teach gdb's bundled bfd/config.bfd about *-substrate targets.
+
+Without this, configure stops with
+
+  *** BFD does not support target i386-unknown-substrate.
+  *** Look in bfd/config.bfd for supported targets.
+
+Ports contrib/binutils/patches/0006 onto gdb-16.2.  Note the x86_64 case
+must go AFTER the complete x86_64-*-redox* case: applying the binutils
+patch with fuzz lands it in the middle of redox's body and silently
+splits that target in two.
+
+--- a/bfd/config.bfd	2025-02-01 04:14:30.000000000 -0600
++++ b/bfd/config.bfd
+@@ -665,6 +665,11 @@
+     targ_selvecs=
+     targ64_selvecs=x86_64_elf64_vec
+     ;;
++  i[3-7]86-*-substrate*)
++    targ_defvec=i386_elf32_substrate_vec
++    targ_selvecs="i386_elf32_vec iamcu_elf32_vec"
++    targ64_selvecs="x86_64_elf64_substrate_vec x86_64_elf64_vec x86_64_elf32_vec"
++    ;;
+ #ifdef BFD64
+   x86_64-*-cloudabi*)
+     targ_defvec=x86_64_elf64_cloudabi_vec
+@@ -730,6 +735,11 @@
+     targ_selvecs=i386_elf32_vec
+     want64=true
+     ;;
++  x86_64-*-substrate*)
++    targ_defvec=x86_64_elf64_substrate_vec
++    targ_selvecs="x86_64_elf64_vec i386_elf32_substrate_vec i386_elf32_vec iamcu_elf32_vec x86_64_elf32_vec"
++    want64=true
++    ;;
+   x86_64-*-gnu*)
+     targ_defvec=x86_64_elf64_vec
+     targ_selvecs="i386_elf32_vec iamcu_elf32_vec x86_64_elf32_vec"

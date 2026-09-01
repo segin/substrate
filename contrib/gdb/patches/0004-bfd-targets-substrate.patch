@@ -1,0 +1,37 @@
+Register the substrate vecs in gdb's bundled bfd/targets.c.
+Ports contrib/binutils/patches/0004 onto gdb-16.2.
+
+--- a/bfd/targets.c	2025-02-01 04:14:30.000000000 -0600
++++ b/bfd/targets.c
+@@ -750,6 +750,7 @@
+ extern const bfd_target i386_elf32_vec;
+ extern const bfd_target i386_elf32_fbsd_vec;
+ extern const bfd_target i386_elf32_sol2_vec;
++extern const bfd_target i386_elf32_substrate_vec;
+ extern const bfd_target i386_elf32_vxworks_vec;
+ extern const bfd_target i386_mach_o_vec;
+ extern const bfd_target i386_msdos_vec;
+@@ -934,6 +935,7 @@
+ extern const bfd_target x86_64_elf64_cloudabi_vec;
+ extern const bfd_target x86_64_elf64_fbsd_vec;
+ extern const bfd_target x86_64_elf64_sol2_vec;
++extern const bfd_target x86_64_elf64_substrate_vec;
+ extern const bfd_target x86_64_mach_o_vec;
+ extern const bfd_target x86_64_pe_vec;
+ extern const bfd_target x86_64_pe_big_vec;
+@@ -1097,6 +1099,7 @@
+ 	&i386_elf32_vec,
+ 	&i386_elf32_fbsd_vec,
+ 	&i386_elf32_sol2_vec,
++	&i386_elf32_substrate_vec,
+ 	&i386_elf32_vxworks_vec,
+ 	&i386_mach_o_vec,
+ 	&i386_msdos_vec,
+@@ -1346,6 +1349,7 @@
+ 	&x86_64_elf64_cloudabi_vec,
+ 	&x86_64_elf64_fbsd_vec,
+ 	&x86_64_elf64_sol2_vec,
++	&x86_64_elf64_substrate_vec,
+ 	&x86_64_mach_o_vec,
+ 	&x86_64_pe_vec,
+ 	&x86_64_pe_big_vec,
