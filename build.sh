@@ -225,6 +225,13 @@ if [ -x "$_cc" ]; then
     else
         echo "    FAILED: $_cc cannot link a trivial program." >&2
         cat "$_t/err" >&2
+        _sysroot="${STAGE1_PREFIX:-/opt/substrate}/i386-unknown-substrate"
+        echo "    --- $_sysroot/lib ---" >&2
+        ls -l "$_sysroot/lib" >&2 || true
+        echo "    --- libc.so.0 DT_NEEDED ---" >&2
+        readelf -d "$_sysroot/lib/libc.so.0" 2>/dev/null | grep NEEDED >&2 || true
+        echo "    --- libraries ld actually opened ---" >&2
+        "$_cc" -Wl,--trace -o "$_t/t" "$_t/t.c" 2>&1 | head -30 >&2 || true
         echo "    --- link line ---" >&2
         "$_cc" -v -o "$_t/t" "$_t/t.c" 2>&1 | tail -20 >&2 || true
         rm -rf "$_t"
