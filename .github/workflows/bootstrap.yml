@@ -95,11 +95,14 @@ jobs:
         if: failure()
         run: |
           shopt -s nullglob
-          for log in contrib/*/build-stage*/config.log \
-                     contrib/*/build*/*/config.log; do
+          # awk caps its own output: `sed ... | head` takes SIGPIPE when head
+          # closes, and pipefail turns that into a step failure that swallows
+          # every remaining log.  stage2 first -- it is the one that fails.
+          for log in contrib/*/build-stage2/config.log \
+                     contrib/*/build-stage1/config.log; do
             echo "::group::$log"
-            sed -n '/configure:.*checking whether the C compiler works/,$p' \
-                "$log" | head -80
+            awk '/checking whether the C compiler works/ {f=1}
+                 f && n++ < 120' "$log"
             echo "::endgroup::"
           done
 

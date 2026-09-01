@@ -208,6 +208,34 @@ else
 fi
 
 #-----------------------------------------------------------------------
+# Stage 1f3: can the cross compiler link a program at all?
+#
+# Everything from here on is autoconf, and autoconf's answer to a broken
+# toolchain is "C compiler cannot create executables" plus a config.log that
+# lives inside the build tree.  Ask the question directly instead, while the
+# answer is still a compiler diagnostic naming the missing piece.
+#-----------------------------------------------------------------------
+step "Stage 1f3: cross-toolchain smoke test"
+_cc="${STAGE1_PREFIX:-/opt/substrate}/bin/i386-unknown-substrate-gcc"
+if [ -x "$_cc" ]; then
+    _t=$(mktemp -d)
+    printf 'int main(void){return 0;}\n' > "$_t/t.c"
+    if "$_cc" -o "$_t/t" "$_t/t.c" 2>"$_t/err"; then
+        echo "    ok: $_cc links a hello-world"
+    else
+        echo "    FAILED: $_cc cannot link a trivial program." >&2
+        cat "$_t/err" >&2
+        echo "    --- link line ---" >&2
+        "$_cc" -v -o "$_t/t" "$_t/t.c" 2>&1 | tail -20 >&2 || true
+        rm -rf "$_t"
+        exit 1
+    fi
+    rm -rf "$_t"
+else
+    echo "    no cross gcc at $_cc — skipping"
+fi
+
+#-----------------------------------------------------------------------
 # Stage 1g: toolchain stage 2 -- AFTER the native libs, not with stage 1.
 #
 # Stage 2 is a Canadian cross: the binutils and gcc it produces are
