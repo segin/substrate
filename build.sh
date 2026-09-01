@@ -299,15 +299,20 @@ fi
 #-----------------------------------------------------------------------
 # Stage 3: image
 #-----------------------------------------------------------------------
+# --no-boot: sys/boot (the in-tree stage2 bootloader) does not compile --
+# stage2.c trips -Werror=unused-function on four statics -- and without the
+# flag build-rootfs.sh stops there and stages nothing.  The image boots via
+# GRUB, so nothing here needs it.  .github/workflows/ci.yml's image job
+# passes the same flag for the same reason.
 step "Stage 3: dist/ staging"
-./build-rootfs.sh --dist
+./build-rootfs.sh --dist --no-boot
 ./build-rootfs.sh --toolchain
 
 if [ "$SKIP_IMAGE" = 1 ]; then
     note "Skipping image bake (SKIP_IMAGE=1).  dist/ is ready under $HERE/dist/."
 else
     step "Stage 3b: rootfs.img"
-    ./build-rootfs.sh --image
+    ./build-rootfs.sh --image --no-boot
     note "Image at $HERE/rootfs.img"
 fi
 
