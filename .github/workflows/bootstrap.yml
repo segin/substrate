@@ -85,6 +85,24 @@ jobs:
           SKIP_TOOLCHAIN: ${{ steps.tc.outputs.cache-hit == 'true' && '1' || '0' }}
         run: ./build.sh
 
+      # A failed configure says only "C compiler cannot create executables"
+      # and points at a config.log that lives inside the runner and is gone
+      # the moment the job ends.  The actual compiler diagnostic -- the one
+      # naming the missing library or object -- is in the conftest section of
+      # that file, so print it rather than guessing across a 25-minute round
+      # trip.  Everything before the conftest link is boilerplate.
+      - name: configure logs (on failure)
+        if: failure()
+        run: |
+          shopt -s nullglob
+          for log in contrib/*/build-stage*/config.log \
+                     contrib/*/build*/*/config.log; do
+            echo "::group::$log"
+            sed -n '/configure:.*checking whether the C compiler works/,$p' \
+                "$log" | head -80
+            echo "::endgroup::"
+          done
+
       - name: Disk space after
         run: df -h /
 
