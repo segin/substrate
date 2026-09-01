@@ -30,6 +30,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # gettext supplies xgettext, which libXpm's sxpm runs on the BUILD host
+      # to generate its message catalogue -- the port fails with "xgettext:
+      # command not found" without it.  pkg-config is what e2tools and the
+      # X11 ports use to find the staged libraries.
       # texinfo/bison/flex build binutils+gcc; gcc's own
       # contrib/download_prerequisites fetches gmp/mpfr/mpc/isl, so those
       # need no -dev packages.  The rest are what build-rootfs.sh's image
@@ -41,6 +45,7 @@ jobs:
           sudo apt-get install -y \
             build-essential gcc-multilib python3 \
             texinfo bison flex gawk curl wget xz-utils \
+            gettext pkg-config \
             e2fsprogs dosfstools mtools fakeroot \
             grub-common grub-pc-bin util-linux zstd
 
