@@ -57,7 +57,18 @@ for dep in "${XCBPROTO_STAGE}:xcb-proto" "${LIBXAU_STAGE}:libXau" \
 done
 
 # Locate xcb-proto's staged xcbgen Python package + protocol XML.
-XCBPYTHONDIR=$(ls -d "${XCBPROTO_STAGE}"/usr/lib/python*/site-packages 2>/dev/null | head -1)
+#
+# Both spellings of the install directory: Debian and Ubuntu patch Python's
+# sysconfig to use dist-packages where everyone else uses site-packages, and
+# xcb-proto's Makefile takes the directory from the build host's python.  The
+# bare python3/ form (no version component) is Debian's too.  Search for the
+# xcbgen package itself rather than guessing the layout.
+XCBPYTHONDIR=$(
+    for d in "${XCBPROTO_STAGE}"/usr/lib/python*/site-packages \
+             "${XCBPROTO_STAGE}"/usr/lib/python*/dist-packages; do
+        [ -d "$d/xcbgen" ] && { echo "$d"; break; }
+    done
+)
 XCBINCLUDEDIR="${XCBPROTO_STAGE}/usr/share/xcb"
 [ -n "${XCBPYTHONDIR}" ] && [ -d "${XCBPYTHONDIR}/xcbgen" ] || {
     echo "build.sh: xcbgen not found under ${XCBPROTO_STAGE}" >&2
