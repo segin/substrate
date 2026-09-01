@@ -226,11 +226,23 @@ meta-compiler (host wml/wmluiltok) and installs the uil/ headers.
   e2rm / e2ln / e2mv / e2tail for manipulating unmounted ext2/3/4
   images.
 
+## Multiple-precision arithmetic
+
+- **GMP 6.3.0** (`contrib/gmp/`) — arbitrary-precision integers.  Built
+  `--disable-assembly`: GMP selects its hand-written x86 asm path from
+  the host triplet, and the portable C path is correct everywhere.
+- **MPFR 4.2.2** (`contrib/mpfr/`) — correctly-rounded multiple-precision
+  floats, on top of GMP.
+
+  Both are build-order prerequisites of gdb, whose configure hard-fails
+  with "Building GDB requires GMP 4.2+, and MPFR 3.1.0+" without them, so
+  `build.sh`'s DEFAULT_CONTRIB lists them immediately before it.
+
 ## Debugger
 
 - **gdb** (`contrib/gdb/`) — the GNU debugger, running natively on
-  substrate atop the libsys `ptrace` PEEK bridge.  (See also
-  `docs/toolchain.md`.)
+  substrate atop the libsys `ptrace` PEEK bridge.  Requires GMP and MPFR
+  in the cross sysroot (above).  (See also `docs/toolchain.md`.)
 
 ## Build tooling
 
