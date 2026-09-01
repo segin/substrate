@@ -63,15 +63,27 @@ done
 # xcb-proto's Makefile takes the directory from the build host's python.  The
 # bare python3/ form (no version component) is Debian's too.  Search for the
 # xcbgen package itself rather than guessing the layout.
+# The trailing `:` matters: without it the subshell's exit status is that of
+# the last [ -d ] test, and under `set -e` a failing command substitution in a
+# plain assignment kills the script -- before the diagnostic below can print.
 XCBPYTHONDIR=$(
     for d in "${XCBPROTO_STAGE}"/usr/lib/python*/site-packages \
              "${XCBPROTO_STAGE}"/usr/lib/python*/dist-packages; do
         [ -d "$d/xcbgen" ] && { echo "$d"; break; }
     done
+    :
 )
+# Last resort: ask the filesystem rather than enumerate layouts.  Debian also
+# ships a version-less python3/dist-packages, and 64-bit hosts use lib64.
+if [ -z "${XCBPYTHONDIR}" ]; then
+    _found=$(find "${XCBPROTO_STAGE}" -type d -name xcbgen 2>/dev/null | head -1)
+    XCBPYTHONDIR="${_found%/xcbgen}"
+fi
 XCBINCLUDEDIR="${XCBPROTO_STAGE}/usr/share/xcb"
 [ -n "${XCBPYTHONDIR}" ] && [ -d "${XCBPYTHONDIR}/xcbgen" ] || {
     echo "build.sh: xcbgen not found under ${XCBPROTO_STAGE}" >&2
+    echo "  what xcb-proto actually staged:" >&2
+    find "${XCBPROTO_STAGE}" -maxdepth 6 2>/dev/null | sed 's/^/    /' >&2
     exit 1
 }
 
