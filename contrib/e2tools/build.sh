@@ -53,6 +53,19 @@ cd "${BUILD_DIR}"
 # <stdlib.h> the way glibc does.  The header is just a
 # __builtin_alloca macro, so force-including it is harmless.
 export PKG_CONFIG_LIBDIR="${E2FSPROGS_STAGE}/usr/lib/pkgconfig"
+# PKG_CONFIG_LIBDIR alone finds the staged .pc files but does not relocate
+# what they say.  e2fsprogs is configured --prefix=/usr and staged under a
+# DESTDIR, so ext2fs.pc still reads "prefix=/usr" and pkg-config emits
+#
+#   -I/usr/include/ext2fs -I/usr/include/et
+#
+# i.e. the BUILD HOST's headers.  On a machine with e2fsprogs headers
+# installed that silently cross-compiles against the host's ext2fs.h, which
+# is wrong and only looks fine; on one without them the build stops at
+# "ext2fs.h: No such file or directory".  PKG_CONFIG_SYSROOT_DIR is the knob
+# that prefixes those paths with the staging tree, which is what we want in
+# both cases.
+export PKG_CONFIG_SYSROOT_DIR="${E2FSPROGS_STAGE}"
 export CPPFLAGS="-I${E2FSPROGS_STAGE}/usr/include -include alloca.h"
 export LDFLAGS="-L${E2FSPROGS_STAGE}/usr/lib -Wl,--copy-dt-needed-entries"
 
