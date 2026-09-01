@@ -190,21 +190,23 @@ sync_native_libs_to_sysroot
 "${HERE}/scripts/install-link-specs.sh"
 
 #-----------------------------------------------------------------------
-# Stage 1f2: finish libgcc.
+# Stage 1f2: finish the stage-1 target runtime (libgcc + libstdc++).
 #
-# libgcc.a builds against headers alone, but the shared libgcc_s.so.1 links
-# with -lc and crtn.o -- and substrate's libc is compiled BY the stage-1 cross
-# compiler, so on a first build it cannot exist yet.  Stage 0's libgcc pass
-# therefore fails its shared link ("ld: cannot find -lc") and carries on.  Now
-# that 1a-1e have built libc and 1f has mirrored it, finish the job.  Reuses
-# the stage-1 build tree rather than reconfiguring, which would be a whole
-# second gcc build for one library.
+# Neither can be built during stage 0: both link against substrate's libc,
+# and substrate's libc is compiled BY the stage-1 cross compiler.  So stage 0
+# gets a compiler with no runtime, and the failures land far away --
+# "ld: cannot find -lc" for libgcc_s.so.1, and later, when stage 2's
+# Canadian cross builds its own host-side C++ with the target g++,
+# "C++ compiler cannot create executables" out of libcody.  Now that 1a-1e
+# have built libc and 1f has mirrored it, finish the job.  Reuses the stage-1
+# build tree rather than reconfiguring, which would be a whole second gcc
+# build.
 #-----------------------------------------------------------------------
 if [ "$SKIP_TOOLCHAIN" = 1 ]; then
-    step "Stage 1f2: libgcc completion (skipped — SKIP_TOOLCHAIN=1)"
+    step "Stage 1f2: target runtime (skipped — SKIP_TOOLCHAIN=1)"
 else
-    step "Stage 1f2: finish libgcc now that libc is in the sysroot"
-    contrib/gcc/build.sh --libgcc-only
+    step "Stage 1f2: finish libgcc + libstdc++ now that libc is in the sysroot"
+    contrib/gcc/build.sh --target-runtime
 fi
 
 #-----------------------------------------------------------------------

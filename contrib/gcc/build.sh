@@ -30,9 +30,10 @@ LIBGCC_ONLY=0
 for arg in "$@"; do
     case "$arg" in
         --stage=1) STAGE=1 ;;
-        # Rebuild only libgcc, reusing the existing stage-1 build tree.
-        # See the LIBGCC_ONLY block below for why this exists.
-        --libgcc-only) STAGE=1; LIBGCC_ONLY=1 ;;
+        # Finish the stage-1 TARGET runtime (libgcc + libstdc++), reusing
+        # the existing stage-1 build tree.  See the block below for why.
+        --target-runtime) STAGE=1; LIBGCC_ONLY=1 ;;
+        --libgcc-only)    STAGE=1; LIBGCC_ONLY=1 ;;   # old name
         --stage=2) STAGE=2 ;;
         -h|--help)
             sed -n '/^# build\.sh/,/^# Usage:/p; /^# Usage:/,/^$/p' "$0"
@@ -117,15 +118,33 @@ if [ "$STAGE" = 1 ]; then
         }
         cd "$BUILD_DIR"
         LIBGCC_TARGET_CFLAGS="-g -O2 -std=gnu23"
+        _mk() { if [ -w "$(dirname "$STAGE1_PREFIX")" ]; then make "$@"; else sudo make "$@"; fi; }
+
         echo "==> Rebuilding libgcc now that libc is in the sysroot"
         make -j "$PARALLEL" CFLAGS_FOR_TARGET="$LIBGCC_TARGET_CFLAGS" all-target-libgcc
         echo "==> Installing libgcc to $STAGE1_PREFIX"
-        if [ -w "$(dirname "$STAGE1_PREFIX")" ]; then
-            make CFLAGS_FOR_TARGET="$LIBGCC_TARGET_CFLAGS" install-target-libgcc
-        else
-            sudo make CFLAGS_FOR_TARGET="$LIBGCC_TARGET_CFLAGS" install-target-libgcc
+        _mk CFLAGS_FOR_TARGET="$LIBGCC_TARGET_CFLAGS" install-target-libgcc
+
+        # And libstdc++ for the target, for the same reason one layer up.
+        # Stage 2 is a Canadian cross whose HOST is substrate, so its own
+        # host-side C++ pieces -- libcody first -- are built with
+        # i386-unknown-substrate-g++ and linked against the TARGET
+        # libstdc++.  Without it stage 2 stops at
+        #
+        #   configure: error: in `.../build-stage2/libcody':
+        #   configure: error: C++ compiler cannot create executables
+        #
+        # which is the same "no runtime yet" story as libgcc: it cannot be
+        # built during stage 1 proper because it needs substrate's libc,
+        # and substrate's libc is built by stage 1.
+        if [ -d "$SRC_TREE/libstdc++-v3" ]; then
+            echo "==> Building libstdc++ for the target"
+            make -j "$PARALLEL" all-target-libstdc++-v3
+            echo "==> Installing libstdc++ to $STAGE1_PREFIX"
+            _mk install-target-libstdc++-v3
         fi
-        echo "==> libgcc complete."
+
+        echo "==> Target runtime complete."
         exit 0
     fi
     rm -rf "$BUILD_DIR"
