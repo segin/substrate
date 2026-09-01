@@ -117,6 +117,27 @@ if [ "$STAGE" = 1 ]; then
             exit 1
         }
         cd "$BUILD_DIR"
+
+        # Hand the in-tree xgcc the same specs as the installed driver.
+        # xgcc reads `specs` from its -B directory -- the build tree -- so
+        # it never sees the file install-link-specs.sh writes into the
+        # INSTALLED gcc dir, and therefore links target programs without
+        # --copy-dt-needed-entries.  libc.so.0 is deliberately linked
+        # --unresolved-symbols=ignore-all and leaves feraiseexcept, syscall
+        # and setsid to its DT_NEEDED chain, so without that flag every
+        # in-tree target link fails.  For libstdc++ the failure is silent
+        # and misleading: its configure runs a link test, records
+        # gcc_no_link=yes, and dies several checks later with
+        #
+        #   configure: error: Link tests are not allowed after
+        #                     GCC_NO_EXECUTABLES.
+        _specs=$(ls "$STAGE1_PREFIX"/lib/gcc/i386-unknown-substrate/*/specs \
+                 2>/dev/null | head -1)
+        if [ -n "$_specs" ] && [ -d "$BUILD_DIR/gcc" ]; then
+            echo "==> Copying $_specs into the build tree"
+            cp "$_specs" "$BUILD_DIR/gcc/specs"
+        fi
+
         LIBGCC_TARGET_CFLAGS="-g -O2 -std=gnu23"
         _mk() { if [ -w "$(dirname "$STAGE1_PREFIX")" ]; then make "$@"; else sudo make "$@"; fi; }
 
