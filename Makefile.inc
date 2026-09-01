@@ -102,7 +102,23 @@ endif
     # produces a versioned ET_DYN with a SONAME.  Library Makefiles
     # use these to produce libX.so.<N> alongside their libX.a.
     SHLIB_CFLAGS  := $(filter-out -fno-pie,$(USER_CFLAGS)) -fPIC
+    # --no-as-needed: every library Makefile here writes its -l: flags
+    # ahead of the objects ("$(CC) $(SHLIB_LDFLAGS) -l:libc.so.0 -o $@
+    # $(PIC_OBJS)"), so on a distribution whose ld defaults to
+    # --as-needed -- Debian and Ubuntu do; Arch does not -- ld sees the
+    # libraries before any reference to them and records no DT_NEEDED at
+    # all.  The result is a libc.so.0 with an empty needed list, and the
+    # first thing the cross compiler tries to link dies on
+    #
+    #   libc.so.0: undefined reference to `feraiseexcept'
+    #   libc.so.0: undefined reference to `syscall'
+    #
+    # because there is no longer a DT_NEEDED chain for
+    # --copy-dt-needed-entries to follow.  These dependencies are
+    # deliberate -- ld.so resolves them at run time -- so --as-needed is
+    # simply the wrong policy for substrate's shared libraries.
     SHLIB_LDFLAGS := -m32 -nostdlib -nostartfiles -shared \
+                     -Wl,--no-as-needed \
                      -Wl,-Bsymbolic-functions \
                      -Wl,-z,max-page-size=0x1000 \
                      -Wl,-z,now \
