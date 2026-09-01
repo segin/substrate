@@ -92,6 +92,20 @@ sync_native_libs_to_sysroot() {
             ln -sfn "lib$name.so.0" "$SYSROOT/lib/lib$name.so"
         fi
     done
+    # The crt startup/shutdown objects.  GCC's link spec names crti.o, crt0.o
+    # and crtn.o unqualified and leaves ld to find them on the library search
+    # path, so an incomplete set here fails EVERY link -- including libgcc's
+    # own libgcc_s.so.1, with the memorably unhelpful
+    #
+    #   ld: cannot find crtn.o: No such file or directory
+    #
+    # They are not libX.a/libX.so.0 and so the loop above never saw them.
+    for crt in "${SUBSTRATE_TOP}"/lib/c/crt*.o \
+               "${SUBSTRATE_TOP}"/lib/c/arch/*/crt*.o \
+               "${SUBSTRATE_TOP}"/dist/usr/lib/crt*.o; do
+        [ -f "$crt" ] || continue
+        cp "$crt" "$SYSROOT/lib/" 2>/dev/null || true
+    done
     if [ -d "${SUBSTRATE_TOP}/include" ]; then
         # -L: substrate's include/ has symlinked headers (pthread.h ->
         # ../lib/pthread/pthread.h); materialise them as real files.
