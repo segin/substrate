@@ -67,7 +67,18 @@ jobs:
           path: |
             /opt/substrate
             dist-overlay/dist-toolchain
-          key: substrate-toolchain-${{ runner.os }}-${{ hashFiles('contrib/binutils/**', 'contrib/gcc/**', 'contrib/build-toolchain.sh') }}
+          # Hash the tracked INPUTS only.  'contrib/gcc/**' also matches
+          # contrib/gcc/build/, where fetch.sh unpacks the gcc source and
+          # build.sh builds it -- several hundred thousand files by the time
+          # the job ends.  The key is re-evaluated when the cache is saved in
+          # the post step, and hashFiles gives up at 120 seconds:
+          #
+          #   The template is not valid ... hashFiles('contrib/binutils/**,
+          #   contrib/gcc/**, contrib/build-toolchain.sh') couldn't finish
+          #   within 120 seconds.
+          #
+          # which fails the job after a completely successful build.
+          key: substrate-toolchain-${{ runner.os }}-${{ hashFiles('contrib/binutils/patches/**', 'contrib/binutils/series', 'contrib/binutils/*.sh', 'contrib/gcc/patches/**', 'contrib/gcc/series', 'contrib/gcc/*.sh', 'contrib/build-toolchain.sh') }}
 
       - name: Disk space before
         run: df -h /
