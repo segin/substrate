@@ -84,7 +84,12 @@ jobs:
           #   within 120 seconds.
           #
           # which fails the job after a completely successful build.
-          key: substrate-toolchain-${{ runner.os }}-${{ hashFiles('contrib/binutils/patches/**', 'contrib/binutils/series', 'contrib/binutils/*.sh', 'contrib/gcc/patches/**', 'contrib/gcc/series', 'contrib/gcc/*.sh', 'contrib/build-toolchain.sh') }}
+          # v2: adding a path to `path:` does not change the key, so a
+          # restore would keep serving the old entry -- which was saved
+          # before /tmp/gcc-stage2-staging was listed and therefore does not
+          # contain it.  Bump once to force a rebuild that saves the complete
+          # set; every run after this hits it.
+          key: substrate-toolchain-v2-${{ runner.os }}-${{ hashFiles('contrib/binutils/patches/**', 'contrib/binutils/series', 'contrib/binutils/*.sh', 'contrib/gcc/patches/**', 'contrib/gcc/series', 'contrib/gcc/*.sh', 'contrib/build-toolchain.sh') }}
 
       - name: Disk space before
         run: df -h /
