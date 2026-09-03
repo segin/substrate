@@ -135,7 +135,8 @@ jobs:
           test "$bytes" -eq $((4096 * 1024 * 1024))
           ROOT_OFF=$((104448 * 512))
           e2fsck -fn "rootfs.img?offset=$ROOT_OFF"
-          for f in /usr/bin/gcc /usr/bin/as /usr/bin/ld /usr/bin/zsh /usr/bin/xterm; do
+          for f in /usr/bin/gcc /usr/bin/g++ /usr/bin/gdb \
+                   /usr/bin/as /usr/bin/ld /usr/bin/zsh /usr/bin/xterm; do
             printf '%-16s ' "$f"
             debugfs "rootfs.img?offset=$ROOT_OFF" -R "stat $f" 2>/dev/null \
               | grep -oE "Size: [0-9]+" | head -1 || echo "MISSING"
