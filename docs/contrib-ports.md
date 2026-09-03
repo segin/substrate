@@ -297,4 +297,11 @@ meta-compiler (host wml/wmluiltok) and installs the uil/ headers.
   (`contrib/faad2/`), `taglib` (`contrib/taglib/`) and `spandsp`
   (`contrib/spandsp/`).  Together these bring audio/multimedia playback
   to the userland.
+- **fdk-aac 2.0.3** (`contrib/fdk-aac/`) — the Fraunhofer FDK AAC codec
+  library, encoder and decoder.  Ported to replace `faad2` (decode-only)
+  as PsyMP3's AAC path in future PsyMP3 versions; the two coexist, so
+  nothing linking `-lfaad` today is affected.  CMake-built like faad2.
+  Note the licence is the Fraunhofer Android one, not a standard
+  free-software licence, and it grants no patent rights — see
+  `contrib/fdk-aac/README.SUBSTRATE.md`.
 - **mpg123** (`contrib/mpg123/`).

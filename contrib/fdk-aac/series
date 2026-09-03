@@ -1,0 +1,2 @@
+# Substrate patch series for fdk-aac 2.0.3.
+# Empty: the CMake build needs no source changes for substrate.
