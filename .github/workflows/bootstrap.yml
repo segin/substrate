@@ -57,10 +57,14 @@ jobs:
           sudo install -d -o "$(id -un)" -g "$(id -gn)" /opt/substrate
 
       # Both halves of the toolchain, keyed on its own sources -- the patch
-      # series, the build scripts, the pinned versions in fetch.sh.  The
-      # stage-2 staging tree has to ride along: build-rootfs.sh --toolchain
-      # overlays dist-overlay/dist-toolchain, so restoring /opt/substrate
-      # alone and skipping the toolchain would leave nothing to overlay.
+      # series, the build scripts, the pinned versions in fetch.sh.  BOTH
+      # stage-2 staging trees have to ride along: build-rootfs.sh --toolchain
+      # overlays dist-overlay/dist-toolchain (binutils) AND
+      # /tmp/gcc-stage2-staging (gcc, which stages elsewhere because binutils
+      # does `rm -rf` on dist-toolchain and would wipe it).  On a cache hit
+      # build.sh skips stage 1g entirely, so whatever is not restored here is
+      # simply not in the image -- caching only dist-toolchain produced a
+      # green run whose image had as and ld but no gcc and no g++.
       - name: Cache the toolchain
         id: tc
         uses: actions/cache@v6
@@ -68,6 +72,7 @@ jobs:
           path: |
             /opt/substrate
             dist-overlay/dist-toolchain
+            /tmp/gcc-stage2-staging
           # Hash the tracked INPUTS only.  'contrib/gcc/**' also matches
           # contrib/gcc/build/, where fetch.sh unpacks the gcc source and
           # build.sh builds it -- several hundred thousand files by the time
@@ -139,14 +144,28 @@ jobs:
           test "$bytes" -eq $((4096 * 1024 * 1024))
           ROOT_OFF=$((104448 * 512))
           e2fsck -fn "rootfs.img?offset=$ROOT_OFF"
+          # `|| echo MISSING` alone swallows the failure and the step passes,
+          # which is how a run whose image had no gcc at all went green.
+          # Collect the misses and fail on them.
+          missing=""
           for f in /usr/bin/gcc /usr/bin/g++ /usr/bin/gdb \
                    /usr/bin/as /usr/bin/ld /usr/bin/zsh /usr/bin/xterm \
                    /usr/bin/Xfbdev /usr/bin/xkbcomp /usr/lib/libXm.so.4 \
                    /usr/dt/bin/dtwm /usr/dt/bin/dtsession /usr/dt/bin/dtterm; do
             printf '%-24s ' "$f"
-            debugfs "rootfs.img?offset=$ROOT_OFF" -R "stat $f" 2>/dev/null \
-              | grep -oE "Size: [0-9]+" | head -1 || echo "MISSING"
+            sz=$(debugfs "rootfs.img?offset=$ROOT_OFF" -R "stat $f" 2>/dev/null \
+                 | grep -oE "Size: [0-9]+" | head -1 || true)
+            if [ -n "$sz" ]; then
+              echo "$sz"
+            else
+              echo "MISSING"
+              missing="$missing $f"
+            fi
           done
+          if [ -n "$missing" ]; then
+            echo "::error::not in the image:$missing"
+            exit 1
+          fi
 
       - name: Compress the image
         run: |
