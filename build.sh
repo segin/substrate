@@ -103,7 +103,27 @@ export STAGE1_PREFIX JOBS SUBSTRATE_TOP="$HERE"
 #                    (build.sh points -I/-L at dist-zlib + dist-openssl).
 #                    Cross-built via nginx's --crossbuild mechanism.
 #
-DEFAULT_CONTRIB="bzip2 libiconv zlib openssl ncurses gzip tzdata make sed expr libarchive mpg123 curl nginx inetutils zsh e2fsprogs e2tools gmp mpfr gdb xorgproto xcb-proto libXau xtrans libxcb libX11 libXext libICE libSM libXt libXmu libXpm libXaw libXinerama libjpeg lmdb mksh tcl libtirpc xterm xauth luit xrdb"
+# The X SERVER group (libXdmcp .. xorg-server) builds Xfbdev, the kdrive
+# framebuffer server.  contrib/xorg-server/build.sh names its ten staged
+# prerequisites explicitly; six of them -- libXdmcp, pixman, libxshmfence,
+# libfontenc, libXfont, libxkbfile -- were not in this list before, and each
+# needs only xorgproto / xtrans / libX11, all built above.  libXfont is
+# configured --disable-freetype, so it does NOT drag in freetype + libpng.
+#
+# xkbcomp + xkeyboard-config and the encodings / font-util / font-* ports are
+# runtime data rather than build dependencies of the server, but a server with
+# no keymap compiler and no fonts is not a usable one: without ISO8859-1 fonts
+# every Xmb client renders tofu.  The font ports and xkeyboard-config are pure
+# staging -- they unpack and generate a fonts.dir, with no compile step and no
+# host tools -- so they are cheap to carry.
+#
+# The CDE group is libXScrnSaver + motif + cde.  contrib/cde/build.sh merges
+# twenty dist-<pkg> trees into one sysroot and refuses to start if any are
+# missing; eighteen were already here, and libXScrnSaver and motif are the
+# two that were not.  Both need only the X toolkit chain built above.  cde
+# also wants mksh (the target's /bin/ksh), which is already in the list.
+#
+DEFAULT_CONTRIB="bzip2 libiconv zlib openssl ncurses gzip tzdata make sed expr libarchive mpg123 curl nginx inetutils zsh e2fsprogs e2tools gmp mpfr gdb xorgproto xcb-proto libXau xtrans libxcb libX11 libXext libICE libSM libXt libXmu libXpm libXaw libXinerama libjpeg lmdb mksh tcl libtirpc xterm xauth luit xrdb libXdmcp pixman libxshmfence libfontenc libXfont libxkbfile xkbcomp xkeyboard-config encodings font-util font-misc-misc font-adobe-75dpi font-adobe-100dpi font-bh-lucida xorg-server libXScrnSaver motif cde"
 : "${ONLY:=${DEFAULT_CONTRIB}}"
 
 #

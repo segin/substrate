@@ -25,7 +25,8 @@ jobs:
     name: toolchain + contrib + image
     runs-on: ubuntu-latest
     # gcc is --disable-bootstrap so stage 1 is a single pass, but this still
-    # builds two toolchains and 42 ports.  Cap under the 6h job limit.
+    # builds two toolchains and 62 ports -- including Motif and CDE, which
+    # are large.  Cap under the 6h job limit.
     timeout-minutes: 340
     steps:
       - uses: actions/checkout@v7
@@ -85,14 +86,16 @@ jobs:
 
       # The whole thing, in the order build.sh defines: stage 1 + stage 2
       # toolchain, kernel, libs, ld.so, base userland, then every port in
-      # DEFAULT_CONTRIB -- a curated 42-port order, with the sysroot
+      # DEFAULT_CONTRIB -- a curated 62-port order, with the sysroot
       # re-synced after each one so the next port's configure probe finds
       # what the last one built -- then dist/, the toolchain overlay and
-      # the image.
+      # the image.  That now includes the Xfbdev framebuffer server and the
+      # CDE desktop, so the image is checked to carry a working X, not just
+      # the X client libraries.
       #
-      # Not every contrib/ port is in that list: the other ~95 (TDE, CDE,
-      # GTK, xorg-server, ...) have no maintained order, and the ports
-      # cannot supply one -- the `for d in ...` lists in build.sh are
+      # Not every contrib/ port is in that list: the rest (TDE, GTK, the
+      # SDL/PsyMP3 stack, ...) have no maintained order, and the ports
+      # cannot supply one -- the `for d in ...` lists in their build.sh are
       # sysroot merge lists rather than dependency declarations, so reading
       # them as edges puts the X11 libraries in a cycle.  DEFAULT_CONTRIB
       # is the set that is known to build in sequence; ONLY= overrides it.
@@ -126,7 +129,8 @@ jobs:
         run: df -h /
 
       # The point of this job is not that a build ran, but that the image
-      # carries a compiler it built itself.
+      # carries a compiler it built itself -- and now a working X too:
+      # Xfbdev plus the keymap compiler and Motif/CDE it needs to be usable.
       - name: Verify image
         run: |
           set -euo pipefail
@@ -136,8 +140,10 @@ jobs:
           ROOT_OFF=$((104448 * 512))
           e2fsck -fn "rootfs.img?offset=$ROOT_OFF"
           for f in /usr/bin/gcc /usr/bin/g++ /usr/bin/gdb \
-                   /usr/bin/as /usr/bin/ld /usr/bin/zsh /usr/bin/xterm; do
-            printf '%-16s ' "$f"
+                   /usr/bin/as /usr/bin/ld /usr/bin/zsh /usr/bin/xterm \
+                   /usr/bin/Xfbdev /usr/bin/xkbcomp /usr/lib/libXm.so.4 \
+                   /usr/dt/bin/dtwm /usr/dt/bin/dtsession /usr/dt/bin/dtterm; do
+            printf '%-24s ' "$f"
             debugfs "rootfs.img?offset=$ROOT_OFF" -R "stat $f" 2>/dev/null \
               | grep -oE "Size: [0-9]+" | head -1 || echo "MISSING"
           done
