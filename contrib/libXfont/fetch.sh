@@ -28,18 +28,34 @@ fi
 echo "==> Verifying ${TARBALL}"
 echo "${SHA256}  ${TARBALL}" | sha256sum -c -
 
-if [ ! -d "${TREE_DIR}" ]; then
-    echo "==> Extracting"
-    tar xf "${TARBALL}"
-fi
+# Always re-extract.  Keeping an existing tree made this port depend on
+# whatever a previous run -- or a hand edit -- had left behind, and the
+# patch series below was never applied by this script at all, so it lived
+# only in trees old enough to predate it.  A clean checkout therefore built
+# a libXfont without the builtin font aliases and nobody noticed.
+echo "==> Extracting"
+rm -rf "${TREE_DIR}"
+tar xf "${TARBALL}"
 
-# Add substrate to config.sub OS list (handle both old single-line and
-# newer one-OS-per-line layouts).  No patch file — line offsets vary
-# too much between config.sub versions to keep one patch portable.
+echo "==> Applying patch series"
+cd "${TREE_DIR}"
+while IFS= read -r p || [ -n "${p}" ]; do
+    case "${p}" in ''|\#*) continue;; esac
+    echo "    - ${p}"
+    patch -p1 -F0 < "${HERE}/patches/${p}"
+done < "${HERE}/series"
+cd "${BUILD_DIR}"
+
+# Add substrate to config.sub OS list.  Three layouts in the wild: the
+# 2015-era dashed list ("| -sortix* \"), which is what libXfont 1.5.4
+# ships and which neither of the other two expressions matched; the
+# undashed inline list; and the one-OS-per-line form.  No patch file --
+# line offsets vary too much between config.sub versions.
 cd "${TREE_DIR}"
 if ! grep -q 'substrate\*' config.sub 2>/dev/null; then
     echo "==> Adding substrate* to config.sub OS allowlist"
     sed -i \
+        -e 's/| -sortix\*/| -sortix* | -substrate*/' \
         -e 's/aos\* | aros\* | cloudabi\* | sortix\* | twizzler\*/aos* | aros* | cloudabi* | sortix* | substrate* | twizzler*/g' \
         -e '/^	| sortix\* \\$/a\	| substrate* \\' \
         config.sub
