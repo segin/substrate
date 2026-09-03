@@ -28,7 +28,7 @@ jobs:
     # builds two toolchains and 42 ports.  Cap under the 6h job limit.
     timeout-minutes: 340
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # gettext supplies xgettext, which libXpm's sxpm runs on the BUILD host
       # to generate its message catalogue -- the port fails with "xgettext:
@@ -62,7 +62,7 @@ jobs:
       # alone and skipping the toolchain would leave nothing to overlay.
       - name: Cache the toolchain
         id: tc
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             /opt/substrate
@@ -146,7 +146,7 @@ jobs:
           zstd -T0 -3 --rm -f rootfs.img
           ls -lh rootfs.img.zst
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: success()
         with:
           name: rootfs-image-bootstrapped
