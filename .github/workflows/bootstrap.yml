@@ -65,9 +65,9 @@ jobs:
       # build.sh skips stage 1g entirely, so whatever is not restored here is
       # simply not in the image -- caching only dist-toolchain produced a
       # green run whose image had as and ld but no gcc and no g++.
-      - name: Cache the toolchain
+      - name: Restore the toolchain cache
         id: tc
-        uses: actions/cache@v6
+        uses: actions/cache/restore@v6
         with:
           path: |
             /opt/substrate
@@ -134,6 +134,44 @@ jobs:
                  f && n++ < 120' "$log"
             echo "::endgroup::"
           done
+
+      # actions/cache saves only at the end of a SUCCESSFUL job, so while the
+      # bootstrap was still failing in the ports nothing was ever written:
+      # every run reported "Cache not found" and spent ~40 minutes rebuilding
+      # both toolchain stages.  A restore/save split is upstream's replacement
+      # for save-always, which is deprecated and documented as not working.
+      #
+      # But saving from a FAILING run is only safe if the toolchain is whole.
+      # build.sh sets SKIP_TOOLCHAIN from the cache hit, so a half-built one
+      # would be restored next run and then never rebuilt -- every later run
+      # quietly building against a broken compiler.  So prove it first, the
+      # same way stage 1f3 does: link a program with it.
+      - name: Is the toolchain complete?
+        id: tcok
+        if: always()
+        run: |
+          cc=/opt/substrate/bin/i386-unknown-substrate-gcc
+          ok=false
+          if [ -x "$cc" ] && [ -d /tmp/gcc-stage2-staging ] \
+             && [ -d dist-overlay/dist-toolchain ]; then
+            t=$(mktemp -d)
+            printf 'int main(void){return 0;}\n' > "$t/t.c"
+            if "$cc" -o "$t/t" "$t/t.c" 2>/dev/null; then ok=true; fi
+            rm -rf "$t"
+          fi
+          echo "ok=$ok" >> "$GITHUB_OUTPUT"
+          echo "toolchain usable: $ok"
+
+      - name: Save the toolchain cache
+        if: always() && steps.tc.outputs.cache-hit != 'true' && steps.tcok.outputs.ok == 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            /opt/substrate
+            dist-overlay/dist-toolchain
+            /tmp/gcc-stage2-staging
+          # Must match the restore key above verbatim.
+          key: substrate-toolchain-v2-${{ runner.os }}-${{ hashFiles('contrib/binutils/patches/**', 'contrib/binutils/series', 'contrib/binutils/*.sh', 'contrib/gcc/patches/**', 'contrib/gcc/series', 'contrib/gcc/*.sh', 'contrib/build-toolchain.sh') }}
 
       - name: Disk space after
         run: df -h /
