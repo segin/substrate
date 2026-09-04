@@ -36,25 +36,18 @@ rm -rf "${BUILD_DIR}"
 mkdir -p "${BUILD_DIR}"
 cd "${BUILD_DIR}"
 
-# The three trees this actually uses are not enough for pkg-config: x11.pc
-# carries "Requires.private: xcb" and xcb.pc "Requires.private: xau
-# pthread-stubs", and the chain has to resolve before pkg-config will answer
-# for x11.  PKG_CONFIG_LIBDIR rather than PKG_CONFIG_PATH so the build host's
-# /usr/lib/pkgconfig cannot supply the missing links -- which is what hid
-# this on a developer machine with X packages installed.
-PKGP=""; CPP=""; LDF=""
-for d in xorgproto xcb-proto libXau libXdmcp xtrans libxcb libX11 libxkbfile; do
-    st="${SUBSTRATE_TOP}/dist-overlay/dist-${d}"
-    [ -d "${st}/usr" ] || continue
-    [ -d "${st}/usr/lib/pkgconfig" ] && PKGP="${PKGP}${PKGP:+:}${st}/usr/lib/pkgconfig"
-    [ -d "${st}/usr/include" ] && CPP="${CPP} -I${st}/usr/include"
-    [ -d "${st}/usr/lib" ] && LDF="${LDF} -L${st}/usr/lib -Wl,-rpath-link,${st}/usr/lib"
-done
-PKGP="${PKGP}:${SUBSTRATE_TOP}/contrib/libxcb/pkgconfig"   # pthread-stubs.pc
-
-export PKG_CONFIG_LIBDIR="${PKGP}"
-export CPPFLAGS="${CPP}"
-export LDFLAGS="${LDF} -fno-pie -Wl,--copy-dt-needed-entries"
+# Resolve dependencies from the cross sysroot, where every port before this
+# one has been installed (build.sh syncs after each).  libX11 is built on
+# XCB, so x11.pc requires xcb.pc, which requires xau.pc and pthread-stubs.pc;
+# the sysroot has the whole set, headers included.
+#
+# LIBDIR rather than PATH: PATH only ADDS to pkg-config's defaults, which do
+# not include the sysroot, so a PATH listing a couple of dist trees resolved
+# the rest out of the build host's /usr/lib/pkgconfig -- feeding host flags
+# into a cross build wherever the host happened to have X installed, and
+# failing outright where it did not.
+export PKG_CONFIG_LIBDIR="${STAGE1_PREFIX}/i386-unknown-substrate/lib/pkgconfig"
+export LDFLAGS="-fno-pie -Wl,--copy-dt-needed-entries"
 
 echo "==> configure"
 "${TREE_DIR}/configure" \

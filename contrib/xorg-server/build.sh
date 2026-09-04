@@ -16,18 +16,6 @@ if [ -z "${SUBSTRATE_TOP:-}" ]; then
     SUBSTRATE_TOP="${p}"
 fi
 : "${STAGE1_PREFIX:=/opt/substrate}"
-: "${XORGPROTO_STAGE:=${SUBSTRATE_TOP}/dist-overlay/dist-xorgproto}"
-: "${XTRANS_STAGE:=${SUBSTRATE_TOP}/dist-overlay/dist-xtrans}"
-: "${LIBX11_STAGE:=${SUBSTRATE_TOP}/dist-overlay/dist-libX11}"
-: "${LIBXAU_STAGE:=${SUBSTRATE_TOP}/dist-overlay/dist-libXau}"
-: "${LIBXKBFILE_STAGE:=${SUBSTRATE_TOP}/dist-overlay/dist-libxkbfile}"
-: "${XCBPROTO_STAGE:=${SUBSTRATE_TOP}/dist-overlay/dist-xcb-proto}"
-: "${LIBXCB_STAGE:=${SUBSTRATE_TOP}/dist-overlay/dist-libxcb}"
-: "${LIBFONTENC_STAGE:=${SUBSTRATE_TOP}/dist-overlay/dist-libfontenc}"
-: "${LIBXFONT_STAGE:=${SUBSTRATE_TOP}/dist-overlay/dist-libXfont}"
-: "${LIBXDMCP_STAGE:=${SUBSTRATE_TOP}/dist-overlay/dist-libXdmcp}"
-: "${LIBXSHMFENCE_STAGE:=${SUBSTRATE_TOP}/dist-overlay/dist-libxshmfence}"
-: "${PIXMAN_STAGE:=${SUBSTRATE_TOP}/dist-overlay/dist-pixman}"
 : "${DESTDIR:=${SUBSTRATE_TOP}/dist-overlay/dist-xorg-server}"
 : "${JOBS:=$(nproc 2>/dev/null || echo 4)}"
 
@@ -40,32 +28,21 @@ rm -rf "${BUILD_DIR}"
 mkdir -p "${BUILD_DIR}"
 cd "${BUILD_DIR}"
 
-PKG_CONFIG_PATH=""
-for d in "${XORGPROTO_STAGE}" "${XTRANS_STAGE}" "${XCBPROTO_STAGE}" \
-         "${LIBXCB_STAGE}" "${LIBX11_STAGE}" "${LIBXAU_STAGE}" \
-         "${LIBXKBFILE_STAGE}" "${LIBFONTENC_STAGE}" "${LIBXFONT_STAGE}" \
-         "${LIBXDMCP_STAGE}" "${LIBXSHMFENCE_STAGE}" "${PIXMAN_STAGE}"; do
-    [ -d "${d}/usr/lib/pkgconfig" ] && \
-        PKG_CONFIG_PATH="${d}/usr/lib/pkgconfig${PKG_CONFIG_PATH:+:}${PKG_CONFIG_PATH}"
-done
-# pthread-stubs.pc has no port; contrib/libxcb ships a hand-written one.
-PKG_CONFIG_PATH="${PKG_CONFIG_PATH}:${SUBSTRATE_TOP}/contrib/libxcb/pkgconfig"
-# LIBDIR, not PATH: PATH adds to the default dirs, so on a build host with X
-# development packages installed the xcb chain that x11.pc requires resolved
-# out of /usr/lib/pkgconfig instead of failing.
-export PKG_CONFIG_LIBDIR="${PKG_CONFIG_PATH}"
+# Resolve dependencies from the cross sysroot, where every port before this
+# one has been installed (build.sh syncs after each).  libX11 is built on
+# XCB, so x11.pc requires xcb.pc, which requires xau.pc and pthread-stubs.pc;
+# the sysroot carries the whole set plus the headers, so no -I/-L
+# enumeration of dist trees is needed.
+#
+# LIBDIR rather than PATH: PATH only ADDS to pkg-config's defaults, which do
+# not include the sysroot, so a PATH listing a few dist trees resolved the
+# rest out of the build host's /usr/lib/pkgconfig -- feeding host flags into
+# a cross build wherever the host had X installed, and failing outright
+# where it did not.
+export PKG_CONFIG_LIBDIR="${STAGE1_PREFIX}/i386-unknown-substrate/lib/pkgconfig"
 
-CPPFLAGS=""
-LDFLAGS=""
-for d in "${XORGPROTO_STAGE}" "${XTRANS_STAGE}" "${XCBPROTO_STAGE}" \
-         "${LIBXCB_STAGE}" "${LIBX11_STAGE}" "${LIBXAU_STAGE}" \
-         "${LIBXKBFILE_STAGE}" "${LIBFONTENC_STAGE}" "${LIBXFONT_STAGE}" \
-         "${LIBXDMCP_STAGE}" "${LIBXSHMFENCE_STAGE}" "${PIXMAN_STAGE}"; do
-    [ -d "${d}/usr/include" ] && CPPFLAGS="-I${d}/usr/include ${CPPFLAGS}"
-    [ -d "${d}/usr/lib" ]     && LDFLAGS="-L${d}/usr/lib ${LDFLAGS}"
-done
-export CPPFLAGS
-export LDFLAGS="${LDFLAGS}-lfontenc -fno-pie"
+# -lfontenc: libXfont references it but records no DT_NEEDED of its own.
+export LDFLAGS="-lfontenc -fno-pie"
 
 echo "==> configure"
 "${TREE_DIR}/configure" \

@@ -35,37 +35,18 @@ rm -rf "${BUILD_DIR}"
 mkdir -p "${BUILD_DIR}"
 cd "${BUILD_DIR}"
 
-# Assemble dependency flags from every staged X dist tree -- the same
-# pattern libXt/libXext/libXaw use.  Listing the full set is harmless: a
-# library does not reference the dirs it has no use for.
+# Resolve dependencies from the cross sysroot, where every port before this
+# one has been installed (build.sh syncs after each).  libX11 is built on
+# XCB, so x11.pc requires xcb.pc, which requires xau.pc and pthread-stubs.pc;
+# the sysroot has the whole set, headers included.
 #
-# xorgproto + libX11 alone is not enough, even though those are the only
-# two this library actually uses.  x11.pc carries "Requires.private: xcb",
-# xcb.pc carries "Requires.private: xau pthread-stubs", and pkg-config
-# resolves that chain before it will answer for x11 at all:
-#
-#   configure: error: Package requirements (x11 kbproto) were not met:
-#   Package 'xcb', required by 'x11', not found
-#
-# PKG_CONFIG_LIBDIR rather than PKG_CONFIG_PATH, because PATH *adds to* the
-# default search dirs: on a build host with X development packages
-# installed the chain silently resolved through /usr/lib/pkgconfig, which
-# both hid this bug and fed host flags into a cross build.
-PKGP=""; CPP=""; LDF=""
-for d in xorgproto xcb-proto libXau libXdmcp xtrans libxcb libX11; do
-    st="${SUBSTRATE_TOP}/dist-overlay/dist-${d}"
-    [ -d "${st}/usr" ] || continue
-    [ -d "${st}/usr/lib/pkgconfig" ] && PKGP="${PKGP}${PKGP:+:}${st}/usr/lib/pkgconfig"
-    [ -d "${st}/usr/include" ] && CPP="${CPP} -I${st}/usr/include"
-    [ -d "${st}/usr/lib" ] && LDF="${LDF} -L${st}/usr/lib -Wl,-rpath-link,${st}/usr/lib"
-done
-# pthread-stubs.pc has no port of its own -- substrate's libpthread provides
-# what it stands for -- so contrib/libxcb ships a hand-written one.
-PKGP="${PKGP}:${SUBSTRATE_TOP}/contrib/libxcb/pkgconfig"
-
-export PKG_CONFIG_LIBDIR="${PKGP}"
-export CPPFLAGS="${CPP}"
-export LDFLAGS="${LDF} -fno-pie -Wl,--copy-dt-needed-entries"
+# LIBDIR rather than PATH: PATH only ADDS to pkg-config's defaults, which do
+# not include the sysroot, so a PATH listing a couple of dist trees resolved
+# the rest out of the build host's /usr/lib/pkgconfig -- feeding host flags
+# into a cross build wherever the host happened to have X installed, and
+# failing outright where it did not.
+export PKG_CONFIG_LIBDIR="${STAGE1_PREFIX}/i386-unknown-substrate/lib/pkgconfig"
+export LDFLAGS="-fno-pie -Wl,--copy-dt-needed-entries"
 
 echo "==> configure"
 "${TREE_DIR}/configure" \
