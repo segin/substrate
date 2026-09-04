@@ -13,6 +13,10 @@
 #ifndef _LINUX_VT_H
 #define _LINUX_VT_H
 
+/* See the matching note in <sys/vtio.h>: whichever of the two is included
+ * first defines struct vt_mode / vt_stat, and the other stands down. */
+#ifndef _SYS_VTIO_H
+
 #define MIN_NR_CONSOLES   1
 #define MAX_NR_CONSOLES   63
 #define MAX_NR_USER_CONSOLES 63
@@ -57,5 +61,7 @@ struct vt_sizes {
     unsigned short v_cols;
     unsigned short v_scrollsize;
 };
+
+#endif /* !_SYS_VTIO_H */
 
 #endif /* _LINUX_VT_H */

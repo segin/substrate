@@ -46,6 +46,21 @@
 #define K_OFF          4
 
 /*
+ * <linux/vt.h> and this header both describe the Linux VT switching
+ * interface -- the kernel needs it here, and userspace reaches it through
+ * the Linux-canonical path.  The macros are identical so redefining them is
+ * harmless, but struct vt_mode / vt_stat are not: xorg-server's kdrive
+ * backend includes <linux/vt.h> and then <linux/kd.h>, which pulls this in,
+ * and got
+ *
+ *     sys/vtio.h:69:8: error: redefinition of 'struct vt_mode'
+ *
+ * Whichever header is reached first defines them; the other stands down.
+ * The kernel never has <linux/vt.h> on its include path, so its view is
+ * unchanged.
+ */
+#ifndef _LINUX_VT_H
+/*
  * Linux VT switching ioctls.  Substrate doesn't implement the Linux
  * signal-driven VT-switch protocol — every call below is accepted
  * and turned into a no-op (or returns a coherent dummy struct).
@@ -79,5 +94,7 @@ struct vt_stat {
     unsigned short v_signal;
     unsigned short v_state;
 };
+
+#endif /* !_LINUX_VT_H */
 
 #endif
