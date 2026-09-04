@@ -235,10 +235,19 @@ implements only
 returns
 .BR ENOSYS .
 .IP \(bu
-Large-model programs, which pass far pointers to calls such as
-.BR read (2),
-are untested; the near-pointer arguments are resolved against the trapping
+System-call pointer arguments are always resolved as near offsets in the
+trapping
 .BR DS .
+Large-data images
+.RB ( XE_LDATA )
+themselves load and run \(em they are handed
+.I argv
+and
+.I envp
+as arrays of far pointers rather than near offsets \(em but a program that
+passes a far pointer to a call such as
+.BR read (2)
+would have only the offset half read.
 .SH VERIFIED
 SCO Xenix/286
 .BR echo ,
@@ -251,12 +260,22 @@ and
 .B vi
 (middle model, full screen) run correctly, as does cross-personality
 .BR execve (2)
-in both directions.  Microsoft Word 3.0 for Xenix
-loads, initializes its terminal, grows its heap through
-.BR brkctl (2),
-paints its banner, forks and reaps a child shell, and echoes keystrokes; it
-then stops in its own memory-manager retry loop, issuing no further system
-calls.
+in both directions.  A 37-command sample of the distribution media runs
+clean: 37 ok, 0 crash, 0 noload.
+.PP
+The shipped
+.B cc
+compiles and links end to end, with correct floating point \(em these
+binaries carry no x87 instructions, the linker having rewritten each into a
+two-byte software interrupt, and the loader patches them back.  Microsoft
+Word 3.0 for Xenix reaches its full editing screen under
+.BR TERM=ansi .
+.PP
+Xenix/86 images
+.RB ( x_cpu
+0x04) run under this same personality: they are protected-mode images
+carrying the same LDT selectors as an 80286 one, and the 8086 instruction
+set is a strict subset.
 .SH FILES
 .TP
 .I sys/exec/perso/perso_sco_x286.c
