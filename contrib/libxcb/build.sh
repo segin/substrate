@@ -130,6 +130,25 @@ make install DESTDIR="${DESTDIR}" \
 # Drop libtool archives — substrate links against .a / .so directly.
 rm -f "${DESTDIR}"/usr/lib/*.la
 
+# Stage pthread-stubs.pc alongside xcb.pc.
+#
+# xcb.pc says "Requires.private: xau pthread-stubs", so pkg-config will not
+# answer for xcb -- and therefore not for x11, which requires xcb -- unless
+# it can also find pthread-stubs.pc.  Upstream expects the libpthread-stubs
+# package to provide it; substrate's libpthread already has the symbols, so
+# contrib/libxcb ships a one-file stand-in.
+#
+# It was only ever passed to libxcb's OWN configure via PKG_CONFIG_LIBDIR
+# and never installed, so every downstream consumer had to know about
+# contrib/libxcb/pkgconfig and add it by hand.  Ones that did not stopped at
+#
+#   Package 'pthread-stubs', required by 'xcb', not found
+#
+# Installing it makes sync_to_sysroot carry it into the cross sysroot with
+# the rest of libxcb, where anything resolving xcb.pc finds it.
+install -D -m 644 "${HERE}/pkgconfig/pthread-stubs.pc" \
+    "${DESTDIR}/usr/lib/pkgconfig/pthread-stubs.pc"
+
 # Post-patch every produced .so OSABI byte to ELFOSABI_SUBSTRATE
 # (0x40).  substrate's cross-ld stamps SYSV otherwise.
 _n=0
