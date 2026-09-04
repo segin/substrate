@@ -123,7 +123,7 @@ export STAGE1_PREFIX JOBS SUBSTRATE_TOP="$HERE"
 # two that were not.  Both need only the X toolkit chain built above.  cde
 # also wants mksh (the target's /bin/ksh), which is already in the list.
 #
-DEFAULT_CONTRIB="bzip2 libiconv zlib openssl ncurses gzip tzdata make sed expr libarchive mpg123 curl nginx inetutils zsh e2fsprogs e2tools gmp mpfr gdb xorgproto xcb-proto libXau xtrans libxcb libX11 libXext libICE libSM libXt libXmu libXpm libXaw libXinerama libjpeg lmdb mksh tcl libtirpc xterm xauth luit xrdb libXdmcp pixman libxshmfence libfontenc libXfont libxkbfile xkbcomp xkeyboard-config encodings font-util font-misc-misc font-adobe-75dpi font-adobe-100dpi font-bh-lucida xorg-server libXScrnSaver motif cde"
+DEFAULT_CONTRIB="bzip2 libiconv zlib openssl ncurses gzip tzdata make sed expr libarchive mpg123 curl nginx inetutils zsh e2fsprogs e2tools gmp mpfr gdb xorgproto xcb-proto libXau xtrans libxcb libX11 libXext libICE libSM libXt libXmu libXpm libXaw libXinerama libjpeg lmdb mksh tcl libtirpc xterm xauth luit xrdb libXdmcp pixman libxshmfence libfontenc libXfont libxkbfile xkbcomp xkeyboard-config encodings font-util font-misc-misc font-adobe-75dpi font-adobe-100dpi font-bh-lucida xorg-server libXScrnSaver libXrender motif cde"
 : "${ONLY:=${DEFAULT_CONTRIB}}"
 
 #
