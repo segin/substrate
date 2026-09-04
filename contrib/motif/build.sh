@@ -98,6 +98,21 @@ echo "==> build libUil (UIL library)"
   make wml wmluiltok CC="cc -std=gnu89" YACC="bison -y" LEX=flex \
       CFLAGS="-O2 -w" AM_CFLAGS= LIBS= LDFLAGS= LEXLIB=-lfl wmluiltok_LDADD=-lfl
   make Uil.c YACC="bison -y"                 # yacc the UIL grammar (Uil.c/Uil.h)
+  # Bison 3.7 started emitting YYEMPTY as a member of the token enum in the
+  # generated HEADER, while the generated parser BODY has always had its own
+  # "#define YYEMPTY (-1)".  Uil.y includes UilDefI.h, which includes that
+  # header, so the macro is in scope when the enum is parsed and the line
+  # becomes "(-1) = -2":
+  #
+  #     UilLexPars.c:10:24: error: expected identifier before '(' token
+  #        10 | #define YYEMPTY        (-1)
+  #     ./../../tools/wml/UilLexPars.h:53:5: note: in expansion of macro 'YYEMPTY'
+  #        53 |     YYEMPTY = -2,
+  #
+  # Drop the enum member.  Nothing is lost: the same header still carries
+  # "#define YYEMPTY -2" in its yacc-compatibility block below, which is what
+  # older bison emitted on its own and what this code was written against.
+  sed -i '/^    YYEMPTY = -2,$/d' Uil.h
   ln -sf Uil.h UilLexPars.h
   ln -sf Uil.c UilLexPars.c
   PATH=".:${PATH}" make wml-uil.mm CC="cc -std=gnu89" YACC="bison -y" \
