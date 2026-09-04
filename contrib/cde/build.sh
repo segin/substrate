@@ -60,15 +60,15 @@ echo "==> assembling sysroot at ${SR}"
 rm -rf "${SR}"; mkdir -p "${SR}/usr/lib"
 _have=0
 for d in xorgproto libXau xtrans libxcb libX11 libXext libICE libSM \
-         libXt libXmu libXpm libXaw libXinerama libXScrnSaver \
+         libXt libXmu libXpm libXaw libXinerama libXScrnSaver libXrender \
          libjpeg lmdb tcl libtirpc zlib motif; do
     st="${SUBSTRATE_TOP}/dist-overlay/dist-${d}"
     [ -d "${st}/usr" ] || { echo "    missing dist-${d}"; continue; }
     cp -a "${st}/usr/." "${SR}/usr/"
     _have=$((_have + 1))
 done
-[ "${_have}" -ge 20 ] || {
-    echo "build.sh: only ${_have}/20 prerequisite dist trees found — build the X stack, Motif, libjpeg, lmdb, Tcl, libtirpc and zlib first" >&2
+[ "${_have}" -ge 21 ] || {
+    echo "build.sh: only ${_have}/21 prerequisite dist trees found — build the X stack, Motif, libjpeg, lmdb, Tcl, libtirpc and zlib first" >&2
     exit 1
 }
 for l in c sys m pthread dl; do
@@ -89,20 +89,38 @@ done
 # the target, and dtksh is configured out rather than silently built for the
 # build host's architecture.
 #
-# Set CDE_DISABLE_DTKSH=1 to leave it out regardless.  As of this writing that
-# is the default state of affairs — see README.SUBSTRATE.md, "dtksh": ksh93
+# It is therefore OFF by default; set CDE_ENABLE_DTKSH=1 to attempt it anyway
+# — see README.SUBSTRATE.md, "dtksh": ksh93
 # builds, but only without the SHOPT set dtksh's own objects are compiled
 # with, and the resulting libshell is missing symbols dtksh references.
 EXEC_IMG="${SUBSTRATE_EXEC_IMG:-${HERE}/hosttools/build/sub-exec.img}"
-if [ -n "${CDE_DISABLE_DTKSH:-}" ]; then
-    DTKSH_ARG=--disable-dtksh
-    echo "build.sh: dtksh disabled by CDE_DISABLE_DTKSH" >&2
-elif [ -x "${HOSTTOOLS}/crossexec" ] && [ -f "${EXEC_IMG}" ]; then
-    DTKSH_ARG=
+if [ -n "${CDE_ENABLE_DTKSH:-}" ]; then
+    if [ -x "${HOSTTOOLS}/crossexec" ] && [ -f "${EXEC_IMG}" ]; then
+        DTKSH_ARG=
+        echo "build.sh: dtksh enabled by CDE_ENABLE_DTKSH — this is known NOT to" >&2
+        echo "build.sh: link; see README.SUBSTRATE.md before reporting the failure." >&2
+    else
+        DTKSH_ARG=--disable-dtksh
+        echo "build.sh: CDE_ENABLE_DTKSH set, but no crossexec exec image" >&2
+        echo "build.sh: (${EXEC_IMG}) — dtksh disabled.  Bake a rootfs.img and" >&2
+        echo "build.sh: re-run hosttools/build.sh first." >&2
+    fi
 else
+    # Off by default, unconditionally.  README.SUBSTRATE.md has said "dtksh
+    # does not currently build, and build.sh configures it out" for a while,
+    # but the code only configured it out when the crossexec exec image was
+    # ABSENT -- and hosttools derives that image from rootfs.img whenever one
+    # happens to exist.  So whether CDE built at all depended on whether the
+    # tree had been baked before: green on a fresh checkout, and on a
+    # developer machine
+    #
+    #   mamake: *** exit code 1 making all
+    #   package: make failed in .../dtksh/ksh93/arch/linux.i386
+    #
+    # which is precisely the libast/SHOPT failure the README documents.  The
+    # attempt is opt-in now, so the outcome no longer turns on unrelated
+    # state.  CDE_DISABLE_DTKSH is still accepted; it is the default.
     DTKSH_ARG=--disable-dtksh
-    echo "build.sh: NOTE: no crossexec exec image (${EXEC_IMG}) — dtksh disabled." >&2
-    echo "build.sh:       Bake a rootfs.img, re-run hosttools/build.sh, then rebuild." >&2
 fi
 
 # --- configure -------------------------------------------------------------
