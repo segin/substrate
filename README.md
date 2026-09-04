@@ -17,13 +17,26 @@ a final toolchain rebuild is still pending).
 
 A distinguishing goal is **binary compatibility via exec personalities**: the
 kernel routes each executable to a loader from its ELF OSABI byte (or, for
-a.out, its MID/flavor), so binaries built for other systems run on the same
-kernel. Current state:
+a.out, its MID/flavor; for Xenix `x.out`, the CPU field of its header), so
+binaries built for other systems run on the same kernel. Current state:
 
 - **Native** — complete.
 - **ELKS** (16-bit Linux-like a.out) — done: 16-bit protected-mode execution
   through a per-process LDT, ELKS `INT 0x80` syscall convention, signal
   callbacks, and a synthetic `/dev/kmem` so upstream ELKS `ps`/`meminfo` run.
+- **SCO Xenix/286** — done: 16-bit protected-mode System V.2 programs in the
+  segmented `x.out` format, each segment mapped into its own 64 KiB window
+  with the LDT slot the linker baked into the binary, so a middle-model
+  image's `lcall $0x47,$off` resolves as it did on hardware. The Xenix trap
+  ABI is emulated (`int $5`, call number in AX with a sub-function in AH,
+  arguments in BX/CX/SI/DI, results in AX:BX), along with V7 far-call signal
+  frames, the 30-byte Xenix `struct stat`, the `termio` ioctl group, and
+  synthesized V7 `struct direct` records for `read(2)` on a directory since
+  Xenix/286 has no `getdents(2)`. A 37-command sample of the SCO media runs
+  clean (37 ok, 0 crash, 0 noload), the shipped `cc` compiles and links end
+  to end with correct floating point, and Microsoft Word 3.0 reaches its full
+  editing screen. Xenix/86 binaries run under the same personality; Xenix/386
+  (`x.out` via the `lcall $7,$0` gate) is a separate, active personality.
 - **FreeBSD** and **NetBSD** — dynamic linking is up and running: their
   run-time linkers (`ld-elf.so.1` / `ld.elf_so`), TLS install, and libc come
   up, so dynamically-linked ELF binaries load and execute.
@@ -31,7 +44,9 @@ kernel. Current state:
   setup in place).
 - **OpenBSD**, **SunOS 4.x**, and **SVR3/SVR4** — earlier-stage personalities.
 
-See `docs/specs/personality_targets.md` and `docs/specs/personality_elks.md`.
+See `docs/specs/personality_targets.md` and `docs/specs/personality_elks.md`;
+Xenix/286 has its own pages, `usr.man/man4/sco_x286.4` (the personality) and
+`usr.man/man4/xout286.4` (the executable format).
 
 ## Repository layout
 
