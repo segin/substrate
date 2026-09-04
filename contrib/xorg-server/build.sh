@@ -41,6 +41,20 @@ cd "${BUILD_DIR}"
 # where it did not.
 export PKG_CONFIG_LIBDIR="${STAGE1_PREFIX}/i386-unknown-substrate/lib/pkgconfig"
 
+# pixman's header lives in a SUBDIRECTORY of includedir, and pixman-1.pc says
+# "Cflags: -I${includedir}/pixman-1" with includedir=/usr/include -- a TARGET
+# path.  pkg-config therefore hands the build -I/usr/include/pixman-1, which
+# on a machine with host pixman installed silently compiles the cross build
+# against the host's headers, and on one without it fails outright:
+#
+#   include/miscstruct.h:52:10: fatal error: pixman.h: No such file or directory
+#
+# Name the sysroot's copy.  Overriding PIXMAN_CFLAGS is not enough: what
+# reaches the compile line is XSERVERCFLAGS_CFLAGS, which re-queries pixman-1
+# as part of REQUIRED_LIBS.  Every other dependency here is content with the
+# compiler's own sysroot search; pixman is the only one with a subdirectory.
+export CPPFLAGS="-I${STAGE1_PREFIX}/i386-unknown-substrate/include/pixman-1"
+
 # -lfontenc: libXfont references it but records no DT_NEEDED of its own.
 export LDFLAGS="-lfontenc -fno-pie"
 
