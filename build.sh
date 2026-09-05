@@ -26,6 +26,8 @@
 #   SKIP_TOOLCHAIN=1  reuse an existing $STAGE1_PREFIX, don't rebuild
 #   SKIP_CONTRIB=1    skip every contrib/ port (just kernel + userland + image)
 #   SKIP_IMAGE=1      stop after staging dist/, don't bake rootfs.img
+#   SKIP_GRUB=1       don't build contrib/grub; let build-rootfs.sh fall
+#                     back to whatever GRUB the build host has
 #   ONLY="pkg1 pkg2"  build only these contrib ports (default: everything in
 #                      the order baked into this script)
 #
@@ -59,6 +61,7 @@ cd "$HERE"
 : "${SKIP_TOOLCHAIN:=0}"
 : "${SKIP_CONTRIB:=0}"
 : "${SKIP_IMAGE:=0}"
+: "${SKIP_GRUB:=0}"
 export STAGE1_PREFIX JOBS SUBSTRATE_TOP="$HERE"
 
 # contrib build order.  Each name is a directory under contrib/.
@@ -314,6 +317,38 @@ else
         ( cd "contrib/$pkg" && ./build.sh )
         sync_to_sysroot "$pkg"
     done
+fi
+
+#-----------------------------------------------------------------------
+# Stage 2b: GRUB.
+#
+# A HOST-tool port, unlike everything in DEFAULT_CONTRIB: this GRUB is not
+# substrate userland, it is the bootloader that loads the kernel plus the
+# utilities that assemble it into rootfs.img, and it is built with the host
+# compiler.  That is why it is a stage of its own rather than another entry
+# in the contrib list.
+#
+# build-rootfs.sh's grub_setup() prefers contrib/grub/dist-grub over the
+# host's /usr/lib/grub whenever the port has been built, so building it here
+# is what makes the image self-contained instead of depending on whichever
+# GRUB the build machine happens to have installed -- or on it having one.
+# It builds three platforms: i386-pc, x86_64-efi, i386-efi.
+#-----------------------------------------------------------------------
+if [ "$SKIP_GRUB" = 1 ]; then
+    step "Stage 2b: GRUB (skipped — SKIP_GRUB=1)"
+    note "build-rootfs.sh will fall back to the host's GRUB."
+else
+    step "Stage 2b: GRUB for the image (host tool, not substrate userland)"
+    ( cd contrib/grub && ./fetch.sh && ./build.sh )
+    # Assert rather than let a silent fallback to the host's GRUB hide a
+    # failure here: the bake would still succeed, with a different
+    # bootloader than the one this stage exists to produce.
+    _gm="${HERE}/contrib/grub/dist-grub/usr/bin/grub-mkimage"
+    [ -x "$_gm" ] || {
+        echo "build.sh: contrib/grub finished but $_gm is missing" >&2
+        exit 1
+    }
+    note "GRUB $("$_gm" --version 2>/dev/null | awk '{print $NF}') staged for the image bake"
 fi
 
 #-----------------------------------------------------------------------
