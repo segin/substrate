@@ -92,6 +92,24 @@ sync_native_libs_to_sysroot() {
             ln -sfn "lib$name.so.0" "$SYSROOT/lib/lib$name.so"
         fi
     done
+    # libgcc_s.so.1.  substrate's libm.so.0 records DT_NEEDED on it (for
+    # __divxc3 and friends), so anything that follows that chain at link time
+    # has to be able to find it -- and it lives in GCC's own libdir, not the
+    # sysroot:
+    #
+    #   ld: warning: libgcc_s.so.1, needed by .../lib/libm.so.0, not found
+    #       (try using -rpath or -rpath-link)
+    #
+    # Most links survive because the compiler driver puts its libdir on -L,
+    # but one that does not -- CMake's compiler probe, for instance -- fails
+    # with no obvious cause.  The image already ships the library in /lib, so
+    # the sysroot is simply the copy that was missing.
+    for _gccdir in "${STAGE1_PREFIX}"/lib/gcc/i386-unknown-substrate/*/; do
+        [ -f "${_gccdir}libgcc_s.so.1" ] || continue
+        cp "${_gccdir}libgcc_s.so.1" "$SYSROOT/lib/" 2>/dev/null || true
+        ln -sfn libgcc_s.so.1 "$SYSROOT/lib/libgcc_s.so" 2>/dev/null || true
+    done
+
     # The crt startup/shutdown objects.  GCC's link spec names crti.o, crt0.o
     # and crtn.o unqualified and leaves ld to find them on the library search
     # path, so an incomplete set here fails EVERY link -- including libgcc's
