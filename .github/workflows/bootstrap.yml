@@ -25,7 +25,7 @@ jobs:
     name: toolchain + contrib + image
     runs-on: ubuntu-latest
     # gcc is --disable-bootstrap so stage 1 is a single pass, but this still
-    # builds two toolchains and 62 ports -- including Motif and CDE, which
+    # builds two toolchains and 65 ports -- including Motif and CDE, which
     # are large.  Cap under the 6h job limit.
     timeout-minutes: 340
     steps:
@@ -38,6 +38,11 @@ jobs:
       # not come out.  Its configure also passes -I/usr/include/tirpc,
       # -ltirpc and --with-tcl=/usr/lib.  None of this reaches the target --
       # substrate's own X and Motif are cross-built from contrib/.
+      # cmake here is the BUILD-HOST one: contrib/cmake cross-builds cmake to
+      # run on substrate and uses the host's to configure itself, and the
+      # CMake-based ports (and TDE, when it joins) need one to cross-build
+      # with.  The runner image ships cmake, but naming it means the job does
+      # not depend on that staying true.
       # libfl-dev supplies libfl, which Motif's host-side wmluiltok scanner
       # links (-lfl, for its main).  Arch ships that inside the flex package;
       # Debian and Ubuntu split it out, so `flex` alone leaves the link with
@@ -56,7 +61,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             build-essential gcc-multilib python3 \
-            texinfo bison flex libfl-dev gawk curl wget xz-utils \
+            texinfo bison flex libfl-dev gawk curl wget xz-utils cmake \
             gettext pkg-config \
             e2fsprogs dosfstools mtools fakeroot \
             grub-common grub-pc-bin util-linux zstd \
@@ -109,7 +114,7 @@ jobs:
 
       # The whole thing, in the order build.sh defines: stage 1 + stage 2
       # toolchain, kernel, libs, ld.so, base userland, then every port in
-      # DEFAULT_CONTRIB -- a curated 62-port order, with the sysroot
+      # DEFAULT_CONTRIB -- a curated 65-port order, with the sysroot
       # re-synced after each one so the next port's configure probe finds
       # what the last one built -- then dist/, the toolchain overlay and
       # the image.  That now includes the Xfbdev framebuffer server and the
