@@ -31,6 +31,13 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # The X11/Motif/tirpc/tcl -dev packages are for CDE, and only for its
+      # BUILD-HOST half: hosttools/build.sh compiles a complete NATIVE CDE
+      # objdir whose libtt, libDtSvc, libDtWidget, libDtHelp and libDtTerm all
+      # include <Xm/*> and <X11/*>, and it hard-fails if those libraries do
+      # not come out.  Its configure also passes -I/usr/include/tirpc,
+      # -ltirpc and --with-tcl=/usr/lib.  None of this reaches the target --
+      # substrate's own X and Motif are cross-built from contrib/.
       # libfl-dev supplies libfl, which Motif's host-side wmluiltok scanner
       # links (-lfl, for its main).  Arch ships that inside the flex package;
       # Debian and Ubuntu split it out, so `flex` alone leaves the link with
@@ -52,7 +59,9 @@ jobs:
             texinfo bison flex libfl-dev gawk curl wget xz-utils \
             gettext pkg-config \
             e2fsprogs dosfstools mtools fakeroot \
-            grub-common grub-pc-bin util-linux zstd
+            grub-common grub-pc-bin util-linux zstd \
+            libmotif-dev libx11-dev libxt-dev libxext-dev libxmu-dev \
+            libxpm-dev libxinerama-dev libxft-dev libtirpc-dev tcl-dev
 
       # build.sh installs the stage-1 toolchain here and says so: make it
       # yours once, and then nothing in the build needs root.
