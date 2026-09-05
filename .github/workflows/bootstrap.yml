@@ -31,6 +31,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # libfl-dev supplies libfl, which Motif's host-side wmluiltok scanner
+      # links (-lfl, for its main).  Arch ships that inside the flex package;
+      # Debian and Ubuntu split it out, so `flex` alone leaves the link with
+      # "cannot find -lfl".
       # gettext supplies xgettext, which libXpm's sxpm runs on the BUILD host
       # to generate its message catalogue -- the port fails with "xgettext:
       # command not found" without it.  pkg-config is what e2tools and the
@@ -45,7 +49,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             build-essential gcc-multilib python3 \
-            texinfo bison flex gawk curl wget xz-utils \
+            texinfo bison flex libfl-dev gawk curl wget xz-utils \
             gettext pkg-config \
             e2fsprogs dosfstools mtools fakeroot \
             grub-common grub-pc-bin util-linux zstd
