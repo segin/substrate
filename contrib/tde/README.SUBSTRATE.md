@@ -18,10 +18,11 @@ Sources are the TDE **R14.1.6** release tarballs from
 | 0 | tde-cmake     | shared TDE CMake modules (TDEMacros, FindTQt)| (modules)    | ✅ fetched |
 | 1 | **tqt3**      | the Qt 3 fork; everything depends on it      | Qt3 configure + qmake | ✅ built + staged |
 | 2 | **tqtinterface** | TQt↔Qt compatibility shim                 | CMake        | ✅ built + staged |
-| 3 | arts (opt.)   | aRts sound server — stub/skip on substrate   | CMake        | todo |
-| 4 | **tdelibs**   | core libraries (tdecore, tdeui, tdeio, …)    | CMake        | todo |
-| 5 | **tdebase**   | the desktop proper (twin, kicker, konqueror…)| CMake        | todo |
-|   | …             | tdeutils, tdegraphics, … (optional apps)     | CMake        | todo |
+| 3 | **dbus-1-tqt**| TQt D-Bus binding; a tdelibs dependency      | CMake        | ✅ built + staged |
+| 4 | **tdelibs**   | core libraries (tdecore, tdeui, tdeio, dcop) | CMake        | ✅ built + staged |
+| 5 | **tdebase**   | the desktop proper (twin, kicker, tdeinit…)  | CMake        | ✅ built + staged |
+| 6 | tdeutils / tdegames / tdetoys | optional application sets    | CMake        | ✅ built + staged |
+|   | arts (opt.)   | aRts sound server — stub/skip on substrate   | CMake        | not attempted |
 
 The CMake layers (2+) cross-build via the shared toolchain
 `contrib/tde/substrate-tde-toolchain.cmake` (C+C++, sysroot
@@ -100,16 +101,27 @@ compat headers + `tqt.pc`, staged under
 own C++ test compiles + links against `-ltqt-mt` cleanly.
 
 ### Next steps
-1. **tdelibs** — the big one (tdecore/tdeui/tdeio/dcop).  Needs
-   tqtinterface (done) + the X11 stack + libart/libidn/etc.; expect
-   real substrate-libc/POSIX deltas.  Same CMake toolchain.
-2. `tdebase` (twin + kicker + tdeinit) for a minimal live desktop —
-   the milestone the CDE port reached.
-
-This is a long road; it is checked in incrementally so each layer's work
-is reproducible from clean sources.
+1. **Live-boot verification.**  The stack builds and stages; what has not
+   been re-confirmed since the fork/no-fork workaround cluster was dropped
+   is a desktop that comes up on target.  That is the milestone the CDE
+   port reached.
+2. **arts** — the sound server, still unattempted; TDE runs without it.
+3. **CI.**  TDE is not in `build.sh`'s `DEFAULT_CONTRIB`.  It is by far the
+   largest thing in the tree (~620 MB staged, TQt3 another ~219 MB), and
+   the bootstrap it would join has not yet gone green on the smaller set.
 
 ## Building
+
+The whole stack, in dependency order:
+
+```sh
+contrib/tde/fetch.sh      # every sub-port's fetch.sh
+contrib/tde/build.sh      # every sub-port's build.sh, merging between layers
+```
+
+Those two exist so TDE presents as a single port: `build.sh`'s contrib loop
+drives `contrib/<pkg>/fetch.sh` and `contrib/<pkg>/build.sh`, and TDE's real
+work lives a directory deeper.  A single sub-port still builds on its own:
 
 ```sh
 cd contrib/tde/tqt3
@@ -117,6 +129,13 @@ cd contrib/tde/tqt3
 ./build.sh        # native host tquic + cross-build lib/plugins -> dist-tqt3/
 ```
 
-`build.sh` needs `chrpath` on the build host (to make the host `tquic`
+`tqt3/build.sh` needs `chrpath` on the build host (to make the host `tquic`
 relocatable).  The first run does a one-time native host build under
-`hostbuild/` (cached on re-runs).
+`hostbuild/` (cached on re-runs).  The CMake layers need a **host** cmake;
+`contrib/cmake` is a different thing — it cross-builds cmake to run *on*
+substrate, and is not what builds TDE.
+
+`merge-staging.sh` assembles the merged sysroot each CMake layer compiles
+against.  Its header says it is run before every sub-port; in practice only
+dbus-1-tqt called it, so `contrib/tde/build.sh` now runs it between layers,
+which is what makes the order reproducible from clean.
