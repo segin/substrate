@@ -31,6 +31,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # libfontenc-dev / libfreetype-dev / zlib1g-dev are for the same CDE
+      # host half: hosttools builds mkfontscale from source, whose configure
+      # does PKG_CHECK_MODULES on fontenc, freetype2 and zlib.
       # The X11/Motif/tirpc/tcl -dev packages are for CDE, and only for its
       # BUILD-HOST half: hosttools/build.sh compiles a complete NATIVE CDE
       # objdir whose libtt, libDtSvc, libDtWidget, libDtHelp and libDtTerm all
@@ -66,7 +69,8 @@ jobs:
             e2fsprogs dosfstools mtools fakeroot \
             grub-common grub-pc-bin util-linux zstd \
             libmotif-dev libx11-dev libxt-dev libxext-dev libxmu-dev \
-            libxpm-dev libxinerama-dev libxft-dev libtirpc-dev tcl-dev
+            libxpm-dev libxinerama-dev libxft-dev libtirpc-dev tcl-dev \
+            libfontenc-dev libfreetype-dev zlib1g-dev
 
       # build.sh installs the stage-1 toolchain here and says so: make it
       # yours once, and then nothing in the build needs root.
