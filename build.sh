@@ -315,6 +315,29 @@ else
         step "Stage 2: contrib/$pkg"
         ( cd "contrib/$pkg" && ./fetch.sh )
         ( cd "contrib/$pkg" && ./build.sh )
+
+        # Strip the staged tree before anything mirrors or overlays it.
+        #
+        # Every port compiles -g (the standard CFLAGS line across contrib/ is
+        # "-march=i486 -mtune=i486 -O2 -g"), and nothing stripped the result:
+        # contrib/strip-staging.sh existed but only binutils and gcc called
+        # it, for the stage-2 toolchain, where the waste had become
+        # impossible to ignore.  Everything else went into the image carrying
+        # its DWARF -- 171 MB of the 274 MB of ELF that DEFAULT_CONTRIB
+        # stages, 62%.
+        #
+        # The script is careful about what it touches: executables get
+        # --strip-all, shared objects only --strip-debug so .dynsym survives
+        # for the dynamic linker, and static archives are left alone entirely
+        # so target-side debugging into them still works.
+        #
+        # Deliberately before sync_to_sysroot, so the cross sysroot holds the
+        # same objects the image does rather than a second, fatter copy.
+        _stage="${HERE}/dist-overlay/dist-${pkg}"
+        if [ -d "$_stage" ]; then
+            "${HERE}/contrib/strip-staging.sh" "$_stage" "$pkg"
+        fi
+
         sync_to_sysroot "$pkg"
     done
 fi
