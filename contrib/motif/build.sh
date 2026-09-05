@@ -69,7 +69,17 @@ echo "==> configure"
 echo "==> make -j${JOBS} (pass 1)"
 make -j"${JOBS}" || true
 echo "==> rebuild build-time tools with the host compiler"
-gcc -O2 -w -std=gnu89 -c config/util/makestrs.c -o config/util/makestrs.o
+# -I the staged xorgproto: makestrs.c includes <X11/Xos.h>, and this is a
+# HOST compile, so it would otherwise need X11 development headers installed
+# on the build machine -- which a developer box has and a CI runner does not:
+#
+#   config/util/makestrs.c:35:10: fatal error: X11/Xos.h: No such file
+#
+# Xos.h and the Xosdefs.h it pulls in are pure portability shims over the
+# standard headers, branching on the macros of whatever is compiling them,
+# so the copy we already build is correct for a host compile too.
+_XPROTO_INC="${SUBSTRATE_TOP}/dist-overlay/dist-xorgproto/usr/include"
+gcc -O2 -w -std=gnu89 -I"${_XPROTO_INC}" -c config/util/makestrs.c -o config/util/makestrs.o
 gcc -O2 -w -std=gnu89 config/util/makestrs.o -o config/util/makestrs
 touch config/util/makestrs.o config/util/makestrs
 
