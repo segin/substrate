@@ -21,7 +21,7 @@ PATH="${STAGE1_PREFIX}/bin:${PATH}"; export PATH
 [ -d "${TREE_DIR}" ] || { echo "build.sh: run ./fetch.sh first" >&2; exit 1; }
 
 PKGP=""; CPP=""; LDF=""
-for d in xorgproto libXau xtrans libxcb libX11 libXext libICE libSM libXt libXmu libXpm; do
+for d in xorgproto xbitmaps libXau xtrans libxcb libX11 libXext libICE libSM libXt libXmu libXpm; do
     st="${SUBSTRATE_TOP}/dist-overlay/dist-${d}"
     [ -d "${st}/usr" ] || continue
     [ -d "${st}/usr/lib/pkgconfig" ] && PKGP="${PKGP}${PKGP:+:}${st}/usr/lib/pkgconfig"

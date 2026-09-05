@@ -59,7 +59,7 @@ PATH="${STAGE1_PREFIX}/bin:${HOSTTOOLS}:${PATH}"; export PATH
 echo "==> assembling sysroot at ${SR}"
 rm -rf "${SR}"; mkdir -p "${SR}/usr/lib"
 _have=0
-for d in xorgproto libXau xtrans libxcb libX11 libXext libICE libSM \
+for d in xorgproto xbitmaps libXau xtrans libxcb libX11 libXext libICE libSM \
          libXt libXmu libXpm libXaw libXinerama libXScrnSaver libXrender \
          libjpeg lmdb tcl libtirpc zlib motif; do
     st="${SUBSTRATE_TOP}/dist-overlay/dist-${d}"
@@ -67,8 +67,8 @@ for d in xorgproto libXau xtrans libxcb libX11 libXext libICE libSM \
     cp -a "${st}/usr/." "${SR}/usr/"
     _have=$((_have + 1))
 done
-[ "${_have}" -ge 21 ] || {
-    echo "build.sh: only ${_have}/21 prerequisite dist trees found — build the X stack, Motif, libjpeg, lmdb, Tcl, libtirpc and zlib first" >&2
+[ "${_have}" -ge 22 ] || {
+    echo "build.sh: only ${_have}/22 prerequisite dist trees found — build the X stack, Motif, libjpeg, lmdb, Tcl, libtirpc and zlib first" >&2
     exit 1
 }
 for l in c sys m pthread dl; do
