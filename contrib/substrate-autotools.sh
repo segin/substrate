@@ -4,15 +4,46 @@
 #   substrate_config_sub_fix "${TREE_DIR}"     # in fetch.sh (after extract)
 #   substrate_libtool_fix    "${TREE_DIR}/configure"  # in build.sh (before configure)
 
-# Replace a tree's config.sub/config.guess with the substrate-patched pair
-# from the binutils port (the substrate triple is unknown to upstream copies).
+# Make a tree's config.sub accept the substrate triple.
+#
+# Preferred: copy the substrate-patched config.sub/config.guess out of the
+# binutils port, which is the one place they are maintained.
+#
+# Fallback: patch the tree's own copy in place.  binutils' EXTRACTED tree is
+# only present if the toolchain was built this run, and once the CI toolchain
+# cache started working build.sh skips that entirely -- so every port using
+# this helper began failing with "contrib/binutils not fetched" on exactly
+# the runs where everything else went right.  Depending on another port's
+# build directory was the fragile part; this removes it.
+#
+# Three OS-list layouts, as in contrib/motif/fetch.sh: the modern undashed
+# one-per-line form, the 2015-era dashed list with a sortix token, and the
+# older dashed list from before sortix existed.
 substrate_config_sub_fix() {
     _tree="$1"
     # ${HERE} (absolute port dir) is set by every contrib build/fetch script.
     _binu="$(ls -d "${HERE}"/../binutils/build/binutils-*/ 2>/dev/null | head -1)"
-    [ -n "${_binu}" ] || { echo "substrate_config_sub_fix: contrib/binutils not fetched" >&2; return 1; }
-    for _s in config.sub config.guess; do
-        find "${_tree}" -name "${_s}" -exec cp -f "${_binu}/${_s}" {} +
+    if [ -n "${_binu}" ]; then
+        for _s in config.sub config.guess; do
+            find "${_tree}" -name "${_s}" -exec cp -f "${_binu}/${_s}" {} +
+        done
+    else
+        for _cs in $(find "${_tree}" -name config.sub); do
+            grep -q 'substrate\*' "${_cs}" || sed -i \
+                -e 's/\(| sortix\* \)/\1| substrate* /' \
+                -e 's/\(| -sortix\* \)/\1| -substrate* /' \
+                -e 's/^\(\t *| -aos\* | -aros\* \)/\t      | -substrate* \\\n\1/' \
+                "${_cs}"
+        done
+    fi
+    # Either way, prove it: a sed that matched nothing is silent, and a
+    # missing config.sub means configure will reject the host triple with a
+    # message that says nothing about why.
+    for _cs in $(find "${_tree}" -name config.sub); do
+        if ! sh "${_cs}" i386-unknown-substrate >/dev/null 2>&1; then
+            echo "substrate_config_sub_fix: ${_cs} still rejects i386-unknown-substrate" >&2
+            return 1
+        fi
     done
 }
 
