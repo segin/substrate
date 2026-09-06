@@ -37,6 +37,54 @@ CONFIGURE_COMMON="-prefix /opt/trinity -thread -no-exceptions \
     -xft -no-xrandr -no-xinerama -no-xcursor -no-xkb \
     -qt-gif -qt-libpng -system-libjpeg -no-imgfmt-mng -qt-zlib"
 
+# Where the HOST's X libraries actually live.
+#
+# TQt3's config.tests/x11/*.test are filesystem probes, not compile tests.
+# Each one looks for its library in a hardcoded
+#
+#     LIBDIRS="$IN_LIBDIRS $XDIRS /usr/shlib /usr/lib /lib"
+#
+# where $XDIRS is QMAKE_LIBDIR_X11 from the mkspec -- /usr/X11R6/lib for
+# linux-g++, a path no distribution has used in twenty years.  So the host
+# build effectively probes /usr/lib alone.  On Arch that is where libXft
+# and libXrender are and everything works; on a multiarch distribution
+# (Debian, Ubuntu) they are in /usr/lib/<triple> and every probe misses.
+#
+# configure then turns Xrender off, which gates the Xft block, which turns
+# freetype off -- silently, all three.  TQt3 does not survive its own
+# answer: qfontdatabase_x11.cpp compiles the Xft code regardless of the
+# QT_NO_XFTFREETYPE that results, so the build dies with
+#
+#     error: 'XftPatternGetString' was not declared in this scope
+#     error: 'FcFontSetDestroy' was not declared in this scope
+#
+# configure's -L feeds IN_LIBDIRS, which is searched first.  Ask pkg-config
+# where libXft is rather than guessing a layout; -print-multiarch is the
+# fallback and is empty on non-multiarch distributions, where /usr/lib is
+# already right.
+#
+# The CROSS configure needs none of this: mkspecs/substrate-g++ sets
+# QMAKE_LIBDIR_X11 and QMAKE_INCDIR_X11 to the sysroot, so $XDIRS covers it.
+host_probe_flags() {
+    _cands="$(pkg-config --variable=libdir xft 2>/dev/null || true)"
+    _cands="${_cands} $(pkg-config --variable=libdir xrender 2>/dev/null || true)"
+    _ma="$(gcc -print-multiarch 2>/dev/null || true)"
+    if [ -n "${_ma}" ]; then
+        _cands="${_cands} /usr/lib/${_ma}"
+    fi
+    # Deduplicate: these end up in QMAKE_LIBDIR_FLAGS, i.e. on every link
+    # line, and the two pkg-config answers are usually the same directory.
+    _seen=""
+    for _d in ${_cands}; do
+        [ -d "${_d}" ] || continue
+        case " ${_seen} " in *" ${_d} "*) continue ;; esac
+        _seen="${_seen} ${_d}"
+        printf ' -L%s' "${_d}"
+    done
+    :
+}
+HOST_PROBE_FLAGS="$(host_probe_flags)"
+
 # Make the host tquic relocatable: RUNPATH=$ORIGIN with libtqt-mt.so.3
 # sitting next to the binary.  (The default RUNPATH /opt/trinity-host/lib
 # is long enough for chrpath to overwrite with the shorter $ORIGIN.)
@@ -69,7 +117,9 @@ if [ ! -x "${HOSTTREE}/bin/tquic" ]; then
     fi
     ( cd "${HOSTTREE}"
       export TQTDIR="${HOSTTREE}" PATH="${HOSTTREE}/bin:${PATH}"
-      yes yes | ./configure -platform linux-g++ -prefix /opt/trinity-host ${CONFIGURE_COMMON}
+      echo "    host X probe dirs:${HOST_PROBE_FLAGS:- (none needed)}"
+      yes yes | ./configure -platform linux-g++ -prefix /opt/trinity-host \
+          ${CONFIGURE_COMMON} ${HOST_PROBE_FLAGS}
       make src-qmake src-moc sub-src
       cd tools/designer/uic && make )
 fi
