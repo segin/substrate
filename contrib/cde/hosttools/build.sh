@@ -170,12 +170,44 @@ if [ ! -f "${HB}/.substrate-hostbuild-done" ]; then
     cp -a "${SRC}" "${HB}"
     ( cd "${HB}" && make distclean >/dev/null 2>&1 || true )
     find "${HB}" -name '*.o' -delete
-    ( cd "${HB}" && ./configure \
+    # Keep only the -Wno-error= names this compiler actually has.
+    #
+    # An unknown one is not ignored -- gcc rejects it outright:
+    #
+    #   cc1: error: '-Wno-error=return-mismatch': no option '-Wreturn-mismatch'
+    #
+    # and since these are in CPPFLAGS that kills every conftest compile, so
+    # configure reports the uninformative "C compiler cannot create
+    # executables".  -Wreturn-mismatch arrived in GCC 14: this list was
+    # written against a GCC 16 host and fails wholesale on the GCC 13 that
+    # Ubuntu 24.04 ships.  Probe instead of assuming.
+    _hostwarn=""
+    for _w in incompatible-pointer-types int-conversion \
+              implicit-function-declaration return-mismatch format; do
+        if echo 'int main(void){return 0;}' | \
+           gcc -Wno-error="${_w}" -x c -c - -o /dev/null 2>/dev/null; then
+            _hostwarn="${_hostwarn} -Wno-error=${_w}"
+        fi
+    done
+
+    # On failure, show the part of config.log that says WHY.  autoconf's
+    # "C compiler cannot create executables" names nothing, the runner is
+    # gone by the time anyone looks, and this tree is deep enough that the
+    # workflow's own config.log dump does not glob it.
+    if ! ( cd "${HB}" && ./configure \
         --prefix=/nonexistent \
         CC=gcc CXX=g++ \
-        CPPFLAGS="-I/usr/include/tirpc -Wno-error=incompatible-pointer-types -Wno-error=int-conversion -Wno-error=implicit-function-declaration -Wno-error=return-mismatch -Wno-error=format" \
+        CPPFLAGS="-I/usr/include/tirpc${_hostwarn}" \
         LIBS="-ltirpc" \
-        --with-tcl=/usr/lib >/dev/null )
+        --with-tcl=/usr/lib >/dev/null ); then
+        echo "hosttools: native CDE objdir: configure failed" >&2
+        if [ -f "${HB}/config.log" ]; then
+            echo "--- ${HB}/config.log (from the first compiler test) ---" >&2
+            awk '/checking whether the C compiler works/ {f=1} f && n++ < 60' \
+                "${HB}/config.log" >&2
+        fi
+        exit 1
+    fi
     ( cd "${HB}" && make -C util -j"${JOBS}" >/dev/null )
     ( cd "${HB}" && make -C lib -k -j"${JOBS}" >/dev/null 2>&1 || true )
     for la in tt/lib/libtt.la DtSvc/libDtSvc.la DtWidget/libDtWidget.la \
