@@ -467,6 +467,25 @@ install_to_dist() {
     echo "Installing substrate-native man pages from usr.man/..."
     make -C "$TOP/usr.man" install DESTDIR="$DIST" >/dev/null
 
+    # Does every binary we are about to ship find what it links against?
+    #
+    # The image verification checks that a list of NAMED files exists, which
+    # passed while the image was missing eight runtime libraries -- the first
+    # anyone knew was a booted CI image printing
+    #
+    #   ld.so: main-program needs librt.so.0 - not found
+    #   ld.so: fatal: DT_NEEDED resolution failed
+    #
+    # Reporting, not fatal: it currently also finds four programs built with
+    # the HOST compiler and installed anyway (join, brandelf, compress, cpio
+    # link glibc's libc.so.6 and cannot run on substrate at all).  Those are
+    # older than this check and fixing them is separate work; failing the bake
+    # on them would just stop the tree building.  Pass --strict once they are
+    # gone.
+    if [ -x "$TOP/tools/check-dt-needed.sh" ]; then
+        "$TOP/tools/check-dt-needed.sh" "$DIST" || true
+    fi
+
     echo "Installing configuration from etc/..."
     cp -r "$TOP/etc/." "$DIST/etc/"
 
