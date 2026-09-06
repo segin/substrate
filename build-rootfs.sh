@@ -323,7 +323,24 @@ install_to_dist() {
     #
     # lib/c/Makefile's own install target has always done it this way (libc.a
     # to /usr/lib, libc.so.0 to /lib); this loop was the odd one out.
-    for libdir in c sys m pthread dl edit resolv; do
+    # Take the list from lib/Makefile's SUBDIRS rather than repeating it.
+    #
+    # This was a hardcoded "c sys m pthread dl edit resolv" while lib/ builds
+    # fifteen shared libraries, so eight never reached the image: at, curses,
+    # dbm, kvm, proc, pwdb, rt and usb.  librt is the one that surfaced --
+    # /opt/posixtestsuite's aio and mqueue programs DT_NEEDED it, and on a
+    # freshly booted CI image ld.so said
+    #
+    #   ld.so: main-program needs librt.so.0 - not found
+    #   ld.so: fatal: DT_NEEDED resolution failed
+    #
+    # A glob over lib/*/ would be wrong: lib/curses is a deliberately
+    # disabled stub (contrib/ncurses replaces it) and installing it would
+    # shadow the real one.  SUBDIRS is what lib/Makefile actually builds, so
+    # it is the list that cannot drift out of step with reality.
+    _libsubdirs=$(sed -n 's/^SUBDIRS *= *//p' "$TOP/lib/Makefile" | head -1)
+    [ -n "$_libsubdirs" ] || _libsubdirs="c sys m pthread dl edit resolv"
+    for libdir in $_libsubdirs; do
         if [ -f "$TOP/lib/$libdir/lib$libdir.a" ]; then
             cp "$TOP/lib/$libdir/lib$libdir.a" "$DIST/usr/lib/"
         fi
@@ -506,14 +523,20 @@ install_to_dist() {
     echo "Installing usr.lib helper libraries to dist/usr/lib..."
     for dir in "$TOP/usr.lib"/*/ ; do
         [ -d "$dir" ] || continue
-        name=$(basename "$dir")
-        if [ -f "$dir/lib$name.a" ]; then
-            cp "$dir/lib$name.a" "$DIST/usr/lib/"
-        fi
-        if [ -f "$dir/lib$name.so.0" ]; then
-            cp "$dir/lib$name.so.0" "$DIST/usr/lib/"
-            ln -sf "lib$name.so.0" "$DIST/usr/lib/lib$name.so"
-        fi
+        # Install what the directory actually produced, rather than deriving
+        # the file name from the directory name: usr.lib/libuu/ is already
+        # called libuu, so "lib$name.so.0" looked for liblibuu.so.0 and
+        # silently installed nothing -- leaving /usr/bin/uudecode, which
+        # DT_NEEDEDs libuu.so.0, unable to start.
+        for _a in "$dir"lib*.a; do
+            [ -f "$_a" ] && cp "$_a" "$DIST/usr/lib/"
+        done
+        for _so in "$dir"lib*.so.0; do
+            [ -f "$_so" ] || continue
+            _b=$(basename "$_so")
+            cp "$_so" "$DIST/usr/lib/"
+            ln -sf "$_b" "$DIST/usr/lib/${_b%.so.0}.so"
+        done
     done
 
     echo "Installing usr.sbin binaries..."
