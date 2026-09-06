@@ -619,6 +619,12 @@ install_to_dist() {
             # onto the native substrate image (they also collide, e.g.
             # NetBSD's /etc/security file vs the PAM /etc/security dir).
             dist-freebsd|dist-netbsd) continue ;;
+            # contrib/tde/merge-staging.sh's output: a merge of the TDE
+            # sub-ports into one prefix so each CMake layer can compile
+            # against the ones below it.  It is build scaffolding, not a
+            # package -- every file in it is already overlaid from the
+            # dist-<sub-port> tree it was copied from.
+            dist-tde-sysroot) continue ;;
         esac
         echo "Overlaying $name from $stage..."
         (cd "$stage" && tar -cf - .) | (cd "$DIST" && tar -xf -)
