@@ -22,8 +22,8 @@ Timing-dependent, so it hides -- two CI runs built this tree before one
 failed.  .NOTPARALLEL applies to this makefile alone; the rest of CDE
 still builds with -j.
 
---- a/cde/programs/dthelp/parser/pass1/eltdef/Makefile.am	2026-09-06 18:00:41.091919161 -0500
-+++ b/cde/programs/dthelp/parser/pass1/eltdef/Makefile.am	2026-09-06 18:00:41.193790439 -0500
+--- a/programs/dthelp/parser/pass1/eltdef/Makefile.am
++++ b/programs/dthelp/parser/pass1/eltdef/Makefile.am
 @@ -7,6 +7,24 @@
  ELTDEF = ./eltdef
  CONTEXT = $(HELPUTILSRC)/context
