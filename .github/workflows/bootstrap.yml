@@ -44,6 +44,11 @@ jobs:
       # discoveries cost a round trip.  Only Xinerama, jpeg and lmdb are
       # fatal in configure; the others silently disable features.
       #
+      # gperf generates fontconfig's fcobjshash.h; chrpath is what TQt3's
+      # build.sh uses to make the host tquic relocatable ($ORIGIN), and its
+      # README says so.  Both are on a developer box and neither is on a bare
+      # runner.  doxygen and intltool are deliberately NOT here: they are
+      # absent from this machine too and TDE builds without them.
       # xbitmaps supplies /usr/include/X11/bitmaps/root_weave, which CDE's
       # native lib/DtHelp/XInterface.c includes -- the host counterpart of the
       # xbitmaps port DEFAULT_CONTRIB builds for the target.  The xm_hour*
@@ -94,7 +99,7 @@ jobs:
             libfontenc-dev libfreetype-dev zlib1g-dev \
             libjpeg-dev liblmdb-dev libpam0g-dev libutempter-dev \
             libice-dev libsm-dev libxrender-dev libxau-dev libxdmcp-dev \
-            libcrypt-dev x11-xserver-utils xbitmaps
+            libcrypt-dev x11-xserver-utils xbitmaps gperf chrpath
 
       # build.sh installs the stage-1 toolchain here and says so: make it
       # yours once, and then nothing in the build needs root.
