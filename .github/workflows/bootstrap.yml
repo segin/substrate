@@ -276,3 +276,29 @@ jobs:
           compression-level: 0
           if-no-files-found: warn
           retention-days: 7
+
+      # Last, so a regression here still leaves the image uploaded to look at.
+      #
+      # The named-file check above answers "is gcc in the image".  This one
+      # answers the stronger question the boot actually asks: can every
+      # binary we ship find the libraries it links against?  A run that was
+      # green by every other measure produced an image that got as far as
+      #
+      #     Substrate init starting (pid 1)
+      #     ld.so: main-program needs librt.so.0 - not found
+      #     ld.so: fatal: DT_NEEDED resolution failed
+      #
+      # build-rootfs.sh runs the same check while baking, but only reports;
+      # this is the gate.
+      - name: Every DT_NEEDED in the staged root resolves
+        if: always()
+        run: |
+          # always(), so a failure earlier in the job still gets this
+          # answered -- but a build that died before staging has nothing to
+          # check, and reporting that as a second failure only obscures the
+          # first.
+          if [ ! -d dist ]; then
+            echo "no staged root: the build did not get that far"
+            exit 0
+          fi
+          ./tools/check-dt-needed.sh dist --strict
