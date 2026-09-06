@@ -224,12 +224,16 @@ if [ ! -f "${HB}/.substrate-hostbuild-done" ]; then
               DtHelp/libDtHelp.la DtTerm/libDtTerm.la; do
         [ -f "${HB}/lib/${la}" ] && continue
         echo "hosttools: native CDE objdir: lib/${la} failed to build" >&2
-        _d=$(dirname "${la}")
-        echo "--- errors from ${_liblog} under lib/${_d} ---" >&2
-        grep -E ": (error|fatal error):|No such file|Error [0-9]+$" "${_liblog}" \
-            | grep -E "${_d}|Error [0-9]+$" | tail -25 >&2 || true
-        echo "--- last 25 lines of the native lib build ---" >&2
-        tail -25 "${_liblog}" >&2
+        # Every compiler error in the log, unfiltered by directory.  Filtering
+        # on the library's own path looked reasonable and was wrong: the
+        # diagnostic named libDtHelp_la-XInterface.lo as the failing object
+        # and then dropped "XInterface.c:...: error: ..." on the floor,
+        # because that line does not contain "DtHelp".
+        echo "--- compiler errors in ${_liblog} ---" >&2
+        grep -nE ": (error|fatal error):|No such file or directory" "${_liblog}" \
+            | tail -40 >&2 || true
+        echo "--- last 40 lines ---" >&2
+        tail -40 "${_liblog}" >&2
         exit 1
     done
     # -static-libtool-libs: link CDE's own libtool libraries into each
