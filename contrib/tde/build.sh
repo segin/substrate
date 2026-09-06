@@ -80,4 +80,22 @@ if [ -d "${_hostbin}" ]; then
     done
     echo "==> removed ${_n} host build tool(s) from dist-tqt3/opt/trinity/bin"
 fi
+
+# Strip the sub-port staging trees.
+#
+# build.sh's contrib loop strips each port's output, but it looks for
+# dist-overlay/dist-<pkg> and this port is called "tde" -- there is no
+# dist-tde.  Every layer stages under its OWN name (dist-tqt3, dist-tdelibs,
+# ...), so the hook found nothing and silently skipped the single largest
+# thing in the image: ~277 MB of -g -O2 objects, all of it DWARF that
+# nothing on the target reads.  Strip them here, where the sub-port names
+# are known.
+_top="${SUBSTRATE_TOP:-$(cd "${HERE}/../.." && pwd)}"
+for _sub in ${TDE_BUILD}; do
+    _d="${_top}/dist-overlay/dist-${_sub}"
+    if [ -d "${_d}" ]; then
+        "${_top}/contrib/strip-staging.sh" "${_d}" "tde/${_sub}"
+    fi
+done
+
 echo "==> TDE built; staged under dist-overlay/dist-{tqt3,tqtinterface,tdelibs,tdebase,...}"
