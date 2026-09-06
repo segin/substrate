@@ -62,15 +62,21 @@ if [ -d "${_hostbin}" ]; then
     _n=0
     for _f in "${_hostbin}"/*; do
         [ -f "${_f}" ] || continue
-        [ -L "${_f}" ] && continue
+        if [ -L "${_f}" ]; then continue; fi
         # ELF class 2 == 64-bit == built for the build host.
         if [ "$(od -An -tu1 -j4 -N1 "${_f}" 2>/dev/null | tr -d ' ')" = "2" ]; then
             rm -f "${_f}"; _n=$((_n + 1))
         fi
     done
-    # Sweep the symlinks the removed files leave dangling.
+    # Sweep the symlinks the removed files leave dangling.  Spelled as an
+    # if rather than a && chain: a chain that short-circuits is the last
+    # command in the loop body, and this script runs under set -e at the
+    # end of a two-hour build -- not the place to depend on which shell
+    # honours the && exemption.
     for _f in "${_hostbin}"/*; do
-        [ -L "${_f}" ] && [ ! -e "${_f}" ] && rm -f "${_f}"
+        if [ -L "${_f}" ] && [ ! -e "${_f}" ]; then
+            rm -f "${_f}"
+        fi
     done
     echo "==> removed ${_n} host build tool(s) from dist-tqt3/opt/trinity/bin"
 fi
