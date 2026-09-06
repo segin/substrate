@@ -44,6 +44,10 @@ jobs:
       # discoveries cost a round trip.  Only Xinerama, jpeg and lmdb are
       # fatal in configure; the others silently disable features.
       #
+      # xbitmaps supplies /usr/include/X11/bitmaps/root_weave, which CDE's
+      # native lib/DtHelp/XInterface.c includes -- the host counterpart of the
+      # xbitmaps port DEFAULT_CONTRIB builds for the target.  The xm_hour*
+      # bitmaps its siblings include come from libmotif-dev.
       # x11-xserver-utils is for the PROGRAM xrdb, which CDE's configure
       # requires on the build host.  Its full required-programs list is
       # bison/byacc, flex/lex, ksh, xrdb, perl, cpp, bdftopcf, mkfontdir,
@@ -90,7 +94,7 @@ jobs:
             libfontenc-dev libfreetype-dev zlib1g-dev \
             libjpeg-dev liblmdb-dev libpam0g-dev libutempter-dev \
             libice-dev libsm-dev libxrender-dev libxau-dev libxdmcp-dev \
-            libcrypt-dev x11-xserver-utils
+            libcrypt-dev x11-xserver-utils xbitmaps
 
       # build.sh installs the stage-1 toolchain here and says so: make it
       # yours once, and then nothing in the build needs root.
