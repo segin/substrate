@@ -120,13 +120,22 @@ export STAGE1_PREFIX JOBS SUBSTRATE_TOP="$HERE"
 # staging -- they unpack and generate a fonts.dir, with no compile step and no
 # host tools -- so they are cheap to carry.
 #
+# The TDE group is expat, libpng, freetype, fontconfig, libXft and then tde.
+# TQt3 configures -xft, so the font stack has to precede it: expat feeds
+# fontconfig, libpng and zlib feed freetype, and libXft needs freetype +
+# fontconfig + libXrender (already above).  tde itself is nine layered
+# sub-ports -- tqt3, tqtinterface, dbus-1-tqt, tdelibs, tdebase and the three
+# application sets -- driven by contrib/tde/{fetch,build}.sh, which exist so
+# the stack presents as one port to the loop below.  It is the largest thing
+# in the tree by a wide margin.
+#
 # The CDE group is libXScrnSaver + motif + cde.  contrib/cde/build.sh merges
 # twenty dist-<pkg> trees into one sysroot and refuses to start if any are
 # missing; eighteen were already here, and libXScrnSaver and motif are the
 # two that were not.  Both need only the X toolkit chain built above.  cde
 # also wants mksh (the target's /bin/ksh), which is already in the list.
 #
-DEFAULT_CONTRIB="bzip2 libiconv zlib openssl ncurses gzip tzdata make sed expr libarchive mpg123 curl nginx inetutils zsh e2fsprogs e2tools gmp mpfr gdb cmake xorgproto xcb-proto libXau xtrans libxcb libX11 libXext libICE libSM libXt libXmu libXpm libXaw libXinerama libjpeg lmdb mksh tcl libtirpc xterm xauth luit xrdb libXdmcp pixman libxshmfence libfontenc libXfont libxkbfile xkbcomp xkeyboard-config encodings font-util font-misc-misc font-adobe-75dpi font-adobe-100dpi font-bh-lucida xorg-server libXScrnSaver libXrender xbitmaps motif cde"
+DEFAULT_CONTRIB="bzip2 libiconv zlib openssl ncurses gzip tzdata make sed expr libarchive mpg123 curl nginx inetutils zsh e2fsprogs e2tools gmp mpfr gdb cmake xorgproto xcb-proto libXau xtrans libxcb libX11 libXext libICE libSM libXt libXmu libXpm libXaw libXinerama libjpeg lmdb mksh tcl libtirpc xterm xauth luit xrdb libXdmcp pixman libxshmfence libfontenc libXfont libxkbfile xkbcomp xkeyboard-config encodings font-util font-misc-misc font-adobe-75dpi font-adobe-100dpi font-bh-lucida xorg-server libXScrnSaver libXrender xbitmaps motif cde expat libpng freetype fontconfig libXft tde"
 : "${ONLY:=${DEFAULT_CONTRIB}}"
 
 #
