@@ -34,7 +34,10 @@ TOP := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 .DEFAULT_GOAL :=
 
 # Branding utility for native Substrate binaries
-BRANDELF = $(TOP)/usr.bin/brandelf/brandelf
+# The HOST build of brandelf (see usr.bin/brandelf/Makefile): this is run
+# during the build, so it must be a binary the build host can exec.  The
+# target brandelf sitting beside it is the one that ships.
+BRANDELF = $(TOP)/usr.bin/brandelf/brandelf.host
 
 # Default install destination
 DESTDIR ?= $(TOP)/dist

@@ -18,7 +18,7 @@ LIBC = ../../lib/c/libc.a
 # but no longer define it); group with libc so the cross-references resolve.
 LIBSYS = ../../lib/sys/libsys.a
 CRT0 = ../../lib/c/crt0.o
-BRANDELF = ../../usr.bin/brandelf/brandelf
+BRANDELF = ../../usr.bin/brandelf/brandelf.host
 
 # Native Substrate ELF brand (ELFOSABI_STANDALONE = 255 for now, or custom)
 # Use 0 for SYSV which works, or build brandelf and use custom
