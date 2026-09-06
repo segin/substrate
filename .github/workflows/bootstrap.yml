@@ -43,6 +43,14 @@ jobs:
       # chain is the same "works by accident" that made every one of these
       # discoveries cost a round trip.  Only Xinerama, jpeg and lmdb are
       # fatal in configure; the others silently disable features.
+      #
+      # x11-xserver-utils is for the PROGRAM xrdb, which CDE's configure
+      # requires on the build host.  Its full required-programs list is
+      # bison/byacc, flex/lex, ksh, xrdb, perl, cpp, bdftopcf, mkfontdir,
+      # gzip, m4, rpcgen, gencat, onsgmls, sessreg and compress/uncompress --
+      # hosttools builds seven of those from source, the runner image already
+      # had the rest, and xrdb was the only gap.  (contrib/xrdb is the TARGET
+      # one; it does not run here.)
       # The X11/Motif/tirpc/tcl -dev packages are for CDE, and only for its
       # BUILD-HOST half: hosttools/build.sh compiles a complete NATIVE CDE
       # objdir whose libtt, libDtSvc, libDtWidget, libDtHelp and libDtTerm all
@@ -82,7 +90,7 @@ jobs:
             libfontenc-dev libfreetype-dev zlib1g-dev \
             libjpeg-dev liblmdb-dev libpam0g-dev libutempter-dev \
             libice-dev libsm-dev libxrender-dev libxau-dev libxdmcp-dev \
-            libcrypt-dev
+            libcrypt-dev x11-xserver-utils
 
       # build.sh installs the stage-1 toolchain here and says so: make it
       # yours once, and then nothing in the build needs root.
