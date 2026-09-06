@@ -213,10 +213,24 @@ if [ ! -f "${HB}/.substrate-hostbuild-done" ]; then
         exit 1
     fi
     ( cd "${HB}" && make -C util -j"${JOBS}" >/dev/null )
-    ( cd "${HB}" && make -C lib -k -j"${JOBS}" >/dev/null 2>&1 || true )
+    # -k, and the output goes to a log rather than /dev/null: the target-only
+    # parts and the DtMmdb C++ bits are EXPECTED to fail natively, so the
+    # build cannot be fatal -- but when one of the libraries below is missing
+    # afterwards, that log is the only record of why, and discarding it meant
+    # the check reported "failed to build" and nothing else.
+    _liblog="${HB}/.substrate-native-lib.log"
+    ( cd "${HB}" && make -C lib -k -j"${JOBS}" >"${_liblog}" 2>&1 || true )
     for la in tt/lib/libtt.la DtSvc/libDtSvc.la DtWidget/libDtWidget.la \
               DtHelp/libDtHelp.la DtTerm/libDtTerm.la; do
-        [ -f "${HB}/lib/${la}" ] || { echo "hosttools: native CDE objdir: lib/${la} failed to build" >&2; exit 1; }
+        [ -f "${HB}/lib/${la}" ] && continue
+        echo "hosttools: native CDE objdir: lib/${la} failed to build" >&2
+        _d=$(dirname "${la}")
+        echo "--- errors from ${_liblog} under lib/${_d} ---" >&2
+        grep -E ": (error|fatal error):|No such file|Error [0-9]+$" "${_liblog}" \
+            | grep -E "${_d}|Error [0-9]+$" | tail -25 >&2 || true
+        echo "--- last 25 lines of the native lib build ---" >&2
+        tail -25 "${_liblog}" >&2
+        exit 1
     done
     # -static-libtool-libs: link CDE's own libtool libraries into each
     # generator so it runs standalone; the system X/Motif/tirpc libraries
