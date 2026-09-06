@@ -77,10 +77,23 @@ echo "==> autogen.sh (generate configure)"
 # --- substrate host triple, in the GENERATED files -------------------------
 # config.sub and libtool's host_os case arms come out of autoconf/libtool, so
 # they cannot be carried as patches against the source tree.
-if ! grep -q 'substrate\*' "${CDE}/config.sub"; then
-    echo "==> teaching config.sub the substrate OS"
-    sed -i 's/\(\t| sunos \\\)/\t| substrate* \\\n\1/' "${CDE}/config.sub"
-fi
+#
+# autogen.sh regenerates config.sub from whatever automake the BUILD HOST has,
+# so its layout is not ours to predict.  The sed here used to anchor on a
+# literal "\t| sunos \\" line; that exists in automake 1.18's copy and not in
+# the one Ubuntu 24.04 ships, so on a runner it matched nothing, said nothing,
+# and configure failed much later with
+#
+#   Invalid configuration `i386-unknown-substrate': OS `substrate' not
+#   recognized
+#
+# substrate_config_sub_fix knows the three layouts in circulation and, more
+# importantly, asserts afterwards by running config.sub on the target triple.
+# This is the third port to hit the same bug (motif and the shared helper were
+# the others), so use the shared implementation rather than a fourth sed.
+echo "==> teaching config.sub the substrate OS"
+. "${HERE}/../substrate-autotools.sh"
+substrate_config_sub_fix "${CDE}"
 # libtool decides shared-library behaviour from a long series of host_os case
 # statements.  Rather than match their exact alternative lists — which differ
 # between libtool releases, and silently stop matching when a new OS is added
