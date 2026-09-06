@@ -4,8 +4,15 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 SUBSTRATE_TOP="$(cd "${HERE}/../.." && pwd)"
 : "${STAGE1_PREFIX:=/opt/substrate}"; : "${JOBS:=$(nproc 2>/dev/null || echo 4)}"
 SR="${STAGE1_PREFIX}/i386-unknown-substrate"; PATH="${STAGE1_PREFIX}/bin:${PATH}"; export PATH
-BINU="$(ls -d "${SUBSTRATE_TOP}"/contrib/binutils/build/binutils-*/ | head -1)"
-cfgsub() { for s in config.sub config.guess; do find . -name "$s" -exec cp -f "${BINU}/$s" {} + ; done
+# config.sub/config.guess via the shared helper.  Copying them straight out
+# of contrib/binutils/build/ only works when the toolchain was built THIS
+# run: build.sh sets SKIP_TOOLCHAIN=1 on a CI toolchain-cache hit, and the
+# cache does not carry that extracted tree, so the old `ls -d ... | head -1`
+# left BINU empty and the port died on `cp -f /config.sub`.  The helper
+# prefers binutils when it is there, patches the tree's own copy when it is
+# not, and asserts the result actually accepts the triple.
+. "${HERE}/../substrate-autotools.sh"
+cfgsub() { substrate_config_sub_fix "."
   sh "${SUBSTRATE_TOP}/contrib/substrate-libtool-shared.sh" ./configure >/dev/null 2>&1 || true; }
 osabi_mirror() { # $1=DEST  (stamp .so + mirror libs/headers/pc to sysroot)
   find "$1" -name "*.la" -delete

@@ -129,13 +129,27 @@ export STAGE1_PREFIX JOBS SUBSTRATE_TOP="$HERE"
 # the stack presents as one port to the loop below.  It is the largest thing
 # in the tree by a wide margin.
 #
+# TDE's own non-X dependencies follow the font stack: libffi glib2 libxml2
+# libxslt libXi dbus.  These ports all existed but had never been in this
+# list, so they were only ever present on a machine that had built them by
+# hand -- CI got as far as dbus-1-tqt and stopped at
+#
+#     dbus-1 is required, but was not found on your system
+#
+# The set is not a guess: it is what the layers actually resolved, read out
+# of the __pkg_config_checked_* entries in each CMakeCache.txt of a
+# successful build -- DBUS, GLIB2, GOBJECT2, LIBXML2, LIBXSLT and XINPUT
+# were the ones with no port in this list.  Order is libffi before glib2,
+# libxml2 before libxslt, and expat (above) before dbus; libXi needs only
+# xorgproto + libX11 + libXext, long since built.
+#
 # The CDE group is libXScrnSaver + motif + cde.  contrib/cde/build.sh merges
 # twenty dist-<pkg> trees into one sysroot and refuses to start if any are
 # missing; eighteen were already here, and libXScrnSaver and motif are the
 # two that were not.  Both need only the X toolkit chain built above.  cde
 # also wants mksh (the target's /bin/ksh), which is already in the list.
 #
-DEFAULT_CONTRIB="bzip2 libiconv zlib openssl ncurses gzip tzdata make sed expr libarchive mpg123 curl nginx inetutils zsh e2fsprogs e2tools gmp mpfr gdb cmake xorgproto xcb-proto libXau xtrans libxcb libX11 libXext libICE libSM libXt libXmu libXpm libXaw libXinerama libjpeg lmdb mksh tcl libtirpc xterm xauth luit xrdb libXdmcp pixman libxshmfence libfontenc libXfont libxkbfile xkbcomp xkeyboard-config encodings font-util font-misc-misc font-adobe-75dpi font-adobe-100dpi font-bh-lucida xorg-server libXScrnSaver libXrender xbitmaps motif cde expat libpng freetype fontconfig libXft tde"
+DEFAULT_CONTRIB="bzip2 libiconv zlib openssl ncurses gzip tzdata make sed expr libarchive mpg123 curl nginx inetutils zsh e2fsprogs e2tools gmp mpfr gdb cmake xorgproto xcb-proto libXau xtrans libxcb libX11 libXext libICE libSM libXt libXmu libXpm libXaw libXinerama libjpeg lmdb mksh tcl libtirpc xterm xauth luit xrdb libXdmcp pixman libxshmfence libfontenc libXfont libxkbfile xkbcomp xkeyboard-config encodings font-util font-misc-misc font-adobe-75dpi font-adobe-100dpi font-bh-lucida xorg-server libXScrnSaver libXrender xbitmaps motif cde expat libpng freetype fontconfig libXft libffi glib2 libxml2 libxslt libXi dbus tde"
 : "${ONLY:=${DEFAULT_CONTRIB}}"
 
 #
