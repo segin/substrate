@@ -1,21 +1,9 @@
-DYNAMIC = 1
-
-include ../../Makefile.inc
-
 PROG = cpio
 SRCS = cpio.c
 
-CFLAGS += -D_POSIX_C_SOURCE=200809L -D_XOPEN_SOURCE=700
+DYNAMIC = 1
 
-all: $(PROG)
+include ../../Makefile.bin.inc
 
-$(PROG): $(SRCS)
-	$(CC) $(CFLAGS) -o $@ $(SRCS)
-
-clean:
-	rm -f $(PROG) *.o
-
-install: $(PROG)
-	@echo "Installing $(PROG)..."
-	@mkdir -p $(DESTDIR)/usr/bin
-	@cp $(PROG) $(DESTDIR)/usr/bin/$(PROG)
+BINDIR = $(DESTDIR)/usr/bin
+USER_CFLAGS += -D_POSIX_C_SOURCE=200809L -D_XOPEN_SOURCE=700
