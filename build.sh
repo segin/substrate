@@ -129,10 +129,10 @@ export STAGE1_PREFIX JOBS SUBSTRATE_TOP="$HERE"
 # the stack presents as one port to the loop below.  It is the largest thing
 # in the tree by a wide margin.
 #
-# TDE's own non-X dependencies follow the font stack: libffi glib2 libxml2
-# libxslt libXi dbus.  These ports all existed but had never been in this
-# list, so they were only ever present on a machine that had built them by
-# hand -- CI got as far as dbus-1-tqt and stopped at
+# TDE's own remaining dependencies follow the font stack: libffi glib2
+# libxml2 libxslt libXfixes libXi dbus.  These ports all existed but had
+# never been in this list, so they were only ever present on a machine that
+# had built them by hand -- CI got as far as dbus-1-tqt and stopped at
 #
 #     dbus-1 is required, but was not found on your system
 #
@@ -140,8 +140,15 @@ export STAGE1_PREFIX JOBS SUBSTRATE_TOP="$HERE"
 # of the __pkg_config_checked_* entries in each CMakeCache.txt of a
 # successful build -- DBUS, GLIB2, GOBJECT2, LIBXML2, LIBXSLT and XINPUT
 # were the ones with no port in this list.  Order is libffi before glib2,
-# libxml2 before libxslt, and expat (above) before dbus; libXi needs only
-# xorgproto + libX11 + libXext, long since built.
+# libxml2 before libxslt, and expat (above) before dbus.
+#
+# libXfixes is here because libXi wants it.  contrib/libXi's own header says
+# it "Depends on xorgproto, libX11, libXext"; that prose is incomplete, and
+# libXi 1.8.2's configure.ac also asks for xfixes >= 5 -- which CI found the
+# hard way, one run after the dbus one.  Read PKG_CHECK_MODULES out of a
+# port's configure.ac: the generated configure has the macro expanded, and
+# the README is prose.  libXfixes itself needs only xproto, fixesproto,
+# xextproto and x11, all long since built.
 #
 # The CDE group is libXScrnSaver + motif + cde.  contrib/cde/build.sh merges
 # twenty dist-<pkg> trees into one sysroot and refuses to start if any are
@@ -149,7 +156,7 @@ export STAGE1_PREFIX JOBS SUBSTRATE_TOP="$HERE"
 # two that were not.  Both need only the X toolkit chain built above.  cde
 # also wants mksh (the target's /bin/ksh), which is already in the list.
 #
-DEFAULT_CONTRIB="bzip2 libiconv zlib openssl ncurses gzip tzdata make sed expr libarchive mpg123 curl nginx inetutils zsh e2fsprogs e2tools gmp mpfr gdb cmake xorgproto xcb-proto libXau xtrans libxcb libX11 libXext libICE libSM libXt libXmu libXpm libXaw libXinerama libjpeg lmdb mksh tcl libtirpc xterm xauth luit xrdb libXdmcp pixman libxshmfence libfontenc libXfont libxkbfile xkbcomp xkeyboard-config encodings font-util font-misc-misc font-adobe-75dpi font-adobe-100dpi font-bh-lucida xorg-server libXScrnSaver libXrender xbitmaps motif cde expat libpng freetype fontconfig libXft libffi glib2 libxml2 libxslt libXi dbus tde"
+DEFAULT_CONTRIB="bzip2 libiconv zlib openssl ncurses gzip tzdata make sed expr libarchive mpg123 curl nginx inetutils zsh e2fsprogs e2tools gmp mpfr gdb cmake xorgproto xcb-proto libXau xtrans libxcb libX11 libXext libICE libSM libXt libXmu libXpm libXaw libXinerama libjpeg lmdb mksh tcl libtirpc xterm xauth luit xrdb libXdmcp pixman libxshmfence libfontenc libXfont libxkbfile xkbcomp xkeyboard-config encodings font-util font-misc-misc font-adobe-75dpi font-adobe-100dpi font-bh-lucida xorg-server libXScrnSaver libXrender xbitmaps motif cde expat libpng freetype fontconfig libXft libffi glib2 libxml2 libxslt libXfixes libXi dbus tde"
 : "${ONLY:=${DEFAULT_CONTRIB}}"
 
 #
