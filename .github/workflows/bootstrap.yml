@@ -34,6 +34,15 @@ jobs:
       # libfontenc-dev / libfreetype-dev / zlib1g-dev are for the same CDE
       # host half: hosttools builds mkfontscale from source, whose configure
       # does PKG_CHECK_MODULES on fontenc, freetype2 and zlib.
+      #
+      # The rest are the full set CDE's own configure AC_CHECK_LIBs on the
+      # host: ICE SM X11 Xau Xdmcp Xext Xinerama Xm Xmu Xpm Xrender Xt crypt
+      # jpeg lmdb m pam tirpc utempter.  Several would arrive transitively
+      # (libxt-dev pulls ICE and SM, libx11-dev pulls Xau and Xdmcp), but
+      # naming them is the point: relying on another package's dependency
+      # chain is the same "works by accident" that made every one of these
+      # discoveries cost a round trip.  Only Xinerama, jpeg and lmdb are
+      # fatal in configure; the others silently disable features.
       # The X11/Motif/tirpc/tcl -dev packages are for CDE, and only for its
       # BUILD-HOST half: hosttools/build.sh compiles a complete NATIVE CDE
       # objdir whose libtt, libDtSvc, libDtWidget, libDtHelp and libDtTerm all
@@ -70,7 +79,10 @@ jobs:
             grub-common grub-pc-bin util-linux zstd \
             libmotif-dev libx11-dev libxt-dev libxext-dev libxmu-dev \
             libxpm-dev libxinerama-dev libxft-dev libtirpc-dev tcl-dev \
-            libfontenc-dev libfreetype-dev zlib1g-dev
+            libfontenc-dev libfreetype-dev zlib1g-dev \
+            libjpeg-dev liblmdb-dev libpam0g-dev libutempter-dev \
+            libice-dev libsm-dev libxrender-dev libxau-dev libxdmcp-dev \
+            libcrypt-dev
 
       # build.sh installs the stage-1 toolchain here and says so: make it
       # yours once, and then nothing in the build needs root.

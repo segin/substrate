@@ -202,9 +202,13 @@ if [ ! -f "${HB}/.substrate-hostbuild-done" ]; then
         --with-tcl=/usr/lib >/dev/null ); then
         echo "hosttools: native CDE objdir: configure failed" >&2
         if [ -f "${HB}/config.log" ]; then
-            echo "--- ${HB}/config.log (from the first compiler test) ---" >&2
-            awk '/checking whether the C compiler works/ {f=1} f && n++ < 60' \
-                "${HB}/config.log" >&2
+            # The TAIL is where autoconf records what actually stopped it --
+            # the first-compiler-test region is boilerplate whenever the
+            # compiler itself is fine, which cost a round trip to learn.
+            echo "--- ${HB}/config.log (last 60 lines) ---" >&2
+            tail -60 "${HB}/config.log" >&2
+            echo "--- configure: error lines ---" >&2
+            grep -E "^configure: error|: error:" "${HB}/config.log" >&2 || true
         fi
         exit 1
     fi
