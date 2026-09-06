@@ -19,3 +19,4 @@
 0014-dtfile-do-not-deref-a-NULL-datatype-name-list.patch
 0015-ttdbserverd-do-not-let-a-client-socket-become-stderr.patch
 0016-tttypes-install-the-ptype-sources-too.patch
+0017-dthelp-pass1-eltdef-do-not-build-in-parallel.patch
