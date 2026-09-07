@@ -130,7 +130,7 @@ export STAGE1_PREFIX JOBS SUBSTRATE_TOP="$HERE"
 # in the tree by a wide margin.
 #
 # TDE's own remaining dependencies follow the font stack: libffi glib2
-# libxml2 libxslt libXfixes libXi dbus.  These ports all existed but had
+# libxml2 libxslt file libXfixes libXi dbus.  These ports all existed but had
 # never been in this list, so they were only ever present on a machine that
 # had built them by hand -- CI got as far as dbus-1-tqt and stopped at
 #
@@ -156,7 +156,7 @@ export STAGE1_PREFIX JOBS SUBSTRATE_TOP="$HERE"
 # two that were not.  Both need only the X toolkit chain built above.  cde
 # also wants mksh (the target's /bin/ksh), which is already in the list.
 #
-DEFAULT_CONTRIB="bzip2 libiconv zlib openssl ncurses gzip tzdata make sed expr libarchive mpg123 curl nginx inetutils zsh e2fsprogs e2tools gmp mpfr gdb cmake xorgproto xcb-proto libXau xtrans libxcb libX11 libXext libICE libSM libXt libXmu libXpm libXaw libXinerama libjpeg lmdb mksh tcl libtirpc xterm xauth luit xrdb libXdmcp pixman libxshmfence libfontenc libXfont libxkbfile xkbcomp xkeyboard-config encodings font-util font-misc-misc font-adobe-75dpi font-adobe-100dpi font-bh-lucida xorg-server libXScrnSaver libXrender xbitmaps motif cde expat libpng freetype fontconfig libXft libffi glib2 libxml2 libxslt libXfixes libXi dbus tde"
+DEFAULT_CONTRIB="bzip2 libiconv zlib openssl ncurses gzip tzdata make sed expr libarchive mpg123 curl nginx inetutils zsh e2fsprogs e2tools gmp mpfr gdb cmake xorgproto xcb-proto libXau xtrans libxcb libX11 libXext libICE libSM libXt libXmu libXpm libXaw libXinerama libjpeg lmdb mksh tcl libtirpc xterm xauth luit xrdb libXdmcp pixman libxshmfence libfontenc libXfont libxkbfile xkbcomp xkeyboard-config encodings font-util font-misc-misc font-adobe-75dpi font-adobe-100dpi font-bh-lucida xorg-server libXScrnSaver libXrender xbitmaps motif cde expat libpng freetype fontconfig libXft libffi glib2 libxml2 libxslt file libXfixes libXi dbus tde"
 : "${ONLY:=${DEFAULT_CONTRIB}}"
 
 #

@@ -7,10 +7,15 @@ SUBSTRATE_TOP="$(cd "${HERE}/../.." && pwd)"
 : "${STAGE1_PREFIX:=/opt/substrate}"; : "${JOBS:=$(nproc 2>/dev/null || echo 4)}"
 SR="${STAGE1_PREFIX}/i386-unknown-substrate"; PATH="${STAGE1_PREFIX}/bin:${PATH}"; export PATH
 TREE="${HERE}/build/file-5.45"; DEST="${SUBSTRATE_TOP}/dist-overlay/dist-file"
-BINU="$(ls -d "${SUBSTRATE_TOP}"/contrib/binutils/build/binutils-*/ | head -1)"
+# config.sub via the shared helper, not a copy out of
+# contrib/binutils/build/binutils-*/: that tree only exists when the
+# toolchain was built this run, and build.sh sets SKIP_TOOLCHAIN=1 on a CI
+# toolchain-cache hit.  The old `ls -d ... | head -1` then returned nothing
+# and the build died on `cp -f /config.sub`.
+. "${HERE}/../substrate-autotools.sh"
 [ -d "${TREE}" ] || { echo "run ./fetch.sh first" >&2; exit 1; }
 cd "${TREE}"
-for s in config.sub config.guess; do find . -name "$s" -exec cp -f "${BINU}/$s" {} + ; done
+substrate_config_sub_fix "."
 sh "${SUBSTRATE_TOP}/contrib/substrate-libtool-shared.sh" ./configure >/dev/null 2>&1 || true
 # substrate keeps POSIX regcomp/regexec in libregex (not libc) -> -lregex.
 ./configure --host=i386-unknown-substrate --prefix=/usr --enable-shared --enable-static \
