@@ -195,13 +195,14 @@ jobs:
           #     -- Looking for magic_load in magic - not found
           #
           # and the compiler command and linker diagnostic that explain WHY
-          # go to CMakeError.log.  Without this, working out that a failing
-          # tdelibs check was the NATIVE configure rather than the cross one
-          # meant reading 88k lines of run log backwards for the nearest
-          # "Check for working C compiler" line.
-          # CMake 3.26 dropped CMakeError.log/CMakeOutput.log in favour of
-          # CMakeConfigureLog.yaml, and the ports build cmake 3.30, so that
-          # is the file to reach for.
+          # go to a file, not the console.  Without this, working out that a
+          # failing tdelibs check was the NATIVE configure rather than the
+          # cross one meant reading 88k lines of run log backwards for the
+          # nearest "Check for working C compiler" line.
+          #
+          # That file is CMakeConfigureLog.yaml: CMake 3.26 replaced
+          # CMakeError.log/CMakeOutput.log with it, and the ports build
+          # cmake 3.30, so the old names would match nothing.
           for log in contrib/tde/*/build/*/obj/CMakeFiles/CMakeConfigureLog.yaml \
                      contrib/tde/*/hostbuild/obj/CMakeFiles/CMakeConfigureLog.yaml \
                      contrib/tde/*/build/*/hostobj/CMakeFiles/CMakeConfigureLog.yaml \
