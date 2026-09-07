@@ -100,7 +100,8 @@ jobs:
             libjpeg-dev liblmdb-dev libpam0g-dev libutempter-dev \
             libice-dev libsm-dev libxrender-dev libxau-dev libxdmcp-dev \
             libcrypt-dev x11-xserver-utils xbitmaps gperf chrpath \
-            libmagic-dev libglib2.0-dev libxml2-dev libxslt1-dev
+            libmagic-dev libglib2.0-dev libxml2-dev libxslt1-dev \
+            libdbus-1-dev
 
       # build.sh installs the stage-1 toolchain here and says so: make it
       # yours once, and then nothing in the build needs root.
