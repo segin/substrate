@@ -162,6 +162,8 @@ export STAGE1_PREFIX JOBS SUBSTRATE_TOP="$HERE"
 #
 # Ordering, where it is not obvious:
 #   libogg before libvorbis/flac/speex; libopus before sox
+#   cjson -> disasterparty -> motifgpt (motifgpt's configure ends with
+#     "disasterparty not found", and disasterparty itself wants libcjson)
 #   libparserutils + libwapcaplet before libcss/libdom/libhubbub (NetSurf)
 #   glib1 before gtk1 -- the GTK1 stack is independent of the GTK2 one
 #   cairo before harfbuzz (harfbuzz probes cairo, not the reverse), then
@@ -181,7 +183,7 @@ export STAGE1_PREFIX JOBS SUBSTRATE_TOP="$HERE"
 # two that were not.  Both need only the X toolkit chain built above.  cde
 # also wants mksh (the target's /bin/ksh), which is already in the list.
 #
-DEFAULT_CONTRIB="bzip2 libiconv zlib openssl ncurses gzip tzdata make sed expr libarchive mpg123 curl nginx inetutils zsh e2fsprogs e2tools gmp mpfr gdb cmake xorgproto xcb-proto libXau xtrans libxcb libX11 libXext libICE libSM libXt libXmu libXpm libXaw libXinerama libjpeg lmdb mksh tcl libtirpc xterm xauth luit xrdb libXdmcp pixman libxshmfence libfontenc libXfont libxkbfile xkbcomp xkeyboard-config encodings font-util font-misc-misc font-adobe-75dpi font-adobe-100dpi font-bh-lucida xorg-server libXScrnSaver libXrender xbitmaps motif cde expat libpng freetype fontconfig libXft libffi glib2 libxml2 libxslt file libXfixes libXi libXtst dbus tde pkg-config ca-certificates sqlite3 cjson quickjs mandoc less posixtestsuite motifgpt iceauth libXfont2 libXcursor fribidi libparserutils libwapcaplet libcss libdom libhubbub glib1 gtk1 libogg libvorbis flac speex libopus faad2 fdk-aac spandsp taglib sox openssh rpcbind disasterparty twm ctwm matwm2 xprop xset xsetroot xkill xeyes xcalc xedit xman cairo atk gdk-pixbuf harfbuzz pango gtk2 hexchat links elinks sdl3 sdl2-compat sdl12-compat psymp3"
+DEFAULT_CONTRIB="bzip2 libiconv zlib openssl ncurses gzip tzdata make sed expr libarchive mpg123 curl nginx inetutils zsh e2fsprogs e2tools gmp mpfr gdb cmake xorgproto xcb-proto libXau xtrans libxcb libX11 libXext libICE libSM libXt libXmu libXpm libXaw libXinerama libjpeg lmdb mksh tcl libtirpc xterm xauth luit xrdb libXdmcp pixman libxshmfence libfontenc libXfont libxkbfile xkbcomp xkeyboard-config encodings font-util font-misc-misc font-adobe-75dpi font-adobe-100dpi font-bh-lucida xorg-server libXScrnSaver libXrender xbitmaps motif cde expat libpng freetype fontconfig libXft libffi glib2 libxml2 libxslt file libXfixes libXi libXtst dbus tde pkg-config ca-certificates sqlite3 cjson quickjs mandoc less posixtestsuite iceauth libXfont2 libXcursor fribidi libparserutils libwapcaplet libcss libdom libhubbub glib1 gtk1 libogg libvorbis flac speex libopus faad2 fdk-aac spandsp taglib sox openssh rpcbind disasterparty motifgpt twm ctwm matwm2 xprop xset xsetroot xkill xeyes xcalc xedit xman cairo atk gdk-pixbuf harfbuzz pango gtk2 hexchat links elinks sdl3 sdl2-compat sdl12-compat psymp3"
 : "${ONLY:=${DEFAULT_CONTRIB}}"
 
 #
