@@ -337,11 +337,28 @@ fi
 if [ "$SKIP_CONTRIB" = 1 ]; then
     step "Stage 2: CONTRIB (skipped — SKIP_CONTRIB=1)"
 else
+    # Validate the whole list before building any of it.
+    #
+    # These same three tests used to live inside the loop, which meant a
+    # port with a non-executable build.sh was not noticed until its turn
+    # came.  Adding `file` to DEFAULT_CONTRIB cost a 65-minute CI run to
+    # learn that its build.sh was mode 100644 -- a second's worth of check,
+    # paid for an hour later, after 78 other ports had already built.
+    # Report every offender rather than the first, so one pass fixes them
+    # all.
+    _bad=
     for pkg in $ONLY; do
-        [ -d "contrib/$pkg" ] || { echo "build.sh: no such contrib/$pkg" >&2; exit 1; }
-        [ -x "contrib/$pkg/fetch.sh" ] || { echo "build.sh: contrib/$pkg has no fetch.sh" >&2; exit 1; }
-        [ -x "contrib/$pkg/build.sh" ] || { echo "build.sh: contrib/$pkg has no build.sh" >&2; exit 1; }
+        [ -d "contrib/$pkg" ]           || _bad="$_bad\n  no such directory:  contrib/$pkg"
+        [ -x "contrib/$pkg/fetch.sh" ]  || _bad="$_bad\n  missing or not executable:  contrib/$pkg/fetch.sh"
+        [ -x "contrib/$pkg/build.sh" ]  || _bad="$_bad\n  missing or not executable:  contrib/$pkg/build.sh"
+    done
+    if [ -n "$_bad" ]; then
+        printf 'build.sh: cannot start Stage 2:%b\n' "$_bad" >&2
+        echo "  (git records the mode: chmod +x, then git update-index --chmod=+x)" >&2
+        exit 1
+    fi
 
+    for pkg in $ONLY; do
         step "Stage 2: contrib/$pkg"
         ( cd "contrib/$pkg" && ./fetch.sh )
         ( cd "contrib/$pkg" && ./build.sh )
