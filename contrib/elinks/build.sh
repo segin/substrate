@@ -59,6 +59,14 @@ endian = 'little'
 
 [properties]
 pkg_config_libdir = '${SYSROOT}/lib/pkgconfig'
+# sys_root makes meson export PKG_CONFIG_SYSROOT_DIR, which prefixes the
+# -L and -I that pkg-config emits.  Without it the sysroot's own .pc files
+# -- they all carry prefix=/usr -- produce a bare "-L/usr/lib", an absolute
+# path that escapes the sysroot and points at the BUILD host:
+#     ld: /usr/lib/libz.so: error adding symbols: file in wrong format
+# pkg_config_libdir alone only decides which .pc files are read, not how
+# the paths inside them are interpreted.
+sys_root = '${SYSROOT}'
 
 [built-in options]
 c_args = ['-march=i586', '-mtune=i686', '-fno-pie']
