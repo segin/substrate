@@ -8,10 +8,13 @@ SUBSTRATE_TOP="$(cd "${HERE}/../.." && pwd)"
 : "${STAGE1_PREFIX:=/opt/substrate}"; : "${JOBS:=$(nproc 2>/dev/null || echo 4)}"
 SR="${STAGE1_PREFIX}/i386-unknown-substrate"; PATH="${STAGE1_PREFIX}/bin:${PATH}"; export PATH
 TREE="${HERE}/build/sox-14.4.2"; DEST="${SUBSTRATE_TOP}/dist-overlay/dist-sox"
-BINU="$(ls -d "${SUBSTRATE_TOP}"/contrib/binutils/build/binutils-*/ | head -1)"
+# config.sub via the shared helper rather than a copy out of
+# contrib/binutils/build/: that tree only exists when the toolchain was
+# built this run, and build.sh sets SKIP_TOOLCHAIN=1 on a CI cache hit.
+. "${HERE}/../substrate-autotools.sh"
 [ -d "${TREE}" ] || { echo "run ./fetch.sh first" >&2; exit 1; }
 cd "${TREE}"
-for s in config.sub config.guess; do find . -name "$s" -exec cp -f "${BINU}/$s" {} + ; done
+substrate_config_sub_fix "."
 sh "${SUBSTRATE_TOP}/contrib/substrate-libtool-shared.sh" ./configure >/dev/null 2>&1 || true
 export PKG_CONFIG_PATH="${SR}/lib/pkgconfig"
 DEMOTE="-Wno-error=implicit-function-declaration -Wno-error=int-conversion -Wno-error=incompatible-pointer-types"

@@ -56,11 +56,14 @@ fi
 # newest one).  Not strictly required here — we configure as a *linux* host and
 # the autoreconf'd config.sub already recognises i386-unknown-linux-gnu — but we
 # keep it for robustness in case a future host triple needs it.
-CFGSUB="${SUBSTRATE_TOP}/contrib/binutils/build/binutils-2.46.0/config.sub"
-CFGGUESS="${SUBSTRATE_TOP}/contrib/binutils/build/binutils-2.46.0/config.guess"
+# This configures as a *linux* host, so the tree's own config.sub already
+# accepts the triple and this never fires -- but it named
+# binutils-2.46.0 explicitly, which is both a version that will move and a
+# tree that does not exist on a CI toolchain-cache hit.  The shared helper
+# has neither problem.
 if ! ./config.sub i386-unknown-linux-gnu >/dev/null 2>&1; then
-    [ -f "${CFGSUB}" ]   && cp "${CFGSUB}"   ./config.sub
-    [ -f "${CFGGUESS}" ] && cp "${CFGGUESS}" ./config.guess
+    . "${HERE}/../substrate-autotools.sh"
+    substrate_config_sub_fix "."
 fi
 
 # --- 2. Configure ----------------------------------------------------------
