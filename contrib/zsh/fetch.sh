@@ -22,7 +22,7 @@ if [ ! -f "${TARBALL}" ]; then
     [ "${1:-}" = "--no-network" ] && { echo "fetch.sh: tarball missing" >&2; exit 1; }
     echo "==> Fetching ${URL}"
     if command -v curl >/dev/null 2>&1; then
-        curl -fSL -o "${TARBALL}" "${URL}" || curl -fSL -o "${TARBALL}" "${URL_FALLBACK}"
+        curl -fSL --retry 3 --retry-delay 3 --retry-all-errors -o "${TARBALL}" "${URL}" || curl -fSL --retry 3 --retry-delay 3 --retry-all-errors -o "${TARBALL}" "${URL_FALLBACK}"
     else
         wget -O "${TARBALL}" "${URL}" || wget -O "${TARBALL}" "${URL_FALLBACK}"
     fi

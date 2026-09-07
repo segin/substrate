@@ -11,7 +11,7 @@
 #
 #   gpg --keyserver keyserver.ubuntu.com --recv-keys \
 #       7E3792A9D8ACF7D633BC1588ED97E90E62AA7E34
-#   curl -O https://data.iana.org/time-zones/releases/tzcode<v>.tar.gz.asc
+#   curl -O --retry 3 --retry-delay 3 --retry-all-errors https://data.iana.org/time-zones/releases/tzcode<v>.tar.gz.asc
 #   gpg --verify tzcode<v>.tar.gz.asc tzcode<v>.tar.gz
 #   sha256sum tzcode<v>.tar.gz   # then update TZCODE_SHA
 set -eu
@@ -40,7 +40,7 @@ fetch() {
     fi
     echo "==> Fetching ${url}"
     if command -v curl >/dev/null 2>&1; then
-        curl -fSL -o "${tar}" "${url}"
+        curl -fSL --retry 3 --retry-delay 3 --retry-all-errors -o "${tar}" "${url}"
     else
         wget -O "${tar}" "${url}"
     fi

@@ -22,7 +22,7 @@ cd "${BUILD_DIR}"
 if [ ! -f "${TARBALL}" ]; then
     [ "${1:-}" = "--no-network" ] && { echo "fetch.sh: tarball missing" >&2; exit 1; }
     echo "==> Fetching ${URL}"
-    curl -fSL -o "${TARBALL}" "${URL}"
+    curl -fSL --retry 3 --retry-delay 3 --retry-all-errors -o "${TARBALL}" "${URL}"
 fi
 
 # No SHA pin (master is a moving target); print the current SHA for the

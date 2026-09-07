@@ -21,7 +21,7 @@ while [ $# -ge 2 ]; do
   if [ ! -f "$t" ]; then
     [ "${1:-}" = "--no-network" ] && { echo "fetch: $t missing" >&2; exit 1; }
     echo "==> Fetching ${base}/${t}"
-    if command -v curl >/dev/null 2>&1; then curl -fSL -o "$t" "${base}/${t}"; else wget -O "$t" "${base}/${t}"; fi
+    if command -v curl >/dev/null 2>&1; then curl -fSL --retry 3 --retry-delay 3 --retry-all-errors -o "$t" "${base}/${t}"; else wget -O "$t" "${base}/${t}"; fi
   fi
   echo "${sha}  ${t}" | sha256sum -c -
   [ -d "${name}" ] || tar xf "$t"

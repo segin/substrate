@@ -8,7 +8,7 @@ URL="https://github.com/knik0/faad2/archive/refs/tags/${VER}.tar.gz"
 SHA256="72dbc0494de9ee38d240f670eccf2b10ef715fd0508c305532ca3def3225bb06"
 HERE="$(cd "$(dirname "$0")" && pwd)"; BUILD_DIR="${HERE}/build"; TREE="${BUILD_DIR}/faad2-${VER}"
 mkdir -p "${BUILD_DIR}"; cd "${BUILD_DIR}"
-[ -f "${TB}" ] || { [ "${1:-}" = "--no-network" ] && { echo "missing tarball" >&2; exit 1; }; curl -fSL -o "${TB}" "${URL}"; }
+[ -f "${TB}" ] || { [ "${1:-}" = "--no-network" ] && { echo "missing tarball" >&2; exit 1; }; curl -fSL --retry 3 --retry-delay 3 --retry-all-errors -o "${TB}" "${URL}"; }
 echo "${SHA256}  ${TB}" | sha256sum -c -
 [ -d "${TREE}" ] || tar xf "${TB}"
 if [ -f "${HERE}/series" ]; then cd "${TREE}"; while IFS= read -r p; do [ -z "$p" ] && continue; case "$p" in \#*) continue;; esac

@@ -11,7 +11,7 @@ BUILD_DIR="${HERE}/build"; TREE_DIR="${BUILD_DIR}/libXft-${VERSION}"
 mkdir -p "${BUILD_DIR}"; cd "${BUILD_DIR}"
 if [ ! -f "${TARBALL}" ]; then
     [ "${1:-}" = "--no-network" ] && { echo "fetch.sh: ${TARBALL} missing" >&2; exit 1; }
-    echo "==> Fetching ${URL}"; curl -fSL -o "${TARBALL}" "${URL}"
+    echo "==> Fetching ${URL}"; curl -fSL --retry 3 --retry-delay 3 --retry-all-errors -o "${TARBALL}" "${URL}"
 fi
 echo "==> Verifying"; echo "${SHA256}  ${TARBALL}" | sha256sum -c -
 echo "==> Extracting"; rm -rf "${TREE_DIR}"; tar xf "${TARBALL}"

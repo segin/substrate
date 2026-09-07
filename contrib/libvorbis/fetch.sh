@@ -7,7 +7,7 @@ URL="https://downloads.xiph.org/releases/vorbis/${TARBALL}"
 SHA256="0e982409a9c3fc82ee06e08205b1355e5c6aa4c36bca58146ef399621b0ce5ab"
 HERE="$(cd "$(dirname "$0")" && pwd)"; BUILD_DIR="${HERE}/build"; TREE="${BUILD_DIR}/libvorbis-${VERSION}"
 mkdir -p "${BUILD_DIR}"; cd "${BUILD_DIR}"
-[ -f "${TARBALL}" ] || { [ "${1:-}" = "--no-network" ] && { echo "missing tarball" >&2; exit 1; }; curl -fSL -o "${TARBALL}" "${URL}"; }
+[ -f "${TARBALL}" ] || { [ "${1:-}" = "--no-network" ] && { echo "missing tarball" >&2; exit 1; }; curl -fSL --retry 3 --retry-delay 3 --retry-all-errors -o "${TARBALL}" "${URL}"; }
 echo "${SHA256}  ${TARBALL}" | sha256sum -c -
 [ -d "${TREE}" ] || tar xf "${TARBALL}"
 if [ -f "${HERE}/series" ]; then cd "${TREE}"; while IFS= read -r p; do [ -z "$p" ] && continue; case "$p" in \#*) continue;; esac

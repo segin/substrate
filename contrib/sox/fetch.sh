@@ -6,7 +6,7 @@ TB="sox-14.4.2.tar.bz2"
 URL="https://downloads.sourceforge.net/project/sox/sox/14.4.2/${TB}"
 SHA512="424b80e9fff43864b0581fea7a231b8308bdebb2aee0b97cc40eeaa347c093e94bcd0111e8b431e7bfe88b3c1133660ede42b6b49d14555ea0626c2c0ffa308e"
 mkdir -p "${HERE}/build"; cd "${HERE}/build"
-[ -f "${TB}" ] || curl -fSL -o "${TB}" "${URL}"
+[ -f "${TB}" ] || curl -fSL --retry 3 --retry-delay 3 --retry-all-errors -o "${TB}" "${URL}"
 echo "${SHA512}  ${TB}" | sha512sum -c -
 rm -rf sox-14.4.2; tar xf "${TB}"
 echo "==> Applying patch series"

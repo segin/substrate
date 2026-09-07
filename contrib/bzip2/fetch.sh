@@ -23,13 +23,13 @@ cd "${BUILD_DIR}"
 if [ ! -f "${TARBALL}" ]; then
     [ "${1:-}" = "--no-network" ] && { echo "fetch.sh: tarball missing" >&2; exit 1; }
     echo "==> Fetching ${URL}"
-    if command -v curl >/dev/null 2>&1; then curl -fSL -o "${TARBALL}" "${URL}"
+    if command -v curl >/dev/null 2>&1; then curl -fSL --retry 3 --retry-delay 3 --retry-all-errors -o "${TARBALL}" "${URL}"
     else wget -O "${TARBALL}" "${URL}"; fi
 fi
 if [ ! -f "${TARBALL}.sig" ]; then
     [ "${1:-}" = "--no-network" ] && { echo "fetch.sh: sig missing" >&2; exit 1; }
     echo "==> Fetching ${SIG_URL}"
-    if command -v curl >/dev/null 2>&1; then curl -fSL -o "${TARBALL}.sig" "${SIG_URL}"
+    if command -v curl >/dev/null 2>&1; then curl -fSL --retry 3 --retry-delay 3 --retry-all-errors -o "${TARBALL}.sig" "${SIG_URL}"
     else wget -O "${TARBALL}.sig" "${SIG_URL}"; fi
 fi
 

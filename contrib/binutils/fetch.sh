@@ -31,7 +31,7 @@ if [ ! -f "${TARBALL}" ]; then
     fi
     echo "==> Fetching ${URL}"
     if command -v curl >/dev/null 2>&1; then
-        curl -fSL -o "${TARBALL}" "${URL}"
+        curl -fSL --retry 3 --retry-delay 3 --retry-all-errors -o "${TARBALL}" "${URL}"
     elif command -v wget >/dev/null 2>&1; then
         wget -O "${TARBALL}" "${URL}"
     else

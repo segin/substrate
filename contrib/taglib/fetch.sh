@@ -30,14 +30,14 @@ mkdir -p "${BUILD_DIR}"; cd "${BUILD_DIR}"
 # --- TagLib tarball ---------------------------------------------------------
 [ -f "${TARBALL}" ] || {
   [ "${1:-}" = "--no-network" ] && { echo "missing ${TARBALL}" >&2; exit 1; }
-  curl -fSL -o "${TARBALL}" "${URL}" || curl -fSL -o "${TARBALL}" "${URL_FALLBACK}"
+  curl -fSL --retry 3 --retry-delay 3 --retry-all-errors -o "${TARBALL}" "${URL}" || curl -fSL --retry 3 --retry-delay 3 --retry-all-errors -o "${TARBALL}" "${URL_FALLBACK}"
 }
 echo "${SHA256}  ${TARBALL}" | sha256sum -c -
 
 # --- utfcpp tarball (bundled 3rdparty) -------------------------------------
 [ -f "${UTFCPP_TARBALL}" ] || {
   [ "${1:-}" = "--no-network" ] && { echo "missing ${UTFCPP_TARBALL}" >&2; exit 1; }
-  curl -fSL -o "${UTFCPP_TARBALL}" "${UTFCPP_URL}"
+  curl -fSL --retry 3 --retry-delay 3 --retry-all-errors -o "${UTFCPP_TARBALL}" "${UTFCPP_URL}"
 }
 echo "${UTFCPP_SHA256}  ${UTFCPP_TARBALL}" | sha256sum -c -
 

@@ -27,7 +27,7 @@ if [ ! -f "${TB}" ]; then
     for u in "${URL}" "${URL_FALLBACK}"; do
         echo "==> Fetching ${u}"
         if command -v curl >/dev/null 2>&1; then
-            curl -fSL -o "${TB}" "${u}" && break
+            curl -fSL --retry 3 --retry-delay 3 --retry-all-errors -o "${TB}" "${u}" && break
         else
             wget -O "${TB}" "${u}" && break
         fi

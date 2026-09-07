@@ -10,7 +10,7 @@ BUILD_DIR="${HERE}/build"; TREE_DIR="${BUILD_DIR}/motif-${VERSION}"
 mkdir -p "${BUILD_DIR}"; cd "${BUILD_DIR}"
 if [ ! -f "${TARBALL}" ]; then
     [ "${1:-}" = "--no-network" ] && { echo "fetch.sh: tarball missing" >&2; exit 1; }
-    if command -v curl >/dev/null 2>&1; then curl -fSL -o "${TARBALL}" "${URL}"; else wget -O "${TARBALL}" "${URL}"; fi
+    if command -v curl >/dev/null 2>&1; then curl -fSL --retry 3 --retry-delay 3 --retry-all-errors -o "${TARBALL}" "${URL}"; else wget -O "${TARBALL}" "${URL}"; fi
 fi
 echo "${SHA256}  ${TARBALL}" | sha256sum -c -
 [ -d "${TREE_DIR}" ] || { echo "==> Extracting"; tar xf "${TARBALL}"; }

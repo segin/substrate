@@ -24,7 +24,7 @@ fetch_verify() {
     if [ ! -f "${tb}" ]; then
         [ "${NO_NETWORK:-0}" = "1" ] && { echo "fetch.sh: ${tb} missing" >&2; exit 1; }
         echo "==> Fetching ${url}"
-        if command -v curl >/dev/null 2>&1; then curl -fSL -o "${tb}" "${url}"; else wget -O "${tb}" "${url}"; fi
+        if command -v curl >/dev/null 2>&1; then curl -fSL --retry 3 --retry-delay 3 --retry-all-errors -o "${tb}" "${url}"; else wget -O "${tb}" "${url}"; fi
     fi
     got=$(sha256sum "${tb}" | awk '{print $1}')
     [ "${got}" = "${sha}" ] || { echo "fetch.sh: SHA mismatch on ${tb} (got ${got})" >&2; exit 1; }
