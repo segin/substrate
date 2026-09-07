@@ -65,7 +65,7 @@ cmake -G "Unix Makefiles" \
     -DTDE_PREFIX="${TQ}" \
     -DMOC_EXECUTABLE="${TQ}/bin/tqmoc" -DUIC_EXECUTABLE="${TQ}/bin/tquic" \
     -DKDECONFIG_EXECUTABLE="${HOSTBIN}/tde-config" \
-    -DKDE3_DCOPIDL_EXECUTABLE="${TQ}/bin/dcopidl" \
+    -DKDE3_DCOPIDL_EXECUTABLE="${HOSTBIN}/dcopidl" \
     -DKDE3_DCOPIDLNG_EXECUTABLE="${TQ}/bin/dcopidlng" \
     -DKDE3_DCOPIDL2CPP_EXECUTABLE="${HOSTBIN}/dcopidl2cpp" \
     -DKDE3_MEINPROC_EXECUTABLE="${HOSTBIN}/meinproc" \

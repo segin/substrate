@@ -5,7 +5,8 @@
 # Several tdelibs build steps execute a freshly-built program ON THE HOST:
 #   - tdeconfig_compiler   turns *.kcfg/*.kcfgc into C++ (dnssd, tdeutils)
 #   - maketdewidgets       turns kde.widgets into tdewidgets.cpp
-#   - dcopidl2cpp          DCOP stub/skel generation (built by contrib/tde/tqt3)
+#   - dcopidl, dcopidl2cpp  DCOP stub/skel generation (built HERE; contrib/tde/tqt3
+#                           builds only the -tqt suffixed variants)
 # A cross-built (substrate) binary cannot run here, so we build native ones.
 #
 # tdeconfig_compiler/maketdewidgets link libtdecore, which links libtqt
@@ -85,7 +86,16 @@ cmake -G "Unix Makefiles" \
     -DHAVE_GOOD_GETADDRINFO_EXITCODE=0 -DICEAUTH_PATH=/usr/bin/iceauth \
     -DINTLTOOL_MERGE_EXECUTABLE="${MODULES}/tde_l10n_merge.pl" \
     "${TDE_TREE}"
-make -j"${JOBS}" tdeconfig_compiler maketdewidgets tde-config
+# dcopidl and dcopidl2cpp are here because the DCOP stub/skel rules run them
+# during the CROSS build, so they must be host binaries.  tdelibs builds its
+# own copies, but those are i386 and cannot run on the builder -- the cross
+# make then falls back to the bare name on PATH and dies with
+#
+#     /bin/sh: 1: dcopidl2cpp: not found
+#     ... [tdeio/bookmarks/.../kbookmarknotifier_skel.cpp] Error 127
+#
+# dcopidlng needs no entry: it is a shell script and runs anywhere.
+make -j"${JOBS}" tdeconfig_compiler maketdewidgets tde-config dcopidl dcopidl2cpp
 
 # Stage the host tools next to the other host generators (build.sh adds
 # ${HB}/bin to PATH).  Their RUNPATH already points at the native build
@@ -93,6 +103,8 @@ make -j"${JOBS}" tdeconfig_compiler maketdewidgets tde-config
 cp -f "${OBJ}/tdecore/tdeconfig_compiler/tdeconfig_compiler" "${HB}/bin/tdeconfig_compiler"
 cp -f "${OBJ}/tdewidgets/maketdewidgets"                     "${HB}/bin/maketdewidgets"
 cp -f "${OBJ}/tdecore/tde-config"                            "${HB}/bin/tde-config"
+cp -f "${OBJ}/dcop/dcopidl/dcopidl"                          "${HB}/bin/dcopidl"
+cp -f "${OBJ}/dcop/dcopidl2cpp/dcopidl2cpp"                  "${HB}/bin/dcopidl2cpp"
 
 # meinproc is only required to EXIST for tdebase's FindTDE; docs are
 # disabled (BUILD_DOC=OFF) so it is never run.  A loud stub avoids the
@@ -103,4 +115,4 @@ echo "meinproc: stub invoked, but TDE docs are disabled on the substrate cross b
 exit 1
 MEINPROC
 chmod +x "${HB}/bin/meinproc"
-echo "==> host tools staged in ${HB}/bin (tdeconfig_compiler, maketdewidgets, tde-config, meinproc-stub)"
+echo "==> host tools staged in ${HB}/bin (tdeconfig_compiler, maketdewidgets, tde-config, dcopidl, dcopidl2cpp, meinproc-stub)"
