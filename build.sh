@@ -385,6 +385,16 @@ else
         exit 1
     fi
 
+    # Ports build in list order against what the ports before them staged,
+    # so a mis-ordered entry fails at that port's configure -- however many
+    # hours in that is.  motifgpt ahead of disasterparty cost a two-hour
+    # run, and was invisible here because disasterparty had been built by
+    # hand long ago.  A second's check instead.  Only meaningful for the
+    # full list; ONLY=... subsets skip constraints they do not contain.
+    if [ -x "${HERE}/tools/check-contrib-order.sh" ]; then
+        "${HERE}/tools/check-contrib-order.sh" "${HERE}/build.sh" || exit 1
+    fi
+
     for pkg in $ONLY; do
         step "Stage 2: contrib/$pkg"
         ( cd "contrib/$pkg" && ./fetch.sh )
