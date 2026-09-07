@@ -272,7 +272,11 @@ jobs:
           for f in /usr/bin/gcc /usr/bin/g++ /usr/bin/gdb \
                    /usr/bin/as /usr/bin/ld /usr/bin/zsh /usr/bin/xterm \
                    /usr/bin/Xfbdev /usr/bin/xkbcomp /usr/lib/libXm.so.4 \
-                   /usr/dt/bin/dtwm /usr/dt/bin/dtsession /usr/dt/bin/dtterm; do
+                   /usr/dt/bin/dtwm /usr/dt/bin/dtsession /usr/dt/bin/dtterm \
+                   /opt/trinity/bin/twin /opt/trinity/bin/kicker \
+                   /opt/trinity/bin/tdeinit \
+                   /opt/trinity/lib/libtdecore.so.14 \
+                   /opt/trinity/lib/libtqt-mt.so.3; do
             printf '%-24s ' "$f"
             sz=$(debugfs "rootfs.img?offset=$ROOT_OFF" -R "stat $f" 2>/dev/null \
                  | grep -oE "Size: [0-9]+" | head -1 || true)
