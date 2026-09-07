@@ -48,6 +48,16 @@ ln -s "${MERGED}/opt/trinity" "${TDEROOT}/opt/trinity"
 export PKG_CONFIG_SYSROOT_DIR="${TDEROOT}"
 export PKG_CONFIG_LIBDIR="${TDEROOT}/usr/lib/pkgconfig:${TDEROOT}/opt/trinity/lib/pkgconfig"
 
+# kcontrol's shutdown paths.  ConfigureChecks does
+#     find_program( POWEROFF_BINARY poweroff HINTS /sbin /usr/sbin )
+# and makes a missing one fatal -- but it searches the BUILD host and bakes
+# whatever it finds into the TARGET's config, which is wrong twice over: the
+# path that matters is substrate's, and a build host without the binary
+# fails a cross build for no reason.  A bare ubuntu:24.04 with this
+# workflow's package list has neither.  Pin them the way this port already
+# pins ICEAUTH_PATH and HTDIG_SEARCH_BINARY; dist/sbin ships all three.
+# shutdown is not shipped, so it stays undefined -- ConfigureChecks only
+# uses it to synthesise poweroff, which is now given directly.
 cd "${TREE}"; rm -rf obj; mkdir obj; cd obj
 cmake -G "Unix Makefiles" \
     -DCMAKE_TOOLCHAIN_FILE="${TC}" -DCMAKE_MODULE_PATH="${MODULES}" \
@@ -72,6 +82,8 @@ cmake -G "Unix Makefiles" \
     -DHAVE_NOGROUP_EXITCODE=1 -DHAVE_NOBODY_EXITCODE=0 \
     -DHONORS_SOCKET_PERMS_EXITCODE=1 -DCOVARIANT_RETURN_EXITCODE=0 \
     -DHAVE_GOOD_GETADDRINFO_EXITCODE=0 -DICEAUTH_PATH=/usr/bin/iceauth \
+    -DREBOOT_BINARY=/sbin/reboot -DPOWEROFF_BINARY=/sbin/poweroff \
+    -DHALT_BINARY=/sbin/halt \
     -DINTLTOOL_MERGE_EXECUTABLE="${MODULES}/tde_l10n_merge.pl" \
     "${TREE}"
 make -j"${JOBS}"
