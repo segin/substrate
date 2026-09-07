@@ -189,6 +189,28 @@ jobs:
             echo "::endgroup::"
           done
 
+          # CMake ports write their failures somewhere else entirely.  A
+          # check_library_exists that cannot link says only
+          #
+          #     -- Looking for magic_load in magic - not found
+          #
+          # and the compiler command and linker diagnostic that explain WHY
+          # go to CMakeError.log.  Without this, working out that a failing
+          # tdelibs check was the NATIVE configure rather than the cross one
+          # meant reading 88k lines of run log backwards for the nearest
+          # "Check for working C compiler" line.
+          # CMake 3.26 dropped CMakeError.log/CMakeOutput.log in favour of
+          # CMakeConfigureLog.yaml, and the ports build cmake 3.30, so that
+          # is the file to reach for.
+          for log in contrib/tde/*/build/*/obj/CMakeFiles/CMakeConfigureLog.yaml \
+                     contrib/tde/*/hostbuild/obj/CMakeFiles/CMakeConfigureLog.yaml \
+                     contrib/tde/*/build/*/hostobj/CMakeFiles/CMakeConfigureLog.yaml \
+                     contrib/*/build/*/CMakeFiles/CMakeConfigureLog.yaml; do
+            echo "::group::$log"
+            tail -n 400 "$log"
+            echo "::endgroup::"
+          done
+
       # actions/cache saves only at the end of a SUCCESSFUL job, so while the
       # bootstrap was still failing in the ports nothing was ever written:
       # every run reported "Cache not found" and spent ~40 minutes rebuilding
