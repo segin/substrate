@@ -29,12 +29,22 @@ codec_fetch() {  # $1=tarball $2=url $3=sha512 $4=topdir
 codec_build() {  # $1=name $2=topdir ; rest=extra configure args
     _name="$1"; _top="$2"; shift 2
     _dest="${SUBSTRATE_TOP}/dist-overlay/dist-${_name}"
-    _binu="$(ls -d "${SUBSTRATE_TOP}"/contrib/binutils/build/binutils-*/ 2>/dev/null | head -1)"
     cd "${HERE}/build/${_top}"
-    # substrate-aware config.sub/guess + libtool ELF shared-lib support
-    for _s in config.sub config.guess; do
-        [ -n "${_binu}" ] && find . -name "${_s}" -exec cp -f "${_binu}/${_s}" {} + 2>/dev/null
-    done
+    # substrate-aware config.sub/guess + libtool ELF shared-lib support.
+    #
+    # This used to copy them out of contrib/binutils/build/binutils-*/ and,
+    # because the copy was guarded on that directory existing, did nothing
+    # at all when it did not -- which is every CI run that hits the
+    # toolchain cache, since build.sh then never fetches binutils.  The
+    # port got a pristine config.sub and configure stopped with
+    #
+    #     Invalid configuration `i386-unknown-substrate':
+    #         OS `substrate' not recognized
+    #
+    # substrate_config_sub_fix prefers binutils when present, patches the
+    # tree's own copy when not, and asserts the result accepts the triple.
+    . "${SUBSTRATE_TOP}/contrib/substrate-autotools.sh"
+    substrate_config_sub_fix "."
     sh "${SUBSTRATE_TOP}/contrib/substrate-libtool-shared.sh" ./configure >/dev/null 2>&1 || true
     export PKG_CONFIG_PATH="${SR}/lib/pkgconfig"
     ./configure --host=i386-unknown-substrate --prefix=/usr \
