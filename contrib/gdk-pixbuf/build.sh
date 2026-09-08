@@ -13,6 +13,14 @@ PATH="${STAGE1_PREFIX}/bin:${PATH}"; export PATH
 . "${HERE}/../substrate-autotools.sh"
 [ -d "${TREE_DIR}" ] || { echo "build.sh: run ./fetch.sh first" >&2; exit 1; }
 
+# The tarball's config.sub predates substrate and rejects the triple:
+#     Invalid configuration `i386-unknown-substrate': OS `substrate' not recognized
+# It works on a developer box only because the extracted tree there was
+# patched by an earlier run.  substrate_config_sub_fix prefers the copy in
+# the binutils port, patches the tree's own when that is absent (which is
+# every CI run that hits the toolchain cache), and asserts the result.
+substrate_config_sub_fix "${TREE_DIR}"
+
 substrate_sysroot "${HERE}/build/sysroot" glib2 libffi zlib libpng
 # shared-mime-info ships only data (MIME globs) + a version .pc; gdk-pixbuf
 # checks it for content-type detection.  Stub the .pc so configure passes
