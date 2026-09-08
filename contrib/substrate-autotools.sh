@@ -33,6 +33,7 @@ substrate_config_sub_fix() {
                 -e 's/\(| sortix\* \)/\1| substrate* /' \
                 -e 's/\(| -sortix\* \)/\1| -substrate* /' \
                 -e 's/^\(\t *| -aos\* | -aros\* \)/\t      | -substrate* \\\n\1/' \
+                -e 's/^\(\t *| -aos\* \\\)$/\t      | -substrate* \\\n\1/' \
                 "${_cs}"
         done
     fi

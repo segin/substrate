@@ -19,9 +19,14 @@ echo "${SHA256}  ${TARBALL}" | sha256sum -c -
 [ -d "${TREE_DIR}" ] || { echo "==> Extracting"; tar xf "${TARBALL}"; }
 # 2001-era config.{sub,guess} don't know the substrate triple — borrow the
 # substrate-patched copies from the binutils port (toolchain prerequisite).
-BINU="$(ls -d "${HERE}"/../binutils/build/binutils-*/ 2>/dev/null | head -1)"
-[ -n "${BINU}" ] || { echo "fetch.sh: need contrib/binutils fetched (for config.sub)" >&2; exit 1; }
-cp -f "${BINU}/config.sub" "${BINU}/config.guess" "${TREE_DIR}/"
+# 2001-era config.{sub,guess} do not know the substrate triple.  The shared
+# helper prefers the substrate-patched copies from the binutils port and
+# falls back to patching the tree's own -- the hard requirement this used
+# to be could not be met on CI at all, where a toolchain-cache hit means
+# build.sh never fetches or builds binutils:
+#     fetch.sh: need contrib/binutils fetched (for config.sub)
+. "${HERE}/../substrate-autotools.sh"
+substrate_config_sub_fix "${TREE_DIR}"
 
 # Apply the substrate patch series (idempotent: skip already-applied).
 if [ -f "${HERE}/series" ]; then
