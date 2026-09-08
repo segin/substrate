@@ -62,9 +62,17 @@ LDFLAGS="-fno-pie ${SUBSTRATE_LIBS}" \
     --libs="-lX11 -lxcb -lXau -lsys"
 
 echo "==> make"
-make CC=i386-unknown-substrate-gcc \
-     CFLAGS="-std=gnu99 -march=i486 -mtune=i486 -O2 -g -fno-pie ${SUBSTRATE_INCS}" \
-     LDFLAGS="-fno-pie ${SUBSTRATE_LIBS}"
+# No CC/CFLAGS/LDFLAGS overrides here.  matwm2's configure GENERATES the
+# Makefile and has already baked all three in -- including the
+# -DVERSION="\"0.1.2pre3\"" it adds itself.  Passing CFLAGS on the make
+# command line overrides the generated value wholesale, taking -DVERSION
+# with it, and main.c then fails to compile:
+#
+#     main.c:35:48: error: expected ')' before 'VERSION'
+#
+# It built on this box only because the tree already held a Makefile from
+# an earlier run whose CFLAGS had been merged by hand.
+make
 
 echo "==> install into ${DESTDIR}"
 rm -rf "${DESTDIR}"
