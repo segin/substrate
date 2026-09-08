@@ -12,8 +12,21 @@ SR="${STAGE1_PREFIX}/i386-unknown-substrate"; PATH="${STAGE1_PREFIX}/bin:${PATH}
 VER="2.11.1"; TREE="${HERE}/build/faad2-${VER}"; DEST="${SUBSTRATE_TOP}/dist-overlay/dist-faad2"
 [ -d "${TREE}" ] || { echo "run ./fetch.sh first" >&2; exit 1; }
 cd "${TREE}"; rm -rf bld; mkdir bld; cd bld
+# Confine find_library/find_path to the sysroot.  CMAKE_SYSTEM_NAME puts
+# CMake in cross mode but does NOT stop it searching host directories, so
+# on a builder with gcc-multilib installed -lm resolved to the host's
+# 32-bit glibc:
+#     ld: /usr/lib32/libm.so: undefined reference to `qsort@GLIBC_2.0'
+# That is a CI-only failure by accident, not by nature -- this box has
+# /usr/lib32/libm.so too; it only passed here because the build tree
+# already held a CMakeCache with the paths resolved.
 cmake -G "Unix Makefiles" \
     -DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR=i386 \
+    -DCMAKE_FIND_ROOT_PATH="${SR}" \
+    -DCMAKE_FIND_ROOT_PATH_MODE_PROGRAM=NEVER \
+    -DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=ONLY \
+    -DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=ONLY \
+    -DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=ONLY \
     -DCMAKE_C_COMPILER=i386-unknown-substrate-gcc \
     -DCMAKE_C_FLAGS="-march=i486 -mtune=i486 -O2 -g -fno-pie -fno-stack-protector" \
     -DCMAKE_EXE_LINKER_FLAGS="-L${SR}/lib -l:libc.so.0" \
