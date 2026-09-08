@@ -19,12 +19,44 @@ CLEANFILES = $(OBJS) $(PIC_OBJS) libat.a libat.so libat.so.0 \
 
 all: libat.a $(if $(NATIVE_BUILD),,libat.so.0)
 
-at_parse_y.c at_parse_y.h: at_parse.y
+# Cancel make's built-in yacc/lex rules.
+#
+# at_parse.c is a HAND-WRITTEN source file that happens to share a stem
+# with at_parse.y and at_parse.l.  GNU make ships %.c: %.y and %.c: %.l
+# implicit rules, so when a fresh checkout gives at_parse.y the newer
+# mtime -- which is a coin flip, git does not preserve mtimes -- make
+# "brings at_parse.c up to date" by running yacc on at_parse.y and
+# clobbering it:
+#
+#     yacc  at_parse.y
+#     mv -f y.tab.c at_parse.c
+#
+# The result is a second copy of the parser that at_parse_y.c already
+# provides, and the link fails with
+#
+#     multiple definition of `yyparse'; at_parse.pic.o: ...
+#
+# A pattern rule with no recipe cancels the built-in one.  This bit CI
+# only after ten runs had passed through here untouched.
+%.c: %.y
+%.c: %.l
+
+# Regeneration is explicit, never automatic.
+#
+# ../../usr.bin/{yacc,lex} are substrate TARGET binaries; on the build host
+# they die with "Accessing a corrupted shared library".  That is why the
+# generated files are checked in.  But while they still listed at_parse.{y,l}
+# as prerequisites, a fresh checkout that happened to give the grammar the
+# newer mtime -- a coin flip, git does not record mtimes -- made make try to
+# regenerate them with a tool it cannot run, and the build died with
+# Error 127 before compiling anything.
+#
+# Run `make regen` on a substrate target if the grammar changes.
+.PHONY: regen
+regen:
 	../../usr.bin/yacc/yacc -d -b at_parse at_parse.y
 	mv at_parse.tab.c at_parse_y.c
 	mv at_parse.tab.h at_parse_y.h
-
-lex.yy.c: at_parse.l at_parse_y.h
 	../../usr.bin/lex/lex at_parse.l
 
 at_parse_y.o: at_parse_y.c
