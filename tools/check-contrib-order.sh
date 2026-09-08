@@ -15,10 +15,17 @@
 # found it no matter where in the list it sat -- the same "this machine has
 # state a clean runner does not" that every other bring-up failure was.
 #
-# The constraints below are not guesses.  They were read out of each port's
-# configure.ac (PKG_CHECK_MODULES / PKG_CHECK_EXISTS), which is the build
-# system's own statement of what it needs, rather than out of build.sh
-# header comments -- contrib/motifgpt's claim no dependencies at all.
+# The constraints below are not guesses.  They come from two places, both
+# of which are the build system stating what it needs rather than prose:
+#
+#   * each port's configure.ac -- PKG_CHECK_MODULES / PKG_CHECK_EXISTS
+#   * each port's build.sh -- the "<x> not staged" / "build contrib/<x>
+#     first" assertions it makes before configuring
+#
+# Reading only the first missed libdom, which needs libhubbub and says so
+# in build.sh, not in configure.ac.  Do NOT read build.sh header comments:
+# contrib/motifgpt's claim no dependencies at all, and that is what put it
+# ahead of disasterparty.
 #
 # Usage:  check-contrib-order.sh [path/to/build.sh]
 #
@@ -61,6 +68,15 @@ libparserutils:libhubbub
 libwapcaplet:libcss
 libwapcaplet:libdom
 libwapcaplet:libhubbub
+libhubbub:libdom
+libdom:elinks
+openssl:curl
+e2fsprogs:e2tools
+xorgproto:libXau
+gmp:mpfr
+openssl:nginx
+zlib:nginx
+libtirpc:rpcbind
 libogg:libvorbis
 libogg:flac
 libogg:speex
