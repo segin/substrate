@@ -69,20 +69,6 @@ echo "==> configure"
     --with-ssl \
     --disable-ssl-pkgconfig
 
-# links.h calls pthread_sigmask whenever configure defined
-# HAVE_PTHREAD_SIGMASK -- it does, substrate's libpthread has the symbol and
-# the generated Makefile links -lpthread -- but it only includes <pthread.h>
-# when HAVE_PTHREADS is set too, which it is not:
-#
-#     links.h:487: error: implicit declaration of function 'pthread_sigmask'
-#
-# Supply the header for the compile only.  It cannot go in the CFLAGS that
-# configure sees: autoconf-2.13 compiles its probes with them and including
-# pthread.h there breaks unrelated checks ("select function not present").
-# Letting the check fail instead would take links' #else branch, which
-# #defines sigset_t to int and SIG_BLOCK to 0 -- no signal masking at all.
-sed -i 's|^CFLAGS *=.*|& -include pthread.h|' Makefile
-
 echo "==> make -j${JOBS}"
 make -j"${JOBS}"
 

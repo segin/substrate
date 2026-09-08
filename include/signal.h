@@ -154,6 +154,23 @@ int sigprocmask(int how, const sigset_t *set, sigset_t *oset);
 int sigpending(sigset_t *set);
 int sigsuspend(const sigset_t *mask);
 
+/* POSIX specifies pthread_kill() and pthread_sigmask() in <signal.h>, not
+ * only in <pthread.h>, and portable code relies on that: links' links.h
+ * includes <signal.h> and calls pthread_sigmask() directly, which builds
+ * on glibc (bits/sigthread.h) and failed here with an implicit
+ * declaration.  Declaring them only in <pthread.h> was the bug.
+ *
+ * pthread_t is shared through a guard rather than duplicated: <pthread.h>
+ * includes this header, so whichever is reached first defines it.  The
+ * typedefs deliberately live in <pthread.h> rather than <sys/types.h>
+ * (see the note there), so this is the one that has to cooperate. */
+#ifndef __pthread_t_defined
+#define __pthread_t_defined
+typedef int pthread_t;
+#endif
+int pthread_kill(pthread_t thread, int sig);
+int pthread_sigmask(int how, const sigset_t *set, sigset_t *oldset);
+
 int sigemptyset(sigset_t *set);
 int sigfillset(sigset_t *set);
 int sigaddset(sigset_t *set, int signo);
