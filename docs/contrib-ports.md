@@ -304,4 +304,15 @@ meta-compiler (host wml/wmluiltok) and installs the uil/ headers.
   Note the licence is the Fraunhofer Android one, not a standard
   free-software licence, and it grants no patent rights — see
   `contrib/fdk-aac/README.SUBSTRATE.md`.
+- **opusfile 0.12** (`contrib/opusfile/`) — the high-level Ogg Opus
+  decoder layered on `libogg` + `libopus`.  Ported because `sox`'s
+  `src/opus.c` includes `<opusfile.h>`, which `libopus` does not ship;
+  without it `contrib/sox` passed `--without-opus` and had no Opus
+  support at all.  Worth remembering as a shape: an optional codec whose
+  probe fails is not a build error, so a green log said nothing.
+  Configured `--disable-http` to avoid pulling in openssl for URL
+  streaming nothing uses.  Both this port and `sox` pass an explicit
+  `-I<sysroot>/include/opus` — see the subdirectory-`Cflags` note under
+  "Cross-build traps" — because `opusfile.pc` resolves that directory to
+  the build host's `/usr/include/opus`.
 - **mpg123** (`contrib/mpg123/`).
