@@ -1,0 +1,111 @@
+util.c: port the DH1080 SASL code to OpenSSL 1.1+ opaque DH
+
+The existing 0001-openssl-1.1-3.x-compat.patch covered ssl.c and server.c
+but not util.c, so the SASL blowfish/AES key exchange still reached into
+the DH struct:
+
+    util.c:2033:50: error: invalid use of incomplete typedef 'DH'
+
+OpenSSL 1.1.0 made DH opaque and 3.0 -- which substrate ships -- removed
+the definition outright.  Use the accessors instead: DH_set0_pqg() to
+install p and g (it takes ownership, so the locals are cleared), and
+DH_get0_key() to read the public key in the two encoders.
+
+This keeps the feature working rather than disabling SASL: we have
+OpenSSL, so hexchat should use it.
+
+--- a/src/common/util.c
++++ b/src/common/util.c
+@@ -1930,6 +1930,9 @@
+ 	guint16 size16;
+ 	BIGNUM *pubkey;
+ 	gint key_size;
++	/* OpenSSL 1.1.0 made DH opaque.  p and g are collected here and handed
++	 * over with DH_set0_pqg(), which takes ownership of both. */
++	BIGNUM *dh_p = NULL, *dh_g = NULL;
+ 
+ 	dh = DH_new();
+ 	data = decoded_data = g_base64_decode (str, &data_len);
+@@ -1945,7 +1948,7 @@
+ 	if (size > data_len)
+ 		goto fail;
+ 
+-	dh->p = BN_bin2bn (data, size, NULL);
++	dh_p = BN_bin2bn (data, size, NULL);
+ 	data += size;
+ 
+ 	/* Generator */
+@@ -1960,7 +1963,10 @@
+ 	if (size > data_len)
+ 		goto fail;
+ 
+-	dh->g = BN_bin2bn (data, size, NULL);
++	dh_g = BN_bin2bn (data, size, NULL);
++	if (!DH_set0_pqg (dh, dh_p, NULL, dh_g))	/* takes ownership */
++		goto fail;
++	dh_p = dh_g = NULL;
+ 	data += size;
+ 
+ 	/* pub key */
+@@ -1997,6 +2003,7 @@
+ char *
+ encode_sasl_pass_blowfish (char *user, char *pass, char *data)
+ {
++	const BIGNUM *dh_pub_key = NULL;
+ 	DH *dh;
+ 	char *response, *ret;
+ 	unsigned char *secret;
+@@ -2011,6 +2018,7 @@
+ 
+ 	if (!parse_dh (data, &dh, &secret, &key_size))
+ 		return NULL;
++	DH_get0_key (dh, &dh_pub_key, NULL);
+ 	BF_set_key (&key, key_size, secret);
+ 
+ 	encrypted_pass = (guchar*)malloc (pass_len);
+@@ -2025,16 +2033,16 @@
+ 		BF_ecb_encrypt ((unsigned char*)in_ptr, (unsigned char*)out_ptr, &key, BF_ENCRYPT);
+ 
+ 	/* Create response */
+-	length = 2 + BN_num_bytes (dh->pub_key) + pass_len + user_len + 1;
++	length = 2 + BN_num_bytes (dh_pub_key) + pass_len + user_len + 1;
+ 	response = (char*)malloc (length);
+ 	out_ptr = response;
+ 
+ 	/* our key */
+-	size16 = htons ((guint16)BN_num_bytes (dh->pub_key));
++	size16 = htons ((guint16)BN_num_bytes (dh_pub_key));
+ 	memcpy (out_ptr, &size16, sizeof(size16));
+ 	out_ptr += 2;
+-	BN_bn2bin (dh->pub_key, (guchar*)out_ptr);
+-	out_ptr += BN_num_bytes (dh->pub_key);
++	BN_bn2bin (dh_pub_key, (guchar*)out_ptr);
++	out_ptr += BN_num_bytes (dh_pub_key);
+ 
+ 	/* username */
+ 	memcpy (out_ptr, user, user_len + 1);
+@@ -2057,6 +2065,7 @@
+ char *
+ encode_sasl_pass_aes (char *user, char *pass, char *data)
+ {
++	const BIGNUM *dh_pub_key = NULL;
+ 	DH *dh;
+ 	AES_KEY key;
+ 	char *response = NULL;
+@@ -2074,6 +2083,7 @@
+ 
+ 	if (!parse_dh (data, &dh, &secret, &key_size))
+ 		return NULL;
++	DH_get0_key (dh, &dh_pub_key, NULL);
+ 
+ 	encrypted_userpass = (guchar*)malloc (userpass_len);
+ 	memset (encrypted_userpass, 0, userpass_len);
+@@ -2116,7 +2126,7 @@
+ 	size16 = htons ((guint16)key_size);
+ 	memcpy (out_ptr, &size16, sizeof(size16));
+ 	out_ptr += 2;
+-	BN_bn2bin (dh->pub_key, (guchar*)out_ptr);
++	BN_bn2bin (dh_pub_key, (guchar*)out_ptr);
+ 	out_ptr += key_size;
+ 
+ 	/* iv */
