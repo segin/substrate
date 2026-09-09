@@ -1,7 +1,15 @@
 #!/bin/sh
 # contrib/sox/build.sh — cross-build SoX for substrate.  Uses the ported
-# audio codecs (libvorbis, libFLAC) for ogg/flac file support; live-audio
-# backends and the codecs substrate lacks are disabled.
+# audio codecs (libvorbis, libFLAC, opusfile) for ogg/flac/opus file
+# support; live-audio backends and the codecs substrate lacks are disabled.
+#
+# Opus needs contrib/opusfile, not just contrib/libopus: sox's src/opus.c
+# includes <opusfile.h>, which libopus does not ship.  The -I${SR}/include/opus
+# below is load-bearing -- opusfile.pc says "Cflags: -I${includedir}/opus",
+# which with no PKG_CONFIG_SYSROOT_DIR expands to the absolute
+# /usr/include/opus (the BUILD HOST's).  sox never references the resulting
+# OPUS_CFLAGS from any Makefile.am anyway, so the path has to come from
+# CPPFLAGS or <opusfile.h> is simply not found.
 set -eu
 HERE="$(cd "$(dirname "$0")" && pwd)"
 SUBSTRATE_TOP="$(cd "${HERE}/../.." && pwd)"
@@ -20,11 +28,11 @@ export PKG_CONFIG_PATH="${SR}/lib/pkgconfig"
 DEMOTE="-Wno-error=implicit-function-declaration -Wno-error=int-conversion -Wno-error=incompatible-pointer-types"
 ./configure --host=i386-unknown-substrate --prefix=/usr --enable-shared --enable-static \
     --without-ao --without-pulseaudio --without-alsa --without-oss --without-sndio --without-coreaudio --without-sunaudio \
-    --without-mad --without-lame --without-twolame --without-opus --without-amrwb --without-amrnb \
+    --without-mad --without-lame --without-twolame --without-amrwb --without-amrnb \
     --without-png --without-ladspa --without-magic --without-id3tag --without-wavpack --without-gsm --without-lpc10 \
-    --with-oggvorbis --with-flac \
+    --with-oggvorbis --with-flac --with-opus \
     CC=i386-unknown-substrate-gcc CFLAGS="-march=i486 -mtune=i486 -O2 -g -fno-pie -fno-stack-protector ${DEMOTE}" \
-    CPPFLAGS="-I${SR}/include" LDFLAGS="-L${SR}/lib"
+    CPPFLAGS="-I${SR}/include -I${SR}/include/opus" LDFLAGS="-L${SR}/lib"
 make -j"${JOBS}"
 rm -rf "${DEST}"; make install DESTDIR="${DEST}"
 find "${DEST}" -name '*.la' -delete
