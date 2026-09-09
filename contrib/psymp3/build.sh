@@ -48,7 +48,21 @@ cd "${TREE}"
 # --- 1. Regenerate configure on the host ----------------------------------
 # autogen.sh -> generate-configure.sh runs `autoreconf -fiv`.  Requires
 # autoconf-archive (provides AX_CXX_COMPILE_STDCXX_17) on the build host.
+#
+# Assert it rather than trusting it.  An unexpanded m4 macro is not an
+# autoreconf error: it passes through into the generated configure as a
+# literal shell word, where it fails as "command not found" -- a message
+# configure ignores.  The build then runs on for a hundred thousand lines
+# and dies compiling C++17 sources, because without the macro AC_PROG_CXX's
+# own probe leaves CXX at -std=gnu++11 and nothing raises it.  That is a
+# multi-hour CI failure whose cause is one line near the very start, so
+# check here where it is cheap and legible.
 if [ ! -x ./configure ]; then
+    aclocal --print-ac-dir >/dev/null 2>&1 && \
+    ls "$(aclocal --print-ac-dir)"/ax_cxx_compile_stdcxx.m4 >/dev/null 2>&1 || {
+        echo "psymp3: AX_CXX_COMPILE_STDCXX_17 is unavailable -- install autoconf-archive" >&2
+        exit 1
+    }
     ./autogen.sh
 fi
 
