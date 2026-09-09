@@ -67,18 +67,30 @@ if ! ./config.sub i386-unknown-linux-gnu >/dev/null 2>&1; then
 fi
 
 # --- 2. Configure ----------------------------------------------------------
-# pkg-config must resolve against the cross sysroot's .pc files.  The .pc files
-# carry prefix=/usr, so they emit -I/usr/include/... and -l<name>; the cross
-# g++'s default sysroot is ${SR}, so those resolve correctly on substrate.
+# pkg-config resolves against the cross sysroot's .pc files.  Those carry
+# prefix=/usr and emit -l<name>, which is fine, and -I/usr/include/... which
+# is NOT: an absolute -I is not rewritten by the compiler's sysroot, so it
+# names the BUILD HOST's directory.  It goes unnoticed for headers that also
+# sit at the top of ${SR}/include, because the default search path finds
+# them anyway -- but psymp3 includes <SDL.h> and <ft2build.h>, which live in
+# subdirectories, and sdl2.pc/freetype2.pc supply those subdirectories
+# through exactly such a -I.  On a box with libsdl2-dev installed it
+# compiles against the host's headers; on a clean runner it stops at
+#
+#     include/psymp3.h:267:10: fatal error: SDL.h: No such file or directory
+#
+# Name them explicitly against ${SR}.  SDL2, not SDL: the sysroot has both,
+# SDL/ being sdl12-compat's, and configure.ac asks for sdl2.
 export PKG_CONFIG_LIBDIR="${SR}/lib/pkgconfig"
+SUBDIR_INCS="-I${SR}/include/SDL2 -I${SR}/include/freetype2"
 
 ./configure \
     --host=i386-unknown-linux-gnu \
     --prefix=/usr \
     CC=i386-unknown-substrate-gcc \
     CXX=i386-unknown-substrate-g++ \
-    CFLAGS="-march=i486 -mtune=i486 -O2 -g -fPIE" \
-    CXXFLAGS="-march=i486 -mtune=i486 -O2 -g -fPIE" \
+    CFLAGS="-march=i486 -mtune=i486 -O2 -g -fPIE ${SUBDIR_INCS}" \
+    CXXFLAGS="-march=i486 -mtune=i486 -O2 -g -fPIE ${SUBDIR_INCS}" \
     LDFLAGS="-L${SR}/lib -Wl,-rpath-link,${SR}/lib -Wl,--allow-shlib-undefined" \
     LIBS="-lpthread" \
     --disable-mpris --disable-rapidcheck --disable-test-harness --disable-final
