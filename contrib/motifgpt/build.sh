@@ -25,6 +25,15 @@ for d in motif disasterparty cjson curl openssl zlib \
     [ -d "${st}/usr" ] || continue
     [ -d "${st}/usr/lib/pkgconfig" ] && PKGP="${PKGP}${PKGP:+:}${st}/usr/lib/pkgconfig"
     [ -d "${st}/usr/include" ] && CPP="${CPP} -I${st}/usr/include"
+    # Some packages install their headers into a subdirectory named after
+    # themselves and point at it from their .pc Cflags.  disasterparty does:
+    # usr/include/disasterparty/disasterparty.h, with
+    # "Cflags: -I${includedir}/disasterparty".  That expands to an ABSOLUTE
+    # /usr/include/disasterparty -- the BUILD HOST's -- so a machine that
+    # happens to have disasterparty installed compiles a cross binary against
+    # the host's header and a clean one fails with
+    #     motifgpt.c:45: fatal error: disasterparty.h: No such file or directory
+    [ -d "${st}/usr/include/${d}" ] && CPP="${CPP} -I${st}/usr/include/${d}"
     [ -d "${st}/usr/lib" ] && LDF="${LDF} -L${st}/usr/lib"
 done
 export PKG_CONFIG_LIBDIR="${PKGP}"
