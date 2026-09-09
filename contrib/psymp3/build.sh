@@ -98,6 +98,31 @@ fi
 export PKG_CONFIG_LIBDIR="${SR}/lib/pkgconfig"
 SUBDIR_INCS="-I${SR}/include/SDL2 -I${SR}/include/freetype2"
 
+# The file-chooser backend needs the same treatment, and rather more of it.
+# configure picks a dialog backend (Qt6..Qt3, GTK4, GTK+3, GTK+2), and with
+# gtk2 staged it settles on GTK+2 -- whose .pc pulls in fifteen include
+# directories across gtk, glib, pango, cairo, atk, gdk-pixbuf and friends,
+# every one of them an absolute /usr path.  Listing them by hand would rot
+# the first time a dependency moves, so rewrite whatever gtk+-2.0.pc
+# actually says into the sysroot.
+#
+# PKG_CONFIG_SYSROOT_DIR is the obvious tool here and it does not work: it
+# would yield ${SR}/usr/include, but the staged sysroot puts headers at
+# ${SR}/include.  Hence the sed.
+#
+# Missing this one was not hypothetical -- it is why the GTK dialog in a
+# locally built psymp3 was compiled against the HOST's gtk2 headers, i.e.
+# against the wrong struct layouts, while a clean runner failed outright
+# with "fatal error: gtk/gtk.h: No such file or directory".
+if pkg-config --exists gtk+-2.0 2>/dev/null; then
+    SUBDIR_INCS="${SUBDIR_INCS} $(
+        pkg-config --cflags gtk+-2.0 2>/dev/null | tr ' ' '\n' | grep '^-I' \
+          | sed -e "s|^-I/usr/lib/|-I${SR}/lib/|" \
+                -e "s|^-I/usr/include/|-I${SR}/include/|" \
+          | tr '\n' ' '
+    )"
+fi
+
 ./configure \
     --host=i386-unknown-linux-gnu \
     --prefix=/usr \
