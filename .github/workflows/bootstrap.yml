@@ -47,6 +47,10 @@ jobs:
       # gperf generates fontconfig's fcobjshash.h; chrpath is what TQt3's
       # build.sh uses to make the host tquic relocatable ($ORIGIN), and its
       # README says so.  Both are on a developer box and neither is on a bare
+      # meson and ninja-build are for contrib/elinks, the tree's only meson
+      # port -- its build.sh runs `meson setup` and `ninja -C`.  Both are on
+      # a developer box by way of other packages and on neither a bare
+      # runner nor this workflow's list.
       # runner.  intltool is here for hexchat, whose configure demands
       # >= 0.40.0 even with --disable-nls and stops at "Your intltool is
       # too old" when intltool-update is missing.  The note that used to
@@ -106,7 +110,7 @@ jobs:
             libice-dev libsm-dev libxrender-dev libxau-dev libxdmcp-dev \
             libcrypt-dev x11-xserver-utils xbitmaps gperf chrpath \
             libmagic-dev libglib2.0-dev libxml2-dev libxslt1-dev \
-            libdbus-1-dev intltool
+            libdbus-1-dev intltool meson ninja-build
 
       # build.sh installs the stage-1 toolchain here and says so: make it
       # yours once, and then nothing in the build needs root.
