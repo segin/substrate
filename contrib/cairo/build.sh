@@ -32,7 +32,16 @@ for d in zlib libpng pixman freetype expat fontconfig \
     [ -d "${st}/usr/lib/pkgconfig" ] && PKGP="${PKGP}${PKGP:+:}${st}/usr/lib/pkgconfig"
 done
 PKGP="${PKGP}:${SUBSTRATE_TOP}/contrib/libxcb/pkgconfig"
-export CPPFLAGS="${CPP} -I${SUBSTRATE_TOP}/dist-overlay/dist-freetype/usr/include/freetype2"
+# Headers that live in a subdirectory need that subdirectory on the path,
+# because the .pc files advertise it as an ABSOLUTE "-I/usr/include/<sub>"
+# -- the BUILD HOST's directory, not the staging tree's.  freetype2 was
+# already handled by hand; pixman needs the same, since cairo does a bare
+#     #include <pixman.h>
+# and our staging puts it in dist-pixman/usr/include/pixman-1/.  On a box
+# with libpixman-1-dev installed the cross build silently used the host
+# header instead; on a clean runner it fails outright.  (libpng needs no
+# entry: it installs png.h at the include root as well as in libpng16/.)
+export CPPFLAGS="${CPP} -I${SUBSTRATE_TOP}/dist-overlay/dist-freetype/usr/include/freetype2 -I${SUBSTRATE_TOP}/dist-overlay/dist-pixman/usr/include/pixman-1"
 export LDFLAGS="${LDF} -Wl,--copy-dt-needed-entries"
 export PKG_CONFIG_LIBDIR="${PKGP}"
 # cross run-tests + substrate malloc(0)
