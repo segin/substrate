@@ -1,2 +1,3 @@
 0001-openssl-1.1-3.x-compat.patch
 0002-util-c-openssl-opaque-dh.patch
+0003-gresource-no-pixdata.patch
