@@ -81,6 +81,9 @@ libogg:libvorbis
 libogg:flac
 libogg:speex
 libopus:sox
+libogg:opusfile
+libopus:opusfile
+opusfile:sox
 sdl3:sdl2-compat
 sdl2-compat:sdl12-compat
 sdl2-compat:psymp3
