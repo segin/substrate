@@ -11,7 +11,10 @@
 extern "C" {
 #endif
 
+#ifndef __pthread_t_defined
+#define __pthread_t_defined
 typedef int pthread_t;
+#endif
 typedef int pthread_attr_t;
 
 int pthread_create(pthread_t *thread, const pthread_attr_t *attr,
