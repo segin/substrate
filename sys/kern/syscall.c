@@ -1801,11 +1801,32 @@ int kern_mkdir(const char *p, int m) {
 int kern_mkdirat(int dirfd, const char *p, int m) {
     fs_node_t *parent_node = NULL;
     char name[128];
+    char norm[256];
+    size_t plen;
     int ret;
 
     if (!p) return -EFAULT;
 
-    ret = kern_resolve_parent_dirfd(dirfd, p, &parent_node, name, sizeof(name));
+    /*
+     * POSIX treats "foo/" and "foo" alike for mkdir.  The resolver below
+     * splits at the LAST slash, so a trailing one leaves the final
+     * component empty and its "name_out[0] == '\0'" guard answers EINVAL
+     * -- "mkdir src/" reported "Invalid argument" where plain "mkdir src"
+     * correctly reported "File exists".  GNU mkdir reaches the kernel
+     * through mkdirat(), so this path needs the same normalisation
+     * vfs_mkdir() does.
+     *
+     * kern_resolve_parent_dirfd() is shared with unlinkat and fchownat,
+     * where a trailing slash is meaningful (it requires the target BE a
+     * directory), so the stripping belongs here rather than in it.
+     */
+    plen = strlen(p);
+    while (plen > 1 && p[plen - 1] == '/') plen--;
+    if (plen >= sizeof(norm)) return -ENAMETOOLONG;
+    memcpy(norm, p, plen);
+    norm[plen] = '\0';
+
+    ret = kern_resolve_parent_dirfd(dirfd, norm, &parent_node, name, sizeof(name));
     if (ret != 0) {
         return ret;
     }

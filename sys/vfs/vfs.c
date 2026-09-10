@@ -1589,12 +1589,49 @@ static char *vfs_strrchr(const char *s, int c) {
     return (char *)last;
 }
 
+/*
+ * Strip trailing slashes from a path destined for mkdir/rmdir.
+ *
+ * POSIX treats "foo/" and "foo" alike for these two: the target has to
+ * be a directory either way.  vfs_resolve_parent_path() splits at the
+ * LAST slash, so without this the final component came back empty and
+ * the resolver's "name_out[0] == '\0'" guard reported EINVAL:
+ *
+ *     mkdir src/     -> "Invalid argument"     (should be EEXIST)
+ *     mkdir src/./   -> "Invalid argument"     (should be EEXIST)
+ *     mkdir src/.    -> "File exists"          (already correct)
+ *
+ * which is what stopped autotools: config.status builds paths by
+ * concatenation and readily emits both forms.
+ *
+ * Deliberately NOT applied to unlink/chown, which share the sibling
+ * resolver in kern/syscall.c.  There a trailing slash is meaningful --
+ * it demands the target BE a directory -- so stripping it would let
+ * "unlink foo/" remove a regular file.
+ */
+static int vfs_strip_trailing_slashes(const char *path, char *out, size_t outsz) {
+    size_t n;
+
+    if (!path || !out || outsz == 0) return -EINVAL;
+    n = strlen(path);
+    while (n > 1 && path[n - 1] == '/') n--;
+    if (n >= outsz) return -ENAMETOOLONG;
+    memcpy(out, path, n);
+    out[n] = '\0';
+    return 0;
+}
+
 int vfs_mkdir(const char *path, uint16_t permission) {
     fs_node_t *parent_node = NULL;
     char name[128];
+    char norm[256];
     int ret;
 
-    ret = vfs_resolve_parent_path(path, &parent_node, name, sizeof(name));
+    ret = vfs_strip_trailing_slashes(path, norm, sizeof(norm));
+    if (ret != 0) {
+        return ret;
+    }
+    ret = vfs_resolve_parent_path(norm, &parent_node, name, sizeof(name));
     if (ret != 0) {
         return ret;
     }
@@ -1614,9 +1651,14 @@ int vfs_mkdir(const char *path, uint16_t permission) {
 int vfs_rmdir(const char *path) {
     fs_node_t *parent_node = NULL;
     char name[128];
+    char norm[256];
     int ret;
 
-    ret = vfs_resolve_parent_path(path, &parent_node, name, sizeof(name));
+    ret = vfs_strip_trailing_slashes(path, norm, sizeof(norm));
+    if (ret != 0) {
+        return ret;
+    }
+    ret = vfs_resolve_parent_path(norm, &parent_node, name, sizeof(name));
     if (ret != 0) {
         return ret;
     }
