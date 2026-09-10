@@ -2906,6 +2906,630 @@ static int ext2_htree_lookup(ext2_node_t *ctx, const char *name,
     return 0;
 }
 
+/* ==================== htree write support ==========================
+ *
+ * [EXT2-08] This driver used to refuse every mutation of an indexed
+ * directory, which made autotools unusable on a real filesystem:
+ * config.status creates `src/.deps` inside a source tree large enough
+ * that mke2fs or `e2fsck -D` had indexed it, and mkdir(2) came back
+ * EOPNOTSUPP.  The seven directory-mutating entry points all bailed on
+ * EXT2_INDEX_FL, so an indexed directory was effectively immutable
+ * while still being readable.
+ *
+ * On-disk shape (ext3/ext4 "dir_index"), everything little-endian:
+ *
+ *   dx_root = logical block 0 of the directory
+ *     0..11   "."  dirent, rec_len 12
+ *     12..23  ".." dirent, rec_len = block_size - 12.  That oversized
+ *             record is what HIDES the index from a linear reader,
+ *             which is exactly why the format stays back-compatible
+ *             and why our linear fallback can still walk these dirs.
+ *     24..27  dx_root_info.reserved_zero
+ *     28      hash_version      29  info_length (8)
+ *     30      indirect_levels   31  unused_flags
+ *     32..    dx_entry[]
+ *
+ *   dx_node = an interior index block
+ *     0..7    fake dirent { inode 0, rec_len = block_size } — reads as
+ *             one large deleted record, so linear scans skip it
+ *     8..     dx_entry[]
+ *
+ *   dx_entry = { __le32 hash; __le32 block; }, where `block` is a
+ *   LOGICAL block within the directory.  entry[0] is overloaded: its
+ *   hash half is dx_countlimit { __le16 limit; __le16 count; } and its
+ *   block half is the leftmost child.  count includes that slot, so
+ *   separator keys live in entries[1..count-1], and entry[i].hash is
+ *   the SMALLEST hash in the subtree entry[i].block covers.
+ *
+ * We maintain indirect_levels 0 and 1 — the classic ext3 ceiling, good
+ * for millions of entries at 4 KiB blocks.  Deeper trees need
+ * INCOMPAT_LARGEDIR and are refused rather than silently mangled.
+ */
+
+#define EXT2_DX_ENTRY_SIZE     8
+#define EXT2_DX_ROOT_INFO_OFF  24
+#define EXT2_DX_NODE_ENTS_OFF  8
+
+/* One level of the descent, retained so a split can insert into the
+ * parent without walking the tree a second time. */
+struct ext2_dx_frame {
+    uint8_t *buf;        /* block image (scratch owned by the caller) */
+    uint32_t logical;    /* logical block within the directory        */
+    uint32_t phys;       /* physical block                            */
+    uint32_t ents_off;   /* byte offset of the dx_entry array         */
+    uint16_t limit;      /* slots available (including entry[0])      */
+    uint16_t count;      /* slots in use    (including entry[0])      */
+    int      at;         /* index of the entry we descended through   */
+    int      is_root;
+};
+
+/* One directory record, for sorting a leaf by hash during a split. */
+struct ext2_dx_map {
+    uint32_t hash;
+    uint16_t off;        /* offset of the record in the source block  */
+    uint16_t len;        /* minimal (4-aligned) size of the record    */
+};
+
+static inline uint32_t ext2_dx_hash_at(const uint8_t *e, int i) {
+    return *(const uint32_t *)(e + (uint32_t)i * EXT2_DX_ENTRY_SIZE);
+}
+static inline uint32_t ext2_dx_block_at(const uint8_t *e, int i) {
+    return *(const uint32_t *)(e + (uint32_t)i * EXT2_DX_ENTRY_SIZE + 4);
+}
+static inline void ext2_dx_set(uint8_t *e, int i, uint32_t hash, uint32_t blk) {
+    *(uint32_t *)(e + (uint32_t)i * EXT2_DX_ENTRY_SIZE)     = hash;
+    *(uint32_t *)(e + (uint32_t)i * EXT2_DX_ENTRY_SIZE + 4) = blk;
+}
+static inline void ext2_dx_set_count(uint8_t *e, uint16_t count) {
+    *(uint16_t *)(e + 2) = count;
+}
+
+/* dx_entry slots that fit in a block whose array starts at ents_off,
+ * reserving the last slot for dx_tail when the volume checksums
+ * metadata (this is how e2fsprogs computes the stored limit). */
+static uint16_t ext2_dx_limit_for(const ext2_fs_t *fs, uint32_t ents_off) {
+    uint32_t n = (fs->block_size - ents_off) / EXT2_DX_ENTRY_SIZE;
+    if (ext2_has_metadata_csum(fs) && n > 0) n--;
+    return (uint16_t)n;
+}
+
+/* Stamp an index block's dx_tail checksum.  The tail occupies the slot
+ * just past the last usable entry and covers the block header plus the
+ * entries actually in use, matching e2fsprogs' ext2fs_dx_csum().  A
+ * leaf block is NOT written through here — it carries the ordinary
+ * dirent tail that ext2_write_dir_block() maintains. */
+static void ext2_dx_tail_set(ext2_fs_t *fs, ext2_node_t *dir, uint8_t *blk,
+                             uint32_t ents_off, uint16_t limit, uint16_t count) {
+    if (!ext2_has_metadata_csum(fs)) return;
+    uint32_t toff = ents_off + (uint32_t)limit * EXT2_DX_ENTRY_SIZE;
+    if (toff + 8 > fs->block_size) return;
+    uint8_t *t = blk + toff;
+    uint32_t size = ents_off + (uint32_t)count * EXT2_DX_ENTRY_SIZE;
+    uint32_t le_inum = dir->inode_num, le_gen = dir->inode.i_generation;
+
+    *(uint32_t *)(t + 0) = 0;                     /* dt_reserved */
+    *(uint32_t *)(t + 4) = 0;                     /* zeroed for the calc */
+    uint32_t c = crc32c_update(fs->csum_seed, &le_inum, 4);
+    c = crc32c_update(c, &le_gen, 4);
+    c = crc32c_update(c, blk, size);
+    c = crc32c_update(c, t, 8);
+    *(uint32_t *)(t + 4) = c;
+}
+
+static uint32_t ext2_dx_write(ext2_fs_t *fs, ext2_node_t *dir,
+                              struct ext2_dx_frame *f) {
+    ext2_dx_tail_set(fs, dir, f->buf, f->ents_off, f->limit, f->count);
+    return ext2_write_block(fs, f->phys, f->buf);
+}
+
+/* Validate an index block already read into f->buf and fill in its
+ * geometry.  Returns 0, or -1 if the block is not a usable index. */
+static int ext2_dx_open(ext2_fs_t *fs, struct ext2_dx_frame *f, int is_root,
+                        uint8_t *hash_version_out, uint8_t *ind_levels_out) {
+    uint32_t ents_off;
+
+    f->is_root = is_root;
+    if (is_root) {
+        if (fs->block_size < 64) return -1;
+        uint8_t info_len = f->buf[EXT2_DX_ROOT_INFO_OFF + 5];
+        if (info_len < 8 || info_len > 16) return -1;
+        if (hash_version_out) *hash_version_out = f->buf[EXT2_DX_ROOT_INFO_OFF + 4];
+        if (ind_levels_out)   *ind_levels_out   = f->buf[EXT2_DX_ROOT_INFO_OFF + 6];
+        ents_off = EXT2_DX_ROOT_INFO_OFF + info_len;
+    } else {
+        ents_off = EXT2_DX_NODE_ENTS_OFF;
+    }
+    if (ents_off + EXT2_DX_ENTRY_SIZE > fs->block_size) return -1;
+
+    uint16_t limit = *(uint16_t *)(f->buf + ents_off);
+    uint16_t count = *(uint16_t *)(f->buf + ents_off + 2);
+    if (count == 0 || count > limit) return -1;
+    if (ents_off + (uint32_t)limit * EXT2_DX_ENTRY_SIZE > fs->block_size) return -1;
+
+    f->ents_off = ents_off;
+    f->limit    = limit;
+    f->count    = count;
+    return 0;
+}
+
+/* Largest index whose separator hash is <= `hash`.  entry[0] is the
+ * leftmost child and covers everything below entries[1].hash. */
+static int ext2_dx_search(const uint8_t *ents, uint16_t count, uint32_t hash) {
+    int lo = 1, hi = (int)count - 1;
+    while (lo <= hi) {
+        int mid = lo + (hi - lo) / 2;
+        if (ext2_dx_hash_at(ents, mid) > hash) hi = mid - 1;
+        else                                   lo = mid + 1;
+    }
+    return lo - 1;
+}
+
+/* The hash variant actually in force: the root block records the
+ * ALGORITHM, but signed-vs-unsigned char comes from the superblock's
+ * s_flags (EXT2-A25 / audit SB-08).  Getting this wrong routes any name
+ * with a high-bit byte to the wrong leaf. */
+static int ext2_dx_hash_version(const ext2_fs_t *fs, uint8_t hv) {
+    if ((fs->sb_flags & 0x2) &&
+        (hv == EXT2_HTREE_LEGACY || hv == EXT2_HTREE_HALF_MD4 ||
+         hv == EXT2_HTREE_TEA))
+        hv = (uint8_t)(hv + 3);
+    return (int)hv;
+}
+
+/* Insert one record into a single leaf block already in memory.
+ * Returns 0 on success, -ENOSPC if the block is full, -EIO if it is
+ * malformed.  Mirrors the slack/reuse logic of the linear inserter but
+ * confined to one block, which is all an htree leaf ever is. */
+static int ext2_leaf_insert(ext2_fs_t *fs, uint8_t *blk, const char *name,
+                            uint32_t name_len, uint32_t inode, uint8_t ft) {
+    uint32_t need = ((8u + name_len + 3u) / 4u) * 4u;
+    uint32_t lim  = ext2_dir_scan_limit(fs, blk);
+    uint32_t off  = 0;
+
+    while (off + 8 <= lim) {
+        ext2_dirent_t *de = (ext2_dirent_t *)(blk + off);
+        if (de->rec_len < 8 || off + de->rec_len > lim) return -EIO;
+
+        uint32_t actual = (de->inode != 0)
+                        ? ((8u + de->name_len + 3u) / 4u) * 4u : 0u;
+        if (actual > de->rec_len) return -EIO;
+
+        if (de->inode == 0 && de->rec_len >= need) {
+            de->inode     = inode;
+            de->name_len  = (uint8_t)name_len;
+            de->file_type = ft;
+            memcpy(de->name, name, name_len);
+            return 0;
+        }
+        if (de->inode != 0 && (uint32_t)(de->rec_len - actual) >= need) {
+            uint16_t slack = (uint16_t)(de->rec_len - actual);
+            de->rec_len = (uint16_t)actual;
+            ext2_dirent_t *nd = (ext2_dirent_t *)(blk + off + actual);
+            nd->inode     = inode;
+            nd->rec_len   = slack;
+            nd->name_len  = (uint8_t)name_len;
+            nd->file_type = ft;
+            memcpy(nd->name, name, name_len);
+            return 0;
+        }
+        off += de->rec_len;
+    }
+    return -ENOSPC;
+}
+
+/* Build a fresh leaf block in `dst` from map[from..to) of `src`. */
+static void ext2_leaf_build(ext2_fs_t *fs, uint8_t *dst, const uint8_t *src,
+                            const struct ext2_dx_map *map, int from, int to) {
+    uint32_t lim = ext2_dir_limit(fs);
+    uint32_t off = 0, last_off = 0;
+
+    memset(dst, 0, fs->block_size);
+    for (int i = from; i < to; i++) {
+        const ext2_dirent_t *s = (const ext2_dirent_t *)(src + map[i].off);
+        ext2_dirent_t *d = (ext2_dirent_t *)(dst + off);
+        d->inode     = s->inode;
+        d->name_len  = s->name_len;
+        d->file_type = s->file_type;
+        memcpy(d->name, s->name, s->name_len);
+        d->rec_len   = map[i].len;
+        last_off = off;
+        off += map[i].len;
+    }
+    if (off == 0) {
+        /* An empty half still needs one record spanning the block. */
+        ext2_dirent_t *d = (ext2_dirent_t *)dst;
+        d->inode = 0;
+        d->rec_len = (uint16_t)lim;
+    } else {
+        /* The last record absorbs the remaining space. */
+        ((ext2_dirent_t *)(dst + last_off))->rec_len = (uint16_t)(lim - last_off);
+    }
+}
+
+/* Insert (hash, blk) into an index block at position `at`+1, which the
+ * caller has already established has room. */
+static void ext2_dx_insert_at(struct ext2_dx_frame *f, int at,
+                              uint32_t hash, uint32_t blk) {
+    uint8_t *ents = f->buf + f->ents_off;
+    int pos = at + 1;
+    if (pos < (int)f->count)
+        memmove(ents + (uint32_t)(pos + 1) * EXT2_DX_ENTRY_SIZE,
+                ents + (uint32_t)pos * EXT2_DX_ENTRY_SIZE,
+                (uint32_t)(f->count - pos) * EXT2_DX_ENTRY_SIZE);
+    ext2_dx_set(ents, pos, hash, blk);
+    f->count++;
+    ext2_dx_set_count(ents, f->count);
+}
+
+/* Re-search `f` and insert (hash, blk), then write it back. */
+static int ext2_dx_add_to_frame(ext2_fs_t *fs, ext2_node_t *ctx,
+                                struct ext2_dx_frame *f,
+                                uint32_t hash, uint32_t blk) {
+    if (f->count >= f->limit) return -ENOSPC;
+    int at = ext2_dx_search(f->buf + f->ents_off, f->count, hash);
+    ext2_dx_insert_at(f, at, hash, blk);
+    return (ext2_dx_write(fs, ctx, f) == fs->block_size) ? 0 : -EIO;
+}
+
+/* Initialise `buf` as an empty dx_node: a fake dirent spanning the
+ * block (so linear readers walk over it) followed by an entry array. */
+static void ext2_dx_node_init(ext2_fs_t *fs, uint8_t *buf,
+                              struct ext2_dx_frame *f,
+                              uint32_t logical, uint32_t phys) {
+    memset(buf, 0, fs->block_size);
+    ext2_dirent_t *fake = (ext2_dirent_t *)buf;
+    fake->inode   = 0;
+    fake->rec_len = (uint16_t)fs->block_size;
+
+    f->buf      = buf;
+    f->logical  = logical;
+    f->phys     = phys;
+    f->ents_off = EXT2_DX_NODE_ENTS_OFF;
+    f->limit    = ext2_dx_limit_for(fs, EXT2_DX_NODE_ENTS_OFF);
+    f->count    = 0;
+    f->at       = 0;
+    f->is_root  = 0;
+}
+
+/* Move the upper half of `src`'s entries into the fresh node `dst`.
+ * `*sep_out` receives the separator hash the parent must record. */
+static int ext2_dx_split_node(struct ext2_dx_frame *src,
+                              struct ext2_dx_frame *dst, uint32_t *sep_out) {
+    uint8_t *se = src->buf + src->ents_off;
+    int n = (int)src->count;
+    int mid = n / 2;
+
+    if (mid < 1 || mid >= n) return -ENOSPC;
+    uint16_t dcount = (uint16_t)(n - mid);
+    if (dcount > dst->limit) return -ENOSPC;
+
+    uint8_t *de = dst->buf + dst->ents_off;
+    memcpy(de, se + (uint32_t)mid * EXT2_DX_ENTRY_SIZE,
+           (uint32_t)dcount * EXT2_DX_ENTRY_SIZE);
+    /* The first moved entry becomes the new node's leftmost child: its
+     * block half stays, its hash half is reused as the countlimit, and
+     * the hash itself becomes the separator stored in the parent. */
+    *sep_out = ext2_dx_hash_at(se, mid);
+    *(uint16_t *)(de + 0) = dst->limit;
+    *(uint16_t *)(de + 2) = dcount;
+    dst->count = dcount;
+
+    src->count = (uint16_t)mid;
+    ext2_dx_set_count(se, src->count);
+    return 0;
+}
+
+/* The root has filled at indirect_levels 0.  Push its entries down into
+ * `node` and leave the root with a single child, raising the tree to
+ * one indirect level. */
+static int ext2_dx_grow(ext2_fs_t *fs, struct ext2_dx_frame *root,
+                        struct ext2_dx_frame *node) {
+    uint8_t *re = root->buf + root->ents_off;
+    uint16_t n = root->count;
+
+    if (n > node->limit) return -ENOSPC;
+
+    uint8_t *ne = node->buf + node->ents_off;
+    memcpy(ne, re, (uint32_t)n * EXT2_DX_ENTRY_SIZE);
+    *(uint16_t *)(ne + 0) = node->limit;
+    *(uint16_t *)(ne + 2) = n;
+    node->count = n;
+
+    ext2_dx_set(re, 0, 0, node->logical);
+    *(uint16_t *)(re + 0) = root->limit;
+    *(uint16_t *)(re + 2) = 1;
+    root->count = 1;
+    root->buf[EXT2_DX_ROOT_INFO_OFF + 6] = 1;      /* indirect_levels */
+    (void)fs;
+    return 0;
+}
+
+/* Allocate one more logical block at the end of the directory.
+ * i_size is NOT advanced here — the caller does that only once the
+ * block's contents have been committed, so a failure in between
+ * leaves a block that is referenced by i_block[] and by nothing else
+ * (a clean, fsck-visible leak) rather than a directory whose tail is
+ * garbage. */
+static int ext2_dir_grow_block(ext2_fs_t *fs, ext2_node_t *ctx,
+                               uint32_t *logical_out, uint32_t *phys_out) {
+    uint32_t logical = ctx->inode.i_size / fs->block_size;
+    int arc = ext2_alloc_inode_block(fs, &ctx->inode, logical,
+                                     ctx->indirect_buf, ctx->dindirect_buf,
+                                     ctx->tindirect_buf);
+    if (arc != 0) return (arc < 0) ? arc : -ENOSPC;
+
+    uint32_t phys = ext2_get_block_num(fs, &ctx->inode, logical,
+                                       ctx->indirect_buf, ctx->dindirect_buf,
+                                       ctx->tindirect_buf);
+    if (phys == 0) return -EIO;
+    *logical_out = logical;
+    *phys_out    = phys;
+    return 0;
+}
+
+/*
+ * Add one entry to an indexed directory, maintaining the index.
+ * Called with ctx->lock held.  Returns 0, or a negative errno;
+ * -EOPNOTSUPP means the tree is shaped in a way we decline to modify
+ * (deeper than one indirect level), in which case nothing was written.
+ */
+static int ext2_htree_insert(ext2_node_t *ctx, const char *name,
+                             uint32_t name_len, uint32_t inode, uint8_t ft) {
+    ext2_fs_t *fs = ctx->fs;
+    uint32_t bs = fs->block_size;
+    struct ext2_dx_frame frames[2];
+    struct ext2_dx_map *map = NULL;
+    uint8_t *blk[6];
+    int nblk = 0, nframes = 0, result;
+    int map_cap = 0;
+
+    if (EXT2_RO_REFUSE(fs)) return -EROFS;
+
+    /* Six block buffers: root, node, leaf, low half, high half and one
+     * spare for an interior-node split.  Allocated separately rather
+     * than as one slab so this never asks the allocator for a large
+     * contiguous run.  ctx's indirect buffers stay reserved for
+     * ext2_get_block_num(). */
+    for (nblk = 0; nblk < 6; nblk++) {
+        blk[nblk] = kmalloc(bs);
+        if (!blk[nblk]) { result = -ENOMEM; goto out; }
+    }
+    uint8_t *rootb = blk[0], *nodeb = blk[1], *leafb = blk[2];
+    uint8_t *lob   = blk[3], *hib   = blk[4], *spareb = blk[5];
+
+    uint32_t *ind = ctx->indirect_buf, *dind = ctx->dindirect_buf,
+             *tind = ctx->tindirect_buf;
+
+    /* ---- descend to the leaf this hash belongs in ---------------- */
+    uint8_t hv_raw = 0, ind_levels = 0;
+    uint32_t root_phys = ext2_get_block_num(fs, &ctx->inode, 0, ind, dind, tind);
+    if (root_phys == 0)                              { result = -EIO; goto out; }
+    if (ext2_read_block(fs, root_phys, rootb) != bs) { result = -EIO; goto out; }
+
+    frames[0].buf = rootb; frames[0].logical = 0; frames[0].phys = root_phys;
+    if (ext2_dx_open(fs, &frames[0], 1, &hv_raw, &ind_levels) != 0) {
+        result = -EOPNOTSUPP; goto out;
+    }
+    if (ind_levels > 1) { result = -EOPNOTSUPP; goto out; }
+    nframes = 1;
+
+    int hv = ext2_dx_hash_version(fs, hv_raw);
+    uint32_t hash = 0, minor = 0;
+    if (ext2_htree_hash(name, (int)name_len, fs->hash_seed, hv,
+                        &hash, &minor) != 0) { result = -EOPNOTSUPP; goto out; }
+
+    frames[0].at = ext2_dx_search(rootb + frames[0].ents_off,
+                                  frames[0].count, hash);
+    uint32_t leaf_log = ext2_dx_block_at(rootb + frames[0].ents_off,
+                                         frames[0].at);
+
+    if (ind_levels == 1) {
+        uint32_t nphys = ext2_get_block_num(fs, &ctx->inode, leaf_log,
+                                            ind, dind, tind);
+        if (nphys == 0)                              { result = -EIO; goto out; }
+        if (ext2_read_block(fs, nphys, nodeb) != bs) { result = -EIO; goto out; }
+        frames[1].buf = nodeb; frames[1].logical = leaf_log; frames[1].phys = nphys;
+        if (ext2_dx_open(fs, &frames[1], 0, NULL, NULL) != 0) {
+            result = -EOPNOTSUPP; goto out;
+        }
+        nframes = 2;
+        frames[1].at = ext2_dx_search(nodeb + frames[1].ents_off,
+                                      frames[1].count, hash);
+        leaf_log = ext2_dx_block_at(nodeb + frames[1].ents_off, frames[1].at);
+    }
+
+    uint32_t leaf_phys = ext2_get_block_num(fs, &ctx->inode, leaf_log,
+                                            ind, dind, tind);
+    if (leaf_phys == 0)                              { result = -EIO; goto out; }
+    if (ext2_read_block(fs, leaf_phys, leafb) != bs) { result = -EIO; goto out; }
+
+    /* The hash picks the leaf, so this is the only block that can hold
+     * the name — which is the entire point of the index.  That makes
+     * the duplicate check cheap AND race-free here, where the linear
+     * inserter has to sweep the whole directory (EXT2-A17). */
+    if (ext2_scan_leaf(leafb, bs, name, name_len) != 0) {
+        result = -EEXIST; goto out;
+    }
+
+    /* ---- fast path: the leaf has room --------------------------- */
+    result = ext2_leaf_insert(fs, leafb, name, name_len, inode, ft);
+    if (result == 0) {
+        if (ext2_write_dir_block(fs, ctx, leaf_phys, leafb) != bs) {
+            result = -EIO; goto out;
+        }
+        goto commit;
+    }
+    if (result != -ENOSPC) goto out;
+
+    /* ---- the leaf is full: split it by hash ---------------------- */
+    {
+        uint32_t lim = ext2_dir_scan_limit(fs, leafb);
+        uint32_t off = 0;
+        int n = 0;
+
+        /* The smallest possible record is 12 bytes (8-byte header plus
+         * a 1-char name padded to 4), which bounds the entry count. */
+        map_cap = (int)(lim / 12) + 2;
+        map = kmalloc(sizeof(*map) * (uint32_t)map_cap);
+        if (!map) { result = -ENOMEM; goto out; }
+
+        while (off + 8 <= lim) {
+            ext2_dirent_t *de = (ext2_dirent_t *)(leafb + off);
+            if (de->rec_len < 8 || off + de->rec_len > lim) {
+                result = -EIO; goto out;
+            }
+            if (de->inode != 0 && de->name_len > 0 &&
+                de->name_len <= (uint32_t)(de->rec_len - 8)) {
+                uint32_t h = 0, mn = 0;
+                if (n >= map_cap) { result = -EIO; goto out; }
+                if (ext2_htree_hash(de->name, de->name_len, fs->hash_seed,
+                                    hv, &h, &mn) != 0) { result = -EIO; goto out; }
+                map[n].hash = h;
+                map[n].off  = (uint16_t)off;
+                map[n].len  = (uint16_t)(((8u + de->name_len + 3u) / 4u) * 4u);
+                n++;
+            }
+            off += de->rec_len;
+        }
+        if (n < 2) { result = -ENOSPC; goto out; }
+
+        /* Insertion sort: one block's worth of records, already close
+         * to ordered in practice. */
+        for (int i = 1; i < n; i++) {
+            struct ext2_dx_map t = map[i];
+            int j = i - 1;
+            while (j >= 0 && map[j].hash > t.hash) { map[j + 1] = map[j]; j--; }
+            map[j + 1] = t;
+        }
+
+        /* Split near the middle by bytes, then walk to a boundary
+         * between DIFFERENT hashes.  Equal hashes must never straddle
+         * two leaves: ext3 marks that case by setting the low bit of
+         * the separator ("this hash continues in the next block") and
+         * neither our lookup nor this inserter chases collision chains,
+         * so refuse rather than build a tree we cannot search.  Every
+         * hash from ext2_htree_hash() is even, which is what leaves
+         * that bit free to mean this. */
+        uint32_t total = 0, acc = 0;
+        for (int i = 0; i < n; i++) total += map[i].len;
+        int split = 1;
+        for (int i = 0; i < n; i++) {
+            acc += map[i].len;
+            if (acc >= total / 2) { split = i + 1; break; }
+        }
+        if (split >= n) split = n - 1;
+        {
+            int s = split;
+            while (s < n && map[s].hash == map[s - 1].hash) s++;
+            if (s >= n) {
+                s = split;
+                while (s > 1 && map[s].hash == map[s - 1].hash) s--;
+            }
+            if (s < 1 || s >= n || map[s].hash == map[s - 1].hash) {
+                result = -ENOSPC;      /* a whole block of colliding names */
+                goto out;
+            }
+            split = s;
+        }
+        uint32_t split_hash = map[split].hash;
+
+        uint32_t new_log = 0, new_phys = 0;
+        result = ext2_dir_grow_block(fs, ctx, &new_log, &new_phys);
+        if (result != 0) goto out;
+
+        ext2_leaf_build(fs, lob, leafb, map, 0, split);
+        ext2_leaf_build(fs, hib, leafb, map, split, n);
+
+        /* Place the new record in the half its hash belongs to. */
+        result = ext2_leaf_insert(fs, (hash < split_hash) ? lob : hib,
+                                  name, name_len, inode, ft);
+        if (result != 0) goto out;
+
+        if (ext2_write_dir_block(fs, ctx, leaf_phys, lob) != bs) {
+            result = -EIO; goto out;
+        }
+        if (ext2_write_dir_block(fs, ctx, new_phys, hib) != bs) {
+            result = -EIO; goto out;
+        }
+        ctx->inode.i_size += bs;
+
+        /* ---- publish the new leaf in the index ------------------- */
+        struct ext2_dx_frame *p = &frames[nframes - 1];
+        if (p->count < p->limit) {
+            ext2_dx_insert_at(p, p->at, split_hash, new_log);
+            if (ext2_dx_write(fs, ctx, p) != bs) { result = -EIO; goto out; }
+            goto commit;
+        }
+
+        if (nframes == 1) {
+            /* Root full with no indirect level yet: grow the tree. */
+            struct ext2_dx_frame nf;
+            uint32_t nl = 0, np = 0;
+            result = ext2_dir_grow_block(fs, ctx, &nl, &np);
+            if (result != 0) goto out;
+            ext2_dx_node_init(fs, nodeb, &nf, nl, np);
+            result = ext2_dx_grow(fs, &frames[0], &nf);
+            if (result != 0) goto out;
+            ctx->inode.i_size += bs;
+            result = ext2_dx_add_to_frame(fs, ctx, &nf, split_hash, new_log);
+            if (result != 0) goto out;
+            if (ext2_dx_write(fs, ctx, &frames[0]) != bs) {
+                result = -EIO; goto out;
+            }
+            goto commit;
+        }
+
+        /* Interior node full.  Split it and hang the new node off the
+         * root; if the root is full too the tree would need a third
+         * level, which requires INCOMPAT_LARGEDIR. */
+        if (frames[0].count >= frames[0].limit) {
+            result = -EOPNOTSUPP; goto out;
+        }
+        {
+            struct ext2_dx_frame nf;
+            uint32_t nl = 0, np = 0, sep = 0;
+            result = ext2_dir_grow_block(fs, ctx, &nl, &np);
+            if (result != 0) goto out;
+            ext2_dx_node_init(fs, spareb, &nf, nl, np);
+            result = ext2_dx_split_node(&frames[1], &nf, &sep);
+            if (result != 0) goto out;
+            ctx->inode.i_size += bs;
+
+            /* The new leaf belongs to whichever node now covers it. */
+            struct ext2_dx_frame *tgt = (split_hash < sep) ? &frames[1] : &nf;
+            result = ext2_dx_add_to_frame(fs, ctx, tgt, split_hash, new_log);
+            if (result != 0) goto out;
+            /* Write whichever half did not already go out above. */
+            if (tgt != &frames[1] &&
+                ext2_dx_write(fs, ctx, &frames[1]) != bs) {
+                result = -EIO; goto out;
+            }
+            if (tgt != &nf && ext2_dx_write(fs, ctx, &nf) != bs) {
+                result = -EIO; goto out;
+            }
+            result = ext2_dx_add_to_frame(fs, ctx, &frames[0], sep, nl);
+            if (result != 0) goto out;
+            goto commit;
+        }
+    }
+
+commit:
+    {
+        uint32_t now = (uint32_t)get_time();
+        ctx->inode.i_mtime = now;
+        ctx->inode.i_ctime = now;
+    }
+    ext2_write_inode(fs, ctx->inode_num, &ctx->inode);
+    ctx->last_readdir_idx = (uint64_t)-1;
+    ctx->last_readdir_pos = 0;
+    result = 0;
+
+out:
+    if (map) kfree(map, sizeof(*map) * (uint32_t)map_cap);
+    while (nblk-- > 0) kfree(blk[nblk], bs);
+    return result;
+}
+
 // Find entry by name in directory
 fs_node_t *ext2_finddir(fs_node_t *node, char *name) {
     if (!node || !name) return NULL;
@@ -4847,22 +5471,6 @@ int ext2_truncate(fs_node_t *node, off_t length) {
 }
 
 // Add directory entry
-/*
- * [EXT2-08] Does this directory carry EXT2_INDEX_FL (an htree)?
- *
- * Substrate honours the flag on the READ side only (ext2_htree_lookup) and
- * has no index maintenance at all, so any structural change would corrupt
- * the tree.  The check lives at the ENTRY points, before an inode is
- * allocated -- refusing after allocation leaks the inode, which is what an
- * e2fsck of the test volume caught ("Inode bitmap differences: +3014").
- */
-static int ext2_dir_is_indexed(fs_node_t *dir) {
-    ext2_node_t *c;
-    if (!dir) return 0;
-    c = (ext2_node_t *)(uintptr_t)dir->impl;
-    return c && (c->inode.i_flags & EXT2_INDEX_FL);
-}
-
 static int ext2_add_entry(fs_node_t *dir, const char *name, uint32_t inode, uint8_t file_type) {
     if (!dir || !name || inode == 0) return -EINVAL;
     
@@ -4887,27 +5495,6 @@ static int ext2_add_entry(fs_node_t *dir, const char *name, uint32_t inode, uint
     
     mutex_lock(&ctx->lock);
 
-    /*
-     * [EXT2-08] Refuse to modify an indexed (htree) directory.
-     *
-     * EXT2_INDEX_FL is honoured on the READ side (ext2_htree_lookup) and
-     * nowhere on the write side.  An htree root block is "." (rec_len 12)
-     * followed by ".." with rec_len = block_size - 12, where that oversized
-     * ".." record HIDES dx_root_info and the index array.  The linear
-     * insert below sees a 12-byte "." and enormous slack, takes the split
-     * path, and writes a fresh dirent at byte offset 24 -- directly over
-     * h_hash_version / h_info_len / h_ind_levels and the first index
-     * entries.  The directory is then structurally corrupt to every other
-     * ext2 implementation.
-     *
-     * Until index maintenance exists, fail cleanly instead.  Reads still
-     * work: ext2_finddir falls back to a linear scan.
-     */
-    if (ctx->inode.i_flags & EXT2_INDEX_FL) {
-        mutex_unlock(&ctx->lock);
-        return -EOPNOTSUPP;
-    }
-
     // Invalidate dcache entry if it matches
     for (int k = 0; k < EXT2_DCACHE_SIZE; k++) {
         if (ctx->dcache[k].inode_num != 0 &&
@@ -4928,6 +5515,21 @@ static int ext2_add_entry(fs_node_t *dir, const char *name, uint32_t inode, uint
     if (!ctx->block_buf || !ctx->indirect_buf || !ctx->dindirect_buf || !ctx->tindirect_buf) {
         mutex_unlock(&ctx->lock);
         return -ENOMEM;
+    }
+
+    /*
+     * [EXT2-08] An indexed directory is maintained through its hash
+     * tree, never by appending.  The linear path below would walk into
+     * the dx_root block, mistake the oversized ".." record for slack and
+     * write a dirent straight over h_hash_version / h_info_len /
+     * h_ind_levels and the first index entries.  ext2_htree_insert()
+     * descends the tree, splits the target leaf when it is full, and
+     * maintains the index.
+     */
+    if (ctx->inode.i_flags & EXT2_INDEX_FL) {
+        int hres = ext2_htree_insert(ctx, name, name_len, inode, file_type);
+        mutex_unlock(&ctx->lock);
+        return hres;
     }
 
     uint8_t *block_buf = ctx->block_buf;
@@ -5182,8 +5784,6 @@ cleanup:
 
 // Implement ext2_link
 int ext2_link(fs_node_t *parent, fs_node_t *source, const char *name) {
-    if (ext2_dir_is_indexed(parent))
-        return -EOPNOTSUPP;   /* [EXT2-08] */
 
     if (!parent || !source || !name || !name[0]) return -EINVAL;
     if ((parent->flags & 0x7) != FS_DIRECTORY) return -ENOTDIR;
@@ -5235,8 +5835,6 @@ int ext2_link(fs_node_t *parent, fs_node_t *source, const char *name) {
 
 // Implement ext2_rename
 int ext2_rename(fs_node_t *old_parent, const char *old_name, fs_node_t *new_parent, const char *new_name) {
-    if (ext2_dir_is_indexed(old_parent) || ext2_dir_is_indexed(new_parent))
-        return -EOPNOTSUPP;   /* [EXT2-08] */
 
     if (!old_parent || !old_name || !new_parent || !new_name) return -EINVAL;
     /* EXT2-A2 (audit DE-04): every other namespace op rejects dot names;
@@ -5465,25 +6063,15 @@ static int ext2_remove_entry(fs_node_t *dir, const char *name) {
     mutex_lock(&ctx->lock);
 
     /*
-     * [EXT2-08] Refuse to modify an indexed (htree) directory.
-     *
-     * EXT2_INDEX_FL is honoured on the READ side (ext2_htree_lookup) and
-     * nowhere on the write side.  An htree root block is "." (rec_len 12)
-     * followed by ".." with rec_len = block_size - 12, where that oversized
-     * ".." record HIDES dx_root_info and the index array.  The linear
-     * insert below sees a 12-byte "." and enormous slack, takes the split
-     * path, and writes a fresh dirent at byte offset 24 -- directly over
-     * h_hash_version / h_info_len / h_ind_levels and the first index
-     * entries.  The directory is then structurally corrupt to every other
-     * ext2 implementation.
-     *
-     * Until index maintenance exists, fail cleanly instead.  Reads still
-     * work: ext2_finddir falls back to a linear scan.
+     * [EXT2-08] Deletion needs no index maintenance and is safe on an
+     * indexed directory exactly as written.  ext3/ext4 never shrink or
+     * rebalance a tree on unlink either -- a leaf simply gets sparser.
+     * The scan below is block-local (prev_de restarts at every block and
+     * records are only ever merged within one), so the dx_root block,
+     * where the oversized ".." hides the index, and the dx_node blocks,
+     * which read as one large deleted record, are walked over and never
+     * rewritten.
      */
-    if (ctx->inode.i_flags & EXT2_INDEX_FL) {
-        mutex_unlock(&ctx->lock);
-        return -EOPNOTSUPP;
-    }
 
     // Invalidate dcache entry if it matches
     for (int k = 0; k < EXT2_DCACHE_SIZE; k++) {
@@ -5595,8 +6183,6 @@ cleanup:
 }
 
 static int ext2_mknod(fs_node_t *dir, const char *name, uint16_t mode, uint32_t dev) {
-    if (ext2_dir_is_indexed(dir))
-        return -EOPNOTSUPP;   /* [EXT2-08] */
 
     ext2_node_t *dir_ctx;
     ext2_fs_t *fs;
@@ -5667,8 +6253,6 @@ static int ext2_mknod(fs_node_t *dir, const char *name, uint16_t mode, uint32_t 
 }
 
 static int ext2_symlink(fs_node_t *dir, const char *target, const char *name) {
-    if (ext2_dir_is_indexed(dir))
-        return -EOPNOTSUPP;   /* [EXT2-08] */
 
     if (!dir || !target || !name || !name[0]) return -EINVAL;
     if ((dir->flags & 0x7) != FS_DIRECTORY) return -ENOTDIR;
@@ -5768,8 +6352,6 @@ static int ext2_symlink(fs_node_t *dir, const char *target, const char *name) {
 }
 
 int ext2_mkdir(fs_node_t *dir, const char *name, uint16_t permission) {
-    if (ext2_dir_is_indexed(dir))
-        return -EOPNOTSUPP;   /* [EXT2-08] */
 
     ext2_node_t *dir_ctx;
     ext2_fs_t *fs;
@@ -5907,8 +6489,6 @@ int ext2_mkdir(fs_node_t *dir, const char *name, uint16_t permission) {
 }
 
 int ext2_unlink(fs_node_t *dir, const char *name) {
-    if (ext2_dir_is_indexed(dir))
-        return -EOPNOTSUPP;   /* [EXT2-08] */
 
     fs_node_t *victim;
     ext2_node_t *victim_ctx;
@@ -6060,8 +6640,6 @@ static int ext2_dir_is_empty(fs_node_t *node) {
 }
 
 int ext2_rmdir(fs_node_t *dir, const char *name) {
-    if (ext2_dir_is_indexed(dir))
-        return -EOPNOTSUPP;   /* [EXT2-08] */
 
     fs_node_t *victim;
     ext2_node_t *dir_ctx;

@@ -70,6 +70,7 @@ HOST_TESTS += host_test_udf_truncate_expand
 HOST_TESTS += host_test_ext2_alloc_inode_block
 HOST_TESTS += host_test_ext2_free_block
 HOST_TESTS += host_test_ext2_get_block_num
+HOST_TESTS += host_test_ext2_htree
 HOST_TESTS += host_test_ext2_get_blocks_extent
 HOST_TESTS += host_test_ext2_read_block
 HOST_TESTS += host_test_ext2_readlink
@@ -451,6 +452,9 @@ host_test_udf_read_tag: host_test_udf_read_tag.c
 
 host_test_udf_find_avdp: host_test_udf_find_avdp.c
 	$(CC) -g -Wall -I../../sys -I. -Ivuln_mocks -idirafter ../../sys/include -idirafter ../../include host_test_udf_find_avdp.c -o $@
+
+host_test_ext2_htree: host_test_ext2_htree.c
+	$(CC) -g -Wall -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I../../sys/fs -I. host_test_ext2_htree.c -o $@
 
 host_test_ext2_read_block: host_test_ext2_read_block.c
 	$(CC) -g -Wall -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_ext2_read_block.c -o $@

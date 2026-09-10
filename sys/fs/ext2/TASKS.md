@@ -29,9 +29,18 @@ does today and what it still does not do.
   inode bitmaps, per-inode, and the `ext4_dir_entry_tail` on every
   directory block.  Volumes stay mountable by Linux and clean under
   e2fsck after substrate writes to them.
-- **htree directory index** (read) — hash-routed lookup with the
-  signed/unsigned variant taken from the superblock's `s_flags`, all
-  six hash functions ported from FreeBSD, linear-scan fallback.
+- **htree directory index** (read and write) — hash-routed lookup with
+  the signed/unsigned variant taken from the superblock's `s_flags`, all
+  six hash functions ported from FreeBSD, linear-scan fallback.  Writes
+  maintain the index: `ext2_htree_insert()` descends to the target leaf,
+  splits it on a hash boundary when full, and publishes the new
+  separator upward, growing the tree from `indirect_levels` 0 to 1 when
+  the root fills.  Deletion needs no maintenance (ext3/ext4 do not
+  rebalance on unlink either) and runs through the ordinary block-local
+  path.  Covered by `tests/ci/test-ext2-htree.sh`, which drives 12k
+  inserts, splits, deletes and a rename on a real indexed volume and
+  hands the result to `e2fsck -fn`, with a linear directory as the
+  control.
 - **Extended attributes** (read) — inline and block-stored, POSIX ACL
   names, permission-gated at the syscall layer; the xattr block is
   refcount-released when an inode is deleted.
@@ -57,13 +66,17 @@ does today and what it still does not do.
 Each is a deliberate refusal or a bounded, documented shortfall — none
 of them corrupts a filesystem.
 
-- **htree write support.** Any structural change to a directory
-  carrying `EXT2_INDEX_FL` is refused with `-EOPNOTSUPP`, because the
-  index is not maintained.  Practical consequence: on a Linux-made
-  image, large directories (`/usr/bin`, `/etc`) are effectively
-  read-only — reads and lookups work fine.  Fixing this means
-  implementing index insertion and node splitting.
-- **htree multi-level** (`h_ind_levels > 0`) falls back to linear scan.
+- **htree beyond one indirect level.** Insertion maintains
+  `h_ind_levels` 0 and 1 — the classic ext3 ceiling, millions of entries
+  at 4 KiB blocks.  A tree already deeper than that (which needs
+  `INCOMPAT_LARGEDIR`) is refused with `-EOPNOTSUPP` rather than
+  modified, and lookup falls back to a linear scan.
+- **htree hash-collision chains.** A leaf split has to land on a
+  boundary between two *different* hashes.  ext3 encodes a split
+  through equal hashes by setting the low bit of the separator, and
+  neither our lookup nor our inserter chases those chains, so a block
+  whose names all collide refuses with `-ENOSPC` instead of building a
+  tree we could not search.
 - **Extent-tree split / grow-in-depth.** The append path stops when the
   inline header fills; sparse and multi-level writes refuse cleanly.
 - **Extent-file partial truncate.** Shrink-to-zero works (full
