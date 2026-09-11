@@ -1,8 +1,8 @@
 diff --git a/src/io/MemoryTracker.cpp b/src/io/MemoryTracker.cpp
-index bc78897c..ef68c3eb 100644
+index e8c9692b..ef23cd43 100644
 --- a/src/io/MemoryTracker.cpp
 +++ b/src/io/MemoryTracker.cpp
-@@ -90,20 +90,41 @@ void MemoryTracker::update() {
+@@ -127,20 +127,41 @@ void MemoryTracker::update() {
      FILE* file = fopen("/proc/meminfo", "r");
      if (file) {
          char line[128];

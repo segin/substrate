@@ -1,6 +1,6 @@
 #!/bin/sh
 #
-# contrib/psymp3/build.sh — cross-build PsyMP3 (C++17 SDL2 music player) for substrate.
+# contrib/psymp3/build.sh — cross-build PsyMP3 (C++17 SDL3 music player) for substrate.
 #
 # PsyMP3 is autotools (configure.ac + generate-configure.sh/autogen.sh).  We
 # regenerate configure on the HOST (needs autoconf/automake + autoconf-archive
@@ -16,8 +16,12 @@
 #                             slower to debug and pulls all sources into one TU).
 #
 # Enabled codecs (all deps are staged in the cross sysroot):
-#   FLAC (native, no libFLAC), Vorbis, Opus, Speex, AAC (faad2),
+#   FLAC (native, no libFLAC), Vorbis, Opus, Speex, AAC (fdk-aac),
 #   G.722 (spandsp), G.711 A-law/u-law, MP3 (bundled minimp3).
+#
+# 2.0-RC3 changed three dependencies from 1.99.16: SDL2 -> SDL3, faad2 ->
+# fdk-aac, and vorbis -> "vorbisenc vorbis".  All three are already staged
+# and ordered ahead of this port.
 #
 # Env: STAGE1_PREFIX (default /opt/substrate), DESTDIR, JOBS.
 
@@ -84,19 +88,24 @@ fi
 # pkg-config resolves against the cross sysroot's .pc files.  Those carry
 # prefix=/usr and emit -l<name>, which is fine, and -I/usr/include/... which
 # is NOT: an absolute -I is not rewritten by the compiler's sysroot, so it
-# names the BUILD HOST's directory.  It goes unnoticed for headers that also
-# sit at the top of ${SR}/include, because the default search path finds
-# them anyway -- but psymp3 includes <SDL.h> and <ft2build.h>, which live in
-# subdirectories, and sdl2.pc/freetype2.pc supply those subdirectories
-# through exactly such a -I.  On a box with libsdl2-dev installed it
-# compiles against the host's headers; on a clean runner it stops at
+# names the BUILD HOST's directory.  That goes unnoticed for headers which
+# also sit at the top of ${SR}/include, because the default search path
+# finds them anyway; it is a hard failure on a clean runner for any include
+# that needs a SUBDIRECTORY on the path.
 #
-#     include/psymp3.h:267:10: fatal error: SDL.h: No such file or directory
+# 2.0-RC3 moved nearly everything to subdirectory-qualified includes --
+# <SDL3/SDL.h>, <taglib/fileref.h>, <opus/opus.h>, <ogg/ogg.h>,
+# <spandsp/g722.h>, <fdk-aac/aacdecoder_lib.h> -- all of which resolve from
+# ${SR}/include with no -I at all.  <ft2build.h> is the one bare name left,
+# so freetype2 is the only entry here now (1.99.16 also needed SDL2).
 #
-# Name them explicitly against ${SR}.  SDL2, not SDL: the sysroot has both,
-# SDL/ being sdl12-compat's, and configure.ac asks for sdl2.
+# configure.ac appends its own
+#     -I`$PKG_CONFIG --variable=includedir sdl3`/SDL3
+# which expands to the host's /usr/include/SDL3.  Harmless: the directory
+# does not exist on a clean runner and <SDL3/SDL.h> resolves from the
+# sysroot regardless.  Do not "fix" it by pointing psymp3 at SDL2.
 export PKG_CONFIG_LIBDIR="${SR}/lib/pkgconfig"
-SUBDIR_INCS="-I${SR}/include/SDL2 -I${SR}/include/freetype2"
+SUBDIR_INCS="-I${SR}/include/freetype2"
 
 # The file-chooser backend needs the same treatment, and rather more of it.
 # configure picks a dialog backend (Qt6..Qt3, GTK4, GTK+3, GTK+2), and with

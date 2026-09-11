@@ -289,18 +289,31 @@ meta-compiler (host wml/wmluiltok) and installs the uil/ headers.
   `DT_NEEDED`, all the layers an application needs must be installed on
   target, not just the one it links.
 - **FreeType2** (`contrib/freetype/`).
-- **PsyMP3** (`contrib/psymp3/`, pinned to the `1.99.16-RELEASE`
-  upstream tag with a vendored patch series) — a music player built on SDL2 (now resolved through sdl2-compat).  Its
+- **PsyMP3** (`contrib/psymp3/`, pinned to the `2.0-RC3` upstream tag
+  with a vendored patch series) — a music player built on SDL3.  Its
   codec dependencies each ship as their own port: `libogg`
   (`contrib/libogg/`), `libvorbis` (`contrib/libvorbis/`), `libopus`
-  (`contrib/libopus/`), `speex` (`contrib/speex/`), `faad2`
-  (`contrib/faad2/`), `taglib` (`contrib/taglib/`) and `spandsp`
+  (`contrib/libopus/`), `speex` (`contrib/speex/`), `fdk-aac`
+  (`contrib/fdk-aac/`), `taglib` (`contrib/taglib/`) and `spandsp`
   (`contrib/spandsp/`).  Together these bring audio/multimedia playback
   to the userland.
+
+  2.0-RC3 changed three dependencies from 1.99.16 — SDL2 to SDL3,
+  `faad2` to `fdk-aac`, and `vorbis` to `vorbisenc vorbis` — and moved
+  to subdirectory-qualified includes (`<SDL3/SDL.h>`, `<taglib/…>`,
+  `<opus/…>`, `<spandsp/…>`, `<fdk-aac/…>`), which resolve from the
+  sysroot with no `-I` at all.  `<ft2build.h>` is the only bare name
+  left, so `build.sh` names just `freetype2` explicitly; see the
+  subdirectory-`Cflags` note under "Cross-build traps" for why that
+  matters.  It also vendors `third_party/stb/stb_vorbis.c`, whose
+  `alloca` guard lists `__linux__`/`__sun__`/`__EMSCRIPTEN__`/
+  `__NEWLIB__` and not substrate — patch `0004` adds `__substrate__`.
+  Substrate does ship `<alloca.h>`; stb simply had no way to know.
 - **fdk-aac 2.0.3** (`contrib/fdk-aac/`) — the Fraunhofer FDK AAC codec
-  library, encoder and decoder.  Ported to replace `faad2` (decode-only)
-  as PsyMP3's AAC path in future PsyMP3 versions; the two coexist, so
-  nothing linking `-lfaad` today is affected.  CMake-built like faad2.
+  library, encoder and decoder.  It is PsyMP3's AAC path as of 2.0-RC3,
+  which asks for `fdk-aac` where 1.99.16 asked for `faad2`; the two
+  coexist, so nothing still linking `-lfaad` is affected.  CMake-built
+  like faad2.
   Note the licence is the Fraunhofer Android one, not a standard
   free-software licence, and it grants no patent rights — see
   `contrib/fdk-aac/README.SUBSTRATE.md`.

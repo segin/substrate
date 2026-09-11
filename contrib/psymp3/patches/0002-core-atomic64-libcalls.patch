@@ -1,5 +1,5 @@
 diff --git a/src/core/Makefile.am b/src/core/Makefile.am
-index 86e97b2c..cb842c4e 100644
+index 13083eea..88575138 100644
 --- a/src/core/Makefile.am
 +++ b/src/core/Makefile.am
 @@ -19,7 +19,8 @@ libpsymp3_core_a_SOURCES = \
@@ -10,7 +10,7 @@ index 86e97b2c..cb842c4e 100644
 +	lyrics.cpp \
 +	atomic64.c
  
- AM_CPPFLAGS = -I$(top_srcdir)/include $(SDL_CFLAGS) $(TAGLIB_CFLAGS) $(FREETYPE_CFLAGS) $(OPENSSL_CFLAGS) $(CURL_CFLAGS) $(DBUS_CFLAGS) $(OPUS_CFLAGS) $(VORBIS_CFLAGS) $(OGG_CFLAGS)
+ AM_CPPFLAGS = -I$(top_srcdir)/include $(SDL_CFLAGS) $(TAGLIB_CFLAGS) $(FREETYPE_CFLAGS) $(OPENSSL_CFLAGS) $(CURL_CFLAGS) $(DBUS_CFLAGS) $(OPUS_CFLAGS) $(OGG_CFLAGS)
  
 diff --git a/src/core/atomic64.c b/src/core/atomic64.c
 new file mode 100644

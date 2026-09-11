@@ -86,12 +86,14 @@ libopus:opusfile
 opusfile:sox
 sdl3:sdl2-compat
 sdl2-compat:sdl12-compat
-sdl2-compat:psymp3
+sdl3:psymp3
 taglib:psymp3
-faad2:psymp3
+fdk-aac:psymp3
 spandsp:psymp3
 speex:psymp3
 libogg:psymp3
+libvorbis:psymp3
+libopus:psymp3
 libxml2:libxslt
 libXfixes:libXi
 libXi:libXtst
