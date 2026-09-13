@@ -45,7 +45,11 @@ struct stat {
 #define st_mtime_nsec  st_mtim.tv_nsec
 #define st_ctime_nsec  st_ctim.tv_nsec
 
-#if defined(__i386__) && !defined(__cplusplus) && \
+/* Pinned for the substrate target only.  tests/ host-builds this header with
+ * -m32 against glibc's typedefs, where ino_t, time_t and off_t are 4 bytes
+ * and the struct is legitimately smaller -- the ABI being guarded is the one
+ * the substrate kernel copies out, not whatever a host test assembles. */
+#if defined(__substrate__) && defined(__i386__) && !defined(__cplusplus) && \
     defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
 _Static_assert(sizeof(struct stat) == 96,
                "struct stat ABI changed; see docs/specs/abi-i386.md");
