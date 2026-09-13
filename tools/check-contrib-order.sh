@@ -120,6 +120,8 @@ file:nano
 ncurses:mc
 glib2:mc
 e2fsprogs:mc
+ncurses:texinfo
+perl:texinfo
 "
 
 pos() {

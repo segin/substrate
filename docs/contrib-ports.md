@@ -53,6 +53,9 @@ image.  This document catalogs the current set.
   cannot be probed, such as `d_nanosleep` and the 64-bit `st_ino_size`.
   One patch makes `Errno_pm.PL` read the target's `errno.h` rather than
   the build host's.
+- **texinfo 7.3** (`contrib/texinfo/`) — `info`, `install-info` and the
+  `texi2any`/`makeinfo` translator.  The last is perl, so this follows
+  `contrib/perl`; built `--disable-perl-xs`, using the pure-perl code path.
 
 ## Compression / archive / crypto / net
 
