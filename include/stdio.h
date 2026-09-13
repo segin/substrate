@@ -16,7 +16,7 @@ extern "C" {
  * (inetutils, coreutils, ...) then fails to compile wchar.h.  Define
  * the typedef up front to break the cycle.  Body uses only int and
  * unsigned char*, so it has no header prerequisites.  */
-typedef struct FILE {
+struct FILE {
     int fd;
     int flags;     // RW, APPEND, etc.
     int mode;      // Buffering mode
@@ -42,7 +42,14 @@ typedef struct FILE {
      * written back to the file (silent corruption).  0 = none, 1 = read,
      * 2 = write (see _IO_RW_* in stdio_core.c). */
     int rw_state;
-} FILE;
+};
+
+/* Guarded so <wchar.h> can forward-declare FILE for its wide-stdio
+ * prototypes without including this header -- see the note there. */
+#ifndef __FILE_defined
+#define __FILE_defined 1
+typedef struct FILE FILE;
+#endif
 
 #include <sys/types.h>
 

@@ -6,15 +6,46 @@ extern "C" {
 #endif
 
 #include <stddef.h>
-#include <stdint.h>
-#include <stdio.h>
+
+/*
+ * <wchar.h> must stand on its own.  It used to pull in <stdint.h> (for
+ * uint32_t) and <stdio.h> (for FILE), which breaks the moment it is reached
+ * from inside one of those headers -- the re-entrant include hits the
+ * _STDINT_H / _STDIO_H guard, returns nothing, and the typedef below fails
+ * with "unknown type name 'uint32_t'".  Everything downstream that uses
+ * wint_t or mbstate_t then collapses.
+ *
+ * That is not hypothetical: gnulib's replacement <stdint.h> includes
+ * <wchar.h> partway through to get WCHAR_MIN/WCHAR_MAX, so every
+ * gnulib-using package hit it, on target, as
+ *
+ *     ./wchar.h:876:1: error: unknown type name 'wint_t'
+ *     /usr/include/wchar.h:34:8: error: conflicting types for 'rpl_mbsinit'
+ *
+ * -- gnulib having fallen back to implicit int for the types it could not
+ * see, then colliding with the real declarations here.  <stdio.h> already
+ * hoists its FILE typedef above its own includes for exactly this reason;
+ * this is the other half of the same fix.
+ *
+ * So: wint_t is spelled without <stdint.h>, and FILE is forward-declared
+ * rather than included.  <stddef.h> is the only prerequisite left, and it
+ * is self-contained (a compiler-provided header with no cycle to join).
+ */
 
 /* wchar_t comes from <stddef.h>; wint_t / mbstate_t / WEOF are local. */
-typedef uint32_t wint_t;
+typedef unsigned int wint_t;
 typedef struct {
     unsigned int __count;
     unsigned int __value;
 } mbstate_t;
+
+/* The wide-stdio prototypes below take FILE *.  Naming the type is enough --
+ * they never dereference it -- so declare it here under the same guard
+ * <stdio.h> uses, and the two agree whichever is included first. */
+#ifndef __FILE_defined
+#define __FILE_defined 1
+typedef struct FILE FILE;
+#endif
 
 #define WEOF ((wint_t)-1)
 
