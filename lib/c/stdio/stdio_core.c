@@ -7,6 +7,7 @@
 #include <unistd.h>
 
 #include <sys/wait.h>
+#include <stdio_ext.h>
 
 static FILE *g_file_list_head = NULL;
 
@@ -567,6 +568,8 @@ void clearerr(FILE *stream) {
 
 int feof(FILE *stream) { return stream->eof; }
 int ferror(FILE *stream) { return stream->error; }
+/* Declared in <stdio_ext.h>; see there for why this exists. */
+void __fseterr(FILE *stream) { stream->error = 1; }
 #undef fileno
 int fileno(FILE *stream) { return stream ? stream->fd : -1; }
 

@@ -1,0 +1,93 @@
+.\" __fseterr.3 - set the error indicator of a stream
+.TH __FSETERR 3 "2026-09-13" "Substrate" "Library Functions Manual"
+.SH NAME
+__fseterr \- set the error indicator of a stream
+.SH LIBRARY
+.B libc
+.SH SYNOPSIS
+.B #include <stdio_ext.h>
+.PP
+.BI "void __fseterr(FILE *" stream ");"
+.SH DESCRIPTION
+The
+.BR __fseterr ()
+function sets the error indicator for the stream pointed to by
+.IR stream ,
+exactly as a failed underlying
+.BR read (2)
+or
+.BR write (2)
+would.
+A later call to
+.BR ferror ()
+on
+.I stream
+returns non-zero until the indicator is reset by
+.BR clearerr ();
+both are described in
+.BR feof (3).
+.PP
+The end-of-file indicator is not affected.
+.SH RETURN VALUE
+The
+.BR __fseterr ()
+function returns no value.
+.PP
+It does not set
+.IR errno .
+.SH NOTES
+This function is an extension, provided under the same name by glibc and
+Solaris.
+It exists so that portable code \(em gnulib in particular \(em can mark a
+stream as failed without knowing the layout of
+.IR FILE .
+Without it, gnulib's
+.I fseterr
+module falls back to code written for specific C libraries, which stops the
+build on any other system with
+.RI \(dq "Please port gnulib fseterr.c to your platform!" \(dq.
+.PP
+Only
+.BR __fseterr ()
+is implemented from the
+.I <stdio_ext.h>
+family; functions such as
+.BR __fpending ()
+and
+.BR __freading ()
+are not provided.
+.SH EXAMPLE
+The following program marks a stream as failed after a check that did not
+come from the I/O layer itself, then reports it through the ordinary error
+indicator.
+.PP
+.RS 4
+.EX
+#include <stdio.h>
+#include <stdio_ext.h>
+
+int
+main(void)
+{
+    FILE *fp = fopen("/etc/hostname", "r");
+
+    if (fp == NULL)
+        return 1;
+    __fseterr(fp);          /* e.g. the contents failed validation */
+    if (ferror(fp))
+        fputs("stream marked as failed\en", stderr);
+    clearerr(fp);
+    fclose(fp);
+    return 0;
+}
+.EE
+.RE
+.SH SEE ALSO
+.BR feof (3),
+.BR fopen (3),
+.BR read (2),
+.BR write (2)
+.SH STANDARDS
+None;
+.BR __fseterr ()
+is a nonstandard extension.
