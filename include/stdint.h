@@ -123,20 +123,26 @@ typedef uint64_t uint_fast64_t;
 #define SIG_ATOMIC_MAX INT32_MAX
 
 /* Constants for minimum-width integer constant expressions */
-#define INT8_C(value) ((int8_t) value)
-#define INT16_C(value) ((int16_t) value)
-#define INT32_C(value) ((int32_t) value)
+/*
+ * C11 7.20.4: each expansion must be usable in #if, so no casts -- a cast is
+ * not a preprocessor operator, and `#if UINT64_C(1) << 63` would otherwise
+ * fail with "missing binary operator".  The suffix alone gives the type:
+ * the 8- and 16-bit forms promote to int exactly as the standard specifies.
+ */
+#define INT8_C(value)   value
+#define INT16_C(value)  value
+#define INT32_C(value)  value
 
-#define UINT8_C(value) ((uint8_t) value)
-#define UINT16_C(value) ((uint16_t) value)
-#define UINT32_C(value) ((uint32_t) value ## U)
+#define UINT8_C(value)  value
+#define UINT16_C(value) value
+#define UINT32_C(value) value ## U
 
 #if defined(__x86_64__) || defined(_M_X64)
-#define INT64_C(value) ((int64_t) value ## L)
-#define UINT64_C(value) ((uint64_t) value ## UL)
+#define INT64_C(value)  value ## L
+#define UINT64_C(value) value ## UL
 #else
-#define INT64_C(value) ((int64_t) value ## LL)
-#define UINT64_C(value) ((uint64_t) value ## ULL)
+#define INT64_C(value)  value ## LL
+#define UINT64_C(value) value ## ULL
 #endif
 
 #define INTMAX_C(value)  INT64_C(value)
