@@ -75,3 +75,28 @@ replaced ncurses's real headers there whenever the native headers were
 synced after this port -- `scripts/sync-sysroot.sh` run with no
 arguments does exactly that.  They live in `lib/curses/` now and are
 installed only by that library's own `install` target.
+
+## Wide-character build
+
+Configured `--enable-widec`, so the libraries are `libncursesw`,
+`libformw`, `libmenuw` and `libpanelw`, and `curses.h` is built with
+`NCURSES_WIDECHAR 1`, declaring the `cchar_t` API (`mvin_wchnstr`,
+`getcchar`, `setcchar`, `mvadd_wchnstr`, ...).  mc cannot be built without
+it -- its ncurses backend draws shadows with those calls unconditionally --
+and it is what gives nano and less multibyte (UTF-8) text.
+
+- `--with-termlib=tinfo` keeps the terminal-info library as plain `libtinfo`
+  rather than `libtinfow`, so ports linking `-ltinfo` alone (gdb) are
+  unaffected.
+- The headers keep their usual names and still install flat into
+  `/usr/include`.
+- `libncurses.so`, `libcurses.so`, `libform.so`, `libmenu.so` and
+  `libpanel.so` are one-line GNU ld scripts (`INPUT(-lncursesw)` and so on),
+  so ports that link `-lncurses` build unchanged and record `DT_NEEDED` on the
+  wide library.  They are link-time names only.  There is deliberately no
+  `libncurses.so.6` runtime alias: a binary built against the narrow headers is
+  not ABI-compatible with `libncursesw` (`WINDOW` is laid out differently), so
+  it has to be rebuilt rather than redirected.
+- The wide build needs POSIX `tsearch`/`tfind`/`tdelete` from libc: extended
+  colour pairs, which `--enable-widec` turns on, live in a binary tree in
+  `ncurses/base/new_pair.c`.

@@ -30,7 +30,7 @@ substrate side, each fixed there rather than worked around here:
 - `--sysconfdir=/etc` puts the global `nanorc` at `/etc/nanorc`.
 - `--disable-nls`: no translations are installed.
 
-## Known limitation
+## UTF-8
 
-The screen library is narrow ncurses, so nano runs without multibyte (UTF-8)
-editing until ncurses is rebuilt with wide-character support.
+ncurses is the wide-character build, so configure finds `wget_wch` in
+`libncursesw` and enables UTF-8 support (`ENABLE_UTF8`).

@@ -19,8 +19,8 @@
 #   * ncurses built with NCURSES_ENABLE_STDBOOL_H 1: otherwise curses.h
 #     redefines bool as unsigned char under nano's own <stdbool.h>.
 #
-# The screen library is narrow ncurses, so multibyte (UTF-8) editing waits on a
-# wide-character ncurses build.
+# ncurses is the wide-character build, so configure finds wget_wch in
+# libncursesw and turns on UTF-8 support.
 set -eu
 HERE="$(cd "$(dirname "$0")" && pwd)"; PKG="nano"; VERSION="9.2"
 TREE="${HERE}/build/nano-${VERSION}"; BS="${HERE}/build/bs"

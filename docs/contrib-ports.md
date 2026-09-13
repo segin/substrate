@@ -31,13 +31,16 @@ image.  This document catalogs the current set.
   `/usr/share/terminfo/`.  Substrate's hand-rolled `bin/clear` and
   `bin/reset` are retained as fallbacks for the no-ncurses embedded
   profile.
+  Built wide-character (`libncursesw`, `NCURSES_WIDECHAR 1`), with
+  `libtinfo` kept under its plain name.  `-lncurses`, `-lcurses`,
+  `-lform`, `-lmenu` and `-lpanel` are one-line linker scripts that
+  forward to the wide libraries, so existing ports link unchanged.
 - **nano 9.2** (`contrib/nano/`) — GNU nano, the small terminal editor.
   Needs ncurses, zlib and libmagic (`contrib/file`).  Carries no patches:
   building it surfaced four substrate-side gaps that were fixed there
   instead -- a self-contained `<wchar.h>`, `__fseterr()` in libc,
   `st_atim`/`st_mtim` in `struct stat`, and ncurses's `bool` definition.
-  Runs on narrow ncurses, so multibyte (UTF-8) editing waits on a
-  wide-character ncurses build.
+  Built against the wide-character ncurses, so UTF-8 editing is enabled.
 
 ## Compression / archive / crypto / net
 
