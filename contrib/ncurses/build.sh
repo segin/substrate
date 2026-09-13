@@ -27,6 +27,24 @@ export PATH
 
 rm -rf "${BUILD_DIR}"; mkdir -p "${BUILD_DIR}"; cd "${BUILD_DIR}"
 
+# cf_cv_header_stdbool_h=1: configure's "should we include stdbool.h" probe
+# answers no here, which bakes NCURSES_ENABLE_STDBOOL_H 0 into curses.h.  That
+# makes the header do
+#
+#     #undef bool
+#     #define bool NCURSES_BOOL          /* typedef unsigned char */
+#
+# -- redefining bool out from under any program that included <stdbool.h>
+# first.  nano does, and dies on its own `bool` flag being assigned a pointer:
+#
+#     move.c:192: error: assignment to 'NCURSES_BOOL' {aka 'unsigned char'}
+#       from 'linestruct *' makes integer from pointer without a cast
+#
+# Every mainstream build (Arch's host ncurses included) ships
+# NCURSES_ENABLE_STDBOOL_H 1.  It changes no ABI: bool and unsigned char have
+# the same size and alignment under this compiler, checked with _Static_assert
+# at both the default -std and -std=c99, so nothing already linked against
+# libncurses needs rebuilding.
 echo "==> configure"
 "${TREE_DIR}/configure" \
     --host=i386-unknown-substrate \
@@ -41,6 +59,7 @@ echo "==> configure"
     --with-termlib \
     --enable-overwrite \
     --disable-stripping \
+    cf_cv_header_stdbool_h=1 \
     CFLAGS="-O2 -g -march=i486 -mtune=i486" \
     CPPFLAGS="-D_GNU_SOURCE"
 
