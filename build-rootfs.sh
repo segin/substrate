@@ -305,7 +305,15 @@ install_to_dist() {
 
     echo "Installing libc + runtime libraries to dist/usr/lib + dist/lib..."
     mkdir -p "$DIST/usr/include"
-    cp -r "$TOP/include/"* "$DIST/usr/include/"
+    # --remove-destination: replace whatever is already at each path instead of
+    # writing THROUGH it.  dist/ persists between builds, and cp refuses to
+    # write through a dangling symlink -- it warns on stderr and carries on with
+    # status 0.  So an image built over a dist/ from before the headers under
+    # include/ became real files would silently keep the five broken links
+    # (pthread.h and sys/{fb,input,keycodes,vtio}.h, which pointed out of the
+    # tree and resolved to nothing under /usr/include).  A clean checkout was
+    # never affected, which is exactly why this needs saying.
+    cp -r --remove-destination "$TOP/include/"* "$DIST/usr/include/"
 
     # Every PIE binary substrate ships DT_NEEDED at minimum libc.so.0 +
     # libsys.so.0; getty / login also pull libpthread + libm; gcc on
