@@ -1843,7 +1843,7 @@ they are not mandatory.
         - [ ] `opendir()`, `fdopendir()`, `readdir()`, `readdir_r()`, `rewinddir()`, `seekdir()`, `telldir()`, `closedir()`, `dirfd()`, `scandir()`, `alphasort()`. (REQ: REQ-06-1440)
     - [ ] **`<sys/stat.h>` — File Status:** (REQ: REQ-06-1441)
         - [ ] `stat()`, `lstat()`, `fstat()`, `fstatat()`, `chmod()`, `fchmod()`, `fchmodat()`, `mkdir()`, `mkdirat()`, `mkfifo()`, `mkfifoat()`, `mknod()`, `mknodat()`, `umask()`, `futimens()`, `utimensat()`. (REQ: REQ-06-1442)
-        - [ ] `struct stat` with `st_dev`, `st_ino`, `st_mode`, `st_nlink`, `st_uid`, `st_gid`, `st_rdev`, `st_size`, `st_blksize`, `st_blocks`, `st_atim`, `st_mtim`, `st_ctim`. (REQ: REQ-06-1443)
+        - [x] `struct stat` with `st_dev`, `st_ino`, `st_mode`, `st_nlink`, `st_uid`, `st_gid`, `st_rdev`, `st_size`, `st_blksize`, `st_blocks`, `st_atim`, `st_mtim`, `st_ctim`. (REQ: REQ-06-1443)
         - [ ] Mode macros: `S_ISREG`, `S_ISDIR`, `S_ISCHR`, `S_ISBLK`, `S_ISFIFO`, `S_ISLNK`, `S_ISSOCK`, `S_IRWXU`, etc. (REQ: REQ-06-1444)
     - [ ] **`<sys/wait.h>` — Process Wait:** (REQ: REQ-06-1445)
         - [ ] `wait()`, `waitpid()`, `waitid()`. (REQ: REQ-06-1446)

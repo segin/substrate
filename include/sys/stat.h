@@ -6,6 +6,7 @@ extern "C" {
 #endif
 
 #include <sys/types.h>
+#include <sys/time.h>   /* struct timespec for st_atim & co. */
 
 struct stat {
     uint32_t       st_dev;
@@ -19,16 +20,36 @@ struct stat {
     uint32_t       st_blksize;
     uint32_t       st_pad1;    // padding
     blkcnt_t       st_blocks;  // 64-bit block count
-    time_t         st_atime;   // 64-bit time
-    uint32_t       st_atime_nsec;
+    /*
+     * POSIX.1-2008 timespec members.  Each occupies exactly the bytes of the
+     * old time_t st_Xtime (8) + uint32_t st_Xtime_nsec (4) pair: struct
+     * timespec is time_t tv_sec + long tv_nsec, 12 bytes with no padding on
+     * i386.  The layout the kernel copies out is therefore unchanged -- the
+     * kernel still fills st_atime, which is now a name for st_atim.tv_sec --
+     * and the size check after the struct keeps it that way.
+     */
+    struct timespec st_atim;
     uint32_t       st_pad2;
-    time_t         st_mtime;
-    uint32_t       st_mtime_nsec;
+    struct timespec st_mtim;
     uint32_t       st_pad3;
-    time_t         st_ctime;
-    uint32_t       st_ctime_nsec;
+    struct timespec st_ctim;
     uint32_t       st_pad4;
 };
+
+#define st_atime       st_atim.tv_sec
+#define st_mtime       st_mtim.tv_sec
+#define st_ctime       st_ctim.tv_sec
+/* Substrate's earlier names for the nanosecond fields, still used by bin/cp,
+ * bin/touch and the quickjs port. */
+#define st_atime_nsec  st_atim.tv_nsec
+#define st_mtime_nsec  st_mtim.tv_nsec
+#define st_ctime_nsec  st_ctim.tv_nsec
+
+#if defined(__i386__) && !defined(__cplusplus) && \
+    defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(sizeof(struct stat) == 96,
+               "struct stat ABI changed; see docs/specs/abi-i386.md");
+#endif
 
 #define S_IFMT  0170000
 #define S_IFDIR 0040000
