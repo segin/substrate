@@ -1,0 +1,29 @@
+# perl-cross hints for i386-unknown-substrate.
+#
+# fetch.sh installs this as cnf/hints/substrate in the perl tree, where
+# configure picks it up by osname.  Passing --hints=<file> instead does not
+# work in perl-cross 1.6.5: configure_hint.sh calls tryhints 'hint' "$h", and
+# tryhints only reads $1, so it looks for a hints file literally named "hint".
+
+# Present in substrate libc; perl-cross does not probe these, so without a
+# hint config.h gets a bare "# HAS_NANOSLEEP" and the build stops.
+d_voidsig='define'
+d_nanosleep='define'
+d_clock_gettime='define'
+d_clock_getres='define'
+d_clock_nanosleep='define'
+d_clock='define'
+
+usemallocwrap='define'
+
+# There is no libcrypt, gdbm or ndbm to look for.
+libswanted='m pthread dl'
+
+# procfs provides /proc/self/exe, which perl uses to find its own path for $^X.
+d_procselfexe='define'
+procselfexe='"/proc/self/exe"'
+
+# ino_t is uint64_t.  The probe compiles but cannot run target code, and
+# falls back to 4.
+st_ino_sign=1
+st_ino_size=8

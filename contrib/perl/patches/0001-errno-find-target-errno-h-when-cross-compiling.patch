@@ -1,0 +1,30 @@
+Errno: find the target's errno.h when cross-compiling without a sysroot
+
+Errno_pm.PL runs under miniperl, a host binary, so $^O is the build
+machine's.  On a linux build host it takes the linux branch and reads
+"$sysroot/usr/include/errno.h"; with no sysroot configured that is the
+host's glibc header.  Preprocessed by the target compiler it fails
+("features.h: No such file or directory"), Errno.pm comes out empty, and
+the build ends up without errno constants -- or, with a compatible host
+header, with the host's values.
+
+When cross-compiling without a sysroot, ask the target compiler which
+errno.h it actually includes (-M) and use that.
+
+--- a/ext/Errno/Errno_pm.PL	2026-09-13 01:52:11.030477518 -0500
++++ b/ext/Errno/Errno_pm.PL	2026-09-13 01:52:11.313235117 -0500
+@@ -112,7 +112,13 @@
+     # When cross-compiling we may store a path for gcc's "sysroot" option:
+     my $sysroot = $Config{sysroot} || '';
+     my $linux_errno_h;
+-    if ($^O eq 'linux') {
++    if ($^O eq 'linux' && $Config{usecrosscompile} && !$sysroot) {
++	# Cross-compiling without a sysroot: $^O is the build host's (miniperl
++	# runs there), and "/usr/include/errno.h" is the host's own header, not
++	# the target's.  Ask the target compiler which errno.h it includes.
++	my $dep = `echo "#include <errno.h>" | $Config{cc} $Config{ccflags} -E -M - 2>/dev/null`;
++	($linux_errno_h) = grep { -e $_ } $dep =~ /(\S*\berrno\.h)\b/g;
++    } elsif ($^O eq 'linux') {
+ 	# Some Linuxes have weird errno.hs which generate
+ 	# no #file or #line directives
+ 	($linux_errno_h) = grep { -e $_ } map { "$_/errno.h" }

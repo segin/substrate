@@ -47,6 +47,12 @@ image.  This document catalogs the current set.
   ncurses and POSIX-typed `struct stat` fields on the substrate side.
   `build.sh` rewrites the `/usr` include paths from the staged `.pc` files
   into the sysroot, and links `-ldl` for gmodule.
+- **perl 5.44.0** (`contrib/perl/`) — cross-built with perl-cross 1.6.5,
+  unpacked over the perl tree.  A `substrate.hints` file (selected by
+  `-Dosname=substrate`; perl-cross's `--hints=` is broken) supplies what
+  cannot be probed, such as `d_nanosleep` and the 64-bit `st_ino_size`.
+  One patch makes `Errno_pm.PL` read the target's `errno.h` rather than
+  the build host's.
 
 ## Compression / archive / crypto / net
 
