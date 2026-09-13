@@ -117,6 +117,9 @@ libXScrnSaver:cde
 ncurses:nano
 zlib:nano
 file:nano
+ncurses:mc
+glib2:mc
+e2fsprogs:mc
 "
 
 pos() {

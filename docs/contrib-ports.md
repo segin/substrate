@@ -41,6 +41,12 @@ image.  This document catalogs the current set.
   instead -- a self-contained `<wchar.h>`, `__fseterr()` in libc,
   `st_atim`/`st_mtim` in `struct stat`, and ncurses's `bool` definition.
   Built against the wide-character ncurses, so UTF-8 editing is enabled.
+- **mc 4.8.33** (`contrib/mc/`) — GNU Midnight Commander, the two-panel
+  file manager, with its viewer, `mcedit` and diff viewer.  Needs glib2,
+  the wide-character ncurses and e2fsprogs.  No patches; it needed the wide
+  ncurses and POSIX-typed `struct stat` fields on the substrate side.
+  `build.sh` rewrites the `/usr` include paths from the staged `.pc` files
+  into the sysroot, and links `-ldl` for gmodule.
 
 ## Compression / archive / crypto / net
 
