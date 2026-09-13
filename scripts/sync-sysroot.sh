@@ -55,6 +55,25 @@ sync_to_sysroot() {
     if [ -d "$distdir/usr/lib" ]; then
         mkdir -p "$SYSROOT/lib"
         cp -a "$distdir/usr/lib/." "$SYSROOT/lib/" 2>/dev/null || true
+        # Libtool archives stay in the staging tree (the image needs them, for
+        # native builds on substrate) but must not reach the CROSS sysroot.
+        # Their libdir='/usr/lib' names the target's install location; given
+        # -lfoo, libtool finds libfoo.la on the -L path and links
+        # $libdir/libfoo.so -- the BUILD HOST's /usr/lib/libfoo.so whenever the
+        # host has one:
+        #
+        #   ld: /usr/lib/libgmp.so: error adding symbols: file in wrong format
+        #
+        # That is invisible on Ubuntu CI, whose libraries live in
+        # /usr/lib/x86_64-linux-gnu, and breaks mpfr on an Arch host.
+        # contrib/gmp and contrib/mpfr already delete their own .la from the
+        # sysroot for this reason, but this sync ran after them and put it
+        # back.  Without the .la, -lfoo resolves through the ordinary -L
+        # search, into the sysroot.
+        ( cd "$distdir/usr/lib" && find . -name '*.la' ) 2>/dev/null |
+        while IFS= read -r _la; do
+            rm -f "$SYSROOT/lib/$_la"
+        done
     fi
     if [ -d "$distdir/usr/include" ]; then
         mkdir -p "$SYSROOT/include"
