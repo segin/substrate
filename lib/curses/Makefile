@@ -33,7 +33,13 @@ install: all
 	(cd $(DESTDIR)/usr/lib && ln -sf libcurses.so.0 libtinfo.so.0)
 	(cd $(DESTDIR)/usr/lib && ln -sf libcurses.so.0 libtinfo.so)
 	(cd $(DESTDIR)/usr/lib && ln -sf libcurses.a libtinfo.a)
-	cp ../../include/curses.h $(DESTDIR)/usr/include/
+	# The stub headers live here rather than in the top-level include/.
+	# include/ is copied into the cross sysroot and the image
+	# unconditionally, so a stub there shadowed ncurses's real
+	# curses.h/term.h/termcap.h even though this library is never built
+	# or installed alongside contrib/ncurses.  Keeping them with the stub
+	# means they appear exactly when the stub itself does.
+	cp curses.h term.h termcap.h $(DESTDIR)/usr/include/
 
 clean:
 	rm -f libcurses.a libcurses.so.0 $(OBJS) $(PIC_OBJS)

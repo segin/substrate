@@ -67,3 +67,11 @@ no-op.
 
 lib/curses is kept in-tree for the embedded / no-ncurses
 profile, but isn't installed when contrib/ncurses is built.
+
+That now holds for its headers too.  `curses.h`, `term.h` and
+`termcap.h` used to sit in the top-level `include/`, which is mirrored
+into the cross sysroot unconditionally, so the 1.5 KB stubs silently
+replaced ncurses's real headers there whenever the native headers were
+synced after this port -- `scripts/sync-sysroot.sh` run with no
+arguments does exactly that.  They live in `lib/curses/` now and are
+installed only by that library's own `install` target.
