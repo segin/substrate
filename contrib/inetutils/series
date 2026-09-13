@@ -3,3 +3,4 @@
 0002-gnulib-getprogname-substrate.patch
 0003-telnet-sys_bsd-stilloob-arity.patch
 0004-telnet-utilities-include-select.patch
+0005-telnet-include-term-h-for-tgetent.patch

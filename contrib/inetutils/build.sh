@@ -66,6 +66,15 @@ fi
 # command line".  Re-enable the historical pass-through.
 export LDFLAGS="${LDFLAGS:-} -Wl,--copy-dt-needed-entries"
 
+# ac_cv_have_decl_tgetent=yes: IU_LIB_TERMCAP finds tgetent in -lcurses but
+# probes for its declaration with <term.h> included only #ifndef
+# _XOPEN_CURSES.  ncurses defines _XOPEN_CURSES and declares tgetent only in
+# <term.h>, so the probe says "no", HAVE_CURSES_TGETENT stays undefined, and
+# telnet.c:767 calls tgetent with no header at all -- an error under GCC 16.
+# Patch 0005 includes <term.h> unconditionally in that branch; this tells
+# configure the declaration is there.  (The old lib/curses stub curses.h
+# declared tgetent itself, which is why this passed until the real ncurses
+# headers reached the sysroot.)
 "${TREE_DIR}/configure" \
     --host="${TARGET}" \
     --prefix=/usr \
@@ -91,6 +100,7 @@ export LDFLAGS="${LDFLAGS:-} -Wl,--copy-dt-needed-entries"
     --disable-ifconfig \
     --disable-rexec --disable-rexecd \
     --enable-telnet --enable-telnetd \
+    ac_cv_have_decl_tgetent=yes \
     CFLAGS="-march=i486 -mtune=i486 -O2 -g"
 
 echo "==> make -j${JOBS}"

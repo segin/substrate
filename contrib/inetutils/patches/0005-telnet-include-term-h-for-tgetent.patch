@@ -1,0 +1,49 @@
+Subject: telnet/telnetd: include <term.h> for tgetent() with ncurses
+
+In the HAVE_CURSES_TGETENT branch, telnet.c and telnetd/utility.c
+include <curses.h> and pull in <term.h> only when _XOPEN_CURSES is
+not defined, assuming an X/Open curses declares tgetent() in
+<curses.h> itself.  ncurses defines _XOPEN_CURSES but declares
+tgetent() only in <term.h> (and <termcap.h>), so the call at
+telnet.c:767 and utility.c:885 is left undeclared, which GCC 16
+rejects:
+
+    telnet.c:767:9: error: implicit declaration of function 'tgetent'
+
+Include <term.h> unconditionally after <curses.h>.  ncurses's
+<term.h> is meant to follow <curses.h>.
+
+configure's own declaration probe carries the same guard, so it
+reports "checking whether tgetent is declared... no" and leaves
+HAVE_CURSES_TGETENT undefined; build.sh presets
+ac_cv_have_decl_tgetent=yes to match.
+
+---
+diff -urN a/telnet/telnet.c b/telnet/telnet.c
+--- a/telnet/telnet.c
++++ b/telnet/telnet.c
+@@ -75,9 +75,7 @@
+ # include <termcap.h>
+ #elif defined HAVE_CURSES_TGETENT
+ # include <curses.h>
+-# ifndef _XOPEN_CURSES
+-#  include <term.h>
+-# endif
++# include <term.h>
+ #endif
+ 
+ #ifdef AUTHENTICATION
+diff -urN a/telnetd/utility.c b/telnetd/utility.c
+--- a/telnetd/utility.c
++++ b/telnetd/utility.c
+@@ -39,9 +39,7 @@
+ # include <termcap.h>
+ #elif defined HAVE_CURSES_TGETENT
+ # include <curses.h>
+-# ifndef _XOPEN_CURSES
+-#  include <term.h>
+-# endif
++# include <term.h>
+ #endif
+ 
+ #if defined HAVE_STREAMSPTY && defined HAVE_GETMSG	\
