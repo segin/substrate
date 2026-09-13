@@ -152,7 +152,14 @@ jobs:
           # before /tmp/gcc-stage2-staging was listed and therefore does not
           # contain it.  Bump once to force a rebuild that saves the complete
           # set; every run after this hits it.
-          key: substrate-toolchain-v2-${{ runner.os }}-${{ hashFiles('contrib/binutils/patches/**', 'contrib/binutils/series', 'contrib/binutils/*.sh', 'contrib/gcc/patches/**', 'contrib/gcc/series', 'contrib/gcc/*.sh', 'contrib/build-toolchain.sh') }}
+          # v3: the key hashes the toolchain's own inputs, not substrate's libc
+          # headers, yet the cached libstdc++.so.6 (and the stage-2 target
+          # libraries) are compiled against them and call stat/fstat/lstat.
+          # struct stat grew from 96 to 104 bytes when st_mode/st_nlink/
+          # st_uid/st_gid became mode_t/nlink_t/uid_t/gid_t, so the cached
+          # libstdc++ would read every field past st_mode at the wrong offset.
+          # Bump again whenever a header ABI those libraries use changes.
+          key: substrate-toolchain-v3-${{ runner.os }}-${{ hashFiles('contrib/binutils/patches/**', 'contrib/binutils/series', 'contrib/binutils/*.sh', 'contrib/gcc/patches/**', 'contrib/gcc/series', 'contrib/gcc/*.sh', 'contrib/build-toolchain.sh') }}
 
       - name: Disk space before
         run: df -h /
@@ -259,7 +266,7 @@ jobs:
             dist-overlay/dist-toolchain
             /tmp/gcc-stage2-staging
           # Must match the restore key above verbatim.
-          key: substrate-toolchain-v2-${{ runner.os }}-${{ hashFiles('contrib/binutils/patches/**', 'contrib/binutils/series', 'contrib/binutils/*.sh', 'contrib/gcc/patches/**', 'contrib/gcc/series', 'contrib/gcc/*.sh', 'contrib/build-toolchain.sh') }}
+          key: substrate-toolchain-v3-${{ runner.os }}-${{ hashFiles('contrib/binutils/patches/**', 'contrib/binutils/series', 'contrib/binutils/*.sh', 'contrib/gcc/patches/**', 'contrib/gcc/series', 'contrib/gcc/*.sh', 'contrib/build-toolchain.sh') }}
 
       - name: Disk space after
         run: df -h /

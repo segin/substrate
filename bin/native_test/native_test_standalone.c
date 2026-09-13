@@ -47,10 +47,10 @@ typedef int32_t ssize_t;
 struct stat {
     uint32_t st_dev;
     uint32_t st_ino;
-    uint16_t st_mode;
-    uint16_t st_nlink;
-    uint16_t st_uid;
-    uint16_t st_gid;
+    uint32_t st_mode;
+    uint32_t st_nlink;
+    uint32_t st_uid;
+    uint32_t st_gid;
     uint32_t st_rdev;
     int64_t  st_size;
     uint32_t st_blksize;

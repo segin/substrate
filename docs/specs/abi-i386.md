@@ -86,35 +86,40 @@ Return Address (Ignored) <--- ESP
 ## 2. Data Structures
 
 ### File Metadata (`struct stat`)
-Defined in `<sys/stat.h>`. **Size: 96 bytes.**
+Defined in `<sys/stat.h>`. **Size: 104 bytes.**
 
 | Offset | Field           | Type       | Size | Description                         |
 | :----- | :-------------- | :--------- | :--- | :---------------------------------- |
 | 0      | `st_dev`          | `uint32_t` | 4    | Device ID of device containing file |
 | 4      | `st_ino`          | `ino_t`    | 8    | Inode number                        |
-| 12     | `st_mode`         | `uint16_t` | 2    | File type and mode                  |
-| 14     | `st_nlink`        | `uint16_t` | 2    | Number of hard links                |
-| 16     | `st_uid`          | `uint16_t` | 2    | User ID of owner                    |
-| 18     | `st_gid`          | `uint16_t` | 2    | Group ID of owner                   |
-| 20     | `st_rdev`         | `uint32_t` | 4    | Device ID (if special file)         |
-| 24     | `st_size`         | `off_t`    | 8    | Total size, in bytes                |
-| 32     | `st_blksize`      | `uint32_t` | 4    | Block size for filesystem I/O       |
-| 36     | `st_pad1`         | `uint32_t` | 4    | Padding                             |
-| 40     | `st_blocks`       | `blkcnt_t` | 8    | Number of 512B blocks allocated     |
-| 48     | `st_atim.tv_sec`  | `time_t`   | 8    | Time of last access (`st_atime`) |
-| 56     | `st_atim.tv_nsec` | `long`     | 4    | Nsecs of last access (`st_atime_nsec`) |
-| 60     | `st_pad2`         | `uint32_t` | 4    | Padding                             |
-| 64     | `st_mtim.tv_sec`  | `time_t`   | 8    | Time of last modification (`st_mtime`) |
-| 72     | `st_mtim.tv_nsec` | `long`     | 4    | Nsecs of last modification (`st_mtime_nsec`) |
-| 76     | `st_pad3`         | `uint32_t` | 4    | Padding                             |
-| 80     | `st_ctim.tv_sec`  | `time_t`   | 8    | Time of last status change (`st_ctime`) |
-| 88     | `st_ctim.tv_nsec` | `long`     | 4    | Nsecs of last status change (`st_ctime_nsec`) |
-| 92     | `st_pad4`         | `uint32_t` | 4    | Padding                             |
+| 12     | `st_mode`         | `mode_t`   | 4    | File type and mode                  |
+| 16     | `st_nlink`        | `nlink_t`  | 4    | Number of hard links                |
+| 20     | `st_uid`          | `uid_t`    | 4    | User ID of owner                    |
+| 24     | `st_gid`          | `gid_t`    | 4    | Group ID of owner                   |
+| 28     | `st_rdev`         | `uint32_t` | 4    | Device ID (if special file)         |
+| 32     | `st_size`         | `off_t`    | 8    | Total size, in bytes                |
+| 40     | `st_blksize`      | `uint32_t` | 4    | Block size for filesystem I/O       |
+| 44     | `st_pad1`         | `uint32_t` | 4    | Padding                             |
+| 48     | `st_blocks`       | `blkcnt_t` | 8    | Number of 512B blocks allocated     |
+| 56     | `st_atim.tv_sec`  | `time_t`   | 8    | Time of last access (`st_atime`)    |
+| 64     | `st_atim.tv_nsec` | `long`     | 4    | Nsecs of last access (`st_atime_nsec`) |
+| 68     | `st_pad2`         | `uint32_t` | 4    | Padding                             |
+| 72     | `st_mtim.tv_sec`  | `time_t`   | 8    | Time of last modification (`st_mtime`) |
+| 80     | `st_mtim.tv_nsec` | `long`     | 4    | Nsecs of last modification (`st_mtime_nsec`) |
+| 84     | `st_pad3`         | `uint32_t` | 4    | Padding                             |
+| 88     | `st_ctim.tv_sec`  | `time_t`   | 8    | Time of last status change (`st_ctime`) |
+| 96     | `st_ctim.tv_nsec` | `long`     | 4    | Nsecs of last status change (`st_ctime_nsec`) |
+| 100    | `st_pad4`         | `uint32_t` | 4    | Padding                             |
 
 `st_atim`, `st_mtim` and `st_ctim` are `struct timespec` (12 bytes, no internal
 padding on i386).  `st_atime`/`st_mtime`/`st_ctime` and the older
 `st_atime_nsec`/`st_mtime_nsec`/`st_ctime_nsec` spellings are macros for
 their `tv_sec`/`tv_nsec` members, so the byte layout is unchanged.
+
+`st_mode`, `st_nlink`, `st_uid` and `st_gid` have their POSIX types (all 4
+bytes), so `&st.st_mode` is a valid `mode_t *`.  They were `uint16_t` until
+the struct grew from 96 to 104 bytes; binaries built against the old layout
+must be rebuilt.
 
 ### System Info (`struct utsname`)
 Defined in `<sys/utsname.h>`.

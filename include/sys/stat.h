@@ -11,10 +11,10 @@ extern "C" {
 struct stat {
     uint32_t       st_dev;
     ino_t          st_ino;
-    uint16_t       st_mode;
-    uint16_t       st_nlink;
-    uint16_t       st_uid;
-    uint16_t       st_gid;
+    mode_t         st_mode;
+    nlink_t        st_nlink;
+    uid_t          st_uid;
+    gid_t          st_gid;
     uint32_t       st_rdev;
     off_t          st_size;    // 64-bit size
     uint32_t       st_blksize;
@@ -51,7 +51,7 @@ struct stat {
  * the substrate kernel copies out, not whatever a host test assembles. */
 #if defined(__substrate__) && defined(__i386__) && !defined(__cplusplus) && \
     defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
-_Static_assert(sizeof(struct stat) == 96,
+_Static_assert(sizeof(struct stat) == 104,
                "struct stat ABI changed; see docs/specs/abi-i386.md");
 #endif
 

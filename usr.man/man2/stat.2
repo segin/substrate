@@ -38,10 +38,10 @@ descriptor
 struct stat {
     uint32_t  st_dev;      /* ID of device containing file */
     uint32_t  st_ino;      /* Inode number */
-    uint16_t  st_mode;     /* File type and mode */
-    uint16_t  st_nlink;    /* Number of hard links */
-    uint16_t  st_uid;      /* User ID of owner */
-    uint16_t  st_gid;      /* Group ID of owner */
+    mode_t    st_mode;     /* File type and mode */
+    nlink_t   st_nlink;    /* Number of hard links */
+    uid_t     st_uid;      /* User ID of owner */
+    gid_t     st_gid;      /* Group ID of owner */
     uint32_t  st_rdev;     /* Device ID (if special file) */
     int64_t   st_size;     /* Total size, in bytes */
     uint32_t  st_blksize;  /* Block size for filesystem I/O */
