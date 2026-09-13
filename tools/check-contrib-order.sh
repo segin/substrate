@@ -114,6 +114,9 @@ libxcb:libX11
 libXau:libxcb
 motif:cde
 libXScrnSaver:cde
+ncurses:nano
+zlib:nano
+file:nano
 "
 
 pos() {
