@@ -61,6 +61,7 @@ typedef struct FILE FILE;
 
 #define BUFSIZ 1024
 #define L_tmpnam 20
+#define L_ctermid 9            /* sizeof("/dev/tty") */
 #define P_tmpdir "/tmp"        /* XSI: default directory for temp files */
 #define FILENAME_MAX 256
 #define FOPEN_MAX 16
@@ -153,6 +154,7 @@ int rename(const char *oldpath, const char *newpath);
 FILE *tmpfile(void);
 char *tmpnam(char *s);
 char *tmpnam_r(char *s);
+char *ctermid(char *s);
 char *tempnam(const char *dir, const char *pfx);
 int fcloseall(void);
 FILE *popen(const char *command, const char *type);

@@ -56,7 +56,7 @@ SRCS = src/sys.c src/atomic.c src/stdlib.c src/string.c src/ctype.c src/assert.c
        src/crypt.c src/crypt_sha256.c src/crypt_md5.c src/crypt_des.c \
        src/time/time.c src/div64.c fnmatch.c src/getopt.c src/wchar.c src/libgen.c \
        src/fpclassify.c src/socket.c src/glob.c src/wordexp.c src/inttypes.c \
-       src/rand48.c src/random_r.c src/cvt.c src/hsearch_r.c src/tsearch.c src/netdb_r.c \
+       src/rand48.c src/random_r.c src/cvt.c src/hsearch_r.c src/tsearch.c src/ctermid.c src/netdb_r.c \
        src/shadow.c src/mntent.c src/getdate.c \
        src/posix_extra.c src/posix_extra2.c src/posix_extra3.c src/ifaddrs.c src/nl_types.c src/utmp.c \
        src/lfs64.c src/spawn.c \

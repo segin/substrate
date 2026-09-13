@@ -1,0 +1,75 @@
+.\" ctermid.3 - get the pathname of the controlling terminal
+.TH CTERMID 3 "2026-09-13" "Substrate" "Library Functions Manual"
+.SH NAME
+ctermid \- get the pathname of the controlling terminal
+.SH LIBRARY
+.B libc
+.SH SYNOPSIS
+.B #include <stdio.h>
+.PP
+.BI "char *ctermid(char *" s ");"
+.SH DESCRIPTION
+The
+.BR ctermid ()
+function returns a pathname that, when opened, refers to the controlling
+terminal of the calling process.
+On Substrate that pathname is always
+.IR /dev/tty ,
+which the device filesystem resolves to the opener's controlling terminal.
+.PP
+If
+.I s
+is not NULL, it must point to an array of at least
+.B L_ctermid
+bytes, and the pathname is stored there.
+If
+.I s
+is NULL, the pathname is stored in a static buffer that later calls
+overwrite.
+.SH RETURN VALUE
+The
+.BR ctermid ()
+function returns
+.I s
+if it is not NULL, and otherwise a pointer to its static buffer.
+It always succeeds and does not set
+.IR errno .
+.SH NOTES
+A returned name does not mean the process has a controlling terminal.
+Opening it fails in that case, and that is how a caller finds out.
+.PP
+With a NULL argument
+.BR ctermid ()
+is not thread-safe, because every call shares the one static buffer.
+.SH EXAMPLE
+The following program opens the controlling terminal, so it can prompt even
+when standard input and output are redirected.
+.PP
+.RS 4
+.EX
+#include <fcntl.h>
+#include <stdio.h>
+#include <string.h>
+#include <unistd.h>
+
+int
+main(void)
+{
+    char name[L_ctermid];
+    int fd = open(ctermid(name), O_RDWR);
+
+    if (fd == \-1) {
+        perror(name);
+        return 1;
+    }
+    write(fd, "Continue? ", strlen("Continue? "));
+    close(fd);
+    return 0;
+}
+.EE
+.RE
+.SH SEE ALSO
+.BR open (2),
+.BR ttyname (3)
+.SH STANDARDS
+POSIX.1-2008.
