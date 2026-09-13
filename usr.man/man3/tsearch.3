@@ -1,0 +1,221 @@
+.\" tsearch.3 - manage a binary search tree
+.TH TSEARCH 3 "2026-09-13" "Substrate" "Library Functions Manual"
+.SH NAME
+tsearch, tfind, tdelete, twalk, tdestroy \- manage a binary search tree
+.SH LIBRARY
+.B libc
+.SH SYNOPSIS
+.B #include <search.h>
+.PP
+.B typedef enum { preorder, postorder, endorder, leaf } VISIT;
+.PP
+.BI "void *tsearch(const void *" key ", void **" rootp ,
+.BI "              int (*" compar ")(const void *, const void *));"
+.PP
+.BI "void *tfind(const void *" key ", void *const *" rootp ,
+.BI "            int (*" compar ")(const void *, const void *));"
+.PP
+.BI "void *tdelete(const void *restrict " key ", void **restrict " rootp ,
+.BI "              int (*" compar ")(const void *, const void *));"
+.PP
+.BI "void twalk(const void *" root ,
+.BI "           void (*" action ")(const void *" nodep ", VISIT " which ", int " depth ));
+.PP
+.BI "void tdestroy(void *" root ", void (*" free_node ")(void *" nodep ));
+.SH DESCRIPTION
+These functions maintain a binary search tree whose only state is a root
+pointer owned by the caller.
+An empty tree is a root pointer set to
+.BR NULL .
+Each node holds a pointer to a key supplied by the caller; the tree never
+copies or frees keys on its own.
+.PP
+The comparison function
+.I compar
+is called with two key pointers and must return a negative value, zero, or a
+positive value when the first compares less than, equal to, or greater than
+the second.
+It must order keys consistently for the lifetime of the tree.
+.PP
+.BR tsearch ()
+searches the tree rooted at
+.I *rootp
+for a key comparing equal to
+.IR key .
+If none exists,
+.I key
+is inserted and
+.I *rootp
+is updated.
+.PP
+.BR tfind ()
+performs the same search without inserting.
+.PP
+.BR tdelete ()
+removes the node whose key compares equal to
+.IR key ,
+updating
+.I *rootp
+as needed.
+The key itself is not freed.
+.PP
+.BR twalk ()
+walks the tree rooted at
+.I root
+depth-first, left to right, calling
+.I action
+for each visit.
+Nodes with children are visited three times: with
+.I which
+set to
+.B preorder
+before the left subtree,
+.B postorder
+between the subtrees, and
+.B endorder
+after the right subtree.
+Nodes with no children are visited once, as
+.BR leaf .
+.I depth
+is 0 for the root.
+Visiting only
+.B postorder
+and
+.B leaf
+yields the keys in ascending order.
+.PP
+.BR tdestroy ()
+frees every node of the tree rooted at
+.IR root ,
+first calling
+.I free_node
+on each node's key when
+.I free_node
+is not
+.BR NULL .
+.PP
+The pointers returned by
+.BR tsearch (),
+.BR tfind ()
+and
+.BR tdelete (),
+and passed to
+.IR action ,
+point to a tree node whose first member is the key pointer, so
+.I *(void **)
+.I nodep
+yields the key.
+.SH RETURN VALUE
+.BR tsearch ()
+returns a pointer to the node holding the matching key, whether it was
+already present or has just been inserted, or
+.B NULL
+if
+.I rootp
+is
+.B NULL
+or a node could not be allocated.
+.PP
+.BR tfind ()
+returns a pointer to the node holding the matching key, or
+.B NULL
+if there is none or
+.I rootp
+is
+.BR NULL .
+.PP
+.BR tdelete ()
+returns a pointer to the parent of the deleted node; when the deleted node
+was the root it returns a non-null pointer that must not be dereferenced.
+It returns
+.B NULL
+if no key matched or
+.I rootp
+is
+.BR NULL .
+.PP
+.BR twalk ()
+and
+.BR tdestroy ()
+return no value.
+.PP
+These functions do not set
+.I errno
+themselves; when
+.BR tsearch ()
+returns
+.B NULL
+because memory was exhausted,
+.I errno
+is as
+.BR malloc ()
+left it.
+.SH NOTES
+The tree is AVL-balanced, so searches, insertions and deletions take
+O(log n) time regardless of the order in which keys arrive.
+POSIX does not require this, and implementations that do not balance
+degrade to a linked list when keys are inserted in sorted order.
+.PP
+The tree must not be modified from within
+.IR action .
+.PP
+The glibc
+.BR twalk_r ()
+variant is not provided.
+.SH EXAMPLE
+The following program inserts a few integers, prints them in order with
+.BR twalk (),
+deletes one, and frees the tree.
+.PP
+.RS 4
+.EX
+#include <search.h>
+#include <stdio.h>
+
+static int
+compare(const void *a, const void *b)
+{
+    int x = *(const int *)a, y = *(const int *)b;
+
+    return (x > y) \- (x < y);
+}
+
+static void
+print(const void *nodep, VISIT which, int depth)
+{
+    (void)depth;
+    if (which == postorder || which == leaf)
+        printf("%d\en", **(int **)nodep);
+}
+
+int
+main(void)
+{
+    static int keys[] = { 42, 7, 19, 3, 88 };
+    void *root = NULL;
+    int want = 19;
+
+    for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); i++)
+        if (tsearch(&keys[i], &root, compare) == NULL)
+            return 1;
+    twalk(root, print);                 /* 3 7 19 42 88 */
+
+    if (tfind(&want, &root, compare) != NULL)
+        tdelete(&want, &root, compare);
+    tdestroy(root, NULL);               /* keys are static */
+    return 0;
+}
+.EE
+.RE
+.SH SEE ALSO
+.BR hsearch_r (3),
+.BR qsort (3)
+.SH STANDARDS
+.BR tsearch (),
+.BR tfind (),
+.BR tdelete ()
+and
+.BR twalk ()
+conform to POSIX.1-2001 and later (XSI).
+.BR tdestroy ()
+is a GNU extension.
