@@ -105,6 +105,7 @@ dist/
 /sys/ksyms*.c
 /sys/ksyms_efi_table.c
 /sys/ksyms_table.c
+/sys/vers.c
 /sys/screen.png
 /sys/symbols_end.txt
 /sys/symbols_start.txt

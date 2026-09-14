@@ -3,7 +3,7 @@
 
 #define OS_NAME "substrate"
 
-/* OS_RELEASE / OS_VERSION / OS_OSRELEASE / OS_VERSION_LONG.  Kept in their own
+/* OS_RELEASE / OS_VERSION / OS_OSRELEASE / kernel_version_long.  Kept in their own
  * header so a file needing only the version -- kern/sysctl.c -- can have it
  * without the externs below. */
 #include <kern/osversion.h>

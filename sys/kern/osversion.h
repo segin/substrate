@@ -25,9 +25,11 @@
 #define OS_OSRELEASE    OS_RELEASE OS_RELEASE_TAG /* sysctl kern.osrelease */
 #define OS_VERSION      OS_RELEASE ".0"           /* boot banner, x.y.z */
 
-/* Build identity for sysctl kern.version.  The stamp is still hand-written --
- * nothing date-stamps the kernel at build time yet. */
-#define OS_BUILD_STAMP  "#0: Fri Jun 26 00:00:00 UTC 2026"
-#define OS_VERSION_LONG "Substrate " OS_OSRELEASE " (GENERIC) " OS_BUILD_STAMP
+/* Build identity for sysctl kern.version, for example
+ *     Substrate 0.4-ALPHA (GENERIC) #0: Sun Sep 13 22:30:00 UTC 2026
+ * The date is the time of the build: sys/Makefile regenerates vers.c, which
+ * defines this string from OS_OSRELEASE, and links it into every kernel image
+ * on every build.  See the vers.c rule there for why it is not a macro. */
+extern char kernel_version_long[];
 
 #endif

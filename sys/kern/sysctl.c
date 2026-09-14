@@ -39,7 +39,6 @@ struct sysctl_oid sysctl_debug= { &sysctl__children, NULL, "debug",CTL_DEBUG,CTL
 int securelevel = 0;
 static char kernel_ostype[] = "Substrate";
 static char kernel_osrelease[] = OS_OSRELEASE;
-static char kernel_version[] = OS_VERSION_LONG;
 static int kernel_maxproc = 1000; // placeholder
 static char kernel_hostname[256] = "localhost";
 static char kernel_domainname[256] = "localdomain";
@@ -48,7 +47,7 @@ SYSCTL_INT(kern, KERN_SECURELVL, securelevel, CTLFLAG_RW, &securelevel, 0, "Syst
 SYSCTL_STRING(kern, KERN_OSTYPE, ostype, CTLFLAG_RD, kernel_ostype, 0, "Operating system type");
 SYSCTL_STRING(kern, KERN_OSRELEASE, osrelease, CTLFLAG_RD, kernel_osrelease, 0, "Operating system release");
 SYSCTL_INT(kern, KERN_OSREV, osrevision, CTLFLAG_RD, NULL, 202601, "Operating system revision");
-SYSCTL_STRING(kern, KERN_VERSION, version, CTLFLAG_RD, kernel_version, 0, "Kernel version");
+SYSCTL_STRING(kern, KERN_VERSION, version, CTLFLAG_RD, kernel_version_long, 0, "Kernel version");
 SYSCTL_INT(kern, KERN_MAXPROC, maxproc, CTLFLAG_RD, &kernel_maxproc, 0, "Maximum number of processes");
 SYSCTL_STRING(kern, KERN_HOSTNAME, hostname, CTLFLAG_RW, kernel_hostname, sizeof(kernel_hostname), "Hostname");
 SYSCTL_STRING(kern, KERN_DOMAINNAME, domainname, CTLFLAG_RW, kernel_domainname, sizeof(kernel_domainname), "Domain name");
