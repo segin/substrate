@@ -20,7 +20,7 @@
  * have to pull in unrelated externs.  sysctl.c is exactly that file: it keeps
  * its own static hostname buffer, which collides with version.h's extern.
  */
-#define OS_RELEASE      "0.3"                     /* uname -r */
+#define OS_RELEASE      "0.4"                     /* uname -r */
 #define OS_RELEASE_TAG  "-ALPHA"                  /* stability suffix */
 #define OS_OSRELEASE    OS_RELEASE OS_RELEASE_TAG /* sysctl kern.osrelease */
 #define OS_VERSION      OS_RELEASE ".0"           /* boot banner, x.y.z */
