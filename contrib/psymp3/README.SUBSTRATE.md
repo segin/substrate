@@ -74,10 +74,28 @@ Codecs (all enabled — every library is staged):
 * `--disable-rapidcheck` — RapidCheck property-test library is not ported.
 * `--disable-test-harness` — the test programs wrap `SDL_main` and pull in extra
   link deps; not needed for the player itself.
-* `--disable-final` — keep the normal multi-translation-unit build rather than
-  the KDE3-style single-TU "final" build.
 
 Everything else (all codecs, the full UI/widget stack, HTTP/Last.fm) is enabled.
+
+## Unity build
+
+`build.sh` configures `--enable-final`, PsyMP3's KDE3-style single
+translation unit: `src/psymp3.final.cpp` `#include`s every C++ source.
+stb_vorbis, fdk-aac, the MLP decoder, SheenBidi and the file dialog are still
+compiled as separate objects.
+
+A final build does not recurse into `src/core` (except to build the
+file-dialog library), so the `libpsymp3-core.a` in which a regular build
+compiles patch `0002`'s `core/atomic64.c` never exists.  Patch `0002` also
+adds `core/atomic64.c` to the final-mode `psymp3_SOURCES` in
+`src/Makefile.am`; without it the link fails on the `__atomic_*_8` libcalls.
+
+Patch `0005` adds `-Wuninitialized` to the pragma `psymp3.final.cpp` puts
+around its `#include` of the vendored `pugixml.cpp`.  Upstream already
+silences a `-Wmaybe-uninitialized` false positive in pugixml's document-move
+code there, which only the unity translation unit's extra inlining exposes;
+GCC 16 reports the same diagnostic as `-Wuninitialized`, and the project's
+`-Werror` made it fatal.
 
 ## Substrate-specific source patches
 

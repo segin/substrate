@@ -1,0 +1,33 @@
+final: also silence GCC 16's -Wuninitialized around the pugixml include
+
+The unity translation unit already wraps pugixml.cpp in a pragma ignoring
+-Wmaybe-uninitialized for a known false positive in the document-move code.
+GCC 16 reports the same diagnostic as the definite -Wuninitialized:
+
+    pugixml.cpp:491:66: error: ...xml_node_struct::header is used uninitialized
+      [-Werror=uninitialized]
+    pugixml.cpp:7688:55: note: in expansion of macro PUGI_IMPL_GETPAGE
+      new (other) impl::xml_document_struct(PUGI_IMPL_GETPAGE(other));
+
+other->header is valid there: it is read to compute the argument for the
+placement new that replaces the object.  Add -Wuninitialized to the pragma.
+The standalone compile of pugixml.cpp (regular builds) is unaffected.
+
+diff --git a/src/psymp3.final.cpp b/src/psymp3.final.cpp
+index 4aac1a48..e8c881ce 100644
+--- a/src/psymp3.final.cpp
++++ b/src/psymp3.final.cpp
+@@ -47,9 +47,13 @@
+ // code when the unity TU gives it extra inlining context; the standalone
+ // compile of the same file is clean. Clang has no such warning group and
+ // would fail the pragma itself under -Werror=unknown-warning-option.
++// GCC 16 reports the same false positive in xml_document::_move -- reading
++// other->header to build the placement-new argument -- as the definite
++// -Wuninitialized, so silence that group too.
+ #if defined(__GNUC__) && !defined(__clang__)
+ #pragma GCC diagnostic push
+ #pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
++#pragma GCC diagnostic ignored "-Wuninitialized"
+ #endif
+ #include "../third_party/pugixml/pugixml.cpp"
+ #if defined(__GNUC__) && !defined(__clang__)

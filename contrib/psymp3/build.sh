@@ -12,8 +12,19 @@
 #   --disable-mpris         : MPRIS needs D-Bus; substrate has no system bus.
 #   --disable-rapidcheck    : property-test lib not ported.
 #   --disable-test-harness  : test programs use SDL_main wrappers + extra libs.
-#   --disable-final         : keep the normal multi-TU build (unity build is
-#                             slower to debug and pulls all sources into one TU).
+#
+# Built as a unity build (--enable-final): src/psymp3.final.cpp #includes every
+# C++ source into one translation unit.  Only stb_vorbis, fdk-aac, the MLP
+# decoder, SheenBidi and the file dialog stay separate objects.  A final build
+# never recurses into src/core except for the file-dialog library, so the
+# libpsymp3-core.a where a regular build compiles patch 0002's
+# core/atomic64.c is never built; patch 0002 therefore also lists
+# core/atomic64.c in the final-mode psymp3_SOURCES.
+#
+# Patch 0005 adds -Wuninitialized to the pragma psymp3.final.cpp already puts
+# around its #include of pugixml.cpp.  Upstream silences a known
+# -Wmaybe-uninitialized false positive in pugixml's document-move code there;
+# GCC 16 reports the same one as -Wuninitialized, which -Werror makes fatal.
 #
 # Enabled codecs (all deps are staged in the cross sysroot):
 #   FLAC (native, no libFLAC), Vorbis, Opus, Speex, AAC (fdk-aac),
@@ -165,7 +176,7 @@ done
     LIBS="-lpthread" \
     HARFBUZZ_CFLAGS="${HARFBUZZ_CFLAGS}" FREETYPE_CFLAGS="${FREETYPE_CFLAGS}" \
     DIALOG_CFLAGS="${DIALOG_CFLAGS}" \
-    --disable-mpris --disable-rapidcheck --disable-test-harness --disable-final
+    --disable-mpris --disable-rapidcheck --disable-test-harness --enable-final
 
 # Fail here rather than ship a binary built against the wrong headers.  Only
 # these three are checked: SDL_CFLAGS and TAGLIB_CFLAGS also carry /usr

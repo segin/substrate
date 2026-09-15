@@ -350,6 +350,14 @@ meta-compiler (host wml/wmluiltok) and installs the uil/ headers.
   file dialog's flags, which reach `FileDialog.cpp` through per-target
   `CPPFLAGS` and so also precede `CXXFLAGS`; on a host with GTK 2
   installed the dialog was compiled against the host's headers.
+
+  It is built as a unity build (`--enable-final`, all C++ sources in
+  `src/psymp3.final.cpp`).  Patch `0002` lists `core/atomic64.c` in the
+  final-mode sources too, since a final build never builds the
+  `libpsymp3-core.a` that carries it otherwise, and patch `0005` extends
+  the unity file's pugixml pragma to `-Wuninitialized`, the name GCC 16
+  gives a false positive upstream already silences as
+  `-Wmaybe-uninitialized`.
 - **fdk-aac 2.0.3** (`contrib/fdk-aac/`) — the Fraunhofer FDK AAC codec
   library, encoder and decoder.  It is PsyMP3's AAC path as of 2.0-RC3,
   which asks for `fdk-aac` where 1.99.16 asked for `faad2`; the two

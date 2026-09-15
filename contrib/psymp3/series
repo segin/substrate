@@ -1,3 +1,4 @@
 0002-core-atomic64-libcalls.patch
 0003-io-memorytracker-memavailable-fallback-and-64bit-pressure.patch
 0004-stb-vorbis-alloca-on-substrate.patch
+0005-final-silence-gcc16-uninitialized-in-pugixml.patch

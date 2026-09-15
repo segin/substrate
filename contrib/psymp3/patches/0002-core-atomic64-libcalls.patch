@@ -1,3 +1,17 @@
+diff --git a/src/Makefile.am b/src/Makefile.am
+index ad4abf53..4f22ec7a 100644
+--- a/src/Makefile.am
++++ b/src/Makefile.am
+@@ -123,7 +123,8 @@ if FINAL_BUILD
+ # keeps them out of the unity translation unit -- the same reason
+ # stb_vorbis_impl.c is built apart.
+ psymp3_SOURCES = psymp3.final.cpp codecs/vorbis/stb_vorbis_impl.c \
+-	codecs/aac/fdk_aac.cpp codecs/mlp/mlp_decoder_impl.cpp
++	codecs/aac/fdk_aac.cpp codecs/mlp/mlp_decoder_impl.cpp \
++	core/atomic64.c
+ # Final build still needs system libraries
+ psymp3_LDADD = \
+ 	libpsymp3-sheenbidi.a \
 diff --git a/src/core/Makefile.am b/src/core/Makefile.am
 index 13083eea..88575138 100644
 --- a/src/core/Makefile.am
