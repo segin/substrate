@@ -172,8 +172,8 @@ export STAGE1_PREFIX JOBS SUBSTRATE_TOP="$HERE"
 #   freetype-harfbuzz right after harfbuzz: FreeType's second pass, rebuilt
 #     with the HarfBuzz that was built against its first (see its README)
 #   sdl3 -> sdl2-compat -> sdl12-compat, each dlopening the one below
-#   psymp3 last: it wants sdl2, taglib, ogg, vorbis, opus, flac, speex,
-#     faad2, spandsp, dbus, curl and openssl, i.e. most of the above
+#   psymp3 last: it wants sdl3, taglib, ogg, vorbis, opus, flac, speex,
+#     fdk-aac, harfbuzz, dbus, curl and openssl, i.e. most of the above
 #
 # contrib/glib is deliberately NOT here.  It and contrib/glib2 are both
 # GLib 2.56.4 and stage the same .pc files to the same paths -- the only

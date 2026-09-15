@@ -17,11 +17,15 @@
 #
 # Enabled codecs (all deps are staged in the cross sysroot):
 #   FLAC (native, no libFLAC), Vorbis, Opus, Speex, AAC (fdk-aac),
-#   G.722 (spandsp), G.711 A-law/u-law, MP3 (bundled minimp3).
+#   G.722 (in-tree decoder since 2.0-RC4), G.711 A-law/u-law, MP3 (bundled minimp3).
 #
 # 2.0-RC3 changed three dependencies from 1.99.16: SDL2 -> SDL3, faad2 ->
 # fdk-aac, and vorbis -> "vorbisenc vorbis".  All three are already staged
 # and ordered ahead of this port.
+#
+# 2.0-RC4 adds harfbuzz, for text shaping (src/core/font.cpp includes the bare
+# <hb.h> and <hb-ft.h>), and drops spandsp: G.722 is now decoded in-tree.  It
+# also vendors SheenBidi (third_party/sheenbidi), which it builds itself.
 #
 # Env: STAGE1_PREFIX (default /opt/substrate), DESTDIR, JOBS.
 
@@ -95,7 +99,7 @@ fi
 #
 # 2.0-RC3 moved nearly everything to subdirectory-qualified includes --
 # <SDL3/SDL.h>, <taglib/fileref.h>, <opus/opus.h>, <ogg/ogg.h>,
-# <spandsp/g722.h>, <fdk-aac/aacdecoder_lib.h> -- all of which resolve from
+# <fdk-aac/aacdecoder_lib.h> -- all of which resolve from
 # ${SR}/include with no -I at all.  <ft2build.h> is the one bare name left,
 # so freetype2 is the only entry here now (1.99.16 also needed SDL2).
 #
@@ -132,6 +136,23 @@ if pkg-config --exists gtk+-2.0 2>/dev/null; then
     )"
 fi
 
+# 2.0-RC4's src/Makefile.am puts $(HARFBUZZ_CFLAGS) and $(FREETYPE_CFLAGS) in
+# AM_CPPFLAGS, which automake places BEFORE CXXFLAGS on the compile line, so
+# the sysroot -I in SUBDIR_INCS no longer wins.  pkg-config's
+# -I/usr/include/harfbuzz -- and the freetype2, glib-2.0 and libpng16
+# directories harfbuzz.pc drags in -- would name the build host's headers
+# first: a newer HarfBuzz than the staged 2.6.8 on a host that has one, and
+# "hb.h: No such file" on a clean runner.  Hand configure the flags rewritten
+# into the sysroot; PKG_CHECK_MODULES uses a preset <VAR>_CFLAGS as-is.
+sysroot_cflags() {
+    pkg-config --cflags "$@" 2>/dev/null | sed -e "s|-I/usr/lib/|-I${SR}/lib/|g" \
+                                              -e "s|-I/usr/include|-I${SR}/include|g"
+}
+HARFBUZZ_CFLAGS=$(sysroot_cflags harfbuzz)
+FREETYPE_CFLAGS=$(sysroot_cflags freetype2)
+[ -n "${HARFBUZZ_CFLAGS}" ] || {
+    echo "psymp3: harfbuzz.pc is not in the sysroot -- build contrib/harfbuzz first" >&2; exit 1; }
+
 ./configure \
     --host=i386-unknown-linux-gnu \
     --prefix=/usr \
@@ -141,6 +162,7 @@ fi
     CXXFLAGS="-march=i486 -mtune=i486 -O2 -g -fPIE ${SUBDIR_INCS}" \
     LDFLAGS="-L${SR}/lib -Wl,-rpath-link,${SR}/lib -Wl,--allow-shlib-undefined" \
     LIBS="-lpthread" \
+    HARFBUZZ_CFLAGS="${HARFBUZZ_CFLAGS}" FREETYPE_CFLAGS="${FREETYPE_CFLAGS}" \
     --disable-mpris --disable-rapidcheck --disable-test-harness --disable-final
 
 # --- 3. Build --------------------------------------------------------------

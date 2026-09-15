@@ -89,7 +89,8 @@ sdl2-compat:sdl12-compat
 sdl3:psymp3
 taglib:psymp3
 fdk-aac:psymp3
-spandsp:psymp3
+harfbuzz:psymp3
+freetype-harfbuzz:psymp3
 freetype:freetype-harfbuzz
 harfbuzz:freetype-harfbuzz
 speex:psymp3

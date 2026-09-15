@@ -5,7 +5,7 @@ FFT spectrum visualizer, by Kirn Gill II (segin).  This port cross-builds it
 for substrate (i386, ELFOSABI_SUBSTRATE).
 
 * Upstream: <https://github.com/segin/psymp3>
-* Pinned tag: `1.99.16-RELEASE` (commit `fa24c45a56cc5f8e6497899e6aac6559e7ebe8e5`)
+* Pinned tag: `2.0-RC4` (commit `316d00e3872fe64648fbf34e7fe4883733b47355`)
 * License: ISC
 
 ## Build
@@ -49,6 +49,7 @@ Core (mandatory):
 | SDL2       | 2.30.9  | built with X11 video backend |
 | taglib     | 2.0.2   | metadata |
 | freetype2  | 26.1.20 | UI text |
+| harfbuzz   | 2.6.8   | text shaping (since 2.0-RC4) |
 | OpenSSL 3  | 3.0.13  | TLS for HTTP/Last.fm |
 | libcurl    | 8.7.1   | HTTP streaming |
 
@@ -62,7 +63,7 @@ Codecs (all enabled — every library is staged):
 | Opus             | libopus 1.5.2 + libogg            |
 | Speex            | libspeex 1.2.1 + libogg           |
 | AAC              | faad2 2.11.1                      |
-| G.722            | spandsp 2.0.0                     |
+| G.722            | in-tree decoder (since 2.0-RC4)   |
 | G.711 A-law/u-law| native (no external dep)          |
 
 ## What is disabled (and why)

@@ -2,9 +2,9 @@
 # contrib/psymp3/fetch.sh — clone PsyMP3 pinned to a release tag, apply patches.
 set -eu
 REPO="https://github.com/segin/psymp3"
-# Pinned to a release tag.  Bump REF to move the port; both substrate patches
-# in series apply unchanged at this revision.
-REF="2.0-RC3"
+# Pinned to a release tag.  Bump REF to move the port; all three substrate
+# patches in series apply unchanged at this revision.
+REF="2.0-RC4"
 HERE="$(cd "$(dirname "$0")" && pwd)"; BUILD_DIR="${HERE}/build"; TREE="${BUILD_DIR}/psymp3"
 mkdir -p "${BUILD_DIR}"
 if [ ! -d "${TREE}/.git" ]; then

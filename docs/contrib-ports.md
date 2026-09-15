@@ -320,19 +320,19 @@ meta-compiler (host wml/wmluiltok) and installs the uil/ headers.
   image's `libfreetype.so.6` links `libharfbuzz.so.0`, which links it back;
   ld.so resolves the cycle to one copy of each.  Ports built between the two
   passes link the first build, which has the same soname and symbols.
-- **PsyMP3** (`contrib/psymp3/`, pinned to the `2.0-RC3` upstream tag
+- **PsyMP3** (`contrib/psymp3/`, pinned to the `2.0-RC4` upstream tag
   with a vendored patch series) — a music player built on SDL3.  Its
   codec dependencies each ship as their own port: `libogg`
   (`contrib/libogg/`), `libvorbis` (`contrib/libvorbis/`), `libopus`
   (`contrib/libopus/`), `speex` (`contrib/speex/`), `fdk-aac`
-  (`contrib/fdk-aac/`), `taglib` (`contrib/taglib/`) and `spandsp`
-  (`contrib/spandsp/`).  Together these bring audio/multimedia playback
+  (`contrib/fdk-aac/`), `taglib` (`contrib/taglib/`) and `harfbuzz`
+  (`contrib/harfbuzz/`).  Together these bring audio/multimedia playback
   to the userland.
 
   2.0-RC3 changed three dependencies from 1.99.16 — SDL2 to SDL3,
   `faad2` to `fdk-aac`, and `vorbis` to `vorbisenc vorbis` — and moved
   to subdirectory-qualified includes (`<SDL3/SDL.h>`, `<taglib/…>`,
-  `<opus/…>`, `<spandsp/…>`, `<fdk-aac/…>`), which resolve from the
+  `<opus/…>`, `<fdk-aac/…>`), which resolve from the
   sysroot with no `-I` at all.  `<ft2build.h>` is the only bare name
   left, so `build.sh` names just `freetype2` explicitly; see the
   subdirectory-`Cflags` note under "Cross-build traps" for why that
@@ -340,6 +340,13 @@ meta-compiler (host wml/wmluiltok) and installs the uil/ headers.
   `alloca` guard lists `__linux__`/`__sun__`/`__EMSCRIPTEN__`/
   `__NEWLIB__` and not substrate — patch `0004` adds `__substrate__`.
   Substrate does ship `<alloca.h>`; stb simply had no way to know.
+
+  2.0-RC4 adds `harfbuzz` for text shaping and drops `spandsp`, whose
+  G.722 codec it now decodes in-tree; it also vendors SheenBidi.  Its
+  `src/Makefile.am` puts `$(HARFBUZZ_CFLAGS)` and `$(FREETYPE_CFLAGS)`
+  ahead of `CXXFLAGS`, so `build.sh` hands configure both rewritten into
+  the sysroot rather than letting pkg-config's `-I/usr/include/…` name the
+  build host's headers.
 - **fdk-aac 2.0.3** (`contrib/fdk-aac/`) — the Fraunhofer FDK AAC codec
   library, encoder and decoder.  It is PsyMP3's AAC path as of 2.0-RC3,
   which asks for `fdk-aac` where 1.99.16 asked for `faad2`; the two
