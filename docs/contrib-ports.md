@@ -313,7 +313,13 @@ meta-compiler (host wml/wmluiltok) and installs the uil/ headers.
   Because each layer dlopens the one below it rather than carrying a
   `DT_NEEDED`, all the layers an application needs must be installed on
   target, not just the one it links.
-- **FreeType2** (`contrib/freetype/`).
+- **FreeType2** (`contrib/freetype/`, second pass `contrib/freetype-harfbuzz/`).
+  FreeType and HarfBuzz depend on each other, so FreeType is built twice:
+  first `--without-harfbuzz`, early in the list, then again right after
+  harfbuzz with `FREETYPE_WITH_HARFBUZZ=1`, replacing `dist-freetype`.  The
+  image's `libfreetype.so.6` links `libharfbuzz.so.0`, which links it back;
+  ld.so resolves the cycle to one copy of each.  Ports built between the two
+  passes link the first build, which has the same soname and symbols.
 - **PsyMP3** (`contrib/psymp3/`, pinned to the `2.0-RC3` upstream tag
   with a vendored patch series) — a music player built on SDL3.  Its
   codec dependencies each ship as their own port: `libogg`

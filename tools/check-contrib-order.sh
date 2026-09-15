@@ -90,6 +90,8 @@ sdl3:psymp3
 taglib:psymp3
 fdk-aac:psymp3
 spandsp:psymp3
+freetype:freetype-harfbuzz
+harfbuzz:freetype-harfbuzz
 speex:psymp3
 libogg:psymp3
 libvorbis:psymp3

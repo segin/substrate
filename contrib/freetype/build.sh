@@ -19,6 +19,26 @@ export CPPFLAGS="-I${ZL}/usr/include -I${PNG}/usr/include"
 export LDFLAGS="-L${ZL}/usr/lib -L${PNG}/usr/lib -Wl,-rpath-link,${ZL}/usr/lib -Wl,-rpath-link,${PNG}/usr/lib -Wl,--copy-dt-needed-entries"
 export PKG_CONFIG_LIBDIR="${ZL}/usr/lib/pkgconfig:${PNG}/usr/lib/pkgconfig"
 
+# FREETYPE_WITH_HARFBUZZ=1 is the second pass, run by contrib/freetype-harfbuzz
+# after harfbuzz is staged.  The two libraries depend on each other -- harfbuzz
+# is built --with-freetype, and FreeType's autohinter uses HarfBuzz to cover
+# glyphs no character maps to -- so the first pass must be --without-harfbuzz.
+#
+# The flags name the harfbuzz staging tree directly rather than asking
+# pkg-config: harfbuzz.pc lists freetype2 under Requires.private, so resolving
+# it would put the FIRST pass's freetype2 headers on FreeType's own include
+# path.  configure takes a preset HARFBUZZ_CFLAGS/HARFBUZZ_LIBS as-is.
+if [ "${FREETYPE_WITH_HARFBUZZ:-0}" = 1 ]; then
+    HB="${SUBSTRATE_TOP}/dist-overlay/dist-harfbuzz"; GLIB="${SUBSTRATE_TOP}/dist-overlay/dist-glib2"
+    for d in "${HB}" "${GLIB}"; do [ -d "${d}/usr" ] || { echo "build.sh: ${d} missing" >&2; exit 1; }; done
+    export HARFBUZZ_CFLAGS="-I${HB}/usr/include/harfbuzz"
+    export HARFBUZZ_LIBS="-L${HB}/usr/lib -lharfbuzz"
+    LDFLAGS="${LDFLAGS} -Wl,-rpath-link,${HB}/usr/lib -Wl,-rpath-link,${GLIB}/usr/lib"
+    HB_OPT=--with-harfbuzz
+else
+    HB_OPT=--without-harfbuzz
+fi
+
 substrate_libtool_fix "${TREE_DIR}/builds/unix/configure"
 # FreeType drives builds/unix/configure from the top; run it in-tree.
 cd "${TREE_DIR}"
@@ -27,7 +47,7 @@ make distclean >/dev/null 2>&1 || true
     --host=i386-unknown-substrate \
     --prefix=/usr --libdir=/usr/lib --includedir=/usr/include \
     --enable-shared --enable-static \
-    --with-zlib --with-png --without-harfbuzz --without-brotli --without-bzip2 \
+    --with-zlib --with-png "${HB_OPT}" --without-brotli --without-bzip2 \
     CC=i386-unknown-substrate-gcc \
     AR=i386-unknown-substrate-ar RANLIB=i386-unknown-substrate-ranlib \
     CC_BUILD=gcc \
