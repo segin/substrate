@@ -111,31 +111,6 @@ fi
 export PKG_CONFIG_LIBDIR="${SR}/lib/pkgconfig"
 SUBDIR_INCS="-I${SR}/include/freetype2"
 
-# The file-chooser backend needs the same treatment, and rather more of it.
-# configure picks a dialog backend (Qt6..Qt3, GTK4, GTK+3, GTK+2), and with
-# gtk2 staged it settles on GTK+2 -- whose .pc pulls in fifteen include
-# directories across gtk, glib, pango, cairo, atk, gdk-pixbuf and friends,
-# every one of them an absolute /usr path.  Listing them by hand would rot
-# the first time a dependency moves, so rewrite whatever gtk+-2.0.pc
-# actually says into the sysroot.
-#
-# PKG_CONFIG_SYSROOT_DIR is the obvious tool here and it does not work: it
-# would yield ${SR}/usr/include, but the staged sysroot puts headers at
-# ${SR}/include.  Hence the sed.
-#
-# Missing this one was not hypothetical -- it is why the GTK dialog in a
-# locally built psymp3 was compiled against the HOST's gtk2 headers, i.e.
-# against the wrong struct layouts, while a clean runner failed outright
-# with "fatal error: gtk/gtk.h: No such file or directory".
-if pkg-config --exists gtk+-2.0 2>/dev/null; then
-    SUBDIR_INCS="${SUBDIR_INCS} $(
-        pkg-config --cflags gtk+-2.0 2>/dev/null | tr ' ' '\n' | grep '^-I' \
-          | sed -e "s|^-I/usr/lib/|-I${SR}/lib/|" \
-                -e "s|^-I/usr/include/|-I${SR}/include/|" \
-          | tr '\n' ' '
-    )"
-fi
-
 # 2.0-RC4's src/Makefile.am puts $(HARFBUZZ_CFLAGS) and $(FREETYPE_CFLAGS) in
 # AM_CPPFLAGS, which automake places BEFORE CXXFLAGS on the compile line, so
 # the sysroot -I in SUBDIR_INCS no longer wins.  pkg-config's
@@ -153,6 +128,32 @@ FREETYPE_CFLAGS=$(sysroot_cflags freetype2)
 [ -n "${HARFBUZZ_CFLAGS}" ] || {
     echo "psymp3: harfbuzz.pc is not in the sysroot -- build contrib/harfbuzz first" >&2; exit 1; }
 
+# The file-dialog backend.  configure picks the first of Qt6Widgets,
+# Qt5Widgets, QtGui, gtk4, gtk+-3.0 and gtk+-2.0 that pkg-config can see (Qt3
+# only with --with-qt3-dir) and takes DIALOG_CFLAGS from it.  With the sysroot
+# as it stands that is gtk+-2.0, whose .pc names fifteen /usr include
+# directories across gtk, glib, pango, cairo, atk, gdk-pixbuf and friends.
+#
+# src/core/Makefile.am puts $(DIALOG_CFLAGS) in the file-dialog library's
+# per-target CPPFLAGS, which come before CXXFLAGS on the compile line.  An
+# earlier version of this script rewrote gtk+-2.0's flags into CXXFLAGS; that
+# rescued a clean runner, which has no /usr/include/gtk-2.0 and so fell
+# through to the sysroot, but on a host with GTK 2 installed FileDialog.cpp
+# still compiled against the host's headers -- including its x86_64
+# glibconfig.h, the wrong type sizes for an i386 target.
+#
+# So walk the same candidate list against the cross sysroot's .pc files and
+# hand configure the winner's flags rewritten into the sysroot.
+# PKG_CONFIG_SYSROOT_DIR cannot do it: it would yield ${SR}/usr/include, but
+# the staged sysroot puts headers at ${SR}/include.
+DIALOG_CFLAGS=
+for _pkg in Qt6Widgets Qt5Widgets QtGui gtk4 gtk+-3.0 gtk+-2.0; do
+    if pkg-config --exists "${_pkg}" 2>/dev/null; then
+        DIALOG_CFLAGS=$(sysroot_cflags "${_pkg}")
+        break
+    fi
+done
+
 ./configure \
     --host=i386-unknown-linux-gnu \
     --prefix=/usr \
@@ -163,7 +164,18 @@ FREETYPE_CFLAGS=$(sysroot_cflags freetype2)
     LDFLAGS="-L${SR}/lib -Wl,-rpath-link,${SR}/lib -Wl,--allow-shlib-undefined" \
     LIBS="-lpthread" \
     HARFBUZZ_CFLAGS="${HARFBUZZ_CFLAGS}" FREETYPE_CFLAGS="${FREETYPE_CFLAGS}" \
+    DIALOG_CFLAGS="${DIALOG_CFLAGS}" \
     --disable-mpris --disable-rapidcheck --disable-test-harness --disable-final
+
+# Fail here rather than ship a binary built against the wrong headers.  Only
+# these three are checked: SDL_CFLAGS and TAGLIB_CFLAGS also carry /usr
+# directories (configure.ac appends -I<includedir>/SDL3), but every include of
+# those libraries is subdirectory-qualified (<SDL3/...>, <taglib/...>), so
+# those directories are never searched.
+if grep -nE "^(DIALOG|HARFBUZZ|FREETYPE)_CFLAGS='[^']*-I/usr/" config.log; then
+    echo "psymp3: a build-host include path leaked into the flags above" >&2
+    exit 1
+fi
 
 # --- 3. Build --------------------------------------------------------------
 make -j"${JOBS}"

@@ -346,7 +346,10 @@ meta-compiler (host wml/wmluiltok) and installs the uil/ headers.
   `src/Makefile.am` puts `$(HARFBUZZ_CFLAGS)` and `$(FREETYPE_CFLAGS)`
   ahead of `CXXFLAGS`, so `build.sh` hands configure both rewritten into
   the sysroot rather than letting pkg-config's `-I/usr/include/…` name the
-  build host's headers.
+  build host's headers.  It does the same for `DIALOG_CFLAGS`, the GTK 2
+  file dialog's flags, which reach `FileDialog.cpp` through per-target
+  `CPPFLAGS` and so also precede `CXXFLAGS`; on a host with GTK 2
+  installed the dialog was compiled against the host's headers.
 - **fdk-aac 2.0.3** (`contrib/fdk-aac/`) — the Fraunhofer FDK AAC codec
   library, encoder and decoder.  It is PsyMP3's AAC path as of 2.0-RC3,
   which asks for `fdk-aac` where 1.99.16 asked for `faad2`; the two
