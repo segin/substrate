@@ -15,11 +15,7 @@
 #
 # Built as a unity build (--enable-final): src/psymp3.final.cpp #includes every
 # C++ source into one translation unit.  Only stb_vorbis, fdk-aac, the MLP
-# decoder, SheenBidi and the file dialog stay separate objects.  A final build
-# never recurses into src/core except for the file-dialog library, so the
-# libpsymp3-core.a where a regular build compiles patch 0002's
-# core/atomic64.c is never built; patch 0002 therefore also lists
-# core/atomic64.c in the final-mode psymp3_SOURCES.
+# decoder, SheenBidi and the file dialog stay separate objects.
 #
 # Patch 0005 adds -Wuninitialized to the pragma psymp3.final.cpp already puts
 # around its #include of pugixml.cpp.  Upstream silences a known

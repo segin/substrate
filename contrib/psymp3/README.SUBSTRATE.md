@@ -84,11 +84,8 @@ translation unit: `src/psymp3.final.cpp` `#include`s every C++ source.
 stb_vorbis, fdk-aac, the MLP decoder, SheenBidi and the file dialog are still
 compiled as separate objects.
 
-A final build does not recurse into `src/core` (except to build the
-file-dialog library), so the `libpsymp3-core.a` in which a regular build
-compiles patch `0002`'s `core/atomic64.c` never exists.  Patch `0002` also
-adds `core/atomic64.c` to the final-mode `psymp3_SOURCES` in
-`src/Makefile.am`; without it the link fails on the `__atomic_*_8` libcalls.
+A final build does not recurse into `src/core` except to build the
+file-dialog library.
 
 Patch `0005` adds `-Wuninitialized` to the pragma `psymp3.final.cpp` puts
 around its `#include` of the vendored `pugixml.cpp`.  Upstream already
@@ -117,13 +114,13 @@ git-apply-able against the pinned tree.  Rationale is in the patch headers.
   PIC code but a non-PIE link, the substrate `psymp3` is a **non-PIE `ET_EXEC`**
   dynamic binary (`PT_INTERP=/sbin/ld.so`, OSABI 0x40 — verified with `readelf`).
   It still gets `-fstack-protector-strong` (libc provides the symbols) and
-  `-pthread`.  The one substrate-specific link need — 64-bit atomic libcalls,
-  which neither libgcc nor a (non-existent) libatomic supplies on the i486 target
-  — is met by patch `0002` (`src/core/atomic64.c`).
+  `-pthread`.  The 64-bit atomic libcalls it needs on the i486 target come
+  from libc (`lib/c/src/atomic.c`), which grew the `__atomic_*_8` set in
+  82d0fc746; the port carried its own `src/core/atomic64.c` until then.
 * Upstream `configure` now probes "how to link 64-bit atomics" and answers
   `-march=i586` (i586 has `cmpxchg8b`, so the atomics become inline and no
   library is needed).  `build.sh` passes `-march=i486` *after* that in
   `CFLAGS`/`CXXFLAGS`, and GCC honours the last `-march`, so the build stays on
-  i486 and keeps emitting the out-of-line `__atomic_*_8` calls that patch `0002`
+  i486 and keeps emitting the out-of-line `__atomic_*_8` calls that libc
   satisfies.  If that ordering ever changes, the binary would silently gain
   `cmpxchg8b` and stop running on a plain i486.
