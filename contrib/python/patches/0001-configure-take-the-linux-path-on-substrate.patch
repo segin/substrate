@@ -1,0 +1,79 @@
+configure: take the Linux path when cross-compiling to substrate
+
+CPython limits cross builds to a list of known systems and stops while
+computing MACHDEP:
+
+    checking MACHDEP... configure: error: cross build not supported for
+    i386-unknown-substrate
+
+Substrate is ELF with GNU ld, a glibc-shaped libc, /proc, /dev/urandom and
+/dev/ptmx, so the Linux branches of the remaining ac_sys_system tests --
+shared-library linking, _XOPEN_SOURCE, the extension suffix, the thread-name
+length -- are the right ones.  There are 110 such tests; claiming Linux is
+less error-prone than adding a platform name to each.  The second hunk gives
+the PLATFORM_TRIPLET case the same treatment as Linux, $host_cpu.
+
+sys.platform therefore reports "linux" on substrate; uname(2) still reports
+substrate.  configure.ac and the generated configure are both patched, so the
+port needs no autoreconf.
+
+--- a/configure	2026-09-18 23:34:53.760175790 -0500
++++ b/configure	2026-09-18 23:34:53.860175640 -0500
+@@ -4109,6 +4109,17 @@
+ 	*-*-linux-android*)
+ 		ac_sys_system=Linux-android
+ 		;;
++	*-*-substrate*)
++		# Substrate is ELF with GNU ld, a glibc-shaped libc, /proc,
++		# /dev/urandom and /dev/ptmx, so the Linux branch of every
++		# ac_sys_system test below -- shared-library linking,
++		# _XOPEN_SOURCE, the extension suffix, the thread-name length --
++		# is the right one.  There are 110 of them; claiming Linux here is
++		# less error-prone than teaching each a new platform name.  The
++		# cost is that sys.platform reports "linux"; uname(2) still
++		# reports substrate.
++		ac_sys_system=Linux
++		;;
+ 	*-*-linux*)
+ 		ac_sys_system=Linux
+ 		;;
+@@ -4591,6 +4602,9 @@
+ 			_host_ident=$host_cpu
+ 		esac
+ 		;;
++	*-*-substrate*)
++		_host_ident=$host_cpu
++		;;
+ 	*-*-cygwin*)
+ 		_host_ident=
+ 		;;
+--- a/configure.ac	2026-09-18 23:34:53.761175789 -0500
++++ b/configure.ac	2026-09-18 23:34:53.870180975 -0500
+@@ -321,6 +321,17 @@
+ 	*-*-linux-android*)
+ 		ac_sys_system=Linux-android
+ 		;;
++	*-*-substrate*)
++		# Substrate is ELF with GNU ld, a glibc-shaped libc, /proc,
++		# /dev/urandom and /dev/ptmx, so the Linux branch of every
++		# ac_sys_system test below -- shared-library linking,
++		# _XOPEN_SOURCE, the extension suffix, the thread-name length --
++		# is the right one.  There are 110 of them; claiming Linux here is
++		# less error-prone than teaching each a new platform name.  The
++		# cost is that sys.platform reports "linux"; uname(2) still
++		# reports substrate.
++		ac_sys_system=Linux
++		;;
+ 	*-*-linux*)
+ 		ac_sys_system=Linux
+ 		;;
+@@ -771,6 +782,9 @@
+ 			_host_ident=$host_cpu
+ 		esac
+ 		;;
++	*-*-substrate*)
++		_host_ident=$host_cpu
++		;;
+ 	*-*-cygwin*)
+ 		_host_ident=
+ 		;;

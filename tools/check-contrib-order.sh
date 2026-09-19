@@ -125,6 +125,13 @@ glib2:mc
 e2fsprogs:mc
 ncurses:texinfo
 perl:texinfo
+zlib:python
+bzip2:python
+openssl:python
+ncurses:python
+libffi:python
+expat:python
+sqlite3:python
 "
 
 pos() {

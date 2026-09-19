@@ -53,6 +53,17 @@ image.  This document catalogs the current set.
   cannot be probed, such as `d_nanosleep` and the 64-bit `st_ino_size`.
   One patch makes `Errno_pm.PL` read the target's `errno.h` rather than
   the build host's.
+- **Python 3.14.7** (`contrib/python/`) — CPython, cross-built in two
+  stages: a build-host interpreter from the same tarball (a cross build
+  needs one of the same major.minor to freeze modules and compile the
+  stdlib), then the substrate build via `--with-build-python`.  Links
+  libffi, zlib, bzip2, openssl, ncurses, sqlite3, expat and uuid; 57
+  extension modules including `_ssl`, `_sqlite3` and `_curses`.  One patch
+  teaches configure that substrate takes the Linux path -- so
+  `sys.platform` is `linux`, while `uname(2)` still says substrate -- and
+  `--disable-ipv6` matches the kernel's refusal of `AF_INET6`.  `_dbm`,
+  `_gdbm`, `_lzma`, `_zstd`, `_tkinter` and `readline` are not built: no
+  port provides them.
 - **texinfo 7.3** (`contrib/texinfo/`) — `info`, `install-info` and the
   `texi2any`/`makeinfo` translator.  The last is perl, so this follows
   `contrib/perl`; built `--disable-perl-xs`, using the pure-perl code path.
