@@ -15,8 +15,14 @@ Substrate vendoring: tarball + patch series.
 ```
 
 Produces `dist-sqlite3/usr/` with `bin/sqlite3` (the CLI),
-`lib/libsqlite3.a`, `include/{sqlite3.h,sqlite3ext.h}` and a
-hand-written `lib/pkgconfig/sqlite3.pc`.
+`lib/libsqlite3.{a,so,so.0,so.0.8.6}`, `include/{sqlite3.h,sqlite3ext.h}`
+and a hand-written `lib/pkgconfig/sqlite3.pc`.
+
+The amalgamation is compiled twice, plain for the static library and
+`-fPIC` for the shared one; the soname is `libsqlite3.so.0` and the file
+`libsqlite3.so.0.8.6`, matching upstream's libtool build.  The `sqlite3`
+CLI links the shared library (`DT_NEEDED libsqlite3.so.0`).  The static
+library stays for anything that wants to link SQLite in.
 
 ## Notes
 
