@@ -1,4 +1,4 @@
-# libpng (1.6.43)
+# libpng (1.6.58)
 
 PNG codec for cairo and gdk-pixbuf (the GTK+ 2.x stack).  Modern-autotools
 patch-free port: `fetch.sh` downloads + SHA-verifies and swaps in the

@@ -1,10 +1,13 @@
 #!/bin/sh
 # contrib/libpng/fetch.sh — libpng 1.6.43 (cairo/gdk-pixbuf PNG support).
 set -eu
-VERSION="1.6.43"
+VERSION="1.6.58"
 TARBALL="libpng-${VERSION}.tar.xz"
 URL="https://download.sourceforge.net/libpng/${TARBALL}"
-SHA256="6a5ca0652392a2d7c9db2ae5b40210843c0bbc081cbd410825ab00cc59f14a6c"
+# sha256 of the tarball SourceForge serves; its stated md5 for this file
+# (c6c372a9d7754c66e0b77a8d34987a3b, from best_release.json) matches the
+# same download.
+SHA256="28eb403f51f0f7405249132cecfe82ea5c0ef97f1b32c5a65828814ae0d34775"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 BUILD_DIR="${HERE}/build"; TREE_DIR="${BUILD_DIR}/libpng-${VERSION}"
 mkdir -p "${BUILD_DIR}"; cd "${BUILD_DIR}"

@@ -2,7 +2,7 @@
 # contrib/libpng/build.sh — cross-compile libpng 1.6.43 for substrate.
 set -eu
 HERE="$(cd "$(dirname "$0")" && pwd)"
-VERSION="1.6.43"
+VERSION="1.6.58"
 TREE_DIR="${HERE}/build/libpng-${VERSION}"
 BUILD_DIR="${HERE}/build/build-substrate"
 if [ -z "${SUBSTRATE_TOP:-}" ]; then
