@@ -77,7 +77,18 @@ int dup3(int oldfd, int newfd, int flags) {
 int faccessat(int dirfd, const char *pathname, int mode, int flags) {
     /* No kernel SYS_FACCESSAT — fall back to access() and document. */
     if (dirfd != AT_FDCWD) { errno = ENOSYS; return -1; }
-    (void)flags;
+    if (flags & ~(AT_EACCESS | AT_SYMLINK_NOFOLLOW)) { errno = EINVAL; return -1; }
+    /* access(2) resolves symlinks, so this flag cannot be honoured here. */
+    if (flags & AT_SYMLINK_NOFOLLOW) { errno = ENOSYS; return -1; }
+    if ((flags & AT_EACCESS) &&
+        (geteuid() != getuid() || getegid() != getgid())) {
+        /* access(2) answers for the REAL ids.  Where they equal the effective
+         * ids the two questions coincide; where they differ there is no way to
+         * ask the kernel the effective-id question, so report that rather than
+         * quietly answer a different one. */
+        errno = ENOSYS;
+        return -1;
+    }
     return access(pathname, mode);
 }
 

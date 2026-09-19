@@ -39,6 +39,10 @@ extern "C" {
 #define AT_FDCWD            (-100)
 #define AT_SYMLINK_NOFOLLOW 0x100
 #define AT_REMOVEDIR        0x200
+/* faccessat(2): ask about the EFFECTIVE ids rather than the real ones.  Shares
+ * a value with AT_REMOVEDIR, as on Linux -- the two never reach the same
+ * call. */
+#define AT_EACCESS          0x200
 
 /* lseek() whence — POSIX allows these in <fcntl.h> alongside
  * <stdio.h> and <unistd.h>.  BSD code (OpenSSH's bsd-flock.c)
