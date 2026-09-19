@@ -172,6 +172,11 @@ int socket(int domain, int type, int protocol);
 int bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen);
 int listen(int sockfd, int backlog);
 int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen);
+/* Like accept(), plus SOCK_NONBLOCK/SOCK_CLOEXEC on the new descriptor in
+ * one call.  libc has always implemented it over SYS_ACCEPT4; only the
+ * declaration was missing, so callers that probed for the symbol (CPython's
+ * socket module does) found it and then failed to compile. */
+int accept4(int sockfd, struct sockaddr *addr, socklen_t *addrlen, int flags);
 int connect(int sockfd, const struct sockaddr *addr, socklen_t addrlen);
 ssize_t send(int sockfd, const void *buf, size_t len, int flags);
 ssize_t recv(int sockfd, void *buf, size_t len, int flags);
