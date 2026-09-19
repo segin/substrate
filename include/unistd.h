@@ -354,6 +354,8 @@ long syscall(long number, ...);
  * name is undefined or returns -1. */
 #define _SC_PRIORITY_SCHEDULING         27
 #define _SC_THREAD_PRIORITY_SCHEDULING  28
+/* Longest terminal name ttyname_r(3) can return, TTY_NAME_MAX in <limits.h>. */
+#define _SC_TTY_NAME_MAX     29
 
 long sysconf(int name);
 

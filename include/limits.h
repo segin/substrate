@@ -41,6 +41,8 @@
 #define MQ_PRIO_MAX 64
 #endif
 #define HOST_NAME_MAX 64
+/* ttyname_r(3) buffer size, sysconf(_SC_TTY_NAME_MAX). */
+#define TTY_NAME_MAX 32
 #define LOGIN_NAME_MAX 256
 #define IOV_MAX 1024
 #define LINE_MAX 2048

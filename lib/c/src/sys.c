@@ -1505,6 +1505,7 @@ long sysconf(int name) {
     case 11 /* _SC_PHYS_PAGES */:  return 65536;
     case 12 /* _SC_GETPW_R_SIZE_MAX */: return 1024;  /* getpw*_r buffer hint */
     case 13 /* _SC_GETGR_R_SIZE_MAX */: return 1024;  /* getgr*_r buffer hint */
+    case 29 /* _SC_TTY_NAME_MAX */: return TTY_NAME_MAX;
     case 14 /* _SC_ASYNCHRONOUS_IO */:
         /* POSIX asynchronous I/O (aio_*) is supported via librt.  Reported
          * at the POSIX.1-2001 level: every OPTS aio test gates on
