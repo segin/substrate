@@ -144,7 +144,6 @@ the rest:
 - **libXdamage 1.1.7** (`contrib/libXdamage/`) — Client library for the Damage extension.
 - **libXxf86vm 1.1.7** (`contrib/libXxf86vm/`) — Client library for the XFree86-VidModeExtension.
 - **libFS 1.0.10** (`contrib/libFS/`) — Client library for the X Font Server protocol.
-
 Alongside them, one non-X.Org library:
 
 - **xcb-util 0.4.1** (`contrib/xcb-util/`) — client-side utility functions
@@ -179,6 +178,97 @@ Alongside them, one non-X.Org library:
   bogus `XChar2b` indices → tofu boxes (the "twm font bug").  See the
   port READMEs.
 
+## X.Org applications
+
+The rest of the X.Org `app/` collection, ported from the upstream
+individual tarballs.  Each is a stock autotools cross build staged into
+`dist-overlay/dist-<name>/usr`; none needs a patch series, because the only
+substrate-specific fixup is `config.sub` (applied by
+`substrate_config_sub_fix`) and libtool's host case (applied by
+`substrate_libtool_fix`, without which libtool quietly builds the static
+archive only).
+
+### Clocks, logos and demos
+
+- **xclock 1.2.1** (`contrib/xclock/`) — The classic analogue / digital clock.
+- **oclock 1.0.6** (`contrib/oclock/`) — Round analogue clock; uses the SHAPE extension for its outline.
+- **xlogo 1.0.7** (`contrib/xlogo/`) — The X logo.
+- **ico 1.0.7** (`contrib/ico/`) — Animated polyhedron demo.
+- **xgc 1.0.7** (`contrib/xgc/`) — Demo / test for the core drawing requests.
+- **beforelight 1.0.6** (`contrib/beforelight/`) — Sample screen saver client driven by the MIT-SCREEN-SAVER extension.
+- **x11perf 1.6.1** (`contrib/x11perf/`) — X server performance benchmark, with x11perfcomp to compare runs.
+- **rendercheck 1.5** (`contrib/rendercheck/`) — Test suite for the RENDER extension.
+
+### Desktop accessories
+
+- **xload 1.2.2** (`contrib/xload/`) — System load average graph.
+- **xbiff 1.0.6** (`contrib/xbiff/`) — Mailbox flag that raises when new mail arrives.
+- **xconsole 1.1.1** (`contrib/xconsole/`) — Display console messages in a window.
+- **xmessage 1.0.7** (`contrib/xmessage/`) — Display a message or ask a question in a window.
+- **xclipboard 1.1.6** (`contrib/xclipboard/`) — Hold and browse CLIPBOARD selections.
+- **xmag 1.0.8** (`contrib/xmag/`) — Magnify part of the screen.
+- **xmore 1.0.4** (`contrib/xmore/`) — Plain-text pager in a window.
+- **xditview 1.0.7** (`contrib/xditview/`) — View ditroff output.
+- **bitmap 1.1.2** (`contrib/bitmap/`) — Bitmap editor, plus the bmtoa/atobm converters.
+
+### Fonts
+
+- **xfd 1.1.6** (`contrib/xfd/`) — Display every glyph in a font.
+- **xfontsel 1.1.2** (`contrib/xfontsel/`) — Point-and-click font selector.
+- **bdftopcf 1.1** (`contrib/bdftopcf/`) — Convert BDF bitmap fonts to PCF, the format the X server loads.
+- **fonttosfnt 1.2.5** (`contrib/fonttosfnt/`) — Wrap a bitmap font in an sfnt (TrueType) container.
+- **mkfontscale 1.2.4** (`contrib/mkfontscale/`) — Build the fonts.scale / fonts.dir index of a font directory.
+- **fslsfonts 1.0.7** (`contrib/fslsfonts/`) — List the fonts served by an X font server.  Needs libFS.
+- **fstobdf 1.0.8** (`contrib/fstobdf/`) — Read a font from an X font server and dump it as BDF.  Needs libFS.
+- **showfont 1.0.7** (`contrib/showfont/`) — Dump a font from an X font server.  Needs libFS.
+- **rgb 1.1.1** (`contrib/rgb/`) — The X colour-name database, plus showrgb.
+
+### Display, window and event inspection
+
+- **xdpyinfo 1.4.0** (`contrib/xdpyinfo/`) — Print display, screen and extension information.
+- **xev 1.2.7** (`contrib/xev/`) — Print X events as they arrive.
+- **xwininfo 1.1.7** (`contrib/xwininfo/`) — Print information about a window.
+- **xlsatoms 1.1.5** (`contrib/xlsatoms/`) — List the atoms interned on a display.
+- **xlsclients 1.1.6** (`contrib/xlsclients/`) — List the clients connected to a display.
+- **xlsfonts 1.0.9** (`contrib/xlsfonts/`) — List the fonts a server knows about.
+- **xwd 1.0.10** (`contrib/xwd/`) — Dump an X window to a file.
+- **xwud 1.0.8** (`contrib/xwud/`) — Display an xwd dump.
+- **xpr 1.2.1** (`contrib/xpr/`) — Convert an xwd dump to PostScript, PCL or HP-GL.
+- **xrefresh 1.1.1** (`contrib/xrefresh/`) — Repaint all or part of the screen.
+
+### Input, keyboard and pointer
+
+- **xmodmap 1.0.12** (`contrib/xmodmap/`) — Edit the keyboard and pointer modifier maps.
+- **setxkbmap 1.3.5** (`contrib/setxkbmap/`) — Set the keyboard map through the XKB extension.
+- **xkbevd 1.1.6** (`contrib/xkbevd/`) — XKB event daemon.
+- **xkbprint 1.0.8** (`contrib/xkbprint/`) — Print an XKB keyboard description.
+- **xkbutils 1.0.7** (`contrib/xkbutils/`) — Small XKB demos: xkbbell, xkbvleds and xkbwatch.
+- **xsetmode 1.0.0** (`contrib/xsetmode/`) — Set the mode of an XInput device.
+- **xsetpointer 1.0.1** (`contrib/xsetpointer/`) — Choose which XInput device drives the core pointer.
+
+### Screen, colour and video
+
+- **xrandr 1.5.4** (`contrib/xrandr/`) — Query and change screen size, orientation and outputs.  Needs libXrandr.
+- **xbacklight 1.2.4** (`contrib/xbacklight/`) — Adjust backlight brightness through RandR.
+- **xgamma 1.0.8** (`contrib/xgamma/`) — Query and set monitor gamma through XF86VidMode.
+- **xcmsdb 1.0.7** (`contrib/xcmsdb/`) — Load, query and remove Device Colour Characterization data.
+- **xstdcmap 1.0.6** (`contrib/xstdcmap/`) — Define the standard colormap properties.
+- **xvinfo 1.1.6** (`contrib/xvinfo/`) — Print Xv adaptor information.  Needs libXv.
+- **xcompmgr 1.1.10** (`contrib/xcompmgr/`) — Sample compositing manager (Composite + Damage + Render).
+- **transset 1.0.4** (`contrib/transset/`) — Set window transparency via _NET_WM_WINDOW_OPACITY.
+- **xcursorgen 1.0.9** (`contrib/xcursorgen/`) — Build an Xcursor file from PNG images.
+
+### Resources and session
+
+- **appres 1.0.7** (`contrib/appres/`) — List the X resource database entries an application would see.
+- **listres 1.0.7** (`contrib/listres/`) — List the resources of Xt widget classes.
+- **viewres 1.0.8** (`contrib/viewres/`) — Browse the Xt widget class tree.
+- **editres 1.1.1** (`contrib/editres/`) — Dynamic resource editor for Xt applications.
+- **xhost 1.0.10** (`contrib/xhost/`) — Manage the host-based access control list.
+- **sessreg 1.1.4** (`contrib/sessreg/`) — Add and remove utmp/wtmp entries for X sessions.
+- **xsm 1.0.6** (`contrib/xsm/`) — X session manager.
+- **smproxy 1.0.8** (`contrib/smproxy/`) — Session-management proxy for clients that do not speak XSMP themselves.
+- **constype 1.0.6** (`contrib/constype/`) — Print the Sun console type.  SunOS-specific; kept for completeness.
 ## CDE (Common Desktop Environment)
 
 **CDE** (`contrib/cde/`) is cross-built from the cdesktopenv git tree,
