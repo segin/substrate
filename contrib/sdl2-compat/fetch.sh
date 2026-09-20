@@ -4,10 +4,10 @@
 
 set -eu
 
-VERSION="2.32.70"
+VERSION="2.32.72"
 TARBALL="sdl2-compat-${VERSION}.tar.gz"
 URL="https://github.com/libsdl-org/sdl2-compat/releases/download/release-${VERSION}/${TARBALL}"
-SHA256="998fa62557eb46ffe7e5c3e2c123bc332f7df9d9f593b3ceed88ed1158428a44"
+SHA256="a14d2f78dad8e83ef1039b6534ace4d14f11f5b11d023af989affd70ac1bb35e"
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 BUILD_DIR="${HERE}/build"

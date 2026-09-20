@@ -17,7 +17,7 @@ set -eu
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 LIB="sdl2-compat"
-VERSION="2.32.70"
+VERSION="2.32.72"
 TREE_DIR="${HERE}/build/sdl2-compat-${VERSION}"
 BUILD_DIR="${HERE}/build/build-stage-substrate"
 X11ROOT="${HERE}/build/x11root"

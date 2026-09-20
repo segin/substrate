@@ -312,7 +312,7 @@ meta-compiler (host wml/wmluiltok) and installs the uil/ headers.
     `libX11.so.6`) and the NetBSD `/dev/audio` (Sun/SADA) audio backend;
     substrate is a first-class CMake platform (`CMAKE_SYSTEM_NAME=Substrate`)
     rather than being built as Linux.  Build it first.
-  - **sdl2-compat 2.32.70** (`contrib/sdl2-compat/`) — provides the SDL2 ABI
+  - **sdl2-compat 2.32.72** (`contrib/sdl2-compat/`) — provides the SDL2 ABI
     (`libSDL2-2.0.so.0`, `sdl2.pc`) on top of SDL3.  **Replaces the former
     `contrib/sdl2` port**; SDL2 consumers such as PsyMP3 link it unchanged.
     It dlopens `libSDL3.so.0` at run time.

@@ -1,6 +1,6 @@
 # sdl2-compat on Substrate
 
-sdl2-compat 2.32.70, cross-built for `i386-unknown-substrate`.
+sdl2-compat 2.32.72, cross-built for `i386-unknown-substrate`.
 
 **This port replaces the old `contrib/sdl2`.**  It provides the SDL2 ABI —
 same `libSDL2-2.0.so.0` soname, same headers, same `sdl2.pc` — implemented on
