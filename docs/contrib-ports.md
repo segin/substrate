@@ -134,6 +134,24 @@ All build shared + static.  Porting them added the POSIX
 `IN6_IS_ADDR_*` macros to `<netinet/in.h>`, a `pthread_key_t` type to
 `<pthread.h>`, and an `#ifndef bzero` guard in `<strings.h>`.
 
+Six more X extension libraries were ported to satisfy the applications
+in "X.Org applications" below, all shared + static and OSABI-branded like
+the rest:
+
+- **libXrandr 1.5.5** (`contrib/libXrandr/`) — Client library for the RandR extension.
+- **libXv 1.0.13** (`contrib/libXv/`) — Client library for the Xv video extension.
+- **libXcomposite 0.4.7** (`contrib/libXcomposite/`) — Client library for the Composite extension.
+- **libXdamage 1.1.7** (`contrib/libXdamage/`) — Client library for the Damage extension.
+- **libXxf86vm 1.1.7** (`contrib/libXxf86vm/`) — Client library for the XFree86-VidModeExtension.
+- **libFS 1.0.10** (`contrib/libFS/`) — Client library for the X Font Server protocol.
+
+Alongside them, one non-X.Org library:
+
+- **xcb-util 0.4.1** (`contrib/xcb-util/`) — client-side utility functions
+  for XCB: `xcb-atom`, `xcb-aux` and `xcb-event`.  It comes from
+  `xcb.freedesktop.org` rather than x.org; `xbacklight` needs its
+  `xcb-atom` and `xcb-aux` pkg-config modules.
+
 ## X toolkit, terminal, and window managers
 
 - **X toolkit + xterm** — `libXext` 1.3.7, `libICE` 1.1.2, `libSM`

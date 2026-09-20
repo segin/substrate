@@ -93,6 +93,16 @@ harfbuzz:psymp3
 freetype-harfbuzz:psymp3
 freetype:freetype-harfbuzz
 harfbuzz:freetype-harfbuzz
+libX11:libXrandr
+libXrender:libXrandr
+libX11:libXv
+libX11:libXcomposite
+libXfixes:libXcomposite
+libX11:libXdamage
+libXfixes:libXdamage
+libX11:libXxf86vm
+libX11:libFS
+libxcb:xcb-util
 speex:psymp3
 libogg:psymp3
 libvorbis:psymp3
