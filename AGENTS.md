@@ -187,11 +187,17 @@ If the kernel hangs in `hlt`, check `eflags` bit 9. If `IF=1`, the IRQ may be ma
   it resolved to 0 at link time and `dlopen()` silently returns NULL
   forever with `dlerror()` NULL too.  `contrib/gcc/install-specs.sh`
   now asserts both link names -- run it after any toolchain reinstall.
-  `libc`, `libm`, `libpthread` and `libregex` still lack theirs, which
-  is why the TDE toolchain file passes `-l:libc.so.0 -l:libregex.so.0`
-  explicitly; check with
+  **FIXED for the in-tree runtime**: `install-specs.sh` now creates and
+  asserts the linker name for `c m pthread regex dl sys` on every
+  toolchain (re)install, and warns instead of skipping silently when a
+  shared library is missing; each library's own `make install` also
+  drops a `libX.so -> libX.so.0` into `dist/`.  So `-lc`, `-lm`,
+  `-lpthread` and `-lregex` all resolve to the shared library, and new
+  ports should not write `-l:libc.so.0`.  The `-l:` forms still in the
+  TDE toolchain file are leftovers, not a requirement.  Verify with
   `ls /opt/substrate/i386-unknown-substrate/lib/lib*.so` before blaming
-  a port.
+  a port; a *contrib* library missing its link name is still the trap
+  described above, since those come from each port's own libtool.
 - Rebuild stage 2 GCC with `--with-arch=i486` to drop the
   pentium-pro default and produce binaries that run on plain i486
   QEMU CPUs.

@@ -54,7 +54,10 @@ PKGP="${PKGP}:${SUBSTRATE_TOP}/contrib/libxcb/pkgconfig"
 
 export PKG_CONFIG_LIBDIR="${PKGP}"
 export CPPFLAGS="${CPP}"
-export LDFLAGS="${LDF} -Wl,--copy-dt-needed-entries -l:libregex.so.0"
+# dsimple.c calls regcomp()/regfree().  glibc has POSIX regex in libc, so
+# upstream never links anything for it; substrate keeps it in its own
+# libregex, hence the explicit -lregex.
+export LDFLAGS="${LDF} -Wl,--copy-dt-needed-entries -lregex"
 
 rm -rf "${BUILD_DIR}"
 mkdir -p "${BUILD_DIR}"
