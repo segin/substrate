@@ -1,6 +1,6 @@
 # SDL3 on Substrate
 
-SDL 3.4.14, cross-built for `i386-unknown-substrate`.
+SDL 3.4.16, cross-built for `i386-unknown-substrate`.
 
 SDL3 is the base of substrate's SDL stack.  Nothing links it directly yet —
 the SDL2 and SDL 1.2 APIs are provided by [`../sdl2-compat`](../sdl2-compat)

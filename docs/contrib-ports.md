@@ -308,7 +308,7 @@ meta-compiler (host wml/wmluiltok) and installs the uil/ headers.
 
       app -> libSDL-1.2.so.0 -> libSDL2-2.0.so.0 -> libSDL3.so.0 -> X11 / audio
 
-  - **SDL 3.4.14** (`contrib/sdl3/`) — the base.  X11 video driver (dlopens
+  - **SDL 3.4.16** (`contrib/sdl3/`) — the base.  X11 video driver (dlopens
     `libX11.so.6`) and the NetBSD `/dev/audio` (Sun/SADA) audio backend;
     substrate is a first-class CMake platform (`CMAKE_SYSTEM_NAME=Substrate`)
     rather than being built as Linux.  Build it first.

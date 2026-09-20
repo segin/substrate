@@ -4,10 +4,10 @@
 
 set -eu
 
-VERSION="3.4.14"
+VERSION="3.4.16"
 TARBALL="SDL3-${VERSION}.tar.gz"
 URL="https://github.com/libsdl-org/SDL/releases/download/release-${VERSION}/${TARBALL}"
-SHA256="30d4aa2b3037718142b32dffd4e72f917ebb6cc5227150e7bb9c45efb2153aeb"
+SHA256="7322236cd12090c3eb40b9728be4d49c76f66ad17d04369584d4ecad5cf77c68"
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 BUILD_DIR="${HERE}/build"

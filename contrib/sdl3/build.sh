@@ -30,7 +30,7 @@ set -eu
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 LIB="sdl3"
-VERSION="3.4.14"
+VERSION="3.4.16"
 TREE_DIR="${HERE}/build/SDL3-${VERSION}"
 BUILD_DIR="${HERE}/build/build-stage-substrate"
 X11ROOT="${HERE}/build/x11root"
