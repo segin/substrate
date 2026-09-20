@@ -171,8 +171,12 @@ If the kernel hangs in `hlt`, check `eflags` bit 9. If `IF=1`, the IRQ may be ma
   `dlopen`ed.  Both fixed; `tests/lib/dl/torture_cxxdso` covers
   cross-DSO and cross-`dlopen` throws, typeinfo identity and TLS.
   **Prefer shared now**: a static libstdc++ gives every `.so` its own
-  operator new/delete, iostream/locale globals and typeinfo, which is
-  what the current TDE staging does across 125 libraries.
+  operator new/delete, iostream/locale globals and typeinfo.  TDE was
+  the worst case of this and is **no longer affected** -- the current
+  staging is clean, and `contrib/tde/check-cxx-runtime.sh` asserts it
+  (1064 staged ELFs, 857 of them C++, 0 linking the runtime
+  statically).  Run that script after building any C++ port rather
+  than assuming either state.
 - ld.so implements neither `DT_RPATH` nor `DT_RUNPATH`; a
   `-Wl,-rpath` is accepted at link time and ignored at runtime, so
   libraries must sit in a default search dir or one named by
