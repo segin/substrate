@@ -34,6 +34,20 @@ mkdir -p "$TDEHOME/share/config"
 
 host=$(hostname 2>/dev/null)
 
+# D-Bus session bus.  TDE's tqt3 D-Bus integration wants one, and kdesktop
+# refuses to start without it ("no running D-Bus") -- dbus has been ported all
+# along, nothing was launching it.  This is the per-SESSION bus; the system bus
+# is a separate, longer-lived one started by /etc/rc.d/06-dbus.
+#
+# dbus-launch prints assignments to eval, so the address reaches every child
+# started below.  --exit-with-session ties the bus's lifetime to this script,
+# so logging out does not leak a daemon per session.
+if [ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ] && [ -x /usr/bin/dbus-launch ]; then
+    eval "$(/usr/bin/dbus-launch --sh-syntax --exit-with-session 2>/dev/null)"
+    export DBUS_SESSION_BUS_ADDRESS
+    [ -n "${DBUS_SESSION_BUS_PID:-}" ] && export DBUS_SESSION_BUS_PID
+fi
+
 # DCOP server (the bus the rest of the desktop registers on).
 dcopserver --nosid >"$TDEHOME/dcopserver.log" 2>&1 &
 i=0

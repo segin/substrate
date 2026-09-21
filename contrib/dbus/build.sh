@@ -24,7 +24,14 @@ TREE="${HERE}/build/dbus-1.14.10"; DEST="${SUBSTRATE_TOP}/dist-overlay/dist-dbus
 [ -d "${TREE}" ] || { echo "run ./fetch.sh first" >&2; exit 1; }
 cd "${TREE}"; cfgsub
 # accept4/pipe2 lack header prototypes on substrate (use fallbacks); no abstract sockets.
-./configure --host=i386-unknown-substrate --prefix=/usr --enable-shared --enable-static \
+# --sysconfdir/--localstatedir are not decoration: autoconf derives them from
+# --prefix, so without them the bus config landed in /usr/etc/dbus-1 and its
+# state in /usr/var.  dbus-daemon compiles those paths in, so it stayed
+# self-consistent and nothing failed loudly -- but /etc/dbus-1 did not exist,
+# which is where every other component (and an admin) looks.
+./configure --host=i386-unknown-substrate --prefix=/usr \
+    --sysconfdir=/etc --localstatedir=/var \
+    --enable-shared --enable-static \
     --disable-systemd --disable-tests --disable-doxygen-docs --disable-xml-docs \
     --without-x --disable-selinux --disable-apparmor --disable-libaudit --with-xml=expat --disable-Werror \
     CC=i386-unknown-substrate-gcc CFLAGS="-march=i486 -mtune=i486 -O2 -g -fno-pie" \

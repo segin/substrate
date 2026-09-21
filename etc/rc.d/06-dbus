@@ -1,0 +1,98 @@
+#!/bin/sh
+# /etc/rc.d/06-dbus — the D-Bus system bus.
+#
+# TDE needs a bus: kdesktop (and the rest of the tqt3 D-Bus integration)
+# refuses to start without one, which is how "no running D-Bus" shows up even
+# though contrib/dbus has been ported all along -- nothing ever launched it.
+#
+# This is the SYSTEM bus.  The per-session bus is a different object with a
+# different lifetime and is started by the session launcher
+# (/etc/X11/starttde-substrate), not here.
+#
+# Ordering: after 05-syslogd so failures are logged, and well before 60-sdm
+# brings up the display manager, since a session started without a bus
+# inherits the problem.
+#
+# dbus-daemon will not start without a machine ID.  It is generated on first
+# boot rather than baked into the image: it is supposed to be unique per
+# installation, and every machine flashed from one image would otherwise
+# share it.
+
+PROG=/usr/bin/dbus-daemon
+UUIDGEN=/usr/bin/dbus-uuidgen
+PIDFILE=/var/run/dbus/pid
+SOCKET=/var/run/dbus/system_bus_socket
+MACHINE_ID=/var/lib/dbus/machine-id
+LOG=/var/log/dbus.log
+
+case "${1:-start}" in
+    start)
+        [ -x "$PROG" ] || exit 0
+
+        mkdir -p /var/run/dbus /var/lib/dbus
+
+        if [ ! -s "$MACHINE_ID" ] && [ -x "$UUIDGEN" ]; then
+            "$UUIDGEN" --ensure="$MACHINE_ID" 2>/dev/null
+        fi
+        if [ ! -s "$MACHINE_ID" ]; then
+            echo "dbus: no machine ID and dbus-uuidgen failed; not starting" >&2
+            exit 1
+        fi
+
+        # A stale pidfile from the previous boot names a PID that is either
+        # gone or belongs to something else entirely; rc.subr's helper checks
+        # both before believing it.
+        . /etc/rc.subr 2>/dev/null
+        if command -v pidfile_running >/dev/null 2>&1 &&
+           pidfile_running "$PIDFILE" "$PROG"; then
+            echo "dbus: already running"
+            exit 0
+        fi
+        rm -f "$PIDFILE"
+
+        # Keep stderr: dbus-daemon's failures are one-liners that say exactly
+        # what is wrong ("Failed to find user messagebus" was the first one),
+        # and throwing them away cost a boot to rediscover.
+        #
+        # No --print-pid redirect here.  dbus-daemon writes the pidfile named
+        # by <pidfile> in system.conf itself, and it REFUSES to start if that
+        # file already exists -- and `> "$PIDFILE"` makes the shell create it
+        # before the daemon ever runs, so the redirect caused the very error
+        # it was meant to record.
+        "$PROG" --system --fork 2>>"$LOG"
+
+        # Report what actually happened rather than assuming the launch
+        # worked -- the socket is the thing clients connect to, so it is the
+        # thing worth checking.  The daemon forks, so allow a moment for it.
+        i=0
+        while [ ! -S "$SOCKET" ] && [ "$i" -lt 10 ]; do
+            sleep 1
+            i=$((i + 1))
+        done
+        if [ -S "$SOCKET" ]; then
+            echo "dbus: system bus started"
+        else
+            echo "dbus: system bus FAILED to start (see $LOG)" >&2
+            exit 1
+        fi
+        ;;
+    stop)
+        if [ -s "$PIDFILE" ]; then
+            kill "$(cat "$PIDFILE" 2>/dev/null)" 2>/dev/null
+            rm -f "$PIDFILE"
+        fi
+        ;;
+    status)
+        if [ -S /var/run/dbus/system_bus_socket ]; then
+            echo "dbus: running"
+        else
+            echo "dbus: stopped"
+        fi
+        ;;
+    restart)
+        "$0" stop
+        "$0" start
+        ;;
+esac
+
+exit 0
