@@ -334,3 +334,46 @@ int test_eol_multiple_starts(void) {
     }
     return 0;
 }
+
+/* regexec() must not report a resource failure as "no match".  Regression
+ * test: every negative engine result was mapped to REG_NOMATCH, so an
+ * exhausted DFA state table or step budget was indistinguishable from a
+ * subject that genuinely does not match.  POSIX offers only REG_ESPACE for
+ * the resource case, so that is what this must produce.
+ *
+ * The subject must be high-entropy for the subset construction to blow past
+ * limits.max_states -- a regular alternating a/b string simply MATCHES, and
+ * an earlier version of this test used one and so passed without testing
+ * anything.  A fixed xorshift keeps it deterministic. */
+int test_regexec_error_not_nomatch(void) {
+    const size_t n = 20000;
+    char *s = (char *)malloc(n + 32);
+    unsigned st = 2654435761u + 12345u;
+    regex_t re;
+    int er;
+    size_t i;
+
+    TEST_ASSERT(s != NULL);
+    for (i = 0; i < n; ++i) {
+        st ^= st << 13;
+        st ^= st >> 17;
+        st ^= st << 5;
+        s[i] = (char)((st & 1u) ? 'a' : 'b');
+    }
+    memcpy(s + n, "abbbbbbbbbbbbbbc", 16);
+    s[n + 16] = '\0';
+
+    TEST_ASSERT(regcomp(&re, "^(a|b)*a(a|b){14}c", REG_EXTENDED) == 0);
+    er = regexec(&re, s, 0, NULL, 0);
+    /* Either it matches outright or the limit is REPORTED -- what it must
+     * never be is a quiet REG_NOMATCH. */
+    TEST_ASSERT(er == 0 || er == REG_ESPACE);
+    regfree(&re);
+    free(s);
+
+    /* A subject that genuinely does not match must still say so. */
+    TEST_ASSERT(regcomp(&re, "zzz", REG_EXTENDED) == 0);
+    TEST_ASSERT(regexec(&re, "aaa", 0, NULL, 0) == REG_NOMATCH);
+    regfree(&re);
+    return 0;
+}

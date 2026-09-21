@@ -58,6 +58,7 @@ int regexec(const regex_t *restrict preg, const char *restrict string,
     size_t max_captures;
     size_t *offsets;
     ssize_t rc;
+    regex_err_t err;
     size_t i;
     regex_t local;
 
@@ -95,10 +96,20 @@ int regexec(const regex_t *restrict preg, const char *restrict string,
      * the slot count (2 * groups), matching the 2*max_captures allocation
      * above; otherwise the engine's "did the caller provide room?" guard fails
      * and it never writes any submatch offsets. */
-    rc = regex_match(&local, string, text_len, offsets, max_captures * 2, NULL);
+    err = REGEX_OK;
+    rc = regex_match(&local, string, text_len, offsets, max_captures * 2, &err);
 
     if (rc < 0) {
         free(offsets);
+        /* Only a genuine negative answer is REG_NOMATCH.  A resource
+         * condition -- out of memory, the step budget, an exhausted DFA state
+         * table -- must not be reported as "this subject does not match";
+         * that is how an engine-side limit became a silently wrong answer at
+         * the API boundary.  POSIX gives regexec() only REG_ESPACE for the
+         * resource case, so use it for all of them. */
+        if (err != REGEX_OK) {
+            return REG_ESPACE;
+        }
         return REG_NOMATCH;
     }
 
