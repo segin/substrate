@@ -104,3 +104,46 @@ int test_repeat_zero_min(void) {
     }
     return 0;
 }
+
+/* `^` dominance.  Regression test: prog->uses_bol was a presence flag set by
+ * any NODE_BOL anywhere in the AST, and it pruned the whole unanchored scan.
+ * So `^foo|bar` could only match at offset 0 and `grep -E '^foo|bar'` missed
+ * every `bar` that was not at the start of a line. */
+int test_bol_dominance(void) {
+    static const struct {
+        const char *pattern;
+        const char *subject;
+        int         should_match;
+        int         so;
+    } cases[] = {
+        /* ^ in only ONE alternative must not anchor the other. */
+        { "^foo|bar",   "xxbar",   1, 2 },
+        { "bar|^foo",   "xxbar",   1, 2 },
+        { "^foo|bar",   "fooy",    1, 0 },
+        { "(^foo|bar)", "xxbar",   1, 2 },
+        /* Genuinely anchored patterns must still be anchored. */
+        { "^abc",       "xabc",    0, 0 },
+        { "^abc",       "abcx",    1, 0 },
+        { "^a|^b",      "xa",      0, 0 },
+        { "^(a|b)",     "xa",      0, 0 },
+        /* A leading empty-matching element does not anchor what follows. */
+        { "x*^a",       "a",       1, 0 },
+    };
+    size_t i;
+
+    for (i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
+        regex_t re;
+        regmatch_t m[1];
+        int rc = regcomp(&re, cases[i].pattern, REG_EXTENDED);
+        TEST_ASSERT(rc == 0);
+        int er = regexec(&re, cases[i].subject, 1, m, 0);
+        if (cases[i].should_match) {
+            TEST_ASSERT(er == 0);
+            TEST_ASSERT(m[0].rm_so == cases[i].so);
+        } else {
+            TEST_ASSERT(er != 0);
+        }
+        regfree(&re);
+    }
+    return 0;
+}

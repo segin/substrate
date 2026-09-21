@@ -1423,6 +1423,39 @@ static frag frag_group(nfa_prog *prog, frag inner, size_t group_id) {
     return f;
 }
 
+/* Does EVERY way through this subtree have to start at a `^`?
+ *
+ * This is what lets the unanchored scan stop after one attempt at offset 0.
+ * A mere presence flag ("the pattern mentions ^ somewhere") is not enough and
+ * was the bug: `^foo|bar` set it, so `bar` could only ever be found at offset
+ * 0 and `grep -E '^foo|bar'` silently missed every non-leading `bar`.
+ *
+ * Only the leftmost position of a concatenation matters, both branches of an
+ * alternation must be anchored for the whole to be, and anything that can
+ * match empty (x*, x?, x{0,n}) does not anchor what follows it. */
+static int node_always_bol(const regex_node *n) {
+    if (!n) {
+        return 0;
+    }
+    switch (n->type) {
+    case NODE_BOL:
+        return 1;
+    case NODE_CONCAT:
+        /* Leftmost element decides; an empty-matching left does not anchor. */
+        return node_always_bol(n->left);
+    case NODE_ALT:
+        return node_always_bol(n->left) && node_always_bol(n->right);
+    case NODE_GROUP:
+        return node_always_bol(n->left);
+    case NODE_REPEAT:
+        /* Only a mandatory first repetition can carry the anchor. */
+        return n->rep_min > 0 && node_always_bol(n->left);
+    default:
+        /* NODE_STAR / NODE_QMARK match empty, so they anchor nothing. */
+        return 0;
+    }
+}
+
 static frag compile_node(nfa_prog *prog, regex_node *n) {
     frag f;
     size_t i;
@@ -1470,7 +1503,6 @@ static frag compile_node(nfa_prog *prog, regex_node *n) {
         f = frag_class(prog, charclass_clone(n->charclass));
         break;
     case NODE_BOL:
-        prog->uses_bol = 1;
         f = frag_anchor(prog, NFA_BOL);
         break;
     case NODE_EOL:
@@ -2364,7 +2396,12 @@ static ssize_t safe_regex_match_internal(const regex_t *re, const char *text, si
             }
             return -REGEX_ERR_MATCH_TIMEOUT;
         }
-        if (anchored || sre->nfa->uses_bol) {
+        /* A ^-dominant pattern can only match at offset 0 -- unless
+         * MULTILINE is on, where ^ also matches after every newline and the
+         * scan must keep going (anchor_at_bol() implements that, but it only
+         * ever sees pos > 0 if we do not break here). */
+        if (anchored ||
+            (sre->nfa->uses_bol && !(re->flags & REGEX_FLAG_MULTILINE))) {
             break;
         }
         if (re->flags & REGEX_FLAG_UTF8) {
@@ -2607,7 +2644,12 @@ static ssize_t safe_regex_backtrack(const regex_t *re, const char *text, size_t 
             }
             return -REGEX_ERR_MATCH_TIMEOUT;
         }
-        if (anchored || sre->nfa->uses_bol) {
+        /* A ^-dominant pattern can only match at offset 0 -- unless
+         * MULTILINE is on, where ^ also matches after every newline and the
+         * scan must keep going (anchor_at_bol() implements that, but it only
+         * ever sees pos > 0 if we do not break here). */
+        if (anchored ||
+            (sre->nfa->uses_bol && !(re->flags & REGEX_FLAG_MULTILINE))) {
             break;
         }
         if (re->flags & REGEX_FLAG_UTF8) {
@@ -3400,6 +3442,10 @@ static regex_err_t safe_regex_compile(regex_t *re, const char *pattern, unsigned
      * pattern whose NFA expansion is enormous - nested {m,n}, deeply
      * nested groups - fails fast instead of allocating it all first. */
     prog->max_states = re->limits.max_states;
+
+    /* Whole-pattern BOL dominance: only when every alternative must start
+     * at ^ can the scan stop after offset 0.  See node_always_bol(). */
+    prog->uses_bol = node_always_bol(ast);
 
     compiled = compile_node(prog, ast);
     if (prog->failed) {
