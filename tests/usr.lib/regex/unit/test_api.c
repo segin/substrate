@@ -60,3 +60,47 @@ int test_api_match(void) {
     return 0;
 }
 
+
+/* Zero-minimum counted repetition.  Regression test: `x{0}` used to compile
+ * to a NULL NFA start state and segfault regcomp(), and `x{0,n}` / `x{0,}`
+ * used to emit one mandatory copy, so they behaved as `x{1,n+1}` / `x+`.
+ * Driven through the POSIX entry points because that is the API grep, less
+ * and TDE use, and it is where the damage showed up. */
+int test_repeat_zero_min(void) {
+    static const struct {
+        const char *pattern;
+        const char *subject;
+        int         should_match;
+        int         so;
+        int         eo;
+    } cases[] = {
+        { "a{0}",   "bbb",  1, 0, 0 },   /* used to SIGSEGV in regcomp() */
+        { "a{0,0}", "bbb",  1, 0, 0 },
+        { "a{0,2}", "bbb",  1, 0, 0 },   /* used to be NOMATCH (as a{1,3}) */
+        { "a{0,2}", "aab",  1, 0, 2 },
+        { "a{0,}",  "bbb",  1, 0, 0 },   /* used to behave as a+ */
+        { "a{0,}",  "aaa",  1, 0, 3 },
+        /* Non-zero minimums must keep working -- guards over-correction. */
+        { "a{2,3}", "aaaa", 1, 0, 3 },
+        { "a{3}",   "aaaa", 1, 0, 3 },
+        { "a{2}",   "ab",   0, 0, 0 },
+    };
+    size_t i;
+
+    for (i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
+        regex_t re;
+        regmatch_t m[1];
+        int rc = regcomp(&re, cases[i].pattern, REG_EXTENDED);
+        TEST_ASSERT(rc == 0);
+        int er = regexec(&re, cases[i].subject, 1, m, 0);
+        if (cases[i].should_match) {
+            TEST_ASSERT(er == 0);
+            TEST_ASSERT(m[0].rm_so == cases[i].so);
+            TEST_ASSERT(m[0].rm_eo == cases[i].eo);
+        } else {
+            TEST_ASSERT(er != 0);
+        }
+        regfree(&re);
+    }
+    return 0;
+}

@@ -1271,6 +1271,22 @@ static frag frag_none(void) {
     return f;
 }
 
+/* A fragment that matches the empty string: a single epsilon state.
+ * Needed by the zero-minimum repetitions ({0}, {0,n}, {0,}), which have
+ * nothing mandatory to emit but still need a real start state -- frag_none()
+ * would leave frag.start NULL and the NULL is only noticed later, when
+ * dfa_build() dereferences prog->start. */
+static frag frag_empty(nfa_prog *prog) {
+    frag f;
+    nfa_state *s = nfa_state_new(prog, NFA_EPSILON);
+    if (!s) {
+        return frag_none();
+    }
+    f.start = s;
+    f.out = list1(&s->out);
+    return f;
+}
+
 static frag frag_literal(nfa_prog *prog, uint32_t cp) {
     frag f;
     nfa_state *s = nfa_state_new(prog, NFA_CHAR);
@@ -1479,15 +1495,25 @@ static frag compile_node(nfa_prog *prog, regex_node *n) {
     case NODE_REPEAT:
         max = n->rep_max;
         if (max == 0) {
-            f = compile_node(prog, NULL);
+            /* x{0} and x{0,0} match the empty string.  compile_node(NULL)
+             * used to be used here, which returns a frag with a NULL start
+             * state; regcomp() then segfaulted in dfa_build(). */
+            f = frag_empty(prog);
             break;
         }
-        f = compile_node(prog, n->left);
-        for (i = 1; i < n->rep_min; ++i) {
-            if (prog->failed) {
-                break;
+        /* Emit rep_min MANDATORY copies -- none at all when rep_min is 0.
+         * Emitting one unconditionally is what turned x{0,n} into x{1,n+1}
+         * and x{0,} into x+. */
+        if (n->rep_min == 0) {
+            f = frag_empty(prog);
+        } else {
+            f = compile_node(prog, n->left);
+            for (i = 1; i < n->rep_min; ++i) {
+                if (prog->failed) {
+                    break;
+                }
+                f = frag_concat(f, compile_node(prog, n->left));
             }
-            f = frag_concat(f, compile_node(prog, n->left));
         }
         if (max == SIZE_MAX) {
             f = frag_concat(f, frag_star(prog, compile_node(prog, n->left)));
