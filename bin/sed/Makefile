@@ -42,5 +42,5 @@ EXTRA_CLEAN = sed_host
 
 sed_host: $(SRCS) $(REGEX_LIB)
 	cc -m32 -O2 -Wall -Wextra -g -DNATIVE_BUILD=1 -D_GNU_SOURCE -DHAVE_MKSTEMP \
-	   -I$(TOP)/usr.lib/regex/include -I. \
+	   -I$(TOP)/include -I. \
 	   -o $@ $(SRCS) $(REGEX_LIB)
