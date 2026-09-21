@@ -2341,6 +2341,12 @@ static ssize_t nfa_capture_match(nfa_prog *prog, const regex_t *re, const char *
     return -1;
 }
 
+/* Returns 1 with *out_end set on a match, 0 for no match, and -1 for a HARD
+ * ERROR -- currently only the lazy DFA hitting limits.max_states.  The error
+ * must stay distinguishable from "no match": it used to just break out of
+ * the walk, and the caller, which only tested the step budget, carried on and
+ * finished with *out_err = REGEX_OK, so an exhausted state table read as a
+ * clean negative answer. */
 static int dfa_match_span(const regex_t *re, safe_regex *sre, const char *text, size_t text_len,
                           size_t start_pos, size_t *out_end, regex_err_t *out_err,
                           uint8_t *scratch_set, size_t scratch_cap, size_t *steps) {
@@ -2378,7 +2384,7 @@ static int dfa_match_span(const regex_t *re, safe_regex *sre, const char *text, 
                 if (out_err) {
                     *out_err = REGEX_ERR_COMPILE_LIMIT;
                 }
-                break;
+                return -1;      /* state table exhausted: a hard error */
             }
             pos = idx;
             if (dfa->states[state].is_dead) {
@@ -2391,7 +2397,7 @@ static int dfa_match_span(const regex_t *re, safe_regex *sre, const char *text, 
                 if (out_err) {
                     *out_err = REGEX_ERR_COMPILE_LIMIT;
                 }
-                break;
+                return -1;      /* state table exhausted: a hard error */
             }
             pos++;
             if (dfa->states[state].is_dead) {
@@ -2455,6 +2461,15 @@ static ssize_t safe_regex_match_internal(const regex_t *re, const char *text, si
     while (start_pos <= text_len) {
         size_t end_pos = 0;
         int ok = dfa_match_span(re, sre, text, text_len, start_pos, &end_pos, out_err, scratch_set, scratch_cap, &steps);
+        if (ok < 0) {
+            /* Lazy-DFA state table exhausted.  Report it rather than letting
+             * the scan run on and finish with REGEX_OK, which turned an
+             * exhausted table into a silent "no match". */
+            if (out_err) {
+                *out_err = REGEX_ERR_COMPILE_LIMIT;
+            }
+            return -REGEX_ERR_COMPILE_LIMIT;
+        }
         if (ok) {
             /* The DFA is built with ignore_anchors, so it is a SUPERSET
              * prefilter: it can report a span that the anchor-aware Pike pass
