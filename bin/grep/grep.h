@@ -111,6 +111,7 @@ struct grep_ctx {
     /* runtime state */
     bool multiple_files;        /* >1 input or recursive => prefix names */
     bool any_error;             /* drives exit status 2 */
+    bool regex_error_reported;  /* diagnostic for a regex engine failure printed once */
     bool usage_error;           /* parse error warrants a usage line */
 };
 

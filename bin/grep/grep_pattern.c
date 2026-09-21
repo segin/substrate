@@ -379,20 +379,46 @@ static int fixed_search(const char *hay, size_t hlen, const char *needle,
     return 0;
 }
 
-static int regex_search(struct grep_pattern *p, const char *line, size_t len,
+/* The engine reports a resource failure -- an exhausted step budget or DFA
+ * state table -- as a negative return WITH an error set.  Treating that as
+ * "this line does not match" is how an engine limit became a silently wrong
+ * answer: grep printed nothing and exited 1, as if the file genuinely had no
+ * matches.  Say so once, and make the run exit 2. */
+static void note_regex_error(struct grep_ctx *g, regex_err_t err)
+{
+    if (!g)
+        return;
+    g->any_error = true;
+    if (!g->regex_error_reported) {
+        g->regex_error_reported = true;
+        if (!g->no_messages)
+            fprintf(stderr,
+                    "%s: regex engine gave up on this input (error %d); "
+                    "results are incomplete\n",
+                    g->progname, (int)err);
+    }
+}
+
+static int regex_search(struct grep_ctx *g, struct grep_pattern *p,
+                        const char *line, size_t len,
                         size_t from, size_t *ms, size_t *me)
 {
+    regex_err_t err = REGEX_OK;
+
     if (from > len)
         return 0;
     ssize_t r = regex_match(p->re, line + from, len - from,
-                            p->caps, p->capslots, NULL);
+                            p->caps, p->capslots, &err);
     /* regex_match returns the capture count (>=1) on a match and a negative
      * value on no-match/error.  The narrow cast keeps the sign test correct
      * regardless of ssize_t width: every valid return fits in int, and the
      * engine's no-match sentinel survives as a negative int on both the
      * 32-bit target and a 64-bit host test build. */
-    if ((int)r < 0)
+    if ((int)r < 0) {
+        if (err != REGEX_OK)
+            note_regex_error(g, err);
         return 0;
+    }
     *ms = from + p->caps[0];
     *me = from + p->caps[1];
     return 1;
@@ -419,7 +445,7 @@ int grep_find_match(struct grep_ctx *g, const char *line, size_t len,
             int ok = (g->dialect == GREP_FIXED)
                          ? fixed_search(line, len, p->text, p->len,
                                         g->ignore_case, cur, &s, &e)
-                         : regex_search(p, line, len, cur, &s, &e);
+                         : regex_search(g, p, line, len, cur, &s, &e);
             if (!ok)
                 break;
             if (g->word && !word_ok(line, len, s, e)) {
@@ -459,9 +485,12 @@ int grep_line_match(struct grep_ctx *g, const char *line, size_t len)
                     return 1;
                 }
             } else {
+                regex_err_t err = REGEX_OK;
                 if ((int)regex_match(p->re, line, len, p->caps, p->capslots,
-                                     NULL) >= 0)
+                                     &err) >= 0)
                     return 1;
+                if (err != REGEX_OK)
+                    note_regex_error(g, err);
             }
         }
         return 0;

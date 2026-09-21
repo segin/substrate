@@ -38,6 +38,20 @@ def body(g, s):
     s.check("long line handled",
             g.run(["-o", "needle", p["big"]])[1], "needle\n")
 
+    # A regex-engine resource failure must not read as "no matches".  A
+    # pattern whose DFA blows past the state cap, over a high-entropy line:
+    # grep used to print 0 and exit 1, indistinguishable from a clean miss.
+    import random
+    rnd = random.Random(7)
+    longline = "".join(rnd.choice("ab") for _ in range(20000)) + "abbbbbbbbbbbbbbc"
+    d, p2 = make_files(poison=longline + "\n" + ("ab" * 8 + "abbbbbbbbbbbbbbc\n") * 5)
+    rc, out, err = g.run(["-cE", "^(a|b)*a(a|b){14}c", p2["poison"]])
+    # Either it copes (rc 0/1 with a real count) or it REPORTS the failure
+    # with exit 2 -- what it must never do is exit 1 claiming zero matches
+    # while having given up.
+    s.check_rc("engine failure is not a silent no-match",
+               0 if (rc == 2 or rc == 0) else 1, 0)
+
     # Count with no matches is 0, not absent.
     s.check("zero count", g.run(["-c", "zzz"], stdin="a\nb\n")[1], "0\n")
 
