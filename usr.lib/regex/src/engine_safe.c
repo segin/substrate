@@ -115,6 +115,7 @@ typedef struct dfa_state {
     uint8_t *nfa_set;
     size_t nfa_set_len;
     int is_accept;
+    int is_dead;        /* empty NFA set: no match can follow from here */
     dfa_trans *trans;
     size_t trans_count;
     size_t trans_cap;
@@ -1804,6 +1805,19 @@ static int dfa_add_state(dfa_prog *dfa, uint8_t *set, size_t bytes, int is_accep
     }
     dfa->states[dfa->state_count].nfa_set = set;
     dfa->states[dfa->state_count].nfa_set_len = bytes;
+    /* A state whose NFA set is empty can never accept and can never reach an
+     * accepting state: it is a sink.  Computed once here (O(bytes)) so the
+     * match loop can test it per input byte for free. */
+    {
+        size_t _i;
+        int _dead = !is_accept;
+        for (_i = 0; _dead && _i < bytes; ++_i) {
+            if (set[_i]) {
+                _dead = 0;
+            }
+        }
+        dfa->states[dfa->state_count].is_dead = _dead;
+    }
     dfa->states[dfa->state_count].is_accept = is_accept;
     dfa->states[dfa->state_count].trans = NULL;
     dfa->states[dfa->state_count].trans_count = 0;
@@ -2367,6 +2381,9 @@ static int dfa_match_span(const regex_t *re, safe_regex *sre, const char *text, 
                 break;
             }
             pos = idx;
+            if (dfa->states[state].is_dead) {
+                break;          /* sink: nothing further can match from here */
+            }
         } else {
             uint32_t cp = (uint8_t)text[pos];
             state = dfa_step(sre->nfa, dfa, state, pos, text, text_len, cp, re->flags, scratch_set, scratch_cap);
@@ -2377,6 +2394,9 @@ static int dfa_match_span(const regex_t *re, safe_regex *sre, const char *text, 
                 break;
             }
             pos++;
+            if (dfa->states[state].is_dead) {
+                break;          /* sink: nothing further can match from here */
+            }
         }
     }
 

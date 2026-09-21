@@ -1,3 +1,4 @@
+#include <stdlib.h>
 #include <string.h>
 #include <regex.h>
 #include "../test_common.h"
@@ -253,6 +254,41 @@ int test_bracket_leading_rbracket(void) {
         int er = regexec(&re, cases[i].subject, 0, NULL, 0);
         TEST_ASSERT((er == 0) == (cases[i].should_match != 0));
         regfree(&re);
+    }
+    return 0;
+}
+
+/* Linear-time unanchored scanning.  Regression test: dfa_match_span() kept
+ * stepping the DFA after it entered a dead (empty NFA set) state, charging
+ * one step of the shared budget per remaining byte.  Each scan start then
+ * cost O(n) and the whole scan O(n^2), so the 1,000,000-step default budget
+ * ran out at a subject of ~1414 bytes and the match was reported as a
+ * timeout -- which regexec() turns into a plain "no match".  Measured
+ * threshold scaled as sqrt(budget), confirming the quadratic behaviour. */
+int test_long_subject_scan(void) {
+    static const size_t fillers[] = { 1500, 4000, 20000, 100000 };
+    size_t i;
+
+    for (i = 0; i < sizeof(fillers) / sizeof(fillers[0]); ++i) {
+        size_t n = fillers[i];
+        char *s = (char *)malloc(n + 8);
+        regex_t re;
+        regmatch_t m[1];
+        int rc;
+        int er;
+
+        TEST_ASSERT(s != NULL);
+        memset(s, 'z', n);
+        memcpy(s + n, "needle", 6);
+        s[n + 6] = '\0';
+
+        rc = regcomp(&re, "needle", REG_EXTENDED);
+        TEST_ASSERT(rc == 0);
+        er = regexec(&re, s, 1, m, 0);
+        TEST_ASSERT(er == 0);
+        TEST_ASSERT((size_t)m[0].rm_so == n);
+        regfree(&re);
+        free(s);
     }
     return 0;
 }
