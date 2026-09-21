@@ -292,3 +292,45 @@ int test_long_subject_scan(void) {
     }
     return 0;
 }
+
+/* `$`-anchored search across multiple candidate starts.  Regression test:
+ * the DFA prefilter is built with ignore_anchors, so it is a superset
+ * matcher -- it reports spans the anchor-aware Pike pass then rejects.  That
+ * rejection was returned straight to the caller instead of advancing to the
+ * next start, so the first false positive ended the whole search and
+ * `grep -E 'foo$'` found 1 of 3 matching lines. */
+int test_eol_multiple_starts(void) {
+    static const struct {
+        const char *pattern;
+        const char *subject;
+        int         should_match;
+        int         so;
+    } cases[] = {
+        /* The prefilter hits "foo" at 0; only the one at 8 satisfies $. */
+        { "foo$",     "foo bar foo", 1, 8 },
+        { "foo$",     "xxfoo",       1, 2 },
+        { "foo$",     "foofoo",      1, 3 },
+        { "foo$",     "foo bar",     0, 0 },
+        { "o$",       "foo bar foo", 1, 10 },
+        { "[a-z]*o$", "foo bar foo", 1, 8 },
+        { "^foo$",    "foo bar foo", 0, 0 },
+        { "^foo$",    "foo",         1, 0 },
+    };
+    size_t i;
+
+    for (i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
+        regex_t re;
+        regmatch_t m[1];
+        int rc = regcomp(&re, cases[i].pattern, REG_EXTENDED);
+        TEST_ASSERT(rc == 0);
+        int er = regexec(&re, cases[i].subject, 1, m, 0);
+        if (cases[i].should_match) {
+            TEST_ASSERT(er == 0);
+            TEST_ASSERT(m[0].rm_so == cases[i].so);
+        } else {
+            TEST_ASSERT(er != 0);
+        }
+        regfree(&re);
+    }
+    return 0;
+}

@@ -9,6 +9,7 @@ int test_dot_newline(void);
 int test_bre_ere_repeat(void);
 int test_bracket_leading_rbracket(void);
 int test_long_subject_scan(void);
+int test_eol_multiple_starts(void);
 int test_api_split_free(void);
 int test_util_ascii_tolower(void);
 int test_util_toupper(void);
@@ -44,6 +45,7 @@ int main(void) {
     failures += test_bre_ere_repeat();
     failures += test_bracket_leading_rbracket();
     failures += test_long_subject_scan();
+    failures += test_eol_multiple_starts();
     failures += test_api_split_free();
     failures += test_util_ascii_tolower();
     failures += test_util_toupper();

@@ -2456,13 +2456,32 @@ static ssize_t safe_regex_match_internal(const regex_t *re, const char *text, si
         size_t end_pos = 0;
         int ok = dfa_match_span(re, sre, text, text_len, start_pos, &end_pos, out_err, scratch_set, scratch_cap, &steps);
         if (ok) {
+            /* The DFA is built with ignore_anchors, so it is a SUPERSET
+             * prefilter: it can report a span that the anchor-aware Pike pass
+             * then rejects (`foo$` matching "foo" at offset 0 of
+             * "foo bar foo").  That is an ordinary miss for this start, not
+             * an error -- returning it used to abandon the whole scan, so
+             * `grep -E 'foo$'` found 1 line out of 3.
+             *
+             * A private err is used because a negative return cannot be
+             * decoded on its own: REGEX_ERR_SYNTAX is 1, so -REGEX_ERR_SYNTAX
+             * and the plain "no match" -1 are the same value.  It also makes
+             * this correct when the caller passed out_err == NULL, which grep
+             * does. */
+            regex_err_t cap_err = REGEX_OK;
             ssize_t cap_res = nfa_capture_match(sre->nfa, re, text, text_len, start_pos,
-                                                capture_offsets, max_captures, out_err, &steps);
+                                                capture_offsets, max_captures, &cap_err, &steps);
             if (cap_res >= 0) {
                 (void)end_pos;
                 return cap_res;
             }
-            return cap_res;
+            if (cap_err != REGEX_OK) {
+                if (out_err) {
+                    *out_err = cap_err;
+                }
+                return cap_res;
+            }
+            /* else: prefilter false positive -- advance and keep scanning. */
         }
         /* dfa_match_span sets MATCH_TIMEOUT and returns 0 once the shared
          * budget is exhausted; stop the whole scan rather than restarting. */
