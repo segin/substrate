@@ -58,7 +58,14 @@ set(CMAKE_CXX_FLAGS_INIT "-march=i486 -mtune=i486 -fcommon ${_substrate_warn}")
 # Linked plain (not --as-needed): CMake places these flags BEFORE the
 # object files, where --as-needed would drop the library before the
 # objects' undefined regex refs are seen.  Shared-object symbol resolution
-# is not positional, so a plain -l: resolves regcomp regardless of order.
+# is not positional, so a plain -l resolves regcomp regardless of order.
+#
+# Written -lc/-lregex, not -l:libc.so.0/-l:libregex.so.0.  The explicit
+# soname form dates from when the cross sysroot had no libc.so/libregex.so
+# LINKER name and -lc would have fallen through to the static archive;
+# install-specs.sh now creates and asserts those link names on every
+# toolchain install, so the plain form resolves to the shared library.
+#
 # The staged TDE sysroot (opt/trinity/lib) holds the cross-built TQt/TDE
 # shared libs.  ld needs it on -rpath-link (not just -L) so it can resolve
 # the *indirect* DT_NEEDED of a library named on the link line -- e.g.
@@ -74,7 +81,7 @@ set(_tde_staged_lib "${_tde_top}/dist-overlay/dist-tde-sysroot/opt/trinity/lib")
 # build-tree dirs are not on -rpath-link, so ld can't follow the indirect
 # NEEDED at link time -- but the DT_NEEDED is correct and ld.so resolves
 # it at runtime.  Tell ld to trust the shared libs' own dependencies.
-set(_substrate_link "-L${SUBSTRATE_SYSROOT}/lib -Wl,-rpath-link,${SUBSTRATE_SYSROOT}/lib -L${_tde_staged_lib} -Wl,-rpath-link,${_tde_staged_lib} -Wl,--copy-dt-needed-entries -Wl,--allow-shlib-undefined -l:libc.so.0 -l:libregex.so.0")
+set(_substrate_link "-L${SUBSTRATE_SYSROOT}/lib -Wl,-rpath-link,${SUBSTRATE_SYSROOT}/lib -L${_tde_staged_lib} -Wl,-rpath-link,${_tde_staged_lib} -Wl,--copy-dt-needed-entries -Wl,--allow-shlib-undefined -lc -lregex")
 set(CMAKE_EXE_LINKER_FLAGS_INIT    "${_substrate_link}")
 set(CMAKE_SHARED_LINKER_FLAGS_INIT "${_substrate_link}")
 set(CMAKE_MODULE_LINKER_FLAGS_INIT "${_substrate_link}")
