@@ -7,8 +7,12 @@
 
 #include "regex_internal.h"
 
+/* POSIX <newline> is LF alone.  CR is an ordinary character: `.` matches it
+ * and a negated bracket expression under REG_NEWLINE still matches it, as
+ * glibc, FreeBSD 14.4 and NetBSD 10.1 all do.  Counting CR here made
+ * `a.c` fail against "a\rc". */
 int regex_is_newline(uint32_t cp) {
-    return cp == '\n' || cp == '\r';
+    return cp == '\n';
 }
 
 uint32_t regex_ascii_tolower(uint32_t cp) {

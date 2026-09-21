@@ -1276,6 +1276,19 @@ static frag frag_none(void) {
  * nothing mandatory to emit but still need a real start state -- frag_none()
  * would leave frag.start NULL and the NULL is only noticed later, when
  * dfa_build() dereferences prog->start. */
+/* What `.` refuses to match.  POSIX: `.` matches any character except NUL;
+ * only REG_NEWLINE (REGEX_FLAG_NEWLINE) additionally excludes <newline>, and
+ * <newline> means LF alone -- CR is an ordinary character.  This used to call
+ * regex_is_newline() with no flag test, so `.` matched neither \n nor \r
+ * regardless of flags, and `a.c` did not match "a\rc" on a library where
+ * glibc, FreeBSD and NetBSD all do. */
+static int dot_rejects(unsigned flags, uint32_t cp) {
+    if (flags & REGEX_FLAG_DOTALL) {
+        return 0;
+    }
+    return (flags & REGEX_FLAG_NEWLINE) && cp == '\n';
+}
+
 static frag frag_empty(nfa_prog *prog) {
     frag f;
     nfa_state *s = nfa_state_new(prog, NFA_EPSILON);
@@ -1834,7 +1847,7 @@ static void dfa_move(nfa_prog *prog, uint8_t *set, size_t pos, const char *text,
                 }
                 break;
             case NFA_DOT:
-                if ((flags & REGEX_FLAG_DOTALL) || !regex_is_newline(cp)) {
+                if (!dot_rejects(flags, cp)) {
                     if (s->out) {
                         epsilon_closure(prog, next, (size_t)s->out->id, pos, text, text_len, flags, 1);
                     }
@@ -2207,7 +2220,7 @@ static ssize_t nfa_capture_match(nfa_prog *prog, const regex_t *re, const char *
                     }
                     break;
                 case NFA_DOT:
-                    if ((re->flags & REGEX_FLAG_DOTALL) || !regex_is_newline(cp)) {
+                    if (!dot_rejects(re->flags, cp)) {
                         if (!add_state(&nlist, s->out, caps, cap_count, list_id, local_pos + advance,
                                        text, text_len, re->flags, out_err)) {
                             free(best_match_caps);
@@ -2500,7 +2513,7 @@ static int nfa_bt(bt_ctx *c, nfa_state *s, size_t pos, size_t depth) {
             if (pos >= c->len || !bt_decode(c, pos, &cp, &adv)) {
                 return 0;
             }
-            if (!(c->flags & REGEX_FLAG_DOTALL) && regex_is_newline(cp)) {
+            if (dot_rejects(c->flags, cp)) {
                 return 0;
             }
             pos += adv;

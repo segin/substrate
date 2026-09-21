@@ -147,3 +147,33 @@ int test_bol_dominance(void) {
     }
     return 0;
 }
+
+/* What `.` may refuse to match.  POSIX: only REG_NEWLINE excludes <newline>,
+ * and <newline> is LF alone.  `.` used to reject both LF and CR regardless of
+ * flags, so `a.c` matched neither "a\nc" nor "a\rc". */
+int test_dot_newline(void) {
+    static const struct {
+        const char *subject;
+        int         cflags_newline;
+        int         should_match;
+    } cases[] = {
+        { "a\nc", 0, 1 },   /* no REG_NEWLINE: `.` matches LF */
+        { "a\nc", 1, 0 },   /* REG_NEWLINE: it does not */
+        { "a\rc", 0, 1 },   /* CR is an ordinary character ... */
+        { "a\rc", 1, 1 },   /* ... even under REG_NEWLINE */
+        { "abc",  0, 1 },
+        { "abc",  1, 1 },
+    };
+    size_t i;
+
+    for (i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
+        regex_t re;
+        int cf = REG_EXTENDED | (cases[i].cflags_newline ? REG_NEWLINE : 0);
+        int rc = regcomp(&re, "a.c", cf);
+        TEST_ASSERT(rc == 0);
+        int er = regexec(&re, cases[i].subject, 0, NULL, 0);
+        TEST_ASSERT((er == 0) == (cases[i].should_match != 0));
+        regfree(&re);
+    }
+    return 0;
+}

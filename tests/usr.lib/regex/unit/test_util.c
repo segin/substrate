@@ -113,7 +113,11 @@ int test_util_utf8_decode(void) {
 
 int test_util_is_newline(void) {
     TEST_ASSERT(regex_is_newline('\n') != 0);
-    TEST_ASSERT(regex_is_newline('\r') != 0);
+    /* CR is NOT a newline.  POSIX <newline> is LF alone, and glibc,
+     * FreeBSD 14.4 and NetBSD 10.1 all match "a\rc" against `a.c`.
+     * This assertion used to demand the opposite, which is why the
+     * suite stayed green while `.` could not match a carriage return. */
+    TEST_ASSERT(regex_is_newline('\r') == 0);
     TEST_ASSERT(regex_is_newline(' ') == 0);
     TEST_ASSERT(regex_is_newline('\t') == 0);
     TEST_ASSERT(regex_is_newline('\v') == 0);
