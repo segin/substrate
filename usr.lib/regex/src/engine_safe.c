@@ -1965,6 +1965,24 @@ static void dfa_free(dfa_prog *dfa) {
     free(dfa);
 }
 
+/* Throw away a filled lazy-DFA cache and start a fresh one.
+ *
+ * The state table hangs off the COMPILED pattern and is shared by every match
+ * made with it, so once some pathological subject fills it to
+ * limits.max_states every later subject failed too -- results depended on the
+ * ORDER the subjects were presented in.  Rebuilding after a bail-out keeps
+ * the failure local to the subject that caused it.
+ *
+ * On allocation failure the old table is kept: that is no worse than before. */
+static void dfa_reset(safe_regex *sre, size_t max_states) {
+    dfa_prog *fresh = dfa_build(sre->nfa, sre->flags, max_states);
+    if (!fresh) {
+        return;
+    }
+    dfa_free(sre->dfa);
+    sre->dfa = fresh;
+}
+
 static int dfa_step(nfa_prog *prog, dfa_prog *dfa, int state_id, size_t pos,
                     const char *text, size_t text_len, uint32_t cp, unsigned flags,
                     uint8_t *scratch_set, size_t scratch_cap) {
@@ -2468,6 +2486,10 @@ static ssize_t safe_regex_match_internal(const regex_t *re, const char *text, si
             if (out_err) {
                 *out_err = REGEX_ERR_COMPILE_LIMIT;
             }
+            /* Do not leave the shared table full: the next subject would fail
+             * too, and whether a subject matches would depend on what came
+             * before it. */
+            dfa_reset(sre, re->limits.max_states);
             return -REGEX_ERR_COMPILE_LIMIT;
         }
         if (ok) {

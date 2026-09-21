@@ -52,6 +52,17 @@ def body(g, s):
     s.check_rc("engine failure is not a silent no-match",
                0 if (rc == 2 or rc == 0) else 1, 0)
 
+    # The DFA cache lives on the compiled pattern, so a subject that fills it
+    # used to poison every LATER subject: the same file gave a different count
+    # depending on whether the pathological line came first or last.
+    longfirst = longline + "\n" + ("ab" * 8 + "abbbbbbbbbbbbbbc\n") * 5
+    longlast = ("ab" * 8 + "abbbbbbbbbbbbbbc\n") * 5 + longline + "\n"
+    d3, p3 = make_files(first=longfirst, last=longlast)
+    _, out_first, _ = g.run(["-cE", "^(a|b)*a(a|b){14}c", p3["first"]])
+    _, out_last, _ = g.run(["-cE", "^(a|b)*a(a|b){14}c", p3["last"]])
+    s.check("match count does not depend on line order",
+            out_first.strip(), out_last.strip())
+
     # Count with no matches is 0, not absent.
     s.check("zero count", g.run(["-c", "zzz"], stdin="a\nb\n")[1], "0\n")
 
