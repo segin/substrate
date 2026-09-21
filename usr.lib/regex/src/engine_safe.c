@@ -538,6 +538,7 @@ static regex_node *parse_charclass(parser *p) {
     uint32_t lo;
     uint32_t hi;
     uint8_t next;
+    int first_item;
 
     parser_get(p);
     if (parser_at_end(p)) {
@@ -557,7 +558,17 @@ static regex_node *parse_charclass(parser *p) {
     }
     cc->negated = negate;
 
-    while (!parser_at_end(p) && parser_peek(p) != ']') {
+    /* POSIX: a `]` in the FIRST position of a bracket expression -- right
+     * after `[` or `[^` -- is a literal member, not the terminator.  The loop
+     * below stops at `]`, so without this `[]]` parsed as an empty class
+     * followed by a stray `]`, and an empty class matches nothing, making
+     * `[]]`, `[^]]` and friends dead for every input.  Letting the first
+     * iteration through the normal item parser also keeps `[]-a]` working as
+     * the range ]..a rather than three separate members. */
+    first_item = 1;
+
+    while (!parser_at_end(p) && (first_item || parser_peek(p) != ']')) {
+        first_item = 0;
         if (parse_posix_class(p, cc)) {
             if (p->err != REGEX_OK) {
                 break;

@@ -224,3 +224,35 @@ int test_bre_ere_repeat(void) {
     }
     return 0;
 }
+
+/* Leading `]` in a bracket expression.  Regression test: the item loop
+ * stopped at `]` before consuming anything, so `[]]` parsed as an empty
+ * class plus a stray `]`.  An empty class matches nothing, so `[]]`,
+ * `[^]]` and `[]a]` were dead for every input while still compiling OK. */
+int test_bracket_leading_rbracket(void) {
+    static const struct {
+        const char *pattern;
+        const char *subject;
+        int         should_match;
+    } cases[] = {
+        { "[]]",   "x]y", 1 },
+        { "[^]]",  "x",   1 },
+        { "[^]]",  "]",   0 },
+        { "[]a]",  "a",   1 },
+        { "[]a]",  "]",   1 },
+        { "[]-a]", "_",   1 },   /* the literal ] can start a range */
+        { "[a]]",  "a]",  1 },   /* ordinary: class {a} then literal ] */
+        { "[abc]", "xbz", 1 },
+    };
+    size_t i;
+
+    for (i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
+        regex_t re;
+        int rc = regcomp(&re, cases[i].pattern, REG_EXTENDED);
+        TEST_ASSERT(rc == 0);
+        int er = regexec(&re, cases[i].subject, 0, NULL, 0);
+        TEST_ASSERT((er == 0) == (cases[i].should_match != 0));
+        regfree(&re);
+    }
+    return 0;
+}
