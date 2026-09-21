@@ -177,3 +177,50 @@ int test_dot_newline(void) {
     }
     return 0;
 }
+
+/* BRE vs ERE repetition syntax.  Regression test: `+`, `?` and `{m,n}` were
+ * treated as operators in BOTH dialects, so in the BRE that grep uses by
+ * default `a\{3\}` and `a\+` matched nothing and a literal `a+b` did not
+ * match "a+b". */
+int test_bre_ere_repeat(void) {
+    static const struct {
+        const char *pattern;
+        int         extended;
+        const char *subject;
+        int         should_match;
+        int         eo;
+    } cases[] = {
+        /* BRE: the operators are backslash-spelled ... */
+        { "a\\{3\\}",  0, "aaaa", 1, 3 },
+        { "a\\{2,\\}", 0, "aaaa", 1, 4 },
+        { "a\\+",      0, "aaa",  1, 3 },
+        { "a\\?",      0, "ab",   1, 1 },
+        { "a*",        0, "aaa",  1, 3 },   /* `*` is an operator in both */
+        /* ... and the bare forms are ordinary characters. */
+        { "a+b",       0, "a+b",  1, 3 },
+        { "a?b",       0, "a?b",  1, 3 },
+        { "a{3}",      0, "a{3}", 1, 4 },
+        /* ERE: the bare forms are the operators. */
+        { "a{3}",      1, "aaaa", 1, 3 },
+        { "a+",        1, "aaa",  1, 3 },
+        { "a?",        1, "b",    1, 0 },
+    };
+    size_t i;
+
+    for (i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
+        regex_t re;
+        regmatch_t m[1];
+        int rc = regcomp(&re, cases[i].pattern,
+                         cases[i].extended ? REG_EXTENDED : 0);
+        TEST_ASSERT(rc == 0);
+        int er = regexec(&re, cases[i].subject, 1, m, 0);
+        if (cases[i].should_match) {
+            TEST_ASSERT(er == 0);
+            TEST_ASSERT(m[0].rm_eo == cases[i].eo);
+        } else {
+            TEST_ASSERT(er != 0);
+        }
+        regfree(&re);
+    }
+    return 0;
+}

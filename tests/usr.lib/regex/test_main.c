@@ -6,6 +6,7 @@ int test_api_match(void);
 int test_repeat_zero_min(void);
 int test_bol_dominance(void);
 int test_dot_newline(void);
+int test_bre_ere_repeat(void);
 int test_api_split_free(void);
 int test_util_ascii_tolower(void);
 int test_util_toupper(void);
@@ -38,6 +39,7 @@ int main(void) {
     failures += test_repeat_zero_min();
     failures += test_bol_dominance();
     failures += test_dot_newline();
+    failures += test_bre_ere_repeat();
     failures += test_api_split_free();
     failures += test_util_ascii_tolower();
     failures += test_util_toupper();

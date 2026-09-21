@@ -966,6 +966,7 @@ static regex_node *parse_repeat(parser *p) {
     size_t max = 0;
     int has_max = 0;
     int max_set = 0;
+    int esc = 0;
 
     if (!atom) {
         return NULL;
@@ -976,7 +977,28 @@ static regex_node *parse_repeat(parser *p) {
     }
 
     c = parser_peek(p);
+
+    /* BRE vs ERE repetition syntax.  POSIX makes `+` `?` and `{m,n}` ordinary
+     * characters in a BRE -- the operators are spelled `\+` `\?` and
+     * `\{m,n\}` -- while an ERE spells them bare.  `*` is an operator in
+     * both.  This used to apply the ERE spelling unconditionally, so in the
+     * BRE that grep uses BY DEFAULT `a\{3\}` and `a\+` matched nothing at
+     * all, and a literal `a+b` did not match "a+b". */
+    if (!p->extended && c == '\\' && p->pos + 1 < p->len) {
+        uint8_t nx = (uint8_t)p->pattern[p->pos + 1];
+        if (nx == '+' || nx == '?' || nx == '{') {
+            esc = 1;
+            c = nx;
+        }
+    }
+    if (!p->extended && !esc && (c == '+' || c == '?' || c == '{')) {
+        return atom;            /* ordinary character in a BRE */
+    }
+
     if (c == '*' || c == '+' || c == '?') {
+        if (esc) {
+            parser_get(p);      /* the backslash */
+        }
         parser_get(p);
         if (c == '*') {
             n = node_new(NODE_STAR);
@@ -996,6 +1018,9 @@ static regex_node *parse_repeat(parser *p) {
 
     if (c == '{') {
         size_t save = p->pos;
+        if (esc) {
+            parser_get(p);      /* the backslash of \{ */
+        }
         parser_get(p);
         if (parser_at_end(p) || parser_peek(p) < '0' || parser_peek(p) > '9') {
             p->pos = save;
@@ -1025,7 +1050,14 @@ static regex_node *parse_repeat(parser *p) {
                 max_set = 1;
             }
         }
-        if (parser_at_end(p) || parser_get(p) != '}') {
+        if (esc) {
+            /* BRE closes the interval with \} */
+            if (parser_at_end(p) || parser_get(p) != '\\' ||
+                parser_at_end(p) || parser_get(p) != '}') {
+                p->pos = save;
+                return atom;
+            }
+        } else if (parser_at_end(p) || parser_get(p) != '}') {
             p->pos = save;
             return atom;
         }
