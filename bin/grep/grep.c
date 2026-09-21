@@ -129,12 +129,24 @@ static void emit_colored(struct grep_ctx *g, const char *data, size_t len)
         fwrite(data + pos, 1, len - pos, stdout);
 }
 
+/* The byte that follows a file name in the output.  -Z replaces it with NUL
+ * so names containing newlines, colons or spaces survive a pipe into
+ * `xargs -0` (REQ-GREP-106).  Only the file name's separator changes: the
+ * line-number and byte-offset separators keep their usual character, which
+ * is what GNU grep does. */
+static char name_sep(const struct grep_ctx *g, char sep)
+{
+    return g->null_out ? '\0' : sep;
+}
+
 static void emit_prefix(struct run *r, const char *name, size_t lineno,
                         long offset, char sep)
 {
     struct grep_ctx *g = r->g;
-    if (r->show_names)
-        printf("%s%c", name, sep);
+    if (r->show_names) {
+        fputs(name, stdout);
+        putchar(name_sep(g, sep));
+    }
     if (g->line_number)
         printf("%zu%c", lineno, sep);
     if (g->byte_offset)
@@ -339,22 +351,28 @@ done:
         return file_match ? 1 : 0;
 
     if (g->files_with) {
-        if (file_match)
-            printf("%s%c", name, g->delim);
+        if (file_match) {
+            fputs(name, stdout);
+            putchar(name_sep(g, (char)g->delim));
+        }
         return file_match ? 1 : 0;
     }
     if (g->files_without) {
-        if (!file_match)
-            printf("%s%c", name, g->delim);
+        if (!file_match) {
+            fputs(name, stdout);
+            putchar(name_sep(g, (char)g->delim));
+        }
         return file_match ? 1 : 0;
     }
     if (g->count) {
         long c = g->only_matching ? match_total : sel_lines;
         if (g->max_count >= 0 && c > g->max_count)
             c = g->max_count;
-        if (r->show_names)
-            printf("%s%c%ld%c", name, ':', c, g->delim);
-        else
+        if (r->show_names) {
+            fputs(name, stdout);
+            putchar(name_sep(g, ':'));
+            printf("%ld%c", c, g->delim);
+        } else
             printf("%ld%c", c, g->delim);
         return file_match ? 1 : 0;
     }

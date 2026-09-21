@@ -88,6 +88,28 @@ def body(g, s):
             g.run(["-z", "hit"], stdin="r1hit\x00r2miss\x00")[1],
             "r1hit\x00")
 
+    # -Z / --null: a NUL replaces the character that follows a FILE NAME.
+    # The line-number and byte-offset separators keep their usual character,
+    # which is what GNU grep does and what `xargs -0` pipelines rely on.
+    d2, p2 = make_files(za="alpha\nbeta\n", zb="alpha\n", zc="nope\n")
+    s.check("-Z -l NUL-terminates names",
+            g.run(["-lZ", "alpha", p2["za"], p2["zb"]])[1],
+            p2["za"] + "\x00" + p2["zb"] + "\x00")
+    s.check("-Z -L NUL-terminates names",
+            g.run(["-LZ", "alpha", p2["za"], p2["zc"]])[1],
+            p2["zc"] + "\x00")
+    s.check("-Z -c NUL after name, count unchanged",
+            g.run(["-cZ", "alpha", p2["za"], p2["zb"]])[1],
+            p2["za"] + "\x001\n" + p2["zb"] + "\x001\n")
+    s.check("-Z -H keeps the line-number colon",
+            g.run(["-HZn", "alpha", p2["za"]])[1],
+            p2["za"] + "\x001:alpha\n")
+    s.check("--null is the long spelling",
+            g.run(["--null", "-l", "alpha", p2["zb"]])[1],
+            p2["zb"] + "\x00")
+    s.check_rc("-Z alone does not change exit status",
+               g.run(["-Z", "alpha", p2["zb"]])[0], 0)
+
     # --color
     out = g.run(["--color=always", "foo"], stdin="xfooy\n")[1]
     s.check("--color wraps match",

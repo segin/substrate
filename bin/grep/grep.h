@@ -88,8 +88,9 @@ struct grep_ctx {
     /* binary (REQ-GREP-090..094) */
     enum grep_binary binary;
 
-    /* delimiters / color / info (REQ-GREP-100..105) */
+    /* delimiters / color / info (REQ-GREP-100..106) */
     bool null_data;             /* -z */
+    bool null_out;              /* -Z: NUL after each file name (REQ-106) */
     int  delim;                 /* '\n' or '\0' */
     enum grep_color color;
     bool color_active;          /* resolved against isatty */

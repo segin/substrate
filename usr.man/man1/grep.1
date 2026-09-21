@@ -204,6 +204,23 @@ Assume binary files are of the given
 Treat input and output as sequences of lines terminated by a NUL byte instead
 of a newline.
 .TP
+.BR \-Z ", " \-\-null
+Write a NUL byte after each file name instead of the character that would
+normally follow it: the newline after a name printed by
+.BR \-l " or " \-L ,
+and the colon after a name printed by
+.BR \-c " or as a match prefix."
+Line-number and byte-offset separators are unaffected.  This makes the output
+unambiguous for names containing newlines or colons, and is what
+.BR xargs (1)
+expects with its
+.B \-0
+option:
+.IP
+.EX
+grep \-lZ PATTERN . \-r | xargs \-r0 rm
+.EE
+.TP
 .BR \-\-color [ =\fIWHEN\fR ], \-\-colour [ =\fIWHEN\fR ]
 Surround matched text with an ANSI color escape.
 .I WHEN

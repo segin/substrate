@@ -202,6 +202,7 @@ demonstration}.
 | REQ-GREP-103 | WHEN `--help` is given, the system shall write usage to stdout and exit 0. | GNU/BSD | T |
 | REQ-GREP-104 | WHEN `-V`/`--version` is given, the system shall write version information to stdout and exit 0. | GNU/BSD | T |
 | REQ-GREP-105 | The system shall accept the shorthand `-NUM` as equivalent to `-C NUM`. | GNU/BSD | T |
+| REQ-GREP-106 | WHERE `-Z`/`--null` is active, the system shall terminate each output file name with a NUL byte instead of the character that would otherwise follow it, leaving the line-number and byte-offset separators unchanged. | GNU | T |
 
 ### 3.11 Context control
 

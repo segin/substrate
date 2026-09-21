@@ -72,6 +72,8 @@ void grep_print_help(const char *progname)
         "\nMiscellaneous:\n"
         "  -s, --no-messages         suppress error messages\n"
         "  -z, --null-data           a data line ends in 0 byte, not newline\n"
+        "  -Z, --null                print 0 byte after file names, not the\n"
+        "                            usual separator (for `xargs -0')\n"
         "      --help                display this help and exit\n"
         "  -V, --version             display version information and exit\n"
         "\nOutput control:\n"
@@ -217,6 +219,7 @@ static const struct longopt longopts[] = {
     { "text",              0, 'a' },
     { "binary-files",      1, LO_BINARY_FILES },
     { "null-data",         0, 'z' },
+    { "null",              0, 'Z' },
     { "color",             2, LO_COLOR },
     { "colour",            2, LO_COLOR },
     { "after-context",     1, 'A' },
@@ -260,6 +263,7 @@ static int apply_option(struct grep_ctx *g, int val, const char *arg,
     case 'a': g->binary = GREP_BIN_TEXT; break;
     case 'I': g->binary = GREP_BIN_WITHOUT_MATCH; break;
     case 'z': g->null_data = true; g->delim = '\0'; break;
+    case 'Z': g->null_out = true; break;
     case 'r': case 'R':
         g->recursive = true; g->diraction = GREP_DIR_RECURSE; break;
     case 'V': g->show_version = true; break;
