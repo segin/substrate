@@ -1,19 +1,23 @@
 # Substrate
 
-Substrate is a Unix-like operating system for x86 (32-bit i386 primary,
-x86-64 in progress). It is a whole system, not just a kernel: the tree
-contains the kernel, a C library and dynamic linker, base userland, a
-patched GNU toolchain that runs *on* Substrate, and a large set of ported
-third-party software (zsh, ncurses, OpenSSL, an X11 client stack, SDL2 with
-an audio backend, the PsyMP3 player, gdb, …).
+Substrate is a Unix-like operating system for 32-bit x86 (i386). It is a
+whole system, not just a kernel: the tree contains the kernel, a C library
+and dynamic linker, the base userland, a patched GNU toolchain that runs
+*on* Substrate, and 220 third-party ports carried as patch series against
+upstream tarballs — among them zsh, ncurses, OpenSSL, Python and Perl, the
+X11 client stack with the `Xfbdev` framebuffer server, the SDL3 family,
+gdb, and two desktop environments: CDE and TDE (Trinity). An x86-64 port
+exists only as a stub under `sys/arch/x86_64`.
 
-Recent work brings up audio and multimedia playback (a Sun-compatible
-in-kernel audio stack behind AC'97 / Intel HDA backends, exposed through
-SDL2's `/dev/audio` backend and the PsyMP3 music player), substantially
-faster local X (a larger AF_UNIX socket buffer lifts an SDL UI from sub-1
-to ~23 fps), and the toolchain pieces for C++ exceptions across shared
-libraries (`dl_iterate_phdr` in the dynamic linker plus a shared `libgcc_s`;
-a final toolchain rebuild is still pending).
+The toolchain self-hosts: stage 1 cross-compiles from a Linux host, and the
+stage-2 GCC, binutils and gdb run on Substrate itself — gdb debugging native
+processes through the libsys `ptrace` bridge. C++ works across shared library
+boundaries end to end (a shared `libgcc_s` plus `PT_GNU_EH_FRAME` unwinding
+via `dl_iterate_phdr` in the dynamic linker, so a `throw` inside a `.so` is
+caught in the executable), which is what makes the large C++ ports viable.
+Graphics and audio are up: a Sun-compatible in-kernel audio stack behind
+AC'97 and Intel HDA backends, exposed through `/dev/audio`, and SDL3 with
+`sdl2-compat` and `sdl12-compat` layered over it, driving the PsyMP3 player.
 
 A distinguishing goal is **binary compatibility via exec personalities**: the
 kernel routes each executable to a loader from its ELF OSABI byte (or, for
