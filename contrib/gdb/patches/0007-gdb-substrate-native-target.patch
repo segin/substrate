@@ -1,0 +1,27 @@
+--- a/gdb/configure.host
++++ b/gdb/configure.host
+@@ -109,6 +109,7 @@
+ 			;;
+ i[34567]86-*-msdosdjgpp*) gdb_host=go32 ;;
+ i[34567]86-*-linux*)	gdb_host=linux ;;
++i[34567]86-*-substrate*)	gdb_host=substrate ;;
+ i[34567]86-*-gnu*)	gdb_host=i386gnu ;;
+ i[34567]86-*-openbsd*)	gdb_host=obsd ;;
+ i[34567]86-*-solaris2* | x86_64-*-solaris2*)
+--- a/gdb/configure.nat
++++ b/gdb/configure.nat
+@@ -74,6 +74,14 @@
+     obsd*)
+ 	NATDEPFILES='fork-child.o nat/fork-inferior.o inf-ptrace.o'
+ 	;;
++    substrate*)
++	# Substrate debugs natively through its own ptrace(2); substrate-nat.o
++	# supplies the GPR transfer on top of the generic inf-ptrace target,
++	# which is what provides attach/detach/resume/wait.  Without this case
++	# NATDEPFILES stays empty, gdb links with NO native target at all, and
++	# every attach fails with "Don't know how to attach".
++	NATDEPFILES='fork-child.o nat/fork-inferior.o inf-ptrace.o substrate-nat.o'
++	;;
+     cygwin*)
+ 	NATDEPFILES='x86-nat.o nat/x86-dregs.o windows-nat.o nat/windows-nat.o'
+ 	;;

@@ -22,6 +22,13 @@ if [ ! -x "${SRCDIR}/configure" ]; then
 fi
 
 # --- configure + build ----------------------------------------------------
+# The native target.  gdb's configure.nat decides NATDEPFILES from
+# ${gdb_host}, and the patch series adds a substrate case naming
+# substrate-nat.o -- but the source has to be IN the tree for the build to
+# find it.  Copying it here (rather than carrying it as a patch) keeps it
+# editable as an ordinary .c file.
+cp "${SUBSTRATE_TOP}/contrib/gdb/substrate-nat.c" "${SRCDIR}/gdb/substrate-nat.c"
+
 mkdir -p "${OBJDIR}"
 cd "${OBJDIR}"
 # Exported, not passed as configure arguments: the top-level configure does
@@ -77,7 +84,11 @@ fi
 # would have had on the TARGET, which of course is not there on the builder.
 rm -f "${SR}/lib/libgmp.la" "${SR}/lib/libmpfr.la" \
       "${SR}/lib/libiconv.la" "${SR}/lib/libcharset.la"
-make all-gdb -k CXXFLAGS="-g -O2 -fpermissive"
+# No -k here.  It used to be `make all-gdb -k`, which keeps going after a
+# failed compile and still links a gdb from whatever did build -- so a
+# native target that failed to compile produced a working-looking gdb that
+# simply could not attach.  Let a broken build fail.
+make all-gdb CXXFLAGS="-g -O2 -fpermissive"
 
 # --- strip + OSABI-stamp + stage (8 MiB, NOT the 154 MiB -g binary) --------
 mkdir -p "${DESTDIR}/usr/bin"
