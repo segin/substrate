@@ -110,6 +110,9 @@ static inline void     tcp_unlock(uint32_t f) { intr_restore(f); }
  * Generous enough not to break a slow-but-live peer, short enough that the
  * leak is bounded. */
 #define TCP_FIN_WAIT_2_TICKS (60 * HZ)   /* 60s */
+/* TCP-SM-01: how long CLOSING or LAST_ACK may sit with nothing left to
+ * retransmit before the timer completes the close itself. */
+#define TCP_CLOSING_TICKS    TCP_MSL_TICKS
 #define TCP_DUP_ACK_FAST   3             /* fast-retx trigger */
 /* Safety-net poll interval for the blocking recv/accept/connect waits.
  * sched_sleep() is not race-free against sched_wakeup() — a wakeup that
@@ -182,6 +185,7 @@ typedef struct tcp_pcb {
     /* TCP-05: deadline for a FIN_WAIT_2 whose peer never closes its half.
      * 0 while not in FIN_WAIT_2. */
     uint64_t  fin_wait2_until;
+    uint64_t  closing_until;  /* TCP-SM-01: CLOSING/LAST_ACK reaper deadline */
     /* SO_ERROR (cleared by getsockopt).  */
     int       so_error;
     /* Backlog for LISTEN sockets */
@@ -487,6 +491,29 @@ static void tcp_timer_tick(uint64_t now) {
             now >= p->fin_wait2_until) {
             tcp_kill_pcb(p, ETIMEDOUT);
             continue;
+        }
+        /*
+         * TCP-SM-01: CLOSING and LAST_ACK are completed only by the peer's
+         * ACK of our FIN.  Once that FIN has left the unacked queue there is
+         * nothing for the retransmit check below to do, so if the ACK that
+         * should complete the close is ever missed, no reaper reaches the
+         * PCB.  Bound it: arm a deadline the first time we see the queue
+         * empty, and complete the close when it expires.  Not immediately --
+         * tcp_close() publishes the state before it queues the FIN.
+         */
+        if ((p->state == TCP_CLOSING || p->state == TCP_LAST_ACK) &&
+            !p->unacked_head) {
+            if (!p->closing_until) {
+                p->closing_until = now + TCP_CLOSING_TICKS;
+            } else if (now >= p->closing_until) {
+                if (p->state == TCP_LAST_ACK) {
+                    tcp_kill_pcb(p, 0);
+                } else {
+                    p->state = TCP_TIME_WAIT;
+                    p->time_wait_until = now + TCP_TIME_WAIT_TICKS;
+                }
+                continue;
+            }
         }
         if (p->state == TCP_TIME_WAIT && now >= p->time_wait_until) {
             /* Drop to CLOSED now; freed on the next tick once no RX
@@ -928,11 +955,21 @@ static void tcp_in_established(tcp_pcb_t *p, uint32_t seq, uint32_t ack,
      * retransmitted, got silence, and aborted with ETIMEDOUT instead of
      * closing cleanly.
      */
+    /*
+     * TCP-SM-01: and it must NOT return here.  The segment that retransmits
+     * the peer's FIN is often also the one that acknowledges OUR FIN -- in a
+     * simultaneous close, or when the peer's first FIN crossed our ACK.
+     * Returning skipped the CLOSING -> TIME_WAIT and LAST_ACK -> CLOSED
+     * tests below, and with the unacked queue now empty the timer had
+     * nothing to retransmit either, so one lost ACK wedged the PCB, its
+     * ring and its port forever.  Fall through: the in-order FIN block
+     * below cannot match (rcv_nxt is already past this FIN), and the
+     * completion tests can.
+     */
     if ((flags & TCP_FIN) && seq + (uint32_t)dlen + 1u == p->rcv_nxt) {
         if (p->state == TCP_TIME_WAIT)
             p->time_wait_until = get_ticks() + TCP_TIME_WAIT_TICKS;
         tcp_send_ctl(p, TCP_ACK);
-        return;
     }
 
     if ((flags & TCP_FIN) && seq + (uint32_t)dlen == p->rcv_nxt) {
