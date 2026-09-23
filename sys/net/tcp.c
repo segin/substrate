@@ -1410,12 +1410,15 @@ static void tcp_in_established(tcp_pcb_t *p, uint32_t seq, uint32_t ack,
      * of being dropped for the peer to retransmit after an RTO. */
     if (can_rx && (dlen || (flags & TCP_FIN)) &&
         (int32_t)(seq - p->rcv_nxt) > 0) {
-        tcp_ooo_insert(p, seq, payload, dlen, flags & TCP_FIN);
+        if (!p->shut_rd)                    /* TCP-WIN-10: nothing to keep */
+            tcp_ooo_insert(p, seq, payload, dlen, flags & TCP_FIN);
         tcp_send_ctl(p, TCP_ACK);
         return;
     }
     if (dlen && seq == p->rcv_nxt && can_rx) {
-        uint32_t accept_n = tcp_rx_put(p, payload, dlen);
+        /* TCP-WIN-10: after SHUT_RD, consume without storing. */
+        uint32_t accept_n = p->shut_rd ? (uint32_t)dlen
+                                       : tcp_rx_put(p, payload, dlen);
         p->rcv_nxt  += accept_n;
         /* TCP-WIN-08: the gap this filled may release queued segments --
          * and a FIN queued behind them. */
@@ -2501,7 +2504,22 @@ int tcp_shutdown_wr(tcp_pcb_t *p) {
  */
 int tcp_shutdown_rd(tcp_pcb_t *p) {
     if (!p) return -ENOTCONN;
+    /* TCP-WIN-10: nothing will ever read the ring again, so empty it (and
+     * the reassembly queue) and from now on acknowledge and discard what
+     * arrives, as BSD does.  The data used to be buffered regardless,
+     * pinning the advertised window at zero once the ring filled -- the
+     * peer's sends then stalled for good. */
+    uint32_t f = tcp_lock();
     p->shut_rd = 1;
+    p->rx_count = 0;
+    p->rx_tail  = p->rx_head;
+    tcp_ooo_free_all(p);
+    int reopen = p->last_adv_wnd < TCP_RING_LEN &&
+                 (p->state == TCP_ESTABLISHED || p->state == TCP_FIN_WAIT_1 ||
+                  p->state == TCP_FIN_WAIT_2);
+    tcp_unlock(f);
+    if (reopen)
+        tcp_send_ctl(p, TCP_ACK);       /* announce the reopened window */
     sched_wakeup(p->recv_chan);
     return 0;
 }

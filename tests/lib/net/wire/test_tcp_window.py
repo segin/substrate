@@ -42,6 +42,9 @@ it guards.
     partial-ack TCP-WIN-09: after the peer acknowledges part of a segment,
                 the retransmission starts at SND.UNA and carries only the
                 unacknowledged octets.
+    shut-rd     TCP-WIN-10: after shutdown(SHUT_RD) arriving data is
+                acknowledged and discarded, so the window stays open: the
+                peer can send more than a ring's worth.
 
 Run from the repo root after building sys/ and wireguest:
     python3 tests/lib/net/wire/test_tcp_window.py [case...]
@@ -345,6 +348,20 @@ def case_partial_ack():
         return None, w
 
 
+def case_shut_rd():
+    with Wire.boot('connect 10.0.2.2 %d shutrd sleep:60' % PORT) as w:
+        syn, err = handshake(w)
+        if err:
+            return err, w
+        gp, g = syn.sport, syn.seq + 1
+        if not w.wait_serial('guest: shutrd ok', 10):
+            return 'shutdown(SHUT_RD) failed: %s' % w.serial()[-200:], w
+        nxt = fill(w, gp, g, 40000)
+        if nxt != PISS + 1 + 40000:
+            return 'window closed after %d octets despite SHUT_RD' % (nxt - PISS - 1), w
+        return None, w
+
+
 CASES = (('persist', case_persist),
          ('nb-persist', case_nb_persist),
          ('reopen', case_reopen),
@@ -353,7 +370,8 @@ CASES = (('persist', case_persist),
          ('sender-sws', case_sender_sws),
          ('receiver-sws', case_receiver_sws),
          ('reorder', case_reorder),
-         ('partial-ack', case_partial_ack))
+         ('partial-ack', case_partial_ack),
+         ('shut-rd', case_shut_rd))
 
 
 def main():

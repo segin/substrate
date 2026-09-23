@@ -22,6 +22,7 @@
  *   write:TEXT   write TEXT
  *   close        close the socket
  *   shutwr       shutdown(SHUT_WR)
+ *   shutrd       shutdown(SHUT_RD)
  *   sleep:N      sleep N seconds
  *   soerror      getsockopt(SO_ERROR), reporting the value
  *   pollin       poll() for POLLIN with no timeout, reporting revents
@@ -80,6 +81,9 @@ static int do_actions(int fd, int argc, char **argv) {
             int r = close(fd);
             say("close %s rc=%ld", r < 0 ? strerror(errno) : "ok", r);
             fd = -1;
+        } else if (strcmp(a, "shutrd") == 0) {
+            int r = shutdown(fd, SHUT_RD);
+            say("shutrd %s rc=%ld", r < 0 ? strerror(errno) : "ok", r);
         } else if (strcmp(a, "shutwr") == 0) {
             int r = shutdown(fd, SHUT_WR);
             say("shutwr %s rc=%ld", r < 0 ? strerror(errno) : "ok", r);
