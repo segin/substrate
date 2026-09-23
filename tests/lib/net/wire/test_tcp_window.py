@@ -53,6 +53,11 @@ it guards.
                 user timeout) is honoured: with 3000 ms set and the peer
                 silent, the connection is aborted with ETIMEDOUT after about
                 3 s instead of retransmitting for ~2 minutes.
+    rtt         TCP-WIN-14: the RTO is derived from the measured RTT (RFC
+                6298).  With the handshake and one segment each answered
+                after 0.8 s, RTO = SRTT + 4*RTTVAR = 2.0 s; the next,
+                unacknowledged, segment is retransmitted after about that,
+                not after the fixed 1 s.
 
 Run from the repo root after building sys/ and wireguest:
     python3 tests/lib/net/wire/test_tcp_window.py [case...]
@@ -416,6 +421,36 @@ def case_user_timeout():
         return None, w
 
 
+def case_rtt():
+    with Wire.boot('connect 10.0.2.2 %d sleep:3 write:one sleep:3 write:two '
+                   'sleep:60' % PORT) as w:
+        # Every RTT is 0.8 s, the handshake's included (it is sampled too).
+        syn = w.expect(lambda s: s.flags & SYN and s.dport == PORT, 90, 'SYN')
+        if not syn:
+            return 'no SYN from guest', w
+        w.pump(0.8)
+        w.send(Seg(PORT, syn.sport, PISS, syn.seq + 1, SYN | ACK))
+        if not w.wait_serial('guest: connected', 10):
+            return 'guest did not report connected', w
+        gp, g = syn.sport, syn.seq + 1
+        d = w.expect(lambda s: s.data == b'one', 10, 'one')
+        if not d:
+            return 'no first segment', w
+        w.pump(0.8)                                   # the RTT sample
+        w.send(Seg(PORT, gp, PISS + 1, g + 3, ACK))
+        d = w.expect(lambda s: s.data == b'two', 6, 'two')
+        if not d:
+            return 'no second segment', w
+        t0 = time.time()
+        r = w.expect(lambda s: s.data == b'two', 6, 'retransmission')
+        if not r:
+            return 'no retransmission within 6 s', w
+        dt = time.time() - t0
+        if not 1.7 <= dt <= 3.5:
+            return 'retransmitted after %.2f s; want ~2.0 s from 0.8 s samples' % dt, w
+        return None, w
+
+
 CASES = (('persist', case_persist),
          ('nb-persist', case_nb_persist),
          ('reopen', case_reopen),
@@ -427,7 +462,8 @@ CASES = (('persist', case_persist),
          ('partial-ack', case_partial_ack),
          ('shut-rd', case_shut_rd),
          ('stale-wnd', case_stale_wnd),
-         ('user-timeout', case_user_timeout))
+         ('user-timeout', case_user_timeout),
+         ('rtt', case_rtt))
 
 
 def main():

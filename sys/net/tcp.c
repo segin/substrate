@@ -216,6 +216,9 @@ typedef struct tcp_pcb {
     uint8_t   snd_wl_valid;
     uint32_t  user_timeout_ms; /* TCP-WIN-13: TCP_USER_TIMEOUT, 0 = default */
     uint64_t  ut_deadline;    /* TCP-WIN-13: abort if no progress by then */
+    uint32_t  srtt8, rttvar4; /* TCP-WIN-14: RFC 6298 estimator, scaled */
+    uint32_t  rto;            /* TCP-WIN-14: current RTO in ticks, 0 = initial */
+    uint8_t   rtt_valid;
     struct ip4_txopts txo;    /* UDP-API-12: the socket's IP_TTL/IP_TOS */
     /* SO_ERROR (cleared by getsockopt).  */
     int       so_error;
@@ -503,8 +506,37 @@ static int tcp_xmit_queue(tcp_pcb_t *p, uint8_t flags,
 /* Drop every segment from the unacked FIFO whose entire seq range
  * is <= ack — i.e. the peer has confirmed they got it.  Returns
  * the number of segments freed.  */
+/*
+ * TCP-WIN-14: RFC 6298 2.2-2.3.  SRTT is kept scaled by 8 and RTTVAR by 4
+ * (the BSD fixed-point form), in ticks.  RTO = SRTT + max(G, 4*RTTVAR),
+ * clamped to [1 s, TCP_RTO_MAX_TICKS]; the timer applies its backoff on
+ * top.  The RTO used to be the fixed 1 s initial value forever, so any path
+ * with an RTT near or above a second retransmitted every segment.
+ */
+static void tcp_rtt_sample(tcp_pcb_t *p, uint32_t r) {
+    if (r == 0) r = 1;
+    if (!p->rtt_valid) {
+        p->srtt8   = r << 3;                    /* SRTT <- R */
+        p->rttvar4 = r << 1;                    /* RTTVAR <- R/2 */
+        p->rtt_valid = 1;
+    } else {
+        int32_t err = (int32_t)r - (int32_t)(p->srtt8 >> 3);
+        uint32_t aerr = err < 0 ? (uint32_t)-err : (uint32_t)err;
+        /* RTTVAR <- 3/4 RTTVAR + 1/4 |SRTT - R|; SRTT <- 7/8 SRTT + 1/8 R */
+        p->rttvar4 = p->rttvar4 - (p->rttvar4 >> 2) + aerr;
+        p->srtt8   = (uint32_t)((int32_t)p->srtt8 + err);
+    }
+    uint32_t var = p->rttvar4;                  /* 4 * RTTVAR */
+    if (var < 1) var = 1;                       /* G: one tick */
+    uint64_t rto = (uint64_t)(p->srtt8 >> 3) + var;
+    if (rto < TCP_RTO_BASE_TICKS) rto = TCP_RTO_BASE_TICKS;
+    if (rto > TCP_RTO_MAX_TICKS)  rto = TCP_RTO_MAX_TICKS;
+    p->rto = (uint32_t)rto;
+}
+
 static int tcp_unacked_prune(tcp_pcb_t *p, uint32_t ack) {
     int freed = 0;
+    uint64_t sample_tick = 0;
     while (p->unacked_head) {
         tcp_seg_t *s = p->unacked_head;
         uint32_t end = s->seq + s->dlen;
@@ -515,9 +547,15 @@ static int tcp_unacked_prune(tcp_pcb_t *p, uint32_t ack) {
         if ((int32_t)(end - ack) > 0) break;
         p->unacked_head = s->next;
         if (!p->unacked_head) p->unacked_tail = NULL;
+        /* TCP-WIN-14: Karn -- only a segment sent exactly once measures
+         * the RTT; take the newest one this ACK covers. */
+        if (s->retx == 0 && s->fast_retx == 0)
+            sample_tick = s->sent_tick;
         kfree(s, sizeof(*s) + s->dlen);
         freed++;
     }
+    if (sample_tick)
+        tcp_rtt_sample(p, (uint32_t)(get_ticks() - sample_tick));
     /* TCP-WIN-13: progress re-arms the user timeout; an empty queue has
      * none (an idle connection is never timed out, RFC 1122 4.2.3.6). */
     if (freed)
@@ -722,7 +760,7 @@ static void tcp_timer_tick(uint64_t now) {
          * retrying at a flat interval forever.  The shift is clamped: a
          * probe's retx is unbounded, and 2^6 s already exceeds the cap. */
         unsigned shift = head->retx > 6 ? 6u : (unsigned)head->retx;
-        uint64_t rto = (uint64_t)TCP_RTO_BASE_TICKS << shift;
+        uint64_t rto = (uint64_t)(p->rto ? p->rto : TCP_RTO_BASE_TICKS) << shift;   /* TCP-WIN-14 */
         if (rto > TCP_RTO_MAX_TICKS) rto = TCP_RTO_MAX_TICKS;
         if (now - head->sent_tick < rto) continue;
         if (!head->probe && head->retx >= TCP_MAX_RETX) {
