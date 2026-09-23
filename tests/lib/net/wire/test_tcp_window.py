@@ -34,6 +34,11 @@ it guards.
     receiver-sws TCP-WIN-07: after a zero window, draining 512 octets does
                 not advertise a 512-octet window; the window reopens only
                 once at least an MSS is free.
+    reorder     TCP-WIN-08: segments arriving out of order are queued, not
+                dropped.  The second segment first draws a duplicate ACK;
+                the first then completes both, acknowledged in one step,
+                and a FIN that arrived ahead of a gap is honoured once the
+                gap fills.
 
 Run from the repo root after building sys/ and wireguest:
     python3 tests/lib/net/wire/test_tcp_window.py [case...]
@@ -288,13 +293,44 @@ def case_receiver_sws():
         return None, w
 
 
+def case_reorder():
+    with Wire.boot('connect 10.0.2.2 %d readeof sleep:60' % PORT) as w:
+        syn, err = handshake(w)
+        if err:
+            return err, w
+        gp, g = syn.sport, syn.seq + 1
+        a, b, c = b'A' * 100, b'B' * 100, b'C' * 100
+        w.rx.clear()
+        w.send(Seg(PORT, gp, PISS + 101, g, ACK, data=b))           # 2nd first
+        d = w.expect(lambda s: s.flags & ACK, 2, 'dup ACK')
+        if not d or d.ack != PISS + 1:
+            return 'out-of-order segment: want a dup ACK %d, got %r' % (PISS + 1, d), w
+        w.rx.clear()
+        w.send(Seg(PORT, gp, PISS + 1, g, ACK, data=a))             # fills the gap
+        if not w.expect(lambda s: s.flags & ACK and s.ack == PISS + 201, 2, 'ACK'):
+            return 'the queued segment was not delivered with the first: %r' % w.rx, w
+        w.send(Seg(PORT, gp, PISS + 301, g, ACK | FIN, data=b'D' * 10))  # FIN early
+        w.pump(0.5)
+        w.rx.clear()
+        w.send(Seg(PORT, gp, PISS + 201, g, ACK, data=c))
+        if not w.expect(lambda s: s.flags & ACK and s.ack == PISS + 312, 2, 'ACK of FIN'):
+            return 'queued FIN not honoured when the gap filled: %r' % w.rx, w
+        if not w.wait_serial('guest: readeof', 5):
+            return 'no EOF', w
+        line = [l for l in w.serial().splitlines() if 'guest: readeof' in l][0]
+        if 'EOF total=310' not in line:
+            return 'reassembled stream: %s' % line.strip(), w
+        return None, w
+
+
 CASES = (('persist', case_persist),
          ('nb-persist', case_nb_persist),
          ('reopen', case_reopen),
          ('fast-retx', case_fast_retx),
          ('dupack', case_dupack),
          ('sender-sws', case_sender_sws),
-         ('receiver-sws', case_receiver_sws))
+         ('receiver-sws', case_receiver_sws),
+         ('reorder', case_reorder))
 
 
 def main():

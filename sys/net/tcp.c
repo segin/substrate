@@ -152,6 +152,15 @@ typedef struct tcp_seg {
     uint8_t   data[];         /* flex array; dlen bytes */
 } tcp_seg_t;
 
+/* TCP-WIN-08: one segment held for reassembly above RCV.NXT. */
+typedef struct tcp_ooo {
+    uint32_t  seq;
+    uint16_t  len;
+    uint8_t   fin;
+    struct tcp_ooo *next;
+    uint8_t   data[];
+} tcp_ooo_t;
+
 typedef struct tcp_pcb {
     int       state;
     uint32_t  laddr, raddr;        /* network byte order */
@@ -194,6 +203,9 @@ typedef struct tcp_pcb {
     uint32_t  last_adv_wnd;   /* TCP-WIN-03: window in our last segment */
     uint32_t  rcv_adv_edge;   /* TCP-WIN-07: RCV.NXT + RCV.WND advertised */
     uint8_t   rcv_adv_edge_valid;
+    tcp_ooo_t *ooo_head;      /* TCP-WIN-08: reassembly queue, by seq */
+    int       ooo_segs;
+    uint32_t  ooo_bytes;
     uint8_t   seg_wnd_same;   /* TCP-WIN-05: segment repeats the window */
     uint32_t  max_snd_wnd;    /* TCP-WIN-06: largest window the peer offered */
     struct ip4_txopts txo;    /* UDP-API-12: the socket's IP_TTL/IP_TOS */
@@ -1120,6 +1132,84 @@ static int tcp_seg_check(tcp_pcb_t *p, uint32_t *seqp, uint8_t *flagsp,
     return 1;
 }
 
+/* Copy up to `n` octets into the receive ring; returns how many fit. */
+static uint32_t tcp_rx_put(tcp_pcb_t *p, const uint8_t *data, uint32_t n) {
+    if (n > TCP_RING_LEN - p->rx_count)
+        n = TCP_RING_LEN - p->rx_count;
+    for (uint32_t i = 0; i < n; i++) {
+        p->rxbuf[p->rx_head] = data[i];
+        p->rx_head = (p->rx_head + 1) % TCP_RING_LEN;
+    }
+    p->rx_count += n;
+    return n;
+}
+
+/*
+ * TCP-WIN-08: out-of-order reassembly.  Segments that arrive above RCV.NXT
+ * (already trimmed to the window by tcp_seg_check) are kept, sorted by
+ * sequence number, until the gap below them fills.  Bounded by segment
+ * count and by one ring's worth of octets, so a peer cannot grow it; what
+ * does not fit is dropped and simply retransmitted, as before.
+ */
+#define TCP_OOO_MAX_SEGS 32
+
+static void tcp_ooo_insert(tcp_pcb_t *p, uint32_t seq, const uint8_t *data,
+                           size_t dlen, int fin) {
+    tcp_ooo_t **pp = &p->ooo_head;
+    while (*pp && (int32_t)((*pp)->seq - seq) < 0)
+        pp = &(*pp)->next;
+    if (*pp && (*pp)->seq == seq && (*pp)->len >= dlen && ((*pp)->fin || !fin))
+        return;                                     /* already have it */
+    if (p->ooo_segs >= TCP_OOO_MAX_SEGS ||
+        p->ooo_bytes + dlen > TCP_RING_LEN)
+        return;
+    tcp_ooo_t *o = (tcp_ooo_t *)kmalloc(sizeof(*o) + dlen);
+    if (!o) return;
+    o->seq  = seq;
+    o->len  = (uint16_t)dlen;
+    o->fin  = fin ? 1 : 0;
+    if (dlen) memcpy(o->data, data, dlen);
+    o->next = *pp;
+    *pp = o;
+    p->ooo_segs++;
+    p->ooo_bytes += dlen;
+}
+
+static void tcp_ooo_unlink_head(tcp_pcb_t *p) {
+    tcp_ooo_t *o = p->ooo_head;
+    p->ooo_head = o->next;
+    p->ooo_segs--;
+    p->ooo_bytes -= o->len;
+    kfree(o, sizeof(*o) + o->len);
+}
+
+/* Move every queued segment that RCV.NXT has reached into the ring.
+ * Returns 1 when a queued FIN is now in order (the caller processes it). */
+static int tcp_ooo_drain(tcp_pcb_t *p) {
+    while (p->ooo_head && (int32_t)(p->ooo_head->seq - p->rcv_nxt) <= 0) {
+        tcp_ooo_t *o = p->ooo_head;
+        uint32_t skip = p->rcv_nxt - o->seq;        /* overlap already held */
+        if (skip < o->len) {
+            uint32_t want = o->len - skip;
+            uint32_t got = tcp_rx_put(p, o->data + skip, want);
+            p->rcv_nxt += got;
+            if (got < want) return 0;               /* ring full: keep it */
+        } else if (skip > o->len) {
+            tcp_ooo_unlink_head(p);                 /* wholly stale */
+            continue;
+        }
+        int fin = o->fin;
+        tcp_ooo_unlink_head(p);
+        if (fin) return 1;
+    }
+    return 0;
+}
+
+static void tcp_ooo_free_all(tcp_pcb_t *p) {
+    while (p->ooo_head)
+        tcp_ooo_unlink_head(p);
+}
+
 static void tcp_in_established(tcp_pcb_t *p, uint32_t seq, uint32_t ack,
                                uint8_t flags, const uint8_t *payload,
                                size_t dlen) {
@@ -1298,18 +1388,27 @@ static void tcp_in_established(tcp_pcb_t *p, uint32_t seq, uint32_t ack,
      * RCV.NXT sits just past it, so text "after the FIN" looked in order
      * and was delivered to read() -- RFC 793 3.9's seventh step says to
      * ignore it. */
-    if (dlen && seq == p->rcv_nxt &&
-        (p->state == TCP_ESTABLISHED || p->state == TCP_FIN_WAIT_1 ||
-         p->state == TCP_FIN_WAIT_2)) {
-        uint32_t accept_n = dlen;
-        if (accept_n > TCP_RING_LEN - p->rx_count)
-            accept_n = TCP_RING_LEN - p->rx_count;
-        for (uint32_t i = 0; i < accept_n; i++) {
-            p->rxbuf[p->rx_head] = payload[i];
-            p->rx_head = (p->rx_head + 1) % TCP_RING_LEN;
-        }
-        p->rx_count += accept_n;
+    int can_rx = (p->state == TCP_ESTABLISHED || p->state == TCP_FIN_WAIT_1 ||
+                  p->state == TCP_FIN_WAIT_2);
+    /* TCP-WIN-08: text (or a FIN) beyond RCV.NXT is queued for reassembly
+     * and answered with an immediate duplicate ACK (RFC 5681 4.2), instead
+     * of being dropped for the peer to retransmit after an RTO. */
+    if (can_rx && (dlen || (flags & TCP_FIN)) &&
+        (int32_t)(seq - p->rcv_nxt) > 0) {
+        tcp_ooo_insert(p, seq, payload, dlen, flags & TCP_FIN);
+        tcp_send_ctl(p, TCP_ACK);
+        return;
+    }
+    if (dlen && seq == p->rcv_nxt && can_rx) {
+        uint32_t accept_n = tcp_rx_put(p, payload, dlen);
         p->rcv_nxt  += accept_n;
+        /* TCP-WIN-08: the gap this filled may release queued segments --
+         * and a FIN queued behind them. */
+        if (accept_n == dlen && !(flags & TCP_FIN) && tcp_ooo_drain(p)) {
+            flags |= TCP_FIN;
+            seq = p->rcv_nxt;
+            dlen = 0;
+        }
         sched_wakeup(p->recv_chan);
     }
 
@@ -1598,6 +1697,7 @@ void tcp_free(tcp_pcb_t *p) {
             if (c->parent == p) c->parent = NULL;
     tcp_unacked_free_all(p);
     tcp_unlock(f);
+    tcp_ooo_free_all(p);                                 /* TCP-WIN-08 */
     if (p->rxbuf)    kfree(p->rxbuf, TCP_RING_LEN);
     if (p->accept_q) kfree(p->accept_q, sizeof(tcp_pcb_t *) * p->accept_cap);
     kfree(p, sizeof(*p));
