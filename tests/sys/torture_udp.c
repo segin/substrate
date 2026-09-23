@@ -7,8 +7,9 @@
  * UDP-U-04 (destination port 0), UDP-U-05 (empty datagram via sendmsg),
  * UDP-IP-02 (all of 127/8 is local), UDP-IP-08 (broadcast fan-out) and
  * UDP-IP-11 (lo's MTU), UDP-API-01 (port ownership), UDP-API-02
- * (multi-iovec sendmsg), UDP-API-03 (writev), UDP-API-04 (SO_RCVTIMEO) and
- * UDP-API-06 (non-local bind) from docs/ip-audit-2026-09-22.md.
+ * (multi-iovec sendmsg), UDP-API-03 (writev), UDP-API-04 (SO_RCVTIMEO),
+ * UDP-API-06 (non-local bind) and UDP-API-07 (connect binds) from
+ * docs/ip-audit-2026-09-22.md.
  *
  * Each case drives the real socket API over the loopback interface, so a
  * PASS means a datagram actually took the intended path through the
@@ -802,6 +803,33 @@ static void test_bind_nonlocal(void)
     close(s3);
 }
 
+/* UDP-API-07: connect() on an unbound UDP socket binds it -- an ephemeral
+ * port and the source address toward the peer -- so it can receive the
+ * peer's first datagram before sending anything, and getsockname() tells
+ * the truth.  It stayed at port 0 until the first send. */
+static void test_connect_binds(void)
+{
+    printf("UDP-API-07: connect() assigns the local endpoint\n");
+    struct sockaddr_in peer, me;
+    socklen_t ml = sizeof(me);
+    char buf[8];
+    int p = bind_udp(31969);
+    int c = socket(AF_INET, SOCK_DGRAM, 0);
+    lo_addr(&peer, 31969);
+    ok("connect", connect(c, (struct sockaddr *)&peer, sizeof(peer)) == 0, "failed");
+    memset(&me, 0, sizeof(me));
+    getsockname(c, (struct sockaddr *)&me, &ml);
+    ok("getsockname reports a port", me.sin_port != 0, "still port 0");
+    ok("and the source address toward the peer",
+       me.sin_addr.s_addr == htonl(0x7F000001), "wrong address");
+    /* The peer answers first. */
+    sendto(p, "hi", 2, 0, (struct sockaddr *)&me, sizeof(me));
+    ok("the peer's datagram is received before we ever send",
+       try_recv(c, buf, sizeof(buf)) == 2, "nothing arrived");
+    close(p);
+    close(c);
+}
+
 int main(void)
 {
     printf("torture_udp: UDP demux + checksum regressions (#430)\n\n");
@@ -824,6 +852,7 @@ int main(void)
     test_writev_dgram();
     test_rcvtimeo();
     test_bind_nonlocal();
+    test_connect_binds();
 
     printf("\nResult: %d passed, %d failed -- %s\n",
            passed, failed, failed ? "FAILED" : "PASSED");

@@ -1489,6 +1489,27 @@ int afinet_connect(int fd, const void *addr, socklen_t len) {
         s->peer_port = __builtin_bswap16(sin6->sin6_port);
         memcpy(s->peer_addr, sin6->sin6_addr, 16);
     }
+    /*
+     * UDP-API-07: connecting an unbound datagram socket binds it, as on BSD
+     * and Linux -- an ephemeral port and the source address routing picks
+     * toward the peer.  It stayed at port 0 until its first send, so it
+     * could not receive a peer that spoke first, and getsockname()
+     * reported 0.
+     */
+    if (s->type == SOCK_DGRAM && s->local_port == 0) {
+        uint16_t eph = afinet_alloc_ephemeral_free(s);
+        if (eph == 0) return -EADDRINUSE;
+        s->local_port = eph;
+        s->bound = 1;
+        if (addr_is_wild(s->local_addr, s->family == AF_INET ? 4 : 16)) {
+            if (s->family == AF_INET) {
+                uint32_t src = ip4_source_for(*(const uint32_t *)s->peer_addr);
+                memcpy(s->local_addr, &src, 4);
+            } else {
+                (void)ip6_source_for(s->peer_addr, s->local_addr);
+            }
+        }
+    }
     s->connected = 1;
     return 0;
 }
