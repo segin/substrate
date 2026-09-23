@@ -20,6 +20,11 @@
  *               127.0.0.1 must not put that source on a real wire (RFC 1122
  *               3.2.1.3(g)): sending off-host fails EINVAL.
  *
+ *   self        UDP-IP-03: traffic to the host's own NIC address must loop
+ *               back locally.  It was routed out the NIC and ARPed for, so
+ *               it failed EHOSTUNREACH -- including the bound-to-NIC-address
+ *               TCP connect above, whose SYN-ACK is sent to 10.0.2.15.
+ *
  * Needs a configured NIC (10.0.2.15): boot with a network device.
  * Run as init; prints a "Result:" line.
  */
@@ -173,12 +178,72 @@ static void test_lo_guard(void)
     close(tx);
 }
 
+static int tcp_connect_bounded(int c, const struct sockaddr_in *a)
+{
+    fcntl(c, F_SETFL, fcntl(c, F_GETFL) | O_NONBLOCK);
+    int rc = connect(c, (const struct sockaddr *)a, sizeof(*a));
+    if (rc == 0) return 1;
+    if (errno != EINPROGRESS) return 0;
+    struct pollfd pfd = { c, POLLOUT, 0 };
+    if (poll(&pfd, 1, 5000) != 1) return 0;
+    int err = 0;
+    socklen_t el = sizeof(err);
+    getsockopt(c, SOL_SOCKET, SO_ERROR, &err, &el);
+    return err == 0;
+}
+
+static void test_self(void)
+{
+    printf("UDP-IP-03: traffic to our own NIC address loops back\n");
+    struct sockaddr_in a, from;
+    socklen_t flen = sizeof(from);
+    char buf[16];
+
+    int rx = socket(AF_INET, SOCK_DGRAM, 0);
+    int tx = socket(AF_INET, SOCK_DGRAM, 0);
+    sin_set(&a, "0.0.0.0", 31985);
+    bind(rx, (struct sockaddr *)&a, sizeof(a));
+    sin_set(&a, NIC_ADDR, 31985);
+    ssize_t n = sendto(tx, "self", 4, 0, (struct sockaddr *)&a, sizeof(a));
+    ok("UDP sendto(own NIC address) succeeds", n == 4, "send failed");
+    n = recvfrom(rx, buf, sizeof(buf), MSG_DONTWAIT, (struct sockaddr *)&from, &flen);
+    ok("and is delivered locally", n == 4, "datagram lost");
+    ok("from our NIC address, not 127.0.0.1",
+       n == 4 && from.sin_addr.s_addr == inet_addr(NIC_ADDR), "wrong source");
+    close(rx);
+    close(tx);
+
+    int one = 1;
+    int l = socket(AF_INET, SOCK_STREAM, 0);
+    setsockopt(l, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+    sin_set(&a, "0.0.0.0", 31986);
+    bind(l, (struct sockaddr *)&a, sizeof(a));
+    listen(l, 4);
+    int c = socket(AF_INET, SOCK_STREAM, 0);
+    sin_set(&a, NIC_ADDR, 31986);
+    ok("TCP connect to our own NIC address completes",
+       tcp_connect_bounded(c, &a), "handshake failed");
+    close(c);
+
+    /* The TCP-HDR-01 case: bound to the NIC address, connecting to
+     * 127.0.0.1 -- the SYN-ACK goes to 10.0.2.15. */
+    c = socket(AF_INET, SOCK_STREAM, 0);
+    sin_set(&a, NIC_ADDR, 0);
+    bind(c, (struct sockaddr *)&a, sizeof(a));
+    sin_set(&a, "127.0.0.1", 31986);
+    ok("TCP connect from the NIC address to 127.0.0.1 completes",
+       tcp_connect_bounded(c, &a), "handshake failed");
+    close(c);
+    close(l);
+}
+
 int main(void)
 {
     printf("torture_srcaddr: IPv4 source address selection\n\n");
     test_udp_bound();
     test_tcp_bound();
     test_lo_guard();
+    test_self();
     printf("\nResult: %d passed, %d failed -- %s\n",
            passed, failed, failed ? "FAILED" : "PASSED");
     return failed ? 1 : 0;

@@ -155,9 +155,21 @@ int eth_send(netdev_t *dev, const uint8_t dst_mac[6], uint16_t ethertype,
 /* Route selection — single entry: first netdev that matches.         */
 /* ------------------------------------------------------------------ */
 
+/* UDP-IP-03: is `a` the address of one of our (non-loopback) interfaces? */
+static int ip4_is_local_ifaddr(uint32_t a) {
+    if (!a) return 0;
+    for (netdev_t *d = netdev_first(); d; d = netdev_next(d))
+        if (!(d->flags & NETDEV_IFF_LOOPBACK) && d->ip4_addr == a)
+            return 1;
+    return 0;
+}
+
 static netdev_t *route_for_v4(uint32_t daddr, int *via_gw_out) {
-    /* 127.0.0.0/8 → loopback. */
-    if ((daddr & 0xFF) == 127) {
+    /* 127.0.0.0/8 → loopback.  So is any address of our own: UDP-IP-03 --
+     * a datagram to the host's own NIC address used to match that NIC's
+     * subnet below, go out on the wire, and ARP for ourselves, failing
+     * EHOSTUNREACH.  Traffic to a local address never leaves the host. */
+    if ((daddr & 0xFF) == 127 || ip4_is_local_ifaddr(daddr)) {
         for (netdev_t *d = netdev_first(); d; d = netdev_next(d)) {
             if (d->flags & NETDEV_IFF_LOOPBACK) {
                 if (via_gw_out) *via_gw_out = 0;
@@ -202,10 +214,20 @@ static uint16_t g_ip_id_counter;
  * can.  Returns 0.0.0.0 when the destination is unroutable; the send will
  * fail with ENETUNREACH a moment later anyway.
  */
+/* The source routing picks for `daddr` out of `dev`.  For a local address
+ * looped back through lo that is the address itself (as Linux's "local"
+ * route does), not 127.0.0.1 -- otherwise a socket talking to our own NIC
+ * address sees its peer as 127.0.0.1. */
+static uint32_t route_src4(const netdev_t *dev, uint32_t daddr) {
+    if ((dev->flags & NETDEV_IFF_LOOPBACK) && (daddr & 0xFF) != 127)
+        return daddr;
+    return dev->ip4_addr;
+}
+
 uint32_t ip4_source_for(uint32_t daddr) {
     int via_gw = 0;
     netdev_t *dev = route_for_v4(daddr, &via_gw);
-    return dev ? dev->ip4_addr : 0;
+    return dev ? route_src4(dev, daddr) : 0;
 }
 
 int ip4_output(uint32_t daddr, uint8_t protocol,
@@ -230,7 +252,7 @@ int ip4_output_from(uint32_t saddr, uint32_t daddr, uint8_t protocol,
     netdev_t *dev = route_for_v4(daddr, &via_gw);
     if (!dev) return -ENETUNREACH;
     if (saddr == 0)
-        saddr = dev->ip4_addr;
+        saddr = route_src4(dev, daddr);
     else if ((saddr & 0xFF) == 127 && !(dev->flags & NETDEV_IFF_LOOPBACK))
         return -EINVAL;
     /*
@@ -363,8 +385,9 @@ void ip4_input(netdev_t *dev, const uint8_t *pkt, size_t len) {
     uint32_t bcast = (dev->ip4_addr & dev->ip4_netmask) | ~dev->ip4_netmask;
     int for_bcast = (ih->daddr == 0xFFFFFFFFu ||
                      (dev->ip4_netmask != 0 && ih->daddr == bcast));
+    /* UDP-IP-03: and lo carries traffic to our own interface addresses. */
     int for_lo = (dev->flags & NETDEV_IFF_LOOPBACK) &&
-                 (ih->daddr & 0xFF) == 127;
+                 ((ih->daddr & 0xFF) == 127 || ip4_is_local_ifaddr(ih->daddr));
     if (ih->daddr != dev->ip4_addr && !for_bcast && !for_lo) {
         return;
     }
