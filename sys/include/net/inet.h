@@ -163,6 +163,20 @@ ssize_t afinet_sendto_kbuf(int fd, const void *kbuf, size_t len, int flags,
                            const void *addr, socklen_t addrlen);
 ssize_t afinet_recvfrom(int fd, void *buf, size_t len, int flags,
                         void *addr, socklen_t *addrlen);
+/* UDP-API-11: where the datagram a receive returned was addressed -- the
+ * IP_PKTINFO data.  valid is 0 when no datagram was taken (or the socket
+ * is not an IPv4 datagram socket).  Addresses in network byte order. */
+struct afi_rxinfo {
+    int      valid;
+    uint32_t ifindex;       /* ipi_ifindex */
+    uint32_t spec_dst;      /* ipi_spec_dst: the local address to reply from */
+    uint32_t addr;          /* ipi_addr: the header's destination */
+};
+ssize_t afinet_recvfrom_rx(int fd, void *buf, size_t len, int flags,
+                           void *addr, socklen_t *addrlen,
+                           struct afi_rxinfo *rx);
+/* UDP-API-11: has IP_PKTINFO been enabled on this AF_INET socket? */
+int     afinet_pktinfo_on(int fd);
 
 /* Upper-half delivery into a bound socket.  Returns 1 if delivered,
  * 0 if no match (RAW or DGRAM sockets registered with matching
@@ -234,7 +248,8 @@ int     afinet_shutdown(int fd, int how);
 int     afinet_getsockname(int fd, void *addr, socklen_t *addrlen);
 int     afinet_getpeername(int fd, void *addr, socklen_t *addrlen);
 int     afinet_set_reuseaddr(int fd, int on);
-/* UDP-API-12: IPPROTO_IP transmit options -- IP_TOS (1), IP_TTL (2),
+/* UDP-API-11/-12: IPPROTO_IP options -- IP_TOS (1), IP_TTL (2),
+ * IP_PKTINFO (8, receive side),
  * IP_MULTICAST_IF (32, val unused, addr = interface address),
  * IP_MULTICAST_TTL (33), IP_MULTICAST_LOOP (34).  set: -ENOTSOCK on a
  * non-AF_INET fd, -EINVAL for an out-of-range value, -ENOPROTOOPT for any

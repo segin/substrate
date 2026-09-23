@@ -103,6 +103,8 @@ typedef struct afi_pkt {
     uint8_t  proto;
     uint16_t port;      /* source port for UDP, 0 for RAW */
     uint8_t  addr[16];  /* source address (4 bytes for v4) */
+    uint32_t daddr4;    /* UDP-API-11: IPv4 destination it arrived for */
+    uint32_t ifindex;   /* UDP-API-11: interface it arrived on (0 unknown) */
     uint16_t len;       /* bytes stored in data[] */
     /* SOCK-06: the datagram's length as it arrived, which can exceed `len`
      * if it did not fit.  recv(MSG_TRUNC) reports this so a caller can tell
@@ -131,6 +133,7 @@ typedef struct afi_sock {
     int      connected;
     int      bound;        /* explicit bind() succeeded — re-bind is EINVAL */
     int      reuseaddr;    /* SO_REUSEADDR — relaxes the EADDRINUSE check */
+    int      pktinfo;      /* UDP-API-11: IP_PKTINFO requested */
     uint32_t owner_uid;    /* UDP-API-01: euid of the creating process */
     uint32_t rcv_timeo;    /* UDP-API-04: SO_RCVTIMEO in ticks, 0 = none */
     struct ip4_txopts txo; /* UDP-API-12: IP_TTL/IP_TOS/IP_MULTICAST_* */
@@ -1162,6 +1165,10 @@ int afinet_set_ipopt(int fd, int optname, int val, uint32_t addr) {
     afi_sock_t *s = afi_from_fd(fd);
     if (!s) return -ENOTSOCK;
     if (s->family != AF_INET) return -ENOPROTOOPT;
+    if (optname == 8) {         /* UDP-API-11: IP_PKTINFO */
+        s->pktinfo = val ? 1 : 0;
+        return 0;
+    }
     struct ip4_txopts o = s->txo;
     switch (optname) {
     case 1:  /* IP_TOS */
@@ -1204,6 +1211,7 @@ int afinet_get_ipopt(int fd, int optname, int *val, uint32_t *addr) {
     if (s->family != AF_INET) return -ENOPROTOOPT;
     *addr = 0;
     switch (optname) {
+    case 8:  *val = s->pktinfo; break;          /* UDP-API-11 */
     case 1:  *val = s->txo.tos; break;
     case 2:  *val = s->txo.ttl; break;
     case 32: *val = 0; *addr = s->txo.mcast_if; break;
@@ -1776,6 +1784,18 @@ ssize_t afinet_sendto(int fd, const void *ubuf, size_t len, int flags,
 
 ssize_t afinet_recvfrom(int fd, void *buf, size_t len, int flags,
                         void *addr, socklen_t *addrlen) {
+    return afinet_recvfrom_rx(fd, buf, len, flags, addr, addrlen, NULL);
+}
+
+int afinet_pktinfo_on(int fd) {
+    afi_sock_t *s = afi_from_fd(fd);
+    return s && s->family == AF_INET && s->pktinfo;
+}
+
+ssize_t afinet_recvfrom_rx(int fd, void *buf, size_t len, int flags,
+                           void *addr, socklen_t *addrlen,
+                           struct afi_rxinfo *rx) {
+    if (rx) rx->valid = 0;
     afi_sock_t *s = afi_from_fd(fd);
     if (!s) return -ENOTSOCK;
     if (!buf) return -EINVAL;
@@ -1845,6 +1865,7 @@ ssize_t afinet_recvfrom(int fd, void *buf, size_t len, int flags,
             uint8_t paddr[16];
             uint16_t pport = p->port;
             uint16_t ptrue = p->truelen;
+            uint32_t pdaddr = p->daddr4, pifindex = p->ifindex;   /* UDP-API-11 */
             memcpy(tmp, p->data, n);
             memcpy(paddr, p->addr, 16);
             /*
@@ -1884,6 +1905,18 @@ ssize_t afinet_recvfrom(int fd, void *buf, size_t len, int flags,
              * and a short datagram are indistinguishable, so a caller can
              * never tell that it lost the tail of a message.
              */
+            if (rx && fam == AF_INET && pdaddr) {
+                rx->valid = 1;
+                rx->ifindex = pifindex;
+                rx->addr = pdaddr;
+                /* A reply to a broadcast or group datagram goes from the
+                 * interface's own address. */
+                netdev_t *d = pifindex ? netdev_by_index(pifindex) : NULL;
+                int unicast = !(pdaddr == 0xFFFFFFFFu || ((pdaddr & 0xFF) >> 4) == 0xE ||
+                                (d && d->ip4_netmask && pdaddr ==
+                                 ((d->ip4_addr & d->ip4_netmask) | ~d->ip4_netmask)));
+                rx->spec_dst = (unicast || !d) ? pdaddr : d->ip4_addr;
+            }
             if (flags & MSG_TRUNC) return (ssize_t)ptrue;
             return (ssize_t)n;
         }
@@ -1988,8 +2021,27 @@ static int sock_score(afi_sock_t *s, int family, uint8_t proto,
     return score;
 }
 
+/* UDP-API-11: the interface a datagram for `daddr` arrived on, for
+ * IP_PKTINFO's ipi_ifindex -- the one owning the address or broadcast, lo
+ * for 127/8, the member interface for a group.  0 if none matches. */
+static uint32_t afi_ifindex_for(uint32_t daddr) {
+    netdev_t *any_mc = NULL;
+    for (netdev_t *d = netdev_first(); d; d = netdev_next(d)) {
+        if ((d->flags & NETDEV_IFF_LOOPBACK) && (daddr & 0xFF) == 127)
+            return d->ifindex;
+        if (d->ip4_addr && (daddr == d->ip4_addr ||
+            (d->ip4_netmask &&
+             daddr == ((d->ip4_addr & d->ip4_netmask) | ~d->ip4_netmask))))
+            return d->ifindex;
+        if (((daddr & 0xFF) >> 4) == 0xE && netdev_mc_member(d, daddr) && !any_mc)
+            any_mc = d;
+    }
+    return any_mc ? any_mc->ifindex : 0;
+}
+
 static void enqueue(afi_sock_t *s, uint8_t family, uint8_t proto, uint16_t port,
-                    const void *addr, const uint8_t *data, size_t len) {
+                    const void *addr, const uint8_t *data, size_t len,
+                    uint32_t daddr4) {
     if (s->count >= AFI_RING_LEN) return;  /* drop */
     afi_pkt_t *p = &s->ring[s->head];
     p->family = family;
@@ -1997,6 +2049,8 @@ static void enqueue(afi_sock_t *s, uint8_t family, uint8_t proto, uint16_t port,
     p->port = port;
     if (family == AF_INET) memcpy(p->addr, addr, 4);
     else                   memcpy(p->addr, addr, 16);
+    p->daddr4 = daddr4;                          /* UDP-API-11 */
+    p->ifindex = daddr4 ? afi_ifindex_for(daddr4) : 0;
     size_t n = len > AFI_DATA_MAX ? AFI_DATA_MAX : len;
     memcpy(p->data, data, n);
     p->len = (uint16_t)n;
@@ -2056,7 +2110,7 @@ int afinet_deliver_v4(uint32_t saddr, uint32_t daddr,
              * datagram is enqueued twice.  RAW legitimately fans out: every
              * subscriber to a protocol sees every packet of it. */
             if (for_dgram) continue;
-            enqueue(s, AF_INET, protocol, sport, &saddr, pkt, len);
+            enqueue(s, AF_INET, protocol, sport, &saddr, pkt, len, daddr);
             delivered = 1;
         } else {
             /* DGRAM: delivered only via udp_input, to the single best match
@@ -2069,7 +2123,7 @@ int afinet_deliver_v4(uint32_t saddr, uint32_t daddr,
                  * split the traffic between them, one datagram each. */
                 enqueue(s, AF_INET, protocol, sport, &saddr,
                         payload + sizeof(struct udphdr),
-                        payload_len - sizeof(struct udphdr));
+                        payload_len - sizeof(struct udphdr), daddr);
                 delivered = 1;
                 continue;
             }
@@ -2082,7 +2136,7 @@ int afinet_deliver_v4(uint32_t saddr, uint32_t daddr,
     if (best) {
         enqueue(best, AF_INET, protocol, sport, &saddr,
                 payload + sizeof(struct udphdr),
-                payload_len - sizeof(struct udphdr));
+                payload_len - sizeof(struct udphdr), daddr);
         delivered = 1;
     }
     spinlock_release_irq(&afi_lock, fl);
@@ -2155,7 +2209,7 @@ int afinet_deliver_v6(const uint8_t saddr[16], const uint8_t daddr[16],
                 body = pkt + sizeof(struct ip6_hdr);
                 blen = len - sizeof(struct ip6_hdr);
             }
-            enqueue(s, AF_INET6, protocol, sport, saddr, body, blen);
+            enqueue(s, AF_INET6, protocol, sport, saddr, body, blen, 0);
             delivered = 1;
         } else {
             /* UDP-01: single best match, not a copy to every socket. */
@@ -2167,7 +2221,7 @@ int afinet_deliver_v6(const uint8_t saddr[16], const uint8_t daddr[16],
                  * split the traffic between them, one datagram each. */
                 enqueue(s, AF_INET6, protocol, sport, saddr,
                         payload + sizeof(struct udphdr),
-                        payload_len - sizeof(struct udphdr));
+                        payload_len - sizeof(struct udphdr), 0);
                 delivered = 1;
                 continue;
             }
@@ -2180,7 +2234,7 @@ int afinet_deliver_v6(const uint8_t saddr[16], const uint8_t daddr[16],
     if (best) {
         enqueue(best, AF_INET6, protocol, sport, saddr,
                 payload + sizeof(struct udphdr),
-                payload_len - sizeof(struct udphdr));
+                payload_len - sizeof(struct udphdr), 0);
         delivered = 1;
     }
     spinlock_release_irq(&afi_lock, fl);

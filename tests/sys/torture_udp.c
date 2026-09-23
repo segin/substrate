@@ -10,7 +10,7 @@
  * (multi-iovec sendmsg), UDP-API-03 (writev), UDP-API-04 (SO_RCVTIMEO),
  * UDP-API-06 (non-local bind), UDP-API-07 (connect binds), UDP-API-08
  * (SHUT_RD), UDP-API-09 (zero-length receive), UDP-API-10 (addrlen at
- * EOF) and UDP-API-12 (IP transmit options) from
+ * EOF), UDP-API-11 (IP_PKTINFO) and UDP-API-12 (IP transmit options) from
  * docs/ip-audit-2026-09-22.md.
  *
  * Each case drives the real socket API over the loopback interface, so a
@@ -977,6 +977,81 @@ static void test_ip_txopts(void)
     close(tx);
 }
 
+/* UDP-API-11: IP_PKTINFO reports where a datagram was addressed.  The
+ * destination was discarded and the option did nothing, so a wildcard-bound
+ * server could not tell which address a request came to. */
+static int check_pktinfo(struct msghdr *mh, uint32_t want_addr, int want_if)
+{
+    for (struct cmsghdr *c = CMSG_FIRSTHDR(mh); c; c = CMSG_NXTHDR(mh, c)) {
+        if (c->cmsg_level == IPPROTO_IP && c->cmsg_type == IP_PKTINFO) {
+            struct in_pktinfo pi;
+            memcpy(&pi, CMSG_DATA(c), sizeof(pi));
+            return pi.ipi_addr.s_addr == want_addr && pi.ipi_ifindex == want_if &&
+                   pi.ipi_spec_dst.s_addr == want_addr;
+        }
+    }
+    return 0;
+}
+
+static void test_pktinfo(void)
+{
+    printf("UDP-API-11: IP_PKTINFO reports the destination\n");
+    struct sockaddr_in any, dst;
+    struct ifreq ifr;
+    int one = 1;
+    int rx = socket(AF_INET, SOCK_DGRAM, 0);
+    int tx = socket(AF_INET, SOCK_DGRAM, 0);
+    memset(&any, 0, sizeof(any));
+    any.sin_family = AF_INET;
+    any.sin_port = htons(31955);
+    bind(rx, (struct sockaddr *)&any, sizeof(any));
+    memset(&ifr, 0, sizeof(ifr));
+    strncpy(ifr.ifr_name, "lo", sizeof(ifr.ifr_name) - 1);
+    ioctl(rx, SIOCGIFINDEX, &ifr);
+    int lo_if = ifr.ifr_ifindex;
+
+    char buf[16], ctl[64];
+    struct iovec iov = { buf, sizeof(buf) };
+    struct msghdr mh;
+    lo_addr(&dst, 31955);
+    dst.sin_addr.s_addr = htonl(0x7F000002);        /* 127.0.0.2 */
+
+    /* Off: no control data. */
+    sendto(tx, "a", 1, 0, (struct sockaddr *)&dst, sizeof(dst));
+    memset(&mh, 0, sizeof(mh));
+    mh.msg_iov = &iov; mh.msg_iovlen = 1;
+    mh.msg_control = ctl; mh.msg_controllen = sizeof(ctl);
+    wait_readable(rx);
+    recvmsg(rx, &mh, MSG_DONTWAIT);
+    ok("without IP_PKTINFO, msg_controllen is 0", mh.msg_controllen == 0,
+       "control data invented");
+
+    ok("setsockopt(IP_PKTINFO)",
+       setsockopt(rx, IPPROTO_IP, IP_PKTINFO, &one, sizeof(one)) == 0, "refused");
+    sendto(tx, "b", 1, 0, (struct sockaddr *)&dst, sizeof(dst));
+    memset(&mh, 0, sizeof(mh));
+    mh.msg_iov = &iov; mh.msg_iovlen = 1;
+    mh.msg_control = ctl; mh.msg_controllen = sizeof(ctl);
+    wait_readable(rx);
+    ssize_t n = recvmsg(rx, &mh, MSG_DONTWAIT);
+    ok("recvmsg returns IP_PKTINFO: 127.0.0.2 on lo",
+       n == 1 && check_pktinfo(&mh, dst.sin_addr.s_addr, lo_if), "missing or wrong");
+
+    /* The scatter (multi-iovec) path too. */
+    char b1[1], b2[8];
+    struct iovec iv2[2] = { { b1, 1 }, { b2, sizeof(b2) } };
+    sendto(tx, "cd", 2, 0, (struct sockaddr *)&dst, sizeof(dst));
+    memset(&mh, 0, sizeof(mh));
+    mh.msg_iov = iv2; mh.msg_iovlen = 2;
+    mh.msg_control = ctl; mh.msg_controllen = sizeof(ctl);
+    wait_readable(rx);
+    n = recvmsg(rx, &mh, MSG_DONTWAIT);
+    ok("and on the multi-iovec path",
+       n == 2 && check_pktinfo(&mh, dst.sin_addr.s_addr, lo_if), "missing or wrong");
+    close(rx);
+    close(tx);
+}
+
 int main(void)
 {
     printf("torture_udp: UDP demux + checksum regressions (#430)\n\n");
@@ -1003,6 +1078,7 @@ int main(void)
     test_shut_rd();
     test_zero_len_recv();
     test_ip_txopts();
+    test_pktinfo();
 
     printf("\nResult: %d passed, %d failed -- %s\n",
            passed, failed, failed ? "FAILED" : "PASSED");

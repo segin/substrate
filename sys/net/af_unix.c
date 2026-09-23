@@ -1731,7 +1731,9 @@ ssize_t sys_send(int fd, const void *buf, size_t len, int flags) {
  * address in kernel space for the caller to copy out.
  */
 static ssize_t recv_into_kbuf(int fd, void *kbuf, size_t len, int flags,
-                              struct sockaddr *kaddr, socklen_t *kaddrlen) {
+                              struct sockaddr *kaddr, socklen_t *kaddrlen,
+                              struct afi_rxinfo *rx) {
+    if (rx) rx->valid = 0;
     file_t *f = current_process->fds[fd];
     if (f && f->f_data) {
         fs_node_t *n = (fs_node_t *)f->f_data;
@@ -1741,7 +1743,7 @@ static ssize_t recv_into_kbuf(int fd, void *kbuf, size_t len, int flags,
         if (n->read == (void *)afpkt_node_read)
             return afpacket_recvfrom(fd, kbuf, len, flags, kaddr, alp);
         if (n->read == (void *)afinet_node_read)
-            return afinet_recvfrom(fd, kbuf, len, flags, kaddr, alp);
+            return afinet_recvfrom_rx(fd, kbuf, len, flags, kaddr, alp, rx);
     }
     /* Remember the caller's buffer capacity BEFORE reporting "no address":
      * *kaddrlen is both the in (capacity) and out (length) parameter. */
@@ -1824,8 +1826,9 @@ static int copyout_sockaddr(const uint8_t *kaddr, size_t kcap,
 
 /* Common recv/recvfrom body: receive into a kernel bounce buffer, then copy
  * the data (and any source address) out to userspace fault-safely. */
-static ssize_t do_recv(int fd, void *buf, size_t len, int flags,
-                       struct sockaddr *addr, socklen_t *addrlen) {
+static ssize_t do_recv_rx(int fd, void *buf, size_t len, int flags,
+                          struct sockaddr *addr, socklen_t *addrlen,
+                          struct afi_rxinfo *rx) {
     if (sock_fd_invalid(fd)) return -EBADF;
     uint8_t    kaddr[128];
     socklen_t  kaddrlen = sizeof(kaddr);
@@ -1857,7 +1860,7 @@ static ssize_t do_recv(int fd, void *buf, size_t len, int flags,
 
     n = recv_into_kbuf(fd, kbuf, cap, flags,
                        addr ? (struct sockaddr *)kaddr : NULL,
-                       addr ? &kaddrlen : NULL);
+                       addr ? &kaddrlen : NULL, rx);
     if (n < 0) {
         if (kbuf != dummy) kfree(kbuf, cap);
         return n;
@@ -1885,6 +1888,11 @@ static ssize_t do_recv(int fd, void *buf, size_t len, int flags,
             return -EFAULT;
     }
     return n;
+}
+
+static ssize_t do_recv(int fd, void *buf, size_t len, int flags,
+                       struct sockaddr *addr, socklen_t *addrlen) {
+    return do_recv_rx(fd, buf, len, flags, addr, addrlen, NULL);
 }
 
 ssize_t sys_recv(int fd, void *buf, size_t len, int flags) {
@@ -2381,6 +2389,9 @@ ssize_t sys_recvmsg(int fd, struct msghdr *umsg, int flags) {
     msg->msg_flags = 0;
 
     ssize_t total = 0;
+    int scattered = 0;
+    struct afi_rxinfo rx;
+    memset(&rx, 0, sizeof(rx));
     struct iovec_local *iov = kiov;
 
     /*
@@ -2412,7 +2423,7 @@ ssize_t sys_recvmsg(int fd, struct msghdr *umsg, int flags) {
         memset(kaddr, 0, sizeof(kaddr));
         ssize_t r = recv_into_kbuf(fd, scat, cap, flags,
                                    want_name ? (struct sockaddr *)kaddr : NULL,
-                                   want_name ? &kaddrlen : NULL);
+                                   want_name ? &kaddrlen : NULL, &rx);
         if (r < 0) { kfree(scat, cap); return r; }
         if (want_name &&
             copyout_sockaddr(kaddr, sizeof(kaddr), kaddrlen, msg->msg_name,
@@ -2433,10 +2444,14 @@ ssize_t sys_recvmsg(int fd, struct msghdr *umsg, int flags) {
             left -= take;
         }
         kfree(scat, cap);
-        return (ssize_t)off;
+        /* Fall through to the common tail: it publishes msg_controllen and
+         * msg_flags, which this branch used to leave holding whatever the
+         * caller passed in -- "control data" that was never written. */
+        total = (ssize_t)off;
+        scattered = 1;
     }
 
-    for (int i = 0; i < (int)msg->msg_iovlen; i++) {
+    for (int i = 0; !scattered && i < (int)msg->msg_iovlen; i++) {
         ssize_t r;
         if (i == 0 && msg->msg_name && msg->msg_namelen > 0) {
             /* Capture the datagram sender's address into msg_name on the
@@ -2451,9 +2466,12 @@ ssize_t sys_recvmsg(int fd, struct msghdr *umsg, int flags) {
              * do_recv copyin/copyout's it in place (msg_namelen and
              * socklen_t are both 4 bytes).  The SCM_RIGHTS path below
              * passes msg_name == NULL, so it is unaffected. */
-            r = sys_recvfrom(fd, iov[i].iov_base, iov[i].iov_len, flags,
-                             (struct sockaddr *)msg->msg_name,
-                             (socklen_t *)&umsg->msg_namelen);
+            r = do_recv_rx(fd, iov[i].iov_base, iov[i].iov_len, flags,
+                           (struct sockaddr *)msg->msg_name,
+                           (socklen_t *)&umsg->msg_namelen, &rx);
+        } else if (i == 0) {
+            r = do_recv_rx(fd, iov[i].iov_base, iov[i].iov_len, flags,
+                           NULL, NULL, &rx);
         } else {
             r = sys_recv(fd, iov[i].iov_base, iov[i].iov_len, flags);
         }
@@ -2469,6 +2487,28 @@ ssize_t sys_recvmsg(int fd, struct msghdr *umsg, int flags) {
      * pointer directly. */
     afunix_sock_t *s = afunix_from_fd(fd);
     uint32_t out_controllen = 0;
+    /*
+     * UDP-API-11: IP_PKTINFO -- where the datagram was addressed and which
+     * interface it came in on (Linux struct in_pktinfo: ipi_ifindex,
+     * ipi_spec_dst, ipi_addr).  The destination was recorded nowhere, so
+     * a server bound to the wildcard could not tell which of its addresses
+     * a request came to, and could not answer from it (RFC 1122 4.1.3.5).
+     */
+    if (!s && rx.valid && afinet_pktinfo_on(fd) && msg->msg_control) {
+        struct { struct kcmsghdr h; uint32_t ifindex, spec_dst, addr; } pc;
+        if ((size_t)msg->msg_controllen < sizeof(pc)) {
+            msg->msg_flags |= MSG_CTRUNC;
+        } else {
+            pc.h.cmsg_len = sizeof(pc);
+            pc.h.cmsg_level = 0;            /* IPPROTO_IP */
+            pc.h.cmsg_type = 8;             /* IP_PKTINFO */
+            pc.ifindex = rx.ifindex;
+            pc.spec_dst = rx.spec_dst;
+            pc.addr = rx.addr;
+            if (copyout(&pc, msg->msg_control, sizeof(pc)) != 0) return -EFAULT;
+            out_controllen = sizeof(pc);
+        }
+    }
     if (s && msg->msg_control && (size_t)msg->msg_controllen >= sizeof(struct kcmsghdr)) {
         size_t cmsgcap = (size_t)msg->msg_controllen;
         if (cmsgcap > AFUNIX_CMSG_MAX) cmsgcap = AFUNIX_CMSG_MAX;
@@ -2727,7 +2767,8 @@ int sys_setsockopt(int fd, int level, int optname,
      * takes a struct in_addr, a struct ip_mreq, or a Linux struct ip_mreqn
      * whose ifindex names the interface. */
     if (level == 0 /*IPPROTO_IP*/ &&
-        (optname == 1 || optname == 2 || (optname >= 32 && optname <= 34))) {
+        (optname == 1 || optname == 2 || optname == 8 ||
+         (optname >= 32 && optname <= 34))) {
         int val = 0;
         uint32_t addr = 0;
         if (!optval || optlen < 1) return -EINVAL;
@@ -2921,7 +2962,8 @@ int sys_getsockopt(int fd, int level, int optname,
     /* UDP-API-12: the IPPROTO_IP transmit options read back what was set
      * (getsockopt(IP_TTL) used to answer 0). */
     if (level == 0 /*IPPROTO_IP*/ &&
-        (optname == 1 || optname == 2 || (optname >= 32 && optname <= 34))) {
+        (optname == 1 || optname == 2 || optname == 8 ||
+         (optname >= 32 && optname <= 34))) {
         int val = 0;
         uint32_t addr = 0;
         int r = afinet_get_ipopt(fd, optname, &val, &addr);
