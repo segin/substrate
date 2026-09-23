@@ -47,20 +47,27 @@
 #include <vm/vm_kmem.h>
 
 /*
- * Netstack synchronisation.  tcp_segment_input() and everything it
- * calls run in hard IRQ context (netdev RX -> ip4_input -> tcp).
- * The socket-layer entry points (tcp_alloc/free/close/recv/accept/
- * connect/send) run in process context and mutate the SAME state:
- * the g_tcp_pcbs list, per-PCB rx ring + counters, accept queues,
- * the unacked send queue.  With no mutual exclusion an RX interrupt
- * landing mid-update corrupts the PCB — the crash class behind
- * "tcp_close called with p=0x28" and the scattered afi_sock damage.
+ * Netstack synchronisation.  tcp_input() and everything it calls mutate
+ * the same state as the socket-layer entry points (tcp_alloc/free/close/
+ * recv/accept/connect/send) and the timer: the g_tcp_pcbs list, per-PCB
+ * rx ring + counters, accept queues, the unacked send queue.  With no
+ * mutual exclusion one side landing mid-update corrupts the PCB -- the
+ * crash class behind "tcp_close called with p=0x28" and the scattered
+ * afi_sock damage.
  *
- * Substrate's RX path always runs with IRQs already disabled (it's
- * an ISR), so on a uniprocessor it's enough for the process-context
- * critical sections to disable local IRQs for the duration: that
- * makes them atomic against RX.  tcp_lock()/tcp_unlock() bracket
- * those sections.  (SMP would need a real spinlock here too.)
+ * tcp_lock() disables local interrupts, which on a uniprocessor makes a
+ * critical section atomic against every other context: no IRQ can arrive
+ * and, without the timer IRQ, nothing can preempt it.  EVERY side has to
+ * take it, the RX side included.  It is NOT safe to assume RX runs in an
+ * ISR with interrupts already off: a NIC's RX interrupt does, but the
+ * loopback device delivers from a kthread with interrupts enabled
+ * (loopback.c restores them before netdev_rx()), so every segment sent
+ * to 127.0.0.1 ran all of tcp_input() preemptibly, and process context
+ * could run -- and take tcp_lock() -- in the middle of it.  tcp_input()
+ * now holds the lock across the PCB lookup and the whole state dispatch.
+ * intr_disable()/intr_restore() nest, so the callees' own tcp_lock()
+ * pairs stay correct, and on a genuine ISR path the outer lock is free.
+ * (SMP would need a real spinlock here too.)
  */
 static inline uint32_t tcp_lock(void)   { return intr_disable(); }
 static inline void     tcp_unlock(uint32_t f) { intr_restore(f); }
@@ -1037,42 +1044,17 @@ static void tcp_in_established(tcp_pcb_t *p, uint32_t seq, uint32_t ack,
 void tcp_input(uint32_t saddr, uint32_t daddr,
                const uint8_t *seg, size_t len);
 
-void tcp_input(uint32_t saddr, uint32_t daddr,
-               const uint8_t *seg, size_t len)
+/*
+ * The PCB-touching half of tcp_input(): lookup, window update and state
+ * dispatch.  Always entered with tcp_lock() held -- see the note at the
+ * top of this file for why the RX side must take it too.
+ */
+static void tcp_input_locked(uint32_t saddr, uint32_t daddr,
+                             const struct tcphdr *th, uint8_t flags,
+                             uint16_t sport, uint16_t dport,
+                             uint32_t seq, uint32_t ack,
+                             const uint8_t *payload, size_t dlen)
 {
-    if (len < sizeof(struct tcphdr)) return;
-    const struct tcphdr *th = (const struct tcphdr *)seg;
-    uint16_t doff_flags = __builtin_bswap16(th->doff_flags);
-    size_t   hlen       = ((doff_flags >> 12) & 0xF) * 4;
-    if (hlen < sizeof(*th) || hlen > len) return;
-    uint8_t  flags = (uint8_t)(doff_flags & 0xFF);
-    uint16_t sport = __builtin_bswap16(th->source);
-    uint16_t dport = __builtin_bswap16(th->dest);
-    uint32_t seq   = __builtin_bswap32(th->seq);
-    uint32_t ack   = __builtin_bswap32(th->ack_seq);
-    size_t   dlen  = len - hlen;
-    const uint8_t *payload = seg + hlen;
-
-    /*
-     * TCP-02: verify the segment checksum before acting on ANY of it.
-     * tcp_csum() existed but had only output callers, and ip4_input
-     * validates the IP header only -- which covers no payload -- so every
-     * received seq/ack/flag/window/data byte was accepted with no
-     * end-to-end check at all.  A single bit flip delivered corrupt stream
-     * data or turned a data segment into a RST, and a blind off-path
-     * attacker had one fewer field to get right.
-     *
-     * A checksum of zero means "not computed" for UDP but NOT for TCP,
-     * where it is mandatory, so a zero field is simply a wrong checksum
-     * unless the segment genuinely sums to zero -- which the standard
-     * one's-complement check below handles correctly either way.
-     */
-    if (tcp_csum(saddr, daddr, seg, len) != 0) {
-        /* Silently drop: replying would let a corrupt segment elicit
-         * traffic, and RFC 793 requires no response to a bad checksum. */
-        return;
-    }
-
     tcp_pcb_t *p = tcp_find(saddr, sport, daddr, dport);
     if (!p) {
         tcp_send_rst(saddr, daddr, th, flags, seq, ack, dlen);
@@ -1122,6 +1104,48 @@ void tcp_input(uint32_t saddr, uint32_t daddr,
     default:
         return;
     }
+}
+
+void tcp_input(uint32_t saddr, uint32_t daddr,
+               const uint8_t *seg, size_t len)
+{
+    if (len < sizeof(struct tcphdr)) return;
+    const struct tcphdr *th = (const struct tcphdr *)seg;
+    uint16_t doff_flags = __builtin_bswap16(th->doff_flags);
+    size_t   hlen       = ((doff_flags >> 12) & 0xF) * 4;
+    if (hlen < sizeof(*th) || hlen > len) return;
+    uint8_t  flags = (uint8_t)(doff_flags & 0xFF);
+    uint16_t sport = __builtin_bswap16(th->source);
+    uint16_t dport = __builtin_bswap16(th->dest);
+    uint32_t seq   = __builtin_bswap32(th->seq);
+    uint32_t ack   = __builtin_bswap32(th->ack_seq);
+    size_t   dlen  = len - hlen;
+    const uint8_t *payload = seg + hlen;
+
+    /*
+     * TCP-02: verify the segment checksum before acting on ANY of it.
+     * tcp_csum() existed but had only output callers, and ip4_input
+     * validates the IP header only -- which covers no payload -- so every
+     * received seq/ack/flag/window/data byte was accepted with no
+     * end-to-end check at all.  A single bit flip delivered corrupt stream
+     * data or turned a data segment into a RST, and a blind off-path
+     * attacker had one fewer field to get right.
+     *
+     * A checksum of zero means "not computed" for UDP but NOT for TCP,
+     * where it is mandatory, so a zero field is simply a wrong checksum
+     * unless the segment genuinely sums to zero -- which the standard
+     * one's-complement check below handles correctly either way.
+     */
+    if (tcp_csum(saddr, daddr, seg, len) != 0) {
+        /* Silently drop: replying would let a corrupt segment elicit
+         * traffic, and RFC 793 requires no response to a bad checksum. */
+        return;
+    }
+
+    uint32_t f = tcp_lock();
+    tcp_input_locked(saddr, daddr, th, flags, sport, dport, seq, ack,
+                     payload, dlen);
+    tcp_unlock(f);
 }
 
 /* ------------------------------------------------------------------ */
