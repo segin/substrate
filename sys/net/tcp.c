@@ -1105,7 +1105,13 @@ static void tcp_in_established(tcp_pcb_t *p, uint32_t seq, uint32_t ack,
      * is gone.  RST the peer so a process still writing to this
      * connection fails promptly instead of having its bytes silently
      * black-holed forever.  Pure ACK/FIN segments (dlen==0) still flow
-     * through so the close handshake can finish. */
+     * through so the close handshake can finish.
+     *
+     * TCP-SM-15: only data beyond RCV.NXT may abort.  tcp_seg_check()
+     * guarantees that here: a retransmission of data already consumed lies
+     * below the window and was ACKed and dropped there, and a straddling
+     * one was trimmed to its new octets.  (Before it existed, a peer that
+     * merely lost our ACK was reset.) */
     if (p->detached && dlen > 0) {
         tcp_send_ctl(p, TCP_RST | TCP_ACK);
         tcp_kill_pcb(p, 0);

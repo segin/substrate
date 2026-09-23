@@ -35,6 +35,9 @@ it guards.
     bad-ack-data    TCP-SM-13: text on a segment whose ACK acknowledges
                     something not yet sent is dropped with the segment (the
                     ACK field is checked before the text is taken).
+    dup-after-close TCP-SM-15: after close(), a retransmission of data the
+                    application already read is ACKed, not answered with a
+                    RST, and the close handshake finishes.
 
 Run from the repo root after building sys/ and wireguest:
     python3 tests/lib/net/wire/test_tcp_input.py [case...]
@@ -266,6 +269,29 @@ def case_bad_ack_data():
         return None, w
 
 
+def case_dup_after_close():
+    with Wire.boot('connect 10.0.2.2 %d read:64 close sleep:60' % PORT) as w:
+        syn, err = handshake(w)
+        if err:
+            return err, w
+        gp, g = syn.sport, syn.seq + 1
+        w.send(Seg(PORT, gp, PISS + 1, g, ACK | PSH, data=b'abc'))
+        fin = w.expect(lambda s: s.flags & FIN, 10, 'guest FIN')
+        if not fin:
+            return 'guest never closed', w
+        w.rx.clear()
+        w.send(Seg(PORT, gp, PISS + 1, g, ACK | PSH, data=b'abc'))   # retransmit
+        r = w.expect(lambda s: True, 3, 'reply')
+        if not r or r.flags & RST or r.ack != PISS + 4:
+            return 'duplicate after close: want ACK %d, got %r' % (PISS + 4, r), w
+        w.send(Seg(PORT, gp, PISS + 4, g + 1, ACK | FIN))
+        if not w.expect(lambda s: s.flags & ACK and s.ack == PISS + 5, 3, 'ACK of FIN'):
+            return 'close handshake did not finish', w
+        if any(s.flags & RST for s in w.rx):
+            return 'a RST was sent', w
+        return None, w
+
+
 CASES = (('data-after-fin', case_data_after_fin),
          ('syn-rcvd-rst', case_syn_rcvd_rst),
          ('syn-sync', case_syn_sync),
@@ -274,7 +300,8 @@ CASES = (('data-after-fin', case_data_after_fin),
          ('syn-sent-ack', case_syn_sent_ack),
          ('simultaneous', case_simultaneous),
          ('no-ack', case_no_ack),
-         ('bad-ack-data', case_bad_ack_data))
+         ('bad-ack-data', case_bad_ack_data),
+         ('dup-after-close', case_dup_after_close))
 
 
 def main():
