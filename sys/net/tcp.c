@@ -519,7 +519,22 @@ static void tcp_retx_head(tcp_pcb_t *p, int fast) {
     tcp_seg_t *s = p->unacked_head;
     if (!s) return;
     if (fast && s->fast_retx >= TCP_FAST_RETX_MAX) return;
-    if (tcp_xmit_raw(p, s->seq, s->flags, s->data, s->dlen) >= 0)
+    /* TCP-WIN-09: a partially acknowledged segment stays queued whole
+     * (tcp_unacked_prune frees whole segments only, and kfree needs the
+     * allocated size), so resend just [SND.UNA, end): the acknowledged
+     * prefix was sent again every time, from below SND.UNA. */
+    uint32_t seq = s->seq, skip = 0;
+    uint8_t flags = s->flags;
+    if (s->dlen && (int32_t)(p->snd_una - s->seq) > 0 &&
+        (int32_t)(p->snd_una - (s->seq + s->dlen)) < 0) {
+        skip = p->snd_una - s->seq;
+        if (flags & TCP_SYN) {          /* the SYN was the first octet acked */
+            flags &= (uint8_t)~TCP_SYN;
+            skip--;
+        }
+        seq = p->snd_una;
+    }
+    if (tcp_xmit_raw(p, seq, flags, s->data + skip, s->dlen - skip) >= 0)
         tcp_note_sent(p, s->seq + s->dlen + ((s->flags & TCP_SYN) ? 1u : 0u) +
                          ((s->flags & TCP_FIN) ? 1u : 0u));   /* TCP-MEM-07 */
     if (fast) {

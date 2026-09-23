@@ -39,6 +39,9 @@ it guards.
                 the first then completes both, acknowledged in one step,
                 and a FIN that arrived ahead of a gap is honoured once the
                 gap fills.
+    partial-ack TCP-WIN-09: after the peer acknowledges part of a segment,
+                the retransmission starts at SND.UNA and carries only the
+                unacknowledged octets.
 
 Run from the repo root after building sys/ and wireguest:
     python3 tests/lib/net/wire/test_tcp_window.py [case...]
@@ -323,6 +326,25 @@ def case_reorder():
         return None, w
 
 
+def case_partial_ack():
+    msg = 'P' * 150
+    with Wire.boot('connect 10.0.2.2 %d write:%s sleep:60' % (PORT, msg)) as w:
+        syn, err = handshake(w)
+        if err:
+            return err, w
+        gp, g = syn.sport, syn.seq + 1
+        if not w.expect(lambda s: s.data, 5, 'data'):
+            return 'guest sent nothing', w
+        w.rx.clear()
+        w.send(Seg(PORT, gp, PISS + 1, g + 50, ACK))
+        r = w.expect(lambda s: s.data, 4, 'retransmission')
+        if not r:
+            return 'no retransmission', w
+        if r.seq != g + 50 or len(r.data) != 100:
+            return 'want seq %d len 100, got %r' % (g + 50, r), w
+        return None, w
+
+
 CASES = (('persist', case_persist),
          ('nb-persist', case_nb_persist),
          ('reopen', case_reopen),
@@ -330,7 +352,8 @@ CASES = (('persist', case_persist),
          ('dupack', case_dupack),
          ('sender-sws', case_sender_sws),
          ('receiver-sws', case_receiver_sws),
-         ('reorder', case_reorder))
+         ('reorder', case_reorder),
+         ('partial-ack', case_partial_ack))
 
 
 def main():
