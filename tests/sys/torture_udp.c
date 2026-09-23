@@ -3,8 +3,8 @@
  * (task #430: UDP-01, UDP-03, SOCK-07).
  *
  * Also UDP-MEM-01 (MSG_TRUNC over-copy), UDP-MEM-02 (recvmsg msg_name
- * written through a raw user pointer) and UDP-U-01 (connected sendto) from
- * docs/ip-audit-2026-09-22.md.
+ * written through a raw user pointer), UDP-U-01 (connected sendto) and
+ * UDP-U-04 (destination port 0) from docs/ip-audit-2026-09-22.md.
  *
  * Each case drives the real socket API over the loopback interface, so a
  * PASS means a datagram actually took the intended path through the
@@ -427,6 +427,23 @@ out:
     if (tx >= 0) close(tx);
 }
 
+/* UDP-U-04: destination port 0 is RFC 768's "no port"; it must never be
+ * sent to or connected to. */
+static void test_port_zero(void)
+{
+    printf("UDP-U-04: destination port 0 is refused\n");
+    struct sockaddr_in z;
+    int tx = socket(AF_INET, SOCK_DGRAM, 0);
+    lo_addr(&z, 0);
+    errno = 0;
+    ssize_t n = sendto(tx, "x", 1, 0, (struct sockaddr *)&z, sizeof(z));
+    ok("sendto(port 0) fails EINVAL", n < 0 && errno == EINVAL, "datagram to port 0 was sent");
+    errno = 0;
+    int r = connect(tx, (struct sockaddr *)&z, sizeof(z));
+    ok("connect(port 0) fails EINVAL", r < 0 && errno == EINVAL, "connected to port 0");
+    close(tx);
+}
+
 int main(void)
 {
     printf("torture_udp: UDP demux + checksum regressions (#430)\n\n");
@@ -439,6 +456,7 @@ int main(void)
     test_msg_trunc_clamp();
     test_recvmsg_name();
     test_connected_sendto();
+    test_port_zero();
 
     printf("\nResult: %d passed, %d failed -- %s\n",
            passed, failed, failed ? "FAILED" : "PASSED");

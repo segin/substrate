@@ -1231,6 +1231,9 @@ int afinet_connect(int fd, const void *addr, socklen_t len) {
         if (len < (socklen_t)sizeof(struct sin_kern)) return -EINVAL;
         const struct sin_kern *sin = (const struct sin_kern *)addr;
         if (sin->sin_family != AF_INET) return -EAFNOSUPPORT;
+        /* UDP-U-04: RFC 768 reserves port 0 as "no port"; a datagram socket
+         * cannot be connected to it. */
+        if (s->type == SOCK_DGRAM && sin->sin_port == 0) return -EINVAL;
         s->peer_port = __builtin_bswap16(sin->sin_port);
         memcpy(s->peer_addr, &sin->sin_addr, 4);
         if (s->tcp) {
@@ -1262,6 +1265,7 @@ int afinet_connect(int fd, const void *addr, socklen_t len) {
         if (len < (socklen_t)sizeof(struct sin6_kern)) return -EINVAL;
         const struct sin6_kern *sin6 = (const struct sin6_kern *)addr;
         if (sin6->sin6_family != AF_INET6) return -EAFNOSUPPORT;
+        if (s->type == SOCK_DGRAM && sin6->sin6_port == 0) return -EINVAL;
         s->peer_port = __builtin_bswap16(sin6->sin6_port);
         memcpy(s->peer_addr, sin6->sin6_addr, 16);
     }
@@ -1319,6 +1323,9 @@ static ssize_t afinet_sendto_k(int fd, const void *buf, size_t len, int flags,
     } else {
         return -EDESTADDRREQ;
     }
+    /* UDP-U-04: never put destination port 0 -- RFC 768's "no port" -- on
+     * the wire. */
+    if (s->type == SOCK_DGRAM && dport == 0) return -EINVAL;
 
     /* RAW: caller writes the L4 (and for v4 RAW with IP_HDRINCL it'd be
      * the IP header too — not supported yet; we always synthesize the
