@@ -131,6 +131,7 @@ typedef struct afi_sock {
     int      connected;
     int      bound;        /* explicit bind() succeeded — re-bind is EINVAL */
     int      reuseaddr;    /* SO_REUSEADDR — relaxes the EADDRINUSE check */
+    uint32_t owner_uid;    /* UDP-API-01: euid of the creating process */
 
     afi_pkt_t *ring;
     uint32_t   head, tail, count;
@@ -889,6 +890,7 @@ int afinet_socket(int family, int type, int protocol) {
     if (!s) return -ENOMEM;
     memset(s, 0, sizeof(*s));
     s->family = family;
+    s->owner_uid = current_process ? current_process->euid : 0;
     s->type = type;
     s->protocol = protocol;
     s->refcount = 1;                 /* NET-01: the installed reference */
@@ -940,6 +942,42 @@ static int afinet_port_taken(const afi_sock_t *self, uint16_t port) {
     return taken;
 }
 
+static int addr_is_wild(const uint8_t *a, size_t n);
+
+/*
+ * UDP-API-01: may `self` bind laddr:port?  Another bound socket of the same
+ * family and type on the same port conflicts when their local addresses
+ * overlap (either is the wildcard, or they are equal) -- unless BOTH set
+ * SO_REUSEADDR and both belong to the same user.  Only the newcomer's flag
+ * used to be consulted, so any process could bind on top of any other's
+ * port simply by asking; and the address was ignored, so 127.0.0.1:P and
+ * 127.0.0.2:P, which do not overlap, were refused.
+ */
+static int afinet_bind_conflict(const afi_sock_t *self, uint16_t port,
+                                const uint8_t *laddr, size_t alen) {
+    int conflict = 0;
+    unsigned long fl = spinlock_acquire_irq(&afi_lock);
+    for (afi_sock_t *o = g_afi_head; o; o = o->next) {
+        if (o == self || o->closed || !o->bound || o->local_port != port) continue;
+        if (o->family != self->family || o->type != self->type) continue;
+        if (!addr_is_wild(laddr, alen) && !addr_is_wild(o->local_addr, alen) &&
+            memcmp(laddr, o->local_addr, alen) != 0)
+            continue;                                  /* disjoint addresses */
+        if (self->reuseaddr && o->reuseaddr && self->owner_uid == o->owner_uid)
+            continue;                                  /* consented sharing */
+        conflict = 1;
+        break;
+    }
+    spinlock_release_irq(&afi_lock, fl);
+    return conflict;
+}
+
+/* UDP-API-01 / TCP-API-18: ports below IPPORT_RESERVED belong to root. */
+static int afinet_port_reserved(uint16_t port) {
+    return port != 0 && port < 1024 &&
+           (!current_process || current_process->euid != 0);
+}
+
 int afinet_bind(int fd, const void *addr, socklen_t len) {
     afi_sock_t *s = afi_from_fd(fd);
     if (!s) return -ENOTSOCK;
@@ -950,9 +988,11 @@ int afinet_bind(int fd, const void *addr, socklen_t len) {
         const struct sin_kern *sin = (const struct sin_kern *)addr;
         if (sin->sin_family != AF_INET) return -EAFNOSUPPORT;
         uint16_t req = __builtin_bswap16(sin->sin_port);
-        /* A specific port already owned by another socket is EADDRINUSE
-         * unless this socket set SO_REUSEADDR. */
-        if (req && !s->reuseaddr && afinet_port_taken(s, req))
+        if (afinet_port_reserved(req)) return -EACCES;
+        uint8_t la[16];
+        memset(la, 0, sizeof(la));
+        memcpy(la, &sin->sin_addr, 4);
+        if (req && afinet_bind_conflict(s, req, la, 4))
             return -EADDRINUSE;
         /* bind(port 0): assign an ephemeral port now so getsockname()
          * reflects it (POSIX/BSD) — see afinet_alloc_ephemeral(). */
@@ -972,7 +1012,11 @@ int afinet_bind(int fd, const void *addr, socklen_t len) {
         if (len < (socklen_t)sizeof(struct sin6_kern)) return -EINVAL;
         const struct sin6_kern *sin6 = (const struct sin6_kern *)addr;
         if (sin6->sin6_family != AF_INET6) return -EAFNOSUPPORT;
-        s->local_port = __builtin_bswap16(sin6->sin6_port);
+        uint16_t req6 = __builtin_bswap16(sin6->sin6_port);
+        if (afinet_port_reserved(req6)) return -EACCES;
+        if (req6 && afinet_bind_conflict(s, req6, sin6->sin6_addr, 16))
+            return -EADDRINUSE;
+        s->local_port = req6;
         if (s->local_port == 0) {
             uint16_t eph = afinet_alloc_ephemeral_free(s);
             if (eph == 0) return -EADDRINUSE;
@@ -1125,6 +1169,7 @@ int afinet_accept(int fd, void *addr, socklen_t *addrlen) {
     if (!c) { tcp_close(cp); return -ENOMEM; }
     memset(c, 0, sizeof(*c));
     c->family = s->family;
+    c->owner_uid = s->owner_uid;
     c->type = SOCK_STREAM;
     c->protocol = 6;
     c->refcount = 1;                 /* NET-01: the installed reference */
@@ -1836,7 +1881,10 @@ int afinet_deliver_v4(uint32_t saddr, uint32_t daddr,
                 delivered = 1;
                 continue;
             }
-            if (score > best_score) { best_score = score; best = s; }
+            /* UDP-API-01: g_afi_head is newest-first, so `>=` leaves a tie to
+             * the OLDEST socket -- a later bind cannot capture an existing
+             * socket's traffic by tying its score. */
+            if (score >= best_score) { best_score = score; best = s; }
         }
     }
     if (best) {
@@ -1931,7 +1979,10 @@ int afinet_deliver_v6(const uint8_t saddr[16], const uint8_t daddr[16],
                 delivered = 1;
                 continue;
             }
-            if (score > best_score) { best_score = score; best = s; }
+            /* UDP-API-01: g_afi_head is newest-first, so `>=` leaves a tie to
+             * the OLDEST socket -- a later bind cannot capture an existing
+             * socket's traffic by tying its score. */
+            if (score >= best_score) { best_score = score; best = s; }
         }
     }
     if (best) {

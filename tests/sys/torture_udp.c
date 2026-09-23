@@ -6,7 +6,8 @@
  * written through a raw user pointer), UDP-U-01 (connected sendto),
  * UDP-U-04 (destination port 0), UDP-U-05 (empty datagram via sendmsg),
  * UDP-IP-02 (all of 127/8 is local), UDP-IP-08 (broadcast fan-out) and
- * UDP-IP-11 (lo's MTU) from docs/ip-audit-2026-09-22.md.
+ * UDP-IP-11 (lo's MTU) and UDP-API-01 (port ownership) from
+ * docs/ip-audit-2026-09-22.md.
  *
  * Each case drives the real socket API over the loopback interface, so a
  * PASS means a datagram actually took the intended path through the
@@ -567,6 +568,84 @@ static void test_lo_mtu(void)
     close(fd);
 }
 
+/*
+ * UDP-API-01 (and TCP-API-18): bind() must not let one user take over
+ * another's port.  Only the NEW socket's SO_REUSEADDR was consulted, never
+ * the incumbent's or the owner's; there was no reserved-port check; and a
+ * tie in the demux went to the newest socket -- so an unprivileged bind to
+ * a root daemon's port captured its traffic.
+ */
+static void test_port_ownership(void)
+{
+    printf("UDP-API-01: a bound port cannot be taken over\n");
+    struct sockaddr_in a;
+    int one = 1;
+    int root = socket(AF_INET, SOCK_DGRAM, 0);
+    memset(&a, 0, sizeof(a));
+    a.sin_family = AF_INET;
+    a.sin_port = htons(31960);
+    ok("root binds *:31960 (no SO_REUSEADDR)",
+       bind(root, (struct sockaddr *)&a, sizeof(a)) == 0, "bind failed");
+
+    pid_t kid = fork();
+    if (kid == 0) {
+        setuid(1000);
+        int res = 0;
+        int s1 = socket(AF_INET, SOCK_DGRAM, 0);
+        setsockopt(s1, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+        struct sockaddr_in b = a;
+        errno = 0;
+        if (bind(s1, (struct sockaddr *)&b, sizeof(b)) == 0) res |= 1;
+        else if (errno != EADDRINUSE) res |= 4;
+        int s2 = socket(AF_INET, SOCK_DGRAM, 0);
+        b.sin_port = htons(530);
+        errno = 0;
+        if (bind(s2, (struct sockaddr *)&b, sizeof(b)) == 0) res |= 2;
+        else if (errno != EACCES) res |= 8;
+        _exit(res);
+    }
+    int st = 0;
+    waitpid(kid, &st, 0);
+    int code = WIFEXITED(st) ? WEXITSTATUS(st) : 255;
+    ok("another user cannot bind the port, even with SO_REUSEADDR",
+       (code & 1) == 0, "an unprivileged socket took over root's port");
+    ok("...and is told EADDRINUSE", (code & 5) == 0, "wrong errno");
+    ok("a non-root bind below 1024 fails EACCES", (code & 10) == 0,
+       (code & 2) ? "an unprivileged process bound port 530" : "wrong errno");
+    close(root);
+
+    /* Same owner, both SO_REUSEADDR: may share; the OLDER keeps unicast. */
+    int o1 = socket(AF_INET, SOCK_DGRAM, 0);
+    int o2 = socket(AF_INET, SOCK_DGRAM, 0);
+    setsockopt(o1, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+    setsockopt(o2, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+    a.sin_port = htons(31962);
+    int b1 = bind(o1, (struct sockaddr *)&a, sizeof(a));
+    int b2 = bind(o2, (struct sockaddr *)&a, sizeof(a));
+    ok("same owner, both SO_REUSEADDR: may share", b1 == 0 && b2 == 0, "bind failed");
+    int tx = socket(AF_INET, SOCK_DGRAM, 0);
+    lo_addr(&a, 31962);
+    sendto(tx, "u", 1, 0, (struct sockaddr *)&a, sizeof(a));
+    char buf[8];
+    ok("a unicast goes to the first-bound socket",
+       try_recv(o1, buf, sizeof(buf)) == 1 && try_recv(o2, buf, sizeof(buf)) < 0,
+       "the later bind captured it");
+    close(o1);
+    close(o2);
+
+    /* Different specific addresses do not conflict at all. */
+    int l1 = socket(AF_INET, SOCK_DGRAM, 0);
+    int l2 = socket(AF_INET, SOCK_DGRAM, 0);
+    lo_addr(&a, 31963);
+    int c1 = bind(l1, (struct sockaddr *)&a, sizeof(a));
+    a.sin_addr.s_addr = htonl(0x7F000002);
+    int c2 = bind(l2, (struct sockaddr *)&a, sizeof(a));
+    ok("127.0.0.1:P and 127.0.0.2:P coexist", c1 == 0 && c2 == 0, "overlap refused");
+    close(l1);
+    close(l2);
+    close(tx);
+}
+
 int main(void)
 {
     printf("torture_udp: UDP demux + checksum regressions (#430)\n\n");
@@ -584,6 +663,7 @@ int main(void)
     test_loopback_net();
     test_broadcast_fanout();
     test_lo_mtu();
+    test_port_ownership();
 
     printf("\nResult: %d passed, %d failed -- %s\n",
            passed, failed, failed ? "FAILED" : "PASSED");
