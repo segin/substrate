@@ -1620,16 +1620,28 @@ ssize_t tcp_peek_nb(tcp_pcb_t *p, void *buf, size_t len) {
     return -EAGAIN;
 }
 
+/*
+ * TCP-MEM-04: tcp_recv()'s twin minus the hold.  It sleeps and then copies
+ * out of p->rxbuf, and tcp_free() releases rxbuf before the PCB, so a
+ * reaped PCB meant copying a freed 32 KiB ring to userspace.  Pin it for the
+ * whole call, as tcp_recv() does (TCP-01).
+ */
 ssize_t tcp_peek(tcp_pcb_t *p, void *buf, size_t len) {
+    ssize_t ret;
+    tcp_hold(p);
     for (;;) {
         ssize_t r = tcp_peek_nb(p, buf, len);
-        if (r != -EAGAIN) return r;
+        if (r != -EAGAIN) { ret = r; break; }
         current_thread->flags |= THREAD_F_INTERRUPTIBLE;
         sched_sleep_until(p->recv_chan, get_ticks() + TCP_SLEEP_POLL);
         current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
-        if (current_thread->sig_pending & ~current_thread->sig_mask)
-            return -EINTR;
+        if (current_thread->sig_pending & ~current_thread->sig_mask) {
+            ret = -EINTR;
+            break;
+        }
     }
+    tcp_unhold(p);
+    return ret;
 }
 
 int tcp_take_so_error(tcp_pcb_t *p) {
