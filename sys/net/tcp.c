@@ -343,12 +343,19 @@ static int tcp_xmit_raw(tcp_pcb_t *p, uint32_t seq, uint8_t flags,
     th->source     = __builtin_bswap16(p->lport);
     th->dest       = __builtin_bswap16(p->rport);
     th->seq        = __builtin_bswap32(seq);
-    th->ack_seq    = __builtin_bswap32(p->rcv_nxt);
+    /* TCP-WIN-11: RCV.NXT and the window are sampled together under the
+     * lock (filled in below).  This runs unlocked from process context
+     * while the RX path advances rcv_nxt and rx_count, so a torn pair
+     * could advertise an edge left of the last one. */
     th->doff_flags = __builtin_bswap16((uint16_t)((5u << 12) | flags));
+    uint32_t wf    = tcp_lock();
+    uint32_t rnxt  = p->rcv_nxt;
     uint32_t adv   = tcp_rcv_wnd_adv(p);
     p->last_adv_wnd = adv;          /* TCP-WIN-03: what the peer now believes */
-    p->rcv_adv_edge = p->rcv_nxt + adv;                    /* TCP-WIN-07 */
+    p->rcv_adv_edge = rnxt + adv;                          /* TCP-WIN-07 */
     p->rcv_adv_edge_valid = 1;
+    tcp_unlock(wf);
+    th->ack_seq    = __builtin_bswap32(rnxt);
     th->window     = __builtin_bswap16((uint16_t)adv);
     th->check      = 0;
     th->urg_ptr    = 0;
