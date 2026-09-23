@@ -31,6 +31,9 @@ it guards.
                 unacknowledged, an ACK that frees 100 octets does not draw
                 a 100-octet segment (sender silly-window avoidance); the ACK
                 of everything then releases a full window.
+    receiver-sws TCP-WIN-07: after a zero window, draining 512 octets does
+                not advertise a 512-octet window; the window reopens only
+                once at least an MSS is free.
 
 Run from the repo root after building sys/ and wireguest:
     python3 tests/lib/net/wire/test_tcp_window.py [case...]
@@ -260,12 +263,38 @@ def case_sender_sws():
         return None, w
 
 
+def case_receiver_sws():
+    with Wire.boot('connect 10.0.2.2 %d sleep:8 readn:512:512 sleep:3 '
+                   'readn:512:1536 sleep:60' % PORT) as w:
+        syn, err = handshake(w)
+        if err:
+            return err, w
+        gp, g = syn.sport, syn.seq + 1
+        nxt = fill(w, gp, g, 32768)
+        if nxt != PISS + 1 + 32768:
+            return 'could not fill the window: got to %d' % (nxt - PISS - 1), w
+        w.rx.clear()
+        if not w.wait_serial('guest: readn ok total=512', 15):
+            return 'guest never drained', w
+        w.pump(1.0)
+        silly = [s for s in w.rx if s.flags & ACK and 0 < s.win < 1460]
+        if silly:
+            return 'advertised a silly window: %r' % silly, w
+        if not w.wait_serial('guest: readn ok total=1536', 10):
+            return 'guest never drained the rest', w
+        w.pump(1.0)
+        if not [s for s in w.rx if s.flags & ACK and s.win >= 1460]:
+            return 'window never reopened after an MSS was free: %r' % w.rx, w
+        return None, w
+
+
 CASES = (('persist', case_persist),
          ('nb-persist', case_nb_persist),
          ('reopen', case_reopen),
          ('fast-retx', case_fast_retx),
          ('dupack', case_dupack),
-         ('sender-sws', case_sender_sws))
+         ('sender-sws', case_sender_sws),
+         ('receiver-sws', case_receiver_sws))
 
 
 def main():

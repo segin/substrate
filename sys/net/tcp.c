@@ -192,6 +192,8 @@ typedef struct tcp_pcb {
     uint64_t  closing_until;  /* TCP-SM-01: CLOSING/LAST_ACK reaper deadline */
     uint8_t   pollout_wait;   /* TCP-WIN-02: poll() saw no POLLOUT */
     uint32_t  last_adv_wnd;   /* TCP-WIN-03: window in our last segment */
+    uint32_t  rcv_adv_edge;   /* TCP-WIN-07: RCV.NXT + RCV.WND advertised */
+    uint8_t   rcv_adv_edge_valid;
     uint8_t   seg_wnd_same;   /* TCP-WIN-05: segment repeats the window */
     uint32_t  max_snd_wnd;    /* TCP-WIN-06: largest window the peer offered */
     struct ip4_txopts txo;    /* UDP-API-12: the socket's IP_TTL/IP_TOS */
@@ -295,6 +297,30 @@ static uint16_t tcp_csum(uint32_t saddr, uint32_t daddr,
     return inet_csum_pseudo4(saddr, daddr, IPPROTO_TCP, (uint16_t)len, seg);
 }
 
+/*
+ * TCP-WIN-07: the receive window to advertise.  Receiver silly-window
+ * avoidance (RFC 793 3.7, RFC 1122 4.2.3.3): offer nothing until at least
+ * min(MSS, ring/2) is free, so the peer is not invited to send tinygrams --
+ * the raw free-space count was advertised, so a reader freeing 512 octets
+ * after a zero window offered exactly 512.  And never move the right edge
+ * (RCV.NXT + RCV.WND) left of where it was last advertised: the peer may
+ * already be sending into it.
+ */
+static uint32_t tcp_rcv_wnd_calc(const tcp_pcb_t *p) {
+    uint32_t free = TCP_RING_LEN - p->rx_count;
+    uint32_t thresh = TCP_MSS < TCP_RING_LEN / 2 ? TCP_MSS : TCP_RING_LEN / 2;
+    return free >= thresh ? free : 0;
+}
+
+static uint32_t tcp_rcv_wnd_adv(const tcp_pcb_t *p) {
+    uint32_t adv = tcp_rcv_wnd_calc(p);
+    if (p->rcv_adv_edge_valid) {
+        int32_t keep = (int32_t)(p->rcv_adv_edge - p->rcv_nxt);
+        if (keep > (int32_t)adv) adv = (uint32_t)keep;
+    }
+    return adv;
+}
+
 /* Write a TCP segment out via ip4_output.  Does NOT touch snd_nxt /
  * the unacked queue — the queuing layer below does that.  */
 static int tcp_xmit_raw(tcp_pcb_t *p, uint32_t seq, uint8_t flags,
@@ -307,8 +333,10 @@ static int tcp_xmit_raw(tcp_pcb_t *p, uint32_t seq, uint8_t flags,
     th->seq        = __builtin_bswap32(seq);
     th->ack_seq    = __builtin_bswap32(p->rcv_nxt);
     th->doff_flags = __builtin_bswap16((uint16_t)((5u << 12) | flags));
-    uint32_t adv   = TCP_RING_LEN - p->rx_count;
+    uint32_t adv   = tcp_rcv_wnd_adv(p);
     p->last_adv_wnd = adv;          /* TCP-WIN-03: what the peer now believes */
+    p->rcv_adv_edge = p->rcv_nxt + adv;                    /* TCP-WIN-07 */
+    p->rcv_adv_edge_valid = 1;
     th->window     = __builtin_bswap16((uint16_t)adv);
     th->check      = 0;
     th->urg_ptr    = 0;
@@ -804,6 +832,7 @@ static void tcp_in_listen(tcp_pcb_t *p, uint32_t saddr, uint32_t daddr,
     c->snd_una = c->iss;
     c->snd_nxt = c->iss;
     c->rcv_nxt = seq + 1;
+    c->rcv_adv_edge_valid = 0;          /* TCP-WIN-07: new sequence space */
     c->rxbuf   = (uint8_t *)kmalloc(TCP_RING_LEN);
     if (!c->rxbuf) { kfree(c, sizeof(*c)); return; }
     c->rcv_wnd      = TCP_RING_LEN;
@@ -857,6 +886,7 @@ static void tcp_in_syn_sent(tcp_pcb_t *p, uint32_t seq, uint32_t ack,
     }
     if ((flags & (TCP_SYN | TCP_ACK)) == (TCP_SYN | TCP_ACK)) {
         p->rcv_nxt = seq + 1;
+        p->rcv_adv_edge_valid = 0;      /* TCP-WIN-07 */
         /* The peer's ACK confirms our SYN (validated acceptable above,
          * so it always advances snd_una).  Prune it from the unacked
          * queue and advance snd_una. */
@@ -885,6 +915,7 @@ static void tcp_in_syn_sent(tcp_pcb_t *p, uint32_t seq, uint32_t ack,
      */
     if (flags & TCP_SYN) {
         p->rcv_nxt = seq + 1;
+        p->rcv_adv_edge_valid = 0;      /* TCP-WIN-07 */
         p->state   = TCP_SYN_RECEIVED;
         if (p->unacked_head && (p->unacked_head->flags & TCP_SYN)) {
             p->unacked_head->flags |= TCP_ACK;
@@ -1707,6 +1738,7 @@ static void tcp_connect_start(tcp_pcb_t *p, uint32_t raddr, uint16_t rport) {
     p->snd_una = p->iss;
     p->snd_nxt = p->iss;
     p->snd_max_valid = 0;             /* TCP-MEM-07: a new ISS, nothing sent */
+    p->rcv_adv_edge_valid = 0;        /* TCP-WIN-07: no peer sequence yet */
     p->state   = TCP_SYN_SENT;
     tcp_unlock(f);
     /* Queue the SYN — the retx timer will resend it on RTO if the
@@ -2066,7 +2098,8 @@ ssize_t tcp_recv_nb(tcp_pcb_t *p, void *buf, size_t len) {
          * call, so no update went out at all, and the sender sat on its
          * zero window until its probe timer.  A 0 -> non-zero transition
          * is always announced. */
-        uint32_t new_wnd = TCP_RING_LEN - p->rx_count;
+        /* TCP-WIN-07: compare what would now be advertised. */
+        uint32_t new_wnd = tcp_rcv_wnd_calc(p);
         uint32_t adv = p->last_adv_wnd;
         uint32_t step = TCP_MSS < TCP_RING_LEN / 2 ? TCP_MSS : TCP_RING_LEN / 2;
         if ((new_wnd >= adv + step || (adv == 0 && new_wnd > 0)) &&
