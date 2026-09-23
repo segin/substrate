@@ -8,8 +8,8 @@
  * UDP-IP-02 (all of 127/8 is local), UDP-IP-08 (broadcast fan-out) and
  * UDP-IP-11 (lo's MTU), UDP-API-01 (port ownership), UDP-API-02
  * (multi-iovec sendmsg), UDP-API-03 (writev), UDP-API-04 (SO_RCVTIMEO),
- * UDP-API-06 (non-local bind) and UDP-API-07 (connect binds) from
- * docs/ip-audit-2026-09-22.md.
+ * UDP-API-06 (non-local bind), UDP-API-07 (connect binds) and UDP-API-08
+ * (SHUT_RD) from docs/ip-audit-2026-09-22.md.
  *
  * Each case drives the real socket API over the loopback interface, so a
  * PASS means a datagram actually took the intended path through the
@@ -21,6 +21,7 @@
 #include <errno.h>
 #include <netinet/in.h>
 #include <poll.h>
+#include <signal.h>
 #include <stdio.h>
 #include <string.h>
 #include <net/if.h>
@@ -830,6 +831,28 @@ static void test_connect_binds(void)
     close(c);
 }
 
+/* UDP-API-08: after shutdown(SHUT_RD) a blocking recv() returns 0 (EOF),
+ * as read() did.  It blocked forever. */
+static void test_shut_rd(void)
+{
+    printf("UDP-API-08: recv() after shutdown(SHUT_RD) is EOF\n");
+    struct sockaddr_in peer;
+    char buf[8];
+    int c = socket(AF_INET, SOCK_DGRAM, 0);
+    lo_addr(&peer, 31959);
+    connect(c, (struct sockaddr *)&peer, sizeof(peer));
+    ok("shutdown(SHUT_RD)", shutdown(c, SHUT_RD) == 0, "failed");
+    struct pollfd pfd = { c, POLLIN, 0 };
+    ok("poll() reports it readable", poll(&pfd, 1, 0) == 1 && (pfd.revents & POLLIN),
+       "not readable");
+    alarm(3);                            /* a hang would otherwise stall the run */
+    ssize_t n = recv(c, buf, sizeof(buf), 0);
+    alarm(0);
+    ok("recv() returns 0", n == 0, "did not return EOF");
+    ok("read() returns 0", read(c, buf, sizeof(buf)) == 0, "did not return EOF");
+    close(c);
+}
+
 int main(void)
 {
     printf("torture_udp: UDP demux + checksum regressions (#430)\n\n");
@@ -853,6 +876,7 @@ int main(void)
     test_rcvtimeo();
     test_bind_nonlocal();
     test_connect_binds();
+    test_shut_rd();
 
     printf("\nResult: %d passed, %d failed -- %s\n",
            passed, failed, failed ? "FAILED" : "PASSED");

@@ -472,6 +472,7 @@ static int afinet_node_poll(fs_node_t *node, void *waiter)
     int rv = POLLOUT;
     if (s->count > 0) rv |= POLLIN;
     if (s->so_error) rv |= POLLERR;     /* UDP-ICMP-01 */
+    if (s->rd_shut) rv |= POLLIN | POLLRDHUP;   /* UDP-API-08: reads return EOF */
     if (waiter && rv == POLLOUT) *(void **)waiter = s->wait_chan;
     return rv;
 }
@@ -621,6 +622,9 @@ static size_t afinet_node_read_body(fs_node_t *node, size_t size, uint8_t *buf) 
             afi_rele_unlock(s, fl);
             return (size_t)-err;
         }
+        /* UDP-API-08: and a reader already asleep when shutdown(SHUT_RD)
+         * arrives must wake to EOF, not go back to sleep. */
+        if (s->rd_shut) { afi_rele_unlock(s, fl); return 0; }
         if (nb) { afi_rele_unlock(s, fl); return (size_t)-EAGAIN; }
         /* UDP-API-04: SO_RCVTIMEO expired. */
         if (deadline && get_ticks() >= deadline) {
@@ -1817,6 +1821,9 @@ ssize_t afinet_recvfrom(int fd, void *buf, size_t len, int flags,
             afi_rele_unlock(s, fl);
             return -err;
         }
+        /* UDP-API-08: after shutdown(SHUT_RD), an empty queue is end of
+         * file -- as read() already reported -- not a reason to sleep. */
+        if (s->rd_shut) { afi_rele_unlock(s, fl); return 0; }
         /* Non-blocking: MSG_DONTWAIT (Linux convention) or the fd's
          * FNONBLOCK, resolved above. */
         if (nb_dgram) { afi_rele_unlock(s, fl); return -EAGAIN; }
