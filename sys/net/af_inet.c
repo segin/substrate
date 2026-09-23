@@ -1290,12 +1290,17 @@ static ssize_t afinet_sendto_k(int fd, const void *buf, size_t len, int flags,
         return tcp_send(s->tcp, buf, len);
     }
 
-    /* Resolve target addr/port. */
+    /* Resolve target addr/port.
+     *
+     * UDP-U-01: an address the caller names wins, connected or not.  This
+     * used to test s->connected first and parse addr only on the else arm,
+     * so after connect() every sendto() silently went to the connected peer
+     * -- RFC 768's send operation specifies the destination, and a resolver
+     * retargeting a second server re-queried the first.  This is what Linux
+     * does; the peer is the default only when no address is given. */
     uint16_t dport = s->peer_port;
     uint8_t  daddr_buf[16];
-    if (s->connected) {
-        memcpy(daddr_buf, s->peer_addr, 16);
-    } else if (addr) {
+    if (addr) {
         if (s->family == AF_INET) {
             if (addrlen < (socklen_t)sizeof(struct sin_kern)) return -EINVAL;
             const struct sin_kern *sin = (const struct sin_kern *)addr;
@@ -1309,6 +1314,8 @@ static ssize_t afinet_sendto_k(int fd, const void *buf, size_t len, int flags,
             dport = __builtin_bswap16(sin6->sin6_port);
             memcpy(daddr_buf, sin6->sin6_addr, 16);
         }
+    } else if (s->connected) {
+        memcpy(daddr_buf, s->peer_addr, 16);
     } else {
         return -EDESTADDRREQ;
     }

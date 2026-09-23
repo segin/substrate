@@ -2,8 +2,9 @@
  * torture_udp.c — regression test for the UDP demux and checksum findings
  * (task #430: UDP-01, UDP-03, SOCK-07).
  *
- * Also UDP-MEM-01 (MSG_TRUNC over-copy) and UDP-MEM-02 (recvmsg msg_name
- * written through a raw user pointer) from docs/ip-audit-2026-09-22.md.
+ * Also UDP-MEM-01 (MSG_TRUNC over-copy), UDP-MEM-02 (recvmsg msg_name
+ * written through a raw user pointer) and UDP-U-01 (connected sendto) from
+ * docs/ip-audit-2026-09-22.md.
  *
  * Each case drives the real socket API over the loopback interface, so a
  * PASS means a datagram actually took the intended path through the
@@ -386,6 +387,46 @@ static void test_recvmsg_name(void)
     close(tx);
 }
 
+/*
+ * UDP-U-01: sendto() on a CONNECTED datagram socket must honour the
+ * destination it names.  afinet_sendto_k() parsed the caller's address only
+ * when the socket was not connected, so after connect() every sendto() went
+ * to the connected peer instead -- a resolver retargeting a second server
+ * silently re-queried the first.  send() with no address still goes to the
+ * peer.
+ */
+static void test_connected_sendto(void)
+{
+    printf("UDP-U-01: sendto() on a connected socket uses the named address\n");
+
+    struct sockaddr_in a, b;
+    char buf[32];
+    int ra = bind_udp(31970);
+    int rb = bind_udp(31971);
+    int tx = socket(AF_INET, SOCK_DGRAM, 0);
+    if (ra < 0 || rb < 0 || tx < 0) {
+        ok("sockets created", 0, "socket/bind failed");
+        goto out;
+    }
+    lo_addr(&a, 31970);
+    lo_addr(&b, 31971);
+    ok("connect to A", connect(tx, (struct sockaddr *)&a, sizeof(a)) == 0,
+       "connect failed");
+    ssize_t n = sendto(tx, "to-b", 4, 0, (struct sockaddr *)&b, sizeof(b));
+    ok("sendto(B) accepted", n == 4, "sendto failed");
+    ok("B received the datagram", try_recv(rb, buf, sizeof(buf)) == 4,
+       "the named destination got nothing");
+    ok("A (the connected peer) received nothing", try_recv(ra, buf, sizeof(buf)) < 0,
+       "the datagram went to the connected peer instead");
+    n = send(tx, "to-a", 4, 0);
+    ok("send() without an address still reaches A",
+       n == 4 && try_recv(ra, buf, sizeof(buf)) == 4, "peer default lost");
+out:
+    if (ra >= 0) close(ra);
+    if (rb >= 0) close(rb);
+    if (tx >= 0) close(tx);
+}
+
 int main(void)
 {
     printf("torture_udp: UDP demux + checksum regressions (#430)\n\n");
@@ -397,6 +438,7 @@ int main(void)
     test_raw_socket_privileged();
     test_msg_trunc_clamp();
     test_recvmsg_name();
+    test_connected_sendto();
 
     printf("\nResult: %d passed, %d failed -- %s\n",
            passed, failed, failed ? "FAILED" : "PASSED");
