@@ -545,13 +545,16 @@ static void tcp_timer_tick(uint64_t now) {
                 if (p->state == TCP_LAST_ACK) {
                     tcp_kill_pcb(p, 0);
                 } else {
+                    p->time_wait_until = now + TCP_TIME_WAIT_TICKS;   /* TCP-MEM-09: deadline first */
                     p->state = TCP_TIME_WAIT;
-                    p->time_wait_until = now + TCP_TIME_WAIT_TICKS;
                 }
                 continue;
             }
         }
-        if (p->state == TCP_TIME_WAIT && now >= p->time_wait_until) {
+        /* TCP-MEM-09: and never expire on an unarmed (zero) deadline, which
+         * a tick landing between the two stores used to see as long past. */
+        if (p->state == TCP_TIME_WAIT && p->time_wait_until &&
+            now >= p->time_wait_until) {
             /* Drop to CLOSED now; freed on the next tick once no RX
              * can still be matching a late segment against it. */
             p->state = TCP_CLOSED;
@@ -1112,16 +1115,16 @@ static void tcp_in_established(tcp_pcb_t *p, uint32_t seq, uint32_t ack,
              * and CLOSING is the correct state.
              */
             if ((flags & TCP_ACK) && ack == p->snd_nxt && !p->unacked_head) {
+                p->time_wait_until = get_ticks() + TCP_TIME_WAIT_TICKS;   /* TCP-MEM-09: deadline first */
                 p->state = TCP_TIME_WAIT;
-                p->time_wait_until = get_ticks() + TCP_TIME_WAIT_TICKS;
             } else {
                 p->state = TCP_CLOSING;
             }
             tcp_send_ctl(p, TCP_ACK);
             break;
         case TCP_FIN_WAIT_2:
+            p->time_wait_until = get_ticks() + TCP_TIME_WAIT_TICKS;   /* TCP-MEM-09: deadline first */
             p->state = TCP_TIME_WAIT;
-            p->time_wait_until = get_ticks() + TCP_TIME_WAIT_TICKS;
             tcp_send_ctl(p, TCP_ACK);
             break;
         case TCP_LAST_ACK:
@@ -1183,8 +1186,8 @@ static void tcp_in_established(tcp_pcb_t *p, uint32_t seq, uint32_t ack,
      * close: both sides sent FIN before either's was acknowledged). */
     if (p->state == TCP_CLOSING && (flags & TCP_ACK) &&
         ack == p->snd_nxt && !p->unacked_head) {
+        p->time_wait_until = get_ticks() + TCP_TIME_WAIT_TICKS;   /* TCP-MEM-09: deadline first */
         p->state = TCP_TIME_WAIT;
-        p->time_wait_until = get_ticks() + TCP_TIME_WAIT_TICKS;
         return;
     }
 
