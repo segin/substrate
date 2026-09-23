@@ -4,8 +4,8 @@
  *
  * Also UDP-MEM-01 (MSG_TRUNC over-copy), UDP-MEM-02 (recvmsg msg_name
  * written through a raw user pointer), UDP-U-01 (connected sendto),
- * UDP-U-04 (destination port 0) and UDP-U-05 (empty datagram via sendmsg)
- * from docs/ip-audit-2026-09-22.md.
+ * UDP-U-04 (destination port 0), UDP-U-05 (empty datagram via sendmsg) and
+ * UDP-IP-02 (all of 127/8 is local) from docs/ip-audit-2026-09-22.md.
  *
  * Each case drives the real socket API over the loopback interface, so a
  * PASS means a datagram actually took the intended path through the
@@ -477,6 +477,37 @@ static void test_sendmsg_empty(void)
     close(tx);
 }
 
+/* UDP-IP-02: all of 127/8 is the loopback network (RFC 1122 3.2.1.3(g)),
+ * not just 127.0.0.1.  ip4_input accepted only lo's exact address and its
+ * broadcast, so 127.0.0.2 was unreachable. */
+static void test_loopback_net(void)
+{
+    printf("UDP-IP-02: every 127/8 address is local\n");
+    struct sockaddr_in any, dst, from;
+    socklen_t flen = sizeof(from);
+    char buf[16];
+    int rx = socket(AF_INET, SOCK_DGRAM, 0);
+    int tx = socket(AF_INET, SOCK_DGRAM, 0);
+    memset(&any, 0, sizeof(any));
+    any.sin_family = AF_INET;
+    any.sin_port = htons(31973);
+    ok("wildcard bind", bind(rx, (struct sockaddr *)&any, sizeof(any)) == 0, "bind failed");
+    memset(&dst, 0, sizeof(dst));
+    dst.sin_family = AF_INET;
+    dst.sin_port = htons(31973);
+    dst.sin_addr.s_addr = htonl(0x7F000002);        /* 127.0.0.2 */
+    ok("sendto(127.0.0.2) accepted",
+       sendto(tx, "lo2", 3, 0, (struct sockaddr *)&dst, sizeof(dst)) == 3, "sendto failed");
+    ssize_t n = recvfrom(rx, buf, sizeof(buf), MSG_DONTWAIT, (struct sockaddr *)&from, &flen);
+    ok("a datagram to 127.0.0.2 is delivered", n == 3, "datagram dropped");
+    dst.sin_addr.s_addr = htonl(0x7F123456);        /* 127.18.52.86 */
+    sendto(tx, "lo3", 3, 0, (struct sockaddr *)&dst, sizeof(dst));
+    ok("a datagram to 127.18.52.86 is delivered",
+       try_recv(rx, buf, sizeof(buf)) == 3, "datagram dropped");
+    close(rx);
+    close(tx);
+}
+
 int main(void)
 {
     printf("torture_udp: UDP demux + checksum regressions (#430)\n\n");
@@ -491,6 +522,7 @@ int main(void)
     test_connected_sendto();
     test_port_zero();
     test_sendmsg_empty();
+    test_loopback_net();
 
     printf("\nResult: %d passed, %d failed -- %s\n",
            passed, failed, failed ? "FAILED" : "PASSED");

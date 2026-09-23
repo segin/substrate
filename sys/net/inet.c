@@ -353,11 +353,19 @@ void ip4_input(netdev_t *dev, const uint8_t *pkt, size_t len) {
         }
     }
 
-    /* Accept if dst is ours, broadcast, or limited-broadcast. */
+    /* Accept if dst is ours, broadcast, or limited-broadcast.
+     *
+     * UDP-IP-02: on the loopback device every 127/8 address is ours (RFC
+     * 1122 3.2.1.3(g) -- "the internal host loopback address"), not only
+     * lo's single configured 127.0.0.1.  route_for_v4() already sends all
+     * of 127/8 to lo and the martian filter above already treats it as
+     * lo-only, but the exact-address test here dropped 127.0.0.2 et al. */
     uint32_t bcast = (dev->ip4_addr & dev->ip4_netmask) | ~dev->ip4_netmask;
     int for_bcast = (ih->daddr == 0xFFFFFFFFu ||
                      (dev->ip4_netmask != 0 && ih->daddr == bcast));
-    if (ih->daddr != dev->ip4_addr && !for_bcast) {
+    int for_lo = (dev->flags & NETDEV_IFF_LOOPBACK) &&
+                 (ih->daddr & 0xFF) == 127;
+    if (ih->daddr != dev->ip4_addr && !for_bcast && !for_lo) {
         return;
     }
 
