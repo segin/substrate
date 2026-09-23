@@ -1403,35 +1403,43 @@ int tcp_listen(tcp_pcb_t *p, int backlog) {
      * allocation without freeing the old one -- leaking 8*accept_cap and
      * orphaning any children already queued on it, which then never got
      * accepted or reaped.  POSIX allows listen() on an already-listening
-     * socket purely to change the backlog, so keep the queue when it is
-     * already big enough and otherwise migrate the pending children.
+     * socket purely to change the backlog, so migrate the pending children
+     * into a queue of the new size.
+     *
+     * TCP-MEM-11: and do it under tcp_lock -- the RX path appends to this
+     * queue from interrupt context -- with the new array allocated before
+     * the lock is taken and the old one freed after.  A shrink resets and
+     * detaches the children beyond the new cap, as tcp_close()'s LISTEN arm
+     * does for all of them; merely truncating accept_count left them
+     * established on the peer's side and never accepted, reset or reaped.
+     * The array is always reallocated at exactly the new size, since
+     * tcp_free() frees it by accept_cap.
      */
-    if (p->accept_q) {
-        if (backlog <= p->accept_cap) {
-            p->accept_cap = backlog;
-            if (p->accept_count > backlog) p->accept_count = backlog;
-            p->state  = TCP_LISTEN;
-            p->listen = 1;
-            return 0;
-        }
-        tcp_pcb_t **nq = (tcp_pcb_t **)kmalloc(sizeof(tcp_pcb_t *) * backlog);
-        if (!nq) return -ENOMEM;
-        memset(nq, 0, sizeof(tcp_pcb_t *) * backlog);        /* TCP-MEM-05 */
-        for (int i = 0; i < p->accept_count; i++) nq[i] = p->accept_q[i];
-        kfree(p->accept_q, sizeof(tcp_pcb_t *) * p->accept_cap);
-        p->accept_q   = nq;
-        p->accept_cap = backlog;
-        p->state      = TCP_LISTEN;
-        p->listen     = 1;
-        return 0;
-    }
-    p->accept_q = (tcp_pcb_t **)kmalloc(sizeof(tcp_pcb_t *) * backlog);
-    if (!p->accept_q) return -ENOMEM;
+    tcp_pcb_t **nq = (tcp_pcb_t **)kmalloc(sizeof(tcp_pcb_t *) * backlog);
+    if (!nq) return -ENOMEM;
     /* TCP-MEM-05: never let an unwritten slot hold a stale heap word. */
-    memset(p->accept_q, 0, sizeof(tcp_pcb_t *) * backlog);
-    p->accept_cap = backlog;
-    p->state      = TCP_LISTEN;
-    p->listen     = 1;
+    memset(nq, 0, sizeof(tcp_pcb_t *) * backlog);
+
+    uint32_t f = tcp_lock();
+    tcp_pcb_t **oq = p->accept_q;
+    int ocap = p->accept_cap;
+    int keep = p->accept_count < backlog ? p->accept_count : backlog;
+    for (int i = 0; i < keep; i++) nq[i] = oq[i];
+    for (int i = keep; oq && i < p->accept_count; i++) {
+        tcp_pcb_t *q = oq[i];
+        q->parent   = NULL;
+        q->detached = 1;            /* timer reaps once CLOSED */
+        if (q->state != TCP_CLOSED && q->state != TCP_TIME_WAIT)
+            tcp_send_ctl(q, TCP_RST | TCP_ACK);
+        tcp_kill_pcb(q, ECONNRESET);
+    }
+    p->accept_q     = nq;
+    p->accept_cap   = backlog;
+    p->accept_count = keep;
+    p->state        = TCP_LISTEN;
+    p->listen       = 1;
+    tcp_unlock(f);
+    if (oq) kfree(oq, sizeof(tcp_pcb_t *) * ocap);
     return 0;
 }
 

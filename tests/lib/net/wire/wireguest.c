@@ -8,6 +8,9 @@
  *
  *   wireguest connect <ip> <port> <action>...
  *   wireguest listen <port> <action>...
+ *   wireguest relisten <port> <first> <secs> <second> <action>...
+ *                                              (listen(first), sleep secs,
+ *                                               listen(second), then accept)
  *   wireguest udp <ip> <port> <action>...     (a connect()ed UDP socket)
  *   wireguest mcast <group> <port> <action>... (UDP bound to *:port, joined
  *                                                to group on INADDR_ANY)
@@ -223,6 +226,31 @@ int main(int argc, char **argv) {
                 rc = do_actions(fd, argc - 3, argv + 3);
             } else {
                 say("accept failed: %s (%ld)", strerror(errno), errno);
+            }
+        } else {
+            say("listen failed: %s (%ld)", strerror(errno), errno);
+        }
+    } else if (argc >= 6 && strcmp(argv[1], "relisten") == 0) {
+        struct sockaddr_in sa;
+        memset(&sa, 0, sizeof sa);
+        sa.sin_family = AF_INET;
+        sa.sin_port = htons((unsigned short)atoi(argv[2]));
+        int l = socket(AF_INET, SOCK_STREAM, 0);
+        if (l >= 0 && bind(l, (struct sockaddr *)&sa, sizeof sa) == 0 &&
+            listen(l, atoi(argv[3])) == 0) {
+            say("listening %s%ld", "", atol(argv[2]));
+            sleep((unsigned)atoi(argv[4]));
+            if (listen(l, atoi(argv[5])) == 0) {
+                say("relistened backlog=%s%ld", "", atol(argv[5]));
+                int fd = accept(l, NULL, NULL);
+                if (fd >= 0) {
+                    say("accepted %s%ld", "", 0);
+                    rc = do_actions(fd, argc - 6, argv + 6);
+                } else {
+                    say("accept failed: %s (%ld)", strerror(errno), errno);
+                }
+            } else {
+                say("relisten failed: %s (%ld)", strerror(errno), errno);
             }
         } else {
             say("listen failed: %s (%ld)", strerror(errno), errno);
