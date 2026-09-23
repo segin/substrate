@@ -17,10 +17,12 @@ send -- which is exactly what the wedge looked like on the wire.
 
     last-ack  guest closes passively (peer FIN first).  Once complete the PCB
               is gone, so a stray ACK draws a RST.
-    closing   simultaneous close.  Once complete the PCB is in TIME-WAIT,
-              where an in-window SYN draws the RFC 5961 challenge ACK.
-              (CLOSING answers an in-window SYN with nothing -- TCP-SM-06; if
-              that changes, this discriminator has to change with it.)
+    closing   simultaneous close.  Once complete the PCB is in TIME-WAIT:
+              it no longer retransmits its FIN, and an in-window SYN draws
+              the RFC 5961 challenge ACK.  (Since TCP-SM-06 CLOSING answers
+              that SYN the same way, so the SYN only shows the PCB is still
+              synchronized; a CLOSING wedged with nothing to send is bounded
+              by TCP-SM-01's deadline rather than observable here.)
 
 Run from the repo root after building sys/ and wireguest:
     python3 tests/lib/net/wire/test_tcp_closing.py
@@ -99,6 +101,9 @@ def case_closing():
         w.send(Seg(PORT, gp, PISS + 1, g + 1, FIN | ACK))
         finish(w, gp, g)
         w.rx.clear()
+        w.pump(3.0)
+        if any(s.flags & FIN for s in w.rx):
+            return 'CLOSING not completed: guest still retransmits its FIN', w
         w.send(Seg(PORT, gp, PISS + 2, 0, SYN))
         if not w.expect(lambda s: s.flags & ACK and not s.flags & (SYN | RST), 3,
                         'challenge ACK'):

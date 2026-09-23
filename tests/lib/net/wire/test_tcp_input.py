@@ -11,6 +11,9 @@ it guards.
                     RCV.NXT draws a challenge ACK and one far outside the
                     window is dropped; neither kills the embryonic
                     connection, which the peer's ACK then completes.
+    syn-sync        TCP-SM-06: an in-window SYN on an ESTABLISHED
+                    connection draws a challenge ACK (RFC 5961 4) and the
+                    connection survives it.
 
 Run from the repo root after building sys/ and wireguest:
     python3 tests/lib/net/wire/test_tcp_input.py [case...]
@@ -91,8 +94,31 @@ def case_syn_rcvd_rst():
         return None, w
 
 
+def case_syn_sync():
+    with Wire.boot('connect 10.0.2.2 %d sleep:4 read:64 sleep:60' % PORT) as w:
+        syn, err = handshake(w)
+        if err:
+            return err, w
+        gp, g = syn.sport, syn.seq + 1
+        w.rx.clear()
+        w.send(Seg(PORT, gp, PISS + 1, 0, SYN))
+        ch = w.expect(lambda s: s.flags & ACK, 3, 'challenge ACK')
+        if not ch:
+            return 'in-window SYN drew nothing', w
+        if ch.flags & RST or ch.ack != PISS + 1:
+            return 'want a challenge ACK at RCV.NXT, got %r' % ch, w
+        w.send(Seg(PORT, gp, PISS + 1, g, ACK | PSH, data=b'still-here'))
+        if not w.wait_serial('guest: read', 10):
+            return 'guest never read', w
+        line = [l for l in w.serial().splitlines() if 'guest: read' in l][0]
+        if 'n=10' not in line:
+            return 'connection did not survive the SYN: %s' % line.strip(), w
+        return None, w
+
+
 CASES = (('data-after-fin', case_data_after_fin),
-         ('syn-rcvd-rst', case_syn_rcvd_rst))
+         ('syn-rcvd-rst', case_syn_rcvd_rst),
+         ('syn-sync', case_syn_sync))
 
 
 def main():

@@ -1001,6 +1001,28 @@ static void tcp_in_established(tcp_pcb_t *p, uint32_t seq, uint32_t ack,
         return;
     }
 
+    /*
+     * TCP-24: a SYN arriving for a connection we hold in TIME_WAIT is a
+     * client reconnecting on the same 4-tuple.  It used to be silently
+     * ignored, so the client was blackholed for the whole TIME_WAIT
+     * (now 60 s, which makes this far more visible than it was at 1 s).
+     * RFC 1122 4.2.2.13 permits accepting a new incarnation when its
+     * sequence number is beyond what we have seen; we do not implement
+     * that resurrection, so send the challenge ACK RFC 5961 4 prescribes.
+     * The peer then learns the connection is not usable and resets, rather
+     * than retrying into silence until its connect() times out.
+     *
+     * TCP-SM-06: and the same in every synchronized state (RFC 793 3.9's
+     * fourth check).  The test only ran in TIME_WAIT, and after the FIN
+     * processing, so an in-window SYN on any other state was answered with
+     * nothing -- or had its text and FIN processed.  The challenge ACK is
+     * preferred over 793's RST: a forged SYN cannot then reset us.
+     */
+    if (flags & TCP_SYN) {
+        tcp_send_ctl(p, TCP_ACK);
+        return;
+    }
+
     /* Data for a detached PCB has nowhere to land — the owning socket
      * is gone.  RST the peer so a process still writing to this
      * connection fails promptly instead of having its bytes silently
@@ -1195,22 +1217,6 @@ static void tcp_in_established(tcp_pcb_t *p, uint32_t seq, uint32_t ack,
          * half of the close.
          */
         p->fin_wait2_until = get_ticks() + TCP_FIN_WAIT_2_TICKS;
-    }
-
-    /*
-     * TCP-24: a SYN arriving for a connection we hold in TIME_WAIT is a
-     * client reconnecting on the same 4-tuple.  It used to be silently
-     * ignored, so the client was blackholed for the whole TIME_WAIT
-     * (now 60 s, which makes this far more visible than it was at 1 s).
-     * RFC 1122 4.2.2.13 permits accepting a new incarnation when its
-     * sequence number is beyond what we have seen; we do not implement
-     * that resurrection, so send the challenge ACK RFC 5961 4 prescribes.
-     * The peer then learns the connection is not usable and resets, rather
-     * than retrying into silence until its connect() times out.
-     */
-    if (p->state == TCP_TIME_WAIT && (flags & TCP_SYN)) {
-        tcp_send_ctl(p, TCP_ACK);
-        return;
     }
 
     /* LAST_ACK → CLOSED when the peer ACKs our FIN.  The final segment
