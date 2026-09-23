@@ -11,8 +11,9 @@
  * UDP-API-06 (non-local bind), UDP-API-07 (connect binds), UDP-API-08
  * (SHUT_RD), UDP-API-09 (zero-length receive), UDP-API-10 (addrlen at
  * EOF), UDP-API-11 (IP_PKTINFO), UDP-API-12 (IP transmit options),
- * UDP-API-13 (unimplemented options), UDP-API-14 (getsockopt checks) and
- * UDP-API-15 (SO_BROADCAST) from docs/ip-audit-2026-09-22.md.
+ * UDP-API-13 (unimplemented options), UDP-API-14 (getsockopt checks),
+ * UDP-API-15 (SO_BROADCAST) and UDP-API-17 (raw filtering) from
+ * docs/ip-audit-2026-09-22.md.
  *
  * Each case drives the real socket API over the loopback interface, so a
  * PASS means a datagram actually took the intended path through the
@@ -1132,6 +1133,51 @@ static void test_so_broadcast(void)
     close(s);
 }
 
+/* UDP-API-17: a bound raw socket sees only traffic to its address, and a
+ * connected one only traffic from its peer.  The raw demux matched on the
+ * protocol alone. */
+static void test_raw_filter(void)
+{
+    printf("UDP-API-17: bound/connected raw sockets are filtered\n");
+    unsigned char pkt[256];
+    struct sockaddr_in a;
+    int raw = socket(AF_INET, SOCK_RAW, 17);
+    memset(&a, 0, sizeof(a));
+    a.sin_family = AF_INET;
+    a.sin_addr.s_addr = htonl(0x7F000002);          /* bind to 127.0.0.2 */
+    ok("bind a raw socket to 127.0.0.2", bind(raw, (struct sockaddr *)&a, sizeof(a)) == 0,
+       "bind failed");
+    int tx = socket(AF_INET, SOCK_DGRAM, 0);
+    struct sockaddr_in d1, d2;
+    lo_addr(&d1, 31953);                            /* to 127.0.0.1 */
+    lo_addr(&d2, 31952);
+    d2.sin_addr.s_addr = htonl(0x7F000002);         /* to 127.0.0.2 */
+    sendto(tx, "y", 1, 0, (struct sockaddr *)&d2, sizeof(d2));
+    ssize_t n = raw_capture_udp(raw, pkt, sizeof(pkt), 31952);
+    ok("it sees the datagram to its own address", n > 0, "missed it");
+    /* Only now the foreign one: raw_capture_udp() discards what it skips. */
+    sendto(tx, "x", 1, 0, (struct sockaddr *)&d1, sizeof(d1));
+    int leaked = 0;
+    for (int i = 0; i < 3; i++) {
+        wait_readable(raw);
+        n = recv(raw, pkt, sizeof(pkt), MSG_DONTWAIT);
+        if (n >= 28 && ((pkt[22] << 8) | pkt[23]) == 31953) leaked = 1;
+    }
+    ok("but not the one to 127.0.0.1", !leaked, "unfiltered");
+    close(raw);
+
+    /* Connected to 127.0.0.9: nothing from 127.0.0.1 gets through. */
+    int rc = socket(AF_INET, SOCK_RAW, 17);
+    a.sin_addr.s_addr = htonl(0x7F000009);
+    connect(rc, (struct sockaddr *)&a, sizeof(a));
+    sendto(tx, "z", 1, 0, (struct sockaddr *)&d1, sizeof(d1));
+    wait_readable(rc);
+    ok("a connected raw socket ignores other sources",
+       recv(rc, pkt, sizeof(pkt), MSG_DONTWAIT) < 0, "unfiltered");
+    close(rc);
+    close(tx);
+}
+
 int main(void)
 {
     printf("torture_udp: UDP demux + checksum regressions (#430)\n\n");
@@ -1162,6 +1208,7 @@ int main(void)
     test_unsupported_ipopts();
     test_getsockopt_checks();
     test_so_broadcast();
+    test_raw_filter();
 
     printf("\nResult: %d passed, %d failed -- %s\n",
            passed, failed, failed ? "FAILED" : "PASSED");

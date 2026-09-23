@@ -2053,8 +2053,18 @@ static int sock_score(afi_sock_t *s, int family, uint8_t proto,
                       uint16_t sport, uint16_t dport, size_t alen) {
     if (s->closed) return -1;
     if (s->family != family) return -1;
-    if (s->type == SOCK_RAW)
-        return (s->protocol == 0 || s->protocol == (int)proto) ? 0 : -1;
+    if (s->type == SOCK_RAW) {
+        if (s->protocol != 0 && s->protocol != (int)proto) return -1;
+        /* UDP-API-17: a bound raw socket takes only datagrams to its
+         * address, a connected one only those from its peer -- as on BSD
+         * and Linux.  Matching on the protocol alone handed every raw
+         * socket the whole host's traffic for it. */
+        if (!addr_is_wild(s->local_addr, alen) &&
+            memcmp(s->local_addr, daddr, alen) != 0) return -1;
+        if (s->connected && !addr_is_wild(s->peer_addr, alen) &&
+            memcmp(s->peer_addr, saddr, alen) != 0) return -1;
+        return 0;
+    }
     /* DGRAM/UDP: a SOCK_STREAM socket never matches here, and an unbound
      * socket (local_port==0) is NOT a promiscuous catch-all — that made
      * every stray TCP/UDP socket swallow a copy of every datagram. */
