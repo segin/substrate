@@ -22,6 +22,9 @@ it guards.
                     with an ACK and does not complete the handshake; and the
                     text and FIN riding on the real third segment are
                     delivered.
+    syn-sent-ack    TCP-SM-10: in SYN-SENT a bare ACK outside
+                    (ISS, SND.NXT] draws <SEQ=SEG.ACK><CTL=RST>, and the
+                    connect then still completes.
 
 Run from the repo root after building sys/ and wireguest:
     python3 tests/lib/net/wire/test_tcp_input.py [case...]
@@ -176,11 +179,29 @@ def case_syn_rcvd_third():
         return None, w
 
 
+def case_syn_sent_ack():
+    with Wire.boot('connect 10.0.2.2 %d sleep:60' % PORT) as w:
+        syn = w.expect(lambda s: s.flags & SYN and s.dport == PORT, 90, 'SYN')
+        if not syn:
+            return 'no SYN from guest', w
+        w.rx.clear()
+        bad = (syn.seq + 1000) & 0xFFFFFFFF
+        w.send(Seg(PORT, syn.sport, PISS, bad, ACK))
+        r = w.expect(lambda s: s.flags & RST, 3, 'RST')
+        if not r or r.seq != bad:
+            return 'bad ACK in SYN-SENT: want RST seq=%d, got %r' % (bad, r), w
+        w.send(Seg(PORT, syn.sport, PISS, syn.seq + 1, SYN | ACK))
+        if not w.wait_serial('guest: connected', 10):
+            return 'connect did not complete after the bad ACK', w
+        return None, w
+
+
 CASES = (('data-after-fin', case_data_after_fin),
          ('syn-rcvd-rst', case_syn_rcvd_rst),
          ('syn-sync', case_syn_sync),
          ('listen-ack', case_listen_ack),
-         ('syn-rcvd-third', case_syn_rcvd_third))
+         ('syn-rcvd-third', case_syn_rcvd_third),
+         ('syn-sent-ack', case_syn_sent_ack))
 
 
 def main():

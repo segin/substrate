@@ -795,20 +795,26 @@ static void tcp_in_syn_sent(tcp_pcb_t *p, uint32_t seq, uint32_t ack,
         tcp_kill_pcb(p, ECONNREFUSED);
         return;
     }
+    /* A71: RFC 793 SYN-SENT requires validating the ACK before
+     * proceeding.  The segment's ACK must acknowledge our SYN,
+     * i.e. ISS < SEG.ACK <= SND.NXT (in SYN_SENT snd_una == ISS
+     * and snd_nxt == ISS+1).  An ack that is at/below snd_una or
+     * beyond snd_nxt is unacceptable: reply with a reset
+     * (<SEQ=SEG.ACK><CTL=RST>, as the RFC prescribes) and drop the
+     * segment rather than establishing with a stale/forged send
+     * state (which also left the SYN un-pruned and snd_una wrong).
+     *
+     * TCP-SM-10: for every ACK-bearing segment, not only a SYN|ACK -- the
+     * first check in 3.9's SYN-SENT precedes the SYN test.  A bare ACK for
+     * something we never sent (a stale half of an old connection on this
+     * 4-tuple) was dropped silently, so the peer never learned to reset. */
+    if ((flags & TCP_ACK) &&
+        ((int32_t)(ack - p->snd_una) <= 0 ||
+         (int32_t)(ack - p->snd_nxt) > 0)) {
+        tcp_xmit_raw(p, ack, TCP_RST, NULL, 0);
+        return;
+    }
     if ((flags & (TCP_SYN | TCP_ACK)) == (TCP_SYN | TCP_ACK)) {
-        /* A71: RFC 793 SYN-SENT requires validating the ACK before
-         * proceeding.  The segment's ACK must acknowledge our SYN,
-         * i.e. ISS < SEG.ACK <= SND.NXT (in SYN_SENT snd_una == ISS
-         * and snd_nxt == ISS+1).  An ack that is at/below snd_una or
-         * beyond snd_nxt is unacceptable: reply with a reset
-         * (<SEQ=SEG.ACK><CTL=RST>, as the RFC prescribes) and drop the
-         * segment rather than establishing with a stale/forged send
-         * state (which also left the SYN un-pruned and snd_una wrong). */
-        if ((int32_t)(ack - p->snd_una) <= 0 ||
-            (int32_t)(ack - p->snd_nxt) > 0) {
-            tcp_xmit_raw(p, ack, TCP_RST, NULL, 0);
-            return;
-        }
         p->rcv_nxt = seq + 1;
         /* The peer's ACK confirms our SYN (validated acceptable above,
          * so it always advances snd_una).  Prune it from the unacked
