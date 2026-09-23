@@ -11,6 +11,7 @@
  *   wireguest udp <ip> <port> <action>...     (a connect()ed UDP socket)
  *   wireguest mcast <group> <port> <action>... (UDP bound to *:port, joined
  *                                                to group on INADDR_ANY)
+ *   wireguest udpany <port> <action>...        (UDP bound to *:port)
  *
  * Actions, executed in order on the connected socket:
  *   readeof      read until EOF (or error), reporting the byte count
@@ -21,6 +22,7 @@
  *   sleep:N      sleep N seconds
  *   soerror      getsockopt(SO_ERROR), reporting the value
  *   sendto:IP:PORT:TEXT   send TEXT to IP:PORT
+ *   ifaddr0      SIOCSIFADDR eth0 0.0.0.0 -- leave the NIC unconfigured
  *
  * Every step is logged as "guest: ..." on the console so the host side can
  * synchronise on it, and the run ends with "Result: done".
@@ -34,6 +36,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <net/if.h>
+#include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
@@ -87,6 +91,15 @@ static int do_actions(int fd, int argc, char **argv) {
             ssize_t n = sendto(fd, c2 + 1, strlen(c2 + 1), 0,
                                (struct sockaddr *)&to, sizeof to);
             say("sendto %s n=%ld", n < 0 ? strerror(errno) : "ok", (long)n);
+        } else if (strcmp(a, "ifaddr0") == 0) {
+            struct ifreq ifr;
+            memset(&ifr, 0, sizeof ifr);
+            strncpy(ifr.ifr_name, "eth0", sizeof ifr.ifr_name - 1);
+            struct sockaddr_in *sin = (struct sockaddr_in *)&ifr.ifr_addr;
+            sin->sin_family = AF_INET;
+            sin->sin_addr.s_addr = 0;
+            int r = ioctl(fd, SIOCSIFADDR, &ifr);
+            say("ifaddr0 %s rc=%ld", r < 0 ? strerror(errno) : "ok", r);
         } else if (strcmp(a, "soerror") == 0) {
             int err = -1;
             socklen_t el = sizeof(err);
@@ -156,6 +169,18 @@ int main(int argc, char **argv) {
             rc = do_actions(fd, argc - 4, argv + 4);
         } else {
             say("mcast setup failed: %s (%ld)", strerror(errno), errno);
+        }
+    } else if (argc >= 3 && strcmp(argv[1], "udpany") == 0) {
+        struct sockaddr_in sa;
+        memset(&sa, 0, sizeof sa);
+        sa.sin_family = AF_INET;
+        sa.sin_port = htons((unsigned short)atoi(argv[2]));
+        int fd = socket(AF_INET, SOCK_DGRAM, 0);
+        if (fd >= 0 && bind(fd, (struct sockaddr *)&sa, sizeof sa) == 0) {
+            say("udpany bound %s%ld", "", atol(argv[2]));
+            rc = do_actions(fd, argc - 3, argv + 3);
+        } else {
+            say("udpany failed: %s (%ld)", strerror(errno), errno);
         }
     } else if (argc >= 3 && strcmp(argv[1], "listen") == 0) {
         struct sockaddr_in sa;
