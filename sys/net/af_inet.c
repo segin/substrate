@@ -213,8 +213,6 @@ static uint16_t afinet_alloc_ephemeral(void) {
     return port;
 }
 
-static int afinet_port_taken(const afi_sock_t *self, uint16_t port);
-
 /*
  * UDP-05: hand out an ephemeral port that is not already in use.
  *
@@ -227,14 +225,31 @@ static int afinet_port_taken(const afi_sock_t *self, uint16_t port);
  *
  * Callers must also record the result in s->local_port BEFORE anyone else
  * can allocate, and set s->bound -- an implicitly-bound socket that leaves
- * `bound` clear is invisible to afinet_port_taken(), which is how the
+ * `bound` clear is invisible to afinet_port_taken_locked(), which is how the
  * collision persisted even once a check existed.
  */
+static int afinet_port_taken_locked(const afi_sock_t *self, uint16_t port);
+
+/*
+ * UDP-API-18: and do it atomically.  The counter was advanced, the port
+ * checked under afi_lock, the lock DROPPED, and only then did the caller
+ * record the port -- so two threads binding implicitly at once could both
+ * pass the check on the same port.  Advance, check and record (local_port,
+ * bound) are now one afi_lock critical section.  Callers' own assignments
+ * of the returned port are then redundant but harmless.
+ */
 static uint16_t afinet_alloc_ephemeral_free(afi_sock_t *s) {
+    unsigned long fl = spinlock_acquire_irq(&afi_lock);
     for (int i = 0; i < 16384; i++) {
         uint16_t port = afinet_alloc_ephemeral();
-        if (!afinet_port_taken(s, port)) return port;
+        if (!afinet_port_taken_locked(s, port)) {
+            s->local_port = port;
+            s->bound = 1;
+            spinlock_release_irq(&afi_lock, fl);
+            return port;
+        }
     }
+    spinlock_release_irq(&afi_lock, fl);
     return 0;   /* range exhausted; caller reports EADDRINUSE */
 }
 
@@ -967,23 +982,18 @@ int afinet_socket(int family, int type, int protocol) {
 
 /* True iff another live socket of the same family+type already has `port`
  * explicitly bound — the EADDRINUSE test, relaxed by SO_REUSEADDR. */
-static int afinet_port_taken(const afi_sock_t *self, uint16_t port) {
-    int taken = 0;
-    /* NET-01: walk the delivery list under afi_lock so it can't be
-     * re-spliced by socket()/accept()/close() (or an IRQ delivery walk)
-     * mid-scan. */
-    unsigned long fl = spinlock_acquire_irq(&afi_lock);
+/* Is `port` bound by another socket of self's family and type?  The caller
+ * holds afi_lock (NET-01: the list cannot be re-spliced mid-scan). */
+static int afinet_port_taken_locked(const afi_sock_t *self, uint16_t port) {
     for (afi_sock_t *o = g_afi_head; o; o = o->next) {
         if (o == self || o->closed) continue;
         if (o->bound && o->local_port == port &&
-            o->family == self->family && o->type == self->type) {
-            taken = 1;
-            break;
-        }
+            o->family == self->family && o->type == self->type)
+            return 1;
     }
-    spinlock_release_irq(&afi_lock, fl);
-    return taken;
+    return 0;
 }
+
 
 static int addr_is_wild(const uint8_t *a, size_t n);
 
