@@ -2008,8 +2008,14 @@ static uint16_t tcp_alloc_ephemeral_locked(const tcp_pcb_t *self, uint32_t r) {
 }
 
 static void tcp_connect_start(tcp_pcb_t *p, uint32_t raddr, uint16_t rport) {
+    /* random_get_bytes() returns the byte count on success, not 0.  The
+     * test was inverted, so the candidate ALWAYS came from get_ticks(): two
+     * connects within one 4 ms tick started from the same port, and a port
+     * whose last connection had just closed was handed straight back out --
+     * onto a 4-tuple the peer still held in TIME-WAIT, which answered the
+     * new SYN with a RST.  Ports were predictable as well (TCP-07). */
     uint32_t r = 0;
-    if (random_get_bytes(&r, sizeof(r)) != 0)
+    if (random_get_bytes(&r, sizeof(r)) != (int)sizeof(r))
         r = (uint32_t)get_ticks();
     uint32_t iss = tcp_new_iss();
     if (!p->laddr) {
