@@ -829,9 +829,17 @@ static void tcp_in_syn_sent(tcp_pcb_t *p, uint32_t seq, uint32_t ack,
 }
 
 static int tcp_seq_in_rcv_window(const tcp_pcb_t *p, uint32_t seq);
+static int tcp_seg_check(tcp_pcb_t *p, uint32_t *seqp, uint8_t *flagsp,
+                         const uint8_t **payloadp, size_t *dlenp);
 
-static void tcp_in_syn_received(tcp_pcb_t *p, uint32_t seq, uint32_t ack,
-                                uint8_t flags) {
+/* Returns 1 when the segment completed the handshake and its text and FIN
+ * (possibly trimmed, through the pointers) remain to be processed by
+ * tcp_in_established(); 0 when it has been consumed. */
+static int tcp_in_syn_received(tcp_pcb_t *p, uint32_t *seqp, uint32_t ack,
+                               uint8_t *flagsp, const uint8_t **payloadp,
+                               size_t *dlenp) {
+    uint32_t seq = *seqp;
+    uint8_t flags = *flagsp;
     /* NET-06: a RST for a half-open child aborts it.  Tear the child
      * down (tcp_kill_pcb -> TCP_CLOSED) instead of silently dropping the
      * segment; the retransmit-timer reaper then frees the never-accepted
@@ -844,44 +852,68 @@ static void tcp_in_syn_received(tcp_pcb_t *p, uint32_t seq, uint32_t ack,
      * send a challenge ACK, exactly at RCV.NXT reset. */
     if (flags & TCP_RST) {
         if (!tcp_seq_in_rcv_window(p, seq))
-            return;
+            return 0;
         if (seq != p->rcv_nxt) {
             tcp_send_ctl(p, TCP_ACK);   /* challenge ACK */
-            return;
+            return 0;
         }
         tcp_kill_pcb(p, ECONNRESET);
-        return;
+        return 0;
     }
-    if ((flags & TCP_ACK) && ack == p->snd_nxt) {
-        if ((int32_t)(ack - p->snd_una) > 0) {
-            p->snd_una = ack;
-            tcp_unacked_prune(p, ack);
-        }
-        p->state = TCP_ESTABLISHED;
-        p->last_ack = ack;          /* TCP-33: so the 1st duplicate counts */
-        p->dup_ack  = 0;
-        /* TCP-10: RFC 5681 3.1 -- initial window of 3*MSS (the IW=10 of
-         * RFC 6928 is for well-provisioned paths; be conservative here),
-         * and an effectively infinite ssthresh so the first loss sets it. */
-        p->cwnd     = 3u * TCP_MSS;
-        p->ssthresh = 0xFFFFFFFFu;
-        /* Hand to parent's accept queue. */
-        if (p->parent) {
-            tcp_pcb_t *par = p->parent;
-            if (par->accept_count < par->accept_cap) {
-                /* TCP-MEM-05: write the slot, THEN publish it.  The
-                 * one-statement form compiled to the count store first
-                 * (confirmed in tcp.o), so a reader between the two stores
-                 * took an unwritten slot as a PCB pointer.  tcp_input()'s
-                 * lock (TCP-MEM-01) now excludes that reader; the order is
-                 * kept right regardless, with a compiler barrier. */
-                par->accept_q[par->accept_count] = p;
-                __asm__ volatile ("" ::: "memory");
-                par->accept_count++;
-                sched_wakeup(par->accept_chan);
-            }
+    /*
+     * TCP-SM-09: RFC 793 3.9 for SYN-RECEIVED.  None of this was checked:
+     * any segment carrying ACK == SND.NXT completed the handshake whatever
+     * its sequence number, an unacceptable ACK was silently ignored, and
+     * the text and FIN of the third segment were thrown away (a client
+     * that sends its request with the handshake ACK had to wait for an RTO
+     * to get it through).
+     *
+     * A SYN here is the peer retransmitting its SYN; the queued SYN-ACK's
+     * retransmission answers it, as before.
+     */
+    if (flags & TCP_SYN)
+        return 0;
+    /* First check: sequence number (answered with an ACK and dropped). */
+    if (!tcp_seg_check(p, seqp, flagsp, payloadp, dlenp))
+        return 0;
+    flags = *flagsp;
+    /* Fifth check: no ACK, drop; an ACK outside (SND.UNA, SND.NXT] draws
+     * <SEQ=SEG.ACK><CTL=RST> and the embryo stays as it was. */
+    if (!(flags & TCP_ACK))
+        return 0;
+    if (!((int32_t)(ack - p->snd_una) > 0 && (int32_t)(ack - p->snd_nxt) <= 0)) {
+        tcp_xmit_raw(p, ack, TCP_RST, NULL, 0);
+        return 0;
+    }
+    if ((int32_t)(ack - p->snd_una) > 0) {
+        p->snd_una = ack;
+        tcp_unacked_prune(p, ack);
+    }
+    p->state = TCP_ESTABLISHED;
+    p->last_ack = ack;          /* TCP-33: so the 1st duplicate counts */
+    p->dup_ack  = 0;
+    /* TCP-10: RFC 5681 3.1 -- initial window of 3*MSS (the IW=10 of
+     * RFC 6928 is for well-provisioned paths; be conservative here),
+     * and an effectively infinite ssthresh so the first loss sets it. */
+    p->cwnd     = 3u * TCP_MSS;
+    p->ssthresh = 0xFFFFFFFFu;
+    /* Hand to parent's accept queue. */
+    if (p->parent) {
+        tcp_pcb_t *par = p->parent;
+        if (par->accept_count < par->accept_cap) {
+            /* TCP-MEM-05: write the slot, THEN publish it.  The
+             * one-statement form compiled to the count store first
+             * (confirmed in tcp.o), so a reader between the two stores
+             * took an unwritten slot as a PCB pointer.  tcp_input()'s
+             * lock (TCP-MEM-01) now excludes that reader; the order is
+             * kept right regardless, with a compiler barrier. */
+            par->accept_q[par->accept_count] = p;
+            __asm__ volatile ("" ::: "memory");
+            par->accept_count++;
+            sched_wakeup(par->accept_chan);
         }
     }
+    return 1;
 }
 
 /* True if `seq` falls inside the current receive window
@@ -1317,7 +1349,8 @@ static void tcp_input_locked(uint32_t saddr, uint32_t daddr,
         tcp_in_syn_sent(p, seq, ack, flags);
         return;
     case TCP_SYN_RECEIVED:
-        tcp_in_syn_received(p, seq, ack, flags);
+        if (tcp_in_syn_received(p, &seq, ack, &flags, &payload, &dlen))
+            tcp_in_established(p, seq, ack, flags, payload, dlen);   /* TCP-SM-09 */
         return;
     case TCP_ESTABLISHED:
     case TCP_FIN_WAIT_1:

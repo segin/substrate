@@ -16,6 +16,12 @@ it guards.
                     connection survives it.
     listen-ack      TCP-SM-07: a bare ACK, and a SYN|ACK, sent to a
                     listening port each draw <SEQ=SEG.ACK><CTL=RST>.
+    syn-rcvd-third  TCP-SM-09: in SYN-RECEIVED an ACK outside
+                    (SND.UNA, SND.NXT] draws <SEQ=SEG.ACK><CTL=RST>; a third
+                    segment with an unacceptable sequence number is answered
+                    with an ACK and does not complete the handshake; and the
+                    text and FIN riding on the real third segment are
+                    delivered.
 
 Run from the repo root after building sys/ and wireguest:
     python3 tests/lib/net/wire/test_tcp_input.py [case...]
@@ -48,6 +54,7 @@ def passive(w, hp):
         return None, 'guest never listened'
     w.send_arp(1, PEER_MAC, PEER_IP, b'\0' * 6, GUEST_IP)
     w.pump(0.5)
+    w.rx.clear()
     w.send(Seg(hp, PORT, PISS, 0, SYN))
     sa = w.expect(lambda s: s.dport == hp and s.flags & (SYN | ACK) == SYN | ACK,
                   5, 'SYN-ACK')
@@ -136,10 +143,44 @@ def case_listen_ack():
         return None, w
 
 
+def case_syn_rcvd_third():
+    with Wire.boot('listen %d readeof sleep:60' % PORT) as w:
+        # A second embryo, answered with a bad ACK: RST <SEQ=SEG.ACK>.
+        sa2, err = passive(w, 42004)
+        if err:
+            return err, w
+        w.rx.clear()
+        bad = (sa2.seq + 1000) & 0xFFFFFFFF
+        w.send(Seg(42004, PORT, PISS + 1, bad, ACK))
+        r = w.expect(lambda s: s.dport == 42004, 3, 'RST')
+        if not r or not r.flags & RST or r.seq != bad:
+            return 'bad ACK in SYN-RECEIVED: want RST seq=%d, got %r' % (bad, r), w
+        # The real one.
+        w.send(Seg(42003, PORT, PISS, 0, SYN))
+        sa = w.expect(lambda s: s.dport == 42003 and s.flags & SYN, 5, 'SYN-ACK')
+        if not sa:
+            return 'no SYN-ACK', w
+        w.rx.clear()
+        w.send(Seg(42003, PORT, PISS + 1 + 0x40000000, sa.seq + 1, ACK))
+        r = w.expect(lambda s: s.dport == 42003, 3, 'ACK')
+        if not r or r.flags & RST or r.ack != PISS + 1:
+            return 'unacceptable third segment: want ACK %d, got %r' % (PISS + 1, r), w
+        if w.wait_serial('guest: accepted', 1):
+            return 'an unacceptable segment completed the handshake', w
+        w.send(Seg(42003, PORT, PISS + 1, sa.seq + 1, ACK | PSH | FIN, data=b'hello'))
+        if not w.wait_serial('guest: readeof', 10):
+            return 'text/FIN on the third segment lost: no EOF', w
+        line = [l for l in w.serial().splitlines() if 'guest: readeof' in l][0]
+        if 'EOF total=5' not in line:
+            return 'third segment: %s' % line.strip(), w
+        return None, w
+
+
 CASES = (('data-after-fin', case_data_after_fin),
          ('syn-rcvd-rst', case_syn_rcvd_rst),
          ('syn-sync', case_syn_sync),
-         ('listen-ack', case_listen_ack))
+         ('listen-ack', case_listen_ack),
+         ('syn-rcvd-third', case_syn_rcvd_third))
 
 
 def main():
