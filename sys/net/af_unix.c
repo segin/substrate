@@ -2661,6 +2661,22 @@ int sys_setsockopt(int fd, int level, int optname,
         }
         afinet_set_reuseaddr(fd, on);   /* no-op on non-AF_INET fds */
     }
+    /* UDP-IP-06: IPPROTO_IP IP_ADD_MEMBERSHIP (35) / IP_DROP_MEMBERSHIP (36),
+     * taking a struct ip_mreq (group, interface address) or a Linux struct
+     * ip_mreqn (group, address, ifindex). */
+    if (level == 0 /*IPPROTO_IP*/ && (optname == 35 || optname == 36)) {
+        uint8_t m[12];
+        size_t n = optlen >= 12 ? 12 : 8;
+        if (!optval || optlen < 8) return -EINVAL;
+        memset(m, 0, sizeof(m));
+        if (copyin(optval, m, n) != 0) return -EFAULT;
+        uint32_t group, ifaddr;
+        int ifindex = 0;
+        memcpy(&group, m, 4);
+        memcpy(&ifaddr, m + 4, 4);
+        if (n == 12) memcpy(&ifindex, m + 8, 4);
+        return afinet_mc_membership(fd, optname == 35, group, ifaddr, ifindex);
+    }
     return 0;
 }
 

@@ -30,7 +30,16 @@ struct netdev_ops {
      * errno on failure.  Driver may copy or DMA; the caller's buffer
      * is no longer referenced after return. */
     int (*xmit)(struct netdev *dev, const void *frame, size_t len);
+    /* UDP-IP-06, optional: accept (on != 0) or stop accepting every
+     * multicast frame.  Called when the interface's first IPv4 group is
+     * joined and when its last is left; the IP layer then filters by
+     * membership.  NULL for a device that already delivers all multicast. */
+    void (*set_allmulti)(struct netdev *dev, int on);
 };
+
+/* UDP-IP-06: IPv4 groups joined on an interface, refcounted across the
+ * sockets that joined them. */
+#define NETDEV_MC_MAX 16
 
 typedef struct netdev {
     char     name[NETDEV_NAME_MAX];      /* "eth0", "eth1", ... */
@@ -49,6 +58,9 @@ typedef struct netdev {
     uint8_t  ip6_addr[16];      /* link-local or global */
     uint8_t  ip6_netmask_bits;  /* CIDR prefix length */
     uint8_t  ip6_gateway[16];
+
+    uint32_t mc_group[NETDEV_MC_MAX];   /* network byte order; 0 = free */
+    uint16_t mc_refs[NETDEV_MC_MAX];
 
     const struct netdev_ops *ops;
     void   *driver_data;
@@ -70,6 +82,17 @@ typedef struct netdev {
 #define NETDEV_IFF_LOOPBACK     0x0008
 #define NETDEV_IFF_RUNNING      0x0040
 #define NETDEV_IFF_PROMISC      0x0100
+#define NETDEV_IFF_MULTICAST    0x1000
+
+/* UDP-IP-06: IPv4 multicast membership on an interface.  join/leave are
+ * refcounted -- each socket that joins takes a reference -- and switch the
+ * driver's all-multicast mode on the first join and off after the last
+ * leave.  join returns 0, -ENOBUFS when the table is full or -EINVAL for a
+ * non-multicast device; leave returns 0 or -EADDRNOTAVAIL.  member
+ * reports whether group is joined on dev. */
+int netdev_mc_join(netdev_t *dev, uint32_t group);
+int netdev_mc_leave(netdev_t *dev, uint32_t group);
+int netdev_mc_member(const netdev_t *dev, uint32_t group);
 
 /* Register a netdev — assigns ifindex, links it onto the global
  * list, prints a registration line.  Driver must have set

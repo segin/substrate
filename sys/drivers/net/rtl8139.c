@@ -41,6 +41,7 @@
 #define R_IMR           0x3C   /* Interrupt Mask */
 #define R_ISR           0x3E   /* Interrupt Status */
 #define R_TCR           0x40   /* TX config */
+#define R_MAR0          0x08   /* multicast filter, 8 bytes */
 #define R_RCR           0x44   /* RX config */
 #define R_CONFIG1       0x52
 
@@ -250,7 +251,21 @@ static int rtl_irq(unsigned int irq, void *dev_id, void *frame) {
     return 1;
 }
 
-static const struct netdev_ops rtl_ops = { .xmit = rtl_xmit };
+/* UDP-IP-06: RCR_AM filters against the MAR0..7 hash, which this driver
+ * never wrote, so which groups passed depended on the chip's reset state.
+ * Open it fully while any IPv4 group is joined, close it otherwise; the IP
+ * layer filters by membership. */
+static void rtl_set_allmulti(netdev_t *dev, int on) {
+    (void)dev;
+    uint32_t v = on ? 0xFFFFFFFFu : 0;
+    outl(rtl.io_base + R_MAR0, v);
+    outl(rtl.io_base + R_MAR0 + 4, v);
+}
+
+static const struct netdev_ops rtl_ops = {
+    .xmit = rtl_xmit,
+    .set_allmulti = rtl_set_allmulti,
+};
 
 /* ----- attach ----- */
 
@@ -333,7 +348,8 @@ int rtl8139_setup(pci_device_t *pdev) {
     /* Register. */
     strlcpy(rtl.netdev.name, "eth0", NETDEV_NAME_MAX);
     rtl.netdev.mtu = 1500;
-    rtl.netdev.flags = NETDEV_IFF_UP | NETDEV_IFF_BROADCAST | NETDEV_IFF_RUNNING;
+    rtl.netdev.flags = NETDEV_IFF_UP | NETDEV_IFF_BROADCAST | NETDEV_IFF_RUNNING |
+                      NETDEV_IFF_MULTICAST;
     rtl.netdev.ops = &rtl_ops;
     rtl.netdev.driver_data = &rtl;
     netdev_register(&rtl.netdev);

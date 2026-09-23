@@ -207,6 +207,11 @@ int     afinet_shutdown(int fd, int how);
 int     afinet_getsockname(int fd, void *addr, socklen_t *addrlen);
 int     afinet_getpeername(int fd, void *addr, socklen_t *addrlen);
 int     afinet_set_reuseaddr(int fd, int on);
+/* UDP-IP-06: IP_ADD_MEMBERSHIP (add != 0) / IP_DROP_MEMBERSHIP.  group and
+ * ifaddr in network byte order; ifindex > 0 selects the interface by index
+ * (struct ip_mreqn) and overrides ifaddr. */
+int     afinet_mc_membership(int fd, int add, uint32_t group, uint32_t ifaddr,
+                             int ifindex);
 int     afinet_so_error(int fd);
 int     afinet_so_type(int fd);
 int     afinet_get_reuseaddr(int fd);

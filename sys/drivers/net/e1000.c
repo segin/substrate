@@ -260,8 +260,19 @@ static int e1000_xmit(netdev_t *dev, const void *frame, size_t len) {
     return 0;
 }
 
+/* UDP-IP-06: multicast promiscuous while any IPv4 group is joined.  The
+ * 128-entry Multicast Table Array is zeroed at setup and RCTL was written
+ * without MPE, so the hash filter rejected every multicast frame; the IP
+ * layer filters by membership, so passing all of them here is enough. */
+static void e1000_set_allmulti(netdev_t *dev, int on) {
+    (void)dev;
+    uint32_t rctl = e1k_read(E1000_RCTL);
+    e1k_write(E1000_RCTL, on ? (rctl | RCTL_MPE) : (rctl & ~RCTL_MPE));
+}
+
 static const struct netdev_ops e1000_ops = {
     .xmit = e1000_xmit,
+    .set_allmulti = e1000_set_allmulti,
 };
 
 /* ----- setup ----- */
@@ -405,7 +416,8 @@ static int e1000_setup(pci_device_t *pdev) {
 
     strlcpy(e1k.netdev.name, "eth0", NETDEV_NAME_MAX);
     e1k.netdev.mtu = 1500;
-    e1k.netdev.flags = NETDEV_IFF_UP | NETDEV_IFF_BROADCAST | NETDEV_IFF_RUNNING;
+    e1k.netdev.flags = NETDEV_IFF_UP | NETDEV_IFF_BROADCAST | NETDEV_IFF_RUNNING |
+                      NETDEV_IFF_MULTICAST;
     e1k.netdev.ops = &e1000_ops;
     e1k.netdev.driver_data = &e1k;
     netdev_register(&e1k.netdev);

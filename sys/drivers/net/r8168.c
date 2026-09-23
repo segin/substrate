@@ -322,8 +322,20 @@ static int r8168_xmit(netdev_t *dev, const void *frame, size_t len) {
     return 0;
 }
 
+/* UDP-IP-06: RCR_AM is set, but it filters against the 64-bit MAR hash,
+ * which setup zeroes -- so no multicast frame was ever accepted.  Open the
+ * whole hash while any IPv4 group is joined; the IP layer filters by
+ * membership. */
+static void r8168_set_allmulti(netdev_t *dev, int on) {
+    (void)dev;
+    uint32_t v = on ? 0xFFFFFFFFu : 0;
+    rt_w32(R_MAR0, v);
+    rt_w32(R_MAR0 + 4, v);
+}
+
 static const struct netdev_ops r8168_ops = {
     .xmit = r8168_xmit,
+    .set_allmulti = r8168_set_allmulti,
 };
 
 /* ----- stepping identification ----- */
@@ -591,7 +603,8 @@ static int r8168_setup(pci_device_t *pdev) {
 
     strlcpy(rt.netdev.name, "eth0", NETDEV_NAME_MAX);
     rt.netdev.mtu = 1500;
-    rt.netdev.flags = NETDEV_IFF_UP | NETDEV_IFF_BROADCAST | NETDEV_IFF_RUNNING;
+    rt.netdev.flags = NETDEV_IFF_UP | NETDEV_IFF_BROADCAST | NETDEV_IFF_RUNNING |
+                     NETDEV_IFF_MULTICAST;
     rt.netdev.ops = &r8168_ops;
     rt.netdev.driver_data = &rt;
     netdev_register(&rt.netdev);

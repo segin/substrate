@@ -164,6 +164,34 @@ static int ip4_is_local_ifaddr(uint32_t a) {
     return 0;
 }
 
+/* UDP-IP-06: class D, 224/4 (network byte order: the first octet is the
+ * low byte). */
+static inline int ip4_is_mcast(uint32_t a) {
+    return ((a & 0xFF) >> 4) == 0xE;
+}
+
+#define IP4_ALLHOSTS 0x010000E0u    /* 224.0.0.1, network byte order */
+
+static netdev_t *ip4_loopback_dev(void) {
+    for (netdev_t *d = netdev_first(); d; d = netdev_next(d))
+        if (d->flags & NETDEV_IFF_LOOPBACK) return d;
+    return NULL;
+}
+
+/* UDP-IP-06: accept a multicast datagram arriving on dev?  224.0.0.1 always
+ * (RFC 1122 3.3.7); otherwise only a group joined on dev.  The loopback
+ * device carries our own looped-back multicast, so there it is a group
+ * joined on ANY interface. */
+static int ip4_mc_accept(const netdev_t *dev, uint32_t group) {
+    if (dev->flags & NETDEV_IFF_LOOPBACK) {
+        for (netdev_t *d = netdev_first(); d; d = netdev_next(d))
+            if (netdev_mc_member(d, group)) return 1;
+        return 0;
+    }
+    if (!(dev->flags & NETDEV_IFF_MULTICAST)) return 0;
+    return group == IP4_ALLHOSTS || netdev_mc_member(dev, group);
+}
+
 /* Is `daddr` a broadcast address on `dev` -- limited, or dev's subnet's
  * directed broadcast? */
 static int ip4_is_bcast_on(const netdev_t *dev, uint32_t daddr) {
@@ -183,6 +211,22 @@ static netdev_t *route_for_v4(uint32_t daddr, int *via_gw_out) {
     if (daddr == 0xFFFFFFFFu) {
         for (netdev_t *d = netdev_first(); d; d = netdev_next(d)) {
             if ((d->flags & NETDEV_IFF_UP) && (d->flags & NETDEV_IFF_BROADCAST) &&
+                !(d->flags & NETDEV_IFF_LOOPBACK)) {
+                if (via_gw_out) *via_gw_out = 0;
+                return d;
+            }
+        }
+        return NULL;
+    }
+    /*
+     * UDP-IP-06: a group address is on-link, never via the gateway (RFC
+     * 1112 6.4).  It used to fall through to the gateway arm -- or return
+     * NULL with no gateway, making even 224.0.0.1 ENETUNREACH.  First UP,
+     * multicast-capable interface.
+     */
+    if (ip4_is_mcast(daddr)) {
+        for (netdev_t *d = netdev_first(); d; d = netdev_next(d)) {
+            if ((d->flags & NETDEV_IFF_UP) && (d->flags & NETDEV_IFF_MULTICAST) &&
                 !(d->flags & NETDEV_IFF_LOOPBACK)) {
                 if (via_gw_out) *via_gw_out = 0;
                 return d;
@@ -309,7 +353,9 @@ int ip4_output_from(uint32_t saddr, uint32_t daddr, uint8_t protocol,
     ih->tot_len = __builtin_bswap16((uint16_t)(sizeof(*ih) + payload_len));
     ih->id = __builtin_bswap16(++g_ip_id_counter);
     ih->frag_off = 0;
-    ih->ttl = 64;
+    /* UDP-IP-06: RFC 1112 6.1 -- a multicast datagram defaults to TTL 1, so
+     * a group send stays on the local link unless the sender asks. */
+    ih->ttl = ip4_is_mcast(daddr) ? 1 : 64;
     ih->protocol = protocol;
     ih->check = 0;
     ih->saddr = saddr;
@@ -328,6 +374,13 @@ int ip4_output_from(uint32_t saddr, uint32_t daddr, uint8_t protocol,
     uint8_t mac[6] = { 0 };
     if (!(dev->flags & NETDEV_IFF_LOOPBACK) && ip4_is_bcast_on(dev, daddr)) {
         memset(mac, 0xFF, sizeof(mac));
+    } else if (!(dev->flags & NETDEV_IFF_LOOPBACK) && ip4_is_mcast(daddr)) {
+        /* UDP-IP-06: RFC 1112 6.4 -- 01:00:5e plus the low 23 bits of the
+         * group; no resolution.  (It used to be ARPed like a unicast
+         * next hop and leave addressed to the router.) */
+        const uint8_t *g = (const uint8_t *)&daddr;
+        mac[0] = 0x01; mac[1] = 0x00; mac[2] = 0x5e;
+        mac[3] = g[1] & 0x7F; mac[4] = g[2]; mac[5] = g[3];
     } else if (!(dev->flags & NETDEV_IFF_LOOPBACK)) {
         uint32_t nexthop = via_gw ? dev->ip4_gateway : daddr;
         if (arp_lookup(dev, nexthop, mac) != 0) {
@@ -360,6 +413,16 @@ int ip4_output_from(uint32_t saddr, uint32_t daddr, uint8_t protocol,
     }
     int rc = eth_send(dev, mac, __builtin_bswap16(ETHERTYPE_IP),
                       pkt, sizeof(*ih) + payload_len);
+    /* UDP-IP-06: RFC 1112 6.1 -- if this host is itself a member of the
+     * group, deliver a copy locally too (the IP_MULTICAST_LOOP default).
+     * A NIC does not hear its own transmission, so loop it through lo,
+     * whose input path accepts a group joined on any interface. */
+    if (ip4_is_mcast(daddr)) {
+        netdev_t *lo = ip4_loopback_dev();
+        if (lo && lo != dev && ip4_mc_accept(lo, daddr))
+            eth_send(lo, mac, __builtin_bswap16(ETHERTYPE_IP),
+                     pkt, sizeof(*ih) + payload_len);
+    }
     netbuf_put(pkt, heap);
     return rc;
 }
@@ -422,6 +485,13 @@ void ip4_input(netdev_t *dev, const uint8_t *pkt, size_t len) {
     /* UDP-IP-03: and lo carries traffic to our own interface addresses. */
     int for_lo = (dev->flags & NETDEV_IFF_LOOPBACK) &&
                  ((ih->daddr & 0xFF) == 127 || ip4_is_local_ifaddr(ih->daddr));
+    /* UDP-IP-06: a class D destination is accepted for a group this host
+     * has joined (224.0.0.1 always).  It is treated as a broadcast from here
+     * on: TCP discards it, UDP fans it out to every member socket, and no
+     * ICMP error is ever sent about it. */
+    int for_mcast = ip4_is_mcast(ih->daddr) && ip4_mc_accept(dev, ih->daddr);
+    if (for_mcast)
+        for_bcast = 1;
     if (ih->daddr != dev->ip4_addr && !for_bcast && !for_lo) {
         return;
     }

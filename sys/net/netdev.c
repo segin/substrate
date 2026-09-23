@@ -29,11 +29,28 @@ static void netdev_lock_init(void) {
     }
 }
 
+/* ------------------------------------------------------------------ */
+/* UDP-IP-06: IPv4 multicast group table                              */
+/* ------------------------------------------------------------------ */
+
+/* Guards every interface's mc_group/mc_refs.  IRQ-safe: ip4_input reads
+ * membership in RX context. */
+static spinlock_t g_mc_lock;
+static int        g_mc_lock_init;
+
+static void mc_lock_init(void) {
+    if (!g_mc_lock_init) {
+        spinlock_init(&g_mc_lock, "netdev_mc");
+        g_mc_lock_init = 1;
+    }
+}
+
 int netdev_register(netdev_t *dev) {
     if (!dev || !dev->ops || !dev->ops->xmit) return -EINVAL;
     if (dev->mtu == 0) dev->mtu = 1500;
 
     netdev_lock_init();
+    mc_lock_init();          /* UDP-IP-06: boot-time, single-threaded */
     mutex_lock(&g_netdev_lock);
     dev->ifindex = g_next_ifindex++;
     dev->next = g_netdev_head;
@@ -45,6 +62,63 @@ int netdev_register(netdev_t *dev) {
             dev->hwaddr[0], dev->hwaddr[1], dev->hwaddr[2],
             dev->hwaddr[3], dev->hwaddr[4], dev->hwaddr[5]);
     return 0;
+}
+
+
+int netdev_mc_join(netdev_t *dev, uint32_t group) {
+    if (!dev || !(dev->flags & NETDEV_IFF_MULTICAST)) return -EINVAL;
+    mc_lock_init();
+    unsigned long fl = spinlock_acquire_irq(&g_mc_lock);
+    int used = 0, slot = -1;
+    for (int i = 0; i < NETDEV_MC_MAX; i++) {
+        if (dev->mc_group[i] == group && dev->mc_refs[i]) {
+            dev->mc_refs[i]++;
+            spinlock_release_irq(&g_mc_lock, fl);
+            return 0;
+        }
+        if (dev->mc_refs[i]) used++;
+        else if (slot < 0) slot = i;
+    }
+    if (slot < 0) {
+        spinlock_release_irq(&g_mc_lock, fl);
+        return -ENOBUFS;
+    }
+    dev->mc_group[slot] = group;
+    dev->mc_refs[slot] = 1;
+    spinlock_release_irq(&g_mc_lock, fl);
+    if (used == 0 && dev->ops && dev->ops->set_allmulti)
+        dev->ops->set_allmulti(dev, 1);
+    return 0;
+}
+
+int netdev_mc_leave(netdev_t *dev, uint32_t group) {
+    if (!dev) return -EADDRNOTAVAIL;
+    mc_lock_init();
+    unsigned long fl = spinlock_acquire_irq(&g_mc_lock);
+    int found = 0, left = 0;
+    for (int i = 0; i < NETDEV_MC_MAX; i++) {
+        if (!found && dev->mc_refs[i] && dev->mc_group[i] == group) {
+            found = 1;
+            if (--dev->mc_refs[i] == 0) dev->mc_group[i] = 0;
+        }
+        if (dev->mc_refs[i]) left++;
+    }
+    spinlock_release_irq(&g_mc_lock, fl);
+    if (!found) return -EADDRNOTAVAIL;
+    if (left == 0 && dev->ops && dev->ops->set_allmulti)
+        dev->ops->set_allmulti(dev, 0);
+    return 0;
+}
+
+int netdev_mc_member(const netdev_t *dev, uint32_t group) {
+    if (!dev) return 0;
+    mc_lock_init();
+    unsigned long fl = spinlock_acquire_irq(&g_mc_lock);
+    int yes = 0;
+    for (int i = 0; i < NETDEV_MC_MAX && !yes; i++)
+        if (dev->mc_refs[i] && dev->mc_group[i] == group) yes = 1;
+    spinlock_release_irq(&g_mc_lock, fl);
+    return yes;
 }
 
 netdev_t *netdev_first(void) { return g_netdev_head; }

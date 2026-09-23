@@ -384,7 +384,10 @@ int virtio_net_setup(uint8_t bus, uint8_t slot, uint8_t func) {
     /* 8. Register the netdev. */
     strlcpy(vn.netdev.name, "eth0", NETDEV_NAME_MAX);
     vn.netdev.mtu = 1500;
-    vn.netdev.flags = NETDEV_IFF_UP | NETDEV_IFF_BROADCAST | NETDEV_IFF_RUNNING;
+    /* UDP-IP-06: no set_allmulti -- without VIRTIO_NET_F_CTRL_RX the
+     * device offers no receive filter, and QEMU delivers all multicast. */
+    vn.netdev.flags = NETDEV_IFF_UP | NETDEV_IFF_BROADCAST | NETDEV_IFF_RUNNING |
+                      NETDEV_IFF_MULTICAST;
     vn.netdev.ops = &vnet_ops;
     vn.netdev.driver_data = &vn;
     netdev_register(&vn.netdev);

@@ -108,7 +108,8 @@ class Wire:
 
     # -- boot -------------------------------------------------------------
     @classmethod
-    def boot(cls, initarg, kernel=None, workdir=None, guest=None):
+    def boot(cls, initarg, kernel=None, workdir=None, guest=None,
+             nic='virtio-net-pci'):
         workdir = workdir or os.environ.get('WIRE_WORKDIR', '/tmp')
         kernel = kernel or os.path.join(TOP, 'sys', 'kernel.multiboot')
         guest = guest or os.path.join(os.path.dirname(__file__), 'wireguest')
@@ -141,7 +142,7 @@ class Wire:
                '-netdev', 'dgram,id=n0,local.type=inet,local.host=127.0.0.1,'
                           'local.port=%d,remote.type=inet,remote.host=127.0.0.1,'
                           'remote.port=%d' % (qport, hport),
-               '-device', 'virtio-net-pci,netdev=n0,mac=52:54:00:12:34:56',
+               '-device', '%s,netdev=n0,mac=52:54:00:12:34:56' % nic,
                '-append', "serial_debug root=LABEL=sub-root init=/wireguest "
                           "initarg='%s'" % initarg]
         proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL,
@@ -246,7 +247,7 @@ class Wire:
         self._send_frame(eth_dst + sha + b'\x08\x06' + pkt)
 
     def send_ip(self, proto, payload, src=PEER_IP, dst=GUEST_IP, ttl=64,
-                ident=None):
+                ident=None, eth_dst=GUEST_MAC):
         ident = self.ip_id if ident is None else ident
         ip = struct.pack('!BBHHHBBH4s4s', 0x45, 0, 20 + len(payload), ident,
                          0, ttl, proto, 0, socket.inet_aton(src),
@@ -255,17 +256,18 @@ class Wire:
         self.ip_id = (self.ip_id + 1) & 0xFFFF
         self.trace.append(('tx', time.time(), 'proto %d %s>%s len %d' %
                            (proto, src, dst, 20 + len(payload))))
-        self._send_frame(GUEST_MAC + PEER_MAC + b'\x08\x00' + ip + payload)
+        self._send_frame(eth_dst + PEER_MAC + b'\x08\x00' + ip + payload)
 
     def send_udp(self, sport, dport, data, src=PEER_IP, dst=GUEST_IP,
-                 checksum=True):
+                 checksum=True, eth_dst=GUEST_MAC):
         hdr = struct.pack('!HHHH', sport, dport, 8 + len(data), 0)
         c = 0
         if checksum:
             pseudo = (socket.inet_aton(src) + socket.inet_aton(dst) +
                       struct.pack('!BBH', 0, 17, 8 + len(data)))
             c = csum(pseudo + hdr + data) or 0xFFFF
-        self.send_ip(17, hdr[:6] + struct.pack('!H', c) + data, src, dst)
+        self.send_ip(17, hdr[:6] + struct.pack('!H', c) + data, src, dst,
+                     eth_dst=eth_dst)
 
     def expect_ip(self, pred, timeout):
         """First non-TCP IPv4 datagram (proto, src, dst, bytes) matching

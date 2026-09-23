@@ -112,6 +112,9 @@ typedef struct afi_pkt {
     uint8_t  data[AFI_DATA_MAX];
 } afi_pkt_t;
 
+/* UDP-IP-06: IPv4 multicast groups one socket may join. */
+#define AFI_MC_MAX 8
+
 typedef struct afi_sock {
     int      family;        /* AF_INET / AF_INET6 */
     int      type;          /* SOCK_RAW / SOCK_DGRAM / SOCK_STREAM */
@@ -136,6 +139,10 @@ typedef struct afi_sock {
     int        rd_shut;     /* shutdown(SHUT_RD): reads return EOF */
     int        so_error;    /* UDP-ICMP-01: errno latched from an ICMP error;
                              * guarded by afi_lock */
+    /* UDP-IP-06: IPv4 groups this socket joined (network byte order; 0 =
+     * free) and the interface each was joined on.  Guarded by afi_lock. */
+    uint32_t   mc_group[AFI_MC_MAX];
+    netdev_t  *mc_dev[AFI_MC_MAX];
 
     /* NET-01: reference count guarding the socket's lifetime against the
      * hard-IRQ delivery path.  Held by the installed socket itself (the
@@ -775,6 +782,22 @@ static void afinet_node_close(fs_node_t *node) {
     /* tcp_close() serialises internally (its own IRQ-off critical
      * section) and may not run under afi_lock. */
     if (s->tcp) { tcp_close(s->tcp); s->tcp = NULL; }
+    /* UDP-IP-06: give back this socket's group memberships, so the last
+     * leave turns the NIC's all-multicast mode off again. */
+    {
+        uint32_t grp[AFI_MC_MAX];
+        netdev_t *dev[AFI_MC_MAX];
+        unsigned long mfl = spinlock_acquire_irq(&afi_lock);
+        for (int i = 0; i < AFI_MC_MAX; i++) {
+            grp[i] = s->mc_group[i];
+            dev[i] = s->mc_dev[i];
+            s->mc_group[i] = 0;
+            s->mc_dev[i] = NULL;
+        }
+        spinlock_release_irq(&afi_lock, mfl);
+        for (int i = 0; i < AFI_MC_MAX; i++)
+            if (grp[i]) netdev_mc_leave(dev[i], grp[i]);
+    }
     /* NET-01: mark closed, unlink from the delivery list, and drop the
      * install reference — all under afi_lock so the hard-IRQ delivery
      * path can neither be walking the list nor enqueuing into this
@@ -975,6 +998,62 @@ int afinet_bind(int fd, const void *addr, socklen_t len) {
 
 /* SO_REUSEADDR plumbing for the getsockopt/setsockopt dispatch in
  * af_unix.c.  Both no-op (return -ENOTSOCK) on a non-AF_INET fd. */
+/*
+ * UDP-IP-06: IP_ADD_MEMBERSHIP / IP_DROP_MEMBERSHIP.  setsockopt used to
+ * return 0 for both while recording nothing (UDP-I-04), so every multicast
+ * application's error path was dead and the symptom was a silent absence of
+ * datagrams.  The interface is chosen by index (struct ip_mreqn), by
+ * address, or -- for INADDR_ANY -- is the first UP multicast-capable one.
+ */
+int afinet_mc_membership(int fd, int add, uint32_t group, uint32_t ifaddr,
+                         int ifindex) {
+    afi_sock_t *s = afi_from_fd(fd);
+    if (!s) return -ENOTSOCK;
+    if (s->family != AF_INET || (s->type != SOCK_DGRAM && s->type != SOCK_RAW))
+        return -EINVAL;
+    if (((group & 0xFF) >> 4) != 0xE) return -EINVAL;
+
+    netdev_t *dev = NULL;
+    for (netdev_t *d = netdev_first(); d; d = netdev_next(d)) {
+        if (!(d->flags & NETDEV_IFF_MULTICAST) || (d->flags & NETDEV_IFF_LOOPBACK))
+            continue;
+        if (ifindex > 0 ? d->ifindex == (uint32_t)ifindex
+                        : ifaddr ? d->ip4_addr == ifaddr
+                                 : (d->flags & NETDEV_IFF_UP) != 0) {
+            dev = d;
+            break;
+        }
+    }
+    if (!dev) return ifindex > 0 ? -ENODEV : -EADDRNOTAVAIL;
+
+    unsigned long fl = spinlock_acquire_irq(&afi_lock);
+    int at = -1, freeslot = -1;
+    for (int i = 0; i < AFI_MC_MAX; i++) {
+        if (s->mc_group[i] == group && s->mc_dev[i] == dev) at = i;
+        else if (!s->mc_group[i] && freeslot < 0) freeslot = i;
+    }
+    if (add) {
+        if (at >= 0) { spinlock_release_irq(&afi_lock, fl); return -EADDRINUSE; }
+        if (freeslot < 0) { spinlock_release_irq(&afi_lock, fl); return -ENOBUFS; }
+        s->mc_group[freeslot] = group;
+        s->mc_dev[freeslot] = dev;
+        spinlock_release_irq(&afi_lock, fl);
+        int rc = netdev_mc_join(dev, group);
+        if (rc < 0) {
+            fl = spinlock_acquire_irq(&afi_lock);
+            s->mc_group[freeslot] = 0;
+            s->mc_dev[freeslot] = NULL;
+            spinlock_release_irq(&afi_lock, fl);
+        }
+        return rc;
+    }
+    if (at < 0) { spinlock_release_irq(&afi_lock, fl); return -EADDRNOTAVAIL; }
+    s->mc_group[at] = 0;
+    s->mc_dev[at] = NULL;
+    spinlock_release_irq(&afi_lock, fl);
+    return netdev_mc_leave(dev, group);
+}
+
 int afinet_set_reuseaddr(int fd, int on) {
     afi_sock_t *s = afi_from_fd(fd);
     if (!s) return -ENOTSOCK;
@@ -1646,6 +1725,17 @@ static int sock_score(afi_sock_t *s, int family, uint8_t proto,
     if (s->type != SOCK_DGRAM) return -1;
     if (proto != IPPROTO_UDP_NUM) return -1;
     if (s->local_port == 0 || s->local_port != dport) return -1;
+    /* UDP-IP-06: a group datagram is for sockets that joined the group (BSD
+     * semantics -- not, as on Linux by default, every socket bound to the
+     * port once anything on the host has joined). */
+    if (family == AF_INET && ((*(const uint8_t *)daddr) >> 4) == 0xE) {
+        uint32_t g;
+        memcpy(&g, daddr, 4);
+        int joined = 0;
+        for (int i = 0; i < AFI_MC_MAX && !joined; i++)
+            if (s->mc_group[i] == g) joined = 1;
+        if (!joined) return -1;
+    }
 
     int score = 0;
     if (!addr_is_wild(s->local_addr, alen)) {

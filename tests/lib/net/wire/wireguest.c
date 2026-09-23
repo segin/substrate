@@ -9,6 +9,8 @@
  *   wireguest connect <ip> <port> <action>...
  *   wireguest listen <port> <action>...
  *   wireguest udp <ip> <port> <action>...     (a connect()ed UDP socket)
+ *   wireguest mcast <group> <port> <action>... (UDP bound to *:port, joined
+ *                                                to group on INADDR_ANY)
  *
  * Actions, executed in order on the connected socket:
  *   readeof      read until EOF (or error), reporting the byte count
@@ -18,6 +20,7 @@
  *   shutwr       shutdown(SHUT_WR)
  *   sleep:N      sleep N seconds
  *   soerror      getsockopt(SO_ERROR), reporting the value
+ *   sendto:IP:PORT:TEXT   send TEXT to IP:PORT
  *
  * Every step is logged as "guest: ..." on the console so the host side can
  * synchronise on it, and the run ends with "Result: done".
@@ -66,6 +69,24 @@ static int do_actions(int fd, int argc, char **argv) {
         } else if (strcmp(a, "shutwr") == 0) {
             int r = shutdown(fd, SHUT_WR);
             say("shutwr %s rc=%ld", r < 0 ? strerror(errno) : "ok", r);
+        } else if (strncmp(a, "sendto:", 7) == 0) {
+            char ip[32];
+            const char *p = a + 7, *c1 = strchr(p, ':');
+            const char *c2 = c1 ? strchr(c1 + 1, ':') : NULL;
+            if (!c1 || !c2 || (size_t)(c1 - p) >= sizeof ip) {
+                say("bad sendto %s (%ld)", a, (long)i);
+                return 1;
+            }
+            memcpy(ip, p, (size_t)(c1 - p));
+            ip[c1 - p] = 0;
+            struct sockaddr_in to;
+            memset(&to, 0, sizeof to);
+            to.sin_family = AF_INET;
+            to.sin_port = htons((unsigned short)atoi(c1 + 1));
+            to.sin_addr.s_addr = inet_addr(ip);
+            ssize_t n = sendto(fd, c2 + 1, strlen(c2 + 1), 0,
+                               (struct sockaddr *)&to, sizeof to);
+            say("sendto %s n=%ld", n < 0 ? strerror(errno) : "ok", (long)n);
         } else if (strcmp(a, "soerror") == 0) {
             int err = -1;
             socklen_t el = sizeof(err);
@@ -119,6 +140,22 @@ int main(int argc, char **argv) {
             rc = do_actions(fd, argc - 4, argv + 4);
         } else {
             say("udp connect failed: %s (%ld)", strerror(errno), errno);
+        }
+    } else if (argc >= 4 && strcmp(argv[1], "mcast") == 0) {
+        struct sockaddr_in sa;
+        memset(&sa, 0, sizeof sa);
+        sa.sin_family = AF_INET;
+        sa.sin_port = htons((unsigned short)atoi(argv[3]));
+        int fd = socket(AF_INET, SOCK_DGRAM, 0);
+        struct ip_mreq mr;
+        mr.imr_multiaddr.s_addr = inet_addr(argv[2]);
+        mr.imr_interface.s_addr = htonl(INADDR_ANY);
+        if (fd >= 0 && bind(fd, (struct sockaddr *)&sa, sizeof sa) == 0 &&
+            setsockopt(fd, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mr, sizeof mr) == 0) {
+            say("joined %s%ld", argv[2], 0);
+            rc = do_actions(fd, argc - 4, argv + 4);
+        } else {
+            say("mcast setup failed: %s (%ld)", strerror(errno), errno);
         }
     } else if (argc >= 3 && strcmp(argv[1], "listen") == 0) {
         struct sockaddr_in sa;
