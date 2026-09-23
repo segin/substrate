@@ -33,6 +33,7 @@
 #include <sys/netdev.h>
 #include <sys/poll.h>
 #include <sys/proc.h>
+#include <sys/signal.h>
 #include <sys/socket.h>
 #include <sys/termios.h>
 #include <vfs/vfs.h>
@@ -145,6 +146,7 @@ typedef struct afi_sock {
     void      *wait_chan;
     int        closed;
     int        rd_shut;     /* shutdown(SHUT_RD): reads return EOF */
+    int        wr_shut;     /* UDP-API-19: shutdown(SHUT_WR): sends EPIPE */
     int        so_error;    /* UDP-ICMP-01: errno latched from an ICMP error;
                              * guarded by afi_lock */
     /* UDP-IP-06: IPv4 groups this socket joined (network byte order; 0 =
@@ -759,6 +761,12 @@ static size_t afinet_node_write_body(fs_node_t *node, afi_sock_t *s,
                                             : tcp_send_until(s->tcp, buf, size, afi_deadline(s->snd_timeo));
         return (size_t)n;
     }
+    /* UDP-API-19: after shutdown(SHUT_WR): EPIPE and SIGPIPE, as for a
+     * pipe (write(2) has no MSG_NOSIGNAL). */
+    if (s->wr_shut) {
+        if (current_process) psignal(current_process, SIGPIPE);
+        return (size_t)-EPIPE;
+    }
     /* write() without an address only works on a connected DGRAM socket. */
     if (!s->connected) return (size_t)-EDESTADDRREQ;
 
@@ -1355,6 +1363,10 @@ int afinet_shutdown(int fd, int how) {
         if (s->tcp) tcp_shutdown_rd(s->tcp); /* TCP: EOF + wake reader */
     }
     if (how == SHUT_WR || how == SHUT_RDWR) {
+        /* UDP-API-19: a datagram socket's write side shuts too.  This was a
+         * silent no-op -- sends after SHUT_WR went out as if nothing had
+         * happened. */
+        s->wr_shut = 1;
         if (s->tcp) tcp_shutdown_wr(s->tcp);
     }
     return 0;
@@ -1671,9 +1683,15 @@ int afinet_connect(int fd, const void *addr, socklen_t len) {
  */
 static ssize_t afinet_sendto_k(int fd, const void *buf, size_t len, int flags,
                                const void *addr, socklen_t addrlen) {
-    (void)flags;
     afi_sock_t *s = afi_from_fd(fd);
     if (!s) return -ENOTSOCK;
+    /* UDP-API-19: after shutdown(SHUT_WR) a datagram send fails EPIPE, with
+     * SIGPIPE unless the caller passed MSG_NOSIGNAL. */
+    if (s->wr_shut && !(s->type == SOCK_STREAM && s->tcp)) {
+        if (!(flags & MSG_NOSIGNAL) && current_process)
+            psignal(current_process, SIGPIPE);
+        return -EPIPE;
+    }
     if (!buf && len) return -EINVAL;   /* len==0 is a valid empty datagram */
     /* TCP: connected stream socket goes through the tcp_send queue
      * regardless of whether the caller passed an addr.  Previously

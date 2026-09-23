@@ -12,8 +12,8 @@
  * (SHUT_RD), UDP-API-09 (zero-length receive), UDP-API-10 (addrlen at
  * EOF), UDP-API-11 (IP_PKTINFO), UDP-API-12 (IP transmit options),
  * UDP-API-13 (unimplemented options), UDP-API-14 (getsockopt checks),
- * UDP-API-15 (SO_BROADCAST) and UDP-API-17 (raw filtering) from
- * docs/ip-audit-2026-09-22.md.
+ * UDP-API-15 (SO_BROADCAST), UDP-API-17 (raw filtering) and UDP-API-19
+ * (SHUT_WR) from docs/ip-audit-2026-09-22.md.
  *
  * Each case drives the real socket API over the loopback interface, so a
  * PASS means a datagram actually took the intended path through the
@@ -1178,6 +1178,32 @@ static void test_raw_filter(void)
     close(tx);
 }
 
+static volatile int sigpipes;
+static void on_sigpipe(int sig) { (void)sig; sigpipes++; }
+
+/* UDP-API-19: after shutdown(SHUT_WR) a UDP send fails EPIPE and raises
+ * SIGPIPE (not with MSG_NOSIGNAL).  It was a silent no-op. */
+static void test_shut_wr(void)
+{
+    printf("UDP-API-19: sends after shutdown(SHUT_WR) fail EPIPE\n");
+    struct sockaddr_in peer;
+    signal(SIGPIPE, on_sigpipe);
+    sigpipes = 0;
+    int c = socket(AF_INET, SOCK_DGRAM, 0);
+    lo_addr(&peer, 31951);
+    connect(c, (struct sockaddr *)&peer, sizeof(peer));
+    ok("shutdown(SHUT_WR)", shutdown(c, SHUT_WR) == 0, "failed");
+    errno = 0;
+    ok("write() fails EPIPE", write(c, "x", 1) < 0 && errno == EPIPE, "sent");
+    ok("and raises SIGPIPE", sigpipes == 1, "no signal");
+    errno = 0;
+    ok("send(MSG_NOSIGNAL) fails EPIPE",
+       send(c, "x", 1, MSG_NOSIGNAL) < 0 && errno == EPIPE, "sent");
+    ok("without a signal", sigpipes == 1, "signalled");
+    signal(SIGPIPE, SIG_DFL);
+    close(c);
+}
+
 int main(void)
 {
     printf("torture_udp: UDP demux + checksum regressions (#430)\n\n");
@@ -1209,6 +1235,7 @@ int main(void)
     test_getsockopt_checks();
     test_so_broadcast();
     test_raw_filter();
+    test_shut_wr();
 
     printf("\nResult: %d passed, %d failed -- %s\n",
            passed, failed, failed ? "FAILED" : "PASSED");
