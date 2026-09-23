@@ -247,6 +247,8 @@ ssize_t    tcp_send_until(tcp_pcb_t *p, const void *buf, size_t len, uint64_t de
 ssize_t    tcp_recv_until(tcp_pcb_t *p, void *buf, size_t len, uint64_t deadline);
 ssize_t    tcp_peek_until(tcp_pcb_t *p, void *buf, size_t len, uint64_t deadline);
 ssize_t    tcp_send_nb(tcp_pcb_t *p, const void *buf, size_t len);
+ssize_t    tcp_send_urg_until(tcp_pcb_t *p, const void *buf, size_t len,
+                              int nonblock, uint64_t deadline);   /* TCP-URG-02 */
 ssize_t    tcp_recv(tcp_pcb_t *p, void *buf, size_t len);
 void       tcp_endpoints(const tcp_pcb_t *p, uint32_t *laddr, uint16_t *lport, uint32_t *raddr, uint16_t *rport);
 ssize_t    tcp_recv_nb(tcp_pcb_t *p, void *buf, size_t len);

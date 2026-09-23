@@ -236,6 +236,8 @@ typedef struct tcp_pcb {
     uint8_t   urg_sig_pending; /* SIGURG owed to the owner (timer delivers) */
     uint32_t  urg_mark_left;  /* ring octets still ahead of the mark */
     int       owner;          /* F_SETOWN: pid, or -pgrp; 0 = none */
+    uint32_t  snd_up;         /* TCP-URG-02: SND.UP, after the urgent octet */
+    uint8_t   snd_up_valid;
     struct ip4_txopts txo;    /* UDP-API-12: the socket's IP_TTL/IP_TOS */
     /* SO_ERROR (cleared by getsockopt).  */
     int       so_error;
@@ -420,18 +422,28 @@ static int tcp_xmit_raw(tcp_pcb_t *p, uint32_t seq, uint8_t flags,
      * lock (filled in below).  This runs unlocked from process context
      * while the RX path advances rcv_nxt and rx_count, so a torn pair
      * could advertise an edge left of the last one. */
-    th->doff_flags = __builtin_bswap16((uint16_t)(((5u + optlen / 4u) << 12) | flags));
     uint32_t wf    = tcp_lock();
     uint32_t rnxt  = p->rcv_nxt;
     uint32_t adv   = tcp_rcv_wnd_adv(p);
     p->last_adv_wnd = adv;          /* TCP-WIN-03: what the peer now believes */
     p->rcv_adv_edge = rnxt + adv;                          /* TCP-WIN-07 */
     p->rcv_adv_edge_valid = 1;
+    /* TCP-URG-02: while urgent data is outstanding every segment below
+     * SND.UP carries URG and the pointer -- in the BSD form, the offset of
+     * the octet FOLLOWING the urgent data (TCP-URG-06). */
+    uint16_t up = 0;
+    if (p->snd_up_valid && !(flags & TCP_RST) &&
+        (int32_t)(p->snd_up - seq) > 0) {
+        uint32_t off = p->snd_up - seq;
+        up = off > 0xFFFFu ? 0xFFFFu : (uint16_t)off;
+        flags |= TCP_URG;
+    }
     tcp_unlock(wf);
+    th->doff_flags = __builtin_bswap16((uint16_t)(((5u + optlen / 4u) << 12) | flags));
     th->ack_seq    = __builtin_bswap32(rnxt);
     th->window     = __builtin_bswap16((uint16_t)adv);
     th->check      = 0;
-    th->urg_ptr    = 0;
+    th->urg_ptr    = __builtin_bswap16(up);
     if (optlen) {
         uint8_t *o = buf + sizeof(*th);
         o[0] = 2;                       /* MSS */
@@ -1558,6 +1570,9 @@ static void tcp_in_established(tcp_pcb_t *p, uint32_t seq, uint32_t ack,
             uint32_t acked = ack - p->snd_una;
             p->snd_una = ack;
             tcp_unacked_prune(p, ack);
+            /* TCP-URG-02: the urgent data is acknowledged -- stop flagging. */
+            if (p->snd_up_valid && (int32_t)(ack - p->snd_up) >= 0)
+                p->snd_up_valid = 0;
             p->dup_ack = 0;
             p->last_ack = ack;
             /*
@@ -2496,6 +2511,24 @@ ssize_t tcp_send_until(tcp_pcb_t *p, const void *buf, size_t len, uint64_t deadl
 }
 ssize_t tcp_send_nb(tcp_pcb_t *p, const void *buf, size_t len) {
     return tcp_send_impl(p, buf, len, /*nonblock=*/1, 0);
+}
+
+/*
+ * TCP-URG-02: send(..., MSG_OOB) -- RFC 793 3.9 SEND with the urgent flag:
+ * SND.UP <- the end of this data, so its last octet is the urgent one.  The
+ * pointer is set before the data is queued so every segment carrying it is
+ * flagged; tcp_xmit_raw() keeps setting URG until SND.UNA passes SND.UP.
+ * The send path could never set URG before.
+ */
+ssize_t tcp_send_urg_until(tcp_pcb_t *p, const void *buf, size_t len,
+                           int nonblock, uint64_t deadline) {
+    if (len == 0)
+        return tcp_send_impl(p, buf, len, nonblock, deadline);
+    uint32_t f = tcp_lock();
+    p->snd_up       = p->snd_nxt + (uint32_t)len;
+    p->snd_up_valid = 1;
+    tcp_unlock(f);
+    return tcp_send_impl(p, buf, len, nonblock, deadline);
 }
 
 size_t tcp_recv_avail(const tcp_pcb_t *p) {

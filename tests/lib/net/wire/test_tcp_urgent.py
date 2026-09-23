@@ -11,6 +11,10 @@ TCP-URG-06).
                 taken out of the stream, the first read stops at the mark
                 ("ab", 2 octets), SIOCATMARK is then 1, and the next read
                 returns "def".
+    send-urg    TCP-URG-02: after write("ab"), send("X", MSG_OOB) puts 'X'
+                on the wire in a segment with URG set and a pointer whose
+                preceding octet is 'X'; the flag stays on retransmissions
+                until the peer acknowledges it.
 
 Run from the repo root after building sys/ and wireguest:
     python3 tests/lib/net/wire/test_tcp_urgent.py [case...]
@@ -67,7 +71,30 @@ def case_recv_mark():
         return None, w
 
 
-CASES = (('recv-mark', case_recv_mark),)
+def case_send_urg():
+    with Wire.boot('connect 10.0.2.2 %d write:ab oob:X sleep:60' % PORT) as w:
+        syn, err = handshake(w)
+        if err:
+            return err, w
+        gp, g = syn.sport, syn.seq + 1
+        d = w.expect(lambda s: s.data and s.seq == g, 5, 'ab')
+        if not d or d.data != b'ab':
+            return 'no "ab": %r' % d, w
+        w.send(Seg(PORT, gp, PISS + 1, g + 2, ACK))
+        u = w.expect(lambda s: s.data == b'X', 5, 'X')
+        if not u:
+            return 'no urgent octet on the wire', w
+        if not u.flags & URG or u.seq + u.urp - 1 != g + 2:
+            return 'want URG with the pointer after "X", got %r urp=%d' % (u, u.urp), w
+        w.rx.clear()
+        r = w.expect(lambda s: s.data == b'X', 3, 'retransmission')
+        if not r or not r.flags & URG:
+            return 'retransmission lost URG: %r' % r, w
+        return None, w
+
+
+CASES = (('recv-mark', case_recv_mark),
+         ('send-urg', case_send_urg))
 
 
 def main():

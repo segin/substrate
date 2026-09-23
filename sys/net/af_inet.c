@@ -1874,6 +1874,10 @@ static ssize_t afinet_sendto_k(int fd, const void *buf, size_t len, int flags,
      * stream, and we fell into the UDP path below, looking for a
      * dest addr that wasn't there.  */
     if (s->type == SOCK_STREAM && s->tcp) {
+        /* TCP-URG-02: MSG_OOB sends the data as urgent. */
+        if (flags & MSG_OOB)
+            return tcp_send_urg_until(s->tcp, buf, len, 0,
+                                      afi_deadline(s->snd_timeo));
         return tcp_send_until(s->tcp, buf, len, afi_deadline(s->snd_timeo));
     }
 

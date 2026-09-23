@@ -30,6 +30,7 @@
  *   setown       install a SIGURG counter and fcntl(F_SETOWN, getpid())
  *   sigurg       report how many SIGURGs have arrived
  *   atmark       ioctl(SIOCATMARK), reporting the value
+ *   oob:TEXT     send(TEXT, MSG_OOB)
  *   sleep:N      sleep N seconds
  *   soerror      getsockopt(SO_ERROR), reporting the value
  *   pollin       poll() for POLLIN with no timeout, reporting revents
@@ -118,6 +119,9 @@ static int do_actions(int fd, int argc, char **argv) {
                 (long)fcntl(fd, F_GETOWN));
         } else if (strcmp(a, "sigurg") == 0) {
             say("sigurg %s count=%ld", "ok", (long)g_sigurg);
+        } else if (strncmp(a, "oob:", 4) == 0) {
+            ssize_t n = send(fd, a + 4, strlen(a + 4), MSG_OOB);
+            say("oob %s n=%ld", n < 0 ? strerror(errno) : "ok", (long)n);
         } else if (strcmp(a, "atmark") == 0) {
             int v = -1;
             int r = ioctl(fd, SIOCATMARK, &v);
