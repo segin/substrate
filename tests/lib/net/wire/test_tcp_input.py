@@ -32,6 +32,9 @@ it guards.
     no-ack          TCP-SM-12: text and FIN on a segment without the ACK bit
                     are dropped (3.9 fifth check); the same text with ACK
                     is then delivered.
+    bad-ack-data    TCP-SM-13: text on a segment whose ACK acknowledges
+                    something not yet sent is dropped with the segment (the
+                    ACK field is checked before the text is taken).
 
 Run from the repo root after building sys/ and wireguest:
     python3 tests/lib/net/wire/test_tcp_input.py [case...]
@@ -243,6 +246,26 @@ def case_no_ack():
         return None, w
 
 
+def case_bad_ack_data():
+    with Wire.boot('connect 10.0.2.2 %d sleep:4 read:64 sleep:60' % PORT) as w:
+        syn, err = handshake(w)
+        if err:
+            return err, w
+        gp, g = syn.sport, syn.seq + 1
+        w.rx.clear()
+        w.send(Seg(PORT, gp, PISS + 1, g + 1000, ACK | PSH, data=b'future'))
+        r = w.expect(lambda s: s.flags & ACK, 3, 'ACK')
+        if not r or r.ack != PISS + 1:
+            return 'want an ACK at %d for an unsent ACK, got %r' % (PISS + 1, r), w
+        w.send(Seg(PORT, gp, PISS + 1, g, ACK | PSH, data=b'present!!'))
+        if not w.wait_serial('guest: read', 10):
+            return 'guest never read', w
+        line = [l for l in w.serial().splitlines() if 'guest: read ' in l][0]
+        if 'n=9' not in line:
+            return 'text with an unsent ACK was taken: %s' % line.strip(), w
+        return None, w
+
+
 CASES = (('data-after-fin', case_data_after_fin),
          ('syn-rcvd-rst', case_syn_rcvd_rst),
          ('syn-sync', case_syn_sync),
@@ -250,7 +273,8 @@ CASES = (('data-after-fin', case_data_after_fin),
          ('syn-rcvd-third', case_syn_rcvd_third),
          ('syn-sent-ack', case_syn_sent_ack),
          ('simultaneous', case_simultaneous),
-         ('no-ack', case_no_ack))
+         ('no-ack', case_no_ack),
+         ('bad-ack-data', case_bad_ack_data))
 
 
 def main():

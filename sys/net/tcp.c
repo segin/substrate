@@ -1112,29 +1112,13 @@ static void tcp_in_established(tcp_pcb_t *p, uint32_t seq, uint32_t ack,
         return;
     }
 
-    /* Accept data if seq matches rcv_nxt and we have room.
+    /* Process ACK: prune unacked segments and run dup-ACK fast-retx.
      *
-     * TCP-SM-03: and only in a state that can still receive text.  Once the
-     * peer's FIN has been taken (CLOSE_WAIT, CLOSING, LAST_ACK, TIME_WAIT)
-     * RCV.NXT sits just past it, so text "after the FIN" looked in order
-     * and was delivered to read() -- RFC 793 3.9's seventh step says to
-     * ignore it. */
-    if (dlen && seq == p->rcv_nxt &&
-        (p->state == TCP_ESTABLISHED || p->state == TCP_FIN_WAIT_1 ||
-         p->state == TCP_FIN_WAIT_2)) {
-        uint32_t accept_n = dlen;
-        if (accept_n > TCP_RING_LEN - p->rx_count)
-            accept_n = TCP_RING_LEN - p->rx_count;
-        for (uint32_t i = 0; i < accept_n; i++) {
-            p->rxbuf[p->rx_head] = payload[i];
-            p->rx_head = (p->rx_head + 1) % TCP_RING_LEN;
-        }
-        p->rx_count += accept_n;
-        p->rcv_nxt  += accept_n;
-        sched_wakeup(p->recv_chan);
-    }
-
-    /* Process ACK: prune unacked segments and run dup-ACK fast-retx. */
+     * TCP-SM-13: before the text (RFC 793 3.9 fifth check, then seventh).
+     * The text used to be committed to the ring first, so a segment whose
+     * ACK acknowledged something never sent -- which 3.9 says to answer
+     * with an ACK and DROP -- still had its data delivered and RCV.NXT
+     * advanced. */
     if (flags & TCP_ACK) {
         /*
          * TCP-03: RFC 793 requires SND.UNA < SEG.ACK <= SND.NXT.  The upper
@@ -1214,6 +1198,28 @@ static void tcp_in_established(tcp_pcb_t *p, uint32_t seq, uint32_t ack,
          * window (tcp_input() already stored it in snd_wnd) — wake any
          * sender parked in tcp_send() waiting for the window to open. */
         sched_wakeup(p->send_chan);
+    }
+
+    /* Accept data if seq matches rcv_nxt and we have room.
+     *
+     * TCP-SM-03: and only in a state that can still receive text.  Once the
+     * peer's FIN has been taken (CLOSE_WAIT, CLOSING, LAST_ACK, TIME_WAIT)
+     * RCV.NXT sits just past it, so text "after the FIN" looked in order
+     * and was delivered to read() -- RFC 793 3.9's seventh step says to
+     * ignore it. */
+    if (dlen && seq == p->rcv_nxt &&
+        (p->state == TCP_ESTABLISHED || p->state == TCP_FIN_WAIT_1 ||
+         p->state == TCP_FIN_WAIT_2)) {
+        uint32_t accept_n = dlen;
+        if (accept_n > TCP_RING_LEN - p->rx_count)
+            accept_n = TCP_RING_LEN - p->rx_count;
+        for (uint32_t i = 0; i < accept_n; i++) {
+            p->rxbuf[p->rx_head] = payload[i];
+            p->rx_head = (p->rx_head + 1) % TCP_RING_LEN;
+        }
+        p->rx_count += accept_n;
+        p->rcv_nxt  += accept_n;
+        sched_wakeup(p->recv_chan);
     }
 
     /* Process FIN — but only when it is in order.  A FIN occupies the
