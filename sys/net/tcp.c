@@ -1436,7 +1436,7 @@ tcp_pcb_t *tcp_accept(tcp_pcb_t *listen_p, int nonblock) {
     return ret;
 }
 
-static ssize_t tcp_send_impl(tcp_pcb_t *p, const void *buf, size_t len, int nonblock) {
+static ssize_t tcp_send_body(tcp_pcb_t *p, const void *buf, size_t len, int nonblock) {
     const uint8_t *b = (const uint8_t *)buf;
     size_t sent = 0;
     while (sent < len) {
@@ -1500,6 +1500,20 @@ static ssize_t tcp_send_impl(tcp_pcb_t *p, const void *buf, size_t len, int nonb
         sent += chunk;
     }
     return (ssize_t)sent;
+}
+
+/*
+ * TCP-MEM-03: the send loop sleeps for window and re-reads p->state,
+ * snd_nxt and snd_una on every wake.  Without a hold, a close() on another
+ * thread plus a peer RST can drive the PCB to CLOSED and let the reaper free
+ * it -- and its ring -- while this thread is asleep.  Pin it for the whole
+ * call, exactly as tcp_recv() does (TCP-01).
+ */
+static ssize_t tcp_send_impl(tcp_pcb_t *p, const void *buf, size_t len, int nonblock) {
+    tcp_hold(p);
+    ssize_t r = tcp_send_body(p, buf, len, nonblock);
+    tcp_unhold(p);
+    return r;
 }
 
 ssize_t tcp_send(tcp_pcb_t *p, const void *buf, size_t len) {
