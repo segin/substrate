@@ -1459,28 +1459,45 @@ int tcp_listen(tcp_pcb_t *p, int backlog) {
  * if any live PCB already holds it; sweep linearly from there so a busy
  * system still terminates.  Returns 0 when the range is exhausted.
  */
-static int tcp_port_taken(const tcp_pcb_t *self, uint16_t port) {
+#define TCP_EPH_LO    49152u
+#define TCP_EPH_SPAN  (65536u - TCP_EPH_LO)
+
+/* TCP-MEM-12: one bit per dynamic-range port, rebuilt under tcp_lock by
+ * each allocation. */
+static uint32_t tcp_eph_map[TCP_EPH_SPAN / 32];
+
+/* Caller holds tcp_lock, and assigns the returned port before dropping it.
+ * `r` is the random starting point, drawn before the lock was taken.
+ *
+ * TCP-MEM-12: this walked the PCB list once per candidate with no lock
+ * from preemptible process context, and the chosen port was assigned
+ * only afterwards, so a concurrent connect() could claim the same port in
+ * between.  Under the lock one pass over the list marks every port in use,
+ * and the candidates are then tested against that bitmap, so the locked
+ * work is O(PCBs + range) rather than O(PCBs x candidates). */
+static uint16_t tcp_alloc_ephemeral_locked(const tcp_pcb_t *self, uint32_t r) {
+    memset(tcp_eph_map, 0, sizeof(tcp_eph_map));
     for (tcp_pcb_t *o = g_tcp_pcbs; o; o = o->next) {
         if (o == self || o->state == TCP_CLOSED) continue;
-        if (o->lport == port) return 1;
+        if (o->lport >= TCP_EPH_LO) {
+            uint32_t i = o->lport - TCP_EPH_LO;
+            tcp_eph_map[i / 32] |= 1u << (i % 32);
+        }
     }
-    return 0;
-}
-
-static uint16_t tcp_alloc_ephemeral(const tcp_pcb_t *self) {
-    uint32_t r = 0;
-    if (random_get_bytes(&r, sizeof(r)) != 0)
-        r = (uint32_t)get_ticks();
-    uint16_t base = (uint16_t)(49152u + (r % (65536u - 49152u)));
-    for (uint32_t i = 0; i < (65536u - 49152u); i++) {
-        uint16_t port = (uint16_t)(49152u + ((base - 49152u + i) % (65536u - 49152u)));
-        if (!tcp_port_taken(self, port)) return port;
+    uint32_t base = r % TCP_EPH_SPAN;
+    for (uint32_t k = 0; k < TCP_EPH_SPAN; k++) {
+        uint32_t i = (base + k) % TCP_EPH_SPAN;
+        if (!(tcp_eph_map[i / 32] & (1u << (i % 32))))
+            return (uint16_t)(TCP_EPH_LO + i);
     }
     return 0;
 }
 
 static void tcp_connect_start(tcp_pcb_t *p, uint32_t raddr, uint16_t rport) {
-    if (!p->lport) p->lport = tcp_alloc_ephemeral(p);
+    uint32_t r = 0;
+    if (random_get_bytes(&r, sizeof(r)) != 0)
+        r = (uint32_t)get_ticks();
+    uint32_t iss = tcp_new_iss();
     if (!p->laddr) {
         /* Pick a source IP based on the destination.  127/8 traffic
          * MUST be sourced from a loopback address — otherwise the
@@ -1494,13 +1511,21 @@ static void tcp_connect_start(tcp_pcb_t *p, uint32_t raddr, uint16_t rport) {
             if (d->ip4_addr) { p->laddr = d->ip4_addr; break; }
         }
     }
+    /* TCP-MEM-12: choose the port and publish it -- with the state that
+     * makes the next allocation's scan count it -- in one locked section.
+     * tcp_alloc_ephemeral_locked() skips CLOSED PCBs, so a port assigned
+     * while the PCB was still CLOSED was invisible to a concurrent
+     * connect(). */
+    uint32_t f = tcp_lock();
+    if (!p->lport) p->lport = tcp_alloc_ephemeral_locked(p, r);
     p->raddr   = raddr;
     p->rport   = rport;
-    p->iss     = tcp_new_iss();
+    p->iss     = iss;
     p->snd_una = p->iss;
     p->snd_nxt = p->iss;
     p->snd_max_valid = 0;             /* TCP-MEM-07: a new ISS, nothing sent */
     p->state   = TCP_SYN_SENT;
+    tcp_unlock(f);
     /* Queue the SYN — the retx timer will resend it on RTO if the
      * server didn't get it.  */
     tcp_xmit_queue(p, TCP_SYN, NULL, 0);
