@@ -2761,6 +2761,15 @@ int sys_setsockopt(int fd, int level, int optname,
         int r = afinet_set_timeo(fd, optname == 20, sec, usec);
         return r == -ENOTSOCK ? 0 : r;
     }
+    /* UDP-API-13 / UDP-I-04: options with no implementation behind them must
+     * say so.  IP_OPTIONS (4) was accepted while options were neither sent
+     * nor received, and the source-specific multicast calls (37-40) while
+     * there is no source filtering -- both reported success and did
+     * nothing, so a caller's fallback path was dead code. */
+    if (level == 0 /*IPPROTO_IP*/ &&
+        (optname == 4 || (optname >= 37 && optname <= 40)) &&
+        afinet_so_type(fd) >= 0)
+        return -ENOPROTOOPT;
     /* UDP-API-12: IPPROTO_IP IP_TOS (1), IP_TTL (2), IP_MULTICAST_IF (32),
      * IP_MULTICAST_TTL (33), IP_MULTICAST_LOOP (34).  Values come as an int
      * or, as BSD code often passes them, a single u_char; IP_MULTICAST_IF
@@ -2959,6 +2968,11 @@ int sys_getsockopt(int fd, int level, int optname,
          * which let bogus getsockopt() calls "succeed"). */
         return -ENOPROTOOPT;
     }
+    /* UDP-API-13: nor can they be read back. */
+    if (level == 0 /*IPPROTO_IP*/ &&
+        (optname == 4 || (optname >= 37 && optname <= 40)) &&
+        afinet_so_type(fd) >= 0)
+        return -ENOPROTOOPT;
     /* UDP-API-12: the IPPROTO_IP transmit options read back what was set
      * (getsockopt(IP_TTL) used to answer 0). */
     if (level == 0 /*IPPROTO_IP*/ &&

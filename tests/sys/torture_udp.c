@@ -10,8 +10,8 @@
  * (multi-iovec sendmsg), UDP-API-03 (writev), UDP-API-04 (SO_RCVTIMEO),
  * UDP-API-06 (non-local bind), UDP-API-07 (connect binds), UDP-API-08
  * (SHUT_RD), UDP-API-09 (zero-length receive), UDP-API-10 (addrlen at
- * EOF), UDP-API-11 (IP_PKTINFO) and UDP-API-12 (IP transmit options) from
- * docs/ip-audit-2026-09-22.md.
+ * EOF), UDP-API-11 (IP_PKTINFO), UDP-API-12 (IP transmit options) and
+ * UDP-API-13 (unimplemented options) from docs/ip-audit-2026-09-22.md.
  *
  * Each case drives the real socket API over the loopback interface, so a
  * PASS means a datagram actually took the intended path through the
@@ -24,6 +24,7 @@
 #include <netinet/in.h>
 #include <poll.h>
 #include <signal.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include <net/if.h>
@@ -1052,6 +1053,31 @@ static void test_pktinfo(void)
     close(tx);
 }
 
+/* UDP-API-13 / UDP-I-04: options with nothing behind them fail
+ * ENOPROTOOPT instead of reporting success. */
+static void test_unsupported_ipopts(void)
+{
+    printf("UDP-API-13: unimplemented IP options are refused\n");
+    int s = socket(AF_INET, SOCK_DGRAM, 0);
+    unsigned char opts[4] = { 1, 1, 1, 0 };           /* NOP NOP NOP EOL */
+    errno = 0;
+    ok("setsockopt(IP_OPTIONS) fails ENOPROTOOPT",
+       setsockopt(s, IPPROTO_IP, IP_OPTIONS, opts, sizeof(opts)) < 0 && errno == ENOPROTOOPT,
+       "accepted");
+    int v = 0;
+    socklen_t vl = sizeof(v);
+    errno = 0;
+    ok("getsockopt(IP_OPTIONS) fails ENOPROTOOPT",
+       getsockopt(s, IPPROTO_IP, IP_OPTIONS, &v, &vl) < 0 && errno == ENOPROTOOPT,
+       "answered");
+    struct { uint32_t g, i, src; } smr = { htonl(0xEF010206), 0, htonl(0x7F000001) };
+    errno = 0;
+    ok("IP_ADD_SOURCE_MEMBERSHIP fails ENOPROTOOPT",
+       setsockopt(s, IPPROTO_IP, IP_ADD_SOURCE_MEMBERSHIP, &smr, sizeof(smr)) < 0 &&
+       errno == ENOPROTOOPT, "accepted");
+    close(s);
+}
+
 int main(void)
 {
     printf("torture_udp: UDP demux + checksum regressions (#430)\n\n");
@@ -1079,6 +1105,7 @@ int main(void)
     test_zero_len_recv();
     test_ip_txopts();
     test_pktinfo();
+    test_unsupported_ipopts();
 
     printf("\nResult: %d passed, %d failed -- %s\n",
            passed, failed, failed ? "FAILED" : "PASSED");
