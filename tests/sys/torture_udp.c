@@ -2,7 +2,8 @@
  * torture_udp.c — regression test for the UDP demux and checksum findings
  * (task #430: UDP-01, UDP-03, SOCK-07).
  *
- * Also UDP-MEM-01 from docs/ip-audit-2026-09-22.md (MSG_TRUNC over-copy).
+ * Also UDP-MEM-01 (MSG_TRUNC over-copy) and UDP-MEM-02 (recvmsg msg_name
+ * written through a raw user pointer) from docs/ip-audit-2026-09-22.md.
  *
  * Each case drives the real socket API over the loopback interface, so a
  * PASS means a datagram actually took the intended path through the
@@ -16,6 +17,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/uio.h>
 #include <sys/un.h>
 #include <unistd.h>
 #include <fcntl.h>
@@ -323,6 +325,67 @@ static void test_msg_trunc_clamp(void)
     close(sv[1]);
 }
 
+/*
+ * UDP-MEM-02: a multi-iovec recvmsg() on a datagram socket wrote the source
+ * sockaddr through msg_name with no validation, so msg_name could name any
+ * address -- kernel memory included.  A legitimate msg_name must still get
+ * the sender's address; one pointing into the kernel must fail EFAULT.
+ */
+static void test_recvmsg_name(void)
+{
+    printf("UDP-MEM-02: multi-iovec recvmsg() validates msg_name\n");
+
+    struct sockaddr_in dst, from, src;
+    socklen_t slen = sizeof(src);
+    int rx = bind_udp(31991);
+    int tx = bind_udp(31992);
+    if (rx < 0 || tx < 0) {
+        ok("sockets created", 0, "socket/bind failed");
+        if (rx >= 0) close(rx);
+        if (tx >= 0) close(tx);
+        return;
+    }
+    getsockname(tx, (struct sockaddr *)&src, &slen);
+    lo_addr(&dst, 31991);
+
+    const char msg[] = "0123456789abcdef";
+    char a[8], b[32];
+    struct iovec iov[2] = { { a, sizeof(a) }, { b, sizeof(b) } };
+    struct msghdr mh;
+
+    /* Legitimate msg_name: data scattered, sender reported. */
+    sendto(tx, msg, sizeof(msg), 0, (struct sockaddr *)&dst, sizeof(dst));
+    memset(&from, 0, sizeof(from));
+    memset(&mh, 0, sizeof(mh));
+    mh.msg_name = &from;
+    mh.msg_namelen = sizeof(from);
+    mh.msg_iov = iov;
+    mh.msg_iovlen = 2;
+    ssize_t got = recvmsg(rx, &mh, MSG_DONTWAIT);
+    ok("datagram scattered across both iovecs",
+       got == (ssize_t)sizeof(msg) && memcmp(a, msg, 8) == 0 &&
+       memcmp(b, msg + 8, sizeof(msg) - 8) == 0, "wrong data");
+    ok("msg_name holds the sender",
+       mh.msg_namelen == (socklen_t)sizeof(from) &&
+       from.sin_family == AF_INET && from.sin_port == src.sin_port &&
+       from.sin_addr.s_addr == htonl(0x7F000001), "wrong source address");
+
+    /* Hostile msg_name: a kernel direct-map address. */
+    sendto(tx, msg, sizeof(msg), 0, (struct sockaddr *)&dst, sizeof(dst));
+    memset(&mh, 0, sizeof(mh));
+    mh.msg_name = (void *)0xC0000500;
+    mh.msg_namelen = sizeof(from);
+    mh.msg_iov = iov;
+    mh.msg_iovlen = 2;
+    errno = 0;
+    got = recvmsg(rx, &mh, MSG_DONTWAIT);
+    ok("msg_name in kernel memory is refused with EFAULT",
+       got < 0 && errno == EFAULT, "the kernel wrote through a kernel msg_name");
+
+    close(rx);
+    close(tx);
+}
+
 int main(void)
 {
     printf("torture_udp: UDP demux + checksum regressions (#430)\n\n");
@@ -333,6 +396,7 @@ int main(void)
     test_so_error_unix();
     test_raw_socket_privileged();
     test_msg_trunc_clamp();
+    test_recvmsg_name();
 
     printf("\nResult: %d passed, %d failed -- %s\n",
            passed, failed, failed ? "FAILED" : "PASSED");

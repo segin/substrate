@@ -1803,6 +1803,25 @@ static ssize_t recv_into_kbuf(int fd, void *kbuf, size_t len, int flags,
     return r;
 }
 
+/*
+ * Publish a source address staged in a kernel buffer to userspace: at most
+ * user_cap bytes of it to uaddr, and its full length to *ulen, both through
+ * validated copyout.  kaddr/kaddrlen come from recv_into_kbuf(); kcap is the
+ * size of the kaddr buffer.  Returns 0 or -EFAULT.
+ */
+static int copyout_sockaddr(const uint8_t *kaddr, size_t kcap,
+                            socklen_t kaddrlen, void *uaddr,
+                            socklen_t user_cap, socklen_t *ulen) {
+    if (kaddrlen > kcap)
+        kaddrlen = (socklen_t)kcap;
+    socklen_t out = kaddrlen < user_cap ? kaddrlen : user_cap;
+    if (out > 0 && copyout(kaddr, uaddr, out) != 0)
+        return -EFAULT;
+    if (copyout(&kaddrlen, ulen, sizeof(kaddrlen)) != 0)
+        return -EFAULT;
+    return 0;
+}
+
 /* Common recv/recvfrom body: receive into a kernel bounce buffer, then copy
  * the data (and any source address) out to userspace fault-safely. */
 static ssize_t do_recv(int fd, void *buf, size_t len, int flags,
@@ -1852,12 +1871,8 @@ static ssize_t do_recv(int fd, void *buf, size_t len, int flags,
         socklen_t user_cap = 0;
         if (copyin(addrlen, &user_cap, sizeof(user_cap)) != 0)
             return -EFAULT;
-        if (kaddrlen > sizeof(kaddr))
-            kaddrlen = sizeof(kaddr);
-        socklen_t out = kaddrlen < user_cap ? kaddrlen : user_cap;
-        if (out > 0 && copyout(kaddr, addr, out) != 0)
-            return -EFAULT;
-        if (copyout(&kaddrlen, addrlen, sizeof(kaddrlen)) != 0)
+        if (copyout_sockaddr(kaddr, sizeof(kaddr), kaddrlen,
+                             addr, user_cap, addrlen) != 0)
             return -EFAULT;
     }
     return n;
@@ -2339,15 +2354,29 @@ ssize_t sys_recvmsg(int fd, struct msghdr *umsg, int flags) {
         uint8_t *scat = kmalloc(cap);
         if (!scat) return -ENOMEM;
         /* Receive into a userspace-invisible buffer via the same path the
-         * single-iovec case uses, so msg_name is still filled in. */
-        ssize_t r;
-        if (msg->msg_name && msg->msg_namelen > 0)
-            r = recv_into_kbuf(fd, scat, cap, flags,
-                               (struct sockaddr *)msg->msg_name,
-                               (socklen_t *)&umsg->msg_namelen);
-        else
-            r = recv_into_kbuf(fd, scat, cap, flags, NULL, NULL);
+         * single-iovec case uses, so msg_name is still filled in.
+         *
+         * UDP-MEM-02: the source address is staged in a KERNEL buffer too.
+         * recv_into_kbuf() writes the sockaddr and its length through
+         * plain pointers, and this branch used to hand it msg_name and
+         * &umsg->msg_namelen straight from userspace -- so a caller could
+         * point msg_name at any address, kernel memory included, and have
+         * the kernel memset and fill it with a sender-chosen address. */
+        uint8_t   kaddr[128];
+        socklen_t kaddrlen = sizeof(kaddr);
+        int want_name = msg->msg_name && msg->msg_namelen > 0;
+        memset(kaddr, 0, sizeof(kaddr));
+        ssize_t r = recv_into_kbuf(fd, scat, cap, flags,
+                                   want_name ? (struct sockaddr *)kaddr : NULL,
+                                   want_name ? &kaddrlen : NULL);
         if (r < 0) { kfree(scat, cap); return r; }
+        if (want_name &&
+            copyout_sockaddr(kaddr, sizeof(kaddr), kaddrlen, msg->msg_name,
+                             (socklen_t)msg->msg_namelen,
+                             (socklen_t *)&umsg->msg_namelen) != 0) {
+            kfree(scat, cap);
+            return -EFAULT;
+        }
         size_t off = 0, left = (size_t)r;
         for (int i = 0; i < (int)msg->msg_iovlen && left; i++) {
             size_t take = iov[i].iov_len < left ? iov[i].iov_len : left;
