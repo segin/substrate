@@ -344,9 +344,46 @@ void ip6_input(netdev_t *dev, const uint8_t *pkt, size_t len) {
     }
     if (!for_us) return;
 
-    const uint8_t *l4 = pkt + sizeof(*h);
-    size_t l4_len = plen;
-    switch (h->next_header) {
+    /*
+     * UDP-IP-10: walk the extension headers (RFC 8200 4) to the upper-layer
+     * header.  The switch used to dispatch on the fixed header's Next Header
+     * alone, so anything behind a Hop-by-Hop, Routing or Destination Options
+     * header -- every MLD message carries Hop-by-Hop -- was dropped.
+     *
+     * Hop-by-Hop is only legal first.  A Routing header with Segments Left
+     * non-zero would make us forward, which a host does not do (RFC 8200
+     * 4.4: the type-0 header it would need is deprecated), so drop it.  We
+     * do not reassemble, so a Fragment header passes only as an "atomic
+     * fragment" -- offset 0, M clear (RFC 6946); any other is dropped.  No
+     * Next Header (59) ends the packet.
+     */
+    uint8_t nh = h->next_header;
+    size_t off = sizeof(*h), end = sizeof(*h) + plen;
+    for (int hops = 0; hops < 8; hops++) {
+        if (nh == 0 || nh == 43 || nh == 60) {             /* HBH, Routing, DestOpt */
+            if (nh == 0 && off != sizeof(*h)) return;
+            if (off + 8 > end) return;
+            size_t hl = ((size_t)pkt[off + 1] + 1) * 8;
+            if (off + hl > end) return;
+            if (nh == 43 && pkt[off + 3] != 0) return;     /* Segments Left */
+            nh = pkt[off];
+            off += hl;
+        } else if (nh == 44) {                             /* Fragment */
+            if (off + 8 > end) return;
+            uint16_t fo = (uint16_t)((pkt[off + 2] << 8) | pkt[off + 3]);
+            if ((fo & 0xFFF9) != 0) return;               /* offset or M set */
+            nh = pkt[off];
+            off += 8;
+        } else if (nh == 59) {                             /* No Next Header */
+            return;
+        } else {
+            break;
+        }
+    }
+
+    const uint8_t *l4 = pkt + off;
+    size_t l4_len = end - off;
+    switch (nh) {
         case IPPROTO_ICMPV6:
             icmp6_input(dev, h->src, h->dst, l4, l4_len);
             break;
