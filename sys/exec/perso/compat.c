@@ -556,6 +556,108 @@ ssize_t sys_readv(int fd, const void *iov_user, int iovcnt) {
     return total;
 }
 
+/*
+ * UDP-API-05: BSD socket-option numbers -> native (Linux) numbers.
+ *
+ * The BSD personalities called sys_setsockopt()/sys_getsockopt() directly,
+ * but those test Linux numbers -- SOL_SOCKET is 1, SO_REUSEADDR 2 -- while a
+ * FreeBSD, NetBSD or OpenBSD binary passes SOL_SOCKET 0xffff and SO_* bit
+ * values.  Every socket option a BSD program set was therefore discarded
+ * as an unknown level (getsockopt(SO_TYPE) failed, SO_RCVTIMEO never took
+ * effect, a daemon's SO_REUSEADDR was lost), and any whose number happened
+ * to collide would have landed on a different native option.
+ *
+ * An option with no native equivalent is mapped past every native number,
+ * so it keeps the lenient unknown-option handling instead of aliasing.
+ */
+#define BSD_SOL_SOCKET  0xffff
+#define BSD_IPPROTO_IP  0
+
+static const struct { int bsd, native; } bsd_so_map[] = {
+    { 0x0002, 30 },     /* SO_ACCEPTCONN */
+    { 0x0004,  2 },     /* SO_REUSEADDR */
+    { 0x0008,  9 },     /* SO_KEEPALIVE */
+    { 0x0010,  5 },     /* SO_DONTROUTE */
+    { 0x0020,  6 },     /* SO_BROADCAST */
+    { 0x0080, 13 },     /* SO_LINGER */
+    { 0x0100, 10 },     /* SO_OOBINLINE */
+    { 0x0200, 15 },     /* SO_REUSEPORT */
+    { 0x1001,  7 },     /* SO_SNDBUF */
+    { 0x1002,  8 },     /* SO_RCVBUF */
+    { 0x1003, 19 },     /* SO_SNDLOWAT */
+    { 0x1004, 18 },     /* SO_RCVLOWAT */
+    { 0x1005, 21 },     /* SO_SNDTIMEO */
+    { 0x1006, 20 },     /* SO_RCVTIMEO */
+    { 0x1007,  4 },     /* SO_ERROR */
+    { 0x1008,  3 },     /* SO_TYPE */
+};
+
+static const struct { int bsd, native; } bsd_ip_map[] = {
+    {  1,  4 },         /* IP_OPTIONS */
+    {  2,  3 },         /* IP_HDRINCL */
+    {  3,  1 },         /* IP_TOS */
+    {  4,  2 },         /* IP_TTL */
+    {  9, 32 },         /* IP_MULTICAST_IF */
+    { 10, 33 },         /* IP_MULTICAST_TTL */
+    { 11, 34 },         /* IP_MULTICAST_LOOP */
+    { 12, 35 },         /* IP_ADD_MEMBERSHIP */
+    { 13, 36 },         /* IP_DROP_MEMBERSHIP */
+};
+
+#define BSD_OPT_UNMAPPED 0x10000   /* above every native option number */
+
+/* NetBSD 6 moved to a 64-bit time_t and renumbered the timeouts, whose
+ * struct timeval grew to 12 bytes on i386; 0x1005/0x1006 remain as the
+ * compat50 (32-bit timeval) numbers.  Verified against NetBSD 10.1. */
+#define NETBSD_SO_SNDTIMEO 0x100b
+#define NETBSD_SO_RCVTIMEO 0x100c
+
+static void bsd_sockopt_translate(int *level, int *optname, int netbsd) {
+    if (*level == BSD_SOL_SOCKET) {
+        *level = 1;                                  /* native SOL_SOCKET */
+        if (netbsd && *optname == NETBSD_SO_SNDTIMEO) { *optname = 21; return; }
+        if (netbsd && *optname == NETBSD_SO_RCVTIMEO) { *optname = 20; return; }
+        for (size_t i = 0; i < sizeof(bsd_so_map) / sizeof(bsd_so_map[0]); i++)
+            if (bsd_so_map[i].bsd == *optname) {
+                *optname = bsd_so_map[i].native;
+                return;
+            }
+        *optname += BSD_OPT_UNMAPPED;
+    } else if (*level == BSD_IPPROTO_IP) {
+        for (size_t i = 0; i < sizeof(bsd_ip_map) / sizeof(bsd_ip_map[0]); i++)
+            if (bsd_ip_map[i].bsd == *optname) {
+                *optname = bsd_ip_map[i].native;
+                return;
+            }
+        *optname += BSD_OPT_UNMAPPED;
+    }
+    /* IPPROTO_TCP (6): TCP_NODELAY is 1 on both; other levels pass through. */
+}
+
+int bsd_sys_setsockopt(int fd, int level, int optname, const void *optval,
+                       int optlen) {
+    bsd_sockopt_translate(&level, &optname, 0);
+    return sys_setsockopt(fd, level, optname, optval, optlen);
+}
+
+int bsd_sys_getsockopt(int fd, int level, int optname, void *optval,
+                       int *optlen) {
+    bsd_sockopt_translate(&level, &optname, 0);
+    return sys_getsockopt(fd, level, optname, optval, optlen);
+}
+
+int netbsd_sys_setsockopt(int fd, int level, int optname, const void *optval,
+                          int optlen) {
+    bsd_sockopt_translate(&level, &optname, 1);
+    return sys_setsockopt(fd, level, optname, optval, optlen);
+}
+
+int netbsd_sys_getsockopt(int fd, int level, int optname, void *optval,
+                          int *optlen) {
+    bsd_sockopt_translate(&level, &optname, 1);
+    return sys_getsockopt(fd, level, optname, optval, optlen);
+}
+
 ssize_t sys_writev(int fd, const void *iov_user, int iovcnt) {
     if (iovcnt < 0 || iovcnt > 1024) return -EINVAL;
     if (iovcnt == 0) return 0;

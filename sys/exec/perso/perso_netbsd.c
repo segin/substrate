@@ -468,7 +468,7 @@ static void *netbsd_syscalls[MAX_SYSCALLS] = {
     [NETBSD_SYS_compat_recv]    = &sys_recv,
     [NETBSD_SYS_compat_sigret]  = NULL,            /* compat_sigret */
     [NETBSD_SYS_bind]           = &sys_bind,
-    [NETBSD_SYS_setsockopt]     = &sys_setsockopt,
+    [NETBSD_SYS_setsockopt]     = (void *)&netbsd_sys_setsockopt,
     [NETBSD_SYS_listen]         = &sys_listen,
     [NETBSD_SYS_obs_vtimes]     = NULL,            /* obs_vtimes */
     [NETBSD_SYS_compat_sigvec]  = NULL,            /* compat_sigvec */
@@ -488,7 +488,7 @@ static void *netbsd_syscalls[MAX_SYSCALLS] = {
     [NETBSD_SYS_obs_vtrace]     = NULL,            /* obs_vtrace */
     [NETBSD_SYS_gettimeofday]   = &sys_gettimeofday,
     [NETBSD_SYS_getrusage]      = &netbsd_sys_getrusage,
-    [NETBSD_SYS_getsockopt]     = &sys_getsockopt,
+    [NETBSD_SYS_getsockopt]     = (void *)&netbsd_sys_getsockopt,
     [NETBSD_SYS_resuba]         = NULL,            /* resuba */
     /* Higher syscalls */
     [NETBSD_SYS_mkdir]          = &sys_mkdir,

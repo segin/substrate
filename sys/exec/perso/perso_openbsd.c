@@ -10,6 +10,7 @@
 #include <string.h>
 
 #include <arch/i386/syscall.h>
+#include <exec/perso/compat.h>
 #include <exec/perso/openbsd/openbsd_syscalls.h>
 #include <exec/perso/openbsd/openbsd_user.h>
 #include <exec/perso/personality.h>
@@ -204,7 +205,7 @@ static void *openbsd_syscalls[MAX_SYSCALLS] = {
     [OPENBSD_SYS_compat_recv]    = &sys_recv,
     [OPENBSD_SYS_compat_sigret]  = NULL,            /* compat_sigret */
     [OPENBSD_SYS_bind]           = &sys_bind,
-    [OPENBSD_SYS_setsockopt]     = &sys_setsockopt,
+    [OPENBSD_SYS_setsockopt]     = (void *)&bsd_sys_setsockopt,
     [OPENBSD_SYS_listen]         = &sys_listen,
     [OPENBSD_SYS_obs_vtimes]     = NULL,            /* obs_vtimes */
     [OPENBSD_SYS_compat_sigvec]  = NULL,            /* compat_sigvec */
@@ -217,7 +218,7 @@ static void *openbsd_syscalls[MAX_SYSCALLS] = {
     [OPENBSD_SYS_obs_vtrace]     = NULL,            /* obs_vtrace */
     [OPENBSD_SYS_gettimeofday]   = &sys_gettimeofday,
     [OPENBSD_SYS_getrusage]      = &openbsd_sys_getrusage,
-    [OPENBSD_SYS_getsockopt]     = &sys_getsockopt,
+    [OPENBSD_SYS_getsockopt]     = (void *)&bsd_sys_getsockopt,
     [OPENBSD_SYS_kill_modern]    = &sys_kill,
     [OPENBSD_SYS_lseek_modern]   = &sys_lseek,
     [OPENBSD_SYS_msync_modern]   = &sys_msync,

@@ -2686,8 +2686,8 @@ int sys_setsockopt(int fd, int level, int optname,
         afinet_set_reuseaddr(fd, on);   /* no-op on non-AF_INET fds */
     }
     /* UDP-API-04: SO_RCVTIMEO (20) / SO_SNDTIMEO (21) take a struct timeval:
-     * 16 bytes of int64 fields natively, 8 bytes of int32 from the 32-bit
-     * personalities.  They used to be accepted and discarded, so a blocking
+     * 16 bytes of int64 fields natively, 12 (int64 + int32) from NetBSD and
+     * OpenBSD i386, 8 bytes of int32 from Linux and FreeBSD i386.  They used to be accepted and discarded, so a blocking
      * receive on an AF_INET socket had no deadline at all.  AF_UNIX keeps
      * none (afinet_set_timeo() is -ENOTSOCK there): still accepted. */
     if (level == 1 /*SOL_SOCKET*/ && (optname == 20 || optname == 21)) {
@@ -2697,6 +2697,11 @@ int sys_setsockopt(int fd, int level, int optname,
             int64_t tv[2];
             if (copyin(optval, tv, sizeof(tv)) != 0) return -EFAULT;
             sec = tv[0]; usec = tv[1];
+        } else if (optlen >= 12) {
+            /* NetBSD/OpenBSD i386: int64 tv_sec, 32-bit tv_usec. */
+            struct { int64_t sec; int32_t usec; } __attribute__((packed)) tv;
+            if (copyin(optval, &tv, sizeof(tv)) != 0) return -EFAULT;
+            sec = tv.sec; usec = tv.usec;
         } else if (optlen >= 8) {
             int32_t tv[2];
             if (copyin(optval, tv, sizeof(tv)) != 0) return -EFAULT;
@@ -2830,14 +2835,21 @@ int sys_getsockopt(int fd, int level, int optname,
         }
         if (optname == 20 /*SO_RCVTIMEO*/ || optname == 21 /*SO_SNDTIMEO*/) {
             /* UDP-API-04: report the stored timeout as a struct timeval in
-             * the caller's width: 16 bytes (native int64 fields) or 8
-             * (the 32-bit personalities).  AF_UNIX keeps none: zero. */
+             * the caller's width: 16 bytes (native int64 fields), 12
+             * (NetBSD/OpenBSD i386) or 8 (Linux/FreeBSD i386).  AF_UNIX keeps
+             * none: zero. */
             int64_t sec = 0, usec = 0;
             (void)afinet_get_timeo(fd, optname == 20, &sec, &usec);
             if (ulen >= 16) {
                 int64_t tv[2] = { sec, usec };
                 socklen_t n = 16;
                 if (copyout(tv, optval, 16) != 0) return -EFAULT;
+                if (copyout(&n, optlen, sizeof(n)) != 0) return -EFAULT;
+            } else if (ulen >= 12) {
+                struct { int64_t sec; int32_t usec; } __attribute__((packed))
+                    tv = { sec, (int32_t)usec };
+                socklen_t n = 12;
+                if (copyout(&tv, optval, 12) != 0) return -EFAULT;
                 if (copyout(&n, optlen, sizeof(n)) != 0) return -EFAULT;
             } else if (ulen >= 8) {
                 int32_t tv[2] = { (int32_t)sec, (int32_t)usec };
