@@ -799,7 +799,15 @@ static void tcp_in_syn_received(tcp_pcb_t *p, uint32_t ack, uint8_t flags) {
         if (p->parent) {
             tcp_pcb_t *par = p->parent;
             if (par->accept_count < par->accept_cap) {
-                par->accept_q[par->accept_count++] = p;
+                /* TCP-MEM-05: write the slot, THEN publish it.  The
+                 * one-statement form compiled to the count store first
+                 * (confirmed in tcp.o), so a reader between the two stores
+                 * took an unwritten slot as a PCB pointer.  tcp_input()'s
+                 * lock (TCP-MEM-01) now excludes that reader; the order is
+                 * kept right regardless, with a compiler barrier. */
+                par->accept_q[par->accept_count] = p;
+                __asm__ volatile ("" ::: "memory");
+                par->accept_count++;
                 sched_wakeup(par->accept_chan);
             }
         }
@@ -1356,6 +1364,7 @@ int tcp_listen(tcp_pcb_t *p, int backlog) {
         }
         tcp_pcb_t **nq = (tcp_pcb_t **)kmalloc(sizeof(tcp_pcb_t *) * backlog);
         if (!nq) return -ENOMEM;
+        memset(nq, 0, sizeof(tcp_pcb_t *) * backlog);        /* TCP-MEM-05 */
         for (int i = 0; i < p->accept_count; i++) nq[i] = p->accept_q[i];
         kfree(p->accept_q, sizeof(tcp_pcb_t *) * p->accept_cap);
         p->accept_q   = nq;
@@ -1366,6 +1375,8 @@ int tcp_listen(tcp_pcb_t *p, int backlog) {
     }
     p->accept_q = (tcp_pcb_t **)kmalloc(sizeof(tcp_pcb_t *) * backlog);
     if (!p->accept_q) return -ENOMEM;
+    /* TCP-MEM-05: never let an unwritten slot hold a stale heap word. */
+    memset(p->accept_q, 0, sizeof(tcp_pcb_t *) * backlog);
     p->accept_cap = backlog;
     p->state      = TCP_LISTEN;
     p->listen     = 1;
