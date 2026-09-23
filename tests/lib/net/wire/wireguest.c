@@ -20,6 +20,7 @@
  *   readeof      read until EOF (or error), reporting the byte count
  *   read:N       read up to N bytes once
  *   write:TEXT   write TEXT
+ *   writen:N     write N octets of a repeating pattern in one call
  *   close        close the socket
  *   shutwr       shutdown(SHUT_WR)
  *   shutrd       shutdown(SHUT_RD)
@@ -79,6 +80,13 @@ static int do_actions(int fd, int argc, char **argv) {
         } else if (strncmp(a, "write:", 6) == 0) {
             ssize_t n = write(fd, a + 6, strlen(a + 6));
             say("write %s n=%ld", n < 0 ? strerror(errno) : "ok", (long)n);
+        } else if (strncmp(a, "writen:", 7) == 0) {
+            static char big[65536];
+            size_t n = (size_t)atol(a + 7);
+            if (n > sizeof big) n = sizeof big;
+            for (size_t k = 0; k < n; k++) big[k] = (char)('a' + k % 26);
+            ssize_t w = write(fd, big, n);
+            say("writen %s n=%ld", w < 0 ? strerror(errno) : "ok", (long)w);
         } else if (strcmp(a, "close") == 0) {
             int r = close(fd);
             say("close %s rc=%ld", r < 0 ? strerror(errno) : "ok", r);

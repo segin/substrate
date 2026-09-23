@@ -75,6 +75,7 @@ static inline void     tcp_unlock(uint32_t f) { intr_restore(f); }
 #define IPPROTO_TCP        6
 #define TCP_RING_LEN       (32 * 1024)
 #define TCP_MSS            1460
+#define TCP_DEFAULT_PEER_MSS 536         /* TCP-HDR-02: RFC 1122 4.2.2.6 */
 /*
  * TCP-06: every timer constant here was hardcoded for HZ=128 while
  * <sys/param.h> defines HZ 250, so each was HALF its documented value --
@@ -219,6 +220,8 @@ typedef struct tcp_pcb {
     uint32_t  srtt8, rttvar4; /* TCP-WIN-14: RFC 6298 estimator, scaled */
     uint32_t  rto;            /* TCP-WIN-14: current RTO in ticks, 0 = initial */
     uint8_t   rtt_valid;
+    uint16_t  snd_mss;        /* TCP-HDR-02: peer's MSS; 0 until known */
+    uint16_t  syn_mss;        /* TCP-HDR-02: MSS option of the last SYN seen */
     struct ip4_txopts txo;    /* UDP-API-12: the socket's IP_TTL/IP_TOS */
     /* SO_ERROR (cleared by getsockopt).  */
     int       so_error;
@@ -390,6 +393,18 @@ static int tcp_xmit_raw(tcp_pcb_t *p, uint32_t seq, uint8_t flags,
                            sizeof(*th) + dlen, &p->txo);
 }
 
+/* TCP-HDR-02: the largest segment we may send the peer -- its MSS option
+ * (536 if it sent none, RFC 1122 4.2.2.6), capped by our own buffer. */
+static uint32_t tcp_eff_mss(const tcp_pcb_t *p) {
+    if (p->snd_mss && p->snd_mss < TCP_MSS)
+        return p->snd_mss;
+    return TCP_MSS;
+}
+
+static void tcp_take_peer_mss(tcp_pcb_t *p, uint16_t syn_mss) {
+    p->snd_mss = syn_mss ? syn_mss : TCP_DEFAULT_PEER_MSS;
+}
+
 /* Sequence space a segment occupies: its data plus one for SYN and FIN. */
 static uint32_t tcp_seg_cost(uint8_t flags, size_t dlen) {
     return (uint32_t)dlen + ((flags & TCP_SYN) ? 1u : 0u) +
@@ -493,7 +508,7 @@ static void tcp_seg_emit(tcp_pcb_t *p, uint32_t seq, uint8_t flags,
  * allocation failed (in which case nothing was transmitted).  */
 static int tcp_xmit_queue(tcp_pcb_t *p, uint8_t flags,
                           const void *data, size_t dlen) {
-    if (dlen > TCP_MSS) dlen = TCP_MSS;
+    if (dlen > tcp_eff_mss(p)) dlen = tcp_eff_mss(p);  /* TCP-HDR-02 */
     tcp_seg_t *s = tcp_seg_alloc(flags, data, dlen);
     if (!s) return -ENOMEM;
     uint32_t f = tcp_lock();
@@ -933,6 +948,7 @@ static void tcp_in_listen(tcp_pcb_t *p, uint32_t saddr, uint32_t daddr,
     memset(c, 0, sizeof(*c));
     c->txo = p->txo;                 /* UDP-API-12: inherit the listener's */
     c->user_timeout_ms = p->user_timeout_ms;          /* TCP-WIN-13 */
+    tcp_take_peer_mss(c, p->syn_mss);                  /* TCP-HDR-02 */
     c->state   = TCP_SYN_RECEIVED;
     c->laddr   = daddr;
     c->raddr   = saddr;
@@ -995,6 +1011,7 @@ static void tcp_in_syn_sent(tcp_pcb_t *p, uint32_t seq, uint32_t ack,
         return;
     }
     if ((flags & (TCP_SYN | TCP_ACK)) == (TCP_SYN | TCP_ACK)) {
+        tcp_take_peer_mss(p, p->syn_mss);               /* TCP-HDR-02 */
         p->rcv_nxt = seq + 1;
         p->rcv_adv_edge_valid = 0;      /* TCP-WIN-07 */
         /* The peer's ACK confirms our SYN (validated acceptable above,
@@ -1024,6 +1041,7 @@ static void tcp_in_syn_sent(tcp_pcb_t *p, uint32_t seq, uint32_t ack,
      * queueing a second one; tcp_in_syn_received() completes the open.
      */
     if (flags & TCP_SYN) {
+        tcp_take_peer_mss(p, p->syn_mss);               /* TCP-HDR-02 */
         p->rcv_nxt = seq + 1;
         p->rcv_adv_edge_valid = 0;      /* TCP-WIN-07 */
         p->state   = TCP_SYN_RECEIVED;
@@ -1638,9 +1656,12 @@ static void tcp_input_locked(uint32_t saddr, uint32_t daddr,
                              const struct tcphdr *th, uint8_t flags,
                              uint16_t sport, uint16_t dport,
                              uint32_t seq, uint32_t ack,
-                             const uint8_t *payload, size_t dlen)
+                             const uint8_t *payload, size_t dlen,
+                             uint16_t syn_mss)
 {
     tcp_pcb_t *p = tcp_find(saddr, sport, daddr, dport);
+    if (p && (flags & TCP_SYN))
+        p->syn_mss = syn_mss;           /* TCP-HDR-02: for the handlers */
     if (!p) {
         tcp_send_rst(saddr, daddr, th, flags, seq, ack, dlen);
         return;
@@ -1733,6 +1754,31 @@ static void tcp_input_locked(uint32_t saddr, uint32_t daddr,
     }
 }
 
+/*
+ * TCP-HDR-02: walk the options of a SYN and return the peer's MSS, or 0 if
+ * it sent none.  Options were never parsed.  Bounded against the header:
+ * EOL (0) ends the list, NOP (1) is one octet, and every other kind needs a
+ * length octet in [2, remaining] -- a zero length would otherwise loop
+ * forever and an over-long one read past the header.  An MSS is kind 2,
+ * length 4.
+ */
+static uint16_t tcp_parse_mss(const uint8_t *o, size_t n) {
+    uint16_t mss = 0;
+    size_t i = 0;
+    while (i < n) {
+        uint8_t kind = o[i];
+        if (kind == 0) break;                       /* EOL */
+        if (kind == 1) { i++; continue; }           /* NOP */
+        if (n - i < 2) break;
+        uint8_t olen = o[i + 1];
+        if (olen < 2 || olen > n - i) break;        /* malformed: stop */
+        if (kind == 2 && olen == 4)
+            mss = (uint16_t)((o[i + 2] << 8) | o[i + 3]);
+        i += olen;
+    }
+    return mss;
+}
+
 void tcp_input(uint32_t saddr, uint32_t daddr,
                const uint8_t *seg, size_t len)
 {
@@ -1769,9 +1815,12 @@ void tcp_input(uint32_t saddr, uint32_t daddr,
         return;
     }
 
+    uint16_t syn_mss = (flags & TCP_SYN)
+        ? tcp_parse_mss(seg + sizeof(*th), hlen - sizeof(*th)) : 0;
+
     uint32_t f = tcp_lock();
     tcp_input_locked(saddr, daddr, th, flags, sport, dport, seq, ack,
-                     payload, dlen);
+                     payload, dlen, syn_mss);
     tcp_unlock(f);
 }
 
@@ -2054,7 +2103,7 @@ int tcp_poll(tcp_pcb_t *p, short events, void **wait_chan) {
             /* TCP-WIN-06: and room the silly-window rule would let a
              * full-sized write use, so poll() and a write() that holds a
              * tinygram back cannot disagree and spin. */
-            if (in_flight == 0 || avail >= TCP_MSS ||
+            if (in_flight == 0 || avail >= tcp_eff_mss(p) ||
                 (avail && p->max_snd_wnd && avail >= p->max_snd_wnd / 2))
                 revents |= POLLOUT;
             else
@@ -2146,7 +2195,7 @@ tcp_pcb_t *tcp_accept(tcp_pcb_t *listen_p, int nonblock) {
  */
 static int tcp_sws_ok(tcp_pcb_t *p, size_t chunk, size_t remaining,
                       uint32_t avail, uint32_t in_flight) {
-    if (chunk >= TCP_MSS || in_flight == 0)
+    if (chunk >= tcp_eff_mss(p) || in_flight == 0)          /* TCP-HDR-02 */
         return 1;
     if (p->max_snd_wnd && avail >= p->max_snd_wnd / 2)
         return 1;
@@ -2154,7 +2203,7 @@ static int tcp_sws_ok(tcp_pcb_t *p, size_t chunk, size_t remaining,
         int small = 0;
         uint32_t f = tcp_lock();
         for (tcp_seg_t *s = p->unacked_head; s; s = s->next)
-            if (s->dlen && s->dlen < TCP_MSS) { small = 1; break; }
+            if (s->dlen && s->dlen < tcp_eff_mss(p)) { small = 1; break; }
         tcp_unlock(f);
         return !small;
     }
@@ -2237,7 +2286,7 @@ static ssize_t tcp_send_body(tcp_pcb_t *p, const void *buf, size_t len, int nonb
         }
 
         size_t chunk = len - sent;
-        if (chunk > TCP_MSS)         chunk = TCP_MSS;
+        if (chunk > tcp_eff_mss(p))  chunk = tcp_eff_mss(p);   /* TCP-HDR-02 */
         if (chunk > avail)           chunk = avail;
         if (!tcp_sws_ok(p, chunk, len - sent, avail, in_flight)) {
             /* TCP-WIN-06: hold the tail back until an ACK makes it worth
