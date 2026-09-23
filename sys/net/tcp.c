@@ -147,6 +147,7 @@ typedef struct tcp_seg {
     uint64_t  sent_tick;      /* timestamp of last (re-)transmit */
     int       retx;           /* number of retransmits so far */
     uint8_t   probe;          /* TCP-WIN-01: sent as a zero-window probe */
+    uint8_t   fast_retx;      /* TCP-WIN-04: fast retransmits so far */
     struct tcp_seg *next;
     uint8_t   data[];         /* flex array; dlen bytes */
 } tcp_seg_t;
@@ -373,6 +374,7 @@ static tcp_seg_t *tcp_seg_alloc(uint8_t flags, const void *data, size_t dlen) {
     s->sent_tick = get_ticks();
     s->retx      = 0;
     s->probe     = 0;
+    s->fast_retx = 0;
     s->next      = NULL;
     if (dlen && data) memcpy(s->data, data, dlen);
     return s;
@@ -462,13 +464,26 @@ static void tcp_unacked_free_all(tcp_pcb_t *p) {
 }
 
 /* Re-transmit the head of the unacked queue (used by both RTO and
- * fast-retx).  */
-static void tcp_retx_head(tcp_pcb_t *p) {
+ * fast-retx).
+ *
+ * TCP-WIN-04: only a timer expiry (fast == 0) advances retx -- which is
+ * both the RTO backoff exponent and the abort budget -- and restarts the
+ * RTO.  Fast retransmits shared both, so a few duplicate-ACK episodes on a
+ * lossy but healthy link pushed the next RTO to the 60 s cap and then
+ * aborted the connection.  They are capped per segment instead, so a peer
+ * cannot drive unbounded retransmission with duplicate ACKs. */
+#define TCP_FAST_RETX_MAX 3
+static void tcp_retx_head(tcp_pcb_t *p, int fast) {
     tcp_seg_t *s = p->unacked_head;
     if (!s) return;
+    if (fast && s->fast_retx >= TCP_FAST_RETX_MAX) return;
     if (tcp_xmit_raw(p, s->seq, s->flags, s->data, s->dlen) >= 0)
         tcp_note_sent(p, s->seq + s->dlen + ((s->flags & TCP_SYN) ? 1u : 0u) +
                          ((s->flags & TCP_FIN) ? 1u : 0u));   /* TCP-MEM-07 */
+    if (fast) {
+        s->fast_retx++;
+        return;
+    }
     s->sent_tick = get_ticks();
     s->retx++;
 }
@@ -628,7 +643,7 @@ static void tcp_timer_tick(uint64_t now) {
             p->cwnd     = TCP_MSS;
             p->dup_ack  = 0;
         }
-        tcp_retx_head(p);
+        tcp_retx_head(p, 0);
     }
     tcp_unlock(f);
 }
@@ -871,7 +886,7 @@ static void tcp_in_syn_sent(tcp_pcb_t *p, uint32_t seq, uint32_t ack,
         p->state   = TCP_SYN_RECEIVED;
         if (p->unacked_head && (p->unacked_head->flags & TCP_SYN)) {
             p->unacked_head->flags |= TCP_ACK;
-            tcp_retx_head(p);
+            tcp_retx_head(p, 1);   /* now, not a timeout */
         }
     }
 }
@@ -1218,7 +1233,7 @@ static void tcp_in_established(tcp_pcb_t *p, uint32_t seq, uint32_t ack,
                 if (half < 2u * TCP_MSS) half = 2u * TCP_MSS;
                 p->ssthresh = half;
                 p->cwnd     = half;
-                tcp_retx_head(p);
+                tcp_retx_head(p, 1);
                 p->dup_ack = 0;
             }
         } else {

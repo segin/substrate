@@ -17,6 +17,11 @@ it guards.
                 update is sent (the 0 -> non-zero transition is always
                 announced, and after that every MSS freed).  It used to
                 need one single read() to free an MSS.
+    fast-retx   TCP-WIN-04: seven duplicate-ACK episodes (fast
+                retransmits, capped per segment) must not consume the RTO backoff or the abort
+                budget: when the peer then goes quiet the next timeout
+                retransmission comes after the base RTO, not the 60 s cap,
+                and the connection survives to deliver everything.
 
 Run from the repo root after building sys/ and wireguest:
     python3 tests/lib/net/wire/test_tcp_window.py [case...]
@@ -153,9 +158,48 @@ def case_reopen():
         return None, w
 
 
+def case_fast_retx():
+    msg = 'F' * 150                  # fits the kernel command line
+    with Wire.boot('connect 10.0.2.2 %d write:%s sleep:60' % (PORT, msg)) as w:
+        syn, err = handshake(w)
+        if err:
+            return err, w
+        gp, g = syn.sport, syn.seq + 1
+        if not w.expect(lambda s: s.data, 5, 'data'):
+            return 'guest sent nothing', w
+        for ep in range(7):
+            w.rx.clear()
+            for _ in range(3):
+                w.send(Seg(PORT, gp, PISS + 1, g, ACK))
+            # Fast retransmits per segment are capped, so only the first
+            # episodes must produce one.
+            if not w.expect(lambda s: s.data and s.seq == g, 2, 'fast retransmit') \
+                    and ep == 0:
+                return 'no fast retransmit on three duplicate ACKs', w
+        w.rx.clear()
+        t0 = time.time()
+        r = w.expect(lambda s: s.data and s.seq == g, 8, 'RTO retransmit')
+        if not r:
+            return 'no timeout retransmission within 8 s of the last episode', w
+        got = b''
+        end = time.time() + 20
+        while len(got) < len(msg) and time.time() < end:
+            s = w.expect(lambda s: s.data, 3, 'data')
+            if not s:
+                continue
+            off = (s.seq - g) & 0xFFFFFFFF
+            if off <= len(got) < off + len(s.data):
+                got += s.data[len(got) - off:]
+            w.send(Seg(PORT, gp, PISS + 1, g + len(got), ACK))
+        if len(got) != len(msg):
+            return 'got %d of %d octets' % (len(got), len(msg)), w
+        return None, w
+
+
 CASES = (('persist', case_persist),
          ('nb-persist', case_nb_persist),
-         ('reopen', case_reopen))
+         ('reopen', case_reopen),
+         ('fast-retx', case_fast_retx))
 
 
 def main():
