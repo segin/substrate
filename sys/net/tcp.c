@@ -324,6 +324,12 @@ static int tcp_xmit_raw(tcp_pcb_t *p, uint32_t seq, uint8_t flags,
                            sizeof(*th) + dlen, &p->txo);
 }
 
+/* Sequence space a segment occupies: its data plus one for SYN and FIN. */
+static uint32_t tcp_seg_cost(uint8_t flags, size_t dlen) {
+    return (uint32_t)dlen + ((flags & TCP_SYN) ? 1u : 0u) +
+           ((flags & TCP_FIN) ? 1u : 0u);
+}
+
 /* TCP-MEM-07: note that sequence space up to `end` has been transmitted.
  * snd_nxt is advanced when a segment is QUEUED, before it goes out, so it
  * over-states what the peer can have seen; ACK acceptability is bounded by
@@ -352,58 +358,70 @@ static void tcp_send_ctl(tcp_pcb_t *p, uint8_t flags) {
 /* Send queue management                                              */
 /* ------------------------------------------------------------------ */
 
-/* Allocate a tcp_seg with `dlen` bytes of payload, copy `data` in,
- * transmit it, advance snd_nxt by the segment's sequence cost
- * (SYN/FIN count as 1, data counts as dlen), and link onto the
- * unacked FIFO so the timer can retransmit.  Returns 0 on success
- * or -ENOMEM if allocation failed (in which case nothing was
- * transmitted).  */
-static int tcp_xmit_queue(tcp_pcb_t *p, uint8_t flags,
-                          const void *data, size_t dlen) {
-    if (dlen > TCP_MSS) dlen = TCP_MSS;
+/* Allocate a tcp_seg with `dlen` bytes of payload and copy `data` in.
+ * Nothing is sequenced or linked yet; that is tcp_seg_link_locked(). */
+static tcp_seg_t *tcp_seg_alloc(uint8_t flags, const void *data, size_t dlen) {
     tcp_seg_t *s = (tcp_seg_t *)kmalloc(sizeof(*s) + dlen);
-    if (!s) return -ENOMEM;
+    if (!s) return NULL;
     s->flags     = flags;
     s->dlen      = (uint16_t)dlen;
     s->sent_tick = get_ticks();
     s->retx      = 0;
     s->next      = NULL;
     if (dlen && data) memcpy(s->data, data, dlen);
+    return s;
+}
 
-    /* Assign the sequence number, advance snd_nxt, and link onto the
-     * unacked FIFO — all under the lock and all BEFORE the transmit.
-     *
-     * Ordering is load-bearing: on loopback tcp_xmit_raw() delivers
-     * the segment synchronously, the peer ACKs it, and that ACK is
-     * processed (tcp_unacked_prune) before tcp_xmit_raw() even
-     * returns.  If the segment were appended afterwards the ACK
-     * could never prune it — it would sit at unacked_head forever,
-     * RTO-retransmitted until ETIMEDOUT killed the connection, and
-     * its permanent presence would block the FIN_WAIT_1 -> FIN_WAIT_2
-     * transition (which requires !unacked_head), so the connection
-     * could never close cleanly either. */
-    uint32_t f = tcp_lock();
+/* Assign `s` its sequence number, advance snd_nxt by the segment's
+ * sequence cost (SYN/FIN count as 1, data counts as dlen), and link it
+ * onto the unacked FIFO so the timer can retransmit.  Caller holds
+ * tcp_lock.  Returns the sequence number assigned.
+ *
+ * Ordering is load-bearing: on loopback tcp_xmit_raw() delivers the
+ * segment synchronously, the peer ACKs it, and that ACK is processed
+ * (tcp_unacked_prune) before tcp_xmit_raw() even returns.  If the
+ * segment were appended afterwards the ACK could never prune it -- it
+ * would sit at unacked_head forever, RTO-retransmitted until ETIMEDOUT
+ * killed the connection, and its permanent presence would block the
+ * FIN_WAIT_1 -> FIN_WAIT_2 transition (which requires !unacked_head), so
+ * the connection could never close cleanly either. */
+static uint32_t tcp_seg_link_locked(tcp_pcb_t *p, tcp_seg_t *s) {
     uint32_t seq = p->snd_nxt;
     s->seq = seq;
-    uint32_t seglen = (uint32_t)dlen + ((flags & TCP_SYN) ? 1u : 0u) +
-                      ((flags & TCP_FIN) ? 1u : 0u);
-    p->snd_nxt += seglen;
+    p->snd_nxt += tcp_seg_cost(s->flags, s->dlen);
     if (p->unacked_tail) p->unacked_tail->next = s;
     else                 p->unacked_head = s;
     p->unacked_tail = s;
-    tcp_unlock(f);
+    return seq;
+}
 
-    /* Transmit with IRQs enabled (tcp_xmit_raw -> ip4_output may
-     * ARP-wait, which needs IRQs on to receive the reply).  A failed
-     * transmit leaves the segment queued; the RTO timer retransmits
-     * it — which is the correct response to a transient send error.
-     *
-     * TCP-MEM-07: and never touch `s` again.  Once the lock is dropped an
-     * ACK can prune and kfree() it, so reading s->seq and s->data here was
-     * a use-after-free.  The sequence number was captured under the lock,
-     * and the caller's buffer holds exactly the bytes copied into s. */
+/* Transmit a segment already linked by tcp_seg_link_locked(), with IRQs
+ * enabled (tcp_xmit_raw -> ip4_output may ARP-wait, which needs IRQs on
+ * to receive the reply).  A failed transmit leaves the segment queued;
+ * the RTO timer retransmits it -- which is the correct response to a
+ * transient send error.
+ *
+ * TCP-MEM-07: the segment itself is never touched here.  Once the lock is
+ * dropped an ACK can prune and kfree() it, so reading s->seq and s->data
+ * would be a use-after-free.  The sequence number was captured under the
+ * lock, and the caller's buffer holds exactly the bytes copied into s. */
+static void tcp_seg_emit(tcp_pcb_t *p, uint32_t seq, uint8_t flags,
+                         const void *data, size_t dlen) {
     if (tcp_xmit_raw(p, seq, flags, data, dlen) >= 0)
-        tcp_note_sent(p, seq + seglen);
+        tcp_note_sent(p, seq + tcp_seg_cost(flags, dlen));
+}
+
+/* Queue and transmit one segment.  Returns 0 on success or -ENOMEM if
+ * allocation failed (in which case nothing was transmitted).  */
+static int tcp_xmit_queue(tcp_pcb_t *p, uint8_t flags,
+                          const void *data, size_t dlen) {
+    if (dlen > TCP_MSS) dlen = TCP_MSS;
+    tcp_seg_t *s = tcp_seg_alloc(flags, data, dlen);
+    if (!s) return -ENOMEM;
+    uint32_t f = tcp_lock();
+    uint32_t seq = tcp_seg_link_locked(p, s);
+    tcp_unlock(f);
+    tcp_seg_emit(p, seq, flags, data, dlen);
     return 0;
 }
 
@@ -1898,7 +1916,17 @@ int tcp_close(tcp_pcb_t *p) {
      * (which may itself transition state or free the PCB) can't
      * interleave.  tcp_free for the already-dead states is done
      * inside the lock; the FIN-emitting paths drop the lock before
-     * tcp_xmit_queue, which is itself lock-bracketed. */
+     * tcp_xmit_queue, which is itself lock-bracketed.
+     *
+     * TCP-MEM-10: the FIN's sequence number is reserved and the segment
+     * linked under the same lock that publishes FIN_WAIT_1/LAST_ACK; only
+     * the transmit happens after the unlock.  Publishing the state first
+     * and sequencing the FIN later let a segment processed in the gap see
+     * the closing state with snd_nxt not yet covering the FIN and an empty
+     * unacked queue -- so an ACK of our data alone moved FIN_WAIT_1 to
+     * FIN_WAIT_2, or LAST_ACK straight to CLOSED, before any FIN existed. */
+    tcp_seg_t *fin = tcp_seg_alloc(TCP_FIN | TCP_ACK, NULL, 0);
+    uint32_t fin_seq = 0;
     uint32_t f = tcp_lock();
     /* The owning socket is being destroyed — mark the PCB orphaned so
      * the timer reaps it once it reaches CLOSED, and so any data that
@@ -1908,14 +1936,16 @@ int tcp_close(tcp_pcb_t *p) {
     switch (st) {
     case TCP_ESTABLISHED:
         p->state = TCP_FIN_WAIT_1;
+        if (fin) fin_seq = tcp_seg_link_locked(p, fin);
         tcp_unlock(f);
-        tcp_xmit_queue(p, TCP_FIN | TCP_ACK, NULL, 0);
-        break;
+        if (fin) tcp_seg_emit(p, fin_seq, TCP_FIN | TCP_ACK, NULL, 0);
+        return 0;
     case TCP_CLOSE_WAIT:
         p->state = TCP_LAST_ACK;
+        if (fin) fin_seq = tcp_seg_link_locked(p, fin);
         tcp_unlock(f);
-        tcp_xmit_queue(p, TCP_FIN | TCP_ACK, NULL, 0);
-        break;
+        if (fin) tcp_seg_emit(p, fin_seq, TCP_FIN | TCP_ACK, NULL, 0);
+        return 0;
     case TCP_LISTEN: {
         /* Closing a listener: every child PCB it spawned is now an
          * orphan.  Children sitting fully-established in the accept
@@ -1972,6 +2002,7 @@ int tcp_close(tcp_pcb_t *p) {
         tcp_unlock(f);
         break;
     }
+    if (fin) kfree(fin, sizeof(*fin));   /* no FIN to send */
     return 0;
 }
 
@@ -1983,24 +2014,29 @@ int tcp_close(tcp_pcb_t *p) {
  */
 int tcp_shutdown_wr(tcp_pcb_t *p) {
     if (!p) return -ENOTCONN;
+    /* TCP-MEM-10: sequence the FIN under the lock that publishes the
+     * closing state (see tcp_close). */
+    tcp_seg_t *fin = tcp_seg_alloc(TCP_FIN | TCP_ACK, NULL, 0);
+    uint32_t fin_seq = 0;
     uint32_t f = tcp_lock();
     switch (p->state) {
     case TCP_ESTABLISHED:
         p->state = TCP_FIN_WAIT_1;
-        tcp_unlock(f);
-        tcp_xmit_queue(p, TCP_FIN | TCP_ACK, NULL, 0);
-        return 0;
+        break;
     case TCP_CLOSE_WAIT:
         p->state = TCP_LAST_ACK;
-        tcp_unlock(f);
-        tcp_xmit_queue(p, TCP_FIN | TCP_ACK, NULL, 0);
-        return 0;
+        break;
     default:
         /* SYN_SENT has nothing established to FIN; the rest already
          * sent their FIN.  Idempotent either way. */
         tcp_unlock(f);
+        if (fin) kfree(fin, sizeof(*fin));
         return 0;
     }
+    if (fin) fin_seq = tcp_seg_link_locked(p, fin);
+    tcp_unlock(f);
+    if (fin) tcp_seg_emit(p, fin_seq, TCP_FIN | TCP_ACK, NULL, 0);
+    return 0;
 }
 
 /*
