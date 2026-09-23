@@ -1095,6 +1095,12 @@ static void tcp_in_established(tcp_pcb_t *p, uint32_t seq, uint32_t ack,
         return;
     }
 
+    /* TCP-SM-12: RFC 793 3.9 fifth check -- "if the ACK bit is off drop
+     * the segment and return".  Text and FIN were taken from segments
+     * without it. */
+    if (!(flags & TCP_ACK))
+        return;
+
     /* Data for a detached PCB has nowhere to land — the owning socket
      * is gone.  RST the peer so a process still writing to this
      * connection fails promptly instead of having its bytes silently

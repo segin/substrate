@@ -29,6 +29,9 @@ it guards.
                     peer answers the guest's SYN with a SYN of its own; the
                     guest replies SYN|ACK from its ISS, and the peer's
                     SYN|ACK then completes the connect, which carries data.
+    no-ack          TCP-SM-12: text and FIN on a segment without the ACK bit
+                    are dropped (3.9 fifth check); the same text with ACK
+                    is then delivered.
 
 Run from the repo root after building sys/ and wireguest:
     python3 tests/lib/net/wire/test_tcp_input.py [case...]
@@ -220,13 +223,34 @@ def case_simultaneous():
         return None, w
 
 
+def case_no_ack():
+    with Wire.boot('connect 10.0.2.2 %d sleep:4 read:64 readeof sleep:60' % PORT) as w:
+        syn, err = handshake(w)
+        if err:
+            return err, w
+        gp, g = syn.sport, syn.seq + 1
+        w.rx.clear()
+        w.send(Seg(PORT, gp, PISS + 1, 0, PSH | FIN, data=b'no-ack'))
+        w.pump(1.0)
+        if any(s.ack != PISS + 1 for s in w.rx if s.flags & ACK):
+            return 'RCV.NXT moved on a segment without ACK: %r' % w.rx, w
+        w.send(Seg(PORT, gp, PISS + 1, g, ACK | PSH, data=b'with-ack'))
+        if not w.wait_serial('guest: read', 10):
+            return 'guest never read', w
+        line = [l for l in w.serial().splitlines() if 'guest: read ' in l][0]
+        if 'n=8' not in line:
+            return 'want the 8 ACKed octets only: %s' % line.strip(), w
+        return None, w
+
+
 CASES = (('data-after-fin', case_data_after_fin),
          ('syn-rcvd-rst', case_syn_rcvd_rst),
          ('syn-sync', case_syn_sync),
          ('listen-ack', case_listen_ack),
          ('syn-rcvd-third', case_syn_rcvd_third),
          ('syn-sent-ack', case_syn_sent_ack),
-         ('simultaneous', case_simultaneous))
+         ('simultaneous', case_simultaneous),
+         ('no-ack', case_no_ack))
 
 
 def main():
