@@ -103,6 +103,7 @@ class Wire:
         self.ip_id = 1
         self.rx = []            # TCP segments from the guest, oldest first
         self.ip_rx = []         # other IPv4 datagrams: (proto, src, dst, ip_bytes)
+        self.frames = []        # every frame from the guest: (dst_mac, ethertype, bytes)
         self.trace = []         # everything seen/sent, for failure reports
 
     # -- boot -------------------------------------------------------------
@@ -111,8 +112,15 @@ class Wire:
         workdir = workdir or os.environ.get('WIRE_WORKDIR', '/tmp')
         kernel = kernel or os.path.join(TOP, 'sys', 'kernel.multiboot')
         guest = guest or os.path.join(os.path.dirname(__file__), 'wireguest')
-        img = os.path.join(workdir, 'wire-rootfs.%d.img' % os.getpid())
-        log = os.path.join(workdir, 'wire-serial.%d.log' % os.getpid())
+        # One serial log per BOOT, not per process, and never pre-existing:
+        # qemu truncates its -serial file only once it is running, so a
+        # reused name let wait_serial() match the previous boot's output.
+        cls._boots = getattr(cls, '_boots', 0) + 1
+        tag = '%d.%d' % (os.getpid(), cls._boots)
+        img = os.path.join(workdir, 'wire-rootfs.%s.img' % tag)
+        log = os.path.join(workdir, 'wire-serial.%s.log' % tag)
+        if os.path.exists(log):
+            os.unlink(log)
         subprocess.run(['cp', '--reflink=auto', os.path.join(TOP, 'rootfs.img'), img],
                        check=True)
         dev = '%s?offset=%d' % (img, ROOT_P2_OFFSET)
@@ -180,6 +188,7 @@ class Wire:
         if len(frame) < 14:
             return
         etype = struct.unpack('!H', frame[12:14])[0]
+        self.frames.append((bytes(frame[0:6]), etype, bytes(frame)))
         if etype == 0x0806 and len(frame) >= 42:              # ARP
             op = struct.unpack('!H', frame[20:22])[0]
             tpa = socket.inet_ntoa(frame[38:42])
@@ -227,6 +236,14 @@ class Wire:
         self.ip_id = (self.ip_id + 1) & 0xFFFF
         self.trace.append(('tx', time.time(), seg))
         self._send_frame(GUEST_MAC + PEER_MAC + b'\x08\x00' + ip + body)
+
+    def send_arp(self, op, sha, spa, tha, tpa, eth_dst=GUEST_MAC):
+        """Inject an ARP packet (op 1 request, 2 reply) toward the guest."""
+        pkt = (struct.pack('!HHBBH', 1, 0x0800, 6, 4, op) + sha +
+               socket.inet_aton(spa) + tha + socket.inet_aton(tpa))
+        self.trace.append(('tx', time.time(), 'arp op %d %s is-at %s -> %s' %
+                           (op, spa, sha.hex(':'), tpa)))
+        self._send_frame(eth_dst + sha + b'\x08\x06' + pkt)
 
     def send_ip(self, proto, payload, src=PEER_IP, dst=GUEST_IP, ttl=64,
                 ident=None):
