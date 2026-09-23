@@ -141,6 +141,23 @@ void icmp_port_unreach(netdev_t *dev, const uint8_t *ip_pkt, size_t ip_len);
 void icmp6_port_unreach(netdev_t *dev, const uint8_t *ip6_pkt, size_t len);
 void tcp_input(uint32_t saddr, uint32_t daddr, const uint8_t *pkt, size_t len);
 
+/* UDP-RES-03 / UDP-RES-06: UDP counters, the Udp: line of Linux's
+ * /proc/net/snmp, published as /proc/udpstat.  Every drop used to be
+ * silent -- no counter, no log -- so a lossy receiver or a checksum-mangling
+ * path could not be diagnosed. */
+enum udp_stat {
+    UDP_STAT_IN_DATAGRAMS,      /* delivered to a socket */
+    UDP_STAT_NO_PORTS,          /* unicast, no socket on the port */
+    UDP_STAT_IN_ERRORS,         /* every receive-side drop below, together */
+    UDP_STAT_OUT_DATAGRAMS,     /* sent */
+    UDP_STAT_RCVBUF_ERRORS,     /* receive queue full (SO_RCVBUF) */
+    UDP_STAT_IN_CSUM_ERRORS,    /* checksum failed, or zero over IPv6 */
+    UDP_STAT_MALFORMED,         /* too short, or a bad Length field */
+    UDP_STAT_COUNT
+};
+void udp_stat_inc(enum udp_stat which);
+void udp_stats_init(void);   /* registers /proc/udpstat */
+
 /* -- Checksums ------------------------------------------------------ */
 
 uint16_t inet_csum(const void *data, size_t len);

@@ -13,8 +13,8 @@
  * EOF), UDP-API-11 (IP_PKTINFO), UDP-API-12 (IP transmit options),
  * UDP-API-13 (unimplemented options), UDP-API-14 (getsockopt checks),
  * UDP-API-15 (SO_BROADCAST), UDP-API-17 (raw filtering), UDP-API-19
- * (SHUT_WR), UDP-API-20 (raw payload limit) and UDP-RES-01 (byte-bounded
- * queue) from docs/ip-audit-2026-09-22.md.
+ * (SHUT_WR), UDP-API-20 (raw payload limit), UDP-RES-01 (byte-bounded
+ * queue) and UDP-RES-03/-06 (drop counters) from docs/ip-audit-2026-09-22.md.
  *
  * Each case drives the real socket API over the loopback interface, so a
  * PASS means a datagram actually took the intended path through the
@@ -29,6 +29,7 @@
 #include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <net/if.h>
 #include <sys/ioctl.h>
@@ -1291,6 +1292,68 @@ static void test_rcvbuf_bytes(void)
     close(tx);
 }
 
+/* Read one field of /proc/udpstat's value line by column index. */
+static long udpstat(int col)
+{
+    char buf[512];
+    int f = open("/proc/udpstat", O_RDONLY);
+    if (f < 0) return -1;
+    ssize_t n = read(f, buf, sizeof(buf) - 1);
+    close(f);
+    if (n <= 0) return -1;
+    buf[n] = 0;
+    char *v = strchr(buf, '\n');
+    if (!v) return -1;
+    v = strstr(v, "Udp:");
+    if (!v) return -1;
+    v += 4;
+    long x = -1;
+    for (int i = 0; i <= col; i++)
+        x = strtol(v, &v, 10);
+    return x;
+}
+
+/* UDP-RES-03 / UDP-RES-06: drops are counted -- a full receive queue
+ * (RcvbufErrors, column 4) and a bad checksum (InCsumErrors, column 6) --
+ * as are NoPorts (1).  Every one of them used to vanish without a trace. */
+static void test_udp_counters(void)
+{
+    printf("UDP-RES-03/06: UDP drops are counted in /proc/udpstat\n");
+    ok("/proc/udpstat is readable", udpstat(0) >= 0, "missing");
+    struct sockaddr_in dst;
+    int tx = socket(AF_INET, SOCK_DGRAM, 0);
+
+    long noports = udpstat(1);
+    lo_addr(&dst, 31940);                          /* nothing bound there */
+    sendto(tx, "x", 1, 0, (struct sockaddr *)&dst, sizeof(dst));
+    usleep(200000);
+    ok("a datagram to a closed port counts as NoPorts", udpstat(1) == noports + 1,
+       "not counted");
+
+    long rcvbuf = udpstat(4);
+    int rx = bind_udp(31941), small = 2048;
+    setsockopt(rx, SOL_SOCKET, SO_RCVBUF, &small, sizeof(small));
+    static char big[1000];
+    lo_addr(&dst, 31941);
+    for (int i = 0; i < 5; i++)
+        sendto(tx, big, sizeof(big), 0, (struct sockaddr *)&dst, sizeof(dst));
+    usleep(200000);
+    ok("queue-full drops count as RcvbufErrors", udpstat(4) >= rcvbuf + 3,
+       "not counted");
+    close(rx);
+
+    /* A bad checksum, built by hand on a raw socket. */
+    long csum = udpstat(6);
+    int raw = socket(AF_INET, SOCK_RAW, 17);
+    unsigned char u[12] = { 0x7c, 0xe0, 0x7c, 0xe1, 0, 12, 0xde, 0xad, 'b', 'a', 'd', '!' };
+    lo_addr(&dst, 0);
+    sendto(raw, u, sizeof(u), 0, (struct sockaddr *)&dst, sizeof(dst));
+    usleep(200000);
+    ok("a bad checksum counts as InCsumErrors", udpstat(6) == csum + 1, "not counted");
+    close(raw);
+    close(tx);
+}
+
 int main(void)
 {
     printf("torture_udp: UDP demux + checksum regressions (#430)\n\n");
@@ -1325,6 +1388,7 @@ int main(void)
     test_shut_wr();
     test_raw_max();
     test_rcvbuf_bytes();
+    test_udp_counters();
 
     printf("\nResult: %d passed, %d failed -- %s\n",
            passed, failed, failed ? "FAILED" : "PASSED");

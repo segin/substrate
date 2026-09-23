@@ -607,6 +607,7 @@ static inline uint32_t v4(uint8_t a, uint8_t b, uint8_t c, uint8_t d) {
 }
 
 void inet_init(void) {
+    udp_stats_init();                       /* UDP-RES-03/-06: /proc/udpstat */
     /* Pick the first non-loopback NIC. */
     netdev_t *dev = NULL;
     for (netdev_t *d = netdev_first(); d; d = netdev_next(d)) {

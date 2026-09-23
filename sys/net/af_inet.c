@@ -160,6 +160,7 @@ typedef struct afi_sock {
     uint8_t   *rq;
     uint32_t   rq_cap, rq_head, rq_tail, rq_used;
     uint32_t   rcvbuf;
+    uint32_t   rq_drops;    /* UDP-RES-03: datagrams dropped on a full queue */
     uint32_t   count;
     void      *wait_chan;
     int        closed;
@@ -872,6 +873,7 @@ static size_t afinet_node_write_body(fs_node_t *node, afi_sock_t *s,
             udp_csum4(uh, saddr, daddr, sizeof(*uh) + size);
             int rc = ip4_output_opts(saddr, daddr, IPPROTO_UDP_NUM, pkt,
                                      sizeof(*uh) + size, &s->txo);
+            if (rc >= 0) udp_stat_inc(UDP_STAT_OUT_DATAGRAMS);   /* UDP-RES-03 */
             return rc < 0 ? (size_t)rc : size;
         } else {
             uint32_t daddr;
@@ -904,6 +906,7 @@ static size_t afinet_node_write_body(fs_node_t *node, afi_sock_t *s,
             int rc = udp_csum6(uh, s->peer_addr, sizeof(*uh) + size);
             if (rc < 0) return (size_t)rc;
             rc = ip6_output(s->peer_addr, IPPROTO_UDP_NUM, pkt, sizeof(*uh) + size);
+            if (rc >= 0) udp_stat_inc(UDP_STAT_OUT_DATAGRAMS);   /* UDP-RES-03 */
             return rc < 0 ? (size_t)rc : size;
         } else {
             int rc = ip6_output(s->peer_addr, (uint8_t)s->protocol, buf, size);
@@ -1891,6 +1894,7 @@ static ssize_t afinet_sendto_k(int fd, const void *buf, size_t len, int flags,
         udp_csum4(uh, src, d, sizeof(*uh) + len);
         int rc = ip4_output_opts(src, d, IPPROTO_UDP_NUM, pkt, sizeof(*uh) + len,
                                  &s->txo);
+        if (rc >= 0) udp_stat_inc(UDP_STAT_OUT_DATAGRAMS);   /* UDP-RES-03 */
         return rc < 0 ? rc : (ssize_t)len;
     } else {
         if (s->type == SOCK_RAW) {
@@ -1917,6 +1921,7 @@ static ssize_t afinet_sendto_k(int fd, const void *buf, size_t len, int flags,
         int rc = udp_csum6(uh, daddr_buf, sizeof(*uh) + len);
         if (rc < 0) return rc;
         rc = ip6_output(daddr_buf, IPPROTO_UDP_NUM, pkt, sizeof(*uh) + len);
+        if (rc >= 0) udp_stat_inc(UDP_STAT_OUT_DATAGRAMS);   /* UDP-RES-03 */
         return rc < 0 ? rc : (ssize_t)len;
     }
 }
@@ -2264,7 +2269,13 @@ static void enqueue(afi_sock_t *s, uint8_t family, uint8_t proto, uint16_t port,
     uint32_t need = AFI_REC_SPACE(n);
     /* UDP-RES-01: admission is by bytes against SO_RCVBUF, not by count. */
     uint32_t limit = s->rcvbuf < s->rq_cap ? s->rcvbuf : s->rq_cap;
-    if (s->rq_used + need > limit) return;          /* drop */
+    if (s->rq_used + need > limit) {
+        /* UDP-RES-03: counted, per socket and (for UDP) globally -- a full
+         * queue used to drop without a trace. */
+        s->rq_drops++;
+        if (proto == IPPROTO_UDP_NUM) udp_stat_inc(UDP_STAT_RCVBUF_ERRORS);
+        return;
+    }
     afi_rec_t h;
     memset(&h, 0, sizeof(h));
     h.family = family;
