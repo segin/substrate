@@ -15,6 +15,8 @@
  *   wireguest mcast <group> <port> <action>... (UDP bound to *:port, joined
  *                                                to group on INADDR_ANY)
  *   wireguest udpany <port> <action>...        (UDP bound to *:port)
+ *   wireguest redial <ip> <port> <lport>       (twice: bind lport, connect,
+ *                                               read until EOF or error)
  *
  * Actions, executed in order on the connected socket:
  *   readeof      read until EOF (or error), reporting the byte count
@@ -266,6 +268,34 @@ int main(int argc, char **argv) {
         } else {
             say("mcast setup failed: %s (%ld)", strerror(errno), errno);
         }
+    } else if (argc >= 5 && strcmp(argv[1], "redial") == 0) {
+        for (int round = 0; round < 2; round++) {
+            struct sockaddr_in me, sa;
+            memset(&me, 0, sizeof me);
+            me.sin_family = AF_INET;
+            me.sin_port = htons((unsigned short)atoi(argv[4]));
+            memset(&sa, 0, sizeof sa);
+            sa.sin_family = AF_INET;
+            sa.sin_port = htons((unsigned short)atoi(argv[3]));
+            sa.sin_addr.s_addr = inet_addr(argv[2]);
+            int fd = socket(AF_INET, SOCK_STREAM, 0);
+            int one = 1;
+            setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
+            if (bind(fd, (struct sockaddr *)&me, sizeof me) != 0 ||
+                connect(fd, (struct sockaddr *)&sa, sizeof sa) != 0) {
+                say("redial failed: %s (%ld)", strerror(errno), errno);
+                close(fd);
+                break;
+            }
+            say("connected %s%ld", "", round);
+            char buf[64];
+            while (read(fd, buf, sizeof buf) > 0)
+                ;
+            say("redial round done %s%ld", "", round);
+            close(fd);
+            sleep(1);
+        }
+        rc = 0;
     } else if (argc >= 3 && strcmp(argv[1], "udpany") == 0) {
         struct sockaddr_in sa;
         memset(&sa, 0, sizeof sa);

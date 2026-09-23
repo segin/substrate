@@ -33,6 +33,7 @@
 
 #include <arch/i386/intr.h>
 #include <kern/console.h>
+#include <kern/random.h>
 #include <kern/sched.h>
 #include <kern/time.h>
 #include <sys/random.h>
@@ -311,12 +312,53 @@ static void tcp_unhold(tcp_pcb_t *p) {
  * the RNG is not yet seeded this early in boot.
  */
 static uint32_t tcp_iss_seed = 0xC0DE1234u;
-static uint32_t tcp_new_iss(void) {
-    uint32_t iss;
-    if (random_get_bytes(&iss, sizeof(iss)) == 0)
-        return iss;
-    tcp_iss_seed = tcp_iss_seed * 1103515245 + 12345;
-    return tcp_iss_seed;
+
+/*
+ * TCP-HDR-05: RFC 6528 -- ISN = M + F(localip, localport, remoteip,
+ * remoteport, secretkey).  A bare CSPRNG draw per connection (above) is
+ * unpredictable but has no clock component, so successive incarnations of
+ * the same 4-tuple got unrelated ISNs and RFC 793 3.3's guarantee -- a new
+ * incarnation's sequence numbers lie beyond the old one's, so its stray
+ * segments cannot be taken for new data -- was lost.
+ *
+ * M is the ~4 us clock 793 3.3 describes (get_uptime_ns() / 4096).  F is ChaCha20
+ * used as a PRF: keyed by a secret drawn once from the kernel CSPRNG, with
+ * the 4-tuple as the nonce.  Until the CSPRNG can supply the key, F falls
+ * back to advancing the old LCG (never to a constant).
+ */
+static uint8_t tcp_isn_key[CHACHA20_KEY_SIZE];
+static int     tcp_isn_key_ready;
+
+static uint32_t tcp_new_iss(uint32_t laddr, uint16_t lport,
+                            uint32_t raddr, uint16_t rport) {
+    /* M: a clock ticking every 4.096 us.  The 4 ms timer tick alone was too
+     * coarse: a reconnect within one tick got the same M, so a reused
+     * 4-tuple's new ISN could sit below the old connection's last sequence
+     * number and the peer, still holding it, rejected the SYN. */
+    uint32_t m = (uint32_t)(get_uptime_ns() >> 12);
+    /* random_get_bytes() returns the byte count, not 0, on success.  The
+     * old ISN code tested "== 0", so it never used the CSPRNG at all: every
+     * ISS came from the fixed-seed LCG and was the same on every boot. */
+    if (!tcp_isn_key_ready &&
+        random_get_bytes(tcp_isn_key, sizeof(tcp_isn_key)) ==
+            (int)sizeof(tcp_isn_key))
+        tcp_isn_key_ready = 1;
+    if (!tcp_isn_key_ready) {
+        tcp_iss_seed = tcp_iss_seed * 1103515245 + 12345;
+        return m + tcp_iss_seed;
+    }
+    uint8_t nonce[CHACHA20_NONCE_SIZE];
+    memcpy(nonce, &laddr, 4);
+    memcpy(nonce + 4, &raddr, 4);
+    memcpy(nonce + 8, &lport, 2);
+    memcpy(nonce + 10, &rport, 2);
+    struct chacha20_ctx ctx;
+    chacha20_init(&ctx, tcp_isn_key, nonce);
+    chacha20_block(&ctx);
+    uint32_t f;
+    memcpy(&f, ctx.block, 4);
+    memset(&ctx, 0, sizeof(ctx));       /* no key material left on the stack */
+    return m + f;
 }
 
 static uint16_t tcp_csum(uint32_t saddr, uint32_t daddr,
@@ -984,7 +1026,7 @@ static void tcp_in_listen(tcp_pcb_t *p, uint32_t saddr, uint32_t daddr,
     tcp_set_mtu_mss(c);                                /* TCP-HDR-04 */
     c->lport   = dport;
     c->rport   = sport;
-    c->iss     = tcp_new_iss();
+    c->iss     = tcp_new_iss(c->laddr, c->lport, c->raddr, c->rport);   /* TCP-HDR-05 */
     c->snd_una = c->iss;
     c->snd_nxt = c->iss;
     c->rcv_nxt = seq + 1;
@@ -2017,7 +2059,6 @@ static void tcp_connect_start(tcp_pcb_t *p, uint32_t raddr, uint16_t rport) {
     uint32_t r = 0;
     if (random_get_bytes(&r, sizeof(r)) != (int)sizeof(r))
         r = (uint32_t)get_ticks();
-    uint32_t iss = tcp_new_iss();
     if (!p->laddr) {
         /* Pick a source IP based on the destination.  127/8 traffic
          * MUST be sourced from a loopback address — otherwise the
@@ -2041,7 +2082,7 @@ static void tcp_connect_start(tcp_pcb_t *p, uint32_t raddr, uint16_t rport) {
     p->raddr   = raddr;
     p->rport   = rport;
     tcp_set_mtu_mss(p);                                /* TCP-HDR-04 */
-    p->iss     = iss;
+    p->iss     = tcp_new_iss(p->laddr, p->lport, raddr, rport);   /* TCP-HDR-05 */
     p->snd_una = p->iss;
     p->snd_nxt = p->iss;
     p->snd_max_valid = 0;             /* TCP-MEM-07: a new ISS, nothing sent */

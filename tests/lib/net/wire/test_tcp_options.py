@@ -16,6 +16,12 @@ case names the checklist item it guards.
                 advertises MSS 960 and, although the peer offers 1460, sends
                 no segment over 960 -- they used to fail EMSGSIZE in
                 ip4_output() on every attempt and the transfer stalled.
+    isn         TCP-HDR-05: RFC 6528 ISNs.  Two connections on the same
+                4-tuple, some seconds apart, get ISNs that advance by the
+                ~4 us clock (250000/s), not by a random amount.
+    isn-boots   TCP-HDR-05: the first ISN differs between two boots.  The old
+                code misread random_get_bytes()'s return value and drew every
+                ISS from a fixed-seed LCG: identical on every boot.
 
 Run from the repo root after building sys/ and wireguest:
     python3 tests/lib/net/wire/test_tcp_options.py [case...]
@@ -128,10 +134,50 @@ def case_mtu_clamp():
         return None, w
 
 
+def case_isn():
+    lport = 45123
+    with Wire.boot('redial 10.0.2.2 %d %d' % (PORT, lport)) as w:
+        isns, times = [], []
+        for rnd in range(2):
+            syn = w.expect(lambda s: s.flags & SYN and s.dport == PORT and
+                           s.sport == lport, 90 if rnd == 0 else 15, 'SYN')
+            if not syn:
+                return 'no SYN in round %d' % rnd, w
+            isns.append(syn.seq)
+            times.append(time.time())
+            w.send(Seg(PORT, lport, PISS, syn.seq + 1, SYN | ACK))
+            if not w.wait_serial('guest: connected %d' % rnd, 10):
+                return 'round %d did not connect' % rnd, w
+            w.pump(0.3)
+            w.send(Seg(PORT, lport, PISS + 1, 0, RST))
+            w.rx.clear()
+        dt = times[1] - times[0]
+        delta = (isns[1] - isns[0]) & 0xFFFFFFFF
+        want = dt * 250000
+        if not 0.5 * want <= delta <= 1.5 * want:
+            return 'ISN advanced by %d over %.2f s; want ~%d' % (delta, dt, want), w
+        return None, w
+
+
+def case_isn_boots():
+    isns = []
+    for _ in range(2):
+        with Wire.boot('connect 10.0.2.2 %d sleep:60' % PORT) as w:
+            syn = w.expect(lambda s: s.flags & SYN and s.dport == PORT, 90, 'SYN')
+            if not syn:
+                return 'no SYN from guest', w
+            isns.append(syn.seq)
+    if isns[0] == isns[1]:
+        return 'the same ISN (%d) on two boots' % isns[0], w
+    return None, w
+
+
 CASES = (('peer-mss', case_peer_mss),
          ('bad-options', case_bad_options),
          ('own-mss', case_own_mss),
-         ('mtu-clamp', case_mtu_clamp))
+         ('mtu-clamp', case_mtu_clamp),
+         ('isn', case_isn),
+         ('isn-boots', case_isn_boots))
 
 
 def main():

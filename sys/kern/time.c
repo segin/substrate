@@ -181,6 +181,12 @@ static uint64_t subtick_nsec(void) {
     return ns;
 }
 
+/* Nanoseconds since boot: the tick count refined by the TSC between ticks
+ * (tick resolution when there is no TSC).  Monotonic across ticks. */
+uint64_t get_uptime_ns(void) {
+    return get_ticks() * (1000000000ULL / HZ) + subtick_nsec();
+}
+
 static int proc_itimer_index(int which) {
     switch (which) {
     case ITIMER_REAL:
