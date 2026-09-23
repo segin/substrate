@@ -3,17 +3,23 @@
 TCP-SM-01 (docs/ip-audit-2026-09-22.md): a segment that retransmits the
 peer's FIN and also acknowledges ours must complete CLOSING and LAST-ACK.
 
-tcp_in_established() answered a retransmitted FIN and returned, before the
-tests that complete CLOSING -> TIME-WAIT and LAST-ACK -> CLOSED.  With our
-FIN now acknowledged the retransmit queue was empty, so the timer had
-nothing to do either: one lost ACK left the PCB, its ring and its port
-wedged for good.  The peer below sends exactly that combined segment.
+tcp_in_established() processed the ACK field of a retransmitted FIN and then
+returned, before the tests that complete CLOSING -> TIME-WAIT and LAST-ACK
+-> CLOSED.  With our FIN acknowledged the retransmit queue was empty, so the
+timer had nothing to do either: one lost ACK left the PCB, its ring and its
+port wedged for good.  The peer below sends exactly that combined segment.
 
-    last-ack  guest closes passively (peer FIN first).  After the combined
-              segment the PCB must be gone, so a stray ACK draws a RST.
-    closing   simultaneous close.  After the combined segment the PCB must be
-              in TIME-WAIT, where a SYN draws the RFC 5961 challenge ACK.
-              (CLOSING currently answers a SYN with nothing -- TCP-SM-06; if
+Since TCP-SM-02 the combined segment is unacceptable (its FIN lies below
+RCV.NXT), so it is answered and dropped whole and our FIN stays queued; the
+guest must then retransmit its FIN, which the peer acknowledges properly.
+Either way the guest must not be left in a closing state with nothing to
+send -- which is exactly what the wedge looked like on the wire.
+
+    last-ack  guest closes passively (peer FIN first).  Once complete the PCB
+              is gone, so a stray ACK draws a RST.
+    closing   simultaneous close.  Once complete the PCB is in TIME-WAIT,
+              where an in-window SYN draws the RFC 5961 challenge ACK.
+              (CLOSING answers an in-window SYN with nothing -- TCP-SM-06; if
               that changes, this discriminator has to change with it.)
 
 Run from the repo root after building sys/ and wireguest:
@@ -27,6 +33,15 @@ from wire import Wire, Seg, SYN, ACK, FIN, RST  # noqa: E402
 
 PORT = 7000
 PISS = 50000
+
+
+def finish(w, gp, g):
+    """After the combined segment: acknowledge a retransmission of the
+    guest's FIN if one comes.  A wedged guest sends nothing at all."""
+    fin = w.expect(lambda s: s.flags & FIN and s.seq == g, 8, 'FIN retransmit')
+    if fin:
+        w.send(Seg(PORT, gp, PISS + 2, g + 1, ACK))
+    w.pump(1.0)
 
 
 def handshake(w):
@@ -57,7 +72,7 @@ def case_last_ack():
             return 'guest FIN missing or misnumbered: %r' % (fin,), w
         # The combined segment: our FIN again (retransmit), now ACKing theirs.
         w.send(Seg(PORT, gp, PISS + 1, g + 1, FIN | ACK))
-        w.pump(1.0)
+        finish(w, gp, g)
         # A stale ACK: a live LAST-ACK PCB swallows it, a closed one RSTs it.
         w.rx.clear()
         w.send(Seg(PORT, gp, PISS + 2, g, ACK))
@@ -82,9 +97,9 @@ def case_closing():
             return 'guest did not ACK our FIN', w
         # The combined segment: FIN retransmit that also ACKs theirs.
         w.send(Seg(PORT, gp, PISS + 1, g + 1, FIN | ACK))
-        w.pump(1.0)
+        finish(w, gp, g)
         w.rx.clear()
-        w.send(Seg(PORT, gp, PISS + 1000, 0, SYN))
+        w.send(Seg(PORT, gp, PISS + 2, 0, SYN))
         if not w.expect(lambda s: s.flags & ACK and not s.flags & (SYN | RST), 3,
                         'challenge ACK'):
             return 'CLOSING not completed: SYN drew no TIME-WAIT challenge ACK', w

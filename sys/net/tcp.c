@@ -807,6 +807,92 @@ static int tcp_seq_in_rcv_window(const tcp_pcb_t *p, uint32_t seq) {
     return (uint32_t)(seq - p->rcv_nxt) < win;              /* within window */
 }
 
+/*
+ * TCP-SM-02 / TCP-SM-05: RFC 793 3.9 SEGMENT ARRIVES, "first check sequence
+ * number", for the synchronized states.
+ *
+ * Acceptability is the 3.3 table, with RCV.WND the free receive space:
+ *
+ *   SEG.LEN  RCV.WND  acceptable when
+ *      0        0     SEG.SEQ = RCV.NXT
+ *      0       >0     RCV.NXT =< SEG.SEQ < RCV.NXT+RCV.WND
+ *     >0        0     never
+ *     >0       >0     either end of the segment inside the window
+ *
+ * where SEG.LEN counts the FIN.  An unacceptable segment is answered with an
+ * ACK carrying our current state and dropped -- unless it is a RST, which is
+ * dropped silently.  Nothing was answered before, so a peer's keepalive (one
+ * octet below RCV.NXT) or a zero-window probe met total silence and the peer
+ * eventually gave up.  3.9 also asks for "special allowance ... to accept
+ * valid ACKs, URGs and RSTs" while the window is zero: a segment exactly at
+ * RCV.NXT keeps its control bits, loses its text and FIN, and is answered.
+ * In TIME-WAIT the only expected arrival is a retransmission of the peer's
+ * FIN, which lies below RCV.NXT: acknowledge it and restart the 2*MSL wait.
+ *
+ * An acceptable segment is then trimmed to the window, so it "begins at
+ * RCV.NXT and does not exceed the window".  Without the left trim, a segment
+ * straddling RCV.NXT -- e.g. a retransmission of one we had half-accepted
+ * into a nearly full ring -- failed the seq == rcv_nxt test forever and the
+ * connection stalled.  A FIN beyond the right edge is dropped with the text.
+ *
+ * Returns 1 to go on processing the (possibly trimmed) segment, 0 if it has
+ * been consumed.
+ */
+static int tcp_seg_check(tcp_pcb_t *p, uint32_t *seqp, uint8_t *flagsp,
+                         const uint8_t **payloadp, size_t *dlenp)
+{
+    uint32_t seq = *seqp;
+    uint8_t  flags = *flagsp;
+    size_t   dlen = *dlenp;
+    uint32_t wnd = (uint32_t)TCP_RING_LEN - p->rx_count;
+    uint32_t seglen = (uint32_t)dlen + ((flags & TCP_FIN) ? 1u : 0u);
+    int acceptable;
+
+    if (seglen == 0) {
+        acceptable = (wnd == 0) ? seq == p->rcv_nxt
+                                : (uint32_t)(seq - p->rcv_nxt) < wnd;
+    } else if (wnd == 0) {
+        acceptable = 0;
+    } else {
+        acceptable = (uint32_t)(seq - p->rcv_nxt) < wnd ||
+                     (uint32_t)(seq + seglen - 1u - p->rcv_nxt) < wnd;
+    }
+
+    if (!acceptable) {
+        if (flags & TCP_RST)
+            return 0;
+        if (wnd == 0 && seq == p->rcv_nxt) {
+            /* Zero-window allowance: keep ACK/URG/RST, drop text and FIN. */
+            *flagsp = flags & (uint8_t)~TCP_FIN;
+            *dlenp = 0;
+            tcp_send_ctl(p, TCP_ACK);
+            return 1;
+        }
+        if (p->state == TCP_TIME_WAIT && (flags & TCP_FIN))
+            p->time_wait_until = get_ticks() + TCP_TIME_WAIT_TICKS;
+        tcp_send_ctl(p, TCP_ACK);
+        return 0;
+    }
+
+    /* Left trim: drop what we already have. */
+    if ((int32_t)(p->rcv_nxt - seq) > 0) {
+        uint32_t d = p->rcv_nxt - seq;
+        if (d > dlen) d = (uint32_t)dlen;       /* only the FIN remains */
+        *payloadp += d;
+        dlen -= d;
+        seq += d;
+    }
+    /* Right trim: nothing beyond RCV.NXT + RCV.WND, FIN included. */
+    if ((uint32_t)(seq - p->rcv_nxt) + dlen > wnd) {
+        dlen = wnd - (uint32_t)(seq - p->rcv_nxt);
+        flags &= (uint8_t)~TCP_FIN;
+    }
+    *seqp = seq;
+    *flagsp = flags;
+    *dlenp = dlen;
+    return 1;
+}
+
 static void tcp_in_established(tcp_pcb_t *p, uint32_t seq, uint32_t ack,
                                uint8_t flags, const uint8_t *payload,
                                size_t dlen) {
@@ -946,31 +1032,14 @@ static void tcp_in_established(tcp_pcb_t *p, uint32_t seq, uint32_t ack,
      * drops ring overflow, recovered by retransmission) would tear the
      * receive side down early and silently truncate the stream. */
     /*
-     * TCP-13: a RETRANSMITTED FIN -- one whose sequence number we have
-     * already consumed -- must still be acknowledged, and TIME_WAIT re-armed.
-     * The in-order test below requires seq + dlen == rcv_nxt, but once the
-     * FIN is consumed rcv_nxt sits one PAST it, so a retransmit failed that
-     * test, fell through to the `dlen &&` ACK path (false for a bare FIN)
-     * and emitted nothing at all.  If our final ACK was lost the peer
-     * retransmitted, got silence, and aborted with ETIMEDOUT instead of
-     * closing cleanly.
+     * TCP-13 / TCP-SM-01: a RETRANSMITTED FIN -- one whose sequence number
+     * rcv_nxt has already passed -- is handled by tcp_seg_check(): it lies
+     * below the window, so it is answered with an ACK (restarting the
+     * 2*MSL wait in TIME_WAIT) and dropped before any field of it is used.
+     * It used to be answered here after the ACK field had been processed,
+     * and then return before the CLOSING/LAST_ACK completion tests, which
+     * wedged both states.
      */
-    /*
-     * TCP-SM-01: and it must NOT return here.  The segment that retransmits
-     * the peer's FIN is often also the one that acknowledges OUR FIN -- in a
-     * simultaneous close, or when the peer's first FIN crossed our ACK.
-     * Returning skipped the CLOSING -> TIME_WAIT and LAST_ACK -> CLOSED
-     * tests below, and with the unacked queue now empty the timer had
-     * nothing to retransmit either, so one lost ACK wedged the PCB, its
-     * ring and its port forever.  Fall through: the in-order FIN block
-     * below cannot match (rcv_nxt is already past this FIN), and the
-     * completion tests can.
-     */
-    if ((flags & TCP_FIN) && seq + (uint32_t)dlen + 1u == p->rcv_nxt) {
-        if (p->state == TCP_TIME_WAIT)
-            p->time_wait_until = get_ticks() + TCP_TIME_WAIT_TICKS;
-        tcp_send_ctl(p, TCP_ACK);
-    }
 
     if ((flags & TCP_FIN) && seq + (uint32_t)dlen == p->rcv_nxt) {
         p->rcv_nxt++;
@@ -1096,6 +1165,23 @@ static void tcp_input_locked(uint32_t saddr, uint32_t daddr,
     if (!p) {
         tcp_send_rst(saddr, daddr, th, flags, seq, ack, dlen);
         return;
+    }
+
+    /* TCP-SM-02/-05: sequence check and trim first, before any field of an
+     * unacceptable segment -- its window included -- is believed. */
+    switch (p->state) {
+    case TCP_ESTABLISHED:
+    case TCP_FIN_WAIT_1:
+    case TCP_FIN_WAIT_2:
+    case TCP_CLOSE_WAIT:
+    case TCP_CLOSING:
+    case TCP_LAST_ACK:
+    case TCP_TIME_WAIT:
+        if (!tcp_seg_check(p, &seq, &flags, &payload, &dlen))
+            return;
+        break;
+    default:
+        break;
     }
 
     /*
