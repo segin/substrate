@@ -18,6 +18,7 @@
  */
 #include <errno.h>
 #include <netinet/in.h>
+#include <poll.h>
 #include <stdio.h>
 #include <string.h>
 #include <net/if.h>
@@ -64,9 +65,19 @@ static int bind_udp(unsigned short port)
     return fd;
 }
 
-/* Non-blocking read; returns bytes read or -1 with errno set. */
+/* Read one datagram if one arrives within 300 ms; returns bytes read or -1
+ * with errno set (EAGAIN if none came).  Loopback delivers from the lo
+ * kthread, asynchronously to the sender, so a bare MSG_DONTWAIT right after
+ * a send can race the delivery and report a datagram as missing. */
+static void wait_readable(int fd)
+{
+    struct pollfd pfd = { fd, POLLIN, 0 };
+    poll(&pfd, 1, 300);
+}
+
 static ssize_t try_recv(int fd, char *buf, size_t n)
 {
+    wait_readable(fd);
     return recv(fd, buf, n, MSG_DONTWAIT);
 }
 
@@ -291,6 +302,7 @@ static void check_trunc(const char *what, int rx, int tx,
         ok(what, 0, "send failed");
         return;
     }
+    wait_readable(rx);
     ssize_t got = recv(rx, region, TRUNC_BUF, MSG_TRUNC | MSG_DONTWAIT);
     int head_ok = 1, canary_ok = 1;
     for (int i = 0; i < TRUNC_BUF; i++)
@@ -367,6 +379,7 @@ static void test_recvmsg_name(void)
     mh.msg_namelen = sizeof(from);
     mh.msg_iov = iov;
     mh.msg_iovlen = 2;
+    wait_readable(rx);
     ssize_t got = recvmsg(rx, &mh, MSG_DONTWAIT);
     ok("datagram scattered across both iovecs",
        got == (ssize_t)sizeof(msg) && memcmp(a, msg, 8) == 0 &&
@@ -384,6 +397,7 @@ static void test_recvmsg_name(void)
     mh.msg_iov = iov;
     mh.msg_iovlen = 2;
     errno = 0;
+    wait_readable(rx);
     got = recvmsg(rx, &mh, MSG_DONTWAIT);
     ok("msg_name in kernel memory is refused with EFAULT",
        got < 0 && errno == EFAULT, "the kernel wrote through a kernel msg_name");
@@ -502,6 +516,7 @@ static void test_loopback_net(void)
     dst.sin_addr.s_addr = htonl(0x7F000002);        /* 127.0.0.2 */
     ok("sendto(127.0.0.2) accepted",
        sendto(tx, "lo2", 3, 0, (struct sockaddr *)&dst, sizeof(dst)) == 3, "sendto failed");
+    wait_readable(rx);
     ssize_t n = recvfrom(rx, buf, sizeof(buf), MSG_DONTWAIT, (struct sockaddr *)&from, &flen);
     ok("a datagram to 127.0.0.2 is delivered", n == 3, "datagram dropped");
     dst.sin_addr.s_addr = htonl(0x7F123456);        /* 127.18.52.86 */
