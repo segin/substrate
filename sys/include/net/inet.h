@@ -83,6 +83,12 @@ void ip4_input(netdev_t *dev, const uint8_t *pkt, size_t len);
  * 0 on success. */
 int  ip4_output(uint32_t daddr, uint8_t protocol,
                 const void *payload, size_t payload_len);
+/* ip4_output() with an explicit source address; 0 lets routing choose it
+ * (what ip4_output() does).  A transport that computes a pseudo-header
+ * checksum must pass the source it summed, so the IP header cannot disagree
+ * with it (TCP-HDR-01, UDP-U-02/U-03). */
+int  ip4_output_from(uint32_t saddr, uint32_t daddr, uint8_t protocol,
+                     const void *payload, size_t payload_len);
 
 /* Source address routing will choose for `daddr` — needed to build a UDP
  * pseudo-header checksum before the packet reaches ip4_output/ip6_output. */

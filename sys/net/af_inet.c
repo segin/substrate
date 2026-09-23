@@ -622,9 +622,22 @@ static size_t afinet_node_read_body(fs_node_t *node, size_t size, uint8_t *buf) 
  * `dgram` covers the UDP header AND payload, so these must be called after
  * the payload has been copied in.
  */
-static void udp_csum4(struct udphdr *uh, uint32_t daddr, size_t dgram_len) {
+/*
+ * UDP-U-02/U-03: the source a datagram leaves with.  A socket bound to a
+ * specific address sends from it -- bind()'s address used to be ignored on
+ * transmit, so the peer saw (and replied to) whatever routing picked.  The
+ * value is computed once and used for both the pseudo-header and the IP
+ * header (ip4_output_from), so the two can never disagree.
+ */
+static uint32_t udp_src4(const afi_sock_t *s, uint32_t daddr) {
+    uint32_t bound;
+    memcpy(&bound, s->local_addr, 4);
+    return bound ? bound : ip4_source_for(daddr);
+}
+
+static void udp_csum4(struct udphdr *uh, uint32_t saddr, uint32_t daddr,
+                      size_t dgram_len) {
     uh->check = 0;
-    uint32_t saddr = ip4_source_for(daddr);
     uint16_t c = inet_csum_pseudo4(saddr, daddr, IPPROTO_UDP_NUM,
                                    (uint16_t)dgram_len, uh);
     uh->check = c ? c : 0xFFFF;
@@ -695,8 +708,10 @@ static size_t afinet_node_write_body(fs_node_t *node, size_t size,
             memcpy(pkt + sizeof(*uh), buf, size);
             uint32_t daddr;
             memcpy(&daddr, s->peer_addr, 4);
-            udp_csum4(uh, daddr, sizeof(*uh) + size);
-            int rc = ip4_output(daddr, IPPROTO_UDP_NUM, pkt, sizeof(*uh) + size);
+            uint32_t saddr = udp_src4(s, daddr);
+            udp_csum4(uh, saddr, daddr, sizeof(*uh) + size);
+            int rc = ip4_output_from(saddr, daddr, IPPROTO_UDP_NUM, pkt,
+                                     sizeof(*uh) + size);
             return rc < 0 ? (size_t)rc : size;
         } else {
             uint32_t daddr;
@@ -1328,8 +1343,9 @@ static ssize_t afinet_sendto_k(int fd, const void *buf, size_t len, int flags,
         memcpy(pkt + sizeof(*uh), buf, len);
         uint32_t d;
         memcpy(&d, daddr_buf, 4);
-        udp_csum4(uh, d, sizeof(*uh) + len);
-        int rc = ip4_output(d, IPPROTO_UDP_NUM, pkt, sizeof(*uh) + len);
+        uint32_t src = udp_src4(s, d);
+        udp_csum4(uh, src, d, sizeof(*uh) + len);
+        int rc = ip4_output_from(src, d, IPPROTO_UDP_NUM, pkt, sizeof(*uh) + len);
         return rc < 0 ? rc : (ssize_t)len;
     } else {
         if (s->type == SOCK_RAW) {

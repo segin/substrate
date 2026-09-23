@@ -312,7 +312,13 @@ static int tcp_xmit_raw(tcp_pcb_t *p, uint32_t seq, uint8_t flags,
      */
     uint32_t csum_src = p->laddr ? p->laddr : ip4_source_for(p->raddr);
     th->check = tcp_csum(csum_src, p->raddr, buf, sizeof(*th) + dlen);
-    return ip4_output(p->raddr, IPPROTO_TCP, buf, sizeof(*th) + dlen);
+    /* TCP-HDR-01: and the IP header must carry that same source.  TCP-29
+     * fixed only laddr == 0; ip4_output() re-chose the source by routing,
+     * so every segment of a socket whose laddr differed from the egress
+     * device's address -- bound, or connected over loopback to a local NIC
+     * address -- went out with a checksum the peer discarded. */
+    return ip4_output_from(csum_src, p->raddr, IPPROTO_TCP, buf,
+                           sizeof(*th) + dlen);
 }
 
 /* Pure-ACK / pure-RST segments don't enter the retx queue.  Use this
@@ -647,7 +653,9 @@ static void tcp_send_rst(uint32_t saddr, uint32_t daddr,
         r->doff_flags = __builtin_bswap16((5u << 12) | TCP_RST | TCP_ACK);
     }
     r->check      = tcp_csum(daddr, saddr, r, sizeof(*r));
-    ip4_output(saddr, IPPROTO_TCP, r, sizeof(*r));
+    /* TCP-HDR-01: answer from the address the segment was sent to, which
+     * is the source the checksum above covers. */
+    ip4_output_from(daddr, saddr, IPPROTO_TCP, r, sizeof(*r));
 }
 
 /* ----- per-state handlers ---------------------------------------- */

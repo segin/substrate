@@ -210,9 +210,29 @@ uint32_t ip4_source_for(uint32_t daddr) {
 
 int ip4_output(uint32_t daddr, uint8_t protocol,
                const void *payload, size_t payload_len) {
+    return ip4_output_from(0, daddr, protocol, payload, payload_len);
+}
+
+/*
+ * TCP-HDR-01, UDP-U-02/U-03: the source address is the caller's to choose.
+ * ip4_output() used to stamp dev->ip4_addr unconditionally, so a transport
+ * that summed its pseudo-header over any other source -- a socket bound to a
+ * specific address, an RST answering a segment sent to one of our addresses
+ * -- shipped a checksum the peer silently rejected, and UDP's bind() address
+ * was ignored on transmit altogether.  saddr == 0 keeps the routing choice.
+ *
+ * RFC 1122 3.2.1.3(g): a 127/8 source must never leave the host, so it is
+ * refused on anything but the loopback device.
+ */
+int ip4_output_from(uint32_t saddr, uint32_t daddr, uint8_t protocol,
+                    const void *payload, size_t payload_len) {
     int via_gw = 0;
     netdev_t *dev = route_for_v4(daddr, &via_gw);
     if (!dev) return -ENETUNREACH;
+    if (saddr == 0)
+        saddr = dev->ip4_addr;
+    else if ((saddr & 0xFF) == 127 && !(dev->flags & NETDEV_IFF_LOOPBACK))
+        return -EINVAL;
     /*
      * Bound payload_len by SUBTRACTING from the buffer size rather than
      * adding to the payload length.  payload_len is a size_t, so the old
@@ -245,7 +265,7 @@ int ip4_output(uint32_t daddr, uint8_t protocol,
     ih->ttl = 64;
     ih->protocol = protocol;
     ih->check = 0;
-    ih->saddr = dev->ip4_addr;
+    ih->saddr = saddr;
     ih->daddr = daddr;
     ih->check = inet_csum(ih, sizeof(*ih));
     memcpy(pkt + sizeof(*ih), payload, payload_len);
