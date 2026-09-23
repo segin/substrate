@@ -319,10 +319,36 @@ int ip4_output(uint32_t daddr, uint8_t protocol,
  * RFC 1122 3.2.1.3(g): a 127/8 source must never leave the host, so it is
  * refused on anything but the loopback device.
  */
+void ip4_txopts_init(struct ip4_txopts *o) {
+    o->ttl = 64;
+    o->tos = 0;
+    o->mcast_ttl = 1;
+    o->mcast_loop = 1;
+    o->mcast_if = 0;
+}
+
 int ip4_output_from(uint32_t saddr, uint32_t daddr, uint8_t protocol,
                     const void *payload, size_t payload_len) {
+    return ip4_output_opts(saddr, daddr, protocol, payload, payload_len, NULL);
+}
+
+int ip4_output_opts(uint32_t saddr, uint32_t daddr, uint8_t protocol,
+                    const void *payload, size_t payload_len,
+                    const struct ip4_txopts *o) {
+    struct ip4_txopts defaults;
+    if (!o) {
+        ip4_txopts_init(&defaults);
+        o = &defaults;
+    }
     int via_gw = 0;
-    netdev_t *dev = route_for_v4(daddr, &via_gw);
+    netdev_t *dev = NULL;
+    /* UDP-API-12: IP_MULTICAST_IF picks the interface for group sends. */
+    if (ip4_is_mcast(daddr) && o->mcast_if) {
+        for (netdev_t *d = netdev_first(); d; d = netdev_next(d))
+            if ((d->flags & NETDEV_IFF_MULTICAST) && d->ip4_addr == o->mcast_if)
+                dev = d;
+    }
+    if (!dev) dev = route_for_v4(daddr, &via_gw);
     if (!dev) return -ENETUNREACH;
     /*
      * UDP-IP-01: bound the datagram by the egress device's MTU, not by the
@@ -363,13 +389,13 @@ int ip4_output_from(uint32_t saddr, uint32_t daddr, uint8_t protocol,
     struct iphdr *ih = (struct iphdr *)pkt;
     memset(ih, 0, sizeof(*ih));
     ih->ihl_version = (4 << 4) | 5;
-    ih->tos = 0;
+    ih->tos = o->tos;                                  /* UDP-API-12 */
     ih->tot_len = __builtin_bswap16((uint16_t)(sizeof(*ih) + payload_len));
     ih->id = __builtin_bswap16(++g_ip_id_counter);
     ih->frag_off = 0;
     /* UDP-IP-06: RFC 1112 6.1 -- a multicast datagram defaults to TTL 1, so
      * a group send stays on the local link unless the sender asks. */
-    ih->ttl = ip4_is_mcast(daddr) ? 1 : 64;
+    ih->ttl = ip4_is_mcast(daddr) ? o->mcast_ttl : o->ttl;   /* UDP-API-12 */
     ih->protocol = protocol;
     ih->check = 0;
     ih->saddr = saddr;
@@ -431,7 +457,7 @@ int ip4_output_from(uint32_t saddr, uint32_t daddr, uint8_t protocol,
      * group, deliver a copy locally too (the IP_MULTICAST_LOOP default).
      * A NIC does not hear its own transmission, so loop it through lo,
      * whose input path accepts a group joined on any interface. */
-    if (ip4_is_mcast(daddr)) {
+    if (ip4_is_mcast(daddr) && o->mcast_loop) {        /* IP_MULTICAST_LOOP */
         netdev_t *lo = ip4_loopback_dev();
         if (lo && lo != dev && ip4_mc_accept(lo, daddr))
             eth_send(lo, mac, __builtin_bswap16(ETHERTYPE_IP),

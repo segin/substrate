@@ -9,8 +9,9 @@
  * UDP-IP-11 (lo's MTU), UDP-API-01 (port ownership), UDP-API-02
  * (multi-iovec sendmsg), UDP-API-03 (writev), UDP-API-04 (SO_RCVTIMEO),
  * UDP-API-06 (non-local bind), UDP-API-07 (connect binds), UDP-API-08
- * (SHUT_RD), UDP-API-09 (zero-length receive) and UDP-API-10 (addrlen at
- * EOF) from docs/ip-audit-2026-09-22.md.
+ * (SHUT_RD), UDP-API-09 (zero-length receive), UDP-API-10 (addrlen at
+ * EOF) and UDP-API-12 (IP transmit options) from
+ * docs/ip-audit-2026-09-22.md.
  *
  * Each case drives the real socket API over the loopback interface, so a
  * PASS means a datagram actually took the intended path through the
@@ -887,6 +888,95 @@ static void test_zero_len_recv(void)
     close(tx);
 }
 
+/* Capture the next UDP datagram to `dport` on a raw socket; returns the IP
+ * datagram length or 0. */
+static ssize_t raw_capture_udp(int raw, unsigned char *pkt, size_t cap,
+                               unsigned short dport)
+{
+    for (int tries = 0; tries < 20; tries++) {
+        wait_readable(raw);
+        ssize_t n = recv(raw, pkt, cap, MSG_DONTWAIT);
+        if (n >= 28) {
+            size_t ihl = (size_t)(pkt[0] & 0xF) * 4;
+            if (pkt[9] == 17 && (size_t)n >= ihl + 8 &&
+                ((pkt[ihl + 2] << 8) | pkt[ihl + 3]) == dport)
+                return n;
+        }
+    }
+    return 0;
+}
+
+/* UDP-API-12: IP_TTL, IP_TOS and IP_MULTICAST_TTL/LOOP take effect, and
+ * read back.  They were accepted and discarded -- TTL hardcoded 64, TOS 0 --
+ * and getsockopt(IP_TTL) answered 0. */
+static void test_ip_txopts(void)
+{
+    printf("UDP-API-12: IP_TTL/IP_TOS/IP_MULTICAST_* take effect\n");
+    int v = 0;
+    socklen_t vl = sizeof(v);
+    int tx = socket(AF_INET, SOCK_DGRAM, 0);
+    getsockopt(tx, IPPROTO_IP, IP_TTL, &v, &vl);
+    ok("default IP_TTL reads 64", v == 64, "wrong default");
+    vl = sizeof(v);
+    getsockopt(tx, IPPROTO_IP, IP_MULTICAST_TTL, &v, &vl);
+    ok("default IP_MULTICAST_TTL reads 1", v == 1, "wrong default");
+
+    int raw = socket(AF_INET, SOCK_RAW, 17);
+    unsigned char pkt[256];
+    struct sockaddr_in dst;
+    int ttl = 7, tos = 0x10;
+    ok("setsockopt(IP_TTL 7)", setsockopt(tx, IPPROTO_IP, IP_TTL, &ttl, sizeof(ttl)) == 0,
+       "refused");
+    ok("setsockopt(IP_TOS 0x10)", setsockopt(tx, IPPROTO_IP, IP_TOS, &tos, sizeof(tos)) == 0,
+       "refused");
+    vl = sizeof(v);
+    getsockopt(tx, IPPROTO_IP, IP_TTL, &v, &vl);
+    ok("getsockopt(IP_TTL) reads 7", v == 7, "not stored");
+    lo_addr(&dst, 31957);
+    sendto(tx, "t", 1, 0, (struct sockaddr *)&dst, sizeof(dst));
+    ssize_t n = raw_capture_udp(raw, pkt, sizeof(pkt), 31957);
+    ok("the datagram leaves with TTL 7 and TOS 0x10",
+       n > 0 && pkt[8] == 7 && pkt[1] == 0x10, "header not as set");
+    int bad = 0;
+    errno = 0;
+    ok("IP_TTL 0 is refused EINVAL",
+       setsockopt(tx, IPPROTO_IP, IP_TTL, &bad, sizeof(bad)) < 0 && errno == EINVAL,
+       "accepted");
+
+    /* Multicast: TTL on the looped-back copy, and loopback control. */
+    struct sockaddr_in any;
+    struct ip_mreq mr;
+    char buf[8];
+    int rx = socket(AF_INET, SOCK_DGRAM, 0);
+    memset(&any, 0, sizeof(any));
+    any.sin_family = AF_INET;
+    any.sin_port = htons(31956);
+    bind(rx, (struct sockaddr *)&any, sizeof(any));
+    mr.imr_multiaddr.s_addr = htonl(0xEF010205);    /* 239.1.2.5 */
+    mr.imr_interface.s_addr = htonl(INADDR_ANY);
+    int joined = setsockopt(rx, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mr, sizeof(mr)) == 0;
+    int mt = 3;
+    setsockopt(tx, IPPROTO_IP, IP_MULTICAST_TTL, &mt, sizeof(mt));
+    memset(&dst, 0, sizeof(dst));
+    dst.sin_family = AF_INET;
+    dst.sin_port = htons(31956);
+    dst.sin_addr.s_addr = mr.imr_multiaddr.s_addr;
+    sendto(tx, "m", 1, 0, (struct sockaddr *)&dst, sizeof(dst));
+    n = raw_capture_udp(raw, pkt, sizeof(pkt), 31956);
+    ok("a group send carries IP_MULTICAST_TTL 3", joined && n > 0 && pkt[8] == 3,
+       "wrong TTL or no looped copy");
+    ok("and loops back to the local member", try_recv(rx, buf, sizeof(buf)) == 1,
+       "not looped");
+    int off = 0;
+    setsockopt(tx, IPPROTO_IP, IP_MULTICAST_LOOP, &off, sizeof(off));
+    sendto(tx, "m", 1, 0, (struct sockaddr *)&dst, sizeof(dst));
+    ok("IP_MULTICAST_LOOP 0 suppresses the local copy", try_recv(rx, buf, sizeof(buf)) < 0,
+       "still looped");
+    close(rx);
+    close(raw);
+    close(tx);
+}
+
 int main(void)
 {
     printf("torture_udp: UDP demux + checksum regressions (#430)\n\n");
@@ -912,6 +1002,7 @@ int main(void)
     test_connect_binds();
     test_shut_rd();
     test_zero_len_recv();
+    test_ip_txopts();
 
     printf("\nResult: %d passed, %d failed -- %s\n",
            passed, failed, failed ? "FAILED" : "PASSED");

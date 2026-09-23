@@ -2721,6 +2721,46 @@ int sys_setsockopt(int fd, int level, int optname,
         int r = afinet_set_timeo(fd, optname == 20, sec, usec);
         return r == -ENOTSOCK ? 0 : r;
     }
+    /* UDP-API-12: IPPROTO_IP IP_TOS (1), IP_TTL (2), IP_MULTICAST_IF (32),
+     * IP_MULTICAST_TTL (33), IP_MULTICAST_LOOP (34).  Values come as an int
+     * or, as BSD code often passes them, a single u_char; IP_MULTICAST_IF
+     * takes a struct in_addr, a struct ip_mreq, or a Linux struct ip_mreqn
+     * whose ifindex names the interface. */
+    if (level == 0 /*IPPROTO_IP*/ &&
+        (optname == 1 || optname == 2 || (optname >= 32 && optname <= 34))) {
+        int val = 0;
+        uint32_t addr = 0;
+        if (!optval || optlen < 1) return -EINVAL;
+        if (optname == 32) {
+            uint8_t m[12];
+            size_t n = optlen >= 12 ? 12 : (optlen >= 8 ? 8 : 4);
+            if (optlen < 4) return -EINVAL;
+            memset(m, 0, sizeof(m));
+            if (copyin(optval, m, n) != 0) return -EFAULT;
+            if (n == 12) {
+                int ifindex;
+                memcpy(&addr, m + 4, 4);                 /* imr_address */
+                memcpy(&ifindex, m + 8, 4);
+                if (ifindex > 0) {
+                    netdev_t *d = netdev_by_index((uint32_t)ifindex);
+                    if (!d) return -ENODEV;
+                    addr = d->ip4_addr;
+                }
+            } else if (n == 8) {
+                memcpy(&addr, m + 4, 4);                 /* imr_interface */
+            } else {
+                memcpy(&addr, m, 4);                     /* in_addr */
+            }
+        } else if (optlen >= (int)sizeof(int)) {
+            if (copyin(optval, &val, sizeof(val)) != 0) return -EFAULT;
+        } else {
+            uint8_t b;
+            if (copyin(optval, &b, 1) != 0) return -EFAULT;
+            val = b;
+        }
+        int r = afinet_set_ipopt(fd, optname, val, addr);
+        return r == -ENOTSOCK ? 0 : r;
+    }
     /* UDP-IP-06: IPPROTO_IP IP_ADD_MEMBERSHIP (35) / IP_DROP_MEMBERSHIP (36),
      * taking a struct ip_mreq (group, interface address) or a Linux struct
      * ip_mreqn (group, address, ifindex). */
@@ -2877,6 +2917,22 @@ int sys_getsockopt(int fd, int level, int optname,
         /* Unknown SOL_SOCKET option — POSIX ENOPROTOOPT (was silently 0,
          * which let bogus getsockopt() calls "succeed"). */
         return -ENOPROTOOPT;
+    }
+    /* UDP-API-12: the IPPROTO_IP transmit options read back what was set
+     * (getsockopt(IP_TTL) used to answer 0). */
+    if (level == 0 /*IPPROTO_IP*/ &&
+        (optname == 1 || optname == 2 || (optname >= 32 && optname <= 34))) {
+        int val = 0;
+        uint32_t addr = 0;
+        int r = afinet_get_ipopt(fd, optname, &val, &addr);
+        if (r == 0 && optname == 32) {
+            socklen_t n = 4;
+            if (copyout(&addr, optval, 4) != 0) return -EFAULT;
+            if (copyout(&n, optlen, sizeof(n)) != 0) return -EFAULT;
+            return 0;
+        }
+        if (r == 0) return getsockopt_ret_int(val, optval, optlen);
+        if (r != -ENOTSOCK) return r;
     }
     /* Non-SOL_SOCKET levels (IPPROTO_TCP/IP/...): stay lenient. */
     return getsockopt_ret_int(0, optval, optlen);

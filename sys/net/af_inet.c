@@ -133,6 +133,7 @@ typedef struct afi_sock {
     int      reuseaddr;    /* SO_REUSEADDR — relaxes the EADDRINUSE check */
     uint32_t owner_uid;    /* UDP-API-01: euid of the creating process */
     uint32_t rcv_timeo;    /* UDP-API-04: SO_RCVTIMEO in ticks, 0 = none */
+    struct ip4_txopts txo; /* UDP-API-12: IP_TTL/IP_TOS/IP_MULTICAST_* */
     uint32_t snd_timeo;    /* UDP-API-04: SO_SNDTIMEO in ticks, 0 = none */
 
     afi_pkt_t *ring;
@@ -753,13 +754,14 @@ static size_t afinet_node_write_body(fs_node_t *node, size_t size,
             memcpy(&daddr, s->peer_addr, 4);
             uint32_t saddr = udp_src4(s, daddr);
             udp_csum4(uh, saddr, daddr, sizeof(*uh) + size);
-            int rc = ip4_output_from(saddr, daddr, IPPROTO_UDP_NUM, pkt,
-                                     sizeof(*uh) + size);
+            int rc = ip4_output_opts(saddr, daddr, IPPROTO_UDP_NUM, pkt,
+                                     sizeof(*uh) + size, &s->txo);
             return rc < 0 ? (size_t)rc : size;
         } else {
             uint32_t daddr;
             memcpy(&daddr, s->peer_addr, 4);
-            int rc = ip4_output(daddr, (uint8_t)s->protocol, buf, size);
+            int rc = ip4_output_opts(0, daddr, (uint8_t)s->protocol, buf, size,
+                                     &s->txo);
             return rc < 0 ? (size_t)rc : size;
         }
     } else {
@@ -909,6 +911,7 @@ int afinet_socket(int family, int type, int protocol) {
     memset(s, 0, sizeof(*s));
     s->family = family;
     s->owner_uid = current_process ? current_process->euid : 0;
+    ip4_txopts_init(&s->txo);
     s->type = type;
     s->protocol = protocol;
     s->refcount = 1;                 /* NET-01: the installed reference */
@@ -1148,6 +1151,69 @@ int afinet_mc_membership(int fd, int add, uint32_t group, uint32_t ifaddr,
     return netdev_mc_leave(dev, group);
 }
 
+/*
+ * UDP-API-12: IP_TOS, IP_TTL and the IP_MULTICAST_* options.  setsockopt()
+ * used to return 0 for all of them and record nothing: every datagram left
+ * with TTL 64 and TOS 0, getsockopt(IP_TTL) answered 0, and a multicast
+ * sender could neither widen its scope nor keep its own group sends from
+ * looping back.  A TCP socket's options are pushed into its PCB.
+ */
+int afinet_set_ipopt(int fd, int optname, int val, uint32_t addr) {
+    afi_sock_t *s = afi_from_fd(fd);
+    if (!s) return -ENOTSOCK;
+    if (s->family != AF_INET) return -ENOPROTOOPT;
+    struct ip4_txopts o = s->txo;
+    switch (optname) {
+    case 1:  /* IP_TOS */
+        o.tos = (uint8_t)val;
+        break;
+    case 2:  /* IP_TTL: 1..255, or -1 for the default (Linux) */
+        if (val == -1) val = 64;
+        if (val < 1 || val > 255) return -EINVAL;
+        o.ttl = (uint8_t)val;
+        break;
+    case 32: /* IP_MULTICAST_IF */
+        if (addr) {
+            int found = 0;
+            for (netdev_t *d = netdev_first(); d; d = netdev_next(d))
+                if ((d->flags & NETDEV_IFF_MULTICAST) && d->ip4_addr == addr)
+                    found = 1;
+            if (!found) return -EADDRNOTAVAIL;
+        }
+        o.mcast_if = addr;
+        break;
+    case 33: /* IP_MULTICAST_TTL: 0..255, or -1 for the default */
+        if (val == -1) val = 1;
+        if (val < 0 || val > 255) return -EINVAL;
+        o.mcast_ttl = (uint8_t)val;
+        break;
+    case 34: /* IP_MULTICAST_LOOP */
+        o.mcast_loop = val ? 1 : 0;
+        break;
+    default:
+        return -ENOPROTOOPT;
+    }
+    s->txo = o;
+    if (s->tcp) tcp_set_txopts(s->tcp, &o);
+    return 0;
+}
+
+int afinet_get_ipopt(int fd, int optname, int *val, uint32_t *addr) {
+    afi_sock_t *s = afi_from_fd(fd);
+    if (!s) return -ENOTSOCK;
+    if (s->family != AF_INET) return -ENOPROTOOPT;
+    *addr = 0;
+    switch (optname) {
+    case 1:  *val = s->txo.tos; break;
+    case 2:  *val = s->txo.ttl; break;
+    case 32: *val = 0; *addr = s->txo.mcast_if; break;
+    case 33: *val = s->txo.mcast_ttl; break;
+    case 34: *val = s->txo.mcast_loop; break;
+    default: return -ENOPROTOOPT;
+    }
+    return 0;
+}
+
 /* UDP-API-04: SO_RCVTIMEO / SO_SNDTIMEO. */
 int afinet_set_timeo(int fd, int rcv, int64_t sec, int64_t usec) {
     afi_sock_t *s = afi_from_fd(fd);
@@ -1245,6 +1311,7 @@ int afinet_accept(int fd, void *addr, socklen_t *addrlen) {
     memset(c, 0, sizeof(*c));
     c->family = s->family;
     c->owner_uid = s->owner_uid;
+    c->txo = s->txo;
     c->type = SOCK_STREAM;
     c->protocol = 6;
     c->refcount = 1;                 /* NET-01: the installed reference */
@@ -1579,7 +1646,7 @@ static ssize_t afinet_sendto_k(int fd, const void *buf, size_t len, int flags,
         if (s->type == SOCK_RAW) {
             uint32_t d;
             memcpy(&d, daddr_buf, 4);
-            int rc = ip4_output(d, (uint8_t)s->protocol, buf, len);
+            int rc = ip4_output_opts(0, d, (uint8_t)s->protocol, buf, len, &s->txo);
             return rc < 0 ? rc : (ssize_t)len;
         }
         /* DGRAM/UDP */
@@ -1604,7 +1671,8 @@ static ssize_t afinet_sendto_k(int fd, const void *buf, size_t len, int flags,
         memcpy(&d, daddr_buf, 4);
         uint32_t src = udp_src4(s, d);
         udp_csum4(uh, src, d, sizeof(*uh) + len);
-        int rc = ip4_output_from(src, d, IPPROTO_UDP_NUM, pkt, sizeof(*uh) + len);
+        int rc = ip4_output_opts(src, d, IPPROTO_UDP_NUM, pkt, sizeof(*uh) + len,
+                                 &s->txo);
         return rc < 0 ? rc : (ssize_t)len;
     } else {
         if (s->type == SOCK_RAW) {

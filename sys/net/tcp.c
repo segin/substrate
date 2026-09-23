@@ -186,6 +186,7 @@ typedef struct tcp_pcb {
      * 0 while not in FIN_WAIT_2. */
     uint64_t  fin_wait2_until;
     uint64_t  closing_until;  /* TCP-SM-01: CLOSING/LAST_ACK reaper deadline */
+    struct ip4_txopts txo;    /* UDP-API-12: the socket's IP_TTL/IP_TOS */
     /* SO_ERROR (cleared by getsockopt).  */
     int       so_error;
     /* Backlog for LISTEN sockets */
@@ -317,8 +318,8 @@ static int tcp_xmit_raw(tcp_pcb_t *p, uint32_t seq, uint8_t flags,
      * so every segment of a socket whose laddr differed from the egress
      * device's address -- bound, or connected over loopback to a local NIC
      * address -- went out with a checksum the peer discarded. */
-    return ip4_output_from(csum_src, p->raddr, IPPROTO_TCP, buf,
-                           sizeof(*th) + dlen);
+    return ip4_output_opts(csum_src, p->raddr, IPPROTO_TCP, buf,
+                           sizeof(*th) + dlen, &p->txo);
 }
 
 /* Pure-ACK / pure-RST segments don't enter the retx queue.  Use this
@@ -697,6 +698,7 @@ static void tcp_in_listen(tcp_pcb_t *p, uint32_t saddr, uint32_t daddr,
     tcp_pcb_t *c = (tcp_pcb_t *)kmalloc(sizeof(*c));
     if (!c) return;
     memset(c, 0, sizeof(*c));
+    c->txo = p->txo;                 /* UDP-API-12: inherit the listener's */
     c->state   = TCP_SYN_RECEIVED;
     c->laddr   = daddr;
     c->raddr   = saddr;
@@ -1288,6 +1290,7 @@ tcp_pcb_t *tcp_alloc(void) {
     if (!p) return NULL;
     memset(p, 0, sizeof(*p));
     p->state = TCP_CLOSED;
+    ip4_txopts_init(&p->txo);
     p->rxbuf = (uint8_t *)kmalloc(TCP_RING_LEN);
     if (!p->rxbuf) { kfree(p, sizeof(*p)); return NULL; }
     p->rcv_wnd      = TCP_RING_LEN;
@@ -1816,6 +1819,14 @@ ssize_t tcp_peek_until(tcp_pcb_t *p, void *buf, size_t len, uint64_t deadline) {
 
 ssize_t tcp_peek(tcp_pcb_t *p, void *buf, size_t len) {
     return tcp_peek_until(p, buf, len, 0);
+}
+
+/* UDP-API-12: the socket layer's IP_TTL/IP_TOS for this connection. */
+void tcp_set_txopts(tcp_pcb_t *p, const struct ip4_txopts *o) {
+    if (!p || !o) return;
+    uint32_t f = tcp_lock();
+    p->txo = *o;
+    tcp_unlock(f);
 }
 
 int tcp_take_so_error(tcp_pcb_t *p) {

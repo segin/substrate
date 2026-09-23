@@ -90,6 +90,22 @@ int  ip4_output(uint32_t daddr, uint8_t protocol,
 int  ip4_output_from(uint32_t saddr, uint32_t daddr, uint8_t protocol,
                      const void *payload, size_t payload_len);
 
+/* UDP-API-12: per-socket IPv4 transmit options (IP_TTL, IP_TOS and the
+ * IP_MULTICAST_* trio).  ip4_txopts_init() gives the defaults: TTL 64, TOS
+ * 0, multicast TTL 1 (RFC 1112 6.1), loopback on, interface by routing. */
+struct ip4_txopts {
+    uint8_t  ttl;           /* unicast/broadcast TTL */
+    uint8_t  tos;
+    uint8_t  mcast_ttl;
+    uint8_t  mcast_loop;    /* deliver our own group sends locally */
+    uint32_t mcast_if;      /* interface address for group sends; 0 = route */
+};
+void ip4_txopts_init(struct ip4_txopts *o);
+/* ip4_output_from() with transmit options; NULL means the defaults. */
+int  ip4_output_opts(uint32_t saddr, uint32_t daddr, uint8_t protocol,
+                     const void *payload, size_t payload_len,
+                     const struct ip4_txopts *o);
+
 /* Source address routing will choose for `daddr` — needed to build a UDP
  * pseudo-header checksum before the packet reaches ip4_output/ip6_output. */
 uint32_t ip4_source_for(uint32_t daddr);
@@ -208,6 +224,7 @@ ssize_t    tcp_peek(tcp_pcb_t *p, void *buf, size_t len);
 ssize_t    tcp_peek_nb(tcp_pcb_t *p, void *buf, size_t len);
 int        tcp_close(tcp_pcb_t *p);
 int        tcp_take_so_error(tcp_pcb_t *p);
+void       tcp_set_txopts(tcp_pcb_t *p, const struct ip4_txopts *o);
 
 /* -- AF_INET socket helper APIs -------------------------------------- */
 int     afinet_listen(int fd, int backlog);
@@ -217,6 +234,13 @@ int     afinet_shutdown(int fd, int how);
 int     afinet_getsockname(int fd, void *addr, socklen_t *addrlen);
 int     afinet_getpeername(int fd, void *addr, socklen_t *addrlen);
 int     afinet_set_reuseaddr(int fd, int on);
+/* UDP-API-12: IPPROTO_IP transmit options -- IP_TOS (1), IP_TTL (2),
+ * IP_MULTICAST_IF (32, val unused, addr = interface address),
+ * IP_MULTICAST_TTL (33), IP_MULTICAST_LOOP (34).  set: -ENOTSOCK on a
+ * non-AF_INET fd, -EINVAL for an out-of-range value, -ENOPROTOOPT for any
+ * other option; get likewise, returning the value (or the address). */
+int     afinet_set_ipopt(int fd, int optname, int val, uint32_t addr);
+int     afinet_get_ipopt(int fd, int optname, int *val, uint32_t *addr);
 /* UDP-API-04: SO_RCVTIMEO (rcv != 0) / SO_SNDTIMEO, as seconds plus
  * microseconds; both zero means no timeout.  -ENOTSOCK on a non-AF_INET fd,
  * -EDOM for a negative or out-of-range value. */
