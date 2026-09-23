@@ -189,6 +189,7 @@ typedef struct tcp_pcb {
      * 0 while not in FIN_WAIT_2. */
     uint64_t  fin_wait2_until;
     uint64_t  closing_until;  /* TCP-SM-01: CLOSING/LAST_ACK reaper deadline */
+    uint8_t   pollout_wait;   /* TCP-WIN-02: poll() saw no POLLOUT */
     struct ip4_txopts txo;    /* UDP-API-12: the socket's IP_TTL/IP_TOS */
     /* SO_ERROR (cleared by getsockopt).  */
     int       so_error;
@@ -1224,6 +1225,10 @@ static void tcp_in_established(tcp_pcb_t *p, uint32_t seq, uint32_t ack,
          * window (tcp_input() already stored it in snd_wnd) — wake any
          * sender parked in tcp_send() waiting for the window to open. */
         sched_wakeup(p->send_chan);
+        if (p->pollout_wait) {          /* TCP-WIN-02: and a POLLOUT poller */
+            p->pollout_wait = 0;
+            sched_wakeup(p->recv_chan);
+        }
     }
 
     /* Accept data if seq matches rcv_nxt and we have room.
@@ -1745,8 +1750,26 @@ int tcp_poll(tcp_pcb_t *p, short events, void **wait_chan) {
         }
     }
     if (events & POLLOUT) {
-        /* No tx buffering yet; treat as always-ready.  */
-        revents |= POLLOUT;
+        /*
+         * TCP-WIN-02: writable means a write() would make progress.  There
+         * is no send buffer, so that is room in min(cwnd, peer window) --
+         * or a zero window with nothing in flight, where a write sends the
+         * persist probe.  POLLOUT used to be unconditional, so a
+         * non-blocking sender facing a closed window spun on poll() and
+         * EAGAIN.  A connection whose send side is finished never blocks a
+         * write (it fails), so it stays writable.
+         */
+        if (p->state == TCP_ESTABLISHED || p->state == TCP_CLOSE_WAIT) {
+            uint32_t in_flight = p->snd_nxt - p->snd_una;
+            uint32_t wnd = p->snd_wnd;
+            if (p->cwnd && p->cwnd < wnd) wnd = p->cwnd;
+            if (wnd > in_flight || in_flight == 0)
+                revents |= POLLOUT;
+            else
+                p->pollout_wait = 1;    /* the ACK path wakes the poller */
+        } else {
+            revents |= POLLOUT;
+        }
     }
     if (p->state == TCP_CLOSE_WAIT) revents |= POLLHUP;
     /* If the caller asked for POLLIN but we don't have data yet,
@@ -1756,6 +1779,11 @@ int tcp_poll(tcp_pcb_t *p, short events, void **wait_chan) {
      * then fell back to a different wait channel and missed the
      * recv wakeup entirely (the inetutils-telnet symptom). */
     if (wait_chan && (events & POLLIN) && !(revents & (POLLIN | POLLHUP)))
+        *wait_chan = p->recv_chan;
+    /* TCP-WIN-02: an fd has one wait channel, and it is recv_chan whenever
+     * POLLIN is also pending, so the ACK that opens the window wakes
+     * recv_chan as well when pollout_wait is set. */
+    if (wait_chan && !*wait_chan && (events & POLLOUT) && !(revents & POLLOUT))
         *wait_chan = p->recv_chan;
     return revents;
 }
@@ -1843,12 +1871,6 @@ static ssize_t tcp_send_body(tcp_pcb_t *p, const void *buf, size_t len, int nonb
         uint32_t avail     = (wnd > in_flight) ? (wnd - in_flight) : 0;
 
         if (avail == 0) {
-            /* Non-blocking sender: return what we managed to send (or
-             * EAGAIN) instead of parking.  A single-threaded nonblocking
-             * pump must be able to return from write() and go read() —
-             * otherwise it can never drain the peer to reopen the window
-             * and the transfer self-deadlocks. */
-            if (nonblock) return sent ? (ssize_t)sent : -EAGAIN;
             if (in_flight == 0) {
                 /* Zero window, nothing outstanding — emit a one-byte
                  * persist probe.  Its RTO retransmissions keep
@@ -1868,6 +1890,17 @@ static ssize_t tcp_send_body(tcp_pcb_t *p, const void *buf, size_t len, int nonb
                 sent += 1;
                 continue;
             }
+            /* Non-blocking sender: return what we managed to send (or
+             * EAGAIN) instead of parking.  A single-threaded nonblocking
+             * pump must be able to return from write() and go read() —
+             * otherwise it can never drain the peer to reopen the window
+             * and the transfer self-deadlocks.
+             *
+             * TCP-WIN-02: after the probe above, not before it.  A
+             * non-blocking sender facing a zero window with nothing in
+             * flight got EAGAIN and sent nothing, so no probe ever went
+             * out and nothing would reopen the window. */
+            if (nonblock) return sent ? (ssize_t)sent : -EAGAIN;
             /* UDP-API-04: SO_SNDTIMEO -- give up once the deadline has
              * passed, reporting what was sent (or EAGAIN). */
             if (deadline && get_ticks() >= deadline)

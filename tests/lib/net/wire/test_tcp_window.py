@@ -8,6 +8,10 @@ it guards.
                 every probe, for longer than the retransmission abort budget
                 (~2 minutes) does not make the sender give up; once the
                 window reopens the whole write goes through.
+    nb-persist  TCP-WIN-02: a non-blocking write facing a zero window sends
+                the one-octet probe (instead of EAGAIN and silence); poll()
+                then withholds POLLOUT until the peer opens the window, and
+                is woken when it does.
 
 Run from the repo root after building sys/ and wireguest:
     python3 tests/lib/net/wire/test_tcp_window.py [case...]
@@ -77,7 +81,39 @@ def case_persist():
         return None, w
 
 
-CASES = (('persist', case_persist),)
+def case_nb_persist():
+    with Wire.boot('connect 10.0.2.2 %d nbwrite:abcdef pollout:8000 '
+                   'nbwrite:bcdef sleep:60' % PORT) as w:
+        syn, err = handshake(w, win=0)
+        if err:
+            return err, w
+        gp, g = syn.sport, syn.seq + 1
+        if not w.wait_serial('guest: nbwrite', 10):
+            return 'guest never wrote', w
+        line = [l for l in w.serial().splitlines() if 'guest: nbwrite' in l][0]
+        probe = w.expect(lambda s: s.data, 3, 'probe')
+        if 'n=1' not in line or not probe or probe.data != b'a':
+            return 'non-blocking write sent no probe: %s, %r' % (line.strip(), probe), w
+        w.send(Seg(PORT, gp, PISS + 1, g, ACK, win=0))
+        w.pump(2.0)
+        if 'guest: pollout' in w.serial():
+            line = [l for l in w.serial().splitlines() if 'guest: pollout' in l][0]
+            return 'POLLOUT asserted against a zero window: %s' % line.strip(), w
+        w.rx.clear()                               # drop probe retransmissions
+        w.send(Seg(PORT, gp, PISS + 1, g + 1, ACK, win=65535))   # ACK probe, open
+        t0 = time.time()
+        if not w.wait_serial('guest: pollout ok', 5):
+            return 'opening the window did not wake poll(): %s' % w.serial()[-200:], w
+        if time.time() - t0 > 2:
+            return 'poll() woke only after %.1fs' % (time.time() - t0), w
+        d = w.expect(lambda s: s.data and s.seq == g + 1, 5, 'data')
+        if not d or d.data != b'bcdef':
+            return 'no data after the window opened: %r' % d, w
+        return None, w
+
+
+CASES = (('persist', case_persist),
+         ('nb-persist', case_nb_persist))
 
 
 def main():

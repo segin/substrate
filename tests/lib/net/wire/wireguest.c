@@ -25,6 +25,8 @@
  *   sleep:N      sleep N seconds
  *   soerror      getsockopt(SO_ERROR), reporting the value
  *   pollin       poll() for POLLIN with no timeout, reporting revents
+ *   pollout:MS   poll() for POLLOUT for up to MS ms, reporting revents
+ *   nbwrite:TEXT set O_NONBLOCK and write TEXT once
  *   sendto:IP:PORT:TEXT   send TEXT to IP:PORT
  *   sendn:IP:PORT:N       send an N-octet datagram to IP:PORT
  *   ifaddr0      SIOCSIFADDR eth0 0.0.0.0 -- leave the NIC unconfigured
@@ -37,6 +39,7 @@
  */
 #include <arpa/inet.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <netinet/in.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -131,6 +134,15 @@ static int do_actions(int fd, int argc, char **argv) {
             int r = poll(&pfd, 1, -1);
             say("pollin %s revents=%#lx", r < 0 ? strerror(errno) : "ok",
                 (long)pfd.revents);
+        } else if (strncmp(a, "pollout:", 8) == 0) {
+            struct pollfd pfd = { .fd = fd, .events = POLLOUT };
+            int r = poll(&pfd, 1, atoi(a + 8));
+            say(r == 0 ? "pollout timeout%s revents=%#lx" : "pollout ok%s revents=%#lx",
+                r < 0 ? strerror(errno) : "", (long)pfd.revents);
+        } else if (strncmp(a, "nbwrite:", 8) == 0) {
+            fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK);
+            ssize_t n = write(fd, a + 8, strlen(a + 8));
+            say("nbwrite %s n=%ld", n < 0 ? strerror(errno) : "ok", (long)n);
         } else if (strcmp(a, "soerror") == 0) {
             int err = -1;
             socklen_t el = sizeof(err);
