@@ -7,8 +7,8 @@
  * UDP-U-04 (destination port 0), UDP-U-05 (empty datagram via sendmsg),
  * UDP-IP-02 (all of 127/8 is local), UDP-IP-08 (broadcast fan-out) and
  * UDP-IP-11 (lo's MTU), UDP-API-01 (port ownership), UDP-API-02
- * (multi-iovec sendmsg), UDP-API-03 (writev) and UDP-API-04 (SO_RCVTIMEO)
- * from docs/ip-audit-2026-09-22.md.
+ * (multi-iovec sendmsg), UDP-API-03 (writev), UDP-API-04 (SO_RCVTIMEO) and
+ * UDP-API-06 (non-local bind) from docs/ip-audit-2026-09-22.md.
  *
  * Each case drives the real socket API over the loopback interface, so a
  * PASS means a datagram actually took the intended path through the
@@ -773,6 +773,35 @@ static void test_rcvtimeo(void)
     close(l);
 }
 
+/* UDP-API-06: bind() to an address this host does not own must fail
+ * EADDRNOTAVAIL.  Any address was accepted, leaving a socket that could
+ * never receive anything, with no error. */
+static void test_bind_nonlocal(void)
+{
+    printf("UDP-API-06: bind() only to addresses we can receive on\n");
+    struct sockaddr_in a;
+    memset(&a, 0, sizeof(a));
+    a.sin_family = AF_INET;
+    a.sin_port = htons(31968);
+    int s1 = socket(AF_INET, SOCK_DGRAM, 0);
+    a.sin_addr.s_addr = htonl(0x0A090909);          /* 10.9.9.9: not ours */
+    errno = 0;
+    ok("a foreign address fails EADDRNOTAVAIL",
+       bind(s1, (struct sockaddr *)&a, sizeof(a)) < 0 && errno == EADDRNOTAVAIL,
+       "bound to an address we do not own");
+    close(s1);
+    int s2 = socket(AF_INET, SOCK_DGRAM, 0);
+    a.sin_addr.s_addr = htonl(0x7F000005);          /* 127.0.0.5 */
+    ok("any 127/8 address is fine", bind(s2, (struct sockaddr *)&a, sizeof(a)) == 0,
+       "loopback address refused");
+    close(s2);
+    int s3 = socket(AF_INET, SOCK_DGRAM, 0);
+    a.sin_addr.s_addr = htonl(0xEF010101);          /* 239.1.1.1 */
+    ok("a multicast group is fine", bind(s3, (struct sockaddr *)&a, sizeof(a)) == 0,
+       "group address refused");
+    close(s3);
+}
+
 int main(void)
 {
     printf("torture_udp: UDP demux + checksum regressions (#430)\n\n");
@@ -794,6 +823,7 @@ int main(void)
     test_sendmsg_gather();
     test_writev_dgram();
     test_rcvtimeo();
+    test_bind_nonlocal();
 
     printf("\nResult: %d passed, %d failed -- %s\n",
            passed, failed, failed ? "FAILED" : "PASSED");

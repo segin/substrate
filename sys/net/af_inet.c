@@ -987,6 +987,35 @@ static int afinet_bind_conflict(const afi_sock_t *self, uint16_t port,
     return conflict;
 }
 
+/*
+ * UDP-API-06: may a socket bind this IPv4 address?  Only one it can receive
+ * on: the wildcard, an interface address, anything in 127/8 (lo takes all of
+ * it, UDP-IP-02), an interface's broadcast or the limited broadcast, or a
+ * class D group.  Any other address was accepted and left the socket
+ * permanently deaf with no error.
+ */
+static int afinet_addr_bindable4(uint32_t a) {
+    if (a == 0 || a == 0xFFFFFFFFu) return 1;
+    if ((a & 0xFF) == 127 || ((a & 0xFF) >> 4) == 0xE) return 1;
+    for (netdev_t *d = netdev_first(); d; d = netdev_next(d)) {
+        if (!d->ip4_addr) continue;
+        if (a == d->ip4_addr) return 1;
+        if (d->ip4_netmask &&
+            a == ((d->ip4_addr & d->ip4_netmask) | ~d->ip4_netmask))
+            return 1;
+    }
+    return 0;
+}
+
+/* The IPv6 counterpart: ::, ::1, an interface address, or multicast. */
+static int afinet_addr_bindable6(const uint8_t a[16]) {
+    static const uint8_t lo6[16] = { [15] = 1 };
+    if (addr_is_wild(a, 16) || memcmp(a, lo6, 16) == 0 || a[0] == 0xff) return 1;
+    for (netdev_t *d = netdev_first(); d; d = netdev_next(d))
+        if (memcmp(a, d->ip6_addr, 16) == 0) return 1;
+    return 0;
+}
+
 /* UDP-API-01 / TCP-API-18: ports below IPPORT_RESERVED belong to root. */
 static int afinet_port_reserved(uint16_t port) {
     return port != 0 && port < 1024 &&
@@ -1004,6 +1033,7 @@ int afinet_bind(int fd, const void *addr, socklen_t len) {
         if (sin->sin_family != AF_INET) return -EAFNOSUPPORT;
         uint16_t req = __builtin_bswap16(sin->sin_port);
         if (afinet_port_reserved(req)) return -EACCES;
+        if (!afinet_addr_bindable4(sin->sin_addr)) return -EADDRNOTAVAIL;
         uint8_t la[16];
         memset(la, 0, sizeof(la));
         memcpy(la, &sin->sin_addr, 4);
@@ -1029,6 +1059,7 @@ int afinet_bind(int fd, const void *addr, socklen_t len) {
         if (sin6->sin6_family != AF_INET6) return -EAFNOSUPPORT;
         uint16_t req6 = __builtin_bswap16(sin6->sin6_port);
         if (afinet_port_reserved(req6)) return -EACCES;
+        if (!afinet_addr_bindable6(sin6->sin6_addr)) return -EADDRNOTAVAIL;
         if (req6 && afinet_bind_conflict(s, req6, sin6->sin6_addr, 16))
             return -EADDRINUSE;
         s->local_port = req6;
