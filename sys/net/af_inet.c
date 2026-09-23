@@ -566,26 +566,41 @@ static int afi_wait(afi_sock_t *s, unsigned long *fl) {
  * every path through the function; the inner acquire/release stays as it
  * is (nested references are fine) so the ring code keeps working unchanged.
  */
-static size_t afinet_node_read_body(fs_node_t *node, size_t size, uint8_t *buf);
+static size_t afinet_node_read_body(fs_node_t *node, afi_sock_t *s,
+                                    size_t size, uint8_t *buf);
+
+/*
+ * UDP-API-16: pin the socket behind a node.  node->impl used to be loaded
+ * with no lock and the reference taken afterwards, so a close() on another
+ * thread could drop the last reference and free the socket between the two
+ * -- the reader or writer then incremented freed memory and later freed it
+ * again (a UMA double-free panic, reproduced with a write racing close()).
+ * The load and the reference are now one step under afi_lock, and close()
+ * clears node->impl under the same lock.  NULL once the socket is gone.
+ */
+static afi_sock_t *afi_node_get(fs_node_t *node) {
+    unsigned long fl = spinlock_acquire_irq(&afi_lock);
+    afi_sock_t *s = (afi_sock_t *)(uintptr_t)node->impl;
+    if (s) s->refcount++;
+    spinlock_release_irq(&afi_lock, fl);
+    return s;
+}
 
 size_t afinet_node_read(fs_node_t *node, off_t off, size_t size, uint8_t *buf) {
     (void)off;
-    afi_sock_t *s = (afi_sock_t *)(uintptr_t)node->impl;
-    if (!s) return 0;
-    unsigned long fl0 = spinlock_acquire_irq(&afi_lock);
-    s->refcount++;
-    spinlock_release_irq(&afi_lock, fl0);
+    afi_sock_t *s = afi_node_get(node);
+    if (!s) return 0;                   /* torn down: end of file */
 
-    size_t r = afinet_node_read_body(node, size, buf);
+    size_t r = afinet_node_read_body(node, s, size, buf);
 
     unsigned long fl1 = spinlock_acquire_irq(&afi_lock);
     afi_rele_unlock(s, fl1);            /* may free; s must not be touched */
     return r;
 }
 
-static size_t afinet_node_read_body(fs_node_t *node, size_t size, uint8_t *buf) {
-    afi_sock_t *s = (afi_sock_t *)(uintptr_t)node->impl;
-    if (!s || s->closed) return 0;
+static size_t afinet_node_read_body(fs_node_t *node, afi_sock_t *s,
+                                    size_t size, uint8_t *buf) {
+    if (s->closed) return 0;
     if (s->rd_shut) return 0;            /* shutdown(SHUT_RD): EOF */
     int nb = afi_node_nonblock(node);
     if (s->type == SOCK_STREAM && s->tcp) {
@@ -703,28 +718,27 @@ static int udp_csum6(struct udphdr *uh, const uint8_t daddr[16],
 
 /* SOCK-03 (write twin of afinet_node_read): tcp_send() blocks on a full
  * send window with nothing holding the socket, so pin at entry here too. */
-static size_t afinet_node_write_body(fs_node_t *node, size_t size,
-                                     const uint8_t *buf);
+static size_t afinet_node_write_body(fs_node_t *node, afi_sock_t *s,
+                                     size_t size, const uint8_t *buf);
 
 static size_t afinet_node_write(fs_node_t *node, off_t off, size_t size, const uint8_t *buf) {
     (void)off;
-    afi_sock_t *s = (afi_sock_t *)(uintptr_t)node->impl;
-    if (!s) return 0;
-    unsigned long fl0 = spinlock_acquire_irq(&afi_lock);
-    s->refcount++;
-    spinlock_release_irq(&afi_lock, fl0);
+    /* UDP-API-16: a write to a torn-down socket is an error, not a
+     * successful zero-byte transfer -- that spun every libc-style
+     * "write until done" loop forever. */
+    afi_sock_t *s = afi_node_get(node);
+    if (!s) return (size_t)-EBADF;
 
-    size_t r = afinet_node_write_body(node, size, buf);
+    size_t r = afinet_node_write_body(node, s, size, buf);
 
     unsigned long fl1 = spinlock_acquire_irq(&afi_lock);
     afi_rele_unlock(s, fl1);            /* may free; s must not be touched */
     return r;
 }
 
-static size_t afinet_node_write_body(fs_node_t *node, size_t size,
-                                     const uint8_t *buf) {
-    afi_sock_t *s = (afi_sock_t *)(uintptr_t)node->impl;
-    if (!s || s->closed) return 0;
+static size_t afinet_node_write_body(fs_node_t *node, afi_sock_t *s,
+                                     size_t size, const uint8_t *buf) {
+    if (s->closed) return (size_t)-EBADF;
     if (s->type == SOCK_STREAM && s->tcp) {
         ssize_t n = afi_node_nonblock(node) ? tcp_send_nb(s->tcp, buf, size)
                                             : tcp_send_until(s->tcp, buf, size, afi_deadline(s->snd_timeo));
@@ -801,9 +815,13 @@ static size_t afinet_node_write_body(fs_node_t *node, size_t size,
 }
 
 static void afinet_node_close(fs_node_t *node) {
+    /* UDP-API-16: detach under afi_lock, so afi_node_get() either pins the
+     * socket first or sees it gone -- never a pointer about to be freed. */
+    unsigned long cfl = spinlock_acquire_irq(&afi_lock);
     afi_sock_t *s = (afi_sock_t *)(uintptr_t)node->impl;
-    if (!s) return;
     node->impl = 0;
+    spinlock_release_irq(&afi_lock, cfl);
+    if (!s) return;
     /* tcp_close() serialises internally (its own IRQ-off critical
      * section) and may not run under afi_lock. */
     if (s->tcp) { tcp_close(s->tcp); s->tcp = NULL; }
