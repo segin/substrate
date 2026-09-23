@@ -38,6 +38,11 @@ it guards.
     dup-after-close TCP-SM-15: after close(), a retransmission of data the
                     application already read is ACKed, not answered with a
                     RST, and the close handshake finishes.
+    fin-wakes       TCP-SM-14: after shutdown(SHUT_WR) (FIN-WAIT-2), a
+                    poll() for POLLIN returns on the peer's FIN.  (The
+                    missing wakeup itself only cost latency up to kern_poll's
+                    ~50 ms backstop, below what this harness can time; the
+                    case guards the outcome.)
 
 Run from the repo root after building sys/ and wireguest:
     python3 tests/lib/net/wire/test_tcp_input.py [case...]
@@ -292,6 +297,25 @@ def case_dup_after_close():
         return None, w
 
 
+def case_fin_wakes():
+    with Wire.boot('connect 10.0.2.2 %d shutwr pollin sleep:60' % PORT) as w:
+        syn, err = handshake(w)
+        if err:
+            return err, w
+        gp, g = syn.sport, syn.seq + 1
+        fin = w.expect(lambda s: s.flags & FIN, 10, 'guest FIN')
+        if not fin:
+            return 'guest never shut down', w
+        w.send(Seg(PORT, gp, PISS + 1, g + 1, ACK))          # -> FIN-WAIT-2
+        w.pump(2.0)                                          # poll() is asleep
+        if 'guest: pollin' in w.serial():
+            return 'poll() returned before the FIN', w
+        w.send(Seg(PORT, gp, PISS + 1, g + 1, ACK | FIN))
+        if not w.wait_serial('guest: pollin', 5):
+            return "the peer's FIN did not wake poll()", w
+        return None, w
+
+
 CASES = (('data-after-fin', case_data_after_fin),
          ('syn-rcvd-rst', case_syn_rcvd_rst),
          ('syn-sync', case_syn_sync),
@@ -301,7 +325,8 @@ CASES = (('data-after-fin', case_data_after_fin),
          ('simultaneous', case_simultaneous),
          ('no-ack', case_no_ack),
          ('bad-ack-data', case_bad_ack_data),
-         ('dup-after-close', case_dup_after_close))
+         ('dup-after-close', case_dup_after_close),
+         ('fin-wakes', case_fin_wakes))
 
 
 def main():

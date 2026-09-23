@@ -574,8 +574,11 @@ static void tcp_timer_tick(uint64_t now) {
         if (p->state == TCP_TIME_WAIT && p->time_wait_until &&
             now >= p->time_wait_until) {
             /* Drop to CLOSED now; freed on the next tick once no RX
-             * can still be matching a late segment against it. */
+             * can still be matching a late segment against it.
+             * TCP-SM-14: and tell anyone still waiting on the socket. */
             p->state = TCP_CLOSED;
+            sched_wakeup(p->recv_chan);
+            sched_wakeup(p->send_chan);
             continue;
         }
         tcp_seg_t *head = p->unacked_head;
@@ -1273,11 +1276,16 @@ static void tcp_in_established(tcp_pcb_t *p, uint32_t seq, uint32_t ack,
             } else {
                 p->state = TCP_CLOSING;
             }
+            /* TCP-SM-14: the FIN is end-of-file for a reader (RFC 793 3.9
+             * eighth check, "signal the user") -- only ESTABLISHED woke
+             * it; a half-closed reader waited out its poll backstop. */
+            sched_wakeup(p->recv_chan);
             tcp_send_ctl(p, TCP_ACK);
             break;
         case TCP_FIN_WAIT_2:
             p->time_wait_until = get_ticks() + TCP_TIME_WAIT_TICKS;   /* TCP-MEM-09: deadline first */
             p->state = TCP_TIME_WAIT;
+            sched_wakeup(p->recv_chan);                               /* TCP-SM-14 */
             tcp_send_ctl(p, TCP_ACK);
             break;
         case TCP_LAST_ACK:

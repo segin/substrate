@@ -24,6 +24,7 @@
  *   shutwr       shutdown(SHUT_WR)
  *   sleep:N      sleep N seconds
  *   soerror      getsockopt(SO_ERROR), reporting the value
+ *   pollin       poll() for POLLIN with no timeout, reporting revents
  *   sendto:IP:PORT:TEXT   send TEXT to IP:PORT
  *   sendn:IP:PORT:N       send an N-octet datagram to IP:PORT
  *   ifaddr0      SIOCSIFADDR eth0 0.0.0.0 -- leave the NIC unconfigured
@@ -41,6 +42,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <net/if.h>
+#include <poll.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -124,6 +126,11 @@ static int do_actions(int fd, int argc, char **argv) {
             sin->sin_addr.s_addr = 0;
             int r = ioctl(fd, SIOCSIFADDR, &ifr);
             say("ifaddr0 %s rc=%ld", r < 0 ? strerror(errno) : "ok", r);
+        } else if (strcmp(a, "pollin") == 0) {
+            struct pollfd pfd = { .fd = fd, .events = POLLIN };
+            int r = poll(&pfd, 1, -1);
+            say("pollin %s revents=%#lx", r < 0 ? strerror(errno) : "ok",
+                (long)pfd.revents);
         } else if (strcmp(a, "soerror") == 0) {
             int err = -1;
             socklen_t el = sizeof(err);
