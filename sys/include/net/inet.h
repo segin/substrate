@@ -110,9 +110,19 @@ void icmp_input(netdev_t *dev, uint32_t saddr, uint32_t daddr,
                 const uint8_t *pkt, size_t len);
 void icmp6_input(netdev_t *dev, const uint8_t saddr[16], const uint8_t daddr[16],
                  const uint8_t *pkt, size_t len);
+/* netpkt/netlen: the whole invoking IP datagram, header included, which an
+ * ICMP error must quote.  for_bcast: the destination was a broadcast or
+ * multicast address, for which no ICMP error may ever be sent. */
 void udp_input(netdev_t *dev, int family,
                const void *saddr, const void *daddr,
-               const uint8_t *pkt, size_t len);
+               const uint8_t *pkt, size_t len,
+               const uint8_t *netpkt, size_t netlen, int for_bcast);
+
+/* UDP-ICMP-02: emit an ICMP Port Unreachable (ICMPv6 Destination
+ * Unreachable, code 4) quoting the invoking datagram, subject to the
+ * RFC 1122 3.2.2 / RFC 4443 2.4 restrictions and a rate limit. */
+void icmp_port_unreach(netdev_t *dev, const uint8_t *ip_pkt, size_t ip_len);
+void icmp6_port_unreach(netdev_t *dev, const uint8_t *ip6_pkt, size_t len);
 void tcp_input(uint32_t saddr, uint32_t daddr, const uint8_t *pkt, size_t len);
 
 /* -- Checksums ------------------------------------------------------ */

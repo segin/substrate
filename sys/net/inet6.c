@@ -334,7 +334,8 @@ void ip6_input(netdev_t *dev, const uint8_t *pkt, size_t len) {
             icmp6_input(dev, h->src, h->dst, l4, l4_len);
             break;
         case IPPROTO_UDP_NUM:
-            udp_input(dev, /*AF_INET6=*/10, h->src, h->dst, l4, l4_len);
+            udp_input(dev, /*AF_INET6=*/10, h->src, h->dst, l4, l4_len,
+                      pkt, sizeof(*h) + plen, /*for_bcast=*/h->dst[0] == 0xff);
             break;
         default:
             break;

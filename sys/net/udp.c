@@ -17,8 +17,8 @@
 
 void udp_input(netdev_t *dev, int family,
                const void *saddr, const void *daddr,
-               const uint8_t *pkt, size_t len) {
-    (void)dev;
+               const uint8_t *pkt, size_t len,
+               const uint8_t *netpkt, size_t netlen, int for_bcast) {
     if (len < sizeof(struct udphdr)) return;
     const struct udphdr *uh = (const struct udphdr *)pkt;
     uint16_t ulen = __builtin_bswap16(uh->len);
@@ -46,13 +46,24 @@ void udp_input(netdev_t *dev, int family,
         if (uh->check != 0 &&
             inet_csum_pseudo4(s, d, IPPROTO_UDP_NUM, ulen, pkt) != 0)
             return;
-        afinet_deliver_v4(s, d, IPPROTO_UDP_NUM, pkt, ulen, /*for_dgram=*/1);
+        /*
+         * UDP-ICMP-02: RFC 1122 4.1.3.1 -- a datagram for a port nobody is
+         * listening on is answered with an ICMP Port Unreachable.  The
+         * delivered count was computed and thrown away, so a client probing
+         * a closed port waited out its whole timeout instead of learning of
+         * the refusal at once.  Never for a broadcast/multicast destination.
+         */
+        if (!afinet_deliver_v4(s, d, IPPROTO_UDP_NUM, pkt, ulen, /*for_dgram=*/1) &&
+            !for_bcast)
+            icmp_port_unreach(dev, netpkt, netlen);
     } else if (family == 10 /* AF_INET6 */) {
         if (uh->check == 0) return;               /* illegal over IPv6 */
         if (inet_csum_pseudo6((const uint8_t *)saddr, (const uint8_t *)daddr,
                               IPPROTO_UDP_NUM, ulen, pkt) != 0)
             return;
-        afinet_deliver_v6((const uint8_t *)saddr, (const uint8_t *)daddr,
-                          IPPROTO_UDP_NUM, pkt, ulen, /*for_dgram=*/1);
+        if (!afinet_deliver_v6((const uint8_t *)saddr, (const uint8_t *)daddr,
+                               IPPROTO_UDP_NUM, pkt, ulen, /*for_dgram=*/1) &&
+            !for_bcast)
+            icmp6_port_unreach(dev, netpkt, netlen);
     }
 }

@@ -11,6 +11,9 @@
 #define ICMP_DEST_UNREACH 3
 #define ICMP_ECHO        8
 
+/* ICMP_DEST_UNREACH codes (RFC 792) */
+#define ICMP_PORT_UNREACH 3
+
 struct icmphdr {
     uint8_t  type;
     uint8_t  code;
@@ -20,6 +23,8 @@ struct icmphdr {
 } __attribute__((packed));
 
 /* ICMPv6 */
+#define ICMP6_DST_UNREACH         1
+#define ICMP6_DST_UNREACH_NOPORT  4   /* RFC 4443 3.1 code 4 */
 #define ICMP6_ECHO_REQUEST 128
 #define ICMP6_ECHO_REPLY   129
 #define ND_ROUTER_SOLICIT  133

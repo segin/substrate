@@ -102,6 +102,7 @@ class Wire:
         self.log, self.img = log, img
         self.ip_id = 1
         self.rx = []            # TCP segments from the guest, oldest first
+        self.ip_rx = []         # other IPv4 datagrams: (proto, src, dst, ip_bytes)
         self.trace = []         # everything seen/sent, for failure reports
 
     # -- boot -------------------------------------------------------------
@@ -194,9 +195,12 @@ class Wire:
         ip = frame[14:]
         ihl = (ip[0] & 0xF) * 4
         tot = struct.unpack('!H', ip[2:4])[0]
-        if ip[9] != 6:
-            return
         src, dst = socket.inet_ntoa(ip[12:16]), socket.inet_ntoa(ip[16:20])
+        if ip[9] != 6:
+            self.trace.append(('rx', time.time(), 'proto %d %s>%s len %d' %
+                               (ip[9], src, dst, tot)))
+            self.ip_rx.append((ip[9], src, dst, bytes(ip[:tot])))
+            return
         seg = Seg.decode(src, dst, ip[ihl:tot])
         self.trace.append(('rx', time.time(), seg))
         self.rx.append(seg)
@@ -224,6 +228,42 @@ class Wire:
         self.trace.append(('tx', time.time(), seg))
         self._send_frame(GUEST_MAC + PEER_MAC + b'\x08\x00' + ip + body)
 
+    def send_ip(self, proto, payload, src=PEER_IP, dst=GUEST_IP, ttl=64,
+                ident=None):
+        ident = self.ip_id if ident is None else ident
+        ip = struct.pack('!BBHHHBBH4s4s', 0x45, 0, 20 + len(payload), ident,
+                         0, ttl, proto, 0, socket.inet_aton(src),
+                         socket.inet_aton(dst))
+        ip = ip[:10] + struct.pack('!H', csum(ip)) + ip[12:]
+        self.ip_id = (self.ip_id + 1) & 0xFFFF
+        self.trace.append(('tx', time.time(), 'proto %d %s>%s len %d' %
+                           (proto, src, dst, 20 + len(payload))))
+        self._send_frame(GUEST_MAC + PEER_MAC + b'\x08\x00' + ip + payload)
+
+    def send_udp(self, sport, dport, data, src=PEER_IP, dst=GUEST_IP,
+                 checksum=True):
+        hdr = struct.pack('!HHHH', sport, dport, 8 + len(data), 0)
+        c = 0
+        if checksum:
+            pseudo = (socket.inet_aton(src) + socket.inet_aton(dst) +
+                      struct.pack('!BBH', 0, 17, 8 + len(data)))
+            c = csum(pseudo + hdr + data) or 0xFFFF
+        self.send_ip(17, hdr[:6] + struct.pack('!H', c) + data, src, dst)
+
+    def expect_ip(self, pred, timeout):
+        """First non-TCP IPv4 datagram (proto, src, dst, bytes) matching
+        pred, or None."""
+        end = time.time() + timeout
+        while True:
+            while self.ip_rx:
+                d = self.ip_rx.pop(0)
+                if pred(d):
+                    return d
+            left = end - time.time()
+            if left <= 0:
+                return None
+            self.pump(min(left, 0.2))
+
     def expect(self, pred, timeout, what):
         """Return the first queued-or-arriving guest segment matching pred,
         dropping the non-matching ones before it.  None on timeout."""
@@ -247,4 +287,5 @@ class Wire:
 
     def dump(self):
         t0 = self.trace[0][1] if self.trace else 0
-        return '\n'.join('  %6.2f %s %r' % (t - t0, d, s) for d, t, s in self.trace)
+        return '\n'.join('  %6.2f %s %s' % (t - t0, d, s if isinstance(s, str) else repr(s))
+                         for d, t, s in self.trace)

@@ -14,12 +14,15 @@
 #include <stddef.h>
 #include <string.h>
 
+#include <arch/i386/intr.h>
 #include <kern/console.h>
+#include <kern/time.h>
 #include <net/inet.h>
 #include <netinet/icmp.h>
 #include <netinet/ip.h>
 #include <netinet/ip6.h>
 #include <sys/netdev.h>
+#include <sys/param.h>
 
 /* ------------------------------------------------------------------ */
 /* ICMPv4                                                             */
@@ -77,6 +80,102 @@ void icmp_input(netdev_t *dev, uint32_t saddr, uint32_t daddr,
     rh->check = 0;
     rh->check = inet_csum(reply, len);
     ip4_output(saddr, IPPROTO_ICMP, reply, len);
+}
+
+/* ------------------------------------------------------------------ */
+/* ICMP errors (UDP-ICMP-02)                                          */
+/* ------------------------------------------------------------------ */
+
+/*
+ * RFC 1122 3.2.2: a host SHOULD limit the rate at which it sends ICMP
+ * error messages, so a flood of datagrams to closed ports cannot be turned
+ * into an equal flood of replies.  One budget covers both families.
+ */
+#define ICMP_ERR_PER_SEC 10
+
+static int icmp_err_ratelimit_ok(void) {
+    static uint64_t window;
+    static unsigned sent;
+    uint64_t now = get_ticks();
+    if (now - window >= HZ) {
+        window = now;
+        sent = 0;
+    }
+    return sent++ < ICMP_ERR_PER_SEC;
+}
+
+/*
+ * ICMP Destination Unreachable, code 3 (port), quoting the invoking IP
+ * header and the first 8 octets of its data (RFC 792) -- for UDP, the whole
+ * header, which is what lets the sender map the error to its socket.
+ *
+ * The caller has already excluded broadcast and multicast destinations.
+ * RFC 1122 3.2.2 also forbids an error about a datagram whose source does
+ * not name a single host, or about a non-initial fragment.  The reply is
+ * sent FROM the address the datagram was sent TO, so the sender can match
+ * it against its own destination.
+ */
+void icmp_port_unreach(netdev_t *dev, const uint8_t *ip_pkt, size_t ip_len) {
+    if (!ip_pkt || ip_len < sizeof(struct iphdr)) return;
+    const struct iphdr *ih = (const struct iphdr *)ip_pkt;
+    size_t hlen = IPH_HL(ih) * 4;
+    if (hlen < sizeof(*ih) || hlen > ip_len) return;
+    if ((__builtin_bswap16(ih->frag_off) & 0x1FFF) != 0) return;
+
+    uint32_t s = __builtin_bswap32(ih->saddr);
+    if (s == 0 || ih->saddr == 0xFFFFFFFFu || (s >> 28) == 0xE) return;
+    if ((s >> 24) == 127 && !(dev && (dev->flags & NETDEV_IFF_LOOPBACK))) return;
+    if (dev && dev->ip4_netmask &&
+        ih->saddr == ((dev->ip4_addr & dev->ip4_netmask) | ~dev->ip4_netmask))
+        return;
+    if (!icmp_err_ratelimit_ok()) return;
+
+    size_t quote = hlen + (ip_len - hlen < 8 ? ip_len - hlen : 8);
+    uint8_t msg[8 + 60 + 8];
+    memset(msg, 0, 8);
+    msg[0] = ICMP_DEST_UNREACH;
+    msg[1] = ICMP_PORT_UNREACH;
+    memcpy(msg + 8, ip_pkt, quote);
+    uint16_t c = inet_csum(msg, 8 + quote);
+    memcpy(msg + 2, &c, 2);
+    ip4_output_from(ih->daddr, ih->saddr, IPPROTO_ICMP, msg, 8 + quote);
+}
+
+/*
+ * ICMPv6 Destination Unreachable, code 4 (port unreachable), RFC 4443 3.1:
+ * as much of the invoking packet as fits without the error exceeding the
+ * IPv6 minimum MTU of 1280.  RFC 4443 2.4(e) forbids errors about packets
+ * sent to a multicast address (excluded by the caller) or from one that
+ * does not identify a single node.
+ */
+#define ICMP6_ERR_MAX (1280 - 40)
+
+void icmp6_port_unreach(netdev_t *dev, const uint8_t *ip6_pkt, size_t len) {
+    (void)dev;
+    if (!ip6_pkt || len < sizeof(struct ip6_hdr)) return;
+    const struct ip6_hdr *h = (const struct ip6_hdr *)ip6_pkt;
+    static const uint8_t unspec[16];
+    if (h->src[0] == 0xff || memcmp(h->src, unspec, 16) == 0) return;
+    if (!icmp_err_ratelimit_ok()) return;
+
+    uint8_t saddr[16];
+    if (ip6_source_for(h->src, saddr) != 0) return;
+    /* Too big for an IRQ stack, so static -- and therefore built and sent
+     * with interrupts off: the loopback kthread reaches here with them on,
+     * and a NIC's RX interrupt must not re-enter mid-build.  ip6_output()
+     * does not sleep with IF=0 (ND-01). */
+    static uint8_t msg[ICMP6_ERR_MAX];
+    uint32_t f = intr_disable();
+    size_t quote = len < sizeof(msg) - 8 ? len : sizeof(msg) - 8;
+    memset(msg, 0, 8);
+    msg[0] = ICMP6_DST_UNREACH;
+    msg[1] = ICMP6_DST_UNREACH_NOPORT;
+    memcpy(msg + 8, ip6_pkt, quote);
+    uint16_t c = inet_csum_pseudo6(saddr, h->src, IPPROTO_ICMPV6,
+                                   (uint32_t)(8 + quote), msg);
+    memcpy(msg + 2, &c, 2);
+    ip6_output(h->src, IPPROTO_ICMPV6, msg, 8 + quote);
+    intr_restore(f);
 }
 
 /* ------------------------------------------------------------------ */

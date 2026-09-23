@@ -368,7 +368,8 @@ void ip4_input(netdev_t *dev, const uint8_t *pkt, size_t len) {
             icmp_input(dev, ih->saddr, ih->daddr, l4, l4_len);
             break;
         case IPPROTO_UDP_NUM:
-            udp_input(dev, /*AF_INET=*/2, &ih->saddr, &ih->daddr, l4, l4_len);
+            udp_input(dev, /*AF_INET=*/2, &ih->saddr, &ih->daddr, l4, l4_len,
+                      pkt, tot, for_bcast);
             break;
         case 6 /*IPPROTO_TCP*/:
             /*
