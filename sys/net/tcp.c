@@ -190,6 +190,7 @@ typedef struct tcp_pcb {
     uint64_t  fin_wait2_until;
     uint64_t  closing_until;  /* TCP-SM-01: CLOSING/LAST_ACK reaper deadline */
     uint8_t   pollout_wait;   /* TCP-WIN-02: poll() saw no POLLOUT */
+    uint32_t  last_adv_wnd;   /* TCP-WIN-03: window in our last segment */
     struct ip4_txopts txo;    /* UDP-API-12: the socket's IP_TTL/IP_TOS */
     /* SO_ERROR (cleared by getsockopt).  */
     int       so_error;
@@ -303,7 +304,9 @@ static int tcp_xmit_raw(tcp_pcb_t *p, uint32_t seq, uint8_t flags,
     th->seq        = __builtin_bswap32(seq);
     th->ack_seq    = __builtin_bswap32(p->rcv_nxt);
     th->doff_flags = __builtin_bswap16((uint16_t)((5u << 12) | flags));
-    th->window     = __builtin_bswap16((uint16_t)(TCP_RING_LEN - p->rx_count));
+    uint32_t adv   = TCP_RING_LEN - p->rx_count;
+    p->last_adv_wnd = adv;          /* TCP-WIN-03: what the peer now believes */
+    th->window     = __builtin_bswap16((uint16_t)adv);
     th->check      = 0;
     th->urg_ptr    = 0;
     if (dlen && data) memcpy(buf + sizeof(*th), data, dlen);
@@ -1964,7 +1967,6 @@ ssize_t tcp_recv_nb(tcp_pcb_t *p, void *buf, size_t len) {
         return 0;
     }
     if (p->rx_count > 0) {
-        size_t prev_count = p->rx_count;
         size_t n = p->rx_count < len ? p->rx_count : len;
         uint8_t *b = (uint8_t *)buf;
         for (size_t i = 0; i < n; i++) {
@@ -1979,10 +1981,18 @@ ssize_t tcp_recv_nb(tcp_pcb_t *p, void *buf, size_t len) {
          * resume.  Without this the connection stalls until the
          * peer's zero-window-probe timer fires (10+ seconds),
          * which looks like a hang in interactive curl downloads.
-         * Matches BSD's silly-window-syndrome avoidance shape.  */
-        size_t old_wnd = TCP_RING_LEN - prev_count;
-        size_t new_wnd = TCP_RING_LEN - p->rx_count;
-        if (new_wnd >= old_wnd + TCP_MSS &&
+         * Matches BSD's silly-window-syndrome avoidance shape.
+         *
+         * TCP-WIN-03: measured against the window last put on the wire,
+         * not against the window at entry to this call.  An application
+         * reading in pieces smaller than an MSS never freed an MSS in one
+         * call, so no update went out at all, and the sender sat on its
+         * zero window until its probe timer.  A 0 -> non-zero transition
+         * is always announced. */
+        uint32_t new_wnd = TCP_RING_LEN - p->rx_count;
+        uint32_t adv = p->last_adv_wnd;
+        uint32_t step = TCP_MSS < TCP_RING_LEN / 2 ? TCP_MSS : TCP_RING_LEN / 2;
+        if ((new_wnd >= adv + step || (adv == 0 && new_wnd > 0)) &&
             (p->state == TCP_ESTABLISHED ||
              p->state == TCP_FIN_WAIT_1  ||
              p->state == TCP_FIN_WAIT_2)) {

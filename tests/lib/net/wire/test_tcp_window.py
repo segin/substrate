@@ -12,6 +12,11 @@ it guards.
                 the one-octet probe (instead of EAGAIN and silence); poll()
                 then withholds POLLOUT until the peer opens the window, and
                 is woken when it does.
+    reopen      TCP-WIN-03: the peer fills the receive window to zero; the
+                application drains it with 512-octet reads, and a window
+                update is sent (the 0 -> non-zero transition is always
+                announced, and after that every MSS freed).  It used to
+                need one single read() to free an MSS.
 
 Run from the repo root after building sys/ and wireguest:
     python3 tests/lib/net/wire/test_tcp_window.py [case...]
@@ -112,8 +117,45 @@ def case_nb_persist():
         return None, w
 
 
+def fill(w, gp, g, total):
+    """Send `total` octets as the guest's window allows; return RCV.NXT."""
+    nxt, wnd = PISS + 1, 1460
+    end = time.time() + 20
+    while nxt - (PISS + 1) < total and time.time() < end:
+        n = min(1460, wnd, total - (nxt - PISS - 1))
+        if n > 0:
+            w.rx.clear()
+            w.send(Seg(PORT, gp, nxt, g, ACK, data=b'x' * n))
+        a = w.expect(lambda s: s.flags & ACK and s.ack >= nxt + max(n, 0), 2, 'ACK')
+        if a:
+            nxt, wnd = a.ack, a.win
+    return nxt
+
+
+def case_reopen():
+    with Wire.boot('connect 10.0.2.2 %d sleep:8 readn:512:4096 sleep:60' % PORT) as w:
+        syn, err = handshake(w)
+        if err:
+            return err, w
+        gp, g = syn.sport, syn.seq + 1
+        nxt = fill(w, gp, g, 32768)
+        if nxt != PISS + 1 + 32768:
+            return 'could not fill the window: got to %d' % (nxt - PISS - 1), w
+        w.rx.clear()
+        if not w.wait_serial('guest: readn', 15):
+            return 'guest never drained', w
+        w.pump(1.0)
+        upd = [s for s in w.rx if s.flags & ACK and s.win > 0]
+        if not upd:
+            return 'no window update after draining 4096 octets in 512s', w
+        if max(u.win for u in upd) <= 4096 - 1460:   # within an MSS of the room
+            return 'window updates stopped short of the drained room: %r' % upd, w
+        return None, w
+
+
 CASES = (('persist', case_persist),
-         ('nb-persist', case_nb_persist))
+         ('nb-persist', case_nb_persist),
+         ('reopen', case_reopen))
 
 
 def main():

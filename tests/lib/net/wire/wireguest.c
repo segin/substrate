@@ -27,6 +27,7 @@
  *   pollin       poll() for POLLIN with no timeout, reporting revents
  *   pollout:MS   poll() for POLLOUT for up to MS ms, reporting revents
  *   nbwrite:TEXT set O_NONBLOCK and write TEXT once
+ *   readn:C:T    read T bytes in reads of at most C bytes
  *   sendto:IP:PORT:TEXT   send TEXT to IP:PORT
  *   sendn:IP:PORT:N       send an N-octet datagram to IP:PORT
  *   ifaddr0      SIOCSIFADDR eth0 0.0.0.0 -- leave the NIC unconfigured
@@ -134,6 +135,20 @@ static int do_actions(int fd, int argc, char **argv) {
             int r = poll(&pfd, 1, -1);
             say("pollin %s revents=%#lx", r < 0 ? strerror(errno) : "ok",
                 (long)pfd.revents);
+        } else if (strncmp(a, "readn:", 6) == 0) {
+            char buf[4096];
+            size_t chunk = (size_t)atoi(a + 6);
+            const char *t = strchr(a + 6, ':');
+            long want = t ? atol(t + 1) : 0, total = 0;
+            if (chunk > sizeof buf) chunk = sizeof buf;
+            while (total < want) {
+                size_t c = chunk;
+                if ((long)c > want - total) c = (size_t)(want - total);
+                ssize_t n = read(fd, buf, c);
+                if (n <= 0) break;
+                total += n;
+            }
+            say("readn %s total=%ld", total == want ? "ok" : strerror(errno), total);
         } else if (strncmp(a, "pollout:", 8) == 0) {
             struct pollfd pfd = { .fd = fd, .events = POLLOUT };
             int r = poll(&pfd, 1, atoi(a + 8));
