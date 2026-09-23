@@ -320,11 +320,28 @@ void ip6_input(netdev_t *dev, const uint8_t *pkt, size_t len) {
     uint16_t plen = __builtin_bswap16(h->payload_len);
     if (sizeof(*h) + plen > len) return;
 
-    /* Accept if destination is our address, link-local solicited-node
-     * multicast, or any-multicast we joined. */
+    /* Accept if destination is our address, or a multicast group this node
+     * belongs to.
+     *
+     * UDP-IP-09: the multicast test was `dst[0] == 0xff` -- EVERY group was
+     * accepted, while the comment claimed a membership check.  A node
+     * belongs to the all-nodes groups (ff01::1, ff02::1) and to the
+     * solicited-node group of its address, ff02::1:ffXX:XXXX with the low
+     * 24 bits of the address (RFC 4291 2.7.1); there is no API to join any
+     * other yet, so nothing else is ours. */
     int for_us = 0;
-    if (memcmp(h->dst, dev->ip6_addr, 16) == 0) for_us = 1;
-    else if (h->dst[0] == 0xff) for_us = 1;
+    if (memcmp(h->dst, dev->ip6_addr, 16) == 0) {
+        for_us = 1;
+    } else if (h->dst[0] == 0xff) {
+        static const uint8_t allnodes_tail[14] = { 0,0, 0,0, 0,0, 0,0, 0,0, 0,0, 0,1 };
+        static const uint8_t solnode_mid[11] = { 0,0, 0,0, 0,0, 0,0, 0,1, 0xff };
+        if ((h->dst[1] == 0x01 || h->dst[1] == 0x02) &&
+            memcmp(h->dst + 2, allnodes_tail, 14) == 0)
+            for_us = 1;
+        else if (h->dst[1] == 0x02 && memcmp(h->dst + 2, solnode_mid, 11) == 0 &&
+                 memcmp(h->dst + 13, dev->ip6_addr + 13, 3) == 0)
+            for_us = 1;
+    }
     if (!for_us) return;
 
     const uint8_t *l4 = pkt + sizeof(*h);
