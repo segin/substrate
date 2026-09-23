@@ -12,8 +12,9 @@
  * (SHUT_RD), UDP-API-09 (zero-length receive), UDP-API-10 (addrlen at
  * EOF), UDP-API-11 (IP_PKTINFO), UDP-API-12 (IP transmit options),
  * UDP-API-13 (unimplemented options), UDP-API-14 (getsockopt checks),
- * UDP-API-15 (SO_BROADCAST), UDP-API-17 (raw filtering) and UDP-API-19
- * (SHUT_WR) from docs/ip-audit-2026-09-22.md.
+ * UDP-API-15 (SO_BROADCAST), UDP-API-17 (raw filtering), UDP-API-19
+ * (SHUT_WR) and UDP-API-20 (raw payload limit) from
+ * docs/ip-audit-2026-09-22.md.
  *
  * Each case drives the real socket API over the loopback interface, so a
  * PASS means a datagram actually took the intended path through the
@@ -1204,6 +1205,33 @@ static void test_shut_wr(void)
     close(c);
 }
 
+/* UDP-API-20: sendto() and write() on a raw socket share one limit -- the
+ * largest payload behind the IPv4 header the stack synthesizes (1600 - 20).
+ * sendto() applied the UDP datagram cap (1572) and write() the IP layer's. */
+static void test_raw_max(void)
+{
+    printf("UDP-API-20: one raw payload limit for sendto() and write()\n");
+    static char big[1600];
+    struct sockaddr_in d;
+    memset(big, 0, sizeof(big));
+    lo_addr(&d, 0);
+    int r1 = socket(AF_INET, SOCK_RAW, 253);        /* experimental protocol */
+    ok("sendto() takes 1580 bytes",
+       sendto(r1, big, 1580, 0, (struct sockaddr *)&d, sizeof(d)) == 1580, "refused");
+    errno = 0;
+    ok("sendto() refuses 1581 with EMSGSIZE",
+       sendto(r1, big, 1581, 0, (struct sockaddr *)&d, sizeof(d)) < 0 && errno == EMSGSIZE,
+       "accepted");
+    int r2 = socket(AF_INET, SOCK_RAW, 253);
+    connect(r2, (struct sockaddr *)&d, sizeof(d));
+    ok("write() takes 1580 bytes", write(r2, big, 1580) == 1580, "refused");
+    errno = 0;
+    ok("write() refuses 1581 with EMSGSIZE",
+       write(r2, big, 1581) < 0 && errno == EMSGSIZE, "accepted");
+    close(r1);
+    close(r2);
+}
+
 int main(void)
 {
     printf("torture_udp: UDP demux + checksum regressions (#430)\n\n");
@@ -1236,6 +1264,7 @@ int main(void)
     test_so_broadcast();
     test_raw_filter();
     test_shut_wr();
+    test_raw_max();
 
     printf("\nResult: %d passed, %d failed -- %s\n",
            passed, failed, failed ? "FAILED" : "PASSED");

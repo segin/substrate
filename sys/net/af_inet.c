@@ -166,6 +166,22 @@ typedef struct afi_sock {
     struct afi_sock *next;
 } afi_sock_t;
 
+/*
+ * UDP-API-20 / UDP-I-03: the largest payload one send on this socket may
+ * carry.  A raw socket supplies its own L4 header, so it gets everything
+ * behind the IP header the stack synthesizes; a datagram socket also loses
+ * the UDP header.  Per family: the IPv6 header is 40 bytes, not IPv4's 20
+ * (the IPv6 datagram cap used to be computed from the IPv4 one).  One
+ * helper, so sendto() and write() cannot disagree again -- sendto() used to
+ * cap a raw payload with the UDP datagram limit and write() with the IP
+ * layer's.
+ */
+static size_t afi_max_payload(int family, int type) {
+    size_t iph = family == AF_INET ? 20 : 40;
+    if (type == SOCK_RAW) return NETDEV_MTU_MAX - iph;
+    return NETDEV_MTU_MAX - iph - 8;               /* sizeof(struct udphdr) */
+}
+
 static afi_sock_t *g_afi_head;
 /* UDP-API-04: the absolute deadline for a blocking call under a timeout of
  * `timeo` ticks, or 0 for none. */
@@ -769,11 +785,14 @@ static size_t afinet_node_write_body(fs_node_t *node, afi_sock_t *s,
     }
     /* write() without an address only works on a connected DGRAM socket. */
     if (!s->connected) return (size_t)-EDESTADDRREQ;
+    /* UDP-API-20: the raw arms below had no bound of their own. */
+    if (s->type == SOCK_RAW && size > afi_max_payload(s->family, s->type))
+        return (size_t)-EMSGSIZE;
 
     if (s->family == AF_INET) {
         if (s->type == SOCK_DGRAM) {
             uint8_t pkt[AFI_DATA_MAX + sizeof(struct udphdr)];
-            if (size > AFI_DATA_MAX) return (size_t)-EMSGSIZE;
+            if (size > afi_max_payload(s->family, s->type)) return (size_t)-EMSGSIZE;
             struct udphdr *uh = (struct udphdr *)pkt;
             /* NET-07: allocate via afinet_alloc_ephemeral() — the inline
              * ++g_ephemeral_next bypassed its wrap-to-49152 guard and is
@@ -808,7 +827,7 @@ static size_t afinet_node_write_body(fs_node_t *node, afi_sock_t *s,
     } else {
         if (s->type == SOCK_DGRAM) {
             uint8_t pkt[AFI_DATA_MAX + sizeof(struct udphdr)];
-            if (size > AFI_DATA_MAX) return (size_t)-EMSGSIZE;
+            if (size > afi_max_payload(s->family, s->type)) return (size_t)-EMSGSIZE;
             struct udphdr *uh = (struct udphdr *)pkt;
             /* NET-07: allocate via afinet_alloc_ephemeral() — the inline
              * ++g_ephemeral_next bypassed its wrap-to-49152 guard and is
@@ -1744,6 +1763,8 @@ static ssize_t afinet_sendto_k(int fd, const void *buf, size_t len, int flags,
     /* RAW: caller writes the L4 (and for v4 RAW with IP_HDRINCL it'd be
      * the IP header too — not supported yet; we always synthesize the
      * v4 IP header). */
+    if (s->type == SOCK_RAW && len > afi_max_payload(s->family, s->type))
+        return -EMSGSIZE;                               /* UDP-API-20 */
     if (s->family == AF_INET) {
         if (s->type == SOCK_RAW) {
             uint32_t d;
@@ -1763,7 +1784,7 @@ static ssize_t afinet_sendto_k(int fd, const void *buf, size_t len, int flags,
         }
         uint16_t sport = s->local_port;
         uint8_t pkt[AFI_DATA_MAX + sizeof(struct udphdr)];
-        if (len > AFI_DATA_MAX) return -EMSGSIZE;
+        if (len > afi_max_payload(s->family, s->type)) return -EMSGSIZE;
         struct udphdr *uh = (struct udphdr *)pkt;
         uh->source = __builtin_bswap16(sport);
         uh->dest   = __builtin_bswap16(dport);
@@ -1792,7 +1813,7 @@ static ssize_t afinet_sendto_k(int fd, const void *buf, size_t len, int flags,
         }
         uint16_t sport = s->local_port;
         uint8_t pkt[AFI_DATA_MAX + sizeof(struct udphdr)];
-        if (len > AFI_DATA_MAX) return -EMSGSIZE;
+        if (len > afi_max_payload(s->family, s->type)) return -EMSGSIZE;
         struct udphdr *uh = (struct udphdr *)pkt;
         uh->source = __builtin_bswap16(sport);
         uh->dest   = __builtin_bswap16(dport);
@@ -1830,7 +1851,7 @@ ssize_t afinet_sendto_kbuf(int fd, const void *kbuf, size_t len, int flags,
     afi_sock_t *s = afi_from_fd(fd);
     if (!s) return -ENOTSOCK;
     if (!kbuf && len) return -EINVAL;
-    if (!(s->type == SOCK_STREAM && s->tcp) && len > AFI_DATA_MAX)
+    if (!(s->type == SOCK_STREAM && s->tcp) && len > afi_max_payload(s->family, s->type))
         return -EMSGSIZE;
     return afinet_sendto_k(fd, kbuf, len, flags, addr, addrlen);
 }
@@ -1846,7 +1867,7 @@ ssize_t afinet_sendto(int fd, const void *ubuf, size_t len, int flags,
     int stream = (s->type == SOCK_STREAM && s->tcp) ? 1 : 0;
 
     /* Reject an oversized datagram before allocating for it. */
-    if (!stream && len > AFI_DATA_MAX)
+    if (!stream && len > afi_max_payload(s->family, s->type))
         return -EMSGSIZE;
 
     size_t cap = stream ? (len < AFI_SEND_CHUNK ? len : AFI_SEND_CHUNK) : len;

@@ -370,11 +370,11 @@ int ip4_output_opts(uint32_t saddr, uint32_t daddr, uint8_t protocol,
      * `payload_len + sizeof(struct iphdr) > NETDEV_MTU_MAX` wrapped for
      * payload_len >= 0xFFFFFFEC: the sum came out small, the check passed,
      * and the memcpy below then ran off the end of pkt[] and up the kernel
-     * stack.  That was reachable from unprivileged userland, because the
-     * SOCK_RAW send path hands this function the caller's length with no
-     * validation of its own (af_inet.c: the SOCK_RAW branch, unlike the
-     * DGRAM branch beside it, has no AFI_DATA_MAX check) and SOCK_RAW
-     * creation is not privileged.
+     * stack.  When written, the SOCK_RAW send path passed the caller's
+     * length through unchecked and SOCK_RAW creation was unprivileged.
+     * Neither is true now -- raw sockets are root-only (UDP-07) and the raw
+     * send arms are bounded by afi_max_payload() (UDP-API-20) -- but this
+     * check is the last line and stays.
      *
      * NETDEV_MTU_MAX is much larger than the header, so the subtraction
      * cannot underflow and folds to a constant.
