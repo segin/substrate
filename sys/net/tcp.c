@@ -1686,6 +1686,21 @@ ssize_t tcp_recv_nb(tcp_pcb_t *p, void *buf, size_t len) {
         }
         return (ssize_t)n;
     }
+    /*
+     * TCP-SM-08: a connection that died -- RST (ECONNRESET) or an exhausted
+     * retransmission budget (ETIMEDOUT) -- reaches CLOSED with so_error set
+     * by tcp_kill_pcb().  Treating that CLOSED like the post-FIN states
+     * below reported it as a clean end-of-file, so a reader took a reset
+     * for a complete reply.  Report the error once the queued data is
+     * gone, and consume it, so the next read sees EOF (as BSD and Linux
+     * do).  An orderly close reaches CLOSED with so_error 0.
+     */
+    if (p->state == TCP_CLOSED && p->so_error) {
+        int err = p->so_error;
+        p->so_error = 0;
+        tcp_unlock(lf);
+        return -err;
+    }
     /* EOF once the peer has closed its send side and the ring is
      * drained — every state reachable after the peer's FIN. */
     if (p->state == TCP_CLOSE_WAIT || p->state == TCP_CLOSING ||
@@ -1732,6 +1747,13 @@ ssize_t tcp_peek_nb(tcp_pcb_t *p, void *buf, size_t len) {
         }
         tcp_unlock(lf);
         return (ssize_t)n;
+    }
+    /* TCP-SM-08: as tcp_recv_nb(), but a peek leaves the error pending
+     * for the read that follows it. */
+    if (p->state == TCP_CLOSED && p->so_error) {
+        int err = p->so_error;
+        tcp_unlock(lf);
+        return -err;
     }
     if (p->state == TCP_CLOSE_WAIT || p->state == TCP_CLOSING ||
         p->state == TCP_LAST_ACK   || p->state == TCP_TIME_WAIT ||
