@@ -823,12 +823,27 @@ static void tcp_in_syn_sent(tcp_pcb_t *p, uint32_t seq, uint32_t ack,
     }
 }
 
-static void tcp_in_syn_received(tcp_pcb_t *p, uint32_t ack, uint8_t flags) {
+static int tcp_seq_in_rcv_window(const tcp_pcb_t *p, uint32_t seq);
+
+static void tcp_in_syn_received(tcp_pcb_t *p, uint32_t seq, uint32_t ack,
+                                uint8_t flags) {
     /* NET-06: a RST for a half-open child aborts it.  Tear the child
      * down (tcp_kill_pcb -> TCP_CLOSED) instead of silently dropping the
      * segment; the retransmit-timer reaper then frees the never-accepted
-     * PCB — see NET-04. */
+     * PCB — see NET-04.
+     *
+     * TCP-SM-04: but only a RST whose sequence number is valid.  Any RST on
+     * the 4-tuple was honoured, so a blind attacker who knew the tuple
+     * killed every embryonic connection.  Apply the same RFC 5961 3.2 test
+     * as the synchronized states: outside the window drop it, off RCV.NXT
+     * send a challenge ACK, exactly at RCV.NXT reset. */
     if (flags & TCP_RST) {
+        if (!tcp_seq_in_rcv_window(p, seq))
+            return;
+        if (seq != p->rcv_nxt) {
+            tcp_send_ctl(p, TCP_ACK);   /* challenge ACK */
+            return;
+        }
         tcp_kill_pcb(p, ECONNRESET);
         return;
     }
@@ -1291,7 +1306,7 @@ static void tcp_input_locked(uint32_t saddr, uint32_t daddr,
         tcp_in_syn_sent(p, seq, ack, flags);
         return;
     case TCP_SYN_RECEIVED:
-        tcp_in_syn_received(p, ack, flags);
+        tcp_in_syn_received(p, seq, ack, flags);
         return;
     case TCP_ESTABLISHED:
     case TCP_FIN_WAIT_1:

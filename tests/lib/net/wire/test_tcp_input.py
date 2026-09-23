@@ -7,6 +7,10 @@ it guards.
     data-after-fin  TCP-SM-03: text the peer sends after its own FIN is not
                     delivered, and RCV.NXT does not move (seventh step:
                     CLOSE-WAIT ignores segment text).
+    syn-rcvd-rst    TCP-SM-04: during a passive open, a RST one octet off
+                    RCV.NXT draws a challenge ACK and one far outside the
+                    window is dropped; neither kills the embryonic
+                    connection, which the peer's ACK then completes.
 
 Run from the repo root after building sys/ and wireguest:
     python3 tests/lib/net/wire/test_tcp_input.py [case...]
@@ -15,7 +19,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from wire import Wire, Seg, SYN, ACK, FIN, RST, PSH  # noqa: E402
+from wire import Wire, Seg, SYN, ACK, FIN, RST, PSH, PEER_MAC, PEER_IP, GUEST_IP  # noqa: E402
 
 PORT = 7050
 PISS = 90000
@@ -31,6 +35,20 @@ def handshake(w):
     if not w.wait_serial('guest: connected', 10):
         return None, 'guest did not report connected'
     return syn, None
+
+
+def passive(w, hp):
+    """Guest listening on PORT: prime ARP, send our SYN, return its SYN-ACK."""
+    if not w.wait_serial('guest: listening', 90):
+        return None, 'guest never listened'
+    w.send_arp(1, PEER_MAC, PEER_IP, b'\0' * 6, GUEST_IP)
+    w.pump(0.5)
+    w.send(Seg(hp, PORT, PISS, 0, SYN))
+    sa = w.expect(lambda s: s.dport == hp and s.flags & (SYN | ACK) == SYN | ACK,
+                  5, 'SYN-ACK')
+    if not sa:
+        return None, 'no SYN-ACK'
+    return sa, None
 
 
 def case_data_after_fin():
@@ -55,7 +73,26 @@ def case_data_after_fin():
         return None, w
 
 
-CASES = (('data-after-fin', case_data_after_fin),)
+def case_syn_rcvd_rst():
+    hp = 42001
+    with Wire.boot('listen %d sleep:60' % PORT) as w:
+        sa, err = passive(w, hp)
+        if err:
+            return err, w
+        w.rx.clear()
+        w.send(Seg(hp, PORT, PISS + 1 + 0x40000000, 0, RST))    # far off: drop
+        w.send(Seg(hp, PORT, PISS + 2, 0, RST))                 # in window: challenge
+        if not w.expect(lambda s: s.dport == hp and s.flags & ACK and
+                        not s.flags & RST, 3, 'challenge ACK'):
+            return 'in-window RST drew no challenge ACK', w
+        w.send(Seg(hp, PORT, PISS + 1, sa.seq + 1, ACK))
+        if not w.wait_serial('guest: accepted', 5):
+            return 'a RST off RCV.NXT killed the embryonic connection', w
+        return None, w
+
+
+CASES = (('data-after-fin', case_data_after_fin),
+         ('syn-rcvd-rst', case_syn_rcvd_rst))
 
 
 def main():
