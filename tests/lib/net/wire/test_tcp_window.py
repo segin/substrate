@@ -45,6 +45,10 @@ it guards.
     shut-rd     TCP-WIN-10: after shutdown(SHUT_RD) arriving data is
                 acknowledged and discarded, so the window stays open: the
                 peer can send more than a ring's worth.
+    stale-wnd   TCP-WIN-12: SND.WL1/WL2.  A newer segment closes the window;
+                an older one (lower SEG.SEQ, delivered late) advertising a
+                large window must not reopen it -- the sender probes with
+                one octet instead of sending into the stale window.
 
 Run from the repo root after building sys/ and wireguest:
     python3 tests/lib/net/wire/test_tcp_window.py [case...]
@@ -362,6 +366,33 @@ def case_shut_rd():
         return None, w
 
 
+def case_stale_wnd():
+    msg = 'W' * 200
+    with Wire.boot('connect 10.0.2.2 %d sleep:3 write:%s sleep:60' % (PORT, msg)) as w:
+        syn, err = handshake(w, win=150)
+        if err:
+            return err, w
+        gp, g = syn.sport, syn.seq + 1
+        d = w.expect(lambda s: s.data, 8, 'data')
+        if not d or len(d.data) != 150:
+            return 'want 150 octets into the 150 window, got %r' % d, w
+        w.rx.clear()
+        # Newer segment (seq PISS+11) first: acks everything, window 0.
+        w.send(Seg(PORT, gp, PISS + 11, g + 150, ACK, data=b'n' * 10, win=0))
+        w.pump(0.3)
+        w.rx.clear()
+        # Older segment (seq PISS+1) late: same ACK, stale open window.  (3000,
+        # so it is also the largest window offered and the sender's
+        # silly-window rule would let the tail through if it were believed.)
+        w.send(Seg(PORT, gp, PISS + 1, g + 150, ACK, data=b'o' * 10, win=3000))
+        d = w.expect(lambda s: s.data, 3, 'next data')
+        if not d:
+            return 'sender sent nothing at all', w
+        if len(d.data) != 1:
+            return 'sent %d octets into a stale window' % len(d.data), w
+        return None, w
+
+
 CASES = (('persist', case_persist),
          ('nb-persist', case_nb_persist),
          ('reopen', case_reopen),
@@ -371,7 +402,8 @@ CASES = (('persist', case_persist),
          ('receiver-sws', case_receiver_sws),
          ('reorder', case_reorder),
          ('partial-ack', case_partial_ack),
-         ('shut-rd', case_shut_rd))
+         ('shut-rd', case_shut_rd),
+         ('stale-wnd', case_stale_wnd))
 
 
 def main():

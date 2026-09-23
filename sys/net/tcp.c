@@ -208,6 +208,8 @@ typedef struct tcp_pcb {
     uint32_t  ooo_bytes;
     uint8_t   seg_wnd_same;   /* TCP-WIN-05: segment repeats the window */
     uint32_t  max_snd_wnd;    /* TCP-WIN-06: largest window the peer offered */
+    uint32_t  snd_wl1, snd_wl2; /* TCP-WIN-12: SEG.SEQ/ACK of the last window update */
+    uint8_t   snd_wl_valid;
     struct ip4_txopts txo;    /* UDP-API-12: the socket's IP_TTL/IP_TOS */
     /* SO_ERROR (cleared by getsockopt).  */
     int       so_error;
@@ -1602,14 +1604,34 @@ static void tcp_input_locked(uint32_t saddr, uint32_t daddr,
     if ((flags & TCP_ACK) && p->state != TCP_LISTEN && p->state != TCP_SYN_SENT) {
         /* Window updates track the highest ACK seen, so an old duplicate
          * cannot walk the window backwards. */
+        /*
+         * TCP-WIN-12: and, among segments carrying the same ACK, only the
+         * newest (by SEG.SEQ, then SEG.ACK) -- RFC 793 3.9's SND.WL1 /
+         * SND.WL2 test.  A pure window update carries the same ACK as the
+         * one before it, so a reordered older segment used to overwrite a
+         * newer window: a stale "open" undid a real zero window, or a stale
+         * zero parked the sender.  The ACK's lower bound stays SND.UNA =<
+         * SEG.ACK, as RFC 1122 4.2.2.20(g) corrects 793's "<" -- with "<"
+         * a window update could never reopen a zero window.
+         */
         if ((int32_t)(ack - p->snd_una) >= 0 &&
-            (int32_t)(ack - tcp_ack_limit(p)) <= 0) {           /* TCP-MEM-07 */
+            (int32_t)(ack - tcp_ack_limit(p)) <= 0 &&           /* TCP-MEM-07 */
+            (!p->snd_wl_valid || (int32_t)(p->snd_wl1 - seq) < 0 ||
+             (p->snd_wl1 == seq && (int32_t)(p->snd_wl2 - ack) <= 0))) {
             p->snd_wnd = __builtin_bswap16(th->window);
             if (p->snd_wnd > p->max_snd_wnd) p->max_snd_wnd = p->snd_wnd;   /* TCP-WIN-06 */
+            p->snd_wl1 = seq;
+            p->snd_wl2 = ack;
+            p->snd_wl_valid = 1;
         }
     } else if (p->state == TCP_LISTEN || p->state == TCP_SYN_SENT) {
         p->snd_wnd = __builtin_bswap16(th->window);
         if (p->snd_wnd > p->max_snd_wnd) p->max_snd_wnd = p->snd_wnd;   /* TCP-WIN-06 */
+        if (p->state == TCP_SYN_SENT) {         /* TCP-WIN-12: from the SYN */
+            p->snd_wl1 = seq;
+            p->snd_wl2 = ack;
+            p->snd_wl_valid = 1;
+        }
     }
 
     switch (p->state) {
@@ -1864,6 +1886,7 @@ static void tcp_connect_start(tcp_pcb_t *p, uint32_t raddr, uint16_t rport) {
     p->snd_nxt = p->iss;
     p->snd_max_valid = 0;             /* TCP-MEM-07: a new ISS, nothing sent */
     p->rcv_adv_edge_valid = 0;        /* TCP-WIN-07: no peer sequence yet */
+    p->snd_wl_valid = 0;              /* TCP-WIN-12 */
     p->state   = TCP_SYN_SENT;
     tcp_unlock(f);
     /* Queue the SYN — the retx timer will resend it on RTO if the
