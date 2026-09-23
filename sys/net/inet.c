@@ -453,7 +453,8 @@ void ip4_input(netdev_t *dev, const uint8_t *pkt, size_t len) {
             break;
     }
     /* RAW sockets get a copy regardless of protocol. */
-    afinet_deliver_v4(ih->saddr, ih->daddr, ih->protocol, pkt, tot, /*for_dgram=*/0);
+    afinet_deliver_v4(ih->saddr, ih->daddr, ih->protocol, pkt, tot, /*for_dgram=*/0,
+                      /*fanout=*/0);
 }
 
 /* ------------------------------------------------------------------ */

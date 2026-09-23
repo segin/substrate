@@ -1681,7 +1681,8 @@ static void enqueue(afi_sock_t *s, uint8_t family, uint8_t proto, uint16_t port,
 
 int afinet_deliver_v4(uint32_t saddr, uint32_t daddr,
                       uint8_t protocol,
-                      const uint8_t *pkt, size_t len, int for_dgram) {
+                      const uint8_t *pkt, size_t len, int for_dgram,
+                      int fanout) {
     /* UDP-01: daddr is now part of the demux key (see sock_score). */
     int delivered = 0;
     uint16_t sport = 0, dport = 0;
@@ -1734,6 +1735,17 @@ int afinet_deliver_v4(uint32_t saddr, uint32_t daddr,
             /* DGRAM: delivered only via udp_input, to the single best match
              * (UDP-01) rather than to every socket on the port. */
             if (!for_dgram) continue;
+            if (fanout) {
+                /* UDP-IP-08: a broadcast/multicast datagram is for every
+                 * socket that can take it (RFC 1122 3.3.6), not only the
+                 * best match -- two listeners on a broadcast port used to
+                 * split the traffic between them, one datagram each. */
+                enqueue(s, AF_INET, protocol, sport, &saddr,
+                        payload + sizeof(struct udphdr),
+                        payload_len - sizeof(struct udphdr));
+                delivered = 1;
+                continue;
+            }
             if (score > best_score) { best_score = score; best = s; }
         }
     }
@@ -1772,7 +1784,8 @@ void afinet_icmp_error_v4(uint32_t laddr, uint16_t lport,
 
 int afinet_deliver_v6(const uint8_t saddr[16], const uint8_t daddr[16],
                       uint8_t protocol,
-                      const uint8_t *pkt, size_t len, int for_dgram) {
+                      const uint8_t *pkt, size_t len, int for_dgram,
+                      int fanout) {
     /* UDP-01: daddr is now part of the demux key (see sock_score). */
     int delivered = 0;
     uint16_t sport = 0, dport = 0;
@@ -1817,6 +1830,17 @@ int afinet_deliver_v6(const uint8_t saddr[16], const uint8_t daddr[16],
         } else {
             /* UDP-01: single best match, not a copy to every socket. */
             if (!for_dgram) continue;
+            if (fanout) {
+                /* UDP-IP-08: a broadcast/multicast datagram is for every
+                 * socket that can take it (RFC 1122 3.3.6), not only the
+                 * best match -- two listeners on a broadcast port used to
+                 * split the traffic between them, one datagram each. */
+                enqueue(s, AF_INET6, protocol, sport, saddr,
+                        payload + sizeof(struct udphdr),
+                        payload_len - sizeof(struct udphdr));
+                delivered = 1;
+                continue;
+            }
             if (score > best_score) { best_score = score; best = s; }
         }
     }

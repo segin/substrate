@@ -146,10 +146,13 @@ ssize_t afinet_recvfrom(int fd, void *buf, size_t len, int flags,
 
 /* Upper-half delivery into a bound socket.  Returns 1 if delivered,
  * 0 if no match (RAW or DGRAM sockets registered with matching
- * protocol/port). */
+ * protocol/port).  fanout (datagram path only): the destination was a
+ * broadcast or multicast address, so every matching socket gets a copy
+ * rather than only the best match (UDP-IP-08). */
 int afinet_deliver_v4(uint32_t saddr, uint32_t daddr,
                       uint8_t protocol,
-                      const uint8_t *pkt, size_t len, int for_dgram);
+                      const uint8_t *pkt, size_t len, int for_dgram,
+                      int fanout);
 /* UDP-ICMP-01: an ICMP error arrived about a UDP datagram we sent from
  * laddr:lport to raddr:rport.  Latch err on the connected socket for that
  * 4-tuple, if any, and wake it.  All in network byte order except the
@@ -158,7 +161,8 @@ void afinet_icmp_error_v4(uint32_t laddr, uint16_t lport,
                           uint32_t raddr, uint16_t rport, int err);
 int afinet_deliver_v6(const uint8_t saddr[16], const uint8_t daddr[16],
                       uint8_t protocol,
-                      const uint8_t *pkt, size_t len, int for_dgram);
+                      const uint8_t *pkt, size_t len, int for_dgram,
+                      int fanout);
 
 /* -- One-shot init from main.c -------------------------------------- */
 

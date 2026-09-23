@@ -53,7 +53,8 @@ void udp_input(netdev_t *dev, int family,
          * a closed port waited out its whole timeout instead of learning of
          * the refusal at once.  Never for a broadcast/multicast destination.
          */
-        if (!afinet_deliver_v4(s, d, IPPROTO_UDP_NUM, pkt, ulen, /*for_dgram=*/1) &&
+        if (!afinet_deliver_v4(s, d, IPPROTO_UDP_NUM, pkt, ulen, /*for_dgram=*/1,
+                               /*fanout=*/for_bcast) &&
             !for_bcast)
             icmp_port_unreach(dev, netpkt, netlen);
     } else if (family == 10 /* AF_INET6 */) {
@@ -62,7 +63,8 @@ void udp_input(netdev_t *dev, int family,
                               IPPROTO_UDP_NUM, ulen, pkt) != 0)
             return;
         if (!afinet_deliver_v6((const uint8_t *)saddr, (const uint8_t *)daddr,
-                               IPPROTO_UDP_NUM, pkt, ulen, /*for_dgram=*/1) &&
+                               IPPROTO_UDP_NUM, pkt, ulen, /*for_dgram=*/1,
+                               /*fanout=*/for_bcast) &&
             !for_bcast)
             icmp6_port_unreach(dev, netpkt, netlen);
     }

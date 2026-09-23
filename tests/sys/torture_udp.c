@@ -4,8 +4,9 @@
  *
  * Also UDP-MEM-01 (MSG_TRUNC over-copy), UDP-MEM-02 (recvmsg msg_name
  * written through a raw user pointer), UDP-U-01 (connected sendto),
- * UDP-U-04 (destination port 0), UDP-U-05 (empty datagram via sendmsg) and
- * UDP-IP-02 (all of 127/8 is local) from docs/ip-audit-2026-09-22.md.
+ * UDP-U-04 (destination port 0), UDP-U-05 (empty datagram via sendmsg),
+ * UDP-IP-02 (all of 127/8 is local) and UDP-IP-08 (broadcast fan-out) from
+ * docs/ip-audit-2026-09-22.md.
  *
  * Each case drives the real socket API over the loopback interface, so a
  * PASS means a datagram actually took the intended path through the
@@ -508,6 +509,46 @@ static void test_loopback_net(void)
     close(tx);
 }
 
+/* UDP-IP-08: a broadcast datagram goes to EVERY socket that can take it,
+ * not just the best match -- RFC 1122 3.3.6.  The demux picked a single
+ * winner for everything, so of two listeners on a broadcast port only one
+ * ever heard anything. */
+static void test_broadcast_fanout(void)
+{
+    printf("UDP-IP-08: a broadcast reaches every listener on the port\n");
+    struct sockaddr_in any, dst;
+    char buf[16];
+    int one = 1;
+    int r1 = socket(AF_INET, SOCK_DGRAM, 0);
+    int r2 = socket(AF_INET, SOCK_DGRAM, 0);
+    int tx = socket(AF_INET, SOCK_DGRAM, 0);
+    setsockopt(r1, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+    setsockopt(r2, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+    memset(&any, 0, sizeof(any));
+    any.sin_family = AF_INET;
+    any.sin_port = htons(31974);
+    int b1 = bind(r1, (struct sockaddr *)&any, sizeof(any));
+    int b2 = bind(r2, (struct sockaddr *)&any, sizeof(any));
+    ok("two wildcard listeners on one port", b1 == 0 && b2 == 0, "bind failed");
+    setsockopt(tx, SOL_SOCKET, SO_BROADCAST, &one, sizeof(one));
+    memset(&dst, 0, sizeof(dst));
+    dst.sin_family = AF_INET;
+    dst.sin_port = htons(31974);
+    dst.sin_addr.s_addr = htonl(0x7FFFFFFF);        /* 127.255.255.255 */
+    ok("broadcast sent", sendto(tx, "all", 3, 0, (struct sockaddr *)&dst, sizeof(dst)) == 3,
+       "sendto failed");
+    ok("the first listener got it", try_recv(r1, buf, sizeof(buf)) == 3, "missed");
+    ok("the second listener got it", try_recv(r2, buf, sizeof(buf)) == 3, "missed");
+    /* A unicast datagram still goes to exactly one (UDP-01). */
+    dst.sin_addr.s_addr = htonl(0x7F000001);
+    sendto(tx, "one", 3, 0, (struct sockaddr *)&dst, sizeof(dst));
+    int got = (try_recv(r1, buf, sizeof(buf)) == 3) + (try_recv(r2, buf, sizeof(buf)) == 3);
+    ok("a unicast still reaches exactly one", got == 1, "unicast fanned out");
+    close(r1);
+    close(r2);
+    close(tx);
+}
+
 int main(void)
 {
     printf("torture_udp: UDP demux + checksum regressions (#430)\n\n");
@@ -523,6 +564,7 @@ int main(void)
     test_port_zero();
     test_sendmsg_empty();
     test_loopback_net();
+    test_broadcast_fanout();
 
     printf("\nResult: %d passed, %d failed -- %s\n",
            passed, failed, failed ? "FAILED" : "PASSED");
