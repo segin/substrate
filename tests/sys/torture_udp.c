@@ -13,8 +13,8 @@
  * EOF), UDP-API-11 (IP_PKTINFO), UDP-API-12 (IP transmit options),
  * UDP-API-13 (unimplemented options), UDP-API-14 (getsockopt checks),
  * UDP-API-15 (SO_BROADCAST), UDP-API-17 (raw filtering), UDP-API-19
- * (SHUT_WR) and UDP-API-20 (raw payload limit) from
- * docs/ip-audit-2026-09-22.md.
+ * (SHUT_WR), UDP-API-20 (raw payload limit) and UDP-RES-01 (byte-bounded
+ * queue) from docs/ip-audit-2026-09-22.md.
  *
  * Each case drives the real socket API over the loopback interface, so a
  * PASS means a datagram actually took the intended path through the
@@ -1082,8 +1082,8 @@ static void test_unsupported_ipopts(void)
 }
 
 /* UDP-API-14: getsockopt() checks the fd is a socket, and SO_RCVBUF on a
- * UDP socket reports its real capacity -- 32 datagrams of up to 1572 bytes
- * -- not the 32768 borrowed from AF_UNIX. */
+ * UDP socket reports its real capacity (UDP-RES-01: the byte-bounded queue,
+ * 64 KiB by default) -- not the 32768 borrowed from AF_UNIX. */
 static void test_getsockopt_checks(void)
 {
     printf("UDP-API-14: getsockopt() fd checks and SO_RCVBUF\n");
@@ -1100,8 +1100,8 @@ static void test_getsockopt_checks(void)
        getsockopt(f, SOL_SOCKET, SO_TYPE, &v, &vl) < 0 && errno == EBADF, "answered");
     int u = socket(AF_INET, SOCK_DGRAM, 0);
     vl = sizeof(v);
-    ok("UDP SO_RCVBUF is the queue's real capacity",
-       getsockopt(u, SOL_SOCKET, SO_RCVBUF, &v, &vl) == 0 && v == 32 * 1572,
+    ok("UDP SO_RCVBUF is the queue's real capacity (64 KiB by default)",
+       getsockopt(u, SOL_SOCKET, SO_RCVBUF, &v, &vl) == 0 && v == 65536,
        "invented value");
     close(u);
 }
@@ -1232,6 +1232,65 @@ static void test_raw_max(void)
     close(r2);
 }
 
+/* UDP-RES-01: the receive queue is bounded by bytes (SO_RCVBUF), not by
+ * datagram count.  It held 32 datagrams whatever their size, so 32 tiny
+ * ones filled it, and SO_RCVBUF was ignored. */
+static int drain_count(int fd)
+{
+    char buf[2048];
+    int n = 0;
+    while (try_recv(fd, buf, sizeof(buf)) >= 0) n++;
+    return n;
+}
+
+static void test_rcvbuf_bytes(void)
+{
+    printf("UDP-RES-01: the receive queue is bounded by bytes\n");
+    static char big[1000];
+    struct sockaddr_in dst;
+    int tx = socket(AF_INET, SOCK_DGRAM, 0);
+
+    int rx = bind_udp(31948);
+    lo_addr(&dst, 31948);
+    for (int i = 0; i < 200; i++)
+        sendto(tx, "8bytes!!", 8, 0, (struct sockaddr *)&dst, sizeof(dst));
+    ok("200 small datagrams all fit the default queue", drain_count(rx) == 200,
+       "capped by count");
+    close(rx);
+
+    rx = bind_udp(31947);
+    int small = 4096, v = 0;
+    socklen_t vl = sizeof(v);
+    setsockopt(rx, SOL_SOCKET, SO_RCVBUF, &small, sizeof(small));
+    getsockopt(rx, SOL_SOCKET, SO_RCVBUF, &v, &vl);
+    ok("SO_RCVBUF 4096 reads back", v == 4096, "not stored");
+    lo_addr(&dst, 31947);
+    for (int i = 0; i < 10; i++)
+        sendto(tx, big, sizeof(big), 0, (struct sockaddr *)&dst, sizeof(dst));
+    ok("and admits exactly three 1000-byte datagrams", drain_count(rx) == 3,
+       "not byte-bounded");
+
+    /* Growing keeps what is queued, in order. */
+    for (int i = 0; i < 3; i++) {
+        memset(big, 'a' + i, sizeof(big));
+        sendto(tx, big, sizeof(big), 0, (struct sockaddr *)&dst, sizeof(dst));
+    }
+    wait_readable(rx);
+    int grow = 262144;
+    setsockopt(rx, SOL_SOCKET, SO_RCVBUF, &grow, sizeof(grow));
+    char in[1000];
+    int intact = 1;
+    for (int i = 0; i < 3; i++) {
+        memset(in, 0, sizeof(in));
+        if (try_recv(rx, in, sizeof(in)) != 1000 || in[0] != 'a' + i || in[999] != 'a' + i)
+            intact = 0;
+    }
+    ok("growing SO_RCVBUF keeps the queued datagrams intact and in order", intact,
+       "lost or corrupted");
+    close(rx);
+    close(tx);
+}
+
 int main(void)
 {
     printf("torture_udp: UDP demux + checksum regressions (#430)\n\n");
@@ -1265,6 +1324,7 @@ int main(void)
     test_raw_filter();
     test_shut_wr();
     test_raw_max();
+    test_rcvbuf_bytes();
 
     printf("\nResult: %d passed, %d failed -- %s\n",
            passed, failed, failed ? "FAILED" : "PASSED");

@@ -78,7 +78,6 @@ struct sin6_kern {
 /* Per-datagram receive queue                                         */
 /* ------------------------------------------------------------------ */
 
-#define AFI_RING_LEN 32
 /*
  * UDP-04: the largest UDP payload that can actually cross this stack.
  *
@@ -99,21 +98,33 @@ struct sin6_kern {
  */
 #define AFI_DATA_MAX (NETDEV_MTU_MAX - 20 - 8)
 
-typedef struct afi_pkt {
+/*
+ * UDP-RES-01: one queued datagram -- this header, then `len` payload bytes,
+ * padded to 4 -- in the socket's receive byte ring.  The queue used to be 32
+ * fixed slots of AFI_DATA_MAX bytes each, bounded by datagram COUNT: 32
+ * eight-byte datagrams filled it, while SO_RCVBUF was ignored.
+ */
+typedef struct afi_rec {
+    uint16_t len;       /* payload bytes stored */
+    /* SOCK-06: the datagram's length as it arrived, which can exceed `len`
+     * if it did not fit.  recv(MSG_TRUNC) reports this so a caller can tell
+     * "your buffer was too small" from "the datagram really was this short";
+     * without it the two were indistinguishable. */
+    uint16_t truelen;
     uint8_t  family;    /* AF_INET or AF_INET6 */
     uint8_t  proto;
     uint16_t port;      /* source port for UDP, 0 for RAW */
     uint8_t  addr[16];  /* source address (4 bytes for v4) */
     uint32_t daddr4;    /* UDP-API-11: IPv4 destination it arrived for */
     uint32_t ifindex;   /* UDP-API-11: interface it arrived on (0 unknown) */
-    uint16_t len;       /* bytes stored in data[] */
-    /* SOCK-06: the datagram's length as it arrived, which can exceed `len`
-     * if it did not fit.  recv(MSG_TRUNC) reports this so a caller can tell
-     * "your buffer was too small" from "the datagram really was this short";
-     * without it the two were indistinguishable. */
-    uint16_t truelen;
-    uint8_t  data[AFI_DATA_MAX];
-} afi_pkt_t;
+} afi_rec_t;
+
+/* Ring space a record with `n` payload bytes occupies. */
+#define AFI_REC_SPACE(n)   (((uint32_t)sizeof(afi_rec_t) + (uint32_t)(n) + 3u) & ~3u)
+/* UDP-RES-01: SO_RCVBUF, in bytes of ring (headers included). */
+#define AFI_RCVBUF_DEFAULT (64u * 1024u)
+#define AFI_RCVBUF_MIN     (2u * 1024u)
+#define AFI_RCVBUF_MAX     (1024u * 1024u)
 
 /* UDP-IP-06: IPv4 multicast groups one socket may join. */
 #define AFI_MC_MAX 8
@@ -141,8 +152,15 @@ typedef struct afi_sock {
     struct ip4_txopts txo; /* UDP-API-12: IP_TTL/IP_TOS/IP_MULTICAST_* */
     uint32_t snd_timeo;    /* UDP-API-04: SO_SNDTIMEO in ticks, 0 = none */
 
-    afi_pkt_t *ring;
-    uint32_t   head, tail, count;
+    /* UDP-RES-01/-02: the datagram receive queue, a byte ring of afi_rec_t
+     * records.  Allocated only for SOCK_DGRAM/SOCK_RAW (a stream socket's
+     * data lives in its TCP PCB); rcvbuf (SO_RCVBUF) bounds rq_used and may
+     * be below rq_cap after a shrink.  count is the number of datagrams and
+     * doubles as the wait channel. */
+    uint8_t   *rq;
+    uint32_t   rq_cap, rq_head, rq_tail, rq_used;
+    uint32_t   rcvbuf;
+    uint32_t   count;
     void      *wait_chan;
     int        closed;
     int        rd_shut;     /* shutdown(SHUT_RD): reads return EOF */
@@ -204,8 +222,41 @@ static spinlock_t afi_lock = SPINLOCK_INIT("af_inet");
 /* Free a socket's backing storage.  Never called with afi_lock held —
  * kfree may take the allocator's own locks. */
 static void afi_free_sock(afi_sock_t *s) {
-    if (s->ring) kfree(s->ring, sizeof(afi_pkt_t) * AFI_RING_LEN);
+    if (s->rq) kfree(s->rq, s->rq_cap);
     kfree(s, sizeof(*s));
+}
+
+/* UDP-RES-01: copy into / out of the receive ring at byte offset `off`,
+ * wrapping at rq_cap.  The caller holds afi_lock. */
+static void rq_put(afi_sock_t *s, uint32_t off, const void *src, uint32_t n) {
+    const uint8_t *b = (const uint8_t *)src;
+    off %= s->rq_cap;
+    uint32_t first = s->rq_cap - off < n ? s->rq_cap - off : n;
+    memcpy(s->rq + off, b, first);
+    if (n > first) memcpy(s->rq, b + first, n - first);
+}
+
+static void rq_get(const afi_sock_t *s, uint32_t off, void *dst, uint32_t n) {
+    uint8_t *b = (uint8_t *)dst;
+    off %= s->rq_cap;
+    uint32_t first = s->rq_cap - off < n ? s->rq_cap - off : n;
+    memcpy(b, s->rq + off, first);
+    if (n > first) memcpy(b + first, s->rq, n - first);
+}
+
+/* Take (consume != 0) or look at the oldest queued record: its header into
+ * *h and up to `max` payload bytes into buf.  count must be non-zero. */
+static void rq_pop(afi_sock_t *s, afi_rec_t *h, uint8_t *buf, size_t max,
+                   int consume) {
+    rq_get(s, s->rq_tail, h, sizeof(*h));
+    uint32_t n = h->len < max ? h->len : (uint32_t)max;
+    rq_get(s, s->rq_tail + (uint32_t)sizeof(*h), buf, n);
+    if (consume) {
+        uint32_t sp = AFI_REC_SPACE(h->len);
+        s->rq_tail = (s->rq_tail + sp) % s->rq_cap;
+        s->rq_used -= sp;
+        s->count--;
+    }
 }
 
 /* Drop a reference taken under afi_lock and release the lock in one step;
@@ -294,8 +345,15 @@ static int afinet_ioctl(fs_node_t *node, uint32_t request, void *arg) {
         if (s) {
             if (s->tcp) {
                 avail = (int)tcp_recv_avail(s->tcp);
-            } else if (s->count > 0) {
-                avail = (int)s->ring[s->tail].len;
+            } else {
+                /* UDP-RES-05 (read under the lock, as recvfrom does). */
+                unsigned long ffl = spinlock_acquire_irq(&afi_lock);
+                if (s->count > 0) {
+                    afi_rec_t h;
+                    rq_get(s, s->rq_tail, &h, sizeof(h));
+                    avail = (int)h.len;
+                }
+                spinlock_release_irq(&afi_lock, ffl);
             }
         }
         if (copyout(&avail, arg, sizeof(avail)) != 0) return -EFAULT;
@@ -657,12 +715,10 @@ static size_t afinet_node_read_body(fs_node_t *node, afi_sock_t *s,
     s->refcount++;
     for (;;) {
         if (s->count > 0) {
-            afi_pkt_t *p = &s->ring[s->tail];
-            size_t n = p->len < size ? p->len : size;
+            afi_rec_t h;
             uint8_t tmp[AFI_DATA_MAX];
-            memcpy(tmp, p->data, n);
-            s->tail = (s->tail + 1) % AFI_RING_LEN;
-            s->count--;
+            rq_pop(s, &h, tmp, size < sizeof(tmp) ? size : sizeof(tmp), 1);
+            size_t n = h.len < size ? h.len : size;
             afi_rele_unlock(s, fl);
             memcpy(buf, tmp, n);
             return n;
@@ -979,14 +1035,20 @@ int afinet_socket(int family, int type, int protocol) {
     s->type = type;
     s->protocol = protocol;
     s->refcount = 1;                 /* NET-01: the installed reference */
-    s->ring = (afi_pkt_t *)kmalloc(sizeof(afi_pkt_t) * AFI_RING_LEN);
-    if (!s->ring) { kfree(s, sizeof(*s)); return -ENOMEM; }
     s->wait_chan = &s->count;
+    s->rcvbuf = AFI_RCVBUF_DEFAULT;
+    /* UDP-RES-02: only a datagram or raw socket has a receive queue.  Every
+     * AF_INET socket used to allocate a ~50 KiB contiguous ring, TCP
+     * included, where it was never used. */
+    if (type != SOCK_STREAM) {
+        s->rq = (uint8_t *)kmalloc(AFI_RCVBUF_DEFAULT);
+        if (!s->rq) { kfree(s, sizeof(*s)); return -ENOMEM; }
+        s->rq_cap = AFI_RCVBUF_DEFAULT;
+    }
 
     if (type == SOCK_STREAM) {
         s->tcp = tcp_alloc();
         if (!s->tcp) {
-            kfree(s->ring, sizeof(afi_pkt_t) * AFI_RING_LEN);
             kfree(s, sizeof(*s));
             return -ENOMEM;
         }
@@ -995,8 +1057,7 @@ int afinet_socket(int family, int type, int protocol) {
     int fd = afi_install_fd(s);
     if (fd < 0) {
         if (s->tcp) tcp_free(s->tcp);
-        kfree(s->ring, sizeof(afi_pkt_t) * AFI_RING_LEN);
-        kfree(s, sizeof(*s));
+        afi_free_sock(s);
         return -EMFILE;
     }
 
@@ -1290,17 +1351,52 @@ int afinet_get_ipopt(int fd, int optname, int *val, uint32_t *addr) {
 }
 
 /*
- * UDP-API-14: what SO_RCVBUF / SO_SNDBUF report for an AF_INET socket -- the
- * capacity the implementation actually has, not a number borrowed from
- * AF_UNIX.  A datagram socket queues up to AFI_RING_LEN datagrams of at most
- * AFI_DATA_MAX bytes and sends one datagram at a time; a stream socket has
- * TCP's 32 KiB receive ring.  -ENOTSOCK on a non-AF_INET fd.
+ * UDP-API-14 / UDP-RES-01: what SO_RCVBUF / SO_SNDBUF report for an AF_INET
+ * socket -- the capacity the implementation actually has, not a number
+ * borrowed from AF_UNIX.  A datagram socket's receive queue holds SO_RCVBUF
+ * bytes of records and it sends one datagram at a time; a stream socket has
+ * TCP's 32 KiB ring.  -ENOTSOCK on a non-AF_INET fd.
  */
 int afinet_bufsize(int fd, int rcv) {
     afi_sock_t *s = afi_from_fd(fd);
     if (!s) return -ENOTSOCK;
     if (s->type == SOCK_STREAM) return 32 * 1024;
-    return rcv ? AFI_RING_LEN * AFI_DATA_MAX : AFI_DATA_MAX;
+    return rcv ? (int)s->rcvbuf : AFI_DATA_MAX;
+}
+
+/*
+ * UDP-RES-01: SO_RCVBUF on a datagram socket.  Growing reallocates the ring,
+ * moving any queued records to the front of the new one; shrinking lowers
+ * the admission limit and keeps what is already queued.  Clamped to
+ * [AFI_RCVBUF_MIN, AFI_RCVBUF_MAX].  (A stream socket's TCP ring is fixed.)
+ */
+int afinet_set_rcvbuf(int fd, int val) {
+    afi_sock_t *s = afi_from_fd(fd);
+    if (!s) return -ENOTSOCK;
+    uint32_t want = val < (int)AFI_RCVBUF_MIN ? AFI_RCVBUF_MIN
+                  : (uint32_t)val > AFI_RCVBUF_MAX ? AFI_RCVBUF_MAX : (uint32_t)val;
+    want = (want + 3u) & ~3u;
+    if (!s->rq) { s->rcvbuf = want; return 0; }
+    if (want <= s->rq_cap) {
+        unsigned long fl = spinlock_acquire_irq(&afi_lock);
+        s->rcvbuf = want;
+        spinlock_release_irq(&afi_lock, fl);
+        return 0;
+    }
+    uint8_t *nb = (uint8_t *)kmalloc(want);
+    if (!nb) return -ENOBUFS;
+    unsigned long fl = spinlock_acquire_irq(&afi_lock);
+    uint8_t *old = s->rq;
+    uint32_t oldcap = s->rq_cap;
+    rq_get(s, s->rq_tail, nb, s->rq_used);           /* linearize */
+    s->rq = nb;
+    s->rq_cap = want;
+    s->rq_tail = 0;
+    s->rq_head = s->rq_used;
+    s->rcvbuf = want;
+    spinlock_release_irq(&afi_lock, fl);
+    kfree(old, oldcap);
+    return 0;
 }
 
 /* UDP-API-04: SO_RCVTIMEO / SO_SNDTIMEO. */
@@ -1421,9 +1517,8 @@ int afinet_accept(int fd, void *addr, socklen_t *addrlen) {
     c->type = SOCK_STREAM;
     c->protocol = 6;
     c->refcount = 1;                 /* NET-01: the installed reference */
-    c->ring = (afi_pkt_t *)kmalloc(sizeof(afi_pkt_t) * AFI_RING_LEN);
-    if (!c->ring) { kfree(c, sizeof(*c)); tcp_close(cp); return -ENOMEM; }
-    c->wait_chan = &c->count;
+    c->wait_chan = &c->count;          /* UDP-RES-02: a stream has no rq */
+    c->rcvbuf = AFI_RCVBUF_DEFAULT;
     c->tcp = cp;
 
     /* Copy the established connection's endpoints from the accepted
@@ -1447,7 +1542,7 @@ int afinet_accept(int fd, void *addr, socklen_t *addrlen) {
 
     int newfd = afi_install_fd(c);
     if (newfd < 0) {
-        if (c->ring) kfree(c->ring, sizeof(afi_pkt_t) * AFI_RING_LEN);
+        if (c->rq) kfree(c->rq, c->rq_cap);
         kfree(c, sizeof(*c));
         tcp_close(cp);
         return -EMFILE;
@@ -1974,15 +2069,8 @@ ssize_t afinet_recvfrom_rx(int fd, void *buf, size_t len, int flags,
     int fam = s->family;
     for (;;) {
         if (s->count > 0) {
-            afi_pkt_t *p = &s->ring[s->tail];
-            size_t n = p->len < len ? p->len : len;
+            afi_rec_t h;
             uint8_t tmp[AFI_DATA_MAX];
-            uint8_t paddr[16];
-            uint16_t pport = p->port;
-            uint16_t ptrue = p->truelen;
-            uint32_t pdaddr = p->daddr4, pifindex = p->ifindex;   /* UDP-API-11 */
-            memcpy(tmp, p->data, n);
-            memcpy(paddr, p->addr, 16);
             /*
              * SOCK-05: MSG_PEEK has to LEAVE the datagram queued.  The ring
              * was advanced unconditionally, so a peek consumed it -- the
@@ -1991,10 +2079,14 @@ ssize_t afinet_recvfrom_rx(int fd, void *buf, size_t len, int flags,
              * silently loses a message for anyone who peeks before deciding
              * how large a buffer to allocate.
              */
-            if (!(flags & MSG_PEEK)) {
-                s->tail = (s->tail + 1) % AFI_RING_LEN;
-                s->count--;
-            }
+            rq_pop(s, &h, tmp, len < sizeof(tmp) ? len : sizeof(tmp),
+                   !(flags & MSG_PEEK));
+            size_t n = h.len < len ? h.len : len;
+            uint8_t paddr[16];
+            uint16_t pport = h.port;
+            uint16_t ptrue = h.truelen;
+            uint32_t pdaddr = h.daddr4, pifindex = h.ifindex;   /* UDP-API-11 */
+            memcpy(paddr, h.addr, 16);
             afi_rele_unlock(s, fl);
             memcpy(buf, tmp, n);
             if (addr && addrlen) {
@@ -2167,20 +2259,27 @@ static uint32_t afi_ifindex_for(uint32_t daddr) {
 static void enqueue(afi_sock_t *s, uint8_t family, uint8_t proto, uint16_t port,
                     const void *addr, const uint8_t *data, size_t len,
                     uint32_t daddr4) {
-    if (s->count >= AFI_RING_LEN) return;  /* drop */
-    afi_pkt_t *p = &s->ring[s->head];
-    p->family = family;
-    p->proto = proto;
-    p->port = port;
-    if (family == AF_INET) memcpy(p->addr, addr, 4);
-    else                   memcpy(p->addr, addr, 16);
-    p->daddr4 = daddr4;                          /* UDP-API-11 */
-    p->ifindex = daddr4 ? afi_ifindex_for(daddr4) : 0;
+    if (!s->rq) return;
     size_t n = len > AFI_DATA_MAX ? AFI_DATA_MAX : len;
-    memcpy(p->data, data, n);
-    p->len = (uint16_t)n;
-    p->truelen = (uint16_t)(len > 0xFFFF ? 0xFFFF : len);
-    s->head = (s->head + 1) % AFI_RING_LEN;
+    uint32_t need = AFI_REC_SPACE(n);
+    /* UDP-RES-01: admission is by bytes against SO_RCVBUF, not by count. */
+    uint32_t limit = s->rcvbuf < s->rq_cap ? s->rcvbuf : s->rq_cap;
+    if (s->rq_used + need > limit) return;          /* drop */
+    afi_rec_t h;
+    memset(&h, 0, sizeof(h));
+    h.family = family;
+    h.proto = proto;
+    h.port = port;
+    if (family == AF_INET) memcpy(h.addr, addr, 4);
+    else                   memcpy(h.addr, addr, 16);
+    h.daddr4 = daddr4;                               /* UDP-API-11 */
+    h.ifindex = daddr4 ? afi_ifindex_for(daddr4) : 0;
+    h.len = (uint16_t)n;
+    h.truelen = (uint16_t)(len > 0xFFFF ? 0xFFFF : len);
+    rq_put(s, s->rq_head, &h, sizeof(h));
+    rq_put(s, s->rq_head + (uint32_t)sizeof(h), data, (uint32_t)n);
+    s->rq_head = (s->rq_head + need) % s->rq_cap;
+    s->rq_used += need;
     s->count++;
     sched_wakeup(s->wait_chan);
 }

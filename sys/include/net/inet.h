@@ -253,6 +253,8 @@ int     afinet_set_broadcast(int fd, int on);
 int     afinet_get_broadcast(int fd);
 /* UDP-API-14: SO_RCVBUF (rcv != 0) / SO_SNDBUF capacity of an AF_INET socket. */
 int     afinet_bufsize(int fd, int rcv);
+/* UDP-RES-01: set SO_RCVBUF, in bytes; -ENOTSOCK on a non-AF_INET fd. */
+int     afinet_set_rcvbuf(int fd, int val);
 /* UDP-API-11/-12: IPPROTO_IP options -- IP_TOS (1), IP_TTL (2),
  * IP_PKTINFO (8, receive side),
  * IP_MULTICAST_IF (32, val unused, addr = interface address),

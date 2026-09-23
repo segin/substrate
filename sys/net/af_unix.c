@@ -2734,6 +2734,14 @@ int sys_setsockopt(int fd, int level, int optname,
         }
         afinet_set_reuseaddr(fd, on);   /* no-op on non-AF_INET fds */
     }
+    /* UDP-RES-01: SO_RCVBUF bounds an AF_INET datagram socket's queue. */
+    if (level == 1 /*SOL_SOCKET*/ && optname == 8 /*SO_RCVBUF*/) {
+        int v = 0;
+        if (!optval || optlen < (socklen_t)sizeof(int)) return -EINVAL;
+        if (copyin(optval, &v, sizeof(v)) != 0) return -EFAULT;
+        int r = afinet_set_rcvbuf(fd, v);
+        if (r < 0 && r != -ENOTSOCK) return r;
+    }
     /* UDP-API-15: SO_BROADCAST is stored (and enforced on send). */
     if (level == 1 /*SOL_SOCKET*/ && optname == 6 /*SO_BROADCAST*/) {
         int on = 0;
