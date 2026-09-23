@@ -643,14 +643,20 @@ static void udp_csum4(struct udphdr *uh, uint32_t saddr, uint32_t daddr,
     uh->check = c ? c : 0xFFFF;
 }
 
-static void udp_csum6(struct udphdr *uh, const uint8_t daddr[16],
-                      size_t dgram_len) {
+/* UDP-U-06: returns 0, or -ENETUNREACH when no source can be chosen.  It
+ * used to return nothing and leave check == 0 in that case, relying on
+ * ip6_output() to fail the send later -- but over IPv6 a zero UDP checksum
+ * is illegal (RFC 8200 8.1), so no path may ever hand one to the output
+ * routine.  The callers now abort the send instead. */
+static int udp_csum6(struct udphdr *uh, const uint8_t daddr[16],
+                     size_t dgram_len) {
     uint8_t saddr[16];
     uh->check = 0;
-    if (ip6_source_for(daddr, saddr) != 0) return;  /* unroutable; send fails */
+    if (ip6_source_for(daddr, saddr) != 0) return -ENETUNREACH;
     uint16_t c = inet_csum_pseudo6(saddr, daddr, IPPROTO_UDP_NUM,
                                    (uint32_t)dgram_len, uh);
     uh->check = c ? c : 0xFFFF;
+    return 0;
 }
 
 /* SOCK-03 (write twin of afinet_node_read): tcp_send() blocks on a full
@@ -740,8 +746,9 @@ static size_t afinet_node_write_body(fs_node_t *node, size_t size,
             uh->dest   = __builtin_bswap16(s->peer_port);
             uh->len    = __builtin_bswap16((uint16_t)(sizeof(*uh) + size));
             memcpy(pkt + sizeof(*uh), buf, size);
-            udp_csum6(uh, s->peer_addr, sizeof(*uh) + size);
-            int rc = ip6_output(s->peer_addr, IPPROTO_UDP_NUM, pkt, sizeof(*uh) + size);
+            int rc = udp_csum6(uh, s->peer_addr, sizeof(*uh) + size);
+            if (rc < 0) return (size_t)rc;
+            rc = ip6_output(s->peer_addr, IPPROTO_UDP_NUM, pkt, sizeof(*uh) + size);
             return rc < 0 ? (size_t)rc : size;
         } else {
             int rc = ip6_output(s->peer_addr, (uint8_t)s->protocol, buf, size);
@@ -1383,8 +1390,9 @@ static ssize_t afinet_sendto_k(int fd, const void *buf, size_t len, int flags,
         uh->dest   = __builtin_bswap16(dport);
         uh->len    = __builtin_bswap16((uint16_t)(sizeof(*uh) + len));
         memcpy(pkt + sizeof(*uh), buf, len);
-        udp_csum6(uh, daddr_buf, sizeof(*uh) + len);
-        int rc = ip6_output(daddr_buf, IPPROTO_UDP_NUM, pkt, sizeof(*uh) + len);
+        int rc = udp_csum6(uh, daddr_buf, sizeof(*uh) + len);
+        if (rc < 0) return rc;
+        rc = ip6_output(daddr_buf, IPPROTO_UDP_NUM, pkt, sizeof(*uh) + len);
         return rc < 0 ? rc : (ssize_t)len;
     }
 }
