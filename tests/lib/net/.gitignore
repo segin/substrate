@@ -3,3 +3,6 @@ torture_inet
 torture_tcp_net
 tcp_partner
 *.o
+torture_tcp_lo
+wire/wireguest
+wire/__pycache__/

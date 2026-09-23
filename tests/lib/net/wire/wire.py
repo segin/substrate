@@ -1,0 +1,250 @@
+"""
+wire.py -- host half of the wire-level TCP test harness.
+
+Boots substrate under qemu with its NIC attached to a `-netdev dgram`
+backend, so every Ethernet frame the guest sends arrives here as one UDP
+datagram, and every frame sent here is injected into the guest.  The host
+plays the guest's gateway, 10.0.2.2: it answers ARP itself and gives each
+test full control over the TCP segments it sends, including deliberately
+out-of-order, out-of-window or combined-flag segments that no real stack
+would produce on demand.
+
+The guest runs tests/lib/net/wire/wireguest (built for substrate) as init,
+with a scenario script passed through initarg.
+
+Nothing here writes rootfs.img: each boot uses a reflink copy.
+
+Usage from a test script:
+
+    from wire import Wire, Seg, ACK, SYN, FIN, RST
+    with Wire.boot('connect 10.0.2.2 7000 readeof close') as w:
+        syn = w.expect(lambda s: s.flags & SYN, 10, 'guest SYN')
+        ...
+"""
+import os
+import select
+import shutil
+import socket
+import struct
+import subprocess
+import time
+
+TOP = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..', '..'))
+
+FIN, SYN, RST, PSH, ACK, URG = 0x01, 0x02, 0x04, 0x08, 0x10, 0x20
+
+PEER_MAC = bytes.fromhex('525400000002')
+GUEST_MAC = bytes.fromhex('525400123456')
+PEER_IP = '10.0.2.2'
+GUEST_IP = '10.0.2.15'
+ROOT_P2_OFFSET = 104448 * 512           # ext2 root partition in rootfs.img
+
+
+def flagstr(f):
+    return ''.join(c for b, c in ((SYN, 'S'), (ACK, 'A'), (FIN, 'F'), (RST, 'R'),
+                                   (PSH, 'P'), (URG, 'U')) if f & b) or '.'
+
+
+def csum(data):
+    if len(data) % 2:
+        data += b'\0'
+    s = sum(struct.unpack('!%dH' % (len(data) // 2), data))
+    while s >> 16:
+        s = (s & 0xFFFF) + (s >> 16)
+    return (~s) & 0xFFFF
+
+
+class Seg:
+    """One TCP segment, in host byte order."""
+
+    def __init__(self, sport, dport, seq, ack, flags, win=65535, data=b'',
+                 opts=b'', urp=0, src=PEER_IP, dst=GUEST_IP):
+        self.sport, self.dport = sport, dport
+        self.seq, self.ack = seq & 0xFFFFFFFF, ack & 0xFFFFFFFF
+        self.flags, self.win, self.data = flags, win, data
+        self.opts, self.urp, self.src, self.dst = opts, urp, src, dst
+
+    def __repr__(self):
+        return ('<%s %s:%d>%s:%d seq=%d ack=%d win=%d len=%d>' %
+                (flagstr(self.flags), self.src, self.sport, self.dst,
+                 self.dport, self.seq, self.ack, self.win, len(self.data)))
+
+    @property
+    def seqlen(self):
+        """Sequence space consumed: data plus one each for SYN and FIN."""
+        return len(self.data) + (1 if self.flags & SYN else 0) + \
+            (1 if self.flags & FIN else 0)
+
+    def encode(self):
+        opts = self.opts + b'\0' * (-len(self.opts) % 4)
+        doff = (20 + len(opts)) // 4
+        hdr = struct.pack('!HHIIBBHHH', self.sport, self.dport, self.seq,
+                          self.ack, doff << 4, self.flags, self.win, 0,
+                          self.urp) + opts
+        body = hdr + self.data
+        pseudo = (socket.inet_aton(self.src) + socket.inet_aton(self.dst) +
+                  struct.pack('!BBH', 0, 6, len(body)))
+        c = csum(pseudo + body)
+        return body[:16] + struct.pack('!H', c) + body[18:]
+
+    @classmethod
+    def decode(cls, src, dst, b):
+        sport, dport, seq, ack, doff, flags, win, _, urp = \
+            struct.unpack('!HHIIBBHHH', b[:20])
+        hl = (doff >> 4) * 4
+        return cls(sport, dport, seq, ack, flags, win, b[hl:], b[20:hl], urp,
+                   src, dst)
+
+
+class Wire:
+    def __init__(self, proc, sock, qport, log, img):
+        self.proc, self.sock, self.qport = proc, sock, qport
+        self.log, self.img = log, img
+        self.ip_id = 1
+        self.rx = []            # TCP segments from the guest, oldest first
+        self.trace = []         # everything seen/sent, for failure reports
+
+    # -- boot -------------------------------------------------------------
+    @classmethod
+    def boot(cls, initarg, kernel=None, workdir=None, guest=None):
+        workdir = workdir or os.environ.get('WIRE_WORKDIR', '/tmp')
+        kernel = kernel or os.path.join(TOP, 'sys', 'kernel.multiboot')
+        guest = guest or os.path.join(os.path.dirname(__file__), 'wireguest')
+        img = os.path.join(workdir, 'wire-rootfs.%d.img' % os.getpid())
+        log = os.path.join(workdir, 'wire-serial.%d.log' % os.getpid())
+        subprocess.run(['cp', '--reflink=auto', os.path.join(TOP, 'rootfs.img'), img],
+                       check=True)
+        dev = '%s?offset=%d' % (img, ROOT_P2_OFFSET)
+        for req in ('write %s /wireguest' % guest, 'sif /wireguest mode 0100755'):
+            subprocess.run(['debugfs', '-w', '-R', req, dev], check=True,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.bind(('127.0.0.1', 0))
+        hport = sock.getsockname()[1]
+        probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        probe.bind(('127.0.0.1', 0))
+        qport = probe.getsockname()[1]
+        probe.close()
+        cmd = ['qemu-system-i386', '-cpu', 'qemu32,+sse,+sse2', '-accel', 'kvm',
+               '-m', '256M', '-kernel', kernel, '-display', 'none',
+               '-serial', 'file:' + log, '-no-reboot',
+               '-drive', 'file=%s,format=raw,if=virtio' % img,
+               '-netdev', 'dgram,id=n0,local.type=inet,local.host=127.0.0.1,'
+                          'local.port=%d,remote.type=inet,remote.host=127.0.0.1,'
+                          'remote.port=%d' % (qport, hport),
+               '-device', 'virtio-net-pci,netdev=n0,mac=52:54:00:12:34:56',
+               '-append', "serial_debug root=LABEL=sub-root init=/wireguest "
+                          "initarg='%s'" % initarg]
+        proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL)
+        return cls(proc, sock, qport, log, img)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
+
+    def close(self):
+        if self.proc.poll() is None:
+            self.proc.terminate()
+            try:
+                self.proc.wait(5)
+            except subprocess.TimeoutExpired:
+                self.proc.kill()
+        self.sock.close()
+        if os.path.exists(self.img):
+            os.unlink(self.img)
+
+    def serial(self):
+        try:
+            with open(self.log, 'rb') as f:
+                return f.read().decode('latin-1').replace('\r', '')
+        except FileNotFoundError:
+            return ''
+
+    def wait_serial(self, text, timeout):
+        end = time.time() + timeout
+        while time.time() < end:
+            if text in self.serial():
+                return True
+            self.pump(0.2)
+        return False
+
+    # -- frames -----------------------------------------------------------
+    def _send_frame(self, frame):
+        self.sock.sendto(frame, ('127.0.0.1', self.qport))
+
+    def _handle(self, frame):
+        if len(frame) < 14:
+            return
+        etype = struct.unpack('!H', frame[12:14])[0]
+        if etype == 0x0806 and len(frame) >= 42:              # ARP
+            op = struct.unpack('!H', frame[20:22])[0]
+            tpa = socket.inet_ntoa(frame[38:42])
+            if op == 1 and tpa == PEER_IP:
+                sha, spa = frame[22:28], frame[28:32]
+                rep = (sha + PEER_MAC + b'\x08\x06' +
+                       struct.pack('!HHBBH', 1, 0x0800, 6, 4, 2) +
+                       PEER_MAC + socket.inet_aton(PEER_IP) + sha + spa)
+                self._send_frame(rep)
+            return
+        if etype != 0x0800:
+            return
+        ip = frame[14:]
+        ihl = (ip[0] & 0xF) * 4
+        tot = struct.unpack('!H', ip[2:4])[0]
+        if ip[9] != 6:
+            return
+        src, dst = socket.inet_ntoa(ip[12:16]), socket.inet_ntoa(ip[16:20])
+        seg = Seg.decode(src, dst, ip[ihl:tot])
+        self.trace.append(('rx', time.time(), seg))
+        self.rx.append(seg)
+
+    def pump(self, timeout):
+        end = time.time() + timeout
+        while True:
+            left = end - time.time()
+            r, _, _ = select.select([self.sock], [], [], max(0, left))
+            if r:
+                frame, _ = self.sock.recvfrom(4096)
+                self._handle(frame)
+                continue
+            if left <= 0:
+                return
+
+    # -- TCP ----------------------------------------------------------------
+    def send(self, seg):
+        body = seg.encode()
+        ip = struct.pack('!BBHHHBBH4s4s', 0x45, 0, 20 + len(body), self.ip_id,
+                         0, 64, 6, 0, socket.inet_aton(seg.src),
+                         socket.inet_aton(seg.dst))
+        ip = ip[:10] + struct.pack('!H', csum(ip)) + ip[12:]
+        self.ip_id = (self.ip_id + 1) & 0xFFFF
+        self.trace.append(('tx', time.time(), seg))
+        self._send_frame(GUEST_MAC + PEER_MAC + b'\x08\x00' + ip + body)
+
+    def expect(self, pred, timeout, what):
+        """Return the first queued-or-arriving guest segment matching pred,
+        dropping the non-matching ones before it.  None on timeout."""
+        end = time.time() + timeout
+        while True:
+            while self.rx:
+                s = self.rx.pop(0)
+                if pred(s):
+                    return s
+            left = end - time.time()
+            if left <= 0:
+                return None
+            self.pump(min(left, 0.2))
+
+    def quiet(self, secs):
+        """Collect whatever the guest sends during the next secs seconds."""
+        self.rx.clear()
+        self.pump(secs)
+        out, self.rx = self.rx, []
+        return out
+
+    def dump(self):
+        t0 = self.trace[0][1] if self.trace else 0
+        return '\n'.join('  %6.2f %s %r' % (t - t0, d, s) for d, t, s in self.trace)
