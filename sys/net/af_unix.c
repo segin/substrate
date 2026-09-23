@@ -2265,10 +2265,21 @@ cmsg_done:
      * audit) and for anything else that builds a header and a body as two
      * iovecs.  A stream socket keeps the loop -- it has no boundaries.
      */
+    size_t need = 0;
+    if (msg->msg_iovlen > 0 &&
+        iov_total(kiov, (int)msg->msg_iovlen, &need) != 0)
+        return -EMSGSIZE;
+    /* UDP-U-05: an empty datagram is legal -- UDP's Length is then 8 -- and
+     * is still one message.  A datagram sendmsg() whose iovecs total zero
+     * (none at all, or only empty ones) used to return 0 having sent
+     * nothing: the gather branch bailed out and the loop below never ran.
+     * Send it, with no payload to copy. */
+    if (need == 0 && sock_fd_is_dgram(fd))
+        return sys_sendto_impl(fd, NULL, 0, flags,
+                               (const struct sockaddr *)msg->msg_name,
+                               (socklen_t)msg->msg_namelen,
+                               /*kernel_payload=*/0);
     if (msg->msg_iovlen > 1 && sock_fd_is_dgram(fd)) {
-        size_t need = 0;
-        if (iov_total(kiov, (int)msg->msg_iovlen, &need) != 0) return -EMSGSIZE;
-        if (need == 0) return 0;
         uint8_t *gath = kmalloc(need);
         if (!gath) return -ENOMEM;
         size_t off = 0;

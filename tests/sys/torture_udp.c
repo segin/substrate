@@ -3,8 +3,9 @@
  * (task #430: UDP-01, UDP-03, SOCK-07).
  *
  * Also UDP-MEM-01 (MSG_TRUNC over-copy), UDP-MEM-02 (recvmsg msg_name
- * written through a raw user pointer), UDP-U-01 (connected sendto) and
- * UDP-U-04 (destination port 0) from docs/ip-audit-2026-09-22.md.
+ * written through a raw user pointer), UDP-U-01 (connected sendto),
+ * UDP-U-04 (destination port 0) and UDP-U-05 (empty datagram via sendmsg)
+ * from docs/ip-audit-2026-09-22.md.
  *
  * Each case drives the real socket API over the loopback interface, so a
  * PASS means a datagram actually took the intended path through the
@@ -444,6 +445,38 @@ static void test_port_zero(void)
     close(tx);
 }
 
+/* UDP-U-05: sendmsg() with no payload -- no iovecs, or only empty ones --
+ * must still send one empty datagram. */
+static void test_sendmsg_empty(void)
+{
+    printf("UDP-U-05: sendmsg() sends an empty datagram\n");
+    struct sockaddr_in dst;
+    char buf[8];
+    int rx = bind_udp(31972);
+    int tx = socket(AF_INET, SOCK_DGRAM, 0);
+    lo_addr(&dst, 31972);
+    struct msghdr mh;
+    memset(&mh, 0, sizeof(mh));
+    mh.msg_name = &dst;
+    mh.msg_namelen = sizeof(dst);
+    ssize_t n = sendmsg(tx, &mh, 0);
+    ok("sendmsg with no iovecs returns 0", n == 0, "sendmsg failed");
+    errno = 0;
+    ok("an empty datagram arrived", try_recv(rx, buf, sizeof(buf)) == 0,
+       "nothing was sent");
+    struct iovec iov[2] = { { buf, 0 }, { buf, 0 } };
+    mh.msg_iov = iov;
+    mh.msg_iovlen = 2;
+    n = sendmsg(tx, &mh, 0);
+    ok("sendmsg with two empty iovecs returns 0", n == 0, "sendmsg failed");
+    ok("a second empty datagram arrived", try_recv(rx, buf, sizeof(buf)) == 0,
+       "nothing was sent");
+    ok("exactly two were queued", try_recv(rx, buf, sizeof(buf)) < 0,
+       "extra datagram");
+    close(rx);
+    close(tx);
+}
+
 int main(void)
 {
     printf("torture_udp: UDP demux + checksum regressions (#430)\n\n");
@@ -457,6 +490,7 @@ int main(void)
     test_recvmsg_name();
     test_connected_sendto();
     test_port_zero();
+    test_sendmsg_empty();
 
     printf("\nResult: %d passed, %d failed -- %s\n",
            passed, failed, failed ? "FAILED" : "PASSED");
