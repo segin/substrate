@@ -193,6 +193,7 @@ typedef struct tcp_pcb {
     uint8_t   pollout_wait;   /* TCP-WIN-02: poll() saw no POLLOUT */
     uint32_t  last_adv_wnd;   /* TCP-WIN-03: window in our last segment */
     uint8_t   seg_wnd_same;   /* TCP-WIN-05: segment repeats the window */
+    uint32_t  max_snd_wnd;    /* TCP-WIN-06: largest window the peer offered */
     struct ip4_txopts txo;    /* UDP-API-12: the socket's IP_TTL/IP_TOS */
     /* SO_ERROR (cleared by getsockopt).  */
     int       so_error;
@@ -1449,9 +1450,11 @@ static void tcp_input_locked(uint32_t saddr, uint32_t daddr,
         if ((int32_t)(ack - p->snd_una) >= 0 &&
             (int32_t)(ack - tcp_ack_limit(p)) <= 0) {           /* TCP-MEM-07 */
             p->snd_wnd = __builtin_bswap16(th->window);
+            if (p->snd_wnd > p->max_snd_wnd) p->max_snd_wnd = p->snd_wnd;   /* TCP-WIN-06 */
         }
     } else if (p->state == TCP_LISTEN || p->state == TCP_SYN_SENT) {
         p->snd_wnd = __builtin_bswap16(th->window);
+        if (p->snd_wnd > p->max_snd_wnd) p->max_snd_wnd = p->snd_wnd;   /* TCP-WIN-06 */
     }
 
     switch (p->state) {
@@ -1793,7 +1796,12 @@ int tcp_poll(tcp_pcb_t *p, short events, void **wait_chan) {
             uint32_t in_flight = p->snd_nxt - p->snd_una;
             uint32_t wnd = p->snd_wnd;
             if (p->cwnd && p->cwnd < wnd) wnd = p->cwnd;
-            if (wnd > in_flight || in_flight == 0)
+            uint32_t avail = wnd > in_flight ? wnd - in_flight : 0;
+            /* TCP-WIN-06: and room the silly-window rule would let a
+             * full-sized write use, so poll() and a write() that holds a
+             * tinygram back cannot disagree and spin. */
+            if (in_flight == 0 || avail >= TCP_MSS ||
+                (avail && p->max_snd_wnd && avail >= p->max_snd_wnd / 2))
                 revents |= POLLOUT;
             else
                 p->pollout_wait = 1;    /* the ACK path wakes the poller */
@@ -1868,6 +1876,35 @@ tcp_pcb_t *tcp_accept(tcp_pcb_t *listen_p, int nonblock) {
     }
     tcp_unhold(listen_p);
     return ret;
+}
+
+/*
+ * TCP-WIN-06: sender silly-window avoidance and Nagle (RFC 793 3.7's
+ * suggestions as RFC 1122 4.2.3.4 makes them precise).  Send a segment of
+ * `chunk` octets only when
+ *   - it is a full MSS, or
+ *   - nothing is unacknowledged (so interactive traffic is not delayed), or
+ *   - the usable window is at least half the largest the peer has
+ *     offered, or
+ *   - it finishes the user's write and no small segment is still unacked.
+ * Otherwise every ACK that freed a few octets drew a segment of exactly
+ * that size, and a window-limited transfer degenerated into tinygrams.
+ */
+static int tcp_sws_ok(tcp_pcb_t *p, size_t chunk, size_t remaining,
+                      uint32_t avail, uint32_t in_flight) {
+    if (chunk >= TCP_MSS || in_flight == 0)
+        return 1;
+    if (p->max_snd_wnd && avail >= p->max_snd_wnd / 2)
+        return 1;
+    if (chunk == remaining) {
+        int small = 0;
+        uint32_t f = tcp_lock();
+        for (tcp_seg_t *s = p->unacked_head; s; s = s->next)
+            if (s->dlen && s->dlen < TCP_MSS) { small = 1; break; }
+        tcp_unlock(f);
+        return !small;
+    }
+    return 0;
 }
 
 static ssize_t tcp_send_body(tcp_pcb_t *p, const void *buf, size_t len, int nonblock,
@@ -1948,6 +1985,19 @@ static ssize_t tcp_send_body(tcp_pcb_t *p, const void *buf, size_t len, int nonb
         size_t chunk = len - sent;
         if (chunk > TCP_MSS)         chunk = TCP_MSS;
         if (chunk > avail)           chunk = avail;
+        if (!tcp_sws_ok(p, chunk, len - sent, avail, in_flight)) {
+            /* TCP-WIN-06: hold the tail back until an ACK makes it worth
+             * a segment -- exactly the zero-window wait above. */
+            if (nonblock) return sent ? (ssize_t)sent : -EAGAIN;
+            if (deadline && get_ticks() >= deadline)
+                return sent ? (ssize_t)sent : -EAGAIN;
+            current_thread->flags |= THREAD_F_INTERRUPTIBLE;
+            sched_sleep_until(p->send_chan, get_ticks() + TCP_SLEEP_POLL);
+            current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
+            if (current_thread->sig_pending & ~current_thread->sig_mask)
+                return sent ? (ssize_t)sent : -EINTR;
+            continue;
+        }
         int rc = tcp_xmit_queue(p, TCP_ACK | TCP_PSH, b + sent, chunk);
         if (rc < 0) return sent ? (ssize_t)sent : rc;
         sent += chunk;

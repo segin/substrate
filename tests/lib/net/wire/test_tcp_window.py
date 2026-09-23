@@ -27,6 +27,10 @@ it guards.
                 unchanged window.  Three ACK-only-repeating data segments,
                 and three window updates, trigger no fast retransmit; three
                 true duplicates do.
+    sender-sws  TCP-WIN-06: with the peer's window at 1000 and 900 octets
+                unacknowledged, an ACK that frees 100 octets does not draw
+                a 100-octet segment (sender silly-window avoidance); the ACK
+                of everything then releases a full window.
 
 Run from the repo root after building sys/ and wireguest:
     python3 tests/lib/net/wire/test_tcp_window.py [case...]
@@ -232,11 +236,36 @@ def case_dupack():
         return None, w
 
 
+def case_sender_sws():
+    msg = 'S' * 200
+    with Wire.boot('connect 10.0.2.2 %d write:%s sleep:60' % (PORT, msg)) as w:
+        syn, err = handshake(w, win=150)
+        if err:
+            return err, w
+        gp, g = syn.sport, syn.seq + 1
+        d = w.expect(lambda s: s.data, 5, 'data')
+        if not d or len(d.data) != 150:
+            return 'want a first segment filling the 150 window, got %r' % d, w
+        w.rx.clear()
+        w.send(Seg(PORT, gp, PISS + 1, g + 10, ACK, win=150))   # frees 10
+        w.pump(0.5)
+        small = [s for s in w.rx if s.data and s.seq == g + 150]
+        if small:
+            return 'sent a %d-octet silly segment' % len(small[0].data), w
+        w.rx.clear()
+        w.send(Seg(PORT, gp, PISS + 1, g + 150, ACK, win=150))  # frees all
+        d = w.expect(lambda s: s.data and s.seq == g + 150, 3, 'rest')
+        if not d or len(d.data) != 50:
+            return 'the rest did not follow the full ACK: %r' % d, w
+        return None, w
+
+
 CASES = (('persist', case_persist),
          ('nb-persist', case_nb_persist),
          ('reopen', case_reopen),
          ('fast-retx', case_fast_retx),
-         ('dupack', case_dupack))
+         ('dupack', case_dupack),
+         ('sender-sws', case_sender_sws))
 
 
 def main():
