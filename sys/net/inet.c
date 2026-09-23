@@ -131,6 +131,10 @@ int eth_send(netdev_t *dev, const uint8_t dst_mac[6], uint16_t ethertype,
              const void *payload, size_t payload_len) {
     if (!dev) return -ENODEV;
     if (payload_len > NETDEV_MTU_MAX) return -EMSGSIZE;
+    /* UDP-IP-01: and never more than the device can carry -- a frame past
+     * the device MTU is a "baby giant" that a conformant switch or peer
+     * NIC silently discards. */
+    if (dev->mtu && payload_len > dev->mtu) return -EMSGSIZE;
 
     int heap = 0;
     uint8_t *frame = netbuf_get(g_irq_frmbuf, &heap);
@@ -320,6 +324,16 @@ int ip4_output_from(uint32_t saddr, uint32_t daddr, uint8_t protocol,
     int via_gw = 0;
     netdev_t *dev = route_for_v4(daddr, &via_gw);
     if (!dev) return -ENETUNREACH;
+    /*
+     * UDP-IP-01: bound the datagram by the egress device's MTU, not by the
+     * compile-time NETDEV_MTU_MAX alone.  A 1572-byte UDP payload became a
+     * 1614-byte frame on a 1500-byte Ethernet and was reported as sent --
+     * silent loss, or success/EMSGSIZE/corruption depending on the NIC
+     * model.  We do not fragment (RFC 1122 3.3.3 leaves that optional), so
+     * fail the send loudly instead.
+     */
+    if (dev->mtu && payload_len > dev->mtu - sizeof(struct iphdr))
+        return -EMSGSIZE;
     if (saddr == 0)
         saddr = route_src4(dev, daddr);
     else if ((saddr & 0xFF) == 127 && !(dev->flags & NETDEV_IFF_LOOPBACK))

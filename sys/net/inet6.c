@@ -245,6 +245,10 @@ int ip6_output(const uint8_t daddr[16], uint8_t next_header,
      * pkt[] and up the kernel stack.  Same defect as the IPv4 path.
      */
     if (payload_len > NETDEV_MTU_MAX - sizeof(struct ip6_hdr)) return -EMSGSIZE;
+    /* UDP-IP-01 (v6 twin): the egress MTU bounds the packet; IPv6 never
+     * fragments in transit, and we do not fragment at the source. */
+    if (dev->mtu && payload_len > dev->mtu - sizeof(struct ip6_hdr))
+        return -EMSGSIZE;
 
     /* STACK-01 (v6 twin): off the interrupt stack -- see netbuf_get() in
      * inet.c.  This path is reached from hard IRQ via

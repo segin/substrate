@@ -22,6 +22,7 @@
  *   sleep:N      sleep N seconds
  *   soerror      getsockopt(SO_ERROR), reporting the value
  *   sendto:IP:PORT:TEXT   send TEXT to IP:PORT
+ *   sendn:IP:PORT:N       send an N-octet datagram to IP:PORT
  *   ifaddr0      SIOCSIFADDR eth0 0.0.0.0 -- leave the NIC unconfigured
  *
  * Every step is logged as "guest: ..." on the console so the host side can
@@ -91,6 +92,26 @@ static int do_actions(int fd, int argc, char **argv) {
             ssize_t n = sendto(fd, c2 + 1, strlen(c2 + 1), 0,
                                (struct sockaddr *)&to, sizeof to);
             say("sendto %s n=%ld", n < 0 ? strerror(errno) : "ok", (long)n);
+        } else if (strncmp(a, "sendn:", 6) == 0) {
+            static char big[4096];
+            char ip[32];
+            const char *p = a + 6, *c1 = strchr(p, ':');
+            const char *c2 = c1 ? strchr(c1 + 1, ':') : NULL;
+            size_t n = c2 ? (size_t)atoi(c2 + 1) : 0;
+            if (!c1 || !c2 || (size_t)(c1 - p) >= sizeof ip || n > sizeof big) {
+                say("bad sendn %s (%ld)", a, (long)i);
+                return 1;
+            }
+            memcpy(ip, p, (size_t)(c1 - p));
+            ip[c1 - p] = 0;
+            memset(big, 'x', n);
+            struct sockaddr_in to;
+            memset(&to, 0, sizeof to);
+            to.sin_family = AF_INET;
+            to.sin_port = htons((unsigned short)atoi(c1 + 1));
+            to.sin_addr.s_addr = inet_addr(ip);
+            ssize_t r = sendto(fd, big, n, 0, (struct sockaddr *)&to, sizeof to);
+            say("sendn %s n=%ld", r < 0 ? strerror(errno) : "ok", (long)r);
         } else if (strcmp(a, "ifaddr0") == 0) {
             struct ifreq ifr;
             memset(&ifr, 0, sizeof ifr);
