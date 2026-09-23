@@ -164,7 +164,32 @@ static int ip4_is_local_ifaddr(uint32_t a) {
     return 0;
 }
 
+/* Is `daddr` a broadcast address on `dev` -- limited, or dev's subnet's
+ * directed broadcast? */
+static int ip4_is_bcast_on(const netdev_t *dev, uint32_t daddr) {
+    if (daddr == 0xFFFFFFFFu) return 1;
+    return dev->ip4_addr && dev->ip4_netmask &&
+           daddr == ((dev->ip4_addr & dev->ip4_netmask) | ~dev->ip4_netmask);
+}
+
 static netdev_t *route_for_v4(uint32_t daddr, int *via_gw_out) {
+    /*
+     * UDP-IP-04: the limited broadcast goes out directly on a broadcast-
+     * capable interface.  It matched no subnet below and fell through to
+     * the default gateway, so 255.255.255.255 was unicast to the router's
+     * MAC and no other host ever saw it.  No address is required: the
+     * limited broadcast is what an unconfigured host (DHCP) must use.
+     */
+    if (daddr == 0xFFFFFFFFu) {
+        for (netdev_t *d = netdev_first(); d; d = netdev_next(d)) {
+            if ((d->flags & NETDEV_IFF_UP) && (d->flags & NETDEV_IFF_BROADCAST) &&
+                !(d->flags & NETDEV_IFF_LOOPBACK)) {
+                if (via_gw_out) *via_gw_out = 0;
+                return d;
+            }
+        }
+        return NULL;
+    }
     /* 127.0.0.0/8 → loopback.  So is any address of our own: UDP-IP-03 --
      * a datagram to the host's own NIC address used to match that NIC's
      * subnet below, go out on the wire, and ARP for ourselves, failing
