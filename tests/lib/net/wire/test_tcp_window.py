@@ -49,6 +49,10 @@ it guards.
                 an older one (lower SEG.SEQ, delivered late) advertising a
                 large window must not reopen it -- the sender probes with
                 one octet instead of sending into the stale window.
+    user-timeout TCP-WIN-13: TCP_USER_TIMEOUT (RFC 793 3.8's per-connection
+                user timeout) is honoured: with 3000 ms set and the peer
+                silent, the connection is aborted with ETIMEDOUT after about
+                3 s instead of retransmitting for ~2 minutes.
 
 Run from the repo root after building sys/ and wireguest:
     python3 tests/lib/net/wire/test_tcp_window.py [case...]
@@ -393,6 +397,25 @@ def case_stale_wnd():
         return None, w
 
 
+def case_user_timeout():
+    with Wire.boot('connect 10.0.2.2 %d utimeout:3000 write:unanswered '
+                   'sleep:7 soerror sleep:60' % PORT) as w:
+        syn, err = handshake(w)
+        if err:
+            return err, w
+        if not w.wait_serial('guest: utimeout', 10):
+            return 'guest never set the option', w
+        line = [l for l in w.serial().splitlines() if 'guest: utimeout' in l][0]
+        if 'ok ms=3000' not in line:
+            return 'TCP_USER_TIMEOUT not accepted: %s' % line.strip(), w
+        if not w.wait_serial('guest: soerror', 20):
+            return 'guest never checked SO_ERROR', w
+        line = [l for l in w.serial().splitlines() if 'guest: soerror' in l][0]
+        if 'value=110' not in line:                     # ETIMEDOUT
+            return 'not aborted by the user timeout: %s' % line.strip(), w
+        return None, w
+
+
 CASES = (('persist', case_persist),
          ('nb-persist', case_nb_persist),
          ('reopen', case_reopen),
@@ -403,7 +426,8 @@ CASES = (('persist', case_persist),
          ('reorder', case_reorder),
          ('partial-ack', case_partial_ack),
          ('shut-rd', case_shut_rd),
-         ('stale-wnd', case_stale_wnd))
+         ('stale-wnd', case_stale_wnd),
+         ('user-timeout', case_user_timeout))
 
 
 def main():

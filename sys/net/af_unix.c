@@ -2777,6 +2777,15 @@ int sys_setsockopt(int fd, int level, int optname,
         int r = afinet_set_timeo(fd, optname == 20, sec, usec);
         return r == -ENOTSOCK ? 0 : r;
     }
+    /* TCP-WIN-13: IPPROTO_TCP TCP_USER_TIMEOUT (18), an unsigned int of
+     * milliseconds. */
+    if (level == 6 /*IPPROTO_TCP*/ && optname == 18) {
+        int val;
+        if (!optval || optlen < (int)sizeof(int)) return -EINVAL;
+        if (copyin(optval, &val, sizeof(val)) != 0) return -EFAULT;
+        int r = afinet_set_tcpopt(fd, optname, val);
+        if (r != -ENOTSOCK) return r;
+    }
     /* UDP-API-13 / UDP-I-04: options with no implementation behind them must
      * say so.  IP_OPTIONS (4) was accepted while options were neither sent
      * nor received, and the source-specific multicast calls (37-40) while
@@ -2997,6 +3006,12 @@ int sys_getsockopt(int fd, int level, int optname,
         /* Unknown SOL_SOCKET option — POSIX ENOPROTOOPT (was silently 0,
          * which let bogus getsockopt() calls "succeed"). */
         return -ENOPROTOOPT;
+    }
+    if (level == 6 /*IPPROTO_TCP*/ && optname == 18) {      /* TCP-WIN-13 */
+        int val = 0;
+        int r = afinet_get_tcpopt(fd, optname, &val);
+        if (r == 0) return getsockopt_ret_int(val, optval, optlen);
+        if (r != -ENOTSOCK) return r;
     }
     /* UDP-API-13: nor can they be read back. */
     if (level == 0 /*IPPROTO_IP*/ &&

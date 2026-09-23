@@ -23,6 +23,7 @@
  *   close        close the socket
  *   shutwr       shutdown(SHUT_WR)
  *   shutrd       shutdown(SHUT_RD)
+ *   utimeout:MS  setsockopt(IPPROTO_TCP, TCP_USER_TIMEOUT, MS), read back
  *   sleep:N      sleep N seconds
  *   soerror      getsockopt(SO_ERROR), reporting the value
  *   pollin       poll() for POLLIN with no timeout, reporting revents
@@ -43,6 +44,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -81,6 +83,12 @@ static int do_actions(int fd, int argc, char **argv) {
             int r = close(fd);
             say("close %s rc=%ld", r < 0 ? strerror(errno) : "ok", r);
             fd = -1;
+        } else if (strncmp(a, "utimeout:", 9) == 0) {
+            unsigned int ms = (unsigned int)atol(a + 9), back = 0;
+            socklen_t bl = sizeof back;
+            int r = setsockopt(fd, IPPROTO_TCP, TCP_USER_TIMEOUT, &ms, sizeof ms);
+            if (r == 0) r = getsockopt(fd, IPPROTO_TCP, TCP_USER_TIMEOUT, &back, &bl);
+            say("utimeout %s ms=%ld", r < 0 ? strerror(errno) : "ok", (long)back);
         } else if (strcmp(a, "shutrd") == 0) {
             int r = shutdown(fd, SHUT_RD);
             say("shutrd %s rc=%ld", r < 0 ? strerror(errno) : "ok", r);

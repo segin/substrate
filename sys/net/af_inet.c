@@ -1336,6 +1336,35 @@ int afinet_set_ipopt(int fd, int optname, int val, uint32_t addr) {
     return 0;
 }
 
+/*
+ * TCP-WIN-13: IPPROTO_TCP options.  TCP_USER_TIMEOUT (18, RFC 5482; the
+ * Linux number) sets RFC 793's per-connection user timeout in milliseconds.
+ * -ENOTSOCK when fd is not an AF_INET socket, -ENOPROTOOPT for anything
+ * else, including a non-stream socket.
+ */
+int afinet_set_tcpopt(int fd, int optname, int val) {
+    afi_sock_t *s = afi_from_fd(fd);
+    if (!s) return -ENOTSOCK;
+    if (s->type != SOCK_STREAM || !s->tcp) return -ENOPROTOOPT;
+    switch (optname) {
+    case 18: /* TCP_USER_TIMEOUT */
+        if (val < 0) return -EINVAL;
+        return tcp_set_user_timeout(s->tcp, (uint32_t)val);
+    default:
+        return -ENOPROTOOPT;
+    }
+}
+
+int afinet_get_tcpopt(int fd, int optname, int *val) {
+    afi_sock_t *s = afi_from_fd(fd);
+    if (!s) return -ENOTSOCK;
+    if (s->type != SOCK_STREAM || !s->tcp) return -ENOPROTOOPT;
+    switch (optname) {
+    case 18: *val = (int)tcp_get_user_timeout(s->tcp); return 0;
+    default: return -ENOPROTOOPT;
+    }
+}
+
 int afinet_get_ipopt(int fd, int optname, int *val, uint32_t *addr) {
     afi_sock_t *s = afi_from_fd(fd);
     if (!s) return -ENOTSOCK;

@@ -6,6 +6,7 @@
  * Substrate's TCP stack honors TCP_NODELAY (disable Nagle) at the
  * PCB level today; the rest are accepted with -ENOPROTOOPT so apps
  * detecting feature availability through setsockopt() don't crash.
+ * TCP_USER_TIMEOUT is honoured (see tcp(7)).
  */
 #ifndef _NETINET_TCP_H
 #define _NETINET_TCP_H

@@ -1,0 +1,92 @@
+.\" tcp.7 - Substrate TCP
+.TH TCP 7 "2026-09-23" "Substrate" "Substrate Programmer's Manual"
+.SH NAME
+tcp \- TCP protocol
+.SH SYNOPSIS
+.nf
+.B #include <sys/socket.h>
+.B #include <netinet/in.h>
+.B #include <netinet/tcp.h>
+.PP
+.IB tcp_socket " = socket(AF_INET, SOCK_STREAM, 0);"
+.fi
+.SH DESCRIPTION
+Substrate's TCP follows RFC 793 as amended by RFC 1122, with RFC 5681
+congestion control and RFC 5961 protection against blind resets.
+A connection has a 32 KiB receive buffer; there is no send buffer, so a
+.BR write (2)
+returns once its data has been queued for transmission within the peer's
+window.
+.PP
+Data that arrives out of order is held for reassembly.
+The advertised window follows receiver silly-window avoidance, and the
+sender applies the Nagle algorithm and sender silly-window avoidance.
+While the peer advertises a zero window, one-octet probes are sent for as
+long as the peer keeps answering them.
+.PP
+Data left unacknowledged is retransmitted with exponential backoff.
+The connection is aborted with
+.B ETIMEDOUT
+when the retransmission budget of the oldest segment is exhausted, or
+when no unacknowledged data has been acknowledged for the
+.I user timeout
+(300 seconds unless set with
+.BR TCP_USER_TIMEOUT ).
+A connection with nothing outstanding is never timed out.
+.SS Socket options
+Options at level
+.B IPPROTO_TCP
+are set with
+.BR setsockopt (2)
+and read with
+.BR getsockopt (2).
+.TP
+.B TCP_USER_TIMEOUT
+An
+.I unsigned int
+of milliseconds (RFC 5482): how long transmitted data may remain
+unacknowledged before the connection is aborted with
+.BR ETIMEDOUT .
+Zero, the default, selects the system value of 300 seconds.
+An explicit value also bounds zero-window probing, which the default
+does not.
+Connections accepted from a listening socket inherit its value.
+.PP
+Other
+.B IPPROTO_TCP
+options are accepted without effect.
+.SH ERRORS
+.TP
+.B EINVAL
+.I optlen
+is smaller than an
+.IR int ,
+or
+.B TCP_USER_TIMEOUT
+was given a negative value.
+.TP
+.B ENOPROTOOPT
+.B TCP_USER_TIMEOUT
+was used on a socket that is not a TCP socket.
+.TP
+.B ETIMEDOUT
+Reported by
+.BR read (2),
+.BR write (2)
+or
+.B SO_ERROR
+when the connection was aborted by the retransmission budget or the user
+timeout.
+.SH EXAMPLE
+Abort a connection after 30 seconds without acknowledgement:
+.PP
+.EX
+unsigned int ms = 30000;
+if (setsockopt(fd, IPPROTO_TCP, TCP_USER_TIMEOUT, &ms, sizeof ms) < 0)
+    perror("setsockopt");
+.EE
+.SH SEE ALSO
+.BR socket (2),
+.BR setsockopt (2),
+.BR getsockopt (2),
+.BR shutdown (2)

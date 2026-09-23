@@ -114,6 +114,10 @@ static inline void     tcp_unlock(uint32_t f) { intr_restore(f); }
  * retransmit before the timer completes the close itself. */
 #define TCP_CLOSING_TICKS    TCP_MSL_TICKS
 #define TCP_DUP_ACK_FAST   3             /* fast-retx trigger */
+/* TCP-WIN-13: the connection-level user timeout (RFC 793 3.8/3.9) when the
+ * application has not set TCP_USER_TIMEOUT -- RFC 1122 4.2.3.5's R2, which
+ * must be at least 100 s. */
+#define TCP_USER_TIMEOUT_TICKS (300 * HZ)
 /* Safety-net poll interval for the blocking recv/accept/connect waits.
  * sched_sleep() is not race-free against sched_wakeup() — a wakeup that
  * fires between the readiness re-check and the sleep is lost.  Sleeping
@@ -210,6 +214,8 @@ typedef struct tcp_pcb {
     uint32_t  max_snd_wnd;    /* TCP-WIN-06: largest window the peer offered */
     uint32_t  snd_wl1, snd_wl2; /* TCP-WIN-12: SEG.SEQ/ACK of the last window update */
     uint8_t   snd_wl_valid;
+    uint32_t  user_timeout_ms; /* TCP-WIN-13: TCP_USER_TIMEOUT, 0 = default */
+    uint64_t  ut_deadline;    /* TCP-WIN-13: abort if no progress by then */
     struct ip4_txopts txo;    /* UDP-API-12: the socket's IP_TTL/IP_TOS */
     /* SO_ERROR (cleared by getsockopt).  */
     int       so_error;
@@ -444,8 +450,18 @@ static tcp_seg_t *tcp_seg_alloc(uint8_t flags, const void *data, size_t dlen) {
  * killed the connection, and its permanent presence would block the
  * FIN_WAIT_1 -> FIN_WAIT_2 transition (which requires !unacked_head), so
  * the connection could never close cleanly either. */
+/* TCP-WIN-13: how long data may sit unacknowledged before the connection
+ * is aborted. */
+static uint64_t tcp_ut_ticks(const tcp_pcb_t *p) {
+    if (p->user_timeout_ms)
+        return (uint64_t)p->user_timeout_ms * HZ / 1000u + 1u;
+    return TCP_USER_TIMEOUT_TICKS;
+}
+
 static uint32_t tcp_seg_link_locked(tcp_pcb_t *p, tcp_seg_t *s) {
     uint32_t seq = p->snd_nxt;
+    if (!p->unacked_head)               /* TCP-WIN-13: queue was empty */
+        p->ut_deadline = get_ticks() + tcp_ut_ticks(p);
     s->seq = seq;
     p->snd_nxt += tcp_seg_cost(s->flags, s->dlen);
     if (p->unacked_tail) p->unacked_tail->next = s;
@@ -502,6 +518,10 @@ static int tcp_unacked_prune(tcp_pcb_t *p, uint32_t ack) {
         kfree(s, sizeof(*s) + s->dlen);
         freed++;
     }
+    /* TCP-WIN-13: progress re-arms the user timeout; an empty queue has
+     * none (an idle connection is never timed out, RFC 1122 4.2.3.6). */
+    if (freed)
+        p->ut_deadline = p->unacked_head ? get_ticks() + tcp_ut_ticks(p) : 0;
     return freed;
 }
 
@@ -683,6 +703,21 @@ static void tcp_timer_tick(uint64_t now) {
             head->probe = 0;
             head->retx  = 0;
         }
+        /*
+         * TCP-WIN-13: RFC 793 3.9 USER TIMEOUT -- a connection-level bound
+         * on unacknowledged data, which the per-segment retransmit budget
+         * is not: that restarts whenever a new segment reaches the head, so
+         * a path on which every segment eventually got through after many
+         * retransmissions never aborted, and nothing let the application
+         * choose the bound.  A zero-window probe the peer keeps answering
+         * is exempt under the default (RFC 1122 4.2.2.17), but not from a
+         * timeout the application set explicitly (RFC 5482).
+         */
+        if (p->ut_deadline && now >= p->ut_deadline &&
+            !(head->probe && p->snd_wnd == 0 && !p->user_timeout_ms)) {
+            tcp_kill_pcb(p, ETIMEDOUT);
+            continue;
+        }
         /* TCP-06: back the RTO off exponentially per attempt rather than
          * retrying at a flat interval forever.  The shift is clamped: a
          * probe's retx is unbounded, and 2^6 s already exceeds the cap. */
@@ -859,6 +894,7 @@ static void tcp_in_listen(tcp_pcb_t *p, uint32_t saddr, uint32_t daddr,
     if (!c) return;
     memset(c, 0, sizeof(*c));
     c->txo = p->txo;                 /* UDP-API-12: inherit the listener's */
+    c->user_timeout_ms = p->user_timeout_ms;          /* TCP-WIN-13 */
     c->state   = TCP_SYN_RECEIVED;
     c->laddr   = daddr;
     c->raddr   = saddr;
@@ -2532,6 +2568,22 @@ int tcp_shutdown_wr(tcp_pcb_t *p) {
  * direction.  recv() returns EOF from now on; a reader already
  * blocked in tcp_recv() is woken so it observes the new state.
  */
+/* TCP-WIN-13: TCP_USER_TIMEOUT, in milliseconds; 0 restores the default.
+ * Takes effect from the next time the unacknowledged queue is (re)armed. */
+int tcp_set_user_timeout(tcp_pcb_t *p, uint32_t ms) {
+    if (!p) return -ENOTCONN;
+    uint32_t f = tcp_lock();
+    p->user_timeout_ms = ms;
+    if (p->unacked_head)
+        p->ut_deadline = get_ticks() + tcp_ut_ticks(p);
+    tcp_unlock(f);
+    return 0;
+}
+
+uint32_t tcp_get_user_timeout(const tcp_pcb_t *p) {
+    return p ? p->user_timeout_ms : 0;
+}
+
 int tcp_shutdown_rd(tcp_pcb_t *p) {
     if (!p) return -ENOTCONN;
     /* TCP-WIN-10: nothing will ever read the ring again, so empty it (and
