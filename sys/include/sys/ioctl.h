@@ -18,6 +18,9 @@ struct winsize {
 #define FIONBIO   0x5421   /* int *: toggle non-blocking I/O on the fd */
 #define FIOASYNC  0x5452   /* int *: toggle FASYNC (SIGIO-on-ready) flag */
 
+/* Socket ioctls (Linux numbers, matching include/sys/ioctl.h). */
+#define SIOCATMARK 0x8905  /* int *: at the TCP urgent mark (TCP-URG-01) */
+
 /* Common ioctlRequest codes handled by specific subsystems */
 /* TTY */
 #define TIOCGWINSZ 0x5413

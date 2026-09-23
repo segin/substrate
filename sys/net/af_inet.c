@@ -28,6 +28,7 @@
 #include <netinet/udp.h>
 #include <sys/copy.h>
 #include <sys/fcntl.h>
+#include <sys/ioctl.h>
 #include <sys/file.h>
 #include <sys/lock.h>
 #include <sys/netdev.h>
@@ -180,6 +181,7 @@ typedef struct afi_sock {
      * concurrent close() can never free the struct while inbound traffic
      * is being delivered into its ring or a reader is asleep on it. */
     int        refcount;
+    int        owner;       /* TCP-URG-01: F_SETOWN (pid, or -pgrp) */
 
     fs_node_t  node;
     struct afi_sock *next;
@@ -358,6 +360,16 @@ static int afinet_ioctl(fs_node_t *node, uint32_t request, void *arg) {
             }
         }
         if (copyout(&avail, arg, sizeof(avail)) != 0) return -EFAULT;
+        return 0;
+    }
+
+    /* TCP-URG-01: SIOCATMARK -- whether the next octet to be read follows
+     * the urgent octet.  Never true for a datagram socket. */
+    if (request == SIOCATMARK) {
+        afi_sock_t *s = node ? (afi_sock_t *)(uintptr_t)node->impl : NULL;
+        if (!s) return -EBADF;
+        int at = s->tcp ? tcp_sockatmark(s->tcp) : 0;
+        if (copyout(&at, arg, sizeof(at)) != 0) return -EFAULT;
         return 0;
     }
 
@@ -560,7 +572,7 @@ static int afinet_node_poll(fs_node_t *node, void *waiter)
     if (s->tcp) {
         /* Defer to TCP for connect-state / accept / recv readiness. */
         void *chan = NULL;
-        int   rv   = tcp_poll(s->tcp, POLLIN | POLLOUT, &chan);
+        int   rv   = tcp_poll(s->tcp, POLLIN | POLLOUT | POLLPRI, &chan);   /* TCP-URG-01 */
         if (waiter && chan) *(void **)waiter = chan;
         return rv;
     }
@@ -1353,6 +1365,23 @@ int afinet_set_tcpopt(int fd, int optname, int val) {
     default:
         return -ENOPROTOOPT;
     }
+}
+
+/* TCP-URG-01: fcntl(F_SETOWN/F_GETOWN) on an AF_INET socket -- the pid (or
+ * -pgrp) that receives SIGURG.  -ENOTSOCK for any other descriptor. */
+int afinet_setown(int fd, int owner) {
+    afi_sock_t *s = afi_from_fd(fd);
+    if (!s) return -ENOTSOCK;
+    s->owner = owner;
+    if (s->tcp) tcp_set_owner(s->tcp, owner);
+    return 0;
+}
+
+int afinet_getown(int fd, int *owner) {
+    afi_sock_t *s = afi_from_fd(fd);
+    if (!s) return -ENOTSOCK;
+    *owner = s->owner;
+    return 0;
 }
 
 int afinet_get_tcpopt(int fd, int optname, int *val) {

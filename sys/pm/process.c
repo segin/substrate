@@ -17,6 +17,7 @@
 #include <sys/acct.h>
 #include <sys/copy.h>
 #include <sys/fcntl.h>
+#include <net/inet.h>
 #include <sys/file.h>
 #include <sys/futex.h>
 #include <sys/ldt.h>
@@ -1387,18 +1388,25 @@ int proc_fcntl(process_t *p, int fd, int cmd, int arg) {
     case F_SETOWN:
         /*
          * Set the pid/pgrp that receives SIGIO/SIGURG for this fd.
-         * substrate doesn't deliver SIGIO yet, so this is an
-         * accept-only no-op.  It MUST succeed, though: nginx's
+         * substrate doesn't deliver SIGIO yet; an AF_INET socket records
+         * the owner for SIGURG (TCP-URG-01), anything else accepts it as
+         * a no-op.  It MUST succeed, though: nginx's
          * ngx_spawn_process() does fcntl(channel, F_SETOWN, pid) right
          * after ioctl(FIOASYNC) and aborts the entire worker spawn
          * (-> NGX_INVALID_PID) on any error.  Consumers that need the
          * notification also poll the fd in their event loop, so a
          * missing SIGIO doesn't break them.
          */
+        if (p == current_process)
+            (void)afinet_setown(fd, arg);
         return 0;
-    case F_GETOWN:
-        /* No SIGIO owner tracking — report "none". */
+    case F_GETOWN: {
+        /* Only AF_INET sockets track an owner; anything else reports none. */
+        int owner = 0;
+        if (p == current_process && afinet_getown(fd, &owner) == 0)
+            return owner;
         return 0;
+    }
     default:
         return -EINVAL;
     }

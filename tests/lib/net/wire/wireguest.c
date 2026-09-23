@@ -27,6 +27,9 @@
  *   shutwr       shutdown(SHUT_WR)
  *   shutrd       shutdown(SHUT_RD)
  *   utimeout:MS  setsockopt(IPPROTO_TCP, TCP_USER_TIMEOUT, MS), read back
+ *   setown       install a SIGURG counter and fcntl(F_SETOWN, getpid())
+ *   sigurg       report how many SIGURGs have arrived
+ *   atmark       ioctl(SIOCATMARK), reporting the value
  *   sleep:N      sleep N seconds
  *   soerror      getsockopt(SO_ERROR), reporting the value
  *   pollin       poll() for POLLIN with no timeout, reporting revents
@@ -55,6 +58,7 @@
 #include <string.h>
 #include <net/if.h>
 #include <poll.h>
+#include <signal.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -65,6 +69,9 @@ static void say(const char *fmt, const char *a, long n) {
     printf("\n");
     fflush(stdout);
 }
+
+static volatile int g_sigurg;
+static void on_sigurg(int sig) { (void)sig; g_sigurg++; }
 
 static int do_actions(int fd, int argc, char **argv) {
     for (int i = 0; i < argc; i++) {
@@ -101,6 +108,20 @@ static int do_actions(int fd, int argc, char **argv) {
             int r = setsockopt(fd, IPPROTO_TCP, TCP_USER_TIMEOUT, &ms, sizeof ms);
             if (r == 0) r = getsockopt(fd, IPPROTO_TCP, TCP_USER_TIMEOUT, &back, &bl);
             say("utimeout %s ms=%ld", r < 0 ? strerror(errno) : "ok", (long)back);
+        } else if (strcmp(a, "setown") == 0) {
+            struct sigaction sa;
+            memset(&sa, 0, sizeof sa);
+            sa.sa_handler = on_sigurg;
+            sigaction(SIGURG, &sa, NULL);
+            int r = fcntl(fd, F_SETOWN, getpid());
+            say("setown %s owner=%ld", r < 0 ? strerror(errno) : "ok",
+                (long)fcntl(fd, F_GETOWN));
+        } else if (strcmp(a, "sigurg") == 0) {
+            say("sigurg %s count=%ld", "ok", (long)g_sigurg);
+        } else if (strcmp(a, "atmark") == 0) {
+            int v = -1;
+            int r = ioctl(fd, SIOCATMARK, &v);
+            say("atmark %s value=%ld", r < 0 ? strerror(errno) : "ok", (long)v);
         } else if (strcmp(a, "shutrd") == 0) {
             int r = shutdown(fd, SHUT_RD);
             say("shutrd %s rc=%ld", r < 0 ? strerror(errno) : "ok", r);

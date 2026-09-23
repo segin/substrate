@@ -38,6 +38,7 @@
 #include <kern/time.h>
 #include <sys/random.h>
 #include <net/inet.h>
+#include <pm/pm.h>
 #include <netinet/ip.h>
 #include <netinet/tcp.h>
 #include <sys/kthread.h>
@@ -45,6 +46,7 @@
 #include <sys/param.h>
 #include <sys/poll.h>
 #include <sys/proc.h>
+#include <sys/signal.h>
 #include <vm/vm_kmem.h>
 
 /*
@@ -224,6 +226,16 @@ typedef struct tcp_pcb {
     uint16_t  snd_mss;        /* TCP-HDR-02: peer's MSS; 0 until known */
     uint16_t  syn_mss;        /* TCP-HDR-02: MSS option of the last SYN seen */
     uint16_t  mtu_mss;        /* TCP-HDR-04: egress MTU less headers; 0 = none */
+    /* TCP-URG-01: the urgent mechanism, receive side (BSD out-of-line). */
+    uint32_t  rcv_up;         /* RCV.UP: sequence number after the urgent octet */
+    uint8_t   urg_have;       /* rcv_up is valid */
+    uint8_t   urg_extract;    /* the urgent octet has not arrived yet */
+    uint8_t   oob_valid;      /* oob_byte holds the urgent octet */
+    uint8_t   oob_byte;
+    uint8_t   urg_mark_valid; /* the ring holds the mark */
+    uint8_t   urg_sig_pending; /* SIGURG owed to the owner (timer delivers) */
+    uint32_t  urg_mark_left;  /* ring octets still ahead of the mark */
+    int       owner;          /* F_SETOWN: pid, or -pgrp; 0 = none */
     struct ip4_txopts txo;    /* UDP-API-12: the socket's IP_TTL/IP_TOS */
     /* SO_ERROR (cleared by getsockopt).  */
     int       so_error;
@@ -750,9 +762,18 @@ static void tcp_timer_tick(uint64_t now) {
      * tcp_xmit_raw() cannot block here.  Retransmitting inline also drops
      * the old fixed 32-victim batch array (NET-11): every PCB whose RTO
      * has expired is serviced on this tick, not silently deferred. */
+    /* TCP-URG-01: SIGURG is owed from the RX path, where psignal()'s locks
+     * cannot be taken; collect the owners here and signal after unlock.
+     * Any beyond the batch stay pending for the next tick. */
+    int urg_owner[16];
+    int nurg = 0;
     uint32_t f = tcp_lock();
     for (tcp_pcb_t *p = g_tcp_pcbs, *next; p; p = next) {
         next = p->next;
+        if (p->urg_sig_pending && nurg < 16) {
+            p->urg_sig_pending = 0;
+            if (p->owner) urg_owner[nurg++] = p->owner;
+        }
         if (p->state == TCP_CLOSED) {
             /* Terminal.  Reap if orphaned — tcp_find() never returns a
              * CLOSED PCB, so no RX path can be holding this pointer. */
@@ -871,6 +892,14 @@ static void tcp_timer_tick(uint64_t now) {
         tcp_retx_head(p, 0);
     }
     tcp_unlock(f);
+    for (int i = 0; i < nurg; i++) {
+        if (urg_owner[i] > 0) {
+            process_t *target = proc_find(urg_owner[i]);
+            if (target) psignal(target, SIGURG);
+        } else {
+            pgsignal(-urg_owner[i], SIGURG);
+        }
+    }
 }
 
 static void tcp_timer_thread(void *arg) {
@@ -1321,7 +1350,7 @@ static int tcp_seg_check(tcp_pcb_t *p, uint32_t *seqp, uint8_t *flagsp,
 }
 
 /* Copy up to `n` octets into the receive ring; returns how many fit. */
-static uint32_t tcp_rx_put(tcp_pcb_t *p, const uint8_t *data, uint32_t n) {
+static uint32_t tcp_rx_copy(tcp_pcb_t *p, const uint8_t *data, uint32_t n) {
     if (n > TCP_RING_LEN - p->rx_count)
         n = TCP_RING_LEN - p->rx_count;
     for (uint32_t i = 0; i < n; i++) {
@@ -1330,6 +1359,36 @@ static uint32_t tcp_rx_put(tcp_pcb_t *p, const uint8_t *data, uint32_t n) {
     }
     p->rx_count += n;
     return n;
+}
+
+/*
+ * Deliver in-order text starting at sequence number `seq` into the ring.
+ * Returns how many sequence octets were consumed.
+ *
+ * TCP-URG-01: the urgent octet (RCV.UP - 1, the BSD pointer convention) is
+ * lifted out of the stream into oob_byte -- BSD's default out-of-line
+ * semantics -- and the mark is recorded as the number of ring octets still
+ * ahead of it, so reads stop at the mark and SIOCATMARK can report it.
+ */
+static uint32_t tcp_rx_put(tcp_pcb_t *p, uint32_t seq, const uint8_t *data,
+                           uint32_t n) {
+    uint32_t done = 0;
+    if (p->urg_extract && n) {
+        uint32_t off = (p->rcv_up - 1u) - seq;
+        if (off < n) {
+            uint32_t got = tcp_rx_copy(p, data, off);
+            if (got < off)
+                return got;                     /* ring full before the mark */
+            p->oob_byte       = data[off];
+            p->oob_valid      = 1;
+            p->urg_extract    = 0;
+            p->urg_mark_left  = p->rx_count;
+            p->urg_mark_valid = 1;
+            done = off + 1;
+            sched_wakeup(p->recv_chan);
+        }
+    }
+    return done + tcp_rx_copy(p, data + done, n - done);
 }
 
 /*
@@ -1379,7 +1438,7 @@ static int tcp_ooo_drain(tcp_pcb_t *p) {
         uint32_t skip = p->rcv_nxt - o->seq;        /* overlap already held */
         if (skip < o->len) {
             uint32_t want = o->len - skip;
-            uint32_t got = tcp_rx_put(p, o->data + skip, want);
+            uint32_t got = tcp_rx_put(p, o->seq + skip, o->data + skip, want);
             p->rcv_nxt += got;
             if (got < want) return 0;               /* ring full: keep it */
         } else if (skip > o->len) {
@@ -1400,7 +1459,7 @@ static void tcp_ooo_free_all(tcp_pcb_t *p) {
 
 static void tcp_in_established(tcp_pcb_t *p, uint32_t seq, uint32_t ack,
                                uint8_t flags, const uint8_t *payload,
-                               size_t dlen) {
+                               size_t dlen, uint32_t urg_end) {
     if (flags & TCP_RST) {
         /*
          * RFC 5961 §3.2: do not honour a RST solely because the
@@ -1578,6 +1637,23 @@ static void tcp_in_established(tcp_pcb_t *p, uint32_t seq, uint32_t ack,
      * ignore it. */
     int can_rx = (p->state == TCP_ESTABLISHED || p->state == TCP_FIN_WAIT_1 ||
                   p->state == TCP_FIN_WAIT_2);
+    /*
+     * TCP-URG-01: RFC 793 3.9 sixth step, check the URG bit -- which was
+     * never looked at.  RCV.UP <- max(RCV.UP, SEG.UP); if it moved ahead of
+     * data not yet received, the user is signalled (SIGURG, POLLPRI) and
+     * the urgent octet is lifted out when it arrives.  urg_end was computed
+     * from the untrimmed segment, with SEG.UP clamped to its length.
+     */
+    if ((flags & TCP_URG) && urg_end && can_rx && !p->shut_rd &&
+        (!p->urg_have || (int32_t)(urg_end - p->rcv_up) > 0) &&
+        (int32_t)(urg_end - 1u - p->rcv_nxt) >= 0) {
+        p->rcv_up          = urg_end;
+        p->urg_have        = 1;
+        p->urg_extract     = 1;
+        p->oob_valid       = 0;         /* a new mark supersedes the old byte */
+        p->urg_sig_pending = 1;
+        sched_wakeup(p->recv_chan);
+    }
     /* TCP-WIN-08: text (or a FIN) beyond RCV.NXT is queued for reassembly
      * and answered with an immediate duplicate ACK (RFC 5681 4.2), instead
      * of being dropped for the peer to retransmit after an RTO. */
@@ -1591,7 +1667,7 @@ static void tcp_in_established(tcp_pcb_t *p, uint32_t seq, uint32_t ack,
     if (dlen && seq == p->rcv_nxt && can_rx) {
         /* TCP-WIN-10: after SHUT_RD, consume without storing. */
         uint32_t accept_n = p->shut_rd ? (uint32_t)dlen
-                                       : tcp_rx_put(p, payload, dlen);
+                                       : tcp_rx_put(p, seq, payload, dlen);
         p->rcv_nxt  += accept_n;
         /* TCP-WIN-08: the gap this filled may release queued segments --
          * and a FIN queued behind them. */
@@ -1739,6 +1815,15 @@ static void tcp_input_locked(uint32_t saddr, uint32_t daddr,
         return;
     }
 
+    /* TCP-URG-01: where the urgent data ends, from the untrimmed segment.
+     * SEG.UP is wire-controlled: clamp it to the segment's text (URG-06). */
+    uint32_t urg_end = 0;
+    if (flags & TCP_URG) {
+        uint16_t up = __builtin_bswap16(th->urg_ptr);
+        if (up > dlen) up = (uint16_t)dlen;
+        if (up) urg_end = seq + up;
+    }
+
     /* TCP-SM-02/-05: sequence check and trim first, before any field of an
      * unacceptable segment -- its window included -- is believed. */
     switch (p->state) {
@@ -1810,7 +1895,7 @@ static void tcp_input_locked(uint32_t saddr, uint32_t daddr,
         return;
     case TCP_SYN_RECEIVED:
         if (tcp_in_syn_received(p, &seq, ack, &flags, &payload, &dlen))
-            tcp_in_established(p, seq, ack, flags, payload, dlen);   /* TCP-SM-09 */
+            tcp_in_established(p, seq, ack, flags, payload, dlen, urg_end);   /* TCP-SM-09 */
         return;
     case TCP_ESTABLISHED:
     case TCP_FIN_WAIT_1:
@@ -1819,7 +1904,7 @@ static void tcp_input_locked(uint32_t saddr, uint32_t daddr,
     case TCP_CLOSING:
     case TCP_LAST_ACK:
     case TCP_TIME_WAIT:
-        tcp_in_established(p, seq, ack, flags, payload, dlen);
+        tcp_in_established(p, seq, ack, flags, payload, dlen, urg_end);
         return;
     default:
         return;
@@ -2163,6 +2248,8 @@ int tcp_poll(tcp_pcb_t *p, short events, void **wait_chan) {
             revents |= POLLIN;
         }
     }
+    if ((events & POLLPRI) && p->oob_valid)
+        revents |= POLLPRI;                     /* TCP-URG-01 */
     if (events & POLLOUT) {
         /*
          * TCP-WIN-02: writable means a write() would make progress.  There
@@ -2426,6 +2513,16 @@ ssize_t tcp_recv_nb(tcp_pcb_t *p, void *buf, size_t len) {
     }
     if (p->rx_count > 0) {
         size_t n = p->rx_count < len ? p->rx_count : len;
+        /* TCP-URG-01: a read stops at the urgent mark (BSD), so the reader
+         * sees SIOCATMARK true there; the next read goes past it. */
+        if (p->urg_mark_valid) {
+            if (p->urg_mark_left > 0 && n > p->urg_mark_left)
+                n = p->urg_mark_left;
+            if (p->urg_mark_left > 0)
+                p->urg_mark_left -= (uint32_t)n;
+            else
+                p->urg_mark_valid = 0;          /* read past the mark */
+        }
         uint8_t *b = (uint8_t *)buf;
         for (size_t i = 0; i < n; i++) {
             b[i] = p->rxbuf[p->rx_tail];
@@ -2519,6 +2616,8 @@ ssize_t tcp_peek_nb(tcp_pcb_t *p, void *buf, size_t len) {
     if (p->shut_rd) { tcp_unlock(lf); return 0; }
     if (p->rx_count > 0) {
         size_t n = p->rx_count < len ? p->rx_count : len;
+        if (p->urg_mark_valid && p->urg_mark_left > 0 && n > p->urg_mark_left)
+            n = p->urg_mark_left;               /* TCP-URG-01: as tcp_recv_nb */
         uint8_t *b = (uint8_t *)buf;
         uint32_t tail = p->rx_tail;
         for (size_t i = 0; i < n; i++) {
@@ -2733,6 +2832,26 @@ int tcp_shutdown_wr(tcp_pcb_t *p) {
  * direction.  recv() returns EOF from now on; a reader already
  * blocked in tcp_recv() is woken so it observes the new state.
  */
+/* TCP-URG-01: SIOCATMARK -- the next octet to be read is the one that
+ * followed the urgent octet. */
+int tcp_sockatmark(tcp_pcb_t *p) {
+    if (!p) return 0;
+    uint32_t f = tcp_lock();
+    int at = p->urg_mark_valid && p->urg_mark_left == 0;
+    tcp_unlock(f);
+    return at;
+}
+
+/* TCP-URG-01: F_SETOWN / F_GETOWN -- who receives SIGURG: a pid, or a
+ * process group as -pgrp. */
+void tcp_set_owner(tcp_pcb_t *p, int owner) {
+    if (p) p->owner = owner;
+}
+
+int tcp_get_owner(const tcp_pcb_t *p) {
+    return p ? p->owner : 0;
+}
+
 /* TCP-WIN-13: TCP_USER_TIMEOUT, in milliseconds; 0 restores the default.
  * Takes effect from the next time the unacknowledged queue is (re)armed. */
 int tcp_set_user_timeout(tcp_pcb_t *p, uint32_t ms) {
