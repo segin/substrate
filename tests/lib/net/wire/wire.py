@@ -37,6 +37,8 @@ PEER_MAC = bytes.fromhex('525400000002')
 GUEST_MAC = bytes.fromhex('525400123456')
 PEER_IP = '10.0.2.2'
 GUEST_IP = '10.0.2.15'
+PEER_IP6 = 'fec0::2'         # inet_init's IPv6 defaults
+GUEST_IP6 = 'fec0::3'
 ROOT_P2_OFFSET = 104448 * 512           # ext2 root partition in rootfs.img
 
 
@@ -104,6 +106,7 @@ class Wire:
         self.rx = []            # TCP segments from the guest, oldest first
         self.ip_rx = []         # other IPv4 datagrams: (proto, src, dst, ip_bytes)
         self.frames = []        # every frame from the guest: (dst_mac, ethertype, bytes)
+        self.ip6_rx = []        # IPv6 packets: (next_header, src, dst, bytes)
         self.trace = []         # everything seen/sent, for failure reports
 
     # -- boot -------------------------------------------------------------
@@ -200,6 +203,15 @@ class Wire:
                        PEER_MAC + socket.inet_aton(PEER_IP) + sha + spa)
                 self._send_frame(rep)
             return
+        if etype == 0x86DD and len(frame) >= 54:
+            ip6 = frame[14:]
+            plen = struct.unpack('!H', ip6[4:6])[0]
+            src = socket.inet_ntop(socket.AF_INET6, ip6[8:24])
+            dst = socket.inet_ntop(socket.AF_INET6, ip6[24:40])
+            self.trace.append(('rx', time.time(), 'ipv6 nh %d %s>%s len %d' %
+                               (ip6[6], src, dst, plen)))
+            self.ip6_rx.append((ip6[6], src, dst, bytes(ip6[:40 + plen])))
+            return
         if etype != 0x0800:
             return
         ip = frame[14:]
@@ -245,6 +257,50 @@ class Wire:
         self.trace.append(('tx', time.time(), 'arp op %d %s is-at %s -> %s' %
                            (op, spa, sha.hex(':'), tpa)))
         self._send_frame(eth_dst + sha + b'\x08\x06' + pkt)
+
+    def send_ip6(self, nh, payload, src=PEER_IP6, dst=GUEST_IP6,
+                 eth_dst=GUEST_MAC, hlim=64):
+        """Send an IPv6 packet; payload is everything after the fixed
+        header (extension headers included), nh the first Next Header."""
+        hdr = (struct.pack('!IHBB', 0x60000000, len(payload), nh, hlim) +
+               socket.inet_pton(socket.AF_INET6, src) +
+               socket.inet_pton(socket.AF_INET6, dst))
+        self.trace.append(('tx', time.time(), 'ipv6 nh %d %s>%s len %d' %
+                           (nh, src, dst, len(payload))))
+        self._send_frame(eth_dst + PEER_MAC + b'\x86\xdd' + hdr + payload)
+
+    @staticmethod
+    def icmp6(type_, code, body, src, dst):
+        """An ICMPv6 message with its checksum."""
+        msg = bytearray(struct.pack('!BBH', type_, code, 0) + body)
+        pseudo = (socket.inet_pton(socket.AF_INET6, src) +
+                  socket.inet_pton(socket.AF_INET6, dst) +
+                  struct.pack('!IxxxB', len(msg), 58))
+        msg[2:4] = struct.pack('!H', csum(pseudo + bytes(msg)))
+        return bytes(msg)
+
+    def prime_nd6(self):
+        """Solicit the guest's address with our link-layer address attached,
+        so the guest learns our MAC.  (It cannot learn it by soliciting us
+        itself: nd6_solicit() creates no entry for the answer to refresh.)"""
+        tgt = socket.inet_pton(socket.AF_INET6, GUEST_IP6)
+        sol = socket.inet_ntop(socket.AF_INET6,
+                               bytes.fromhex('ff0200000000000000000001ff') + tgt[13:])
+        body = b'\0\0\0\0' + tgt + bytes([1, 1]) + PEER_MAC
+        self.send_ip6(58, self.icmp6(135, 0, body, PEER_IP6, sol), dst=sol,
+                      eth_dst=bytes([0x33, 0x33, 0xff]) + tgt[13:], hlim=255)
+
+    def expect_ip6(self, pred, timeout):
+        end = time.time() + timeout
+        while True:
+            while self.ip6_rx:
+                d = self.ip6_rx.pop(0)
+                if pred(d):
+                    return d
+            left = end - time.time()
+            if left <= 0:
+                return None
+            self.pump(min(left, 0.2))
 
     def send_ip(self, proto, payload, src=PEER_IP, dst=GUEST_IP, ttl=64,
                 ident=None, eth_dst=GUEST_MAC):
