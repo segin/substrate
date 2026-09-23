@@ -1222,6 +1222,20 @@ int afinet_get_ipopt(int fd, int optname, int *val, uint32_t *addr) {
     return 0;
 }
 
+/*
+ * UDP-API-14: what SO_RCVBUF / SO_SNDBUF report for an AF_INET socket -- the
+ * capacity the implementation actually has, not a number borrowed from
+ * AF_UNIX.  A datagram socket queues up to AFI_RING_LEN datagrams of at most
+ * AFI_DATA_MAX bytes and sends one datagram at a time; a stream socket has
+ * TCP's 32 KiB receive ring.  -ENOTSOCK on a non-AF_INET fd.
+ */
+int afinet_bufsize(int fd, int rcv) {
+    afi_sock_t *s = afi_from_fd(fd);
+    if (!s) return -ENOTSOCK;
+    if (s->type == SOCK_STREAM) return 32 * 1024;
+    return rcv ? AFI_RING_LEN * AFI_DATA_MAX : AFI_DATA_MAX;
+}
+
 /* UDP-API-04: SO_RCVTIMEO / SO_SNDTIMEO. */
 int afinet_set_timeo(int fd, int rcv, int64_t sec, int64_t usec) {
     afi_sock_t *s = afi_from_fd(fd);

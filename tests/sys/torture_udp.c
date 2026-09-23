@@ -10,8 +10,9 @@
  * (multi-iovec sendmsg), UDP-API-03 (writev), UDP-API-04 (SO_RCVTIMEO),
  * UDP-API-06 (non-local bind), UDP-API-07 (connect binds), UDP-API-08
  * (SHUT_RD), UDP-API-09 (zero-length receive), UDP-API-10 (addrlen at
- * EOF), UDP-API-11 (IP_PKTINFO), UDP-API-12 (IP transmit options) and
- * UDP-API-13 (unimplemented options) from docs/ip-audit-2026-09-22.md.
+ * EOF), UDP-API-11 (IP_PKTINFO), UDP-API-12 (IP transmit options),
+ * UDP-API-13 (unimplemented options) and UDP-API-14 (getsockopt checks)
+ * from docs/ip-audit-2026-09-22.md.
  *
  * Each case drives the real socket API over the loopback interface, so a
  * PASS means a datagram actually took the intended path through the
@@ -1078,6 +1079,31 @@ static void test_unsupported_ipopts(void)
     close(s);
 }
 
+/* UDP-API-14: getsockopt() checks the fd is a socket, and SO_RCVBUF on a
+ * UDP socket reports its real capacity -- 32 datagrams of up to 1572 bytes
+ * -- not the 32768 borrowed from AF_UNIX. */
+static void test_getsockopt_checks(void)
+{
+    printf("UDP-API-14: getsockopt() fd checks and SO_RCVBUF\n");
+    int v = 0;
+    socklen_t vl = sizeof(v);
+    int f = open("/", O_RDONLY);
+    errno = 0;
+    ok("getsockopt on a non-socket fails ENOTSOCK",
+       getsockopt(f, SOL_SOCKET, SO_TYPE, &v, &vl) < 0 && errno == ENOTSOCK, "answered");
+    close(f);
+    vl = sizeof(v);
+    errno = 0;
+    ok("getsockopt on a closed fd fails EBADF",
+       getsockopt(f, SOL_SOCKET, SO_TYPE, &v, &vl) < 0 && errno == EBADF, "answered");
+    int u = socket(AF_INET, SOCK_DGRAM, 0);
+    vl = sizeof(v);
+    ok("UDP SO_RCVBUF is the queue's real capacity",
+       getsockopt(u, SOL_SOCKET, SO_RCVBUF, &v, &vl) == 0 && v == 32 * 1572,
+       "invented value");
+    close(u);
+}
+
 int main(void)
 {
     printf("torture_udp: UDP demux + checksum regressions (#430)\n\n");
@@ -1106,6 +1132,7 @@ int main(void)
     test_ip_txopts();
     test_pktinfo();
     test_unsupported_ipopts();
+    test_getsockopt_checks();
 
     printf("\nResult: %d passed, %d failed -- %s\n",
            passed, failed, failed ? "FAILED" : "PASSED");

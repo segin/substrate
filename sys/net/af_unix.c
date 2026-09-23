@@ -2847,6 +2847,10 @@ static int getsockopt_ret_int(int val, void *uoptval, socklen_t *uoptlen) {
 
 int sys_getsockopt(int fd, int level, int optname,
                    void *optval, socklen_t *optlen) {
+    /* UDP-API-14: like setsockopt (SOCK-09), the fd must be a socket --
+     * getsockopt() on a regular file used to answer with invented values. */
+    if (sock_fd_invalid(fd)) return -EBADF;
+    if (!sock_fd_is_socket(fd)) return -ENOTSOCK;
     if (!optval || !optlen) return -EINVAL;
     /* NET-03: optval/optlen are user pointers.  Pull the caller's buffer
      * length in first and validate it, then copy each result out — never
@@ -2930,6 +2934,12 @@ int sys_getsockopt(int fd, int level, int optname,
              * path's per-4KiB-chunk datagram framing) and a third does not. */
             afunix_sock_t *us = afunix_from_fd(fd);
             int v = (us && us->type == SOCK_DGRAM) ? (192 * 1024) : 32 * 1024;
+            /* UDP-API-14: an AF_INET socket reports its own capacity, not
+             * the AF_UNIX constants above. */
+            if (!us) {
+                int b = afinet_bufsize(fd, optname == 8);
+                if (b > 0) v = b;
+            }
             return getsockopt_ret_int(v, optval, optlen);
         }
         if (optname == 20 /*SO_RCVTIMEO*/ || optname == 21 /*SO_SNDTIMEO*/) {
