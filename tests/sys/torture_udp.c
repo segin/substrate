@@ -5,8 +5,8 @@
  * Also UDP-MEM-01 (MSG_TRUNC over-copy), UDP-MEM-02 (recvmsg msg_name
  * written through a raw user pointer), UDP-U-01 (connected sendto),
  * UDP-U-04 (destination port 0), UDP-U-05 (empty datagram via sendmsg),
- * UDP-IP-02 (all of 127/8 is local) and UDP-IP-08 (broadcast fan-out) from
- * docs/ip-audit-2026-09-22.md.
+ * UDP-IP-02 (all of 127/8 is local), UDP-IP-08 (broadcast fan-out) and
+ * UDP-IP-11 (lo's MTU) from docs/ip-audit-2026-09-22.md.
  *
  * Each case drives the real socket API over the loopback interface, so a
  * PASS means a datagram actually took the intended path through the
@@ -19,6 +19,8 @@
 #include <netinet/in.h>
 #include <stdio.h>
 #include <string.h>
+#include <net/if.h>
+#include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <sys/uio.h>
 #include <sys/un.h>
@@ -549,6 +551,22 @@ static void test_broadcast_fanout(void)
     close(tx);
 }
 
+/* UDP-IP-11: lo reports the MTU its ring can actually carry (1686 = the
+ * 1700-byte frame limit minus the Ethernet header), not 16384. */
+static void test_lo_mtu(void)
+{
+    printf("UDP-IP-11: lo's MTU is what it can carry\n");
+    struct ifreq ifr;
+    int fd = socket(AF_INET, SOCK_DGRAM, 0);
+    memset(&ifr, 0, sizeof(ifr));
+    strncpy(ifr.ifr_name, "lo", sizeof(ifr.ifr_name) - 1);
+    int r = ioctl(fd, SIOCGIFMTU, &ifr);
+    ok("SIOCGIFMTU(lo) succeeds", r == 0, "ioctl failed");
+    ok("lo's MTU fits its 1700-byte frames", r == 0 && ifr.ifr_mtu > 0 && ifr.ifr_mtu <= 1686,
+       "MTU larger than the device can carry");
+    close(fd);
+}
+
 int main(void)
 {
     printf("torture_udp: UDP demux + checksum regressions (#430)\n\n");
@@ -565,6 +583,7 @@ int main(void)
     test_sendmsg_empty();
     test_loopback_net();
     test_broadcast_fanout();
+    test_lo_mtu();
 
     printf("\nResult: %d passed, %d failed -- %s\n",
            passed, failed, failed ? "FAILED" : "PASSED");

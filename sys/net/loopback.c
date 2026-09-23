@@ -29,6 +29,7 @@
  * loopback), the lookup is skipped.
  */
 
+#include <errno.h>
 #include <stddef.h>
 #include <string.h>
 
@@ -72,7 +73,11 @@ static const struct netdev_ops lo_ops = { .xmit = lo_xmit };
  */
 static int lo_xmit(netdev_t *dev, const void *frame, size_t len) {
     (void)dev;
-    if (len > LO_FRAME_MAX) len = LO_FRAME_MAX;
+    /* UDP-IP-11: refuse rather than truncate.  An oversize frame used to be
+     * cut to LO_FRAME_MAX and reported as sent -- silent data loss.  No
+     * caller can exceed it today (NETDEV_MTU_MAX is smaller), but the
+     * contract must not depend on that. */
+    if (len > LO_FRAME_MAX) return -EMSGSIZE;
     uint32_t f = intr_disable();
     unsigned next = (lo_ring_head + 1) % LO_RING;
     if (next != lo_ring_tail) {
@@ -121,7 +126,10 @@ void loopback_init(void) {
     strlcpy(lo_netdev.name, "lo", NETDEV_NAME_MAX);
     /* Use a recognisable zero MAC.  Real loopback doesn't have one. */
     memset(lo_netdev.hwaddr, 0, NETDEV_HWADDR_LEN);
-    lo_netdev.mtu   = 16384;
+    /* UDP-IP-11: advertise what the ring can actually carry.  It said 16384
+     * while carrying LO_FRAME_MAX, which is what SIOCGIFMTU reported and
+     * what anything sizing by the device MTU would have trusted. */
+    lo_netdev.mtu   = LO_FRAME_MAX - ETH_HLEN;
     lo_netdev.flags = NETDEV_IFF_UP | NETDEV_IFF_LOOPBACK | NETDEV_IFF_RUNNING;
     lo_netdev.ops   = &lo_ops;
     /* 127.0.0.1 / 255.0.0.0 */
