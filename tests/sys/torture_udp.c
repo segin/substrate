@@ -2,6 +2,8 @@
  * torture_udp.c — regression test for the UDP demux and checksum findings
  * (task #430: UDP-01, UDP-03, SOCK-07).
  *
+ * Also UDP-MEM-01 from docs/ip-audit-2026-09-22.md (MSG_TRUNC over-copy).
+ *
  * Each case drives the real socket API over the loopback interface, so a
  * PASS means a datagram actually took the intended path through the
  * kernel's demux, not that some internal predicate returned the right
@@ -257,6 +259,70 @@ static void test_raw_socket_privileged(void)
        "an unprivileged process opened a packet socket");
 }
 
+/*
+ * UDP-MEM-01: recv(..., MSG_TRUNC) returns a datagram's REAL length, which
+ * can exceed the caller's buffer.  do_recv() then copied that many bytes out
+ * of a kernel bounce buffer sized to the caller's length -- reading past the
+ * end of the kernel allocation and writing past the end of the user buffer.
+ * The 16-byte receive buffer sits at the front of a canary-filled region, so
+ * any byte copied beyond 16 shows up as a clobbered canary.
+ */
+#define TRUNC_DGRAM 1400
+#define TRUNC_BUF   16
+static void check_trunc(const char *what, int rx, int tx,
+                        const struct sockaddr *dst, socklen_t dstlen)
+{
+    static char big[TRUNC_DGRAM];
+    static unsigned char region[4096];
+
+    memset(big, 'A', sizeof(big));
+    memset(region, 0xCC, sizeof(region));
+    ssize_t sent = dst ? sendto(tx, big, sizeof(big), 0, dst, dstlen)
+                       : send(tx, big, sizeof(big), 0);
+    if (sent != (ssize_t)sizeof(big)) {
+        ok(what, 0, "send failed");
+        return;
+    }
+    ssize_t got = recv(rx, region, TRUNC_BUF, MSG_TRUNC | MSG_DONTWAIT);
+    int head_ok = 1, canary_ok = 1;
+    for (int i = 0; i < TRUNC_BUF; i++)
+        if (region[i] != 'A') head_ok = 0;
+    for (size_t i = TRUNC_BUF; i < sizeof(region); i++)
+        if (region[i] != 0xCC) canary_ok = 0;
+    char label[96];
+    snprintf(label, sizeof(label), "%s: MSG_TRUNC reports the real length", what);
+    ok(label, got == TRUNC_DGRAM, "wrong return value");
+    snprintf(label, sizeof(label), "%s: only the caller's %d bytes are written", what, TRUNC_BUF);
+    ok(label, head_ok && canary_ok,
+       canary_ok ? "payload bytes wrong" : "bytes written past the end of the user buffer");
+}
+
+static void test_msg_trunc_clamp(void)
+{
+    printf("UDP-MEM-01: MSG_TRUNC never copies past the caller's buffer\n");
+
+    struct sockaddr_in dst;
+    int rx = bind_udp(31990);
+    int tx = socket(AF_INET, SOCK_DGRAM, 0);
+    if (rx < 0 || tx < 0) {
+        ok("UDP sockets created", 0, "socket/bind failed");
+    } else {
+        lo_addr(&dst, 31990);
+        check_trunc("UDP", rx, tx, (struct sockaddr *)&dst, sizeof(dst));
+    }
+    if (rx >= 0) close(rx);
+    if (tx >= 0) close(tx);
+
+    int sv[2];
+    if (socketpair(AF_UNIX, SOCK_DGRAM, 0, sv) < 0) {
+        ok("AF_UNIX socketpair created", 0, "socketpair failed");
+        return;
+    }
+    check_trunc("AF_UNIX", sv[1], sv[0], NULL, 0);
+    close(sv[0]);
+    close(sv[1]);
+}
+
 int main(void)
 {
     printf("torture_udp: UDP demux + checksum regressions (#430)\n\n");
@@ -266,6 +332,7 @@ int main(void)
     test_connected_peer_filter();
     test_so_error_unix();
     test_raw_socket_privileged();
+    test_msg_trunc_clamp();
 
     printf("\nResult: %d passed, %d failed -- %s\n",
            passed, failed, failed ? "FAILED" : "PASSED");

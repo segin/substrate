@@ -1834,7 +1834,15 @@ static ssize_t do_recv(int fd, void *buf, size_t len, int flags,
         kfree(kbuf, cap);
         return n;
     }
-    if (n > 0 && copyout(kbuf, buf, (size_t)n) != 0) {
+    /*
+     * UDP-MEM-01: with MSG_TRUNC, n is the datagram's REAL length, which can
+     * exceed what was received into kbuf.  Copying n bytes read past the end
+     * of the kernel allocation and wrote past the end of the user buffer --
+     * adjacent kernel heap handed to userspace.  Copy what kbuf holds and
+     * still return n, which is what MSG_TRUNC reports.
+     */
+    size_t ncopy = (size_t)n < cap ? (size_t)n : cap;
+    if (ncopy > 0 && copyout(kbuf, buf, ncopy) != 0) {
         kfree(kbuf, cap);
         return -EFAULT;
     }
