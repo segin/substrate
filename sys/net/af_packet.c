@@ -210,21 +210,46 @@ int afpacket_bind(int fd, const struct sockaddr_ll_kern *sll, socklen_t len) {
     return 0;
 }
 
+/* Resolve the destination device for a send.  Returns it, or NULL with
+ * *err set. */
+static netdev_t *afpacket_send_dev(int fd, const struct sockaddr_ll_kern *to,
+                                   socklen_t tolen, int *err) {
+    afpkt_sock_t *s = afpkt_from_fd(fd);
+    if (!s) { *err = -ENOTSOCK; return NULL; }
+    if (s->closed) { *err = -EBADF; return NULL; }
+    int ifindex = s->ifindex_bound;
+    if (to && tolen >= (socklen_t)sizeof(*to)) {
+        if (to->sll_family != AF_PACKET) { *err = -EAFNOSUPPORT; return NULL; }
+        ifindex = to->sll_ifindex;
+    }
+    if (ifindex <= 0) { *err = -EDESTADDRREQ; return NULL; }
+    netdev_t *dev = netdev_by_index((uint32_t)ifindex);
+    if (!dev) *err = -ENODEV;
+    return dev;
+}
+
+/* UDP-API-02: sendmsg()'s gather buffer is already kernel memory, so it
+ * must not go through copyin(), which rejects every kernel address. */
+ssize_t afpacket_sendto_kbuf(int fd, const void *kbuf, size_t len, int flags,
+                             const void *sll, socklen_t tolen) {
+    (void)flags;
+    int err = 0;
+    netdev_t *dev = afpacket_send_dev(fd, (const struct sockaddr_ll_kern *)sll,
+                                      tolen, &err);
+    if (!dev) return err;
+    if (!kbuf && len) return -EINVAL;
+    if (len == 0) return 0;
+    if (len > NETDEV_MTU_MAX) return -EMSGSIZE;
+    int rc = netdev_xmit(dev, kbuf, len);
+    return rc < 0 ? rc : (ssize_t)len;
+}
+
 ssize_t afpacket_sendto(int fd, const void *buf, size_t len, int flags,
                         const struct sockaddr_ll_kern *to, socklen_t tolen) {
     (void)flags;
-    afpkt_sock_t *s = afpkt_from_fd(fd);
-    if (!s) return -ENOTSOCK;
-    if (s->closed) return -EBADF;
-
-    int ifindex = s->ifindex_bound;
-    if (to && tolen >= (socklen_t)sizeof(*to)) {
-        if (to->sll_family != AF_PACKET) return -EAFNOSUPPORT;
-        ifindex = to->sll_ifindex;
-    }
-    if (ifindex <= 0) return -EDESTADDRREQ;
-    netdev_t *dev = netdev_by_index((uint32_t)ifindex);
-    if (!dev) return -ENODEV;
+    int err = 0;
+    netdev_t *dev = afpacket_send_dev(fd, to, tolen, &err);
+    if (!dev) return err;
 
     /*
      * SOCK-02: `buf` is a raw userspace pointer from send/sendto/sendmsg and

@@ -1559,6 +1559,16 @@ static ssize_t afinet_sendto_k(int fd, const void *buf, size_t len, int flags,
  */
 #define AFI_SEND_CHUNK (64U * 1024U)
 
+ssize_t afinet_sendto_kbuf(int fd, const void *kbuf, size_t len, int flags,
+                           const void *addr, socklen_t addrlen) {
+    afi_sock_t *s = afi_from_fd(fd);
+    if (!s) return -ENOTSOCK;
+    if (!kbuf && len) return -EINVAL;
+    if (!(s->type == SOCK_STREAM && s->tcp) && len > AFI_DATA_MAX)
+        return -EMSGSIZE;
+    return afinet_sendto_k(fd, kbuf, len, flags, addr, addrlen);
+}
+
 ssize_t afinet_sendto(int fd, const void *ubuf, size_t len, int flags,
                       const void *addr, socklen_t addrlen) {
     afi_sock_t *s = afi_from_fd(fd);

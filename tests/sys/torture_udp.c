@@ -6,8 +6,8 @@
  * written through a raw user pointer), UDP-U-01 (connected sendto),
  * UDP-U-04 (destination port 0), UDP-U-05 (empty datagram via sendmsg),
  * UDP-IP-02 (all of 127/8 is local), UDP-IP-08 (broadcast fan-out) and
- * UDP-IP-11 (lo's MTU) and UDP-API-01 (port ownership) from
- * docs/ip-audit-2026-09-22.md.
+ * UDP-IP-11 (lo's MTU), UDP-API-01 (port ownership) and UDP-API-02
+ * (multi-iovec sendmsg) from docs/ip-audit-2026-09-22.md.
  *
  * Each case drives the real socket API over the loopback interface, so a
  * PASS means a datagram actually took the intended path through the
@@ -646,6 +646,37 @@ static void test_port_ownership(void)
     close(tx);
 }
 
+/* UDP-API-02: sendmsg() with more than one iovec on a UDP socket sends ONE
+ * datagram with the iovecs concatenated.  The gather buffer is kernel
+ * memory, and the AF_INET route ran it through copyin(), so every such call
+ * failed EFAULT. */
+static void test_sendmsg_gather(void)
+{
+    printf("UDP-API-02: multi-iovec sendmsg() on UDP\n");
+    struct sockaddr_in dst;
+    char buf[32];
+    int rx = bind_udp(31964);
+    int tx = socket(AF_INET, SOCK_DGRAM, 0);
+    lo_addr(&dst, 31964);
+    struct iovec iov[2] = { { (void *)"head-", 5 }, { (void *)"body", 4 } };
+    struct msghdr mh;
+    memset(&mh, 0, sizeof(mh));
+    mh.msg_name = &dst;
+    mh.msg_namelen = sizeof(dst);
+    mh.msg_iov = iov;
+    mh.msg_iovlen = 2;
+    errno = 0;
+    ssize_t n = sendmsg(tx, &mh, 0);
+    ok("two-iovec sendmsg returns the total", n == 9, "sendmsg failed");
+    memset(buf, 0, sizeof(buf));
+    ssize_t r = try_recv(rx, buf, sizeof(buf));
+    ok("one datagram with both iovecs arrived",
+       r == 9 && memcmp(buf, "head-body", 9) == 0, "wrong or no datagram");
+    ok("and only one", try_recv(rx, buf, sizeof(buf)) < 0, "split into several");
+    close(rx);
+    close(tx);
+}
+
 int main(void)
 {
     printf("torture_udp: UDP demux + checksum regressions (#430)\n\n");
@@ -664,6 +695,7 @@ int main(void)
     test_broadcast_fanout();
     test_lo_mtu();
     test_port_ownership();
+    test_sendmsg_gather();
 
     printf("\nResult: %d passed, %d failed -- %s\n",
            passed, failed, failed ? "FAILED" : "PASSED");

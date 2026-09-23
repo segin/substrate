@@ -141,6 +141,10 @@ int     afinet_bind(int fd, const void *addr, socklen_t len);
 int     afinet_connect(int fd, const void *addr, socklen_t len);
 ssize_t afinet_sendto(int fd, const void *buf, size_t len, int flags,
                       const void *addr, socklen_t addrlen);
+/* UDP-API-02: as afinet_sendto(), but `kbuf` is kernel memory (the
+ * sendmsg() gather buffer) and is not copied in. */
+ssize_t afinet_sendto_kbuf(int fd, const void *kbuf, size_t len, int flags,
+                           const void *addr, socklen_t addrlen);
 ssize_t afinet_recvfrom(int fd, void *buf, size_t len, int flags,
                         void *addr, socklen_t *addrlen);
 
@@ -221,6 +225,10 @@ int     afpacket_socket(int type, int protocol);
 int     afpacket_bind(int fd, const void *sll, socklen_t len);
 ssize_t afpacket_sendto(int fd, const void *buf, size_t len, int flags,
                         const void *sll, socklen_t addrlen);
+/* UDP-API-02: as afpacket_sendto(), but `kbuf` is kernel memory (the
+ * sendmsg() gather buffer) and is not copied in. */
+ssize_t afpacket_sendto_kbuf(int fd, const void *kbuf, size_t len, int flags,
+                             const void *sll, socklen_t addrlen);
 ssize_t afpacket_recvfrom(int fd, void *buf, size_t len, int flags,
                           void *sll, socklen_t *addrlen);
 size_t  afpkt_node_read(struct fs_node *, off_t, size_t, uint8_t *);

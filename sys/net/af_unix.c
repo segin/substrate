@@ -1973,11 +1973,20 @@ static ssize_t sys_sendto_impl(int fd, const void *buf, size_t len, int flags,
     /* Route by destination address family first.  The payload bounce happens
      * inside afpacket_sendto/afinet_sendto, which know their own size
      * limits. */
+    /* UDP-API-02: honour kernel_payload on these routes too.  It was
+     * honoured only for AF_UNIX, so the SOCK-04 sendmsg() gather buffer --
+     * kernel memory -- reached afinet_sendto()'s copyin(), which rejects
+     * every kernel address: each multi-iovec sendmsg() on a UDP socket
+     * failed EFAULT and sent nothing (libtirpc's svc_dg_reply among them). */
     if (kaddr) {
         if (kaddr->sa_family == AF_PACKET)
-            return afpacket_sendto(fd, buf, len, flags, kaddr, kaddrlen);
+            return kernel_payload
+                ? afpacket_sendto_kbuf(fd, buf, len, flags, (const void *)kaddr, kaddrlen)
+                : afpacket_sendto(fd, buf, len, flags, (const void *)kaddr, kaddrlen);
         if (kaddr->sa_family == AF_INET || kaddr->sa_family == AF_INET6)
-            return afinet_sendto(fd, buf, len, flags, kaddr, kaddrlen);
+            return kernel_payload
+                ? afinet_sendto_kbuf(fd, buf, len, flags, kaddr, kaddrlen)
+                : afinet_sendto(fd, buf, len, flags, kaddr, kaddrlen);
     }
     /* No addr: route by fd type. */
     if (fd >= 0 && fd < MAX_FD && current_process) {
@@ -1987,9 +1996,13 @@ static ssize_t sys_sendto_impl(int fd, const void *buf, size_t len, int flags,
             if (n->read && n->read != afunix_node_read) {
 
                 if (n->read == (void *)afpkt_node_read)
-                    return afpacket_sendto(fd, buf, len, flags, addr, addrlen);
+                    return kernel_payload
+                        ? afpacket_sendto_kbuf(fd, buf, len, flags, NULL, 0)
+                        : afpacket_sendto(fd, buf, len, flags, addr, addrlen);
                 if (n->read == (void *)afinet_node_read)
-                    return afinet_sendto(fd, buf, len, flags, addr, addrlen);
+                    return kernel_payload
+                        ? afinet_sendto_kbuf(fd, buf, len, flags, NULL, 0)
+                        : afinet_sendto(fd, buf, len, flags, addr, addrlen);
             }
         }
     }
