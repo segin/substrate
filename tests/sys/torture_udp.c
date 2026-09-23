@@ -9,8 +9,8 @@
  * UDP-IP-11 (lo's MTU), UDP-API-01 (port ownership), UDP-API-02
  * (multi-iovec sendmsg), UDP-API-03 (writev), UDP-API-04 (SO_RCVTIMEO),
  * UDP-API-06 (non-local bind), UDP-API-07 (connect binds), UDP-API-08
- * (SHUT_RD) and UDP-API-09 (zero-length receive) from
- * docs/ip-audit-2026-09-22.md.
+ * (SHUT_RD), UDP-API-09 (zero-length receive) and UDP-API-10 (addrlen at
+ * EOF) from docs/ip-audit-2026-09-22.md.
  *
  * Each case drives the real socket API over the loopback interface, so a
  * PASS means a datagram actually took the intended path through the
@@ -851,6 +851,14 @@ static void test_shut_rd(void)
     alarm(0);
     ok("recv() returns 0", n == 0, "did not return EOF");
     ok("read() returns 0", read(c, buf, sizeof(buf)) == 0, "did not return EOF");
+    /* UDP-API-10: that EOF carries no source address. */
+    struct sockaddr_in from;
+    socklen_t flen = sizeof(from);
+    alarm(3);
+    n = recvfrom(c, buf, sizeof(buf), 0, (struct sockaddr *)&from, &flen);
+    alarm(0);
+    ok("UDP-API-10: recvfrom() at EOF reports no address (addrlen 0)",
+       n == 0 && flen == 0, "addrlen left at the bounce capacity");
     close(c);
 }
 

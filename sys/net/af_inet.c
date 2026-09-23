@@ -1711,6 +1711,13 @@ ssize_t afinet_recvfrom(int fd, void *buf, size_t len, int flags,
     afi_sock_t *s = afi_from_fd(fd);
     if (!s) return -ENOTSOCK;
     if (!buf) return -EINVAL;
+    /* UDP-API-10: no source address unless a datagram is actually taken.
+     * The caller's *addrlen (do_recv's 128-byte bounce capacity) was left
+     * untouched on EOF, EAGAIN and the stream path, so recvfrom() reported
+     * a 128-byte "address" of zeros.  Only the dequeue path sets it.
+     * *addrlen is in/out: keep the capacity it brought in. */
+    socklen_t acap = addrlen ? *addrlen : 0;
+    if (addrlen) *addrlen = 0;
 
     /* TCP path — data lives in the PCB's rxbuf, NOT the per-socket
      * UDP/RAW ring below.  Without this branch every TCP recv hung
@@ -1787,14 +1794,14 @@ ssize_t afinet_recvfrom(int fd, void *buf, size_t len, int flags,
             afi_rele_unlock(s, fl);
             memcpy(buf, tmp, n);
             if (addr && addrlen) {
-                if (fam == AF_INET && *addrlen >= (socklen_t)sizeof(struct sin_kern)) {
+                if (fam == AF_INET && acap >= (socklen_t)sizeof(struct sin_kern)) {
                     struct sin_kern *sin = (struct sin_kern *)addr;
                     memset(sin, 0, sizeof(*sin));
                     sin->sin_family = AF_INET;
                     sin->sin_port = __builtin_bswap16(pport);
                     memcpy(&sin->sin_addr, paddr, 4);
                     *addrlen = sizeof(*sin);
-                } else if (fam == AF_INET6 && *addrlen >= (socklen_t)sizeof(struct sin6_kern)) {
+                } else if (fam == AF_INET6 && acap >= (socklen_t)sizeof(struct sin6_kern)) {
                     struct sin6_kern *sin6 = (struct sin6_kern *)addr;
                     memset(sin6, 0, sizeof(*sin6));
                     sin6->sin6_family = AF_INET6;
