@@ -187,13 +187,33 @@ void arp_input(netdev_t *dev, const uint8_t *pkt, size_t len) {
      *     broadcast/unsolicited reply, can refresh but never create.
      */
     int target_is_me = (target_ip == dev->ip4_addr && dev->ip4_addr);
+    /*
+     * UDP-IP-05: never learn -- or refresh -- a mapping for an address that
+     * cannot name a single host: 0.0.0.0, a broadcast (limited or this
+     * subnet's), or multicast.  A reply claiming "10.0.2.255 is-at X" was
+     * accepted like any other (its target is our IP), after which every
+     * subnet broadcast went to X alone.  (0.0.0.0 is also the probe source
+     * of RFC 5227 duplicate-address detection, which says nothing about
+     * the sender's MAC -- and such a probe for OUR address must still be
+     * answered below, so only the learning is gated.)
+     */
+    int learnable;
+    {
+        uint32_t h = __builtin_bswap32(sender_ip);
+        uint32_t dbcast = (dev->ip4_addr & dev->ip4_netmask) | ~dev->ip4_netmask;
+        learnable = !(sender_ip == 0 || sender_ip == 0xFFFFFFFFu ||
+                      (h >> 28) == 0xE ||
+                      (dev->ip4_netmask && sender_ip == dbcast));
+    }
     /* NET-09: merge/insert under the cache lock (raw ops — we already hold
      * it, so do not call the locking arp_insert() here).  Kept tiny; the
      * reply transmit below runs outside the lock. */
-    unsigned long af = spinlock_acquire_irq(&g_arp_lock);
-    if (!arp_update_existing(dev, sender_ip, arp->ar_sha) && target_is_me)
-        arp_insert_raw(dev, sender_ip, arp->ar_sha);
-    spinlock_release_irq(&g_arp_lock, af);
+    if (learnable) {
+        unsigned long af = spinlock_acquire_irq(&g_arp_lock);
+        if (!arp_update_existing(dev, sender_ip, arp->ar_sha) && target_is_me)
+            arp_insert_raw(dev, sender_ip, arp->ar_sha);
+        spinlock_release_irq(&g_arp_lock, af);
+    }
 
     /* If a request is directed at us, reply. */
     uint16_t op = __builtin_bswap16(arp->ar_op);

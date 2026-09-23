@@ -317,9 +317,18 @@ int ip4_output_from(uint32_t saddr, uint32_t daddr, uint8_t protocol,
     ih->check = inet_csum(ih, sizeof(*ih));
     memcpy(pkt + sizeof(*ih), payload, payload_len);
 
-    /* ARP for the next hop.  Loopback skips ARP entirely. */
+    /* ARP for the next hop.  Loopback skips ARP entirely.
+     *
+     * UDP-IP-05: so does a broadcast -- RFC 1122 3.3.6, it goes out as a
+     * link-layer broadcast.  A subnet broadcast used to be ARPed for like a
+     * host: the request normally went unanswered and the datagram was
+     * dropped, and any on-link host that did answer captured every one of
+     * our broadcasts until the entry expired.  (arp.c now refuses to learn
+     * such a mapping at all.)  Mirrors inet6.c's multicast mapping. */
     uint8_t mac[6] = { 0 };
-    if (!(dev->flags & NETDEV_IFF_LOOPBACK)) {
+    if (!(dev->flags & NETDEV_IFF_LOOPBACK) && ip4_is_bcast_on(dev, daddr)) {
+        memset(mac, 0xFF, sizeof(mac));
+    } else if (!(dev->flags & NETDEV_IFF_LOOPBACK)) {
         uint32_t nexthop = via_gw ? dev->ip4_gateway : daddr;
         if (arp_lookup(dev, nexthop, mac) != 0) {
             arp_request(dev, nexthop);
