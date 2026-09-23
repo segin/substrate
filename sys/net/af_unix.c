@@ -91,7 +91,7 @@ static int sock_fd_invalid(int fd) {
 /* Substrate uses BSD-style msghdr; mirror the user-visible field set
  * for the iov walk in sys_send/recvmsg.  Kernel socket.h has a
  * narrower form, so cast through this struct's interpretation. */
-struct iovec_local { void *iov_base; size_t iov_len; };
+/* struct iovec_local: <net/inet.h> (UDP-API-03). */
 
 /* ============================================================
  * Buffer
@@ -2134,7 +2134,7 @@ struct kcmsghdr {
  * framing destroyed on the wire.  On a stream there are no boundaries, so
  * iterating is correct and stays.
  */
-static int sock_fd_is_dgram(int fd) {
+int sock_fd_is_dgram(int fd) {
     afunix_sock_t *u = afunix_from_fd(fd);
     if (u) return u->type == SOCK_DGRAM;
     int t = afinet_so_type(fd);
@@ -2150,6 +2150,40 @@ static ssize_t iov_total(const struct iovec_local *iov, int n, size_t *out) {
     }
     *out = total;
     return 0;
+}
+
+/*
+ * SOCK-04 / UDP-U-05 / UDP-API-03: on a datagram socket the iovecs are ONE
+ * message.  Gather them (kiov is a kernel copy whose iov_base entries are
+ * still user pointers) into one kernel buffer and send exactly one datagram
+ * -- an empty one if they total zero.  Shared by sendmsg() and writev(),
+ * which used to send one datagram per iovec and destroy the framing.
+ * Returns the bytes sent or a negative errno.
+ */
+ssize_t sock_dgram_sendv(int fd, const struct iovec_local *kiov, int iovcnt,
+                         int flags, const struct sockaddr *uaddr,
+                         socklen_t addrlen) {
+    size_t need = 0;
+    if (iovcnt < 0) return -EINVAL;
+    if (iovcnt > 0 && iov_total(kiov, iovcnt, &need) != 0) return -EMSGSIZE;
+    if (need == 0)
+        return sys_sendto_impl(fd, NULL, 0, flags, uaddr, addrlen,
+                               /*kernel_payload=*/0);
+    uint8_t *gath = kmalloc(need);
+    if (!gath) return -ENOMEM;
+    size_t off = 0;
+    for (int i = 0; i < iovcnt; i++) {
+        if (kiov[i].iov_len == 0) continue;
+        if (copyin(kiov[i].iov_base, gath + off, kiov[i].iov_len) != 0) {
+            kfree(gath, need);
+            return -EFAULT;
+        }
+        off += kiov[i].iov_len;
+    }
+    ssize_t r = sys_sendto_impl(fd, gath, need, flags, uaddr, addrlen,
+                                /*kernel_payload=*/1);
+    kfree(gath, need);
+    return r;
 }
 
 ssize_t sys_sendmsg(int fd, const struct msghdr *umsg, int flags) {
@@ -2278,38 +2312,15 @@ cmsg_done:
      * audit) and for anything else that builds a header and a body as two
      * iovecs.  A stream socket keeps the loop -- it has no boundaries.
      */
-    size_t need = 0;
-    if (msg->msg_iovlen > 0 &&
-        iov_total(kiov, (int)msg->msg_iovlen, &need) != 0)
-        return -EMSGSIZE;
-    /* UDP-U-05: an empty datagram is legal -- UDP's Length is then 8 -- and
-     * is still one message.  A datagram sendmsg() whose iovecs total zero
-     * (none at all, or only empty ones) used to return 0 having sent
-     * nothing: the gather branch bailed out and the loop below never ran.
-     * Send it, with no payload to copy. */
-    if (need == 0 && sock_fd_is_dgram(fd))
-        return sys_sendto_impl(fd, NULL, 0, flags,
-                               (const struct sockaddr *)msg->msg_name,
-                               (socklen_t)msg->msg_namelen,
-                               /*kernel_payload=*/0);
-    if (msg->msg_iovlen > 1 && sock_fd_is_dgram(fd)) {
-        uint8_t *gath = kmalloc(need);
-        if (!gath) return -ENOMEM;
-        size_t off = 0;
-        for (int i = 0; i < (int)msg->msg_iovlen; i++) {
-            if (iov[i].iov_len == 0) continue;
-            if (copyin(iov[i].iov_base, gath + off, iov[i].iov_len) != 0) {
-                kfree(gath, need);
-                return -EFAULT;
-            }
-            off += iov[i].iov_len;
-        }
-        ssize_t r = sys_sendto_impl(fd, gath, need, flags,
+    if (sock_fd_is_dgram(fd)) {
+        size_t need = 0;
+        if (msg->msg_iovlen > 0 &&
+            iov_total(kiov, (int)msg->msg_iovlen, &need) != 0)
+            return -EMSGSIZE;
+        if (need == 0 || msg->msg_iovlen > 1)
+            return sock_dgram_sendv(fd, kiov, (int)msg->msg_iovlen, flags,
                                     (const struct sockaddr *)msg->msg_name,
-                                    (socklen_t)msg->msg_namelen,
-                                    /*kernel_payload=*/1);
-        kfree(gath, need);
-        return r;
+                                    (socklen_t)msg->msg_namelen);
     }
 
     for (int i = 0; i < (int)msg->msg_iovlen; i++) {

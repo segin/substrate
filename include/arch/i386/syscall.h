@@ -287,6 +287,13 @@
 #define SYS_SIGWAIT          524
 #define SYS_SIGTIMEDWAIT     525
 
+/* UDP-API-03: gathering write.  The native libc writev() was a userspace loop
+ * of write() calls, so a datagram socket put one datagram per iovec on the
+ * wire.  The kernel's sys_writev() (shared with the BSD personalities) sends
+ * a datagram socket's iovecs as ONE datagram.  Next free after
+ * SYS_SIGTIMEDWAIT. */
+#define SYS_WRITEV           526
+
 void syscall_init(void);
 
 // GDT TLS entries

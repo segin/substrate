@@ -12,6 +12,7 @@
 #include <kern/file.h>
 #include <kern/sched.h>
 #include <kern/version.h>
+#include <net/inet.h>
 #include <pm/pm.h>
 #include <sys/compiler.h>
 #include <sys/copy.h>
@@ -565,6 +566,18 @@ ssize_t sys_writev(int fd, const void *iov_user, int iovcnt) {
     if (copyin(iov_user, kiov, sz) != 0) {
         if (kiov != stackbuf) kfree(kiov, sz);
         return -EFAULT;
+    }
+    /* UDP-API-03: on a datagram socket the iovecs are one message.  The
+     * loop below issued one write per iovec, so writev() on a connected UDP
+     * socket put N datagrams on the wire for one call and destroyed the
+     * framing.  freebsd_iovec and iovec_local share a layout. */
+    if (sock_fd_is_dgram(fd)) {
+        _Static_assert(sizeof(struct freebsd_iovec) == sizeof(struct iovec_local),
+                       "iovec layouts differ");
+        ssize_t r = sock_dgram_sendv(fd, (const struct iovec_local *)kiov,
+                                     iovcnt, 0, NULL, 0);
+        if (kiov != stackbuf) kfree(kiov, sz);
+        return r;
     }
     ssize_t total = 0;
     for (int i = 0; i < iovcnt; i++) {

@@ -4,7 +4,7 @@ Source of truth:
 - Numbers: `sys/arch/i386/syscall.h`
 - Native dispatch wiring: `sys/exec/perso/perso_native.c`
 
-## Wired In Native Dispatch (82 entries)
+## Wired In Native Dispatch (83 entries)
 
 ### Process, identity, scheduler
 
@@ -31,6 +31,7 @@ Source of truth:
 
 - `3 SYS_READ (read)`: read from file descriptor.
 - `4 SYS_WRITE (write)`: write to file descriptor.
+- `526 SYS_WRITEV (writev)`: gathering write; a datagram socket's buffers are sent as one datagram (UDP-API-03). See `writev(2)`.
 - `5 SYS_OPEN (open)`: open file path.
 - `6 SYS_CLOSE (close)`: close file descriptor.
 - `10 SYS_UNLINK (unlink)`: remove directory entry.

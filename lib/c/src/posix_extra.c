@@ -39,6 +39,7 @@
 #include <sys/syscall.h>
 #include <sys/types.h>
 #include <sys/uio.h>
+#include <sys_local.h>
 #include <sys/wait.h>
 
 /* ============================================================
@@ -409,16 +410,18 @@ ssize_t readv(int fd, const struct iovec *iov, int iovcnt) {
     return total;
 }
 
+/*
+ * UDP-API-03: a real system call, not a loop of write()s.  The loop put one
+ * datagram per iovec on a datagram socket, splitting a message its caller
+ * had built as a header plus a body; the kernel's sys_writev() sends a
+ * datagram socket's iovecs as ONE datagram (and loops over write() itself
+ * for everything else, as before).
+ */
 ssize_t writev(int fd, const struct iovec *iov, int iovcnt) {
-    ssize_t total = 0;
-    for (int i = 0; i < iovcnt; i++) {
-        if (iov[i].iov_len == 0) continue;
-        ssize_t n = write(fd, iov[i].iov_base, iov[i].iov_len);
-        if (n < 0) return total > 0 ? total : -1;
-        total += n;
-        if ((size_t)n < iov[i].iov_len) break;
-    }
-    return total;
+    int64_t r = _syscall3(SYS_WRITEV, (uintptr_t)fd, (uintptr_t)iov,
+                          (uintptr_t)iovcnt);
+    if (r < 0) { errno = (int)-r; return -1; }
+    return (ssize_t)r;
 }
 
 ssize_t preadv(int fd, const struct iovec *iov, int iovcnt, off_t offset) {

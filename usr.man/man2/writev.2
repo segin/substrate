@@ -1,0 +1,124 @@
+.\"
+.\" WRITEV(2) - Substrate Native Personality
+.\"
+.TH WRITEV 2 "2026-09-23" "Substrate OS" "System Calls"
+.SH NAME
+writev \- write data from multiple buffers
+.SH LIBRARY
+Standard C library
+.RI ( libc ", " \-lc )
+.SH SYNOPSIS
+.nf
+.B #include <sys/uio.h>
+.PP
+.BI "ssize_t writev(int " fd ", const struct iovec *" iov ", int " iovcnt ");"
+.fi
+.PP
+.nf
+struct iovec {
+    void   *iov_base;   /* start of a buffer */
+    size_t  iov_len;    /* number of bytes to write from it */
+};
+.fi
+.SH DESCRIPTION
+.BR writev ()
+writes
+.I iovcnt
+buffers, described by the array
+.IR iov ,
+to the file referred to by the file descriptor
+.IR fd .
+The buffers are written in array order, each one completely before the
+next, as if their contents had been concatenated and passed to a single
+.BR write (2).
+Buffers with an
+.I iov_len
+of zero are skipped.
+.PP
+On a datagram socket
+.RB ( SOCK_DGRAM
+or
+.BR SOCK_RAW )
+the buffers form
+.B one
+datagram: their concatenation is sent as a single message, exactly as
+.BR sendmsg (2)
+would send it.
+If the buffers total zero bytes, one empty datagram is sent.
+.PP
+.BR writev ()
+is a system call (number 526 in the native personality).
+The Linux, FreeBSD and NetBSD personalities route their own
+.BR writev ()
+numbers to the same implementation.
+.SH RETURN VALUE
+On success, the number of bytes written is returned.
+As with
+.BR write (2),
+this may be less than the total of the
+.I iov_len
+fields when the file cannot accept all of the data.
+.PP
+On error, \-1 is returned, and
+.I errno
+is set to indicate the error.
+If an error occurs after some bytes have been written, the number of
+bytes written is returned instead.
+.SH ERRORS
+.TP
+.B EBADF
+.I fd
+is not a valid file descriptor or is not open for writing.
+.TP
+.B EFAULT
+.I iov
+or one of the
+.I iov_base
+buffers is outside the accessible address space.
+.TP
+.B EINVAL
+.I iovcnt
+is negative or greater than 1024.
+.TP
+.B EMSGSIZE
+.I fd
+is a datagram socket and the buffers total more than the largest
+datagram the socket can send.
+.TP
+.B EDESTADDRREQ
+.I fd
+is a datagram socket that has not been connected.
+.PP
+Any error that
+.BR write (2)
+can return for
+.I fd
+may also be returned.
+.SH CONFORMING TO
+POSIX.1-2008.
+.SH NOTES
+Before Substrate 2026-09,
+.BR writev ()
+was implemented in the C library as a loop of
+.BR write (2)
+calls, one per buffer.
+On a datagram socket that sent one datagram per buffer, splitting a
+message built as a header plus a body.
+.SH EXAMPLE
+Send a two-part message as one UDP datagram on a connected socket:
+.PP
+.EX
+#include <sys/uio.h>
+
+struct iovec iov[2] = {
+    { hdr,  sizeof hdr },
+    { body, body_len   },
+};
+if (writev(sock, iov, 2) < 0)
+    perror("writev");
+.EE
+.SH SEE ALSO
+.BR write (2),
+.BR sendmsg (2),
+.BR readv (3),
+.BR socket (2)

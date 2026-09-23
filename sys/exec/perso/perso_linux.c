@@ -12,6 +12,7 @@
 #include <exec/perso/perso_ipc_sem.h>
 #include <exec/perso/personality.h>
 #include <kern/sched.h>
+#include <net/inet.h>
 #include <sys/compiler.h>
 #include <sys/copy.h>
 #include <sys/errno.h>
@@ -684,6 +685,16 @@ static ssize_t linux_sys_do_uio(int fd, const struct iovec *uiov, int iovcnt,
     }
     if (copyin(uiov, kiov, iov_bytes) != 0) {
         ret = -EFAULT;
+        goto out;
+    }
+
+    /* UDP-API-03: a datagram socket's writev() is one message, not one per
+     * iovec -- see sys_writev(). */
+    if (rw == UIO_WRITE && sock_fd_is_dgram(fd)) {
+        _Static_assert(sizeof(struct iovec) == sizeof(struct iovec_local),
+                       "iovec layouts differ");
+        ret = sock_dgram_sendv(fd, (const struct iovec_local *)kiov, iovcnt,
+                               0, NULL, 0);
         goto out;
     }
 
