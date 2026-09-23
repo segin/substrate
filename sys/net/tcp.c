@@ -192,6 +192,7 @@ typedef struct tcp_pcb {
     uint64_t  closing_until;  /* TCP-SM-01: CLOSING/LAST_ACK reaper deadline */
     uint8_t   pollout_wait;   /* TCP-WIN-02: poll() saw no POLLOUT */
     uint32_t  last_adv_wnd;   /* TCP-WIN-03: window in our last segment */
+    uint8_t   seg_wnd_same;   /* TCP-WIN-05: segment repeats the window */
     struct ip4_txopts txo;    /* UDP-API-12: the socket's IP_TTL/IP_TOS */
     /* SO_ERROR (cleared by getsockopt).  */
     int       so_error;
@@ -1205,7 +1206,16 @@ static void tcp_in_established(tcp_pcb_t *p, uint32_t seq, uint32_t ack,
                 if (inc == 0) inc = 1;
                 if (p->cwnd < 0xFFFFFFFFu - inc) p->cwnd += inc;
             }
-        } else if (ack == p->last_ack && p->unacked_head) {
+        } else if (ack == p->last_ack && p->unacked_head &&
+                   /* TCP-WIN-05: RFC 5681 2's whole definition of a
+                    * duplicate: no data, no SYN/FIN, ACK = SND.UNA with
+                    * data outstanding, and the window unchanged.  Any
+                    * segment repeating the ACK used to count, so the
+                    * peer's own data (or a window update) fired spurious
+                    * fast retransmits and cwnd cuts. */
+                   dlen == 0 && !(flags & (TCP_SYN | TCP_FIN)) &&
+                   ack == p->snd_una && p->snd_una != p->snd_nxt &&
+                   p->seg_wnd_same) {
             /*
              * Duplicate ACK -- the peer is still waiting on our oldest
              * unacked segment.  After TCP_DUP_ACK_FAST in a row, resend it
@@ -1431,6 +1441,8 @@ static void tcp_input_locked(uint32_t saddr, uint32_t daddr,
      * and LISTEN states run their own handlers below and take the window
      * from the segment that establishes the connection.
      */
+    /* TCP-WIN-05: whether this segment repeats the window last seen. */
+    p->seg_wnd_same = (__builtin_bswap16(th->window) == p->snd_wnd);
     if ((flags & TCP_ACK) && p->state != TCP_LISTEN && p->state != TCP_SYN_SENT) {
         /* Window updates track the highest ACK seen, so an old duplicate
          * cannot walk the window backwards. */

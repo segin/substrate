@@ -22,6 +22,11 @@ it guards.
                 budget: when the peer then goes quiet the next timeout
                 retransmission comes after the base RTO, not the 60 s cap,
                 and the connection survives to deliver everything.
+    dupack      TCP-WIN-05: only RFC 5681's duplicate ACK counts -- no data,
+                no SYN/FIN, ACK = SND.UNA with data outstanding, and an
+                unchanged window.  Three ACK-only-repeating data segments,
+                and three window updates, trigger no fast retransmit; three
+                true duplicates do.
 
 Run from the repo root after building sys/ and wireguest:
     python3 tests/lib/net/wire/test_tcp_window.py [case...]
@@ -196,10 +201,42 @@ def case_fast_retx():
         return None, w
 
 
+def case_dupack():
+    with Wire.boot('connect 10.0.2.2 %d write:outstanding sleep:60' % PORT) as w:
+        syn, err = handshake(w)
+        if err:
+            return err, w
+        gp, g = syn.sport, syn.seq + 1
+        if not w.expect(lambda s: s.data, 5, 'data'):
+            return 'guest sent nothing', w
+        # Wait out the first RTO: the next one is 2 s away, room to test in.
+        if not w.expect(lambda s: s.data and s.seq == g, 3, 'first RTO'):
+            return 'no first RTO retransmission', w
+        w.rx.clear()
+        rn = PISS + 1
+        for i in range(3):                         # data, repeating the ACK
+            w.send(Seg(PORT, gp, rn, g, ACK | PSH, data=b'd%d' % i))
+            rn += 2
+        w.pump(0.4)
+        if any(s.data for s in w.rx):
+            return 'data segments counted as duplicate ACKs', w
+        for win in (60000, 50000, 40000):          # window updates
+            w.send(Seg(PORT, gp, rn, g, ACK, win=win))
+        w.pump(0.4)
+        if any(s.data for s in w.rx):
+            return 'window updates counted as duplicate ACKs', w
+        for _ in range(3):                         # true duplicates
+            w.send(Seg(PORT, gp, rn, g, ACK, win=40000))
+        if not w.expect(lambda s: s.data and s.seq == g, 0.5, 'fast retransmit'):
+            return 'three true duplicate ACKs triggered nothing', w
+        return None, w
+
+
 CASES = (('persist', case_persist),
          ('nb-persist', case_nb_persist),
          ('reopen', case_reopen),
-         ('fast-retx', case_fast_retx))
+         ('fast-retx', case_fast_retx),
+         ('dupack', case_dupack))
 
 
 def main():
