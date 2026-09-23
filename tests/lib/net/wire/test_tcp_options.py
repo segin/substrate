@@ -9,6 +9,13 @@ case names the checklist item it guards.
                 longer than the header, and an option list running exactly to
                 the header's end are each answered with a SYN|ACK -- the
                 option walk neither hangs nor over-reads.
+    own-mss     TCP-HDR-03: the guest's SYN (active open) and SYN|ACK
+                (passive open) each carry an MSS option of 1460, in a
+                24-octet header.
+    mtu-clamp   TCP-HDR-04: on an interface with a 1000-octet MTU the guest
+                advertises MSS 960 and, although the peer offers 1460, sends
+                no segment over 960 -- they used to fail EMSGSIZE in
+                ip4_output() on every attempt and the transfer stalled.
 
 Run from the repo root after building sys/ and wireguest:
     python3 tests/lib/net/wire/test_tcp_options.py [case...]

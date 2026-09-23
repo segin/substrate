@@ -109,6 +109,7 @@ int  ip4_output_opts(uint32_t saddr, uint32_t daddr, uint8_t protocol,
 /* Source address routing will choose for `daddr` — needed to build a UDP
  * pseudo-header checksum before the packet reaches ip4_output/ip6_output. */
 uint32_t ip4_source_for(uint32_t daddr);
+uint32_t ip4_path_mtu(uint32_t daddr);      /* TCP-HDR-04 */
 int      ip6_source_for(const uint8_t daddr[16], uint8_t out[16]);
 
 /* -- IPv6 input/output ---------------------------------------------- */

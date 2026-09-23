@@ -222,6 +222,7 @@ typedef struct tcp_pcb {
     uint8_t   rtt_valid;
     uint16_t  snd_mss;        /* TCP-HDR-02: peer's MSS; 0 until known */
     uint16_t  syn_mss;        /* TCP-HDR-02: MSS option of the last SYN seen */
+    uint16_t  mtu_mss;        /* TCP-HDR-04: egress MTU less headers; 0 = none */
     struct ip4_txopts txo;    /* UDP-API-12: the socket's IP_TTL/IP_TOS */
     /* SO_ERROR (cleared by getsockopt).  */
     int       so_error;
@@ -381,8 +382,9 @@ static int tcp_xmit_raw(tcp_pcb_t *p, uint32_t seq, uint8_t flags,
         uint8_t *o = buf + sizeof(*th);
         o[0] = 2;                       /* MSS */
         o[1] = 4;
-        o[2] = (uint8_t)(TCP_MSS >> 8);
-        o[3] = (uint8_t)(TCP_MSS & 0xFF);
+        uint16_t our = p->mtu_mss ? p->mtu_mss : TCP_MSS;     /* TCP-HDR-04 */
+        o[2] = (uint8_t)(our >> 8);
+        o[3] = (uint8_t)(our & 0xFF);
     }
     if (dlen && data) memcpy(buf + sizeof(*th) + optlen, data, dlen);
     /*
@@ -407,9 +409,25 @@ static int tcp_xmit_raw(tcp_pcb_t *p, uint32_t seq, uint8_t flags,
 /* TCP-HDR-02: the largest segment we may send the peer -- its MSS option
  * (536 if it sent none, RFC 1122 4.2.2.6), capped by our own buffer. */
 static uint32_t tcp_eff_mss(const tcp_pcb_t *p) {
-    if (p->snd_mss && p->snd_mss < TCP_MSS)
-        return p->snd_mss;
-    return TCP_MSS;
+    uint32_t m = TCP_MSS;
+    if (p->snd_mss && p->snd_mss < m) m = p->snd_mss;
+    if (p->mtu_mss && p->mtu_mss < m) m = p->mtu_mss;   /* TCP-HDR-04 */
+    return m;
+}
+
+/*
+ * TCP-HDR-04: the MSS the egress interface allows -- its MTU less the IP and
+ * TCP headers -- resolved once when the connection is set up.  TCP_MSS was
+ * used whatever the MTU, so on a smaller-MTU link every full segment failed
+ * EMSGSIZE in ip4_output() (UDP-IP-01) on every retransmission and the
+ * transfer stalled.  It also bounds the MSS we advertise.
+ */
+static void tcp_set_mtu_mss(tcp_pcb_t *p) {
+    uint32_t mtu = ip4_path_mtu(p->raddr);
+    uint32_t hdr = sizeof(struct iphdr) + sizeof(struct tcphdr);
+    p->mtu_mss = 0;
+    if (mtu > hdr && mtu - hdr < TCP_MSS)
+        p->mtu_mss = (uint16_t)(mtu - hdr);
 }
 
 static void tcp_take_peer_mss(tcp_pcb_t *p, uint16_t syn_mss) {
@@ -963,6 +981,7 @@ static void tcp_in_listen(tcp_pcb_t *p, uint32_t saddr, uint32_t daddr,
     c->state   = TCP_SYN_RECEIVED;
     c->laddr   = daddr;
     c->raddr   = saddr;
+    tcp_set_mtu_mss(c);                                /* TCP-HDR-04 */
     c->lport   = dport;
     c->rport   = sport;
     c->iss     = tcp_new_iss();
@@ -2015,6 +2034,7 @@ static void tcp_connect_start(tcp_pcb_t *p, uint32_t raddr, uint16_t rport) {
     if (!p->lport) p->lport = tcp_alloc_ephemeral_locked(p, r);
     p->raddr   = raddr;
     p->rport   = rport;
+    tcp_set_mtu_mss(p);                                /* TCP-HDR-04 */
     p->iss     = iss;
     p->snd_una = p->iss;
     p->snd_nxt = p->iss;

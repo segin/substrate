@@ -303,6 +303,14 @@ uint32_t ip4_source_for(uint32_t daddr) {
     return dev ? route_src4(dev, daddr) : 0;
 }
 
+/* TCP-HDR-04: the MTU of the interface a datagram to daddr would leave by,
+ * or 0 when there is no route. */
+uint32_t ip4_path_mtu(uint32_t daddr) {
+    int via_gw = 0;
+    netdev_t *dev = route_for_v4(daddr, &via_gw);
+    return dev ? dev->mtu : 0;
+}
+
 int ip4_output(uint32_t daddr, uint8_t protocol,
                const void *payload, size_t payload_len) {
     return ip4_output_from(0, daddr, protocol, payload, payload_len);

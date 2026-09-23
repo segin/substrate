@@ -35,6 +35,8 @@
  *   sendn:IP:PORT:N       send an N-octet datagram to IP:PORT
  *   ifaddr0      SIOCSIFADDR eth0 0.0.0.0 -- leave the NIC unconfigured
  *
+ * A leading "mtu=N" argument first sets eth0's MTU (SIOCSIFMTU).
+ *
  * Every step is logged as "guest: ..." on the console so the host side can
  * synchronise on it, and the run ends with "Result: done".
  *
@@ -205,6 +207,19 @@ int main(int argc, char **argv) {
         split[n] = NULL;
         argc = n;
         argv = split;
+    }
+    if (argc >= 2 && strncmp(argv[1], "mtu=", 4) == 0) {
+        struct ifreq ifr;
+        memset(&ifr, 0, sizeof ifr);
+        strncpy(ifr.ifr_name, "eth0", sizeof ifr.ifr_name - 1);
+        ifr.ifr_mtu = atoi(argv[1] + 4);
+        int s = socket(AF_INET, SOCK_DGRAM, 0);
+        int r = ioctl(s, SIOCSIFMTU, &ifr);
+        close(s);
+        say("mtu %s n=%ld", r < 0 ? strerror(errno) : "ok", (long)ifr.ifr_mtu);
+        argv[1] = argv[0];
+        argv++;
+        argc--;
     }
     if (argc >= 4 && strcmp(argv[1], "connect") == 0) {
         struct sockaddr_in sa;
