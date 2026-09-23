@@ -997,8 +997,16 @@ static void tcp_in_established(tcp_pcb_t *p, uint32_t seq, uint32_t ack,
         return;
     }
 
-    /* Accept data if seq matches rcv_nxt and we have room.  */
-    if (dlen && seq == p->rcv_nxt) {
+    /* Accept data if seq matches rcv_nxt and we have room.
+     *
+     * TCP-SM-03: and only in a state that can still receive text.  Once the
+     * peer's FIN has been taken (CLOSE_WAIT, CLOSING, LAST_ACK, TIME_WAIT)
+     * RCV.NXT sits just past it, so text "after the FIN" looked in order
+     * and was delivered to read() -- RFC 793 3.9's seventh step says to
+     * ignore it. */
+    if (dlen && seq == p->rcv_nxt &&
+        (p->state == TCP_ESTABLISHED || p->state == TCP_FIN_WAIT_1 ||
+         p->state == TCP_FIN_WAIT_2)) {
         uint32_t accept_n = dlen;
         if (accept_n > TCP_RING_LEN - p->rx_count)
             accept_n = TCP_RING_LEN - p->rx_count;
