@@ -14,6 +14,8 @@ it guards.
     syn-sync        TCP-SM-06: an in-window SYN on an ESTABLISHED
                     connection draws a challenge ACK (RFC 5961 4) and the
                     connection survives it.
+    listen-ack      TCP-SM-07: a bare ACK, and a SYN|ACK, sent to a
+                    listening port each draw <SEQ=SEG.ACK><CTL=RST>.
 
 Run from the repo root after building sys/ and wireguest:
     python3 tests/lib/net/wire/test_tcp_input.py [case...]
@@ -116,9 +118,28 @@ def case_syn_sync():
         return None, w
 
 
+def case_listen_ack():
+    hp = 42002
+    with Wire.boot('listen %d sleep:60' % PORT) as w:
+        if not w.wait_serial('guest: listening', 90):
+            return 'guest never listened', w
+        w.send_arp(1, PEER_MAC, PEER_IP, b'\0' * 6, GUEST_IP)
+        w.pump(0.5)
+        for flags, ackno in ((ACK, 0x12345678), (SYN | ACK, 0x23456789)):
+            w.rx.clear()
+            w.send(Seg(hp, PORT, PISS, ackno, flags))
+            r = w.expect(lambda s: s.dport == hp, 3, 'reply')
+            if not r:
+                return 'no reply to %#x at a listener' % flags, w
+            if not r.flags & RST or r.seq != ackno or r.flags & SYN:
+                return 'want RST seq=%d, got %r' % (ackno, r), w
+        return None, w
+
+
 CASES = (('data-after-fin', case_data_after_fin),
          ('syn-rcvd-rst', case_syn_rcvd_rst),
-         ('syn-sync', case_syn_sync))
+         ('syn-sync', case_syn_sync),
+         ('listen-ack', case_listen_ack))
 
 
 def main():

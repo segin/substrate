@@ -712,8 +712,9 @@ static void tcp_send_rst(uint32_t saddr, uint32_t daddr,
 /* ----- per-state handlers ---------------------------------------- */
 
 static void tcp_in_listen(tcp_pcb_t *p, uint32_t saddr, uint32_t daddr,
+                          const struct tcphdr *th,
                           uint16_t sport, uint16_t dport, uint32_t seq,
-                          uint8_t flags) {
+                          uint32_t ack, uint8_t flags, size_t dlen) {
     /*
      * TCP-28: only a CLEAN SYN may open a connection.  The test was
      * `!(flags & TCP_SYN)`, so SYN|RST and SYN|ACK both spawned a child PCB
@@ -723,14 +724,18 @@ static void tcp_in_listen(tcp_pcb_t *p, uint32_t saddr, uint32_t daddr,
      * confused peer.  A SYN|FIN is equally nonsense here.
      */
     if (flags & TCP_RST) return;                 /* RFC 793: discard */
-    if (!(flags & TCP_SYN)) return;
-    if (flags & (TCP_ACK | TCP_FIN)) {
+    if (flags & TCP_ACK) {
         /* An ACK arriving at a LISTEN socket refers to a connection that
-         * does not exist here: RFC 793 says answer it with a RST.  The
-         * caller has the header we need, so let the unmatched-segment path
-         * below handle it by simply not creating a child. */
+         * does not exist here: RFC 793 3.9 says answer it with
+         * <SEQ=SEG.ACK><CTL=RST>.  TCP-SM-07: this used to return, trusting
+         * "the unmatched-segment path" to send the RST -- but tcp_find()
+         * matched the listener, so that path never ran and the peer got
+         * silence. */
+        tcp_send_rst(saddr, daddr, th, flags, seq, ack, dlen);
         return;
     }
+    if (!(flags & TCP_SYN)) return;
+    if (flags & TCP_FIN) return;
     /* Respect the listen backlog.  Count children that already exist
      * for this listener (handshaking SYN_RECEIVED ones plus those
      * sitting fully-established in the accept queue); if that is at or
@@ -1306,7 +1311,7 @@ static void tcp_input_locked(uint32_t saddr, uint32_t daddr,
 
     switch (p->state) {
     case TCP_LISTEN:
-        tcp_in_listen(p, saddr, daddr, sport, dport, seq, flags);
+        tcp_in_listen(p, saddr, daddr, th, sport, dport, seq, ack, flags, dlen);
         return;
     case TCP_SYN_SENT:
         tcp_in_syn_sent(p, seq, ack, flags);
