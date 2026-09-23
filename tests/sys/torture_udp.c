@@ -7,8 +7,8 @@
  * UDP-U-04 (destination port 0), UDP-U-05 (empty datagram via sendmsg),
  * UDP-IP-02 (all of 127/8 is local), UDP-IP-08 (broadcast fan-out) and
  * UDP-IP-11 (lo's MTU), UDP-API-01 (port ownership), UDP-API-02
- * (multi-iovec sendmsg) and UDP-API-03 (writev) from
- * docs/ip-audit-2026-09-22.md.
+ * (multi-iovec sendmsg), UDP-API-03 (writev) and UDP-API-04 (SO_RCVTIMEO)
+ * from docs/ip-audit-2026-09-22.md.
  *
  * Each case drives the real socket API over the loopback interface, so a
  * PASS means a datagram actually took the intended path through the
@@ -25,8 +25,10 @@
 #include <net/if.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <sys/uio.h>
 #include <sys/un.h>
+#include <time.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/wait.h>
@@ -717,6 +719,60 @@ static void test_writev_dgram(void)
     close(tx);
 }
 
+static long elapsed_ms(const struct timespec *a)
+{
+    struct timespec b;
+    clock_gettime(CLOCK_MONOTONIC, &b);
+    return (long)(b.tv_sec - a->tv_sec) * 1000 + (b.tv_nsec - a->tv_nsec) / 1000000;
+}
+
+/* UDP-API-04: SO_RCVTIMEO bounds a blocking receive.  It was accepted and
+ * discarded, so recv() on a silent socket slept forever. */
+static void test_rcvtimeo(void)
+{
+    printf("UDP-API-04: SO_RCVTIMEO bounds a blocking receive\n");
+    struct timeval tv = { 0, 250000 }, got;
+    socklen_t gl = sizeof(got);
+    char buf[8];
+    struct timespec t0;
+
+    int u = bind_udp(31966);
+    ok("setsockopt(SO_RCVTIMEO) on UDP",
+       setsockopt(u, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) == 0, "refused");
+    memset(&got, 0, sizeof(got));
+    getsockopt(u, SOL_SOCKET, SO_RCVTIMEO, &got, &gl);
+    ok("getsockopt reads it back",
+       got.tv_sec == 0 && got.tv_usec >= 240000 && got.tv_usec <= 260000, "wrong value");
+    clock_gettime(CLOCK_MONOTONIC, &t0);
+    errno = 0;
+    ssize_t n = recv(u, buf, sizeof(buf), 0);
+    long ms = elapsed_ms(&t0);
+    ok("UDP recv() times out with EAGAIN", n < 0 && errno == EAGAIN, "did not time out");
+    ok("after about 250 ms", ms >= 200 && ms < 2000, "wrong duration");
+    close(u);
+
+    int one = 1;
+    struct sockaddr_in a;
+    int l = socket(AF_INET, SOCK_STREAM, 0);
+    setsockopt(l, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+    lo_addr(&a, 31967);
+    bind(l, (struct sockaddr *)&a, sizeof(a));
+    listen(l, 1);
+    int c = socket(AF_INET, SOCK_STREAM, 0);
+    connect(c, (struct sockaddr *)&a, sizeof(a));
+    int sv = accept(l, NULL, NULL);
+    setsockopt(c, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    clock_gettime(CLOCK_MONOTONIC, &t0);
+    errno = 0;
+    n = recv(c, buf, sizeof(buf), 0);
+    ms = elapsed_ms(&t0);
+    ok("TCP recv() times out with EAGAIN", n < 0 && errno == EAGAIN, "did not time out");
+    ok("after about 250 ms", ms >= 200 && ms < 2000, "wrong duration");
+    close(sv);
+    close(c);
+    close(l);
+}
+
 int main(void)
 {
     printf("torture_udp: UDP demux + checksum regressions (#430)\n\n");
@@ -737,6 +793,7 @@ int main(void)
     test_port_ownership();
     test_sendmsg_gather();
     test_writev_dgram();
+    test_rcvtimeo();
 
     printf("\nResult: %d passed, %d failed -- %s\n",
            passed, failed, failed ? "FAILED" : "PASSED");

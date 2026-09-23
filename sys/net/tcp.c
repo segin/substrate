@@ -1567,7 +1567,8 @@ tcp_pcb_t *tcp_accept(tcp_pcb_t *listen_p, int nonblock) {
     return ret;
 }
 
-static ssize_t tcp_send_body(tcp_pcb_t *p, const void *buf, size_t len, int nonblock) {
+static ssize_t tcp_send_body(tcp_pcb_t *p, const void *buf, size_t len, int nonblock,
+                             uint64_t deadline) {
     const uint8_t *b = (const uint8_t *)buf;
     size_t sent = 0;
     while (sent < len) {
@@ -1613,6 +1614,10 @@ static ssize_t tcp_send_body(tcp_pcb_t *p, const void *buf, size_t len, int nonb
                 sent += 1;
                 continue;
             }
+            /* UDP-API-04: SO_SNDTIMEO -- give up once the deadline has
+             * passed, reporting what was sent (or EAGAIN). */
+            if (deadline && get_ticks() >= deadline)
+                return sent ? (ssize_t)sent : -EAGAIN;
             /* Data already in flight — its own retransmissions probe
              * the peer; wait for an ACK to reopen the window. */
             current_thread->flags |= THREAD_F_INTERRUPTIBLE;
@@ -1640,18 +1645,22 @@ static ssize_t tcp_send_body(tcp_pcb_t *p, const void *buf, size_t len, int nonb
  * it -- and its ring -- while this thread is asleep.  Pin it for the whole
  * call, exactly as tcp_recv() does (TCP-01).
  */
-static ssize_t tcp_send_impl(tcp_pcb_t *p, const void *buf, size_t len, int nonblock) {
+static ssize_t tcp_send_impl(tcp_pcb_t *p, const void *buf, size_t len, int nonblock,
+                             uint64_t deadline) {
     tcp_hold(p);
-    ssize_t r = tcp_send_body(p, buf, len, nonblock);
+    ssize_t r = tcp_send_body(p, buf, len, nonblock, deadline);
     tcp_unhold(p);
     return r;
 }
 
 ssize_t tcp_send(tcp_pcb_t *p, const void *buf, size_t len) {
-    return tcp_send_impl(p, buf, len, /*nonblock=*/0);
+    return tcp_send_impl(p, buf, len, /*nonblock=*/0, 0);
+}
+ssize_t tcp_send_until(tcp_pcb_t *p, const void *buf, size_t len, uint64_t deadline) {
+    return tcp_send_impl(p, buf, len, /*nonblock=*/0, deadline);
 }
 ssize_t tcp_send_nb(tcp_pcb_t *p, const void *buf, size_t len) {
-    return tcp_send_impl(p, buf, len, /*nonblock=*/1);
+    return tcp_send_impl(p, buf, len, /*nonblock=*/1, 0);
 }
 
 size_t tcp_recv_avail(const tcp_pcb_t *p) {
@@ -1721,12 +1730,15 @@ ssize_t tcp_recv_nb(tcp_pcb_t *p, void *buf, size_t len) {
     return -EAGAIN;
 }
 
-ssize_t tcp_recv(tcp_pcb_t *p, void *buf, size_t len) {
+/* UDP-API-04: deadline is an absolute tick count (SO_RCVTIMEO), 0 for none;
+ * past it an empty receive returns -EAGAIN. */
+ssize_t tcp_recv_until(tcp_pcb_t *p, void *buf, size_t len, uint64_t deadline) {
     ssize_t ret;
     tcp_hold(p);                                    /* TCP-01 */
     for (;;) {
         ssize_t r = tcp_recv_nb(p, buf, len);
         if (r != -EAGAIN) { ret = r; break; }
+        if (deadline && get_ticks() >= deadline) { ret = -EAGAIN; break; }
         current_thread->flags |= THREAD_F_INTERRUPTIBLE;
         sched_sleep_until(p->recv_chan, get_ticks() + TCP_SLEEP_POLL);
         current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
@@ -1737,6 +1749,10 @@ ssize_t tcp_recv(tcp_pcb_t *p, void *buf, size_t len) {
     }
     tcp_unhold(p);
     return ret;
+}
+
+ssize_t tcp_recv(tcp_pcb_t *p, void *buf, size_t len) {
+    return tcp_recv_until(p, buf, len, 0);
 }
 
 /* MSG_PEEK: copy up to len bytes from the rx ring WITHOUT consuming them,
@@ -1779,12 +1795,13 @@ ssize_t tcp_peek_nb(tcp_pcb_t *p, void *buf, size_t len) {
  * reaped PCB meant copying a freed 32 KiB ring to userspace.  Pin it for the
  * whole call, as tcp_recv() does (TCP-01).
  */
-ssize_t tcp_peek(tcp_pcb_t *p, void *buf, size_t len) {
+ssize_t tcp_peek_until(tcp_pcb_t *p, void *buf, size_t len, uint64_t deadline) {
     ssize_t ret;
     tcp_hold(p);
     for (;;) {
         ssize_t r = tcp_peek_nb(p, buf, len);
         if (r != -EAGAIN) { ret = r; break; }
+        if (deadline && get_ticks() >= deadline) { ret = -EAGAIN; break; }
         current_thread->flags |= THREAD_F_INTERRUPTIBLE;
         sched_sleep_until(p->recv_chan, get_ticks() + TCP_SLEEP_POLL);
         current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
@@ -1795,6 +1812,10 @@ ssize_t tcp_peek(tcp_pcb_t *p, void *buf, size_t len) {
     }
     tcp_unhold(p);
     return ret;
+}
+
+ssize_t tcp_peek(tcp_pcb_t *p, void *buf, size_t len) {
+    return tcp_peek_until(p, buf, len, 0);
 }
 
 int tcp_take_so_error(tcp_pcb_t *p) {

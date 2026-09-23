@@ -132,6 +132,8 @@ typedef struct afi_sock {
     int      bound;        /* explicit bind() succeeded — re-bind is EINVAL */
     int      reuseaddr;    /* SO_REUSEADDR — relaxes the EADDRINUSE check */
     uint32_t owner_uid;    /* UDP-API-01: euid of the creating process */
+    uint32_t rcv_timeo;    /* UDP-API-04: SO_RCVTIMEO in ticks, 0 = none */
+    uint32_t snd_timeo;    /* UDP-API-04: SO_SNDTIMEO in ticks, 0 = none */
 
     afi_pkt_t *ring;
     uint32_t   head, tail, count;
@@ -158,6 +160,12 @@ typedef struct afi_sock {
 } afi_sock_t;
 
 static afi_sock_t *g_afi_head;
+/* UDP-API-04: the absolute deadline for a blocking call under a timeout of
+ * `timeo` ticks, or 0 for none. */
+static uint64_t afi_deadline(uint32_t timeo) {
+    return timeo ? get_ticks() + timeo : 0;
+}
+
 static uint16_t    g_ephemeral_next = 49152;
 
 /* NET-01: g_afi_head and every socket's ring counters (head/tail/count),
@@ -576,7 +584,7 @@ static size_t afinet_node_read_body(fs_node_t *node, size_t size, uint8_t *buf) 
     int nb = afi_node_nonblock(node);
     if (s->type == SOCK_STREAM && s->tcp) {
         ssize_t n = nb ? tcp_recv_nb(s->tcp, buf, size)
-                       : tcp_recv(s->tcp, buf, size);
+                       : tcp_recv_until(s->tcp, buf, size, afi_deadline(s->rcv_timeo));
         /* Propagate errors as (size_t)-errno — the read() syscall
          * layer decodes them.  Collapsing a negative return to 0
          * here would forge a spurious EOF: a recv interrupted by a
@@ -590,6 +598,7 @@ static size_t afinet_node_read_body(fs_node_t *node, size_t size, uint8_t *buf) 
      * into a kernel-local buffer under the lock; the copy out to the
      * caller's (possibly user) buffer runs unlocked so a page fault there
      * is never taken with interrupts disabled. */
+    uint64_t deadline = afi_deadline(s->rcv_timeo);
     unsigned long fl = spinlock_acquire_irq(&afi_lock);
     s->refcount++;
     for (;;) {
@@ -613,6 +622,11 @@ static size_t afinet_node_read_body(fs_node_t *node, size_t size, uint8_t *buf) 
             return (size_t)-err;
         }
         if (nb) { afi_rele_unlock(s, fl); return (size_t)-EAGAIN; }
+        /* UDP-API-04: SO_RCVTIMEO expired. */
+        if (deadline && get_ticks() >= deadline) {
+            afi_rele_unlock(s, fl);
+            return (size_t)-EAGAIN;
+        }
         /* UDP-06: queue-then-release, and signal-interruptible so SIGINT
          * (and friends) yank ping/etc out of a blocked recv. */
         if (afi_wait(s, &fl) == -EINTR) {
@@ -704,7 +718,7 @@ static size_t afinet_node_write_body(fs_node_t *node, size_t size,
     if (!s || s->closed) return 0;
     if (s->type == SOCK_STREAM && s->tcp) {
         ssize_t n = afi_node_nonblock(node) ? tcp_send_nb(s->tcp, buf, size)
-                                            : tcp_send(s->tcp, buf, size);
+                                            : tcp_send_until(s->tcp, buf, size, afi_deadline(s->snd_timeo));
         return (size_t)n;
     }
     /* write() without an address only works on a connected DGRAM socket. */
@@ -944,6 +958,7 @@ static int afinet_port_taken(const afi_sock_t *self, uint16_t port) {
 
 static int addr_is_wild(const uint8_t *a, size_t n);
 
+
 /*
  * UDP-API-01: may `self` bind laddr:port?  Another bound socket of the same
  * family and type on the same port conflicts when their local addresses
@@ -1096,6 +1111,31 @@ int afinet_mc_membership(int fd, int add, uint32_t group, uint32_t ifaddr,
     s->mc_dev[at] = NULL;
     spinlock_release_irq(&afi_lock, fl);
     return netdev_mc_leave(dev, group);
+}
+
+/* UDP-API-04: SO_RCVTIMEO / SO_SNDTIMEO. */
+int afinet_set_timeo(int fd, int rcv, int64_t sec, int64_t usec) {
+    afi_sock_t *s = afi_from_fd(fd);
+    if (!s) return -ENOTSOCK;
+    if (sec < 0 || usec < 0 || usec >= 1000000) return -EDOM;
+    uint64_t hz = get_hz();
+    if (!hz) hz = 100;
+    uint64_t ticks = (uint64_t)sec * hz + ((uint64_t)usec * hz + 999999u) / 1000000u;
+    if (ticks > 0xFFFFFFFFu) ticks = 0xFFFFFFFFu;
+    if (rcv) s->rcv_timeo = (uint32_t)ticks;
+    else     s->snd_timeo = (uint32_t)ticks;
+    return 0;
+}
+
+int afinet_get_timeo(int fd, int rcv, int64_t *sec, int64_t *usec) {
+    afi_sock_t *s = afi_from_fd(fd);
+    if (!s) return -ENOTSOCK;
+    uint64_t hz = get_hz();
+    if (!hz) hz = 100;
+    uint64_t t = rcv ? s->rcv_timeo : s->snd_timeo;
+    *sec = (int64_t)(t / hz);
+    *usec = (int64_t)((t % hz) * 1000000u / hz);
+    return 0;
 }
 
 int afinet_set_reuseaddr(int fd, int on) {
@@ -1440,7 +1480,7 @@ static ssize_t afinet_sendto_k(int fd, const void *buf, size_t len, int flags,
      * stream, and we fell into the UDP path below, looking for a
      * dest addr that wasn't there.  */
     if (s->type == SOCK_STREAM && s->tcp) {
-        return tcp_send(s->tcp, buf, len);
+        return tcp_send_until(s->tcp, buf, len, afi_deadline(s->snd_timeo));
     }
 
     /* Resolve target addr/port.
@@ -1630,11 +1670,12 @@ ssize_t afinet_recvfrom(int fd, void *buf, size_t len, int flags,
                         ? current_process->fds[fd] : NULL;
         int nb = (flags & MSG_DONTWAIT) ||
                  (f && (f->f_flag & FNONBLOCK));
+        uint64_t dl = afi_deadline(s->rcv_timeo);
         if (flags & MSG_PEEK)
             return nb ? tcp_peek_nb(s->tcp, buf, len)
-                      : tcp_peek   (s->tcp, buf, len);
+                      : tcp_peek_until(s->tcp, buf, len, dl);
         return nb ? tcp_recv_nb(s->tcp, buf, len)
-                  : tcp_recv   (s->tcp, buf, len);
+                  : tcp_recv_until(s->tcp, buf, len, dl);
     }
 
     /* NET-01: pin the socket and take the ring lock — see afinet_node_read.
@@ -1661,6 +1702,7 @@ ssize_t afinet_recvfrom(int fd, void *buf, size_t len, int flags,
                    (nf && (nf->f_flag & FNONBLOCK));
     }
 
+    uint64_t deadline = afi_deadline(s->rcv_timeo);
     unsigned long fl = spinlock_acquire_irq(&afi_lock);
     s->refcount++;
     int fam = s->family;
@@ -1726,6 +1768,12 @@ ssize_t afinet_recvfrom(int fd, void *buf, size_t len, int flags,
         /* Non-blocking: MSG_DONTWAIT (Linux convention) or the fd's
          * FNONBLOCK, resolved above. */
         if (nb_dgram) { afi_rele_unlock(s, fl); return -EAGAIN; }
+        /* UDP-API-04: SO_RCVTIMEO expired -- it used to be accepted and
+         * discarded, so this loop slept forever against a silent peer. */
+        if (deadline && get_ticks() >= deadline) {
+            afi_rele_unlock(s, fl);
+            return -EAGAIN;
+        }
         /* UDP-06: queue-then-release; see afi_wait(). */
         if (afi_wait(s, &fl) == -EINTR) {
             afi_rele_unlock(s, fl);

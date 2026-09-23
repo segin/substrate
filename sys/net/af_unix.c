@@ -2685,6 +2685,28 @@ int sys_setsockopt(int fd, int level, int optname,
         }
         afinet_set_reuseaddr(fd, on);   /* no-op on non-AF_INET fds */
     }
+    /* UDP-API-04: SO_RCVTIMEO (20) / SO_SNDTIMEO (21) take a struct timeval:
+     * 16 bytes of int64 fields natively, 8 bytes of int32 from the 32-bit
+     * personalities.  They used to be accepted and discarded, so a blocking
+     * receive on an AF_INET socket had no deadline at all.  AF_UNIX keeps
+     * none (afinet_set_timeo() is -ENOTSOCK there): still accepted. */
+    if (level == 1 /*SOL_SOCKET*/ && (optname == 20 || optname == 21)) {
+        int64_t sec, usec;
+        if (!optval) return -EFAULT;
+        if (optlen >= 16) {
+            int64_t tv[2];
+            if (copyin(optval, tv, sizeof(tv)) != 0) return -EFAULT;
+            sec = tv[0]; usec = tv[1];
+        } else if (optlen >= 8) {
+            int32_t tv[2];
+            if (copyin(optval, tv, sizeof(tv)) != 0) return -EFAULT;
+            sec = tv[0]; usec = tv[1];
+        } else {
+            return -EINVAL;
+        }
+        int r = afinet_set_timeo(fd, optname == 20, sec, usec);
+        return r == -ENOTSOCK ? 0 : r;
+    }
     /* UDP-IP-06: IPPROTO_IP IP_ADD_MEMBERSHIP (35) / IP_DROP_MEMBERSHIP (36),
      * taking a struct ip_mreq (group, interface address) or a Linux struct
      * ip_mreqn (group, address, ifindex). */
@@ -2805,6 +2827,27 @@ int sys_getsockopt(int fd, int level, int optname,
             afunix_sock_t *us = afunix_from_fd(fd);
             int v = (us && us->type == SOCK_DGRAM) ? (192 * 1024) : 32 * 1024;
             return getsockopt_ret_int(v, optval, optlen);
+        }
+        if (optname == 20 /*SO_RCVTIMEO*/ || optname == 21 /*SO_SNDTIMEO*/) {
+            /* UDP-API-04: report the stored timeout as a struct timeval in
+             * the caller's width: 16 bytes (native int64 fields) or 8
+             * (the 32-bit personalities).  AF_UNIX keeps none: zero. */
+            int64_t sec = 0, usec = 0;
+            (void)afinet_get_timeo(fd, optname == 20, &sec, &usec);
+            if (ulen >= 16) {
+                int64_t tv[2] = { sec, usec };
+                socklen_t n = 16;
+                if (copyout(tv, optval, 16) != 0) return -EFAULT;
+                if (copyout(&n, optlen, sizeof(n)) != 0) return -EFAULT;
+            } else if (ulen >= 8) {
+                int32_t tv[2] = { (int32_t)sec, (int32_t)usec };
+                socklen_t n = 8;
+                if (copyout(tv, optval, 8) != 0) return -EFAULT;
+                if (copyout(&n, optlen, sizeof(n)) != 0) return -EFAULT;
+            } else {
+                return -EINVAL;
+            }
+            return 0;
         }
         if (optname == 6 /*SO_BROADCAST*/ || optname == 9 /*SO_KEEPALIVE*/ ||
             optname == 15 /*SO_REUSEPORT*/ || optname == SO_ACCEPTCONN_K) {

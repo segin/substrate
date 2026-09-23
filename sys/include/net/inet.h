@@ -192,6 +192,12 @@ int        tcp_is_listening(const tcp_pcb_t *p);
 int        tcp_shutdown_wr(tcp_pcb_t *p);
 int        tcp_shutdown_rd(tcp_pcb_t *p);
 ssize_t    tcp_send(tcp_pcb_t *p, const void *buf, size_t len);
+/* UDP-API-04: the blocking calls with an absolute tick deadline (SO_SNDTIMEO
+ * / SO_RCVTIMEO); 0 means none.  Past it they return -EAGAIN (or, for send,
+ * the bytes already queued). */
+ssize_t    tcp_send_until(tcp_pcb_t *p, const void *buf, size_t len, uint64_t deadline);
+ssize_t    tcp_recv_until(tcp_pcb_t *p, void *buf, size_t len, uint64_t deadline);
+ssize_t    tcp_peek_until(tcp_pcb_t *p, void *buf, size_t len, uint64_t deadline);
 ssize_t    tcp_send_nb(tcp_pcb_t *p, const void *buf, size_t len);
 ssize_t    tcp_recv(tcp_pcb_t *p, void *buf, size_t len);
 void       tcp_endpoints(const tcp_pcb_t *p, uint32_t *laddr, uint16_t *lport, uint32_t *raddr, uint16_t *rport);
@@ -211,6 +217,11 @@ int     afinet_shutdown(int fd, int how);
 int     afinet_getsockname(int fd, void *addr, socklen_t *addrlen);
 int     afinet_getpeername(int fd, void *addr, socklen_t *addrlen);
 int     afinet_set_reuseaddr(int fd, int on);
+/* UDP-API-04: SO_RCVTIMEO (rcv != 0) / SO_SNDTIMEO, as seconds plus
+ * microseconds; both zero means no timeout.  -ENOTSOCK on a non-AF_INET fd,
+ * -EDOM for a negative or out-of-range value. */
+int     afinet_set_timeo(int fd, int rcv, int64_t sec, int64_t usec);
+int     afinet_get_timeo(int fd, int rcv, int64_t *sec, int64_t *usec);
 /* UDP-IP-06: IP_ADD_MEMBERSHIP (add != 0) / IP_DROP_MEMBERSHIP.  group and
  * ifaddr in network byte order; ifindex > 0 selects the interface by index
  * (struct ip_mreqn) and overrides ifaddr. */
