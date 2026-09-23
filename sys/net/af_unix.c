@@ -2734,6 +2734,14 @@ int sys_setsockopt(int fd, int level, int optname,
         }
         afinet_set_reuseaddr(fd, on);   /* no-op on non-AF_INET fds */
     }
+    /* UDP-API-15: SO_BROADCAST is stored (and enforced on send). */
+    if (level == 1 /*SOL_SOCKET*/ && optname == 6 /*SO_BROADCAST*/) {
+        int on = 0;
+        if (optval && optlen >= (socklen_t)sizeof(int) &&
+            copyin(optval, &on, sizeof(on)) != 0)
+            return -EFAULT;
+        afinet_set_broadcast(fd, on);   /* no-op on non-AF_INET fds */
+    }
     /* UDP-API-04: SO_RCVTIMEO (20) / SO_SNDTIMEO (21) take a struct timeval:
      * 16 bytes of int64 fields natively, 12 (int64 + int32) from NetBSD and
      * OpenBSD i386, 8 bytes of int32 from Linux and FreeBSD i386.  They used to be accepted and discarded, so a blocking
@@ -2970,7 +2978,11 @@ int sys_getsockopt(int fd, int level, int optname,
             }
             return 0;
         }
-        if (optname == 6 /*SO_BROADCAST*/ || optname == 9 /*SO_KEEPALIVE*/ ||
+        if (optname == 6 /*SO_BROADCAST*/) {
+            int b = afinet_get_broadcast(fd);           /* UDP-API-15 */
+            return getsockopt_ret_int(b < 0 ? 0 : b, optval, optlen);
+        }
+        if (optname == 9 /*SO_KEEPALIVE*/ ||
             optname == 15 /*SO_REUSEPORT*/ || optname == SO_ACCEPTCONN_K) {
             return getsockopt_ret_int(0, optval, optlen);
         }

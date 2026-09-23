@@ -248,6 +248,9 @@ int     afinet_shutdown(int fd, int how);
 int     afinet_getsockname(int fd, void *addr, socklen_t *addrlen);
 int     afinet_getpeername(int fd, void *addr, socklen_t *addrlen);
 int     afinet_set_reuseaddr(int fd, int on);
+/* UDP-API-15: SO_BROADCAST; -ENOTSOCK on a non-AF_INET fd. */
+int     afinet_set_broadcast(int fd, int on);
+int     afinet_get_broadcast(int fd);
 /* UDP-API-14: SO_RCVBUF (rcv != 0) / SO_SNDBUF capacity of an AF_INET socket. */
 int     afinet_bufsize(int fd, int rcv);
 /* UDP-API-11/-12: IPPROTO_IP options -- IP_TOS (1), IP_TTL (2),

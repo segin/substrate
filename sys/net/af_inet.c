@@ -134,6 +134,7 @@ typedef struct afi_sock {
     int      bound;        /* explicit bind() succeeded — re-bind is EINVAL */
     int      reuseaddr;    /* SO_REUSEADDR — relaxes the EADDRINUSE check */
     int      pktinfo;      /* UDP-API-11: IP_PKTINFO requested */
+    int      broadcast;    /* UDP-API-15: SO_BROADCAST */
     uint32_t owner_uid;    /* UDP-API-01: euid of the creating process */
     uint32_t rcv_timeo;    /* UDP-API-04: SO_RCVTIMEO in ticks, 0 = none */
     struct ip4_txopts txo; /* UDP-API-12: IP_TTL/IP_TOS/IP_MULTICAST_* */
@@ -1026,6 +1027,17 @@ static int afinet_addr_bindable6(const uint8_t a[16]) {
     return 0;
 }
 
+/* UDP-API-15: is this IPv4 destination a broadcast -- limited, or some
+ * interface's directed broadcast? */
+static int afinet_is_bcast4(uint32_t a) {
+    if (a == 0xFFFFFFFFu) return 1;
+    for (netdev_t *d = netdev_first(); d; d = netdev_next(d))
+        if (d->ip4_addr && d->ip4_netmask &&
+            a == ((d->ip4_addr & d->ip4_netmask) | ~d->ip4_netmask))
+            return 1;
+    return 0;
+}
+
 /* UDP-API-01 / TCP-API-18: ports below IPPORT_RESERVED belong to root. */
 static int afinet_port_reserved(uint16_t port) {
     return port != 0 && port < 1024 &&
@@ -1259,6 +1271,19 @@ int afinet_get_timeo(int fd, int rcv, int64_t *sec, int64_t *usec) {
     *sec = (int64_t)(t / hz);
     *usec = (int64_t)((t % hz) * 1000000u / hz);
     return 0;
+}
+
+/* UDP-API-15: SO_BROADCAST. */
+int afinet_set_broadcast(int fd, int on) {
+    afi_sock_t *s = afi_from_fd(fd);
+    if (!s) return -ENOTSOCK;
+    s->broadcast = on ? 1 : 0;
+    return 0;
+}
+
+int afinet_get_broadcast(int fd) {
+    afi_sock_t *s = afi_from_fd(fd);
+    return s ? s->broadcast : -ENOTSOCK;
 }
 
 int afinet_set_reuseaddr(int fd, int on) {
@@ -1547,6 +1572,9 @@ int afinet_connect(int fd, const void *addr, socklen_t len) {
         /* UDP-U-04: RFC 768 reserves port 0 as "no port"; a datagram socket
          * cannot be connected to it. */
         if (s->type == SOCK_DGRAM && sin->sin_port == 0) return -EINVAL;
+        /* UDP-API-15: nor to a broadcast address without SO_BROADCAST. */
+        if (s->type == SOCK_DGRAM && !s->broadcast && afinet_is_bcast4(sin->sin_addr))
+            return -EACCES;
         s->peer_port = __builtin_bswap16(sin->sin_port);
         memcpy(s->peer_addr, &sin->sin_addr, 4);
         if (s->tcp) {
@@ -1660,6 +1688,12 @@ static ssize_t afinet_sendto_k(int fd, const void *buf, size_t len, int flags,
     /* UDP-U-04: never put destination port 0 -- RFC 768's "no port" -- on
      * the wire. */
     if (s->type == SOCK_DGRAM && dport == 0) return -EINVAL;
+    /* UDP-API-15: a broadcast needs SO_BROADCAST (BSD and Linux both fail
+     * EACCES), so a program cannot flood the segment by mistyping an
+     * address.  The option was not even stored. */
+    if (s->family == AF_INET && s->type != SOCK_STREAM && !s->broadcast &&
+        afinet_is_bcast4(*(const uint32_t *)daddr_buf))
+        return -EACCES;
 
     /* RAW: caller writes the L4 (and for v4 RAW with IP_HDRINCL it'd be
      * the IP header too — not supported yet; we always synthesize the

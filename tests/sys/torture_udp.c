@@ -11,8 +11,8 @@
  * UDP-API-06 (non-local bind), UDP-API-07 (connect binds), UDP-API-08
  * (SHUT_RD), UDP-API-09 (zero-length receive), UDP-API-10 (addrlen at
  * EOF), UDP-API-11 (IP_PKTINFO), UDP-API-12 (IP transmit options),
- * UDP-API-13 (unimplemented options) and UDP-API-14 (getsockopt checks)
- * from docs/ip-audit-2026-09-22.md.
+ * UDP-API-13 (unimplemented options), UDP-API-14 (getsockopt checks) and
+ * UDP-API-15 (SO_BROADCAST) from docs/ip-audit-2026-09-22.md.
  *
  * Each case drives the real socket API over the loopback interface, so a
  * PASS means a datagram actually took the intended path through the
@@ -1104,6 +1104,34 @@ static void test_getsockopt_checks(void)
     close(u);
 }
 
+/* UDP-API-15: sending to (or connecting to) a broadcast address needs
+ * SO_BROADCAST, which is stored and reads back.  It was neither. */
+static void test_so_broadcast(void)
+{
+    printf("UDP-API-15: SO_BROADCAST is stored and enforced\n");
+    struct sockaddr_in b;
+    int one = 1, v = 0;
+    socklen_t vl = sizeof(v);
+    int s = socket(AF_INET, SOCK_DGRAM, 0);
+    memset(&b, 0, sizeof(b));
+    b.sin_family = AF_INET;
+    b.sin_port = htons(31954);
+    b.sin_addr.s_addr = htonl(0x7FFFFFFF);          /* 127.255.255.255 */
+    errno = 0;
+    ok("broadcast without SO_BROADCAST fails EACCES",
+       sendto(s, "x", 1, 0, (struct sockaddr *)&b, sizeof(b)) < 0 && errno == EACCES,
+       "sent");
+    errno = 0;
+    ok("so does connect()",
+       connect(s, (struct sockaddr *)&b, sizeof(b)) < 0 && errno == EACCES, "connected");
+    setsockopt(s, SOL_SOCKET, SO_BROADCAST, &one, sizeof(one));
+    getsockopt(s, SOL_SOCKET, SO_BROADCAST, &v, &vl);
+    ok("SO_BROADCAST reads back 1", v == 1, "not stored");
+    ok("with it, the broadcast is sent",
+       sendto(s, "x", 1, 0, (struct sockaddr *)&b, sizeof(b)) == 1, "refused");
+    close(s);
+}
+
 int main(void)
 {
     printf("torture_udp: UDP demux + checksum regressions (#430)\n\n");
@@ -1133,6 +1161,7 @@ int main(void)
     test_pktinfo();
     test_unsupported_ipopts();
     test_getsockopt_checks();
+    test_so_broadcast();
 
     printf("\nResult: %d passed, %d failed -- %s\n",
            passed, failed, failed ? "FAILED" : "PASSED");

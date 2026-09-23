@@ -169,6 +169,9 @@ int main(int argc, char **argv) {
         sa.sin_port = htons((unsigned short)atoi(argv[3]));
         sa.sin_addr.s_addr = inet_addr(argv[2]);
         int fd = socket(AF_INET, SOCK_DGRAM, 0);
+        int one = 1;
+        /* Broadcast needs SO_BROADCAST (UDP-API-15), as for any real client. */
+        setsockopt(fd, SOL_SOCKET, SO_BROADCAST, &one, sizeof one);
         if (fd >= 0 && connect(fd, (struct sockaddr *)&sa, sizeof sa) == 0) {
             say("udp connected %s%ld", "", 0);
             rc = do_actions(fd, argc - 4, argv + 4);
@@ -197,6 +200,8 @@ int main(int argc, char **argv) {
         sa.sin_family = AF_INET;
         sa.sin_port = htons((unsigned short)atoi(argv[2]));
         int fd = socket(AF_INET, SOCK_DGRAM, 0);
+        int one = 1;
+        setsockopt(fd, SOL_SOCKET, SO_BROADCAST, &one, sizeof one);
         if (fd >= 0 && bind(fd, (struct sockaddr *)&sa, sizeof sa) == 0) {
             say("udpany bound %s%ld", "", atol(argv[2]));
             rc = do_actions(fd, argc - 3, argv + 3);
