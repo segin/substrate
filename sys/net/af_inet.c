@@ -2261,10 +2261,12 @@ static uint32_t afi_ifindex_for(uint32_t daddr) {
     return any_mc ? any_mc->ifindex : 0;
 }
 
-static void enqueue(afi_sock_t *s, uint8_t family, uint8_t proto, uint16_t port,
-                    const void *addr, const uint8_t *data, size_t len,
-                    uint32_t daddr4) {
-    if (!s->rq) return;
+/* Queue one datagram on s.  The caller holds afi_lock and, if this returns
+ * 1, wakes s->wait_chan AFTER releasing it (UDP-RES-04). */
+static int enqueue(afi_sock_t *s, uint8_t family, uint8_t proto, uint16_t port,
+                   const void *addr, const uint8_t *data, size_t len,
+                   uint32_t daddr4) {
+    if (!s->rq) return 0;
     size_t n = len > AFI_DATA_MAX ? AFI_DATA_MAX : len;
     uint32_t need = AFI_REC_SPACE(n);
     /* UDP-RES-01: admission is by bytes against SO_RCVBUF, not by count. */
@@ -2274,7 +2276,7 @@ static void enqueue(afi_sock_t *s, uint8_t family, uint8_t proto, uint16_t port,
          * queue used to drop without a trace. */
         s->rq_drops++;
         if (proto == IPPROTO_UDP_NUM) udp_stat_inc(UDP_STAT_RCVBUF_ERRORS);
-        return;
+        return 0;
     }
     afi_rec_t h;
     memset(&h, 0, sizeof(h));
@@ -2292,7 +2294,45 @@ static void enqueue(afi_sock_t *s, uint8_t family, uint8_t proto, uint16_t port,
     s->rq_head = (s->rq_head + need) % s->rq_cap;
     s->rq_used += need;
     s->count++;
-    sched_wakeup(s->wait_chan);
+    return 1;
+}
+
+/*
+ * UDP-RES-04: wake the readers of the sockets a delivery queued to, after
+ * afi_lock is released.  sched_wakeup() walks the whole thread registry, and
+ * it used to run once per receiving socket inside the IRQ-off critical
+ * section -- a broadcast to N listeners held interrupts off for N registry
+ * walks.  netdev_rx() uses the same collect-then-wake shape.
+ */
+#define AFI_WAKE_MAX 16
+
+struct afi_wakeset {
+    void *chan[AFI_WAKE_MAX];
+    int   n;
+    int   overflow;     /* more sockets than slots: wake by rescanning */
+};
+
+static void afi_wake_add(struct afi_wakeset *w, afi_sock_t *s) {
+    for (int i = 0; i < w->n; i++)
+        if (w->chan[i] == s->wait_chan) return;
+    if (w->n < AFI_WAKE_MAX) w->chan[w->n++] = s->wait_chan;
+    else w->overflow = 1;
+}
+
+static void afi_wake_all(struct afi_wakeset *w) {
+    for (int i = 0; i < w->n; i++)
+        sched_wakeup(w->chan[i]);
+    if (w->overflow) {
+        /* Rare: more than AFI_WAKE_MAX sockets took this datagram.  Wake
+         * every socket with data queued; a spurious wakeup is harmless. */
+        unsigned long fl = spinlock_acquire_irq(&afi_lock);
+        void *extra[AFI_WAKE_MAX];
+        int n = 0;
+        for (afi_sock_t *s = g_afi_head; s && n < AFI_WAKE_MAX; s = s->next)
+            if (s->count) extra[n++] = s->wait_chan;
+        spinlock_release_irq(&afi_lock, fl);
+        for (int i = 0; i < n; i++) sched_wakeup(extra[i]);
+    }
 }
 
 int afinet_deliver_v4(uint32_t saddr, uint32_t daddr,
@@ -2332,6 +2372,9 @@ int afinet_deliver_v4(uint32_t saddr, uint32_t daddr,
      * concurrent close() cannot unlink and free a socket while we are
      * about to enqueue into its ring, and enqueue()'s ring-counter
      * mutation is serialised against process-context readers. */
+    struct afi_wakeset wake;
+    wake.n = 0;
+    wake.overflow = 0;
     unsigned long fl = spinlock_acquire_irq(&afi_lock);
     afi_sock_t *best = NULL;
     int best_score = -1;
@@ -2345,7 +2388,7 @@ int afinet_deliver_v4(uint32_t saddr, uint32_t daddr,
              * datagram is enqueued twice.  RAW legitimately fans out: every
              * subscriber to a protocol sees every packet of it. */
             if (for_dgram) continue;
-            enqueue(s, AF_INET, protocol, sport, &saddr, pkt, len, daddr);
+            if (enqueue(s, AF_INET, protocol, sport, &saddr, pkt, len, daddr)) afi_wake_add(&wake, s);
             delivered = 1;
         } else {
             /* DGRAM: delivered only via udp_input, to the single best match
@@ -2356,9 +2399,9 @@ int afinet_deliver_v4(uint32_t saddr, uint32_t daddr,
                  * socket that can take it (RFC 1122 3.3.6), not only the
                  * best match -- two listeners on a broadcast port used to
                  * split the traffic between them, one datagram each. */
-                enqueue(s, AF_INET, protocol, sport, &saddr,
+                if (enqueue(s, AF_INET, protocol, sport, &saddr,
                         payload + sizeof(struct udphdr),
-                        payload_len - sizeof(struct udphdr), daddr);
+                        payload_len - sizeof(struct udphdr), daddr)) afi_wake_add(&wake, s);
                 delivered = 1;
                 continue;
             }
@@ -2369,12 +2412,13 @@ int afinet_deliver_v4(uint32_t saddr, uint32_t daddr,
         }
     }
     if (best) {
-        enqueue(best, AF_INET, protocol, sport, &saddr,
+        if (enqueue(best, AF_INET, protocol, sport, &saddr,
                 payload + sizeof(struct udphdr),
-                payload_len - sizeof(struct udphdr), daddr);
+                payload_len - sizeof(struct udphdr), daddr)) afi_wake_add(&wake, best);
         delivered = 1;
     }
     spinlock_release_irq(&afi_lock, fl);
+    afi_wake_all(&wake);                     /* UDP-RES-04 */
     return delivered;
 }
 
@@ -2427,6 +2471,9 @@ int afinet_deliver_v6(const uint8_t saddr[16], const uint8_t daddr[16],
     }
 
     /* NET-01: walk + enqueue under afi_lock — see afinet_deliver_v4. */
+    struct afi_wakeset wake;
+    wake.n = 0;
+    wake.overflow = 0;
     unsigned long fl = spinlock_acquire_irq(&afi_lock);
     afi_sock_t *best = NULL;
     int best_score = -1;
@@ -2444,7 +2491,7 @@ int afinet_deliver_v6(const uint8_t saddr[16], const uint8_t daddr[16],
                 body = pkt + sizeof(struct ip6_hdr);
                 blen = len - sizeof(struct ip6_hdr);
             }
-            enqueue(s, AF_INET6, protocol, sport, saddr, body, blen, 0);
+            if (enqueue(s, AF_INET6, protocol, sport, saddr, body, blen, 0)) afi_wake_add(&wake, s);
             delivered = 1;
         } else {
             /* UDP-01: single best match, not a copy to every socket. */
@@ -2454,9 +2501,9 @@ int afinet_deliver_v6(const uint8_t saddr[16], const uint8_t daddr[16],
                  * socket that can take it (RFC 1122 3.3.6), not only the
                  * best match -- two listeners on a broadcast port used to
                  * split the traffic between them, one datagram each. */
-                enqueue(s, AF_INET6, protocol, sport, saddr,
+                if (enqueue(s, AF_INET6, protocol, sport, saddr,
                         payload + sizeof(struct udphdr),
-                        payload_len - sizeof(struct udphdr), 0);
+                        payload_len - sizeof(struct udphdr), 0)) afi_wake_add(&wake, s);
                 delivered = 1;
                 continue;
             }
@@ -2467,11 +2514,12 @@ int afinet_deliver_v6(const uint8_t saddr[16], const uint8_t daddr[16],
         }
     }
     if (best) {
-        enqueue(best, AF_INET6, protocol, sport, saddr,
+        if (enqueue(best, AF_INET6, protocol, sport, saddr,
                 payload + sizeof(struct udphdr),
-                payload_len - sizeof(struct udphdr), 0);
+                payload_len - sizeof(struct udphdr), 0)) afi_wake_add(&wake, best);
         delivered = 1;
     }
     spinlock_release_irq(&afi_lock, fl);
+    afi_wake_all(&wake);                     /* UDP-RES-04 */
     return delivered;
 }
