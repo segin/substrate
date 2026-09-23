@@ -157,6 +157,8 @@ typedef struct tcp_pcb {
     uint32_t  iss;                 /* initial send seq */
     uint32_t  snd_una;             /* oldest unack */
     uint32_t  snd_nxt;             /* next seq to send */
+    uint32_t  snd_max;             /* TCP-MEM-07: highest seq actually sent */
+    int       snd_max_valid;
     uint32_t  rcv_nxt;             /* next expected seq */
     uint16_t  rcv_wnd;             /* advertised window */
     uint32_t  snd_wnd;             /* peer's advertised window */
@@ -322,6 +324,24 @@ static int tcp_xmit_raw(tcp_pcb_t *p, uint32_t seq, uint8_t flags,
                            sizeof(*th) + dlen, &p->txo);
 }
 
+/* TCP-MEM-07: note that sequence space up to `end` has been transmitted.
+ * snd_nxt is advanced when a segment is QUEUED, before it goes out, so it
+ * over-states what the peer can have seen; ACK acceptability is bounded by
+ * this instead. */
+static void tcp_note_sent(tcp_pcb_t *p, uint32_t end) {
+    uint32_t f = tcp_lock();
+    if (!p->snd_max_valid || (int32_t)(end - p->snd_max) > 0) {
+        p->snd_max = end;
+        p->snd_max_valid = 1;
+    }
+    tcp_unlock(f);
+}
+
+/* The upper bound for an acceptable ACK: the highest sequence sent. */
+static uint32_t tcp_ack_limit(const tcp_pcb_t *p) {
+    return p->snd_max_valid ? p->snd_max : p->snd_nxt;
+}
+
 /* Pure-ACK / pure-RST segments don't enter the retx queue.  Use this
  * for the "I want to acknowledge what I just received" pattern.  */
 static void tcp_send_ctl(tcp_pcb_t *p, uint8_t flags) {
@@ -363,10 +383,11 @@ static int tcp_xmit_queue(tcp_pcb_t *p, uint8_t flags,
      * transition (which requires !unacked_head), so the connection
      * could never close cleanly either. */
     uint32_t f = tcp_lock();
-    s->seq = p->snd_nxt;
-    p->snd_nxt += (uint32_t)dlen;
-    if (flags & TCP_SYN) p->snd_nxt++;
-    if (flags & TCP_FIN) p->snd_nxt++;
+    uint32_t seq = p->snd_nxt;
+    s->seq = seq;
+    uint32_t seglen = (uint32_t)dlen + ((flags & TCP_SYN) ? 1u : 0u) +
+                      ((flags & TCP_FIN) ? 1u : 0u);
+    p->snd_nxt += seglen;
     if (p->unacked_tail) p->unacked_tail->next = s;
     else                 p->unacked_head = s;
     p->unacked_tail = s;
@@ -375,8 +396,14 @@ static int tcp_xmit_queue(tcp_pcb_t *p, uint8_t flags,
     /* Transmit with IRQs enabled (tcp_xmit_raw -> ip4_output may
      * ARP-wait, which needs IRQs on to receive the reply).  A failed
      * transmit leaves the segment queued; the RTO timer retransmits
-     * it — which is the correct response to a transient send error. */
-    tcp_xmit_raw(p, s->seq, flags, s->data, dlen);
+     * it — which is the correct response to a transient send error.
+     *
+     * TCP-MEM-07: and never touch `s` again.  Once the lock is dropped an
+     * ACK can prune and kfree() it, so reading s->seq and s->data here was
+     * a use-after-free.  The sequence number was captured under the lock,
+     * and the caller's buffer holds exactly the bytes copied into s. */
+    if (tcp_xmit_raw(p, seq, flags, data, dlen) >= 0)
+        tcp_note_sent(p, seq + seglen);
     return 0;
 }
 
@@ -415,7 +442,9 @@ static void tcp_unacked_free_all(tcp_pcb_t *p) {
 static void tcp_retx_head(tcp_pcb_t *p) {
     tcp_seg_t *s = p->unacked_head;
     if (!s) return;
-    tcp_xmit_raw(p, s->seq, s->flags, s->data, s->dlen);
+    if (tcp_xmit_raw(p, s->seq, s->flags, s->data, s->dlen) >= 0)
+        tcp_note_sent(p, s->seq + s->dlen + ((s->flags & TCP_SYN) ? 1u : 0u) +
+                         ((s->flags & TCP_FIN) ? 1u : 0u));   /* TCP-MEM-07 */
     s->sent_tick = get_ticks();
     s->retx++;
 }
@@ -973,7 +1002,9 @@ static void tcp_in_established(tcp_pcb_t *p, uint32_t seq, uint32_t ack,
          * the send window read as permanently full -- an unrecoverable
          * write-side wedge from a single forged segment.
          */
-        if ((int32_t)(ack - p->snd_nxt) > 0) {
+        /* TCP-MEM-07: bounded by what was actually transmitted, not by the
+         * pre-advanced snd_nxt. */
+        if ((int32_t)(ack - tcp_ack_limit(p)) > 0) {
             /* Unacceptable ACK.  RFC 793 3.9: in a synchronized state,
              * respond with an empty ACK carrying our current state and
              * drop the segment. */
@@ -1216,7 +1247,7 @@ static void tcp_input_locked(uint32_t saddr, uint32_t daddr,
         /* Window updates track the highest ACK seen, so an old duplicate
          * cannot walk the window backwards. */
         if ((int32_t)(ack - p->snd_una) >= 0 &&
-            (int32_t)(ack - p->snd_nxt) <= 0) {
+            (int32_t)(ack - tcp_ack_limit(p)) <= 0) {           /* TCP-MEM-07 */
             p->snd_wnd = __builtin_bswap16(th->window);
         }
     } else if (p->state == TCP_LISTEN || p->state == TCP_SYN_SENT) {
@@ -1439,6 +1470,7 @@ static void tcp_connect_start(tcp_pcb_t *p, uint32_t raddr, uint16_t rport) {
     p->iss     = tcp_new_iss();
     p->snd_una = p->iss;
     p->snd_nxt = p->iss;
+    p->snd_max_valid = 0;             /* TCP-MEM-07: a new ISS, nothing sent */
     p->state   = TCP_SYN_SENT;
     /* Queue the SYN — the retx timer will resend it on RTO if the
      * server didn't get it.  */
