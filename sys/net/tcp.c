@@ -146,6 +146,7 @@ typedef struct tcp_seg {
     uint16_t  dlen;           /* data byte count */
     uint64_t  sent_tick;      /* timestamp of last (re-)transmit */
     int       retx;           /* number of retransmits so far */
+    uint8_t   probe;          /* TCP-WIN-01: sent as a zero-window probe */
     struct tcp_seg *next;
     uint8_t   data[];         /* flex array; dlen bytes */
 } tcp_seg_t;
@@ -367,6 +368,7 @@ static tcp_seg_t *tcp_seg_alloc(uint8_t flags, const void *data, size_t dlen) {
     s->dlen      = (uint16_t)dlen;
     s->sent_tick = get_ticks();
     s->retx      = 0;
+    s->probe     = 0;
     s->next      = NULL;
     if (dlen && data) memcpy(s->data, data, dlen);
     return s;
@@ -583,12 +585,27 @@ static void tcp_timer_tick(uint64_t now) {
         }
         tcp_seg_t *head = p->unacked_head;
         if (!head) continue;
+        /*
+         * TCP-WIN-01: a zero-window probe is retransmitted for as long as
+         * the peer keeps its window shut -- a receiver that is alive but
+         * not reading is not a failed path, and RFC 793 3.7 says to keep
+         * probing.  Its retransmissions used to count toward TCP_MAX_RETX,
+         * so a reader that paused for ~2 minutes got the connection
+         * aborted.  Once the peer opens the window the segment is ordinary
+         * data again, and its abort countdown starts afresh.
+         */
+        if (head->probe && p->snd_wnd != 0) {
+            head->probe = 0;
+            head->retx  = 0;
+        }
         /* TCP-06: back the RTO off exponentially per attempt rather than
-         * retrying at a flat interval forever. */
-        uint64_t rto = (uint64_t)TCP_RTO_BASE_TICKS << (unsigned)head->retx;
+         * retrying at a flat interval forever.  The shift is clamped: a
+         * probe's retx is unbounded, and 2^6 s already exceeds the cap. */
+        unsigned shift = head->retx > 6 ? 6u : (unsigned)head->retx;
+        uint64_t rto = (uint64_t)TCP_RTO_BASE_TICKS << shift;
         if (rto > TCP_RTO_MAX_TICKS) rto = TCP_RTO_MAX_TICKS;
         if (now - head->sent_tick < rto) continue;
-        if (head->retx >= TCP_MAX_RETX) {
+        if (!head->probe && head->retx >= TCP_MAX_RETX) {
             tcp_kill_pcb(p, ETIMEDOUT);
             continue;
         }
@@ -1836,9 +1853,18 @@ static ssize_t tcp_send_body(tcp_pcb_t *p, const void *buf, size_t len, int nonb
                 /* Zero window, nothing outstanding — emit a one-byte
                  * persist probe.  Its RTO retransmissions keep
                  * prodding the peer until it re-advertises a window,
-                 * so no separate persist timer is needed. */
-                int rc = tcp_xmit_queue(p, TCP_ACK | TCP_PSH, b + sent, 1);
-                if (rc < 0) return sent ? (ssize_t)sent : rc;
+                 * so no separate persist timer is needed.
+                 *
+                 * TCP-WIN-01: marked as a probe, so the timer does not
+                 * charge those retransmissions to the abort budget while
+                 * the window stays shut (RFC 793 3.7: keep probing). */
+                tcp_seg_t *ps = tcp_seg_alloc(TCP_ACK | TCP_PSH, b + sent, 1);
+                if (!ps) return sent ? (ssize_t)sent : -ENOMEM;
+                ps->probe = 1;
+                uint32_t lf = tcp_lock();
+                uint32_t pseq = tcp_seg_link_locked(p, ps);
+                tcp_unlock(lf);
+                tcp_seg_emit(p, pseq, TCP_ACK | TCP_PSH, b + sent, 1);
                 sent += 1;
                 continue;
             }
