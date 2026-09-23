@@ -351,7 +351,11 @@ static uint32_t tcp_rcv_wnd_adv(const tcp_pcb_t *p) {
  * the unacked queue — the queuing layer below does that.  */
 static int tcp_xmit_raw(tcp_pcb_t *p, uint32_t seq, uint8_t flags,
                         const void *data, size_t dlen) {
-    uint8_t buf[TCP_MSS + sizeof(struct tcphdr)];
+    /* TCP-HDR-03: a SYN carries our MSS option, <kind=2,len=4,mss>.  It
+     * was never sent, so every peer fell back to RFC 1122's 536.  The four
+     * octets keep the header 32-bit aligned; no padding is needed. */
+    size_t optlen = (flags & TCP_SYN) ? 4u : 0u;
+    uint8_t buf[TCP_MSS + sizeof(struct tcphdr) + 4];
     if (dlen > TCP_MSS) dlen = TCP_MSS;
     struct tcphdr *th = (struct tcphdr *)buf;
     th->source     = __builtin_bswap16(p->lport);
@@ -361,7 +365,7 @@ static int tcp_xmit_raw(tcp_pcb_t *p, uint32_t seq, uint8_t flags,
      * lock (filled in below).  This runs unlocked from process context
      * while the RX path advances rcv_nxt and rx_count, so a torn pair
      * could advertise an edge left of the last one. */
-    th->doff_flags = __builtin_bswap16((uint16_t)((5u << 12) | flags));
+    th->doff_flags = __builtin_bswap16((uint16_t)(((5u + optlen / 4u) << 12) | flags));
     uint32_t wf    = tcp_lock();
     uint32_t rnxt  = p->rcv_nxt;
     uint32_t adv   = tcp_rcv_wnd_adv(p);
@@ -373,7 +377,14 @@ static int tcp_xmit_raw(tcp_pcb_t *p, uint32_t seq, uint8_t flags,
     th->window     = __builtin_bswap16((uint16_t)adv);
     th->check      = 0;
     th->urg_ptr    = 0;
-    if (dlen && data) memcpy(buf + sizeof(*th), data, dlen);
+    if (optlen) {
+        uint8_t *o = buf + sizeof(*th);
+        o[0] = 2;                       /* MSS */
+        o[1] = 4;
+        o[2] = (uint8_t)(TCP_MSS >> 8);
+        o[3] = (uint8_t)(TCP_MSS & 0xFF);
+    }
+    if (dlen && data) memcpy(buf + sizeof(*th) + optlen, data, dlen);
     /*
      * TCP-29: the pseudo-header source must be the address ip4_output will
      * put in the IP header, not p->laddr.  On a multihomed host they differ,
@@ -383,14 +394,14 @@ static int tcp_xmit_raw(tcp_pcb_t *p, uint32_t seq, uint8_t flags,
      * ip4_output makes, and is what the UDP path uses since UDP-03.
      */
     uint32_t csum_src = p->laddr ? p->laddr : ip4_source_for(p->raddr);
-    th->check = tcp_csum(csum_src, p->raddr, buf, sizeof(*th) + dlen);
+    th->check = tcp_csum(csum_src, p->raddr, buf, sizeof(*th) + optlen + dlen);
     /* TCP-HDR-01: and the IP header must carry that same source.  TCP-29
      * fixed only laddr == 0; ip4_output() re-chose the source by routing,
      * so every segment of a socket whose laddr differed from the egress
      * device's address -- bound, or connected over loopback to a local NIC
      * address -- went out with a checksum the peer discarded. */
     return ip4_output_opts(csum_src, p->raddr, IPPROTO_TCP, buf,
-                           sizeof(*th) + dlen, &p->txo);
+                           sizeof(*th) + optlen + dlen, &p->txo);
 }
 
 /* TCP-HDR-02: the largest segment we may send the peer -- its MSS option
