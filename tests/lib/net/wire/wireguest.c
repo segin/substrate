@@ -31,6 +31,8 @@
  *   sigurg       report how many SIGURGs have arrived
  *   atmark       ioctl(SIOCATMARK), reporting the value
  *   oob:TEXT     send(TEXT, MSG_OOB)
+ *   recvoob      recv(MSG_OOB) into a 16-octet buffer, reporting the octets
+ *   recvmsgoob   the same through recvmsg(), reporting msg_flags too
  *   sleep:N      sleep N seconds
  *   soerror      getsockopt(SO_ERROR), reporting the value
  *   pollin       poll() for POLLIN with no timeout, reporting revents
@@ -122,6 +124,22 @@ static int do_actions(int fd, int argc, char **argv) {
         } else if (strncmp(a, "oob:", 4) == 0) {
             ssize_t n = send(fd, a + 4, strlen(a + 4), MSG_OOB);
             say("oob %s n=%ld", n < 0 ? strerror(errno) : "ok", (long)n);
+        } else if (strcmp(a, "recvoob") == 0) {
+            char b[17] = { 0 };
+            ssize_t n = recv(fd, b, 16, MSG_OOB);
+            say(n < 0 ? "recvoob %s n=%ld" : "recvoob data=%s n=%ld",
+                n < 0 ? strerror(errno) : b, (long)n);
+        } else if (strcmp(a, "recvmsgoob") == 0) {
+            char b[17] = { 0 };
+            struct iovec iv = { b, 16 };
+            struct msghdr mh;
+            memset(&mh, 0, sizeof mh);
+            mh.msg_iov = &iv;
+            mh.msg_iovlen = 1;
+            ssize_t n = recvmsg(fd, &mh, MSG_OOB);
+            say(n < 0 ? "recvmsgoob %s n=%ld" : "recvmsgoob data=%s n=%ld",
+                n < 0 ? strerror(errno) : b, (long)n);
+            say("recvmsgoob flags %s%#lx", "", (long)mh.msg_flags);
         } else if (strcmp(a, "atmark") == 0) {
             int v = -1;
             int r = ioctl(fd, SIOCATMARK, &v);

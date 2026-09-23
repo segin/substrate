@@ -2875,6 +2875,27 @@ int tcp_sockatmark(tcp_pcb_t *p) {
     return at;
 }
 
+/*
+ * TCP-URG-04: recv(..., MSG_OOB) -- the urgent octet taken out of the
+ * stream by tcp_rx_put(), as BSD returns it.  -EWOULDBLOCK while the peer
+ * has announced urgent data that has not arrived yet, -EINVAL when there is
+ * none (or it was already read).  MSG_PEEK leaves it in place.
+ */
+ssize_t tcp_recv_oob(tcp_pcb_t *p, void *buf, size_t len, int peek) {
+    if (!p) return -ENOTCONN;
+    if (len == 0) return 0;
+    uint32_t f = tcp_lock();
+    if (!p->oob_valid) {
+        int pending = p->urg_extract;
+        tcp_unlock(f);
+        return pending ? -EWOULDBLOCK : -EINVAL;
+    }
+    *(uint8_t *)buf = p->oob_byte;
+    if (!peek) p->oob_valid = 0;
+    tcp_unlock(f);
+    return 1;
+}
+
 /* TCP-URG-01: F_SETOWN / F_GETOWN -- who receives SIGURG: a pid, or a
  * process group as -pgrp. */
 void tcp_set_owner(tcp_pcb_t *p, int owner) {

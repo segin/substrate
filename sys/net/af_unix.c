@@ -2478,7 +2478,12 @@ ssize_t sys_recvmsg(int fd, struct msghdr *umsg, int flags) {
         if (r < 0) return total > 0 ? total : r;
         total += r;
         if ((size_t)r < iov[i].iov_len) break;
+        /* TCP-URG-04: an out-of-band read returns one octet and stops. */
+        if (flags & MSG_OOB) break;
     }
+    /* TCP-URG-04: an out-of-band read says so in msg_flags. */
+    if ((flags & MSG_OOB) && total > 0)
+        msg->msg_flags |= MSG_OOB;
 
     /* AF_UNIX rx_fdq drain.  Only applies once the iov loop above has
      * pulled at least one byte (recvmsg without data wouldn't carry

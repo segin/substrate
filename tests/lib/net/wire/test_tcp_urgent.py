@@ -15,6 +15,10 @@ TCP-URG-06).
                 on the wire in a segment with URG set and a pointer whose
                 preceding octet is 'X'; the flag stays on retransmissions
                 until the peer acknowledges it.
+    recv-oob    TCP-URG-04: after "abcdef" with SEG.UP 3, recvmsg(MSG_OOB)
+                returns 'c' with MSG_OOB in msg_flags, the stream reads
+                "ab" then "def", and a second MSG_OOB read fails EINVAL
+                (nothing is pending) instead of consuming stream data.
 
 Run from the repo root after building sys/ and wireguest:
     python3 tests/lib/net/wire/test_tcp_urgent.py [case...]
@@ -93,8 +97,31 @@ def case_send_urg():
         return None, w
 
 
+def case_recv_oob():
+    with Wire.boot('connect 10.0.2.2 %d sleep:3 recvmsgoob read:64 read:64 '
+                   'recvoob sleep:60' % PORT) as w:
+        syn, err = handshake(w)
+        if err:
+            return err, w
+        gp, g = syn.sport, syn.seq + 1
+        w.send(Seg(PORT, gp, PISS + 1, g, ACK | PSH | URG, data=b'abcdef', urp=3))
+        if not w.wait_serial('guest: recvoob', 15):
+            return 'guest never finished: %s' % w.serial()[-300:], w
+        m = line(w, 'recvmsgoob')
+        reads = line(w, 'read')
+        o = line(w, 'recvoob')
+        if len(m) < 2 or 'data=c n=1' not in m[0] or '0x1' not in m[1]:
+            return 'recvmsg(MSG_OOB): %s' % m, w
+        if len(reads) < 2 or 'n=2' not in reads[0] or 'n=3' not in reads[1]:
+            return 'stream reads: %s' % reads, w
+        if not o or 'Invalid argument' not in o[0]:
+            return 'second MSG_OOB read: %s' % o, w
+        return None, w
+
+
 CASES = (('recv-mark', case_recv_mark),
-         ('send-urg', case_send_urg))
+         ('send-urg', case_send_urg),
+         ('recv-oob', case_recv_oob))
 
 
 def main():

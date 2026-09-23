@@ -2099,6 +2099,10 @@ ssize_t afinet_recvfrom_rx(int fd, void *buf, size_t len, int flags,
         int nb = (flags & MSG_DONTWAIT) ||
                  (f && (f->f_flag & FNONBLOCK));
         uint64_t dl = afi_deadline(s->rcv_timeo);
+        /* TCP-URG-04: MSG_OOB reads the urgent octet, never the stream --
+         * it used to fall through and consume ordinary in-band data. */
+        if (flags & MSG_OOB)
+            return tcp_recv_oob(s->tcp, buf, len, (flags & MSG_PEEK) != 0);
         if (flags & MSG_PEEK)
             return nb ? tcp_peek_nb(s->tcp, buf, len)
                       : tcp_peek_until(s->tcp, buf, len, dl);

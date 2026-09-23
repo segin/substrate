@@ -262,6 +262,7 @@ void       tcp_set_txopts(tcp_pcb_t *p, const struct ip4_txopts *o);
 int        tcp_set_user_timeout(tcp_pcb_t *p, uint32_t ms);     /* TCP-WIN-13 */
 uint32_t   tcp_get_user_timeout(const tcp_pcb_t *p);
 int        tcp_sockatmark(tcp_pcb_t *p);                        /* TCP-URG-01 */
+ssize_t    tcp_recv_oob(tcp_pcb_t *p, void *buf, size_t len, int peek); /* TCP-URG-04 */
 void       tcp_set_owner(tcp_pcb_t *p, int owner);
 int        tcp_get_owner(const tcp_pcb_t *p);
 
