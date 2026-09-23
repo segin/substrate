@@ -150,6 +150,12 @@ ssize_t afinet_recvfrom(int fd, void *buf, size_t len, int flags,
 int afinet_deliver_v4(uint32_t saddr, uint32_t daddr,
                       uint8_t protocol,
                       const uint8_t *pkt, size_t len, int for_dgram);
+/* UDP-ICMP-01: an ICMP error arrived about a UDP datagram we sent from
+ * laddr:lport to raddr:rport.  Latch err on the connected socket for that
+ * 4-tuple, if any, and wake it.  All in network byte order except the
+ * ports and err. */
+void afinet_icmp_error_v4(uint32_t laddr, uint16_t lport,
+                          uint32_t raddr, uint16_t rport, int err);
 int afinet_deliver_v6(const uint8_t saddr[16], const uint8_t daddr[16],
                       uint8_t protocol,
                       const uint8_t *pkt, size_t len, int for_dgram);

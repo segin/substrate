@@ -11,6 +11,7 @@
  * ping(8) sees the reply.
  */
 
+#include <errno.h>
 #include <stddef.h>
 #include <string.h>
 
@@ -28,21 +29,62 @@
 /* ICMPv4                                                             */
 /* ------------------------------------------------------------------ */
 
+/*
+ * UDP-ICMP-01: an ICMP error about a datagram we sent.  The message quotes
+ * the offending IP header plus at least 8 octets of its data -- for UDP the
+ * whole header, which gives the 4-tuple that locates the socket.  icmp_input
+ * used to return on anything but an echo request, so every one of these was
+ * dropped unread.  The errno follows the usual BSD/Linux mapping.
+ */
+static int icmp_unreach_errno(uint8_t code) {
+    switch (code) {
+    case ICMP_NET_UNREACH: case 6: case 9: case 11: return ENETUNREACH;
+    case ICMP_PROT_UNREACH: return ENOPROTOOPT;
+    case ICMP_PORT_UNREACH: return ECONNREFUSED;
+    case ICMP_FRAG_NEEDED:  return EMSGSIZE;
+    default:                return EHOSTUNREACH;
+    }
+}
+
+static void icmp_error_input(uint8_t type, uint8_t code,
+                             const uint8_t *pkt, size_t len) {
+    if (len < 8 + sizeof(struct iphdr)) return;
+    const struct iphdr *q = (const struct iphdr *)(pkt + 8);
+    size_t qhl = IPH_HL(q) * 4;
+    if (IPH_V(q) != 4 || qhl < sizeof(*q) || 8 + qhl + 8 > len) return;
+    if (q->protocol != IPPROTO_UDP_NUM) return;
+    const uint8_t *qudp = pkt + 8 + qhl;
+    uint16_t sport = (uint16_t)((qudp[0] << 8) | qudp[1]);
+    uint16_t dport = (uint16_t)((qudp[2] << 8) | qudp[3]);
+    int err = type == ICMP_DEST_UNREACH  ? icmp_unreach_errno(code)
+            : type == ICMP_TIME_EXCEEDED ? EHOSTUNREACH
+            :                              EPROTO;
+    /* The quoted datagram is one we sent: its source is our end. */
+    afinet_icmp_error_v4(q->saddr, sport, q->daddr, dport, err);
+}
+
 void icmp_input(netdev_t *dev, uint32_t saddr, uint32_t daddr,
                 const uint8_t *pkt, size_t len) {
     if (len < sizeof(struct icmphdr)) return;
     const struct icmphdr *ih = (const struct icmphdr *)pkt;
-    if (ih->type != ICMP_ECHO) return;
-
     /*
      * ICMP-02: verify the received checksum.  It was never checked, so a
      * corrupted echo request was reflected back as a perfectly-formed
      * reply carrying the corrupted payload -- we became a laundering
      * service for bit errors, and the sender saw a valid response for data
      * it never sent.  ICMP's checksum covers the whole message, so this is
-     * a straight one's-complement check over len.
+     * a straight one's-complement check over len -- and it now guards the
+     * error messages below as well, before their quote is trusted.
      */
     if (inet_csum(pkt, len) != 0) return;
+    if (ih->type == ICMP_DEST_UNREACH || ih->type == ICMP_TIME_EXCEEDED ||
+        ih->type == ICMP_PARAMETERPROB) {
+        icmp_error_input(ih->type, ih->code, pkt, len);
+        return;
+    }
+    /* Source Quench is deprecated: RFC 6633 says hosts MUST ignore it. */
+    if (ih->type != ICMP_ECHO) return;
+
 
     /*
      * ICMP-01: never answer an echo request sent to a broadcast address.

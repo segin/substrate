@@ -134,6 +134,8 @@ typedef struct afi_sock {
     void      *wait_chan;
     int        closed;
     int        rd_shut;     /* shutdown(SHUT_RD): reads return EOF */
+    int        so_error;    /* UDP-ICMP-01: errno latched from an ICMP error;
+                             * guarded by afi_lock */
 
     /* NET-01: reference count guarding the socket's lifetime against the
      * hard-IRQ delivery path.  Held by the installed socket itself (the
@@ -453,6 +455,7 @@ static int afinet_node_poll(fs_node_t *node, void *waiter)
      * something queued; always writeable.  */
     int rv = POLLOUT;
     if (s->count > 0) rv |= POLLIN;
+    if (s->so_error) rv |= POLLERR;     /* UDP-ICMP-01 */
     if (waiter && rv == POLLOUT) *(void **)waiter = s->wait_chan;
     return rv;
 }
@@ -592,6 +595,14 @@ static size_t afinet_node_read_body(fs_node_t *node, size_t size, uint8_t *buf) 
             afi_rele_unlock(s, fl);
             memcpy(buf, tmp, n);
             return n;
+        }
+        /* UDP-ICMP-01: read(2) reports a latched ICMP error exactly as
+         * recv() does (afinet_recvfrom). */
+        if (s->so_error) {
+            int err = s->so_error;
+            s->so_error = 0;
+            afi_rele_unlock(s, fl);
+            return (size_t)-err;
         }
         if (nb) { afi_rele_unlock(s, fl); return (size_t)-EAGAIN; }
         /* UDP-06: queue-then-release, and signal-interruptible so SIGINT
@@ -1187,7 +1198,14 @@ int afinet_so_error(int fd) {
     afi_sock_t *s = afi_from_fd(fd);
     if (!s) return -ENOTSOCK;
     if (s->tcp) return tcp_take_so_error(s->tcp);
-    return 0;
+    /* UDP-ICMP-01: this used to be a hard 0 for every datagram socket, so
+     * an ICMP error could never be observed through SO_ERROR.  Reading it
+     * clears it, as on BSD and Linux. */
+    unsigned long fl = spinlock_acquire_irq(&afi_lock);
+    int err = s->so_error;
+    s->so_error = 0;
+    spinlock_release_irq(&afi_lock, fl);
+    return err;
 }
 
 /* SO_TYPE for an AF_INET/AF_INET6 fd: SOCK_STREAM / SOCK_DGRAM / SOCK_RAW, or
@@ -1562,6 +1580,15 @@ ssize_t afinet_recvfrom(int fd, void *buf, size_t len, int flags,
             if (flags & MSG_TRUNC) return (ssize_t)ptrue;
             return (ssize_t)n;
         }
+        /* UDP-ICMP-01: queued datagrams first, then a pending ICMP error --
+         * which a blocked reader is woken to collect, instead of sleeping
+         * out its whole timeout against a port that has already refused. */
+        if (s->so_error) {
+            int err = s->so_error;
+            s->so_error = 0;
+            afi_rele_unlock(s, fl);
+            return -err;
+        }
         /* Non-blocking: MSG_DONTWAIT (Linux convention) or the fd's
          * FNONBLOCK, resolved above. */
         if (nb_dgram) { afi_rele_unlock(s, fl); return -EAGAIN; }
@@ -1718,6 +1745,29 @@ int afinet_deliver_v4(uint32_t saddr, uint32_t daddr,
     }
     spinlock_release_irq(&afi_lock, fl);
     return delivered;
+}
+
+/*
+ * UDP-ICMP-01: RFC 1122 4.1.3.3 -- UDP must pass ICMP errors to the
+ * application.  Only a CONNECTED socket whose 4-tuple matches the quoted
+ * datagram hears about it, as on BSD and Linux: an unconnected socket has no
+ * per-destination error channel, and reporting one client's unreachable
+ * port to a server's next recv() would let any peer break it.
+ */
+void afinet_icmp_error_v4(uint32_t laddr, uint16_t lport,
+                          uint32_t raddr, uint16_t rport, int err) {
+    unsigned long fl = spinlock_acquire_irq(&afi_lock);
+    for (afi_sock_t *s = g_afi_head; s; s = s->next) {
+        if (s->closed || s->family != AF_INET || s->type != SOCK_DGRAM) continue;
+        if (!s->connected || s->local_port != lport || s->peer_port != rport)
+            continue;
+        if (memcmp(s->peer_addr, &raddr, 4) != 0) continue;
+        if (!addr_is_wild(s->local_addr, 4) &&
+            memcmp(s->local_addr, &laddr, 4) != 0) continue;
+        s->so_error = err;
+        sched_wakeup(s->wait_chan);
+    }
+    spinlock_release_irq(&afi_lock, fl);
 }
 
 int afinet_deliver_v6(const uint8_t saddr[16], const uint8_t daddr[16],

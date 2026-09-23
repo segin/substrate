@@ -8,6 +8,7 @@
  *
  *   wireguest connect <ip> <port> <action>...
  *   wireguest listen <port> <action>...
+ *   wireguest udp <ip> <port> <action>...     (a connect()ed UDP socket)
  *
  * Actions, executed in order on the connected socket:
  *   readeof      read until EOF (or error), reporting the byte count
@@ -16,6 +17,7 @@
  *   close        close the socket
  *   shutwr       shutdown(SHUT_WR)
  *   sleep:N      sleep N seconds
+ *   soerror      getsockopt(SO_ERROR), reporting the value
  *
  * Every step is logged as "guest: ..." on the console so the host side can
  * synchronise on it, and the run ends with "Result: done".
@@ -64,6 +66,11 @@ static int do_actions(int fd, int argc, char **argv) {
         } else if (strcmp(a, "shutwr") == 0) {
             int r = shutdown(fd, SHUT_WR);
             say("shutwr %s rc=%ld", r < 0 ? strerror(errno) : "ok", r);
+        } else if (strcmp(a, "soerror") == 0) {
+            int err = -1;
+            socklen_t el = sizeof(err);
+            int r = getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &el);
+            say("soerror %s value=%ld", r < 0 ? strerror(errno) : "ok", (long)err);
         } else if (strncmp(a, "sleep:", 6) == 0) {
             sleep((unsigned)atoi(a + 6));
             say("slept %s%ld", "", atol(a + 6));
@@ -99,6 +106,19 @@ int main(int argc, char **argv) {
             rc = do_actions(fd, argc - 4, argv + 4);
         } else {
             say("connect failed: %s (%ld)", strerror(errno), errno);
+        }
+    } else if (argc >= 4 && strcmp(argv[1], "udp") == 0) {
+        struct sockaddr_in sa;
+        memset(&sa, 0, sizeof sa);
+        sa.sin_family = AF_INET;
+        sa.sin_port = htons((unsigned short)atoi(argv[3]));
+        sa.sin_addr.s_addr = inet_addr(argv[2]);
+        int fd = socket(AF_INET, SOCK_DGRAM, 0);
+        if (fd >= 0 && connect(fd, (struct sockaddr *)&sa, sizeof sa) == 0) {
+            say("udp connected %s%ld", "", 0);
+            rc = do_actions(fd, argc - 4, argv + 4);
+        } else {
+            say("udp connect failed: %s (%ld)", strerror(errno), errno);
         }
     } else if (argc >= 3 && strcmp(argv[1], "listen") == 0) {
         struct sockaddr_in sa;

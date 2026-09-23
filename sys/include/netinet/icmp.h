@@ -11,8 +11,16 @@
 #define ICMP_DEST_UNREACH 3
 #define ICMP_ECHO        8
 
-/* ICMP_DEST_UNREACH codes (RFC 792) */
-#define ICMP_PORT_UNREACH 3
+#define ICMP_SOURCE_QUENCH 4
+#define ICMP_TIME_EXCEEDED 11
+#define ICMP_PARAMETERPROB 12
+
+/* ICMP_DEST_UNREACH codes (RFC 792, RFC 1122 3.2.2.1) */
+#define ICMP_NET_UNREACH   0
+#define ICMP_HOST_UNREACH  1
+#define ICMP_PROT_UNREACH  2
+#define ICMP_PORT_UNREACH  3
+#define ICMP_FRAG_NEEDED   4
 
 struct icmphdr {
     uint8_t  type;
