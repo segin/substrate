@@ -25,6 +25,10 @@ it guards.
     syn-sent-ack    TCP-SM-10: in SYN-SENT a bare ACK outside
                     (ISS, SND.NXT] draws <SEQ=SEG.ACK><CTL=RST>, and the
                     connect then still completes.
+    simultaneous    TCP-SM-11: simultaneous open (RFC 793 figure 8).  The
+                    peer answers the guest's SYN with a SYN of its own; the
+                    guest replies SYN|ACK from its ISS, and the peer's
+                    SYN|ACK then completes the connect, which carries data.
 
 Run from the repo root after building sys/ and wireguest:
     python3 tests/lib/net/wire/test_tcp_input.py [case...]
@@ -196,12 +200,33 @@ def case_syn_sent_ack():
         return None, w
 
 
+def case_simultaneous():
+    with Wire.boot('connect 10.0.2.2 %d write:simul sleep:60' % PORT) as w:
+        syn = w.expect(lambda s: s.flags & SYN and s.dport == PORT, 90, 'SYN')
+        if not syn:
+            return 'no SYN from guest', w
+        gp, iss = syn.sport, syn.seq
+        w.rx.clear()
+        w.send(Seg(PORT, gp, PISS, 0, SYN))
+        sa = w.expect(lambda s: s.flags & SYN, 3, 'SYN-ACK')
+        if not sa or not sa.flags & ACK or sa.seq != iss or sa.ack != PISS + 1:
+            return 'want SYN|ACK seq=%d ack=%d, got %r' % (iss, PISS + 1, sa), w
+        w.send(Seg(PORT, gp, PISS, iss + 1, SYN | ACK))
+        if not w.wait_serial('guest: connected', 10):
+            return 'simultaneous open did not complete', w
+        d = w.expect(lambda s: s.data, 5, 'data')
+        if not d or d.data != b'simul' or d.seq != iss + 1:
+            return 'no data after the open: %r' % d, w
+        return None, w
+
+
 CASES = (('data-after-fin', case_data_after_fin),
          ('syn-rcvd-rst', case_syn_rcvd_rst),
          ('syn-sync', case_syn_sync),
          ('listen-ack', case_listen_ack),
          ('syn-rcvd-third', case_syn_rcvd_third),
-         ('syn-sent-ack', case_syn_sent_ack))
+         ('syn-sent-ack', case_syn_sent_ack),
+         ('simultaneous', case_simultaneous))
 
 
 def main():

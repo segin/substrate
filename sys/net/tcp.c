@@ -831,6 +831,24 @@ static void tcp_in_syn_sent(tcp_pcb_t *p, uint32_t seq, uint32_t ack,
         p->ssthresh = 0xFFFFFFFFu;
         tcp_send_ctl(p, TCP_ACK);
         sched_wakeup(p->connect_chan);
+        return;
+    }
+    /*
+     * TCP-SM-11: simultaneous open (RFC 793 3.4 figure 8, 3.9 SYN-SENT
+     * fourth check).  A SYN without ACK means the peer is opening toward
+     * us at the same moment.  It used to be dropped, so two ends that
+     * dialled each other never connected.  Take its sequence number, move
+     * to SYN-RECEIVED, and turn the SYN already queued at ISS into the
+     * SYN|ACK (retransmitted as such until acknowledged) rather than
+     * queueing a second one; tcp_in_syn_received() completes the open.
+     */
+    if (flags & TCP_SYN) {
+        p->rcv_nxt = seq + 1;
+        p->state   = TCP_SYN_RECEIVED;
+        if (p->unacked_head && (p->unacked_head->flags & TCP_SYN)) {
+            p->unacked_head->flags |= TCP_ACK;
+            tcp_retx_head(p);
+        }
     }
 }
 
@@ -874,11 +892,20 @@ static int tcp_in_syn_received(tcp_pcb_t *p, uint32_t *seqp, uint32_t ack,
      * that sends its request with the handshake ACK had to wait for an RTO
      * to get it through).
      *
-     * A SYN here is the peer retransmitting its SYN; the queued SYN-ACK's
-     * retransmission answers it, as before.
+     * A SYN at IRS is the peer's SYN again: a retransmission (the queued
+     * SYN-ACK's retransmission answers it, as before), or in a simultaneous
+     * open (TCP-SM-11) the peer's SYN|ACK, whose ACK completes the open.
+     * Strip the SYN, as BSD does, and process the rest; RFC 793's own
+     * acceptability test would reject that SYN|ACK, which is a known
+     * defect of its figure 8.  Any other SYN is ignored.
      */
-    if (flags & TCP_SYN)
-        return 0;
+    if (flags & TCP_SYN) {
+        if (seq != p->rcv_nxt - 1u)
+            return 0;
+        flags &= (uint8_t)~TCP_SYN;
+        *flagsp = flags;
+        *seqp = seq = p->rcv_nxt;
+    }
     /* First check: sequence number (answered with an ACK and dropped). */
     if (!tcp_seg_check(p, seqp, flagsp, payloadp, dlenp))
         return 0;
@@ -918,6 +945,8 @@ static int tcp_in_syn_received(tcp_pcb_t *p, uint32_t *seqp, uint32_t ack,
             par->accept_count++;
             sched_wakeup(par->accept_chan);
         }
+    } else {
+        sched_wakeup(p->connect_chan);   /* TCP-SM-11: an active open */
     }
     return 1;
 }
