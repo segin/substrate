@@ -8,8 +8,9 @@
  * UDP-IP-02 (all of 127/8 is local), UDP-IP-08 (broadcast fan-out) and
  * UDP-IP-11 (lo's MTU), UDP-API-01 (port ownership), UDP-API-02
  * (multi-iovec sendmsg), UDP-API-03 (writev), UDP-API-04 (SO_RCVTIMEO),
- * UDP-API-06 (non-local bind), UDP-API-07 (connect binds) and UDP-API-08
- * (SHUT_RD) from docs/ip-audit-2026-09-22.md.
+ * UDP-API-06 (non-local bind), UDP-API-07 (connect binds), UDP-API-08
+ * (SHUT_RD) and UDP-API-09 (zero-length receive) from
+ * docs/ip-audit-2026-09-22.md.
  *
  * Each case drives the real socket API over the loopback interface, so a
  * PASS means a datagram actually took the intended path through the
@@ -853,6 +854,31 @@ static void test_shut_rd(void)
     close(c);
 }
 
+/* UDP-API-09: recv() with a zero-length buffer on a datagram socket takes a
+ * datagram (MSG_TRUNC reporting its length).  It returned 0 without taking
+ * it, so a poll()-driven drain that receives zero bytes spun forever. */
+static void test_zero_len_recv(void)
+{
+    printf("UDP-API-09: a zero-length receive consumes the datagram\n");
+    struct sockaddr_in dst;
+    char buf[16];
+    int rx = bind_udp(31958);
+    int tx = socket(AF_INET, SOCK_DGRAM, 0);
+    lo_addr(&dst, 31958);
+    sendto(tx, "first", 5, 0, (struct sockaddr *)&dst, sizeof(dst));
+    sendto(tx, "second", 6, 0, (struct sockaddr *)&dst, sizeof(dst));
+    wait_readable(rx);
+    ssize_t n = recv(rx, buf, 0, MSG_TRUNC | MSG_DONTWAIT);
+    ok("recv(len 0, MSG_TRUNC) reports the first datagram's length", n == 5,
+       "wrong length");
+    memset(buf, 0, sizeof(buf));
+    n = try_recv(rx, buf, sizeof(buf));
+    ok("and consumed it: the next receive is the second",
+       n == 6 && memcmp(buf, "second", 6) == 0, "the first was still queued");
+    close(rx);
+    close(tx);
+}
+
 int main(void)
 {
     printf("torture_udp: UDP demux + checksum regressions (#430)\n\n");
@@ -877,6 +903,7 @@ int main(void)
     test_bind_nonlocal();
     test_connect_binds();
     test_shut_rd();
+    test_zero_len_recv();
 
     printf("\nResult: %d passed, %d failed -- %s\n",
            passed, failed, failed ? "FAILED" : "PASSED");

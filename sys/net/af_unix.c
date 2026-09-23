@@ -1837,12 +1837,21 @@ static ssize_t do_recv(int fd, void *buf, size_t len, int flags,
      * simply is not a socket (ENOTSOCK, returned by recv_into_kbuf). */
     if (fd < 0 || fd >= MAX_FD || !current_process || !current_process->fds[fd])
         return -EBADF;
-    if (len == 0)
+    /*
+     * UDP-API-09: a zero-length receive on a DATAGRAM socket still takes
+     * one datagram (and reports its sender; with MSG_TRUNC, its length).
+     * Short-circuiting it left the datagram queued, so a poll()-driven drain
+     * that receives with a zero-length buffer spun forever on it.  On a
+     * stream there is nothing to consume, so 0 stays an immediate answer.
+     */
+    uint8_t dummy[1];
+    int zero_dgram = (len == 0 && sock_fd_is_dgram(fd));
+    if (len == 0 && !zero_dgram)
         return 0;
     memset(kaddr, 0, sizeof(kaddr));
 
     cap = len < RECV_BOUNCE_CAP ? len : RECV_BOUNCE_CAP;
-    kbuf = kmalloc(cap);
+    kbuf = zero_dgram ? dummy : kmalloc(cap);
     if (!kbuf)
         return -ENOMEM;
 
@@ -1850,7 +1859,7 @@ static ssize_t do_recv(int fd, void *buf, size_t len, int flags,
                        addr ? (struct sockaddr *)kaddr : NULL,
                        addr ? &kaddrlen : NULL);
     if (n < 0) {
-        kfree(kbuf, cap);
+        if (kbuf != dummy) kfree(kbuf, cap);
         return n;
     }
     /*
@@ -1862,10 +1871,10 @@ static ssize_t do_recv(int fd, void *buf, size_t len, int flags,
      */
     size_t ncopy = (size_t)n < cap ? (size_t)n : cap;
     if (ncopy > 0 && copyout(kbuf, buf, ncopy) != 0) {
-        kfree(kbuf, cap);
+        if (kbuf != dummy) kfree(kbuf, cap);
         return -EFAULT;
     }
-    kfree(kbuf, cap);
+    if (kbuf != dummy) kfree(kbuf, cap);
 
     if (addr && addrlen) {
         socklen_t user_cap = 0;
