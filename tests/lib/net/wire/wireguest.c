@@ -30,6 +30,7 @@
  *   setown       install a SIGURG counter and fcntl(F_SETOWN, getpid())
  *   sigurg       report how many SIGURGs have arrived
  *   atmark       ioctl(SIOCATMARK), reporting the value
+ *   sockatmark   sockatmark() on the socket and then on fd 0 (the console)
  *   oob:TEXT     send(TEXT, MSG_OOB)
  *   recvoob      recv(MSG_OOB) into a 16-octet buffer, reporting the octets
  *   recvmsgoob   the same through recvmsg(), reporting msg_flags too
@@ -140,6 +141,11 @@ static int do_actions(int fd, int argc, char **argv) {
             say(n < 0 ? "recvmsgoob %s n=%ld" : "recvmsgoob data=%s n=%ld",
                 n < 0 ? strerror(errno) : b, (long)n);
             say("recvmsgoob flags %s%#lx", "", (long)mh.msg_flags);
+        } else if (strcmp(a, "sockatmark") == 0) {
+            int v = sockatmark(fd);
+            say("sockatmark socket %s value=%ld", v < 0 ? strerror(errno) : "ok", (long)v);
+            v = sockatmark(0);
+            say("sockatmark console %s value=%ld", v < 0 ? strerror(errno) : "ok", (long)v);
         } else if (strcmp(a, "atmark") == 0) {
             int v = -1;
             int r = ioctl(fd, SIOCATMARK, &v);

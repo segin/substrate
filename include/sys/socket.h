@@ -191,6 +191,7 @@ int setsockopt(int sockfd, int level, int optname, const void *optval, socklen_t
 int getsockname(int sockfd, struct sockaddr *addr, socklen_t *addrlen);
 int getpeername(int sockfd, struct sockaddr *addr, socklen_t *addrlen);
 int shutdown(int sockfd, int how);
+int sockatmark(int sockfd);
 int socketpair(int domain, int type, int protocol, int sv[2]);
 
 #ifdef __cplusplus

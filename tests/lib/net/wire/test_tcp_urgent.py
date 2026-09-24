@@ -19,6 +19,9 @@ TCP-URG-06).
                 returns 'c' with MSG_OOB in msg_flags, the stream reads
                 "ab" then "def", and a second MSG_OOB read fails EINVAL
                 (nothing is pending) instead of consuming stream data.
+    sockatmark  TCP-URG-05: libc sockatmark() asks the kernel: 1 at the mark
+                on the TCP socket, and -1 ENOTTY on the console, which is
+                not a socket.  It used to return 0 for everything.
 
 Run from the repo root after building sys/ and wireguest:
     python3 tests/lib/net/wire/test_tcp_urgent.py [case...]
@@ -119,9 +122,28 @@ def case_recv_oob():
         return None, w
 
 
+def case_sockatmark():
+    with Wire.boot('connect 10.0.2.2 %d sleep:3 read:64 sockatmark sleep:60' % PORT) as w:
+        syn, err = handshake(w)
+        if err:
+            return err, w
+        gp, g = syn.sport, syn.seq + 1
+        w.send(Seg(PORT, gp, PISS + 1, g, ACK | PSH | URG, data=b'abcdef', urp=3))
+        if not w.wait_serial('guest: sockatmark console', 15):
+            return 'guest never finished: %s' % w.serial()[-300:], w
+        s = line(w, 'sockatmark')
+        if 'socket ok value=1' not in s[0]:
+            return 'sockatmark(socket) at the mark: %s' % s[0], w
+        if 'value=-1' not in s[1] or 'not a typewriter' not in s[1].lower() and \
+                'inappropriate ioctl' not in s[1].lower():
+            return 'sockatmark(console): %s' % s[1], w
+        return None, w
+
+
 CASES = (('recv-mark', case_recv_mark),
          ('send-urg', case_send_urg),
-         ('recv-oob', case_recv_oob))
+         ('recv-oob', case_recv_oob),
+         ('sockatmark', case_sockatmark))
 
 
 def main():

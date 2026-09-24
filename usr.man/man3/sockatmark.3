@@ -1,0 +1,80 @@
+.\" sockatmark.3 - Substrate libc
+.TH SOCKATMARK 3 "2026-09-23" "Substrate" "Library Functions Manual"
+.SH NAME
+sockatmark \- determine whether a socket is at the out-of-band mark
+.SH LIBRARY
+Standard C library
+.RI ( libc ", " \-lc )
+.SH SYNOPSIS
+.nf
+.B #include <sys/socket.h>
+.PP
+.BI "int sockatmark(int " sockfd ");"
+.fi
+.SH DESCRIPTION
+.BR sockatmark ()
+reports whether the next octet to be read from the socket
+.I sockfd
+is the one that follows TCP urgent data (the
+.IR mark ).
+.PP
+When a TCP peer sends urgent data, the urgent octet is removed from the
+stream and can be read with
+.BR recv (2)
+and
+.BR MSG_OOB .
+A normal read stops at the mark, so a reader that loops on
+.BR read (2)
+and checks
+.BR sockatmark ()
+can tell which data preceded the urgent notification.
+The mark is cleared by the next read that returns data.
+.PP
+An AF_UNIX or datagram socket never has a mark.
+.PP
+The function is implemented with the
+.B SIOCATMARK
+.BR ioctl (2).
+.SH RETURN VALUE
+1 if the socket is at the mark, 0 if it is not.
+On error, \-1 is returned, and
+.I errno
+is set to indicate the error.
+.SH ERRORS
+.TP
+.B EBADF
+.I sockfd
+is not a valid file descriptor.
+.TP
+.B ENOTTY
+.I sockfd
+does not refer to a socket.
+.SH CONFORMING TO
+POSIX.1-2008.
+.SH NOTES
+Before Substrate 2026-09,
+.BR sockatmark ()
+returned 0 for every descriptor without consulting the kernel.
+.SH EXAMPLE
+Read up to the mark, then fetch the urgent octet:
+.PP
+.EX
+char buf[512], oob;
+for (;;) {
+    int at = sockatmark(fd);
+    if (at < 0) { perror("sockatmark"); break; }
+    if (at) {
+        if (recv(fd, &oob, 1, MSG_OOB) == 1)
+            printf("urgent: %c\en", oob);
+        break;
+    }
+    if (read(fd, buf, sizeof buf) <= 0)
+        break;
+}
+.EE
+.SH SEE ALSO
+.BR recv (2),
+.BR send (2),
+.BR ioctl (2),
+.BR fcntl (2),
+.BR tcp (7)

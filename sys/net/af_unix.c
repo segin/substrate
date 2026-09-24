@@ -56,6 +56,7 @@
 #include <sys/lock.h>
 #include <sys/poll.h>
 #include <sys/proc.h>
+#include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/termios.h>
@@ -1052,6 +1053,14 @@ static int afunix_node_ioctl(fs_node_t *node, uint32_t request, void *arg) {
             mutex_unlock(&s->lock);
         }
         if (copyout(&avail, arg, sizeof(avail)) != 0) return -EFAULT;
+        return 0;
+    }
+    /* TCP-URG-05: an AF_UNIX socket has no urgent data, so it is never at
+     * the mark -- but it IS a socket, so sockatmark() must not see ENOTTY. */
+    if (request == SIOCATMARK) {
+        int at = 0;
+        if (!arg) return -EFAULT;
+        if (copyout(&at, arg, sizeof(at)) != 0) return -EFAULT;
         return 0;
     }
     return -ENOTTY;

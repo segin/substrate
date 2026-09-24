@@ -662,8 +662,7 @@ struct netent *getnetbyaddr(uint32_t net, int type) {
 }
 
 /* accept4 and sockatmark live in src/socket.c — they're real
- * wrappers around the SYS_ACCEPT4 syscall (and a no-op return for
- * sockatmark, since AF_UNIX has no OOB data). */
+ * wrappers around the SYS_ACCEPT4 syscall and the SIOCATMARK ioctl. */
 
 /*
  * getpass — POSIX-obsolete password prompt.  Disable echo on the
