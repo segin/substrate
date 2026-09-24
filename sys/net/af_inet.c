@@ -1526,6 +1526,17 @@ int afinet_listen(int fd, int backlog) {
     afi_sock_t *s = afi_from_fd(fd);
     if (!s) return -ENOTSOCK;
     if (!s->tcp) return -EOPNOTSUPP;
+    /* TCP-API-07: listen() on a never-bound socket entered LISTEN with
+     * port 0, which no segment can match; getsockname() then advertised
+     * port 0 and every SYN drew a RST.  Bind an ephemeral port first, as
+     * BSD and Linux do (and as UDP does on its first send). */
+    if (s->local_port == 0) {
+        uint16_t eph = afinet_alloc_ephemeral_free(s);
+        if (eph == 0) return -EADDRINUSE;
+        uint32_t la; memcpy(&la, s->local_addr, 4);
+        int rc = tcp_bind(s->tcp, la, eph, s->reuseaddr);
+        if (rc) { s->local_port = 0; s->bound = 0; return rc; }
+    }
     return tcp_listen(s->tcp, backlog);
 }
 

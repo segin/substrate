@@ -20,6 +20,14 @@ it guards.
                    once the first socket is closed and in TIME-WAIT, a plain
                    bind() of its port fails EADDRINUSE while a SO_REUSEADDR
                    bind() + listen() succeeds.
+    find-specific  TCP-API-05: with an address-specific and a (newer)
+                   wildcard listener on one port, a SYN to the specific
+                   address reaches the specific listener, not the newest.
+    listen-connected TCP-API-06: listen() on a connected socket fails
+                   EINVAL and the connection keeps working.
+    listen-unbound TCP-API-07: listen() on a never-bound socket binds an
+                   ephemeral port, getsockname() reports it, and a SYN to
+                   it is accepted.
 
 Run from the repo root after building sys/ and wireguest:
     python3 tests/lib/net/wire/test_tcp_api.py [case...]
@@ -147,10 +155,72 @@ def case_bind_unique():
         return None, w
 
 
+def dial(w, hp, port):
+    """Prime ARP and complete a handshake from host port hp to guest port."""
+    w.send_arp(1, PEER_MAC, PEER_IP, b'\0' * 6, GUEST_IP)
+    w.pump(0.5)
+    w.send(Seg(hp, port, PISS, 0, SYN))
+    sa = w.expect(lambda s: s.dport == hp and s.flags & SYN, 3, 'SYN-ACK')
+    if not sa:
+        return 'no SYN|ACK from port %d' % port
+    w.send(Seg(hp, port, PISS + 1, sa.seq + 1, ACK))
+    return None
+
+
+def case_find_specific():
+    with Wire.boot('listen2 %d' % PORT) as w:
+        if not w.wait_serial('guest: listening', 90):
+            return 'listeners not up: %s' % line(w, 'listen2'), w
+        err = dial(w, 44002, PORT)
+        if err:
+            return err, w
+        if not w.wait_serial('guest: accepted on', 5):
+            return 'nobody accepted', w
+        a = line(w, 'accepted on')[0]
+        if 'specific' not in a:
+            return 'the wildcard listener took the SYN: %s' % a, w
+        return None, w
+
+
+def case_listen_connected():
+    with Wire.boot('listenafter 10.0.2.2 %d write:still sleep:60' % PORT) as w:
+        syn = w.expect(lambda s: s.flags & SYN and s.dport == PORT, 90, 'SYN')
+        if not syn:
+            return 'no SYN', w
+        w.send(Seg(PORT, syn.sport, PISS, syn.seq + 1, SYN | ACK))
+        if not w.wait_serial('guest: listen', 10):
+            return 'no listen() report', w
+        l = line(w, 'listen ')[0]
+        if 'invalid argument' not in l.lower():
+            return 'listen() on a connected socket: %s (want EINVAL)' % l, w
+        d = w.expect(lambda s: s.data == b'still', 5, 'data')
+        if not d:
+            return 'the connection did not survive listen()', w
+        return None, w
+
+
+def case_listen_unbound():
+    with Wire.boot('listen0 sleep:60') as w:
+        if not w.wait_serial('guest: listening', 90):
+            return 'guest never listened: %s' % line(w, 'listen'), w
+        port = int(line(w, 'port')[0].split()[-1])
+        if port == 0:
+            return 'listen() without bind() left the port at 0', w
+        err = dial(w, 44003, port)
+        if err:
+            return err, w
+        if not w.wait_serial('guest: accepted', 5):
+            return 'accept() did not return', w
+        return None, w
+
+
 CASES = (('reconnect', case_reconnect),
          ('connect-twice', case_connect_twice),
          ('listen-connect', case_listen_connect),
-         ('bind-unique', case_bind_unique))
+         ('bind-unique', case_bind_unique),
+         ('find-specific', case_find_specific),
+         ('listen-connected', case_listen_connected),
+         ('listen-unbound', case_listen_unbound))
 
 
 def main():

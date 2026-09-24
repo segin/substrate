@@ -25,6 +25,17 @@
  *                                               each; then SO_ERROR)
  *   wireguest listenconnect <port>             (listen, then connect() on the
  *                                               listening socket, then accept)
+ *   wireguest listen2 <port>                   (two SO_REUSEADDR listeners on
+ *                                               port: 10.0.2.15 first, then
+ *                                               0.0.0.0; accept on whichever
+ *                                               becomes readable, reporting
+ *                                               "specific" or "wild")
+ *   wireguest listenafter <ip> <port> <action>... (connect, then listen() on
+ *                                               the connected socket,
+ *                                               reporting the result)
+ *   wireguest listen0 <action>...              (listen() with no bind(),
+ *                                               report getsockname()'s port,
+ *                                               then accept)
  *   wireguest bindtest <ip> <port> <lport>     (A: SO_REUSEADDR, bind lport,
  *                                               connect; B: SO_REUSEADDR, bind
  *                                               lport, non-blocking connect to
@@ -379,6 +390,65 @@ int main(int argc, char **argv) {
             }
         } else {
             say("listen failed: %s (%ld)", strerror(errno), errno);
+        }
+    } else if (argc >= 3 && strcmp(argv[1], "listen2") == 0) {
+        int one = 1;
+        struct sockaddr_in sa;
+        memset(&sa, 0, sizeof sa);
+        sa.sin_family = AF_INET;
+        sa.sin_port = htons((unsigned short)atoi(argv[2]));
+        sa.sin_addr.s_addr = inet_addr("10.0.2.15");
+        int l1 = socket(AF_INET, SOCK_STREAM, 0);
+        setsockopt(l1, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
+        int r1 = bind(l1, (struct sockaddr *)&sa, sizeof sa) == 0 && listen(l1, 4) == 0;
+        sa.sin_addr.s_addr = 0;
+        int l2 = socket(AF_INET, SOCK_STREAM, 0);
+        setsockopt(l2, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
+        int r2 = bind(l2, (struct sockaddr *)&sa, sizeof sa) == 0 && listen(l2, 4) == 0;
+        if (r1 && r2) {
+            say("listening %s%ld", "", atol(argv[2]));
+            struct pollfd pf[2] = { { .fd = l1, .events = POLLIN },
+                                    { .fd = l2, .events = POLLIN } };
+            if (poll(pf, 2, -1) > 0) {
+                int which = (pf[0].revents & POLLIN) ? 0 : 1;
+                int fd = accept(which ? l2 : l1, NULL, NULL);
+                say("accepted on %s%ld", which ? "wild" : "specific", (long)fd);
+            }
+        } else {
+            say("listen2 failed: %s (%ld)", strerror(errno), errno);
+        }
+        rc = 0;
+    } else if (argc >= 4 && strcmp(argv[1], "listenafter") == 0) {
+        struct sockaddr_in sa;
+        memset(&sa, 0, sizeof sa);
+        sa.sin_family = AF_INET;
+        sa.sin_port = htons((unsigned short)atoi(argv[3]));
+        sa.sin_addr.s_addr = inet_addr(argv[2]);
+        int fd = socket(AF_INET, SOCK_STREAM, 0);
+        if (fd >= 0 && connect(fd, (struct sockaddr *)&sa, sizeof sa) == 0) {
+            say("connected %s%ld", "", 0);
+            int r = listen(fd, 4);
+            say("listen %s rc=%ld", r < 0 ? strerror(errno) : "ok", r);
+            rc = do_actions(fd, argc - 4, argv + 4);
+        } else {
+            say("connect failed: %s (%ld)", strerror(errno), errno);
+        }
+    } else if (argc >= 2 && strcmp(argv[1], "listen0") == 0) {
+        int l = socket(AF_INET, SOCK_STREAM, 0);
+        int r = listen(l, 4);
+        say("listen %s rc=%ld", r < 0 ? strerror(errno) : "ok", r);
+        struct sockaddr_in me;
+        socklen_t ml = sizeof me;
+        memset(&me, 0, sizeof me);
+        getsockname(l, (struct sockaddr *)&me, &ml);
+        say("port %s%ld", "", (long)ntohs(me.sin_port));
+        say("listening %s%ld", "", (long)ntohs(me.sin_port));
+        int fd = accept(l, NULL, NULL);
+        if (fd >= 0) {
+            say("accepted %s%ld", "", 0);
+            rc = do_actions(fd, argc - 2, argv + 2);
+        } else {
+            say("accept failed: %s (%ld)", strerror(errno), errno);
         }
     } else if (argc >= 5 && strcmp(argv[1], "bindtest") == 0) {
         int one = 1, r;

@@ -967,13 +967,25 @@ static tcp_pcb_t *tcp_find(uint32_t saddr, uint16_t sport,
             (p->laddr == 0 || p->laddr == daddr))
             return p;
     }
-    /* Then a LISTEN socket on the local port. */
+    /* Then a LISTEN socket on the local port.
+     *
+     * TCP-API-05: the most specific one (RFC 793 2.2), not the first in
+     * the list.  The list is prepended, so with a wildcard and an
+     * address-specific listener on one port the NEWEST won every SYN --
+     * a later [::]:22 (bound as the v4 wildcard) captured sshd's
+     * 10.0.0.5:22.  An address-specific listener beats a wildcard, and a
+     * fully specified passive open (a foreign socket named on the
+     * listener) matches only its own peer and beats both. */
+    tcp_pcb_t *best = NULL;
+    int best_score = -1;
     for (tcp_pcb_t *p = g_tcp_pcbs; p; p = p->next) {
-        if (p->state == TCP_LISTEN && p->lport == dport) {
-            if (p->laddr == 0 || p->laddr == daddr) return p;
-        }
+        if (p->state != TCP_LISTEN || p->lport != dport) continue;
+        if (p->laddr && p->laddr != daddr) continue;
+        if (p->raddr && (p->raddr != saddr || p->rport != sport)) continue;
+        int score = (p->laddr ? 1 : 0) + (p->raddr ? 2 : 0);
+        if (score > best_score) { best = p; best_score = score; }
     }
-    return NULL;
+    return best;
 }
 
 /* Emit a bare RST for an unknown segment.  */
@@ -2092,6 +2104,14 @@ int tcp_bind(tcp_pcb_t *p, uint32_t laddr, uint16_t lport, int reuseaddr) {
 int tcp_listen(tcp_pcb_t *p, int backlog) {
     if (backlog < 1)  backlog = 1;
     if (backlog > 32) backlog = 32;
+    /* TCP-API-06: a passive OPEN is legal only from CLOSED (RFC 793 3.9:
+     * any other state is "connection already exists"), plus the
+     * already-LISTEN backlog change below.  The state was overwritten from
+     * anywhere, so listen() on a connected socket turned it into a
+     * listener whose 4-tuple still matched the peer's segments -- which
+     * tcp_in_listen() then discarded, blackholing the peer with no RST. */
+    if (p->state != TCP_CLOSED && p->state != TCP_LISTEN)
+        return -EINVAL;
     /*
      * TCP-32: a second listen() overwrote p->accept_q with a fresh
      * allocation without freeing the old one -- leaking 8*accept_cap and
@@ -2115,6 +2135,11 @@ int tcp_listen(tcp_pcb_t *p, int backlog) {
     memset(nq, 0, sizeof(tcp_pcb_t *) * backlog);
 
     uint32_t f = tcp_lock();
+    if (p->state != TCP_CLOSED && p->state != TCP_LISTEN) {
+        tcp_unlock(f);                          /* TCP-API-06: raced an open */
+        kfree(nq, sizeof(tcp_pcb_t *) * backlog);
+        return -EINVAL;
+    }
     tcp_pcb_t **oq = p->accept_q;
     int ocap = p->accept_cap;
     int keep = p->accept_count < backlog ? p->accept_count : backlog;
