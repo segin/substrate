@@ -2048,9 +2048,44 @@ void tcp_free(tcp_pcb_t *p) {
     kfree(p, sizeof(*p));
 }
 
-int tcp_bind(tcp_pcb_t *p, uint32_t laddr, uint16_t lport) {
+/*
+ * TCP-API-04: RFC 793 2.7 -- a connection is identified by its pair of
+ * sockets, so the local socket must be unique among the PCBs that can
+ * still receive.  The only EADDRINUSE test was the socket layer's, which
+ * sees sockets, not PCBs: accepted children (never marked bound), and the
+ * PCBs a closed socket leaves behind in FIN-WAIT/LAST-ACK/TIME-WAIT, were
+ * invisible to it.  A daemon restarting a second after it closed found
+ * nothing taken, and tcp_find() then matched a client's SYN to the old
+ * LAST-ACK PCB instead of the new listener: the client blackholed.
+ *
+ * Caller holds tcp_lock.  Any non-CLOSED PCB on the same port whose local
+ * address overlaps (either wildcard, or equal) conflicts, except with
+ * SO_REUSEADDR: then a PCB that has a foreign socket (an accepted child, a
+ * client, or the remains of a closed connection, TIME-WAIT included) does
+ * not block a new local socket -- the BSD rule that lets a daemon restart
+ * while old connections drain -- and a LISTEN PCB is left to the socket
+ * layer's consent test (UDP-API-01: both flags, same owner).
+ */
+static int tcp_local_conflict_locked(const tcp_pcb_t *self, uint32_t laddr,
+                                     uint16_t lport, int reuseaddr) {
+    for (const tcp_pcb_t *o = g_tcp_pcbs; o; o = o->next) {
+        if (o == self || o->state == TCP_CLOSED || o->lport != lport) continue;
+        if (o->laddr && laddr && o->laddr != laddr) continue;   /* disjoint */
+        if (reuseaddr && (o->raddr != 0 || o->state == TCP_LISTEN)) continue;
+        return 1;
+    }
+    return 0;
+}
+
+int tcp_bind(tcp_pcb_t *p, uint32_t laddr, uint16_t lport, int reuseaddr) {
+    uint32_t f = tcp_lock();
+    if (lport && tcp_local_conflict_locked(p, laddr, lport, reuseaddr)) {
+        tcp_unlock(f);
+        return -EADDRINUSE;
+    }
     p->laddr = laddr;
     p->lport = lport;
+    tcp_unlock(f);
     return 0;
 }
 
@@ -2246,6 +2281,18 @@ static int tcp_connect_start(tcp_pcb_t *p, uint32_t raddr, uint16_t rport) {
         return -EALREADY;
     }
     if (!p->lport) p->lport = tcp_alloc_ephemeral_locked(p, r);
+    /* TCP-API-04: and the 4-tuple itself must be unique before the SYN
+     * goes out.  A bound socket keeps its port here, so two connects from
+     * the same local socket to the same peer built byte-identical tuples
+     * and tcp_find() fed both streams to whichever PCB came first. */
+    for (const tcp_pcb_t *o = g_tcp_pcbs; o; o = o->next) {
+        if (o == p || o->state == TCP_CLOSED) continue;
+        if (o->lport == p->lport && o->rport == rport && o->raddr == raddr &&
+            (o->laddr == 0 || p->laddr == 0 || o->laddr == p->laddr)) {
+            tcp_unlock(f);
+            return -EADDRINUSE;
+        }
+    }
     p->raddr   = raddr;
     p->rport   = rport;
     tcp_set_mtu_mss(p);                                /* TCP-HDR-04 */

@@ -25,6 +25,12 @@
  *                                               each; then SO_ERROR)
  *   wireguest listenconnect <port>             (listen, then connect() on the
  *                                               listening socket, then accept)
+ *   wireguest bindtest <ip> <port> <lport>     (A: SO_REUSEADDR, bind lport,
+ *                                               connect; B: SO_REUSEADDR, bind
+ *                                               lport, non-blocking connect to
+ *                                               the same peer; close A; C: bind
+ *                                               lport; D: SO_REUSEADDR, bind
+ *                                               lport, listen -- reporting each)
  *
  * Actions, executed in order on the connected socket:
  *   readeof      read until EOF (or error), reporting the byte count
@@ -374,6 +380,43 @@ int main(int argc, char **argv) {
         } else {
             say("listen failed: %s (%ld)", strerror(errno), errno);
         }
+    } else if (argc >= 5 && strcmp(argv[1], "bindtest") == 0) {
+        int one = 1, r;
+        struct sockaddr_in me, sa;
+        memset(&me, 0, sizeof me);
+        me.sin_family = AF_INET;
+        me.sin_port = htons((unsigned short)atoi(argv[4]));
+        memset(&sa, 0, sizeof sa);
+        sa.sin_family = AF_INET;
+        sa.sin_port = htons((unsigned short)atoi(argv[3]));
+        sa.sin_addr.s_addr = inet_addr(argv[2]);
+        int a = socket(AF_INET, SOCK_STREAM, 0);
+        setsockopt(a, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
+        r = bind(a, (struct sockaddr *)&me, sizeof me);
+        say("bindA %s rc=%ld", r < 0 ? strerror(errno) : "ok", r);
+        r = connect(a, (struct sockaddr *)&sa, sizeof sa);
+        say("connectA %s rc=%ld", r < 0 ? strerror(errno) : "ok", r);
+        int b = socket(AF_INET, SOCK_STREAM, 0);
+        setsockopt(b, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
+        fcntl(b, F_SETFL, fcntl(b, F_GETFL) | O_NONBLOCK);
+        r = bind(b, (struct sockaddr *)&me, sizeof me);
+        say("bindB %s rc=%ld", r < 0 ? strerror(errno) : "ok", r);
+        r = connect(b, (struct sockaddr *)&sa, sizeof sa);
+        say("connectB %s rc=%ld", r < 0 ? strerror(errno) : "ok", r);
+        close(b);
+        close(a);
+        say("closedA %s%ld", "", 0);
+        sleep(2);
+        int c = socket(AF_INET, SOCK_STREAM, 0);
+        r = bind(c, (struct sockaddr *)&me, sizeof me);
+        say("bindC %s rc=%ld", r < 0 ? strerror(errno) : "ok", r);
+        int d = socket(AF_INET, SOCK_STREAM, 0);
+        setsockopt(d, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
+        r = bind(d, (struct sockaddr *)&me, sizeof me);
+        say("bindD %s rc=%ld", r < 0 ? strerror(errno) : "ok", r);
+        r = listen(d, 1);
+        say("listenD %s rc=%ld", r < 0 ? strerror(errno) : "ok", r);
+        rc = 0;
     } else if (argc >= 5 && strcmp(argv[1], "redial") == 0) {
         for (int round = 0; round < 2; round++) {
             struct sockaddr_in me, sa;

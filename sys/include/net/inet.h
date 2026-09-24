@@ -230,7 +230,7 @@ typedef struct tcp_pcb tcp_pcb_t;
 
 tcp_pcb_t *tcp_alloc(void);
 void       tcp_free(tcp_pcb_t *p);
-int        tcp_bind(tcp_pcb_t *p, uint32_t laddr, uint16_t lport);
+int        tcp_bind(tcp_pcb_t *p, uint32_t laddr, uint16_t lport, int reuseaddr);   /* TCP-API-04 */
 int        tcp_listen(tcp_pcb_t *p, int backlog);
 int        tcp_connect(tcp_pcb_t *p, uint32_t raddr, uint16_t rport);
 int        tcp_connect_nb(tcp_pcb_t *p, uint32_t raddr, uint16_t rport);

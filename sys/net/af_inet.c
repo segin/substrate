@@ -1203,8 +1203,19 @@ int afinet_bind(int fd, const void *addr, socklen_t len) {
         }
         memcpy(s->local_addr, &sin->sin_addr, 4);
         if (s->tcp) {
+            /* TCP-API-04: the PCB layer's verdict is authoritative -- it
+             * sees the children and closed-but-lingering PCBs the socket
+             * list does not.  Its result used to be discarded.  An
+             * ephemeral choice that collides only there is retried. */
             uint32_t la; memcpy(&la, s->local_addr, 4);
-            tcp_bind(s->tcp, la, s->local_port);
+            int rc = tcp_bind(s->tcp, la, s->local_port, s->reuseaddr);
+            for (int tries = 0; rc == -EADDRINUSE && !req && tries < 16; tries++) {
+                uint16_t eph = afinet_alloc_ephemeral_free(s);
+                if (eph == 0) break;
+                s->local_port = eph;
+                rc = tcp_bind(s->tcp, la, s->local_port, s->reuseaddr);
+            }
+            if (rc) { s->local_port = 0; s->bound = 0; return rc; }
         }
     } else {
         if (len < (socklen_t)sizeof(struct sin6_kern)) return -EINVAL;
@@ -1232,7 +1243,8 @@ int afinet_bind(int fd, const void *addr, socklen_t len) {
          * dual-stack listener.  When v6 TCP lands, replace this
          * with a real v6 bind path.  */
         if (s->tcp) {
-            tcp_bind(s->tcp, 0, s->local_port);
+            int rc = tcp_bind(s->tcp, 0, s->local_port, s->reuseaddr);   /* TCP-API-04 */
+            if (rc) { s->local_port = 0; s->bound = 0; return rc; }
         }
     }
     s->bound = 1;
@@ -1599,6 +1611,8 @@ int afinet_accept(int fd, void *addr, socklen_t *addrlen) {
         memcpy(c->peer_addr,  &raddr, 4);
         c->local_port = lport;
         memcpy(c->local_addr, &laddr, 4);
+        c->bound      = 1;           /* TCP-API-04: visible to bind checks */
+        c->reuseaddr  = s->reuseaddr;
     }
 
     int newfd = afi_install_fd(c);
@@ -1818,6 +1832,7 @@ int afinet_connect(int fd, const void *addr, socklen_t len) {
                 tcp_endpoints(s->tcp, &la, &lp, &ra2, &rp);
                 s->local_port = lp;
                 memcpy(s->local_addr, &la, 4);
+                s->bound = 1;           /* TCP-API-04: visible to bind checks */
             }
             if (rc == -EINPROGRESS) {
                 s->connected = 1;

@@ -13,6 +13,13 @@ it guards.
                    the handshake is not restarted (one ISS on the wire).
     listen-connect TCP-API-03: connect() on a listening socket fails
                    EOPNOTSUPP and the socket still accepts.
+    bind-unique    TCP-API-04: the PCB layer enforces local-socket
+                   uniqueness.  With SO_REUSEADDR a second socket may bind
+                   the port a connected socket holds, but connecting it to
+                   the same peer (a duplicate 4-tuple) fails EADDRINUSE;
+                   once the first socket is closed and in TIME-WAIT, a plain
+                   bind() of its port fails EADDRINUSE while a SO_REUSEADDR
+                   bind() + listen() succeeds.
 
 Run from the repo root after building sys/ and wireguest:
     python3 tests/lib/net/wire/test_tcp_api.py [case...]
@@ -108,9 +115,42 @@ def case_listen_connect():
         return None, w
 
 
+def case_bind_unique():
+    lport = 45200
+    with Wire.boot('bindtest 10.0.2.2 %d %d' % (PORT, lport)) as w:
+        syn = w.expect(lambda s: s.flags & SYN and s.sport == lport, 90, 'SYN')
+        if not syn:
+            return 'no SYN from socket A', w
+        w.send(Seg(PORT, lport, PISS, syn.seq + 1, SYN | ACK))
+        if not w.wait_serial('guest: connectA ok', 10):
+            return 'A did not connect: %s' % line(w, 'connectA'), w
+        if not w.wait_serial('guest: connectB', 10):
+            return 'no report from B', w
+        bb, cb = line(w, 'bindB')[0], line(w, 'connectB')[0]
+        if 'bindB ok' not in bb:
+            return 'B (SO_REUSEADDR) could not bind beside a connected socket: %s' % bb, w
+        if 'already in use' not in cb.lower():
+            return 'duplicate 4-tuple connect: %s (want EADDRINUSE)' % cb, w
+        fin = w.expect(lambda s: s.flags & FIN and s.sport == lport, 10, 'FIN')
+        if not fin:
+            return 'A never sent its FIN', w
+        w.send(Seg(PORT, lport, PISS + 1, fin.seq + 1, FIN | ACK))
+        if not w.expect(lambda s: s.flags & ACK and s.ack == PISS + 2, 5, 'ACK'):
+            return 'A did not reach TIME-WAIT', w
+        if not w.wait_serial('guest: listenD', 15):
+            return 'no report from D', w
+        bc, bd, ld = line(w, 'bindC')[0], line(w, 'bindD')[0], line(w, 'listenD')[0]
+        if 'already in use' not in bc.lower():
+            return 'bind over a TIME-WAIT PCB: %s (want EADDRINUSE)' % bc, w
+        if 'bindD ok' not in bd or 'listenD ok' not in ld:
+            return 'SO_REUSEADDR rebind over TIME-WAIT: %s / %s' % (bd, ld), w
+        return None, w
+
+
 CASES = (('reconnect', case_reconnect),
          ('connect-twice', case_connect_twice),
-         ('listen-connect', case_listen_connect))
+         ('listen-connect', case_listen_connect),
+         ('bind-unique', case_bind_unique))
 
 
 def main():
