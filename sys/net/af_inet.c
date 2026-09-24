@@ -1767,10 +1767,12 @@ int afinet_connect(int fd, const void *addr, socklen_t len) {
     afi_sock_t *s = afi_from_fd(fd);
     if (!s) return -ENOTSOCK;
     if (!addr) return -EINVAL;
-    /* A connected stream socket cannot be reconnected — return EISCONN
-     * immediately rather than attempting another handshake (which wedged
-     * the caller forever). */
-    if (s->tcp && s->connected) return -EISCONN;
+    /* TCP-API-02: a stream socket's PCB state decides whether an open is
+     * legal (EALREADY while connecting, EISCONN once connected, EOPNOTSUPP
+     * on a listener) -- tcp_connect_start() applies RFC 793 3.8.  The
+     * `connected` flag it was gated on is set only at the end (or, for a
+     * non-blocking connect, the start) of the handshake, so a second
+     * connect() during SYN-SENT restarted it. */
 
     /* Honour O_NONBLOCK on the underlying fd — clients like curl
      * fcntl() the socket non-blocking and then expect connect() to
@@ -1790,18 +1792,23 @@ int afinet_connect(int fd, const void *addr, socklen_t len) {
         /* UDP-API-15: nor to a broadcast address without SO_BROADCAST. */
         if (s->type == SOCK_DGRAM && !s->broadcast && afinet_is_bcast4(sin->sin_addr))
             return -EACCES;
-        s->peer_port = __builtin_bswap16(sin->sin_port);
-        memcpy(s->peer_addr, &sin->sin_addr, 4);
         if (s->tcp) {
-            uint32_t ra; memcpy(&ra, s->peer_addr, 4);
-            int rc = nonblock ? tcp_connect_nb(s->tcp, ra, s->peer_port)
-                              : tcp_connect   (s->tcp, ra, s->peer_port);
+            uint32_t ra; memcpy(&ra, &sin->sin_addr, 4);
+            uint16_t rp = __builtin_bswap16(sin->sin_port);
+            int rc = nonblock ? tcp_connect_nb(s->tcp, ra, rp)
+                              : tcp_connect   (s->tcp, ra, rp);
             /* -EINPROGRESS is the success-but-async return for the
              * non-blocking path.  Record the peer + the connected
              * state BEFORE returning so a follow-up sendto() sees
              * s->connected and uses the stored peer_addr/port,
-             * rather than failing with EDESTADDRREQ. */
+             * rather than failing with EDESTADDRREQ.
+             *
+             * TCP-API-02: the peer is recorded only once the PCB has
+             * taken it, so a rejected connect() to a second address
+             * leaves the socket naming the connection it actually has. */
             if (rc < 0 && rc != -EINPROGRESS) return rc;
+            s->peer_port = rp;
+            memcpy(s->peer_addr, &sin->sin_addr, 4);
             /* Sync the kernel-assigned local endpoint back so getsockname()
              * reflects the ephemeral local port the SYN used; otherwise it
              * reports 0 while the connection runs on the real port and the
@@ -1816,6 +1823,9 @@ int afinet_connect(int fd, const void *addr, socklen_t len) {
                 s->connected = 1;
                 return -EINPROGRESS;
             }
+        } else {
+            s->peer_port = __builtin_bswap16(sin->sin_port);
+            memcpy(s->peer_addr, &sin->sin_addr, 4);
         }
     } else {
         if (len < (socklen_t)sizeof(struct sin6_kern)) return -EINVAL;

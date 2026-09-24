@@ -736,6 +736,9 @@ void tcp_free(tcp_pcb_t *p);   /* forward decl — timer reaps PCBs */
 static void tcp_kill_pcb(tcp_pcb_t *p, int err) {
     p->state    = TCP_CLOSED;
     p->so_error = err;
+    /* TCP-API-01: nothing queued survives the connection; a re-open would
+     * otherwise retransmit it ahead of the new SYN. */
+    tcp_unacked_free_all(p);
     sched_wakeup(p->connect_chan);
     sched_wakeup(p->recv_chan);
     sched_wakeup(p->accept_chan);
@@ -2149,7 +2152,66 @@ static uint16_t tcp_alloc_ephemeral_locked(const tcp_pcb_t *self, uint32_t r) {
     return 0;
 }
 
-static void tcp_connect_start(tcp_pcb_t *p, uint32_t raddr, uint16_t rport) {
+/*
+ * TCP-API-02 / TCP-API-03: RFC 793 3.8 OPEN, by state.  An active open is
+ * legal only from CLOSED.  connect() used to be gated on the socket
+ * layer's `connected` flag, which is set only once the handshake has
+ * completed (or, non-blocking, when it was started): a second connect()
+ * while the first was still in SYN-SENT restarted the handshake with a new
+ * ISS, and connect() on a LISTEN socket silently turned the listener into
+ * a client, orphaning every child it had.
+ */
+static int tcp_open_check_locked(const tcp_pcb_t *p) {
+    switch (p->state) {
+    case TCP_CLOSED:       return 0;
+    case TCP_LISTEN:       return -EOPNOTSUPP;   /* what POSIX and BSD do */
+    case TCP_SYN_SENT:
+    case TCP_SYN_RECEIVED: return -EALREADY;
+    default:               return -EISCONN;
+    }
+}
+
+/*
+ * TCP-API-01: a PCB that reached CLOSED through a failed or finished
+ * connection still holds that connection's state.  Re-opening it used to
+ * queue the new SYN behind the old one, so the retransmit timer resent the
+ * OLD SYN (old ISS) and the new connection never formed; so_error, the
+ * congestion state and the receive side all leaked into the new attempt
+ * too.  Return everything to the freshly allocated state.  Caller holds
+ * tcp_lock and has checked the state is CLOSED.
+ */
+static void tcp_reset_for_open_locked(tcp_pcb_t *p) {
+    tcp_unacked_free_all(p);
+    tcp_ooo_free_all(p);
+    p->so_error  = 0;
+    p->last_ack  = 0;
+    p->dup_ack   = 0;
+    p->cwnd      = 0;
+    p->ssthresh  = 0;
+    p->rcv_nxt   = 0;
+    p->rx_head   = p->rx_tail = 0;
+    p->rx_count  = 0;
+    p->snd_wnd   = 0;
+    p->max_snd_wnd = 0;
+    p->rto       = 0;
+    p->rtt_valid = 0;
+    p->ut_deadline     = 0;
+    p->closing_until   = 0;
+    p->time_wait_until = 0;
+    p->fin_wait2_until = 0;
+    p->shut_rd   = 0;
+    p->urg_have  = p->urg_extract = p->oob_valid = 0;
+    p->urg_mark_valid = p->urg_sig_pending = 0;
+    p->snd_up_valid   = 0;
+    p->pollout_wait   = 0;
+}
+
+static int tcp_connect_start(tcp_pcb_t *p, uint32_t raddr, uint16_t rport) {
+    uint32_t f = tcp_lock();
+    int rc = tcp_open_check_locked(p);
+    if (rc == 0) tcp_reset_for_open_locked(p);     /* TCP-API-01 */
+    tcp_unlock(f);
+    if (rc) return rc;
     /* random_get_bytes() returns the byte count on success, not 0.  The
      * test was inverted, so the candidate ALWAYS came from get_ticks(): two
      * connects within one 4 ms tick started from the same port, and a port
@@ -2177,7 +2239,12 @@ static void tcp_connect_start(tcp_pcb_t *p, uint32_t raddr, uint16_t rport) {
      * tcp_alloc_ephemeral_locked() skips CLOSED PCBs, so a port assigned
      * while the PCB was still CLOSED was invisible to a concurrent
      * connect(). */
-    uint32_t f = tcp_lock();
+    f = tcp_lock();
+    if (p->state != TCP_CLOSED) {
+        /* Another thread opened it between the two locked sections. */
+        tcp_unlock(f);
+        return -EALREADY;
+    }
     if (!p->lport) p->lport = tcp_alloc_ephemeral_locked(p, r);
     p->raddr   = raddr;
     p->rport   = rport;
@@ -2193,12 +2260,14 @@ static void tcp_connect_start(tcp_pcb_t *p, uint32_t raddr, uint16_t rport) {
     /* Queue the SYN — the retx timer will resend it on RTO if the
      * server didn't get it.  */
     tcp_xmit_queue(p, TCP_SYN, NULL, 0);
+    return 0;
 }
 
 int tcp_connect(tcp_pcb_t *p, uint32_t raddr, uint16_t rport) {
     int ret;
     tcp_hold(p);                                    /* TCP-01 */
-    tcp_connect_start(p, raddr, rport);
+    ret = tcp_connect_start(p, raddr, rport);
+    if (ret) { tcp_unhold(p); return ret; }
     /* Wait — the retransmit kthread enforces the overall timeout via
      * TCP_MAX_RETX.  Loop on state changes.  */
     for (;;) {
@@ -2220,7 +2289,8 @@ int tcp_connect(tcp_pcb_t *p, uint32_t raddr, uint16_t rport) {
 }
 
 int tcp_connect_nb(tcp_pcb_t *p, uint32_t raddr, uint16_t rport) {
-    tcp_connect_start(p, raddr, rport);
+    int rc = tcp_connect_start(p, raddr, rport);
+    if (rc) return rc;
     if (p->state == TCP_ESTABLISHED) return 0;
     if (p->state == TCP_CLOSED) {
         return p->so_error ? -p->so_error : -ECONNREFUSED;

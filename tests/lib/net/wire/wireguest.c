@@ -17,6 +17,14 @@
  *   wireguest udpany <port> <action>...        (UDP bound to *:port)
  *   wireguest redial <ip> <port> <lport>       (twice: bind lport, connect,
  *                                               read until EOF or error)
+ *   wireguest reconnect <ip> <port> <action>...  (connect; if that fails,
+ *                                               connect the SAME socket again)
+ *   wireguest nbconnect <ip> <port> <action>...  (O_NONBLOCK connect, then
+ *                                               connect again at once and
+ *                                               again 3 s later, reporting
+ *                                               each; then SO_ERROR)
+ *   wireguest listenconnect <port>             (listen, then connect() on the
+ *                                               listening socket, then accept)
  *
  * Actions, executed in order on the connected socket:
  *   readeof      read until EOF (or error), reporting the byte count
@@ -316,6 +324,55 @@ int main(int argc, char **argv) {
             rc = do_actions(fd, argc - 4, argv + 4);
         } else {
             say("mcast setup failed: %s (%ld)", strerror(errno), errno);
+        }
+    } else if (argc >= 4 && (strcmp(argv[1], "reconnect") == 0 ||
+                             strcmp(argv[1], "nbconnect") == 0)) {
+        int nb = argv[1][0] == 'n';
+        struct sockaddr_in sa;
+        memset(&sa, 0, sizeof sa);
+        sa.sin_family = AF_INET;
+        sa.sin_port = htons((unsigned short)atoi(argv[3]));
+        sa.sin_addr.s_addr = inet_addr(argv[2]);
+        int fd = socket(AF_INET, SOCK_STREAM, 0);
+        if (nb) fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK);
+        int r = connect(fd, (struct sockaddr *)&sa, sizeof sa);
+        say("connect1 %s rc=%ld", r < 0 ? strerror(errno) : "ok", r);
+        if (nb || r < 0) {
+            r = connect(fd, (struct sockaddr *)&sa, sizeof sa);
+            say("connect2 %s rc=%ld", r < 0 ? strerror(errno) : "ok", r);
+        }
+        if (nb) {
+            sleep(3);
+            r = connect(fd, (struct sockaddr *)&sa, sizeof sa);
+            say("connect3 %s rc=%ld", r < 0 ? strerror(errno) : "ok", r);
+            int err = -1;
+            socklen_t el = sizeof err;
+            getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &el);
+            say("soerror ok value=%s%ld", "", (long)err);
+        }
+        if (r == 0) say("connected %s%ld", "", 0);
+        rc = do_actions(fd, argc - 4, argv + 4);
+    } else if (argc >= 3 && strcmp(argv[1], "listenconnect") == 0) {
+        struct sockaddr_in sa;
+        memset(&sa, 0, sizeof sa);
+        sa.sin_family = AF_INET;
+        sa.sin_port = htons((unsigned short)atoi(argv[2]));
+        int l = socket(AF_INET, SOCK_STREAM, 0);
+        if (l >= 0 && bind(l, (struct sockaddr *)&sa, sizeof sa) == 0 &&
+            listen(l, 4) == 0) {
+            say("listening %s%ld", "", atol(argv[2]));
+            sa.sin_addr.s_addr = inet_addr("10.0.2.2");
+            int r = connect(l, (struct sockaddr *)&sa, sizeof sa);
+            say("connect1 %s rc=%ld", r < 0 ? strerror(errno) : "ok", r);
+            int fd = accept(l, NULL, NULL);
+            if (fd >= 0) {
+                say("accepted %s%ld", "", 0);
+                rc = do_actions(fd, argc - 3, argv + 3);
+            } else {
+                say("accept failed: %s (%ld)", strerror(errno), errno);
+            }
+        } else {
+            say("listen failed: %s (%ld)", strerror(errno), errno);
         }
     } else if (argc >= 5 && strcmp(argv[1], "redial") == 0) {
         for (int round = 0; round < 2; round++) {
