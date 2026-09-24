@@ -175,6 +175,30 @@ int coredump(process_t *p) {
                         buf[4], buf[5], buf[6], buf[7]);
             }
         }
+        /* Walk the frame-pointer chain: one line per frame with the
+         * return address and the 8 code bytes it points at, so a frame in
+         * a stripped binary or a library at an unknown base can still be
+         * placed by searching the unstripped build for those bytes.  Every
+         * read is a copyin; the walk stops at the first unreadable or
+         * non-ascending frame. */
+        {
+            uint32_t bp = last_core_record.regs.ebp;
+            for (int i = 0; i < 16 && bp; i++) {
+                uint32_t fr[2] = {0, 0};
+                unsigned char cb[8] = {0};
+                if (copyin((const void *)bp, fr, sizeof(fr)) != 0) break;
+                if (copyin((const void *)fr[1], cb, sizeof(cb)) != 0) {
+                    kprintf("CORE: bt #%d ret=%08x ebp=%08x code: <not mapped>\n",
+                            i, fr[1], fr[0]);
+                    break;
+                }
+                kprintf("CORE: bt #%d ret=%08x ebp=%08x code: %02x %02x %02x %02x %02x %02x %02x %02x\n",
+                        i, fr[1], fr[0], cb[0], cb[1], cb[2], cb[3],
+                        cb[4], cb[5], cb[6], cb[7]);
+                if (fr[0] <= bp) break;
+                bp = fr[0];
+            }
+        }
         /* Dump 16 bytes of user code at eip, peeked via copyin. */
         if (last_core_record.regs.eip != 0) {
             unsigned char ibuf[16] = {0};
