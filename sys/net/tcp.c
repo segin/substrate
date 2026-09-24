@@ -2194,10 +2194,21 @@ static uint32_t tcp_eph_map[TCP_EPH_SPAN / 32];
  * between.  Under the lock one pass over the list marks every port in use,
  * and the candidates are then tested against that bitmap, so the locked
  * work is O(PCBs + range) rather than O(PCBs x candidates). */
-static uint16_t tcp_alloc_ephemeral_locked(const tcp_pcb_t *self, uint32_t r) {
+/* TCP-API-09: a port is unavailable for a connection to (raddr, rport) only
+ * if a live PCB already uses it toward that same peer (with an overlapping
+ * local address), or a listener owns it wholesale.  Keying on the local
+ * port alone made every connection anywhere consume a port from the
+ * 16384-wide range, so a busy client exhausted it after 16384 concurrent
+ * connections however many peers they were spread over. */
+static uint16_t tcp_alloc_ephemeral_locked(const tcp_pcb_t *self, uint32_t r,
+                                           uint32_t raddr, uint16_t rport) {
     memset(tcp_eph_map, 0, sizeof(tcp_eph_map));
     for (tcp_pcb_t *o = g_tcp_pcbs; o; o = o->next) {
         if (o == self || o->state == TCP_CLOSED) continue;
+        if (o->state != TCP_LISTEN &&
+            (o->raddr != raddr || o->rport != rport ||
+             (o->laddr && self->laddr && o->laddr != self->laddr)))
+            continue;
         if (o->lport >= TCP_EPH_LO) {
             uint32_t i = o->lport - TCP_EPH_LO;
             tcp_eph_map[i / 32] |= 1u << (i % 32);
@@ -2305,7 +2316,13 @@ static int tcp_connect_start(tcp_pcb_t *p, uint32_t raddr, uint16_t rport) {
         tcp_unlock(f);
         return -EALREADY;
     }
-    if (!p->lport) p->lport = tcp_alloc_ephemeral_locked(p, r);
+    if (!p->lport) p->lport = tcp_alloc_ephemeral_locked(p, r, raddr, rport);
+    if (!p->lport) {
+        /* TCP-API-08: the range is exhausted.  This was discarded and the
+         * SYN went out from port 0. */
+        tcp_unlock(f);
+        return -EADDRNOTAVAIL;
+    }
     /* TCP-API-04: and the 4-tuple itself must be unique before the SYN
      * goes out.  A bound socket keeps its port here, so two connects from
      * the same local socket to the same peer built byte-identical tuples
@@ -2331,7 +2348,16 @@ static int tcp_connect_start(tcp_pcb_t *p, uint32_t raddr, uint16_t rport) {
     tcp_unlock(f);
     /* Queue the SYN — the retx timer will resend it on RTO if the
      * server didn't get it.  */
-    tcp_xmit_queue(p, TCP_SYN, NULL, 0);
+    rc = tcp_xmit_queue(p, TCP_SYN, NULL, 0);
+    if (rc) {
+        /* TCP-API-08: no memory for the SYN.  The PCB used to be left in
+         * SYN-SENT with nothing queued, so nothing would ever retransmit
+         * or time it out.  Back to CLOSED, where a retry is legal. */
+        f = tcp_lock();
+        p->state = TCP_CLOSED;
+        tcp_unlock(f);
+        return rc;
+    }
     return 0;
 }
 

@@ -28,6 +28,9 @@ it guards.
     listen-unbound TCP-API-07: listen() on a never-bound socket binds an
                    ephemeral port, getsockname() reports it, and a SYN to
                    it is accepted.
+    connect-unspec TCP-API-10: connect() to port 0 fails EADDRNOTAVAIL with
+                   no SYN on the wire; connect() to 0.0.0.0 goes to the local
+                   host (refused at once by loopback), not onto the wire.
 
 Run from the repo root after building sys/ and wireguest:
     python3 tests/lib/net/wire/test_tcp_api.py [case...]
@@ -214,13 +217,34 @@ def case_listen_unbound():
         return None, w
 
 
+def case_connect_unspec():
+    with Wire.boot('connect 10.0.2.2 0') as w:
+        if not w.wait_serial('guest: connect failed', 90):
+            return 'connect() to port 0 did not fail', w
+        c = line(w, 'connect failed')[0]
+        if 'cannot assign' not in c.lower():
+            return 'connect() to port 0: %s (want EADDRNOTAVAIL)' % c, w
+        if any(s.flags & SYN for s in w.rx):
+            return 'a SYN to port 0 went out', w
+    with Wire.boot('connect 0.0.0.0 %d' % PORT) as w:
+        if not w.wait_serial('guest: connect failed', 90):
+            return 'connect() to 0.0.0.0 did not fail', w
+        c = line(w, 'connect failed')[0]
+        if 'refused' not in c.lower():
+            return 'connect() to 0.0.0.0: %s (want ECONNREFUSED from lo)' % c, w
+        if any(s.flags & SYN for s in w.rx):
+            return 'a SYN to 0.0.0.0 went out on the wire', w
+    return None, w
+
+
 CASES = (('reconnect', case_reconnect),
          ('connect-twice', case_connect_twice),
          ('listen-connect', case_listen_connect),
          ('bind-unique', case_bind_unique),
          ('find-specific', case_find_specific),
          ('listen-connected', case_listen_connected),
-         ('listen-unbound', case_listen_unbound))
+         ('listen-unbound', case_listen_unbound),
+         ('connect-unspec', case_connect_unspec))
 
 
 def main():

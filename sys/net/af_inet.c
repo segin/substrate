@@ -1820,6 +1820,11 @@ int afinet_connect(int fd, const void *addr, socklen_t len) {
         if (s->tcp) {
             uint32_t ra; memcpy(&ra, &sin->sin_addr, 4);
             uint16_t rp = __builtin_bswap16(sin->sin_port);
+            /* TCP-API-10: RFC 793 3.8 OPEN, "foreign socket unspecified" is
+             * an error for an active open.  Port 0 was accepted and a SYN
+             * sent to it; INADDR_ANY is the local host (as Linux does). */
+            if (rp == 0) return -EADDRNOTAVAIL;
+            if (ra == 0) ra = __builtin_bswap32(0x7F000001u);
             int rc = nonblock ? tcp_connect_nb(s->tcp, ra, rp)
                               : tcp_connect   (s->tcp, ra, rp);
             /* -EINPROGRESS is the success-but-async return for the
@@ -1858,6 +1863,8 @@ int afinet_connect(int fd, const void *addr, socklen_t len) {
         const struct sin6_kern *sin6 = (const struct sin6_kern *)addr;
         if (sin6->sin6_family != AF_INET6) return -EAFNOSUPPORT;
         if (s->type == SOCK_DGRAM && sin6->sin6_port == 0) return -EINVAL;
+        if (s->type == SOCK_STREAM && sin6->sin6_port == 0)
+            return -EADDRNOTAVAIL;                          /* TCP-API-10 */
         s->peer_port = __builtin_bswap16(sin6->sin6_port);
         memcpy(s->peer_addr, sin6->sin6_addr, 16);
     }
