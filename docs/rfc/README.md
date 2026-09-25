@@ -10,6 +10,13 @@ the citation was written against.
 | `rfc791.txt` | 791 | Internet Protocol | `sys/net/inet.c` |
 | `rfc793.txt` | 793 | Transmission Control Protocol | `sys/net/tcp.c`, `sys/include/netinet/tcp.h` |
 | `rfc768.txt` | 768 | User Datagram Protocol | `sys/net/udp.c` |
+| `rfc2131.txt` | 2131 | Dynamic Host Configuration Protocol | `sbin/dhclient/dhclient.c` |
+
+## DHCP
+
+RFC 2131 defines the protocol -- message format, client state machine,
+timers.  The options themselves (subnet mask, router, lease time, message
+type, ...) are defined in its companion RFC 2132, which is not vendored here.
 
 ## Which TCP edition
 
@@ -34,17 +41,20 @@ cited in `sys/net/tcp.c` but not vendored here:
 
 ## Provenance
 
-Retrieved 2026-09-22 from the RFC Editor, unmodified:
+Retrieved from the RFC Editor, unmodified -- 791, 793 and 768 on
+2026-09-22, 2131 on 2026-09-25:
 
     https://www.rfc-editor.org/rfc/rfc791.txt
     https://www.rfc-editor.org/rfc/rfc793.txt
     https://www.rfc-editor.org/rfc/rfc768.txt
+    https://www.rfc-editor.org/rfc/rfc2131.txt
 
     6cfb387fcecfc1b72f2f69343c5b6951b5d263d708162e2b5c66ab8f394f6265  rfc791.txt
     e55b1faa35edbeecceb2400233a16ae81897bdf9c31d5b3031e91139e5ea8142  rfc793.txt
     7dc8880e1ecef9c3f9da0db4b876a16e96bfa4f0953cc9d977d414f8f680c2f0  rfc768.txt
+    a043b705785b81762505ded4cf71d61392b2b1da2b4ce1e32c13bc984de5f4a5  rfc2131.txt
 
 These are the canonical plain-text editions and carry no copyright notice:
-all three predate the IETF Trust and the RFC 5378 boilerplate.  They are
+all four predate the IETF Trust and the RFC 5378 boilerplate.  They are
 reproduced verbatim, trailing form feeds and pagination included.  Do not edit
 them -- a vendored spec that has been "cleaned up" is no longer the spec.
