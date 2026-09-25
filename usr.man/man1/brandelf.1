@@ -1,0 +1,141 @@
+.TH BRANDELF 1 2026-09-25 "Substrate" "User Commands"
+.SH NAME
+brandelf \- show or set the OS/ABI brand of ELF files
+.SH SYNOPSIS
+.B brandelf
+.RB [ \-v ]
+.RB [ \-f
+.IR abi_number " |"
+.B \-t
+.IR brand ]
+.I file
+\&...
+.br
+.B brandelf
+.B \-l
+.SH DESCRIPTION
+.B brandelf
+reads or rewrites the
+.B EI_OSABI
+byte of the ELF identification header of each
+.IR file .
+The Substrate kernel uses this byte to choose the personality under
+which an executable runs; binaries built for Substrate carry
+.B ELFOSABI_SUBSTRATE
+(64).
+.PP
+Without
+.B \-f
+or
+.BR \-t ,
+each
+.I file
+is opened read-only and a line of the form
+.PP
+.EX
+File 'a.out' is of brand 'Substrate' (64).
+.EE
+.PP
+is printed to standard output.
+With
+.B \-f
+or
+.BR \-t ,
+each file is opened read-write and the byte is overwritten in place;
+nothing is printed.
+Only the 16-byte identification header is read and written; the rest
+of the file is not checked.
+.PP
+This is FreeBSD's
+.B brandelf
+with a Substrate brand added.
+.SH OPTIONS
+.TP
+.BI \-f " abi_number"
+Set the brand to the numeric value
+.IR abi_number ,
+which must be between 0 and 255.
+The number is converted with
+.BR atoi (3),
+so a non-numeric argument is taken as 0.
+Cannot be combined with
+.BR \-t .
+.TP
+.B \-l
+Print the list of known brand names and their values to standard
+error and exit with status 0.
+Any
+.I file
+arguments are ignored.
+.TP
+.BI \-t " brand"
+Set the brand by name.
+Names are matched without regard to case:
+.RS
+.PD 0
+.TP 12
+.B FreeBSD
+9
+.TP
+.B Linux
+3
+.TP
+.B Solaris
+6
+.TP
+.B SVR4
+0
+.TP
+.B Substrate
+64
+.TP
+.B SysV
+0
+.PD
+.RE
+.IP
+An unknown name is an error; the list of known names is printed and
+.B brandelf
+exits.
+Cannot be combined with
+.BR \-f .
+.TP
+.B \-v
+Accepted for compatibility and ignored.
+.SH EXIT STATUS
+.TP
+.B 0
+Success.
+.TP
+.B 1
+A usage error, an unknown brand, no
+.I file
+arguments, or at least one
+.I file
+could not be opened, was not an ELF file, or could not be written.
+Remaining files are still processed after a per-file error.
+.SH EXAMPLES
+Show the brand of a binary:
+.PP
+.EX
+$ brandelf /bin/ls
+File '/bin/ls' is of brand 'Substrate' (64).
+.EE
+.PP
+Mark a binary as a Linux executable:
+.PP
+.EX
+$ brandelf \-t Linux ./prog
+.EE
+.SH SEE ALSO
+.BR readelf (1),
+.BR elfedit (1),
+.BR ld (1)
+.SH HISTORY
+.B brandelf
+first appeared in FreeBSD 2.2.
+.SH BUGS
+A brand byte of 128 or greater is printed as a very large number,
+because the header is held in a signed
+.B char
+buffer.
