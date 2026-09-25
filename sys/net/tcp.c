@@ -3093,8 +3093,15 @@ int tcp_close(tcp_pcb_t *p) {
     case TCP_SYN_SENT:
         /* No established peer to FIN — drop straight to CLOSED.  The
          * reap is deferred to the timer (rather than an inline
-         * tcp_free) so it cannot race a concurrent RX walk. */
-        p->state = TCP_CLOSED;
+         * tcp_free) so it cannot race a concurrent RX walk.
+         *
+         * TCP-API-23: RFC 793 3.9 CLOSE in SYN-SENT: "any outstanding
+         * RECEIVEs and SENDs are returned with 'error: closing'".  A bare
+         * state change woke nobody -- a thread blocked in connect() only
+         * noticed on its next poll tick, and then reported ECONNREFUSED
+         * (so_error was never set).  tcp_kill_pcb() also drops the queued
+         * SYN so it is not retransmitted. */
+        tcp_kill_pcb(p, ECONNABORTED);
         tcp_unlock(f);
         break;
     default:

@@ -65,6 +65,9 @@ it guards.
     peer-early     TCP-API-22: getpeername() on a socket still in SYN-SENT
                    (a non-blocking connect) fails ENOTCONN; once the
                    handshake completes it reports the peer.
+    close-synsent  TCP-API-23: close() while another thread is blocked in
+                   connect() (SYN-SENT) wakes it at once with
+                   ECONNABORTED -- not ECONNREFUSED on the next poll.
 
 Run from the repo root after building sys/ and wireguest:
     python3 tests/lib/net/wire/test_tcp_api.py [case...]
@@ -514,6 +517,21 @@ def case_peer_early():
         return None, w
 
 
+def case_close_synsent():
+    with Wire.boot('closeconnect 10.0.2.2 %d' % PORT) as w:
+        if not w.expect(lambda s: s.flags & SYN and s.dport == PORT, 90, 'SYN'):
+            return 'no SYN', w
+        if not w.wait_serial('guest: took', 30):
+            return 'the blocked connect() never returned', w
+        rep = line(w, 'connect')[0]
+        if 'abort' not in rep.lower():
+            return 'connect() after close(): %s (want ECONNABORTED)' % rep, w
+        took = int(line(w, 'took')[0].split()[-1])
+        if took > 3:
+            return 'connect() took %d s to notice the close' % took, w
+        return None, w
+
+
 CASES = (('reconnect', case_reconnect),
          ('connect-twice', case_connect_twice),
          ('listen-connect', case_listen_connect),
@@ -532,7 +550,8 @@ CASES = (('reconnect', case_reconnect),
          ('read-listener', case_read_listener),
          ('close-synrcvd', case_close_synrcvd),
          ('synrst-flood', case_synrst_flood),
-         ('peer-early', case_peer_early))
+         ('peer-early', case_peer_early),
+         ('close-synsent', case_close_synsent))
 
 
 def main():

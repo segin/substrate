@@ -50,6 +50,11 @@
  *   wireguest peerconnect <ip> <port>          (O_NONBLOCK connect, then
  *                                               getpeername() at once and
  *                                               again 4 s later)
+ *   wireguest closeconnect <ip> <port>         (a second thread blocks in
+ *                                               connect(); 2 s later close()
+ *                                               the socket and report what
+ *                                               the connect returned, and
+ *                                               how many seconds it took)
  *   wireguest acceptfull <port>                (listen, sleep 4 s, fill the fd
  *                                               table with dup(), then accept,
  *                                               reporting the error)
@@ -109,7 +114,9 @@
 #include <string.h>
 #include <net/if.h>
 #include <poll.h>
+#include <pthread.h>
 #include <signal.h>
+#include <time.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -125,6 +132,17 @@ static volatile int g_sigurg;
 static void on_sigurg(int sig) { (void)sig; g_sigurg++; }
 static volatile int g_sigpipe;
 static void on_sigpipe(int sig) { (void)sig; g_sigpipe++; }
+
+/* closeconnect: the connect() that the main thread closes out from under. */
+static struct sockaddr_in cc_sa;
+static int cc_fd, cc_rc, cc_errno;
+static void *cc_thread(void *arg) {
+    (void)arg;
+    cc_rc = connect(cc_fd, (struct sockaddr *)&cc_sa, sizeof cc_sa);
+    cc_errno = errno;
+    return NULL;
+}
+
 static int do_actions(int fd, int argc, char **argv) {
     for (int i = 0; i < argc; i++) {
         const char *a = argv[i];
@@ -549,6 +567,22 @@ int main(int argc, char **argv) {
         socklen_t el = sizeof err;
         getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &el);
         say("soerror ok value=%s%ld", "", (long)err);
+        rc = 0;
+    } else if (argc >= 4 && strcmp(argv[1], "closeconnect") == 0) {
+        memset(&cc_sa, 0, sizeof cc_sa);
+        cc_sa.sin_family = AF_INET;
+        cc_sa.sin_port = htons((unsigned short)atoi(argv[3]));
+        cc_sa.sin_addr.s_addr = inet_addr(argv[2]);
+        cc_fd = socket(AF_INET, SOCK_STREAM, 0);
+        pthread_t t;
+        time_t t0 = time(NULL);
+        pthread_create(&t, NULL, cc_thread, NULL);
+        sleep(2);
+        say("closing %s", "", 0);
+        close(cc_fd);
+        pthread_join(t, NULL);
+        say("connect %s", cc_rc < 0 ? strerror(cc_errno) : "ok", 0);
+        say("took %s%ld", "", (long)(time(NULL) - t0));
         rc = 0;
     } else if (argc >= 4 && strcmp(argv[1], "peerconnect") == 0) {
         struct sockaddr_in sa, pa;
