@@ -15,6 +15,11 @@ exactly as the case needs.
     backoff       DHC-05: unanswered, the four DISCOVERs are spaced by the
                   RFC 2131 4.1 randomized exponential backoff (4, 8, 16 s,
                   each +-1 s) and dhclient gives up 32 +- 1 s after the last.
+    request-retx  DHC-03: an unanswered DHCPREQUEST is retransmitted with
+                  the same xid on the backoff, and an ACK to the third binds.
+    request-restart DHC-03: after four unanswered REQUESTs the client goes
+                  back to INIT -- a new DISCOVER with a new xid -- and binds
+                  from that exchange.
 
 Run from the repo root after building sys/, wireguest and sbin/dhclient:
     python3 tests/lib/net/wire/test_dhclient.py [case...]
@@ -213,8 +218,71 @@ def case_backoff():
         return None, w
 
 
+def offer_and_request(s):
+    """DISCOVER -> OFFER; returns the first REQUEST (or an error string)."""
+    d = s.expect(DISCOVER, 90)
+    if not d:
+        return None, d, 'no DHCPDISCOVER'
+    s.reply(d, OFFER, opts=s.std_opts())
+    r = s.expect(REQUEST, 10)
+    if not r:
+        return None, d, 'no DHCPREQUEST after the OFFER'
+    return r, d, None
+
+
+def case_request_retx():
+    with boot() as w:
+        s = Server(w)
+        r, d, err = offer_and_request(s)
+        if err:
+            return err, w
+        reqs = [r]
+        for _ in range(2):                  # ignore the first two
+            nxt = s.expect(REQUEST, 12)
+            if not nxt:
+                return 'DHCPREQUEST %d never came' % (len(reqs) + 1), w
+            reqs.append(nxt)
+        for k, (lo, hi) in enumerate(((3, 5), (7, 9))):
+            gap = reqs[k + 1].t - reqs[k].t
+            if not lo - 0.4 <= gap <= hi + 0.4:
+                return ('REQUEST retransmission %d after %.2f s, want %d..%d'
+                        % (k + 1, gap, lo, hi)), w
+        if any(q.xid != d.xid for q in reqs):
+            return 'a retransmitted REQUEST changed its xid', w
+        s.reply(reqs[-1], ACK, opts=s.std_opts())
+        if not w.wait_serial('dhclient: bound', 10):
+            return 'not bound after the ACK to the third REQUEST', w
+        return None, w
+
+
+def case_request_restart():
+    with boot() as w:
+        s = Server(w)
+        r, d, err = offer_and_request(s)
+        if err:
+            return err, w
+        # ignore every REQUEST (4, about 60 s); a new DISCOVER must follow
+        d2 = s.expect(DISCOVER, 75)
+        if not d2:
+            return 'no new DISCOVER after the unanswered REQUESTs', w
+        nreq = sum(1 for m in s.seen if m.type == REQUEST)
+        if nreq != 4:
+            return '%d REQUESTs before restarting, want 4' % nreq, w
+        if d2.xid == d.xid:
+            return 'the restarted DISCOVER reused the old xid', w
+        s.reply(d2, OFFER, opts=s.std_opts())
+        r2 = s.expect(REQUEST, 10)
+        if not r2:
+            return 'no REQUEST in the restarted exchange', w
+        s.reply(r2, ACK, opts=s.std_opts())
+        if not w.wait_serial('dhclient: bound', 10):
+            return 'not bound after the restart', w
+        return None, w
+
+
 CASES = (('bound', case_bound), ('clock-step', case_clock_step),
-         ('backoff', case_backoff))
+         ('backoff', case_backoff), ('request-retx', case_request_retx),
+         ('request-restart', case_request_restart))
 
 
 def main():
