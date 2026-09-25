@@ -1,0 +1,489 @@
+.TH AWK 1 2026-09-25 "Substrate" "User Commands"
+.SH NAME
+awk \- pattern-directed scanning and processing language
+.SH SYNOPSIS
+.B awk
+.RB [ \-F
+.IR fs " |"
+.BR \-\-csv ]
+.RB [ \-v
+.IR var = value ]
+.RB [ \-safe ]
+.I 'prog'
+.RI [ file " ...]"
+.br
+.B awk
+.RB [ \-F
+.IR fs " |"
+.BR \-\-csv ]
+.RB [ \-v
+.IR var = value ]
+.RB [ \-safe ]
+.B \-f
+.I progfile
+\&...
+.RI [ file " ...]"
+.SH DESCRIPTION
+Substrate's
+.B awk
+is Brian Kernighan's \(lqOne True Awk\(rq, compiled unmodified from
+the vendored sources in
+.B contrib/onetrueawk
+(upstream version 20260426).
+.PP
+.B awk
+scans each input
+.I file
+for lines that match any of a set of patterns given literally in
+.I prog
+or in one or more files named with
+.BR \-f .
+Each pattern may have an associated action that is performed when a
+line matches.
+The file name
+.B \-
+means standard input; with no
+.I file
+operands, standard input is read.
+An operand of the form
+.IB var = value
+is treated as an assignment, performed at the time the operand would
+have been opened as a file.
+.PP
+An input record is normally a line, split into fields by white space
+or by the regular expression
+.BR FS .
+Fields are
+.BR $1 ,
+.BR $2 ,
+\&...;
+.B $0
+is the whole record.
+If
+.B FS
+is empty, each character is a separate field.
+.SS Program structure
+A program is a sequence of
+.IP
+.IB pattern " { " action " }"
+.PP
+statements, separated by newlines or semicolons.
+A missing action prints the record; a missing pattern always matches.
+Functions may be defined in place of a pattern-action statement:
+.IP
+.B function
+.IB name ( "parameter-list" )
+.B {
+.I statements
+.B }
+.PP
+Scalar arguments are passed by value and arrays by reference;
+parameters are local and all other variables are global, so extra
+parameters serve as local variables.
+.B func
+is accepted as a synonym for
+.BR function .
+.SS Statements
+.EX
+if (\fIexpr\fP) \fIstatement\fP [else \fIstatement\fP]
+while (\fIexpr\fP) \fIstatement\fP
+for (\fIexpr\fP; \fIexpr\fP; \fIexpr\fP) \fIstatement\fP
+for (\fIvar\fP in \fIarray\fP) \fIstatement\fP
+do \fIstatement\fP while (\fIexpr\fP)
+break
+continue
+{ [\fIstatement\fP ...] }
+\fIexpr\fP
+print [\fIexpr-list\fP] [> \fIexpr\fP | >> \fIexpr\fP | | \fIexpr\fP]
+printf \fIformat\fP [, \fIexpr-list\fP] [> \fIexpr\fP | >> \fIexpr\fP | | \fIexpr\fP]
+return [\fIexpr\fP]
+next
+nextfile
+delete \fIarray\fP[\fIexpr\fP]
+delete \fIarray\fP
+exit [\fIexpr\fP]
+.EE
+.PP
+.B next
+skips the remaining patterns for the current record;
+.B nextfile
+skips the rest of the current input file.
+An empty expression list stands for
+.BR $0 .
+Output files and pipes named by identical strings in different
+statements refer to the same open stream.
+.SS Expressions
+String constants are written in double quotes with the usual C
+escapes.
+Values are strings or numbers as context requires.
+The operators are
+.BR "+ \- * / % ^" ,
+concatenation (juxtaposition),
+.BR "! ++ \-\- += \-= *= /= %= ^= > >= < <= == != ?:" ,
+.BR "&& ||" ,
+the match operators
+.B ~
+and
+.BR !~ ,
+and
+.BR in .
+Variables are scalars, fields, or associative arrays indexed by
+strings; a subscript
+.B [i,j]
+is joined with
+.BR SUBSEP .
+Uninitialised variables have the null string (and numeric zero) as
+value.
+.SS Patterns
+A pattern is an arbitrary Boolean combination of regular expressions
+(written
+.BI / re /\fR,\fP
+using
+.BR egrep (1)
+syntax) and relational expressions.
+A bare regular expression matches against
+.BR $0 .
+Two patterns separated by a comma select the range of records from a
+match of the first through the next match of the second, inclusive.
+The special patterns
+.B BEGIN
+and
+.B END
+match before the first record is read and after the last; they may
+appear more than once and do not combine with other patterns.
+.SS Built-in functions
+.TP
+.BR atan2 ( \fIy\fP , \fIx\fP "), " cos "(\fIx\fP), " exp "(\fIx\fP), " \
+int "(\fIx\fP), " log "(\fIx\fP), " sin "(\fIx\fP), " sqrt (\fIx\fP)
+Arithmetic functions;
+.B int
+truncates toward zero.
+.TP
+.BR rand ()
+Random number in [0,1).
+.TP
+.BR srand ([ \fIs\fP ])
+Seed
+.B rand
+with
+.I s
+(or the time of day) and return the previous seed.
+The initial seed is 1.
+.TP
+.BR length ([ \fIv\fP ])
+Length of
+.I v
+as a string, number of elements if
+.I v
+is an array, or length of
+.B $0
+with no argument.
+.TP
+.BR substr ( \fIs\fP , " \fIm\fP" [, " \fIn\fP" ])
+The
+.IR n -character
+substring of
+.I s
+starting at position
+.I m
+(counting from 1), or the rest of the string without
+.IR n .
+.TP
+.BR index ( \fIs\fP , " \fIt\fP" )
+Position of
+.I t
+in
+.IR s ,
+or 0.
+.TP
+.BR match ( \fIs\fP , " \fIr\fP" )
+Position in
+.I s
+where the regular expression
+.I r
+matches, or 0; sets
+.B RSTART
+and
+.BR RLENGTH .
+.TP
+.BR split ( \fIs\fP , " \fIa\fP" [, " \fIfs\fP" ])
+Split
+.I s
+into
+.IB a [1]\fR,\fP
+\&...,
+.IB a [ n ]
+using
+.I fs
+(default
+.BR FS )
+and return
+.IR n .
+An empty
+.I fs
+splits into characters.
+.TP
+.BR sub ( \fIr\fP , " \fIt\fP" [, " \fIs\fP" ])
+Replace the first match of
+.I r
+in
+.I s
+(default
+.BR $0 )
+by
+.IR t ;
+.B &
+in
+.I t
+stands for the matched text.
+Returns the number of replacements.
+.TP
+.BR gsub ( \fIr\fP , " \fIt\fP" [, " \fIs\fP" ])
+As
+.BR sub ,
+but replace every match.
+.TP
+.BR sprintf ( \fIfmt\fP , " \fIexpr\fP" ", ...)"
+Format the expressions as
+.BR printf (3)
+would.
+.TP
+.BR system ( \fIcmd\fP )
+Run
+.I cmd
+with the shell and return its exit status: \-1 on error, the exit
+status on normal exit, 256 plus the signal number if killed by a
+signal, or 512 plus the signal number if a core was dumped.
+.TP
+.BR tolower ( \fIs\fP "), " toupper ( \fIs\fP )
+Case-converted copy of
+.IR s .
+.TP
+.BR close ( \fIexpr\fP )
+Close the file or pipe named
+.IR expr .
+.TP
+.BR fflush ([ \fIexpr\fP ])
+Flush output buffered for
+.IR expr ,
+or for all output streams.
+.PP
+.B getline
+reads the next record into
+.B $0
+from the current input;
+.BI "getline <" " file"
+reads from
+.IR file ;
+.BI "getline " var
+sets
+.I var
+instead of
+.BR $0 ;
+and
+.IB cmd " | getline"
+reads successive lines of the output of
+.IR cmd .
+.B getline
+returns 1 on success, 0 at end of file, and \-1 on error.
+.SS Special variables
+.TP
+.BR ARGC ", " ARGV
+Argument count and array; both are assignable, and non-null members
+of
+.B ARGV
+are taken as input file names.
+.TP
+.B CONVFMT
+Number-to-string conversion format (default
+.BR %.6g ).
+.TP
+.B ENVIRON
+The environment, indexed by variable name.
+Empty in
+.B \-safe
+mode.
+.TP
+.B FILENAME
+Name of the current input file.
+.TP
+.B FNR
+Record number in the current file.
+.TP
+.B FS
+Input field separator (default a blank).
+.TP
+.B NF
+Number of fields in the current record.
+.TP
+.B NR
+Record number over all input.
+.TP
+.B OFMT
+Output format for numbers (default
+.BR %.6g ).
+.TP
+.B OFS
+Output field separator (default a blank).
+.TP
+.B ORS
+Output record separator (default newline).
+.TP
+.BR RLENGTH ", " RSTART
+Length and start of the text matched by
+.BR match .
+.TP
+.B RS
+Input record separator (default newline).
+If empty, records are separated by blank lines; if longer than one
+character, it is treated as a regular expression.
+.TP
+.B SUBSEP
+Subscript separator (default
+.BR \e034 ).
+.SH OPTIONS
+.TP
+.BI \-F " fs"
+Set the input field separator to the regular expression
+.IR fs .
+.B \-Ft
+sets it to a tab.
+.TP
+.B \-\-csv
+Parse input as comma-separated values.
+Setting
+.B FS
+at the same time draws a warning.
+.TP
+.BI \-v " var" = value
+Assign
+.I value
+to
+.I var
+before the program starts, including before
+.BR BEGIN .
+May be repeated.
+.TP
+.BI \-f " progfile"
+Read the program from
+.IR progfile ;
+.B \-
+means standard input.
+May be repeated; the files are concatenated.
+.TP
+.B \-safe
+Disallow the
+.B system
+function (rejected as a syntax error) and leave
+.B ENVIRON
+empty.
+.TP
+.BI \-d [ n ]
+Enable parser/interpreter debugging output at level
+.I n
+(default 1).
+.TP
+.BR \-version ", " \-\-version
+Print the version and exit.
+.TP
+.B \-\-
+End of options.
+.PP
+Unknown options produce a warning and are ignored.
+Option arguments may be attached
+.RB ( \-F: )
+or separate
+.RB ( "\-F :" ).
+.SH EXIT STATUS
+.TP
+.B 0
+Normal completion.
+.TP
+.I n
+The value given to an
+.B exit
+statement.
+.TP
+.B 2
+A syntax error or fatal runtime error.
+.TP
+.B 1
+No arguments at all were given (usage message).
+.SH ENVIRONMENT
+.TP
+.B POSIXLY_CORRECT
+If set,
+.B sub
+and
+.B gsub
+follow the POSIX rules for runs of backslashes before
+.B &
+in the replacement string.
+.PP
+The whole environment is available through
+.B ENVIRON
+unless
+.B \-safe
+is given.
+.SH EXAMPLES
+Print lines longer than 72 characters:
+.PP
+.EX
+awk \(aqlength($0) > 72\(aq
+.EE
+.PP
+Swap the first two fields:
+.PP
+.EX
+awk \(aq{ print $2, $1 }\(aq
+.EE
+.PP
+Sum the first column and print the total and average:
+.PP
+.EX
+awk \(aq{ s += $1 } END { print "sum is", s, "average is", s/NR }\(aq
+.EE
+.PP
+Print the login names from the password file:
+.PP
+.EX
+awk \-F: \(aq{ print $1 }\(aq /etc/passwd
+.EE
+.SH SEE ALSO
+.BR egrep (1),
+.BR grep (1),
+.BR sh (1),
+.BR tr (1),
+.BR printf (3),
+.BR regex (3)
+.PP
+A. V. Aho, B. W. Kernighan, P. J. Weinberger,
+.IR "The AWK Programming Language, Second Edition" ,
+Addison-Wesley, 2024.
+.SH STANDARDS
+POSIX.1-2024
+.BR awk ,
+with the extensions
+.BR \-\-csv ,
+.BR \-safe ,
+.BR nextfile ,
+.BR fflush ,
+.BR delete " of whole arrays, and"
+.BR ENVIRON .
+.SH BUGS
+There are no explicit conversions between numbers and strings; add 0
+to force a number, or concatenate
+.B \(dq\(dq
+to force a string.
+.PP
+Input is expected to be UTF-8; other multibyte encodings are not
+handled.
+.PP
+Strings are converted to numbers after pre-filtering: hexadecimal
+strings convert to 0, and only
+.BR +nan ,
+.BR \-nan ,
+.BR +inf ,
+and
+.B \-inf
+(in any case) convert to NaN or infinity.
