@@ -1,0 +1,49 @@
+.TH NPROC 1 2026-09-25 "Substrate" "User Commands"
+.SH NAME
+nproc \- print the number of processors
+.SH SYNOPSIS
+.B nproc
+.RB [ \-\-all ]
+.RB [ \-\-ignore= \fIn\fR]
+.SH DESCRIPTION
+.B nproc
+prints the number of processors currently online, as reported by
+.BR sysconf ( _SC_NPROCESSORS_ONLN ).
+If
+.B sysconf
+fails or reports less than 1, 1 is printed.
+.SH OPTIONS
+.TP
+.B \-\-all
+Print the number of configured processors
+.RB ( _SC_NPROCESSORS_CONF )
+instead.
+.TP
+.BI \-\-ignore= n\fR, " " \-\-ignore " " n
+Subtract
+.I n
+(a non-negative decimal number) from the count, but never print less
+than 1.
+.TP
+.B \-\-help
+Print a usage line to standard output and exit with status 0.
+.TP
+.B \-\-version
+Print version information and exit with status 0.
+.SH EXIT STATUS
+.TP
+.B 0
+Success.
+.TP
+.B 1
+An unknown option or an invalid number was given.
+.SH EXAMPLE
+Run a parallel build using every processor but one:
+.PP
+.EX
+$ make \-j$(nproc \-\-ignore=1)
+.EE
+.SH SEE ALSO
+.BR top (1),
+.BR uname (1),
+.BR sys_cpu_count (2)
