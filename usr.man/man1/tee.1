@@ -1,0 +1,71 @@
+.TH TEE 1 2026-09-25 "Substrate" "User Commands"
+.SH NAME
+tee \- copy standard input to standard output and files
+.SH SYNOPSIS
+.B tee
+.RB [ \-ai ]
+.RB [ \-\- ]
+.RI [ file ...]
+.SH DESCRIPTION
+.B tee
+reads standard input and writes everything it reads both to standard
+output and to each
+.IR file .
+Files are created with mode 0666 (modified by the umask) and truncated
+unless
+.B \-a
+is given.
+.PP
+Short writes and interrupted system calls are retried.
+A
+.I file
+that cannot be opened is diagnosed and skipped; a
+.I file
+that fails on write is diagnosed, closed and not written again.
+In both cases copying continues to the other destinations and the exit
+status becomes nonzero.
+.PP
+Option processing stops at the first argument that does not begin with
+.BR \- ,
+at a lone
+.B \-
+(which is treated as an ordinary file name), or after
+.BR \-\- .
+Short options may be combined, as in
+.BR \-ai .
+.SH OPTIONS
+.TP
+.BR \-a ", " \-\-append
+Append to each
+.I file
+instead of truncating it.
+.TP
+.BR \-i ", " \-\-ignore\-interrupts
+Ignore
+.BR SIGINT .
+.TP
+.B \-p
+Accepted for compatibility; has no effect.
+.TP
+.B \-\-help
+Print a usage line and exit.
+.SH EXIT STATUS
+.TP
+.B 0
+All input was copied to every destination.
+.TP
+.B 1
+An invalid option was given, or an error occurred reading input,
+writing standard output, or opening, writing or closing a
+.IR file .
+.SH EXAMPLE
+Save a build log while watching it:
+.EX
+$ make 2>&1 | tee \-a build.log
+.EE
+.SH SEE ALSO
+.BR cat (1),
+.BR open (2),
+.BR write (2)
+.SH STANDARDS
+POSIX.1-2024, with the GNU long options as extensions.
