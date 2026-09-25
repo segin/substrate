@@ -1,0 +1,108 @@
+.TH RESET 1 2026-09-25 "Substrate" "User Commands"
+.SH NAME
+reset \- restore the terminal to a sane state
+.SH SYNOPSIS
+.B reset
+.RI [ term ]
+.SH DESCRIPTION
+.B reset
+puts a terminal that has been left in an unusable mode back into a
+normal, usable state.
+.PP
+It selects the terminal to act on by trying standard error, then
+standard output, then
+.IR /dev/tty ;
+if none of them is a terminal, it writes to standard output.
+.PP
+First, if the chosen descriptor is a terminal, its attributes are
+changed with
+.BR tcsetattr (3)
+using
+.B TCSAFLUSH
+(pending input is discarded):
+.IP \(bu 2
+input: set
+.BR BRKINT ,
+.BR ICRNL ,
+.BR IXON ;
+clear
+.BR IGNBRK ,
+.BR PARMRK ,
+.BR ISTRIP ,
+.BR INLCR ,
+.BR IGNCR ,
+.BR IXOFF ;
+.IP \(bu
+output: set
+.BR OPOST ,
+.BR ONLCR ;
+clear
+.BR OCRNL ,
+.BR ONOCR ,
+.BR ONLRET ,
+.BR OFILL ,
+.BR OFDEL ;
+.IP \(bu
+control: 8 data bits, no parity, one stop bit,
+.BR CREAD
+and
+.B CLOCAL
+set,
+.B HUPCL
+cleared;
+.IP \(bu
+local: set
+.BR ICANON ,
+.BR ISIG ,
+.BR IEXTEN ,
+.BR ECHO ,
+.BR ECHOE ,
+.BR ECHOK ;
+clear
+.BR ECHONL ,
+.BR NOFLSH ,
+.BR TOSTOP ;
+.IP \(bu
+control characters: intr \(haC, quit \(ha\e, erase \(ha? (DEL),
+kill \(haU, eof \(haD, start \(haQ, stop \(haS, susp \(haZ,
+.B VMIN
+1,
+.B VTIME
+0.
+.PP
+Other flags, the line speed and the window size are left as they are.
+.PP
+Then the following VT100/ANSI sequences are written: RIS
+.RB ( "ESC c" ),
+select US-ASCII into G0
+.RB ( "ESC ( B" ),
+soft terminal reset DECSTR
+.RB ( "ESC [ ! p" ),
+show cursor
+.RB ( "ESC [ ? 25 h" ),
+erase display
+.RB ( "ESC [ 2 J" ),
+and cursor home
+.RB ( "ESC [ H" ).
+The same sequences are sent whatever the terminal type; there is no
+terminfo or termcap lookup, and
+.B TERM
+is not consulted.
+.PP
+The optional
+.I term
+operand is accepted for compatibility and ignored, as are any other
+arguments.
+.SH EXIT STATUS
+.B reset
+always exits with status 0, even if the terminal attributes or the
+escape sequences could not be written.
+.SH FILES
+.TP
+.I /dev/tty
+Used when neither standard error nor standard output is a terminal.
+.SH SEE ALSO
+.BR stty (1),
+.BR tty (1),
+.BR cfmakeraw (3),
+.BR tcsetattr (3)
