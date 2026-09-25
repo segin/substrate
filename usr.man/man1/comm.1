@@ -1,0 +1,122 @@
+.TH COMM 1 2026-09-25 "Substrate" "User Commands"
+.SH NAME
+comm \- select or reject lines common to two sorted files
+.SH SYNOPSIS
+.B comm
+.RB [ \-123iz ]
+.RB [ \-\-output\-delimiter= \fIstr\fP ]
+.RB [ \-\-total ]
+.RB [ \-\-check\-order | \-\-nocheck\-order ]
+.I file1 file2
+.SH DESCRIPTION
+.B comm
+reads
+.I file1
+and
+.IR file2 ,
+which should be sorted in byte order, and writes three columns to
+standard output:
+lines only in
+.IR file1 ,
+lines only in
+.IR file2 ,
+and lines in both.
+Each column is preceded by one delimiter (a tab by default) for every
+earlier column that is not suppressed.
+.PP
+Either operand may be
+.B \-
+for standard input.
+Lines are compared byte by byte with
+.BR strcmp (3)
+(or case-insensitively with
+.BR \-i );
+the locale's collation order is not used.
+.SH OPTIONS
+.TP
+.B \-1
+Suppress column 1 (lines only in
+.IR file1 ).
+.TP
+.B \-2
+Suppress column 2 (lines only in
+.IR file2 ).
+.TP
+.B \-3
+Suppress column 3 (lines in both files).
+.TP
+.B \-i
+Compare lines case-insensitively.
+A common line is printed as it appears in
+.IR file1 .
+.TP
+.BR \-z ", " \-\-zero\-terminated
+Lines are terminated by NUL bytes instead of newlines, on input and
+output.
+.TP
+.BI \-\-output\-delimiter= str
+Separate columns with
+.I str
+instead of a tab.
+.TP
+.B \-\-total
+After the output, print a summary line containing the number of
+lines in each of the three columns, separated by the column
+delimiter, followed by the word
+.BR total .
+The counts include suppressed columns.
+.TP
+.B \-\-check\-order
+Report the first out-of-order line found (in either file) with a
+diagnostic on standard error; later disorder is not reported.
+Processing continues, but the exit status is 1.
+.TP
+.B \-\-nocheck\-order
+Do not check input order (the default).
+.TP
+.B \-\-help
+Print a usage summary and exit.
+.TP
+.B \-\-version
+Print version information and exit.
+.SH EXIT STATUS
+.TP
+.B 0
+Success.
+.TP
+.B 1
+.B \-\-check\-order
+was given and an input was not sorted.
+.TP
+.B 2
+Invalid usage, a file could not be opened, or a write error occurred.
+.SH EXAMPLES
+Print lines that appear in both files:
+.PP
+.EX
+$ comm \-12 a.sorted b.sorted
+.EE
+.PP
+Print lines only in the first file:
+.PP
+.EX
+$ comm \-23 a.sorted b.sorted
+.EE
+.SH SEE ALSO
+.BR join (1),
+.BR strcmp (3)
+.SH STANDARDS
+POSIX.1-2024 for
+.BR \-1 ,
+.BR \-2 ,
+and
+.BR \-3 .
+.B \-i
+follows BSD; the long options and
+.B \-z
+follow GNU coreutils.
+.SH BUGS
+Giving
+.B \-
+for both operands is not rejected; the second read of standard input
+sees end of file.
