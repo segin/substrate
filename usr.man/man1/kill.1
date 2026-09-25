@@ -1,0 +1,142 @@
+.TH KILL 1 2026-09-25 "Substrate" "User Commands"
+.SH NAME
+kill \- send a signal to processes
+.SH SYNOPSIS
+.B kill
+.RB [ \-s
+.I signal
+|
+.BI \- signal
+|
+.BR \-\- ]
+.IR pid ...
+.br
+.B kill
+.B \-l
+.RI [ exit_status | signal ...]
+.SH DESCRIPTION
+.B kill
+sends a signal, by default
+.BR SIGTERM ,
+to each process named by a
+.I pid
+operand, using
+.BR kill (2).
+A positive
+.I pid
+names a process, 0 names every process in the caller's process
+group, and a negative
+.I pid
+names every process in process group
+.RI | pid |.
+Each
+.I pid
+must be a whole decimal integer; anything else is diagnosed and
+skipped rather than being treated as 0.
+.PP
+A
+.I signal
+may be given as a number (0 up to 31) or as a name, with or without
+the
+.B SIG
+prefix, in any letter case.
+Signal 0 performs the permission and existence checks without
+sending anything.
+.PP
+Only the first argument is examined for an option.
+To name a process group with a negative
+.I pid
+while using the default signal, put
+.B \-\-
+first.
+.SH OPTIONS
+.TP
+.BI \-s " signal\fR, " \-\-signal " signal"
+Send
+.I signal
+instead of
+.BR SIGTERM .
+.TP
+.BI \- signal
+Same as
+.BR \-s ,
+for example
+.B \-9
+or
+.BR \-KILL .
+.TP
+.BR \-l ", " \-\-list
+With no further arguments, print every known signal name, without
+the
+.B SIG
+prefix, on one line.
+Otherwise decode each argument: a number is taken as a signal number
+(or, if greater than 128, as an exit status from which 128 is
+subtracted) and its name is printed; a name is translated to its
+number.
+.TP
+.B \-\-
+End of options.
+.PP
+The names known to
+.B kill
+are:
+.BR HUP ", " INT ", " QUIT ", " ILL ", " TRAP ", " ABRT ", " IOT ", "
+.BR BUS ", " FPE ", " KILL ", " USR1 ", " SEGV ", " USR2 ", " PIPE ", "
+.BR ALRM ", " TERM ", " CHLD ", " CONT ", " STOP ", " TSTP ", " TTIN ", "
+.BR TTOU ", " URG ", " XCPU ", " XFSZ ", " VTALRM ", " PROF ", " WINCH ", "
+.BR IO ", " POLL ", and " SYS .
+Real-time signals have no name and must be given by number.
+.SH EXIT STATUS
+.TP
+.B 0
+Every process was signalled (or, with
+.BR \-l ,
+every argument was decoded).
+.TP
+.B 1
+No
+.I pid
+was given, a signal or
+.I pid
+was invalid, or at least one
+.BR kill (2)
+call failed.
+.SH EXAMPLES
+Terminate a process politely, then forcibly:
+.PP
+.EX
+$ kill 1234
+$ kill \-KILL 1234
+.EE
+.PP
+Send SIGHUP to every process in process group 500:
+.PP
+.EX
+$ kill \-s HUP \-\- \-500
+.EE
+.PP
+Find which signal killed a job that exited with status 137:
+.PP
+.EX
+$ kill \-l 137
+KILL
+.EE
+.SH SEE ALSO
+.BR ps (1),
+.BR sh (1),
+.BR kill (2),
+.BR signal (2)
+.SH STANDARDS
+POSIX.1-2024.
+The long options
+.B \-\-signal
+and
+.B \-\-list
+follow GNU conventions.
+.SH BUGS
+Job-control operands such as
+.B %1
+are not supported by this utility; use the shell's built-in
+.B kill
+for those.
