@@ -1,0 +1,146 @@
+.TH COMPRESS 1 2026-09-25 "Substrate" "User Commands"
+.SH NAME
+compress, zcat \- compress files with LZW, or write expanded data to standard output
+.SH SYNOPSIS
+.B compress
+.RB [ \-cfqv ]
+.RB [ \-b
+.IR bits ]
+.RI [ file ...]
+.br
+.B zcat
+.RB [ \-fv ]
+.RI [ file ...]
+.SH DESCRIPTION
+.B compress
+reduces the size of each
+.I file
+using adaptive Lempel-Ziv-Welch coding and writes the result to
+.IR file .Z
+in the format used by historic Unix
+.B compress
+(magic bytes 0x1f 0x9d, block mode enabled).
+On success the original
+.I file
+is removed and its permission bits are copied to the new file.
+Ownership and timestamps are not copied.
+.PP
+A
+.I file
+whose name already ends in
+.B .Z
+is skipped with a diagnostic.
+If
+.IR file .Z
+already exists it is not overwritten unless
+.B \-f
+is given.
+Unless
+.B \-f
+is given, if the compressed file is not smaller than the original, it
+is removed, the original is kept, and a
+.B "file would grow; not compressed"
+message is printed.
+.PP
+If no
+.I file
+is given, or
+.I file
+is
+.BR \- ,
+standard input is compressed to standard output.
+.PP
+.B zcat
+is a link to
+.BR compress .
+When invoked under that name it runs
+.B uncompress \-c
+with the remaining arguments, looking
+.B uncompress
+up in
+.BR PATH ,
+so each
+.I file
+is expanded to standard output and left in place.
+The options it accepts are those of
+.BR uncompress (1).
+.SH OPTIONS
+.TP
+.BI \-b " bits"
+Limit codes to at most
+.I bits
+bits.
+.I bits
+must be between 9 and 16; the default is 16.
+.TP
+.B \-c
+Write the compressed data to standard output and leave the original
+.I file
+in place.
+The size check described above is not applied.
+.TP
+.B \-f
+Overwrite an existing
+.IR file .Z,
+and keep the compressed result even if it is not smaller than the
+original.
+.TP
+.B \-q
+Do not print the
+.B "file would grow"
+message.
+.TP
+.B \-v
+Print the compression ratio of each file, and the message
+.IB file ": compressed"
+after a file is replaced, to standard error.
+.SH EXIT STATUS
+.TP
+.B 0
+Every file was processed successfully.
+.TP
+.B 1
+An invalid option or
+.B \-b
+value was given, or at least one file could not be read, written or
+removed, already had a
+.B .Z
+suffix, had an existing output file, or would have grown.
+Remaining files are still processed.
+.SH ENVIRONMENT
+.TP
+.B PATH
+Searched by
+.B zcat
+for the
+.B uncompress
+program.
+.SH EXAMPLES
+Compress a file, replacing it with
+.IR notes.txt.Z :
+.PP
+.EX
+$ compress notes.txt
+.EE
+.PP
+Display a compressed file:
+.PP
+.EX
+$ zcat notes.txt.Z
+.EE
+.SH SEE ALSO
+.BR uncompress (1),
+.BR pax (1),
+.BR tar (1)
+.SH BUGS
+Unlike traditional implementations,
+.B compress
+exits with status 1, not 2, when a file would grow.
+.PP
+Neither
+.B compress
+nor
+.B zcat
+refuses to write compressed data to a terminal.
+.PP
+File names are limited to 1023 bytes.
