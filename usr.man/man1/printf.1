@@ -1,0 +1,174 @@
+.TH PRINTF 1 2026-09-25 "Substrate" "User Commands"
+.SH NAME
+printf \- format and print data
+.SH SYNOPSIS
+.B printf
+.I format
+.RI [ argument ...]
+.SH DESCRIPTION
+.B printf
+writes
+.I format
+to standard output, replacing each conversion specification with the
+next
+.I argument
+formatted accordingly.
+There are no options; the first operand is always the format.
+.PP
+Backslash escapes in
+.I format
+are interpreted first:
+.B \e\e
+(backslash),
+.B \ea
+(alert),
+.B \eb
+(backspace),
+.B \ee
+(escape),
+.B \ef
+(form feed),
+.B \en
+(newline),
+.B \er
+(carriage return),
+.B \et
+(tab),
+.B \ev
+(vertical tab),
+.BI \e nnn
+(the byte with octal value
+.IR nnn ,
+one to three digits) and
+.BI \ex HH
+(the byte with hexadecimal value
+.IR HH ,
+one or two digits).
+A backslash followed by any other character is printed unchanged,
+together with that character.
+.PP
+A conversion specification is
+.B %
+followed by optional flags
+.RB ( \- ,
+.BR + ,
+space,
+.BR # ,
+.BR 0 ),
+an optional field width, an optional precision
+.RB ( .
+followed by digits), and a conversion character.
+The width and the precision may each be given as
+.BR * ,
+in which case they are taken from the next argument; a negative width
+from an argument means left alignment, a negative precision is treated
+as 0.
+Widths and precisions are capped at 1048576.
+.B %%
+prints a percent sign.
+.PP
+The conversions are:
+.TP
+.BR d ", " i
+Signed decimal integer.
+.TP
+.BR o ", " u ", " x ", " X
+Unsigned octal, decimal and hexadecimal integers.
+.TP
+.BR e ", " E ", " f ", " F ", " g ", " G ", " a ", " A
+Floating-point number, converted with
+.BR strtod (3).
+.TP
+.B c
+The first byte of the argument.
+Nothing at all is printed for an empty or missing argument.
+.TP
+.B s
+The argument as a string.
+.TP
+.B b
+The argument as a string in which the backslash escapes listed above
+(except
+.BR \ee ,
+.B \ex
+and plain
+.BR \e nnn)
+are interpreted; an octal value is written as
+.B \e0
+followed by up to three octal digits.
+.B \ec
+in the argument stops all output immediately, and
+.B printf
+exits.
+Precision limits the number of bytes written; width pads with spaces.
+.PP
+Integer arguments are converted as C
+.B long
+values, in decimal, octal (leading
+.BR 0 )
+or hexadecimal (leading
+.BR 0x ).
+An argument that starts with a single or double quote converts to the
+byte value of the character after the quote.
+An argument that is not entirely a valid number, or is out of range,
+is diagnosed on standard error and the converted value is used anyway;
+the exit status becomes 1.
+Missing arguments are treated as 0 for numeric conversions and as the
+empty string otherwise.
+.PP
+If arguments remain after the format has been used, the format is
+reused from the beginning until all arguments are consumed.
+A pass over the format that consumes no argument ends the output.
+.SH EXIT STATUS
+.TP
+.B 0
+Success.
+.TP
+.B 1
+No
+.I format
+was given, an argument could not be fully converted, an invalid
+conversion character was used, or memory ran out.
+.SH EXAMPLES
+.EX
+$ printf \(aq%s is %d years old\en\(aq Ann 34
+Ann is 34 years old
+$ printf \(aq%\-5s|%05.1f\en\(aq a 3.14159 b 2
+a    |003.1
+b    |002.0
+$ printf \(aq%d\en\(aq "\(aqA"
+65
+.EE
+.SH SEE ALSO
+.BR sh (1),
+.BR printf (3),
+.BR strtod (3)
+.SH STANDARDS
+Intended to follow POSIX.1-2024
+.BR printf ,
+with the
+.BR \ee ,
+.B \ex
+and floating-point conversions as extensions.
+.SH BUGS
+Escapes in
+.I format
+are expanded before conversion specifications are recognised, so an
+escape that produces
+.B %
+(for example
+.BR \e045 )
+starts a conversion instead of printing a literal percent sign, and
+.B \e0
+ends the format.
+.PP
+.B \ec
+is not recognised in
+.IR format ,
+only in
+.B %b
+arguments.
+.PP
+A leading
+.B \-\-
+is not skipped; it is used as the format.
