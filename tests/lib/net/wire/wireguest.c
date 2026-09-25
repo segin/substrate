@@ -23,6 +23,8 @@
  *                                               connect again at once and
  *                                               again 3 s later, reporting
  *                                               each; then SO_ERROR)
+ *   wireguest listenread <port>                (listen, then read() the
+ *                                               listening socket)
  *   wireguest listenconnect <port>             (listen, then connect() on the
  *                                               listening socket, then accept)
  *   wireguest listen2 <port>                   (two SO_REUSEADDR listeners on
@@ -406,6 +408,21 @@ int main(int argc, char **argv) {
         }
         if (r == 0) say("connected %s%ld", "", 0);
         rc = do_actions(fd, argc - 4, argv + 4);
+    } else if (argc >= 3 && strcmp(argv[1], "listenread") == 0) {
+        struct sockaddr_in sa;
+        memset(&sa, 0, sizeof sa);
+        sa.sin_family = AF_INET;
+        sa.sin_port = htons((unsigned short)atoi(argv[2]));
+        int l = socket(AF_INET, SOCK_STREAM, 0);
+        if (l >= 0 && bind(l, (struct sockaddr *)&sa, sizeof sa) == 0 &&
+            listen(l, 4) == 0) {
+            char b[16];
+            ssize_t n = read(l, b, sizeof b);
+            say("readlisten %s n=%ld", n < 0 ? strerror(errno) : "ok", (long)n);
+        } else {
+            say("listen failed: %s (%ld)", strerror(errno), errno);
+        }
+        rc = 0;
     } else if (argc >= 3 && strcmp(argv[1], "listenconnect") == 0) {
         struct sockaddr_in sa;
         memset(&sa, 0, sizeof sa);

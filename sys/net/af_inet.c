@@ -710,6 +710,9 @@ static size_t afinet_node_read_body(fs_node_t *node, afi_sock_t *s,
     if (s->rd_shut) return 0;            /* shutdown(SHUT_RD): EOF */
     int nb = afi_node_nonblock(node);
     if (s->type == SOCK_STREAM && s->tcp) {
+        /* TCP-API-17: as recv() already does -- a listener has no stream to
+         * read, and read() on one blocked forever. */
+        if (tcp_is_listening(s->tcp)) return (size_t)-ENOTCONN;
         ssize_t n = nb ? tcp_recv_nb(s->tcp, buf, size)
                        : tcp_recv_until(s->tcp, buf, size, afi_deadline(s->rcv_timeo));
         /* Propagate errors as (size_t)-errno — the read() syscall

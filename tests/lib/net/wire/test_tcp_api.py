@@ -53,6 +53,8 @@ it guards.
     send-dontwait  TCP-API-16: send(MSG_DONTWAIT) on a blocking socket facing
                    a closed window returns (the probe octet, then EAGAIN)
                    instead of blocking.
+    read-listener  TCP-API-17: read() on a listening socket fails ENOTCONN
+                   (as recv() does) instead of blocking forever.
 
 Run from the repo root after building sys/ and wireguest:
     python3 tests/lib/net/wire/test_tcp_api.py [case...]
@@ -441,6 +443,16 @@ def case_send_dontwait():
         return None, w
 
 
+def case_read_listener():
+    with Wire.boot('listenread %d' % PORT) as w:
+        if not w.wait_serial('guest: readlisten', 90):
+            return 'read() on a listener never returned', w
+        r = line(w, 'readlisten')[0]
+        if 'not connected' not in r.lower():
+            return 'read() on a listener: %s (want ENOTCONN)' % r, w
+        return None, w
+
+
 CASES = (('reconnect', case_reconnect),
          ('connect-twice', case_connect_twice),
          ('listen-connect', case_listen_connect),
@@ -455,7 +467,8 @@ CASES = (('reconnect', case_reconnect),
          ('write-closing', case_write_closing),
          ('early-write', case_early_write),
          ('shut-connecting', case_shut_connecting),
-         ('send-dontwait', case_send_dontwait))
+         ('send-dontwait', case_send_dontwait),
+         ('read-listener', case_read_listener))
 
 
 def main():
