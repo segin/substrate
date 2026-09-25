@@ -1,0 +1,291 @@
+.TH LEX 1 2026-09-25 "Substrate" "User Commands"
+.SH NAME
+lex \- generate a lexical analyzer in C
+.SH SYNOPSIS
+.B lex
+.RB [ \-t ]
+.RB [ \-n | \-v ]
+.RI [ file ...]
+.SH DESCRIPTION
+.B lex
+reads a lexical-analyzer specification from each
+.I file
+in turn, as if they were one file, or from standard input if no
+.I file
+is given; a
+.I file
+of
+.B \-
+also means standard input.
+It compiles the patterns into a single deterministic finite automaton
+and writes a C scanner to
+.I lex.yy.c
+in the current directory, or to standard output with
+.BR \-t .
+.PP
+This is an in-tree implementation that covers a subset of POSIX
+.BR lex ;
+see
+.B BUGS
+before relying on it.
+.SS Input format
+The input has a definitions section, a rules section and an optional
+user-subroutines section, separated by lines beginning with
+.BR %% .
+The first
+.B %%
+is required.
+.PP
+In the definitions section:
+.TP
+.B %{ ... %}
+Lines between a
+.B %{
+line and a
+.B %}
+line are copied to the output.
+.TP
+.I indented line
+A line beginning with a blank or tab is copied to the output.
+.TP
+.I "name definition"
+Defines a substitution used as
+.BI { name }
+in patterns.
+.TP
+.BI %s " name ..."
+.PD 0
+.TP
+.BI %x " name ..."
+.PD
+Declare inclusive and exclusive start conditions.
+.TP
+.BR %array ", " %pointer
+Make
+.B yytext
+an array of 65536 bytes, or a pointer into the input buffer (the
+default).
+.TP
+.BR %p ", " %n ", " %a ", " %e ", " %k ", " %o
+Table-size declarations.
+They are accepted and ignored.
+.PP
+Other lines beginning with
+.B %
+(such as
+.BR %option )
+are silently ignored.
+.PP
+In the rules section, each rule is a pattern starting in the first
+column, followed by blanks and an action.
+The action is either a C block in braces, which may span lines, the
+rest of the line as a single statement, or
+.BR | .
+A rule with no action copies the matched text to
+.BR yyout .
+A pattern may be prefixed by
+.BI < sc1 , sc2 ,...>
+to restrict it to those start conditions, and
+.BI < sc >{
+starts a block, ended by a line consisting of
+.BR } ,
+in which every rule gets that prefix.
+Blank lines are skipped, and indented lines are discarded.
+.PP
+Everything after the second
+.B %%
+is copied to the end of the output.
+.SS Patterns
+Supported: ordinary characters;
+.B .
+(any byte except newline and NUL);
+bracket expressions
+.BI [ ... ]
+and
+.BI [^ ... ]
+with ranges;
+quoted strings
+.BI \(dq ... \(dq ;
+.BI { name }
+substitutions; grouping with parentheses; alternation
+.BR | ;
+the operators
+.BR * ,
+.BR + ,
+.B ?
+and intervals
+.BI { m } ,
+.BI { m ,}
+and
+.BI { m , n } ;
+a leading
+.B ^
+and a trailing
+.BR $ ;
+trailing context
+.IB r / s ;
+and the escapes
+.BR \en ,
+.BR \et ,
+.BR \er ,
+.BR \ea ,
+.BR \eb ,
+.BR \ef ,
+.BR \ev ,
+.BR \e\e ,
+.BI \e ooo
+(octal),
+.BI \ex hh
+(hexadecimal) and
+.BI \ec X
+(control character).
+Any other escaped character stands for itself.
+Bracket expressions do not support character classes such as
+.BR [:alpha:] .
+.SS Generated scanner
+The output defines
+.BR yylex (),
+.BR yywrap ()
+(which always returns 1),
+.BR yymore (),
+.BR input (),
+.BR unput (),
+the macros
+.BR ECHO ,
+.BR BEGIN ,
+.B REJECT
+and
+.BR yyless (),
+and the variables
+.BR yytext ,
+.BR yyleng ,
+.B yyin
+and
+.BR yyout ,
+which default to standard input and standard output.
+Start conditions are
+.B #define
+constants, with
+.B INITIAL
+equal to 0.
+The longest match wins, and among matches of equal length the rule
+that appears first.
+Input that no rule matches is copied to
+.BR yyout .
+.PP
+The output does not contain
+.BR main ()
+and there is no
+.B \-ll
+library; the program must supply its own
+.BR main ().
+.SH OPTIONS
+.TP
+.B \-t
+Write the scanner to standard output instead of
+.IR lex.yy.c .
+.TP
+.B \-n
+Do not print the statistics line.
+This is the default.
+.TP
+.B \-v
+Print a
+.BI "Statistics: " n " DFA states"
+line to standard output after generating the scanner.
+.PP
+If both
+.B \-n
+and
+.B \-v
+are given, the last one wins.
+.SH EXIT STATUS
+.TP
+.B 0
+The scanner was written.
+.TP
+.B 1
+An unknown option was given, an input file could not be opened, the
+input contained a NUL byte, the
+.B %%
+ending the definitions section or a closing
+.B %}
+was missing, a pattern could not be compiled or used an undefined
+.BI { name } ,
+there were no rules, or
+.I lex.yy.c
+could not be created.
+.SH FILES
+.TP
+.I lex.yy.c
+Default output file.
+.SH EXAMPLE
+Count the lines of standard input:
+.PP
+.EX
+$ cat count.l
+%{
+int lines;
+%}
+%%
+\en      { lines++; }
+\&.       ;
+%%
+int main(void) { yylex(); printf("%d\en", lines); return 0; }
+$ lex count.l && cc \-o count lex.yy.c
+.EE
+.SH SEE ALSO
+.BR yacc (1),
+.BR cc (1),
+.BR yylex (3)
+.SH STANDARDS
+Partially implements
+.B lex
+as specified in POSIX.1-2024.
+.SH BUGS
+Progress and debugging messages (lines beginning with
+.BR Mock: ,
+the rule and definition dumps, the DFA state counts and
+.BR "Generated lex.yy.c" )
+are always written to standard output.
+With
+.B \-t
+they are mixed into the generated scanner, which then does not
+compile.
+The
+.B \-v
+statistics line also goes to standard output.
+.PP
+Trailing context is not separated from the match:
+.IB r / s
+matches
+.I rs
+and
+.B yytext
+includes
+.IR s .
+Because a trailing
+.B $
+is implemented as
+.BR /\en ,
+the newline is part of
+.B yytext
+for such rules.
+.PP
+The
+.B |
+action does not share the next rule's action; the rule does nothing.
+.PP
+Indented code and
+.B %{ %}
+blocks in the rules section are not copied to the output.
+.PP
+.B yywrap ()
+is always defined in the output, so a user-supplied
+.BR yywrap ()
+causes a duplicate definition.
+There is no
+.BR yylineno .
+.PP
+The generated scanner keeps all input in one 65536-byte buffer that is
+never reused; input beyond that point is treated as end of file.
