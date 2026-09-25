@@ -384,6 +384,25 @@ if [ "$STAGE" = 2 ]; then
     # cc1/cc1plus/lto1/lto-dump reached ~370 MB apiece.
     "$HERE/../strip-staging.sh" "$STAGE2_DESTDIR" "gcc stage-2"
 
+    # The on-substrate compiler needs the same link additions the cross one
+    # gets from install-specs.sh (see there for why each is needed):
+    # --eh-frame-hdr kept, --copy-dt-needed-entries, and -lpthread after the
+    # user's objects.  Without them every g++ link fails with
+    #
+    #   libgcc_s.so.1: error adding symbols: DSO missing from command line
+    #
+    # because libstdc++.so.6's own DT_NEEDED on libgcc_s is not followed.
+    # The rpath-link points at the target's own library directories.
+    _gcc_libdir="$STAGE2_DESTDIR/usr/lib/gcc/${TARGET_TRIPLE}/$(cat "$SRC_TREE/gcc/BASE-VER")"
+    cat > "$_gcc_libdir/specs" <<'SPECS'
+*link:
++ %{!static:--eh-frame-hdr} --copy-dt-needed-entries -rpath-link /usr/lib:/lib
+
+*lib:
++ -lpthread
+SPECS
+    echo "==> installed $_gcc_libdir/specs"
+
     cat <<EOF
 
 ==> Stage 2 complete.
