@@ -367,7 +367,7 @@ frames exactly as each case needs.
 - [ ] **DHC-02** Track the lease: T1/T2 renew and rebind, expiry drops the address and restarts
 - [ ] **DHC-03** Retransmit DHCPREQUEST; on exhaustion return to INIT
 - [ ] **DHC-04** Handle DHCPNAK: restart from INIT
-- [ ] **DHC-05** Randomized exponential backoff for DISCOVER and REQUEST
+- [x] **DHC-05** Randomized exponential backoff for DISCOVER and REQUEST -- `retx_delay()` (4, 8, 16, 32 s, capped at 64, each +-1 s); DISCOVER uses it now, REQUEST with DHC-03.  Four DISCOVERs in the foreground, about 60 s, by choice (the RFC 3.1 example).  `backoff` in `test_dhclient.py`
 - [ ] **DHC-06** Configure from the DHCPACK, not the DHCPOFFER
 - [ ] **DHC-07** ARP-probe the address; DHCPDECLINE if it's taken; gratuitous ARP when bound
 - [ ] **DHC-08** Defaults for missing netmask/router; fail on ioctl errors

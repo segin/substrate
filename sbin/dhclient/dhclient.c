@@ -49,11 +49,16 @@ struct sockaddr_ll {
     uint8_t  sll_addr[8];
 };
 
-/* DISCOVER retransmit policy: how many DISCOVERs to send, and how long to
- * wait for an OFFER after each, before giving up so boot can proceed without
- * a lease.  Bounded total wait = DHCP_DISCOVER_TRIES * DHCP_DISCOVER_WAIT. */
+/* DISCOVER retransmit policy: how many DISCOVERs to send before giving up
+ * so boot can proceed without a lease.  The wait after each one is
+ * retx_delay(): with 4 tries, about 4 + 8 + 16 + 32 = 60 s in all, the
+ * RFC 2131 3.1 example. */
 #define DHCP_DISCOVER_TRIES 4
-#define DHCP_DISCOVER_WAIT  2.0
+
+/* RFC 2131 4.1 retransmission: 4 s before the first retransmission, doubled
+ * each time up to 64 s, each randomized by a uniform -1..+1 s. */
+#define DHCP_RETX_BASE 4.0
+#define DHCP_RETX_MAX  64.0
 
 /* DHCP message types (RFC 2132 §9.6) */
 #define DHCP_DISCOVER 1
@@ -142,6 +147,19 @@ static double now_sec(void) {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return ts.tv_sec + ts.tv_nsec / 1000000000.0;
+}
+
+/* DHC-05: the wait after transmission number `attempt` (0-based) -- the
+ * randomized exponential backoff RFC 2131 4.1 requires.  It was a flat 2 s,
+ * so clients that powered up together stayed in lockstep, and the whole
+ * 8 s budget ran out before a server that probes the address (3.1 step 2)
+ * had answered. */
+static double retx_delay(int attempt) {
+    double d = DHCP_RETX_BASE;
+    for (int i = 0; i < attempt && d < DHCP_RETX_MAX; i++)
+        d *= 2.0;
+    if (d > DHCP_RETX_MAX) d = DHCP_RETX_MAX;
+    return d + ((double)arc4random_uniform(2001) - 1000.0) / 1000.0;
 }
 
 static void get_hw_addr(const char *iface, uint8_t mac[6], int *ifindex) {
@@ -396,14 +414,15 @@ int main(int argc, char **argv) {
      * RFC 2131 §4.1: a client that gets no response retransmits the DISCOVER.
      * A single send is fragile — one dropped frame (common right after
      * link-up, before the switch learns the port / finishes STP) means no
-     * lease.  Retransmit with the same xid a handful of times, each with its
-     * own short OFFER window; then give up so boot proceeds without a lease
-     * rather than stalling.  Combined with the non-blocking socket above, the
-     * total wait is bounded (DHCP_DISCOVER_TRIES * DHCP_DISCOVER_WAIT). */
+     * lease.  Retransmit with the same xid, waiting retx_delay() for an
+     * OFFER after each; then give up so boot proceeds without a lease rather
+     * than stalling.  Combined with the non-blocking socket above, the total
+     * wait is bounded (about a minute for DHCP_DISCOVER_TRIES = 4). */
     uint32_t offered_ip = 0, server_id = 0, subnet = 0, router = 0;
     uint8_t rxbuf[1600];
     size_t n;
     double deadline;
+    double started = now_sec();
     for (int dtry = 0; dtry < DHCP_DISCOVER_TRIES && !offered_ip; dtry++) {
     n = build_dhcp_packet(pkt, hw, xid, DHCP_DISCOVER, 0, 0);
     if (sendto(pkts, pkt, n, 0, (struct sockaddr *)&sll, sizeof(sll)) != (ssize_t)n) {
@@ -413,7 +432,7 @@ int main(int argc, char **argv) {
             iface, xid, dtry + 1, DHCP_DISCOVER_TRIES);
 
     /* ---- await OFFER ---- */
-    deadline = now_sec() + DHCP_DISCOVER_WAIT;
+    deadline = now_sec() + retx_delay(dtry);
     while (now_sec() < deadline) {
         usleep(5000);
         ssize_t r = recv(pkts, rxbuf, sizeof(rxbuf), 0);
@@ -456,8 +475,7 @@ int main(int argc, char **argv) {
     if (!offered_ip) {
         fprintf(stderr, "dhclient: no OFFER after %d DISCOVER attempts "
                 "(%.0fs); giving up\n",
-                DHCP_DISCOVER_TRIES,
-                DHCP_DISCOVER_TRIES * DHCP_DISCOVER_WAIT);
+                DHCP_DISCOVER_TRIES, now_sec() - started);
         close(pkts);
         return 1;
     }

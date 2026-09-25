@@ -12,6 +12,9 @@ exactly as the case needs.
                   200 ms while dhclient waits for an OFFER; its DISCOVERs
                   stay spaced by the retransmission delay instead of all
                   timing out at once.
+    backoff       DHC-05: unanswered, the four DISCOVERs are spaced by the
+                  RFC 2131 4.1 randomized exponential backoff (4, 8, 16 s,
+                  each +-1 s) and dhclient gives up 32 +- 1 s after the last.
 
 Run from the repo root after building sys/, wireguest and sbin/dhclient:
     python3 tests/lib/net/wire/test_dhclient.py [case...]
@@ -187,7 +190,31 @@ def case_clock_step():
         return None, w
 
 
-CASES = (('bound', case_bound), ('clock-step', case_clock_step))
+def case_backoff():
+    with boot() as w:
+        s = Server(w)
+        if not s.expect(DISCOVER, 90):
+            return 'no DHCPDISCOVER', w
+        # 4 + 8 + 16 s between the four, then 32 s before giving up
+        s.poll(34.0)
+        ts = [m.t for m in s.seen if m.type == DISCOVER]
+        if len(ts) != 4:
+            return '%d DISCOVERs in 34 s, want 4' % len(ts), w
+        for k, (lo, hi) in enumerate(((3, 5), (7, 9), (15, 17))):
+            gap = ts[k + 1] - ts[k]
+            if not lo - 0.4 <= gap <= hi + 0.4:
+                return ('retransmission %d came %.2f s after the previous, '
+                        'want %d..%d s' % (k + 1, gap, lo, hi)), w
+        if not w.wait_serial('dhclient: no OFFER', 40):
+            return 'never gave up after the fourth DISCOVER', w
+        given_up = time.time() - ts[3]
+        if not 31 - 0.4 <= given_up <= 33 + 1.0:
+            return 'gave up %.1f s after the last DISCOVER, want 31..33' % given_up, w
+        return None, w
+
+
+CASES = (('bound', case_bound), ('clock-step', case_clock_step),
+         ('backoff', case_backoff))
 
 
 def main():
