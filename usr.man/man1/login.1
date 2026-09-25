@@ -1,0 +1,218 @@
+.TH LOGIN 1 2026-09-25 "Substrate" "User Commands"
+.SH NAME
+login \- begin a session on the system
+.SH SYNOPSIS
+.B login
+.RI [ username ]
+.SH DESCRIPTION
+.B login
+authenticates a user on the terminal connected to its standard input
+and starts that user's login shell.
+It is normally run by
+.B getty
+or
+.B telnetd
+as the superuser, and must run as the superuser to be able to change
+identity.
+.PP
+With no
+.I username
+operand,
+.B login
+prints the contents of
+.I /etc/issue
+verbatim, followed by the line
+.RI "Substrate (" tty )
+where
+.I tty
+is the terminal name with any leading
+.I /dev/
+removed.
+It then prompts
+.B login:
+for a user name.
+If
+.I username
+is given (as
+.B getty
+does), the banner and the first user-name prompt are skipped.
+An operand beginning with
+.B \-
+is ignored, as are all operands after the first.
+.PP
+The password is then read from the
+.B Password:
+prompt with terminal echo turned off.
+The password prompt is shown even when the user does not exist.
+.PP
+The password is checked against the second field of the user's
+entry in
+.IR /etc/shadow .
+If the user has no shadow entry, the password field of
+.I /etc/passwd
+is used instead, unless it begins with
+.BR x .
+The stored value is interpreted as follows:
+.TP
+empty
+No password is required.
+.TP
+begins with \fB*\fR or \fB!\fR
+The account is locked; no password is accepted.
+.TP
+anything else
+A
+.BR crypt (3)
+hash.
+The typed password is hashed with the stored value as the setting
+and the results are compared.
+Plaintext passwords are not accepted.
+.PP
+On failure,
+.B Login incorrect
+is printed and, after a 2-second delay, the user name is prompted for
+again.
+After 3 failed attempts
+.B login
+exits.
+An empty user name counts as a failed attempt.
+End-of-file (typing the EOF character) at either prompt does not
+count as an attempt; the user-name prompt is shown again.
+.PP
+On success
+.B login
+does the following, in order:
+.IP \(bu 2
+Writes a
+.B USER_PROCESS
+record for the terminal to
+.I /var/run/utmp
+and appends it to
+.IR /var/log/wtmp .
+The remote host field is taken from the
+.B REMOTEHOST
+environment variable, if set.
+.IP \(bu
+Changes the owner of the terminal to the user and its group to
+.B tty
+(or the user's login group if there is no
+.B tty
+group), with mode 0620.
+.IP \(bu
+Sets the group ID, initializes the supplementary groups from
+.IR /etc/group ,
+and sets the user ID.
+.IP \(bu
+Removes
+.BR IFS ,
+.BR ENV ,
+.BR BASH_ENV ,
+.BR CDPATH ,
+.BR LD_PRELOAD ,
+.BR LD_LIBRARY_PATH ,
+.BR PS1 ,
+.BR PS2 ,
+.BR PWD ,
+and
+.B OLDPWD
+from the environment and sets the variables listed under
+ENVIRONMENT.
+Other inherited variables are kept.
+.IP \(bu
+Changes to the home directory, or to
+.I /
+if that fails.
+.IP \(bu
+Resets the disposition of signals 1 to 31 to the default, calls
+.BR setsid (2),
+and executes the login shell from the password entry
+.RI ( /bin/sh
+if the field is empty) with
+.I argv[0]
+set to
+.B \-
+followed by the shell's base name, which requests a login shell.
+If that fails it tries the shell with a
+.B \-l
+argument, then with no arguments.
+.PP
+.B login
+does not write the logout record itself.
+For sessions started by
+.BR getty ,
+.B init
+writes the
+.B DEAD_PROCESS
+record when it reaps the session.
+.SH EXIT STATUS
+On success
+.B login
+does not return; it is replaced by the user's shell.
+.TP
+.B 1
+Three login attempts failed.
+.SH ENVIRONMENT
+.TP
+.B TERM
+Preserved for the shell; set to
+.B linux
+if not set.
+.TP
+.B REMOTEHOST
+If set, recorded as the remote host in the
+.I utmp
+and
+.I wtmp
+records.
+.PP
+The following are set for the shell:
+.TP
+.BR HOME ", " SHELL
+From the password entry.
+.TP
+.BR USER ", " LOGNAME
+The user name.
+.TP
+.B PATH
+.I /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/dt/bin
+for the superuser,
+.I /usr/local/bin:/usr/bin:/bin:/usr/dt/bin
+for everyone else.
+.SH FILES
+.TP
+.I /etc/issue
+Banner shown before the first prompt.
+.TP
+.I /etc/passwd
+User database.
+.TP
+.I /etc/shadow
+Password hashes.
+.TP
+.I /etc/group
+Supplementary groups and the
+.B tty
+group.
+.TP
+.I /var/run/utmp
+Current login records.
+.TP
+.I /var/log/wtmp
+Login history.
+.SH SEE ALSO
+.BR id (1),
+.BR last (1),
+.BR newgrp (1),
+.BR sh (1),
+.BR setsid (2),
+.BR setuid (2),
+.BR setgid (2),
+.BR getpwent_r (3)
+.SH BUGS
+User names longer than 63 characters are silently truncated, and the
+rest of the line is then read as the password.
+.PP
+If the shell cannot be executed,
+.B login
+reports the error and returns to the user-name prompt, but it is by
+then already running as the authenticated user.
