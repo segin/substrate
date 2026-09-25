@@ -1,0 +1,202 @@
+.TH BAS 1 2026-09-25 "Substrate" "User Commands"
+.SH NAME
+bas \- minimal BASIC interpreter
+.SH SYNOPSIS
+.B bas
+.RI [ file ]
+.SH DESCRIPTION
+.B bas
+is a small, incomplete BASIC interpreter loosely modelled on the
+Seventh Edition
+.BR bas .
+Numbered program lines are compiled into an internal instruction
+buffer and executed with the
+.B run
+command.
+Immediate (unnumbered) statements are not implemented.
+.PP
+If
+.I file
+is given, its lines are read and processed as though they had been
+typed, and
+.B bas
+then continues reading from standard input.
+Loading a file does not run it.
+.PP
+In interactive use,
+.B bas
+prints the prompt
+.B >
+before each input line.
+.SS Commands
+A line that does not start with a digit is a command.
+Commands are lower case and must appear alone on the line.
+.TP
+.B list
+Print the stored program in line-number order.
+.TP
+.B run
+Execute the stored program from its lowest-numbered line.
+When the program ends,
+.B Done
+is printed.
+.TP
+.BR exit ", " quit
+Exit
+.BR bas .
+.PP
+Any other unnumbered line prints
+.B "Immediate mode not fully implemented"
+and is otherwise ignored.
+.SS Program lines
+A line beginning with a decimal number, followed by a space and a
+statement, is stored under that line number, replacing any existing
+line with the same number.
+A line number with no statement text is ignored; it does not delete
+the line.
+Keywords and function names are case-insensitive.
+.PP
+Only one statement per line is compiled; text after a
+.B :
+separator is discarded.
+.PP
+The following statements are recognised:
+.TP
+\fBPRINT\fP \fIitem\fP [\fB;\fP \fIitem\fP]...
+Print string literals in double quotes and numeric expressions.
+Items are separated by
+.B ;
+or
+.BR , ,
+which behave identically.
+Numbers are printed with
+.BR %g
+formatting surrounded by single spaces.
+A trailing
+.B ;
+or
+.B ,
+suppresses the final newline.
+.TP
+.BI "LET " var " = " expr
+Assign to a variable.
+.B LET
+may be omitted.
+.TP
+.BI "GOTO " line
+Jump to a line.
+.TP
+.BI "IF " expr " THEN " line
+.TQ
+.BI "IF " expr " GOTO " line
+Jump to
+.I line
+if
+.I expr
+is non-zero.
+.TP
+.BI "FOR " var " = " expr " TO " expr " \fR[\fPSTEP " expr \fR]\fP
+Start a loop; the default step is 1.
+.TP
+.BI "NEXT " var
+End a loop.
+.I var
+must match the innermost active
+.BR FOR .
+.TP
+.BI "GOSUB " line
+Call a subroutine.
+.TP
+.B RETURN
+Return from a subroutine.
+.PP
+Unrecognised statements are silently discarded.
+.SS Expressions
+Expressions use double-precision numbers, variables, parentheses and
+the operators
+.BR + ,
+.BR \- ,
+.BR * ,
+and
+.BR / .
+There are no comparison or logical operators and no unary minus.
+Division by zero reports an error and yields 0.
+.PP
+Variable names consist of letters and digits; only the first three
+characters are significant.
+Variables are initially 0.
+There are no string variables and no arrays.
+.PP
+The built-in functions, each taking one argument in parentheses, are
+.BR INT ,
+.BR SQR ,
+.BR SIN ,
+.BR COS ,
+.BR ABS ,
+.BR RND ,
+.BR LOG ,
+.BR EXP ,
+and
+.BR ATN .
+.B RND
+ignores its argument and returns a pseudo-random value in [0,1].
+.SS Diagnostics
+Runtime errors are printed to standard output as
+.BI "Error at " line ": " message \fR.\fP
+Errors that stop the program include jumps to undefined lines,
+.B NEXT
+without
+.BR FOR ,
+and
+.B RETURN
+without
+.BR GOSUB .
+.SH EXIT STATUS
+.TP
+.B 0
+End of standard input, or an
+.B exit
+or
+.B quit
+command.
+.TP
+.B 1
+.I file
+could not be opened, or an option was given.
+.SH EXAMPLES
+.EX
+$ bas
+> 10 FOR I = 1 TO 3
+> 20 PRINT "I = "; I
+> 30 NEXT I
+> run
+I =  1
+I =  2
+I =  3
+
+Done
+> quit
+.EE
+.SH SEE ALSO
+.BR bc (1),
+.BR dc (1)
+.SH BUGS
+.B bas
+is incomplete: there are no relational operators (so
+.B IF
+can only test for non-zero), no unary minus, no
+.BR INPUT ,
+.BR END ,
+.BR REM ,
+or
+.BR DIM ,
+no immediate mode, and no way to delete a line.
+.PP
+Replaced lines are not freed from the instruction buffer, which holds
+8192 instructions in total; the program table holds 600 lines and the
+symbol table 200 variables.
+The instruction and line tables are not bounds-checked.
+.PP
+A malformed expression such as
+.B "PRINT )"
+can make the compiler loop without consuming input.
