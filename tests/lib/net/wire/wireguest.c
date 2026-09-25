@@ -96,6 +96,7 @@
  *   oob:TEXT     send(TEXT, MSG_OOB)
  *   linger0      setsockopt(SO_LINGER, {1, 0}), read it back
  *   rcvbuf:N     setsockopt(SO_RCVBUF, N)
+ *   cat:PATH     print PATH, each line as "guest: cat |line|"
  *   catchpipe    install a SIGPIPE counter (so a SIGPIPE does not kill init)
  *   sigpipe      report how many SIGPIPEs have arrived
  *   sendns:TEXT  send(TEXT, MSG_NOSIGNAL)
@@ -236,6 +237,19 @@ static int do_actions(int fd, int argc, char **argv) {
         } else if (strncmp(a, "senddw:", 7) == 0) {
             ssize_t n = send(fd, a + 7, strlen(a + 7), MSG_DONTWAIT);
             say("senddw %s n=%ld", n < 0 ? strerror(errno) : "ok", (long)n);
+        } else if (strncmp(a, "cat:", 4) == 0) {
+            FILE *f = fopen(a + 4, "r");
+            char ln[256];
+            if (!f) {
+                say("cat %s: %s", a + 4, (long)errno);
+            } else {
+                while (fgets(ln, sizeof ln, f)) {
+                    ln[strcspn(ln, "\n")] = 0;
+                    printf("guest: cat |%s|\n", ln);
+                }
+                fclose(f);
+                say("cat end %s%ld", "", 0L);
+            }
         } else if (strncmp(a, "rcvbuf:", 7) == 0) {
             int v = atoi(a + 7);
             int r = setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &v, sizeof v);

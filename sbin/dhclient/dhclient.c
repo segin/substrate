@@ -231,6 +231,12 @@ static int set_ipv4(const char *iface, unsigned long req, uint32_t addr) {
     return rc;
 }
 
+/* DHC-12: a letter, digit or hyphen -- what a DNS label may hold. */
+static int ldh_char(char c) {
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+           (c >= '0' && c <= '9') || c == '-';
+}
+
 /* DHC-11: can a host be assigned this address?  Not 0, the limited
  * broadcast, 0/8, loopback 127/8, multicast 224/4 or class E 240/4. */
 static int usable_addr(uint32_t addr) {
@@ -574,6 +580,14 @@ static int install_lease(const char *iface, const struct bootp *bp,
         memcpy(domain_buf, op_p, ml);
         domain_buf[ml] = '\0';
         domain_len = ml;
+        /* DHC-12: a domain name is letters, digits, '-' and '.' (RFC 2132
+         * 3.17 names it a domain name).  It was written into resolv.conf
+         * as received, so a newline in it added arbitrary lines. */
+        for (unsigned i = 0; i < ml; i++)
+            if (!ldh_char(domain_buf[i]) && domain_buf[i] != '.')
+                domain_len = 0;
+        if (domain_len == 0)
+            fprintf(stderr, "dhclient: ignoring a malformed domain name\n");
     }
     op_p = find_opt(bp, bootp_len, DHCP_OPT_SEARCH, &mlen);
     if (op_p && mlen > 0) {
@@ -630,6 +644,7 @@ static int install_lease(const char *iface, const struct bootp *bp,
                     size_t j  = i;
                     int    safety = 256;
                     int    first  = 1;
+                    int    bad    = 0;  /* DHC-12: a non-LDH octet */
                     while (j < search_len && safety-- > 0) {
                         uint8_t l = search_buf[j];
                         if (l == 0) { j++; break; }
@@ -646,13 +661,15 @@ static int install_lease(const char *iface, const struct bootp *bp,
                         if (l > 63 || j + 1 + l > search_len) break;
                         if (!first && no + 1 < sizeof(name)) name[no++] = '.';
                         for (uint8_t k = 0; k < l && no + 1 < sizeof(name); k++) {
-                            name[no++] = (char)search_buf[j + 1 + k];
+                            char ch = (char)search_buf[j + 1 + k];
+                            if (!ldh_char(ch)) bad = 1;
+                            name[no++] = ch;
                         }
                         j += 1 + l;
                         first = 0;
                     }
                     name[no] = '\0';
-                    if (no > 0) fprintf(rf, " %s", name);
+                    if (no > 0 && !bad) fprintf(rf, " %s", name);
                     /* Advance the OUTER cursor past the name we
                      * just decoded — find the terminating 0 from
                      * position i forward, skipping comp pointers. */

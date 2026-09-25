@@ -30,6 +30,10 @@ exactly as the case needs.
                   ignored; the valid OFFER after them is requested.
     foreign-ack   DHC-11: an ACK naming a server other than the selected
                   one does not bind; the selected server's ACK does.
+    resolv        DHC-12: a domain name and a search domain carrying a
+                  newline are dropped rather than written into
+                  /etc/resolv.conf, while the DNS server and a valid search
+                  domain still are.
     probe-announce DHC-07: before using the address the client ARP-probes it
                   (sender IP 0), and once bound announces it with a
                   gratuitous ARP.
@@ -742,6 +746,42 @@ def case_foreign_ack():
         return None, w
 
 
+def resolv_lines(w):
+    return [l[len('guest: cat |'):-1] for l in w.serial().splitlines()
+            if l.startswith('guest: cat |')]
+
+
+def search_opt(*names):
+    """An RFC 3397 search list (no compression)."""
+    out = b''
+    for n in names:
+        for label in n.split(b'.'):
+            out += bytes([len(label)]) + label
+        out += b'\0'
+    return out
+
+
+def case_resolv():
+    with boot(args='eth0 -- cat:/etc/resolv.conf') as w:
+        s = Server(w)
+        opts = [(51, struct.pack('!I', 3600)), (6, socket.inet_aton('10.0.2.3')),
+                (15, b'example.com\nnameserver 6.6.6.6'),
+                (119, search_opt(b'good.example', b'bad\nsearch.evil'))]
+        err = exchange(s, w, dict(opts=opts))
+        if err:
+            return err, w
+        if not w.wait_serial('guest: cat end', 10):
+            return 'resolv.conf was not written', w
+        lines = resolv_lines(w)
+        if 'nameserver 10.0.2.3' not in lines:
+            return 'resolv.conf lost the DNS server: %r' % lines, w
+        if any('6.6.6.6' in l or 'evil' in l for l in lines):
+            return 'server-supplied text injected lines: %r' % lines, w
+        if 'search good.example' not in lines:
+            return 'the valid search domain is missing: %r' % lines, w
+        return None, w
+
+
 OFFLINK = '198.51.100.1'
 
 
@@ -785,7 +825,7 @@ CASES = (('bound', case_bound), ('ack-config', case_ack_config),
          ('no-options', case_no_options), ('overload', case_overload),
          ('concat', case_concat), ('maxsize', case_maxsize),
          ('bad-headers', case_bad_headers), ('bad-offers', case_bad_offers),
-         ('foreign-ack', case_foreign_ack),
+         ('foreign-ack', case_foreign_ack), ('resolv', case_resolv),
          ('probe-announce', case_probe_announce), ('declined', case_declined),
          ('renew', case_renew), ('rebind', case_rebind),
          ('expire', case_expire), ('nak-renew', case_nak_renew), ('clock-step', case_clock_step),
