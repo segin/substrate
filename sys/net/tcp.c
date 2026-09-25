@@ -3,7 +3,7 @@
  *
  * Layout, top to bottom:
  *   - Types and tunables
- *   - Per-PCB list (linear; replace with hash once profiling shows it)
+ *   - Per-PCB list (all PCBs) plus the demux hash (TCP-RES-03)
  *   - Segment construction + tcp_xmit (fresh and retransmit share this)
  *   - Per-PCB send queue of unacked segments (linked list)
  *   - Retransmit timer kthread (one per system)
@@ -25,6 +25,14 @@
  *     PCB is freed.
  *
  * Still TBD: send window/cwnd, SACK, RTT-driven RTO, IPv6 transport.
+ *
+ * Deliberately omitted (TCP-SEC-01): RFC 793 3.6 precedence and
+ * security/compartment.  Segments are sent with the socket's IP_TOS and
+ * no IP security option, and neither is checked on input.  RFC 2873
+ * requires TCP to ignore the precedence field rather than reset a
+ * connection whose precedence does not match, and the security option
+ * (IPSO, RFC 1108) is obsolete; implementing 3.6 as written would now be
+ * non-conformant.
  */
 
 #include <errno.h>
