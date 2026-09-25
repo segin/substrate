@@ -1,0 +1,56 @@
+.TH ECHOD 8 2026-09-25 "Substrate" "System Administration"
+.SH NAME
+echod \- TCP echo service daemon
+.SH SYNOPSIS
+.B echod
+.RI [ port ]
+.SH DESCRIPTION
+.B echod
+is a minimal implementation of the Echo Protocol.
+It listens for TCP connections on
+.I port
+(default 7) on all IPv4 addresses and sends back every byte it receives
+on a connection until the client closes it.
+.PP
+Connections are served one at a time, in the order they are accepted;
+while one client is connected, others wait in the listen queue (backlog 5).
+There is no UDP service.
+.PP
+.B echod
+does not detach from its terminal; it runs in the foreground and prints
+a line to standard output when it starts listening and when each connection
+is accepted and closed.
+It is not started by any of the boot scripts.
+.SH OPTIONS
+.TP
+.I port
+TCP port to listen on.
+The argument is converted with
+.BR atoi (3)
+and is not otherwise checked.
+.SH EXIT STATUS
+.TP
+.B 0
+.BR accept (2)
+failed with an error other than
+.BR EINTR .
+.TP
+.B 1
+The socket could not be created, bound or put into the listening state.
+.SH EXAMPLE
+Serve the echo protocol on port 7007 and test it:
+.EX
+# echod 7007 &
+$ telnet localhost 7007
+.EE
+.SH SEE ALSO
+.BR telnetd (8),
+.BR tcp (7)
+.SH STANDARDS
+RFC 862 (Echo Protocol), TCP service only.
+.SH BUGS
+.B echod
+does not ignore
+.BR SIGPIPE ,
+so a client that closes its connection while data is being echoed back can
+terminate the daemon.
