@@ -1,0 +1,191 @@
+.TH HEAD 1 2026-09-25 "Substrate" "User Commands"
+.SH NAME
+head \- output the first part of files
+.SH SYNOPSIS
+.B head
+.RB [ \-c
+.RI [ \- ] num
+|
+.B \-n
+.RI [ \- ] num ]
+.RB [ \-qvz ]
+.RI [ file ...]
+.br
+.B head
+.BI \- num\c
+.RB [ bkmcl ][ qv ]
+.RI [ file ...]
+.SH DESCRIPTION
+.B head
+copies the first 10 lines of each
+.I file
+to standard output.
+With no
+.IR file ,
+or when
+.I file
+is
+.BR \- ,
+standard input is read.
+.PP
+When more than one
+.I file
+is given, the output for each is preceded by a header of the form
+.PP
+.EX
+==> \fIname\fR <==
+.EE
+.PP
+with a blank line before every header except the first.
+Standard input is shown as
+.BR "standard input" .
+.PP
+A count given with a leading
+.B \-
+(for example
+.BR "\-n \-5" )
+selects everything
+.I except
+the last
+.I num
+lines or bytes.
+For a seekable file this is done in two passes; for a pipe or other
+non-seekable input the whole input is held in memory first.
+.SS Number suffixes
+The
+.I num
+argument of
+.B \-c
+and
+.B \-n
+may carry a case-insensitive suffix:
+.BR K " (1024), " M " (1024^2), " G ", " T ", " P ", or " E
+(successive powers of 1024), optionally followed by
+.B i
+and/or
+.BR B ,
+so
+.BR KiB ,
+.BR kB ,
+and
+.B K
+all mean 1024.
+A bare trailing
+.B B
+multiplies by 1.
+.SH OPTIONS
+.TP
+.BR \-n " [\fB\-\fR]\fInum\fR, " \-\-lines= [\fB\-\fR]\fInum\fR
+Output the first
+.I num
+lines (default 10), or with a leading
+.BR \- ,
+all but the last
+.I num
+lines.
+.TP
+.BR \-c " [\fB\-\fR]\fInum\fR, " \-\-bytes= [\fB\-\fR]\fInum\fR
+Output the first
+.I num
+bytes, or with a leading
+.BR \- ,
+all but the last
+.I num
+bytes.
+.B \-c
+and
+.B \-n
+may not be combined; if either is repeated, the last one wins.
+.TP
+.BR \-q ", " \-\-quiet ", " \-\-silent
+Never print headers.
+Takes precedence over
+.B \-v
+regardless of order.
+.TP
+.BR \-v ", " \-\-verbose
+Always print headers, even for a single input.
+.TP
+.BR \-z ", " \-\-zero\-terminated
+Lines are delimited by NUL bytes instead of newlines.
+.TP
+.B \-\-help
+Print a help summary to standard output and exit with status 0.
+.TP
+.B \-\-version
+Print version information and exit with status 0.
+.TP
+.B \-\-
+End option processing.
+.SS Obsolete syntax
+An argument of the form
+.BI \- num
+followed by optional letters is accepted anywhere before
+.BR \-\- .
+The letters are:
+.TP
+.B b
+Bytes, multiplied by 512.
+.TP
+.B k
+Bytes, multiplied by 1024.
+.TP
+.B m
+Bytes, multiplied by 1048576.
+.TP
+.B c
+Bytes.
+.TP
+.B l
+Lines (the default).
+.TP
+.BR q ", " v
+As
+.B \-q
+and
+.BR \-v .
+.PP
+For example,
+.B head \-20 file
+prints 20 lines and
+.B head \-2kq a b
+prints the first 2048 bytes of each file without headers.
+.SH EXIT STATUS
+.TP
+.B 0
+All inputs were processed successfully.
+.TP
+.B 1
+Invalid options or counts, or at least one
+.I file
+could not be opened, read, or written.
+Remaining files are still processed after a per-file error.
+.SH EXAMPLES
+Show the first 5 lines of two files:
+.PP
+.EX
+$ head \-n 5 a.txt b.txt
+.EE
+.PP
+Print everything except the last 2 KiB of a file:
+.PP
+.EX
+$ head \-c \-2K image.bin > trimmed.bin
+.EE
+.SH SEE ALSO
+.BR cat (1),
+.BR pr (1),
+.BR tail (1)
+.SH STANDARDS
+The
+.B \-c
+and
+.B \-n
+options with non-negative counts follow POSIX.1-2024.
+Negative counts and the long options follow GNU coreutils; the
+number suffixes follow the BSD
+.B expand_number
+convention.
+.SH BUGS
+When headers are enabled, the header for a file that cannot be
+opened is printed before the error message.
