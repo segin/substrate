@@ -1,0 +1,118 @@
+.TH XENIX 1 2026-09-25 "Substrate" "User Commands"
+.SH NAME
+xenix \- run a SCO Xenix/286 program with a suitable environment
+.SH SYNOPSIS
+.B xenix
+.I program
+.RI [ argument ...]
+.SH DESCRIPTION
+.B xenix
+is a shell script installed as
+.IR /usr/bin/xenix .
+It is not an emulator: Xenix/286 binaries run directly under the
+SCO Xenix/286 personality.
+The script only adjusts the environment and then replaces itself with
+.I program
+and its arguments via the shell's
+.BR exec .
+.I program
+is a path in the Substrate file system, such as
+.IR /perso/xenix286s/usr/bin/word .
+.PP
+Its main job is choosing
+.BR TERM .
+Microsoft MSTOOLS programs such as Word 3.0 look the terminal up in
+.IR $XENIX_ROOT/usr/lib/MSTOOLS/termdesc
+and refuse to start if it is not described there, while Substrate's
+console login sets
+.BR TERM=linux .
+.B xenix
+sets
+.B TERM
+as follows:
+.IP 1. 4
+If
+.B XENIX_TERM
+is set and non-empty, its value is used.
+.IP 2. 4
+Otherwise, if
+.B TERM
+consists only of letters, digits,
+.BR . ,
+.B _
+and
+.BR \- ,
+the termdesc file is readable, and it has an entry beginning with
+.IB TERM |
+at the start of a line,
+.B TERM
+is kept.
+.IP 3. 4
+Otherwise
+.B TERM
+is set to
+.BR vt100 .
+.PP
+It also creates the directory
+.I $XENIX_ROOT/usr/tmp
+if it is missing, since MSTOOLS programs write scratch files there
+without creating it.
+.SH EXIT STATUS
+If
+.I program
+is executed, the exit status is that of
+.IR program .
+With no arguments,
+.B xenix
+prints a usage message and exits with status
+.BR 64 .
+If
+.I program
+cannot be executed, the status is the one reported by
+.BR sh (1)
+for a failed
+.BR exec .
+.SH ENVIRONMENT
+.TP
+.B XENIX_ROOT
+Root of the Xenix/286 file tree; default
+.IR /perso/xenix286s .
+.TP
+.B XENIX_TERM
+If set, used as
+.B TERM
+unconditionally.
+.TP
+.B TERM
+Kept if the termdesc file describes it, otherwise replaced as above.
+.SH FILES
+.TP
+.I /perso/xenix286s/usr/lib/MSTOOLS/termdesc
+MSTOOLS terminal descriptions (under
+.BR XENIX_ROOT ).
+.TP
+.I /perso/xenix286s/usr/tmp
+Scratch directory created on demand.
+.SH NOTES
+The
+.B ansi
+entry of the termdesc file shipped with MSTOOLS is damaged and makes
+Word fail with
+.BR "Insufficient memory" .
+The source directory
+.I bin/xenix
+contains
+.BR fix\-termdesc\-ansi.sh ,
+which replaces that entry with the corrected one in
+.BR termdesc\-ansi.entry ;
+it is a maintenance script for the Xenix disk image and is not
+installed.
+.SH EXAMPLES
+.EX
+$ xenix /perso/xenix286s/usr/bin/word letter.doc
+$ XENIX_TERM=wyse50 xenix /perso/xenix286s/usr/bin/word
+.EE
+.SH SEE ALSO
+.BR sh (1),
+.BR sco_x286 (4),
+.BR xout286 (4)
