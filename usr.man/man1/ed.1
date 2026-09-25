@@ -1,0 +1,61 @@
+.TH ED 1 2026-09-25 "Substrate" "User Commands"
+.SH NAME
+ed \- line editor (placeholder)
+.SH SYNOPSIS
+.B ed
+.SH DESCRIPTION
+The Substrate
+.B ed
+is a minimal placeholder, not a working implementation of the
+standard line editor.
+It takes no options and no file operand, cannot read a file, and
+cannot write one.
+Any command-line arguments are ignored.
+.PP
+.B ed
+reads commands from standard input, one per line, and looks only at
+the first character of each line:
+.TP
+.B a
+Append text.
+Subsequent input lines are stored in an in-memory buffer until a line
+consisting of a single
+.B .
+is read.
+.TP
+.B p
+Print every line in the buffer.
+.TP
+.B w
+Print the message
+.B "written (mock)"
+and do nothing else; the buffer is not saved.
+.TP
+.B q
+Exit.
+.PP
+Every other command is silently ignored; there is no line addressing,
+no error reporting, and no
+.B ?
+diagnostic.
+.B ed
+also exits at end of input.
+.SH EXIT STATUS
+.B ed
+always exits with status 0.
+.SH SEE ALSO
+.BR ex (1),
+.BR vi (1)
+.SH BUGS
+The buffer holds at most 1024 lines; further appended lines are
+discarded without warning.
+Input lines longer than 1023 bytes are split into several buffer
+lines.
+Because only the first character of a command is examined, any line
+beginning with
+.BR q ,
+.BR a ,
+.BR p ,
+or
+.B w
+is treated as that command.
