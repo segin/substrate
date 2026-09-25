@@ -1,0 +1,178 @@
+.TH AUDIOCTL 1 2026-09-25 "Substrate" "User Commands"
+.SH NAME
+audioctl \- display or set audio device parameters
+.SH SYNOPSIS
+.B audioctl
+.RB [ \-an ]
+.RB [ \-d
+.IR device ]
+.br
+.B audioctl
+.RB [ \-an ]
+.RB [ \-d
+.IR device ]
+.IR name [= value ]
+\&...
+.SH DESCRIPTION
+.B audioctl
+reads the state of an audio device with the
+.B AUDIO_GETINFO
+.BR ioctl (2)
+and, when given assignments, changes it with
+.BR AUDIO_SETINFO .
+The device is opened read-only.
+.PP
+With no operands,
+.B audioctl
+prints the playback and record parameters and the monitor gain, one
+.IB name = value
+pair per line.
+.PP
+Each operand is either an assignment
+.IB name = value
+or a bare
+.IR name .
+All assignments on the command line are collected into a single
+.B AUDIO_SETINFO
+request; fields that are not assigned are left unchanged.
+If any assignment is invalid, nothing is set.
+A bare
+.I name
+prints the current value of that variable (as read before any
+change is applied).
+After the set request succeeds, the full device state is read back
+and printed, unless
+.B \-n
+was given.
+.SS Variables
+The following variables can be displayed and set.
+Values are unsigned decimal integers unless noted otherwise.
+.TP
+.BR play.gain ", " record.gain
+Gain, 0 to 255.
+.TP
+.BR play.balance ", " record.balance
+Balance, 0 (left) to 64 (right); 32 is centre.
+.TP
+.BR play.sample_rate ", " record.sample_rate
+Sample rate in Hz.
+.TP
+.BR play.channels ", " record.channels
+Channel count, at least 1.
+.TP
+.BR play.precision ", " record.precision
+Bits per sample.
+.TP
+.BR play.encoding ", " record.encoding
+Sample encoding, one of:
+.BR ulaw ,
+.BR alaw ,
+.BR pcm16 ,
+.BR pcm8 ,
+.BR adpcm ,
+.BR slinear_le ,
+.BR slinear_be ,
+.BR ulinear_le ,
+.BR ulinear_be ,
+.BR slinear ,
+.BR ulinear .
+An encoding the tool does not recognise is displayed as
+.BR unknown .
+.TP
+.BR play.pause ", " record.pause
+1 pauses, 0 resumes.
+.TP
+.B monitor_gain
+Loopback monitor gain, 0 to 255.
+.PP
+.B volume
+is accepted as an alias for
+.BR play.gain ,
+and
+.B monitor
+as an alias for
+.BR monitor_gain .
+.PP
+With
+.BR \-a ,
+the display also includes these read-only fields for each direction:
+.BR port ,
+.BR avail_ports ,
+.BR buffer_size ,
+.BR samples ,
+.BR eof ,
+.BR error ,
+.BR open ,
+.BR active ;
+and the device-wide
+.BR blocksize ,
+.BR hiwat ,
+and
+.BR lowat .
+.SH OPTIONS
+.TP
+.BI \-d " device"
+Control
+.I device
+instead of the default
+.BR /dev/audioctl0 .
+The argument may also be attached, as in
+.BR \-d/dev/audioctl1 .
+.TP
+.B \-a
+Show all fields, including the read-only statistics.
+.TP
+.B \-n
+Do not print the device state after setting values.
+.TP
+.B \-h
+Print a usage summary to standard error and exit with status 0.
+.TP
+.B \-\-
+End of options.
+.SH EXIT STATUS
+.TP
+.B 0
+Success.
+.TP
+.B 1
+An unknown option, an unknown variable, an invalid value, or a failure
+to open the device or perform an
+.BR ioctl (2).
+.SH FILES
+.TP
+.B /dev/audioctl0
+Default control device.
+.SH EXAMPLES
+Show the current settings:
+.PP
+.EX
+$ audioctl
+.EE
+.PP
+Set the playback volume without printing the result:
+.PP
+.EX
+$ audioctl \-n volume=200
+.EE
+.PP
+Configure 16-bit stereo playback at 44100 Hz:
+.PP
+.EX
+$ audioctl play.sample_rate=44100 play.channels=2 \e
+    play.precision=16 play.encoding=slinear_le
+.EE
+.SH SEE ALSO
+.BR ioctl (2),
+.BR audio (4),
+.BR dsp (4),
+.BR hda (4),
+.BR uac (4)
+.SH BUGS
+An operand list made up only of bare names (no assignment) still
+issues an empty
+.B AUDIO_SETINFO
+request, and then prints the full device state after the requested
+values unless
+.B \-n
+is given.
