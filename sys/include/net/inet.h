@@ -257,6 +257,7 @@ size_t     tcp_recv_avail(const tcp_pcb_t *p);
 ssize_t    tcp_peek(tcp_pcb_t *p, void *buf, size_t len);
 ssize_t    tcp_peek_nb(tcp_pcb_t *p, void *buf, size_t len);
 int        tcp_close(tcp_pcb_t *p);
+int        tcp_abort(tcp_pcb_t *p);                             /* TCP-API-11 */
 int        tcp_take_so_error(tcp_pcb_t *p);
 void       tcp_set_txopts(tcp_pcb_t *p, const struct ip4_txopts *o);
 int        tcp_set_user_timeout(tcp_pcb_t *p, uint32_t ms);     /* TCP-WIN-13 */
@@ -293,6 +294,8 @@ int     afinet_set_tcpopt(int fd, int optname, int val);     /* TCP-WIN-13 */
 int     afinet_get_tcpopt(int fd, int optname, int *val);
 int     afinet_setown(int fd, int owner);                   /* TCP-URG-01 */
 int     afinet_getown(int fd, int *owner);
+int     afinet_set_linger(int fd, int onoff, int secs);     /* TCP-API-11 */
+int     afinet_get_linger(int fd, int *onoff, int *secs);
 /* UDP-API-04: SO_RCVTIMEO (rcv != 0) / SO_SNDTIMEO, as seconds plus
  * microseconds; both zero means no timeout.  -ENOTSOCK on a non-AF_INET fd,
  * -EDOM for a negative or out-of-range value. */

@@ -57,6 +57,7 @@
  *   atmark       ioctl(SIOCATMARK), reporting the value
  *   sockatmark   sockatmark() on the socket and then on fd 0 (the console)
  *   oob:TEXT     send(TEXT, MSG_OOB)
+ *   linger0      setsockopt(SO_LINGER, {1, 0}), read it back
  *   recvoob      recv(MSG_OOB) into a 16-octet buffer, reporting the octets
  *   recvmsgoob   the same through recvmsg(), reporting msg_flags too
  *   sleep:N      sleep N seconds
@@ -147,6 +148,12 @@ static int do_actions(int fd, int argc, char **argv) {
                 (long)fcntl(fd, F_GETOWN));
         } else if (strcmp(a, "sigurg") == 0) {
             say("sigurg %s count=%ld", "ok", (long)g_sigurg);
+        } else if (strcmp(a, "linger0") == 0) {
+            struct linger lg = { 1, 0 }, back = { -1, -1 };
+            socklen_t bl = sizeof back;
+            int r = setsockopt(fd, SOL_SOCKET, SO_LINGER, &lg, sizeof lg);
+            if (r == 0) r = getsockopt(fd, SOL_SOCKET, SO_LINGER, &back, &bl);
+            say("linger0 %s onoff=%ld", r < 0 ? strerror(errno) : "ok", (long)back.l_onoff);
         } else if (strncmp(a, "oob:", 4) == 0) {
             ssize_t n = send(fd, a + 4, strlen(a + 4), MSG_OOB);
             say("oob %s n=%ld", n < 0 ? strerror(errno) : "ok", (long)n);

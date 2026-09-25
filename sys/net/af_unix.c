@@ -2764,6 +2764,17 @@ int sys_setsockopt(int fd, int level, int optname,
             return -EFAULT;
         afinet_set_broadcast(fd, on);   /* no-op on non-AF_INET fds */
     }
+    /* TCP-API-11: SO_LINGER (13), struct linger { int l_onoff, l_linger; }
+     * (the same 8 octets in every i386 personality).  It was accepted and
+     * discarded; an AF_INET socket now records it and close() honours
+     * {1, 0} as an abortive close.  AF_UNIX keeps none: still accepted. */
+    if (level == 1 /*SOL_SOCKET*/ && optname == 13 /*SO_LINGER*/) {
+        int lg[2];
+        if (!optval || optlen < (socklen_t)sizeof(lg)) return -EINVAL;
+        if (copyin(optval, lg, sizeof(lg)) != 0) return -EFAULT;
+        int r = afinet_set_linger(fd, lg[0], lg[1]);
+        return r == -ENOTSOCK ? 0 : r;
+    }
     /* UDP-API-04: SO_RCVTIMEO (20) / SO_SNDTIMEO (21) take a struct timeval:
      * 16 bytes of int64 fields natively, 12 (int64 + int32) from NetBSD and
      * OpenBSD i386, 8 bytes of int32 from Linux and FreeBSD i386.  They used to be accepted and discarded, so a blocking
@@ -3012,6 +3023,15 @@ int sys_getsockopt(int fd, int level, int optname,
         if (optname == 6 /*SO_BROADCAST*/) {
             int b = afinet_get_broadcast(fd);           /* UDP-API-15 */
             return getsockopt_ret_int(b < 0 ? 0 : b, optval, optlen);
+        }
+        if (optname == 13 /*SO_LINGER*/) {                /* TCP-API-11 */
+            int lg[2] = { 0, 0 };
+            socklen_t n = sizeof(lg);
+            (void)afinet_get_linger(fd, &lg[0], &lg[1]);   /* AF_UNIX: {0,0} */
+            if (ulen < n) return -EINVAL;
+            if (copyout(lg, optval, n) != 0) return -EFAULT;
+            if (copyout(&n, optlen, sizeof(n)) != 0) return -EFAULT;
+            return 0;
         }
         if (optname == 9 /*SO_KEEPALIVE*/ ||
             optname == 15 /*SO_REUSEPORT*/ || optname == SO_ACCEPTCONN_K) {

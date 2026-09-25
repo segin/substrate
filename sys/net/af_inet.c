@@ -182,6 +182,8 @@ typedef struct afi_sock {
      * is being delivered into its ring or a reader is asleep on it. */
     int        refcount;
     int        owner;       /* TCP-URG-01: F_SETOWN (pid, or -pgrp) */
+    int        linger_on;   /* TCP-API-11: SO_LINGER l_onoff */
+    int        linger_secs; /* TCP-API-11: SO_LINGER l_linger */
 
     fs_node_t  node;
     struct afi_sock *next;
@@ -936,8 +938,20 @@ static void afinet_node_close(fs_node_t *node) {
     spinlock_release_irq(&afi_lock, cfl);
     if (!s) return;
     /* tcp_close() serialises internally (its own IRQ-off critical
-     * section) and may not run under afi_lock. */
-    if (s->tcp) { tcp_close(s->tcp); s->tcp = NULL; }
+     * section) and may not run under afi_lock.
+     *
+     * TCP-API-11: SO_LINGER {l_onoff = 1, l_linger = 0} asks for an
+     * abortive close -- RST, queued data discarded -- instead of the FIN
+     * handshake.  (A non-zero linger time would make close() wait for the
+     * data to be acknowledged; that is not implemented, and such a close
+     * stays graceful and non-blocking.) */
+    if (s->tcp) {
+        if (s->linger_on && s->linger_secs == 0)
+            tcp_abort(s->tcp);
+        else
+            tcp_close(s->tcp);
+        s->tcp = NULL;
+    }
     /* UDP-IP-06: give back this socket's group memberships, so the last
      * leave turns the NIC's all-multicast mode off again. */
     {
@@ -1386,6 +1400,25 @@ int afinet_setown(int fd, int owner) {
     if (!s) return -ENOTSOCK;
     s->owner = owner;
     if (s->tcp) tcp_set_owner(s->tcp, owner);
+    return 0;
+}
+
+/* TCP-API-11: SO_LINGER, stored per socket and acted on at close().
+ * -ENOTSOCK for a descriptor that is not an AF_INET socket. */
+int afinet_set_linger(int fd, int onoff, int secs) {
+    afi_sock_t *s = afi_from_fd(fd);
+    if (!s) return -ENOTSOCK;
+    if (secs < 0) return -EINVAL;
+    s->linger_on = onoff ? 1 : 0;
+    s->linger_secs = secs;
+    return 0;
+}
+
+int afinet_get_linger(int fd, int *onoff, int *secs) {
+    afi_sock_t *s = afi_from_fd(fd);
+    if (!s) return -ENOTSOCK;
+    *onoff = s->linger_on;
+    *secs = s->linger_secs;
     return 0;
 }
 

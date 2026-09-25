@@ -2996,6 +2996,53 @@ int tcp_close(tcp_pcb_t *p) {
 }
 
 /*
+ * TCP-API-11: RFC 793 3.9 ABORT.  Tear the connection down at once: queued
+ * data is discarded, a synchronized peer is sent <SEQ=SND.NXT><CTL=RST>,
+ * and waiters get ECONNRESET.  There was no ABORT at all -- close() was
+ * the only way out, always graceful -- so SO_LINGER {1, 0} (the POSIX way
+ * to ask for an abortive close) reported success and did nothing.
+ *
+ * Like tcp_close(), this consumes the socket's reference: the PCB is
+ * detached and the timer reaps it.  A listener is handled by tcp_close()'s
+ * LISTEN arm, which already resets every child.
+ */
+int tcp_abort(tcp_pcb_t *p) {
+    if (!p) return -ENOTCONN;
+    uint32_t f = tcp_lock();
+    if (p->state == TCP_LISTEN) {
+        tcp_unlock(f);
+        return tcp_close(p);
+    }
+    p->detached = 1;
+    switch (p->state) {
+    case TCP_SYN_RECEIVED:
+    case TCP_ESTABLISHED:
+    case TCP_FIN_WAIT_1:
+    case TCP_FIN_WAIT_2:
+    case TCP_CLOSE_WAIT:
+        /* Inline under the lock, as tcp_close()'s LISTEN arm does (A45):
+         * ip4_output() does not sleep with interrupts off (NET-05). */
+        tcp_xmit_raw(p, p->snd_nxt, TCP_RST, NULL, 0);
+        tcp_ooo_free_all(p);
+        tcp_kill_pcb(p, ECONNRESET);         /* frees the send queue */
+        break;
+    case TCP_SYN_SENT:
+    case TCP_CLOSING:
+    case TCP_LAST_ACK:
+    case TCP_TIME_WAIT:
+        /* No RST: SYN-SENT has no synchronized peer, and in the last three
+         * the peer has already closed its side ("delete the TCB"). */
+        tcp_ooo_free_all(p);
+        tcp_kill_pcb(p, ECONNRESET);
+        break;
+    default:
+        break;                                /* CLOSED: nothing to do */
+    }
+    tcp_unlock(f);
+    return 0;
+}
+
+/*
  * tcp_shutdown_wr — shutdown(fd, SHUT_WR): send a FIN to close the
  * send direction while the socket stays open for reading.  Unlike
  * tcp_close() the PCB is NOT detached — userspace still owns it and

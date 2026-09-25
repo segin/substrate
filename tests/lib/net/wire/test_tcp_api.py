@@ -31,6 +31,9 @@ it guards.
     connect-unspec TCP-API-10: connect() to port 0 fails EADDRNOTAVAIL with
                    no SYN on the wire; connect() to 0.0.0.0 goes to the local
                    host (refused at once by loopback), not onto the wire.
+    linger-abort   TCP-API-11: with SO_LINGER {1, 0}, close() is an ABORT:
+                   one RST at SND.NXT, no FIN, and the unacknowledged data
+                   is not retransmitted.
 
 Run from the repo root after building sys/ and wireguest:
     python3 tests/lib/net/wire/test_tcp_api.py [case...]
@@ -237,6 +240,32 @@ def case_connect_unspec():
     return None, w
 
 
+def case_linger_abort():
+    with Wire.boot('connect 10.0.2.2 %d linger0 write:unacked close sleep:60' % PORT) as w:
+        syn = w.expect(lambda s: s.flags & SYN and s.dport == PORT, 90, 'SYN')
+        if not syn:
+            return 'no SYN', w
+        w.send(Seg(PORT, syn.sport, PISS, syn.seq + 1, SYN | ACK))
+        if not w.wait_serial('guest: close', 10):
+            return 'guest never closed', w
+        l = line(w, 'linger0')[0]
+        if 'ok onoff=1' not in l:
+            return 'SO_LINGER not stored: %s' % l, w
+        w.pump(3.0)                   # past the first RTO of the data
+        g = syn.seq + 1
+        fins = [s for s in w.rx if s.flags & FIN]
+        rsts = [s for s in w.rx if s.flags & RST]
+        if fins:
+            return 'close() sent a FIN (graceful), want an abort', w
+        if len(rsts) != 1 or rsts[0].seq != g + len('unacked'):
+            return 'want one RST at SND.NXT=%d, got %r' % (g + 7, rsts), w
+        after = [s for s in w.rx if s.data and s.seq == g and
+                 w.rx.index(s) > w.rx.index(rsts[0])]
+        if after:
+            return 'the discarded data was retransmitted after the RST', w
+        return None, w
+
+
 CASES = (('reconnect', case_reconnect),
          ('connect-twice', case_connect_twice),
          ('listen-connect', case_listen_connect),
@@ -244,7 +273,8 @@ CASES = (('reconnect', case_reconnect),
          ('find-specific', case_find_specific),
          ('listen-connected', case_listen_connected),
          ('listen-unbound', case_listen_unbound),
-         ('connect-unspec', case_connect_unspec))
+         ('connect-unspec', case_connect_unspec),
+         ('linger-abort', case_linger_abort))
 
 
 def main():
