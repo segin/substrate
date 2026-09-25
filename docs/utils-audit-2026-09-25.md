@@ -1,0 +1,921 @@
+# Userland utilities remediation checklist (2026-09-25)
+
+Actionable checklist of the defects found while writing the 74 manual pages
+added to `usr.man/` on 2026-09-25 (`man: add ...` commits `1b5abd28e` through
+`14a3122da`).  Each page was written from a full read of its program's source,
+and anything that looked wrong was recorded rather than fixed.  Each item names
+the defect, the site, the fix and how to verify it, and carries an INCOSE/EARS
+requirement (`REQ-UTLA-nnnn`) in the section at the end, in the format of the
+`docs/tasks/` section files indexed by `TASKS.md`.
+
+**Read these with the right expectations.**  Except where marked **[ran]**
+(reproduced by running the program), every item comes from reading the code.
+None has yet been through the verification pass the protocol audits had, so a
+few may turn out to be intended or already handled elsewhere: confirm each one
+against the code before fixing it, and drop it with a note if it does not hold.
+Line numbers refer to the tree at `14a3122da`; a `~` marks an approximate
+line.
+
+**119 items: 13 high, 41 medium, 56 low, 9 info.**  The info items include five
+decision items (stubs, placeholders and missing aliases) that need a choice
+rather than a fix.
+
+## How to work this list
+
+Per the `TASKS.md` methodology: take one checkbox at a time, confirm the defect,
+fix it, add or extend the regression test named under **Verify** (userland tools
+under `tests/bin/<tool>/` or `tests/usr.bin/<tool>/`, kernel changes under
+`tests/sys/`), update the tool's page in `usr.man/` if the fix changes
+documented behaviour (several pages describe today's limitations in BUGS), tick
+the box, then commit and push.  Kernel changes need `make -C sys clean` first and
+a boot test with `--virtio --snapshot`.  Adding or changing a page in
+`rootfs.img` by hand also needs `mandoc.db` regenerated (see
+`build-rootfs.sh` `build_man_db()`).
+
+Suggested order, highest leverage first:
+
+1. **UTL-KERN-01**, **UTL-AT-01**, **UTL-SGREET-01**, **UTL-LOGIN-01**,
+   **UTL-SED-12**: privilege and identity defects.
+2. **UTL-INIT-01**: SIGHUP ignored by everything init starts; it undermines
+   every session's hangup cleanup.
+3. **UTL-SYSLOG-01**, **UTL-SYSLOG-02**: the shipped `syslog.conf` routes
+   nothing to its two main log files.
+4. **UTL-PASSWD-01**: ordinary users cannot change their passwords.
+5. The crash and hang items (**UTL-MKNOD-01**, **UTL-SED-01**,
+   **UTL-SLEEP-01**, **UTL-BAS-01**, **UTL-BAS-02**, **UTL-PRINTF-01**), then
+   the rest by section.
+
+## A. Privilege, identity and security
+
+- [ ] **UTL-KERN-01** (high) `sethostname(2)` has no privilege check (REQ: REQ-UTLA-0001)
+    - Site: `sys/kern/syscall.c:1339`
+    - Fix: Require euid 0 (return `-EPERM` otherwise), as `SIOCSIFGATEWAY` and the other configuration calls do; fail with `-EINVAL` rather than silently truncating a name of `MAXHOSTNAMELEN` or more.
+    - Verify: `tests/sys/`: a non-root `sethostname()` fails EPERM and leaves the name unchanged; root succeeds; an over-long name fails EINVAL.
+- [ ] **UTL-AT-01** (high) An `at` job runs as root if dropping privileges fails (REQ: REQ-UTLA-0002)
+    - Site: `lib/at/at_exec.c:30-31`
+    - Fix: Check `setgid()`/`setuid()` and abort the job on failure; call `initgroups()` (or `setgroups()`) first so root's supplementary groups are dropped.
+    - Verify: `tests/usr.bin/at/`: with the credential calls made to fail (mock), the job does not run; a normal job runs with exactly the owner's groups.
+- [ ] **UTL-AT-02** (medium) A non-root `at` job's output capture fails (REQ: REQ-UTLA-0003)
+    - Site: `lib/at/at_exec.c:51` vs `:61-65`
+    - Fix: Create the output file in the root-owned spool before dropping privileges (then `fchown` it to the job owner), or pass an already-open descriptor.
+    - Verify: A job queued by a non-root user produces its mailed or spooled output.
+- [ ] **UTL-AT-03** (medium) `at` jobs run with umask 0 (REQ: REQ-UTLA-0004)
+    - Site: `usr.sbin/atd/atd.c:78`
+    - Fix: Record the submitter's umask in the job request and have `atd` apply it; default to 022 when absent.
+    - Verify: A job that creates a file gets the submitter's umask applied.
+- [ ] **UTL-SGREET-01** (high) A failed `initgroups()` leaves root's supplementary groups in the user session (REQ: REQ-UTLA-0005)
+    - Site: `sbin/sdm/sgreet.c:173`
+    - Fix: Check `initgroups()` and refuse the session on failure, before `setgid`/`setuid`.
+    - Verify: Code review; a forced failure (mock) aborts the session.
+- [ ] **UTL-SGREET-02** (medium) `sgreet` spins forever on ECHILD (REQ: REQ-UTLA-0006)
+    - Site: `sbin/sdm/sgreet.c:429`
+    - Fix: Retry `waitpid()` only on EINTR; treat ECHILD as "the session is gone".
+    - Verify: The greeter returns when the session child has already been reaped.
+- [ ] **UTL-LOGIN-01** (high) `login` returns to its prompt as the authenticated user when exec of the shell fails (REQ: REQ-UTLA-0007)
+    - Site: `bin/login/login.c:430-431` with `:457-467`
+    - Fix: After the identity switch, an exec failure must `_exit()`, never return to the prompt loop.
+    - Verify: `tests/bin/login/`: an account whose shell does not exist ends the login with an error, and no further prompt runs under that uid.
+- [ ] **UTL-LOGIN-02** (low) The utmp/wtmp login record is written before `setgid`/`setuid` succeed (REQ: REQ-UTLA-0008)
+    - Site: `bin/login/login.c:348-351` vs `:382-392`
+    - Fix: Write the records only once the identity switch has succeeded (or write a matching logout record on failure).
+    - Verify: A failed switch leaves no dangling USER_PROCESS record.
+- [ ] **UTL-LOGIN-03** (medium) A user name over 63 bytes is truncated and its remainder read as the password (REQ: REQ-UTLA-0009)
+    - Site: `bin/login/login.c:176-187`
+    - Fix: Consume the rest of an over-long line and reject the name.
+    - Verify: A 100-byte name is rejected without its tail reaching the password prompt.
+- [ ] **UTL-SED-12** (high) `sed -i` uses a predictable temporary file opened with `fopen("w")` (REQ: REQ-UTLA-0010)
+    - Site: `bin/sed/sed.c:321-323` (the target build has no `HAVE_MKSTEMP`)
+    - Fix: Use `mkstemp()` (libc provides it) unconditionally in the target build, in the file's own directory.
+    - Verify: `tests/bin/sed/`: a pre-planted symlink at the old predictable name is not followed.
+- [ ] **UTL-LDSO-02** (medium) `ldd` on a setuid program runs the program (REQ: REQ-UTLA-0011)
+    - Site: `sbin/ld.so/ld_main.c:244-247`
+    - Fix: Keep dropping `LD_TRACE_LOADED_OBJECTS` for secure-mode programs, but have `ldd` read a setuid/setgid binary's headers directly instead of executing it.
+    - Verify: `tests/usr.bin/ldd/`: `ldd` on a setuid binary lists its dependencies and does not run it.
+- [ ] **UTL-HOSTNAME-01** (medium) Printing the host name can set it (REQ: REQ-UTLA-0012)
+    - Site: `bin/hostname/hostname.c:69`
+    - Fix: Only print in the no-argument case; leave setting from `/etc/hostname` to `-F` (and `rc.d/00-hostname`).
+    - Verify: `hostname` with no arguments makes no `sethostname()` call.
+- [ ] **UTL-NEWGRP-01** (low) `newgrp` accepts any numeric gid, though its comment says it is checked (REQ: REQ-UTLA-0013)
+    - Site: `bin/newgrp/newgrp.c:38-40`
+    - Fix: Look the gid up in the group database and reject unknown ones.
+    - Verify: `newgrp 99999` (no such group) fails.
+- [ ] **UTL-PASSWD-01** (high) `passwd` is not installed setuid, so ordinary users cannot change their own password (REQ: REQ-UTLA-0014)
+    - Site: `build-rootfs.sh:948-949` (only `su` and `ping` get mode 4755), `bin/passwd/passwd.c`
+    - Fix: Install `/bin/passwd` setuid root, and confirm `passwd.c` restricts a non-root caller to its own entry and re-verifies the old password.
+    - Verify: A non-root user changes their own password; cannot change another user's.
+- [ ] **UTL-PASSWD-02** (low) Password input over 127 bytes is truncated and the remainder feeds the next prompt (REQ: REQ-UTLA-0015)
+    - Site: `bin/passwd/passwd.c:88-97`
+    - Fix: Consume the rest of the line and reject over-long input.
+    - Verify: A 200-byte entry is rejected and does not answer the confirmation prompt.
+- [ ] **UTL-SU-01** (low) A password-read error check can never fire (REQ: REQ-UTLA-0016)
+    - Site: `bin/su/su.c:155` (`read_password()` never returns a negative value)
+    - Fix: Make `read_password()` report EOF/errors, and fail authentication on them.
+    - Verify: `su` with stdin closed fails instead of trying an empty password.
+
+## B. System services
+
+- [ ] **UTL-INIT-01** (high) init leaves SIGHUP ignored in every process it starts (REQ: REQ-UTLA-0017)
+    - Site: `sbin/init/init.c:398-400` with `:111-116`, `:466-467`
+    - Fix: Restore SIGHUP (and every other signal init ignores) to SIG_DFL in the child before exec of getty, rc scripts and daemons.
+    - Verify: A process started from rc.d or a getty session has SIGHUP at SIG_DFL (`/proc/<pid>/status` SigIgn), and a telnet disconnect terminates the session.
+- [ ] **UTL-INIT-02** (low) The tty1 getty cannot be disabled when sdm runs, although `rc.d/60-sdm` says to (REQ: REQ-UTLA-0018)
+    - Site: `etc/rc.d/60-sdm` vs `sbin/init/init.c:55-59` (compiled-in line table)
+    - Fix: Read the getty lines from a configuration file (e.g. `/etc/ttys`), or correct the rc.d comment.
+    - Verify: With tty1 disabled in the configuration, init starts no getty there.
+- [ ] **UTL-SYSLOG-01** (high) A `fac.none` selector suppresses every facility, so the shipped `*.*;auth.none;authpriv.none` rule never writes `/var/log/messages` (REQ: REQ-UTLA-0019)
+    - Site: `sbin/syslogd/syslogd.c:149`, `:234-241`
+    - Fix: Keep the named facility with the `none` level and exclude only that facility in `rule_matches`.
+    - Verify: `tests/`: with the shipped `syslog.conf`, a `daemon.info` message reaches `/var/log/messages` and an `auth.info` one does not.
+- [ ] **UTL-SYSLOG-02** (high) Comma-separated facility lists are not parsed, so the shipped `auth,authpriv.*` rule is dropped and `auth.log` gets nothing (REQ: REQ-UTLA-0020)
+    - Site: `sbin/syslogd/syslogd.c:146`
+    - Fix: Parse `fac1,fac2.level` into one selector per facility.
+    - Verify: An `authpriv.notice` message reaches `/var/log/auth.log`.
+- [ ] **UTL-SYSLOG-03** (low) Every line carries two timestamps (REQ: REQ-UTLA-0021)
+    - Site: `sbin/syslogd/syslogd.c:519` vs `lib/c/src/syslog.c:160`
+    - Fix: When the message already carries an RFC 3164 timestamp, keep it (strip before re-stamping, or do not re-stamp).
+    - Verify: A `syslog(3)` message is logged with exactly one timestamp.
+- [ ] **UTL-TELNETD-01** (medium) IAC doubling of a full 1024-byte pty read overruns the output bound and drops the tail (REQ: REQ-UTLA-0022)
+    - Site: `sbin/telnetd/telnetd.c:196`
+    - Fix: Size the output buffer to twice the input (worst case all 0xff), or emit in chunks.
+    - Verify: 1024 bytes of 0xff from the pty reach the client as 2048 bytes.
+- [ ] **UTL-TELNETD-02** (low) A TELNET command split across two reads is passed to the pty as data (REQ: REQ-UTLA-0023)
+    - Site: `sbin/telnetd/telnetd.c:101`
+    - Fix: Keep the command parser's state across reads.
+    - Verify: IAC and its command sent in separate segments are consumed, not delivered.
+- [ ] **UTL-ECHOD-01** (medium) A client closing mid-echo can kill `echod` with SIGPIPE (REQ: REQ-UTLA-0024)
+    - Site: `sbin/echod/echod.c:49`
+    - Fix: Ignore SIGPIPE (or use MSG_NOSIGNAL) and handle EPIPE.
+    - Verify: `echod` survives a client that resets the connection during a write.
+- [ ] **UTL-RADVD-01** (medium) The prefix length is not range-checked; a negative value indexes outside the prefix field (REQ: REQ-UTLA-0025)
+    - Site: `sbin/radvd/radvd.c:75`, `:159-166`
+    - Fix: Accept only 0..128 and reject other values at startup.
+    - Verify: `radvd eth0 fec0::/-1` and `/200` are refused.
+- [ ] **UTL-RADVD-02** (low) `radvd` exits 0 after a send failure (REQ: REQ-UTLA-0026)
+    - Site: `sbin/radvd/radvd.c:175-180`
+    - Fix: Exit non-zero, or log and keep advertising, but do not report success.
+    - Verify: A send failure is visible in the exit status or log.
+- [ ] **UTL-RADVD-03** (low) `socket()` and `bind()` results are not checked (REQ: REQ-UTLA-0027)
+    - Site: `sbin/radvd/radvd.c:83`, `:106`
+    - Fix: Check both and exit with a message on failure.
+    - Verify: Code review.
+- [ ] **UTL-RADVD-04** (info) A comment says 9999 where the value is 10000 (REQ: REQ-UTLA-0028)
+    - Site: `sbin/radvd/radvd.c:154-155`
+    - Fix: Correct the comment (0x2710 = 10000).
+    - Verify: Code review.
+- [ ] **UTL-SDM-01** (low) `rc.d/60-sdm stop` takes effect only after the foreground greeter or session exits (REQ: REQ-UTLA-0029)
+    - Site: `sbin/sdm/sdm.sh:30-39`
+    - Fix: Run the child in the background and `wait`, so the TERM trap runs at once and forwards the signal.
+    - Verify: `60-sdm stop` ends sdm and its X server within a second.
+- [ ] **UTL-DHC-15** (low) A failed install on renew or rebind is ignored (REQ: REQ-UTLA-0030)
+    - Site: `sbin/dhclient/dhclient.c:868` (`extend()` ignores `install_lease()`'s result; DHC-08 made it fatal only for the first bind)
+    - Fix: Treat a failed reinstall like a lost lease: drop the address and reacquire.
+    - Verify: `tests/lib/net/wire/test_dhclient.py`: code review, since the harness cannot make the ioctls fail (as for DHC-08).
+- [ ] **UTL-HALT-01** (medium) `halt` resets the machine instead of halting it (REQ: REQ-UTLA-0031)
+    - Site: `sys/kern/syscall.c:4594` (`RB_HALT_SYSTEM` goes down the `RB_AUTOBOOT` path)
+    - Fix: Give `RB_HALT_SYSTEM` its own path: stop the CPUs and leave the machine halted (interrupts off, `hlt`).
+    - Verify: `tests/sys/`: `reboot(RB_HALT_SYSTEM)` under QEMU leaves the guest halted instead of rebooting.
+- [ ] **UTL-MOUNT-01** (medium) `mount -o` options never reach filesystems on real devices (REQ: REQ-UTLA-0032)
+    - Site: `bin/mount/mount.c:102` with `sys/vfs/vfs.c:367` (the device node replaces the data string)
+    - Fix: Pass the device and the option string to the filesystem separately.
+    - Verify: `mount -o ro` (or an ext2-specific option) on `/dev/storage/virtio0` takes effect.
+
+## C. Network tools
+
+- [ ] **UTL-PING-01** (low) `ping -t ttl` is parsed but never applied (REQ: REQ-UTLA-0033)
+    - Site: `bin/ping/ping.c:387`
+    - Fix: `setsockopt(IP_TTL)` (and `IPV6_UNICAST_HOPS` for v6), which the kernel supports.
+    - Verify: Wire test: the echo request carries the requested TTL.
+- [ ] **UTL-PING-02** (medium) ICMPv6 echo requests are sent with a zero checksum (REQ: REQ-UTLA-0034)
+    - Site: `bin/ping/ping.c:203-204`
+    - Fix: Compute the ICMPv6 checksum over the pseudo-header, or have the kernel's raw ICMPv6 socket fill it (RFC 3542 3.1 requires the kernel to compute it for ICMPv6).
+    - Verify: `tests/lib/net/wire/test_ip6_input.py`: the request's checksum verifies.
+- [ ] **UTL-PING-03** (low) The v6 reply line prints the target address, not the reply's source (REQ: REQ-UTLA-0035)
+    - Site: `bin/ping/ping.c:230`
+    - Fix: Print the source from `recvfrom()`.
+    - Verify: A reply from a different address is reported with that address.
+- [ ] **UTL-PING-04** (low) Numeric arguments are not validated (REQ: REQ-UTLA-0036)
+    - Site: `bin/ping/ping.c:383-387` (`atol`/`strtod`/`atoi`)
+    - Fix: Parse with `strtol`/`strtod`, reject trailing garbage, negatives and out-of-range values.
+    - Verify: `ping -c x`, `ping -i -1` are rejected.
+- [ ] **UTL-IFCONFIG-01** (low) Showing a nonexistent interface exits 0 (REQ: REQ-UTLA-0037)
+    - Site: `sbin/ifconfig/ifconfig.c:100-104`, `:319`
+    - Fix: Exit 1 after reporting the error.
+    - Verify: `ifconfig nosuch; echo $?` prints 1.
+- [ ] **UTL-IFCONFIG-02** (low) A keyword missing its argument is parsed as an IPv4 address (REQ: REQ-UTLA-0038)
+    - Site: `sbin/ifconfig/ifconfig.c:350-353`
+    - Fix: Report "missing argument" for a trailing `netmask`, `mtu`, `gateway` etc.
+    - Verify: `ifconfig eth0 netmask` fails with that message and changes nothing.
+
+## D. sed
+
+- [ ] **UTL-SED-01** (high) **[ran]** `D` on a pattern space with no newline loops forever (REQ: REQ-UTLA-0039)
+    - Site: `bin/sed/sed_exec.c:535-549`
+    - Fix: Per POSIX, when the pattern space has no newline `D` behaves like `d` (start the next cycle with new input).
+    - Verify: `printf 'a\n' | sed D` exits and prints nothing.
+- [ ] **UTL-SED-02** (medium) **[ran]** `0,/re/` restarts the range on every line, selecting every line (REQ: REQ-UTLA-0040)
+    - Site: `bin/sed/sed_exec.c:321-323`
+    - Fix: Make the `0` start address active only once, at the start of input.
+    - Verify: `printf 'x\ny\nx\n' | sed '0,/x/d'` prints `y` and `x`.
+- [ ] **UTL-SED-03** (medium) **[ran]** `$` matches the last line of every input file (REQ: REQ-UTLA-0041)
+    - Site: `bin/sed/sed_exec.c:790`, `:772` (`is_last_file` ignored)
+    - Fix: Match `$` only on the last line of the last file (unless `-s`/`-i`).
+    - Verify: `sed -n '$p' f1 f2` prints only f2's last line.
+- [ ] **UTL-SED-04** (medium) **[ran]** `q` stops only the current file (REQ: REQ-UTLA-0042)
+    - Site: `bin/sed/sed_exec.c:801` with `bin/sed/sed.c:286`
+    - Fix: Make `q`/`Q` end the whole run.
+    - Verify: `sed q f1 f2` prints one line.
+- [ ] **UTL-SED-05** (medium) **[ran]** The `Ng` flag combination replaces only the Nth match (REQ: REQ-UTLA-0043)
+    - Site: `bin/sed/sed_exec.c:180`
+    - Fix: With both N and `g`, replace the Nth and every later match.
+    - Verify: `echo aaaa | sed 's/a/b/2g'` prints `abbb`.
+- [ ] **UTL-SED-06** (low) **[ran]** The `s///e` flag is parsed and then ignored (REQ: REQ-UTLA-0044)
+    - Site: `bin/sed/sed_parse.c:352`
+    - Fix: Implement it (execute the pattern space, replace it with the output) or reject the flag.
+    - Verify: `echo 'echo hi' | sed 's/.*/&/e'` prints `hi`, or the flag is refused.
+- [ ] **UTL-SED-07** (medium) **[ran]** Backslash-newline in a replacement gives a literal backslash and newline (REQ: REQ-UTLA-0045)
+    - Site: `bin/sed/sed_parse.c:332` with `bin/sed/sed_exec.c:110`
+    - Fix: Treat backslash-newline in the replacement as a newline (POSIX).
+    - Verify: A script replacing with `a\` + newline + `b` yields two lines `a`, `b`.
+- [ ] **UTL-SED-08** (low) **[ran]** `R` re-reads the first line of its file every time (REQ: REQ-UTLA-0046)
+    - Site: `bin/sed/sed_exec.c:701-705`
+    - Fix: Keep the file open and its position across cycles.
+    - Verify: `R f` over three input lines appends f's lines 1, 2, 3.
+- [ ] **UTL-SED-09** (medium) **[ran]** With `-z` the NUL stays in the pattern space and output adds `\n` (REQ: REQ-UTLA-0047)
+    - Site: `bin/sed/sed_exec.c:785`
+    - Fix: Strip the NUL delimiter on input and emit NUL on output.
+    - Verify: `printf 'a\0b\0' | sed -z s/a/x/ | od -c` shows `x \0 b \0`.
+- [ ] **UTL-SED-10** (low) Output of the `e` command appears out of order (REQ: REQ-UTLA-0048)
+    - Site: `bin/sed/sed_exec.c:732`, `:735`
+    - Fix: `fflush(stdout)` before `system()`.
+    - Verify: `printf '1\n2\n' | sed '2e echo X'` prints `1 X 2` in order.
+- [ ] **UTL-SED-11** (low) Any first line starting with `#n` enables `-n` (REQ: REQ-UTLA-0049)
+    - Site: `bin/sed/sed_parse.c:520`
+    - Fix: Only a first line that is exactly `#n` (POSIX).
+    - Verify: A script starting `#nope` prints normally.
+- [ ] **UTL-SED-13** (low) `-l 0` wraps at 70 instead of not wrapping (REQ: REQ-UTLA-0050)
+    - Site: `bin/sed/sed.c:486-489` with `bin/sed/sed_exec.c:19`
+    - Fix: Treat 0 as "no wrapping".
+    - Verify: `l` of a 200-character line with `-l 0` prints one line.
+- [ ] **UTL-SED-14** (low) An empty regex reuses the previous one in the script text, not the last one used at run time (REQ: REQ-UTLA-0051)
+    - Site: `bin/sed/sed_parse.c:197-203`, `:369-374`
+    - Fix: Resolve `//` at execution time to the last regex applied.
+    - Verify: POSIX example with alternating addresses matches as specified.
+
+## E. Text and file utilities
+
+- [ ] **UTL-SORT-01** (medium) In `-c` mode a file that failed to open is dropped from the exit status (REQ: REQ-UTLA-0052)
+    - Site: `bin/sort/sort.c:624-625`
+    - Fix: Exit 2 when any input could not be read.
+    - Verify: `sort -c nosuch; echo $?` prints 2.
+- [ ] **UTL-SORT-02** (medium) Output write and close errors are ignored (REQ: REQ-UTLA-0053)
+    - Site: `bin/sort/sort.c:638-639`
+    - Fix: Check `fwrite`/`fclose` (or `ferror`) and exit 2.
+    - Verify: `sort f > /dev/full` exits 2.
+- [ ] **UTL-SORT-03** (low) Read errors are not checked (REQ: REQ-UTLA-0054)
+    - Site: `bin/sort/sort.c:124`
+    - Fix: Check `ferror()` after the read loop.
+    - Verify: Code review.
+- [ ] **UTL-SORT-04** (info) The header comment says `-k` sorts whole lines (REQ: REQ-UTLA-0055)
+    - Site: `bin/sort/sort.c:17`
+    - Fix: Update the comment.
+    - Verify: Code review.
+- [ ] **UTL-SORT-05** (medium) `-m` is ignored (REQ: REQ-UTLA-0056)
+    - Site: `bin/sort/sort.c:543`
+    - Fix: Implement merge of pre-sorted inputs (or document that it sorts them, which gives the same output).
+    - Verify: `sort -m a b` output equals `sort a b` for sorted inputs.
+- [ ] **UTL-PRINTF-01** (medium) A lone `'` or `"` argument makes the numeric parser read past the string (REQ: REQ-UTLA-0057)
+    - Site: `bin/printf/printf.c:128`, `:153`
+    - Fix: Check the argument's length before reading `arg[1]`/`arg[2]`.
+    - Verify: `printf %d "'"` prints 0 (or an error) without an out-of-bounds read.
+- [ ] **UTL-PRINTF-02** (medium) Format escapes are expanded before `%` parsing (REQ: REQ-UTLA-0058)
+    - Site: `bin/printf/printf.c:206`
+    - Fix: Interpret escapes as the format is walked, so `\045` prints `%` and `\0` does not truncate.
+    - Verify: `printf '\045d\n'` prints `%d`.
+- [ ] **UTL-SLEEP-01** (medium) `sleep -1` never returns; operands are not validated (REQ: REQ-UTLA-0059)
+    - Site: `bin/sleep/sleep.c:10-11`
+    - Fix: Parse with `strtol`/`strtod`, reject negatives and garbage (exit 1); allow fractional seconds via `nanosleep`.
+    - Verify: `sleep -1` and `sleep x` fail at once; `sleep 0.2` sleeps 0.2 s.
+- [ ] **UTL-SLEEP-02** (low) The usage message goes to stdout (REQ: REQ-UTLA-0060)
+    - Site: `bin/sleep/sleep.c:7`
+    - Fix: Write it to stderr.
+    - Verify: `sleep 2>/dev/null` prints nothing.
+- [ ] **UTL-SPLIT-01** (low) Input read errors are not checked (REQ: REQ-UTLA-0061)
+    - Site: `bin/split/split.c:109`, `:144`
+    - Fix: Check read results and exit 1 on error.
+    - Verify: Code review.
+- [ ] **UTL-OD-01** (low) Only the first argument is checked for options (REQ: REQ-UTLA-0062)
+    - Site: `bin/od/od.c:55-64`
+    - Fix: Check every argument before the first operand (or use `getopt`).
+    - Verify: `od f -x` refuses `-x` instead of opening a file named `-x`.
+- [ ] **UTL-TEST-01** (medium) `-nt`, `-ot` and `-ef` are recognised but never evaluated (REQ: REQ-UTLA-0063)
+    - Site: `bin/test/test.c:138` vs `:146-164`
+    - Fix: Implement them with `stat()` (mtime, device/inode).
+    - Verify: `test newer -nt older` is true; `test f -ef f` is true.
+- [ ] **UTL-TEST-02** (medium) The POSIX argument-count rules are not applied (REQ: REQ-UTLA-0064)
+    - Site: `bin/test/test.c:179-196`, `:272-275`
+    - Fix: Dispatch on argument count (1-4) as POSIX specifies before the general parser.
+    - Verify: `test ! = !` exits 1; `test "(" = "("` exits 0.
+- [ ] **UTL-TOUCH-01** (medium) `touch -d "YYYY-MM-DD hh:mm:ss"` drops the time of day (REQ: REQ-UTLA-0065)
+    - Site: `bin/touch/touch.c:91-95`
+    - Fix: Try the full date-time forms first, and reject trailing garbage.
+    - Verify: `touch -d "2026-09-25 13:14:15" f` sets 13:14:15.
+- [ ] **UTL-TOUCH-02** (info) The usage message omits `-h` (REQ: REQ-UTLA-0066)
+    - Site: `bin/touch/touch.c:148`
+    - Fix: Add it.
+    - Verify: Code review.
+- [ ] **UTL-DIFF-01** (low) With `-B` and `-I` together, `-I` is ignored (REQ: REQ-UTLA-0067)
+    - Site: `bin/diff/diff.c:~357-375` (`extract`)
+    - Fix: Apply both filters.
+    - Verify: A change matching `-I` is suppressed when `-B` is also given.
+- [ ] **UTL-DIFF-02** (medium) With `-N`, a subdirectory present on one side only is skipped silently (REQ: REQ-UTLA-0068)
+    - Site: `bin/diff/diff.c:~705-735` (`diff_dirs`)
+    - Fix: Report it (or recurse treating the missing side as empty) and count it in the exit status.
+    - Verify: `diff -rN a b` with `a/sub/` only exits 1 and mentions `sub`.
+- [ ] **UTL-DIFF-03** (medium) A lone `.` in inserted text is not escaped in ed, forward and RCS output (REQ: REQ-UTLA-0069)
+    - Site: `bin/diff/diff.c` (`emit_ed`, `emit_forward`, `emit_rcs`)
+    - Fix: Emit the standard escape (`..` then `s/.//`) for such lines.
+    - Verify: `diff -e` output applied with `ed` reproduces a file containing a `.` line.
+- [ ] **UTL-DF-01** (low) A nonexistent absolute path is reported against `/` with exit 0 (REQ: REQ-UTLA-0070)
+    - Site: `bin/df/df.c:~396-399`
+    - Fix: Report the `realpath()` failure and exit 1.
+    - Verify: `df /nosuch; echo $?` prints an error and 1.
+- [ ] **UTL-DATE-01** (low) The day is only checked against 1..31 (Feb 31 is normalised) (REQ: REQ-UTLA-0071)
+    - Site: `bin/date/date.c:~200`
+    - Fix: Validate against the month's length.  (The BSD year-first setting-string order is documented in `date.1`; changing it to POSIX `mmddhhmm[[cc]yy]` is a separate decision.)
+    - Verify: `date 202602310000` is rejected.
+- [ ] **UTL-COMM-01** (low) `comm - -` is not rejected (REQ: REQ-UTLA-0072)
+    - Site: `bin/comm/comm.c:~150`
+    - Fix: Refuse both operands being standard input.
+    - Verify: `comm - -` fails with a message.
+- [ ] **UTL-CUT-01** (low) `-d`/`-s` are silently accepted with `-b`/`-c`, and `-w` silently overrides `-d` (REQ: REQ-UTLA-0073)
+    - Site: `bin/cut/cut.c:~305-310`
+    - Fix: Reject the invalid combinations (POSIX: `-d` and `-s` only with `-f`).
+    - Verify: `cut -b1 -d:` fails.
+- [ ] **UTL-CMP-01** (low) A failed skip (count beyond end of file) is ignored (REQ: REQ-UTLA-0074)
+    - Site: `bin/cmp/cmp.c:~215`
+    - Fix: Treat the file as at EOF and report accordingly (POSIX "EOF on" message).
+    - Verify: `cmp f g 99999` reports EOF on the shorter file.
+- [ ] **UTL-FMT-01** (low) Widths use `atoi`; `-s` ignores `-n`/`-m`; paragraphs merge across files (REQ: REQ-UTLA-0075)
+    - Site: `bin/fmt/fmt.c:~340-342`
+    - Fix: Validate numeric options; honour `-n`/`-m` in `format_split`; end a paragraph at each file boundary.
+    - Verify: Two files each with one paragraph produce two paragraphs.
+- [ ] **UTL-FOLD-01** (low) The width uses `atoi` (garbage ignored, overflow) (REQ: REQ-UTLA-0076)
+    - Site: `bin/fold/fold.c:132`, `:153`
+    - Fix: Parse with `strtol`, reject trailing garbage and non-positive values.
+    - Verify: `fold -w 10x` is rejected.
+- [ ] **UTL-HEAD-01** (low) With an over-long file name the header can appear out of order, with a spurious leading newline (REQ: REQ-UTLA-0077)
+    - Site: `bin/head/head.c:754`
+    - Fix: Use one output path for headers and data.
+    - Verify: Headers for a 300-byte file name appear in order.
+- [ ] **UTL-NPROC-01** (low) An empty `--ignore` argument is accepted as 0 (REQ: REQ-UTLA-0078)
+    - Site: `bin/nproc/nproc.c:54`
+    - Fix: Check `end == argv[i]`.
+    - Verify: `nproc --ignore ""` fails.
+- [ ] **UTL-AUDIOCTL-01** (low) Operands without `=` still issue an empty `AUDIO_SETINFO` (REQ: REQ-UTLA-0079)
+    - Site: `bin/audioctl/audioctl.c:336-385`
+    - Fix: Only call `AUDIO_SETINFO` when something was set; print just the named fields.
+    - Verify: `audioctl play.rate` prints that field and changes nothing.
+
+## F. Terminal, session and process utilities
+
+- [ ] **UTL-MKNOD-01** (high) `mknod` crashes when the minor number is omitted, and a minor over 255 spills into the major (REQ: REQ-UTLA-0080)
+    - Site: `bin/mknod/mknod.c:8`, `:19`, `:22`
+    - Fix: Require 5 arguments for `b`/`c`; validate major and minor ranges; use the system's `makedev()`.
+    - Verify: `mknod x c 1` prints usage; `mknod x c 1 256` is rejected.
+- [ ] **UTL-MORE-01** (medium) `more` reads an uninitialised key on EOF, and with no file operand reads its answers from the text stream (REQ: REQ-UTLA-0081)
+    - Site: `bin/more/more.c:27-29`
+    - Fix: Check `read()`; read keys from `/dev/tty`, not stdin.
+    - Verify: `cat longfile | more` pages instead of consuming text as keypresses.
+- [ ] **UTL-WALL-01** (low) Reports "no logged-in users" whenever nothing was delivered, and exits 0 (REQ: REQ-UTLA-0082)
+    - Site: `bin/wall/wall.c:152-153`
+    - Fix: Distinguish "no users" from "could not write"; exit non-zero in the latter case.
+    - Verify: With a user logged in on an unwritable tty, the message says so and the status is 1.
+- [ ] **UTL-WALL-02** (low) Messages over 8191 bytes are cut off silently (REQ: REQ-UTLA-0083)
+    - Site: `bin/wall/wall.c:40`
+    - Fix: Warn on truncation (or send in pieces).
+    - Verify: A 10 KiB message reports truncation.
+- [ ] **UTL-TABS-01** (low) Tab-list entries of 0 or over 1024 are dropped silently (REQ: REQ-UTLA-0084)
+    - Site: `bin/tabs/tabs.c:72`
+    - Fix: Reject them with a message.
+    - Verify: `tabs 0,8` fails.
+- [ ] **UTL-TABS-02** (low) Arguments after `--` are ignored (REQ: REQ-UTLA-0085)
+    - Site: `bin/tabs/tabs.c:55-57`
+    - Fix: Treat them as operands.
+    - Verify: `tabs -- 4` sets stops every 4 columns.
+- [ ] **UTL-UPTIME-01** (info) The header comment says a missing utmp gives "1 user"; the code shows 0 (REQ: REQ-UTLA-0086)
+    - Site: `bin/uptime/uptime.c:15`
+    - Fix: Correct the comment.
+    - Verify: Code review.
+- [ ] **UTL-UPTIME-02** (low) `uptime` and `w` count users differently (REQ: REQ-UTLA-0087)
+    - Site: `bin/uptime/uptime.c:61` vs `bin/w/w.c:179`
+    - Fix: Share one rule (USER_PROCESS with a non-empty `ut_user`).
+    - Verify: Both report the same count for the same utmp.
+- [ ] **UTL-WRITE-01** (low) Write errors after the terminal is opened are ignored and the exit status is always 0 (REQ: REQ-UTLA-0088)
+    - Site: `bin/write/write.c:163-167`
+    - Fix: Check each write and exit 1 on failure.
+    - Verify: Writing to a terminal that goes away mid-message exits 1.
+
+## G. bas and ed
+
+- [ ] **UTL-BAS-01** (high) A `PRINT` token `parse_factor` does not consume loops the compiler forever, overrunning `space[]` (REQ: REQ-UTLA-0089)
+    - Site: `bin/bas/compile.c:147-172`
+    - Fix: Stop the PRINT loop (syntax error) when no progress is made.
+    - Verify: `10 PRINT )` reports a syntax error.
+- [ ] **UTL-BAS-02** (high) String literals are copied into `char buf[256]` without a length check (REQ: REQ-UTLA-0090)
+    - Site: `bin/bas/compile.c:152-155`
+    - Fix: Bound the copy and reject longer literals.
+    - Verify: A 400-character string literal is rejected, not a stack overflow.
+- [ ] **UTL-BAS-03** (medium) `space[]` has no bounds checks; comparison opcodes are never emitted; `:` silently discards the rest of the line (REQ: REQ-UTLA-0091)
+    - Site: `bin/bas/compile.c`, `bin/bas/bas.h` (`OP_EQ`/`OP_LT`/`OP_GT`)
+    - Fix: Check every emit against the 8192-entry limit; implement comparisons or reject them; implement or reject `:`.
+    - Verify: A program exceeding the code space is rejected; `IF A<B` works or errors.
+- [ ] **UTL-BAS-04** (medium) `add_line` has no bound against `SZ_LINTAB` (600) (REQ: REQ-UTLA-0092)
+    - Site: `bin/bas/bas.c:52-62`
+    - Fix: Refuse lines beyond the table size.
+    - Verify: Entering 601 lines reports an error.
+- [ ] **UTL-BAS-05** (low) A bare line number does nothing, so lines cannot be deleted (REQ: REQ-UTLA-0093)
+    - Site: `bin/bas/bas.c:106-108`
+    - Fix: Delete the line (traditional BASIC behaviour).
+    - Verify: `10 PRINT 1` then `10` leaves no line 10.
+- [ ] **UTL-ED-01** (info) `ed` is a mock: it cannot read or write files, drops lines past 1024, and `w` prints "written (mock)" (REQ: REQ-UTLA-0094)
+    - Site: `bin/ed/ed.c:14-16`, `:34`
+    - Fix: Decision item: implement `ed` (POSIX) or remove it from the image (ex/vi already provides `ex`).  Its page says it is a stub.
+    - Verify: Per the decision.
+
+## H. Toolchain
+
+- [ ] **UTL-LDD-01** (medium) Missing libraries do not change `ldd`'s exit status (REQ: REQ-UTLA-0095)
+    - Site: `usr.bin/ldd/ldd.c:430` (`do_ldd()` returns 1, `main` counts only negatives)
+    - Fix: Count positive returns as failures.
+    - Verify: `ldd` on a binary with a missing DT_NEEDED exits 1.
+- [ ] **UTL-LDD-02** (low) Brand 64 (Substrate) is reported as "unknown" (REQ: REQ-UTLA-0096)
+    - Site: `usr.bin/ldd/ldd.c:91-101`
+    - Fix: Add `ELFOSABI_SUBSTRATE` (64) to the table.
+    - Verify: `ldd` on a branded shared object names Substrate.
+- [ ] **UTL-LDD-03** (low) Per-file headers can be printed out of order (REQ: REQ-UTLA-0097)
+    - Site: `usr.bin/ldd/ldd.c:193` (no `fflush` before `fork()`)
+    - Fix: Flush stdout before forking.
+    - Verify: `ldd a b > out` shows each header before its libraries.
+- [ ] **UTL-LDD-04** (medium) The fallback path re-reads the file without the first pass's bounds checks (REQ: REQ-UTLA-0098)
+    - Site: `usr.bin/ldd/ldd.c:344-369`
+    - Fix: Apply the same checks (or share the parser).
+    - Verify: A truncated ELF fed to the fallback is rejected cleanly (fuzz case).
+- [ ] **UTL-LDSO-01** (low) The `LD_TRACE_LOADED_OBJECTS` listing goes to stderr (REQ: REQ-UTLA-0099)
+    - Site: `sbin/ld.so/ld_main.c:590-611` with `sbin/ld.so/ld_io.c:129`
+    - Fix: Write the listing to stdout, as other systems' `ldd` do.
+    - Verify: `ldd /bin/ls | grep libc` finds libc.
+- [ ] **UTL-LDSO-03** (low) A relative `LD_PRELOAD` path (e.g. `./libfoo.so`) is searched for in the library directories (REQ: REQ-UTLA-0100)
+    - Site: `sbin/ld.so/ld_main.c:470` vs `sbin/ld.so/ld_load.c:621`
+    - Fix: Treat any entry containing `/` as a path, as the comment says.
+    - Verify: `LD_PRELOAD=./libx.so prog` loads the local file.
+- [ ] **UTL-LEX-01** (medium) Debug and statistics lines always go to stdout, corrupting `lex -t` output (REQ: REQ-UTLA-0101)
+    - Site: `usr.bin/lex/parser.c:388,510,527,535,555-565`, `symtab.c:440-450`, `dfa.c:415,417`, `codegen.c:332`, `main.c:28`
+    - Fix: Remove them or send them to stderr under a verbose flag.
+    - Verify: `lex -t x.l | cc -x c -` compiles.
+- [ ] **UTL-LEX-02** (medium) Trailing context `r/s` is joined onto the pattern, so `yytext` includes `s` (also a trailing `$`'s newline) (REQ: REQ-UTLA-0102)
+    - Site: `usr.bin/lex/regex.c:216-224`
+    - Fix: Record the context boundary and truncate `yytext`/`yyleng` there.
+    - Verify: `a/b` on input `ab` gives `yytext` `a`.
+- [ ] **UTL-LEX-03** (medium) The `|` action emits `break`, so the rule does nothing (REQ: REQ-UTLA-0103)
+    - Site: `usr.bin/lex/codegen.c:203-206`
+    - Fix: Fall through to the next rule's action.
+    - Verify: Two rules sharing one action via `|` both run it.
+- [ ] **UTL-LEX-04** (medium) Input past 65536 bytes is treated as end of file (REQ: REQ-UTLA-0104)
+    - Site: `usr.bin/lex/codegen.c:93`
+    - Fix: Refill and reuse the input buffer.
+    - Verify: A generated scanner counts all lines of a 200 KiB input.
+- [ ] **UTL-LEX-05** (medium) `yywrap()` is always emitted, so a user-supplied one is a duplicate definition (REQ: REQ-UTLA-0105)
+    - Site: `usr.bin/lex/codegen.c:321-323`
+    - Fix: Emit it only with `%option noyywrap` or when the user defines none (or provide it in a library).
+    - Verify: A spec defining `yywrap` compiles.
+- [ ] **UTL-LEX-06** (low) Indented code in the rules section is discarded (REQ: REQ-UTLA-0106)
+    - Site: `usr.bin/lex/parser.c:398-401`
+    - Fix: Copy it into `yylex()` before the first rule.
+    - Verify: An indented declaration in the rules section appears in the output.
+- [ ] **UTL-LEX-07** (medium) DFA minimization merges states that differ in lower-priority rules (REQ: REQ-UTLA-0107)
+    - Site: `usr.bin/lex/dfa.c:216-226`
+    - Fix: Partition on the full accepting-rule set.
+    - Verify: A `REJECT` spec falls back to the correct rule.
+- [ ] **UTL-LEX-08** (low) The start-state worklist is a fixed 1024 entries with no growth check (REQ: REQ-UTLA-0108)
+    - Site: `usr.bin/lex/dfa.c:319`, `:370`
+    - Fix: Grow it, or bound the number of start conditions.
+    - Verify: A spec with 600 start conditions is handled or rejected cleanly.
+- [ ] **UTL-BRANDELF-01** (low) Brand bytes of 128 or more print as huge numbers (REQ: REQ-UTLA-0109)
+    - Site: `usr.bin/brandelf/brandelf.c:170`, `:245` (signed `char` buffer)
+    - Fix: Use `unsigned char`.
+    - Verify: `brandelf` on an OSABI 200 file prints 200.
+- [ ] **UTL-COMPRESS-01** (low) "File would grow" exits 1 rather than the traditional 2 (REQ: REQ-UTLA-0110)
+    - Site: `usr.bin/compress/compress.c:314`, `:331`
+    - Fix: Exit 2 (or document 1 as a deliberate deviation).
+    - Verify: Compressing random data exits 2.
+
+## I. Library, sysroot and documentation
+
+- [ ] **UTL-LIBC-01** (medium) `<sys/time.h>` declares `settimeofday()`, but libc does not provide it (REQ: REQ-UTLA-0111)
+    - Site: `include/sys/time.h:43`, `lib/c/` (only `clock_settime` and `stime` are exported)
+    - Fix: Implement `settimeofday()` over `clock_settime(CLOCK_REALTIME)` (ignoring a non-null `tz`), with a man page.
+    - Verify: `tests/lib/`: a program calling `settimeofday()` links and steps the clock.
+- [ ] **UTL-SYSROOT-01** (low) Stale narrow-ncurses symlinks remain in the cross sysroot (REQ: REQ-UTLA-0112)
+    - Site: `/opt/substrate/i386-unknown-substrate/lib/libncurses.so -> libncurses.so.6 -> libncurses.so.6.4` (now the `INPUT(-lncursesw)` script)
+    - Fix: Have `contrib/ncurses/build.sh` (or `contrib/gcc/install-specs.sh`) remove the narrow `.so.6` names when staging the wide-only build.
+    - Verify: After a toolchain reinstall, `libncurses.so` is the linker script and no `libncurses.so.6*` exists.
+- [ ] **UTL-MAN-01** (low) `strftime(3)` has no page, though `date(1)` refers to it (REQ: REQ-UTLA-0113)
+    - Site: `usr.man/man3/`
+    - Fix: Add `strftime.3` (and audit libc for other exported functions without pages, as CLAUDE.md requires).
+    - Verify: `man 3 strftime` resolves.
+- [ ] **UTL-TEST-03** (info) No `/bin/[` link is installed (REQ: REQ-UTLA-0114)
+    - Site: `Makefile.bin.inc`, `bin/test/Makefile`
+    - Fix: Decision item: install `[` as a link to `test` (the code supports it; POSIX shells have it built in).
+    - Verify: `/bin/[ 1 = 1 ]` exits 0.
+- [ ] **UTL-GETTY-01** (info) `/bin/getty` is an empty placeholder distinct from `/sbin/getty` (REQ: REQ-UTLA-0115)
+    - Site: `bin/getty/getty.c` (`int main() { return 0; }`)
+    - Fix: Decision item: remove it or make it a link to `/sbin/getty`.
+    - Verify: `/bin/getty` is absent or is the real getty.
+- [ ] **UTL-PKILL-01** (info) There is no `pkill` (REQ: REQ-UTLA-0116)
+    - Site: `bin/pgrep/`
+    - Fix: Decision item: add `pkill` as a mode of `pgrep` (same matching, send a signal).
+    - Verify: `pkill -x sleep` terminates a running `sleep`.
+- [ ] **UTL-STUB-01** (info) `fsck`, `mkfs`, `prof` and `tc` are stubs (REQ: REQ-UTLA-0117)
+    - Site: `sbin/fsck/`, `sbin/mkfs/`, `bin/prof/`, `bin/tc/`
+    - Fix: Decision item: make `fsck`/`mkfs` front ends that exec `e2fsck`/`mke2fs` (or other checkers) by filesystem type, and `fsck` exit non-zero rather than claim success; leave `prof`/`tc` as honest stubs.
+    - Verify: `fsck /dev/storage/virtio0` runs a real check.
+- [ ] **UTL-MOUNT-02** (low) `mount` cannot mount from `/etc/fstab` (REQ: REQ-UTLA-0118)
+    - Site: `bin/mount/mount.c`
+    - Fix: Add `mount -a` and single-operand lookup in `/etc/fstab` (same field syntax as the command line, per CLAUDE.md).
+    - Verify: `mount /mnt` mounts the fstab entry for `/mnt`.
+- [ ] **UTL-MKNOD-02** (low) `mknod` cannot create FIFOs (REQ: REQ-UTLA-0119)
+    - Site: `bin/mknod/mknod.c`
+    - Fix: Support type `p` (POSIX `mknod name p`).
+    - Verify: `mknod f p` creates a FIFO.
+
+## User Stories
+
+- **US-UTLA-01** (A, Privilege, identity and security): As a system administrator, I want login, su, at, the greeter and the host name to enforce identity and privilege exactly, so that no ordinary user or failure path gains another user's rights.  Covers REQ-UTLA-0001..REQ-UTLA-0016.
+- **US-UTLA-02** (B, System services): As a system administrator, I want init, syslogd and the daemons to behave as configured and survive their clients, so that logs, sessions and shutdown work without surprises.  Covers REQ-UTLA-0017..REQ-UTLA-0032.
+- **US-UTLA-03** (C, Network tools): As a network user, I want ping and ifconfig to apply their options and report failures, so that what they show matches what happened on the wire.  Covers REQ-UTLA-0033..REQ-UTLA-0038.
+- **US-UTLA-04** (D, sed): As a shell script author, I want sed to follow POSIX, so that portable scripts produce the same output here as elsewhere.  Covers REQ-UTLA-0039..REQ-UTLA-0051.
+- **US-UTLA-05** (E, Text and file utilities): As a shell script author, I want the text utilities to validate their input, report errors in their exit status and follow POSIX, so that pipelines fail loudly instead of producing wrong output.  Covers REQ-UTLA-0052..REQ-UTLA-0079.
+- **US-UTLA-06** (F, Terminal, session and process utilities): As an interactive user, I want mknod, more, wall, tabs, write and the user-count tools to handle bad input and failures cleanly, so that they neither crash nor mislead.  Covers REQ-UTLA-0080..REQ-UTLA-0088.
+- **US-UTLA-07** (G, bas and ed): As a user of the bundled interpreters, I want them to reject what they cannot handle instead of overflowing, so that a typo cannot corrupt memory.  Covers REQ-UTLA-0089..REQ-UTLA-0094.
+- **US-UTLA-08** (H, Toolchain): As a developer, I want ldd, ld.so and lex to produce correct, pipeable output and exit status, so that builds and diagnostics can rely on them.  Covers REQ-UTLA-0095..REQ-UTLA-0110.
+- **US-UTLA-09** (I, Library, sysroot and documentation): As a developer, I want every declared libc function implemented and documented, and the toolchain and tool set free of stale or placeholder pieces, so that what the headers and image promise exists.  Covers REQ-UTLA-0111..REQ-UTLA-0119.
+
+## INCOSE/EARS Requirements
+
+- **REQ-UTLA-0001** (EARS/Unwanted behaviour): If a process without effective uid 0 calls sethostname(), then the kernel shall fail the call with EPERM and leave the host name unchanged.
+  - Context: UTL-KERN-01, A Privilege, identity and security
+  - Verification: regression test in `tests/sys/` + code review.
+- **REQ-UTLA-0002** (EARS/Unwanted behaviour): If atd cannot set a job's group, supplementary groups or user, then atd shall not run the job.
+  - Context: UTL-AT-01, A Privilege, identity and security
+  - Verification: regression test + code review.
+- **REQ-UTLA-0003** (EARS/Event-driven): When atd runs a job queued by a non-root user, atd shall capture the job's output.
+  - Context: UTL-AT-02, A Privilege, identity and security
+  - Verification: regression test.
+- **REQ-UTLA-0004** (EARS/Event-driven): When atd runs a job, atd shall apply the umask recorded when the job was submitted.
+  - Context: UTL-AT-03, A Privilege, identity and security
+  - Verification: regression test.
+- **REQ-UTLA-0005** (EARS/Unwanted behaviour): If sgreet cannot initialize the user's supplementary groups, then sgreet shall not start the session.
+  - Context: UTL-SGREET-01, A Privilege, identity and security
+  - Verification: code review + forced-failure test.
+- **REQ-UTLA-0006** (EARS/Event-driven): When waitpid() fails with ECHILD, sgreet shall treat the session as ended.
+  - Context: UTL-SGREET-02, A Privilege, identity and security
+  - Verification: regression test.
+- **REQ-UTLA-0007** (EARS/Unwanted behaviour): If login cannot execute the user's shell after changing identity, then login shall exit without prompting again.
+  - Context: UTL-LOGIN-01, A Privilege, identity and security
+  - Verification: regression test.
+- **REQ-UTLA-0008** (EARS/Ubiquitous): login shall write a USER_PROCESS utmp/wtmp record only after the identity switch has succeeded.
+  - Context: UTL-LOGIN-02, A Privilege, identity and security
+  - Verification: regression test + code review.
+- **REQ-UTLA-0009** (EARS/Unwanted behaviour): If a login name exceeds the name buffer, then login shall reject it and discard the rest of the input line.
+  - Context: UTL-LOGIN-03, A Privilege, identity and security
+  - Verification: regression test.
+- **REQ-UTLA-0010** (EARS/Ubiquitous): sed -i shall create its temporary file with mkstemp() in the directory of the file being edited.
+  - Context: UTL-SED-12, A Privilege, identity and security
+  - Verification: regression test (planted symlink not followed).
+- **REQ-UTLA-0011** (EARS/Event-driven): When ldd is given a set-user-ID or set-group-ID program, ldd shall list its dependencies without executing it.
+  - Context: UTL-LDSO-02, A Privilege, identity and security
+  - Verification: regression test.
+- **REQ-UTLA-0012** (EARS/Event-driven): When hostname is run with no arguments, hostname shall print the host name and shall not change it.
+  - Context: UTL-HOSTNAME-01, A Privilege, identity and security
+  - Verification: regression test + code review.
+- **REQ-UTLA-0013** (EARS/Unwanted behaviour): If newgrp is given a numeric gid that names no group, then newgrp shall fail.
+  - Context: UTL-NEWGRP-01, A Privilege, identity and security
+  - Verification: regression test.
+- **REQ-UTLA-0014** (EARS/Ubiquitous): passwd shall allow a non-root user to change that user's own password and no other.
+  - Context: UTL-PASSWD-01, A Privilege, identity and security
+  - Verification: regression test on target.
+- **REQ-UTLA-0015** (EARS/Unwanted behaviour): If a password entry exceeds the input buffer, then passwd shall reject it and discard the rest of the line.
+  - Context: UTL-PASSWD-02, A Privilege, identity and security
+  - Verification: regression test.
+- **REQ-UTLA-0016** (EARS/Unwanted behaviour): If su cannot read a password, then su shall fail authentication.
+  - Context: UTL-SU-01, A Privilege, identity and security
+  - Verification: regression test.
+- **REQ-UTLA-0017** (EARS/Ubiquitous): init shall restore every signal it ignores to its default disposition in each child before executing it.
+  - Context: UTL-INIT-01, B System services
+  - Verification: boot test (SigIgn of rc.d and getty children) + code review.
+- **REQ-UTLA-0018** (EARS/Optional feature): Where a terminal line is disabled in init's configuration, init shall not start a getty on it.
+  - Context: UTL-INIT-02, B System services
+  - Verification: boot test.
+- **REQ-UTLA-0019** (EARS/Event-driven): When a syslog.conf selector names a facility with level none, syslogd shall exclude only that facility from the rule.
+  - Context: UTL-SYSLOG-01, B System services
+  - Verification: regression test with the shipped syslog.conf.
+- **REQ-UTLA-0020** (EARS/Event-driven): When a syslog.conf selector lists several comma-separated facilities, syslogd shall apply the level to each of them.
+  - Context: UTL-SYSLOG-02, B System services
+  - Verification: regression test with the shipped syslog.conf.
+- **REQ-UTLA-0021** (EARS/Ubiquitous): syslogd shall log each message with exactly one timestamp.
+  - Context: UTL-SYSLOG-03, B System services
+  - Verification: regression test.
+- **REQ-UTLA-0022** (EARS/Ubiquitous): telnetd shall deliver every pty byte to the client, doubling each 0xff, without truncation.
+  - Context: UTL-TELNETD-01, B System services
+  - Verification: regression test (1024 bytes of 0xff).
+- **REQ-UTLA-0023** (EARS/Event-driven): When a TELNET command spans two reads, telnetd shall interpret it as a command.
+  - Context: UTL-TELNETD-02, B System services
+  - Verification: regression test.
+- **REQ-UTLA-0024** (EARS/Unwanted behaviour): If an echod client closes its connection during a write, then echod shall continue serving.
+  - Context: UTL-ECHOD-01, B System services
+  - Verification: regression test.
+- **REQ-UTLA-0025** (EARS/Unwanted behaviour): If the prefix length given to radvd is outside 0..128, then radvd shall refuse to start.
+  - Context: UTL-RADVD-01, B System services
+  - Verification: regression test.
+- **REQ-UTLA-0026** (EARS/Unwanted behaviour): If radvd fails to send an advertisement, then radvd shall report the failure and shall not exit with status 0.
+  - Context: UTL-RADVD-02, B System services
+  - Verification: code review.
+- **REQ-UTLA-0027** (EARS/Unwanted behaviour): If radvd cannot create or bind its socket, then radvd shall exit with an error.
+  - Context: UTL-RADVD-03, B System services
+  - Verification: code review.
+- **REQ-UTLA-0028** (EARS/Ubiquitous): Source comments stating a numeric value shall match the value used.
+  - Context: UTL-RADVD-04, B System services
+  - Verification: code review.
+- **REQ-UTLA-0029** (EARS/Event-driven): When sdm receives SIGTERM, sdm shall stop its greeter or session and X server without waiting for them to exit first.
+  - Context: UTL-SDM-01, B System services
+  - Verification: boot test.
+- **REQ-UTLA-0030** (EARS/Unwanted behaviour): If dhclient cannot reinstall a renewed or rebound lease, then dhclient shall drop the address and reacquire a lease.
+  - Context: UTL-DHC-15, B System services
+  - Verification: code review.
+- **REQ-UTLA-0031** (EARS/Event-driven): When reboot() is called with RB_HALT_SYSTEM, the kernel shall halt the machine and shall not reset it.
+  - Context: UTL-HALT-01, B System services
+  - Verification: boot test under QEMU.
+- **REQ-UTLA-0032** (EARS/Event-driven): When mount is given -o options for a device-backed filesystem, the kernel shall pass those options to the filesystem.
+  - Context: UTL-MOUNT-01, B System services
+  - Verification: boot test (mount -o ro).
+- **REQ-UTLA-0033** (EARS/Event-driven): When ping is given -t ttl, ping shall send its requests with that TTL or hop limit.
+  - Context: UTL-PING-01, C Network tools
+  - Verification: wire test.
+- **REQ-UTLA-0034** (EARS/Ubiquitous): ping shall send ICMPv6 echo requests with a valid checksum.
+  - Context: UTL-PING-02, C Network tools
+  - Verification: wire test.
+- **REQ-UTLA-0035** (EARS/Event-driven): When ping reports an ICMPv6 reply, ping shall print the reply's source address.
+  - Context: UTL-PING-03, C Network tools
+  - Verification: wire test.
+- **REQ-UTLA-0036** (EARS/Unwanted behaviour): If a numeric ping option is malformed or out of range, then ping shall refuse it.
+  - Context: UTL-PING-04, C Network tools
+  - Verification: regression test.
+- **REQ-UTLA-0037** (EARS/Unwanted behaviour): If ifconfig is asked to show an interface that does not exist, then ifconfig shall exit with a non-zero status.
+  - Context: UTL-IFCONFIG-01, C Network tools
+  - Verification: regression test.
+- **REQ-UTLA-0038** (EARS/Unwanted behaviour): If an ifconfig keyword lacks its argument, then ifconfig shall report the missing argument and change nothing.
+  - Context: UTL-IFCONFIG-02, C Network tools
+  - Verification: regression test.
+- **REQ-UTLA-0039** (EARS/Event-driven): When sed executes D on a pattern space without a newline, sed shall start the next cycle with new input.
+  - Context: UTL-SED-01, D sed
+  - Verification: regression test.
+- **REQ-UTLA-0040** (EARS/Event-driven): When sed evaluates a 0,/re/ range, sed shall end the range at the first line matching re, including line 1.
+  - Context: UTL-SED-02, D sed
+  - Verification: regression test.
+- **REQ-UTLA-0041** (EARS/Ubiquitous): sed shall match the $ address only on the last line of the last input file, unless files are processed separately.
+  - Context: UTL-SED-03, D sed
+  - Verification: regression test.
+- **REQ-UTLA-0042** (EARS/Event-driven): When sed executes q or Q, sed shall stop processing all remaining input.
+  - Context: UTL-SED-04, D sed
+  - Verification: regression test.
+- **REQ-UTLA-0043** (EARS/Event-driven): When an s command carries both a number N and g, sed shall replace the Nth and every later match.
+  - Context: UTL-SED-05, D sed
+  - Verification: regression test.
+- **REQ-UTLA-0044** (EARS/Unwanted behaviour): If sed cannot honour an s command flag, then sed shall reject the script.
+  - Context: UTL-SED-06, D sed
+  - Verification: regression test.
+- **REQ-UTLA-0045** (EARS/Ubiquitous): sed shall treat a backslash-newline in a replacement as a newline.
+  - Context: UTL-SED-07, D sed
+  - Verification: regression test.
+- **REQ-UTLA-0046** (EARS/Event-driven): When sed executes R repeatedly, sed shall append successive lines of the file.
+  - Context: UTL-SED-08, D sed
+  - Verification: regression test.
+- **REQ-UTLA-0047** (EARS/Optional feature): Where -z is given, sed shall use NUL as the line delimiter on both input and output.
+  - Context: UTL-SED-09, D sed
+  - Verification: regression test.
+- **REQ-UTLA-0048** (EARS/Event-driven): When sed runs a command with e, sed shall flush its pending output first.
+  - Context: UTL-SED-10, D sed
+  - Verification: regression test.
+- **REQ-UTLA-0049** (EARS/Ubiquitous): sed shall enable -n from a script only when the script's first line is exactly #n.
+  - Context: UTL-SED-11, D sed
+  - Verification: regression test.
+- **REQ-UTLA-0050** (EARS/Optional feature): Where -l 0 is given, sed shall not wrap l output.
+  - Context: UTL-SED-13, D sed
+  - Verification: regression test.
+- **REQ-UTLA-0051** (EARS/Ubiquitous): sed shall resolve an empty regex to the last regex applied at run time.
+  - Context: UTL-SED-14, D sed
+  - Verification: regression test.
+- **REQ-UTLA-0052** (EARS/Unwanted behaviour): If sort -c cannot read an input, then sort shall exit with status 2.
+  - Context: UTL-SORT-01, E Text and file utilities
+  - Verification: regression test.
+- **REQ-UTLA-0053** (EARS/Unwanted behaviour): If sort cannot write or close its output, then sort shall exit with status 2.
+  - Context: UTL-SORT-02, E Text and file utilities
+  - Verification: regression test (/dev/full).
+- **REQ-UTLA-0054** (EARS/Unwanted behaviour): If sort encounters a read error, then sort shall report it and exit with status 2.
+  - Context: UTL-SORT-03, E Text and file utilities
+  - Verification: code review.
+- **REQ-UTLA-0055** (EARS/Ubiquitous): Source comments describing an option shall match its implementation.
+  - Context: UTL-SORT-04, E Text and file utilities
+  - Verification: code review.
+- **REQ-UTLA-0056** (EARS/Optional feature): Where -m is given, sort shall merge its already-sorted inputs.
+  - Context: UTL-SORT-05, E Text and file utilities
+  - Verification: regression test.
+- **REQ-UTLA-0057** (EARS/Ubiquitous): printf shall read no byte beyond the end of a numeric argument.
+  - Context: UTL-PRINTF-01, E Text and file utilities
+  - Verification: regression test (sanitizer build).
+- **REQ-UTLA-0058** (EARS/Ubiquitous): printf shall interpret escape sequences in the format as literal characters, never as conversion introducers.
+  - Context: UTL-PRINTF-02, E Text and file utilities
+  - Verification: regression test.
+- **REQ-UTLA-0059** (EARS/Unwanted behaviour): If a sleep operand is negative or not a number, then sleep shall exit with an error immediately.
+  - Context: UTL-SLEEP-01, E Text and file utilities
+  - Verification: regression test.
+- **REQ-UTLA-0060** (EARS/Ubiquitous): Utilities shall write usage messages to standard error.
+  - Context: UTL-SLEEP-02, E Text and file utilities
+  - Verification: regression test.
+- **REQ-UTLA-0061** (EARS/Unwanted behaviour): If split encounters a read error, then split shall exit with a non-zero status.
+  - Context: UTL-SPLIT-01, E Text and file utilities
+  - Verification: code review.
+- **REQ-UTLA-0062** (EARS/Ubiquitous): od shall treat every argument before the first operand as a potential option.
+  - Context: UTL-OD-01, E Text and file utilities
+  - Verification: regression test.
+- **REQ-UTLA-0063** (EARS/Event-driven): When test evaluates -nt, -ot or -ef, test shall compare the files' modification times or device and inode numbers.
+  - Context: UTL-TEST-01, E Text and file utilities
+  - Verification: regression test.
+- **REQ-UTLA-0064** (EARS/Ubiquitous): test shall apply the POSIX argument-count rules for one to four arguments.
+  - Context: UTL-TEST-02, E Text and file utilities
+  - Verification: regression test.
+- **REQ-UTLA-0065** (EARS/Event-driven): When touch -d is given a date and time of day, touch shall set both.
+  - Context: UTL-TOUCH-01, E Text and file utilities
+  - Verification: regression test.
+- **REQ-UTLA-0066** (EARS/Ubiquitous): A utility's usage message shall list every option it accepts.
+  - Context: UTL-TOUCH-02, E Text and file utilities
+  - Verification: code review.
+- **REQ-UTLA-0067** (EARS/Optional feature): Where diff is given both -B and -I, diff shall apply both filters.
+  - Context: UTL-DIFF-01, E Text and file utilities
+  - Verification: regression test.
+- **REQ-UTLA-0068** (EARS/Event-driven): When diff -rN finds a subdirectory on one side only, diff shall report it and count it in the exit status.
+  - Context: UTL-DIFF-02, E Text and file utilities
+  - Verification: regression test.
+- **REQ-UTLA-0069** (EARS/Ubiquitous): diff shall escape a line consisting of a single period in ed, forward and RCS output.
+  - Context: UTL-DIFF-03, E Text and file utilities
+  - Verification: regression test (apply with ed).
+- **REQ-UTLA-0070** (EARS/Unwanted behaviour): If df cannot resolve a path operand, then df shall report the error and exit with a non-zero status.
+  - Context: UTL-DF-01, E Text and file utilities
+  - Verification: regression test.
+- **REQ-UTLA-0071** (EARS/Unwanted behaviour): If date is given a day that the month does not have, then date shall reject the setting.
+  - Context: UTL-DATE-01, E Text and file utilities
+  - Verification: regression test.
+- **REQ-UTLA-0072** (EARS/Unwanted behaviour): If both comm operands are standard input, then comm shall refuse them.
+  - Context: UTL-COMM-01, E Text and file utilities
+  - Verification: regression test.
+- **REQ-UTLA-0073** (EARS/Unwanted behaviour): If cut is given -d or -s without -f, then cut shall exit with a usage error.
+  - Context: UTL-CUT-01, E Text and file utilities
+  - Verification: regression test.
+- **REQ-UTLA-0074** (EARS/Event-driven): When a cmp skip count exceeds a file's length, cmp shall treat that file as at end of file.
+  - Context: UTL-CMP-01, E Text and file utilities
+  - Verification: regression test.
+- **REQ-UTLA-0075** (EARS/Ubiquitous): fmt shall validate numeric options and end a paragraph at each input file boundary.
+  - Context: UTL-FMT-01, E Text and file utilities
+  - Verification: regression test.
+- **REQ-UTLA-0076** (EARS/Unwanted behaviour): If fold's width is not a positive integer, then fold shall refuse it.
+  - Context: UTL-FOLD-01, E Text and file utilities
+  - Verification: regression test.
+- **REQ-UTLA-0077** (EARS/Ubiquitous): head shall write each file header before that file's data, with no leading blank line before the first.
+  - Context: UTL-HEAD-01, E Text and file utilities
+  - Verification: regression test.
+- **REQ-UTLA-0078** (EARS/Unwanted behaviour): If an nproc --ignore argument is empty or not a number, then nproc shall refuse it.
+  - Context: UTL-NPROC-01, E Text and file utilities
+  - Verification: regression test.
+- **REQ-UTLA-0079** (EARS/Event-driven): When audioctl is given only field names, audioctl shall print those fields and change no setting.
+  - Context: UTL-AUDIOCTL-01, E Text and file utilities
+  - Verification: regression test.
+- **REQ-UTLA-0080** (EARS/Unwanted behaviour): If mknod is given too few operands or an out-of-range device number, then mknod shall print a usage error and create nothing.
+  - Context: UTL-MKNOD-01, F Terminal, session and process utilities
+  - Verification: regression test.
+- **REQ-UTLA-0081** (EARS/Ubiquitous): more shall read paging commands from the terminal, not from the text being paged.
+  - Context: UTL-MORE-01, F Terminal, session and process utilities
+  - Verification: regression test.
+- **REQ-UTLA-0082** (EARS/Unwanted behaviour): If wall cannot deliver to a logged-in user's terminal, then wall shall report it and exit with a non-zero status.
+  - Context: UTL-WALL-01, F Terminal, session and process utilities
+  - Verification: regression test.
+- **REQ-UTLA-0083** (EARS/Unwanted behaviour): If a wall message exceeds its buffer, then wall shall report the truncation.
+  - Context: UTL-WALL-02, F Terminal, session and process utilities
+  - Verification: regression test.
+- **REQ-UTLA-0084** (EARS/Unwanted behaviour): If a tabs list entry is outside the supported range, then tabs shall reject it.
+  - Context: UTL-TABS-01, F Terminal, session and process utilities
+  - Verification: regression test.
+- **REQ-UTLA-0085** (EARS/Ubiquitous): tabs shall treat arguments following -- as operands.
+  - Context: UTL-TABS-02, F Terminal, session and process utilities
+  - Verification: regression test.
+- **REQ-UTLA-0086** (EARS/Ubiquitous): Source comments describing output shall match the code.
+  - Context: UTL-UPTIME-01, F Terminal, session and process utilities
+  - Verification: code review.
+- **REQ-UTLA-0087** (EARS/Ubiquitous): uptime and w shall count logged-in users by the same rule.
+  - Context: UTL-UPTIME-02, F Terminal, session and process utilities
+  - Verification: regression test.
+- **REQ-UTLA-0088** (EARS/Unwanted behaviour): If write fails to write to the target terminal, then write shall exit with a non-zero status.
+  - Context: UTL-WRITE-01, F Terminal, session and process utilities
+  - Verification: regression test.
+- **REQ-UTLA-0089** (EARS/Unwanted behaviour): If the bas compiler makes no progress on a PRINT item, then bas shall report a syntax error.
+  - Context: UTL-BAS-01, G bas and ed
+  - Verification: regression test.
+- **REQ-UTLA-0090** (EARS/Unwanted behaviour): If a bas string literal exceeds its buffer, then bas shall reject it.
+  - Context: UTL-BAS-02, G bas and ed
+  - Verification: regression test.
+- **REQ-UTLA-0091** (EARS/Ubiquitous): bas shall bound every write to its code space, and shall either implement or reject comparisons and the : separator.
+  - Context: UTL-BAS-03, G bas and ed
+  - Verification: regression test.
+- **REQ-UTLA-0092** (EARS/Unwanted behaviour): If a program exceeds the bas line table, then bas shall refuse the line.
+  - Context: UTL-BAS-04, G bas and ed
+  - Verification: regression test.
+- **REQ-UTLA-0093** (EARS/Event-driven): When bas is given a bare line number, bas shall delete that line.
+  - Context: UTL-BAS-05, G bas and ed
+  - Verification: regression test.
+- **REQ-UTLA-0094** (EARS/Ubiquitous): The image shall ship either a working POSIX ed or no ed.
+  - Context: UTL-ED-01, G bas and ed
+  - Verification: per decision.
+- **REQ-UTLA-0095** (EARS/Unwanted behaviour): If a dependency cannot be found, then ldd shall exit with a non-zero status.
+  - Context: UTL-LDD-01, H Toolchain
+  - Verification: regression test.
+- **REQ-UTLA-0096** (EARS/Ubiquitous): ldd shall identify ELFOSABI_SUBSTRATE (64) by name.
+  - Context: UTL-LDD-02, H Toolchain
+  - Verification: regression test.
+- **REQ-UTLA-0097** (EARS/Ubiquitous): ldd shall print each file's header before that file's dependencies.
+  - Context: UTL-LDD-03, H Toolchain
+  - Verification: regression test.
+- **REQ-UTLA-0098** (EARS/Ubiquitous): ldd shall bounds-check every ELF structure it reads, on every path.
+  - Context: UTL-LDD-04, H Toolchain
+  - Verification: fuzz test.
+- **REQ-UTLA-0099** (EARS/Optional feature): Where LD_TRACE_LOADED_OBJECTS is set, ld.so shall write the dependency listing to standard output.
+  - Context: UTL-LDSO-01, H Toolchain
+  - Verification: regression test.
+- **REQ-UTLA-0100** (EARS/Ubiquitous): ld.so shall treat any LD_PRELOAD entry containing a slash as a path.
+  - Context: UTL-LDSO-03, H Toolchain
+  - Verification: regression test.
+- **REQ-UTLA-0101** (EARS/Ubiquitous): lex shall write only the generated scanner to its output.
+  - Context: UTL-LEX-01, H Toolchain
+  - Verification: regression test (lex -t output compiles).
+- **REQ-UTLA-0102** (EARS/Event-driven): When a lex rule has trailing context, the scanner shall exclude the context from yytext and yyleng.
+  - Context: UTL-LEX-02, H Toolchain
+  - Verification: regression test.
+- **REQ-UTLA-0103** (EARS/Event-driven): When a lex rule's action is |, the scanner shall execute the next rule's action.
+  - Context: UTL-LEX-03, H Toolchain
+  - Verification: regression test.
+- **REQ-UTLA-0104** (EARS/Ubiquitous): A lex-generated scanner shall process input of any length.
+  - Context: UTL-LEX-04, H Toolchain
+  - Verification: regression test (200 KiB input).
+- **REQ-UTLA-0105** (EARS/Optional feature): Where the specification defines yywrap, lex shall not emit a second definition.
+  - Context: UTL-LEX-05, H Toolchain
+  - Verification: regression test.
+- **REQ-UTLA-0106** (EARS/Ubiquitous): lex shall copy indented code in the rules section into the scanner.
+  - Context: UTL-LEX-06, H Toolchain
+  - Verification: regression test.
+- **REQ-UTLA-0107** (EARS/Ubiquitous): lex DFA minimization shall merge only states with identical accepting-rule sets.
+  - Context: UTL-LEX-07, H Toolchain
+  - Verification: regression test (REJECT fallback).
+- **REQ-UTLA-0108** (EARS/Unwanted behaviour): If a specification has more start conditions than lex supports, then lex shall reject it.
+  - Context: UTL-LEX-08, H Toolchain
+  - Verification: regression test.
+- **REQ-UTLA-0109** (EARS/Ubiquitous): brandelf shall print OSABI values as unsigned numbers.
+  - Context: UTL-BRANDELF-01, H Toolchain
+  - Verification: regression test.
+- **REQ-UTLA-0110** (EARS/Event-driven): When compression would enlarge a file, compress shall leave it uncompressed and exit with status 2.
+  - Context: UTL-COMPRESS-01, H Toolchain
+  - Verification: regression test.
+- **REQ-UTLA-0111** (EARS/Ubiquitous): Every function declared in a libc header shall be implemented in libc.
+  - Context: UTL-LIBC-01, I Library, sysroot and documentation
+  - Verification: link test for settimeofday(); header/export comparison.
+- **REQ-UTLA-0112** (EARS/Ubiquitous): The cross sysroot shall contain no library names left from a superseded build.
+  - Context: UTL-SYSROOT-01, I Library, sysroot and documentation
+  - Verification: install-specs check.
+- **REQ-UTLA-0113** (EARS/Ubiquitous): Every exported libc function shall have a section 3 manual page.
+  - Context: UTL-MAN-01, I Library, sysroot and documentation
+  - Verification: man -w for each exported symbol.
+- **REQ-UTLA-0114** (EARS/Ubiquitous): The image shall provide [ as an alias for test.
+  - Context: UTL-TEST-03, I Library, sysroot and documentation
+  - Verification: per decision.
+- **REQ-UTLA-0115** (EARS/Ubiquitous): The image shall install no placeholder program under a real command's name.
+  - Context: UTL-GETTY-01, I Library, sysroot and documentation
+  - Verification: per decision.
+- **REQ-UTLA-0116** (EARS/Optional feature): Where pkill is provided, pkill shall select processes by the same rules as pgrep and signal them.
+  - Context: UTL-PKILL-01, I Library, sysroot and documentation
+  - Verification: per decision.
+- **REQ-UTLA-0117** (EARS/Ubiquitous): fsck and mkfs shall either run a real filesystem tool or exit with a non-zero status.
+  - Context: UTL-STUB-01, I Library, sysroot and documentation
+  - Verification: per decision.
+- **REQ-UTLA-0118** (EARS/Event-driven): When mount is given only a mount point or -a, mount shall take the remaining fields from /etc/fstab.
+  - Context: UTL-MOUNT-02, I Library, sysroot and documentation
+  - Verification: boot test.
+- **REQ-UTLA-0119** (EARS/Event-driven): When mknod is given type p, mknod shall create a FIFO.
+  - Context: UTL-MKNOD-02, I Library, sysroot and documentation
+  - Verification: regression test.
