@@ -1,0 +1,194 @@
+.TH TEST 1 2026-09-25 "Substrate" "User Commands"
+.SH NAME
+test, [ \- evaluate a conditional expression
+.SH SYNOPSIS
+.B test
+.RI [ expression ]
+.br
+.B [
+.RI [ expression ]
+.B ]
+.SH DESCRIPTION
+.B test
+evaluates
+.I expression
+and exits with status 0 if it is true and 1 if it is false.
+With no expression the result is false.
+.PP
+When the program is invoked under the name
+.B [
+(the last component of
+.I argv[0]
+is compared), the final argument must be
+.BR ] ,
+which is then discarded.
+The Substrate build installs only
+.IR /bin/test ;
+no
+.B [
+link is created, so the
+.B [
+form requires a link made by other means or a shell builtin.
+.PP
+The expression is parsed by recursive descent.
+When the token after the current one is a binary operator, the three
+tokens are taken as a binary expression; otherwise a recognised unary
+operator followed by an argument is a unary expression; otherwise a
+single argument is true if it is a non-empty string.
+.SS File operators
+.TP
+.BI \-e " file"
+.I file
+exists (tested with
+.BR access (2)).
+.TP
+.BI \-r " file"
+.TQ
+.BI \-w " file"
+.TQ
+.BI \-x " file"
+.I file
+is readable, writable, or executable by the real user ID, as reported
+by
+.BR access (2).
+.TP
+.BI \-f " file"
+Regular file.
+.TP
+.BI \-d " file"
+Directory.
+.TP
+.BI \-c " file"
+Character device.
+.TP
+.BI \-b " file"
+Block device.
+.TP
+.BI \-p " file"
+FIFO.
+.TP
+.BI \-S " file"
+Socket.
+.TP
+.BI \-L " file"
+.TQ
+.BI \-h " file"
+Symbolic link (not followed).
+.TP
+.BI \-s " file"
+Size is greater than zero.
+.TP
+.BI \-g " file"
+.TQ
+.BI \-u " file"
+.TQ
+.BI \-k " file"
+Set-group-ID, set-user-ID, or sticky bit is set.
+.TP
+.BI \-t " fd"
+File descriptor
+.I fd
+is a terminal.
+.PP
+All file operators except
+.BR \-L " and " \-h
+follow symbolic links.
+.SS String operators
+.TP
+.BI \-n " string"
+.I string
+is non-empty.
+.TP
+.BI \-z " string"
+.I string
+is empty.
+.TP
+.I string
+.I string
+is non-empty.
+.TP
+.IB s1 " = " s2
+.TQ
+.IB s1 " != " s2
+The strings are identical, or differ.
+.SS Integer operators
+.TP
+.IB n1 " \-eq " n2
+.TQ
+.IB n1 " \-ne " n2
+.TQ
+.IB n1 " \-lt " n2
+.TQ
+.IB n1 " \-le " n2
+.TQ
+.IB n1 " \-gt " n2
+.TQ
+.IB n1 " \-ge " n2
+Signed decimal integer comparison.
+An operand that is not a complete decimal integer in the range of a
+.B long
+is a syntax error.
+.SS Combinators
+In order of increasing precedence:
+.TP
+.IB expr1 " \-o " expr2
+Logical OR.
+.TP
+.IB expr1 " \-a " expr2
+Logical AND.
+.TP
+.BI ! " expr"
+Negation.
+.TP
+.BI ( " expr " )
+Grouping.
+.SH EXIT STATUS
+.TP
+.B 0
+The expression is true.
+.TP
+.B 1
+The expression is false, or no expression was given.
+.TP
+.B 2
+Syntax error, invalid integer, unknown operator, extra argument, or a
+missing
+.B ]
+when invoked as
+.BR [ .
+.SH EXAMPLES
+.EX
+$ test \-d /tmp && echo directory
+$ test "$a" = "$b" \-o \-z "$c"
+$ test 3 \-lt 10; echo $?
+0
+.EE
+.SH SEE ALSO
+.BR sh (1),
+.BR access (2),
+.BR stat (2),
+.BR isatty (3)
+.SH STANDARDS
+Intended to follow POSIX.1-2024
+.BR test ,
+with
+.BR \-a ", " \-o ", " ( ", " ) ", " \-h ", " \-k
+as the common XSI and BSD extensions.
+.SH BUGS
+The file comparison operators
+.BR \-nt ,
+.B \-ot
+and
+.B \-ef
+are recognised as binary operators but not implemented: they are
+evaluated as integer comparisons and fail with a syntax error.
+.PP
+The POSIX rules that select a parse by argument count are not applied,
+so a leading
+.B !
+or
+.B (
+is always taken as an operator.
+For example,
+.B test ! = !
+is reported as a syntax error instead of comparing two strings.
