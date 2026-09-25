@@ -1,0 +1,169 @@
+.TH DF 1 2026-09-25 "Substrate" "User Commands"
+.SH NAME
+df \- report file system disk space usage
+.SH SYNOPSIS
+.B df
+.RB [ \-aHhikmPT ]
+.RB [ \-t
+.IR type ]
+.RI [ file " ...]"
+.SH DESCRIPTION
+.B df
+reports the total, used, and available space of mounted file systems,
+as returned by
+.BR statvfs (2).
+The list of mounts is read from
+.BR /proc/mounts .
+.PP
+With no
+.I file
+operands, every mounted file system is listed, except those that
+report zero total blocks (pseudo file systems) unless
+.B \-a
+is given.
+With operands,
+.B df
+reports, for each
+.IR file ,
+the file system whose mount point is the longest path prefix of the
+file's resolved absolute path.
+.PP
+The output has the columns
+.BR Filesystem ,
+optionally
+.BR Type ,
+the size,
+.BR Used ,
+.BR Available ,
+.BR Use% ,
+and
+.BR "Mounted on" .
+Each column is as wide as its widest entry.
+Sizes are shown in 1024-byte blocks by default.
+.B Use%
+is used space divided by the sum of used and available space, rounded
+up.
+If
+.BR statvfs (2)
+fails for a mount point, its numeric columns show
+.BR \- .
+.SH OPTIONS
+.TP
+.BR \-a ", " \-\-all
+Include file systems that report zero blocks.
+.TP
+.BR \-h ", " \-\-human\-readable
+Print sizes with a unit suffix
+.RB ( K ,
+.BR M ,
+.BR G ,
+.BR T ,
+.BR P ,
+.BR E )
+in powers of 1024.
+Values below 10 are shown with one decimal place.
+.TP
+.BR \-H ", " \-\-si
+Like
+.BR \-h ,
+but in powers of 1000.
+.TP
+.BR \-i ", " \-\-inodes
+Report inode usage
+.RB ( Inodes ,
+.BR IUsed ,
+.BR IFree ,
+.BR IUse% )
+instead of block usage.
+.TP
+.B \-k
+Use 1024-byte blocks (the default).
+.TP
+.B \-m
+Use 1048576-byte blocks.
+.TP
+.BR \-P ", " \-\-portability
+Use 1024-byte blocks and the POSIX column headings
+.B 1024\-blocks
+and
+.B Capacity
+(or
+.B ICapacity
+with
+.BR \-i ).
+.TP
+.BR \-T ", " \-\-print\-type
+Add a column with the file system type.
+.TP
+.BR \-t ", " \-\-type= \fItype\fP
+Only report file systems of type
+.IR type .
+.TP
+.B \-\-help
+Print a usage summary and exit.
+.TP
+.B \-\-version
+Print version information and exit.
+.PP
+Among
+.BR \-h ,
+.BR \-H ,
+.BR \-k ,
+.BR \-m ,
+and
+.BR \-P ,
+the last unit selection given takes effect.
+.SH EXIT STATUS
+.TP
+.B 0
+Success.
+.TP
+.B 1
+The mount table could not be read, an option was invalid, or no
+mount matched a
+.I file
+operand.
+.TP
+.B 2
+Out of memory.
+.SH ENVIRONMENT
+.TP
+.B DF_MOUNTS_FILE
+Read the mount table from this file instead of
+.B /proc/mounts
+(intended for testing).
+.SH FILES
+.TP
+.B /proc/mounts
+Mount table: device, mount point, and type are taken from the first
+three fields of each line.
+.SH EXAMPLES
+Show all file systems with human-readable sizes and types:
+.PP
+.EX
+$ df \-hT
+.EE
+.PP
+Show the file system holding the current directory:
+.PP
+.EX
+$ df .
+.EE
+.SH SEE ALSO
+.BR mount (2),
+.BR statvfs (2),
+.BR proc (5)
+.SH STANDARDS
+.B \-k
+and
+.B \-P
+follow POSIX.1-2024.
+The remaining options follow GNU coreutils and BSD; in particular
+.B \-t
+selects a file system type, not the XSI total-space output.
+.SH BUGS
+If a
+.I file
+operand cannot be resolved (for example, it does not exist), its name
+is matched literally, so a nonexistent absolute path is reported as
+belonging to the root file system rather than being diagnosed.
