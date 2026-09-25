@@ -1,0 +1,60 @@
+.TH REBOOT 8 2026-09-25 "Substrate" "System Administration"
+.SH NAME
+reboot \- restart the system
+.SH SYNOPSIS
+.B reboot
+.RB [ \-f ]
+.SH DESCRIPTION
+By default
+.B reboot
+sends
+.B SIGUSR2
+to
+.BR init
+(process 1), which performs an orderly shutdown (see
+.BR halt (8))
+and ends by calling
+.BR reboot (2)
+with
+.BR RB_AUTOBOOT .
+.B reboot
+returns as soon as the signal has been delivered.
+If signalling init fails,
+.B reboot
+prints a warning and calls
+.BR reboot (2)
+itself.
+.PP
+The kernel resets the machine through the keyboard controller and, if
+that does not work, by forcing a triple fault.
+.PP
+An effective user ID of 0 is required.
+.SH OPTIONS
+.TP
+.B \-f
+Do not signal init; call
+.BR reboot (2)
+with
+.B RB_AUTOBOOT
+directly.
+Processes are not terminated and
+.B /etc/rc stop
+is not run, although the kernel still unmounts all file systems.
+.SH EXIT STATUS
+.TP
+.B 0
+Init was signalled.
+.TP
+.B 1
+.BR reboot (2)
+failed (for example with
+.B EPERM
+when not run as root).
+.TP
+.B 2
+An unrecognized argument was given; a usage message is printed.
+.SH SEE ALSO
+.BR kill (2),
+.BR reboot (2),
+.BR halt (8),
+.BR poweroff (8)
