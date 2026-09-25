@@ -90,6 +90,8 @@ struct sockaddr_ll {
 #define DHCP_OPT_MSGTYPE  53
 #define DHCP_OPT_SRV_ID   54
 #define DHCP_OPT_PARAMLST 55
+#define DHCP_OPT_OVERLOAD 52   /* Option Overload: 1 file, 2 sname, 3 both */
+#define DHCP_OPT_MAXSIZE  57   /* Maximum DHCP Message Size */
 #define DHCP_OPT_T1       58   /* Renewal (T1) Time Value */
 #define DHCP_OPT_T2       59   /* Rebinding (T2) Time Value */
 #define DHCP_OPT_CLIENT_ID 61  /* RFC 2132 §9.14 — Client Identifier */
@@ -97,6 +99,9 @@ struct sockaddr_ll {
 #define DHCP_OPT_END      255
 
 #define DHCP_MAGIC 0x63825363u
+
+/* DHC-09: the Maximum DHCP Message Size we advertise (option 57). */
+#define DHCP_MAX_MSG 1500
 
 struct bootp {
     uint8_t  op;
@@ -325,6 +330,13 @@ static size_t build_dhcp_packet(uint8_t *out,
         *op++ = DHCP_OPT_DOMAIN;       /* RFC 2132 — domain name */
         *op++ = DHCP_OPT_SEARCH;       /* RFC 3397 — search list */
         *op++ = DHCP_OPT_LEASE;
+        /* DHC-09: RFC 2131 3.5 SHOULD -- the largest message we accept:
+         * a full-MTU IP datagram (rxbuf holds a 1500-octet one plus its
+         * Ethernet header).  Without it the server must assume 576 and
+         * overloads 'file'/'sname' that much sooner. */
+        *op++ = DHCP_OPT_MAXSIZE; *op++ = 2;
+        *op++ = (uint8_t)(DHCP_MAX_MSG >> 8);
+        *op++ = (uint8_t)(DHCP_MAX_MSG & 0xFF);
     }
 
     /*
@@ -388,26 +400,59 @@ static size_t build_dhcp_packet(uint8_t *out,
 
 /* ---- option parsing ---- */
 
-static const uint8_t *find_opt(const struct bootp *bp, size_t len, uint8_t code, uint8_t *out_len) {
-    size_t body_off = (size_t)((const uint8_t *)bp->options - (const uint8_t *)bp);
-    if (len <= body_off) return NULL;
-    const uint8_t *opts = bp->options;
+/* Append every instance of `code` in one option field of `max` octets to
+ * val[*n]; note an 'option overload' (52) value on the way. */
+static void scan_opts(const uint8_t *opts, size_t max, uint8_t code,
+                      uint8_t *val, size_t cap, size_t *n, int *found,
+                      int *overload) {
     size_t i = 0;
-    size_t max = len - body_off;
     while (i < max) {
         uint8_t c = opts[i++];
-        if (c == 0) continue;
+        if (c == 0) continue;                       /* pad */
         if (c == DHCP_OPT_END) break;
         if (i >= max) break;
         uint8_t l = opts[i++];
-        if (i + l > max) break;
+        if (i + l > max) break;     /* must lie wholly inside its field */
+        if (c == DHCP_OPT_OVERLOAD && l == 1 && overload)
+            *overload = opts[i];
         if (c == code) {
-            if (out_len) *out_len = l;
-            return &opts[i];
+            size_t k = l;
+            if (k > cap - *n) k = cap - *n;
+            memcpy(val + *n, opts + i, k);
+            *n += k;
+            *found = 1;
         }
         i += l;
     }
-    return NULL;
+}
+
+/*
+ * DHC-09: RFC 2131 4.1 -- options are read from the 'options' field and
+ * then, as an 'option overload' option there directs, from 'file' and
+ * then 'sname'.  The client "concatenates the values of multiple instances
+ * of the same option".  Only the first instance in 'options' used to be
+ * seen, so options a server overloaded into 'file'/'sname', or split
+ * across instances, were lost.  The value is assembled in a static buffer:
+ * the pointer is valid until the next call.
+ */
+static const uint8_t *find_opt(const struct bootp *bp, size_t len,
+                               uint8_t code, size_t *out_len) {
+    static uint8_t val[1024];
+    size_t body_off = (size_t)((const uint8_t *)bp->options - (const uint8_t *)bp);
+    if (len <= body_off) return NULL;
+    size_t n = 0;
+    int found = 0, overload = 0;
+    scan_opts(bp->options, len - body_off, code, val, sizeof(val), &n,
+              &found, &overload);
+    if (overload & 1)
+        scan_opts(bp->file, sizeof(bp->file), code, val, sizeof(val), &n,
+                  &found, NULL);
+    if (overload & 2)
+        scan_opts(bp->sname, sizeof(bp->sname), code, val, sizeof(val), &n,
+                  &found, NULL);
+    if (!found) return NULL;
+    if (out_len) *out_len = n;
+    return val;
 }
 
 /* Wait until `deadline` for a BOOTREPLY carrying `xid`.  Returns its DHCP
@@ -433,7 +478,7 @@ static int recv_dhcp(int pkts, uint8_t *rxbuf, size_t cap, uint32_t xid,
             (const struct bootp *)(rxbuf + sizeof(*eh) + hlen + sizeof(*uh));
         size_t bootp_len = (size_t)r - sizeof(*eh) - hlen - sizeof(*uh);
         if (bp->op != 2 || bp->xid != xid) continue;
-        uint8_t mlen;
+        size_t mlen;
         const uint8_t *mt = find_opt(bp, bootp_len, DHCP_OPT_MSGTYPE, &mlen);
         if (!mt || mlen < 1 || *mt == 0) continue;
         *bpp = bp;
@@ -454,7 +499,7 @@ static int recv_dhcp(int pkts, uint8_t *rxbuf, size_t cap, uint32_t xid,
  * route or with the wrong mask. */
 static int install_lease(const char *iface, const struct bootp *bp,
                          size_t bootp_len, const char *what) {
-    uint8_t mlen;
+    size_t mlen;
     uint32_t offered_ip = bp->yiaddr ? bp->yiaddr : bp->ciaddr;
     uint32_t subnet = 0, router = 0;
     const uint8_t *p = find_opt(bp, bootp_len, DHCP_OPT_SUBNET, &mlen);
@@ -473,9 +518,10 @@ static int install_lease(const char *iface, const struct bootp *bp,
 
     const uint8_t *op_p;
     op_p = find_opt(bp, bootp_len, DHCP_OPT_DNS, &mlen);
-    if (op_p && mlen >= 4 && mlen <= (uint8_t)sizeof(dns_buf)) {
+    if (op_p && mlen >= 4) {
+        if (mlen > sizeof(dns_buf)) mlen = sizeof(dns_buf);
         memcpy(dns_buf, op_p, mlen);
-        dns_len = mlen;
+        dns_len = (unsigned)mlen;
     }
     op_p = find_opt(bp, bootp_len, DHCP_OPT_DOMAIN, &mlen);
     if (op_p && mlen > 0) {
@@ -610,7 +656,7 @@ struct lease {
 
 static uint32_t opt_u32(const struct bootp *bp, size_t len, uint8_t code,
                         int *found) {
-    uint8_t mlen;
+    size_t mlen;
     uint32_t v = 0;
     const uint8_t *p = find_opt(bp, len, code, &mlen);
     *found = p && mlen == 4;
@@ -623,7 +669,7 @@ static uint32_t opt_u32(const struct bootp *bp, size_t len, uint8_t code,
 
 static void lease_from_ack(const struct bootp *bp, size_t len, double sent_at,
                            struct lease *L) {
-    uint8_t mlen;
+    size_t mlen;
     int has;
     L->addr = bp->yiaddr ? bp->yiaddr : L->addr;
     const uint8_t *p = find_opt(bp, len, DHCP_OPT_SRV_ID, &mlen);
@@ -734,7 +780,7 @@ static int extend(const char *iface, const uint8_t hw[6], struct lease *L,
             if (r < 240) continue;
             const struct bootp *bp = (const struct bootp *)buf;
             if (bp->op != 2 || bp->xid != xid) continue;
-            uint8_t mlen;
+            size_t mlen;
             const uint8_t *mt = find_opt(bp, (size_t)r, DHCP_OPT_MSGTYPE, &mlen);
             if (!mt || mlen < 1) continue;
             if (*mt == DHCP_NAK) {
@@ -898,7 +944,7 @@ static int acquire(const char *iface, const uint8_t hw[6], int ifindex,
             while ((t = recv_dhcp(pkts, rxbuf, sizeof(rxbuf), xid, deadline,
                                   &bp, &bootp_len)) != 0) {
                 if (t != DHCP_OFFER) continue;
-                uint8_t mlen;
+                size_t mlen;
                 offered_ip = bp->yiaddr;
                 const uint8_t *p = find_opt(bp, bootp_len, DHCP_OPT_SRV_ID, &mlen);
                 if (p && mlen == 4) memcpy(&server_id, p, 4);

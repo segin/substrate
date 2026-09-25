@@ -14,6 +14,12 @@ exactly as the case needs.
                   to the address's class (/8 for 10.0.2.50) and the gateway
                   the kernel booted with is removed -- an off-link datagram
                   no longer leaves through 10.0.2.2.
+    overload      DHC-09: with option 52 = 3 the mask is read from 'file'
+                  and the router from 'sname'.
+    concat        DHC-09: a router and a mask each split across two option
+                  instances are concatenated.
+    maxsize       DHC-09: DISCOVER and REQUEST carry a Maximum DHCP Message
+                  Size of at least 576.
     probe-announce DHC-07: before using the address the client ARP-probes it
                   (sender IP 0), and once bound announces it with a
                   gratuitous ARP.
@@ -147,16 +153,21 @@ class Server:
         return None
 
     def reply(self, req, mtype, yiaddr=LEASED, opts=None,
-              server_id=PEER_IP, dst='255.255.255.255', eth_dst=BCAST_MAC):
+              server_id=PEER_IP, dst='255.255.255.255', eth_dst=BCAST_MAC,
+              sname=b'', file=b''):
+        """opts: a dict, or a list of (code, value) pairs when a code must
+        repeat.  sname/file: raw field contents (e.g. overloaded options),
+        zero-padded to 64/128 octets."""
         body = struct.pack('!BBBBIHH4s4s4s4s', 2, 1, 6, 0, req.xid, 0,
                            req.flags, b'\0' * 4,
                            socket.inet_aton(yiaddr if mtype != NAK else '0.0.0.0'),
                            b'\0' * 4, b'\0' * 4)
-        body += req.chaddr + b'\0' * 64 + b'\0' * 128
+        body += req.chaddr + sname.ljust(64, b'\0') + file.ljust(128, b'\0')
         o = bytes([53, 1, mtype])
         if server_id:
             o += bytes([54, 4]) + socket.inet_aton(server_id)
-        for code, val in (opts or {}).items():
+        items = opts.items() if isinstance(opts, dict) else (opts or [])
+        for code, val in items:
             o += bytes([code, len(val)]) + val
         body += struct.pack('!I', MAGIC) + o + b'\xff'
         self.w.send_udp(67, 68, body, src=PEER_IP, dst=dst, eth_dst=eth_dst)
@@ -550,6 +561,79 @@ def case_nak_renew():
         return None, w
 
 
+def bound_line(w):
+    lines = [l for l in w.serial().splitlines() if 'dhclient: bound' in l]
+    return lines[-1] if lines else ''
+
+
+def exchange(s, w, ack_kw):
+    """DISCOVER/OFFER/REQUEST, then an ACK built from ack_kw; returns an
+    error string or None once bound."""
+    d = s.expect(DISCOVER, 90)
+    if not d:
+        return 'no DHCPDISCOVER'
+    s.reply(d, OFFER, opts={51: struct.pack('!I', 3600)})
+    r = s.expect(REQUEST, 10)
+    if not r:
+        return 'no DHCPREQUEST'
+    s.reply(r, ACK, **ack_kw)
+    if not w.wait_serial('dhclient: bound', 10):
+        return 'dhclient never reported bound'
+    w.pump(0.3)
+    return None
+
+
+def case_overload():
+    with boot() as w:
+        s = Server(w)
+        # mask in 'file', router in 'sname', as option 52 = 3 directs
+        f = bytes([1, 4]) + socket.inet_aton(MASK) + b'\xff'
+        sn = bytes([3, 4]) + socket.inet_aton(PEER_IP) + b'\xff'
+        err = exchange(s, w, dict(opts=[(51, struct.pack('!I', 3600)),
+                                        (52, b'\x03')], file=f, sname=sn))
+        if err:
+            return err, w
+        want = 'dhclient: bound %s/%s via %s' % (LEASED, MASK, PEER_IP)
+        if bound_line(w) != want:
+            return 'bound %r, want %r (options overloaded into file/sname)' % (
+                bound_line(w), want), w
+        return None, w
+
+
+def case_concat():
+    with boot() as w:
+        s = Server(w)
+        r = socket.inet_aton(PEER_IP)
+        m = socket.inet_aton(MASK)
+        # the router and mask each split across two instances
+        err = exchange(s, w, dict(opts=[(51, struct.pack('!I', 3600)),
+                                        (3, r[:2]), (1, m[:3]),
+                                        (3, r[2:]), (1, m[3:])]))
+        if err:
+            return err, w
+        want = 'dhclient: bound %s/%s via %s' % (LEASED, MASK, PEER_IP)
+        if bound_line(w) != want:
+            return 'bound %r, want %r (split options concatenated)' % (
+                bound_line(w), want), w
+        return None, w
+
+
+def case_maxsize():
+    with boot() as w:
+        s = Server(w)
+        d = s.expect(DISCOVER, 90)
+        if not d:
+            return 'no DHCPDISCOVER', w
+        v = d.opts.get(57)
+        if not v or len(v) != 2 or struct.unpack('!H', v)[0] < 576:
+            return 'DISCOVER has no usable Maximum DHCP Message Size (%r)' % v, w
+        s.reply(d, OFFER, opts=s.std_opts())
+        r = s.expect(REQUEST, 10)
+        if not r or r.opts.get(57) != v:
+            return 'REQUEST does not repeat the Maximum Message Size', w
+        return None, w
+
+
 OFFLINK = '198.51.100.1'
 
 
@@ -590,7 +674,8 @@ def case_no_options():
 
 
 CASES = (('bound', case_bound), ('ack-config', case_ack_config),
-         ('no-options', case_no_options),
+         ('no-options', case_no_options), ('overload', case_overload),
+         ('concat', case_concat), ('maxsize', case_maxsize),
          ('probe-announce', case_probe_announce), ('declined', case_declined),
          ('renew', case_renew), ('rebind', case_rebind),
          ('expire', case_expire), ('nak-renew', case_nak_renew), ('clock-step', case_clock_step),
