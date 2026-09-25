@@ -402,11 +402,22 @@ static int recv_dhcp(int pkts, uint8_t *rxbuf, size_t cap, uint32_t xid,
 }
 
 /* Install the lease an ACK granted -- address, netmask, router -- and
- * write /etc/resolv.conf from its resolver options. */
+ * write /etc/resolv.conf from its resolver options.
+ *
+ * DHC-06: everything comes from the DHCPACK.  RFC 2131 3.1 step 4: the
+ * ACK carries the committed configuration and its 'yiaddr' the selected
+ * address; a server only SHOULD keep it consistent with the OFFER.  The
+ * address, netmask and router were taken from the OFFER, so a server that
+ * sent the router or mask only in its ACK left the host without a default
+ * route or with the wrong mask. */
 static int install_lease(const char *iface, const struct bootp *bp,
-                         size_t bootp_len, uint32_t offered_ip,
-                         uint32_t subnet, uint32_t router) {
+                         size_t bootp_len) {
     uint8_t mlen;
+    uint32_t offered_ip = bp->yiaddr, subnet = 0, router = 0;
+    const uint8_t *p = find_opt(bp, bootp_len, DHCP_OPT_SUBNET, &mlen);
+    if (p && mlen == 4) memcpy(&subnet, p, 4);
+    p = find_opt(bp, bootp_len, DHCP_OPT_ROUTER, &mlen);
+    if (p && mlen >= 4) memcpy(&router, p, 4);
 
     /* Pull resolver-relevant options from the ACK (servers
      * frequently include them only at ACK time, not OFFER). */
@@ -600,7 +611,7 @@ int main(int argc, char **argv) {
          * proceeds without a lease rather than stalling.  Combined with the
          * non-blocking socket above, the total wait is bounded (about a
          * minute for DHCP_DISCOVER_TRIES = 4). */
-        uint32_t offered_ip = 0, server_id = 0, subnet = 0, router = 0;
+        uint32_t offered_ip = 0, server_id = 0;
         double started = now_sec();
         for (int dtry = 0; dtry < DHCP_DISCOVER_TRIES && !offered_ip; dtry++) {
             size_t n = build_dhcp_packet(pkt, hw, xid, DHCP_DISCOVER, 0, 0);
@@ -619,10 +630,6 @@ int main(int argc, char **argv) {
                 offered_ip = bp->yiaddr;
                 const uint8_t *p = find_opt(bp, bootp_len, DHCP_OPT_SRV_ID, &mlen);
                 if (p && mlen == 4) memcpy(&server_id, p, 4);
-                p = find_opt(bp, bootp_len, DHCP_OPT_SUBNET, &mlen);
-                if (p && mlen == 4) memcpy(&subnet, p, 4);
-                p = find_opt(bp, bootp_len, DHCP_OPT_ROUTER, &mlen);
-                if (p && mlen == 4) memcpy(&router, p, 4);
 
                 uint8_t *yi = (uint8_t *)&offered_ip;
                 fprintf(stdout, "dhclient: DHCPOFFER %u.%u.%u.%u from ",
@@ -667,8 +674,7 @@ int main(int argc, char **argv) {
                 if (t != DHCP_ACK) continue;
                 fprintf(stdout, "dhclient: DHCPACK\n");
                 close(pkts);
-                return install_lease(iface, bp, bootp_len, offered_ip,
-                                     subnet, router);
+                return install_lease(iface, bp, bootp_len);
             }
         }
         if (!naked)

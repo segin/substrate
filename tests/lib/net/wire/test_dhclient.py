@@ -8,6 +8,8 @@ exactly as the case needs.
 
     bound         DISCOVER -> OFFER -> REQUEST -> ACK: dhclient binds the
                   offered address, and the guest then answers ARP for it.
+    ack-config    DHC-06: the netmask and router come from the DHCPACK --
+                  here the OFFER carries neither.
     clock-step    DHC-14: the wall clock is stepped forward an hour every
                   200 ms while dhclient waits for an OFFER; its DISCOVERs
                   stay spaced by the retransmission delay instead of all
@@ -307,7 +309,28 @@ def case_nak():
         return None, w
 
 
-CASES = (('bound', case_bound), ('clock-step', case_clock_step),
+def case_ack_config():
+    with boot() as w:
+        s = Server(w)
+        d = s.expect(DISCOVER, 90)
+        if not d:
+            return 'no DHCPDISCOVER', w
+        s.reply(d, OFFER, opts={51: struct.pack('!I', 3600)})   # no mask/router
+        r = s.expect(REQUEST, 10)
+        if not r:
+            return 'no DHCPREQUEST', w
+        s.reply(r, ACK, opts=s.std_opts())
+        if not w.wait_serial('dhclient: bound', 10):
+            return 'dhclient never reported bound', w
+        w.pump(0.3)
+        want = 'dhclient: bound %s/%s via %s' % (LEASED, MASK, PEER_IP)
+        if want not in w.serial():
+            line = [l for l in w.serial().splitlines() if 'dhclient: bound' in l]
+            return 'installed %r, want the ACK\'s %r' % (line[-1:], want), w
+        return None, w
+
+
+CASES = (('bound', case_bound), ('ack-config', case_ack_config), ('clock-step', case_clock_step),
          ('backoff', case_backoff), ('request-retx', case_request_retx),
          ('request-restart', case_request_restart), ('nak', case_nak))
 
