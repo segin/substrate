@@ -18,15 +18,16 @@ restarts from INIT on a DHCPNAK or a failed request.  Most findings below
 follow from dhclient implementing only the INIT → SELECTING → REQUESTING →
 BOUND path, once, with no recovery.
 
-**14 findings: 2 high, 6 medium, 4 low, 2 info.**  Each was checked
-against both the code and the RFC text.  Two candidates were refuted and
-are listed at the end with what does conform.
+**13 findings: 1 high, 6 medium, 4 low, 2 info.**  Each was checked
+against both the code and the RFC text.  Two candidates were refuted,
+and DHC-01 was withdrawn as intended behaviour; all three are listed at
+the end, with what does conform.  The remaining IDs keep their original
+numbers.
 
 ## Findings
 
 | ID | Severity | Summary |
 | --- | --- | --- |
-| DHC-01 | high | Every Substrate host sends the same client identifier, so a server treats them all as one client |
 | DHC-02 | high | The lease is never tracked: no renewal, no rebinding, and the address is used forever after the lease expires |
 | DHC-03 | medium | DHCPREQUEST is sent once and never retransmitted; failure exits instead of restarting |
 | DHC-04 | medium | A DHCPNAK is ignored; the client waits out its timeout and gives up |
@@ -42,33 +43,6 @@ are listed at the end with what does conform.
 | DHC-14 | info | Deadlines use the wall clock |
 
 ---
-
-### DHC-01 (high). Every Substrate host sends the same client identifier, so a server treats them all as one client
-
-**Requirement.** RFC 2131 §4.2: *"If the client supplies a 'client
-identifier', the client MUST use the same 'client identifier' in all
-subsequent messages, and the server MUST use that identifier to identify
-the client. ... It is crucial for a DHCP client to use an identifier
-unique within the subnet to which the client is attached in the 'client
-identifier' option."*
-
-**Code.** `build_dhcp_packet()` sends option 61 as type 0 followed by the
-hostname (`sbin/dhclient/dhclient.c:281-286`).  The hostname comes from
-`read_system_hostname()` (`:181-217`), which reads `/etc/hostname`.  The
-tracked `etc/hostname`, staged unchanged into every image, is `agar`.
-
-**Failure.** Two Substrate machines, or two VMs booted from the same
-`rootfs.img`, on one LAN both send client identifier `"\0agar"`.  The
-server is required to key the lease on that identifier, so it sees one
-client and hands the second machine the address the first already holds.
-The two hosts then run with a duplicate IPv4 address.  The identifier
-also changes whenever the hostname changes, so renaming a host makes it
-look like a new client and takes a new lease.
-
-**Fix.** Omit option 61, so the server keys on `chaddr` as §4.2 requires
-when no identifier is given.  Or send a hardware-type identifier: type 1
-followed by the MAC, the form RFC 2132 §9.14 describes.  Keep option 12
-(Host Name), which is only a hint.
 
 ### DHC-02 (high). The lease is never tracked: no renewal, no rebinding, and the address is used forever after the lease expires
 
@@ -351,8 +325,16 @@ lease timers.
 
 ---
 
-## Refuted, and what conforms
+## Refuted, withdrawn, and what conforms
 
+- **DHC-01, withdrawn: hostname-derived client identifier.**  Option 61
+  is type 0 followed by the hostname (`sbin/dhclient/dhclient.c:281-286`),
+  so two hosts still carrying the stock `/etc/hostname` (`agar`) would
+  present the same identifier.  This is intended: the hostname is meant
+  to be set per site, and the identifier deliberately ties the lease to
+  it (RFC 2131 §4.2 explicitly allows a DNS name as the client
+  identifier).  Keeping identifiers unique within a subnet is part of
+  that site configuration, not dhclient's job.
 - **Predictable xid.** `srand(time)` looks like it gives two clients
   booted in the same second the same xid.  It doesn't:
   `lib/c/src/stdlib.c` `srand()` keys ChaCha20 with the seed XORed with a
@@ -382,7 +364,6 @@ One item per finding, to work through one at a time as with
 DHCP server (`tests/lib/net/wire/`), which can send OFFER, ACK and NAK
 frames exactly as each case needs.
 
-- [ ] **DHC-01** Stop sending hostname-derived client identifiers (omit option 61, or use type 1 + MAC)
 - [ ] **DHC-02** Track the lease: T1/T2 renew and rebind, expiry drops the address and restarts
 - [ ] **DHC-03** Retransmit DHCPREQUEST; on exhaustion return to INIT
 - [ ] **DHC-04** Handle DHCPNAK: restart from INIT
