@@ -1,0 +1,245 @@
+.TH MOUNT 8 2026-09-25 "Substrate" "System Administration"
+.SH NAME
+mount \- mount a filesystem
+.SH SYNOPSIS
+.B mount
+.I device
+.I dir
+.I type
+.br
+.B mount
+.RB [ \-r ]
+.RB [ \-o
+.IR options ]
+.B \-t
+.I type
+.I device
+.I dir
+.br
+.B mount
+.B \-o remount\c
+.RI [, options ]
+.I dir
+.SH DESCRIPTION
+.B mount
+attaches the filesystem of type
+.I type
+found on
+.I device
+to the directory
+.I dir
+using
+.BR mount (2).
+The first form, with three positional operands, is the traditional
+Substrate syntax; the second form takes the type from
+.BR \-t .
+With
+.BR \-t ,
+exactly two operands are required; without it, exactly three.
+.PP
+.I device
+is normally a block device under
+.IR /dev/storage/ ,
+named by driver type and instance with an optional partition suffix,
+for example
+.IR /dev/storage/ide0 ,
+.IR /dev/storage/sata0p2 ,
+or
+.IR /dev/storage/virtio0 .
+It may also be given as
+.BI LABEL= name\fR,
+in which case the kernel scans every block device for a filesystem
+with that volume label and mounts the first match.
+Filesystems that need no device accept any placeholder word, such as
+.BR none .
+.PP
+.I type
+must name a filesystem registered in the kernel.
+The in-tree kernel provides
+.BR ext2 ,
+.BR fat ,
+.BR exfat ,
+.BR udf ,
+.BR minix ,
+.BR sysv ,
+.BR xenix ,
+.BR 9p ,
+.BR fuse ,
+.BR shmfs ,
+.BR procfs ,
+.BR sysfs ,
+and
+.BR devfs .
+.PP
+Only the superuser may mount filesystems.
+The kernel refuses to mount anything over
+.IR /dev ,
+.IR /proc ,
+or
+.I /sys
+(except as a remount), and refuses a second mount on
+.IR / .
+The kernel itself mounts the root filesystem and then
+.B devfs
+on
+.IR /dev ,
+.B shmfs
+on
+.IR /dev/shm ,
+.B procfs
+on
+.IR /proc ,
+and
+.B sysfs
+on
+.I /sys
+at boot, so these never need to be mounted by hand.
+.PP
+.B mount
+does not read
+.I /etc/fstab
+and does not maintain
+.IR /etc/mtab .
+Run with no operands it prints a usage message; it does not list the
+current mounts.
+.SS Remounting
+If
+.I options
+contains
+.BR remount ,
+the filesystem already mounted on
+.I dir
+has its flags changed in place, typically to switch between
+read-only and read-write.
+Only
+.I dir
+is required; a second operand, if given, is passed as the source but
+is not otherwise used, and
+.B \-t
+is optional.
+.SH OPTIONS
+.TP
+.BI \-t " type"
+Filesystem type.
+.TP
+.B \-r
+Mount read-only.
+Applied after
+.BR \-o ,
+so it overrides an
+.B rw
+there.
+.TP
+.BI \-o " options"
+A comma-separated list of mount options.
+The following are translated into
+.BR mount (2)
+flags:
+.RS
+.TP
+.B ro
+Read-only.
+.TP
+.B rw
+Read-write; cancels an earlier
+.BR ro .
+.TP
+.B remount
+Change the flags of an existing mount (see
+.BR Remounting ).
+.TP
+.B nosuid
+Ignore set-user-ID and set-group-ID bits.
+.TP
+.B nodev
+Do not interpret device special files.
+.TP
+.B noexec
+Do not allow execution of programs.
+.TP
+.B sync
+Synchronous I/O.
+.TP
+.B async
+Asynchronous I/O.
+.TP
+.B defaults
+Accepted and ignored.
+.RE
+.IP
+Other words are not rejected.
+The complete option string is passed to
+.BR mount (2)
+as its
+.I data
+argument, but see BUGS.
+The kernel rejects
+.B async
+combined with
+.B ro
+or
+.BR sync .
+.SH EXIT STATUS
+.TP
+.B 0
+The filesystem was mounted.
+.TP
+.B 1
+The command line was invalid, or
+.BR mount (2)
+failed.
+In the latter case a message naming the device, directory, type and
+error is written to standard error.
+.SH FILES
+.TP
+.I /dev/storage/
+Block devices.
+.TP
+.I /etc/fstab
+Filesystem table used by the boot scripts.
+Each entry lists, in order, the device (usually as
+.BR LABEL= ),
+the mount point, the type, the options, and the dump and pass
+numbers; the first three fields are the operands of the traditional
+.B mount
+form.
+.SH EXAMPLES
+Mount the second partition of the first SATA disk on
+.IR /mnt :
+.PP
+.EX
+# mount /dev/storage/sata0p2 /mnt ext2
+.EE
+.PP
+Mount a FAT filesystem by volume label, read-only:
+.PP
+.EX
+# mount \-r \-t fat LABEL=sub\-boot /boot
+.EE
+.PP
+Make the root filesystem writable after checking it:
+.PP
+.EX
+# mount \-o remount,rw /
+.EE
+.SH SEE ALSO
+.BR umount (8),
+.BR mount (2),
+.BR umount (2),
+.BR ext2 (4),
+.BR proc (5),
+.BR rootfs (7)
+.SH BUGS
+When
+.I device
+names a node under
+.IR /dev ,
+the kernel passes that device to the filesystem in place of the
+.I data
+argument, so filesystem-specific
+.B \-o
+options are only seen by filesystems mounted without a device.
+.PP
+Only the first 255 bytes of
+.I options
+are examined for the flags listed above.
