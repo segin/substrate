@@ -1,0 +1,27 @@
+.TH PROF 1 2026-09-25 "Substrate" "User Commands"
+.SH NAME
+prof \- display profile data (not supported)
+.SH SYNOPSIS
+.B prof
+.RI [ argument ...]
+.SH DESCRIPTION
+.B prof
+is a stub.
+Substrate has no
+.I mon.out
+or
+.I gmon.out
+profiling support, so there is never any profile data to display.
+The command ignores all arguments, writes
+.RS
+.B prof: profiling is not supported on this system
+.RE
+to standard error, and exits with a failure status so that scripts can
+detect the missing facility.
+.SH EXIT STATUS
+.TP
+.B 1
+Always.
+.SH SEE ALSO
+.BR cc (1),
+.BR time (1)
