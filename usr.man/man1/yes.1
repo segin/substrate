@@ -1,0 +1,36 @@
+.TH YES 1 2026-09-25 "Substrate" "User Commands"
+.SH NAME
+yes \- output a string repeatedly until killed
+.SH SYNOPSIS
+.B yes
+.RI [ string ...]
+.SH DESCRIPTION
+.B yes
+writes a line to standard output over and over.
+The line consists of the
+.I string
+operands separated by single spaces, or
+.B y
+if there are none.
+No options are recognised; every argument is output literally.
+.PP
+.B yes
+stops when a write to standard output fails, for example with
+.B EPIPE
+when the reading end of a pipe has been closed and
+.B SIGPIPE
+is ignored.
+.SH EXIT STATUS
+.B yes
+runs until killed by a signal, or exits with status
+.B 1
+when standard output can no longer be written.
+.SH EXAMPLE
+Answer every prompt of a command with
+.BR y :
+.EX
+$ yes | rm \-i *.tmp
+.EE
+.SH SEE ALSO
+.BR cat (1),
+.BR true (1)
