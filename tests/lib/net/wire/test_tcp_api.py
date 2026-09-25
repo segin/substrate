@@ -75,6 +75,10 @@ it guards.
     listen-close   TCP-RES-02: closing a listener with 20 established,
                    never-accepted children (more than one batch) resets
                    every one of them, each at SND.NXT.
+    backlog-recovers TCP-RES-03: SYN+RST pairs fill a backlog-4 listener
+                   with dead children; once the timer reaps them the
+                   listener answers a new SYN (the per-listener child count
+                   that replaced the backlog walk is given back on free).
 
 Run from the repo root after building sys/ and wireguest:
     python3 tests/lib/net/wire/test_tcp_api.py [case...]
@@ -505,6 +509,25 @@ def case_synrst_flood():
         return None, w
 
 
+def case_backlog_recovers():
+    with Wire.boot('listen %d sleep:60' % PORT) as w:
+        if not w.wait_serial('guest: listening', 90):
+            return 'guest never listened', w
+        w.send_arp(1, PEER_MAC, PEER_IP, b'\0' * 6, GUEST_IP)
+        w.pump(0.5)
+        for i in range(8):
+            hp = 47000 + i
+            w.send(Seg(hp, PORT, PISS, 0, SYN))
+            w.send(Seg(hp, PORT, PISS + 1, 0, RST))
+        w.pump(3.0)                     # the timer reaps the dead children
+        w.rx.clear()
+        w.send(Seg(47100, PORT, PISS, 0, SYN))
+        if not w.expect(lambda s: s.dport == 47100 and s.flags & SYN and
+                        s.flags & ACK, 5, 'SYN|ACK'):
+            return 'listener still full after its dead children were reaped', w
+        return None, w
+
+
 def case_listen_close():
     n = 20
     with Wire.boot('listenclose %d 8' % PORT) as w:
@@ -613,7 +636,8 @@ CASES = (('reconnect', case_reconnect),
          ('peer-early', case_peer_early),
          ('close-synsent', case_close_synsent),
          ('retx-batch', case_retx_batch),
-         ('listen-close', case_listen_close))
+         ('listen-close', case_listen_close),
+         ('backlog-recovers', case_backlog_recovers))
 
 
 def main():

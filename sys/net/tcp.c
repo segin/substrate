@@ -261,6 +261,12 @@ typedef struct tcp_pcb {
     int        shut_rd;
     /* Parent (for SYN_RECEIVED children before accept) */
     struct tcp_pcb *parent;
+    /* TCP-RES-03: on a listener, how many PCBs name it as ->parent (the
+     * backlog test); on a child, whether it sits in the parent's
+     * accept_q.  Both change only through tcp_orphan_locked() and the
+     * enqueue/dequeue sites, under tcp_lock. */
+    int        nchildren;
+    int        in_accept_q;
     /*
      * TCP-01: number of blocked callers currently holding this PCB across a
      * sleep.  The timer kthread is the sole reaper, and it must not free a
@@ -271,9 +277,72 @@ typedef struct tcp_pcb {
     int        holds;
     /* Linked list */
     struct tcp_pcb *next;
+    /* TCP-RES-03: demux index chain (see tcp_rehash_locked); hpprev is
+     * NULL while the PCB is in no chain. */
+    struct tcp_pcb *hnext;
+    struct tcp_pcb **hpprev;
 } tcp_pcb_t;
 
 static tcp_pcb_t *g_tcp_pcbs;
+
+/*
+ * TCP-RES-03: tcp_find() runs in hard IRQ for every arriving segment, and
+ * walked the whole PCB list twice (a SYN three times, counting the backlog
+ * walk).  The demux is indexed instead: connections by a hash of (lport,
+ * raddr, rport) -- laddr is not in the key, since it may still be 0 -- and
+ * listeners by lport alone.  g_tcp_pcbs stays the list of all PCBs for the
+ * timer and the bind/port-allocation scans, which run in process context.
+ */
+#define TCP_CHASH_SIZE 256
+#define TCP_LHASH_SIZE 32
+static tcp_pcb_t *g_tcp_chash[TCP_CHASH_SIZE];
+static tcp_pcb_t *g_tcp_lhash[TCP_LHASH_SIZE];
+
+static unsigned tcp_chash(uint16_t lport, uint32_t raddr, uint16_t rport) {
+    uint32_t h = raddr ^ ((uint32_t)rport << 16 | lport);
+    h ^= h >> 16;
+    h *= 0x45d9f3bu;
+    h ^= h >> 16;
+    return h & (TCP_CHASH_SIZE - 1);
+}
+
+static unsigned tcp_lhash(uint16_t lport) {
+    return (lport ^ (lport >> 5)) & (TCP_LHASH_SIZE - 1);
+}
+
+static void tcp_unhash_locked(tcp_pcb_t *p) {
+    if (!p->hpprev) return;
+    *p->hpprev = p->hnext;
+    if (p->hnext) p->hnext->hpprev = p->hpprev;
+    p->hnext  = NULL;
+    p->hpprev = NULL;
+}
+
+/* (Re)file p under its current key: a listener by lport, a PCB with a
+ * foreign socket by its 4-tuple, anything else nowhere.  Called wherever
+ * lport, raddr, rport or the LISTEN state is set.  Caller holds tcp_lock. */
+static void tcp_rehash_locked(tcp_pcb_t *p) {
+    tcp_pcb_t **head;
+    tcp_unhash_locked(p);
+    if (p->state == TCP_LISTEN)
+        head = &g_tcp_lhash[tcp_lhash(p->lport)];
+    else if (p->rport)
+        head = &g_tcp_chash[tcp_chash(p->lport, p->raddr, p->rport)];
+    else
+        return;
+    p->hnext = *head;
+    if (*head) (*head)->hpprev = &p->hnext;
+    *head = p;
+    p->hpprev = head;
+}
+
+/* Detach a child from its listener.  Caller holds tcp_lock. */
+static void tcp_orphan_locked(tcp_pcb_t *c) {
+    if (c->parent && c->parent->nchildren > 0)
+        c->parent->nchildren--;
+    c->parent      = NULL;
+    c->in_accept_q = 0;
+}
 
 /*
  * TCP-01: pin a PCB across a blocking wait.
@@ -808,13 +877,10 @@ static void tcp_kill_pcb(tcp_pcb_t *p, int err) {
  * parent listener?  If so the reaper must not free it — a blocked
  * accept() could still hand it to userspace.  tcp_accept() clears
  * ->parent when it dequeues a child, so a child with ->parent still set
- * is either mid-handshake (not yet queued) or sitting in accept_q. */
+ * is either mid-handshake (not yet queued) or sitting in accept_q.
+ * TCP-RES-03: a flag set on enqueue, not a scan of the queue. */
 static int tcp_child_in_accept_q(const tcp_pcb_t *p) {
-    tcp_pcb_t *par = p->parent;
-    if (!par || !par->accept_q) return 0;
-    for (int i = 0; i < par->accept_count; i++)
-        if (par->accept_q[i] == p) return 1;
-    return 0;
+    return p->parent && p->in_accept_q;
 }
 
 static int tcp_timer_tick(uint64_t now) {
@@ -1039,8 +1105,11 @@ static tcp_pcb_t *tcp_find(uint32_t saddr, uint16_t sport,
     /* Look for exact 4-tuple match first.  laddr is allowed to be
      * "unbound" (0) — happens for client sockets that haven't picked
      * a local IP yet, or for loopback where the chosen source IP
-     * differs from what the connect() caller specified. */
-    for (tcp_pcb_t *p = g_tcp_pcbs; p; p = p->next) {
+     * differs from what the connect() caller specified.
+     *
+     * TCP-RES-03: both searches walk one index bucket, not every PCB. */
+    for (tcp_pcb_t *p = g_tcp_chash[tcp_chash(dport, saddr, sport)]; p;
+         p = p->hnext) {
         if (p->state == TCP_CLOSED) continue;
         if (p->lport != dport) continue;
         if (p->raddr == saddr && p->rport == sport &&
@@ -1058,7 +1127,7 @@ static tcp_pcb_t *tcp_find(uint32_t saddr, uint16_t sport,
      * listener) matches only its own peer and beats both. */
     tcp_pcb_t *best = NULL;
     int best_score = -1;
-    for (tcp_pcb_t *p = g_tcp_pcbs; p; p = p->next) {
+    for (tcp_pcb_t *p = g_tcp_lhash[tcp_lhash(dport)]; p; p = p->hnext) {
         if (p->state != TCP_LISTEN || p->lport != dport) continue;
         if (p->laddr && p->laddr != daddr) continue;
         if (p->raddr && (p->raddr != saddr || p->rport != sport)) continue;
@@ -1150,12 +1219,11 @@ static void tcp_in_listen(tcp_pcb_t *p, uint32_t saddr, uint32_t daddr,
      * 32 KiB ring until the timer reaps it -- no longer counted, and a
      * SYN+RST flood allocated a fresh child per pair faster than the
      * reaper could free them.  Accept-queued children keep ->parent until
-     * accept() takes them, so this also counts them exactly once. */
-    int pending = 0;
-    for (tcp_pcb_t *q = g_tcp_pcbs; q; q = q->next)
-        if (q->parent == p)
-            pending++;
-    if (pending >= p->accept_cap)
+     * accept() takes them, so this also counts them exactly once.
+     *
+     * TCP-RES-03: kept as a count on the listener rather than a walk of
+     * every PCB. */
+    if (p->nchildren >= p->accept_cap)
         return;
     /* Spawn a child PCB in SYN_RECEIVED.  */
     tcp_pcb_t *c = (tcp_pcb_t *)kmalloc(sizeof(*c));
@@ -1183,8 +1251,10 @@ static void tcp_in_listen(tcp_pcb_t *p, uint32_t saddr, uint32_t daddr,
     c->accept_chan  = &c->accept_count;
     c->send_chan    = &c->snd_una;
     c->parent       = p;
+    p->nchildren++;
     c->next         = g_tcp_pcbs;
     g_tcp_pcbs      = c;
+    tcp_rehash_locked(c);
     tcp_xmit_queue(c, TCP_SYN | TCP_ACK, NULL, 0);
 }
 
@@ -1359,6 +1429,7 @@ static int tcp_in_syn_received(tcp_pcb_t *p, uint32_t *seqp, uint32_t ack,
             par->accept_q[par->accept_count] = p;
             __asm__ volatile ("" ::: "memory");
             par->accept_count++;
+            p->in_accept_q = 1;
             sched_wakeup(par->accept_chan);
         }
     } else {
@@ -2134,12 +2205,16 @@ void tcp_free(tcp_pcb_t *p) {
     tcp_pcb_t **link = &g_tcp_pcbs;
     while (*link && *link != p) link = &(*link)->next;
     if (*link == p) *link = p->next;
+    tcp_unhash_locked(p);                                /* TCP-RES-03 */
     /* If this is a listener, orphan any SYN_RECEIVED / not-yet-accepted
      * children so a later segment for one of them can't dereference a
      * freed parent in tcp_in_syn_received(). */
     if (p->listen)
         for (tcp_pcb_t *c = g_tcp_pcbs; c; c = c->next)
-            if (c->parent == p) c->parent = NULL;
+            if (c->parent == p) tcp_orphan_locked(c);
+    /* TCP-RES-03: and a child the reaper frees before accept() took it
+     * (NET-04) no longer counts against its listener's backlog. */
+    tcp_orphan_locked(p);
     tcp_unacked_free_all(p);
     tcp_unlock(f);
     tcp_ooo_free_all(p);                                 /* TCP-WIN-08 */
@@ -2185,6 +2260,7 @@ int tcp_bind(tcp_pcb_t *p, uint32_t laddr, uint16_t lport, int reuseaddr) {
     }
     p->laddr = laddr;
     p->lport = lport;
+    tcp_rehash_locked(p);                                /* TCP-RES-03 */
     tcp_unlock(f);
     return 0;
 }
@@ -2234,7 +2310,7 @@ int tcp_listen(tcp_pcb_t *p, int backlog) {
     for (int i = 0; i < keep; i++) nq[i] = oq[i];
     for (int i = keep; oq && i < p->accept_count; i++) {
         tcp_pcb_t *q = oq[i];
-        q->parent   = NULL;
+        tcp_orphan_locked(q);
         q->detached = 1;            /* timer reaps once CLOSED */
         if (q->state != TCP_CLOSED && q->state != TCP_TIME_WAIT)
             tcp_send_ctl(q, TCP_RST | TCP_ACK);
@@ -2245,6 +2321,7 @@ int tcp_listen(tcp_pcb_t *p, int backlog) {
     p->accept_count = keep;
     p->state        = TCP_LISTEN;
     p->listen       = 1;
+    tcp_rehash_locked(p);                                /* TCP-RES-03 */
     tcp_unlock(f);
     if (oq) kfree(oq, sizeof(tcp_pcb_t *) * ocap);
     return 0;
@@ -2425,6 +2502,7 @@ static int tcp_connect_start(tcp_pcb_t *p, uint32_t raddr, uint16_t rport) {
     }
     p->raddr   = raddr;
     p->rport   = rport;
+    tcp_rehash_locked(p);                              /* TCP-RES-03 */
     tcp_set_mtu_mss(p);                                /* TCP-HDR-04 */
     p->iss     = tcp_new_iss(p->laddr, p->lport, raddr, rport);   /* TCP-HDR-05 */
     p->snd_una = p->iss;
@@ -2617,7 +2695,7 @@ tcp_pcb_t *tcp_accept(tcp_pcb_t *listen_p, int nonblock) {
             for (int i = 1; i < listen_p->accept_count; i++)
                 listen_p->accept_q[i - 1] = listen_p->accept_q[i];
             listen_p->accept_count--;
-            c->parent = NULL;
+            tcp_orphan_locked(c);                   /* TCP-RES-03 */
             tcp_unlock(f);
             ret = c;
             break;
@@ -3157,7 +3235,7 @@ int tcp_close(tcp_pcb_t *p) {
                     more = 1;           /* next batch; still ->parent == p */
                     continue;
                 }
-                q->parent   = NULL;     /* drop the dangling back-pointer */
+                tcp_orphan_locked(q);   /* drop the dangling back-pointer */
                 q->detached = 1;        /* timer reaps once CLOSED */
                 if (needs_rst) {
                     q->holds++;
