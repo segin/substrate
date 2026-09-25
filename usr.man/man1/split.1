@@ -1,0 +1,130 @@
+.TH SPLIT 1 2026-09-25 "Substrate" "User Commands"
+.SH NAME
+split \- split a file into pieces
+.SH SYNOPSIS
+.B split
+.RB [ \-l
+.IR line_count ]
+.RB [ \-b
+.IR byte_count [ k | m ]]
+.RB [ \-a
+.IR suffix_length ]
+.RI [ file
+.RI [ prefix ]]
+.SH DESCRIPTION
+.B split
+copies
+.I file
+(standard input if
+.I file
+is omitted or is
+.BR \- )
+into a series of output files of fixed size.
+.PP
+The output files are named
+.I prefix
+followed by a suffix of
+.I suffix_length
+lower-case letters, counting
+.BR aa ,
+.BR ab ,
+\&...,
+.BR az ,
+.BR ba ,
+\&...,
+.BR zz
+for the default length of 2.
+The default
+.I prefix
+is
+.BR x .
+Output files are created in the current directory (or wherever
+.I prefix
+points), truncating any existing file of the same name.
+An output file is only created once there is data to put in it, so an
+empty input produces no files.
+.PP
+By default each piece holds 1000 lines; the last piece may be shorter.
+A final line without a terminating newline is copied as is.
+.SH OPTIONS
+Each option takes a value, either attached
+.RB ( \-l100 )
+or as the next argument
+.RB ( "\-l 100" ).
+.TP
+.BI \-l " line_count"
+Put
+.I line_count
+lines in each piece.
+It must be a positive decimal number.
+.TP
+.BI \-b " byte_count\fR[\fPk\fR|\fPm\fR]\fP"
+Put
+.I byte_count
+bytes in each piece, splitting without regard to lines.
+A
+.B k
+or
+.B K
+suffix multiplies by 1024, an
+.B m
+or
+.B M
+suffix by 1048576.
+.TP
+.BI \-a " suffix_length"
+Use suffixes of
+.I suffix_length
+letters.
+It must be between 1 and 8.
+.PP
+.B \-l
+and
+.B \-b
+override each other; the one given last is used.
+.SH EXIT STATUS
+.TP
+.B 0
+Success.
+.TP
+.B 1
+Invalid option or value, the input could not be opened, an output file
+could not be created or written, or the suffixes ran out (more than
+26 to the power
+.I suffix_length
+pieces were needed).
+Pieces already written are left in place.
+.SH EXAMPLES
+Split a log into 500-line pieces named
+.BR logaa ,
+.BR logab ,
+\&...:
+.EX
+$ split \-l 500 big.log log
+.EE
+.PP
+Split an image into 1 MiB pieces and join them back:
+.EX
+$ split \-b 1m disk.img part.
+$ cat part.* > copy.img
+.EE
+.SH SEE ALSO
+.BR cat (1),
+.BR wc (1)
+.SH STANDARDS
+Follows POSIX.1-2024
+.BR split ,
+except that the POSIX
+.B g
+suffix of
+.B \-b
+is not supported.
+.SH BUGS
+Read errors on the input are not detected; they look like end of file
+and
+.B split
+exits with status 0.
+.PP
+Operands after
+.I prefix
+are ignored silently.
