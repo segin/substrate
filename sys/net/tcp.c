@@ -2461,6 +2461,14 @@ int tcp_poll(tcp_pcb_t *p, short events, void **wait_chan) {
         }
     }
     if (p->state == TCP_CLOSE_WAIT) revents |= POLLHUP;
+    /* TCP-API-13: once both directions are closed (our FIN and theirs),
+     * nothing more can move either way: hang-up.  POLLOUT stays set after
+     * the local FIN, as on Linux and the BSDs -- a write then fails at once
+     * with EPIPE/SIGPIPE, which is how a poller learns the send side is
+     * gone, instead of never being woken for it. */
+    if (p->state == TCP_CLOSING || p->state == TCP_LAST_ACK ||
+        p->state == TCP_TIME_WAIT)
+        revents |= POLLHUP;
     /* If the caller asked for POLLIN but we don't have data yet,
      * advertise recv_chan so the poll layer can sleep on the right
      * queue.  Previously gated on `!revents`, which never fired
@@ -2566,9 +2574,24 @@ static ssize_t tcp_send_body(tcp_pcb_t *p, const void *buf, size_t len, int nonb
         if (p->state != TCP_ESTABLISHED && p->state != TCP_CLOSE_WAIT) {
             /* A connection that was up and then failed (RST ->
              * ECONNRESET, RTO -> ETIMEDOUT) reports EPIPE; one that
-             * was never connected reports ENOTCONN. */
+             * was never connected reports ENOTCONN.
+             *
+             * TCP-API-13: and so do the five closing states -- RFC 793
+             * 3.9 SEND: "error: connection closing".  They have so_error
+             * 0 after an ordinary shutdown(SHUT_WR) or close, so a write
+             * after the local FIN reported ENOTCONN, the code for a
+             * connection that never existed. */
             if (sent) return (ssize_t)sent;
-            return p->so_error ? -EPIPE : -ENOTCONN;
+            switch (p->state) {
+            case TCP_FIN_WAIT_1:
+            case TCP_FIN_WAIT_2:
+            case TCP_CLOSING:
+            case TCP_LAST_ACK:
+            case TCP_TIME_WAIT:
+                return -EPIPE;
+            default:
+                return p->so_error ? -EPIPE : -ENOTCONN;
+            }
         }
 
         /* Flow control: the unacknowledged bytes in flight

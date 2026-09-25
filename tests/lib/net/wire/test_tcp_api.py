@@ -39,6 +39,9 @@ it guards.
     accept-emfile  TCP-API-12: accept() failing EMFILE on an established
                    child that already holds the peer's acknowledged request
                    resets it rather than sending a FIN.
+    write-closing  TCP-API-13: after shutdown(SHUT_WR), write() fails EPIPE
+                   (not ENOTCONN) and raises SIGPIPE; send(MSG_NOSIGNAL)
+                   fails EPIPE without one.
 
 Run from the repo root after building sys/ and wireguest:
     python3 tests/lib/net/wire/test_tcp_api.py [case...]
@@ -328,6 +331,30 @@ def case_accept_emfile():
         return None, w
 
 
+def case_write_closing():
+    with Wire.boot('connect 10.0.2.2 %d catchpipe shutwr sleep:2 write:late '
+                   'sigpipe sendns:later sigpipe sleep:60' % PORT) as w:
+        syn = w.expect(lambda s: s.flags & SYN and s.dport == PORT, 90, 'SYN')
+        if not syn:
+            return 'no SYN', w
+        g = syn.seq + 1
+        w.send(Seg(PORT, syn.sport, PISS, g, SYN | ACK))
+        fin = w.expect(lambda s: s.flags & FIN, 10, 'FIN')
+        if not fin:
+            return 'shutdown(SHUT_WR) sent no FIN', w
+        w.send(Seg(PORT, syn.sport, PISS + 1, g + 1, ACK))     # -> FIN-WAIT-2
+        if not w.wait_serial('guest: sendns', 15):
+            return 'guest never finished: %s' % w.serial()[-300:], w
+        wr, sp, ns = line(w, 'write')[0], line(w, 'sigpipe'), line(w, 'sendns')[0]
+        if 'broken pipe' not in wr.lower():
+            return 'write() after SHUT_WR: %s (want EPIPE)' % wr, w
+        if len(sp) < 2 or 'count=1' not in sp[0]:
+            return 'no SIGPIPE for the write: %s' % sp, w
+        if 'broken pipe' not in ns.lower() or 'count=1' not in sp[1]:
+            return 'send(MSG_NOSIGNAL): %s, then %s' % (ns, sp[1]), w
+        return None, w
+
+
 CASES = (('reconnect', case_reconnect),
          ('connect-twice', case_connect_twice),
          ('listen-connect', case_listen_connect),
@@ -338,7 +365,8 @@ CASES = (('reconnect', case_reconnect),
          ('connect-unspec', case_connect_unspec),
          ('linger-abort', case_linger_abort),
          ('unread-close', case_unread_close),
-         ('accept-emfile', case_accept_emfile))
+         ('accept-emfile', case_accept_emfile),
+         ('write-closing', case_write_closing))
 
 
 def main():

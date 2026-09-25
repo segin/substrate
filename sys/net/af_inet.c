@@ -846,6 +846,10 @@ static size_t afinet_node_write_body(fs_node_t *node, afi_sock_t *s,
     if (s->type == SOCK_STREAM && s->tcp) {
         ssize_t n = afi_node_nonblock(node) ? tcp_send_nb(s->tcp, buf, size)
                                             : tcp_send_until(s->tcp, buf, size, afi_deadline(s->snd_timeo));
+        /* TCP-API-13: a write on a stream whose send side is gone raises
+         * SIGPIPE, as for a pipe; nothing in sys/net ever did. */
+        if (n == -EPIPE && current_process)
+            psignal(current_process, SIGPIPE);
         return (size_t)n;
     }
     /* UDP-API-19: after shutdown(SHUT_WR): EPIPE and SIGPIPE, as for a
@@ -1953,11 +1957,17 @@ static ssize_t afinet_sendto_k(int fd, const void *buf, size_t len, int flags,
      * stream, and we fell into the UDP path below, looking for a
      * dest addr that wasn't there.  */
     if (s->type == SOCK_STREAM && s->tcp) {
+        ssize_t n;
         /* TCP-URG-02: MSG_OOB sends the data as urgent. */
         if (flags & MSG_OOB)
-            return tcp_send_urg_until(s->tcp, buf, len, 0,
-                                      afi_deadline(s->snd_timeo));
-        return tcp_send_until(s->tcp, buf, len, afi_deadline(s->snd_timeo));
+            n = tcp_send_urg_until(s->tcp, buf, len, 0,
+                                   afi_deadline(s->snd_timeo));
+        else
+            n = tcp_send_until(s->tcp, buf, len, afi_deadline(s->snd_timeo));
+        /* TCP-API-13: SIGPIPE on a broken stream, unless MSG_NOSIGNAL. */
+        if (n == -EPIPE && !(flags & MSG_NOSIGNAL) && current_process)
+            psignal(current_process, SIGPIPE);
+        return n;
     }
 
     /* Resolve target addr/port.

@@ -61,6 +61,9 @@
  *   sockatmark   sockatmark() on the socket and then on fd 0 (the console)
  *   oob:TEXT     send(TEXT, MSG_OOB)
  *   linger0      setsockopt(SO_LINGER, {1, 0}), read it back
+ *   catchpipe    install a SIGPIPE counter (so a SIGPIPE does not kill init)
+ *   sigpipe      report how many SIGPIPEs have arrived
+ *   sendns:TEXT  send(TEXT, MSG_NOSIGNAL)
  *   recvoob      recv(MSG_OOB) into a 16-octet buffer, reporting the octets
  *   recvmsgoob   the same through recvmsg(), reporting msg_flags too
  *   sleep:N      sleep N seconds
@@ -105,6 +108,8 @@ static void say(const char *fmt, const char *a, long n) {
 
 static volatile int g_sigurg;
 static void on_sigurg(int sig) { (void)sig; g_sigurg++; }
+static volatile int g_sigpipe;
+static void on_sigpipe(int sig) { (void)sig; g_sigpipe++; }
 
 static int do_actions(int fd, int argc, char **argv) {
     for (int i = 0; i < argc; i++) {
@@ -151,6 +156,17 @@ static int do_actions(int fd, int argc, char **argv) {
                 (long)fcntl(fd, F_GETOWN));
         } else if (strcmp(a, "sigurg") == 0) {
             say("sigurg %s count=%ld", "ok", (long)g_sigurg);
+        } else if (strcmp(a, "catchpipe") == 0) {
+            struct sigaction sa;
+            memset(&sa, 0, sizeof sa);
+            sa.sa_handler = on_sigpipe;
+            sigaction(SIGPIPE, &sa, NULL);
+            say("catchpipe %s%ld", "ok", 0);
+        } else if (strcmp(a, "sigpipe") == 0) {
+            say("sigpipe ok count=%s%ld", "", (long)g_sigpipe);
+        } else if (strncmp(a, "sendns:", 7) == 0) {
+            ssize_t n = send(fd, a + 7, strlen(a + 7), MSG_NOSIGNAL);
+            say("sendns %s n=%ld", n < 0 ? strerror(errno) : "ok", (long)n);
         } else if (strcmp(a, "linger0") == 0) {
             struct linger lg = { 1, 0 }, back = { -1, -1 };
             socklen_t bl = sizeof back;
