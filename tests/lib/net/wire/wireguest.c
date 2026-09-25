@@ -36,6 +36,10 @@
  *   wireguest listen0 <action>...              (listen() with no bind(),
  *                                               report getsockname()'s port,
  *                                               then accept)
+ *   wireguest earlywrite <ip> <port> <text>    (O_NONBLOCK connect, write text
+ *                                               at once (EAGAIN expected), then
+ *                                               clear O_NONBLOCK and write it
+ *                                               again, blocking until connected)
  *   wireguest acceptfull <port>                (listen, sleep 4 s, fill the fd
  *                                               table with dup(), then accept,
  *                                               reporting the error)
@@ -476,6 +480,23 @@ int main(int argc, char **argv) {
         } else {
             say("accept failed: %s (%ld)", strerror(errno), errno);
         }
+    } else if (argc >= 5 && strcmp(argv[1], "earlywrite") == 0) {
+        struct sockaddr_in sa;
+        memset(&sa, 0, sizeof sa);
+        sa.sin_family = AF_INET;
+        sa.sin_port = htons((unsigned short)atoi(argv[3]));
+        sa.sin_addr.s_addr = inet_addr(argv[2]);
+        int fd = socket(AF_INET, SOCK_STREAM, 0);
+        int fl = fcntl(fd, F_GETFL);
+        fcntl(fd, F_SETFL, fl | O_NONBLOCK);
+        int r = connect(fd, (struct sockaddr *)&sa, sizeof sa);
+        say("connect1 %s rc=%ld", r < 0 ? strerror(errno) : "ok", r);
+        ssize_t n = write(fd, argv[4], strlen(argv[4]));
+        say("nbwrite %s n=%ld", n < 0 ? strerror(errno) : "ok", (long)n);
+        fcntl(fd, F_SETFL, fl & ~O_NONBLOCK);
+        n = write(fd, argv[4], strlen(argv[4]));
+        say("bwrite %s n=%ld", n < 0 ? strerror(errno) : "ok", (long)n);
+        rc = do_actions(fd, argc - 5, argv + 5);
     } else if (argc >= 3 && strcmp(argv[1], "acceptfull") == 0) {
         struct sockaddr_in sa;
         memset(&sa, 0, sizeof sa);

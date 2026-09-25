@@ -42,6 +42,10 @@ it guards.
     write-closing  TCP-API-13: after shutdown(SHUT_WR), write() fails EPIPE
                    (not ENOTCONN) and raises SIGPIPE; send(MSG_NOSIGNAL)
                    fails EPIPE without one.
+    early-write    TCP-API-14: a write while the handshake is outstanding
+                   returns EAGAIN on a non-blocking socket and, on a
+                   blocking one, waits and goes out once established --
+                   it used to fail ENOTCONN either way.
 
 Run from the repo root after building sys/ and wireguest:
     python3 tests/lib/net/wire/test_tcp_api.py [case...]
@@ -355,6 +359,30 @@ def case_write_closing():
         return None, w
 
 
+def case_early_write():
+    with Wire.boot('earlywrite 10.0.2.2 %d early sleep:60' % PORT) as w:
+        syn = w.expect(lambda s: s.flags & SYN and s.dport == PORT, 90, 'SYN')
+        if not syn:
+            return 'no SYN', w
+        if not w.wait_serial('guest: nbwrite', 10):
+            return 'no non-blocking write report', w
+        nb = line(w, 'nbwrite')[0]
+        if 'temporarily unavailable' not in nb.lower():
+            return 'non-blocking write in SYN-SENT: %s (want EAGAIN)' % nb, w
+        w.pump(2.0)                              # the blocking write waits
+        if line(w, 'bwrite', timeout=0):
+            return 'blocking write returned before the handshake: %s' % line(w, 'bwrite')[0], w
+        g = syn.seq + 1
+        w.send(Seg(PORT, syn.sport, PISS, g, SYN | ACK))
+        d = w.expect(lambda s: s.data == b'early', 5, 'data')
+        if not d or d.seq != g:
+            return 'the queued write never went out: %r' % d, w
+        b = line(w, 'bwrite')
+        if not b or 'ok n=5' not in b[0]:
+            return 'blocking write: %s' % b, w
+        return None, w
+
+
 CASES = (('reconnect', case_reconnect),
          ('connect-twice', case_connect_twice),
          ('listen-connect', case_listen_connect),
@@ -366,7 +394,8 @@ CASES = (('reconnect', case_reconnect),
          ('linger-abort', case_linger_abort),
          ('unread-close', case_unread_close),
          ('accept-emfile', case_accept_emfile),
-         ('write-closing', case_write_closing))
+         ('write-closing', case_write_closing),
+         ('early-write', case_early_write))
 
 
 def main():

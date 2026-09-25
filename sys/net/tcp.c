@@ -2571,6 +2571,23 @@ static ssize_t tcp_send_body(tcp_pcb_t *p, const void *buf, size_t len, int nonb
     const uint8_t *b = (const uint8_t *)buf;
     size_t sent = 0;
     while (sent < len) {
+        /* TCP-API-14: RFC 793 3.9 SEND in SYN-SENT/SYN-RECEIVED queues the
+         * data for transmission once the connection is established.  It
+         * failed ENOTCONN instead, so a client that wrote right after a
+         * non-blocking connect() lost its first write.  Wait for the
+         * handshake (a blocking socket) or report EAGAIN (non-blocking);
+         * the state check below then decides as usual. */
+        if (p->state == TCP_SYN_SENT || p->state == TCP_SYN_RECEIVED) {
+            if (nonblock) return sent ? (ssize_t)sent : -EAGAIN;
+            if (deadline && get_ticks() >= deadline)
+                return sent ? (ssize_t)sent : -EAGAIN;
+            current_thread->flags |= THREAD_F_INTERRUPTIBLE;
+            sched_sleep_until(p->connect_chan, get_ticks() + TCP_SLEEP_POLL);
+            current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
+            if (current_thread->sig_pending & ~current_thread->sig_mask)
+                return sent ? (ssize_t)sent : -EINTR;
+            continue;
+        }
         if (p->state != TCP_ESTABLISHED && p->state != TCP_CLOSE_WAIT) {
             /* A connection that was up and then failed (RST ->
              * ECONNRESET, RTO -> ETIMEDOUT) reports EPIPE; one that
