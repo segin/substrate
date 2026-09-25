@@ -159,6 +159,23 @@ static uint16_t inet_csum(const void *data, size_t len) {
     return (uint16_t)__builtin_bswap16((uint16_t)~sum);
 }
 
+/* 1 if a UDP datagram's (non-zero) checksum verifies over its IPv4
+ * pseudo-header, 0 otherwise. */
+static int udp_csum_ok(const struct ip_hdr *ih, const struct udp_hdr *uh,
+                       size_t udp_len) {
+    uint32_t sum = 0;
+    const uint8_t *a = (const uint8_t *)&ih->saddr;       /* saddr, daddr */
+    for (int i = 0; i < 8; i += 2) sum += ((uint32_t)a[i] << 8) | a[i + 1];
+    sum += IPPROTO_UDP;
+    sum += (uint32_t)udp_len;
+    const uint8_t *p = (const uint8_t *)uh;
+    size_t n = udp_len;
+    while (n > 1) { sum += ((uint32_t)p[0] << 8) | p[1]; p += 2; n -= 2; }
+    if (n) sum += (uint32_t)p[0] << 8;
+    while (sum >> 16) sum = (sum & 0xFFFF) + (sum >> 16);
+    return sum == 0xFFFF;
+}
+
 /* DHC-14: deadlines are measured on the monotonic clock.  They were taken
  * from gettimeofday(), so a wall-clock step during boot (an RTC read, NTP)
  * expired every wait at once -- all the DISCOVERs went out back to back and
@@ -472,11 +489,31 @@ static int recv_dhcp(int pkts, uint8_t *rxbuf, size_t cap, uint32_t xid,
         struct ip_hdr *ih = (struct ip_hdr *)(rxbuf + sizeof(*eh));
         size_t hlen = (ih->vhl & 0x0F) * 4;
         if (ih->proto != IPPROTO_UDP) continue;
+        /* DHC-10: AF_PACKET hands us raw frames, bypassing every check the
+         * kernel's IP and UDP input would make, so make them here: IPv4
+         * with a sane header, not a fragment, a good header checksum, a
+         * reply from the server port, a UDP length that fits the frame and
+         * bounds the BOOTP body, a UDP checksum that is absent or right,
+         * and the DHCP magic cookie.  Only op and xid were checked, and
+         * the body was sized by the frame, not the UDP length. */
+        size_t ip_avail = (size_t)r - sizeof(*eh);
+        if ((ih->vhl >> 4) != 4 || hlen < sizeof(*ih) ||
+            hlen + sizeof(struct udp_hdr) > ip_avail) continue;
+        if (__builtin_bswap16(ih->frag_off) & 0x3FFF) continue;
+        if (inet_csum(ih, hlen) != 0) continue;
+        size_t ip_tot = __builtin_bswap16(ih->tot_len);
+        if (ip_tot < hlen + sizeof(struct udp_hdr) || ip_tot > ip_avail)
+            continue;
         struct udp_hdr *uh = (struct udp_hdr *)(rxbuf + sizeof(*eh) + hlen);
         if (__builtin_bswap16(uh->dst) != 68) continue;
+        if (__builtin_bswap16(uh->src) != 67) continue;
+        size_t udp_len = __builtin_bswap16(uh->len);
+        if (udp_len < sizeof(*uh) + 240 || udp_len > ip_tot - hlen) continue;
+        if (uh->check && udp_csum_ok(ih, uh, udp_len) == 0) continue;
         const struct bootp *bp =
             (const struct bootp *)(rxbuf + sizeof(*eh) + hlen + sizeof(*uh));
-        size_t bootp_len = (size_t)r - sizeof(*eh) - hlen - sizeof(*uh);
+        size_t bootp_len = udp_len - sizeof(*uh);
+        if (__builtin_bswap32(bp->magic) != DHCP_MAGIC) continue;
         if (bp->op != 2 || bp->xid != xid) continue;
         size_t mlen;
         const uint8_t *mt = find_opt(bp, bootp_len, DHCP_OPT_MSGTYPE, &mlen);
@@ -779,6 +816,9 @@ static int extend(const char *iface, const uint8_t hw[6], struct lease *L,
             ssize_t r = recv(s, buf, sizeof(buf), 0);
             if (r < 240) continue;
             const struct bootp *bp = (const struct bootp *)buf;
+            /* The kernel checked IP and UDP on this path; the cookie is
+             * ours to check (DHC-10). */
+            if (__builtin_bswap32(bp->magic) != DHCP_MAGIC) continue;
             if (bp->op != 2 || bp->xid != xid) continue;
             size_t mlen;
             const uint8_t *mt = find_opt(bp, (size_t)r, DHCP_OPT_MSGTYPE, &mlen);

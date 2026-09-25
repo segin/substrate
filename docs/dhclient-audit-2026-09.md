@@ -372,7 +372,7 @@ frames exactly as each case needs.
 - [x] **DHC-07** ARP-probe the address; DHCPDECLINE if it's taken; gratuitous ARP when bound -- `arp_in_use()` (2 probes, sender 0.0.0.0, 1 s listen; own-MAC frames ignored), DHCPDECLINE per Table 5 then 10 s and INIT; `probe-announce`, `declined` in `test_dhclient.py`
 - [x] **DHC-08** Defaults for missing netmask/router; fail on ioctl errors -- classful mask without option 1, gateway cleared without option 3, a failed ioctl fails the bind (no "bound", non-zero exit); `no-options` in `test_dhclient.py` (the failure path has no test: the harness cannot make the ioctls fail)
 - [x] **DHC-09** Option overload, concatenation, Maximum Message Size -- `find_opt()` reads options, then file/sname per option 52, concatenating repeats; option 57 = 1500 in DISCOVER/REQUEST; `overload`, `concat`, `maxsize` in `test_dhclient.py`
-- [ ] **DHC-10** Validate IP/UDP headers on received frames
+- [x] **DHC-10** Validate IP/UDP headers on received frames -- `recv_dhcp()` checks version, header length, fragments, IP checksum, source port 67, UDP length (which now bounds the body) and checksum, and the magic cookie; the renew path checks the cookie; `bad-headers` in `test_dhclient.py`
 - [ ] **DHC-11** Validate server identifier and yiaddr in OFFER/ACK
 - [ ] **DHC-12** Sanitize option 15/119 before writing resolv.conf
 - [ ] **DHC-13** Clear the BROADCAST flag once unicast reception is confirmed

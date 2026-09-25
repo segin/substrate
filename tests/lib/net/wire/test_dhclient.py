@@ -20,6 +20,11 @@ exactly as the case needs.
                   instances are concatenated.
     maxsize       DHC-09: DISCOVER and REQUEST carry a Maximum DHCP Message
                   Size of at least 576.
+    bad-headers   DHC-10: OFFERs with a bad IP checksum, a bad UDP checksum,
+                  a source port other than 67, the MF bit, IP version 6, a
+                  16-octet IP header, a UDP length too short for the body,
+                  or a wrong magic cookie are all ignored; a well-formed
+                  OFFER after them is the one requested.
     probe-announce DHC-07: before using the address the client ARP-probes it
                   (sender IP 0), and once bound announces it with a
                   gratuitous ARP.
@@ -63,7 +68,7 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from wire import Wire, TOP, PEER_IP, PEER_MAC, GUEST_MAC  # noqa: E402
+from wire import Wire, TOP, PEER_IP, PEER_MAC, GUEST_MAC, csum  # noqa: E402
 
 DHCLIENT = os.path.join(TOP, 'sbin', 'dhclient', 'dhclient')
 LEASED = '10.0.2.50'
@@ -158,6 +163,12 @@ class Server:
         """opts: a dict, or a list of (code, value) pairs when a code must
         repeat.  sname/file: raw field contents (e.g. overloaded options),
         zero-padded to 64/128 octets."""
+        body = self.body(req, mtype, yiaddr, opts, server_id, sname, file)
+        self.w.send_udp(67, 68, body, src=PEER_IP, dst=dst, eth_dst=eth_dst)
+
+    def body(self, req, mtype, yiaddr=LEASED, opts=None, server_id=PEER_IP,
+             sname=b'', file=b''):
+        """The BOOTP/DHCP body of a reply to req."""
         body = struct.pack('!BBBBIHH4s4s4s4s', 2, 1, 6, 0, req.xid, 0,
                            req.flags, b'\0' * 4,
                            socket.inet_aton(yiaddr if mtype != NAK else '0.0.0.0'),
@@ -170,7 +181,7 @@ class Server:
         for code, val in items:
             o += bytes([code, len(val)]) + val
         body += struct.pack('!I', MAGIC) + o + b'\xff'
-        self.w.send_udp(67, 68, body, src=PEER_IP, dst=dst, eth_dst=eth_dst)
+        return body
 
     def std_opts(self, lease=3600):
         return {1: socket.inet_aton(MASK), 3: socket.inet_aton(PEER_IP),
@@ -634,6 +645,60 @@ def case_maxsize():
         return None, w
 
 
+def raw_reply(w, body, bad=None):
+    """Send a DHCP reply as a hand-built frame, broken in the way `bad`
+    names (None: well-formed)."""
+    sport = 1067 if bad == 'sport' else 67
+    if bad == 'magic':
+        body = body[:236] + b'\x63\x82\x53\x00' + body[240:]
+    ulen = 8 + len(body)
+    uh = struct.pack('!HHHH', sport, 68, ulen, 0)
+    pseudo = (socket.inet_aton(PEER_IP) + socket.inet_aton('255.255.255.255') +
+              struct.pack('!BBH', 0, 17, ulen))
+    c = csum(pseudo + uh + body) or 0xFFFF
+    if bad == 'udpcsum':
+        c ^= 0x5555
+    if bad == 'udplen':                     # too short to hold the body
+        uh = struct.pack('!HHHH', sport, 68, 8 + 200, 0)
+    else:
+        uh = uh[:6] + struct.pack('!H', c)
+    vhl = {'ver': 0x65, 'hlen': 0x44}.get(bad, 0x45)
+    frag = 0x2000 if bad == 'frag' else 0
+    ip = struct.pack('!BBHHHBBH4s4s', vhl, 0, 20 + ulen, 0x4242, frag, 64, 17,
+                     0, socket.inet_aton(PEER_IP),
+                     socket.inet_aton('255.255.255.255'))
+    ip = ip[:10] + struct.pack('!H', csum(ip)) + ip[12:]
+    if bad == 'ipcsum':
+        ip = ip[:10] + bytes([ip[10] ^ 0xFF, ip[11]]) + ip[12:]
+    w._send_frame(BCAST_MAC + PEER_MAC + b'\x08\x00' + ip + uh + body)
+
+
+def case_bad_headers():
+    bads = ('ipcsum', 'udpcsum', 'sport', 'frag', 'ver', 'hlen', 'udplen',
+            'magic')
+    with boot() as w:
+        s = Server(w)
+        d = s.expect(DISCOVER, 90)
+        if not d:
+            return 'no DHCPDISCOVER', w
+        # each malformed OFFER offers its own address; only the last,
+        # well-formed one offers LEASED
+        for k, bad in enumerate(bads):
+            raw_reply(w, s.body(d, OFFER, '10.0.2.%d' % (60 + k),
+                                opts=s.std_opts()), bad)
+        w.pump(0.5)
+        raw_reply(w, s.body(d, OFFER, LEASED, opts=s.std_opts()))
+        r = s.expect(REQUEST, 10)
+        if not r:
+            return 'no REQUEST after a well-formed OFFER', w
+        got = r.ip_opt(50)
+        if got != LEASED:
+            k = int(got.split('.')[-1]) - 60 if got else -1
+            return 'accepted an OFFER with a bad %s' % (
+                bads[k] if 0 <= k < len(bads) else got), w
+        return None, w
+
+
 OFFLINK = '198.51.100.1'
 
 
@@ -676,6 +741,7 @@ def case_no_options():
 CASES = (('bound', case_bound), ('ack-config', case_ack_config),
          ('no-options', case_no_options), ('overload', case_overload),
          ('concat', case_concat), ('maxsize', case_maxsize),
+         ('bad-headers', case_bad_headers),
          ('probe-announce', case_probe_announce), ('declined', case_declined),
          ('renew', case_renew), ('rebind', case_rebind),
          ('expire', case_expire), ('nak-renew', case_nak_renew), ('clock-step', case_clock_step),
