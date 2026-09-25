@@ -71,6 +71,7 @@ struct sockaddr_ll {
 #define DHCP_OFFER    2
 #define DHCP_REQUEST  3
 #define DHCP_ACK      5
+#define DHCP_NAK      6
 
 /* DHCP option codes (RFC 2132) */
 #define DHCP_OPT_SUBNET   1
@@ -639,8 +640,9 @@ int main(int argc, char **argv) {
             return 1;
         }
 
-        /* ---- REQUEST, retransmitted until ACK ---- */
-        for (int rtry = 0; rtry < DHCP_REQUEST_TRIES; rtry++) {
+        /* ---- REQUEST, retransmitted until ACK or NAK ---- */
+        int naked = 0;
+        for (int rtry = 0; rtry < DHCP_REQUEST_TRIES && !naked; rtry++) {
             size_t n = build_dhcp_packet(pkt, hw, xid, DHCP_REQUEST,
                                          offered_ip, server_id);
             if (sendto(pkts, pkt, n, 0, (struct sockaddr *)&sll,
@@ -653,6 +655,15 @@ int main(int argc, char **argv) {
             double deadline = now_sec() + retx_delay(rtry);
             while ((t = recv_dhcp(pkts, rxbuf, sizeof(rxbuf), xid, deadline,
                                   &bp, &bootp_len)) != 0) {
+                /* DHC-04: RFC 2131 3.1 step 5 / Figure 5 -- a DHCPNAK sends
+                 * the client straight back to INIT.  It was discarded like
+                 * any other non-ACK, so dhclient sat out its timeout and
+                 * gave up when an immediate restart would have worked. */
+                if (t == DHCP_NAK) {
+                    fprintf(stdout, "dhclient: DHCPNAK\n");
+                    naked = 1;
+                    break;
+                }
                 if (t != DHCP_ACK) continue;
                 fprintf(stdout, "dhclient: DHCPACK\n");
                 close(pkts);
@@ -660,8 +671,9 @@ int main(int argc, char **argv) {
                                      subnet, router);
             }
         }
-        fprintf(stderr, "dhclient: no DHCPACK after %d DHCPREQUESTs; "
-                "initialization failed\n", DHCP_REQUEST_TRIES);
+        if (!naked)
+            fprintf(stderr, "dhclient: no DHCPACK after %d DHCPREQUESTs; "
+                    "initialization failed\n", DHCP_REQUEST_TRIES);
     }
     fprintf(stderr, "dhclient: no lease after %d attempts; giving up\n",
             DHCP_INIT_ATTEMPTS);

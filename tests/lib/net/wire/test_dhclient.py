@@ -20,6 +20,8 @@ exactly as the case needs.
     request-restart DHC-03: after four unanswered REQUESTs the client goes
                   back to INIT -- a new DISCOVER with a new xid -- and binds
                   from that exchange.
+    nak           DHC-04: a DHCPNAK to the REQUEST sends the client back to
+                  INIT at once (new DISCOVER, new xid), not after a timeout.
 
 Run from the repo root after building sys/, wireguest and sbin/dhclient:
     python3 tests/lib/net/wire/test_dhclient.py [case...]
@@ -280,9 +282,34 @@ def case_request_restart():
         return None, w
 
 
+def case_nak():
+    with boot() as w:
+        s = Server(w)
+        r, d, err = offer_and_request(s)
+        if err:
+            return err, w
+        s.reply(r, NAK)
+        nak_t = time.time()
+        d2 = s.expect(DISCOVER, 10)
+        if not d2:
+            return 'no new DISCOVER after the DHCPNAK', w
+        if d2.t - nak_t > 2.0:
+            return 'restarted %.1f s after the NAK, not at once' % (d2.t - nak_t), w
+        if d2.xid == d.xid:
+            return 'the restarted DISCOVER reused the old xid', w
+        s.reply(d2, OFFER, opts=s.std_opts())
+        r2 = s.expect(REQUEST, 10)
+        if not r2:
+            return 'no REQUEST after the restart', w
+        s.reply(r2, ACK, opts=s.std_opts())
+        if not w.wait_serial('dhclient: bound', 10):
+            return 'not bound after the restart', w
+        return None, w
+
+
 CASES = (('bound', case_bound), ('clock-step', case_clock_step),
          ('backoff', case_backoff), ('request-retx', case_request_retx),
-         ('request-restart', case_request_restart))
+         ('request-restart', case_request_restart), ('nak', case_nak))
 
 
 def main():
