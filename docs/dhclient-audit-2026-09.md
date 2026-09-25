@@ -364,7 +364,7 @@ One item per finding, to work through one at a time as with
 DHCP server (`tests/lib/net/wire/`), which can send OFFER, ACK and NAK
 frames exactly as each case needs.
 
-- [ ] **DHC-02** Track the lease: T1/T2 renew and rebind, expiry drops the address and restarts
+- [x] **DHC-02** Track the lease: T1/T2 renew and rebind, expiry drops the address and restarts -- once bound dhclient forks; the child renews at T1 (unicast) and rebinds at T2 (broadcast) over a UDP socket per Table 4, retransmitting per 4.4.5, and on NAK or expiry drops the address and reacquires; an infinite lease is not tracked.  `renew`, `rebind`, `expire`, `nak-renew` in `test_dhclient.py`
 - [x] **DHC-03** Retransmit DHCPREQUEST; on exhaustion return to INIT -- 4 REQUESTs on `retx_delay()`, then INIT with a new xid, up to `DHCP_INIT_ATTEMPTS` (3); `request-retx`, `request-restart` in `test_dhclient.py`
 - [x] **DHC-04** Handle DHCPNAK: restart from INIT -- a NAK with the current xid ends the REQUEST phase and re-enters INIT at once; `nak` in `test_dhclient.py`
 - [x] **DHC-05** Randomized exponential backoff for DISCOVER and REQUEST -- `retx_delay()` (4, 8, 16, 32 s, capped at 64, each +-1 s); DISCOVER uses it now, REQUEST with DHC-03.  Four DISCOVERs in the foreground, about 60 s, by choice (the RFC 3.1 example).  `backoff` in `test_dhclient.py`

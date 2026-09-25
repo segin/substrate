@@ -23,6 +23,7 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+#include <poll.h>
 #include <sys/socket.h>
 #include <sys/ioctl.h>
 #include <netinet/in.h>
@@ -61,6 +62,10 @@ struct sockaddr_ll {
 #define DHCP_REQUEST_TRIES 4
 #define DHCP_INIT_ATTEMPTS 3
 
+/* DHC-02: after losing a lease, the pause between failed reacquisitions
+ * in the background. */
+#define DHCP_REACQUIRE_WAIT 60
+
 /* RFC 2131 4.1 retransmission: 4 s before the first retransmission, doubled
  * each time up to 64 s, each randomized by a uniform -1..+1 s. */
 #define DHCP_RETX_BASE 4.0
@@ -84,6 +89,8 @@ struct sockaddr_ll {
 #define DHCP_OPT_MSGTYPE  53
 #define DHCP_OPT_SRV_ID   54
 #define DHCP_OPT_PARAMLST 55
+#define DHCP_OPT_T1       58   /* Renewal (T1) Time Value */
+#define DHCP_OPT_T2       59   /* Rebinding (T2) Time Value */
 #define DHCP_OPT_CLIENT_ID 61  /* RFC 2132 §9.14 — Client Identifier */
 #define DHCP_OPT_SEARCH   119  /* RFC 3397: Domain Search */
 #define DHCP_OPT_END      255
@@ -244,10 +251,18 @@ static size_t read_system_hostname(char *buf, size_t bufsz) {
     return n;
 }
 
+/* Build an Ethernet + IP + UDP + BOOTP frame.  `ciaddr` is our address in
+ * BOUND/RENEWING/REBINDING (0 before); 'requested IP address' and 'server
+ * identifier' are included only when non-zero, since RFC 2131 Table 4
+ * forbids both in RENEWING and REBINDING.  A caller sending through an
+ * AF_INET socket takes the BOOTP body at BOOTP_OFF. */
+#define BOOTP_OFF (sizeof(struct eth_hdr) + sizeof(struct ip_hdr) + \
+                   sizeof(struct udp_hdr))
 static size_t build_dhcp_packet(uint8_t *out,
                                 const uint8_t hw[6],
                                 uint32_t xid,
                                 uint8_t msg_type,
+                                uint32_t ciaddr,
                                 uint32_t request_ip,
                                 uint32_t server_id) {
     struct eth_hdr *eh = (struct eth_hdr *)out;
@@ -266,16 +281,21 @@ static size_t build_dhcp_packet(uint8_t *out,
     bp->htype = 1;
     bp->hlen  = 6;
     bp->xid   = xid;
-    bp->flags = __builtin_bswap16(0x8000);  /* BROADCAST flag */
+    /* BROADCAST flag until configured; with ciaddr set the server unicasts
+     * the reply to that address (RFC 2131 4.1). */
+    bp->flags = ciaddr ? 0 : __builtin_bswap16(0x8000);
+    bp->ciaddr = ciaddr;
     memcpy(bp->chaddr, hw, 6);
     bp->magic = __builtin_bswap32(DHCP_MAGIC);
 
     /* Options */
     uint8_t *op = bp->options;
     *op++ = DHCP_OPT_MSGTYPE; *op++ = 1; *op++ = msg_type;
-    if (msg_type == DHCP_REQUEST) {
+    if (request_ip) {
         *op++ = DHCP_OPT_REQ_IP; *op++ = 4;
         memcpy(op, &request_ip, 4); op += 4;
+    }
+    if (server_id) {
         *op++ = DHCP_OPT_SRV_ID; *op++ = 4;
         memcpy(op, &server_id, 4); op += 4;
     }
@@ -337,7 +357,7 @@ static size_t build_dhcp_packet(uint8_t *out,
     ih->ttl = 64;
     ih->proto = IPPROTO_UDP;
     ih->check = 0;
-    ih->saddr = 0;                  /* 0.0.0.0 */
+    ih->saddr = ciaddr;             /* 0.0.0.0 until configured (4.1) */
     ih->daddr = 0xFFFFFFFFu;        /* 255.255.255.255 */
     ih->check = inet_csum(ih, sizeof(*ih));
 
@@ -411,9 +431,10 @@ static int recv_dhcp(int pkts, uint8_t *rxbuf, size_t cap, uint32_t xid,
  * sent the router or mask only in its ACK left the host without a default
  * route or with the wrong mask. */
 static int install_lease(const char *iface, const struct bootp *bp,
-                         size_t bootp_len) {
+                         size_t bootp_len, const char *what) {
     uint8_t mlen;
-    uint32_t offered_ip = bp->yiaddr, subnet = 0, router = 0;
+    uint32_t offered_ip = bp->yiaddr ? bp->yiaddr : bp->ciaddr;
+    uint32_t subnet = 0, router = 0;
     const uint8_t *p = find_opt(bp, bootp_len, DHCP_OPT_SUBNET, &mlen);
     if (p && mlen == 4) memcpy(&subnet, p, 4);
     p = find_opt(bp, bootp_len, DHCP_OPT_ROUTER, &mlen);
@@ -526,7 +547,7 @@ static int install_lease(const char *iface, const struct bootp *bp,
     uint8_t *yi = (uint8_t *)&offered_ip;
     uint8_t *m  = (uint8_t *)&subnet;
     uint8_t *r2 = (uint8_t *)&router;
-    fprintf(stdout, "dhclient: bound %u.%u.%u.%u/%u.%u.%u.%u",
+    fprintf(stdout, "dhclient: %s %u.%u.%u.%u/%u.%u.%u.%u", what,
             yi[0], yi[1], yi[2], yi[3],
             m[0], m[1], m[2], m[3]);
     if (router) fprintf(stdout, " via %u.%u.%u.%u",
@@ -535,21 +556,179 @@ static int install_lease(const char *iface, const struct bootp *bp,
     return 0;
 }
 
-/* ---- main ---- */
+/* ---- lease ---- */
 
-int main(int argc, char **argv) {
-    if (argc != 2) {
-        fprintf(stderr, "usage: dhclient <iface>\n");
-        return 2;
+/*
+ * DHC-02: the lease an ACK granted, on the monotonic clock.  RFC 2131
+ * 4.4.1/4.4.5: the lease runs from the time the acknowledged DHCPREQUEST
+ * was sent; T1 and T2 come from options 58/59 or default to 0.5 and 0.875
+ * of it.
+ */
+struct lease {
+    uint32_t addr;      /* network byte order */
+    uint32_t server;    /* 'server identifier' of the leasing server */
+    uint32_t router;    /* installed default route, to drop with the lease */
+    double   start;     /* now_sec() when the acknowledged REQUEST went out */
+    double   t1, t2, len;
+    int      infinite;  /* lease time 0xffffffff (3.3), or none given */
+};
+
+static uint32_t opt_u32(const struct bootp *bp, size_t len, uint8_t code,
+                        int *found) {
+    uint8_t mlen;
+    uint32_t v = 0;
+    const uint8_t *p = find_opt(bp, len, code, &mlen);
+    *found = p && mlen == 4;
+    if (*found) {
+        memcpy(&v, p, 4);
+        v = __builtin_bswap32(v);
     }
-    const char *iface = argv[1];
+    return v;
+}
 
-    uint8_t hw[6];
-    int ifindex;
-    get_hw_addr(iface, hw, &ifindex);
-    fprintf(stdout, "dhclient: %s ifindex=%d hw=%02x:%02x:%02x:%02x:%02x:%02x\n",
-            iface, ifindex, hw[0], hw[1], hw[2], hw[3], hw[4], hw[5]);
+static void lease_from_ack(const struct bootp *bp, size_t len, double sent_at,
+                           struct lease *L) {
+    uint8_t mlen;
+    int has;
+    L->addr = bp->yiaddr ? bp->yiaddr : L->addr;
+    const uint8_t *p = find_opt(bp, len, DHCP_OPT_SRV_ID, &mlen);
+    if (p && mlen == 4) memcpy(&L->server, p, 4);
+    L->router = 0;
+    p = find_opt(bp, len, DHCP_OPT_ROUTER, &mlen);
+    if (p && mlen >= 4) memcpy(&L->router, p, 4);
+    L->start = sent_at;
 
+    uint32_t secs = opt_u32(bp, len, DHCP_OPT_LEASE, &has);
+    L->infinite = !has || secs == 0xFFFFFFFFu;
+    if (L->infinite)
+        return;
+    L->len = secs;
+    int h1, h2;
+    double t1 = opt_u32(bp, len, DHCP_OPT_T1, &h1);
+    double t2 = opt_u32(bp, len, DHCP_OPT_T2, &h2);
+    if (!h1) t1 = 0.5 * L->len;
+    if (!h2) t2 = 0.875 * L->len;
+    if (!(0 < t1 && t1 < t2 && t2 < L->len)) {  /* 4.4.5: T1 < T2 < lease */
+        t1 = 0.5 * L->len;
+        t2 = 0.875 * L->len;
+    }
+    /* 4.4.5: "some random fuzz around a fixed value, to avoid
+     * synchronization of client reacquisition" -- +-5%, keeping the
+     * order. */
+    t1 *= 1.0 + ((double)arc4random_uniform(2001) - 1000.0) / 20000.0;
+    t2 *= 1.0 + ((double)arc4random_uniform(2001) - 1000.0) / 20000.0;
+    if (t2 >= L->len) t2 = 0.95 * L->len;
+    if (t1 >= t2) t1 = 0.9 * t2;
+    L->t1 = t1;
+    L->t2 = t2;
+}
+
+/* Stop using the address: 3.7 / 4.4.5 "MUST immediately stop any other
+ * network processing". */
+static void drop_lease(const char *iface, const struct lease *L) {
+    if (L->router) set_ipv4(iface, SIOCSIFGATEWAY, 0);
+    set_ipv4(iface, SIOCSIFADDR, 0);
+}
+
+static void sleep_until(double t) {
+    for (;;) {
+        double left = t - now_sec();
+        if (left <= 0) return;
+        if (left > 60.0) left = 60.0;       /* re-check the clock regularly */
+        struct timespec ts;
+        ts.tv_sec = (time_t)left;
+        ts.tv_nsec = (long)((left - (double)ts.tv_sec) * 1e9);
+        nanosleep(&ts, NULL);
+    }
+}
+
+/*
+ * RENEWING (rebinding == 0: unicast to the leasing server, until T2) or
+ * REBINDING (broadcast, until the lease ends), per 4.4.5 and Table 4:
+ * ciaddr set, no 'server identifier', no 'requested IP address'.  With no
+ * answer the client waits half the remaining time, down to a minimum of
+ * 60 s, before retransmitting.  The host is configured by now, so this
+ * goes through an ordinary UDP socket on port 68 -- a unicast renewal needs
+ * the kernel's routing and ARP.  Returns 1 on an ACK (lease updated and
+ * reinstalled), -1 on a NAK, 0 when the phase ran out.
+ */
+static int extend(const char *iface, const uint8_t hw[6], struct lease *L,
+                  int rebinding) {
+    double deadline = L->start + (rebinding ? L->len : L->t2);
+    if (now_sec() >= deadline) return 0;
+
+    int s = socket(AF_INET, SOCK_DGRAM, 0);
+    if (s < 0) { perror("dhclient: socket"); return 0; }
+    int one = 1;
+    setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+    setsockopt(s, SOL_SOCKET, SO_BROADCAST, &one, sizeof(one));
+    struct sockaddr_in me;
+    memset(&me, 0, sizeof(me));
+    me.sin_family = AF_INET;
+    me.sin_port = htons(68);
+    if (bind(s, (struct sockaddr *)&me, sizeof(me)) < 0) {
+        perror("dhclient: bind port 68");
+        close(s);
+        return 0;
+    }
+    struct sockaddr_in to;
+    memset(&to, 0, sizeof(to));
+    to.sin_family = AF_INET;
+    to.sin_port = htons(67);
+    to.sin_addr.s_addr = rebinding ? 0xFFFFFFFFu : L->server;
+
+    uint32_t xid = ((uint32_t)rand() << 16) ^ (uint32_t)rand();
+    uint8_t pkt[1500], buf[1600];
+    const char *phase = rebinding ? "rebinding" : "renewing";
+    while (now_sec() < deadline) {
+        size_t n = build_dhcp_packet(pkt, hw, xid, DHCP_REQUEST, L->addr, 0, 0);
+        double sent_at = now_sec();
+        if (sendto(s, pkt + BOOTP_OFF, n - BOOTP_OFF, 0,
+                   (struct sockaddr *)&to, sizeof(to)) < 0)
+            fprintf(stderr, "dhclient: sendto REQUEST (%s): %s\n", phase,
+                    strerror(errno));
+        fprintf(stdout, "dhclient: DHCPREQUEST (%s)\n", phase);
+
+        double wait = (deadline - now_sec()) / 2.0;
+        if (wait < 60.0) wait = 60.0;
+        double until = now_sec() + wait;
+        if (until > deadline) until = deadline;
+        for (;;) {
+            double left = until - now_sec();
+            if (left <= 0) break;
+            struct pollfd pfd = { .fd = s, .events = POLLIN };
+            if (poll(&pfd, 1, (int)(left * 1000.0) + 1) <= 0) continue;
+            ssize_t r = recv(s, buf, sizeof(buf), 0);
+            if (r < 240) continue;
+            const struct bootp *bp = (const struct bootp *)buf;
+            if (bp->op != 2 || bp->xid != xid) continue;
+            uint8_t mlen;
+            const uint8_t *mt = find_opt(bp, (size_t)r, DHCP_OPT_MSGTYPE, &mlen);
+            if (!mt || mlen < 1) continue;
+            if (*mt == DHCP_NAK) {
+                fprintf(stdout, "dhclient: DHCPNAK (%s)\n", phase);
+                close(s);
+                return -1;
+            }
+            if (*mt != DHCP_ACK) continue;
+            fprintf(stdout, "dhclient: DHCPACK (%s)\n", phase);
+            lease_from_ack(bp, (size_t)r, sent_at, L);
+            install_lease(iface, bp, (size_t)r,
+                          rebinding ? "rebound" : "renewed");
+            close(s);
+            return 1;
+        }
+    }
+    close(s);
+    return 0;
+}
+
+/* ---- INIT through BOUND ---- */
+
+/* Acquire a lease from scratch (INIT -> SELECTING -> REQUESTING -> BOUND)
+ * and install it.  Returns 0 with *L filled in, or 1 if none was had. */
+static int acquire(const char *iface, const uint8_t hw[6], int ifindex,
+                   struct lease *L) {
     int pkts = socket(AF_PACKET, SOCK_RAW, __builtin_bswap16(0x0003));
     if (pkts < 0) { perror("socket(AF_PACKET)"); return 1; }
     struct sockaddr_ll sll;
@@ -577,7 +756,6 @@ int main(int argc, char **argv) {
         }
     }
 
-    srand((unsigned)now_sec());
     uint8_t pkt[1500];
     uint8_t rxbuf[1600];
     const struct bootp *bp;
@@ -614,7 +792,7 @@ int main(int argc, char **argv) {
         uint32_t offered_ip = 0, server_id = 0;
         double started = now_sec();
         for (int dtry = 0; dtry < DHCP_DISCOVER_TRIES && !offered_ip; dtry++) {
-            size_t n = build_dhcp_packet(pkt, hw, xid, DHCP_DISCOVER, 0, 0);
+            size_t n = build_dhcp_packet(pkt, hw, xid, DHCP_DISCOVER, 0, 0, 0);
             if (sendto(pkts, pkt, n, 0, (struct sockaddr *)&sll,
                        sizeof(sll)) != (ssize_t)n) {
                 perror("sendto DISCOVER"); close(pkts); return 1;
@@ -650,8 +828,9 @@ int main(int argc, char **argv) {
         /* ---- REQUEST, retransmitted until ACK or NAK ---- */
         int naked = 0;
         for (int rtry = 0; rtry < DHCP_REQUEST_TRIES && !naked; rtry++) {
-            size_t n = build_dhcp_packet(pkt, hw, xid, DHCP_REQUEST,
+            size_t n = build_dhcp_packet(pkt, hw, xid, DHCP_REQUEST, 0,
                                          offered_ip, server_id);
+            double sent_at = now_sec();
             if (sendto(pkts, pkt, n, 0, (struct sockaddr *)&sll,
                        sizeof(sll)) != (ssize_t)n) {
                 perror("sendto REQUEST"); close(pkts); return 1;
@@ -674,7 +853,10 @@ int main(int argc, char **argv) {
                 if (t != DHCP_ACK) continue;
                 fprintf(stdout, "dhclient: DHCPACK\n");
                 close(pkts);
-                return install_lease(iface, bp, bootp_len);
+                memset(L, 0, sizeof(*L));
+                L->server = server_id;
+                lease_from_ack(bp, bootp_len, sent_at, L);
+                return install_lease(iface, bp, bootp_len, "bound");
             }
         }
         if (!naked)
@@ -685,4 +867,69 @@ int main(int argc, char **argv) {
             DHCP_INIT_ATTEMPTS);
     close(pkts);
     return 1;
+}
+
+/*
+ * DHC-02: keep the lease.  RFC 2131 4.4.5: at T1 renew with the leasing
+ * server, at T2 rebind with any, and if the lease runs out "the client
+ * moves to INIT state, MUST immediately stop any other network
+ * processing"; 3.7 likewise.  dhclient requested the lease time and
+ * never read it, then exited once bound, so nothing renewed the lease and
+ * the address stayed in use after it expired -- by which time the server
+ * could have given it to another host.
+ */
+static void maintain(const char *iface, const uint8_t hw[6], int ifindex,
+                     struct lease *L) {
+    for (;;) {
+        sleep_until(L->start + L->t1);
+        int r = extend(iface, hw, L, 0);            /* RENEWING */
+        if (r == 0) r = extend(iface, hw, L, 1);    /* REBINDING */
+        if (r > 0) {
+            if (L->infinite) return;
+            continue;                               /* BOUND again */
+        }
+        drop_lease(iface, L);
+        fprintf(stdout, "dhclient: %s; address released, restarting "
+                "from INIT\n", r < 0 ? "lease refused" : "lease expired");
+        while (acquire(iface, hw, ifindex, L) != 0)
+            sleep(DHCP_REACQUIRE_WAIT);
+        if (L->infinite) return;
+    }
+}
+
+int main(int argc, char **argv) {
+    if (argc != 2) {
+        fprintf(stderr, "usage: dhclient <iface>\n");
+        return 2;
+    }
+    const char *iface = argv[1];
+
+    uint8_t hw[6];
+    int ifindex;
+    get_hw_addr(iface, hw, &ifindex);
+    fprintf(stdout, "dhclient: %s ifindex=%d hw=%02x:%02x:%02x:%02x:%02x:%02x\n",
+            iface, ifindex, hw[0], hw[1], hw[2], hw[3], hw[4], hw[5]);
+    srand((unsigned)now_sec());
+
+    struct lease L;
+    if (acquire(iface, hw, ifindex, &L) != 0)
+        return 1;
+    if (L.infinite) {
+        fprintf(stdout, "dhclient: infinite lease; nothing to renew\n");
+        return 0;
+    }
+
+    /* Bound: let boot continue, and keep the lease from the background. */
+    fflush(stdout);
+    fflush(stderr);
+    pid_t pid = fork();
+    if (pid < 0) {
+        perror("dhclient: fork; the lease will not be renewed");
+        return 0;
+    }
+    if (pid > 0)
+        return 0;
+    setsid();
+    maintain(iface, hw, ifindex, &L);
+    return 0;
 }

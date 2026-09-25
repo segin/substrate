@@ -10,6 +10,17 @@ exactly as the case needs.
                   offered address, and the guest then answers ARP for it.
     ack-config    DHC-06: the netmask and router come from the DHCPACK --
                   here the OFFER carries neither.
+    renew         DHC-02: with a 20 s lease the client renews at T1 (10 s
+                  +-5%) by unicast to the server -- ciaddr set, no server
+                  identifier or requested address (Table 4) -- takes the
+                  ACK, and renews again T1 after that REQUEST.
+    rebind        DHC-02: with the renewal ignored, a broadcast REBINDING
+                  request at T2 (17.5 s +-5%); its ACK keeps the address.
+    expire        DHC-02: with everything ignored, the address is dropped
+                  when the lease ends (no more ARP replies) and INIT
+                  restarts.
+    nak-renew     DHC-02: a NAK to the renewal drops the address at once
+                  and restarts INIT.
     clock-step    DHC-14: the wall clock is stepped forward an hour every
                   200 ms while dhclient waits for an OFFER; its DISCOVERs
                   stay spaced by the retransmission delay instead of all
@@ -330,7 +341,129 @@ def case_ack_config():
         return None, w
 
 
-CASES = (('bound', case_bound), ('ack-config', case_ack_config), ('clock-step', case_clock_step),
+LEASE = 20          # short lease for the lifecycle cases: T1 ~10 s, T2 ~17.5 s
+
+
+def bind_short(s, w):
+    """Full exchange with a LEASE-second lease.  Returns the time the
+    acknowledged REQUEST arrived (the client's lease start), or None."""
+    r, d, err = offer_and_request(s)
+    if err:
+        return None
+    s.reply(r, ACK, opts=s.std_opts(LEASE))
+    if not w.wait_serial('dhclient: bound', 10):
+        return None
+    return r.t
+
+
+def is_renewal(m):
+    return (m.type == REQUEST and m.ciaddr == LEASED and
+            50 not in m.opts and 54 not in m.opts)
+
+
+def case_renew():
+    with boot() as w:
+        s = Server(w)
+        t0 = bind_short(s, w)
+        if t0 is None:
+            return 'did not bind', w
+        m = s.expect(REQUEST, LEASE)
+        if not m:
+            return 'no DHCPREQUEST before the lease ran out: nothing renews it', w
+        if not is_renewal(m) or m.dst != PEER_IP:
+            return ('first REQUEST after binding is not a RENEWING one '
+                    '(dst %s ciaddr %s opts %s)' % (m.dst, m.ciaddr,
+                                                    sorted(m.opts))), w
+        at = m.t - t0
+        if not 0.5 * LEASE * 0.95 - 0.5 <= at <= 0.5 * LEASE * 1.05 + 0.5:
+            return 'renewed at %.1f s, want T1 = %.1f s +-5%%' % (at, 0.5 * LEASE), w
+        s.reply(m, ACK, opts=s.std_opts(LEASE), dst=LEASED, eth_dst=GUEST_MAC)
+        if not w.wait_serial('dhclient: renewed', 10):
+            return 'the ACK to the renewal was not taken', w
+        m2 = s.expect(REQUEST, LEASE)
+        if not m2 or not is_renewal(m2):
+            return 'no second renewal', w
+        at2 = m2.t - m.t
+        if not 0.5 * LEASE * 0.95 - 0.5 <= at2 <= 0.5 * LEASE * 1.05 + 0.5:
+            return ('second renewal %.1f s after the first; the lease was not '
+                    'restarted from the renewing REQUEST' % at2), w
+        return None, w
+
+
+def case_rebind():
+    with boot() as w:
+        s = Server(w)
+        t0 = bind_short(s, w)
+        if t0 is None:
+            return 'did not bind', w
+        # ignore the unicast renewal; the next REQUEST must be a broadcast
+        # rebinding one at T2
+        end = time.time() + LEASE
+        m = None
+        while time.time() < end:
+            q = s.expect(REQUEST, max(0.1, end - time.time()))
+            if q and q.dst == '255.255.255.255':
+                m = q
+                break
+        if not m:
+            return 'no broadcast REBINDING request before the lease ran out', w
+        if not is_renewal(m):
+            return 'REBINDING request has the wrong fields (Table 4)', w
+        at = m.t - t0
+        if not 0.875 * LEASE * 0.95 - 0.5 <= at <= 0.875 * LEASE * 1.05 + 0.5:
+            return 'rebinding at %.1f s, want T2 = %.1f s +-5%%' % (at, 0.875 * LEASE), w
+        s.reply(m, ACK, opts=s.std_opts(LEASE), dst=LEASED, eth_dst=GUEST_MAC)
+        if not w.wait_serial('dhclient: rebound', 10):
+            return 'the ACK to the rebinding request was not taken', w
+        if not arp_answers(w, LEASED):
+            return 'address lost after rebinding', w
+        return None, w
+
+
+def case_expire():
+    with boot() as w:
+        s = Server(w)
+        t0 = bind_short(s, w)
+        if t0 is None:
+            return 'did not bind', w
+        if not arp_answers(w, LEASED):
+            return 'leased address not in use after binding', w
+        # answer nothing: at LEASE s the address must go and INIT restart
+        d = s.expect(DISCOVER, LEASE + 10)
+        if not d:
+            return 'no DISCOVER after the lease expired', w
+        at = d.t - t0
+        if at < LEASE - 0.5:
+            return 'restarted at %.1f s, before the lease ended' % at, w
+        if arp_answers(w, LEASED):
+            return 'still answering ARP for the expired address', w
+        return None, w
+
+
+def case_nak_renew():
+    with boot() as w:
+        s = Server(w)
+        t0 = bind_short(s, w)
+        if t0 is None:
+            return 'did not bind', w
+        m = s.expect(REQUEST, LEASE)
+        if not m or not is_renewal(m):
+            return 'no renewal', w
+        s.reply(m, NAK, dst=LEASED, eth_dst=GUEST_MAC)
+        nak_t = time.time()
+        d = s.expect(DISCOVER, 10)
+        if not d:
+            return 'no DISCOVER after the renewal was NAKed', w
+        if d.t - nak_t > 2.0:
+            return 'restarted %.1f s after the NAK' % (d.t - nak_t), w
+        if arp_answers(w, LEASED):
+            return 'still using the refused address', w
+        return None, w
+
+
+CASES = (('bound', case_bound), ('ack-config', case_ack_config),
+         ('renew', case_renew), ('rebind', case_rebind),
+         ('expire', case_expire), ('nak-renew', case_nak_renew), ('clock-step', case_clock_step),
          ('backoff', case_backoff), ('request-retx', case_request_retx),
          ('request-restart', case_request_restart), ('nak', case_nak))
 
