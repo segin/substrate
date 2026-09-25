@@ -543,6 +543,16 @@ static int afinet_ioctl(fs_node_t *node, uint32_t request, void *arg) {
             const struct sin_kern *sin = (const struct sin_kern *)&r->ifr_addr;
             if (sin->sin_family != AF_INET) return -EAFNOSUPPORT;
             dev->ip4_addr = sin->sin_addr;
+            /* An address set without a netmask gets its class's natural
+             * mask (RFC 1122 3.3.1.1), so `ifconfig eth1 10.1.2.3` alone
+             * still yields an on-link subnet; a later SIOCSIFNETMASK
+             * overrides it. */
+            if (!dev->ip4_netmask && dev->ip4_addr) {
+                uint8_t a = ((const uint8_t *)&dev->ip4_addr)[0];
+                uint32_t m = a < 128 ? 0xFF000000u :
+                             a < 192 ? 0xFFFF0000u : 0xFFFFFF00u;
+                dev->ip4_netmask = __builtin_bswap32(m);
+            }
             return 0;
         }
         case SIOCGIFNETMASK: {

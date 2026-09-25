@@ -855,7 +855,7 @@ def case_no_options():
         # the boot-time gateway (10.0.2.2) must be gone: an off-link send
         # must not leave through it
         w.ip_rx.clear()
-        w.wait_serial('guest: sleep', 10)
+        w.wait_serial('guest: slept', 10)
         w.pump(3.0)
         leaked = [x for x in w.ip_rx if x[2] == OFFLINK]
         if leaked:

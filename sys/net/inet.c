@@ -259,6 +259,10 @@ static netdev_t *route_for_v4(uint32_t daddr, int *via_gw_out) {
         if (!(d->flags & NETDEV_IFF_UP)) continue;
         if (d->flags & NETDEV_IFF_LOOPBACK) continue;
         if (!d->ip4_addr) continue;
+        /* No netmask means no known on-link subnet.  Masking with 0 would
+         * make every destination look on-link, so off-link traffic would be
+         * ARPed for directly and fail instead of going to the gateway. */
+        if (!d->ip4_netmask) continue;
         if ((d->ip4_addr & d->ip4_netmask) ==
             (daddr      & d->ip4_netmask)) {
             if (via_gw_out) *via_gw_out = 0;

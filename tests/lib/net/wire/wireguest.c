@@ -23,6 +23,7 @@
  *   wireguest mcast <group> <port> <action>... (UDP bound to *:port, joined
  *                                                to group on INADDR_ANY)
  *   wireguest udpany <port> <action>...        (UDP bound to *:port)
+ *   wireguest udpbind <addr> <port> <action>... (UDP bound to addr:port)
  *   wireguest redial <ip> <port> <lport>       (twice: bind lport, connect,
  *                                               read until EOF or error)
  *   wireguest reconnect <ip> <port> <action>...  (connect; if that fails,
@@ -112,6 +113,8 @@
  *   sendto:IP:PORT:TEXT   send TEXT to IP:PORT
  *   sendn:IP:PORT:N       send an N-octet datagram to IP:PORT
  *   ifaddr0      SIOCSIFADDR eth0 0.0.0.0 -- leave the NIC unconfigured
+ *   ifaddr:A     SIOCSIFADDR eth0 A
+ *   netmask:M    SIOCSIFNETMASK eth0 M
  *
  * A leading "mtu=N" argument first sets eth0's MTU (SIOCSIFMTU).
  *
@@ -341,6 +344,18 @@ static int do_actions(int fd, int argc, char **argv) {
             sin->sin_addr.s_addr = 0;
             int r = ioctl(fd, SIOCSIFADDR, &ifr);
             say("ifaddr0 %s rc=%ld", r < 0 ? strerror(errno) : "ok", r);
+        } else if (strncmp(a, "ifaddr:", 7) == 0 ||
+                   strncmp(a, "netmask:", 8) == 0) {
+            int is_mask = a[0] == 'n';
+            struct ifreq ifr;
+            memset(&ifr, 0, sizeof ifr);
+            strncpy(ifr.ifr_name, "eth0", sizeof ifr.ifr_name - 1);
+            struct sockaddr_in *sin = (struct sockaddr_in *)&ifr.ifr_addr;
+            sin->sin_family = AF_INET;
+            sin->sin_addr.s_addr = inet_addr(a + (is_mask ? 8 : 7));
+            int r = ioctl(fd, is_mask ? SIOCSIFNETMASK : SIOCSIFADDR, &ifr);
+            say(is_mask ? "netmask %s rc=%ld" : "ifaddr %s rc=%ld",
+                r < 0 ? strerror(errno) : "ok", r);
         } else if (strcmp(a, "pollin") == 0) {
             struct pollfd pfd = { .fd = fd, .events = POLLIN };
             int r = poll(&pfd, 1, -1);
@@ -820,6 +835,21 @@ int main(int argc, char **argv) {
             sleep(1);
         }
         rc = 0;
+    } else if (argc >= 4 && strcmp(argv[1], "udpbind") == 0) {
+        struct sockaddr_in sa;
+        memset(&sa, 0, sizeof sa);
+        sa.sin_family = AF_INET;
+        sa.sin_port = htons((unsigned short)atoi(argv[3]));
+        sa.sin_addr.s_addr = inet_addr(argv[2]);
+        int fd = socket(AF_INET, SOCK_DGRAM, 0);
+        int one = 1;
+        setsockopt(fd, SOL_SOCKET, SO_BROADCAST, &one, sizeof one);
+        if (fd >= 0 && bind(fd, (struct sockaddr *)&sa, sizeof sa) == 0) {
+            say("udpbind bound %s%ld", "", atol(argv[3]));
+            rc = do_actions(fd, argc - 4, argv + 4);
+        } else {
+            say("udpbind failed: %s (%ld)", strerror(errno), errno);
+        }
     } else if (argc >= 3 && strcmp(argv[1], "udpany") == 0) {
         struct sockaddr_in sa;
         memset(&sa, 0, sizeof sa);
