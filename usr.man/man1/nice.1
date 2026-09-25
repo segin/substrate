@@ -1,0 +1,108 @@
+.TH NICE 1 2026-09-25 "Substrate" "User Commands"
+.SH NAME
+nice \- run a command with a modified scheduling priority
+.SH SYNOPSIS
+.B nice
+.RB [ \-n
+.IR adjustment ]
+.RB [ \-\- ]
+.I command
+.RI [ argument ...]
+.br
+.B nice
+.BI \- adjustment
+.I command
+.RI [ argument ...]
+.br
+.B nice
+.SH DESCRIPTION
+.B nice
+adds
+.I adjustment
+(default 10) to the current nice value of the process, sets the
+result with
+.BR setpriority (2),
+and then executes
+.I command
+with its arguments, searching
+.B PATH
+as
+.BR execvp (3)
+does.
+The resulting nice value is clamped to the range \-20 to 20.
+.PP
+If the new nice value cannot be set (for example, a negative
+adjustment by an unprivileged user), a warning is printed and
+.I command
+is run anyway.
+.PP
+With no arguments at all,
+.B nice
+prints the current nice value.
+.SH OPTIONS
+.TP
+.BI \-n " adjustment"
+Add
+.I adjustment
+to the nice value.
+It must be a decimal integer, optionally signed.
+.TP
+.BI \- adjustment
+.TQ
+.BI \-n adjustment
+Traditional one-argument forms of
+.BR \-n .
+A negative adjustment is written with two dashes, for example
+.BR \-\-5 .
+.TP
+.B \-\-
+End of options.
+.SH EXIT STATUS
+If
+.I command
+is run, the exit status is that of
+.IR command .
+Otherwise:
+.TP
+.B 0
+The current nice value was printed.
+.TP
+.B 125
+An adjustment was invalid or missing, no
+.I command
+followed an adjustment, or the nice value could not be read.
+.TP
+.B 126
+.I command
+was found but could not be executed.
+.TP
+.B 127
+.I command
+was not found.
+.SH ENVIRONMENT
+.TP
+.B PATH
+Searched for
+.IR command .
+.SH EXAMPLES
+Run a build at lower priority:
+.PP
+.EX
+$ nice \-n 15 make
+.EE
+.PP
+Raise the priority of a command (superuser only):
+.PP
+.EX
+# nice \-n \-5 top
+.EE
+.SH SEE ALSO
+.BR ps (1),
+.BR renice (1),
+.BR top (1),
+.BR execve (2)
+.SH STANDARDS
+POSIX.1-2024.
+The obsolete
+.BI \- adjustment
+form is a traditional extension.
