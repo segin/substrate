@@ -1,0 +1,72 @@
+.TH PWD 1 2026-09-25 "Substrate" "User Commands"
+.SH NAME
+pwd \- print the name of the current working directory
+.SH SYNOPSIS
+.B pwd
+.RB [ \-L | \-P ]
+.SH DESCRIPTION
+.B pwd
+writes the absolute path name of the current working directory,
+followed by a newline, to standard output.
+.PP
+In logical mode (the default), the value of the
+.B PWD
+environment variable is printed if it is an absolute path name that
+contains no
+.B .\&
+or
+.B ..\&
+components and names the same directory (same device and inode) as
+the current directory.
+Otherwise, and always in physical mode,
+.B pwd
+prints the path returned by
+.BR getcwd (3),
+which contains no symbolic links.
+Path names longer than
+.B PATH_MAX
+are handled by retrying with a larger buffer, up to about 1\~MiB.
+.PP
+Scanning for options stops at
+.BR \-\- ,
+at a lone
+.BR \- ,
+or at the first argument that does not begin with
+.BR \- .
+Operands are ignored.
+.PP
+The shell usually provides its own built-in
+.BR pwd ;
+this page describes the stand-alone program.
+.SH OPTIONS
+.TP
+.B \-L
+Logical mode, as described above.
+This is the default.
+.TP
+.B \-P
+Physical mode: always use
+.BR getcwd (3).
+.PP
+If both are given, the last one wins.
+.SH EXIT STATUS
+.TP
+.B 0
+Success.
+.TP
+.B 1
+The current directory could not be determined, or writing to standard
+output failed.
+.TP
+.B 2
+An invalid option was given.
+.SH ENVIRONMENT
+.TP
+.B PWD
+Used in logical mode, subject to the checks described above.
+.SH SEE ALSO
+.BR sh (1),
+.BR readlink (1),
+.BR getcwd (3)
+.SH STANDARDS
+POSIX.1-2024.
