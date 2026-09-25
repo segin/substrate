@@ -1,0 +1,91 @@
+.TH LAST 1 2026-09-25 "Substrate" "User Commands"
+.SH NAME
+last \- list recent logins and system boots
+.SH SYNOPSIS
+.B last
+.RB [ \- \fInum\fR]
+.RI [ name ]
+.SH DESCRIPTION
+.B last
+reads the login accounting file
+.I /var/log/wtmp
+and lists sessions and system boots, most recent first.
+.PP
+Each login
+.RB ( USER_PROCESS
+record) is printed on one line containing the user name, the terminal
+line, the remote host (or
+.B \-
+for a local login), and the login time.
+The session end is found by searching forward for the next logout
+.RB ( DEAD_PROCESS )
+record on the same terminal line.
+If one is found, the logout time and the session duration in
+hours and minutes are appended.
+If a boot record comes first, the session is shown as ending at that
+boot and is marked
+.BR crash .
+If neither is found, the session is shown as
+.BR "still logged in" .
+.PP
+Boot records are printed as
+.B reboot
+on line
+.BR "system boot" .
+.PP
+Times are shown in local time.
+.SH OPTIONS
+.TP
+.BI \- num
+Print at most
+.I num
+lines.
+.B \-0
+means no limit.
+.TP
+.I name
+Show only sessions of the user
+.IR name .
+If
+.I name
+is
+.BR reboot ,
+only boot records are shown.
+If several names are given, only the last is used.
+.PP
+Any other argument beginning with
+.B \-
+is accepted and ignored.
+.SH EXIT STATUS
+.TP
+.B 0
+Success.
+.TP
+.B 1
+.I /var/log/wtmp
+could not be opened, or memory could not be allocated.
+.SH FILES
+.TP
+.I /var/log/wtmp
+Login, logout and boot records, written by
+.BR login (1)
+and
+.BR init .
+.SH EXAMPLE
+Show the last 10 entries for root:
+.PP
+.EX
+$ last \-10 root
+.EE
+.SH SEE ALSO
+.BR id (1),
+.BR login (1),
+.BR whoami (1)
+.SH BUGS
+The whole of
+.I /var/log/wtmp
+is read into memory.
+.PP
+Sessions whose logout was never written to
+.I wtmp
+are reported as still logged in until the next boot record.
