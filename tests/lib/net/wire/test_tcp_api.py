@@ -46,6 +46,10 @@ it guards.
                    returns EAGAIN on a non-blocking socket and, on a
                    blocking one, waits and goes out once established --
                    it used to fail ENOTCONN either way.
+    shut-connecting TCP-API-15: shutdown(SHUT_WR) in SYN-SENT aborts the
+                   open (SO_ERROR ECONNABORTED; the late SYN|ACK draws a
+                   RST, no connection forms); in SYN-RECEIVED (reached by
+                   simultaneous open) it sends the FIN.
 
 Run from the repo root after building sys/ and wireguest:
     python3 tests/lib/net/wire/test_tcp_api.py [case...]
@@ -383,6 +387,38 @@ def case_early_write():
         return None, w
 
 
+def case_shut_connecting():
+    # SYN-SENT: shut down at once, answer the SYN only afterwards.
+    with Wire.boot('shutconnect 10.0.2.2 %d 0' % PORT) as w:
+        syn = w.expect(lambda s: s.flags & SYN and s.dport == PORT, 90, 'SYN')
+        if not syn:
+            return 'no SYN', w
+        if not w.wait_serial('guest: shutwr', 10):
+            return 'no shutdown report', w
+        w.rx.clear()
+        w.send(Seg(PORT, syn.sport, PISS, syn.seq + 1, SYN | ACK))
+        r = w.expect(lambda s: s.sport == syn.sport, 3, 'reply')
+        if not r or not r.flags & RST:
+            return 'SYN|ACK after SHUT_WR in SYN-SENT: %r (want RST)' % r, w
+        if not w.wait_serial('guest: soerror', 5):
+            return 'no SO_ERROR report', w
+        e = line(w, 'soerror')[0]
+        if 'value=103' not in e:
+            return 'SO_ERROR %s, want ECONNABORTED (103)' % e, w
+    # SYN-RECEIVED via simultaneous open: shut down after it is reached.
+    with Wire.boot('shutconnect 10.0.2.2 %d 3' % PORT) as w:
+        syn = w.expect(lambda s: s.flags & SYN and s.dport == PORT, 90, 'SYN')
+        if not syn:
+            return 'no SYN', w
+        w.send(Seg(PORT, syn.sport, PISS, 0, SYN))         # -> SYN-RECEIVED
+        if not w.expect(lambda s: s.flags & SYN and s.flags & ACK, 3, 'SYN|ACK'):
+            return 'no simultaneous-open SYN|ACK', w
+        fin = w.expect(lambda s: s.flags & FIN, 8, 'FIN')
+        if not fin or fin.seq != syn.seq + 1:
+            return 'SHUT_WR in SYN-RECEIVED: want a FIN at ISS+1, got %r' % fin, w
+    return None, w
+
+
 CASES = (('reconnect', case_reconnect),
          ('connect-twice', case_connect_twice),
          ('listen-connect', case_listen_connect),
@@ -395,7 +431,8 @@ CASES = (('reconnect', case_reconnect),
          ('unread-close', case_unread_close),
          ('accept-emfile', case_accept_emfile),
          ('write-closing', case_write_closing),
-         ('early-write', case_early_write))
+         ('early-write', case_early_write),
+         ('shut-connecting', case_shut_connecting))
 
 
 def main():

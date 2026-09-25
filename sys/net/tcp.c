@@ -3112,14 +3112,28 @@ int tcp_shutdown_wr(tcp_pcb_t *p) {
     uint32_t f = tcp_lock();
     switch (p->state) {
     case TCP_ESTABLISHED:
+    case TCP_SYN_RECEIVED:
+        /* TCP-API-15: SYN-RECEIVED sends its FIN too (RFC 793 3.9 CLOSE:
+         * "If no SENDs have been issued ... form a FIN segment and send
+         * it, and enter FIN-WAIT-1").  It used to be ignored, so the
+         * connection came up and never closed its send side. */
         p->state = TCP_FIN_WAIT_1;
         break;
     case TCP_CLOSE_WAIT:
         p->state = TCP_LAST_ACK;
         break;
+    case TCP_SYN_SENT:
+        /* TCP-API-15: nothing is synchronized to FIN, and RFC 793 3.9 CLOSE
+         * in SYN-SENT deletes the TCB with "error: closing" (as Linux and
+         * the BSDs do).  It was discarded: the handshake carried on and
+         * the connection came up with its send side still open. */
+        tcp_ooo_free_all(p);
+        tcp_kill_pcb(p, ECONNABORTED);
+        tcp_unlock(f);
+        if (fin) kfree(fin, sizeof(*fin));
+        return 0;
     default:
-        /* SYN_SENT has nothing established to FIN; the rest already
-         * sent their FIN.  Idempotent either way. */
+        /* The rest already sent their FIN (or are gone): idempotent. */
         tcp_unlock(f);
         if (fin) kfree(fin, sizeof(*fin));
         return 0;
