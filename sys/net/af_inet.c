@@ -1605,8 +1605,13 @@ int afinet_shutdown(int fd, int how) {
         /* UDP-API-19: a datagram socket's write side shuts too.  This was a
          * silent no-op -- sends after SHUT_WR went out as if nothing had
          * happened. */
+        if (s->tcp) {
+            /* TCP-API-19: -ENOMEM (no FIN could be queued) leaves the send
+             * side open so the caller can retry. */
+            int r = tcp_shutdown_wr(s->tcp);
+            if (r < 0) return r;
+        }
         s->wr_shut = 1;
-        if (s->tcp) tcp_shutdown_wr(s->tcp);
     }
     return 0;
 }

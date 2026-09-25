@@ -822,12 +822,19 @@ static void tcp_timer_tick(uint64_t now) {
          * empty, and complete the close when it expires.  Not immediately --
          * tcp_close() publishes the state before it queues the FIN.
          */
-        if ((p->state == TCP_CLOSING || p->state == TCP_LAST_ACK) &&
+        /* TCP-API-19: FIN-WAIT-1 too.  With its FIN queued it is bounded by
+         * the retransmit budget, and an ACK of the FIN moves it on at once;
+         * one with an empty queue has no FIN at all and nothing else would
+         * ever end it. */
+        if ((p->state == TCP_CLOSING || p->state == TCP_LAST_ACK ||
+             p->state == TCP_FIN_WAIT_1) &&
             !p->unacked_head) {
             if (!p->closing_until) {
                 p->closing_until = now + TCP_CLOSING_TICKS;
             } else if (now >= p->closing_until) {
-                if (p->state == TCP_LAST_ACK) {
+                if (p->state == TCP_FIN_WAIT_1) {
+                    tcp_kill_pcb(p, ETIMEDOUT);
+                } else if (p->state == TCP_LAST_ACK) {
                     tcp_kill_pcb(p, 0);
                 } else {
                     p->time_wait_until = now + TCP_TIME_WAIT_TICKS;   /* TCP-MEM-09: deadline first */
@@ -2971,6 +2978,18 @@ int tcp_close(tcp_pcb_t *p) {
      * FIN_WAIT_2, or LAST_ACK straight to CLOSED, before any FIN existed. */
     tcp_seg_t *fin = tcp_seg_alloc(TCP_FIN | TCP_ACK, NULL, 0);
     uint32_t fin_seq = 0;
+    if (!fin) {
+        /* TCP-API-19: no memory for the FIN.  The state used to move to
+         * FIN-WAIT-1/LAST-ACK with nothing queued: no FIN ever went out,
+         * nothing retransmitted, and no deadline reaped the PCB.  A
+         * connection that cannot be closed gracefully is aborted -- the
+         * RST needs no allocation. */
+        uint32_t af = tcp_lock();
+        int live = p->state == TCP_ESTABLISHED || p->state == TCP_CLOSE_WAIT;
+        tcp_unlock(af);
+        if (live)
+            return tcp_abort(p);
+    }
     uint32_t f = tcp_lock();
     /* The owning socket is being destroyed — mark the PCB orphaned so
      * the timer reaps it once it reaches CLOSED, and so any data that
@@ -3110,6 +3129,14 @@ int tcp_shutdown_wr(tcp_pcb_t *p) {
     tcp_seg_t *fin = tcp_seg_alloc(TCP_FIN | TCP_ACK, NULL, 0);
     uint32_t fin_seq = 0;
     uint32_t f = tcp_lock();
+    if (!fin && (p->state == TCP_ESTABLISHED || p->state == TCP_SYN_RECEIVED ||
+                 p->state == TCP_CLOSE_WAIT)) {
+        /* TCP-API-19: no memory for the FIN.  Leave the state as it is so
+         * the caller can retry, rather than entering a closing state with
+         * no FIN to send. */
+        tcp_unlock(f);
+        return -ENOMEM;
+    }
     switch (p->state) {
     case TCP_ESTABLISHED:
     case TCP_SYN_RECEIVED:
