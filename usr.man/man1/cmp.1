@@ -1,0 +1,199 @@
+.TH CMP 1 2026-09-25 "Substrate" "User Commands"
+.SH NAME
+cmp \- compare two files byte by byte
+.SH SYNOPSIS
+.B cmp
+.RB [ \-l | \-s | \-x ]
+.RB [ \-bhz ]
+.RB [ \-i
+.IR skip | skip1 : skip2 ]
+.RB [ \-n
+.IR limit ]
+.I file1 file2
+.RI [ skip1 " [" skip2 ]]
+.SH DESCRIPTION
+.B cmp
+compares
+.I file1
+and
+.I file2
+byte by byte.
+Either operand (but not both) may be
+.B \-
+for standard input.
+.PP
+By default, when the files differ,
+.B cmp
+writes the position of the first differing byte to standard output
+in the form
+.PP
+.RS
+.IB file1 " " file2 " differ: char " N ", line " L
+.RE
+.PP
+where
+.I N
+counts bytes from 1 and
+.I L
+counts lines of
+.I file1
+from 1, and stops.
+If one file is a prefix of the other, the message
+.PP
+.RS
+.BI "cmp: EOF on " name
+.RE
+.PP
+is written to standard error, naming the shorter file.
+.PP
+The optional
+.I skip1
+and
+.I skip2
+operands give byte counts to skip at the start of
+.I file1
+and
+.I file2
+respectively; each overrides the corresponding value set by
+.BR \-i .
+Byte counts (for
+.IR skip ,
+.BR \-i ,
+and
+.BR \-n )
+are decimal and may carry a suffix:
+.B b
+(512),
+.B k
+or
+.B K
+(1024),
+.B M
+(1024\(ha2),
+.B G
+(1024\(ha3), or
+.BR kB ,
+.BR MB ,
+.B GB
+(powers of 1000).
+Skipped bytes are read and discarded, so skipping works on pipes.
+.SH OPTIONS
+.TP
+.BR \-b ", " \-\-print\-bytes
+With
+.B \-l
+or
+.BR \-x ,
+also print each differing byte as a character, using
+.BI ^ c
+for control characters,
+.B ^?
+for DEL, and a
+.B M\-
+prefix for bytes above 127.
+.TP
+.B \-h
+Accepted for BSD compatibility and ignored; symbolic links are always
+followed.
+.TP
+.BR \-i ", " \-\-ignore\-initial= \fIskip\fP | \fIskip1\fP : \fIskip2\fP
+Skip
+.I skip
+bytes of both files, or
+.I skip1
+bytes of
+.I file1
+and
+.I skip2
+bytes of
+.IR file2 .
+.TP
+.BR \-l ", " \-\-verbose
+List every difference, one per line, as the decimal byte position
+followed by the two differing byte values in octal.
+.TP
+.BR \-n ", " \-\-bytes= \fIlimit\fP
+Compare at most
+.I limit
+bytes.
+.TP
+.BR \-s ", " \-\-silent ", " \-\-quiet
+Print nothing (not even the EOF message); report only through the
+exit status.
+.TP
+.B \-x
+Like
+.BR \-l ,
+but print the byte values in hexadecimal.
+.TP
+.B \-z
+When both operands are regular file names (not
+.BR \- ),
+compare their sizes, less any skipped bytes, before reading them.
+If the sizes differ, report EOF on the smaller one and exit with
+status 1 without comparing content.
+.TP
+.B \-\-help
+Print a usage summary and exit.
+.TP
+.B \-\-version
+Print version information and exit.
+.PP
+Of
+.BR \-l ,
+.BR \-s ,
+and
+.BR \-x ,
+the last one given takes effect.
+.SH EXIT STATUS
+.TP
+.B 0
+The files are identical (within any skip and limit).
+.TP
+.B 1
+The files differ, or one is shorter than the other.
+.TP
+.B 2
+Invalid usage, a file could not be opened, or writing to standard
+output failed.
+.SH EXAMPLES
+Test whether two files are identical in a script:
+.PP
+.EX
+if cmp \-s old.bin new.bin; then echo same; fi
+.EE
+.PP
+List all differing bytes in hexadecimal, with characters:
+.PP
+.EX
+$ cmp \-xb a.txt b.txt
+.EE
+.PP
+Compare two files, ignoring a 512-byte header on each:
+.PP
+.EX
+$ cmp \-i 1b disk1.img disk2.img
+.EE
+.SH SEE ALSO
+.BR diff (1),
+.BR sum (1)
+.SH STANDARDS
+POSIX.1-2024, for the
+.B \-l
+and
+.B \-s
+options and the default output format.
+The long options,
+.BR \-b ,
+.BR \-i ,
+and
+.B \-n
+follow GNU diffutils;
+.BR \-h ,
+.BR \-x ,
+and
+.B \-z
+follow BSD.
+.SH BUGS
+A skip count larger than a file is not reported; the file is simply
+treated as empty from that point.
