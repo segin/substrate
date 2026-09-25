@@ -1,0 +1,39 @@
+.TH FSCK 8 2026-09-25 "Substrate" "System Administration"
+.SH NAME
+fsck \- check a file system (stub)
+.SH SYNOPSIS
+.B fsck
+.RI [ argument ...]
+.SH DESCRIPTION
+The in-tree
+.B fsck
+is a placeholder.
+It ignores all of its arguments, prints the line
+.PP
+.EX
+fsck: stub implementation
+.EE
+.PP
+to standard output, and exits.
+It does not open any device and does not examine or repair any file
+system.
+.PP
+To check an ext2, ext3 or ext4 file system, use
+.BR e2fsck (8)
+(also installed as
+.BR fsck.ext2 ,
+.BR fsck.ext3
+and
+.BR fsck.ext4 )
+from the e2fsprogs port.
+.SH EXIT STATUS
+.B fsck
+always exits with status 0.
+.SH SEE ALSO
+.BR mkfs (8),
+.BR e2fsck (8)
+.SH BUGS
+Not implemented.
+Because the exit status is always 0, a script that runs
+.B fsck
+cannot tell that no check took place.
