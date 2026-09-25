@@ -1,0 +1,146 @@
+.TH TOUCH 1 2026-09-25 "Substrate" "User Commands"
+.SH NAME
+touch \- change file access and modification times
+.SH SYNOPSIS
+.B touch
+.RB [ \-achm ]
+.RB [ \-d
+.I date
+|
+.B \-r
+.I ref
+|
+.B \-t
+.IR time ]
+.IR file ...
+.SH DESCRIPTION
+.B touch
+sets the access and modification times of each
+.IR file ,
+by default to the current time, using
+.BR utimensat (2).
+.PP
+A
+.I file
+that does not exist is created as an empty regular file with mode 0666
+(modified by the umask), unless
+.B \-c
+or
+.B \-h
+is given.
+A directory operand is not an error; only its times are changed.
+.PP
+When more than one of
+.BR \-r ,
+.B \-d
+and
+.B \-t
+is given,
+.B \-r
+takes precedence over
+.BR \-d ,
+which takes precedence over
+.BR \-t .
+.SH OPTIONS
+.TP
+.B \-a
+Change only the access time (unless
+.B \-m
+is also given).
+.TP
+.B \-m
+Change only the modification time (unless
+.B \-a
+is also given).
+.TP
+.B \-c
+Do not create files that do not exist.
+.TP
+.B \-h
+Change the times of a symbolic link itself rather than its target
+.RB ( AT_SYMLINK_NOFOLLOW ).
+With
+.BR \-r ,
+the reference times are also taken from the link itself.
+Implies that missing files are not created.
+.TP
+.BI \-d " date"
+Use
+.I date
+instead of the current time.
+Accepted forms are
+.BI @ seconds
+(seconds since the Epoch),
+.IR YYYY \- MM \- DD
+(midnight), and
+.IR YYYY \- MM \- DD\fBT\fIhh : mm : ss .
+Dates are interpreted in local time.
+.TP
+.BI \-r " ref"
+Use the access and modification times of file
+.IR ref ,
+including nanoseconds.
+.TP
+.BI \-t " time"
+Use
+.I time
+in the POSIX form
+.RI [[ CC ] YY ] MMDDhhmm [. SS ],
+interpreted in local time.
+With no year the current year is used; a two-digit year
+.I YY
+below 69 means 20\fIYY\fR, otherwise 19\fIYY\fR.
+.SH EXIT STATUS
+.TP
+.B 0
+All files were updated.
+.TP
+.B 1
+An option or date was invalid, no
+.I file
+was given,
+.I ref
+could not be read, or at least one
+.I file
+could not be created or updated.
+.SH EXAMPLES
+Create an empty file or update its times to now:
+.EX
+$ touch stamp
+.EE
+.PP
+Copy the times of another file:
+.EX
+$ touch \-r configure config.h.in
+.EE
+.PP
+Set a specific time:
+.EX
+$ touch \-t 202601011200.00 file
+$ touch \-d @0 file
+.EE
+.SH SEE ALSO
+.BR ls (1),
+.BR stat (2),
+.BR utimensat (2)
+.SH STANDARDS
+POSIX.1-2024, with
+.B \-h
+and the
+.B @
+form of
+.B \-d
+as extensions.
+.SH BUGS
+A
+.B \-d
+date of the form
+.I "YYYY-MM-DD hh:mm:ss"
+(with a space) is accepted, but the time of day is silently ignored and
+midnight is used.
+Trailing garbage after a recognised
+.B \-d
+date is ignored.
+.PP
+The usage message does not mention
+.BR \-h .
