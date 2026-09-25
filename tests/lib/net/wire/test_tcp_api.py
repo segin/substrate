@@ -58,6 +58,10 @@ it guards.
     close-synrcvd  TCP-API-20: close() in SYN-RECEIVED (via simultaneous
                    open) sends a FIN at ISS+1 instead of silently dropping
                    the connection.
+    synrst-flood   TCP-API-21: 32 SYN+RST pairs sent back to back at a
+                   backlog-4 listener; the dead children count against the
+                   backlog until reaped, so far fewer than 32 draw a SYN|ACK
+                   (each used to get a fresh child and a SYN|ACK).
 
 Run from the repo root after building sys/ and wireguest:
     python3 tests/lib/net/wire/test_tcp_api.py [case...]
@@ -470,6 +474,24 @@ def case_close_synrcvd():
         return None, w
 
 
+def case_synrst_flood():
+    with Wire.boot('listen %d sleep:60' % PORT) as w:
+        if not w.wait_serial('guest: listening', 90):
+            return 'guest never listened', w
+        w.send_arp(1, PEER_MAC, PEER_IP, b'\0' * 6, GUEST_IP)
+        w.pump(0.5)
+        w.rx.clear()
+        for i in range(32):
+            hp = 45000 + i
+            w.send(Seg(hp, PORT, PISS, 0, SYN))
+            w.send(Seg(hp, PORT, PISS + 1, 0, RST))     # exactly RCV.NXT
+        w.pump(1.0)
+        answered = {s.dport for s in w.rx if s.flags & SYN and s.flags & ACK}
+        if len(answered) >= 16:
+            return '%d of 32 SYN+RST pairs got a fresh child (SYN|ACK)' % len(answered), w
+        return None, w
+
+
 CASES = (('reconnect', case_reconnect),
          ('connect-twice', case_connect_twice),
          ('listen-connect', case_listen_connect),
@@ -486,7 +508,8 @@ CASES = (('reconnect', case_reconnect),
          ('shut-connecting', case_shut_connecting),
          ('send-dontwait', case_send_dontwait),
          ('read-listener', case_read_listener),
-         ('close-synrcvd', case_close_synrcvd))
+         ('close-synrcvd', case_close_synrcvd),
+         ('synrst-flood', case_synrst_flood))
 
 
 def main():

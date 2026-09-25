@@ -1069,10 +1069,18 @@ static void tcp_in_listen(tcp_pcb_t *p, uint32_t saddr, uint32_t daddr,
      * past the backlog, drop the SYN.  The peer's SYN retransmit will
      * get in once accept() drains a slot — and if it never does, the
      * peer's connect() times out, which is the correct backlog-full
-     * behaviour instead of establishing an un-acceptable connection. */
-    int pending = p->accept_count;
+     * behaviour instead of establishing an un-acceptable connection.
+     *
+     * TCP-API-21: count EVERY child still attached to this listener, in
+     * any state.  Only SYN_RECEIVED ones (plus the accept queue) were
+     * counted, so a child killed by the peer's RST -- CLOSED, holding its
+     * 32 KiB ring until the timer reaps it -- no longer counted, and a
+     * SYN+RST flood allocated a fresh child per pair faster than the
+     * reaper could free them.  Accept-queued children keep ->parent until
+     * accept() takes them, so this also counts them exactly once. */
+    int pending = 0;
     for (tcp_pcb_t *q = g_tcp_pcbs; q; q = q->next)
-        if (q->parent == p && q->state == TCP_SYN_RECEIVED)
+        if (q->parent == p)
             pending++;
     if (pending >= p->accept_cap)
         return;
