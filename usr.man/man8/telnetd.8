@@ -1,0 +1,147 @@
+.TH TELNETD 8 2026-09-25 "Substrate" "System Administration"
+.SH NAME
+telnetd \- TELNET protocol server
+.SH SYNOPSIS
+.B telnetd
+.RB [ \-f ]
+.RB [ \-h ]
+.RB [ \-l
+.IR login-program ]
+.RB [ \-p
+.IR port ]
+.SH DESCRIPTION
+.B telnetd
+is a stand-alone TELNET server.
+It listens on TCP port 23 on all IPv4 addresses (with
+.BR SO_REUSEADDR ),
+and serves each connection in a separate thread of the same process.
+.PP
+For each connection it allocates a pseudo-terminal with
+.BR openpty (3),
+sends
+.BR "IAC WILL ECHO" ,
+.B "IAC WILL SUPPRESS-GO-AHEAD"
+and
+.BR "IAC DO NAWS" ,
+and forks a child that makes the pty slave its controlling terminal and
+standard input, output and error with
+.BR login_tty (3)
+and executes the login program, with
+.B login
+as
+.I argv[0]
+and no other arguments.
+.PP
+The thread then copies data between the connection and the pty master
+until either side closes, then closes both and waits for the child.
+From the network, TELNET commands
+.RB ( IAC
+sequences) and subnegotiations are discarded, a doubled
+.B IAC
+becomes one 0xff byte, and a carriage return followed by NUL or LF becomes
+a single carriage return.
+Towards the network, each 0xff byte is doubled.
+No option is negotiated beyond the initial three; the window size reported
+by the client is ignored.
+.PP
+Unless
+.B \-f
+is given,
+.B telnetd
+detaches with
+.BR daemon (3)
+after binding the socket.
+It then writes its pid to
+.IR /var/run/telnetd.pid ,
+ignores
+.BR SIGPIPE ,
+and accepts connections until
+.BR accept (2)
+fails.
+If a thread cannot be created, the connection is closed.
+.PP
+It is started at boot by
+.IR /etc/rc.d/35\-telnetd ;
+the telnet entry in
+.I /etc/inetd.conf
+is disabled in favour of it.
+.SH OPTIONS
+.TP
+.B \-f
+Stay in the foreground.
+.TP
+.B \-h
+Print a usage message and exit 0.
+.TP
+.BI \-l " login-program"
+Execute
+.I login-program
+for each session instead of
+.IR /bin/login .
+.TP
+.BI \-p " port"
+Listen on
+.I port
+instead of 23.
+.SH EXIT STATUS
+.TP
+.B 0
+.B \-h
+was given.
+.TP
+.B 1
+An invalid option, a failure to create, bind or listen on the socket, a
+failure to detach, or a failed
+.BR accept (2)
+(other than
+.BR EINTR ).
+.SH SIGNALS
+.TP
+.B SIGPIPE
+Ignored.
+.PP
+Other signals have their default action;
+.I /etc/rc.d/35\-telnetd stop
+sends
+.BR SIGTERM .
+.SH FILES
+.TP
+.I /bin/login
+Default login program.
+.TP
+.I /var/run/telnetd.pid
+Process ID, written in both foreground and background mode.
+.TP
+.I /etc/rc.d/35\-telnetd
+Boot script.
+.SH EXAMPLE
+Run a test server on port 2323 in the foreground:
+.EX
+# telnetd \-f \-p 2323
+.EE
+.SH SEE ALSO
+.BR login (1),
+.BR getty (8),
+.BR init (8),
+.BR openpty (3),
+.BR pty (7)
+.SH STANDARDS
+RFC 854 (TELNET protocol), with the ECHO (RFC 857), SUPPRESS-GO-AHEAD
+(RFC 858) and NAWS (RFC 1073) options offered but only partly honoured.
+.SH BUGS
+Traffic is unencrypted, including passwords.
+.PP
+A TELNET command split across two reads from the network is not recognised,
+and its bytes reach the pty as data.
+.PP
+When a read from the pty contains 0xff bytes, the doubled output can
+exceed the 1024-byte buffer and the excess is dropped.
+.PP
+.B telnetd
+writes no utmp or wtmp records, and a session's logout is not recorded.
+.PP
+The
+.B \-p
+argument is converted with
+.BR atoi (3)
+and not checked.
