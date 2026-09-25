@@ -1,0 +1,88 @@
+.TH WRITE 1 2026-09-25 "Substrate" "User Commands"
+.SH NAME
+write \- send a message to another user
+.SH SYNOPSIS
+.B write
+.I user
+.RI [ ttyname ]
+.SH DESCRIPTION
+.B write
+copies standard input to the terminal of
+.IR user .
+The terminal is the first
+.B USER_PROCESS
+record for
+.I user
+in the utmp file, or the record whose line matches
+.I ttyname
+when that is given.
+.I ttyname
+is the line name relative to
+.IR /dev ,
+for example
+.BR tty2 ;
+it may not contain
+.B /
+or begin with
+a dot.
+.PP
+The terminal
+.I /dev/line
+is opened non-blocking and without following symbolic links, and must
+be a terminal.
+.B write
+then sends a banner
+.PP
+.EX
+Message from \fIsender\fP on \fIline\fP ...
+.EE
+.PP
+preceded by a bell, where
+.I sender
+comes from
+.BR getlogin (3)
+or the password entry of the real user ID, and
+.I line
+is the name of the sender's standard input terminal
+.RB ( ?
+if it is not a terminal).
+Standard input is then relayed line by line until end of file, followed
+by
+.BR EOF .
+Newlines and tabs pass through, carriage returns are dropped, other
+control characters are shown as
+.BI ^ X
+and bytes with the high bit set as
+.BI M\- X\c
+\&.
+.SH EXIT STATUS
+.TP
+.B 0
+The terminal was opened and the message sent.
+.TP
+.B 1
+Wrong number of arguments, invalid
+.IR ttyname ,
+the utmp file could not be read,
+.I user
+is not logged in (on that terminal), or the terminal could not be
+opened or is not a terminal.
+.SH FILES
+.TP
+.I /var/run/utmp
+Current login records.
+.SH EXAMPLE
+.EX
+$ echo "lunch?" | write alice tty2
+.EE
+.SH SEE ALSO
+.BR tty (1),
+.BR wall (1),
+.BR who (1),
+.BR utmp (5)
+.SH BUGS
+There is no interactive two-way mode and no
+.B mesg
+permission check; delivery depends solely on whether the sender can
+open the recipient's terminal for writing.
+Errors writing to the terminal after it has been opened are ignored.
