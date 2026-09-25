@@ -73,6 +73,8 @@
  * Actions, executed in order on the connected socket:
  *   readeof      read until EOF (or error), reporting the byte count
  *   read:N       read up to N bytes once
+ *   recvsum:N    recvfrom() up to N bytes once, reporting the length, the
+ *                source port and the byte sum of what arrived
  *   write:TEXT   write TEXT
  *   writen:N     write N octets of a repeating pattern in one call
  *   close        close the socket
@@ -85,6 +87,7 @@
  *   sockatmark   sockatmark() on the socket and then on fd 0 (the console)
  *   oob:TEXT     send(TEXT, MSG_OOB)
  *   linger0      setsockopt(SO_LINGER, {1, 0}), read it back
+ *   rcvbuf:N     setsockopt(SO_RCVBUF, N)
  *   catchpipe    install a SIGPIPE counter (so a SIGPIPE does not kill init)
  *   sigpipe      report how many SIGPIPEs have arrived
  *   sendns:TEXT  send(TEXT, MSG_NOSIGNAL)
@@ -163,6 +166,23 @@ static int do_actions(int fd, int argc, char **argv) {
             if (want > sizeof buf) want = sizeof buf;
             ssize_t n = read(fd, buf, want);
             say("read %s n=%ld", n < 0 ? strerror(errno) : "ok", (long)n);
+        } else if (strncmp(a, "recvsum:", 8) == 0) {
+            static unsigned char rbig[65536];
+            size_t want = (size_t)atol(a + 8);
+            if (want > sizeof rbig) want = sizeof rbig;
+            struct sockaddr_in from;
+            socklen_t fl = sizeof from;
+            ssize_t n = recvfrom(fd, rbig, want, 0,
+                                 (struct sockaddr *)&from, &fl);
+            if (n < 0) {
+                say("recvsum %s n=%ld", strerror(errno), -1L);
+            } else {
+                unsigned long sum = 0;
+                for (ssize_t k = 0; k < n; k++) sum += rbig[k];
+                printf("guest: recvsum n=%ld sport=%u sum=%lu\n", (long)n,
+                       (unsigned)ntohs(from.sin_port), sum);
+                fflush(stdout);
+            }
         } else if (strncmp(a, "write:", 6) == 0) {
             ssize_t n = write(fd, a + 6, strlen(a + 6));
             say("write %s n=%ld", n < 0 ? strerror(errno) : "ok", (long)n);
@@ -207,6 +227,10 @@ static int do_actions(int fd, int argc, char **argv) {
         } else if (strncmp(a, "senddw:", 7) == 0) {
             ssize_t n = send(fd, a + 7, strlen(a + 7), MSG_DONTWAIT);
             say("senddw %s n=%ld", n < 0 ? strerror(errno) : "ok", (long)n);
+        } else if (strncmp(a, "rcvbuf:", 7) == 0) {
+            int v = atoi(a + 7);
+            int r = setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &v, sizeof v);
+            say("rcvbuf %s rc=%ld", r < 0 ? strerror(errno) : "ok", (long)r);
         } else if (strcmp(a, "linger0") == 0) {
             struct linger lg = { 1, 0 }, back = { -1, -1 };
             socklen_t bl = sizeof back;

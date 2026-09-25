@@ -1724,8 +1724,9 @@ ssize_t sys_send(int fd, const void *buf, size_t len, int flags) {
 }
 
 /* Bytes copied through the kernel bounce buffer in one recv call.  Stream
- * recv may return short (the caller loops); UDP / RAW / AF_PACKET datagrams
- * are <= 1500 so they always fit; only an AF_UNIX datagram larger than this
+ * recv may return short (the caller loops); a UDP / RAW datagram is at most
+ * 65507 octets (a reassembled one, UDP-I-01) and AF_PACKET's at most a
+ * frame, so they always fit; only an AF_UNIX datagram larger than this
  * would truncate, which no real caller hits.  kmalloc handles this via its
  * large-allocation path (KMEM_MAX_ALLOC is 128 MiB). */
 #define RECV_BOUNCE_CAP (64U * 1024U)

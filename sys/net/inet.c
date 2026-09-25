@@ -15,12 +15,15 @@
 #include <arch/i386/intr.h>
 #include <kern/console.h>
 #include <kern/sched.h>
+#include <kern/time.h>
 #include <net/inet.h>
 #include <netinet/icmp.h>
 #include <netinet/if_arp.h>
 #include <netinet/ip.h>
 #include <netinet/udp.h>
+#include <sys/lock.h>
 #include <sys/netdev.h>
+#include <sys/param.h>
 #include <vm/vm_kmem.h>
 
 /* ------------------------------------------------------------------ */
@@ -479,6 +482,181 @@ int ip4_output_opts(uint32_t saddr, uint32_t daddr, uint8_t protocol,
 /* IPv4 input                                                         */
 /* ------------------------------------------------------------------ */
 
+static void ip4_deliver(netdev_t *dev, const uint8_t *pkt, size_t tot,
+                        size_t hlen, int for_bcast);
+
+/*
+ * UDP-I-01: reassembly (RFC 791 3.2, RFC 1122 3.3.2).  Every fragment used
+ * to be dropped, so no datagram larger than one frame could arrive and the
+ * usable UDP length range was 8..1472, not the 8..65507 RFC 768 allows.
+ *
+ * A small fixed table of datagrams in progress, keyed on (source,
+ * destination, identification, protocol).  Each holds a buffer for the
+ * largest possible datagram, with room in front for the header, and a
+ * bitmap of the 8-octet blocks received so far; overlapping fragments
+ * simply overwrite.  The datagram is complete once the last fragment
+ * (MF clear) has fixed its length, the offset-0 fragment has supplied the
+ * header, and every block below the end is present -- in any arrival
+ * order.  It is then delivered from the slot's buffer exactly as an
+ * unfragmented datagram would be.
+ *
+ * Bounds: IP4_REASM_SLOTS datagrams at once, each at most 64 KiB.  An
+ * entry expires IP4_REASM_TICKS after its first fragment (RFC 1122
+ * suggests 60-120 s; 30 s keeps a stalled sender from pinning a buffer
+ * long), swept whenever a fragment arrives.  When the table is full the
+ * oldest entry is evicted, so a fragment flood cannot wedge it.  No ICMP
+ * Time Exceeded is sent on expiry (RFC 1122 3.3.2 SHOULD): the sweep is
+ * lazy, so it would be late anyway.
+ */
+#define IP4_REASM_SLOTS  8
+#define IP4_REASM_TICKS  (30u * HZ)
+#define IP4_REASM_HROOM  60u                    /* the largest IP header */
+#define IP4_REASM_DATA   (65535u - 20u)         /* the largest payload */
+#define IP4_REASM_BLOCKS ((IP4_REASM_DATA + 7u) / 8u)
+
+typedef struct ip4_reasm {
+    int       used;
+    uint32_t  saddr, daddr;     /* network byte order */
+    uint16_t  id;
+    uint8_t   proto;
+    uint8_t   for_bcast;
+    uint8_t   hlen;             /* 0 until the offset-0 fragment arrives */
+    uint64_t  born;             /* tick of the first fragment */
+    uint32_t  data_len;         /* fixed by the last fragment, else 0 */
+    netdev_t *dev;
+    uint8_t  *buf;              /* IP4_REASM_HROOM + IP4_REASM_DATA */
+    uint8_t   hdr[IP4_REASM_HROOM];
+    uint8_t   have[(IP4_REASM_BLOCKS + 7u) / 8u];
+} ip4_reasm_t;
+
+static ip4_reasm_t g_reasm[IP4_REASM_SLOTS];
+static spinlock_t g_reasm_lock = SPINLOCK_INIT("ip4_reasm");
+
+/* Caller holds g_reasm_lock.  kfree() is IRQ-safe. */
+static void ip4_reasm_drop_locked(ip4_reasm_t *r) {
+    if (r->buf) kfree(r->buf, IP4_REASM_HROOM + IP4_REASM_DATA);
+    r->buf  = NULL;
+    r->used = 0;
+}
+
+/* Every block below data_len present?  Caller holds g_reasm_lock. */
+static int ip4_reasm_complete(const ip4_reasm_t *r) {
+    if (!r->hlen || !r->data_len) return 0;
+    uint32_t nb = (r->data_len + 7u) / 8u;
+    for (uint32_t b = 0; b < nb; b++)
+        if (!(r->have[b >> 3] & (1u << (b & 7)))) return 0;
+    return 1;
+}
+
+static void ip4_reasm_input(netdev_t *dev, const uint8_t *pkt, size_t hlen,
+                            size_t tot, int for_bcast) {
+    const struct iphdr *ih = (const struct iphdr *)pkt;
+    uint16_t fo  = __builtin_bswap16(ih->frag_off);
+    uint32_t off = (uint32_t)(fo & 0x1FFF) * 8u;
+    int      mf  = (fo & 0x2000) != 0;
+    uint32_t len = (uint32_t)(tot - hlen);
+    /* Only the last fragment may end off an 8-octet boundary, and nothing
+     * may reach past the largest datagram (the "ping of death"). */
+    if (len == 0 || (mf && (len & 7u)) || off + len > IP4_REASM_DATA)
+        return;
+
+    uint64_t now = get_ticks();
+    uint8_t *done = NULL;
+    size_t   done_tot = 0, done_hlen = 0;
+    int      done_bcast = 0;
+    netdev_t *done_dev = NULL;
+
+    unsigned long f = spinlock_acquire_irq(&g_reasm_lock);
+    ip4_reasm_t *r = NULL, *slot = NULL, *oldest = NULL;
+    for (int i = 0; i < IP4_REASM_SLOTS; i++) {
+        ip4_reasm_t *e = &g_reasm[i];
+        if (e->used && now - e->born >= IP4_REASM_TICKS)
+            ip4_reasm_drop_locked(e);                   /* timed out */
+        if (!e->used) {
+            if (!slot) slot = e;
+            continue;
+        }
+        if (e->saddr == ih->saddr && e->daddr == ih->daddr &&
+            e->id == ih->id && e->proto == ih->protocol)
+            r = e;
+        if (!oldest || e->born < oldest->born)
+            oldest = e;
+    }
+    if (!r) {
+        if (!slot) {
+            slot = oldest;                              /* table full */
+            ip4_reasm_drop_locked(slot);
+        }
+        uint8_t *b = (uint8_t *)kmalloc(IP4_REASM_HROOM + IP4_REASM_DATA);
+        if (!b) {
+            spinlock_release_irq(&g_reasm_lock, f);
+            return;
+        }
+        r = slot;
+        memset(r, 0, sizeof(*r));
+        r->used      = 1;
+        r->saddr     = ih->saddr;
+        r->daddr     = ih->daddr;
+        r->id        = ih->id;
+        r->proto     = ih->protocol;
+        r->for_bcast = (uint8_t)for_bcast;
+        r->born      = now;
+        r->dev       = dev;
+        r->buf       = b;
+    }
+
+    /* The last fragment fixes the length; anything that contradicts it
+     * (a second, different end, or data beyond it) spoils the datagram. */
+    if (!mf) {
+        if (r->data_len && r->data_len != off + len) goto spoil;
+        r->data_len = off + len;
+        uint32_t nb = (r->data_len + 7u) / 8u;
+        for (uint32_t b = nb; b < IP4_REASM_BLOCKS; b++)
+            if (r->have[b >> 3] & (1u << (b & 7))) goto spoil;
+    } else if (r->data_len && off + len > r->data_len) {
+        goto spoil;
+    }
+    memcpy(r->buf + IP4_REASM_HROOM + off, pkt + hlen, len);
+    for (uint32_t b = off / 8u; b < (off + len + 7u) / 8u; b++)
+        r->have[b >> 3] |= (uint8_t)(1u << (b & 7));
+    if (off == 0) {
+        memcpy(r->hdr, pkt, hlen);
+        r->hlen = (uint8_t)hlen;
+    }
+
+    if (ip4_reasm_complete(r)) {
+        if (r->hlen + r->data_len > 65535u) goto spoil;
+        /* The first fragment's header, rewritten as a whole datagram's,
+         * goes directly in front of the data. */
+        uint8_t *h = r->buf + IP4_REASM_HROOM - r->hlen;
+        memcpy(h, r->hdr, r->hlen);
+        struct iphdr *nh = (struct iphdr *)h;
+        nh->tot_len  = __builtin_bswap16((uint16_t)(r->hlen + r->data_len));
+        nh->frag_off = 0;
+        nh->check    = 0;
+        nh->check    = inet_csum(h, r->hlen);
+        done       = r->buf;
+        done_tot   = r->hlen + r->data_len;
+        done_hlen  = r->hlen;
+        done_bcast = r->for_bcast;
+        done_dev   = r->dev;
+        r->buf  = NULL;                 /* ownership passes to `done` */
+        r->used = 0;
+    }
+    spinlock_release_irq(&g_reasm_lock, f);
+
+    if (done) {
+        ip4_deliver(done_dev, done + IP4_REASM_HROOM - done_hlen, done_tot,
+                    done_hlen, done_bcast);
+        kfree(done, IP4_REASM_HROOM + IP4_REASM_DATA);
+    }
+    return;
+
+spoil:
+    ip4_reasm_drop_locked(r);
+    spinlock_release_irq(&g_reasm_lock, f);
+}
+
 void ip4_input(netdev_t *dev, const uint8_t *pkt, size_t len) {
     if (!dev || len < sizeof(struct iphdr)) return;
     const struct iphdr *ih = (const struct iphdr *)pkt;
@@ -490,9 +668,6 @@ void ip4_input(netdev_t *dev, const uint8_t *pkt, size_t len) {
 
     /* Validate header checksum. */
     if (inet_csum(ih, hlen) != 0) return;
-
-    /* Drop fragments — we don't reassemble yet. */
-    if ((__builtin_bswap16(ih->frag_off) & 0x3FFF) != 0) return;
 
     /*
      * IP-02: reject martian source addresses.  Only the destination used to
@@ -544,6 +719,20 @@ void ip4_input(netdev_t *dev, const uint8_t *pkt, size_t len) {
         return;
     }
 
+    /* UDP-I-01: a fragment (MF set or a nonzero offset) goes to
+     * reassembly, which delivers the whole datagram when it completes. */
+    if ((__builtin_bswap16(ih->frag_off) & 0x3FFF) != 0) {
+        ip4_reasm_input(dev, pkt, hlen, tot, for_bcast);
+        return;
+    }
+    ip4_deliver(dev, pkt, tot, hlen, for_bcast);
+}
+
+/* Hand one whole datagram -- as received, or reassembled -- to its
+ * protocol and to RAW sockets. */
+static void ip4_deliver(netdev_t *dev, const uint8_t *pkt, size_t tot,
+                        size_t hlen, int for_bcast) {
+    const struct iphdr *ih = (const struct iphdr *)pkt;
     const uint8_t *l4 = pkt + hlen;
     size_t l4_len = tot - hlen;
     switch (ih->protocol) {

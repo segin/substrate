@@ -96,8 +96,15 @@ struct sin6_kern {
  * behavioural gain.  What it CAN do is stop truncating what does fit, so it
  * is now exactly MTU minus the IPv4 and UDP headers.  Real 65507 support is
  * an IP-fragmentation feature, not a socket-layer one.
+ *
+ * UDP-I-01: ip4_input now reassembles, so a datagram up to the protocol
+ * maximum can ARRIVE; AFI_RX_MAX is that receive ceiling.  Sending is still
+ * one unfragmented packet, so AFI_DATA_MAX stays the send-side bound (and
+ * the size of the on-stack bounce buffers; a larger receive bounces
+ * through the heap instead).
  */
 #define AFI_DATA_MAX (NETDEV_MTU_MAX - 20 - 8)
+#define AFI_RX_MAX   (65535 - 20 - 8)
 
 /*
  * UDP-RES-01: one queued datagram -- this header, then `len` payload bytes,
@@ -122,6 +129,29 @@ typedef struct afi_rec {
 
 /* Ring space a record with `n` payload bytes occupies. */
 #define AFI_REC_SPACE(n)   (((uint32_t)sizeof(afi_rec_t) + (uint32_t)(n) + 3u) & ~3u)
+
+/*
+ * UDP-I-01: the buffer a datagram is copied through under afi_lock before
+ * it reaches the caller.  The caller's on-stack one (AFI_DATA_MAX) does for
+ * anything that fits a frame; a larger request -- which a reassembled
+ * datagram can now satisfy -- gets a heap buffer of up to AFI_RX_MAX,
+ * allocated before the lock is taken.  If that fails the stack buffer is
+ * used and the datagram is truncated, as every large one used to be.
+ */
+static uint8_t *afi_rx_bounce(uint8_t *stk, size_t stk_len, size_t want,
+                              size_t *cap) {
+    *cap = stk_len;
+    if (want <= stk_len) return stk;
+    if (want > AFI_RX_MAX) want = AFI_RX_MAX;
+    uint8_t *b = (uint8_t *)kmalloc(want);
+    if (!b) return stk;
+    *cap = want;
+    return b;
+}
+
+static void afi_rx_bounce_free(uint8_t *b, const uint8_t *stk, size_t cap) {
+    if (b != stk) kfree(b, cap);
+}
 /* UDP-RES-01: SO_RCVBUF, in bytes of ring (headers included). */
 #define AFI_RCVBUF_DEFAULT (64u * 1024u)
 #define AFI_RCVBUF_MIN     (2u * 1024u)
@@ -673,7 +703,8 @@ static int afi_wait(afi_sock_t *s, unsigned long *fl) {
  * is (nested references are fine) so the ring code keeps working unchanged.
  */
 static size_t afinet_node_read_body(fs_node_t *node, afi_sock_t *s,
-                                    size_t size, uint8_t *buf);
+                                    size_t size, uint8_t *buf,
+                                    uint8_t *tmp, size_t cap);
 
 /*
  * UDP-API-16: pin the socket behind a node.  node->impl used to be loaded
@@ -697,7 +728,12 @@ size_t afinet_node_read(fs_node_t *node, off_t off, size_t size, uint8_t *buf) {
     afi_sock_t *s = afi_node_get(node);
     if (!s) return 0;                   /* torn down: end of file */
 
-    size_t r = afinet_node_read_body(node, s, size, buf);
+    uint8_t stk[AFI_DATA_MAX];
+    size_t cap = sizeof(stk);
+    uint8_t *tmp = s->type == SOCK_STREAM ? stk
+                                          : afi_rx_bounce(stk, sizeof(stk), size, &cap);
+    size_t r = afinet_node_read_body(node, s, size, buf, tmp, cap);
+    afi_rx_bounce_free(tmp, stk, cap);
 
     unsigned long fl1 = spinlock_acquire_irq(&afi_lock);
     afi_rele_unlock(s, fl1);            /* may free; s must not be touched */
@@ -705,7 +741,8 @@ size_t afinet_node_read(fs_node_t *node, off_t off, size_t size, uint8_t *buf) {
 }
 
 static size_t afinet_node_read_body(fs_node_t *node, afi_sock_t *s,
-                                    size_t size, uint8_t *buf) {
+                                    size_t size, uint8_t *buf,
+                                    uint8_t *tmp, size_t cap) {
     if (s->closed) return 0;
     if (s->rd_shut) return 0;            /* shutdown(SHUT_RD): EOF */
     int nb = afi_node_nonblock(node);
@@ -734,9 +771,9 @@ static size_t afinet_node_read_body(fs_node_t *node, afi_sock_t *s,
     for (;;) {
         if (s->count > 0) {
             afi_rec_t h;
-            uint8_t tmp[AFI_DATA_MAX];
-            rq_pop(s, &h, tmp, size < sizeof(tmp) ? size : sizeof(tmp), 1);
-            size_t n = h.len < size ? h.len : size;
+            size_t lim = size < cap ? size : cap;
+            rq_pop(s, &h, tmp, lim, 1);
+            size_t n = h.len < lim ? h.len : lim;   /* only lim were copied */
             afi_rele_unlock(s, fl);
             memcpy(buf, tmp, n);
             return n;
@@ -2186,6 +2223,12 @@ int afinet_pktinfo_on(int fd) {
     return s && s->family == AF_INET && s->pktinfo;
 }
 
+static ssize_t afinet_recvfrom_dgram(int fd, afi_sock_t *s, void *buf,
+                                     size_t len, int flags, void *addr,
+                                     socklen_t *addrlen, socklen_t acap,
+                                     struct afi_rxinfo *rx, uint8_t *tmp,
+                                     size_t cap);
+
 ssize_t afinet_recvfrom_rx(int fd, void *buf, size_t len, int flags,
                            void *addr, socklen_t *addrlen,
                            struct afi_rxinfo *rx) {
@@ -2227,6 +2270,20 @@ ssize_t afinet_recvfrom_rx(int fd, void *buf, size_t len, int flags,
                   : tcp_recv_until(s->tcp, buf, len, dl);
     }
 
+    uint8_t stk[AFI_DATA_MAX];
+    size_t cap;
+    uint8_t *tmp = afi_rx_bounce(stk, sizeof(stk), len, &cap);   /* UDP-I-01 */
+    ssize_t r = afinet_recvfrom_dgram(fd, s, buf, len, flags, addr, addrlen,
+                                      acap, rx, tmp, cap);
+    afi_rx_bounce_free(tmp, stk, cap);
+    return r;
+}
+
+static ssize_t afinet_recvfrom_dgram(int fd, afi_sock_t *s, void *buf,
+                                     size_t len, int flags, void *addr,
+                                     socklen_t *addrlen, socklen_t acap,
+                                     struct afi_rxinfo *rx, uint8_t *tmp,
+                                     size_t cap) {
     /* NET-01: pin the socket and take the ring lock — see afinet_node_read.
      * The datagram payload and its source address are snapshotted into
      * kernel-local storage under the lock; the fill-out of the caller's
@@ -2258,7 +2315,7 @@ ssize_t afinet_recvfrom_rx(int fd, void *buf, size_t len, int flags,
     for (;;) {
         if (s->count > 0) {
             afi_rec_t h;
-            uint8_t tmp[AFI_DATA_MAX];
+            size_t lim = len < cap ? len : cap;
             /*
              * SOCK-05: MSG_PEEK has to LEAVE the datagram queued.  The ring
              * was advanced unconditionally, so a peek consumed it -- the
@@ -2267,9 +2324,8 @@ ssize_t afinet_recvfrom_rx(int fd, void *buf, size_t len, int flags,
              * silently loses a message for anyone who peeks before deciding
              * how large a buffer to allocate.
              */
-            rq_pop(s, &h, tmp, len < sizeof(tmp) ? len : sizeof(tmp),
-                   !(flags & MSG_PEEK));
-            size_t n = h.len < len ? h.len : len;
+            rq_pop(s, &h, tmp, lim, !(flags & MSG_PEEK));
+            size_t n = h.len < lim ? h.len : lim;   /* only lim were copied */
             uint8_t paddr[16];
             uint16_t pport = h.port;
             uint16_t ptrue = h.truelen;
@@ -2450,7 +2506,7 @@ static int enqueue(afi_sock_t *s, uint8_t family, uint8_t proto, uint16_t port,
                    const void *addr, const uint8_t *data, size_t len,
                    uint32_t daddr4) {
     if (!s->rq) return 0;
-    size_t n = len > AFI_DATA_MAX ? AFI_DATA_MAX : len;
+    size_t n = len > AFI_RX_MAX ? AFI_RX_MAX : len;             /* UDP-I-01 */
     uint32_t need = AFI_REC_SPACE(n);
     /* UDP-RES-01: admission is by bytes against SO_RCVBUF, not by count. */
     uint32_t limit = s->rcvbuf < s->rq_cap ? s->rcvbuf : s->rq_cap;

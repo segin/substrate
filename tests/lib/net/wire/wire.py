@@ -303,10 +303,12 @@ class Wire:
             self.pump(min(left, 0.2))
 
     def send_ip(self, proto, payload, src=PEER_IP, dst=GUEST_IP, ttl=64,
-                ident=None, eth_dst=GUEST_MAC):
+                ident=None, eth_dst=GUEST_MAC, frag=0):
+        """frag is the raw flags/fragment-offset field: 0x2000 | (off // 8)
+        for a More Fragments piece, off // 8 for the last one."""
         ident = self.ip_id if ident is None else ident
         ip = struct.pack('!BBHHHBBH4s4s', 0x45, 0, 20 + len(payload), ident,
-                         0, ttl, proto, 0, socket.inet_aton(src),
+                         frag, ttl, proto, 0, socket.inet_aton(src),
                          socket.inet_aton(dst))
         ip = ip[:10] + struct.pack('!H', csum(ip)) + ip[12:]
         self.ip_id = (self.ip_id + 1) & 0xFFFF
