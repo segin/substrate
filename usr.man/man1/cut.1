@@ -1,0 +1,208 @@
+.TH CUT 1 2026-09-25 "Substrate" "User Commands"
+.SH NAME
+cut \- cut out selected fields of each line of a file
+.SH SYNOPSIS
+.B cut
+.B \-b
+.I list
+.RB [ \-n ]
+.RI [ option " ...]"
+.RI [ file " ...]"
+.br
+.B cut
+.B \-c
+.I list
+.RI [ option " ...]"
+.RI [ file " ...]"
+.br
+.B cut
+.B \-f
+.I list
+.RB [ \-d
+.IR delim " |"
+.BR \-w ]
+.RB [ \-s ]
+.RI [ option " ...]"
+.RI [ file " ...]"
+.SH DESCRIPTION
+.B cut
+writes selected parts of each input line to standard output.
+Input is read from each
+.I file
+in turn, or from standard input if none is given or for a
+.I file
+of
+.BR \- .
+.PP
+Exactly one of
+.BR \-b ,
+.BR \-c ,
+or
+.B \-f
+must be given.
+Its
+.I list
+is a comma-separated set of positions or ranges, numbered from 1:
+.TP
+.I N
+position
+.I N
+only;
+.TP
+.IB N \-
+from
+.I N
+to the end of the line;
+.TP
+.BI \- M
+from 1 to
+.IR M ;
+.TP
+.IB N \- M
+from
+.I N
+to
+.I M
+inclusive.
+.PP
+Ranges may overlap and appear in any order; each selected byte or
+field is written once, in input order.
+.PP
+Only single-byte characters are supported, so
+.B \-c
+behaves exactly like
+.B \-b
+and
+.B \-n
+has no effect.
+.PP
+In field mode, a line that contains no delimiter is written unchanged
+unless
+.B \-s
+is given.
+Selected fields are joined with the input delimiter (or the
+.B \-\-output\-delimiter
+string).
+.SH OPTIONS
+.TP
+.BR \-b ", " \-\-bytes= \fIlist\fP
+Select bytes.
+.TP
+.BR \-c ", " \-\-characters= \fIlist\fP
+Select characters (identical to
+.BR \-b ).
+.TP
+.BR \-f ", " \-\-fields= \fIlist\fP
+Select fields.
+.TP
+.BR \-d ", " \-\-delimiter= \fIdelim\fP
+Use the single character
+.I delim
+as the field delimiter instead of tab.
+.TP
+.B \-w
+Split fields on runs of blanks and tabs instead of a single delimiter
+character; leading blanks are skipped.
+Selected fields are joined with a tab.
+Valid only with
+.BR \-f ,
+and takes precedence over
+.BR \-d .
+.TP
+.BR \-s ", " \-\-only\-delimited
+With
+.BR \-f ,
+do not print lines that contain no delimiter.
+.TP
+.B \-n
+Accepted and ignored.
+.TP
+.BR \-z ", " \-\-zero\-terminated
+Lines are terminated by NUL bytes instead of newlines, on input and
+output.
+.TP
+.B \-\-complement
+Select every byte or field that is
+.I not
+in
+.IR list .
+.TP
+.BI \-\-output\-delimiter= str
+With
+.BR \-f ,
+join selected fields with
+.IR str .
+With
+.B \-b
+or
+.BR \-c ,
+write
+.I str
+between non-adjacent selected bytes.
+.TP
+.B \-\-help
+Print a usage summary and exit.
+.TP
+.B \-\-version
+Print version information and exit.
+.SH EXIT STATUS
+.TP
+.B 0
+Success.
+.TP
+.B 1
+A
+.I file
+could not be opened; the remaining files are still processed.
+.TP
+.B 2
+Invalid usage or list, out of memory, or a write error.
+.SH EXAMPLES
+Print login names and shells from the password file:
+.PP
+.EX
+$ cut \-d: \-f1,7 /etc/passwd
+.EE
+.PP
+Print the first 8 bytes of each line:
+.PP
+.EX
+$ cut \-b \-8 file
+.EE
+.PP
+Print the second whitespace-separated column:
+.PP
+.EX
+$ ps | cut \-w \-f2
+.EE
+.SH SEE ALSO
+.BR awk (1),
+.BR join (1),
+.BR tr (1)
+.SH STANDARDS
+POSIX.1-2024 for
+.BR \-b ,
+.BR \-c ,
+.BR \-d ,
+.BR \-f ,
+.BR \-n ,
+and
+.BR \-s .
+.B \-w
+follows BSD;
+.BR \-z ,
+.BR \-\-complement ,
+.BR \-\-output\-delimiter ,
+and the other long options follow GNU coreutils.
+.SH BUGS
+Multibyte characters are not recognised;
+.B \-c
+counts bytes.
+.PP
+.B \-s
+and
+.B \-d
+are accepted, and ignored, with
+.B \-b
+and
+.BR \-c .
