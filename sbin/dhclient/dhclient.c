@@ -190,7 +190,8 @@ static void get_hw_addr(const char *iface, uint8_t mac[6], int *ifindex) {
     close(s);
 }
 
-static void set_ipv4(const char *iface, unsigned long req, uint32_t addr) {
+/* Returns 0, or -1 (with the error reported) if the ioctl failed. */
+static int set_ipv4(const char *iface, unsigned long req, uint32_t addr) {
     int s = socket(AF_INET, SOCK_DGRAM, 0);
     if (s < 0) { perror("socket"); exit(1); }
     struct ifreq r;
@@ -199,10 +200,21 @@ static void set_ipv4(const char *iface, unsigned long req, uint32_t addr) {
     struct sockaddr_in *sin = (struct sockaddr_in *)&r.ifr_addr;
     sin->sin_family = AF_INET;
     sin->sin_addr.s_addr = addr;
+    int rc = 0;
     if (ioctl(s, req, &r) < 0) {
         fprintf(stderr, "dhclient: ioctl 0x%lx: %s\n", req, strerror(errno));
+        rc = -1;
     }
     close(s);
+    return rc;
+}
+
+/* The netmask for an address's class (RFC 1122 3.3.1.1 behaviour), used
+ * when the server sends no subnet mask option. */
+static uint32_t classful_mask(uint32_t addr) {
+    uint8_t a = ((const uint8_t *)&addr)[0];
+    uint32_t m = a < 128 ? 0xFF000000u : a < 192 ? 0xFFFF0000u : 0xFFFFFF00u;
+    return __builtin_bswap32(m);
 }
 
 /* ---- DHCP frame builder ---- */
@@ -481,10 +493,24 @@ static int install_lease(const char *iface, const struct bootp *bp,
         search_len = ml;
     }
 
-    /* Install lease. */
-    set_ipv4(iface, SIOCSIFADDR,    offered_ip);
-    if (subnet) set_ipv4(iface, SIOCSIFNETMASK, subnet);
-    if (router) set_ipv4(iface, SIOCSIFGATEWAY, router);
+    /* Install lease.
+     *
+     * DHC-08: RFC 2131 3.5 -- a parameter the server does not send takes
+     * its Host Requirements default.  A missing mask or router used to
+     * leave whatever the interface already had -- at boot, the /24 and
+     * 10.0.2.2 gateway inet_init() hard-codes for QEMU -- so a real
+     * network's lease kept a route through a host that does not exist
+     * there.  The mask defaults to the address's class and a missing
+     * router clears the gateway.  And a failed install is a failure: it
+     * used to be reported and then announced as "bound" with exit 0. */
+    if (!subnet) subnet = classful_mask(offered_ip);
+    int bad = set_ipv4(iface, SIOCSIFADDR, offered_ip) < 0;
+    bad |= set_ipv4(iface, SIOCSIFNETMASK, subnet) < 0;
+    bad |= set_ipv4(iface, SIOCSIFGATEWAY, router) < 0;
+    if (bad) {
+        fprintf(stderr, "dhclient: could not install the lease on %s\n", iface);
+        return 1;
+    }
 
     /* Write /etc/resolv.conf with DNS + search/domain.  Atomic-
      * via-rename so a partial write never blinds the resolver. */
@@ -577,7 +603,6 @@ static int install_lease(const char *iface, const struct bootp *bp,
 struct lease {
     uint32_t addr;      /* network byte order */
     uint32_t server;    /* 'server identifier' of the leasing server */
-    uint32_t router;    /* installed default route, to drop with the lease */
     double   start;     /* now_sec() when the acknowledged REQUEST went out */
     double   t1, t2, len;
     int      infinite;  /* lease time 0xffffffff (3.3), or none given */
@@ -603,9 +628,6 @@ static void lease_from_ack(const struct bootp *bp, size_t len, double sent_at,
     L->addr = bp->yiaddr ? bp->yiaddr : L->addr;
     const uint8_t *p = find_opt(bp, len, DHCP_OPT_SRV_ID, &mlen);
     if (p && mlen == 4) memcpy(&L->server, p, 4);
-    L->router = 0;
-    p = find_opt(bp, len, DHCP_OPT_ROUTER, &mlen);
-    if (p && mlen >= 4) memcpy(&L->router, p, 4);
     L->start = sent_at;
 
     uint32_t secs = opt_u32(bp, len, DHCP_OPT_LEASE, &has);
@@ -635,8 +657,8 @@ static void lease_from_ack(const struct bootp *bp, size_t len, double sent_at,
 
 /* Stop using the address: 3.7 / 4.4.5 "MUST immediately stop any other
  * network processing". */
-static void drop_lease(const char *iface, const struct lease *L) {
-    if (L->router) set_ipv4(iface, SIOCSIFGATEWAY, 0);
+static void drop_lease(const char *iface) {
+    set_ipv4(iface, SIOCSIFGATEWAY, 0);
     set_ipv4(iface, SIOCSIFADDR, 0);
 }
 
@@ -985,7 +1007,7 @@ static void maintain(const char *iface, const uint8_t hw[6], int ifindex,
             if (L->infinite) return;
             continue;                               /* BOUND again */
         }
-        drop_lease(iface, L);
+        drop_lease(iface);
         fprintf(stdout, "dhclient: %s; address released, restarting "
                 "from INIT\n", r < 0 ? "lease refused" : "lease expired");
         while (acquire(iface, hw, ifindex, L) != 0)

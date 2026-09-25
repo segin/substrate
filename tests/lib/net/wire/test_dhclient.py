@@ -10,6 +10,10 @@ exactly as the case needs.
                   offered address, and the guest then answers ARP for it.
     ack-config    DHC-06: the netmask and router come from the DHCPACK --
                   here the OFFER carries neither.
+    no-options    DHC-08: an ACK with no mask or router: the mask defaults
+                  to the address's class (/8 for 10.0.2.50) and the gateway
+                  the kernel booted with is removed -- an off-link datagram
+                  no longer leaves through 10.0.2.2.
     probe-announce DHC-07: before using the address the client ARP-probes it
                   (sender IP 0), and once bound announces it with a
                   gratuitous ARP.
@@ -546,7 +550,47 @@ def case_nak_renew():
         return None, w
 
 
+OFFLINK = '198.51.100.1'
+
+
+def case_no_options():
+    # Two sends a second apart: through a gateway, the first can be lost
+    # while ARP resolves it.
+    with boot(args='eth0 -- sendto:%s:9:x sleep:1 sendto:%s:9:y'
+              % (OFFLINK, OFFLINK)) as w:
+        s = Server(w)
+        d = s.expect(DISCOVER, 90)
+        if not d:
+            return 'no DHCPDISCOVER', w
+        only_lease = {51: struct.pack('!I', 3600)}
+        s.reply(d, OFFER, opts=only_lease)
+        r = s.expect(REQUEST, 10)
+        if not r:
+            return 'no DHCPREQUEST', w
+        s.reply(r, ACK, opts=only_lease)
+        if not w.wait_serial('dhclient: bound', 10):
+            return 'dhclient never reported bound', w
+        w.pump(0.3)
+        want = 'dhclient: bound %s/255.0.0.0\n' % LEASED
+        if want not in w.serial():
+            line = [l for l in w.serial().splitlines() if 'dhclient: bound' in l]
+            return 'installed %r, want the class A default mask' % line[-1:], w
+        # the boot-time gateway (10.0.2.2) must be gone: an off-link send
+        # must not leave through it
+        w.ip_rx.clear()
+        w.wait_serial('guest: sleep', 10)
+        w.pump(3.0)
+        leaked = [x for x in w.ip_rx if x[2] == OFFLINK]
+        if leaked:
+            return 'an off-link datagram still went out via the old gateway', w
+        sends = [l for l in w.serial().splitlines() if 'guest: sendto' in l]
+        if len(sends) != 2 or any('unreachable' not in l for l in sends):
+            return 'off-link sends: %r, want Network is unreachable' % sends, w
+        return None, w
+
+
 CASES = (('bound', case_bound), ('ack-config', case_ack_config),
+         ('no-options', case_no_options),
          ('probe-announce', case_probe_announce), ('declined', case_declined),
          ('renew', case_renew), ('rebind', case_rebind),
          ('expire', case_expire), ('nak-renew', case_nak_renew), ('clock-step', case_clock_step),

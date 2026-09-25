@@ -370,7 +370,7 @@ frames exactly as each case needs.
 - [x] **DHC-05** Randomized exponential backoff for DISCOVER and REQUEST -- `retx_delay()` (4, 8, 16, 32 s, capped at 64, each +-1 s); DISCOVER uses it now, REQUEST with DHC-03.  Four DISCOVERs in the foreground, about 60 s, by choice (the RFC 3.1 example).  `backoff` in `test_dhclient.py`
 - [x] **DHC-06** Configure from the DHCPACK, not the DHCPOFFER -- `install_lease()` reads `yiaddr`, options 1 and 3 from the ACK; the OFFER supplies only the server and the requested address; `ack-config` in `test_dhclient.py`
 - [x] **DHC-07** ARP-probe the address; DHCPDECLINE if it's taken; gratuitous ARP when bound -- `arp_in_use()` (2 probes, sender 0.0.0.0, 1 s listen; own-MAC frames ignored), DHCPDECLINE per Table 5 then 10 s and INIT; `probe-announce`, `declined` in `test_dhclient.py`
-- [ ] **DHC-08** Defaults for missing netmask/router; fail on ioctl errors
+- [x] **DHC-08** Defaults for missing netmask/router; fail on ioctl errors -- classful mask without option 1, gateway cleared without option 3, a failed ioctl fails the bind (no "bound", non-zero exit); `no-options` in `test_dhclient.py` (the failure path has no test: the harness cannot make the ioctls fail)
 - [ ] **DHC-09** Option overload, concatenation, Maximum Message Size
 - [ ] **DHC-10** Validate IP/UDP headers on received frames
 - [ ] **DHC-11** Validate server identifier and yiaddr in OFFER/ACK

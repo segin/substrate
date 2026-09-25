@@ -6,8 +6,11 @@
  * which sends exact, possibly deliberately malformed, segments and checks
  * the guest's replies on the wire.
  *
- *   wireguest run <path> <arg>...              (fork + exec path, report its
- *                                               exit status, stay up)
+ *   wireguest run <path> <arg>... [-- <action>...]
+ *                                              (fork + exec path, report its
+ *                                               exit status, then run any
+ *                                               actions after "--" on a new
+ *                                               UDP socket; stay up)
  *   wireguest runclock <path> <arg>...         (as run, stepping the wall
  *                                               clock +1 h every 200 ms for
  *                                               the first 12 s)
@@ -418,7 +421,13 @@ int main(int argc, char **argv) {
     } else if (argc >= 3 && strcmp(argv[1], "run") == 0) {
         /* Run another program (e.g. a dhclient under test, added to the
          * image with Wire.boot(files=...)) and report how it exited.  Init
-         * stays up afterwards, so a child that daemonized keeps running. */
+         * stays up afterwards, so a child that daemonized keeps running.
+         * Arguments after a lone "--" are not the program's: they are
+         * actions run afterwards on a fresh UDP socket. */
+        int sep = argc;
+        for (int k = 3; k < argc; k++)
+            if (strcmp(argv[k], "--") == 0) { sep = k; break; }
+        if (sep < argc) argv[sep] = NULL;
         pid_t pid = fork();
         if (pid == 0) {
             execv(argv[2], argv + 2);
@@ -432,6 +441,10 @@ int main(int argc, char **argv) {
         else
             say("run failed: %s (%ld)", strerror(errno), errno);
         rc = 0;
+        if (sep < argc) {
+            int fd = socket(AF_INET, SOCK_DGRAM, 0);
+            rc = do_actions(fd, argc - sep - 1, argv + sep + 1);
+        }
     } else if (argc >= 4 && strcmp(argv[1], "connect") == 0) {
         struct sockaddr_in sa;
         memset(&sa, 0, sizeof sa);
