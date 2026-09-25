@@ -1,0 +1,79 @@
+.TH TABS 1 2026-09-25 "Substrate" "User Commands"
+.SH NAME
+tabs \- set terminal tab stops
+.SH SYNOPSIS
+.B tabs
+.RI [ \-n ]
+.br
+.B tabs
+.IR n1 [, n2 ,...]
+.SH DESCRIPTION
+.B tabs
+writes ANSI escape sequences to standard output that clear all tab stops
+on the terminal and then set new ones.
+It emits a carriage return and
+.B ESC [ 3 g
+(clear all tab stops), moves the cursor right to each requested column
+and sets a stop there with
+.B ESC H
+(HTS), and finishes with a carriage return.
+No terminal database is consulted; the terminal must understand these
+sequences.
+.PP
+Columns are numbered from 1.
+Without a column list, stops are set every 8 columns (at 9, 17, 25, ...).
+Stops are set only up to column 1024.
+.SH OPTIONS
+.TP
+.BI \- n
+Set a stop every
+.I n
+columns, at columns 1+\fIn\fR, 1+2\fIn\fR, and so on.
+.I n
+must be at least 1.
+.TP
+.IR n1 , n2 ,...
+Set stops at exactly the listed columns.
+Columns are separated by commas or spaces and must be strictly
+increasing.
+Several list arguments may be given; they are concatenated.
+A list overrides any
+.BI \- n
+option.
+.TP
+.B \-\-
+Ends option processing.
+.SH EXIT STATUS
+.TP
+.B 0
+Success.
+.TP
+.B 1
+An argument was not recognised, the increment was less than 1, the
+column list was not increasing, or writing to standard output failed.
+.SH EXAMPLES
+Set stops every 4 columns:
+.EX
+$ tabs \-4
+.EE
+.PP
+Set stops at specific columns:
+.EX
+$ tabs 10,20,40
+.EE
+.SH SEE ALSO
+.BR stty (1),
+.BR tty (1)
+.SH BUGS
+The POSIX
+.B \-T
+.I type
+option, the predefined formats such as
+.BR \-a " and " \-c ,
+and
+.BI + n
+increments in a column list are not supported.
+List entries of 0 or greater than 1024 are silently ignored, and any
+arguments after
+.B \-\-
+are ignored.
