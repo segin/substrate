@@ -1,0 +1,145 @@
+.TH SU 1 2026-09-25 "Substrate" "User Commands"
+.SH NAME
+su \- run a shell with a different user ID
+.SH SYNOPSIS
+.B su
+.RB [ \-l | \-\-login | \- ]
+.RB [ \-c
+.IR command ]
+.RI [ user ]
+.SH DESCRIPTION
+.B su
+starts the shell of
+.I user
+(default
+.BR root )
+with that user's user ID, group ID and supplementary groups.
+Arguments are scanned left to right; options and the
+.I user
+operand may appear in any order, and a later
+.I user
+operand replaces an earlier one.
+.PP
+If the invoking real user ID is not 0,
+.B su
+prompts for a password on standard input, with echo disabled when
+standard input is a terminal, and checks it against the second field of
+the user's line in
+.I /etc/shadow
+using
+.BR crypt (3).
+If the user has no
+.I /etc/shadow
+entry and the
+.BR passwd (5)
+password field does not begin with
+.BR x ,
+that field is used instead.
+An empty stored password accepts any input; a stored password beginning
+with
+.B *
+or
+.B !\&
+never matches.
+The real user ID 0 skips the prompt entirely.
+.PP
+After authentication
+.B su
+calls
+.BR setgid (2),
+.BR initgroups (3)
+and
+.BR setuid (2),
+sets
+.B USER
+and
+.B LOGNAME
+to the target user's name, and executes the target user's shell from
+.BR passwd (5),
+or
+.I /bin/sh
+if that field is empty.
+All other environment variables are passed through unchanged.
+.PP
+.B su
+must be installed set-user-ID root to switch users; the root file system
+build installs
+.I /bin/su
+with mode 4755.
+.SH OPTIONS
+.TP
+.BR \-l ", " \-\-login ", " \-
+Start a login shell: additionally set
+.BR HOME ,
+.BR SHELL ,
+.B USER
+and
+.B LOGNAME
+from the target user's
+.BR passwd (5)
+entry, change to the user's home directory (or to
+.I /
+if that fails), and execute the shell with the argument
+.BR \-l .
+If that
+.BR exec
+fails, the shell is retried with no arguments.
+.TP
+.BI \-c " command"
+Execute the shell as
+.IB shell " \-c " command
+instead of starting an interactive shell.
+.PP
+Any other argument that begins with
+.B \-
+is rejected.
+.SH EXIT STATUS
+On success
+.B su
+does not return; the exit status is that of the executed shell.
+It exits with status
+.B 1
+if an option is invalid, the user does not exist, authentication fails,
+the user or group ID cannot be changed, or the shell cannot be executed.
+.SH ENVIRONMENT
+.TP
+.BR USER ", " LOGNAME
+Always set to the target user's name.
+.TP
+.BR HOME ", " SHELL
+Set from the target user's entry only with
+.BR \-l .
+.SH FILES
+.TP
+.I /etc/passwd
+User database, read via
+.BR getpwnam (3).
+.TP
+.I /etc/shadow
+Password hashes.
+.SH EXAMPLES
+Become root with a login environment:
+.EX
+$ su \-
+.EE
+.PP
+Run one command as another user:
+.EX
+$ su \-c 'id' daemon
+.EE
+.SH SEE ALSO
+.BR id (1),
+.BR sh (1),
+.BR whoami (1),
+.BR setgid (2),
+.BR setuid (2),
+.BR crypt (3),
+.BR getpwnam (3),
+.BR passwd (5),
+.BR shadow (5)
+.SH BUGS
+.B su
+does not log its use, does not sanitize the inherited environment, and
+does not consult the target account's expiry fields in
+.IR /etc/shadow .
+Passwords longer than 127 bytes are truncated.
