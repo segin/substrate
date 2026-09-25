@@ -1,0 +1,109 @@
+.TH HOSTNAME 1 2026-09-25 "Substrate" "User Commands"
+.SH NAME
+hostname \- show or set the system host name
+.SH SYNOPSIS
+.B hostname
+.RB [ \-f | \-s ]
+.br
+.B hostname
+.B \-F
+.I file
+.br
+.B hostname
+.RB [ \-\- ]
+.I name
+.SH DESCRIPTION
+With no operand,
+.B hostname
+prints the kernel host name.
+By default only the part before the first dot is printed; use
+.B \-f
+to print the whole name.
+No DNS lookup is performed in either case.
+.PP
+If the kernel host name is empty, or is
+.B (none)
+or
+.BR localhost ,
+.B hostname
+reads the first line of
+.IR /etc/hostname .
+If that line is non-empty,
+.B hostname
+also sets it as the kernel host name, ignoring any error, and prints it.
+This lets the name be shown correctly early in boot, before the
+host name has been set by the boot scripts.
+.PP
+With a
+.I name
+operand,
+.B hostname
+sets the kernel host name to
+.I name
+with
+.BR sethostname (2).
+.SH OPTIONS
+Options are processed from left to right.
+.TP
+.B \-f
+Print the full host name, including any domain part.
+.TP
+.B \-s
+Print the short host name, up to the first dot (the default).
+.TP
+.BI \-F " file"
+Set the host name from the first line of
+.IR file ,
+with trailing newline, carriage-return, space and tab characters
+removed.
+It is an error if the file is empty or the line is blank.
+.B hostname
+exits as soon as this option has been handled; any later arguments
+are ignored.
+.TP
+.B \-\-
+End of options; the next argument is taken as
+.IR name .
+.SH EXIT STATUS
+.TP
+.B 0
+Success.
+.TP
+.B 1
+An unknown option was given,
+.B \-F
+had no argument,
+.I file
+could not be read or was blank, or getting or setting the host name
+failed.
+.SH FILES
+.TP
+.I /etc/hostname
+Read when the kernel host name is unset or
+.BR localhost ,
+and conventionally used with
+.BR \-F .
+.SH EXAMPLES
+Set the host name from the configuration file:
+.PP
+.EX
+# hostname \-F /etc/hostname
+.EE
+.PP
+Print the fully qualified name:
+.PP
+.EX
+$ hostname \-f
+build.example.org
+.EE
+.SH SEE ALSO
+.BR uname (1),
+.BR sys_hostname (2),
+.BR uname (2)
+.SH BUGS
+Merely printing the host name can change it, as described above.
+.PP
+The Substrate kernel currently does not check privilege in
+.BR sethostname (2),
+so any user can change the host name.
+Names longer than the kernel limit are silently truncated.
