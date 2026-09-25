@@ -25,7 +25,6 @@
 #include <unistd.h>
 #include <sys/socket.h>
 #include <sys/ioctl.h>
-#include <sys/time.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <net/if.h>
@@ -135,10 +134,14 @@ static uint16_t inet_csum(const void *data, size_t len) {
     return (uint16_t)__builtin_bswap16((uint16_t)~sum);
 }
 
+/* DHC-14: deadlines are measured on the monotonic clock.  They were taken
+ * from gettimeofday(), so a wall-clock step during boot (an RTC read, NTP)
+ * expired every wait at once -- all the DISCOVERs went out back to back and
+ * dhclient gave up -- or, stepped backwards, stretched a wait out. */
 static double now_sec(void) {
-    struct timeval tv;
-    gettimeofday(&tv, NULL);
-    return tv.tv_sec + tv.tv_usec / 1000000.0;
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return ts.tv_sec + ts.tv_nsec / 1000000000.0;
 }
 
 static void get_hw_addr(const char *iface, uint8_t mac[6], int *ifindex) {

@@ -376,4 +376,4 @@ frames exactly as each case needs.
 - [ ] **DHC-11** Validate server identifier and yiaddr in OFFER/ACK
 - [ ] **DHC-12** Sanitize option 15/119 before writing resolv.conf
 - [ ] **DHC-13** Clear the BROADCAST flag once unicast reception is confirmed
-- [ ] **DHC-14** Monotonic clock for deadlines
+- [x] **DHC-14** Monotonic clock for deadlines -- `now_sec()` reads `CLOCK_MONOTONIC`; `clock-step` in `tests/lib/net/wire/test_dhclient.py` (DISCOVERs 0.2 s apart before, one retransmission delay after)

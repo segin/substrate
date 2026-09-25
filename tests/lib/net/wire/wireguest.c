@@ -6,6 +6,11 @@
  * which sends exact, possibly deliberately malformed, segments and checks
  * the guest's replies on the wire.
  *
+ *   wireguest run <path> <arg>...              (fork + exec path, report its
+ *                                               exit status, stay up)
+ *   wireguest runclock <path> <arg>...         (as run, stepping the wall
+ *                                               clock +1 h every 200 ms for
+ *                                               the first 12 s)
  *   wireguest connect <ip> <port> <action>...
  *   wireguest listen <port> <action>...
  *   wireguest relisten <port> <first> <secs> <second> <action>...
@@ -127,6 +132,7 @@
 #include <time.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 static void say(const char *fmt, const char *a, long n) {
@@ -387,7 +393,46 @@ int main(int argc, char **argv) {
         argv++;
         argc--;
     }
-    if (argc >= 4 && strcmp(argv[1], "connect") == 0) {
+    if (argc >= 3 && strcmp(argv[1], "runclock") == 0) {
+        /* As "run", but while the program runs step the wall clock forward
+         * an hour every 200 ms for 12 s -- what an RTC read or NTP step
+         * during boot does to anything timing itself by gettimeofday(). */
+        pid_t pid = fork();
+        if (pid == 0) {
+            execv(argv[2], argv + 2);
+            _exit(127);
+        }
+        for (int i = 0; i < 60; i++) {
+            struct timespec ts;
+            clock_gettime(CLOCK_REALTIME, &ts);
+            ts.tv_sec += 3600;
+            clock_settime(CLOCK_REALTIME, &ts);
+            usleep(200000);
+        }
+        say("runclock stepped %s%ld", "", 60L);
+        int st = 0;
+        if (pid > 0 && waitpid(pid, &st, 0) == pid)
+            say("run exit %s%ld", "", WIFEXITED(st) ? (long)WEXITSTATUS(st)
+                                                    : -1L);
+        rc = 0;
+    } else if (argc >= 3 && strcmp(argv[1], "run") == 0) {
+        /* Run another program (e.g. a dhclient under test, added to the
+         * image with Wire.boot(files=...)) and report how it exited.  Init
+         * stays up afterwards, so a child that daemonized keeps running. */
+        pid_t pid = fork();
+        if (pid == 0) {
+            execv(argv[2], argv + 2);
+            say("run exec failed: %s (%ld)", strerror(errno), errno);
+            _exit(127);
+        }
+        int st = 0;
+        if (pid > 0 && waitpid(pid, &st, 0) == pid)
+            say("run exit %s%ld", "", WIFEXITED(st) ? (long)WEXITSTATUS(st)
+                                                    : -1L);
+        else
+            say("run failed: %s (%ld)", strerror(errno), errno);
+        rc = 0;
+    } else if (argc >= 4 && strcmp(argv[1], "connect") == 0) {
         struct sockaddr_in sa;
         memset(&sa, 0, sizeof sa);
         sa.sin_family = AF_INET;

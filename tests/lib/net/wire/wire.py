@@ -112,7 +112,9 @@ class Wire:
     # -- boot -------------------------------------------------------------
     @classmethod
     def boot(cls, initarg, kernel=None, workdir=None, guest=None,
-             nic='virtio-net-pci'):
+             nic='virtio-net-pci', files=()):
+        """files: extra (local path, guest path) pairs written into the
+        image, e.g. a freshly built program for 'wireguest run'."""
         workdir = workdir or os.environ.get('WIRE_WORKDIR', '/tmp')
         kernel = kernel or os.path.join(TOP, 'sys', 'kernel.multiboot')
         guest = guest or os.path.join(os.path.dirname(__file__), 'wireguest')
@@ -128,8 +130,14 @@ class Wire:
         subprocess.run(['cp', '--reflink=auto', os.path.join(TOP, 'rootfs.img'), img],
                        check=True)
         dev = '%s?offset=%d' % (img, ROOT_P2_OFFSET)
-        for req in ('write %s /wireguest' % guest, 'sif /wireguest mode 0100755'):
-            subprocess.run(['debugfs', '-w', '-R', req, dev], check=True,
+        reqs = ['write %s /wireguest' % guest, 'sif /wireguest mode 0100755']
+        for local, path in files:
+            reqs += ['rm %s' % path, 'write %s %s' % (local, path),
+                     'sif %s mode 0100755' % path]
+        for req in reqs:
+            # 'rm' of a path that is not there yet fails harmlessly
+            subprocess.run(['debugfs', '-w', '-R', req, dev],
+                           check=not req.startswith('rm '),
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.bind(('127.0.0.1', 0))

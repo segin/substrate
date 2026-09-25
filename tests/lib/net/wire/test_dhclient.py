@@ -1,0 +1,212 @@
+#!/usr/bin/env python3
+"""
+sbin/dhclient against a scripted DHCP server on the wire
+(docs/dhclient-audit-2026-09.md).  The guest runs the freshly built
+sbin/dhclient/dhclient (written into the image as /sbin/dhclient) under
+'wireguest run'; this side plays the server, answering each DHCP message
+exactly as the case needs.
+
+    bound         DISCOVER -> OFFER -> REQUEST -> ACK: dhclient binds the
+                  offered address, and the guest then answers ARP for it.
+    clock-step    DHC-14: the wall clock is stepped forward an hour every
+                  200 ms while dhclient waits for an OFFER; its DISCOVERs
+                  stay spaced by the retransmission delay instead of all
+                  timing out at once.
+
+Run from the repo root after building sys/, wireguest and sbin/dhclient:
+    python3 tests/lib/net/wire/test_dhclient.py [case...]
+"""
+import os
+import socket
+import struct
+import sys
+import time
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from wire import Wire, TOP, PEER_IP, PEER_MAC, GUEST_MAC  # noqa: E402
+
+DHCLIENT = os.path.join(TOP, 'sbin', 'dhclient', 'dhclient')
+LEASED = '10.0.2.50'
+MASK = '255.255.255.0'
+BCAST_MAC = b'\xff' * 6
+
+DISCOVER, OFFER, REQUEST, DECLINE, ACK, NAK, RELEASE = 1, 2, 3, 4, 5, 6, 7
+MAGIC = 0x63825363
+
+
+class Msg:
+    """One DHCP message from the guest."""
+
+    def __init__(self, t, ip):
+        ihl = (ip[0] & 0xF) * 4
+        self.t = t
+        self.src = socket.inet_ntoa(ip[12:16])
+        self.dst = socket.inet_ntoa(ip[16:20])
+        self.sport, self.dport = struct.unpack('!HH', ip[ihl:ihl + 4])
+        b = ip[ihl + 8:]
+        (self.op, self.htype, self.hlen, self.hops, self.xid, self.secs,
+         self.flags) = struct.unpack('!BBBBIHH', b[:12])
+        self.ciaddr = socket.inet_ntoa(b[12:16])
+        self.yiaddr = socket.inet_ntoa(b[16:20])
+        self.chaddr = b[28:44]
+        self.opts = {}
+        if len(b) >= 240 and struct.unpack('!I', b[236:240])[0] == MAGIC:
+            i, o = 0, b[240:]
+            while i < len(o):
+                c = o[i]
+                if c == 0:
+                    i += 1
+                    continue
+                if c == 255 or i + 1 >= len(o):
+                    break
+                n = o[i + 1]
+                self.opts[c] = self.opts.get(c, b'') + o[i + 2:i + 2 + n]
+                i += 2 + n
+        mt = self.opts.get(53, b'\0')
+        self.type = mt[0] if mt else 0
+
+    def ip_opt(self, code):
+        v = self.opts.get(code)
+        return socket.inet_ntoa(v[:4]) if v and len(v) >= 4 else None
+
+
+def dhcp_msgs(w):
+    """Every DHCP client message received so far (consumed from ip_rx)."""
+    out, keep = [], []
+    for d in w.ip_rx:
+        proto, src, dst, ip = d
+        ihl = (ip[0] & 0xF) * 4
+        if proto == 17 and len(ip) >= ihl + 8 and \
+                struct.unpack('!H', ip[ihl + 2:ihl + 4])[0] == 67:
+            out.append(Msg(time.time(), ip))
+        else:
+            keep.append(d)
+    w.ip_rx[:] = keep
+    return out
+
+
+class Server:
+    def __init__(self, w):
+        self.w = w
+        self.seen = []          # every client message, oldest first
+
+    def poll(self, timeout):
+        """Pump for `timeout` seconds in short slices, so each message is
+        stamped close to when it arrived."""
+        new = []
+        end = time.time() + timeout
+        while True:
+            self.w.pump(min(0.02, max(0.0, end - time.time())))
+            new += dhcp_msgs(self.w)
+            if time.time() >= end:
+                break
+        self.seen += new
+        return new
+
+    def expect(self, mtype, timeout):
+        """The next client message of type mtype, or None."""
+        end = time.time() + timeout
+        while time.time() < end:
+            for m in self.poll(0.1):
+                if m.type == mtype:
+                    return m
+        return None
+
+    def reply(self, req, mtype, yiaddr=LEASED, opts=None,
+              server_id=PEER_IP, dst='255.255.255.255', eth_dst=BCAST_MAC):
+        body = struct.pack('!BBBBIHH4s4s4s4s', 2, 1, 6, 0, req.xid, 0,
+                           req.flags, b'\0' * 4,
+                           socket.inet_aton(yiaddr if mtype != NAK else '0.0.0.0'),
+                           b'\0' * 4, b'\0' * 4)
+        body += req.chaddr + b'\0' * 64 + b'\0' * 128
+        o = bytes([53, 1, mtype])
+        if server_id:
+            o += bytes([54, 4]) + socket.inet_aton(server_id)
+        for code, val in (opts or {}).items():
+            o += bytes([code, len(val)]) + val
+        body += struct.pack('!I', MAGIC) + o + b'\xff'
+        self.w.send_udp(67, 68, body, src=PEER_IP, dst=dst, eth_dst=eth_dst)
+
+    def std_opts(self, lease=3600):
+        return {1: socket.inet_aton(MASK), 3: socket.inet_aton(PEER_IP),
+                51: struct.pack('!I', lease)}
+
+
+def boot(mode='run', args='eth0'):
+    return Wire.boot('%s /sbin/dhclient %s' % (mode, args),
+                     files=[(DHCLIENT, '/sbin/dhclient')])
+
+
+def arp_answers(w, ip, timeout=3):
+    """Does the guest answer an ARP request for ip?"""
+    w.frames.clear()
+    w.send_arp(1, PEER_MAC, PEER_IP, b'\0' * 6, ip, eth_dst=BCAST_MAC)
+    end = time.time() + timeout
+    while time.time() < end:
+        w.pump(0.2)
+        for dst, et, fr in w.frames:
+            if et == 0x0806 and fr[20:22] == b'\x00\x02' and \
+                    socket.inet_ntoa(fr[28:32]) == ip:
+                return True
+    return False
+
+
+def case_bound():
+    with boot() as w:
+        s = Server(w)
+        d = s.expect(DISCOVER, 90)
+        if not d:
+            return 'no DHCPDISCOVER', w
+        s.reply(d, OFFER, opts=s.std_opts())
+        r = s.expect(REQUEST, 10)
+        if not r:
+            return 'no DHCPREQUEST after the OFFER', w
+        if r.ip_opt(50) != LEASED or r.ip_opt(54) != PEER_IP:
+            return 'REQUEST asks for %s from %s' % (r.ip_opt(50), r.ip_opt(54)), w
+        s.reply(r, ACK, opts=s.std_opts())
+        if not w.wait_serial('dhclient: bound', 10):
+            return 'dhclient never reported bound', w
+        if not arp_answers(w, LEASED):
+            return 'guest does not answer ARP for the leased address', w
+        return None, w
+
+
+def case_clock_step():
+    with boot('runclock') as w:
+        s = Server(w)
+        if not s.expect(DISCOVER, 90):
+            return 'no DHCPDISCOVER', w
+        s.poll(6.0)                     # answer nothing: let it retransmit
+        ts = [m.t for m in s.seen if m.type == DISCOVER]
+        if len(ts) < 2:
+            return 'only %d DISCOVER(s) in 6 s' % len(ts), w
+        gap = ts[1] - ts[0]
+        if gap < 1.5:
+            return ('DISCOVERs %.2f s apart while the clock was stepped: '
+                    'the waits time out on the wall clock' % gap), w
+        return None, w
+
+
+CASES = (('bound', case_bound), ('clock-step', case_clock_step))
+
+
+def main():
+    failed = 0
+    only = sys.argv[1:]
+    for name, fn in CASES:
+        if only and name not in only:
+            continue
+        err, w = fn()
+        if err:
+            failed += 1
+            print('FAIL  %s: %s' % (name, err))
+            print(w.dump()[-2000:])
+            print(w.serial()[-1500:])
+        else:
+            print('ok    %s' % name)
+    print('Result: %s' % ('FAILED' if failed else 'PASSED'))
+    return 1 if failed else 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())
