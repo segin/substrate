@@ -1,0 +1,244 @@
+.TH GETTY 8 2026-09-25 "Substrate" "System Administration"
+.SH NAME
+getty \- set up a terminal line and prompt for a login name
+.SH SYNOPSIS
+.B getty
+.RB [ \-h ]
+.RB [ \-i ]
+.RB [ \-l
+.IR login-program ]
+.I tty
+.RI [ speed
+.RI [ type
+.RI [ linedisc ]]]
+.SH DESCRIPTION
+.B getty
+opens a terminal line, makes it the controlling terminal, prints a banner and a
+.B login:
+prompt, reads a user name and executes
+.BR login (1)
+with it.
+It is normally started by
+.BR init (8)
+on
+.IR /dev/tty1 ,
+.I /dev/tty2
+and
+.IR /dev/tty3 ,
+and respawned by
+.B init
+whenever it exits.
+.PP
+.I tty
+is the terminal device.
+A name that does not begin with
+.B /
+has
+.I /dev/
+prepended.
+.PP
+The line is set up as follows:
+.IP 1. 3
+Standard input, output and error are closed and
+.I tty
+is opened read-write without becoming the controlling terminal.
+If it cannot be opened, a message is written to
+.I /dev/console
+and
+.B getty
+exits.
+.IP 2. 3
+.BR setsid (2)
+is called (a failure is ignored) and the line is made the controlling
+terminal with
+.BR TIOCSCTTY .
+It is then duplicated onto descriptors 0, 1 and 2.
+.IP 3. 3
+If the line is a terminal, its modes are reset: input
+.BR BRKINT ,
+.BR ICRNL ,
+.BR IXON ;
+output
+.BR OPOST ,
+.BR ONLCR ;
+control
+.BR CS8 ,
+.BR CREAD ,
+.BR HUPCL ,
+.B CLOCAL
+(other control bits kept); local
+.BR ISIG ,
+.BR ICANON ,
+.BR ECHO ,
+.BR ECHOE ,
+.BR ECHOK ,
+.BR ECHOCTL ,
+.BR ECHOKE ,
+.BR IEXTEN .
+The special characters are set to EOF ^D, ERASE DEL (0x7f), INTR ^C,
+KILL ^U, QUIT ^\e, SUSP ^Z, START ^Q, STOP ^S, with MIN 1 and TIME 0.
+The line speed is not changed.
+.IP 4. 3
+Unless
+.B \-h
+or
+.B \-i
+is given,
+.I /etc/issue
+is copied to the terminal with the escapes described below expanded.
+If
+.I /etc/issue
+does not exist, a short banner naming the host and line is printed instead.
+.IP 5. 3
+Unless
+.B \-i
+is given,
+.B login:
+is printed and a user name is read, up to a newline or carriage return
+(at most 63 characters).
+Backspace and DEL delete the previous character.
+Only letters, digits and the characters
+.BR . ,
+.BR _ ,
+.B \-
+and
+.B $
+are kept; any other byte is silently discarded.
+The program is then executed as
+.IR "login-program user" .
+With
+.BR \-i ,
+it is executed with no arguments.
+.PP
+If the name read is empty, or end of file or an error is read,
+.B getty
+exits 0 and
+.B init
+starts a new one.
+.SS /etc/issue escapes
+.TP
+.B \een
+newline
+.TP
+.B \ees
+operating system name from
+.BR uname (2)
+(Substrate if that fails)
+.TP
+.B \eeh
+host name, from
+.BR gethostname (2),
+else the first line of
+.IR /etc/hostname ,
+else
+.B substrate
+.TP
+.B \eer
+kernel release from
+.BR uname (2)
+.TP
+.B \eel
+the
+.I tty
+argument as given
+.TP
+.B \eed
+current date,
+.I YYYY-MM-DD
+.TP
+.B \eet
+current time,
+.I HH:MM:SS
+.TP
+.B \eeu
+always 0
+.TP
+.B \ee\e\e
+a backslash
+.PP
+Any other backslash sequence is printed unchanged.
+.SH OPTIONS
+.TP
+.B \-h
+Do not print
+.I /etc/issue
+or the fallback banner.
+.TP
+.B \-i
+Do not prompt: execute the login program with no arguments and let it
+prompt for the name.
+.TP
+.BI \-l " login-program"
+Execute
+.I login-program
+instead of
+.IR /bin/login .
+.TP
+.IR speed ", " type ", " linedisc
+Accepted for compatibility with BSD
+.BR getty ;
+ignored.
+.PP
+Any other argument beginning with
+.B \-
+(including
+.BR \-\-help )
+prints a usage message.
+.SH EXIT STATUS
+.B getty
+does not return when the login program is executed successfully.
+Otherwise:
+.TP
+.B 0
+End of file, an error, or an empty name was read at the prompt.
+.TP
+.B 1
+The line could not be opened or duplicated, or the login program could not
+be executed.
+.TP
+.B 2
+Usage error.
+.SH FILES
+.TP
+.I /etc/issue
+Pre-login banner.
+.TP
+.I /etc/hostname
+Host name fallback for
+.BR \eeh .
+.TP
+.I /bin/login
+Default login program.
+.TP
+.I /bin/getty
+A placeholder built from
+.I bin/getty
+in the source tree: it does nothing and exits 0.
+The working program is
+.IR /sbin/getty ,
+which is the one
+.BR init (8)
+runs.
+.SH EXAMPLE
+Run a login prompt on the second virtual terminal without the banner:
+.EX
+# /sbin/getty \-h tty2
+.EE
+.SH SEE ALSO
+.BR login (1),
+.BR init (8),
+.BR telnetd (8),
+.BR sdm (8),
+.BR stty (1),
+.BR tty (1),
+.BR termios (3)
+.SH BUGS
+There is no
+.I gettytab
+or
+.IR inittab ;
+line speed and parity are never set.
+.PP
+The
+.B \eeu
+escape always prints 0 rather than the number of logged-in users.
