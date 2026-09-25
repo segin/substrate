@@ -1,0 +1,53 @@
+.TH UPTIME 1 2026-09-25 "Substrate" "User Commands"
+.SH NAME
+uptime \- show how long the system has been running
+.SH SYNOPSIS
+.B uptime
+.SH DESCRIPTION
+.B uptime
+prints a single line containing the current local time, how long the
+system has been up, the number of logged-in users, and the load averages
+over the last 1, 5 and 15 minutes:
+.PP
+.EX
+ 12:34:56 up 1 day,  2:03,  1 user,  load average: 0.00, 0.00, 0.00
+.EE
+.PP
+Uptimes of less than an hour are shown as
+.IB N " min" ;
+from one hour on as
+.IR hh : mm ,
+preceded by a day count once the system has been up a day or more.
+.PP
+The uptime is read from
+.I /proc/uptime
+and the load averages from
+.IR /proc/loadavg ;
+if either cannot be read, zero is shown.
+The user count is the number of
+.B USER_PROCESS
+records with a non-empty user name in the utmp file; it is 0 if that
+file cannot be opened.
+.PP
+.B uptime
+takes no options; any arguments are ignored.
+.SH EXIT STATUS
+.B uptime
+always exits with status 0.
+.SH FILES
+.TP
+.I /proc/uptime
+Seconds since boot.
+.TP
+.I /proc/loadavg
+Load averages.
+.TP
+.I /var/run/utmp
+Current login records.
+.SH SEE ALSO
+.BR top (1),
+.BR w (1),
+.BR who (1),
+.BR sysinfo (2),
+.BR proc (5),
+.BR utmp (5)
