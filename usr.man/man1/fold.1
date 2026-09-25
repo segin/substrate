@@ -1,0 +1,115 @@
+.TH FOLD 1 2026-09-25 "Substrate" "User Commands"
+.SH NAME
+fold \- wrap each input line to fit a specified width
+.SH SYNOPSIS
+.B fold
+.RB [ \-bs ]
+.RB [ \-w
+.IR width " |"
+.BI \- width ]
+.RI [ file ...]
+.SH DESCRIPTION
+.B fold
+copies each
+.I file
+(or standard input if no
+.I file
+is given) to standard output, inserting a newline wherever a line
+would otherwise exceed
+.I width
+columns.
+A
+.I file
+of
+.B \-
+means standard input.
+.PP
+By default the width is 80 and positions are counted in display
+columns:
+a tab advances to the next multiple of 8,
+a backspace moves back one column (never below 0),
+a carriage return resets the column to 0,
+and every other byte occupies one column.
+A newline in the input ends the line and resets the count.
+A break is inserted before the character that would carry the line
+past
+.IR width ,
+except that a line is never broken before its first character.
+.PP
+If the last line of the input has no terminating newline,
+none is added.
+.SH OPTIONS
+.TP
+.BR \-b ", " \-\-bytes
+Count bytes rather than columns: tabs, backspaces and carriage
+returns each count as one position.
+.TP
+.BR \-s ", " \-\-spaces
+Break after the last space or tab within the current line segment
+instead of at the exact width.
+If the segment contains no blank, the line is broken at the width.
+.TP
+.BR \-w " \fIwidth\fR, " \-\-width= \fIwidth\fR
+Use
+.I width
+columns instead of 80.
+The value is converted with
+.BR atoi (3);
+it must come out as a positive integer.
+.TP
+.BI \- width
+Obsolete form of
+.BR \-w .
+Any argument before
+.B \-\-
+that consists of a
+.B \-
+followed only by digits is taken as the width.
+.TP
+.B \-\-help
+Print a usage line to standard output and exit with status 0.
+.TP
+.B \-\-version
+Print version information and exit with status 0.
+.SH EXIT STATUS
+.TP
+.B 0
+Success.
+.TP
+.B 1
+An unknown option was given, the width was not a positive integer,
+or a
+.I file
+could not be opened.
+Remaining files are still processed after an open failure.
+.SH EXAMPLES
+Wrap a file at 40 columns, breaking at blanks:
+.PP
+.EX
+$ fold \-s \-w 40 notes.txt
+.EE
+.PP
+Wrap standard input at 72 bytes:
+.PP
+.EX
+$ cat log | fold \-b \-72
+.EE
+.SH SEE ALSO
+.BR pr (1),
+.BR tr (1),
+.BR wc (1)
+.SH STANDARDS
+The
+.BR \-b ,
+.BR \-s ,
+and
+.B \-w
+options follow POSIX.1-2024.
+The long options follow GNU coreutils.
+.SH BUGS
+The width argument is parsed with
+.BR atoi (3),
+so trailing garbage (for example
+.BR "\-w 10x" )
+is silently ignored.
+Read errors on input are not reported.
