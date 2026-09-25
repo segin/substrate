@@ -74,6 +74,8 @@ __attribute__((weak)) unsigned long vm_pager_vnode_dealloc_count;   /* sys/vm/vm
 __attribute__((weak)) void vt_release_graphics_on_exit(void *exiting_process) { (void)exiting_process; }   /* sys/include/sys/vt.h */
 
 /* Commit accounting (sys/vm/vm_commit.h) -- proc_exit uncharges on teardown. */
+__attribute__((weak)) int afinet_setown(int fd, int owner) { (void)fd; (void)owner; return -1; }   /* sys/include/net/inet.h */
+__attribute__((weak)) int afinet_getown(int fd, int *owner) { (void)fd; (void)owner; return -1; }   /* sys/include/net/inet.h */
 __attribute__((weak)) int vm_commit_charge(size_t npages) { (void)npages; return 0; }
 __attribute__((weak)) void vm_commit_uncharge(size_t npages) { (void)npages; }
 

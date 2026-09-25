@@ -1,3 +1,4 @@
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -632,9 +633,23 @@ void sched_park_if_reboot_frozen(void) { }
 void shmfs_init(void) { }
 uint64_t shmfs_resident_bytes(void) { return 0; }
 
-/* --- sockets --- */
+/* --- sockets ---
+ * The host tests link the personality layer (compat.c) and the process
+ * code (process.c) but not the network stack those call into, so every
+ * socket entry point they reach answers "no such socket". */
 int sys_accept(int s, void *name, int *namelen)
 { (void)s; (void)name; (void)namelen; return -1; }
+int sys_setsockopt(int s, int level, int name, const void *val, int len)
+{ (void)s; (void)level; (void)name; (void)val; (void)len; return -1; }
+int sys_getsockopt(int s, int level, int name, void *val, int *len)
+{ (void)s; (void)level; (void)name; (void)val; (void)len; return -1; }
+int sock_fd_is_dgram(int fd) { (void)fd; return 0; }
+long sock_dgram_sendv(int fd, const void *kiov, int iovcnt, int flags,
+                      const void *uaddr, unsigned int addrlen)
+{ (void)fd; (void)kiov; (void)iovcnt; (void)flags; (void)uaddr; (void)addrlen;
+  return -ENOTSOCK; }
+int afinet_setown(int fd, int owner) { (void)fd; (void)owner; return -ENOTSOCK; }
+int afinet_getown(int fd, int *owner) { (void)fd; (void)owner; return -ENOTSOCK; }
 
 /* --- tty (include/sys/tty.h) --- */
 int tty_ioctl(struct tty *tty, uint32_t cmd, unsigned long arg)
