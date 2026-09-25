@@ -1,0 +1,176 @@
+.TH FMT 1 2026-09-25 "Substrate" "User Commands"
+.SH NAME
+fmt \- simple text formatter
+.SH SYNOPSIS
+.B fmt
+.RB [ \-cmnps ]
+.RB [ \-d
+.IR chars ]
+.RB [ \-l
+.IR num ]
+.RB [ \-t
+.IR num ]
+.RB [ \-w
+.IR width " |"
+.B \-g
+.IR goal ]
+.RI [ goal " [" maximum ]]
+.RI [ file " ...]"
+.SH DESCRIPTION
+.B fmt
+fills and joins lines of text into paragraphs no wider than a target
+width (65 columns by default) and writes the result to standard
+output.
+Input is read from each
+.I file
+in turn, or from standard input if none is given or for a
+.I file
+of
+.BR \- .
+All input is read before any output is produced, and the files are
+formatted as one continuous text.
+.PP
+Tabs in the input are expanded to spaces (every 8 columns, or
+.B \-l
+columns); the output never contains tabs.
+.PP
+A paragraph is a run of non-blank lines.
+Blank lines are preserved.
+Words are packed greedily: as many words as fit within the width go on
+each line, and a word longer than the width is placed on a line by
+itself.
+Words are separated by one space, or by two spaces after a word that
+ends a sentence: one whose last character, ignoring closing
+.BR ) ,
+.BR ] ,
+.BR \(dq ,
+and
+.BR \(aq ,
+is one of
+.B .!?\&
+(or the
+.B \-d
+set).
+.PP
+Every output line of a paragraph is indented like the paragraph's
+first input line, unless
+.B \-c
+is given.
+Lines whose first non-blank character is
+.B .\&
+(for example troff requests) are copied unchanged and end the paragraph, unless
+.B \-n
+is given.
+.PP
+If the first operand (after options) consists only of digits and
+neither
+.B \-w
+nor
+.B \-g
+was given, it sets the width; a second all-digit operand, the BSD
+.IR maximum ,
+is accepted and ignored.
+.SH OPTIONS
+.TP
+.BR \-c ", " \-\-crown\-margin
+Crown margin: indent the first output line of a paragraph like the
+first input line, and the remaining lines like the second input line.
+.TP
+.B \-m
+Copy lines that look like mail headers (a letter followed by letters,
+digits, or hyphens and then a colon) unchanged; they also end the
+paragraph.
+.TP
+.B \-n
+Also format lines beginning with
+.BR . .
+.TP
+.B \-p
+Start a new paragraph whenever the indentation changes.
+.TP
+.BR \-s ", " \-\-split\-only
+Split long lines but never join short ones: each input line is
+formatted on its own.
+.TP
+.BI \-d " chars"
+Use the characters in
+.I chars
+as the sentence-ending set instead of
+.BR .!? .
+.TP
+.BI \-l " num"
+Expand input tabs to every
+.I num
+columns (default 8; values below 1 mean 8).
+.TP
+.BI \-t " num"
+Accepted and ignored.
+.TP
+.BR \-w ", " \-\-width= \fIwidth\fP
+Set the maximum line width.
+.TP
+.BR \-g ", " \-\-goal= \fIgoal\fP
+Same as
+.BR \-w ;
+there is no separate goal width.
+.TP
+.B \-\-help
+Print a usage summary and exit.
+.TP
+.B \-\-version
+Print version information and exit.
+.SH EXIT STATUS
+.TP
+.B 0
+Success.
+.TP
+.B 1
+Invalid usage, a width below 1, out of memory, or a
+.I file
+that could not be opened (the remaining files are still formatted).
+.SH EXAMPLES
+Reformat a file to 72 columns:
+.PP
+.EX
+$ fmt \-w 72 notes.txt
+.EE
+.PP
+Rewrap a mail message, keeping its headers:
+.PP
+.EX
+$ fmt \-m < message
+.EE
+.SH SEE ALSO
+.BR pr (1),
+.BR vi (1)
+.SH STANDARDS
+.B fmt
+is not specified by POSIX.
+The options follow BSD
+.B fmt
+and GNU coreutils.
+.SH BUGS
+Because all files are formatted as a single text, a paragraph at the
+end of one file can be joined with one at the start of the next.
+.PP
+With
+.BR \-s ,
+lines beginning with
+.B .
+and mail header lines are not protected, and
+.B \-n
+and
+.B \-m
+have no effect.
+.PP
+With
+.BR \-m ,
+header lines are recognised anywhere in the text, not only at the top
+of a message.
+.PP
+Numeric option arguments are parsed without error checking, so
+trailing garbage is ignored and a non-numeric
+.B \-w
+or
+.B \-g
+argument is reported only as a width below 1.
