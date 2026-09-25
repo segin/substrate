@@ -279,11 +279,17 @@ static int r8168_xmit(netdev_t *dev, const void *frame, size_t len) {
      * Do not reuse a descriptor the NIC still owns; its buffer is being
      * DMA'd.  Bounded so a wedged NIC returns an error rather than spinning
      * forever with interrupts disabled.
+     *
+     * TCP-RES-04: and bounded tightly when the caller had interrupts off
+     * (as RTL-06 does for rtl8139): the frame is dropped and the upper
+     * layer retransmits.  The caller's IF is the one saved in `flags`;
+     * inside the _irq lock interrupts are always off.
      */
     if (d->opts1 & DESC_OWN) {
         int spins = 0;
+        int limit = (flags & 0x200ul) ? 1000000 : 10000;
         while (d->opts1 & DESC_OWN) {
-            if (++spins > 1000000) {
+            if (++spins > limit) {
                 spinlock_release_irq(&rt_tx_lock, flags);
                 rt.netdev.tx_dropped++;
                 return -EIO;

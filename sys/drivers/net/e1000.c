@@ -231,11 +231,19 @@ static int e1000_xmit(netdev_t *dev, const void *frame, size_t len) {
      * wire -- the failure mode that made bulk upload (but not download) die
      * on rtl8139.  Bounded so a wedged NIC returns an error instead of
      * spinning forever with interrupts off.
+     *
+     * TCP-RES-04: as RTL-06 does for rtl8139, bound it tightly when the
+     * caller had interrupts disabled (the TCP input path, the ARP/ICMP
+     * replies sent from the RX interrupt), where a million polls freeze the
+     * machine; the dropped frame is retransmitted by the upper layer.  The
+     * test is on the caller's IF, saved in `flags` -- inside the _irq lock
+     * interrupts are always off.
      */
     if (d->cmd != 0 && !(d->status & TXD_STAT_DD)) {
         int spins = 0;
+        int limit = (flags & 0x200ul) ? 1000000 : 10000;
         while (!(d->status & TXD_STAT_DD)) {
-            if (++spins > 1000000) {
+            if (++spins > limit) {
                 spinlock_release_irq(&e1k_tx_lock, flags);
                 e1k.netdev.tx_dropped++;
                 return -EIO;
