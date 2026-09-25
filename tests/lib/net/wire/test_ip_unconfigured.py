@@ -10,6 +10,9 @@ be sent at all and DHCP could never bootstrap.
                    255.255.255.255:67 leaves as an Ethernet broadcast, from
                    IP 0.0.0.0, with a UDP checksum that verifies over that
                    source.
+    zero-dest      with eth0 unaddressed, a datagram to 0.0.0.0 is not
+                   delivered to a wildcard socket (RFC 791 3.2: 0/8 is
+                   never a destination); one to 255.255.255.255 still is.
 
 Run from the repo root after building sys/ and wireguest:
     python3 tests/lib/net/wire/test_ip_unconfigured.py
@@ -52,14 +55,45 @@ def case_dhcp_discover():
             [l for l in line if 'sendto' in l], w
 
 
+def case_zero_dest():
+    # recvsum reports the first datagram the wildcard socket gets
+    with Wire.boot('udpany 7400 ifaddr0 recvsum:100 sleep:60') as w:
+        if not w.wait_serial('guest: ifaddr0 ok', 90):
+            return 'could not clear the address', w
+        w.pump(0.5)
+        w.send_udp(40001, 7400, b'to-zero', src='10.0.2.2', dst='0.0.0.0')
+        w.pump(0.5)
+        w.send_udp(40002, 7400, b'to-bcast', src='10.0.2.2',
+                   dst='255.255.255.255', eth_dst=b'\xff' * 6)
+        if not w.wait_serial('guest: recvsum', 10):
+            return 'the limited broadcast was not delivered either', w
+        w.pump(0.3)
+        got = [l for l in w.serial().splitlines() if 'guest: recvsum' in l][0]
+        if 'sport=40001' in got:
+            return 'a datagram to 0.0.0.0 was delivered: %s' % got, w
+        if 'sport=40002' not in got:
+            return 'unexpected delivery: %s' % got, w
+        return None, w
+
+
+CASES = (('dhcp-discover', case_dhcp_discover), ('zero-dest', case_zero_dest))
+
+
 def main():
-    err, w = case_dhcp_discover()
-    if err:
-        print('FAIL  dhcp-discover: %s' % err)
-    else:
-        print('ok    dhcp-discover')
-    print('Result: %s' % ('FAILED' if err else 'PASSED'))
-    return 1 if err else 0
+    failed = 0
+    only = sys.argv[1:]
+    for name, fn in CASES:
+        if only and name not in only:
+            continue
+        err, w = fn()
+        if err:
+            failed += 1
+            print('FAIL  %s: %s' % (name, err))
+            print(w.dump()[-2000:])
+        else:
+            print('ok    %s' % name)
+    print('Result: %s' % ('FAILED' if failed else 'PASSED'))
+    return 1 if failed else 0
 
 
 if __name__ == '__main__':

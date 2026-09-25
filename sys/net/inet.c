@@ -715,7 +715,17 @@ void ip4_input(netdev_t *dev, const uint8_t *pkt, size_t len) {
     int for_mcast = ip4_is_mcast(ih->daddr) && ip4_mc_accept(dev, ih->daddr);
     if (for_mcast)
         for_bcast = 1;
-    if (ih->daddr != dev->ip4_addr && !for_bcast && !for_lo) {
+    /* RFC 791 3.2: a zero network field "means this network" and appears
+     * only in certain ICMP messages; RFC 1122 3.2.1.3(a) allows {0, 0} only
+     * as a source.  So 0/8 is never a destination.  And an interface with
+     * no address (ip4_addr 0) has no unicast address at all: comparing
+     * against its 0 would accept a datagram to 0.0.0.0 as ours, letting
+     * any host on that link reach every wildcard-bound service.  It still
+     * takes the limited broadcast, which DHCP needs. */
+    if ((ih->daddr & 0xFF) == 0)
+        return;
+    int for_me = dev->ip4_addr != 0 && ih->daddr == dev->ip4_addr;
+    if (!for_me && !for_bcast && !for_lo) {
         return;
     }
 
