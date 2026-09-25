@@ -1,0 +1,49 @@
+.TH CLEAR 1 2026-09-25 "Substrate" "User Commands"
+.SH NAME
+clear \- clear the terminal screen
+.SH SYNOPSIS
+.B clear
+.RB [ \-x ]
+.br
+.B clear
+.BR \-V | \-\-version
+.SH DESCRIPTION
+.B clear
+clears the terminal screen and its scrollback buffer by writing fixed
+ANSI/VT100 escape sequences to standard output:
+.TP
+.B ESC [ H
+Move the cursor to the home position.
+.TP
+.B ESC [ 2 J
+Erase the whole display.
+.TP
+.B ESC [ 3 J
+Erase the scrollback buffer (an xterm extension that other terminals
+ignore).
+.PP
+No terminfo database is consulted and the
+.B TERM
+environment variable is not examined; the same sequences are written
+for every terminal.
+.SH OPTIONS
+.TP
+.B \-x
+Do not clear the scrollback buffer (omit
+.BR "ESC [ 3 J" ).
+.TP
+.BR \-V ", " \-\-version
+Print version information and exit.
+.SH EXIT STATUS
+.TP
+.B 0
+Success.
+.TP
+.B 1
+An unrecognised argument was given, or writing to standard output
+failed.
+.SH SEE ALSO
+.BR stty (1),
+.BR tty (1),
+.BR tty (4),
+.BR vt (4)
