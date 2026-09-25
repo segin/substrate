@@ -1,0 +1,146 @@
+.TH DATE 1 2026-09-25 "Substrate" "User Commands"
+.SH NAME
+date \- print or set the system date and time
+.SH SYNOPSIS
+.B date
+.RB [ \-u ]
+.RB [ \-r
+.IR seconds " |"
+.B \-d
+.BI @ seconds\fR]\fP
+.RB [ + \fIformat\fP ]
+.br
+.B date
+.RB [ \-u ]
+.RI [[[[[ cc ] yy ] mm ] dd ] hh ] mm [. ss ]
+.SH DESCRIPTION
+.B date
+writes the current date and time, or another given time, to standard
+output.
+.PP
+The output is produced by
+.BR strftime (3)
+with the format
+.I format
+if an argument beginning with
+.B +
+is given, or
+.B \(dq%a %b %e %H:%M:%S %Z %Y\(dq
+otherwise, followed by a newline.
+The result may be at most 255 bytes long.
+.PP
+Local time is computed from the
+.B TZ
+environment variable; without it, local time is UTC.
+.SS Setting the clock
+An operand made of digits, with an optional
+.BI . ss
+suffix, sets the system clock with
+.BR stime (2),
+which requires superuser privileges.
+The digits before the dot are read as two-digit fields, from the most
+significant field present down to the minute:
+.TP
+.I mm
+minute;
+.TP
+.I hhmm
+hour and minute;
+.TP
+.I ddhhmm
+day of month, hour, minute;
+.TP
+.I mmddhhmm
+month, day, hour, minute;
+.TP
+.I yymmddhhmm
+two-digit year, month, day, hour, minute;
+.TP
+.I ccyymmddhhmm
+four-digit year, month, day, hour, minute.
+.PP
+Fields that are not given are taken from the current date; the
+seconds default to 0.
+A two-digit year from 69 to 99 means 1969 to 1999, and 00 to 68 means
+2000 to 2068.
+Out-of-range fields (a month outside 1 to 12, a day outside 1 to 31,
+an hour above 23, a minute above 59, or seconds above 61) are
+rejected.
+The time is interpreted as local time, or as UTC with
+.BR \-u .
+After the clock is set, the new time is printed.
+.SH OPTIONS
+.TP
+.B \-u
+Display, and interpret a setting operand, in UTC instead of local
+time.
+.TP
+.BI \-r " seconds"
+Display the time
+.I seconds
+seconds after the Epoch (1970-01-01 00:00:00 UTC) instead of the
+current time.
+The argument may also be attached
+.RB ( \-r1700000000 ).
+.TP
+.BI "\-d @" seconds
+Same as
+.BR \-r ;
+this is the only form of
+.B \-d
+argument accepted.
+.TP
+.BI + format
+Use
+.I format
+as the
+.BR strftime (3)
+output format.
+.SH EXIT STATUS
+.TP
+.B 0
+Success.
+.TP
+.B 1
+Invalid usage, an invalid argument, a failure to set the clock, or an
+over-long formatted result.
+.SH ENVIRONMENT
+.TP
+.B TZ
+POSIX timezone string used for local time.
+If unset or empty, local time is UTC.
+.SH EXAMPLES
+Print the date in ISO 8601 form:
+.PP
+.EX
+$ date +%Y\-%m\-%d
+.EE
+.PP
+Convert an Epoch time to a readable UTC date:
+.PP
+.EX
+$ date \-u \-r 1700000000
+Tue Nov 14 22:13:20 UTC 2023
+.EE
+.PP
+Set the clock to 14:30 today:
+.PP
+.EX
+# date 1430
+.EE
+.SH SEE ALSO
+.BR stime (2),
+.BR time (2),
+.BR strftime (3)
+.SH BUGS
+The setting operand orders its fields year first, as in BSD
+.BR date ,
+not as the POSIX
+.I mmddhhmm[[cc]yy]
+form.
+.PP
+The day of month is checked only against 1 to 31, so a date such as
+February 31 is silently normalised into the following month.
+.PP
+.B \-d
+does not parse free-form date strings.
