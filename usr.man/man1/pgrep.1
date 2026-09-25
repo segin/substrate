@@ -1,0 +1,68 @@
+.TH PGREP 1 2026-09-25 "Substrate" "User Commands"
+.SH NAME
+pgrep \- look up processes by name
+.SH SYNOPSIS
+.B pgrep
+.RB [ \-l ]
+.RB [ \-x ]
+.RB [ \-u
+.IR uid ]
+.RB [ \-\- ]
+.I pattern
+.SH DESCRIPTION
+.B pgrep
+takes a snapshot of the process table and writes, one per line, the
+process ID of every process whose command name contains
+.I pattern
+as a substring.
+.I pattern
+is a plain string, not a regular expression, and the comparison is
+case-sensitive.
+Only the process name is examined, not its arguments.
+.PP
+Process ID 0 is never reported.
+The
+.B pgrep
+process itself is included if its name matches.
+There is no
+.B pkill
+counterpart.
+.SH OPTIONS
+Each option must be given as a separate argument.
+.TP
+.B \-l
+Print the process name after each process ID, separated by a space.
+.TP
+.B \-x
+Require
+.I pattern
+to match the whole process name exactly.
+.TP
+.BI \-u " uid"
+Only consider processes whose real user ID is
+.IR uid .
+.I uid
+must be a non-negative decimal number; user names are not accepted.
+.SH EXIT STATUS
+.TP
+.B 0
+At least one process matched.
+.TP
+.B 1
+No process matched, or the process table could not be read.
+.TP
+.B 2
+Invalid usage, a missing
+.IR pattern ,
+or memory exhaustion.
+.SH EXAMPLES
+.EX
+$ pgrep \-l sh
+12 sh
+40 zsh
+$ pgrep \-x init || echo "init not running"
+.EE
+.SH SEE ALSO
+.BR ps (1),
+.BR top (1),
+.BR proc (5)
