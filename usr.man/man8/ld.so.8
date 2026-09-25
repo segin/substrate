@@ -1,0 +1,376 @@
+.TH LD.SO 8 2026-09-25 "Substrate" "System Administration"
+.SH NAME
+ld.so \- Substrate dynamic linker/loader
+.SH SYNOPSIS
+.I /sbin/ld.so
+.SH DESCRIPTION
+.B /sbin/ld.so
+loads the shared libraries a dynamically linked Substrate program
+needs, relocates them and the program, runs their constructors and
+then jumps to the program's entry point.
+It is not run by hand: the kernel maps it as the program interpreter
+of any i386 executable whose
+.B PT_INTERP
+names
+.IR /sbin/ld.so ,
+and passes it the program's headers through the auxiliary vector.
+.PP
+.B ld.so
+is freestanding.
+It links against no library and performs its own system calls.
+.SS Startup
+.IP 1. 4
+.B ld.so
+applies its own
+.B R_386_RELATIVE
+relocations, then locates the program's
+.BR PT_DYNAMIC .
+A program without
+.B PT_DYNAMIC
+(a static PIE) is entered directly.
+.IP 2.
+Objects named by
+.B LD_PRELOAD
+are loaded (see
+.BR ENVIRONMENT ).
+.IP 3.
+The
+.B DT_NEEDED
+entries of the program, and then of every loaded object, are loaded
+breadth-first.
+The resulting list, program first, is the global symbol lookup scope.
+A dependency that cannot be found is fatal.
+.IP 4.
+Thread-local storage is laid out (see
+.BR "Thread-local storage" ).
+.IP 5.
+Every object is relocated, with
+.B R_386_COPY
+relocations applied last so they copy already-relocated data.
+Binding is always immediate; there is no lazy PLT binding.
+.IP 6.
+Each library's
+.B PT_LOAD
+segments are returned to their ELF protections (they are mapped
+writable for relocation) and each
+.B PT_GNU_RELRO
+region is made read-only.
+.IP 7.
+.B environ
+is set, if some object defines it, so constructors may call
+.BR getenv (3).
+.IP 8.
+.B DT_INIT
+and then
+.B DT_INIT_ARRAY
+run for every object, deepest dependency first and the program last.
+.PP
+When the program calls
+.BR exit (3),
+libc calls back into
+.B ld.so
+to run each object's
+.B DT_FINI_ARRAY
+(in reverse order) and then
+.BR DT_FINI ,
+program first.
+.SS Library search
+A
+.B DT_NEEDED
+name, an
+.B LD_PRELOAD
+entry, or a
+.BR dlopen (3)
+argument is resolved as follows:
+.IP \(bu 2
+If an object with that name (its
+.BR DT_SONAME ,
+or its file name if it has none) is already loaded, it is reused.
+.IP \(bu
+A name beginning with
+.B /
+is opened as given.
+.IP \(bu
+Any other name is appended to each of
+.IR /lib ,
+.I /usr/lib
+and
+.IR /usr/local/lib ,
+in that order, and then to each directory listed in
+.IR /etc/ld.so.conf .
+The first file that loads is used.
+.PP
+.B DT_RPATH
+and
+.B DT_RUNPATH
+are ignored, and
+.B LD_LIBRARY_PATH
+is not supported; a library outside the built-in directories must be in
+a directory named by
+.IR /etc/ld.so.conf .
+.PP
+After a file is mapped, its
+.B DT_SONAME
+is compared with the objects already loaded; if it matches one, the new
+mapping is discarded and the existing object is used.
+.PP
+A file is accepted only if it is an ELF
+.B ET_DYN
+object for
+.B EM_386
+with at most 64 program headers and a
+.BR PT_DYNAMIC
+segment.
+The
+.B EI_OSABI
+byte is not checked.
+.SS /etc/ld.so.conf
+The file is read once, the first time a name is not found in the
+built-in directories.
+Each line holds one absolute directory.
+Leading and trailing blanks are ignored, as are empty lines and lines
+beginning with
+.BR # .
+A line of the form
+.PP
+.RS
+.BI include " pattern"
+.RE
+.PP
+reads further configuration files.
+.I pattern
+is either a file name or a path whose final component contains
+.B *
+or
+.B ?
+wildcards, which are matched against the entries of that directory.
+Includes may nest four deep.
+At most 64 distinct directories and 8 KiB of configuration text in
+total are used; anything beyond is ignored.
+A missing file adds no directories.
+.SS Symbol resolution
+Symbols are looked up in each object of the global scope in load
+order, using
+.B DT_GNU_HASH
+when present and
+.B DT_HASH
+otherwise.
+The first global or weak definition wins.
+GNU symbol versioning
+.RB ( DT_VERSYM ,
+.BR DT_VERDEF ,
+.BR DT_VERNEED )
+is honoured: a versioned reference binds only to a definition of that
+version, and an unversioned reference does not bind to a hidden
+non-default version.
+An undefined weak reference is left as 0; any other undefined symbol
+is fatal.
+.PP
+When a non-PIE executable takes the address of a shared-library
+function, the executable's PLT entry is used as that function's
+address by every other object, so function pointers compare equal
+across objects.
+.PP
+Supported relocation types are
+.BR R_386_NONE ,
+.BR R_386_32 ,
+.BR R_386_PC32 ,
+.BR R_386_COPY ,
+.BR R_386_GLOB_DAT ,
+.BR R_386_JMP_SLOT ,
+.BR R_386_RELATIVE ,
+.BR R_386_TLS_TPOFF ,
+.B R_386_TLS_DTPMOD32
+and
+.BR R_386_TLS_DTPOFF32 .
+Any other type is fatal.
+.SS Thread-local storage
+.B ld.so
+uses the i386 variant II layout: each module's
+.B PT_TLS
+block sits below the thread pointer, which points at a two-word thread
+control block (a self-pointer at
+.B %gs:0
+and the dynamic thread vector at
+.BR %gs:4 ).
+At startup every
+.B PT_TLS
+module gets a fixed offset, a further 4096 bytes (and 16 module slots)
+are reserved as surplus for modules loaded later with
+.BR dlopen (3),
+and the block is installed as the initial thread's
+.B %gs
+base.
+The total per-thread block is limited to 32 KiB.
+libpthread obtains a block of the same layout for each new thread from
+.BR ld.so .
+.PP
+When
+.BR dlopen (3)
+loads a module with
+.BR PT_TLS ,
+it is placed in the surplus and its initialization image is copied
+into every live thread, so initial-exec references work immediately.
+The general-dynamic model is served by
+.B __tls_get_addr
+(also provided by libc), which fills in a thread's slot on first use.
+.SS Run-time interface
+.B ld.so
+exports the functions behind libdl's
+.BR dlopen (3),
+.BR dlsym ,
+.BR dlclose ,
+.BR dlerror ,
+.B dladdr
+and
+.BR dl_iterate_phdr ;
+programs call them through libdl, not directly.
+.IP \(bu 2
+.B dlopen
+loads the object and its
+.B DT_NEEDED
+closure, relocates and protects them and runs their constructors.
+If any step fails every object loaded by that call is unmapped.
+.BR RTLD_LAZY ,
+.BR RTLD_NOW ,
+.B RTLD_GLOBAL
+and
+.B RTLD_LOCAL
+are ignored: binding is immediate and every object joins the global
+scope.
+.B RTLD_NOLOAD
+returns a handle only if the object is already loaded.
+.B dlopen(NULL)
+returns a handle for the program.
+.IP \(bu
+.B dlsym
+with
+.B RTLD_DEFAULT
+or the program's handle searches the global scope;
+with
+.B RTLD_NEXT
+it searches the objects after the caller's; with any other handle it
+searches only that object.
+.IP \(bu
+.B dlclose
+decrements a reference count and, when it reaches zero and no loaded
+object lists the library in
+.BR DT_NEEDED ,
+runs its destructors.
+The object is never unmapped.
+.IP \(bu
+.B dlerror
+returns the most recent error message once.
+The message is shared by all threads.
+.PP
+The
+.B dl*
+calls are serialized by one process-wide recursive lock, so a
+constructor may itself call
+.BR dlopen .
+.SH EXIT STATUS
+On a fatal error (a missing dependency, an undefined symbol, an
+unsupported relocation, or a TLS setup failure)
+.B ld.so
+prints a diagnostic and exits with status 127 before the program runs.
+With
+.B LD_TRACE_LOADED_OBJECTS
+set it exits with status 0 after printing the object list.
+.SH ENVIRONMENT
+All of the following are ignored when the kernel marks the execution
+as secure
+.RB ( AT_SECURE ,
+set for set-user-ID and set-group-ID programs).
+.TP
+.B LD_PRELOAD
+A list of libraries, separated by colons or spaces, to load after the
+program and before its
+.B DT_NEEDED
+libraries, so that their definitions take precedence over those of the
+program's libraries (but not of the program itself).
+Each entry is resolved as described under
+.BR "Library search" .
+An entry that cannot be loaded is reported and skipped.
+.TP
+.B LD_TRACE_LOADED_OBJECTS
+If set, to any value including the empty string,
+.B ld.so
+loads and relocates everything as usual, then prints one line per
+loaded object other than the program and exits instead of running the
+program.
+Each line has the form
+.RS
+.IP
+.EX
+<tab>\fIname\fP => \fIpath\fP (\fIbase\fP)
+.EE
+.RE
+.IP
+where
+.I name
+is the object's
+.B DT_SONAME
+and
+.I base
+its load bias in hexadecimal.
+.B ld.so
+itself is listed as
+.IR "ld.so (0x...)" .
+This is what
+.BR ldd (1)
+uses.
+.TP
+.B LD_DEBUG
+If set, to any value, print a trace of the auxiliary vector, loaded
+objects, relocation passes, TLS layout and constructor calls to
+standard error.
+The value is not examined.
+.SH FILES
+.TP
+.I /sbin/ld.so
+The dynamic linker.
+.TP
+.IR /lib ", " /usr/lib ", " /usr/local/lib
+Built-in library directories, searched first.
+.TP
+.I /etc/ld.so.conf
+Additional library directories.
+.TP
+.I /etc/ld.so.conf.d/*.conf
+Drop-in files included by the stock
+.IR /etc/ld.so.conf .
+.SH SEE ALSO
+.BR ld (1),
+.BR ldd (1),
+.BR brandelf (1),
+.BR readelf (1),
+.BR execve (2),
+.BR dlopen (3),
+.BR libsys (7)
+.SH BUGS
+All diagnostics, and the
+.B LD_TRACE_LOADED_OBJECTS
+listing, are written to standard error, not standard output.
+.PP
+An
+.B LD_PRELOAD
+entry such as
+.I ./libfoo.so
+that contains a slash but does not start with one is searched for in
+the library directories rather than opened relative to the current
+directory.
+.PP
+At most 192 objects can be loaded, and library paths are limited to
+255 bytes.
+.PP
+There is no lazy binding, no
+.BR LD_LIBRARY_PATH ,
+no
+.BR DT_RPATH / DT_RUNPATH
+support, no
+.B RTLD_LOCAL
+scope, and
+.BR dlclose (3)
+never unmaps anything.
+A dlopened module whose TLS needs more than the remaining surplus
+cannot be loaded.
