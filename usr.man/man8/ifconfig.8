@@ -1,0 +1,184 @@
+.TH IFCONFIG 8 2026-09-25 "Substrate" "System Administration"
+.SH NAME
+ifconfig \- display and configure network interfaces
+.SH SYNOPSIS
+.B ifconfig
+.RB [ \-a ]
+.br
+.B ifconfig
+.I interface
+.br
+.B ifconfig
+.I interface command
+.RI [ command ...]
+.SH DESCRIPTION
+With no arguments, or with the single argument
+.BR \-a ,
+.B ifconfig
+lists every interface the kernel reports through
+.BR SIOCGIFCONF ,
+at most 16, separated by blank lines.
+.PP
+With a single
+.I interface
+argument it shows only that interface.
+.PP
+The display for an interface consists of:
+.IP \(bu 2
+a header line with the interface name, the flags word in decimal
+followed by the names of the set flags among
+.BR UP ,
+.BR BROADCAST ,
+.BR LOOPBACK ,
+.B RUNNING
+and
+.BR PROMISC ,
+and the MTU;
+.IP \(bu
+an
+.B ether
+line with the hardware address;
+.IP \(bu
+an
+.B inet
+line with the IPv4 address, netmask (also as a prefix length) and
+broadcast address, if an IPv4 address is set;
+.IP \(bu
+a
+.B gateway
+line with the IPv4 default gateway, if one is set;
+.IP \(bu
+an
+.B inet6
+line with one IPv6 address and its prefix length, if one is set.
+The address is printed as eight colon-separated hexadecimal groups
+without zero compression.
+.PP
+Lines whose information the kernel does not provide are omitted.
+.PP
+When one or more
+.I command
+arguments follow the interface name, they are applied left to right,
+each with its own
+.BR ioctl (2)
+call, and nothing is printed.
+Processing stops at the first failing command; commands before it
+remain in effect.
+.SH COMMANDS
+.TP
+.B up
+Set the
+.B IFF_UP
+flag.
+.TP
+.B down
+Clear the
+.B IFF_UP
+flag.
+.TP
+.I address
+Set the IPv4 address.
+Any argument that is not one of the other command keywords is taken
+as an IPv4 address in dotted-quad form.
+.TP
+.BI netmask " mask"
+Set the IPv4 netmask, given in dotted-quad form.
+.TP
+.BI broadcast " address"
+Set the IPv4 broadcast address.
+.TP
+.BI mtu " n"
+Set the MTU.
+.I n
+is converted with
+.BR atoi (3)
+and is not otherwise checked.
+.TP
+.BI "hw ether " mac
+Set the hardware address;
+.I mac
+is six colon-separated hexadecimal octets.
+.TP
+.BI gateway " address"
+Set the IPv4 default gateway.
+This is a Substrate extension
+.RB ( SIOCSIFGATEWAY ).
+.TP
+.BI "inet6 add " address\c
+.RI [/ prefix ]
+Add an IPv6 address.
+The prefix length defaults to 64.
+.TP
+.BI "inet6 del " address
+Delete an IPv6 address.
+.TP
+.BI "inet6 gw " address
+Set the IPv6 default gateway.
+.SH EXIT STATUS
+.TP
+.B 0
+The listing was printed or every command succeeded.
+.TP
+.B 1
+A socket could not be created, the interface list could not be read,
+an address or MAC argument could not be parsed, an
+.BR ioctl (2)
+failed while applying a command, or
+.B hw
+was followed by something other than
+.BR ether ,
+or
+.B inet6
+by something other than
+.BR add ,
+.B del
+or
+.BR gw .
+.SH FILES
+.TP
+.I /etc/network.conf
+Per-interface configuration read by
+.IR /etc/rc.d/20-network ,
+which calls
+.B ifconfig
+at boot.
+.B ifconfig
+itself does not read this file.
+.SH EXAMPLES
+Show all interfaces:
+.PP
+.EX
+# ifconfig
+.EE
+.PP
+Configure a static IPv4 address and bring the interface up:
+.PP
+.EX
+# ifconfig eth0 10.0.2.15 netmask 255.255.255.0
+# ifconfig eth0 gateway 10.0.2.2
+# ifconfig eth0 up
+.EE
+.PP
+Add an IPv6 address with a /64 prefix:
+.PP
+.EX
+# ifconfig eth0 inet6 add fec0::3/64
+.EE
+.SH SEE ALSO
+.BR ioctl (2)
+.SH BUGS
+Showing a single interface that does not exist prints an error but
+still exits with status 0.
+.PP
+A keyword given without its argument, such as a trailing
+.BR netmask ,
+is treated as an IPv4 address and rejected with
+.BR "invalid IPv4 address" .
+.PP
+The broadcast address is not derived from the address and netmask
+by
+.BR ifconfig .
+.PP
+Only one IPv6 address per interface is displayed.
+.PP
+Interfaces beyond the first 16 are not listed.
