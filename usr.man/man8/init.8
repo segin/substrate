@@ -1,0 +1,308 @@
+.TH INIT 8 2026-09-25 "Substrate" "System Administration"
+.SH NAME
+init \- process control initialization
+.SH SYNOPSIS
+.B /sbin/init
+.SH DESCRIPTION
+.B init
+is the first user process, started by the kernel as process 1 once the
+root filesystem is mounted.
+It runs the boot scripts, keeps a
+.BR getty (8)
+running on each console terminal, records boot, shutdown and console
+logouts in the utmp and wtmp files, and shuts the system down when signalled.
+It takes no arguments and reads no configuration file; any arguments are
+ignored.
+The kernel mounts
+.IR /proc ,
+.I /sys
+and
+.I /dev
+itself, so
+.B init
+does not.
+.SS Startup
+.IP 1. 3
+.I /dev/console
+is opened and duplicated onto standard input, output and error.
+.IP 2. 3
+.B SIGHUP
+is ignored, and the console is released as the controlling terminal with
+.B TIOCNOTTY
+so that a
+.B getty
+can later claim
+.IR /dev/tty1 .
+.IP 3. 3
+Handlers are installed for the shutdown signals (see
+.BR SIGNALS ).
+.IP 4. 3
+The directories
+.IR /var ,
+.I /var/run
+and
+.I /var/log
+are created if missing.
+.IP 5. 3
+A
+.B BOOT_TIME
+record (user
+.BR reboot ,
+line
+.BR ~ )
+is appended to
+.IR /var/log/wtmp ,
+and
+.I /var/run/utmp
+is truncated and rewritten with that single record.
+.IP 6. 3
+.B "/bin/sh /etc/rc start"
+is run, and
+.B init
+waits for it to finish before going on.
+.IP 7. 3
+A
+.B /sbin/getty
+is started on each of
+.IR /dev/tty1 ,
+.I /dev/tty2
+and
+.IR /dev/tty3 .
+This table is compiled in.
+Each getty runs in a new session, with the default action restored for
+.BR SIGTERM ,
+.BR SIGINT ,
+.B SIGQUIT
+and
+.BR SIGCHLD .
+.PP
+.B init
+then loops, once a second reaping exited children.
+When the process started on a terminal line exits, the session on that line
+has ended:
+.B init
+writes a
+.B DEAD_PROCESS
+record for the line to utmp and wtmp and starts a new getty there.
+A line is not restarted more than once per second.
+.SS The boot scripts
+.I /etc/rc
+takes one argument,
+.BR start ,
+.BR stop ,
+.B restart
+or
+.BR status .
+It runs every executable file in
+.I /etc/rc.d
+with that argument, in lexical order of the file names, or in reverse order
+for
+.BR stop ,
+printing each script name and action first.
+A numeric prefix in the file name sets the order.
+The scripts shipped are:
+.TP
+.B 00-fsck
+Check the root filesystem with
+.B "e2fsck \-p"
+if it is mounted read-only, then remount it read-write.
+If
+.B e2fsck
+leaves uncorrected errors, the root stays read-only; if it repaired the
+filesystem, the system is rebooted before the remount.
+.TP
+.B 00-hostname
+Set the host name from
+.IR /etc/hostname .
+.TP
+.BR 01-run-clean ", " 02-tmp-clean
+Remove stale runtime state from
+.I /var/run
+and
+.IR /tmp .
+.TP
+.B 05-syslogd
+Start
+.BR syslogd (8).
+.TP
+.B 06-dbus
+Start the system D-Bus daemon.
+.TP
+.B 10-loopback
+Configure the loopback interface.
+.TP
+.BR 15-rpcbind ", " 16-ttdbserver
+Start the RPC port mapper and the ToolTalk database server.
+.TP
+.B 20-network
+Configure interfaces from
+.IR /etc/network.conf ,
+running
+.BR dhclient (8)
+for interfaces marked
+.BR dhcp .
+.TP
+.B 30-atd
+Start
+.BR atd (8).
+.TP
+.B 35-telnetd
+Start
+.BR telnetd (8).
+.TP
+.BR 40-inetd ", " 45-sshd ", " 50-nginx
+Start inetd, sshd and nginx.
+.TP
+.B 60-sdm
+Start the graphical login,
+.BR sdm (8),
+if it and the X server are installed.
+.PP
+Daemon scripts share helpers from
+.IR /etc/rc.subr ,
+which is sourced, not executed.
+.SS Shutdown
+On a shutdown signal
+.B init
+stops restarting gettys and:
+.IP 1. 3
+sends
+.B SIGHUP
+and
+.B SIGTERM
+to each getty session's process group and leader, waits up to 3 seconds
+for them to exit, then sends
+.B SIGKILL
+to whatever is left;
+.IP 2. 3
+runs
+.BR "/bin/sh /etc/rc stop" ,
+waiting for it at most 15 seconds;
+.IP 3. 3
+sends
+.B SIGHUP
+and then
+.B SIGTERM
+to every process, waits up to 5 seconds for its children to exit,
+then sends
+.B SIGKILL
+to every process;
+.IP 4. 3
+appends a
+.B RUN_LVL
+record (user
+.BR shutdown ,
+line
+.BR ~ )
+to wtmp, calls
+.BR sync (2),
+and calls
+.BR reboot (2)
+to halt, reboot or power off.
+.PP
+If
+.BR reboot (2)
+returns,
+.B init
+sleeps forever.
+.SH SIGNALS
+.TP
+.BR SIGTERM ", " SIGQUIT
+Shut down and halt.
+.TP
+.B SIGINT
+Shut down and reboot (the Ctrl-Alt-Del convention).
+.TP
+.B SIGUSR1
+Shut down and power off.
+.TP
+.B SIGUSR2
+Shut down and reboot.
+.TP
+.B SIGHUP
+Ignored.
+.PP
+The
+.BR halt ,
+.B reboot
+and
+.B poweroff
+commands in
+.I /sbin
+send
+.BR SIGTERM ,
+.B SIGUSR2
+and
+.B SIGUSR1
+respectively to process 1.
+.SH FILES
+.TP
+.I /dev/console
+Standard input, output and error of
+.BR init .
+.TP
+.I /etc/rc
+Boot and shutdown script runner.
+.TP
+.I /etc/rc.d/
+Service scripts run by
+.IR /etc/rc .
+.TP
+.I /etc/rc.subr
+Shell helpers for the service scripts.
+.TP
+.I /sbin/getty
+Program run on each terminal line.
+.TP
+.IR /dev/tty1 ", " /dev/tty2 ", " /dev/tty3
+Terminal lines served.
+.TP
+.I /var/run/utmp
+Current logins; reset at boot.
+.TP
+.I /var/log/wtmp
+Login, logout, boot and shutdown history.
+.SH EXAMPLES
+Reboot the system cleanly:
+.EX
+# kill \-USR2 1
+.EE
+.PP
+Restart one service by hand:
+.EX
+# /etc/rc.d/35-telnetd restart
+.EE
+.SH SEE ALSO
+.BR last (1),
+.BR getty (8),
+.BR halt (8),
+.BR reboot (8),
+.BR poweroff (8),
+.BR syslogd (8),
+.BR dhclient (8),
+.BR atd (8),
+.BR telnetd (8),
+.BR sdm (8),
+.BR reboot (2),
+.BR utmp (5)
+.SH BUGS
+There is no
+.IR inittab :
+the set of terminal lines is compiled in, so the getty on
+.I /dev/tty1
+cannot be turned off when
+.BR sdm (8)
+uses the same console, and there are no run levels.
+.PP
+.B SIGHUP
+stays ignored in the processes
+.B init
+starts, since only
+.BR SIGTERM ,
+.BR SIGINT ,
+.B SIGQUIT
+and
+.B SIGCHLD
+are reset in the getty child and nothing is reset in the
+.I /etc/rc
+child.
