@@ -1,0 +1,72 @@
+.TH WALL 1 2026-09-25 "Substrate" "User Commands"
+.SH NAME
+wall \- write a message to all logged-in users
+.SH SYNOPSIS
+.B wall
+.RI [ file ]
+.SH DESCRIPTION
+.B wall
+reads a message from
+.IR file ,
+or from standard input until end of file if no
+.I file
+is given, and writes it to the terminal of every
+.B USER_PROCESS
+record in the utmp file.
+Only the first 8191 bytes of the message are used.
+Arguments after
+.I file
+are ignored.
+.PP
+Each copy is preceded by a banner of the form
+.PP
+.EX
+Broadcast message from \fIuser\fP@\fIhost\fP at \fIhh\fP:\fImm\fP ...
+.EE
+.PP
+with a leading bell character, where
+.I user
+is taken from
+.BR getlogin (3),
+or from the password entry of the real user ID.
+.PP
+The message is made safe for terminals before it is sent: newlines and
+tabs pass through, carriage returns are dropped, other control
+characters are shown as
+.BI ^ X
+and bytes with the high bit set as
+.BI M\- X\c
+\&.
+.PP
+A utmp line containing
+.B /
+or starting with a dot is skipped.
+Each terminal
+.I /dev/line
+is opened non-blocking and without following symbolic links, and is
+written only if it is a terminal; terminals that cannot be opened are
+silently skipped.
+.SH EXIT STATUS
+.TP
+.B 0
+The message was processed, even if it could not be delivered to any
+terminal.
+.TP
+.B 1
+.I file
+or the utmp file could not be opened, or memory was exhausted.
+.SH FILES
+.TP
+.I /var/run/utmp
+Current login records.
+.SH SEE ALSO
+.BR w (1),
+.BR who (1),
+.BR write (1),
+.BR utmp (5)
+.SH BUGS
+When no terminal accepted the message,
+.B wall
+prints
+.B "wall: no logged-in users"
+even if users are logged in but their terminals could not be opened.
