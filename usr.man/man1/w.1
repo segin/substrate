@@ -1,0 +1,80 @@
+.TH W 1 2026-09-25 "Substrate" "User Commands"
+.SH NAME
+w \- show who is logged on and what they are doing
+.SH SYNOPSIS
+.B w
+.SH DESCRIPTION
+.B w
+first prints a header line in the same format as
+.BR uptime (1):
+the current time, the time since boot, the number of logged-in users
+(all
+.B USER_PROCESS
+records in the utmp file), and the three load averages.
+.PP
+It then prints a table with one row per
+.B USER_PROCESS
+record:
+.TP
+.B USER
+Login name.
+.TP
+.B TTY
+Terminal line, relative to
+.IR /dev .
+.TP
+.B FROM
+Remote host recorded at login, or
+.B \-
+for a local login.
+.TP
+.B LOGIN@
+Login time, as
+.IR hh : mm
+in local time.
+.TP
+.B WHAT
+The command name of the foreground process on that terminal, or
+.B \-
+if none can be found.
+.PP
+The
+.B WHAT
+column is derived from
+.IR /proc :
+a process qualifies if its process group equals the terminal's
+foreground process group (the
+.I pgrp
+and
+.I tpgid
+fields of
+.IR /proc/pid/stat )
+and one of its file descriptors 0, 1 or 2 is a link to
+.IR /dev/line .
+The process-group leader is preferred when several processes qualify.
+.PP
+Non-printable characters in the user, line and host fields are shown as
+.BR ? .
+.PP
+.B w
+takes no options; any arguments are ignored.
+.SH EXIT STATUS
+.B w
+always exits with status 0.
+.SH FILES
+.TP
+.I /var/run/utmp
+Current login records.
+.TP
+.IR /proc/uptime ", " /proc/loadavg
+Uptime and load averages.
+.TP
+.IR /proc/pid/stat ", " /proc/pid/fd/
+Used to find the foreground command on each terminal.
+.SH SEE ALSO
+.BR ps (1),
+.BR top (1),
+.BR uptime (1),
+.BR who (1),
+.BR proc (5),
+.BR utmp (5)
