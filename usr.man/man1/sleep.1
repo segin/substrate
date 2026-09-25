@@ -1,0 +1,53 @@
+.TH SLEEP 1 2026-09-25 "Substrate" "User Commands"
+.SH NAME
+sleep \- suspend execution for an interval
+.SH SYNOPSIS
+.B sleep
+.I seconds
+.SH DESCRIPTION
+.B sleep
+suspends execution for
+.I seconds
+seconds by calling
+.BR sleep (3),
+then exits.
+.PP
+.I seconds
+is converted with
+.BR atoi (3):
+only a leading decimal integer is used, so a fractional part is
+discarded and a suffix such as
+.BR s ,
+.B m
+or
+.B h
+is ignored.
+A value that does not begin with a number is taken as 0 and
+.B sleep
+returns at once.
+Arguments after the first are ignored.
+.PP
+There are no options.
+.SH EXIT STATUS
+.TP
+.B 0
+The interval elapsed (or was 0).
+.TP
+.B 1
+No operand was given; a usage message is written to standard output.
+.SH EXAMPLE
+.EX
+$ sleep 5; echo done
+.EE
+.SH SEE ALSO
+.BR sh (1),
+.BR time (1)
+.SH BUGS
+Invalid operands are not diagnosed.
+A negative value is passed to
+.BR sleep (3)
+as a huge unsigned number, so
+.B "sleep \-1"
+effectively sleeps forever.
+.PP
+The usage message goes to standard output instead of standard error.
