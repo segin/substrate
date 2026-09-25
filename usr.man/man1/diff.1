@@ -1,0 +1,305 @@
+.TH DIFF 1 2026-09-25 "Substrate" "User Commands"
+.SH NAME
+diff \- compare files line by line
+.SH SYNOPSIS
+.B diff
+.RB [ \-c | \-C
+.IR n | \fB\-u\fP | \fB\-U\fP
+.IR n | \fB\-e\fP | \fB\-f\fP | \fB\-n\fP | \fB\-q\fP | \fB\-\-normal\fP ]
+.RB [ \-abirstwBN ]
+.RB [ \-I
+.IR regexp ]
+.RB [ \-L
+.IR label ]
+.I file1 file2
+.SH DESCRIPTION
+.B diff
+compares
+.I file1
+and
+.I file2
+and writes a description of the changes needed to turn
+.I file1
+into
+.IR file2 .
+Either operand may be
+.B \-
+for standard input.
+.PP
+The comparison uses the Myers O(ND) shortest-edit-script algorithm.
+If the two files are so large and dissimilar that the algorithm's
+working memory would exceed about 128 MiB,
+.B diff
+instead reports every line as changed; the output is still a correct
+edit script, but not a minimal one.
+Input files of 1 GiB or more are rejected.
+.PP
+A file containing a NUL byte is treated as binary unless
+.B \-a
+is given.
+If either file is binary, only the line
+.BI "Binary files " file1 " and " file2 " differ"
+is printed when they differ.
+.PP
+A last line without a trailing newline never matches a
+newline-terminated line, and is followed in the output by
+.BR "\e No newline at end of file" .
+.SS Directories
+If exactly one operand is a directory,
+.B diff
+compares the other file with the file of the same base name in that
+directory.
+If both are directories, entries are compared in sorted name order:
+an entry present in only one directory is reported as
+.BI "Only in " dir ": " name \fR,\fP
+a pair of subdirectories as
+.BI "Common subdirectories: " a " and " b
+(unless
+.B \-r
+is given), and a pair of files is compared.
+When a file and a directory of the same name meet, an error is
+reported.
+.SS Output formats
+.TP
+Normal (default)
+Change commands of the form
+.IB range1 a range2\fR,\fP
+.IB range1 c range2\fR,\fP
+and
+.IB range1 d range2\fR,\fP
+followed by the affected lines prefixed with
+.B <
+(from
+.IR file1 )
+and
+.B >
+(from
+.IR file2 ),
+with
+.B \-\-\-
+between the two groups of a change.
+.TP
+Context (\fB\-c\fP)
+Hunks of changed lines with surrounding context, marked with
+.B !
+(changed),
+.B \-
+(deleted), and
+.B +
+(added), under a
+.B ***
+/
+.B \-\-\-
+file header.
+.TP
+Unified (\fB\-u\fP)
+Hunks headed by
+.BI "@@ \-" "start,count" " +" "start,count" " @@"
+with lines prefixed by a space (context),
+.BR \- ,
+or
+.BR + ,
+under a
+.B \-\-\-
+/
+.B +++
+file header.
+.TP
+Ed script (\fB\-e\fP)
+.BR ed (1)
+commands, in reverse line order, that turn
+.I file1
+into
+.IR file2 .
+.TP
+Forward (\fB\-f\fP)
+Like
+.BR \-e ,
+but in forward order with the command letter before the line
+numbers.
+.TP
+RCS (\fB\-n\fP)
+RCS-style
+\fBd\fP\fIline\fP\ \fIcount\fP
+and
+\fBa\fP\fIline\fP\ \fIcount\fP
+commands, each
+.B a
+followed by the lines to add.
+.PP
+In the context and unified formats, the file headers show only the
+file name (or label); no timestamps are printed.
+Hunks separated by no more than twice the context length are merged.
+.SH OPTIONS
+.SS Output format
+.TP
+.B \-\-normal
+Normal output (the default).
+.TP
+.BR \-c ", " \-\-context [= \fIn\fP ]
+Context output with 3 lines (or
+.IR n )
+of context.
+.TP
+.BI \-C " n"
+Context output with
+.I n
+lines of context.
+.TP
+.BR \-u ", " \-\-unified [= \fIn\fP ]
+Unified output with 3 lines (or
+.IR n )
+of context.
+.TP
+.BI \-U " n"
+Unified output with
+.I n
+lines of context.
+.TP
+.BR \-e ", " \-\-ed
+Ed script output.
+.TP
+.B \-f
+Forward ed-style output.
+.TP
+.BR \-n ", " \-\-rcs
+RCS output.
+.TP
+.BR \-q ", " \-\-brief
+Only report
+.BI "Files " file1 " and " file2 " differ"
+when the files differ.
+.PP
+The last format option given takes effect.
+Context lengths must be between 0 and 1048576.
+.SS Comparison
+.TP
+.BR \-a ", " \-\-text
+Treat all files as text.
+.TP
+.BR \-b ", " \-\-ignore\-space\-change
+Treat any run of white space as a single blank, and ignore trailing
+white space.
+.TP
+.BR \-w ", " \-\-ignore\-all\-space
+Ignore all white space.
+Takes precedence over
+.BR \-b .
+.TP
+.BR \-i ", " \-\-ignore\-case
+Ignore case differences.
+.TP
+.BR \-B ", " \-\-ignore\-blank\-lines
+Suppress changes in which every inserted and deleted line is blank
+(empty or white space only).
+.TP
+.BI \-I " regexp"
+Suppress changes in which every inserted and deleted line matches the
+extended regular expression
+.IR regexp .
+.SS Other options
+.TP
+.BR \-r ", " \-\-recursive
+Compare subdirectories recursively (to a depth of 64).
+In normal, context, and unified formats, each pair of compared files
+is preceded by a line
+.BI "diff " "file1 file2" \fR.\fP
+.TP
+.BR \-N ", " \-\-new\-file
+Treat a missing file, or a file present in only one directory, as an
+empty file
+.RB ( /dev/null ).
+.TP
+.BR \-s ", " \-\-report\-identical\-files
+Report
+.BI "Files " file1 " and " file2 " are identical"
+when they are.
+.TP
+.BR \-t ", " \-\-expand\-tabs
+Expand tabs to spaces (8-column stops) in output lines of the normal,
+context, and unified formats.
+.TP
+.BR \-L ", " \-\-label= \fIlabel\fP
+Use
+.I label
+instead of the file name in the context or unified header.
+The first
+.B \-L
+labels
+.IR file1 ,
+the second
+.IR file2 .
+.TP
+.B \-\-help
+Print a usage summary and exit.
+.TP
+.B \-\-version
+Print version information and exit.
+.SH EXIT STATUS
+.TP
+.B 0
+No differences were found.
+.TP
+.B 1
+Differences were found.
+.TP
+.B 2
+Invalid usage or an error (unreadable file, bad regular expression,
+file/directory mismatch, directory nesting too deep).
+.SH FILES
+.TP
+.B /dev/null
+Stands in for a missing file with
+.BR \-N .
+.SH EXAMPLES
+Produce a unified diff suitable for a patch:
+.PP
+.EX
+$ diff \-u old.c new.c > change.diff
+.EE
+.PP
+List which files differ between two trees:
+.PP
+.EX
+$ diff \-rq dir1 dir2
+.EE
+.SH SEE ALSO
+.BR cmp (1),
+.BR ed (1),
+.BR regex (3)
+.SH STANDARDS
+POSIX.1-2024 for
+.BR \-b ,
+.BR \-c ,
+.BR \-C ,
+.BR \-e ,
+.BR \-f ,
+.BR \-r ,
+.BR \-u ,
+and
+.BR \-U ;
+the other options follow GNU diffutils and BSD.
+.SH BUGS
+Context and unified headers carry no file timestamps.
+.PP
+With
+.BR \-e ,
+.BR \-f ,
+or
+.BR \-n ,
+an inserted line consisting of a single
+.B .
+is not escaped, so the resulting script is wrong.
+.PP
+When both
+.B \-B
+and
+.B \-I
+are given, only
+.B \-B
+is applied.
+.PP
+With
+.B \-N
+in a directory comparison, a subdirectory present on only one side is
+skipped silently.
