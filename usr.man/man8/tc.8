@@ -1,0 +1,22 @@
+.TH TC 8 2026-09-25 "Substrate" "System Administration"
+.SH NAME
+tc \- traffic control (unsupported)
+.SH SYNOPSIS
+.B tc
+.RI [ argument ...]
+.SH DESCRIPTION
+Substrate has no queueing-discipline or traffic-control subsystem.
+.B tc
+is a placeholder that ignores all arguments, prints
+.RS
+.B tc: traffic control is not supported on this system
+.RE
+on standard error and exits unsuccessfully, so that scripts do not
+mistake it for having installed a rule.
+.SH EXIT STATUS
+.B tc
+always exits with status
+.BR 1 .
+.SH SEE ALSO
+.BR tcp (7),
+.BR substrate (7)
