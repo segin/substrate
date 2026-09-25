@@ -55,6 +55,8 @@
  *                                               the socket and report what
  *                                               the connect returned, and
  *                                               how many seconds it took)
+ *   wireguest manyconnect <ip> <port> <n>      (n O_NONBLOCK connects to the
+ *                                               same peer, then sleep 30 s)
  *   wireguest acceptfull <port>                (listen, sleep 4 s, fill the fd
  *                                               table with dup(), then accept,
  *                                               reporting the error)
@@ -567,6 +569,21 @@ int main(int argc, char **argv) {
         socklen_t el = sizeof err;
         getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &el);
         say("soerror ok value=%s%ld", "", (long)err);
+        rc = 0;
+    } else if (argc >= 5 && strcmp(argv[1], "manyconnect") == 0) {
+        struct sockaddr_in sa;
+        memset(&sa, 0, sizeof sa);
+        sa.sin_family = AF_INET;
+        sa.sin_port = htons((unsigned short)atoi(argv[3]));
+        sa.sin_addr.s_addr = inet_addr(argv[2]);
+        int n = atoi(argv[4]);
+        for (int i = 0; i < n; i++) {
+            int fd = socket(AF_INET, SOCK_STREAM, 0);
+            fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK);
+            connect(fd, (struct sockaddr *)&sa, sizeof sa);
+        }
+        say("connecting %s%ld", "", (long)n);
+        sleep(30);
         rc = 0;
     } else if (argc >= 4 && strcmp(argv[1], "closeconnect") == 0) {
         memset(&cc_sa, 0, sizeof cc_sa);

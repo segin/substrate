@@ -68,6 +68,10 @@ it guards.
     close-synsent  TCP-API-23: close() while another thread is blocked in
                    connect() (SYN-SENT) wakes it at once with
                    ECONNABORTED -- not ECONNREFUSED on the next poll.
+    retx-batch     TCP-RES-01: 12 connects (more than one retransmit batch)
+                   to a peer that never answers; every SYN is retransmitted
+                   on the RTO, and all of them on the same timer tick -- the
+                   overflow is not deferred to later ticks.
 
 Run from the repo root after building sys/ and wireguest:
     python3 tests/lib/net/wire/test_tcp_api.py [case...]
@@ -532,6 +536,28 @@ def case_close_synsent():
         return None, w
 
 
+def case_retx_batch():
+    n = 12
+    with Wire.boot('manyconnect 10.0.2.2 %d %d' % (PORT, n)) as w:
+        if not w.wait_serial('guest: connecting', 90):
+            return 'guest never connected', w
+        w.pump(5.0)
+        sends = {}
+        for kind, t, seg in w.trace:
+            if kind == 'rx' and isinstance(seg, Seg) and seg.flags & SYN \
+                    and seg.dport == PORT:
+                sends.setdefault(seg.sport, []).append(t)
+        if len(sends) != n:
+            return '%d connections on the wire, want %d' % (len(sends), n), w
+        firsts = sorted(ts[1] for ts in sends.values() if len(ts) > 1)
+        if len(firsts) != n:
+            return 'only %d of %d SYNs were retransmitted' % (len(firsts), n), w
+        spread = firsts[-1] - firsts[0]
+        if spread > 0.1:
+            return 'retransmissions spread over %.3f s (want one tick)' % spread, w
+        return None, w
+
+
 CASES = (('reconnect', case_reconnect),
          ('connect-twice', case_connect_twice),
          ('listen-connect', case_listen_connect),
@@ -551,7 +577,8 @@ CASES = (('reconnect', case_reconnect),
          ('close-synrcvd', case_close_synrcvd),
          ('synrst-flood', case_synrst_flood),
          ('peer-early', case_peer_early),
-         ('close-synsent', case_close_synsent))
+         ('close-synsent', case_close_synsent),
+         ('retx-batch', case_retx_batch))
 
 
 def main():

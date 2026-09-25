@@ -692,34 +692,90 @@ static void tcp_unacked_free_all(tcp_pcb_t *p) {
  * aborted the connection.  They are capped per segment instead, so a peer
  * cannot drive unbounded retransmission with duplicate ACKs. */
 #define TCP_FAST_RETX_MAX 3
+
+/* TCP-WIN-09: a partially acknowledged segment stays queued whole
+ * (tcp_unacked_prune frees whole segments only, and kfree needs the
+ * allocated size), so resend just [SND.UNA, end): the acknowledged
+ * prefix was sent again every time, from below SND.UNA.  Returns how many
+ * of s->data's octets to skip; *seq and *flags describe what to send. */
+static uint32_t tcp_retx_span(const tcp_pcb_t *p, const tcp_seg_t *s,
+                              uint32_t *seq, uint8_t *flags) {
+    uint32_t skip = 0;
+    *seq = s->seq;
+    *flags = s->flags;
+    if (s->dlen && (int32_t)(p->snd_una - s->seq) > 0 &&
+        (int32_t)(p->snd_una - (s->seq + s->dlen)) < 0) {
+        skip = p->snd_una - s->seq;
+        if (*flags & TCP_SYN) {         /* the SYN was the first octet acked */
+            *flags &= (uint8_t)~TCP_SYN;
+            skip--;
+        }
+        *seq = p->snd_una;
+    }
+    return skip;
+}
+
 static void tcp_retx_head(tcp_pcb_t *p, int fast) {
     tcp_seg_t *s = p->unacked_head;
     if (!s) return;
     if (fast && s->fast_retx >= TCP_FAST_RETX_MAX) return;
-    /* TCP-WIN-09: a partially acknowledged segment stays queued whole
-     * (tcp_unacked_prune frees whole segments only, and kfree needs the
-     * allocated size), so resend just [SND.UNA, end): the acknowledged
-     * prefix was sent again every time, from below SND.UNA. */
-    uint32_t seq = s->seq, skip = 0;
-    uint8_t flags = s->flags;
-    if (s->dlen && (int32_t)(p->snd_una - s->seq) > 0 &&
-        (int32_t)(p->snd_una - (s->seq + s->dlen)) < 0) {
-        skip = p->snd_una - s->seq;
-        if (flags & TCP_SYN) {          /* the SYN was the first octet acked */
-            flags &= (uint8_t)~TCP_SYN;
-            skip--;
-        }
-        seq = p->snd_una;
-    }
+    uint32_t seq;
+    uint8_t flags;
+    uint32_t skip = tcp_retx_span(p, s, &seq, &flags);
     if (tcp_xmit_raw(p, seq, flags, s->data + skip, s->dlen - skip) >= 0)
-        tcp_note_sent(p, s->seq + s->dlen + ((s->flags & TCP_SYN) ? 1u : 0u) +
-                         ((s->flags & TCP_FIN) ? 1u : 0u));   /* TCP-MEM-07 */
+        tcp_note_sent(p, s->seq + tcp_seg_cost(s->flags, s->dlen));   /* TCP-MEM-07 */
     if (fast) {
         s->fast_retx++;
         return;
     }
     s->sent_tick = get_ticks();
     s->retx++;
+}
+
+/*
+ * TCP-RES-01: one timer retransmission, copied out of the unacked queue
+ * under the lock so it can be transmitted after the lock is dropped.  The
+ * copy is what makes that safe against NET-02's race -- an ACK pruning and
+ * freeing the segment in the gap -- and the hold keeps the reaper off the
+ * PCB.  The batch belongs to the timer kthread, the only caller.
+ */
+#define TCP_RETX_BATCH 8
+typedef struct {
+    tcp_pcb_t *p;
+    uint32_t   seq;
+    uint32_t   end;             /* sequence space the segment covers */
+    uint8_t    flags;
+    uint16_t   dlen;
+    uint8_t    data[TCP_MSS];
+} tcp_retx_t;
+static tcp_retx_t g_tcp_retx[TCP_RETX_BATCH];
+
+/* The timer's half of tcp_retx_head(): the same span and bookkeeping, but
+ * the octets go into *r instead of onto the wire.  Caller holds tcp_lock. */
+static void tcp_retx_capture_locked(tcp_pcb_t *p, tcp_retx_t *r) {
+    tcp_seg_t *s = p->unacked_head;
+    uint32_t skip = tcp_retx_span(p, s, &r->seq, &r->flags);
+    uint32_t dlen = s->dlen - skip;
+    if (dlen > TCP_MSS) dlen = TCP_MSS;
+    if (dlen) memcpy(r->data, s->data + skip, dlen);
+    r->dlen = (uint16_t)dlen;
+    r->end  = s->seq + tcp_seg_cost(s->flags, s->dlen);
+    r->p    = p;
+    s->sent_tick = get_ticks();
+    s->retx++;
+    p->holds++;
+}
+
+/* Transmit what tcp_retx_capture_locked() collected, with interrupts on. */
+static void tcp_retx_flush(int n) {
+    for (int i = 0; i < n; i++) {
+        tcp_retx_t *r = &g_tcp_retx[i];
+        /* A RST may have closed it since the capture; don't resend then. */
+        if (r->p->state != TCP_CLOSED &&
+            tcp_xmit_raw(r->p, r->seq, r->flags, r->data, r->dlen) >= 0)
+            tcp_note_sent(r->p, r->end);
+        tcp_unhold(r->p);
+    }
 }
 
 /* ------------------------------------------------------------------ */
@@ -758,30 +814,33 @@ static int tcp_child_in_accept_q(const tcp_pcb_t *p) {
     return 0;
 }
 
-static void tcp_timer_tick(uint64_t now) {
+static int tcp_timer_tick(uint64_t now) {
     /* The timer kthread is the single reaper of orphaned PCBs.  Walk the
      * list with IRQs off (tcp_lock) so an RX interrupt can neither free
      * nor splice a node — nor prune/free an unacked segment — underneath
      * us.
      *
-     * NET-02: the retransmit runs INLINE under the lock.  The previous
-     * design collected the victims, dropped the lock, then dereferenced
-     * each PCB's unacked_head to transmit — a window in which an incoming
-     * ACK (tcp_input, hard IRQ) could tcp_unacked_prune() and kfree() the
-     * very segment tcp_retx_head() was about to read: a use-after-free.
-     * Holding the lock across the dereference-and-transmit closes it.
+     * NET-02: an earlier design collected the victims, dropped the lock,
+     * then dereferenced each PCB's unacked_head to transmit — a window in
+     * which an incoming ACK (tcp_input, hard IRQ) could tcp_unacked_prune()
+     * and kfree() the very segment it was about to read: a use-after-free.
+     * The fix transmitted inline under the lock instead.
      *
-     * This is safe only because NET-05 makes ip4_output() non-sleeping
-     * while interrupts are disabled: on an ARP miss it fires the request
-     * and drops the frame (the next tick resends) instead of yielding, so
-     * tcp_xmit_raw() cannot block here.  Retransmitting inline also drops
-     * the old fixed 32-victim batch array (NET-11): every PCB whose RTO
-     * has expired is serviced on this tick, not silently deferred. */
+     * TCP-RES-01: but that put every full transmit of every expired PCB
+     * inside one IRQs-off region, unbounded in the number of connections.
+     * Now the segment is COPIED under the lock (tcp_retx_capture_locked,
+     * which also holds the PCB against the reaper) and sent after the
+     * unlock, so there is nothing left in the queue to race over.  The
+     * batch is bounded; when it fills this returns 1 and the timer thread
+     * walks again at once, so every PCB whose RTO has expired is still
+     * serviced on this tick (NET-11), with the lock dropped between
+     * batches. */
     /* TCP-URG-01: SIGURG is owed from the RX path, where psignal()'s locks
      * cannot be taken; collect the owners here and signal after unlock.
      * Any beyond the batch stay pending for the next tick. */
     int urg_owner[16];
     int nurg = 0;
+    int nretx = 0, more = 0;
     uint32_t f = tcp_lock();
     for (tcp_pcb_t *p = g_tcp_pcbs, *next; p; p = next) {
         next = p->next;
@@ -896,6 +955,10 @@ static void tcp_timer_tick(uint64_t now) {
             tcp_kill_pcb(p, ETIMEDOUT);
             continue;
         }
+        if (nretx == TCP_RETX_BATCH) {  /* TCP-RES-01: next batch */
+            more = 1;
+            continue;
+        }
         /*
          * TCP-10: RFC 5681 3.1 -- an RTO is the strongest loss signal there
          * is, so ssthresh drops to half the flight size and cwnd collapses
@@ -911,9 +974,10 @@ static void tcp_timer_tick(uint64_t now) {
             p->cwnd     = TCP_MSS;
             p->dup_ack  = 0;
         }
-        tcp_retx_head(p, 0);
+        tcp_retx_capture_locked(p, &g_tcp_retx[nretx++]);
     }
     tcp_unlock(f);
+    tcp_retx_flush(nretx);
     for (int i = 0; i < nurg; i++) {
         if (urg_owner[i] > 0) {
             process_t *target = proc_find(urg_owner[i]);
@@ -922,6 +986,7 @@ static void tcp_timer_tick(uint64_t now) {
             pgsignal(-urg_owner[i], SIGURG);
         }
     }
+    return more;
 }
 
 static void tcp_timer_thread(void *arg) {
@@ -929,7 +994,12 @@ static void tcp_timer_thread(void *arg) {
     for (;;) {
         sched_sleep_until(&g_tcp_pcbs,
                           get_ticks() + TCP_TIMER_PERIOD);
-        tcp_timer_tick(get_ticks());
+        /* TCP-RES-01: again while a retransmit batch overflowed.  Each
+         * pass samples the clock afresh: a segment the previous pass sent
+         * has a sent_tick newer than that pass's `now`, and would look long
+         * overdue against it. */
+        while (tcp_timer_tick(get_ticks()))
+            ;
     }
 }
 
