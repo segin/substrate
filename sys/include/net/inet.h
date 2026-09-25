@@ -237,6 +237,8 @@ int        tcp_connect_nb(tcp_pcb_t *p, uint32_t raddr, uint16_t rport);
 int        tcp_poll(tcp_pcb_t *p, short events, void **wait_chan);
 tcp_pcb_t *tcp_accept(tcp_pcb_t *listen_p, int nonblock);
 int        tcp_is_listening(const tcp_pcb_t *p);
+int        tcp_is_synchronized(const tcp_pcb_t *p);             /* TCP-API-22 */
+int        tcp_has_connection(const tcp_pcb_t *p);
 int        tcp_shutdown_wr(tcp_pcb_t *p);
 int        tcp_shutdown_rd(tcp_pcb_t *p);
 ssize_t    tcp_send(tcp_pcb_t *p, const void *buf, size_t len);

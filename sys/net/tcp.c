@@ -2500,6 +2500,27 @@ int tcp_poll(tcp_pcb_t *p, short events, void **wait_chan) {
     return revents;
 }
 
+/* TCP-API-22: the socket layer's view of "connected" comes from here, not
+ * from a flag it set when a non-blocking connect() merely started.
+ * Synchronized: both SYNs acknowledged (ESTABLISHED and every closing
+ * state) -- what getpeername() requires. */
+int tcp_is_synchronized(const tcp_pcb_t *p) {
+    if (!p) return 0;
+    switch (p->state) {
+    case TCP_ESTABLISHED: case TCP_FIN_WAIT_1: case TCP_FIN_WAIT_2:
+    case TCP_CLOSE_WAIT:  case TCP_CLOSING:    case TCP_LAST_ACK:
+    case TCP_TIME_WAIT:
+        return 1;
+    default:
+        return 0;
+    }
+}
+
+/* Has a connection, open or still opening -- what shutdown() requires. */
+int tcp_has_connection(const tcp_pcb_t *p) {
+    return p && p->state != TCP_CLOSED && p->state != TCP_LISTEN;
+}
+
 /* True iff the PCB is a listening socket — lets the socket layer
  * reject accept() on a non-listening fd with EINVAL. */
 int tcp_is_listening(const tcp_pcb_t *p) {

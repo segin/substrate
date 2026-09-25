@@ -62,6 +62,9 @@ it guards.
                    backlog-4 listener; the dead children count against the
                    backlog until reaped, so far fewer than 32 draw a SYN|ACK
                    (each used to get a fresh child and a SYN|ACK).
+    peer-early     TCP-API-22: getpeername() on a socket still in SYN-SENT
+                   (a non-blocking connect) fails ENOTCONN; once the
+                   handshake completes it reports the peer.
 
 Run from the repo root after building sys/ and wireguest:
     python3 tests/lib/net/wire/test_tcp_api.py [case...]
@@ -492,6 +495,25 @@ def case_synrst_flood():
         return None, w
 
 
+def case_peer_early():
+    with Wire.boot('peerconnect 10.0.2.2 %d' % PORT) as w:
+        syn = w.expect(lambda s: s.flags & SYN and s.dport == PORT, 90, 'SYN')
+        if not syn:
+            return 'no SYN', w
+        if not w.wait_serial('guest: peer1', 10):
+            return 'no first getpeername report', w
+        p1 = line(w, 'peer1')[0]
+        if 'not connected' not in p1.lower():
+            return 'getpeername() in SYN-SENT: %s (want ENOTCONN)' % p1, w
+        w.send(Seg(PORT, syn.sport, PISS, syn.seq + 1, SYN | ACK))
+        if not w.wait_serial('guest: peer2', 10):
+            return 'no second getpeername report', w
+        p2 = line(w, 'peer2')[0]
+        if 'ok port=%d' % PORT not in p2:
+            return 'getpeername() once established: %s' % p2, w
+        return None, w
+
+
 CASES = (('reconnect', case_reconnect),
          ('connect-twice', case_connect_twice),
          ('listen-connect', case_listen_connect),
@@ -509,7 +531,8 @@ CASES = (('reconnect', case_reconnect),
          ('send-dontwait', case_send_dontwait),
          ('read-listener', case_read_listener),
          ('close-synrcvd', case_close_synrcvd),
-         ('synrst-flood', case_synrst_flood))
+         ('synrst-flood', case_synrst_flood),
+         ('peer-early', case_peer_early))
 
 
 def main():

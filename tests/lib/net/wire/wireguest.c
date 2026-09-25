@@ -47,6 +47,9 @@
  *                                               shutdown(SHUT_WR), sleep 2 s,
  *                                               report SO_ERROR; with "close",
  *                                               close() instead of shutdown)
+ *   wireguest peerconnect <ip> <port>          (O_NONBLOCK connect, then
+ *                                               getpeername() at once and
+ *                                               again 4 s later)
  *   wireguest acceptfull <port>                (listen, sleep 4 s, fill the fd
  *                                               table with dup(), then accept,
  *                                               reporting the error)
@@ -122,7 +125,6 @@ static volatile int g_sigurg;
 static void on_sigurg(int sig) { (void)sig; g_sigurg++; }
 static volatile int g_sigpipe;
 static void on_sigpipe(int sig) { (void)sig; g_sigpipe++; }
-
 static int do_actions(int fd, int argc, char **argv) {
     for (int i = 0; i < argc; i++) {
         const char *a = argv[i];
@@ -547,6 +549,26 @@ int main(int argc, char **argv) {
         socklen_t el = sizeof err;
         getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &el);
         say("soerror ok value=%s%ld", "", (long)err);
+        rc = 0;
+    } else if (argc >= 4 && strcmp(argv[1], "peerconnect") == 0) {
+        struct sockaddr_in sa, pa;
+        socklen_t pl;
+        memset(&sa, 0, sizeof sa);
+        sa.sin_family = AF_INET;
+        sa.sin_port = htons((unsigned short)atoi(argv[3]));
+        sa.sin_addr.s_addr = inet_addr(argv[2]);
+        int fd = socket(AF_INET, SOCK_STREAM, 0);
+        fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK);
+        int r = connect(fd, (struct sockaddr *)&sa, sizeof sa);
+        say("connect1 %s rc=%ld", r < 0 ? strerror(errno) : "ok", r);
+        pl = sizeof pa;
+        r = getpeername(fd, (struct sockaddr *)&pa, &pl);
+        say("peer1 %s rc=%ld", r < 0 ? strerror(errno) : "ok", r);
+        sleep(4);
+        pl = sizeof pa;
+        r = getpeername(fd, (struct sockaddr *)&pa, &pl);
+        say("peer2 %s port=%ld", r < 0 ? strerror(errno) : "ok",
+            r < 0 ? -1L : (long)ntohs(pa.sin_port));
         rc = 0;
     } else if (argc >= 3 && strcmp(argv[1], "acceptfull") == 0) {
         struct sockaddr_in sa;

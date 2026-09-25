@@ -1594,8 +1594,15 @@ int afinet_shutdown(int fd, int how) {
      * or raw socket reported success and did nothing -- a caller using the
      * return value to decide whether a teardown happened was misled.  A
      * datagram socket becomes "connected" via connect(), same as a stream.
+     *
+     * TCP-API-22: a stream socket's answer comes from its PCB: any
+     * connection, open or still opening (TCP-API-15 acts on SYN-SENT).
      */
-    if (!s->connected) return -ENOTCONN;
+    if (s->type == SOCK_STREAM && s->tcp) {
+        if (!tcp_has_connection(s->tcp)) return -ENOTCONN;
+    } else if (!s->connected) {
+        return -ENOTCONN;
+    }
     if (how == SHUT_RD || how == SHUT_RDWR) {
         s->rd_shut = 1;
         sched_wakeup(s->wait_chan);          /* UDP/RAW blocked readers */
@@ -1827,11 +1834,15 @@ int afinet_getsockname(int fd, void *addr, socklen_t *addrlen) {
 int afinet_getpeername(int fd, void *addr, socklen_t *addrlen) {
     afi_sock_t *s = afi_from_fd(fd);
     if (!s) return -ENOTSOCK;
-    /* afinet_connect sets s->connected on both UDP and TCP paths;
-     * for TCP it's set right after tcp_connect{,_nb} returns
-     * success (or EINPROGRESS).  Good enough as a "has-a-peer"
-     * signal for the rare callers that bother checking.  */
-    if (!s->connected) return -ENOTCONN;
+    /* TCP-API-22: a stream socket has a peer once its connection is
+     * synchronized -- not while a non-blocking connect() is still in
+     * SYN-SENT, and not after it failed.  Datagram sockets keep the
+     * flag connect() sets. */
+    if (s->type == SOCK_STREAM && s->tcp) {
+        if (!tcp_is_synchronized(s->tcp)) return -ENOTCONN;
+    } else if (!s->connected) {
+        return -ENOTCONN;
+    }
     return afinet_pack_sockaddr(s->family, s->peer_port, s->peer_addr,
                                 addr, addrlen);
 }
@@ -1898,10 +1909,11 @@ int afinet_connect(int fd, const void *addr, socklen_t len) {
                 memcpy(s->local_addr, &la, 4);
                 s->bound = 1;           /* TCP-API-04: visible to bind checks */
             }
-            if (rc == -EINPROGRESS) {
-                s->connected = 1;
+            /* TCP-API-22: not "connected" yet -- getpeername() and
+             * shutdown() ask the PCB (tcp_is_synchronized() /
+             * tcp_has_connection()) instead of this flag. */
+            if (rc == -EINPROGRESS)
                 return -EINPROGRESS;
-            }
         } else {
             s->peer_port = __builtin_bswap16(sin->sin_port);
             memcpy(s->peer_addr, &sin->sin_addr, 4);
