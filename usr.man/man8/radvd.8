@@ -1,0 +1,80 @@
+.TH RADVD 8 2026-09-25 "Substrate" "System Administration"
+.SH NAME
+radvd \- minimal IPv6 router advertisement sender
+.SH SYNOPSIS
+.B radvd
+.I interface
+.IR prefix [/ length ]
+.SH DESCRIPTION
+.B radvd
+sends an unsolicited ICMPv6 Router Advertisement on
+.I interface
+every 60 seconds, so that hosts on the link can configure a global address
+by stateless autoconfiguration and use this host as their default router.
+It has no configuration file and no options, never answers Router
+Solicitations, and runs in the foreground until it is killed or a send fails.
+.PP
+.I prefix
+is an IPv6 address in the form accepted by
+.BR inet_pton (3);
+.I length
+is the prefix length, 64 if omitted.
+Bits of
+.I prefix
+beyond
+.I length
+are cleared before it is advertised.
+.PP
+Each advertisement is built by hand and sent over an
+.B AF_PACKET
+socket to the all-nodes group ff02::1 (Ethernet 33:33:00:00:00:01), with
+hop limit 255.
+Its source address is the IPv6 address the kernel reports for the interface
+with the
+.B SIOCGIFADDR_IN6
+ioctl.
+It carries:
+.IP \(bu 2
+current hop limit 64, the M and O flags clear, router lifetime 1800 seconds,
+reachable time and retransmission timer 0 (unspecified);
+.IP \(bu 2
+a source link-layer address option with the interface's MAC address;
+.IP \(bu 2
+one prefix information option for
+.IR prefix / length ,
+with the on-link (L) and autonomous (A) flags set and valid and preferred
+lifetimes of 10000 seconds.
+.PP
+A line naming the interface, its index and the prefix is printed to
+standard output at startup.
+.B radvd
+is not started by any of the boot scripts.
+.SH EXIT STATUS
+.TP
+.B 0
+A send failed; the error is reported on standard error.
+.TP
+.B 1
+Too few arguments, an invalid prefix, or the interface's hardware address,
+index or IPv6 address could not be read, or the packet socket could not be
+created.
+.SH EXAMPLE
+Advertise the site prefix fec0::/64 on eth0:
+.EX
+# radvd eth0 fec0::/64 &
+.EE
+.SH SEE ALSO
+.BR ifconfig (8),
+.BR dhclient (8),
+.BR init (8)
+.SH STANDARDS
+Sends Router Advertisement messages as described in RFC 4861 (Neighbor
+Discovery for IPv6), for use with RFC 4862 stateless address
+autoconfiguration.
+.SH BUGS
+The prefix length is not checked: it should be between 0 and 128.
+.PP
+The source address is whatever
+.B SIOCGIFADDR_IN6
+returns for the interface, which RFC 4861 requires to be link-local but
+is not checked.
