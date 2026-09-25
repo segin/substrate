@@ -375,5 +375,5 @@ frames exactly as each case needs.
 - [x] **DHC-10** Validate IP/UDP headers on received frames -- `recv_dhcp()` checks version, header length, fragments, IP checksum, source port 67, UDP length (which now bounds the body) and checksum, and the magic cookie; the renew path checks the cookie; `bad-headers` in `test_dhclient.py`
 - [x] **DHC-11** Validate server identifier and yiaddr in OFFER/ACK -- offers need a 4-octet server identifier and a `usable_addr()` yiaddr; an ACK naming another server, or an unusable address, is ignored; `bad-offers`, `foreign-ack` in `test_dhclient.py`
 - [x] **DHC-12** Sanitize option 15/119 before writing resolv.conf -- option 15 must be LDH plus '.', each search-list label LDH, or it is dropped; `resolv` in `test_dhclient.py`
-- [ ] **DHC-13** Clear the BROADCAST flag once unicast reception is confirmed
+- [x] **DHC-13** Clear the BROADCAST flag once unicast reception is confirmed -- flag always clear; a port-68 socket held during acquisition keeps the kernel from answering unicast replies to an address it already has with ICMP; `unicast`, `unicast-own` in `test_dhclient.py`
 - [x] **DHC-14** Monotonic clock for deadlines -- `now_sec()` reads `CLOCK_MONOTONIC`; `clock-step` in `tests/lib/net/wire/test_dhclient.py` (DISCOVERs 0.2 s apart before, one retransmission delay after)

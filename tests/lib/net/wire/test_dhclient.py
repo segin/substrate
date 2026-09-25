@@ -34,6 +34,11 @@ exactly as the case needs.
                   newline are dropped rather than written into
                   /etc/resolv.conf, while the DNS server and a valid search
                   domain still are.
+    unicast       DHC-13: DISCOVER and REQUEST leave the BROADCAST flag
+                  clear, and an OFFER and ACK unicast to 'yiaddr' at our MAC
+                  bind.
+    unicast-own   DHC-13: the same for the address the kernel already has
+                  (10.0.2.15), with no ICMP error sent back to the server.
     probe-announce DHC-07: before using the address the client ARP-probes it
                   (sender IP 0), and once bound announces it with a
                   gratuitous ARP.
@@ -782,6 +787,46 @@ def case_resolv():
         return None, w
 
 
+def unicast_exchange(w, addr):
+    s = Server(w)
+    d = s.expect(DISCOVER, 90)
+    if not d:
+        return 'no DHCPDISCOVER'
+    if d.flags & 0x8000:
+        return 'DISCOVER sets the BROADCAST flag'
+    s.reply(d, OFFER, yiaddr=addr, opts=s.std_opts(), dst=addr,
+            eth_dst=GUEST_MAC)
+    r = s.expect(REQUEST, 10)
+    if not r:
+        return 'no REQUEST after a unicast OFFER'
+    if r.flags & 0x8000:
+        return 'REQUEST sets the BROADCAST flag'
+    w.ip_rx.clear()
+    s.reply(r, ACK, yiaddr=addr, opts=s.std_opts(), dst=addr,
+            eth_dst=GUEST_MAC)
+    if not w.wait_serial('dhclient: bound %s/' % addr, 10):
+        return 'a unicast ACK did not bind'
+    return None
+
+
+def case_unicast():
+    with boot() as w:
+        return unicast_exchange(w, LEASED), w
+
+
+def case_unicast_own():
+    # 10.0.2.15 is the address the guest kernel already has at boot
+    with boot() as w:
+        err = unicast_exchange(w, '10.0.2.15')
+        if err:
+            return err, w
+        w.pump(1.0)
+        icmp = [x for x in w.ip_rx if x[0] == 1]
+        if icmp:
+            return 'the kernel answered a unicast reply with ICMP', w
+        return None, w
+
+
 OFFLINK = '198.51.100.1'
 
 
@@ -826,6 +871,7 @@ CASES = (('bound', case_bound), ('ack-config', case_ack_config),
          ('concat', case_concat), ('maxsize', case_maxsize),
          ('bad-headers', case_bad_headers), ('bad-offers', case_bad_offers),
          ('foreign-ack', case_foreign_ack), ('resolv', case_resolv),
+         ('unicast', case_unicast), ('unicast-own', case_unicast_own),
          ('probe-announce', case_probe_announce), ('declined', case_declined),
          ('renew', case_renew), ('rebind', case_rebind),
          ('expire', case_expire), ('nak-renew', case_nak_renew), ('clock-step', case_clock_step),

@@ -329,10 +329,13 @@ static size_t build_dhcp_packet(uint8_t *out,
     bp->htype = 1;
     bp->hlen  = 6;
     bp->xid   = xid;
-    /* BROADCAST flag until configured; with ciaddr set the server unicasts
-     * the reply to that address (RFC 2131 4.1). */
-    bp->flags = (ciaddr || msg_type == DHCP_DECLINE)
-                    ? 0 : __builtin_bswap16(0x8000);
+    /* DHC-13: the BROADCAST flag stays clear.  RFC 2131 4.1: a client that
+     * can receive unicast before it is configured SHOULD clear it, and
+     * this one can -- it reads replies off an AF_PACKET socket, which
+     * netdev_rx() feeds every frame for our MAC whatever its IP
+     * destination.  Setting it made every OFFER and ACK a broadcast to
+     * the whole segment. */
+    bp->flags = 0;
     bp->ciaddr = ciaddr;
     memcpy(bp->chaddr, hw, 6);
     bp->magic = __builtin_bswap32(DHCP_MAGIC);
@@ -1118,6 +1121,34 @@ static int acquire(const char *iface, const uint8_t hw[6], int ifindex,
 }
 
 /*
+ * DHC-13: with the BROADCAST flag clear, a server unicasts the OFFER and
+ * ACK to 'yiaddr'.  AF_PACKET sees them either way, but if the kernel
+ * already holds that address (10.0.2.15 at boot under QEMU) its UDP layer
+ * receives them too and, with nothing on port 68, would answer the server
+ * with ICMP port unreachable.  A socket on port 68 held for the exchange
+ * takes those copies instead; nothing reads it.
+ */
+static int acquire_quietly(const char *iface, const uint8_t hw[6],
+                           int ifindex, struct lease *L) {
+    int sink = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sink >= 0) {
+        int one = 1;
+        setsockopt(sink, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+        struct sockaddr_in me;
+        memset(&me, 0, sizeof(me));
+        me.sin_family = AF_INET;
+        me.sin_port = htons(68);
+        if (bind(sink, (struct sockaddr *)&me, sizeof(me)) < 0) {
+            close(sink);
+            sink = -1;
+        }
+    }
+    int rc = acquire(iface, hw, ifindex, L);
+    if (sink >= 0) close(sink);
+    return rc;
+}
+
+/*
  * DHC-02: keep the lease.  RFC 2131 4.4.5: at T1 renew with the leasing
  * server, at T2 rebind with any, and if the lease runs out "the client
  * moves to INIT state, MUST immediately stop any other network
@@ -1139,7 +1170,7 @@ static void maintain(const char *iface, const uint8_t hw[6], int ifindex,
         drop_lease(iface);
         fprintf(stdout, "dhclient: %s; address released, restarting "
                 "from INIT\n", r < 0 ? "lease refused" : "lease expired");
-        while (acquire(iface, hw, ifindex, L) != 0)
+        while (acquire_quietly(iface, hw, ifindex, L) != 0)
             sleep(DHCP_REACQUIRE_WAIT);
         if (L->infinite) return;
     }
@@ -1160,7 +1191,7 @@ int main(int argc, char **argv) {
     srand((unsigned)now_sec());
 
     struct lease L;
-    if (acquire(iface, hw, ifindex, &L) != 0)
+    if (acquire_quietly(iface, hw, ifindex, &L) != 0)
         return 1;
     if (L.infinite) {
         fprintf(stdout, "dhclient: infinite lease; nothing to renew\n");
