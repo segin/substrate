@@ -1,0 +1,174 @@
+.TH LDD 1 2026-09-25 "Substrate" "User Commands"
+.SH NAME
+ldd \- list the shared libraries an ELF file depends on
+.SH SYNOPSIS
+.B ldd
+.I file
+\&...
+.br
+.B ldd
+.BR \-h | \-\-help
+.SH DESCRIPTION
+.B ldd
+reports the shared-library dependencies of each 32-bit ELF
+.IR file .
+When more than one
+.I file
+is given, each report is preceded by a line holding the file name and a
+colon.
+.PP
+The whole file is read and its program headers are examined.
+.IP \(bu 2
+A file with no
+.B PT_DYNAMIC
+segment is reported as
+.RS
+.IP
+.EX
+<tab>not a dynamic executable [\fIosabi\fP, e_type=\fIn\fP]
+.EE
+.RE
+.IP
+where
+.I osabi
+is
+.BR SysV/native ,
+.BR NetBSD ,
+.BR Linux ,
+.B FreeBSD
+or
+.B unknown
+according to the
+.B EI_OSABI
+byte.
+.IP \(bu
+A file whose
+.B PT_INTERP
+is
+.I /sbin/ld.so
+(a native dynamic executable) is executed with
+.B LD_TRACE_LOADED_OBJECTS=1
+in its environment and no arguments.
+.BR ld.so (8)
+then loads the complete dependency tree, prints each object with its
+resolved path and real load address, and exits without running the
+program.
+See
+.BR ld.so (8)
+for the format.
+If the child exits with status 127 (the file could not be executed, or
+.B ld.so
+hit a fatal error such as a missing library),
+.B ldd
+falls back to the method below.
+.IP \(bu
+Any other dynamic file (a shared library, or a Linux, FreeBSD or NetBSD
+binary) is not executed.
+.B ldd
+prints a line
+.RS
+.IP
+.EX
+<tab>[interpreter: \fIpath\fP, OSABI=\fIosabi\fP]
+.EE
+.RE
+.IP
+(or just
+.BI [OSABI= osabi ]
+if there is no
+.BR PT_INTERP ),
+then, for each
+.B DT_NEEDED
+entry of the file itself,
+.RS
+.IP
+.EX
+<tab>\fIname\fP => \fIpath\fP (0x????????)
+<tab>\fIname\fP => not found
+.EE
+.RE
+.IP
+Only direct dependencies are listed, and no load address is known.
+Names are looked up as regular files in a fixed list of directories
+chosen from the
+.B EI_OSABI
+byte and the interpreter name:
+.RS
+.TP 10
+NetBSD
+.IR /perso/netbsd/lib ,
+.IR /perso/netbsd/usr/lib ,
+.I /perso/netbsd/usr/pkg/lib
+.TP
+FreeBSD
+.IR /perso/freebsd/lib ,
+.I /perso/freebsd/usr/lib
+.TP
+Linux
+.IR /perso/linux/lib ,
+.I /perso/linux/usr/lib
+.TP
+otherwise
+.IR /lib ,
+.IR /usr/lib ,
+.I /usr/local/lib
+.RE
+.SH OPTIONS
+.TP
+.BR \-h ", " \-\-help
+Print a usage message to standard error and exit with status 0.
+Recognized only as the first argument; no other options exist, and any
+other argument is taken as a file name.
+.SH EXIT STATUS
+.TP
+.B 0
+Every
+.I file
+was examined, including files with missing dependencies.
+.TP
+.B 1
+No
+.I file
+was given, or at least one
+.I file
+could not be read, was not a 32-bit ELF file, had malformed program
+headers or had no usable
+.BR DT_STRTAB .
+.SH EXAMPLE
+.EX
+$ ldd /bin/ls
+.EE
+.SH SEE ALSO
+.BR brandelf (1),
+.BR readelf (1),
+.BR ld.so (8)
+.SH BUGS
+For a native executable the dependency list comes from
+.BR ld.so (8),
+which writes it to standard error; it cannot be piped without
+redirecting standard error.
+.PP
+A missing dependency does not change the exit status.
+.PP
+Native executables are run to obtain the listing.
+.BR ld.so (8)
+ignores
+.B LD_TRACE_LOADED_OBJECTS
+for set-user-ID and set-group-ID programs, so running
+.B ldd
+on such a program as an ordinary user starts the program itself.
+.PP
+Substrate's own brand,
+.B ELFOSABI_SUBSTRATE
+(64), is reported as
+.BR unknown .
+.PP
+The fallback method does not read
+.I /etc/ld.so.conf
+and does not follow indirect dependencies.
+.PP
+Only 32-bit ELF files are supported.
+.PP
+With several files and standard output not a terminal, the file-name
+header line can appear after that file's listing, because output is
+not flushed before the program is run.
