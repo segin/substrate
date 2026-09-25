@@ -10,8 +10,15 @@
  * AF_INET wouldn't have a valid source address to put in the IP
  * header at DISCOVER time.
  *
- * On ACK, the lease (address, netmask, router) is installed on the
- * interface via the same SIOC* ioctls /sbin/ifconfig uses.
+ * On ACK the address is ARP-probed (DHCPDECLINE if taken), then the lease
+ * (address, netmask, router) is installed on the interface via the same
+ * SIOC* ioctls /sbin/ifconfig uses and announced with a gratuitous ARP.
+ * Unless the lease is infinite, dhclient then forks: the parent exits 0
+ * so boot continues, and the child keeps the lease -- RENEWING at T1,
+ * REBINDING at T2 (over an ordinary UDP socket, the host being configured
+ * by then), and on a NAK or at expiry it removes the address and starts
+ * again from INIT.  Conformance notes against RFC 2131:
+ * docs/dhclient-audit-2026-09.md.
  */
 
 #define _GNU_SOURCE
