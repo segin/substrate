@@ -25,6 +25,11 @@ exactly as the case needs.
                   16-octet IP header, a UDP length too short for the body,
                   or a wrong magic cookie are all ignored; a well-formed
                   OFFER after them is the one requested.
+    bad-offers    DHC-11: OFFERs without a server identifier, or offering
+                  255.255.255.255, 127/8, 224/4, 240/4 or 0/8, are
+                  ignored; the valid OFFER after them is requested.
+    foreign-ack   DHC-11: an ACK naming a server other than the selected
+                  one does not bind; the selected server's ACK does.
     probe-announce DHC-07: before using the address the client ARP-probes it
                   (sender IP 0), and once bound announces it with a
                   gratuitous ARP.
@@ -699,6 +704,44 @@ def case_bad_headers():
         return None, w
 
 
+def case_bad_offers():
+    with boot() as w:
+        s = Server(w)
+        d = s.expect(DISCOVER, 90)
+        if not d:
+            return 'no DHCPDISCOVER', w
+        s.reply(d, OFFER, yiaddr='10.0.2.70', server_id=None,
+                opts=s.std_opts())                      # no server id
+        for bad in ('255.255.255.255', '127.0.0.5', '224.0.0.9',
+                    '240.0.0.1', '0.1.2.3'):
+            s.reply(d, OFFER, yiaddr=bad, opts=s.std_opts())
+        w.pump(0.5)
+        s.reply(d, OFFER, opts=s.std_opts())
+        r = s.expect(REQUEST, 10)
+        if not r:
+            return 'no REQUEST after a valid OFFER', w
+        if r.ip_opt(50) != LEASED or r.ip_opt(54) != PEER_IP:
+            return 'accepted a bad OFFER: requested %s from server %s' % (
+                r.ip_opt(50), r.ip_opt(54)), w
+        return None, w
+
+
+def case_foreign_ack():
+    with boot() as w:
+        s = Server(w)
+        r, d, err = offer_and_request(s)
+        if err:
+            return err, w
+        s.reply(r, ACK, opts=s.std_opts(), server_id='10.0.2.9')
+        w.pump(2.5)
+        if 'dhclient: bound' in w.serial():
+            return 'bound on an ACK from a server it did not select', w
+        s.reply(r, ACK, opts=s.std_opts())
+        if not w.wait_serial('dhclient: bound', 10):
+            return 'the selected server\'s ACK was not taken', w
+        return None, w
+
+
 OFFLINK = '198.51.100.1'
 
 
@@ -741,7 +784,8 @@ def case_no_options():
 CASES = (('bound', case_bound), ('ack-config', case_ack_config),
          ('no-options', case_no_options), ('overload', case_overload),
          ('concat', case_concat), ('maxsize', case_maxsize),
-         ('bad-headers', case_bad_headers),
+         ('bad-headers', case_bad_headers), ('bad-offers', case_bad_offers),
+         ('foreign-ack', case_foreign_ack),
          ('probe-announce', case_probe_announce), ('declined', case_declined),
          ('renew', case_renew), ('rebind', case_rebind),
          ('expire', case_expire), ('nak-renew', case_nak_renew), ('clock-step', case_clock_step),

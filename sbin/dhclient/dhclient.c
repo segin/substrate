@@ -231,6 +231,13 @@ static int set_ipv4(const char *iface, unsigned long req, uint32_t addr) {
     return rc;
 }
 
+/* DHC-11: can a host be assigned this address?  Not 0, the limited
+ * broadcast, 0/8, loopback 127/8, multicast 224/4 or class E 240/4. */
+static int usable_addr(uint32_t addr) {
+    uint8_t a = ((const uint8_t *)&addr)[0];
+    return addr != 0 && addr != 0xFFFFFFFFu && a != 0 && a != 127 && a < 224;
+}
+
 /* The netmask for an address's class (RFC 1122 3.3.1.1 behaviour), used
  * when the server sends no subnet mask option. */
 static uint32_t classful_mask(uint32_t addr) {
@@ -984,10 +991,18 @@ static int acquire(const char *iface, const uint8_t hw[6], int ifindex,
             while ((t = recv_dhcp(pkts, rxbuf, sizeof(rxbuf), xid, deadline,
                                   &bp, &bootp_len)) != 0) {
                 if (t != DHCP_OFFER) continue;
+                /* DHC-11: an OFFER MUST carry a 'server identifier' (Table
+                 * 3), which the REQUEST must then name (3.1 step 3), and
+                 * must offer an address a host can use.  One without it
+                 * produced a REQUEST naming server 0.0.0.0; a broadcast,
+                 * multicast, loopback or class E 'yiaddr' was installed. */
                 size_t mlen;
-                offered_ip = bp->yiaddr;
+                uint32_t sid = 0;
                 const uint8_t *p = find_opt(bp, bootp_len, DHCP_OPT_SRV_ID, &mlen);
-                if (p && mlen == 4) memcpy(&server_id, p, 4);
+                if (p && mlen == 4) memcpy(&sid, p, 4);
+                if (!sid || !usable_addr(bp->yiaddr)) continue;
+                offered_ip = bp->yiaddr;
+                server_id = sid;
 
                 uint8_t *yi = (uint8_t *)&offered_ip;
                 fprintf(stdout, "dhclient: DHCPOFFER %u.%u.%u.%u from ",
@@ -1032,6 +1047,17 @@ static int acquire(const char *iface, const uint8_t hw[6], int ifindex,
                     break;
                 }
                 if (t != DHCP_ACK) continue;
+                /* DHC-11: only the selected server's ACK, for an address
+                 * a host can use. */
+                {
+                    size_t mlen;
+                    uint32_t sid = 0;
+                    const uint8_t *p = find_opt(bp, bootp_len,
+                                                DHCP_OPT_SRV_ID, &mlen);
+                    if (p && mlen == 4) memcpy(&sid, p, 4);
+                    if ((sid && sid != server_id) || !usable_addr(bp->yiaddr))
+                        continue;
+                }
                 fprintf(stdout, "dhclient: DHCPACK\n");
                 /* DHC-07: RFC 2131 3.1 step 5 -- check the address is
                  * free; if it is taken the client MUST send a DHCPDECLINE
