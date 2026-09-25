@@ -1,0 +1,181 @@
+.TH PING 1 2026-09-25 "Substrate" "User Commands"
+.SH NAME
+ping \- send ICMP and ICMPv6 echo requests to a host
+.SH SYNOPSIS
+.B ping
+.RB [ \-46nqV ]
+.RB [ \-c
+.IR count ]
+.RB [ \-i
+.IR interval ]
+.RB [ \-s
+.IR size ]
+.RB [ \-W
+.IR timeout ]
+.RB [ \-t
+.IR ttl ]
+.I target
+.SH DESCRIPTION
+.B ping
+sends ICMP ECHO_REQUEST packets (ICMPv6 echo requests for IPv6) to
+.I target
+and reports each matching ECHO_REPLY, then prints summary statistics.
+.PP
+The address family is chosen from
+.IR target :
+a string containing a colon is treated as IPv6, anything else as IPv4,
+unless
+.B \-4
+or
+.B \-6
+forces a family.
+An IPv4
+.I target
+may be a dotted-quad address or a host name, which is resolved with
+.BR gethostbyname (3);
+the resolved address is printed first.
+An IPv6
+.I target
+must be a literal address; host names are not resolved for IPv6.
+.PP
+Requests are sent every
+.I interval
+seconds regardless of replies, while the socket is polled for replies
+between sends.
+Each request carries the low 16 bits of the process ID as its
+identifier and a sequence number starting at 1.
+When the payload is at least 8 bytes, its first 8 bytes hold the send
+time, from which the round-trip time is computed; the rest is filled
+with an incrementing byte pattern.
+Replies whose identifier does not match are ignored.
+.PP
+For each reply
+.B ping
+prints the reply size, source address, sequence number, round-trip
+time and, for IPv4, the TTL of the received packet.
+For IPv6 the address printed is the target address, not the source of
+the reply.
+.PP
+.B ping
+stops after
+.I count
+requests have been sent and a further
+.I timeout
+seconds have passed, or when it receives
+.BR SIGINT .
+It then prints the number of packets sent and received, the loss
+percentage, the elapsed time and, if any reply arrived, the minimum,
+average, maximum and standard deviation of the round-trip time.
+.SS Privileges
+The kernel allows
+.B SOCK_RAW
+sockets only to processes with effective user ID 0; others get
+.BR EACCES .
+The root filesystem build therefore installs
+.B ping
+set-user-ID root.
+Immediately after the raw socket is created,
+.B ping
+sets its group and user IDs back to the real IDs; name resolution
+and reply parsing run unprivileged.
+.PP
+On an IPv4 raw socket the kernel delivers the whole IP datagram,
+including the IP header, and builds the outgoing IP header itself.
+On an IPv6 raw socket it delivers only the ICMPv6 message.
+Every raw ICMP socket receives every ICMP packet, which is why
+replies are filtered by identifier.
+.SH OPTIONS
+.TP
+.B \-4
+Use IPv4.
+.TP
+.B \-6
+Use IPv6.
+.TP
+.BI \-c " count"
+Stop after sending
+.I count
+requests.
+A value of 0 or less, or omitting the option, means send until
+interrupted.
+.TP
+.BI \-i " interval"
+Wait
+.I interval
+seconds (a decimal fraction is allowed) between requests.
+The default is 1.
+.TP
+.BI \-s " size"
+Send
+.I size
+bytes of payload after the 8-byte ICMP header.
+The default is 56.
+Requests larger than 1500 bytes including the ICMP header are not
+sent; each attempt is reported as a
+.B sendto
+error.
+With a payload smaller than 8 bytes no timestamp is sent and
+round-trip times are reported as 0.
+.TP
+.BI \-W " timeout"
+After the last of
+.I count
+requests has been sent, wait
+.I timeout
+seconds for replies before stopping.
+The default is 1.
+It has no effect without
+.BR \-c .
+.TP
+.BI \-t " ttl"
+Accepted but ignored; see
+.BR BUGS .
+.TP
+.B \-q
+Quiet: print only the banner and the summary.
+.TP
+.B \-n
+Accepted for compatibility.
+Addresses are always printed numerically.
+.TP
+.B \-V
+Print version information and exit with status 0.
+.TP
+.B \-h
+Print a usage message and exit with status 2.
+.SH EXIT STATUS
+.TP
+.B 0
+At least one reply was received.
+.TP
+.B 1
+No reply was received.
+.TP
+.B 2
+Invalid usage, an unresolvable target, failure to create the raw
+socket, or failure to drop privileges.
+.SH EXAMPLES
+.EX
+$ ping \-c 3 10.0.2.2
+$ ping \-6 \-c 1 ::1
+.EE
+.SH SEE ALSO
+.BR gethostbyname_r (3),
+.BR tcp (7)
+.SH BUGS
+.B \-t
+is parsed but never applied to the socket, so requests are always sent
+with the kernel default TTL (or hop limit) of 64.
+.PP
+The ICMPv6 checksum is left as zero.
+Substrate's own stack answers such requests, but hosts that verify the
+checksum discard them, so IPv6 pings to other systems get no reply.
+.PP
+For IPv4, a
+.B sendto
+failure is reported and
+.B ping
+keeps going; for IPv6 the first failure ends the run.
+.PP
+The numeric arguments are converted without error checking; a
+malformed value is taken as 0.
