@@ -1,0 +1,64 @@
+.TH UMOUNT 8 2026-09-25 "Substrate" "System Administration"
+.SH NAME
+umount \- unmount a filesystem
+.SH SYNOPSIS
+.B umount
+.RB [ \-f ]
+.I dir
+.SH DESCRIPTION
+.B umount
+detaches the filesystem mounted on the directory
+.I dir
+using
+.BR umount (2),
+or
+.B umount2
+when
+.B \-f
+is given.
+Exactly one operand is accepted.
+.PP
+Only the superuser may unmount filesystems.
+A filesystem that is still in use cannot be unmounted without
+.BR \-f ,
+and the root filesystem can only be unmounted with
+.BR \-f .
+.B umount
+does not read
+.I /etc/fstab
+or update
+.IR /etc/mtab .
+.SH OPTIONS
+.TP
+.B \-f
+Force the unmount
+.RB ( MNT_FORCE ),
+detaching the filesystem even if files on it are still open.
+Those open files become unusable.
+.SH EXIT STATUS
+.TP
+.B 0
+The filesystem was unmounted.
+.TP
+.B 1
+An invalid option or wrong number of operands was given, or the
+unmount failed.
+In the latter case a message naming
+.I dir
+and the error is written to standard error.
+.SH EXAMPLES
+Unmount a filesystem:
+.PP
+.EX
+# umount /mnt
+.EE
+.PP
+Force the unmount of a filesystem on a removed USB stick:
+.PP
+.EX
+# umount \-f /mnt/usb
+.EE
+.SH SEE ALSO
+.BR mount (8),
+.BR mount (2),
+.BR umount (2)
