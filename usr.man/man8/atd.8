@@ -1,0 +1,172 @@
+.TH ATD 8 2026-09-25 "Substrate" "System Administration"
+.SH NAME
+atd \- run jobs queued by at and batch
+.SH SYNOPSIS
+.B atd
+.RB [ \-l
+.IR load ]
+.RB [ \-b
+.IR interval ]
+.RB [ \-f | \-d ]
+.SH DESCRIPTION
+.B atd
+runs the jobs that
+.BR at (1)
+and
+.BR batch (1)
+place in the spool directory
+.IR /var/spool/at .
+.PP
+Each queue is a subdirectory named by one letter: the lowercase queues
+.BR a " to " z
+and the uppercase queues
+.BR A " to " Z .
+Queue
+.B b
+and the uppercase queues are batch queues; the others are
+.B at
+queues.
+A job is a regular file in a queue directory whose name consists of letters,
+digits and dots; its modification time is the time it is due.
+.PP
+On each pass
+.B atd
+scans the queues in the order
+.BR a \(en z ,
+then
+.BR A \(en Z .
+In an
+.B at
+queue every job that is due is run.
+In a batch queue at most one due job is run per pass, and only when the
+first number in
+.I /proc/loadavg
+is no greater than the load limit and at least
+.I interval
+seconds have passed since the last batch job ran.
+If
+.I /proc/loadavg
+cannot be read, no batch jobs run.
+If any job ran, another pass starts at once; otherwise
+.B atd
+sleeps
+.I interval
+seconds (1 second if
+.I interval
+is 0).
+.PP
+To run a job,
+.B atd
+moves it into
+.I /var/spool/at/=
+and forks a child, which starts a new session, sets its group and user ID
+to the owner of the job file, sends standard output and standard error to
+.IR /var/spool/at/spool/ job .out ,
+and executes
+.B /bin/sh
+.IR job-file .
+.B atd
+waits for the job to finish, then removes the job file.
+Jobs therefore run one at a time.
+.PP
+By default
+.B atd
+forks, the parent exits 0, and the child calls
+.BR setsid (2)
+and runs in the background.
+It writes no pid file.
+At boot,
+.I /etc/rc.d/30\-atd
+starts it as
+.B "atd \-f"
+in the background, with output to
+.IR /dev/null ,
+and records the pid in
+.IR /var/run/atd.pid .
+.SH OPTIONS
+.TP
+.BI \-l " load"
+Run batch jobs only when the load average is at most
+.IR load ,
+which must be greater than 0.
+The default is 1.5.
+.TP
+.BI \-b " interval"
+Minimum number of seconds between batch jobs, and the time to sleep between
+passes.
+The default is 60.
+A negative value is an error.
+.TP
+.BR \-f ", " \-d
+Stay in the foreground.
+.SH EXIT STATUS
+.B atd
+does not exit while it is running normally.
+.TP
+.B 0
+The parent process after a successful fork.
+.TP
+.B 1
+An invalid option or option value, or the fork or
+.BR setsid (2)
+failed.
+.SH FILES
+.TP
+.IR /var/spool/at/ q /
+Queue
+.IR q .
+.TP
+.I /var/spool/at/=
+Jobs currently running.
+.TP
+.I /var/spool/at/spool/
+Captured job output,
+.IR job .out.
+.TP
+.I /proc/loadavg
+Load average for the batch queues.
+.TP
+.I /etc/rc.d/30\-atd
+Boot script.
+.SH EXAMPLE
+Run batch jobs whenever the load is below 0.8, checking every 30 seconds,
+in the foreground:
+.EX
+# atd \-f \-l 0.8 \-b 30
+.EE
+.SH SEE ALSO
+.BR at (1),
+.BR batch (1),
+.BR init (8)
+.SH BUGS
+An
+.B at
+job can start up to
+.I interval
+seconds (60 by default) after it is due, because that is how long
+.B atd
+sleeps between passes.
+.PP
+Output is never mailed; the
+.I .out
+files are left in
+.I /var/spool/at/spool
+and never removed.
+.PP
+The job's environment, working directory and umask as recorded by
+.BR at (1)
+are not restored; jobs run with umask 0, in
+.BR atd 's
+working directory and environment.
+.PP
+The return values of
+.BR setgid (2)
+and
+.BR setuid (2)
+are not checked, and supplementary groups are not changed.
+The output file is created after the user ID is changed, so if the job's
+owner cannot write to
+.IR /var/spool/at/spool ,
+the output goes wherever
+.BR atd 's
+does.
