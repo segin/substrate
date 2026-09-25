@@ -1,0 +1,108 @@
+.TH PASTE 1 2026-09-25 "Substrate" "User Commands"
+.SH NAME
+paste \- merge corresponding or subsequent lines of files
+.SH SYNOPSIS
+.B paste
+.RB [ \-s ]
+.RB [ \-z ]
+.RB [ \-d
+.IR list ]
+.RI [ file ...]
+.SH DESCRIPTION
+.B paste
+reads the named files and writes merged lines to standard output.
+A
+.I file
+of
+.BR \- ,
+or no
+.I file
+at all, means standard input.
+.PP
+By default (parallel mode) the first line of every file is written on
+one output line, then the second line of every file, and so on, with
+the fields separated by characters from the delimiter list.
+When a file runs out of lines before the others, it contributes an
+empty field, so the delimiters still appear.
+Output stops once every file is exhausted.
+.PP
+With
+.BR \-s
+(serial mode) all lines of each file are joined into a single output
+line instead, one output line per file.
+A file with no lines produces no output line.
+.PP
+The delimiter list is used cyclically: the
+.IR n th
+separator on an output line is the
+.RI ( n
+modulo list length)th character of the list.
+The default list is a single tab.
+.SH OPTIONS
+.TP
+.BR \-d " \fIlist\fR, " \-\-delimiters " \fIlist\fR"
+Use the characters in
+.I list
+as delimiters.
+The escapes
+.B \en
+(newline),
+.B \et
+(tab),
+.B \er
+(carriage return),
+.B \e\e
+(backslash) and
+.B \e0
+(empty delimiter: nothing is written) are recognised.
+A backslash before any other character yields that character.
+At most 256 delimiters are used.
+An empty
+.I list
+is an error.
+.TP
+.BR \-s ", " \-\-serial
+Serial mode, as described above.
+.TP
+.BR \-z ", " \-\-zero\-terminated
+Lines are terminated by NUL bytes instead of newlines, on both input
+and output.
+.TP
+.B \-\-help
+Print a usage line to standard output and exit with status 0.
+.TP
+.B \-\-version
+Print version information and exit with status 0.
+.SH EXIT STATUS
+.TP
+.B 0
+Success.
+.TP
+.B 1
+Invalid option, empty delimiter list, a file could not be opened (no
+output is produced in that case), a read error, memory exhaustion, or
+a write error on standard output.
+.SH EXAMPLES
+Join two files side by side:
+.EX
+$ paste names ages
+.EE
+.PP
+Join all lines of a file with commas:
+.EX
+$ paste \-s \-d , list
+.EE
+.PP
+Print a file in three columns:
+.EX
+$ paste \- \- \- < list
+.EE
+.SH SEE ALSO
+.BR cat (1),
+.BR join (1),
+.BR pr (1),
+.BR tr (1)
+.SH STANDARDS
+POSIX.1-2024, with the
+.B \-z
+option and long options from GNU coreutils.
