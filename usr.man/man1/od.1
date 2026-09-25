@@ -1,0 +1,80 @@
+.TH OD 1 2026-09-25 "Substrate" "User Commands"
+.SH NAME
+od \- dump files as octal bytes
+.SH SYNOPSIS
+.B od
+.RB [ \-\- ]
+.RI [ file ...]
+.SH DESCRIPTION
+.B od
+writes the contents of each
+.I file
+to standard output as a listing of octal byte values.
+If no
+.I file
+is given, or a
+.I file
+is
+.BR \- ,
+standard input is read.
+.PP
+This is a deliberately small subset of the traditional utility: only the
+default format is implemented.
+No output-format, address-radix, skip or count options are supported.
+.PP
+Each output line starts with the byte offset, in octal, padded to seven
+digits, followed by up to 16 bytes, each printed as a space and a
+three-digit octal number.
+The offset runs on across all operands, so several files are dumped as
+if they were one concatenated stream.
+After the last byte a final line holding only the total byte count
+(again as a seven-digit octal offset) is printed.
+Unlike other implementations, repeated lines are never collapsed into
+.BR * .
+.PP
+If the first argument begins with
+.B \-
+and is not
+.B \-
+itself or
+.BR \-\- ,
+.B od
+reports that the option is not supported and exits with status 1
+without producing any output.
+Only the first argument is checked this way; later arguments are always
+treated as file names.
+.SH EXIT STATUS
+.TP
+.B 0
+All input was dumped.
+.TP
+.B 1
+An option was given, a file could not be opened, or a read error
+occurred.
+Files that cannot be opened are reported and skipped; the remaining
+operands are still dumped.
+.SH EXAMPLE
+.EX
+$ printf \(aqAB\en\(aq | od
+0000000 101 102 012
+0000003
+.EE
+.SH SEE ALSO
+.BR cat (1),
+.BR sum (1),
+.BR wc (1)
+.SH BUGS
+None of the POSIX options
+.RB ( \-A ,
+.BR \-j ,
+.BR \-N ,
+.BR \-t ,
+.BR \-v )
+or the traditional format letters
+.RB ( \-b ,
+.BR \-c ,
+.BR \-d ,
+.BR \-o ,
+.BR \-s ,
+.BR \-x )
+are implemented.
