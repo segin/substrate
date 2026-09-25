@@ -1,0 +1,295 @@
+.TH SDM 8 2026-09-25 "Substrate" "System Administration"
+.SH NAME
+sdm, sgreet \- Substrate display manager and graphical login greeter
+.SH SYNOPSIS
+.B /usr/sbin/sdm
+.PP
+.B DISPLAY=:0 /usr/sbin/sgreet
+.SH DESCRIPTION
+.B sdm
+provides a graphical login on the framebuffer console.
+It is a shell script that loops forever:
+.IP 1. 3
+remove
+.I /tmp/.X0\-lock
+and
+.I /tmp/.X11\-unix/X0
+and create
+.IR /tmp/.X11\-unix ;
+.IP 2. 3
+start the X server in the background as
+.B "Xfbdev \-ac \-retro \-noreset \-dumbSched vt1 :0"
+with its output sent to
+.IR /var/log/xlog.txt ;
+.IP 3. 3
+run
+.B sgreet
+in the foreground with
+.B DISPLAY
+set to
+.BR :0 ;
+.IP 4. 3
+when
+.B sgreet
+exits, kill the X server, wait for it, pause one second and start over.
+.PP
+.B sdm
+takes no arguments and does not put itself in the background.
+It is started at boot by
+.IR /etc/rc.d/60-sdm ,
+which runs it in the background with output to
+.IR /var/log/sdm.log ,
+records its pid in
+.I /var/run/sdm.pid
+and does nothing if
+.IR /usr/sbin/sdm ,
+.I /usr/sbin/sgreet
+or
+.I /usr/bin/Xfbdev
+is missing.
+.SS The greeter
+.B sgreet
+is an Xlib client that runs as root.
+It connects to
+.B $DISPLAY
+(default
+.BR :0 ),
+retrying for about 10 seconds while the server starts, and shows a
+centred window with a
+.IB host " login:"
+field, a
+.B Password:
+field (echoed as asterisks), the selected session, and
+.B Reboot
+and
+.B "Power off"
+buttons.
+It grabs the keyboard, since no window manager is running.
+The host name comes from
+.BR gethostname (2),
+or from
+.I /etc/hostname
+if that returns an empty name,
+.B localhost
+or
+.BR (none) .
+It uses the font
+.BR 9x15 ,
+falling back to
+.BR fixed .
+.PP
+Keys:
+.TP
+.B Return
+In the user field, move to the password field; in the password field,
+try to log in.
+.TP
+.B Tab
+Move from the user field to the password field.
+.TP
+.BR BackSpace ", " Delete
+Delete the last character of the current field.
+.TP
+.B Escape
+Clear both fields.
+.TP
+.B F1
+Select the next session from
+.IR /etc/sdm/sessions .
+.PP
+Only printable ASCII characters are accepted; each field holds up to 127.
+.PP
+The password is checked with
+.BR crypt (3)
+against the user's entry in
+.IR /etc/shadow ,
+or, if there is none there, against the password field of
+.I /etc/passwd
+unless it begins with
+.BR x .
+An empty stored password accepts any password; a stored password beginning
+with
+.B *
+or
+.B !
+is locked.
+On failure the fields are cleared and
+.B "Login incorrect"
+is shown.
+.PP
+On success
+.B sgreet
+closes its display connection and forks.
+The child sets its group, supplementary groups and user ID to the user's,
+sets
+.BR HOME ,
+.B SHELL
+(default
+.IR /bin/sh ),
+.BR USER ,
+.BR LOGNAME ,
+.BR PATH ,
+.BR DISPLAY ,
+.B TERM=xterm
+and
+.BR LANG=en_US.UTF\-8 ,
+sets
+.B SDM_SESSION
+to the selected session's command (or unsets it), changes to the home
+directory (or
+.IR / ),
+calls
+.BR setsid (2)
+and runs
+.BR "/bin/sh /etc/X11/Xsession" ,
+or
+.I /usr/bin/xterm
+if that cannot be executed.
+The parent waits for the session to end and exits 0, which makes
+.B sdm
+restart the X server and the greeter.
+.PP
+The
+.B Reboot
+and
+.B "Power off"
+buttons send
+.B SIGUSR2
+or
+.B SIGUSR1
+to
+.BR init (8),
+which shuts the system down cleanly; if the signal cannot be sent,
+.B sgreet
+calls
+.BR reboot (2)
+directly.
+No password is needed to use them.
+.SS Sessions
+.I /etc/sdm/sessions
+lists the sessions offered, one per line as
+.IP
+.IB label " = " command
+.PP
+Blank lines and lines beginning with
+.B #
+are ignored, as are lines without
+.B =
+or with an empty label or command.
+At most 16 sessions are read; the first is selected initially.
+Labels are truncated to 63 characters and commands to 255.
+If the file is missing or has no valid lines, a single session named
+.B Default
+with an empty command is offered.
+.PP
+.I /etc/X11/Xsession
+runs as the user.
+If
+.I ~/.xsession
+is executable, it is executed instead of everything else.
+Otherwise the script starts
+.B "xterm \-fn 9x15"
+in the background (output to
+.IR /var/log/xterm.txt )
+and executes
+.B $SDM_SESSION
+(default
+.BR matwm2 )
+with output to
+.IR /var/log/xsession.txt .
+The session ends when that command exits.
+.SH EXIT STATUS
+.B sdm
+runs until it receives
+.B SIGTERM
+or
+.BR SIGINT ,
+then exits 0.
+.PP
+.B sgreet
+exits 0 after a session ends, and 1 if it cannot open the display or
+load a font.
+.SH SIGNALS
+.TP
+.BR SIGTERM ", " SIGINT
+.B sdm
+kills the X server it started and exits 0.
+.SH ENVIRONMENT
+.TP
+.B DISPLAY
+Display
+.B sgreet
+connects to; default
+.BR :0 .
+.TP
+.B SDM_SESSION
+Set by
+.B sgreet
+for the session; the command
+.I /etc/X11/Xsession
+executes.
+.SH FILES
+.TP
+.I /usr/sbin/sdm
+The supervisor script.
+.TP
+.I /usr/sbin/sgreet
+The greeter.
+.TP
+.I /etc/sdm/sessions
+Session list.
+.TP
+.I /etc/X11/Xsession
+Session start script.
+.TP
+.I /etc/X11/starttde\-substrate
+Session script for the Trinity desktop, listed in the default sessions file.
+.TP
+.I ~/.xsession
+Per-user session script, used if executable.
+.TP
+.IR /etc/passwd ", " /etc/shadow
+Account and password data.
+.TP
+.I /etc/rc.d/60\-sdm
+Boot script.
+.TP
+.IR /var/log/xlog.txt ", " /var/log/sdm.log
+X server and
+.B sdm
+output.
+.SH EXAMPLE
+A sessions file offering twm and an xterm-only session:
+.EX
+twm   = twm
+xterm = xterm \-fn 9x15
+.EE
+.SH SEE ALSO
+.BR login (1),
+.BR init (8),
+.BR reboot (8),
+.BR poweroff (8),
+.BR getty (8),
+.BR crypt (3)
+.SH BUGS
+The X server runs with access control disabled
+.RB ( \-ac ),
+so any client able to reach display :0 can connect to it.
+.PP
+.BR init (8)
+always runs a getty on
+.IR /dev/tty1 ,
+which shares the console with the X server.
+.PP
+No utmp or wtmp records are written for graphical logins.
+.PP
+.B sgreet
+takes a single character per key press and cannot enter non-ASCII text.
+.PP
+Because
+.B sdm
+waits for
+.B sgreet
+in the foreground, the shell delivers
+.B SIGTERM
+to it only after the greeter or session exits.
