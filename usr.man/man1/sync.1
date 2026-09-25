@@ -1,0 +1,79 @@
+.TH SYNC 1 2026-09-25 "Substrate" "User Commands"
+.SH NAME
+sync \- flush file system buffers
+.SH SYNOPSIS
+.B sync
+.RB [ \-d | \-\-data ]
+.RB [ \-f | \-\-file\-system ]
+.RB [ \-\- ]
+.RI [ file ...]
+.SH DESCRIPTION
+With no
+.I file
+operands,
+.B sync
+calls
+.BR sync (2)
+to write all modified buffered data to storage.
+.PP
+With operands, each
+.I file
+is opened (read-only, or write-only if that fails, in both cases with
+.BR O_NONBLOCK )
+and flushed individually with
+.BR fsync (2),
+or
+.BR fdatasync (2)
+when
+.B \-d
+is given.
+A file that cannot be opened or flushed is reported and the remaining
+operands are still processed.
+.PP
+Option processing stops at the first argument that does not begin with
+.BR \- ,
+at a lone
+.BR \- ,
+or after
+.BR \-\- .
+.SH OPTIONS
+.TP
+.BR \-d ", " \-\-data
+Use
+.BR fdatasync (2)
+instead of
+.BR fsync (2).
+.TP
+.BR \-f ", " \-\-file\-system
+Accepted, but Substrate has no
+.BR syncfs (2),
+so each operand is simply flushed with
+.BR fsync (2)
+rather than flushing its whole file system.
+.TP
+.B \-\-help
+Print a usage line and exit.
+.TP
+.B \-\-version
+Print version information and exit.
+.PP
+If
+.B \-d
+or
+.B \-f
+is given without operands, a warning is printed and a global
+.BR sync (2)
+is performed.
+.SH EXIT STATUS
+.TP
+.B 0
+Success.
+.TP
+.B 1
+An invalid option was given, or at least one
+.I file
+could not be opened or flushed.
+.SH SEE ALSO
+.BR fsync (2),
+.BR fdatasync (2),
+.BR sync (2)
