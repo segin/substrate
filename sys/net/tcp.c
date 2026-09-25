@@ -2643,6 +2643,11 @@ static ssize_t tcp_send_body(tcp_pcb_t *p, const void *buf, size_t len, int nonb
             case TCP_TIME_WAIT:
                 return -EPIPE;
             default:
+                /* TCP-API-24: this includes LISTEN.  RFC 793 3.9 SEND in
+                 * LISTEN would turn the passive open into an active one
+                 * (pick a foreign socket, send a SYN); POSIX has no such
+                 * operation and write() on a listening socket fails
+                 * ENOTCONN, which supersedes the RFC here. */
                 return p->so_error ? -EPIPE : -ENOTCONN;
             }
         }
