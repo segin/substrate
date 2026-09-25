@@ -10,6 +10,13 @@ exactly as the case needs.
                   offered address, and the guest then answers ARP for it.
     ack-config    DHC-06: the netmask and router come from the DHCPACK --
                   here the OFFER carries neither.
+    probe-announce DHC-07: before using the address the client ARP-probes it
+                  (sender IP 0), and once bound announces it with a
+                  gratuitous ARP.
+    declined      DHC-07: when another host answers the probe, the client
+                  sends a DHCPDECLINE (requested address and server
+                  identifier, ciaddr 0, no other options -- Table 5), does
+                  not bind, and restarts no sooner than 10 s later.
     renew         DHC-02: with a 20 s lease the client renews at T1 (10 s
                   +-5%) by unicast to the server -- ciaddr set, no server
                   identifier or requested address (Table 4) -- takes the
@@ -172,6 +179,84 @@ def arp_answers(w, ip, timeout=3):
                     socket.inet_ntoa(fr[28:32]) == ip:
                 return True
     return False
+
+
+OTHER_MAC = bytes.fromhex('020000000099')
+
+
+def arp_frames(w):
+    """Guest ARP frames seen so far: (op, sha, spa, tpa, eth_dst)."""
+    out = []
+    for dst, et, fr in w.frames:
+        if et == 0x0806 and len(fr) >= 42:
+            out.append((struct.unpack('!H', fr[20:22])[0], fr[22:28],
+                        socket.inet_ntoa(fr[28:32]),
+                        socket.inet_ntoa(fr[38:42]), dst))
+    return out
+
+
+def wait_arp(w, pred, timeout):
+    end = time.time() + timeout
+    while time.time() < end:
+        for a in arp_frames(w):
+            if pred(a):
+                return a
+        w.pump(0.05)
+    return None
+
+
+def is_probe(a):
+    op, sha, spa, tpa, dst = a
+    return op == 1 and sha == GUEST_MAC and spa == '0.0.0.0' and tpa == LEASED
+
+
+def case_probe_announce():
+    with boot() as w:
+        s = Server(w)
+        r, d, err = offer_and_request(s)
+        if err:
+            return err, w
+        w.frames.clear()
+        s.reply(r, ACK, opts=s.std_opts())
+        if not wait_arp(w, is_probe, 5):
+            return 'no ARP probe (sender 0.0.0.0) for the leased address', w
+        if not w.wait_serial('dhclient: bound', 10):
+            return 'did not bind after an unanswered probe', w
+        ann = wait_arp(w, lambda a: a[0] == 2 and a[2] == LEASED and
+                       a[3] == LEASED and a[4] == BCAST_MAC, 3)
+        if not ann:
+            return 'no gratuitous ARP announcing the new address', w
+        return None, w
+
+
+def case_declined():
+    with boot() as w:
+        s = Server(w)
+        r, d, err = offer_and_request(s)
+        if err:
+            return err, w
+        w.frames.clear()
+        s.reply(r, ACK, opts=s.std_opts())
+        if not wait_arp(w, is_probe, 5):
+            return 'no ARP probe for the leased address', w
+        # another host already has it
+        w.send_arp(2, OTHER_MAC, LEASED, GUEST_MAC, '0.0.0.0', eth_dst=BCAST_MAC)
+        dec = s.expect(DECLINE, 5)
+        if not dec:
+            return 'no DHCPDECLINE for an address that answered ARP', w
+        if (dec.ip_opt(50) != LEASED or dec.ip_opt(54) != PEER_IP or
+                dec.ciaddr != '0.0.0.0' or 55 in dec.opts or 51 in dec.opts):
+            return ('DHCPDECLINE fields are wrong (Table 5): requested %s '
+                    'server %s ciaddr %s opts %s' % (dec.ip_opt(50),
+                    dec.ip_opt(54), dec.ciaddr, sorted(dec.opts))), w
+        if 'dhclient: bound' in w.serial():
+            return 'bound the address anyway', w
+        d2 = s.expect(DISCOVER, 15)
+        if not d2:
+            return 'no restart after declining', w
+        if d2.t - dec.t < 9.5:
+            return 'restarted %.1f s after declining, want >= 10' % (d2.t - dec.t), w
+        return None, w
 
 
 def case_bound():
@@ -462,6 +547,7 @@ def case_nak_renew():
 
 
 CASES = (('bound', case_bound), ('ack-config', case_ack_config),
+         ('probe-announce', case_probe_announce), ('declined', case_declined),
          ('renew', case_renew), ('rebind', case_rebind),
          ('expire', case_expire), ('nak-renew', case_nak_renew), ('clock-step', case_clock_step),
          ('backoff', case_backoff), ('request-retx', case_request_retx),

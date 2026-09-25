@@ -75,6 +75,7 @@ struct sockaddr_ll {
 #define DHCP_DISCOVER 1
 #define DHCP_OFFER    2
 #define DHCP_REQUEST  3
+#define DHCP_DECLINE  4
 #define DHCP_ACK      5
 #define DHCP_NAK      6
 
@@ -283,7 +284,8 @@ static size_t build_dhcp_packet(uint8_t *out,
     bp->xid   = xid;
     /* BROADCAST flag until configured; with ciaddr set the server unicasts
      * the reply to that address (RFC 2131 4.1). */
-    bp->flags = ciaddr ? 0 : __builtin_bswap16(0x8000);
+    bp->flags = (ciaddr || msg_type == DHCP_DECLINE)
+                    ? 0 : __builtin_bswap16(0x8000);
     bp->ciaddr = ciaddr;
     memcpy(bp->chaddr, hw, 6);
     bp->magic = __builtin_bswap32(DHCP_MAGIC);
@@ -299,13 +301,19 @@ static size_t build_dhcp_packet(uint8_t *out,
         *op++ = DHCP_OPT_SRV_ID; *op++ = 4;
         memcpy(op, &server_id, 4); op += 4;
     }
-    *op++ = DHCP_OPT_PARAMLST; *op++ = 6;
-    *op++ = DHCP_OPT_SUBNET;
-    *op++ = DHCP_OPT_ROUTER;
-    *op++ = DHCP_OPT_DNS;
-    *op++ = DHCP_OPT_DOMAIN;       /* RFC 2132 — domain name */
-    *op++ = DHCP_OPT_SEARCH;       /* RFC 3397 — search list */
-    *op++ = DHCP_OPT_LEASE;
+    /* RFC 2131 Table 5: a DHCPDECLINE carries no parameter request list
+     * and no other options ("All others: MUST NOT") beyond the requested
+     * address, server identifier and client identifier. */
+    int decline = (msg_type == DHCP_DECLINE);
+    if (!decline) {
+        *op++ = DHCP_OPT_PARAMLST; *op++ = 6;
+        *op++ = DHCP_OPT_SUBNET;
+        *op++ = DHCP_OPT_ROUTER;
+        *op++ = DHCP_OPT_DNS;
+        *op++ = DHCP_OPT_DOMAIN;       /* RFC 2132 — domain name */
+        *op++ = DHCP_OPT_SEARCH;       /* RFC 3397 — search list */
+        *op++ = DHCP_OPT_LEASE;
+    }
 
     /*
      * Include the system hostname both as RFC 2132 option 12
@@ -321,10 +329,12 @@ static size_t build_dhcp_packet(uint8_t *out,
         size_t hn_len = read_system_hostname(hn, sizeof(hn));
         if (hn_len > 0) {
             /* Option 12: Host Name */
-            *op++ = DHCP_OPT_HOSTNAME;
-            *op++ = (uint8_t)hn_len;
-            memcpy(op, hn, hn_len);
-            op += hn_len;
+            if (!decline) {
+                *op++ = DHCP_OPT_HOSTNAME;
+                *op++ = (uint8_t)hn_len;
+                memcpy(op, hn, hn_len);
+                op += hn_len;
+            }
 
             /* Option 61: Client Identifier = type(0) + hostname */
             *op++ = DHCP_OPT_CLIENT_ID;
@@ -723,6 +733,68 @@ static int extend(const char *iface, const uint8_t hw[6], struct lease *L,
     return 0;
 }
 
+/* ---- duplicate-address check (DHC-07) ---- */
+
+#define ETH_P_ARP        0x0806
+#define ARP_FRAME_LEN    42
+#define ARP_PROBES       2        /* probes sent, ARP_PROBE_GAP apart */
+#define ARP_PROBE_GAP    0.5
+#define ARP_PROBE_LISTEN 1.0      /* listening time from the first probe */
+#define DECLINE_WAIT     10       /* 3.1 step 5: at least 10 s, then INIT */
+
+/* An ARP request (op 1) or reply (op 2) from `spa`, asking about / telling
+ * of `tpa`, broadcast. */
+static void send_arp(int pkts, const struct sockaddr_ll *sll,
+                     const uint8_t hw[6], uint16_t op, uint32_t spa,
+                     const uint8_t tha[6], uint32_t tpa) {
+    uint8_t f[ARP_FRAME_LEN];
+    memset(f, 0xff, 6);                             /* broadcast */
+    memcpy(f + 6, hw, 6);
+    f[12] = 0x08; f[13] = 0x06;
+    f[14] = 0; f[15] = 1;                           /* Ethernet */
+    f[16] = 0x08; f[17] = 0x00;                     /* IPv4 */
+    f[18] = 6; f[19] = 4;
+    f[20] = 0; f[21] = (uint8_t)op;
+    memcpy(f + 22, hw, 6);
+    memcpy(f + 28, &spa, 4);
+    memcpy(f + 32, tha, 6);
+    memcpy(f + 38, &tpa, 4);
+    sendto(pkts, f, sizeof(f), 0, (const struct sockaddr *)sll, sizeof(*sll));
+}
+
+/*
+ * RFC 2131 3.1 step 5 / 4.4.1: before using the address, ARP for it with
+ * sender IP 0 (the RFC 5227 probe form, which confuses no ARP cache).  It
+ * is in use if another host answers for it, or is itself probing for it.
+ * Our own frames, and the kernel answering for an address it already has,
+ * carry our MAC and are not a conflict.
+ */
+static int arp_in_use(int pkts, const struct sockaddr_ll *sll,
+                      const uint8_t hw[6], uint32_t ip) {
+    static const uint8_t zero[6];
+    uint8_t buf[128];
+    double start = now_sec(), next = start;
+    int sent = 0;
+    while (now_sec() < start + ARP_PROBE_LISTEN) {
+        if (sent < ARP_PROBES && now_sec() >= next) {
+            send_arp(pkts, sll, hw, 1, 0, zero, ip);
+            sent++;
+            next += ARP_PROBE_GAP;
+        }
+        usleep(5000);
+        ssize_t r = recv(pkts, buf, sizeof(buf), 0);
+        if (r < ARP_FRAME_LEN) continue;
+        if (buf[12] != 0x08 || buf[13] != 0x06) continue;
+        if (memcmp(buf + 22, hw, 6) == 0) continue;     /* ours */
+        uint32_t spa, tpa;
+        memcpy(&spa, buf + 28, 4);
+        memcpy(&tpa, buf + 38, 4);
+        if (spa == ip) return 1;                    /* someone has it */
+        if (spa == 0 && tpa == ip) return 1;        /* someone wants it */
+    }
+    return 0;
+}
+
 /* ---- INIT through BOUND ---- */
 
 /* Acquire a lease from scratch (INIT -> SELECTING -> REQUESTING -> BOUND)
@@ -826,8 +898,9 @@ static int acquire(const char *iface, const uint8_t hw[6], int ifindex,
         }
 
         /* ---- REQUEST, retransmitted until ACK or NAK ---- */
-        int naked = 0;
-        for (int rtry = 0; rtry < DHCP_REQUEST_TRIES && !naked; rtry++) {
+        int naked = 0, declined = 0;
+        for (int rtry = 0; rtry < DHCP_REQUEST_TRIES && !naked && !declined;
+             rtry++) {
             size_t n = build_dhcp_packet(pkt, hw, xid, DHCP_REQUEST, 0,
                                          offered_ip, server_id);
             double sent_at = now_sec();
@@ -852,14 +925,38 @@ static int acquire(const char *iface, const uint8_t hw[6], int ifindex,
                 }
                 if (t != DHCP_ACK) continue;
                 fprintf(stdout, "dhclient: DHCPACK\n");
-                close(pkts);
+                /* DHC-07: RFC 2131 3.1 step 5 -- check the address is
+                 * free; if it is taken the client MUST send a DHCPDECLINE
+                 * and restart, after waiting at least ten seconds.  The
+                 * address used to be installed unchecked, so a duplicate
+                 * went unnoticed and the server kept handing it out. */
+                uint32_t yi = bp->yiaddr;
+                if (arp_in_use(pkts, &sll, hw, yi)) {
+                    uint8_t *y = (uint8_t *)&yi;
+                    fprintf(stdout, "dhclient: %u.%u.%u.%u is already in use; "
+                            "DHCPDECLINE\n", y[0], y[1], y[2], y[3]);
+                    uint32_t dxid = ((uint32_t)rand() << 16) ^ (uint32_t)rand();
+                    n = build_dhcp_packet(pkt, hw, dxid, DHCP_DECLINE, 0,
+                                          yi, server_id);
+                    sendto(pkts, pkt, n, 0, (struct sockaddr *)&sll,
+                           sizeof(sll));
+                    declined = 1;
+                    break;
+                }
                 memset(L, 0, sizeof(*L));
                 L->server = server_id;
                 lease_from_ack(bp, bootp_len, sent_at, L);
-                return install_lease(iface, bp, bootp_len, "bound");
+                int rc = install_lease(iface, bp, bootp_len, "bound");
+                /* 4.4.1: announce the new address, clearing stale ARP
+                 * cache entries on the subnet. */
+                send_arp(pkts, &sll, hw, 2, yi, hw, yi);
+                close(pkts);
+                return rc;
             }
         }
-        if (!naked)
+        if (declined)
+            sleep(DECLINE_WAIT);
+        else if (!naked)
             fprintf(stderr, "dhclient: no DHCPACK after %d DHCPREQUESTs; "
                     "initialization failed\n", DHCP_REQUEST_TRIES);
     }
