@@ -1,0 +1,164 @@
+.TH ECHO 1 2026-09-25 "Substrate" "User Commands"
+.SH NAME
+echo \- write arguments to standard output
+.SH SYNOPSIS
+.B echo
+.RB [ \-neE ]
+.RI [ string " ...]"
+.br
+.B echo
+.BR \-\-help | \-\-version
+.SH DESCRIPTION
+.B echo
+writes its
+.I string
+operands to standard output, separated by single spaces and followed
+by a newline.
+.PP
+Leading arguments that consist of
+.B \-
+followed only by the letters
+.BR n ,
+.BR e ,
+and
+.B E
+are taken as options; they may be combined, as in
+.BR \-ne .
+Option processing stops at the first other argument, which is printed
+together with everything after it.
+There is no
+.B \-\-
+end-of-options marker;
+.B \-\-
+is printed like any other string.
+.SS Escape sequences
+With
+.BR \-e ,
+the following backslash sequences are interpreted:
+.TP
+.B \e\e
+backslash
+.TP
+.B \ea
+alert (BEL)
+.TP
+.B \eb
+backspace
+.TP
+.B \ec
+produce no further output: the rest of the argument, any further
+arguments, and the trailing newline are suppressed
+.TP
+.BR \ee ", " \eE
+escape (ESC, 0x1B)
+.TP
+.B \ef
+form feed
+.TP
+.B \en
+newline
+.TP
+.B \er
+carriage return
+.TP
+.B \et
+horizontal tab
+.TP
+.B \ev
+vertical tab
+.TP
+.BI \e0 nnn
+the byte with octal value
+.I nnn
+(zero to three octal digits)
+.TP
+.BI \ex hh
+the byte with hexadecimal value
+.I hh
+(one or two hex digits)
+.TP
+.BI \eu hhhh
+the Unicode character U+\fIhhhh\fP, written as UTF-8 (exactly four hex
+digits)
+.TP
+.BI \eU hhhhhhhh
+the Unicode character U+\fIhhhhhhhh\fP, written as UTF-8 (exactly
+eight hex digits)
+.PP
+Any other backslash sequence, a
+.B \ex
+with no hex digit, or a
+.B \eu
+or
+.B \eU
+with too few digits or naming a surrogate or a value above U+10FFFF,
+is written unchanged.
+A backslash at the end of an argument is written as is.
+.SH OPTIONS
+.TP
+.B \-n
+Do not write the trailing newline.
+.TP
+.B \-e
+Interpret backslash escape sequences.
+.TP
+.B \-E
+Do not interpret backslash escape sequences (the default).
+When both
+.B \-e
+and
+.B \-E
+are given, the last one wins.
+.TP
+.B \-\-help
+Print a usage summary and exit.
+.TP
+.B \-\-version
+Print version information and exit.
+.SH EXIT STATUS
+.TP
+.B 0
+Success.
+.TP
+.B 1
+A write to standard output failed.
+A write failing with
+.B EPIPE
+exits with status 1 without printing a diagnostic.
+.SH ENVIRONMENT
+.TP
+.B POSIXLY_CORRECT
+If set, only
+.B \-n
+is recognised as an option (and may be repeated);
+.BR \-e ,
+.BR \-E ,
+.BR \-\-help ,
+and
+.B \-\-version
+are printed as ordinary strings, and escape sequences are not
+interpreted.
+.SH EXAMPLES
+Print a line without a trailing newline:
+.PP
+.EX
+$ echo \-n "prompt> "
+.EE
+.PP
+Print a tab-separated line:
+.PP
+.EX
+$ echo \-e "a\etb\etc"
+.EE
+.SH SEE ALSO
+.BR sh (1),
+.BR printf (3)
+.SH STANDARDS
+POSIX.1-2024 leaves
+.B \-n
+and backslashes implementation-defined.
+The
+.B \-e
+and
+.B \-E
+options and the escape set follow GNU coreutils.
