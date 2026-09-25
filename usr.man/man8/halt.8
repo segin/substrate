@@ -1,0 +1,121 @@
+.TH HALT 8 2026-09-25 "Substrate" "System Administration"
+.SH NAME
+halt \- stop the system
+.SH SYNOPSIS
+.B halt
+.RB [ \-f ]
+.RB [ \-p | \-r ]
+.SH DESCRIPTION
+By default
+.B halt
+asks
+.BR init
+(process 1) to shut the system down by sending it
+.BR SIGTERM .
+.B halt
+returns as soon as the signal has been delivered; it does not wait for
+the shutdown to finish.
+.PP
+On receipt of the signal init terminates login sessions, runs
+.BR "/etc/rc stop" ,
+sends
+.B SIGHUP
+and
+.B SIGTERM
+to every remaining process, waits up to five seconds, sends
+.BR SIGKILL ,
+writes a shutdown record to
+.IR /var/log/wtmp ,
+calls
+.BR sync (2),
+and finally calls
+.BR reboot (2)
+with
+.BR RB_HALT_SYSTEM .
+.PP
+If signalling init fails,
+.B halt
+prints a warning and falls back to calling
+.BR reboot (2)
+itself.
+.PP
+Both paths require an effective user ID of 0.
+.SH OPTIONS
+.TP
+.B \-f
+Do not signal init; call
+.BR reboot (2)
+directly.
+Processes are not terminated and
+.B /etc/rc stop
+is not run, although the kernel still unmounts all file systems
+before the machine goes down.
+.TP
+.B \-p
+Power off instead of halting: signal init with
+.B SIGUSR1
+or, with
+.BR \-f ,
+call
+.BR reboot (2)
+with
+.BR RB_POWER_OFF .
+Equivalent to
+.BR poweroff (8).
+.TP
+.B \-r
+Reboot instead of halting: signal init with
+.B SIGUSR2
+or, with
+.BR \-f ,
+call
+.BR reboot (2)
+with
+.BR RB_AUTOBOOT .
+Equivalent to
+.BR reboot (8).
+.PP
+If both
+.B \-p
+and
+.B \-r
+are given, the last one wins.
+Each option must be given as a separate argument; combined forms
+such as
+.B \-fp
+are rejected.
+.SH EXIT STATUS
+.TP
+.B 0
+Init was signalled, or
+.BR reboot (2)
+returned without error.
+.TP
+.B 1
+.BR reboot (2)
+failed (for example with
+.B EPERM
+when not run as root).
+.TP
+.B 2
+An unrecognized argument was given; a usage message is printed.
+.SH FILES
+.TP
+.I /etc/rc
+Run by init with the argument
+.B stop
+during an orderly shutdown.
+.SH SEE ALSO
+.BR kill (2),
+.BR reboot (2),
+.BR sync (2),
+.BR poweroff (8),
+.BR reboot (8)
+.SH BUGS
+The kernel does not implement a true halt:
+.B RB_HALT_SYSTEM
+is handled exactly like
+.BR RB_AUTOBOOT ,
+so
+.B halt
+resets the machine instead of stopping it.
