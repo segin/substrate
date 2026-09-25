@@ -252,7 +252,10 @@ static int vnet_xmit(netdev_t *dev, const void *frame, size_t len) {
     uint32_t in_flight = (uint32_t)(uint16_t)(q->avail->idx - q->last_used_idx);
     if (in_flight >= (uint32_t)q->n_bufs) {
         uint32_t spins = 0;
-        uint32_t limit = intr_enabled() ? 2000000u : 10000u;
+        /* The caller's IF, saved by the _irq lock: intr_enabled() here
+         * is always false, which pinned the wait at the short bound and
+         * dropped frames whenever QEMU was slow to drain the ring. */
+        uint32_t limit = (txf & 0x200ul) ? 2000000u : 10000u;
         while ((uint16_t)(q->avail->idx - q->last_used_idx) >=
                (uint16_t)q->n_bufs) {
             if (q->last_used_idx != q->used->idx) {

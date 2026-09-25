@@ -206,8 +206,10 @@ static int rtl_xmit(netdev_t *dev, const void *frame, size_t len) {
         /* RTL-06: this poll can run inside rtl_irq with IF=0, where seconds
          * of spinning freeze the machine.  Bound it much more tightly when
          * we cannot afford to wait, and just drop the frame -- the upper
-         * layer retransmits. */
-        uint32_t limit = intr_enabled() ? 2000000u : 10000u;
+         * layer retransmits.  The caller's IF is the one saved in txf:
+         * intr_enabled() inside the _irq lock is always false, so the
+         * long bound was never used. */
+        uint32_t limit = (txf & 0x200ul) ? 2000000u : 10000u;
         uint32_t spins = 0;
         while (!(inl(rtl.io_base + R_TSD0 + slot * 4) & TSD_OWN)) {
             if (++spins > limit) {
