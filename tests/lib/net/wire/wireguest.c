@@ -71,6 +71,7 @@
  *   catchpipe    install a SIGPIPE counter (so a SIGPIPE does not kill init)
  *   sigpipe      report how many SIGPIPEs have arrived
  *   sendns:TEXT  send(TEXT, MSG_NOSIGNAL)
+ *   senddw:TEXT  send(TEXT, MSG_DONTWAIT) on the (blocking) socket
  *   recvoob      recv(MSG_OOB) into a 16-octet buffer, reporting the octets
  *   recvmsgoob   the same through recvmsg(), reporting msg_flags too
  *   sleep:N      sleep N seconds
@@ -174,6 +175,9 @@ static int do_actions(int fd, int argc, char **argv) {
         } else if (strncmp(a, "sendns:", 7) == 0) {
             ssize_t n = send(fd, a + 7, strlen(a + 7), MSG_NOSIGNAL);
             say("sendns %s n=%ld", n < 0 ? strerror(errno) : "ok", (long)n);
+        } else if (strncmp(a, "senddw:", 7) == 0) {
+            ssize_t n = send(fd, a + 7, strlen(a + 7), MSG_DONTWAIT);
+            say("senddw %s n=%ld", n < 0 ? strerror(errno) : "ok", (long)n);
         } else if (strcmp(a, "linger0") == 0) {
             struct linger lg = { 1, 0 }, back = { -1, -1 };
             socklen_t bl = sizeof back;

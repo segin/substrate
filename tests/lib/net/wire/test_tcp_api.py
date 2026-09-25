@@ -50,6 +50,9 @@ it guards.
                    open (SO_ERROR ECONNABORTED; the late SYN|ACK draws a
                    RST, no connection forms); in SYN-RECEIVED (reached by
                    simultaneous open) it sends the FIN.
+    send-dontwait  TCP-API-16: send(MSG_DONTWAIT) on a blocking socket facing
+                   a closed window returns (the probe octet, then EAGAIN)
+                   instead of blocking.
 
 Run from the repo root after building sys/ and wireguest:
     python3 tests/lib/net/wire/test_tcp_api.py [case...]
@@ -419,6 +422,25 @@ def case_shut_connecting():
     return None, w
 
 
+def case_send_dontwait():
+    with Wire.boot('connect 10.0.2.2 %d senddw:ab senddw:cd sleep:60' % PORT) as w:
+        syn = w.expect(lambda s: s.flags & SYN and s.dport == PORT, 90, 'SYN')
+        if not syn:
+            return 'no SYN', w
+        w.send(Seg(PORT, syn.sport, PISS, syn.seq + 1, SYN | ACK, win=0))
+        if not w.wait_serial('guest: senddw', 10):
+            return 'the first send(MSG_DONTWAIT) never returned', w
+        # Each probe is answered with the window still shut.
+        w.expect(lambda s: s.data, 3, 'probe')
+        w.send(Seg(PORT, syn.sport, PISS + 1, syn.seq + 1, ACK, win=0))
+        s = line(w, 'senddw', timeout=5)
+        if len(s) < 2:
+            return 'send(MSG_DONTWAIT) blocked on a closed window: %s' % s, w
+        if 'ok n=1' not in s[0] or 'temporarily unavailable' not in s[1].lower():
+            return 'want the probe octet then EAGAIN, got %s' % s, w
+        return None, w
+
+
 CASES = (('reconnect', case_reconnect),
          ('connect-twice', case_connect_twice),
          ('listen-connect', case_listen_connect),
@@ -432,7 +454,8 @@ CASES = (('reconnect', case_reconnect),
          ('accept-emfile', case_accept_emfile),
          ('write-closing', case_write_closing),
          ('early-write', case_early_write),
-         ('shut-connecting', case_shut_connecting))
+         ('shut-connecting', case_shut_connecting),
+         ('send-dontwait', case_send_dontwait))
 
 
 def main():

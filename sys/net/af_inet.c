@@ -1958,10 +1958,18 @@ static ssize_t afinet_sendto_k(int fd, const void *buf, size_t len, int flags,
      * dest addr that wasn't there.  */
     if (s->type == SOCK_STREAM && s->tcp) {
         ssize_t n;
+        /* TCP-API-16: honour MSG_DONTWAIT and the fd's O_NONBLOCK, as
+         * afinet_recvfrom() does.  send()/sendto() always blocked, so a
+         * non-blocking event loop parked in the kernel on a full window. */
+        file_t *f = (fd >= 0 && fd < MAX_FD && current_process)
+                        ? current_process->fds[fd] : NULL;
+        int nb = (flags & MSG_DONTWAIT) || (f && (f->f_flag & FNONBLOCK));
         /* TCP-URG-02: MSG_OOB sends the data as urgent. */
         if (flags & MSG_OOB)
-            n = tcp_send_urg_until(s->tcp, buf, len, 0,
+            n = tcp_send_urg_until(s->tcp, buf, len, nb,
                                    afi_deadline(s->snd_timeo));
+        else if (nb)
+            n = tcp_send_nb(s->tcp, buf, len);
         else
             n = tcp_send_until(s->tcp, buf, len, afi_deadline(s->snd_timeo));
         /* TCP-API-13: SIGPIPE on a broken stream, unless MSG_NOSIGNAL. */
