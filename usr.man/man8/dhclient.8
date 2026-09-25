@@ -1,0 +1,168 @@
+.TH DHCLIENT 8 2026-09-25 "Substrate" "System Administration"
+.SH NAME
+dhclient \- DHCPv4 client
+.SH SYNOPSIS
+.B dhclient
+.I interface
+.SH DESCRIPTION
+.B dhclient
+obtains an IPv4 address lease for
+.I interface
+from a DHCP server, installs it on the interface, and keeps it by
+renewing it before it expires.
+It takes exactly one argument, the interface name; there are no options.
+.PP
+The client first reads the interface's hardware address and index.
+It then broadcasts a DHCPDISCOVER from 0.0.0.0 port 68 to
+255.255.255.255 port 67 over an
+.B AF_PACKET
+socket, since the interface may not have an address yet.
+Up to four DISCOVERs are sent, waiting about 4, 8, 16 and 32 seconds
+(each randomized by up to one second) for an offer: about a minute in all.
+An offer is accepted only if it carries a server identifier and offers
+an address a host can use (not 0/8, 127/8, multicast, class E or the
+limited broadcast address).
+.PP
+The client then broadcasts a DHCPREQUEST for the offered address,
+retransmitted up to four times with the same backoff.
+A DHCPNAK, or no answer, sends the client back to the start with a new
+transaction ID; this is tried three times in all before
+.B dhclient
+gives up.
+An acknowledgement from a server other than the one selected is ignored.
+.PP
+Before using an acknowledged address,
+.B dhclient
+sends two ARP probes for it (sender address 0.0.0.0) and listens for one
+second.
+If another host answers for the address, or is probing for it, the client
+sends a DHCPDECLINE, waits ten seconds and starts over.
+.PP
+The lease is taken from the DHCPACK: the address
+.RI ( yiaddr ),
+the subnet mask (option 1) and the first router (option 3).
+If the server sends no mask, the classful mask of the address is used;
+if it sends no router, the interface's gateway is cleared.
+These are installed with the
+.BR SIOCSIFADDR ,
+.B SIOCSIFNETMASK
+and
+.B SIOCSIFGATEWAY
+ioctls, and the address is announced with a gratuitous ARP reply.
+If any of the ioctls fails, the lease is not reported as bound and
+.B dhclient
+exits with status 1.
+.PP
+If the acknowledgement carries DNS servers (option 6), a domain name
+(option 15) or a domain search list (option 119),
+.B dhclient
+rewrites
+.I /etc/resolv.conf
+with
+.BR nameserver ,
+.B domain
+and
+.B search
+lines, by writing
+.I /etc/resolv.conf.new
+and renaming it into place.
+A domain name, or a search-list entry, that contains anything other than
+letters, digits, hyphens and dots is dropped.
+If none of these options is present,
+.I /etc/resolv.conf
+is left alone.
+.PP
+Requests carry a parameter request list (options 1, 3, 6, 15, 119 and 51)
+and a maximum message size of 1500 octets.
+If the system hostname is set (read from
+.IR /etc/hostname ,
+otherwise
+.BR gethostname (2)),
+and is not empty,
+.B localhost
+or
+.BR (none) ,
+it is sent as the host name (option 12, truncated to 63 bytes) and, prefixed
+by a zero type byte, as the client identifier (option 61).
+The BROADCAST flag is left clear.
+.SS Keeping the lease
+If the lease is infinite (lease time 0xffffffff, or no lease time given),
+.B dhclient
+prints a message and exits 0 once bound.
+Otherwise it forks: the parent exits 0 so that the caller (typically boot)
+continues, and the child calls
+.BR setsid (2)
+and stays in the background to maintain the lease.
+.PP
+The renewal time T1 and rebinding time T2 come from options 58 and 59,
+or default to 0.5 and 0.875 of the lease; each is randomized by up to 5%.
+At T1 the child unicasts DHCPREQUESTs to the leasing server (RENEWING);
+from T2 it broadcasts them (REBINDING) until the lease ends.
+These go through an ordinary UDP socket on port 68.
+After each request it waits half of the time remaining in the phase, but
+at least 60 seconds.
+An acknowledgement updates the lease and reinstalls it (and
+.IR /etc/resolv.conf ).
+.PP
+On a DHCPNAK, or when the lease expires, the child removes the address and
+gateway from the interface and starts again from DHCPDISCOVER, retrying
+every 60 seconds until it gets a new lease.
+.PP
+Progress messages are written to standard output and errors to standard
+error; the background child keeps the descriptors it inherited.
+.SH EXIT STATUS
+.TP
+.B 0
+A lease was bound and installed (the background child, if any, continues),
+or the fork failed after binding, in which case the lease will not be
+renewed.
+.TP
+.B 1
+No lease was obtained, the lease could not be installed, or the interface
+could not be queried or its sockets set up.
+.TP
+.B 2
+Wrong number of arguments.
+.SH FILES
+.TP
+.I /etc/resolv.conf
+Resolver configuration, rewritten when the server supplies DNS options.
+.TP
+.I /etc/hostname
+Source of the host name and client identifier sent to the server.
+.TP
+.I /etc/network.conf
+Interfaces with the mode
+.B dhcp
+are passed to
+.B dhclient
+by
+.IR /etc/rc.d/20-network
+at boot.
+.SH EXAMPLE
+Lease an address for the first Ethernet interface, as the boot scripts do
+for an
+.B "eth0 dhcp"
+line in
+.IR /etc/network.conf :
+.EX
+# dhclient eth0
+.EE
+.SH SEE ALSO
+.BR ifconfig (8),
+.BR radvd (8),
+.BR init (8),
+.BR resolv.conf (5)
+.SH STANDARDS
+RFC 2131 (DHCP), RFC 2132 (DHCP options), RFC 3397 (domain search option).
+Conformance notes are in
+.I docs/dhclient\-audit\-2026\-09.md
+in the source tree.
+.SH BUGS
+There is no way to release a lease: the daemon does not handle signals and
+never sends DHCPRELEASE, and it writes no pid file.
+.PP
+Only IPv4 is supported; there is no DHCPv6.
+.PP
+At most 16 name servers are written to
+.IR /etc/resolv.conf .
