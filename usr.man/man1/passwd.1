@@ -1,0 +1,119 @@
+.TH PASSWD 1 2026-09-25 "Substrate" "User Commands"
+.SH NAME
+passwd \- change a user's login password
+.SH SYNOPSIS
+.B passwd
+.RI [ user ]
+.SH DESCRIPTION
+.B passwd
+changes the password stored in
+.I /etc/shadow
+for
+.IR user ,
+or for the user owning the real user ID of the calling process when no
+.I user
+is given.
+The user must exist in the password database
+.RB ( getpwnam (3)).
+Only the superuser (real user ID 0) may change another user's password;
+any further arguments are ignored.
+.PP
+A caller other than the superuser is first prompted for the current
+password, which is checked against the stored hash with
+.BR crypt (3).
+If the stored password field is empty, only an empty entry is accepted.
+The superuser is not asked for the current password.
+.PP
+The new password is then read twice.
+The two entries must match and must not be empty.
+Passwords are read from standard input one byte at a time up to a
+newline or carriage return; at most 127 bytes are kept.
+When standard input is a terminal, echo is turned off while a password
+is typed, and the previous terminal settings are restored if
+.BR SIGINT ,
+.BR SIGQUIT ,
+or
+.B SIGTERM
+arrives during the prompt (the program then exits with status 128 plus
+the signal number).
+.PP
+The new password is hashed with SHA-256-crypt: a
+.B $5$
+setting with an 8-character salt taken from
+.I /dev/urandom
+and the default number of rounds.
+Existing MD5-crypt
+.RB ( $1$ )
+or DES hashes still verify and are replaced by a
+.B $5$
+hash when the password is changed.
+If eight random bytes cannot be read, the change is refused rather than
+using a weaker salt.
+.PP
+The shadow file is updated while holding the password-database lock
+.RI ( /etc/.pwd.lock )
+using
+.BR pwdb_atomic_rewrite (3):
+a new file is written to
+.IR /etc/shadow.new ,
+synced, given the mode and owner of the old file, and renamed over
+.IR /etc/shadow .
+Only the second field of the user's line is replaced.
+If the user has no line in
+.IR /etc/shadow ,
+the file is left untouched and the change fails.
+Buffers that held passwords or hashes are overwritten before exit.
+.SH EXIT STATUS
+.TP
+.B 0
+The password was changed.
+.TP
+.B 1
+The user does not exist, permission was denied, authentication failed,
+a password could not be read, the new passwords did not match or were
+empty, or
+.I /etc/shadow
+could not be updated.
+.TP
+.B "128 + signal"
+The program was interrupted during a password prompt.
+.SH FILES
+.TP
+.I /etc/passwd
+User database, consulted through
+.BR getpwnam (3)
+and
+.BR getpwuid (3).
+.TP
+.I /etc/shadow
+Password hashes; read to verify the current password and rewritten.
+.TP
+.I /etc/shadow.new
+Temporary file used during the rewrite.
+It is created exclusively; if a stale copy is left behind, the update
+fails until it is removed.
+.TP
+.I /etc/.pwd.lock
+Advisory lock shared with the other password-database tools.
+.TP
+.I /dev/urandom
+Source of the salt.
+.SH SEE ALSO
+.BR id (1),
+.BR crypt (3),
+.BR pwdb (3),
+.BR pwdb_atomic_rewrite (3),
+.BR pwdb_lock (3),
+.BR useradd (8),
+.BR usermod (8)
+.SH BUGS
+The root filesystem build does not install
+.B passwd
+set-user-ID root, so a user other than the superuser cannot take the
+lock or replace
+.I /etc/shadow
+and gets
+.RB \(dq "failed to update /etc/shadow" \(dq.
+.PP
+Input longer than 127 bytes is truncated silently, and the unread
+remainder of the line is consumed by the next prompt.
