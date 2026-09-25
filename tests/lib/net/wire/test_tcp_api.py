@@ -34,12 +34,18 @@ it guards.
     linger-abort   TCP-API-11: with SO_LINGER {1, 0}, close() is an ABORT:
                    one RST at SND.NXT, no FIN, and the unacknowledged data
                    is not retransmitted.
+    unread-close   TCP-API-12: close() with received data still unread is
+                   an abort (RFC 1122 4.2.2.13): RST, not FIN.
+    accept-emfile  TCP-API-12: accept() failing EMFILE on an established
+                   child that already holds the peer's acknowledged request
+                   resets it rather than sending a FIN.
 
 Run from the repo root after building sys/ and wireguest:
     python3 tests/lib/net/wire/test_tcp_api.py [case...]
 """
 import os
 import sys
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from wire import Wire, Seg, SYN, ACK, FIN, RST, PSH, PEER_MAC, PEER_IP, GUEST_IP  # noqa: E402
@@ -48,8 +54,21 @@ PORT = 7090
 PISS = 170000
 
 
-def line(w, prefix):
-    return [l.strip() for l in w.serial().splitlines() if l.startswith('guest: ' + prefix)]
+def line(w, prefix, timeout=3.0):
+    """The COMPLETE guest lines starting with prefix.  wait_serial() can
+    match a line whose tail has not reached the serial log yet, so a
+    trailing line without its newline is not returned; wait up to
+    `timeout` for at least one complete match."""
+    end = time.time() + timeout
+    while True:
+        out = w.serial()
+        lines = out.splitlines()
+        if lines and not out.endswith('\n'):
+            lines = lines[:-1]
+        got = [l.strip() for l in lines if l.startswith('guest: ' + prefix)]
+        if got or time.time() >= end:
+            return got
+        w.pump(0.2)
 
 
 def case_reconnect():
@@ -266,6 +285,49 @@ def case_linger_abort():
         return None, w
 
 
+def case_unread_close():
+    with Wire.boot('connect 10.0.2.2 %d sleep:3 close sleep:60' % PORT) as w:
+        syn = w.expect(lambda s: s.flags & SYN and s.dport == PORT, 90, 'SYN')
+        if not syn:
+            return 'no SYN', w
+        g = syn.seq + 1
+        w.send(Seg(PORT, syn.sport, PISS, g, SYN | ACK))
+        w.pump(0.5)
+        w.send(Seg(PORT, syn.sport, PISS + 1, g, ACK | PSH, data=b'never-read'))
+        if not w.wait_serial('guest: close', 10):
+            return 'guest never closed', w
+        w.pump(1.0)
+        if any(s.flags & FIN for s in w.rx):
+            return 'close() with unread data sent a FIN', w
+        if not any(s.flags & RST for s in w.rx):
+            return 'close() with unread data sent no RST', w
+        return None, w
+
+
+def case_accept_emfile():
+    with Wire.boot('acceptfull %d' % PORT) as w:
+        if not w.wait_serial('guest: listening', 90):
+            return 'guest never listened', w
+        err = dial(w, 44004, PORT)
+        if err:
+            return err, w
+        w.send(Seg(44004, PORT, PISS + 1, 0, ACK | PSH, data=b'request'))
+        w.pump(0.5)
+        w.rx.clear()
+        if not w.wait_serial('guest: accept', 15):
+            return 'accept() never returned', w
+        a = line(w, 'accept ')[0]
+        if 'too many open files' not in a.lower():
+            return 'accept() with a full fd table: %s' % a, w
+        w.pump(1.0)
+        mine = [s for s in w.rx if s.dport == 44004]
+        if any(s.flags & FIN for s in mine):
+            return 'the dropped child sent a FIN', w
+        if not any(s.flags & RST for s in mine):
+            return 'the dropped child sent no RST', w
+        return None, w
+
+
 CASES = (('reconnect', case_reconnect),
          ('connect-twice', case_connect_twice),
          ('listen-connect', case_listen_connect),
@@ -274,7 +336,9 @@ CASES = (('reconnect', case_reconnect),
          ('listen-connected', case_listen_connected),
          ('listen-unbound', case_listen_unbound),
          ('connect-unspec', case_connect_unspec),
-         ('linger-abort', case_linger_abort))
+         ('linger-abort', case_linger_abort),
+         ('unread-close', case_unread_close),
+         ('accept-emfile', case_accept_emfile))
 
 
 def main():

@@ -36,6 +36,9 @@
  *   wireguest listen0 <action>...              (listen() with no bind(),
  *                                               report getsockname()'s port,
  *                                               then accept)
+ *   wireguest acceptfull <port>                (listen, sleep 4 s, fill the fd
+ *                                               table with dup(), then accept,
+ *                                               reporting the error)
  *   wireguest bindtest <ip> <port> <lport>     (A: SO_REUSEADDR, bind lport,
  *                                               connect; B: SO_REUSEADDR, bind
  *                                               lport, non-blocking connect to
@@ -457,6 +460,25 @@ int main(int argc, char **argv) {
         } else {
             say("accept failed: %s (%ld)", strerror(errno), errno);
         }
+    } else if (argc >= 3 && strcmp(argv[1], "acceptfull") == 0) {
+        struct sockaddr_in sa;
+        memset(&sa, 0, sizeof sa);
+        sa.sin_family = AF_INET;
+        sa.sin_port = htons((unsigned short)atoi(argv[2]));
+        int l = socket(AF_INET, SOCK_STREAM, 0);
+        if (l >= 0 && bind(l, (struct sockaddr *)&sa, sizeof sa) == 0 &&
+            listen(l, 4) == 0) {
+            say("listening %s%ld", "", atol(argv[2]));
+            sleep(4);
+            long n = 0;
+            while (dup(l) >= 0) n++;
+            say("filled %s%ld", "", n);
+            int fd = accept(l, NULL, NULL);
+            say("accept %s rc=%ld", fd < 0 ? strerror(errno) : "ok", (long)fd);
+        } else {
+            say("listen failed: %s (%ld)", strerror(errno), errno);
+        }
+        rc = 0;
     } else if (argc >= 5 && strcmp(argv[1], "bindtest") == 0) {
         int one = 1, r;
         struct sockaddr_in me, sa;

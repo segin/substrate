@@ -2901,6 +2901,21 @@ int tcp_close(tcp_pcb_t *p) {
         kprintf("tcp_close: refusing bogus pcb %p — socket ->tcp corrupted\n", p);
         return 0;
     }
+    /* TCP-API-12: RFC 1122 4.2.2.13 -- closing a connection whose received
+     * data the application never read is an abort, not a CLOSE.  That data
+     * was acknowledged and is about to be thrown away; an orderly FIN would
+     * tell the peer it was all consumed (a request "fully delivered" to a
+     * server that never saw it).  Send the RST that says otherwise. */
+    {
+        uint32_t uf = tcp_lock();
+        int unread = (p->rx_count > 0 || p->ooo_head) &&
+                     (p->state == TCP_ESTABLISHED || p->state == TCP_CLOSE_WAIT ||
+                      p->state == TCP_FIN_WAIT_1  || p->state == TCP_FIN_WAIT_2 ||
+                      p->state == TCP_SYN_RECEIVED);
+        tcp_unlock(uf);
+        if (unread)
+            return tcp_abort(p);
+    }
     /* Snapshot + transition state under the lock so a concurrent RX
      * (which may itself transition state or free the PCB) can't
      * interleave.  tcp_free for the already-dead states is done

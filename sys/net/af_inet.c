@@ -1626,7 +1626,10 @@ int afinet_accept(int fd, void *addr, socklen_t *addrlen) {
 
     /* Allocate a new afi_sock_t wrapping the accepted PCB. */
     afi_sock_t *c = (afi_sock_t *)kmalloc(sizeof(*c));
-    if (!c) { tcp_close(cp); return -ENOMEM; }
+    /* TCP-API-12: a connection dropped because the host ran out of memory
+     * or descriptors is an ABORT: the peer's request may already sit
+     * acknowledged in the ring, and a FIN would report it consumed. */
+    if (!c) { tcp_abort(cp); return -ENOMEM; }
     memset(c, 0, sizeof(*c));
     c->family = s->family;
     c->owner_uid = s->owner_uid;
@@ -1663,7 +1666,7 @@ int afinet_accept(int fd, void *addr, socklen_t *addrlen) {
     if (newfd < 0) {
         if (c->rq) kfree(c->rq, c->rq_cap);
         kfree(c, sizeof(*c));
-        tcp_close(cp);
+        tcp_abort(cp);                   /* TCP-API-12 */
         return -EMFILE;
     }
     unsigned long fl = spinlock_acquire_irq(&afi_lock);
