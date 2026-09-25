@@ -1,0 +1,221 @@
+.TH SYSLOGD 8 2026-09-25 "Substrate" "System Administration"
+.SH NAME
+syslogd \- system message logger
+.SH SYNOPSIS
+.B syslogd
+.RB [ \-f ]
+.RB [ \-n ]
+.SH DESCRIPTION
+.B syslogd
+collects the messages that programs send with
+.BR syslog (3)
+and appends them to log files according to the rules in
+.IR /etc/syslog.conf .
+.PP
+It listens on the
+.B AF_UNIX
+socket
+.IR /var/run/log ,
+removing any file already there and making the socket mode 0666.
+Substrate's
+.B AF_UNIX
+sockets are stream-only, so clients connect and send one message per
+newline-terminated line; the libc
+.BR syslog (3)
+client does this.
+Up to 32 clients can be connected at once; further connections are
+accepted and closed.
+A line longer than 2048 bytes is delivered in 2048-byte pieces.
+.PP
+A message may begin with a priority,
+.BI < n >\c
+, where
+.I n
+is the facility code times 8 plus the severity, as in RFC 3164.
+Without one, the message is logged as
+.BR user.notice .
+The priority is removed, and each message is written as
+.IP
+.I "Mmm DD HH:MM:SS hostname message"
+.PP
+with the time in UTC and the host name as it was when
+.B syslogd
+started.
+The rest of the message, including any timestamp the sender put in it, is
+kept as received.
+.PP
+For every rule that matches the message, the line (with a newline added if
+missing) is appended to the rule's target, which is opened, created with
+mode 0640 if necessary, written and closed each time.
+.PP
+Unless
+.B \-f
+or
+.B \-n
+is given,
+.B syslogd
+detaches from its terminal after creating the socket: it forks twice,
+calls
+.BR setsid (2),
+changes to
+.IR / ,
+sets the umask to 022 and connects standard input, output and error to
+.IR /dev/null .
+In either mode it then writes its pid to
+.I /var/run/syslogd.pid
+and logs
+.B "syslogd: started, pid"
+.I N
+directly to
+.IR /var/log/messages .
+It is started at boot by
+.IR /etc/rc.d/05\-syslogd .
+.SS Configuration
+Each line of
+.I /etc/syslog.conf
+that is not blank and does not begin with
+.B #
+(after leading blanks) is a rule: a selector list, one or more spaces or
+tabs, and a target.
+The target is the path of a file (or a device such as
+.IR /dev/console )
+to append to.
+At most 64 rules are read.
+.PP
+The selector list is up to 8 selectors separated by
+.BR ; ,
+each of the form
+.IB facility . level\c
+\&.
+.I facility
+is one of
+.BR kern ,
+.BR user ,
+.BR mail ,
+.BR daemon ,
+.BR auth ,
+.BR syslog ,
+.BR lpr ,
+.BR news ,
+.BR uucp ,
+.BR cron ,
+.BR authpriv ,
+.BR ftp ,
+.BR local0 " to " local7 ,
+or
+.B *
+for any facility.
+.I level
+is one of
+.BR emerg " (or " panic ),
+.BR alert ,
+.BR crit ,
+.BR err " (or " error ),
+.BR warning " (or " warn ),
+.BR notice ,
+.BR info ,
+.BR debug ,
+or
+.B *
+for any level; a level matches messages of that severity or more severe.
+A selector with an unknown name is skipped, and a rule with no valid
+selectors is ignored.
+A message matches a rule if it matches any of its selectors.
+.PP
+If
+.I /etc/syslog.conf
+cannot be opened, or contains no valid rules, these defaults are used:
+.PP
+.EX
+auth.*      /var/log/auth.log
+mail.*      /var/log/mail.log
+cron.*      /var/log/cron.log
+daemon.*    /var/log/daemon.log
+kern.*      /var/log/kern.log
+user.*      /var/log/user.log
+*.*         /var/log/messages
+*.emerg     /dev/console
+.EE
+.SH OPTIONS
+.TP
+.BR \-f ", " \-n
+Stay in the foreground.
+.PP
+Other arguments are ignored.
+.SH EXIT STATUS
+.TP
+.B 0
+Terminated by
+.B SIGTERM
+or
+.BR SIGINT .
+.TP
+.B 1
+The socket could not be created or bound, or a fork failed.
+.SH SIGNALS
+.TP
+.B SIGHUP
+Reread
+.I /etc/syslog.conf
+and log
+.B "syslogd: configuration reloaded"
+to
+.IR /var/log/messages .
+.TP
+.BR SIGTERM ", " SIGINT
+Close all connections, remove the pid file and the socket, and exit.
+.TP
+.B SIGPIPE
+Ignored.
+.SH FILES
+.TP
+.I /etc/syslog.conf
+Rules.
+.TP
+.I /var/run/log
+Listening socket.
+The libc client also tries
+.IR /dev/log .
+.TP
+.I /var/run/syslogd.pid
+Process ID of the running daemon.
+.TP
+.I /var/log/messages
+Startup and reload notices are always written here.
+.SH EXAMPLE
+Log everything of severity
+.B err
+or worse to one file, and all mail messages to another:
+.EX
+*.err       /var/log/errors
+mail.*      /var/log/mail.log
+.EE
+.SH SEE ALSO
+.BR syslog (3),
+.BR init (8)
+.SH STANDARDS
+Accepts the priority prefix of RFC 3164.
+There is no network (UDP 514) input or forwarding.
+.SH BUGS
+A selector with level
+.BR none ,
+such as
+.BR auth.none ,
+does not exclude its facility: it makes the whole rule match nothing.
+The
+.B *.*;auth.none;authpriv.none
+rule in the shipped
+.I /etc/syslog.conf
+therefore never writes to
+.IR /var/log/messages .
+.PP
+Comma-separated facility lists are not supported:
+.B auth,authpriv.*
+is an unknown facility, and the rule is ignored.
+.PP
+Messages from the libc
+.BR syslog (3)
+client carry their own timestamp, so logged lines show two.
+.PP
+Only file and device targets exist; there are no pipes, remote hosts or
+user-terminal targets.
