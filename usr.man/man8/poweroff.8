@@ -1,0 +1,67 @@
+.TH POWEROFF 8 2026-09-25 "Substrate" "System Administration"
+.SH NAME
+poweroff \- stop the system and turn the machine off
+.SH SYNOPSIS
+.B poweroff
+.RB [ \-f ]
+.SH DESCRIPTION
+By default
+.B poweroff
+sends
+.B SIGUSR1
+to
+.BR init
+(process 1), which performs an orderly shutdown (see
+.BR halt (8))
+and ends by calling
+.BR reboot (2)
+with
+.BR RB_POWER_OFF .
+.B poweroff
+returns as soon as the signal has been delivered.
+If signalling init fails,
+.B poweroff
+prints a warning and calls
+.BR reboot (2)
+itself.
+.PP
+The kernel does not parse ACPI tables.
+To power off it writes the S5 sleep command to the power-control
+ports used by QEMU (0x604), Bochs and older QEMU (0xB004) and
+VirtualBox (0x4004).
+If none of these takes effect, as on most real hardware, the CPU is
+halted with interrupts disabled; the machine is never rebooted.
+.PP
+An effective user ID of 0 is required.
+.SH OPTIONS
+.TP
+.B \-f
+Do not signal init; call
+.BR reboot (2)
+with
+.B RB_POWER_OFF
+directly.
+Processes are not terminated and
+.B /etc/rc stop
+is not run, although the kernel still unmounts all file systems.
+.SH EXIT STATUS
+.TP
+.B 0
+Init was signalled.
+.TP
+.B 1
+.BR reboot (2)
+failed (for example with
+.B EPERM
+when not run as root).
+.TP
+.B 2
+An unrecognized argument was given; a usage message is printed.
+.SH SEE ALSO
+.BR kill (2),
+.BR reboot (2),
+.BR halt (8),
+.BR reboot (8)
+.SH BUGS
+Power-off works only under the emulators listed above; on real
+hardware the machine is left halted and must be switched off by hand.
