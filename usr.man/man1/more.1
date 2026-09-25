@@ -1,0 +1,58 @@
+.TH MORE 1 2026-09-25 "Substrate" "User Commands"
+.SH NAME
+more \- page through text one screenful at a time
+.SH SYNOPSIS
+.B more
+.RI [ file ]
+.SH DESCRIPTION
+.B more
+is a minimal pager.
+It copies
+.I file
+(or standard input if no
+.I file
+is given) to standard output, pausing after every 23 lines.
+It has no options, does not query the terminal size, and supports no
+commands other than those described here.
+Only the first
+.I file
+operand is used; any others are ignored.
+.PP
+At each pause
+.B more
+prints
+.B \-\-More\-\-
+and reads one character from standard input.
+If the character is
+.BR q ,
+.B more
+exits.
+Any other character erases the prompt and shows the next 23 lines.
+Because the terminal is normally in canonical mode, the response
+takes effect only after
+.B Enter
+is pressed, and the newline itself is read as the response to the
+following pause.
+.SH EXIT STATUS
+.TP
+.B 0
+Success, including quitting with
+.BR q .
+.TP
+.B 1
+.I file
+could not be opened.
+.SH SEE ALSO
+.BR cat (1),
+.BR head (1),
+.BR pr (1),
+.BR tail (1)
+.SH BUGS
+Responses to the prompt are read from standard input, which is also
+where the text comes from when no
+.I file
+is given.
+Paging a pipe therefore consumes input bytes as responses instead of
+waiting for the keyboard.
+.PP
+Input is read one byte at a time.
