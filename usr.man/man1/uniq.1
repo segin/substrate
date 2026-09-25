@@ -1,0 +1,155 @@
+.TH UNIQ 1 2026-09-25 "Substrate" "User Commands"
+.SH NAME
+uniq \- report or filter out repeated adjacent lines
+.SH SYNOPSIS
+.B uniq
+.RB [ \-cdiuDz ]
+.RB [ \-f
+.IR fields ]
+.RB [ \-s
+.IR chars ]
+.RB [ \-w
+.IR chars ]
+.RB [ \-\-all\-repeated [ =\c
+.IR method ]]
+.RI [ input
+.RI [ output ]]
+.SH DESCRIPTION
+.B uniq
+reads
+.I input
+(standard input if omitted or
+.BR \- )
+and writes one copy of each group of adjacent identical lines to
+.I output
+(standard output if omitted).
+Only adjacent lines are compared, so input is normally sorted first.
+.PP
+Lines may be arbitrarily long and may contain NUL bytes; comparison uses
+the full byte length of each line.
+.PP
+Short options may be combined, and the argument of
+.BR \-f ,
+.B \-s
+and
+.B \-w
+may be attached
+.RB ( \-f2 )
+or given as the next argument.
+Option processing stops at the first argument that does not begin with
+.BR \- ,
+at a lone
+.BR \- ,
+or after
+.BR \-\- .
+.SH OPTIONS
+.TP
+.B \-c
+Precede each output line with the number of times it occurred, in a
+field four characters wide followed by a space.
+.TP
+.B \-d
+Output only lines that are repeated.
+.TP
+.B \-u
+Output only lines that are not repeated.
+Given together,
+.B \-d
+and
+.B \-u
+suppress all output.
+.TP
+.B \-i
+Compare lines case-insensitively.
+.TP
+.BI \-f " fields"
+Ignore the first
+.I fields
+fields of each line when comparing.
+A field is a run of non-blank characters preceded by blanks (spaces or
+tabs); blanks following the skipped fields are also skipped.
+.TP
+.BI \-s " chars"
+Ignore the first
+.I chars
+characters when comparing, after any fields skipped by
+.BR \-f .
+.TP
+.BI \-w " chars"
+Compare at most
+.I chars
+characters, after the skips above.
+.TP
+.B \-D
+Print every line of each repeated group, and nothing for lines that are
+not repeated.
+Overrides
+.BR \-d " and " \-u .
+With
+.BR \-c ,
+each line is prefixed with its position within the group.
+.TP
+.BR \-\-all\-repeated [ =\c
+.IR method ]
+Like
+.BR \-D ,
+with
+.I method
+controlling the separator line (an empty line) between groups:
+.B none
+(the default) prints no separators,
+.B separate
+and
+.B prepend
+print one before every group except the first, and
+.B append
+prints one after every group.
+.TP
+.B \-z
+Lines are terminated by NUL instead of newline, on both input and
+output.
+.TP
+.B \-\-help
+Print a usage message on standard error and exit with status 2.
+.PP
+Counts given to
+.BR \-f ,
+.B \-s
+and
+.B \-w
+must be non-negative decimal integers.
+.SH EXIT STATUS
+.TP
+.B 0
+Success.
+.TP
+.B 1
+A file could not be opened, or a read or write error occurred.
+.TP
+.B 2
+Invalid option or count,
+.BR \-\-help ,
+or an unknown
+.B \-\-all\-repeated
+method.
+.SH EXAMPLES
+Count occurrences of each word, most frequent first:
+.EX
+$ tr \-s ' ' '\en' < file | sort | uniq \-c | sort \-rn
+.EE
+.PP
+Show duplicated lines ignoring the first field:
+.EX
+$ sort \-k2 list | uniq \-d \-f 1
+.EE
+.SH SEE ALSO
+.BR tr (1),
+.BR wc (1)
+.SH STANDARDS
+The
+.BR \-c ", " \-d ", " \-u ", " \-f " and " \-s
+options follow POSIX.1-2024.
+.B \-i
+follows BSD;
+.BR \-D ", " \-w ", " \-z " and " \-\-all\-repeated
+follow GNU.
