@@ -1,0 +1,51 @@
+.TH WHO 1 2026-09-25 "Substrate" "User Commands"
+.SH NAME
+who \- show who is logged on
+.SH SYNOPSIS
+.B who
+.RB [ \-b ]
+.RB [ \-H ]
+.SH DESCRIPTION
+.B who
+reads the utmp file and prints one line for each
+.B USER_PROCESS
+record: the login name, the terminal line, and the login time as
+.IR YYYY \- MM \- DD " " hh : mm
+in local time.
+If a remote host is recorded, it is appended in parentheses.
+Non-printable characters in these fields are shown as
+.BR ? .
+.SH OPTIONS
+.TP
+.B \-b
+Print the time of the last system boot (the
+.B BOOT_TIME
+record) instead of the logged-in users.
+.TP
+.B \-H
+Print a column heading line first.
+.PP
+Options must be given as separate arguments.
+.SH EXIT STATUS
+.TP
+.B 0
+Success.
+.TP
+.B 2
+An unknown argument was given.
+.SH FILES
+.TP
+.I /var/run/utmp
+Current login records.
+.SH EXAMPLE
+.EX
+$ who \-H
+NAME      LINE         TIME              COMMENT
+root      tty1         2026\-09\-25 10:02
+.EE
+.SH SEE ALSO
+.BR id (1),
+.BR uptime (1),
+.BR w (1),
+.BR whoami (1),
+.BR utmp (5)
