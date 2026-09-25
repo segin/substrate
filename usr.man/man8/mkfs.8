@@ -1,0 +1,35 @@
+.TH MKFS 8 2026-09-25 "Substrate" "System Administration"
+.SH NAME
+mkfs \- build a file system (stub)
+.SH SYNOPSIS
+.B mkfs
+.RI [ argument ...]
+.SH DESCRIPTION
+The in-tree
+.B mkfs
+is a placeholder.
+It ignores all of its arguments, prints the line
+.PP
+.EX
+mkfs: stub implementation
+.EE
+.PP
+to standard output, and exits.
+It does not open any device and does not write anything.
+.PP
+To create an ext2, ext3 or ext4 file system, use
+.BR mke2fs (8)
+(also installed as
+.BR mkfs.ext2 )
+from the e2fsprogs port.
+.SH EXIT STATUS
+.B mkfs
+always exits with status 0.
+.SH SEE ALSO
+.BR fsck (8),
+.BR mke2fs (8)
+.SH BUGS
+Not implemented.
+Because the exit status is always 0, a script that runs
+.B mkfs
+cannot tell that no file system was created.
