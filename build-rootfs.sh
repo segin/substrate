@@ -32,14 +32,14 @@ usage() {
 }
 
 # Stage-2 toolchain staging trees are produced by contrib/build-toolchain.sh
-# under SUBSTRATE_TOP/dist-toolchain (binutils) and /tmp/gcc-stage2-staging
-# (gcc) — see contrib/{binutils,gcc}/build.sh for the canonical paths.
+# under dist-overlay/dist-toolchain (binutils) and dist-overlay/dist-gcc (gcc)
+# — see contrib/{binutils,gcc}/build.sh for the canonical paths.
 DIST_TOOLCHAIN="${DIST_TOOLCHAIN:-$TOP/dist-overlay/dist-toolchain}"
-GCC_STAGE2_STAGING="${GCC_STAGE2_STAGING:-/tmp/gcc-stage2-staging}"
+GCC_STAGE2_STAGING_DIR="${GCC_STAGE2_STAGING:-$TOP/dist-overlay/dist-gcc}"
 
 overlay_toolchain() {
     local merged=0
-    for staging in "$DIST_TOOLCHAIN" "$GCC_STAGE2_STAGING"; do
+    for staging in "$DIST_TOOLCHAIN" "$GCC_STAGE2_STAGING_DIR"; do
         if [ ! -d "$staging" ]; then
             echo "  (skipped: $staging does not exist)"
             continue
@@ -522,7 +522,7 @@ install_to_dist() {
     echo "Installing toolchain to dist/usr/bin..."
     mkdir -p "$DIST/usr/bin"
     # cc, as, ld, and the rest of the C toolchain are provided by the
-    # stage-2 binutils + GCC overlay (dist-toolchain/, /tmp/gcc-stage2-staging/).
+    # stage-2 binutils + GCC overlay (dist-toolchain/, dist-gcc/).
     # Substrate's earlier hand-rolled usr.bin/cc, usr.bin/as, usr.bin/ld
     # have been retired in favour of the GNU toolchain.
     # Archive / binary utilities that still live under usr.bin/ — these
@@ -611,10 +611,10 @@ install_to_dist() {
     # just means that one isn't on the image.
     #
     # Iterate every dist-* tree that exists at $TOP so newly-added
-    # ports get picked up without having to update this list.  The
-    # toolchain split — binutils stage 2 in dist-toolchain, gcc stage
-    # 2 in /tmp/gcc-stage2-staging because gcc's build doesn't honor
-    # a single DESTDIR cleanly — gets handled explicitly below.
+    # ports get picked up without having to update this list.  That
+    # includes the stage-2 toolchain: binutils in dist-toolchain and gcc
+    # in dist-gcc (separate, because binutils' build.sh wipes its own
+    # staging tree); the check for a compiler follows below.
     for stage in "$TOP"/dist-overlay/dist-*; do
         [ -d "$stage" ] || continue
         name=$(basename "$stage")
@@ -661,16 +661,30 @@ install_to_dist() {
         fi
     fi
 
-    # gcc stage 2 lives in /tmp/gcc-stage2-staging (see contrib/gcc/
-    # build.sh — the gcc build doesn't cooperate with a custom
-    # DESTDIR the way binutils does, so it stages to /tmp instead of
-    # alongside dist-toolchain).  Overlay it the same way.
-    GCC_STAGE2_STAGING="${GCC_STAGE2_STAGING:-/tmp/gcc-stage2-staging}"
-    if [ -d "$GCC_STAGE2_STAGING" ]; then
+    # The compiler.  contrib/gcc stages stage 2 into dist-overlay/dist-gcc,
+    # which the loop above has already overlaid with the ports;
+    # GCC_STAGE2_STAGING can name a staging tree somewhere else.
+    #
+    # It used to stage into /tmp, and a missing tree was skipped with a note.
+    # /tmp is a tmpfs on common build hosts, so after a reboot the image got
+    # binutils (dist-toolchain) and make but no gcc, cc1 or libgcc -- a
+    # toolchain that could assemble and link but never compile.  Binutils
+    # without a compiler is always that mistake, so it is fatal; an image
+    # built with no stage-2 toolchain at all (the fast CI bake) is fine.
+    if [ -n "${GCC_STAGE2_STAGING:-}" ] &&
+       [ "$GCC_STAGE2_STAGING" != "$TOP/dist-overlay/dist-gcc" ]; then
+        [ -d "$GCC_STAGE2_STAGING" ] || {
+            echo "Error: GCC_STAGE2_STAGING=$GCC_STAGE2_STAGING does not exist" >&2
+            exit 1
+        }
         echo "Overlaying contrib/gcc stage 2 from $GCC_STAGE2_STAGING..."
         (cd "$GCC_STAGE2_STAGING" && tar -cf - .) | (cd "$DIST" && tar -xf -)
-    else
-        echo "  (skipped contrib/gcc stage 2: $GCC_STAGE2_STAGING does not exist)"
+    fi
+    if [ -d "$TOP/dist-overlay/dist-toolchain" ] && [ ! -x "$DIST/usr/bin/gcc" ]; then
+        echo "Error: the stage-2 binutils are staged but no stage-2 gcc is." >&2
+        echo "       Build it (contrib/build-toolchain.sh --stage=2) or re-stage an" >&2
+        echo "       existing build into dist-overlay/dist-gcc; see contrib/gcc/build.sh." >&2
+        exit 1
     fi
 
     finalize_x_fonts

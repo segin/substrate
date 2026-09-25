@@ -21,7 +21,7 @@ and are reapplied by each port's `fetch.sh`; nothing in
   *with* the stage-1 cross compiler to produce substrate-ELF binaries
   that run *on* substrate itself.  Installs into
   `dist-overlay/dist-toolchain/usr/` (binutils) and
-  `/tmp/gcc-stage2-staging/usr/` (gcc) as:
+  `dist-overlay/dist-gcc/usr/` (gcc) as:
   - `/usr/bin/{gcc,g++,ld,as,ar,nm,objdump,readelf,strip,ranlib,size,strings,addr2line,c++filt,elfedit,gprof,ld.bfd}`
   - `/usr/libexec/gcc/i386-unknown-substrate/16.1.0/{cc1,cc1plus,lto1,lto-dump,collect2,lto-wrapper}`
   - `/usr/lib/gcc/i386-unknown-substrate/16.1.0/{libgcc.a,libgcov.a,crtbegin*.o,crtend*.o}`

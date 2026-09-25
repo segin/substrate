@@ -175,7 +175,7 @@ make -C "$BUILD_DIR/$TARGET_TRIPLE/libstdc++-v3" install >/dev/null
 #   /usr/lib/                                   ← ld.so search path
 #   /usr/i386-unknown-substrate/lib/            ← stage-2 driver -L
 #   /usr/lib/gcc/i386-unknown-substrate/16.1.0/ ← shared-libgcc spec
-STG="${GCC_STAGE2_STAGING:-/tmp/gcc-stage2-staging}"
+STG="${GCC_STAGE2_STAGING:-${SUBSTRATE_TOP}/dist-overlay/dist-gcc}"
 GCCV="$(cat "$SRC_TREE/gcc/BASE-VER")"
 STRIP="$STAGE1_PREFIX/bin/${TARGET_TRIPLE}-strip"
 

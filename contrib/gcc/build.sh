@@ -16,7 +16,7 @@
 #
 # Env knobs (with defaults):
 #   STAGE1_PREFIX     /opt/substrate-toolchain
-#   STAGE2_DESTDIR    /tmp/gcc-stage2-staging
+#   STAGE2_DESTDIR    ${SUBSTRATE_TOP}/dist-overlay/dist-gcc
 #   PARALLEL          $(nproc)
 #   TARGET_TRIPLE     i386-unknown-substrate
 #   ENABLE_LANGUAGES  c                  (add "c,c++" once libstdc++
@@ -61,8 +61,13 @@ STAGE1_PREFIX="${STAGE1_PREFIX:-/opt/substrate}"
 # and does `rm -rf` on it; if GCC used the same directory the second
 # build to run would wipe the first (the symptom: `gcc` ends up on the
 # image with no `as`/`ld`).  build-rootfs.sh --toolchain overlays BOTH
-# dist-toolchain (binutils) and /tmp/gcc-stage2-staging (gcc).
-STAGE2_DESTDIR="${STAGE2_DESTDIR:-/tmp/gcc-stage2-staging}"
+# dist-toolchain (binutils) and dist-gcc (gcc).
+#
+# It used to stage into /tmp/gcc-stage2-staging.  /tmp is a tmpfs on
+# common build hosts, so a reboot deleted the staged compiler, and the next
+# image bake -- which skipped a missing staging tree with a note -- shipped
+# binutils and make but no gcc, cc1 or libgcc.
+STAGE2_DESTDIR="${STAGE2_DESTDIR:-${SUBSTRATE_TOP}/dist-overlay/dist-gcc}"
 ENABLE_LANGUAGES="${ENABLE_LANGUAGES:-c,c++}"
 
 SRC_TREE="$(ls -d "$HERE"/build/gcc-*/ 2>/dev/null | head -1 || true)"

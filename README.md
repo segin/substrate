@@ -229,7 +229,8 @@ contrib/build-toolchain.sh         # binutils + gcc, stage 1 (cross) and stage 2
   `STAGE1_PREFIX=`) as `i386-unknown-substrate-{gcc,as,ld,…}` for
   cross-compiling on the host.
 - **Stage 2** (Canadian cross) produces a toolchain that runs *on* Substrate,
-  staged into `dist-toolchain/` (binutils) and `/tmp/gcc-stage2-staging/` (gcc),
+  staged into `dist-overlay/dist-toolchain/` (binutils) and
+  `dist-overlay/dist-gcc/` (gcc),
   ready to fold into the image.
 
 Each `contrib/<pkg>/build.sh` can also be run individually. Patch series live

@@ -123,7 +123,7 @@ jobs:
       # series, the build scripts, the pinned versions in fetch.sh.  BOTH
       # stage-2 staging trees have to ride along: build-rootfs.sh --toolchain
       # overlays dist-overlay/dist-toolchain (binutils) AND
-      # /tmp/gcc-stage2-staging (gcc, which stages elsewhere because binutils
+      # dist-overlay/dist-gcc (gcc, which stages separately because binutils
       # does `rm -rf` on dist-toolchain and would wipe it).  On a cache hit
       # build.sh skips stage 1g entirely, so whatever is not restored here is
       # simply not in the image -- caching only dist-toolchain produced a
@@ -135,7 +135,7 @@ jobs:
           path: |
             /opt/substrate
             dist-overlay/dist-toolchain
-            /tmp/gcc-stage2-staging
+            dist-overlay/dist-gcc
           # Hash the tracked INPUTS only.  'contrib/gcc/**' also matches
           # contrib/gcc/build/, where fetch.sh unpacks the gcc source and
           # build.sh builds it -- several hundred thousand files by the time
@@ -247,7 +247,7 @@ jobs:
         run: |
           cc=/opt/substrate/bin/i386-unknown-substrate-gcc
           ok=false
-          if [ -x "$cc" ] && [ -d /tmp/gcc-stage2-staging ] \
+          if [ -x "$cc" ] && [ -d dist-overlay/dist-gcc ] \
              && [ -d dist-overlay/dist-toolchain ]; then
             t=$(mktemp -d)
             printf 'int main(void){return 0;}\n' > "$t/t.c"
@@ -264,7 +264,7 @@ jobs:
           path: |
             /opt/substrate
             dist-overlay/dist-toolchain
-            /tmp/gcc-stage2-staging
+            dist-overlay/dist-gcc
           # Must match the restore key above verbatim.
           key: substrate-toolchain-v3-${{ runner.os }}-${{ hashFiles('contrib/binutils/patches/**', 'contrib/binutils/series', 'contrib/binutils/*.sh', 'contrib/gcc/patches/**', 'contrib/gcc/series', 'contrib/gcc/*.sh', 'contrib/build-toolchain.sh') }}
 

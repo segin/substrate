@@ -21,7 +21,7 @@
 #   contrib/gcc/install-stripped-to-rootfs.sh /path/to/rootfs.img
 #
 # Env:
-#   STG          stage-2 staging tree (default /tmp/gcc-stage2-staging)
+#   STG          stage-2 staging tree (default dist-overlay/dist-gcc)
 #   STAGE1_PREFIX cross toolchain prefix (default /opt/substrate)
 
 set -e
@@ -32,7 +32,7 @@ if [ -z "$IMG" ] || [ ! -f "$IMG" ]; then
     exit 1
 fi
 
-STG="${STG:-/tmp/gcc-stage2-staging}"
+STG="${STG:-$(cd "$(dirname "$0")/../.." && pwd)/dist-overlay/dist-gcc}"
 STAGE1_PREFIX="${STAGE1_PREFIX:-/opt/substrate}"
 STRIP="$STAGE1_PREFIX/bin/i386-unknown-substrate-strip"
 SO_SRC="$STAGE1_PREFIX/i386-unknown-substrate/lib"
