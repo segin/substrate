@@ -20,3 +20,4 @@
 0015-ttdbserverd-do-not-let-a-client-socket-become-stderr.patch
 0016-tttypes-install-the-ptype-sources-too.patch
 0017-dthelp-pass1-eltdef-do-not-build-in-parallel.patch
+0018-ttdbserverd-keep-the-record-lengths-getISAMFileInfo-set.patch

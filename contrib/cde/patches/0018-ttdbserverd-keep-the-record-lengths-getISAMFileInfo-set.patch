@@ -1,0 +1,79 @@
+ttdbserverd: keep the record lengths getISAMFileInfo() set
+
+Both _Tt_isam_file constructors open (or build) the ISAM file, call
+getISAMFileInfo() -- which sets maxRecordLength from isindexinfo()'s
+di_recsize and minRecordLength from isreclen -- and then, as their last
+two statements, set both back to 0.
+
+Every buffer sized from them is therefore empty.  readRecord() does
+
+    _Tt_string record_buffer(maxRecordLength);   // malloc(0 + 1)
+    isread(fileDescriptor, (char *)record_buffer, mode);
+
+and isread() copies a whole record (fcb->minreclen octets, more with a
+variable-length tail) into that one-byte allocation, running straight
+over the heap header of whatever was allocated next.  In _amread() that
+is the `oldcurpos` byte array it _bytearr_dup()s immediately afterwards,
+so the overrun is caught when it is freed:
+
+    free <- _bytearr_free <- _amread <- isread
+         <- _Tt_isam_file::readRecord <- setFileProperties
+         <- _tt_create_file_1 <- _tt_dbserver_prog_1 <- svc_run
+
+On substrate the overwritten header's `prev` link read 0xffffffff and
+rpc.ttdbserver died with SIGSEGV in libc's coalesce_block() on the first
+tt_create_file RPC of every CDE login, with no ToolTalk file properties
+ever stored.  getEmptyRecord() and getFullRecord() size their records
+from the same two members, so their buffers were zero-length too.
+
+The zeroing was evidently meant as initialisation; do it first, before
+the file is opened, so the members are still defined when the open
+fails and getISAMFileInfo()'s values survive when it succeeds.
+
+Verified on substrate: headless CDE login through sgreet, 4 of 4 runs
+crashed before; with this change rpc.ttdbserver survives, and
+/TT_DB/property_table.{rec,var} grow as the properties are written
+(the .var file stayed at 0 octets before).
+
+diff --git a/lib/tt/bin/ttdbserverd/tt_isam_file.C b/lib/tt/bin/ttdbserverd/tt_isam_file.C
+index 5cb64f2b..37c18495 100644
+--- a/lib/tt/bin/ttdbserverd/tt_isam_file.C
++++ b/lib/tt/bin/ttdbserverd/tt_isam_file.C
+@@ -45,6 +45,8 @@ _Tt_isam_file::_Tt_isam_file (const _Tt_string &file, int mode)
+   setTtISAMFileDefaults();
+   fileName = file;
+   fileMode = mode;
++  maxRecordLength = 0;
++  minRecordLength = 0;
+
+   if ((fileDescriptor = cached_isopen(file, mode)) != -1) {
+     getISAMFileInfo();
+@@ -52,9 +54,6 @@ _Tt_isam_file::_Tt_isam_file (const _Tt_string &file, int mode)
+   else {
+     getStatusInfo();
+   }
+-
+-  maxRecordLength = 0;
+-  minRecordLength = 0;
+ }
+
+ _Tt_isam_file
+@@ -67,6 +66,8 @@ _Tt_isam_file
+   setTtISAMFileDefaults();
+   fileName = file;
+   fileMode = mode;
++  maxRecordLength = 0;
++  minRecordLength = 0;
+
+   if ((fileDescriptor = cached_isopen(file, mode)) == -1) {
+     newFlag = TRUE;
+@@ -85,9 +86,6 @@ _Tt_isam_file
+     currentRecordLength = -1;
+     currentRecordNumber = -1;
+   }
+-
+-  maxRecordLength = 0;
+-  minRecordLength = 0;
+ }
+
+ void _Tt_isam_file::setTtISAMFileDefaults ()
