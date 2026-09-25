@@ -1,0 +1,75 @@
+.TH NEWGRP 1 2026-09-25 "Substrate" "User Commands"
+.SH NAME
+newgrp \- start a shell with a different group ID
+.SH SYNOPSIS
+.B newgrp
+.RI [ group ]
+.SH DESCRIPTION
+.B newgrp
+changes the group ID of the process with
+.BR setgid (2)
+and then executes a shell.
+.PP
+.I group
+may be a group name from the group database or a numeric group ID.
+A name is looked up first; if it is not found and the operand is a
+non-negative decimal number, that number is used as the group ID
+without checking that such a group exists.
+With no operand, the group is set back to the login group from the
+password entry of the real user ID.
+.PP
+.B newgrp
+does not check group membership or group passwords and is not
+installed set-user-ID.
+The change therefore succeeds only when
+.BR setgid (2)
+permits it: always for the superuser, and for other users only when
+the target is their real or saved group ID.
+Supplementary groups are not changed.
+If
+.BR setgid (2)
+fails, an error is printed and no shell is started.
+.PP
+The shell is taken from the
+.B SHELL
+environment variable, or else from the user's password entry, or
+else
+.IR /bin/sh .
+It is executed with no arguments and with
+.I argv[0]
+set to its path, so it is not a login shell.
+The environment is passed unchanged.
+.SH EXIT STATUS
+On success
+.B newgrp
+does not return; the exit status is that of the shell.
+.TP
+.B 1
+Too many operands, an unknown group, no password entry for the
+user,
+.BR setgid (2)
+failed, or the shell could not be executed.
+.SH ENVIRONMENT
+.TP
+.B SHELL
+The shell to execute.
+.SH FILES
+.TP
+.I /etc/group
+Group database.
+.TP
+.I /etc/passwd
+Password database, for the login group and shell.
+.SH EXAMPLE
+As the superuser, start a shell with group
+.BR wheel :
+.PP
+.EX
+# newgrp wheel
+.EE
+.SH SEE ALSO
+.BR groups (1),
+.BR id (1),
+.BR login (1),
+.BR setgid (2),
+.BR getgrent_r (3)
