@@ -2985,7 +2985,8 @@ int tcp_close(tcp_pcb_t *p) {
          * connection that cannot be closed gracefully is aborted -- the
          * RST needs no allocation. */
         uint32_t af = tcp_lock();
-        int live = p->state == TCP_ESTABLISHED || p->state == TCP_CLOSE_WAIT;
+        int live = p->state == TCP_ESTABLISHED || p->state == TCP_CLOSE_WAIT ||
+                   p->state == TCP_SYN_RECEIVED;
         tcp_unlock(af);
         if (live)
             return tcp_abort(p);
@@ -3049,8 +3050,18 @@ int tcp_close(tcp_pcb_t *p) {
         tcp_unlock(f);
         break;
     }
-    case TCP_SYN_SENT:
     case TCP_SYN_RECEIVED:
+        /* TCP-API-20: RFC 793 3.9 CLOSE in SYN-RECEIVED: "form a FIN
+         * segment and send it, and enter FIN-WAIT-1", as ESTABLISHED does.
+         * It dropped straight to CLOSED with neither FIN nor RST, leaving
+         * the peer -- which may already be ESTABLISHED -- with a
+         * connection this side had silently forgotten. */
+        p->state = TCP_FIN_WAIT_1;
+        if (fin) fin_seq = tcp_seg_link_locked(p, fin);
+        tcp_unlock(f);
+        if (fin) tcp_seg_emit(p, fin_seq, TCP_FIN | TCP_ACK, NULL, 0);
+        return 0;
+    case TCP_SYN_SENT:
         /* No established peer to FIN — drop straight to CLOSED.  The
          * reap is deferred to the timer (rather than an inline
          * tcp_free) so it cannot race a concurrent RX walk. */

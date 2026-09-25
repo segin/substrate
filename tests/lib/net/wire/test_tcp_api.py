@@ -55,6 +55,9 @@ it guards.
                    instead of blocking.
     read-listener  TCP-API-17: read() on a listening socket fails ENOTCONN
                    (as recv() does) instead of blocking forever.
+    close-synrcvd  TCP-API-20: close() in SYN-RECEIVED (via simultaneous
+                   open) sends a FIN at ISS+1 instead of silently dropping
+                   the connection.
 
 Run from the repo root after building sys/ and wireguest:
     python3 tests/lib/net/wire/test_tcp_api.py [case...]
@@ -453,6 +456,20 @@ def case_read_listener():
         return None, w
 
 
+def case_close_synrcvd():
+    with Wire.boot('shutconnect 10.0.2.2 %d 3 close' % PORT) as w:
+        syn = w.expect(lambda s: s.flags & SYN and s.dport == PORT, 90, 'SYN')
+        if not syn:
+            return 'no SYN', w
+        w.send(Seg(PORT, syn.sport, PISS, 0, SYN))         # -> SYN-RECEIVED
+        if not w.expect(lambda s: s.flags & SYN and s.flags & ACK, 3, 'SYN|ACK'):
+            return 'no simultaneous-open SYN|ACK', w
+        fin = w.expect(lambda s: s.flags & (FIN | RST), 8, 'FIN')
+        if not fin or not fin.flags & FIN or fin.seq != syn.seq + 1:
+            return 'close() in SYN-RECEIVED: want a FIN at ISS+1, got %r' % fin, w
+        return None, w
+
+
 CASES = (('reconnect', case_reconnect),
          ('connect-twice', case_connect_twice),
          ('listen-connect', case_listen_connect),
@@ -468,7 +485,8 @@ CASES = (('reconnect', case_reconnect),
          ('early-write', case_early_write),
          ('shut-connecting', case_shut_connecting),
          ('send-dontwait', case_send_dontwait),
-         ('read-listener', case_read_listener))
+         ('read-listener', case_read_listener),
+         ('close-synrcvd', case_close_synrcvd))
 
 
 def main():

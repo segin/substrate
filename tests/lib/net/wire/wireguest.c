@@ -42,9 +42,11 @@
  *                                               at once (EAGAIN expected), then
  *                                               clear O_NONBLOCK and write it
  *                                               again, blocking until connected)
- *   wireguest shutconnect <ip> <port> <secs>   (O_NONBLOCK connect, sleep secs,
+ *   wireguest shutconnect <ip> <port> <secs> [close]
+ *                                              (O_NONBLOCK connect, sleep secs,
  *                                               shutdown(SHUT_WR), sleep 2 s,
- *                                               report SO_ERROR)
+ *                                               report SO_ERROR; with "close",
+ *                                               close() instead of shutdown)
  *   wireguest acceptfull <port>                (listen, sleep 4 s, fill the fd
  *                                               table with dup(), then accept,
  *                                               reporting the error)
@@ -532,6 +534,12 @@ int main(int argc, char **argv) {
         int r = connect(fd, (struct sockaddr *)&sa, sizeof sa);
         say("connect1 %s rc=%ld", r < 0 ? strerror(errno) : "ok", r);
         sleep((unsigned)atoi(argv[4]));
+        if (argc >= 6 && strcmp(argv[5], "close") == 0) {
+            r = close(fd);
+            say("close %s rc=%ld", r < 0 ? strerror(errno) : "ok", r);
+            rc = 0;
+            goto done;
+        }
         r = shutdown(fd, SHUT_WR);
         say("shutwr %s rc=%ld", r < 0 ? strerror(errno) : "ok", r);
         sleep(2);
@@ -685,6 +693,7 @@ int main(int argc, char **argv) {
     } else {
         say("usage: wireguest connect|listen ... %s%ld", "", 0);
     }
+done:
     printf("Result: done\n");
     fflush(stdout);
     for (;;) sleep(60);        /* init must not exit; the host stops qemu */
