@@ -1,0 +1,269 @@
+.TH SORT 1 2026-09-25 "Substrate" "User Commands"
+.SH NAME
+sort \- sort lines of text files
+.SH SYNOPSIS
+.B sort
+.RB [ \-bCcdfghiMmnRrsuVz ]
+.RB [ \-k
+.IR keydef ]
+.RB [ \-o
+.IR output ]
+.RB [ \-t
+.IR char ]
+.RI [ file ...]
+.SH DESCRIPTION
+.B sort
+reads all lines of the named files (standard input if none is given or
+a
+.I file
+is
+.BR \- ),
+sorts them together and writes the result to standard output.
+A last line without a terminating newline is treated as a complete line
+and gets a newline on output.
+.PP
+All input is read into memory before any output is produced, so
+.B \-o
+may name one of the input files.
+.PP
+Without a key option, lines are compared as byte strings (as with
+.BR memcmp (3));
+no locale collation is performed.
+Lines that compare equal appear in an unspecified order unless
+.B \-s
+is given; there is no final whole-line comparison.
+.SH OPTIONS
+Options may be combined in one argument
+.RB ( \-nr ).
+Option parsing stops at the first argument that does not begin with
+.BR \- ,
+at a lone
+.BR \- ,
+or after
+.BR \-\- .
+.SS Ordering
+Only one of
+.BR \-g ,
+.BR \-h ,
+.BR \-M ,
+.BR \-n ,
+.BR \-R ,
+.B \-V
+is in effect; the last one given wins.
+.TP
+.B \-n
+Numeric: compare the leading decimal integer (optional sign) of each
+key.
+Leading white space is skipped.
+Fractions, thousands separators and exponents are not recognised; a
+key with no digits sorts as 0.
+Values that overflow saturate at the largest or smallest
+.BR "long long" .
+.TP
+.B \-g
+General numeric: compare values parsed with
+.BR strtod (3),
+so decimals and exponents are handled.
+.TP
+.B \-h
+Human numeric: like
+.B \-g
+but a suffix
+.BR K ,
+.BR M ,
+.BR G ,
+.B T
+or
+.B P
+(either case) immediately after the number multiplies it by the
+corresponding power of 1024.
+.TP
+.B \-M
+Month: compare the first three characters of the key, case-insensitively,
+as
+.B JAN
+<
+.B FEB
+< ... <
+.BR DEC .
+Anything else sorts before
+.BR JAN .
+.TP
+.B \-V
+Version: runs of digits are compared by numeric value and other
+characters byte by byte, so
+.B foo\-1.9
+sorts before
+.BR foo\-1.10 .
+.TP
+.B \-R
+Random: order lines by a hash of the first 32 bytes of their key,
+seeded from the current time.
+Identical keys end up next to each other.
+.SS Modifiers
+.TP
+.B \-b
+Ignore leading blanks (spaces and tabs) of the key.
+.TP
+.B \-d
+Dictionary order: only alphanumeric and white-space characters take
+part in the comparison.
+.TP
+.B \-f
+Fold lower case to upper case for comparison.
+.TP
+.B \-i
+Ignore non-printable characters.
+.TP
+.B \-r
+Reverse the result of each comparison.
+.PP
+.BR \-d ,
+.B \-f
+and
+.B \-i
+apply to the byte-string comparison;
+.B \-b
+also affects the numeric and month orderings.
+.SS Keys and fields
+.TP
+.BI \-t " char"
+Fields are separated by the single character
+.IR char .
+Only its first character is used; an empty argument is an error.
+Without
+.BR \-t ,
+fields are separated by runs of spaces and tabs, and leading blanks
+are not part of the first field.
+.TP
+.BI \-k " keydef"
+Compare only the key described by
+.IR keydef ,
+which has the form
+.IR field1 [ .char1 ][ ,field2 [ .char2 ]],
+all numbers counting from 1.
+The key starts at character
+.I char1
+of field
+.I field1
+(the start of the field if omitted) and ends at character
+.I char2
+of field
+.I field2
+(the end of that field if
+.I char2
+is omitted or 0), or at the end of the line if
+.I field2
+is omitted.
+Only one key is supported; if
+.B \-k
+is repeated, the last one is used.
+Ordering letters written after a field position (such as
+.BR 2n )
+are accepted but ignored; the global options apply to the key.
+.SS Other options
+.TP
+.B \-c
+Check whether the input is already sorted instead of sorting it.
+On the first line out of order, print a
+.B disorder
+message naming that line and exit with status 1.
+.TP
+.B \-C
+Like
+.BR \-c ,
+but print nothing.
+.TP
+.B \-m
+Accepted for compatibility.
+The input is sorted in full anyway, which gives the same result for
+sorted input.
+.TP
+.BI \-o " output"
+Write the result to
+.I output
+instead of standard output.
+.TP
+.B \-s
+Stable sort: lines with equal keys keep their input order.
+.TP
+.B \-u
+Unique: of each group of lines that compare equal (on the key, if one
+is given), write only the first.
+.TP
+.B \-z
+Lines are terminated by NUL bytes instead of newlines, on both input
+and output.
+.TP
+.B \-\-help
+Print a usage message to standard error and exit with status 2.
+.SH EXIT STATUS
+.TP
+.B 0
+Success, or with
+.B \-c
+or
+.BR \-C ,
+the input was sorted.
+.TP
+.B 1
+With
+.B \-c
+or
+.BR \-C ,
+the input was not sorted.
+.TP
+.B 2
+Invalid usage, a file could not be opened, the output file
+could not be created, or memory ran out.
+Unreadable input files are reported and skipped; the others are still
+sorted.
+.SH EXAMPLES
+Sort
+.I /etc/passwd
+by numeric user ID:
+.EX
+$ sort \-t : \-k 3,3 \-n /etc/passwd
+.EE
+.PP
+Sort sizes such as 10K and 2M, largest first:
+.EX
+$ sort \-hr sizes
+.EE
+.PP
+Remove duplicate lines in place:
+.EX
+$ sort \-u \-o list list
+.EE
+.SH SEE ALSO
+.BR join (1),
+.BR tr (1),
+.BR wc (1),
+.BR qsort (3)
+.SH STANDARDS
+The ordering and key options follow POSIX.1-2024
+.BR sort ;
+.BR \-g ,
+.BR \-h ,
+.BR \-M ,
+.BR \-R ,
+.B \-V
+and
+.B \-z
+are BSD and GNU extensions.
+.SH BUGS
+Only a single
+.B \-k
+key is supported, and per-key ordering letters are ignored.
+.PP
+.B \-m
+does not merge; it sorts.
+.PP
+With
+.B \-c
+the disorder message always names the input
+.B \-
+and a line number counted across all inputs, and a file that could not
+be opened does not change the exit status.
+.PP
+Errors while reading input or writing the output are not detected.
