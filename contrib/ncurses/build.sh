@@ -65,7 +65,8 @@ echo "==> configure"
 "${TREE_DIR}/configure" \
     --host=i386-unknown-substrate \
     --prefix=/usr \
-    --without-cxx-binding \
+    --with-cxx-binding \
+    --with-cxx-shared \
     --without-ada \
     --without-tests \
     --without-debug \
@@ -87,19 +88,55 @@ echo "==> install into ${DESTDIR}"
 rm -rf "${DESTDIR}"; mkdir -p "${DESTDIR}"
 make install DESTDIR="${DESTDIR}"
 
-# Link-time compatibility names.  Ports configure with -lncurses, -lcurses,
-# -lform, -lmenu and -lpanel; with only the wide libraries staged those links
-# would fail.  A one-line GNU ld script forwards each name to its wide library,
-# so existing build systems link unchanged and record DT_NEEDED on the w
-# library -- the same arrangement Arch uses.  These are link-time names only:
-# there is deliberately no libncurses.so.6 runtime alias, because a binary
-# built against the narrow headers is not ABI-compatible with libncursesw
-# (WINDOW's layout differs), so it has to be rebuilt, not redirected.
-for _l in ncurses form menu panel; do
-    printf 'INPUT(-l%sw)\n' "${_l}" > "${DESTDIR}/usr/lib/lib${_l}.so"
-    ln -sf "lib${_l}w.a" "${DESTDIR}/usr/lib/lib${_l}.a"
-done
-printf 'INPUT(-lncursesw)\n' > "${DESTDIR}/usr/lib/libcurses.so"
-ln -sf libncursesw.a "${DESTDIR}/usr/lib/libcurses.a"
+# The narrow libraries too: libncurses, libform, libmenu and libpanel as real
+# shared objects (plus .a), so -lncurses, -lform, -lmenu, -lpanel and -lcurses
+# each link a narrow library with its own libncurses.so.6-style soname, while
+# the -l...w names link the wide ones -- the arrangement Debian ships.  A
+# program that wants wide-character support links the w library explicitly
+# (mc and nano do).
+#
+# One header set serves both: the wide build's.  It differs from the narrow
+# one only in what NCURSES_WIDECHAR switches on, and WINDOW's wide-only
+# members (_bkgrnd, _color) sit at the very end of struct _win_st under that
+# switch, so the layout a narrow consumer sees -- NCURSES_WIDECHAR 0 unless it
+# asks for _XOPEN_SOURCE_EXTENDED -- is the narrow library's.  Nor is a second
+# libtinfo needed: the wide build's exports every symbol the narrow one does,
+# plus the extended-colour *2 variants.
+NARROW_DIR="${HERE}/build/build-stage-substrate-narrow"
+NARROW_DEST="${HERE}/build/dest-narrow"
+echo "==> configure (narrow)"
+rm -rf "${NARROW_DIR}" "${NARROW_DEST}"; mkdir -p "${NARROW_DIR}"; cd "${NARROW_DIR}"
+"${TREE_DIR}/configure" \
+    --host=i386-unknown-substrate \
+    --prefix=/usr \
+    --with-cxx-binding \
+    --with-cxx-shared \
+    --without-ada \
+    --without-tests \
+    --without-debug \
+    --without-manpages \
+    --with-shared \
+    --with-normal \
+    --with-termlib=tinfo \
+    --enable-overwrite \
+    --disable-stripping \
+    cf_cv_header_stdbool_h=1 \
+    CFLAGS="-O2 -g -march=i486 -mtune=i486" \
+    CPPFLAGS="-D_GNU_SOURCE"
 
-echo "==> Done.  Staged at ${DESTDIR}/usr/lib/libncursesw.so.6"
+echo "==> make -j${JOBS} (narrow)"
+make -j"${JOBS}"
+make install DESTDIR="${NARROW_DEST}"
+
+# Replaces the INPUT(-l...w) forwarding scripts earlier versions staged under
+# the plain names.
+for _l in ncurses form menu panel ncurses++; do
+    rm -f "${DESTDIR}/usr/lib/lib${_l}.so" "${DESTDIR}/usr/lib/lib${_l}.a"
+    cp -P "${NARROW_DEST}/usr/lib/lib${_l}.so"* "${NARROW_DEST}/usr/lib/lib${_l}.a" \
+        "${DESTDIR}/usr/lib/"
+done
+ln -sf libncurses.so "${DESTDIR}/usr/lib/libcurses.so"
+ln -sf libncurses.a "${DESTDIR}/usr/lib/libcurses.a"
+rm -rf "${NARROW_DEST}"
+
+echo "==> Done.  Staged libncurses.so.6 and libncursesw.so.6 under ${DESTDIR}/usr/lib"

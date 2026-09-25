@@ -15,7 +15,9 @@ on the image up to now) with a real terminfo backend.
 
   --host=i386-unknown-substrate     substrate cross
   --prefix=/usr
-  --without-cxx-binding             skip libncurses++
+  --with-cxx-binding                build libncurses++(w), the C++
+  --with-cxx-shared                 binding, as shared libraries
+                                    against the shared libstdc++
   --without-ada                     skip Ada binding
   --without-tests                   skip test programs
   --with-shared                     produce libncurses.so.6
@@ -90,13 +92,20 @@ and it is what gives nano and less multibyte (UTF-8) text.
   unaffected.
 - The headers keep their usual names and still install flat into
   `/usr/include`.
-- `libncurses.so`, `libcurses.so`, `libform.so`, `libmenu.so` and
-  `libpanel.so` are one-line GNU ld scripts (`INPUT(-lncursesw)` and so on),
-  so ports that link `-lncurses` build unchanged and record `DT_NEEDED` on the
-  wide library.  They are link-time names only.  There is deliberately no
-  `libncurses.so.6` runtime alias: a binary built against the narrow headers is
-  not ABI-compatible with `libncursesw` (`WINDOW` is laid out differently), so
-  it has to be rebuilt rather than redirected.
+- The narrow libraries are built too, in a second configure pass without
+  `--enable-widec`, and staged as real shared objects alongside the wide ones:
+  `libncurses.so.6`, `libform.so.6`, `libmenu.so.6`, `libpanel.so.6` and
+  `libncurses++.so.6`, with `libcurses.so` pointing at `libncurses.so`.  So
+  `-lncurses` (and `-lcurses`, `-lform`, ...) links the narrow library and
+  `-lncursesw` the wide one, as on Debian.  A port that wants multibyte text
+  links the `w` library explicitly (mc and nano do).
+- One header set, the wide build's, serves both.  It differs from the narrow
+  one only in what `NCURSES_WIDECHAR` switches on, and `WINDOW`'s wide-only
+  members sit at the end of `struct _win_st` under that switch, so a narrow
+  consumer (`NCURSES_WIDECHAR` 0 unless it asks for `_XOPEN_SOURCE_EXTENDED`)
+  sees the narrow library's layout.  The narrow build's `libtinfo` is not
+  staged: the wide build's exports every symbol it does, plus the
+  extended-colour `*2` variants.
 - The wide build needs POSIX `tsearch`/`tfind`/`tdelete` from libc: extended
   colour pairs, which `--enable-widec` turns on, live in a binary tree in
   `ncurses/base/new_pair.c`.

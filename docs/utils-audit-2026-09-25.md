@@ -515,7 +515,7 @@ Suggested order, highest leverage first:
     - Site: `include/sys/time.h:43`, `lib/c/` (only `clock_settime` and `stime` are exported)
     - Fix: Implement `settimeofday()` over `clock_settime(CLOCK_REALTIME)` (ignoring a non-null `tz`), with a man page.
     - Verify: `tests/lib/`: a program calling `settimeofday()` links and steps the clock.
-- [ ] **UTL-SYSROOT-01** (low) Stale narrow-ncurses symlinks remain in the cross sysroot (REQ: REQ-UTLA-0112)
+- [x] **UTL-SYSROOT-01** (low) Stale narrow-ncurses symlinks remain in the cross sysroot (REQ: REQ-UTLA-0112)
     - Site: `/opt/substrate/i386-unknown-substrate/lib/libncurses.so -> libncurses.so.6 -> libncurses.so.6.4` (now the `INPUT(-lncursesw)` script)
     - Fix: Have `contrib/ncurses/build.sh` (or `contrib/gcc/install-specs.sh`) remove the narrow `.so.6` names when staging the wide-only build.
     - Verify: After a toolchain reinstall, `libncurses.so` is the linker script and no `libncurses.so.6*` exists.
