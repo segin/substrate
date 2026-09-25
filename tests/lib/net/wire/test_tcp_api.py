@@ -72,6 +72,9 @@ it guards.
                    to a peer that never answers; every SYN is retransmitted
                    on the RTO, and all of them on the same timer tick -- the
                    overflow is not deferred to later ticks.
+    listen-close   TCP-RES-02: closing a listener with 20 established,
+                   never-accepted children (more than one batch) resets
+                   every one of them, each at SND.NXT.
 
 Run from the repo root after building sys/ and wireguest:
     python3 tests/lib/net/wire/test_tcp_api.py [case...]
@@ -502,6 +505,37 @@ def case_synrst_flood():
         return None, w
 
 
+def case_listen_close():
+    n = 20
+    with Wire.boot('listenclose %d 8' % PORT) as w:
+        if not w.wait_serial('guest: listening', 90):
+            return 'guest never listened', w
+        w.send_arp(1, PEER_MAC, PEER_IP, b'\0' * 6, GUEST_IP)
+        w.pump(0.5)
+        w.rx.clear()
+        for i in range(n):
+            w.send(Seg(46000 + i, PORT, PISS, 0, SYN))
+        w.pump(1.0)
+        synack = {s.dport: s for s in w.rx if s.flags & SYN and s.flags & ACK}
+        if len(synack) != n:
+            return '%d of %d SYNs answered' % (len(synack), n), w
+        for hp, s in synack.items():
+            w.send(Seg(hp, PORT, PISS + 1, s.seq + 1, ACK))
+        w.rx.clear()
+        if not w.wait_serial('guest: closed', 20):
+            return 'guest never closed the listener', w
+        w.pump(1.0)
+        rst = {s.dport: s for s in w.rx if s.flags & RST}
+        missing = sorted(set(synack) - set(rst))
+        if missing:
+            return '%d of %d children got no RST (e.g. port %d)' % (
+                len(missing), n, missing[0]), w
+        bad = [hp for hp, s in rst.items() if s.seq != synack[hp].seq + 1]
+        if bad:
+            return 'RST to port %d not at SND.NXT' % bad[0], w
+        return None, w
+
+
 def case_peer_early():
     with Wire.boot('peerconnect 10.0.2.2 %d' % PORT) as w:
         syn = w.expect(lambda s: s.flags & SYN and s.dport == PORT, 90, 'SYN')
@@ -578,7 +612,8 @@ CASES = (('reconnect', case_reconnect),
          ('synrst-flood', case_synrst_flood),
          ('peer-early', case_peer_early),
          ('close-synsent', case_close_synsent),
-         ('retx-batch', case_retx_batch))
+         ('retx-batch', case_retx_batch),
+         ('listen-close', case_listen_close))
 
 
 def main():

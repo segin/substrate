@@ -57,6 +57,9 @@
  *                                               how many seconds it took)
  *   wireguest manyconnect <ip> <port> <n>      (n O_NONBLOCK connects to the
  *                                               same peer, then sleep 30 s)
+ *   wireguest listenclose <port> <secs>        (listen with backlog 32, sleep
+ *                                               secs, close the listener
+ *                                               without accepting)
  *   wireguest acceptfull <port>                (listen, sleep 4 s, fill the fd
  *                                               table with dup(), then accept,
  *                                               reporting the error)
@@ -569,6 +572,22 @@ int main(int argc, char **argv) {
         socklen_t el = sizeof err;
         getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &el);
         say("soerror ok value=%s%ld", "", (long)err);
+        rc = 0;
+    } else if (argc >= 4 && strcmp(argv[1], "listenclose") == 0) {
+        struct sockaddr_in sa;
+        memset(&sa, 0, sizeof sa);
+        sa.sin_family = AF_INET;
+        sa.sin_port = htons((unsigned short)atoi(argv[2]));
+        int l = socket(AF_INET, SOCK_STREAM, 0);
+        if (l >= 0 && bind(l, (struct sockaddr *)&sa, sizeof sa) == 0 &&
+            listen(l, 32) == 0) {
+            say("listening %s%ld", "", atol(argv[2]));
+            sleep((unsigned)atoi(argv[3]));
+            close(l);
+            say("closed %s%ld", "", 0);
+        } else {
+            say("listen failed: %s (%ld)", strerror(errno), errno);
+        }
         rc = 0;
     } else if (argc >= 5 && strcmp(argv[1], "manyconnect") == 0) {
         struct sockaddr_in sa;

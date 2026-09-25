@@ -750,6 +750,9 @@ typedef struct {
 } tcp_retx_t;
 static tcp_retx_t g_tcp_retx[TCP_RETX_BATCH];
 
+/* TCP-RES-02: children reset per lock hold when a listener closes. */
+#define TCP_CLOSE_BATCH 8
+
 /* The timer's half of tcp_retx_head(): the same span and bookkeeping, but
  * the octets go into *r instead of onto the wire.  Caller holds tcp_lock. */
 static void tcp_retx_capture_locked(tcp_pcb_t *p, tcp_retx_t *r) {
@@ -3125,33 +3128,52 @@ int tcp_close(tcp_pcb_t *p) {
          * connection is up.  Reset and detach each so the peer is told
          * the connection is gone and the timer frees the PCB.
          *
-         * A45: the RST is emitted INLINE, under the lock, exactly like
-         * the retransmit timer's inline transmit (NET-02).  NET-05
-         * makes ip4_output() non-sleeping while interrupts are disabled
-         * (an ARP miss fires the request and drops the frame instead of
-         * yielding), so tcp_xmit_raw() cannot block here.  The previous
-         * design collected the children, dropped the lock, then called
-         * tcp_send_ctl() on each after the unlock — but tcp_kill_pcb()
-         * transitions each child to CLOSED+detached, precisely the state
-         * the timer reaper (an ordinary preemptible kthread) tcp_free()s
-         * on its next wake.  A preemption in the gap between the unlock
-         * and the RST sends could free a child before its pointer was
-         * dereferenced: a use-after-free.  Sending under the lock closes
-         * the window (and drops the old 32-child cap). */
-        for (tcp_pcb_t *q = g_tcp_pcbs; q; q = q->next) {
-            if (q->parent != p) continue;
-            q->parent   = NULL;     /* drop the dangling back-pointer */
-            q->detached = 1;        /* timer reaps once CLOSED */
-            int qst = q->state;
-            /* Only an established/half-open child has a peer that needs
-             * telling; a CLOSED/TIME_WAIT one is already torn down. */
-            if (qst != TCP_CLOSED && qst != TCP_TIME_WAIT)
-                tcp_send_ctl(q, TCP_RST | TCP_ACK);
-            tcp_kill_pcb(q, ECONNRESET);   /* -> CLOSED, wakes waiters */
-        }
+         * A45: an earlier design collected the children, dropped the
+         * lock and sent the RSTs -- but tcp_kill_pcb() leaves each child
+         * CLOSED+detached, exactly what the timer reaper tcp_free()s, so a
+         * preemption in the gap could free a child before its RST went
+         * out.  The fix sent every RST inline under the lock.
+         *
+         * TCP-RES-02: which is one IRQs-off region as long as the backlog.
+         * Now each child that needs a RST is HELD (the reaper skips a held
+         * PCB) and sent after the unlock, a bounded batch at a time.  The
+         * listener goes CLOSED first, so no SYN can add a child while the
+         * lock is dropped, and is held itself until the last batch is out:
+         * it too is CLOSED+detached, and the walk compares against it. */
+        tcp_pcb_t *rst[TCP_CLOSE_BATCH];
         p->accept_count = 0;
         p->state = TCP_CLOSED;
-        tcp_unlock(f);
+        p->holds++;
+        for (;;) {
+            int n = 0, more = 0;
+            for (tcp_pcb_t *q = g_tcp_pcbs; q; q = q->next) {
+                if (q->parent != p) continue;
+                /* Only an established/half-open child has a peer that
+                 * needs telling; a CLOSED/TIME_WAIT one is already torn
+                 * down. */
+                int needs_rst = q->state != TCP_CLOSED &&
+                                q->state != TCP_TIME_WAIT;
+                if (needs_rst && n == TCP_CLOSE_BATCH) {
+                    more = 1;           /* next batch; still ->parent == p */
+                    continue;
+                }
+                q->parent   = NULL;     /* drop the dangling back-pointer */
+                q->detached = 1;        /* timer reaps once CLOSED */
+                if (needs_rst) {
+                    q->holds++;
+                    rst[n++] = q;
+                }
+                tcp_kill_pcb(q, ECONNRESET);   /* -> CLOSED, wakes waiters */
+            }
+            tcp_unlock(f);
+            for (int i = 0; i < n; i++) {
+                tcp_send_ctl(rst[i], TCP_RST | TCP_ACK);
+                tcp_unhold(rst[i]);
+            }
+            if (!more) break;
+            f = tcp_lock();
+        }
+        tcp_unhold(p);
         break;
     }
     case TCP_SYN_RECEIVED:
