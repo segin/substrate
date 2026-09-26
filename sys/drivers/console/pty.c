@@ -792,8 +792,7 @@ void pty_master_node_close(fs_node_t *node) {
 
     /* Hangup the slave: any pending slave read returns 0 (EOF)
      * after draining whatever's already in raw_buf.  Wake any
-     * blocked slave reader so it can observe hung_up and return.
-     * SIGHUP delivery to the slave's session is a follow-up. */
+     * blocked slave reader so it can observe hung_up and return. */
     if (slave_tty) {
         spinlock_acquire(&slave_tty->lock);
         slave_tty->hung_up = 1;
@@ -803,6 +802,12 @@ void pty_master_node_close(fs_node_t *node) {
         /* Also wake a slave writer blocked in tty_write's flow-control loop,
          * so it observes hung_up and returns -EIO instead of hanging. */
         sched_wakeup(&slave_tty->write_wait);
+        /* And tell the session whose controlling terminal this was
+         * (POSIX 11.1.10: a hangup sends SIGHUP, with SIGCONT for any
+         * stopped member).  Without it a shell left stopped on the slave --
+         * Midnight Commander's subshell after mc exits -- stayed stopped
+         * forever, reparented to init. */
+        tty_hangup(slave_tty);
     }
 
     /*
@@ -1016,6 +1021,7 @@ static void pty_bsd_master_close(fs_node_t *node) {
         spinlock_release(&st->lock);
         sched_wakeup(&st->read_wait);
         sched_wakeup(&st->poll_wait);
+        tty_hangup(st);         /* SIGHUP (+SIGCONT) to the slave's session */
     }
 }
 

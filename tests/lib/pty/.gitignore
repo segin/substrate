@@ -1,3 +1,4 @@
 torture_pty
 torture_ctty
 *.o
+torture_pty_hangup
