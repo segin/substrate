@@ -1550,6 +1550,31 @@ int afinet_get_ipopt(int fd, int optname, int *val, uint32_t *addr) {
     return 0;
 }
 
+/* IP_OPTIONS (RFC 791 3.1): the options every datagram from this socket
+ * carries.  A raw socket's caller builds its own IP header only under
+ * IP_HDRINCL, which is not offered, so options apply to every type. */
+int afinet_set_ipoptions(int fd, const uint8_t *opts, size_t len) {
+    afi_sock_t *s = afi_from_fd(fd);
+    if (!s) return -ENOTSOCK;
+    if (s->family != AF_INET) return -ENOPROTOOPT;
+    struct ip4_txopts o = s->txo;
+    int rc = ip4_txopts_set_options(&o, opts, len);
+    if (rc < 0) return rc;
+    s->txo = o;
+    if (s->tcp) tcp_set_txopts(s->tcp, &o);
+    return 0;
+}
+
+int afinet_get_ipoptions(int fd, uint8_t *opts, size_t *len) {
+    afi_sock_t *s = afi_from_fd(fd);
+    if (!s) return -ENOTSOCK;
+    if (s->family != AF_INET) return -ENOPROTOOPT;
+    size_t n = s->txo.optlen < *len ? s->txo.optlen : *len;
+    memcpy(opts, s->txo.opts, n);
+    *len = s->txo.optlen;
+    return 0;
+}
+
 /*
  * UDP-API-14 / UDP-RES-01: what SO_RCVBUF / SO_SNDBUF report for an AF_INET
  * socket -- the capacity the implementation actually has, not a number

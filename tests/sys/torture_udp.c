@@ -1063,17 +1063,17 @@ static void test_unsupported_ipopts(void)
 {
     printf("UDP-API-13: unimplemented IP options are refused\n");
     int s = socket(AF_INET, SOCK_DGRAM, 0);
+    /* IP_OPTIONS is implemented: what is set is sent and reads back. */
     unsigned char opts[4] = { 1, 1, 1, 0 };           /* NOP NOP NOP EOL */
-    errno = 0;
-    ok("setsockopt(IP_OPTIONS) fails ENOPROTOOPT",
-       setsockopt(s, IPPROTO_IP, IP_OPTIONS, opts, sizeof(opts)) < 0 && errno == ENOPROTOOPT,
-       "accepted");
-    int v = 0;
-    socklen_t vl = sizeof(v);
-    errno = 0;
-    ok("getsockopt(IP_OPTIONS) fails ENOPROTOOPT",
-       getsockopt(s, IPPROTO_IP, IP_OPTIONS, &v, &vl) < 0 && errno == ENOPROTOOPT,
-       "answered");
+    ok("setsockopt(IP_OPTIONS) accepts a well-formed list",
+       setsockopt(s, IPPROTO_IP, IP_OPTIONS, opts, sizeof(opts)) == 0,
+       "refused");
+    unsigned char back[40];
+    socklen_t vl = sizeof(back);
+    ok("getsockopt(IP_OPTIONS) reads it back",
+       getsockopt(s, IPPROTO_IP, IP_OPTIONS, back, &vl) == 0 && vl == 4 &&
+       memcmp(back, opts, 4) == 0,
+       "different");
     struct { uint32_t g, i, src; } smr = { htonl(0xEF010206), 0, htonl(0x7F000001) };
     errno = 0;
     ok("IP_ADD_SOURCE_MEMBERSHIP fails ENOPROTOOPT",

@@ -14,15 +14,20 @@ had none.
     srcroute a datagram carrying a loose source route with a hop still to
             visit is not delivered (a host does not forward, RFC 1122
             3.3.5) and draws no error; one whose route is exhausted is.
+    send    IP_OPTIONS: with a Record Route set, the guest's datagram carries
+            it (IHL 7, a valid header checksum, the payload after it) and
+            getsockopt reads it back; cleared, the next datagram has none;
+            a malformed list is refused EINVAL.
 
 Run from the repo root after building sys/ and wireguest:
     python3 tests/lib/net/wire/test_ip_options.py
 """
 import os
 import sys
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from wire import Wire, GUEST_IP  # noqa: E402
+from wire import Wire, csum, GUEST_IP  # noqa: E402
 
 PORT = 7412
 RR_OK = b'\x07\x07\x04' + b'\0' * 4 + b'\x00'
@@ -108,7 +113,46 @@ def case_srcroute():
         return None, w
 
 
-CASES = (('walk', case_walk), ('srcroute', case_srcroute))
+def case_send():
+    rr = '0707040000000000'
+    with Wire.boot('udpany %d ipopts:%s getipopts sendto:10.0.2.2:9:rr '
+                   'ipopts: sendto:10.0.2.2:9:plain ipopts:0701 sleep:60'
+                   % (PORT, rr)) as w:
+        end = time.time() + 90
+        while time.time() < end and w.serial().count('guest: ipopts') < 3:
+            w.pump(0.2)
+        if w.serial().count('guest: ipopts') < 3:
+            return 'guest never finished its sends', w
+        w.pump(1.0)
+        lines = [l for l in w.serial().splitlines() if 'guest: ' in l]
+        sets = [l for l in lines if 'guest: ipopts' in l]
+        if len(sets) < 3 or 'ok' not in sets[0] or 'ok' not in sets[1]:
+            return 'IP_OPTIONS set/clear: %r' % sets, w
+        if 'invalid' not in sets[2].lower():
+            return 'a malformed option list was accepted: %r' % sets[2], w
+        got = [l for l in lines if 'getipopts' in l]
+        if not got or '|%s|' % rr not in got[0]:
+            return 'getsockopt(IP_OPTIONS): %r, want %s' % (got, rr), w
+        udp = [fr[14:] for mac, et, fr in w.frames
+               if et == 0x0800 and fr[14 + 9] == 17 and
+               fr[14 + 16:14 + 20] == bytes([10, 0, 2, 2])]
+        if len(udp) < 2:
+            return 'saw %d datagrams, want 2' % len(udp), w
+        with_opts, plain = udp[0], udp[1]
+        ihl = (with_opts[0] & 0xF) * 4
+        if ihl != 28 or with_opts[20:28].hex() != rr:
+            return 'first datagram: IHL %d, options %s; want 28 and %s' % (
+                ihl, with_opts[20:ihl].hex(), rr), w
+        if csum(bytes(with_opts[:ihl])) != 0:
+            return 'the header with options has a bad checksum', w
+        if with_opts[ihl + 8:ihl + 10] != b'rr':
+            return 'the payload moved: %r' % bytes(with_opts[ihl + 8:]), w
+        if (plain[0] & 0xF) != 5:
+            return 'options still sent after they were cleared', w
+        return None, w
+
+
+CASES = (('walk', case_walk), ('srcroute', case_srcroute), ('send', case_send))
 
 
 def main():

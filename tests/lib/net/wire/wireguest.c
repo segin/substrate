@@ -117,6 +117,8 @@
  *   netmask:M    SIOCSIFNETMASK eth0 M
  *   hwaddr:MAC   SIOCSIFHWADDR eth0 MAC (aa:bb:cc:dd:ee:ff)
  *   pmtudisc:N   setsockopt(IP_MTU_DISCOVER, N)
+ *   ipopts:HEX   setsockopt(IP_OPTIONS) with the octets HEX (empty clears)
+ *   getipopts    getsockopt(IP_OPTIONS), reporting the octets in hex
  *
  * A leading "mtu=N" argument first sets eth0's MTU (SIOCSIFMTU); a leading
  * "ifaddr0" (after it, if both) first clears eth0's address, leaving the
@@ -360,6 +362,25 @@ static int do_actions(int fd, int argc, char **argv) {
             int r = ioctl(fd, is_mask ? SIOCSIFNETMASK : SIOCSIFADDR, &ifr);
             say(is_mask ? "netmask %s rc=%ld" : "ifaddr %s rc=%ld",
                 r < 0 ? strerror(errno) : "ok", r);
+        } else if (strncmp(a, "ipopts:", 7) == 0) {
+            unsigned char o[64];
+            size_t n = 0;
+            for (const char *h = a + 7; h[0] && h[1] && n < sizeof(o); h += 2) {
+                char byte[3] = { h[0], h[1], 0 };
+                o[n++] = (unsigned char)strtoul(byte, NULL, 16);
+            }
+            int r = setsockopt(fd, IPPROTO_IP, 4 /* IP_OPTIONS */,
+                               n ? o : NULL, (socklen_t)n);
+            say("ipopts %s rc=%ld", r < 0 ? strerror(errno) : "ok", r);
+        } else if (strcmp(a, "getipopts") == 0) {
+            unsigned char o[40];
+            socklen_t n = sizeof(o);
+            char hex[2 * sizeof(o) + 1] = "";
+            int r = getsockopt(fd, IPPROTO_IP, 4 /* IP_OPTIONS */, o, &n);
+            for (socklen_t k = 0; r == 0 && k < n; k++)
+                snprintf(hex + 2 * k, 3, "%02x", o[k]);
+            say("getipopts |%s| n=%ld", r < 0 ? strerror(errno) : hex,
+                (long)n);
         } else if (strncmp(a, "pmtudisc:", 9) == 0) {
             int mode = atoi(a + 9);
             int r = setsockopt(fd, IPPROTO_IP, 10 /* IP_MTU_DISCOVER */,

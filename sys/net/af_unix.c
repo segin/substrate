@@ -2812,13 +2812,21 @@ int sys_setsockopt(int fd, int level, int optname,
         int r = afinet_set_tcpopt(fd, optname, val);
         if (r != -ENOTSOCK) return r;
     }
+    /* IPPROTO_IP IP_OPTIONS (4): up to 40 octets of options for every
+     * datagram the socket sends; an empty list clears them. */
+    if (level == 0 /*IPPROTO_IP*/ && optname == 4 && afinet_so_type(fd) >= 0) {
+        uint8_t opts[40];
+        if (optlen > sizeof(opts)) return -EINVAL;
+        if (optlen && (!optval || copyin(optval, opts, (size_t)optlen) != 0))
+            return -EFAULT;
+        return afinet_set_ipoptions(fd, opts, (size_t)optlen);
+    }
     /* UDP-API-13 / UDP-I-04: options with no implementation behind them must
-     * say so.  IP_OPTIONS (4) was accepted while options were neither sent
-     * nor received, and the source-specific multicast calls (37-40) while
-     * there is no source filtering -- both reported success and did
+     * say so.  The source-specific multicast calls (37-40) were accepted
+     * while there is no source filtering -- they reported success and did
      * nothing, so a caller's fallback path was dead code. */
     if (level == 0 /*IPPROTO_IP*/ &&
-        (optname == 4 || (optname >= 37 && optname <= 40)) &&
+        (optname >= 37 && optname <= 40) &&
         afinet_so_type(fd) >= 0)
         return -ENOPROTOOPT;
     /* UDP-API-12: IPPROTO_IP IP_TOS (1), IP_TTL (2), IP_MULTICAST_IF (32),
@@ -3056,9 +3064,20 @@ int sys_getsockopt(int fd, int level, int optname,
         if (r == 0) return getsockopt_ret_int(val, optval, optlen);
         if (r != -ENOTSOCK) return r;
     }
-    /* UDP-API-13: nor can they be read back. */
+    /* IP_OPTIONS reads back what was set, as many octets as fit. */
+    if (level == 0 /*IPPROTO_IP*/ && optname == 4 && afinet_so_type(fd) >= 0) {
+        uint8_t opts[40];
+        size_t len = sizeof(opts);
+        int r = afinet_get_ipoptions(fd, opts, &len);
+        if (r < 0) return r;
+        socklen_t n = (socklen_t)len < ulen ? (socklen_t)len : ulen;
+        if (n && copyout(opts, optval, n) != 0) return -EFAULT;
+        if (copyout(&n, optlen, sizeof(n)) != 0) return -EFAULT;
+        return 0;
+    }
+    /* The source-specific multicast options cannot be read back either. */
     if (level == 0 /*IPPROTO_IP*/ &&
-        (optname == 4 || (optname >= 37 && optname <= 40)) &&
+        (optname >= 37 && optname <= 40) &&
         afinet_so_type(fd) >= 0)
         return -ENOPROTOOPT;
     /* UDP-API-12: the IPPROTO_IP transmit options read back what was set

@@ -421,6 +421,33 @@ void ip4_txopts_init(struct ip4_txopts *o) {
     o->mcast_loop = 1;
     o->mcast_if = 0;
     o->df = IP4_PMTUDISC_DONT;
+    o->optlen = 0;
+}
+
+static size_t ip4_check_options(const uint8_t *pkt, size_t hlen,
+                                int *route_pending);
+
+/* The option list is well formed, is at most 40 octets, and is stored in
+ * `o` padded with End of Option List to a multiple of 4 (RFC 791 3.1).
+ * Validation is the input walker's, so nothing is sent that we would
+ * ourselves answer with Parameter Problem.  len 0 clears.  Returns 0 or
+ * -EINVAL. */
+int ip4_txopts_set_options(struct ip4_txopts *o, const uint8_t *opts,
+                           size_t len) {
+    if (len > sizeof(o->opts))
+        return -EINVAL;
+    uint8_t hdr[sizeof(struct iphdr) + sizeof(o->opts)];
+    size_t padded = (len + 3) & ~(size_t)3;
+    memset(hdr, 0, sizeof(hdr));
+    if (len)
+        memcpy(hdr + sizeof(struct iphdr), opts, len);
+    int route_pending;
+    if (padded &&
+        ip4_check_options(hdr, sizeof(struct iphdr) + padded, &route_pending))
+        return -EINVAL;
+    memcpy(o->opts, hdr + sizeof(struct iphdr), padded);
+    o->optlen = (uint8_t)padded;
+    return 0;
 }
 
 int ip4_output_from(uint32_t saddr, uint32_t daddr, uint8_t protocol,
@@ -444,6 +471,9 @@ int ip4_output_opts(uint32_t saddr, uint32_t daddr, uint8_t protocol,
     int via_gw = 0;
     netdev_t *dev = route_out4(daddr, o, &via_gw);
     if (!dev) return -ENETUNREACH;
+    /* The header: the fixed 20 octets plus the socket's IP_OPTIONS, which
+     * are stored already padded to a multiple of 4 (RFC 791 3.1). */
+    size_t hlen = sizeof(struct iphdr) + o->optlen;
     /*
      * UDP-IP-01: bound the datagram by the egress device's MTU, not by the
      * compile-time NETDEV_MTU_MAX alone.  A 1572-byte UDP payload became a
@@ -452,7 +482,7 @@ int ip4_output_opts(uint32_t saddr, uint32_t daddr, uint8_t protocol,
      * model.  We do not fragment (RFC 1122 3.3.3 leaves that optional), so
      * fail the send loudly instead.
      */
-    if (dev->mtu && payload_len > dev->mtu - sizeof(struct iphdr))
+    if (dev->mtu && payload_len > dev->mtu - hlen)
         return -EMSGSIZE;
     /* With Don't Fragment set, a datagram larger than the learned path MTU
      * would only be dropped by the router that reported it; refuse it here
@@ -464,7 +494,7 @@ int ip4_output_opts(uint32_t saddr, uint32_t daddr, uint8_t protocol,
         if (locked && o->df == IP4_PMTUDISC_WANT) {
             set_df = 0;         /* path below the floor: let routers fragment */
         } else if (o->df != IP4_PMTUDISC_PROBE && pmtu &&
-                   payload_len > pmtu - sizeof(struct iphdr)) {
+                   payload_len > pmtu - hlen) {
             return -EMSGSIZE;
         }
     }
@@ -498,10 +528,10 @@ int ip4_output_opts(uint32_t saddr, uint32_t daddr, uint8_t protocol,
      * send arms are bounded by afi_max_payload() (UDP-API-20) -- but this
      * check is the last line and stays.
      *
-     * NETDEV_MTU_MAX is much larger than the header, so the subtraction
-     * cannot underflow and folds to a constant.
+     * NETDEV_MTU_MAX is much larger than the header, options included, so
+     * the subtraction cannot underflow.
      */
-    if (payload_len > NETDEV_MTU_MAX - sizeof(struct iphdr)) return -EMSGSIZE;
+    if (payload_len > NETDEV_MTU_MAX - hlen) return -EMSGSIZE;
 
     /* STACK-01: see netbuf_get() -- this used to be pkt[NETDEV_MTU_MAX] on
      * the (interrupt) stack, nested inside eth_send's frame buffer. */
@@ -510,9 +540,9 @@ int ip4_output_opts(uint32_t saddr, uint32_t daddr, uint8_t protocol,
     if (!pkt) return -ENOMEM;
     struct iphdr *ih = (struct iphdr *)pkt;
     memset(ih, 0, sizeof(*ih));
-    ih->ihl_version = (4 << 4) | 5;
+    ih->ihl_version = (uint8_t)((4 << 4) | (hlen / 4));
     ih->tos = o->tos;                                  /* UDP-API-12 */
-    ih->tot_len = __builtin_bswap16((uint16_t)(sizeof(*ih) + payload_len));
+    ih->tot_len = __builtin_bswap16((uint16_t)(hlen + payload_len));
     /* One atomic increment per datagram: a plain ++ is a load and a store,
      * and a send from interrupt context (tcp_input answering with a RST or
      * ACK) landing between them stamps a second datagram with the same
@@ -530,8 +560,10 @@ int ip4_output_opts(uint32_t saddr, uint32_t daddr, uint8_t protocol,
     ih->check = 0;
     ih->saddr = saddr;
     ih->daddr = daddr;
-    ih->check = inet_csum(ih, sizeof(*ih));
-    memcpy(pkt + sizeof(*ih), payload, payload_len);
+    if (o->optlen)
+        memcpy(pkt + sizeof(*ih), o->opts, o->optlen);
+    ih->check = inet_csum(ih, hlen);
+    memcpy(pkt + hlen, payload, payload_len);
 
     /* ARP for the next hop.  Loopback skips ARP entirely.
      *
@@ -582,7 +614,7 @@ int ip4_output_opts(uint32_t saddr, uint32_t daddr, uint8_t protocol,
         }
     }
     int rc = eth_send(dev, mac, __builtin_bswap16(ETHERTYPE_IP),
-                      pkt, sizeof(*ih) + payload_len);
+                      pkt, hlen + payload_len);
     /* UDP-IP-06: RFC 1112 6.1 -- if this host is itself a member of the
      * group, deliver a copy locally too (the IP_MULTICAST_LOOP default).
      * A NIC does not hear its own transmission, so loop it through lo,
@@ -591,7 +623,7 @@ int ip4_output_opts(uint32_t saddr, uint32_t daddr, uint8_t protocol,
         netdev_t *lo = ip4_loopback_dev();
         if (lo && lo != dev && ip4_mc_accept(lo, daddr))
             eth_send(lo, mac, __builtin_bswap16(ETHERTYPE_IP),
-                     pkt, sizeof(*ih) + payload_len);
+                     pkt, hlen + payload_len);
     }
     netbuf_put(pkt, heap);
     return rc;

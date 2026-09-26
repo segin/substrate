@@ -560,6 +560,9 @@ static uint32_t tcp_eff_mss(const tcp_pcb_t *p) {
     uint32_t m = TCP_MSS;
     if (p->snd_mss && p->snd_mss < m) m = p->snd_mss;
     if (p->mtu_mss && p->mtu_mss < m) m = p->mtu_mss;   /* TCP-HDR-04 */
+    /* IP options ride in every segment's header: the MSS counts neither
+     * them nor TCP's own options, so the sender makes room (RFC 6691). */
+    if (p->txo.optlen && m > p->txo.optlen) m -= p->txo.optlen;
     return m;
 }
 

@@ -100,6 +100,8 @@ struct ip4_txopts {
     uint8_t  mcast_loop;    /* deliver our own group sends locally */
     uint32_t mcast_if;      /* interface address for group sends; 0 = route */
     uint8_t  df;            /* IP_MTU_DISCOVER mode, IP4_PMTUDISC_* */
+    uint8_t  optlen;        /* IP_OPTIONS: octets in opts, a multiple of 4 */
+    uint8_t  opts[40];      /* sent after the fixed header of every datagram */
 };
 
 /* IP_MTU_DISCOVER modes (Linux numbering).  Every mode but DONT sets Don't
@@ -111,6 +113,10 @@ struct ip4_txopts {
 #define IP4_PMTUDISC_DO     2
 #define IP4_PMTUDISC_PROBE  3
 void ip4_txopts_init(struct ip4_txopts *o);
+/* IP_OPTIONS: validate `opts` (len octets, at most 40; 0 clears) and store
+ * it padded to a multiple of 4.  Returns 0 or -EINVAL. */
+int  ip4_txopts_set_options(struct ip4_txopts *o, const uint8_t *opts,
+                            size_t len);
 /* ip4_output_from() with transmit options; NULL means the defaults. */
 int  ip4_output_opts(uint32_t saddr, uint32_t daddr, uint8_t protocol,
                      const void *payload, size_t payload_len,
@@ -328,6 +334,10 @@ int     afinet_set_rcvbuf(int fd, int val);
  * other option; get likewise, returning the value (or the address). */
 int     afinet_set_ipopt(int fd, int optname, int val, uint32_t addr);
 int     afinet_get_ipopt(int fd, int optname, int *val, uint32_t *addr);
+/* IP_OPTIONS: set from, or copy into, a kernel buffer.  get stores at most
+ * *len octets and sets *len to the length of the options. */
+int     afinet_set_ipoptions(int fd, const uint8_t *opts, size_t len);
+int     afinet_get_ipoptions(int fd, uint8_t *opts, size_t *len);
 int     afinet_set_tcpopt(int fd, int optname, int val);     /* TCP-WIN-13 */
 int     afinet_get_tcpopt(int fd, int optname, int *val);
 int     afinet_setown(int fd, int owner);                   /* TCP-URG-01 */
