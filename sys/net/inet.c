@@ -601,6 +601,22 @@ static void ip4_reasm_drop_locked(ip4_reasm_t *r) {
     r->used = 0;
 }
 
+/* A whole datagram arrived with the same (source, destination, protocol,
+ * Identification) as a reassembly in progress: that reassembly belongs to an
+ * earlier datagram whose ID the sender has since reused, and completing it
+ * later with a stray fragment would splice two datagrams together (RFC 791
+ * 3.2, Example Reassembly Procedure).  Discard it. */
+static void ip4_reasm_flush(const struct iphdr *ih) {
+    unsigned long f = spinlock_acquire_irq(&g_reasm_lock);
+    for (int i = 0; i < IP4_REASM_SLOTS; i++) {
+        ip4_reasm_t *e = &g_reasm[i];
+        if (e->used && e->saddr == ih->saddr && e->daddr == ih->daddr &&
+            e->id == ih->id && e->proto == ih->protocol)
+            ip4_reasm_drop_locked(e);
+    }
+    spinlock_release_irq(&g_reasm_lock, f);
+}
+
 /* Every block below data_len present?  Caller holds g_reasm_lock. */
 static int ip4_reasm_complete(const ip4_reasm_t *r) {
     if (!r->hlen || !r->data_len) return 0;
@@ -880,6 +896,7 @@ static void ip4_input_link(netdev_t *dev, const uint8_t *pkt, size_t len,
         ip4_reasm_input(dev, pkt, hlen, tot, for_bcast);
         return;
     }
+    ip4_reasm_flush(ih);
     ip4_deliver(dev, pkt, tot, hlen, for_bcast);
 }
 

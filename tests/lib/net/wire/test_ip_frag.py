@@ -23,6 +23,11 @@ Length range was 8..1472 instead of RFC 768's 8..65507.
                   truncated to one MTU (1480 octets of ICMP) with a valid
                   checksum -- we do not fragment on output, and RFC 1122
                   3.2.2.6 says truncate rather than drop.
+    bufid-reuse   a first fragment, then a whole datagram with the same
+                  source, destination, protocol and ID, then the first
+                  datagram's remaining fragment: only the whole datagram is
+                  delivered -- it discards the stale reassembly (RFC 791
+                  3.2), which would otherwise complete from the old pieces.
 
 Run from the repo root after building sys/ and wireguest:
     python3 tests/lib/net/wire/test_ip_frag.py [case...]
@@ -234,10 +239,35 @@ def case_big_echo():
         return 'no reply to a 3000-octet echo request', w
 
 
+def case_bufid_reuse():
+    w, err = boot('recvsum:4000 recvsum:4000 sleep:60')
+    with w:
+        if err:
+            return err, w
+        old = pieces(udp(40051, payload(2000)))
+        whole = udp(40052, payload(100, seed=5))
+        ident = 0x6161
+        first, rest = old[0], old[1:]
+        send(w, [first], ident)                 # old datagram, first piece
+        w.pump(0.3)
+        w.send_ip(17, whole, ident=ident)       # whole datagram, same BUFID
+        w.pump(0.3)
+        send(w, rest, ident)                    # the old datagram's tail
+        w.pump(2.0)
+        got = [l for l in w.serial().splitlines() if 'guest: recvsum' in l]
+        if not got or 'sport=40052' not in got[0]:
+            return 'the whole datagram was not delivered: %r' % got, w
+        if len(got) > 1:
+            return 'a stale reassembly completed after a whole datagram ' \
+                   'reused its ID: %r' % got[1:], w
+        return None, w
+
+
 CASES = (('in-order', case_in_order), ('read', case_read),
          ('reorder', case_reorder), ('overlap', case_overlap),
          ('incomplete', case_incomplete), ('oversize', case_oversize),
-         ('flood', case_flood), ('max', case_max), ('big-echo', case_big_echo))
+         ('flood', case_flood), ('max', case_max), ('big-echo', case_big_echo),
+         ('bufid-reuse', case_bufid_reuse))
 
 
 def main():
