@@ -63,13 +63,13 @@ struct sockaddr_ll {
  * RFC 2131 3.1 example. */
 #define DHCP_DISCOVER_TRIES 4
 
-/* DHC-03: DHCPREQUESTs per selected offer (4 x retx_delay(), about 60 s --
+/* DHCPREQUESTs per selected offer (4 x retx_delay(), about 60 s --
  * the RFC 2131 3.1 example), and how many times INIT is re-entered when
  * none is answered before dhclient gives up. */
 #define DHCP_REQUEST_TRIES 4
 #define DHCP_INIT_ATTEMPTS 3
 
-/* DHC-02: after losing a lease, the pause between failed reacquisitions
+/* After losing a lease, the pause between failed reacquisitions
  * in the background. */
 #define DHCP_REACQUIRE_WAIT 60
 
@@ -107,7 +107,7 @@ struct sockaddr_ll {
 
 #define DHCP_MAGIC 0x63825363u
 
-/* DHC-09: the Maximum DHCP Message Size we advertise (option 57). */
+/* The Maximum DHCP Message Size we advertise (RFC 2132 9.10, option 57). */
 #define DHCP_MAX_MSG 1500
 
 struct bootp {
@@ -183,7 +183,7 @@ static int udp_csum_ok(const struct ip_hdr *ih, const struct udp_hdr *uh,
     return sum == 0xFFFF;
 }
 
-/* DHC-14: deadlines are measured on the monotonic clock.  They were taken
+/* Deadlines are measured on the monotonic clock.  They were taken
  * from gettimeofday(), so a wall-clock step during boot (an RTC read, NTP)
  * expired every wait at once -- all the DISCOVERs went out back to back and
  * dhclient gave up -- or, stepped backwards, stretched a wait out. */
@@ -193,7 +193,7 @@ static double now_sec(void) {
     return ts.tv_sec + ts.tv_nsec / 1000000000.0;
 }
 
-/* DHC-05: the wait after transmission number `attempt` (0-based) -- the
+/* The wait after transmission number `attempt` (0-based) -- the
  * randomized exponential backoff RFC 2131 4.1 requires.  It was a flat 2 s,
  * so clients that powered up together stayed in lockstep, and the whole
  * 8 s budget ran out before a server that probes the address (3.1 step 2)
@@ -238,13 +238,13 @@ static int set_ipv4(const char *iface, unsigned long req, uint32_t addr) {
     return rc;
 }
 
-/* DHC-12: a letter, digit or hyphen -- what a DNS label may hold. */
+/* A letter, digit or hyphen -- what a DNS label may hold. */
 static int ldh_char(char c) {
     return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
            (c >= '0' && c <= '9') || c == '-';
 }
 
-/* DHC-11: can a host be assigned this address?  Not 0, the limited
+/* Can a host be assigned this address?  Not 0, the limited
  * broadcast, 0/8, loopback 127/8, multicast 224/4 or class E 240/4. */
 static int usable_addr(uint32_t addr) {
     uint8_t a = ((const uint8_t *)&addr)[0];
@@ -336,7 +336,7 @@ static size_t build_dhcp_packet(uint8_t *out,
     bp->htype = 1;
     bp->hlen  = 6;
     bp->xid   = xid;
-    /* DHC-13: the BROADCAST flag stays clear.  RFC 2131 4.1: a client that
+    /* The BROADCAST flag stays clear.  RFC 2131 4.1: a client that
      * can receive unicast before it is configured SHOULD clear it, and
      * this one can -- it reads replies off an AF_PACKET socket, which
      * netdev_rx() feeds every frame for our MAC whatever its IP
@@ -370,7 +370,7 @@ static size_t build_dhcp_packet(uint8_t *out,
         *op++ = DHCP_OPT_DOMAIN;       /* RFC 2132 — domain name */
         *op++ = DHCP_OPT_SEARCH;       /* RFC 3397 — search list */
         *op++ = DHCP_OPT_LEASE;
-        /* DHC-09: RFC 2131 3.5 SHOULD -- the largest message we accept:
+        /* RFC 2131 3.5 SHOULD -- the largest message we accept:
          * a full-MTU IP datagram (rxbuf holds a 1500-octet one plus its
          * Ethernet header).  Without it the server must assume 576 and
          * overloads 'file'/'sname' that much sooner. */
@@ -467,7 +467,7 @@ static void scan_opts(const uint8_t *opts, size_t max, uint8_t code,
 }
 
 /*
- * DHC-09: RFC 2131 4.1 -- options are read from the 'options' field and
+ * RFC 2131 4.1 -- options are read from the 'options' field and
  * then, as an 'option overload' option there directs, from 'file' and
  * then 'sname'.  The client "concatenates the values of multiple instances
  * of the same option".  Only the first instance in 'options' used to be
@@ -512,7 +512,7 @@ static int recv_dhcp(int pkts, uint8_t *rxbuf, size_t cap, uint32_t xid,
         struct ip_hdr *ih = (struct ip_hdr *)(rxbuf + sizeof(*eh));
         size_t hlen = (ih->vhl & 0x0F) * 4;
         if (ih->proto != IPPROTO_UDP) continue;
-        /* DHC-10: AF_PACKET hands us raw frames, bypassing every check the
+        /* AF_PACKET hands us raw frames, bypassing every check the
          * kernel's IP and UDP input would make, so make them here: IPv4
          * with a sane header, not a fragment, a good header checksum, a
          * reply from the server port, a UDP length that fits the frame and
@@ -551,7 +551,7 @@ static int recv_dhcp(int pkts, uint8_t *rxbuf, size_t cap, uint32_t xid,
 /* Install the lease an ACK granted -- address, netmask, router -- and
  * write /etc/resolv.conf from its resolver options.
  *
- * DHC-06: everything comes from the DHCPACK.  RFC 2131 3.1 step 4: the
+ * Everything comes from the DHCPACK.  RFC 2131 3.1 step 4: the
  * ACK carries the committed configuration and its 'yiaddr' the selected
  * address; a server only SHOULD keep it consistent with the OFFER.  The
  * address, netmask and router were taken from the OFFER, so a server that
@@ -590,7 +590,7 @@ static int install_lease(const char *iface, const struct bootp *bp,
         memcpy(domain_buf, op_p, ml);
         domain_buf[ml] = '\0';
         domain_len = ml;
-        /* DHC-12: a domain name is letters, digits, '-' and '.' (RFC 2132
+        /* A domain name is letters, digits, '-' and '.' (RFC 2132
          * 3.17 names it a domain name).  It was written into resolv.conf
          * as received, so a newline in it added arbitrary lines. */
         for (unsigned i = 0; i < ml; i++)
@@ -609,7 +609,7 @@ static int install_lease(const char *iface, const struct bootp *bp,
 
     /* Install lease.
      *
-     * DHC-08: RFC 2131 3.5 -- a parameter the server does not send takes
+     * RFC 2131 3.5 -- a parameter the server does not send takes
      * its Host Requirements default.  A missing mask or router used to
      * leave whatever the interface already had -- at boot, the /24 and
      * 10.0.2.2 gateway inet_init() hard-codes for QEMU -- so a real
@@ -654,7 +654,7 @@ static int install_lease(const char *iface, const struct bootp *bp,
                     size_t j  = i;
                     int    safety = 256;
                     int    first  = 1;
-                    int    bad    = 0;  /* DHC-12: a non-LDH octet */
+                    int    bad    = 0;  /* a non-LDH octet */
                     while (j < search_len && safety-- > 0) {
                         uint8_t l = search_buf[j];
                         if (l == 0) { j++; break; }
@@ -712,7 +712,7 @@ static int install_lease(const char *iface, const struct bootp *bp,
 /* ---- lease ---- */
 
 /*
- * DHC-02: the lease an ACK granted, on the monotonic clock.  RFC 2131
+ * The lease an ACK granted, on the monotonic clock.  RFC 2131
  * 4.4.1/4.4.5: the lease runs from the time the acknowledged DHCPREQUEST
  * was sent; T1 and T2 come from options 58/59 or default to 0.5 and 0.875
  * of it.
@@ -851,7 +851,7 @@ static int extend(const char *iface, const uint8_t hw[6], struct lease *L,
             if (r < 240) continue;
             const struct bootp *bp = (const struct bootp *)buf;
             /* The kernel checked IP and UDP on this path; the cookie is
-             * ours to check (DHC-10). */
+             * ours to check, as recv_dhcp() does on the raw path. */
             if (__builtin_bswap32(bp->magic) != DHCP_MAGIC) continue;
             if (bp->op != 2 || bp->xid != xid) continue;
             size_t mlen;
@@ -875,7 +875,7 @@ static int extend(const char *iface, const uint8_t hw[6], struct lease *L,
     return 0;
 }
 
-/* ---- duplicate-address check (DHC-07) ---- */
+/* ---- duplicate-address check (RFC 2131 3.1 step 5) ---- */
 
 #define ETH_P_ARP        0x0806
 #define ARP_FRAME_LEN    42
@@ -977,7 +977,7 @@ static int acquire(const char *iface, const uint8_t hw[6], int ifindex,
     int t;
 
     /*
-     * DHC-03: RFC 2131 3.1 step 5 -- a client that gets neither DHCPACK nor
+     * RFC 2131 3.1 step 5 -- a client that gets neither DHCPACK nor
      * DHCPNAK retransmits the DHCPREQUEST (4.1 backoff), and if that fails
      * too "reverts to INIT state and restarts the initialization process".
      * The REQUEST went out once, with a flat 5 s wait, and on timeout
@@ -1018,8 +1018,8 @@ static int acquire(const char *iface, const uint8_t hw[6], int ifindex,
             while ((t = recv_dhcp(pkts, rxbuf, sizeof(rxbuf), xid, deadline,
                                   &bp, &bootp_len)) != 0) {
                 if (t != DHCP_OFFER) continue;
-                /* DHC-11: an OFFER MUST carry a 'server identifier' (Table
-                 * 3), which the REQUEST must then name (3.1 step 3), and
+                /* An OFFER MUST carry a 'server identifier' (RFC 2131
+                 * Table 3), which the REQUEST must then name (3.1 step 3), and
                  * must offer an address a host can use.  One without it
                  * produced a REQUEST naming server 0.0.0.0; a broadcast,
                  * multicast, loopback or class E 'yiaddr' was installed. */
@@ -1064,7 +1064,7 @@ static int acquire(const char *iface, const uint8_t hw[6], int ifindex,
             double deadline = now_sec() + retx_delay(rtry);
             while ((t = recv_dhcp(pkts, rxbuf, sizeof(rxbuf), xid, deadline,
                                   &bp, &bootp_len)) != 0) {
-                /* DHC-04: RFC 2131 3.1 step 5 / Figure 5 -- a DHCPNAK sends
+                /* RFC 2131 3.1 step 5 / Figure 5 -- a DHCPNAK sends
                  * the client straight back to INIT.  It was discarded like
                  * any other non-ACK, so dhclient sat out its timeout and
                  * gave up when an immediate restart would have worked. */
@@ -1074,7 +1074,7 @@ static int acquire(const char *iface, const uint8_t hw[6], int ifindex,
                     break;
                 }
                 if (t != DHCP_ACK) continue;
-                /* DHC-11: only the selected server's ACK, for an address
+                /* Only the selected server's ACK, for an address
                  * a host can use. */
                 {
                     size_t mlen;
@@ -1086,7 +1086,7 @@ static int acquire(const char *iface, const uint8_t hw[6], int ifindex,
                         continue;
                 }
                 fprintf(stdout, "dhclient: DHCPACK\n");
-                /* DHC-07: RFC 2131 3.1 step 5 -- check the address is
+                /* RFC 2131 3.1 step 5 -- check the address is
                  * free; if it is taken the client MUST send a DHCPDECLINE
                  * and restart, after waiting at least ten seconds.  The
                  * address used to be installed unchecked, so a duplicate
@@ -1128,7 +1128,7 @@ static int acquire(const char *iface, const uint8_t hw[6], int ifindex,
 }
 
 /*
- * DHC-13: with the BROADCAST flag clear, a server unicasts the OFFER and
+ * With the BROADCAST flag clear, a server unicasts the OFFER and
  * ACK to 'yiaddr'.  AF_PACKET sees them either way, but if the kernel
  * already holds that address (10.0.2.15 at boot under QEMU) its UDP layer
  * receives them too and, with nothing on port 68, would answer the server
@@ -1156,7 +1156,7 @@ static int acquire_quietly(const char *iface, const uint8_t hw[6],
 }
 
 /*
- * DHC-02: keep the lease.  RFC 2131 4.4.5: at T1 renew with the leasing
+ * Keep the lease.  RFC 2131 4.4.5: at T1 renew with the leasing
  * server, at T2 rebind with any, and if the lease runs out "the client
  * moves to INIT state, MUST immediately stop any other network
  * processing"; 3.7 likewise.  dhclient requested the lease time and
