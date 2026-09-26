@@ -36,11 +36,11 @@ static struct nd6_entry g_nd6_cache[ND6_CACHE_SIZE];
 static unsigned          g_nd6_next;
 
 /*
- * ND-02: the cache is written by icmp6_input() in IRQ/RX context and read
+ * The cache is written by icmp6_input() in IRQ/RX context and read
  * by nd6_lookup() from process context, with non-atomic 16-byte and 6-byte
  * memcpy()s on both sides -- so a reader could observe half of one binding
- * and half of another and send to a torn MAC.  The ARP cache was given an
- * IRQ-safe spinlock as NET-09; this is the mirror that was missed.
+ * and half of another and send to a torn MAC.  This mirrors the IRQ-safe
+ * spinlock that guards the ARP cache.
  * Critical sections stay tiny: no transmit happens under the lock.
  */
 static spinlock_t g_nd6_lock = SPINLOCK_INIT("nd6_cache");
@@ -52,7 +52,7 @@ static int ip6_zero(const uint8_t a[16]) {
 
 int nd6_lookup(netdev_t *dev, const uint8_t ip6[16], uint8_t mac[6]) {
     if (!dev) return -1;
-    unsigned long f = spinlock_acquire_irq(&g_nd6_lock);   /* ND-02 */
+    unsigned long f = spinlock_acquire_irq(&g_nd6_lock);
     for (unsigned i = 0; i < ND6_CACHE_SIZE; i++) {
         struct nd6_entry *e = &g_nd6_cache[i];
         if (e->ifindex == dev->ifindex &&
@@ -71,7 +71,7 @@ int nd6_lookup(netdev_t *dev, const uint8_t ip6[16], uint8_t mac[6]) {
  * Update the MAC of an existing binding.  Returns 1 if one was updated, 0
  * if no entry exists for (ip6, ifindex).
  *
- * ND-03: this exists so an unsolicited Neighbor Advertisement can refresh a
+ * This exists so an unsolicited Neighbor Advertisement can refresh a
  * binding we already believed without being able to CREATE one.  Previously
  * icmp6_input handed every NA straight to nd6_insert(), which creates, with
  * no solicitation match and no source check -- so a single forged NA naming
@@ -97,7 +97,7 @@ int nd6_update_existing(netdev_t *dev, const uint8_t ip6[16],
 
 void nd6_insert(netdev_t *dev, const uint8_t ip6[16], const uint8_t mac[6]) {
     if (!dev || ip6_zero(ip6)) return;
-    unsigned long f = spinlock_acquire_irq(&g_nd6_lock);   /* ND-02 */
+    unsigned long f = spinlock_acquire_irq(&g_nd6_lock);
     for (unsigned i = 0; i < ND6_CACHE_SIZE; i++) {
         struct nd6_entry *e = &g_nd6_cache[i];
         if (e->ifindex == dev->ifindex && memcmp(e->ip6, ip6, 16) == 0) {
@@ -205,9 +205,9 @@ static netdev_t *route_for_v6(const uint8_t daddr[16], int *via_gw_out) {
     return NULL;
 }
 
-/* STACK-01: v6 transmit scratch.  Separate slot from the v4 one purely for
- * clarity -- a single hard IRQ only ever runs one of the two -- and, like
- * them, this must become per-CPU when APs start scheduling. */
+/* v6 transmit scratch, used instead of a stack buffer when called from
+ * hard IRQ.  Separate slot from the v4 one purely for clarity -- a single
+ * hard IRQ only ever runs one of the two -- and, like it, this must become per-CPU when APs start scheduling. */
 #define NETBUF6_SIZE (NETDEV_MTU_MAX + ETH_HLEN)
 static uint8_t g_irq_pktbuf6[NETBUF6_SIZE];
 
@@ -221,7 +221,7 @@ static void netbuf_put_v6(uint8_t *b, int heap) {
     if (heap && b) kfree(b, NETBUF6_SIZE);
 }
 
-/* UDP-03 (v6 twin of ip4_source_for): the source address routing will pick,
+/* v6 twin of ip4_source_for(): the source address routing will pick,
  * so the UDP send path can compute the mandatory IPv6 pseudo-header
  * checksum.  A zero UDP checksum is illegal over IPv6, so conformant peers
  * were discarding every v6 datagram we sent. */
@@ -245,12 +245,12 @@ int ip6_output(const uint8_t daddr[16], uint8_t next_header,
      * pkt[] and up the kernel stack.  Same defect as the IPv4 path.
      */
     if (payload_len > NETDEV_MTU_MAX - sizeof(struct ip6_hdr)) return -EMSGSIZE;
-    /* UDP-IP-01 (v6 twin): the egress MTU bounds the packet; IPv6 never
+    /* The egress MTU bounds the packet; IPv6 never
      * fragments in transit, and we do not fragment at the source. */
     if (dev->mtu && payload_len > dev->mtu - sizeof(struct ip6_hdr))
         return -EMSGSIZE;
 
-    /* STACK-01 (v6 twin): off the interrupt stack -- see netbuf_get() in
+    /* Keep the packet buffer off the interrupt stack -- see netbuf_get() in
      * inet.c.  This path is reached from hard IRQ via
      * ip6_input -> icmp6_input -> ip6_output. */
     int heap = 0;
@@ -280,8 +280,8 @@ int ip6_output(const uint8_t daddr[16], uint8_t next_header,
         if (nd6_lookup(dev, nh, mac) != 0) {
             nd6_solicit(dev, nh);
             /*
-             * ND-01: the same rule ip4_output got as NET-05, which this
-             * path never received.  ip6_output is reachable from hard IRQ
+             * The same rule ip4_output follows, which this path once
+             * lacked.  ip6_output is reachable from hard IRQ
              * context with IF=0 -- rtl_irq -> netdev_rx -> ip6_input ->
              * icmp6_input -> icmp6_handle_echo/ns -> ip6_output -- and the
              * sched_yield() spin below sleeps.  Switching away from an
@@ -327,7 +327,7 @@ void ip6_input(netdev_t *dev, const uint8_t *pkt, size_t len) {
     /* Accept if destination is our address, or a multicast group this node
      * belongs to.
      *
-     * UDP-IP-09: the multicast test was `dst[0] == 0xff` -- EVERY group was
+     * The multicast test was `dst[0] == 0xff` -- EVERY group was
      * accepted, while the comment claimed a membership check.  A node
      * belongs to the all-nodes groups (ff01::1, ff02::1) and to the
      * solicited-node group of its address, ff02::1:ffXX:XXXX with the low
@@ -349,7 +349,7 @@ void ip6_input(netdev_t *dev, const uint8_t *pkt, size_t len) {
     if (!for_us) return;
 
     /*
-     * UDP-IP-10: walk the extension headers (RFC 8200 4) to the upper-layer
+     * Walk the extension headers (RFC 8200 4) to the upper-layer
      * header.  The switch used to dispatch on the fixed header's Next Header
      * alone, so anything behind a Hop-by-Hop, Routing or Destination Options
      * header -- every MLD message carries Hop-by-Hop -- was dropped.

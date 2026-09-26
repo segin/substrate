@@ -143,7 +143,7 @@ static struct {
  * The TX path is re-entered from the hard IRQ handler: e1000_irq ->
  * e1000_rx_drain -> netdev_rx -> inet_eth_input -> arp_input -> eth_send ->
  * netdev_xmit -> e1000_xmit, so an inbound ARP request transmits its reply
- * from inside the ISR.  This is the same hazard documented as RTL-02, and it
+ * from inside the ISR.  This is the same hazard rtl8139's TX lock guards, and it
  * needs an IRQ-safe lock: a plain spinlock_acquire() deadlocks the moment the
  * ISR interrupts a lock holder.
  */
@@ -178,7 +178,7 @@ static void e1000_rx_drain(void) {
          * bit means the bytes are not trustworthy -- drop rather than hand
          * either to the stack, but still recycle the descriptor so the ring
          * keeps moving.  (Not doing that is how a single bad frame wedges a
-         * receiver permanently; cf. RTL-04.)
+         * receiver permanently; cf. rtl_rx_reset() in rtl8139.)
          */
         if ((d->status & RXD_STAT_EOP) && d->errors == 0 &&
             len >= 14 && len <= E1000_MAX_FRAME) {
@@ -233,7 +233,7 @@ static int e1000_xmit(netdev_t *dev, const void *frame, size_t len) {
      * on rtl8139.  Bounded so a wedged NIC returns an error instead of
      * spinning forever with interrupts off.
      *
-     * TCP-RES-04: as RTL-06 does for rtl8139, bound it tightly when the
+     * As rtl8139's TX poll does, bound it tightly when the
      * caller had interrupts disabled (the TCP input path, the ARP/ICMP
      * replies sent from the RX interrupt), where a million polls freeze the
      * machine; the dropped frame is retransmitted by the upper layer.  The
@@ -269,7 +269,7 @@ static int e1000_xmit(netdev_t *dev, const void *frame, size_t len) {
     return 0;
 }
 
-/* UDP-IP-06: multicast promiscuous while any IPv4 group is joined.  The
+/* Multicast promiscuous while any IPv4 group is joined.  The
  * 128-entry Multicast Table Array is zeroed at setup and RCTL was written
  * without MPE, so the hash filter rejected every multicast frame; the IP
  * layer filters by membership, so passing all of them here is enough. */

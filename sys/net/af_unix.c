@@ -92,7 +92,7 @@ static int sock_fd_invalid(int fd) {
 /* Substrate uses BSD-style msghdr; mirror the user-visible field set
  * for the iov walk in sys_send/recvmsg.  Kernel socket.h has a
  * narrower form, so cast through this struct's interpretation. */
-/* struct iovec_local: <net/inet.h> (UDP-API-03). */
+/* struct iovec_local: <net/inet.h>. */
 
 /* ============================================================
  * Buffer
@@ -104,7 +104,7 @@ static int sock_fd_invalid(int fd) {
 #define AFUNIX_FDQ_MAX     16    /* maximum SCM_RIGHTS fds queued per socket */
 
 /*
- * UNIX-04: the ring used to be `uint8_t data[AFUNIX_BUF_SIZE]` embedded in
+ * The ring used to be `uint8_t data[AFUNIX_BUF_SIZE]` embedded in
  * the socket, so every socket() / socketpair() (twice) / inbound connect()
  * kmalloc'd ~263 KiB up front whether or not a single byte was ever sent.
  * With MAX_FD sockets open that is on the order of a gigabyte requested on
@@ -419,7 +419,7 @@ static void afunix_sock_free(afunix_sock_t *s) {
      * path.  g_bound_unlink is a no-op when we are not in the list. */
     if (s->pathlen > 0) g_bound_unlink(s);
 
-    afbuf_free(&s->rx);          /* UNIX-04: the ring is a separate object now */
+    afbuf_free(&s->rx);          /* the ring is a separate object now */
     kfree(s, sizeof(*s));
 }
 
@@ -428,7 +428,7 @@ static afunix_sock_t *afunix_find_bound(const char *path, int len) {
     mutex_lock(&g_bound_lock);
     for (afunix_bound_node_t *n = g_bound_list; n; n = n->next) {
         /*
-         * UNIX-07: skip a socket that has already been closed.  The list is
+         * Skip a socket that has already been closed.  The list is
          * prepended so the newest binding for a path wins, which is what
          * makes the standard unlink(path); bind(path) server restart work
          * (see sys_bind) -- but an entry whose socket is closed and merely
@@ -559,7 +559,7 @@ static int afunix_wait(void *chan, mutex_t *m) {
  * ============================================================ */
 
 /*
- * SOCK-03: hold the socket across the whole call.
+ * Hold the socket across the whole call.
  *
  * The blocking body below sleeps on s->rx_chan with no reference taken, so a
  * concurrent close() on another thread dropped the last one and freed the
@@ -584,7 +584,7 @@ static size_t afunix_node_read(fs_node_t *node, off_t off, size_t size, uint8_t 
     return r;
 }
 
-/* UNIX-05: recvfrom() needs the sender, which read(2) does not.  srcpath (at
+/* recvfrom() needs the sender, which read(2) does not.  srcpath (at
  * least AFUNIX_PATH_MAX bytes) and srclen are optional; when supplied they
  * receive the sender's bound path from the datagram frame. */
 static size_t afunix_recvfrom_body(afunix_sock_t *s, size_t size, uint8_t *buf,
@@ -608,7 +608,7 @@ static size_t afunix_node_read_body(afunix_sock_t *s, size_t size, uint8_t *buf,
         s ? (unsigned)s->rx.count : 0,
         (unsigned)size);
     if (!s || s->closed) return 0;
-    /* SOCK-08: per-call MSG_DONTWAIT now rides on the thread rather than
+    /* Per-call MSG_DONTWAIT now rides on the thread rather than
      * on the shared file description. */
     int nonblock = current_thread &&
                    (((current_thread->flags & THREAD_F_IO_NONBLOCK) != 0) ||
@@ -622,7 +622,7 @@ static size_t afunix_node_read_body(afunix_sock_t *s, size_t size, uint8_t *buf,
          * (written atomically), so return exactly one datagram per read and
          * preserve message boundaries. */
         /*
-         * UNIX-05: an unconnected datagram socket has no peer, and the old
+         * An unconnected datagram socket has no peer, and the old
          * loop treated "no peer" as EOF -- so a bound server with an empty
          * queue got 0 back instead of waiting for a client, which is the
          * single reason AF_UNIX datagram servers did not work at all.  A
@@ -652,7 +652,7 @@ static size_t afunix_node_read_body(afunix_sock_t *s, size_t size, uint8_t *buf,
             if (s->rd_closed) { mutex_unlock(&s->lock); return 0; }
         }
         /*
-         * SOCK-05: MSG_PEEK must leave the datagram in the ring.  A peek
+         * MSG_PEEK must leave the datagram in the ring.  A peek
          * used to consume it like any other read, so the caller got its
          * look at the data and the message was gone -- the opposite of what
          * MSG_PEEK means, and a silent loss for anyone who peeks to size a
@@ -678,7 +678,7 @@ static size_t afunix_node_read_body(afunix_sock_t *s, size_t size, uint8_t *buf,
             *srclen = (int)slen;
         }
         mlen -= 1 + slen;
-        /* SOCK-06: the datagram's real length, for MSG_TRUNC.  Without it a
+        /* The datagram's real length, for MSG_TRUNC.  Without it a
          * short buffer and a short datagram are indistinguishable. */
         if (truelen) *truelen = mlen;
         size_t n = mlen < size ? mlen : size;
@@ -730,7 +730,7 @@ static size_t afunix_node_read_body(afunix_sock_t *s, size_t size, uint8_t *buf,
     return r;
 }
 
-/* SOCK-03 (write twin of afunix_node_read): the send path sleeps on the
+/* Write twin of afunix_node_read: the send path sleeps on the
  * PEER's tx_chan, so both this socket and its peer have to survive the
  * sleep.  Hold ours here; the peer link is itself a counted reference that
  * close() clears only after waking us. */
@@ -767,7 +767,7 @@ static size_t afunix_node_write_body(afunix_sock_t *s, size_t size,
     /* O_NONBLOCK is carried on the file_t, which only the syscall layer sees;
      * it stashes it on the thread (current_thread->io_file) for the duration
      * of the write so we can reach it from this fs_node callback. */
-    /* SOCK-08: per-call MSG_DONTWAIT now rides on the thread rather than
+    /* Per-call MSG_DONTWAIT now rides on the thread rather than
      * on the shared file description. */
     int nonblock = current_thread &&
                    (((current_thread->flags & THREAD_F_IO_NONBLOCK) != 0) ||
@@ -798,7 +798,7 @@ static size_t afunix_node_write_body(afunix_sock_t *s, size_t size,
         if (peer->closed || peer->rd_closed || s->wr_closed) {
             mutex_unlock(&peer->lock); return (size_t)-EPIPE;
         }
-        /* UNIX-05: the frame is [u16 total][u8 srclen][src][payload].  On a
+        /* The frame is [u16 total][u8 srclen][src][payload].  On a
          * connected socket the receiver already knows the peer, so we name
          * no source (srclen 0) -- but the srclen byte itself is part of the
          * format and must be present or the reader misparses every frame. */
@@ -997,7 +997,7 @@ static int afunix_node_poll(fs_node_t *node, void *waiter) {
 
     case AFUS_BOUND:
         /*
-         * UNIX-05: a bound datagram socket used to fall into the default
+         * A bound datagram socket used to fall into the default
          * arm below and report a bare POLLHUP, so it was never readable and
          * a poll/select-driven datagram server never woke for a client.  It
          * is a live endpoint: readable when a datagram is queued, always
@@ -1041,7 +1041,7 @@ static int afunix_node_ioctl(fs_node_t *node, uint32_t request, void *arg) {
                     uint8_t h0 = s->rx.data[s->rx.tail];
                     uint8_t h1 = s->rx.data[(s->rx.tail + 1) % s->rx.cap];
                     uint8_t sl = s->rx.data[(s->rx.tail + 2) % s->rx.cap];
-                    /* UNIX-05: the framed length now covers the srclen byte
+                    /* The framed length now covers the srclen byte
                      * and the sender path; FIONREAD must report only what a
                      * read() would hand back. */
                     uint32_t total = ((uint32_t)h0 << 8) | h1;
@@ -1055,7 +1055,7 @@ static int afunix_node_ioctl(fs_node_t *node, uint32_t request, void *arg) {
         if (copyout(&avail, arg, sizeof(avail)) != 0) return -EFAULT;
         return 0;
     }
-    /* TCP-URG-05: an AF_UNIX socket has no urgent data, so it is never at
+    /* An AF_UNIX socket has no urgent data, so it is never at
      * the mark -- but it IS a socket, so sockatmark() must not see ENOTTY. */
     if (request == SIOCATMARK) {
         int at = 0;
@@ -1137,7 +1137,7 @@ static afunix_sock_t *afunix_from_fd(int fd) {
 /*
  * Does this descriptor actually refer to a socket of any family?
  *
- * SOCK-09: sys_setsockopt() used to return 0 for anything at all, so a caller
+ * sys_setsockopt() used to return 0 for anything at all, so a caller
  * probing an fd with setsockopt() was told "socket" about a regular file, a
  * directory or a closed descriptor.  The family test mirrors the dispatch
  * already used by sys_send/sys_sendto: AF_UNIX sockets answer
@@ -1273,7 +1273,7 @@ int sys_socketpair(int domain, int type, int protocol, int sv[2]) {
 int sys_bind(int fd, const struct sockaddr *uaddr, socklen_t addrlen) {
     if (sock_fd_invalid(fd)) return -EBADF;
     if (!uaddr || addrlen < 2) return -EINVAL;
-    /* NET-03: `uaddr` is a raw userspace pointer.  Copy the sockaddr into
+    /* `uaddr` is a raw userspace pointer.  Copy the sockaddr into
      * a kernel buffer before reading any field — dereferencing it directly
      * takes an unrecoverable kernel fault on a bad/unmapped user pointer
      * (a trivial DoS).  Everything below works off the kernel copy. */
@@ -1286,7 +1286,7 @@ int sys_bind(int fd, const struct sockaddr *uaddr, socklen_t addrlen) {
 
     if (addr->sa_family == AF_UNIX) {
         const char *p = ((const struct sockaddr_un *)addr)->sun_path;
-        /* UNIX-08: this ran before the addrlen > AFUNIX_PATH_MAX+2 rejection
+        /* This ran before the addrlen > AFUNIX_PATH_MAX+2 rejection
          * below and took its %.*s precision from the caller's addrlen, which
          * can exceed what actually landed in kbuf -- printing ~170 bytes of
          * adjacent kernel stack.  Bound the precision by the bytes we really
@@ -1375,7 +1375,7 @@ int sys_listen(int fd, int backlog) {
     afunix_sock_t *s = afunix_from_fd(fd);
     if (!s) return -ENOTSOCK;
     /*
-     * UNIX-06: listen() never checked the socket type, so listen() on a
+     * listen() never checked the socket type, so listen() on a
      * SOCK_DGRAM socket "succeeded" and put it in AFUS_LISTENING -- after
      * which a connect() to it produced a type-confused pair (the server half
      * is hardcoded SOCK_STREAM below), and the client's [u16 len] framing
@@ -1475,7 +1475,7 @@ int sys_accept(int fd, struct sockaddr *addr, socklen_t *addrlen) {
      * its fd and its peer link — the steady-state connected pair. */
     afunix_unref(server_side);
     /*
-     * SOCK-01: addr/addrlen arrive as raw userspace pointers.  This used to
+     * addr/addrlen arrive as raw userspace pointers.  This used to
      * assign through them directly, so accept(lfd, (void *)0xC0100000, &len)
      * wrote AF_UNIX plus a NUL into kernel memory at an address of the
      * caller's choosing -- an arbitrary kernel write available to any process
@@ -1498,7 +1498,7 @@ int sys_accept(int fd, struct sockaddr *addr, socklen_t *addrlen) {
 int sys_connect(int fd, const struct sockaddr *uaddr, socklen_t addrlen) {
     if (sock_fd_invalid(fd)) return -EBADF;
     if (!uaddr || addrlen < 2) return -EINVAL;
-    /* NET-03: copy the sockaddr in before touching it — see sys_bind. */
+    /* Copy the sockaddr in before touching it — see sys_bind. */
     uint8_t kbuf[128];
     socklen_t clen = addrlen > (socklen_t)sizeof(kbuf)
                          ? (socklen_t)sizeof(kbuf) : addrlen;
@@ -1546,7 +1546,7 @@ int sys_connect(int fd, const struct sockaddr *uaddr, socklen_t addrlen) {
         afunix_unref(server);
         return -ECONNREFUSED;
     }
-    /* UNIX-06: and the two halves must agree on the socket type -- the
+    /* And the two halves must agree on the socket type -- the
      * server side allocated below is a SOCK_STREAM unconditionally, so a
      * datagram client connecting to a stream listener would be handed a
      * peer that frames its data differently than it reads it. */
@@ -1560,7 +1560,7 @@ int sys_connect(int fd, const struct sockaddr *uaddr, socklen_t addrlen) {
      * successful connect() returns as soon as the kernel has queued
      * the connection onto the listen backlog — it does not wait for
      * the server process to actually invoke accept(). */
-    /* UNIX-06: use the type both ends agreed on, not a hardcoded
+    /* Use the type both ends agreed on, not a hardcoded
      * SOCK_STREAM (they are equal by the check above; naming it here keeps
      * the two from drifting apart again). */
     afunix_sock_t *server_side = afunix_alloc(server->type);  /* alloc ref = 1 */
@@ -1706,7 +1706,7 @@ ssize_t sys_send(int fd, const void *buf, size_t len, int flags) {
      */
     file_t *sf = current_process ? current_process->fds[fd] : NULL;
     file_t *saved = current_thread ? current_thread->io_file : NULL;
-    /* SOCK-08: scope MSG_DONTWAIT to this thread instead of mutating the
+    /* Scope MSG_DONTWAIT to this thread instead of mutating the
      * shared file description -- see THREAD_F_IO_NONBLOCK. */
     uint32_t saved_nb = current_thread
                             ? (current_thread->flags & THREAD_F_IO_NONBLOCK) : 0;
@@ -1725,7 +1725,7 @@ ssize_t sys_send(int fd, const void *buf, size_t len, int flags) {
 
 /* Bytes copied through the kernel bounce buffer in one recv call.  Stream
  * recv may return short (the caller loops); a UDP / RAW datagram is at most
- * 65507 octets (a reassembled one, UDP-I-01) and AF_PACKET's at most a
+ * 65507 octets (a reassembled one) and AF_PACKET's at most a
  * frame, so they always fit; only an AF_UNIX datagram larger than this
  * would truncate, which no real caller hits.  kmalloc handles this via its
  * large-allocation path (KMEM_MAX_ALLOC is 128 MiB). */
@@ -1772,7 +1772,7 @@ static ssize_t recv_into_kbuf(int fd, void *kbuf, size_t len, int flags,
      * af_inet path is immune — it reads f->f_flag directly.)
      */
     file_t *saved = current_thread ? current_thread->io_file : NULL;
-    /* SOCK-08: thread-scoped MSG_DONTWAIT, not a write to the shared
+    /* Thread-scoped MSG_DONTWAIT, not a write to the shared
      * file description -- see THREAD_F_IO_NONBLOCK. */
     uint32_t saved_nb = current_thread
                             ? (current_thread->flags & THREAD_F_IO_NONBLOCK) : 0;
@@ -1781,7 +1781,7 @@ static ssize_t recv_into_kbuf(int fd, void *kbuf, size_t len, int flags,
         current_thread->io_file = f;
     }
     /*
-     * UNIX-05: this used to hardcode *kaddrlen = 0, so a bound datagram
+     * This used to hardcode *kaddrlen = 0, so a bound datagram
      * server learned nothing about who had written to it and could not
      * reply.  The frame carries the sender's path now; unpack it into the
      * caller's kernel-side sockaddr_un.  An unbound sender yields srclen 0,
@@ -1789,7 +1789,7 @@ static ssize_t recv_into_kbuf(int fd, void *kbuf, size_t len, int flags,
      */
     char   spath[AFUNIX_PATH_MAX];
     int    slen = 0;
-    /* SOCK-05/SOCK-06: MSG_PEEK must leave the datagram queued, and
+    /* MSG_PEEK must leave the datagram queued, and
      * MSG_TRUNC reports the datagram's real length rather than how much of
      * it fitted.  `truelen` comes back from the body for both. */
     size_t truelen = 0;
@@ -1851,7 +1851,7 @@ static ssize_t do_recv_rx(int fd, void *buf, size_t len, int flags,
     if (fd < 0 || fd >= MAX_FD || !current_process || !current_process->fds[fd])
         return -EBADF;
     /*
-     * UDP-API-09: a zero-length receive on a DATAGRAM socket still takes
+     * A zero-length receive on a DATAGRAM socket still takes
      * one datagram (and reports its sender; with MSG_TRUNC, its length).
      * Short-circuiting it left the datagram queued, so a poll()-driven drain
      * that receives with a zero-length buffer spun forever on it.  On a
@@ -1876,7 +1876,7 @@ static ssize_t do_recv_rx(int fd, void *buf, size_t len, int flags,
         return n;
     }
     /*
-     * UDP-MEM-01: with MSG_TRUNC, n is the datagram's REAL length, which can
+     * With MSG_TRUNC, n is the datagram's REAL length, which can
      * exceed what was received into kbuf.  Copying n bytes read past the end
      * of the kernel allocation and wrote past the end of the user buffer --
      * adjacent kernel heap handed to userspace.  Copy what kbuf holds and
@@ -1916,7 +1916,7 @@ ssize_t sys_recv(int fd, void *buf, size_t len, int flags) {
  * reader wakes its own tx_chan for these connectionless senders).  Returns
  * the byte count sent, or a negative errno. */
 /*
- * UNIX-05: a datagram frame now carries the sender's bound path.
+ * A datagram frame now carries the sender's bound path.
  *
  * The wire format in the ring is
  *     [u16 total][u8 srclen][srclen bytes of sender path][payload]
@@ -1967,7 +1967,7 @@ static ssize_t afunix_dgram_deliver_from(afunix_sock_t *dst,
 
 
 /*
- * SOCK-04: sendmsg() on a datagram socket has to emit ONE datagram carrying
+ * sendmsg() on a datagram socket has to emit ONE datagram carrying
  * all of the iovecs, so it gathers them into kernel memory first and needs a
  * send entry that does not copyin again.  `kernel_payload` says buf is
  * already ours; every other caller passes 0 and behaviour is unchanged.
@@ -1978,7 +1978,7 @@ static ssize_t sys_sendto_impl(int fd, const void *buf, size_t len, int flags,
     if (sock_fd_invalid(fd)) return -EBADF;
 
     /*
-     * SOCK-02: `addr` is a raw userspace pointer.  Reading addr->sa_family
+     * `addr` is a raw userspace pointer.  Reading addr->sa_family
      * directly here dereferenced it in kernel context, so a bad pointer
      * panicked the kernel rather than returning EFAULT, and every downstream
      * user of `addr` (including the AF_UNIX path walk below) then worked off
@@ -2000,8 +2000,8 @@ static ssize_t sys_sendto_impl(int fd, const void *buf, size_t len, int flags,
     /* Route by destination address family first.  The payload bounce happens
      * inside afpacket_sendto/afinet_sendto, which know their own size
      * limits. */
-    /* UDP-API-02: honour kernel_payload on these routes too.  It was
-     * honoured only for AF_UNIX, so the SOCK-04 sendmsg() gather buffer --
+    /* Honour kernel_payload on these routes too.  It was
+     * honoured only for AF_UNIX, so the sendmsg() gather buffer --
      * kernel memory -- reached afinet_sendto()'s copyin(), which rejects
      * every kernel address: each multi-iovec sendmsg() on a UDP socket
      * failed EFAULT and sent nothing (libtirpc's svc_dg_reply among them). */
@@ -2062,7 +2062,7 @@ static ssize_t sys_sendto_impl(int fd, const void *buf, size_t len, int flags,
             /* `dst` carries a transient reference pinning it against a
              * concurrent close() while we deliver into its rx buffer. */
             if (dst->type != SOCK_DGRAM) { afunix_unref(dst); return -ECONNREFUSED; }
-            /* UNIX-05: name ourselves in the frame so the server can reply.
+            /* Name ourselves in the frame so the server can reply.
              * An unbound sender has pathlen 0 and stays anonymous. */
             afunix_sock_t *src = afunix_from_fd(fd);
             int nonblock = 0;
@@ -2071,7 +2071,7 @@ static ssize_t sys_sendto_impl(int fd, const void *buf, size_t len, int flags,
                 if (ff && (ff->f_flag & FNONBLOCK)) nonblock = 1;
             }
             /*
-             * UNIX-01: this used to hand the raw user pointer to
+             * This used to hand the raw user pointer to
              * afunix_dgram_deliver(), which memcpy()s it into the
              * destination socket's receive buffer.  That was a clean
              * arbitrary kernel READ: point buf at kernel memory, send to a
@@ -2154,7 +2154,7 @@ struct kcmsghdr {
  * buffer are all pulled into the kernel with copyin() before use —
  * never dereferenced straight off the user pointer. */
 /*
- * SOCK-04: is this fd a datagram socket, i.e. one where message boundaries
+ * Is this fd a datagram socket, i.e. one where message boundaries
  * are part of the contract?  sendmsg/recvmsg looped over the iovecs calling
  * sys_send/sys_recv once each, which on a datagram socket emitted N
  * datagrams for one sendmsg and consumed N datagrams for one recvmsg --
@@ -2180,7 +2180,7 @@ static ssize_t iov_total(const struct iovec_local *iov, int n, size_t *out) {
 }
 
 /*
- * SOCK-04 / UDP-U-05 / UDP-API-03: on a datagram socket the iovecs are ONE
+ * On a datagram socket the iovecs are ONE
  * message.  Gather them (kiov is a kernel copy whose iov_base entries are
  * still user pointers) into one kernel buffer and send exactly one datagram
  * -- an empty one if they total zero.  Shared by sendmsg() and writev(),
@@ -2232,7 +2232,7 @@ ssize_t sys_sendmsg(int fd, const struct msghdr *umsg, int flags) {
     afunix_sock_t *s = afunix_from_fd(fd);
 
     /*
-     * UNIX-03: pin the peer before touching it.
+     * Pin the peer before touching it.
      *
      * This used to read s->peer unlocked and then lock THROUGH it
      * (mutex_lock(&s->peer->lock), s->peer->rx_fdq[...]), while s->peer is
@@ -2264,7 +2264,7 @@ ssize_t sys_sendmsg(int fd, const struct msghdr *umsg, int flags) {
         while (off + sizeof(struct kcmsghdr) <= cmsglen) {
             const struct kcmsghdr *c = (const struct kcmsghdr *)(cmsgbuf + off);
             /*
-             * UNIX-02: `off + c->cmsg_len > cmsglen` is a 32-bit add and
+             * `off + c->cmsg_len > cmsglen` is a 32-bit add and
              * cmsg_len is entirely attacker-chosen, so it WRAPPED: a second
              * cmsg claiming cmsg_len 0xFFFFFFFD made 12 + 0xFFFFFFFD come
              * out as 9, which passed the bound.  KCMSG_ALIGN(0xFFFFFFFD) is
@@ -2332,7 +2332,7 @@ cmsg_done:
     struct iovec_local *iov = kiov;
 
     /*
-     * SOCK-04: on a datagram socket the iovecs are ONE message.  Gather them
+     * On a datagram socket the iovecs are ONE message.  Gather them
      * into a single kernel buffer and send exactly one datagram; the old
      * per-iovec loop turned an N-iovec sendmsg into N datagrams, which is
      * what destroys framing for libtirpc's svc_dg_reply (named in the
@@ -2405,7 +2405,7 @@ ssize_t sys_recvmsg(int fd, struct msghdr *umsg, int flags) {
     struct iovec_local *iov = kiov;
 
     /*
-     * SOCK-04 (receive half): one recvmsg must consume exactly ONE datagram
+     * One recvmsg must consume exactly ONE datagram
      * and scatter it across the iovecs.  The loop below called sys_recv per
      * iovec, so an N-iovec recvmsg swallowed N datagrams and glued them
      * together -- the caller saw one "message" assembled from several,
@@ -2421,7 +2421,7 @@ ssize_t sys_recvmsg(int fd, struct msghdr *umsg, int flags) {
         /* Receive into a userspace-invisible buffer via the same path the
          * single-iovec case uses, so msg_name is still filled in.
          *
-         * UDP-MEM-02: the source address is staged in a KERNEL buffer too.
+         * The source address is staged in a KERNEL buffer too.
          * recv_into_kbuf() writes the sockaddr and its length through
          * plain pointers, and this branch used to hand it msg_name and
          * &umsg->msg_namelen straight from userspace -- so a caller could
@@ -2488,10 +2488,10 @@ ssize_t sys_recvmsg(int fd, struct msghdr *umsg, int flags) {
         if (r < 0) return total > 0 ? total : r;
         total += r;
         if ((size_t)r < iov[i].iov_len) break;
-        /* TCP-URG-04: an out-of-band read returns one octet and stops. */
+        /* An out-of-band read returns one octet and stops. */
         if (flags & MSG_OOB) break;
     }
-    /* TCP-URG-04: an out-of-band read says so in msg_flags. */
+    /* An out-of-band read says so in msg_flags. */
     if ((flags & MSG_OOB) && total > 0)
         msg->msg_flags |= MSG_OOB;
 
@@ -2503,7 +2503,7 @@ ssize_t sys_recvmsg(int fd, struct msghdr *umsg, int flags) {
     afunix_sock_t *s = afunix_from_fd(fd);
     uint32_t out_controllen = 0;
     /*
-     * UDP-API-11: IP_PKTINFO -- where the datagram was addressed and which
+     * IP_PKTINFO -- where the datagram was addressed and which
      * interface it came in on (Linux struct in_pktinfo: ipi_ifindex,
      * ipi_spec_dst, ipi_addr).  The destination was recorded nowhere, so
      * a server bound to the wildcard could not tell which of its addresses
@@ -2620,7 +2620,7 @@ int sys_shutdown(int fd, int how) {
     if (!s) return -ENOTSOCK;
     if (how != SHUT_RD && how != SHUT_WR && how != SHUT_RDWR) return -EINVAL;
     /*
-     * SOCK-10: POSIX requires ENOTCONN when the socket is not connected.
+     * POSIX requires ENOTCONN when the socket is not connected.
      * shutdown() on a fresh or merely-bound AF_UNIX socket reported success
      * and did nothing, so a caller using the return value to decide whether
      * a teardown actually happened was misled.
@@ -2655,7 +2655,7 @@ int sys_shutdown(int fd, int how) {
 int sys_getsockname(int fd, struct sockaddr *uaddr, socklen_t *uaddrlen) {
     if (sock_fd_invalid(fd)) return -EBADF;
     if (!uaddr || !uaddrlen) return -EINVAL;
-    /* NET-03: uaddr/uaddrlen are user pointers.  Pull the caller's buffer
+    /* uaddr/uaddrlen are user pointers.  Pull the caller's buffer
      * capacity in, build the result in a kernel buffer, then copy out
      * under length validation — never write through the raw user pointer. */
     socklen_t cap;
@@ -2673,7 +2673,7 @@ int sys_getsockname(int fd, struct sockaddr *uaddr, socklen_t *uaddrlen) {
         un->sun_family = AF_UNIX;
         int plen = s->pathlen;
         if (plen > (int)cap - 2) plen = (int)cap - 2;
-        /* NET-10: a user *addrlen of 0 or 1 drives plen negative; clamp so
+        /* A user *addrlen of 0 or 1 drives plen negative; clamp so
          * un->sun_path[plen]='\0' below never writes at a negative index. */
         if (plen < 0) plen = 0;
         if (plen > 0) memcpy(un->sun_path, s->path, plen);
@@ -2692,7 +2692,7 @@ int sys_getsockname(int fd, struct sockaddr *uaddr, socklen_t *uaddrlen) {
 int sys_getpeername(int fd, struct sockaddr *uaddr, socklen_t *uaddrlen) {
     if (sock_fd_invalid(fd)) return -EBADF;
     if (!uaddr || !uaddrlen) return -EINVAL;
-    /* NET-03: see sys_getsockname. */
+    /* User pointers: see sys_getsockname. */
     socklen_t cap;
     if (copyin(uaddrlen, &cap, sizeof(cap)) != 0) return -EFAULT;
     uint8_t kaddr[128];
@@ -2709,7 +2709,7 @@ int sys_getpeername(int fd, struct sockaddr *uaddr, socklen_t *uaddrlen) {
         un->sun_family = AF_UNIX;
         int plen = s->peer->pathlen;
         if (plen > (int)cap - 2) plen = (int)cap - 2;
-        if (plen < 0) plen = 0;   /* NET-10 twin: negative cap-2 -> no neg index */
+        if (plen < 0) plen = 0;   /* negative cap-2 -> no neg index */
         if (plen > 0) memcpy(un->sun_path, s->peer->path, plen);
         if (plen < AFUNIX_PATH_MAX) un->sun_path[plen] = '\0';
         outlen = 2 + plen;
@@ -2726,7 +2726,7 @@ int sys_getpeername(int fd, struct sockaddr *uaddr, socklen_t *uaddrlen) {
 int sys_setsockopt(int fd, int level, int optname,
                    const void *optval, socklen_t optlen) {
     /*
-     * SOCK-09: this used to return 0 unconditionally, so setsockopt() on a
+     * This used to return 0 unconditionally, so setsockopt() on a
      * closed fd, a regular file or a directory reported success.  Callers
      * that probe with setsockopt() to decide whether they hold a socket were
      * told yes about anything.  Validate the descriptor first; the option
@@ -2743,13 +2743,13 @@ int sys_setsockopt(int fd, int level, int optname,
     if (level == 1 /*SOL_SOCKET*/ && optname == 2 /*SO_REUSEADDR*/) {
         int on = 0;
         if (optval && optlen >= (socklen_t)sizeof(int)) {
-            /* NET-03: optval is a raw user pointer — copy it in rather than
+            /* optval is a raw user pointer — copy it in rather than
              * dereferencing it in the kernel. */
             if (copyin(optval, &on, sizeof(on)) != 0) return -EFAULT;
         }
         afinet_set_reuseaddr(fd, on);   /* no-op on non-AF_INET fds */
     }
-    /* UDP-RES-01: SO_RCVBUF bounds an AF_INET datagram socket's queue. */
+    /* SO_RCVBUF bounds an AF_INET datagram socket's queue. */
     if (level == 1 /*SOL_SOCKET*/ && optname == 8 /*SO_RCVBUF*/) {
         int v = 0;
         if (!optval || optlen < (socklen_t)sizeof(int)) return -EINVAL;
@@ -2757,7 +2757,7 @@ int sys_setsockopt(int fd, int level, int optname,
         int r = afinet_set_rcvbuf(fd, v);
         if (r < 0 && r != -ENOTSOCK) return r;
     }
-    /* UDP-API-15: SO_BROADCAST is stored (and enforced on send). */
+    /* SO_BROADCAST is stored (and enforced on send). */
     if (level == 1 /*SOL_SOCKET*/ && optname == 6 /*SO_BROADCAST*/) {
         int on = 0;
         if (optval && optlen >= (socklen_t)sizeof(int) &&
@@ -2765,7 +2765,7 @@ int sys_setsockopt(int fd, int level, int optname,
             return -EFAULT;
         afinet_set_broadcast(fd, on);   /* no-op on non-AF_INET fds */
     }
-    /* TCP-API-11: SO_LINGER (13), struct linger { int l_onoff, l_linger; }
+    /* SO_LINGER (13), struct linger { int l_onoff, l_linger; }
      * (the same 8 octets in every i386 personality).  It was accepted and
      * discarded; an AF_INET socket now records it and close() honours
      * {1, 0} as an abortive close.  AF_UNIX keeps none: still accepted. */
@@ -2776,7 +2776,7 @@ int sys_setsockopt(int fd, int level, int optname,
         int r = afinet_set_linger(fd, lg[0], lg[1]);
         return r == -ENOTSOCK ? 0 : r;
     }
-    /* UDP-API-04: SO_RCVTIMEO (20) / SO_SNDTIMEO (21) take a struct timeval:
+    /* SO_RCVTIMEO (20) / SO_SNDTIMEO (21) take a struct timeval:
      * 16 bytes of int64 fields natively, 12 (int64 + int32) from NetBSD and
      * OpenBSD i386, 8 bytes of int32 from Linux and FreeBSD i386.  They used to be accepted and discarded, so a blocking
      * receive on an AF_INET socket had no deadline at all.  AF_UNIX keeps
@@ -2803,7 +2803,7 @@ int sys_setsockopt(int fd, int level, int optname,
         int r = afinet_set_timeo(fd, optname == 20, sec, usec);
         return r == -ENOTSOCK ? 0 : r;
     }
-    /* TCP-WIN-13: IPPROTO_TCP TCP_USER_TIMEOUT (18), an unsigned int of
+    /* IPPROTO_TCP TCP_USER_TIMEOUT (18), an unsigned int of
      * milliseconds. */
     if (level == 6 /*IPPROTO_TCP*/ && optname == 18) {
         int val;
@@ -2821,7 +2821,7 @@ int sys_setsockopt(int fd, int level, int optname,
             return -EFAULT;
         return afinet_set_ipoptions(fd, opts, (size_t)optlen);
     }
-    /* UDP-API-13 / UDP-I-04: options with no implementation behind them must
+    /* Options with no implementation behind them must
      * say so.  The source-specific multicast calls (37-40) were accepted
      * while there is no source filtering -- they reported success and did
      * nothing, so a caller's fallback path was dead code. */
@@ -2829,7 +2829,7 @@ int sys_setsockopt(int fd, int level, int optname,
         (optname >= 37 && optname <= 40) &&
         afinet_so_type(fd) >= 0)
         return -ENOPROTOOPT;
-    /* UDP-API-12: IPPROTO_IP IP_TOS (1), IP_TTL (2), IP_MULTICAST_IF (32),
+    /* IPPROTO_IP IP_TOS (1), IP_TTL (2), IP_MULTICAST_IF (32),
      * IP_MULTICAST_TTL (33), IP_MULTICAST_LOOP (34).  Values come as an int
      * or, as BSD code often passes them, a single u_char; IP_MULTICAST_IF
      * takes a struct in_addr, a struct ip_mreq, or a Linux struct ip_mreqn
@@ -2871,7 +2871,7 @@ int sys_setsockopt(int fd, int level, int optname,
         int r = afinet_set_ipopt(fd, optname, val, addr);
         return r == -ENOTSOCK ? 0 : r;
     }
-    /* UDP-IP-06: IPPROTO_IP IP_ADD_MEMBERSHIP (35) / IP_DROP_MEMBERSHIP (36),
+    /* IPPROTO_IP IP_ADD_MEMBERSHIP (35) / IP_DROP_MEMBERSHIP (36),
      * taking a struct ip_mreq (group, interface address) or a Linux struct
      * ip_mreqn (group, address, ifindex). */
     if (level == 0 /*IPPROTO_IP*/ && (optname == 35 || optname == 36)) {
@@ -2903,7 +2903,7 @@ int sys_setsockopt(int fd, int level, int optname,
  * succeeded and proceed to send into a dead PCB).  */
 
 
-/* NET-03: copy a single-int option value out to the user optval/optlen,
+/* Copy a single-int option value out to the user optval/optlen,
  * which are raw user pointers.  Returns 0 or -EFAULT. */
 static int getsockopt_ret_int(int val, void *uoptval, socklen_t *uoptlen) {
     if (copyout(&val, uoptval, sizeof(val)) != 0) return -EFAULT;
@@ -2914,12 +2914,12 @@ static int getsockopt_ret_int(int val, void *uoptval, socklen_t *uoptlen) {
 
 int sys_getsockopt(int fd, int level, int optname,
                    void *optval, socklen_t *optlen) {
-    /* UDP-API-14: like setsockopt (SOCK-09), the fd must be a socket --
+    /* Like setsockopt, the fd must be a socket --
      * getsockopt() on a regular file used to answer with invented values. */
     if (sock_fd_invalid(fd)) return -EBADF;
     if (!sock_fd_is_socket(fd)) return -ENOTSOCK;
     if (!optval || !optlen) return -EINVAL;
-    /* NET-03: optval/optlen are user pointers.  Pull the caller's buffer
+    /* optval/optlen are user pointers.  Pull the caller's buffer
      * length in first and validate it, then copy each result out — never
      * read or write through the raw user pointer. */
     socklen_t ulen;
@@ -2933,7 +2933,7 @@ int sys_getsockopt(int fd, int level, int optname,
     if (level == SOL_SOCKET_K) {
         if (optname == SO_ERROR_K) {
             /*
-             * SOCK-07: afinet_so_error() returns -ENOTSOCK for anything that
+             * afinet_so_error() returns -ENOTSOCK for anything that
              * is not an AF_INET socket, and that value was handed straight to
              * getsockopt_ret_int() -- so getsockopt() SUCCEEDED and wrote -88
              * into the caller's int.  Every `if (so_error) fail();` idiom
@@ -3001,7 +3001,7 @@ int sys_getsockopt(int fd, int level, int optname,
              * path's per-4KiB-chunk datagram framing) and a third does not. */
             afunix_sock_t *us = afunix_from_fd(fd);
             int v = (us && us->type == SOCK_DGRAM) ? (192 * 1024) : 32 * 1024;
-            /* UDP-API-14: an AF_INET socket reports its own capacity, not
+            /* An AF_INET socket reports its own capacity, not
              * the AF_UNIX constants above. */
             if (!us) {
                 int b = afinet_bufsize(fd, optname == 8);
@@ -3010,7 +3010,7 @@ int sys_getsockopt(int fd, int level, int optname,
             return getsockopt_ret_int(v, optval, optlen);
         }
         if (optname == 20 /*SO_RCVTIMEO*/ || optname == 21 /*SO_SNDTIMEO*/) {
-            /* UDP-API-04: report the stored timeout as a struct timeval in
+            /* Report the stored timeout as a struct timeval in
              * the caller's width: 16 bytes (native int64 fields), 12
              * (NetBSD/OpenBSD i386) or 8 (Linux/FreeBSD i386).  AF_UNIX keeps
              * none: zero. */
@@ -3038,10 +3038,10 @@ int sys_getsockopt(int fd, int level, int optname,
             return 0;
         }
         if (optname == 6 /*SO_BROADCAST*/) {
-            int b = afinet_get_broadcast(fd);           /* UDP-API-15 */
+            int b = afinet_get_broadcast(fd);
             return getsockopt_ret_int(b < 0 ? 0 : b, optval, optlen);
         }
-        if (optname == 13 /*SO_LINGER*/) {                /* TCP-API-11 */
+        if (optname == 13 /*SO_LINGER*/) {
             int lg[2] = { 0, 0 };
             socklen_t n = sizeof(lg);
             (void)afinet_get_linger(fd, &lg[0], &lg[1]);   /* AF_UNIX: {0,0} */
@@ -3058,7 +3058,7 @@ int sys_getsockopt(int fd, int level, int optname,
          * which let bogus getsockopt() calls "succeed"). */
         return -ENOPROTOOPT;
     }
-    if (level == 6 /*IPPROTO_TCP*/ && optname == 18) {      /* TCP-WIN-13 */
+    if (level == 6 /*IPPROTO_TCP*/ && optname == 18) {      /* TCP_USER_TIMEOUT */
         int val = 0;
         int r = afinet_get_tcpopt(fd, optname, &val);
         if (r == 0) return getsockopt_ret_int(val, optval, optlen);
@@ -3080,7 +3080,7 @@ int sys_getsockopt(int fd, int level, int optname,
         (optname >= 37 && optname <= 40) &&
         afinet_so_type(fd) >= 0)
         return -ENOPROTOOPT;
-    /* UDP-API-12: the IPPROTO_IP transmit options read back what was set
+    /* The IPPROTO_IP transmit options read back what was set
      * (getsockopt(IP_TTL) used to answer 0). */
     if (level == 0 /*IPPROTO_IP*/ &&
         (optname == 1 || optname == 2 || optname == 8 || optname == 10 ||

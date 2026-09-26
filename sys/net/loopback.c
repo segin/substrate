@@ -73,7 +73,7 @@ static const struct netdev_ops lo_ops = { .xmit = lo_xmit };
  */
 static int lo_xmit(netdev_t *dev, const void *frame, size_t len) {
     (void)dev;
-    /* UDP-IP-11: refuse rather than truncate.  An oversize frame used to be
+    /* Refuse rather than truncate.  An oversize frame used to be
      * cut to LO_FRAME_MAX and reported as sent -- silent data loss.  No
      * caller can exceed it today (NETDEV_MTU_MAX is smaller), but the
      * contract must not depend on that. */
@@ -131,7 +131,7 @@ void loopback_init(void) {
     strlcpy(lo_netdev.name, "lo", NETDEV_NAME_MAX);
     /* Use a recognisable zero MAC.  Real loopback doesn't have one. */
     memset(lo_netdev.hwaddr, 0, NETDEV_HWADDR_LEN);
-    /* UDP-IP-11: advertise what the ring can actually carry.  It said 16384
+    /* Advertise what the ring can actually carry.  It said 16384
      * while carrying LO_FRAME_MAX, which is what SIOCGIFMTU reported and
      * what anything sizing by the device MTU would have trusted. */
     lo_netdev.mtu   = LO_FRAME_MAX - ETH_HLEN;

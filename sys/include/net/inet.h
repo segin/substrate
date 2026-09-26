@@ -54,7 +54,7 @@ void arp_input(netdev_t *dev, const uint8_t *arp_pkt, size_t len);
 
 int  nd6_lookup(netdev_t *dev, const uint8_t ip6[16], uint8_t mac[6]);
 void nd6_insert(netdev_t *dev, const uint8_t ip6[16], const uint8_t mac[6]);
-/* Refresh an existing binding only; never creates.  ND-03: an unsolicited
+/* Refresh an existing binding only; never creates.  An unsolicited
  * Neighbor Advertisement may update what we already believe but must not be
  * able to introduce a new neighbour, which is how one forged NA could
  * redirect all IPv6 traffic. */
@@ -86,11 +86,11 @@ int  ip4_output(uint32_t daddr, uint8_t protocol,
 /* ip4_output() with an explicit source address; 0 lets routing choose it
  * (what ip4_output() does).  A transport that computes a pseudo-header
  * checksum must pass the source it summed, so the IP header cannot disagree
- * with it (TCP-HDR-01, UDP-U-02/U-03). */
+ * with it. */
 int  ip4_output_from(uint32_t saddr, uint32_t daddr, uint8_t protocol,
                      const void *payload, size_t payload_len);
 
-/* UDP-API-12: per-socket IPv4 transmit options (IP_TTL, IP_TOS and the
+/* Per-socket IPv4 transmit options (IP_TTL, IP_TOS and the
  * IP_MULTICAST_* trio).  ip4_txopts_init() gives the defaults: TTL 64, TOS
  * 0, multicast TTL 1 (RFC 1112 6.1), loopback on, interface by routing. */
 struct ip4_txopts {
@@ -174,7 +174,7 @@ void udp_input(netdev_t *dev, int family,
                const uint8_t *pkt, size_t len,
                const uint8_t *netpkt, size_t netlen, int for_bcast);
 
-/* UDP-ICMP-02: emit an ICMP Port Unreachable (ICMPv6 Destination
+/* Emit an ICMP Port Unreachable (ICMPv6 Destination
  * Unreachable, code 4) quoting the invoking datagram, subject to the
  * RFC 1122 3.2.2 / RFC 4443 2.4 restrictions and a rate limit. */
 void icmp_port_unreach(netdev_t *dev, const uint8_t *ip_pkt, size_t ip_len);
@@ -200,7 +200,7 @@ void tcp_pmtu_event(uint32_t laddr, uint16_t lport, uint32_t raddr,
                     uint16_t rport, uint32_t seq, uint32_t next_hop_mtu,
                     uint32_t dropped_len);
 
-/* UDP-RES-03 / UDP-RES-06: UDP counters, the Udp: line of Linux's
+/* UDP counters, the Udp: line of Linux's
  * /proc/net/snmp, published as /proc/udpstat.  Every drop used to be
  * silent -- no counter, no log -- so a lossy receiver or a checksum-mangling
  * path could not be diagnosed. */
@@ -228,13 +228,13 @@ int     afinet_bind(int fd, const void *addr, socklen_t len);
 int     afinet_connect(int fd, const void *addr, socklen_t len);
 ssize_t afinet_sendto(int fd, const void *buf, size_t len, int flags,
                       const void *addr, socklen_t addrlen);
-/* UDP-API-02: as afinet_sendto(), but `kbuf` is kernel memory (the
+/* As afinet_sendto(), but `kbuf` is kernel memory (the
  * sendmsg() gather buffer) and is not copied in. */
 ssize_t afinet_sendto_kbuf(int fd, const void *kbuf, size_t len, int flags,
                            const void *addr, socklen_t addrlen);
 ssize_t afinet_recvfrom(int fd, void *buf, size_t len, int flags,
                         void *addr, socklen_t *addrlen);
-/* UDP-API-11: where the datagram a receive returned was addressed -- the
+/* Where the datagram a receive returned was addressed -- the
  * IP_PKTINFO data.  valid is 0 when no datagram was taken (or the socket
  * is not an IPv4 datagram socket).  Addresses in network byte order. */
 struct afi_rxinfo {
@@ -246,19 +246,19 @@ struct afi_rxinfo {
 ssize_t afinet_recvfrom_rx(int fd, void *buf, size_t len, int flags,
                            void *addr, socklen_t *addrlen,
                            struct afi_rxinfo *rx);
-/* UDP-API-11: has IP_PKTINFO been enabled on this AF_INET socket? */
+/* Has IP_PKTINFO been enabled on this AF_INET socket? */
 int     afinet_pktinfo_on(int fd);
 
 /* Upper-half delivery into a bound socket.  Returns 1 if delivered,
  * 0 if no match (RAW or DGRAM sockets registered with matching
  * protocol/port).  fanout (datagram path only): the destination was a
  * broadcast or multicast address, so every matching socket gets a copy
- * rather than only the best match (UDP-IP-08). */
+ * rather than only the best match. */
 int afinet_deliver_v4(uint32_t saddr, uint32_t daddr,
                       uint8_t protocol,
                       const uint8_t *pkt, size_t len, int for_dgram,
                       int fanout);
-/* UDP-ICMP-01: an ICMP error arrived about a UDP datagram we sent from
+/* An ICMP error arrived about a UDP datagram we sent from
  * laddr:lport to raddr:rport.  Latch err on the connected socket for that
  * 4-tuple, if any, and wake it.  All in network byte order except the
  * ports and err. */
@@ -283,19 +283,19 @@ typedef struct tcp_pcb tcp_pcb_t;
 
 tcp_pcb_t *tcp_alloc(void);
 void       tcp_free(tcp_pcb_t *p);
-int        tcp_bind(tcp_pcb_t *p, uint32_t laddr, uint16_t lport, int reuseaddr);   /* TCP-API-04 */
+int        tcp_bind(tcp_pcb_t *p, uint32_t laddr, uint16_t lport, int reuseaddr);
 int        tcp_listen(tcp_pcb_t *p, int backlog);
 int        tcp_connect(tcp_pcb_t *p, uint32_t raddr, uint16_t rport);
 int        tcp_connect_nb(tcp_pcb_t *p, uint32_t raddr, uint16_t rport);
 int        tcp_poll(tcp_pcb_t *p, short events, void **wait_chan);
 tcp_pcb_t *tcp_accept(tcp_pcb_t *listen_p, int nonblock);
 int        tcp_is_listening(const tcp_pcb_t *p);
-int        tcp_is_synchronized(const tcp_pcb_t *p);             /* TCP-API-22 */
+int        tcp_is_synchronized(const tcp_pcb_t *p);
 int        tcp_has_connection(const tcp_pcb_t *p);
 int        tcp_shutdown_wr(tcp_pcb_t *p);
 int        tcp_shutdown_rd(tcp_pcb_t *p);
 ssize_t    tcp_send(tcp_pcb_t *p, const void *buf, size_t len);
-/* UDP-API-04: the blocking calls with an absolute tick deadline (SO_SNDTIMEO
+/* The blocking calls with an absolute tick deadline (SO_SNDTIMEO
  * / SO_RCVTIMEO); 0 means none.  Past it they return -EAGAIN (or, for send,
  * the bytes already queued). */
 ssize_t    tcp_send_until(tcp_pcb_t *p, const void *buf, size_t len, uint64_t deadline);
@@ -303,7 +303,7 @@ ssize_t    tcp_recv_until(tcp_pcb_t *p, void *buf, size_t len, uint64_t deadline
 ssize_t    tcp_peek_until(tcp_pcb_t *p, void *buf, size_t len, uint64_t deadline);
 ssize_t    tcp_send_nb(tcp_pcb_t *p, const void *buf, size_t len);
 ssize_t    tcp_send_urg_until(tcp_pcb_t *p, const void *buf, size_t len,
-                              int nonblock, uint64_t deadline);   /* TCP-URG-02 */
+                              int nonblock, uint64_t deadline);
 ssize_t    tcp_recv(tcp_pcb_t *p, void *buf, size_t len);
 void       tcp_endpoints(const tcp_pcb_t *p, uint32_t *laddr, uint16_t *lport, uint32_t *raddr, uint16_t *rport);
 ssize_t    tcp_recv_nb(tcp_pcb_t *p, void *buf, size_t len);
@@ -312,13 +312,13 @@ size_t     tcp_recv_avail(const tcp_pcb_t *p);
 ssize_t    tcp_peek(tcp_pcb_t *p, void *buf, size_t len);
 ssize_t    tcp_peek_nb(tcp_pcb_t *p, void *buf, size_t len);
 int        tcp_close(tcp_pcb_t *p);
-int        tcp_abort(tcp_pcb_t *p);                             /* TCP-API-11 */
+int        tcp_abort(tcp_pcb_t *p);
 int        tcp_take_so_error(tcp_pcb_t *p);
 void       tcp_set_txopts(tcp_pcb_t *p, const struct ip4_txopts *o);
-int        tcp_set_user_timeout(tcp_pcb_t *p, uint32_t ms);     /* TCP-WIN-13 */
+int        tcp_set_user_timeout(tcp_pcb_t *p, uint32_t ms);
 uint32_t   tcp_get_user_timeout(const tcp_pcb_t *p);
-int        tcp_sockatmark(tcp_pcb_t *p);                        /* TCP-URG-01 */
-ssize_t    tcp_recv_oob(tcp_pcb_t *p, void *buf, size_t len, int peek); /* TCP-URG-04 */
+int        tcp_sockatmark(tcp_pcb_t *p);
+ssize_t    tcp_recv_oob(tcp_pcb_t *p, void *buf, size_t len, int peek);
 void       tcp_set_owner(tcp_pcb_t *p, int owner);
 int        tcp_get_owner(const tcp_pcb_t *p);
 
@@ -330,14 +330,14 @@ int     afinet_shutdown(int fd, int how);
 int     afinet_getsockname(int fd, void *addr, socklen_t *addrlen);
 int     afinet_getpeername(int fd, void *addr, socklen_t *addrlen);
 int     afinet_set_reuseaddr(int fd, int on);
-/* UDP-API-15: SO_BROADCAST; -ENOTSOCK on a non-AF_INET fd. */
+/* SO_BROADCAST; -ENOTSOCK on a non-AF_INET fd. */
 int     afinet_set_broadcast(int fd, int on);
 int     afinet_get_broadcast(int fd);
-/* UDP-API-14: SO_RCVBUF (rcv != 0) / SO_SNDBUF capacity of an AF_INET socket. */
+/* SO_RCVBUF (rcv != 0) / SO_SNDBUF capacity of an AF_INET socket. */
 int     afinet_bufsize(int fd, int rcv);
-/* UDP-RES-01: set SO_RCVBUF, in bytes; -ENOTSOCK on a non-AF_INET fd. */
+/* Set SO_RCVBUF, in bytes; -ENOTSOCK on a non-AF_INET fd. */
 int     afinet_set_rcvbuf(int fd, int val);
-/* UDP-API-11/-12: IPPROTO_IP options -- IP_TOS (1), IP_TTL (2),
+/* IPPROTO_IP options -- IP_TOS (1), IP_TTL (2),
  * IP_PKTINFO (8, receive side),
  * IP_MULTICAST_IF (32, val unused, addr = interface address),
  * IP_MULTICAST_TTL (33), IP_MULTICAST_LOOP (34).  set: -ENOTSOCK on a
@@ -349,18 +349,18 @@ int     afinet_get_ipopt(int fd, int optname, int *val, uint32_t *addr);
  * *len octets and sets *len to the length of the options. */
 int     afinet_set_ipoptions(int fd, const uint8_t *opts, size_t len);
 int     afinet_get_ipoptions(int fd, uint8_t *opts, size_t *len);
-int     afinet_set_tcpopt(int fd, int optname, int val);     /* TCP-WIN-13 */
+int     afinet_set_tcpopt(int fd, int optname, int val);
 int     afinet_get_tcpopt(int fd, int optname, int *val);
-int     afinet_setown(int fd, int owner);                   /* TCP-URG-01 */
+int     afinet_setown(int fd, int owner);
 int     afinet_getown(int fd, int *owner);
-int     afinet_set_linger(int fd, int onoff, int secs);     /* TCP-API-11 */
+int     afinet_set_linger(int fd, int onoff, int secs);
 int     afinet_get_linger(int fd, int *onoff, int *secs);
-/* UDP-API-04: SO_RCVTIMEO (rcv != 0) / SO_SNDTIMEO, as seconds plus
+/* SO_RCVTIMEO (rcv != 0) / SO_SNDTIMEO, as seconds plus
  * microseconds; both zero means no timeout.  -ENOTSOCK on a non-AF_INET fd,
  * -EDOM for a negative or out-of-range value. */
 int     afinet_set_timeo(int fd, int rcv, int64_t sec, int64_t usec);
 int     afinet_get_timeo(int fd, int rcv, int64_t *sec, int64_t *usec);
-/* UDP-IP-06: IP_ADD_MEMBERSHIP (add != 0) / IP_DROP_MEMBERSHIP.  group and
+/* IP_ADD_MEMBERSHIP (add != 0) / IP_DROP_MEMBERSHIP.  group and
  * ifaddr in network byte order; ifindex > 0 selects the interface by index
  * (struct ip_mreqn) and overrides ifaddr. */
 int     afinet_mc_membership(int fd, int add, uint32_t group, uint32_t ifaddr,
@@ -374,7 +374,7 @@ int     afpacket_socket(int type, int protocol);
 int     afpacket_bind(int fd, const void *sll, socklen_t len);
 ssize_t afpacket_sendto(int fd, const void *buf, size_t len, int flags,
                         const void *sll, socklen_t addrlen);
-/* UDP-API-02: as afpacket_sendto(), but `kbuf` is kernel memory (the
+/* As afpacket_sendto(), but `kbuf` is kernel memory (the
  * sendmsg() gather buffer) and is not copied in. */
 ssize_t afpacket_sendto_kbuf(int fd, const void *kbuf, size_t len, int flags,
                              const void *sll, socklen_t addrlen);
@@ -386,7 +386,7 @@ size_t  afpkt_node_read(struct fs_node *, off_t, size_t, uint8_t *);
  * personality iovec types share this layout. */
 struct iovec_local { void *iov_base; size_t iov_len; };
 
-/* UDP-API-03: is fd a datagram socket (AF_UNIX/AF_INET SOCK_DGRAM, or
+/* Is fd a datagram socket (AF_UNIX/AF_INET SOCK_DGRAM, or
  * SOCK_RAW)?  And send a kernel-copied iovec array on one as a single
  * datagram (sendmsg/writev), returning the bytes sent or -errno. */
 int     sock_fd_is_dgram(int fd);
@@ -400,7 +400,7 @@ ssize_t sock_dgram_sendv(int fd, const struct iovec_local *kiov, int iovcnt,
  * directly is both a security hole (a caller-chosen kernel address gets
  * written or read) and a stability hole (an unmapped pointer takes an
  * unrecoverable kernel fault instead of returning EFAULT).  Task #156
- * (NET-03) fixed this for bind/getsockname/getsockopt; these helpers exist
+ * fixed this for bind/getsockname/getsockopt; these helpers exist
  * so accept/sendto/recvfrom get the same treatment without each call site
  * re-deriving the copyin/copyout dance.
  *

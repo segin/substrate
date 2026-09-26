@@ -40,7 +40,7 @@
  * device may legally report would need ~208 and is refused rather than
  * mismatched.  (This was 256 "matching the QEMU default", which is what
  * made rx_queue_size=1024 -- a perfectly ordinary setting -- trip the
- * VNET-01 mismatch.)
+ * queue-size mismatch described in vnet_queue_init.)
  */
 #define VNET_QSZ_MAX       4096
 
@@ -72,7 +72,7 @@ static struct {
     int            registered;
 } vn;
 
-/* VNET-02: see vnet_xmit.  IRQ-safe: the TX path is re-entered from the
+/* See vnet_xmit.  IRQ-safe: the TX path is re-entered from the
  * NIC's own interrupt handler. */
 static spinlock_t vnet_tx_lock = SPINLOCK_INIT("vnet_tx");
 
@@ -83,7 +83,7 @@ static int vnet_queue_init(vnet_queue_t *q, uint16_t qsel) {
     uint16_t qsz = inw(vn.io_base + VIRTIO_REG_QUEUE_SIZE);
 
     /*
-     * VNET-01: QUEUE_NUM is READ-ONLY in legacy virtio-pci -- the device
+     * QUEUE_NUM is READ-ONLY in legacy virtio-pci -- the device
      * fixes the size and we do not get a vote.  This used to clamp qsz down
      * to VNET_QSZ_MAX and then size the ring allocation from the clamped
      * value, while the device went on computing the used-ring offset from
@@ -123,7 +123,7 @@ static int vnet_queue_init(vnet_queue_t *q, uint16_t qsel) {
     if (pages < 1) pages = 1;
 
     void *page = pmm_alloc_contiguous(pages);
-    if (!page) {                    /* VNET-11: never memset(NULL) */
+    if (!page) {                    /* never memset(NULL) */
         kprint("virtio-net: ring allocation failed\n");
         return -ENOMEM;
     }
@@ -138,7 +138,7 @@ static int vnet_queue_init(vnet_queue_t *q, uint16_t qsel) {
     /* Allocate one buffer per slot we actually use. */
     for (int i = 0; i < q->n_bufs; i++) {
         void *buf = pmm_alloc_block();
-        if (!buf) {                 /* VNET-11 */
+        if (!buf) {                 /* never memset(NULL) */
             kprint("virtio-net: buffer allocation failed\n");
             return -ENOMEM;
         }
@@ -167,7 +167,7 @@ static void vnet_rx_publish_all(void) {
         vnet_rx_post(i);
         q->avail->ring[i] = (uint16_t)i;
     }
-    /* VNET-05: the descriptor and ring writes above must be visible to the
+    /* The descriptor and ring writes above must be visible to the
      * device before the index that publishes them. */
     __asm__ volatile("" ::: "memory");
     q->avail->idx = q->n_bufs;
@@ -192,7 +192,7 @@ static void vnet_rx_drain(void) {
             continue;
         }
         /*
-         * VNET-06: `total` is the device-written used-ring length and was
+         * `total` is the device-written used-ring length and was
          * never bounded.  desc_id was validated but this was not, so a
          * buggy or hostile device could name a length far past the 4 KiB
          * buffer we posted; only netdev_rx's own clamp stood between that
@@ -213,7 +213,7 @@ static void vnet_rx_drain(void) {
         /* Recycle the buffer back to the device. */
         vnet_rx_post((int)desc_id);
         q->avail->ring[q->avail->idx % q->q_size] = (uint16_t)desc_id;
-        __asm__ volatile("" ::: "memory");   /* VNET-05: publish after writes */
+        __asm__ volatile("" ::: "memory");   /* publish after writes */
         q->avail->idx++;
         q->last_used_idx++;
     }
@@ -229,7 +229,7 @@ static int vnet_xmit(netdev_t *dev, const void *frame, size_t len) {
     vnet_queue_t *q = &vn.txq;
 
     /*
-     * VNET-02: vnet_xmit is re-entered from the hard IRQ handler with no
+     * vnet_xmit is re-entered from the hard IRQ handler, so it needs
      * serialization -- vnet_irq -> vnet_rx_drain -> netdev_rx ->
      * inet_eth_input -> arp_input -> eth_send -> netdev_xmit -> vnet_xmit.
      * desc_id is derived from q->avail->idx before that index is
@@ -240,7 +240,7 @@ static int vnet_xmit(netdev_t *dev, const void *frame, size_t len) {
     unsigned long txf = spinlock_acquire_irq(&vnet_tx_lock);
 
     /*
-     * VNET-03: reap the TX used ring before reusing a buffer.  Nothing ever
+     * Reap the TX used ring before reusing a buffer.  Nothing ever
      * read txq.used->idx -- last_used_idx was written once at init and never
      * again -- so after n_bufs transmits we memcpy'd a new frame into a
      * buffer the device might still be reading.  This is the same bug class
@@ -363,7 +363,7 @@ int virtio_net_setup(uint8_t bus, uint8_t slot, uint8_t func) {
     }
 
     /* 4. Set up queues. */
-    /* VNET-01: a queue we cannot back exactly must abort the attach, not be
+    /* A queue we cannot back exactly must abort the attach, not be
      * silently mismatched against the device's own ring geometry. */
     if (vnet_queue_init(&vn.rxq, 0) != 0) return -1;
     if (vnet_queue_init(&vn.txq, 1) != 0) return -1;
@@ -372,7 +372,7 @@ int virtio_net_setup(uint8_t bus, uint8_t slot, uint8_t func) {
     outb(vn.io_base + VIRTIO_REG_DEVICE_STATUS, 7);  /* ACK|DRIVER|DRIVER_OK */
 
     /* 6. Hook the IRQ. */
-    /* VNET-04: virtio-net commonly shares its PCI INTx line with
+    /* Virtio-net commonly shares its PCI INTx line with
      * virtio-blk / AHCI.  Without IRQF_SHARED one of the two registrations
      * is refused with -EBUSY -- either this NIC gets no handler and the
      * interface is dead, or the sibling loses its own -- and a level-
@@ -400,7 +400,7 @@ int virtio_net_setup(uint8_t bus, uint8_t slot, uint8_t func) {
     /* 8. Register the netdev. */
     strlcpy(vn.netdev.name, "eth0", NETDEV_NAME_MAX);
     vn.netdev.mtu = 1500;
-    /* UDP-IP-06: no set_allmulti -- without VIRTIO_NET_F_CTRL_RX the
+    /* No set_allmulti -- without VIRTIO_NET_F_CTRL_RX the
      * device offers no receive filter, and QEMU delivers all multicast. */
     vn.netdev.flags = NETDEV_IFF_UP | NETDEV_IFF_BROADCAST | NETDEV_IFF_RUNNING |
                       NETDEV_IFF_MULTICAST;

@@ -80,14 +80,13 @@ struct sin6_kern {
 /* ------------------------------------------------------------------ */
 
 /*
- * UDP-04: the largest UDP payload that can actually cross this stack.
+ * The largest UDP payload that can actually cross this stack.
  *
  * This was 1500, which silently truncated on receive and refused on send
  * anything between 1501 and the real link maximum -- a datagram that the
  * NIC delivered whole was cut short with no indication to the caller.
  *
- * The audit asked for 65507 (the protocol maximum), and that is NOT what
- * this is, deliberately: reaching it requires IP fragmentation on send and
+ * It is deliberately NOT 65507 (the protocol maximum): reaching it requires IP fragmentation on send and
  * reassembly on receive, and this stack has neither -- ip4_input drops every
  * fragment outright (inet.c: "Drop fragments -- we don't reassemble yet")
  * and ip4_output emits a single unfragmented packet.  A >MTU datagram
@@ -97,7 +96,7 @@ struct sin6_kern {
  * is now exactly MTU minus the IPv4 and UDP headers.  Real 65507 support is
  * an IP-fragmentation feature, not a socket-layer one.
  *
- * UDP-I-01: ip4_input now reassembles, so a datagram up to the protocol
+ * ip4_input now reassembles, so a datagram up to the protocol
  * maximum can ARRIVE; AFI_RX_MAX is that receive ceiling.  Sending is still
  * one unfragmented packet, so AFI_DATA_MAX stays the send-side bound (and
  * the size of the on-stack bounce buffers; a larger receive bounces
@@ -107,14 +106,14 @@ struct sin6_kern {
 #define AFI_RX_MAX   (65535 - 20 - 8)
 
 /*
- * UDP-RES-01: one queued datagram -- this header, then `len` payload bytes,
+ * One queued datagram -- this header, then `len` payload bytes,
  * padded to 4 -- in the socket's receive byte ring.  The queue used to be 32
  * fixed slots of AFI_DATA_MAX bytes each, bounded by datagram COUNT: 32
  * eight-byte datagrams filled it, while SO_RCVBUF was ignored.
  */
 typedef struct afi_rec {
     uint16_t len;       /* payload bytes stored */
-    /* SOCK-06: the datagram's length as it arrived, which can exceed `len`
+    /* The datagram's length as it arrived, which can exceed `len`
      * if it did not fit.  recv(MSG_TRUNC) reports this so a caller can tell
      * "your buffer was too small" from "the datagram really was this short";
      * without it the two were indistinguishable. */
@@ -123,15 +122,15 @@ typedef struct afi_rec {
     uint8_t  proto;
     uint16_t port;      /* source port for UDP, 0 for RAW */
     uint8_t  addr[16];  /* source address (4 bytes for v4) */
-    uint32_t daddr4;    /* UDP-API-11: IPv4 destination it arrived for */
-    uint32_t ifindex;   /* UDP-API-11: interface it arrived on (0 unknown) */
+    uint32_t daddr4;    /* IP_PKTINFO: IPv4 destination it arrived for */
+    uint32_t ifindex;   /* IP_PKTINFO: interface it arrived on (0 unknown) */
 } afi_rec_t;
 
 /* Ring space a record with `n` payload bytes occupies. */
 #define AFI_REC_SPACE(n)   (((uint32_t)sizeof(afi_rec_t) + (uint32_t)(n) + 3u) & ~3u)
 
 /*
- * UDP-I-01: the buffer a datagram is copied through under afi_lock before
+ * The buffer a datagram is copied through under afi_lock before
  * it reaches the caller.  The caller's on-stack one (AFI_DATA_MAX) does for
  * anything that fits a frame; a larger request -- which a reassembled
  * datagram can now satisfy -- gets a heap buffer of up to AFI_RX_MAX,
@@ -152,12 +151,12 @@ static uint8_t *afi_rx_bounce(uint8_t *stk, size_t stk_len, size_t want,
 static void afi_rx_bounce_free(uint8_t *b, const uint8_t *stk, size_t cap) {
     if (b != stk) kfree(b, cap);
 }
-/* UDP-RES-01: SO_RCVBUF, in bytes of ring (headers included). */
+/* SO_RCVBUF, in bytes of ring (headers included). */
 #define AFI_RCVBUF_DEFAULT (64u * 1024u)
 #define AFI_RCVBUF_MIN     (2u * 1024u)
 #define AFI_RCVBUF_MAX     (1024u * 1024u)
 
-/* UDP-IP-06: IPv4 multicast groups one socket may join. */
+/* IPv4 multicast groups one socket may join. */
 #define AFI_MC_MAX 8
 
 typedef struct afi_sock {
@@ -176,14 +175,14 @@ typedef struct afi_sock {
     int      connected;
     int      bound;        /* explicit bind() succeeded — re-bind is EINVAL */
     int      reuseaddr;    /* SO_REUSEADDR — relaxes the EADDRINUSE check */
-    int      pktinfo;      /* UDP-API-11: IP_PKTINFO requested */
-    int      broadcast;    /* UDP-API-15: SO_BROADCAST */
-    uint32_t owner_uid;    /* UDP-API-01: euid of the creating process */
-    uint32_t rcv_timeo;    /* UDP-API-04: SO_RCVTIMEO in ticks, 0 = none */
-    struct ip4_txopts txo; /* UDP-API-12: IP_TTL/IP_TOS/IP_MULTICAST_* */
-    uint32_t snd_timeo;    /* UDP-API-04: SO_SNDTIMEO in ticks, 0 = none */
+    int      pktinfo;      /* IP_PKTINFO requested */
+    int      broadcast;    /* SO_BROADCAST */
+    uint32_t owner_uid;    /* euid of the creating process */
+    uint32_t rcv_timeo;    /* SO_RCVTIMEO in ticks, 0 = none */
+    struct ip4_txopts txo; /* IP_TTL/IP_TOS/IP_MULTICAST_* */
+    uint32_t snd_timeo;    /* SO_SNDTIMEO in ticks, 0 = none */
 
-    /* UDP-RES-01/-02: the datagram receive queue, a byte ring of afi_rec_t
+    /* The datagram receive queue, a byte ring of afi_rec_t
      * records.  Allocated only for SOCK_DGRAM/SOCK_RAW (a stream socket's
      * data lives in its TCP PCB); rcvbuf (SO_RCVBUF) bounds rq_used and may
      * be below rq_cap after a shrink.  count is the number of datagrams and
@@ -191,36 +190,36 @@ typedef struct afi_sock {
     uint8_t   *rq;
     uint32_t   rq_cap, rq_head, rq_tail, rq_used;
     uint32_t   rcvbuf;
-    uint32_t   rq_drops;    /* UDP-RES-03: datagrams dropped on a full queue */
+    uint32_t   rq_drops;    /* datagrams dropped on a full queue */
     uint32_t   count;
     void      *wait_chan;
     int        closed;
     int        rd_shut;     /* shutdown(SHUT_RD): reads return EOF */
-    int        wr_shut;     /* UDP-API-19: shutdown(SHUT_WR): sends EPIPE */
-    int        so_error;    /* UDP-ICMP-01: errno latched from an ICMP error;
+    int        wr_shut;     /* shutdown(SHUT_WR): sends EPIPE */
+    int        so_error;    /* errno latched from an ICMP error;
                              * guarded by afi_lock */
-    /* UDP-IP-06: IPv4 groups this socket joined (network byte order; 0 =
+    /* IPv4 groups this socket joined (network byte order; 0 =
      * free) and the interface each was joined on.  Guarded by afi_lock. */
     uint32_t   mc_group[AFI_MC_MAX];
     netdev_t  *mc_dev[AFI_MC_MAX];
 
-    /* NET-01: reference count guarding the socket's lifetime against the
+    /* Reference count guarding the socket's lifetime against the
      * hard-IRQ delivery path.  Held by the installed socket itself (the
      * fd/list reference, dropped by afinet_node_close) plus a transient
      * reference each blocking reader takes for its duration, so a
      * concurrent close() can never free the struct while inbound traffic
      * is being delivered into its ring or a reader is asleep on it. */
     int        refcount;
-    int        owner;       /* TCP-URG-01: F_SETOWN (pid, or -pgrp) */
-    int        linger_on;   /* TCP-API-11: SO_LINGER l_onoff */
-    int        linger_secs; /* TCP-API-11: SO_LINGER l_linger */
+    int        owner;       /* F_SETOWN (pid, or -pgrp) */
+    int        linger_on;   /* SO_LINGER l_onoff */
+    int        linger_secs; /* SO_LINGER l_linger */
 
     fs_node_t  node;
     struct afi_sock *next;
 } afi_sock_t;
 
 /*
- * UDP-API-20 / UDP-I-03: the largest payload one send on this socket may
+ * The largest payload one send on this socket may
  * carry.  A raw socket supplies its own L4 header, so it gets everything
  * behind the IP header the stack synthesizes; a datagram socket also loses
  * the UDP header.  Per family: the IPv6 header is 40 bytes, not IPv4's 20
@@ -236,7 +235,7 @@ static size_t afi_max_payload(int family, int type) {
 }
 
 static afi_sock_t *g_afi_head;
-/* UDP-API-04: the absolute deadline for a blocking call under a timeout of
+/* The absolute deadline for a blocking call under a timeout of
  * `timeo` ticks, or 0 for none. */
 static uint64_t afi_deadline(uint32_t timeo) {
     return timeo ? get_ticks() + timeo : 0;
@@ -244,7 +243,7 @@ static uint64_t afi_deadline(uint32_t timeo) {
 
 static uint16_t    g_ephemeral_next = 49152;
 
-/* NET-01: g_afi_head and every socket's ring counters (head/tail/count),
+/* g_afi_head and every socket's ring counters (head/tail/count),
  * closed flag and refcount are mutated from BOTH the hard-IRQ delivery
  * path (afinet_deliver_v4/v6 -> enqueue, called from netdev RX) and
  * process context (socket/accept/bind/close/recv).  This IRQ-safe
@@ -261,7 +260,7 @@ static void afi_free_sock(afi_sock_t *s) {
     kfree(s, sizeof(*s));
 }
 
-/* UDP-RES-01: copy into / out of the receive ring at byte offset `off`,
+/* Copy into / out of the receive ring at byte offset `off`,
  * wrapping at rq_cap.  The caller holds afi_lock. */
 static void rq_put(afi_sock_t *s, uint32_t off, const void *src, uint32_t n) {
     const uint8_t *b = (const uint8_t *)src;
@@ -318,7 +317,7 @@ static uint16_t afinet_alloc_ephemeral(void) {
 }
 
 /*
- * UDP-05: hand out an ephemeral port that is not already in use.
+ * Hand out an ephemeral port that is not already in use.
  *
  * The bare counter above is incremented without any check that the port it
  * lands on is free, so two sockets could be handed the same one -- after
@@ -335,7 +334,7 @@ static uint16_t afinet_alloc_ephemeral(void) {
 static int afinet_port_taken_locked(const afi_sock_t *self, uint16_t port);
 
 /*
- * UDP-API-18: and do it atomically.  The counter was advanced, the port
+ * And do it atomically.  The counter was advanced, the port
  * checked under afi_lock, the lock DROPPED, and only then did the caller
  * record the port -- so two threads binding implicitly at once could both
  * pass the check on the same port.  Advance, check and record (local_port,
@@ -433,7 +432,8 @@ static int afinet_ioctl(fs_node_t *node, uint32_t request, void *arg) {
             if (s->tcp) {
                 avail = (int)tcp_recv_avail(s->tcp);
             } else {
-                /* UDP-RES-05 (read under the lock, as recvfrom does). */
+                /* The next datagram's size, read under the lock as
+                 * recvfrom does. */
                 unsigned long ffl = spinlock_acquire_irq(&afi_lock);
                 if (s->count > 0) {
                     afi_rec_t h;
@@ -447,7 +447,7 @@ static int afinet_ioctl(fs_node_t *node, uint32_t request, void *arg) {
         return 0;
     }
 
-    /* TCP-URG-01: SIOCATMARK -- whether the next octet to be read follows
+    /* SIOCATMARK -- whether the next octet to be read follows
      * the urgent octet.  Never true for a datagram socket. */
     if (request == SIOCATMARK) {
         afi_sock_t *s = node ? (afi_sock_t *)(uintptr_t)node->impl : NULL;
@@ -490,7 +490,7 @@ static int afinet_ioctl(fs_node_t *node, uint32_t request, void *arg) {
      * by ifindex).  Handle them before the by-name lookup. */
     if (request == SIOCGIFADDR_IN6 || request == SIOCSIFADDR_IN6 ||
         request == SIOCDIFADDR_IN6 || request == SIOCSIFGW_IN6) {
-        /* CFG-01: same rule as the IPv4 setters below -- these mutate the
+        /* Same rule as the IPv4 setters below -- these mutate the
          * interface address and the v6 gateway, which is the whole of the
          * IPv6 routing state. */
         if (request != SIOCGIFADDR_IN6 &&
@@ -538,7 +538,7 @@ static int afinet_ioctl(fs_node_t *node, uint32_t request, void *arg) {
     if (!dev) return -ENODEV;
 
     /*
-     * CFG-01: the SIOCSIF* commands mutate dev->ip4_addr / ip4_netmask /
+     * The SIOCSIF* commands mutate dev->ip4_addr / ip4_netmask /
      * ip4_gateway / hwaddr / mtu / flags directly, and on this stack those
      * fields ARE the routing table -- route_for_v4() reads nothing else.
      * With no privilege check any unprivileged process could repoint the
@@ -714,7 +714,7 @@ static int afinet_node_poll(fs_node_t *node, void *waiter)
     if (s->tcp) {
         /* Defer to TCP for connect-state / accept / recv readiness. */
         void *chan = NULL;
-        int   rv   = tcp_poll(s->tcp, POLLIN | POLLOUT | POLLPRI, &chan);   /* TCP-URG-01 */
+        int   rv   = tcp_poll(s->tcp, POLLIN | POLLOUT | POLLPRI, &chan);   /* PRI: urgent data */
         if (waiter && chan) *(void **)waiter = chan;
         return rv;
     }
@@ -722,8 +722,8 @@ static int afinet_node_poll(fs_node_t *node, void *waiter)
      * something queued; always writeable.  */
     int rv = POLLOUT;
     if (s->count > 0) rv |= POLLIN;
-    if (s->so_error) rv |= POLLERR;     /* UDP-ICMP-01 */
-    if (s->rd_shut) rv |= POLLIN | POLLRDHUP;   /* UDP-API-08: reads return EOF */
+    if (s->so_error) rv |= POLLERR;     /* latched ICMP error */
+    if (s->rd_shut) rv |= POLLIN | POLLRDHUP;   /* reads return EOF */
     if (waiter && rv == POLLOUT) *(void **)waiter = s->wait_chan;
     return rv;
 }
@@ -751,7 +751,7 @@ static int afi_node_nonblock(const fs_node_t *node) {
 }
 
 /*
- * UDP-06: register on the sleep queue BEFORE dropping the ring lock.
+ * Register on the sleep queue BEFORE dropping the ring lock.
  *
  * The receive loops used to do
  *      spinlock_release_irq(&afi_lock, fl);
@@ -801,14 +801,14 @@ static int afi_wait(afi_sock_t *s, unsigned long *fl) {
 }
 
 /*
- * SOCK-03: pin the socket BEFORE the first dereference, not after.
+ * Pin the socket BEFORE the first dereference, not after.
  *
- * NET-01 already added a reference around the datagram ring walk, but it
+ * A reference was already taken around the datagram ring walk, but it
  * was taken well down the function -- after s->closed / s->rd_shut / s->tcp
  * had been read, and, for a stream socket, after tcp_recv() had been
  * entered and blocked.  A concurrent close() in that window frees the
- * struct out from under a sleeping reader, which is the same defect NET-01
- * fixed for the ring.  Taking the reference at entry closes the window for
+ * struct out from under a sleeping reader, which is the same defect that
+ * reference fixed for the ring.  Taking the reference at entry closes the window for
  * every path through the function; the inner acquire/release stays as it
  * is (nested references are fine) so the ring code keeps working unchanged.
  */
@@ -817,7 +817,7 @@ static size_t afinet_node_read_body(fs_node_t *node, afi_sock_t *s,
                                     uint8_t *tmp, size_t cap);
 
 /*
- * UDP-API-16: pin the socket behind a node.  node->impl used to be loaded
+ * Pin the socket behind a node.  node->impl used to be loaded
  * with no lock and the reference taken afterwards, so a close() on another
  * thread could drop the last reference and free the socket between the two
  * -- the reader or writer then incremented freed memory and later freed it
@@ -857,7 +857,7 @@ static size_t afinet_node_read_body(fs_node_t *node, afi_sock_t *s,
     if (s->rd_shut) return 0;            /* shutdown(SHUT_RD): EOF */
     int nb = afi_node_nonblock(node);
     if (s->type == SOCK_STREAM && s->tcp) {
-        /* TCP-API-17: as recv() already does -- a listener has no stream to
+        /* As recv() already does -- a listener has no stream to
          * read, and read() on one blocked forever. */
         if (tcp_is_listening(s->tcp)) return (size_t)-ENOTCONN;
         ssize_t n = nb ? tcp_recv_nb(s->tcp, buf, size)
@@ -869,7 +869,7 @@ static size_t afinet_node_read_body(fs_node_t *node, afi_sock_t *s,
          * closing the connection. */
         return (size_t)n;
     }
-    /* NET-01: serialise ring access against the hard-IRQ delivery path
+    /* Serialise ring access against the hard-IRQ delivery path
      * and pin the socket with a reference so a concurrent close() cannot
      * free it while we are dequeuing or asleep.  The ring slot is copied
      * into a kernel-local buffer under the lock; the copy out to the
@@ -888,7 +888,7 @@ static size_t afinet_node_read_body(fs_node_t *node, afi_sock_t *s,
             memcpy(buf, tmp, n);
             return n;
         }
-        /* UDP-ICMP-01: read(2) reports a latched ICMP error exactly as
+        /* read(2) reports a latched ICMP error exactly as
          * recv() does (afinet_recvfrom). */
         if (s->so_error) {
             int err = s->so_error;
@@ -896,16 +896,16 @@ static size_t afinet_node_read_body(fs_node_t *node, afi_sock_t *s,
             afi_rele_unlock(s, fl);
             return (size_t)-err;
         }
-        /* UDP-API-08: and a reader already asleep when shutdown(SHUT_RD)
-         * arrives must wake to EOF, not go back to sleep. */
+        /* A reader already asleep when shutdown(SHUT_RD) arrives must
+         * wake to EOF, not go back to sleep. */
         if (s->rd_shut) { afi_rele_unlock(s, fl); return 0; }
         if (nb) { afi_rele_unlock(s, fl); return (size_t)-EAGAIN; }
-        /* UDP-API-04: SO_RCVTIMEO expired. */
+        /* SO_RCVTIMEO expired. */
         if (deadline && get_ticks() >= deadline) {
             afi_rele_unlock(s, fl);
             return (size_t)-EAGAIN;
         }
-        /* UDP-06: queue-then-release, and signal-interruptible so SIGINT
+        /* Queue-then-release, and signal-interruptible so SIGINT
          * (and friends) yank ping/etc out of a blocked recv. */
         if (afi_wait(s, &fl) == -EINTR) {
             afi_rele_unlock(s, fl);
@@ -916,7 +916,7 @@ static size_t afinet_node_read_body(fs_node_t *node, afi_sock_t *s,
 }
 
 /*
- * UDP-03: compute the transmit checksum.
+ * Compute the transmit checksum.
  *
  * Every UDP send path wrote `uh->check = 0` and left it there.  Over IPv4
  * that is legal-but-lazy (a zero checksum means "not computed", so silent
@@ -934,7 +934,7 @@ static size_t afinet_node_read_body(fs_node_t *node, afi_sock_t *s,
  * the payload has been copied in.
  */
 /*
- * UDP-U-02/U-03: the source a datagram leaves with.  A socket bound to a
+ * The source a datagram leaves with.  A socket bound to a
  * specific address sends from it -- bind()'s address used to be ignored on
  * transmit, so the peer saw (and replied to) whatever routing picked.  The
  * value is computed once and used for both the pseudo-header and the IP
@@ -960,7 +960,7 @@ static void udp_csum4(struct udphdr *uh, uint32_t saddr, uint32_t daddr,
     uh->check = c ? c : 0xFFFF;
 }
 
-/* UDP-U-06: returns 0, or -ENETUNREACH when no source can be chosen.  It
+/* Returns 0, or -ENETUNREACH when no source can be chosen.  It
  * used to return nothing and leave check == 0 in that case, relying on
  * ip6_output() to fail the send later -- but over IPv6 a zero UDP checksum
  * is illegal (RFC 8200 8.1), so no path may ever hand one to the output
@@ -976,14 +976,14 @@ static int udp_csum6(struct udphdr *uh, const uint8_t daddr[16],
     return 0;
 }
 
-/* SOCK-03 (write twin of afinet_node_read): tcp_send() blocks on a full
+/* The write twin of afinet_node_read: tcp_send() blocks on a full
  * send window with nothing holding the socket, so pin at entry here too. */
 static size_t afinet_node_write_body(fs_node_t *node, afi_sock_t *s,
                                      size_t size, const uint8_t *buf);
 
 static size_t afinet_node_write(fs_node_t *node, off_t off, size_t size, const uint8_t *buf) {
     (void)off;
-    /* UDP-API-16: a write to a torn-down socket is an error, not a
+    /* A write to a torn-down socket is an error, not a
      * successful zero-byte transfer -- that spun every libc-style
      * "write until done" loop forever. */
     afi_sock_t *s = afi_node_get(node);
@@ -1002,13 +1002,13 @@ static size_t afinet_node_write_body(fs_node_t *node, afi_sock_t *s,
     if (s->type == SOCK_STREAM && s->tcp) {
         ssize_t n = afi_node_nonblock(node) ? tcp_send_nb(s->tcp, buf, size)
                                             : tcp_send_until(s->tcp, buf, size, afi_deadline(s->snd_timeo));
-        /* TCP-API-13: a write on a stream whose send side is gone raises
+        /* A write on a stream whose send side is gone raises
          * SIGPIPE, as for a pipe; nothing in sys/net ever did. */
         if (n == -EPIPE && current_process)
             psignal(current_process, SIGPIPE);
         return (size_t)n;
     }
-    /* UDP-API-19: after shutdown(SHUT_WR): EPIPE and SIGPIPE, as for a
+    /* After shutdown(SHUT_WR): EPIPE and SIGPIPE, as for a
      * pipe (write(2) has no MSG_NOSIGNAL). */
     if (s->wr_shut) {
         if (current_process) psignal(current_process, SIGPIPE);
@@ -1016,7 +1016,7 @@ static size_t afinet_node_write_body(fs_node_t *node, afi_sock_t *s,
     }
     /* write() without an address only works on a connected DGRAM socket. */
     if (!s->connected) return (size_t)-EDESTADDRREQ;
-    /* UDP-API-20: the raw arms below had no bound of their own. */
+    /* The raw arms below have no payload bound of their own. */
     if (s->type == SOCK_RAW && size > afi_max_payload(s->family, s->type))
         return (size_t)-EMSGSIZE;
 
@@ -1025,10 +1025,10 @@ static size_t afinet_node_write_body(fs_node_t *node, afi_sock_t *s,
             uint8_t pkt[AFI_DATA_MAX + sizeof(struct udphdr)];
             if (size > afi_max_payload(s->family, s->type)) return (size_t)-EMSGSIZE;
             struct udphdr *uh = (struct udphdr *)pkt;
-            /* NET-07: allocate via afinet_alloc_ephemeral() — the inline
+            /* Allocate via afinet_alloc_ephemeral() — the inline
              * ++g_ephemeral_next bypassed its wrap-to-49152 guard and is
              * non-atomic, yielding port 0 / low ports past 65535. */
-            /* UDP-05: an implicit bind must pick a FREE port and record it
+            /* An implicit bind must pick a FREE port and record it
              * as bound, or the socket stays invisible to the collision
              * check and a later bind() can hand the same port out again. */
             if (!s->local_port) {
@@ -1047,7 +1047,7 @@ static size_t afinet_node_write_body(fs_node_t *node, afi_sock_t *s,
             udp_csum4(uh, saddr, daddr, sizeof(*uh) + size);
             int rc = ip4_output_opts(saddr, daddr, IPPROTO_UDP_NUM, pkt,
                                      sizeof(*uh) + size, &s->txo);
-            if (rc >= 0) udp_stat_inc(UDP_STAT_OUT_DATAGRAMS);   /* UDP-RES-03 */
+            if (rc >= 0) udp_stat_inc(UDP_STAT_OUT_DATAGRAMS);
             return rc < 0 ? (size_t)rc : size;
         } else {
             uint32_t daddr;
@@ -1061,10 +1061,10 @@ static size_t afinet_node_write_body(fs_node_t *node, afi_sock_t *s,
             uint8_t pkt[AFI_DATA_MAX + sizeof(struct udphdr)];
             if (size > afi_max_payload(s->family, s->type)) return (size_t)-EMSGSIZE;
             struct udphdr *uh = (struct udphdr *)pkt;
-            /* NET-07: allocate via afinet_alloc_ephemeral() — the inline
+            /* Allocate via afinet_alloc_ephemeral() — the inline
              * ++g_ephemeral_next bypassed its wrap-to-49152 guard and is
              * non-atomic, yielding port 0 / low ports past 65535. */
-            /* UDP-05: an implicit bind must pick a FREE port and record it
+            /* An implicit bind must pick a FREE port and record it
              * as bound, or the socket stays invisible to the collision
              * check and a later bind() can hand the same port out again. */
             if (!s->local_port) {
@@ -1080,7 +1080,7 @@ static size_t afinet_node_write_body(fs_node_t *node, afi_sock_t *s,
             int rc = udp_csum6(uh, s->peer_addr, sizeof(*uh) + size);
             if (rc < 0) return (size_t)rc;
             rc = ip6_output(s->peer_addr, IPPROTO_UDP_NUM, pkt, sizeof(*uh) + size);
-            if (rc >= 0) udp_stat_inc(UDP_STAT_OUT_DATAGRAMS);   /* UDP-RES-03 */
+            if (rc >= 0) udp_stat_inc(UDP_STAT_OUT_DATAGRAMS);
             return rc < 0 ? (size_t)rc : size;
         } else {
             int rc = ip6_output(s->peer_addr, (uint8_t)s->protocol, buf, size);
@@ -1090,7 +1090,7 @@ static size_t afinet_node_write_body(fs_node_t *node, afi_sock_t *s,
 }
 
 static void afinet_node_close(fs_node_t *node) {
-    /* UDP-API-16: detach under afi_lock, so afi_node_get() either pins the
+    /* Detach under afi_lock, so afi_node_get() either pins the
      * socket first or sees it gone -- never a pointer about to be freed. */
     unsigned long cfl = spinlock_acquire_irq(&afi_lock);
     afi_sock_t *s = (afi_sock_t *)(uintptr_t)node->impl;
@@ -1100,7 +1100,7 @@ static void afinet_node_close(fs_node_t *node) {
     /* tcp_close() serialises internally (its own IRQ-off critical
      * section) and may not run under afi_lock.
      *
-     * TCP-API-11: SO_LINGER {l_onoff = 1, l_linger = 0} asks for an
+     * SO_LINGER {l_onoff = 1, l_linger = 0} asks for an
      * abortive close -- RST, queued data discarded -- instead of the FIN
      * handshake.  (A non-zero linger time would make close() wait for the
      * data to be acknowledged; that is not implemented, and such a close
@@ -1112,7 +1112,7 @@ static void afinet_node_close(fs_node_t *node) {
             tcp_close(s->tcp);
         s->tcp = NULL;
     }
-    /* UDP-IP-06: give back this socket's group memberships, so the last
+    /* Give back this socket's group memberships, so the last
      * leave turns the NIC's all-multicast mode off again. */
     {
         uint32_t grp[AFI_MC_MAX];
@@ -1128,7 +1128,7 @@ static void afinet_node_close(fs_node_t *node) {
         for (int i = 0; i < AFI_MC_MAX; i++)
             if (grp[i]) netdev_mc_leave(dev[i], grp[i]);
     }
-    /* NET-01: mark closed, unlink from the delivery list, and drop the
+    /* Mark closed, unlink from the delivery list, and drop the
      * install reference — all under afi_lock so the hard-IRQ delivery
      * path can neither be walking the list nor enqueuing into this
      * socket's ring while we unlink it.  The socket is freed here only
@@ -1195,7 +1195,7 @@ int afinet_socket(int family, int type, int protocol) {
     if (type != SOCK_RAW && type != SOCK_DGRAM && type != SOCK_STREAM)
         return -EPROTONOSUPPORT;
     /*
-     * UDP-07: a raw socket is a privileged object -- it reads every packet
+     * A raw socket is a privileged object -- it reads every packet
      * of its protocol regardless of who they were for, and writes
      * caller-composed IP payloads straight onto the wire.  Creating one
      * required no privilege at all, so any unprivileged process could sniff
@@ -1226,10 +1226,10 @@ int afinet_socket(int family, int type, int protocol) {
         s->txo.df = IP4_PMTUDISC_WANT;
     s->type = type;
     s->protocol = protocol;
-    s->refcount = 1;                 /* NET-01: the installed reference */
+    s->refcount = 1;                 /* the installed reference */
     s->wait_chan = &s->count;
     s->rcvbuf = AFI_RCVBUF_DEFAULT;
-    /* UDP-RES-02: only a datagram or raw socket has a receive queue.  Every
+    /* Only a datagram or raw socket has a receive queue.  Every
      * AF_INET socket used to allocate a ~50 KiB contiguous ring, TCP
      * included, where it was never used. */
     if (type != SOCK_STREAM) {
@@ -1263,7 +1263,7 @@ int afinet_socket(int family, int type, int protocol) {
 /* True iff another live socket of the same family+type already has `port`
  * explicitly bound — the EADDRINUSE test, relaxed by SO_REUSEADDR. */
 /* Is `port` bound by another socket of self's family and type?  The caller
- * holds afi_lock (NET-01: the list cannot be re-spliced mid-scan). */
+ * holds afi_lock, so the list cannot be re-spliced mid-scan. */
 static int afinet_port_taken_locked(const afi_sock_t *self, uint16_t port) {
     for (afi_sock_t *o = g_afi_head; o; o = o->next) {
         if (o == self || o->closed) continue;
@@ -1279,7 +1279,7 @@ static int addr_is_wild(const uint8_t *a, size_t n);
 
 
 /*
- * UDP-API-01: may `self` bind laddr:port?  Another bound socket of the same
+ * May `self` bind laddr:port?  Another bound socket of the same
  * family and type on the same port conflicts when their local addresses
  * overlap (either is the wildcard, or they are equal) -- unless BOTH set
  * SO_REUSEADDR and both belong to the same user.  Only the newcomer's flag
@@ -1307,9 +1307,9 @@ static int afinet_bind_conflict(const afi_sock_t *self, uint16_t port,
 }
 
 /*
- * UDP-API-06: may a socket bind this IPv4 address?  Only one it can receive
+ * May a socket bind this IPv4 address?  Only one it can receive
  * on: the wildcard, an interface address, anything in 127/8 (lo takes all of
- * it, UDP-IP-02), an interface's broadcast or the limited broadcast, or a
+ * it), an interface's broadcast or the limited broadcast, or a
  * class D group.  Any other address was accepted and left the socket
  * permanently deaf with no error.
  */
@@ -1331,7 +1331,7 @@ static int afinet_addr_bindable6(const uint8_t a[16]) {
     return 0;
 }
 
-/* UDP-API-15: is this IPv4 destination a broadcast -- limited, or some
+/* Is this IPv4 destination a broadcast -- limited, or some
  * interface's directed broadcast? */
 static int afinet_is_bcast4(uint32_t a) {
     if (a == 0xFFFFFFFFu) return 1;
@@ -1341,7 +1341,7 @@ static int afinet_is_bcast4(uint32_t a) {
     return 0;
 }
 
-/* UDP-API-01 / TCP-API-18: ports below IPPORT_RESERVED belong to root. */
+/* Ports below IPPORT_RESERVED belong to root, for UDP and TCP alike. */
 static int afinet_port_reserved(uint16_t port) {
     return port != 0 && port < 1024 &&
            (!current_process || current_process->euid != 0);
@@ -1375,7 +1375,7 @@ int afinet_bind(int fd, const void *addr, socklen_t len) {
         }
         memcpy(s->local_addr, &sin->sin_addr, 4);
         if (s->tcp) {
-            /* TCP-API-04: the PCB layer's verdict is authoritative -- it
+            /* The PCB layer's verdict is authoritative -- it
              * sees the children and closed-but-lingering PCBs the socket
              * list does not.  Its result used to be discarded.  An
              * ephemeral choice that collides only there is retried. */
@@ -1415,7 +1415,7 @@ int afinet_bind(int fd, const void *addr, socklen_t len) {
          * dual-stack listener.  When v6 TCP lands, replace this
          * with a real v6 bind path.  */
         if (s->tcp) {
-            int rc = tcp_bind(s->tcp, 0, s->local_port, s->reuseaddr);   /* TCP-API-04 */
+            int rc = tcp_bind(s->tcp, 0, s->local_port, s->reuseaddr);   /* PCB verdict wins */
             if (rc) { s->local_port = 0; s->bound = 0; return rc; }
         }
     }
@@ -1426,8 +1426,8 @@ int afinet_bind(int fd, const void *addr, socklen_t len) {
 /* SO_REUSEADDR plumbing for the getsockopt/setsockopt dispatch in
  * af_unix.c.  Both no-op (return -ENOTSOCK) on a non-AF_INET fd. */
 /*
- * UDP-IP-06: IP_ADD_MEMBERSHIP / IP_DROP_MEMBERSHIP.  setsockopt used to
- * return 0 for both while recording nothing (UDP-I-04), so every multicast
+ * IP_ADD_MEMBERSHIP / IP_DROP_MEMBERSHIP (RFC 1112).  setsockopt used to
+ * return 0 for both while recording nothing, so every multicast
  * application's error path was dead and the symptom was a silent absence of
  * datagrams.  The interface is chosen by index (struct ip_mreqn), by
  * address, or -- for INADDR_ANY -- is the first UP multicast-capable one.
@@ -1482,7 +1482,7 @@ int afinet_mc_membership(int fd, int add, uint32_t group, uint32_t ifaddr,
 }
 
 /*
- * UDP-API-12: IP_TOS, IP_TTL and the IP_MULTICAST_* options.  setsockopt()
+ * IP_TOS, IP_TTL and the IP_MULTICAST_* options.  setsockopt()
  * used to return 0 for all of them and record nothing: every datagram left
  * with TTL 64 and TOS 0, getsockopt(IP_TTL) answered 0, and a multicast
  * sender could neither widen its scope nor keep its own group sends from
@@ -1492,7 +1492,7 @@ int afinet_set_ipopt(int fd, int optname, int val, uint32_t addr) {
     afi_sock_t *s = afi_from_fd(fd);
     if (!s) return -ENOTSOCK;
     if (s->family != AF_INET) return -ENOPROTOOPT;
-    if (optname == 8) {         /* UDP-API-11: IP_PKTINFO */
+    if (optname == 8) {         /* IP_PKTINFO */
         s->pktinfo = val ? 1 : 0;
         return 0;
     }
@@ -1538,7 +1538,7 @@ int afinet_set_ipopt(int fd, int optname, int val, uint32_t addr) {
 }
 
 /*
- * TCP-WIN-13: IPPROTO_TCP options.  TCP_USER_TIMEOUT (18, RFC 5482; the
+ * IPPROTO_TCP options.  TCP_USER_TIMEOUT (18, RFC 5482; the
  * Linux number) sets RFC 793's per-connection user timeout in milliseconds.
  * -ENOTSOCK when fd is not an AF_INET socket, -ENOPROTOOPT for anything
  * else, including a non-stream socket.
@@ -1556,7 +1556,7 @@ int afinet_set_tcpopt(int fd, int optname, int val) {
     }
 }
 
-/* TCP-URG-01: fcntl(F_SETOWN/F_GETOWN) on an AF_INET socket -- the pid (or
+/* fcntl(F_SETOWN/F_GETOWN) on an AF_INET socket -- the pid (or
  * -pgrp) that receives SIGURG.  -ENOTSOCK for any other descriptor. */
 int afinet_setown(int fd, int owner) {
     afi_sock_t *s = afi_from_fd(fd);
@@ -1566,7 +1566,7 @@ int afinet_setown(int fd, int owner) {
     return 0;
 }
 
-/* TCP-API-11: SO_LINGER, stored per socket and acted on at close().
+/* SO_LINGER, stored per socket and acted on at close().
  * -ENOTSOCK for a descriptor that is not an AF_INET socket. */
 int afinet_set_linger(int fd, int onoff, int secs) {
     afi_sock_t *s = afi_from_fd(fd);
@@ -1608,7 +1608,7 @@ int afinet_get_ipopt(int fd, int optname, int *val, uint32_t *addr) {
     if (s->family != AF_INET) return -ENOPROTOOPT;
     *addr = 0;
     switch (optname) {
-    case 8:  *val = s->pktinfo; break;          /* UDP-API-11 */
+    case 8:  *val = s->pktinfo; break;          /* IP_PKTINFO */
     case 1:  *val = s->txo.tos; break;
     case 2:  *val = s->txo.ttl; break;
     case 32: *val = 0; *addr = s->txo.mcast_if; break;
@@ -1646,7 +1646,7 @@ int afinet_get_ipoptions(int fd, uint8_t *opts, size_t *len) {
 }
 
 /*
- * UDP-API-14 / UDP-RES-01: what SO_RCVBUF / SO_SNDBUF report for an AF_INET
+ * What SO_RCVBUF / SO_SNDBUF report for an AF_INET
  * socket -- the capacity the implementation actually has, not a number
  * borrowed from AF_UNIX.  A datagram socket's receive queue holds SO_RCVBUF
  * bytes of records and it sends one datagram at a time; a stream socket has
@@ -1660,7 +1660,7 @@ int afinet_bufsize(int fd, int rcv) {
 }
 
 /*
- * UDP-RES-01: SO_RCVBUF on a datagram socket.  Growing reallocates the ring,
+ * SO_RCVBUF on a datagram socket.  Growing reallocates the ring,
  * moving any queued records to the front of the new one; shrinking lowers
  * the admission limit and keeps what is already queued.  Clamped to
  * [AFI_RCVBUF_MIN, AFI_RCVBUF_MAX].  (A stream socket's TCP ring is fixed.)
@@ -1694,7 +1694,7 @@ int afinet_set_rcvbuf(int fd, int val) {
     return 0;
 }
 
-/* UDP-API-04: SO_RCVTIMEO / SO_SNDTIMEO. */
+/* SO_RCVTIMEO / SO_SNDTIMEO. */
 int afinet_set_timeo(int fd, int rcv, int64_t sec, int64_t usec) {
     afi_sock_t *s = afi_from_fd(fd);
     if (!s) return -ENOTSOCK;
@@ -1719,7 +1719,7 @@ int afinet_get_timeo(int fd, int rcv, int64_t *sec, int64_t *usec) {
     return 0;
 }
 
-/* UDP-API-15: SO_BROADCAST. */
+/* SO_BROADCAST. */
 int afinet_set_broadcast(int fd, int on) {
     afi_sock_t *s = afi_from_fd(fd);
     if (!s) return -ENOTSOCK;
@@ -1748,7 +1748,7 @@ int afinet_listen(int fd, int backlog) {
     afi_sock_t *s = afi_from_fd(fd);
     if (!s) return -ENOTSOCK;
     if (!s->tcp) return -EOPNOTSUPP;
-    /* TCP-API-07: listen() on a never-bound socket entered LISTEN with
+    /* listen() on a never-bound socket entered LISTEN with
      * port 0, which no segment can match; getsockname() then advertised
      * port 0 and every SYN drew a RST.  Bind an ephemeral port first, as
      * BSD and Linux do (and as UDP does on its first send). */
@@ -1771,14 +1771,15 @@ int afinet_shutdown(int fd, int how) {
     if (how != SHUT_RD && how != SHUT_WR && how != SHUT_RDWR)
         return -EINVAL;
     /*
-     * SOCK-10: POSIX requires ENOTCONN when the socket is not connected.
+     * POSIX requires ENOTCONN when the socket is not connected.
      * The check only covered TCP, so shutdown() on an unconnected datagram
      * or raw socket reported success and did nothing -- a caller using the
      * return value to decide whether a teardown happened was misled.  A
      * datagram socket becomes "connected" via connect(), same as a stream.
      *
-     * TCP-API-22: a stream socket's answer comes from its PCB: any
-     * connection, open or still opening (TCP-API-15 acts on SYN-SENT).
+     * A stream socket's answer comes from its PCB: any connection, open
+     * or still opening (a half-close in SYN-SENT is acted on per RFC 793
+     * 3.9 CLOSE).
      */
     if (s->type == SOCK_STREAM && s->tcp) {
         if (!tcp_has_connection(s->tcp)) return -ENOTCONN;
@@ -1791,11 +1792,11 @@ int afinet_shutdown(int fd, int how) {
         if (s->tcp) tcp_shutdown_rd(s->tcp); /* TCP: EOF + wake reader */
     }
     if (how == SHUT_WR || how == SHUT_RDWR) {
-        /* UDP-API-19: a datagram socket's write side shuts too.  This was a
+        /* A datagram socket's write side shuts too.  This was a
          * silent no-op -- sends after SHUT_WR went out as if nothing had
          * happened. */
         if (s->tcp) {
-            /* TCP-API-19: -ENOMEM (no FIN could be queued) leaves the send
+            /* -ENOMEM (no FIN could be queued) leaves the send
              * side open so the caller can retry. */
             int r = tcp_shutdown_wr(s->tcp);
             if (r < 0) return r;
@@ -1827,7 +1828,7 @@ int afinet_accept(int fd, void *addr, socklen_t *addrlen) {
 
     /* Allocate a new afi_sock_t wrapping the accepted PCB. */
     afi_sock_t *c = (afi_sock_t *)kmalloc(sizeof(*c));
-    /* TCP-API-12: a connection dropped because the host ran out of memory
+    /* A connection dropped because the host ran out of memory
      * or descriptors is an ABORT: the peer's request may already sit
      * acknowledged in the ring, and a FIN would report it consumed. */
     if (!c) { tcp_abort(cp); return -ENOMEM; }
@@ -1837,8 +1838,8 @@ int afinet_accept(int fd, void *addr, socklen_t *addrlen) {
     c->txo = s->txo;
     c->type = SOCK_STREAM;
     c->protocol = 6;
-    c->refcount = 1;                 /* NET-01: the installed reference */
-    c->wait_chan = &c->count;          /* UDP-RES-02: a stream has no rq */
+    c->refcount = 1;                 /* the installed reference */
+    c->wait_chan = &c->count;          /* a stream has no rq */
     c->rcvbuf = AFI_RCVBUF_DEFAULT;
     c->tcp = cp;
 
@@ -1859,7 +1860,7 @@ int afinet_accept(int fd, void *addr, socklen_t *addrlen) {
         memcpy(c->peer_addr,  &raddr, 4);
         c->local_port = lport;
         memcpy(c->local_addr, &laddr, 4);
-        c->bound      = 1;           /* TCP-API-04: visible to bind checks */
+        c->bound      = 1;           /* visible to bind checks */
         c->reuseaddr  = s->reuseaddr;
     }
 
@@ -1867,7 +1868,7 @@ int afinet_accept(int fd, void *addr, socklen_t *addrlen) {
     if (newfd < 0) {
         if (c->rq) kfree(c->rq, c->rq_cap);
         kfree(c, sizeof(*c));
-        tcp_abort(cp);                   /* TCP-API-12 */
+        tcp_abort(cp);                   /* abort, not FIN: see above */
         return -EMFILE;
     }
     unsigned long fl = spinlock_acquire_irq(&afi_lock);
@@ -1879,7 +1880,7 @@ int afinet_accept(int fd, void *addr, socklen_t *addrlen) {
      * Fill the accept() out-param with the peer's address, BSD/POSIX
      * convention.  addr may be NULL if the caller doesn't want it.
      *
-     * SOCK-01: addr/addrlen are raw userspace pointers straight off the
+     * addr/addrlen are raw userspace pointers straight off the
      * syscall table.  This used to pack the sockaddr directly through `addr`
      * and assign through `*addrlen`, so
      *     accept(lfd, (void *)0xC0100000, &len)
@@ -1988,7 +1989,7 @@ int afinet_so_error(int fd) {
     afi_sock_t *s = afi_from_fd(fd);
     if (!s) return -ENOTSOCK;
     if (s->tcp) return tcp_take_so_error(s->tcp);
-    /* UDP-ICMP-01: this used to be a hard 0 for every datagram socket, so
+    /* This used to be a hard 0 for every datagram socket, so
      * an ICMP error could never be observed through SO_ERROR.  Reading it
      * clears it, as on BSD and Linux. */
     unsigned long fl = spinlock_acquire_irq(&afi_lock);
@@ -2016,7 +2017,7 @@ int afinet_getsockname(int fd, void *addr, socklen_t *addrlen) {
 int afinet_getpeername(int fd, void *addr, socklen_t *addrlen) {
     afi_sock_t *s = afi_from_fd(fd);
     if (!s) return -ENOTSOCK;
-    /* TCP-API-22: a stream socket has a peer once its connection is
+    /* A stream socket has a peer once its connection is
      * synchronized -- not while a non-blocking connect() is still in
      * SYN-SENT, and not after it failed.  Datagram sockets keep the
      * flag connect() sets. */
@@ -2033,7 +2034,7 @@ int afinet_connect(int fd, const void *addr, socklen_t len) {
     afi_sock_t *s = afi_from_fd(fd);
     if (!s) return -ENOTSOCK;
     if (!addr) return -EINVAL;
-    /* TCP-API-02: a stream socket's PCB state decides whether an open is
+    /* A stream socket's PCB state decides whether an open is
      * legal (EALREADY while connecting, EISCONN once connected, EOPNOTSUPP
      * on a listener) -- tcp_connect_start() applies RFC 793 3.8.  The
      * `connected` flag it was gated on is set only at the end (or, for a
@@ -2052,16 +2053,16 @@ int afinet_connect(int fd, const void *addr, socklen_t len) {
         if (len < (socklen_t)sizeof(struct sin_kern)) return -EINVAL;
         const struct sin_kern *sin = (const struct sin_kern *)addr;
         if (sin->sin_family != AF_INET) return -EAFNOSUPPORT;
-        /* UDP-U-04: RFC 768 reserves port 0 as "no port"; a datagram socket
+        /* RFC 768 reserves port 0 as "no port"; a datagram socket
          * cannot be connected to it. */
         if (s->type == SOCK_DGRAM && sin->sin_port == 0) return -EINVAL;
-        /* UDP-API-15: nor to a broadcast address without SO_BROADCAST. */
+        /* Nor to a broadcast address without SO_BROADCAST. */
         if (s->type == SOCK_DGRAM && !s->broadcast && afinet_is_bcast4(sin->sin_addr))
             return -EACCES;
         if (s->tcp) {
             uint32_t ra; memcpy(&ra, &sin->sin_addr, 4);
             uint16_t rp = __builtin_bswap16(sin->sin_port);
-            /* TCP-API-10: RFC 793 3.8 OPEN, "foreign socket unspecified" is
+            /* RFC 793 3.8 OPEN, "foreign socket unspecified" is
              * an error for an active open.  Port 0 was accepted and a SYN
              * sent to it; INADDR_ANY is the local host (as Linux does). */
             if (rp == 0) return -EADDRNOTAVAIL;
@@ -2074,7 +2075,7 @@ int afinet_connect(int fd, const void *addr, socklen_t len) {
              * s->connected and uses the stored peer_addr/port,
              * rather than failing with EDESTADDRREQ.
              *
-             * TCP-API-02: the peer is recorded only once the PCB has
+             * The peer is recorded only once the PCB has
              * taken it, so a rejected connect() to a second address
              * leaves the socket naming the connection it actually has. */
             if (rc < 0 && rc != -EINPROGRESS) return rc;
@@ -2089,9 +2090,9 @@ int afinet_connect(int fd, const void *addr, socklen_t len) {
                 tcp_endpoints(s->tcp, &la, &lp, &ra2, &rp);
                 s->local_port = lp;
                 memcpy(s->local_addr, &la, 4);
-                s->bound = 1;           /* TCP-API-04: visible to bind checks */
+                s->bound = 1;           /* visible to bind checks */
             }
-            /* TCP-API-22: not "connected" yet -- getpeername() and
+            /* Not "connected" yet -- getpeername() and
              * shutdown() ask the PCB (tcp_is_synchronized() /
              * tcp_has_connection()) instead of this flag. */
             if (rc == -EINPROGRESS)
@@ -2111,12 +2112,12 @@ int afinet_connect(int fd, const void *addr, socklen_t len) {
         if (sin6->sin6_family != AF_INET6) return -EAFNOSUPPORT;
         if (s->type == SOCK_DGRAM && sin6->sin6_port == 0) return -EINVAL;
         if (s->type == SOCK_STREAM && sin6->sin6_port == 0)
-            return -EADDRNOTAVAIL;                          /* TCP-API-10 */
+            return -EADDRNOTAVAIL;          /* RFC 793 3.8: no foreign port */
         s->peer_port = __builtin_bswap16(sin6->sin6_port);
         memcpy(s->peer_addr, sin6->sin6_addr, 16);
     }
     /*
-     * UDP-API-07: connecting an unbound datagram socket binds it, as on BSD
+     * Connecting an unbound datagram socket binds it, as on BSD
      * and Linux -- an ephemeral port and the source address routing picks
      * toward the peer.  It stayed at port 0 until its first send, so it
      * could not receive a peer that spoke first, and getsockname()
@@ -2151,7 +2152,7 @@ static ssize_t afinet_sendto_k(int fd, const void *buf, size_t len, int flags,
                                const void *addr, socklen_t addrlen) {
     afi_sock_t *s = afi_from_fd(fd);
     if (!s) return -ENOTSOCK;
-    /* UDP-API-19: after shutdown(SHUT_WR) a datagram send fails EPIPE, with
+    /* After shutdown(SHUT_WR) a datagram send fails EPIPE, with
      * SIGPIPE unless the caller passed MSG_NOSIGNAL. */
     if (s->wr_shut && !(s->type == SOCK_STREAM && s->tcp)) {
         if (!(flags & MSG_NOSIGNAL) && current_process)
@@ -2166,13 +2167,13 @@ static ssize_t afinet_sendto_k(int fd, const void *buf, size_t len, int flags,
      * dest addr that wasn't there.  */
     if (s->type == SOCK_STREAM && s->tcp) {
         ssize_t n;
-        /* TCP-API-16: honour MSG_DONTWAIT and the fd's O_NONBLOCK, as
+        /* Honour MSG_DONTWAIT and the fd's O_NONBLOCK, as
          * afinet_recvfrom() does.  send()/sendto() always blocked, so a
          * non-blocking event loop parked in the kernel on a full window. */
         file_t *f = (fd >= 0 && fd < MAX_FD && current_process)
                         ? current_process->fds[fd] : NULL;
         int nb = (flags & MSG_DONTWAIT) || (f && (f->f_flag & FNONBLOCK));
-        /* TCP-URG-02: MSG_OOB sends the data as urgent. */
+        /* MSG_OOB sends the data as urgent. */
         if (flags & MSG_OOB)
             n = tcp_send_urg_until(s->tcp, buf, len, nb,
                                    afi_deadline(s->snd_timeo));
@@ -2180,7 +2181,7 @@ static ssize_t afinet_sendto_k(int fd, const void *buf, size_t len, int flags,
             n = tcp_send_nb(s->tcp, buf, len);
         else
             n = tcp_send_until(s->tcp, buf, len, afi_deadline(s->snd_timeo));
-        /* TCP-API-13: SIGPIPE on a broken stream, unless MSG_NOSIGNAL. */
+        /* SIGPIPE on a broken stream, unless MSG_NOSIGNAL. */
         if (n == -EPIPE && !(flags & MSG_NOSIGNAL) && current_process)
             psignal(current_process, SIGPIPE);
         return n;
@@ -2188,7 +2189,7 @@ static ssize_t afinet_sendto_k(int fd, const void *buf, size_t len, int flags,
 
     /* Resolve target addr/port.
      *
-     * UDP-U-01: an address the caller names wins, connected or not.  This
+     * An address the caller names wins, connected or not.  This
      * used to test s->connected first and parse addr only on the else arm,
      * so after connect() every sendto() silently went to the connected peer
      * -- RFC 768's send operation specifies the destination, and a resolver
@@ -2220,10 +2221,10 @@ static ssize_t afinet_sendto_k(int fd, const void *buf, size_t len, int flags,
     } else {
         return -EDESTADDRREQ;
     }
-    /* UDP-U-04: never put destination port 0 -- RFC 768's "no port" -- on
+    /* Never put destination port 0 -- RFC 768's "no port" -- on
      * the wire. */
     if (s->type == SOCK_DGRAM && dport == 0) return -EINVAL;
-    /* UDP-API-15: a broadcast needs SO_BROADCAST (BSD and Linux both fail
+    /* A broadcast needs SO_BROADCAST (BSD and Linux both fail
      * EACCES), so a program cannot flood the segment by mistyping an
      * address.  The option was not even stored. */
     if (s->family == AF_INET && s->type != SOCK_STREAM && !s->broadcast &&
@@ -2234,7 +2235,7 @@ static ssize_t afinet_sendto_k(int fd, const void *buf, size_t len, int flags,
      * the IP header too — not supported yet; we always synthesize the
      * v4 IP header). */
     if (s->type == SOCK_RAW && len > afi_max_payload(s->family, s->type))
-        return -EMSGSIZE;                               /* UDP-API-20 */
+        return -EMSGSIZE;
     if (s->family == AF_INET) {
         if (s->type == SOCK_RAW) {
             uint32_t d;
@@ -2243,9 +2244,9 @@ static ssize_t afinet_sendto_k(int fd, const void *buf, size_t len, int flags,
             return rc < 0 ? rc : (ssize_t)len;
         }
         /* DGRAM/UDP */
-        /* NET-07: use the wrap-guarded ephemeral allocator, not the raw
+        /* Use the wrap-guarded ephemeral allocator, not the raw
          * (non-atomic, unguarded) ++g_ephemeral_next. */
-        /* UDP-05: as above -- free port, recorded, marked bound. */
+        /* As above -- free port, recorded, marked bound. */
         if (!s->local_port) {
             uint16_t eph = afinet_alloc_ephemeral_free(s);
             if (eph == 0) return -EADDRINUSE;
@@ -2266,16 +2267,16 @@ static ssize_t afinet_sendto_k(int fd, const void *buf, size_t len, int flags,
         udp_csum4(uh, src, d, sizeof(*uh) + len);
         int rc = ip4_output_opts(src, d, IPPROTO_UDP_NUM, pkt, sizeof(*uh) + len,
                                  &s->txo);
-        if (rc >= 0) udp_stat_inc(UDP_STAT_OUT_DATAGRAMS);   /* UDP-RES-03 */
+        if (rc >= 0) udp_stat_inc(UDP_STAT_OUT_DATAGRAMS);
         return rc < 0 ? rc : (ssize_t)len;
     } else {
         if (s->type == SOCK_RAW) {
             int rc = ip6_output(daddr_buf, (uint8_t)s->protocol, buf, len);
             return rc < 0 ? rc : (ssize_t)len;
         }
-        /* NET-07: use the wrap-guarded ephemeral allocator, not the raw
+        /* Use the wrap-guarded ephemeral allocator, not the raw
          * (non-atomic, unguarded) ++g_ephemeral_next. */
-        /* UDP-05: as above -- free port, recorded, marked bound. */
+        /* As above -- free port, recorded, marked bound. */
         if (!s->local_port) {
             uint16_t eph = afinet_alloc_ephemeral_free(s);
             if (eph == 0) return -EADDRINUSE;
@@ -2293,13 +2294,13 @@ static ssize_t afinet_sendto_k(int fd, const void *buf, size_t len, int flags,
         int rc = udp_csum6(uh, daddr_buf, sizeof(*uh) + len);
         if (rc < 0) return rc;
         rc = ip6_output(daddr_buf, IPPROTO_UDP_NUM, pkt, sizeof(*uh) + len);
-        if (rc >= 0) udp_stat_inc(UDP_STAT_OUT_DATAGRAMS);   /* UDP-RES-03 */
+        if (rc >= 0) udp_stat_inc(UDP_STAT_OUT_DATAGRAMS);
         return rc < 0 ? rc : (ssize_t)len;
     }
 }
 
 /*
- * SOCK-02: bounce the caller's payload into kernel memory before it reaches
+ * Bounce the caller's payload into kernel memory before it reaches
  * the transmit path.
  *
  * send/sendto/sendmsg used to hand the raw user pointer all the way down to
@@ -2392,7 +2393,7 @@ ssize_t afinet_recvfrom_rx(int fd, void *buf, size_t len, int flags,
     afi_sock_t *s = afi_from_fd(fd);
     if (!s) return -ENOTSOCK;
     if (!buf) return -EINVAL;
-    /* UDP-API-10: no source address unless a datagram is actually taken.
+    /* No source address unless a datagram is actually taken.
      * The caller's *addrlen (do_recv's 128-byte bounce capacity) was left
      * untouched on EOF, EAGAIN and the stream path, so recvfrom() reported
      * a 128-byte "address" of zeros.  Only the dequeue path sets it.
@@ -2415,7 +2416,7 @@ ssize_t afinet_recvfrom_rx(int fd, void *buf, size_t len, int flags,
         int nb = (flags & MSG_DONTWAIT) ||
                  (f && (f->f_flag & FNONBLOCK));
         uint64_t dl = afi_deadline(s->rcv_timeo);
-        /* TCP-URG-04: MSG_OOB reads the urgent octet, never the stream --
+        /* MSG_OOB reads the urgent octet, never the stream --
          * it used to fall through and consume ordinary in-band data. */
         if (flags & MSG_OOB)
             return tcp_recv_oob(s->tcp, buf, len, (flags & MSG_PEEK) != 0);
@@ -2428,7 +2429,7 @@ ssize_t afinet_recvfrom_rx(int fd, void *buf, size_t len, int flags,
 
     uint8_t stk[AFI_DATA_MAX];
     size_t cap;
-    uint8_t *tmp = afi_rx_bounce(stk, sizeof(stk), len, &cap);   /* UDP-I-01 */
+    uint8_t *tmp = afi_rx_bounce(stk, sizeof(stk), len, &cap);   /* heap if > stk */
     ssize_t r = afinet_recvfrom_dgram(fd, s, buf, len, flags, addr, addrlen,
                                       acap, rx, tmp, cap);
     afi_rx_bounce_free(tmp, stk, cap);
@@ -2440,7 +2441,7 @@ static ssize_t afinet_recvfrom_dgram(int fd, afi_sock_t *s, void *buf,
                                      socklen_t *addrlen, socklen_t acap,
                                      struct afi_rxinfo *rx, uint8_t *tmp,
                                      size_t cap) {
-    /* NET-01: pin the socket and take the ring lock — see afinet_node_read.
+    /* Pin the socket and take the ring lock — see afinet_node_read.
      * The datagram payload and its source address are snapshotted into
      * kernel-local storage under the lock; the fill-out of the caller's
      * buffers runs unlocked.  `addr`/`addrlen` here are the kernel bounce
@@ -2473,7 +2474,7 @@ static ssize_t afinet_recvfrom_dgram(int fd, afi_sock_t *s, void *buf,
             afi_rec_t h;
             size_t lim = len < cap ? len : cap;
             /*
-             * SOCK-05: MSG_PEEK has to LEAVE the datagram queued.  The ring
+             * MSG_PEEK has to LEAVE the datagram queued.  The ring
              * was advanced unconditionally, so a peek consumed it -- the
              * caller got its look at the data and the datagram was gone,
              * which is the exact opposite of what MSG_PEEK means and
@@ -2485,7 +2486,7 @@ static ssize_t afinet_recvfrom_dgram(int fd, afi_sock_t *s, void *buf,
             uint8_t paddr[16];
             uint16_t pport = h.port;
             uint16_t ptrue = h.truelen;
-            uint32_t pdaddr = h.daddr4, pifindex = h.ifindex;   /* UDP-API-11 */
+            uint32_t pdaddr = h.daddr4, pifindex = h.ifindex;   /* IP_PKTINFO */
             memcpy(paddr, h.addr, 16);
             afi_rele_unlock(s, fl);
             memcpy(buf, tmp, n);
@@ -2507,7 +2508,7 @@ static ssize_t afinet_recvfrom_dgram(int fd, afi_sock_t *s, void *buf,
                 }
             }
             /*
-             * SOCK-06: with MSG_TRUNC, report the datagram's real length
+             * With MSG_TRUNC, report the datagram's real length
              * rather than how much of it fitted.  Without it a short buffer
              * and a short datagram are indistinguishable, so a caller can
              * never tell that it lost the tail of a message.
@@ -2530,7 +2531,7 @@ static ssize_t afinet_recvfrom_dgram(int fd, afi_sock_t *s, void *buf,
             if (flags & MSG_TRUNC) return (ssize_t)ptrue;
             return (ssize_t)n;
         }
-        /* UDP-ICMP-01: queued datagrams first, then a pending ICMP error --
+        /* Queued datagrams first, then a pending ICMP error --
          * which a blocked reader is woken to collect, instead of sleeping
          * out its whole timeout against a port that has already refused. */
         if (s->so_error) {
@@ -2539,19 +2540,19 @@ static ssize_t afinet_recvfrom_dgram(int fd, afi_sock_t *s, void *buf,
             afi_rele_unlock(s, fl);
             return -err;
         }
-        /* UDP-API-08: after shutdown(SHUT_RD), an empty queue is end of
+        /* After shutdown(SHUT_RD), an empty queue is end of
          * file -- as read() already reported -- not a reason to sleep. */
         if (s->rd_shut) { afi_rele_unlock(s, fl); return 0; }
         /* Non-blocking: MSG_DONTWAIT (Linux convention) or the fd's
          * FNONBLOCK, resolved above. */
         if (nb_dgram) { afi_rele_unlock(s, fl); return -EAGAIN; }
-        /* UDP-API-04: SO_RCVTIMEO expired -- it used to be accepted and
+        /* SO_RCVTIMEO expired -- it used to be accepted and
          * discarded, so this loop slept forever against a silent peer. */
         if (deadline && get_ticks() >= deadline) {
             afi_rele_unlock(s, fl);
             return -EAGAIN;
         }
-        /* UDP-06: queue-then-release; see afi_wait(). */
+        /* Queue-then-release; see afi_wait(). */
         if (afi_wait(s, &fl) == -EINTR) {
             afi_rele_unlock(s, fl);
             return -EINTR;
@@ -2565,7 +2566,7 @@ static ssize_t afinet_recvfrom_dgram(int fd, afi_sock_t *s, void *buf,
 /* ------------------------------------------------------------------ */
 
 /*
- * UDP-01: score a datagram socket against a received datagram's full
+ * Score a datagram socket against a received datagram's full
  * 4-tuple, not just its local port.
  *
  * The demux used to be "local_port == dport" and nothing else -- daddr was
@@ -2599,7 +2600,7 @@ static int sock_score(afi_sock_t *s, int family, uint8_t proto,
     if (s->family != family) return -1;
     if (s->type == SOCK_RAW) {
         if (s->protocol != 0 && s->protocol != (int)proto) return -1;
-        /* UDP-API-17: a bound raw socket takes only datagrams to its
+        /* A bound raw socket takes only datagrams to its
          * address, a connected one only those from its peer -- as on BSD
          * and Linux.  Matching on the protocol alone handed every raw
          * socket the whole host's traffic for it. */
@@ -2615,7 +2616,7 @@ static int sock_score(afi_sock_t *s, int family, uint8_t proto,
     if (s->type != SOCK_DGRAM) return -1;
     if (proto != IPPROTO_UDP_NUM) return -1;
     if (s->local_port == 0 || s->local_port != dport) return -1;
-    /* UDP-IP-06: a group datagram is for sockets that joined the group (BSD
+    /* A group datagram is for sockets that joined the group (BSD
      * semantics -- not, as on Linux by default, every socket bound to the
      * port once anything on the host has joined). */
     if (family == AF_INET && ((*(const uint8_t *)daddr) >> 4) == 0xE) {
@@ -2641,7 +2642,7 @@ static int sock_score(afi_sock_t *s, int family, uint8_t proto,
     return score;
 }
 
-/* UDP-API-11: the interface a datagram for `daddr` arrived on, for
+/* The interface a datagram for `daddr` arrived on, for
  * IP_PKTINFO's ipi_ifindex -- the one owning the address or broadcast, lo
  * for 127/8, the member interface for a group.  0 if none matches. */
 static uint32_t afi_ifindex_for(uint32_t daddr) {
@@ -2658,17 +2659,17 @@ static uint32_t afi_ifindex_for(uint32_t daddr) {
 }
 
 /* Queue one datagram on s.  The caller holds afi_lock and, if this returns
- * 1, wakes s->wait_chan AFTER releasing it (UDP-RES-04). */
+ * 1, wakes s->wait_chan AFTER releasing it (see afi_wake_all()). */
 static int enqueue(afi_sock_t *s, uint8_t family, uint8_t proto, uint16_t port,
                    const void *addr, const uint8_t *data, size_t len,
                    uint32_t daddr4) {
     if (!s->rq) return 0;
-    size_t n = len > AFI_RX_MAX ? AFI_RX_MAX : len;             /* UDP-I-01 */
+    size_t n = len > AFI_RX_MAX ? AFI_RX_MAX : len;   /* reassembled max */
     uint32_t need = AFI_REC_SPACE(n);
-    /* UDP-RES-01: admission is by bytes against SO_RCVBUF, not by count. */
+    /* Admission is by bytes against SO_RCVBUF, not by count. */
     uint32_t limit = s->rcvbuf < s->rq_cap ? s->rcvbuf : s->rq_cap;
     if (s->rq_used + need > limit) {
-        /* UDP-RES-03: counted, per socket and (for UDP) globally -- a full
+        /* Counted, per socket and (for UDP) globally -- a full
          * queue used to drop without a trace. */
         s->rq_drops++;
         if (proto == IPPROTO_UDP_NUM) udp_stat_inc(UDP_STAT_RCVBUF_ERRORS);
@@ -2681,7 +2682,7 @@ static int enqueue(afi_sock_t *s, uint8_t family, uint8_t proto, uint16_t port,
     h.port = port;
     if (family == AF_INET) memcpy(h.addr, addr, 4);
     else                   memcpy(h.addr, addr, 16);
-    h.daddr4 = daddr4;                               /* UDP-API-11 */
+    h.daddr4 = daddr4;                               /* IP_PKTINFO */
     h.ifindex = daddr4 ? afi_ifindex_for(daddr4) : 0;
     h.len = (uint16_t)n;
     h.truelen = (uint16_t)(len > 0xFFFF ? 0xFFFF : len);
@@ -2694,7 +2695,7 @@ static int enqueue(afi_sock_t *s, uint8_t family, uint8_t proto, uint16_t port,
 }
 
 /*
- * UDP-RES-04: wake the readers of the sockets a delivery queued to, after
+ * Wake the readers of the sockets a delivery queued to, after
  * afi_lock is released.  sched_wakeup() walks the whole thread registry, and
  * it used to run once per receiving socket inside the IRQ-off critical
  * section -- a broadcast to N listeners held interrupts off for N registry
@@ -2735,7 +2736,7 @@ int afinet_deliver_v4(uint32_t saddr, uint32_t daddr,
                       uint8_t protocol,
                       const uint8_t *pkt, size_t len, int for_dgram,
                       int fanout) {
-    /* UDP-01: daddr is now part of the demux key (see sock_score). */
+    /* daddr is part of the demux key (see sock_score). */
     int delivered = 0;
     uint16_t sport = 0, dport = 0;
 
@@ -2745,7 +2746,7 @@ int afinet_deliver_v4(uint32_t saddr, uint32_t daddr,
     if (protocol == IPPROTO_UDP_NUM) {
         /* pkt is the IP packet for RAW deliveries (for_dgram==0), or the
          * bare UDP datagram for udp_input deliveries (for_dgram==1).
-         * NET-08: only strip an IP header on the RAW path — gating on the
+         * Only strip an IP header on the RAW path — gating on the
          * for_dgram flag, not the (pkt[0]>>4)==4 heuristic, which misfires
          * when a UDP source port's high byte is 0x4X on the datagram
          * path and wrongly strips IPH_HL*4 bytes as a phantom IP header. */
@@ -2763,7 +2764,7 @@ int afinet_deliver_v4(uint32_t saddr, uint32_t daddr,
         /* Strip UDP header for DGRAM sockets. */
     }
 
-    /* NET-01: walk + enqueue under afi_lock (IRQ-safe).  This runs in
+    /* Walk + enqueue under afi_lock (IRQ-safe).  This runs in
      * hard IRQ context; holding the lock across the whole walk means a
      * concurrent close() cannot unlink and free a socket while we are
      * about to enqueue into its ring, and enqueue()'s ring-counter
@@ -2788,10 +2789,10 @@ int afinet_deliver_v4(uint32_t saddr, uint32_t daddr,
             delivered = 1;
         } else {
             /* DGRAM: delivered only via udp_input, to the single best match
-             * (UDP-01) rather than to every socket on the port. */
+             * (see sock_score) rather than to every socket on the port. */
             if (!for_dgram) continue;
             if (fanout) {
-                /* UDP-IP-08: a broadcast/multicast datagram is for every
+                /* A broadcast/multicast datagram is for every
                  * socket that can take it (RFC 1122 3.3.6), not only the
                  * best match -- two listeners on a broadcast port used to
                  * split the traffic between them, one datagram each. */
@@ -2801,7 +2802,7 @@ int afinet_deliver_v4(uint32_t saddr, uint32_t daddr,
                 delivered = 1;
                 continue;
             }
-            /* UDP-API-01: g_afi_head is newest-first, so `>=` leaves a tie to
+            /* g_afi_head is newest-first, so `>=` leaves a tie to
              * the OLDEST socket -- a later bind cannot capture an existing
              * socket's traffic by tying its score. */
             if (score >= best_score) { best_score = score; best = s; }
@@ -2814,12 +2815,12 @@ int afinet_deliver_v4(uint32_t saddr, uint32_t daddr,
         delivered = 1;
     }
     spinlock_release_irq(&afi_lock, fl);
-    afi_wake_all(&wake);                     /* UDP-RES-04 */
+    afi_wake_all(&wake);                     /* after releasing afi_lock */
     return delivered;
 }
 
 /*
- * UDP-ICMP-01: RFC 1122 4.1.3.3 -- UDP must pass ICMP errors to the
+ * RFC 1122 4.1.3.3 -- UDP must pass ICMP errors to the
  * application.  Only a CONNECTED socket whose 4-tuple matches the quoted
  * datagram hears about it, as on BSD and Linux: an unconnected socket has no
  * per-destination error channel, and reporting one client's unreachable
@@ -2845,14 +2846,14 @@ int afinet_deliver_v6(const uint8_t saddr[16], const uint8_t daddr[16],
                       uint8_t protocol,
                       const uint8_t *pkt, size_t len, int for_dgram,
                       int fanout) {
-    /* UDP-01: daddr is now part of the demux key (see sock_score). */
+    /* daddr is part of the demux key (see sock_score). */
     int delivered = 0;
     uint16_t sport = 0, dport = 0;
 
     const uint8_t *payload = pkt;
     size_t payload_len = len;
     if (protocol == IPPROTO_UDP_NUM) {
-        /* NET-08 (v6 twin): only strip a leading IPv6 header on the RAW path
+        /* As in afinet_deliver_v4: only strip a leading IPv6 header on the RAW path
          * (for_dgram==0); on the bare-datagram path the (pkt[0]>>4)==6
          * heuristic can misfire on datagram bytes. */
         if (!for_dgram && len >= sizeof(struct ip6_hdr) &&
@@ -2866,7 +2867,7 @@ int afinet_deliver_v6(const uint8_t saddr[16], const uint8_t daddr[16],
         dport = __builtin_bswap16(uh->dest);
     }
 
-    /* NET-01: walk + enqueue under afi_lock — see afinet_deliver_v4. */
+    /* Walk + enqueue under afi_lock — see afinet_deliver_v4. */
     struct afi_wakeset wake;
     wake.n = 0;
     wake.overflow = 0;
@@ -2890,10 +2891,10 @@ int afinet_deliver_v6(const uint8_t saddr[16], const uint8_t daddr[16],
             if (enqueue(s, AF_INET6, protocol, sport, saddr, body, blen, 0)) afi_wake_add(&wake, s);
             delivered = 1;
         } else {
-            /* UDP-01: single best match, not a copy to every socket. */
+            /* Single best match, not a copy to every socket. */
             if (!for_dgram) continue;
             if (fanout) {
-                /* UDP-IP-08: a broadcast/multicast datagram is for every
+                /* A broadcast/multicast datagram is for every
                  * socket that can take it (RFC 1122 3.3.6), not only the
                  * best match -- two listeners on a broadcast port used to
                  * split the traffic between them, one datagram each. */
@@ -2903,7 +2904,7 @@ int afinet_deliver_v6(const uint8_t saddr[16], const uint8_t daddr[16],
                 delivered = 1;
                 continue;
             }
-            /* UDP-API-01: g_afi_head is newest-first, so `>=` leaves a tie to
+            /* g_afi_head is newest-first, so `>=` leaves a tie to
              * the OLDEST socket -- a later bind cannot capture an existing
              * socket's traffic by tying its score. */
             if (score >= best_score) { best_score = score; best = s; }
@@ -2916,6 +2917,6 @@ int afinet_deliver_v6(const uint8_t saddr[16], const uint8_t daddr[16],
         delivered = 1;
     }
     spinlock_release_irq(&afi_lock, fl);
-    afi_wake_all(&wake);                     /* UDP-RES-04 */
+    afi_wake_all(&wake);                     /* after releasing afi_lock */
     return delivered;
 }

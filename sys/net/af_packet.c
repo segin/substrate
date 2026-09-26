@@ -164,7 +164,7 @@ int afpacket_socket(int type, int protocol) {
     if (type != SOCK_RAW && type != SOCK_DGRAM)
         return -EPROTONOSUPPORT;
     /*
-     * UDP-07 (AF_PACKET half): an AF_PACKET socket sees every frame on
+     * An AF_PACKET socket sees every frame on
      * every NIC and can transmit arbitrary link-layer frames, which is
      * strictly more power than a SOCK_RAW IP socket.  It needed no
      * privilege whatsoever to open.  Root only, as everywhere else.
@@ -228,7 +228,7 @@ static netdev_t *afpacket_send_dev(int fd, const struct sockaddr_ll_kern *to,
     return dev;
 }
 
-/* UDP-API-02: sendmsg()'s gather buffer is already kernel memory, so it
+/* sendmsg()'s gather buffer is already kernel memory, so it
  * must not go through copyin(), which rejects every kernel address. */
 ssize_t afpacket_sendto_kbuf(int fd, const void *kbuf, size_t len, int flags,
                              const void *sll, socklen_t tolen) {
@@ -252,7 +252,7 @@ ssize_t afpacket_sendto(int fd, const void *buf, size_t len, int flags,
     if (!dev) return err;
 
     /*
-     * SOCK-02: `buf` is a raw userspace pointer from send/sendto/sendmsg and
+     * `buf` is a raw userspace pointer from send/sendto/sendmsg and
      * this used to pass it straight to netdev_xmit(), which DMAs it onto the
      * wire.  sendto(fd, (void *)0xC0000000, 1400, ...) therefore transmitted
      * kernel memory, and an unmapped buf faulted in the driver instead of

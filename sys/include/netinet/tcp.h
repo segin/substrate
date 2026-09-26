@@ -15,7 +15,7 @@ struct tcphdr {
     uint16_t window;
     uint16_t check;
     /*
-     * TCP-URG-06: the urgent pointer, as an offset from SEG.SEQ.  RFC 793
+     * The urgent pointer, as an offset from SEG.SEQ.  RFC 793
      * contradicts itself (3.1 says it points to the octet FOLLOWING the
      * urgent data, 3.9 to the last urgent octet) and RFC 1122 4.2.2.4
      * settled on "the last octet".  Deployed stacks -- BSD, and Linux

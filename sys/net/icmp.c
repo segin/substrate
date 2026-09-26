@@ -30,7 +30,7 @@
 /* ------------------------------------------------------------------ */
 
 /*
- * UDP-ICMP-01: an ICMP error about a datagram we sent.  The message quotes
+ * An ICMP error about a datagram we sent.  The message quotes
  * the offending IP header plus at least 8 octets of its data -- for UDP the
  * whole header, which gives the 4-tuple that locates the socket.  icmp_input
  * used to return on anything but an echo request, so every one of these was
@@ -169,7 +169,7 @@ void icmp_input(netdev_t *dev, uint32_t saddr, uint32_t daddr,
     if (len < sizeof(struct icmphdr)) return;
     const struct icmphdr *ih = (const struct icmphdr *)pkt;
     /*
-     * ICMP-02: verify the received checksum.  It was never checked, so a
+     * Verify the received checksum.  It was never checked, so a
      * corrupted echo request was reflected back as a perfectly-formed
      * reply carrying the corrupted payload -- we became a laundering
      * service for bit errors, and the sender saw a valid response for data
@@ -188,7 +188,7 @@ void icmp_input(netdev_t *dev, uint32_t saddr, uint32_t daddr,
 
 
     /*
-     * ICMP-01: never answer an echo request sent to a broadcast address.
+     * Never answer an echo request sent to a broadcast address.
      * daddr used to be discarded outright ("(void)daddr"), so a request
      * addressed to 255.255.255.255 or the subnet broadcast was answered by
      * every host that saw it, with the reply going to the attacker-chosen
@@ -250,7 +250,7 @@ void icmp_input(netdev_t *dev, uint32_t saddr, uint32_t daddr,
 }
 
 /* ------------------------------------------------------------------ */
-/* ICMP errors (UDP-ICMP-02)                                          */
+/* ICMP errors                                                        */
 /* ------------------------------------------------------------------ */
 
 /*
@@ -350,7 +350,7 @@ void icmp6_port_unreach(netdev_t *dev, const uint8_t *ip6_pkt, size_t len) {
     /* Too big for an IRQ stack, so static -- and therefore built and sent
      * with interrupts off: the loopback kthread reaches here with them on,
      * and a NIC's RX interrupt must not re-enter mid-build.  ip6_output()
-     * does not sleep with IF=0 (ND-01). */
+     * does not sleep with IF=0. */
     static uint8_t msg[ICMP6_ERR_MAX];
     uint32_t f = intr_disable();
     size_t quote = len < sizeof(msg) - 8 ? len : sizeof(msg) - 8;
@@ -421,7 +421,7 @@ static void icmp6_handle_na(netdev_t *dev, const uint8_t *pkt, size_t len) {
     if (opt->type != 2 || opt->len != 1) return;
 
     /*
-     * ND-03: an advertisement may REFRESH a binding we already hold; it may
+     * An advertisement may REFRESH a binding we already hold; it may
      * not CREATE one.  This used to call nd6_insert() unconditionally, which
      * creates -- with no solicitation match, no source check and without
      * even looking at the Solicited/Override flags -- so one forged NA

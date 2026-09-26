@@ -90,8 +90,8 @@ static struct {
 } rtl;
 
 /*
- * RTL-02: the TX path is re-entered from the hard IRQ handler with no
- * serialization at all.  rtl_irq -> rtl_rx_drain -> netdev_rx ->
+ * The TX path is re-entered from the hard IRQ handler, so it needs
+ * serialization.  rtl_irq -> rtl_rx_drain -> netdev_rx ->
  * inet_eth_input -> arp_input -> eth_send -> netdev_xmit -> rtl_xmit, so an
  * inbound ARP request transmits a reply from inside the ISR.  A
  * process-context rtl_xmit interrupted between its memcpy and the TSD write
@@ -108,7 +108,7 @@ static spinlock_t rtl_tx_lock = SPINLOCK_INIT("rtl_tx");
 /* ----- RX path ----- */
 
 /*
- * RTL-04: reset the receiver and resynchronize the ring.
+ * Reset the receiver and resynchronize the ring.
  *
  * The old error path just `break`-ed out of the drain loop with a comment
  * claiming "let RX path reset on next IRQ" -- but no such reset existed
@@ -139,14 +139,14 @@ static void rtl_rx_drain(void) {
         uint16_t status = (uint16_t)p[0] | ((uint16_t)p[1] << 8);
         uint16_t length = (uint16_t)p[2] | ((uint16_t)p[3] << 8);
         if (!(status & 0x01)) {
-            /* RTL-04: a receive error leaves the ring position unknown.
+            /* A receive error leaves the ring position unknown.
              * Reset the receiver rather than spinning on it forever. */
             rtl.netdev.rx_dropped++;
             rtl_rx_reset();
             return;
         }
         /*
-         * RTL-04: `length` comes from the device.  It was used RAW to
+         * `length` comes from the device.  It was used RAW to
          * advance the ring while only the netdev_rx call was gated on a
          * plausible range, so an early-receive header (0xFFF0, "packet
          * still arriving") or any absurd value walked rx_offset to a
@@ -176,7 +176,7 @@ static int rtl_xmit(netdev_t *dev, const void *frame, size_t len) {
     if (len > 1792) return -EMSGSIZE;
     if (!frame || len == 0) return -EINVAL;
     /*
-     * RTL-01: `len` is the caller's real frame length and must stay that way
+     * `len` is the caller's real frame length and must stay that way
      * until after the copy.  This used to clamp it UP to 60 here and then
      * memcpy(buf, frame, len), reading up to 40 bytes past the end of a
      * short frame -- and putting them on the wire.  (The memset below it was
@@ -186,7 +186,7 @@ static int rtl_xmit(netdev_t *dev, const void *frame, size_t len) {
      * Copy exactly what we were given, zero the pad, and only then round the
      * length up for the hardware.
      */
-    unsigned long txf = spinlock_acquire_irq(&rtl_tx_lock);   /* RTL-02 */
+    unsigned long txf = spinlock_acquire_irq(&rtl_tx_lock);
     int slot = rtl.tx_cur;
 
     /* Wait for this descriptor's previous transmit to finish before
@@ -204,7 +204,7 @@ static int rtl_xmit(netdev_t *dev, const void *frame, size_t len) {
      * wait on a slot we've actually used (its initial TSD state is
      * don't-care). */
     if (rtl.tx_started[slot]) {
-        /* RTL-06: this poll can run inside rtl_irq with IF=0, where seconds
+        /* This poll can run inside rtl_irq with IF=0, where seconds
          * of spinning freeze the machine.  Bound it much more tightly when
          * we cannot afford to wait, and just drop the frame -- the upper
          * layer retransmits.  The caller's IF is the one saved in txf:
@@ -244,7 +244,7 @@ static int rtl_irq(unsigned int irq, void *dev_id, void *frame) {
     /* Ack first to avoid losing edges. */
     outw(rtl.io_base + R_ISR, isr);
     if (isr & ISR_ROK) rtl_rx_drain();
-    /* RTL-05: an overflow means the ring position is no longer trustworthy;
+    /* An overflow means the ring position is no longer trustworthy;
      * drain whatever is intact, then resynchronize. */
     if (isr & (ISR_RXOVW | ISR_FOVW)) {
         rtl.netdev.rx_dropped++;
@@ -254,7 +254,7 @@ static int rtl_irq(unsigned int irq, void *dev_id, void *frame) {
     return 1;
 }
 
-/* UDP-IP-06: RCR_AM filters against the MAR0..7 hash, which this driver
+/* RCR_AM filters against the MAR0..7 hash, which this driver
  * never wrote, so which groups passed depended on the chip's reset state.
  * Open it fully while any IPv4 group is joined, close it otherwise; the IP
  * layer filters by membership. */
@@ -337,7 +337,7 @@ int rtl8139_setup(pci_device_t *pdev) {
     outl(rtl.io_base + R_TCR, (3 << 8));   /* MaxDMA = 1 KiB */
 
     /* Enable interrupts for ROK + TOK + errors. */
-    /* RTL-05: RxOverflow and RxFIFOOver were masked off and unhandled, so
+    /* RxOverflow and RxFIFOOver were masked off and unhandled, so
      * an overflow silently wedged the ring with no way to notice.  Take
      * them and recover in the ISR. */
     outw(rtl.io_base + R_IMR,
@@ -346,7 +346,7 @@ int rtl8139_setup(pci_device_t *pdev) {
     /* Start RX + TX. */
     outb(rtl.io_base + R_CR, CR_RE | CR_TE);
 
-    /* RTL-03: PCI INTx is routinely shared (this NIC lands on the same line
+    /* PCI INTx is routinely shared (this NIC lands on the same line
      * as virtio-blk / AHCI under QEMU).  Without IRQF_SHARED one of the two
      * registrations is refused with -EBUSY: either the NIC gets no handler
      * and the interface is dead, or the sibling loses its own.  And since

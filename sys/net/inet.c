@@ -2,10 +2,11 @@
  * inet.c — IPv4 input/output + shared helpers (eth_send, checksums,
  * route selection, AF_INET delivery glue).
  *
- * Routing is a single-entry view: each netdev carries its own
- * ip4_addr + netmask + gateway, and we pick the first netdev whose
- * subnet matches the destination (or has a gateway set).  Plenty for
- * a one-NIC test rig; multi-NIC routing comes later.
+ * Routing is per interface: each netdev carries a primary ip4_addr +
+ * netmask + gateway and up to NETDEV_IP4_ALIASES further addresses, and
+ * we pick the first netdev one of whose subnets holds the destination
+ * (or, failing that, the first with a gateway).  There is no separate
+ * routing table.
  */
 
 #include <errno.h>
@@ -34,7 +35,7 @@
 /* ------------------------------------------------------------------ */
 
 /*
- * STACK-01: keep the transmit path's MTU-sized buffers OFF the stack.
+ * Keep the transmit path's MTU-sized buffers OFF the stack.
  *
  * The worst chain runs entirely in hard-IRQ context on the 16 KiB interrupt
  * stack: icmp_input's reply[1500] (or tcp_xmit_raw's buf[1480]) calls
@@ -51,7 +52,7 @@
  * under memory pressure anyway.
  *
  * SMP NOTE: when APs start scheduling these statics must become per-CPU.
- * The same caveat applies to tcp_lock (audit TCP-21) and is tracked there.
+ * The same caveat applies to tcp_lock.
  */
 #define NETBUF_SIZE (NETDEV_MTU_MAX + ETH_HLEN)
 
@@ -74,7 +75,7 @@ int eth_send(netdev_t *dev, const uint8_t dst_mac[6], uint16_t ethertype,
              const void *payload, size_t payload_len) {
     if (!dev) return -ENODEV;
     if (payload_len > NETDEV_MTU_MAX) return -EMSGSIZE;
-    /* UDP-IP-01: and never more than the device can carry -- a frame past
+    /* And never more than the device can carry -- a frame past
      * the device MTU is a "baby giant" that a conformant switch or peer
      * NIC silently discards. */
     if (dev->mtu && payload_len > dev->mtu) return -EMSGSIZE;
@@ -99,7 +100,7 @@ int eth_send(netdev_t *dev, const uint8_t dst_mac[6], uint16_t ethertype,
 }
 
 /* ------------------------------------------------------------------ */
-/* Route selection — single entry: first netdev that matches.         */
+/* Route selection: first netdev one of whose subnets matches.        */
 /* ------------------------------------------------------------------ */
 
 /*
@@ -158,7 +159,7 @@ uint32_t ip4_dev_mask_of(const netdev_t *d, uint32_t a) {
     return 0;
 }
 
-/* UDP-IP-03: is `a` an address of one of our (non-loopback) interfaces? */
+/* Is `a` an address of one of our (non-loopback) interfaces? */
 static int ip4_is_local_ifaddr(uint32_t a) {
     if (!a) return 0;
     for (netdev_t *d = netdev_first(); d; d = netdev_next(d))
@@ -167,7 +168,7 @@ static int ip4_is_local_ifaddr(uint32_t a) {
     return 0;
 }
 
-/* UDP-IP-06: class D, 224/4 (network byte order: the first octet is the
+/* Class D, 224/4 (network byte order: the first octet is the
  * low byte). */
 static inline int ip4_is_mcast(uint32_t a) {
     return ((a & 0xFF) >> 4) == 0xE;
@@ -181,7 +182,7 @@ static netdev_t *ip4_loopback_dev(void) {
     return NULL;
 }
 
-/* UDP-IP-06: accept a multicast datagram arriving on dev?  224.0.0.1 always
+/* Accept a multicast datagram arriving on dev?  224.0.0.1 always
  * (RFC 1122 3.3.7); otherwise only a group joined on dev.  The loopback
  * device carries our own looped-back multicast, so there it is a group
  * joined on ANY interface. */
@@ -232,7 +233,7 @@ static netdev_t *route_first_capable(uint32_t flag) {
 
 static netdev_t *route_for_v4(uint32_t daddr, int *via_gw_out) {
     /*
-     * UDP-IP-04: the limited broadcast goes out directly on a broadcast-
+     * The limited broadcast goes out directly on a broadcast-
      * capable interface.  It matched no subnet below and fell through to
      * the default gateway, so 255.255.255.255 was unicast to the router's
      * MAC and no other host ever saw it.  No address is required: the
@@ -243,7 +244,7 @@ static netdev_t *route_for_v4(uint32_t daddr, int *via_gw_out) {
         return route_first_capable(NETDEV_IFF_BROADCAST);
     }
     /*
-     * UDP-IP-06: a group address is on-link, never via the gateway (RFC
+     * A group address is on-link, never via the gateway (RFC
      * 1112 6.4).  It used to fall through to the gateway arm -- or return
      * NULL with no gateway, making even 224.0.0.1 ENETUNREACH.  First UP,
      * multicast-capable interface.
@@ -252,7 +253,7 @@ static netdev_t *route_for_v4(uint32_t daddr, int *via_gw_out) {
         if (via_gw_out) *via_gw_out = 0;
         return route_first_capable(NETDEV_IFF_MULTICAST);
     }
-    /* 127.0.0.0/8 → loopback.  So is any address of our own: UDP-IP-03 --
+    /* 127.0.0.0/8 → loopback.  So is any address of our own --
      * a datagram to the host's own NIC address used to match that NIC's
      * subnet below, go out on the wire, and ARP for ourselves, failing
      * EHOSTUNREACH.  Traffic to a local address never leaves the host. */
@@ -295,7 +296,7 @@ static netdev_t *route_for_v4(uint32_t daddr, int *via_gw_out) {
 static uint16_t g_ip_id_counter;
 
 /*
- * UDP-03: the source address a datagram will actually leave with, so a
+ * The source address a datagram will actually leave with, so a
  * caller can build the pseudo-header checksum before handing the packet to
  * ip4_output().  UDP had no checksum at all -- it wrote uh->check = 0 on
  * every transmit -- because the source address is chosen here by routing,
@@ -350,7 +351,7 @@ uint32_t ip4_source_for(uint32_t daddr) {
     return ip4_source_for_opts(daddr, NULL);
 }
 
-/* TCP-HDR-04: the MTU of the interface a datagram to daddr would leave by,
+/* The MTU of the interface a datagram to daddr would leave by,
  * or 0 when there is no route. */
 /*
  * Path MTU Discovery (RFC 1191): the smallest MTU learned for a destination
@@ -464,7 +465,7 @@ int ip4_output(uint32_t daddr, uint8_t protocol,
 }
 
 /*
- * TCP-HDR-01, UDP-U-02/U-03: the source address is the caller's to choose.
+ * The source address is the caller's to choose.
  * ip4_output() used to stamp dev->ip4_addr unconditionally, so a transport
  * that summed its pseudo-header over any other source -- a socket bound to a
  * specific address, an RST answering a segment sent to one of our addresses
@@ -535,7 +536,7 @@ int ip4_output_opts(uint32_t saddr, uint32_t daddr, uint8_t protocol,
      * are stored already padded to a multiple of 4 (RFC 791 3.1). */
     size_t hlen = sizeof(struct iphdr) + o->optlen;
     /*
-     * UDP-IP-01: bound the datagram by the egress device's MTU, not by the
+     * Bound the datagram by the egress device's MTU, not by the
      * compile-time NETDEV_MTU_MAX alone.  A 1572-byte UDP payload became a
      * 1614-byte frame on a 1500-byte Ethernet and was reported as sent --
      * silent loss, or success/EMSGSIZE/corruption depending on the NIC
@@ -584,8 +585,8 @@ int ip4_output_opts(uint32_t saddr, uint32_t daddr, uint8_t protocol,
      * and the memcpy below then ran off the end of pkt[] and up the kernel
      * stack.  When written, the SOCK_RAW send path passed the caller's
      * length through unchecked and SOCK_RAW creation was unprivileged.
-     * Neither is true now -- raw sockets are root-only (UDP-07) and the raw
-     * send arms are bounded by afi_max_payload() (UDP-API-20) -- but this
+     * Neither is true now -- raw sockets are root-only and the raw
+     * send arms are bounded by afi_max_payload() -- but this
      * check is the last line and stays.
      *
      * NETDEV_MTU_MAX is much larger than the header, options included, so
@@ -593,7 +594,7 @@ int ip4_output_opts(uint32_t saddr, uint32_t daddr, uint8_t protocol,
      */
     if (payload_len > NETDEV_MTU_MAX - hlen) return -EMSGSIZE;
 
-    /* STACK-01: see netbuf_get() -- this used to be pkt[NETDEV_MTU_MAX] on
+    /* See netbuf_get() -- this used to be pkt[NETDEV_MTU_MAX] on
      * the (interrupt) stack, nested inside eth_send's frame buffer. */
     int heap = 0;
     uint8_t *pkt = netbuf_get(g_irq_pktbuf, &heap);
@@ -601,7 +602,7 @@ int ip4_output_opts(uint32_t saddr, uint32_t daddr, uint8_t protocol,
     struct iphdr *ih = (struct iphdr *)pkt;
     memset(ih, 0, sizeof(*ih));
     ih->ihl_version = (uint8_t)((4 << 4) | (hlen / 4));
-    ih->tos = o->tos;                                  /* UDP-API-12 */
+    ih->tos = o->tos;                                  /* IP_TOS */
     ih->tot_len = __builtin_bswap16((uint16_t)(hlen + payload_len));
     /* One atomic increment per datagram: a plain ++ is a load and a store,
      * and a send from interrupt context (tcp_input answering with a RST or
@@ -613,9 +614,9 @@ int ip4_output_opts(uint32_t saddr, uint32_t daddr, uint8_t protocol,
     ih->id = (dev->flags & NETDEV_IFF_LOOPBACK) ? 0 : __builtin_bswap16(
         __atomic_add_fetch(&g_ip_id_counter, 1, __ATOMIC_RELAXED));
     ih->frag_off = set_df ? __builtin_bswap16(0x4000) : 0;      /* IP_DF */
-    /* UDP-IP-06: RFC 1112 6.1 -- a multicast datagram defaults to TTL 1, so
+    /* RFC 1112 6.1 -- a multicast datagram defaults to TTL 1, so
      * a group send stays on the local link unless the sender asks. */
-    ih->ttl = ip4_is_mcast(daddr) ? o->mcast_ttl : o->ttl;   /* UDP-API-12 */
+    ih->ttl = ip4_is_mcast(daddr) ? o->mcast_ttl : o->ttl;   /* IP_TTL */
     ih->protocol = protocol;
     ih->check = 0;
     ih->saddr = saddr;
@@ -627,7 +628,7 @@ int ip4_output_opts(uint32_t saddr, uint32_t daddr, uint8_t protocol,
 
     /* ARP for the next hop.  Loopback skips ARP entirely.
      *
-     * UDP-IP-05: so does a broadcast -- RFC 1122 3.3.6, it goes out as a
+     * So does a broadcast -- RFC 1122 3.3.6, it goes out as a
      * link-layer broadcast.  A subnet broadcast used to be ARPed for like a
      * host: the request normally went unanswered and the datagram was
      * dropped, and any on-link host that did answer captured every one of
@@ -637,7 +638,7 @@ int ip4_output_opts(uint32_t saddr, uint32_t daddr, uint8_t protocol,
     if (!(dev->flags & NETDEV_IFF_LOOPBACK) && ip4_is_bcast_on(dev, daddr)) {
         memset(mac, 0xFF, sizeof(mac));
     } else if (!(dev->flags & NETDEV_IFF_LOOPBACK) && ip4_is_mcast(daddr)) {
-        /* UDP-IP-06: RFC 1112 6.4 -- 01:00:5e plus the low 23 bits of the
+        /* RFC 1112 6.4 -- 01:00:5e plus the low 23 bits of the
          * group; no resolution.  (It used to be ARPed like a unicast
          * next hop and leave addressed to the router.) */
         const uint8_t *g = (const uint8_t *)&daddr;
@@ -648,7 +649,7 @@ int ip4_output_opts(uint32_t saddr, uint32_t daddr, uint8_t protocol,
         if (arp_lookup(dev, nexthop, mac) != 0) {
             arp_request(dev, nexthop);
             /*
-             * NET-05: ip4_output is reachable from tcp_input()/ip4_input(),
+             * ip4_output is reachable from tcp_input()/ip4_input(),
              * which run in hard IRQ context (netdev RX upcall, IF=0).  The
              * sched_yield() spin below sleeps — switching away from an
              * interrupt handler is illegal and corrupts the interrupted
@@ -675,7 +676,7 @@ int ip4_output_opts(uint32_t saddr, uint32_t daddr, uint8_t protocol,
     }
     int rc = eth_send(dev, mac, __builtin_bswap16(ETHERTYPE_IP),
                       pkt, hlen + payload_len);
-    /* UDP-IP-06: RFC 1112 6.1 -- if this host is itself a member of the
+    /* RFC 1112 6.1 -- if this host is itself a member of the
      * group, deliver a copy locally too (the IP_MULTICAST_LOOP default).
      * A NIC does not hear its own transmission, so loop it through lo,
      * whose input path accepts a group joined on any interface. */
@@ -697,7 +698,7 @@ static void ip4_deliver(netdev_t *dev, const uint8_t *pkt, size_t tot,
                         size_t hlen, int for_bcast);
 
 /*
- * UDP-I-01: reassembly (RFC 791 3.2, RFC 1122 3.3.2).  Every fragment used
+ * Reassembly (RFC 791 3.2, RFC 1122 3.3.2).  Every fragment used
  * to be dropped, so no datagram larger than one frame could arrive and the
  * usable UDP length range was 8..1472, not the 8..65507 RFC 768 allows.
  *
@@ -954,7 +955,7 @@ static void ip4_input_link(netdev_t *dev, const uint8_t *pkt, size_t len,
     if (inet_csum(ih, hlen) != 0) return;
 
     /*
-     * IP-02: reject martian source addresses.  Only the destination used to
+     * Reject martian source addresses.  Only the destination used to
      * be checked, so a frame arriving on a real NIC claiming saddr =
      * 127.0.0.1 was accepted and handed up -- defeating any userland
      * "the peer is localhost, therefore trusted" check -- and a broadcast
@@ -978,17 +979,17 @@ static void ip4_input_link(netdev_t *dev, const uint8_t *pkt, size_t len,
 
     /* Accept if dst is ours, broadcast, or limited-broadcast.
      *
-     * UDP-IP-02: on the loopback device every 127/8 address is ours (RFC
+     * On the loopback device every 127/8 address is ours (RFC
      * 1122 3.2.1.3(g) -- "the internal host loopback address"), not only
      * lo's single configured 127.0.0.1.  route_for_v4() already sends all
      * of 127/8 to lo and the martian filter above already treats it as
      * lo-only, but the exact-address test here dropped 127.0.0.2 et al. */
     int for_bcast = (ih->daddr == 0xFFFFFFFFu ||
                      ip4_dev_is_dbcast(dev, ih->daddr));
-    /* UDP-IP-03: and lo carries traffic to our own interface addresses. */
+    /* And lo carries traffic to our own interface addresses. */
     int for_lo = (dev->flags & NETDEV_IFF_LOOPBACK) &&
                  ((ih->daddr & 0xFF) == 127 || ip4_is_local_ifaddr(ih->daddr));
-    /* UDP-IP-06: a class D destination is accepted for a group this host
+    /* A class D destination is accepted for a group this host
      * has joined (224.0.0.1 always).  It is treated as a broadcast from here
      * on: TCP discards it, UDP fans it out to every member socket, and no
      * ICMP error is ever sent about it. */
@@ -1035,7 +1036,7 @@ static void ip4_input_link(netdev_t *dev, const uint8_t *pkt, size_t len,
             return;
     }
 
-    /* UDP-I-01: a fragment (MF set or a nonzero offset) goes to
+    /* A fragment (MF set or a nonzero offset) goes to
      * reassembly, which delivers the whole datagram when it completes. */
     if ((__builtin_bswap16(ih->frag_off) & 0x3FFF) != 0) {
         ip4_reasm_input(dev, pkt, hlen, tot, for_bcast);
@@ -1067,7 +1068,7 @@ static void ip4_deliver(netdev_t *dev, const uint8_t *pkt, size_t tot,
             break;
         case 6 /*IPPROTO_TCP*/:
             /*
-             * IP-03: TCP has no broadcast or multicast semantics, and
+             * TCP has no broadcast or multicast semantics, and
              * broadcast delivery was not flagged to L4 at all -- so a
              * broadcast segment reached tcp_input, matched no PCB, and every
              * host on the segment emitted a RST at whatever source address
@@ -1144,7 +1145,7 @@ static inline uint32_t v4(uint8_t a, uint8_t b, uint8_t c, uint8_t d) {
 }
 
 void inet_init(void) {
-    udp_stats_init();                       /* UDP-RES-03/-06: /proc/udpstat */
+    udp_stats_init();                       /* /proc/udpstat */
     /* Start the Identification counter somewhere unpredictable: from 1 on
      * every boot, datagrams sent shortly after a reboot reused the IDs of
      * ones sent shortly after the previous boot, which a receiver still

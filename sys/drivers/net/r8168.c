@@ -176,7 +176,7 @@ static struct {
 
 /* IRQ-safe: the ISR re-enters the transmit path through netdev_rx ->
  * inet_eth_input -> arp_input -> eth_send, so an inbound ARP request sends
- * its reply from inside the handler.  Same hazard as RTL-02. */
+ * its reply from inside the handler.  Same hazard as rtl8139's TX path. */
 static spinlock_t rt_tx_lock = SPINLOCK_INIT("r8168_tx");
 
 static inline uint8_t  rt_r8(uint32_t o)  { return *(volatile uint8_t  *)(rt.mmio + o); }
@@ -211,7 +211,8 @@ static void r8168_rx_drain(void) {
          * Accept only a descriptor that is both first and last segment (we
          * never configured scatter receive) with no error summary and a
          * plausible length.  Recycle either way, so one bad frame cannot
-         * wedge the receiver -- the failure mode RTL-04 documents.
+         * wedge the receiver -- the failure mode rtl8139's rtl_rx_reset()
+         * documents.
          *
          * The FCS is included in `len` (RxCRC stripping is not enabled on
          * this part), so drop the trailing 4 bytes.
@@ -280,8 +281,8 @@ static int r8168_xmit(netdev_t *dev, const void *frame, size_t len) {
      * DMA'd.  Bounded so a wedged NIC returns an error rather than spinning
      * forever with interrupts disabled.
      *
-     * TCP-RES-04: and bounded tightly when the caller had interrupts off
-     * (as RTL-06 does for rtl8139): the frame is dropped and the upper
+     * It is bounded tightly when the caller had interrupts off
+     * (as rtl8139's TX poll is): the frame is dropped and the upper
      * layer retransmits.  The caller's IF is the one saved in `flags`;
      * inside the _irq lock interrupts are always off.
      */
@@ -328,7 +329,7 @@ static int r8168_xmit(netdev_t *dev, const void *frame, size_t len) {
     return 0;
 }
 
-/* UDP-IP-06: RCR_AM is set, but it filters against the 64-bit MAR hash,
+/* RCR_AM is set, but it filters against the 64-bit MAR hash,
  * which setup zeroes -- so no multicast frame was ever accepted.  Open the
  * whole hash while any IPv4 group is joined; the IP layer filters by
  * membership. */

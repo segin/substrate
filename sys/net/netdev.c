@@ -30,7 +30,7 @@ static void netdev_lock_init(void) {
 }
 
 /* ------------------------------------------------------------------ */
-/* UDP-IP-06: IPv4 multicast group table                              */
+/* IPv4 multicast group table                                         */
 /* ------------------------------------------------------------------ */
 
 /* Guards every interface's mc_group/mc_refs.  IRQ-safe: ip4_input reads
@@ -50,7 +50,7 @@ int netdev_register(netdev_t *dev) {
     if (dev->mtu == 0) dev->mtu = 1500;
 
     netdev_lock_init();
-    mc_lock_init();          /* UDP-IP-06: boot-time, single-threaded */
+    mc_lock_init();          /* boot-time, single-threaded */
     mutex_lock(&g_netdev_lock);
     dev->ifindex = g_next_ifindex++;
     dev->next = g_netdev_head;

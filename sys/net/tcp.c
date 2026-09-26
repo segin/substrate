@@ -3,7 +3,7 @@
  *
  * Layout, top to bottom:
  *   - Types and tunables
- *   - Per-PCB list (all PCBs) plus the demux hash (TCP-RES-03)
+ *   - Per-PCB list (all PCBs) plus the demux hash
  *   - Segment construction + tcp_xmit (fresh and retransmit share this)
  *   - Per-PCB send queue of unacked segments (linked list)
  *   - Retransmit timer kthread (one per system)
@@ -26,7 +26,7 @@
  *
  * Still TBD: send window/cwnd, SACK, RTT-driven RTO, IPv6 transport.
  *
- * Deliberately omitted (TCP-SEC-01): RFC 793 3.6 precedence and
+ * Deliberately omitted: RFC 793 3.6 precedence and
  * security/compartment.  Segments are sent with the socket's IP_TOS and
  * no IP security option, and neither is checked on input.  RFC 2873
  * requires TCP to ignore the precedence field rather than reset a
@@ -86,9 +86,9 @@ static inline void     tcp_unlock(uint32_t f) { intr_restore(f); }
 #define IPPROTO_TCP        6
 #define TCP_RING_LEN       (32 * 1024)
 #define TCP_MSS            1460
-#define TCP_DEFAULT_PEER_MSS 536         /* TCP-HDR-02: RFC 1122 4.2.2.6 */
+#define TCP_DEFAULT_PEER_MSS 536         /* RFC 1122 4.2.2.6 */
 /*
- * TCP-06: every timer constant here was hardcoded for HZ=128 while
+ * Every timer constant here was hardcoded for HZ=128 while
  * <sys/param.h> defines HZ 250, so each was HALF its documented value --
  * RTO 256ms instead of 500ms, TIME_WAIT 512ms instead of 1s, and a total
  * retry budget of about 1.5s.  Any peer with an RTT over 256ms had every
@@ -109,7 +109,7 @@ static inline void     tcp_unlock(uint32_t f) { intr_restore(f); }
 #define TCP_MAX_RETX       6
 #define TCP_TIMER_PERIOD   (HZ / 8)      /* ~125ms kthread wake interval */
 /*
- * TCP-12: TIME_WAIT is 2*MSL.  This was 1 second, far too short to absorb a
+ * TIME_WAIT is 2*MSL.  This was 1 second, far too short to absorb a
  * retransmitted FIN from the peer, and short enough that 4-tuple reuse
  * became likely rather than astronomically improbable.  RFC 793 puts MSL at
  * 2 minutes; 30 s (60 s of TIME_WAIT) is the pragmatic value BSD and Linux
@@ -118,15 +118,15 @@ static inline void     tcp_unlock(uint32_t f) { intr_restore(f); }
  */
 #define TCP_MSL_TICKS       (30 * HZ)
 #define TCP_TIME_WAIT_TICKS (2 * TCP_MSL_TICKS)
-/* TCP-05: bound on how long we hold a PCB whose peer has stopped closing.
+/* Bound on how long we hold a PCB whose peer has stopped closing.
  * Generous enough not to break a slow-but-live peer, short enough that the
  * leak is bounded. */
 #define TCP_FIN_WAIT_2_TICKS (60 * HZ)   /* 60s */
-/* TCP-SM-01: how long CLOSING or LAST_ACK may sit with nothing left to
+/* How long CLOSING or LAST_ACK may sit with nothing left to
  * retransmit before the timer completes the close itself. */
 #define TCP_CLOSING_TICKS    TCP_MSL_TICKS
 #define TCP_DUP_ACK_FAST   3             /* fast-retx trigger */
-/* TCP-WIN-13: the connection-level user timeout (RFC 793 3.8/3.9) when the
+/* The connection-level user timeout (RFC 793 3.8/3.9) when the
  * application has not set TCP_USER_TIMEOUT -- RFC 1122 4.2.3.5's R2, which
  * must be at least 100 s. */
 #define TCP_USER_TIMEOUT_TICKS (300 * HZ)
@@ -162,13 +162,13 @@ typedef struct tcp_seg {
     uint16_t  dlen;           /* data byte count */
     uint64_t  sent_tick;      /* timestamp of last (re-)transmit */
     int       retx;           /* number of retransmits so far */
-    uint8_t   probe;          /* TCP-WIN-01: sent as a zero-window probe */
-    uint8_t   fast_retx;      /* TCP-WIN-04: fast retransmits so far */
+    uint8_t   probe;          /* sent as a zero-window probe */
+    uint8_t   fast_retx;      /* fast retransmits so far */
     struct tcp_seg *next;
     uint8_t   data[];         /* flex array; dlen bytes */
 } tcp_seg_t;
 
-/* TCP-WIN-08: one segment held for reassembly above RCV.NXT. */
+/* One segment held for reassembly above RCV.NXT. */
 typedef struct tcp_ooo {
     uint32_t  seq;
     uint16_t  len;
@@ -184,19 +184,19 @@ typedef struct tcp_pcb {
     uint32_t  iss;                 /* initial send seq */
     uint32_t  snd_una;             /* oldest unack */
     uint32_t  snd_nxt;             /* next seq to send */
-    uint32_t  snd_max;             /* TCP-MEM-07: highest seq actually sent */
+    uint32_t  snd_max;             /* highest seq actually sent */
     int       snd_max_valid;
     uint32_t  rcv_nxt;             /* next expected seq */
     uint16_t  rcv_wnd;             /* advertised window */
     uint32_t  snd_wnd;             /* peer's advertised window */
     /*
-     * TCP-10: RFC 5681 congestion control.  There was none at all -- cwnd
+     * RFC 5681 congestion control.  There was none at all -- cwnd
      * appeared once as a "TBD" comment and ssthresh not at all -- so the
      * only limiter was the peer's receive window and up to 64 KB went out
      * in the first RTT with no slow start and no reduction on loss.  On any
      * path with a bottleneck that is a self-inflicted congestion collapse,
      * and it is the other half of why a single drop cost seconds to
-     * recover (with TCP-11's missing reassembly queue).
+     * recover (with the then-missing reassembly queue).
      */
     uint32_t  cwnd;                /* congestion window, bytes */
     uint32_t  ssthresh;            /* slow-start threshold, bytes */
@@ -211,30 +211,30 @@ typedef struct tcp_pcb {
     int       dup_ack;
     /* Time-bound state expiries.  */
     uint64_t  time_wait_until;
-    /* TCP-05: deadline for a FIN_WAIT_2 whose peer never closes its half.
+    /* Deadline for a FIN_WAIT_2 whose peer never closes its half.
      * 0 while not in FIN_WAIT_2. */
     uint64_t  fin_wait2_until;
-    uint64_t  closing_until;  /* TCP-SM-01: CLOSING/LAST_ACK reaper deadline */
-    uint8_t   pollout_wait;   /* TCP-WIN-02: poll() saw no POLLOUT */
-    uint32_t  last_adv_wnd;   /* TCP-WIN-03: window in our last segment */
-    uint32_t  rcv_adv_edge;   /* TCP-WIN-07: RCV.NXT + RCV.WND advertised */
+    uint64_t  closing_until;  /* CLOSING/LAST_ACK reaper deadline */
+    uint8_t   pollout_wait;   /* poll() saw no POLLOUT */
+    uint32_t  last_adv_wnd;   /* window in our last segment */
+    uint32_t  rcv_adv_edge;   /* RCV.NXT + RCV.WND advertised */
     uint8_t   rcv_adv_edge_valid;
-    tcp_ooo_t *ooo_head;      /* TCP-WIN-08: reassembly queue, by seq */
+    tcp_ooo_t *ooo_head;      /* reassembly queue, by seq */
     int       ooo_segs;
     uint32_t  ooo_bytes;
-    uint8_t   seg_wnd_same;   /* TCP-WIN-05: segment repeats the window */
-    uint32_t  max_snd_wnd;    /* TCP-WIN-06: largest window the peer offered */
-    uint32_t  snd_wl1, snd_wl2; /* TCP-WIN-12: SEG.SEQ/ACK of the last window update */
+    uint8_t   seg_wnd_same;   /* segment repeats the window */
+    uint32_t  max_snd_wnd;    /* largest window the peer offered */
+    uint32_t  snd_wl1, snd_wl2; /* SEG.SEQ/ACK of the last window update */
     uint8_t   snd_wl_valid;
-    uint32_t  user_timeout_ms; /* TCP-WIN-13: TCP_USER_TIMEOUT, 0 = default */
-    uint64_t  ut_deadline;    /* TCP-WIN-13: abort if no progress by then */
-    uint32_t  srtt8, rttvar4; /* TCP-WIN-14: RFC 6298 estimator, scaled */
-    uint32_t  rto;            /* TCP-WIN-14: current RTO in ticks, 0 = initial */
+    uint32_t  user_timeout_ms; /* TCP_USER_TIMEOUT, 0 = default */
+    uint64_t  ut_deadline;    /* abort if no progress by then */
+    uint32_t  srtt8, rttvar4; /* RFC 6298 estimator, scaled */
+    uint32_t  rto;            /* current RTO in ticks, 0 = initial */
     uint8_t   rtt_valid;
-    uint16_t  snd_mss;        /* TCP-HDR-02: peer's MSS; 0 until known */
-    uint16_t  syn_mss;        /* TCP-HDR-02: MSS option of the last SYN seen */
-    uint16_t  mtu_mss;        /* TCP-HDR-04: egress MTU less headers; 0 = none */
-    /* TCP-URG-01: the urgent mechanism, receive side (BSD out-of-line). */
+    uint16_t  snd_mss;        /* peer's MSS; 0 until known */
+    uint16_t  syn_mss;        /* MSS option of the last SYN seen */
+    uint16_t  mtu_mss;        /* egress MTU less headers; 0 = none */
+    /* The urgent mechanism, receive side (BSD out-of-line). */
     uint32_t  rcv_up;         /* RCV.UP: sequence number after the urgent octet */
     uint8_t   urg_have;       /* rcv_up is valid */
     uint8_t   urg_extract;    /* the urgent octet has not arrived yet */
@@ -244,9 +244,9 @@ typedef struct tcp_pcb {
     uint8_t   urg_sig_pending; /* SIGURG owed to the owner (timer delivers) */
     uint32_t  urg_mark_left;  /* ring octets still ahead of the mark */
     int       owner;          /* F_SETOWN: pid, or -pgrp; 0 = none */
-    uint32_t  snd_up;         /* TCP-URG-02: SND.UP, after the urgent octet */
+    uint32_t  snd_up;         /* SND.UP, after the urgent octet */
     uint8_t   snd_up_valid;
-    struct ip4_txopts txo;    /* UDP-API-12: the socket's IP_TTL/IP_TOS */
+    struct ip4_txopts txo;    /* the socket's IP_TTL/IP_TOS */
     /* SO_ERROR (cleared by getsockopt).  */
     int       so_error;
     /* The last routing failure a transmit hit (ENETUNREACH / EHOSTUNREACH)
@@ -274,14 +274,14 @@ typedef struct tcp_pcb {
     int        shut_rd;
     /* Parent (for SYN_RECEIVED children before accept) */
     struct tcp_pcb *parent;
-    /* TCP-RES-03: on a listener, how many PCBs name it as ->parent (the
+    /* On a listener, how many PCBs name it as ->parent (the
      * backlog test); on a child, whether it sits in the parent's
      * accept_q.  Both change only through tcp_orphan_locked() and the
      * enqueue/dequeue sites, under tcp_lock. */
     int        nchildren;
     int        in_accept_q;
     /*
-     * TCP-01: number of blocked callers currently holding this PCB across a
+     * Number of blocked callers currently holding this PCB across a
      * sleep.  The timer kthread is the sole reaper, and it must not free a
      * PCB that a sleeping tcp_recv/accept/connect is about to re-dereference
      * when it wakes.  0 = only the socket owns it, which is the reapable
@@ -290,7 +290,7 @@ typedef struct tcp_pcb {
     int        holds;
     /* Linked list */
     struct tcp_pcb *next;
-    /* TCP-RES-03: demux index chain (see tcp_rehash_locked); hpprev is
+    /* Demux index chain (see tcp_rehash_locked); hpprev is
      * NULL while the PCB is in no chain. */
     struct tcp_pcb *hnext;
     struct tcp_pcb **hpprev;
@@ -299,7 +299,7 @@ typedef struct tcp_pcb {
 static tcp_pcb_t *g_tcp_pcbs;
 
 /*
- * TCP-RES-03: tcp_find() runs in hard IRQ for every arriving segment, and
+ * tcp_find() runs in hard IRQ for every arriving segment, and
  * walked the whole PCB list twice (a SYN three times, counting the backlog
  * walk).  The demux is indexed instead: connections by a hash of (lport,
  * raddr, rport) -- laddr is not in the key, since it may still be 0 -- and
@@ -358,7 +358,7 @@ static void tcp_orphan_locked(tcp_pcb_t *c) {
 }
 
 /*
- * TCP-01: pin a PCB across a blocking wait.
+ * Pin a PCB across a blocking wait.
  *
  * tcp_close() only marks the PCB detached; the timer kthread frees it (and
  * its 32 KiB receive ring) once it reaches CLOSED.  But tcp_recv, tcp_accept
@@ -394,11 +394,11 @@ static void tcp_unhold(tcp_pcb_t *p) {
 /* ------------------------------------------------------------------ */
 
 /*
- * TCP-08: the initial sequence number must be unpredictable.
+ * The initial sequence number must be unpredictable.
  *
  * This was a fixed-seed LCG (0xC0DE1234, no entropy), so the Nth ISN since
- * boot was computable offline -- and with TCP-07's predictable ports that is
- * everything an off-path attacker needs to inject into or reset a
+ * boot was computable offline -- and with the then-predictable local ports
+ * that is everything an off-path attacker needs to inject into or reset a
  * connection.  RFC 6528 requires unpredictability.  It was also called
  * unlocked from both hard-IRQ (tcp_in_listen) and process (tcp_connect)
  * context, so two callers could hand out the same ISN.
@@ -410,7 +410,7 @@ static void tcp_unhold(tcp_pcb_t *p) {
 static uint32_t tcp_iss_seed = 0xC0DE1234u;
 
 /*
- * TCP-HDR-05: RFC 6528 -- ISN = M + F(localip, localport, remoteip,
+ * RFC 6528 -- ISN = M + F(localip, localport, remoteip,
  * remoteport, secretkey).  A bare CSPRNG draw per connection (above) is
  * unpredictable but has no clock component, so successive incarnations of
  * the same 4-tuple got unrelated ISNs and RFC 793 3.3's guarantee -- a new
@@ -463,7 +463,7 @@ static uint16_t tcp_csum(uint32_t saddr, uint32_t daddr,
 }
 
 /*
- * TCP-WIN-07: the receive window to advertise.  Receiver silly-window
+ * The receive window to advertise.  Receiver silly-window
  * avoidance (RFC 793 3.7, RFC 1122 4.2.3.3): offer nothing until at least
  * min(MSS, ring/2) is free, so the peer is not invited to send tinygrams --
  * the raw free-space count was advertised, so a reader freeing 512 octets
@@ -490,7 +490,7 @@ static uint32_t tcp_rcv_wnd_adv(const tcp_pcb_t *p) {
  * the unacked queue — the queuing layer below does that.  */
 static int tcp_xmit_raw(tcp_pcb_t *p, uint32_t seq, uint8_t flags,
                         const void *data, size_t dlen) {
-    /* TCP-HDR-03: a SYN carries our MSS option, <kind=2,len=4,mss>.  It
+    /* A SYN carries our MSS option, <kind=2,len=4,mss>.  It
      * was never sent, so every peer fell back to RFC 1122's 536.  The four
      * octets keep the header 32-bit aligned; no padding is needed. */
     size_t optlen = (flags & TCP_SYN) ? 4u : 0u;
@@ -500,19 +500,19 @@ static int tcp_xmit_raw(tcp_pcb_t *p, uint32_t seq, uint8_t flags,
     th->source     = __builtin_bswap16(p->lport);
     th->dest       = __builtin_bswap16(p->rport);
     th->seq        = __builtin_bswap32(seq);
-    /* TCP-WIN-11: RCV.NXT and the window are sampled together under the
+    /* RCV.NXT and the window are sampled together under the
      * lock (filled in below).  This runs unlocked from process context
      * while the RX path advances rcv_nxt and rx_count, so a torn pair
      * could advertise an edge left of the last one. */
     uint32_t wf    = tcp_lock();
     uint32_t rnxt  = p->rcv_nxt;
     uint32_t adv   = tcp_rcv_wnd_adv(p);
-    p->last_adv_wnd = adv;          /* TCP-WIN-03: what the peer now believes */
-    p->rcv_adv_edge = rnxt + adv;                          /* TCP-WIN-07 */
+    p->last_adv_wnd = adv;          /* what the peer now believes */
+    p->rcv_adv_edge = rnxt + adv;   /* right edge we just advertised */
     p->rcv_adv_edge_valid = 1;
-    /* TCP-URG-02: while urgent data is outstanding every segment below
+    /* While urgent data is outstanding every segment below
      * SND.UP carries URG and the pointer -- in the BSD form, the offset of
-     * the octet FOLLOWING the urgent data (TCP-URG-06). */
+     * the octet FOLLOWING the urgent data. */
     uint16_t up = 0;
     if (p->snd_up_valid && !(flags & TCP_RST) &&
         (int32_t)(p->snd_up - seq) > 0) {
@@ -530,23 +530,23 @@ static int tcp_xmit_raw(tcp_pcb_t *p, uint32_t seq, uint8_t flags,
         uint8_t *o = buf + sizeof(*th);
         o[0] = 2;                       /* MSS */
         o[1] = 4;
-        uint16_t our = p->mtu_mss ? p->mtu_mss : TCP_MSS;     /* TCP-HDR-04 */
+        uint16_t our = p->mtu_mss ? p->mtu_mss : TCP_MSS;     /* egress MTU cap */
         o[2] = (uint8_t)(our >> 8);
         o[3] = (uint8_t)(our & 0xFF);
     }
     if (dlen && data) memcpy(buf + sizeof(*th) + optlen, data, dlen);
     /*
-     * TCP-29: the pseudo-header source must be the address ip4_output will
+     * The pseudo-header source must be the address ip4_output will
      * put in the IP header, not p->laddr.  On a multihomed host they differ,
      * and when p->laddr is still 0 (a client socket that never bound) EVERY
      * segment shipped an invalid checksum -- silently, since we never see
      * the peer's discard.  ip4_source_for() is the same routing decision
-     * ip4_output makes, and is what the UDP path uses since UDP-03.
+     * ip4_output makes, and is what the UDP path uses.
      */
     uint32_t csum_src = p->laddr ? p->laddr : ip4_source_for(p->raddr);
     th->check = tcp_csum(csum_src, p->raddr, buf, sizeof(*th) + optlen + dlen);
-    /* TCP-HDR-01: and the IP header must carry that same source.  TCP-29
-     * fixed only laddr == 0; ip4_output() re-chose the source by routing,
+    /* And the IP header must carry that same source.  Fixing the checksum
+     * alone covered only laddr == 0; ip4_output() re-chose the source by routing,
      * so every segment of a socket whose laddr differed from the egress
      * device's address -- bound, or connected over loopback to a local NIC
      * address -- went out with a checksum the peer discarded. */
@@ -554,12 +554,12 @@ static int tcp_xmit_raw(tcp_pcb_t *p, uint32_t seq, uint8_t flags,
                            sizeof(*th) + optlen + dlen, &p->txo);
 }
 
-/* TCP-HDR-02: the largest segment we may send the peer -- its MSS option
+/* The largest segment we may send the peer -- its MSS option
  * (536 if it sent none, RFC 1122 4.2.2.6), capped by our own buffer. */
 static uint32_t tcp_eff_mss(const tcp_pcb_t *p) {
     uint32_t m = TCP_MSS;
     if (p->snd_mss && p->snd_mss < m) m = p->snd_mss;
-    if (p->mtu_mss && p->mtu_mss < m) m = p->mtu_mss;   /* TCP-HDR-04 */
+    if (p->mtu_mss && p->mtu_mss < m) m = p->mtu_mss;   /* egress MTU cap */
     /* IP options ride in every segment's header: the MSS counts neither
      * them nor TCP's own options, so the sender makes room (RFC 6691). */
     if (p->txo.optlen && m > p->txo.optlen) m -= p->txo.optlen;
@@ -567,10 +567,10 @@ static uint32_t tcp_eff_mss(const tcp_pcb_t *p) {
 }
 
 /*
- * TCP-HDR-04: the MSS the egress interface allows -- its MTU less the IP and
+ * The MSS the egress interface allows -- its MTU less the IP and
  * TCP headers -- resolved once when the connection is set up.  TCP_MSS was
  * used whatever the MTU, so on a smaller-MTU link every full segment failed
- * EMSGSIZE in ip4_output() (UDP-IP-01) on every retransmission and the
+ * EMSGSIZE in ip4_output() on every retransmission and the
  * transfer stalled.  It also bounds the MSS we advertise.
  */
 static void tcp_set_mtu_mss(tcp_pcb_t *p) {
@@ -591,7 +591,7 @@ static uint32_t tcp_seg_cost(uint8_t flags, size_t dlen) {
            ((flags & TCP_FIN) ? 1u : 0u);
 }
 
-/* TCP-MEM-07: note that sequence space up to `end` has been transmitted.
+/* Note that sequence space up to `end` has been transmitted.
  * snd_nxt is advanced when a segment is QUEUED, before it goes out, so it
  * over-states what the peer can have seen; ACK acceptability is bounded by
  * this instead. */
@@ -648,7 +648,7 @@ static tcp_seg_t *tcp_seg_alloc(uint8_t flags, const void *data, size_t dlen) {
  * killed the connection, and its permanent presence would block the
  * FIN_WAIT_1 -> FIN_WAIT_2 transition (which requires !unacked_head), so
  * the connection could never close cleanly either. */
-/* TCP-WIN-13: how long data may sit unacknowledged before the connection
+/* How long data may sit unacknowledged before the connection
  * is aborted. */
 static uint64_t tcp_ut_ticks(const tcp_pcb_t *p) {
     if (p->user_timeout_ms)
@@ -658,7 +658,7 @@ static uint64_t tcp_ut_ticks(const tcp_pcb_t *p) {
 
 static uint32_t tcp_seg_link_locked(tcp_pcb_t *p, tcp_seg_t *s) {
     uint32_t seq = p->snd_nxt;
-    if (!p->unacked_head)               /* TCP-WIN-13: queue was empty */
+    if (!p->unacked_head)               /* queue was empty: arm user timeout */
         p->ut_deadline = get_ticks() + tcp_ut_ticks(p);
     s->seq = seq;
     p->snd_nxt += tcp_seg_cost(s->flags, s->dlen);
@@ -674,7 +674,7 @@ static uint32_t tcp_seg_link_locked(tcp_pcb_t *p, tcp_seg_t *s) {
  * the RTO timer retransmits it -- which is the correct response to a
  * transient send error.
  *
- * TCP-MEM-07: the segment itself is never touched here.  Once the lock is
+ * The segment itself is never touched here.  Once the lock is
  * dropped an ACK can prune and kfree() it, so reading s->seq and s->data
  * would be a use-after-free.  The sequence number was captured under the
  * lock, and the caller's buffer holds exactly the bytes copied into s. */
@@ -700,7 +700,7 @@ static void tcp_seg_emit(tcp_pcb_t *p, uint32_t seq, uint8_t flags,
  * allocation failed (in which case nothing was transmitted).  */
 static int tcp_xmit_queue(tcp_pcb_t *p, uint8_t flags,
                           const void *data, size_t dlen) {
-    if (dlen > tcp_eff_mss(p)) dlen = tcp_eff_mss(p);  /* TCP-HDR-02 */
+    if (dlen > tcp_eff_mss(p)) dlen = tcp_eff_mss(p);  /* peer's MSS */
     tcp_seg_t *s = tcp_seg_alloc(flags, data, dlen);
     if (!s) return -ENOMEM;
     uint32_t f = tcp_lock();
@@ -714,7 +714,7 @@ static int tcp_xmit_queue(tcp_pcb_t *p, uint8_t flags,
  * is <= ack — i.e. the peer has confirmed they got it.  Returns
  * the number of segments freed.  */
 /*
- * TCP-WIN-14: RFC 6298 2.2-2.3.  SRTT is kept scaled by 8 and RTTVAR by 4
+ * RFC 6298 2.2-2.3.  SRTT is kept scaled by 8 and RTTVAR by 4
  * (the BSD fixed-point form), in ticks.  RTO = SRTT + max(G, 4*RTTVAR),
  * clamped to [1 s, TCP_RTO_MAX_TICKS]; the timer applies its backoff on
  * top.  The RTO used to be the fixed 1 s initial value forever, so any path
@@ -757,7 +757,7 @@ static int tcp_unacked_prune(tcp_pcb_t *p, uint32_t ack) {
         if ((int32_t)(end - ack) > 0) break;
         p->unacked_head = s->next;
         if (!p->unacked_head) p->unacked_tail = NULL;
-        /* TCP-WIN-14: Karn -- only a segment sent exactly once measures
+        /* Karn -- only a segment sent exactly once measures
          * the RTT; take the newest one this ACK covers. */
         if (s->retx == 0 && s->fast_retx == 0)
             sample_tick = s->sent_tick;
@@ -766,7 +766,7 @@ static int tcp_unacked_prune(tcp_pcb_t *p, uint32_t ack) {
     }
     if (sample_tick)
         tcp_rtt_sample(p, (uint32_t)(get_ticks() - sample_tick));
-    /* TCP-WIN-13: progress re-arms the user timeout; an empty queue has
+    /* Progress re-arms the user timeout; an empty queue has
      * none (an idle connection is never timed out, RFC 1122 4.2.3.6). */
     if (freed)
         p->ut_deadline = p->unacked_head ? get_ticks() + tcp_ut_ticks(p) : 0;
@@ -785,7 +785,7 @@ static void tcp_unacked_free_all(tcp_pcb_t *p) {
 /* Re-transmit the head of the unacked queue (used by both RTO and
  * fast-retx).
  *
- * TCP-WIN-04: only a timer expiry (fast == 0) advances retx -- which is
+ * Only a timer expiry (fast == 0) advances retx -- which is
  * both the RTO backoff exponent and the abort budget -- and restarts the
  * RTO.  Fast retransmits shared both, so a few duplicate-ACK episodes on a
  * lossy but healthy link pushed the next RTO to the 60 s cap and then
@@ -793,7 +793,7 @@ static void tcp_unacked_free_all(tcp_pcb_t *p) {
  * cannot drive unbounded retransmission with duplicate ACKs. */
 #define TCP_FAST_RETX_MAX 3
 
-/* TCP-WIN-09: a partially acknowledged segment stays queued whole
+/* A partially acknowledged segment stays queued whole
  * (tcp_unacked_prune frees whole segments only, and kfree needs the
  * allocated size), so resend just [SND.UNA, end): the acknowledged
  * prefix was sent again every time, from below SND.UNA.  Returns how many
@@ -823,7 +823,7 @@ static void tcp_retx_head(tcp_pcb_t *p, int fast) {
     uint8_t flags;
     uint32_t skip = tcp_retx_span(p, s, &seq, &flags);
     if (tcp_xmit_raw(p, seq, flags, s->data + skip, s->dlen - skip) >= 0)
-        tcp_note_sent(p, s->seq + tcp_seg_cost(s->flags, s->dlen));   /* TCP-MEM-07 */
+        tcp_note_sent(p, s->seq + tcp_seg_cost(s->flags, s->dlen));
     if (fast) {
         s->fast_retx++;
         return;
@@ -833,9 +833,9 @@ static void tcp_retx_head(tcp_pcb_t *p, int fast) {
 }
 
 /*
- * TCP-RES-01: one timer retransmission, copied out of the unacked queue
+ * One timer retransmission, copied out of the unacked queue
  * under the lock so it can be transmitted after the lock is dropped.  The
- * copy is what makes that safe against NET-02's race -- an ACK pruning and
+ * copy is what makes that safe against the race -- an ACK pruning and
  * freeing the segment in the gap -- and the hold keeps the reaper off the
  * PCB.  The batch belongs to the timer kthread, the only caller.
  */
@@ -850,7 +850,7 @@ typedef struct {
 } tcp_retx_t;
 static tcp_retx_t g_tcp_retx[TCP_RETX_BATCH];
 
-/* TCP-RES-02: children reset per lock hold when a listener closes. */
+/* Children reset per lock hold when a listener closes. */
 #define TCP_CLOSE_BATCH 8
 
 /* The timer's half of tcp_retx_head(): the same span and bookkeeping, but
@@ -898,7 +898,7 @@ void tcp_free(tcp_pcb_t *p);   /* forward decl — timer reaps PCBs */
 static void tcp_kill_pcb(tcp_pcb_t *p, int err) {
     p->state    = TCP_CLOSED;
     p->so_error = err;
-    /* TCP-API-01: nothing queued survives the connection; a re-open would
+    /* Nothing queued survives the connection; a re-open would
      * otherwise retransmit it ahead of the new SYN. */
     tcp_unacked_free_all(p);
     sched_wakeup(p->connect_chan);
@@ -907,12 +907,12 @@ static void tcp_kill_pcb(tcp_pcb_t *p, int err) {
     sched_wakeup(p->send_chan);
 }
 
-/* NET-04: is this child still queued for a pending accept() on its
+/* Is this child still queued for a pending accept() on its
  * parent listener?  If so the reaper must not free it — a blocked
  * accept() could still hand it to userspace.  tcp_accept() clears
  * ->parent when it dequeues a child, so a child with ->parent still set
  * is either mid-handshake (not yet queued) or sitting in accept_q.
- * TCP-RES-03: a flag set on enqueue, not a scan of the queue. */
+ * A flag set on enqueue, not a scan of the queue. */
 static int tcp_child_in_accept_q(const tcp_pcb_t *p) {
     return p->parent && p->in_accept_q;
 }
@@ -923,22 +923,22 @@ static int tcp_timer_tick(uint64_t now) {
      * nor splice a node — nor prune/free an unacked segment — underneath
      * us.
      *
-     * NET-02: an earlier design collected the victims, dropped the lock,
+     * An earlier design collected the victims, dropped the lock,
      * then dereferenced each PCB's unacked_head to transmit — a window in
      * which an incoming ACK (tcp_input, hard IRQ) could tcp_unacked_prune()
      * and kfree() the very segment it was about to read: a use-after-free.
      * The fix transmitted inline under the lock instead.
      *
-     * TCP-RES-01: but that put every full transmit of every expired PCB
+     * But that put every full transmit of every expired PCB
      * inside one IRQs-off region, unbounded in the number of connections.
      * Now the segment is COPIED under the lock (tcp_retx_capture_locked,
      * which also holds the PCB against the reaper) and sent after the
      * unlock, so there is nothing left in the queue to race over.  The
      * batch is bounded; when it fills this returns 1 and the timer thread
      * walks again at once, so every PCB whose RTO has expired is still
-     * serviced on this tick (NET-11), with the lock dropped between
+     * serviced on this tick, with the lock dropped between
      * batches. */
-    /* TCP-URG-01: SIGURG is owed from the RX path, where psignal()'s locks
+    /* SIGURG is owed from the RX path, where psignal()'s locks
      * cannot be taken; collect the owners here and signal after unlock.
      * Any beyond the batch stay pending for the next tick. */
     int urg_owner[16];
@@ -954,13 +954,13 @@ static int tcp_timer_tick(uint64_t now) {
         if (p->state == TCP_CLOSED) {
             /* Terminal.  Reap if orphaned — tcp_find() never returns a
              * CLOSED PCB, so no RX path can be holding this pointer. */
-            /* TCP-01: never free a PCB a blocked caller is still holding;
+            /* Never free a PCB a blocked caller is still holding;
              * it will be reaped on a later tick once that caller returns. */
             if (p->detached && p->holds == 0) { tcp_free(p); continue; }
             if (p->detached) continue;
-            /* NET-04: a never-accepted child (->parent still set) that
+            /* A never-accepted child (->parent still set) that
              * died in the handshake — e.g. SYN_RECEIVED retransmit
-             * timeout or a RST (NET-06) — has no userspace owner and no
+             * timeout or a RST — has no userspace owner and no
              * fd.  Free it now instead of leaking its rxbuf until the
              * listener closes.  Skip it while still in the listener's
              * accept queue, where a pending accept() could claim it. */
@@ -969,14 +969,14 @@ static int tcp_timer_tick(uint64_t now) {
             }
             continue;
         }
-        /* TCP-05: reap a FIN_WAIT_2 whose peer never sent its FIN. */
+        /* Reap a FIN_WAIT_2 whose peer never sent its FIN. */
         if (p->state == TCP_FIN_WAIT_2 && p->fin_wait2_until &&
             now >= p->fin_wait2_until) {
             tcp_kill_pcb(p, ETIMEDOUT);
             continue;
         }
         /*
-         * TCP-SM-01: CLOSING and LAST_ACK are completed only by the peer's
+         * CLOSING and LAST_ACK are completed only by the peer's
          * ACK of our FIN.  Once that FIN has left the unacked queue there is
          * nothing for the retransmit check below to do, so if the ACK that
          * should complete the close is ever missed, no reaper reaches the
@@ -984,7 +984,7 @@ static int tcp_timer_tick(uint64_t now) {
          * empty, and complete the close when it expires.  Not immediately --
          * tcp_close() publishes the state before it queues the FIN.
          */
-        /* TCP-API-19: FIN-WAIT-1 too.  With its FIN queued it is bounded by
+        /* FIN-WAIT-1 too.  With its FIN queued it is bounded by
          * the retransmit budget, and an ACK of the FIN moves it on at once;
          * one with an empty queue has no FIN at all and nothing else would
          * ever end it. */
@@ -999,19 +999,19 @@ static int tcp_timer_tick(uint64_t now) {
                 } else if (p->state == TCP_LAST_ACK) {
                     tcp_kill_pcb(p, 0);
                 } else {
-                    p->time_wait_until = now + TCP_TIME_WAIT_TICKS;   /* TCP-MEM-09: deadline first */
+                    p->time_wait_until = now + TCP_TIME_WAIT_TICKS;   /* deadline first */
                     p->state = TCP_TIME_WAIT;
                 }
                 continue;
             }
         }
-        /* TCP-MEM-09: and never expire on an unarmed (zero) deadline, which
+        /* And never expire on an unarmed (zero) deadline, which
          * a tick landing between the two stores used to see as long past. */
         if (p->state == TCP_TIME_WAIT && p->time_wait_until &&
             now >= p->time_wait_until) {
             /* Drop to CLOSED now; freed on the next tick once no RX
              * can still be matching a late segment against it.
-             * TCP-SM-14: and tell anyone still waiting on the socket. */
+             * And tell anyone still waiting on the socket. */
             p->state = TCP_CLOSED;
             sched_wakeup(p->recv_chan);
             sched_wakeup(p->send_chan);
@@ -1020,7 +1020,7 @@ static int tcp_timer_tick(uint64_t now) {
         tcp_seg_t *head = p->unacked_head;
         if (!head) continue;
         /*
-         * TCP-WIN-01: a zero-window probe is retransmitted for as long as
+         * A zero-window probe is retransmitted for as long as
          * the peer keeps its window shut -- a receiver that is alive but
          * not reading is not a failed path, and RFC 793 3.7 says to keep
          * probing.  Its retransmissions used to count toward TCP_MAX_RETX,
@@ -1033,7 +1033,7 @@ static int tcp_timer_tick(uint64_t now) {
             head->retx  = 0;
         }
         /*
-         * TCP-WIN-13: RFC 793 3.9 USER TIMEOUT -- a connection-level bound
+         * RFC 793 3.9 USER TIMEOUT -- a connection-level bound
          * on unacknowledged data, which the per-segment retransmit budget
          * is not: that restarts whenever a new segment reaches the head, so
          * a path on which every segment eventually got through after many
@@ -1047,23 +1047,23 @@ static int tcp_timer_tick(uint64_t now) {
             tcp_kill_pcb(p, p->soft_error ? p->soft_error : ETIMEDOUT);
             continue;
         }
-        /* TCP-06: back the RTO off exponentially per attempt rather than
+        /* Back the RTO off exponentially per attempt rather than
          * retrying at a flat interval forever.  The shift is clamped: a
          * probe's retx is unbounded, and 2^6 s already exceeds the cap. */
         unsigned shift = head->retx > 6 ? 6u : (unsigned)head->retx;
-        uint64_t rto = (uint64_t)(p->rto ? p->rto : TCP_RTO_BASE_TICKS) << shift;   /* TCP-WIN-14 */
+        uint64_t rto = (uint64_t)(p->rto ? p->rto : TCP_RTO_BASE_TICKS) << shift;
         if (rto > TCP_RTO_MAX_TICKS) rto = TCP_RTO_MAX_TICKS;
         if (now - head->sent_tick < rto) continue;
         if (!head->probe && head->retx >= TCP_MAX_RETX) {
             tcp_kill_pcb(p, p->soft_error ? p->soft_error : ETIMEDOUT);
             continue;
         }
-        if (nretx == TCP_RETX_BATCH) {  /* TCP-RES-01: next batch */
+        if (nretx == TCP_RETX_BATCH) {  /* the rest go in the next batch */
             more = 1;
             continue;
         }
         /*
-         * TCP-10: RFC 5681 3.1 -- an RTO is the strongest loss signal there
+         * RFC 5681 3.1 -- an RTO is the strongest loss signal there
          * is, so ssthresh drops to half the flight size and cwnd collapses
          * all the way to one segment.  Slow start then rebuilds it.  Doing
          * this here rather than only on duplicate ACKs is what keeps a path
@@ -1097,7 +1097,7 @@ static void tcp_timer_thread(void *arg) {
     for (;;) {
         sched_sleep_until(&g_tcp_pcbs,
                           get_ticks() + TCP_TIMER_PERIOD);
-        /* TCP-RES-01: again while a retransmit batch overflowed.  Each
+        /* Again while a retransmit batch overflowed.  Each
          * pass samples the clock afresh: a segment the previous pass sent
          * has a sent_tick newer than that pass's `now`, and would look long
          * overdue against it. */
@@ -1108,7 +1108,7 @@ static void tcp_timer_thread(void *arg) {
 
 static int tcp_timer_started = 0;
 /*
- * TCP-31: the retransmit timer is the only thing that resends lost segments,
+ * The retransmit timer is the only thing that resends lost segments,
  * expires TIME_WAIT and reaps detached PCBs, so losing it degrades TCP to
  * fire-and-forget with an unbounded PCB leak -- silently.
  *
@@ -1141,7 +1141,7 @@ static tcp_pcb_t *tcp_find(uint32_t saddr, uint16_t sport,
      * a local IP yet, or for loopback where the chosen source IP
      * differs from what the connect() caller specified.
      *
-     * TCP-RES-03: both searches walk one index bucket, not every PCB. */
+     * Both searches walk one index bucket, not every PCB. */
     for (tcp_pcb_t *p = g_tcp_chash[tcp_chash(dport, saddr, sport)]; p;
          p = p->hnext) {
         if (p->state == TCP_CLOSED) continue;
@@ -1152,7 +1152,7 @@ static tcp_pcb_t *tcp_find(uint32_t saddr, uint16_t sport,
     }
     /* Then a LISTEN socket on the local port.
      *
-     * TCP-API-05: the most specific one (RFC 793 2.2), not the first in
+     * The most specific one (RFC 793 2.2), not the first in
      * the list.  The list is prepended, so with a wildcard and an
      * address-specific listener on one port the NEWEST won every SYN --
      * a later [::]:22 (bound as the v4 wildcard) captured sshd's
@@ -1182,7 +1182,7 @@ static void tcp_send_rst(uint32_t saddr, uint32_t daddr,
     r->source     = th->dest;
     r->dest       = th->source;
     /*
-     * TCP-27: the two forms RFC 793 3.4 specifies.
+     * The two forms RFC 793 3.4 specifies.
      *
      * The ACK field was wrong twice over.  A FIN consumes a sequence number
      * and was not counted, so the RST acknowledged one byte short of the
@@ -1207,7 +1207,7 @@ static void tcp_send_rst(uint32_t saddr, uint32_t daddr,
         r->doff_flags = __builtin_bswap16((5u << 12) | TCP_RST | TCP_ACK);
     }
     r->check      = tcp_csum(daddr, saddr, r, sizeof(*r));
-    /* TCP-HDR-01: answer from the address the segment was sent to, which
+    /* Answer from the address the segment was sent to, which
      * is the source the checksum above covers. */
     ip4_output_from(daddr, saddr, IPPROTO_TCP, r, sizeof(*r));
 }
@@ -1219,7 +1219,7 @@ static void tcp_in_listen(tcp_pcb_t *p, uint32_t saddr, uint32_t daddr,
                           uint16_t sport, uint16_t dport, uint32_t seq,
                           uint32_t ack, uint8_t flags, size_t dlen) {
     /*
-     * TCP-28: only a CLEAN SYN may open a connection.  The test was
+     * Only a CLEAN SYN may open a connection.  The test was
      * `!(flags & TCP_SYN)`, so SYN|RST and SYN|ACK both spawned a child PCB
      * -- a segment that RFC 793 3.9 says a listener must answer with a RST
      * (SYN|ACK) or discard outright (anything with RST) instead created
@@ -1230,7 +1230,7 @@ static void tcp_in_listen(tcp_pcb_t *p, uint32_t saddr, uint32_t daddr,
     if (flags & TCP_ACK) {
         /* An ACK arriving at a LISTEN socket refers to a connection that
          * does not exist here: RFC 793 3.9 says answer it with
-         * <SEQ=SEG.ACK><CTL=RST>.  TCP-SM-07: this used to return, trusting
+         * <SEQ=SEG.ACK><CTL=RST>.  This used to return, trusting
          * "the unmatched-segment path" to send the RST -- but tcp_find()
          * matched the listener, so that path never ran and the peer got
          * silence. */
@@ -1247,7 +1247,7 @@ static void tcp_in_listen(tcp_pcb_t *p, uint32_t saddr, uint32_t daddr,
      * peer's connect() times out, which is the correct backlog-full
      * behaviour instead of establishing an un-acceptable connection.
      *
-     * TCP-API-21: count EVERY child still attached to this listener, in
+     * Count EVERY child still attached to this listener, in
      * any state.  Only SYN_RECEIVED ones (plus the accept queue) were
      * counted, so a child killed by the peer's RST -- CLOSED, holding its
      * 32 KiB ring until the timer reaps it -- no longer counted, and a
@@ -1255,7 +1255,7 @@ static void tcp_in_listen(tcp_pcb_t *p, uint32_t saddr, uint32_t daddr,
      * reaper could free them.  Accept-queued children keep ->parent until
      * accept() takes them, so this also counts them exactly once.
      *
-     * TCP-RES-03: kept as a count on the listener rather than a walk of
+     * Kept as a count on the listener rather than a walk of
      * every PCB. */
     if (p->nchildren >= p->accept_cap)
         return;
@@ -1263,20 +1263,20 @@ static void tcp_in_listen(tcp_pcb_t *p, uint32_t saddr, uint32_t daddr,
     tcp_pcb_t *c = (tcp_pcb_t *)kmalloc(sizeof(*c));
     if (!c) return;
     memset(c, 0, sizeof(*c));
-    c->txo = p->txo;                 /* UDP-API-12: inherit the listener's */
-    c->user_timeout_ms = p->user_timeout_ms;          /* TCP-WIN-13 */
-    tcp_take_peer_mss(c, p->syn_mss);                  /* TCP-HDR-02 */
+    c->txo = p->txo;                 /* inherit the listener's IP_TTL/IP_TOS */
+    c->user_timeout_ms = p->user_timeout_ms;
+    tcp_take_peer_mss(c, p->syn_mss);
     c->state   = TCP_SYN_RECEIVED;
     c->laddr   = daddr;
     c->raddr   = saddr;
-    tcp_set_mtu_mss(c);                                /* TCP-HDR-04 */
+    tcp_set_mtu_mss(c);
     c->lport   = dport;
     c->rport   = sport;
-    c->iss     = tcp_new_iss(c->laddr, c->lport, c->raddr, c->rport);   /* TCP-HDR-05 */
+    c->iss     = tcp_new_iss(c->laddr, c->lport, c->raddr, c->rport);
     c->snd_una = c->iss;
     c->snd_nxt = c->iss;
     c->rcv_nxt = seq + 1;
-    c->rcv_adv_edge_valid = 0;          /* TCP-WIN-07: new sequence space */
+    c->rcv_adv_edge_valid = 0;          /* new sequence space */
     c->rxbuf   = (uint8_t *)kmalloc(TCP_RING_LEN);
     if (!c->rxbuf) { kfree(c, sizeof(*c)); return; }
     c->rcv_wnd      = TCP_RING_LEN;
@@ -1296,9 +1296,9 @@ static void tcp_in_syn_sent(tcp_pcb_t *p, uint32_t seq, uint32_t ack,
                             uint8_t flags) {
     if (flags & TCP_RST) {
         /*
-         * TCP-09: a RST in SYN_SENT is acceptable ONLY if it acknowledges
+         * A RST in SYN_SENT is acceptable ONLY if it acknowledges
          * our SYN (RFC 793 3.9 / RFC 5961 3.2).  It used to be honoured
-         * unconditionally, so with TCP-07's predictable ports an off-path
+         * unconditionally, so with the then-predictable ports an off-path
          * attacker aborted any outbound connect by spraying RSTs -- and no
          * sequence number even had to be guessed, since a bare RST with no
          * ACK bit was equally effective.  The challenge-ACK logic was
@@ -1311,7 +1311,7 @@ static void tcp_in_syn_sent(tcp_pcb_t *p, uint32_t seq, uint32_t ack,
         tcp_kill_pcb(p, ECONNREFUSED);
         return;
     }
-    /* A71: RFC 793 SYN-SENT requires validating the ACK before
+    /* RFC 793 SYN-SENT requires validating the ACK before
      * proceeding.  The segment's ACK must acknowledge our SYN,
      * i.e. ISS < SEG.ACK <= SND.NXT (in SYN_SENT snd_una == ISS
      * and snd_nxt == ISS+1).  An ack that is at/below snd_una or
@@ -1320,7 +1320,7 @@ static void tcp_in_syn_sent(tcp_pcb_t *p, uint32_t seq, uint32_t ack,
      * segment rather than establishing with a stale/forged send
      * state (which also left the SYN un-pruned and snd_una wrong).
      *
-     * TCP-SM-10: for every ACK-bearing segment, not only a SYN|ACK -- the
+     * For every ACK-bearing segment, not only a SYN|ACK -- the
      * first check in 3.9's SYN-SENT precedes the SYN test.  A bare ACK for
      * something we never sent (a stale half of an old connection on this
      * 4-tuple) was dropped silently, so the peer never learned to reset. */
@@ -1331,18 +1331,18 @@ static void tcp_in_syn_sent(tcp_pcb_t *p, uint32_t seq, uint32_t ack,
         return;
     }
     if ((flags & (TCP_SYN | TCP_ACK)) == (TCP_SYN | TCP_ACK)) {
-        tcp_take_peer_mss(p, p->syn_mss);               /* TCP-HDR-02 */
+        tcp_take_peer_mss(p, p->syn_mss);
         p->rcv_nxt = seq + 1;
-        p->rcv_adv_edge_valid = 0;      /* TCP-WIN-07 */
+        p->rcv_adv_edge_valid = 0;      /* new sequence space */
         /* The peer's ACK confirms our SYN (validated acceptable above,
          * so it always advances snd_una).  Prune it from the unacked
          * queue and advance snd_una. */
         p->snd_una = ack;
         tcp_unacked_prune(p, ack);
         p->state = TCP_ESTABLISHED;
-        p->last_ack = ack;          /* TCP-33: so the 1st duplicate counts */
+        p->last_ack = ack;          /* so the 1st duplicate counts */
         p->dup_ack  = 0;
-        /* TCP-10: RFC 5681 3.1 -- initial window of 3*MSS (the IW=10 of
+        /* RFC 5681 3.1 -- initial window of 3*MSS (the IW=10 of
          * RFC 6928 is for well-provisioned paths; be conservative here),
          * and an effectively infinite ssthresh so the first loss sets it. */
         p->cwnd     = 3u * TCP_MSS;
@@ -1352,7 +1352,7 @@ static void tcp_in_syn_sent(tcp_pcb_t *p, uint32_t seq, uint32_t ack,
         return;
     }
     /*
-     * TCP-SM-11: simultaneous open (RFC 793 3.4 figure 8, 3.9 SYN-SENT
+     * Simultaneous open (RFC 793 3.4 figure 8, 3.9 SYN-SENT
      * fourth check).  A SYN without ACK means the peer is opening toward
      * us at the same moment.  It used to be dropped, so two ends that
      * dialled each other never connected.  Take its sequence number, move
@@ -1361,9 +1361,9 @@ static void tcp_in_syn_sent(tcp_pcb_t *p, uint32_t seq, uint32_t ack,
      * queueing a second one; tcp_in_syn_received() completes the open.
      */
     if (flags & TCP_SYN) {
-        tcp_take_peer_mss(p, p->syn_mss);               /* TCP-HDR-02 */
+        tcp_take_peer_mss(p, p->syn_mss);
         p->rcv_nxt = seq + 1;
-        p->rcv_adv_edge_valid = 0;      /* TCP-WIN-07 */
+        p->rcv_adv_edge_valid = 0;      /* new sequence space */
         p->state   = TCP_SYN_RECEIVED;
         if (p->unacked_head && (p->unacked_head->flags & TCP_SYN)) {
             p->unacked_head->flags |= TCP_ACK;
@@ -1384,12 +1384,12 @@ static int tcp_in_syn_received(tcp_pcb_t *p, uint32_t *seqp, uint32_t ack,
                                size_t *dlenp) {
     uint32_t seq = *seqp;
     uint8_t flags = *flagsp;
-    /* NET-06: a RST for a half-open child aborts it.  Tear the child
+    /* A RST for a half-open child aborts it.  Tear the child
      * down (tcp_kill_pcb -> TCP_CLOSED) instead of silently dropping the
      * segment; the retransmit-timer reaper then frees the never-accepted
-     * PCB — see NET-04.
+     * PCB — see tcp_timer_tick().
      *
-     * TCP-SM-04: but only a RST whose sequence number is valid.  Any RST on
+     * But only a RST whose sequence number is valid.  Any RST on
      * the 4-tuple was honoured, so a blind attacker who knew the tuple
      * killed every embryonic connection.  Apply the same RFC 5961 3.2 test
      * as the synchronized states: outside the window drop it, off RCV.NXT
@@ -1405,7 +1405,7 @@ static int tcp_in_syn_received(tcp_pcb_t *p, uint32_t *seqp, uint32_t ack,
         return 0;
     }
     /*
-     * TCP-SM-09: RFC 793 3.9 for SYN-RECEIVED.  None of this was checked:
+     * RFC 793 3.9 for SYN-RECEIVED.  None of this was checked:
      * any segment carrying ACK == SND.NXT completed the handshake whatever
      * its sequence number, an unacceptable ACK was silently ignored, and
      * the text and FIN of the third segment were thrown away (a client
@@ -1414,7 +1414,7 @@ static int tcp_in_syn_received(tcp_pcb_t *p, uint32_t *seqp, uint32_t ack,
      *
      * A SYN at IRS is the peer's SYN again: a retransmission (the queued
      * SYN-ACK's retransmission answers it, as before), or in a simultaneous
-     * open (TCP-SM-11) the peer's SYN|ACK, whose ACK completes the open.
+     * open the peer's SYN|ACK, whose ACK completes the open.
      * Strip the SYN, as BSD does, and process the rest; RFC 793's own
      * acceptability test would reject that SYN|ACK, which is a known
      * defect of its figure 8.  Any other SYN is ignored.
@@ -1443,9 +1443,9 @@ static int tcp_in_syn_received(tcp_pcb_t *p, uint32_t *seqp, uint32_t ack,
         tcp_unacked_prune(p, ack);
     }
     p->state = TCP_ESTABLISHED;
-    p->last_ack = ack;          /* TCP-33: so the 1st duplicate counts */
+    p->last_ack = ack;          /* so the 1st duplicate counts */
     p->dup_ack  = 0;
-    /* TCP-10: RFC 5681 3.1 -- initial window of 3*MSS (the IW=10 of
+    /* RFC 5681 3.1 -- initial window of 3*MSS (the IW=10 of
      * RFC 6928 is for well-provisioned paths; be conservative here),
      * and an effectively infinite ssthresh so the first loss sets it. */
     p->cwnd     = 3u * TCP_MSS;
@@ -1454,11 +1454,11 @@ static int tcp_in_syn_received(tcp_pcb_t *p, uint32_t *seqp, uint32_t ack,
     if (p->parent) {
         tcp_pcb_t *par = p->parent;
         if (par->accept_count < par->accept_cap) {
-            /* TCP-MEM-05: write the slot, THEN publish it.  The
+            /* Write the slot, THEN publish it.  The
              * one-statement form compiled to the count store first
              * (confirmed in tcp.o), so a reader between the two stores
              * took an unwritten slot as a PCB pointer.  tcp_input()'s
-             * lock (TCP-MEM-01) now excludes that reader; the order is
+             * lock now excludes that reader; the order is
              * kept right regardless, with a compiler barrier. */
             par->accept_q[par->accept_count] = p;
             __asm__ volatile ("" ::: "memory");
@@ -1467,7 +1467,7 @@ static int tcp_in_syn_received(tcp_pcb_t *p, uint32_t *seqp, uint32_t ack,
             sched_wakeup(par->accept_chan);
         }
     } else {
-        sched_wakeup(p->connect_chan);   /* TCP-SM-11: an active open */
+        sched_wakeup(p->connect_chan);   /* simultaneous (active) open */
     }
     return 1;
 }
@@ -1484,7 +1484,7 @@ static int tcp_seq_in_rcv_window(const tcp_pcb_t *p, uint32_t seq) {
 }
 
 /*
- * TCP-SM-02 / TCP-SM-05: RFC 793 3.9 SEGMENT ARRIVES, "first check sequence
+ * RFC 793 3.9 SEGMENT ARRIVES, "first check sequence
  * number", for the synchronized states.
  *
  * Acceptability is the 3.3 table, with RCV.WND the free receive space:
@@ -1585,7 +1585,7 @@ static uint32_t tcp_rx_copy(tcp_pcb_t *p, const uint8_t *data, uint32_t n) {
  * Deliver in-order text starting at sequence number `seq` into the ring.
  * Returns how many sequence octets were consumed.
  *
- * TCP-URG-01: the urgent octet (RCV.UP - 1, the BSD pointer convention) is
+ * The urgent octet (RCV.UP - 1, the BSD pointer convention) is
  * lifted out of the stream into oob_byte -- BSD's default out-of-line
  * semantics -- and the mark is recorded as the number of ring octets still
  * ahead of it, so reads stop at the mark and SIOCATMARK can report it.
@@ -1612,7 +1612,7 @@ static uint32_t tcp_rx_put(tcp_pcb_t *p, uint32_t seq, const uint8_t *data,
 }
 
 /*
- * TCP-WIN-08: out-of-order reassembly.  Segments that arrive above RCV.NXT
+ * Out-of-order reassembly.  Segments that arrive above RCV.NXT
  * (already trimmed to the window by tcp_seg_check) are kept, sorted by
  * sequence number, until the gap below them fills.  Bounded by segment
  * count and by one ring's worth of octets, so a peer cannot grow it; what
@@ -1703,7 +1703,7 @@ static void tcp_in_established(tcp_pcb_t *p, uint32_t seq, uint32_t ack,
     }
 
     /*
-     * TCP-24: a SYN arriving for a connection we hold in TIME_WAIT is a
+     * A SYN arriving for a connection we hold in TIME_WAIT is a
      * client reconnecting on the same 4-tuple.  It used to be silently
      * ignored, so the client was blackholed for the whole TIME_WAIT
      * (now 60 s, which makes this far more visible than it was at 1 s).
@@ -1713,7 +1713,7 @@ static void tcp_in_established(tcp_pcb_t *p, uint32_t seq, uint32_t ack,
      * The peer then learns the connection is not usable and resets, rather
      * than retrying into silence until its connect() times out.
      *
-     * TCP-SM-06: and the same in every synchronized state (RFC 793 3.9's
+     * And the same in every synchronized state (RFC 793 3.9's
      * fourth check).  The test only ran in TIME_WAIT, and after the FIN
      * processing, so an in-window SYN on any other state was answered with
      * nothing -- or had its text and FIN processed.  The challenge ACK is
@@ -1724,7 +1724,7 @@ static void tcp_in_established(tcp_pcb_t *p, uint32_t seq, uint32_t ack,
         return;
     }
 
-    /* TCP-SM-12: RFC 793 3.9 fifth check -- "if the ACK bit is off drop
+    /* RFC 793 3.9 fifth check -- "if the ACK bit is off drop
      * the segment and return".  Text and FIN were taken from segments
      * without it. */
     if (!(flags & TCP_ACK))
@@ -1736,7 +1736,7 @@ static void tcp_in_established(tcp_pcb_t *p, uint32_t seq, uint32_t ack,
      * black-holed forever.  Pure ACK/FIN segments (dlen==0) still flow
      * through so the close handshake can finish.
      *
-     * TCP-SM-15: only data beyond RCV.NXT may abort.  tcp_seg_check()
+     * Only data beyond RCV.NXT may abort.  tcp_seg_check()
      * guarantees that here: a retransmission of data already consumed lies
      * below the window and was ACKed and dropped there, and a straddling
      * one was trimmed to its new octets.  (Before it existed, a peer that
@@ -1749,14 +1749,14 @@ static void tcp_in_established(tcp_pcb_t *p, uint32_t seq, uint32_t ack,
 
     /* Process ACK: prune unacked segments and run dup-ACK fast-retx.
      *
-     * TCP-SM-13: before the text (RFC 793 3.9 fifth check, then seventh).
+     * Before the text (RFC 793 3.9 fifth check, then seventh).
      * The text used to be committed to the ring first, so a segment whose
      * ACK acknowledged something never sent -- which 3.9 says to answer
      * with an ACK and DROP -- still had its data delivered and RCV.NXT
      * advanced. */
     if (flags & TCP_ACK) {
         /*
-         * TCP-03: RFC 793 requires SND.UNA < SEG.ACK <= SND.NXT.  The upper
+         * RFC 793 requires SND.UNA < SEG.ACK <= SND.NXT.  The upper
          * bound was missing here (it IS enforced in SYN_SENT), so an ACK for
          * data we never sent was accepted.  That did two things: it pruned
          * unacked segments the peer had never received, silently losing
@@ -1765,7 +1765,7 @@ static void tcp_in_established(tcp_pcb_t *p, uint32_t seq, uint32_t ack,
          * the send window read as permanently full -- an unrecoverable
          * write-side wedge from a single forged segment.
          */
-        /* TCP-MEM-07: bounded by what was actually transmitted, not by the
+        /* Bounded by what was actually transmitted, not by the
          * pre-advanced snd_nxt. */
         if ((int32_t)(ack - tcp_ack_limit(p)) > 0) {
             /* Unacceptable ACK.  RFC 793 3.9: in a synchronized state,
@@ -1778,13 +1778,13 @@ static void tcp_in_established(tcp_pcb_t *p, uint32_t seq, uint32_t ack,
             uint32_t acked = ack - p->snd_una;
             p->snd_una = ack;
             tcp_unacked_prune(p, ack);
-            /* TCP-URG-02: the urgent data is acknowledged -- stop flagging. */
+            /* The urgent data is acknowledged -- stop flagging. */
             if (p->snd_up_valid && (int32_t)(ack - p->snd_up) >= 0)
                 p->snd_up_valid = 0;
             p->dup_ack = 0;
             p->last_ack = ack;
             /*
-             * TCP-10: RFC 5681 3.1.  Below ssthresh we are in slow start
+             * RFC 5681 3.1.  Below ssthresh we are in slow start
              * and cwnd grows by at most one MSS per ACK; above it we are in
              * congestion avoidance and grow by roughly MSS per RTT, which
              * is MSS*MSS/cwnd per ACK.  Clamp so cwnd cannot wrap.
@@ -1799,7 +1799,7 @@ static void tcp_in_established(tcp_pcb_t *p, uint32_t seq, uint32_t ack,
                 if (p->cwnd < 0xFFFFFFFFu - inc) p->cwnd += inc;
             }
         } else if (ack == p->last_ack && p->unacked_head &&
-                   /* TCP-WIN-05: RFC 5681 2's whole definition of a
+                   /* RFC 5681 2's whole definition of a
                     * duplicate: no data, no SYN/FIN, ACK = SND.UNA with
                     * data outstanding, and the window unchanged.  Any
                     * segment repeating the ACK used to count, so the
@@ -1813,7 +1813,7 @@ static void tcp_in_established(tcp_pcb_t *p, uint32_t seq, uint32_t ack,
              * unacked segment.  After TCP_DUP_ACK_FAST in a row, resend it
              * without waiting for the RTO.
              *
-             * TCP-33: this used to need FOUR duplicates, not three.
+             * This used to need FOUR duplicates, not three.
              * last_ack started at 0 and was only assigned in the advancing
              * branch and the trailing else, so the FIRST duplicate fell into
              * that else and merely initialised last_ack instead of counting.
@@ -1826,7 +1826,7 @@ static void tcp_in_established(tcp_pcb_t *p, uint32_t seq, uint32_t ack,
              */
             p->dup_ack++;
             if (p->dup_ack >= TCP_DUP_ACK_FAST) {
-                /* TCP-10: RFC 5681 3.2 -- three duplicate ACKs signal a
+                /* RFC 5681 3.2 -- three duplicate ACKs signal a
                  * loss.  ssthresh drops to half the flight size and cwnd
                  * follows; without this the retransmit went out at the same
                  * rate that caused the drop. */
@@ -1845,7 +1845,7 @@ static void tcp_in_established(tcp_pcb_t *p, uint32_t seq, uint32_t ack,
          * window (tcp_input() already stored it in snd_wnd) — wake any
          * sender parked in tcp_send() waiting for the window to open. */
         sched_wakeup(p->send_chan);
-        if (p->pollout_wait) {          /* TCP-WIN-02: and a POLLOUT poller */
+        if (p->pollout_wait) {          /* and a POLLOUT poller */
             p->pollout_wait = 0;
             sched_wakeup(p->recv_chan);
         }
@@ -1853,7 +1853,7 @@ static void tcp_in_established(tcp_pcb_t *p, uint32_t seq, uint32_t ack,
 
     /* Accept data if seq matches rcv_nxt and we have room.
      *
-     * TCP-SM-03: and only in a state that can still receive text.  Once the
+     * And only in a state that can still receive text.  Once the
      * peer's FIN has been taken (CLOSE_WAIT, CLOSING, LAST_ACK, TIME_WAIT)
      * RCV.NXT sits just past it, so text "after the FIN" looked in order
      * and was delivered to read() -- RFC 793 3.9's seventh step says to
@@ -1861,7 +1861,7 @@ static void tcp_in_established(tcp_pcb_t *p, uint32_t seq, uint32_t ack,
     int can_rx = (p->state == TCP_ESTABLISHED || p->state == TCP_FIN_WAIT_1 ||
                   p->state == TCP_FIN_WAIT_2);
     /*
-     * TCP-URG-01: RFC 793 3.9 sixth step, check the URG bit -- which was
+     * RFC 793 3.9 sixth step, check the URG bit -- which was
      * never looked at.  RCV.UP <- max(RCV.UP, SEG.UP); if it moved ahead of
      * data not yet received, the user is signalled (SIGURG, POLLPRI) and
      * the urgent octet is lifted out when it arrives.  urg_end was computed
@@ -1877,22 +1877,22 @@ static void tcp_in_established(tcp_pcb_t *p, uint32_t seq, uint32_t ack,
         p->urg_sig_pending = 1;
         sched_wakeup(p->recv_chan);
     }
-    /* TCP-WIN-08: text (or a FIN) beyond RCV.NXT is queued for reassembly
+    /* Text (or a FIN) beyond RCV.NXT is queued for reassembly
      * and answered with an immediate duplicate ACK (RFC 5681 4.2), instead
      * of being dropped for the peer to retransmit after an RTO. */
     if (can_rx && (dlen || (flags & TCP_FIN)) &&
         (int32_t)(seq - p->rcv_nxt) > 0) {
-        if (!p->shut_rd)                    /* TCP-WIN-10: nothing to keep */
+        if (!p->shut_rd)                    /* after SHUT_RD, nothing to keep */
             tcp_ooo_insert(p, seq, payload, dlen, flags & TCP_FIN);
         tcp_send_ctl(p, TCP_ACK);
         return;
     }
     if (dlen && seq == p->rcv_nxt && can_rx) {
-        /* TCP-WIN-10: after SHUT_RD, consume without storing. */
+        /* After SHUT_RD, consume without storing. */
         uint32_t accept_n = p->shut_rd ? (uint32_t)dlen
                                        : tcp_rx_put(p, seq, payload, dlen);
         p->rcv_nxt  += accept_n;
-        /* TCP-WIN-08: the gap this filled may release queued segments --
+        /* The gap this filled may release queued segments --
          * and a FIN queued behind them. */
         if (accept_n == dlen && !(flags & TCP_FIN) && tcp_ooo_drain(p)) {
             flags |= TCP_FIN;
@@ -1911,7 +1911,7 @@ static void tcp_in_established(tcp_pcb_t *p, uint32_t seq, uint32_t ack,
      * drops ring overflow, recovered by retransmission) would tear the
      * receive side down early and silently truncate the stream. */
     /*
-     * TCP-13 / TCP-SM-01: a RETRANSMITTED FIN -- one whose sequence number
+     * A RETRANSMITTED FIN -- one whose sequence number
      * rcv_nxt has already passed -- is handled by tcp_seg_check(): it lies
      * below the window, so it is answered with an ACK (restarting the
      * 2*MSL wait in TIME_WAIT) and dropped before any field of it is used.
@@ -1930,7 +1930,7 @@ static void tcp_in_established(tcp_pcb_t *p, uint32_t seq, uint32_t ack,
             break;
         case TCP_FIN_WAIT_1:
             /*
-             * TCP-14: simultaneous close.  This used to move to TIME_WAIT on
+             * Simultaneous close.  This used to move to TIME_WAIT on
              * ANY segment carrying the ACK bit -- which every segment after
              * the handshake does -- so the CLOSING branch was effectively
              * dead.  Our own FIN was then still sitting in unacked_head, but
@@ -1942,21 +1942,21 @@ static void tcp_in_established(tcp_pcb_t *p, uint32_t seq, uint32_t ack,
              * and CLOSING is the correct state.
              */
             if ((flags & TCP_ACK) && ack == p->snd_nxt && !p->unacked_head) {
-                p->time_wait_until = get_ticks() + TCP_TIME_WAIT_TICKS;   /* TCP-MEM-09: deadline first */
+                p->time_wait_until = get_ticks() + TCP_TIME_WAIT_TICKS;   /* deadline first */
                 p->state = TCP_TIME_WAIT;
             } else {
                 p->state = TCP_CLOSING;
             }
-            /* TCP-SM-14: the FIN is end-of-file for a reader (RFC 793 3.9
+            /* The FIN is end-of-file for a reader (RFC 793 3.9
              * eighth check, "signal the user") -- only ESTABLISHED woke
              * it; a half-closed reader waited out its poll backstop. */
             sched_wakeup(p->recv_chan);
             tcp_send_ctl(p, TCP_ACK);
             break;
         case TCP_FIN_WAIT_2:
-            p->time_wait_until = get_ticks() + TCP_TIME_WAIT_TICKS;   /* TCP-MEM-09: deadline first */
+            p->time_wait_until = get_ticks() + TCP_TIME_WAIT_TICKS;   /* deadline first */
             p->state = TCP_TIME_WAIT;
-            sched_wakeup(p->recv_chan);                               /* TCP-SM-14 */
+            sched_wakeup(p->recv_chan);                               /* EOF for a reader */
             tcp_send_ctl(p, TCP_ACK);
             break;
         case TCP_LAST_ACK:
@@ -1973,7 +1973,7 @@ static void tcp_in_established(tcp_pcb_t *p, uint32_t seq, uint32_t ack,
         ack == p->snd_nxt && !p->unacked_head) {
         p->state = TCP_FIN_WAIT_2;
         /*
-         * TCP-05: arm a deadline.  A FIN_WAIT_2 PCB is not TIME_WAIT and
+         * Arm a deadline.  A FIN_WAIT_2 PCB is not TIME_WAIT and
          * has an empty unacked queue, so the timer tick skipped it and it
          * was never touched again -- if the peer simply never sent its own
          * FIN the PCB and its 32 KiB receive ring leaked forever.  That is
@@ -2002,7 +2002,7 @@ static void tcp_in_established(tcp_pcb_t *p, uint32_t seq, uint32_t ack,
      * close: both sides sent FIN before either's was acknowledged). */
     if (p->state == TCP_CLOSING && (flags & TCP_ACK) &&
         ack == p->snd_nxt && !p->unacked_head) {
-        p->time_wait_until = get_ticks() + TCP_TIME_WAIT_TICKS;   /* TCP-MEM-09: deadline first */
+        p->time_wait_until = get_ticks() + TCP_TIME_WAIT_TICKS;   /* deadline first */
         p->state = TCP_TIME_WAIT;
         return;
     }
@@ -2032,14 +2032,14 @@ static void tcp_input_locked(uint32_t saddr, uint32_t daddr,
 {
     tcp_pcb_t *p = tcp_find(saddr, sport, daddr, dport);
     if (p && (flags & TCP_SYN))
-        p->syn_mss = syn_mss;           /* TCP-HDR-02: for the handlers */
+        p->syn_mss = syn_mss;           /* for the handlers */
     if (!p) {
         tcp_send_rst(saddr, daddr, th, flags, seq, ack, dlen);
         return;
     }
 
-    /* TCP-URG-01: where the urgent data ends, from the untrimmed segment.
-     * SEG.UP is wire-controlled: clamp it to the segment's text (URG-06). */
+    /* Where the urgent data ends, from the untrimmed segment.
+     * SEG.UP is wire-controlled: clamp it to the segment's text. */
     uint32_t urg_end = 0;
     if (flags & TCP_URG) {
         uint16_t up = __builtin_bswap16(th->urg_ptr);
@@ -2047,7 +2047,7 @@ static void tcp_input_locked(uint32_t saddr, uint32_t daddr,
         if (up) urg_end = seq + up;
     }
 
-    /* TCP-SM-02/-05: sequence check and trim first, before any field of an
+    /* Sequence check and trim first, before any field of an
      * unacceptable segment -- its window included -- is believed. */
     switch (p->state) {
     case TCP_ESTABLISHED:
@@ -2065,7 +2065,7 @@ static void tcp_input_locked(uint32_t saddr, uint32_t daddr,
     }
 
     /*
-     * TCP-04: only an ACK-bearing segment may move the send window, and
+     * Only an ACK-bearing segment may move the send window, and
      * only when its acknowledgement is one we can actually accept.  This
      * used to take snd_wnd from EVERY segment, before the state dispatch,
      * with no ACK bit and no acceptability test -- so one forged packet
@@ -2074,13 +2074,13 @@ static void tcp_input_locked(uint32_t saddr, uint32_t daddr,
      * and LISTEN states run their own handlers below and take the window
      * from the segment that establishes the connection.
      */
-    /* TCP-WIN-05: whether this segment repeats the window last seen. */
+    /* Whether this segment repeats the window last seen. */
     p->seg_wnd_same = (__builtin_bswap16(th->window) == p->snd_wnd);
     if ((flags & TCP_ACK) && p->state != TCP_LISTEN && p->state != TCP_SYN_SENT) {
         /* Window updates track the highest ACK seen, so an old duplicate
          * cannot walk the window backwards. */
         /*
-         * TCP-WIN-12: and, among segments carrying the same ACK, only the
+         * And, among segments carrying the same ACK, only the
          * newest (by SEG.SEQ, then SEG.ACK) -- RFC 793 3.9's SND.WL1 /
          * SND.WL2 test.  A pure window update carries the same ACK as the
          * one before it, so a reordered older segment used to overwrite a
@@ -2090,19 +2090,19 @@ static void tcp_input_locked(uint32_t saddr, uint32_t daddr,
          * a window update could never reopen a zero window.
          */
         if ((int32_t)(ack - p->snd_una) >= 0 &&
-            (int32_t)(ack - tcp_ack_limit(p)) <= 0 &&           /* TCP-MEM-07 */
+            (int32_t)(ack - tcp_ack_limit(p)) <= 0 &&
             (!p->snd_wl_valid || (int32_t)(p->snd_wl1 - seq) < 0 ||
              (p->snd_wl1 == seq && (int32_t)(p->snd_wl2 - ack) <= 0))) {
             p->snd_wnd = __builtin_bswap16(th->window);
-            if (p->snd_wnd > p->max_snd_wnd) p->max_snd_wnd = p->snd_wnd;   /* TCP-WIN-06 */
+            if (p->snd_wnd > p->max_snd_wnd) p->max_snd_wnd = p->snd_wnd;
             p->snd_wl1 = seq;
             p->snd_wl2 = ack;
             p->snd_wl_valid = 1;
         }
     } else if (p->state == TCP_LISTEN || p->state == TCP_SYN_SENT) {
         p->snd_wnd = __builtin_bswap16(th->window);
-        if (p->snd_wnd > p->max_snd_wnd) p->max_snd_wnd = p->snd_wnd;   /* TCP-WIN-06 */
-        if (p->state == TCP_SYN_SENT) {         /* TCP-WIN-12: from the SYN */
+        if (p->snd_wnd > p->max_snd_wnd) p->max_snd_wnd = p->snd_wnd;
+        if (p->state == TCP_SYN_SENT) {         /* SND.WL1/WL2 from the SYN */
             p->snd_wl1 = seq;
             p->snd_wl2 = ack;
             p->snd_wl_valid = 1;
@@ -2118,7 +2118,7 @@ static void tcp_input_locked(uint32_t saddr, uint32_t daddr,
         return;
     case TCP_SYN_RECEIVED:
         if (tcp_in_syn_received(p, &seq, ack, &flags, &payload, &dlen))
-            tcp_in_established(p, seq, ack, flags, payload, dlen, urg_end);   /* TCP-SM-09 */
+            tcp_in_established(p, seq, ack, flags, payload, dlen, urg_end);   /* text/FIN of the 3rd segment */
         return;
     case TCP_ESTABLISHED:
     case TCP_FIN_WAIT_1:
@@ -2135,7 +2135,7 @@ static void tcp_input_locked(uint32_t saddr, uint32_t daddr,
 }
 
 /*
- * TCP-HDR-02: walk the options of a SYN and return the peer's MSS, or 0 if
+ * Walk the options of a SYN and return the peer's MSS, or 0 if
  * it sent none.  Options were never parsed.  Bounded against the header:
  * EOL (0) ends the list, NOP (1) is one octet, and every other kind needs a
  * length octet in [2, remaining] -- a zero length would otherwise loop
@@ -2288,7 +2288,7 @@ void tcp_input(uint32_t saddr, uint32_t daddr,
     const uint8_t *payload = seg + hlen;
 
     /*
-     * TCP-02: verify the segment checksum before acting on ANY of it.
+     * Verify the segment checksum before acting on ANY of it.
      * tcp_csum() existed but had only output callers, and ip4_input
      * validates the IP header only -- which covers no payload -- so every
      * received seq/ack/flag/window/data byte was accepted with no
@@ -2352,26 +2352,26 @@ void tcp_free(tcp_pcb_t *p) {
     tcp_pcb_t **link = &g_tcp_pcbs;
     while (*link && *link != p) link = &(*link)->next;
     if (*link == p) *link = p->next;
-    tcp_unhash_locked(p);                                /* TCP-RES-03 */
+    tcp_unhash_locked(p);
     /* If this is a listener, orphan any SYN_RECEIVED / not-yet-accepted
      * children so a later segment for one of them can't dereference a
      * freed parent in tcp_in_syn_received(). */
     if (p->listen)
         for (tcp_pcb_t *c = g_tcp_pcbs; c; c = c->next)
             if (c->parent == p) tcp_orphan_locked(c);
-    /* TCP-RES-03: and a child the reaper frees before accept() took it
-     * (NET-04) no longer counts against its listener's backlog. */
+    /* And a child the reaper frees before accept() took it
+     * no longer counts against its listener's backlog. */
     tcp_orphan_locked(p);
     tcp_unacked_free_all(p);
     tcp_unlock(f);
-    tcp_ooo_free_all(p);                                 /* TCP-WIN-08 */
+    tcp_ooo_free_all(p);
     if (p->rxbuf)    kfree(p->rxbuf, TCP_RING_LEN);
     if (p->accept_q) kfree(p->accept_q, sizeof(tcp_pcb_t *) * p->accept_cap);
     kfree(p, sizeof(*p));
 }
 
 /*
- * TCP-API-04: RFC 793 2.7 -- a connection is identified by its pair of
+ * RFC 793 2.7 -- a connection is identified by its pair of
  * sockets, so the local socket must be unique among the PCBs that can
  * still receive.  The only EADDRINUSE test was the socket layer's, which
  * sees sockets, not PCBs: accepted children (never marked bound), and the
@@ -2386,7 +2386,7 @@ void tcp_free(tcp_pcb_t *p) {
  * client, or the remains of a closed connection, TIME-WAIT included) does
  * not block a new local socket -- the BSD rule that lets a daemon restart
  * while old connections drain -- and a LISTEN PCB is left to the socket
- * layer's consent test (UDP-API-01: both flags, same owner).
+ * layer's consent test (both flags, same owner).
  */
 static int tcp_local_conflict_locked(const tcp_pcb_t *self, uint32_t laddr,
                                      uint16_t lport, int reuseaddr) {
@@ -2407,7 +2407,7 @@ int tcp_bind(tcp_pcb_t *p, uint32_t laddr, uint16_t lport, int reuseaddr) {
     }
     p->laddr = laddr;
     p->lport = lport;
-    tcp_rehash_locked(p);                                /* TCP-RES-03 */
+    tcp_rehash_locked(p);
     tcp_unlock(f);
     return 0;
 }
@@ -2415,7 +2415,7 @@ int tcp_bind(tcp_pcb_t *p, uint32_t laddr, uint16_t lport, int reuseaddr) {
 int tcp_listen(tcp_pcb_t *p, int backlog) {
     if (backlog < 1)  backlog = 1;
     if (backlog > 32) backlog = 32;
-    /* TCP-API-06: a passive OPEN is legal only from CLOSED (RFC 793 3.9:
+    /* A passive OPEN is legal only from CLOSED (RFC 793 3.9:
      * any other state is "connection already exists"), plus the
      * already-LISTEN backlog change below.  The state was overwritten from
      * anywhere, so listen() on a connected socket turned it into a
@@ -2424,14 +2424,14 @@ int tcp_listen(tcp_pcb_t *p, int backlog) {
     if (p->state != TCP_CLOSED && p->state != TCP_LISTEN)
         return -EINVAL;
     /*
-     * TCP-32: a second listen() overwrote p->accept_q with a fresh
+     * A second listen() overwrote p->accept_q with a fresh
      * allocation without freeing the old one -- leaking 8*accept_cap and
      * orphaning any children already queued on it, which then never got
      * accepted or reaped.  POSIX allows listen() on an already-listening
      * socket purely to change the backlog, so migrate the pending children
      * into a queue of the new size.
      *
-     * TCP-MEM-11: and do it under tcp_lock -- the RX path appends to this
+     * And do it under tcp_lock -- the RX path appends to this
      * queue from interrupt context -- with the new array allocated before
      * the lock is taken and the old one freed after.  A shrink resets and
      * detaches the children beyond the new cap, as tcp_close()'s LISTEN arm
@@ -2442,12 +2442,12 @@ int tcp_listen(tcp_pcb_t *p, int backlog) {
      */
     tcp_pcb_t **nq = (tcp_pcb_t **)kmalloc(sizeof(tcp_pcb_t *) * backlog);
     if (!nq) return -ENOMEM;
-    /* TCP-MEM-05: never let an unwritten slot hold a stale heap word. */
+    /* Never let an unwritten slot hold a stale heap word. */
     memset(nq, 0, sizeof(tcp_pcb_t *) * backlog);
 
     uint32_t f = tcp_lock();
     if (p->state != TCP_CLOSED && p->state != TCP_LISTEN) {
-        tcp_unlock(f);                          /* TCP-API-06: raced an open */
+        tcp_unlock(f);                          /* raced an open */
         kfree(nq, sizeof(tcp_pcb_t *) * backlog);
         return -EINVAL;
     }
@@ -2468,7 +2468,7 @@ int tcp_listen(tcp_pcb_t *p, int backlog) {
     p->accept_count = keep;
     p->state        = TCP_LISTEN;
     p->listen       = 1;
-    tcp_rehash_locked(p);                                /* TCP-RES-03 */
+    tcp_rehash_locked(p);
     tcp_unlock(f);
     if (oq) kfree(oq, sizeof(tcp_pcb_t *) * ocap);
     return 0;
@@ -2476,7 +2476,7 @@ int tcp_listen(tcp_pcb_t *p, int backlog) {
 
 /* Kick off the SYN.  Common to blocking and non-blocking connect.  */
 /*
- * TCP-07: pick a local port that is random and demonstrably free.
+ * Pick a local port that is random and demonstrably free.
  *
  * This was `static uint16_t next_eph = 32768; p->lport = ++next_eph;` --
  * sequential (so trivially predictable, which is half of what makes off-path
@@ -2484,7 +2484,7 @@ int tcp_listen(tcp_pcb_t *p, int backlog) {
  * range after 32766 connections, and never checked against the PCB list, so
  * two concurrent connect()s could share a 4-tuple and tcp_find would deliver
  * both streams to whichever PCB came first in the list.  af_inet.c fixed
- * exactly this class for UDP (NET-07 / UDP-05); TCP bypassed the helper.
+ * exactly this class for UDP; TCP bypassed the helper.
  *
  * Draw a candidate from the CSPRNG in the IANA dynamic range and reject it
  * if any live PCB already holds it; sweep linearly from there so a busy
@@ -2493,20 +2493,20 @@ int tcp_listen(tcp_pcb_t *p, int backlog) {
 #define TCP_EPH_LO    49152u
 #define TCP_EPH_SPAN  (65536u - TCP_EPH_LO)
 
-/* TCP-MEM-12: one bit per dynamic-range port, rebuilt under tcp_lock by
+/* One bit per dynamic-range port, rebuilt under tcp_lock by
  * each allocation. */
 static uint32_t tcp_eph_map[TCP_EPH_SPAN / 32];
 
 /* Caller holds tcp_lock, and assigns the returned port before dropping it.
  * `r` is the random starting point, drawn before the lock was taken.
  *
- * TCP-MEM-12: this walked the PCB list once per candidate with no lock
+ * This walked the PCB list once per candidate with no lock
  * from preemptible process context, and the chosen port was assigned
  * only afterwards, so a concurrent connect() could claim the same port in
  * between.  Under the lock one pass over the list marks every port in use,
  * and the candidates are then tested against that bitmap, so the locked
  * work is O(PCBs + range) rather than O(PCBs x candidates). */
-/* TCP-API-09: a port is unavailable for a connection to (raddr, rport) only
+/* A port is unavailable for a connection to (raddr, rport) only
  * if a live PCB already uses it toward that same peer (with an overlapping
  * local address), or a listener owns it wholesale.  Keying on the local
  * port alone made every connection anywhere consume a port from the
@@ -2536,7 +2536,7 @@ static uint16_t tcp_alloc_ephemeral_locked(const tcp_pcb_t *self, uint32_t r,
 }
 
 /*
- * TCP-API-02 / TCP-API-03: RFC 793 3.8 OPEN, by state.  An active open is
+ * RFC 793 3.8 OPEN, by state.  An active open is
  * legal only from CLOSED.  connect() used to be gated on the socket
  * layer's `connected` flag, which is set only once the handshake has
  * completed (or, non-blocking, when it was started): a second connect()
@@ -2555,7 +2555,7 @@ static int tcp_open_check_locked(const tcp_pcb_t *p) {
 }
 
 /*
- * TCP-API-01: a PCB that reached CLOSED through a failed or finished
+ * A PCB that reached CLOSED through a failed or finished
  * connection still holds that connection's state.  Re-opening it used to
  * queue the new SYN behind the old one, so the retransmit timer resent the
  * OLD SYN (old ISS) and the new connection never formed; so_error, the
@@ -2598,7 +2598,7 @@ static int tcp_connect_start(tcp_pcb_t *p, uint32_t raddr, uint16_t rport) {
         return -ENETUNREACH;
     uint32_t f = tcp_lock();
     int rc = tcp_open_check_locked(p);
-    if (rc == 0) tcp_reset_for_open_locked(p);     /* TCP-API-01 */
+    if (rc == 0) tcp_reset_for_open_locked(p);
     tcp_unlock(f);
     if (rc) return rc;
     /* random_get_bytes() returns the byte count on success, not 0.  The
@@ -2606,7 +2606,7 @@ static int tcp_connect_start(tcp_pcb_t *p, uint32_t raddr, uint16_t rport) {
      * connects within one 4 ms tick started from the same port, and a port
      * whose last connection had just closed was handed straight back out --
      * onto a 4-tuple the peer still held in TIME-WAIT, which answered the
-     * new SYN with a RST.  Ports were predictable as well (TCP-07). */
+     * new SYN with a RST.  Ports were predictable as well. */
     uint32_t r = 0;
     if (random_get_bytes(&r, sizeof(r)) != (int)sizeof(r))
         r = (uint32_t)get_ticks();
@@ -2618,7 +2618,7 @@ static int tcp_connect_start(tcp_pcb_t *p, uint32_t raddr, uint16_t rport) {
          * gateway's -- so the peer can answer. */
         p->laddr = ip4_source_for(raddr);
     }
-    /* TCP-MEM-12: choose the port and publish it -- with the state that
+    /* Choose the port and publish it -- with the state that
      * makes the next allocation's scan count it -- in one locked section.
      * tcp_alloc_ephemeral_locked() skips CLOSED PCBs, so a port assigned
      * while the PCB was still CLOSED was invisible to a concurrent
@@ -2631,12 +2631,12 @@ static int tcp_connect_start(tcp_pcb_t *p, uint32_t raddr, uint16_t rport) {
     }
     if (!p->lport) p->lport = tcp_alloc_ephemeral_locked(p, r, raddr, rport);
     if (!p->lport) {
-        /* TCP-API-08: the range is exhausted.  This was discarded and the
+        /* The range is exhausted.  This was discarded and the
          * SYN went out from port 0. */
         tcp_unlock(f);
         return -EADDRNOTAVAIL;
     }
-    /* TCP-API-04: and the 4-tuple itself must be unique before the SYN
+    /* And the 4-tuple itself must be unique before the SYN
      * goes out.  A bound socket keeps its port here, so two connects from
      * the same local socket to the same peer built byte-identical tuples
      * and tcp_find() fed both streams to whichever PCB came first. */
@@ -2650,21 +2650,21 @@ static int tcp_connect_start(tcp_pcb_t *p, uint32_t raddr, uint16_t rport) {
     }
     p->raddr   = raddr;
     p->rport   = rport;
-    tcp_rehash_locked(p);                              /* TCP-RES-03 */
-    tcp_set_mtu_mss(p);                                /* TCP-HDR-04 */
-    p->iss     = tcp_new_iss(p->laddr, p->lport, raddr, rport);   /* TCP-HDR-05 */
+    tcp_rehash_locked(p);
+    tcp_set_mtu_mss(p);
+    p->iss     = tcp_new_iss(p->laddr, p->lport, raddr, rport);
     p->snd_una = p->iss;
     p->snd_nxt = p->iss;
-    p->snd_max_valid = 0;             /* TCP-MEM-07: a new ISS, nothing sent */
-    p->rcv_adv_edge_valid = 0;        /* TCP-WIN-07: no peer sequence yet */
-    p->snd_wl_valid = 0;              /* TCP-WIN-12 */
+    p->snd_max_valid = 0;             /* a new ISS, nothing sent */
+    p->rcv_adv_edge_valid = 0;        /* no peer sequence yet */
+    p->snd_wl_valid = 0;              /* no window update seen yet */
     p->state   = TCP_SYN_SENT;
     tcp_unlock(f);
     /* Queue the SYN — the retx timer will resend it on RTO if the
      * server didn't get it.  */
     rc = tcp_xmit_queue(p, TCP_SYN, NULL, 0);
     if (rc) {
-        /* TCP-API-08: no memory for the SYN.  The PCB used to be left in
+        /* No memory for the SYN.  The PCB used to be left in
          * SYN-SENT with nothing queued, so nothing would ever retransmit
          * or time it out.  Back to CLOSED, where a retry is legal. */
         f = tcp_lock();
@@ -2677,7 +2677,7 @@ static int tcp_connect_start(tcp_pcb_t *p, uint32_t raddr, uint16_t rport) {
 
 int tcp_connect(tcp_pcb_t *p, uint32_t raddr, uint16_t rport) {
     int ret;
-    tcp_hold(p);                                    /* TCP-01 */
+    tcp_hold(p);                                    /* pin across the wait */
     ret = tcp_connect_start(p, raddr, rport);
     if (ret) { tcp_unhold(p); return ret; }
     /* Wait — the retransmit kthread enforces the overall timeout via
@@ -2746,10 +2746,10 @@ int tcp_poll(tcp_pcb_t *p, short events, void **wait_chan) {
         }
     }
     if ((events & POLLPRI) && p->oob_valid)
-        revents |= POLLPRI;                     /* TCP-URG-01 */
+        revents |= POLLPRI;                     /* urgent octet waiting */
     if (events & POLLOUT) {
         /*
-         * TCP-WIN-02: writable means a write() would make progress.  There
+         * Writable means a write() would make progress.  There
          * is no send buffer, so that is room in min(cwnd, peer window) --
          * or a zero window with nothing in flight, where a write sends the
          * persist probe.  POLLOUT used to be unconditional, so a
@@ -2762,7 +2762,7 @@ int tcp_poll(tcp_pcb_t *p, short events, void **wait_chan) {
             uint32_t wnd = p->snd_wnd;
             if (p->cwnd && p->cwnd < wnd) wnd = p->cwnd;
             uint32_t avail = wnd > in_flight ? wnd - in_flight : 0;
-            /* TCP-WIN-06: and room the silly-window rule would let a
+            /* And room the silly-window rule would let a
              * full-sized write use, so poll() and a write() that holds a
              * tinygram back cannot disagree and spin. */
             if (in_flight == 0 || avail >= tcp_eff_mss(p) ||
@@ -2775,7 +2775,7 @@ int tcp_poll(tcp_pcb_t *p, short events, void **wait_chan) {
         }
     }
     if (p->state == TCP_CLOSE_WAIT) revents |= POLLHUP;
-    /* TCP-API-13: once both directions are closed (our FIN and theirs),
+    /* Once both directions are closed (our FIN and theirs),
      * nothing more can move either way: hang-up.  POLLOUT stays set after
      * the local FIN, as on Linux and the BSDs -- a write then fails at once
      * with EPIPE/SIGPIPE, which is how a poller learns the send side is
@@ -2791,7 +2791,7 @@ int tcp_poll(tcp_pcb_t *p, short events, void **wait_chan) {
      * recv wakeup entirely (the inetutils-telnet symptom). */
     if (wait_chan && (events & POLLIN) && !(revents & (POLLIN | POLLHUP)))
         *wait_chan = p->recv_chan;
-    /* TCP-WIN-02: an fd has one wait channel, and it is recv_chan whenever
+    /* An fd has one wait channel, and it is recv_chan whenever
      * POLLIN is also pending, so the ACK that opens the window wakes
      * recv_chan as well when pollout_wait is set. */
     if (wait_chan && !*wait_chan && (events & POLLOUT) && !(revents & POLLOUT))
@@ -2799,7 +2799,7 @@ int tcp_poll(tcp_pcb_t *p, short events, void **wait_chan) {
     return revents;
 }
 
-/* TCP-API-22: the socket layer's view of "connected" comes from here, not
+/* The socket layer's view of "connected" comes from here, not
  * from a flag it set when a non-blocking connect() merely started.
  * Synchronized: both SYNs acknowledged (ESTABLISHED and every closing
  * state) -- what getpeername() requires. */
@@ -2832,7 +2832,7 @@ int tcp_is_listening(const tcp_pcb_t *p) {
  * wait was interrupted by a signal. */
 tcp_pcb_t *tcp_accept(tcp_pcb_t *listen_p, int nonblock) {
     tcp_pcb_t *ret = NULL;
-    tcp_hold(listen_p);                             /* TCP-01 */
+    tcp_hold(listen_p);                             /* pin across the wait */
     for (;;) {
         /* accept_q / accept_count are appended by tcp_in_syn_received
          * in IRQ context — dequeue with IRQs off so the shift-down
@@ -2843,13 +2843,13 @@ tcp_pcb_t *tcp_accept(tcp_pcb_t *listen_p, int nonblock) {
             for (int i = 1; i < listen_p->accept_count; i++)
                 listen_p->accept_q[i - 1] = listen_p->accept_q[i];
             listen_p->accept_count--;
-            tcp_orphan_locked(c);                   /* TCP-RES-03 */
+            tcp_orphan_locked(c);
             tcp_unlock(f);
             ret = c;
             break;
         }
         /*
-         * TCP-19: a listener that has been closed can never produce another
+         * A listener that has been closed can never produce another
          * connection, so waiting on it is waiting forever.  tcp_accept
          * tested only accept_count and tcp_close's LISTEN arm wakes nobody
          * on accept_chan, so a thread blocked in accept() when the socket
@@ -2873,7 +2873,7 @@ tcp_pcb_t *tcp_accept(tcp_pcb_t *listen_p, int nonblock) {
 }
 
 /*
- * TCP-WIN-06: sender silly-window avoidance and Nagle (RFC 793 3.7's
+ * Sender silly-window avoidance and Nagle (RFC 793 3.7's
  * suggestions as RFC 1122 4.2.3.4 makes them precise).  Send a segment of
  * `chunk` octets only when
  *   - it is a full MSS, or
@@ -2886,7 +2886,7 @@ tcp_pcb_t *tcp_accept(tcp_pcb_t *listen_p, int nonblock) {
  */
 static int tcp_sws_ok(tcp_pcb_t *p, size_t chunk, size_t remaining,
                       uint32_t avail, uint32_t in_flight) {
-    if (chunk >= tcp_eff_mss(p) || in_flight == 0)          /* TCP-HDR-02 */
+    if (chunk >= tcp_eff_mss(p) || in_flight == 0)
         return 1;
     if (p->max_snd_wnd && avail >= p->max_snd_wnd / 2)
         return 1;
@@ -2906,7 +2906,7 @@ static ssize_t tcp_send_body(tcp_pcb_t *p, const void *buf, size_t len, int nonb
     const uint8_t *b = (const uint8_t *)buf;
     size_t sent = 0;
     while (sent < len) {
-        /* TCP-API-14: RFC 793 3.9 SEND in SYN-SENT/SYN-RECEIVED queues the
+        /* RFC 793 3.9 SEND in SYN-SENT/SYN-RECEIVED queues the
          * data for transmission once the connection is established.  It
          * failed ENOTCONN instead, so a client that wrote right after a
          * non-blocking connect() lost its first write.  Wait for the
@@ -2928,7 +2928,7 @@ static ssize_t tcp_send_body(tcp_pcb_t *p, const void *buf, size_t len, int nonb
              * ECONNRESET, RTO -> ETIMEDOUT) reports EPIPE; one that
              * was never connected reports ENOTCONN.
              *
-             * TCP-API-13: and so do the five closing states -- RFC 793
+             * And so do the five closing states -- RFC 793
              * 3.9 SEND: "error: connection closing".  They have so_error
              * 0 after an ordinary shutdown(SHUT_WR) or close, so a write
              * after the local FIN reported ENOTCONN, the code for a
@@ -2942,7 +2942,7 @@ static ssize_t tcp_send_body(tcp_pcb_t *p, const void *buf, size_t len, int nonb
             case TCP_TIME_WAIT:
                 return -EPIPE;
             default:
-                /* TCP-API-24: this includes LISTEN.  RFC 793 3.9 SEND in
+                /* This includes LISTEN.  RFC 793 3.9 SEND in
                  * LISTEN would turn the passive open into an active one
                  * (pick a foreign socket, send a SYN); POSIX has no such
                  * operation and write() on a listening socket fails
@@ -2959,7 +2959,7 @@ static ssize_t tcp_send_body(tcp_pcb_t *p, const void *buf, size_t len, int nonb
          * limped along on retransmissions. */
         uint32_t in_flight = p->snd_nxt - p->snd_una;
         /*
-         * TCP-10: the sender is bounded by min(cwnd, peer window).  Only the
+         * The sender is bounded by min(cwnd, peer window).  Only the
          * peer's window was consulted, so nothing throttled us on a
          * congested path.  cwnd == 0 means a PCB that predates establishment
          * (or a pre-RFC one); treat that as "not yet limited".
@@ -2975,7 +2975,7 @@ static ssize_t tcp_send_body(tcp_pcb_t *p, const void *buf, size_t len, int nonb
                  * prodding the peer until it re-advertises a window,
                  * so no separate persist timer is needed.
                  *
-                 * TCP-WIN-01: marked as a probe, so the timer does not
+                 * Marked as a probe, so the timer does not
                  * charge those retransmissions to the abort budget while
                  * the window stays shut (RFC 793 3.7: keep probing). */
                 tcp_seg_t *ps = tcp_seg_alloc(TCP_ACK | TCP_PSH, b + sent, 1);
@@ -2994,12 +2994,12 @@ static ssize_t tcp_send_body(tcp_pcb_t *p, const void *buf, size_t len, int nonb
              * otherwise it can never drain the peer to reopen the window
              * and the transfer self-deadlocks.
              *
-             * TCP-WIN-02: after the probe above, not before it.  A
+             * After the probe above, not before it.  A
              * non-blocking sender facing a zero window with nothing in
              * flight got EAGAIN and sent nothing, so no probe ever went
              * out and nothing would reopen the window. */
             if (nonblock) return sent ? (ssize_t)sent : -EAGAIN;
-            /* UDP-API-04: SO_SNDTIMEO -- give up once the deadline has
+            /* SO_SNDTIMEO -- give up once the deadline has
              * passed, reporting what was sent (or EAGAIN). */
             if (deadline && get_ticks() >= deadline)
                 return sent ? (ssize_t)sent : -EAGAIN;
@@ -3014,10 +3014,10 @@ static ssize_t tcp_send_body(tcp_pcb_t *p, const void *buf, size_t len, int nonb
         }
 
         size_t chunk = len - sent;
-        if (chunk > tcp_eff_mss(p))  chunk = tcp_eff_mss(p);   /* TCP-HDR-02 */
+        if (chunk > tcp_eff_mss(p))  chunk = tcp_eff_mss(p);
         if (chunk > avail)           chunk = avail;
         if (!tcp_sws_ok(p, chunk, len - sent, avail, in_flight)) {
-            /* TCP-WIN-06: hold the tail back until an ACK makes it worth
+            /* Hold the tail back until an ACK makes it worth
              * a segment -- exactly the zero-window wait above. */
             if (nonblock) return sent ? (ssize_t)sent : -EAGAIN;
             if (deadline && get_ticks() >= deadline)
@@ -3037,11 +3037,11 @@ static ssize_t tcp_send_body(tcp_pcb_t *p, const void *buf, size_t len, int nonb
 }
 
 /*
- * TCP-MEM-03: the send loop sleeps for window and re-reads p->state,
+ * The send loop sleeps for window and re-reads p->state,
  * snd_nxt and snd_una on every wake.  Without a hold, a close() on another
  * thread plus a peer RST can drive the PCB to CLOSED and let the reaper free
  * it -- and its ring -- while this thread is asleep.  Pin it for the whole
- * call, exactly as tcp_recv() does (TCP-01).
+ * call, exactly as tcp_recv() does (see tcp_hold()).
  */
 static ssize_t tcp_send_impl(tcp_pcb_t *p, const void *buf, size_t len, int nonblock,
                              uint64_t deadline) {
@@ -3062,7 +3062,7 @@ ssize_t tcp_send_nb(tcp_pcb_t *p, const void *buf, size_t len) {
 }
 
 /*
- * TCP-URG-02: send(..., MSG_OOB) -- RFC 793 3.9 SEND with the urgent flag:
+ * send(..., MSG_OOB) -- RFC 793 3.9 SEND with the urgent flag:
  * SND.UP <- the end of this data, so its last octet is the urgent one.  The
  * pointer is set before the data is queued so every segment carrying it is
  * flagged; tcp_xmit_raw() keeps setting URG until SND.UNA passes SND.UP.
@@ -3094,7 +3094,7 @@ ssize_t tcp_recv_nb(tcp_pcb_t *p, void *buf, size_t len) {
     }
     if (p->rx_count > 0) {
         size_t n = p->rx_count < len ? p->rx_count : len;
-        /* TCP-URG-01: a read stops at the urgent mark (BSD), so the reader
+        /* A read stops at the urgent mark (BSD), so the reader
          * sees SIOCATMARK true there; the next read goes past it. */
         if (p->urg_mark_valid) {
             if (p->urg_mark_left > 0 && n > p->urg_mark_left)
@@ -3119,13 +3119,13 @@ ssize_t tcp_recv_nb(tcp_pcb_t *p, void *buf, size_t len) {
          * which looks like a hang in interactive curl downloads.
          * Matches BSD's silly-window-syndrome avoidance shape.
          *
-         * TCP-WIN-03: measured against the window last put on the wire,
+         * Measured against the window last put on the wire,
          * not against the window at entry to this call.  An application
          * reading in pieces smaller than an MSS never freed an MSS in one
          * call, so no update went out at all, and the sender sat on its
          * zero window until its probe timer.  A 0 -> non-zero transition
          * is always announced. */
-        /* TCP-WIN-07: compare what would now be advertised. */
+        /* Compare what would now be advertised. */
         uint32_t new_wnd = tcp_rcv_wnd_calc(p);
         uint32_t adv = p->last_adv_wnd;
         uint32_t step = TCP_MSS < TCP_RING_LEN / 2 ? TCP_MSS : TCP_RING_LEN / 2;
@@ -3138,7 +3138,7 @@ ssize_t tcp_recv_nb(tcp_pcb_t *p, void *buf, size_t len) {
         return (ssize_t)n;
     }
     /*
-     * TCP-SM-08: a connection that died -- RST (ECONNRESET) or an exhausted
+     * A connection that died -- RST (ECONNRESET) or an exhausted
      * retransmission budget (ETIMEDOUT) -- reaches CLOSED with so_error set
      * by tcp_kill_pcb().  Treating that CLOSED like the post-FIN states
      * below reported it as a clean end-of-file, so a reader took a reset
@@ -3164,11 +3164,11 @@ ssize_t tcp_recv_nb(tcp_pcb_t *p, void *buf, size_t len) {
     return -EAGAIN;
 }
 
-/* UDP-API-04: deadline is an absolute tick count (SO_RCVTIMEO), 0 for none;
+/* deadline is an absolute tick count (SO_RCVTIMEO), 0 for none;
  * past it an empty receive returns -EAGAIN. */
 ssize_t tcp_recv_until(tcp_pcb_t *p, void *buf, size_t len, uint64_t deadline) {
     ssize_t ret;
-    tcp_hold(p);                                    /* TCP-01 */
+    tcp_hold(p);                                    /* pin across the wait */
     for (;;) {
         ssize_t r = tcp_recv_nb(p, buf, len);
         if (r != -EAGAIN) { ret = r; break; }
@@ -3198,7 +3198,7 @@ ssize_t tcp_peek_nb(tcp_pcb_t *p, void *buf, size_t len) {
     if (p->rx_count > 0) {
         size_t n = p->rx_count < len ? p->rx_count : len;
         if (p->urg_mark_valid && p->urg_mark_left > 0 && n > p->urg_mark_left)
-            n = p->urg_mark_left;               /* TCP-URG-01: as tcp_recv_nb */
+            n = p->urg_mark_left;               /* stop at the mark, as tcp_recv_nb */
         uint8_t *b = (uint8_t *)buf;
         uint32_t tail = p->rx_tail;
         for (size_t i = 0; i < n; i++) {
@@ -3208,7 +3208,7 @@ ssize_t tcp_peek_nb(tcp_pcb_t *p, void *buf, size_t len) {
         tcp_unlock(lf);
         return (ssize_t)n;
     }
-    /* TCP-SM-08: as tcp_recv_nb(), but a peek leaves the error pending
+    /* As tcp_recv_nb(), but a peek leaves the error pending
      * for the read that follows it. */
     if (p->state == TCP_CLOSED && p->so_error) {
         int err = p->so_error;
@@ -3226,10 +3226,10 @@ ssize_t tcp_peek_nb(tcp_pcb_t *p, void *buf, size_t len) {
 }
 
 /*
- * TCP-MEM-04: tcp_recv()'s twin minus the hold.  It sleeps and then copies
+ * This was tcp_recv()'s twin minus the hold.  It sleeps and then copies
  * out of p->rxbuf, and tcp_free() releases rxbuf before the PCB, so a
  * reaped PCB meant copying a freed 32 KiB ring to userspace.  Pin it for the
- * whole call, as tcp_recv() does (TCP-01).
+ * whole call, as tcp_recv() does (see tcp_hold()).
  */
 ssize_t tcp_peek_until(tcp_pcb_t *p, void *buf, size_t len, uint64_t deadline) {
     ssize_t ret;
@@ -3254,7 +3254,7 @@ ssize_t tcp_peek(tcp_pcb_t *p, void *buf, size_t len) {
     return tcp_peek_until(p, buf, len, 0);
 }
 
-/* UDP-API-12: the socket layer's IP_TTL/IP_TOS for this connection. */
+/* The socket layer's IP_TTL/IP_TOS for this connection. */
 void tcp_set_txopts(tcp_pcb_t *p, const struct ip4_txopts *o) {
     if (!p || !o) return;
     uint32_t f = tcp_lock();
@@ -3281,7 +3281,7 @@ int tcp_close(tcp_pcb_t *p) {
         kprintf("tcp_close: refusing bogus pcb %p — socket ->tcp corrupted\n", p);
         return 0;
     }
-    /* TCP-API-12: RFC 1122 4.2.2.13 -- closing a connection whose received
+    /* RFC 1122 4.2.2.13 -- closing a connection whose received
      * data the application never read is an abort, not a CLOSE.  That data
      * was acknowledged and is about to be thrown away; an orderly FIN would
      * tell the peer it was all consumed (a request "fully delivered" to a
@@ -3302,7 +3302,7 @@ int tcp_close(tcp_pcb_t *p) {
      * inside the lock; the FIN-emitting paths drop the lock before
      * tcp_xmit_queue, which is itself lock-bracketed.
      *
-     * TCP-MEM-10: the FIN's sequence number is reserved and the segment
+     * The FIN's sequence number is reserved and the segment
      * linked under the same lock that publishes FIN_WAIT_1/LAST_ACK; only
      * the transmit happens after the unlock.  Publishing the state first
      * and sequencing the FIN later let a segment processed in the gap see
@@ -3312,7 +3312,7 @@ int tcp_close(tcp_pcb_t *p) {
     tcp_seg_t *fin = tcp_seg_alloc(TCP_FIN | TCP_ACK, NULL, 0);
     uint32_t fin_seq = 0;
     if (!fin) {
-        /* TCP-API-19: no memory for the FIN.  The state used to move to
+        /* No memory for the FIN.  The state used to move to
          * FIN-WAIT-1/LAST-ACK with nothing queued: no FIN ever went out,
          * nothing retransmitted, and no deadline reaped the PCB.  A
          * connection that cannot be closed gracefully is aborted -- the
@@ -3354,13 +3354,13 @@ int tcp_close(tcp_pcb_t *p) {
          * connection is up.  Reset and detach each so the peer is told
          * the connection is gone and the timer frees the PCB.
          *
-         * A45: an earlier design collected the children, dropped the
+         * An earlier design collected the children, dropped the
          * lock and sent the RSTs -- but tcp_kill_pcb() leaves each child
          * CLOSED+detached, exactly what the timer reaper tcp_free()s, so a
          * preemption in the gap could free a child before its RST went
          * out.  The fix sent every RST inline under the lock.
          *
-         * TCP-RES-02: which is one IRQs-off region as long as the backlog.
+         * That is one IRQs-off region as long as the backlog.
          * Now each child that needs a RST is HELD (the reaper skips a held
          * PCB) and sent after the unlock, a bounded batch at a time.  The
          * listener goes CLOSED first, so no SYN can add a child while the
@@ -3403,7 +3403,7 @@ int tcp_close(tcp_pcb_t *p) {
         break;
     }
     case TCP_SYN_RECEIVED:
-        /* TCP-API-20: RFC 793 3.9 CLOSE in SYN-RECEIVED: "form a FIN
+        /* RFC 793 3.9 CLOSE in SYN-RECEIVED: "form a FIN
          * segment and send it, and enter FIN-WAIT-1", as ESTABLISHED does.
          * It dropped straight to CLOSED with neither FIN nor RST, leaving
          * the peer -- which may already be ESTABLISHED -- with a
@@ -3418,7 +3418,7 @@ int tcp_close(tcp_pcb_t *p) {
          * reap is deferred to the timer (rather than an inline
          * tcp_free) so it cannot race a concurrent RX walk.
          *
-         * TCP-API-23: RFC 793 3.9 CLOSE in SYN-SENT: "any outstanding
+         * RFC 793 3.9 CLOSE in SYN-SENT: "any outstanding
          * RECEIVEs and SENDs are returned with 'error: closing'".  A bare
          * state change woke nobody -- a thread blocked in connect() only
          * noticed on its next poll tick, and then reported ECONNREFUSED
@@ -3440,7 +3440,7 @@ int tcp_close(tcp_pcb_t *p) {
 }
 
 /*
- * TCP-API-11: RFC 793 3.9 ABORT.  Tear the connection down at once: queued
+ * RFC 793 3.9 ABORT.  Tear the connection down at once: queued
  * data is discarded, a synchronized peer is sent <SEQ=SND.NXT><CTL=RST>,
  * and waiters get ECONNRESET.  There was no ABORT at all -- close() was
  * the only way out, always graceful -- so SO_LINGER {1, 0} (the POSIX way
@@ -3464,8 +3464,8 @@ int tcp_abort(tcp_pcb_t *p) {
     case TCP_FIN_WAIT_1:
     case TCP_FIN_WAIT_2:
     case TCP_CLOSE_WAIT:
-        /* Inline under the lock, as tcp_close()'s LISTEN arm does (A45):
-         * ip4_output() does not sleep with interrupts off (NET-05). */
+        /* Inline under the lock, as tcp_close()'s LISTEN arm does:
+         * ip4_output() does not sleep with interrupts off. */
         tcp_xmit_raw(p, p->snd_nxt, TCP_RST, NULL, 0);
         tcp_ooo_free_all(p);
         tcp_kill_pcb(p, ECONNRESET);         /* frees the send queue */
@@ -3494,14 +3494,14 @@ int tcp_abort(tcp_pcb_t *p) {
  */
 int tcp_shutdown_wr(tcp_pcb_t *p) {
     if (!p) return -ENOTCONN;
-    /* TCP-MEM-10: sequence the FIN under the lock that publishes the
+    /* Sequence the FIN under the lock that publishes the
      * closing state (see tcp_close). */
     tcp_seg_t *fin = tcp_seg_alloc(TCP_FIN | TCP_ACK, NULL, 0);
     uint32_t fin_seq = 0;
     uint32_t f = tcp_lock();
     if (!fin && (p->state == TCP_ESTABLISHED || p->state == TCP_SYN_RECEIVED ||
                  p->state == TCP_CLOSE_WAIT)) {
-        /* TCP-API-19: no memory for the FIN.  Leave the state as it is so
+        /* No memory for the FIN.  Leave the state as it is so
          * the caller can retry, rather than entering a closing state with
          * no FIN to send. */
         tcp_unlock(f);
@@ -3510,7 +3510,7 @@ int tcp_shutdown_wr(tcp_pcb_t *p) {
     switch (p->state) {
     case TCP_ESTABLISHED:
     case TCP_SYN_RECEIVED:
-        /* TCP-API-15: SYN-RECEIVED sends its FIN too (RFC 793 3.9 CLOSE:
+        /* SYN-RECEIVED sends its FIN too (RFC 793 3.9 CLOSE:
          * "If no SENDs have been issued ... form a FIN segment and send
          * it, and enter FIN-WAIT-1").  It used to be ignored, so the
          * connection came up and never closed its send side. */
@@ -3520,7 +3520,7 @@ int tcp_shutdown_wr(tcp_pcb_t *p) {
         p->state = TCP_LAST_ACK;
         break;
     case TCP_SYN_SENT:
-        /* TCP-API-15: nothing is synchronized to FIN, and RFC 793 3.9 CLOSE
+        /* Nothing is synchronized to FIN, and RFC 793 3.9 CLOSE
          * in SYN-SENT deletes the TCB with "error: closing" (as Linux and
          * the BSDs do).  It was discarded: the handshake carried on and
          * the connection came up with its send side still open. */
@@ -3546,7 +3546,7 @@ int tcp_shutdown_wr(tcp_pcb_t *p) {
  * direction.  recv() returns EOF from now on; a reader already
  * blocked in tcp_recv() is woken so it observes the new state.
  */
-/* TCP-URG-01: SIOCATMARK -- the next octet to be read is the one that
+/* SIOCATMARK -- the next octet to be read is the one that
  * followed the urgent octet. */
 int tcp_sockatmark(tcp_pcb_t *p) {
     if (!p) return 0;
@@ -3557,7 +3557,7 @@ int tcp_sockatmark(tcp_pcb_t *p) {
 }
 
 /*
- * TCP-URG-04: recv(..., MSG_OOB) -- the urgent octet taken out of the
+ * recv(..., MSG_OOB) -- the urgent octet taken out of the
  * stream by tcp_rx_put(), as BSD returns it.  -EWOULDBLOCK while the peer
  * has announced urgent data that has not arrived yet, -EINVAL when there is
  * none (or it was already read).  MSG_PEEK leaves it in place.
@@ -3577,7 +3577,7 @@ ssize_t tcp_recv_oob(tcp_pcb_t *p, void *buf, size_t len, int peek) {
     return 1;
 }
 
-/* TCP-URG-01: F_SETOWN / F_GETOWN -- who receives SIGURG: a pid, or a
+/* F_SETOWN / F_GETOWN -- who receives SIGURG: a pid, or a
  * process group as -pgrp. */
 void tcp_set_owner(tcp_pcb_t *p, int owner) {
     if (p) p->owner = owner;
@@ -3587,7 +3587,7 @@ int tcp_get_owner(const tcp_pcb_t *p) {
     return p ? p->owner : 0;
 }
 
-/* TCP-WIN-13: TCP_USER_TIMEOUT, in milliseconds; 0 restores the default.
+/* TCP_USER_TIMEOUT, in milliseconds; 0 restores the default.
  * Takes effect from the next time the unacknowledged queue is (re)armed. */
 int tcp_set_user_timeout(tcp_pcb_t *p, uint32_t ms) {
     if (!p) return -ENOTCONN;
@@ -3605,7 +3605,7 @@ uint32_t tcp_get_user_timeout(const tcp_pcb_t *p) {
 
 int tcp_shutdown_rd(tcp_pcb_t *p) {
     if (!p) return -ENOTCONN;
-    /* TCP-WIN-10: nothing will ever read the ring again, so empty it (and
+    /* Nothing will ever read the ring again, so empty it (and
      * the reassembly queue) and from now on acknowledge and discard what
      * arrives, as BSD does.  The data used to be buffered regardless,
      * pinning the advertised window at zero once the ring filled -- the

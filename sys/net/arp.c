@@ -8,7 +8,7 @@
  *
  * Cache is a small fixed table per netdev — 32 entries.  Entries carry a
  * last-touched timestamp: lookups treat an entry older than ARP_TTL_MS as
- * stale, and eviction takes the least-recently-used slot (ARP-01).
+ * stale, and eviction takes the least-recently-used slot.
  */
 
 #include <stddef.h>
@@ -25,7 +25,7 @@
 #define ARP_CACHE_SIZE 32
 
 /*
- * ARP-01: entries used to be evicted by a blind round-robin cursor with no
+ * Entries used to be evicted by a blind round-robin cursor with no
  * aging, no timeout and no in-use protection, so 32 forged requests
  * addressed to our IP with distinct sender addresses evicted everything
  * including the gateway -- and because ip4_output cannot wait for ARP in IRQ
@@ -56,7 +56,7 @@ static int arp_entry_fresh(const struct arp_entry *e, uint64_t now) {
     return (now - e->touched_ms) < ARP_TTL_MS;
 }
 
-/* NET-09: the cache is written by arp_input() in IRQ/RX context and read
+/* The cache is written by arp_input() in IRQ/RX context and read
  * by arp_lookup() in process context; guard it with an IRQ-safe spinlock
  * so a partially-written MAC is never read.  Critical sections are kept
  * tiny — the ARP reply transmit in arp_input() stays outside the lock. */
@@ -67,11 +67,11 @@ static spinlock_t g_arp_lock = SPINLOCK_INIT("arp_cache");
 int arp_lookup(netdev_t *dev, uint32_t ip, uint8_t mac[6]) {
     if (!dev) return -1;
     uint64_t now = arp_now_ms();
-    unsigned long f = spinlock_acquire_irq(&g_arp_lock);   /* NET-09 */
+    unsigned long f = spinlock_acquire_irq(&g_arp_lock);
     for (unsigned i = 0; i < ARP_CACHE_SIZE; i++) {
         struct arp_entry *e = &g_arp_cache[i];
         if (e->ip == ip && e->ifindex == dev->ifindex) {
-            /* ARP-01: an expired binding must not be handed out — the peer
+            /* An expired binding must not be handed out — the peer
              * may have changed MAC.  Report a miss so the caller
              * re-resolves; the slot is reclaimed by the next insert. */
             if (!arp_entry_fresh(e, now)) break;
@@ -103,13 +103,13 @@ static int arp_update_existing(netdev_t *dev, uint32_t ip,
     return 0;
 }
 
-/* Raw update-or-insert; caller must hold g_arp_lock (NET-09). */
+/* Raw update-or-insert; caller must hold g_arp_lock. */
 static void arp_insert_raw(netdev_t *dev, uint32_t ip, const uint8_t mac[6]) {
     if (!dev || !ip) return;
     /* Update if already present. */
     if (arp_update_existing(dev, ip, mac)) return;
 
-    /* ARP-01: take a free or expired slot first; only if every slot holds a
+    /* Take a free or expired slot first; only if every slot holds a
      * live binding do we evict, and then the oldest one rather than whatever
      * the round-robin cursor happened to point at. */
     uint64_t now = arp_now_ms();
@@ -128,7 +128,7 @@ static void arp_insert_raw(netdev_t *dev, uint32_t ip, const uint8_t mac[6]) {
 }
 
 void arp_insert(netdev_t *dev, uint32_t ip, const uint8_t mac[6]) {
-    unsigned long f = spinlock_acquire_irq(&g_arp_lock);   /* NET-09 */
+    unsigned long f = spinlock_acquire_irq(&g_arp_lock);
     arp_insert_raw(dev, ip, mac);
     spinlock_release_irq(&g_arp_lock, f);
 }
@@ -176,7 +176,7 @@ void arp_input(netdev_t *dev, const uint8_t *pkt, size_t len) {
      * Anti-poisoning (RFC 826 "merge" rule): do NOT blindly insert the
      * sender into the cache — an off-path host could otherwise fill the
      * whole cache with forged unsolicited replies.  Note precisely what
-     * this does and does not buy (ARP-02): only CREATION is restricted.
+     * this does and does not buy: only CREATION is restricted.
      * Per the RFC merge rule an existing binding is refreshed by ANY ARP
      * packet naming it, request or reply, solicited or not, so a
      * gratuitous ARP from an on-link host can still repoint an entry we
@@ -194,7 +194,7 @@ void arp_input(netdev_t *dev, const uint8_t *pkt, size_t len) {
      */
     int target_is_me = ip4_dev_has_addr(dev, target_ip);  /* any of ours */
     /*
-     * UDP-IP-05: never learn -- or refresh -- a mapping for an address that
+     * Never learn -- or refresh -- a mapping for an address that
      * cannot name a single host: 0.0.0.0, a broadcast (limited or this
      * subnet's), or multicast.  A reply claiming "10.0.2.255 is-at X" was
      * accepted like any other (its target is our IP), after which every
@@ -210,7 +210,7 @@ void arp_input(netdev_t *dev, const uint8_t *pkt, size_t len) {
                       (h >> 28) == 0xE ||
                       ip4_dev_is_dbcast(dev, sender_ip));
     }
-    /* NET-09: merge/insert under the cache lock (raw ops — we already hold
+    /* Merge/insert under the cache lock (raw ops — we already hold
      * it, so do not call the locking arp_insert() here).  Kept tiny; the
      * reply transmit below runs outside the lock. */
     if (learnable) {

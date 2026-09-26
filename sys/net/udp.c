@@ -17,7 +17,7 @@
 #include <netinet/udp.h>
 #include <sys/netdev.h>
 
-/* UDP-RES-03 / UDP-RES-06: bumped from RX (interrupt or loopback-kthread)
+/* UDP statistics counters, bumped from RX (interrupt or loopback-kthread)
  * and process context alike, so atomically. */
 static uint32_t g_udp_stats[UDP_STAT_COUNT];
 
@@ -50,14 +50,14 @@ void udp_input(netdev_t *dev, int family,
                const void *saddr, const void *daddr,
                const uint8_t *pkt, size_t len,
                const uint8_t *netpkt, size_t netlen, int for_bcast) {
-    /* UDP-RES-06: every drop path is counted. */
+    /* Every drop path is counted. */
     if (len < sizeof(struct udphdr)) { udp_stat_inc(UDP_STAT_MALFORMED); return; }
     const struct udphdr *uh = (const struct udphdr *)pkt;
     uint16_t ulen = __builtin_bswap16(uh->len);
     if (ulen < sizeof(*uh) || ulen > len) { udp_stat_inc(UDP_STAT_MALFORMED); return; }
 
     /*
-     * UDP-03: verify the checksum instead of "we trust it either way".
+     * Verify the checksum instead of "we trust it either way".
      * Corrupted datagrams were handed to the socket layer as if intact --
      * silent data corruption for every UDP consumer, with no way for
      * userland to notice.  The checksum covers a pseudo-header of the IP
@@ -81,7 +81,7 @@ void udp_input(netdev_t *dev, int family,
             return;
         }
         /*
-         * UDP-ICMP-02: RFC 1122 4.1.3.1 -- a datagram for a port nobody is
+         * RFC 1122 4.1.3.1 -- a datagram for a port nobody is
          * listening on is answered with an ICMP Port Unreachable.  The
          * delivered count was computed and thrown away, so a client probing
          * a closed port waited out its whole timeout instead of learning of

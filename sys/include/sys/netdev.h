@@ -30,7 +30,7 @@ struct netdev_ops {
      * errno on failure.  Driver may copy or DMA; the caller's buffer
      * is no longer referenced after return. */
     int (*xmit)(struct netdev *dev, const void *frame, size_t len);
-    /* UDP-IP-06, optional: accept (on != 0) or stop accepting every
+    /* Optional: accept (on != 0) or stop accepting every
      * multicast frame.  Called when the interface's first IPv4 group is
      * joined and when its last is left; the IP layer then filters by
      * membership.  NULL for a device that already delivers all multicast. */
@@ -41,7 +41,7 @@ struct netdev_ops {
     int (*set_hwaddr)(struct netdev *dev, const uint8_t mac[6]);
 };
 
-/* UDP-IP-06: IPv4 groups joined on an interface, refcounted across the
+/* IPv4 groups joined on an interface, refcounted across the
  * sockets that joined them. */
 #define NETDEV_MC_MAX 16
 
@@ -100,7 +100,7 @@ typedef struct netdev {
 #define NETDEV_IFF_PROMISC      0x0100
 #define NETDEV_IFF_MULTICAST    0x1000
 
-/* UDP-IP-06: IPv4 multicast membership on an interface.  join/leave are
+/* IPv4 multicast membership on an interface.  join/leave are
  * refcounted -- each socket that joins takes a reference -- and switch the
  * driver's all-multicast mode on the first join and off after the last
  * leave.  join returns 0, -ENOBUFS when the table is full or -EINVAL for a
