@@ -12,7 +12,7 @@
 static FILE *g_file_list_head = NULL;
 
 /*
- * LIBC-05: the global open-FILE list (g_file_list_head) is shared mutable
+ * The global open-FILE list (g_file_list_head) is shared mutable
  * state — fdopen/fclose splice nodes in and out while fflush(NULL) walks it.
  * Guard it with a single spinlock mirroring libc's malloc lock (CAS +
  * sched_yield) so the C library stays independent of libpthread and is safe
@@ -109,7 +109,7 @@ FILE *fdopen(int fd, const char *mode) {
     
     f->mode = _IOFBF; 
     
-    // Add to global list (LIBC-05: guard the shared list)
+    // Add to global list (guard the shared list)
     __file_list_lock_acquire();
     f->next = g_file_list_head;
     f->prev = NULL;
@@ -145,11 +145,11 @@ FILE *fopen(const char *path, const char *mode) {
 
 int fclose(FILE *stream) {
     if (!stream) return EOF;
-    /* LIBC-08: a write error at close-time must be reported, not swallowed.
+    /* A write error at close-time must be reported, not swallowed.
      * Capture the flush and close results and fold them into the return. */
     int flush_err = fflush(stream);
 
-    // Remove from global list (LIBC-05: guard the shared list)
+    // Remove from global list (guard the shared list)
     __file_list_lock_acquire();
     if (stream->prev) {
         stream->prev->next = stream->next;
@@ -169,7 +169,7 @@ int fclose(FILE *stream) {
 
 int fflush(FILE *stream) {
 	if(!stream) {
-		/* LIBC-05: walk the shared open-FILE list under the lock so a
+		/* Walk the shared open-FILE list under the lock so a
 		 * concurrent fdopen/fclose can't splice a node mid-traversal. */
 		int ret = 0;
 		__file_list_lock_acquire();
@@ -781,7 +781,7 @@ int pclose(FILE *stream) {
             int status = 0;
             if (waitpid(pid, &status, 0) < 0)
                 return -1;
-            /* LIBC-07: POSIX requires pclose() to return the raw wait status
+            /* POSIX requires pclose() to return the raw wait status
              * (as from waitpid), not the decoded exit code — callers apply
              * WIFEXITED/WEXITSTATUS/WIFSIGNALED themselves. */
             return status;

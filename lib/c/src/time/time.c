@@ -440,7 +440,7 @@ struct tm *localtime(const time_t *timer) {
 
 time_t mktime(struct tm *timeptr) {
     /*
-     * LIBC-10: interpret the broken-down time as LOCAL time honoring $TZ —
+     * Interpret the broken-down time as LOCAL time honoring $TZ —
      * the inverse of localtime_r — so that mktime(localtime(&t)) == t even
      * off UTC.  The previous version treated the fields as UTC and, via its
      * `for (y=1970; y<year; y++)` loop, never subtracted days for years

@@ -75,7 +75,7 @@ static void ftoa(char *buf, size_t size, double val, int precision, int uppercas
         val = -val;
     }
 
-    /* LIBC-03: |val| >= 2^63 overflows the int64_t integer-part cast below
+    /* |val| >= 2^63 overflows the int64_t integer-part cast below
      * (undefined behavior — the cast yields INT64_MIN and prints garbage
      * such as "-9223372036854775808...").  A magnitude that large cannot be
      * rendered in fixed notation without bignum arithmetic, so fall back to
@@ -136,7 +136,7 @@ static void etoa(char *buf, size_t size, double val, int precision, int uppercas
         }
     }
 
-    /* LIBC-11: ftoa applies round-half-up, which can carry the normalized
+    /* ftoa applies round-half-up, which can carry the normalized
      * mantissa from [1,10) up to 10 (e.g. 9.9999999 at precision 6).  Apply
      * the identical rounding here first and renormalize, so the result is
      * "1.000000e+01" rather than a denormalized "10.000000e+00". */

@@ -412,7 +412,7 @@ ssize_t readv(int fd, const struct iovec *iov, int iovcnt) {
 }
 
 /*
- * UDP-API-03: a real system call, not a loop of write()s.  The loop put one
+ * A real system call, not a loop of write()s.  The loop put one
  * datagram per iovec on a datagram socket, splitting a message its caller
  * had built as a header plus a body; the kernel's sys_writev() sends a
  * datagram socket's iovecs as ONE datagram (and loops over write() itself

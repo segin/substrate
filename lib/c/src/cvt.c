@@ -74,7 +74,7 @@ fcvt_common(long double value, int ndigit, int *decpt, int *sign,
     dot = strchr(tmp, '.');
     intlen = dot ? (int)(dot - tmp) : (int)strlen(tmp);
 
-    /* LIBC-02: bound every write to the caller's buffer as we go (reserving
+    /* Bound every write to the caller's buffer as we go (reserving
      * one byte for the NUL) so a small `len` can never be overflowed.  The
      * old code copied the full integer + fraction unconditionally and only
      * truncated AFTER, which had already written past buf. */

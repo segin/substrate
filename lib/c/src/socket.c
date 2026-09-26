@@ -137,7 +137,7 @@ int shutdown(int sockfd, int how)
 }
 
 /* sockatmark — whether the next octet to read on a TCP socket is the one
- * after the urgent mark (TCP-URG-05).  The kernel answers SIOCATMARK for
+ * after the urgent mark.  The kernel answers SIOCATMARK for
  * AF_INET (the mark) and AF_UNIX (never at a mark); a descriptor that is
  * not a socket fails ENOTTY and a bad one EBADF, as POSIX requires.  This
  * used to return 0 for every descriptor without asking the kernel. */

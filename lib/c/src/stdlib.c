@@ -102,7 +102,7 @@ void exit(int status) {
 }
 
 void abort(void) {
-    /* LIBC-06: C11 §7.22.4.1 / POSIX require abort() to raise SIGABRT.  The
+    /* C11 §7.22.4.1 / POSIX require abort() to raise SIGABRT.  The
      * signal must be unblocked (and, on the second pass, its disposition
      * reset to default) so a caught-and-returned or blocked/ignored SIGABRT
      * cannot defeat abort().  _exit(134) is only the last-resort fallback. */
@@ -816,7 +816,7 @@ unsigned long long strtoull(const char *nptr, char **endptr, int base) {
 }
 
 unsigned long strtoul(const char *nptr, char **endptr, int base) {
-    /* LIBC-04: strtoul negates in the return type and flags ERANGE only when
+    /* strtoul negates in the return type and flags ERANGE only when
      * the parsed *magnitude* exceeds ULONG_MAX.  A legitimately-negated
      * in-range value wraps modulo 2^bits — it must not be reported as
      * overflow.  Funnelling through strtoull and comparing the 64-bit

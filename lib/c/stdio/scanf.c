@@ -181,7 +181,7 @@ static int scan_decimal_float_token(scan_input_t *in, int width, char *buf, size
 }
 
 /*
- * LIBC-09: combined float token for %a/%A.  These specifiers accept BOTH a
+ * Combined float token for %a/%A.  These specifiers accept BOTH a
  * C99 hex float ("0x1.8p3") AND an ordinary decimal float ("0", "3.14",
  * "1e5"), exactly like strtod/strtof.  The previous scan_hex_float_token
  * consumed the leading '0' (and any sign) while probing for the "0x" prefix
@@ -682,7 +682,7 @@ static int scan_core(scan_input_t *in, const char *format, va_list ap) {
 			int ok;
 
 			if(spec == 'a' || spec == 'A') {
-				/* LIBC-09: one pass accepts both hex and decimal floats. */
+				/* One pass accepts both hex and decimal floats. */
 				ok = scan_float_token(in, width, fbuf, sizeof(fbuf), &input_failure);
 			} else {
 				ok = scan_decimal_float_token(in, width, fbuf, sizeof(fbuf), &input_failure);
