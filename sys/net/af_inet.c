@@ -1993,8 +1993,13 @@ int afinet_connect(int fd, const void *addr, socklen_t len) {
             if (rc == -EINPROGRESS)
                 return -EINPROGRESS;
         } else {
+            /* 0.0.0.0 is never a destination (RFC 791 3.2); as for TCP
+             * above, and as Linux does, it names the local host. */
+            uint32_t ra;
+            memcpy(&ra, &sin->sin_addr, 4);
+            if (ra == 0) ra = __builtin_bswap32(0x7F000001u);
             s->peer_port = __builtin_bswap16(sin->sin_port);
-            memcpy(s->peer_addr, &sin->sin_addr, 4);
+            memcpy(s->peer_addr, &ra, 4);
         }
     } else {
         if (len < (socklen_t)sizeof(struct sin6_kern)) return -EINVAL;
@@ -2093,7 +2098,12 @@ static ssize_t afinet_sendto_k(int fd, const void *buf, size_t len, int flags,
             const struct sin_kern *sin = (const struct sin_kern *)addr;
             if (sin->sin_family != AF_INET) return -EAFNOSUPPORT;
             dport = __builtin_bswap16(sin->sin_port);
-            memcpy(daddr_buf, &sin->sin_addr, 4);
+            /* A datagram to 0.0.0.0 goes to the local host, as connect()
+             * treats it. */
+            uint32_t da;
+            memcpy(&da, &sin->sin_addr, 4);
+            if (da == 0) da = __builtin_bswap32(0x7F000001u);
+            memcpy(daddr_buf, &da, 4);
         } else {
             if (addrlen < (socklen_t)sizeof(struct sin6_kern)) return -EINVAL;
             const struct sin6_kern *sin6 = (const struct sin6_kern *)addr;

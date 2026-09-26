@@ -395,6 +395,11 @@ int ip4_output_opts(uint32_t saddr, uint32_t daddr, uint8_t protocol,
         ip4_txopts_init(&defaults);
         o = &defaults;
     }
+    /* 0/8 means "this network" and is never a destination (RFC 791 3.2;
+     * RFC 1122 3.2.1.3(a)).  Routed like any other address it went to the
+     * default gateway. */
+    if ((daddr & 0xFF) == 0)
+        return -EINVAL;
     int via_gw = 0;
     netdev_t *dev = route_out4(daddr, o, &via_gw);
     if (!dev) return -ENETUNREACH;

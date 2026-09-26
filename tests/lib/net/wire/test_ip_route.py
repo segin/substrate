@@ -10,6 +10,10 @@ IPv4 route selection when an interface's netmask is 0.
     addr-only   with the mask cleared, setting the address alone installs
                 the address's classful mask (10.x: /8), so 10.9.9.9 is
                 on-link and ARPed for directly, not sent to the gateway.
+    this-net    0/8 is never a destination (RFC 791 3.2): sendto 0.1.2.3
+                fails EINVAL and nothing leaves (it used to go to the
+                gateway), while 0.0.0.0 names the local host, as it does
+                for TCP.
 
 Run from the repo root after building sys/ and wireguest:
     python3 tests/lib/net/wire/test_ip_route.py [case...]
@@ -66,7 +70,26 @@ def case_addr_only():
         return None, w
 
 
-CASES = (('zero-mask', case_zero_mask), ('addr-only', case_addr_only))
+def case_this_net():
+    with Wire.boot('udpany 7414 sendto:0.1.2.3:9:far sendto:0.0.0.0:7414:self '
+                   'recvsum:100 sleep:60') as w:
+        if not w.wait_serial('guest: recvsum', 90):
+            s = [l for l in w.serial().splitlines() if 'guest: sendto' in l]
+            return 'the datagram to 0.0.0.0 never reached the guest ' \
+                   '(%r)' % s, w
+        w.pump(0.5)
+        s = [l for l in w.serial().splitlines() if 'guest: sendto' in l]
+        if not s or ' ok ' in s[0] or 'invalid' not in s[0].lower():
+            return 'sendto 0.1.2.3: %r, want EINVAL' % s[:1], w
+        for dst, et, fr in w.frames:
+            if et == 0x0800 and socket.inet_ntoa(fr[30:34]).startswith('0.'):
+                return 'a datagram to %s left the guest' % \
+                    socket.inet_ntoa(fr[30:34]), w
+        return None, w
+
+
+CASES = (('zero-mask', case_zero_mask), ('addr-only', case_addr_only),
+         ('this-net', case_this_net))
 
 
 def main():
