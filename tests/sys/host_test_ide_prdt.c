@@ -105,7 +105,7 @@ static void test_zero_length_rejected(void) {
 }
 
 /*
- * [IDE-18] A region that runs off the top of the 32-bit physical space must
+ * A region that runs off the top of the 32-bit physical space must
  * be rejected, not wrapped.
  *
  * The boundary used to be an absolute address, (phys & ~0xFFFF) + 0x10000,

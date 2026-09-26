@@ -1,25 +1,26 @@
 /*
  * torture_minix.c — regression tests for the MINIX batch (#418).
  *
- *   MINIX-17  The dirent stride was hardcoded to sizeof(struct minix_dirent_v1)
- *             (32 bytes) while the 14-char name variants (magics 0x137F/0x2468)
- *             use a 16-byte stride, so on those volumes every readdir/lookup
- *             walked entries at the wrong offsets.
- *   MINIX-18  The zone bitmap was indexed by zone number.  MINIX maps bit i to
- *             zone i + s_firstdatazone - 1.  Self-consistent while only
- *             substrate touches the volume, so nothing in-kernel notices --
- *             but fsck.minix and Linux read the same bitmap correctly, see
- *             substrate's allocated zones as free, and hand them out again.
- *   MINIX-19  Zone-to-byte-offset arithmetic overflowed 32 bits, and the
- *             indirect-block walkers returned whatever zone number the block
- *             happened to contain without validating it.
- *   MINIX-20  minix_write did not bound the offset.
- *   MINIX-31  minix_dir_add did not scan for an existing name (duplicate
- *             entries), and minix_unlink did not test S_ISDIR, so
- *             unlink("adir") orphaned the whole subtree beneath it.
+ *   - The dirent stride was hardcoded to sizeof(struct minix_dirent_v1)
+ *     (32 bytes) while the 14-char name variants (magics 0x137F/0x2468) use
+ *     a 16-byte stride, so on those volumes every readdir/lookup walked
+ *     entries at the wrong offsets.
+ *   - The zone bitmap was indexed by zone number.  MINIX maps bit i to
+ *     zone i + s_firstdatazone - 1.  Self-consistent while only substrate
+ *     touches the volume, so nothing in-kernel notices -- but fsck.minix
+ *     and Linux read the same bitmap correctly, see substrate's allocated
+ *     zones as free, and hand them out again.
+ *   - Zone-to-byte-offset arithmetic overflowed 32 bits, and the
+ *     indirect-block walkers returned whatever zone number the block
+ *     happened to contain without validating it.
+ *   - minix_write did not bound the offset.
+ *   - minix_dir_add did not scan for an existing name (duplicate entries),
+ *     and minix_unlink did not test S_ISDIR, so unlink("adir") orphaned
+ *     the whole subtree beneath it.
  *
- * The load-bearing check for MINIX-18 is NOT in this program: it is running
- * host fsck.minix over the image afterwards.  This test's job is to make the
+ * The load-bearing check for the zone-bitmap indexing is NOT in this
+ * program: it is running host fsck.minix over the image afterwards.  This
+ * test's job is to make the
  * kernel allocate and free real zones on a real mkfs.minix volume so that
  * fsck has something to disagree with.
  *
@@ -57,7 +58,7 @@ static char big[BIG];
 
 static void test_zone_alloc(void)
 {
-    printf("MINIX-18/19: allocate and free real zones\n");
+    printf("allocate and free real zones\n");
 
     for (int i = 0; i < BIG; i++)
         big[i] = (char)('A' + (i % 26));
@@ -107,7 +108,7 @@ static void test_zone_alloc(void)
 
 static void test_unlink_rejects_directory(void)
 {
-    printf("MINIX-31: unlink(2) refuses a directory\n");
+    printf("unlink(2) refuses a directory\n");
 
     if (mkdir(MNT "/adir", 0755) != 0 && errno != EEXIST) {
         ok("mkdir " MNT "/adir", 0, "mkdir failed");
@@ -134,7 +135,7 @@ static void test_unlink_rejects_directory(void)
 
 static void test_no_duplicate_names(void)
 {
-    printf("MINIX-31: creating an existing name does not duplicate the entry\n");
+    printf("creating an existing name does not duplicate the entry\n");
 
     int fd = open(MNT "/dup", O_RDWR | O_CREAT, 0644);
     if (fd >= 0) close(fd);
@@ -159,7 +160,7 @@ static void test_no_duplicate_names(void)
 
 static void test_readdir_names(void)
 {
-    printf("MINIX-17: readdir returns whole, terminated names\n");
+    printf("readdir returns whole, terminated names\n");
 
     DIR *d = opendir(MNT);
     if (!d) { ok("opendir " MNT, 0, "opendir failed"); return; }

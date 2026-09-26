@@ -603,8 +603,8 @@ if [ ! -f "$IMG_SRC" ]; then
 fi
 
 t_rename_self() {
-    echo "==> rename-self (audit DE-02)"
-    # rename(a, a) must be a successful no-op.  The pre-audit driver
+    echo "==> rename-self"
+    # rename(a, a) must be a successful no-op.  The old driver
     # unlinked the target, re-added the name, then removed the entry it
     # had just added — and the deferred delete freed the inode and its
     # data.  `mv "$f" "$f"` was silent data loss.
@@ -626,7 +626,7 @@ check='echo KEEPME > /mnt/test/d/f; mv /mnt/test/d/f /mnt/test/d/f; cat /mnt/tes
 }
 
 t_rm_extent_file() {
-    echo "==> rm-extent-file (audit BM-07)"
+    echo "==> rm-extent-file"
     # Every regular file on a default ext4 image is extent-mapped, and
     # unlink used to remove the dirent and THEN refuse with
     # -EOPNOTSUPP: the name vanished, rm reported an error, and the
@@ -652,7 +652,7 @@ check='rm /mnt/test/victim && echo RM_OK; ls /mnt/test/victim 2>&1 | head -1'"
 }
 
 t_csum_rw_remount() {
-    echo "==> metadata-csum rw then remount (audit CK-01/SB-01/SB-02)"
+    echo "==> metadata-csum rw then remount"
     # The driver only ever recomputed the per-inode checksum, so the
     # first deferred free-count flush wrote new counts under the old
     # superblock and group-descriptor checksums.  The volume then
@@ -685,7 +685,7 @@ check='cat /mnt/test/newfile; ls -d /mnt/test/newdir'"
 }
 
 t_uninit_bg_alloc() {
-    echo "==> uninit block groups (audit BG-01)"
+    echo "==> uninit block groups"
     # A gdt_csum/metadata_csum image ships unused groups flagged
     # BLOCK_UNINIT with an uninitialised on-disk bitmap.  The allocator
     # used to read that block and trust it, handing out the group's own
@@ -707,7 +707,7 @@ check='i=0; while [ \$i -lt 40 ]; do dd if=/dev/zero of=/mnt/test/f\$i bs=4096 c
 }
 
 t_extent_max_len() {
-    echo "==> extent ee_len == 32768 (audit BM-01)"
+    echo "==> extent ee_len == 32768"
     # 32768 is the largest INITIALIZED extent length and Linux writes
     # it for any sufficiently large contiguous run.  The old resolver
     # masked with 0x7FFF, turning that length into 0, so the whole
@@ -737,7 +737,7 @@ check='cat /mnt/test/target'"
 }
 
 t_no_ftype_write() {
-    echo "==> create on a no-filetype image (audit MS-01)"
+    echo "==> create on a no-filetype image"
     # Without INCOMPAT_FILETYPE the dirent byte the driver used for the
     # type is the high half of a 16-bit name_len, so every entry it
     # created read back on Linux as name_len + 256*type.
@@ -785,7 +785,7 @@ check='ls -l /mnt/test/big'"
 }
 
 t_truncate_shrink() {
-    echo "==> truncate to a smaller size (audit BM-09)"
+    echo "==> truncate to a smaller size"
     # Shrinking to a non-zero length used to return -EOPNOTSUPP.
     local img; img=$(mkimg t-trunc ext2)
     dd if=/dev/urandom of="$WORK/trunc-payload" bs=1K count=128 2>/dev/null
@@ -823,9 +823,9 @@ t_extent_append_write
 t_mount_64bit
 t_mount_64bit_with_csum
 
-# Regression scenarios added with the 2026-08 spec audit
-# (docs/ext2-audit-2026-08.md).  Each one reproduces a specific
-# finding; the assert_fsck calls are the interoperability gate.
+# Regression scenarios checked against the ext2/ext4 on-disk spec.
+# Each one reproduces a specific defect the driver once had; the
+# assert_fsck calls are the interoperability gate.
 t_rename_self
 t_rm_extent_file
 t_csum_rw_remount

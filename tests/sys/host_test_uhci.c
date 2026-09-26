@@ -3,7 +3,7 @@
  *
  * Same shape as host_test_ehci.c: compiles uhci.c into this TU with the
  * I/O-port funnel (uhci_readw/writew/writel) redirected to a scripted fake
- * controller.  Covers the RF-4 parity fixes:
+ * controller.  Covers the fixes that bring UHCI to parity with EHCI/xHCI:
  *
  *   - TD status classification, cause bits before STALLED
  *   - honest uhci_port_reset (a port that never enables reports failure)

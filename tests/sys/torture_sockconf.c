@@ -1,16 +1,17 @@
 /*
  * torture_sockconf.c — the MEDIUM/LOW conformance half of task #430.
  *
- * SOCK-04 sendmsg/recvmsg treated each iovec as a separate datagram
- * SOCK-05 MSG_PEEK consumed the datagram everywhere except TCP
- * SOCK-06 MSG_TRUNC unimplemented, so truncation was unreportable
- * SOCK-08 MSG_DONTWAIT mutated the shared file description's flags
- * SOCK-10 shutdown() on an unconnected socket returned success
- * UDP-04  the receive path truncated datagrams above 1500 bytes
- * UDP-05  ephemeral ports were handed out without a collision check
- * UDP-06  lost-wakeup window in the AF_INET receive sleep
- * UNIX-06 listen()/connect() did not validate the socket type
- * UNIX-07 a closed-but-not-yet-freed binding could still be returned
+ * Defects covered:
+ *   - sendmsg/recvmsg treated each iovec as a separate datagram
+ *   - MSG_PEEK consumed the datagram everywhere except TCP
+ *   - MSG_TRUNC unimplemented, so truncation was unreportable
+ *   - MSG_DONTWAIT mutated the shared file description's flags
+ *   - shutdown() on an unconnected socket returned success
+ *   - the UDP receive path truncated datagrams above 1500 bytes
+ *   - UDP ephemeral ports were handed out without a collision check
+ *   - lost-wakeup window in the AF_INET receive sleep
+ *   - AF_UNIX listen()/connect() did not validate the socket type
+ *   - a closed-but-not-yet-freed AF_UNIX binding could still be returned
  *
  * Run as init:  qemu ... -append "init=/tmp/torture_sockconf"
  */
@@ -55,10 +56,10 @@ static int bind_udp(unsigned short port)
     return fd;
 }
 
-/* SOCK-05 + SOCK-06 over UDP. */
+/* MSG_PEEK and MSG_TRUNC over UDP. */
 static void test_peek_and_trunc_udp(void)
 {
-    printf("SOCK-05/06: MSG_PEEK preserves, MSG_TRUNC reports (UDP)\n");
+    printf("MSG_PEEK preserves, MSG_TRUNC reports (UDP)\n");
 
     const char msg[] = "abcdefghijklmnop";     /* 17 bytes with the NUL */
     char buf[64];
@@ -97,10 +98,10 @@ static void test_peek_and_trunc_udp(void)
     close(tx);
 }
 
-/* SOCK-05 + SOCK-06 over an AF_UNIX datagram pair. */
+/* MSG_PEEK and MSG_TRUNC over an AF_UNIX datagram pair. */
 static void test_peek_and_trunc_unix(void)
 {
-    printf("SOCK-05/06: MSG_PEEK preserves, MSG_TRUNC reports (AF_UNIX)\n");
+    printf("MSG_PEEK preserves, MSG_TRUNC reports (AF_UNIX)\n");
 
     int sv[2];
     if (socketpair(AF_UNIX, SOCK_DGRAM, 0, sv) < 0) {
@@ -132,10 +133,10 @@ static void test_peek_and_trunc_unix(void)
     close(sv[1]);
 }
 
-/* SOCK-04: one sendmsg = one datagram, one recvmsg = one datagram. */
+/* One sendmsg = one datagram, one recvmsg = one datagram. */
 static void test_iovec_framing(void)
 {
-    printf("SOCK-04: an N-iovec datagram stays ONE datagram\n");
+    printf("an N-iovec datagram stays ONE datagram\n");
 
     int sv[2];
     if (socketpair(AF_UNIX, SOCK_DGRAM, 0, sv) < 0) {
@@ -191,10 +192,10 @@ static void test_iovec_framing(void)
     close(sv[1]);
 }
 
-/* SOCK-08: MSG_DONTWAIT must not leave the fd non-blocking afterwards. */
+/* MSG_DONTWAIT must not leave the fd non-blocking afterwards. */
 static void test_dontwait_scope(void)
 {
-    printf("SOCK-08: MSG_DONTWAIT does not alter the file description\n");
+    printf("MSG_DONTWAIT does not alter the file description\n");
 
     int sv[2];
     if (socketpair(AF_UNIX, SOCK_STREAM, 0, sv) < 0) {
@@ -220,10 +221,10 @@ static void test_dontwait_scope(void)
     close(sv[1]);
 }
 
-/* SOCK-10: shutdown() on an unconnected socket is ENOTCONN. */
+/* shutdown() on an unconnected socket is ENOTCONN. */
 static void test_shutdown_notconn(void)
 {
-    printf("SOCK-10: shutdown() on an unconnected socket is ENOTCONN\n");
+    printf("shutdown() on an unconnected socket is ENOTCONN\n");
 
     int u = socket(AF_INET, SOCK_DGRAM, 0);
     ok("unconnected UDP shutdown -> ENOTCONN",
@@ -247,10 +248,10 @@ static void test_shutdown_notconn(void)
     }
 }
 
-/* UNIX-06: listen()/connect() must validate the socket type. */
+/* AF_UNIX listen()/connect() must validate the socket type. */
 static void test_type_validation(void)
 {
-    printf("UNIX-06: listen() on a datagram socket is EOPNOTSUPP\n");
+    printf("listen() on a datagram socket is EOPNOTSUPP\n");
 
     const char *path = "/tmp/t-sockconf-dg";
     struct sockaddr_un un;
@@ -287,10 +288,10 @@ static void test_type_validation(void)
     unlink(spath);
 }
 
-/* UDP-05: two implicitly-bound sockets must not share a source port. */
+/* Two implicitly-bound sockets must not share a source port. */
 static void test_ephemeral_unique(void)
 {
-    printf("UDP-05: implicit binds get distinct ports\n");
+    printf("implicit binds get distinct ports\n");
 
     enum { N = 24 };
     int fds[N];
@@ -328,7 +329,7 @@ static void test_ephemeral_unique(void)
 }
 
 /*
- * UDP-06: a datagram sent just before the reader blocks must wake it
+ * A datagram sent just before the reader blocks must wake it
  * promptly rather than waiting out the fallback deadline.  A single-threaded
  * test cannot hit the exact race, but it can confirm the reworked sleep path
  * still delivers correctly and does not hang -- which is what a broken
@@ -336,7 +337,7 @@ static void test_ephemeral_unique(void)
  */
 static void test_blocking_receive(void)
 {
-    printf("UDP-06: blocking receive still wakes on delivery\n");
+    printf("blocking receive still wakes on delivery\n");
 
     struct sockaddr_in dst;
     int rx = bind_udp(33005);
@@ -358,10 +359,10 @@ static void test_blocking_receive(void)
     close(tx);
 }
 
-/* UDP-04: a datagram larger than the old 1500-byte cap survives whole. */
+/* A datagram larger than the old 1500-byte cap survives whole. */
 static void test_large_datagram(void)
 {
-    printf("UDP-04: datagrams above the old 1500-byte cap are not truncated\n");
+    printf("datagrams above the old 1500-byte cap are not truncated\n");
 
     static char out[1536], in[2048];
     for (size_t i = 0; i < sizeof(out); i++) out[i] = (char)(i * 7 + 3);

@@ -4,21 +4,22 @@
  * Each case is the thing the corresponding defect made impossible, driven
  * through the real syscalls.
  *
- *   PIPE-10  fifo_open recorded one role in is_writer = (accmode==O_WRONLY),
- *            so an O_RDWR open bumped BOTH readers_open and writers_open but
- *            close dropped only one.  writers_open stuck at 1 forever means a
- *            reader never sees EOF.
- *   PIPE-23  pipe_poll branched solely on is_writer, so an O_RDWR endpoint --
- *            the standard way to hold a FIFO open without blocking -- never
- *            reported POLLOUT and was useless in an event loop.
- *   PIPE-18  a write of <= PIPE_BUF must be atomic; the writer used to resume
- *            as soon as ONE byte drained, so concurrent writers interleaved.
- *   PIPE-22  the blocking FIFO open was non-interruptible, so a reader with
- *            no writer could not be killed at all.
+ *   - fifo_open recorded one role in is_writer = (accmode==O_WRONLY), so an
+ *     O_RDWR open bumped BOTH readers_open and writers_open but close
+ *     dropped only one.  writers_open stuck at 1 forever means a reader
+ *     never sees EOF.
+ *   - pipe_poll branched solely on is_writer, so an O_RDWR endpoint -- the
+ *     standard way to hold a FIFO open without blocking -- never reported
+ *     POLLOUT and was useless in an event loop.
+ *   - a write of <= PIPE_BUF must be atomic; the writer used to resume as
+ *     soon as ONE byte drained, so concurrent writers interleaved.
+ *   - the blocking FIFO open was non-interruptible, so a reader with no
+ *     writer could not be killed at all.
  *
- * PIPE-11 (registry keyed on inode number alone, so same-inode FIFOs on
- * different filesystems shared a buffer) needs two filesystems with a
- * colliding inode number to exercise and is not covered here.
+ * The FIFO registry used to be keyed on inode number alone, so same-inode
+ * FIFOs on different filesystems shared a buffer; that fix needs two
+ * filesystems with a colliding inode number to exercise and is not covered
+ * here.
  *
  * Run as init:  qemu ... -append "init=/tmp/torture_pipe_fifo"
  */
@@ -46,7 +47,7 @@ static void ok(const char *what, int cond, const char *why)
 }
 
 /*
- * PIPE-10.  Open a FIFO O_RDWR, close it, then read it with a writer that
+ * Open a FIFO O_RDWR, close it, then read it with a writer that
  * closes.  If the O_RDWR close leaked a writers_open reference the reader
  * never reaches EOF and blocks forever -- so the check is wrapped in an alarm
  * and the test reports a hang rather than becoming one.
@@ -56,7 +57,7 @@ static void on_alarm(int sig) { (void)sig; alarm_fired = 1; }
 
 static void test_rdwr_close_releases_both(void)
 {
-    printf("PIPE-10: O_RDWR open/close does not leak a writer reference\n");
+    printf("O_RDWR open/close does not leak a writer reference\n");
 
     const char *path = "/tmp/t-fifo-rdwr";
     unlink(path);
@@ -102,10 +103,10 @@ static void test_rdwr_close_releases_both(void)
     unlink(path);
 }
 
-/* PIPE-23.  An O_RDWR FIFO endpoint must be reported writable by poll(). */
+/* An O_RDWR FIFO endpoint must be reported writable by poll(). */
 static void test_rdwr_polls_writable(void)
 {
-    printf("PIPE-23: an O_RDWR FIFO endpoint reports POLLOUT\n");
+    printf("an O_RDWR FIFO endpoint reports POLLOUT\n");
 
     const char *path = "/tmp/t-fifo-poll";
     unlink(path);
@@ -134,14 +135,14 @@ static void test_rdwr_polls_writable(void)
 }
 
 /*
- * PIPE-18.  Two writers each write PIPE_BUF-sized blocks of a distinct byte.
+ * Two writers each write PIPE_BUF-sized blocks of a distinct byte.
  * A write of at most PIPE_BUF is required to be atomic, so every block the
  * reader sees must be a single repeated byte -- never a mixture.
  */
 #define ATOM 4096
 static void test_write_atomicity(void)
 {
-    printf("PIPE-18: writes of <= PIPE_BUF are atomic\n");
+    printf("writes of <= PIPE_BUF are atomic\n");
 
     int fds[2];
     if (pipe(fds) != 0) { ok("pipe", 0, "pipe failed"); return; }
@@ -198,13 +199,13 @@ static void test_write_atomicity(void)
 }
 
 /*
- * PIPE-22.  Blocking open of a FIFO with no writer must be interruptible.
+ * Blocking open of a FIFO with no writer must be interruptible.
  * The child parks in open(); the parent signals it.  Before the fix the child
  * was unkillable -- even SIGKILL -- so this hung the whole test.
  */
 static void test_open_interruptible(void)
 {
-    printf("PIPE-22: a blocking FIFO open can be interrupted\n");
+    printf("a blocking FIFO open can be interrupted\n");
 
     const char *path = "/tmp/t-fifo-intr";
     unlink(path);

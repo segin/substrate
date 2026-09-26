@@ -4,23 +4,24 @@
  * Compiles sys/drivers/usb/ehci.c into this TU (the nvme.c HOST_TEST
  * pattern) with the operational-register accessors redirected to a scripted
  * fake controller, then drives the poll loops and port operations through
- * the states QEMU cannot produce and the ehci-audit fixes exist for:
+ * the fault states QEMU cannot produce but the driver must handle:
  *
- *   - Host System Error mid-poll        [EHCI-INIT-03 / ehci-audit 11]
- *   - async schedule refusing to stop   [ASYNC-04 / ehci-audit 3]
- *   - completion landing during the stop window  [EHCI-03 / ehci-audit 3]
- *   - stuck Port Reset                  [PORT-02 / ehci-audit 8]
- *   - Line-Status validity gating       [PORT-01 / ehci-audit 9]
- *   - W1C change-bit preservation       [ehci-audit 10]
- *   - RL=0 on interrupt queue heads     [ehci-audit 5]
+ *   - Host System Error mid-poll (USBSTS read in the poll loop)
+ *   - async schedule refusing to stop
+ *   - completion landing during the stop window
+ *   - stuck Port Reset
+ *   - Line-Status validity gating (valid only while PED=0)
+ *   - W1C change-bit preservation in PORTSC read-modify-writes
+ *   - RL=0 on interrupt queue heads
  *
  * plus table tests for the pure calculators (ehci_halt_status,
  * ehci_intr_stride, ehci_endp_char/ehci_endp_cap, ehci_fill_qtd).  These
  * assert against hand-derived spec values, never against a mirror copy of
  * the driver's own arithmetic.
  *
- * Known limitation, on purpose: the overlay park/publish STORE ORDERING of
- * [ehci-audit 1] is a concurrency property a single-threaded fake cannot
+ * Known limitation, on purpose: the STORE ORDERING of the async QH overlay
+ * park/publish sequence (park HALTED, program, publish with one final
+ * token store) is a concurrency property a single-threaded fake cannot
  * check; it remains a review property.
  */
 #include <assert.h>
@@ -414,7 +415,8 @@ static void test_fill_qtd(void)
     assert(!(hc->qtd[1].token & EHCI_QTD_TOGGLE));
 
     /* The control data qTD's alt_next must point at the status qTD --
-     * the [ehci-audit 6] 3.5.2-vs-4.10.2 defense.  Reproduce the control
+     * the defense against EHCI 3.5.2 and 4.10.2 disagreeing on whether a
+     * short packet with alt_next=T advances to Next.  Reproduce the control
      * path's calls and check the chain wiring. */
     ehci_fill_qtd(hc, 2, 0, 0, EHCI_QTD_PID_IN, 0, 1, 0, 1);   /* status */
     ehci_fill_qtd(hc, 1, ehci_qtd_dma(hc, 2), ehci_qtd_dma(hc, 2),

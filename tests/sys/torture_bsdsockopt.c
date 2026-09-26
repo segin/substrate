@@ -1,6 +1,6 @@
 /*
- * torture_bsdsockopt.c -- UDP-API-05 (docs/ip-audit-2026-09-22.md): socket
- * options set by a BSD binary under Substrate's BSD personalities.
+ * torture_bsdsockopt.c -- socket options set by a BSD binary under
+ * Substrate's BSD personalities.
  *
  * sys_setsockopt()/sys_getsockopt() use Linux numbering; a BSD binary passes
  * SOL_SOCKET 0xffff and BSD SO_* values, so every option it set was lost.

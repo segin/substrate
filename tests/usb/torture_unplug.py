@@ -4,7 +4,7 @@
 Root stays on AHCI; a second usb-storage disk hangs off the controller under
 test.  Pass criteria: the disconnect propagates (usb 'device removed' or msc
 error), the machine stays alive (a typed `echo ALIVE` lands after the yank),
-and nothing panics.  Exercises the RF-1a/RF-4 error classification and the
+and nothing panics.  Exercises the transfer-error classification and the
 disconnect paths on all three HCDs.
 
 usage: torturetest.py {ehci|xhci|uhci}

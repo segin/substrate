@@ -1,15 +1,14 @@
 /*
  * torture_devfs_sysfs.c — regression tests for the devfs/sysfs batch (#421).
  *
- *   DEVFS-12  node->inode and readdir's d_ino were the devfs_entry_t's heap
- *             ADDRESS, and sys_stat copies node->inode into st_ino -- so
- *             `stat /dev/tty` handed any user a kernel-heap pointer, a
- *             reliable layout oracle for aiming use-after-frees.
- *   DEVFS-21  readdir emitted no "." or ".." while finddir resolved them, so
- *             enumeration and lookup disagreed about /dev.
- *   SYSFS-14  /sys/bus listed bus, class and devices, and so did
- *             /sys/bus/bus, without limit -- any recursive walk of /sys ran
- *             forever.
+ *   - node->inode and readdir's d_ino were the devfs_entry_t's heap
+ *     ADDRESS, and sys_stat copies node->inode into st_ino -- so
+ *     `stat /dev/tty` handed any user a kernel-heap pointer, a reliable
+ *     layout oracle for aiming use-after-frees.
+ *   - devfs readdir emitted no "." or ".." while finddir resolved them, so
+ *     enumeration and lookup disagreed about /dev.
+ *   - /sys/bus listed bus, class and devices, and so did /sys/bus/bus,
+ *     without limit -- any recursive walk of /sys ran forever.
  *
  * Run as init:  qemu ... -append "init=/tmp/torture_devfs_sysfs"
  */
@@ -34,7 +33,7 @@ static void ok(const char *what, int cond, const char *why)
 }
 
 /*
- * DEVFS-12.  A kernel heap address on this target is a high value (the
+ * devfs inode numbers.  A kernel heap address on this target is a high value (the
  * direct map starts at 0xC0000000) and, more tellingly, several devfs
  * entries would be scattered across a wide range.  A monotonic counter gives
  * small, densely packed values.  Check both properties: no inode may look
@@ -42,7 +41,7 @@ static void ok(const char *what, int cond, const char *why)
  */
 static void test_no_heap_address_in_ino(void)
 {
-    printf("DEVFS-12: st_ino is not a kernel heap address\n");
+    printf("st_ino is not a kernel heap address\n");
 
     DIR *d = opendir("/dev");
     if (!d) { ok("opendir /dev", 0, "cannot open /dev"); return; }
@@ -75,10 +74,10 @@ static void test_no_heap_address_in_ino(void)
        "inode values are spread like heap addresses");
 }
 
-/* DEVFS-21.  readdir must offer the dot entries finddir already resolves. */
+/* devfs readdir must offer the dot entries finddir already resolves. */
 static void test_dot_entries(void)
 {
-    printf("DEVFS-21: /dev enumerates \".\" and \"..\"\n");
+    printf("/dev enumerates \".\" and \"..\"\n");
 
     static const char *dirs[] = { "/dev", "/dev/pts" };
     for (unsigned i = 0; i < sizeof(dirs) / sizeof(dirs[0]); i++) {
@@ -98,7 +97,7 @@ static void test_dot_entries(void)
 }
 
 /*
- * SYSFS-14.  Walk /sys recursively with a depth cap well above anything a
+ * Walk /sys recursively with a depth cap well above anything a
  * bounded tree needs.  A self-referential /sys/bus/bus/bus/... blows through
  * it immediately.
  */
@@ -130,7 +129,7 @@ static int walk(const char *path, int depth, int *deepest)
 
 static void test_sysfs_terminates(void)
 {
-    printf("SYSFS-14: a recursive walk of /sys terminates\n");
+    printf("a recursive walk of /sys terminates\n");
 
     int deepest = 0;
     int bad = walk("/sys", 0, &deepest);

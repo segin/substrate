@@ -80,7 +80,7 @@ bool test_mountopt_apply_generic(void) {
 
     /*
      * "ro,rw" and "sync,async" are not conflicts -- options apply in list
-     * order and the last occurrence wins ([VFS-30]).  Rejecting the pair
+     * order and the last occurrence wins.  Rejecting the pair
      * contradicted mountopt_lookup(), which documents the same last-wins
      * rule, and would have made option shorthands unusable: the moment
      * `defaults` expands to "rw,suid,dev,exec,async", `-o defaults,ro`

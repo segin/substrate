@@ -1,5 +1,6 @@
 /*
- * torture_afunix_grow.c — regression test for UNIX-04 (task #430).
+ * torture_afunix_grow.c — regression test for the lazily allocated,
+ * growable AF_UNIX receive ring (task #430).
  *
  * The AF_UNIX receive ring used to be a 256 KiB array embedded in the
  * socket struct, allocated in full by every socket() / socketpair() /
@@ -47,7 +48,7 @@ static unsigned char pat(unsigned long i) { return (unsigned char)(i * 31 + 7); 
  */
 static void test_stream_growth(void)
 {
-    printf("UNIX-04: stream survives repeated ring growth\n");
+    printf("stream survives repeated ring growth\n");
 
     int sv[2];
     if (socketpair(AF_UNIX, SOCK_STREAM, 0, sv) < 0) {
@@ -107,7 +108,7 @@ static void test_stream_growth(void)
  */
 static void test_large_datagram(void)
 {
-    printf("UNIX-04: one oversized datagram grows the ring atomically\n");
+    printf("one oversized datagram grows the ring atomically\n");
 
     int sv[2];
     if (socketpair(AF_UNIX, SOCK_DGRAM, 0, sv) < 0) {
@@ -151,7 +152,7 @@ static void test_large_datagram(void)
  */
 static void test_many_idle_sockets(void)
 {
-    printf("UNIX-04: idle sockets are cheap\n");
+    printf("idle sockets are cheap\n");
 
     enum { PAIRS = 60 };
     int sv[PAIRS][2];
@@ -183,7 +184,7 @@ static void test_many_idle_sockets(void)
 
 int main(void)
 {
-    printf("torture_afunix_grow: lazy/growable AF_UNIX ring (#430 UNIX-04)\n\n");
+    printf("torture_afunix_grow: lazy/growable AF_UNIX ring (#430)\n\n");
 
     test_stream_growth();
     test_large_datagram();

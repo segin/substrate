@@ -1,6 +1,7 @@
 /*
  * torture_netsec.c — regression test for the socket userspace-boundary
- * findings (task #427: SOCK-01, SOCK-02, UNIX-01, SOCK-09).
+ * fixes (task #427): accept() and sendto() address handling, AF_UNIX
+ * sendto()-by-path, and setsockopt() on a non-socket.
  *
  * Every case here is an attempt at the actual exploit, so a PASS means the
  * kernel refused rather than that some internal predicate returned the right
@@ -38,7 +39,7 @@ static void ok(const char *what, int cond, const char *why)
     }
 }
 
-/* SOCK-01: accept() must not write the peer sockaddr through a raw user
+/* accept() must not write the peer sockaddr through a raw user
  * pointer.  We cannot observe the kernel write directly from here, so we
  * check the two things we can: the call reports EFAULT-or-success rather
  * than corrupting us, and the machine is still alive afterwards. */
@@ -75,7 +76,7 @@ static void test_accept_kernel_addr(void)
     unlink(sun.sun_path);
 }
 
-/* SOCK-02: sendto() must not transmit from a kernel address. */
+/* sendto() must not transmit from a kernel address. */
 static void test_sendto_kernel_buf(void)
 {
     printf("sendto() with a kernel-address payload:\n");
@@ -99,7 +100,7 @@ static void test_sendto_kernel_buf(void)
     close(fd);
 }
 
-/* SOCK-02: the destination sockaddr itself must be copied in, not chased. */
+/* sendto(): the destination sockaddr itself must be copied in, not chased. */
 static void test_sendto_kernel_addr(void)
 {
     printf("sendto() with a kernel-address destination:\n");
@@ -117,7 +118,7 @@ static void test_sendto_kernel_addr(void)
     close(fd);
 }
 
-/* UNIX-01: AF_UNIX sendto()-by-path must not copy FROM kernel memory into a
+/* AF_UNIX sendto()-by-path must not copy FROM kernel memory into a
  * socket the caller can then read back.  That was an arbitrary kernel read. */
 static void test_unix_dgram_kernel_read(void)
 {
@@ -160,7 +161,7 @@ static void test_unix_dgram_kernel_read(void)
     unlink(sun.sun_path);
 }
 
-/* SOCK-09: setsockopt() must not claim success on a non-socket. */
+/* setsockopt() must not claim success on a non-socket. */
 static void test_setsockopt_nonsocket(void)
 {
     printf("setsockopt() on descriptors that are not sockets:\n");

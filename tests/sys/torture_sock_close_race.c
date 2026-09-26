@@ -1,6 +1,5 @@
 /*
- * torture_sock_close_race.c -- UDP-API-16 (docs/ip-audit-2026-09-22.md):
- * write() racing close() on an AF_INET socket.
+ * torture_sock_close_race.c -- write() racing close() on an AF_INET socket.
  *
  * afinet_node_write() loaded node->impl with no lock and only then took its
  * reference, so a close() on another thread could free the socket between

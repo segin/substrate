@@ -8,8 +8,8 @@
  *
  * These run in the kernel, against the real allocators and the real bio
  * cache, because most of these defects were only reachable through the
- * genuine data structures (a host mock of getblk would have hidden BIO-01
- * entirely -- the bug was in the interaction between the hash and the
+ * genuine data structures (a host mock of getblk would have hidden the
+ * getblk B_CACHE bug entirely -- the bug was in the interaction between the hash and the
  * B_CACHE flag, not in either alone).
  */
 
@@ -40,7 +40,7 @@ static int tests_failed = 0;
 } while(0)
 
 /* ------------------------------------------------------------------
- * BIO-01 (86c76757a): a buffer that never held valid data must not be
+ * getblk (86c76757a): a buffer that never held valid data must not be
  * reachable through the hash, and a hash hit must not manufacture B_CACHE.
  *
  * The bug: getblk() hash-inserted a buffer whose bio_ensure_size() had
@@ -60,7 +60,7 @@ static void test_bio_cache_flag_tracks_data(void)
     TEST_ASSERT(bp != NULL, "getblk returned NULL for a normal request");
     if (!bp) return;
     TEST_ASSERT((bp->b_flags & B_CACHE) == 0,
-                "BIO-01: fresh miss came back with B_CACHE already set");
+                "fresh miss came back with B_CACHE already set");
     TEST_ASSERT(bp->b_data != NULL,
                 "getblk returned a buffer with no data on success");
 
@@ -74,9 +74,9 @@ static void test_bio_cache_flag_tracks_data(void)
     TEST_ASSERT(bp != NULL, "getblk lost a cached block");
     if (bp) {
         TEST_ASSERT((bp->b_flags & B_CACHE) != 0,
-                    "BIO-01: a real hit lost B_CACHE");
+                    "a real hit lost B_CACHE");
         TEST_ASSERT(((uint8_t *)bp->b_data)[0] == 0xA5,
-                    "BIO-01: cached contents did not survive a hit");
+                    "cached contents did not survive a hit");
 
         /* Re-acquiring at a DIFFERENT size forces bio_ensure_size() to
          * reallocate, which discards the contents -- B_CACHE must go with
@@ -85,7 +85,7 @@ static void test_bio_cache_flag_tracks_data(void)
         bp = getblk(fake_vp, 4242, 1024, 0, 0);
         if (bp) {
             TEST_ASSERT((bp->b_flags & B_CACHE) == 0,
-                        "BIO-01: B_CACHE survived a reallocation");
+                        "B_CACHE survived a reallocation");
             bp->b_flags |= B_INVAL;
             brelse(bp);
         }
@@ -94,7 +94,7 @@ static void test_bio_cache_flag_tracks_data(void)
 }
 
 /* ------------------------------------------------------------------
- * BIO-14 (df120c9e7): brelse() must unlink from whichever queue the buffer
+ * brelse (df120c9e7): brelse() must unlink from whichever queue the buffer
  * is on.  It previously only handled BQ_LOCKED, so a second release
  * re-inserted an already-queued node into the same TAILQ, self-linking it
  * and spinning the next queue walk forever.
@@ -117,7 +117,7 @@ static void test_bio_release_leaves_single_queue(void)
     TEST_ASSERT(bp->b_qindex >= 0, "busy buffer is not on any queue");
     brelse(bp);
     TEST_ASSERT(bp->b_qindex >= 0 && bp->b_qindex < BQ_COUNT,
-                "BIO-14: released buffer has an out-of-range queue index");
+                "released buffer has an out-of-range queue index");
     TEST_ASSERT((bp->b_flags & B_BUSY) == 0,
                 "brelse left B_BUSY set");
 
@@ -131,7 +131,7 @@ static void test_bio_release_leaves_single_queue(void)
 }
 
 /* ------------------------------------------------------------------
- * BLK-08 / RAM-01 and the general errno convention: the kernel returns
+ * The block/ramdisk layers and the general errno convention: the kernel returns
  * NEGATIVE errno.  A bare -1 reaches userland as EPERM, which is why
  * "rmdir on a non-empty directory" used to report "Operation not
  * permitted".  Assert the convention holds for the block layer's
@@ -150,7 +150,7 @@ static void test_blkdev_rejects_bad_args_with_errno(void)
 }
 
 /* ------------------------------------------------------------------
- * EXT2-06 (102259dba) / PROCFS-02 (023e931e6): a negative off_t must be
+ * ext2 (102259dba) / procfs (023e931e6): a negative off_t must be
  * rejected before it is used as an index.
  *
  * sys_lseek accepts a negative offset and read_fs/write_fs pass it through
@@ -169,8 +169,8 @@ static void test_off_t_is_signed(void)
 
     kprint("test_off_t_is_signed:\n");
     TEST_ASSERT(negative < 0,
-                "EXT2-06: off_t is not signed -- every `offset < 0` guard "
-                "added by the storage/fs audit is now dead code");
+                "off_t is not signed -- every `offset < 0` guard "
+                "in the filesystem read/write paths is now dead code");
     TEST_ASSERT(sizeof(off_t) == 8,
                 "off_t is not 64-bit; the 64-bit truncation guards in shmfs "
                 "and ext2 assume it is wider than size_t");
@@ -178,7 +178,7 @@ static void test_off_t_is_signed(void)
 }
 
 /* ------------------------------------------------------------------
- * SHMFS-01/03 (43fdc4e15): size arithmetic that mixes a 64-bit off_t with
+ * shmfs (43fdc4e15): size arithmetic that mixes a 64-bit off_t with
  * a 32-bit size_t must be done in 64 bits.
  *
  * ftruncate(fd, 0x100001000) truncated to 0x1000, skipped the grow, and
@@ -193,17 +193,17 @@ static void test_size_truncation_is_real(void)
 
     kprint("test_size_truncation_is_real:\n");
     TEST_ASSERT((off_t)(size_t)big != big,
-                "SHMFS-01: size_t is as wide as off_t here, so casting an "
+                "size_t is as wide as off_t here, so casting an "
                 "offset through it loses nothing -- the 64-bit guards in "
                 "shmfs_truncate/shmfs_node_mmap are untested on this target");
     TEST_ASSERT((size_t)big == 0x1000,
-                "SHMFS-01: truncation does not produce the documented value; "
+                "truncation does not produce the documented value; "
                 "re-derive the guard rather than trusting the comment");
     kprint("  done\n");
 }
 
 /* ------------------------------------------------------------------
- * SCSI-03: a REPORT LUNS descriptor is big-endian on the wire and must be
+ * A REPORT LUNS descriptor is big-endian on the wire and must be
  * decoded a byte at a time.
  *
  * The bug: scsi_scan_bus() loaded the descriptor as a native uint64_t and
@@ -234,9 +234,9 @@ static void test_report_luns_descriptor_byte_order(void)
     for (i = 0; i < 4; i++) {
         lun = 0xFFFF;
         TEST_ASSERT(scsi_lun_from_report_desc(desc[i], &lun) == 0,
-                    "SCSI-03: peripheral-addressed descriptor was rejected");
+                    "peripheral-addressed descriptor was rejected");
         TEST_ASSERT(lun == (uint16_t)i,
-                    "SCSI-03: descriptor decoded to the wrong LUN -- the "
+                    "descriptor decoded to the wrong LUN -- the "
                     "decode is reading the wrong end of the big-endian "
                     "descriptor, so multi-LUN devices look single-LUN");
     }
@@ -246,9 +246,9 @@ static void test_report_luns_descriptor_byte_order(void)
         static const uint8_t flat[8] = { 0x41, 0x23, 0, 0, 0, 0, 0, 0 };
         lun = 0;
         TEST_ASSERT(scsi_lun_from_report_desc(flat, &lun) == 0,
-                    "SCSI-03: flat-space descriptor was rejected");
+                    "flat-space descriptor was rejected");
         TEST_ASSERT(lun == 0x0123,
-                    "SCSI-03: flat-space LUN mis-decoded");
+                    "flat-space LUN mis-decoded");
     }
 
     /* Multi-level addressing must be reported as undecodable rather than
@@ -257,7 +257,7 @@ static void test_report_luns_descriptor_byte_order(void)
         static const uint8_t multi[8] = { 0x80, 0x07, 0, 0, 0, 0, 0, 0 };
         lun = 0xFFFF;
         TEST_ASSERT(scsi_lun_from_report_desc(multi, &lun) != 0,
-                    "SCSI-03: logical-unit addressing was decoded as a flat "
+                    "logical-unit addressing was decoded as a flat "
                     "LUN");
     }
 
@@ -268,7 +268,7 @@ static void test_report_luns_descriptor_byte_order(void)
         uint64_t native;
         memcpy(&native, desc[3], sizeof(native));
         TEST_ASSERT((uint16_t)((native >> 48) & 0xFFFF) != 0x0003,
-                    "SCSI-03: this target is big-endian -- re-derive the "
+                    "this target is big-endian -- re-derive the "
                     "REPORT LUNS decode instead of trusting this test");
     }
 

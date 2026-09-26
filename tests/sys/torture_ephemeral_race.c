@@ -1,12 +1,12 @@
 /*
  * torture_ephemeral_race.c -- concurrent implicit binds must never share
- * an ephemeral port (docs/ip-audit-2026-09-22.md).  Run as init.
+ * an ephemeral port.  Run as init.
  *
- *   udp  UDP-API-18: six threads each connect() 150 UDP sockets (which
+ *   udp  six threads each connect() 150 UDP sockets (which
  *        binds them to a free ephemeral port) and keep them open; every
  *        port must be distinct.  The allocator used to check a port under
  *        afi_lock and record it only after dropping the lock.
- *   tcp  TCP-MEM-12: the same with non-blocking TCP connect()s to a
+ *   tcp  the same with non-blocking TCP connect()s to a
  *        black-holed address, so every PCB stays in SYN-SENT holding its
  *        port.  tcp_port_taken() walked the PCB list with no lock, and the
  *        port was assigned while the PCB was still CLOSED -- invisible to

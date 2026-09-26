@@ -1,5 +1,6 @@
 /*
- * torture_afunix_dgram.c — regression test for UNIX-05 (task #430).
+ * torture_afunix_dgram.c — regression test for bound AF_UNIX datagram
+ * servers (task #430).
  *
  * A bound AF_UNIX SOCK_DGRAM socket was unusable as a server in three
  * independent ways: an empty queue returned 0 (EOF) instead of waiting,
@@ -54,7 +55,7 @@ static int bind_dgram(const char *path)
 
 static void test_request_response(void)
 {
-    printf("UNIX-05: bound datagram server can receive and reply\n");
+    printf("bound datagram server can receive and reply\n");
 
     const char *spath = "/tmp/t-dgram-srv";
     const char *cpath = "/tmp/t-dgram-cli";
@@ -140,7 +141,7 @@ static void test_request_response(void)
  */
 static void test_boundaries(void)
 {
-    printf("UNIX-05: framing survives the source header\n");
+    printf("framing survives the source header\n");
 
     const char *spath = "/tmp/t-dgram-b";
     int srv = bind_dgram(spath);
@@ -195,7 +196,7 @@ static void test_boundaries(void)
  * source; those must still parse correctly, since they share the format. */
 static void test_socketpair_still_works(void)
 {
-    printf("UNIX-05: connected datagram frames still parse\n");
+    printf("connected datagram frames still parse\n");
 
     int sv[2];
     if (socketpair(AF_UNIX, SOCK_DGRAM, 0, sv) < 0) {
@@ -220,7 +221,7 @@ static void test_socketpair_still_works(void)
 
 int main(void)
 {
-    printf("torture_afunix_dgram: bound datagram servers (#430 UNIX-05)\n\n");
+    printf("torture_afunix_dgram: bound datagram servers (#430)\n\n");
 
     test_request_response();
     test_boundaries();

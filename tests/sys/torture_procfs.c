@@ -1,20 +1,21 @@
 /*
  * torture_procfs.c — regression tests for the procfs batch (#420).
  *
- *   PROCFS-29  /proc/self resolved to "/proc/<pid>/" WITH a trailing slash
- *              where Linux returns "/proc/<pid>", so appending produced
- *              "/proc/42//exe" and every comparison against the result failed.
- *   PROCFS-30  procfs_finddir returned the node itself for "..", so
- *              `cd /proc; cd ..` stayed in /proc and "../etc/passwd" from a
- *              /proc cwd resolved inside procfs.
- *   PROCFS-16  /proc/<pid>/maps was mode 0444 -- any user could read another
- *              process's address-space layout, which is what defeats ASLR
- *              when attacking a setuid binary.
- *   PROCFS-19  proc_pid_status_read clamped back to 1023 bytes even when the
- *              larger retry allocation had succeeded, so the retry was dead
- *              code and a long status file was silently truncated.
+ *   - /proc/self resolved to "/proc/<pid>/" WITH a trailing slash where
+ *     Linux returns "/proc/<pid>", so appending produced "/proc/42//exe"
+ *     and every comparison against the result failed.
+ *   - procfs_finddir returned the node itself for "..", so
+ *     `cd /proc; cd ..` stayed in /proc and "../etc/passwd" from a /proc
+ *     cwd resolved inside procfs.
+ *   - /proc/<pid>/maps was mode 0444 -- any user could read another
+ *     process's address-space layout, which is what defeats ASLR when
+ *     attacking a setuid binary.
+ *   - proc_pid_status_read clamped back to 1023 bytes even when the larger
+ *     retry allocation had succeeded, so the retry was dead code and a
+ *     long status file was silently truncated.
  *
- * The credential half of PROCFS-15/16 cannot be shown from a single-user
+ * The credential half of the per-process access checks (the maps mode
+ * among them) cannot be shown from a single-user
  * test: this runs as root, and root is allowed to inspect everything.  What
  * IS checked here is that the gate did not break self-inspection, which is
  * the case every real /proc consumer depends on.
@@ -43,7 +44,7 @@ static void ok(const char *what, int cond, const char *why)
 
 static void test_self_no_trailing_slash(void)
 {
-    printf("PROCFS-29: /proc/self has no trailing slash\n");
+    printf("/proc/self has no trailing slash\n");
 
     char link[64];
     ssize_t n = readlink("/proc/self", link, sizeof(link) - 1);
@@ -70,7 +71,7 @@ static void test_self_no_trailing_slash(void)
 
 static void test_dotdot_leaves_procfs(void)
 {
-    printf("PROCFS-30: \"..\" at /proc leaves procfs\n");
+    printf("\"..\" at /proc leaves procfs\n");
 
     /* /proc/../etc must be /etc.  If ".." stays inside procfs this either
      * fails outright or resolves to something in /proc. */
@@ -85,7 +86,7 @@ static void test_dotdot_leaves_procfs(void)
 
 static void test_maps_mode(void)
 {
-    printf("PROCFS-16: /proc/<pid>/maps is not world-readable\n");
+    printf("/proc/<pid>/maps is not world-readable\n");
 
     char path[64];
     snprintf(path, sizeof(path), "/proc/%d/maps", (int)getpid());
@@ -109,7 +110,7 @@ static void test_maps_mode(void)
 
 static void test_status_not_truncated(void)
 {
-    printf("PROCFS-19: /proc/<pid>/status is not clamped to 1023 bytes\n");
+    printf("/proc/<pid>/status is not clamped to 1023 bytes\n");
 
     char path[64];
     snprintf(path, sizeof(path), "/proc/%d/status", (int)getpid());

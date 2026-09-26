@@ -8,7 +8,8 @@
  * Scope, deliberately narrow (the tier-3 review priced out a full fake-xHC
  * device model as larger than the driver's testable core):
  *
- *   - xhci_xfer_status: the RF-1a completion-code classifier
+ *   - xhci_xfer_status: the completion-code classifier
+ *     (STALL vs. transport error vs. timeout)
  *   - xhci_ring_push: producer cycle-bit arithmetic across the Link-TRB
  *     wrap (the missed-cycle-flip failure mode desynchronizes every later
  *     TRB's ownership)

@@ -52,8 +52,8 @@ bool test_vnode_cache_insert_no_mount(void) {
     vnode_cache_insert(&vp);
 
     /*
-     * A NULL v_mount is cacheable: only v_ino has to be meaningful
-     * ([VNODE-16]).  Requiring a mount made the cache a silent no-op for
+     * A NULL v_mount is cacheable: only v_ino has to be meaningful.
+     * Requiring a mount made the cache a silent no-op for
      * exactly the vnodes the fs_node_t bridge publishes -- every lookup
      * allocated a fresh vnode and none was ever found again.  This test
      * asserted the vnode stayed out of the cache.

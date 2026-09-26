@@ -93,7 +93,7 @@ int main(void) {
     assert(color_bg == 4);
 
     /*
-     * [USB-HW-03] A second CPU panicking while the first is still dumping
+     * A second CPU panicking while the first is still dumping
      * must not print into the middle of the first dump.  Before ownership
      * was explicit, `int d = ++panic_depth` was a non-atomic
      * read-modify-write: two CPUs both read 0, both computed 1, and both
