@@ -302,12 +302,13 @@ int alphasort(const struct dirent **a, const struct dirent **b) {
 
 void rewinddir(DIR *dirp) {
     if (!dirp) return;
-    /* opendir reopens cleanly; we have no public dir-fd accessor so
-     * a portable rewind is closedir + opendir on the original path.
-     * Substrate's DIR keeps the open fd; lseek to 0 should be enough
-     * for the simple block-device-backed FS we have. */
+    /* Seek the directory back to its start and discard the entries
+     * readdir() has buffered: they come from the old position, so
+     * handing them out after the seek would repeat them. */
     int fd = dirp->fd;
     if (fd >= 0) lseek(fd, 0, SEEK_SET);
+    dirp->buf_pos = 0;
+    dirp->buf_end = 0;
 }
 
 long telldir(DIR *dirp) {
