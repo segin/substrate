@@ -713,6 +713,51 @@ spoil:
     spinlock_release_irq(&g_reasm_lock, f);
 }
 
+/* IPv4 option types (RFC 791 3.1). */
+#define IPOPT_EOL   0
+#define IPOPT_NOP   1
+#define IPOPT_RR    7
+#define IPOPT_TS    68
+#define IPOPT_LSRR  131
+#define IPOPT_SSRR  137
+
+/*
+ * Walk the option area of a received datagram (RFC 791 3.1, 3.2 Options).
+ * End of Option List ends it and No Operation is a single octet; every
+ * other option carries a length, which must be at least 2 and must not run
+ * past the header.  Record Route and the source routes need a pointer of
+ * at least 4, Timestamp at least 5.  Returns 0 when the options are well
+ * formed; otherwise the octet offset, from the start of the IP header, of
+ * the first bad field -- the Parameter Problem pointer.
+ */
+static size_t ip4_check_options(const uint8_t *pkt, size_t hlen) {
+    size_t off = sizeof(struct iphdr);
+    while (off < hlen) {
+        uint8_t type = pkt[off];
+        if (type == IPOPT_EOL)
+            break;
+        if (type == IPOPT_NOP) {
+            off++;
+            continue;
+        }
+        if (off + 1 >= hlen)
+            return off;                     /* no room for the length */
+        uint8_t olen = pkt[off + 1];
+        if (olen < 2 || off + olen > hlen)
+            return off + 1;
+        if (type == IPOPT_RR || type == IPOPT_LSRR || type == IPOPT_SSRR ||
+            type == IPOPT_TS) {
+            uint8_t min_ptr = type == IPOPT_TS ? 5 : 4;
+            if (olen < 3)
+                return off + 1;
+            if (pkt[off + 2] < min_ptr)
+                return off + 2;
+        }
+        off += olen;
+    }
+    return 0;
+}
+
 /* link_group: the frame carrying the datagram was addressed to a link-layer
  * broadcast or multicast address rather than to this interface. */
 static void ip4_input_link(netdev_t *dev, const uint8_t *pkt, size_t len,
@@ -794,6 +839,18 @@ static void ip4_input_link(netdev_t *dev, const uint8_t *pkt, size_t len,
      * draw a reply (TCP RST, ICMP error) from each. */
     if (link_group && !for_bcast)
         return;
+
+    /* Malformed options: discard, and say where (RFC 1122 3.2.2.5) --
+     * unless the datagram was a broadcast or multicast, which never draws
+     * an ICMP error (RFC 1122 3.2.2). */
+    if (hlen > sizeof(struct iphdr)) {
+        size_t bad = ip4_check_options(pkt, hlen);
+        if (bad) {
+            if (!for_bcast)
+                icmp_param_problem(dev, pkt, tot, (uint8_t)bad);
+            return;
+        }
+    }
 
     /* UDP-I-01: a fragment (MF set or a nonzero offset) goes to
      * reassembly, which delivers the whole datagram when it completes. */

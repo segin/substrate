@@ -311,21 +311,24 @@ class Wire:
             self.pump(min(left, 0.2))
 
     def send_ip(self, proto, payload, src=PEER_IP, dst=GUEST_IP, ttl=64,
-                ident=None, eth_dst=GUEST_MAC, frag=0):
+                ident=None, eth_dst=GUEST_MAC, frag=0, opts=b''):
         """frag is the raw flags/fragment-offset field: 0x2000 | (off // 8)
-        for a More Fragments piece, off // 8 for the last one."""
+        for a More Fragments piece, off // 8 for the last one.  opts: raw
+        option octets, a multiple of 4 long, placed after the fixed header
+        (IHL grows to match)."""
         ident = self.ip_id if ident is None else ident
-        ip = struct.pack('!BBHHHBBH4s4s', 0x45, 0, 20 + len(payload), ident,
-                         frag, ttl, proto, 0, socket.inet_aton(src),
-                         socket.inet_aton(dst))
+        hlen = 20 + len(opts)
+        ip = struct.pack('!BBHHHBBH4s4s', 0x40 | (hlen // 4), 0,
+                         hlen + len(payload), ident, frag, ttl, proto, 0,
+                         socket.inet_aton(src), socket.inet_aton(dst)) + opts
         ip = ip[:10] + struct.pack('!H', csum(ip)) + ip[12:]
         self.ip_id = (self.ip_id + 1) & 0xFFFF
         self.trace.append(('tx', time.time(), 'proto %d %s>%s len %d' %
-                           (proto, src, dst, 20 + len(payload))))
+                           (proto, src, dst, hlen + len(payload))))
         self._send_frame(eth_dst + PEER_MAC + b'\x08\x00' + ip + payload)
 
     def send_udp(self, sport, dport, data, src=PEER_IP, dst=GUEST_IP,
-                 checksum=True, eth_dst=GUEST_MAC):
+                 checksum=True, eth_dst=GUEST_MAC, opts=b''):
         hdr = struct.pack('!HHHH', sport, dport, 8 + len(data), 0)
         c = 0
         if checksum:
@@ -333,7 +336,7 @@ class Wire:
                       struct.pack('!BBH', 0, 17, 8 + len(data)))
             c = csum(pseudo + hdr + data) or 0xFFFF
         self.send_ip(17, hdr[:6] + struct.pack('!H', c) + data, src, dst,
-                     eth_dst=eth_dst)
+                     eth_dst=eth_dst, opts=opts)
 
     def expect_ip(self, pred, timeout):
         """First non-TCP IPv4 datagram (proto, src, dst, bytes) matching

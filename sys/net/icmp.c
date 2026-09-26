@@ -148,9 +148,10 @@ static int icmp_err_ratelimit_ok(void) {
 }
 
 /*
- * ICMP Destination Unreachable, code 3 (port), quoting the invoking IP
- * header and the first 8 octets of its data (RFC 792) -- for UDP, the whole
- * header, which is what lets the sender map the error to its socket.
+ * An ICMP error of `type`/`code`, its second word's first octet set to
+ * `pointer` (Parameter Problem) or zero, quoting the invoking IP header and
+ * the first 8 octets of its data (RFC 792) -- for UDP, the whole header,
+ * which is what lets the sender map the error to its socket.
  *
  * The caller has already excluded broadcast and multicast destinations.
  * RFC 1122 3.2.2 also forbids an error about a datagram whose source does
@@ -158,7 +159,8 @@ static int icmp_err_ratelimit_ok(void) {
  * sent FROM the address the datagram was sent TO, so the sender can match
  * it against its own destination.
  */
-void icmp_port_unreach(netdev_t *dev, const uint8_t *ip_pkt, size_t ip_len) {
+static void icmp_error4(netdev_t *dev, uint8_t type, uint8_t code,
+                        uint8_t pointer, const uint8_t *ip_pkt, size_t ip_len) {
     if (!ip_pkt || ip_len < sizeof(struct iphdr)) return;
     const struct iphdr *ih = (const struct iphdr *)ip_pkt;
     size_t hlen = IPH_HL(ih) * 4;
@@ -176,12 +178,25 @@ void icmp_port_unreach(netdev_t *dev, const uint8_t *ip_pkt, size_t ip_len) {
     size_t quote = hlen + (ip_len - hlen < 8 ? ip_len - hlen : 8);
     uint8_t msg[8 + 60 + 8];
     memset(msg, 0, 8);
-    msg[0] = ICMP_DEST_UNREACH;
-    msg[1] = ICMP_PORT_UNREACH;
+    msg[0] = type;
+    msg[1] = code;
+    msg[4] = pointer;
     memcpy(msg + 8, ip_pkt, quote);
     uint16_t c = inet_csum(msg, 8 + quote);
     memcpy(msg + 2, &c, 2);
     ip4_output_from(ih->daddr, ih->saddr, IPPROTO_ICMP, msg, 8 + quote);
+}
+
+/* Destination Unreachable, code 3 (port). */
+void icmp_port_unreach(netdev_t *dev, const uint8_t *ip_pkt, size_t ip_len) {
+    icmp_error4(dev, ICMP_DEST_UNREACH, ICMP_PORT_UNREACH, 0, ip_pkt, ip_len);
+}
+
+/* Parameter Problem, code 0: `pointer` is the offending octet's offset from
+ * the start of the invoking IP header. */
+void icmp_param_problem(netdev_t *dev, const uint8_t *ip_pkt, size_t ip_len,
+                        uint8_t pointer) {
+    icmp_error4(dev, ICMP_PARAMETERPROB, 0, pointer, ip_pkt, ip_len);
 }
 
 /*
