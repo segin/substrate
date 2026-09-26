@@ -50,7 +50,7 @@ int main(int argc, char **argv) {
                 close(fd);
                 return 1;
             }
-            if (w == 0) {          /* no progress: avoid an infinite loop (DMESG-02) */
+            if (w == 0) {          /* no progress: avoid an infinite loop */
                 fprintf(stderr, "dmesg: write: no progress\n");
                 close(fd);
                 return 1;
@@ -63,7 +63,7 @@ int main(int argc, char **argv) {
         close(fd);
         return 1;
     }
-    if (close(fd) != 0) {          /* check close (DMESG-03) */
+    if (close(fd) != 0) {          /* check close */
         perror("dmesg: close");
         return 1;
     }

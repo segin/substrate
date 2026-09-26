@@ -15,7 +15,7 @@
  * Copy a utmp char field (not guaranteed NUL-terminated), replacing any
  * non-printable byte with '?'.  ut_host is set by telnetd from the network
  * peer, so printing it raw would inject terminal-escape sequences into the
- * operator's terminal (WHO-01).
+ * operator's terminal.
  */
 static void field(char *dst, const char *src, size_t n)
 {

@@ -131,7 +131,7 @@ static int read_file(struct file *F, const char *name)
 		if (F->rawlen == cap) {
 			/* Cap the slurp: doubling at ~2 GiB wraps cap to 0 on the
 			 * 32-bit target, so the next fread count (cap - rawlen)
-			 * becomes a huge value and overflows the heap (DIFF-03). */
+			 * becomes a huge value and overflows the heap. */
 			if (cap > (512UL * 1024 * 1024)) {
 				fprintf(stderr, "%s: %s: file too large\n", prog, name);
 				if (!is_stdin) fclose(f);
@@ -143,7 +143,7 @@ static int read_file(struct file *F, const char *name)
 		}
 	}
 	/* Distinguish a read error from EOF so a truncated read isn't silently
-	 * compared as the whole file (DIFF-08). */
+	 * compared as the whole file. */
 	if (ferror(f)) {
 		fprintf(stderr, "%s: %s: %s\n", prog, name, strerror(errno));
 		if (!is_stdin) fclose(f);
@@ -236,10 +236,10 @@ static void myers(struct file *A, struct file *B, int *am, int *bm)
 	 * The O(ND) tracer keeps a vsz-int vector for every edit depth, i.e.
 	 * ~(MAX+1)*vsz ints — quadratic in the file size (two dissimilar 10k-
 	 * line files would need ~3.2 GB and OOM on the 32-bit target).  Guard
-	 * the size_t multiplies (DIFF-02) and bound the total to a memory
+	 * the size_t multiplies and bound the total to a memory
 	 * budget; when the pair is too large fall back to leaving am/bm all -1
 	 * (already initialised), which yields a correct if non-minimal diff
-	 * rather than OOMing (DIFF-01).
+	 * rather than OOMing.
 	 */
 	if (vsz > SIZE_MAX / sizeof(int) ||
 	    (size_t)(MAX + 1) > SIZE_MAX / sizeof(int *) ||
@@ -688,7 +688,7 @@ static char **list_dir(const char *d, int *n_out)
 			cap = cap ? cap * 2 : 32;
 			names = xrealloc(names, (size_t)cap * sizeof(char *));
 		}
-		names[n] = strdup(e->d_name);         /* was unchecked (DIFF-07) */
+		names[n] = strdup(e->d_name);         /* checked below */
 		if (!names[n]) {
 			fprintf(stderr, "%s: out of memory\n", prog);
 			for (int k = 0; k < n; k++) free(names[k]);
@@ -700,7 +700,7 @@ static char **list_dir(const char *d, int *n_out)
 		n++;
 	}
 	closedir(dp);
-	if (n > 0)                                 /* qsort(NULL,0,...) is UB (DIFF-10) */
+	if (n > 0)                                 /* qsort(NULL,0,...) is UB */
 		qsort(names, (size_t)n, sizeof(char *), cmp_str);
 	*n_out = n;
 	return names;
@@ -790,7 +790,7 @@ static int diff_path(const char *p1, const char *p2)
 		}
 		/* Cap recursion depth so a symlink loop (a directory that contains
 		 * a symlink back to an ancestor) cannot recurse until the C stack
-		 * overflows (DIFF-04). */
+		 * overflows. */
 		if (dir_depth >= DIFF_MAX_DEPTH) {
 			fprintf(stderr, "%s: %s: directory nesting too deep\n", prog, p1);
 			exitcode = 2;
@@ -828,7 +828,7 @@ static void usage(FILE *o)
 }
 
 /* Parse a context-line count: reject garbage/negatives and clamp so that
- * 2*context (used in hunk grouping) cannot overflow int (DIFF-06). */
+ * 2*context (used in hunk grouping) cannot overflow int. */
 static int parse_context(const char *s)
 {
 	char *e;

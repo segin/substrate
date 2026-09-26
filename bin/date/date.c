@@ -37,7 +37,7 @@ static const char *prog = "date";
 /*
  * timegm(3) isn't in our libc, so convert a broken-down UTC time to
  * epoch seconds directly (Howard Hinnant's days_from_civil).  Unlike
- * mktime(), this does not apply the local timezone offset (DATE-02).
+ * mktime(), this does not apply the local timezone offset.
  */
 static time_t
 tm_to_utc(const struct tm *tm)
@@ -80,7 +80,7 @@ parse_set_string(const char *s, int use_utc, time_t *out)
     int     val_mm, val_dd, val_HH, val_MM, val_SS;
     int     val_cc, val_yy;
     int     dot_pos = -1;         /* string index; int so it can't alias
-                                   * the (char)-1 sentinel (DATE-07) */
+                                   * the (char)-1 sentinel */
     int     cc_given = 0, yy_given = 0;
     int     ss_val = 0;
     int     parts[6] = {0,0,0,0,0,0};
@@ -108,7 +108,7 @@ parse_set_string(const char *s, int use_utc, time_t *out)
     (void)digits;
 
     /* Digits before the optional '.SS' must form 1..6 two-digit chunks
-     * (mm up to CCYYMMDDhhmm); SS is exactly two digits (DATE-01). */
+     * (mm up to CCYYMMDDhhmm); SS is exactly two digits. */
     {
         int main_digits = (dot_pos == -1) ? (int)len : dot_pos;
         if (main_digits < 2 || main_digits > 12 || (main_digits % 2) != 0)
@@ -116,7 +116,7 @@ parse_set_string(const char *s, int use_utc, time_t *out)
     }
 
     /* Split into 2-digit chunks before the optional `.SS`.  Allow the
-     * full six chunks (CCYYMMDDhhmm), not five (DATE-01). */
+     * full six chunks (CCYYMMDDhhmm), not five. */
     {
         const char *q = s;
         while (parts_n < 6 && q < s + (dot_pos == -1 ? (int)len : dot_pos)) {
@@ -179,7 +179,7 @@ parse_set_string(const char *s, int use_utc, time_t *out)
             val_HH = parts[3]; val_MM = parts[4];
             yy_given = 1;
             break;
-        case 6:                                     /* CCYYMMDDhhmm (DATE-01) */
+        case 6:                                     /* CCYYMMDDhhmm */
             val_cc = parts[0]; val_yy = parts[1]; val_mm = parts[2];
             val_dd = parts[3]; val_HH = parts[4]; val_MM = parts[5];
             cc_given = 1; yy_given = 1;
@@ -189,13 +189,13 @@ parse_set_string(const char *s, int use_utc, time_t *out)
     }
 
     /* Century pivot when a 2-digit year is given without a century:
-     * 69..99 -> 1969..1999, 00..68 -> 2000..2068 (DATE-06). */
+     * 69..99 -> 1969..1999, 00..68 -> 2000..2068 (POSIX). */
     if (yy_given && !cc_given)
         val_cc = (val_yy < 69) ? 20 : 19;
 
     /* Range-validate every field before the conversion so a bogus
      * setting string ('date 13322500') is rejected, not silently
-     * normalised into the system clock as root (DATE-04). */
+     * normalised into the system clock as root. */
     if (val_mm < 1 || val_mm > 12 || val_dd < 1 || val_dd > 31 ||
         val_HH < 0 || val_HH > 23 || val_MM < 0 || val_MM > 59 ||
         val_SS < 0 || val_SS > 61)
@@ -212,7 +212,7 @@ parse_set_string(const char *s, int use_utc, time_t *out)
 
     if (use_utc) {
         /* -u interprets the fields as UTC; use the timegm-equivalent so
-         * the clock isn't skewed by the local TZ offset (DATE-02). */
+         * the clock isn't skewed by the local TZ offset. */
         *out = tm_to_utc(&result);
     } else {
         time_t t = mktime(&result);
@@ -230,14 +230,14 @@ parse_at_epoch(const char *s, time_t *out)
     if (s == NULL || s[0] != '@') return -1;
     errno = 0;
     /* time_t is 64-bit on Substrate; parse with strtoll so a value past
-     * LONG_MAX isn't truncated, and reject overflow (DATE-03). */
+     * LONG_MAX isn't truncated, and reject overflow. */
     v = strtoll(s + 1, &eptr, 10);
     if (eptr == s + 1 || *eptr != '\0' || errno == ERANGE) return -1;
     *out = (time_t)v;
     return 0;
 }
 
-/* Parse a bare seconds-since-epoch operand for -r (DATE-03/08). */
+/* Parse a bare seconds-since-epoch operand for -r. */
 static int
 parse_seconds(const char *s, time_t *out)
 {
@@ -336,8 +336,7 @@ main(int argc, char **argv)
         }
         /* strftime returns 0 both when the output is legitimately empty
          * (date +'') and when it overflows buf.  An empty format can't
-         * overflow, so only treat 0 as an error for a non-empty format
-         * (DATE-05). */
+         * overflow, so only treat 0 as an error for a non-empty format. */
         size_t n = strftime(buf, sizeof(buf), fmt, tm);
         if (n == 0 && fmt[0] != '\0') {
             fprintf(stderr, "%s: format result too long\n", prog);

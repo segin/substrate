@@ -131,7 +131,7 @@ rm_remove_directory(struct rm_walk_state *state, int parent_fd,
     int result;
 
     /* Bound recursion so a very deep tree can't exhaust the C stack or
-     * (with one held-open fd per level) RLIMIT_NOFILE mid-delete (RM-01). */
+     * (with one held-open fd per level) RLIMIT_NOFILE mid-delete. */
     if (state->depth >= RM_MAX_DEPTH) {
         rm_report_errno(state->opts, display_path, ELOOP);
         return RM_WALK_FAILED;
@@ -167,7 +167,7 @@ rm_remove_directory(struct rm_walk_state *state, int parent_fd,
     /*
      * Re-verify the file-system boundary against the actually-opened fd, not
      * the pre-openat fstatat: a rename swap between the two could otherwise
-     * let --one-file-system descend across the boundary (RM-03).
+     * let --one-file-system descend across the boundary.
      */
     if (state->opts->one_file_system) {
         struct stat opened_st;
@@ -218,7 +218,7 @@ rm_remove_directory(struct rm_walk_state *state, int parent_fd,
 
             if (child_result == RM_WALK_FAILED) {
                 /* Record the failure but keep removing the remaining
-                 * siblings rather than abandoning them (RM-02). The
+                 * siblings rather than abandoning them. The
                  * non-empty parent will then fail its own rmdir below. */
                 result = RM_WALK_FAILED;
                 continue;
@@ -314,7 +314,7 @@ rm_remove_root(struct rm_walk_state *state)
 
             if (child_result == RM_WALK_FAILED) {
                 /* Record the failure but keep removing the remaining
-                 * siblings rather than abandoning them (RM-02). The
+                 * siblings rather than abandoning them. The
                  * non-empty parent will then fail its own rmdir below. */
                 result = RM_WALK_FAILED;
                 continue;

@@ -160,8 +160,7 @@ static int wc_file(struct wc_opts *o, int fd, const char *name, struct wc_counts
 
     memset(file_counts, 0, sizeof(*file_counts));
 
-    /* Reject a directory rather than read()-ing garbage counts out of it
-     * (WC-02). */
+    /* Reject a directory rather than read()-ing garbage counts out of it. */
     {
         struct stat st;
         if (fstat(fd, &st) == 0 && S_ISDIR(st.st_mode)) {
@@ -182,7 +181,7 @@ static int wc_file(struct wc_opts *o, int fd, const char *name, struct wc_counts
 
     while ((n = read(fd, buf, BUF_SIZE)) != 0) {
         if (n < 0) {
-            if (errno == EINTR)   /* e.g. interrupted by the SIGINFO handler (WC-03) */
+            if (errno == EINTR)   /* e.g. interrupted by the SIGINFO handler */
                 continue;
             break;
         }

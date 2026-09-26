@@ -57,7 +57,7 @@ main(int argc, char **argv)
             }
             break;
         }
-        if (a[0] == '-' && a[1] != '\0')   /* an option, not an operand (WHOAMI-02) */
+        if (a[0] == '-' && a[1] != '\0')   /* an option, not an operand */
             fprintf(stderr, "%s: unrecognized option '%s'\n", prog, a);
         else
             fprintf(stderr, "%s: extra operand '%s'\n", prog, a);
@@ -81,7 +81,7 @@ main(int argc, char **argv)
         return 1;
     }
 
-    if (pw->pw_name == NULL) {          /* malformed entry: puts(NULL) is UB (WHOAMI-01) */
+    if (pw->pw_name == NULL) {          /* malformed entry: puts(NULL) is UB */
         fprintf(stderr, "%s: no name for user ID %u\n", prog, (unsigned)euid);
         return 1;
     }

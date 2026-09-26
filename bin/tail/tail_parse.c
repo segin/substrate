@@ -128,7 +128,7 @@ static int parse_count(const char *s, int64_t *out, bool *from_start,
 		/* Explicit leading '-' is the documented from-end form
 		 * (`tail -n -5` == `tail -n 5`); consume it and parse the
 		 * magnitude, or the negative value would reach the printer
-		 * as "output nothing" (TAIL-02). */
+		 * as "output nothing". */
 		s++;
 		if(!*s) goto bad;
 	}

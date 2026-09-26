@@ -19,7 +19,7 @@
 
 #define TAR_BLOCK 512
 #define PAX_TYPE 'x'
-#define PAX_MAX (1 << 20)   /* cap on a pax extended-header blob (TAR-06) */
+#define PAX_MAX (1 << 20)   /* cap on a pax extended-header blob */
 
 struct tar_header {
     char name[100], mode[8], uid[8], gid[8], size[12], mtime[12], chksum[8];
@@ -75,7 +75,7 @@ static int64_t oct2i(const char *s, size_t n) {
     /* GNU base-256: when the top bit of the first byte is set the field is a
      * big-endian binary integer, not ASCII octal.  Decoding it as octal (and
      * "continue"-skipping the non-octal bytes) silently desyncs large
-     * size/uid/mtime values (TAR-07). */
+     * size/uid/mtime values. */
     if (n > 0 && (s[0] & 0x80)) {
         uint64_t v = (uint64_t)((unsigned char)s[0] & 0x7f);
         for (size_t i = 1; i < n; i++) v = (v << 8) | (unsigned char)s[i];
@@ -474,7 +474,7 @@ static char *map_extract_path(const char *in) {
  * Open the directory that will hold `relpath`'s final component, walking one
  * component at a time from the pinned extraction-root fd with
  * O_DIRECTORY|O_NOFOLLOW so that NO symlink in any intermediate component can
- * redirect the operation outside the extraction root (TAR-01).  Intermediate
+ * redirect the operation outside the extraction root.  Intermediate
  * directories are created with mkdirat.  On success returns a dirfd the caller
  * must close and copies the final path component into leaf[leafsz].  `relpath`
  * must already be root-relative and free of "../" (map_extract_path).
@@ -551,7 +551,7 @@ static int pax_parse(const char *blob, size_t len, struct pax_state *ps) {
          * The record is "<len> <key>=<value>\n"; the "<len> " prefix is
          * (j+1-i) bytes.  A record whose declared length is <= the prefix
          * (e.g. "1 =\n") would make n = rec - prefix underflow to a huge
-         * size_t and memchr/strndup over-read far past the blob (TAR-03).
+         * size_t and memchr/strndup over-read far past the blob.
          * Require room for the prefix plus at least "=\n".
          */
         size_t plen = (size_t)(j + 1 - i);
@@ -619,7 +619,7 @@ static int process_read(FILE *in, bool extract) {
         int64_t hsize = oct2i(h.size, sizeof(h.size));
         /* name/prefix/linkname are fixed-width fields with no guaranteed NUL;
          * bound every read with a field-width precision / explicit copy so a
-         * full-width value can't read past the field (TAR-04). */
+         * full-width value can't read past the field. */
         char name[PATH_MAX];
         if (h.prefix[0]) snprintf(name, sizeof(name), "%.155s/%.100s", h.prefix, h.name);
         else snprintf(name, sizeof(name), "%.100s", h.name);
@@ -631,7 +631,7 @@ static int process_read(FILE *in, bool extract) {
             /* Cap the extended-header size: reject non-positive or absurd
              * values before the (size_t) cast so a 64-bit attacker length
              * can't truncate to a small/zero malloc that then desyncs the
-             * stream (TAR-06). */
+             * stream. */
             if (hsize <= 0 || hsize > PAX_MAX) return -1;
             char *blob = malloc((size_t)hsize);
             if (!blob) return -1;
@@ -696,7 +696,7 @@ static int process_read(FILE *in, bool extract) {
                 if (skip_padded(in, hsize)) { close(pdir); free(target); close(rootfd); return -1; }
                 break;
             }
-            case '1': {   /* hardlink: confine the source to the extraction root (TAR-02) */
+            case '1': {   /* hardlink: confine the source to the extraction root */
                 const char *lt = ps.linkpath ? ps.linkpath : linkbuf;
                 /*
                  * The old code passed linkname to link() verbatim, so a member
@@ -735,7 +735,7 @@ static int process_read(FILE *in, bool extract) {
         /* Metadata via *at on the pinned parent — never re-traverses the path
          * and never follows a symlink member (chmod skipped for symlinks).
          * Strip setuid/setgid from a restored mode so a hostile archive can't
-         * plant a setuid-root binary (TAR-05). */
+         * plant a setuid-root binary. */
         if (opt.preserve_permissions && tf != '2')
             fchmodat(pdir, leaf,
                      (mode_t)oct2i(h.mode, sizeof(h.mode)) & 07777
@@ -790,7 +790,7 @@ int main(int argc, char **argv) {
     memset(&opt, 0, sizeof(opt));
     /* Default to NOT restoring archived ownership: applying an untrusted
      * uid/gid (especially as root) is a footgun / priv-esc vector. Opt in
-     * with --same-owner (TAR-05). */
+     * with --same-owner. */
     opt.no_same_owner = true;
     opt.format = FMT_PAX;
     opt.safe_extract = true; /* Enable safe extraction by default */

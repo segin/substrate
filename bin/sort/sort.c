@@ -91,7 +91,7 @@ add_line(char *s, size_t len)
 {
     if (n_lines == cap_lines) {
         size_t nc = cap_lines ? cap_lines * 2 : 256;
-        /* Guard the growth multiply on 32-bit (SORT-07). */
+        /* Guard the growth multiply on 32-bit. */
         if (nc < cap_lines || nc > SIZE_MAX / sizeof(*all_lines)) {
             fprintf(stderr, "%s: too many lines\n", progname);
             exit(2);
@@ -167,7 +167,7 @@ filter_char(int c, const sort_opts_t *o)
 /*
  * Length-aware lexical compare.  The plain path uses memcmp over the
  * common length so an embedded NUL no longer truncates the key and -u
- * no longer merges distinct binary lines (SORT-01).  Filtering modes
+ * no longer merges distinct binary lines.  Filtering modes
  * (-b/-f/-d/-i) fall into a length-bounded byte loop.
  */
 static int
@@ -277,7 +277,7 @@ parse_int_key(const char *s, const sort_opts_t *o)
     long long v = strtoll(s, &end, 10);
     if (end == s)
         return 0;                       /* no digits: sorts as 0 */
-    if (errno == ERANGE)                /* saturate instead of wrapping (SORT-05) */
+    if (errno == ERANGE)                /* saturate instead of wrapping */
         return (s[0] == '-') ? LLONG_MIN : LLONG_MAX;
     return v;
 }
@@ -331,7 +331,7 @@ version_compare(const char *a, const char *b)
         if (isdigit((unsigned char)*a) && isdigit((unsigned char)*b)) {
             /* Compare digit runs by significant length then lexically —
              * no numeric accumulation, so arbitrarily long version
-             * numbers can't overflow (SORT-06). */
+             * numbers can't overflow. */
             while (*a == '0') a++;
             while (*b == '0') b++;
             const char *da = a, *db = b;
@@ -395,7 +395,7 @@ compare_lines(const void *pa, const void *pb, const sort_opts_t *o)
                 hb = hb * 1000003u ^ (unsigned char)lb->key[i];
             r = (ha < hb) ? -1 : (ha > hb) ? 1 : 0;
             /* Break hash ties by the full line so -R stays a strict total
-             * order and -u doesn't drop distinct colliding lines (SORT-10). */
+             * order and -u doesn't drop distinct colliding lines. */
             if (r == 0)
                 r = lex_compare(la->s, la->len, lb->s, lb->len, o);
             break;
@@ -493,8 +493,7 @@ emit_lines(FILE *out, const sort_opts_t *o)
             sort_opts_t neq = *o;
             neq.reverse = 0;
             neq.stable  = 0;   /* else the orig_index tiebreak makes equal
-                                * keys never compare 0, so -su emits dupes
-                                * (SORT-02) */
+                                * keys never compare 0, so -su emits dupes */
             if (compare_lines(&all_lines[i - 1], &all_lines[i], &neq) == 0)
                 continue;
         }
@@ -549,7 +548,7 @@ main(int argc, char **argv)
                     const char *sep;
                     if (p[1] != '\0') { sep = p + 1; p += strlen(p) - 1; }
                     else { if (i + 1 >= argc) usage(); sep = argv[++i]; }
-                    if (sep[0] == '\0') {   /* reject empty -t '' (SORT-08) */
+                    if (sep[0] == '\0') {   /* reject empty -t '' */
                         fprintf(stderr, "%s: empty tab separator\n", progname);
                         usage();
                     }
@@ -607,7 +606,7 @@ next_arg: ;
         }
     }
 
-    /* Materialise the -k comparison key for each line (SORT-04). */
+    /* Materialise the -k comparison key for each line. */
     if (o.has_key) {
         for (size_t li = 0; li < n_lines; li++) {
             size_t kl;

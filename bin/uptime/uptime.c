@@ -44,7 +44,7 @@ static void read_loadavg(double load[3]) {
 }
 
 static int count_users(void) {
-    /* Count USER_PROCESS records in utmp (UPTIME-01: was a hardcoded 1). */
+    /* Count USER_PROCESS records in utmp rather than assuming one user. */
     FILE *f = fopen(UTMP_FILE, "r");
     struct utmp u;
     int n = 0;

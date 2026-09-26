@@ -63,7 +63,7 @@ db_reserve(dynbuf_t *db, size_t extra)
     /*
      * Guard the size arithmetic: on the 32-bit target `db->len + extra + 1`
      * can wrap to a small value (undersized realloc then memcpy overflow),
-     * and the `newcap *= 2` doubling can wrap to 0 (endless loop) (SED-05).
+     * and the `newcap *= 2` doubling can wrap to 0 (endless loop).
      */
     if (extra > SIZE_MAX - 1 - db->len)
         return -1;

@@ -87,7 +87,7 @@ process_files(int argc, char **argv, int optind)
             }
 
             /* Capture the original's mode/owner so the replacement can
-             * preserve them (SED-04) rather than inherit mkstemp's 0600. */
+             * preserve them rather than inherit mkstemp's 0600. */
             struct stat orig_st;
             int have_st = (fstat(fileno(fp), &orig_st) == 0);
 
@@ -114,12 +114,12 @@ process_files(int argc, char **argv, int optind)
 #endif
             if (!tmpfp) {
                 warn("cannot create temp '%s': %s", tmpname, strerror(errno));
-                if (tmpfd >= 0) { close(tmpfd); unlink(tmpname); } /* SED-09 */
+                if (tmpfd >= 0) { close(tmpfd); unlink(tmpname); } /* don't leak the fd or leave the temp behind */
                 free(tmpname); fclose(fp); ret = 1; continue;
             }
 
             /* Flush the real stdout BEFORE redirecting, otherwise pending
-             * output would be written into the temp file (SED-07). */
+             * output would be written into the temp file. */
             fflush(stdout);
             int saved_stdout_fd = dup(STDOUT_FILENO);
             dup2(fileno(tmpfp), STDOUT_FILENO);
@@ -136,14 +136,14 @@ process_files(int argc, char **argv, int optind)
 
             /* Detect any write error to the temp before committing it over
              * the original: a silent ENOSPC would otherwise rename a
-             * truncated temp and lose the file (SED-03). */
+             * truncated temp and lose the file. */
             int werr = (fflush(stdout) != 0) || ferror(stdout);
 
             /* restore stdout */
             dup2(saved_stdout_fd, STDOUT_FILENO);
             close(saved_stdout_fd);
 
-            /* Preserve the original mode/owner (SED-04) and force the data to
+            /* Preserve the original mode/owner and force the data to
              * disk before the rename commits it. */
             if (have_st) {
                 (void)fchmod(fileno(tmpfp), orig_st.st_mode & 07777);

@@ -109,8 +109,8 @@ retry_stat(const char *path, struct stat *st)
     return rc;
 }
 
-/* fd-relative stat/chown, EINTR-retried, for the pinned-parent descent
- * (CHGRP-01/05). */
+/* fd-relative stat/chown, EINTR-retried, for the pinned-parent descent, so
+ * a directory swapped for a symlink can't redirect the operation. */
 static int
 retry_fstatat(int dirfd, const char *name, struct stat *st, int flag)
 {
@@ -166,7 +166,7 @@ path_join(const char *base, const char *name)
     const size_t base_len = strlen(base);
     const size_t name_len = strlen(name);
     const bool need_slash = base_len > 0 && base[base_len - 1] != '/';
-    /* Guard the length arithmetic against size_t wrap on 32-bit (CHGRP-08). */
+    /* Guard the length arithmetic against size_t wrap on 32-bit. */
     if (base_len > SIZE_MAX - name_len - 2u) {
         return NULL;
     }
@@ -228,7 +228,8 @@ visited_add(struct chgrp_context *ctx, dev_t dev, ino_t ino)
 }
 
 /* Pop the directory pushed on entry, so the set tracks only current-path
- * ancestors (CHGRP-08/09 ancestor-only cycle set). */
+ * ancestors: a hardlink cycle is caught, but a directory reachable from two
+ * sibling branches is not falsely skipped. */
 static void
 visited_pop(struct chgrp_context *ctx)
 {
@@ -239,10 +240,9 @@ visited_pop(struct chgrp_context *ctx)
 
 /*
  * Resolve a group spec to a gid via an out-parameter (no int/(gid_t)-1
- * sentinel collision, CHGRP-07).  A real group name is preferred over a
+ * sentinel collision).  A real group name is preferred over a
  * numeric guess; numeric ids are parsed with strtoul + endptr + range so
- * "12abc" and out-of-range values are rejected rather than truncated
- * (CHGRP-04).
+ * "12abc" and out-of-range values are rejected rather than truncated.
  */
 static int
 resolve_group_gid(const char *name, gid_t *out)
@@ -285,7 +285,7 @@ apply_at(struct chgrp_context *ctx, int dirfd, const char *name,
     }
     /* --reference implies a target gid even though it doesn't set gid_set;
      * without this the reference gid was clobbered to -1 and chgrp became a
-     * silent no-op (CHGRP-03). */
+     * silent no-op. */
     if (!ctx->opts.gid_set && !ctx->opts.use_reference) {
         gid = (gid_t)-1;
     }
@@ -313,7 +313,7 @@ static void process_entry_at(struct chgrp_context *ctx, int dirfd,
     const char *name, const char *display, bool cmdline, int depth);
 
 /* Descend into `owned_fd` (taken ownership of + closed here), operating
- * fd-relative so a swapped-in symlink can't redirect the walk (CHGRP-01/05). */
+ * fd-relative so a swapped-in symlink can't redirect the walk. */
 static void
 walk_fd(struct chgrp_context *ctx, int owned_fd, const char *display,
     dev_t dev, ino_t ino, int depth)

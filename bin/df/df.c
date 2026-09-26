@@ -99,7 +99,7 @@ static char *unescape(const char *s)
 			int v = ((s[i+1]-'0') << 6)
 			      | ((s[i+2]-'0') << 3)
 			      |  (s[i+3]-'0');
-			out[o++] = (char)(v & 0xff);   /* \400-\777 would wrap (DF-06) */
+			out[o++] = (char)(v & 0xff);   /* \400-\777 would wrap */
 			i += 4;
 		} else {
 			out[o++] = s[i++];
@@ -124,7 +124,7 @@ static int read_mounts(void)
 	while (fgets(line, sizeof line, f)) {
 		/* A line longer than the buffer would be split across two fgets,
 		 * with the tail mis-parsed as a bogus mount; drain the rest and
-		 * skip it (DF-04). */
+		 * skip it. */
 		size_t ll = strlen(line);
 		if (ll > 0 && line[ll - 1] != '\n' && !feof(f)) {
 			int ch;
@@ -134,7 +134,7 @@ static int read_mounts(void)
 		}
 		/* Field buffers sized to the line so long device paths / mount
 		 * points aren't silently truncated, breaking longest-prefix
-		 * matching (DF-03). */
+		 * matching. */
 		char src[4096], tgt[4096], typ[4096];
 		if (sscanf(line, "%4095s %4095s %4095s", src, tgt, typ) < 3)
 			continue;
@@ -375,7 +375,7 @@ int main(int argc, char **argv)
 	if (read_mounts() < 0)
 		return 1;
 
-	int ret = 0;                    /* nonzero if any operand fails (DF-02) */
+	int ret = 0;                    /* nonzero if any operand fails */
 
 	/* Buffer rows so emit_table() can size columns to the actual data. */
 	disps = xrealloc(NULL, (size_t)(nmounts + argc) * sizeof(*disps));
@@ -394,7 +394,7 @@ int main(int argc, char **argv)
 	} else {
 		for (int i = optind; i < argc; i++) {
 			/* realpath() may write up to PATH_MAX bytes; a 1024-byte
-			 * buffer overran the stack for deep paths (DF-01). */
+			 * buffer overran the stack for deep paths. */
 			char resolved[PATH_MAX];
 			if (!realpath(argv[i], resolved)) {
 				strlcpy(resolved, argv[i], sizeof resolved);
@@ -416,7 +416,7 @@ int main(int argc, char **argv)
 
 	emit_table();
 
-	/* Release the per-mount unescape() allocations (DF-05). */
+	/* Release the per-mount unescape() allocations. */
 	for (int i = 0; i < nmounts; i++) {
 		free(mounts[i].source);
 		free(mounts[i].target);

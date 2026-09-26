@@ -122,7 +122,7 @@ sed_do_subst(subst_t *sub, dynbuf_t *pat)
     /* Compile the pattern ONCE and reuse it for every match position:
      * regex_match() takes a const regex_t* and does not mutate the object,
      * so the old per-iteration recompile was pure CPU-DoS overhead on lines
-     * with many matches (SED-06). */
+     * with many matches. */
     regex_err_t compile_err;
     regex_t *re = regex_compile(sub->pat, sub->reflags, &compile_err);
     if (!re) return 0;
@@ -140,7 +140,7 @@ sed_do_subst(subst_t *sub, dynbuf_t *pat)
     while (pos <= tlen) {
         regex_err_t err;
         /* Reset the capture vector so an unset group reads as (size_t)-1
-         * rather than uninitialised heap (SED-08). */
+         * rather than uninitialised heap. */
         for (size_t k = 0; k < ncaps * 2; k++) caps[k] = (size_t)-1;
         ssize_t rc = regex_match(re, text + pos, tlen - pos,
                                  caps, ncaps * 2, &err);
@@ -420,7 +420,7 @@ print_first_line_to(FILE *fp)
 /*
  * Resolve a w/W/s///w target to its stdio stream, opening (and truncating)
  * it lazily on the first actual write.  Returns NULL — writing nothing — in
- * sandbox mode, so -S never creates or truncates a file (SED-01).
+ * sandbox mode, so -S never creates or truncates a file.
  */
 static FILE *
 wfile_fp(int idx)
@@ -453,7 +453,7 @@ run_cmds(cmd_t *start)
     cmd_t *c = start;
     /* Bound the number of command steps per input line so an untrusted
      * script cannot hang the process with an unconditional branch loop
-     * (e.g. `:x;bx`). The cap is far above any legitimate use (SED-10). */
+     * (e.g. `:x;bx`). The cap is far above any legitimate use. */
     unsigned long steps = 0;
     while (c) {
         if (++steps > 100000000UL)

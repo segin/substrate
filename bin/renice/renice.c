@@ -41,7 +41,7 @@ static int resolve_user(const char *s, id_t *out)
 	errno = 0;
 	v = strtol(s, &end, 10);
 	/* Range-check so a huge id can't truncate into a valid id_t and
-	 * target the wrong user (RENICE-01/03). */
+	 * target the wrong user, and a negative id can't wrap. */
 	if (end != s && *end == '\0' && errno != ERANGE && v >= 0 && v <= INT_MAX) {
 		*out = (id_t)v;
 		return 0;

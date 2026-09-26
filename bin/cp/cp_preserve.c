@@ -202,8 +202,7 @@ int cp_preserve_metadata(const struct cp_options *opts,
 {
     /* Whether the destination's owner/group were set to the source's. If not
      * (typically EPERM as non-root), the setuid/setgid bits must NOT be
-     * restored, else -p would leave a setuid binary owned by the invoker
-     * (CP-02). */
+     * restored, else -p would leave a setuid binary owned by the invoker. */
     int owner_established = 1;
 
     if (opts->preserve_owner) {

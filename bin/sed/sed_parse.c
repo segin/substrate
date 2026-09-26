@@ -304,8 +304,7 @@ get_wfile(const char *name)
      * Do NOT open (and truncate) the file here: opening at parse time meant
      * `sed -S -e 'w /etc/motd' /dev/null` truncated /etc/motd even though the
      * sandbox skips the write at exec time. The file is opened lazily on the
-     * first actual write via wfile_fp(), which refuses in sandbox mode
-     * (SED-01).
+     * first actual write via wfile_fp(), which refuses in sandbox mode.
      */
     G.write_fps[G.write_count] = NULL;
     return G.write_count++;

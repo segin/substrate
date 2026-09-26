@@ -189,7 +189,7 @@ static int cp_prompt_overwrite(const struct cp_options *opts, const char *path)
     }
 
     /* Drain the rest of the input line so leftover bytes don't spill into
-     * the next prompt (CP-11). */
+     * the next prompt. */
     if (memchr(buf, '\n', (size_t)n) == NULL) {
         char c;
         while (read(STDIN_FILENO, &c, 1) == 1 && c != '\n')
@@ -952,7 +952,7 @@ static int cp_copy_regular(struct cp_context *ctx,
         /* Create the temp with the source-derived mode (subject to umask via
          * open), not a hardcoded 0600 — otherwise `cp foo bar` produced a
          * 0600 file, dropping exec/group/other bits and ignoring the source
-         * mode + umask (CP-01). */
+         * mode + umask. */
         if (cp_atomic_open_temp(dst, create_mode, &tmp_path, &dst_fd) != 0) {
             cp_diag(ctx, src, dst, "create atomic temporary file", errno);
             goto out;
@@ -1018,7 +1018,7 @@ static int cp_copy_regular(struct cp_context *ctx,
 
     if (using_atomic) {
         int crc = cp_atomic_commit(dst_fd, tmp_path, dst);
-        dst_fd = -1;                    /* commit owns/closed the fd (CP-04) */
+        dst_fd = -1;                    /* commit owns/closed the fd */
         if (crc != 0) {
             cp_diag(ctx, src, dst, "atomic replace", errno);
             goto out;
@@ -1109,7 +1109,7 @@ static int cp_copy_directory(struct cp_context *ctx,
     } else {
         /* Create with owner rwx so children can be written even when the
          * source directory is read-only (e.g. 0555); the real mode is
-         * restored after the directory is populated (CP-05). */
+         * restored after the directory is populated. */
         if (mkdir(dst, (src_st->st_mode & 0777) | S_IRWXU) != 0) {
             cp_diag(ctx, src, dst, "create destination directory", errno);
             return -1;
@@ -1163,7 +1163,7 @@ static int cp_copy_directory(struct cp_context *ctx,
                                    cp_preserve_warn_bridge, ctx);
     } else if (created) {
         /* Restore the source directory's real mode now that it is populated
-         * (we created it u+rwx to be able to write into it) (CP-05). */
+         * (we created it u+rwx to be able to write into it). */
         (void)chmod(dst, src_st->st_mode & 0777);
     }
 

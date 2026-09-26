@@ -89,7 +89,7 @@ compare_view(const char *s, size_t slen, const uniq_opts_t *o,
 }
 
 /* Compare using the byte lengths, not strcmp — an embedded NUL in a line
- * (binary input) must not truncate the comparison (UNIQ-02). */
+ * (binary input) must not truncate the comparison. */
 static int
 lines_equal(const char *a, size_t alen, const char *b, size_t blen,
             const uniq_opts_t *o)
@@ -114,7 +114,7 @@ lines_equal(const char *a, size_t alen, const char *b, size_t blen,
 }
 
 /* Parse a non-negative count operand, rejecting garbage/negatives/overflow
- * instead of atoi's silent 0 (UNIQ-05/06). */
+ * instead of atoi's silent 0. */
 static int
 parse_count(const char *s)
 {
@@ -140,8 +140,7 @@ read_line(FILE *f, char **out, size_t *out_len, int term)
     while ((c = fgetc(f)) != EOF) {
         if (len + 1 >= cap) {
             /* Guard the doubling: on a >=2 GiB line cap*2 wraps to 0 on the
-             * 32-bit target, giving a tiny realloc then a heap overflow
-             * (UNIQ-01). */
+             * 32-bit target, giving a tiny realloc then a heap overflow. */
             if (cap > SIZE_MAX / 2) { free(buf); return -1; }
             size_t nc = cap * 2;
             char *nb = realloc(buf, nc);
@@ -309,13 +308,13 @@ next_arg: ;
         free(prev);
     }
 
-    /* Distinguish a read error from EOF (UNIQ-04). */
+    /* Distinguish a read error from EOF. */
     if (rl < 0 || ferror(in)) {
         fprintf(stderr, "%s: read error: %s\n", progname, strerror(errno));
         ret = 1;
     }
 
-    /* Check that all output actually reached the file (UNIQ-03). */
+    /* Check that all output actually reached the file. */
     if (fflush(out) != 0 || ferror(out)) {
         fprintf(stderr, "%s: write error: %s\n", progname, strerror(errno));
         ret = 1;

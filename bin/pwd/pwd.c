@@ -19,7 +19,7 @@
 
 static const char *prog = "pwd";
 
-/* getcwd into a buffer grown past PATH_MAX on ERANGE (PWD-03). */
+/* getcwd into a buffer grown past PATH_MAX on ERANGE. */
 static char *
 xgetcwd(void)
 {
@@ -102,12 +102,12 @@ main(int argc, char *argv[])
         out = cwd;
     }
 
-    if (out == NULL) {                                        /* PWD-01/02 */
+    if (out == NULL) {                    /* diagnose on stderr, exit nonzero */
         fprintf(stderr, "%s: %s\n", prog, strerror(errno));
         return 1;
     }
 
-    if (printf("%s\n", out) < 0 || fflush(stdout) != 0) {     /* PWD-05 */
+    if (printf("%s\n", out) < 0 || fflush(stdout) != 0) {     /* check the write */
         fprintf(stderr, "%s: write error: %s\n", prog, strerror(errno));
         free(cwd);
         return 1;

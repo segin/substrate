@@ -84,7 +84,7 @@ static void parse_list(const char *s)
 				unsigned v = 0;
 				while (*s >= '0' && *s <= '9') {
 					unsigned d = (unsigned)(*s - '0');
-					/* v*10 wraps mod 2^32 -> silently wrong (CUT-01). */
+					/* v*10 wraps mod 2^32 -> silently wrong. */
 					if (v > (UINT_MAX - d) / 10u)
 						die("byte/character/field value out of range");
 					v = v * 10 + d;
@@ -102,8 +102,8 @@ static void parse_list(const char *s)
 			if (!have_lo) die("invalid list");
 			hi = lo;
 		} else {
-			/* A bare '-' (no number on either side) is not a valid range
-			 * (CUT-03). */
+			/* A bare '-' (no number on either side) is not a valid
+			 * range. */
 			if (!have_lo && !have_hi)
 				die("invalid range with no endpoint");
 			if (!have_lo) lo = 1;        /* -M */

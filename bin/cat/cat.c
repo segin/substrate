@@ -699,9 +699,9 @@ static int cat_process_raw_fd(int fd,
 }
 
 /*
- * Reject a directory operand (CAT-02) and guard against `cat f >> f`, where
+ * Reject a directory operand and guard against `cat f >> f`, where
  * the input file is the output file and cat would read its own growing
- * output forever (CAT-01). Returns 0 if the fd is safe to read, -1 otherwise.
+ * output forever. Returns 0 if the fd is safe to read, -1 otherwise.
  */
 static int cat_input_ok(int fd, const char *name,
                         const struct cat_options *options)

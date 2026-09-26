@@ -10,12 +10,12 @@
 #include <sys/wait.h>
 
 /* Caps: a huge output base OOMs the printer, and a huge power exponent makes
- * a number with billions of digits — both DoS on untrusted input (DC-04). */
+ * a number with billions of digits — both DoS on untrusted input. */
 #define DC_OBASE_MAX 65535
 #define DC_POW_MAX   1000000
 
 /* Accept the digits valid for the given input base, including A..Z for
- * ibase up to 36 (the old code only accepted A..F) (DC-09). */
+ * ibase up to 36 (the old code only accepted A..F). */
 static int dc_is_num_char(int c, int base) {
     if (c >= '0' && c <= '9') return 1;
     if (base > 10 && c >= 'A' && c <= 'A' + (base - 11)) return 1;
@@ -24,7 +24,7 @@ static int dc_is_num_char(int c, int base) {
 
 /* Upper bound on a dc register-array index: caps a single array at ~1M
  * entries so a hostile index can neither overflow the size arithmetic nor
- * drive an unbounded allocation (DC-01). */
+ * drive an unbounded allocation. */
 #define DC_ARRAY_MAX (1 << 20)
 
 typedef enum { VAL_NUM, VAL_STR } val_type_t;
@@ -57,7 +57,7 @@ void stack_init(dc_stack_t *s) {
     s->cap = 64;
     s->sp = 0;
     s->data = malloc(s->cap * sizeof(dc_val_t*));
-    if (!s->data) { perror("dc: malloc"); exit(1); }   /* DC-08 */
+    if (!s->data) { perror("dc: malloc"); exit(1); }
 }
 
 void val_free(dc_val_t *v) {
@@ -69,7 +69,7 @@ void val_free(dc_val_t *v) {
 
 dc_val_t *val_new_num(bc_num *n) {
     dc_val_t *v = malloc(sizeof(dc_val_t));
-    if (!v) { perror("dc: malloc"); exit(1); }          /* DC-08 */
+    if (!v) { perror("dc: malloc"); exit(1); }
     v->type = VAL_NUM;
     v->v.num = n;
     return v;
@@ -77,7 +77,7 @@ dc_val_t *val_new_num(bc_num *n) {
 
 dc_val_t *val_new_str(const char *s) {
     dc_val_t *v = malloc(sizeof(dc_val_t));
-    if (!v) { perror("dc: malloc"); exit(1); }          /* DC-08 */
+    if (!v) { perror("dc: malloc"); exit(1); }
     v->type = VAL_STR;
     v->v.str = strdup(s);
     if (!v->v.str) { perror("dc: strdup"); exit(1); }
@@ -140,7 +140,7 @@ void unget_char(input_t *in, int c) {
 void execute(input_t *in);
 
 /* Cap nested macro execution so a self-referential macro (e.g.
- * `[lFx]sF lFx`) cannot recurse until the C stack overflows (DC-03). */
+ * `[lFx]sF lFx`) cannot recurse until the C stack overflows. */
 #define DC_MAX_EXEC_DEPTH 500
 static int exec_depth = 0;
 
@@ -226,7 +226,7 @@ void execute(input_t *in) {
 
         if (c == '[') {
             size_t i = 0, cap = 1024;
-            char *s = malloc(cap);          /* was unchecked (DC-06) */
+            char *s = malloc(cap);          /* checked below */
             int depth = 1;
             if (!s) { perror("dc: malloc"); exit(1); }
             while ((c = get_char(in)) != EOF) {
@@ -300,7 +300,7 @@ void execute(input_t *in) {
                 else if (c == '-') res = bc_sub(av->v.num, bv->v.num);
                 else if (c == '*') res = bc_mul(av->v.num, bv->v.num);
                 else if (c == '/' || c == '%') {
-                    /* Guard divide/modulo by zero at the dc layer (DC-05). */
+                    /* Guard divide/modulo by zero at the dc layer. */
                     if (bc_is_zero(bv->v.num)) {
                         fprintf(stderr, "dc: divide by zero\n");
                         push(&main_stack, av); push(&main_stack, bv);
@@ -310,7 +310,7 @@ void execute(input_t *in) {
                                      : bc_mod(av->v.num, bv->v.num);
                 } else if (c == '^') {
                     /* Reject an enormous exponent so `2 100000000^` can't build
-                     * a billion-digit number and OOM/hang (DC-04). */
+                     * a billion-digit number and OOM/hang. */
                     long e = (long)bc_num_to_long(bv->v.num);
                     if (e > DC_POW_MAX || e < -DC_POW_MAX) {
                         fprintf(stderr, "dc: exponent too large\n");
@@ -452,7 +452,7 @@ void execute(input_t *in) {
                      * int (idx+1 overflowed at INT_MAX), multiplied int*size_t
                      * (wraps on 32-bit -> tiny alloc then OOB memset/store),
                      * left realloc unchecked (NULL deref + leak), and let a
-                     * moderate index drive an unbounded allocation (DC-01).
+                     * moderate index drive an unbounded allocation.
                      */
                     if (idxl < 0 || idxl > DC_ARRAY_MAX) {
                         fprintf(stderr, "dc: array index out of bounds\n");
@@ -518,7 +518,7 @@ void execute(input_t *in) {
                     line[i] = 0;
                     if (line[0]) {
                         /* Shell-out from dc input is an RCE vector on untrusted
-                         * scripts; require explicit opt-in (DC-02). */
+                         * scripts; require explicit opt-in. */
                         if (!getenv("DC_ENABLE_SHELL")) {
                             fprintf(stderr, "dc: '!' shell execution is disabled "
                                             "(set DC_ENABLE_SHELL to enable)\n");

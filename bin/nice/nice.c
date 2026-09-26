@@ -20,7 +20,7 @@
 
 #include <sys/resource.h>
 
-/* Parse an adjustment, rejecting garbage/overflow (NICE-04). */
+/* Parse an adjustment, rejecting garbage/overflow. */
 static int
 parse_adj(const char *s, int *out)
 {
@@ -88,8 +88,7 @@ main(int argc, char *argv[])
         return 0;
     }
 
-    /* Apply the adjustment (NICE-01: this was previously commented out, so
-     * nice was a silent no-op). A failure is non-fatal — like GNU nice, warn
+    /* Apply the adjustment. A failure is non-fatal — like GNU nice, warn
      * and still exec. */
     errno = 0;
     cur = getpriority(PRIO_PROCESS, 0);
@@ -101,11 +100,11 @@ main(int argc, char *argv[])
     if (setpriority(PRIO_PROCESS, 0, newprio) != 0)
         fprintf(stderr, "nice: setpriority: %s\n", strerror(errno));
 
-    /* NICE-02: exec argv[i] (the command), not the numeric adjustment. */
+    /* Exec argv[i] (the command), not the numeric adjustment. */
     execvp(argv[i], &argv[i]);
     {
         int err = errno;
         fprintf(stderr, "nice: %s: %s\n", argv[i], strerror(err));
-        return (err == ENOENT) ? 127 : 126;   /* NICE-03 */
+        return (err == ENOENT) ? 127 : 126;   /* POSIX: 127 not found, 126 not executable */
     }
 }

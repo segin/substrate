@@ -121,7 +121,7 @@ retry_stat(const char *path, struct stat *st)
  * fd-relative stat/chown, EINTR-retried.  The descent uses these against a
  * pinned parent directory fd + a single path component, so an attacker who
  * swaps an intermediate directory for a symlink between check and act can no
- * longer redirect the operation outside the tree (CHOWN-01/07).
+ * longer redirect the operation outside the tree.
  */
 static int
 retry_fstatat(int dirfd, const char *name, struct stat *st, int flag)
@@ -178,7 +178,7 @@ path_join(const char *base, const char *name)
     const size_t base_len = strlen(base);
     const size_t name_len = strlen(name);
     const bool need_slash = base_len > 0 && base[base_len - 1] != '/';
-    /* Guard the length arithmetic against size_t wrap on 32-bit (CHOWN-11). */
+    /* Guard the length arithmetic against size_t wrap on 32-bit. */
     if (base_len > SIZE_MAX - name_len - 2u) {
         return NULL;
     }
@@ -243,8 +243,7 @@ visited_add(struct chown_context *ctx, dev_t dev, ino_t ino)
  * Pop the directory pushed by the matching visited_add on the way out of a
  * subtree.  The set therefore tracks only the *ancestors* on the current
  * descent path, so an A/B/A hardlink cycle is caught while a directory
- * legitimately reachable from two sibling branches is not falsely skipped
- * (CHGRP-08/09 ancestor-only set).
+ * legitimately reachable from two sibling branches is not falsely skipped.
  */
 static void
 visited_pop(struct chown_context *ctx)
@@ -275,9 +274,9 @@ parse_numeric_id(const char *s, unsigned long *out)
 
 /*
  * Resolve a user spec to a uid.  A real account name is preferred over a
- * numeric guess, so `4chan`/`0day` chown to the account, not uid 4/0
- * (CHOWN-03); a leading '+' forces numeric (CHOWN-09); numeric ids are
- * parsed with range checking into uid_t (CHOWN-04).
+ * numeric guess, so `4chan`/`0day` chown to the account, not uid 4/0;
+ * a leading '+' forces numeric; numeric ids are parsed with range
+ * checking into uid_t.
  */
 static int
 resolve_owner_uid(const char *name, uid_t *out)
@@ -545,7 +544,7 @@ process_entry_at(struct chown_context *ctx, int dirfd, const char *name,
 
         /* Refuse to follow the entry unless it is a symlink we deliberately
          * traverse (-L, or -H at the command line); the kernel now enforces
-         * O_NOFOLLOW, so a swapped-in symlink yields ELOOP (CHOWN-01/07). */
+         * O_NOFOLLOW, so a swapped-in symlink yields ELOOP. */
         if (!(is_symlink && follow_walk)) {
             flags |= O_NOFOLLOW;
         }
@@ -583,7 +582,7 @@ parse_owner_spec(const char *spec, uid_t *uid, gid_t *gid, bool *uid_set, bool *
         /*
          * Deprecated `user.group`: split on '.' only when the whole spec is
          * not itself a valid owner, so a real username containing a dot
-         * still works (CHOWN-05).
+         * still works.
          */
         const char *dot = strchr(spec, '.');
         if (dot != NULL) {
@@ -595,7 +594,7 @@ parse_owner_spec(const char *spec, uid_t *uid, gid_t *gid, bool *uid_set, bool *
     }
 
     if (sep == NULL) {
-        /* The whole spec is the user (CHOWN-02: no longer includes ":grp"). */
+        /* The whole spec is the user (it contains no ":grp" part). */
         if (resolve_owner_uid(spec, uid) != 0) {
             return -1;
         }

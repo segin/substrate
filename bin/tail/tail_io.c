@@ -181,8 +181,7 @@ static int tail_pipe_bytes(int fd, int64_t count)
 	 * the "last count bytes" is the entire stream.  Copy it straight
 	 * through rather than truncating count into a bogus size_t — on a
 	 * 32-bit target `tail -c 4G` would otherwise yield malloc(0), a
-	 * `% cap` divide-by-zero (SIGFPE), and an out-of-bounds ring write
-	 * (TAIL-01).
+	 * `% cap` divide-by-zero (SIGFPE), and an out-of-bounds ring write.
 	 */
 	if((uint64_t)count > (uint64_t)SIZE_MAX) {
 		unsigned char buf[TAIL_BUFSZ];
@@ -240,7 +239,7 @@ static int tail_pipe_lines(int fd, int64_t count, unsigned char delim)
 
 	/* Bounded ring of the last `count` lines: keep only N line copies
 	 * rather than buffering the entire (possibly infinite) pipe, which
-	 * would OOM on a large or unbounded producer (TAIL-03).  A
+	 * would OOM on a large or unbounded producer.  A
 	 * pathologically huge count fails the pointer-array allocation
 	 * gracefully instead of crashing. */
 	if((uint64_t)count > SIZE_MAX / sizeof(char *)) {

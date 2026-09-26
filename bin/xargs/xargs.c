@@ -106,7 +106,7 @@ static char *replace_tok(const char *tok, const char *r, const char *val,
      * size: the old estimate `(vl-rl)*(cap/rl+1)` overflowed 32-bit
      * size_t for a long token with a large replacement, yielding a tiny
      * malloc, and only the match branch re-checked capacity — the
-     * literal-byte else branch overran the buffer (XARGS-01). Here every
+     * literal-byte else branch overran the buffer. Here every
      * write ensures room first.
      */
     size_t out_cap = strlen(tok) + 16;

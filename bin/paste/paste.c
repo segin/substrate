@@ -82,8 +82,7 @@ static int read_line(FILE *f, struct buf *b)
 			break;
 		if (b->len + 1 >= b->cap) {
 			/* Guard the doubling: on a >=2 GiB line b->cap*2 wraps to 0
-			 * on the 32-bit target -> tiny realloc then heap overflow
-			 * (PASTE-01). */
+			 * on the 32-bit target -> tiny realloc then heap overflow. */
 			if (b->cap > SIZE_MAX / 2) die("line too long");
 			size_t nc = b->cap ? b->cap * 2 : 256;
 			char  *np = realloc(b->p, nc);
@@ -93,8 +92,7 @@ static int read_line(FILE *f, struct buf *b)
 		b->p[b->len++] = (char)c;
 	}
 	/* getc returns EOF on both end-of-file and read error; distinguish the
-	 * latter so a mid-stream I/O error isn't silently treated as EOF
-	 * (PASTE-02). */
+	 * latter so a mid-stream I/O error isn't silently treated as EOF. */
 	if (ferror(f))
 		die("read error");
 	return any;
@@ -215,7 +213,7 @@ int main(int argc, char **argv)
 		} else if (!(f[i] = fopen(name, "r"))) {
 			fprintf(stderr, "%s: %s: %s\n", prog, name,
 			    strerror(errno));
-			/* Close the files already opened before bailing (PASTE-03). */
+			/* Close the files already opened before bailing. */
 			for (int j = 0; j < i; j++)
 				if (f[j] != stdin)
 					fclose(f[j]);

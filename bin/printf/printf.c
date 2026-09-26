@@ -19,7 +19,7 @@
 #include <string.h>
 
 /* Cap width/precision so `printf '%999999999d'` cannot demand a gigabyte
- * of padding (PRINTF-03). One MiB is far beyond any real formatting need. */
+ * of padding. One MiB is far beyond any real formatting need. */
 #define MAX_FIELD 1048576
 
 static const char *prog = "printf";
@@ -117,7 +117,7 @@ static size_t interp_b(const char *s, char *out, int *stop)
 }
 
 /* Parse a signed integer argument, honoring the POSIX `'c`/`"c` char-code
- * form and diagnosing trailing garbage / overflow (PRINTF-04). */
+ * form and diagnosing trailing garbage / overflow. */
 static long parse_signed(const char *arg)
 {
     char *end;
@@ -345,7 +345,7 @@ int main(int argc, char **argv)
         }
 
         /* Stop reusing the format once a full cycle consumed no argument,
-         * otherwise `printf hello x` would loop forever (PRINTF-01). */
+         * otherwise `printf hello x` would loop forever. */
         if (argi == argi_start)
             break;
     } while (argi < argc);

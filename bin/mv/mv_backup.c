@@ -138,7 +138,7 @@ static char *next_numbered_backup(const char *target)
     }
     free(dir);
 
-    if (highest >= ULONG_MAX) {          /* next index would wrap (MV-09) */
+    if (highest >= ULONG_MAX) {          /* next index would wrap */
         errno = EOVERFLOW;
         return NULL;
     }
@@ -177,7 +177,7 @@ char *mv_backup_name(const char *target,
     }
     /* A suffix containing '/' (e.g. from a crafted -S or
      * $SIMPLE_BACKUP_SUFFIX like "/../../victim") would make the backup path
-     * escape the target's directory and clobber an unrelated file (MV-06). */
+     * escape the target's directory and clobber an unrelated file. */
     if (strchr(suffix, '/') != NULL) {
         errno = EINVAL;
         return NULL;

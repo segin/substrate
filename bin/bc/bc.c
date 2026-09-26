@@ -354,7 +354,7 @@ static void lex_set_file(FILE *fp) {
     lex_string = NULL;
     lineno = 1;
 }
-/* (lex_set_string removed with BC-03: the interactive REPL now uses the
+/* (No lex_set_string: the interactive REPL uses the
  * FILE-based lexer directly, so nothing lexes from a string buffer.
  * lex_string stays NULL, so its branches in next_char are inert.) */
 
@@ -662,7 +662,7 @@ void match(int tok) {
     } else {
         fprintf(stderr, "bc: syntax error at line %d: expected %s, got %s\n",
                 lineno, tok_name(tok), tok_name(cur_tok));
-        bc_fail();          /* recover per BC-02 instead of exit()ing */
+        bc_fail();          /* back to the REPL; exits when not interactive */
     }
 }
 
@@ -2029,7 +2029,8 @@ static void run_file_stream(FILE *fp) {
  * lexing across newlines instead of hitting EOF mid-parse.  The "bc> "
  * prompt is printed before each new input line (i.e. when a statement
  * terminator is seen), so it appears before the blocking read.  Errors
- * recover per BC-02. */
+ * longjmp back to the REPL rather than exiting, so a typo doesn't kill
+ * the session. */
 static void run_interactive(void) {
     lex_set_file(stdin);
     bc_err_active = 1;

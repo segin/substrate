@@ -19,7 +19,7 @@
 
 static const char *prog = "tee";
 
-/* Write the whole buffer, retrying EINTR and short writes (TEE-01/04). */
+/* Write the whole buffer, retrying EINTR and short writes. */
 static int
 full_write(int fd, const char *buf, size_t n)
 {
@@ -78,19 +78,19 @@ main(int argc, char *argv[])
     }
 
     if (ignore_int)
-        signal(SIGINT, SIG_IGN);           /* -i: keep copying past ^C (TEE-08) */
+        signal(SIGINT, SIG_IGN);           /* -i: keep copying past ^C */
 
     int   nfiles = argc - i;
     int  *fds = NULL;
     if (nfiles > 0) {
-        fds = malloc((size_t)nfiles * sizeof(*fds));   /* size to argc (TEE-03) */
+        fds = malloc((size_t)nfiles * sizeof(*fds));   /* size to argc */
         if (!fds) { perror(prog); return 1; }
     }
 
     int flags = O_WRONLY | O_CREAT | (append ? O_APPEND : O_TRUNC);
     for (int k = 0; k < nfiles; k++) {
         fds[k] = open(argv[i + k], flags, 0666);
-        if (fds[k] < 0) {                 /* diagnose + nonzero, keep going (TEE-02) */
+        if (fds[k] < 0) {                 /* diagnose + nonzero, keep going */
             fprintf(stderr, "%s: %s: %s\n", prog, argv[i + k], strerror(errno));
             rc = 1;
         }
@@ -101,7 +101,7 @@ main(int argc, char *argv[])
     for (;;) {
         n = read(0, buf, sizeof(buf));
         if (n < 0) {
-            if (errno == EINTR)           /* don't truncate input (TEE-04) */
+            if (errno == EINTR)           /* don't truncate input */
                 continue;
             fprintf(stderr, "%s: read error: %s\n", prog, strerror(errno));
             rc = 1;
@@ -119,18 +119,18 @@ main(int argc, char *argv[])
             if (full_write(fds[k], buf, (size_t)n) != 0) {
                 fprintf(stderr, "%s: %s: %s\n", prog, argv[i + k], strerror(errno));
                 close(fds[k]);
-                fds[k] = -1;              /* stop writing to a dead fd (TEE-05) */
+                fds[k] = -1;              /* stop writing to a dead fd */
                 rc = 1;
             }
         }
     }
 
     for (int k = 0; k < nfiles; k++) {
-        if (fds[k] >= 0 && close(fds[k]) != 0) {   /* check close (TEE-06) */
+        if (fds[k] >= 0 && close(fds[k]) != 0) {   /* check close */
             fprintf(stderr, "%s: %s: %s\n", prog, argv[i + k], strerror(errno));
             rc = 1;
         }
     }
     free(fds);
-    return rc;                            /* real status (TEE-07) */
+    return rc;                            /* real status */
 }

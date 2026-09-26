@@ -23,7 +23,7 @@
 static size_t read_message(const char *path, char *buf, size_t cap)
 {
     FILE *src = stdin;
-    if (cap == 0) return 0;                 /* guard cap-1 underflow (WALL-02) */
+    if (cap == 0) return 0;                 /* guard cap-1 underflow */
     if (path) {
         src = fopen(path, "r");
         if (!src) { perror(path); exit(1); }
@@ -42,7 +42,7 @@ static size_t read_message(const char *path, char *buf, size_t cap)
  * bytes, newline and tab; render other control bytes as ^X and high-bit
  * bytes as M-.  Without this, ESC/OSC/DECRQSS sequences in the message would
  * be interpreted by every recipient's terminal (retitle, clear, type-back,
- * OSC52 clipboard) — a broadcast escape-injection (WALL-01).  Returns a
+ * OSC52 clipboard) — a broadcast escape-injection.  Returns a
  * malloc'd buffer; *outlen gets its length.
  */
 static char *sanitize_message(const char *in, size_t n, size_t *outlen)
@@ -63,7 +63,7 @@ static char *sanitize_message(const char *in, size_t n, size_t *outlen)
     return out;
 }
 
-/* Write the whole buffer, retrying short writes/EINTR (WALL-05). */
+/* Write the whole buffer, retrying short writes/EINTR. */
 static int full_write(int fd, const char *buf, size_t n)
 {
     size_t off = 0;
@@ -129,14 +129,14 @@ int main(int argc, char *argv[])
 
         /* Reject a ut_line with '/' or a leading '.' so a crafted utmp
          * (ut_line="../../etc/passwd") can't redirect the write outside
-         * /dev (WALL-03). */
+         * /dev. */
         if (strchr(line, '/') != NULL || line[0] == '.' || line[0] == '\0')
             continue;
         snprintf(dev, sizeof dev, "/dev/%s", line);
 
         /* O_NONBLOCK: never block wall on a wedged terminal.  O_NOFOLLOW +
          * an isatty() gate stop a symlink at /dev/<line> from redirecting
-         * the broadcast into an arbitrary file (WALL-04). */
+         * the broadcast into an arbitrary file. */
         int fd = open(dev, O_WRONLY | O_NONBLOCK | O_NOFOLLOW);
         if (fd < 0) continue;
         if (!isatty(fd)) { close(fd); continue; }
