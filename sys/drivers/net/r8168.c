@@ -339,9 +339,22 @@ static void r8168_set_allmulti(netdev_t *dev, int on) {
     rt_w32(R_MAR0 + 4, v);
 }
 
+/* Station address: IDR0-5 as two 32-bit writes, high half first, with
+ * CFG9346 unlocked (as Linux's rtl_rar_set does). */
+static int r8168_set_hwaddr(netdev_t *dev, const uint8_t mac[6]) {
+    (void)dev;
+    rt_w8(R_CFG9346, CFG9346_UNLOCK);
+    rt_w32(R_IDR0 + 4, (uint32_t)mac[4] | (uint32_t)mac[5] << 8);
+    rt_w32(R_IDR0, (uint32_t)mac[0] | (uint32_t)mac[1] << 8 |
+                   (uint32_t)mac[2] << 16 | (uint32_t)mac[3] << 24);
+    rt_w8(R_CFG9346, CFG9346_LOCK);
+    return 0;
+}
+
 static const struct netdev_ops r8168_ops = {
     .xmit = r8168_xmit,
     .set_allmulti = r8168_set_allmulti,
+    .set_hwaddr = r8168_set_hwaddr,
 };
 
 /* ----- stepping identification ----- */

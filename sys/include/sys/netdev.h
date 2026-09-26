@@ -35,6 +35,10 @@ struct netdev_ops {
      * joined and when its last is left; the IP layer then filters by
      * membership.  NULL for a device that already delivers all multicast. */
     void (*set_allmulti)(struct netdev *dev, int on);
+    /* Optional: program the NIC's station address so its receive filter
+     * accepts unicast to `mac`.  Returns 0 or a negative errno.  NULL means
+     * the address cannot be changed (SIOCSIFHWADDR fails EOPNOTSUPP). */
+    int (*set_hwaddr)(struct netdev *dev, const uint8_t mac[6]);
 };
 
 /* UDP-IP-06: IPv4 groups joined on an interface, refcounted across the

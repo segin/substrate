@@ -529,9 +529,24 @@ static int afinet_ioctl(fs_node_t *node, uint32_t request, void *arg) {
             r->ifr_hwaddr.sa_family = 1;   /* ARPHRD_ETHER */
             memcpy(r->ifr_hwaddr.sa_data, dev->hwaddr, 6);
             goto out_get;
-        case SIOCSIFHWADDR:
-            memcpy(dev->hwaddr, r->ifr_hwaddr.sa_data, 6);
+        case SIOCSIFHWADDR: {
+            /* The NIC's own filter must learn the address too: changing
+             * only dev->hwaddr advertised a MAC in ARP and every frame we
+             * sent while the hardware kept accepting only the old one, so
+             * all unicast to the host was lost.  A station address is
+             * never zero and never a group address (I/G bit). */
+            const uint8_t *mac = (const uint8_t *)r->ifr_hwaddr.sa_data;
+            static const uint8_t zero[6];
+            if ((mac[0] & 1) || memcmp(mac, zero, 6) == 0)
+                return -EADDRNOTAVAIL;
+            if (!dev->ops || !dev->ops->set_hwaddr)
+                return -EOPNOTSUPP;
+            int rc = dev->ops->set_hwaddr(dev, mac);
+            if (rc < 0)
+                return rc;
+            memcpy(dev->hwaddr, mac, 6);
             return 0;
+        }
         case SIOCGIFADDR: {
             struct sin_kern *sin = (struct sin_kern *)&r->ifr_addr;
             sin->sin_family = AF_INET;

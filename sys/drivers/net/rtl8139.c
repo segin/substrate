@@ -43,6 +43,7 @@
 #define R_TCR           0x40   /* TX config */
 #define R_MAR0          0x08   /* multicast filter, 8 bytes */
 #define R_RCR           0x44   /* RX config */
+#define R_9346CR        0x50   /* config register write enable */
 #define R_CONFIG1       0x52
 
 /* CR bits */
@@ -264,9 +265,22 @@ static void rtl_set_allmulti(netdev_t *dev, int on) {
     outl(rtl.io_base + R_MAR0 + 4, v);
 }
 
+/* Station address: IDR0-5 take only 32-bit writes, and only while 9346CR
+ * is in config-write mode (EEM = 11). */
+static int rtl_set_hwaddr(netdev_t *dev, const uint8_t mac[6]) {
+    (void)dev;
+    outb(rtl.io_base + R_9346CR, 0xC0);
+    outl(rtl.io_base + R_IDR0, (uint32_t)mac[0] | (uint32_t)mac[1] << 8 |
+                               (uint32_t)mac[2] << 16 | (uint32_t)mac[3] << 24);
+    outl(rtl.io_base + R_IDR0 + 4, (uint32_t)mac[4] | (uint32_t)mac[5] << 8);
+    outb(rtl.io_base + R_9346CR, 0x00);
+    return 0;
+}
+
 static const struct netdev_ops rtl_ops = {
     .xmit = rtl_xmit,
     .set_allmulti = rtl_set_allmulti,
+    .set_hwaddr = rtl_set_hwaddr,
 };
 
 /* ----- attach ----- */

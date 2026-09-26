@@ -57,6 +57,7 @@
 #define E1000_MTA           0x5200   /* multicast table array, 128 dwords */
 #define E1000_RAL0          0x5400
 #define E1000_RAH0          0x5404
+#define E1000_RAH_AV        0x80000000u   /* Address Valid */
 
 /* CTRL bits. */
 #define CTRL_SLU            (1u << 6)    /* set link up */
@@ -278,9 +279,21 @@ static void e1000_set_allmulti(netdev_t *dev, int on) {
     e1k_write(E1000_RCTL, on ? (rctl | RCTL_MPE) : (rctl & ~RCTL_MPE));
 }
 
+/* Station address: Receive Address 0, low four octets in RAL0, the last
+ * two in RAH0 with Address Valid set so the filter matches on it. */
+static int e1000_set_hwaddr(netdev_t *dev, const uint8_t mac[6]) {
+    (void)dev;
+    e1k_write(E1000_RAL0, (uint32_t)mac[0] | (uint32_t)mac[1] << 8 |
+                          (uint32_t)mac[2] << 16 | (uint32_t)mac[3] << 24);
+    e1k_write(E1000_RAH0, (uint32_t)mac[4] | (uint32_t)mac[5] << 8 |
+                          E1000_RAH_AV);
+    return 0;
+}
+
 static const struct netdev_ops e1000_ops = {
     .xmit = e1000_xmit,
     .set_allmulti = e1000_set_allmulti,
+    .set_hwaddr = e1000_set_hwaddr,
 };
 
 /* ----- setup ----- */

@@ -304,7 +304,20 @@ static int vnet_irq(unsigned int irq, void *dev_id, void *frame) {
 
 /* ----- ops ----- */
 
-static const struct netdev_ops vnet_ops = { .xmit = vnet_xmit };
+/* Station address: without VIRTIO_NET_F_CTRL_MAC_ADDR a legacy device
+ * takes a new MAC written into its config space (offset 0x14), where the
+ * attach read it from. */
+static int vnet_set_hwaddr(netdev_t *dev, const uint8_t mac[6]) {
+    (void)dev;
+    for (int i = 0; i < 6; i++)
+        outb(vn.io_base + 0x14 + i, mac[i]);
+    return 0;
+}
+
+static const struct netdev_ops vnet_ops = {
+    .xmit = vnet_xmit,
+    .set_hwaddr = vnet_set_hwaddr,
+};
 
 /* ----- attach (called from sys/drivers/virtio/virtio.c dispatch) ----- */
 

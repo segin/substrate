@@ -115,6 +115,7 @@
  *   ifaddr0      SIOCSIFADDR eth0 0.0.0.0 -- leave the NIC unconfigured
  *   ifaddr:A     SIOCSIFADDR eth0 A
  *   netmask:M    SIOCSIFNETMASK eth0 M
+ *   hwaddr:MAC   SIOCSIFHWADDR eth0 MAC (aa:bb:cc:dd:ee:ff)
  *
  * A leading "mtu=N" argument first sets eth0's MTU (SIOCSIFMTU).
  *
@@ -356,6 +357,27 @@ static int do_actions(int fd, int argc, char **argv) {
             int r = ioctl(fd, is_mask ? SIOCSIFNETMASK : SIOCSIFADDR, &ifr);
             say(is_mask ? "netmask %s rc=%ld" : "ifaddr %s rc=%ld",
                 r < 0 ? strerror(errno) : "ok", r);
+        } else if (strncmp(a, "hwaddr:", 7) == 0) {
+            struct ifreq ifr;
+            memset(&ifr, 0, sizeof ifr);
+            strncpy(ifr.ifr_name, "eth0", sizeof ifr.ifr_name - 1);
+            ifr.ifr_hwaddr.sa_family = 1;       /* ARPHRD_ETHER */
+            const char *p = a + 7;
+            int k;
+            for (k = 0; k < 6; k++) {
+                char *end;
+                unsigned long v = strtoul(p, &end, 16);
+                if (end == p || v > 0xFF || (k < 5 && *end != ':'))
+                    break;
+                ifr.ifr_hwaddr.sa_data[k] = (char)v;
+                p = end + 1;
+            }
+            if (k != 6) {
+                say("hwaddr %s rc=%ld", "bad address", -1);
+                continue;
+            }
+            int r = ioctl(fd, SIOCSIFHWADDR, &ifr);
+            say("hwaddr %s rc=%ld", r < 0 ? strerror(errno) : "ok", r);
         } else if (strcmp(a, "pollin") == 0) {
             struct pollfd pfd = { .fd = fd, .events = POLLIN };
             int r = poll(&pfd, 1, -1);
