@@ -124,22 +124,36 @@ void icmp_input(netdev_t *dev, uint32_t saddr, uint32_t daddr,
             saddr == 0xFFFFFFFFu) return;
     }
 
-    /* Build a reply with type=0 (reply), same id/sequence, same data. */
-    uint8_t reply[1500];
-    if (len > sizeof(reply)) return;
-    memcpy(reply, pkt, len);
+    /* Build a reply with type=0 (reply), same id/sequence, same data.
+     *
+     * We do not fragment on output, so a reply that would not fit one
+     * datagram on the path back is truncated to fit and sent (RFC 1122
+     * 3.2.2.6) rather than dropped: a reassembled 3000-octet request used
+     * to get no answer at all.  The buffer is too big for an interrupt
+     * stack, so it is static, and built and sent with interrupts off --
+     * ip4_output does not sleep with IF=0. */
+    static uint8_t reply[NETDEV_MTU_MAX];
+    uint32_t mtu = ip4_path_mtu(saddr);
+    if (mtu <= sizeof(struct iphdr) + sizeof(struct icmphdr)) return;
+    size_t max = mtu - sizeof(struct iphdr);
+    if (max > sizeof(reply) - sizeof(struct iphdr))
+        max = sizeof(reply) - sizeof(struct iphdr);
+    size_t rlen = len < max ? len : max;
+    uint32_t f = intr_disable();
+    memcpy(reply, pkt, rlen);
     struct icmphdr *rh = (struct icmphdr *)reply;
     rh->type = ICMP_ECHOREPLY;
     rh->code = 0;
     rh->check = 0;
-    rh->check = inet_csum(reply, len);
+    rh->check = inet_csum(reply, rlen);
     /* Answer from the address the request was sent to (RFC 1122 3.2.2.6),
      * so a ping of 127.1.2.3, or of one of several local addresses, hears
      * back from that address rather than whichever one routing prefers.
      * A request to a multicast group is answered from a routed unicast
      * address: a group is never a source. */
     uint32_t src = ((daddr & 0xF0) == 0xE0) ? 0 : daddr;
-    ip4_output_from(src, saddr, IPPROTO_ICMP, reply, len);
+    ip4_output_from(src, saddr, IPPROTO_ICMP, reply, rlen);
+    intr_restore(f);
 }
 
 /* ------------------------------------------------------------------ */

@@ -19,6 +19,10 @@ Length range was 8..1472 instead of RFC 768's 8..65507.
                   sent after them is still delivered.
     max           a 65507-octet datagram (the RFC 768 maximum) in 45
                   fragments, with SO_RCVBUF raised to hold it.
+    big-echo      a 3000-octet ICMP echo request in fragments draws a reply
+                  truncated to one MTU (1480 octets of ICMP) with a valid
+                  checksum -- we do not fragment on output, and RFC 1122
+                  3.2.2.6 says truncate rather than drop.
 
 Run from the repo root after building sys/ and wireguest:
     python3 tests/lib/net/wire/test_ip_frag.py [case...]
@@ -28,6 +32,7 @@ import re
 import socket
 import struct
 import sys
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from wire import Wire, csum, PEER_IP, GUEST_IP  # noqa: E402
@@ -193,10 +198,46 @@ def case_max():
         return check(w, recvsum(w, 20), 40000, data), w
 
 
+def case_big_echo():
+    # The guest talks to the host first so the reply, sent from the receive
+    # path, finds an ARP entry rather than being dropped behind a request.
+    w, err = boot('sendto:10.0.2.2:9:arp sleep:60')
+    with w:
+        if err:
+            return err, w
+        ident, seq = 0x4242, 9
+        data = payload(3000 - 8, seed=11)
+        echo = bytearray(struct.pack('!BBHHH', 8, 0, 0, ident, seq) + data)
+        echo[2:4] = struct.pack('!H', csum(bytes(echo)))
+        for off, part, last in pieces(bytes(echo)):
+            w.send_ip(1, part, ident=0x7777,
+                      frag=(0 if last else MF) | (off // 8))
+        end = time.time() + 5
+        while time.time() < end:
+            w.pump(0.2)
+            for proto, src, dst, ip in w.ip_rx:
+                ihl = (ip[0] & 0xF) * 4
+                icmp = ip[ihl:]
+                if proto != 1 or icmp[0] != 0:
+                    continue
+                rid, rseq = struct.unpack('!HH', icmp[4:8])
+                if (rid, rseq) != (ident, seq):
+                    continue
+                if len(icmp) != 1480:
+                    return 'reply carries %d octets of ICMP, want 1480 ' \
+                           '(truncated to the MTU)' % len(icmp), w
+                if csum(bytes(icmp)) != 0:
+                    return 'truncated reply has a bad checksum', w
+                if icmp[8:] != data[:1480 - 8]:
+                    return 'reply data does not match the request', w
+                return None, w
+        return 'no reply to a 3000-octet echo request', w
+
+
 CASES = (('in-order', case_in_order), ('read', case_read),
          ('reorder', case_reorder), ('overlap', case_overlap),
          ('incomplete', case_incomplete), ('oversize', case_oversize),
-         ('flood', case_flood), ('max', case_max))
+         ('flood', case_flood), ('max', case_max), ('big-echo', case_big_echo))
 
 
 def main():
