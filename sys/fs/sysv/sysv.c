@@ -115,7 +115,7 @@ static uint32_t sysv_resolve_block(sysv_fs_t *fs, sysv_node_t *node,
 
     /* Helper closure: read the i-th 3-byte entry from a given
      * physical block. */
-    /* [SYSV-23] Shared per-mount scratch instead of 2 KiB of stack.  The
+    /* Shared per-mount scratch instead of 2 KiB of stack.  The
      * caller (sysv_file_read) holds fs->io_lock across this. */
     uint8_t *indir = fs->indirbuf;
     if (!indir) return 0;
@@ -143,8 +143,8 @@ static uint32_t sysv_resolve_block(sysv_fs_t *fs, sysv_node_t *node,
     logical -= ppb * ppb;
 
     /*
-     * [SYSV-22] The single and double branches above are guarded by
-     * `logical < ppb` and `logical < ppb*ppb`, but the triple branch had no
+     * The single and double branches above are guarded by
+     * `logical < ppb` and `logical < ppb*ppb`, but the triple branch used to have no
      * bound at all: whatever was left simply fell through to here.  With
      * 512-byte blocks (ppb = 170) and an i_size of 0xFFFFFFFF, the top index
      * logical/(ppb*ppb) reaches 289, so indir + 289*3 reads at indir[867..869]
@@ -198,7 +198,7 @@ static int sysv_read_inode(sysv_fs_t *fs, uint32_t ino, fs_node_t *node) {
     memset(nd, 0, sizeof(*nd));
     nd->fs  = fs;
     nd->ino = ino;
-    /* [SYSV-23] See sysv_fs_t::live_nodes -- unmount must not free the
+    /* See sysv_fs_t::live_nodes -- unmount must not free the
      * mount state out from under this node. */
     fs->live_nodes++;
     for (int i = 0; i < 13; i++) {
@@ -259,7 +259,7 @@ static size_t sysv_file_read(fs_node_t *node, off_t offset, size_t size, uint8_t
     size_t total = 0;
     uint8_t *blkbuf;
 
-    /* [SYSV-23] See sysv_fs_t::blkbuf.  The lock covers both scratch buffers,
+    /* See sysv_fs_t::blkbuf.  The lock covers both scratch buffers,
      * including the one sysv_resolve_block() uses. */
     mutex_lock(&fs->io_lock);
     blkbuf = fs->blkbuf;
@@ -304,7 +304,7 @@ static struct dirent *sysv_readdir(fs_node_t *node, uint64_t index) {
     sysv_node_t *nd = (sysv_node_t *)node->ptr;
     sysv_fs_t   *fs = nd->fs;
     /*
-     * [SYSV-21] This used to compute one slot from `index` and give up the
+     * This used to compute one slot from `index` and give up the
      * moment it found d_ino == 0:
      *
      *     if (de.d_ino == 0) return NULL;
@@ -374,7 +374,7 @@ static fs_node_t *sysv_finddir(fs_node_t *node, char *name) {
 }
 
 /*
- * [SYSV-23] Release the per-node state.
+ * Release the per-node state.
  *
  * sysv_read_inode kmalloc's a sysv_node_t for every node it fills in, and
  * nothing ever freed it -- so each finddir() that resolved a name leaked one.
@@ -472,7 +472,7 @@ fs_node_t *sysv_mount(const char *device, uint32_t flags, void *data) {
     fs->ninodes          = (uint32_t)s_isize * (fs->block_size / fs->inode_size);
     fs->first_data_block = 2 + s_isize;
 
-    /* [SYSV-23] One block-sized scratch buffer each for the data path and the
+    /* One block-sized scratch buffer each for the data path and the
      * indirect-block walk, on the heap rather than ~4 KiB of kernel stack. */
     mutex_init(&fs->io_lock, "sysv_io");
     fs->blkbuf   = (uint8_t *)kmalloc(fs->block_size);
@@ -521,7 +521,7 @@ static int sysv_unmount(fs_node_t *root) {
         sysv_fs_t *fs = nd->fs;
 
         /*
-         * [SYSV-23] This used to kfree(fs) unconditionally.  Every node
+         * This used to kfree(fs) unconditionally.  Every node
          * finddir ever produced holds a sysv_node_t pointing at it, and
          * sysv_file_read reads fs->block_size / fs->device / fs->blkbuf on
          * every call -- so a read through a file still open across the

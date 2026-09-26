@@ -53,7 +53,7 @@ enum {
 };
 
 /*
- * SYSFS-14: sysfs_readdir and sysfs_finddir were installed on the root AND on
+ * sysfs_readdir and sysfs_finddir used to be installed on the root AND on
  * bus/class/devices, and both IGNORED their node argument -- so /sys/bus
  * listed bus, class and devices, and so did /sys/bus/bus, without limit.
  * `find /sys`, `du -s /sys` or any recursive indexer never terminated.  The

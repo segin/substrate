@@ -41,7 +41,7 @@
 /* FAT-entry sentinels (32-bit entries).  Valid next-cluster indices are
  * 2..ClusterCount+1 (ClusterCount is capped at 0xFFFFFFF5), so any entry >=
  * EXFAT_CLUSTER_BAD is a non-continuation: the BAD marker (0xFFFFFFF7), the
- * reserved range, or the end-of-chain marker (0xFFFFFFFF).  audit L3: chain
+ * reserved range, or the end-of-chain marker (0xFFFFFFFF).  Chain
  * walks stop at EXFAT_CLUSTER_END so a 0xFFFFFFF7 BAD entry is never followed. */
 #define EXFAT_FIRST_CLUSTER    2U
 #define EXFAT_CLUSTER_BAD      0xFFFFFFF7U  /* "bad cluster" FAT marker */
@@ -147,7 +147,7 @@ typedef struct exfat_fs {
     uint16_t *upcase;                  /* 65536-entry BMP up-case fold table */
     uint32_t  free_clusters;           /* cached clear-bit count (statfs) */
 
-    /* exFAT-audit H3: serialises every metadata mutation on this mount
+    /* Serialises every metadata mutation on this mount
      * (allocate/free clusters, FAT-chain edits, allocation-bitmap RMW,
      * directory-entry-set create/update/delete, node size updates).  Held at
      * the top-level VFS mutation op; the helpers it calls never take it. */
@@ -172,13 +172,13 @@ typedef struct exfat_node {
     uint8_t  secondary_count;          /* # of secondary entries in the set */
 
     struct dirent current_dirent;      /* per-node readdir scratch */
-    /* exFAT-F3: live-open count; a pinned slot is never recycled.  Same
+    /* Live-open count; a pinned slot is never recycled.  Same
      * hazard the root-node comment in exfat_alloc_node() describes, but for
      * every other slot: sys_open puts this pointer straight into f->f_data,
      * so recycling a slot redirects an existing fd to a different file. */
     uint32_t pin;
 
-    /* Deferred unlink (audit H6): set when unlink removes the directory entry
+    /* Deferred unlink: set when unlink removes the directory entry
      * while the file is still open (pinned).  The cluster chain is retained and
      * freed only when the last reference is closed, so a still-open fd can keep
      * reading/writing its own data instead of clusters the allocator has reused. */

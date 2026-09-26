@@ -36,7 +36,7 @@ typedef struct {
 typedef struct {
     pipe_t *pipe;
     /*
-     * PIPE-10: these two record which of the pipe's role counters THIS
+     * These two record which of the pipe's role counters THIS
      * endpoint incremented, so close decrements exactly those.  They are not
      * mutually exclusive: an O_RDWR FIFO open holds both.  The old code had
      * only is_writer, set to (accmode == O_WRONLY) -- so an O_RDWR open bumped
@@ -66,7 +66,7 @@ typedef struct {
 
 typedef struct fifo_reg {
     /*
-     * PIPE-11: keyed on the inode number ALONE, this registry made
+     * Keyed on the inode number ALONE, this registry used to make
      * /mnt/a/fifo and /tmp/fifo collide whenever both happened to be inode 12
      * -- inode numbers restart per filesystem.  Two unrelated FIFOs owned by
      * different users then shared one pipe_t: A's writes were readable by B,
@@ -174,7 +174,7 @@ static int pipe_wait(void *chan, mutex_t *m) {
 /* Block during fifo_open() until a peer arrives.  Same enqueue-and-release
  * under intr_disable + lost-wakeup net as pipe_wait().
  *
- * PIPE-22: this used to omit THREAD_F_INTERRUPTIBLE deliberately, on the
+ * This used to omit THREAD_F_INTERRUPTIBLE deliberately, on the
  * reasoning that a looped interruptible wait would busy-spin on a pending
  * signal.  The cost was that `mkfifo /tmp/f; cat /tmp/f` with no writer parked
  * the process permanently -- psignal's scan skips non-interruptible threads,
@@ -274,7 +274,7 @@ static size_t pipe_write(fs_node_t *node, off_t offset, size_t size, const uint8
         }
 
         /*
-         * PIPE-18: the wait condition used to be "buffer completely full",
+         * The wait condition used to be "buffer completely full",
          * so a writer resumed as soon as a single byte drained and copied
          * whatever fit.  With PIPE_SIZE 4096 any backlog guarantees a
          * full-buffer wait, so two processes each doing write(fd, buf, 4096)
@@ -354,7 +354,7 @@ static int pipe_poll(fs_node_t *node, void *waiter) {
     int no_readers = (p->readers_open == 0);
 
     /*
-     * PIPE-23: this branched solely on is_writer, which is 0 for an O_RDWR
+     * This used to branch solely on is_writer, which is 0 for an O_RDWR
      * endpoint -- the standard trick for holding a FIFO open without
      * blocking -- so such an endpoint never reported POLLOUT and was unusable
      * from a poll/select event loop.  Report each direction the endpoint
@@ -389,7 +389,7 @@ static void pipe_close(fs_node_t *node) {
     fifo_reg_t *fifo = ep->fifo;
 
     mutex_lock(&p->lock);
-    /* PIPE-10: drop exactly the counters this endpoint took (both, for an
+    /* Drop exactly the counters this endpoint took (both, for an
      * O_RDWR FIFO endpoint). */
     if (ep->is_writer) {
         if (p->writers_open > 0) {
@@ -649,7 +649,7 @@ static fs_node_t *fifo_endpoint_new(fifo_reg_t *fifo, int is_reader, int is_writ
  * tears the entry down if it was the last), frees the endpoint and node, and
  * returns `err`.  Caller holds p->lock; it is released here.
  *
- * PIPE-22 needs this on the EINTR path; the O_WRONLY|O_NONBLOCK ENXIO path
+ * The interruptible blocking open needs this on its EINTR path; the O_WRONLY|O_NONBLOCK ENXIO path
  * had grown its own copy of the same sequence, which now shares this one.
  */
 static int fifo_open_unwind(fifo_reg_t *fifo, fs_node_t *node, pipe_t *p,
@@ -693,7 +693,7 @@ int fifo_open(fs_node_t *inode, int oflags, fs_node_t **out) {
     fifo_reg_t *fifo = fifo_lookup_or_create(inode->mp, inode->inode);
     if (!fifo) return -ENOMEM;
 
-    /* PIPE-10: an O_RDWR open holds BOTH roles.  Derive the pair once and use
+    /* An O_RDWR open holds BOTH roles.  Derive the pair once and use
      * it for the counter bumps below and for the endpoint, so open and close
      * cannot disagree about what was taken. */
     int is_reader = (accmode == O_RDONLY || accmode == O_RDWR);

@@ -678,7 +678,7 @@ static procfs_pid_nodes_t *procfs_get_pid_nodes(int pid) {
 
     strlcpy(nodes->maps.name, "maps", sizeof(nodes->maps.name));
     nodes->maps.flags = FS_FILE;
-    nodes->maps.mask = 0400;   /* PROCFS-16: was 0444 — world-readable ASLR oracle */
+    nodes->maps.mask = 0400;   /* not 0444: a world-readable map is an ASLR oracle */
     nodes->maps.uid = target->uid;
     nodes->maps.gid = target->gid;
     nodes->maps.read = &proc_pid_maps_read;
@@ -746,7 +746,7 @@ static fs_node_t *procfs_get_driver_node(struct procfs_runtime_entry *entry) {
 }
 
 /*
- * PROCFS-16: may the caller inspect `target`'s address space?
+ * May the caller inspect `target`'s address space?
  *
  * /proc/<pid>/maps was mode 0444, so any user could read another process's
  * full address-space layout -- which is exactly what defeats ASLR when
@@ -779,7 +779,7 @@ static int proc_self_readlink(fs_node_t *node, char *buf, size_t size) {
 
     int pid = (current_process && current_process->pid > 0) ? current_process->pid : 0;
     char target[32];
-    /* PROCFS-29: Linux returns "/proc/<pid>" with NO trailing slash.  With one,
+    /* Linux returns "/proc/<pid>" with NO trailing slash.  With one,
      * anything that appends produces "/proc/42//exe" and every string compare
      * against a readlink("/proc/self") result fails. */
     int len = snprintf(target, sizeof(target), "/proc/%d", pid);
@@ -807,7 +807,7 @@ static int proc_copy_process_link_target(process_t *p, const char *src, char *bu
 }
 
 /*
- * PROCFS-15: /proc/<pid>/{exe,cwd,fd/<n>} carry 0500/0700 modes, but those are
+ * /proc/<pid>/{exe,cwd,fd/<n>} carry 0500/0700 modes, but those are
  * only consulted by vfs_may_open -- kern_readlinkat calls readlink_fs with NO
  * permission check, and vfs_lookup does not test search permission on
  * intermediate components either.  So an unprivileged user could readlink a
@@ -924,7 +924,7 @@ static size_t procfs_generic_read(fs_node_t *node, off_t offset, size_t size, ui
             if (alloc_buf) {
                 len = entry->generator(alloc_buf, alloc_size, entry->opaque);
                 /*
-                 * PROCFS-09: the retry's return was used unclamped, but
+                 * The retry's return used to be used unclamped, but
                  * "returned more than the buffer holds" is exactly the
                  * truncation protocol these generators use -- gen_kmsg
                  * returns klog_size() whenever size < total, and gen_mounts
@@ -1086,7 +1086,7 @@ static size_t proc_pid_maps_read(fs_node_t *node, off_t offset, size_t size, uin
     int pid = node->inode;
     process_t *p = proc_find(pid);
     if (!p) return 0;
-    /* PROCFS-16: the 0400 mode is only consulted by vfs_may_open, and an fd
+    /* The 0400 mode is only consulted by vfs_may_open, and an fd
      * inherited across a setuid exec would keep working; gate the content
      * itself too. */
     if (!proc_may_inspect(p)) return 0;
@@ -1144,12 +1144,13 @@ static size_t proc_pid_status_read(fs_node_t *node, off_t offset, size_t size, u
 
     if (len < 0) len = 0;
     /*
-     * PROCFS-19: the clamp was unconditionally back to sizeof(buf) - 1, which
+     * The clamp used to be unconditionally back to sizeof(buf) - 1, which
      * made the whole retry above dead code -- the moment /proc/<pid>/status
      * grew past 1024 bytes every reader silently got a truncated 1023-byte
      * file even though the larger allocation had succeeded and been filled.
      * Clamp to whichever buffer we are actually reading from.  (Bounding the
-     * retry's own return matters for the same reason as PROCFS-09.)
+     * retry's own return matters too: a generator reports truncation by
+     * returning more than the buffer holds.)
      * proc_pid_stat_read already got this right.
      */
     if (alloc_buf) {
@@ -1266,7 +1267,7 @@ static size_t proc_pid_cmdline_read(fs_node_t *node, off_t offset, size_t size, 
     size_t total_len;
 
     if (!p) return 0;
-    /* PROCFS-16: the live-argv path below reads the target's address space
+    /* The live-argv path below reads the target's address space
      * with pmap_copyin_other.  That is a cross-process memory read and needs
      * the same permission as attaching to it. */
     if (!proc_may_inspect(p)) return 0;
@@ -1547,7 +1548,7 @@ static fs_node_t *procfs_finddir(fs_node_t *node, char *name) {
     }
     if (strcmp(name, "..") == 0) {
         /*
-         * PROCFS-30: this returned `node` for "..", so `cd /proc; cd ..`
+         * This used to return `node` for "..", so `cd /proc; cd ..`
          * stayed in /proc and "../etc/passwd" from a /proc cwd resolved
          * inside procfs instead of reaching /etc.  ".." at a mount root
          * belongs to the covered directory -- devfs already does this.

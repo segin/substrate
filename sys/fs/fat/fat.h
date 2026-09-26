@@ -106,7 +106,7 @@ typedef struct fat_node {
     uint16_t dirent_off;            // Byte offset of the entry within that sector
     struct dirent current_dirent;   // Per-node readdir result (avoids static)
     /*
-     * FAT-F3: number of live opens holding this slot.  fat_alloc_node() used
+     * Number of live opens holding this slot.  fat_alloc_node() used
      * to hand out &cache[idx++ % 64] unconditionally, and sys_open stores that
      * pointer straight into f->f_data for regular files -- so 64 further path
      * lookups on the mount silently recycled a slot out from under an open

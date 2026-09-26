@@ -18,7 +18,7 @@
 static fat_node_t fat_node_cache[FAT_NODE_CACHE_SIZE];
 static fs_node_t fat_fs_node_cache[FAT_NODE_CACHE_SIZE];
 static int fat_node_cache_idx = 0;
-/* FAT-F3: guards slot selection, the pin counts, and the memset that
+/* Guards slot selection, the pin counts, and the memset that
  * re-populates a slot.  A mutex (not a spinlock) because callers may sleep on
  * block I/O elsewhere in the same paths; nothing here touches IRQ context. */
 static mutex_t fat_node_cache_lock;
@@ -601,7 +601,7 @@ static int fat_statfs(fs_node_t *node, struct statfs *buf) {
 }
 
 /*
- * FAT-F3: pin/unpin, installed as the node's open/close hooks.
+ * Pin/unpin, installed as the node's open/close hooks.
  *
  * sys_open() stores the fs_node_t* that fat_alloc_node() returns directly in
  * f->f_data (only character devices get cloned), so the slot must survive for
@@ -631,7 +631,7 @@ static fs_node_t *fat_alloc_node(fat_fs_t *fs, const char *name, uint64_t inode,
     fs_node_t *node = NULL;
 
     /*
-     * FAT-F3: slot selection.  This was `fat_node_cache_idx++ % 64` -- a
+     * Slot selection.  This was `fat_node_cache_idx++ % 64` -- a
      * non-atomic read-modify-write shared by every caller (so two concurrent
      * finddirs could be handed the SAME slot), followed by an unconditional
      * memset of whatever was there.  Now: reuse the slot that already
@@ -1057,7 +1057,7 @@ fs_node_t *fat_mount(const char *device, uint32_t flags, void *data) {
         /* Copy the root out of the recycling ring cache into dedicated storage:
          * fat_alloc_node hands back a slot that is reused every
          * FAT_NODE_CACHE_SIZE lookups, so the long-lived fs->root_node would
-         * otherwise be silently overwritten by an unrelated node (A15).  The
+         * otherwise be silently overwritten by an unrelated node.  The
          * dedicated pair is freed in fat_unmount. */
         fs_node_t  *rn = kmalloc(sizeof(fs_node_t));
         fat_node_t *rc = kmalloc(sizeof(fat_node_t));

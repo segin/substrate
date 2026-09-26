@@ -107,7 +107,7 @@
 /* The set we support.  Anything outside SUPP triggers a refuse-mount
  * (INCOMPAT) or ro-only mount (ROCOMPAT).  COMPAT bits never block
  * a mount, they're informational.  */
-/* EXT2-A5 (audit SB-04): META_BG is NOT supported — with meta_bg the
+/* META_BG is NOT supported — with meta_bg the
  * group descriptors are no longer one contiguous run after the
  * superblock (each metagroup keeps its own descriptor block, cutover at
  * s_first_meta_bg), and this driver reads AND flushes the GDT as a
@@ -207,8 +207,8 @@ typedef struct {
 } __attribute__((packed)) ext2_superblock_t;
 
 /* Block Group Descriptor — the 32-byte layout (low half of a 64-byte
- * descriptor on INCOMPAT_64BIT filesystems).  EXT2-A6 (audit BG-01/
- * SB-02/BG-03): the fields past bg_used_dirs_count were previously
+ * descriptor on INCOMPAT_64BIT filesystems).  The fields past
+ * bg_used_dirs_count were previously
  * bg_pad + bg_reserved[], hiding bg_flags (lazy-init state) and the
  * three checksum/accounting fields this driver must maintain. */
 typedef struct {
@@ -361,7 +361,7 @@ typedef struct {
      * of accumulated changes, on sync, and on unmount — instead of on every
      * single alloc/free.  A crash before a flush costs only fsck-fixable
      * free-count discrepancies, never data or allocation state. */
-    uint32_t bgd_size;          // bytes actually kmalloc'd for bgd (EXT2-21:
+    uint32_t bgd_size;          // bytes actually kmalloc'd for bgd (it is
                                 // rounded up to whole blocks, so it is not
                                 // group_count * sizeof(ext2_group_desc_t))
     uint8_t *bgd_dirty;         // per-group dirty bitmap (group_count bits)
@@ -540,7 +540,7 @@ uint32_t ext2_inode_read(ext2_node_t *node, off_t offset, uint32_t size, void *b
  * or zero return needs a reason: `errp`, when non-NULL, receives 0 on full
  * success or a negative errno describing why the write stopped early
  * (-ENOSPC, -ENOMEM, -EINVAL).  Callers that report to userspace must consult
- * it -- returning 0 for a non-zero count is a POSIX violation (EXT2-15). */
+ * it -- returning 0 for a non-zero count is a POSIX violation. */
 uint32_t ext2_inode_write(ext2_node_t *node, off_t offset, uint32_t size,
                           const void *buffer, int *errp);
 uint32_t ext2_alloc_block(ext2_fs_t *fs);

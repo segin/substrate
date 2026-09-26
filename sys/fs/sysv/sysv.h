@@ -156,7 +156,7 @@ typedef struct sysv_fs {
     uint8_t          name_len;         /* SYSV_NAMELEN today */
 
     /*
-     * [SYSV-23] Live sysv_node_t count, including the root's.  sysv_unmount
+     * Live sysv_node_t count, including the root's.  sysv_unmount
      * used to kfree() this struct unconditionally while every node produced
      * by finddir still held a pointer to it -- so a read through any open
      * file after unmount dereferenced freed memory to find the block size and
@@ -165,7 +165,7 @@ typedef struct sysv_fs {
     int              live_nodes;
 
     /*
-     * [SYSV-23] Shared scratch for one disk block.
+     * Shared scratch for one disk block.
      *
      * sysv_file_read had a 2048-byte blkbuf on the stack and called
      * sysv_resolve_block, which had its own 2048-byte indir -- ~4 KiB of a

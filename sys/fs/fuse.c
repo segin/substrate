@@ -15,7 +15,7 @@ static int fuse_q_head = 0;
 static int fuse_q_tail = 0;
 
 /*
- * [FUSE-10] This used to be:
+ * This used to be:
  *
  *     while (fuse_q_head == fuse_q_tail)
  *         sched_sleep(&request_queue);
@@ -38,7 +38,7 @@ static size_t fuse_dev_read(fs_node_t *node, off_t offset, size_t size, uint8_t 
 }
 
 /*
- * [FUSE-27] This cast an unvalidated user buffer straight to a 16-byte
+ * This used to cast an unvalidated user buffer straight to a 16-byte
  * struct fuse_out_header with no length check, then returned `size` --
  * reporting success for a reply nothing reads.  Nothing dispatches replies
  * (there are no outstanding requests to match them against), so the honest
@@ -84,7 +84,7 @@ static int fuse_unmount(fs_node_t *root) {
 }
 
 /*
- * [FUSE-28] This used to succeed unconditionally: no FUSE_INIT handshake, no
+ * This used to succeed unconditionally: no FUSE_INIT handshake, no
  * /dev/fuse session bound to the mount, no owning uid, and the node it
  * returned had NULL readdir and NULL finddir.  Mounting it over a real
  * directory therefore replaced that directory with an empty one nothing could

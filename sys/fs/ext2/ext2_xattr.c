@@ -90,7 +90,7 @@ int ext2_xattr_split_name(const char *full, const char **suffix) {
     size_t prefix_len = dot - full;
     *suffix = dot + 1;
     /*
-     * EXT2-25: POSIX ACLs are not "system.*" entries with a suffix -- they
+     * POSIX ACLs are not "system.*" entries with a suffix -- they
      * get their own name indices (2 and 3) and are stored with an EMPTY
      * name.  Falling through to the "system" case below returned index 7
      * with suffix "posix_acl_access", which matches nothing on disk, so
@@ -122,7 +122,7 @@ static const char *ext2_xattr_index_prefix(uint8_t idx) {
     case EXT4_XATTR_INDEX_TRUSTED:  return "trusted.";
     case EXT4_XATTR_INDEX_SECURITY: return "security.";
     case EXT4_XATTR_INDEX_SYSTEM:   return "system.";
-    /* EXT2-25: no trailing separator.  These entries carry an empty name, so
+    /* POSIX ACL prefixes: no trailing separator.  These entries carry an empty name, so
      * listxattr concatenates prefix + "" -- with the colon it produced
      * "system.posix_acl_access:", a name that getxattr could not resolve.
      * The attribute's full name IS the prefix. */
@@ -169,7 +169,7 @@ static int ext2_xattr_walk_get(const uint8_t *entries,
             uint32_t vsize = e->e_value_size;
             uint32_t voff  = e->e_value_offs;
             if (e->e_value_block != 0) return -ENOTSUP;
-            /* EXT2-14: voff and vsize are both untrusted u32 straight off the
+            /* voff and vsize are both untrusted u32 straight off the
              * disk, and size_t is 32 bits here -- so `voff + vsize` wraps and
              * a crafted pair passes the bound.  The NULL-out query path then
              * hands the caller a ~4 GiB required size, and a caller that
@@ -376,9 +376,9 @@ int ext2_xattr_get(fs_node_t *node, const char *full_name,
     int idx = ext2_xattr_split_name(full_name, &suffix);
     if (idx < 0) return -ENOTSUP;
     size_t slen = strlen(suffix);
-    /* EXT2-A28 (audit XA-04): the POSIX-ACL names map to their own
+    /* The POSIX-ACL names map to their own
      * indices with a deliberately EMPTY suffix — that is how they are
-     * stored on disk (EXT2-25).  Rejecting an empty suffix here made
+     * stored on disk.  Rejecting an empty suffix here made
      * getxattr("system.posix_acl_access") fail -ERANGE before it ever
      * reached the disk, so the walker's empty-name match was dead code
      * while listxattr happily advertised the name.  -ERANGE also means

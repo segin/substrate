@@ -9,7 +9,7 @@
  * conversion, and maintains the allocation bitmap, FAT chains, entry-set
  * SetChecksum, NameHash and the loaded up-case table on writes.
  *
- * Hardening (see the exfat-audit references below): the boot region is verified
+ * Hardening: the boot region is verified
  * against its §3.4 checksum and geometry bounds (with a backup-region fallback);
  * directory SetChecksums, the up-case TableChecksum and cluster indices are
  * validated on read; every metadata mutation runs under a per-mount lock; new
@@ -44,7 +44,7 @@
 static exfat_node_t exfat_node_cache[EXFAT_NODE_CACHE_SIZE];
 static fs_node_t    exfat_fs_node_cache[EXFAT_NODE_CACHE_SIZE];
 static uint32_t     exfat_node_cache_idx;
-/* exFAT-F3: guards slot selection, pin counts, node population and the
+/* Guards slot selection, pin counts, node population and the
  * re-populating memset.  Initialised once in exfat_init() (single-threaded at
  * driver registration) — the old lazy "ensure" ran mutex_init() with no
  * protecting lock, so two concurrent first-ever mounts double-initialised it. */
@@ -69,7 +69,7 @@ static void exfat_node_close(fs_node_t *node) {
     if (!ctx) return;
     mutex_lock(&exfat_node_cache_lock);
     if (ctx->pin > 0) ctx->pin--;
-    /* audit H6: a file unlinked while open kept its chain via ctx->orphaned;
+    /* A file unlinked while open kept its chain via ctx->orphaned;
      * free it now that the last reference has dropped.  Re-pin across the
      * teardown (which does device I/O under fs->lock, not the cache lock) so
      * the allocator cannot hand this half-freed slot to another lookup. */
@@ -91,7 +91,7 @@ static void exfat_node_close(fs_node_t *node) {
 }
 
 /*
- * audit H6: if the file (fs, inode) is currently open, mark its cached node
+ * If the file (fs, inode) is currently open, mark its cached node
  * orphaned so its cluster chain is freed on the last close, and return 1.
  * Otherwise return 0 and let the caller free the chain now.  The caller holds
  * fs->lock; the orphan fields are stamped atomically under the cache lock.
@@ -116,7 +116,7 @@ static int exfat_defer_or_free(exfat_fs_t *fs, uint64_t inode,
 }
 
 /*
- * audit H6: after rename relocates a file's directory entry, update any open
+ * After rename relocates a file's directory entry, update any open
  * cached node so its recorded entry location (and inode) follow the move -- a
  * stale open fd would otherwise write through the old, now-deleted entry.
  * Caller holds fs->lock.
@@ -172,7 +172,7 @@ static exfat_fs_t *exfat_node_fs(fs_node_t *node) {
 }
 
 /*
- * Public mutation ops: take the per-mount lock (audit H3) so allocator +
+ * Public mutation ops: take the per-mount lock so allocator +
  * directory-slot assignment + FAT/bitmap RMW never interleave between two
  * writers, then delegate to the *_locked body.  The bodies and every helper
  * they call assume the lock is already held and never re-take it.
@@ -279,7 +279,7 @@ static uint32_t exfat_fat_next(exfat_fs_t *fs, uint32_t cluster) {
  * Return the cluster number `n` steps along a chain that starts at `start`,
  * or 0 if that is past the end.  Contiguous (NoFatChain) files skip the FAT.
  *
- * audit M2/M8: `n` is 64-bit (callers derive it from a 64-bit byte offset, so a
+ * `n` is 64-bit (callers derive it from a 64-bit byte offset, so a
  * 32-bit parameter truncated the index and returned a valid-looking WRONG
  * cluster).  A valid chain spans at most ClusterCount clusters, so any index
  * that far out is past the end -- this both rejects the overflowed offset and
@@ -359,7 +359,7 @@ static int exfat_bitmap_flush_bit(exfat_fs_t *fs, uint32_t bit) {
 }
 
 /* Mark a cluster used/free in memory and flush the affected byte.
- * audit M6: apply the in-memory bit and free_clusters accounting only after the
+ * Apply the in-memory bit and free_clusters accounting only after the
  * flush succeeds -- on a flush failure the byte is reverted to its prior value
  * so the in-memory bitmap can't drift out of sync with the disk. */
 static int exfat_bitmap_set(exfat_fs_t *fs, uint32_t cluster, int used) {
@@ -389,7 +389,7 @@ static uint32_t exfat_alloc_cluster(exfat_fs_t *fs) {
     for (uint32_t c = EXFAT_FIRST_CLUSTER;
          c < EXFAT_FIRST_CLUSTER + fs->cluster_count; c++) {
         if (!exfat_bitmap_test(fs, c)) {
-            /* audit I2: never hand out a cluster the FAT marks BAD even if the
+            /* Never hand out a cluster the FAT marks BAD even if the
              * bitmap bit is (inconsistently) clear -- reserve it in memory and
              * keep scanning. */
             if (exfat_fat_next(fs, c) == EXFAT_CLUSTER_BAD) {
@@ -408,7 +408,7 @@ static uint32_t exfat_alloc_cluster(exfat_fs_t *fs) {
 }
 
 /*
- * audit H7: allocate a data cluster and zero its contents before it becomes
+ * Allocate a data cluster and zero its contents before it becomes
  * part of a file's readable range.  exfat_alloc_cluster hands back a cluster
  * still holding a previously-deleted file's data; without this a hole created
  * by a sparse write / truncate-grow, or the unwritten tail of the last cluster,
@@ -449,7 +449,7 @@ static void exfat_free_chain(exfat_fs_t *fs, uint32_t start, int no_fat_chain,
     uint32_t c = start;
     uint32_t guard = 0;
     while (exfat_cluster_valid(fs, c) && guard++ < fs->cluster_count) {
-        /* audit I3: a corrupt back-linked chain revisits a cluster we already
+        /* A corrupt back-linked chain revisits a cluster we already
          * freed (its bit is now clear) -- stop rather than touch it twice. */
         if (!exfat_bitmap_test(fs, c)) break;
         uint32_t nx = exfat_fat_next(fs, c);
@@ -464,7 +464,7 @@ static void exfat_free_chain(exfat_fs_t *fs, uint32_t start, int no_fat_chain,
 /*
  * Convert up to `nchars` UTF-16LE code units to UTF-8 into `dst` (`dstsz`
  * includes the NUL).  Surrogate pairs are decoded; an UNPAIRED surrogate is
- * emitted as U+FFFD (audit L6) rather than as an ill-formed 3-byte sequence.
+ * emitted as U+FFFD rather than as an ill-formed 3-byte sequence.
  * Returns bytes written (excluding NUL).
  */
 static size_t exfat_utf16_to_utf8(const uint8_t *src, int nchars, char *dst, size_t dstsz) {
@@ -481,10 +481,10 @@ static size_t exfat_utf16_to_utf8(const uint8_t *src, int nchars, char *dst, siz
                 cp = 0x10000 + ((cp - 0xD800) << 10) + (lo - 0xDC00);
                 i++;
             } else {
-                cp = 0xFFFD;   /* audit L6: unpaired high surrogate */
+                cp = 0xFFFD;   /* unpaired high surrogate */
             }
         } else if (cp >= 0xDC00 && cp <= 0xDFFF) {
-            cp = 0xFFFD;       /* audit L6: unpaired low surrogate */
+            cp = 0xFFFD;       /* unpaired low surrogate */
         }
         if (cp < 0x80) {
             dst[o++] = (char)cp;
@@ -514,7 +514,7 @@ static size_t exfat_utf16_to_utf8(const uint8_t *src, int nchars, char *dst, siz
  * up to `cap` code units and returns the count.  Used to build on-disk name
  * entries and to fold a lookup name for comparison.
  *
- * audit L6/M12: overlong encodings, UTF-8-encoded surrogates and code points
+ * Overlong encodings, UTF-8-encoded surrogates and code points
  * above U+10FFFF are decoded to U+FFFD, never to their literal code point.
  * This is what stops an overlong "/" (C0 AF) from being written on disk as a
  * real U+002F path separator the VFS splitter never saw.
@@ -553,7 +553,7 @@ static int exfat_utf8_to_utf16(const char *s, uint16_t *out, int cap) {
     return n;
 }
 
-/* audit M12 / §7.7.3: is `c` an invalid FileName character (control code or one
+/* §7.7.3: is `c` an invalid FileName character (control code or one
  * of the reserved punctuation glyphs)? */
 static int exfat_name_char_invalid(uint16_t c) {
     if (c < 0x0020) return 1;
@@ -688,7 +688,7 @@ static fs_node_t *exfat_alloc_node(exfat_fs_t *fs, const char *name, uint64_t in
                                    uint8_t dir_no_fat_chain, uint64_t primary_index,
                                    uint8_t secondary_count) {
     /*
-     * exFAT-F3 / audit H1+H2+L1: the node cache is a fixed slot ring shared by
+     * The node cache is a fixed slot ring shared by
      * all exFAT mounts.  The old code hardcoded the root to slot 0 (shared
      * across every mount, so a second mount aliased then freed the first
      * mount's root -> cross-volume writes + use-after-free) and populated the
@@ -822,7 +822,7 @@ static int exfat_iter_to(struct exfat_dir_iter *it, uint32_t want_chain) {
         c = exfat_chain_nth(it->fs, it->start, it->no_fat_chain, want_chain);
         if (c == 0) { it->eof = 1; return -1; }
     }
-    /* audit M4: a failed device read is an I/O error, not a clean end of
+    /* A failed device read is an I/O error, not a clean end of
      * directory — flag it so exfat_scan_dir returns -EIO instead of -ENOENT. */
     if (exfat_read_cluster(it->fs, c, it->buf) != 0) { it->eof = 1; it->io_error = 1; return -1; }
     it->chain_index = want_chain;
@@ -902,7 +902,7 @@ static int exfat_scan_dir(exfat_node_t *dir, const char *want_name,
         if (type == EXFAT_ENTRY_EOD) break;         /* end of directory */
         if (!(type & EXFAT_ENTRY_INUSE)) continue;  /* deleted / unused */
         if (type != EXFAT_ENTRY_FILE) {
-            /* audit I1 / §8.2: an unrecognised in-use *critical primary*
+            /* §8.2: an unrecognised in-use *critical primary*
              * ((type & 0xE0) == 0x80) renders the directory invalid.  We reject
              * major!=1 volumes, so such a type cannot be a future benign entry;
              * stop rather than misparse past it.  Benign primaries (0xA0-0xBF)
@@ -926,7 +926,7 @@ static int exfat_scan_dir(exfat_node_t *dir, const char *want_name,
         int64_t mod = exfat_time(fe->modify_time);
         int64_t acc = exfat_time(fe->access_time);
 
-        /* audit H4 / §6.3.3: verify the SetChecksum before using any entry in
+        /* §6.3.3: verify the SetChecksum before using any entry in
          * the set.  This both rejects corrupt sets and stops a hostile
          * SecondaryCount from later steering exfat_delete_set across unrelated
          * neighbouring entries.  (Reloads the iterator buffer.) */
@@ -938,7 +938,7 @@ static int exfat_scan_dir(exfat_node_t *dir, const char *want_name,
         if (!se || se[0] != EXFAT_ENTRY_STREAM) continue;
         const exfat_stream_entry_t *st = (const exfat_stream_entry_t *)se;
         uint8_t  nlen   = st->name_length;
-        if (nlen == 0) continue;                    /* audit L5: §7.6 name is 1..255 */
+        if (nlen == 0) continue;                    /* §7.6 name is 1..255 */
         uint32_t fc     = st->first_cluster;
         uint64_t sz     = st->data_length;
         uint8_t  sflags = st->flags;
@@ -960,7 +960,7 @@ static int exfat_scan_dir(exfat_node_t *dir, const char *want_name,
         int match;
         if (want_name) {
             match = exfat_name_eq_utf16(fs, utf16, nchars, want_name);
-            /* audit M13: a long non-ASCII name is truncated to <=255 UTF-8 bytes
+            /* A long non-ASCII name is truncated to <=255 UTF-8 bytes
              * by readdir; also accept an exact match against that truncated
              * rendering so a name userspace saw in a listing is resolvable. */
             if (!match && strcmp(want_name, utf8) == 0) match = 1;
@@ -987,7 +987,7 @@ static int exfat_scan_dir(exfat_node_t *dir, const char *want_name,
          * outer loop's per-entry advance walks over them. */
     }
 
-    /* audit M4: a read failure mid-scan must not masquerade as "not found",
+    /* A read failure mid-scan must not masquerade as "not found",
      * or rmdir/rename would treat an unreadable directory as empty and mkdir
      * would skip its EEXIST check. */
     if (rc == -ENOENT && it.io_error) rc = -EIO;
@@ -1047,12 +1047,12 @@ static size_t exfat_read(fs_node_t *node, off_t offset, size_t size, uint8_t *bu
     size_t done = 0;
     int io_err = 0;
     uint32_t within = (uint32_t)(off % fs->cluster_size);
-    /* audit M2: pass the full 64-bit logical cluster index (was truncated to
+    /* Pass the full 64-bit logical cluster index (was truncated to
      * uint32, which wrapped for large offsets to a valid-looking wrong cluster). */
     uint32_t cluster = exfat_chain_nth(fs, ctx->first_cluster, ctx->no_fat_chain,
                                        off / fs->cluster_size);
 
-    /* audit M8: a single read cannot legitimately span more than ClusterCount
+    /* A single read cannot legitimately span more than ClusterCount
      * clusters; the guard stops a cyclic FAT from looping. */
     uint32_t guard = 0;
     while (done < size && cluster != 0 && guard++ < fs->cluster_count) {
@@ -1072,8 +1072,8 @@ static size_t exfat_read(fs_node_t *node, off_t offset, size_t size, uint8_t *bu
         }
     }
     kfree(cbuf, fs->cluster_size);
-    /* audit L2: surface a device error the caller can distinguish from EOF via
-     * the VFS-28 negated-errno channel, but only when no bytes were delivered
+    /* Surface a device error the caller can distinguish from EOF via
+     * the VFS's negated-errno return channel, but only when no bytes were delivered
      * (a partial read returns its count so the error lands on the next call). */
     if (done == 0 && io_err) return (size_t)-EIO;
     return done;
@@ -1109,7 +1109,7 @@ static uint32_t exfat_dir_extend(exfat_node_t *dir) {
     exfat_fs_t *fs = dir->fs;
     if (dir->no_fat_chain) return 0;                 /* not supported */
     if (!exfat_cluster_valid(fs, dir->first_cluster)) return 0;
-    /* audit L8 / §9.5: refuse to grow a directory past the 256 MiB limit. */
+    /* §9.5: refuse to grow a directory past the 256 MiB limit. */
     if (dir->has_dir_entry && dir->size + fs->cluster_size > EXFAT_MAX_DIR_BYTES)
         return 0;
 
@@ -1124,7 +1124,7 @@ static uint32_t exfat_dir_extend(exfat_node_t *dir) {
         if (x < EXFAT_FIRST_CLUSTER || x >= EXFAT_CLUSTER_END) break;
         last = x;
     }
-    /* audit M6: if either link write fails, free the new cluster and do NOT
+    /* If either link write fails, free the new cluster and do NOT
      * grow the recorded size -- otherwise DataLength would exceed the real
      * chain by one cluster. */
     if (exfat_fat_set(fs, last, nc) != 0 ||
@@ -1250,10 +1250,10 @@ static int exfat_create_set(exfat_node_t *dir, const char *name, uint16_t attr,
                             uint64_t *out_primary, uint8_t *out_secondary) {
     exfat_fs_t *fs = dir->fs;
 
-    /* audit M12: reject the reserved names outright. */
+    /* Reject the reserved names outright. */
     if (!strcmp(name, ".") || !strcmp(name, "..")) return -EINVAL;
 
-    /* audit L12: convert with a cap one past the limit so an over-length name
+    /* Convert with a cap one past the limit so an over-length name
      * saturates to 256 units and is reported as -ENAMETOOLONG rather than
      * silently truncated to a different (aliasing) name. */
     uint16_t u16[256];
@@ -1261,7 +1261,7 @@ static int exfat_create_set(exfat_node_t *dir, const char *name, uint16_t attr,
     if (nlen <= 0) return -EINVAL;
     if (nlen > 255) return -ENAMETOOLONG;
 
-    /* audit M12 / §7.7.3: reject invalid FileName characters. */
+    /* §7.7.3: reject invalid FileName characters. */
     for (int i = 0; i < nlen; i++)
         if (exfat_name_char_invalid(u16[i])) return -EINVAL;
 
@@ -1314,7 +1314,7 @@ static int exfat_create_set(exfat_node_t *dir, const char *name, uint16_t attr,
     for (uint32_t i = 0; i < nent; i++) {
         uint64_t off = exfat_entry_offset(fs, dir->first_cluster, dir->no_fat_chain, idx + i);
         if (off == 0 || exfat_write_bytes(fs, off, 32, set + i * 32) != 0) {
-            /* audit M6: a device error partway through leaves a torn set that
+            /* A device error partway through leaves a torn set that
              * (lacking a valid SetChecksum) scan_dir already rejects -- but
              * clear the InUse bit on the entries we did write so it also stops
              * enumerating and never confuses another implementation. */
@@ -1338,7 +1338,7 @@ static int exfat_create_set(exfat_node_t *dir, const char *name, uint16_t attr,
 }
 
 /* Delete an entry set: clear the "in use" bit on each of its entries.
- * audit H4: the primary is cleared first (so the set stops enumerating even if
+ * The primary is cleared first (so the set stops enumerating even if
  * a later write fails), and each entry's type is checked against its expected
  * category before clearing -- entry 0 an in-use critical primary, the rest
  * in-use secondaries -- so a bogus secondary_count can never steer this across
@@ -1373,14 +1373,14 @@ static size_t exfat_file_write_locked(fs_node_t *node, off_t offset, size_t size
     uint32_t cs = fs->cluster_size;
 
     uint64_t end = (uint64_t)offset + size;
-    /* audit M2: refuse a write whose last byte lands beyond the last possible
+    /* Refuse a write whose last byte lands beyond the last possible
      * cluster; this also stops need_clusters / the logical index below from
      * being truncated into a valid-looking wrong cluster. */
     if ((end - 1) / cs >= (uint64_t)fs->cluster_count) return (size_t)-EFBIG;
     uint32_t need_clusters = (uint32_t)((end + cs - 1) / cs);
     uint32_t have_clusters = (uint32_t)((ctx->size + cs - 1) / cs);
 
-    /* audit M6: reject up front if the volume lacks room for the whole
+    /* Reject up front if the volume lacks room for the whole
      * extension, rather than allocating some clusters and then failing partway
      * -- which would leave a chain longer than the recorded DataLength. */
     if (need_clusters > have_clusters &&
@@ -1399,7 +1399,7 @@ static size_t exfat_file_write_locked(fs_node_t *node, off_t offset, size_t size
         ctx->no_fat_chain = 0;
     }
 
-    /* Allocate the first cluster if the file is empty (zeroed — audit H7). */
+    /* Allocate the first cluster if the file is empty (zeroed). */
     if (!exfat_cluster_valid(fs, ctx->first_cluster)) {
         uint32_t nc = exfat_alloc_cluster_zeroed(fs);
         if (nc == 0) return 0;
@@ -1408,7 +1408,7 @@ static size_t exfat_file_write_locked(fs_node_t *node, off_t offset, size_t size
     }
 
     /* Walk to the need_clusters-th cluster, extending the FAT chain as needed.
-     * New clusters are zeroed (audit H7) so a hole or unwritten tail reads back
+     * New clusters are zeroed so a hole or unwritten tail reads back
      * as zeroes instead of a previously-deleted file's residue. */
     uint32_t cluster = ctx->first_cluster;
     for (uint32_t i = 1; i < need_clusters; i++) {
@@ -1433,7 +1433,7 @@ static size_t exfat_file_write_locked(fs_node_t *node, off_t offset, size_t size
     size_t done = 0;
     uint32_t within = (uint32_t)((uint64_t)offset % cs);
     uint32_t c = exfat_chain_nth(fs, ctx->first_cluster, ctx->no_fat_chain,
-                                 (uint64_t)offset / cs);   /* audit M2: 64-bit index */
+                                 (uint64_t)offset / cs);   /* 64-bit index */
     while (done < size && c != 0) {
         uint32_t chunk = cs - within;
         if ((uint64_t)chunk > (uint64_t)(size - done)) chunk = (uint32_t)(size - done);
@@ -1459,7 +1459,7 @@ static size_t exfat_file_write_locked(fs_node_t *node, off_t offset, size_t size
         ctx->size = (uint64_t)offset + done;
         node->length = (off_t)ctx->size;
     }
-    /* audit H6: honour exfat_update_stream's return instead of ignoring it.
+    /* Honour exfat_update_stream's return instead of ignoring it.
      * Only fail the call when nothing was written -- a positive count means the
      * data reached its (unchanged first_cluster) clusters even if the metadata
      * re-stamp failed; the stale-node-after-rename case that made this fail is
@@ -1475,7 +1475,7 @@ static int exfat_truncate_locked(fs_node_t *node, off_t new_size) {
     exfat_fs_t *fs = ctx->fs;
     uint32_t cs = fs->cluster_size;
     uint64_t ns = (uint64_t)new_size;
-    /* audit M2: cap the new size at the volume's cluster capacity so `need`
+    /* Cap the new size at the volume's cluster capacity so `need`
      * cannot be truncated to a bogus (small) cluster count. */
     if (ns && (ns - 1) / cs >= (uint64_t)fs->cluster_count) return -EFBIG;
     uint32_t need = (uint32_t)((ns + cs - 1) / cs);
@@ -1510,7 +1510,7 @@ static int exfat_truncate_locked(fs_node_t *node, off_t new_size) {
         }
     } else if (need > have) {
         /* Grow: allocate the extra clusters so DataLength stays backed.
-         * audit M6: check free space up front so we never allocate part of the
+         * Check free space up front so we never allocate part of the
          * extension and then fail, leaving a chain longer than DataLength that a
          * retried grow would sever and orphan. */
         if ((uint64_t)(need - have) > fs->free_clusters) return -ENOSPC;
@@ -1522,7 +1522,7 @@ static int exfat_truncate_locked(fs_node_t *node, off_t new_size) {
             ctx->no_fat_chain = 0;
         }
         if (!exfat_cluster_valid(fs, ctx->first_cluster)) {
-            uint32_t nc = exfat_alloc_cluster_zeroed(fs);   /* audit H7 */
+            uint32_t nc = exfat_alloc_cluster_zeroed(fs);
             if (nc == 0) return -ENOSPC;
             ctx->first_cluster = nc;
             ctx->no_fat_chain = 0;
@@ -1535,7 +1535,7 @@ static int exfat_truncate_locked(fs_node_t *node, off_t new_size) {
             cluster = nx;
         }
         for (uint32_t i = have; i < need; i++) {
-            uint32_t nc = exfat_alloc_cluster_zeroed(fs);   /* audit H7 */
+            uint32_t nc = exfat_alloc_cluster_zeroed(fs);
             if (nc == 0) return -ENOSPC;
             exfat_fat_set(fs, cluster, nc);
             exfat_fat_set(fs, nc, EXFAT_CLUSTER_EOF);
@@ -1561,7 +1561,7 @@ static int exfat_mkdir_locked(fs_node_t *parent, const char *name, uint16_t perm
     struct exfat_dirinfo info;
     int erc = exfat_scan_dir(dir, name, 0, &info);
     if (erc == 0) return -EEXIST;
-    if (erc != -ENOENT) return erc;             /* audit M4: don't create over an unreadable dir */
+    if (erc != -ENOENT) return erc;             /* don't create over an unreadable dir */
 
     /* A new (empty) directory occupies one zeroed cluster (no "." / ".."). */
     uint32_t c = exfat_alloc_cluster(fs);
@@ -1598,7 +1598,7 @@ static int exfat_mknod_locked(fs_node_t *parent, const char *name, uint16_t mode
     struct exfat_dirinfo info;
     int erc = exfat_scan_dir(dir, name, 0, &info);
     if (erc == 0) return -EEXIST;
-    if (erc != -ENOENT) return erc;             /* audit M4 */
+    if (erc != -ENOENT) return erc;             /* I/O error, not "absent" */
 
     uint64_t pidx; uint8_t sec;
     return exfat_create_set(dir, name, EXFAT_ATTR_ARCHIVE, 0, 0, 0, &pidx, &sec);
@@ -1614,13 +1614,13 @@ static int exfat_unlink_locked(fs_node_t *parent, const char *name) {
     if (rc != 0) return rc;
     if (info.attr & EXFAT_ATTR_DIRECTORY) return -EISDIR;
 
-    /* audit M7 / §8.1: remove the directory entry BEFORE freeing the chain, so
+    /* §8.1: remove the directory entry BEFORE freeing the chain, so
      * an interrupted delete leaks clusters rather than leaving a live entry
      * pointing at clusters the allocator can reuse (a cross-link). */
     rc = exfat_delete_set(dir, info.dir_entry_index, info.secondary_count);
     if (rc != 0) return rc;
     if (exfat_cluster_valid(fs, info.first_cluster)) {
-        /* audit H6: if the file is still open, defer freeing its chain until the
+        /* If the file is still open, defer freeing its chain until the
          * last fd closes -- otherwise the freed clusters get reused and the open
          * fd scribbles another file's data. */
         uint64_t ino = ((uint64_t)dir->first_cluster << 32) |
@@ -1632,7 +1632,7 @@ static int exfat_unlink_locked(fs_node_t *parent, const char *name) {
 }
 
 /*
- * audit L7 / §8.2: when deleting a directory, free the cluster allocations of
+ * §8.2: when deleting a directory, free the cluster allocations of
  * any unrecognised *benign primary* entries it holds (in-use, (type&0xE0)==0xA0,
  * with GeneralPrimaryFlags.AllocationPossible set).  The emptiness check only
  * looks for 0x85 File entries, so without this those allocations leak.  This
@@ -1686,13 +1686,13 @@ static int exfat_rmdir_locked(fs_node_t *parent, const char *name) {
     struct exfat_dirinfo child;
     int crc = exfat_scan_dir(&tmp, NULL, 0, &child);
     if (crc == 0) return -ENOTEMPTY;
-    if (crc != -ENOENT) return crc;             /* audit M4: unreadable != empty */
+    if (crc != -ENOENT) return crc;             /* unreadable != empty */
 
-    /* audit M7 / §8.1: delete the entry before freeing the chain. */
+    /* §8.1: delete the entry before freeing the chain. */
     rc = exfat_delete_set(dir, info.dir_entry_index, info.secondary_count);
     if (rc != 0) return rc;
     if (exfat_cluster_valid(fs, info.first_cluster)) {
-        /* audit L7: reclaim any benign-primary allocations before the chain. */
+        /* Reclaim any benign-primary allocations before the chain. */
         exfat_free_benign_allocs(fs, info.first_cluster, info.no_fat_chain);
         exfat_free_chain(fs, info.first_cluster, info.no_fat_chain, info.size);
     }
@@ -1700,7 +1700,7 @@ static int exfat_rmdir_locked(fs_node_t *parent, const char *name) {
 }
 
 /*
- * audit M5: does directory `target_fc` equal, or lie anywhere inside, the
+ * Does directory `target_fc` equal, or lie anywhere inside, the
  * subtree rooted at `ancestor_fc`?  exFAT records no ".."/parent links, so the
  * only way to detect "moving a directory into its own subtree" is to walk down.
  * Bounded by a depth cap; on too-deep nesting (or a pre-existing cycle) it
@@ -1730,7 +1730,7 @@ static int exfat_rename_locked(fs_node_t *old_parent, const char *old_name,
     exfat_node_t *odir = (exfat_node_t *)(uintptr_t)old_parent->impl;
     exfat_node_t *ndir = (exfat_node_t *)(uintptr_t)new_parent->impl;
     if (!odir || !ndir || !old_name || !new_name) return -EINVAL;
-    /* audit M12/M5: reserved names must never be recorded. */
+    /* Reserved names must never be recorded. */
     if (!strcmp(new_name, ".") || !strcmp(new_name, "..")) return -EINVAL;
     exfat_fs_t *fs = odir->fs;
 
@@ -1740,20 +1740,20 @@ static int exfat_rename_locked(fs_node_t *old_parent, const char *old_name,
     uint64_t src_inode = ((uint64_t)odir->first_cluster << 32) |
                          (uint32_t)(src.dir_entry_index + 1);
 
-    /* audit M5: refuse to move a directory into itself or its own subtree,
+    /* Refuse to move a directory into itself or its own subtree,
      * which would orphan it into a disconnected cycle. */
     if ((src.attr & EXFAT_ATTR_DIRECTORY) &&
         odir->first_cluster != ndir->first_cluster &&
         exfat_dir_contains(fs, src.first_cluster, src.no_fat_chain, ndir->first_cluster, 0))
         return -EINVAL;
 
-    /* Resolve the destination.  audit H5: if it resolves to the SAME entry set
+    /* Resolve the destination.  If it resolves to the SAME entry set
      * as the source (a case-only or no-op rename, matched up-case-folded), it is
      * NOT an existing file to remove -- the old code freed the source's own
      * clusters here.  Skip removal in that case. */
     struct exfat_dirinfo dst;
     int drc = exfat_scan_dir(ndir, new_name, 0, &dst);
-    if (drc != 0 && drc != -ENOENT) return drc;             /* audit M4 */
+    if (drc != 0 && drc != -ENOENT) return drc;             /* I/O error */
     int have_dst = (drc == 0);
     int same_entry = have_dst &&
                      odir->first_cluster == ndir->first_cluster &&
@@ -1769,7 +1769,7 @@ static int exfat_rename_locked(fs_node_t *old_parent, const char *old_name,
             struct exfat_dirinfo dchild;
             int cc = exfat_scan_dir(&tmp, NULL, 0, &dchild);
             if (cc == 0) return -ENOTEMPTY;
-            if (cc != -ENOENT) return cc;                   /* audit M4 */
+            if (cc != -ENOENT) return cc;                   /* I/O error */
         }
         /* §8.1 order: delete the entry, then free the chain (deferred if open). */
         int derc = exfat_delete_set(ndir, dst.dir_entry_index, dst.secondary_count);
@@ -1793,7 +1793,7 @@ static int exfat_rename_locked(fs_node_t *old_parent, const char *old_name,
     rc = exfat_delete_set(odir, src.dir_entry_index, src.secondary_count);
     if (rc != 0) return rc;
 
-    /* audit H6: point any open cached node at the new entry location so a stale
+    /* Point any open cached node at the new entry location so a stale
      * fd keeps updating the right directory entry. */
     uint64_t new_inode = ((uint64_t)ndir->first_cluster << 32) | (uint32_t)(pidx + 1);
     exfat_relocate_cached(fs, src_inode, ndir->first_cluster, ndir->no_fat_chain,
@@ -1802,7 +1802,7 @@ static int exfat_rename_locked(fs_node_t *old_parent, const char *old_name,
 }
 
 /*
- * audit M7 / §3.1.13.2: set or clear the VolumeDirty bit (bit 1 of VolumeFlags,
+ * §3.1.13.2: set or clear the VolumeDirty bit (bit 1 of VolumeFlags,
  * boot byte 106).  We set it once at mount (marking the read-write session) and
  * clear it at unmount, so an unclean shutdown leaves it set for the next mount
  * to warn about.  VolumeFlags is excluded from the boot checksum, so no
@@ -1816,7 +1816,7 @@ static void exfat_set_volume_dirty(exfat_fs_t *fs, int dirty) {
     exfat_write_bytes(fs, offsetof(exfat_boot_t, volume_flags), 2, &vf);
 }
 
-/* audit L9 / §3.1.18: we do not track PercentInUse precisely, so mark it "not
+/* §3.1.18: we do not track PercentInUse precisely, so mark it "not
  * available" (0xFF, boot byte 112, also checksum-exempt) instead of leaving a
  * stale figure for other implementations. */
 static void exfat_set_percent_unknown(exfat_fs_t *fs) {
@@ -1849,7 +1849,7 @@ static int exfat_unmount(fs_node_t *root) {
     if (!ctx || !ctx->fs) return -EINVAL;
     exfat_fs_t *fs = ctx->fs;
 
-    /* audit M1: exclude any in-flight mutation (which holds fs->lock) before
+    /* Exclude any in-flight mutation (which holds fs->lock) before
      * tearing the mount down, and clear this mount's node-cache slots under the
      * cache lock the allocator/open/close use -- the old teardown raced them. */
     mutex_lock(&fs->lock);
@@ -1863,7 +1863,7 @@ static int exfat_unmount(fs_node_t *root) {
     mutex_unlock(&exfat_node_cache_lock);
     mutex_unlock(&fs->lock);
 
-    /* audit M7: a clean unmount clears VolumeDirty (device still valid here). */
+    /* A clean unmount clears VolumeDirty (device still valid here). */
     exfat_set_volume_dirty(fs, 0);
 
     if (fs->bitmap) kfree(fs->bitmap, fs->bitmap_bytes);
@@ -1912,7 +1912,7 @@ static uint32_t exfat_table_checksum(const uint8_t *t, uint64_t len) {
 }
 
 /* Reset the fold table to identity plus the mandatory ASCII a-z -> A-Z fold --
- * the safe fallback (audit M10) when the on-disk up-case table can't be trusted. */
+ * the safe fallback when the on-disk up-case table can't be trusted. */
 static void exfat_upcase_ascii(uint16_t *up) {
     for (uint32_t i = 0; i < 65536; i++) up[i] = (uint16_t)i;
     for (uint32_t i = 0x61; i <= 0x7A; i++) up[i] = (uint16_t)(i - 0x20);
@@ -1947,7 +1947,7 @@ static int exfat_load_metadata(exfat_fs_t *fs) {
                 bitmap_len     = exfat_le64(cbuf + off + 24);
                 found_bitmap = 1;
             } else if (type == EXFAT_ENTRY_UPCASE) {
-                /* audit M10: exactly one up-case table entry is valid (§7.2). */
+                /* Exactly one up-case table entry is valid (§7.2). */
                 if (found_upcase) { dup = 1; done = 1; break; }
                 upcase_flags    = cbuf[off + 1];
                 upcase_checksum = exfat_le32(cbuf + off + 4);   /* §7.2.2 TableChecksum */
@@ -1963,9 +1963,9 @@ static int exfat_load_metadata(exfat_fs_t *fs) {
     }
     kfree(cbuf, fs->cluster_size);
 
-    if (dup) return -1;                       /* audit M10: duplicate 0x81/0x82 */
+    if (dup) return -1;                       /* duplicate 0x81/0x82 */
     if (!found_bitmap || !found_upcase) return -1;
-    /* audit L4: §7.1.5 needs one bit per cluster, so the bitmap DataLength must
+    /* §7.1.5 needs one bit per cluster, so the bitmap DataLength must
      * be at least ceil(ClusterCount/8) — a too-short bitmap silently marks the
      * uncovered clusters "used" and loses most of the volume. */
     if (bitmap_len < (((uint64_t)fs->cluster_count + 7) / 8) ||
@@ -1984,7 +1984,7 @@ static int exfat_load_metadata(exfat_fs_t *fs) {
         fs->bitmap = NULL;
         return -1;
     }
-    /* audit M9: count free (clear) clusters by byte-popcount over the covering
+    /* Count free (clear) clusters by byte-popcount over the covering
      * bitmap bytes instead of a per-cluster loop that spins up to ~2^32 times
      * on a large volume.  Only the first ClusterCount bits are real clusters;
      * trailing bits in the final byte are reserved and must not be counted. */
@@ -2015,7 +2015,7 @@ static int exfat_load_metadata(exfat_fs_t *fs) {
         return -1;
     }
 
-    /* audit M10 / §7.2.2: verify the TableChecksum before trusting the table --
+    /* §7.2.2: verify the TableChecksum before trusting the table --
      * the fold drives every name comparison and every NameHash we write, so a
      * hostile table (e.g. mapping every code point to 'A') would make finddir
      * return the wrong file.  On mismatch, fall back to a built-in
@@ -2043,7 +2043,7 @@ static int exfat_load_metadata(exfat_fs_t *fs) {
     }
     kfree(table, (uint32_t)upcase_len);
 
-    /* audit M10 / §7.2.5: the first 128 mappings are mandatory (identity except
+    /* §7.2.5: the first 128 mappings are mandatory (identity except
      * a-z -> A-Z).  A table that decompressed with a valid checksum but violates
      * them is malformed; fall back to the ASCII fold. */
     for (uint32_t i = 0; i < 128; i++) {
@@ -2119,7 +2119,7 @@ static int exfat_parse_boot(const uint8_t *boot, exfat_boot_t *out) {
         b->root_cluster >= EXFAT_FIRST_CLUSTER + b->cluster_count) return -1;
 
     /*
-     * audit M3/M9/L3/L10/L11: the fields above were the only ones validated,
+     * The fields above used to be the only ones validated,
      * so a corrupt or hostile boot sector could carry geometry that directs
      * FAT/data writes into the boot region or off the end of the volume, or an
      * absurd ClusterCount that drives ~2^32-iteration allocation scans.  Cross-
@@ -2172,7 +2172,7 @@ static fs_node_t *exfat_mount(const char *device, uint32_t flags, void *data) {
     uint8_t boot[512];
     if (dev->read(dev, 0, sizeof(boot), boot) != sizeof(boot)) return NULL;
 
-    /* audit M11: verify the §3.4 Boot Checksum before trusting any geometry.
+    /* Verify the §3.4 Boot Checksum before trusting any geometry.
      * BytesPerSectorShift (needed to size the region read) lives at a fixed
      * offset inside the first 512 bytes; validate it, then checksum the main
      * region and fall back to the backup boot region (sectors 12-23). */
@@ -2239,12 +2239,12 @@ static fs_node_t *exfat_mount(const char *device, uint32_t flags, void *data) {
         return NULL;
     }
     root->unmount = exfat_unmount;
-    /* Pin the root for the whole mount lifetime (audit H1): keyed by
+    /* Pin the root for the whole mount lifetime: keyed by
      * (fs, EXFAT_ROOT_INO), it is now an ordinary cache slot, so without a pin
      * the round-robin would eventually recycle it out from under the VFS. */
     exfat_node_open(root);
     fs->root_node = root;
-    /* audit M7/L9: warn on a dirty volume, mark our read-write session dirty,
+    /* Warn on a dirty volume, mark our read-write session dirty,
      * and set PercentInUse "not available" since we don't track it precisely. */
     if (b.volume_flags & EXFAT_VOLFLAG_DIRTY)
         kprint("exFAT: volume was not cleanly unmounted (VolumeDirty set)\n");
@@ -2261,7 +2261,7 @@ int exfat_read_label(blkdev_t *dev, char *label, size_t len) {
     uint8_t boot[512];
     if (blkdev_read_bytes(dev, 0, sizeof(boot), boot) != sizeof(boot)) return -1;
 
-    /* audit M11: verify the §3.4 Boot Checksum (main, then backup) before
+    /* Verify the §3.4 Boot Checksum (main, then backup) before
      * trusting the geometry this probe walks. */
     uint8_t bps_shift = boot[offsetof(exfat_boot_t, bytes_per_sector_shift)];
     if (bps_shift < 9 || bps_shift > 12) return -1;

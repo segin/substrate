@@ -22,7 +22,7 @@ static void udf_write_space_bitmap(struct udf_fs *fs) {
     if (!fs->space_bitmap || !fs->space_bitmap_base || !fs->device) return;
 
     /*
-     * UDF-01: this used to cast fs->space_bitmap -- which points at the BIT
+     * This used to cast fs->space_bitmap -- which points at the BIT
      * ARRAY, 24 bytes past the descriptor -- to the header type.  The header
      * fields were therefore read out of raw allocation bits: desc_crc_len came
      * from bitmap bytes 14-15 and drove udf_crc far past the allocation, and
@@ -109,7 +109,7 @@ int udf_read_space_bitmap(struct udf_fs *fs, uint32_t bitmap_loc, uint32_t bitma
     }
     
     fs->space_bitmap       = sector_buf + sizeof(struct udf_space_bitmap);
-    fs->space_bitmap_base  = sector_buf;                  /* UDF-01 */
+    fs->space_bitmap_base  = sector_buf;                  /* descriptor header */
     fs->space_bitmap_alloc = UDF_SECTOR_SIZE * 4;
     fs->space_bitmap_sector = sector;
 
@@ -135,7 +135,7 @@ uint32_t udf_alloc_block(struct udf_fs *fs) {
     if (!fs->space_bitmap) return 0;
 
     /*
-     * UDF-03: the polarity was inverted.  ECMA-167 4/14.12.1.1 (and Linux's
+     * The polarity used to be inverted.  ECMA-167 4/14.12.1.1 (and Linux's
      * udf_bitmap_new_block) define a SET bit as FREE and a clear bit as
      * allocated; this scanned for a ZERO bit and set it, i.e. it treated
      * allocated blocks as free.  On a real mkudffs volume the first "free"
@@ -170,7 +170,7 @@ void udf_free_block(struct udf_fs *fs, uint32_t block) {
     uint32_t byte = block / 8;
     uint8_t bit = block % 8;
 
-    /* UDF-03: freeing means marking FREE, which is setting the bit. */
+    /* Freeing means marking FREE, which is setting the bit. */
     fs->space_bitmap[byte] |= (1 << bit);
     udf_write_space_bitmap(fs);
 }
@@ -267,7 +267,7 @@ static void udf_ext_write_aed(struct udf_fs *fs, uint32_t block, uint8_t *buf, u
 }
 
 /*
- * UDF-05: ext_attr_length is an untrusted on-disk field, and nearly every
+ * ext_attr_length is an untrusted on-disk field, and nearly every
  * write path computes both an allocation-descriptor pointer
  * (fe + sizeof(fe) + ext_attr_length) and an UNSIGNED remaining length
  * (UDF_SECTOR_SIZE - sizeof(fe) - ext_attr_length) from it.  Only the inline
@@ -280,7 +280,7 @@ static void udf_ext_write_aed(struct udf_fs *fs, uint32_t block, uint8_t *buf, u
  * Returns 1 when the FE's descriptor area lies wholly inside one sector.
  */
 /*
- * UDF-06: alloc_desc_length inside an Allocation Extent Descriptor is taken
+ * alloc_desc_length inside an Allocation Extent Descriptor is taken
  * straight off the disc.  0xFFFFFFFF divided by 8 is 536 million iterations
  * of a loop that both READS and WRITES ads[i] in a single-sector buffer.  An
  * AED can only describe what fits in the sector that holds it.
@@ -295,7 +295,7 @@ static uint32_t udf_aed_len_ok(uint32_t len) {
 }
 
 /*
- * UDF-06: an AED chain is a linked list read from the disc, so a
+ * An AED chain is a linked list read from the disc, so a
  * self-referencing or cyclic link makes every walker spin forever.  Nothing
  * legitimate needs more links than there are sectors in a partition, and far
  * fewer in practice; this is the guard rail, not a real limit.
@@ -319,13 +319,13 @@ static int udf_fe_area_ok(const struct udf_fe *fe) {
  * Convert inline data to Short Allocation Descriptor
  */
 static int udf_convert_inline_to_short_ad(struct udf_fs *fs, struct udf_fe *fe) {
-    if (!udf_fe_area_ok(fe)) return -1;                       /* UDF-05 */
+    if (!udf_fe_area_ok(fe)) return -1;                       /* untrusted EA len */
 
     uint32_t len = (uint32_t)fe->info_length;
     uint8_t *inline_data = (uint8_t *)fe + sizeof(struct udf_fe) + fe->ext_attr_length;
 
     /*
-     * UDF-04: info_length is on-disk and unbounded, but the inline data it
+     * info_length is on-disk and unbounded, but the inline data it
      * describes lives inside a single 2048-byte FE sector and is copied into
      * a UDF_SECTOR_SIZE buffer.  Bound it by both.
      */
@@ -373,7 +373,7 @@ static int udf_convert_inline_to_short_ad(struct udf_fs *fs, struct udf_fe *fe) 
  */
 static int udf_write_extent_data_long(struct udf_fs *fs, struct udf_fe *fe,
                                       uint32_t offset, uint32_t size, const uint8_t *data) {
-    if (!udf_fe_area_ok(fe)) return -1;                       /* UDF-05 */
+    if (!udf_fe_area_ok(fe)) return -1;                       /* untrusted EA len */
     uint8_t *ad_area = (uint8_t *)fe + sizeof(struct udf_fe) + fe->ext_attr_length;
     struct udf_long_ad *ads = (struct udf_long_ad *)ad_area;
 
@@ -506,7 +506,7 @@ static int udf_write_extent_data_long(struct udf_fs *fs, struct udf_fe *fe,
  */
 static int udf_write_extent_data(struct udf_fs *fs, struct udf_fe *fe,
                                  uint32_t offset, uint32_t size, const uint8_t *data) {
-    if (!udf_fe_area_ok(fe)) return -1;                       /* UDF-05 */
+    if (!udf_fe_area_ok(fe)) return -1;                       /* untrusted EA len */
     /* Pointers to current AD container */
     uint8_t *cur_buf = NULL;     /* If NULL, using FE */
     uint32_t cur_block = 0;      /* Block of current AED */
@@ -516,7 +516,7 @@ static int udf_write_extent_data(struct udf_fs *fs, struct udf_fe *fe,
 
     uint32_t logical_pos = 0;
     uint32_t cur_idx = 0;
-    /* UDF-06: bound the AED chain walk -- a self-referencing link on disc
+    /* Bound the AED chain walk -- a self-referencing link on disc
      * otherwise spins here forever, holding a live kmalloc each pass. */
     uint32_t chain_hops = 0;
 
@@ -557,7 +557,7 @@ static int udf_write_extent_data(struct udf_fs *fs, struct udf_fe *fe,
             cur_block = next_block;
 
             struct udf_aed *aed = (struct udf_aed *)cur_buf;
-            cur_len = udf_aed_len_ok(aed->alloc_desc_length);   /* UDF-06 */
+            cur_len = udf_aed_len_ok(aed->alloc_desc_length);   /* on-disk: bound */
             ads = (struct udf_short_ad *)(cur_buf + sizeof(struct udf_aed));
             max_len = UDF_SECTOR_SIZE - sizeof(struct udf_aed);
 
@@ -722,7 +722,7 @@ static int udf_write_extent_data(struct udf_fs *fs, struct udf_fe *fe,
             cur_block = next_block;
 
             struct udf_aed *aed = (struct udf_aed *)cur_buf;
-            cur_len = udf_aed_len_ok(aed->alloc_desc_length);   /* UDF-06 */
+            cur_len = udf_aed_len_ok(aed->alloc_desc_length);   /* on-disk: bound */
             ads = (struct udf_short_ad *)(cur_buf + sizeof(struct udf_aed));
             max_len = UDF_SECTOR_SIZE - sizeof(struct udf_aed);
 
@@ -797,7 +797,7 @@ int udf_write_file(struct udf_fs *fs, struct udf_fe *fe, uint32_t fe_block,
     }
     
     struct udf_fe *disk_fe = (struct udf_fe *)sector_buf;
-    /* A85: compute in 64-bit so offset+size cannot wrap, and validate the
+    /* Compute in 64-bit so offset+size cannot wrap, and validate the
      * untrusted on-disk ext_attr_length before using it as an offset into
      * the fixed UDF_SECTOR_SIZE-byte sector buffer.  inline_base + 40 must
      * fit within the sector or the original bound underflowed and let a
@@ -913,7 +913,7 @@ int udf_add_fid(struct udf_fs *fs, struct udf_fe *dir_fe, uint32_t dir_block,
         return -1;
     }
 
-    /* A39: the directory may span more than one sector (info_length up to
+    /* The directory may span more than one sector (info_length up to
      * 4096 = 2 sectors).  Read every sector we will index into — not just
      * the first — so the FID is never written into uninitialised heap, and
      * persist that same span below.  Otherwise a multi-sector directory
@@ -951,7 +951,7 @@ int udf_add_fid(struct udf_fs *fs, struct udf_fe *dir_fe, uint32_t dir_block,
     /* Update directory size */
     dir_fe->info_length = dir_size + fid_size;
 
-    /* Write back every sector we touched (see A39 above). */
+    /* Write back every sector we touched (see the read above). */
     for (uint32_t i = 0; i < used_sectors; i++) {
         fs->device->write(fs->device, disk_off + (off_t)i * UDF_SECTOR_SIZE,
                           UDF_SECTOR_SIZE, dir_buf + i * UDF_SECTOR_SIZE);
@@ -1030,7 +1030,7 @@ static void udf_free_short_ad_chain(struct udf_fs *fs, uint32_t aed_block) {
     uint8_t *buf = kmalloc(UDF_SECTOR_SIZE);
     if (!buf) return;
 
-    uint32_t aed_hops = 0;      /* UDF-06: cycle guard */
+    uint32_t aed_hops = 0;      /* cycle guard */
     while (aed_block != 0) {
         if (++aed_hops > UDF_AED_CHAIN_MAX) {
             kprint("UDF: AED chain too long (cycle?); aborting\n");
@@ -1048,7 +1048,7 @@ static void udf_free_short_ad_chain(struct udf_fs *fs, uint32_t aed_block) {
 
         struct udf_short_ad *ads = (struct udf_short_ad *)(buf + sizeof(struct udf_aed));
         uint32_t num_ads = udf_aed_len_ok(aed->alloc_desc_length) /
-                           sizeof(struct udf_short_ad);        /* UDF-06 */
+                           sizeof(struct udf_short_ad);        /* bounded */
         uint32_t next_aed_block = 0;
 
         for (uint32_t i = 0; i < num_ads; i++) {
@@ -1080,7 +1080,7 @@ static void udf_free_short_ad_chain(struct udf_fs *fs, uint32_t aed_block) {
 static uint32_t udf_process_short_ads(struct udf_fs *fs, uint8_t *ad_buf, uint32_t ad_len,
                                       uint64_t *current_offset, uint64_t new_size,
                                       uint32_t depth) {
-    /* UDF-06: this recurses once per AED link with a live kmalloc held in
+    /* This recurses once per AED link with a live kmalloc held in
      * every frame, and the link comes off the disc -- a cycle exhausts the
      * kernel stack.  Same bound as the iterative chain walkers. */
     if (depth > UDF_AED_CHAIN_MAX) {
@@ -1184,7 +1184,7 @@ static void udf_free_long_ad_chain(struct udf_fs *fs, uint32_t aed_block) {
     uint8_t *buf = kmalloc(UDF_SECTOR_SIZE);
     if (!buf) return;
 
-    uint32_t aed_hops = 0;      /* UDF-06: cycle guard */
+    uint32_t aed_hops = 0;      /* cycle guard */
     while (aed_block != 0) {
         if (++aed_hops > UDF_AED_CHAIN_MAX) {
             kprint("UDF: AED chain too long (cycle?); aborting\n");
@@ -1202,7 +1202,7 @@ static void udf_free_long_ad_chain(struct udf_fs *fs, uint32_t aed_block) {
 
         struct udf_long_ad *ads = (struct udf_long_ad *)(buf + sizeof(struct udf_aed));
         uint32_t num_ads = udf_aed_len_ok(aed->alloc_desc_length) /
-                           sizeof(struct udf_long_ad);         /* UDF-06 */
+                           sizeof(struct udf_long_ad);         /* bounded */
         uint32_t next_aed_block = 0;
 
         for (uint32_t i = 0; i < num_ads; i++) {
@@ -1234,7 +1234,7 @@ static void udf_free_long_ad_chain(struct udf_fs *fs, uint32_t aed_block) {
 static uint32_t udf_process_long_ads(struct udf_fs *fs, uint8_t *ad_buf, uint32_t ad_len,
                                      uint64_t *current_offset, uint64_t new_size,
                                      uint32_t depth) {
-    if (depth > UDF_AED_CHAIN_MAX) {           /* UDF-06 */
+    if (depth > UDF_AED_CHAIN_MAX) {           /* cycle guard */
         kprint("UDF: AED nesting too deep (cycle?); aborting\n");
         return 0;
     }
@@ -1343,7 +1343,7 @@ int udf_truncate_file(struct udf_fs *fs, struct udf_fe *fe, uint32_t fe_block,
     
     struct udf_fe *disk_fe = (struct udf_fe *)sector_buf;
 
-    /* UDF-05: both descriptor branches below derive alloc_area and an
+    /* Both descriptor branches below derive alloc_area and an
      * unsigned max_ad_len from disk_fe->ext_attr_length; validate the FE we
      * just read off the disc before either of them uses it. */
     if (!udf_fe_area_ok(disk_fe)) {

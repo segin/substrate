@@ -76,7 +76,7 @@ typedef struct devfs_entry {
      */
     uint32_t perso_mask;
     /*
-     * DEVFS-12: this used to be the entry's heap ADDRESS, both here (via
+     * This used to be the entry's heap ADDRESS, both here (via
      * node->inode) and as readdir's d_ino -- and sys_stat copies node->inode
      * straight into st_ino.  Any user running `stat /dev/tty` or `ls -i /dev`
      * therefore read back kernel-heap addresses: a reliable heap-layout
@@ -344,7 +344,7 @@ static struct dirent *devfs_dir_readdir(fs_node_t *node, uint64_t index) {
     if (!entry) return NULL;
 
     /*
-     * DEVFS-21: devfs_dir_finddir resolves "." and ".." but readdir did not
+     * devfs_dir_finddir resolves "." and ".." but readdir used to not
      * emit them, so lookup and enumeration disagreed: `ls -a /dev` and
      * /dev/pts showed no dot entries (unlike /proc, /sys and /dev/shm), and
      * tree-walkers that expect ".." from getdents mis-handled devfs.  Emit
@@ -462,7 +462,7 @@ static int devfs_path_allowed(const char *path) {
 }
 
 /*
- * DEVFS-33: this walked every component with devfs_find_child(), which
+ * This used to walk every component with devfs_find_child(), which
  * returns the FIRST name match regardless of personality mask, while
  * registration places entries with devfs_find_child_mask().  With both a
  * universal entry and a personality-scoped override of the same name -- the
@@ -608,7 +608,7 @@ static int devfs_add_entry(const char *path, fs_node_t *node, uint32_t perso_mas
         next = devfs_find_child_mask(current, name_buf, perso_mask);
         if (next != NULL) {
             /*
-             * DEVFS-13: replacing an existing leaf used to just overwrite
+             * Replacing an existing leaf used to just overwrite
              * next->node.  Two bugs followed.  If the old node was
              * devfs-owned (owns_node = 1 -- an alias, kmalloc'd here) it
              * leaked.  Worse, owns_node stayed SET while the new node might
@@ -796,7 +796,7 @@ void devfs_unregister_alias(const char *path, uint32_t perso_mask) {
     devfs_entry_t *entry;
 
     spinlock_acquire(&devfs_lock);
-    /* DEVFS-33: match the mask, or a universal alias and a perso-scoped
+    /* Match the mask, or a universal alias and a perso-scoped
      * override of the same name are indistinguishable here and whichever sits
      * first in the child list gets removed. */
     entry = devfs_lookup_path(path, perso_mask);

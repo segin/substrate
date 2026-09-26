@@ -61,13 +61,13 @@ static int ext2_node_cache_idx = 0;
  * (both are process-context only — never touched from an ISR — so a plain
  * mutex is the right tool; initialised once in ext2_init()):
  *
- *   ext2_node_cache_lock (FS-01) — guards node-cache slot selection AND
+ *   ext2_node_cache_lock — guards node-cache slot selection AND
  *     population in ext2_alloc_node().  Without it two concurrent lookups
  *     could both pick the same pin_count==0 slot and memcpy() two different
  *     on-disk inodes into it, silently handing one file's fs_node_t back
  *     as another's (the root of the reproduced live-symlink double-alloc).
  *
- *   ext2_inode_table_lock (FS-02) — serializes the read-modify-write of a
+ *   ext2_inode_table_lock — serializes the read-modify-write of a
  *     whole inode-table block in ext2_write_inode().  Many inodes share one
  *     table block; two unserialized RMWs race and one writer's stale copy of
  *     a co-resident inode clobbers the other's just-written i_links_count.
@@ -84,7 +84,7 @@ static int ext2_release_inode_blocks(ext2_fs_t *fs, uint32_t inode_num,
                                      ext2_inode_t *inode, int freeing_inode);
 
 /*
- * EXT2-18: pin_count is what stops ext2_alloc_node() from recycling a slot
+ * pin_count is what stops ext2_alloc_node() from recycling a slot
  * out from under a live fs_node, but it was a plain uint16_t incremented and
  * decremented with no lock while the allocator scanned it under
  * ext2_node_cache_lock.  Two hazards: a lost update between concurrent
@@ -122,7 +122,7 @@ static void ext2_node_close(fs_node_t *node) {
          * which would hand this half-torn-down slot to another lookup.  The
          * pin keeps it reserved; it is dropped again at the end.
          *
-         * EXT2-A17 (audit CY-15): unlink the slot from lookup NOW, while
+         * Unlink the slot from lookup NOW, while
          * the cache lock is still held.  ext2_free_inode below makes the
          * inode number reallocatable, and a lookup of the new file that
          * receives it used to match this slot (fs/inode_num were still
@@ -141,9 +141,9 @@ static void ext2_node_close(fs_node_t *node) {
      * instead of freeing the inode + data blocks.  Now that the last
      * FD has closed, complete the delete the unlink path skipped. */
     if (finish_delete) {
-        /* EXT2-A15: commits the emptied inode before releasing its
+        /* Commits the emptied inode before releasing its
          * blocks, so a failure here can only leak.  The slot is already
-         * unlinked from lookup (EXT2-A17), so work from the saved
+         * unlinked from lookup (above), so work from the saved
          * identity rather than the cleared fields. */
         (void)ext2_release_inode_blocks(dead_fs, dead_ino, &ctx->inode, 1);
         ext2_free_inode(dead_fs, dead_ino,
@@ -171,7 +171,7 @@ static void ext2_node_close(fs_node_t *node) {
 #define EXT2_IMMUTABLE_FL  0x00000010
 #define EXT2_APPEND_FL     0x00000020
 
-/* EXT2-A34 (audit MS-14): an immutable inode may not be modified,
+/* An immutable inode may not be modified,
  * renamed, unlinked or have its metadata changed; an append-only one
  * may only grow.  Both flags were ignored entirely. */
 #define EXT2_IS_IMMUTABLE(ctx)  ((ctx)->inode.i_flags & EXT2_IMMUTABLE_FL)
@@ -304,7 +304,7 @@ uint32_t ext2_read_blocks(ext2_fs_t *fs, uint32_t block_num, uint32_t count, voi
     return fs->device->read(fs->device, offset, fs->block_size * count, buffer);
 }
 
-/* EXT2-A10 (audit IN-01/IN-02/XA-01/XA-02): i_extra_isize discipline.
+/* i_extra_isize discipline.
  *
  * The field is "size of this inode - 128", i.e. how many bytes past
  * offset 128 hold defined extension fields — INCLUDING the two bytes
@@ -323,10 +323,10 @@ static uint16_t ext2_valid_extra_isize(const ext2_fs_t *fs, uint16_t extra) {
 
 // Read an inode
 int ext2_read_inode(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inode) {
-    /* EXT2-A18 (audit CY-16): negative errno, never a bare -1 (which
+    /* Negative errno, never a bare -1 (which
      * the syscall layer would surface as EPERM). */
     if (!fs || inode_num == 0) return -EINVAL;
-    
+
     // Calculate which block group the inode is in
     uint32_t group = (inode_num - 1) / fs->inodes_per_group;
     uint32_t index = (inode_num - 1) % fs->inodes_per_group;
@@ -421,7 +421,7 @@ int ext2_read_inode(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inode) {
         uint32_t copy = (want < avail) ? want : avail;
         memcpy((uint8_t *)inode + legacy,
                block_buf + inode_offset + legacy, copy);
-        /* EXT2-A10 (audit IN-02): i_extra_isize says how many bytes
+        /* i_extra_isize says how many bytes
          * past offset 128 are DEFINED FIELDS (the field counts itself).
          * Everything after that belongs to the inline xattr area, so
          * zero it here rather than hand callers xattr bytes decoded as
@@ -452,8 +452,8 @@ uint32_t ext2_write_block(ext2_fs_t *fs, uint32_t block_num, const void *buffer)
     return fs->device->write(fs->device, offset, fs->block_size, (uint8_t *)buffer);
 }
 
-/* EXT2-A6 (audit CK-01/SB-01/SB-02/BG-03): write-side checksum
- * stamping.  Until now only the per-inode checksum was recomputed on
+/* Write-side checksum
+ * stamping.  Originally only the per-inode checksum was recomputed on
  * write; every other structure the driver flushed on a GDT_CSUM or
  * METADATA_CKSUM filesystem went out with its mount-time checksum —
  * after the first free-count flush the driver's own next mount (and
@@ -464,7 +464,7 @@ static int ext2_write_meta(ext2_fs_t *fs, uint32_t blk, const void *buf);
 static int ext2_has_metadata_csum(const ext2_fs_t *fs);
 static int ext2_has_gdt_csum(const ext2_fs_t *fs);
 
-/* SELFREV-RA01: bg_flags only exists on a filesystem that carries
+/* bg_flags only exists on a filesystem that carries
  * group-descriptor checksums (GDT_CSUM / METADATA_CKSUM).  Everywhere
  * else those two bytes are the old bg_pad — reserved, and not
  * guaranteed zero.  Reading them as lazy-init state on a plain ext2
@@ -526,7 +526,7 @@ static uint16_t ext2_group_desc_calc_csum(ext2_fs_t *fs, uint32_t group,
 }
 
 /*
- * EXT2-A8 (audit DE-01/CK-06): directory-block checksums.
+ * Directory-block checksums.
  *
  * On a metadata_csum filesystem every directory leaf block ends in a
  * 12-byte fake dirent — struct ext4_dir_entry_tail: inode 0, rec_len
@@ -544,7 +544,7 @@ static uint32_t ext2_dir_limit(const ext2_fs_t *fs) {
     return ext2_has_metadata_csum(fs) ? fs->block_size - 12 : fs->block_size;
 }
 
-/* SELFREV-RC002: the same question for a block we are holding.
+/* The same question for a block we are holding.
  *
  * ext2_dir_limit() answers from the feature bit alone, which is right
  * for deciding where to WRITE.  For walking an existing block it is too
@@ -613,7 +613,7 @@ static void ext2_group_desc_stamp_csum(ext2_fs_t *fs, uint32_t group,
 }
 
 /* Write a block/inode bitmap back, refreshing its descriptor checksum
- * first.  EXT2-A6 (audit BG-03/CK-05): the bitmaps are write-through on
+ * first.  The bitmaps are write-through on
  * every allocation but bg_{block,inode}_bitmap_csum_lo were never
  * recomputed, so on a metadata_csum volume every allocation left the
  * descriptor describing a bitmap that no longer matched.  The caller
@@ -637,7 +637,7 @@ static void ext2_bitmap_csum_set(ext2_fs_t *fs, uint32_t group,
 
 static uint32_t ext2_write_block_bitmap(ext2_fs_t *fs, uint32_t group,
                                         uint8_t *bitmap) {
-    /* EXT2-A7: the bitmap we are about to commit is now the authority
+    /* The bitmap we are about to commit is now the authority
      * for this group, so it is no longer "uninitialized".  Leaving the
      * flag set would make Linux ignore what we just wrote. */
     if (ext2_has_bg_flags(fs))
@@ -671,7 +671,7 @@ static uint32_t ext2_write_inode_bitmap(ext2_fs_t *fs, uint32_t group,
     if (ext2_bg_flags(fs, group) & EXT2_BG_INODE_UNINIT) {
         if (!(fs->bgd[group].bg_flags & EXT2_BG_INODE_ZEROED))
             ext2_zero_inode_table(fs, group);
-        /* SELFREV-RA05: clearing INODE_UNINIT tells every other reader
+        /* Clearing INODE_UNINIT tells every other reader
          * that the inode table is meaningful.  Only say so if the
          * zeroing actually completed — ext2_zero_inode_table sets
          * INODE_ZEROED on success and leaves it clear on failure. */
@@ -695,7 +695,7 @@ static int is_sparse_backup(uint32_t group) {
 /* Does `group` carry a superblock + group-descriptor-table backup?
  * Three layouts: no sparse_super (every group), sparse_super (group 0,
  * 1 and the powers of 3/5/7), sparse_super2 (group 0 plus the at most
- * two groups named in s_backup_bgs).  EXT2-A7 (audit SB-07): the
+ * two groups named in s_backup_bgs).  The
  * sparse_super2 case was ignored, so the backup-flush loop wrote
  * superblock images over ordinary file data at group starts. */
 static int ext2_group_has_super(const ext2_fs_t *fs, uint32_t group) {
@@ -759,7 +759,7 @@ static inline void ext2_bitmap_set(uint8_t *bm, uint32_t bit) {
 }
 
 /*
- * EXT2-A7 (audit BG-01/SB-03/CK-02): lazy-init block groups.
+ * Lazy-init block groups.
  *
  * On a GDT_CSUM or METADATA_CKSUM filesystem — every default mkfs.ext4
  * image — a group that has never been used carries EXT2_BG_BLOCK_UNINIT
@@ -880,7 +880,7 @@ static int ext2_load_inode_bitmap(ext2_fs_t *fs, uint32_t group) {
 static int ext2_super_rmw(ext2_fs_t *fs, uint8_t *buf, size_t buf_len) {
     if (buf_len < sizeof(fs->sb)) return -EIO;
 
-    /* EXT2-A12 (audit CY-14): a failed preservation read used to fall
+    /* A failed preservation read used to fall
      * back to zeros, so ONE transient device error during a routine
      * free-count flush permanently wiped every extended field this
      * driver does not model — s_journal_inum (Linux then refuses the
@@ -901,12 +901,12 @@ static int ext2_flush_super(ext2_fs_t *fs) {
     uint8_t *sb_buf = kmalloc(1024);
     if (!sb_buf) return -ENOMEM;
 
-    fs->sb.s_wtime = (uint32_t)get_time();   /* EXT2-A30 */
+    fs->sb.s_wtime = (uint32_t)get_time();   /* last write time */
     if (ext2_super_rmw(fs, sb_buf, 1024) != 0) {
         kfree(sb_buf, 1024);
         return -EIO;
     }
-    /* EXT2-A6: the free counts we just patched in are covered by
+    /* The free counts we just patched in are covered by
      * s_checksum, so it has to be recomputed over the final image. */
     ext2_super_stamp_csum(fs, sb_buf);
 
@@ -916,7 +916,7 @@ static int ext2_flush_super(ext2_fs_t *fs) {
     }
     kfree(sb_buf, 1024);
 
-    /* Backup superblocks.  EXT2-A12 (audit SB-07): which groups carry
+    /* Backup superblocks.  Which groups carry
      * one depends on sparse_super AND sparse_super2 — the latter names
      * its (at most two) backup groups in s_backup_bgs, and the first
      * block of every other group is ordinary file data that this loop
@@ -941,7 +941,7 @@ static int ext2_flush_super(ext2_fs_t *fs) {
             continue;
         }
         memcpy(tmp, &fs->sb, sizeof(fs->sb));
-        /* EXT2-A12 (audit SB-12): each copy records its OWN group
+        /* Each copy records its OWN group
          * number; blanket-copying the primary's prefix stamped 0 into
          * every backup and lost that self-identification. */
         *(uint16_t *)(tmp + 0x5A) = (uint16_t)i;   /* s_block_group_nr */
@@ -984,7 +984,7 @@ static int ext2_flush_group_desc(ext2_fs_t *fs, uint32_t group) {
     }
 
     memcpy(block_buf + block_offset, &fs->bgd[group], sizeof(ext2_group_desc_t));
-    /* EXT2-A6: bg_checksum covers the free counts / bg_flags / bitmap
+    /* bg_checksum covers the free counts / bg_flags / bitmap
      * csums we just wrote, and (on 64-byte descriptors) the preserved
      * high half — stamp it over the final on-disk bytes. */
     ext2_group_desc_stamp_csum(fs, group, block_buf + block_offset);
@@ -1010,7 +1010,7 @@ int ext2_sync_meta(ext2_fs_t *fs) {
     if (!fs) return -EINVAL;
     if (fs->readonly) return 0;
     int err = 0;
-    /* EXT2-A12: keep the dirty marks on anything that failed to reach
+    /* Keep the dirty marks on anything that failed to reach
      * the disk so the next flush retries it, instead of dropping the
      * update and leaving the on-disk counts permanently stale. */
     if (fs->bgd_dirty) {
@@ -1060,7 +1060,7 @@ static void ext2_mark_meta_dirty(ext2_fs_t *fs, uint32_t group) {
 // Write an inode back to disk
 static int ext2_write_inode_ex(ext2_fs_t *fs, uint32_t inode_num,
                                ext2_inode_t *inode, int is_new) {
-    if (!fs || inode_num == 0) return -EINVAL;   /* EXT2-A18 */
+    if (!fs || inode_num == 0) return -EINVAL;
     
     // Calculate which block group the inode is in
     uint32_t group = (inode_num - 1) / fs->inodes_per_group;
@@ -1080,7 +1080,7 @@ static int ext2_write_inode_ex(ext2_fs_t *fs, uint32_t inode_num,
     uint8_t *block_buf = kmalloc(fs->block_size);
     if (!block_buf) return -ENOMEM;
 
-    /* FS-02: the read..modify..write below touches a whole inode-table block
+    /* The read..modify..write below touches a whole inode-table block
      * shared by many inodes.  Serialize it so a concurrent writer of a
      * co-resident inode can't clobber the copy we're committing (and vice
      * versa).  Held across both the read and the write; released on every
@@ -1120,7 +1120,7 @@ static int ext2_write_inode_ex(ext2_fs_t *fs, uint32_t inode_num,
     }
 
     /*
-     * EXT2-A10 (audit IN-01/IN-02/XA-01/XA-02/XA-05): decide how many
+     * Decide how many
      * bytes of the on-disk record we may touch.
      *
      * The old code always committed sizeof(ext2_inode_t) = 152 bytes
@@ -1217,7 +1217,7 @@ int ext2_write_inode(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inode) {
 }
 
 /* First write of a freshly allocated inode: scrubs the whole on-disk
- * record (see EXT2-A10) and stamps the filesystem's preferred
+ * record (see the i_extra_isize notes above) and stamps the filesystem's preferred
  * i_extra_isize. */
 int ext2_write_inode_new(ext2_fs_t *fs, uint32_t inode_num,
                          ext2_inode_t *inode) {
@@ -1236,7 +1236,7 @@ int ext2_write_inode_new(ext2_fs_t *fs, uint32_t inode_num,
  * the ext4 48-bit physical address are clamped — fine for any
  * filesystem under 16 TiB.  Add 64-bit-block lookup when we
  * actually grow a >2^32-block target.  */
-/* EXT2-A1 (audit BM-12): a corrupt extent tree resolves every block as a
+/* A corrupt extent tree resolves every block as a
  * hole, which reads as an all-zero file — indistinguishable from a sparse
  * file, with no error anywhere.  Full error plumbing through the resolver
  * is a larger change; at minimum make the corruption visible.  Capped so a
@@ -1268,7 +1268,7 @@ static uint32_t ext4_extent_resolve(ext2_fs_t *fs, ext2_inode_t *inode,
      * a corrupt filesystem could otherwise drive the idx[i]/ex[i] loops far
      * past the buffer — an out-of-bounds read. */
     size_t node_cap = sizeof(inode->i_block);
-    /* EXT2-13: eh_depth is an unbounded u16 from disk and drives this descent.
+    /* eh_depth is an unbounded u16 from disk and drives this descent.
      * A corrupt inode claiming depth 65535, with an index entry pointing back
      * at its own block, made every logical-block lookup do 65535 block reads.
      * ext4 itself caps the tree at EXT4_EXT_DEPTH_MAX levels, so anything
@@ -1294,7 +1294,7 @@ static uint32_t ext4_extent_resolve(ext2_fs_t *fs, ext2_inode_t *inode,
         uint64_t child = ((uint64_t)idx[pick].ei_leaf_hi << 32)
                        | idx[pick].ei_leaf_lo;
         if (child == 0 || child >> 32) return 0;
-        /* SELFREV-RB05: an unchecked read leaves the previous node's
+        /* An unchecked read leaves the previous node's
          * image in the scratch buffer, which the magic/depth checks
          * below would then happily accept as this node. */
         if (ext2_read_block(fs, (uint32_t)child, scratch) != fs->block_size) {
@@ -1308,7 +1308,7 @@ static uint32_t ext4_extent_resolve(ext2_fs_t *fs, ext2_inode_t *inode,
             ext2_extent_corrupt(fs, "node magic");
             return 0;
         }
-        /* EXT2-13: a well-formed tree strictly decreases in depth on the way
+        /* A well-formed tree strictly decreases in depth on the way
          * down.  Without this an index pointing at its own block (or at any
          * node of equal-or-greater depth) satisfies the magic check and the
          * loop just keeps re-reading it. */
@@ -1329,7 +1329,7 @@ static uint32_t ext4_extent_resolve(ext2_fs_t *fs, ext2_inode_t *inode,
     }
     for (int i = 0; i < n; i++) {
         uint32_t ext_start = ex[i].e_blk;
-        /* EXT2-A1 (audit BM-01/BM-02): e_len <= 32768 is an INITIALIZED
+        /* e_len <= 32768 is an INITIALIZED
          * extent of that length — 32768 (0x8000) itself is the spec's
          * EXT_INIT_MAX_LEN, which Linux writes for every >=128 MiB
          * contiguous run, and the old `& 0x7FFF` mask decoded it as
@@ -1348,7 +1348,7 @@ static uint32_t ext4_extent_resolve(ext2_fs_t *fs, ext2_inode_t *inode,
                           | ex[i].e_start_lo;
             phys += (logical - ext_start);
             if (phys >> 32) return 0;   /* needs 64-bit block addr */
-            /* EXT2-A14 (audit BM-04): the resolved address is untrusted
+            /* The resolved address is untrusted
              * on-disk data.  Out of range it would sail past the read/
              * write primitives' own guards as a "valid" mapping, so the
              * write silently went nowhere while write(2) reported
@@ -1386,7 +1386,7 @@ uint32_t ext2_get_block_num(ext2_fs_t *fs, ext2_inode_t *inode, uint32_t block_i
     // Indirect block (12)
     if (block_idx < ptrs_per_block) {
         if (inode->i_block[12] == 0) return 0;
-        /* EXT2-A16 (audit BM-11): on a failed read the buffer still holds
+        /* On a failed read the buffer still holds
          * the PREVIOUS block's image, whose pointers belong to another
          * file.  Report a hole rather than return one of them. */
         if (ext2_read_meta(fs, inode->i_block[12], indirect_buf) != 0) return 0;
@@ -1478,7 +1478,7 @@ uint32_t ext2_inode_read(ext2_node_t *node, off_t offset, uint32_t size, void *b
     ext2_fs_t *fs = node->fs;
     ext2_inode_t *inode = &node->inode;
 
-    /* EXT2-A37: 64-bit size — a >4 GiB file made by Linux used to
+    /* 64-bit size — a >4 GiB file made by Linux used to
      * report (and deliver) only size mod 2^32. */
     uint64_t isize = ext2_inode_get_size(inode);
     if ((uint64_t)offset >= isize) return 0;
@@ -1592,7 +1592,7 @@ uint32_t ext2_inode_read(ext2_node_t *node, off_t offset, uint32_t size, void *b
  * Returns 0 on success, -1 on out-of-space / refusal.  */
 static int ext4_extent_alloc_inode_block(ext2_fs_t *fs, ext2_inode_t *inode,
                                          uint32_t block_idx) {
-    /* SELFREV-RB04: every refusal here reaches userspace, so it needs a
+    /* Every refusal here reaches userspace, so it needs a
      * real errno — a bare -1 surfaces as EPERM.  -EOPNOTSUPP for the
      * write shapes this append-only path does not implement, -ENOSPC
      * when the disk is genuinely full. */
@@ -1648,7 +1648,7 @@ static int ext4_extent_alloc_inode_block(ext2_fs_t *fs, ext2_inode_t *inode,
      * logical range ends highest.  In a sane on-disk layout the
      * entries are sorted by e_blk so exts[n-1] is the last; we
      * don't bother verifying.
-     * EXT2-A1: decode e_len per spec (raw > 32768 = uninitialized
+     * Decode e_len per spec (raw > 32768 = uninitialized
      * extent of length raw-32768) so an uninit last extent yields
      * the right logical end — and is never grown in place, since
      * extending an uninitialized extent would silently extend the
@@ -1660,7 +1660,7 @@ static int ext4_extent_alloc_inode_block(ext2_fs_t *fs, ext2_inode_t *inode,
     uint32_t logical_end = last->e_blk + last_len;
     if (logical_end != block_idx) return -EOPNOTSUPP;   /* sparse — refuse */
 
-    /* EXT2-11: e_start_lo holds the low 32 bits and e_start_hi the *high 16*
+    /* e_start_lo holds the low 32 bits and e_start_hi the *high 16*
      * of a 48-bit physical block number, which is how ext4_extent_resolve()
      * reads it back ((hi << 32) | lo).  This shifted hi by 16 instead, so on
      * any volume that actually used the high word the contiguity test
@@ -1693,7 +1693,7 @@ static int ext4_extent_alloc_inode_block(ext2_fs_t *fs, ext2_inode_t *inode,
     ext4_extent_t *ne = &exts[n];
     ne->e_blk      = block_idx;
     ne->e_len      = 1;
-    /* EXT2-11: `blk` is a 32-bit block number, so it belongs entirely in
+    /* `blk` is a 32-bit block number, so it belongs entirely in
      * e_start_lo with a zero high word.  Writing (blk >> 16) into e_start_hi
      * meant ext4_extent_resolve() read it back as bits 32-47 of a 48-bit
      * address: for any block above 65535 the resolved address had a non-zero
@@ -1706,8 +1706,8 @@ static int ext4_extent_alloc_inode_block(ext2_fs_t *fs, ext2_inode_t *inode,
     return 0;
 }
 
-/* Metadata block I/O with the result actually checked.  EXT2-A14 /
- * EXT2-A16 (audit BM-04/BM-11): the indirect-chain code discarded every
+/* Metadata block I/O with the result actually checked.  The
+ * indirect-chain code used to discard every
  * return value.  A failed read left the PREVIOUS block's image in the
  * scratch buffer, whose stale pointers were then dereferenced and
  * written back as this file's block map; a failed (or range-refused)
@@ -1723,7 +1723,7 @@ static int ext2_write_meta(ext2_fs_t *fs, uint32_t blk, const void *buf) {
  * Allocate the backing block for logical block `block_idx`, creating
  * whatever indirect blocks the chain needs on the way.
  *
- * Rewritten as one generic level walk (EXT2-A14): the three hand-rolled
+ * Rewritten as one generic level walk: the three hand-rolled
  * copies each ignored their I/O results and had no unwind, so an error
  * partway through left allocated-but-unreferenced blocks charged to
  * i_blocks and, worse, an inode pointing at an indirect block that was
@@ -1757,7 +1757,7 @@ int ext2_alloc_inode_block(ext2_fs_t *fs, ext2_inode_t *inode, uint32_t block_id
 
     /* Pick the indirection level and the per-level index path.  The
      * level bounds are computed in 64-bit: ppb^3 overflows uint32 for
-     * block sizes of 8 KiB and up (audit BM-16). */
+     * block sizes of 8 KiB and up. */
     int       levels;
     uint32_t  root_slot;
     uint32_t  idx[3];
@@ -1785,7 +1785,7 @@ int ext2_alloc_inode_block(ext2_fs_t *fs, ext2_inode_t *inode, uint32_t block_id
 
     /* Everything allocated here, so a failure can hand it back.
      *
-     * SELFREV-RB01/RA02: `linked` records whether the allocation has
+     * `linked` records whether the allocation has
      * already been published into a parent block ON DISK.  Once it has,
      * freeing it would leave that parent pointing at a free block — the
      * exact cross-linking this rewrite exists to prevent — so those are
@@ -1850,7 +1850,7 @@ unwind:
     {
         unsigned leaked = 0;
         for (int i = 0; i < nmade; i++) {
-            if (linked[i]) { leaked++; continue; }   /* SELFREV-RB01 */
+            if (linked[i]) { leaked++; continue; }   /* already on disk: leak */
             ext2_free_block(fs, made[i]);
             inode->i_blocks -= spb;
         }
@@ -1865,7 +1865,7 @@ unwind:
 // Write data to an inode at a given offset
 uint32_t ext2_inode_write(ext2_node_t *node, off_t offset, uint32_t size,
                           const void *buffer, int *errp) {
-    /* EXT2-15: every early return below used to yield a bare 0, which
+    /* Every early return below used to yield a bare 0, which
      * ext2_file_write() handed straight back to write(2).  POSIX forbids a 0
      * return for a non-zero count, and stdio's fwrite() retry loop treats it
      * as "try again" -- so a full filesystem spun forever instead of
@@ -1926,7 +1926,7 @@ uint32_t ext2_inode_write(ext2_node_t *node, off_t offset, uint32_t size,
 
         // Allocate block if it doesn't exist
         if (block_num == 0) {
-            /* EXT2-A14: report the allocator's real reason — -EFBIG
+            /* Report the allocator's real reason — -EFBIG
              * (past the triple-indirect limit) and -EIO (metadata write
              * failure) were both surfacing to userspace as ENOSPC. */
             int arc = ext2_alloc_inode_block(fs, inode, block_idx,
@@ -1949,7 +1949,7 @@ uint32_t ext2_inode_write(ext2_node_t *node, off_t offset, uint32_t size,
             }
         }
 
-        /* EXT2-A33 (audit BM-14): when the write starts past the
+        /* When the write starts past the
          * current end of file inside an already-allocated block, the
          * bytes between old EOF and here must read as zeros — they are
          * a hole POSIX says is zero-filled, not whatever the block
@@ -1971,7 +1971,7 @@ uint32_t ext2_inode_write(ext2_node_t *node, off_t offset, uint32_t size,
 
         // Read block if we're doing a partial write
         if (block_offset != 0 || size < fs->block_size) {
-            /* EXT2-A14: a failed read leaves the previous block's image
+            /* A failed read leaves the previous block's image
              * in the buffer; merging into it and writing it back would
              * publish another file's data here. */
             if (ext2_read_block(fs, block_num, block_buf) != fs->block_size) {
@@ -1984,7 +1984,7 @@ uint32_t ext2_inode_write(ext2_node_t *node, off_t offset, uint32_t size,
         if (to_copy > size) to_copy = size;
 
         memcpy(block_buf + block_offset, buf, to_copy);
-        /* EXT2-A14 (audit BM-04): the return was discarded, so a
+        /* Check the return: when it was discarded, a
          * refused or short write still advanced total_written and
          * write(2) reported full success for data that never landed. */
         if (ext2_write_block(fs, block_num, block_buf) != fs->block_size) {
@@ -2000,7 +2000,7 @@ uint32_t ext2_inode_write(ext2_node_t *node, off_t offset, uint32_t size,
     }
 
     if ((uint64_t)offset > ext2_inode_get_size(inode)) {
-        ext2_inode_set_size(inode, (uint64_t)offset);   /* EXT2-A37 */
+        ext2_inode_set_size(inode, (uint64_t)offset);   /* 64-bit size */
         /* Linux sets RO_COMPAT_LARGE_FILE the first time any file
          * exceeds 2 GiB; without it an older reader would refuse the
          * volume rather than misread the size. */
@@ -2011,7 +2011,7 @@ uint32_t ext2_inode_write(ext2_node_t *node, off_t offset, uint32_t size,
         }
     }
 
-    /* Update modification and change times.  EXT2-A34 (audit IN-05):
+    /* Update modification and change times, and
      * clear the nanosecond extras alongside — leaving the previous
      * write's nsec attached to a new seconds value reports a timestamp
      * that never happened. */
@@ -2052,7 +2052,7 @@ uint64_t ext2_finddir_break_block0   = 0;
  * we see after the first /bin walk. */
 uint64_t ext2_root_pin_lost          = 0;
 
-/* EXT2-A19 (audit IN-03): ext2 splits an owner id across i_uid/i_gid
+/* ext2 splits an owner id across i_uid/i_gid
  * (low 16) and osd2's l_i_*_high (high 16).  Only the low halves were
  * read or written, so a file owned by uid > 65535 stat'd wrong and any
  * metadata write truncated its ownership on disk. */
@@ -2072,7 +2072,7 @@ static inline void ext2_inode_set_gid(ext2_inode_t *i, uint32_t gid) {
 }
 
 /*
- * EXT2-A21 (audit MS-07): ownership of a newly created object.
+ * Ownership of a newly created object.
  *
  * POSIX: a new file belongs to the creating process's effective uid.
  * The group is the parent directory's when the directory is set-gid
@@ -2097,7 +2097,7 @@ static void ext2_set_creator_owner(ext2_inode_t *inode, fs_node_t *dir,
 }
 
 
-/* EXT2-A20 (audit MS-06/IN-06): device numbers have two on-disk
+/* Device numbers have two on-disk
  * encodings.  The old one packs an 8-bit major/minor into i_block[0];
  * the "new" Linux one lives in i_block[1] and reaches 12-bit majors and
  * 20-bit minors.  Only the old form was ever read, so any node Linux
@@ -2131,7 +2131,7 @@ static fs_node_t *ext2_node_build_from_inode(fs_node_t *node, ext2_node_t *ctx,
         ext2_inode_t *inode, uint32_t inode_num, ext2_fs_t *fs, int idx) {
     memset(node, 0, sizeof(fs_node_t));
     node->inode = inode_num;
-    node->length = (off_t)ext2_inode_get_size(inode);   /* EXT2-A37 */
+    node->length = (off_t)ext2_inode_get_size(inode);   /* 64-bit size */
     node->mask = inode->i_mode & 0xFFF;
     node->uid = ext2_inode_uid(inode);
     node->gid = ext2_inode_gid(inode);
@@ -2161,7 +2161,7 @@ static fs_node_t *ext2_node_build_from_inode(fs_node_t *node, ext2_node_t *ctx,
         node->link = ext2_link;
         node->rename = ext2_rename;
         node->statfs = ext2_statfs;
-        node->syncfs = ext2_syncfs;     /* EXT2-A31 */
+        node->syncfs = ext2_syncfs;
         node->unmount = ext2_unmount;
         node->remount = ext2_remount;
         node->symlink = ext2_symlink;
@@ -2190,7 +2190,7 @@ static fs_node_t *ext2_node_build_from_inode(fs_node_t *node, ext2_node_t *ctx,
 fs_node_t *ext2_alloc_node(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inode) {
     int idx = -1;
 
-    /* FS-01: serialize the whole select-or-populate sequence.  Slot lookup,
+    /* Serialize the whole select-or-populate sequence.  Slot lookup,
      * the pin_count==0 scan, and the memcpy() of the on-disk inode into the
      * chosen slot must be one atomic step, or two lookups race onto the same
      * slot.  Released on every return path below. */
@@ -2258,7 +2258,7 @@ fs_node_t *ext2_alloc_node(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inod
                  * This was the cause of "cat: stdout: Bad file descriptor"
                  * floods when a configure recycled conftest.c/conftest.dir. */
                 memcpy(&ext2_node_cache[i].inode, inode, sizeof(ext2_inode_t));
-                /* EXT2-A33 (audit DE-17): this slot now describes a
+                /* This slot now describes a
                  * DIFFERENT file that merely reused the inode number —
                  * the previous directory's name cache and readdir
                  * cursor would answer lookups for it. */
@@ -2376,10 +2376,10 @@ static int ext2_chmod(fs_node_t *node, uint32_t mode) {
     ctx = (ext2_node_t *)(uintptr_t)node->impl;
     if (!ctx || !ctx->fs) return -EINVAL;
     if (EXT2_RO_REFUSE(ctx->fs)) return -EROFS;
-    if (EXT2_IS_IMMUTABLE(ctx)) return -EPERM;      /* EXT2-A34 */
+    if (EXT2_IS_IMMUTABLE(ctx)) return -EPERM;
 
     ctx->inode.i_mode = (uint16_t)((ctx->inode.i_mode & 0xF000U) | (mode & 0x0FFFU));
-    /* EXT2-22: this copied the *existing* cached ctime back over itself, so
+    /* This used to copy the *existing* cached ctime back over itself, so
      * chmod() never advanced it.  POSIX requires a successful chmod to set
      * ctime to the current time -- tools that detect metadata changes by
      * ctime (backup programs, `find -newerct`, intrusion detection) saw
@@ -2412,7 +2412,7 @@ static int ext2_setattr(fs_node_t *node, const struct fs_attr *a) {
     if (a->mask == 0) return 0;
 
     /* SIZE — truncation needs to free data blocks; route through the existing
-     * truncate path.  EXT2-19: this refusal used to sit at the *end* of the
+     * truncate path.  This refusal used to sit at the *end* of the
      * function, after every other selected field had already been written into
      * ctx->inode and the cached fs_node.  The call returned -EINVAL without
      * reaching ext2_write_inode(), so the caller saw a clean rejection while
@@ -2452,14 +2452,14 @@ static int ext2_setattr(fs_node_t *node, const struct fs_attr *a) {
         node->mask        = a->mode & 0x0FFFU;
     }
     if (a->mask & FS_ATTR_UID) {
-        ext2_inode_set_uid(&ctx->inode, a->uid);   /* EXT2-A19 */
+        ext2_inode_set_uid(&ctx->inode, a->uid);   /* both 16-bit halves */
         node->uid        = a->uid;
     }
     if (a->mask & FS_ATTR_GID) {
-        ext2_inode_set_gid(&ctx->inode, a->gid);   /* EXT2-A19 */
+        ext2_inode_set_gid(&ctx->inode, a->gid);   /* both 16-bit halves */
         node->gid        = a->gid;
     }
-    /* EXT2-A33 (audit MS-13): POSIX — a successful chown/chgrp/chmod
+    /* POSIX — a successful chown/chgrp/chmod
      * updates ctime.  Only the dedicated chmod path did.  An explicit
      * ctime in the request wins. */
     if ((a->mask & (FS_ATTR_MODE | FS_ATTR_UID | FS_ATTR_GID)) &&
@@ -2481,7 +2481,7 @@ static int ext2_setattr(fs_node_t *node, const struct fs_attr *a) {
 static int ext2_getattr(fs_node_t *node, struct fs_attr *a) {
     if (!node || !a) return -EINVAL;
     ext2_node_t *ctx = (ext2_node_t *)(uintptr_t)node->impl;
-    /* SELFREV-RG06: fill_stat now calls this for every stat(2), and a
+    /* fill_stat calls this for every stat(2), and a
      * torn-down cache slot has fs == NULL. */
     if (!ctx || !ctx->fs) return -EINVAL;
     a->mask  = FS_ATTR_ATIME | FS_ATTR_MTIME | FS_ATTR_CTIME |
@@ -2500,8 +2500,8 @@ static int ext2_getattr(fs_node_t *node, struct fs_attr *a) {
     a->mode  = ctx->inode.i_mode & 0x0FFFU;
     a->uid   = ext2_inode_uid(&ctx->inode);
     a->gid   = ext2_inode_gid(&ctx->inode);
-    a->size  = (off_t)ext2_inode_get_size(&ctx->inode);   /* EXT2-A37 */
-    /* EXT2-A32: i_blocks is already in 512-byte units, which is what
+    a->size  = (off_t)ext2_inode_get_size(&ctx->inode);   /* 64-bit size */
+    /* i_blocks is already in 512-byte units, which is what
      * st_blocks wants, and it counts the indirect/extent metadata and
      * xattr block too — so a sparse file reports what it really costs. */
     a->nlink  = ctx->inode.i_links_count;
@@ -2509,7 +2509,7 @@ static int ext2_getattr(fs_node_t *node, struct fs_attr *a) {
     return 0;
 }
 
-/* EXT2-A11 (audit BM-03/MS-02/BM-08): is this symlink's target stored
+/* Is this symlink's target stored
  * inline in i_block[]?
  *
  * The discriminator is i_blocks, not i_size: a "fast" symlink owns no
@@ -2522,7 +2522,7 @@ static int ext2_getattr(fs_node_t *node, struct fs_attr *a) {
  * pointers as the target string. */
 static int ext2_symlink_is_fast(const ext2_fs_t *fs,
                                 const ext2_inode_t *inode) {
-    if (!fs) return inode->i_blocks == 0;     /* SELFREV-RI04 */
+    if (!fs) return inode->i_blocks == 0;
     uint32_t ea_sectors = inode->i_file_acl ? (fs->block_size / 512) : 0;
     return inode->i_blocks <= ea_sectors;
 }
@@ -2552,15 +2552,15 @@ int ext2_readlink(fs_node_t *node, char *buf, size_t size) {
         link_size = ctx->fs->block_size;
     if (link_size >= size) link_size = (uint32_t)(size - 1);
 
-    ext2_touch_atime(ctx, node);              /* EXT2-A34 */
+    ext2_touch_atime(ctx, node);
 
     if (ext2_symlink_is_fast(ctx->fs, inode)) {
-        /* Clamp to sizeof(i_block) to prevent overflow (finding #26) */
+        /* Clamp to sizeof(i_block) to prevent overflow */
         if (link_size > sizeof(inode->i_block)) link_size = sizeof(inode->i_block);
         memcpy(buf, (char *)inode->i_block, link_size);
     } else {
         // Slow symlink: target is in data blocks
-        /* EXT2-A11 (audit BM-15): a short read left the tail of the
+        /* A short read used to leave the tail of the
          * caller's buffer uninitialised and we reported the full
          * length anyway — kernel heap bytes handed to userspace. */
         uint32_t got = ext2_inode_read(ctx, 0, link_size, (uint8_t *)buf);
@@ -2571,7 +2571,7 @@ int ext2_readlink(fs_node_t *node, char *buf, size_t size) {
 }
 
 /*
- * EXT2-A34 (audit MS-12): atime was never persisted at all.
+ * atime persistence.  It used to be never persisted at all.
  *
  * Updating it on every read would mean a metadata write per read, so
  * use Linux's relatime rule: refresh only when the stored atime is
@@ -2606,15 +2606,15 @@ size_t ext2_file_write(fs_node_t *node, off_t offset, size_t size, const uint8_t
     ext2_node_t *ctx = (ext2_node_t *)(uintptr_t)node->impl;
     ext2_fs_t *fs = ctx->fs;
     if (EXT2_RO_REFUSE(fs)) return (size_t)-EROFS;
-    /* EXT2-A34 */
+    /* Immutable files refuse writes; append-only ones only grow. */
     if (EXT2_IS_IMMUTABLE(ctx)) return (size_t)-EPERM;
     if (EXT2_IS_APPEND(ctx) &&
         (uint64_t)offset != ext2_inode_get_size(&ctx->inode))
         return (size_t)-EPERM;
 
     /*
-     * EXT2-A37: sizes are 64-bit now (i_size_high in i_dir_acl), so the
-     * old 4 GiB refusal is gone — EXT2-12 added it only because the
+     * Sizes are 64-bit now (i_size_high in i_dir_acl), so the
+     * old 4 GiB refusal is gone — it existed only because the
      * driver dropped the high word and recorded the length modulo 2^32.
      * What remains is a real structural limit: i_blocks counts 512-byte
      * units in a uint32_t.
@@ -2638,7 +2638,7 @@ size_t ext2_file_write(fs_node_t *node, off_t offset, size_t size, const uint8_t
         node->length = (off_t)ext2_inode_get_size(&ctx->inode);
     }
 
-    /* EXT2-15: a partial write is a success -- the caller retries from where
+    /* A partial write is a success -- the caller retries from where
      * we stopped.  Writing *nothing* when something was asked for is not: it
      * has to surface as an error, or write(2) returns 0 and the caller loops
      * forever on a full filesystem. */
@@ -2697,7 +2697,7 @@ struct dirent *ext2_readdir(fs_node_t *node, uint64_t index) {
         uint32_t block_num = ext2_get_block_num(fs, &ctx->inode, block_idx, indirect, dindirect, tindirect);
         
         if (block_num == 0) break;
-        /* EXT2-A16: a failed read leaves the previous block's image in
+        /* A failed read leaves the previous block's image in
          * the scratch buffer — skip the block rather than report its
          * neighbour's entries a second time. */
         if (ext2_read_block(fs, block_num, ext2_dir_buf) != fs->block_size) {
@@ -2854,7 +2854,7 @@ static int ext2_htree_lookup(ext2_node_t *ctx, const char *name,
         return -1;
 
     /*
-     * EXT2-A25 (audit SB-08/DE-16): the root block records the hash
+     * The root block records the hash
      * ALGORITHM; whether it hashes `char` as signed or unsigned comes
      * from the superblock's s_flags (0x1 signed / 0x2 unsigned) — that
      * is how Linux and e2fsprogs decide.  Taking the base variant
@@ -2908,7 +2908,7 @@ static int ext2_htree_lookup(ext2_node_t *ctx, const char *name,
 
 /* ==================== htree write support ==========================
  *
- * [EXT2-08] This driver used to refuse every mutation of an indexed
+ * This driver used to refuse every mutation of an indexed
  * directory, which made autotools unusable on a real filesystem:
  * config.status creates `src/.deps` inside a source tree large enough
  * that mke2fs or `e2fsck -D` had indexed it, and mkdir(2) came back
@@ -3066,7 +3066,7 @@ static int ext2_dx_search(const uint8_t *ents, uint16_t count, uint32_t hash) {
 
 /* The hash variant actually in force: the root block records the
  * ALGORITHM, but signed-vs-unsigned char comes from the superblock's
- * s_flags (EXT2-A25 / audit SB-08).  Getting this wrong routes any name
+ * s_flags.  Getting this wrong routes any name
  * with a high-bit byte to the wrong leaf. */
 static int ext2_dx_hash_version(const ext2_fs_t *fs, uint8_t hv) {
     if ((fs->sb_flags & 0x2) &&
@@ -3346,7 +3346,7 @@ static int ext2_htree_insert(ext2_node_t *ctx, const char *name,
     /* The hash picks the leaf, so this is the only block that can hold
      * the name — which is the entire point of the index.  That makes
      * the duplicate check cheap AND race-free here, where the linear
-     * inserter has to sweep the whole directory (EXT2-A17). */
+     * inserter has to sweep the whole directory. */
     if (ext2_scan_leaf(leafb, bs, name, name_len) != 0) {
         result = -EEXIST; goto out;
     }
@@ -3545,12 +3545,12 @@ fs_node_t *ext2_finddir(fs_node_t *node, char *name) {
     uint32_t dir_size = ctx->inode.i_size;
     uint32_t pos = 0;
 
-    /* FS-05: pin this directory's own cache slot for the duration of the
+    /* Pin this directory's own cache slot for the duration of the
      * walk.  The ext2_alloc_node() call we make for a matching child scans
      * for a pin_count==0 slot to recycle, and would otherwise be free to
      * recycle THIS slot out from under us mid-lookup (the parent is not
      * necessarily pinned by the caller).  Balanced at the cleanup label.
-     * EXT2-18: under ext2_node_cache_lock, the lock the recycling scan
+     * The pin is taken under ext2_node_cache_lock, the lock the recycling scan
      * itself holds -- an unsynchronised bump can be lost against a
      * concurrent close and leave the slot recyclable mid-walk. */
     mutex_lock(&ext2_node_cache_lock);
@@ -3639,7 +3639,7 @@ fs_node_t *ext2_finddir(fs_node_t *node, char *name) {
             }
         } else if (htr == 0) {
             /*
-             * [EXT2-08] This used to `goto cleanup` -- treating the htree
+             * This used to `goto cleanup` -- treating the htree
              * miss as authoritative, which is correct ONLY if every entry in
              * the directory is actually present in the index.  Substrate has
              * no write-side htree support at all: ext2_add_entry appends to
@@ -3665,7 +3665,7 @@ fs_node_t *ext2_finddir(fs_node_t *node, char *name) {
         uint32_t block_num = ext2_get_block_num(fs, &ctx->inode, block_idx, indirect, dindirect, tindirect);
 
         if (block_num == 0) { walk_break_block0 = 1; break; }
-        /* EXT2-A16: an unreadable block must not be answered from the
+        /* An unreadable block must not be answered from the
          * previous block's image, and must not let a miss be cached as
          * an authoritative negative. */
         if (ext2_read_block(fs, block_num, ext2_dir_buf) != fs->block_size) {
@@ -3763,7 +3763,7 @@ fs_node_t *ext2_finddir(fs_node_t *node, char *name) {
 
 cleanup:
     mutex_unlock(&ctx->lock);
-    /* FS-05: release the parent pin taken on entry.  Done after dropping
+    /* Release the parent pin taken on entry.  Done after dropping
      * ctx->lock so the slot is fully quiescent; the returned child node is
      * a distinct slot and is unaffected. */
     mutex_lock(&ext2_node_cache_lock);
@@ -3868,7 +3868,7 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
             kprintf("ext2: superblock metadata_csum verified (%08x)\n", got);
         }
 
-        /* EXT2-A10 (audit SB-06): honor the filesystem's stated
+        /* Honor the filesystem's stated
          * preference for how much extension area new inodes reserve.
          * mkfs.ext4 asks for 32; fall back to that when the field is
          * absent or implausible, and never claim more than the record
@@ -3881,11 +3881,11 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
             fs->want_extra_isize = want;
         }
 
-        /* EXT2-A25 (audit SB-08/DE-16): hash signedness lives here. */
+        /* Hash signedness (htree) lives here. */
         fs->sb_flags = *(uint32_t *)(sb_buf + 0x160);
 
         /* Layout facts needed to synthesize uninit-group bitmaps and to
-         * place superblock backups (EXT2-A7). */
+         * place superblock backups. */
         fs->reserved_gdt_blocks = *(uint16_t *)(sb_buf + 0xCE);
         if (fs->sb.s_feature_compat & EXT2F_COMPAT_SPARSESUPER2) {
             fs->sparse_super2 = 1;
@@ -3920,7 +3920,7 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
     fs->device = dev;
 
     /*
-     * EXT2-A30 (audit MS-04/SB-10/MS-15): mount-state bookkeeping.
+     * Mount-state bookkeeping.
      *
      * s_state was neither read nor written.  Nothing warned about a
      * filesystem that was not cleanly unmounted, nothing honored
@@ -3945,12 +3945,12 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
     if (!(fs->sb.s_state & EXT2_VALID_FS))
         kprintf("ext2: filesystem was not cleanly unmounted — run e2fsck\n");
 
-    /* EXT2-A9: revision 0 has no feature fields at all, so it never
+    /* Revision 0 has no feature fields at all, so it never
      * carries the filetype feature. */
     fs->has_ftype = (fs->sb.s_rev_level >= 1) &&
                     (fs->sb.s_feature_incompat & EXT2F_INCOMPAT_FTYPE) != 0;
 
-    /* Validate s_log_block_size before shifting.  EXT2-A5 (audit DE-13):
+    /* Validate s_log_block_size before shifting, and
      * cap at 32 KiB (log=5).  64 KiB blocks are legal on-disk but dirent
      * rec_len is a uint16 — a full-block record needs the special 0xFFFF
      * encoding this driver doesn't implement, and `rec_len = block_size`
@@ -3963,7 +3963,7 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
     }
     fs->block_size = 1024 << fs->sb.s_log_block_size;
 
-    /* EXT2-A5 (audit SB-13): s_first_data_block is 1 on a 1 KiB-block
+    /* s_first_data_block is 1 on a 1 KiB-block
      * filesystem (the superblock occupies block 1) and 0 otherwise.  All
      * group/block math and the GDT location derive from it, so refuse
      * images that lie rather than compute a shifted layout. */
@@ -3977,7 +3977,7 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
         }
     }
 
-    /* EXT2-A5 (audit SB-15): future revisions may relayout the extended
+    /* Future revisions may relayout the extended
      * superblock; parse as rev 1 but say so. */
     if (fs->sb.s_rev_level >= 2)
         kprintf("ext2: unknown s_rev_level %u — treating as revision 1\n",
@@ -4007,7 +4007,7 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
         kfree(fs, sizeof(ext2_fs_t));
         return NULL;
     }
-    /* EXT2-24: block numbering starts at s_first_data_block (1 on a 1 KiB-block
+    /* Block numbering starts at s_first_data_block (1 on a 1 KiB-block
      * filesystem, 0 otherwise), so the number of groups is derived from the
      * count of *addressable* blocks.  Including the pre-first_data_block gap
      * could yield one group too many, and the extra bgd slot -- plus its
@@ -4084,7 +4084,7 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
         return NULL;
     }
     memset(fs->bgd, 0, bgd_size);
-    /* EXT2-21: bgd is allocated rounded up to whole blocks, but unmount used
+    /* bgd is allocated rounded up to whole blocks, but unmount used
      * to free it as group_count * sizeof(ext2_group_desc_t).  kfree derives
      * the true size from the pointer so nothing was corrupted, but kmem_stats
      * drifted by the rounding on every mount/unmount cycle.  Keep the real
@@ -4118,7 +4118,7 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
      * low half.  s_desc_size lives at superblock offset 0xFE (254).  */
     fs->desc_size = sizeof(ext2_group_desc_t);
     if (fs->sb.s_feature_incompat & EXT2F_INCOMPAT_64BIT) {
-        /* EXT2-A5 (audit SB-05/CK-08): the stated 64BIT policy is
+        /* The stated 64BIT policy is
          * "accepted only if every high half is zero", but only the
          * per-descriptor high halves were checked.  s_blocks_count_hi
          * (sb offset 0x150) was never read, so an 18 TiB filesystem
@@ -4130,7 +4130,7 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
         if (blocks_hi != 0) {
             kprintf("ext2: >2^32 blocks (s_blocks_count_hi=%u) — refuse mount\n",
                     blocks_hi);
-            goto fail;          /* SELFREV-RA06: bgd/bgd_dirty are live */
+            goto fail;          /* bgd/bgd_dirty are live */
         }
         if (free_blocks_hi != 0)
             kprintf("ext2: warning: s_free_blocks_count_hi=%u with zero "
@@ -4139,7 +4139,7 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
 
         uint16_t on_disk = *(uint16_t *)(sb_buf + 0xFE);
         if (on_disk == 0)               on_disk = 64;
-        /* EXT2-A5 (audit SB-14): with 64BIT the descriptor is at least
+        /* With 64BIT the descriptor is at least
          * 64 bytes and the size must be a power of two (spec 2.3.1). */
         if (on_disk < 64 || on_disk > 1024 ||
             (on_disk & (uint16_t)(on_disk - 1))) {
@@ -4151,7 +4151,7 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
 
     /* Storage for the bitmap-checksum high halves; only descriptors big
      * enough to carry them on disk need it (64-byte, INCOMPAT_64BIT).
-     * SELFREV-RC001: these are seeded from the on-disk descriptors once
+     * These are seeded from the on-disk descriptors once
      * the GDT has been read (below).  Leaving them zero meant the first
      * descriptor flush stamped a zero over a live checksum half. */
     if ((fs->sb.s_feature_ro_compat & EXT2F_ROCOMPAT_METADATA_CKSUM) &&
@@ -4170,7 +4170,7 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
      * staging buffer, copy the first 32 bytes of each, and reject
      * the mount if any high-half field is non-zero (we have no way
      * to address those blocks with uint32_t internals).  */
-    /* EXT2-28: the ceiling above bounded group_count * 32 (the in-memory slot
+    /* The ceiling above bounded group_count * 32 (the in-memory slot
      * size).  The staging buffer is group_count * desc_size, and desc_size is
      * accepted up to 1024 -- so a superblock that passed the first check could
      * still ask for 32x more here, up to half a gigabyte.  Bound what we are
@@ -4206,7 +4206,7 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
             }
         }
         memcpy(&fs->bgd[g], src, sizeof(ext2_group_desc_t));
-        /* SELFREV-RC001: carry the on-disk high halves forward. */
+        /* Carry the on-disk high halves forward. */
         if (fs->bbitmap_csum_hi &&
             fs->desc_size >= EXT2_BG_BBITMAP_CSUM_HI_OFF + 2)
             fs->bbitmap_csum_hi[g] =
@@ -4225,7 +4225,7 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
      *                             -> crc32c(state, gd[32..desc_size-1])
      * For 32-byte descriptors the trailing range is empty.  Any
      * mismatch refuses the mount — same argument as superblock-csum.  */
-    /* EXT2-A26 (audit SB-09): the per-group metadata block numbers are
+    /* The per-group metadata block numbers are
      * untrusted on-disk data used directly for I/O — an out-of-range
      * bg_inode_table makes every inode read land somewhere arbitrary,
      * and an out-of-range bitmap pointer makes an allocation write a
@@ -4291,7 +4291,7 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
         }
     }
 
-    /* EXT2-A6 (audit CK-04): this now covers the crc16 GDT_CSUM scheme
+    /* This covers the crc16 GDT_CSUM scheme
      * too — it was accepted in ROCOMPAT_SUPP but neither verified nor
      * written, so uninit_bg volumes went entirely unchecked. */
     if (ext2_has_metadata_csum(fs) || ext2_has_gdt_csum(fs)) {
@@ -4348,7 +4348,7 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
     ext2_node_t *root_ctx = (ext2_node_t *)(uintptr_t)root_node->impl;
     root_ctx->pin_count = 1; // Pin root node
 
-    /* EXT2-A30: publish "mounted, not cleanly unmounted yet" plus the
+    /* Publish "mounted, not cleanly unmounted yet" plus the
      * mount bookkeeping fsck and tune2fs report. */
     if (!fs->readonly) {
         fs->sb.s_state &= (uint16_t)~EXT2_VALID_FS;
@@ -4364,7 +4364,7 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
     return root_node;
 
     /*
-     * EXT2-20: every one of the failure paths above used to unwind by hand,
+     * Every one of the failure paths above used to unwind by hand,
      * and not one of them freed fs->bgd_dirty -- so each rejected mount
      * (bad descriptor size, csum mismatch, unreadable root inode, any failed
      * allocation) leaked (group_count+7)/8 bytes.  A mount that fails is
@@ -4426,7 +4426,7 @@ static filesystem_t ext2_filesystem = {
 };
 
 void ext2_init(void) {
-    /* FS-01/FS-02: bring up the node-cache and inode-table serialization
+    /* Bring up the node-cache and inode-table serialization
      * before any mount can hand out or write back inodes. */
     mutex_init(&ext2_node_cache_lock, "ext2_ncache");
     mutex_init(&ext2_inode_table_lock, "ext2_itable");
@@ -4439,7 +4439,7 @@ uint32_t ext2_alloc_block(ext2_fs_t *fs) {
     if (!fs) return 0;
     mutex_lock(&fs->alloc_lock);
 
-    /* EXT2-A31 (audit BG-06/SB-17): s_r_blocks_count is space the
+    /* s_r_blocks_count is space the
      * filesystem holds back so that root can still act — and so the
      * allocator has room to avoid fragmenting — on a full volume.  It
      * was never enforced, so any user could run the disk to zero while
@@ -4476,7 +4476,7 @@ uint32_t ext2_alloc_block(ext2_fs_t *fs) {
         int found = 0;
 
         /*
-         * EXT2-17: the returned block number was never checked against
+         * The returned block number was never checked against
          * s_blocks_count.  The last group's bitmap is padded out to
          * blocks_per_group bits, and those tail bits describe blocks that do
          * not exist -- mkfs sets them to 1, but nothing here required that.
@@ -4670,7 +4670,7 @@ uint32_t ext2_alloc_inode(ext2_fs_t *fs, int is_dir) {
         /*
          * Find the first free bit (skip reserved inodes in first group).
          *
-         * EXT2-23: two bugs here.  Bit i of group 0 describes inode i+1, so
+         * Two bugs used to live here.  Bit i of group 0 describes inode i+1, so
          * using s_first_ino directly as the bit index skipped one bit too
          * many and permanently wasted the first usable inode.  And
          * s_first_ino was taken raw off the disk: revision-0 filesystems do
@@ -4717,7 +4717,7 @@ uint32_t ext2_alloc_inode(ext2_fs_t *fs, int is_dir) {
                 if (is_dir) {
                     fs->bgd[group].bg_used_dirs_count++;
                 }
-                /* EXT2-A7 (audit BG-07): bg_itable_unused counts the
+                /* bg_itable_unused counts the
                  * inode-table entries at the END of the group that have
                  * never been used, letting fsck skip them.  Allocating
                  * inode i means entries i+1..inodes_per_group-1 are the
@@ -4730,17 +4730,17 @@ uint32_t ext2_alloc_inode(ext2_fs_t *fs, int is_dir) {
 
                 // Calculate absolute inode number
                 uint32_t inode_num = group * fs->inodes_per_group + i + 1;
-                /* EXT2-A33 (audit BG-08): the last group's bitmap is
+                /* The last group's bitmap is
                  * padded out to inodes_per_group bits and those tail
                  * bits describe inodes that do not exist.  Handing one
                  * out would write an inode past the table. */
                 if (inode_num > fs->sb.s_inodes_count) {
-                    /* SELFREV-RA03: the bit was already set in the
+                    /* The bit was already set in the
                      * cached bitmap above; clear it and, since the
                      * descriptor counts were decremented too, put those
                      * back before giving up on this group. */
                     bitmap_buf[byte_idx] &= (uint8_t)~(1u << bit_idx);
-                    /* SELFREV-RA03: ext2_write_inode_bitmap already
+                    /* ext2_write_inode_bitmap already
                      * committed the set bit to disk, so the rollback has
                      * to reach the disk as well — otherwise the on-disk
                      * bitmap permanently reserves an inode number that
@@ -4749,7 +4749,7 @@ uint32_t ext2_alloc_inode(ext2_fs_t *fs, int is_dir) {
                     fs->bgd[group].bg_free_inodes_count++;
                     if (is_dir) fs->bgd[group].bg_used_dirs_count--;
                     ext2_mark_meta_dirty(fs, group);
-                    /* SELFREV-RC007: s_free_inodes_count is decremented
+                    /* s_free_inodes_count is decremented
                      * below this point, so it must NOT be credited here
                      * — doing so inflated the superblock's free count on
                      * every last-group tail-bit rejection. */
@@ -4768,7 +4768,7 @@ uint32_t ext2_alloc_inode(ext2_fs_t *fs, int is_dir) {
                 inode.i_mtime = now;
                 inode.i_atime = now;
 
-                /* EXT2-A10 (audit XA-05): the new-inode path scrubs the
+                /* The new-inode path scrubs the
                  * whole on-disk record.  A recycled slot still holds the
                  * previous file's inline xattrs, which would otherwise
                  * resurface as this file's attributes. */
@@ -4805,14 +4805,14 @@ void ext2_free_inode(ext2_fs_t *fs, uint32_t inode_num, int was_dir) {
      * FS_CHARDEVICE).  That manifested as torture_ipc tests 7 and 9
      * failing S_ISFIFO/S_ISCHR after mknod-of-a-recycled-inode.
      *
-     * FS-01: take ext2_node_cache_lock across the whole scan.  Slot
+     * Take ext2_node_cache_lock across the whole scan.  Slot
      * selection + kfree() of the scratch buffers + zeroing the slot must
      * be atomic with respect to ext2_alloc_node(), which holds the same
      * lock while it selects and populates a slot; otherwise the two race
      * onto the same slot (double-free / half-populated node). */
     mutex_lock(&ext2_node_cache_lock);
     for (int i = 0; i < EXT2_NODE_CACHE_SIZE; i++) {
-        /* EXT2-A17 (audit CY-04): the recycler requires pin_count==0
+        /* The recycler requires pin_count==0
          * AND lock.locked==0; this scan checked only the pin.  A node
          * can be locked while unpinned — finddir hands children back
          * unpinned and ext2_dir_is_empty/readdir then hold that lock
@@ -4893,7 +4893,7 @@ static uint8_t ext2_dirent_type_from_mode(uint16_t mode) {
         case S_IFBLK: return EXT2_FT_BLKDEV;
         case S_IFIFO: return EXT2_FT_FIFO;
         case S_IFLNK: return EXT2_FT_SYMLINK;
-        case S_IFSOCK: return EXT2_FT_SOCK;      /* EXT2-A22 */
+        case S_IFSOCK: return EXT2_FT_SOCK;
         default: return EXT2_FT_UNKNOWN;
     }
 }
@@ -4911,7 +4911,7 @@ static uint8_t ext2_file_type_to_dt(uint8_t ext2_type) {
     }
 }
 
-/* SELFREV-RB02: how many blocks does this indirect subtree occupy,
+/* How many blocks does this indirect subtree occupy,
  * counting the interior nodes?  Used to keep i_blocks honest when a
  * partial truncate releases a whole subtree.  Returns -1 if the tree
  * could not be read (caller falls back to a conservative estimate). */
@@ -4971,7 +4971,7 @@ static int ext2_free_indirect_tree(ext2_fs_t *fs, uint32_t block_num, uint32_t d
     return 0;
 }
 
-/* EXT2-A3 (audit BM-07/CY-06/DE-03): extent-tree teardown.
+/* Extent-tree teardown.
  *
  * Frees every data block referenced by an extent tree, walking interior
  * nodes recursively (depth <= EXT4_EXT_DEPTH_MAX, one block-sized scratch
@@ -5035,7 +5035,7 @@ static void ext4_extent_free_node(ext2_fs_t *fs, const uint8_t *node,
 }
 
 /*
- * EXT2-A27 (audit XA-03): release the inode's extended-attribute block.
+ * Release the inode's extended-attribute block.
  *
  * Deleting an inode never touched i_file_acl, so the block leaked on
  * every delete.  It cannot simply be freed either: mkfs and Linux
@@ -5051,7 +5051,7 @@ static void ext2_release_xattr_block(ext2_fs_t *fs, ext2_inode_t *inode) {
     inode->i_file_acl = 0;
     if (blk >= fs->sb.s_blocks_count) return;
 
-    /* SELFREV-RI03: the refcount is a read-modify-write across sleeping
+    /* The refcount is a read-modify-write across sleeping
      * disk I/O, and one xattr block is shared by every inode carrying
      * identical attributes — two concurrent deletes could both read the
      * same count and one decrement would be lost, eventually freeing a
@@ -5075,7 +5075,7 @@ static void ext2_release_xattr_block(ext2_fs_t *fs, ext2_inode_t *inode) {
     }
     if (refcount > 1) {
         *(uint32_t *)(buf + 4) = refcount - 1;
-        /* SELFREV-RC003: h_checksum (offset 0x10) covers the whole block
+        /* h_checksum (offset 0x10) covers the whole block
          * — seeded with the fs UUID and the block's own 64-bit number,
          * with the checksum field itself zeroed (spec 2.4.4).  Leaving
          * it stale after touching h_refcount makes Linux and e2fsck
@@ -5100,7 +5100,7 @@ static void ext2_release_xattr_block(ext2_fs_t *fs, ext2_inode_t *inode) {
 }
 
 /* `freeing_inode` distinguishes truncate (the inode lives on, keeps its
- * attributes) from delete.  SELFREV-RB03/RI01: releasing the external
+ * attributes) from delete.  Releasing the external
  * xattr block unconditionally meant truncate(2) and every O_TRUNC open
  * silently destroyed the file's ACLs and other block-stored
  * attributes — and decremented a refcount shared with other inodes. */
@@ -5109,7 +5109,7 @@ static int ext2_free_inode_blocks(ext2_fs_t *fs, ext2_inode_t *inode,
     if (!fs || !inode) return -EINVAL;
 
     if (freeing_inode)
-        ext2_release_xattr_block(fs, inode);   /* EXT2-A27 */
+        ext2_release_xattr_block(fs, inode);
 
     /*
      * For an ext4 extent inode, i_block[] is NOT an array of block pointers:
@@ -5166,7 +5166,7 @@ static int ext2_free_inode_blocks(ext2_fs_t *fs, ext2_inode_t *inode,
 }
 
 /*
- * EXT2-A15 (audit BM-05/CY-10): release an inode's blocks, on-disk
+ * Release an inode's blocks, on-disk
  * inode FIRST.
  *
  * ext2_free_inode_blocks clears bitmap bits write-through as it walks,
@@ -5188,11 +5188,11 @@ static int ext2_release_inode_blocks(ext2_fs_t *fs, uint32_t inode_num,
 
     ext2_inode_t snapshot = *inode;      /* still names the blocks */
 
-    /* EXT2-A27: the xattr block is released from the snapshot, so drop
+    /* The xattr block is released from the snapshot, so drop
      * the live inode's reference here — otherwise the inode we are
      * about to commit would still point at a block whose refcount we
      * just decremented (or freed).  Only when the inode itself is
-     * going away (SELFREV-RB03). */
+     * going away. */
     if (freeing_inode) inode->i_file_acl = 0;
     memset(inode->i_block, 0, sizeof(inode->i_block));
     if (inode->i_flags & EXT4_EXTENTS_FL) {
@@ -5209,7 +5209,7 @@ static int ext2_release_inode_blocks(ext2_fs_t *fs, uint32_t inode_num,
     ext2_inode_set_size(inode, 0);
 
     if (ext2_write_inode(fs, inode_num, inode) != 0) {
-        /* SELFREV-RI02: nothing has been freed, so the file is intact
+        /* Nothing has been freed, so the file is intact
          * on disk — but the in-core inode has already been emptied.
          * Returning with it gutted makes the live file look
          * zero-length to every subsequent operation.  Put it back. */
@@ -5221,7 +5221,7 @@ static int ext2_release_inode_blocks(ext2_fs_t *fs, uint32_t inode_num,
 }
 
 /*
- * EXT2-A34 (audit BM-09): shrink a file to a smaller, non-zero length.
+ * Shrink a file to a smaller, non-zero length.
  *
  * This used to return -EOPNOTSUPP — a real POSIX ftruncate(2) gap, and
  * the reason was that releasing only the blocks past the new end of
@@ -5286,7 +5286,7 @@ static int64_t ext2_trunc_node(ext2_fs_t *fs, uint32_t node_blk, uint32_t depth,
         uint64_t start = base + (uint64_t)i * per;
         if (start < keep) continue;         /* collapsed child, freed below */
         if (depth > 1) {
-            /* SELFREV-RB02: count what the subtree actually released,
+            /* Count what the subtree actually released,
              * not one block per subtree — the old tally left i_blocks
              * far above the file's real usage after a partial truncate,
              * which e2fsck then flags on every shrunk file. */
@@ -5360,7 +5360,7 @@ static int ext2_truncate_blocks(ext2_fs_t *fs, uint32_t inode_num,
             int64_t sub = ext2_count_tree_blocks(fs, roots[r].blk,
                                                  roots[r].depth);
             if (ext2_free_indirect_tree(fs, roots[r].blk, roots[r].depth) == 0)
-                freed += (sub > 0) ? sub : 1;      /* SELFREV-RB02 */
+                freed += (sub > 0) ? sub : 1;      /* whole subtree */
         } else {
             int empty = 0;
             int64_t rc = ext2_trunc_node(fs, roots[r].blk, roots[r].depth,
@@ -5392,10 +5392,10 @@ int ext2_truncate(fs_node_t *node, off_t length) {
     if (!ctx) return -EINVAL;
     fs = ctx->fs;
     if (EXT2_RO_REFUSE(fs)) return -EROFS;
-    /* EXT2-A34: truncation is forbidden on both flags. */
+    /* Truncation is forbidden on both immutable and append-only files. */
     if (EXT2_IS_IMMUTABLE(ctx) || EXT2_IS_APPEND(ctx)) return -EPERM;
 
-    /* EXT2-A37: 64-bit now; the bound is i_blocks' 512-byte-unit
+    /* Sizes are 64-bit; the bound is i_blocks' 512-byte-unit
      * uint32_t, not the size field. */
     if ((uint64_t)length > EXT2_MAX_FILE_SIZE) return -EFBIG;
 
@@ -5408,7 +5408,7 @@ int ext2_truncate(fs_node_t *node, off_t length) {
     int ret = 0;
 
     if (length == 0) {
-        /* Release every data block.  EXT2-A15: the emptied inode is
+        /* Release every data block.  The emptied inode is
          * committed before any bitmap bit is cleared. */
         uint32_t tnow = (uint32_t)get_time();
         ctx->inode.i_mtime = tnow;
@@ -5425,11 +5425,11 @@ int ext2_truncate(fs_node_t *node, off_t length) {
          * on a freshly created (empty) file does, the precondition for most
          * of the mmap(2) conformance tests.
          */
-        ext2_inode_set_size(&ctx->inode, (uint64_t)length);   /* EXT2-A37 */
+        ext2_inode_set_size(&ctx->inode, (uint64_t)length);   /* 64-bit size */
     } else {
         /* Shrink.  Free everything past the new end of file, then zero
          * the tail of the last surviving block so a later grow reads
-         * zeros there rather than the old contents (EXT2-A34). */
+         * zeros there rather than the old contents. */
         uint32_t keep = (uint32_t)((length + fs->block_size - 1) / fs->block_size);
         ret = ext2_truncate_blocks(fs, ctx->inode_num, &ctx->inode,
                                    keep, (uint32_t)length);
@@ -5478,12 +5478,12 @@ static int ext2_add_entry(fs_node_t *dir, const char *name, uint32_t inode, uint
     ext2_fs_t *fs = ctx->fs;
     
     uint32_t name_len = strlen(name);
-    /* EXT2-A18 (audit DE-15): bare -1 became EPERM at the syscall
+    /* A bare -1 would become EPERM at the syscall
      * boundary; both of these have proper errnos. */
     if (name_len == 0) return -EINVAL;
     if (name_len > 255) return -ENAMETOOLONG;
 
-    /* EXT2-A9 (audit MS-01/DE-05/SB-11): without INCOMPAT_FILETYPE the
+    /* Without INCOMPAT_FILETYPE the
      * byte we would store the type in is the high half of a 16-bit
      * name_len, so every entry this driver created on such a volume
      * read back on Linux as name_len + 256*type — "directory entry has
@@ -5518,7 +5518,7 @@ static int ext2_add_entry(fs_node_t *dir, const char *name, uint32_t inode, uint
     }
 
     /*
-     * [EXT2-08] An indexed directory is maintained through its hash
+     * An indexed directory is maintained through its hash
      * tree, never by appending.  The linear path below would walk into
      * the dx_root block, mistake the oversized ".." record for slack and
      * write a dirent straight over h_hash_version / h_info_len /
@@ -5542,7 +5542,7 @@ static int ext2_add_entry(fs_node_t *dir, const char *name, uint32_t inode, uint
     int result = -EIO;
 
     /*
-     * EXT2-A17 (audit CY-05): scan the WHOLE directory before inserting.
+     * Scan the WHOLE directory before inserting.
      *
      * The callers' EEXIST probe (finddir) runs in a separate critical
      * section from this insert, so two concurrent creates of the same
@@ -5563,7 +5563,7 @@ static int ext2_add_entry(fs_node_t *dir, const char *name, uint32_t inode, uint
         uint32_t block_num = ext2_get_block_num(fs, &ctx->inode, block_idx, indirect, dindirect, tindirect);
 
         if (block_num == 0) break;
-        /* EXT2-A16 (audit CY-07/DE-07): splicing an entry into a buffer
+        /* Splicing an entry into a buffer
          * whose refresh failed would commit the PREVIOUS block's image
          * over this block — destroying its entries and duplicating the
          * other block's.  One transient read error, permanent directory
@@ -5573,12 +5573,12 @@ static int ext2_add_entry(fs_node_t *dir, const char *name, uint32_t inode, uint
             goto cleanup;
         }
 
-        /* EXT2-A8: stop before the ext4_dir_entry_tail on a
+        /* Stop before the ext4_dir_entry_tail on a
          * metadata_csum filesystem — it is a fake dirent (inode 0,
          * rec_len 12) that the reuse path below would otherwise claim
          * as free space for any name of four characters or fewer,
          * destroying the block's checksum record. */
-        uint32_t dir_limit = ext2_dir_scan_limit(fs, block_buf);   /* RC002 */
+        uint32_t dir_limit = ext2_dir_scan_limit(fs, block_buf);
         while (block_off + 8 <= dir_limit && pos < dir_size) {
             ext2_dirent_t *de = (ext2_dirent_t *)(block_buf + block_off);
 
@@ -5640,7 +5640,7 @@ static int ext2_add_entry(fs_node_t *dir, const char *name, uint32_t inode, uint
             result = -EIO;
             goto cleanup;
         }
-        /* SELFREV-RD03: pass one recorded an offset; this is a freshly
+        /* Pass one recorded an offset; this is a freshly
          * re-read copy of the block.  Re-derive the record's geometry
          * and re-check it still admits the insertion before writing —
          * trusting the earlier measurements would place the new dirent
@@ -5649,7 +5649,7 @@ static int ext2_add_entry(fs_node_t *dir, const char *name, uint32_t inode, uint
          * lock between passes). */
         {
             /* Same limit pass one used, so a legitimately tail-less
-             * block does not fail revalidation (SELFREV-RC002). */
+             * block does not fail revalidation. */
             uint32_t lim = ext2_dir_scan_limit(fs, block_buf);
             if (fit_off + 8 > lim) { result = -EIO; goto cleanup; }
             ext2_dirent_t *chk = (ext2_dirent_t *)(block_buf + fit_off);
@@ -5695,7 +5695,7 @@ static int ext2_add_entry(fs_node_t *dir, const char *name, uint32_t inode, uint
                     ctx->inode_num, name, inode, file_type,
                     fit_reuse ? "reuse" : "split");
         }
-        /* EXT2-A23 (audit DE-08/MS-09): the parent's mtime/ctime were
+        /* The parent's mtime/ctime used to be
          * only refreshed on the grow-a-block path, so the common
          * insertion left the directory's timestamps stale. */
         {
@@ -5716,7 +5716,7 @@ static int ext2_add_entry(fs_node_t *dir, const char *name, uint32_t inode, uint
         int arc = ext2_alloc_inode_block(fs, &ctx->inode, new_block_idx,
                                          indirect, dindirect, tindirect);
         if (arc != 0) {
-            result = (arc < 0) ? arc : -ENOSPC;   /* EXT2-A18 */
+            result = (arc < 0) ? arc : -ENOSPC;
             goto cleanup;
         }
     }
@@ -5735,16 +5735,16 @@ static int ext2_add_entry(fs_node_t *dir, const char *name, uint32_t inode, uint
     ext2_dirent_t *de = (ext2_dirent_t *)block_buf;
     de->inode = inode;
     /* Entry spans the whole block, stopping short of the tail when the
-     * filesystem carries dirent checksums (EXT2-A8). */
+     * filesystem carries dirent checksums. */
     de->rec_len = (uint16_t)ext2_dir_limit(fs);
     de->name_len = name_len;
     de->file_type = file_type;
     memcpy(de->name, name, name_len);
 
     if (ext2_write_dir_block(fs, ctx, new_block, block_buf) != fs->block_size) {
-        /* EXT2-A14: the block is allocated and linked but its contents
+        /* The block is allocated and linked but its contents
          * never reached the disk — the directory would grow by a block
-         * of garbage.  SELFREV-RD04: i_size still describes the old
+         * of garbage.  i_size still describes the old
          * directory, so the block is referenced by i_block[] and by
          * nothing else.  Commit the inode as it stands (the block is
          * accounted in i_blocks) rather than leave i_block[] and i_size
@@ -5759,7 +5759,7 @@ static int ext2_add_entry(fs_node_t *dir, const char *name, uint32_t inode, uint
     }
 
     // Update directory size and timestamps
-    /* EXT2-A4 (audit BM-06): i_blocks is NOT bumped here —
+    /* i_blocks is NOT bumped here —
      * ext2_alloc_inode_block already accounted the new block (and any
      * indirect blocks).  The old extra increment double-counted every
      * directory block past the first, failing e2fsck on every grown
@@ -5799,7 +5799,7 @@ int ext2_link(fs_node_t *parent, fs_node_t *source, const char *name) {
 
     if (ext2_finddir(parent, (char *)name) != NULL) return -EEXIST;
 
-    // Increment links_count (EXT2-A17/CY-09: RMW + commit under the lock)
+    // Increment links_count (RMW + commit under the lock)
     mutex_lock(&source_ctx->lock);
     source_ctx->inode.i_links_count++;
     source_ctx->inode.i_ctime = (uint32_t)get_time();
@@ -5817,7 +5817,7 @@ int ext2_link(fs_node_t *parent, fs_node_t *source, const char *name) {
     else if (s_flags == FS_BLOCKDEVICE) file_type = EXT2_FT_BLKDEV;
     else if (s_flags == FS_PIPE) file_type = EXT2_FT_FIFO;
     else if (s_flags == FS_SYMLINK) file_type = EXT2_FT_SYMLINK;
-    else if (s_flags == FS_SOCKET) file_type = EXT2_FT_SOCK;   /* EXT2-A22 */
+    else if (s_flags == FS_SOCKET) file_type = EXT2_FT_SOCK;
 
     {
         int arc = ext2_add_entry(parent, name, source_ctx->inode_num, file_type);
@@ -5826,7 +5826,7 @@ int ext2_link(fs_node_t *parent, fs_node_t *source, const char *name) {
             source_ctx->inode.i_links_count--;
             ext2_write_inode(fs, source_ctx->inode_num, &source_ctx->inode);
             mutex_unlock(&source_ctx->lock);
-            return (arc < 0) ? arc : -EIO;    /* EXT2-A18 */
+            return (arc < 0) ? arc : -EIO;
         }
     }
 
@@ -5837,7 +5837,7 @@ int ext2_link(fs_node_t *parent, fs_node_t *source, const char *name) {
 int ext2_rename(fs_node_t *old_parent, const char *old_name, fs_node_t *new_parent, const char *new_name) {
 
     if (!old_parent || !old_name || !new_parent || !new_name) return -EINVAL;
-    /* EXT2-A2 (audit DE-04): every other namespace op rejects dot names;
+    /* Every other namespace op rejects dot names;
      * rename did not, so rename("/a/.", "/b/x") deleted a's own "."
      * entry and gave the directory a second parent — structural
      * corruption from one syscall.  POSIX prescribes EINVAL. */
@@ -5852,7 +5852,7 @@ int ext2_rename(fs_node_t *old_parent, const char *old_name, fs_node_t *new_pare
     fs_node_t *old_node = ext2_finddir(old_parent, (char *)old_name);
     if (!old_node) return -ENOENT;
 
-    /* FS-05: old_parent, new_parent and old_node are all bare node-cache
+    /* old_parent, new_parent and old_node are all bare node-cache
      * slots that we keep dereferencing across the finddir/alloc_node/
      * unlink/rmdir calls below — every one of which can recycle an
      * unpinned slot.  Pin them for the whole operation so none is reused
@@ -5867,14 +5867,14 @@ int ext2_rename(fs_node_t *old_parent, const char *old_name, fs_node_t *new_pare
     int new_node_pinned = 0;
     int rc = -EIO;
 
-    /* EXT2-A34: renaming an immutable/append-only file is forbidden.
-     * SELFREV-RD01: release the pins taken above before returning. */
+    /* Renaming an immutable/append-only file is forbidden.
+     * Release the pins taken above before returning. */
     if (old_node_ctx &&
         (EXT2_IS_IMMUTABLE(old_node_ctx) || EXT2_IS_APPEND(old_node_ctx))) {
         rc = -EPERM;
         goto out;
     }
-    /* SELFREV-RD02: moving a directory to a new parent rewrites its
+    /* Moving a directory to a new parent rewrites its
      * '..' entry in block 0.  For an htree directory that block is the
      * dx_root — index data, not a dirent block — so writing it back
      * through the dirent-tail stamper would scribble a fake dirent over
@@ -5886,13 +5886,13 @@ int ext2_rename(fs_node_t *old_parent, const char *old_name, fs_node_t *new_pare
         goto out;
     }
 
-    /* FS-07: reject moving a directory into itself or into one of its own
+    /* Reject moving a directory into itself or into one of its own
      * descendants — that splices a detached cycle out of the tree (POSIX
      * EINVAL).  Only a directory can create a loop.  Walk new_parent's
      * ancestry via ".."; each ext2_finddir() pins its own parent for the
-     * duration of that lookup (FS-05), so this walk is safe. */
+     * duration of that lookup, so this walk is safe. */
     if ((old_node->flags & 0x7) == FS_DIRECTORY) {
-        /* EXT2-A24 (audit DE-10): the walk must REACH the root to prove
+        /* The walk must REACH the root to prove
          * the destination is not inside the directory being moved.  It
          * used to `break` out on a failed ".." lookup or on running out
          * of guard iterations and then allow the move, splicing a
@@ -5917,7 +5917,7 @@ int ext2_rename(fs_node_t *old_parent, const char *old_name, fs_node_t *new_pare
     if (new_node) {
         ext2_node_open(new_node);
         new_node_pinned = 1;
-        /* EXT2-A2 (audit DE-02): POSIX — when old and new resolve to the
+        /* POSIX — when old and new resolve to the
          * same existing file (the same entry, or two hard links to one
          * inode), rename succeeds and performs NO other action.  Without
          * this, rename(a, a) went unlink-target → re-add → remove-old,
@@ -5931,7 +5931,7 @@ int ext2_rename(fs_node_t *old_parent, const char *old_name, fs_node_t *new_pare
                 goto out;
             }
         }
-        /* EXT2-A24 (audit DE-09): the removal's result was discarded, so
+        /* Check the removal's result: when it was discarded,
          * a failure that left the old entry in place was followed by
          * add_entry inserting a SECOND record with the same name. */
         int drc;
@@ -5953,13 +5953,13 @@ int ext2_rename(fs_node_t *old_parent, const char *old_name, fs_node_t *new_pare
     else if (flags == FS_CHARDEVICE) file_type = EXT2_FT_CHRDEV;
     else if (flags == FS_BLOCKDEVICE) file_type = EXT2_FT_BLKDEV;
     else if (flags == FS_PIPE) file_type = EXT2_FT_FIFO;
-    else if (flags == FS_SOCKET) file_type = EXT2_FT_SOCK;     /* EXT2-A22 */
+    else if (flags == FS_SOCKET) file_type = EXT2_FT_SOCK;
 
     // Add new entry
     {
         int arc = ext2_add_entry(new_parent, new_name, old_node_ctx->inode_num, file_type);
         if (arc != 0) {
-            rc = (arc < 0) ? arc : -EIO;        /* EXT2-A18 */
+            rc = (arc < 0) ? arc : -EIO;
             goto out;
         }
     }
@@ -5977,7 +5977,7 @@ int ext2_rename(fs_node_t *old_parent, const char *old_name, fs_node_t *new_pare
         ext2_node_t *new_p_ctx = (ext2_node_t *)(uintptr_t)new_parent->impl;
         ext2_fs_t *fs = old_node_ctx->fs;
 
-        /* EXT2-A17/CY-09: each parent's count under its own lock. */
+        /* Each parent's link count is updated under its own lock. */
         mutex_lock(&old_p_ctx->lock);
         if (old_p_ctx->inode.i_links_count > 0)
             old_p_ctx->inode.i_links_count--;
@@ -5989,8 +5989,7 @@ int ext2_rename(fs_node_t *old_parent, const char *old_name, fs_node_t *new_pare
         ext2_write_inode(fs, new_p_ctx->inode_num, &new_p_ctx->inode);
         mutex_unlock(&new_p_ctx->lock);
 
-        /* Update ".." in the moved directory.  EXT2-A17 (audit CY-08):
-         * this walks and rewrites through old_node_ctx's scratch
+        /* Update ".." in the moved directory.  This walks and rewrites through old_node_ctx's scratch
          * buffers, which every other user of that node also shares —
          * take its lock, as readdir/finddir/add_entry do. */
         mutex_lock(&old_node_ctx->lock);
@@ -6001,7 +6000,7 @@ int ext2_rename(fs_node_t *old_parent, const char *old_name, fs_node_t *new_pare
 
         if (old_node_ctx->block_buf && old_node_ctx->indirect_buf &&
             old_node_ctx->dindirect_buf && old_node_ctx->tindirect_buf) {
-            /* EXT2-A33 (audit BM-13): all four buffers must exist —
+            /* All four buffers must exist —
              * ext2_get_block_num dereferences the indirect ones. */
             uint32_t dotdot_block = ext2_get_block_num(fs, &old_node_ctx->inode, 0,
                                                        old_node_ctx->indirect_buf,
@@ -6009,9 +6008,9 @@ int ext2_rename(fs_node_t *old_parent, const char *old_name, fs_node_t *new_pare
                                                        old_node_ctx->tindirect_buf);
             if (dotdot_block != 0 &&
                 ext2_read_block(fs, dotdot_block, old_node_ctx->block_buf)
-                    == fs->block_size) {   /* EXT2-A16 */
+                    == fs->block_size) {   /* never patch a stale buffer */
                 ext2_dirent_t *dot = (ext2_dirent_t *)old_node_ctx->block_buf;
-                /* A63: dot->rec_len is an untrusted uint16 read from disk.
+                /* dot->rec_len is an untrusted uint16 read from disk.
                  * Bound it so the '..' entry (8-byte dirent header + its
                  * 2-char name) lies wholly inside the block buffer before
                  * we dereference or write through dotdot.  A corrupt '.'
@@ -6029,7 +6028,7 @@ int ext2_rename(fs_node_t *old_parent, const char *old_name, fs_node_t *new_pare
                 }
             }
         }
-        /* EXT2-A24 (audit DE-12): the moved directory's own dcache may
+        /* The moved directory's own dcache may
          * hold ".." pointing at the OLD parent — the rename cycle check
          * itself populates it.  Drop the whole cache; a stale ".." here
          * misdirects path resolution and later cycle checks. */
@@ -6053,7 +6052,7 @@ out:
 
 // Remove directory entry
 static int ext2_remove_entry(fs_node_t *dir, const char *name) {
-    if (!dir || !name) return -EINVAL;    /* EXT2-A18 */
+    if (!dir || !name) return -EINVAL;
     
     ext2_node_t *ctx = (ext2_node_t *)(uintptr_t)dir->impl;
     ext2_fs_t *fs = ctx->fs;
@@ -6063,7 +6062,7 @@ static int ext2_remove_entry(fs_node_t *dir, const char *name) {
     mutex_lock(&ctx->lock);
 
     /*
-     * [EXT2-08] Deletion needs no index maintenance and is safe on an
+     * Deletion needs no index maintenance and is safe on an
      * indexed directory exactly as written.  ext3/ext4 never shrink or
      * rebalance a tree on unlink either -- a leaf simply gets sparser.
      * The scan below is block-local (prev_de restarts at every block and
@@ -6102,7 +6101,7 @@ static int ext2_remove_entry(fs_node_t *dir, const char *name) {
 
     uint32_t dir_size = ctx->inode.i_size;
     uint32_t pos = 0;
-    int result = -ENOENT;                 /* EXT2-A18: name not found */
+    int result = -ENOENT;                 /* name not found */
 
     while (pos < dir_size) {
         uint32_t block_idx = pos / fs->block_size;
@@ -6111,12 +6110,12 @@ static int ext2_remove_entry(fs_node_t *dir, const char *name) {
         
         if (block_num == 0) break;
         if (ext2_read_block(fs, block_num, block_buf) != fs->block_size) {
-            result = -EIO;              /* EXT2-A16: never modify a stale buffer */
+            result = -EIO;              /* never modify a stale buffer */
             goto cleanup;
         }
 
         ext2_dirent_t *prev_de = NULL;
-        uint32_t dir_limit = ext2_dir_scan_limit(fs, block_buf);   /* RC002 */
+        uint32_t dir_limit = ext2_dir_scan_limit(fs, block_buf);
 
         while (block_off + 8 <= dir_limit && pos < dir_size) {
             ext2_dirent_t *de = (ext2_dirent_t *)(block_buf + block_off);
@@ -6209,7 +6208,7 @@ static int ext2_mknod(fs_node_t *dir, const char *name, uint16_t mode, uint32_t 
         type = S_IFREG;
         mode |= S_IFREG;
     }
-    /* EXT2-A33 (audit MS-17): POSIX mknod rejects a directory with
+    /* POSIX mknod rejects a directory with
      * EPERM (mkdir's job), and a symlink has no target here — it would
      * create a degenerate empty link that resolves to "". */
     if (type == S_IFDIR)  return -EPERM;
@@ -6225,11 +6224,11 @@ static int ext2_mknod(fs_node_t *dir, const char *name, uint16_t mode, uint32_t 
 
     memset(&inode, 0, sizeof(inode));
     inode.i_mode = mode;
-    ext2_set_creator_owner(&inode, dir, &mode);   /* EXT2-A21 */
+    ext2_set_creator_owner(&inode, dir, &mode);
     inode.i_mode = mode;
     inode.i_links_count = 1;
     if (type == S_IFCHR || type == S_IFBLK) {
-        ext2_inode_set_rdev(&inode, dev);          /* EXT2-A20 */
+        ext2_inode_set_rdev(&inode, dev);
     }
     uint32_t now = (uint32_t)get_time();
     inode.i_atime = now;
@@ -6245,7 +6244,7 @@ static int ext2_mknod(fs_node_t *dir, const char *name, uint16_t mode, uint32_t 
         int arc = ext2_add_entry(dir, name, inode_num, ext2_dirent_type_from_mode(mode));
         if (arc != 0) {
             ext2_free_inode(fs, inode_num, is_dir);
-            return (arc < 0) ? arc : -EIO;      /* EXT2-A18 */
+            return (arc < 0) ? arc : -EIO;
         }
     }
 
@@ -6268,7 +6267,7 @@ static int ext2_symlink(fs_node_t *dir, const char *target, const char *name) {
     ext2_fs_t *fs = dir_ctx->fs;
     uint32_t target_len = strlen(target);
 
-    /* EXT2-A11 (audit MS-10): a slow symlink's target has to fit in the
+    /* A slow symlink's target has to fit in the
      * single block the read path (and e2fsck) expects; longer targets
      * produced an inode neither could use. */
     if (target_len == 0 || target_len > fs->block_size - 1)
@@ -6280,7 +6279,7 @@ static int ext2_symlink(fs_node_t *dir, const char *target, const char *name) {
     ext2_inode_t inode;
     memset(&inode, 0, sizeof(inode));
     inode.i_mode = EXT2_S_IFLNK | 0777;
-    ext2_set_creator_owner(&inode, dir, NULL);   /* EXT2-A21 */
+    ext2_set_creator_owner(&inode, dir, NULL);
     inode.i_links_count = 1;
     inode.i_size = target_len;
     uint32_t now = (uint32_t)get_time();
@@ -6288,7 +6287,7 @@ static int ext2_symlink(fs_node_t *dir, const char *target, const char *name) {
     inode.i_mtime = now;
     inode.i_ctime = now;
 
-    /* EXT2-A11 (audit BM-03): inline only when the target plus its NUL
+    /* Inline only when the target plus its NUL
      * fits in the 60-byte i_block area.  Storing a 60-byte target
      * filled it with no terminator: e2fsck treats such an inode as an
      * invalid fast symlink and offers to clear it, and Linux's reader
@@ -6317,7 +6316,7 @@ static int ext2_symlink(fs_node_t *dir, const char *target, const char *name) {
         lctx->inode.i_size = target_len;
         ext2_write_inode(fs, inode_num, &lctx->inode);
         if (written < target_len) {
-            /* FS-11: ext2_inode_write() may already have allocated one or
+            /* ext2_inode_write() may already have allocated one or
              * more data blocks for the target before it ran short.  Freeing
              * only the inode leaks those blocks, and leaving the cache slot
              * populated (fs/inode_num still set) means a later lookup of the
@@ -6336,7 +6335,7 @@ static int ext2_symlink(fs_node_t *dir, const char *target, const char *name) {
 
     int add_rc = ext2_add_entry(dir, name, inode_num, EXT2_FT_SYMLINK);
     if (add_rc != 0) {
-        /* EXT2-27: a slow symlink (target > 60 bytes) has a data block
+        /* A slow symlink (target > 60 bytes) has a data block
          * allocated and written above.  Freeing only the inode here left that
          * block marked in-use with nothing referencing it -- an unreachable
          * block that only fsck could recover.  Re-read the inode we just
@@ -6345,7 +6344,7 @@ static int ext2_symlink(fs_node_t *dir, const char *target, const char *name) {
         if (!fast && ext2_read_inode(fs, inode_num, &li) == 0)
             (void)ext2_release_inode_blocks(fs, inode_num, &li, 1);
         ext2_free_inode(fs, inode_num, 0);
-        return (add_rc < 0) ? add_rc : -EIO;    /* EXT2-A18 */
+        return (add_rc < 0) ? add_rc : -EIO;
     }
 
     return 0;
@@ -6362,7 +6361,7 @@ int ext2_mkdir(fs_node_t *dir, const char *name, uint16_t permission) {
     uint32_t now;
     uint16_t dot_len;
 
-    /* FS-12: validate `dir` before dereferencing dir->impl. */
+    /* Validate `dir` before dereferencing dir->impl. */
     if (!dir || !name || !name[0]) return -EINVAL;
     if ((dir->flags & 0x7) != FS_DIRECTORY) return -ENOTDIR;
     if (!strcmp(name, ".") || !strcmp(name, "..")) return -EINVAL;
@@ -6397,7 +6396,7 @@ int ext2_mkdir(fs_node_t *dir, const char *name, uint16_t permission) {
 
     {
         uint16_t dmode = (uint16_t)(S_IFDIR | (permission & 0777));
-        ext2_set_creator_owner(&inode, dir, &dmode);   /* EXT2-A21 */
+        ext2_set_creator_owner(&inode, dir, &dmode);
         inode.i_mode = dmode;
     }
     inode.i_size = fs->block_size;
@@ -6416,15 +6415,15 @@ int ext2_mkdir(fs_node_t *dir, const char *name, uint16_t permission) {
         dot->inode = inode_num;
         dot->rec_len = dot_len;
         dot->name_len = 1;
-        dot->file_type = fs->has_ftype ? EXT2_FT_DIR : 0;   /* EXT2-A9 */
+        dot->file_type = fs->has_ftype ? EXT2_FT_DIR : 0;
         dot->name[0] = '.';
 
         dotdot->inode = dir_ctx->inode_num;
         /* '..' spans the rest of the usable area — short of the dirent
-         * tail on a metadata_csum filesystem (EXT2-A8). */
+         * tail on a metadata_csum filesystem. */
         dotdot->rec_len = (uint16_t)(ext2_dir_limit(fs) - dot_len);
         dotdot->name_len = 2;
-        dotdot->file_type = fs->has_ftype ? EXT2_FT_DIR : 0;   /* EXT2-A9 */
+        dotdot->file_type = fs->has_ftype ? EXT2_FT_DIR : 0;
         dotdot->name[0] = '.';
         dotdot->name[1] = '.';
     }
@@ -6449,12 +6448,12 @@ int ext2_mkdir(fs_node_t *dir, const char *name, uint16_t permission) {
         if (arc != 0) {
             ext2_release_inode_blocks(fs, inode_num, &inode, 1);
             ext2_free_inode(fs, inode_num, 1);
-            return (arc < 0) ? arc : -EIO;      /* EXT2-A18 */
+            return (arc < 0) ? arc : -EIO;
         }
     }
 
-    mutex_lock(&dir_ctx->lock);         /* EXT2-A17/CY-09 */
-    /* EXT2-A24 (audit DE-11): i_links_count is a uint16 that would wrap
+    mutex_lock(&dir_ctx->lock);         /* link-count RMW under the lock */
+    /* i_links_count is a uint16 that would wrap
      * to 0 at 65535 subdirectories.  With RO_COMPAT_DIR_NLINK the
      * format's answer is to stop counting — store 1, meaning "unknown"
      * — otherwise the operation has to fail. */
@@ -6495,7 +6494,7 @@ int ext2_unlink(fs_node_t *dir, const char *name) {
     ext2_fs_t *fs;
     int ret;
 
-    /* FS-12: validate `dir` before dereferencing dir->impl (the read-only
+    /* Validate `dir` before dereferencing dir->impl (the read-only
      * refusal probe below reads it). */
     if (!dir || !name || !name[0]) return -EINVAL;
     if ((dir->flags & 0x7) != FS_DIRECTORY) return -ENOTDIR;
@@ -6508,14 +6507,14 @@ int ext2_unlink(fs_node_t *dir, const char *name) {
     if (!victim) return -ENOENT;
     if ((victim->flags & 0x7) == FS_DIRECTORY) return -EISDIR;
 
-    /* EXT2-A34: an immutable or append-only file cannot be unlinked. */
+    /* An immutable or append-only file cannot be unlinked. */
     {
         ext2_node_t *vc = (ext2_node_t *)(uintptr_t)victim->impl;
         if (vc && (EXT2_IS_IMMUTABLE(vc) || EXT2_IS_APPEND(vc)))
             return -EPERM;
     }
 
-    /* EXT2-A17 (audit CY-02): finddir returns children UNPINNED, and
+    /* finddir returns children UNPINNED, and
      * everything below sleeps on disk I/O — the slot recycler is free
      * to hand this slot to another inode in the meantime, after which
      * we would decrement a stranger's link count.  Hold it. */
@@ -6525,9 +6524,9 @@ int ext2_unlink(fs_node_t *dir, const char *name) {
     fs = victim_ctx->fs;
 
     ret = ext2_remove_entry(dir, name);
-    if (ret != 0) { ext2_node_close(victim); return ret; }   /* EXT2-A18 */
+    if (ret != 0) { ext2_node_close(victim); return ret; }
 
-    /* EXT2-A17 (audit CY-09): the link-count read-modify-write and the
+    /* The link-count read-modify-write and the
      * inode commit belong together under the victim's own lock, or two
      * concurrent unlinks of two names for one inode can both read the
      * same count and one decrement is lost. */
@@ -6563,7 +6562,7 @@ int ext2_unlink(fs_node_t *dir, const char *name) {
 }
 
 /*
- * EXT2-A13 (audit DE-06): is this directory empty?
+ * Is this directory empty?
  *
  * The answer authorises rmdir to free the directory's blocks and
  * inode, so "I could not tell" must read as NOT empty.  The old
@@ -6616,7 +6615,7 @@ static int ext2_dir_is_empty(fs_node_t *node) {
         }
 
         uint32_t off = 0;
-        uint32_t limit = ext2_dir_scan_limit(fs, ctx->block_buf);   /* RC002 */
+        uint32_t limit = ext2_dir_scan_limit(fs, ctx->block_buf);
         while (off + 8 <= limit) {
             ext2_dirent_t *de = (ext2_dirent_t *)(ctx->block_buf + off);
             if (de->rec_len < 8 || (de->rec_len & 3) ||
@@ -6647,7 +6646,7 @@ int ext2_rmdir(fs_node_t *dir, const char *name) {
     ext2_fs_t *fs;
     int ret;
 
-    /* FS-12: validate `dir` before dereferencing dir->impl. */
+    /* Validate `dir` before dereferencing dir->impl. */
     if (!dir || !name || !name[0]) return -EINVAL;
     if ((dir->flags & 0x7) != FS_DIRECTORY) return -ENOTDIR;
     if (!strcmp(name, ".") || !strcmp(name, "..")) return -EINVAL;
@@ -6659,15 +6658,15 @@ int ext2_rmdir(fs_node_t *dir, const char *name) {
     victim = ext2_finddir(dir, (char *)name);
     if (!victim) return -ENOENT;
     if ((victim->flags & 0x7) != FS_DIRECTORY) return -ENOTDIR;
-    /* SELFREV-RD05: the immutable/append guard covered unlink and the
-     * rename source but not rmdir. */
+    /* The immutable/append guard applies to rmdir as well as to unlink
+     * and the rename source. */
     {
         ext2_node_t *vc = (ext2_node_t *)(uintptr_t)victim->impl;
         if (vc && (EXT2_IS_IMMUTABLE(vc) || EXT2_IS_APPEND(vc)))
             return -EPERM;
     }
 
-    /* EXT2-A17 (audit CY-02): pin before the emptiness scan — that scan
+    /* Pin before the emptiness scan — that scan
      * sleeps on disk I/O with the slot unpinned, so the recycler could
      * hand it to another inode and we would go on to delete that one. */
     ext2_node_open(victim);
@@ -6679,9 +6678,9 @@ int ext2_rmdir(fs_node_t *dir, const char *name) {
     fs = victim_ctx->fs;
 
     ret = ext2_remove_entry(dir, name);
-    if (ret != 0) { ext2_node_close(victim); return ret; }   /* EXT2-A18 */
+    if (ret != 0) { ext2_node_close(victim); return ret; }
 
-    /* Parent loses the child's ".." link (EXT2-A17/CY-09: under lock). */
+    /* Parent loses the child's ".." link (under lock). */
     mutex_lock(&dir_ctx->lock);
     if (dir_ctx->inode.i_links_count > 0) {
         dir_ctx->inode.i_links_count--;
@@ -6696,7 +6695,7 @@ int ext2_rmdir(fs_node_t *dir, const char *name) {
     victim_ctx->inode.i_dtime = (uint32_t)get_time();
 
     /*
-     * EXT2-16: this used to free the blocks and the inode unconditionally,
+     * This used to free the blocks and the inode unconditionally,
      * with no equivalent of the unlink-while-open handling a few functions
      * up.  An open DIR fd (opendir() holds the node pinned) therefore went on
      * reading directory blocks that were already back on the free list and
@@ -6710,8 +6709,8 @@ int ext2_rmdir(fs_node_t *dir, const char *name) {
     /* Mark orphaned and let ext2_node_close complete the teardown when
      * the last pin — ours included — is dropped.  An open DIR fd keeps
      * the directory's blocks valid for its readdir, as POSIX requires
-     * (EXT2-16), and the close path is the one with the correct
-     * commit-then-free ordering (EXT2-A15). */
+     * and the close path is the one with the correct
+     * commit-then-free ordering. */
     victim_ctx->orphaned = 1;
     victim_ctx->was_dir_at_unlink = 1;
     ret = ext2_write_inode(fs, victim_ctx->inode_num, &victim_ctx->inode);
@@ -6731,7 +6730,7 @@ int ext2_statfs(fs_node_t *node, struct statfs *buf) {
     buf->f_iosize       = fs->block_size;
     buf->f_blocks       = fs->sb.s_blocks_count;
     buf->f_bfree        = fs->sb.s_free_blocks_count;
-    /* EXT2-26: f_bfree is every free block; f_bavail is what an unprivileged
+    /* f_bfree is every free block; f_bavail is what an unprivileged
      * writer may actually use, which excludes the s_r_blocks_count reserve.
      * Reporting the reserve as available made df(1) promise space that write()
      * refused with ENOSPC. */
@@ -6740,7 +6739,7 @@ int ext2_statfs(fs_node_t *node, struct statfs *buf) {
                         : 0;
     buf->f_files        = fs->sb.s_inodes_count;
     buf->f_ffree        = fs->sb.s_free_inodes_count;
-    /* EXT2-A34 (audit MS-16): report the mount's real flags (statvfs
+    /* Report the mount's real flags (statvfs
      * derives ST_RDONLY from them — a read-only mount claimed rw) and
      * give the volume an identity from its UUID. */
     memcpy(&buf->f_fsid, fs->sb.s_uuid, sizeof(buf->f_fsid));
@@ -6755,7 +6754,7 @@ int ext2_statfs(fs_node_t *node, struct statfs *buf) {
     return 0;
 }
 /*
- * EXT2-A31 (audit BG-05/CY-12/MS-05): sync(2)/fsync(2) hook.
+ * sync(2)/fsync(2) hook.
  *
  * The block and inode bitmaps are write-through, but the superblock
  * and group-descriptor free counts are deliberately coalesced in core
@@ -6768,7 +6767,7 @@ static int ext2_syncfs(fs_node_t *node) {
     if (!node) return -EINVAL;
     ext2_node_t *ctx = (ext2_node_t *)(uintptr_t)node->impl;
     if (!ctx || !ctx->fs) return -EINVAL;
-    /* SELFREV-RG05/RC004: ext2_sync_meta walks bgd_dirty and publishes
+    /* ext2_sync_meta walks bgd_dirty and publishes
      * the cached free counts and bitmap checksums — all state the
      * allocators mutate under this lock.  Without it a concurrent
      * allocation can clear a dirty bit whose descriptor we have not
@@ -6920,7 +6919,7 @@ int ext2_remount(fs_node_t *node, uint32_t flags) {
     int want_ro = !!(flags & MNT_RDONLY);
     if (!want_ro && fs->force_readonly)
         return -EROFS;          /* cannot safely write this volume */
-    /* EXT2-A31 (audit MS-05): flush before going read-only —
+    /* Flush before going read-only —
      * ext2_sync_meta returns immediately on a read-only mount, so
      * flipping the flag first stranded every deferred free count and
      * left the on-disk superblock permanently stale.  Mark the volume
@@ -6961,7 +6960,7 @@ int ext2_unmount(fs_node_t *node) {
     if (!fs) return -EINVAL;
 
     /*
-     * EXT2-A17 (audit CY-03/MS-03): tear the node cache down under the
+     * Tear the node cache down under the
      * cache lock, and only when nothing is using it.
      *
      * This loop used to free every slot's scratch buffers and memset the
@@ -6976,7 +6975,7 @@ int ext2_unmount(fs_node_t *node) {
      */
     ext2_node_t *root_ctx = ctx;
 
-    /* SELFREV-RG01: by the time the VFS calls this, it has ALREADY
+    /* By the time the VFS calls this, it has ALREADY
      * cleared FS_MOUNTPOINT, dropped mountpoint->ptr and unlinked the
      * mount record — and it ignores our return value.  Refusing with
      * -EBUSY here therefore did not keep the filesystem mounted; it
@@ -7046,7 +7045,7 @@ int ext2_unmount(fs_node_t *node) {
      * disk before tearing the in-core copies down. */
     ext2_sync_meta(fs);
 
-    /* EXT2-A30: the volume is now consistent on disk — say so, so the
+    /* The volume is now consistent on disk — say so, so the
      * next fsck can skip it (and so a crash BEFORE this point is
      * distinguishable, which is the whole point of the flag). */
     if (!fs->readonly) {
@@ -7055,7 +7054,7 @@ int ext2_unmount(fs_node_t *node) {
         ext2_flush_super(fs);
     }
 
-    /* SELFREV-RG01: a slot still in use holds a pointer to this
+    /* A slot still in use holds a pointer to this
      * ext2_fs_t and will keep dereferencing it (and its bgd, its
      * bitmaps, its mutexes) until its owner finishes.  The on-disk
      * state is now consistent, which is what matters; deliberately
@@ -7076,7 +7075,7 @@ int ext2_unmount(fs_node_t *node) {
         kfree(fs->bbitmap_csum_hi, fs->group_count * sizeof(uint16_t));
     if (fs->ibitmap_csum_hi)
         kfree(fs->ibitmap_csum_hi, fs->group_count * sizeof(uint16_t));
-    /* EXT2-21: free with the size actually allocated (rounded up to whole
+    /* Free with the size actually allocated (rounded up to whole
      * blocks), not the unrounded descriptor-array size. */
     if (fs->bgd) kfree(fs->bgd, fs->bgd_size);
     if (fs->bgd_dirty) {

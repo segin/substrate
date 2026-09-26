@@ -373,7 +373,7 @@ struct udf_fs {
 
     /* Space bitmap.
      *
-     * UDF-01: space_bitmap points at the BIT ARRAY, i.e. past the 24-byte
+     * space_bitmap points at the BIT ARRAY, i.e. past the 24-byte
      * struct udf_space_bitmap header.  The writer used to cast that pointer
      * back to the header type, reinterpreting raw allocation bits as
      * tag+counters -- so bitmap bytes 14-15 became desc_crc_len (driving
