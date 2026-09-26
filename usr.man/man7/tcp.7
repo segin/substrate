@@ -69,6 +69,21 @@ was given a negative value.
 .B TCP_USER_TIMEOUT
 was used on a socket that is not a TCP socket.
 .TP
+.B ECONNREFUSED
+.BR connect (2)
+was answered with a reset, or with an ICMP protocol or port unreachable
+quoting the connection's SYN.
+.TP
+.BR ENETUNREACH ", " EHOSTUNREACH
+.BR connect (2)
+fails with
+.B ENETUNREACH
+at once when there is no route to the peer.
+When a connection gives up after transmissions failed for want of a
+route or an ICMP error reported the path unreachable, that error is
+reported instead of
+.BR ETIMEDOUT .
+.TP
 .B ETIMEDOUT
 Reported by
 .BR read (2),
@@ -76,7 +91,7 @@ Reported by
 or
 .B SO_ERROR
 when the connection was aborted by the retransmission budget or the user
-timeout.
+timeout, with no routing or ICMP error to explain it.
 .SH EXAMPLE
 Abort a connection after 30 seconds without acknowledgement:
 .PP
