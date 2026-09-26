@@ -729,9 +729,15 @@ spoil:
  * at least 4, Timestamp at least 5.  Returns 0 when the options are well
  * formed; otherwise the octet offset, from the start of the IP header, of
  * the first bad field -- the Parameter Problem pointer.
+ *
+ * *route_pending is set when a loose or strict source route still has hops
+ * to visit (pointer <= length): the datagram's final destination is further
+ * along the route, not this host.
  */
-static size_t ip4_check_options(const uint8_t *pkt, size_t hlen) {
+static size_t ip4_check_options(const uint8_t *pkt, size_t hlen,
+                                int *route_pending) {
     size_t off = sizeof(struct iphdr);
+    *route_pending = 0;
     while (off < hlen) {
         uint8_t type = pkt[off];
         if (type == IPOPT_EOL)
@@ -752,6 +758,9 @@ static size_t ip4_check_options(const uint8_t *pkt, size_t hlen) {
                 return off + 1;
             if (pkt[off + 2] < min_ptr)
                 return off + 2;
+            if ((type == IPOPT_LSRR || type == IPOPT_SSRR) &&
+                pkt[off + 2] <= olen)
+                *route_pending = 1;
         }
         off += olen;
     }
@@ -844,12 +853,19 @@ static void ip4_input_link(netdev_t *dev, const uint8_t *pkt, size_t len,
      * unless the datagram was a broadcast or multicast, which never draws
      * an ICMP error (RFC 1122 3.2.2). */
     if (hlen > sizeof(struct iphdr)) {
-        size_t bad = ip4_check_options(pkt, hlen);
+        int route_pending;
+        size_t bad = ip4_check_options(pkt, hlen, &route_pending);
         if (bad) {
             if (!for_bcast)
                 icmp_param_problem(dev, pkt, tot, (uint8_t)bad);
             return;
         }
+        /* A source route with hops left is addressed through us, not to
+         * us, and a host does not forward (RFC 1122 3.3.5): delivering it
+         * locally would let a sender reach this host's services under an
+         * address the route never arrived at. */
+        if (route_pending)
+            return;
     }
 
     /* UDP-I-01: a fragment (MF set or a nonzero offset) goes to

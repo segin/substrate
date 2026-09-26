@@ -11,6 +11,9 @@ had none.
             the bad octet (21 and 22 from the start of the IP header).  Two
             well-formed ones -- NOP/NOP/NOP/EOL padding, and a Record Route
             with room for one address -- are delivered, in order.
+    srcroute a datagram carrying a loose source route with a hop still to
+            visit is not delivered (a host does not forward, RFC 1122
+            3.3.5) and draws no error; one whose route is exhausted is.
 
 Run from the repo root after building sys/ and wireguest:
     python3 tests/lib/net/wire/test_ip_options.py
@@ -79,7 +82,33 @@ def case_walk():
         return None, w
 
 
-CASES = (('walk', case_walk),)
+def case_srcroute():
+    hop = bytes([10, 0, 2, 99])
+    pending = b'\x83\x07\x04' + hop + b'\x00'      # LSRR, one hop to go
+    done = b'\x83\x07\x08' + hop + b'\x00'         # LSRR, route exhausted
+    with Wire.boot('udpany %d sendto:10.0.2.2:9:arp recvsum:100 sleep:60'
+                   % PORT) as w:
+        if not w.wait_serial('guest: sendto', 90):
+            return 'guest never sent its ARP-priming datagram', w
+        w.pump(0.5)
+        w.send_udp(40031, PORT, b'via-route', dst=GUEST_IP, opts=pending)
+        w.pump(0.5)
+        w.send_udp(40032, PORT, b'route-done', dst=GUEST_IP, opts=done)
+        if not w.wait_serial('guest: recvsum', 10):
+            return 'the datagram whose route was exhausted was not ' \
+                   'delivered', w
+        w.pump(0.5)
+        got = [l for l in w.serial().splitlines() if 'guest: recvsum' in l][0]
+        if 'sport=40031' in got:
+            return 'a datagram with a source-route hop left was delivered', w
+        if 'sport=40032' not in got:
+            return 'unexpected delivery: %s' % got, w
+        if any(p[1] == 40031 for p in param_problems(w)):
+            return 'the pending source route drew a Parameter Problem', w
+        return None, w
+
+
+CASES = (('walk', case_walk), ('srcroute', case_srcroute))
 
 
 def main():
