@@ -107,7 +107,8 @@ void icmp_input(netdev_t *dev, uint32_t saddr, uint32_t daddr,
     {
         uint32_t s = __builtin_bswap32(saddr);
         if (s == 0 ||                       /* "this host" */
-            (s >> 24) == 127 ||             /* 127/8 arriving on a NIC */
+            ((s >> 24) == 127 &&            /* 127/8 arriving on a NIC; */
+             !(dev && (dev->flags & NETDEV_IFF_LOOPBACK))) ||  /* lo is fine */
             (s >> 28) == 0xE ||             /* 224/4 multicast */
             saddr == 0xFFFFFFFFu) return;
     }
