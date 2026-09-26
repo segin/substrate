@@ -157,6 +157,10 @@ HOST_TESTS += host_test_scsi_dev
 HOST_TESTS += host_test_scsi_nodes
 HOST_TESTS += host_test_virtio_scsi
 
+# Networking — the Internet checksum, on both byte orders
+HOST_TESTS += host_test_inet_csum
+HOST_TESTS += host_test_inet_csum_be
+
 # Drivers — audio / USB / random
 HOST_TESTS += host_test_ac97
 HOST_TESTS += host_test_audio
@@ -363,6 +367,15 @@ host_test_audio: host_test_audio.c ../../sys/drivers/audio/audio.c ../../sys/dri
 
 host_test_ac97: host_test_ac97.c
 	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_ac97.c -o $@
+
+# inet_csum.c needs only the standard integer types, so it builds against
+# the host's headers (-idirafter keeps sys/include from shadowing them).
+# The _be variant forces the big-endian path on a little-endian host.
+host_test_inet_csum: host_test_inet_csum.c ../../sys/net/inet_csum.c
+	$(CC) -g -Wall -Wextra -idirafter ../../sys/include host_test_inet_csum.c ../../sys/net/inet_csum.c -o $@
+
+host_test_inet_csum_be: host_test_inet_csum.c ../../sys/net/inet_csum.c
+	$(CC) -g -Wall -Wextra -Wno-builtin-macro-redefined -U__BYTE_ORDER__ -D__BYTE_ORDER__=__ORDER_BIG_ENDIAN__ -idirafter ../../sys/include host_test_inet_csum.c ../../sys/net/inet_csum.c -o $@
 
 host_test_sb16: host_test_sb16.c
 	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_sb16.c -o $@

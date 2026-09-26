@@ -27,68 +27,7 @@
 #include <sys/random.h>
 #include <vm/vm_kmem.h>
 
-/* ------------------------------------------------------------------ */
-/* Generic 16-bit one's-complement checksum                           */
-/* ------------------------------------------------------------------ */
-
-uint16_t inet_csum(const void *data, size_t len) {
-    uint32_t sum = 0;
-    const uint8_t *p = (const uint8_t *)data;
-    while (len > 1) {
-        sum += ((uint32_t)p[0] << 8) | p[1];
-        p += 2;
-        len -= 2;
-    }
-    if (len == 1) sum += (uint32_t)p[0] << 8;
-    while (sum >> 16) sum = (sum & 0xFFFF) + (sum >> 16);
-    return (uint16_t)__builtin_bswap16((uint16_t)~sum);
-}
-
-uint16_t inet_csum_pseudo4(uint32_t saddr, uint32_t daddr,
-                           uint8_t proto, uint16_t len,
-                           const void *data) {
-    uint32_t sum = 0;
-    const uint8_t *sp = (const uint8_t *)&saddr;
-    const uint8_t *dp = (const uint8_t *)&daddr;
-    sum += ((uint32_t)sp[0] << 8) | sp[1];
-    sum += ((uint32_t)sp[2] << 8) | sp[3];
-    sum += ((uint32_t)dp[0] << 8) | dp[1];
-    sum += ((uint32_t)dp[2] << 8) | dp[3];
-    sum += proto;
-    sum += len;
-    const uint8_t *p = (const uint8_t *)data;
-    size_t n = len;
-    while (n > 1) {
-        sum += ((uint32_t)p[0] << 8) | p[1];
-        p += 2;
-        n -= 2;
-    }
-    if (n == 1) sum += (uint32_t)p[0] << 8;
-    while (sum >> 16) sum = (sum & 0xFFFF) + (sum >> 16);
-    return (uint16_t)__builtin_bswap16((uint16_t)~sum);
-}
-
-uint16_t inet_csum_pseudo6(const uint8_t saddr[16], const uint8_t daddr[16],
-                           uint8_t proto, uint32_t len, const void *data) {
-    uint32_t sum = 0;
-    for (int i = 0; i < 16; i += 2) {
-        sum += ((uint32_t)saddr[i] << 8) | saddr[i+1];
-        sum += ((uint32_t)daddr[i] << 8) | daddr[i+1];
-    }
-    sum += (len >> 16) & 0xFFFF;
-    sum += len & 0xFFFF;
-    sum += proto;
-    const uint8_t *p = (const uint8_t *)data;
-    size_t n = len;
-    while (n > 1) {
-        sum += ((uint32_t)p[0] << 8) | p[1];
-        p += 2;
-        n -= 2;
-    }
-    if (n == 1) sum += (uint32_t)p[0] << 8;
-    while (sum >> 16) sum = (sum & 0xFFFF) + (sum >> 16);
-    return (uint16_t)__builtin_bswap16((uint16_t)~sum);
-}
+/* The Internet checksum lives in inet_csum.c. */
 
 /* ------------------------------------------------------------------ */
 /* Ethernet send                                                      */

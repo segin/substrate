@@ -179,12 +179,7 @@ void udp_stats_init(void);   /* registers /proc/udpstat */
 
 /* -- Checksums ------------------------------------------------------ */
 
-uint16_t inet_csum(const void *data, size_t len);
-uint16_t inet_csum_pseudo4(uint32_t saddr, uint32_t daddr,
-                           uint8_t proto, uint16_t len,
-                           const void *data);
-uint16_t inet_csum_pseudo6(const uint8_t saddr[16], const uint8_t daddr[16],
-                           uint8_t proto, uint32_t len, const void *data);
+#include <net/inet_csum.h>     /* inet_csum, inet_csum_pseudo4/6 */
 
 /* -- AF_INET / AF_INET6 socket entry points (af_inet.c, af_inet6.c) - */
 
