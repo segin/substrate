@@ -117,7 +117,9 @@
  *   netmask:M    SIOCSIFNETMASK eth0 M
  *   hwaddr:MAC   SIOCSIFHWADDR eth0 MAC (aa:bb:cc:dd:ee:ff)
  *
- * A leading "mtu=N" argument first sets eth0's MTU (SIOCSIFMTU).
+ * A leading "mtu=N" argument first sets eth0's MTU (SIOCSIFMTU); a leading
+ * "ifaddr0" (after it, if both) first clears eth0's address, leaving the
+ * host with no route off loopback.
  *
  * Every step is logged as "guest: ..." on the console so the host side can
  * synchronise on it, and the run ends with "Result: done".
@@ -443,6 +445,21 @@ int main(int argc, char **argv) {
         int r = ioctl(s, SIOCSIFMTU, &ifr);
         close(s);
         say("mtu %s n=%ld", r < 0 ? strerror(errno) : "ok", (long)ifr.ifr_mtu);
+        argv[1] = argv[0];
+        argv++;
+        argc--;
+    }
+    if (argc >= 2 && strcmp(argv[1], "ifaddr0") == 0) {
+        struct ifreq ifr;
+        memset(&ifr, 0, sizeof ifr);
+        strncpy(ifr.ifr_name, "eth0", sizeof ifr.ifr_name - 1);
+        struct sockaddr_in *sin = (struct sockaddr_in *)&ifr.ifr_addr;
+        sin->sin_family = AF_INET;
+        sin->sin_addr.s_addr = 0;
+        int s = socket(AF_INET, SOCK_DGRAM, 0);
+        int r = ioctl(s, SIOCSIFADDR, &ifr);
+        close(s);
+        say("ifaddr0 %s rc=%ld", r < 0 ? strerror(errno) : "ok", r);
         argv[1] = argv[0];
         argv++;
         argc--;

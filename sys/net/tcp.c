@@ -249,6 +249,10 @@ typedef struct tcp_pcb {
     struct ip4_txopts txo;    /* UDP-API-12: the socket's IP_TTL/IP_TOS */
     /* SO_ERROR (cleared by getsockopt).  */
     int       so_error;
+    /* The last routing failure a transmit hit (ENETUNREACH / EHOSTUNREACH),
+     * cleared by a transmit that gets out.  Reported instead of ETIMEDOUT
+     * when the connection gives up, since it says why. */
+    int       soft_error;
     /* Backlog for LISTEN sockets */
     struct tcp_pcb **accept_q;
     int        accept_cap, accept_count;
@@ -670,9 +674,22 @@ static uint32_t tcp_seg_link_locked(tcp_pcb_t *p, tcp_seg_t *s) {
  * dropped an ACK can prune and kfree() it, so reading s->seq and s->data
  * would be a use-after-free.  The sequence number was captured under the
  * lock, and the caller's buffer holds exactly the bytes copied into s. */
+/* Record how a transmit of a queued segment went: a routing failure is
+ * latched as the connection's soft error, a transmit that gets out clears
+ * it (RFC 1122 4.2.3.9: such errors are advisory until the connection
+ * gives up). */
+static void tcp_note_xmit_result(tcp_pcb_t *p, int rc) {
+    if (rc == -ENETUNREACH || rc == -EHOSTUNREACH)
+        p->soft_error = -rc;
+    else if (rc >= 0)
+        p->soft_error = 0;
+}
+
 static void tcp_seg_emit(tcp_pcb_t *p, uint32_t seq, uint8_t flags,
                          const void *data, size_t dlen) {
-    if (tcp_xmit_raw(p, seq, flags, data, dlen) >= 0)
+    int rc = tcp_xmit_raw(p, seq, flags, data, dlen);
+    tcp_note_xmit_result(p, rc);
+    if (rc >= 0)
         tcp_note_sent(p, seq + tcp_seg_cost(flags, dlen));
 }
 
@@ -851,9 +868,12 @@ static void tcp_retx_flush(int n) {
     for (int i = 0; i < n; i++) {
         tcp_retx_t *r = &g_tcp_retx[i];
         /* A RST may have closed it since the capture; don't resend then. */
-        if (r->p->state != TCP_CLOSED &&
-            tcp_xmit_raw(r->p, r->seq, r->flags, r->data, r->dlen) >= 0)
-            tcp_note_sent(r->p, r->end);
+        if (r->p->state != TCP_CLOSED) {
+            int rc = tcp_xmit_raw(r->p, r->seq, r->flags, r->data, r->dlen);
+            tcp_note_xmit_result(r->p, rc);
+            if (rc >= 0)
+                tcp_note_sent(r->p, r->end);
+        }
         tcp_unhold(r->p);
     }
 }
@@ -1018,7 +1038,7 @@ static int tcp_timer_tick(uint64_t now) {
          */
         if (p->ut_deadline && now >= p->ut_deadline &&
             !(head->probe && p->snd_wnd == 0 && !p->user_timeout_ms)) {
-            tcp_kill_pcb(p, ETIMEDOUT);
+            tcp_kill_pcb(p, p->soft_error ? p->soft_error : ETIMEDOUT);
             continue;
         }
         /* TCP-06: back the RTO off exponentially per attempt rather than
@@ -1029,7 +1049,7 @@ static int tcp_timer_tick(uint64_t now) {
         if (rto > TCP_RTO_MAX_TICKS) rto = TCP_RTO_MAX_TICKS;
         if (now - head->sent_tick < rto) continue;
         if (!head->probe && head->retx >= TCP_MAX_RETX) {
-            tcp_kill_pcb(p, ETIMEDOUT);
+            tcp_kill_pcb(p, p->soft_error ? p->soft_error : ETIMEDOUT);
             continue;
         }
         if (nretx == TCP_RETX_BATCH) {  /* TCP-RES-01: next batch */
@@ -2428,6 +2448,7 @@ static void tcp_reset_for_open_locked(tcp_pcb_t *p) {
     tcp_unacked_free_all(p);
     tcp_ooo_free_all(p);
     p->so_error  = 0;
+    p->soft_error = 0;
     p->last_ack  = 0;
     p->dup_ack   = 0;
     p->cwnd      = 0;
@@ -2451,6 +2472,11 @@ static void tcp_reset_for_open_locked(tcp_pcb_t *p) {
 }
 
 static int tcp_connect_start(tcp_pcb_t *p, uint32_t raddr, uint16_t rport) {
+    /* No route at all: say so now.  The SYN used to be queued anyway; every
+     * transmit failed and connect() ended ETIMEDOUT after the whole
+     * retransmission budget (RFC 791 3.3 SEND reports the result). */
+    if (ip4_path_mtu(raddr) == 0)
+        return -ENETUNREACH;
     uint32_t f = tcp_lock();
     int rc = tcp_open_check_locked(p);
     if (rc == 0) tcp_reset_for_open_locked(p);     /* TCP-API-01 */

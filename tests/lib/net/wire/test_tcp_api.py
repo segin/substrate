@@ -31,7 +31,10 @@ it guards.
     connect-unspec TCP-API-10: connect() to port 0 fails EADDRNOTAVAIL with
                    no SYN on the wire; connect() to 0.0.0.0 goes to the local
                    host (refused at once by loopback), not onto the wire.
-    linger-abort   TCP-API-11: with SO_LINGER {1, 0}, close() is an ABORT:
+    connect-noroute with eth0's address cleared there is no route off
+                   loopback; connect() fails ENETUNREACH at once instead of
+                   queueing a SYN it can never send and timing out.
+    linger-abort  TCP-API-11: with SO_LINGER {1, 0}, close() is an ABORT:
                    one RST at SND.NXT, no FIN, and the unacknowledged data
                    is not retransmitted.
     unread-close   TCP-API-12: close() with received data still unread is
@@ -296,6 +299,23 @@ def case_connect_unspec():
             return 'connect() to 0.0.0.0: %s (want ECONNREFUSED from lo)' % c, w
         if any(s.flags & SYN for s in w.rx):
             return 'a SYN to 0.0.0.0 went out on the wire', w
+    return None, w
+
+
+def case_connect_noroute():
+    t0 = time.time()
+    with Wire.boot('ifaddr0 connect 10.9.9.9 %d' % PORT) as w:
+        if not w.wait_serial('guest: ifaddr0 ok', 90):
+            return 'could not clear the address', w
+        t_clear = time.time()
+        if not w.wait_serial('guest: connect failed', 10):
+            return 'connect() with no route did not fail at once (%.0f s ' \
+                   'after boot)' % (time.time() - t0), w
+        c = line(w, 'connect failed')[0]
+        if '(101)' not in c:
+            return 'connect() with no route: %s (want ENETUNREACH)' % c, w
+        if time.time() - t_clear > 5:
+            return 'connect() took %.0f s to fail' % (time.time() - t_clear), w
     return None, w
 
 
@@ -623,6 +643,7 @@ CASES = (('reconnect', case_reconnect),
          ('listen-connected', case_listen_connected),
          ('listen-unbound', case_listen_unbound),
          ('connect-unspec', case_connect_unspec),
+         ('connect-noroute', case_connect_noroute),
          ('linger-abort', case_linger_abort),
          ('unread-close', case_unread_close),
          ('accept-emfile', case_accept_emfile),
