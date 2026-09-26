@@ -884,7 +884,7 @@ static void init_root_fs(void) {
              * scanning itself: one usb_hotplug_poll() + mount retry every
              * ~500ms.  Proven by hot-adding the root USB device mid-wait
              * under QEMU.  Bounded: a genuinely absent device still falls
-             * through to the fallback and the panic. [HW-02]
+             * through to the fallback and the panic.
              */
             /*
              * Default 45s: one enumeration attempt is ~2s (ten descriptor
@@ -914,7 +914,7 @@ static void init_root_fs(void) {
                  * retrying it twice a second buried the USB errors that
                  * explain the failure under a thousand lines of its own
                  * output -- on a screen that is the only diagnostic there
-                 * is. [HW-05]
+                 * is.
                  */
                 if (usb_hotplug_poll() > 0)
                     mounted = (root_mount_from_spec(root_dev,

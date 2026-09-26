@@ -346,11 +346,11 @@ size_t pci_bar_size(pci_device_t *dev, int bar) {
 
     offset = (uint16_t)(0x10 + bar * 4);
 
-    /* [RF-18] Disable decode around the all-ones probe.  PCI 3.0 s6.2.5.1
+    /* Disable decode around the all-ones probe.  PCI 3.0 s6.2.5.1
      * requires it: while the probe value is in the BAR, the device decodes
      * a bogus window, and if firmware (SMM) or another agent touches the
-     * device mid-probe the accesses land nowhere -- the xHCI audit
-     * [P6-INIT-01] hit exactly this against a BIOS-owned controller.
+     * device mid-probe the accesses land nowhere -- the xHCI driver hit
+     * exactly this against a BIOS-owned controller.
      * Doing it here covers every caller, pci_iomap included. */
     uint16_t cmd_save = pci_read_config16(dev->bus, dev->slot, dev->func,
                                           PCI_CONFIG_COMMAND);

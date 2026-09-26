@@ -204,7 +204,7 @@ int sys_mprotect(void *addr, size_t len, int prot) {
         return 0;
 
     /*
-     * Guard the page round-up against 32-bit wrap (audit A60).  A huge len
+     * Guard the page round-up against 32-bit wrap.  A huge len
      * makes (start + len + 0xFFF) overflow to a small value; the end <=
      * 0xC0000000 check below would then pass with end < start, and
      * vm_map_protect's loops terminate immediately — silently reporting
@@ -557,7 +557,7 @@ ssize_t sys_readv(int fd, const void *iov_user, int iovcnt) {
 }
 
 /*
- * UDP-API-05: BSD socket-option numbers -> native (Linux) numbers.
+ * BSD socket-option numbers -> native (Linux) numbers.
  *
  * The BSD personalities called sys_setsockopt()/sys_getsockopt() directly,
  * but those test Linux numbers -- SOL_SOCKET is 1, SO_REUSEADDR 2 -- while a
@@ -669,7 +669,7 @@ ssize_t sys_writev(int fd, const void *iov_user, int iovcnt) {
         if (kiov != stackbuf) kfree(kiov, sz);
         return -EFAULT;
     }
-    /* UDP-API-03: on a datagram socket the iovecs are one message.  The
+    /* On a datagram socket the iovecs are one message.  The
      * loop below issued one write per iovec, so writev() on a connected UDP
      * socket put N datagrams on the wire for one call and destroyed the
      * framing.  freebsd_iovec and iovec_local share a layout. */

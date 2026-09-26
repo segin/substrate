@@ -54,7 +54,7 @@ void stack_trace(void) {
         }
 
         /*
-         * [USB-HW-03 lead (c)] The range and alignment checks above say the
+         * The range and alignment checks above say the
          * frame pointer LOOKS like a kernel address; they do not say it is
          * mapped.  Dereferencing an in-range but unmapped frame faults, and
          * we are already inside a fault handler -- so the stack trace of the
@@ -120,7 +120,7 @@ void stack_trace_from(uint32_t ebp, uint32_t eip) {
             break;
         }
 
-        /* [USB-HW-03 lead (c)] In range and aligned is not the same as
+        /* In range and aligned is not the same as
          * mapped; see the matching guard in stack_trace().  This walker is
          * the one exception handlers call, with the frame pointer taken
          * straight from the faulting trap frame, so it is the likeliest of

@@ -385,7 +385,7 @@ typedef struct thread {
 #define THREAD_F_DETACHED      0x0008 // Detached LWP: self-reap on exit, no join
 #define THREAD_F_SUSPENDED     0x0010 // _lwp_suspend: off-CPU until _lwp_continue
 /*
- * SOCK-08: per-call MSG_DONTWAIT, scoped to the calling thread.
+ * Per-call MSG_DONTWAIT, scoped to the calling thread.
  *
  * recv/send used to implement MSG_DONTWAIT by OR-ing FNONBLOCK into the
  * file_t's f_flag for the duration of the call and restoring it after.
@@ -416,7 +416,7 @@ typedef struct thread {
     uint8_t        exec_saved_no_preempt; // Preserve preempt state across exec pin
     uint8_t        vfs_symlink_depth; // Current symlink-follow recursion depth
     /*
-     * [VFS-06] Set when a lookup gave up because the symlink chain was too
+     * Set when a lookup gave up because the symlink chain was too
      * long.  finddir_fs_internal()/vfs_lookup() report every failure as
      * NULL, which callers map to ENOENT, so a symlink loop was reported as
      * "no such file" -- indistinguishable from a genuinely missing path and

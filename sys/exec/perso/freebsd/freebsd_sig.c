@@ -128,7 +128,7 @@ void freebsd_sendsig(void *handler, int sig, uint32_t mask, uint32_t flags, void
      * zero-initialised sig_alt_stack (ss_sp==NULL, ss_size==0, ss_flags==0, so
      * SS_DISABLE is clear), and checking SS_DISABLE alone would build the frame
      * at NULL+0 -> validate_user_addr fails -> the thread is killed with
-     * SIGSEGV instead of the handler running. [EXEC-03] */
+     * SIGSEGV instead of the handler running. */
     if ((flags & SA_ONSTACK) &&
         current_thread->sig_alt_stack.ss_sp != NULL &&
         current_thread->sig_alt_stack.ss_size > 0 &&

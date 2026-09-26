@@ -30,7 +30,7 @@ void arch_switch_to(thread_t *prev, thread_t *next) {
         /* Re-arm CR0.TS (lazy FPU): the incoming process must trap (#NM) on
          * its first FPU/SSE use so fpu_handler saves the outgoing owner's
          * live registers and loads the incoming one's, instead of running
-         * with another process's x87/SSE state (ARCH-01). */
+         * with another process's x87/SSE state. */
         fpu_switch();
     }
 

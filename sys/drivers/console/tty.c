@@ -1174,7 +1174,7 @@ void tty_start(struct tty *tty) {
  * can return: the historical -1 aliased -EPERM (EPERM == 1), so a permission
  * failure was indistinguishable from "unhandled" and got silently forwarded to
  * the driver instead of failing.  Using an out-of-band value lets denials
- * return a proper -errno. [DRV-21]
+ * return a proper -errno.
  */
 #define TTY_IOCTL_UNHANDLED  0x7FFFFFFF
 
@@ -1238,7 +1238,7 @@ int tty_ioctl_kern(struct tty *tty, uint32_t cmd, uintptr_t arg) {
                     /* Return a real errno, not the bare -1 the dispatch below
                      * treats as "unhandled → forward to the driver ioctl":
                      * otherwise the permission failure is silently swallowed
-                     * and the op forwarded. [DRV-21] */
+                     * and the op forwarded. */
                     ret = -EPERM;   /* not our controlling terminal */
                     break;
                 }
@@ -1263,7 +1263,7 @@ int tty_ioctl_kern(struct tty *tty, uint32_t cmd, uintptr_t arg) {
             }
             if (!is_session_leader) {
                 // Must be session leader
-                ret = -EPERM;   /* not -1: that aliases the driver-forward sentinel [DRV-21] */
+                ret = -EPERM;   /* not -1: that aliases the driver-forward sentinel */
                 break;
             }
             int cur_sid = current_process->p_pgrp->pg_session->s_sid;
@@ -1274,7 +1274,7 @@ int tty_ioctl_kern(struct tty *tty, uint32_t cmd, uintptr_t arg) {
              * or explicitly stolen.
              */
             if (tty->session != 0 && tty->session != cur_sid && arg != 1) {
-                ret = -EPERM;   /* not -1: that aliases the driver-forward sentinel [DRV-21] */
+                ret = -EPERM;   /* not -1: that aliases the driver-forward sentinel */
                 break;
             }
 
@@ -1297,7 +1297,7 @@ int tty_ioctl_kern(struct tty *tty, uint32_t cmd, uintptr_t arg) {
                 ret = 0;
                 break;
             }
-            ret = -ENOTTY;   /* not -1: that aliases the driver-forward sentinel [DRV-21] */
+            ret = -ENOTTY;   /* not -1: that aliases the driver-forward sentinel */
             break;
         }
     }
@@ -1321,7 +1321,7 @@ int tty_ioctl_kern(struct tty *tty, uint32_t cmd, uintptr_t arg) {
     }
 
     /* Nothing (core or driver) handled it: report the POSIX errno for an
-     * inappropriate ioctl rather than leaking the sentinel. [DRV-21] */
+     * inappropriate ioctl rather than leaking the sentinel. */
     if (ret == TTY_IOCTL_UNHANDLED) {
         ret = -ENOTTY;
     }

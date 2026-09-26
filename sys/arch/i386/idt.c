@@ -198,7 +198,7 @@ void idt_init(void) {
     idt_set_gate(TLB_SHOOTDOWN_VECTOR, (uint32_t)(uintptr_t)isr254,
                  KERNEL_CODE_SELECTOR, IDT_FLAG_KERNEL_INT_GATE);
 
-    /* [USB-HW-03] LAPIC spurious-interrupt vector.  lapic_enable(0xFF) puts
+    /* LAPIC spurious-interrupt vector.  lapic_enable(0xFF) puts
      * 0xFF in the SVR on the BSP and on every AP, but nothing ever installed
      * a gate for it, so the entry stayed not-present and a spurious interrupt
      * raised #GP.  See isr_spurious in isr.S for why it does not EOI. */
@@ -529,7 +529,7 @@ void isr_handler(registers_t *regs) {
         char buf[256];
 
         /*
-         * [USB-HW-03] Only the USER-mode path prints this block.
+         * Only the USER-mode path prints this block.
          *
          * It is ~6 separate kprint() calls with no arbitration between them.
          * A kernel-mode fault then printed it AND called panic_with_regs(),
@@ -570,7 +570,7 @@ void isr_handler(registers_t *regs) {
             kprint("Instruction bytes at EIP: ");
             uint8_t *eip_ptr = (uint8_t *)regs->eip;
             /* Dump up to 16 bytes if address is valid */
-            /* [USB-HW-03 lead (c)] in-range is not mapped; see
+            /* An in-range address is not necessarily mapped; see
              * panic_addr_readable(). */
             if (panic_addr_readable((uintptr_t)regs->eip, 16)) {
                 for (int i = 0; i < 16; i++) {

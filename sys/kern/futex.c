@@ -784,7 +784,7 @@ typedef struct pi_state {
     int                type;       /* 0=Shared, 1=Private */
     int                pid;        /* PID for private */
     thread_t          *owner;      /* Current owner thread (unheld cache) */
-    int                owner_tid;  /* KERN-09: owner tid for safe re-lookup */
+    int                owner_tid;  /* owner tid for safe re-lookup */
     int                owner_prio; /* Owner's original priority */
     pi_waiter_t       *waiters;    /* Priority-sorted waiter list */
     int                boosted_prio; /* Current boosted priority */
@@ -827,10 +827,10 @@ static pi_state_t *pi_state_alloc(void) {
     ps->type = 0;
     ps->pid = 0;
     ps->owner = NULL;
-    ps->owner_tid = 0;                 /* KERN-09 */
+    ps->owner_tid = 0;
     ps->owner_prio = 0;
     ps->waiters = NULL;
-    ps->boosted_prio = -1;            /* KERN-11: -1 = not boosted (0 is a
+    ps->boosted_prio = -1;            /* -1 = not boosted (0 is a
                                        * valid, highest, TIMESHARE priority) */
     ps->next = NULL;
     return ps;
@@ -884,7 +884,7 @@ static pi_state_t *pi_get_or_create(void *key, int type, int pid) {
 }
 
 /*
- * KERN-11: true if priority number `a` outranks `b` (higher scheduling
+ * True if priority number `a` outranks `b` (higher scheduling
  * precedence) under scheduling class `cls`.
  *
  * The two classes order oppositely (see runqueue_level_for_thread()):
@@ -899,7 +899,7 @@ static int pi_prio_better(sched_class_t cls, int a, int b) {
 
 /* Insert waiter in priority order (most favourable first) */
 static void pi_insert_waiter(pi_state_t *ps, pi_waiter_t *pw) {
-    /* KERN-11: rank by the waiter's own scheduling class so a TIMESHARE
+    /* Rank by the waiter's own scheduling class so a TIMESHARE
      * waiter (lower number = higher priority) is not mis-ordered. */
     sched_class_t cls = pw->task ? pw->task->sched_class : SCHED_TIMESHARE;
     if (!ps->waiters || pi_prio_better(cls, pw->priority, ps->waiters->priority)) {
@@ -963,7 +963,7 @@ static int pi_top_waiter_prio(pi_state_t *ps) {
  */
 static void pi_boost_owner(pi_state_t *ps) {
     /*
-     * KERN-09: ps->owner is an unheld cached pointer — the owner may have
+     * ps->owner is an unheld cached pointer — the owner may have
      * exited and been reaped (robust/OWNER_DIED).  Re-resolve it by tid so we
      * never dereference freed thread storage.
      */
@@ -976,7 +976,7 @@ static void pi_boost_owner(pi_state_t *ps) {
     int top_prio = pi_top_waiter_prio(ps);
     sched_class_t cls = owner->sched_class;
 
-    /* KERN-11: boost only when the top waiter is more favourable than the
+    /* Boost only when the top waiter is more favourable than the
      * boost already in effect, using this class' ordering sense. */
     if (ps->boosted_prio != -1 && !pi_prio_better(cls, top_prio, ps->boosted_prio))
         return;
@@ -1031,7 +1031,7 @@ int futex_lock_pi(int *uaddr, int detect, int trylock, int private, void *timeou
     }
 
     /*
-     * KERN-05: resolve the (absolute, CLOCK_REALTIME) timeout into a tick
+     * Resolve the (absolute, CLOCK_REALTIME) timeout into a tick
      * deadline before registering as a waiter, so a malformed timespec fails
      * cleanly and an already-expired deadline returns ETIMEDOUT without ever
      * sleeping.  NULL timeout => block indefinitely (but still interruptibly).
@@ -1080,7 +1080,7 @@ int futex_lock_pi(int *uaddr, int detect, int trylock, int private, void *timeou
         thread_t *owner = sched_get_thread(owner_tid);
         if (owner) {
             ps->owner = owner;
-            ps->owner_tid = owner_tid;   /* KERN-09 */
+            ps->owner_tid = owner_tid;
             ps->owner_prio = owner->priority;
         }
     }
@@ -1127,7 +1127,7 @@ int futex_lock_pi(int *uaddr, int detect, int trylock, int private, void *timeou
         }
         
         /*
-         * KERN-05: interruptible, timed sleep with a post-enqueue re-read.
+         * Interruptible, timed sleep with a post-enqueue re-read.
          *
          * Arm the deadline and the interruptible flag BEFORE enqueuing so a
          * signal or timeout can abort the wait — without this a racing
@@ -1231,9 +1231,9 @@ int futex_lock_pi(int *uaddr, int detect, int trylock, int private, void *timeou
             pi_spinlock();
             pi_remove_waiter(ps, current_thread);
             ps->owner = current_thread;
-            ps->owner_tid = tid;              /* KERN-09 */
+            ps->owner_tid = tid;
             ps->owner_prio = current_thread->priority;
-            ps->boosted_prio = -1;           /* KERN-11 */
+            ps->boosted_prio = -1;
             pi_unlock();
             return 0;
         }
@@ -1244,9 +1244,9 @@ int futex_lock_pi(int *uaddr, int detect, int trylock, int private, void *timeou
                 pi_spinlock();
                 pi_remove_waiter(ps, current_thread);
                 ps->owner = current_thread;
-                ps->owner_tid = tid;              /* KERN-09 */
+                ps->owner_tid = tid;
                 ps->owner_prio = current_thread->priority;
-                ps->boosted_prio = -1;           /* KERN-11 */
+                ps->boosted_prio = -1;
                 pi_unlock();
                 return -EOWNERDEAD;
             }
@@ -1255,7 +1255,7 @@ int futex_lock_pi(int *uaddr, int detect, int trylock, int private, void *timeou
         /* Lost race, loop back and re-boost if needed */
         pi_spinlock();
         int owner_tid = oldval & FUTEX_TID_MASK;
-        /* KERN-09: compare against the stored tid, never deref the stale
+        /* Compare against the stored tid, never deref the stale
          * cached ps->owner (it may have been reaped). */
         if (owner_tid && ps->owner_tid != owner_tid) {
             thread_t *new_owner = sched_get_thread(owner_tid);
@@ -1313,14 +1313,14 @@ int futex_unlock_pi(int *uaddr, int private) {
      */
     if (ps) {
         if (ps->boosted_prio != -1) {
-            /* KERN-09: re-resolve the owner by tid before touching it. */
+            /* Re-resolve the owner by tid before touching it. */
             thread_t *owner = ps->owner_tid ? sched_get_thread(ps->owner_tid) : NULL;
             if (owner)
                 sched_set_priority(owner->tid, owner->sched_class, ps->owner_prio);
-            ps->boosted_prio = -1;           /* KERN-11 */
+            ps->boosted_prio = -1;
         }
         ps->owner = NULL;
-        ps->owner_tid = 0;                    /* KERN-09 */
+        ps->owner_tid = 0;
 
         /* If there are no remaining waiters either, the pi_state is
          * idle — unlink and free it.  Done here under pi_lock so a

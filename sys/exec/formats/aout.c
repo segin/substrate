@@ -620,7 +620,8 @@ static int aout_load(int fd, const char *path, char *const argv[],
  *   - the text is writable, because the a.out jump-table scheme has ld.so
  *     patch call slots in place at runtime.  Mapping it read-only only
  *     appeared to work because writes to a read-only private mapping are
- *     currently granted silently (audit A30, reverted).
+ *     currently granted silently (a change making them fault was
+ *     reverted; see the NB in vm_fault()).
  */
 static int aout_load_library(const char *path) {
     struct aout_exec hdr;

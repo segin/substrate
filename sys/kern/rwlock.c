@@ -37,7 +37,7 @@ bool rw_try_rlock(rwlock_t *rw) {
 void rw_rlock(rwlock_t *rw) {
     spinlock_acquire(&rw->lock);
     /*
-     * A42: gate reader admission on the writer sleepq's actual occupancy
+     * Gate reader admission on the writer sleepq's actual occupancy
      * rather than a persistent waiting_writers counter.  proc_exit() removes a
      * parked writer from its sleepq (without running rw_wlock's decrement) when
      * a sibling thread exits, so a raw counter leaks permanently and blocks all
@@ -95,7 +95,7 @@ void rw_wlock(rwlock_t *rw) {
     }
 
     /*
-     * A42: no separate waiting_writers counter.  Being parked on the writer
+     * No separate waiting_writers counter.  Being parked on the writer
      * sleepq IS the record that a writer is waiting; if this thread is killed
      * while parked, proc_exit() pulls it off the sleepq and readers are no
      * longer blocked (see rw_rlock).

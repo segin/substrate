@@ -108,7 +108,7 @@ thread_t *thread_first(void) { return allthread; }
 thread_t *thread_next(thread_t *t) { return t ? t->t_allthread_next : NULL; }
 
 /*
- * KERN-06: the thread registry (allthread + tid_hash) is walked by signal
+ * The thread registry (allthread + tid_hash) is walked by signal
  * delivery (psignal_info) and the scheduler tick from HARD-IRQ context while
  * other threads are concurrently reaped -- sched_reap_thread() unlinks and
  * frees a thread_t under tid_lock, so an unlocked walker can dereference freed
@@ -408,7 +408,7 @@ rescan:
     highest_prio = -1;
     best_class = SCHED_IDLE;
 
-    /* KERN-06: the allthread pick walk below dereferences t->state and
+    /* The allthread pick walk below dereferences t->state and
      * t->t_allthread_next.  sched_reap_thread()/sched_unlink_locked() unlink and
      * free a thread_t under tid_lock, so on SMP another CPU can reap a thread
      * mid-scan — intr_disable() alone only bars the local reaper.  Hold the
@@ -577,7 +577,7 @@ thread_t *sched_get_thread(int tid) {
 }
 
 void sched_set_priority(int tid, sched_class_t cls, int prio) {
-    /* RMW under tid_lock to avoid racing a reaper freeing the thread_t (A49). */
+    /* RMW under tid_lock to avoid racing a reaper freeing the thread_t. */
     unsigned long tf = spinlock_acquire_irq(&tid_lock);
     thread_t *t = sched_lookup_tid_locked(tid);
     if (!t) {
@@ -668,7 +668,7 @@ void sched_tick(void) {
     // Perform periodic SMP load balancing
     sched_periodic_balance();
 
-    /* KERN-06: sched_tick runs in the timer IRQ; hold the registry lock so a
+    /* sched_tick runs in the timer IRQ; hold the registry lock so a
      * thread being reaped concurrently can't be freed under this walk. */
     unsigned long rf = thread_registry_lock();
     FOREACH_THREAD(thread) {
@@ -834,7 +834,7 @@ void sched_wakeup_n(void *chan, int n) {
     if (chan == &g_poll_wake_chan)
         g_poll_wake_seq++;
 
-    /* KERN-06: sched_wakeup_n runs from IRQ wake paths (tty/tcp/af_inet) and
+    /* sched_wakeup_n runs from IRQ wake paths (tty/tcp/af_inet) and
      * walks the registry; hold it so a concurrent reap can't free a thread_t
      * mid-walk.  The body takes the sleepq bucket lock (sleepq_remove_thread),
      * which is ranked below tid_lock -- consistent order, no ABBA. */
@@ -842,7 +842,7 @@ void sched_wakeup_n(void *chan, int n) {
     FOREACH_THREAD(thread) {
         if (thread->state == THREAD_BLOCKED && thread->wait_chan == chan) {
             /*
-             * KERN-04: a thread parked via sleepq_add() is linked in a
+             * A thread parked via sleepq_add() is linked in a
              * sleepq bucket AND carries wait_chan == chan.  Readying it by
              * only clearing wait_chan would strand its bucket entry: the
              * sleepq self-unlink path (sleepq_remove_thread) keys off
@@ -851,7 +851,7 @@ void sched_wakeup_n(void *chan, int n) {
              * thread_t is freed (UAF).  Dequeue it from the sleepq first —
              * sleepq_remove_thread finds the bucket via wait_chan (still set
              * here) and is a no-op for pure sched_sleep() sleepers, which are
-             * on no bucket.  It is IRQ-safe (KERN-01), so this is fine even on
+             * on no bucket.  It is IRQ-safe, so this is fine even on
              * the IRQ-context wake paths (tty/tcp/af_inet).
              */
             sleepq_remove_thread(thread);
@@ -922,13 +922,13 @@ void sched_reap_thread(thread_t *t) {
     /* Never free a thread that is still executing on another CPU: proc_exit
      * marks siblings THREAD_ZOMBIE without forcing them off remote cores, so a
      * concurrent wait4 reap could otherwise free the kstack/thread_t out from
-     * under a running sibling (A26).  Wait for it to leave the CPU first. */
+     * under a running sibling.  Wait for it to leave the CPU first. */
     sched_wait_thread_offcpu(t);
 
     /* Release any kernel mutexes this thread still holds, now that it is
      * guaranteed off-CPU.  proc_exit defers a still-running sibling's release
      * to here rather than force-releasing (and corrupting held_mutexes) while
-     * the sibling concurrently mutates it on another core (A22).  Idempotent
+     * the sibling concurrently mutates it on another core.  Idempotent
      * if proc_exit already released them. */
     mutex_release_owned_by_thread(t);
 
@@ -1024,7 +1024,7 @@ int sched_lwp_detach(tid_t tid) {
     /* Look up and read-modify-write under tid_lock: sched_get_thread() drops
      * the lock before returning, so a reaper on another CPU (or a nested
      * reap) could unlink+free the thread_t between the lookup and the store
-     * (A49 write-after-free).  Hold the lock across the whole RMW. */
+     * (a write-after-free).  Hold the lock across the whole RMW. */
     unsigned long tf = spinlock_acquire_irq(&tid_lock);
     thread_t *t = sched_lookup_tid_locked((int)tid);
     if (!t || t->proc != current_process) {
@@ -1055,7 +1055,7 @@ int sched_lwp_set_detached(tid_t tid) {
  * scheduler skips it; a blocked target just carries the flag and parks when it
  * would next become runnable. */
 int sched_lwp_suspend(tid_t tid) {
-    /* RMW under tid_lock to avoid racing a reaper freeing the thread_t (A49). */
+    /* RMW under tid_lock to avoid racing a reaper freeing the thread_t. */
     unsigned long tf = spinlock_acquire_irq(&tid_lock);
     thread_t *t = sched_lookup_tid_locked((int)tid);
     if (!t || t->proc != current_process) {
@@ -1075,7 +1075,7 @@ int sched_lwp_suspend(tid_t tid) {
 
 /* _lwp_continue: undo _lwp_suspend and make the LWP runnable again. */
 int sched_lwp_continue(tid_t tid) {
-    /* RMW under tid_lock to avoid racing a reaper freeing the thread_t (A49). */
+    /* RMW under tid_lock to avoid racing a reaper freeing the thread_t. */
     unsigned long tf = spinlock_acquire_irq(&tid_lock);
     thread_t *t = sched_lookup_tid_locked((int)tid);
     if (!t || t->proc != current_process) {
@@ -1145,7 +1145,7 @@ int sched_has_waitable_siblings(void) {
  * target rather than waiting on it), else 0. */
 int sched_lwp_wait_check(tid_t tid) {
     /* Read t->flags under tid_lock so a concurrent reaper cannot free the
-     * thread_t between the lookup and the flag test (A49). */
+     * thread_t between the lookup and the flag test. */
     unsigned long tf = spinlock_acquire_irq(&tid_lock);
     thread_t *t = sched_lookup_tid_locked((int)tid);
     if (!t || t->proc != current_process) {

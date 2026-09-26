@@ -42,7 +42,7 @@ static inline int turnstile_hash_func(void *lockobj) {
 
 // Lock the turnstile subsystem
 //
-// A70: disable preemption for the whole (short, non-sleeping) critical section
+// Disable preemption for the whole (short, non-sleeping) critical section
 // (preempt.h contract: a held spinlock must keep preempt_count != 0).  A raw
 // test_and_set that left preempt_count at 0 could be preempted by the timer
 // tick while holding turnstile_lock; a peer that then spins here (e.g. a
@@ -139,7 +139,7 @@ void turnstile_block(void *lockobj, thread_t *owner) {
         ts = turnstile_alloc();
         if (!ts) {
             /*
-             * A43: turnstile pool exhausted under extreme lock contention.
+             * Turnstile pool exhausted under extreme lock contention.
              * The turnstile exists ONLY for priority inheritance; the waiter
              * still enqueues on the lock's sleepq (in the caller, right after
              * this returns) and is woken normally.  Skip the PI boost for this
@@ -210,7 +210,7 @@ void turnstile_release(void *lockobj) {
         return;
     }
 
-    // A69: if this turnstile carried an inherited boost, recompute the owner's
+    // If this turnstile carried an inherited boost, recompute the owner's
     // priority from any OTHER turnstiles it still owns instead of dropping it
     // straight to base_priority.  Releasing one contended lock must not discard
     // a boost still owed for a different lock the same thread continues to hold

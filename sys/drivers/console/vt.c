@@ -93,7 +93,7 @@ static spinlock_t vt_switch_lock = SPINLOCK_INIT("vt_switch");
  *     whose keyboard is USB -- from the USB-HID poll kthread.
  *
  * keyboard.c already serializes the modifier bits against exactly this pair
- * of contexts (kbd_mod_lock, DRV-22), but the state behind them was left
+ * of contexts (kbd_mod_lock), but the state behind them was left
  * unguarded: process_keycode() runs straight on into vt_scrollback_*() and
  * vt_redraw_active(), which touch far more.  An interleaved update tears the
  * ring indices apart, which is how console output ends up spliced together

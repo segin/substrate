@@ -290,7 +290,7 @@ void device_get(struct device *dev) {
  */
 void device_put(struct device *dev) {
     if (dev) {
-        /* Guard against underflow (finding #22) */
+        /* Guard against underflow */
         int old = __sync_fetch_and_sub(&dev->ref_count, 1);
         if (old <= 1) {
             if (old < 1) {
@@ -531,7 +531,7 @@ void device_shutdown(struct device *dev) {
  * reboot path so controllers that master the bus -- a USB host controller
  * walking its schedule rings, for one -- stop DMAing before the kernel that
  * owns those rings is torn down.  device_shutdown() existed but nothing
- * called it on reboot, so every .shutdown hook was dead code. [ehci-audit 7]
+ * called it on reboot, so every .shutdown hook was dead code.
  */
 void device_shutdown_all(void) {
     struct bus_type *bus;

@@ -713,7 +713,7 @@ pmap_t pmap_fork(pmap_t src_pmap) {
         /*
          * Large (4 MiB) user PDE: this is NOT a page table — the low
          * bits address a 4 MiB frame, and its data bytes must never be
-         * walked as PTEs (audit A55).  Clone it copy-on-write the same
+         * walked as PTEs.  Clone it copy-on-write the same
          * way the 4 KiB loop below does, and track the child's pv/hold
          * refs with pmap_large_track_range() — the symmetric teardown
          * already lives in pmap_destroy()'s PTE_PS branch.
@@ -737,7 +737,7 @@ pmap_t pmap_fork(pmap_t src_pmap) {
 
         // Get source page table
         uint32_t src_pt_phys = src_pd[pdi] & ~0xFFF;
-        /* Bounds check: ensure physical address is in direct-map range (finding #14) */
+        /* Bounds check: ensure physical address is in direct-map range */
         if (src_pt_phys >= 0x40000000) {
             pmap_destroy(dst_pmap);
             return 0;
@@ -866,7 +866,7 @@ static struct pmap_activation_state pmap_activate_for_update(pmap_t pmap) {
          * tables through the recursive self-map is not safe across a context
          * switch: if a timer tick preempts this thread, the scheduler restores
          * THIS process's own pmap on resume, and the pending PTE writes then
-         * land in the wrong address space (audit A82).  Hold off involuntary
+         * land in the wrong address space.  Hold off involuntary
          * preemption for the whole switch-mutate-restore window.  Paired with
          * the preempt_enable_noresched() in pmap_restore_after_update().
          */
@@ -1703,7 +1703,7 @@ int pmap_copy(pmap_t dst_pmap, pmap_t src_pmap, uintptr_t sva, uintptr_t eva, in
     if (src_pmap->pdir_phys != cr3) return -1;
     
     // Map dst page directory temporarily
-    /* Bounds check: ensure physical address is in direct-map range (finding #15) */
+    /* Bounds check: ensure physical address is in direct-map range */
     if (dst_pmap->pdir_phys >= 0x40000000) return -1;
     uint32_t *dst_pd = (uint32_t *)(dst_pmap->pdir_phys + 0xC0000000);
     

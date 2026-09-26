@@ -92,7 +92,7 @@ void runqueue_add(runqueue_t *rq, thread_t *t) {
     t->current_queue = rq;
     // Remember the level we physically linked into: the thread's priority
     // and sched_class can be mutated in place (decay, PI boost) before it is
-    // dequeued, so runqueue_remove must not recompute the level (audit A86).
+    // dequeued, so runqueue_remove must not recompute the level.
     t->rq_level = (int16_t)level;
     
     if (q->tail) {
@@ -116,8 +116,7 @@ void runqueue_add(runqueue_t *rq, thread_t *t) {
 void runqueue_remove(runqueue_t *rq, thread_t *t) {
     // Use the level the thread was actually enqueued at, NOT one recomputed
     // from its (possibly since-mutated) priority/sched_class — recomputing can
-    // pick a different queue and corrupt both lists' head/tail/count/bitmap
-    // (audit A86).
+    // pick a different queue and corrupt both lists' head/tail/count/bitmap.
     int level = t->rq_level;
     runqueue_level_t *q = &rq->queues[level];
     

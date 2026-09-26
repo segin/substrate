@@ -19,7 +19,7 @@ struct winsize {
 #define FIOASYNC  0x5452   /* int *: toggle FASYNC (SIGIO-on-ready) flag */
 
 /* Socket ioctls (Linux numbers, matching include/sys/ioctl.h). */
-#define SIOCATMARK 0x8905  /* int *: at the TCP urgent mark (TCP-URG-01) */
+#define SIOCATMARK 0x8905  /* int *: at the TCP urgent mark */
 
 /* Common ioctlRequest codes handled by specific subsystems */
 /* TTY */

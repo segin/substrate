@@ -68,7 +68,7 @@ static int rtsig_enqueue(process_t *p, int sig, int code, union sigval val) {
                  * instance: bit clear, queue non-empty -> lost signal + a
                  * permanently-occupied slot (spurious EAGAIN). */
                 uint32_t m = sigmask(sig);
-                unsigned long rrf = thread_registry_lock();  /* KERN-06 */
+                unsigned long rrf = thread_registry_lock();
                 FOREACH_THREAD(t) {
                     if (t->proc == p)
                         __sync_fetch_and_or(&t->sig_pending, m);
@@ -272,7 +272,7 @@ static void sigwait_consume(int sig, int *code, union sigval *val,
      * dequeued from the process rtsig_q[] above, one instance per accept). */
     if (current_process) {
         uint32_t clr = ~sigmask(sig);
-        unsigned long rf = thread_registry_lock();  /* KERN-06 */
+        unsigned long rf = thread_registry_lock();
         FOREACH_THREAD(t) {
             if (t != current_thread && t->proc == current_process)
                 __sync_fetch_and_and(&t->sig_pending, clr);
@@ -290,7 +290,7 @@ static void signal_interrupt_thread(thread_t *t) {
     t->sleep_status = -EINTR;
     t->wait_chan = NULL;
     /*
-     * KERN-07: never resurrect a thread that is not genuinely sleeping.
+     * Never resurrect a thread that is not genuinely sleeping.
      * A thread proc_exit() is tearing down (THREAD_ZOMBIE) — reachable
      * because a killed thread can re-block interruptibly during its own
      * teardown — must not be flipped back to THREAD_READY: the scheduler
@@ -359,7 +359,7 @@ static void signal_stop_process_threads(process_t *p, const char *reason) {
         return;
     }
 
-    unsigned long rf = thread_registry_lock();  /* KERN-06 */
+    unsigned long rf = thread_registry_lock();
     FOREACH_THREAD(thread) {
         if (thread->proc != p) continue;
         thread->state = THREAD_STOPPED;
@@ -377,7 +377,7 @@ void signal_resume_process_threads(process_t *p) {
         return;
     }
 
-    /* KERN-06: reachable from psignal_info in IRQ context (SIGCONT/SIGKILL);
+    /* Reachable from psignal_info in IRQ context (SIGCONT/SIGKILL);
      * hold the registry lock across the walk.  Callers never hold tid_lock. */
     unsigned long rf = thread_registry_lock();
     FOREACH_THREAD(thread) {
@@ -417,7 +417,7 @@ void *ptrace_user_frame(process_t *p) {
         return NULL;
     }
     void *frame = NULL;
-    unsigned long rf = thread_registry_lock();  /* KERN-06 */
+    unsigned long rf = thread_registry_lock();
     FOREACH_THREAD(thread) {
         if (thread->proc == p && thread->user_frame) {
             frame = thread->user_frame;
@@ -1118,7 +1118,7 @@ static int psignal_info(process_t *p, int sig, int si_code,
         uint32_t stop_mask = sigmask(SIGSTOP) | sigmask(SIGTSTP) | sigmask(SIGTTIN) | sigmask(SIGTTOU);
 
         // Clear pending stop signals on all threads (atomic — racing psignal on SMP)
-        unsigned long rf = thread_registry_lock();  /* KERN-06: IRQ-context walk */
+        unsigned long rf = thread_registry_lock();  /* IRQ-context walk */
         FOREACH_THREAD(thread) {
             if (thread->proc == p) {
                 __sync_fetch_and_and(&thread->sig_pending, ~stop_mask);
@@ -1150,7 +1150,7 @@ static int psignal_info(process_t *p, int sig, int si_code,
 
     /* For SIGSTOP/SIGTSTP/SIGTTIN/SIGTTOU, clear SIGCONT */
     if (sig == SIGSTOP || sig == SIGTSTP || sig == SIGTTIN || sig == SIGTTOU) {
-        unsigned long rf = thread_registry_lock();  /* KERN-06: IRQ-context walk */
+        unsigned long rf = thread_registry_lock();  /* IRQ-context walk */
         FOREACH_THREAD(thread) {
             if (thread->proc == p) {
                 __sync_fetch_and_and(&thread->sig_pending, ~sigmask(SIGCONT));
@@ -1185,7 +1185,7 @@ static int psignal_info(process_t *p, int sig, int si_code,
             uint32_t m = sigmask(sig);
             int deliverable_now = 0;
             int awaited = 0;
-            unsigned long rf = thread_registry_lock();  /* KERN-06 */
+            unsigned long rf = thread_registry_lock();
             FOREACH_THREAD(t) {
                 if (t->proc != p) continue;
                 if (!(t->sig_mask & m)) { deliverable_now = 1; }
@@ -1227,7 +1227,7 @@ static int psignal_info(process_t *p, int sig, int si_code,
     thread_t *best_thread = NULL;
     int best_priority = -1; // Higher is better
 
-    /* KERN-06: this walk sets pending bits, selects best_thread, and wakes it
+    /* This walk sets pending bits, selects best_thread, and wakes it
      * (below, still under the lock) -- all from IRQ context.  Hold the registry
      * lock so a concurrent reap can't free a thread_t (or best_thread) mid-walk.
      * signal_interrupt_thread takes only the sleepq lock, ranked below tid_lock,
@@ -1526,7 +1526,7 @@ int sys_kill(int pid, int sig) {
         int permitted = 0;
         int matched = 0;
         /*
-         * KERN-06: hold proctree_lock across the pg_members walk.  A
+         * Hold proctree_lock across the pg_members walk.  A
          * concurrent wait4()/autoreap reap unlinks a member from pg_members
          * only through pgrp_remove_proc() (under proctree_lock) BEFORE it
          * frees the process_t, so serializing here keeps member->p_pgrp_link
@@ -1549,7 +1549,7 @@ int sys_kill(int pid, int sig) {
         int permitted = 0;
         int matched = 0;
         /*
-         * KERN-06: hold the process registry lock across the broadcast walk so
+         * Hold the process registry lock across the broadcast walk so
          * a concurrent proc_destroy() (wait4 / autoreap) can't free a process_t
          * mid-walk (allproc UAF).  signal_record_match -> psignal takes tid_lock
          * (order pid_lock -> tid_lock) but never pid_lock, so this is
@@ -1575,7 +1575,7 @@ int sys_kill(int pid, int sig) {
 
         if (!pgrp) return -ESRCH;
 
-        /* KERN-06: serialize the pg_members walk against reap (see the
+        /* Serialize the pg_members walk against reap (see the
          * pid==0 case above). */
         mutex_lock(&proctree_lock);
         process_t *member = pgrp->pg_members;

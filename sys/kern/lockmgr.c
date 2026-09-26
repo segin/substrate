@@ -52,10 +52,10 @@ void    lockdestroy(struct lock *lkp)
  * *actual* live occupancy instead of a sticky LK_WANT_EXCL flag.
  *
  * The sticky flag was:
- *   - A41: clobbered whenever any one writer won, a NOWAIT trylock failed, or
+ *   - clobbered whenever any one writer won, a NOWAIT trylock failed, or
  *     an upgrade ran — reopening the shared gate and starving other writers
  *     still parked (they never re-asserted it), an unbounded writer starvation.
- *   - A54: left permanently set when a parked writer was destroyed by
+ *   - left permanently set when a parked writer was destroyed by
  *     proc_exit() (which pulls the thread off its sleepq without running the
  *     waiter's cleanup), hanging every future shared acquirer forever.
  *
@@ -105,7 +105,7 @@ lockmgr(struct lock *lkp, uint32_t flags, spinlock_t *interlock)
         /*
          * Acquire shared lock.
          * Wait if exclusive lock is held or wanted (writer preference).
-         * A41/A54: writer preference is derived from live writer-sleepq
+         * Writer preference is derived from live writer-sleepq
          * occupancy, not a sticky LK_WANT_EXCL flag.
          */
         while ((lkp->lk_flags & (LK_HAVE_EXCL | LK_WANT_DRAIN)) ||
@@ -122,7 +122,7 @@ lockmgr(struct lock *lkp, uint32_t flags, spinlock_t *interlock)
                 spinlock_release(interlock);
             spinlock_release(&lkp->lk_interlock);
             sched_yield();
-            /* KERN-10: reacquire in caller-entry order (interlock before
+            /* Reacquire in caller-entry order (interlock before
              * lk_interlock) to avoid an ABBA deadlock with vn_lock(), which
              * enters holding v_interlock and then takes lk_interlock. */
             if (interlock)
@@ -154,7 +154,7 @@ lockmgr(struct lock *lkp, uint32_t flags, spinlock_t *interlock)
             if (lkp->lk_lockholder)
                 turnstile_block(lkp, lkp->lk_lockholder);
             /*
-             * A41/A54: park on the dedicated writer channel so the LK_SHARED
+             * Park on the dedicated writer channel so the LK_SHARED
              * gate observes us via sleepq_has_waiters() (no sticky flag), and
              * so a kill while parked self-heals the gate.
              */
@@ -163,7 +163,7 @@ lockmgr(struct lock *lkp, uint32_t flags, spinlock_t *interlock)
                 spinlock_release(interlock);
             spinlock_release(&lkp->lk_interlock);
             sched_yield();
-            /* KERN-10: reacquire in caller-entry order (interlock before
+            /* Reacquire in caller-entry order (interlock before
              * lk_interlock) to avoid an ABBA deadlock with vn_lock(), which
              * enters holding v_interlock and then takes lk_interlock. */
             if (interlock)
@@ -205,13 +205,13 @@ lockmgr(struct lock *lkp, uint32_t flags, spinlock_t *interlock)
                 break;
             }
             lkp->lk_waitcount++;
-            /* A41/A54: park on the writer channel (see LK_EXCLUSIVE). */
+            /* Park on the writer channel (see LK_EXCLUSIVE). */
             sleepq_add(lk_excl_chan(lkp), td);
             if (interlock)
                 spinlock_release(interlock);
             spinlock_release(&lkp->lk_interlock);
             sched_yield();
-            /* KERN-10: reacquire in caller-entry order (interlock before
+            /* Reacquire in caller-entry order (interlock before
              * lk_interlock) to avoid an ABBA deadlock with vn_lock(), which
              * enters holding v_interlock and then takes lk_interlock. */
             if (interlock)
@@ -300,7 +300,7 @@ lockmgr(struct lock *lkp, uint32_t flags, spinlock_t *interlock)
                 spinlock_release(interlock);
             spinlock_release(&lkp->lk_interlock);
             sched_yield();
-            /* KERN-10: reacquire in caller-entry order (interlock before
+            /* Reacquire in caller-entry order (interlock before
              * lk_interlock) to avoid an ABBA deadlock with vn_lock(), which
              * enters holding v_interlock and then takes lk_interlock. */
             if (interlock)

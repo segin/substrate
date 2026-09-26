@@ -271,7 +271,7 @@ void *kern_shmat(int shmid, const void *shmaddr, int shmflg, int *err)
 
     /* An explicit shmaddr replaces whatever is mapped there.  Capture that
      * intent now (before find_space overwrites virt) but do NOT tear the old
-     * mapping down yet — see below (audit A66). */
+     * mapping down yet — see below. */
     int have_addr = (virt != 0);
 
     if (!have_addr) {
@@ -289,7 +289,7 @@ void *kern_shmat(int shmid, const void *shmaddr, int shmflg, int *err)
      * at an explicit shmaddr.  These are the memory-pressure-prone steps; doing
      * them first means an ENOMEM here returns with the caller's address space
      * untouched.  A failed shmat must not leave a hole where a live region used
-     * to be (audit A66): only once the resources are in hand do we tear down.
+     * to be: only once the resources are in hand do we tear down.
      */
     vm_object_t *obj = vm_object_allocate(VM_OBJ_TYPE_DEVICE, length);
     if (!obj) { mutex_unlock(&shm_lock); *err = ENOMEM; return (void *)-1; }

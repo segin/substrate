@@ -66,7 +66,7 @@ static inline int sleepq_current_private_pid(void) {
 
 // Lock a hash bucket.
 //
-// IRQ-SAFE (KERN-01): psignal() runs in hard-interrupt context (the timer
+// IRQ-SAFE: psignal() runs in hard-interrupt context (the timer
 // tick delivering SIGALRM, a TTY ^C from the keyboard IRQ) and reaches
 // sleepq_remove_thread() -> sq_lock().  If a bucket could be held with local
 // IRQs enabled, an interrupt landing on the CPU that already owns that bucket

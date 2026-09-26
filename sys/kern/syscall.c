@@ -183,7 +183,7 @@ static int elf_dt_needs_substrate_libc(fs_node_t *node, const Elf32_Ehdr *eh) {
     if (eh->e_phentsize != sizeof(Elf32_Phdr) || phnum == 0 || phnum > 32)
         return 0;
     phbytes = (size_t)phnum * sizeof(Elf32_Phdr);
-    /* [VFS-28] read_fs is signed now: a short read AND an error both fail
+    /* read_fs is signed: a short read AND an error both fail
      * this test, where an error used to compare as a huge unsigned value and
      * pass it. */
     if (read_fs(node, eh->e_phoff, phbytes, (uint8_t *)ph) < (ssize_t)phbytes)
@@ -685,7 +685,7 @@ static int kern_open_from(const char *path, int flags, int mode, fs_node_t *root
     fs_node_t *node = 0;
 
     /*
-     * [VFS-06] Clear the per-thread ELOOP marker before the lookup so what
+     * Clear the per-thread ELOOP marker before the lookup so what
      * we read afterwards belongs to THIS lookup.  vfs_lookup() reports every
      * failure as NULL, so without it a symlink loop was reported as ENOENT
      * -- the same answer as a genuinely missing file, and useless for
@@ -1034,7 +1034,7 @@ void file_close_ptr(file_t *f) {
     if (current_process)
         advlock_release_by_owner(f, current_process->pid);
     /* Atomic decrement-and-test: a plain RMW here races fork's concurrent
-     * f_count increment (A48) — the lost update could free a file still
+     * f_count increment — the lost update could free a file still
      * referenced by the child, or double-free. */
     if (__sync_sub_and_fetch(&f->f_count, 1) <= 0) {
         close_fs((fs_node_t*)f->f_data);
@@ -1694,7 +1694,7 @@ static void fill_stat(struct stat *buf, fs_node_t *node) {
     else
         buf->st_mode |= 0100000;  // S_IFREG
     
-    /* EXT2-A32: ask the backend for the real link count and block
+    /* Ask the backend for the real link count and block
      * usage; fall back to the old estimates when it cannot say. */
     buf->st_nlink = 1;
     buf->st_blksize = 4096;
@@ -2209,7 +2209,7 @@ static int xattr_resolve(int dirfd_or_fd, const char *path, int follow,
 }
 
 /*
- * EXT2-A29 (ext2 audit XA-06): who may see an attribute.
+ * Who may see an attribute.
  *
  * Reading an xattr used to require nothing at all: any user could pull
  * user.* off a file they cannot open, and trusted.* — which Linux
@@ -2223,7 +2223,7 @@ static int xattr_permission(fs_node_t *node, const char *kname) {
         return (current_process && current_process->euid == 0) ? 0 : -ENODATA;
     if (!current_process) return 0;
     if (current_process->euid == 0) return 0;
-    /* SELFREV-RG04: use the supplementary-group-aware check, and map a
+    /* Use the supplementary-group-aware check, and map a
      * denial to EACCES — vfs_check_permissions reports a bare -1, which
      * reaches userspace as EPERM. */
     if (vfs_check_permissions_groups(node, current_process->euid,
@@ -2270,14 +2270,14 @@ static int kern_getxattr(fs_node_t *node, const char *name,
 
 static int kern_listxattr(fs_node_t *node, char *list, size_t size) {
     if (!node->listxattr) return -ENOTSUP;
-    /* EXT2-A29: listing requires read permission on the file, same as
+    /* Listing requires read permission on the file, same as
      * fetching an individual attribute. */
     if (current_process && current_process->euid != 0) {
         if (vfs_check_permissions_groups(node, current_process->euid,
                                          current_process->egid,
                                          current_process->supp_groups,
                                          current_process->n_supp_groups, 4) != 0)
-            return -EACCES;                 /* SELFREV-RG04 */
+            return -EACCES;                 /* not the bare -1 (EPERM) */
     }
     size_t actual = 0;
     if (list == NULL || size == 0) {
@@ -2290,9 +2290,9 @@ static int kern_listxattr(fs_node_t *node, char *list, size_t size) {
     if (!kbuf) return -ENOMEM;
     int rc = node->listxattr(node, kbuf, size, &actual);
     if (rc == 0) {
-        /* SELFREV-RG07: Linux does not enumerate trusted.* to
-         * unprivileged callers.  The XA-06 work gated fetching them but
-         * left them listed, which still discloses their existence.  The
+        /* Linux does not enumerate trusted.* to unprivileged callers.
+         * xattr_permission() gates fetching them, but listing them would
+         * still disclose their existence.  The
          * buffer is a run of NUL-terminated names; drop the ones this
          * caller may not see. */
         if (current_process && current_process->euid != 0 && actual > 0) {
@@ -2943,7 +2943,7 @@ int sys_readlink(const char *pathname, char *buf, size_t bufsiz) {
     if (copyinstr(pathname, kpath, sizeof(kpath), NULL) != 0) return -14;
     if (bufsiz == 0) return -22;                    /* EINVAL */
     if (bufsiz > 4096) bufsiz = 4096;
-    /* EXT2-A34 (ext2 audit MS-11): readlink(2) fills the caller's
+    /* readlink(2) fills the caller's
      * buffer completely and does NOT NUL-terminate, but the in-kernel
      * readlink op reserves a byte for a terminator (see ext2.h).  Give
      * it one extra byte so the user still gets bufsiz bytes of target. */
@@ -3162,7 +3162,7 @@ int sys_sync(void) {
     (void)bufsync(0);
 
     /*
-     * [AHCI-18] bufsync() only gets the data as far as the DEVICE.  A disk
+     * bufsync() only gets the data as far as the DEVICE.  A disk
      * with write caching enabled acknowledges from its own DRAM, so without
      * this the guarantee sync(2) is supposed to give -- "on-disk state
      * matches what stat() reports" -- stopped one power failure short.
@@ -3251,7 +3251,7 @@ int sys_dup(int oldfd) {
 
     proc_set_fd(current_process, newfd, f);
     fdset_clear(current_process->fd_cloexec, newfd);
-    __sync_fetch_and_add(&f->f_count, 1);   /* atomic vs racing close (A48) */
+    __sync_fetch_and_add(&f->f_count, 1);   /* atomic vs racing close */
     return newfd;
 }
 
@@ -3270,7 +3270,7 @@ int sys_dup2(int oldfd, int newfd) {
 
     proc_set_fd(current_process, newfd, f);
     fdset_clear(current_process->fd_cloexec, newfd);
-    __sync_fetch_and_add(&f->f_count, 1);   /* atomic vs racing close (A48) */
+    __sync_fetch_and_add(&f->f_count, 1);   /* atomic vs racing close */
     return newfd;
 }
 
@@ -4584,7 +4584,7 @@ int sys_reboot(int cmd) {
      * keeps walking its schedule rings in the old kernel's memory straight
      * through a warm reboot -- untraceable early-boot corruption on real
      * hardware (an emulator resets its device models, so this only shows
-     * on metal).  Every driver's .shutdown hook runs here. [ehci-audit 7] */
+     * on metal).  Every driver's .shutdown hook runs here. */
     device_shutdown_all();
 
     switch (cmd) {

@@ -549,7 +549,7 @@ static int kbd_s2_break_pending = 0;
  * handle_modifier.  Without serialization an update from one source can
  * interleave with the l/r-set + composite-recompute of the other, briefly
  * exposing an inconsistent kbd_shift/ctrl/alt and emitting a wrong-modifier
- * character.  IRQ-safe because one caller runs in hard IRQ context. [DRV-22]
+ * character.  IRQ-safe because one caller runs in hard IRQ context.
  */
 static spinlock_t kbd_mod_lock = SPINLOCK_INIT("kbd_mod");
 

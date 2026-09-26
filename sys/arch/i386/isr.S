@@ -184,7 +184,7 @@ isr_panic_ipi:
 
 # LAPIC spurious interrupt (vector 0xFF).
 #
-# [USB-HW-03] lapic_enable(0xFF) programs this vector into the SVR on the BSP
+# lapic_enable(0xFF) programs this vector into the SVR on the BSP
 # (main.c) and on every AP (smp_ap_entry), but idt_init() never installed a
 # gate for it -- the entry stayed zeroed by the initial memset, i.e. NOT
 # PRESENT.  A spurious interrupt therefore took #GP instead of being ignored.

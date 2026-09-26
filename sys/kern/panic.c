@@ -31,7 +31,7 @@ void panic_test_halt(void);
  * which holds no locks and uses polled THR-empty.  After two levels
  * of recursion we simply halt.
  *
- * [USB-HW-03] This used to be the WHOLE story, and `int d = ++panic_depth`
+ * This used to be the WHOLE story, and `int d = ++panic_depth`
  * on a plain volatile int is not an atomic read-modify-write: two CPUs
  * faulting at the same moment both read 0, both compute 1, and both take
  * the full rich-console path.  Their output then interleaves character by
@@ -90,7 +90,7 @@ static void panic_serial_hex32(uint32_t v) {
 }
 
 /*
- * [USB-HW-03 lead (c)] Is every page of [va, va+len) present in the CURRENT
+ * Is every page of [va, va+len) present in the CURRENT
  * address space?
  *
  * The dump helpers below used to gate their raw reads on a pure RANGE check
@@ -234,7 +234,7 @@ static void panic_dump_regs(const registers_t *regs) {
     fault_esp = is_user ? regs->useresp : regs->esp;
 
     /*
-     * [USB-HW-03] SS and USERESP are pushed by the CPU only on a ring
+     * SS and USERESP are pushed by the CPU only on a ring
      * transition.  On a CPL0 -> CPL0 fault they are simply not part of the
      * frame, so regs->ss aliases whatever happens to sit above it -- which
      * is why the hardware dumps show nonsense like ss=c844 (the low half of

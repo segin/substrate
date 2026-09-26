@@ -180,7 +180,7 @@ int sys_set_thread_area(struct user_desc *u_info) {
     
     /* Write the resolved entry number back to the user struct.  Use a
      * fault-guarded copyout instead of a raw store: a hostile or COW/read-only
-     * user page would otherwise #PF in kernel context and panic (ARCH-02).
+     * user page would otherwise #PF in kernel context and panic.
      * entry_number is at offset 0 of struct user_desc, so this targets exactly
      * the pointer copyin() validated above; correct copyout arg order is
      * (kernel src, user dst, size) -- swapping them makes validate_user_addr

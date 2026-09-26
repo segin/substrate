@@ -383,7 +383,7 @@ process_t *proc_bootstrap_kernel(int pid, int perso_id) {
 }
 
 /*
- * KERN-06: expose the process-registry lock so a FOREACH_PROC broadcast walker
+ * Expose the process-registry lock so a FOREACH_PROC broadcast walker
  * (sys_kill(-1)) can hold it across the walk.  proc_destroy() unlinks+frees a
  * process_t under pid_lock, so an unlocked walk can dereference freed storage.
  * A plain acquire suffices: the only concurrent freer is proc_destroy() via
@@ -398,8 +398,7 @@ void proc_destroy(process_t *p) {
     if (!p) return;
 
     /* If this process owns the live FPU registers, relinquish ownership before
-     * the struct is freed so a later #NM never fnsaves into freed storage
-     * (ARCH-01). */
+     * the struct is freed so a later #NM never fnsaves into freed storage. */
     fpu_forget_process(p);
 
     /* Release the chroot-root vnode reference taken in proc_create() when the
@@ -1364,7 +1363,7 @@ int proc_fcntl(process_t *p, int fd, int cmd, int arg) {
         }
         proc_set_fd(p, newfd, f);
         fdset_clear(p->fd_cloexec, newfd);
-        __sync_fetch_and_add(&f->f_count, 1);   /* atomic vs racing close (A48) */
+        __sync_fetch_and_add(&f->f_count, 1);   /* atomic vs racing close */
         return newfd;
     case F_GETFD:
         return fdset_test(p->fd_cloexec, fd) ? FD_CLOEXEC : 0;
@@ -1389,7 +1388,7 @@ int proc_fcntl(process_t *p, int fd, int cmd, int arg) {
         /*
          * Set the pid/pgrp that receives SIGIO/SIGURG for this fd.
          * substrate doesn't deliver SIGIO yet; an AF_INET socket records
-         * the owner for SIGURG (TCP-URG-01), anything else accepts it as
+         * the owner for SIGURG, anything else accepts it as
          * a no-op.  It MUST succeed, though: nginx's
          * ngx_spawn_process() does fcntl(channel, F_SETOWN, pid) right
          * after ioctl(FIOASYNC) and aborts the entire worker spawn
@@ -1888,7 +1887,7 @@ void proc_exit(int code) {
         /* Force-release this thread's kernel mutexes — but ONLY if it is not
          * still executing on another CPU.  Walking/unlinking a running
          * sibling's held_mutexes while it concurrently mutates the list on its
-         * own core corrupts it (A22).  A sibling still on a remote CPU has its
+         * own core corrupts it.  A sibling still on a remote CPU has its
          * mutexes released later at sched_reap_thread(), which waits for it to
          * leave the CPU first.  The exiting thread itself is on THIS CPU, so it
          * is never "remote" and is handled here as before. */

@@ -93,7 +93,7 @@ void free_irq(unsigned int irq, void *dev_id) {
                 irq_lines[irq] = curr->next;
             }
             /*
-             * [USB-HW-03] RETIRE the action instead of freeing it.
+             * RETIRE the action instead of freeing it.
              *
              * irq_dispatch() walks this chain with no lock at all (see the
              * comment there for why it must not take a plain spinlock), so a
@@ -140,7 +140,7 @@ int irq_dispatch(unsigned int irq, void *frame) {
      * it tripped the deadlock detector.  So the read side has to stay
      * lockless.
      *
-     * [USB-HW-03] This used to say "Substrate is UP today", and made
+     * This used to say "Substrate is UP today", and made
      * correctness rest on that.  It is NOT true: smp_ap_entry() runs sti and
      * parks in hlt, so every AP accepts interrupts — they simply never
      * schedule.  irq_dispatch() therefore runs concurrently on several CPUs
@@ -153,7 +153,7 @@ int irq_dispatch(unsigned int irq, void *frame) {
     while (curr != NULL) {
         irq_handler_t fn = curr->handler;
 
-        /* [USB-HW-03] A retired action has a NULL handler (free_irq clears it
+        /* A retired action has a NULL handler (free_irq clears it
          * before unlinking).  Calling through it would be a jump to 0 with
          * IF=0 in supervisor mode -- eip=0, CR2=0, err=0 -- which is precisely
          * the fault signature reported from real hardware.  Stop rather than

@@ -91,7 +91,7 @@ static int elf_note_detect_os(const uint8_t *buf, uint32_t len) {
          * sizes up front stops the aligned-offset additions below from wrapping
          * 32-bit and slipping past the `next_off > len` guard while desc_off
          * points far outside buf (OOB read -> kernel panic on a crafted
-         * binary, EXEC-01). */
+         * binary). */
         if (namesz > len || descsz > len) {
             break;
         }
@@ -551,7 +551,7 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, int is_main_image,
     (void)tls_vaddr;  // Will be used for debug output
     (void)tls_align;  // Will be used for proper alignment
     
-    /* Track mapped VA ranges for overlap detection (finding #3) */
+    /* Track mapped VA ranges for overlap detection */
     struct { uint32_t start; uint32_t end; } mapped_ranges[256];
     int mapped_range_count = 0;
 
@@ -570,7 +570,7 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, int is_main_image,
         // Detect TLS segment
         if (phdr.p_type == PT_TLS) {
             uint32_t tls_end = phdr.p_vaddr + load_base + phdr.p_memsz;
-            // SECURITY CHECK: Validate TLS segment bounds (finding #2)
+            // SECURITY CHECK: Validate TLS segment bounds
             if (tls_end < phdr.p_vaddr + load_base || tls_end >= 0xC0000000 ||
                 phdr.p_vaddr + load_base >= 0xC0000000) {
                 kprint("ELF: PT_TLS segment has invalid bounds\n");
@@ -619,7 +619,7 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, int is_main_image,
             // Calculate page-aligned start and end
             uint32_t vaddr = phdr.p_vaddr + load_base;
             
-            // SECURITY CHECK: Detect overflow in p_vaddr + load_base (finding #1)
+            // SECURITY CHECK: Detect overflow in p_vaddr + load_base
             if (load_base != 0 && vaddr < phdr.p_vaddr) {
                 kprint("ELF: Segment vaddr overflow (p_vaddr + load_base wraps)\n");
                 kfree(image, sizeof(*image));
@@ -642,7 +642,7 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, int is_main_image,
             uint32_t va_start = vaddr & 0xFFFFF000;
             uint32_t va_end = (vaddr + phdr.p_memsz + 0xFFF) & 0xFFFFF000;
 
-            // SECURITY CHECK: Detect overlapping segments (finding #3)
+            // SECURITY CHECK: Detect overlapping segments
             for (int j = 0; j < mapped_range_count; j++) {
                 if (va_start < mapped_ranges[j].end && va_end > mapped_ranges[j].start) {
                     kprint("ELF: Overlapping PT_LOAD segments detected\n");
@@ -760,7 +760,7 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, int is_main_image,
                 void *pa = pmm_alloc_block();
                 if (!pa) {
                     kprint("ELF: Out of physical memory\n");
-                    /* Free already-mapped pages for this segment (finding #11).
+                    /* Free already-mapped pages for this segment.
                      * Pages already handed to seg_obj (vm_page_insert below)
                      * are owned by it — free them ONLY via vm_object_deallocate,
                      * never also via pmm_free_block, or the frame is freed
@@ -1571,7 +1571,7 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
     // Capture arguments and environment.  These early-out paths must free the
     // already-allocated image + open fd, not leak them (E2BIG on a large argv
     // is attacker-triggerable), so route through cleanup like every other
-    // failure.  [EXEC-02]
+    // failure.
     ret = exec_count_args(argv, &argc, "execve: Too many arguments\n");
     if (ret < 0) { error_code = ret; goto cleanup; }
 

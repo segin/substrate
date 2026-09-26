@@ -59,7 +59,7 @@ int freebsd_sys_wait4(int pid, int *status, int options, void *rusage);
  * 1/HZ tick resolution (substrate has no native sys_clock_getres). */
 int freebsd_sys_clock_getres(int clk_id, void *res);
 
-/* UDP-API-05: setsockopt(2)/getsockopt(2) for the BSD personalities
+/* setsockopt(2)/getsockopt(2) for the BSD personalities
  * (FreeBSD, NetBSD, OpenBSD share these numbers).  sys_setsockopt() and
  * sys_getsockopt() speak the native numbering, which is Linux's; a BSD
  * binary's SOL_SOCKET (0xffff), SO_* and IPPROTO_IP option numbers are

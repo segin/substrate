@@ -688,7 +688,7 @@ static ssize_t linux_sys_do_uio(int fd, const struct iovec *uiov, int iovcnt,
         goto out;
     }
 
-    /* UDP-API-03: a datagram socket's writev() is one message, not one per
+    /* A datagram socket's writev() is one message, not one per
      * iovec -- see sys_writev(). */
     if (rw == UIO_WRITE && sock_fd_is_dgram(fd)) {
         _Static_assert(sizeof(struct iovec) == sizeof(struct iovec_local),

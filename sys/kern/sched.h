@@ -27,7 +27,7 @@ thread_t *thread_next(thread_t *t);
 
 /*
  * Registry lock for FOREACH_THREAD walkers that run in IRQ context or race a
- * concurrent sched_reap_thread() free (KERN-06).  IRQ-safe; returns/restores
+ * concurrent sched_reap_thread() free.  IRQ-safe; returns/restores
  * the caller's interrupt state.  Acquire BEFORE any sleepq bucket lock.
  */
 unsigned long thread_registry_lock(void);
