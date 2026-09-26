@@ -12,8 +12,13 @@ It listens for TCP connections on
 (default 7) on all IPv4 addresses and sends back every byte it receives
 on a connection until the client closes it.
 .PP
-Connections are served one at a time, in the order they are accepted;
-while one client is connected, others wait in the listen queue (backlog 5).
+Each accepted connection is served by its own thread, created when the
+connection is accepted and gone when the client closes it, so any number of
+clients can be connected at once; there is no fixed pool of workers.
+If a thread cannot be created, that one connection is closed and the daemon
+goes on accepting others.
+The listen queue is
+.BR SOMAXCONN .
 There is no UDP service.
 .PP
 .B echod
@@ -53,4 +58,4 @@ RFC 862 (Echo Protocol), TCP service only.
 does not ignore
 .BR SIGPIPE ,
 so a client that closes its connection while data is being echoed back can
-terminate the daemon.
+terminate the daemon, and with it every other client's connection.
