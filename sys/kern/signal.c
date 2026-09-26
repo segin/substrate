@@ -1862,6 +1862,9 @@ void signal_handle_pending(registers_t *regs) {
      */
     uint32_t pre_handler_mask = current_thread->sig_mask;
     uint32_t restore_mask;
+    /* Only kern_sigsuspend() sets sig_mask_suspend_active, so this is
+     * delivery on the way out of sigsuspend() (or pause(), built on it). */
+    int from_sigsuspend = current_thread->sig_mask_suspend_active;
     if (current_thread->sig_mask_suspend_active) {
         restore_mask = current_thread->sig_mask_suspend;
         current_thread->sig_mask_suspend_active = 0;
@@ -1897,7 +1900,14 @@ void signal_handle_pending(registers_t *regs) {
     // SA_RESTART: Restart syscall if it was interrupted and handler has SA_RESTART
     // EINTR is typically 4 (Linux/Native) or -4/4 (FreeBSD)
     // On i386, we decrement EIP by 2 (size of INT 0x80) and restore EAX
-    if (current_thread->in_syscall && (int32_t)regs->eax == -4) {
+    //
+    // sigsuspend() is never restarted: returning EINTR once a handler has
+    // run is its whole purpose (POSIX; Linux's ERESTARTNOHAND).  Restarting
+    // it put the caller back to sleep, so a "block; while (!flag)
+    // sigsuspend()" loop never saw the flag its SA_RESTART handler had just
+    // set -- Midnight Commander waiting on its subshell's SIGCHLD hung.
+    if (current_thread->in_syscall && (int32_t)regs->eax == -4 &&
+        !from_sigsuspend) {
         if (flags & SA_RESTART) {
             regs->eax = current_thread->syscall_orig_eax;
             regs->eip -= 2; // Size of INT 0x80 opcode

@@ -15,11 +15,14 @@ ifneq ($(CROSS),)
   CFLAGS += -I../../../include -I../../../sys
 endif
 
-TESTS = torture_signal
+TESTS = torture_signal torture_sigsuspend
 
 all: $(TESTS)
 
 torture_signal: torture_signal.c
+	$(CC) $(CFLAGS) $(LDFLAGS) $< -o $@
+
+torture_sigsuspend: torture_sigsuspend.c
 	$(CC) $(CFLAGS) $(LDFLAGS) $< -o $@
 
 clean:
