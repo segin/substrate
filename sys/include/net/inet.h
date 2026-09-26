@@ -144,6 +144,10 @@ void udp_input(netdev_t *dev, int family,
  * Unreachable, code 4) quoting the invoking datagram, subject to the
  * RFC 1122 3.2.2 / RFC 4443 2.4 restrictions and a rate limit. */
 void icmp_port_unreach(netdev_t *dev, const uint8_t *ip_pkt, size_t ip_len);
+/* ICMP Destination Unreachable with any code (e.g. 2, protocol), under the
+ * same restrictions and rate limit. */
+void icmp_dest_unreach(netdev_t *dev, uint8_t code, const uint8_t *ip_pkt,
+                       size_t ip_len);
 /* ICMP Parameter Problem (type 12, code 0) quoting the invoking datagram,
  * `pointer` naming the offending octet (RFC 792), under the same source
  * restrictions and rate limit as icmp_port_unreach(). */

@@ -919,8 +919,15 @@ static void ip4_deliver(netdev_t *dev, const uint8_t *pkt, size_t tot,
             break;
     }
     /* RAW sockets get a copy regardless of protocol. */
-    afinet_deliver_v4(ih->saddr, ih->daddr, ih->protocol, pkt, tot, /*for_dgram=*/0,
-                      /*fanout=*/0);
+    int raw = afinet_deliver_v4(ih->saddr, ih->daddr, ih->protocol, pkt, tot,
+                                /*for_dgram=*/0, /*fanout=*/0);
+    /* A protocol the stack does not implement, which no raw socket took
+     * either, has no receiver: say so with Protocol Unreachable (RFC 1122
+     * 3.2.2.1) -- never about a broadcast or multicast datagram (3.2.2).
+     * Reassembled datagrams arrive here whole, so this is sent once. */
+    if (raw == 0 && !for_bcast && ih->protocol != IPPROTO_ICMP &&
+        ih->protocol != IPPROTO_UDP_NUM && ih->protocol != 6 /*TCP*/)
+        icmp_dest_unreach(dev, ICMP_PROT_UNREACH, pkt, tot);
 }
 
 /* ------------------------------------------------------------------ */

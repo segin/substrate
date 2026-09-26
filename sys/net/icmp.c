@@ -218,9 +218,15 @@ static void icmp_error4(netdev_t *dev, uint8_t type, uint8_t code,
     ip4_output_from(ih->daddr, ih->saddr, IPPROTO_ICMP, msg, 8 + quote);
 }
 
+/* Destination Unreachable with the given code. */
+void icmp_dest_unreach(netdev_t *dev, uint8_t code, const uint8_t *ip_pkt,
+                       size_t ip_len) {
+    icmp_error4(dev, ICMP_DEST_UNREACH, code, 0, ip_pkt, ip_len);
+}
+
 /* Destination Unreachable, code 3 (port). */
 void icmp_port_unreach(netdev_t *dev, const uint8_t *ip_pkt, size_t ip_len) {
-    icmp_error4(dev, ICMP_DEST_UNREACH, ICMP_PORT_UNREACH, 0, ip_pkt, ip_len);
+    icmp_dest_unreach(dev, ICMP_PORT_UNREACH, ip_pkt, ip_len);
 }
 
 /* Parameter Problem, code 0: `pointer` is the offending octet's offset from
