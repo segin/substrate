@@ -195,10 +195,8 @@ void icmp_input(netdev_t *dev, uint32_t saddr, uint32_t daddr,
      * source -- a classic smurf amplifier, and one that ran inside the NIC
      * ISR at that.  RFC 1122 3.2.2.6 requires silent discard.
      */
-    if (dev) {
-        uint32_t bcast = (dev->ip4_addr & dev->ip4_netmask) | ~dev->ip4_netmask;
-        if (daddr == 0xFFFFFFFFu || daddr == bcast) return;
-    }
+    if (daddr == 0xFFFFFFFFu || (dev && ip4_dev_is_dbcast(dev, daddr)))
+        return;
 
     /*
      * And never reply to a request that claims an unusable source, since the
@@ -296,8 +294,7 @@ static void icmp_error4(netdev_t *dev, uint8_t type, uint8_t code,
     uint32_t s = __builtin_bswap32(ih->saddr);
     if (s == 0 || ih->saddr == 0xFFFFFFFFu || (s >> 28) == 0xE) return;
     if ((s >> 24) == 127 && !(dev && (dev->flags & NETDEV_IFF_LOOPBACK))) return;
-    if (dev && dev->ip4_netmask &&
-        ih->saddr == ((dev->ip4_addr & dev->ip4_netmask) | ~dev->ip4_netmask))
+    if (dev && ip4_dev_is_dbcast(dev, ih->saddr))
         return;
     if (!icmp_err_ratelimit_ok()) return;
 

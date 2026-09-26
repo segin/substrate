@@ -2611,17 +2611,12 @@ static int tcp_connect_start(tcp_pcb_t *p, uint32_t raddr, uint16_t rport) {
     if (random_get_bytes(&r, sizeof(r)) != (int)sizeof(r))
         r = (uint32_t)get_ticks();
     if (!p->laddr) {
-        /* Pick a source IP based on the destination.  127/8 traffic
-         * MUST be sourced from a loopback address — otherwise the
-         * reply comes back through loopback with saddr=daddr=
-         * 127.0.0.1 and tcp_find can't match a PCB whose laddr is,
-         * say, 10.0.0.5.  Same shape for IPv6 ::1 once we wire it.  */
-        int want_lo = ((raddr & 0xFF) == 127);
-        for (netdev_t *d = netdev_first(); d; d = netdev_next(d)) {
-            int is_lo = !!(d->flags & NETDEV_IFF_LOOPBACK);
-            if (is_lo != want_lo) continue;
-            if (d->ip4_addr) { p->laddr = d->ip4_addr; break; }
-        }
+        /* The source routing picks for the destination: a loopback
+         * address for 127/8 (the reply comes back through loopback, and
+         * tcp_find must match it), and on an interface with several
+         * addresses the one on the destination's subnet -- or the
+         * gateway's -- so the peer can answer. */
+        p->laddr = ip4_source_for(raddr);
     }
     /* TCP-MEM-12: choose the port and publish it -- with the state that
      * makes the next allocation's scan count it -- in one locked section.

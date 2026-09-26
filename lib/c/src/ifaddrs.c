@@ -1,10 +1,11 @@
 /*
  * ifaddrs.c — getifaddrs(3) / freeifaddrs(3).
  *
- * Enumerates interfaces via SIOCGIFCONF (which the kernel fills with each
- * interface's name and primary IPv4 address), then queries the netmask and
- * flags per interface with SIOCGIFNETMASK / SIOCGIFFLAGS.  Builds the BSD
- * struct ifaddrs linked list.  IPv4 only, which is all SIOCGIFCONF reports.
+ * Enumerates addresses via SIOCGIFCONF (which the kernel fills with one
+ * entry per IPv4 address, primary first, each under its interface's name),
+ * then queries each address's netmask and its interface's flags with
+ * SIOCGIFNETMASK / SIOCGIFFLAGS.  Builds the BSD struct ifaddrs linked list.
+ * IPv4 only, which is all SIOCGIFCONF reports.
  */
 
 #include <errno.h>
@@ -51,9 +52,12 @@ int getifaddrs(struct ifaddrs **ifap)
         ifa->ifa_name = strdup(list[i].ifr_name);
         ifa->ifa_addr = dup_sa(&list[i].ifr_addr);   /* SIOCGIFCONF filled it */
 
+        /* An interface may hold several addresses, each listed separately
+         * by SIOCGIFCONF; passing the address asks for that one's mask. */
         struct ifreq req;
         memset(&req, 0, sizeof req);
         strlcpy(req.ifr_name, list[i].ifr_name, sizeof(req.ifr_name));
+        req.ifr_addr = list[i].ifr_addr;
         if (ioctl(fd, SIOCGIFNETMASK, &req) == 0)
             ifa->ifa_netmask = dup_sa(&req.ifr_netmask);
 

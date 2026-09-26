@@ -117,6 +117,8 @@
  *   netmask:M    SIOCSIFNETMASK eth0 M
  *   hwaddr:MAC   SIOCSIFHWADDR eth0 MAC (aa:bb:cc:dd:ee:ff)
  *   pmtudisc:N   setsockopt(IP_MTU_DISCOVER, N)
+ *   alias:A/BITS SIOCAIFADDR eth0 A with a BITS-long netmask
+ *   unalias:A    SIOCDIFADDR eth0 A
  *   ipopts:HEX   setsockopt(IP_OPTIONS) with the octets HEX (empty clears)
  *   getipopts    getsockopt(IP_OPTIONS), reporting the octets in hex
  *
@@ -381,6 +383,34 @@ static int do_actions(int fd, int argc, char **argv) {
                 snprintf(hex + 2 * k, 3, "%02x", o[k]);
             say("getipopts |%s| n=%ld", r < 0 ? strerror(errno) : hex,
                 (long)n);
+        } else if (strncmp(a, "alias:", 6) == 0) {
+            /* alias:A/BITS -- SIOCAIFADDR on eth0 */
+            char addr[32];
+            strncpy(addr, a + 6, sizeof(addr) - 1);
+            addr[sizeof(addr) - 1] = '\0';
+            char *slash = strchr(addr, '/');
+            int bits = slash ? atoi(slash + 1) : 0;
+            if (slash) *slash = '\0';
+            struct ifaliasreq ra;
+            memset(&ra, 0, sizeof ra);
+            strncpy(ra.ifra_name, "eth0", sizeof ra.ifra_name - 1);
+            struct sockaddr_in *sa = (struct sockaddr_in *)&ra.ifra_addr;
+            struct sockaddr_in *sm = (struct sockaddr_in *)&ra.ifra_mask;
+            sa->sin_family = AF_INET;
+            sa->sin_addr.s_addr = inet_addr(addr);
+            sm->sin_family = AF_INET;
+            sm->sin_addr.s_addr = bits ? htonl(~0u << (32 - bits)) : 0;
+            int r = ioctl(fd, SIOCAIFADDR, &ra);
+            say("alias %s rc=%ld", r < 0 ? strerror(errno) : "ok", r);
+        } else if (strncmp(a, "unalias:", 8) == 0) {
+            struct ifreq ifr;
+            memset(&ifr, 0, sizeof ifr);
+            strncpy(ifr.ifr_name, "eth0", sizeof ifr.ifr_name - 1);
+            struct sockaddr_in *sin = (struct sockaddr_in *)&ifr.ifr_addr;
+            sin->sin_family = AF_INET;
+            sin->sin_addr.s_addr = inet_addr(a + 8);
+            int r = ioctl(fd, SIOCDIFADDR, &ifr);
+            say("unalias %s rc=%ld", r < 0 ? strerror(errno) : "ok", r);
         } else if (strncmp(a, "pmtudisc:", 9) == 0) {
             int mode = atoi(a + 9);
             int r = setsockopt(fd, IPPROTO_IP, 10 /* IP_MTU_DISCOVER */,

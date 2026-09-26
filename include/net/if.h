@@ -58,6 +58,16 @@ struct ifreq {
     } ifr_ifru;
 };
 
+/* SIOCAIFADDR: add an IPv4 address to an interface beside its primary one
+ * (BSD's structure; ifra_broadaddr is ignored -- the broadcast address is
+ * always derived from the address and mask). */
+struct ifaliasreq {
+    char            ifra_name[IFNAMSIZ];
+    struct sockaddr ifra_addr;
+    struct sockaddr ifra_broadaddr;
+    struct sockaddr ifra_mask;
+};
+
 #define ifr_addr      ifr_ifru.ifru_addr
 #define ifr_dstaddr   ifr_ifru.ifru_dstaddr
 #define ifr_broadaddr ifr_ifru.ifru_broadaddr
@@ -119,6 +129,8 @@ struct in6_ifreq {
 #define SIOCGIFINDEX    0x8933
 #define SIOCSIFGATEWAY  0x8980   /* substrate extension */
 #define SIOCGIFGATEWAY  0x8981   /* substrate extension */
+#define SIOCAIFADDR     0x8982   /* substrate: add an IPv4 alias (ifaliasreq) */
+#define SIOCDIFADDR     0x8983   /* substrate: remove an IPv4 alias (ifreq) */
 #define SIOCSIFADDR_IN6 0x8990   /* substrate: set IPv6 addr + prefix */
 #define SIOCDIFADDR_IN6 0x8991   /* substrate: clear IPv6 addr */
 #define SIOCGIFADDR_IN6 0x8992   /* substrate: get IPv6 addr + prefix */

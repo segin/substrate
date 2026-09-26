@@ -366,6 +366,58 @@ static netdev_t *afinet_find_dev(const char *name) {
     return netdev_by_name(name);
 }
 
+/* May `a` be an address of `dev`?  No interface can be the limited
+ * broadcast or a multicast group, and 127/8 belongs to loopback alone.
+ * (0.0.0.0 clears a primary address.) */
+static int afinet_ifaddr_ok(const netdev_t *dev, uint32_t a) {
+    uint8_t first = ((const uint8_t *)&a)[0];
+    return !(a == 0xFFFFFFFFu || (first >= 224 && first < 240) ||
+             (first == 127 && !(dev->flags & NETDEV_IFF_LOOPBACK)));
+}
+
+/* An address's class's natural mask (RFC 1122 3.3.1.1), network order. */
+static uint32_t afinet_classful_mask(uint32_t a) {
+    uint8_t first = ((const uint8_t *)&a)[0];
+    uint32_t m = first < 128 ? 0xFF000000u :
+                 first < 192 ? 0xFFFF0000u : 0xFFFFFF00u;
+    return __builtin_bswap32(m);
+}
+
+/*
+ * SIOCAIFADDR: add an IPv4 address to an interface beside its primary one
+ * (RFC 791 3.2: a host may have several).  Takes struct ifaliasreq.  With
+ * no primary address yet, the new one becomes the primary.  A mask of 0
+ * takes the address's classful mask.  An address the interface already
+ * holds fails EEXIST, a full alias table ENOSPC.
+ */
+static int afinet_add_alias(void *arg) {
+    if (!current_process || current_process->euid != 0)
+        return -EPERM;
+    struct ifaliasreq ra;
+    if (copyin(arg, &ra, sizeof(ra)) != 0) return -EFAULT;
+    ra.ifra_name[IFNAMSIZ - 1] = '\0';
+    netdev_t *dev = afinet_find_dev(ra.ifra_name);
+    if (!dev) return -ENODEV;
+    const struct sin_kern *sa = (const struct sin_kern *)&ra.ifra_addr;
+    const struct sin_kern *sm = (const struct sin_kern *)&ra.ifra_mask;
+    if (sa->sin_family != AF_INET) return -EAFNOSUPPORT;
+    uint32_t a = sa->sin_addr;
+    uint32_t m = sm->sin_addr;
+    if (!a || !afinet_ifaddr_ok(dev, a)) return -EINVAL;
+    if (!m) m = afinet_classful_mask(a);
+    if (ip4_dev_has_addr(dev, a)) return -EEXIST;
+    if (!dev->ip4_addr) {
+        dev->ip4_addr = a;
+        dev->ip4_netmask = m;
+        return 0;
+    }
+    if (dev->ip4_nalias >= NETDEV_IP4_ALIASES) return -ENOSPC;
+    dev->ip4_alias[dev->ip4_nalias].addr = a;
+    dev->ip4_alias[dev->ip4_nalias].mask = m;
+    dev->ip4_nalias++;
+    return 0;
+}
+
 static int afinet_ioctl(fs_node_t *node, uint32_t request, void *arg) {
     if (!arg) return -EFAULT;
 
@@ -414,15 +466,20 @@ static int afinet_ioctl(fs_node_t *node, uint32_t request, void *arg) {
         int max = ifc.ifc_len / (int)sizeof(struct ifreq);
         struct ifreq *out = ifc.ifc_req;   /* user pointer */
         int n = 0;
+        /* One entry per address, as BSD does: the interface's primary
+         * address, then each alias under the same name. */
         for (netdev_t *d = netdev_first(); d && n < max; d = netdev_next(d)) {
-            struct ifreq e;
-            memset(&e, 0, sizeof(e));
-            strlcpy(e.ifr_name, d->name, IFNAMSIZ);
-            struct sin_kern *sin = (struct sin_kern *)&e.ifr_addr;
-            sin->sin_family = AF_INET;
-            sin->sin_addr   = d->ip4_addr;
-            if (!out || copyout(&e, &out[n], sizeof(e)) != 0) return -EFAULT;
-            n++;
+            for (unsigned i = 0; i < 1u + d->ip4_nalias && n < max; i++) {
+                struct ifreq e;
+                memset(&e, 0, sizeof(e));
+                strlcpy(e.ifr_name, d->name, IFNAMSIZ);
+                struct sin_kern *sin = (struct sin_kern *)&e.ifr_addr;
+                sin->sin_family = AF_INET;
+                sin->sin_addr   = i ? d->ip4_alias[i - 1].addr : d->ip4_addr;
+                if (!out || copyout(&e, &out[n], sizeof(e)) != 0)
+                    return -EFAULT;
+                n++;
+            }
         }
         ifc.ifc_len = n * (int)sizeof(struct ifreq);
         if (copyout(&ifc, arg, sizeof(ifc)) != 0) return -EFAULT;
@@ -468,6 +525,10 @@ static int afinet_ioctl(fs_node_t *node, uint32_t request, void *arg) {
         }
     }
 
+    /* SIOCAIFADDR takes struct ifaliasreq, larger than struct ifreq. */
+    if (request == SIOCAIFADDR)
+        return afinet_add_alias(arg);
+
     struct ifreq kr;
     if (copyin(arg, &kr, sizeof(kr)) != 0) return -EFAULT;
     /* Ensure the name field is NUL-terminated before using it. */
@@ -493,6 +554,7 @@ static int afinet_ioctl(fs_node_t *node, uint32_t request, void *arg) {
         case SIOCSIFNETMASK:
         case SIOCSIFBRDADDR:
         case SIOCSIFGATEWAY:
+        case SIOCDIFADDR:
             if (!current_process || current_process->euid != 0)
                 return -EPERM;
             break;
@@ -557,34 +619,47 @@ static int afinet_ioctl(fs_node_t *node, uint32_t request, void *arg) {
         case SIOCSIFADDR: {
             const struct sin_kern *sin = (const struct sin_kern *)&r->ifr_addr;
             if (sin->sin_family != AF_INET) return -EAFNOSUPPORT;
-            /* No interface can be the limited broadcast or a multicast
-             * group, and 127/8 belongs to loopback alone.  (0.0.0.0 clears
-             * the address.) */
-            {
-                uint32_t a = sin->sin_addr;
-                uint8_t first = ((const uint8_t *)&a)[0];
-                if (a == 0xFFFFFFFFu || (first >= 224 && first < 240) ||
-                    (first == 127 && !(dev->flags & NETDEV_IFF_LOOPBACK)))
-                    return -EINVAL;
-            }
+            if (!afinet_ifaddr_ok(dev, sin->sin_addr))
+                return -EINVAL;
             dev->ip4_addr = sin->sin_addr;
             /* An address set without a netmask gets its class's natural
              * mask (RFC 1122 3.3.1.1), so `ifconfig eth1 10.1.2.3` alone
              * still yields an on-link subnet; a later SIOCSIFNETMASK
              * overrides it. */
-            if (!dev->ip4_netmask && dev->ip4_addr) {
-                uint8_t a = ((const uint8_t *)&dev->ip4_addr)[0];
-                uint32_t m = a < 128 ? 0xFF000000u :
-                             a < 192 ? 0xFFFF0000u : 0xFFFFFF00u;
-                dev->ip4_netmask = __builtin_bswap32(m);
-            }
+            if (!dev->ip4_netmask && dev->ip4_addr)
+                dev->ip4_netmask = afinet_classful_mask(dev->ip4_addr);
             return 0;
         }
         case SIOCGIFNETMASK: {
+            /* Given one of the interface's addresses in ifr_addr (which
+             * shares its storage with ifr_netmask), that address's mask;
+             * otherwise the primary's. */
+            const struct sin_kern *qa = (const struct sin_kern *)&r->ifr_addr;
+            uint32_t mask = dev->ip4_netmask;
+            if (qa->sin_family == AF_INET && qa->sin_addr &&
+                ip4_dev_has_addr(dev, qa->sin_addr))
+                mask = ip4_dev_mask_of(dev, qa->sin_addr);
             struct sin_kern *sin = (struct sin_kern *)&r->ifr_netmask;
             sin->sin_family = AF_INET;
-            sin->sin_addr   = dev->ip4_netmask;
+            sin->sin_addr   = mask;
+            sin->sin_port   = 0;
             goto out_get;
+        }
+        case SIOCDIFADDR: {
+            /* Remove an alias; the primary address is changed with
+             * SIOCSIFADDR instead. */
+            const struct sin_kern *sin = (const struct sin_kern *)&r->ifr_addr;
+            if (sin->sin_family != AF_INET) return -EAFNOSUPPORT;
+            for (unsigned i = 0; i < dev->ip4_nalias; i++) {
+                if (dev->ip4_alias[i].addr != sin->sin_addr) continue;
+                for (unsigned j = i + 1; j < dev->ip4_nalias; j++)
+                    dev->ip4_alias[j - 1] = dev->ip4_alias[j];
+                dev->ip4_nalias--;
+                dev->ip4_alias[dev->ip4_nalias].addr = 0;
+                dev->ip4_alias[dev->ip4_nalias].mask = 0;
+                return 0;
+            }
+            return -EADDRNOTAVAIL;
         }
         case SIOCSIFNETMASK: {
             const struct sin_kern *sin = (const struct sin_kern *)&r->ifr_netmask;
@@ -1241,13 +1316,9 @@ static int afinet_bind_conflict(const afi_sock_t *self, uint16_t port,
 static int afinet_addr_bindable4(uint32_t a) {
     if (a == 0 || a == 0xFFFFFFFFu) return 1;
     if ((a & 0xFF) == 127 || ((a & 0xFF) >> 4) == 0xE) return 1;
-    for (netdev_t *d = netdev_first(); d; d = netdev_next(d)) {
-        if (!d->ip4_addr) continue;
-        if (a == d->ip4_addr) return 1;
-        if (d->ip4_netmask &&
-            a == ((d->ip4_addr & d->ip4_netmask) | ~d->ip4_netmask))
-            return 1;
-    }
+    for (netdev_t *d = netdev_first(); d; d = netdev_next(d))
+        if (ip4_dev_has_addr(d, a) || ip4_dev_is_dbcast(d, a))
+            return 1;               /* any of its addresses or broadcasts */
     return 0;
 }
 
@@ -1265,8 +1336,7 @@ static int afinet_addr_bindable6(const uint8_t a[16]) {
 static int afinet_is_bcast4(uint32_t a) {
     if (a == 0xFFFFFFFFu) return 1;
     for (netdev_t *d = netdev_first(); d; d = netdev_next(d))
-        if (d->ip4_addr && d->ip4_netmask &&
-            a == ((d->ip4_addr & d->ip4_netmask) | ~d->ip4_netmask))
+        if (ip4_dev_is_dbcast(d, a))
             return 1;
     return 0;
 }
@@ -1375,7 +1445,7 @@ int afinet_mc_membership(int fd, int add, uint32_t group, uint32_t ifaddr,
         if (!(d->flags & NETDEV_IFF_MULTICAST) || (d->flags & NETDEV_IFF_LOOPBACK))
             continue;
         if (ifindex > 0 ? d->ifindex == (uint32_t)ifindex
-                        : ifaddr ? d->ip4_addr == ifaddr
+                        : ifaddr ? ip4_dev_has_addr(d, ifaddr)
                                  : (d->flags & NETDEV_IFF_UP) != 0) {
             dev = d;
             break;
@@ -1440,7 +1510,7 @@ int afinet_set_ipopt(int fd, int optname, int val, uint32_t addr) {
         if (addr) {
             int found = 0;
             for (netdev_t *d = netdev_first(); d; d = netdev_next(d))
-                if ((d->flags & NETDEV_IFF_MULTICAST) && d->ip4_addr == addr)
+                if ((d->flags & NETDEV_IFF_MULTICAST) && ip4_dev_has_addr(d, addr))
                     found = 1;
             if (!found) return -EADDRNOTAVAIL;
         }
@@ -2447,12 +2517,15 @@ static ssize_t afinet_recvfrom_dgram(int fd, afi_sock_t *s, void *buf,
                 rx->ifindex = pifindex;
                 rx->addr = pdaddr;
                 /* A reply to a broadcast or group datagram goes from the
-                 * interface's own address. */
+                 * interface's own address -- for a subnet's broadcast, the
+                 * address it holds on that subnet. */
                 netdev_t *d = pifindex ? netdev_by_index(pifindex) : NULL;
-                int unicast = !(pdaddr == 0xFFFFFFFFu || ((pdaddr & 0xFF) >> 4) == 0xE ||
-                                (d && d->ip4_netmask && pdaddr ==
-                                 ((d->ip4_addr & d->ip4_netmask) | ~d->ip4_netmask)));
-                rx->spec_dst = (unicast || !d) ? pdaddr : d->ip4_addr;
+                int dbcast = d && ip4_dev_is_dbcast(d, pdaddr);
+                int unicast = !(pdaddr == 0xFFFFFFFFu ||
+                                ((pdaddr & 0xFF) >> 4) == 0xE || dbcast);
+                uint32_t own = d ? (dbcast ? ip4_dev_onlink_addr(d, pdaddr)
+                                           : d->ip4_addr) : 0;
+                rx->spec_dst = (unicast || !d) ? pdaddr : own;
             }
             if (flags & MSG_TRUNC) return (ssize_t)ptrue;
             return (ssize_t)n;
@@ -2576,9 +2649,7 @@ static uint32_t afi_ifindex_for(uint32_t daddr) {
     for (netdev_t *d = netdev_first(); d; d = netdev_next(d)) {
         if ((d->flags & NETDEV_IFF_LOOPBACK) && (daddr & 0xFF) == 127)
             return d->ifindex;
-        if (d->ip4_addr && (daddr == d->ip4_addr ||
-            (d->ip4_netmask &&
-             daddr == ((d->ip4_addr & d->ip4_netmask) | ~d->ip4_netmask))))
+        if (ip4_dev_has_addr(d, daddr) || ip4_dev_is_dbcast(d, daddr))
             return d->ifindex;
         if (((daddr & 0xFF) >> 4) == 0xE && netdev_mc_member(d, daddr) && !any_mc)
             any_mc = d;

@@ -11,6 +11,8 @@
  *   ifconfig <iface> mtu <n>       — set MTU
  *   ifconfig <iface> hw ether MAC  — set hardware address
  *   ifconfig <iface> gateway <ip>  — set IPv4 default gateway (substrate ext)
+ *   ifconfig <iface> alias <ip> [netmask <m>] — add an IPv4 address
+ *   ifconfig <iface> -alias <ip>   — remove an added IPv4 address
  *   ifconfig <iface> inet6 add <addr>[/prefix]
  *   ifconfig <iface> inet6 del <addr>
  *   ifconfig <iface> inet6 gw <addr>
@@ -47,6 +49,8 @@ static void usage(void) {
         "       ifconfig <iface> mtu <n>\n"
         "       ifconfig <iface> hw ether <MAC>\n"
         "       ifconfig <iface> gateway <addr>\n"
+        "       ifconfig <iface> alias <addr> [netmask <mask>]\n"
+        "       ifconfig <iface> -alias <addr>\n"
         "       ifconfig <iface> inet6 add <addr>[/prefix]\n"
         "       ifconfig <iface> inet6 del <addr>\n"
         "       ifconfig <iface> inet6 gw <addr>\n");
@@ -88,6 +92,37 @@ static int prefixlen_from_mask(uint32_t m) {
     int n = 0;
     while (h & 0x80000000u) { n++; h <<= 1; }
     return n;
+}
+
+/* The interface's other IPv4 addresses: SIOCGIFCONF lists every address
+ * under its interface's name, and SIOCGIFNETMASK given an address answers
+ * with that address's mask. */
+static void show_aliases(int s, const char *name, uint32_t primary) {
+    struct ifreq reqs[64];
+    struct ifconf ifc;
+    ifc.ifc_len = sizeof(reqs);
+    ifc.ifc_req = reqs;
+    if (ioctl(s, SIOCGIFCONF, &ifc) < 0)
+        return;
+    int n = ifc.ifc_len / (int)sizeof(struct ifreq);
+    for (int i = 0; i < n; i++) {
+        if (strncmp(reqs[i].ifr_name, name, IFNAMSIZ) != 0)
+            continue;
+        uint32_t a = ((struct sockaddr_in *)&reqs[i].ifr_addr)->sin_addr.s_addr;
+        if (!a || a == primary)
+            continue;
+        struct ifreq r = reqs[i];
+        uint32_t m = 0;
+        if (ioctl(s, SIOCGIFNETMASK, &r) == 0)
+            m = ((struct sockaddr_in *)&r.ifr_netmask)->sin_addr.s_addr;
+        printf("        inet ");
+        print_ip4(a);
+        printf(" netmask ");
+        print_ip4(m);
+        printf("/%d broadcast ", prefixlen_from_mask(m));
+        print_ip4((a & m) | ~m);
+        printf(" alias\n");
+    }
 }
 
 static void show_iface(const char *name) {
@@ -150,6 +185,7 @@ static void show_iface(const char *name) {
             }
             printf("\n");
         }
+        show_aliases(s, name, addr);
     }
 
     /* IPv4 gateway (substrate ext) */
@@ -196,9 +232,19 @@ static void list_all(void) {
         exit(1);
     }
     close(s);
+    /* SIOCGIFCONF has one entry per address, so an interface with aliases
+     * appears more than once: show each interface once. */
     int n = ifc.ifc_len / sizeof(struct ifreq);
+    int shown = 0;
     for (int i = 0; i < n; i++) {
-        if (i) printf("\n");
+        int seen = 0;
+        for (int j = 0; j < i; j++)
+            if (strncmp(ifc.ifc_req[j].ifr_name, ifc.ifc_req[i].ifr_name,
+                        IFNAMSIZ) == 0)
+                seen = 1;
+        if (seen)
+            continue;
+        if (shown++) printf("\n");
         show_iface(ifc.ifc_req[i].ifr_name);
     }
 }
@@ -236,6 +282,30 @@ static void set_ipv4(const char *name, unsigned long req, const char *val) {
     }
     if (ioctl(s, req, &r) < 0) {
         fprintf(stderr, "%s: %s\n", name, strerror(errno));
+        close(s); exit(1);
+    }
+    close(s);
+}
+
+/* Add an IPv4 address beside the primary one; mask NULL takes the
+ * address's classful mask, as a primary address set without one does. */
+static void add_alias(const char *name, const char *addr, const char *mask) {
+    int s = sock_open(AF_INET);
+    struct ifaliasreq r;
+    memset(&r, 0, sizeof(r));
+    strlcpy(r.ifra_name, name, sizeof(r.ifra_name));
+    struct sockaddr_in *sa = (struct sockaddr_in *)&r.ifra_addr;
+    struct sockaddr_in *sm = (struct sockaddr_in *)&r.ifra_mask;
+    sa->sin_family = AF_INET;
+    sm->sin_family = AF_INET;
+    if (parse_ip4(addr, &sa->sin_addr.s_addr) < 0 ||
+        (mask && parse_ip4(mask, &sm->sin_addr.s_addr) < 0)) {
+        fprintf(stderr, "ifconfig: invalid IPv4 address: %s\n",
+                mask ? mask : addr);
+        close(s); exit(1);
+    }
+    if (ioctl(s, SIOCAIFADDR, &r) < 0) {
+        fprintf(stderr, "%s: SIOCAIFADDR: %s\n", name, strerror(errno));
         close(s); exit(1);
     }
     close(s);
@@ -338,6 +408,19 @@ int main(int argc, char **argv) {
         }
         else if (strcmp(cmd, "gateway") == 0 && i + 1 < argc) {
             set_ipv4(iface, SIOCSIFGATEWAY, argv[i + 1]); i += 2;
+        }
+        else if (strcmp(cmd, "alias") == 0 && i + 1 < argc) {
+            const char *mask = NULL;
+            int used = 2;
+            if (i + 3 < argc && strcmp(argv[i + 2], "netmask") == 0) {
+                mask = argv[i + 3];
+                used = 4;
+            }
+            add_alias(iface, argv[i + 1], mask);
+            i += used;
+        }
+        else if (strcmp(cmd, "-alias") == 0 && i + 1 < argc) {
+            set_ipv4(iface, SIOCDIFADDR, argv[i + 1]); i += 2;
         }
         else if (strcmp(cmd, "inet6") == 0 && i + 2 < argc) {
             const char *sub = argv[i + 1];

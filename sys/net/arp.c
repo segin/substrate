@@ -145,7 +145,13 @@ int arp_request(netdev_t *dev, uint32_t target_ip) {
     arp.ar_pln = 4;
     arp.ar_op  = __builtin_bswap16(ARPOP_REQUEST);
     memcpy(arp.ar_sha, dev->hwaddr, 6);
-    memcpy(arp.ar_spa, &dev->ip4_addr, 4);
+    /* Ask from our address on the target's subnet (an interface may hold
+     * several), so the target learns a mapping it can use. */
+    {
+        uint32_t spa = ip4_dev_onlink_addr(dev, target_ip);
+        if (!spa) spa = dev->ip4_addr;
+        memcpy(arp.ar_spa, &spa, 4);
+    }
     memset(arp.ar_tha, 0, 6);
     memcpy(arp.ar_tpa, &target_ip, 4);
     return eth_send(dev, broadcast, __builtin_bswap16(ETHERTYPE_ARP),
@@ -186,7 +192,7 @@ void arp_input(netdev_t *dev, const uint8_t *pkt, size_t len) {
      *     the sender's MAC).  A request/reply for some other host, or a
      *     broadcast/unsolicited reply, can refresh but never create.
      */
-    int target_is_me = (target_ip == dev->ip4_addr && dev->ip4_addr);
+    int target_is_me = ip4_dev_has_addr(dev, target_ip);  /* any of ours */
     /*
      * UDP-IP-05: never learn -- or refresh -- a mapping for an address that
      * cannot name a single host: 0.0.0.0, a broadcast (limited or this
@@ -200,10 +206,9 @@ void arp_input(netdev_t *dev, const uint8_t *pkt, size_t len) {
     int learnable;
     {
         uint32_t h = __builtin_bswap32(sender_ip);
-        uint32_t dbcast = (dev->ip4_addr & dev->ip4_netmask) | ~dev->ip4_netmask;
         learnable = !(sender_ip == 0 || sender_ip == 0xFFFFFFFFu ||
                       (h >> 28) == 0xE ||
-                      (dev->ip4_netmask && sender_ip == dbcast));
+                      ip4_dev_is_dbcast(dev, sender_ip));
     }
     /* NET-09: merge/insert under the cache lock (raw ops — we already hold
      * it, so do not call the locking arp_insert() here).  Kept tiny; the
@@ -225,7 +230,7 @@ void arp_input(netdev_t *dev, const uint8_t *pkt, size_t len) {
         reply.ar_pln = 4;
         reply.ar_op  = __builtin_bswap16(ARPOP_REPLY);
         memcpy(reply.ar_sha, dev->hwaddr, 6);
-        memcpy(reply.ar_spa, &dev->ip4_addr, 4);
+        memcpy(reply.ar_spa, &target_ip, 4);    /* the address asked about */
         memcpy(reply.ar_tha, arp->ar_sha, 6);
         memcpy(reply.ar_tpa, arp->ar_spa, 4);
         eth_send(dev, arp->ar_sha, __builtin_bswap16(ETHERTYPE_ARP),

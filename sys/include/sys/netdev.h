@@ -45,6 +45,9 @@ struct netdev_ops {
  * sockets that joined them. */
 #define NETDEV_MC_MAX 16
 
+/* IPv4 addresses an interface may hold beside its primary one. */
+#define NETDEV_IP4_ALIASES 8
+
 typedef struct netdev {
     char     name[NETDEV_NAME_MAX];      /* "eth0", "eth1", ... */
     uint8_t  hwaddr[NETDEV_HWADDR_LEN];  /* MAC */
@@ -56,6 +59,15 @@ typedef struct netdev {
     uint32_t ip4_addr;     /* network byte order, 0 = unconfigured */
     uint32_t ip4_netmask;  /* network byte order */
     uint32_t ip4_gateway;  /* network byte order, 0 = none */
+    /* Further IPv4 addresses beside ip4_addr (SIOCAIFADDR), each with its
+     * own subnet; the first ip4_nalias entries are in use.  Code that asks
+     * "is this one of the interface's addresses / subnets" goes through
+     * the ip4_dev_* helpers in <net/inet.h>, which cover all of them. */
+    struct {
+        uint32_t addr;     /* network byte order */
+        uint32_t mask;
+    } ip4_alias[NETDEV_IP4_ALIASES];
+    uint8_t  ip4_nalias;
 
     /* IPv6 config — single global-scope address + link-local + default
      * router.  Plenty for first-cut dual-stack. */

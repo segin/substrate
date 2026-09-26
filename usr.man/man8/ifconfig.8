@@ -1,4 +1,4 @@
-.TH IFCONFIG 8 2026-09-25 "Substrate" "System Administration"
+.TH IFCONFIG 8 2026-09-26 "Substrate" "System Administration"
 .SH NAME
 ifconfig \- display and configure network interfaces
 .SH SYNOPSIS
@@ -43,6 +43,14 @@ an
 .B inet
 line with the IPv4 address, netmask (also as a prefix length) and
 broadcast address, if an IPv4 address is set;
+.IP \(bu
+an
+.B inet
+line ending in
+.B alias
+for each further IPv4 address added with the
+.B alias
+command;
 .IP \(bu
 a
 .B gateway
@@ -104,6 +112,27 @@ Set the IPv4 default gateway.
 This is a Substrate extension
 .RB ( SIOCSIFGATEWAY ).
 .TP
+.BI "alias " address\c
+.RB " [" netmask
+.IR mask ]
+Add
+.I address
+to the interface beside its primary address, with
+.I mask
+or, without one, the address's classful mask.
+The interface receives, answers ARP for and sends from every address it
+holds, each on its own subnet; at most eight may be added.
+This is a Substrate extension
+.RB ( SIOCAIFADDR ).
+.TP
+.BI "\-alias " address
+Remove an address added with
+.BR alias
+.RB ( SIOCDIFADDR ).
+The primary address is changed with an
+.I address
+command instead.
+.TP
 .BI "inet6 add " address\c
 .RI [/ prefix ]
 Add an IPv6 address.
@@ -157,6 +186,13 @@ Configure a static IPv4 address and bring the interface up:
 # ifconfig eth0 10.0.2.15 netmask 255.255.255.0
 # ifconfig eth0 gateway 10.0.2.2
 # ifconfig eth0 up
+.EE
+.PP
+Give eth0 a second address on another subnet, then remove it:
+.PP
+.EX
+# ifconfig eth0 alias 10.0.3.15 netmask 255.255.255.0
+# ifconfig eth0 \-alias 10.0.3.15
 .EE
 .PP
 Add an IPv6 address with a /64 prefix:

@@ -19,9 +19,13 @@ nor loopback will produce on demand.
 Build and run from the repo root:
 
     make -C sys
-    i386-unknown-substrate-gcc -O2 -o tests/lib/net/wire/wireguest \
-        tests/lib/net/wire/wireguest.c
+    i386-unknown-substrate-gcc -O2 -I include -o tests/lib/net/wire/wireguest \
+        tests/lib/net/wire/wireguest.c -lpthread
     python3 tests/lib/net/wire/test_tcp_closing.py
+
+`-I include` takes the tree's headers ahead of the toolchain's: wireguest
+uses interfaces (such as `SIOCAIFADDR`) that may be newer than the
+installed sysroot.
 
 `WIRE_WORKDIR` chooses where the scratch image and serial log go (default
 `/tmp`); put it on the same btrfs volume as `rootfs.img` so the copy is a

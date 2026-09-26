@@ -13,8 +13,15 @@ ip \- IPv4 protocol
 .fi
 .SH DESCRIPTION
 Substrate's IPv4 follows RFC 791 as amended by RFC 1122.
-Each interface has one address and netmask; datagrams to a destination on
-no local subnet go to the interface's gateway.
+Each interface has a primary address and netmask and may hold up to eight
+further addresses, each with its own netmask
+.RB ( SIOCAIFADDR ,
+.BR SIOCDIFADDR ;
+see
+.BR ifconfig (8)).
+A datagram is sent from the interface's address on the destination's
+subnet, or on the gateway's subnet when the destination is on no local
+subnet and goes to the interface's gateway.
 All of 127.0.0.0/8 is the host's own loopback, and a datagram to one of
 the host's interface addresses never leaves the host.
 .PP
@@ -166,4 +173,5 @@ sendto(s, buf, len, 0, (struct sockaddr *)&dst, sizeof(dst));
 .BR socket (2),
 .BR setsockopt (2),
 .BR recvmsg (2),
-.BR tcp (7)
+.BR tcp (7),
+.BR ifconfig (8)

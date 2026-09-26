@@ -102,11 +102,67 @@ int eth_send(netdev_t *dev, const uint8_t dst_mac[6], uint16_t ethertype,
 /* Route selection — single entry: first netdev that matches.         */
 /* ------------------------------------------------------------------ */
 
-/* UDP-IP-03: is `a` the address of one of our (non-loopback) interfaces? */
+/*
+ * An interface's IPv4 addresses: the primary ip4_addr/ip4_netmask and any
+ * aliases added with SIOCAIFADDR (RFC 791 3.2 allows a host several).
+ * Entry i of ip4_dev_entry() for i in [0, 1 + ip4_nalias); an entry with a
+ * zero address is unused.
+ */
+static inline void ip4_dev_entry(const netdev_t *d, unsigned i,
+                                 uint32_t *addr, uint32_t *mask) {
+    if (i == 0) {
+        *addr = d->ip4_addr;
+        *mask = d->ip4_netmask;
+    } else {
+        *addr = d->ip4_alias[i - 1].addr;
+        *mask = d->ip4_alias[i - 1].mask;
+    }
+}
+
+int ip4_dev_has_addr(const netdev_t *d, uint32_t a) {
+    if (!a) return 0;
+    for (unsigned i = 0; i < 1u + d->ip4_nalias; i++) {
+        uint32_t addr, mask;
+        ip4_dev_entry(d, i, &addr, &mask);
+        if (addr == a) return 1;
+    }
+    return 0;
+}
+
+int ip4_dev_is_dbcast(const netdev_t *d, uint32_t a) {
+    for (unsigned i = 0; i < 1u + d->ip4_nalias; i++) {
+        uint32_t addr, mask;
+        ip4_dev_entry(d, i, &addr, &mask);
+        if (addr && mask && a == ((addr & mask) | ~mask)) return 1;
+    }
+    return 0;
+}
+
+uint32_t ip4_dev_onlink_addr(const netdev_t *d, uint32_t a) {
+    for (unsigned i = 0; i < 1u + d->ip4_nalias; i++) {
+        uint32_t addr, mask;
+        ip4_dev_entry(d, i, &addr, &mask);
+        /* No netmask means no known on-link subnet: masking with 0 would
+         * claim every destination. */
+        if (addr && mask && (addr & mask) == (a & mask)) return addr;
+    }
+    return 0;
+}
+
+uint32_t ip4_dev_mask_of(const netdev_t *d, uint32_t a) {
+    for (unsigned i = 0; i < 1u + d->ip4_nalias; i++) {
+        uint32_t addr, mask;
+        ip4_dev_entry(d, i, &addr, &mask);
+        if (a && addr == a) return mask;
+    }
+    return 0;
+}
+
+/* UDP-IP-03: is `a` an address of one of our (non-loopback) interfaces? */
 static int ip4_is_local_ifaddr(uint32_t a) {
     if (!a) return 0;
     for (netdev_t *d = netdev_first(); d; d = netdev_next(d))
-        if (!(d->flags & NETDEV_IFF_LOOPBACK) && d->ip4_addr == a)
+        if (!(d->flags & NETDEV_IFF_LOOPBACK) && ip4_dev_has_addr(d, a))
             return 1;
     return 0;
 }
@@ -143,8 +199,7 @@ static int ip4_mc_accept(const netdev_t *dev, uint32_t group) {
  * directed broadcast? */
 static int ip4_is_bcast_on(const netdev_t *dev, uint32_t daddr) {
     if (daddr == 0xFFFFFFFFu) return 1;
-    return dev->ip4_addr && dev->ip4_netmask &&
-           daddr == ((dev->ip4_addr & dev->ip4_netmask) | ~dev->ip4_netmask);
+    return ip4_dev_is_dbcast(dev, daddr);
 }
 
 /* Is `a` a broadcast (limited or any interface's directed) or multicast
@@ -214,13 +269,11 @@ static netdev_t *route_for_v4(uint32_t daddr, int *via_gw_out) {
     for (netdev_t *d = netdev_first(); d; d = netdev_next(d)) {
         if (!(d->flags & NETDEV_IFF_UP)) continue;
         if (d->flags & NETDEV_IFF_LOOPBACK) continue;
-        if (!d->ip4_addr) continue;
-        /* No netmask means no known on-link subnet.  Masking with 0 would
-         * make every destination look on-link, so off-link traffic would be
-         * ARPed for directly and fail instead of going to the gateway. */
-        if (!d->ip4_netmask) continue;
-        if ((d->ip4_addr & d->ip4_netmask) ==
-            (daddr      & d->ip4_netmask)) {
+        /* On-link when one of the interface's subnets, primary or alias,
+         * holds the destination.  (An address with no netmask has no known
+         * subnet and matches nothing, so off-link traffic still goes to the
+         * gateway instead of being ARPed for directly.) */
+        if (ip4_dev_onlink_addr(d, daddr)) {
             if (via_gw_out) *via_gw_out = 0;
             return d;
         }
@@ -254,10 +307,16 @@ static uint16_t g_ip_id_counter;
  * looped back through lo that is the address itself (as Linux's "local"
  * route does), not 127.0.0.1 -- otherwise a socket talking to our own NIC
  * address sees its peer as 127.0.0.1. */
+/* Out of an interface with several addresses, the one on the destination's
+ * subnet -- or, off-link, on the gateway's -- so the peer can answer it;
+ * otherwise the primary. */
 static uint32_t route_src4(const netdev_t *dev, uint32_t daddr) {
     if ((dev->flags & NETDEV_IFF_LOOPBACK) && (daddr & 0xFF) != 127)
         return daddr;
-    return dev->ip4_addr;
+    uint32_t a = ip4_dev_onlink_addr(dev, daddr);
+    if (!a && dev->ip4_gateway)
+        a = ip4_dev_onlink_addr(dev, dev->ip4_gateway);
+    return a ? a : dev->ip4_addr;
 }
 
 /* The interface a datagram to `daddr` leaves by.  A group send honours the
@@ -267,7 +326,8 @@ static netdev_t *route_out4(uint32_t daddr, const struct ip4_txopts *o,
                             int *via_gw_out) {
     if (o && o->mcast_if && ip4_is_mcast(daddr)) {
         for (netdev_t *d = netdev_first(); d; d = netdev_next(d)) {
-            if ((d->flags & NETDEV_IFF_MULTICAST) && d->ip4_addr == o->mcast_if) {
+            if ((d->flags & NETDEV_IFF_MULTICAST) &&
+                ip4_dev_has_addr(d, o->mcast_if)) {
                 if (via_gw_out) *via_gw_out = 0;
                 return d;
             }
@@ -911,12 +971,9 @@ static void ip4_input_link(netdev_t *dev, const uint8_t *pkt, size_t len,
         if ((s >> 24) == 127 && !(dev->flags & NETDEV_IFF_LOOPBACK)) {
             return;                                    /* 127/8 off-box */
         }
-        /* A source equal to this link's broadcast address is equally bogus. */
-        {
-            uint32_t bcast = (dev->ip4_addr & dev->ip4_netmask) |
-                             ~dev->ip4_netmask;
-            if (dev->ip4_netmask != 0 && ih->saddr == bcast) return;
-        }
+        /* A source equal to a broadcast address of one of this link's
+         * subnets is equally bogus. */
+        if (ip4_dev_is_dbcast(dev, ih->saddr)) return;
     }
 
     /* Accept if dst is ours, broadcast, or limited-broadcast.
@@ -926,9 +983,8 @@ static void ip4_input_link(netdev_t *dev, const uint8_t *pkt, size_t len,
      * lo's single configured 127.0.0.1.  route_for_v4() already sends all
      * of 127/8 to lo and the martian filter above already treats it as
      * lo-only, but the exact-address test here dropped 127.0.0.2 et al. */
-    uint32_t bcast = (dev->ip4_addr & dev->ip4_netmask) | ~dev->ip4_netmask;
     int for_bcast = (ih->daddr == 0xFFFFFFFFu ||
-                     (dev->ip4_netmask != 0 && ih->daddr == bcast));
+                     ip4_dev_is_dbcast(dev, ih->daddr));
     /* UDP-IP-03: and lo carries traffic to our own interface addresses. */
     int for_lo = (dev->flags & NETDEV_IFF_LOOPBACK) &&
                  ((ih->daddr & 0xFF) == 127 || ip4_is_local_ifaddr(ih->daddr));
@@ -948,7 +1004,7 @@ static void ip4_input_link(netdev_t *dev, const uint8_t *pkt, size_t len,
      * takes the limited broadcast, which DHCP needs. */
     if ((ih->daddr & 0xFF) == 0)
         return;
-    int for_me = dev->ip4_addr != 0 && ih->daddr == dev->ip4_addr;
+    int for_me = ip4_dev_has_addr(dev, ih->daddr);  /* primary or alias */
     if (!for_me && !for_bcast && !for_lo) {
         return;
     }

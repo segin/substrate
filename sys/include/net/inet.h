@@ -127,6 +127,14 @@ int  ip4_output_opts(uint32_t saddr, uint32_t daddr, uint8_t protocol,
 uint32_t ip4_source_for(uint32_t daddr);
 /* The same, for a send with transmit options `o` (IP_MULTICAST_IF). */
 uint32_t ip4_source_for_opts(uint32_t daddr, const struct ip4_txopts *o);
+/* An interface's IPv4 addresses -- its primary one and any aliases:
+ * whether `a` is one of them; whether `a` is the directed broadcast of one
+ * of their subnets; the one whose subnet holds `a` (0 if none); `a`'s
+ * netmask if it is one of them (0 if not). */
+int      ip4_dev_has_addr(const netdev_t *d, uint32_t a);
+int      ip4_dev_is_dbcast(const netdev_t *d, uint32_t a);
+uint32_t ip4_dev_onlink_addr(const netdev_t *d, uint32_t a);
+uint32_t ip4_dev_mask_of(const netdev_t *d, uint32_t a);
 /* Broadcast or multicast: an address a socket may bind to receive on but
  * that is never a source. */
 int ip4_is_group_addr(uint32_t a);
