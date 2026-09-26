@@ -13,6 +13,9 @@ be sent at all and DHCP could never bootstrap.
     zero-dest      with eth0 unaddressed, a datagram to 0.0.0.0 is not
                    delivered to a wildcard socket (RFC 791 3.2: 0/8 is
                    never a destination); one to 255.255.255.255 still is.
+    mcast-zero-src with eth0 unaddressed, a multicast send is refused rather
+                   than sent from 0.0.0.0 (only the limited broadcast, for
+                   DHCP, may leave an unaddressed interface).
 
 Run from the repo root after building sys/ and wireguest:
     python3 tests/lib/net/wire/test_ip_unconfigured.py
@@ -76,7 +79,26 @@ def case_zero_dest():
         return None, w
 
 
-CASES = (('dhcp-discover', case_dhcp_discover), ('zero-dest', case_zero_dest))
+def case_mcast_zero_src():
+    group = '224.0.0.9'
+    with Wire.boot('udpany 7403 ifaddr0 sendto:%s:9:x sleep:1 sendto:%s:9:y '
+                   'sleep:60' % (group, group)) as w:
+        if not w.wait_serial('guest: slept', 90):
+            return 'guest never got to its sends', w
+        w.wait_serial('guest: sendto', 5)
+        w.pump(1.0)
+        for mac, etype, fr in w.frames:
+            if etype == 0x0800 and socket.inet_ntoa(fr[30:34]) == group:
+                return 'a multicast datagram left from %s' % \
+                    socket.inet_ntoa(fr[26:30]), w
+        s = [l for l in w.serial().splitlines() if l.startswith('guest: sendto')]
+        if len(s) != 2 or any(' ok ' in l for l in s):
+            return 'sends: %r, want both refused' % s, w
+        return None, w
+
+
+CASES = (('dhcp-discover', case_dhcp_discover), ('zero-dest', case_zero_dest),
+         ('mcast-zero-src', case_mcast_zero_src))
 
 
 def main():

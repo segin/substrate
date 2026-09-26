@@ -216,6 +216,25 @@ int ip4_is_group_addr(uint32_t a) {
     return a == 0xFFFFFFFFu;
 }
 
+/* First UP, non-loopback interface with capability `flag`, preferring one
+ * that has an address: a broadcast or group send from an addressed interface
+ * carries that address as its source, where an unaddressed one could only
+ * send from 0.0.0.0.  The unaddressed one is returned only when no
+ * interface is configured, which is the DHCP case. */
+static netdev_t *route_first_capable(uint32_t flag) {
+    netdev_t *bare = NULL;
+    for (netdev_t *d = netdev_first(); d; d = netdev_next(d)) {
+        if (!(d->flags & NETDEV_IFF_UP) || !(d->flags & flag) ||
+            (d->flags & NETDEV_IFF_LOOPBACK))
+            continue;
+        if (d->ip4_addr)
+            return d;
+        if (!bare)
+            bare = d;
+    }
+    return bare;
+}
+
 static netdev_t *route_for_v4(uint32_t daddr, int *via_gw_out) {
     /*
      * UDP-IP-04: the limited broadcast goes out directly on a broadcast-
@@ -225,14 +244,8 @@ static netdev_t *route_for_v4(uint32_t daddr, int *via_gw_out) {
      * limited broadcast is what an unconfigured host (DHCP) must use.
      */
     if (daddr == 0xFFFFFFFFu) {
-        for (netdev_t *d = netdev_first(); d; d = netdev_next(d)) {
-            if ((d->flags & NETDEV_IFF_UP) && (d->flags & NETDEV_IFF_BROADCAST) &&
-                !(d->flags & NETDEV_IFF_LOOPBACK)) {
-                if (via_gw_out) *via_gw_out = 0;
-                return d;
-            }
-        }
-        return NULL;
+        if (via_gw_out) *via_gw_out = 0;
+        return route_first_capable(NETDEV_IFF_BROADCAST);
     }
     /*
      * UDP-IP-06: a group address is on-link, never via the gateway (RFC
@@ -241,14 +254,8 @@ static netdev_t *route_for_v4(uint32_t daddr, int *via_gw_out) {
      * multicast-capable interface.
      */
     if (ip4_is_mcast(daddr)) {
-        for (netdev_t *d = netdev_first(); d; d = netdev_next(d)) {
-            if ((d->flags & NETDEV_IFF_UP) && (d->flags & NETDEV_IFF_MULTICAST) &&
-                !(d->flags & NETDEV_IFF_LOOPBACK)) {
-                if (via_gw_out) *via_gw_out = 0;
-                return d;
-            }
-        }
-        return NULL;
+        if (via_gw_out) *via_gw_out = 0;
+        return route_first_capable(NETDEV_IFF_MULTICAST);
     }
     /* 127.0.0.0/8 → loopback.  So is any address of our own: UDP-IP-03 --
      * a datagram to the host's own NIC address used to match that NIC's
@@ -397,6 +404,11 @@ int ip4_output_opts(uint32_t saddr, uint32_t daddr, uint8_t protocol,
     } else if (!ip4_is_local_ifaddr(saddr)) {
         return -EADDRNOTAVAIL;
     }
+    /* 0.0.0.0 is a valid source only while the host is learning its own
+     * address, and only toward the limited broadcast (RFC 1122 3.2.1.3(a),
+     * RFC 2131 4.1).  A group send needs a real source. */
+    if (saddr == 0 && ip4_is_mcast(daddr))
+        return -EADDRNOTAVAIL;
     /*
      * Bound payload_len by SUBTRACTING from the buffer size rather than
      * adding to the payload length.  payload_len is a size_t, so the old
