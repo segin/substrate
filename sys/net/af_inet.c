@@ -855,9 +855,10 @@ static uint32_t udp_src4(const afi_sock_t *s, uint32_t daddr) {
     memcpy(&bound, s->local_addr, 4);
     /* A socket bound to a broadcast or multicast address (to receive on
      * it) sends from the address routing picks, as BSD and Linux do: such
-     * an address is never a valid source. */
+     * an address is never a valid source.  A group send through
+     * IP_MULTICAST_IF takes that interface's address. */
     if (!bound || ip4_is_group_addr(bound))
-        return ip4_source_for(daddr);
+        return ip4_source_for_opts(daddr, &s->txo);
     return bound;
 }
 
@@ -2004,7 +2005,8 @@ int afinet_connect(int fd, const void *addr, socklen_t len) {
         s->bound = 1;
         if (addr_is_wild(s->local_addr, s->family == AF_INET ? 4 : 16)) {
             if (s->family == AF_INET) {
-                uint32_t src = ip4_source_for(*(const uint32_t *)s->peer_addr);
+                uint32_t src = ip4_source_for_opts(
+                    *(const uint32_t *)s->peer_addr, &s->txo);
                 memcpy(s->local_addr, &src, 4);
             } else {
                 (void)ip6_source_for(s->peer_addr, s->local_addr);

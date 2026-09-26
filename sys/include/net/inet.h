@@ -109,6 +109,8 @@ int  ip4_output_opts(uint32_t saddr, uint32_t daddr, uint8_t protocol,
 /* Source address routing will choose for `daddr` — needed to build a UDP
  * pseudo-header checksum before the packet reaches ip4_output/ip6_output. */
 uint32_t ip4_source_for(uint32_t daddr);
+/* The same, for a send with transmit options `o` (IP_MULTICAST_IF). */
+uint32_t ip4_source_for_opts(uint32_t daddr, const struct ip4_txopts *o);
 /* Broadcast or multicast: an address a socket may bind to receive on but
  * that is never a source. */
 int ip4_is_group_addr(uint32_t a);

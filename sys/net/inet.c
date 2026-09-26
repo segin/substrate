@@ -320,10 +320,34 @@ static uint32_t route_src4(const netdev_t *dev, uint32_t daddr) {
     return dev->ip4_addr;
 }
 
-uint32_t ip4_source_for(uint32_t daddr) {
+/* The interface a datagram to `daddr` leaves by.  A group send honours the
+ * socket's IP_MULTICAST_IF when that address belongs to a multicast-capable
+ * interface; everything else is routed. */
+static netdev_t *route_out4(uint32_t daddr, const struct ip4_txopts *o,
+                            int *via_gw_out) {
+    if (o && o->mcast_if && ip4_is_mcast(daddr)) {
+        for (netdev_t *d = netdev_first(); d; d = netdev_next(d)) {
+            if ((d->flags & NETDEV_IFF_MULTICAST) && d->ip4_addr == o->mcast_if) {
+                if (via_gw_out) *via_gw_out = 0;
+                return d;
+            }
+        }
+    }
+    return route_for_v4(daddr, via_gw_out);
+}
+
+/* The source a datagram to `daddr` sent with options `o` (NULL: defaults)
+ * leaves with.  It comes from the same interface choice ip4_output_opts
+ * makes, so a group send through IP_MULTICAST_IF carries that interface's
+ * address rather than the routed interface's (RFC 1112 6.1). */
+uint32_t ip4_source_for_opts(uint32_t daddr, const struct ip4_txopts *o) {
     int via_gw = 0;
-    netdev_t *dev = route_for_v4(daddr, &via_gw);
+    netdev_t *dev = route_out4(daddr, o, &via_gw);
     return dev ? route_src4(dev, daddr) : 0;
+}
+
+uint32_t ip4_source_for(uint32_t daddr) {
+    return ip4_source_for_opts(daddr, NULL);
 }
 
 /* TCP-HDR-04: the MTU of the interface a datagram to daddr would leave by,
@@ -372,14 +396,7 @@ int ip4_output_opts(uint32_t saddr, uint32_t daddr, uint8_t protocol,
         o = &defaults;
     }
     int via_gw = 0;
-    netdev_t *dev = NULL;
-    /* UDP-API-12: IP_MULTICAST_IF picks the interface for group sends. */
-    if (ip4_is_mcast(daddr) && o->mcast_if) {
-        for (netdev_t *d = netdev_first(); d; d = netdev_next(d))
-            if ((d->flags & NETDEV_IFF_MULTICAST) && d->ip4_addr == o->mcast_if)
-                dev = d;
-    }
-    if (!dev) dev = route_for_v4(daddr, &via_gw);
+    netdev_t *dev = route_out4(daddr, o, &via_gw);
     if (!dev) return -ENETUNREACH;
     /*
      * UDP-IP-01: bound the datagram by the egress device's MTU, not by the
