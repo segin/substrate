@@ -453,7 +453,12 @@ int ip4_output_opts(uint32_t saddr, uint32_t daddr, uint8_t protocol,
     ih->ihl_version = (4 << 4) | 5;
     ih->tos = o->tos;                                  /* UDP-API-12 */
     ih->tot_len = __builtin_bswap16((uint16_t)(sizeof(*ih) + payload_len));
-    ih->id = __builtin_bswap16(++g_ip_id_counter);
+    /* One atomic increment per datagram: a plain ++ is a load and a store,
+     * and a send from interrupt context (tcp_input answering with a RST or
+     * ACK) landing between them stamps a second datagram with the same
+     * Identification (RFC 791 3.2). */
+    ih->id = __builtin_bswap16(
+        __atomic_add_fetch(&g_ip_id_counter, 1, __ATOMIC_RELAXED));
     ih->frag_off = 0;
     /* UDP-IP-06: RFC 1112 6.1 -- a multicast datagram defaults to TTL 1, so
      * a group send stays on the local link unless the sender asks. */
