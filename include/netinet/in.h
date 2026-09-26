@@ -145,6 +145,15 @@ extern const struct in6_addr in6addr_loopback;
 #define IP_OPTIONS              4
 #define IP_RECVOPTS             6
 #define IP_RETOPTS              7
+#define IP_MTU_DISCOVER         10
+
+/* IP_MTU_DISCOVER values.  Every mode but DONT sets Don't Fragment; WANT
+ * and DO also refuse a datagram larger than the path MTU (substrate never
+ * fragments on output); PROBE sends regardless. */
+#define IP_PMTUDISC_DONT        0
+#define IP_PMTUDISC_WANT        1
+#define IP_PMTUDISC_DO          2
+#define IP_PMTUDISC_PROBE       3
 #define IP_MULTICAST_IF         32
 #define IP_MULTICAST_TTL        33
 #define IP_MULTICAST_LOOP       34

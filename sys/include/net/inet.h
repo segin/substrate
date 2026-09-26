@@ -99,7 +99,17 @@ struct ip4_txopts {
     uint8_t  mcast_ttl;
     uint8_t  mcast_loop;    /* deliver our own group sends locally */
     uint32_t mcast_if;      /* interface address for group sends; 0 = route */
+    uint8_t  df;            /* IP_MTU_DISCOVER mode, IP4_PMTUDISC_* */
 };
+
+/* IP_MTU_DISCOVER modes (Linux numbering).  Every mode but DONT sets Don't
+ * Fragment; WANT and DO also refuse a datagram larger than the learned
+ * path MTU (we never fragment on output, so WANT behaves as DO); PROBE
+ * sends regardless.  TCP defaults to WANT, other sockets to DONT. */
+#define IP4_PMTUDISC_DONT   0
+#define IP4_PMTUDISC_WANT   1
+#define IP4_PMTUDISC_DO     2
+#define IP4_PMTUDISC_PROBE  3
 void ip4_txopts_init(struct ip4_txopts *o);
 /* ip4_output_from() with transmit options; NULL means the defaults. */
 int  ip4_output_opts(uint32_t saddr, uint32_t daddr, uint8_t protocol,
@@ -114,7 +124,14 @@ uint32_t ip4_source_for_opts(uint32_t daddr, const struct ip4_txopts *o);
 /* Broadcast or multicast: an address a socket may bind to receive on but
  * that is never a source. */
 int ip4_is_group_addr(uint32_t a);
-uint32_t ip4_path_mtu(uint32_t daddr);      /* TCP-HDR-04 */
+/* The MTU toward daddr: the egress interface's, or less if Path MTU
+ * Discovery has learned a smaller one; 0 when there is no route. */
+uint32_t ip4_path_mtu(uint32_t daddr);
+/* An ICMP "fragmentation needed" for daddr (RFC 1191): record the reported
+ * next-hop MTU, or when it is 0 the plateau below the dropped datagram's
+ * length, if it lowers the path MTU.  Returns the path MTU now in force. */
+uint32_t ip4_pmtu_update(uint32_t daddr, uint32_t next_hop_mtu,
+                         uint32_t dropped_len);
 int      ip6_source_for(const uint8_t daddr[16], uint8_t out[16]);
 
 /* -- IPv6 input/output ---------------------------------------------- */
@@ -159,6 +176,12 @@ void tcp_input(uint32_t saddr, uint32_t daddr, const uint8_t *pkt, size_t len);
  * with sequence number seq; hard: a hard error (RFC 1122 4.2.3.9). */
 void tcp_icmp_error(uint32_t laddr, uint16_t lport, uint32_t raddr,
                     uint16_t rport, uint32_t seq, int hard, int err);
+/* An ICMP "fragmentation needed" quoting a segment we sent (RFC 1191):
+ * if seq is in the connection's window, lower the path MTU, shrink the
+ * connection's MSS to fit and resend what no longer fits. */
+void tcp_pmtu_event(uint32_t laddr, uint16_t lport, uint32_t raddr,
+                    uint16_t rport, uint32_t seq, uint32_t next_hop_mtu,
+                    uint32_t dropped_len);
 
 /* UDP-RES-03 / UDP-RES-06: UDP counters, the Udp: line of Linux's
  * /proc/net/snmp, published as /proc/udpstat.  Every drop used to be

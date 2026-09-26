@@ -5,10 +5,10 @@
  * setsockopt() used to answer 0 for every IPPROTO_IP option it did not
  * recognise.  With IP_HDRINCL a raw socket's caller then built its own IP
  * header, which went out as payload behind a second, kernel-built one;
- * IP_MTU_DISCOVER claimed a DF policy no datagram carried.
+ * IP_RECVERR claimed an error queue that does not exist.
  *
  *   hdrincl      IP_HDRINCL on a raw socket fails ENOPROTOOPT
- *   mtudisc      IP_MTU_DISCOVER (Linux 10) on UDP fails ENOPROTOOPT
+ *   recverr      IP_RECVERR (Linux 11) on UDP fails ENOPROTOOPT
  *   unknown      an unassigned IPPROTO_IP option (99) fails ENOPROTOOPT
  *   ttl          IP_TTL still works and reads back
  *
@@ -24,7 +24,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-#define IP_MTU_DISCOVER_LINUX 10
+#define IP_RECVERR_LINUX 11
 
 static int failures;
 
@@ -53,7 +53,7 @@ int main(void) {
     }
 
     int u = socket(AF_INET, SOCK_DGRAM, 0);
-    expect_noprotoopt("mtudisc", u, IP_MTU_DISCOVER_LINUX);
+    expect_noprotoopt("recverr", u, IP_RECVERR_LINUX);
     expect_noprotoopt("unknown", u, 99);
 
     int ttl = 5, got = 0;

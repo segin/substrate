@@ -61,13 +61,27 @@ static void icmp_error_input(uint8_t type, uint8_t code,
     int err = type == ICMP_DEST_UNREACH  ? icmp_unreach_errno(code)
             : type == ICMP_TIME_EXCEEDED ? EHOSTUNREACH
             :                              EPROTO;
+    uint32_t seq = (uint32_t)ql4[4] << 24 | (uint32_t)ql4[5] << 16 |
+                   (uint32_t)ql4[6] << 8 | ql4[7];
+    /* Fragmentation needed and DF set: Path MTU Discovery (RFC 1191).  The
+     * next-hop MTU is the low half of the second word (RFC 1191 4).  TCP
+     * checks the quoted sequence number before it acts, so a forged
+     * message cannot shrink a connection it does not know; the MTU cache
+     * only ever takes reductions and forgets them in ten minutes. */
+    if (type == ICMP_DEST_UNREACH && code == ICMP_FRAG_NEEDED) {
+        uint32_t next_hop = (uint32_t)pkt[6] << 8 | pkt[7];
+        uint32_t dropped  = __builtin_bswap16(q->tot_len);
+        if (q->protocol == 6) {
+            tcp_pmtu_event(q->saddr, sport, q->daddr, dport, seq, next_hop,
+                           dropped);
+            return;
+        }
+        ip4_pmtu_update(q->daddr, next_hop, dropped);
+    }
     /* The quoted datagram is one we sent: its source is our end. */
     if (q->protocol == 6) {
-        uint32_t seq = (uint32_t)ql4[4] << 24 | (uint32_t)ql4[5] << 16 |
-                       (uint32_t)ql4[6] << 8 | ql4[7];
         int hard = type == ICMP_DEST_UNREACH &&
-                   (code == ICMP_PROT_UNREACH || code == ICMP_PORT_UNREACH ||
-                    code == ICMP_FRAG_NEEDED);
+                   (code == ICMP_PROT_UNREACH || code == ICMP_PORT_UNREACH);
         tcp_icmp_error(q->saddr, sport, q->daddr, dport, seq, hard, err);
         return;
     }

@@ -2157,6 +2157,93 @@ static uint16_t tcp_parse_mss(const uint8_t *o, size_t n) {
 }
 
 /*
+ * Split every queued segment carrying more than `mss` octets into
+ * contiguous segments of at most `mss`, so each can be retransmitted
+ * through the smaller path.  A SYN stays on the first piece, FIN and PSH
+ * on the last; the pieces keep the original's retransmission state.  If an
+ * allocation fails the rest of the queue is left as it is.  Caller holds
+ * tcp_lock.
+ */
+static void tcp_resegment_locked(tcp_pcb_t *p, uint32_t mss) {
+    tcp_seg_t *prev = NULL;
+    tcp_seg_t *s = p->unacked_head;
+    while (s) {
+        tcp_seg_t *next = s->next;
+        if (s->dlen <= mss) {
+            prev = s;
+            s = next;
+            continue;
+        }
+        tcp_seg_t *first = NULL, *last = NULL;
+        uint32_t seq = s->seq;
+        int ok = 1;
+        for (uint32_t off = 0; off < s->dlen; off += mss) {
+            uint32_t n = s->dlen - off < mss ? s->dlen - off : mss;
+            int is_first = off == 0, is_last = off + n >= s->dlen;
+            uint8_t flags = s->flags;
+            if (!is_first) flags &= (uint8_t)~TCP_SYN;
+            if (!is_last)  flags &= (uint8_t)~(TCP_FIN | TCP_PSH);
+            tcp_seg_t *piece = tcp_seg_alloc(flags, s->data + off, n);
+            if (!piece) {
+                ok = 0;
+                break;
+            }
+            piece->seq       = seq;
+            piece->sent_tick = s->sent_tick;
+            piece->retx      = s->retx;
+            piece->probe     = s->probe;
+            seq += tcp_seg_cost(flags, n);
+            if (last) last->next = piece; else first = piece;
+            last = piece;
+        }
+        if (!ok) {
+            while (first) {
+                tcp_seg_t *f = first->next;
+                kfree(first, sizeof(*first) + first->dlen);
+                first = f;
+            }
+            return;
+        }
+        last->next = next;
+        if (prev) prev->next = first; else p->unacked_head = first;
+        if (p->unacked_tail == s) p->unacked_tail = last;
+        kfree(s, sizeof(*s) + s->dlen);
+        prev = last;
+        s = next;
+    }
+}
+
+/*
+ * ICMP "fragmentation needed" about a segment we sent (RFC 1191).  Believed
+ * only when the quoted sequence number is one we have sent and not yet had
+ * acknowledged (RFC 5927 4.1).  The path MTU is lowered, the connection's
+ * MSS recomputed from it, anything queued that no longer fits is split,
+ * and the head is resent at once -- the router dropped it, so waiting for
+ * the retransmission timer would only stall the connection.
+ */
+void tcp_pmtu_event(uint32_t laddr, uint16_t lport, uint32_t raddr,
+                    uint16_t rport, uint32_t seq, uint32_t next_hop_mtu,
+                    uint32_t dropped_len) {
+    uint32_t f = tcp_lock();
+    tcp_pcb_t *p = tcp_find(raddr, rport, laddr, lport);
+    if (!p || p->state == TCP_LISTEN || p->raddr != raddr ||
+        p->rport != rport || (int32_t)(seq - p->snd_una) < 0 ||
+        (int32_t)(seq - p->snd_nxt) >= 0) {
+        tcp_unlock(f);
+        return;
+    }
+    uint32_t old_mss = tcp_eff_mss(p);
+    ip4_pmtu_update(raddr, next_hop_mtu, dropped_len);
+    tcp_set_mtu_mss(p);
+    uint32_t mss = tcp_eff_mss(p);
+    if (mss < old_mss) {
+        tcp_resegment_locked(p, mss);
+        tcp_retx_head(p, 1);
+    }
+    tcp_unlock(f);
+}
+
+/*
  * An ICMP error quoting a segment we sent: laddr/lport are our end, as the
  * quoted header named them, and seq the quoted sequence number.  It is
  * believed only when that sequence number is one we have sent and not yet
@@ -2236,6 +2323,7 @@ tcp_pcb_t *tcp_alloc(void) {
     memset(p, 0, sizeof(*p));
     p->state = TCP_CLOSED;
     ip4_txopts_init(&p->txo);
+    p->txo.df = IP4_PMTUDISC_WANT;      /* RFC 1191: TCP discovers the path */
     p->rxbuf = (uint8_t *)kmalloc(TCP_RING_LEN);
     if (!p->rxbuf) { kfree(p, sizeof(*p)); return NULL; }
     p->rcv_wnd      = TCP_RING_LEN;

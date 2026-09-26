@@ -2825,9 +2825,10 @@ int sys_setsockopt(int fd, int level, int optname,
      * IP_MULTICAST_TTL (33), IP_MULTICAST_LOOP (34).  Values come as an int
      * or, as BSD code often passes them, a single u_char; IP_MULTICAST_IF
      * takes a struct in_addr, a struct ip_mreq, or a Linux struct ip_mreqn
-     * whose ifindex names the interface. */
+     * whose ifindex names the interface.  IP_MTU_DISCOVER (10) takes an
+     * int mode. */
     if (level == 0 /*IPPROTO_IP*/ &&
-        (optname == 1 || optname == 2 || optname == 8 ||
+        (optname == 1 || optname == 2 || optname == 8 || optname == 10 ||
          (optname >= 32 && optname <= 34))) {
         int val = 0;
         uint32_t addr = 0;
@@ -3063,7 +3064,7 @@ int sys_getsockopt(int fd, int level, int optname,
     /* UDP-API-12: the IPPROTO_IP transmit options read back what was set
      * (getsockopt(IP_TTL) used to answer 0). */
     if (level == 0 /*IPPROTO_IP*/ &&
-        (optname == 1 || optname == 2 || optname == 8 ||
+        (optname == 1 || optname == 2 || optname == 8 || optname == 10 ||
          (optname >= 32 && optname <= 34))) {
         int val = 0;
         uint32_t addr = 0;

@@ -1146,6 +1146,9 @@ int afinet_socket(int family, int type, int protocol) {
     s->family = family;
     s->owner_uid = current_process ? current_process->euid : 0;
     ip4_txopts_init(&s->txo);
+    /* TCP discovers the path MTU (RFC 1191): its segments carry DF. */
+    if (type == SOCK_STREAM)
+        s->txo.df = IP4_PMTUDISC_WANT;
     s->type = type;
     s->protocol = protocol;
     s->refcount = 1;                 /* NET-01: the installed reference */
@@ -1451,6 +1454,11 @@ int afinet_set_ipopt(int fd, int optname, int val, uint32_t addr) {
     case 34: /* IP_MULTICAST_LOOP */
         o.mcast_loop = val ? 1 : 0;
         break;
+    case 10: /* IP_MTU_DISCOVER: DONT, WANT, DO or PROBE */
+        if (val < IP4_PMTUDISC_DONT || val > IP4_PMTUDISC_PROBE)
+            return -EINVAL;
+        o.df = (uint8_t)val;
+        break;
     default:
         return -ENOPROTOOPT;
     }
@@ -1536,6 +1544,7 @@ int afinet_get_ipopt(int fd, int optname, int *val, uint32_t *addr) {
     case 32: *val = 0; *addr = s->txo.mcast_if; break;
     case 33: *val = s->txo.mcast_ttl; break;
     case 34: *val = s->txo.mcast_loop; break;
+    case 10: *val = s->txo.df; break;           /* IP_MTU_DISCOVER */
     default: return -ENOPROTOOPT;
     }
     return 0;

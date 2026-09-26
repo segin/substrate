@@ -292,10 +292,110 @@ uint32_t ip4_source_for(uint32_t daddr) {
 
 /* TCP-HDR-04: the MTU of the interface a datagram to daddr would leave by,
  * or 0 when there is no route. */
+/*
+ * Path MTU Discovery (RFC 1191): the smallest MTU learned for a destination
+ * from ICMP "fragmentation needed" messages, below the egress interface's.
+ * An entry ages out after IP4_PMTU_TICKS so a path that has grown is
+ * rediscovered (RFC 1191 6.3 suggests ten minutes).  The table is small and
+ * a full one evicts its oldest entry.
+ */
+#define IP4_PMTU_SLOTS  16
+#define IP4_PMTU_TICKS  ((uint64_t)600 * HZ)
+#define IP4_MIN_MTU     68                      /* RFC 791 3.2 */
+/* The least path MTU a report may impose, as Linux's min_pmtu: an ICMP
+ * message about a UDP datagram cannot be checked against any state, so a
+ * forged one could otherwise shrink every later connection to a host to
+ * 28-octet segments.  A report below this pins the path here and "locks"
+ * it: WANT-mode sockets then send to it without DF, so a real path that
+ * small still works through fragmentation by its routers. */
+#define IP4_PMTU_FLOOR  552
+
+static struct {
+    uint32_t daddr;             /* network byte order; 0 = free */
+    uint32_t mtu;
+    uint8_t  locked;            /* reported below IP4_PMTU_FLOOR */
+    uint64_t born;
+} g_pmtu[IP4_PMTU_SLOTS];
+static spinlock_t g_pmtu_lock = SPINLOCK_INIT("ip4_pmtu");
+
+/* The learned MTU toward daddr, or 0 when none is current; *locked says
+ * whether it is pinned at the floor. */
+static uint32_t ip4_pmtu_lookup(uint32_t daddr, int *locked) {
+    uint32_t mtu = 0;
+    uint64_t now = get_ticks();
+    if (locked) *locked = 0;
+    unsigned long f = spinlock_acquire_irq(&g_pmtu_lock);
+    for (int i = 0; i < IP4_PMTU_SLOTS; i++) {
+        if (g_pmtu[i].daddr != daddr)
+            continue;
+        if (now - g_pmtu[i].born >= IP4_PMTU_TICKS) {
+            g_pmtu[i].daddr = 0;                /* expired */
+        } else {
+            mtu = g_pmtu[i].mtu;
+            if (locked) *locked = g_pmtu[i].locked;
+        }
+        break;
+    }
+    spinlock_release_irq(&g_pmtu_lock, f);
+    return mtu;
+}
+
 uint32_t ip4_path_mtu(uint32_t daddr) {
     int via_gw = 0;
     netdev_t *dev = route_for_v4(daddr, &via_gw);
-    return dev ? dev->mtu : 0;
+    if (!dev)
+        return 0;
+    uint32_t mtu = dev->mtu;
+    uint32_t learned = ip4_pmtu_lookup(daddr, NULL);
+    if (learned && learned < mtu)
+        mtu = learned;
+    return mtu;
+}
+
+/* RFC 1191 7: MTU plateaus, for a router that reports a next-hop MTU of 0
+ * (an RFC 792 router): the largest plateau below the datagram it dropped. */
+static uint32_t ip4_pmtu_plateau(uint32_t tot_len) {
+    static const uint16_t plateau[] = {
+        32000, 17914, 8166, 4352, 2002, 1492, 1006, 508, 296, IP4_MIN_MTU,
+    };
+    for (size_t i = 0; i < sizeof(plateau) / sizeof(plateau[0]); i++)
+        if (plateau[i] < tot_len)
+            return plateau[i];
+    return IP4_MIN_MTU;
+}
+
+uint32_t ip4_pmtu_update(uint32_t daddr, uint32_t next_hop_mtu,
+                         uint32_t dropped_len) {
+    uint32_t mtu = next_hop_mtu ? next_hop_mtu : ip4_pmtu_plateau(dropped_len);
+    int locked = 0;
+    if (mtu < IP4_PMTU_FLOOR) {
+        mtu = IP4_PMTU_FLOOR;
+        locked = 1;
+    }
+    uint32_t cur = ip4_path_mtu(daddr);
+    if (!cur || mtu > cur || (mtu == cur && !locked))
+        return cur;             /* no route, or not a reduction: ignore */
+    uint64_t now = get_ticks();
+    unsigned long f = spinlock_acquire_irq(&g_pmtu_lock);
+    int slot = -1, oldest = 0;
+    for (int i = 0; i < IP4_PMTU_SLOTS; i++) {
+        if (g_pmtu[i].daddr == daddr) {
+            slot = i;
+            break;
+        }
+        if (slot < 0 && !g_pmtu[i].daddr)
+            slot = i;
+        if (g_pmtu[i].born < g_pmtu[oldest].born)
+            oldest = i;
+    }
+    if (slot < 0)
+        slot = oldest;
+    g_pmtu[slot].daddr  = daddr;
+    g_pmtu[slot].mtu    = mtu;
+    g_pmtu[slot].locked = (uint8_t)locked;
+    g_pmtu[slot].born   = now;
+    spinlock_release_irq(&g_pmtu_lock, f);
+    return mtu;
 }
 
 int ip4_output(uint32_t daddr, uint8_t protocol,
@@ -320,6 +420,7 @@ void ip4_txopts_init(struct ip4_txopts *o) {
     o->mcast_ttl = 1;
     o->mcast_loop = 1;
     o->mcast_if = 0;
+    o->df = IP4_PMTUDISC_DONT;
 }
 
 int ip4_output_from(uint32_t saddr, uint32_t daddr, uint8_t protocol,
@@ -353,6 +454,20 @@ int ip4_output_opts(uint32_t saddr, uint32_t daddr, uint8_t protocol,
      */
     if (dev->mtu && payload_len > dev->mtu - sizeof(struct iphdr))
         return -EMSGSIZE;
+    /* With Don't Fragment set, a datagram larger than the learned path MTU
+     * would only be dropped by the router that reported it; refuse it here
+     * so the sender learns at once (RFC 1191 5). */
+    int set_df = o->df != IP4_PMTUDISC_DONT;
+    if (set_df && !(dev->flags & NETDEV_IFF_LOOPBACK)) {
+        int locked;
+        uint32_t pmtu = ip4_pmtu_lookup(daddr, &locked);
+        if (locked && o->df == IP4_PMTUDISC_WANT) {
+            set_df = 0;         /* path below the floor: let routers fragment */
+        } else if (o->df != IP4_PMTUDISC_PROBE && pmtu &&
+                   payload_len > pmtu - sizeof(struct iphdr)) {
+            return -EMSGSIZE;
+        }
+    }
     /* RFC 791 3.3: the source must be one of this host's addresses.  A
      * caller-supplied one is checked against the interfaces as they are
      * now: a socket bound to a broadcast or multicast address, or to an
@@ -401,10 +516,13 @@ int ip4_output_opts(uint32_t saddr, uint32_t daddr, uint8_t protocol,
     /* One atomic increment per datagram: a plain ++ is a load and a store,
      * and a send from interrupt context (tcp_input answering with a RST or
      * ACK) landing between them stamps a second datagram with the same
-     * Identification (RFC 791 3.2). */
-    ih->id = __builtin_bswap16(
+     * Identification (RFC 791 3.2).  A datagram that never leaves the host
+     * cannot be fragmented or confused with another host's, so loopback
+     * takes none: it used to drain the 16-bit space other destinations
+     * need unique within a reassembly lifetime (RFC 6864 4.1). */
+    ih->id = (dev->flags & NETDEV_IFF_LOOPBACK) ? 0 : __builtin_bswap16(
         __atomic_add_fetch(&g_ip_id_counter, 1, __ATOMIC_RELAXED));
-    ih->frag_off = 0;
+    ih->frag_off = set_df ? __builtin_bswap16(0x4000) : 0;      /* IP_DF */
     /* UDP-IP-06: RFC 1112 6.1 -- a multicast datagram defaults to TTL 1, so
      * a group send stays on the local link unless the sender asks. */
     ih->ttl = ip4_is_mcast(daddr) ? o->mcast_ttl : o->ttl;   /* UDP-API-12 */

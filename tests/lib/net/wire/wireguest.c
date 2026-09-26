@@ -116,6 +116,7 @@
  *   ifaddr:A     SIOCSIFADDR eth0 A
  *   netmask:M    SIOCSIFNETMASK eth0 M
  *   hwaddr:MAC   SIOCSIFHWADDR eth0 MAC (aa:bb:cc:dd:ee:ff)
+ *   pmtudisc:N   setsockopt(IP_MTU_DISCOVER, N)
  *
  * A leading "mtu=N" argument first sets eth0's MTU (SIOCSIFMTU); a leading
  * "ifaddr0" (after it, if both) first clears eth0's address, leaving the
@@ -359,6 +360,11 @@ static int do_actions(int fd, int argc, char **argv) {
             int r = ioctl(fd, is_mask ? SIOCSIFNETMASK : SIOCSIFADDR, &ifr);
             say(is_mask ? "netmask %s rc=%ld" : "ifaddr %s rc=%ld",
                 r < 0 ? strerror(errno) : "ok", r);
+        } else if (strncmp(a, "pmtudisc:", 9) == 0) {
+            int mode = atoi(a + 9);
+            int r = setsockopt(fd, IPPROTO_IP, 10 /* IP_MTU_DISCOVER */,
+                               &mode, sizeof mode);
+            say("pmtudisc %s rc=%ld", r < 0 ? strerror(errno) : "ok", r);
         } else if (strncmp(a, "hwaddr:", 7) == 0) {
             struct ifreq ifr;
             memset(&ifr, 0, sizeof ifr);
