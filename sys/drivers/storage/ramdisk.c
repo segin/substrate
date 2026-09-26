@@ -15,7 +15,7 @@ static int ramdisk_count = 0;
 // Read callback
 static int ramdisk_read(blkdev_t *dev, uint64_t sector, uint32_t count, void *buffer) {
     void *addr = dev->priv;
-    /* RAM-01: a bare -1 surfaces in userland as EPERM.  No backing store is
+    /* A bare -1 surfaces in userland as EPERM.  No backing store is
      * ENXIO; an out-of-range request is EINVAL. */
     if (!addr) return -ENXIO;
     

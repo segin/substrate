@@ -28,7 +28,7 @@ int ide_prdt_build_entries(prdt_entry_t *prdt, size_t max_entries,
     while (remaining > 0 && entry < max_entries) {
         uint32_t region_size = remaining;
         /*
-         * [IDE-18] Distance to the next 64 KiB boundary, computed as an
+         * Distance to the next 64 KiB boundary, computed as an
          * OFFSET rather than an absolute address.
          *
          * This used to be
@@ -62,7 +62,7 @@ int ide_prdt_build_entries(prdt_entry_t *prdt, size_t max_entries,
         remaining -= region_size;
         entry++;
 
-        /* [IDE-18] A transfer ending exactly at the 4 GiB mark leaves
+        /* A transfer ending exactly at the 4 GiB mark leaves
          * phys_addr wrapped to 0.  That is fine only if nothing is left to
          * describe; otherwise the next entry would point at physical 0. */
         if (phys_addr + region_size < phys_addr) {
@@ -92,7 +92,7 @@ int ide_prdt_build_entries(prdt_entry_t *prdt, size_t max_entries,
  * a 64KB boundary (guaranteed by the page-aligned ide_prdts[] slot).
  */
 /*
- * [IDE-05] Translate a DIRECT-MAPPED kernel virtual address to physical.
+ * Translate a DIRECT-MAPPED kernel virtual address to physical.
  *
  * This used to call pmap_extract(pmap_kernel(), va).  pmap_extract opens with
  *
@@ -132,7 +132,7 @@ int ide_prdt_setup(uint8_t channel, void *buffer, uint32_t byte_count) {
     entry = 0;
 
     /*
-     * [IDE-16] Build the PRDT, COALESCING physically adjacent pages.
+     * Build the PRDT, COALESCING physically adjacent pages.
      *
      * This used to emit one entry per page fragment unconditionally, so a
      * 128 KiB transfer needed 33 entries against MAX_PRD_ENTRIES 32, returned
@@ -154,7 +154,7 @@ int ide_prdt_setup(uint8_t channel, void *buffer, uint32_t byte_count) {
             return IDE_DMA_UNSUPPORTED;
         }
 
-        phys = ide_kva_to_phys(va);      /* [IDE-05] */
+        phys = ide_kva_to_phys(va);
         if (phys == 0) {
             return -1;
         }
@@ -213,7 +213,7 @@ int ide_prdt_setup(uint8_t channel, void *buffer, uint32_t byte_count) {
     ide_prdts[channel][entry - 1].eot = 1;
 
     /* Program PRDT base address into Bus Master */
-    prdt_phys = ide_kva_to_phys((uintptr_t)ide_prdts[channel]);   /* [IDE-05] */
+    prdt_phys = ide_kva_to_phys((uintptr_t)ide_prdts[channel]);
     if (prdt_phys == 0) {
         return -1;
     }
@@ -230,7 +230,7 @@ int ide_prdt_setup(uint8_t channel, void *buffer, uint32_t byte_count) {
 
 void ide_bm_start(uint8_t channel, int write) {
     uint8_t cmd = BM_CMD_START;
-    /* [IDE-03] RWCON describes the PCI side: set it when the bus master must
+    /* RWCON describes the PCI side: set it when the bus master must
      * WRITE to memory, which is a disk READ.  This was inverted. */
     if (!write) {
         cmd |= BM_CMD_RWCON;
@@ -315,7 +315,7 @@ int ide_dma_read(uint8_t channel, uint8_t drive, uint64_t lba,
             if (ide_debug_enabled()) {
                 kprintf("ide: dma-read prdt setup failed ch=%u (%d)\n", channel, pr);
             }
-            /* [IDE-16] -2 means OUR descriptor table ran out of entries for a
+            /* -2 means OUR descriptor table ran out of entries for a
              * badly fragmented buffer.  That is not a device fault, so pass it
              * up distinctly: the caller falls back to PIO for this request
              * without permanently demoting the drive. */
@@ -323,7 +323,7 @@ int ide_dma_read(uint8_t channel, uint8_t drive, uint64_t lba,
         }
     }
 
-    /* Clear status and set direction.  [IDE-03] A disk read means the bus
+    /* Clear status and set direction.  A disk read means the bus
      * master writes into memory, i.e. RWCON = 1. */
     ide_bm_clear_interrupt(channel);
     ide_bm_write8(channel, BM_REG_COMMAND, BM_CMD_RWCON);
@@ -393,7 +393,7 @@ int ide_dma_read(uint8_t channel, uint8_t drive, uint64_t lba,
     ide_bm_clear_interrupt(channel);
 
     /*
-     * [IDE-11] BM_STAT_ACTIVE still set with no error bit means the engine
+     * BM_STAT_ACTIVE still set with no error bit means the engine
      * never reached end-of-transfer: the PRDT was not exhausted, so part of
      * the buffer holds whatever was in it before.  Checking only the error
      * bits let that short transfer be cached as valid data.
@@ -430,7 +430,7 @@ int ide_dma_write(uint8_t channel, uint8_t drive, uint64_t lba,
             if (ide_debug_enabled()) {
                 kprintf("ide: dma-write prdt setup failed ch=%u (%d)\n", channel, pr);
             }
-            /* [IDE-16] -2 means OUR descriptor table ran out of entries for a
+            /* -2 means OUR descriptor table ran out of entries for a
              * badly fragmented buffer.  That is not a device fault, so pass it
              * up distinctly: the caller falls back to PIO for this request
              * without permanently demoting the drive. */
@@ -438,7 +438,7 @@ int ide_dma_write(uint8_t channel, uint8_t drive, uint64_t lba,
         }
     }
 
-    /* Clear status and set direction.  [IDE-03] A disk write means the bus
+    /* Clear status and set direction.  A disk write means the bus
      * master reads from memory, i.e. RWCON = 0. */
     ide_bm_clear_interrupt(channel);
     ide_bm_write8(channel, BM_REG_COMMAND, 0);
@@ -503,7 +503,7 @@ int ide_dma_write(uint8_t channel, uint8_t drive, uint64_t lba,
     ide_bm_clear_interrupt(channel);
 
     /*
-     * [IDE-11] BM_STAT_ACTIVE still set with no error bit means the engine
+     * BM_STAT_ACTIVE still set with no error bit means the engine
      * never reached end-of-transfer: the PRDT was not exhausted, so part of
      * the buffer holds whatever was in it before.  Checking only the error
      * bits let that short transfer be cached as valid data.

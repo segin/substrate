@@ -81,7 +81,7 @@ typedef struct nvme_controller {
     uint16_t vendor_id;
     uint16_t device_id;
     volatile uint8_t *mmio;
-    /* NVME-06: size of the BAR0 mapping, so doorbell offsets can be checked
+    /* Size of the BAR0 mapping, so doorbell offsets can be checked
      * against what is actually mapped.  0 means "unknown", in which case the
      * fixed 1 MiB bound alone applies. */
     uint32_t mmio_size;

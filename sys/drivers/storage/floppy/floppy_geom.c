@@ -1,7 +1,7 @@
 #include <drivers/storage/floppy/floppy.h>
 
 /*
- * FDC-04: the CCR data-rate codes were wrong for two entries.
+ * CCR data-rate codes.  Two entries used to be wrong.
  *
  * The code selects the controller's data rate: 0 = 500 kbps, 1 = 300 kbps,
  * 2 = 250 kbps, 3 = 1 Mbps.

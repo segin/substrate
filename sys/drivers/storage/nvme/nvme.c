@@ -78,7 +78,7 @@ static uint32_t nvme_mmio_read32(volatile uint8_t *mmio, uint32_t reg) {
 }
 
 /*
- * NVME-06: a doorbell offset that does not fit the mapped register window is
+ * A doorbell offset that does not fit the mapped register window is
  * an error, not something to substitute for.  The guards below used to
  * return NVME_REG_DBS -- the ADMIN submission-queue doorbell -- so an
  * out-of-range qid silently rang the admin queue instead, corrupting its
@@ -89,7 +89,7 @@ static uint32_t nvme_mmio_read32(volatile uint8_t *mmio, uint32_t reg) {
 
 static void nvme_mmio_write32(volatile uint8_t *mmio, uint32_t reg, uint32_t value) {
     if (reg == NVME_REG_INVALID) {
-        return;                     /* NVME-06: refuse, never alias */
+        return;                     /* refuse, never alias */
     }
 #ifdef HOST_TEST
     nvme_test_mmio_write32(mmio, reg, value);
@@ -104,7 +104,7 @@ static void nvme_mmio_write64(volatile uint8_t *mmio, uint32_t reg, uint64_t val
     nvme_mmio_write32(mmio, reg + 4U, (uint32_t)(value >> 32));
 }
 
-/* NVME-06: `>=`, not `>` -- an offset exactly at the bound is already past
+/* `>=`, not `>` -- an offset exactly at the bound is already past
  * the last addressable doorbell.  And the mapped window must actually cover
  * it, which the old guard never checked at all. */
 static uint32_t nvme_doorbell_reg(const nvme_controller_t *ctrl, uint32_t index) {
@@ -211,13 +211,13 @@ static int nvme_admin_submit_sync(nvme_controller_t *ctrl,
     *cqe = cq[head];
 
     /*
-     * NVME-03: CONSUME the entry before judging it.  A non-zero status or a
+     * CONSUME the entry before judging it.  A non-zero status or a
      * cid mismatch used to return here -- before advancing cq_head, flipping
      * the phase, or ringing the doorbell -- so the CQE was never consumed and
      * every subsequent admin command re-read the same stale completion.  The
      * first non-fatal device error killed bring-up permanently.
      *
-     * NVME-02: and do NOT memset the consumed entry.  Zeroing it makes an
+     * And do NOT memset the consumed entry.  Zeroing it makes an
      * unwritten slot indistinguishable from a phase-0 completion, so on the
      * second lap of the queue the poll above exits immediately on a zeroed
      * slot with status 0 and a matching cid.  The phase bit is the only
@@ -545,7 +545,7 @@ int nvme_identify_namespaces(nvme_controller_t *ctrl) {
     ctrl->namespace_count = 0;
     found = 0;
     /*
-     * NVME-05: Identify's NN field is a COUNT of namespaces, not the highest
+     * Identify's NN field is a COUNT of namespaces, not the highest
      * valid NSID, and it was used verbatim as an unbounded loop bound -- a
      * controller reporting 0xFFFFFFFF sent us into 4.29 billion admin
      * commands.  Proper enumeration is the Active Namespace ID list
@@ -585,7 +585,7 @@ int nvme_identify_namespaces(nvme_controller_t *ctrl) {
         }
 
         /*
-         * NVME-01: LBA Format descriptors are FOUR bytes each, not sixteen.
+         * LBA Format descriptors are FOUR bytes each, not sixteen.
          * The 16-byte stride meant only LBAF 0 landed on a real descriptor;
          * a 4096-byte-block drive (FLBAS=1) read garbage, yielding either
          * block_size 0 (drive looks dead) or 512 while the medium is really
@@ -593,7 +593,7 @@ int nvme_identify_namespaces(nvme_controller_t *ctrl) {
          * NLBAF (byte 25) is the index of the LAST valid format, so a
          * FLBAS naming anything past it is invalid.
          *
-         * NVME-09: bound the shift to what a block device can actually be.
+         * Bound the shift to what a block device can actually be.
          * The old `>= 32` guard admitted absurd values; a 512-byte to 4 KiB
          * sector is the real range, and anything else is a parse error.
          */
@@ -679,7 +679,7 @@ static int nvme_io_submit_sync(nvme_controller_t *ctrl,
 
     *cqe = cq[head];
 
-    /* NVME-02/03 (I/O-queue twin of the admin path): consume the CQE before
+    /* As on the admin path: consume the CQE before
      * judging it, and never zero a consumed entry -- the phase bit is the
      * only valid liveness indicator. */
     q->cq_head = (uint16_t)((head + 1U) % q->cq_entries);
@@ -977,7 +977,7 @@ static int nvme_io_rw(nvme_controller_t *ctrl, uint8_t opcode, uint32_t nsid,
     }
 
     /*
-     * NVME-09: compute in 64 bits.  This was a 32-bit multiply, so a large
+     * Compute in 64 bits.  This was a 32-bit multiply, so a large
      * block_size combined with a non-trivial nblocks wrapped -- and a wrapped
      * (small) expected_bytes passes the buffer_len check below while the
      * device is asked to transfer far more than the buffer holds.  The

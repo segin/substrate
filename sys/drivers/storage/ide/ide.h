@@ -151,7 +151,7 @@
 /* Bus Master Command Register bits */
 #define BM_CMD_START       0x01  /* Start/Stop DMA */
 /*
- * [IDE-03] Bus Master IDE Command register bit 3, "Read or Write Control"
+ * Bus Master IDE Command register bit 3, "Read or Write Control"
  * (RWCON) in SFF-8038i.  It names the direction of the PCI-SIDE transfer,
  * not the disk-side one, and the two are opposites:
  *
@@ -196,7 +196,7 @@ typedef struct __attribute__((packed)) {
 #define MAX_PRD_ENTRIES 32
 
 /*
- * [IDE-16] ide_dma_read/ide_dma_write return this when the transfer could not
+ * ide_dma_read/ide_dma_write return this when the transfer could not
  * be described by a PRDT of MAX_PRD_ENTRIES entries.  Distinct from -1 so the
  * caller retries in PIO for that one request instead of calling
  * ide_disable_device_dma(), which is permanent.
@@ -333,7 +333,7 @@ int ide_atapi_packet(uint8_t channel, uint8_t drive,
                      void *buffer, uint32_t buffer_len, int write);
 int ide_atapi_read_capacity(uint8_t channel, uint8_t drive, 
                             uint32_t *lba, uint32_t *block_size);
-/* IDE-02: ATAPI media is not always 2048-byte-sectored; the _ss form takes
+/* ATAPI media is not always 2048-byte-sectored; the _ss form takes
  * the size the probe negotiated from READ CAPACITY.  The plain form keeps
  * the historical 2048 default for callers that have no better answer. */
 #define ATAPI_DEFAULT_SECTOR_SIZE 2048u

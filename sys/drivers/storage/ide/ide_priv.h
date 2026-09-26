@@ -78,7 +78,7 @@ int ide_wait_drq(uint8_t channel, uint32_t timeout_ms, const char *op);
  *     command and must be reported as a failure.
  *  0  the wait precedes issuing a new command.  ATA leaves ERR/DF latched
  *     from the PREVIOUS command until a new one is written to the command
- *     register, so treating it as failure here (IDE-09) let a single media
+ *     register, so treating it as failure here let a single media
  *     error block every subsequent command on the channel.
  */
 int ide_wait_ready_ex(uint8_t channel, int timeout_ms, const char *op,

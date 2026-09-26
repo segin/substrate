@@ -46,7 +46,7 @@ int ide_atapi_packet(uint8_t channel, uint8_t drive,
     if (ide_wait_ready_ex(channel, IDE_TIMEOUT_PACKET_MS, "packet-select", 0) < 0) return -1;
 
     /*
-     * [IDE-07] The byte-count limit is a 16-bit field split across LBA_MID
+     * The byte-count limit is a 16-bit field split across LBA_MID
      * and LBA_HIGH.  buffer_len is 32-bit and was written straight in with
      * `& 0xFF` / `>> 8 & 0xFF`, discarding bits 16 and up: a 256-sector CD
      * read-ahead (524288 bytes) programmed a BCL of 0x0000, which is
@@ -67,7 +67,7 @@ int ide_atapi_packet(uint8_t channel, uint8_t drive,
     /* Issue PACKET command */
     ide_write_reg(channel, ATA_REG_COMMAND, ATA_CMD_PACKET);
 
-    /* [IDE-17] The command register write needs the 400 ns settle before
+    /* The command register write needs the 400 ns settle before
      * STATUS is meaningful; without it the first read can still show the
      * pre-command state and the ATAPI path returns a spurious error. */
     ide_400ns(channel);
@@ -103,7 +103,7 @@ int ide_atapi_packet(uint8_t channel, uint8_t drive,
     /* Data transfer phase */
     uint16_t *buf = (uint16_t *)buffer;
     uint32_t transferred = 0;
-    int short_transfer = 0;   /* [IDE-08] */
+    int short_transfer = 0;   /* data the buffer could not hold */
 
     while (transferred < buffer_len) {
         /* Wait for DRQ or completion */
@@ -127,7 +127,7 @@ int ide_atapi_packet(uint8_t channel, uint8_t drive,
 
         /* Transfer data */
         /*
-         * [IDE-08] The device dictates byte_count; it can exceed what is
+         * The device dictates byte_count; it can exceed what is
          * left of the caller's buffer, or be odd.  The old code clamped
          * `words` and then `break`'d when the clamp reached zero -- walking
          * away with DRQ still asserted and data pending in the drive, so the
@@ -186,7 +186,7 @@ int ide_atapi_packet(uint8_t channel, uint8_t drive,
         return -1;
 
     /*
-     * [IDE-08] The data phase completed (DRQ has dropped, because everything
+     * The data phase completed (DRQ has dropped, because everything
      * the drive declared was consumed above), but some of it could not be
      * stored in the caller's buffer.  Report that rather than claiming a
      * full transfer -- the drive is now in a sane state either way, which is
@@ -245,7 +245,7 @@ int ide_atapi_read_sectors(uint8_t channel, uint8_t drive,
 }
 
 /*
- * IDE-02: the transfer length has to come from the device's OWN sector size.
+ * The transfer length has to come from the device's OWN sector size.
  *
  * This used to compute `count * 2048` unconditionally while the probe path
  * (ide_refresh_device_slot) correctly takes the size from READ CAPACITY and

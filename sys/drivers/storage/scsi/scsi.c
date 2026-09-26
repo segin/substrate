@@ -266,7 +266,7 @@ int scsi_device_register(scsi_device_t *dev) {
 void scsi_device_unregister(scsi_device_t *dev) {
     if (!dev) return;
 
-    /* SCSI-06: drop the /dev/storage/scsi/B:T:L node first, so no ioctl can
+    /* Drop the /dev/storage/scsi/B:T:L node first, so no ioctl can
      * reach a scsi_device_t that is on its way out. */
     scsi_destroy_generic_node(dev);
     
@@ -467,7 +467,7 @@ int scsi_execute(scsi_request_t *req) {
     }
     
     /*
-     * SCSI-11: report the REQUEST's outcome, not the transport's.
+     * Report the REQUEST's outcome, not the transport's.
      *
      * `ret` is what the transport returned for the last attempt.  A command
      * that exhausted its retries and landed in SCSI_REQ_STATE_ERROR still
@@ -684,7 +684,7 @@ int scsi_inquiry(scsi_device_t *dev, struct scsi_inquiry_data *inq) {
 }
 
 /*
- * SCSI-09: a capacity is device-supplied data and has to be treated as such.
+ * A capacity is device-supplied data and has to be treated as such.
  *
  * A sector size of 0 divides by zero in every geometry calculation above
  * this; 0xFFFFFFFF (or any absurd value) multiplies out to a nonsense
@@ -707,7 +707,7 @@ int scsi_read_capacity(scsi_device_t *dev, uint64_t *sectors, uint32_t *sector_s
     struct scsi_read_capacity_10 cap;
 
     /*
-     * SCSI-09: zero the buffer first.  A transport that reports success
+     * Zero the buffer first.  A transport that reports success
      * without actually transferring data (a short read, or a stub that only
      * checks the command) left this stack struct uninitialised and its
      * contents were parsed as a capacity -- so the device size came from

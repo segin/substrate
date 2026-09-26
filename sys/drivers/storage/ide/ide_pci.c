@@ -23,7 +23,7 @@ static uintptr_t ide_pci_bar_base(const pci_device_t *pdev, int bar) {
     }
 
     /*
-     * [IDE-14] Bit 0 clear means this is a MEMORY BAR.  The old code masked
+     * Bit 0 clear means this is a MEMORY BAR.  The old code masked
      * off the low nibble and returned it anyway, and ide_pci_apply_channel
      * truncates the result to uint16_t -- so a memory BAR at 0xFEBF1F00
      * became "io_base 0x1F00" and the driver started doing inb/outb against

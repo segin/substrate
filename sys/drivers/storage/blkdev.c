@@ -21,7 +21,7 @@
  */
 #define BLKDEV_RA_MIN   16
 #define BLKDEV_RA_MAX   256
-/* BLK-09: past this many sectors, invalidating a range one sector at a time
+/* Past this many sectors, invalidating a range one sector at a time
  * costs more than purging the device's whole cache. */
 #define BLKDEV_INVAL_MAX 1024
 
@@ -141,9 +141,8 @@ void blkdev_unregister(blkdev_t *dev) {
      * I/O still works, so their force-unmounts can flush.  geom_unregister_
      * disk() unregisters + frees each partition blkdev (force-unmount, devfs
      * removal, bio-cache purge) and drops the disk from the GEOM lists.  The
-     * GEOM disk is embedded in the kmalloc'd provider, which we free after
-     * (DRV-14).  Partition blkdevs have dev->geom == NULL, so this does not
-     * recurse. */
+     * GEOM disk is embedded in the kmalloc'd provider, which we free after.
+     * Partition blkdevs have dev->geom == NULL, so this does not recurse. */
     if (dev->geom) {
         geom_disk_t *disk = dev->geom;
         blkdev_geom_provider_t *provider =
@@ -189,7 +188,7 @@ void blkdev_unregister(blkdev_t *dev) {
     bio_dev_purge(dev);
 
     /*
-     * BLK-04: wait for any in-flight prefetch to let go of ra_buf first.
+     * Wait for any in-flight prefetch to let go of ra_buf first.
      *
      * blkdev_prefetch checks dev->dead only on entry and then holds ra_busy
      * across a BLOCKING dev->read into dev->ra_buf.  Freeing here without
@@ -264,7 +263,7 @@ static void blkdev_prefetch(blkdev_t *dev, uint64_t start, uint32_t window) {
         return;
 
     /*
-     * BLK-07: the scratch was sized from the sector size at FIRST prefetch and
+     * The scratch was sized from the sector size at FIRST prefetch and
      * never revalidated, so an ATAPI device switching between 512 and 2048
      * either overflowed it (2048 after being sized for 512) or had its kfree
      * mis-sized on teardown.  Remember what it was sized for and re-allocate
@@ -334,8 +333,8 @@ static int blkdev_do_read(blkdev_t *dev, uint64_t sector, uint32_t count, void *
         }
 
         /* Miss at sector+i: extend the run over contiguous misses so a cold
-         * sequential read issues one device I/O instead of one per sector
-         * (BLK-12).  The probe is a heuristic; under write-through any cached
+         * sequential read issues one device I/O instead of one per sector.
+         * The probe is a heuristic; under write-through any cached
          * sector re-read here would yield identical bytes, so a misjudged
          * run is harmless. */
         uint32_t run = 1;
@@ -397,7 +396,7 @@ static int blkdev_do_read(blkdev_t *dev, uint64_t sector, uint32_t count, void *
  * A raw-disk write bypasses the per-partition bio caches: a partition's
  * sectors are cached under its OWN blkdev pointer at partition-relative
  * offsets, so a write to the raw disk node at absolute sector S leaves the
- * partition's cached copy of that same physical sector stale (DRV-13).
+ * partition's cached copy of that same physical sector stale.
  * Drop every partition cache block overlapping the written range.  A no-op
  * for partition blkdevs and for raw devices with no partitions (dev->geom
  * NULL).
@@ -407,12 +406,12 @@ static void blkdev_invalidate_partitions(blkdev_t *dev, uint64_t sector, uint32_
     uint64_t w_start, w_end;
 
     /*
-     * BLK-03: the partition -> raw direction.  A write through a partition
+     * The partition -> raw direction.  A write through a partition
      * node leaves the RAW device's cache of those same physical sectors
      * stale, and this used to return right here because a partition blkdev
      * has no ->geom.
      *
-     * BLK-09: invalidate per sector only for small ranges.  A large raw
+     * Invalidate per sector only for small ranges.  A large raw
      * write (up to UINT32_MAX sectors) turned this into ~500K hash lookups
      * per call; past a threshold, purge the device wholesale instead.
      */
@@ -440,7 +439,7 @@ static void blkdev_invalidate_partitions(blkdev_t *dev, uint64_t sector, uint32_
         lo = (w_start > p_start) ? w_start : p_start;
         hi = (w_end   < p_end)   ? w_end   : p_end;
         if (hi <= lo) continue;
-        if (hi - lo > BLKDEV_INVAL_MAX) {      /* BLK-09 */
+        if (hi - lo > BLKDEV_INVAL_MAX) {      /* cheaper to purge it all */
             bio_dev_purge(p->bdev);
             continue;
         }
@@ -451,8 +450,8 @@ static void blkdev_invalidate_partitions(blkdev_t *dev, uint64_t sector, uint32_
 
 /*
  * Write `count` sectors write-through: push to the device first, then
- * refresh the cached copies (BLK-5).  On a failed device write, invalidate
- * the affected cached sectors so no stale data is ever served (BLK-6).
+ * refresh the cached copies.  On a failed device write, invalidate the
+ * affected cached sectors so no stale data is ever served.
  */
 static int blkdev_do_write(blkdev_t *dev, uint64_t sector, uint32_t count, const void *buffer) {
     if (dev->dead) return -EIO;   /* removed/unplugged: no I/O to a gone device */
@@ -485,11 +484,11 @@ static int blkdev_do_write(blkdev_t *dev, uint64_t sector, uint32_t count, const
 
 static int blkdev_geom_read(struct geom_disk *disk, uint64_t sector, size_t count, void *buf) {
     blkdev_geom_provider_t *provider = (blkdev_geom_provider_t *)disk->priv;
-    /* BLK-08: a bare -1 reaches userland as EPERM ("operation not
+    /* A bare -1 reaches userland as EPERM ("operation not
      * permitted") for what is really a missing device or a bad argument. */
     if (!provider || !provider->blkdev || !provider->blkdev->read) return -ENXIO;
     if (count > 0xFFFFFFFFU) return -EINVAL;
-    /* Honour the `dead` short-circuit (DRV-13) but read directly from the
+    /* Honour the `dead` short-circuit but read directly from the
      * driver: geom_read runs during partition scan at registration time
      * (before the raw device has any mount/bio context), and its reads are
      * keyed on the raw-disk pointer at absolute sectors -- a different key
@@ -536,7 +535,7 @@ void blkdev_register_disk(blkdev_t *dev) {
     if (!dev) return;
 
     /*
-     * BLK-05: blkdev_register() refuses a device with sector_size == 0, but
+     * blkdev_register() refuses a device with sector_size == 0, but
      * the scan ran regardless, publishing a geom_disk_t (and partition
      * blkdevs) for a device the block layer does not know about.  And a
      * second scan overwrote dev->geom, orphaning the previous provider.
@@ -550,7 +549,7 @@ void blkdev_register_disk(blkdev_t *dev) {
     blkdev_scan_partitions(dev);
 
     /*
-     * BLK-03: give each partition blkdev a back-pointer to this raw device.
+     * Give each partition blkdev a back-pointer to this raw device.
      *
      * blkdev_invalidate_partitions() only ever walked raw -> partition, and
      * returned immediately when dev->geom was NULL -- which is exactly the
@@ -588,7 +587,7 @@ blkdev_t *blkdev_first(void) {
 }
 
 /*
- * [AHCI-18] Push every device's own write cache to media.
+ * Push every device's own write cache to media.
  *
  * bufsync() drains the kernel's bio cache INTO the devices; it does not make
  * the devices durable.  A disk with write caching enabled acknowledges a
@@ -658,7 +657,7 @@ size_t blkdev_read_bytes(blkdev_t *dev, uint64_t offset, size_t size, void *buff
      * The same message had already had to be worked around once from the
      * other side -- see the no-media probe skip in vfs.c's label scan -- and
      * a diagnostic that callers keep having to avoid tripping is not earning
-     * its place on the console. [HW-06]
+     * its place on the console.
      */
     if (start_sector >= dev->total_sectors)
         return 0;
@@ -705,7 +704,7 @@ size_t blkdev_read_bytes(blkdev_t *dev, uint64_t offset, size_t size, void *buff
         if (sectors > dev->total_sectors - start_sector)
             sectors = dev->total_sectors - start_sector;
         /*
-         * BLK-06: leaving the bulk loop with size still >= sector_size means
+         * Leaving the bulk loop with size still >= sector_size means
          * the tail copy below would memcpy size >= 512 bytes out of the
          * 512-byte stack_buf.  The clamps above currently maintain the
          * invariant that this cannot happen, but that depends on
@@ -752,7 +751,7 @@ size_t blkdev_read_bytes(blkdev_t *dev, uint64_t offset, size_t size, void *buff
             if (sector_buf && sector_buf != stack_buf) kfree(sector_buf, sector_size);
             return total_read;
         }
-        /* BLK-06: the tail is by definition a partial sector; clamp so the
+        /* The tail is by definition a partial sector; clamp so the
          * copy can never exceed the buffer even if `size` arrived larger. */
         size_t tail = size < sector_size ? size : sector_size;
         memcpy(buf, sector_buf, tail);
@@ -825,7 +824,7 @@ size_t blkdev_write_bytes(blkdev_t *dev, uint64_t offset, size_t size, const voi
         if (sectors > dev->total_sectors - start_sector)
             sectors = dev->total_sectors - start_sector;
         /*
-         * BLK-06: leaving the bulk loop with size still >= sector_size means
+         * Leaving the bulk loop with size still >= sector_size means
          * the tail copy below would memcpy size >= 512 bytes out of the
          * 512-byte stack_buf.  The clamps above currently maintain the
          * invariant that this cannot happen, but that depends on

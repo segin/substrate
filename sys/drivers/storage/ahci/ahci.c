@@ -45,7 +45,7 @@
 #define AHCI_IRQ_FASTSPIN      64
 
 /*
- * [AHCI-10] Largest bounce buffer a single command will ask for.
+ * Largest bounce buffer a single command will ask for.
  *
  * max_sectors used to advertise 4 MiB, so every large I/O called
  * pmm_alloc_contiguous for a 1024-page PHYSICALLY CONTIGUOUS run, memset it,
@@ -64,14 +64,14 @@
  * ticks that at least 1 ms has provably elapsed. */
 #define AHCI_COMRESET_HOLD_MS  10
 
-/* [AHCI-15] How long to wait after asserting PxCMD.SUD for the PHY to come
+/* How long to wait after asserting PxCMD.SUD for the PHY to come
  * up.  The spec's own deadline is 10 ms, but that assumes the platters are
  * already turning; on a controller with staggered spin-up the whole point is
  * that they are not, and a cold 7200 rpm drive needs on the order of a second
  * before it answers.  Still bounded, so a dead port costs one second once. */
 #define AHCI_SPINUP_TIMEOUT_MS   1000
 
-/* [AHCI-15] How long to wait for a link asked to leave Partial/Slumber to
+/* How long to wait for a link asked to leave Partial/Slumber to
  * report Active.  The transition is a PHY handshake measured in microseconds;
  * this is a generous ceiling, not an expected duration. */
 #define AHCI_ICC_TIMEOUT_MS      100
@@ -128,13 +128,13 @@ typedef struct ahci_port {
     char               firmware[9];
     int                lba48;
 
-    /* [AHCI-19] IDENTIFY PACKET DEVICE word 62 bit 15: the device requires
+    /* IDENTIFY PACKET DEVICE word 62 bit 15: the device requires
      * the DMADIR bit in the PACKET command's Feature field to know which way
      * the data is going.  Devices that do NOT set it may abort a PACKET that
      * carries DMADIR, so it must not be asserted blindly. */
     int                dmadir;
 
-    /* [AHCI-18] IDENTIFY word 82 bit 5 / word 85 bit 5: the device has a
+    /* IDENTIFY word 82 bit 5 / word 85 bit 5: the device has a
      * volatile write cache, and it is enabled.  Only then is there anything
      * for FLUSH CACHE to push to media. */
     int                write_cache;
@@ -407,7 +407,7 @@ static int ahci_port_alloc(ahci_port_t *ap) {
 }
 
 /*
- * [AHCI-11] Undo ahci_port_init.  It allocates three DMA regions and STARTS
+ * Undo ahci_port_init.  It allocates three DMA regions and STARTS
  * the port's command engine, but the caller only decides whether a device is
  * present afterwards -- and the no-device path was a bare `continue`, which
  * leaked all three allocations and left ST/FRE set with the HBA pointing at
@@ -510,7 +510,7 @@ static int ahci_port_init(ahci_port_t *ap, hba_port_t *port_regs, int port_num) 
  */
 
 /*
- * [AHCI-15] Spin the device up and bring the link out of a low-power state.
+ * Spin the device up and bring the link out of a low-power state.
  *
  * Two independent things used to be assumed rather than done:
  *
@@ -590,7 +590,7 @@ static int ahci_port_detect_device(ahci_port_t *ap) {
     uint8_t  ipm = (ssts & HBA_PXSSTS_IPM_MASK) >> 8;
 
     /*
-     * [AHCI-15] ipm == 0 means the PHY really has no device.  Anything else
+     * ipm == 0 means the PHY really has no device.  Anything else
      * (Active, Partial, Slumber, DevSleep) means one is attached;
      * ahci_port_spinup() has already asked for Active, and a device that
      * will not leave Slumber is still better addressed than declared absent.
@@ -734,7 +734,7 @@ static int ahci_port_issue_cmd(ahci_port_t *ap, uint32_t timeout_ms) {
     port->is = 0xFFFFFFFF;
 
     /*
-     * [AHCI-17] The command list, command table and PRDT are ordinary
+     * The command list, command table and PRDT are ordinary
      * (non-volatile) memory; PxCI is volatile MMIO.  Nothing stopped the
      * compiler from sinking those descriptor stores past this one, handing
      * the HBA a slot whose table it has not finished writing.  It has not
@@ -785,7 +785,7 @@ static int ahci_port_issue_cmd(ahci_port_t *ap, uint32_t timeout_ms) {
              * yet DMA into the command table / PRDT / data buffer.  If we
              * just returned, the caller would reclaim and reuse slot 0's
              * cmd_table for the next command while the controller finishes
-             * the old transfer -> DMA into recycled memory (DRV-05).  Stop
+             * the old transfer -> DMA into recycled memory.  Stop
              * the command engine to make the HBA relinquish the slot, clear
              * the latched errors, and restart, mirroring the fatal-error
              * path above (IDE quiesces on timeout the same way).
@@ -916,7 +916,7 @@ static int ahci_ata_dma_cmd(ahci_port_t *ap, uint8_t command,
     hdr->a     = 0;
     hdr->w     = is_write ? 1 : 0;
     /*
-     * [AHCI-21] P (Prefetchable) and C (Clear Busy upon R_OK) were both set on
+     * P (Prefetchable) and C (Clear Busy upon R_OK) were both set on
      * every command.  C is the damaging one: AHCI 1.3.1 s4.2.2 says the HBA
      * shall clear PxTFD.STS.BSY and the PxCI bit "after transmitting this FIS
      * and receiving R_OK" -- that is, as soon as the COMMAND is acknowledged,
@@ -938,7 +938,7 @@ static int ahci_ata_dma_cmd(ahci_port_t *ap, uint8_t command,
     hdr->c     = 0;
     hdr->pmp   = 0;
     /*
-     * [AHCI-16] prdtl was hardcoded to 1 even when byte_count == 0, leaving
+     * prdtl was hardcoded to 1 even when byte_count == 0, leaving
      * the HBA a PRDT entry that is entirely zero: dba = 0 and dbc = 0, which
      * on AHCI means a ONE-byte transfer to physical address 0.  A
      * zero-length command must advertise no PRDT entries at all.  Currently
@@ -952,7 +952,7 @@ static int ahci_ata_dma_cmd(ahci_port_t *ap, uint8_t command,
     int ret = ahci_port_issue_cmd(ap, AHCI_TIMEOUT_CMD);
 
     /*
-     * [AHCI-04] hdr->prdbc is the HBA's report of how many bytes it actually
+     * hdr->prdbc is the HBA's report of how many bytes it actually
      * moved.  It is zeroed before every command and declared volatile in
      * ahci.h for exactly this read-back -- which never happened.  A short
      * transfer was therefore indistinguishable from a complete one, and
@@ -1008,7 +1008,7 @@ static int ahci_identify(ahci_port_t *ap) {
     }
 
     /*
-     * [AHCI-13] There is one command table per port and this is the third
+     * There is one command table per port and this is the third
      * producer that scribbles on it, but it was the only one not taking
      * cmd_lock.  That was safe only by the accident that probing runs
      * serially -- and ahci_register_disk publishes sataN while later ports
@@ -1052,10 +1052,10 @@ static int ahci_identify(ahci_port_t *ap) {
     hdr->cfl   = sizeof(struct fis_reg_h2d) / 4;
     hdr->a     = 0;
     hdr->w     = 0;     /* D2H (read) */
-    hdr->p     = 0;     /* [AHCI-21] see ahci_ata_dma_cmd() */
+    hdr->p     = 0;     /* see ahci_ata_dma_cmd() */
     hdr->r     = 0;
     hdr->b     = 0;
-    hdr->c     = 0;     /* [AHCI-21] Soft Reset only; clearing BSY early made
+    hdr->c     = 0;     /* Soft Reset only; clearing BSY early made
                          * IDENTIFY report 0 of 512 bytes on real hardware */
     hdr->pmp   = 0;
     hdr->prdtl = 1;
@@ -1138,7 +1138,7 @@ static int ahci_identify(ahci_port_t *ap) {
     }
 
     /*
-     * [AHCI-19] For an ATAPI device the interesting bit is word 62 bit 15:
+     * For an ATAPI device the interesting bit is word 62 bit 15:
      * "DMADIR is required for PACKET DMA commands".  The PACKET builder used
      * to set DMADIR on every read unconditionally.  A device that does not
      * require it is entitled to treat the bit as reserved and abort the
@@ -1161,7 +1161,7 @@ static int ahci_identify(ahci_port_t *ap) {
     }
 
     /*
-     * [AHCI-18] Word 82 bit 5 says the device HAS a volatile write cache;
+     * Word 82 bit 5 says the device HAS a volatile write cache;
      * word 85 bit 5 says it is currently enabled.  FLUSH CACHE is only
      * meaningful when both hold -- and issuing it to a device without the
      * cache is a command abort, not a no-op.
@@ -1204,7 +1204,7 @@ static int ahci_identify(ahci_port_t *ap) {
     }
 
     /*
-     * [AHCI-08] sector_size is already sanity-checked above; the capacity was
+     * sector_size is already sanity-checked above; the capacity was
      * taken verbatim from IDENTIFY.  ahci_build_h2d_fis writes only lba0..lba5
      * -- 48 bits -- so a device reporting 2^48 + 5 sectors would let an access
      * to that sector silently wrap and land on LBA 5, i.e. straight through
@@ -1255,7 +1255,7 @@ static int ahci_bdev_read(blkdev_t *bdev, uint64_t sector,
     if (max_sectors > 65535) {
         max_sectors = 65535;
     }
-    /* [AHCI-07] An LBA28 command counts at most 256 sectors. */
+    /* An LBA28 command counts at most 256 sectors. */
     if (!ap->lba48 && max_sectors > AHCI_LBA28_MAX_SECTORS) {
         max_sectors = AHCI_LBA28_MAX_SECTORS;
     }
@@ -1264,7 +1264,7 @@ static int ahci_bdev_read(blkdev_t *bdev, uint64_t sector,
         chunk = (count > max_sectors) ? max_sectors : count;
 
         /*
-         * [AHCI-07] ap->lba48 was computed at identify time and then read
+         * ap->lba48 was computed at identify time and then read
          * nowhere: both paths issued READ/WRITE DMA EXT unconditionally.
          * Those opcodes are 48-bit-only, so an LBA28 drive enumerated with a
          * correct capacity and then aborted every transfer.
@@ -1295,12 +1295,12 @@ static int ahci_bdev_write(blkdev_t *bdev, uint64_t sector,
         return -1;
     }
 
-    max_sectors = AHCI_MAX_XFER_BYTES / ap->sector_size;   /* [AHCI-10] */
+    max_sectors = AHCI_MAX_XFER_BYTES / ap->sector_size;
     if (max_sectors == 0) max_sectors = 1;
     if (max_sectors > 65535) {
         max_sectors = 65535;
     }
-    if (!ap->lba48 && max_sectors > AHCI_LBA28_MAX_SECTORS) {   /* [AHCI-07] */
+    if (!ap->lba48 && max_sectors > AHCI_LBA28_MAX_SECTORS) {
         max_sectors = AHCI_LBA28_MAX_SECTORS;
     }
 
@@ -1323,7 +1323,7 @@ static int ahci_bdev_write(blkdev_t *bdev, uint64_t sector,
 }
 
 /*
- * [AHCI-18] Push the drive's volatile write cache to media.
+ * Push the drive's volatile write cache to media.
  *
  * AHCI_ATA_CMD_FLUSH_CACHE_EXT was defined and never issued, and bdev.ioctl
  * was left NULL, so sync(2) and unmount drained the kernel's bio cache into
@@ -1331,8 +1331,8 @@ static int ahci_bdev_write(blkdev_t *bdev, uint64_t sector,
  * those writes from its own DRAM; on power loss the data is gone even though
  * every layer above reported success.
  *
- * This carries no data, which is why it needed AHCI-16 (prdtl must be 0 for
- * a zero-length command) before it could be issued at all.
+ * This carries no data, so it relies on prdtl being 0 for a zero-length
+ * command; with a stray zeroed PRDT entry it could not be issued at all.
  */
 static int ahci_bdev_ioctl(blkdev_t *bdev, uint32_t request, void *arg) {
     ahci_port_t *ap = (ahci_port_t *)bdev->priv;
@@ -1374,7 +1374,7 @@ static void ahci_register_disk(ahci_port_t *ap) {
     ap->bdev.priv          = ap;
     ap->bdev.read          = ahci_bdev_read;
     ap->bdev.write         = ahci_bdev_write;
-    ap->bdev.ioctl         = ahci_bdev_ioctl;   /* [AHCI-18] */
+    ap->bdev.ioctl         = ahci_bdev_ioctl;   /* cache flush */
 
     blkdev_register_disk(&ap->bdev);
 
@@ -1409,7 +1409,7 @@ static int ahci_scsi_execute(scsi_link_t *link, scsi_request_t *req) {
     }
 
     /*
-     * [AHCI-06] Reject transfer lengths the hardware fields cannot express
+     * Reject transfer lengths the hardware fields cannot express
      * before building the command.  The ATAPI byte-count-limit is 16 bits
      * (so 0 and >= 65536 are both unrepresentable -- BCL 0 is illegal per
      * ACS-3), and the PRDT dbc field is 22 bits, so anything above 4 MiB
@@ -1460,7 +1460,7 @@ static int ahci_scsi_execute(scsi_link_t *link, scsi_request_t *req) {
     /*
      * Feature bit 0 = DMA mode, bit 2 = DMADIR (1=D2H read, 0=H2D write).
      *
-     * [AHCI-19] DMADIR used to be set on every read regardless of the
+     * DMADIR used to be set on every read regardless of the
      * device.  It is only defined for devices that report "DMADIR required"
      * in IDENTIFY PACKET DEVICE word 62 bit 15 -- typically SATA bridges in
      * front of a PATA optical drive.  A native SATA drive is free to treat
@@ -1472,7 +1472,7 @@ static int ahci_scsi_execute(scsi_link_t *link, scsi_request_t *req) {
     if (ap->dmadir && !(req->flags & SCSI_REQ_WRITE))
         fis->featurel |= 0x04;                       /* DMADIR: device -> host */
     /*
-     * [AHCI-06] The ATAPI byte-count-limit is 16 bits, and req->data_len is a
+     * The ATAPI byte-count-limit is 16 bits, and req->data_len is a
      * uint32.  scsi_ctl.c explicitly permits data_len == 65536, which
      * truncates to a BCL of 0 -- illegal per ACS-3 -- and data_len == 0
      * likewise gives BCL 0.  The same value also feeds the PRDT's 22-bit dbc
@@ -1516,7 +1516,7 @@ static int ahci_scsi_execute(scsi_link_t *link, scsi_request_t *req) {
     hdr->p     = 1;    /* both references pair Prefetchable with ATAPI */
     hdr->r     = 0;
     hdr->b     = 0;
-    hdr->c     = 0;    /* [AHCI-21] see ahci_ata_dma_cmd() */
+    hdr->c     = 0;    /* see ahci_ata_dma_cmd() */
     hdr->pmp   = 0;
     hdr->prdbc = 0;
 
@@ -1539,7 +1539,7 @@ static int ahci_scsi_execute(scsi_link_t *link, scsi_request_t *req) {
 
     req->status = SCSI_STATUS_GOOD;
     /*
-     * [AHCI-09] data_xfer was set to the full requested length regardless of
+     * data_xfer was set to the full requested length regardless of
      * what the device actually returned, and scsi_ctl.c uses it as the
      * copyout length -- so a device answering an INQUIRY with 36 bytes had
      * the rest of the caller's buffer filled from the zero-filled bounce
@@ -1594,7 +1594,7 @@ static void ahci_register_satapi_devices(void) {
     }
 
     /*
-     * [AHCI-20] This used to bail out at the top when ahci_scsi_registered
+     * This used to bail out at the top when ahci_scsi_registered
      * was set, so only the FIRST controller's optical drives were ever
      * exposed: a second HBA found later added SATAPI ports that nothing
      * enumerated, and max_targets stayed frozen at the first controller's
@@ -1674,7 +1674,7 @@ static int ahci_hba_init(ahci_controller_t *ctrl) {
     ctrl->num_ports = (ctrl->cap & HBA_CAP_NP_MASK) + 1;
 
     /*
-     * [AHCI-05] ctrl->pi comes straight from the device and every one of its
+     * ctrl->pi comes straight from the device and every one of its
      * 32 bits used to be walked, dereferencing abar->ports[port] at offsets up
      * to 0x100 + 31*0x80 = 0x1080.  pci_iomap maps exactly bar_sz bytes and
      * nothing bounded the walk against it, so an HBA with a 0x1000-byte BAR5
@@ -1758,7 +1758,7 @@ static void ahci_probe_ports(ahci_controller_t *ctrl) {
         ap->regs = &ctrl->abar->ports[port];
 
         /*
-         * [AHCI-15] Spin the device up BEFORE deciding the port is empty.
+         * Spin the device up BEFORE deciding the port is empty.
          * On a CAP.SSS controller PxCMD.SUD is clear out of reset and DET
          * reads 0 for a perfectly good drive, so the old pre-check --
          *     if ((ssts & DET) == 0) continue;
@@ -1779,7 +1779,7 @@ static void ahci_probe_ports(ahci_controller_t *ctrl) {
         ap->ctrl = ctrl;   /* back-pointer so issue_cmd can see irq_ready */
 
         if (!ahci_port_detect_device(ap)) {
-            ahci_port_teardown(ap);   /* [AHCI-11] don't abandon it running */
+            ahci_port_teardown(ap);   /* don't abandon it running */
             continue;
         }
 
@@ -1799,7 +1799,7 @@ static void ahci_probe_ports(ahci_controller_t *ctrl) {
         ctrl->port_count++;
 
         /*
-         * [AHCI-19] IDENTIFY PACKET DEVICE for optical drives too, not just
+         * IDENTIFY PACKET DEVICE for optical drives too, not just
          * IDENTIFY for disks.  ahci_identify() already picks the right
          * opcode from ap->type; it simply was never called for SATAPI, so
          * ap->dmadir stayed 0 and the PACKET builder guessed instead.  A
@@ -1880,18 +1880,18 @@ static int ahci_pci_attach(struct device *dev) {
 
     if (ahci_ctrl_count >= AHCI_MAX_CONTROLLERS) {
         kprint("ahci: too many AHCI controllers; ignoring this one\n");
-        iounmap(mmio_base);   /* [AHCI-12] don't leak the BAR5 mapping */
+        iounmap(mmio_base);   /* don't leak the BAR5 mapping */
         return -1;
     }
 
     ahci_controller_t *ctrl = &ahci_ctrls[ahci_ctrl_count];
     memset(ctrl, 0, sizeof(*ctrl));
     ctrl->abar    = (hba_mem_t *)mmio_base;
-    ctrl->bar_sz  = bar_sz;          /* [AHCI-05] bound the PI walk to this */
+    ctrl->bar_sz  = bar_sz;          /* bound the PI walk to this */
     ctrl->pci_dev = pdev;
 
     if (ahci_hba_init(ctrl) < 0) {
-        /* [AHCI-12] Currently unreachable -- ahci_hba_init always returns 0 --
+        /* Currently unreachable -- ahci_hba_init always returns 0 --
          * but it must not leak the mapping if that ever changes. */
         kprint("ahci: HBA init failed\n");
         ctrl->abar = NULL;

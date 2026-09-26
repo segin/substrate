@@ -77,7 +77,7 @@ static inline uint16_t fdc_reg(const fdc_controller_t *ctlr, uint8_t offset) {
 }
 
 /*
- * FDC-03: every wait here used to be bounded by BOTH a monotonic deadline and
+ * Every wait here used to be bounded by BOTH a monotonic deadline and
  * a spin count, exiting on whichever came first -- and the spin count was a
  * raw `pause` loop with no clock reference at all, so it always came first.
  *
@@ -159,7 +159,7 @@ static int fdc_wait_irq(fdc_controller_t *ctlr, uint32_t timeout_ms) {
     while (!ctlr->irq_seen) {
         if (fdc_command_result_ready(ctlr)) {
             /*
-             * FDC-05: clear irq_seen on EVERY exit, not just the normal one.
+             * Clear irq_seen on EVERY exit, not just the normal one.
              * Both early returns used to leave it set, and the seek paths did
              * not clear it before issuing, so a late IRQ from a command that
              * had already timed out made the NEXT seek return success before
@@ -170,7 +170,7 @@ static int fdc_wait_irq(fdc_controller_t *ctlr, uint32_t timeout_ms) {
         }
         if ((uint64_t)get_uptime_ms() >= deadline) {
             int ready = fdc_command_result_ready(ctlr);
-            ctlr->irq_seen = 0;               /* FDC-05 */
+            ctlr->irq_seen = 0;
             return ready ? 0 : -ETIMEDOUT;
         }
         __asm__ volatile("pause");
@@ -333,7 +333,7 @@ static int fdc_seek_drive(fdc_drive_t *drive, uint8_t cylinder) {
         return 0;
     }
 
-    /* FDC-05: discard any IRQ left over from a previous command before
+    /* Discard any IRQ left over from a previous command before
      * issuing, or a late one satisfies this wait before the head moves. */
     ctlr->irq_seen = 0;
 
@@ -372,7 +372,7 @@ static int fdc_recalibrate_drive(fdc_drive_t *drive) {
     uint8_t sensed_cyl;
     int ret;
 
-    ctlr->irq_seen = 0;                 /* FDC-05: see fdc_seek_drive */
+    ctlr->irq_seen = 0;                 /* drop stale IRQs; see fdc_seek_drive */
 
     ret = fdc_write_fifo(ctlr, FDC_CMD_RECALIBRATE);
     if (ret < 0) {
@@ -544,7 +544,7 @@ static int fdc_transfer_sectors(fdc_drive_t *drive, uint32_t lba, uint32_t count
 
     byte_count = sectors_this_cmd * 512U;
     command = write_to_drive ? FDC_CMD_WRITE_DATA : FDC_CMD_READ_DATA;
-    /* FDC-04: from the format, not from the rate code. */
+    /* GAP3 comes from the format, not from the rate code. */
     gap3 = drive->geom->gap3;
     mt = (((uint32_t)chs.sector - 1U) + sectors_this_cmd > sectors_per_track) ? 0x80U : 0x00U;
 
@@ -869,7 +869,7 @@ static int floppy_ioctl(blkdev_t *dev, uint32_t request, void *arg) {
             return -EINVAL;
         }
         /*
-         * FDC-02: never dereference `arg` because it looks like a kernel
+         * Never dereference `arg` because it looks like a kernel
          * address.  sys_ioctl rejects arg >= KERN_BASE, but the FreeBSD
          * personality (compat.c freebsd_sys_ioctl) and the ELKS default case
          * both reach kern_ioctl with the raw user pointer and NO such check,

@@ -111,7 +111,7 @@ retry:
             scsi->media_present = 1;
             scsi->removable = 1;
             /*
-             * SCSI-05: push the NEW medium's geometry into the block device.
+             * Push the NEW medium's geometry into the block device.
              * The refresh updated scsi->capacity and scsi->sector_size but
              * stopped there, so blkdev kept the size of the disc that had
              * just been ejected -- every subsequent read was bounded by the
@@ -258,7 +258,7 @@ int scsi_dev_attach(scsi_device_t *scsi_dev) {
     snprintf(sbd->blkdev.name, sizeof(sbd->blkdev.name), "scsi%u", sbd->dev_num);
     
     /*
-     * SCSI-04: reconcile the block layer's sector size with what the DEVICE
+     * Reconcile the block layer's sector size with what the DEVICE
      * reported, instead of hardcoding 2048 for every optical unit.
      *
      * total_sectors comes from READ CAPACITY and is counted in the device's

@@ -151,7 +151,7 @@ int ide_wait_ready_ex(uint8_t channel, int timeout_ms, const char *op,
         uint8_t status = ide_read_reg(channel, ATA_REG_STATUS);
 
         /*
-         * [IDE-09] Only a post-data-phase wait may treat ERR/DF as this
+         * Only a post-data-phase wait may treat ERR/DF as this
          * command's failure.  Before issuing a command these bits are still
          * whatever the PREVIOUS command left latched -- ATA does not clear
          * them until the command register is written -- so failing here made
@@ -189,16 +189,16 @@ int ide_wait_ready_ex(uint8_t channel, int timeout_ms, const char *op,
 }
 
 /*
- * [IDE-12/IDE-13] Abandon an in-flight command.
+ * Abandon an in-flight command.
  *
  * Stopping the bus master is not enough.  The DRIVE is still executing the
  * command and will raise INTRQ when it finishes, at which point:
  *
  *  - it may still be streaming into the very buffer the caller is about to
- *    reuse for the PIO fallback (IDE-12), and
+ *    reuse for the PIO fallback, and
  *  - that late interrupt sets ide_irq_complete[channel], which the NEXT
  *    command's waiter reads as its own completion and reports torn data as
- *    a successful transfer (IDE-13).
+ *    a successful transfer.
  *
  * Reading the (non-alternate) status register acknowledges and clears the
  * drive's pending INTRQ, so the interrupt is consumed here rather than

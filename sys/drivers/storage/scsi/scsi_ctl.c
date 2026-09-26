@@ -76,7 +76,7 @@ typedef struct scsi_generic_node {
     scsi_device_t *dev;
     struct scsi_generic_node *next;
     /*
-     * SCSI-06: slots were allocated by bumping sg_count and never released,
+     * Slots used to be allocated by bumping sg_count and never released,
      * so 64 hotplug cycles exhausted the pool -- and, worse, sg->dev outlived
      * the scsi_device_t it pointed at, so after an unplug+replug a stale
      * /dev/storage/scsi/B:T:L node delivered CDBs to whatever device now
@@ -233,7 +233,7 @@ static int sg_ioctl(fs_node_t *node, uint32_t request, void *arg) {
  * Create /dev/storage/scsi/B:T:L node for a device
  */
 /*
- * SCSI-06: release the generic node for a device that is going away.  Called
+ * Release the generic node for a device that is going away.  Called
  * from the device teardown path so the slot and the devfs entry do not
  * outlive the scsi_device_t they name.
  */
@@ -262,7 +262,7 @@ static int scsi_create_generic_node(scsi_device_t *dev) {
     snprintf(want, sizeof(want), "storage/scsi/%d:%d:%d",
              dev->bus, dev->target, dev->lun);
 
-    /* SCSI-06: a re-probe of an address we already publish rebinds the
+    /* A re-probe of an address we already publish rebinds the
      * existing node instead of consuming another slot with a duplicate
      * name -- which is what made a replug leak and alias. */
     for (scsi_generic_node_t *e = sg_list; e; e = e->next) {
@@ -317,7 +317,7 @@ static int bus_ioctl(fs_node_t *node, uint32_t request, void *arg) {
     if (!bn || !bn->link) return -1;
     
     /*
-     * SCSI-13: SCAN_BUS and RESET_BUS drive the bus itself -- a rescan
+     * SCAN_BUS and RESET_BUS drive the bus itself -- a rescan
      * replays TEST UNIT READY and READ CAPACITY against every target and
      * can disturb media state, and a reset aborts every outstanding command
      * on the bus including another process's.  Neither needed any privilege.

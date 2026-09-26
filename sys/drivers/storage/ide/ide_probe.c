@@ -63,12 +63,12 @@ void ide_refresh_device_slot(uint8_t channel, uint8_t drive) {
         uint32_t blk_size;
 
         /*
-         * IDE-06: validate what the device reports.  blk_size was stored
+         * Validate what the device reports.  blk_size was stored
          * verbatim, so a drive answering 0 (or a parse error yielding 0)
          * published sector_size 0 to the block layer, which divides by it in
          * every geometry calculation.  An absurd value is equally a lie.
-         * Same class as SCSI-09; fall back to the ATAPI default rather than
-         * trusting it.
+         * As with SCSI READ CAPACITY, fall back to the ATAPI default rather
+         * than trusting it.
          */
         if (ide_atapi_read_capacity(channel, drive, &lba, &blk_size) == 0 &&
             blk_size >= 512U && blk_size <= 65536U &&
@@ -314,7 +314,7 @@ int ide_program_dma_mode(ide_device_t *dev) {
 
     ide_select_drive(dev->channel, dev->drive);
     if (ide_wait_ready_ex(dev->channel, IDE_TIMEOUT_READY_MS, "set-features", 0) < 0) {
-        dev->dma_mode = 0;   /* [IDE-10] never programmed: don't claim a mode */
+        dev->dma_mode = 0;   /* never programmed: don't claim a mode */
         return -1;
     }
 
@@ -323,14 +323,14 @@ int ide_program_dma_mode(ide_device_t *dev) {
     ide_write_reg(dev->channel, ATA_REG_COMMAND, ATA_CMD_SET_FEATURES);
 
     if (ide_wait_bsy(dev->channel, IDE_TIMEOUT_READY_MS, "set-features") < 0) {
-        dev->dma_mode = 0;   /* [IDE-10] */
+        dev->dma_mode = 0;   /* never programmed: don't claim a mode */
         ide_bm_set_drive_dma_capable(dev->channel, dev->drive, 0);
         return -1;
     }
 
     status = ide_read_reg(dev->channel, ATA_REG_STATUS);
     if ((status & (ATA_SR_ERR | ATA_SR_DF)) != 0) {
-        dev->dma_mode = 0;   /* [IDE-10] SET FEATURES was rejected */
+        dev->dma_mode = 0;   /* SET FEATURES was rejected */
         ide_bm_set_drive_dma_capable(dev->channel, dev->drive, 0);
         return -1;
     }
@@ -385,7 +385,7 @@ void ide_register_irqs(void) {
         unsigned long flags = 0;
 
         /*
-         * [IDE-04] This used to require dma_capable, which NOTHING ever sets
+         * This used to require dma_capable, which NOTHING ever sets
          * -- ide_dma_init()/ide_dma_init_pair() have no callers anywhere in
          * sys/ -- so no handler was ever registered for IRQ 14/15.  Probe
          * then cleared nIEN at the end (see below), leaving device
@@ -435,7 +435,7 @@ void ide_register_irqs(void) {
                     (unsigned)channel, (unsigned)ide_channels[channel].irq,
                     (flags & IRQF_SHARED) ? " (shared)" : "");
         } else {
-            /* [IDE-04] Say so: the channel will be left with nIEN set and
+            /* Say so: the channel will be left with nIEN set and
              * driven purely by polling, which is a materially different
              * operating mode and used to be invisible. */
             kprintf("ide: channel %u could not claim IRQ %u; "
@@ -445,7 +445,7 @@ void ide_register_irqs(void) {
     }
 
     /*
-     * [IDE-04] Enable bus-master DMA, now that a handler exists to complete
+     * Enable bus-master DMA, now that a handler exists to complete
      * it.
      *
      * dma_capable was never set by anything -- ide_dma_init() and
@@ -464,8 +464,8 @@ void ide_register_irqs(void) {
      *
      * A device that then fails a DMA transfer is demoted to PIO by
      * ide_disable_device_dma(); a transfer this driver's PRDT simply cannot
-     * describe falls back to PIO for that request alone (IDE_DMA_UNSUPPORTED,
-     * see IDE-16) without condemning the drive.
+     * describe falls back to PIO for that request alone (IDE_DMA_UNSUPPORTED)
+     * without condemning the drive.
      */
     for (uint8_t channel = 0; channel < MAX_IDE_CHANNELS; channel++) {
         if (ide_channels[channel].bm_base == 0)
@@ -744,7 +744,7 @@ int ide_scan_controller(void) {
                     /* ATAPI size calculation */
                     uint32_t lba, blk_size;
                     /* Try to read capacity. If fails (no media), size=0 */
-                    /* IDE-06: same validation as the refresh path above --
+                    /* Same validation as the refresh path above --
                      * a reported block size of 0 publishes sector_size 0 to
                      * the block layer, which divides by it. */
                     if (ide_atapi_read_capacity(ch, d, &lba, &blk_size) == 0 &&
@@ -814,7 +814,7 @@ int ide_scan_controller(void) {
     }
 
     /*
-     * [IDE-04] Unmask device interrupts ONLY on channels whose handler was
+     * Unmask device interrupts ONLY on channels whose handler was
      * actually installed.  Clearing nIEN unconditionally is what turned an
      * unregistered IRQ into a storm; a channel with no handler stays masked
      * and is driven purely by polling, which is what the PIO paths already
