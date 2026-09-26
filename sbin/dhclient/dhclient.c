@@ -17,8 +17,7 @@
  * so boot continues, and the child keeps the lease -- RENEWING at T1,
  * REBINDING at T2 (over an ordinary UDP socket, the host being configured
  * by then), and on a NAK or at expiry it removes the address and starts
- * again from INIT.  Conformance notes against RFC 2131:
- * docs/dhclient-audit-2026-09.md.
+ * again from INIT.
  */
 
 #define _GNU_SOURCE
