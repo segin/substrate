@@ -35,13 +35,13 @@
  * pointers cover the full 20480 bytes (4.10.6: the 20K maximum requires a
  * zero first-page offset).  If that allocator ever returns unaligned
  * buffers, every `len > EHCI_BOUNCE_SIZE` check must become
- * `len > EHCI_BOUNCE_SIZE - (bounce_dma & 0xFFF)`. [ehci-audit] */
+ * `len > EHCI_BOUNCE_SIZE - (bounce_dma & 0xFFF)`. */
 #define EHCI_BOUNCE_SIZE   (20 * 1024)
 /* 8 slots, exactly two chain shapes (SETUP[+DATA]+STATUS, single qTD).
  * A chain-builder abstraction over this was proposed and rejected: the
  * alt_next decision is per-shape and load-bearing where it sits, and the
  * pool is too small to amortize indirection.  Revisit only if multi-qTD
- * bulk chains or resident periodic QHs ever land. [RF-8] */
+ * bulk chains or resident periodic QHs ever land. */
 #define EHCI_MAX_QTD       8
 #define EHCI_XFER_TIMEOUT_MS 1000
 
@@ -57,7 +57,7 @@ typedef struct ehci_hc {
     struct ehci_qh   *async_qh;      dma_addr_t async_qh_dma;
     /* Periodic schedule: the frame list the controller walks once per frame,
      * and the single interrupt QH this driver links into it for the duration
-     * of one polled transfer. [USB-10] */
+     * of one polled transfer. */
     uint32_t         *periodic;      dma_addr_t periodic_dma;
     struct ehci_qh   *intr_qh;       dma_addr_t intr_qh_dma;
     struct ehci_qtd  *qtd;           dma_addr_t qtd_dma;   /* EHCI_MAX_QTD pool */
@@ -80,7 +80,7 @@ static uint8_t ehci_instances;
 
 /* ---- register access ---- */
 /*
- * [RF-3] Every operational-register access funnels through these two, so a
+ * Every operational-register access funnels through these two, so a
  * host-side test build can substitute a scripted fake controller and drive
  * the poll loops through states QEMU cannot produce (Host System Error,
  * stuck Port Reset, a schedule that refuses to stop).  Mirrors the nvme.c
@@ -144,7 +144,7 @@ static int ehci_port_reset(usb_hcd_t *hcd, uint8_t port)
      * status bit is set to a one"), so gate on PED: on a re-reset of an
      * already-enabled port -- routine during enumeration retries -- the field
      * is meaningless and a garbage K reading here silently routed a working
-     * high-speed device to a companion that may not exist. [PORT-01] */
+     * high-speed device to a companion that may not exist. */
     if (!(psc & EHCI_PORT_ENABLE) &&
         (psc & EHCI_PORT_LINESTATUS) == EHCI_PORT_LS_KSTATE) {
         ehci_portsc_wr(hc, port, (psc & ~EHCI_PORT_CLEAR) | EHCI_PORT_OWNER);
@@ -174,7 +174,7 @@ static int ehci_port_reset(usb_hcd_t *hcd, uint8_t port)
     }
     psc = ehci_portsc_rd(hc, port);
     if (psc & EHCI_PORT_RESET) {
-        /* [PORT-02] Reset never completed -- the spec bound is 2 ms after
+        /* Reset never completed -- the spec bound is 2 ms after
          * the PR deassert, so a PR still set here means a faulted/halted
          * controller (Table 2-16: the HC may hold Port Reset asserted when
          * HCHalted is one).  PED is meaningless before PR reads 0 (4.2.2);
@@ -203,7 +203,7 @@ static int ehci_port_reset(usb_hcd_t *hcd, uint8_t port)
  * and never fetches the qTDs behind it.  QEMU and ICH implement the 4.10.2
  * reading, which is why bare alt=T worked here; both BSDs still refuse to
  * rely on it (NetBSD points altnext at the real next stage, FreeBSD at a
- * pre-halted dummy).  Pass 0 for end-of-chain semantics. [ehci-audit 6] */
+ * pre-halted dummy).  Pass 0 for end-of-chain semantics. */
 static void ehci_fill_qtd(ehci_hc_t *hc, int idx, uint32_t next_dma,
                           uint32_t alt_dma, uint32_t pid, uint32_t bytes,
                           int toggle, dma_addr_t data_dma, int ioc)
@@ -233,11 +233,11 @@ static uint32_t ehci_qtd_dma(ehci_hc_t *hc, int idx)
     return (uint32_t)(hc->qtd_dma + (dma_addr_t)idx * sizeof(struct ehci_qtd));
 }
 
-/* [DRV-05] On a transfer timeout the controller may still own the async QH
+/* On a transfer timeout the controller may still own the async QH
  * overlay and keep DMAing into the (reused) bounce buffer / walking the qTDs.
  * It has to be verifiably stopped before that memory is touched.  4.8 also
  * forbids modifying ASE unless it equals ASS, so the stop must be confirmed
- * before anything -- including ASE itself -- is written again.  [ASYNC-04]
+ * before anything -- including ASE itself -- is written again.
  * Returns 0 only when the schedule is verifiably stopped (ASS clear). */
 static int ehci_async_stop(ehci_hc_t *hc)
 {
@@ -262,7 +262,7 @@ static void ehci_async_restart(ehci_hc_t *hc)
     }
 }
 
-/* [EHCI-05] Classify a halted qTD.  A pure STALL handshake halts the queue
+/* Classify a halted qTD.  A pure STALL handshake halts the queue
  * with only the Halted bit set; babble, transaction-error, buffer-error and
  * missed-microframe halts carry their cause bit alongside it (Table 3-16).
  * Reporting them all as USB_XFER_STALL made callers run stall recovery
@@ -277,15 +277,15 @@ static int ehci_halt_status(uint32_t tok)
     return USB_XFER_STALL;
 }
 
-/* One MMIO read per 1024 spins: each is a vmexit under KVM. [RF-6] */
+/* One MMIO read per 1024 spins: each is a vmexit under KVM. */
 #define EHCI_DEADCHECK_MASK 0x3FF
 
-/* [EHCI-INIT-03] Throttled dead-controller probe, shared by both poll
+/* Throttled dead-controller probe, shared by both poll
  * loops.  An interruptless driver can only learn about a Host System Error
  * -- a PCI parity error or abort, on which the HC clears its own Run bit
  * (2.3.2) -- by asking; without this, a dead schedule left every qTD
  * Active forever and every transfer burned its full timeout, silently.
- * Detection, one-shot diagnostic, W1C ack and the [RF-2] core latch live
+ * Detection, one-shot diagnostic, W1C ack and the core hc_failed latch live
  * here; CLEANUP stays with each caller (the async path neutralizes its
  * tokens inline, the periodic path defers to its unlink protocol). */
 static int ehci_check_hc_dead(ehci_hc_t *hc, unsigned *spins)
@@ -297,11 +297,11 @@ static int ehci_check_hc_dead(ehci_hc_t *hc, unsigned *spins)
         return 0;
     kprintf("ehci: host controller halted (USBSTS=0x%x)\n", (unsigned)sts);
     ehci_op_wr(hc, EHCI_OP_USBSTS, EHCI_STS_HSE);   /* W1C ack */
-    hc->hcd.hc_failed = 1;   /* [RF-2] core latch */
+    hc->hcd.hc_failed = 1;   /* core dead-controller latch */
     return 1;
 }
 
-/* Snapshot of one transfer's qTD tokens. [RF-6] */
+/* Snapshot of one transfer's qTD tokens. */
 struct ehci_qtd_scan {
     int      active;
     int      halted;
@@ -309,8 +309,7 @@ struct ehci_qtd_scan {
 };
 
 /* Scan this transfer's qTDs (contiguous from `first`).  The skip guard
- * only inspects qTDs we linked -- a zeroed pool slot has no status bits.
- * [DRV-06] */
+ * only inspects qTDs we linked -- a zeroed pool slot has no status bits. */
 static void ehci_scan_qtds(ehci_hc_t *hc, int first, int n,
                            struct ehci_qtd_scan *s)
 {
@@ -334,7 +333,7 @@ enum ehci_poll_outcome {
 };
 
 /*
- * [RF-6] The one qTD poll loop, shared by the async and periodic paths.
+ * The one qTD poll loop, shared by the async and periodic paths.
  * Only the outcome HANDLING differs between them (the async timeout runs
  * the verified-stop/late-recheck/neutralize protocol, the periodic one its
  * frame-list unlink), and that stays with the callers.
@@ -371,7 +370,7 @@ static enum ehci_poll_outcome ehci_poll_qtds(ehci_hc_t *hc, int first, int n,
 }
 
 /*
- * [RF-10] What a finished transfer leaves behind, captured while the QH is
+ * What a finished transfer leaves behind, captured while the QH is
  * verifiably quiescent so callers stop reaching back into live hardware
  * state with per-caller phasing.  ending_toggle is the overlay dt -- the
  * authoritative next expected toggle, written back after every transaction
@@ -395,7 +394,7 @@ static void ehci_capture_result(ehci_hc_t *hc, struct ehci_xfer_result *res)
 
 /* Arm the async QH at a qTD chain and poll to completion.  Returns USB_XFER_*
  * and fills *res while the QH is quiescent.
- * [DRV-06] n_qtd counts the qTDs this transfer filled/linked (contiguous from
+ * n_qtd counts the qTDs this transfer filled/linked (contiguous from
  * first_qtd); only those are polled, so stale qTDs left ACTIVE/HALTED by a prior
  * transfer (e.g. a STALLed GET_MAX_LUN) no longer poison this one. */
 static int ehci_run_qh(ehci_hc_t *hc, uint32_t endp_char, uint32_t endp_cap,
@@ -405,7 +404,7 @@ static int ehci_run_qh(ehci_hc_t *hc, uint32_t endp_char, uint32_t endp_cap,
     res->overlay_valid = 0;
     res->ending_toggle = 0;
 
-    /* [EHCI-01] The async QH is permanently reachable (self-linked, ASE on)
+    /* The async QH is permanently reachable (self-linked, ASE on)
      * and an inactive non-halted overlay is advanceable the instant
      * overlay_next becomes valid (4.10.2), so the old order (next first,
      * token last) let the controller seize the qTD chain mid-update -- and
@@ -456,18 +455,18 @@ static int ehci_run_qh(ehci_hc_t *hc, uint32_t endp_char, uint32_t endp_cap,
         break;                          /* the async timeout protocol below */
     }
 
-    /* [DRV-05] Reclaim the descriptors from the hardware before the caller
+    /* Reclaim the descriptors from the hardware before the caller
      * reuses the bounce buffer / qTD pool. */
     if (ehci_async_stop(hc) != 0) {
-        /* [ASYNC-04] Schedule refused to stop: do not scribble on memory
+        /* Schedule refused to stop: do not scribble on memory
          * the HC may still walk, and do not flip ASE against the 4.8
          * ASE==ASS rule.  This controller is done. */
-        hc->hcd.hc_failed = 1;   /* [RF-2] core latch */
+        hc->hcd.hc_failed = 1;   /* core dead-controller latch */
         kprintf("ehci: async schedule failed to stop; "
                 "controller disabled\n");
         return USB_XFER_TIMEOUT;
     }
-    /* [EHCI-03] A completion may have landed between the last token sample
+    /* A completion may have landed between the last token sample
      * and the stop: re-read before destroying the evidence, or a
      * just-finished transfer is thrown away as a timeout. */
     struct ehci_qtd_scan late;
@@ -480,7 +479,7 @@ static int ehci_run_qh(ehci_hc_t *hc, uint32_t endp_char, uint32_t endp_cap,
     /* Genuinely incomplete: capture (packets may have moved before the
      * deadline; the verified stop makes the overlay safe to read), then
      * neutralize so a stale visit is a no-op.  The park below preserves
-     * the overlay dt bit as well ([EHCI-04]). */
+     * the overlay dt bit as well. */
     ehci_capture_result(hc, res);
     for (int i = first_qtd; i < first_qtd + n_qtd; i++)
         hc->qtd[i].token &= ~EHCI_QTD_STATUS_ACTIVE;
@@ -500,7 +499,7 @@ static int ehci_run_qh(ehci_hc_t *hc, uint32_t endp_char, uint32_t endp_cap,
  * built as EHCI_QH_EPS_HIGH, so a full- or low-speed device was described to
  * the controller as something it is not and could never transfer.  A non-
  * high-speed CONTROL endpoint additionally needs the Control Endpoint Flag so
- * the controller knows to use the control split protocol. [USB-02]
+ * the controller knows to use the control split protocol.
  */
 static uint32_t ehci_endp_char(usb_transfer_t *xfer, int is_control)
 {
@@ -540,7 +539,7 @@ static uint32_t ehci_endp_char(usb_transfer_t *xfer, int is_control)
      * RL!=0 on throttling silicon decrements NakCnt to zero after 4 NAKs
      * and is then never considered for execution again -- the endpoint goes
      * deaf for the rest of the transfer window.  QEMU does not implement
-     * the throttle, which is why this never showed there. [ehci-audit 5] */
+     * the throttle, which is why this never showed there. */
     int is_intr = xfer->ep && xfer->ep->type == USB_EP_TYPE_INTERRUPT;
     if (dev->speed == USB_SPEED_HIGH && !is_intr)
         ec |= 4u << EHCI_QH_NRL_SHIFT;
@@ -553,7 +552,7 @@ static uint32_t ehci_endp_char(usb_transfer_t *xfer, int is_control)
  * full/low-speed device, the address and port of the high-speed hub whose
  * transaction translator bridges it.  Interrupt endpoints also need the
  * start-split / complete-split microframe masks; the async schedule does not
- * use them, which is why bulk and control leave them clear. [USB-02]
+ * use them, which is why bulk and control leave them clear.
  */
 static uint32_t ehci_endp_cap(usb_transfer_t *xfer, uint8_t mult)
 {
@@ -578,7 +577,7 @@ static uint32_t ehci_endp_cap(usb_transfer_t *xfer, uint8_t mult)
     return cap;
 }
 
-/* [RF-8] Shared bounce staging and result extraction for the three
+/* Shared bounce staging and result extraction for the three
  * transfer builders.  ehci_stage_tx: size gate + OUT copy-in.
  * ehci_qtd_residue: Total Bytes remaining from a retired qTD (4.10.4
  * guarantees this field's write-back).  ehci_copyout: actual_length + IN
@@ -644,14 +643,14 @@ static int ehci_control_transfer(ehci_hc_t *hc, usb_transfer_t *xfer)
 
     /* Honour the caller's timeout: a HID poll asks to give up in milliseconds,
      * and making it sit out the bulk timeout stalled the USB thread for a full
-     * second per idle poll. [USB-09] */
+     * second per idle poll. */
     struct ehci_xfer_result res;
     int r = ehci_run_qh(hc, ehci_endp_char(xfer, 1),
                         /* Same mult derivation as bulk/intr: identical for
                          * EP0, whose mult the core pins to 1 (usb.c). */
                         ehci_endp_cap(xfer, xfer->ep && xfer->ep->mult
                                             ? xfer->ep->mult : 1),
-                        setup_i, idx,               /* [DRV-06] idx qTDs */
+                        setup_i, idx,               /* idx qTDs */
                         xfer->timeout_ms ? xfer->timeout_ms
                                          : EHCI_XFER_TIMEOUT_MS,
                         &res);
@@ -683,15 +682,15 @@ static int ehci_bulk_transfer(ehci_hc_t *hc, usb_transfer_t *xfer)
                         ehci_endp_cap(xfer,
                                       xfer->ep && xfer->ep->mult ? xfer->ep->mult
                                                                  : 1),
-                        0, 1,                       /* [DRV-06] single qTD */
+                        0, 1,                       /* single qTD */
                         xfer->timeout_ms ? xfer->timeout_ms
-                                         : EHCI_XFER_TIMEOUT_MS,   /* [USB-09] */
+                                         : EHCI_XFER_TIMEOUT_MS,   /* honour caller's timeout */
                         &res);
     if (r == USB_XFER_OK)
         ehci_copyout(hc, xfer, in, len - ehci_qtd_residue(hc, 0));
     if ((r == USB_XFER_OK || r == USB_XFER_TIMEOUT) && xfer->ep &&
         res.overlay_valid) {
-        /* [EHCI-04] The ending toggle used to be computed as
+        /* The ending toggle used to be computed as
          * initial ^ (npackets & 1) from actual_length -- which misses a
          * device's terminating ZLP (a bulk IN holding exactly k*MPS bytes
          * but fewer than requested sends k full packets plus a ZLP: k+1
@@ -719,9 +718,9 @@ static int ehci_bulk_transfer(ehci_hc_t *hc, usb_transfer_t *xfer)
  * the divide floors those to a 1 ms stride with the single S-mask bit
  * ehci_endp_cap sets.  Deliberate for a polled driver, and what the BSDs
  * ship too; lifting it means multiple S-mask bits (0xFF / 0x55 / 0x11)
- * rather than a stride change. [ehci-audit note]
+ * rather than a stride change.
  *
- * Pure function so the host test suite can table-test it. [RF-3]
+ * Pure function so the host test suite can table-test it.
  */
 static uint32_t ehci_intr_stride(uint8_t bi, uint8_t speed)
 {
@@ -751,12 +750,12 @@ static uint32_t ehci_intr_stride(uint8_t bi, uint8_t speed)
  * bInterval was ignored entirely and an idle endpoint burned async bandwidth
  * continuously.  EHCI's periodic schedule is what implements a polling
  * interval: the controller walks one frame-list entry per 1 ms frame, so a QH
- * linked in every Nth entry is visited every N milliseconds. [USB-10]
+ * linked in every Nth entry is visited every N milliseconds.
  *
  * The driver is synchronous and holds submit_lock, so a single QH is linked in,
  * polled, and unlinked per transfer rather than kept resident.
  */
-/* Link the interrupt QH into every stride-th frame-list entry. [RF-7] */
+/* Link the interrupt QH into every stride-th frame-list entry. */
 static void ehci_periodic_link(ehci_hc_t *hc, uint32_t stride)
 {
     uint32_t qh_link = (uint32_t)hc->intr_qh_dma | EHCI_LINK_TYPE_QH;
@@ -772,7 +771,7 @@ static void ehci_periodic_link(ehci_hc_t *hc, uint32_t stride)
 #define EHCI_UNLINK_DRAIN_MS     20
 
 /*
- * [RF-7] The periodic unlink protocol.  There is no doorbell handshake for
+ * The periodic unlink protocol.  There is no doorbell handshake for
  * the periodic schedule (IAAD covers the async ring only), so: terminate
  * the frame-list entries, then let the controller advance
  * EHCI_UNLINK_DRAIN_FRAMES frames past wherever it was -- any transaction
@@ -826,12 +825,12 @@ static int ehci_intr_transfer(ehci_hc_t *hc, usb_transfer_t *xfer)
     qh->overlay_alt_next = EHCI_LINK_TERMINATE;
     qh->overlay_token = 0;
 
-    ehci_periodic_link(hc, stride);   /* [RF-7] */
+    ehci_periodic_link(hc, stride);
 
     deadline = (uint64_t)get_uptime_ms() +
                (xfer->timeout_ms ? xfer->timeout_ms : EHCI_XFER_TIMEOUT_MS);
     {
-        /* Shared poll loop [RF-6]; the unlink/drain below is bounded and
+        /* Shared poll loop; the unlink/drain below is bounded and
          * safe on a halted HC, so every outcome funnels through it. */
         uint32_t htok = 0;
 
@@ -843,9 +842,9 @@ static int ehci_intr_transfer(ehci_hc_t *hc, usb_transfer_t *xfer)
         }
     }
 
-    /* Unlink before touching the buffer again. [RF-7] */
+    /* Unlink before touching the buffer again. */
     ehci_periodic_unlink(hc, stride);
-    /* [EHCI-03] A completion can land between the last poll and the unlink
+    /* A completion can land between the last poll and the unlink
      * settling above; re-read the token before neutralizing it, or a
      * just-delivered report is discarded as a timeout. */
     if (r == USB_XFER_TIMEOUT) {
@@ -855,7 +854,7 @@ static int ehci_intr_transfer(ehci_hc_t *hc, usb_transfer_t *xfer)
         if (!late.active)
             r = late.halted ? ehci_halt_status(late.htok) : USB_XFER_OK;
     }
-    /* [EHCI-04] Capture the overlay before neutralizing it below -- the
+    /* Capture the overlay before neutralizing it below -- the
      * write-back overlay dt is the authoritative ending toggle. */
     uint32_t ov_tok = *(volatile uint32_t *)&qh->overlay_token;
     uint32_t ov_cur = qh->current_qtd;
@@ -876,7 +875,7 @@ static int ehci_intr_transfer(ehci_hc_t *hc, usb_transfer_t *xfer)
         ehci_copyout(hc, xfer, in, (len > residue) ? (len - residue) : 0);
     }
     if ((r == USB_XFER_OK || r == USB_XFER_TIMEOUT) && xfer->ep && ov_cur) {
-        /* [EHCI-04] Same overlay-dt readback as the bulk path: parity from
+        /* Same overlay-dt readback as the bulk path: parity from
          * actual_length misses a terminating ZLP and skips timeouts. */
         xfer->ep->toggle = (ov_tok & EHCI_QTD_TOGGLE) ? 1 : 0;
     }
@@ -891,7 +890,7 @@ static int ehci_submit(usb_hcd_t *hcd, usb_transfer_t *xfer)
     mutex_lock(&hc->submit_lock);
     if (hc->hcd.hc_failed) {
         /* Dead controller: fail fast rather than burning the full transfer
-         * timeout against a schedule that will never run it. [ASYNC-04] */
+         * timeout against a schedule that will never run it. */
         xfer->status = USB_XFER_ERROR;
         mutex_unlock(&hc->submit_lock);
         return USB_XFER_ERROR;
@@ -901,7 +900,7 @@ static int ehci_submit(usb_hcd_t *hcd, usb_transfer_t *xfer)
     else if (xfer->ep && xfer->ep->type == USB_EP_TYPE_BULK)
         ret = ehci_bulk_transfer(hc, xfer);
     else if (xfer->ep && xfer->ep->type == USB_EP_TYPE_INTERRUPT)
-        ret = ehci_intr_transfer(hc, xfer);   /* periodic schedule [USB-10] */
+        ret = ehci_intr_transfer(hc, xfer);   /* periodic schedule */
     else
         ret = USB_XFER_ERROR;
     mutex_unlock(&hc->submit_lock);
@@ -1051,7 +1050,7 @@ static int ehci_start(ehci_hc_t *hc)
 
     /* Periodic frame list: every entry terminated until an interrupt transfer
      * links its QH in.  The controller walks one entry per frame from
-     * FRINDEX, so this must be valid before PSE is set. [USB-10] */
+     * FRINDEX, so this must be valid before PSE is set. */
     for (unsigned i = 0; i < EHCI_FRAMELIST_ENTRIES; i++)
         hc->periodic[i] = EHCI_LINK_TERMINATE;
     memset(hc->intr_qh, 0, sizeof(struct ehci_qh));
@@ -1071,7 +1070,7 @@ static int ehci_start(ehci_hc_t *hc)
                EHCI_CMD_RUN | EHCI_CMD_ASE | EHCI_CMD_PSE |
                EHCI_CMD_FLS_1024 | (8u << EHCI_CMD_ITC_SHIFT));
     ehci_op_wr(hc, EHCI_OP_CONFIGFLAG, EHCI_CONFIGFLAG_CF);
-    /* [EHCI-INIT-02] Verify the controller actually left the halted state:
+    /* Verify the controller actually left the halted state:
      * HCHalted "is a zero whenever the Run/Stop bit is a one" (Table 2-10)
      * is the only read-back truth that it started -- RS=1 in USBCMD proves
      * nothing on wedged hardware.  Registering a stuck-halted controller
@@ -1149,8 +1148,7 @@ static int ehci_pci_attach(struct device *dev)
          * low half mapped as MMIO -- garbage capability registers, then
          * register writes into an unrelated region.  Dead code on QEMU
          * usb-ehci and real ICH (32-bit BARs), but 64-bit-BAR EHCIs
-         * exist; handle it the way xhci.c does: relocate below 4 GiB.
-         * [ehci-audit 15] */
+         * exist; handle it the way xhci.c does: relocate below 4 GiB. */
         uint32_t bar1 = pci_read_config32(pdev->bus, pdev->slot, pdev->func,
                                           0x14);
         phys64 |= (uint64_t)bar1 << 32;
@@ -1221,7 +1219,7 @@ static int ehci_pci_attach(struct device *dev)
     hc->hcd.port_status = ehci_port_status;
     hc->hcd.port_reset = ehci_port_reset;
 
-    hc->hcd.kdev = dev;                  /* shutdown dispatch [RF-5] */
+    hc->hcd.kdev = dev;                  /* shutdown dispatch */
     usb_register_hcd(&hc->hcd);
     hc->initialized = 1;
     ehci_instances++;
@@ -1239,11 +1237,11 @@ static int ehci_pci_attach(struct device *dev)
  * untraceable early-boot corruption.  HCRESET also reverts CONFIGFLAG and
  * port routing to power-on state (Table 2-9), so firmware/companions can
  * reclaim the ports we took in ehci_take_controller().  QEMU resets device
- * models itself; this is for real hardware. [ehci-audit 7]
+ * models itself; this is for real hardware.
  */
 static void ehci_pci_shutdown(struct device *dev)
 {
-    usb_hcd_t *hcd = usb_hcd_by_kdev(dev);   /* [RF-5] */
+    usb_hcd_t *hcd = usb_hcd_by_kdev(dev);
     ehci_hc_t *hc;
 
     if (!hcd)

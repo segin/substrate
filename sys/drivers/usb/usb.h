@@ -98,7 +98,7 @@
 #define USB_MSC_PROTO_UAS       0x62  /* USB Attached SCSI */
 
 /*
- * Transfer status taxonomy. [RF-11]
+ * Transfer status taxonomy.
  *
  * The distinction callers act on:
  *   STALL   -- the DEVICE said no (protocol stall / functional halt).
@@ -207,7 +207,7 @@
  * answers USB at all.  The first version of this escalated at attempt 7 of
  * 10 and so allowed ~500ms after the cycle -- it cut power and gave up
  * before the device could possibly have returned, on every single retry.
- * Hence a full fresh round rather than the tail of the old one. [HW-04]
+ * Hence a full fresh round rather than the tail of the old one.
  */
 #define USB_ENUM_DESC_ROUNDS      2
 /*
@@ -270,7 +270,7 @@
 /* How long an HCD waits for firmware to release its controller during the
  * BIOS/OS ownership handoff before claiming it anyway.  Shared by the EHCI
  * (PCI-config EECP) and xHCI (MMIO xECP) handoffs -- the walks differ per
- * spec, the patience does not. [RF-9] */
+ * spec, the patience does not. */
 #define USB_BIOS_HANDOFF_WAIT_MS 5000
 
 /*
@@ -395,7 +395,6 @@ typedef struct usb_interface {
      * 0 and a mouse on interface 1 -- and each needs its own driver and its
      * own private state.  dev->driver/dev->driver_data hold whichever
      * interface is currently being dispatched; these are the durable copies.
-     * [HW-07]
      */
     struct usb_class_driver *driver;
     void                    *driver_data;
@@ -551,7 +550,7 @@ typedef struct usb_hcd {
     uint8_t  enum_fail[USB_MAX_ROOT_PORTS];
 
     /*
-     * Dead-controller latch. [RF-2]
+     * Dead-controller latch.
      *
      * hc_failed is written by the HCD when the controller is beyond use --
      * the schedule refused a verified stop, or the hardware reported it
@@ -567,7 +566,7 @@ typedef struct usb_hcd {
 
     /* The bus device this controller attached as.  struct device carries no
      * driver-private pointer, so .shutdown dispatch resolves the HCD through
-     * usb_hcd_by_kdev() instead of per-driver registries. [RF-5] */
+     * usb_hcd_by_kdev() instead of per-driver registries. */
     struct device *kdev;
     uint32_t (*port_status)(struct usb_hcd *hcd, uint8_t port);
     int      (*port_reset)(struct usb_hcd *hcd, uint8_t port);
@@ -588,7 +587,7 @@ typedef struct usb_hcd {
      * device left mid-conversation by other software, which on the HP
      * Pavilion is the SD-card reader the firmware was driving as its own
      * boot disk until the xHCI BIOS handoff took the controller away.
-     * NULL on HCDs with no per-port power control. [HW-03]
+     * NULL on HCDs with no per-port power control.
      */
     int      (*port_power_cycle)(struct usb_hcd *hcd, uint8_t port);
 
@@ -636,7 +635,7 @@ typedef struct usb_hcd {
      * TD must stay ahead of the running frame counter.  xHCI derives it
      * from HCSPARAMS2's Isochronous Scheduling Threshold: a TD placed
      * closer than IST to the current microframe may be skipped entirely
-     * (xHCI 1.2 s4.14.2).  0 = no requirement advertised. [P5-05] */
+     * (xHCI 1.2 s4.14.2).  0 = no requirement advertised. */
     uint8_t  iso_min_lead_frames;
     uint16_t (*frame_number)(struct usb_hcd *hcd);
     int      (*iso_schedule)(struct usb_hcd *hcd, usb_device_t *dev,
@@ -648,12 +647,12 @@ typedef struct usb_hcd {
      * are coming for a while.  On xHCI this parks the endpoint cleanly: an
      * empty ring raises one Ring Underrun Transfer Event when first detected
      * and the xHC then removes the endpoint from its Pipe Schedule until the
-     * next doorbell (xHCI 1.2 s4.11.2.3, s4.10.3.1) -- P5-03's original
-     * claim of an event per interval flooding the event ring was WRONG, see
-     * the pass-6 audit -- so this is tidiness (quiesce + dequeue resync at
-     * a known point), not flood protection.  The next iso_schedule()'s
-     * doorbell restarts a Stopped endpoint (s4.8.3).  UHCI reclaims its
-     * frame-list slots individually and leaves this NULL. [P5-03, P6-ISO-01]
+     * next doorbell (xHCI 1.2 s4.11.2.3, s4.10.3.1) -- it does NOT post an
+     * event per interval and flood the event ring -- so this is tidiness
+     * (quiesce + dequeue resync at a known point), not flood protection.
+     * The next iso_schedule()'s doorbell restarts a Stopped endpoint
+     * (s4.8.3).  UHCI reclaims its frame-list slots individually and
+     * leaves this NULL.
      */
     void     (*iso_stop)(struct usb_hcd *hcd, usb_device_t *dev,
                          usb_endpoint_t *ep);
@@ -667,7 +666,7 @@ typedef struct usb_hcd {
      * is only knowable from the completion, so IN packets are armed with
      * an event requested and this is how the caller collects it.  A
      * handle abandoned without polling must still be released with
-     * iso_reclaim(). [T3]
+     * iso_reclaim().
      */
     int      (*iso_in_status)(struct usb_hcd *hcd, void *handle,
                               uint32_t *out_len);
@@ -714,7 +713,7 @@ void usb_init(void);
  * the monitor takes PID 1.  See the note in usb.c. */
 void usb_late_init(void);
 /* One synchronous scan; returns how many devices it newly enumerated, so a
- * caller can act only when the bus actually changed.  See rootwait. [HW-02] */
+ * caller can act only when the bus actually changed.  See rootwait. */
 int  usb_hotplug_poll(void);
 void usb_msc_init(void);
 void uas_init(void);
@@ -724,7 +723,7 @@ void usb_hid_mouse_init(void);
 void usb_hub_init(void);
 
 /*
- * [RF-13] Per-type transfer deadlines, stamped by the core wrappers when the
+ * Per-type transfer deadlines, stamped by the core wrappers when the
  * caller passes none.  One second covers every conformant control request
  * with margin (two of three HCDs already used it; UHCI's old 5 s floor made
  * a wedged EP0 five times as expensive).  Bulk keeps the 5 s UHCI proved
@@ -735,12 +734,12 @@ void usb_hub_init(void);
 #define USB_TIMEOUT_CONTROL_MS  1000
 #define USB_TIMEOUT_BULK_MS     5000
 
-/* Millisecond busy-wait (pause spin) shared by the HCDs and hub code. [RF-12] */
+/* Millisecond busy-wait (pause spin) shared by the HCDs and hub code. */
 void usb_delay_ms(uint32_t ms);
 
 /* HCD Registration */
 int  usb_register_hcd(usb_hcd_t *hcd);
-/* Resolve a registered HCD from its bus device (shutdown dispatch). [RF-5] */
+/* Resolve a registered HCD from its bus device (shutdown dispatch). */
 usb_hcd_t *usb_hcd_by_kdev(struct device *dev);
 void usb_unregister_hcd(usb_hcd_t *hcd);
 

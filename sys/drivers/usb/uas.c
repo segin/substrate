@@ -167,7 +167,7 @@ static int uas_transfer(uas_dev_t *u, uint8_t lun, const uint8_t *cdb,
             return -1;
         /* The Sense IU must carry the task tag of the command we issued; a
          * status IU bearing a different tag belongs to another command and
-         * must not be attributed to this one. [DRV-17] */
+         * must not be attributed to this one. */
         if ((((uint16_t)siu[2] << 8) | siu[3]) != tag)
             return -1;
         uint8_t status = siu[6];
@@ -192,7 +192,7 @@ static int uas_transfer(uas_dev_t *u, uint8_t lun, const uint8_t *cdb,
 
         /* Every status/ready IU is tagged with the task tag it responds to;
          * one bearing a different tag is a stale or misordered reply to another
-         * command and must be skipped, not acted upon. [DRV-17] */
+         * command and must be skipped, not acted upon. */
         if ((((uint16_t)siu[2] << 8) | siu[3]) != tag)
             continue;
 

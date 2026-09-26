@@ -91,7 +91,7 @@ struct usb_msc_csw {
  * on USB2/USB3 storage.  16 KiB is block-aligned (32 * 512) and clears the
  * 20 KiB EHCI ceiling with margin; bigger transfers are split across the loop
  * below.  Submit_lock serializes everything, so concurrent control transfers
- * can't race for TDs. [DRV-16] */
+ * can't race for TDs. */
 #define USB_MSC_MAX_XFER        16384
 #define USB_MSC_KERN_BASE       0xC0000000U
 
@@ -163,7 +163,7 @@ static int usb_msc_bot_transfer(usb_msc_dev_t *msc, uint8_t lun,
     /* Re-check under the lock: a concurrent detach (USB unplug) may have
      * quiesced the device and freed the DMA buffers after our caller's
      * lock-less active check.  The detach holds this same lock while it tears
-     * down, so once we hold it the state is stable. [DRV-01] */
+     * down, so once we hold it the state is stable. */
     if (!msc->active || !msc->udev || !msc->cbw || !msc->csw) {
         mutex_unlock(&msc->lock);
         return -1;
@@ -181,7 +181,7 @@ static int usb_msc_bot_transfer(usb_msc_dev_t *msc, uint8_t lun,
     /* Clamp BEFORE recording it: the wire field used to carry the unclamped
      * length while only 16 bytes were copied.  BOT restricts bCBWCBLength to
      * 1-16 and a device receiving more must treat the CBW as invalid, stalling
-     * both endpoints and dragging us through reset recovery. [USB-15] */
+     * both endpoints and dragging us through reset recovery. */
     if (cdb_len > 16)
         cdb_len = 16;
     cbw->bCBWCBLength = cdb_len;
@@ -251,7 +251,7 @@ static int usb_msc_bot_transfer(usb_msc_dev_t *msc, uint8_t lun,
                 }
 
                 if (actual > chunk_size)
-                    actual = chunk_size;   /* never walk past the request [USB-17] */
+                    actual = chunk_size;   /* never walk past the request */
                 ptr += actual;
                 remaining -= actual;
 
@@ -262,7 +262,7 @@ static int usb_msc_bot_transfer(usb_msc_dev_t *msc, uint8_t lun,
             while (remaining > 0) {
                 /* Cap the bounce chunk at the same HCD-safe limit; the bounce
                  * buffer itself is larger but the transfer must still fit the
-                 * controller's per-transfer ceiling. [DRV-16] */
+                 * controller's per-transfer ceiling. */
                 uint32_t chunk_size = (remaining > USB_MSC_MAX_XFER) ?
                                       USB_MSC_MAX_XFER : remaining;
 
@@ -285,7 +285,7 @@ static int usb_msc_bot_transfer(usb_msc_dev_t *msc, uint8_t lun,
                 }
 
                 if (actual > chunk_size)
-                    actual = chunk_size;   /* [USB-17] */
+                    actual = chunk_size;   /* never walk past the request */
                 ptr += actual;
                 remaining -= actual;
 
@@ -327,7 +327,7 @@ static int usb_msc_bot_transfer(usb_msc_dev_t *msc, uint8_t lun,
 
     /* BOT requires dCSWDataResidue <= dCBWDataTransferLength.  A device
      * reporting more makes the caller's (data_len - residue) underflow into a
-     * ~4 GB transfer count, so clamp rather than trust. [USB-16] */
+     * ~4 GB transfer count, so clamp rather than trust. */
     if (csw->dCSWDataResidue > data_len) {
         kprintf("usb_msc: CSW residue %u exceeds transfer length %u; clamping\n",
                 csw->dCSWDataResidue, data_len);
@@ -596,7 +596,7 @@ static void usb_msc_detach(usb_device_t *dev)
     /* Quiesce: take the transfer lock so any BOT transfer already past its
      * active check completes before we free the DMA buffers and drop udev.  A
      * transfer that blocked on the lock re-checks active/udev after acquiring
-     * it and bails, so it can't touch the freed buffers. [DRV-01] */
+     * it and bails, so it can't touch the freed buffers. */
     mutex_lock(&msc->lock);
     msc->active = 0;
     msc->udev = NULL;

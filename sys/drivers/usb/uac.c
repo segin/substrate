@@ -75,14 +75,13 @@
  * TD no completion event, so the driver cannot detect overwrite of TRBs the
  * controller has not consumed.  It must stay below the HCD's per-endpoint
  * ring capacity (XHCI_RING_TRBS - 2 = 62; UHCI's frame list is far larger).
- * [P5-04]
  */
 #define UAC_WINDOW                48U
 #define UAC_RING_SLOTS            64U
 /* Fallback frame-space modulus, used only if the HCD does not advertise one
  * (hcd->iso_frame_modulus == 0).  UHCI's value; xHCI advertises 2048, and
  * assuming 1024 there stalled the stream for the half of every 2048ms cycle
- * in which the two moduli disagree. [P5-01] */
+ * in which the two moduli disagree. */
 #define UAC_NFRAMES               1024U
 
 #define UAC_FIFO_BYTES            (64U * 1024U)   /* ~340 ms cushion          */
@@ -164,7 +163,7 @@ static void uac_feeder(void *arg)
 		if (!d->active) {
 			/* Idle: stop scheduling (device plays silence), wait to be
 			 * woken by a write.  Tell the HCD once, on the transition,
-			 * so it can park the endpoint at a known point. [P5-03] */
+			 * so it can park the endpoint at a known point. */
 			if (d->started)
 				usb_iso_stop(d->udev, &d->iso_ep);
 			uac_reclaim_all(d);
@@ -180,7 +179,7 @@ static void uac_feeder(void *arg)
 		 * modulus, or dev_frame jumps backwards at every wrap and the
 		 * window test below goes quiet for the difference -- adding 1024
 		 * on xHCI's 2048-frame counter silenced the stream for ~1s of
-		 * every 2s. [P5-01]
+		 * every 2s.
 		 */
 		uint32_t fmod = d->udev->hcd->iso_frame_modulus
 		                    ? d->udev->hcd->iso_frame_modulus : UAC_NFRAMES;
@@ -194,7 +193,7 @@ static void uac_feeder(void *arg)
 
 		/* (Re)sync the scheduling cursor on start or after an underrun.
 		 * The lead honors the controller's advertised minimum (xHCI
-		 * IST, [P5-05]): a packet scheduled inside that window may be
+		 * IST): a packet scheduled inside that window may be
 		 * skipped by the controller outright. */
 		uint32_t lead = UAC_LEAD;
 		if (d->udev->hcd->iso_min_lead_frames > lead)
@@ -247,7 +246,9 @@ static void uac_feeder(void *arg)
 			 * No mask: uint16_t truncation is exact mod any power-of-two
 			 * modulus up to 65536, and each HCD masks to its own space
 			 * (UHCI to its frame list, xHCI's Frame ID field to 2048).
-			 * Masking here to the WRONG modulus is what [P5-01] was.
+			 * Masking here to the WRONG modulus (1024 on xHCI's
+			 * 2048-frame counter) silenced the stream for half of
+			 * every cycle.
 			 */
 			usb_iso_schedule(d->udev, &d->iso_ep,
 			    (uint16_t)d->sched,

@@ -41,7 +41,7 @@
  * device and the SD card reader (the root device!) never enumerating at
  * all, exactly the failure mode xhci_take_controller()'s comment predicts.
  * The Supported Protocol capabilities live out there too, so the port
- * speed map was silently incomplete. [HW-01]
+ * speed map was silently incomplete.
  */
 #define XHCI_MMIO_MIN      0x4000  /* cap + op(0) + runtime(0x1000) + doorbell(0x2000) */
 #define XHCI_MMIO_MAX      0x100000
@@ -89,7 +89,7 @@
  * through a volatile pointer: these are not ordinary variables the compiler
  * may cache, fold or reorder among themselves.  The ownership handoff in
  * particular depends on the cycle bit becoming visible *after* the rest of
- * the TRB, which xhci_trb_commit() enforces. [X-11]
+ * the TRB, which xhci_trb_commit() enforces.
  */
 struct xhci_ring {
     volatile struct xhci_trb *trb;
@@ -133,7 +133,7 @@ typedef struct xhci_hc {
      * Protocol capability; 0 = the capability said nothing about it. */
     uint8_t  port_major[USB_MAX_ROOT_PORTS];
     uint32_t ctx_size;         /* 32 or 64 */
-    uint32_t mmio_size;        /* mapped register window, from the BAR [HW-01] */
+    uint32_t mmio_size;        /* mapped register window, from the BAR */
     int      initialized;
 
     mutex_t  submit_lock;
@@ -159,7 +159,6 @@ typedef struct xhci_hc {
      * it via iso_reclaim().  Events are matched to records by TRB address
      * wherever the driver would otherwise discard an unrecognised event.
      * Sized above uac's 48-packet window; all access is under submit_lock.
-     * [T3]
      */
 #define XHCI_ISO_RECS 64
     struct xhci_iso_rec {
@@ -172,7 +171,7 @@ typedef struct xhci_hc {
 
     /* Indexed by slot id (1-based).  Each entry is ~3 KiB and most are
      * never used, so they are allocated when the controller hands us the
-     * slot and freed with it. [X-14] */
+     * slot and freed with it. */
     struct xhci_slot *slots[XHCI_MAX_SLOTS + 1];
     uint8_t  addr_slot[128];       /* usb address -> slot id */
     uint8_t  enum_slot;            /* slot of the current address-0 device */
@@ -338,7 +337,7 @@ static void xhci_abort_command(xhci_hc_t *hc)
      * desynchronisation this function exists to prevent: the next command
      * matches on TRB type alone and would take one of them as its own result,
      * report a spurious failure, and leave its real completion behind for the
-     * command after that. [R-01]
+     * command after that.
      *
      * Anything else met on the way (a late transfer event for the TD we are
      * abandoning, a port-status change) is discarded with them -- this is a
@@ -363,7 +362,7 @@ static void xhci_abort_command(xhci_hc_t *hc)
     link->param = hc->cmd_ring.dma;
     /* Through xhci_trb_commit() like every other ring write, even though the
      * controller is stopped here and CRCR is republished below, so there is no
-     * handoff to order.  The rule is worth more than the exception. [R-04] */
+     * handoff to order.  The rule is worth more than the exception. */
     xhci_trb_commit(link, XHCI_TRB_TYPE(TRB_LINK) | XHCI_TRB_TC);
     hc->cmd_ring.enq = 0;
     hc->cmd_ring.cycle = 1;
@@ -374,7 +373,7 @@ static void xhci_abort_command(xhci_hc_t *hc)
  * Offer an event that is about to be discarded to the iso-IN records.
  * Called from every path that consumes events it does not recognise; a
  * Transfer Event naming an armed IN TRB is that packet's completion, and
- * dropping it would lose the received length forever. [T3]
+ * dropping it would lose the received length forever.
  */
 static void xhci_iso_note(xhci_hc_t *hc, uint64_t param, uint32_t ctrl,
                           uint32_t status)
@@ -413,8 +412,8 @@ static int xhci_run_command_st(xhci_hc_t *hc, uint64_t param, uint32_t status,
     for (int guard = 0; guard < 8; guard++) {
         int cc = xhci_wait_event(hc, &ep, &ec, &est, XHCI_CMD_TIMEOUT_MS);
         if (cc != 0)
-            xhci_iso_note(hc, ep, ec, est);   /* [T3] */
-        if (cc == 0) {                      /* [X-04] */
+            xhci_iso_note(hc, ep, ec, est);
+        if (cc == 0) {
             xhci_abort_command(hc);
             return 0;
         }
@@ -425,7 +424,7 @@ static int xhci_run_command_st(xhci_hc_t *hc, uint64_t param, uint32_t status,
              * command we have already given up waiting for.  xhci_abort_command
              * drains both, so reaching one here means an abort happened
              * somewhere else -- skip rather than report it as this command's
-             * outcome. [R-01] */
+             * outcome. */
             if (cc == XHCI_CC_CMD_RING_STOPPED || cc == XHCI_CC_CMD_ABORTED)
                 continue;
             if (out_slot) *out_slot = XHCI_TRB_GET_SLOT(ec);
@@ -481,7 +480,7 @@ static int xhci_set_tr_dequeue(xhci_hc_t *hc, uint8_t slot, int dci,
      * SCT=1 (Primary Transfer Ring) when a Stream ID is named on a
      * linear-array endpoint; 0 is only for stream-less endpoints.  Same
      * encoding as the stream context's own SCT field, hence the shared
-     * constant. [P6-SLOT-03] */
+     * constant. */
     uint64_t sct = stream_id ? (uint64_t)XHCI_SCTX_SCT_PRIM_TR : 0;
     int cc = xhci_run_command_st(hc, deq | sct | (ring->cycle ? 1u : 0u),
                                  (uint32_t)stream_id << 16,
@@ -555,7 +554,7 @@ static int xhci_recover_ep(xhci_hc_t *hc, uint8_t slot, int dci,
      * session.  A bounce means precisely "the state moved"; by the time
      * the completion arrives the output context has long settled, so
      * re-reading and re-dispatching converges -- one extra lap in the
-     * race, two more as insurance. [P6-SLOT-02]
+     * race, two more as insurance.
      */
     for (int attempt = 0; attempt < 3; attempt++) {
         uint32_t state = xhci_ep_state(hc, slot, dci);
@@ -600,7 +599,7 @@ static int xhci_recover_ep(xhci_hc_t *hc, uint8_t slot, int dci,
     return -1;
 }
 
-/* [DRV-03] Wait for the Transfer Event addressed to (slot, dci); skip unrelated
+/* Wait for the Transfer Event addressed to (slot, dci); skip unrelated
  * events (port-status changes from the hotplug scanner, other slots/endpoints).
  * Without this filter a routine Port-Status-Change event is consumed as the
  * transfer's completion, giving a bogus actual_length and desyncing every later
@@ -631,7 +630,7 @@ static int xhci_recover_ep(xhci_hc_t *hc, uint8_t slot, int dci,
  * the rest of the session.
  */
 /*
- * [RF-1a] Map a transfer completion code to a USB_XFER_* status.
+ * Map a transfer completion code to a USB_XFER_* status.
  *
  * Every non-success code used to collapse into USB_XFER_STALL, so a
  * transient USB Transaction Error (4), Babble (3), TRB Error (5) or Context
@@ -641,7 +640,7 @@ static int xhci_recover_ep(xhci_hc_t *hc, uint8_t slot, int dci,
  * usb_hid / usb_hid_mouse permanently latch ctl_poll_refused when a
  * GET_REPORT poll "stalls".  One flaky bus transaction on the polled
  * control path could therefore silently kill a HID device's input for the
- * life of the machine.  EHCI grew the same classifier in [ehci-audit 2];
+ * life of the machine.  EHCI has the same classifier (ehci_halt_status);
  * the taxonomy (STALL = the device said no; ERROR = the transport broke;
  * TIMEOUT = nothing answered) is shared, the encodings are per-driver.
  * xhci_recover_ep() runs unconditionally on these paths either way, so
@@ -667,7 +666,7 @@ static int xhci_wait_td(xhci_hc_t *hc, uint8_t slot, int dci,
     for (int guard = 0; guard < XHCI_EVENT_SCAN_MAX; guard++) {
         int cc = xhci_wait_event(hc, &ep_trb, &ec, &est, timeout_ms);
         if (cc == 0) return 0;   /* timeout */
-        xhci_iso_note(hc, ep_trb, ec, est);   /* [T3] */
+        xhci_iso_note(hc, ep_trb, ec, est);
 
         /* Not a transfer event for this endpoint at all (port status change,
          * another slot, another EP): drop it and keep looking. */
@@ -702,7 +701,7 @@ static uint8_t *in_ep_of(xhci_hc_t *hc, uint8_t *in_ctx, int dci)
 static void xhci_free_slot(xhci_hc_t *hc, uint8_t slot);
 /* Every path that takes submit_lock and drives the controller drains first,
  * so none of them can start a command sequence against an event ring that is
- * already full. [R-05] */
+ * already full. */
 static void xhci_drain_events(xhci_hc_t *hc);
 
 /*
@@ -720,7 +719,7 @@ static void xhci_drain_events(xhci_hc_t *hc);
  * and neither do the parts implementing them; FreeBSD (xhci_configure_device)
  * and NetBSD (xhci_speed2xspeed) both still populate it from the device.
  * The encoding is the default Protocol Speed ID assignment and does not line
- * up with substrate's USB_SPEED_*, so this is a mapping, not a cast. [P3-01]
+ * up with substrate's USB_SPEED_*, so this is a mapping, not a cast.
  */
 static uint32_t xhci_slot_speed(const usb_device_t *dev)
 {
@@ -743,7 +742,7 @@ static uint32_t xhci_slot_speed(const usb_device_t *dev)
  * initialized on *every* Configure Endpoint Command -- not just the first --
  * so every site that builds an input slot context calls this.  TTT is only
  * meaningful on a high-speed hub, which is the condition the spec attaches to
- * it. [P3-02, P3-03]
+ * it.
  */
 static void xhci_slot_hub_fields(const usb_device_t *dev, uint32_t *sc)
 {
@@ -758,7 +757,7 @@ static void xhci_slot_hub_fields(const usb_device_t *dev, uint32_t *sc)
                 ((uint32_t)(dev->hub_ttt & 0x3) << XHCI_SLOT_TTT_SHIFT);
 }
 
-/* [A34] Release any slot still bound to a root port that has lost its
+/* Release any slot still bound to a root port that has lost its
  * connection.  The USB core has no HCD-level disconnect callback — it only runs
  * the class driver's .detach — so a successfully-enumerated device's slot was
  * never disabled and its contexts + transfer rings leaked on unplug, exhausting
@@ -786,7 +785,7 @@ static void xhci_port_gone(usb_hcd_t *hcd, uint8_t port)
         return;
 
     mutex_lock(&hc->submit_lock);
-    xhci_drain_events(hc);   /* [R-05] */
+    xhci_drain_events(hc);
     for (uint8_t slot = 1; slot <= XHCI_MAX_SLOTS; slot++) {
         struct xhci_slot *s = hc->slots[slot];
         if (!s || !s->in_use || s->port != port)
@@ -818,7 +817,7 @@ static uint32_t xhci_port_status(usb_hcd_t *hcd, uint8_t port)
          * to and a SuperSpeed one was never recognised as such -- which also
          * meant bMaxPacketSize0's exponent encoding was read as a literal.
          * PORTSC bits 13:10 hold the Protocol Speed ID; 1..4 are the standard
-         * FS/LS/HS/SS assignments (xHCI 1.1 s7.2.2.1.1). [USB-12]
+         * FS/LS/HS/SS assignments (xHCI 1.1 s7.2.2.1.1).
          */
         uint32_t psid = (psc & XHCI_PORT_SPEED_MASK) >> XHCI_PORT_SPEED_SHIFT;
         uint8_t major = (port >= 1 && port <= USB_MAX_ROOT_PORTS)
@@ -828,7 +827,7 @@ static uint32_t xhci_port_status(usb_hcd_t *hcd, uint8_t port)
             /* Every speed a USB3 protocol port can train at -- SuperSpeed and
              * the SuperSpeedPlus gears above it -- is SuperSpeed as far as the
              * core is concerned.  Reading the PSID against the default table
-             * here is what reported a Gen 2 port as high speed. [X-10] */
+             * here is what reported a Gen 2 port as high speed. */
             out |= USB_PORT_STAT_SUPER_SPEED;
         } else {
             switch (psid) {
@@ -852,7 +851,7 @@ static uint32_t xhci_port_status(usb_hcd_t *hcd, uint8_t port)
      * and a poll loop added elsewhere in this driver duly fired hundreds of
      * teardowns and broke enumeration.  The reaping now hangs off the
      * port_gone hook, called from the hot-plug scan.  Keep this a pure
-     * read. [X-12]
+     * read.
      */
     return out;
 }
@@ -891,7 +890,7 @@ static int xhci_do_reset(xhci_hc_t *hc, uint8_t port, uint32_t reset_bit)
 
     /* Let the device finish coming out of reset before anyone talks to it.
      * usb_scan_ports() goes straight from here into enumeration, so if this
-     * wait is not taken here it is not taken anywhere. [X-07] */
+     * wait is not taken here it is not taken anywhere. */
     usb_delay_ms(XHCI_PORT_RESET_RECOVERY_MS);
 
     return (portsc_rd(hc, port) & XHCI_PORT_PED) ? 0 : -1;
@@ -930,7 +929,6 @@ static int xhci_port_reset(usb_hcd_t *hcd, uint8_t port)
      * xhci_roothub_exec UHF_PORT_RESET, NetBSD xhci_roothub_ctrl).  It is
      * also harmless on a SuperSpeed port that auto-enabled on connect: PR
      * there is a hot reset, which is precisely what re-enumeration wants.
-     * [HW-08]
      */
     if (xhci_do_reset(hc, port, XHCI_PORT_PR) == 0)
         return 0;
@@ -948,7 +946,7 @@ static int xhci_port_reset(usb_hcd_t *hcd, uint8_t port)
     if ((psc & XHCI_PORT_CCS) &&
         ((psc & XHCI_PORT_SPEED_MASK) >> XHCI_PORT_SPEED_SHIFT) >= 4) {
         kprintf("xhci: port %u would not enable; trying a warm reset\n", port);
-        return xhci_do_reset(hc, port, XHCI_PORT_WPR);   /* [X-15] */
+        return xhci_do_reset(hc, port, XHCI_PORT_WPR);
     }
     return -1;
 }
@@ -966,7 +964,7 @@ static int xhci_port_reset(usb_hcd_t *hcd, uint8_t port)
  *
  * The off time has to be long enough for the device to actually observe the
  * loss through its own bulk capacitance; the on time is the same
- * power-on-to-power-good budget xhci_power_ports() waits. [HW-03]
+ * power-on-to-power-good budget xhci_power_ports() waits.
  */
 static int xhci_port_power_cycle(usb_hcd_t *hcd, uint8_t port)
 {
@@ -992,7 +990,7 @@ static int xhci_port_power_cycle(usb_hcd_t *hcd, uint8_t port)
     return 0;
 }
 
-/* [DRV-19] Release everything a (partially) set-up slot allocated and hand the
+/* Release everything a (partially) set-up slot allocated and hand the
  * slot id back to the controller.  Every failure path in xhci_setup_slot funnels
  * here so a flaky enumeration doesn't leak the slot + its DMA contexts — 16 such
  * failures would otherwise exhaust every slot the controller has. */
@@ -1013,8 +1011,7 @@ static void xhci_free_slot(xhci_hc_t *hc, uint8_t slot)
      * device also has bulk/interrupt transfer rings (xhci_ensure_ep) and, for
      * USB3 UAS, a stream-context array plus one ring per stream ID (xhci_bulk).
      * On a setup-time failure only ep_ring[1] exists, so the extra checks are
-     * cheap no-ops; on a real disconnect they are what actually plugs the leak.
-     * [A34] */
+     * cheap no-ops; on a real disconnect they are what actually plugs the leak. */
     for (int dci = 0; dci < 32; dci++) {
         if (s->ep_ring[dci].trb) {
             dma_free_coherent((void *)s->ep_ring[dci].trb,
@@ -1041,7 +1038,7 @@ static void xhci_free_slot(xhci_hc_t *hc, uint8_t slot)
         dma_free_coherent(s->dev_ctx, 32 * hc->ctx_size);
         s->dev_ctx = NULL;
     }
-    /* And the per-slot state itself, which is allocated on demand. [X-14] */
+    /* And the per-slot state itself, which is allocated on demand. */
     hc->slots[slot] = NULL;
     kfree(s, sizeof(*s));
 }
@@ -1056,7 +1053,7 @@ static int xhci_setup_slot(xhci_hc_t *hc, usb_transfer_t *xfer, uint8_t port)
         return -1;
     }
     /* Per-slot state is ~3 KiB and most slots are never used, so it is
-     * allocated now that the controller has actually given us one. [X-14] */
+     * allocated now that the controller has actually given us one. */
     if (!hc->slots[slot]) {
         hc->slots[slot] = kzalloc(sizeof(struct xhci_slot));
         if (!hc->slots[slot]) {
@@ -1075,7 +1072,7 @@ static int xhci_setup_slot(xhci_hc_t *hc, usb_transfer_t *xfer, uint8_t port)
     s->in_ctx  = dma_alloc_coherent(33 * hc->ctx_size, &s->in_ctx_dma);
     if (!s->dev_ctx || !s->in_ctx || xhci_ring_alloc(&s->ep_ring[1]) != 0) {
         kprintf("xhci: slot %u alloc failed\n", slot);
-        xhci_free_slot(hc, slot);   /* [DRV-19] */
+        xhci_free_slot(hc, slot);
         return -1;
     }
     memset(s->dev_ctx, 0, 32 * hc->ctx_size);
@@ -1090,12 +1087,12 @@ static int xhci_setup_slot(xhci_hc_t *hc, usb_transfer_t *xfer, uint8_t port)
      * Slot context: 1 ctx entry (EP0), speed, root hub port -- plus the
      * topology fields, without which the controller cannot reach anything
      * behind a hub.  `port` here is the ROOT port; the device's own port
-     * number is only one tier of the route. [USB-01]
+     * number is only one tier of the route.
      */
     uint32_t *sc = (uint32_t *)in_slot_of(hc, s->in_ctx);
     usb_device_t *udev = xfer->dev;
     /* The device's own speed, not the root port's -- see xhci_slot_speed. */
-    uint32_t speed = xhci_slot_speed(udev);        /* [P3-01] */
+    uint32_t speed = xhci_slot_speed(udev);
     uint32_t route = usb_route_string(udev);
 
     sc[0] = (1u << XHCI_SLOT_CTX_ENTRIES_SHIFT) | (speed << XHCI_SLOT_SPEED_SHIFT) |
@@ -1129,7 +1126,7 @@ static int xhci_setup_slot(xhci_hc_t *hc, usb_transfer_t *xfer, uint8_t port)
              (3u << XHCI_EP_CERR_SHIFT);
     ep0[2] = (uint32_t)(s->ep_ring[1].dma) | s->ep_ring[1].cycle;  /* DCS */
     ep0[3] = (uint32_t)((uint64_t)s->ep_ring[1].dma >> 32);
-    ep0[4] = XHCI_EP_AVG_TRB_LEN(XHCI_EP_AVG_TRB_CTRL);   /* [X-05] */
+    ep0[4] = XHCI_EP_AVG_TRB_LEN(XHCI_EP_AVG_TRB_CTRL);
 
     /* Address Device with BSR=1: sets up the slot but leaves the device in
      * Default state so the core can read the initial 8-byte descriptor. */
@@ -1138,7 +1135,7 @@ static int xhci_setup_slot(xhci_hc_t *hc, usb_transfer_t *xfer, uint8_t port)
     cc = xhci_run_command(hc, s->in_ctx_dma, ctrl, NULL);
     if (cc != XHCI_CC_SUCCESS) {
         kprintf("xhci: address-device(BSR) slot %u failed cc=%d\n", slot, cc);
-        xhci_free_slot(hc, slot);   /* [DRV-19] */
+        xhci_free_slot(hc, slot);
         return -1;
     }
     hc->enum_slot = slot;
@@ -1154,7 +1151,7 @@ static uint8_t xhci_slot_for(xhci_hc_t *hc, usb_transfer_t *xfer)
      * between one transfer and the next has had xhci_free_slot() NULL its
      * entry, and every caller dereferences hc->slots[] without rechecking --
      * the enum_slot branch below has always guarded this and this one had
-     * not. [R-06] */
+     * not. */
     if (addr != 0 && hc->addr_slot[addr] && hc->slots[hc->addr_slot[addr]])
         return hc->addr_slot[addr];
     if (hc->enum_slot &&
@@ -1268,7 +1265,7 @@ static int xhci_ensure_ep(xhci_hc_t *hc, uint8_t slot, usb_device_t *dev,
      * configured out of order -- a function whose interrupt IN is polled
      * before its bulk OUT is touched sets it back below a context that is
      * still live.  FreeBSD tracks the same running maximum
-     * (xhci.c, sc_hw.devs[].context_num). [P3-05]
+     * (xhci.c, sc_hw.devs[].context_num).
      */
     uint32_t entries = (dsc[0] >> XHCI_SLOT_CTX_ENTRIES_SHIFT) & 0x1F;
     if ((uint32_t)dci > entries)
@@ -1285,7 +1282,7 @@ static int xhci_ensure_ep(xhci_hc_t *hc, uint8_t slot, usb_device_t *dev,
      * the endpoint we are configuring gets scheduled as if the device were
      * high-speed.  EP0 keeps working (it was addressed with the fields intact)
      * and only the endpoint added by this command misbehaves, which is why it
-     * looks like a device that enumerates fine and then goes quiet. [X-06]
+     * looks like a device that enumerates fine and then goes quiet.
      */
     insc[2] = dsc[2];
 
@@ -1293,7 +1290,7 @@ static int xhci_ensure_ep(xhci_hc_t *hc, uint8_t slot, usb_device_t *dev,
      * And the hub fields.  s6.2.2.2 requires the Hub field to be initialized
      * on every Configure Endpoint Command, and this is the command that
      * transitions the slot Addressed -> Configured -- the one point at which
-     * s4.5.2 lets the xHC latch Hub, Number of Ports and TTT at all. [P3-02]
+     * s4.5.2 lets the xHC latch Hub, Number of Ports and TTT at all.
      */
     xhci_slot_hub_fields(dev, insc);
 
@@ -1311,7 +1308,7 @@ static int xhci_ensure_ep(xhci_hc_t *hc, uint8_t slot, usb_device_t *dev,
      * additional transactions per microframe (ep->mult is 1..3, the field
      * wants transactions-1); everything else bursts one packet.  Left at 0
      * on SuperSpeed -- as this was -- every SS endpoint ran at a fraction
-     * of its negotiated bandwidth. [T2]
+     * of its negotiated bandwidth.
      */
     uint32_t burst = 0;
     if (dev && dev->speed == USB_SPEED_SUPER)
@@ -1345,7 +1342,7 @@ static int xhci_ensure_ep(xhci_hc_t *hc, uint8_t slot, usb_device_t *dev,
      * Bandwidth parameters.  A periodic endpoint's Max ESIT Payload is the
      * bytes it may move per service interval: max-packet times the burst
      * (Table 6-9's formula, MaxPacketSize * (MaxBurst+1)); an async endpoint
-     * reserves nothing and only needs a representative TRB length. [X-05, T2]
+     * reserves nothing and only needs a representative TRB length.
      */
     if (ep->type == USB_EP_TYPE_INTERRUPT || isoch) {
         uint32_t esit = mps * (burst + 1);
@@ -1368,7 +1365,7 @@ static int xhci_ensure_ep(xhci_hc_t *hc, uint8_t slot, usb_device_t *dev,
 /*
  * The core has learned this device is a hub.  Declare it one to the
  * controller: xHCI will not route a transfer past a slot whose Hub bit is
- * clear. [USB-01]
+ * clear.
  *
  * This used to issue Evaluate Context, which cannot do it.  xHCI 1.2 s6.2.2.3
  * is explicit -- an Evaluate Context Command that flags the Slot Context
@@ -1378,7 +1375,7 @@ static int xhci_ensure_ep(xhci_hc_t *hc, uint8_t slot, usb_device_t *dev,
  * (s6.2.2.2).  The command returned Success and the Hub bit stayed clear, on
  * every hub, forever -- and s4.5.2 adds that once a slot has been Addressed
  * the hub fields can only be latched by a Configure Endpoint, so nothing later
- * recovered it either. [P3-02]
+ * recovered it either.
  *
  * Issued here rather than left to the Configure Endpoint that opens the hub's
  * status-change endpoint, because usb_hub_attach() walks the downstream ports
@@ -1406,7 +1403,7 @@ static int xhci_set_hub(usb_hcd_t *hcd, usb_device_t *dev, uint8_t nports,
         return -1;
 
     mutex_lock(&hc->submit_lock);
-    xhci_drain_events(hc);   /* [R-05] */
+    xhci_drain_events(hc);
 
     /* Configure Endpoint, slot context only (A0): no endpoint is being added
      * or dropped, so the drop flags and every endpoint add flag stay clear. */
@@ -1445,7 +1442,7 @@ static int xhci_set_hub(usb_hcd_t *hcd, usb_device_t *dev, uint8_t nports,
  * slot was addressed with the core's pre-descriptor guess, which for a
  * full-speed device (8) versus the assumed 64 is simply wrong.  Evaluate
  * Context with only the EP0 add flag is the amendment the spec provides
- * (xHCI 1.1 s4.3.4). [USB-11]
+ * (xHCI 1.1 s4.3.4).
  */
 static int xhci_set_ep0_mps(usb_hcd_t *hcd, usb_device_t *dev, uint16_t mps)
 {
@@ -1464,7 +1461,7 @@ static int xhci_set_ep0_mps(usb_hcd_t *hcd, usb_device_t *dev, uint16_t mps)
         return -1;
 
     mutex_lock(&hc->submit_lock);
-    xhci_drain_events(hc);   /* [R-05] */
+    xhci_drain_events(hc);
 
     icc = (uint32_t *)in_ctrl_of(hc->slots[slot]->in_ctx);
     icc[0] = 0;
@@ -1494,11 +1491,11 @@ static int xhci_control(xhci_hc_t *hc, usb_transfer_t *xfer)
 {
     /* Default to failure so the several early returns below cannot leave the
      * caller reading whatever the previous transfer left here.  Every path
-     * that actually succeeds overwrites it. [X-16] */
+     * that actually succeeds overwrites it. */
     xfer->status = USB_XFER_ERROR;
     /* The ROOT port, not the device's own port number: for anything behind a
      * hub those differ, and the slot context wants the root one (the rest of
-     * the path is the Route String). [USB-01] */
+     * the path is the Route String). */
     uint8_t port = usb_root_port(xfer->dev);
     uint8_t addr = xfer->dev->address & 0x7F;
 
@@ -1530,7 +1527,6 @@ static int xhci_control(xhci_hc_t *hc, usb_transfer_t *xfer)
          * enqueue + cycle instead: that is where the next TD will actually
          * be written.  Linux does the equivalent copy-forward of the
          * enqueue into the input context on every Address Device.
-         * [P6-SLOT-01]
          */
         {
             uint32_t *ep0 = (uint32_t *)in_ep_of(hc, s->in_ctx, 1);
@@ -1542,7 +1538,7 @@ static int xhci_control(xhci_hc_t *hc, usb_transfer_t *xfer)
         int cc = xhci_run_command(hc, s->in_ctx_dma, ctrl, NULL);
         if (cc != XHCI_CC_SUCCESS) return USB_XFER_ERROR;
         /* A device is allowed a settling period after being addressed before
-         * it has to answer on the new address (USB 2.0 s9.2.6.3). [X-07] */
+         * it has to answer on the new address (USB 2.0 s9.2.6.3). */
         usb_delay_ms(XHCI_SET_ADDRESS_SETTLE_MS);
         hc->addr_slot[xfer->setup.wValue & 0x7F] = slot;
         hc->enum_slot = 0;
@@ -1586,7 +1582,7 @@ static int xhci_control(xhci_hc_t *hc, usb_transfer_t *xfer)
 
     /* Honour the caller's timeout.  A HID poll asks to give up in a few
      * milliseconds; making it wait out the bulk timeout instead put the USB
-     * thread in a permanent 1-second stall per idle poll. [USB-09] */
+     * thread in a permanent 1-second stall per idle poll. */
     uint32_t tmo = xfer->timeout_ms ? xfer->timeout_ms : XHCI_CMD_TIMEOUT_MS;
     uint32_t evst = 0;
     uint32_t residue = 0;
@@ -1605,17 +1601,17 @@ static int xhci_control(xhci_hc_t *hc, usb_transfer_t *xfer)
         if (cc != XHCI_CC_SUCCESS && cc != XHCI_CC_SHORT_PACKET) {
             /* Quiesce the endpoint whatever went wrong: the completion code
              * says what happened, but the endpoint's own state says what it
-             * needs, and xhci_recover_ep() dispatches on that. [X-03] */
+             * needs, and xhci_recover_ep() dispatches on that. */
             (void)xhci_recover_ep(hc, slot, 1, ring, 0);
             /* Behind xhcidebug: a control transfer failing is routine (an
              * optional request the device declines answers with a stall),
              * so this is a debugging instrument rather than news.  Printing
              * it unconditionally turned a device that stalls a poll into a
-             * console full of xhci lines. [HW-09] */
+             * console full of xhci lines. */
             if (xhci_trace)
                 kprintf("xhci: control transfer failed: slot %u ep0 cc=%d%s\n",
                         slot, cc, (cc == 0) ? " (no event: timeout)" : "");
-            xfer->status = xhci_xfer_status(cc);   /* [RF-1a] */
+            xfer->status = xhci_xfer_status(cc);
             return xfer->status;
         }
         if (len && which == 1) {           /* data stage, short */
@@ -1633,7 +1629,7 @@ static int xhci_control(xhci_hc_t *hc, usb_transfer_t *xfer)
 
 static int xhci_bulk(xhci_hc_t *hc, usb_transfer_t *xfer)
 {
-    xfer->status = USB_XFER_ERROR;          /* [X-16], see xhci_control() */
+    xfer->status = USB_XFER_ERROR;          /* see xhci_control() */
     uint8_t slot = xhci_slot_for(hc, xfer);
     if (slot == 0) return USB_XFER_ERROR;
     int dci = xhci_ensure_ep(hc, slot, xfer->dev, xfer->ep);
@@ -1675,7 +1671,7 @@ static int xhci_bulk(xhci_hc_t *hc, usb_transfer_t *xfer)
      * event (naming the TRB it landed in) and retires the remainder of the
      * TD.  TD Size counts the max-packets still to move after each TRB
      * (s4.11.2.4, capped at 31 by the macro) and must be an explicit 0 in
-     * the last. [T1]
+     * the last.
      */
     uint32_t mps = xfer->ep->max_packet ? xfer->ep->max_packet : 512;
     uint64_t td[XHCI_TD_MAX_TRBS];
@@ -1709,18 +1705,18 @@ static int xhci_bulk(xhci_hc_t *hc, usb_transfer_t *xfer)
 
     uint32_t evst;
     int which = ntrbs - 1;
-    int cc = xhci_wait_td(hc, slot, dci, td, ntrbs, &evst,  /* [DRV-03] */
+    int cc = xhci_wait_td(hc, slot, dci, td, ntrbs, &evst,
                           &which,
                           xfer->timeout_ms ? xfer->timeout_ms
-                                           : XHCI_CMD_TIMEOUT_MS); /* [USB-09] */
+                                           : XHCI_CMD_TIMEOUT_MS);
     if (cc != XHCI_CC_SUCCESS && cc != XHCI_CC_SHORT_PACKET) {
         /* Clear the controller-side halt before returning, so the class
          * driver's retry (after its own CLEAR_FEATURE) has a live endpoint
          * to retry on rather than timing out forever. */
         uint16_t sid = (xfer->ep->max_streams > 0)
                        ? (xfer->stream_id ? xfer->stream_id : 1) : 0;
-        (void)xhci_recover_ep(hc, slot, dci, ring, sid);   /* [X-03] */
-        xfer->status = xhci_xfer_status(cc);   /* [RF-1a] */
+        (void)xhci_recover_ep(hc, slot, dci, ring, sid);
+        xfer->status = xhci_xfer_status(cc);
         return xfer->status;
     }
 
@@ -1729,7 +1725,7 @@ static int xhci_bulk(xhci_hc_t *hc, usb_transfer_t *xfer)
      * per-TRB (Table 6-38: "residual number of bytes not transferred" for
      * that TRB).  Everything before that TRB moved in full; on a clean
      * completion the event names the last TRB with residue 0, making this
-     * the whole length. [T1]
+     * the whole length.
      */
     uint32_t residue = XHCI_TRB_GET_XLEN(evst);
     if (which < 0 || which >= ntrbs)
@@ -1763,7 +1759,7 @@ static void xhci_drain_events(xhci_hc_t *hc)
     int drained = 0;
 
     if (sts & (XHCI_STS_HSE | XHCI_STS_HCE | XHCI_STS_HCH)) {
-        /* [RF-2] Latch it for the core.  This block used to only print --
+        /* Latch it for the core.  This block used to only print --
          * on every drain, forever, while each transfer still burned its
          * full timeout against the dead controller.  The one-shot detail
          * print stays here (it names WHICH fault); the core's
@@ -1796,7 +1792,7 @@ static void xhci_drain_events(xhci_hc_t *hc)
         if ((e->control & XHCI_TRB_CYCLE) != hc->event_cycle)
             break;
         if (xhci_wait_event(hc, &ep, &ec, &est, 0) != 0)
-            xhci_iso_note(hc, ep, ec, est);   /* [T3] */
+            xhci_iso_note(hc, ep, ec, est);
         drained++;
     }
 }
@@ -1807,7 +1803,7 @@ static void xhci_drain_events(xhci_hc_t *hc)
  * The iso hooks are a different shape from submit(): the caller (uac) keeps a
  * sliding window of packets armed a few frames ahead of the controller and
  * never waits for one, so these arm a single packet at a named frame and
- * return.  This is what X-13 recorded as missing, and its absence is why USB
+ * return.  These hooks were once missing, and their absence is why USB
  * audio played through UHCI and EHCI but not through xHCI -- i.e. not on any
  * machine new enough to have dropped its companion controllers.
  *
@@ -1855,7 +1851,7 @@ static int xhci_iso_schedule(usb_hcd_t *hcd, usb_device_t *dev,
         return USB_XFER_ERROR;
 
     mutex_lock(&hc->submit_lock);
-    xhci_drain_events(hc);   /* [R-05] */
+    xhci_drain_events(hc);
 
     dci = xhci_ensure_ep(hc, slot, dev, ep);
     if (dci < 0) {
@@ -1876,14 +1872,13 @@ static int xhci_iso_schedule(usb_hcd_t *hcd, usb_device_t *dev,
      * context's copy is only valid in Halted/Stopped, s6.2.3.2).  The caller
      * carries the capacity contract instead -- at most XHCI_RING_TRBS - 2
      * (62) packets outstanding per endpoint; uac's UAC_WINDOW (48) is the
-     * number to check against it when either changes. [P5-04]
+     * number to check against it when either changes.
      */
     /*
      * An IN packet needs a completion record before the TRB exists: the
      * received length only arrives in the Transfer Event (hence IOC on IN
      * and not on OUT), and the event must find its record armed.  ISP too:
      * a capture packet holding less than max is the norm, not an error.
-     * [T3]
      */
     if (in) {
         for (int i = 0; i < XHCI_ISO_RECS; i++) {
@@ -1922,7 +1917,7 @@ static int xhci_iso_schedule(usb_hcd_t *hcd, usb_device_t *dev,
 }
 
 /* Is this handle an IN completion record (vs an OUT token)?  Records live
- * in the hc's own array, so pointer range answers it. [T3] */
+ * in the hc's own array, so pointer range answers it. */
 static struct xhci_iso_rec *xhci_iso_rec_of(xhci_hc_t *hc, void *handle)
 {
     struct xhci_iso_rec *r = handle;
@@ -1943,7 +1938,7 @@ static void xhci_iso_reclaim(usb_hcd_t *hcd, void *handle)
      * itself; the caller reuses its packet buffer only after that frame has
      * passed, which is the same condition.  An IN handle is a completion
      * record, released here whether or not its packet ever completed
-     * (stream teardown reclaims pending packets). [T3]
+     * (stream teardown reclaims pending packets).
      */
     if (rec) {
         mutex_lock(&hc->submit_lock);
@@ -1955,7 +1950,7 @@ static void xhci_iso_reclaim(usb_hcd_t *hcd, void *handle)
 /*
  * Poll one armed IN packet.  Draining first is what makes this progress:
  * completions sit on the event ring until someone consumes them, and the
- * capture caller may be the only USB activity on the machine. [T3]
+ * capture caller may be the only USB activity on the machine.
  */
 static int xhci_iso_in_status(usb_hcd_t *hcd, void *handle, uint32_t *out_len)
 {
@@ -1994,7 +1989,7 @@ static int xhci_iso_in_status(usb_hcd_t *hcd, void *handle, uint32_t *out_len)
  * state dispatch does the right thing here: the endpoint is Running, so it
  * gets Stop Endpoint + Set TR Dequeue.  The next iso_schedule() rings the
  * doorbell, and a doorbell restarts a Stopped endpoint (s4.8.3), so resume
- * needs nothing further. [P5-03, P6-ISO-01]
+ * needs nothing further.
  */
 static void xhci_iso_stop(usb_hcd_t *hcd, usb_device_t *dev, usb_endpoint_t *ep)
 {
@@ -2010,7 +2005,7 @@ static void xhci_iso_stop(usb_hcd_t *hcd, usb_device_t *dev, usb_endpoint_t *ep)
     dci = (ep->address & 0x0F) * 2 + ((ep->address & 0x80) ? 1 : 0);
 
     mutex_lock(&hc->submit_lock);
-    xhci_drain_events(hc);   /* [R-05] */
+    xhci_drain_events(hc);
     if (hc->slots[slot] && hc->slots[slot]->ep_ring[dci].trb)
         (void)xhci_recover_ep(hc, slot, dci,
                               &hc->slots[slot]->ep_ring[dci], 0);
@@ -2022,7 +2017,7 @@ static int xhci_submit(usb_hcd_t *hcd, usb_transfer_t *xfer)
     xhci_hc_t *hc = hcd->priv;
     int ret;
     mutex_lock(&hc->submit_lock);
-    xhci_drain_events(hc);   /* [X-08] */
+    xhci_drain_events(hc);
     if (xfer->is_control)
         ret = xhci_control(hc, xfer);
     else if (xfer->ep && (xfer->ep->type == USB_EP_TYPE_BULK ||
@@ -2034,14 +2029,14 @@ static int xhci_submit(usb_hcd_t *hcd, usb_transfer_t *xfer)
          * different shape -- a sliding window of packets armed ahead of
          * MFINDEX rather than one transfer waited on -- and it arrives
          * through the frame_number/iso_schedule/iso_reclaim hooks in
-         * usb_hcd_t, which this driver now implements. [X-13]
+         * usb_hcd_t, which this driver implements.
          *
          * Reaching here means a caller submitted an iso transfer as though it
          * were bulk, which those hooks exist to avoid.
          *
-         * xfer->status is set here as well as ret: X-16 gave every other exit
-         * from this driver an explicit status so a caller could not read the
-         * previous transfer's, and this branch was the one it missed. [R-02]
+         * xfer->status is set here as well as ret: every exit from this
+         * driver sets an explicit status so a caller cannot read the
+         * previous transfer's.
          */
         ret = xfer->status = USB_XFER_ERROR;
     mutex_unlock(&hc->submit_lock);
@@ -2078,7 +2073,7 @@ static void xhci_take_controller(xhci_hc_t *hc)
         if (off + 8 > hc->mmio_size) {
             /* Say so rather than silently giving up: stopping here means the
              * BIOS handoff below may never run, and we would then reset a
-             * controller that SMM still owns. [X-09] */
+             * controller that SMM still owns. */
             kprintf("xhci: extended capabilities continue past the mapped "
                     "window (at 0x%x); BIOS handoff may be incomplete\n",
                     (unsigned)off);
@@ -2096,7 +2091,7 @@ static void xhci_take_controller(xhci_hc_t *hc)
             /* One line, always: whether the handoff HAPPENED (and from
              * where) is the first question every hardware failure photo
              * needs answered, and it used to be silent unless the BIOS
-             * semaphore was set. [HW-01] */
+             * semaphore was set. */
             found = 1;
             kprintf("xhci: legacy-support cap at 0x%x, bios_sem=%u\n",
                     (unsigned)off, (unsigned)*bios_sem);
@@ -2230,7 +2225,7 @@ static int xhci_reset(xhci_hc_t *hc)
          * 1ms of asserting HCRST can hang the host; NetBSD carries the same
          * 1ms ("Existing Intel xHCI requires 1ms delay... (Errata)"),
          * FreeBSD pauses 10ms, Linux gates a 1ms delay on XHCI_INTEL_HOST.
-         * The old loop read USBCMD back immediately. [P6-INIT-02]
+         * The old loop read USBCMD back immediately.
          */
         usb_delay_ms(1);
         if (!(rd32(hc->op, XHCI_OP_USBCMD) & XHCI_CMD_HCRST) &&
@@ -2286,7 +2281,7 @@ static int xhci_reset(xhci_hc_t *hc)
  * NetBSD parses the same capability in xhci_id_protocols(), where it also
  * builds a controller-port to root-hub-port map and splits the USB2 and USB3
  * buses.  We only need enough to interpret the speed field, so this records
- * the major revision per port and nothing more. [X-10]
+ * the major revision per port and nothing more.
  */
 static void xhci_parse_protocols(xhci_hc_t *hc)
 {
@@ -2488,7 +2483,7 @@ static void xhci_power_ports(xhci_hc_t *hc)
  * strand its DMA rings with no pointer left to free them through.
  */
 /* Stop the controller: clear Run, wait for HCHalted.  Shared by the failed-
- * attach teardown and the reboot shutdown hook. [RF-5] */
+ * attach teardown and the reboot shutdown hook. */
 static void xhci_halt(xhci_hc_t *hc)
 {
     if (!hc->op)
@@ -2508,9 +2503,9 @@ static void xhci_halt(xhci_hc_t *hc)
  * through a warm reboot, and the next kernel reuses those pages
  * immediately.  On the xHCI-only HP Pavilion this controller also carries
  * the root disk, making it the highest-stakes instance of the hazard
- * [ehci-audit 7] closed for EHCI.  HCRST returns all operational state to
- * power-on defaults so firmware can reclaim the ports.  QEMU resets its
- * device models itself; this is for real hardware. [RF-5]
+ * ehci_pci_shutdown() closes for EHCI.  HCRST returns all operational state
+ * to power-on defaults so firmware can reclaim the ports.  QEMU resets its
+ * device models itself; this is for real hardware.
  */
 static void xhci_pci_shutdown(struct device *dev)
 {
@@ -2532,7 +2527,7 @@ static void xhci_teardown(xhci_hc_t *hc)
      * Stop the controller before handing back memory it may still be reading.
      * A failure after xhci_start() succeeded would otherwise leave it running
      * with DCBAAP, CRCR and ERSTBA all pointing into pages we are about to
-     * free.  hc->op is NULL if we never got as far as decoding CAPLENGTH. [X-17]
+     * free.  hc->op is NULL if we never got as far as decoding CAPLENGTH.
      */
     xhci_halt(hc);
     if (hc->bounce)
@@ -2615,7 +2610,7 @@ static int xhci_pci_attach(struct device *dev)
      * the boot disk's HCD.  A transient all-ones BAR under a firmware
      * driver mid-transfer is precisely the kind of poke that leaves it
      * wedged in ways that look like random per-device failures
-     * downstream. [P6-INIT-01]
+     * downstream.
      */
     uint16_t cmd = pci_read_config16(pdev->bus, pdev->slot, pdev->func, PCI_CONFIG_COMMAND);
     pci_write_config16(pdev->bus, pdev->slot, pdev->func, PCI_CONFIG_COMMAND,
@@ -2635,7 +2630,7 @@ static int xhci_pci_attach(struct device *dev)
      * bounded by this, and a window smaller than the hardware truncates that
      * list: the BIOS handoff and the protocol/speed map both live in it.
      * Clamped to a floor that covers the architectural minimum and a ceiling
-     * so a garbage size-probe cannot eat the kernel's mapping space. [HW-01]
+     * so a garbage size-probe cannot eat the kernel's mapping space.
      */
     if (barsz < XHCI_MMIO_MIN) barsz = XHCI_MMIO_MIN;
     if (barsz > XHCI_MMIO_MAX) barsz = XHCI_MMIO_MAX;
@@ -2654,7 +2649,7 @@ static int xhci_pci_attach(struct device *dev)
     /* MaxPorts is 8-bit, so it can name more ports than port_major[] has room
      * for and more than the core will ever scan.  Clamp before anything
      * indexes by port: hcd.nports, port_major[] and the core's per-port arrays
-     * all have to agree on the same bound. [R-03] */
+     * all have to agree on the same bound. */
     if (hc->nports > USB_MAX_ROOT_PORTS) {
         kprintf("xhci: controller reports %u ports; using %u\n",
                 hc->nports, USB_MAX_ROOT_PORTS);
@@ -2671,7 +2666,7 @@ static int xhci_pci_attach(struct device *dev)
      * its runtime or doorbell region past the window -- or a bad read that
      * returns all-ones -- would have us writing doorbells and ERDP updates
      * into whatever happens to follow the mapping.  Bound them and refuse the
-     * attach instead, naming the register that was out of range. [X-09]
+     * attach instead, naming the register that was out of range.
      */
     /* CAPLENGTH is 8-bit, so it cannot itself leave the window; it only has
      * to be big enough to cover the capability registers we read above. */
@@ -2701,7 +2696,7 @@ static int xhci_pci_attach(struct device *dev)
 
     /* Which protocol each port speaks; needed to read PORTSC's speed
      * field correctly.  Static capability data, safe to read before the
-     * controller is started. [X-10] */
+     * controller is started. */
     xhci_parse_protocols(hc);
 
     if (xhci_start(hc) != 0) {
@@ -2754,12 +2749,12 @@ static int xhci_pci_attach(struct device *dev)
     hc->hcd.port_status = xhci_port_status;
     hc->hcd.port_reset = xhci_port_reset;
     hc->hcd.set_hub = xhci_set_hub;
-    hc->hcd.port_power_cycle = xhci_port_power_cycle;   /* [HW-03] */
+    hc->hcd.port_power_cycle = xhci_port_power_cycle;
     hc->hcd.set_ep0_mps = xhci_set_ep0_mps;
     hc->hcd.port_gone = xhci_port_gone;
     hc->hcd.iso_frame_modulus = 2048;  /* MFINDEX frame index, s4.11.2.5 */
     {
-        /* [P5-05] Advertise the controller's Isochronous Scheduling
+        /* Advertise the controller's Isochronous Scheduling
          * Threshold as a minimum lead in frames: a TD scheduled inside the
          * threshold window may be skipped outright (s4.14.2), which
          * presents as silently-dropped audio packets.  Microframe ISTs
@@ -2775,7 +2770,7 @@ static int xhci_pci_attach(struct device *dev)
     hc->hcd.iso_reclaim = xhci_iso_reclaim;
     hc->hcd.iso_stop = xhci_iso_stop;
     hc->hcd.iso_in_status = xhci_iso_in_status;
-    hc->hcd.kdev = dev;                  /* shutdown dispatch [RF-5] */
+    hc->hcd.kdev = dev;                  /* shutdown dispatch */
     usb_register_hcd(&hc->hcd);
     hc->initialized = 1;
     xhci_instances++;
@@ -2790,7 +2785,7 @@ static int xhci_pci_attach(struct device *dev)
      * difference (present here, absent there) plus the raw PLS/speed bits is
      * the entire diagnosis a photo can carry.  Runs once, after the 100ms
      * power settle; a device that connects later shows up through the
-     * hot-plug scan instead. [HW-01]
+     * hot-plug scan instead.
      */
     for (uint8_t p = 1; p <= hc->nports; p++) {
         uint32_t psc = portsc_rd(hc, p);

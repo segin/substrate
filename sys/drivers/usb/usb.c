@@ -50,7 +50,7 @@ static void usb_publish_device(usb_device_t *dev)
         device_put(bd);
     } else {
         /* Remember the node so a later disconnect can remove it (else the
-         * /proc/devtree entry leaks one device per hot-plug cycle). [DRV-20] */
+         * /proc/devtree entry leaks one device per hot-plug cycle). */
         dev->devtree_dev = bd;
     }
     usbdevfs_publish(dev);
@@ -72,7 +72,7 @@ static uint32_t      usb_addr_bitmap[4];   /* 128 bits */
 /*
  * Guards usb_devices[] and usb_addr_bitmap[].  The hot-plug kthread walks the
  * table while enumeration adds to it and class-driver detach paths remove from
- * it, and none of that was serialised. [USB-19]
+ * it, and none of that was serialised.
  *
  * Held only across the table and bitmap operations themselves -- never across
  * a control transfer or a class driver's probe/attach/detach, which sleep and
@@ -128,7 +128,7 @@ int usb_register_hcd(usb_hcd_t *hcd)
 }
 
 /*
- * [RF-5] Resolve a registered HCD from its bus device.  The one consumer is
+ * Resolve a registered HCD from its bus device.  The one consumer is
  * .shutdown dispatch: struct device has no driver-private pointer, and each
  * HCD driver was starting to grow its own device->softc registry
  * (ehci_hcs[] was the first) to bridge that gap.  The core already owns the
@@ -264,7 +264,7 @@ void usb_free_device(usb_device_t *dev)
  */
 
 /*
- * [RF-2] One-shot dead-controller guard.  An HCD latches hc_failed when its
+ * One-shot dead-controller guard.  An HCD latches hc_failed when its
  * controller is beyond use (schedule refused a verified stop, or the
  * hardware reported itself halted).  Fail every transfer here, fast --
  * previously each one burned its full timeout, serialized behind the HCD's
@@ -296,7 +296,7 @@ int usb_control_transfer_actual(usb_device_t *dev,
         *actual_length = 0;
     if (!dev || !dev->hcd || !dev->hcd->submit)
         return USB_XFER_ERROR;
-    if (usb_hcd_dead(dev->hcd))            /* [RF-2] */
+    if (usb_hcd_dead(dev->hcd))
         return USB_XFER_ERROR;
 
     memset(&xfer, 0, sizeof(xfer));
@@ -311,10 +311,10 @@ int usb_control_transfer_actual(usb_device_t *dev,
     xfer.setup.wValue = wValue;
     xfer.setup.wIndex = wIndex;
     xfer.setup.wLength = wLength;
-    xfer.timeout_ms = USB_TIMEOUT_CONTROL_MS;   /* [RF-13] */
+    xfer.timeout_ms = USB_TIMEOUT_CONTROL_MS;
 
     ret = dev->hcd->submit(dev->hcd, &xfer);
-    xfer.status = ret;   /* [RF-11] return value is authoritative */
+    xfer.status = ret;   /* return value is authoritative */
 
     if (actual_length)
         *actual_length = xfer.actual_length;
@@ -339,7 +339,7 @@ int usb_interrupt_transfer(usb_device_t *dev, usb_endpoint_t *ep,
 
     if (!dev || !dev->hcd || !dev->hcd->submit || !ep)
         return USB_XFER_ERROR;
-    if (usb_hcd_dead(dev->hcd))            /* [RF-2] */
+    if (usb_hcd_dead(dev->hcd))
         return USB_XFER_ERROR;
 
     memset(&xfer, 0, sizeof(xfer));
@@ -351,7 +351,7 @@ int usb_interrupt_transfer(usb_device_t *dev, usb_endpoint_t *ep,
     xfer.timeout_ms = timeout_ms;
 
     ret = dev->hcd->submit(dev->hcd, &xfer);
-    xfer.status = ret;   /* [RF-11] return value is authoritative */
+    xfer.status = ret;   /* return value is authoritative */
 
     if (actual_length)
         *actual_length = xfer.actual_length;
@@ -368,7 +368,7 @@ int usb_bulk_transfer(usb_device_t *dev, usb_endpoint_t *ep,
 
     if (!dev || !dev->hcd || !dev->hcd->submit || !ep)
         return USB_XFER_ERROR;
-    if (usb_hcd_dead(dev->hcd))            /* [RF-2] */
+    if (usb_hcd_dead(dev->hcd))
         return USB_XFER_ERROR;
 
     memset(&xfer, 0, sizeof(xfer));
@@ -377,10 +377,10 @@ int usb_bulk_transfer(usb_device_t *dev, usb_endpoint_t *ep,
     xfer.is_control = 0;
     xfer.data = data;
     xfer.length = length;
-    xfer.timeout_ms = USB_TIMEOUT_BULK_MS;      /* [RF-13] */
+    xfer.timeout_ms = USB_TIMEOUT_BULK_MS;
 
     ret = dev->hcd->submit(dev->hcd, &xfer);
-    xfer.status = ret;   /* [RF-11] return value is authoritative */
+    xfer.status = ret;   /* return value is authoritative */
 
     if (actual_length)
         *actual_length = xfer.actual_length;
@@ -437,7 +437,7 @@ int usb_iso_transfer(usb_device_t *dev, usb_endpoint_t *ep,
 
     if (!dev || !dev->hcd || !dev->hcd->submit || !ep)
         return USB_XFER_ERROR;
-    if (usb_hcd_dead(dev->hcd))            /* [RF-2] */
+    if (usb_hcd_dead(dev->hcd))
         return USB_XFER_ERROR;
 
     /* The HCD submit path dispatches on ep->type, so an ISO-typed endpoint
@@ -450,7 +450,7 @@ int usb_iso_transfer(usb_device_t *dev, usb_endpoint_t *ep,
     xfer.length = length;
 
     ret = dev->hcd->submit(dev->hcd, &xfer);
-    xfer.status = ret;   /* [RF-11] return value is authoritative */
+    xfer.status = ret;   /* return value is authoritative */
 
     if (actual_length)
         *actual_length = xfer.actual_length;
@@ -547,7 +547,7 @@ int usb_set_configuration(usb_device_t *dev, uint8_t config)
          * SET_CONFIGURATION(0) *un*configures the device -- it returns to
          * Address state with no interfaces active.  Recording that as
          * configured told every later caller the device was ready when it was
-         * not. [USB-22]
+         * not.
          */
         dev->configured = (config != 0);
     }
@@ -698,7 +698,7 @@ uint32_t usb_route_string(const usb_device_t *dev)
      * hub has one nibble and nothing to reverse, which is why every one-deep
      * test passed; the first device behind a second hub handed the controller
      * a route through the wrong ports and its Address Device failed outright
-     * (QEMU: TRB Error, the walk hits an empty port). [P5-06]
+     * (QEMU: TRB Error, the walk hits an empty port).
      */
     for (int i = 0; i < n; i++) {
         uint8_t p = ports[i];
@@ -844,7 +844,7 @@ static void usb_parse_config(usb_device_t *dev)
                      * Split the size from the transaction count.  Only
                      * high-speed (and above) interrupt/isochronous endpoints
                      * use bits 12:11; everywhere else they are zero, so the
-                     * mask is a no-op and mult comes out 1. [USB-06]
+                     * mask is a no-op and mult comes out 1.
                      */
                     ep->max_packet = wmps & USB_EP_MPS_MASK;
                     if (dev->speed == USB_SPEED_HIGH &&
@@ -887,7 +887,7 @@ int usb_bulk_stream_transfer(usb_device_t *dev, usb_endpoint_t *ep,
     int ret;
     if (!dev || !dev->hcd || !dev->hcd->submit || !ep)
         return USB_XFER_ERROR;
-    if (usb_hcd_dead(dev->hcd))            /* [RF-2] */
+    if (usb_hcd_dead(dev->hcd))
         return USB_XFER_ERROR;
     memset(&xfer, 0, sizeof(xfer));
     xfer.dev = dev;
@@ -896,9 +896,9 @@ int usb_bulk_stream_transfer(usb_device_t *dev, usb_endpoint_t *ep,
     xfer.data = data;
     xfer.length = length;
     xfer.stream_id = stream_id;
-    xfer.timeout_ms = USB_TIMEOUT_BULK_MS;      /* [RF-13] */
+    xfer.timeout_ms = USB_TIMEOUT_BULK_MS;
     ret = dev->hcd->submit(dev->hcd, &xfer);
-    xfer.status = ret;   /* [RF-11] return value is authoritative */
+    xfer.status = ret;   /* return value is authoritative */
     if (actual_length)
         *actual_length = xfer.actual_length;
     return ret;
@@ -949,7 +949,7 @@ static int usb_try_bind(usb_device_t *dev, usb_class_driver_t *drv,
         if (drv->attach(dev) == 0) {
             dev->driver = drv;       /* remember for disconnect dispatch */
             /* Durable per-interface copies: a composite device binds more
-             * than one driver, and each keeps its own state. [HW-07] */
+             * than one driver, and each keeps its own state. */
             ((usb_interface_t *)iface)->driver = drv;
             ((usb_interface_t *)iface)->driver_data = dev->driver_data;
             kprintf("usb: device %u:%u interface %u bound to driver '%s'\n",
@@ -1001,7 +1001,7 @@ static void usb_match_driver(usb_device_t *dev)
                  * case in hand -- interface 0 is a boot keyboard, interface 1
                  * is a boot mouse -- so the keyboard bound, the mouse was
                  * never offered to anyone, and the trackpad was dead while
-                 * the keys worked. [HW-07]
+                 * the keys worked.
                  */
                 bound++;
                 break;          /* this interface is taken; try the next one */
@@ -1099,7 +1099,7 @@ int usb_enumerate_device(usb_hcd_t *hcd, uint8_t port, uint8_t speed)
 
 /* Busy-wait; enumeration runs on the boot thread and on the hot-plug kthread,
  * and the waits here are short and infrequent. */
-/* [RF-12] The one millisecond busy-wait for the USB stack.  A `pause` spin,
+/* The one millisecond busy-wait for the USB stack.  A `pause` spin,
  * not a sleep: HCD bring-up paths run before the scheduler and enumeration
  * runs from contexts that must not block.  Was copied per-driver. */
 void usb_delay_ms(uint32_t ms)
@@ -1138,7 +1138,7 @@ static int usb_enum_reset_port(usb_hcd_t *hcd, uint8_t port, usb_device_t *paren
  * shape of "gets an address, then fails on the config descriptor".
  *
  * port_gone() is exactly this teardown; it already exists for unplug.  Root
- * ports only: a device behind a hub has no HCD-level port state. [HW-05]
+ * ports only: a device behind a hub has no HCD-level port state.
  */
 static void usb_enum_release_hcd(usb_hcd_t *hcd, uint8_t port,
                                  usb_device_t *parent)
@@ -1194,7 +1194,7 @@ static void usb_enum_wait_port_connect(usb_hcd_t *hcd, uint8_t port)
 }
 
 /*
- * [ENUM-1] Post-SET_ADDRESS control requests, retried.
+ * Post-SET_ADDRESS control requests, retried.
  *
  * A device that just took an address is allowed to be slow -- it may still
  * be settling internal state -- and one flaky read here used to abort the
@@ -1253,7 +1253,7 @@ static int usb_enumerate_device_inner(usb_hcd_t *hcd, uint8_t port, uint8_t spee
 
     dev->port = port;
     dev->speed = speed;
-    dev->parent = parent;   /* NULL for a root-hub port; the hub otherwise [DRV-04] */
+    dev->parent = parent;   /* NULL for a root-hub port; the hub otherwise */
     dev->address = 0;   /* Default address for initial communication */
 
     /* Set EP0 max packet size based on speed */
@@ -1265,7 +1265,7 @@ static int usb_enumerate_device_inner(usb_hcd_t *hcd, uint8_t port, uint8_t spee
      * first request, and a single failure used to make the port permanently
      * unenumerable.  Re-reset the port every fourth attempt, which is what
      * shakes loose a device whose state machine is wedged rather than merely
-     * slow.  Mirrors NetBSD usbd_new_device(). [USB-03]
+     * slow.  Mirrors NetBSD usbd_new_device().
      */
     ret = USB_XFER_ERROR;
     for (int round = 0; round < USB_ENUM_DESC_ROUNDS; round++) {
@@ -1277,7 +1277,7 @@ static int usb_enumerate_device_inner(usb_hcd_t *hcd, uint8_t port, uint8_t spee
              * only -- per-port power is an HCD register there, where on a
              * hub it would be a class request to the very device we are
              * mid-enumeration of.  Then wait long enough for it to come
-             * back from cold before asking anything of it. [HW-03, HW-04]
+             * back from cold before asking anything of it.
              */
             if (parent || !hcd || !hcd->port_power_cycle)
                 break;
@@ -1290,7 +1290,7 @@ static int usb_enumerate_device_inner(usb_hcd_t *hcd, uint8_t port, uint8_t spee
              * HCD's slot and rings (else the retry addresses the new device
              * through the old device's contexts), and our cached speed, which
              * was sampled before the cycle and may not be what the link
-             * re-trains at. [HW-05]
+             * re-trains at.
              */
             usb_enum_release_hcd(hcd, port, parent);
             usb_enum_wait_port_connect(hcd, port);
@@ -1301,10 +1301,10 @@ static int usb_enumerate_device_inner(usb_hcd_t *hcd, uint8_t port, uint8_t spee
              * until a reset has completed, and port_status() reports no
              * speed bits at all when CCS is clear -- so a device that has
              * not finished re-attaching decodes as the FULL fallback, and
-             * P3-01 then bakes that into the slot context.  Silently
+             * xHCI then bakes that into the slot context.  Silently
              * describing this high-speed card reader as full-speed is worse
              * than keeping the speed we already knew, so on a doubtful read
-             * we keep it. [HW-08]
+             * we keep it.
              */
             if (hcd->port_status) {
                 uint32_t st = hcd->port_status(hcd, port);
@@ -1349,7 +1349,7 @@ static int usb_enumerate_device_inner(usb_hcd_t *hcd, uint8_t port, uint8_t spee
      * Validate what came back before trusting it.  A glitched read that returns
      * plausible garbage would otherwise set an EP0 packet size like 0x2A and
      * mis-frame every later control transfer -- which presents as a device that
-     * "sometimes fails to enumerate" rather than as a bad read. [USB-13]
+     * "sometimes fails to enumerate" rather than as a bad read.
      */
     if (dd.bDescriptorType != USB_DT_DEVICE) {
         kprintf("usb: port %u: initial descriptor has type %u, not DEVICE\n",
@@ -1362,7 +1362,7 @@ static int usb_enumerate_device_inner(usb_hcd_t *hcd, uint8_t port, uint8_t spee
     /*
      * For SuperSpeed, bMaxPacketSize0 is log2(size) and the only legal value
      * is 9, meaning 512 (USB 3.2 s9.6.1).  Taken literally it yields an EP0
-     * packet size of 9. [USB-12]
+     * packet size of 9.
      */
     if (speed == USB_SPEED_SUPER) {
         if (dd.bMaxPacketSize0 != 9) {
@@ -1397,7 +1397,7 @@ static int usb_enumerate_device_inner(usb_hcd_t *hcd, uint8_t port, uint8_t spee
      * Tell the controller the real EP0 packet size.  xHCI baked the core's
      * guess into the endpoint context when the slot was addressed, so a
      * full-speed device with an 8-byte EP0 would otherwise be driven with a
-     * context claiming 64. [USB-11]
+     * context claiming 64.
      */
     if (hcd->set_ep0_mps)
         (void)hcd->set_ep0_mps(hcd, dev, dev->ep0.max_packet);
@@ -1407,7 +1407,7 @@ static int usb_enumerate_device_inner(usb_hcd_t *hcd, uint8_t port, uint8_t spee
      * this and devices are tuned against the Windows sequence, so ones that
      * depend on it exist in quantity; NetBSD copies the behaviour for the same
      * reason.  The device stays in Default state at address 0 either way, so
-     * nothing learned above is invalidated.  TRSTRCY is 10 ms. [USB-04]
+     * nothing learned above is invalidated.  TRSTRCY is 10 ms.
      */
     (void)usb_enum_reset_port(hcd, port, parent);
     usb_delay_ms(10);
@@ -1434,7 +1434,7 @@ static int usb_enumerate_device_inner(usb_hcd_t *hcd, uint8_t port, uint8_t spee
          * success -- so a failure here used to burn one of the 127 addresses
          * for the rest of the boot.  A machine with a few ports that report a
          * device they cannot enumerate walks the space down and eventually
-         * hits "address space exhausted". [USB-07]
+         * hits "address space exhausted".
          */
         usb_addr_free(addr);
         usb_enum_release_hcd(hcd, port, parent);
@@ -1515,7 +1515,7 @@ static int usb_enumerate_device_inner(usb_hcd_t *hcd, uint8_t port, uint8_t spee
     /* Set configuration.  A device whose only configuration is numbered 0 has
      * no usable configuration at all -- selecting it unconfigures the device
      * -- so refuse rather than proceeding with a device that is not
-     * configured. [USB-22] */
+     * configured. */
     if (cd.bConfigurationValue == 0) {
         kprintf("usb: addr %u: configuration value 0 is not selectable\n", addr);
         usb_enum_release_hcd(hcd, port, parent);
@@ -1649,7 +1649,7 @@ static usb_device_t *usb_root_device_on_port(usb_hcd_t *hcd, uint8_t port)
  * (quiesce in-flight transfers, force-unmount, free its DMA buffers) and every
  * published node that stores a back-pointer to this usb_device_t must be
  * removed BEFORE the struct is freed, or those consumers dereference freed
- * memory. [DRV-01][DRV-02][DRV-20] */
+ * memory. */
 void usb_disconnect_device(usb_device_t *dev)
 {
     if (!dev)
@@ -1663,12 +1663,12 @@ void usb_disconnect_device(usb_device_t *dev)
      * downstream device's class-driver .detach (force-unmount, DMA-buffer free,
      * thread quiesce) is skipped and its usb_device_t + USB address leak.
      * Children go first so their in-flight I/O drains before the parent hub
-     * (which they depend on for transfers) is torn down. [A33] */
+     * (which they depend on for transfers) is torn down. */
     /*
      * Take one child at a time: look it up under the lock, then recurse with
      * the lock dropped, because the child's teardown runs its class driver's
      * .detach, which sleeps.  Snapshotting the whole list instead would put a
-     * 512-byte array on a stack that recurses to the hub-tier limit. [USB-19]
+     * 512-byte array on a stack that recurses to the hub-tier limit.
      * Each pass removes a child, so the loop terminates.
      */
     for (;;) {
@@ -1697,7 +1697,7 @@ void usb_disconnect_device(usb_device_t *dev)
      * only dev->driver would leave the others' poll threads running against
      * a device about to be freed.  The dev->if_ fields and driver_data are
      * republished per interface so each detach() sees the context its
-     * attach() saw. [HW-07]
+     * attach() saw.
      */
     for (int i = 0; i < dev->num_interfaces; i++) {
         usb_interface_t *iface = &dev->interfaces[i];
@@ -1768,7 +1768,7 @@ static void usb_hotplug_scan(void)
     for (usb_hcd_t *hcd = usb_hcd_list; hcd; hcd = hcd->next) {
         if (!hcd->port_status)
             continue;
-        /* [RF-2] A dead controller's ports are not worth resetting, and
+        /* A dead controller's ports are not worth resetting, and
          * every enumeration attempt against it would burn full transfer
          * timeouts inside the scan.  Devices on it are unreachable until
          * the controller is re-attached. */
@@ -1780,7 +1780,7 @@ static void usb_hotplug_scan(void)
             usb_device_t *dev = usb_root_device_on_port(hcd, port);
 
             /* Ports are 1-based; index from 0 so the last port is covered
-             * too. [USB-20] */
+             * too. */
             uint8_t *fails = (port >= 1 && port <= USB_MAX_ROOT_PORTS)
                              ? &hcd->enum_fail[port - 1] : NULL;
 
@@ -1788,7 +1788,7 @@ static void usb_hotplug_scan(void)
                 if (fails)
                     *fails = 0;  /* gone: a re-plug deserves a fresh try */
                 /* Let the HCD reap whatever it still has bound to this port
-                 * (xHCI: the device slot and its rings). [X-12] */
+                 * (xHCI: the device slot and its rings). */
                 if (hcd->port_gone)
                     hcd->port_gone(hcd, port);
             }
@@ -1843,7 +1843,7 @@ static void usb_hotplug_scan(void)
  * caller is the rootwait loop: a USB root device that re-announces itself
  * after the boot scan needs SOMETHING scanning while root-mount waits, and
  * during that window the waiting thread is the only candidate.  Same thread
- * context the synchronous boot enumeration already ran in. [HW-02]
+ * context the synchronous boot enumeration already ran in.
  */
 /* Devices currently in the table -- the cheap "did anything appear?" signal
  * the rootwait loop gates its mount retries on. */
@@ -1869,9 +1869,9 @@ int usb_hotplug_poll(void)
      * system is up -- but during rootwait the system is not up, the caller is
      * blocked on precisely one of these ports, and parking it after ~6s of
      * trying only guarantees the panic that follows.  The wait's own deadline
-     * is the bound here, so the counter has nothing left to protect. [HW-03]
+     * is the bound here, so the counter has nothing left to protect.
      *
-     * [ENUM-2] That clear makes this function ROOTWAIT-ONLY in spirit: a
+     * That clear makes this function ROOTWAIT-ONLY in spirit: a
      * periodic caller would defeat the parking ladder entirely and re-probe
      * dead ports forever.  Anything that wants a scan without that side
      * effect calls usb_hotplug_scan() via the monitor instead.  Audited

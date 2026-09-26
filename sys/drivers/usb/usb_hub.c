@@ -58,7 +58,7 @@ typedef struct usb_hub_dev {
 	uint8_t          active;
 	uint8_t          pwr_on_2_pwr_good_2ms;  /* hub descriptor field */
 	/* Status-change interrupt endpoint: the hub reports a bitmap of which
-	 * ports changed, so a scan can skip the ones that did not. [USB-14] */
+	 * ports changed, so a scan can skip the ones that did not. */
 	usb_endpoint_t  *intr_ep;
 	/* Consecutive failed enumeration attempts per downstream port, cleared
 	 * on disconnect.  See USB_ENUM_MAX_TRIES: without this a port holding a
@@ -220,7 +220,7 @@ static int usb_hub_bringup_port(usb_hub_dev_t *hub, uint8_t port)
 
 	/* Enumerate the downstream device through the core USB stack,
 	 * recording this hub as its parent so the root-port hot-plug scan
-	 * doesn't mistake it for a root device and disconnect it. [DRV-04] */
+	 * doesn't mistake it for a root device and disconnect it. */
 	/* Propagate the result.  This used to `return 1` unconditionally, which
 	 * would have made the retry cap dead code: a port whose enumeration
 	 * failed still looked like a success, so its failure counter never
@@ -279,7 +279,7 @@ static void usb_hub_enumerate_ports(usb_hub_dev_t *hub)
  * ordering that was expensive to get right: recurse into anything behind a
  * nested hub, run the class driver's .detach (force-unmount, DMA quiesce),
  * unregister the devtree node, unpublish the /dev/usb nodes, and only then
- * free the struct and its USB address. [DRV-01][DRV-02][DRV-20][A33]
+ * free the struct and its USB address.
  */
 /*
  * Read the hub's status-change bitmap.  Returns a mask of ports to examine, or
@@ -289,7 +289,7 @@ static void usb_hub_enumerate_ports(usb_hub_dev_t *hub)
  *
  * A hub with nothing to report NAKs for the whole (short) timeout, which is the
  * normal idle result and the entire point: one transfer per hub per scan
- * instead of one per PORT per scan. [USB-14]
+ * instead of one per PORT per scan.
  */
 #define USB_HUB_CHANGE_ALL   0xFFFFFFFFu
 #define USB_HUB_INTR_TIMEOUT_MS 5
@@ -418,7 +418,7 @@ static int usb_hub_attach(usb_device_t *dev)
 
 	/* Read hub descriptor to learn port count.  A SuperSpeed hub answers only
 	 * to descriptor type 0x2A and STALLs the USB 2.0 0x29, so ask for the one
-	 * this hub actually implements. [USB-21] */
+	 * this hub actually implements. */
 	memset(&hdesc, 0, sizeof(hdesc));
 	{
 		uint8_t dtype = (dev->speed == USB_SPEED_SUPER) ? USB_DT_SS_HUB
@@ -449,7 +449,7 @@ static int usb_hub_attach(usb_device_t *dev)
 
 	/* A hub's one required endpoint is the status-change interrupt IN.  It is
 	 * what turns a scan from "ask every port" into "ask the ports the hub says
-	 * changed". [USB-14] */
+	 * changed". */
 	hub->intr_ep = usb_find_endpoint(dev, USB_EP_TYPE_INTERRUPT, USB_EP_DIR_IN);
 	if (!hub->intr_ep)
 		kprintf("usb_hub: no status-change endpoint; polling every port\n");
@@ -459,8 +459,7 @@ static int usb_hub_attach(usb_device_t *dev)
 
 	/* Tell the core (and through it the controller) that this is a hub.  xHCI
 	 * will not route a transfer to anything behind a slot whose Hub bit is
-	 * clear, so this has to happen before the downstream ports are walked.
-	 * [USB-01] */
+	 * clear, so this has to happen before the downstream ports are walked. */
 	usb_set_hub(dev, hub->nports,
 	            USB_HUB_TT_THINK(hdesc.wHubCharacteristics));
 
@@ -474,7 +473,7 @@ static int usb_hub_attach(usb_device_t *dev)
 	 * device had enumerated past a slot still declaring itself a non-hub.
 	 * One throwaway poll drives the configure now; the NAK an idle hub
 	 * answers with is expected and ignored.  Costs one NAK'd IN on
-	 * UHCI/EHCI. [P5-02]
+	 * UHCI/EHCI.
 	 */
 	if (hub->intr_ep) {
 		uint8_t scratch[8];

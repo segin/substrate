@@ -82,7 +82,7 @@ static int usbdevfs_dev_ioctl(fs_node_t *node, uint32_t request, void *arg)
          * transfer was performed on the wire and then its data silently
          * dropped, leaving the caller with an untouched buffer and a reported
          * length of 0.  Take the byte count from the transfer layer and report
-         * that. [USB-08]
+         * that.
          */
         {
             uint32_t moved = 0;
@@ -124,7 +124,7 @@ static int usbdevfs_dev_ioctl(fs_node_t *node, uint32_t request, void *arg)
      * Not implemented, and saying so beats pretending.  Returning 0 told a
      * userspace client it owned an interface a kernel class driver is actively
      * driving, or that a configuration change had been applied when nothing
-     * happened.  ENOTTY is what an unimplemented ioctl reports. [USB-18]
+     * happened.  ENOTTY is what an unimplemented ioctl reports.
      */
     case USBDEVFS_CLAIMINTERFACE:
     case USBDEVFS_RELEASEINTERFACE:
@@ -172,7 +172,7 @@ static size_t usbdevfs_meta_read(fs_node_t *node, off_t offset, size_t size,
      * used as the length below -- so a device with enough endpoints (16 are
      * allowed, and ~13 already overflow 384 bytes) made this copy adjacent
      * kernel stack out to userspace.  Clamp to what the buffer actually
-     * holds. [USB-05]
+     * holds.
      */
     if ((size_t)n > sizeof(meta) - 1) {
         n = (int)(sizeof(meta) - 1);
@@ -283,7 +283,7 @@ void usbdevfs_publish(usb_device_t *dev)
  * pointer in node->impl; without this, lsusb/libusb would dereference the freed
  * (address-reusable) struct after usb_free_device.  devfs_register_device made
  * these entries with owns_node == 0, so devfs won't free the fs_node_t — we own
- * it and free it here. [DRV-02][DRV-20] */
+ * it and free it here. */
 void usbdevfs_unpublish(usb_device_t *dev)
 {
     fs_node_t *dn = (fs_node_t *)dev->usbfs_node;

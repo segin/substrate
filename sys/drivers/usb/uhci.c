@@ -17,7 +17,7 @@
 
 #ifdef HOST_TEST
 /* The arch headers define these as static-inline asm; the host test build
- * substitutes plain functions. [RF-4] */
+ * substitutes plain functions. */
 uint32_t intr_disable(void);
 void intr_restore(uint32_t eflags);
 void intr_enable(void);
@@ -99,7 +99,7 @@ typedef struct uhci_hc {
 static uint8_t uhci_instances;
 
 /* Default per-transfer deadline.  UHCI proved 5 s out on full-speed BOT
- * storage; callers with tighter needs pass xfer->timeout_ms. [RF-4] */
+ * storage; callers with tighter needs pass xfer->timeout_ms. */
 #define UHCI_XFER_TIMEOUT_MS 5000
 
 /*
@@ -120,7 +120,7 @@ static uint8_t uhci_instances;
  * ============================================================
  */
 
-/* [RF-4] Register access funnels through these three so a host-side test
+/* Register access funnels through these three so a host-side test
  * build can substitute a scripted fake controller -- the ehci.c/nvme.c
  * HOST_TEST pattern, over I/O ports instead of MMIO. */
 #ifdef HOST_TEST
@@ -371,7 +371,7 @@ static int uhci_port_reset(usb_hcd_t *hcd, uint8_t port)
     uint16_t reg;
     uint16_t portsc;
 
-    /* CSC and PEC are write-1-to-clear: see UHCI_PORTSC_CLEAR. [RF-4] */
+    /* CSC and PEC are write-1-to-clear: see UHCI_PORTSC_CLEAR. */
     const uint16_t W1C = UHCI_PORTSC_CLEAR;
 
     if (port < 1 || port > UHCI_NUM_PORTS)
@@ -409,7 +409,7 @@ static int uhci_port_reset(usb_hcd_t *hcd, uint8_t port)
         usb_delay_ms(50);
     }
 
-    /* [RF-4] Report the truth.  This returned 0 unconditionally, so the
+    /* Report the truth.  This returned 0 unconditionally, so the
      * core's enumeration-failure ladder (usb.c enum_fail parking) never
      * learned that a port cannot enable and re-probed it forever. */
     portsc = uhci_readw(hc, reg);
@@ -428,7 +428,7 @@ static int uhci_port_reset(usb_hcd_t *hcd, uint8_t port)
  */
 
 /*
- * [RF-4] Classify a retired TD's ctrl_status.  Cause bits FIRST: when the
+ * Classify a retired TD's ctrl_status.  Cause bits FIRST: when the
  * error counter exhausts (three CRC/timeout/bitstuff/databuffer failures)
  * the controller sets STALLED *alongside* the cause bit, so testing
  * STALLED first misreported transport errors as functional stalls --
@@ -486,11 +486,11 @@ static int uhci_poll_td(uhci_hc_t *hc, struct uhci_td *td,
                 intr_restore(_saved_if);
                 return USB_XFER_TIMEOUT;
             }
-            /* [RF-4] A controller that halted itself (Host System Error /
+            /* A controller that halted itself (Host System Error /
              * Process Error clears Run) never retires another TD; without
              * this probe every transfer burned its full 5 s timeout,
              * forever, silently.  Same throttled-detect + core-latch shape
-             * as ehci_check's [EHCI-INIT-03]. */
+             * as ehci_check_hc_dead(). */
             if ((++_deadcheck & 0x3FF) == 0) {
                 uint16_t sts = uhci_readw(hc, UHCI_USBSTS);
                 if (sts & (UHCI_STS_HSE | UHCI_STS_HCPE | UHCI_STS_HCH)) {
@@ -499,7 +499,7 @@ static int uhci_poll_td(uhci_hc_t *hc, struct uhci_td *td,
                     /* HSE/HCPE are W1C; acknowledge the fault bits. */
                     uhci_writew(hc, UHCI_USBSTS,
                                 sts & (UHCI_STS_HSE | UHCI_STS_HCPE));
-                    hc->hcd.hc_failed = 1;   /* [RF-2] core fail-fast */
+                    hc->hcd.hc_failed = 1;   /* core fail-fast latch */
                     intr_restore(_saved_if);
                     return USB_XFER_ERROR;
                 }
@@ -513,7 +513,7 @@ static int uhci_poll_td(uhci_hc_t *hc, struct uhci_td *td,
         }
         intr_restore(_saved_if);
 
-        /* Check for errors -- cause bits before STALLED [RF-4]. */
+        /* Check for errors -- cause bits before STALLED. */
         {
             int st = uhci_td_status(td->ctrl_status);
 
@@ -557,7 +557,7 @@ static int uhci_poll_td(uhci_hc_t *hc, struct uhci_td *td,
 }
 
 /*
- * [DRV-18] On a timeout the TD chain is still linked into the async QH (or
+ * On a timeout the TD chain is still linked into the async QH (or
  * cached inside the controller's current frame) and its TDs may still be
  * Active.  Freeing the TDs and unmapping the data buffer here would let a late
  * controller visit DMA into a TD slot that has since been reissued, or into an
@@ -704,7 +704,7 @@ static int uhci_control_transfer(uhci_hc_t *hc, usb_transfer_t *xfer)
     /* Poll for completion.  Honor the caller's deadline; note this is
      * latent parity for now -- nothing in-tree sets a control timeout_ms
      * yet -- but the moment one does, a 5 s floor here would defeat
-     * it. [RF-4] */
+     * it. */
     ret = uhci_poll_td(hc, setup_td,
                        xfer->timeout_ms ? xfer->timeout_ms
                                         : UHCI_XFER_TIMEOUT_MS, &actual);
@@ -712,7 +712,7 @@ static int uhci_control_transfer(uhci_hc_t *hc, usb_transfer_t *xfer)
     /* Remove from schedule */
     hc->async_qh->element_link = UHCI_QH_LINK_T;
 
-    /* [DRV-18] On timeout the HC may still own the chain — quiesce before the
+    /* On timeout the HC may still own the chain — quiesce before the
      * cleanup path frees the TDs and unmaps the data buffer. */
     if (ret == USB_XFER_TIMEOUT)
         uhci_quiesce_chain(hc, first_td);
@@ -760,7 +760,7 @@ static int uhci_bulk_transfer(uhci_hc_t *hc, usb_transfer_t *xfer)
     max_pkt = xfer->ep->max_packet;
     if (max_pkt == 0) max_pkt = 64;
 
-    /* [RF-4] A zero-length bulk transfer is a real protocol element (the
+    /* A zero-length bulk transfer is a real protocol element (the
      * terminating ZLP of a BOT transport, a zero-length OUT heartbeat) and
      * EHCI/xHCI both accept it; rejecting it here was a UHCI-only
      * divergence.  Only a missing buffer WITH a length is an error. */
@@ -834,7 +834,7 @@ static int uhci_bulk_transfer(uhci_hc_t *hc, usb_transfer_t *xfer)
     /* Remove from schedule */
     hc->async_qh->element_link = UHCI_QH_LINK_T;
 
-    /* [DRV-18] On timeout the HC may still own the chain — quiesce before the
+    /* On timeout the HC may still own the chain — quiesce before the
      * cleanup path frees the TDs and unmaps the data buffer. */
     if (ret == USB_XFER_TIMEOUT)
         uhci_quiesce_chain(hc, first_td);
@@ -845,7 +845,7 @@ static int uhci_bulk_transfer(uhci_hc_t *hc, usb_transfer_t *xfer)
     /* Update endpoint toggle based on actual packets transferred.  STALL is
      * deliberately excluded: usb_clear_halt resets BOTH sides' toggles, so
      * advancing ours here desynced them -- EHCI and xHCI already leave
-     * stall-toggle ownership to the core. [RF-4] */
+     * stall-toggle ownership to the core. */
     if (ret == USB_XFER_OK || ret == USB_XFER_SHORT) {
         struct uhci_td *td = first_td;
         while (td) {
@@ -1219,7 +1219,7 @@ static int uhci_pci_attach(struct device *dev)
     hc->hcd.iso_reclaim = uhci_hcd_iso_reclaim;
     hc->hcd.priv = hc;
 
-    hc->hcd.kdev = dev;                  /* shutdown dispatch [RF-5] */
+    hc->hcd.kdev = dev;                  /* shutdown dispatch */
     usb_register_hcd(&hc->hcd);
 
     uhci_instances++;
@@ -1247,9 +1247,9 @@ static const device_id_t uhci_pci_ids[] = {
  *
  * The frame list stays permanently linked (every entry points at the async
  * QH), so a running UHCI keeps DMAing this kernel's schedule pages straight
- * through a warm reboot -- the [ehci-audit 7] hazard, UHCI edition.
- * HCRESET returns the controller (and port ownership) to power-on
- * state. [RF-5]
+ * through a warm reboot into whatever the next kernel put there -- the same
+ * hazard ehci_pci_shutdown() guards against.  HCRESET returns the controller
+ * (and port ownership) to power-on state.
  */
 static void uhci_pci_shutdown(struct device *dev)
 {

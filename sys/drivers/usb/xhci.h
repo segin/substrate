@@ -38,7 +38,7 @@ void xhci_init(void);
  */
 #define XHCI_HCS2_SPB_MAX(x)   ((((x) >> 16) & 0x3E0) | (((x) >> 27) & 0x1F))
 /* Isochronous Scheduling Threshold (HCSPARAMS2 bits 3:0): bit 3 selects the
- * unit -- set = IST[2:0] counts FRAMES, clear = microframes. [P5-05] */
+ * unit -- set = IST[2:0] counts FRAMES, clear = microframes. */
 #define XHCI_HCS2_IST(x)        ((x) & 0xF)
 #define XHCI_IST_IS_FRAMES(ist) ((ist) & 0x8)
 #define XHCI_IST_VALUE(ist)     ((ist) & 0x7)
@@ -218,7 +218,7 @@ struct xhci_trb {
  * in a transfer TRB -- hence the two names for one value.  XHCI_TRB_ENT was
  * 0x10, which is the Chain bit; harmless while nothing used it, and a silent
  * mis-set of CH the moment a multi-TRB TD (a data stage over 64K, or
- * isochronous) reached for it. [P3-04]
+ * isochronous) reached for it.
  */
 #define XHCI_TRB_CYCLE       0x00000001
 #define XHCI_TRB_TC          0x00000002   /* toggle cycle (link TRB) */
@@ -286,7 +286,7 @@ struct xhci_trb {
  * completes the command that was executing with Command Aborted, and then
  * always posts Command Ring Stopped for the ring itself.  Both land on the
  * event ring after the abort, where a matcher that keys on TRB type alone
- * would take the first of them as the *next* command's result. [R-01]
+ * would take the first of them as the *next* command's result.
  */
 #define XHCI_CC_CMD_RING_STOPPED 0x18
 #define XHCI_CC_CMD_ABORTED      0x19

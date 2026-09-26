@@ -86,7 +86,7 @@ typedef struct usb_hid_dev {
     usb_endpoint_t *intr_ep;
     uint8_t  if_number;
     /* The control-pipe GET_REPORT fallback has been refused by this device
-     * and must not be tried again -- see the poll loop. [HW-09] */
+     * and must not be tried again -- see the poll loop. */
     uint8_t  ctl_poll_refused;
     uint8_t  active;
     uint8_t  poll_exited;    /* set by poll thread before kthread_exit() */
@@ -422,7 +422,7 @@ static void usb_hid_poll_thread(void *arg)
              * EP0 several times a second for the life of the machine -- it
              * cannot start working, it burns control bandwidth on a bus that
              * shares it with the root disk, and it drowns the console.  One
-             * refusal is the device's answer; take it. [HW-09]
+             * refusal is the device's answer; take it.
              */
             if (hid->ctl_poll_refused) {
                 ret = USB_XFER_NAK;
