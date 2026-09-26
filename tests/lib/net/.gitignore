@@ -6,3 +6,5 @@ tcp_partner
 torture_tcp_lo
 wire/wireguest
 wire/__pycache__/
+torture_ipopts
+torture_ping_lo

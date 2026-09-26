@@ -2878,6 +2878,13 @@ int sys_setsockopt(int fd, int level, int optname,
         if (n == 12) memcpy(&ifindex, m + 8, 4);
         return afinet_mc_membership(fd, optname == 35, group, ifaddr, ifindex);
     }
+    /* Every other IPPROTO_IP option on an inet socket is one this stack does
+     * not implement.  Reporting success made the caller believe it: with
+     * IP_HDRINCL (3) a raw socket's own IP header was then sent as payload
+     * behind a second, kernel-built header, and IP_MTU_DISCOVER claimed a
+     * DF policy that no datagram carried (RFC 791 3.3 SEND). */
+    if (level == 0 /*IPPROTO_IP*/ && afinet_so_type(fd) >= 0)
+        return -ENOPROTOOPT;
     return 0;
 }
 
