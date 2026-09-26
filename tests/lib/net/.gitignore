@@ -8,3 +8,4 @@ wire/wireguest
 wire/__pycache__/
 torture_ipopts
 torture_ping_lo
+torture_lo_flood

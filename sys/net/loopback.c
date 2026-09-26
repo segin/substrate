@@ -78,17 +78,22 @@ static int lo_xmit(netdev_t *dev, const void *frame, size_t len) {
      * caller can exceed it today (NETDEV_MTU_MAX is smaller), but the
      * contract must not depend on that. */
     if (len > LO_FRAME_MAX) return -EMSGSIZE;
+    int rc = 0;
     uint32_t f = intr_disable();
     unsigned next = (lo_ring_head + 1) % LO_RING;
     if (next != lo_ring_tail) {
         memcpy(lo_ring_buf[lo_ring_head], frame, len);
         lo_ring_len[lo_ring_head] = (uint16_t)len;
         lo_ring_head = next;
+    } else {
+        /* Ring full: the frame is dropped, and the sender is told so
+         * (RFC 791 3.3 SEND returns a result) instead of hearing it was
+         * sent.  The drain thread is still woken to make room. */
+        rc = -ENOBUFS;
     }
-    /* else: ring full — drop, same as a real NIC's TX overrun. */
     intr_restore(f);
     sched_wakeup(&lo_ring_head);
-    return 0;
+    return rc;
 }
 
 /*
