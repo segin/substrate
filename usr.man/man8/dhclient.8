@@ -155,9 +155,6 @@ line in
 .BR resolv.conf (5)
 .SH STANDARDS
 RFC 2131 (DHCP), RFC 2132 (DHCP options), RFC 3397 (domain search option).
-Conformance notes are in
-.I docs/dhclient\-audit\-2026\-09.md
-in the source tree.
 .SH BUGS
 There is no way to release a lease: the daemon does not handle signals and
 never sends DHCPRELEASE, and it writes no pid file.
