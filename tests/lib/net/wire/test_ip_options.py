@@ -18,6 +18,10 @@ had none.
             it (IHL 7, a valid header checksum, the payload after it) and
             getsockopt reads it back; cleared, the next datagram has none;
             a malformed list is refused EINVAL.
+    echo    an echo request carrying Record Route and Timestamp is answered
+            with both, updated with this host: its address in the next
+            Record Route slot and a time in the next Timestamp slot (RFC
+            1122 3.2.2.6).
 
 Run from the repo root after building sys/ and wireguest:
     python3 tests/lib/net/wire/test_ip_options.py
@@ -152,7 +156,43 @@ def case_send():
         return None, w
 
 
-CASES = (('walk', case_walk), ('srcroute', case_srcroute), ('send', case_send))
+def case_echo():
+    import struct
+    rr = b'\x07\x0b\x04' + b'\0' * 8                  # Record Route, 2 slots
+    ts = b'\x44\x0c\x05\x00' + b'\0' * 8              # Timestamp, flag 0, 2 slots
+    opts = rr + ts + b'\x00'                           # 11 + 12 + EOL = 24
+    with Wire.boot('udpany %d sendto:10.0.2.2:9:arp sleep:60' % PORT) as w:
+        if not w.wait_serial('guest: sendto', 90):
+            return 'guest never sent its ARP-priming datagram', w
+        w.pump(0.5)
+        echo = bytearray(struct.pack('!BBHHH', 8, 0, 0, 0x1234, 1) + b'opts')
+        echo[2:4] = struct.pack('!H', csum(bytes(echo)))
+        w.send_ip(1, bytes(echo), dst=GUEST_IP, opts=opts)
+        end = time.time() + 5
+        while time.time() < end:
+            w.pump(0.2)
+            for proto, src, dst, ip in w.ip_rx:
+                ihl = (ip[0] & 0xF) * 4
+                if proto != 1 or ip[ihl] != 0:
+                    continue
+                o = bytes(ip[20:ihl])
+                if csum(bytes(ip[:ihl])) != 0:
+                    return 'the reply header checksum is bad', w
+                if len(o) < 23 or o[0] != 7 or o[11] != 0x44:
+                    return 'reply options %s, want Record Route then ' \
+                           'Timestamp' % o.hex(), w
+                if o[2] != 8 or o[3:7] != bytes([10, 0, 2, 15]):
+                    return 'Record Route pointer %d, slot %s: want 8 and ' \
+                           '10.0.2.15' % (o[2], o[3:7].hex()), w
+                if o[13] != 9 or o[15:19] == b'\0' * 4:
+                    return 'Timestamp pointer %d, stamp %s: want 9 and a ' \
+                           'time' % (o[13], o[15:19].hex()), w
+                return None, w
+        return 'no echo reply', w
+
+
+CASES = (('walk', case_walk), ('srcroute', case_srcroute), ('send', case_send),
+         ('echo', case_echo))
 
 
 def main():

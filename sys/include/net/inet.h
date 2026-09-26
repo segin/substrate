@@ -151,7 +151,10 @@ int  ip6_output(const uint8_t daddr[16], uint8_t next_header,
 /* Called by ip4_input after header validation.  payload points at the
  * L4 protocol body (typically struct icmphdr / udphdr).  saddr/daddr
  * are in network byte order. */
+/* opts/optlen: the received datagram's IP options (after the fixed
+ * header), reflected into an echo reply where RFC 1122 3.2.2.6 asks. */
 void icmp_input(netdev_t *dev, uint32_t saddr, uint32_t daddr,
+                const uint8_t *opts, size_t optlen,
                 const uint8_t *pkt, size_t len);
 void icmp6_input(netdev_t *dev, const uint8_t saddr[16], const uint8_t daddr[16],
                  const uint8_t *pkt, size_t len);

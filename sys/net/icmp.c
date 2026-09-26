@@ -88,7 +88,83 @@ static void icmp_error_input(uint8_t type, uint8_t code,
     afinet_icmp_error_v4(q->saddr, sport, q->daddr, dport, err);
 }
 
+/*
+ * RFC 1122 3.2.2.6: Record Route and Timestamp options received in an echo
+ * request are updated to include this host and sent back in the reply, so
+ * the route or times recorded cover the whole round trip.  The request's
+ * options (already validated on input) are walked and those two copied into
+ * `o`, with our address -- the reply's source, `self` -- or the time added
+ * where there is room; for a full Timestamp the overflow count is raised
+ * instead (RFC 791 3.1).  Other options are not reflected: a source route
+ * would have to be reversed, which a host that does not forward has no use
+ * for.  The result is padded to a multiple of 4.
+ */
+static void icmp_echo_options(struct ip4_txopts *o, const uint8_t *opts,
+                              size_t optlen, uint32_t self) {
+    uint8_t out[40];
+    size_t n = 0;
+    for (size_t off = 0; off < optlen; ) {
+        uint8_t type = opts[off];
+        if (type == 0)                          /* End of Option List */
+            break;
+        if (type == 1) {                        /* No Operation */
+            off++;
+            continue;
+        }
+        if (off + 1 >= optlen)
+            break;
+        uint8_t olen = opts[off + 1];
+        if (olen < 2 || off + olen > optlen)
+            break;
+        if ((type == 7 || type == 68) && olen >= 4 && n + olen <= sizeof(out)) {
+            uint8_t *op = out + n;
+            memcpy(op, opts + off, olen);
+            uint8_t ptr = op[2];
+            if (type == 7) {                    /* Record Route */
+                if (ptr >= 4 && ptr + 3 <= olen) {
+                    memcpy(op + ptr - 1, &self, 4);
+                    op[2] = (uint8_t)(ptr + 4);
+                }
+            } else {                            /* Timestamp */
+                uint8_t flag = op[3] & 0x0F;
+                size_t need = flag == 0 ? 4 : 8;
+                /* ms since midnight UT, network order (RFC 791 3.1) */
+                uint32_t ms = (uint32_t)(get_time() % 86400) * 1000u +
+                              (uint32_t)(get_uptime_ms() % 1000);
+                uint32_t ms_be = __builtin_bswap32(ms);
+                if (ptr >= 5 && ptr + need - 1 <= olen) {
+                    if (flag == 3) {
+                        /* prespecified: stamp only if the next address
+                         * listed is ours */
+                        if (memcmp(op + ptr - 1, &self, 4) == 0) {
+                            memcpy(op + ptr + 3, &ms_be, 4);
+                            op[2] = (uint8_t)(ptr + 8);
+                        }
+                    } else {
+                        if (flag == 1) {
+                            memcpy(op + ptr - 1, &self, 4);
+                            memcpy(op + ptr + 3, &ms_be, 4);
+                        } else {
+                            memcpy(op + ptr - 1, &ms_be, 4);
+                        }
+                        op[2] = (uint8_t)(ptr + need);
+                    }
+                } else if (flag != 3 && (op[3] >> 4) < 15) {
+                    op[3] = (uint8_t)(op[3] + 0x10);    /* overflow count */
+                }
+            }
+            n += olen;
+        }
+        off += olen;
+    }
+    while (n & 3)
+        out[n++] = 0;                           /* pad with End of Option List */
+    memcpy(o->opts, out, n);
+    o->optlen = (uint8_t)n;
+}
+
 void icmp_input(netdev_t *dev, uint32_t saddr, uint32_t daddr,
+                const uint8_t *opts, size_t optlen,
                 const uint8_t *pkt, size_t len) {
     if (len < sizeof(struct icmphdr)) return;
     const struct icmphdr *ih = (const struct icmphdr *)pkt;
@@ -147,11 +223,22 @@ void icmp_input(netdev_t *dev, uint32_t saddr, uint32_t daddr,
      * stack, so it is static, and built and sent with interrupts off --
      * ip4_output does not sleep with IF=0. */
     static uint8_t reply[NETDEV_MTU_MAX];
+    /* Answer from the address the request was sent to (RFC 1122 3.2.2.6),
+     * so a ping of 127.1.2.3, or of one of several local addresses, hears
+     * back from that address rather than whichever one routing prefers.
+     * A request to a multicast group is answered from a routed unicast
+     * address: a group is never a source. */
+    uint32_t src = ((daddr & 0xF0) == 0xE0) ? 0 : daddr;
+    struct ip4_txopts txo;
+    ip4_txopts_init(&txo);
+    if (optlen)
+        icmp_echo_options(&txo, opts, optlen, src ? src : ip4_source_for(saddr));
+    size_t hdr = sizeof(struct iphdr) + txo.optlen;
     uint32_t mtu = ip4_path_mtu(saddr);
-    if (mtu <= sizeof(struct iphdr) + sizeof(struct icmphdr)) return;
-    size_t max = mtu - sizeof(struct iphdr);
-    if (max > sizeof(reply) - sizeof(struct iphdr))
-        max = sizeof(reply) - sizeof(struct iphdr);
+    if (mtu <= hdr + sizeof(struct icmphdr)) return;
+    size_t max = mtu - hdr;
+    if (max > sizeof(reply) - hdr)
+        max = sizeof(reply) - hdr;
     size_t rlen = len < max ? len : max;
     uint32_t f = intr_disable();
     memcpy(reply, pkt, rlen);
@@ -160,13 +247,7 @@ void icmp_input(netdev_t *dev, uint32_t saddr, uint32_t daddr,
     rh->code = 0;
     rh->check = 0;
     rh->check = inet_csum(reply, rlen);
-    /* Answer from the address the request was sent to (RFC 1122 3.2.2.6),
-     * so a ping of 127.1.2.3, or of one of several local addresses, hears
-     * back from that address rather than whichever one routing prefers.
-     * A request to a multicast group is answered from a routed unicast
-     * address: a group is never a source. */
-    uint32_t src = ((daddr & 0xF0) == 0xE0) ? 0 : daddr;
-    ip4_output_from(src, saddr, IPPROTO_ICMP, reply, rlen);
+    ip4_output_opts(src, saddr, IPPROTO_ICMP, reply, rlen, &txo);
     intr_restore(f);
 }
 

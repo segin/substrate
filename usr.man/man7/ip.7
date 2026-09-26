@@ -1,0 +1,169 @@
+.\" ip.7 - Substrate IPv4
+.TH IP 7 "2026-09-26" "Substrate" "Substrate Programmer's Manual"
+.SH NAME
+ip \- IPv4 protocol
+.SH SYNOPSIS
+.nf
+.B #include <sys/socket.h>
+.B #include <netinet/in.h>
+.PP
+.IB udp_socket " = socket(AF_INET, SOCK_DGRAM, 0);"
+.IB tcp_socket " = socket(AF_INET, SOCK_STREAM, 0);"
+.IB raw_socket " = socket(AF_INET, SOCK_RAW, " protocol ");"
+.fi
+.SH DESCRIPTION
+Substrate's IPv4 follows RFC 791 as amended by RFC 1122.
+Each interface has one address and netmask; datagrams to a destination on
+no local subnet go to the interface's gateway.
+All of 127.0.0.0/8 is the host's own loopback, and a datagram to one of
+the host's interface addresses never leaves the host.
+.PP
+The 0.0.0.0/8 block is never a destination: sending to an address in it
+fails with
+.BR EINVAL ,
+except that 0.0.0.0 itself, as the destination of
+.BR connect (2)
+or
+.BR sendto (2),
+names the local host.
+.PP
+Received fragments are reassembled, up to eight datagrams at a time, each
+for at most 30 seconds.
+Datagrams are never fragmented on output: one larger than the path allows
+fails with
+.BR EMSGSIZE .
+.PP
+Options in received datagrams are checked; a malformed one draws an ICMP
+Parameter Problem, and a datagram whose source route still has hops to
+visit is discarded, as this host does not forward.
+Record Route and Timestamp options in an ICMP echo request are updated
+with this host and returned in the reply.
+.SS Path MTU discovery
+TCP discovers the path MTU (RFC 1191): its segments carry Don't Fragment,
+and an ICMP "fragmentation needed" lowers the MTU recorded for the
+destination, after which the connection sends smaller segments.
+A recorded MTU expires after ten minutes.
+Reports below 552 octets are held at 552 and the path is marked so that
+.B IP_PMTUDISC_WANT
+sockets send to it without Don't Fragment.
+Other sockets set Don't Fragment only when asked with
+.BR IP_MTU_DISCOVER .
+.SS ICMP errors
+An ICMP Destination Unreachable, Time Exceeded or Parameter Problem about
+a datagram a socket sent is reported to that socket.
+A UDP socket sees it as the error of its next call; a TCP connection still
+being established is refused at once by a protocol or port unreachable,
+and any other error is reported if the connection later gives up.
+.SS Socket options
+Options at level
+.B IPPROTO_IP
+are set with
+.BR setsockopt (2)
+and read with
+.BR getsockopt (2).
+.TP
+.B IP_TOS
+An
+.IR int :
+the Type of Service octet of every datagram sent.
+.TP
+.B IP_TTL
+An
+.IR int ,
+1 to 255, or \-1 for the default of 64: the Time to Live of every unicast
+or broadcast datagram sent.
+.TP
+.B IP_OPTIONS
+Up to 40 octets of IP options sent in every datagram, padded with End of
+Option List to a multiple of four; an empty list removes them.
+A list that is not well formed fails with
+.BR EINVAL .
+On a TCP socket the segment size shrinks to make room.
+.BR getsockopt ()
+returns the list as set.
+.TP
+.B IP_MTU_DISCOVER
+An
+.IR int :
+.B IP_PMTUDISC_DONT
+sends without Don't Fragment;
+.B IP_PMTUDISC_WANT
+and
+.B IP_PMTUDISC_DO
+set it and refuse a datagram larger than the recorded path MTU with
+.BR EMSGSIZE ;
+.B IP_PMTUDISC_PROBE
+sets it and sends regardless.
+TCP sockets start with
+.BR IP_PMTUDISC_WANT ,
+all others with
+.BR IP_PMTUDISC_DONT .
+.TP
+.B IP_PKTINFO
+An
+.IR int :
+when nonzero,
+.BR recvmsg (2)
+on a datagram socket returns an
+.B IP_PKTINFO
+control message naming the interface and destination address of each
+datagram.
+.TP
+.BR IP_MULTICAST_IF ", " IP_MULTICAST_TTL ", " IP_MULTICAST_LOOP
+The interface (by address, or a
+.I struct ip_mreqn
+naming an interface index), the Time to Live (default 1) and the local
+loopback (default on) of datagrams sent to a multicast group.
+.TP
+.BR IP_ADD_MEMBERSHIP ", " IP_DROP_MEMBERSHIP
+A
+.I struct ip_mreq
+or
+.IR "struct ip_mreqn" :
+join or leave a multicast group on an interface.
+.PP
+Any other
+.B IPPROTO_IP
+option, among them
+.BR IP_HDRINCL ,
+.BR IP_RECVERR
+and the source-specific multicast options, fails with
+.BR ENOPROTOOPT .
+.SH ERRORS
+.TP
+.B EADDRNOTAVAIL
+The source address is not one of this host's addresses, or is 0.0.0.0
+for a multicast destination.
+.TP
+.B EINVAL
+The destination is in 0.0.0.0/8; a 127.0.0.0/8 source was given for a
+destination off the loopback interface; or an option value is invalid.
+.TP
+.B EMSGSIZE
+The datagram is larger than the interface MTU, or, with Don't Fragment
+set, than the recorded path MTU.
+.TP
+.B ENETUNREACH
+There is no route to the destination.
+.TP
+.B ENOBUFS
+The loopback interface's queue was full and the datagram was dropped.
+.TP
+.B ENOPROTOOPT
+The
+.B IPPROTO_IP
+option is not implemented.
+.SH EXAMPLE
+Send a UDP datagram with Don't Fragment set:
+.PP
+.EX
+int s = socket(AF_INET, SOCK_DGRAM, 0);
+int mode = IP_PMTUDISC_DO;
+setsockopt(s, IPPROTO_IP, IP_MTU_DISCOVER, &mode, sizeof(mode));
+sendto(s, buf, len, 0, (struct sockaddr *)&dst, sizeof(dst));
+.EE
+.SH SEE ALSO
+.BR socket (2),
+.BR setsockopt (2),
+.BR recvmsg (2),
+.BR tcp (7)

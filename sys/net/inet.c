@@ -1002,7 +1002,8 @@ static void ip4_deliver(netdev_t *dev, const uint8_t *pkt, size_t tot,
     size_t l4_len = tot - hlen;
     switch (ih->protocol) {
         case IPPROTO_ICMP:
-            icmp_input(dev, ih->saddr, ih->daddr, l4, l4_len);
+            icmp_input(dev, ih->saddr, ih->daddr, pkt + sizeof(*ih),
+                       hlen - sizeof(*ih), l4, l4_len);
             break;
         case IPPROTO_UDP_NUM:
             udp_input(dev, /*AF_INET=*/2, &ih->saddr, &ih->daddr, l4, l4_len,
