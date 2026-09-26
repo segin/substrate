@@ -542,6 +542,16 @@ static int afinet_ioctl(fs_node_t *node, uint32_t request, void *arg) {
         case SIOCSIFADDR: {
             const struct sin_kern *sin = (const struct sin_kern *)&r->ifr_addr;
             if (sin->sin_family != AF_INET) return -EAFNOSUPPORT;
+            /* No interface can be the limited broadcast or a multicast
+             * group, and 127/8 belongs to loopback alone.  (0.0.0.0 clears
+             * the address.) */
+            {
+                uint32_t a = sin->sin_addr;
+                uint8_t first = ((const uint8_t *)&a)[0];
+                if (a == 0xFFFFFFFFu || (first >= 224 && first < 240) ||
+                    (first == 127 && !(dev->flags & NETDEV_IFF_LOOPBACK)))
+                    return -EINVAL;
+            }
             dev->ip4_addr = sin->sin_addr;
             /* An address set without a netmask gets its class's natural
              * mask (RFC 1122 3.3.1.1), so `ifconfig eth1 10.1.2.3` alone
@@ -843,7 +853,12 @@ static size_t afinet_node_read_body(fs_node_t *node, afi_sock_t *s,
 static uint32_t udp_src4(const afi_sock_t *s, uint32_t daddr) {
     uint32_t bound;
     memcpy(&bound, s->local_addr, 4);
-    return bound ? bound : ip4_source_for(daddr);
+    /* A socket bound to a broadcast or multicast address (to receive on
+     * it) sends from the address routing picks, as BSD and Linux do: such
+     * an address is never a valid source. */
+    if (!bound || ip4_is_group_addr(bound))
+        return ip4_source_for(daddr);
+    return bound;
 }
 
 static void udp_csum4(struct udphdr *uh, uint32_t saddr, uint32_t daddr,

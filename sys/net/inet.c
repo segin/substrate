@@ -207,6 +207,15 @@ static int ip4_is_bcast_on(const netdev_t *dev, uint32_t daddr) {
            daddr == ((dev->ip4_addr & dev->ip4_netmask) | ~dev->ip4_netmask);
 }
 
+/* Is `a` a broadcast (limited or any interface's directed) or multicast
+ * address -- one that can be bound to receive on but never sent from? */
+int ip4_is_group_addr(uint32_t a) {
+    if (ip4_is_mcast(a)) return 1;
+    for (netdev_t *d = netdev_first(); d; d = netdev_next(d))
+        if (ip4_is_bcast_on(d, a)) return 1;
+    return a == 0xFFFFFFFFu;
+}
+
 static netdev_t *route_for_v4(uint32_t daddr, int *via_gw_out) {
     /*
      * UDP-IP-04: the limited broadcast goes out directly on a broadcast-
@@ -375,10 +384,19 @@ int ip4_output_opts(uint32_t saddr, uint32_t daddr, uint8_t protocol,
      */
     if (dev->mtu && payload_len > dev->mtu - sizeof(struct iphdr))
         return -EMSGSIZE;
+    /* RFC 791 3.3: the source must be one of this host's addresses.  A
+     * caller-supplied one is checked against the interfaces as they are
+     * now: a socket bound to a broadcast or multicast address, or to an
+     * address since removed by SIOCSIFADDR, must not put it on the wire.
+     * 127/8 is ours only on loopback. */
     if (saddr == 0)
         saddr = route_src4(dev, daddr);
-    else if ((saddr & 0xFF) == 127 && !(dev->flags & NETDEV_IFF_LOOPBACK))
-        return -EINVAL;
+    else if ((saddr & 0xFF) == 127) {
+        if (!(dev->flags & NETDEV_IFF_LOOPBACK))
+            return -EINVAL;
+    } else if (!ip4_is_local_ifaddr(saddr)) {
+        return -EADDRNOTAVAIL;
+    }
     /*
      * Bound payload_len by SUBTRACTING from the buffer size rather than
      * adding to the payload length.  payload_len is a size_t, so the old
