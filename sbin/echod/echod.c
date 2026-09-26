@@ -9,6 +9,7 @@
 
 #include <errno.h>
 #include <pthread.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -48,6 +49,16 @@ done:
 int main(int argc, char **argv) {
     int port = 7;
     if (argc > 1) port = atoi(argv[1]);
+
+    /* A client that goes away while its echo is being sent makes send()
+     * raise SIGPIPE, whose default action would kill the daemon and every
+     * other client with it.  Ignored, the send fails EPIPE and only that
+     * connection's thread ends. */
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = SIG_IGN;
+    sigemptyset(&sa.sa_mask);
+    sigaction(SIGPIPE, &sa, NULL);
 
     int s = socket(AF_INET, SOCK_STREAM, 0);
     if (s < 0) { perror("socket"); return 1; }

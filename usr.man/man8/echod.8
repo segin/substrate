@@ -17,6 +17,9 @@ connection is accepted and gone when the client closes it, so any number of
 clients can be connected at once; there is no fixed pool of workers.
 If a thread cannot be created, that one connection is closed and the daemon
 goes on accepting others.
+.B SIGPIPE
+is ignored, so a client that disconnects while its data is being echoed
+back ends only its own connection.
 The listen queue is
 .BR SOMAXCONN .
 There is no UDP service.
@@ -38,7 +41,9 @@ and is not otherwise checked.
 .B 0
 .BR accept (2)
 failed with an error other than
-.BR EINTR .
+.B EINTR
+or
+.BR ECONNABORTED .
 .TP
 .B 1
 The socket could not be created, bound or put into the listening state.
@@ -53,9 +58,3 @@ $ telnet localhost 7007
 .BR tcp (7)
 .SH STANDARDS
 RFC 862 (Echo Protocol), TCP service only.
-.SH BUGS
-.B echod
-does not ignore
-.BR SIGPIPE ,
-so a client that closes its connection while data is being echoed back can
-terminate the daemon, and with it every other client's connection.

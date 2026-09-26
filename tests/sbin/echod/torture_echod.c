@@ -8,6 +8,10 @@
  *   churn  closes every other connection, opens NCONN more, and talks on
  *          all survivors and newcomers; threads for the closed clients must
  *          have gone away without disturbing the rest.
+ *   reset  NRESET clients each send data they never read and abort the
+ *          connection (RST), so echod's next send fails; a bystander
+ *          connection and a new one must still be served.  A daemon that
+ *          dies of SIGPIPE here drops every client at once.
  *   bulk   streams BULK_BYTES through each of NBULK connections at once,
  *          interleaved, and checks every echoed byte.
  *
@@ -36,6 +40,8 @@
 #define NBULK       8
 #define BULK_BYTES  (64 * 1024)
 #define WAIT_MS     5000
+#define NRESET      8
+#define RESET_BYTES (32 * 1024)
 
 static int failures;
 
@@ -155,6 +161,48 @@ static void run_bulk(void) {
     printf("  bulk: %d x %d KiB interleaved\n", NBULK, BULK_BYTES / 1024);
 }
 
+static void run_reset(pid_t echod_pid) {
+    static char junk[RESET_BYTES];
+    int st;
+    int by = dial();
+    if (by < 0 || ping(by, 0) < 0) {
+        fail("reset bystander", 0);
+        if (by >= 0)
+            close(by);
+        return;
+    }
+    memset(junk, 'r', sizeof(junk));
+    for (int i = 0; i < NRESET; i++) {
+        int s = dial();
+        if (s < 0) {
+            fail("reset connect", i);
+            break;
+        }
+        /* Unread echo piles up in our receive buffer; closing with it
+         * unread (and linger 0) aborts the connection with a RST. */
+        (void)send_all(s, junk, sizeof(junk));
+        struct linger l = { 1, 0 };
+        setsockopt(s, SOL_SOCKET, SO_LINGER, &l, sizeof(l));
+        close(s);
+    }
+    usleep(500000);
+    if (waitpid(echod_pid, &st, WNOHANG) == echod_pid) {
+        printf("  FAIL echod died on an aborted client (status 0x%x)\n", st);
+        failures++;
+        close(by);
+        return;
+    }
+    if (ping(by, 1) < 0)
+        fail("reset bystander echo", 1);
+    close(by);
+    int s = dial();
+    if (s < 0 || ping(s, 2) < 0)
+        fail("reset new client", 2);
+    if (s >= 0)
+        close(s);
+    printf("  reset: %d aborted clients\n", NRESET);
+}
+
 int main(int argc, char **argv) {
     const char *echod = argc > 1 ? argv[1] : "/sbin/echod";
     int fd[2 * NCONN];
@@ -209,6 +257,10 @@ int main(int argc, char **argv) {
         if (fd[i] >= 0)
             close(fd[i]);
     printf("  churn: %d closed, %d reopened\n", NCONN / 2, NCONN);
+    if (failures)
+        goto out;
+
+    run_reset(pid);
     if (failures)
         goto out;
 
