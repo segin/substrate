@@ -24,6 +24,7 @@
 #include <sys/lock.h>
 #include <sys/netdev.h>
 #include <sys/param.h>
+#include <sys/random.h>
 #include <vm/vm_kmem.h>
 
 /* ------------------------------------------------------------------ */
@@ -974,6 +975,19 @@ static inline uint32_t v4(uint8_t a, uint8_t b, uint8_t c, uint8_t d) {
 
 void inet_init(void) {
     udp_stats_init();                       /* UDP-RES-03/-06: /proc/udpstat */
+    /* Start the Identification counter somewhere unpredictable: from 1 on
+     * every boot, datagrams sent shortly after a reboot reused the IDs of
+     * ones sent shortly after the previous boot, which a receiver still
+     * holding their fragments would splice together (RFC 791 3.2).
+     * GRND_INSECURE: this runs during boot, where waiting for the pool to
+     * be fully seeded could stall it, and a starting point needs to vary
+     * between boots, not to be secret. */
+    {
+        uint16_t seed;
+        if (random_get_bytes_flags(&seed, sizeof(seed), GRND_INSECURE) ==
+            (int)sizeof(seed))
+            g_ip_id_counter = seed;
+    }
     /* Pick the first non-loopback NIC. */
     netdev_t *dev = NULL;
     for (netdev_t *d = netdev_first(); d; d = netdev_next(d)) {
