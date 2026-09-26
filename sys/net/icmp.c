@@ -133,7 +133,13 @@ void icmp_input(netdev_t *dev, uint32_t saddr, uint32_t daddr,
     rh->code = 0;
     rh->check = 0;
     rh->check = inet_csum(reply, len);
-    ip4_output(saddr, IPPROTO_ICMP, reply, len);
+    /* Answer from the address the request was sent to (RFC 1122 3.2.2.6),
+     * so a ping of 127.1.2.3, or of one of several local addresses, hears
+     * back from that address rather than whichever one routing prefers.
+     * A request to a multicast group is answered from a routed unicast
+     * address: a group is never a source. */
+    uint32_t src = ((daddr & 0xF0) == 0xE0) ? 0 : daddr;
+    ip4_output_from(src, saddr, IPPROTO_ICMP, reply, len);
 }
 
 /* ------------------------------------------------------------------ */

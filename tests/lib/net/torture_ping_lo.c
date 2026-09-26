@@ -9,7 +9,9 @@
  *
  * Pings 127.0.0.1, 127.0.0.2, 127.1.2.3 and 127.255.255.254 on a raw ICMP
  * socket, one request each (sequence number = index), and waits up to 2 s
- * for each matching reply.  Runs as init; prints a "Result:" line.  Build:
+ * for each matching reply, which must come from the address pinged (RFC
+ * 1122 3.2.2.6), not from 127.0.0.1 because routing prefers it.  Runs as
+ * init; prints a "Result:" line.  Build:
  *   i386-unknown-substrate-gcc -O2 -Wall -o tests/lib/net/torture_ping_lo \
  *       tests/lib/net/torture_ping_lo.c
  */
@@ -86,6 +88,13 @@ static int ping_once(int fd, const char *addr, uint16_t seq) {
         memcpy(&rid, ic + 4, 2);
         memcpy(&rseq, ic + 6, 2);
         if (ic[0] == 0 && ntohs(rid) == ECHO_ID && ntohs(rseq) == seq) {
+            uint32_t from;
+            memcpy(&from, buf + 12, 4);
+            if (from != to.sin_addr.s_addr) {
+                struct in_addr f = { .s_addr = from };
+                printf("  FAIL %s: reply came from %s\n", addr, inet_ntoa(f));
+                return 0;
+            }
             printf("  ok   %s\n", addr);
             return 1;
         }
