@@ -1,63 +1,61 @@
 #!/usr/bin/env python3
 """
-RFC 793 3.7 window management and retransmission
-(docs/ip-audit-2026-09-22.md, TCP-C).  Each case names the checklist item
-it guards.
+RFC 793 3.7 window management and retransmission.
 
-    persist     TCP-WIN-01: a peer that holds a zero window, answering
-                every probe, for longer than the retransmission abort budget
-                (~2 minutes) does not make the sender give up; once the
-                window reopens the whole write goes through.
-    nb-persist  TCP-WIN-02: a non-blocking write facing a zero window sends
-                the one-octet probe (instead of EAGAIN and silence); poll()
+    persist     a peer that holds a zero window, answering every probe, for
+                longer than the retransmission abort budget (~2 minutes)
+                does not make the sender give up; once the window reopens
+                the whole write goes through.
+    nb-persist  a non-blocking write facing a zero window sends the
+                one-octet probe (instead of EAGAIN and silence); poll()
                 then withholds POLLOUT until the peer opens the window, and
                 is woken when it does.
-    reopen      TCP-WIN-03: the peer fills the receive window to zero; the
-                application drains it with 512-octet reads, and a window
-                update is sent (the 0 -> non-zero transition is always
-                announced, and after that every MSS freed).  It used to
-                need one single read() to free an MSS.
-    fast-retx   TCP-WIN-04: seven duplicate-ACK episodes (fast
-                retransmits, capped per segment) must not consume the RTO backoff or the abort
+    reopen      the peer fills the receive window to zero; the application
+                drains it with 512-octet reads, and a window update is sent
+                (the 0 -> non-zero transition is always announced, and
+                after that every MSS freed).  It used to need one single
+                read() to free an MSS.
+    fast-retx   seven duplicate-ACK episodes (fast retransmits, capped per
+                segment) must not consume the RTO backoff or the abort
                 budget: when the peer then goes quiet the next timeout
                 retransmission comes after the base RTO, not the 60 s cap,
                 and the connection survives to deliver everything.
-    dupack      TCP-WIN-05: only RFC 5681's duplicate ACK counts -- no data,
-                no SYN/FIN, ACK = SND.UNA with data outstanding, and an
-                unchanged window.  Three ACK-only-repeating data segments,
-                and three window updates, trigger no fast retransmit; three
-                true duplicates do.
-    sender-sws  TCP-WIN-06: with the peer's window at 1000 and 900 octets
+    dupack      only RFC 5681's duplicate ACK counts -- no data, no SYN/FIN,
+                ACK = SND.UNA with data outstanding, and an unchanged
+                window.  Three ACK-only-repeating data segments, and three
+                window updates, trigger no fast retransmit; three true
+                duplicates do.
+    sender-sws  with the peer's window at 1000 and 900 octets
                 unacknowledged, an ACK that frees 100 octets does not draw
                 a 100-octet segment (sender silly-window avoidance); the ACK
                 of everything then releases a full window.
-    receiver-sws TCP-WIN-07: after a zero window, draining 512 octets does
-                not advertise a 512-octet window; the window reopens only
-                once at least an MSS is free.
-    reorder     TCP-WIN-08: segments arriving out of order are queued, not
+    receiver-sws after a zero window, draining 512 octets does not
+                advertise a 512-octet window; the window reopens only once
+                at least an MSS is free.
+    reorder     segments arriving out of order are queued, not
                 dropped.  The second segment first draws a duplicate ACK;
                 the first then completes both, acknowledged in one step,
                 and a FIN that arrived ahead of a gap is honoured once the
                 gap fills.
-    partial-ack TCP-WIN-09: after the peer acknowledges part of a segment,
-                the retransmission starts at SND.UNA and carries only the
+    partial-ack after the peer acknowledges part of a segment, the
+                retransmission starts at SND.UNA and carries only the
                 unacknowledged octets.
-    shut-rd     TCP-WIN-10: after shutdown(SHUT_RD) arriving data is
-                acknowledged and discarded, so the window stays open: the
-                peer can send more than a ring's worth.
-    stale-wnd   TCP-WIN-12: SND.WL1/WL2.  A newer segment closes the window;
-                an older one (lower SEG.SEQ, delivered late) advertising a
-                large window must not reopen it -- the sender probes with
-                one octet instead of sending into the stale window.
-    user-timeout TCP-WIN-13: TCP_USER_TIMEOUT (RFC 793 3.8's per-connection
-                user timeout) is honoured: with 3000 ms set and the peer
-                silent, the connection is aborted with ETIMEDOUT after about
-                3 s instead of retransmitting for ~2 minutes.
-    rtt         TCP-WIN-14: the RTO is derived from the measured RTT (RFC
-                6298).  With the handshake and one segment each answered
-                after 0.8 s, RTO = SRTT + 4*RTTVAR = 2.0 s; the next,
-                unacknowledged, segment is retransmitted after about that,
-                not after the fixed 1 s.
+    shut-rd     after shutdown(SHUT_RD) arriving data is acknowledged and
+                discarded, so the window stays open: the peer can send more
+                than a ring's worth.
+    stale-wnd   SND.WL1/WL2.  A newer segment closes the window; an older
+                one (lower SEG.SEQ, delivered late) advertising a large
+                window must not reopen it -- the sender probes with one
+                octet instead of sending into the stale window.
+    user-timeout TCP_USER_TIMEOUT (RFC 793 3.8's per-connection user
+                timeout) is honoured: with 3000 ms set and the peer silent,
+                the connection is aborted with ETIMEDOUT after about 3 s
+                instead of retransmitting for ~2 minutes.
+    rtt         the RTO is derived from the measured RTT (RFC 6298).  With
+                the handshake and one segment each answered after 0.8 s,
+                RTO = SRTT + 4*RTTVAR = 2.0 s; the next, unacknowledged,
+                segment is retransmitted after about that, not after the
+                fixed 1 s.
 
 Run from the repo root after building sys/ and wireguest:
     python3 tests/lib/net/wire/test_tcp_window.py [case...]

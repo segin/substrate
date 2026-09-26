@@ -1,87 +1,85 @@
 #!/usr/bin/env python3
 """
-The user interface: OPEN/CLOSE/SEND semantics on a live socket
-(docs/ip-audit-2026-09-22.md, TCP-F).  Each case names the checklist item
-it guards.
+The user interface: OPEN/CLOSE/SEND semantics on a live socket.
 
-    reconnect      TCP-API-01: after a connect() the peer refused with a RST,
-                   connect() on the same socket starts a clean new
-                   connection: a fresh SYN with a new ISS and no stray
-                   retransmission of the old one, and it completes.
-    connect-twice  TCP-API-02: a second connect() while the first is still
-                   in SYN-SENT fails EALREADY; once established, EISCONN;
-                   the handshake is not restarted (one ISS on the wire).
-    listen-connect TCP-API-03: connect() on a listening socket fails
-                   EOPNOTSUPP and the socket still accepts.
-    bind-unique    TCP-API-04: the PCB layer enforces local-socket
-                   uniqueness.  With SO_REUSEADDR a second socket may bind
-                   the port a connected socket holds, but connecting it to
-                   the same peer (a duplicate 4-tuple) fails EADDRINUSE;
-                   once the first socket is closed and in TIME-WAIT, a plain
-                   bind() of its port fails EADDRINUSE while a SO_REUSEADDR
-                   bind() + listen() succeeds.
-    find-specific  TCP-API-05: with an address-specific and a (newer)
-                   wildcard listener on one port, a SYN to the specific
-                   address reaches the specific listener, not the newest.
-    listen-connected TCP-API-06: listen() on a connected socket fails
-                   EINVAL and the connection keeps working.
-    listen-unbound TCP-API-07: listen() on a never-bound socket binds an
-                   ephemeral port, getsockname() reports it, and a SYN to
-                   it is accepted.
-    connect-unspec TCP-API-10: connect() to port 0 fails EADDRNOTAVAIL with
-                   no SYN on the wire; connect() to 0.0.0.0 goes to the local
-                   host (refused at once by loopback), not onto the wire.
+    reconnect      after a connect() the peer refused with a RST, connect()
+                   on the same socket starts a clean new connection: a
+                   fresh SYN with a new ISS and no stray retransmission of
+                   the old one, and it completes.
+    connect-twice  a second connect() while the first is still in SYN-SENT
+                   fails EALREADY; once established, EISCONN; the handshake
+                   is not restarted (one ISS on the wire).
+    listen-connect connect() on a listening socket fails EOPNOTSUPP and the
+                   socket still accepts.
+    bind-unique    the PCB layer enforces local-socket uniqueness.  With
+                   SO_REUSEADDR a second socket may bind the port a
+                   connected socket holds, but connecting it to the same
+                   peer (a duplicate 4-tuple) fails EADDRINUSE; once the
+                   first socket is closed and in TIME-WAIT, a plain bind()
+                   of its port fails EADDRINUSE while a SO_REUSEADDR bind()
+                   + listen() succeeds.
+    find-specific  with an address-specific and a (newer) wildcard listener
+                   on one port, a SYN to the specific address reaches the
+                   specific listener, not the newest.
+    listen-connected listen() on a connected socket fails EINVAL and the
+                   connection keeps working.
+    listen-unbound listen() on a never-bound socket binds an ephemeral
+                   port, getsockname() reports it, and a SYN to it is
+                   accepted.
+    connect-unspec connect() to port 0 fails EADDRNOTAVAIL with no SYN on
+                   the wire; connect() to 0.0.0.0 goes to the local host
+                   (refused at once by loopback), not onto the wire.
     connect-noroute with eth0's address cleared there is no route off
                    loopback; connect() fails ENETUNREACH at once instead of
                    queueing a SYN it can never send and timing out.
-    linger-abort  TCP-API-11: with SO_LINGER {1, 0}, close() is an ABORT:
-                   one RST at SND.NXT, no FIN, and the unacknowledged data
-                   is not retransmitted.
-    unread-close   TCP-API-12: close() with received data still unread is
-                   an abort (RFC 1122 4.2.2.13): RST, not FIN.
-    accept-emfile  TCP-API-12: accept() failing EMFILE on an established
-                   child that already holds the peer's acknowledged request
-                   resets it rather than sending a FIN.
-    write-closing  TCP-API-13: after shutdown(SHUT_WR), write() fails EPIPE
-                   (not ENOTCONN) and raises SIGPIPE; send(MSG_NOSIGNAL)
-                   fails EPIPE without one.
-    early-write    TCP-API-14: a write while the handshake is outstanding
-                   returns EAGAIN on a non-blocking socket and, on a
-                   blocking one, waits and goes out once established --
-                   it used to fail ENOTCONN either way.
-    shut-connecting TCP-API-15: shutdown(SHUT_WR) in SYN-SENT aborts the
-                   open (SO_ERROR ECONNABORTED; the late SYN|ACK draws a
-                   RST, no connection forms); in SYN-RECEIVED (reached by
+    linger-abort   with SO_LINGER {1, 0}, close() is an ABORT: one RST at
+                   SND.NXT, no FIN, and the unacknowledged data is not
+                   retransmitted.
+    unread-close   close() with received data still unread is an abort
+                   (RFC 1122 4.2.2.13): RST, not FIN.
+    accept-emfile  accept() failing EMFILE on an established child that
+                   already holds the peer's acknowledged request resets it
+                   rather than sending a FIN.
+    write-closing  after shutdown(SHUT_WR), write() fails EPIPE (not
+                   ENOTCONN) and raises SIGPIPE; send(MSG_NOSIGNAL) fails
+                   EPIPE without one.
+    early-write    a write while the handshake is outstanding returns
+                   EAGAIN on a non-blocking socket and, on a blocking one,
+                   waits and goes out once established -- it used to fail
+                   ENOTCONN either way.
+    shut-connecting shutdown(SHUT_WR) in SYN-SENT aborts the open
+                   (SO_ERROR ECONNABORTED; the late SYN|ACK draws a RST, no
+                   connection forms); in SYN-RECEIVED (reached by
                    simultaneous open) it sends the FIN.
-    send-dontwait  TCP-API-16: send(MSG_DONTWAIT) on a blocking socket facing
-                   a closed window returns (the probe octet, then EAGAIN)
-                   instead of blocking.
-    read-listener  TCP-API-17: read() on a listening socket fails ENOTCONN
-                   (as recv() does) instead of blocking forever.
-    close-synrcvd  TCP-API-20: close() in SYN-RECEIVED (via simultaneous
-                   open) sends a FIN at ISS+1 instead of silently dropping
-                   the connection.
-    synrst-flood   TCP-API-21: 32 SYN+RST pairs sent back to back at a
-                   backlog-4 listener; the dead children count against the
-                   backlog until reaped, so far fewer than 32 draw a SYN|ACK
-                   (each used to get a fresh child and a SYN|ACK).
-    peer-early     TCP-API-22: getpeername() on a socket still in SYN-SENT
-                   (a non-blocking connect) fails ENOTCONN; once the
-                   handshake completes it reports the peer.
-    close-synsent  TCP-API-23: close() while another thread is blocked in
-                   connect() (SYN-SENT) wakes it at once with
-                   ECONNABORTED -- not ECONNREFUSED on the next poll.
-    retx-batch     TCP-RES-01: 12 connects (more than one retransmit batch)
-                   to a peer that never answers; every SYN is retransmitted
-                   on the RTO, and all of them on the same timer tick -- the
+    send-dontwait  send(MSG_DONTWAIT) on a blocking socket facing a closed
+                   window returns (the probe octet, then EAGAIN) instead of
+                   blocking.
+    read-listener  read() on a listening socket fails ENOTCONN (as recv()
+                   does) instead of blocking forever.
+    close-synrcvd  close() in SYN-RECEIVED (via simultaneous open) sends a
+                   FIN at ISS+1 instead of silently dropping the
+                   connection.
+    synrst-flood   32 SYN+RST pairs sent back to back at a backlog-4
+                   listener; the dead children count against the backlog
+                   until reaped, so far fewer than 32 draw a SYN|ACK (each
+                   used to get a fresh child and a SYN|ACK).
+    peer-early     getpeername() on a socket still in SYN-SENT (a
+                   non-blocking connect) fails ENOTCONN; once the handshake
+                   completes it reports the peer.
+    close-synsent  close() while another thread is blocked in connect()
+                   (SYN-SENT) wakes it at once with ECONNABORTED -- not
+                   ECONNREFUSED on the next poll.
+    retx-batch     12 connects (more than one retransmit batch) to a peer
+                   that never answers; every SYN is retransmitted on the
+                   RTO, and all of them on the same timer tick -- the
                    overflow is not deferred to later ticks.
-    listen-close   TCP-RES-02: closing a listener with 20 established,
-                   never-accepted children (more than one batch) resets
-                   every one of them, each at SND.NXT.
-    backlog-recovers TCP-RES-03: SYN+RST pairs fill a backlog-4 listener
-                   with dead children; once the timer reaps them the
-                   listener answers a new SYN (the per-listener child count
-                   that replaced the backlog walk is given back on free).
+    listen-close   closing a listener with 20 established, never-accepted
+                   children (more than one batch) resets every one of them,
+                   each at SND.NXT.
+    backlog-recovers SYN+RST pairs fill a backlog-4 listener with dead
+                   children; once the timer reaps them the listener answers
+                   a new SYN (the per-listener child count that replaced
+                   the backlog walk is given back on free).
 
 Run from the repo root after building sys/ and wireguest:
     python3 tests/lib/net/wire/test_tcp_api.py [case...]

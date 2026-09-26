@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-TCP-SM-02 and TCP-SM-05 (docs/ip-audit-2026-09-22.md): RFC 793 3.9's
-"first check sequence number" -- the 3.3 acceptability test, the answer to
-an unacceptable segment, and trimming an acceptable one to the window.
+RFC 793 3.9's "first check sequence number" -- the 3.3 acceptability test,
+the answer to an unacceptable segment, and trimming an acceptable one to
+the window.
 
     keepalive     an empty ACK one octet below RCV.NXT (what BSD and Linux
                   send as a keepalive) must be answered with an ACK.

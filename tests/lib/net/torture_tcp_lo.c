@@ -46,7 +46,7 @@
  * it finds a race.  Pace it to keep TIME-WAIT occupancy bounded. */
 #define CHURN_GAP_US  100000
 /* Bulk rounds leave two connections (control + data) in TIME-WAIT each; once
- * reassembly (TCP-WIN-08) removed the RTO stalls a round took milliseconds,
+ * out-of-order reassembly removed the RTO stalls a round took milliseconds,
  * and an unpaced loop filled a 512 MiB guest with TIME-WAIT rings. */
 #define BULK_GAP_US   250000
 #define RUN_SECS      150   /* each worker repeats its scenario this long */

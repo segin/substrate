@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """
-UDP-IP-06 (docs/ip-audit-2026-09-22.md): IPv4 multicast end to end, per
-RFC 1112 6 and RFC 1122 3.3.7.  Every piece was missing -- no route, no
-01:00:5e mapping, no input path, no membership state, and NIC receive
-filters that rejected every group frame -- while IP_ADD_MEMBERSHIP returned
-success.
+IPv4 multicast end to end, per RFC 1112 6 and RFC 1122 3.3.7.  Every piece
+was missing -- no route, no 01:00:5e mapping, no input path, no membership
+state, and NIC receive filters that rejected every group frame -- while
+IP_ADD_MEMBERSHIP returned success.
 
     receive       a datagram to a joined group is delivered; one to a group
                   nobody joined is not.  Run on virtio-net and on e1000, whose

@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """
-UDP-ICMP-01 (docs/ip-audit-2026-09-22.md): RFC 1122 4.1.3.3 -- UDP must
-pass ICMP errors to the application.  icmp_input() returned on anything but
-an echo request, and SO_ERROR was a hard 0 for every datagram socket, so a
-resolver whose server port was closed learned nothing and sat out its whole
-timeout.
+RFC 1122 4.1.3.3 -- UDP must pass ICMP errors to the application.
+icmp_input() returned on anything but an echo request, and SO_ERROR was a
+hard 0 for every datagram socket, so a resolver whose server port was
+closed learned nothing and sat out its whole timeout.
 
     recv        a connected socket blocked in recv() is woken by a Port
                 Unreachable about its datagram and fails ECONNREFUSED.

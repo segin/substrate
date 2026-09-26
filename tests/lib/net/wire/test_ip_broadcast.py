@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """
-UDP-IP-04 / UDP-IP-05 (docs/ip-audit-2026-09-22.md): IPv4 broadcast on the
-wire.  RFC 1122 3.3.6: a datagram to a broadcast address is sent as a
-link-layer broadcast.
+IPv4 broadcast on the wire.  RFC 1122 3.3.6: a datagram to a broadcast
+address is sent as a link-layer broadcast.
 
     limited     a datagram to 255.255.255.255 leaves as an Ethernet broadcast.
                 route_for_v4() matched no subnet and sent it to the default

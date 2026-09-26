@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-UDP-IP-01 (docs/ip-audit-2026-09-22.md): outbound datagrams are bounded by
-the egress interface's MTU.  The only bound was the compile-time
-NETDEV_MTU_MAX, so on a 1500-byte Ethernet a UDP payload of 1473..1572
-octets left as a frame past the 1514-octet maximum -- which a conformant
-switch or peer NIC discards -- and sendto() reported complete success.  We
-do not fragment, so the send must fail EMSGSIZE instead.
+Outbound datagrams are bounded by the egress interface's MTU.  The only
+bound was the compile-time NETDEV_MTU_MAX, so on a 1500-byte Ethernet a
+UDP payload of 1473..1572 octets left as a frame past the 1514-octet
+maximum -- which a conformant switch or peer NIC discards -- and sendto()
+reported complete success.  We do not fragment, so the send must fail
+EMSGSIZE instead.
 
     fits      a 1472-octet payload (the largest that fits in 1500) is sent,
               in one frame of exactly 1514 octets.

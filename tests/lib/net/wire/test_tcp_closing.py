@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-TCP-SM-01 (docs/ip-audit-2026-09-22.md): a segment that retransmits the
-peer's FIN and also acknowledges ours must complete CLOSING and LAST-ACK.
+A segment that retransmits the peer's FIN and also acknowledges ours must
+complete CLOSING and LAST-ACK.
 
 tcp_in_established() processed the ACK field of a retransmitted FIN and then
 returned, before the tests that complete CLOSING -> TIME-WAIT and LAST-ACK
@@ -9,9 +9,10 @@ returned, before the tests that complete CLOSING -> TIME-WAIT and LAST-ACK
 timer had nothing to do either: one lost ACK left the PCB, its ring and its
 port wedged for good.  The peer below sends exactly that combined segment.
 
-Since TCP-SM-02 the combined segment is unacceptable (its FIN lies below
-RCV.NXT), so it is answered and dropped whole and our FIN stays queued; the
-guest must then retransmit its FIN, which the peer acknowledges properly.
+Now that the RFC 793 3.9 acceptability test exists, the combined segment
+is unacceptable (its FIN lies below RCV.NXT), so it is answered and dropped
+whole and our FIN stays queued; the guest must then retransmit its FIN,
+which the peer acknowledges properly.
 Either way the guest must not be left in a closing state with nothing to
 send -- which is exactly what the wedge looked like on the wire.
 
@@ -19,10 +20,11 @@ send -- which is exactly what the wedge looked like on the wire.
               is gone, so a stray ACK draws a RST.
     closing   simultaneous close.  Once complete the PCB is in TIME-WAIT:
               it no longer retransmits its FIN, and an in-window SYN draws
-              the RFC 5961 challenge ACK.  (Since TCP-SM-06 CLOSING answers
-              that SYN the same way, so the SYN only shows the PCB is still
-              synchronized; a CLOSING wedged with nothing to send is bounded
-              by TCP-SM-01's deadline rather than observable here.)
+              the RFC 5961 challenge ACK.  (CLOSING now answers that SYN
+              the same way, as any synchronized state must, so the SYN only
+              shows the PCB is still synchronized; a CLOSING wedged with
+              nothing to send is bounded by the CLOSING/LAST-ACK reaper
+              deadline rather than observable here.)
 
 Run from the repo root after building sys/ and wireguest:
     python3 tests/lib/net/wire/test_tcp_closing.py

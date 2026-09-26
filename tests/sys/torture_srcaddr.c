@@ -1,9 +1,9 @@
 /*
  * torture_srcaddr.c — the IPv4 source address a socket sends from.
  *
- * TCP-HDR-01, UDP-U-02, UDP-U-03 (docs/ip-audit-2026-09-22.md).  Transports
- * summed their pseudo-header checksum over one source address and then let
- * ip4_output() stamp another into the IP header, chosen by routing.  So:
+ * Transports summed their pseudo-header checksum over one source address
+ * and then let ip4_output() stamp another into the IP header, chosen by
+ * routing.  So:
  *
  *   udp-bound   a UDP socket bound to the NIC address sending to 127.0.0.1
  *               was seen by the receiver as coming from 127.0.0.1 -- bind()'s
@@ -14,14 +14,14 @@
  *               A raw socket captures that SYN and verifies its checksum
  *               against the IP header's own addresses.  (Completing that
  *               handshake also needs the reply to 10.0.2.15 to be looped
- *               back rather than ARPed for on the wire -- UDP-IP-03 -- so
- *               the test checks the SYN, not the connect.)
+ *               back rather than ARPed for on the wire -- the 'self' case
+ *               below -- so the test checks the SYN, not the connect.)
  *   lo-guard    once the bound source is honoured, a socket bound to
  *               127.0.0.1 must not put that source on a real wire (RFC 1122
  *               3.2.1.3(g)): sending off-host fails EINVAL.
  *
- *   self        UDP-IP-03: traffic to the host's own NIC address must loop
- *               back locally.  It was routed out the NIC and ARPed for, so
+ *   self        traffic to the host's own NIC address must loop back
+ *               locally.  It was routed out the NIC and ARPed for, so
  *               it failed EHOSTUNREACH -- including the bound-to-NIC-address
  *               TCP connect above, whose SYN-ACK is sent to 10.0.2.15.
  *
@@ -63,7 +63,7 @@ static void sin_set(struct sockaddr_in *sa, const char *ip, unsigned short port)
 
 static void test_udp_bound(void)
 {
-    printf("UDP-U-02: a bound UDP socket sends from its bound address\n");
+    printf("a bound UDP socket sends from its bound address\n");
     struct sockaddr_in a, from;
     socklen_t flen = sizeof(from);
     char buf[32];
@@ -120,7 +120,7 @@ static ssize_t capture_syn(int raw, unsigned char *pkt, size_t cap,
 
 static void test_tcp_bound(void)
 {
-    printf("TCP-HDR-01: a bound TCP socket's segments carry a matching source\n");
+    printf("a bound TCP socket's segments carry a matching source\n");
     struct sockaddr_in a;
     int l = socket(AF_INET, SOCK_STREAM, 0);
     int c = socket(AF_INET, SOCK_STREAM, 0);
@@ -194,7 +194,7 @@ static int tcp_connect_bounded(int c, const struct sockaddr_in *a)
 
 static void test_self(void)
 {
-    printf("UDP-IP-03: traffic to our own NIC address loops back\n");
+    printf("traffic to our own NIC address loops back\n");
     struct sockaddr_in a, from;
     socklen_t flen = sizeof(from);
     char buf[16];
@@ -225,7 +225,7 @@ static void test_self(void)
        tcp_connect_bounded(c, &a), "handshake failed");
     close(c);
 
-    /* The TCP-HDR-01 case: bound to the NIC address, connecting to
+    /* The tcp-bound case: bound to the NIC address, connecting to
      * 127.0.0.1 -- the SYN-ACK goes to 10.0.2.15. */
     c = socket(AF_INET, SOCK_STREAM, 0);
     sin_set(&a, NIC_ADDR, 0);

@@ -1,76 +1,72 @@
 #!/usr/bin/env python3
 """
-sbin/dhclient against a scripted DHCP server on the wire
-(docs/dhclient-audit-2026-09.md).  The guest runs the freshly built
-sbin/dhclient/dhclient (written into the image as /sbin/dhclient) under
-'wireguest run'; this side plays the server, answering each DHCP message
-exactly as the case needs.
+sbin/dhclient against a scripted DHCP server on the wire.  The guest runs
+the freshly built sbin/dhclient/dhclient (written into the image as
+/sbin/dhclient) under 'wireguest run'; this side plays the server,
+answering each DHCP message exactly as the case needs.
 
     bound         DISCOVER -> OFFER -> REQUEST -> ACK: dhclient binds the
                   offered address, and the guest then answers ARP for it.
-    ack-config    DHC-06: the netmask and router come from the DHCPACK --
-                  here the OFFER carries neither.
-    no-options    DHC-08: an ACK with no mask or router: the mask defaults
-                  to the address's class (/8 for 10.0.2.50) and the gateway
-                  the kernel booted with is removed -- an off-link datagram
-                  no longer leaves through 10.0.2.2.
-    overload      DHC-09: with option 52 = 3 the mask is read from 'file'
-                  and the router from 'sname'.
-    concat        DHC-09: a router and a mask each split across two option
-                  instances are concatenated.
-    maxsize       DHC-09: DISCOVER and REQUEST carry a Maximum DHCP Message
-                  Size of at least 576.
-    bad-headers   DHC-10: OFFERs with a bad IP checksum, a bad UDP checksum,
-                  a source port other than 67, the MF bit, IP version 6, a
+    ack-config    the netmask and router come from the DHCPACK -- here the
+                  OFFER carries neither.
+    no-options    an ACK with no mask or router: the mask defaults to the
+                  address's class (/8 for 10.0.2.50) and the gateway the
+                  kernel booted with is removed -- an off-link datagram no
+                  longer leaves through 10.0.2.2.
+    overload      with option 52 = 3 the mask is read from 'file' and the
+                  router from 'sname'.
+    concat        a router and a mask each split across two option
+                  instances are concatenated (RFC 3396).
+    maxsize       DISCOVER and REQUEST carry a Maximum DHCP Message Size of
+                  at least 576.
+    bad-headers   OFFERs with a bad IP checksum, a bad UDP checksum, a
+                  source port other than 67, the MF bit, IP version 6, a
                   16-octet IP header, a UDP length too short for the body,
                   or a wrong magic cookie are all ignored; a well-formed
                   OFFER after them is the one requested.
-    bad-offers    DHC-11: OFFERs without a server identifier, or offering
+    bad-offers    OFFERs without a server identifier, or offering
                   255.255.255.255, 127/8, 224/4, 240/4 or 0/8, are
                   ignored; the valid OFFER after them is requested.
-    foreign-ack   DHC-11: an ACK naming a server other than the selected
-                  one does not bind; the selected server's ACK does.
-    resolv        DHC-12: a domain name and a search domain carrying a
-                  newline are dropped rather than written into
-                  /etc/resolv.conf, while the DNS server and a valid search
-                  domain still are.
-    unicast       DHC-13: DISCOVER and REQUEST leave the BROADCAST flag
-                  clear, and an OFFER and ACK unicast to 'yiaddr' at our MAC
-                  bind.
-    unicast-own   DHC-13: the same for the address the kernel already has
+    foreign-ack   an ACK naming a server other than the selected one does
+                  not bind; the selected server's ACK does.
+    resolv        a domain name and a search domain carrying a newline are
+                  dropped rather than written into /etc/resolv.conf, while
+                  the DNS server and a valid search domain still are.
+    unicast       DISCOVER and REQUEST leave the BROADCAST flag clear, and
+                  an OFFER and ACK unicast to 'yiaddr' at our MAC bind.
+    unicast-own   the same for the address the kernel already has
                   (10.0.2.15), with no ICMP error sent back to the server.
-    probe-announce DHC-07: before using the address the client ARP-probes it
+    probe-announce before using the address the client ARP-probes it
                   (sender IP 0), and once bound announces it with a
                   gratuitous ARP.
-    declined      DHC-07: when another host answers the probe, the client
-                  sends a DHCPDECLINE (requested address and server
-                  identifier, ciaddr 0, no other options -- Table 5), does
-                  not bind, and restarts no sooner than 10 s later.
-    renew         DHC-02: with a 20 s lease the client renews at T1 (10 s
-                  +-5%) by unicast to the server -- ciaddr set, no server
-                  identifier or requested address (Table 4) -- takes the
-                  ACK, and renews again T1 after that REQUEST.
-    rebind        DHC-02: with the renewal ignored, a broadcast REBINDING
-                  request at T2 (17.5 s +-5%); its ACK keeps the address.
-    expire        DHC-02: with everything ignored, the address is dropped
-                  when the lease ends (no more ARP replies) and INIT
-                  restarts.
-    nak-renew     DHC-02: a NAK to the renewal drops the address at once
-                  and restarts INIT.
-    clock-step    DHC-14: the wall clock is stepped forward an hour every
-                  200 ms while dhclient waits for an OFFER; its DISCOVERs
-                  stay spaced by the retransmission delay instead of all
-                  timing out at once.
-    backoff       DHC-05: unanswered, the four DISCOVERs are spaced by the
-                  RFC 2131 4.1 randomized exponential backoff (4, 8, 16 s,
-                  each +-1 s) and dhclient gives up 32 +- 1 s after the last.
-    request-retx  DHC-03: an unanswered DHCPREQUEST is retransmitted with
-                  the same xid on the backoff, and an ACK to the third binds.
-    request-restart DHC-03: after four unanswered REQUESTs the client goes
-                  back to INIT -- a new DISCOVER with a new xid -- and binds
-                  from that exchange.
-    nak           DHC-04: a DHCPNAK to the REQUEST sends the client back to
-                  INIT at once (new DISCOVER, new xid), not after a timeout.
+    declined      when another host answers the probe, the client sends a
+                  DHCPDECLINE (requested address and server identifier,
+                  ciaddr 0, no other options -- RFC 2131 Table 5), does not
+                  bind, and restarts no sooner than 10 s later.
+    renew         with a 20 s lease the client renews at T1 (10 s +-5%) by
+                  unicast to the server -- ciaddr set, no server identifier
+                  or requested address (RFC 2131 Table 4) -- takes the ACK,
+                  and renews again T1 after that REQUEST.
+    rebind        with the renewal ignored, a broadcast REBINDING request
+                  at T2 (17.5 s +-5%); its ACK keeps the address.
+    expire        with everything ignored, the address is dropped when the
+                  lease ends (no more ARP replies) and INIT restarts.
+    nak-renew     a NAK to the renewal drops the address at once and
+                  restarts INIT.
+    clock-step    the wall clock is stepped forward an hour every 200 ms
+                  while dhclient waits for an OFFER; its DISCOVERs stay
+                  spaced by the retransmission delay instead of all timing
+                  out at once.
+    backoff       unanswered, the four DISCOVERs are spaced by the RFC 2131
+                  4.1 randomized exponential backoff (4, 8, 16 s, each
+                  +-1 s) and dhclient gives up 32 +- 1 s after the last.
+    request-retx  an unanswered DHCPREQUEST is retransmitted with the same
+                  xid on the backoff, and an ACK to the third binds.
+    request-restart after four unanswered REQUESTs the client goes back to
+                  INIT -- a new DISCOVER with a new xid -- and binds from
+                  that exchange.
+    nak           a DHCPNAK to the REQUEST sends the client back to INIT at
+                  once (new DISCOVER, new xid), not after a timeout.
 
 Run from the repo root after building sys/, wireguest and sbin/dhclient:
     python3 tests/lib/net/wire/test_dhclient.py [case...]

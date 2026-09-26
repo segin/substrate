@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-UDP-ICMP-02 (docs/ip-audit-2026-09-22.md): RFC 1122 4.1.3.1 -- a UDP
-datagram for a port with no listener is answered with ICMP Destination
-Unreachable, code 3 (port), quoting the invoking IP header and the first 8
-octets of its data.  udp_input() computed whether anything took the
-datagram and threw the answer away, so nothing was ever sent.
+RFC 1122 4.1.3.1 -- a UDP datagram for a port with no listener is answered
+with ICMP Destination Unreachable, code 3 (port), quoting the invoking IP
+header and the first 8 octets of its data.  udp_input() computed whether
+anything took the datagram and threw the answer away, so nothing was ever
+sent.
 
     closed-port   a datagram to a closed port draws a Port Unreachable from
                   the address it was sent to, quoting the UDP header.
@@ -30,7 +30,7 @@ CLOSED = 9999
 def boot():
     # The guest dials the peer first, which resolves the peer's MAC.  The
     # error is generated in RX (interrupt) context, where ip4_output() cannot
-    # wait for ARP and drops the packet on a cache miss (NET-05), so an
+    # wait for ARP and drops the packet on a cache miss, so an
     # unprimed cache would lose the errors this test is looking for.
     w = Wire.boot('connect 10.0.2.2 7011 sleep:120')
     if not w.expect(lambda s: s.dport == 7011, 90, 'SYN'):

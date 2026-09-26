@@ -591,7 +591,7 @@ int main(int argc, char **argv) {
         sa.sin_addr.s_addr = inet_addr(argv[2]);
         int fd = socket(AF_INET, SOCK_DGRAM, 0);
         int one = 1;
-        /* Broadcast needs SO_BROADCAST (UDP-API-15), as for any real client. */
+        /* Broadcast needs SO_BROADCAST, as for any real client. */
         setsockopt(fd, SOL_SOCKET, SO_BROADCAST, &one, sizeof one);
         if (fd >= 0 && connect(fd, (struct sockaddr *)&sa, sizeof sa) == 0) {
             say("udp connected %s%ld", "", 0);

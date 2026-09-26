@@ -1,20 +1,19 @@
 /*
- * torture_udp.c — regression test for the UDP demux and checksum findings
- * (task #430: UDP-01, UDP-03, SOCK-07).
+ * torture_udp.c — regression test for UDP demux and checksums (task #430):
+ * one datagram reaches exactly one socket, a connected socket rejects
+ * other sources, the checksum survives a loopback round trip, and
+ * SO_ERROR on an AF_UNIX socket reports no error.
  *
- * Also UDP-MEM-01 (MSG_TRUNC over-copy), UDP-MEM-02 (recvmsg msg_name
- * written through a raw user pointer), UDP-U-01 (connected sendto),
- * UDP-U-04 (destination port 0), UDP-U-05 (empty datagram via sendmsg),
- * UDP-IP-02 (all of 127/8 is local), UDP-IP-08 (broadcast fan-out) and
- * UDP-IP-11 (lo's MTU), UDP-API-01 (port ownership), UDP-API-02
- * (multi-iovec sendmsg), UDP-API-03 (writev), UDP-API-04 (SO_RCVTIMEO),
- * UDP-API-06 (non-local bind), UDP-API-07 (connect binds), UDP-API-08
- * (SHUT_RD), UDP-API-09 (zero-length receive), UDP-API-10 (addrlen at
- * EOF), UDP-API-11 (IP_PKTINFO), UDP-API-12 (IP transmit options),
- * UDP-API-13 (unimplemented options), UDP-API-14 (getsockopt checks),
- * UDP-API-15 (SO_BROADCAST), UDP-API-17 (raw filtering), UDP-API-19
- * (SHUT_WR), UDP-API-20 (raw payload limit), UDP-RES-01 (byte-bounded
- * queue) and UDP-RES-03/-06 (drop counters) from docs/ip-audit-2026-09-22.md.
+ * Also: raw and packet sockets are root-only; MSG_TRUNC never over-copies;
+ * recvmsg() validates msg_name instead of writing through a raw user
+ * pointer; sendto() on a connected socket; destination port 0; an empty
+ * datagram via sendmsg(); all of 127/8 is local; broadcast fan-out; lo's
+ * MTU; port ownership on bind(); multi-iovec sendmsg(); writev();
+ * SO_RCVTIMEO; bind() to a non-local address; connect() binds; SHUT_RD;
+ * zero-length receives; addrlen at EOF; IP_PKTINFO; the IP transmit
+ * options; refusing unimplemented options; getsockopt() checks;
+ * SO_BROADCAST; raw socket filtering; SHUT_WR; the raw payload limit; the
+ * byte-bounded receive queue; and the drop counters.
  *
  * Each case drives the real socket API over the loopback interface, so a
  * PASS means a datagram actually took the intended path through the
@@ -94,7 +93,7 @@ static ssize_t try_recv(int fd, char *buf, size_t n)
 }
 
 /*
- * UDP-03: a datagram must survive a loopback round trip now that the send
+ * A datagram must survive a loopback round trip now that the send
  * path computes a checksum and the receive path verifies it.  If the two
  * disagree in any way -- wrong pseudo-header source, wrong length, wrong
  * byte order -- every datagram is silently dropped and nothing works at
@@ -102,7 +101,7 @@ static ssize_t try_recv(int fd, char *buf, size_t n)
  */
 static void test_roundtrip(void)
 {
-    printf("UDP-03: checksummed loopback round trip\n");
+    printf("checksummed loopback round trip\n");
 
     const char msg[] = "the quick brown fox";
     char buf[64];
@@ -129,13 +128,13 @@ static void test_roundtrip(void)
 }
 
 /*
- * UDP-01a: two sockets on one port must not each receive a COPY.  The demux
+ * Two sockets on one port must not each receive a COPY.  The demux
  * matched on local_port alone and enqueued into every match, so two
  * resolvers on one port read each other's answers.
  */
 static void test_no_duplicate_delivery(void)
 {
-    printf("UDP-01: one datagram reaches exactly one socket\n");
+    printf("one datagram reaches exactly one socket\n");
 
     const char msg[] = "only-once";
     char buf[64];
@@ -181,13 +180,13 @@ static void test_no_duplicate_delivery(void)
 }
 
 /*
- * UDP-01b: a connect()ed datagram socket must receive only from its peer.
+ * A connect()ed datagram socket must receive only from its peer.
  * Without the peer check a spoofed reply from any source was accepted,
  * which is how an off-path attacker beats a real DNS server.
  */
 static void test_connected_peer_filter(void)
 {
-    printf("UDP-01: connected socket rejects a non-peer source\n");
+    printf("connected socket rejects a non-peer source\n");
 
     char buf[64];
     struct sockaddr_in peer, dst;
@@ -227,13 +226,13 @@ static void test_connected_peer_filter(void)
 }
 
 /*
- * SOCK-07: getsockopt(SO_ERROR) on an AF_UNIX socket returned -ENOTSOCK as
+ * getsockopt(SO_ERROR) on an AF_UNIX socket returned -ENOTSOCK as
  * the option VALUE while reporting success, so every `if (so_error) fail()`
  * saw a phantom error.
  */
 static void test_so_error_unix(void)
 {
-    printf("SOCK-07: SO_ERROR on AF_UNIX reports no error\n");
+    printf("SO_ERROR on AF_UNIX reports no error\n");
 
     int sv[2];
     if (socketpair(AF_UNIX, SOCK_STREAM, 0, sv) < 0) {
@@ -253,13 +252,13 @@ static void test_so_error_unix(void)
 }
 
 /*
- * UDP-07: a raw socket reads every packet of its protocol regardless of who
+ * A raw socket reads every packet of its protocol regardless of who
  * it was for, and writes caller-composed payloads onto the wire.  Creating
  * one required no privilege at all.
  */
 static void test_raw_socket_privileged(void)
 {
-    printf("UDP-07: raw and packet sockets are root-only\n");
+    printf("raw and packet sockets are root-only\n");
 
     /* init runs as root, so both must still be creatable here -- a gate that
      * refuses root would break ping(8) and dhclient outright. */
@@ -291,7 +290,7 @@ static void test_raw_socket_privileged(void)
 }
 
 /*
- * UDP-MEM-01: recv(..., MSG_TRUNC) returns a datagram's REAL length, which
+ * recv(..., MSG_TRUNC) returns a datagram's REAL length, which
  * can exceed the caller's buffer.  do_recv() then copied that many bytes out
  * of a kernel bounce buffer sized to the caller's length -- reading past the
  * end of the kernel allocation and writing past the end of the user buffer.
@@ -331,7 +330,7 @@ static void check_trunc(const char *what, int rx, int tx,
 
 static void test_msg_trunc_clamp(void)
 {
-    printf("UDP-MEM-01: MSG_TRUNC never copies past the caller's buffer\n");
+    printf("MSG_TRUNC never copies past the caller's buffer\n");
 
     struct sockaddr_in dst;
     int rx = bind_udp(31990);
@@ -356,14 +355,14 @@ static void test_msg_trunc_clamp(void)
 }
 
 /*
- * UDP-MEM-02: a multi-iovec recvmsg() on a datagram socket wrote the source
+ * A multi-iovec recvmsg() on a datagram socket wrote the source
  * sockaddr through msg_name with no validation, so msg_name could name any
  * address -- kernel memory included.  A legitimate msg_name must still get
  * the sender's address; one pointing into the kernel must fail EFAULT.
  */
 static void test_recvmsg_name(void)
 {
-    printf("UDP-MEM-02: multi-iovec recvmsg() validates msg_name\n");
+    printf("multi-iovec recvmsg() validates msg_name\n");
 
     struct sockaddr_in dst, from, src;
     socklen_t slen = sizeof(src);
@@ -419,7 +418,7 @@ static void test_recvmsg_name(void)
 }
 
 /*
- * UDP-U-01: sendto() on a CONNECTED datagram socket must honour the
+ * sendto() on a CONNECTED datagram socket must honour the
  * destination it names.  afinet_sendto_k() parsed the caller's address only
  * when the socket was not connected, so after connect() every sendto() went
  * to the connected peer instead -- a resolver retargeting a second server
@@ -428,7 +427,7 @@ static void test_recvmsg_name(void)
  */
 static void test_connected_sendto(void)
 {
-    printf("UDP-U-01: sendto() on a connected socket uses the named address\n");
+    printf("sendto() on a connected socket uses the named address\n");
 
     struct sockaddr_in a, b;
     char buf[32];
@@ -458,11 +457,11 @@ out:
     if (tx >= 0) close(tx);
 }
 
-/* UDP-U-04: destination port 0 is RFC 768's "no port"; it must never be
+/* Destination port 0 is RFC 768's "no port"; it must never be
  * sent to or connected to. */
 static void test_port_zero(void)
 {
-    printf("UDP-U-04: destination port 0 is refused\n");
+    printf("destination port 0 is refused\n");
     struct sockaddr_in z;
     int tx = socket(AF_INET, SOCK_DGRAM, 0);
     lo_addr(&z, 0);
@@ -475,11 +474,11 @@ static void test_port_zero(void)
     close(tx);
 }
 
-/* UDP-U-05: sendmsg() with no payload -- no iovecs, or only empty ones --
+/* sendmsg() with no payload -- no iovecs, or only empty ones --
  * must still send one empty datagram. */
 static void test_sendmsg_empty(void)
 {
-    printf("UDP-U-05: sendmsg() sends an empty datagram\n");
+    printf("sendmsg() sends an empty datagram\n");
     struct sockaddr_in dst;
     char buf[8];
     int rx = bind_udp(31972);
@@ -507,12 +506,12 @@ static void test_sendmsg_empty(void)
     close(tx);
 }
 
-/* UDP-IP-02: all of 127/8 is the loopback network (RFC 1122 3.2.1.3(g)),
+/* All of 127/8 is the loopback network (RFC 1122 3.2.1.3(g)),
  * not just 127.0.0.1.  ip4_input accepted only lo's exact address and its
  * broadcast, so 127.0.0.2 was unreachable. */
 static void test_loopback_net(void)
 {
-    printf("UDP-IP-02: every 127/8 address is local\n");
+    printf("every 127/8 address is local\n");
     struct sockaddr_in any, dst, from;
     socklen_t flen = sizeof(from);
     char buf[16];
@@ -539,13 +538,13 @@ static void test_loopback_net(void)
     close(tx);
 }
 
-/* UDP-IP-08: a broadcast datagram goes to EVERY socket that can take it,
+/* A broadcast datagram goes to EVERY socket that can take it,
  * not just the best match -- RFC 1122 3.3.6.  The demux picked a single
  * winner for everything, so of two listeners on a broadcast port only one
  * ever heard anything. */
 static void test_broadcast_fanout(void)
 {
-    printf("UDP-IP-08: a broadcast reaches every listener on the port\n");
+    printf("a broadcast reaches every listener on the port\n");
     struct sockaddr_in any, dst;
     char buf[16];
     int one = 1;
@@ -569,7 +568,7 @@ static void test_broadcast_fanout(void)
        "sendto failed");
     ok("the first listener got it", try_recv(r1, buf, sizeof(buf)) == 3, "missed");
     ok("the second listener got it", try_recv(r2, buf, sizeof(buf)) == 3, "missed");
-    /* A unicast datagram still goes to exactly one (UDP-01). */
+    /* A unicast datagram still goes to exactly one socket. */
     dst.sin_addr.s_addr = htonl(0x7F000001);
     sendto(tx, "one", 3, 0, (struct sockaddr *)&dst, sizeof(dst));
     int got = (try_recv(r1, buf, sizeof(buf)) == 3) + (try_recv(r2, buf, sizeof(buf)) == 3);
@@ -579,11 +578,11 @@ static void test_broadcast_fanout(void)
     close(tx);
 }
 
-/* UDP-IP-11: lo reports the MTU its ring can actually carry (1686 = the
+/* lo reports the MTU its ring can actually carry (1686 = the
  * 1700-byte frame limit minus the Ethernet header), not 16384. */
 static void test_lo_mtu(void)
 {
-    printf("UDP-IP-11: lo's MTU is what it can carry\n");
+    printf("lo's MTU is what it can carry\n");
     struct ifreq ifr;
     int fd = socket(AF_INET, SOCK_DGRAM, 0);
     memset(&ifr, 0, sizeof(ifr));
@@ -596,15 +595,15 @@ static void test_lo_mtu(void)
 }
 
 /*
- * UDP-API-01 (and TCP-API-18): bind() must not let one user take over
- * another's port.  Only the NEW socket's SO_REUSEADDR was consulted, never
+ * bind() must not let one user take over another's port (TCP shares the
+ * same bind() path).  Only the NEW socket's SO_REUSEADDR was consulted, never
  * the incumbent's or the owner's; there was no reserved-port check; and a
  * tie in the demux went to the newest socket -- so an unprivileged bind to
  * a root daemon's port captured its traffic.
  */
 static void test_port_ownership(void)
 {
-    printf("UDP-API-01: a bound port cannot be taken over\n");
+    printf("a bound port cannot be taken over\n");
     struct sockaddr_in a;
     int one = 1;
     int root = socket(AF_INET, SOCK_DGRAM, 0);
@@ -673,13 +672,13 @@ static void test_port_ownership(void)
     close(tx);
 }
 
-/* UDP-API-02: sendmsg() with more than one iovec on a UDP socket sends ONE
+/* sendmsg() with more than one iovec on a UDP socket sends ONE
  * datagram with the iovecs concatenated.  The gather buffer is kernel
  * memory, and the AF_INET route ran it through copyin(), so every such call
  * failed EFAULT. */
 static void test_sendmsg_gather(void)
 {
-    printf("UDP-API-02: multi-iovec sendmsg() on UDP\n");
+    printf("multi-iovec sendmsg() on UDP\n");
     struct sockaddr_in dst;
     char buf[32];
     int rx = bind_udp(31964);
@@ -704,12 +703,12 @@ static void test_sendmsg_gather(void)
     close(tx);
 }
 
-/* UDP-API-03: writev() on a connected datagram socket sends ONE datagram
+/* writev() on a connected datagram socket sends ONE datagram
  * with the iovecs concatenated, as write() of the concatenation would.  It
  * issued one write per iovec -- one datagram each. */
 static void test_writev_dgram(void)
 {
-    printf("UDP-API-03: writev() on UDP is one datagram\n");
+    printf("writev() on UDP is one datagram\n");
     struct sockaddr_in dst;
     char buf[32];
     int rx = bind_udp(31965);
@@ -735,11 +734,11 @@ static long elapsed_ms(const struct timespec *a)
     return (long)(b.tv_sec - a->tv_sec) * 1000 + (b.tv_nsec - a->tv_nsec) / 1000000;
 }
 
-/* UDP-API-04: SO_RCVTIMEO bounds a blocking receive.  It was accepted and
+/* SO_RCVTIMEO bounds a blocking receive.  It was accepted and
  * discarded, so recv() on a silent socket slept forever. */
 static void test_rcvtimeo(void)
 {
-    printf("UDP-API-04: SO_RCVTIMEO bounds a blocking receive\n");
+    printf("SO_RCVTIMEO bounds a blocking receive\n");
     struct timeval tv = { 0, 250000 }, got;
     socklen_t gl = sizeof(got);
     char buf[8];
@@ -782,12 +781,12 @@ static void test_rcvtimeo(void)
     close(l);
 }
 
-/* UDP-API-06: bind() to an address this host does not own must fail
+/* bind() to an address this host does not own must fail
  * EADDRNOTAVAIL.  Any address was accepted, leaving a socket that could
  * never receive anything, with no error. */
 static void test_bind_nonlocal(void)
 {
-    printf("UDP-API-06: bind() only to addresses we can receive on\n");
+    printf("bind() only to addresses we can receive on\n");
     struct sockaddr_in a;
     memset(&a, 0, sizeof(a));
     a.sin_family = AF_INET;
@@ -811,13 +810,13 @@ static void test_bind_nonlocal(void)
     close(s3);
 }
 
-/* UDP-API-07: connect() on an unbound UDP socket binds it -- an ephemeral
+/* connect() on an unbound UDP socket binds it -- an ephemeral
  * port and the source address toward the peer -- so it can receive the
  * peer's first datagram before sending anything, and getsockname() tells
  * the truth.  It stayed at port 0 until the first send. */
 static void test_connect_binds(void)
 {
-    printf("UDP-API-07: connect() assigns the local endpoint\n");
+    printf("connect() assigns the local endpoint\n");
     struct sockaddr_in peer, me;
     socklen_t ml = sizeof(me);
     char buf[8];
@@ -838,11 +837,11 @@ static void test_connect_binds(void)
     close(c);
 }
 
-/* UDP-API-08: after shutdown(SHUT_RD) a blocking recv() returns 0 (EOF),
+/* After shutdown(SHUT_RD) a blocking recv() returns 0 (EOF),
  * as read() did.  It blocked forever. */
 static void test_shut_rd(void)
 {
-    printf("UDP-API-08: recv() after shutdown(SHUT_RD) is EOF\n");
+    printf("recv() after shutdown(SHUT_RD) is EOF\n");
     struct sockaddr_in peer;
     char buf[8];
     int c = socket(AF_INET, SOCK_DGRAM, 0);
@@ -857,23 +856,23 @@ static void test_shut_rd(void)
     alarm(0);
     ok("recv() returns 0", n == 0, "did not return EOF");
     ok("read() returns 0", read(c, buf, sizeof(buf)) == 0, "did not return EOF");
-    /* UDP-API-10: that EOF carries no source address. */
+    /* That EOF carries no source address. */
     struct sockaddr_in from;
     socklen_t flen = sizeof(from);
     alarm(3);
     n = recvfrom(c, buf, sizeof(buf), 0, (struct sockaddr *)&from, &flen);
     alarm(0);
-    ok("UDP-API-10: recvfrom() at EOF reports no address (addrlen 0)",
+    ok("recvfrom() at EOF reports no address (addrlen 0)",
        n == 0 && flen == 0, "addrlen left at the bounce capacity");
     close(c);
 }
 
-/* UDP-API-09: recv() with a zero-length buffer on a datagram socket takes a
+/* recv() with a zero-length buffer on a datagram socket takes a
  * datagram (MSG_TRUNC reporting its length).  It returned 0 without taking
  * it, so a poll()-driven drain that receives zero bytes spun forever. */
 static void test_zero_len_recv(void)
 {
-    printf("UDP-API-09: a zero-length receive consumes the datagram\n");
+    printf("a zero-length receive consumes the datagram\n");
     struct sockaddr_in dst;
     char buf[16];
     int rx = bind_udp(31958);
@@ -911,12 +910,12 @@ static ssize_t raw_capture_udp(int raw, unsigned char *pkt, size_t cap,
     return 0;
 }
 
-/* UDP-API-12: IP_TTL, IP_TOS and IP_MULTICAST_TTL/LOOP take effect, and
+/* IP_TTL, IP_TOS and IP_MULTICAST_TTL/LOOP take effect, and
  * read back.  They were accepted and discarded -- TTL hardcoded 64, TOS 0 --
  * and getsockopt(IP_TTL) answered 0. */
 static void test_ip_txopts(void)
 {
-    printf("UDP-API-12: IP_TTL/IP_TOS/IP_MULTICAST_* take effect\n");
+    printf("IP_TTL/IP_TOS/IP_MULTICAST_* take effect\n");
     int v = 0;
     socklen_t vl = sizeof(v);
     int tx = socket(AF_INET, SOCK_DGRAM, 0);
@@ -982,7 +981,7 @@ static void test_ip_txopts(void)
     close(tx);
 }
 
-/* UDP-API-11: IP_PKTINFO reports where a datagram was addressed.  The
+/* IP_PKTINFO reports where a datagram was addressed.  The
  * destination was discarded and the option did nothing, so a wildcard-bound
  * server could not tell which address a request came to. */
 static int check_pktinfo(struct msghdr *mh, uint32_t want_addr, int want_if)
@@ -1000,7 +999,7 @@ static int check_pktinfo(struct msghdr *mh, uint32_t want_addr, int want_if)
 
 static void test_pktinfo(void)
 {
-    printf("UDP-API-11: IP_PKTINFO reports the destination\n");
+    printf("IP_PKTINFO reports the destination\n");
     struct sockaddr_in any, dst;
     struct ifreq ifr;
     int one = 1;
@@ -1057,11 +1056,11 @@ static void test_pktinfo(void)
     close(tx);
 }
 
-/* UDP-API-13 / UDP-I-04: options with nothing behind them fail
- * ENOPROTOOPT instead of reporting success. */
+/* Options with nothing behind them fail ENOPROTOOPT instead of reporting
+ * success. */
 static void test_unsupported_ipopts(void)
 {
-    printf("UDP-API-13: unimplemented IP options are refused\n");
+    printf("unimplemented IP options are refused\n");
     int s = socket(AF_INET, SOCK_DGRAM, 0);
     /* IP_OPTIONS is implemented: what is set is sent and reads back. */
     unsigned char opts[4] = { 1, 1, 1, 0 };           /* NOP NOP NOP EOL */
@@ -1082,12 +1081,12 @@ static void test_unsupported_ipopts(void)
     close(s);
 }
 
-/* UDP-API-14: getsockopt() checks the fd is a socket, and SO_RCVBUF on a
- * UDP socket reports its real capacity (UDP-RES-01: the byte-bounded queue,
- * 64 KiB by default) -- not the 32768 borrowed from AF_UNIX. */
+/* getsockopt() checks the fd is a socket, and SO_RCVBUF on a UDP socket
+ * reports its real capacity (the byte-bounded queue, 64 KiB by default) --
+ * not the 32768 borrowed from AF_UNIX. */
 static void test_getsockopt_checks(void)
 {
-    printf("UDP-API-14: getsockopt() fd checks and SO_RCVBUF\n");
+    printf("getsockopt() fd checks and SO_RCVBUF\n");
     int v = 0;
     socklen_t vl = sizeof(v);
     int f = open("/", O_RDONLY);
@@ -1107,11 +1106,11 @@ static void test_getsockopt_checks(void)
     close(u);
 }
 
-/* UDP-API-15: sending to (or connecting to) a broadcast address needs
+/* Sending to (or connecting to) a broadcast address needs
  * SO_BROADCAST, which is stored and reads back.  It was neither. */
 static void test_so_broadcast(void)
 {
-    printf("UDP-API-15: SO_BROADCAST is stored and enforced\n");
+    printf("SO_BROADCAST is stored and enforced\n");
     struct sockaddr_in b;
     int one = 1, v = 0;
     socklen_t vl = sizeof(v);
@@ -1135,12 +1134,12 @@ static void test_so_broadcast(void)
     close(s);
 }
 
-/* UDP-API-17: a bound raw socket sees only traffic to its address, and a
+/* A bound raw socket sees only traffic to its address, and a
  * connected one only traffic from its peer.  The raw demux matched on the
  * protocol alone. */
 static void test_raw_filter(void)
 {
-    printf("UDP-API-17: bound/connected raw sockets are filtered\n");
+    printf("bound/connected raw sockets are filtered\n");
     unsigned char pkt[256];
     struct sockaddr_in a;
     int raw = socket(AF_INET, SOCK_RAW, 17);
@@ -1183,11 +1182,11 @@ static void test_raw_filter(void)
 static volatile int sigpipes;
 static void on_sigpipe(int sig) { (void)sig; sigpipes++; }
 
-/* UDP-API-19: after shutdown(SHUT_WR) a UDP send fails EPIPE and raises
+/* After shutdown(SHUT_WR) a UDP send fails EPIPE and raises
  * SIGPIPE (not with MSG_NOSIGNAL).  It was a silent no-op. */
 static void test_shut_wr(void)
 {
-    printf("UDP-API-19: sends after shutdown(SHUT_WR) fail EPIPE\n");
+    printf("sends after shutdown(SHUT_WR) fail EPIPE\n");
     struct sockaddr_in peer;
     signal(SIGPIPE, on_sigpipe);
     sigpipes = 0;
@@ -1206,12 +1205,12 @@ static void test_shut_wr(void)
     close(c);
 }
 
-/* UDP-API-20: sendto() and write() on a raw socket share one limit -- the
+/* sendto() and write() on a raw socket share one limit -- the
  * largest payload behind the IPv4 header the stack synthesizes (1600 - 20).
  * sendto() applied the UDP datagram cap (1572) and write() the IP layer's. */
 static void test_raw_max(void)
 {
-    printf("UDP-API-20: one raw payload limit for sendto() and write()\n");
+    printf("one raw payload limit for sendto() and write()\n");
     static char big[1600];
     struct sockaddr_in d;
     memset(big, 0, sizeof(big));
@@ -1233,7 +1232,7 @@ static void test_raw_max(void)
     close(r2);
 }
 
-/* UDP-RES-01: the receive queue is bounded by bytes (SO_RCVBUF), not by
+/* The receive queue is bounded by bytes (SO_RCVBUF), not by
  * datagram count.  It held 32 datagrams whatever their size, so 32 tiny
  * ones filled it, and SO_RCVBUF was ignored. */
 static int drain_count(int fd)
@@ -1246,7 +1245,7 @@ static int drain_count(int fd)
 
 static void test_rcvbuf_bytes(void)
 {
-    printf("UDP-RES-01: the receive queue is bounded by bytes\n");
+    printf("the receive queue is bounded by bytes\n");
     static char big[1000];
     struct sockaddr_in dst;
     int tx = socket(AF_INET, SOCK_DGRAM, 0);
@@ -1313,12 +1312,12 @@ static long udpstat(int col)
     return x;
 }
 
-/* UDP-RES-03 / UDP-RES-06: drops are counted -- a full receive queue
+/* Drops are counted -- a full receive queue
  * (RcvbufErrors, column 4) and a bad checksum (InCsumErrors, column 6) --
  * as are NoPorts (1).  Every one of them used to vanish without a trace. */
 static void test_udp_counters(void)
 {
-    printf("UDP-RES-03/06: UDP drops are counted in /proc/udpstat\n");
+    printf("UDP drops are counted in /proc/udpstat\n");
     ok("/proc/udpstat is readable", udpstat(0) >= 0, "missing");
     struct sockaddr_in dst;
     int tx = socket(AF_INET, SOCK_DGRAM, 0);

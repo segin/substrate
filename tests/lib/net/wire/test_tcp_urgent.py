@@ -1,25 +1,24 @@
 #!/usr/bin/env python3
 """
-The TCP urgent mechanism (docs/ip-audit-2026-09-22.md, TCP-E).  Each case
-names the checklist item it guards.  Substrate uses the BSD pointer
-convention on both sides: the urgent pointer is the offset of the octet
-FOLLOWING the urgent data, so the urgent octet is SEG.SEQ + SEG.UP - 1 (see
-TCP-URG-06).
+The TCP urgent mechanism.  Substrate uses the BSD pointer convention on
+both sides, not RFC 1122 4.2.2.4's: the urgent pointer is the offset of the
+octet FOLLOWING the urgent data, so the urgent octet is
+SEG.SEQ + SEG.UP - 1.
 
-    recv-mark   TCP-URG-01: the peer sends "abcdef" with URG and SEG.UP 3.
-                The owner (F_SETOWN) gets SIGURG, the urgent octet 'c' is
-                taken out of the stream, the first read stops at the mark
-                ("ab", 2 octets), SIOCATMARK is then 1, and the next read
-                returns "def".
-    send-urg    TCP-URG-02: after write("ab"), send("X", MSG_OOB) puts 'X'
-                on the wire in a segment with URG set and a pointer whose
-                preceding octet is 'X'; the flag stays on retransmissions
+    recv-mark   the peer sends "abcdef" with URG and SEG.UP 3.  The owner
+                (F_SETOWN) gets SIGURG, the urgent octet 'c' is taken out
+                of the stream, the first read stops at the mark ("ab", 2
+                octets), SIOCATMARK is then 1, and the next read returns
+                "def".
+    send-urg    after write("ab"), send("X", MSG_OOB) puts 'X' on the wire
+                in a segment with URG set and a pointer whose preceding
+                octet is 'X'; the flag stays on retransmissions
                 until the peer acknowledges it.
-    recv-oob    TCP-URG-04: after "abcdef" with SEG.UP 3, recvmsg(MSG_OOB)
+    recv-oob    after "abcdef" with SEG.UP 3, recvmsg(MSG_OOB)
                 returns 'c' with MSG_OOB in msg_flags, the stream reads
                 "ab" then "def", and a second MSG_OOB read fails EINVAL
                 (nothing is pending) instead of consuming stream data.
-    sockatmark  TCP-URG-05: libc sockatmark() asks the kernel: 1 at the mark
+    sockatmark  libc sockatmark() asks the kernel: 1 at the mark
                 on the TCP socket, and -1 ENOTTY on the console, which is
                 not a socket.  It used to return 0 for everything.
 

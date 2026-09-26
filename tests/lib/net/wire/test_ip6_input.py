@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """
-UDP-IP-09 and UDP-IP-10 (docs/ip-audit-2026-09-22.md): what ip6_input()
-accepts, and how far into a packet it looks.  ICMPv6 echo is the probe --
-RFC 4443 4.2 says an echo request to a multicast group this node belongs to
-should be answered -- because AF_INET6 sockets cannot be opened yet
-(UDP-I-02), so no UDP socket can observe IPv6 delivery directly.
+What ip6_input() accepts, and how far into a packet it looks.  ICMPv6
+echo is the probe -- RFC 4443 4.2 says an echo request to a multicast group
+this node belongs to should be answered -- because AF_INET6 sockets cannot
+be opened yet, so no UDP socket can observe IPv6 delivery directly.
 
     all-nodes     an echo request to ff02::1 is answered: every node is a
                   member of the all-nodes group.

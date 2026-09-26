@@ -13,8 +13,8 @@ nor loopback will produce on demand.
 - `wireguest.c` is the guest side, run as init: it connects or listens and
   then runs a scripted list of socket actions (`readeof`, `read:N`,
   `write:TEXT`, `close`, `shutwr`, `sleep:N`), logging each as `guest: ...`.
-- `test_*.py` are the scenarios, one file per checklist item or cluster in
-  `docs/ip-audit-2026-09-22.md`.
+- `test_*.py` are the scenarios, one file per behaviour or cluster of
+  related behaviours; each file's docstring lists its cases.
 
 Build and run from the repo root:
 

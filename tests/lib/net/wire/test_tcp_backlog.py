@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 """
-TCP-MEM-11 (docs/ip-audit-2026-09-22.md): listen() on a listening socket
-that shrinks the backlog must not orphan the children queued beyond the new
-cap.  tcp_listen() just truncated accept_count, so those connections --
-fully established from the peer's point of view -- were never accepted,
-never reset and never reaped; the peer believed them up forever.  (It also
-did all of this without tcp_lock, racing the RX path that appends to the
-same queue.)
+listen() on a listening socket that shrinks the backlog must not orphan the
+children queued beyond the new cap.  tcp_listen() just truncated
+accept_count, so those connections -- fully established from the peer's
+point of view -- were never accepted, never reset and never reaped; the
+peer believed them up forever.  (It also did all of this without tcp_lock,
+racing the RX path that appends to the same queue.)
 
     shrink  the guest listens with backlog 4; three peers complete the
             handshake; the guest calls listen() again with backlog 1.  The

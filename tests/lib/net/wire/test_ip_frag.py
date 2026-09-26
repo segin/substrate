@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-UDP-I-01 (docs/ip-audit-2026-09-22.md): IPv4 reassembly, RFC 791 3.2 /
-RFC 1122 3.3.2.  ip4_input() dropped every fragment, so the usable UDP
-Length range was 8..1472 instead of RFC 768's 8..65507.
+IPv4 reassembly, RFC 791 3.2 / RFC 1122 3.3.2.  ip4_input() dropped every
+fragment, so the usable UDP Length range was 8..1472 instead of RFC 768's
+8..65507.
 
     in-order      a 3000-octet datagram in three fragments arrives whole
                   (recvfrom), with the right length, source port and bytes.

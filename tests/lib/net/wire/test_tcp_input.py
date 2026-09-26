@@ -1,45 +1,42 @@
 #!/usr/bin/env python3
 """
-RFC 793 3.9 SEGMENT ARRIVES rules for synchronized states
-(docs/ip-audit-2026-09-22.md, TCP-B).  Each case names the checklist item
-it guards.
+RFC 793 3.9 SEGMENT ARRIVES rules for synchronized states.
 
-    data-after-fin  TCP-SM-03: text the peer sends after its own FIN is not
-                    delivered, and RCV.NXT does not move (seventh step:
-                    CLOSE-WAIT ignores segment text).
-    syn-rcvd-rst    TCP-SM-04: during a passive open, a RST one octet off
-                    RCV.NXT draws a challenge ACK and one far outside the
-                    window is dropped; neither kills the embryonic
-                    connection, which the peer's ACK then completes.
-    syn-sync        TCP-SM-06: an in-window SYN on an ESTABLISHED
-                    connection draws a challenge ACK (RFC 5961 4) and the
-                    connection survives it.
-    listen-ack      TCP-SM-07: a bare ACK, and a SYN|ACK, sent to a
-                    listening port each draw <SEQ=SEG.ACK><CTL=RST>.
-    syn-rcvd-third  TCP-SM-09: in SYN-RECEIVED an ACK outside
-                    (SND.UNA, SND.NXT] draws <SEQ=SEG.ACK><CTL=RST>; a third
-                    segment with an unacceptable sequence number is answered
-                    with an ACK and does not complete the handshake; and the
-                    text and FIN riding on the real third segment are
-                    delivered.
-    syn-sent-ack    TCP-SM-10: in SYN-SENT a bare ACK outside
-                    (ISS, SND.NXT] draws <SEQ=SEG.ACK><CTL=RST>, and the
-                    connect then still completes.
-    simultaneous    TCP-SM-11: simultaneous open (RFC 793 figure 8).  The
-                    peer answers the guest's SYN with a SYN of its own; the
-                    guest replies SYN|ACK from its ISS, and the peer's
-                    SYN|ACK then completes the connect, which carries data.
-    no-ack          TCP-SM-12: text and FIN on a segment without the ACK bit
-                    are dropped (3.9 fifth check); the same text with ACK
-                    is then delivered.
-    bad-ack-data    TCP-SM-13: text on a segment whose ACK acknowledges
-                    something not yet sent is dropped with the segment (the
-                    ACK field is checked before the text is taken).
-    dup-after-close TCP-SM-15: after close(), a retransmission of data the
-                    application already read is ACKed, not answered with a
-                    RST, and the close handshake finishes.
-    fin-wakes       TCP-SM-14: after shutdown(SHUT_WR) (FIN-WAIT-2), a
-                    poll() for POLLIN returns on the peer's FIN.  (The
+    data-after-fin  text the peer sends after its own FIN is not delivered,
+                    and RCV.NXT does not move (seventh step: CLOSE-WAIT
+                    ignores segment text).
+    syn-rcvd-rst    during a passive open, a RST one octet off RCV.NXT
+                    draws a challenge ACK and one far outside the window is
+                    dropped; neither kills the embryonic connection, which
+                    the peer's ACK then completes.
+    syn-sync        an in-window SYN on an ESTABLISHED connection draws a
+                    challenge ACK (RFC 5961 4) and the connection survives
+                    it.
+    listen-ack      a bare ACK, and a SYN|ACK, sent to a listening port each
+                    draw <SEQ=SEG.ACK><CTL=RST>.
+    syn-rcvd-third  in SYN-RECEIVED an ACK outside (SND.UNA, SND.NXT] draws
+                    <SEQ=SEG.ACK><CTL=RST>; a third segment with an
+                    unacceptable sequence number is answered with an ACK
+                    and does not complete the handshake; and the text and
+                    FIN riding on the real third segment are delivered.
+    syn-sent-ack    in SYN-SENT a bare ACK outside (ISS, SND.NXT] draws
+                    <SEQ=SEG.ACK><CTL=RST>, and the connect then still
+                    completes.
+    simultaneous    simultaneous open (RFC 793 figure 8).  The peer answers
+                    the guest's SYN with a SYN of its own; the guest replies
+                    SYN|ACK from its ISS, and the peer's SYN|ACK then
+                    completes the connect, which carries data.
+    no-ack          text and FIN on a segment without the ACK bit are
+                    dropped (3.9 fifth check); the same text with ACK is
+                    then delivered.
+    bad-ack-data    text on a segment whose ACK acknowledges something not
+                    yet sent is dropped with the segment (the ACK field is
+                    checked before the text is taken).
+    dup-after-close after close(), a retransmission of data the application
+                    already read is ACKed, not answered with a RST, and the
+                    close handshake finishes.
+    fin-wakes       after shutdown(SHUT_WR) (FIN-WAIT-2), a poll() for
+                    POLLIN returns on the peer's FIN.  (The
                     missing wakeup itself only cost latency up to kern_poll's
                     ~50 ms backstop, below what this harness can time; the
                     case guards the outcome.)

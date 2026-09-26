@@ -1,26 +1,24 @@
 #!/usr/bin/env python3
 """
-TCP options and segment size (docs/ip-audit-2026-09-22.md, TCP-D).  Each
-case names the checklist item it guards.
+TCP options and segment size.
 
-    peer-mss    TCP-HDR-02: an MSS option of 536 on the peer's SYN|ACK limits
-                every data segment the guest sends to 536 octets.
-    bad-options TCP-HDR-02: SYNs carrying a zero-length option, an option
-                longer than the header, and an option list running exactly to
-                the header's end are each answered with a SYN|ACK -- the
-                option walk neither hangs nor over-reads.
-    own-mss     TCP-HDR-03: the guest's SYN (active open) and SYN|ACK
-                (passive open) each carry an MSS option of 1460, in a
-                24-octet header.
-    mtu-clamp   TCP-HDR-04: on an interface with a 1000-octet MTU the guest
-                advertises MSS 960 and, although the peer offers 1460, sends
-                no segment over 960 -- they used to fail EMSGSIZE in
+    peer-mss    an MSS option of 536 on the peer's SYN|ACK limits every
+                data segment the guest sends to 536 octets.
+    bad-options SYNs carrying a zero-length option, an option longer than
+                the header, and an option list running exactly to the
+                header's end are each answered with a SYN|ACK -- the option
+                walk neither hangs nor over-reads.
+    own-mss     the guest's SYN (active open) and SYN|ACK (passive open)
+                each carry an MSS option of 1460, in a 24-octet header.
+    mtu-clamp   on an interface with a 1000-octet MTU the guest advertises
+                MSS 960 and, although the peer offers 1460, sends no
+                segment over 960 -- they used to fail EMSGSIZE in
                 ip4_output() on every attempt and the transfer stalled.
-    isn         TCP-HDR-05: RFC 6528 ISNs.  Two connections on the same
-                4-tuple, some seconds apart, get ISNs that advance by the
-                ~4 us clock (250000/s), not by a random amount.
-    isn-boots   TCP-HDR-05: the first ISN differs between two boots.  The old
-                code misread random_get_bytes()'s return value and drew every
+    isn         RFC 6528 ISNs.  Two connections on the same 4-tuple, some
+                seconds apart, get ISNs that advance by the ~4 us clock
+                (250000/s), not by a random amount.
+    isn-boots   the first ISN differs between two boots.  The old code
+                misread random_get_bytes()'s return value and drew every
                 ISS from a fixed-seed LCG: identical on every boot.
 
 Run from the repo root after building sys/ and wireguest:

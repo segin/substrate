@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-UDP-IP-07 (docs/ip-audit-2026-09-22.md): an interface with no IPv4 address
-must still be able to send the limited broadcast, from 0.0.0.0 -- which is
-exactly what a DHCP client does before it has an address (RFC 2131 4.1).
-route_for_v4() skipped every interface with ip4_addr == 0, so nothing could
-be sent at all and DHCP could never bootstrap.
+An interface with no IPv4 address must still be able to send the limited
+broadcast, from 0.0.0.0 -- which is exactly what a DHCP client does before
+it has an address (RFC 2131 4.1).  route_for_v4() skipped every interface
+with ip4_addr == 0, so nothing could be sent at all and DHCP could never
+bootstrap.
 
     dhcp-discover  eth0's address is cleared; a datagram to
                    255.255.255.255:67 leaves as an Ethernet broadcast, from

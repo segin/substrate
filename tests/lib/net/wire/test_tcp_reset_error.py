@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """
-TCP-SM-08 (docs/ip-audit-2026-09-22.md): a connection killed by a RST or by
-the retransmission budget must be reported to read() as an error, not as a
-clean end-of-file.
+A connection killed by a RST or by the retransmission budget must be
+reported to read() as an error, not as a clean end-of-file.
 
 tcp_kill_pcb() records ECONNRESET / ETIMEDOUT in so_error and moves the PCB
 to CLOSED, but tcp_recv_nb() treated CLOSED like any post-FIN state and
