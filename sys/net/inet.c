@@ -708,7 +708,10 @@ spoil:
     spinlock_release_irq(&g_reasm_lock, f);
 }
 
-void ip4_input(netdev_t *dev, const uint8_t *pkt, size_t len) {
+/* link_group: the frame carrying the datagram was addressed to a link-layer
+ * broadcast or multicast address rather than to this interface. */
+static void ip4_input_link(netdev_t *dev, const uint8_t *pkt, size_t len,
+                           int link_group) {
     if (!dev || len < sizeof(struct iphdr)) return;
     const struct iphdr *ih = (const struct iphdr *)pkt;
     if (IPH_V(ih) != 4) return;
@@ -779,6 +782,13 @@ void ip4_input(netdev_t *dev, const uint8_t *pkt, size_t len) {
     if (!for_me && !for_bcast && !for_lo) {
         return;
     }
+    /* RFC 1122 3.3.6: a datagram that arrived in a link-layer broadcast or
+     * multicast frame is discarded unless its IP destination is itself a
+     * broadcast or multicast address.  Taking it as unicast would let one
+     * frame to ff:ff:ff:ff:ff:ff reach every host's services at once and
+     * draw a reply (TCP RST, ICMP error) from each. */
+    if (link_group && !for_bcast)
+        return;
 
     /* UDP-I-01: a fragment (MF set or a nonzero offset) goes to
      * reassembly, which delivers the whole datagram when it completes. */
@@ -787,6 +797,10 @@ void ip4_input(netdev_t *dev, const uint8_t *pkt, size_t len) {
         return;
     }
     ip4_deliver(dev, pkt, tot, hlen, for_bcast);
+}
+
+void ip4_input(netdev_t *dev, const uint8_t *pkt, size_t len) {
+    ip4_input_link(dev, pkt, len, 0);
 }
 
 /* Hand one whole datagram -- as received, or reassembled -- to its
@@ -836,12 +850,23 @@ void inet_eth_input(netdev_t *dev, const uint8_t *frame, size_t len) {
     uint16_t et = __builtin_bswap16(eh->ethertype);
     const uint8_t *l3 = frame + ETH_HLEN;
     size_t l3_len = len - ETH_HLEN;
+    /* A frame to another station's unicast MAC is not ours, even when the
+     * NIC hands it up (qemu's virtio-net, or any NIC left promiscuous).
+     * Group addresses -- the I/G bit, which covers broadcast, 01:00:5e IPv4
+     * multicast and 33:33 IPv6 multicast -- are taken, and remembered so
+     * IPv4 can check the datagram's destination against them. */
+    int link_group = 0;
+    if (!(dev->flags & NETDEV_IFF_LOOPBACK)) {
+        link_group = eh->dst[0] & 1;
+        if (!link_group && memcmp(eh->dst, dev->hwaddr, 6) != 0)
+            return;
+    }
     switch (et) {
         case ETHERTYPE_ARP:
             arp_input(dev, l3, l3_len);
             break;
         case ETHERTYPE_IP:
-            ip4_input(dev, l3, l3_len);
+            ip4_input_link(dev, l3, l3_len, link_group);
             break;
         case ETHERTYPE_IPV6:
             ip6_input(dev, l3, l3_len);
