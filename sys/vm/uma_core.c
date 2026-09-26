@@ -59,7 +59,7 @@ static spinlock_t uma_bucket_depot_lock;
  * global uma_page_hash.  The per-CPU fast path (uma_zalloc/zfree) uses only
  * intr_disable, which gives no cross-CPU exclusion and drops before the slow
  * path, so two allocators of one zone could interleave the slab-list splices
- * and hand the same item to two callers (kernel-wide heap corruption, VM-01).
+ * and hand the same item to two callers (kernel-wide heap corruption).
  * IRQ-safe because kfree() runs from IRQ context.
  *
  * It must be RECURSIVE: uma_slab_alloc() calls kzalloc() for an off-page slab
@@ -309,7 +309,7 @@ static struct uma_bucket *uma_bucket_alloc(void) {
         return b;
     }
 
-    /* The static-pool carve MUST stay under the depot lock too (VM-10):
+    /* The static-pool carve MUST stay under the depot lock too:
      * reading and bumping uma_bucket_idx outside it let two CPUs read the
      * same index and hand the same bucket struct to both, so a single
      * bucket ends up installed in two per-CPU caches. */
@@ -885,7 +885,7 @@ static void *uma_slab_alloc_item(uma_zone_t *zone, uma_slab_t *slab) {
     }
 
     uint32_t idx = slab->us_firstfree;
-    /* Bounds check index before use (finding #23) */
+    /* Bounds check index before use */
     if (idx >= zone->uz_ipers) return NULL;
     void *obj = (void *)((uintptr_t)slab->us_data + slab->us_offset +
                          idx * zone->uz_rsize);
@@ -916,7 +916,7 @@ static void uma_slab_free_item(uma_zone_t *zone, uma_slab_t *slab, void *item) {
     uint32_t idx = ((uintptr_t)item - ((uintptr_t)slab->us_data + slab->us_offset)) /
                    zone->uz_rsize;
     
-    /* Bounds check index before use (finding #23) */
+    /* Bounds check index before use */
     if (idx >= zone->uz_ipers) return;
     
     /* Add to free list */
@@ -1414,7 +1414,7 @@ void uma_zfree(uma_zone_t *zone, void *item) {
     /* Slow path: free to slab */
     uma_zfree_slab(zone, item);
     zone->uz_frees++;
-    /* Guard against underflow (VM-14): a stray/duplicate free must not wrap
+    /* Guard against underflow: a stray/duplicate free must not wrap
      * uz_count to ~4 billion.  Matches the >0 guard on the fast path above. */
     if (zone->uz_count > 0) {
         zone->uz_count--;
@@ -1429,7 +1429,7 @@ void uma_reclaim(void) {
         if (zone->uz_flags & UMA_ZONE_NOFREE) continue;
 
         /*
-         * Drain ONLY this CPU's per-CPU buckets (VM-04).  The old loop
+         * Drain ONLY this CPU's per-CPU buckets.  The old loop
          * reached into every CPU's live per-CPU cache, which is protected
          * solely by the owning CPU's intr_disable window (the lockless
          * uma_zalloc/uma_zfree fast path) — there is no cross-CPU lock.

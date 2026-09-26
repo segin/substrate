@@ -14,7 +14,7 @@
 
 /*
  * Serialises the object-resolution + page-fill + COW + pmap_enter region of
- * vm_fault (VM-02).  vm_fault runs holding only the map READ lock, so several
+ * vm_fault.  vm_fault runs holding only the map READ lock, so several
  * threads faulting the same vm_object proceed concurrently and race the
  * object's page-list mutation: one faulter's vm_object_add_page() stale
  * eviction frees a frame while another is still pmap_enter'ing it → silent
@@ -194,7 +194,7 @@ int vm_fault(vm_map_t *map, uintptr_t va, uint8_t prot) {
      * resource shortage, not a programmer error.  Set only at the
      * exact failure site; the trailing `goto out` uses it. */
     int oom = 0;
-    /* Set once the fault-object lock (VM-02) is held so the single `out`
+    /* Set once the fault-object lock is held so the single `out`
      * epilogue releases it exactly when it was taken. */
     int fault_locked = 0;
 
@@ -264,7 +264,7 @@ int vm_fault(vm_map_t *map, uintptr_t va, uint8_t prot) {
         goto out;
     }
 
-    /* Serialize object mutation from here through pmap_enter (VM-02).
+    /* Serialize object mutation from here through pmap_enter.
      * Acquired under the map read lock; released at `out` before the map
      * read lock is dropped. */
     vm_fault_object_lock_acquire(va, prot, vf_pc);
@@ -426,7 +426,7 @@ int vm_fault(vm_map_t *map, uintptr_t va, uint8_t prot) {
             if (count > 1 && pages[1]) {
                 pages[1]->flags |= PG_VALID;
                 /* The prefaulted read-ahead page is fully populated and this
-                 * fault is done filling it — clear PG_BUSY (VM-08).  Left set,
+                 * fault is done filling it — clear PG_BUSY.  Left set,
                  * it is permanently unreclaimable (vm_page_try_to_free skips
                  * PG_BUSY pages). */
                 pages[1]->flags &= ~PG_BUSY;
@@ -460,14 +460,14 @@ int vm_fault(vm_map_t *map, uintptr_t va, uint8_t prot) {
         new_m->flags |= PG_VALID | PG_DIRTY;
 
         /* The COW source is fully copied and this fault is done filling it —
-         * clear PG_BUSY (VM-08) before vm_object_add_page(), which in the
+         * clear PG_BUSY before vm_object_add_page(), which in the
          * in-place case (cow_src lives in first_obj at this pindex) FREES
          * cow_src: touching it afterward would be a use-after-free. */
         cow_src->flags &= ~PG_BUSY;
 
         vm_object_add_page(first_obj, new_m);
 
-        /* VM-09: when the source lives one level down in an exclusively-owned
+        /* When the source lives one level down in an exclusively-owned
          * anonymous shadow (obj != first_obj, obj->ref_count == 1), the copy
          * we just installed in first_obj now MASKS cow_src — no fault can
          * ever reach it again, yet it lingers in the shadow's page list until

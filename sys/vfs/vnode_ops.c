@@ -337,7 +337,7 @@ vop_open(struct vnode *vp, int mode, struct ucred *cred)
     }
 
     /*
-     * [VNODE-20] Take the open reference through vref(), not by touching
+     * Take the open reference through vref(), not by touching
      * v_usecount directly.  A raw increment leaves an OPEN vnode sitting on
      * the LRU freelist -- vref() is what unlinks it -- so vnode_recycle()
      * could clean a vnode that a process had open.
@@ -390,7 +390,7 @@ vop_close(struct vnode *vp, int fflag, struct ucred *cred)
         error = 0;
 
     /*
-     * [VNODE-20] Drop the open reference through vrele().  Decrementing
+     * Drop the open reference through vrele().  Decrementing
      * v_usecount by hand skipped the 1->0 transition entirely, so
      * VOP_INACTIVE never fired on last close (no truncate-on-last-close, and
      * the vnode never reached the freelist to be reclaimed).

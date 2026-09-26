@@ -103,7 +103,7 @@ namei(struct nameidata *ndp)
      */
     for (;;) {
         if (*ndp->ni_dirp == '\0') {
-            /* [VNODE-21] Lookup of "/" (or a path that is all slashes)
+            /* Lookup of "/" (or a path that is all slashes)
              * returned here without freeing cn_pnbuf. */
             ndp->ni_vp = dp;
             if (namei_zone) uma_zfree(namei_zone, cnp->cn_pnbuf);
@@ -118,7 +118,7 @@ namei(struct nameidata *ndp)
         
         cnp->cn_namelen = p - ndp->ni_dirp;
         if (cnp->cn_namelen >= sizeof(component)) {
-            /* [VNODE-21] ...and on an over-long component. */
+            /* ...and on an over-long component. */
             vrele(dp);
             if (namei_zone) uma_zfree(namei_zone, cnp->cn_pnbuf);
             else kfree(cnp->cn_pnbuf, 1024);
@@ -147,7 +147,7 @@ namei(struct nameidata *ndp)
          */
         if (cnp->cn_namelen == 2 && component[0] == '.' && component[1] == '.') {
             for (;;) {
-                /* [VNODE-22] VROOT without a v_mount faulted here.  The
+                /* VROOT without a v_mount faulted here.  The
                  * fs_node_t bridge publishes vnodes with no struct mount at
                  * all, so this is now reachable rather than theoretical. */
                 if ((dp->v_flag & VROOT) && dp->v_mount != NULL) {
@@ -171,7 +171,7 @@ namei(struct nameidata *ndp)
             /* Cache miss - perform full lookup */
             error = VOP_LOOKUP(dp, &ndp->ni_vp, cnp);
             if (error) {
-                /* [VNODE-21] This is the ENOENT path -- i.e. EVERY failed
+                /* This is the ENOENT path -- i.e. EVERY failed
                  * lookup -- and it leaked the 1024-byte cn_pnbuf every
                  * time. */
                 vrele(dp);
@@ -192,7 +192,7 @@ namei(struct nameidata *ndp)
             
             error = VFS_ROOT(mp, &tvp);
             if (error) {
-                /* [VNODE-21] Same leak on the VFS_ROOT failure path. */
+                /* Same leak on the VFS_ROOT failure path. */
                 vrele(ndp->ni_vp);
                 vrele(dp);
                 if (namei_zone) uma_zfree(namei_zone, cnp->cn_pnbuf);
@@ -311,7 +311,7 @@ namei(struct nameidata *ndp)
 
         /* Terminal check: must be a directory to continue */
         if (dp->v_type != VDIR) {
-            /* [VNODE-21] ...and when a mid-path component is not a
+            /* ...and when a mid-path component is not a
              * directory, which is a perfectly ordinary lookup failure. */
             vrele(dp);
             if (namei_zone) uma_zfree(namei_zone, cnp->cn_pnbuf);

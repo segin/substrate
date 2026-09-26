@@ -92,7 +92,7 @@ static fs_node_t *vfs_mount_root_parent(fs_node_t *node) {
     char ppath[128];
     ppath[0] = '\0';
     /* Walk and snapshot the matched mount's path under vfs_mount_lock so a
-     * concurrent unmount can't unlink/free it mid-traversal (A28). */
+     * concurrent unmount can't unlink/free it mid-traversal. */
     spinlock_acquire(&vfs_mount_lock);
     TAILQ_FOREACH(mnt, &mountlist, mnt_list) {
         if (mnt->mnt_covered_ino != 0 && mnt->mnt_node_root &&
@@ -379,7 +379,7 @@ int vfs_mount_legacy(const char *device, const char *path, const char *type, uin
     fs_node_t *mountpoint = NULL;
     if (strcmp(path, "/") == 0) {
         /*
-         * [VFS-10] Replacing an already-mounted root silently strands
+         * Replacing an already-mounted root silently strands
          * everything that still points into the old tree: every process's
          * cwd_node and root_node, and every open fd.  Those nodes are not
          * re-resolved, so they keep referring to a filesystem nothing can
@@ -423,7 +423,7 @@ int vfs_mount_legacy(const char *device, const char *path, const char *type, uin
         }
         
         /*
-         * [VFS-09] Refuse to mount over an existing mount.
+         * Refuse to mount over an existing mount.
          *
          * This used to overwrite mountpoint->ptr unconditionally.  There is
          * no mount stacking here -- a single ->ptr per node -- so the first
@@ -516,7 +516,7 @@ int vfs_mount_legacy(const char *device, const char *path, const char *type, uin
 }
 
 /*
- * [VFS-28] Backends signal failure by returning a negated errno cast to
+ * Backends signal failure by returning a negated errno cast to
  * size_t -- (size_t)-EIO is 0xFFFFFFFA.  read_fs/write_fs returned that
  * verbatim as an unsigned count, so an I/O error arrived at the caller as a
  * FOUR-BILLION-BYTE SUCCESSFUL TRANSFER.  Callers that compared against an
@@ -540,7 +540,7 @@ ssize_t read_fs(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
     if (!node) return -EINVAL;
 
     /*
-     * [VFS-28] A node with no read method is not an empty file.  Returning
+     * A node with no read method is not an empty file.  Returning
      * 0 made "this object cannot be read" indistinguishable from a clean
      * EOF, so callers looping until 0 silently treated a directory or a
      * write-only device as an empty one.
@@ -549,7 +549,7 @@ ssize_t read_fs(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
 
     result = node->read(node, offset, size, buffer);
     if (vfs_is_err_value(result)) {
-        /* [VFS-28] Do NOT stamp atime for a read that failed -- it used to
+        /* Do NOT stamp atime for a read that failed -- it used to
          * be updated unconditionally, before the result was even looked at,
          * so a failing read still advanced the access time. */
         return (ssize_t)result;
@@ -649,7 +649,7 @@ static fs_node_t *finddir_fs_internal(fs_node_t *node, char *name, int depth, in
 /*
  * Check if a filesystem is busy.
  *
- * [VFS-26] Two problems, both fixed here:
+ * Two problems, both fixed here:
  *
  *  1. The walk ran with NO lock at all.  proc_first()/proc_next() are safe
  *     against concurrent INSERTION (that happens at the head), but a process
@@ -750,7 +750,7 @@ fs_node_t *finddir_fs(fs_node_t *node, char *name) {
 /*
  * Maximum symlink recursion depth.
  *
- * [VFS-06] This was 4 -- below the POSIX minimum of 8 -- so a legal
+ * This was 4 -- below the POSIX minimum of 8 -- so a legal
  * five-deep chain failed outright, which is routine in /usr/lib and the
  * CDE/TDE trees.  The reason was stack, not policy: vfs_lookup's local
  * 512-byte ppath buffer dominated its frame (~800 bytes), and each
@@ -793,7 +793,7 @@ static fs_node_t *finddir_fs_internal(fs_node_t *node, char *name, int depth, in
 
             // Check recursion depth limit
             if (depth >= MAX_SYMLINK_DEPTH) {
-                /* [VFS-06] Record WHY this failed.  Every failure here is
+                /* Record WHY this failed.  Every failure here is
                  * reported as NULL and mapped to ENOENT by the callers, so a
                  * symlink loop was indistinguishable from a missing file.
                  * The flag lets the syscall layer answer ELOOP. */
@@ -828,7 +828,7 @@ static fs_node_t *finddir_fs_internal(fs_node_t *node, char *name, int depth, in
                 fs_node_t *target;
                 if (current_thread &&
                     current_thread->vfs_symlink_depth >= MAX_SYMLINK_DEPTH) {
-                    current_thread->vfs_symlink_eloop = 1;   /* [VFS-06] */
+                    current_thread->vfs_symlink_eloop = 1;
                     return NULL;
                 }
                 if (current_thread) current_thread->vfs_symlink_depth++;
@@ -843,7 +843,7 @@ static fs_node_t *finddir_fs_internal(fs_node_t *node, char *name, int depth, in
                     return target;
                 }
                 /*
-                 * [VFS-05] A symlink whose target does not resolve is a
+                 * A symlink whose target does not resolve is a
                  * BROKEN symlink, and a follow_symlinks lookup of one must
                  * fail.
                  *
@@ -890,7 +890,7 @@ fs_node_t *vfs_lookup(fs_node_t *root, const char *path) {
         const char *pname = perso_name(current_process->perso_id);
         if (pname) {
             /*
-             * [VFS-06 prerequisite] This 512-byte buffer used to live on the
+             * This 512-byte buffer used to live on the
              * stack and dominated vfs_lookup's frame (~800 bytes).  Since
              * vfs_lookup recurses -- through this branch, through the
              * symlink resolution in finddir_fs_internal, and through the
@@ -950,7 +950,7 @@ perso_done:
         component[i] = '\0';
 
         /*
-         * [VFS-27] The copy loop stops at 255 with *p still in the MIDDLE of
+         * The copy loop stops at 255 with *p still in the MIDDLE of
          * the component, so the next iteration used to carry on from there
          * and treat the remainder as a fresh component: a 300-character
          * name silently became a lookup of its first 255 characters followed
@@ -1093,7 +1093,7 @@ fs_node_t *vfs_lookup_lstat(fs_node_t *root, const char *path) {
         component[i] = '\0';
 
         /*
-         * [VFS-27] The copy loop stops at 255 with *p still in the MIDDLE of
+         * The copy loop stops at 255 with *p still in the MIDDLE of
          * the component, so the next iteration used to carry on from there
          * and treat the remainder as a fresh component: a 300-character
          * name silently became a lookup of its first 255 characters followed
@@ -1354,7 +1354,7 @@ int rename_fs(fs_node_t *old_parent, const char *old_name, fs_node_t *new_parent
  */
 void vfs_sync_all(void) {
     /*
-     * SELFREV-RG02/RC005: syncfs sleeps (it writes metadata), so the
+     * syncfs sleeps (it writes metadata), so the
      * walk cannot hold vfs_mount_lock across the call — that lock is a
      * spinlock and a concurrent umount would TAILQ_REMOVE and kfree the
      * record we are standing on.  Snapshot the root nodes under the
@@ -1824,7 +1824,7 @@ int vfs_unmount_legacy_flags(const char *path, int flags) {
     if (!mountpoint) return -ENOENT;
     
     /*
-     * [VFS-04] Read the mount state under the lock.
+     * Read the mount state under the lock.
      *
      * The FS_MOUNTPOINT test and the mountpoint->ptr read used to happen
      * out here in the open while the detach below happened under the lock.
@@ -1874,7 +1874,7 @@ int vfs_unmount_legacy_flags(const char *path, int flags) {
     }
 
     /*
-     * [VFS-04] CLAIM the mount: clear FS_MOUNTPOINT, drop ptr and unlink the
+     * CLAIM the mount: clear FS_MOUNTPOINT, drop ptr and unlink the
      * mount record, all in one critical section.
      *
      * Clearing the flag is the gate.  Exactly one caller can observe it set
@@ -1885,8 +1885,7 @@ int vfs_unmount_legacy_flags(const char *path, int flags) {
      * Locked also so a concurrent vfs_cross_mountpoint() sees either a fully
      * attached mount or a fully detached node -- never FS_MOUNTPOINT set with
      * ptr already NULL, which would race-deref NULL.  The TAILQ unlink joins
-     * the same section so a path-lookup traversal never walks it mid-splice
-     * (A28).
+     * the same section so a path-lookup traversal never walks it mid-splice.
      */
     spinlock_acquire(&vfs_mount_lock);
     if (!(mountpoint->flags & FS_MOUNTPOINT)) {
@@ -1952,7 +1951,7 @@ void vfs_unmount_all(void) {
     struct mount *mp;
 
     /*
-     * [VFS-31] Both bounds here silently discard work on shutdown: a 33rd
+     * Both bounds here silently discard work on shutdown: a 33rd
      * mount was dropped from the list entirely and never unmounted (its
      * dirty buffers never flushed), and a mount path longer than 127 bytes
      * was truncated -- which is worse than dropping it, because the

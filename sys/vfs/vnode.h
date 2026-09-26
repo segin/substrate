@@ -127,7 +127,7 @@ struct vnode {
      * when it is not hashed.  Removal must not recompute the bucket from
      * (v_mount, v_ino): vclean() nulls v_mount, so a recomputed key would
      * miss -- that is exactly how a recycled vnode used to stay linked and
-     * turn its bucket into a cycle [VNODE-16].  It also lets vnodes with no
+     * turn its bucket into a cycle.  It also lets vnodes with no
      * mount at all (the fs_node_t bridge) be cached. */
     struct vnode    *v_hash_next;
     int32_t         v_hash_bucket;

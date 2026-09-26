@@ -27,8 +27,8 @@ static vm_page_t *wired_queue = NULL;      // Pages pinned in memory (kernel, DM
 static vm_page_t *laundry_queue = NULL;    // Dirty pages pending writeback
 
 /*
- * Serialises the four global page queues and the enqueue()/dequeue() splices
- * (VM-03).  The queues are mutated concurrently by the fault path
+ * Serialises the four global page queues and the enqueue()/dequeue() splices.
+ * The queues are mutated concurrently by the fault path
  * (vm_page_activate), the exit path (vm_page_free), wiring, and the
  * pagedaemon scanners; without this an interleaved pair of splices corrupts
  * the next/prev linkage.
@@ -43,7 +43,7 @@ static vm_page_t *laundry_queue = NULL;    // Dirty pages pending writeback
 static spinlock_t vm_page_queue_lock = SPINLOCK_INIT("vm_page_queue");
 
 /*
- * Protects the static pv_entry free list and its one-shot bootstrap (VM-03).
+ * Protects the static pv_entry free list and its one-shot bootstrap.
  * IRQ-safe and a LEAF lock: the kmalloc() fallback in pv_alloc() runs with it
  * dropped, so it never nests kmalloc/UMA locks under itself.  It guards only
  * the pool free list — the per-page pv_list chains remain serialised by the
@@ -604,7 +604,7 @@ void vm_page_free(vm_page_t *m) {
 	m->age = 0;
 	/* Preserve PG_PMM_ALLOC so vm_phys_free_page's free-of-unallocated
 	 * tripwire still sees the buddy-allocator state.  Also preserve PG_FREE
-	 * (A52): if this page is already sitting on the buddy free list, PG_FREE
+	 * as well: if this page is already sitting on the buddy free list, PG_FREE
 	 * is set — stripping it here would let the double-free sail past
 	 * vm_phys_free_page()'s PG_FREE early-return and either panic
 	 * ('free of unallocated page') or, if the frame was meanwhile
@@ -875,7 +875,7 @@ int vm_page_try_to_free(vm_page_t *m) {
 static int vm_page_reclaim_inactive_clean(int target) {
 	int freed = 0;
 
-	// Read the queue head and every ->next link under the queue lock (A53):
+	// Read the queue head and every ->next link under the queue lock:
 	// vm_page_t.next/prev double as the buddy allocator's free-list links,
 	// so loading m->next while another CPU frees m would redirect the walk
 	// into buddy-owned memory.  The lock is dropped only to call
@@ -909,7 +909,7 @@ static int vm_page_reclaim_inactive_clean(int target) {
 static int vm_page_launder_inactive_dirty(int target) {
 	int freed = 0;
 
-	// Hold the queue lock across the head and ->next loads (A53); drop it
+	// Hold the queue lock across the head and ->next loads; drop it
 	// only for vm_page_launder / vm_page_free, which take it themselves.
 	unsigned long f = spinlock_acquire_irq(&vm_page_queue_lock);
 	vm_page_t *m = inactive_queue;
@@ -1124,7 +1124,7 @@ void vm_page_writeback_done(vm_page_t *m) {
 void vm_page_age_scan(void) {
 	// Scan active queue - pages accessed get max age, others decrement.
 	// The queue head and every ->next link are read under the queue lock
-	// (A53) — vm_page_t.next aliases the buddy free-list link, so an unlocked
+	// — vm_page_t.next aliases the buddy free-list link, so an unlocked
 	// load of m->next racing a concurrent free would walk into buddy memory.
 	// The lock is dropped only for the pmap A-bit probe (leaf discipline).
 	unsigned long f = spinlock_acquire_irq(&vm_page_queue_lock);
@@ -1236,7 +1236,7 @@ void vm_page_get_stats(vm_page_stats_t *stats) {
 	stats->dirty_count = 0;
 	stats->free_count = 0;
 
-	// Traverse the queues under the queue lock (A53): the ->next links are
+	// Traverse the queues under the queue lock: the ->next links are
 	// spliced by vm_page_free/activate/deactivate under this same lock, and
 	// alias the buddy free-list links once a page is freed.
 	unsigned long f = spinlock_acquire_irq(&vm_page_queue_lock);
@@ -1269,7 +1269,7 @@ void vm_page_get_vmstat(vm_vmstat_t *stats) {
 
 	memset(stats, 0, sizeof(*stats));
 
-	// Traverse the page queues under the queue lock (A53) — see
+	// Traverse the page queues under the queue lock — see
 	// vm_page_get_stats().
 	unsigned long f = spinlock_acquire_irq(&vm_page_queue_lock);
 	for(vm_page_t *m = active_queue; m; m = m->next) {

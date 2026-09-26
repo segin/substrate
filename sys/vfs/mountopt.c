@@ -181,7 +181,7 @@ int mountopt_apply_generic(mountopt_t *head, uint32_t *flags) {
     if (!flags) return -EINVAL;
 
     /*
-     * [VFS-30] Apply in list order, LAST OCCURRENCE WINS.
+     * Apply in list order, LAST OCCURRENCE WINS.
      *
      * This used to collect saw_ro/saw_rw/... booleans and then reject any
      * pair that both appeared:
@@ -209,7 +209,7 @@ int mountopt_apply_generic(mountopt_t *head, uint32_t *flags) {
         else if (strcmp(m->key, "noexec") == 0) *flags |=  MNT_NOEXEC;
         else if (strcmp(m->key, "exec")   == 0) *flags &= ~MNT_NOEXEC;
         else if (strcmp(m->key, "sync")   == 0) {
-            /* [VFS-29] each of the pair clears its opposite. */
+            /* Each of the pair clears its opposite. */
             *flags |=  MNT_SYNCHRONOUS;
             *flags &= ~MNT_ASYNC;
         } else if (strcmp(m->key, "async") == 0) {

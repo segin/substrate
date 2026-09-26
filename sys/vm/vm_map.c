@@ -678,7 +678,7 @@ vm_map_t *vm_map_create(pmap_t pmap, uintptr_t min, uintptr_t max) {
     vm_map_t *map = kmalloc(sizeof(vm_map_t));
     if (!map) return NULL;
     vm_map_init(map, pmap, min, max);
-    /* Fail if sentinel or hole allocation failed (finding #25) */
+    /* Fail if sentinel or hole allocation failed */
     if (!map->header || !map->holes_root) {
         if (map->header) free_entry(map->header);
         if (map->holes_root) free_hole(map->holes_root);
@@ -876,8 +876,8 @@ int vm_map_insert(vm_map_t *map, struct vm_object *obj, uint64_t offset, uintptr
 
 fail_shadow:
     /*
-     * Insertion failed after we wrapped the caller's object in a shadow
-     * (VM-07).  Undo the wrap so we neither leak the shadow nor let the
+     * Insertion failed after we wrapped the caller's object in a shadow.
+     * Undo the wrap so we neither leak the shadow nor let the
      * caller's own vm_object_deallocate(orig_obj) drop a reference we
      * already consumed: re-reference the original (restoring the caller's
      * ref) and free the shadow — its teardown drops the ref it holds on
@@ -1139,8 +1139,8 @@ int vm_map_protect(vm_map_t *map, uintptr_t start, uintptr_t end, uint8_t prot) 
      * entire text segment, faulting every later access to it. */
     /* If clipping can't split (OOM), applying prot to the whole unclipped
      * entry would widen the change beyond [start,end) — e.g. a RELRO page
-     * turned read-only would drag the rest of the text segment with it
-     * (VM-06).  Fail cleanly instead; nothing has been re-protected yet, so
+     * turned read-only would drag the rest of the text segment with it.
+     * Fail cleanly instead; nothing has been re-protected yet, so
      * the map is unchanged. */
     if (vm_map_clip(map, start) != 0 || vm_map_clip(map, end) != 0) {
         vm_map_unlock(map);
@@ -1155,7 +1155,7 @@ int vm_map_protect(vm_map_t *map, uintptr_t start, uintptr_t end, uint8_t prot) 
             continue;
 
         cur->protection = prot;
-        /* Don't ignore pmap_protect's result (VM-15).  rc == -11 is the
+        /* Don't ignore pmap_protect's result.  rc == -11 is the
          * deferred-COW case: the PTE is intentionally left read-only and the
          * pending write fault performs the copy from entry->protection, which
          * is correct — treat it as success.  Any other non-zero return means

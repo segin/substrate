@@ -177,7 +177,7 @@ void kfree(void *ptr, size_t size) {
 
     /*
      * Determine the true owning zone from the pointer itself, NOT from the
-     * caller-supplied size (A51).  Trusting `size` lets a caller that frees
+     * caller-supplied size.  Trusting `size` lets a caller that frees
      * with a size in a different power-of-two bucket than it allocated with
      * push the item into the WRONG zone's per-CPU free bucket (and skip the
      * large-vs-small decision entirely), silently bypassing UMA's ownership
@@ -226,7 +226,7 @@ void kfree(void *ptr, size_t size) {
     /* Snapshot the header size BEFORE freeing the pages: pmm_free_contiguous
      * hands hdr's pages back to the buddy allocator, after which hdr->size is
      * freed memory that may be recycled/scribbled at any instant.  Reading it
-     * afterward (VM-11) is a use-after-free that corrupts the accounting. */
+     * afterward is a use-after-free that corrupts the accounting. */
     size_t hdr_size = hdr->size;
     size_t total = hdr_size + sizeof(kmem_large_header_t);
     size_t pages = (total + 4095) / 4096;
@@ -312,7 +312,7 @@ void *krealloc(void *ptr, size_t size) {
 void kmem_get_stats(uint64_t *allocs, uint64_t *frees, uint64_t *bytes) {
     /* IRQ-save: kfree() runs from IRQ context (netstack RX) and takes this
      * same lock; a plain spinlock_acquire disables only preemption, so an
-     * IRQ landing here on the same CPU would deadlock-panic (A79). */
+     * IRQ landing here on the same CPU would deadlock-panic. */
     unsigned long _kf = spinlock_acquire_irq(&kmem_stats_lock);
     if (allocs) *allocs = kmem_stats.allocs;
     if (frees) *frees = kmem_stats.frees;
@@ -325,7 +325,7 @@ void kmem_get_snapshot(kmem_stat_snapshot_t *snapshot) {
         return;
     }
 
-    /* IRQ-save: see kmem_get_stats() (A79). */
+    /* IRQ-save: see kmem_get_stats(). */
     unsigned long _kf = spinlock_acquire_irq(&kmem_stats_lock);
     memset(snapshot, 0, sizeof(*snapshot));
     snapshot->total_allocs = kmem_stats.allocs;

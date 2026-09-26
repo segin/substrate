@@ -47,7 +47,7 @@ static spinlock_t vnode_freelist_lock;
 static struct vnode *vnode_hashtable[VNODE_HASH_SIZE];
 static spinlock_t vnode_hash_lock;
 
-/* Protects every mp->mnt_vnodelist [VNODE-23]. */
+/* Protects every mp->mnt_vnodelist. */
 static spinlock_t vnode_mntlist_lock;
 
 /* Statistics */
@@ -119,7 +119,7 @@ static void vnode_freelist_add(struct vnode *vp)
 /*
  * Unlink from the free list.  Caller holds vnode_freelist_lock.
  *
- * [VNODE-19] Split out so that vref() and vnode_recycle() can decide to take
+ * Split out so that vref() and vnode_recycle() can decide to take
  * a vnode and unlink it WITHOUT dropping the freelist lock in between.  The
  * lock order for all of this is vnode_freelist_lock -> v_interlock; nothing
  * may take the freelist lock while already holding a v_interlock.
@@ -189,7 +189,7 @@ static struct vnode *vnode_recycle(void)
     /*
      * Get oldest (head) vnode from free list.
      *
-     * [VNODE-19] Each candidate is examined under its OWN v_interlock, and
+     * Each candidate is examined under its OWN v_interlock, and
      * v_usecount is part of the test.  This scanned the list holding only
      * vnode_freelist_lock and never looked at v_usecount at all, while
      * vref() bumped v_usecount under v_interlock and then RELEASED it before
@@ -223,7 +223,7 @@ static struct vnode *vnode_recycle(void)
     spinlock_release(&vnode_freelist_lock);
 
     /*
-     * [VNODE-16] Remove from the hash BEFORE vclean().
+     * Remove from the hash BEFORE vclean().
      *
      * vnode_recycle() never did this at all, and it cannot be deferred:
      * vnode_cache_remove() early-returns on !v_mount, and vclean() is what
@@ -233,7 +233,7 @@ static struct vnode *vnode_recycle(void)
      * and, once the vnode is re-inserted into that same bucket, closing it
      * into a CYCLE that hangs the next lookup miss with vnode_hash_lock held.
      *
-     * [VNODE-17] And purge the name cache, which vnode_reclaim() already
+     * And purge the name cache, which vnode_reclaim() already
      * does for exactly the same reason.  Without it the namecache keeps
      * mapping the OLD path to this vnode, so a lookup of one file can return
      * the vnode now backing a completely different one.
@@ -301,7 +301,7 @@ int getnewvnode(const char *tag, struct mount *mp,
     lockinit(&vp->v_lock, 0, "vnode", 0);
 
     /*
-     * [VNODE-23] Put the vnode on its mount's vnode list.  mnt_vnodelist was
+     * Put the vnode on its mount's vnode list.  mnt_vnodelist was
      * TAILQ_INIT'ed and walked by vflush(), but nothing ever inserted into
      * it -- so the unmount busy check always passed and vflush() always
      * returned 0, i.e. a filesystem with live vnodes could be unmounted out
@@ -330,7 +330,7 @@ void vref(struct vnode *vp)
         return;
     }
     /*
-     * [VNODE-19] Take the freelist lock FIRST, then v_interlock, and do the
+     * Take the freelist lock FIRST, then v_interlock, and do the
      * whole bump-and-unlink under both.  The old code bumped v_usecount
      * under v_interlock, released it, and only then took the freelist lock
      * to unlink -- leaving the vnode referenced but still on the freelist,
@@ -392,7 +392,7 @@ void vrele(struct vnode *vp)
         }
 
         /*
-         * [VNODE-18] Reclaim only when there is no HOLD outstanding either.
+         * Reclaim only when there is no HOLD outstanding either.
          *
          * This tested v_usecount alone, while vgone() correctly requires
          * v_usecount == 0 && v_holdcount == 0.  A vhold() followed by
@@ -672,7 +672,7 @@ void vnode_reclaim(struct vnode *vp)
     cache_purge(vp);
 
     /*
-     * [VNODE-23] Unlink from the mount's vnode list BEFORE the memory goes
+     * Unlink from the mount's vnode list BEFORE the memory goes
      * back to the zone.  getnewvnode() now inserts here, and vflush() walks
      * this list -- without the matching removal, vflush() would walk freed
      * vnodes.  Note this must happen before vclean() nulls v_mount, but the
@@ -711,7 +711,7 @@ void vnode_cache_insert(struct vnode *vp)
     uint32_t hash;
 
     /*
-     * [VNODE-16] Only v_ino has to be meaningful.  This also required a
+     * Only v_ino has to be meaningful.  This also required a
      * non-NULL v_mount, which silently made the cache a no-op for any vnode
      * without one -- the fs_node_t bridge publishes exactly those, so every
      * lookup allocated a fresh vnode and none was ever found again.
@@ -743,7 +743,7 @@ void vnode_cache_remove(struct vnode *vp)
     struct vnode **pp;
 
     /*
-     * [VNODE-16] Unlink from the bucket the vnode was actually inserted
+     * Unlink from the bucket the vnode was actually inserted
      * into, recorded at insert time.  This used to recompute the bucket from
      * (v_mount, v_ino) and bail out entirely when v_mount was NULL -- but
      * vclean() nulls v_mount, so once a vnode had been cleaned it could

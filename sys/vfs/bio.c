@@ -860,7 +860,7 @@ retry:
 
     if (bp->b_flags & B_DELWRI) {
         /*
-         * FS-10: the block carries a pending delayed write.  The old code
+         * The block carries a pending delayed write.  The old code
          * cleared B_DELWRI unconditionally here, silently discarding that
          * writeback.  Flush it to the backing store first (bwrite() writes
          * the buffer and clears B_BUSY/B_DELWRI), so the write is not lost;

@@ -74,8 +74,8 @@ struct fs_attr {
     uint32_t uid;
     uint32_t gid;
     off_t    size;
-    /* EXT2-A32 (ext2 audit IN-04/MS-18): stat() had no way to learn a
-     * file's real link count or its true storage cost — st_nlink was
+    /* Without these, stat() had no way to learn a file's
+     * real link count or its true storage cost — st_nlink was
      * hardcoded to 1 and st_blocks derived from the length, so
      * hardlinks reported wrong and sparse files reported dense. */
     uint32_t nlink;
@@ -197,7 +197,7 @@ typedef struct vfs_mount {
 
 // Standard VFS functions
 /*
- * [VFS-28] SIGNED return.  A backend reports failure as a negated errno
+ * SIGNED return.  A backend reports failure as a negated errno
  * cast through size_t; these translate that into a negative ssize_t rather
  * than handing the caller a ~4 GiB "successful" transfer.  A NULL node, or
  * a node with no read/write method, is -EINVAL -- not 0, which used to be
@@ -285,8 +285,8 @@ int devfs_register_alias_perso(const char *path, const char *target,
                                uint32_t perso_mask);
 /* Removes the alias registered at `path` with this exact perso_mask.  The
  * mask matters: a universal alias and a personality-scoped override of the
- * same name coexist, and passing the wrong one removes the wrong entry
- * (DEVFS-33).  Use 0 for aliases made with devfs_register_alias(). */
+ * same name coexist, and passing the wrong one removes the wrong entry.
+ * Use 0 for aliases made with devfs_register_alias(). */
 void devfs_unregister_alias(const char *path, uint32_t perso_mask);
 
 /* shmfs — POSIX shared-memory filesystem.  Mounted at /dev/shm

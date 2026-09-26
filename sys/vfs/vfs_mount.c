@@ -134,7 +134,7 @@ vfs_unmount(struct mount *mp, int mntflags, struct thread *td)
     }
 
     /*
-     * [VNODE-24] Tear the vnodes down before the mount goes away.
+     * Tear the vnodes down before the mount goes away.
      *
      * This used to free `mp` with its vnodes still live and still on the
      * namecache, leaving dangling nc_dvp/nc_vp entries and v_mount pointers

@@ -524,7 +524,7 @@ void *sys_brk(void *addr) {
     /* Serialize concurrent brk/sbrk (and brk vs mmap) on the address-space
      * write lock: without it two threads both read old_brk, both grow, and the
      * loser's brk update is lost (heap truncated) while its freshly-allocated
-     * frames become unreachable (permanent leak).  VM-05. */
+     * frames become unreachable (permanent leak). */
     if (!current_process) return NULL;
     vm_map_t *map = current_process->vm_map;
     if (map) vm_map_lock(map);
@@ -709,7 +709,7 @@ static void *sys_brk_locked(void *addr) {
 
 int sys_msync(void *addr, size_t length, int flags) {
     /* Return a real negated errno, not a bare -1 (the libc wrapper negates the
-     * kernel return into errno, so -1 would surface as EPERM) — audit A81. */
+     * kernel return into errno, so -1 would surface as EPERM). */
     if (!current_process || !current_process->vm_map) return -EINVAL;
     if (length == 0) return 0;
 

@@ -539,7 +539,7 @@ void vm_phys_mark_used(uintptr_t pa) {
 
     head->flags &= ~PG_FREE;
     /*
-     * Mark the reserved page allocated (A77).  Every normally-allocated page
+     * Mark the reserved page allocated.  Every normally-allocated page
      * gets PG_PMM_ALLOC in vm_phys_prepare_allocated_block; vm_phys_free_page
      * panics ('free of unallocated page') when it is absent.  Without this, a
      * page reserved here (kernel image, watermark, boot regions) that is ever

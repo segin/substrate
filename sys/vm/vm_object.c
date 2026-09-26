@@ -15,7 +15,7 @@ static spinlock_t vm_object_teardown_lock = SPINLOCK_INIT("vmobj_teardown");
 
 static vm_object_t *alloc_object(void) {
     /*
-     * Reserve a bootstrap slot atomically (A80): vm_object_allocate is
+     * Reserve a bootstrap slot atomically: vm_object_allocate is
      * reachable at runtime (mmap, fork shadow creation) on multiple CPUs,
      * not just single-threaded boot.  A plain post-increment lets two CPUs
      * read the same index and receive the same vm_object_t, which each then
@@ -187,7 +187,7 @@ void vm_object_add_page(vm_object_t *object, vm_page_t *page) {
     if (stale && stale != page) {
         vm_object_remove_page(object, stale);
         /* Reclaim the evicted frame ONLY when nothing still maps, holds, or
-         * wires it — mirroring the VM-09 guard in vm_fault().  vm_page_free()
+         * wires it — mirroring the matching COW-source guard in vm_fault().  vm_page_free()
          * force-zeroes the frame's hold accounting and returns it to the buddy
          * allocator WITHOUT clearing any hardware PTE, so freeing a still-
          * mapped stale page (the in-place COW case: the source is still mapped
