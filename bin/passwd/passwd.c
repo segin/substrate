@@ -41,8 +41,7 @@ secure_zero(void *p, size_t n)
 #define PW_MAX 128
 
 /* Terminal state to restore if a signal interrupts the echo-off prompt,
- * so ^C never leaves the tty un-echoing and leaking the next line
- * (PASSWD-05). */
+ * so ^C never leaves the tty un-echoing and leaking the next line. */
 static struct termios         g_saved_tio;
 static volatile sig_atomic_t  g_tio_saved;
 
@@ -55,7 +54,7 @@ restore_tio_and_die(int sig)
 }
 
 /* Read a line with echo disabled.  Returns the length on success, or -1
- * on read error or EOF-before-any-input (PASSWD-07) so the caller can
+ * on read error or EOF-before-any-input, so the caller can
  * tell an I/O failure from a genuinely empty entry. */
 static int
 read_password(const char *prompt, char *buf, size_t bufsz)
@@ -201,9 +200,9 @@ rewrite_shadow_cb(FILE *out, void *arg)
 
 /* Replace the password field of `user`'s row with `newpw`.  Returns 0 on
  * success, -1 on failure. Holds the passwd-DB lock across the read and the
- * atomic rewrite so concurrent passwd/useradd cannot lose an update
- * (PASSWD-01); pwdb_atomic_rewrite does the O_EXCL 0640 temp + fsync +
- * checked writes + rename, unlinking on any failure (PASSWD-02/03). */
+ * atomic rewrite so concurrent passwd/useradd cannot lose an update;
+ * pwdb_atomic_rewrite does the O_EXCL 0640 temp + fsync + checked
+ * writes + rename, unlinking on any failure. */
 static int
 rewrite_shadow(const char *user, const char *newpw)
 {
@@ -254,7 +253,7 @@ shadow_current(const char *user, char *line_out, size_t line_sz)
 
         /* A chunk that did not end in '\n' was truncated by the buffer;
          * the next chunk is a mid-line continuation and must never be
-         * matched as a record start (PASSWD-09). */
+         * matched as a record start. */
         at_line_start = full_line;
         if (!this_start) {
             continue;
@@ -324,7 +323,7 @@ main(int argc, char **argv)
         }
         if (cur_stored[0] == '\0') {
             /* An empty stored password authenticates only against an
-             * empty entry — never silently skip re-auth (PASSWD-10). */
+             * empty entry — never silently skip re-auth. */
             if (cur[0] != '\0') {
                 secure_zero(cur, sizeof(cur));
                 secure_zero(line, sizeof(line));
@@ -372,7 +371,7 @@ main(int argc, char **argv)
          * password under it.  The salt is filled directly from
          * /dev/urandom (8 chars, 6 bits each); if we cannot obtain the
          * full 8 random bytes we fail closed rather than fall back to a
-         * predictable pid/time-derived salt (PASSWD-04/08). */
+         * predictable pid/time-derived salt. */
         static const char b64[] =
             "./0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
         char  setting[16];

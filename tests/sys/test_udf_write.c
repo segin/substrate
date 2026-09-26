@@ -68,7 +68,7 @@ static void test_udf_allocation_writeback(void) {
     uint8_t *data = mock_disk + sizeof(struct udf_space_bitmap);
 
     /*
-     * UDF-03: this fixture used to encode the driver's INVERTED polarity --
+     * This fixture used to encode the driver's INVERTED polarity --
      * an all-zero bitmap read as "everything free" and a set bit as
      * "allocated".  ECMA-167 4/14.12.1.1 (and Linux's udf_bitmap_new_block,
      * which tests for a set bit to find a free block and clears it to
@@ -80,7 +80,7 @@ static void test_udf_allocation_writeback(void) {
     data[0] &= (uint8_t)~1u;
 
     /* Calculate initial CRC/Checksum.
-     * UDF-01: a descriptor CRC covers everything AFTER the 16-byte tag, so
+     * A descriptor CRC covers everything AFTER the 16-byte tag, so
      * here that is num_bits + num_bytes (8 bytes) plus the 8-byte bit array.
      * The old fixture hashed only the bit array, matching the driver's
      * then-confused pointer rather than the format. */
@@ -116,7 +116,7 @@ static void test_udf_allocation_writeback(void) {
         return;
     }
 
-    /* UDF-03: allocating marks a block IN USE, which under ECMA-167 means
+    /* Allocating marks a block IN USE, which under ECMA-167 means
      * CLEARING its bit.  Bit 0 was cleared by the fixture and bit 1 by the
      * allocation, so the byte must read 0xFC. */
     if (data[0] != 0xFC) {
@@ -153,7 +153,7 @@ static void test_udf_large_file_write(void) {
     sbm->num_bytes = 8;
 
     /* Mark sector 0 (SBM) and 1 (FE) as allocated.
-     * UDF-03: free == set, so "allocated" means the bit is CLEAR. */
+     * ECMA-167: free == set, so "allocated" means the bit is CLEAR. */
     uint8_t *bitmap_data = mock_disk + sizeof(struct udf_space_bitmap);
     memset(bitmap_data, 0xFF, 8);
     bitmap_data[0] &= (uint8_t)~0x03u;   /* blocks 0 and 1 in use */
@@ -238,7 +238,7 @@ static void test_udf_truncate_extent(void) {
 
     uint8_t *bitmap_data = mock_disk + sizeof(struct udf_space_bitmap);
     /* Mark block 2, 3 as allocated (where we put our file data).
-     * UDF-03: free == set, so allocated means the bit is CLEAR. */
+     * ECMA-167: free == set, so allocated means the bit is CLEAR. */
     memset(bitmap_data, 0xFF, 4);
     bitmap_data[0] &= (uint8_t)~((1 << 2) | (1 << 3));
 
@@ -313,7 +313,7 @@ static void test_udf_truncate_extent(void) {
         return;
     }
 
-    /* Verify Block 3 still allocated.  UDF-03: allocated == bit CLEAR. */
+    /* Verify Block 3 still allocated (allocated == bit CLEAR). */
     if (bitmap_data[0] & (1 << 3)) {
          kprintf("FAILED: Block 3 was freed incorrectly\n");
          return;
@@ -353,7 +353,7 @@ static void test_udf_truncate_extent(void) {
     /* Verify Block 3 Freed */
     /* Reload bitmap from disk (since udf_free_block writes it back) */
     /* udf_free_block updates the mock_disk directly */
-    /* UDF-03: freed == bit SET. */
+    /* Freed == bit SET. */
     if (!(bitmap_data[0] & (1 << 3))) {
         kprintf("FAILED: Block 3 was NOT freed\n");
         return;
@@ -381,7 +381,7 @@ static void test_udf_truncate_extent_long(void) {
 
     uint8_t *bitmap_data = mock_disk + sizeof(struct udf_space_bitmap);
     /* Mark block 2, 3 as allocated (where we put our file data).
-     * UDF-03: free == set, so allocated means the bit is CLEAR. */
+     * ECMA-167: free == set, so allocated means the bit is CLEAR. */
     memset(bitmap_data, 0xFF, 4);
     bitmap_data[0] &= (uint8_t)~((1 << 2) | (1 << 3));
 
@@ -458,7 +458,7 @@ static void test_udf_truncate_extent_long(void) {
         return;
     }
 
-    /* Verify Block 3 still allocated.  UDF-03: allocated == bit CLEAR. */
+    /* Verify Block 3 still allocated (allocated == bit CLEAR). */
     if (bitmap_data[0] & (1 << 3)) {
          kprintf("FAILED: Block 3 was freed incorrectly\n");
          return;
@@ -498,7 +498,7 @@ static void test_udf_truncate_extent_long(void) {
     /* Verify Block 3 Freed */
     /* Reload bitmap from disk (since udf_free_block writes it back) */
     /* udf_free_block updates the mock_disk directly */
-    /* UDF-03: freed == bit SET. */
+    /* Freed == bit SET. */
     if (!(bitmap_data[0] & (1 << 3))) {
         kprintf("FAILED: Block 3 was NOT freed\n");
         return;

@@ -22,7 +22,7 @@ static void do_sleep(double seconds)
 {
 	struct timespec ts;
 	/* Floor the interval so `-s 0` (or a negative value) polls at a
-	 * modest rate instead of spinning at 100% CPU (TAIL-05..10). */
+	 * modest rate instead of spinning at 100% CPU. */
 	if(!(seconds >= 0.02))
 		seconds = 0.02;
 	ts.tv_sec  = (time_t)seconds;
