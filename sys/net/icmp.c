@@ -52,14 +52,25 @@ static void icmp_error_input(uint8_t type, uint8_t code,
     const struct iphdr *q = (const struct iphdr *)(pkt + 8);
     size_t qhl = IPH_HL(q) * 4;
     if (IPH_V(q) != 4 || qhl < sizeof(*q) || 8 + qhl + 8 > len) return;
-    if (q->protocol != IPPROTO_UDP_NUM) return;
-    const uint8_t *qudp = pkt + 8 + qhl;
-    uint16_t sport = (uint16_t)((qudp[0] << 8) | qudp[1]);
-    uint16_t dport = (uint16_t)((qudp[2] << 8) | qudp[3]);
+    if (q->protocol != IPPROTO_UDP_NUM && q->protocol != 6 /*TCP*/) return;
+    /* UDP and TCP both start with the two ports; TCP's sequence number
+     * follows, inside the 8 octets every ICMP error must quote. */
+    const uint8_t *ql4 = pkt + 8 + qhl;
+    uint16_t sport = (uint16_t)((ql4[0] << 8) | ql4[1]);
+    uint16_t dport = (uint16_t)((ql4[2] << 8) | ql4[3]);
     int err = type == ICMP_DEST_UNREACH  ? icmp_unreach_errno(code)
             : type == ICMP_TIME_EXCEEDED ? EHOSTUNREACH
             :                              EPROTO;
     /* The quoted datagram is one we sent: its source is our end. */
+    if (q->protocol == 6) {
+        uint32_t seq = (uint32_t)ql4[4] << 24 | (uint32_t)ql4[5] << 16 |
+                       (uint32_t)ql4[6] << 8 | ql4[7];
+        int hard = type == ICMP_DEST_UNREACH &&
+                   (code == ICMP_PROT_UNREACH || code == ICMP_PORT_UNREACH ||
+                    code == ICMP_FRAG_NEEDED);
+        tcp_icmp_error(q->saddr, sport, q->daddr, dport, seq, hard, err);
+        return;
+    }
     afinet_icmp_error_v4(q->saddr, sport, q->daddr, dport, err);
 }
 

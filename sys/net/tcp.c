@@ -249,9 +249,10 @@ typedef struct tcp_pcb {
     struct ip4_txopts txo;    /* UDP-API-12: the socket's IP_TTL/IP_TOS */
     /* SO_ERROR (cleared by getsockopt).  */
     int       so_error;
-    /* The last routing failure a transmit hit (ENETUNREACH / EHOSTUNREACH),
-     * cleared by a transmit that gets out.  Reported instead of ETIMEDOUT
-     * when the connection gives up, since it says why. */
+    /* The last routing failure a transmit hit (ENETUNREACH / EHOSTUNREACH)
+     * or soft ICMP error reported, cleared when the peer acknowledges new
+     * data.  Reported instead of ETIMEDOUT when the connection gives up,
+     * since it says why. */
     int       soft_error;
     /* Backlog for LISTEN sockets */
     struct tcp_pcb **accept_q;
@@ -675,14 +676,13 @@ static uint32_t tcp_seg_link_locked(tcp_pcb_t *p, tcp_seg_t *s) {
  * would be a use-after-free.  The sequence number was captured under the
  * lock, and the caller's buffer holds exactly the bytes copied into s. */
 /* Record how a transmit of a queued segment went: a routing failure is
- * latched as the connection's soft error, a transmit that gets out clears
- * it (RFC 1122 4.2.3.9: such errors are advisory until the connection
- * gives up). */
+ * latched as the connection's soft error (RFC 1122 4.2.3.9: such errors
+ * are advisory until the connection gives up).  It is cleared when the
+ * peer acknowledges new data, not by a transmit that merely left: that
+ * would also wipe an error an ICMP message reported. */
 static void tcp_note_xmit_result(tcp_pcb_t *p, int rc) {
     if (rc == -ENETUNREACH || rc == -EHOSTUNREACH)
         p->soft_error = -rc;
-    else if (rc >= 0)
-        p->soft_error = 0;
 }
 
 static void tcp_seg_emit(tcp_pcb_t *p, uint32_t seq, uint8_t flags,
@@ -740,6 +740,9 @@ static void tcp_rtt_sample(tcp_pcb_t *p, uint32_t r) {
 
 static int tcp_unacked_prune(tcp_pcb_t *p, uint32_t ack) {
     int freed = 0;
+    /* Called only when an ACK advances SND.UNA: the peer is reachable, so
+     * whatever routing or ICMP trouble was latched is over. */
+    p->soft_error = 0;
     uint64_t sample_tick = 0;
     while (p->unacked_head) {
         tcp_seg_t *s = p->unacked_head;
@@ -2151,6 +2154,31 @@ static uint16_t tcp_parse_mss(const uint8_t *o, size_t n) {
         i += olen;
     }
     return mss;
+}
+
+/*
+ * An ICMP error quoting a segment we sent: laddr/lport are our end, as the
+ * quoted header named them, and seq the quoted sequence number.  It is
+ * believed only when that sequence number is one we have sent and not yet
+ * had acknowledged (SND.UNA <= seq < SND.NXT), so an off-path forger must
+ * guess it (RFC 5927 4.1).  Protocol, port and fragmentation-needed
+ * unreachables are hard errors (RFC 1122 4.2.3.9) and end a connection
+ * still in SYN-SENT; every other error is latched as the soft error the
+ * connection reports if it later gives up.
+ */
+void tcp_icmp_error(uint32_t laddr, uint16_t lport, uint32_t raddr,
+                    uint16_t rport, uint32_t seq, int hard, int err) {
+    uint32_t f = tcp_lock();
+    tcp_pcb_t *p = tcp_find(raddr, rport, laddr, lport);
+    if (p && p->state != TCP_LISTEN && p->raddr == raddr &&
+        p->rport == rport &&
+        (int32_t)(seq - p->snd_una) >= 0 && (int32_t)(seq - p->snd_nxt) < 0) {
+        if (hard && p->state == TCP_SYN_SENT)
+            tcp_kill_pcb(p, err);
+        else
+            p->soft_error = err;
+    }
+    tcp_unlock(f);
 }
 
 void tcp_input(uint32_t saddr, uint32_t daddr,

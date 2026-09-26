@@ -151,6 +151,10 @@ void icmp_param_problem(netdev_t *dev, const uint8_t *ip_pkt, size_t ip_len,
                         uint8_t pointer);
 void icmp6_port_unreach(netdev_t *dev, const uint8_t *ip6_pkt, size_t len);
 void tcp_input(uint32_t saddr, uint32_t daddr, const uint8_t *pkt, size_t len);
+/* An ICMP error about a segment we sent from laddr:lport to raddr:rport
+ * with sequence number seq; hard: a hard error (RFC 1122 4.2.3.9). */
+void tcp_icmp_error(uint32_t laddr, uint16_t lport, uint32_t raddr,
+                    uint16_t rport, uint32_t seq, int hard, int err);
 
 /* UDP-RES-03 / UDP-RES-06: UDP counters, the Udp: line of Linux's
  * /proc/net/snmp, published as /proc/udpstat.  Every drop used to be
