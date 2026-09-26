@@ -341,7 +341,7 @@ typedef struct ld_obj {
     int             copy_relocated; /* R_386_COPY final pass done */
     int             initialized;
     int             finalized;
-    int             refcount;       /* dlopen refs; fini at last close (LDSO-11) */
+    int             refcount;       /* dlopen refs; fini at last close */
     int             protected;      /* W^X + RELRO applied (LDSO-08b) */
 
     /* Phase 5 (C++ linkage): GNU symbol-versioning sections.  All

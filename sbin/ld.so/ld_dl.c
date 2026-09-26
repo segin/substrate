@@ -32,7 +32,7 @@
 #define LD_PUBLIC __attribute__((visibility("default")))
 
 /* -------------------------------------------------------------------- *
- * dl-API serialization lock (LDSO-06)
+ * dl-API serialization lock
  *
  * The startup path (ld_main) is single-threaded, but once the program
  * is running any thread may call dlopen/dlsym/dlclose concurrently -

@@ -442,7 +442,7 @@ static ld_obj_t *load_from_path(const char *path) {
      * -> libfoo.so.1) resolves to a different path but carries the
      * SONAME of an object we already hold.  Return the existing copy -
      * o is not yet on the list, so find_loaded only sees prior loads.
-     * The duplicate mapping leaks until munmap is wired (LDSO-08). */
+     * The duplicate mapping leaks until munmap is wired. */
     {
         ld_obj_t *dup = find_loaded(o->name);
         if (dup) {
