@@ -142,7 +142,7 @@ Suggested order, highest leverage first:
     - Site: `sbin/telnetd/telnetd.c:101`
     - Fix: Keep the command parser's state across reads.
     - Verify: IAC and its command sent in separate segments are consumed, not delivered.
-- [ ] **UTL-ECHOD-01** (medium) A client closing mid-echo can kill `echod` with SIGPIPE (REQ: REQ-UTLA-0024)
+- [x] **UTL-ECHOD-01** (medium) A client closing mid-echo can kill `echod` with SIGPIPE (REQ: REQ-UTLA-0024)
     - Site: `sbin/echod/echod.c:49`
     - Fix: Ignore SIGPIPE (or use MSG_NOSIGNAL) and handle EPIPE.
     - Verify: `echod` survives a client that resets the connection during a write.
