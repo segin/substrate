@@ -33,6 +33,7 @@ Never send mail to the user. (GNU extension)
 .TP
 .B \-f \fIfile\fR
 Read the job from \fIfile\fR rather than standard input.
+The file is opened with the invoking user's permissions.
 .TP
 .B \-q \fIqueue\fR
 Use the specified queue. A queue designation consists of a single letter; valid queue designations range from `a' to `z' and `A' to `Z'. The `a' queue is the default for \fBat\fR and the `b' queue is the default for \fBbatch\fR.
@@ -49,6 +50,18 @@ When invoked with options (e.g., \fBbatch \-m\fR or \fBbatch tomorrow\fR), the p
 The \fBat\fR command supports GNU extensions natively, specifically \fB\-b\fR to simulate \fBbatch\fR, and \fB\-M\fR to suppress all mail notification.
 .SH HISTORICAL QUIRKS
 Unsupported historical quirks are explicitly rejected rather than silently inherited. If an ambiguous mixed-profile behavior is attempted (e.g., mixing GNU-specific tunables with BSD-specific queue default assumptions in a single invocation without explicit definition), the system will fail deterministically with a diagnostic error.
+.SH FILES
+.TP
+.I /var/spool/at
+The job spool, owned by root and mode 0700.
+\fBat\fR and \fBbatch\fR are installed set-user-ID root to write it; they
+run with the invoking user's identity except while creating the job file,
+which belongs to that user.
+.TP
+.IR /etc/at.allow ", " /etc/at.deny
+Who other than root may submit jobs: if \fIat.allow\fR exists, only the
+users it lists; otherwise, if \fIat.deny\fR exists, everyone it does not
+list; if neither exists, only root.
 .SH SEE ALSO
 .BR crontab (1),
 .BR sh (1)

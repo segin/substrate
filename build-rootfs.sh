@@ -936,10 +936,12 @@ EOF
     #       fakes `chown -R 0:0` (without touching the real dist/) so mke2fs
     #       records uid/gid 0 — matching what the old debugfs path produced.
     #
-    #    su(1), passwd(1) and ping(8) are the setuid-root binaries (dist/ has
-    #    no other setuid files); chown clears the bit so it is re-set inside
-    #    the fakeroot session.  passwd needs it to rewrite /etc/shadow for
-    #    the user changing their own password.  ping needs it because opening
+    #    su(1), passwd(1), at(1), batch(1) and ping(8) are the setuid-root
+    #    binaries (dist/ has no other setuid files); chown clears the bit so
+    #    it is re-set inside the fakeroot session.  passwd needs it to
+    #    rewrite /etc/shadow for the user changing their own password; at
+    #    and batch to write the root-only /var/spool/at (they run as the
+    #    user otherwise).  ping needs it because opening
     #    a SOCK_RAW socket is root-only; it drops the privilege immediately
     #    after socket().
     #    /etc/shadow is root:shadow 0640 (gid 42, from etc/group): no user
@@ -964,6 +966,8 @@ EOF
         chown -R 0:0 "$1"
         [ -e "$1/bin/su" ] && chmod 4755 "$1/bin/su"
         [ -e "$1/bin/passwd" ] && chmod 4755 "$1/bin/passwd"
+        [ -e "$1/usr/bin/at" ] && chmod 4755 "$1/usr/bin/at"
+        [ -e "$1/usr/bin/batch" ] && chmod 4755 "$1/usr/bin/batch"
         [ -e "$1/bin/ping" ] && chmod 4755 "$1/bin/ping"
         if [ -e "$1/etc/shadow" ]; then
             chown 0:42 "$1/etc/shadow" && chmod 0640 "$1/etc/shadow"

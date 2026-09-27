@@ -1,3 +1,4 @@
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -11,6 +12,15 @@
 int main(int argc, char *argv[]) {
     struct batch_submit_request req;
     memset(&req, 0, sizeof(req));
+
+    /* at is setuid root only so it can write the root-owned spool.  Run as
+     * the invoking user -- a -f file opened as root would be copied into a
+     * job the user owns, disclosing any file on the system -- and take the
+     * privilege back just to create the job. */
+    if (seteuid(getuid()) != 0) {
+        perror("at: seteuid");
+        return 1;
+    }
 
     /* Default `at` POSIX state */
     req.queue = 'a'; /* 'at' uses 'a', 'batch' uses 'b' */
@@ -44,8 +54,10 @@ int main(int argc, char *argv[]) {
                 }
                 break;
             case 'q':
-                if (strlen(optarg) != 1) {
-                    fprintf(stderr, "at: queue must be a single character\n");
+                /* Queues are the letters; anything else names no queue
+                 * directory ("/", or "=" for the jobs being run). */
+                if (strlen(optarg) != 1 || !isalpha((unsigned char)optarg[0])) {
+                    fprintf(stderr, "at: queue must be a single letter\n");
                     return 1;
                 }
                 req.queue = optarg[0];
@@ -83,6 +95,9 @@ int main(int argc, char *argv[]) {
     struct batch_submit_result res;
     memset(&res, 0, sizeof(res));
 
+    /* Back to root for the spool; if at is not setuid this fails, and so
+     * does the spool write, with its own message. */
+    (void)seteuid(0);
     if (at_spool_create_job(&req, &res) != 0) {
         fprintf(stderr, "at: Failed to submit job: %s\n", res.diagnostics);
         return res.status_code > 0 ? res.status_code : 1;
