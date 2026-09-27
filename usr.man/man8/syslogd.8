@@ -104,7 +104,9 @@ is one of
 .BR local0 " to " local7 ,
 or
 .B *
-for any facility.
+for any facility; several facilities separated by commas, as in
+.BR auth,authpriv.* ,
+count as one selector per facility toward the limit of 8.
 .I level
 is one of
 .BR emerg " (or " panic ),
@@ -205,10 +207,6 @@ mail.*      /var/log/mail.log
 Accepts the priority prefix of RFC 3164.
 There is no network (UDP 514) input or forwarding.
 .SH BUGS
-Comma-separated facility lists are not supported:
-.B auth,authpriv.*
-is an unknown facility, and the rule is ignored.
-.PP
 Messages from the libc
 .BR syslog (3)
 client carry their own timestamp, so logged lines show two.

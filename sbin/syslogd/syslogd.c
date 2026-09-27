@@ -134,28 +134,39 @@ static int lookup_lvl(const char *s)
 
 /* ---------------------------------------------------------- config parse */
 
-/* Parse one selector token like "auth.warn" or "*.*" or "auth.none". */
-static int parse_one_selector(char *tok, struct selector *out)
+/*
+ * Parse one selector token like "auth.warn", "*.*", "auth.none" or
+ * "auth,authpriv.*" into one selector per facility, at most `max` of them.
+ * Returns the number stored, or -1 if the token is malformed, names an
+ * unknown facility or level, or does not fit.
+ */
+static int parse_selector(char *tok, struct selector *out, int max)
 {
     char *dot = strchr(tok, '.');
     if (!dot) return -1;
     *dot = '\0';
-    const char *facname = tok;
     const char *lvlname = dot + 1;
 
     /* ANY_FAC and ANY_LVL are -1, the same value the lookups return for an
      * unknown name, so an unknown name is caught here, before the lookup's
      * result is stored, and never confused with a wildcard. */
-    if (strcmp(facname, "*") == 0)         out->facility = ANY_FAC;
-    else if (strcmp(facname, "none") == 0) out->facility = NONE_FAC;
-    else if ((out->facility = lookup_fac(facname)) < 0) return -1;
+    int level;
+    if (strcmp(lvlname, "*") == 0)         level = ANY_LVL;
+    else if (strcmp(lvlname, "none") == 0) level = NONE_LVL;
+    else if ((level = lookup_lvl(lvlname)) < 0) return -1;
 
-    out->level = ANY_LVL;
-    if (strcmp(lvlname, "*") == 0)         out->level = ANY_LVL;
-    else if (strcmp(lvlname, "none") == 0) out->level = NONE_LVL;
-    else if ((out->level = lookup_lvl(lvlname)) < 0) return -1;
-
-    return 0;
+    int n = 0;
+    char *save;
+    for (char *facname = strtok_r(tok, ",", &save); facname;
+         facname = strtok_r(NULL, ",", &save)) {
+        if (n >= max) return -1;
+        if (strcmp(facname, "*") == 0)         out[n].facility = ANY_FAC;
+        else if (strcmp(facname, "none") == 0) out[n].facility = NONE_FAC;
+        else if ((out[n].facility = lookup_fac(facname)) < 0) return -1;
+        out[n].level = level;
+        n++;
+    }
+    return n > 0 ? n : -1;
 }
 
 static void add_default_rules(void)
@@ -174,8 +185,10 @@ static void add_default_rules(void)
         struct rule *r = &g_rules[g_n_rules];
         char tmp[64];
         strlcpy(tmp, d[i].sel, sizeof(tmp));
-        if (parse_one_selector(tmp, &r->sels[0]) < 0) continue;
-        r->n_sels = 1;
+        int ns = parse_selector(tmp, r->sels,
+                                (int)(sizeof(r->sels)/sizeof(r->sels[0])));
+        if (ns < 0) continue;
+        r->n_sels = ns;
         strlcpy(r->target, d[i].tgt, sizeof(r->target));
         g_n_rules++;
     }
@@ -218,8 +231,10 @@ static void load_config(void)
         for (char *tok = strtok_r(sels, ";", &save);
              tok && r->n_sels < (int)(sizeof(r->sels)/sizeof(r->sels[0]));
              tok = strtok_r(NULL, ";", &save)) {
-            if (parse_one_selector(tok, &r->sels[r->n_sels]) == 0)
-                r->n_sels++;
+            int ns = parse_selector(tok, &r->sels[r->n_sels],
+                        (int)(sizeof(r->sels)/sizeof(r->sels[0])) - r->n_sels);
+            if (ns > 0)
+                r->n_sels += ns;
         }
         if (r->n_sels == 0) continue;
 

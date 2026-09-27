@@ -126,7 +126,7 @@ Suggested order, highest leverage first:
     - Site: `sbin/syslogd/syslogd.c:149`, `:234-241`
     - Fix: Keep the named facility with the `none` level and exclude only that facility in `rule_matches`.
     - Verify: `tests/`: with the shipped `syslog.conf`, a `daemon.info` message reaches `/var/log/messages` and an `auth.info` one does not.
-- [ ] **UTL-SYSLOG-02** (high) Comma-separated facility lists are not parsed, so the shipped `auth,authpriv.*` rule is dropped and `auth.log` gets nothing (REQ: REQ-UTLA-0020)
+- [x] **UTL-SYSLOG-02** (high) Comma-separated facility lists are not parsed, so the shipped `auth,authpriv.*` rule is dropped and `auth.log` gets nothing (REQ: REQ-UTLA-0020)
     - Site: `sbin/syslogd/syslogd.c:146`
     - Fix: Parse `fac1,fac2.level` into one selector per facility.
     - Verify: An `authpriv.notice` message reaches `/var/log/auth.log`.
