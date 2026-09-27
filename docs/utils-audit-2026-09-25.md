@@ -118,7 +118,7 @@ Suggested order, highest leverage first:
     - Site: `sbin/init/init.c:398-400` with `:111-116`, `:466-467`
     - Fix: Restore SIGHUP (and every other signal init ignores) to SIG_DFL in the child before exec of getty, rc scripts and daemons.
     - Verify: A process started from rc.d or a getty session has SIGHUP at SIG_DFL (`/proc/<pid>/status` SigIgn), and a telnet disconnect terminates the session.
-- [ ] **UTL-INIT-02** (low) The tty1 getty cannot be disabled when sdm runs, although `rc.d/60-sdm` says to (REQ: REQ-UTLA-0018)
+- [x] **UTL-INIT-02** (low) The tty1 getty cannot be disabled when sdm runs, although `rc.d/60-sdm` says to (REQ: REQ-UTLA-0018)
     - Site: `etc/rc.d/60-sdm` vs `sbin/init/init.c:55-59` (compiled-in line table)
     - Fix: Read the getty lines from a configuration file (e.g. `/etc/ttys`), or correct the rc.d comment.
     - Verify: With tty1 disabled in the configuration, init starts no getty there.

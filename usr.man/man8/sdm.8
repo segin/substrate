@@ -271,16 +271,23 @@ xterm = xterm \-fn 9x15
 .BR reboot (8),
 .BR poweroff (8),
 .BR getty (8),
-.BR crypt (3)
+.BR crypt (3),
+.BR ttys (5)
 .SH BUGS
 The X server runs with access control disabled
 .RB ( \-ac ),
 so any client able to reach display :0 can connect to it.
 .PP
-.BR init (8)
-always runs a getty on
+The shipped
+.I /etc/ttys
+runs a getty on
 .IR /dev/tty1 ,
-which shares the console with the X server.
+which shares the console with the X server; set that line
+.B off
+(see
+.BR ttys (5))
+when using
+.BR sdm .
 .PP
 No utmp or wtmp records are written for graphical logins.
 .PP

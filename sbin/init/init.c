@@ -37,7 +37,7 @@
 #include <utmp.h>
 
 struct gettyline {
-    const char *tty;        /* device path */
+    char        tty[32];    /* device path */
     pid_t       pid;        /* current getty pid (0 if not running) */
     time_t      last_spawn; /* wall-clock seconds of last spawn */
 };
@@ -51,13 +51,69 @@ struct gettyline {
  * through sys/drivers/console/tty.c which has the full line discipline.
  * Run the primary getty on tty1 and reserve /dev/console for kernel
  * diagnostics where its raw write semantics are actually desirable.
+ *
+ * The lines come from /etc/ttys (see load_ttys()); without that file,
+ * tty1 to tty3.
  */
-static struct gettyline g_lines[] = {
-    { "/dev/tty1",    0, 0 },
-    { "/dev/tty2",    0, 0 },
-    { "/dev/tty3",    0, 0 },
-};
-#define NLINES ((int)(sizeof(g_lines) / sizeof(g_lines[0])))
+#define TTYS_PATH  "/etc/ttys"
+#define MAX_LINES  16
+
+static struct gettyline g_lines[MAX_LINES];
+static int              g_nlines;
+#define NLINES g_nlines
+
+static void
+add_line(const char *name)
+{
+    if (g_nlines >= MAX_LINES) {
+        fprintf(stderr, "init: %s: more than %d lines, %s ignored\n",
+                TTYS_PATH, MAX_LINES, name);
+        return;
+    }
+    snprintf(g_lines[g_nlines].tty, sizeof(g_lines[g_nlines].tty), "%s%s",
+             name[0] == '/' ? "" : "/dev/", name);
+    g_lines[g_nlines].pid = 0;
+    g_lines[g_nlines].last_spawn = 0;
+    g_nlines++;
+}
+
+/*
+ * Read the terminal lines to run a getty on from /etc/ttys: one line per
+ * terminal, "<tty> on" or "<tty> off" (a name under /dev, or a full path),
+ * with '#' comments and blank lines ignored.  Only "on" lines get a getty,
+ * so turning tty1 off frees the console for sdm(8).  Without the file,
+ * tty1 to tty3 are used.
+ */
+static void
+load_ttys(void)
+{
+    FILE *f = fopen(TTYS_PATH, "r");
+    char  line[128];
+
+    g_nlines = 0;
+    if (f == NULL) {
+        add_line("tty1");
+        add_line("tty2");
+        add_line("tty3");
+        return;
+    }
+    while (fgets(line, sizeof(line), f) != NULL) {
+        char *save = NULL;
+        char *name = strtok_r(line, " \t\r\n", &save);
+        char *status;
+
+        if (name == NULL || name[0] == '#')
+            continue;
+        status = strtok_r(NULL, " \t\r\n", &save);
+        if (status != NULL && strcmp(status, "on") == 0) {
+            add_line(name);
+        } else if (status == NULL || strcmp(status, "off") != 0) {
+            fprintf(stderr, "init: %s: %s: status must be on or off\n",
+                    TTYS_PATH, name);
+        }
+    }
+    fclose(f);
+}
 
 /*
  * Shutdown intent.  g_shutdown_cmd selects what reboot() does at the
@@ -495,7 +551,8 @@ main(int argc, char **argv)
         }
     }
 
-    /* Spawn initial gettys. */
+    /* Spawn initial gettys, on the lines /etc/ttys enables. */
+    load_ttys();
     {
         time_t now = time(NULL);
         for (int i = 0; i < NLINES; i++) {

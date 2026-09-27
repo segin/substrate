@@ -1,0 +1,58 @@
+.TH TTYS 5 2026-09-26 "Substrate" "File Formats"
+.SH NAME
+ttys \- terminal lines for getty
+.SH SYNOPSIS
+.B /etc/ttys
+.SH DESCRIPTION
+The file
+.I /etc/ttys
+lists the terminal lines on which
+.BR init (8)
+starts
+.BR getty (8).
+Each line holds a terminal and its status, separated by blanks:
+.PP
+.EX
+tty1	on
+tty2	off
+.EE
+.PP
+The terminal is a device name under
+.I /dev
+or a full path.
+The status is
+.B on
+to run a getty on the line or
+.B off
+not to; any other status is reported on standard error and the line is
+not used.
+Blank lines and lines beginning with
+.B #
+are ignored.
+At most 16 lines are used.
+.PP
+.B init
+reads the file once, after
+.I /etc/rc
+has run and before it starts the first getty.
+If the file does not exist, gettys run on
+.IR /dev/tty1 ,
+.I /dev/tty2
+and
+.IR /dev/tty3 .
+.SH FILES
+.TP
+.I /etc/ttys
+.SH EXAMPLES
+Leave the first console to the graphical login of
+.BR sdm (8):
+.PP
+.EX
+tty1	off
+tty2	on
+tty3	on
+.EE
+.SH SEE ALSO
+.BR getty (8),
+.BR init (8),
+.BR sdm (8)

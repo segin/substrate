@@ -63,12 +63,15 @@ waits for it to finish before going on.
 .IP 7. 3
 A
 .B /sbin/getty
-is started on each of
+is started on each terminal line that
+.I /etc/ttys
+turns on (see
+.BR ttys (5));
+without that file, on each of
 .IR /dev/tty1 ,
 .I /dev/tty2
 and
 .IR /dev/tty3 .
-This table is compiled in.
 Each getty runs in a new session.
 .PP
 Every process
@@ -257,8 +260,9 @@ Shell helpers for the service scripts.
 .I /sbin/getty
 Program run on each terminal line.
 .TP
-.IR /dev/tty1 ", " /dev/tty2 ", " /dev/tty3
-Terminal lines served.
+.I /etc/ttys
+Terminal lines served; see
+.BR ttys (5).
 .TP
 .I /var/run/utmp
 Current logins; reset at boot.
@@ -287,12 +291,9 @@ Restart one service by hand:
 .BR telnetd (8),
 .BR sdm (8),
 .BR reboot (2),
+.BR ttys (5),
 .BR utmp (5)
 .SH BUGS
-There is no
-.IR inittab :
-the set of terminal lines is compiled in, so the getty on
-.I /dev/tty1
-cannot be turned off when
-.BR sdm (8)
-uses the same console, and there are no run levels.
+There are no run levels, and
+.I /etc/ttys
+is read only at boot.

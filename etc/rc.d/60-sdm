@@ -11,8 +11,8 @@
 # down its Xfbdev before exiting.
 #
 # NOTE: sdm drives the framebuffer console (vt1).  If a getty is also
-# running on that console the two fight over the display — disable the
-# console getty when you enable the graphical login.
+# running on that console the two fight over the display — set tty1
+# "off" in /etc/ttys when you enable the graphical login.
 
 PROG=/usr/sbin/sdm
 PIDFILE=/var/run/sdm.pid

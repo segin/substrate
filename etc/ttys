@@ -1,0 +1,10 @@
+# /etc/ttys -- terminal lines init(8) runs a getty(8) on.
+#
+# One line per terminal: the device (under /dev, or a full path) and
+# "on" or "off".  init reads this once, after /etc/rc has run.  Set tty1
+# off when sdm(8) owns the console (see /etc/rc.d/60-sdm).
+#
+# name	status
+tty1	on
+tty2	on
+tty3	on
