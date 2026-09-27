@@ -283,7 +283,7 @@ Suggested order, highest leverage first:
     - Site: `bin/sort/sort.c:543`
     - Fix: Implement merge of pre-sorted inputs (or document that it sorts them, which gives the same output).
     - Verify: `sort -m a b` output equals `sort a b` for sorted inputs.
-- [ ] **UTL-PRINTF-01** (medium) A lone `'` or `"` argument makes the numeric parser read past the string (REQ: REQ-UTLA-0057)
+- [x] **UTL-PRINTF-01** (medium) A lone `'` or `"` argument makes the numeric parser read past the string (REQ: REQ-UTLA-0057)
     - Site: `bin/printf/printf.c:128`, `:153`
     - Fix: Check the argument's length before reading `arg[1]`/`arg[2]`.
     - Verify: `printf %d "'"` prints 0 (or an error) without an out-of-bounds read.

@@ -116,6 +116,22 @@ static size_t interp_b(const char *s, char *out, int *stop)
     return (size_t)(o - out);
 }
 
+/* The POSIX `'c`/`"c` form: the code of the character after the quote.  A
+ * quote with nothing after it names no character; it is diagnosed as a
+ * non-number and yields 0 (the old code read past the argument there). */
+static unsigned char char_code(const char *arg)
+{
+    if (arg[1] == '\0') {
+        fprintf(stderr, "%s: %s: expected a numeric value\n", prog, arg);
+        g_rc = 1;
+        return 0;
+    }
+    if (arg[2] != '\0')
+        fprintf(stderr, "%s: warning: extra characters after '%c'\n",
+            prog, arg[1]);
+    return (unsigned char)arg[1];
+}
+
 /* Parse a signed integer argument, honoring the POSIX `'c`/`"c` char-code
  * form and diagnosing trailing garbage / overflow. */
 static long parse_signed(const char *arg)
@@ -124,12 +140,8 @@ static long parse_signed(const char *arg)
     long  v;
     if (!arg || !*arg)
         return 0;
-    if (arg[0] == '\'' || arg[0] == '"') {
-        if (arg[2] != '\0')
-            fprintf(stderr, "%s: warning: extra characters after '%c'\n",
-                prog, arg[1]);
-        return (unsigned char)arg[1];
-    }
+    if (arg[0] == '\'' || arg[0] == '"')
+        return char_code(arg);
     errno = 0;
     v = strtol(arg, &end, 0);
     if (end == arg || *end != '\0') {
@@ -149,12 +161,8 @@ static unsigned long parse_unsigned(const char *arg)
     unsigned long v;
     if (!arg || !*arg)
         return 0;
-    if (arg[0] == '\'' || arg[0] == '"') {
-        if (arg[2] != '\0')
-            fprintf(stderr, "%s: warning: extra characters after '%c'\n",
-                prog, arg[1]);
-        return (unsigned char)arg[1];
-    }
+    if (arg[0] == '\'' || arg[0] == '"')
+        return char_code(arg);
     errno = 0;
     v = strtoul(arg, &end, 0);
     if (end == arg || *end != '\0') {

@@ -109,7 +109,8 @@ values, in decimal, octal (leading
 or hexadecimal (leading
 .BR 0x ).
 An argument that starts with a single or double quote converts to the
-byte value of the character after the quote.
+byte value of the character after the quote; a quote on its own is not
+a number and converts to 0.
 An argument that is not entirely a valid number, or is out of range,
 is diagnosed on standard error and the converted value is used anyway;
 the exit status becomes 1.
