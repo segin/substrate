@@ -130,8 +130,16 @@ static void parse_expr() {
 }
 
 
+/* Report a compile error in `lineno` and discard the code generated for
+ * the line so far.  Returns 0 for compile_line to pass back. */
+static int syntax_error(int lineno, const char *what, int *out_offset, int start) {
+    printf("Error: %s in line %d\n", what, lineno);
+    *out_offset = start;
+    return 0;
+}
+
 int compile_line(int lineno, const char *text, int *out_offset) {
-    (void)lineno; /* Unused but kept for signature */
+    int start = *out_offset;
     cursor = text;
     skip_white();
     
@@ -163,7 +171,12 @@ int compile_line(int lineno, const char *text, int *out_offset) {
                     skip_white();
                     continue;
                 } else {
+                    /* An item the expression parser cannot consume (a
+                     * stray ")", say) would be retried forever. */
+                    const char *before = cursor;
                     parse_expr();
+                    if (cursor == before)
+                        return syntax_error(lineno, "syntax error", out_offset, start);
                     space[*out_offset].opcode = OP_PRINT;
                     (*out_offset)++;
                 }

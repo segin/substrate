@@ -151,6 +151,12 @@ and
 .B RETURN
 without
 .BR GOSUB .
+.PP
+A numbered line the compiler cannot parse, such as
+.BR "10 PRINT )" ,
+is reported as
+.BI "Error: syntax error in line " n
+and is not stored.
 .SH EXIT STATUS
 .TP
 .B 0
@@ -196,7 +202,3 @@ Replaced lines are not freed from the instruction buffer, which holds
 8192 instructions in total; the program table holds 600 lines and the
 symbol table 200 variables.
 The instruction and line tables are not bounds-checked.
-.PP
-A malformed expression such as
-.B "PRINT )"
-can make the compiler loop without consuming input.

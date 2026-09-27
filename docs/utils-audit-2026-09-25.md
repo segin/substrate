@@ -417,7 +417,7 @@ Suggested order, highest leverage first:
 
 ## G. bas and ed
 
-- [ ] **UTL-BAS-01** (high) A `PRINT` token `parse_factor` does not consume loops the compiler forever, overrunning `space[]` (REQ: REQ-UTLA-0089)
+- [x] **UTL-BAS-01** (high) A `PRINT` token `parse_factor` does not consume loops the compiler forever, overrunning `space[]` (REQ: REQ-UTLA-0089)
     - Site: `bin/bas/compile.c:147-172`
     - Fix: Stop the PRINT loop (syntax error) when no progress is made.
     - Verify: `10 PRINT )` reports a syntax error.
