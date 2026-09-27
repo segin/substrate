@@ -38,6 +38,25 @@ the executed program.
 is an array of pointers to strings, conventionally of the form
 .BR key=value ,
 which are passed as the environment of the new program.
+.PP
+If the program file has its set-user-ID bit set, the effective user ID
+becomes the file's owner; with the set-group-ID bit, the effective group
+ID becomes the file's group.
+The real IDs are unchanged, and the saved set-user-ID and set-group-ID
+become the new effective IDs, so the program can drop its privilege with
+.BR seteuid (2)
+and take it back.
+When the effective IDs then differ from the real ones, the auxiliary
+vector's
+.B AT_SECURE
+is 1, and the dynamic linker ignores
+.BR LD_PRELOAD .
+The bits are ignored for an interpreter script, for a program on a
+filesystem mounted
+.BR nosuid ,
+and when the calling process is being traced by a process whose
+effective user ID is not 0 (the tracer could otherwise go on controlling
+the privileged program).
 .SH RETURN VALUE
 On success,
 .BR execve ()

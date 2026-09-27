@@ -1726,6 +1726,15 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
         // the bits are ignored for images that live on such a mount.
         int honor_suid = !(file && file->mp &&
                            (file->mp->mnt_flag & MNT_NOSUID));
+        // Nor when an unprivileged tracer is attached: it could go on
+        // reading and writing the process's memory and registers after the
+        // exec raised its credentials -- root for anyone who can
+        // PTRACE_TRACEME and exec a setuid-root program.  As on Linux and
+        // the BSDs, the program runs with the caller's own ids, still
+        // traced.  A root tracer may already do anything, so it is exempt.
+        if ((current_process->p_flag & P_TRACED) &&
+            !(current_process->p_tracer && current_process->p_tracer->euid == 0))
+            honor_suid = 0;
         if (honor_suid && file && (file->mask & S_ISUID))
             current_process->euid = file->uid;
         if (honor_suid && file && (file->mask & S_ISGID))
