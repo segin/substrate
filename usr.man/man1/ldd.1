@@ -46,7 +46,8 @@ A file whose
 .B PT_INTERP
 is
 .I /sbin/ld.so
-(a native dynamic executable) is executed with
+(a native dynamic executable), unless it is set-user-ID or set-group-ID,
+is executed with
 .B LD_TRACE_LOADED_OBJECTS=1
 in its environment and no arguments.
 .BR ld.so (8)
@@ -62,8 +63,10 @@ hit a fatal error such as a missing library),
 .B ldd
 falls back to the method below.
 .IP \(bu
-Any other dynamic file (a shared library, or a Linux, FreeBSD or NetBSD
-binary) is not executed.
+Any other dynamic file (a shared library, a Linux, FreeBSD or NetBSD
+binary, or a set-user-ID or set-group-ID program, which
+.BR ld.so (8)
+would run rather than trace) is not executed.
 .B ldd
 prints a line
 .RS
@@ -149,14 +152,6 @@ which writes it to standard error; it cannot be piped without
 redirecting standard error.
 .PP
 A missing dependency does not change the exit status.
-.PP
-Native executables are run to obtain the listing.
-.BR ld.so (8)
-ignores
-.B LD_TRACE_LOADED_OBJECTS
-for set-user-ID and set-group-ID programs, so running
-.B ldd
-on such a program as an ordinary user starts the program itself.
 .PP
 Substrate's own brand,
 .B ELFOSABI_SUBSTRATE

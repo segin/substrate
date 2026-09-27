@@ -87,7 +87,7 @@ Suggested order, highest leverage first:
     - Site: `bin/sed/sed.c:321-323` (the target build has no `HAVE_MKSTEMP`)
     - Fix: Use `mkstemp()` (libc provides it) unconditionally in the target build, in the file's own directory.
     - Verify: `tests/bin/sed/`: a pre-planted symlink at the old predictable name is not followed.
-- [ ] **UTL-LDSO-02** (medium) `ldd` on a setuid program runs the program (REQ: REQ-UTLA-0011)
+- [x] **UTL-LDSO-02** (medium) `ldd` on a setuid program runs the program (REQ: REQ-UTLA-0011)
     - Site: `sbin/ld.so/ld_main.c:244-247`
     - Fix: Keep dropping `LD_TRACE_LOADED_OBJECTS` for secure-mode programs, but have `ldd` read a setuid/setgid binary's headers directly instead of executing it.
     - Verify: `tests/usr.bin/ldd/`: `ldd` on a setuid binary lists its dependencies and does not run it.

@@ -324,7 +324,15 @@ do_ldd(const char *path)
      * but the child fork'd from us inherits our memory, and we
      * don't want a 100 KB buffer per fork.
      */
-    if (have_interp && strcmp(interp, SUBSTRATE_LDSO_INTERP) == 0) {
+    /*
+     * Never for a setuid or setgid file, though: ld.so ignores
+     * LD_TRACE_LOADED_OBJECTS in a program it runs with privileges, so
+     * the program would simply run, with those privileges, for whoever
+     * ran ldd.  Its headers are read instead, below.
+     */
+    struct stat pst;
+    int setid = stat(path, &pst) != 0 || (pst.st_mode & (S_ISUID | S_ISGID));
+    if (have_interp && strcmp(interp, SUBSTRATE_LDSO_INTERP) == 0 && !setid) {
         free(blob);
         if (trace_via_ldso(path) == 0) {
             return 0;
