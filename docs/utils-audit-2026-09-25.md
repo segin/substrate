@@ -291,7 +291,7 @@ Suggested order, highest leverage first:
     - Site: `bin/printf/printf.c:206`
     - Fix: Interpret escapes as the format is walked, so `\045` prints `%` and `\0` does not truncate.
     - Verify: `printf '\045d\n'` prints `%d`.
-- [ ] **UTL-SLEEP-01** (medium) `sleep -1` never returns; operands are not validated (REQ: REQ-UTLA-0059)
+- [x] **UTL-SLEEP-01** (medium) `sleep -1` never returns; operands are not validated (REQ: REQ-UTLA-0059)
     - Site: `bin/sleep/sleep.c:10-11`
     - Fix: Parse with `strtol`/`strtod`, reject negatives and garbage (exit 1); allow fractional seconds via `nanosleep`.
     - Verify: `sleep -1` and `sleep x` fail at once; `sleep 0.2` sleeps 0.2 s.
