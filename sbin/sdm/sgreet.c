@@ -21,6 +21,7 @@
 #include <X11/Xutil.h>
 #include <X11/keysym.h>
 
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -428,7 +429,11 @@ int main(void) {
                     }
                     if (kid > 0) {
                         int st;
-                        while (waitpid(kid, &st, 0) < 0) /* retry */;
+                        /* Retry only an interrupted wait: ECHILD (the
+                         * child already reaped -- SIGCHLD ignored, say)
+                         * would otherwise spin here forever. */
+                        while (waitpid(kid, &st, 0) < 0 && errno == EINTR)
+                            ;
                     }
                     return 0;   /* sdm restarts a fresh greeter */
                 }

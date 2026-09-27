@@ -67,7 +67,7 @@ Suggested order, highest leverage first:
     - Site: `sbin/sdm/sgreet.c:173`
     - Fix: Check `initgroups()` and refuse the session on failure, before `setgid`/`setuid`.
     - Verify: Code review; a forced failure (mock) aborts the session.
-- [ ] **UTL-SGREET-02** (medium) `sgreet` spins forever on ECHILD (REQ: REQ-UTLA-0006)
+- [x] **UTL-SGREET-02** (medium) `sgreet` spins forever on ECHILD (REQ: REQ-UTLA-0006)
     - Site: `sbin/sdm/sgreet.c:429`
     - Fix: Retry `waitpid()` only on EINTR; treat ECHILD as "the session is gone".
     - Verify: The greeter returns when the session child has already been reaped.
