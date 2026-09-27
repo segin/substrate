@@ -166,7 +166,7 @@ Suggested order, highest leverage first:
     - Site: `sbin/sdm/sdm.sh:30-39`
     - Fix: Run the child in the background and `wait`, so the TERM trap runs at once and forwards the signal.
     - Verify: `60-sdm stop` ends sdm and its X server within a second.
-- [ ] **UTL-DHC-15** (low) A failed install on renew or rebind is ignored (REQ: REQ-UTLA-0030)
+- [x] **UTL-DHC-15** (low) A failed install on renew or rebind is ignored (REQ: REQ-UTLA-0030)
     - Site: `sbin/dhclient/dhclient.c:868` (`extend()` ignores `install_lease()`'s result; DHC-08 made it fatal only for the first bind)
     - Fix: Treat a failed reinstall like a lost lease: drop the address and reacquire.
     - Verify: `tests/lib/net/wire/test_dhclient.py`: code review, since the harness cannot make the ioctls fail (as for DHC-08).

@@ -798,7 +798,8 @@ static void sleep_until(double t) {
  * 60 s, before retransmitting.  The host is configured by now, so this
  * goes through an ordinary UDP socket on port 68 -- a unicast renewal needs
  * the kernel's routing and ARP.  Returns 1 on an ACK (lease updated and
- * reinstalled), -1 on a NAK, 0 when the phase ran out.
+ * reinstalled), -1 on a NAK, -2 on an ACK whose lease could not be
+ * installed, 0 when the phase ran out.
  */
 static int extend(const char *iface, const uint8_t hw[6], struct lease *L,
                   int rebinding) {
@@ -864,8 +865,11 @@ static int extend(const char *iface, const uint8_t hw[6], struct lease *L,
             if (*mt != DHCP_ACK) continue;
             fprintf(stdout, "dhclient: DHCPACK (%s)\n", phase);
             lease_from_ack(bp, (size_t)r, sent_at, L);
-            install_lease(iface, bp, (size_t)r,
-                          rebinding ? "rebound" : "renewed");
+            if (install_lease(iface, bp, (size_t)r,
+                              rebinding ? "rebound" : "renewed") != 0) {
+                close(s);
+                return -2;
+            }
             close(s);
             return 1;
         }
@@ -1173,9 +1177,13 @@ static void maintain(const char *iface, const uint8_t hw[6], int ifindex,
             if (L->infinite) return;
             continue;                               /* BOUND again */
         }
+        /* A lease that could not be reinstalled is treated as lost too:
+         * the interface no longer matches what the server granted. */
         drop_lease(iface);
         fprintf(stdout, "dhclient: %s; address released, restarting "
-                "from INIT\n", r < 0 ? "lease refused" : "lease expired");
+                "from INIT\n",
+                r == -2 ? "renewed lease could not be installed" :
+                r < 0 ? "lease refused" : "lease expired");
         while (acquire_quietly(iface, hw, ifindex, L) != 0)
             sleep(DHCP_REACQUIRE_WAIT);
         if (L->infinite) return;

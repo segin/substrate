@@ -104,8 +104,9 @@ at least 60 seconds.
 An acknowledgement updates the lease and reinstalls it (and
 .IR /etc/resolv.conf ).
 .PP
-On a DHCPNAK, or when the lease expires, the child removes the address and
-gateway from the interface and starts again from DHCPDISCOVER, retrying
+On a DHCPNAK, when an acknowledged renewal cannot be installed, or when
+the lease expires, the child removes the address and gateway from the
+interface and starts again from DHCPDISCOVER, retrying
 every 60 seconds until it gets a new lease.
 .PP
 Progress messages are written to standard output and errors to standard
