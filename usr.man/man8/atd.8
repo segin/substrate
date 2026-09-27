@@ -64,9 +64,15 @@ and forks a child, which starts a new session, creates
 owned by the job's owner, takes the supplementary
 groups, group and user ID of the owner of the job file (if any of these
 fails the job is not run and the child exits with status 126), sends
-standard output and standard error to that file, and executes
+standard output and standard error to that file, sets the umask to 022,
+and executes
 .B /bin/sh
 .IR job-file .
+A job queued by
+.BR at (1)
+begins with a
+.B umask
+command that restores the submitter's umask.
 .B atd
 waits for the job to finish, then removes the job file.
 Jobs therefore run one at a time.
@@ -155,9 +161,7 @@ files are left in
 .I /var/spool/at/spool
 and never removed.
 .PP
-The job's environment, working directory and umask as recorded by
-.BR at (1)
-are not restored; jobs run with umask 0, in
+The job's environment and working directory are not restored; jobs run in
 .BR atd 's
 working directory and environment.
 .PP

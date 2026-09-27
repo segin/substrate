@@ -6,6 +6,7 @@
 #include <errno.h>
 #include <getopt.h>
 #include <fcntl.h>
+#include <sys/stat.h>
 
 #include <at.h>
 
@@ -88,6 +89,8 @@ int main(int argc, char *argv[]) {
     }
 
     /* Snapshot identity and environment */
+    req.umask_snapshot = umask(0);
+    umask(req.umask_snapshot);
     req.submitter_uid = getuid();
     req.submitter_gid = getgid();
 

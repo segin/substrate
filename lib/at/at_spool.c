@@ -110,7 +110,14 @@ int at_spool_create_job(const struct batch_submit_request *req, struct batch_sub
         return -1;
     }
 
-    if (copy_fd_contents(req->input_fd, fd) != 0) {
+    /* The job runs under /bin/sh; its first command restores the umask
+     * the job was submitted with (atd's own default applies to a job
+     * without one). */
+    char umask_line[32];
+    int ulen = snprintf(umask_line, sizeof(umask_line), "umask %04o\n",
+                        (unsigned)(req->umask_snapshot & 0777));
+    if (write(fd, umask_line, (size_t)ulen) != ulen ||
+        copy_fd_contents(req->input_fd, fd) != 0) {
         snprintf(out_res->diagnostics, sizeof(out_res->diagnostics),
                  "Failed to write spool file: %s", strerror(errno));
         out_res->status_code = 1;

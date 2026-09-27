@@ -59,7 +59,7 @@ Suggested order, highest leverage first:
     - Site: `lib/at/at_exec.c:51` vs `:61-65`
     - Fix: Create the output file in the root-owned spool before dropping privileges (then `fchown` it to the job owner), or pass an already-open descriptor.
     - Verify: A job queued by a non-root user produces its mailed or spooled output.
-- [ ] **UTL-AT-03** (medium) `at` jobs run with umask 0 (REQ: REQ-UTLA-0004)
+- [x] **UTL-AT-03** (medium) `at` jobs run with umask 0 (REQ: REQ-UTLA-0004)
     - Site: `usr.sbin/atd/atd.c:78`
     - Fix: Record the submitter's umask in the job request and have `atd` apply it; default to 022 when absent.
     - Verify: A job that creates a file gets the submitter's umask applied.

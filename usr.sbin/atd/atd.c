@@ -84,6 +84,9 @@ build_job_request(char queue_name, const struct stat *st, struct batch_submit_re
                                               : AT_PROFILE_POSIX_STRICT;
     req->submitter_uid = st->st_uid;
     req->submitter_gid = st->st_gid;
+    /* A job restores its submitter's umask as its first command; this is
+     * the umask for one that does not. */
+    req->umask_snapshot = 022;
 
     return 0;
 }
