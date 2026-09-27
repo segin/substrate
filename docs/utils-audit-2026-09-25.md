@@ -83,7 +83,7 @@ Suggested order, highest leverage first:
     - Site: `bin/login/login.c:176-187`
     - Fix: Consume the rest of an over-long line and reject the name.
     - Verify: A 100-byte name is rejected without its tail reaching the password prompt.
-- [ ] **UTL-SED-12** (high) `sed -i` uses a predictable temporary file opened with `fopen("w")` (REQ: REQ-UTLA-0010)
+- [x] **UTL-SED-12** (high) `sed -i` uses a predictable temporary file opened with `fopen("w")` (REQ: REQ-UTLA-0010)
     - Site: `bin/sed/sed.c:321-323` (the target build has no `HAVE_MKSTEMP`)
     - Fix: Use `mkstemp()` (libc provides it) unconditionally in the target build, in the file's own directory.
     - Verify: `tests/bin/sed/`: a pre-planted symlink at the old predictable name is not followed.

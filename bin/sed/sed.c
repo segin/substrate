@@ -100,18 +100,15 @@ process_files(int argc, char **argv, int optind)
             int tmpfd = -1;
             FILE *tmpfp = NULL;
 
-#ifdef HAVE_MKSTEMP
+            /* An unpredictable name created with O_EXCL: a guessable one
+             * lets anyone who can write the directory plant a symlink there
+             * and have us overwrite its target. */
             tmpfd = mkstemp(tmpname);
             if (tmpfd < 0) {
                 warn("mkstemp '%s': %s", tmpname, strerror(errno));
                 free(tmpname); fclose(fp); ret = 1; continue;
             }
             tmpfp = fdopen(tmpfd, "w");
-#else
-            /* fallback: use a deterministic name */
-            snprintf(tmpname, nlen + 16, "%s.sed%d", name, (int)getpid());
-            tmpfp = fopen(tmpname, "w");
-#endif
             if (!tmpfp) {
                 warn("cannot create temp '%s': %s", tmpname, strerror(errno));
                 if (tmpfd >= 0) { close(tmpfd); unlink(tmpname); } /* don't leak the fd or leave the temp behind */

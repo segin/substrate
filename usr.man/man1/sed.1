@@ -90,8 +90,9 @@ and a newline to the script.
 Edit each
 .I file
 in place.
-Output for each file is written to a temporary file next to it, which
-receives the original's mode and owner, is synced to disk, and is then
+Output for each file is written to a temporary file next to it, created by
+.BR mkstemp (3)
+with an unpredictable name, which receives the original's mode and owner, is synced to disk, and is then
 renamed over the original.
 If
 .I ext
@@ -606,8 +607,3 @@ Without
 .BR \-s ,
 .B \-i
 does not reset line numbers between files.
-The temporary file for
-.B \-i
-is named
-.IB file .sed pid
-and is opened without exclusive creation.

@@ -13,7 +13,7 @@ OBJS = $(SRCS:.c=.o)
 ifdef NATIVE_BUILD
 REGEX_LIB = $(TOP)/usr.lib/regex/libregex.a
 LDADD = $(REGEX_LIB)
-USER_CFLAGS += -DNATIVE_BUILD=1 -D_GNU_SOURCE -DHAVE_MKSTEMP
+USER_CFLAGS += -DNATIVE_BUILD=1 -D_GNU_SOURCE
 else
 REGEX_LIB = $(TOP)/usr.lib/regex/libregex.so.0
 LDADD = -L$(TOP)/usr.lib/regex -l:libregex.so.0
@@ -41,6 +41,6 @@ test: sed_host
 EXTRA_CLEAN = sed_host
 
 sed_host: $(SRCS) $(REGEX_LIB)
-	cc -m32 -O2 -Wall -Wextra -g -DNATIVE_BUILD=1 -D_GNU_SOURCE -DHAVE_MKSTEMP \
+	cc -m32 -O2 -Wall -Wextra -g -DNATIVE_BUILD=1 -D_GNU_SOURCE \
 	   -I$(TOP)/include -I. \
 	   -o $@ $(SRCS) $(REGEX_LIB)
