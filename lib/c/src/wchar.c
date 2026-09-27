@@ -1,81 +1,90 @@
+#include <errno.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <time.h>
 #include <stdio.h>
 #include <wchar.h>
 
+/*
+ * UTF-8 decoding with a real conversion state.  A character may arrive in
+ * pieces: when `n` bytes end partway through one, mbrtowc() returns
+ * (size_t)-2 and keeps what it has in *ps, and the next call continues
+ * from there (POSIX; gnulib's configure checks it, and replaces mbstate_t
+ * wholesale if it does not hold).  The state records, in __count, the
+ * character's full length (bits 8-15) and how many continuation bytes are
+ * still due (bits 0-7), and in __value the bits decoded so far.  __count
+ * zero is the initial state.
+ */
+#define MBS_NEED(ps)   ((ps)->__count & 0xffu)
+#define MBS_TOTAL(ps)  (((ps)->__count >> 8) & 0xffu)
+
+static mbstate_t mbrtowc_state;     /* for ps == NULL */
+
 size_t mbrtowc(wchar_t *restrict pwc, const char *restrict s, size_t n, mbstate_t *restrict ps) {
-    (void)ps;
-
-    if (s == NULL)
+    if (ps == NULL)
+        ps = &mbrtowc_state;
+    if (s == NULL) {
+        /* Equivalent to mbrtowc(NULL, "", 1, ps): back to the initial
+         * state (an incomplete character there is an error). */
+        int partial = MBS_NEED(ps) != 0;
+        ps->__count = ps->__value = 0;
+        if (partial) {
+            errno = EILSEQ;
+            return (size_t)-1;
+        }
         return 0;
-    if (n == 0)
-        return (size_t)-2;
-
-    unsigned char c0 = (unsigned char)s[0];
-    if (c0 == '\0') {
-        if (pwc)
-            *pwc = 0;
-        return 0;
     }
 
-    if (c0 < 0x80) {
-        if (pwc)
-            *pwc = (wchar_t)c0;
-        return 1;
-    }
+    unsigned int need = MBS_NEED(ps), total = MBS_TOTAL(ps);
+    uint32_t cp = ps->__value;
+    size_t used = 0;
 
-    if ((c0 & 0xE0) == 0xC0) {
-        if (n < 2)
+    if (need == 0) {
+        if (n == 0)
             return (size_t)-2;
-        unsigned char c1 = (unsigned char)s[1];
-        if ((c1 & 0xC0) != 0x80)
+        unsigned char c0 = (unsigned char)s[used++];
+        if (c0 < 0x80) {
+            if (pwc)
+                *pwc = (wchar_t)c0;
+            return c0 == '\0' ? 0 : 1;
+        }
+        if ((c0 & 0xE0) == 0xC0)      { total = 2; cp = c0 & 0x1F; }
+        else if ((c0 & 0xF0) == 0xE0) { total = 3; cp = c0 & 0x0F; }
+        else if ((c0 & 0xF8) == 0xF0) { total = 4; cp = c0 & 0x07; }
+        else {
+            errno = EILSEQ;
             return (size_t)-1;
-        wchar_t cp = (wchar_t)(((c0 & 0x1F) << 6) | (c1 & 0x3F));
-        if (cp < 0x80)
-            return (size_t)-1; /* reject overlong */
-        if (pwc)
-            *pwc = cp;
-        return 2;
+        }
+        need = total - 1;
     }
 
-    if ((c0 & 0xF0) == 0xE0) {
-        if (n < 3)
+    while (need > 0) {
+        if (used == n) {                /* incomplete: keep it for later */
+            ps->__count = (total << 8) | need;
+            ps->__value = cp;
             return (size_t)-2;
-        unsigned char c1 = (unsigned char)s[1];
-        unsigned char c2 = (unsigned char)s[2];
-        if ((c1 & 0xC0) != 0x80 || (c2 & 0xC0) != 0x80)
+        }
+        unsigned char c = (unsigned char)s[used++];
+        if ((c & 0xC0) != 0x80) {
+            ps->__count = ps->__value = 0;
+            errno = EILSEQ;
             return (size_t)-1;
-        wchar_t cp = (wchar_t)(((c0 & 0x0F) << 12) | ((c1 & 0x3F) << 6) | (c2 & 0x3F));
-        if (cp < 0x800)
-            return (size_t)-1; /* reject overlong */
-        if (cp >= 0xD800 && cp <= 0xDFFF)
-            return (size_t)-1; /* reject surrogates */
-        if (pwc)
-            *pwc = cp;
-        return 3;
+        }
+        cp = (cp << 6) | (c & 0x3F);
+        need--;
     }
+    ps->__count = ps->__value = 0;
 
-    if ((c0 & 0xF8) == 0xF0) {
-        if (n < 4)
-            return (size_t)-2;
-        unsigned char c1 = (unsigned char)s[1];
-        unsigned char c2 = (unsigned char)s[2];
-        unsigned char c3 = (unsigned char)s[3];
-        if ((c1 & 0xC0) != 0x80 || (c2 & 0xC0) != 0x80 || (c3 & 0xC0) != 0x80)
-            return (size_t)-1;
-        wchar_t cp = (wchar_t)(((c0 & 0x07) << 18) | ((c1 & 0x3F) << 12) |
-                             ((c2 & 0x3F) << 6) | (c3 & 0x3F));
-        if (cp < 0x10000)
-            return (size_t)-1; /* reject overlong */
-        if (cp > 0x10FFFF)
-            return (size_t)-1; /* reject beyond Unicode range */
-        if (pwc)
-            *pwc = cp;
-        return 4;
+    if ((total == 2 && cp < 0x80) ||                    /* overlong */
+        (total == 3 && (cp < 0x800 || (cp >= 0xD800 && cp <= 0xDFFF))) ||
+        (total == 4 && (cp < 0x10000 || cp > 0x10FFFF))) {
+        errno = EILSEQ;
+        return (size_t)-1;
     }
-
-    return (size_t)-1;
+    if (pwc)
+        *pwc = (wchar_t)cp;
+    return used;
 }
 
 /*
@@ -90,7 +99,8 @@ int mbtowc(wchar_t *pwc, const char *s, size_t n) {
         return 0;
     if (n == 0)
         return -1;
-    size_t r = mbrtowc(pwc, s, n, NULL);
+    mbstate_t st = { 0, 0 };        /* stateless: never a partial carry-over */
+    size_t r = mbrtowc(pwc, s, n, &st);
     if (r == (size_t)-1 || r == (size_t)-2)
         return -1;
     return (int)r;
@@ -199,8 +209,8 @@ int wcswidth(const wchar_t *pwcs, size_t n) {
 /* mbrlen: how many bytes does the next char take?  Substrate is
  * UTF-8 so we just dispatch through mbrtowc. */
 size_t mbrlen(const char *s, size_t n, mbstate_t *ps) {
-    (void)ps;
-    return mbrtowc(NULL, s, n, NULL);
+    static mbstate_t mbrlen_state;  /* POSIX: its own, not mbrtowc's */
+    return mbrtowc(NULL, s, n, ps ? ps : &mbrlen_state);
 }
 
 size_t wcrtomb(char *s, wchar_t wc, mbstate_t *ps) {
@@ -212,11 +222,15 @@ size_t wcrtomb(char *s, wchar_t wc, mbstate_t *ps) {
 }
 
 size_t mbsrtowcs(wchar_t *dst, const char **src, size_t len, mbstate_t *ps) {
-    (void)ps;
+    static mbstate_t mbsrtowcs_state;
+    if (ps == NULL)
+        ps = &mbsrtowcs_state;
     size_t produced = 0;
     while (len == 0 || produced < len) {
         wchar_t wc;
-        size_t r = mbrtowc(&wc, *src, 4, NULL);
+        /* The string is NUL-terminated, and a NUL is never a continuation
+         * byte, so a 4-byte window cannot run past its end. */
+        size_t r = mbrtowc(&wc, *src, 4, ps);
         if (r == (size_t)-1 || r == (size_t)-2) return (size_t)-1;
         if (dst) dst[produced] = wc;
         if (wc == 0) {
@@ -426,7 +440,8 @@ size_t wcsxfrm(wchar_t *dst, const wchar_t *src, size_t n) {
 }
 size_t wcsftime(wchar_t *s, size_t m, const wchar_t *f, const struct tm *t) { (void)s; (void)m; (void)f; (void)t; return 0; }
 
-int mbsinit(const mbstate_t *ps) { (void)ps; return 1; }
+/* Initial state: no character in progress (see mbrtowc). */
+int mbsinit(const mbstate_t *ps) { return ps == NULL || ps->__count == 0; }
 size_t wcscspn(const wchar_t *s, const wchar_t *reject) {
     size_t n = 0;
     while (s[n] && !wcschr(reject, s[n])) n++;
