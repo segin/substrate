@@ -1880,7 +1880,54 @@ int sys_getgid(void) { return current_process->gid; }
 int sys_getppid(void) { return current_process->ppid; }
 int sys_geteuid(void) { return current_process->euid; }
 int sys_getegid(void) { return current_process->egid; }
-int sys_setuid(int u) {
+
+/*
+ * issetugid(2) bookkeeping.  Every set*id() call below runs through
+ * CRED_CALL, which marks the process P_SUGID when the call succeeded and
+ * changed any of its six ids -- as BSD does, so a program that switched
+ * identity (and its children) are treated as untrusted by runtimes that
+ * ask issetugid(), exactly like one started set-ID.
+ */
+struct cred_ids { uint32_t uid, euid, suid, gid, egid, sgid; };
+
+static void cred_save(const process_t *p, struct cred_ids *c) {
+    c->uid = p->uid;  c->euid = p->euid;  c->suid = p->suid;
+    c->gid = p->gid;  c->egid = p->egid;  c->sgid = p->sgid;
+}
+
+static int cred_mark(process_t *p, const struct cred_ids *c, int ret) {
+    if (ret == 0 &&
+        (c->uid != p->uid || c->euid != p->euid || c->suid != p->suid ||
+         c->gid != p->gid || c->egid != p->egid || c->sgid != p->sgid))
+        p->p_flag |= P_SUGID;
+    return ret;
+}
+
+#define CRED_CALL(call) do {                                    \
+        struct cred_ids before_;                                \
+        cred_save(current_process, &before_);                   \
+        return cred_mark(current_process, &before_, (call));    \
+    } while (0)
+
+static int setuid_ids(int u);
+static int setgid_ids(int g);
+static int seteuid_ids(int euid);
+static int setegid_ids(int egid);
+static int setreuid_ids(int ruid, int euid);
+static int setregid_ids(int rgid, int egid);
+static int setresuid_ids(int ruid, int euid, int suid);
+static int setresgid_ids(int rgid, int egid, int sgid);
+
+int sys_setuid(int u)                          { CRED_CALL(setuid_ids(u)); }
+int sys_setgid(int g)                          { CRED_CALL(setgid_ids(g)); }
+int sys_seteuid(int euid)                      { CRED_CALL(seteuid_ids(euid)); }
+int sys_setegid(int egid)                      { CRED_CALL(setegid_ids(egid)); }
+int sys_setreuid(int ruid, int euid)           { CRED_CALL(setreuid_ids(ruid, euid)); }
+int sys_setregid(int rgid, int egid)           { CRED_CALL(setregid_ids(rgid, egid)); }
+int sys_setresuid(int ruid, int euid, int suid) { CRED_CALL(setresuid_ids(ruid, euid, suid)); }
+int sys_setresgid(int rgid, int egid, int sgid) { CRED_CALL(setresgid_ids(rgid, egid, sgid)); }
+
+static int setuid_ids(int u) {
     if (current_process->euid == 0) {
         current_process->uid = u;
         current_process->euid = u;
@@ -1893,7 +1940,7 @@ int sys_setuid(int u) {
     }
     return -EPERM;
 }
-int sys_setgid(int g) {
+static int setgid_ids(int g) {
     if (current_process->euid == 0) {
         current_process->gid = g;
         current_process->egid = g;
@@ -1912,7 +1959,7 @@ int sys_setgid(int g) {
  * its euid to its real, effective or saved uid; the superuser to anything.
  * Real and saved uid are unchanged.
  */
-int sys_seteuid(int euid) {
+static int seteuid_ids(int euid) {
     process_t *p = current_process;
     if (p->euid == 0 ||
         (uint32_t)euid == p->uid ||
@@ -1925,7 +1972,7 @@ int sys_seteuid(int euid) {
 }
 
 /* setegid(2): the gid analogue of seteuid(2). */
-int sys_setegid(int egid) {
+static int setegid_ids(int egid) {
     process_t *p = current_process;
     if (p->euid == 0 ||
         (uint32_t)egid == p->gid ||
@@ -1946,7 +1993,7 @@ int sys_setegid(int egid) {
  * the saved uid is set to the new effective uid.  The superuser may set
  * either to any value.
  */
-int sys_setreuid(int ruid, int euid) {
+static int setreuid_ids(int ruid, int euid) {
     process_t *p = current_process;
     int priv = (p->euid == 0);
     uint32_t new_ruid = (ruid == -1) ? p->uid : (uint32_t)ruid;
@@ -1970,7 +2017,7 @@ int sys_setreuid(int ruid, int euid) {
 }
 
 /* setregid(2): the gid analogue of setreuid(2). */
-int sys_setregid(int rgid, int egid) {
+static int setregid_ids(int rgid, int egid) {
     process_t *p = current_process;
     int priv = (p->euid == 0);
     uint32_t new_rgid = (rgid == -1) ? p->gid : (uint32_t)rgid;
@@ -1999,7 +2046,7 @@ int sys_setregid(int rgid, int egid) {
  * unprivileged process may set each field only to one of its current
  * real, effective or saved uid.
  */
-int sys_setresuid(int ruid, int euid, int suid) {
+static int setresuid_ids(int ruid, int euid, int suid) {
     process_t *p = current_process;
     if (p->euid != 0) {
         uint32_t r = p->uid, e = p->euid, s = p->suid;
@@ -2014,7 +2061,7 @@ int sys_setresuid(int ruid, int euid, int suid) {
 }
 
 /* setresgid(2): the gid analogue of setresuid(2). */
-int sys_setresgid(int rgid, int egid, int sgid) {
+static int setresgid_ids(int rgid, int egid, int sgid) {
     process_t *p = current_process;
     if (p->euid != 0) {
         uint32_t r = p->gid, e = p->egid, s = p->sgid;

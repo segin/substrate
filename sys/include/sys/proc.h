@@ -22,6 +22,8 @@
 #define P_WAITED     0x0004  // Stopped state already reported
 #define P_AUTOREAP   0x0008  // Zombie should be reaped asynchronously
 #define P_SIGEXIT    0x0010  // Zombie status is signal/core encoded already
+#define P_SUGID      0x0020  // Set-ID exec or credential change since the
+                             // last exec: issetugid(2) is 1 (BSD semantics)
 
 #define PROC_ITIMER_COUNT 3
 #define PROC_CMDLINE_MAX  512

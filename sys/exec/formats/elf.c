@@ -1518,6 +1518,7 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
     uint32_t old_egid = current_process ? current_process->egid : 0;
     uint32_t old_suid = current_process ? current_process->suid : 0;
     uint32_t old_sgid = current_process ? current_process->sgid : 0;
+    uint16_t old_sugid = current_process ? (current_process->p_flag & P_SUGID) : 0;
     if (!root) {
         if (fd >= 0) kern_close(fd);
         return -ENOENT;
@@ -1747,6 +1748,16 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
         current_process->suid = current_process->euid;
         current_process->sgid = current_process->egid;
 
+        // issetugid(2), as on BSD: a set-ID exec that changed the effective
+        // ids taints the process; any other exec clears the taint once the
+        // real and effective ids agree (the new program then holds no
+        // privilege it was not started with).
+        if (current_process->euid != old_euid || current_process->egid != old_egid)
+            current_process->p_flag |= P_SUGID;
+        else if (current_process->uid == current_process->euid &&
+                 current_process->gid == current_process->egid)
+            current_process->p_flag &= (uint16_t)~P_SUGID;
+
         // Extract basename
         const char *name = path;
         for (const char *p = path; *p; p++) {
@@ -1914,6 +1925,7 @@ cleanup:
         current_process->egid = old_egid;
         current_process->suid = old_suid;
         current_process->sgid = old_sgid;
+        current_process->p_flag = (uint16_t)((current_process->p_flag & ~P_SUGID) | old_sugid);
     }
     if (!vm_state_committed && switched_pmap) {
         if (old_pmap) {

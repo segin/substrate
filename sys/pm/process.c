@@ -470,6 +470,9 @@ process_t *proc_create(int perso_id) {
     proc->egid = current_process ? current_process->egid : 0;
     proc->suid = current_process ? current_process->suid : 0;
     proc->sgid = current_process ? current_process->sgid : 0;
+    /* The child of a tainted process is tainted too (issetugid(2)). */
+    if (current_process && (current_process->p_flag & P_SUGID))
+        proc->p_flag |= P_SUGID;
     proc->umask = current_process ? current_process->umask : 022;
     /* POSIX: a child created by fork() inherits the parent's scheduling
      * policy and priority (sched_setscheduler(2)).  First process gets
@@ -653,7 +656,10 @@ static int proc_fork_common(process_t *parent, void *stack, int is_vfork) {
     memcpy(child_proc->supp_groups, parent->supp_groups,
            sizeof(parent->supp_groups));
     child_proc->n_supp_groups = parent->n_supp_groups;
-    
+    /* The child of a tainted process is tainted too (issetugid(2)). */
+    if (parent->p_flag & P_SUGID)
+        child_proc->p_flag |= P_SUGID;
+
     // Copy limits, etc. if implemented
     
     // Create Thread for child

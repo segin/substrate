@@ -507,8 +507,17 @@ int sys_setrlimit(int resource, const void *rlp) {
     return 0;
 }
 
+/*
+ * issetugid(2): 1 if the process is "tainted" -- its program was started
+ * by a set-user-ID or set-group-ID exec, or it has changed its real,
+ * effective or saved ids or its group list since its last exec (P_SUGID;
+ * inherited across fork, re-evaluated at exec).  FreeBSD's rtld and libc,
+ * and NetBSD's libc, use it to decide whether to trust the environment
+ * (LD_PRELOAD, LD_LIBRARY_PATH, TMPDIR, ...); answering 0 for a set-ID
+ * program let it load a library of the invoking user's choosing.
+ */
 int sys_issetugid(void) {
-    return 0;
+    return (current_process->p_flag & P_SUGID) ? 1 : 0;
 }
 
 int sys_cap_getmode(unsigned int *modep) {
@@ -720,6 +729,7 @@ int sys_setgroups(int gidsetsize, const void *gidset) {
     if (gidsetsize > 32) return -EINVAL;
     if (gidsetsize == 0) {
         current_process->n_supp_groups = 0;
+        current_process->p_flag |= P_SUGID;     /* see sys_issetugid() */
         return 0;
     }
     {
@@ -730,6 +740,7 @@ int sys_setgroups(int gidsetsize, const void *gidset) {
             current_process->supp_groups[i] = kbuf[i];
         current_process->n_supp_groups = gidsetsize;
     }
+    current_process->p_flag |= P_SUGID;         /* see sys_issetugid() */
     return 0;
 }
 
