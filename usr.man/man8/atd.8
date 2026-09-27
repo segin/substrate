@@ -59,8 +59,10 @@ To run a job,
 .B atd
 moves it into
 .I /var/spool/at/=
-and forks a child, which starts a new session, sets its group and user ID
-to the owner of the job file, sends standard output and standard error to
+and forks a child, which starts a new session, takes the supplementary
+groups, group and user ID of the owner of the job file (if any of these
+fails the job is not run and the child exits with status 126), sends
+standard output and standard error to
 .IR /var/spool/at/spool/ job .out ,
 and executes
 .B /bin/sh
@@ -159,11 +161,6 @@ are not restored; jobs run with umask 0, in
 .BR atd 's
 working directory and environment.
 .PP
-The return values of
-.BR setgid (2)
-and
-.BR setuid (2)
-are not checked, and supplementary groups are not changed.
 The output file is created after the user ID is changed, so if the job's
 owner cannot write to
 .IR /var/spool/at/spool ,

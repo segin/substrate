@@ -4,6 +4,8 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <string.h>
+#include <grp.h>
+#include <pwd.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <sys/stat.h>
@@ -18,19 +20,38 @@ at_setsid(void) {
     return (pid_t)syscall(SYS_SETSID);
 }
 
+/*
+ * Become the job's owner: its supplementary groups first (root's own must
+ * not leak into the job), then its group, then its user.  Every step is
+ * checked, and so is the result -- a job that cannot shed root's identity
+ * must not run at all, since it would otherwise run as root.  Returns 0,
+ * or -1 if the job must be abandoned.
+ */
+static int drop_to_owner(uid_t uid, gid_t gid) {
+    struct passwd *pw = getpwuid(uid);
+    int rc = pw ? initgroups(pw->pw_name, gid) : setgroups(1, &gid);
+    if (rc != 0)
+        return -1;
+    if (setgid(gid) != 0 || setuid(uid) != 0)
+        return -1;
+    if (getuid() != uid || geteuid() != uid ||
+        getgid() != gid || getegid() != gid)
+        return -1;
+    /* Having dropped from root, getting it back must be impossible. */
+    if (uid != 0 && setuid(0) == 0)
+        return -1;
+    return 0;
+}
+
 static int setup_job_environment(const struct batch_submit_request *req) {
     /* Phase 4.2: Restore cwd, umask, retained environment */
     if (req->cwd_snapshot) {
         chdir(req->cwd_snapshot);
     }
-    
+
     umask(req->umask_snapshot);
 
-    /* Set UID/GID */
-    setgid(req->submitter_gid);
-    setuid(req->submitter_uid);
-
-    return 0;
+    return drop_to_owner(req->submitter_uid, req->submitter_gid);
 }
 
 static int ensure_dir(const char *path, mode_t mode) {
@@ -48,7 +69,10 @@ int at_exec_run_job(const struct batch_submit_request *req, const char *job_file
         /* Child process - Phase 4.1: run in separate process group without ctty */
         at_setsid();
 
-        setup_job_environment(req);
+        if (setup_job_environment(req) != 0) {
+            /* Could not become the job's owner: never run it as root. */
+            _exit(126);
+        }
 
         /* Phase 4.3: Stdout/stderr capture.
          * For now, pipe stdout and stderr to a file for the mailer to pick up.

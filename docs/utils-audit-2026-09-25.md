@@ -51,7 +51,7 @@ Suggested order, highest leverage first:
     - Site: `sys/kern/syscall.c:1339`
     - Fix: Require euid 0 (return `-EPERM` otherwise), as `SIOCSIFGATEWAY` and the other configuration calls do; fail with `-EINVAL` rather than silently truncating a name of `MAXHOSTNAMELEN` or more.
     - Verify: `tests/sys/`: a non-root `sethostname()` fails EPERM and leaves the name unchanged; root succeeds; an over-long name fails EINVAL.
-- [ ] **UTL-AT-01** (high) An `at` job runs as root if dropping privileges fails (REQ: REQ-UTLA-0002)
+- [x] **UTL-AT-01** (high) An `at` job runs as root if dropping privileges fails (REQ: REQ-UTLA-0002)
     - Site: `lib/at/at_exec.c:30-31`
     - Fix: Check `setgid()`/`setuid()` and abort the job on failure; call `initgroups()` (or `setgroups()`) first so root's supplementary groups are dropped.
     - Verify: `tests/usr.bin/at/`: with the credential calls made to fail (mock), the job does not run; a normal job runs with exactly the owner's groups.
