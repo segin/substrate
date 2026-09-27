@@ -378,7 +378,7 @@ Suggested order, highest leverage first:
 
 ## F. Terminal, session and process utilities
 
-- [ ] **UTL-MKNOD-01** (high) `mknod` crashes when the minor number is omitted, and a minor over 255 spills into the major (REQ: REQ-UTLA-0080)
+- [x] **UTL-MKNOD-01** (high) `mknod` crashes when the minor number is omitted, and a minor over 255 spills into the major (REQ: REQ-UTLA-0080)
     - Site: `bin/mknod/mknod.c:8`, `:19`, `:22`
     - Fix: Require 5 arguments for `b`/`c`; validate major and minor ranges; use the system's `makedev()`.
     - Verify: `mknod x c 1` prints usage; `mknod x c 1 256` is rejected.

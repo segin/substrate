@@ -28,11 +28,10 @@ Character special file.
 .I major
 and
 .I minor
-are decimal numbers, converted with
-.BR atoi (3)
-and combined into a device number as
-.RI ( major " << 8) | " minor .
-They are not range-checked.
+are decimal numbers, each from 0 to 255, combined into a device number
+as
+.RI ( major " << 8) | " minor ;
+anything else is rejected.
 .PP
 The node is created with permissions 0666, reduced by the process
 file-creation mask.
@@ -52,10 +51,14 @@ The node was created.
 .B 1
 Too few operands, an unknown
 .IR type ,
+a
+.I major
 or
+.I minor
+that is not a number from 0 to 255, or
 .BR mknod (2)
 failed.
-The usage and unknown-type messages are written to standard output;
+The usage, unknown-type and operand messages are written to standard output;
 the
 .BR mknod (2)
 error is written to standard error.
@@ -69,12 +72,3 @@ Create a character device node with major 1, minor 3:
 .BR mkdir (1),
 .BR mknod (2),
 .BR stat (2)
-.SH BUGS
-Omitting
-.I minor
-is not diagnosed and makes
-.B mknod
-crash.
-A
-.I minor
-greater than 255 overflows into the major number.
