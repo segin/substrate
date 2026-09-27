@@ -55,7 +55,7 @@ Suggested order, highest leverage first:
     - Site: `lib/at/at_exec.c:30-31`
     - Fix: Check `setgid()`/`setuid()` and abort the job on failure; call `initgroups()` (or `setgroups()`) first so root's supplementary groups are dropped.
     - Verify: `tests/usr.bin/at/`: with the credential calls made to fail (mock), the job does not run; a normal job runs with exactly the owner's groups.
-- [ ] **UTL-AT-02** (medium) A non-root `at` job's output capture fails (REQ: REQ-UTLA-0003)
+- [x] **UTL-AT-02** (medium) A non-root `at` job's output capture fails (REQ: REQ-UTLA-0003)
     - Site: `lib/at/at_exec.c:51` vs `:61-65`
     - Fix: Create the output file in the root-owned spool before dropping privileges (then `fchown` it to the job owner), or pass an already-open descriptor.
     - Verify: A job queued by a non-root user produces its mailed or spooled output.

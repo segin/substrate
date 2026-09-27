@@ -69,13 +69,11 @@ int at_exec_run_job(const struct batch_submit_request *req, const char *job_file
         /* Child process - Phase 4.1: run in separate process group without ctty */
         at_setsid();
 
-        if (setup_job_environment(req) != 0) {
-            /* Could not become the job's owner: never run it as root. */
-            _exit(126);
-        }
-
         /* Phase 4.3: Stdout/stderr capture.
          * For now, pipe stdout and stderr to a file for the mailer to pick up.
+         * The spool is root's and mode 0700, so the file is created while
+         * still root and handed to the job's owner; opened after the
+         * identity switch it could not be created for anyone but root.
          */
         char out_path[160];
         const char *job_name = job_file_path;
@@ -85,8 +83,19 @@ int at_exec_run_job(const struct batch_submit_request *req, const char *job_file
         ensure_dir("/var/spool/at", 0700);
         ensure_dir(AT_SPOOL_OUT, 0700);
         snprintf(out_path, sizeof(out_path), "%s/%s.out", AT_SPOOL_OUT, job_name);
-        
-        int fd = open(out_path, O_CREAT | O_WRONLY | O_TRUNC, 0600);
+
+        int fd = open(out_path, O_CREAT | O_WRONLY | O_TRUNC | O_NOFOLLOW, 0600);
+        if (fd >= 0 &&
+            fchown(fd, req->submitter_uid, req->submitter_gid) != 0) {
+            close(fd);
+            fd = -1;
+        }
+
+        if (setup_job_environment(req) != 0) {
+            /* Could not become the job's owner: never run it as root. */
+            _exit(126);
+        }
+
         if (fd >= 0) {
             dup2(fd, STDOUT_FILENO);
             dup2(fd, STDERR_FILENO);
