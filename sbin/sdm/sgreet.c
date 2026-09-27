@@ -170,7 +170,9 @@ static void exec_session(const struct passwd *pw, const char *display,
     /* setgid + initgroups BEFORE setuid, or we lose the privilege to
      * install the supplementary group list. */
     if (setgid(pw->pw_gid) != 0) _exit(1);
-    initgroups(pw->pw_name, pw->pw_gid);
+    /* A failure here would leave root's supplementary groups -- wheel and
+     * the rest -- in the user's session: refuse the session instead. */
+    if (initgroups(pw->pw_name, pw->pw_gid) != 0) _exit(1);
     if (setuid(pw->pw_uid) != 0) _exit(1);
 
     setenv("HOME", pw->pw_dir, 1);

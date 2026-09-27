@@ -63,7 +63,7 @@ Suggested order, highest leverage first:
     - Site: `usr.sbin/atd/atd.c:78`
     - Fix: Record the submitter's umask in the job request and have `atd` apply it; default to 022 when absent.
     - Verify: A job that creates a file gets the submitter's umask applied.
-- [ ] **UTL-SGREET-01** (high) A failed `initgroups()` leaves root's supplementary groups in the user session (REQ: REQ-UTLA-0005)
+- [x] **UTL-SGREET-01** (high) A failed `initgroups()` leaves root's supplementary groups in the user session (REQ: REQ-UTLA-0005)
     - Site: `sbin/sdm/sgreet.c:173`
     - Fix: Check `initgroups()` and refuse the session on failure, before `setgid`/`setuid`.
     - Verify: Code review; a forced failure (mock) aborts the session.

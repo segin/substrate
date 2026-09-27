@@ -120,7 +120,8 @@ is shown.
 On success
 .B sgreet
 closes its display connection and forks.
-The child sets its group, supplementary groups and user ID to the user's,
+The child sets its group, supplementary groups and user ID to the user's
+(if any of these fails, it exits with status 1 and no session starts),
 sets
 .BR HOME ,
 .B SHELL
