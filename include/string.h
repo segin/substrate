@@ -6,6 +6,11 @@ extern "C" {
 #endif
 
 #include <stddef.h>
+/* The BSD legacy functions (bcopy, bzero, bcmp, index, rindex, ffs) live
+ * in <strings.h>, but old code -- cpio 2.4.2, for one -- includes only
+ * <string.h> and expects them, as glibc and the BSDs provide in their
+ * default compilation mode. */
+#include <strings.h>
 
 void *memcpy(void *dest, const void *src, size_t n);
 void *memmove(void *dest, const void *src, size_t n);

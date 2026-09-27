@@ -66,6 +66,8 @@ cp "$SUBSTRATE_TOP/include/utmp.h"          "$FIXDIR/utmp.h"
 cp "$SUBSTRATE_TOP/include/termios.h"       "$FIXDIR/termios.h"
 # stdlib.h gained getloadavg() (TDE kicker/kasbar).
 cp "$SUBSTRATE_TOP/include/stdlib.h"        "$FIXDIR/stdlib.h"
+# string.h now includes <strings.h> (bcopy/bzero/index for old code).
+cp "$SUBSTRATE_TOP/include/string.h"        "$FIXDIR/string.h"
 
 # Toplevel reconfigure.  Compared to build.sh stage 1 we drop
 # --disable-libstdcxx and --disable-shared so libstdc++-v3 actually
