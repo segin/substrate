@@ -42,6 +42,7 @@
  * Writes /var/run/syslogd.pid so init/rc.d can supervise it.
  */
 
+#include <ctype.h>
 #include <syslog.h>
 #include <unistd.h>
 #include <stdio.h>
@@ -300,6 +301,27 @@ static int parse_pri(const char *msg, size_t len, int *fac, int *lvl,
     return -1;
 }
 
+/* Does `s` start with an RFC 3164 timestamp and its space, "Mmm dd hh:mm:ss "
+ * (16 bytes; a one-digit day is space-padded)? */
+static int has_rfc3164_timestamp(const char *s, size_t len)
+{
+    static const char mon[] = "JanFebMarAprMayJunJulAugSepOctNovDec";
+    int m;
+
+    if (len < 16) return 0;
+    for (m = 0; m < 12; m++)
+        if (memcmp(s, mon + 3 * m, 3) == 0) break;
+    if (m == 12) return 0;
+    return s[3] == ' ' && (s[4] == ' ' || isdigit((unsigned char)s[4])) &&
+           isdigit((unsigned char)s[5]) && s[6] == ' ' &&
+           isdigit((unsigned char)s[7]) && isdigit((unsigned char)s[8]) &&
+           s[9] == ':' &&
+           isdigit((unsigned char)s[10]) && isdigit((unsigned char)s[11]) &&
+           s[12] == ':' &&
+           isdigit((unsigned char)s[13]) && isdigit((unsigned char)s[14]) &&
+           s[15] == ' ';
+}
+
 /* ---------------------------------------------------------- signals */
 
 static void on_hup(int sig) { (void)sig; g_reload = 1; }
@@ -532,6 +554,12 @@ int main(int argc, char **argv)
                 int blen = msglen;
                 if (parse_pri(msg, (size_t)msglen, &fac, &lvl, &body) == 0)
                     blen = msglen - (body - msg);
+                /* The sender's own RFC 3164 timestamp is dropped: the line
+                 * gets syslogd's, and would otherwise carry two. */
+                if (has_rfc3164_timestamp(body, (size_t)blen)) {
+                    body += 16;
+                    blen -= 16;
+                }
 
                 char ts[32];
                 format_timestamp(ts, sizeof(ts));

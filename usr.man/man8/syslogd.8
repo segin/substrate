@@ -41,8 +41,11 @@ The priority is removed, and each message is written as
 with the time in UTC and the host name as it was when
 .B syslogd
 started.
-The rest of the message, including any timestamp the sender put in it, is
-kept as received.
+A timestamp the sender put at the start of the message, in the same
+RFC 3164 form (as the libc
+.BR syslog (3)
+client does), is removed so that the line carries one; the rest of the
+message is kept as received.
 .PP
 For every rule that matches the message, the line (with a newline added if
 missing) is appended to the rule's target, which is opened, created with
@@ -207,9 +210,5 @@ mail.*      /var/log/mail.log
 Accepts the priority prefix of RFC 3164.
 There is no network (UDP 514) input or forwarding.
 .SH BUGS
-Messages from the libc
-.BR syslog (3)
-client carry their own timestamp, so logged lines show two.
-.PP
 Only file and device targets exist; there are no pipes, remote hosts or
 user-terminal targets.

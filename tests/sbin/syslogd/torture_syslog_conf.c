@@ -10,6 +10,9 @@
  *                                   not parsed, the rule was dropped, and
  *                                   nothing reached /var/log/auth.log.
  *
+ * And each line carried two timestamps: syslogd stamped its own in front
+ * of the one syslog(3) sends.
+ *
  * Runs as init (root): starts /sbin/syslogd with the image's shipped
  * /etc/syslog.conf, logs one tagged message at daemon.info, auth.info and
  * authpriv.notice through syslog(3), and checks which files each one
@@ -30,6 +33,39 @@ static void check(const char *name, int ok, const char *why) {
     printf("  %s %s%s%s\n", ok ? "ok  " : "FAIL", name, ok ? "" : ": ", ok ? "" : why);
     if (!ok)
         failures++;
+}
+
+/* Number of RFC 3164 timestamps ("Mmm dd hh:mm:ss") in the line of `path`
+ * that holds "<tag>-<what>", or -1 if there is no such line. */
+static int timestamps(const char *path, const char *what) {
+    static const char *mon = "JanFebMarAprMayJunJulAugSepOctNovDec";
+    static char buf[65536];
+    char needle[64];
+    int fd = open(path, O_RDONLY);
+    if (fd < 0)
+        return -1;
+    ssize_t n = read(fd, buf, sizeof(buf) - 1);
+    close(fd);
+    if (n < 0)
+        return -1;
+    buf[n] = '\0';
+    snprintf(needle, sizeof(needle), "%s-%s", tag, what);
+    char *hit = strstr(buf, needle);
+    if (!hit)
+        return -1;
+    char *line = hit;
+    while (line > buf && line[-1] != '\n')
+        line--;
+    int count = 0;
+    for (char *p = line; p + 15 <= hit; p++) {
+        int is_month = 0;
+        for (int m = 0; m < 12; m++)
+            if (strncmp(p, mon + 3 * m, 3) == 0)
+                is_month = 1;
+        if (is_month && p[3] == ' ' && p[6] == ' ' && p[9] == ':' && p[12] == ':')
+            count++;
+    }
+    return count;
 }
 
 /* Does `path` contain "<tag>-<what>"? */
@@ -79,6 +115,9 @@ int main(void) {
           "not in /var/log/auth.log");
     check("authpriv.notice reaches auth.log", logged("/var/log/auth.log", "authpriv"),
           "not in /var/log/auth.log");
+    check("a syslog(3) line carries one timestamp",
+          timestamps("/var/log/daemon.log", "daemon") == 1,
+          "zero or several timestamps on the line");
 
     printf("Result: %s\n", failures ? "FAILED" : "PASSED");
     return failures ? 1 : 0;

@@ -130,7 +130,7 @@ Suggested order, highest leverage first:
     - Site: `sbin/syslogd/syslogd.c:146`
     - Fix: Parse `fac1,fac2.level` into one selector per facility.
     - Verify: An `authpriv.notice` message reaches `/var/log/auth.log`.
-- [ ] **UTL-SYSLOG-03** (low) Every line carries two timestamps (REQ: REQ-UTLA-0021)
+- [x] **UTL-SYSLOG-03** (low) Every line carries two timestamps (REQ: REQ-UTLA-0021)
     - Site: `sbin/syslogd/syslogd.c:519` vs `lib/c/src/syslog.c:160`
     - Fix: When the message already carries an RFC 3164 timestamp, keep it (strip before re-stamping, or do not re-stamp).
     - Verify: A `syslog(3)` message is logged with exactly one timestamp.
