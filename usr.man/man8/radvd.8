@@ -18,7 +18,7 @@ Solicitations, and runs in the foreground until it is killed or a send fails.
 is an IPv6 address in the form accepted by
 .BR inet_pton (3);
 .I length
-is the prefix length, 64 if omitted.
+is the prefix length, a decimal number from 0 to 128, 64 if omitted.
 Bits of
 .I prefix
 beyond
@@ -55,7 +55,8 @@ is not started by any of the boot scripts.
 A send failed; the error is reported on standard error.
 .TP
 .B 1
-Too few arguments, an invalid prefix, or the interface's hardware address,
+Too few arguments, an invalid prefix or prefix length, or the interface's
+hardware address,
 index or IPv6 address could not be read, or the packet socket could not be
 created.
 .SH EXAMPLE
@@ -72,8 +73,6 @@ Sends Router Advertisement messages as described in RFC 4861 (Neighbor
 Discovery for IPv6), for use with RFC 4862 stateless address
 autoconfiguration.
 .SH BUGS
-The prefix length is not checked: it should be between 0 and 128.
-.PP
 The source address is whatever
 .B SIOCGIFADDR_IN6
 returns for the interface, which RFC 4861 requires to be link-local but

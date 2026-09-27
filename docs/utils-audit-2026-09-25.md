@@ -146,7 +146,7 @@ Suggested order, highest leverage first:
     - Site: `sbin/echod/echod.c:49`
     - Fix: Ignore SIGPIPE (or use MSG_NOSIGNAL) and handle EPIPE.
     - Verify: `echod` survives a client that resets the connection during a write.
-- [ ] **UTL-RADVD-01** (medium) The prefix length is not range-checked; a negative value indexes outside the prefix field (REQ: REQ-UTLA-0025)
+- [x] **UTL-RADVD-01** (medium) The prefix length is not range-checked; a negative value indexes outside the prefix field (REQ: REQ-UTLA-0025)
     - Site: `sbin/radvd/radvd.c:75`, `:159-166`
     - Fix: Accept only 0..128 and reject other values at startup.
     - Verify: `radvd eth0 fec0::/-1` and `/200` are refused.

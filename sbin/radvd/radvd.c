@@ -72,7 +72,21 @@ int main(int argc, char **argv) {
     const char *iface = argv[1];
     char *slash = strchr(argv[2], '/');
     int prefix_len = 64;
-    if (slash) { *slash = '\0'; prefix_len = atoi(slash + 1); }
+    if (slash) {
+        /* 0..128 in decimal digits only: the length is used below to
+         * index into the prefix, so anything else must not get there. */
+        char *end;
+        long v;
+        *slash = '\0';
+        errno = 0;
+        v = strtol(slash + 1, &end, 10);
+        if (slash[1] < '0' || slash[1] > '9' || *end != '\0' || errno != 0 ||
+            v < 0 || v > 128) {
+            fprintf(stderr, "radvd: bad prefix length %s (0-128)\n", slash + 1);
+            return 1;
+        }
+        prefix_len = (int)v;
+    }
     uint8_t prefix[16];
     if (inet_pton(AF_INET6, argv[2], prefix) != 1) {
         fprintf(stderr, "radvd: bad prefix %s\n", argv[2]);
