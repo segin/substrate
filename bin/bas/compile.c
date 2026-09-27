@@ -156,6 +156,9 @@ int compile_line(int lineno, const char *text, int *out_offset) {
                     char buf[256];
                     int i = 0;
                     while (*cursor && *cursor != '"') {
+                        if (i == (int)sizeof(buf) - 1)
+                            return syntax_error(lineno, "string too long",
+                                                out_offset, start);
                         buf[i++] = *cursor++;
                     }
                     if (*cursor == '"') cursor++;

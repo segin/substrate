@@ -64,6 +64,10 @@ The following statements are recognised:
 .TP
 \fBPRINT\fP \fIitem\fP [\fB;\fP \fIitem\fP]...
 Print string literals in double quotes and numeric expressions.
+A string literal may be at most 255 characters long; a longer one is
+reported as
+.BI "Error: string too long in line " n
+and the line is not stored.
 Items are separated by
 .B ;
 or

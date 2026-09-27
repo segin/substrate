@@ -421,7 +421,7 @@ Suggested order, highest leverage first:
     - Site: `bin/bas/compile.c:147-172`
     - Fix: Stop the PRINT loop (syntax error) when no progress is made.
     - Verify: `10 PRINT )` reports a syntax error.
-- [ ] **UTL-BAS-02** (high) String literals are copied into `char buf[256]` without a length check (REQ: REQ-UTLA-0090)
+- [x] **UTL-BAS-02** (high) String literals are copied into `char buf[256]` without a length check (REQ: REQ-UTLA-0090)
     - Site: `bin/bas/compile.c:152-155`
     - Fix: Bound the copy and reject longer literals.
     - Verify: A 400-character string literal is rejected, not a stack overflow.

@@ -39,6 +39,13 @@ case_ "PRINT )"        '10 PRINT )'        'syntax error'  '10 PRINT'
 case_ "PRINT 1 )"      '10 PRINT 1 )'      'syntax error'  '10 PRINT'
 case_ "good line kept" '10 PRINT 1'        '10 PRINT 1'    'syntax error'
 
+# String literals longer than the compiler's 255-byte buffer are rejected
+# (they overflowed it); one that fits is kept.
+long400=$(printf '%400s' '' | tr ' ' 'x')
+long255=$(printf '%255s' '' | tr ' ' 'y')
+case_ "400-byte string rejected" "10 PRINT \"$long400\"" 'string too long' '10 PRINT'
+case_ "255-byte string kept"     "10 PRINT \"$long255\"" "10 PRINT \"$long255\"" 'too long'
+
 if [ "$fails" -eq 0 ]; then
     echo "Result: PASSED"
 else
