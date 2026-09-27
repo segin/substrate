@@ -150,6 +150,7 @@ The listing was printed or every command succeeded.
 .TP
 .B 1
 A socket could not be created, the interface list could not be read,
+the interface to show does not exist,
 an address or MAC argument could not be parsed, an
 .BR ioctl (2)
 failed while applying a command, or
@@ -203,9 +204,6 @@ Add an IPv6 address with a /64 prefix:
 .SH SEE ALSO
 .BR ioctl (2)
 .SH BUGS
-Showing a single interface that does not exist prints an error but
-still exits with status 0.
-.PP
 A keyword given without its argument, such as a trailing
 .BR netmask ,
 is treated as an IPv4 address and rejected with

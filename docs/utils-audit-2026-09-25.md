@@ -170,7 +170,7 @@ Suggested order, highest leverage first:
     - Site: `sbin/dhclient/dhclient.c:868` (`extend()` ignores `install_lease()`'s result; DHC-08 made it fatal only for the first bind)
     - Fix: Treat a failed reinstall like a lost lease: drop the address and reacquire.
     - Verify: `tests/lib/net/wire/test_dhclient.py`: code review, since the harness cannot make the ioctls fail (as for DHC-08).
-- [ ] **UTL-HALT-01** (medium) `halt` resets the machine instead of halting it (REQ: REQ-UTLA-0031)
+- [x] **UTL-HALT-01** (medium) `halt` resets the machine instead of halting it (REQ: REQ-UTLA-0031)
     - Site: `sys/kern/syscall.c:4594` (`RB_HALT_SYSTEM` goes down the `RB_AUTOBOOT` path)
     - Fix: Give `RB_HALT_SYSTEM` its own path: stop the CPUs and leave the machine halted (interrupts off, `hlt`).
     - Verify: `tests/sys/`: `reboot(RB_HALT_SYSTEM)` under QEMU leaves the guest halted instead of rebooting.
@@ -197,7 +197,7 @@ Suggested order, highest leverage first:
     - Site: `bin/ping/ping.c:383-387` (`atol`/`strtod`/`atoi`)
     - Fix: Parse with `strtol`/`strtod`, reject trailing garbage, negatives and out-of-range values.
     - Verify: `ping -c x`, `ping -i -1` are rejected.
-- [ ] **UTL-IFCONFIG-01** (low) Showing a nonexistent interface exits 0 (REQ: REQ-UTLA-0037)
+- [x] **UTL-IFCONFIG-01** (low) Showing a nonexistent interface exits 0 (REQ: REQ-UTLA-0037)
     - Site: `sbin/ifconfig/ifconfig.c:100-104`, `:319`
     - Fix: Exit 1 after reporting the error.
     - Verify: `ifconfig nosuch; echo $?` prints 1.

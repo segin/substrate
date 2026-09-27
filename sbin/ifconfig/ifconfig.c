@@ -125,7 +125,8 @@ static void show_aliases(int s, const char *name, uint32_t primary) {
     }
 }
 
-static void show_iface(const char *name) {
+/* Print one interface; returns 0, or 1 if there is no such interface. */
+static int show_iface(const char *name) {
     int s = sock_open(AF_INET);
     struct ifreq r;
     memset(&r, 0, sizeof(r));
@@ -135,7 +136,7 @@ static void show_iface(const char *name) {
     if (ioctl(s, SIOCGIFFLAGS, &r) < 0) {
         fprintf(stderr, "%s: %s\n", name, strerror(errno));
         close(s);
-        return;
+        return 1;
     }
     short flags = r.ifr_flags;
 
@@ -218,6 +219,7 @@ static void show_iface(const char *name) {
         }
     }
     close(s);
+    return 0;
 }
 
 static void list_all(void) {
@@ -386,7 +388,7 @@ int main(int argc, char **argv) {
         return 0;
     }
     const char *iface = argv[1];
-    if (argc == 2) { show_iface(iface); return 0; }
+    if (argc == 2) return show_iface(iface);
 
     int i = 2;
     while (i < argc) {
