@@ -138,7 +138,7 @@ Suggested order, highest leverage first:
     - Site: `sbin/telnetd/telnetd.c:196`
     - Fix: Size the output buffer to twice the input (worst case all 0xff), or emit in chunks.
     - Verify: 1024 bytes of 0xff from the pty reach the client as 2048 bytes.
-- [ ] **UTL-TELNETD-02** (low) A TELNET command split across two reads is passed to the pty as data (REQ: REQ-UTLA-0023)
+- [x] **UTL-TELNETD-02** (low) A TELNET command split across two reads is passed to the pty as data (REQ: REQ-UTLA-0023)
     - Site: `sbin/telnetd/telnetd.c:101`
     - Fix: Keep the command parser's state across reads.
     - Verify: IAC and its command sent in separate segments are consumed, not delivered.

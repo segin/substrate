@@ -84,47 +84,66 @@ static ssize_t write_all(int fd, const void *buf, size_t n) {
  * as the first byte of the *next* read() — e.g. the NUL after the
  * username's CR lands at the head of the password input.
  *
- * *cr_pending carries a CR seen at the very end of the previous
- * chunk, so a CR/NUL pair split across two read()s is still
- * collapsed.  Returns the number of data bytes written to `out`. */
+ * TCP may split a command or a CR pair anywhere, so the parser is a
+ * state machine whose state (*st) carries over from one read() to the
+ * next: a command, subnegotiation or CR pair split across two reads is
+ * still recognised.  Returns the number of data bytes written to `out`.
+ */
+enum nvt_state {
+    NVT_DATA,       /* ordinary data */
+    NVT_CR,         /* after a CR: swallow one NUL or LF */
+    NVT_IAC,        /* after IAC: the command byte */
+    NVT_OPT,        /* after IAC WILL/WONT/DO/DONT: the option byte */
+    NVT_SB,         /* inside a subnegotiation */
+    NVT_SB_IAC,     /* inside a subnegotiation, after IAC */
+};
+
 static size_t strip_iac(const uint8_t *in, size_t n, uint8_t *out,
-                        size_t outcap, int *cr_pending) {
-    size_t i = 0, o = 0;
+                        size_t outcap, enum nvt_state *st) {
+    size_t o = 0;
 
-    /* A CR ended the previous chunk — swallow a leading NUL/LF. */
-    if (*cr_pending) {
-        *cr_pending = 0;
-        if (i < n && (in[i] == '\0' || in[i] == '\n')) i++;
-    }
-
-    while (i < n) {
-        if (in[i] == IAC && i + 1 < n) {
-            uint8_t v = in[i + 1];
-            if (v == IAC) { if (o < outcap) out[o++] = IAC; i += 2; continue; }
-            if (v == DO || v == DONT || v == WILL || v == WONT) { i += 3; continue; }
-            if (v == SB) {
-                i += 2;
-                while (i + 1 < n && !(in[i] == IAC && in[i + 1] == SE)) i++;
-                i += 2;
-                continue;
+    for (size_t i = 0; i < n; i++) {
+        uint8_t b = in[i];
+        switch (*st) {
+        case NVT_CR:
+            *st = NVT_DATA;
+            if (b == '\0' || b == '\n')
+                break;                  /* the CR pair's second byte */
+            /* FALLTHROUGH */
+        case NVT_DATA:
+            if (b == IAC) {
+                *st = NVT_IAC;
+            } else if (b == '\r') {
+                /* Emit one CR — the PTY's ICRNL maps it to NL — and
+                 * discard the paired NUL or LF that follows. */
+                if (o < outcap) out[o++] = '\r';
+                *st = NVT_CR;
+            } else if (o < outcap) {
+                out[o++] = b;
             }
-            i += 2;
-            continue;
-        }
-        if (in[i] == '\r') {
-            /* Emit one CR — the PTY's ICRNL maps it to NL — and
-             * discard the paired NUL or LF that follows. */
-            if (o < outcap) out[o++] = '\r';
-            i++;
-            if (i < n) {
-                if (in[i] == '\0' || in[i] == '\n') i++;
+            break;
+        case NVT_IAC:
+            if (b == IAC) {             /* a doubled IAC is one 0xff */
+                if (o < outcap) out[o++] = IAC;
+                *st = NVT_DATA;
+            } else if (b == DO || b == DONT || b == WILL || b == WONT) {
+                *st = NVT_OPT;
+            } else if (b == SB) {
+                *st = NVT_SB;
             } else {
-                *cr_pending = 1;   /* CR/NUL pair split across reads */
+                *st = NVT_DATA;         /* a two-byte command */
             }
-            continue;
+            break;
+        case NVT_OPT:
+            *st = NVT_DATA;             /* the option byte */
+            break;
+        case NVT_SB:
+            if (b == IAC) *st = NVT_SB_IAC;
+            break;
+        case NVT_SB_IAC:
+            *st = b == SE ? NVT_DATA : NVT_SB;
+            break;
         }
-        if (o < outcap) out[o++] = in[i];
-        i++;
     }
     return o;
 }
@@ -173,7 +192,7 @@ static int handle_one_connection(int c) {
      * so the network-bound buffer is twice the read size. */
     uint8_t in[1024], out[1024], stuffed[2 * sizeof(in)];
     int alive = 1;
-    int cr_pending = 0;   /* NVT CR carried across a read() boundary */
+    enum nvt_state nvt = NVT_DATA;   /* parser state across reads */
     while (alive) {
         fd_set rfds;
         FD_ZERO(&rfds);
@@ -186,7 +205,7 @@ static int handle_one_connection(int c) {
         if (FD_ISSET(c, &rfds)) {
             ssize_t r = read(c, in, sizeof(in));
             if (r <= 0) break;
-            size_t dn = strip_iac(in, (size_t)r, out, sizeof(out), &cr_pending);
+            size_t dn = strip_iac(in, (size_t)r, out, sizeof(out), &nvt);
             if (dn > 0 && write_all(master, out, dn) < 0) break;
         }
         if (FD_ISSET(master, &rfds)) {

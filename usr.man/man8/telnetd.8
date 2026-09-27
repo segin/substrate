@@ -39,7 +39,7 @@ From the network, TELNET commands
 sequences) and subnegotiations are discarded, a doubled
 .B IAC
 becomes one 0xff byte, and a carriage return followed by NUL or LF becomes
-a single carriage return.
+a single carriage return, however the bytes are split between reads.
 Towards the network, each 0xff byte is doubled.
 No option is negotiated beyond the initial three; the window size reported
 by the client is ignored.
@@ -130,9 +130,6 @@ RFC 854 (TELNET protocol), with the ECHO (RFC 857), SUPPRESS-GO-AHEAD
 (RFC 858) and NAWS (RFC 1073) options offered but only partly honoured.
 .SH BUGS
 Traffic is unencrypted, including passwords.
-.PP
-A TELNET command split across two reads from the network is not recognised,
-and its bytes reach the pty as data.
 .PP
 .B telnetd
 writes no utmp or wtmp records, and a session's logout is not recorded.
