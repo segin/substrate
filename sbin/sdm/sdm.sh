@@ -23,10 +23,15 @@ export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 SGREET=/usr/sbin/sgreet
 DISP=:0
 
-# Tear the X server down on TERM/INT (e.g. `rc.d/60-sdm stop`) so we
-# don't orphan Xfbdev when the supervisor is killed.
+# Tear the greeter and X server down on TERM/INT (e.g. `rc.d/60-sdm stop`)
+# so we don't orphan them when the supervisor is killed.
 XPID=
-cleanup() { [ -n "$XPID" ] && kill "$XPID" 2>/dev/null; exit 0; }
+GPID=
+cleanup() {
+    [ -n "$GPID" ] && kill "$GPID" 2>/dev/null
+    [ -n "$XPID" ] && kill "$XPID" 2>/dev/null
+    exit 0
+}
 trap cleanup TERM INT
 
 while :; do
@@ -37,7 +42,13 @@ while :; do
     XPID=$!
 
     # sgreet retries XOpenDisplay for ~10s, so it tolerates a slow start.
-    DISPLAY="$DISP" "$SGREET"
+    # It runs in the background and we wait for it: a trap runs only once
+    # a foreground command ends, which for the greeter means when the
+    # user's session does, but `wait` is cut short by the signal.
+    DISPLAY="$DISP" "$SGREET" &
+    GPID=$!
+    wait "$GPID"
+    GPID=
 
     kill "$XPID" 2>/dev/null
     wait "$XPID" 2>/dev/null

@@ -214,7 +214,8 @@ load a font.
 .TP
 .BR SIGTERM ", " SIGINT
 .B sdm
-kills the X server it started and exits 0.
+kills the greeter and the X server it started and exits 0, at once,
+even while a session is running.
 .SH ENVIRONMENT
 .TP
 .B DISPLAY
@@ -293,11 +294,3 @@ No utmp or wtmp records are written for graphical logins.
 .PP
 .B sgreet
 takes a single character per key press and cannot enter non-ASCII text.
-.PP
-Because
-.B sdm
-waits for
-.B sgreet
-in the foreground, the shell delivers
-.B SIGTERM
-to it only after the greeter or session exits.

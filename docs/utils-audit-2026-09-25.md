@@ -162,7 +162,7 @@ Suggested order, highest leverage first:
     - Site: `sbin/radvd/radvd.c:154-155`
     - Fix: Correct the comment (0x2710 = 10000).
     - Verify: Code review.
-- [ ] **UTL-SDM-01** (low) `rc.d/60-sdm stop` takes effect only after the foreground greeter or session exits (REQ: REQ-UTLA-0029)
+- [x] **UTL-SDM-01** (low) `rc.d/60-sdm stop` takes effect only after the foreground greeter or session exits (REQ: REQ-UTLA-0029)
     - Site: `sbin/sdm/sdm.sh:30-39`
     - Fix: Run the child in the background and `wait`, so the TERM trap runs at once and forwards the signal.
     - Verify: `60-sdm stop` ends sdm and its X server within a second.
