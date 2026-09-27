@@ -71,7 +71,7 @@ Suggested order, highest leverage first:
     - Site: `sbin/sdm/sgreet.c:429`
     - Fix: Retry `waitpid()` only on EINTR; treat ECHILD as "the session is gone".
     - Verify: The greeter returns when the session child has already been reaped.
-- [ ] **UTL-LOGIN-01** (high) `login` returns to its prompt as the authenticated user when exec of the shell fails (REQ: REQ-UTLA-0007)
+- [x] **UTL-LOGIN-01** (high) `login` returns to its prompt as the authenticated user when exec of the shell fails (REQ: REQ-UTLA-0007)
     - Site: `bin/login/login.c:430-431` with `:457-467`
     - Fix: After the identity switch, an exec failure must `_exit()`, never return to the prompt loop.
     - Verify: `tests/bin/login/`: an account whose shell does not exist ends the login with an error, and no further prompt runs under that uid.

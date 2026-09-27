@@ -135,6 +135,10 @@ followed by the shell's base name, which requests a login shell.
 If that fails it tries the shell with a
 .B \-l
 argument, then with no arguments.
+If none of these can be executed,
+.B login
+reports the error and exits with status 1; it does not return to its
+prompt, since it is by then running as the user.
 .PP
 .B login
 does not write the logout record itself.
@@ -150,7 +154,7 @@ On success
 does not return; it is replaced by the user's shell.
 .TP
 .B 1
-Three login attempts failed.
+Three login attempts failed, or the user's shell could not be executed.
 .SH ENVIRONMENT
 .TP
 .B TERM
@@ -211,8 +215,3 @@ Login history.
 .SH BUGS
 User names longer than 63 characters are silently truncated, and the
 rest of the line is then read as the password.
-.PP
-If the shell cannot be executed,
-.B login
-reports the error and returns to the user-name prompt, but it is by
-then already running as the authenticated user.

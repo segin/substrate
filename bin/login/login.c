@@ -428,7 +428,9 @@ do_login_one(const char *forced_user)
         execl(shell, shell, "-l", (char *)NULL);
         execl(shell, shell, (char *)NULL);
         perror("login: exec");
-        return -1;
+        /* We are the user now: going back to the prompt loop would run
+         * the next login attempt under this uid.  End the login. */
+        _exit(1);
     }
 }
 
