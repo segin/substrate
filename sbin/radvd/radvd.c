@@ -170,8 +170,8 @@ int main(int argc, char **argv) {
         po[0] = 3; po[1] = 4;
         po[2] = (uint8_t)prefix_len;
         po[3] = 0xc0;                   /* L=1 A=1 */
-        po[4]=0; po[5]=0; po[6]=0x27; po[7]=0x10; /* valid 9999 */
-        po[8]=0; po[9]=0; po[10]=0x27; po[11]=0x10; /* preferred 9999 */
+        po[4]=0; po[5]=0; po[6]=0x27; po[7]=0x10; /* valid 10000 s */
+        po[8]=0; po[9]=0; po[10]=0x27; po[11]=0x10; /* preferred 10000 s */
         po[12]=po[13]=po[14]=po[15] = 0; /* reserved */
         memcpy(po + 16, prefix, 16);
         /* zero remaining bits below prefix_len */

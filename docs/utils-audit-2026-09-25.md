@@ -158,7 +158,7 @@ Suggested order, highest leverage first:
     - Site: `sbin/radvd/radvd.c:83`, `:106`
     - Fix: Check both and exit with a message on failure.
     - Verify: Code review.
-- [ ] **UTL-RADVD-04** (info) A comment says 9999 where the value is 10000 (REQ: REQ-UTLA-0028)
+- [x] **UTL-RADVD-04** (info) A comment says 9999 where the value is 10000 (REQ: REQ-UTLA-0028)
     - Site: `sbin/radvd/radvd.c:154-155`
     - Fix: Correct the comment (0x2710 = 10000).
     - Verify: Code review.
