@@ -87,6 +87,29 @@ on_shutdown_signal(int sig)
 }
 
 /*
+ * Give a freshly forked child the signal state of a new process: every
+ * disposition at its default and nothing blocked.  init ignores SIGHUP for
+ * itself, and an ignored signal survives exec -- without this, no daemon,
+ * rc script or login session init starts could ever be hung up.
+ */
+static void
+child_signal_defaults(void)
+{
+    struct sigaction dfl = { 0 };
+    sigset_t         none;
+
+    dfl.sa_handler = SIG_DFL;
+    for (int sig = 1; sig < 32; sig++) {
+        if (sig == SIGKILL || sig == SIGSTOP) {
+            continue;
+        }
+        (void)sigaction(sig, &dfl, NULL);
+    }
+    sigemptyset(&none);
+    (void)sigprocmask(SIG_SETMASK, &none, NULL);
+}
+
+/*
  * Fork + exec a getty on `line`.  Called both at boot and on
  * respawn.  The child detaches into its own session so the getty
  * can become the controlling terminal for its tty.
@@ -104,16 +127,9 @@ spawn_getty(struct gettyline *line)
         /*
          * Child.  setsid() gives us a brand-new session so the
          * subsequent open() of the tty in getty can claim it as
-         * the controlling terminal.  Restore default disposition
-         * for the signals init handled — we don't want the getty
-         * inheriting init's signal mask.
+         * the controlling terminal.
          */
-        struct sigaction dfl = { 0 };
-        dfl.sa_handler = SIG_DFL;
-        sigaction(SIGTERM, &dfl, NULL);
-        sigaction(SIGINT,  &dfl, NULL);
-        sigaction(SIGQUIT, &dfl, NULL);
-        sigaction(SIGCHLD, &dfl, NULL);
+        child_signal_defaults();
 
         setsid();
 
@@ -244,6 +260,7 @@ shutdown_sequence(void)
     {
         pid_t rc_pid = fork();
         if (rc_pid == 0) {
+            child_signal_defaults();
             execl("/bin/sh", "sh", "/etc/rc", "stop", (char *)NULL);
             _exit(127);
         }
@@ -464,6 +481,7 @@ main(int argc, char **argv)
     {
         pid_t rc_pid = fork();
         if (rc_pid == 0) {
+            child_signal_defaults();
             execl("/bin/sh", "sh", "/etc/rc", "start", (char *)NULL);
             _exit(127);
         } else if (rc_pid > 0) {

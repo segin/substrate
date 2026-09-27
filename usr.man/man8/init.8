@@ -69,12 +69,15 @@ is started on each of
 and
 .IR /dev/tty3 .
 This table is compiled in.
-Each getty runs in a new session, with the default action restored for
-.BR SIGTERM ,
-.BR SIGINT ,
-.B SIGQUIT
-and
-.BR SIGCHLD .
+Each getty runs in a new session.
+.PP
+Every process
+.B init
+starts \(em the gettys and both
+.I /etc/rc
+runs \(em begins with the default action for every signal, including
+.BR SIGHUP ,
+and with no signals blocked.
 .PP
 .B init
 then loops, once a second reaping exited children.
@@ -293,16 +296,3 @@ the set of terminal lines is compiled in, so the getty on
 cannot be turned off when
 .BR sdm (8)
 uses the same console, and there are no run levels.
-.PP
-.B SIGHUP
-stays ignored in the processes
-.B init
-starts, since only
-.BR SIGTERM ,
-.BR SIGINT ,
-.B SIGQUIT
-and
-.B SIGCHLD
-are reset in the getty child and nothing is reset in the
-.I /etc/rc
-child.

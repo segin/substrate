@@ -114,7 +114,7 @@ Suggested order, highest leverage first:
 
 ## B. System services
 
-- [ ] **UTL-INIT-01** (high) init leaves SIGHUP ignored in every process it starts (REQ: REQ-UTLA-0017)
+- [x] **UTL-INIT-01** (high) init leaves SIGHUP ignored in every process it starts (REQ: REQ-UTLA-0017)
     - Site: `sbin/init/init.c:398-400` with `:111-116`, `:466-467`
     - Fix: Restore SIGHUP (and every other signal init ignores) to SIG_DFL in the child before exec of getty, rc scripts and daemons.
     - Verify: A process started from rc.d or a getty session has SIGHUP at SIG_DFL (`/proc/<pid>/status` SigIgn), and a telnet disconnect terminates the session.
