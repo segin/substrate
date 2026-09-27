@@ -17,6 +17,10 @@ The user must exist in the password database
 .RB ( getpwnam (3)).
 Only the superuser (real user ID 0) may change another user's password;
 any further arguments are ignored.
+.B passwd
+is installed set-user-ID root so that other users can rewrite
+.I /etc/shadow
+for their own entry.
 .PP
 A caller other than the superuser is first prompted for the current
 password, which is checked against the stored hash with
@@ -107,13 +111,5 @@ Source of the salt.
 .BR useradd (8),
 .BR usermod (8)
 .SH BUGS
-The root filesystem build does not install
-.B passwd
-set-user-ID root, so a user other than the superuser cannot take the
-lock or replace
-.I /etc/shadow
-and gets
-.RB \(dq "failed to update /etc/shadow" \(dq.
-.PP
 Input longer than 127 bytes is truncated silently, and the unread
 remainder of the line is consumed by the next prompt.

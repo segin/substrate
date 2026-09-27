@@ -282,6 +282,7 @@ main(int argc, char **argv)
     char           new1[PW_MAX];
     char           new2[PW_MAX];
     char           line[512];
+    char           my_name[256];
 
     if (argc >= 2) {
         user = argv[1];
@@ -291,7 +292,10 @@ main(int argc, char **argv)
             fprintf(stderr, "passwd: cannot identify uid %u\n", (unsigned)my_uid);
             return 1;
         }
-        user = pw->pw_name;
+        /* Copy the name out: getpwnam() below reuses the buffer
+         * getpwuid() returned, and would scan for its own records. */
+        snprintf(my_name, sizeof(my_name), "%s", pw->pw_name);
+        user = my_name;
     }
 
     pw = getpwnam(user);

@@ -115,6 +115,20 @@ pwdb_atomic_rewrite(const char *path, mode_t default_mode,
     fd = open(tmp, O_WRONLY | O_CREAT | O_EXCL, mode);
     if (fd < 0) return -1;
 
+    /* Give the file the original's owner before anything is written to
+     * it.  Under a setuid-root passwd the file is created with the
+     * caller's group, which the mode may let read it; changing the owner
+     * only after writing would let that group open it -- and keep it open
+     * -- while it holds every account's hash. */
+    if ((fchown(fd, owner_uid, owner_gid) < 0 && errno != EPERM) ||
+        fchmod(fd, mode) < 0) {        /* exact mode, whatever the umask */
+        int saved = errno;
+        close(fd);
+        unlink(tmp);
+        errno = saved;
+        return -1;
+    }
+
     fp = fdopen(fd, "w");
     if (fp == NULL) {
         int saved = errno;
@@ -144,14 +158,6 @@ pwdb_atomic_rewrite(const char *path, mode_t default_mode,
     }
     if (fclose(fp) != 0) {
         unlink(tmp);
-        return -1;
-    }
-
-    /* Preserve ownership when running as root onto a non-root file. */
-    if (chown(tmp, owner_uid, owner_gid) < 0 && errno != EPERM) {
-        int saved = errno;
-        unlink(tmp);
-        errno = saved;
         return -1;
     }
 

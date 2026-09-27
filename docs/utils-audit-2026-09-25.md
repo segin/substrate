@@ -99,7 +99,7 @@ Suggested order, highest leverage first:
     - Site: `bin/newgrp/newgrp.c:38-40`
     - Fix: Look the gid up in the group database and reject unknown ones.
     - Verify: `newgrp 99999` (no such group) fails.
-- [ ] **UTL-PASSWD-01** (high) `passwd` is not installed setuid, so ordinary users cannot change their own password (REQ: REQ-UTLA-0014)
+- [x] **UTL-PASSWD-01** (high) `passwd` is not installed setuid, so ordinary users cannot change their own password (REQ: REQ-UTLA-0014)
     - Site: `build-rootfs.sh:948-949` (only `su` and `ping` get mode 4755), `bin/passwd/passwd.c`
     - Fix: Install `/bin/passwd` setuid root, and confirm `passwd.c` restricts a non-root caller to its own entry and re-verifies the old password.
     - Verify: A non-root user changes their own password; cannot change another user's.

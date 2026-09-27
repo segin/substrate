@@ -88,6 +88,15 @@ with
 .Dv O_CREAT|O_EXCL
 \(em fails loudly on a leftover from a previous crash.
 .It
+Give it the owner and mode of the existing
+.Fa path
+where it exists, else
+.Fa default_mode ,
+before anything is written, so a set-user-ID caller's group never
+holds a readable copy (a non-root caller's
+.Er EPERM
+from the ownership change is ignored).
+.It
 Call
 .Fa cb
 with the new file's
@@ -98,11 +107,6 @@ fills it and returns 0, or returns -1 to abort.
 .Fn fflush ,
 .Fn fsync ,
 .Fn fclose .
-.It
-Preserve owner/mode from the existing
-.Fa path
-where it exists, else use
-.Fa default_mode .
 .It
 .Xr rename 2
 the temp file over
@@ -178,8 +182,9 @@ returned by
 .Xr rename 2 ,
 .Xr fsync 2 ,
 .Xr stat 2 ,
+.Xr fchown 2 ,
 or
-.Xr chown 2 .
+.Xr fchmod 2 .
 Notable values:
 .Bl -tag -width Ds
 .It Bq Er EEXIST
