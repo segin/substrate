@@ -134,7 +134,7 @@ Suggested order, highest leverage first:
     - Site: `sbin/syslogd/syslogd.c:519` vs `lib/c/src/syslog.c:160`
     - Fix: When the message already carries an RFC 3164 timestamp, keep it (strip before re-stamping, or do not re-stamp).
     - Verify: A `syslog(3)` message is logged with exactly one timestamp.
-- [ ] **UTL-TELNETD-01** (medium) IAC doubling of a full 1024-byte pty read overruns the output bound and drops the tail (REQ: REQ-UTLA-0022)
+- [x] **UTL-TELNETD-01** (medium) IAC doubling of a full 1024-byte pty read overruns the output bound and drops the tail (REQ: REQ-UTLA-0022)
     - Site: `sbin/telnetd/telnetd.c:196`
     - Fix: Size the output buffer to twice the input (worst case all 0xff), or emit in chunks.
     - Verify: 1024 bytes of 0xff from the pty reach the client as 2048 bytes.

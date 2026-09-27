@@ -134,9 +134,6 @@ Traffic is unencrypted, including passwords.
 A TELNET command split across two reads from the network is not recognised,
 and its bytes reach the pty as data.
 .PP
-When a read from the pty contains 0xff bytes, the doubled output can
-exceed the 1024-byte buffer and the excess is dropped.
-.PP
 .B telnetd
 writes no utmp or wtmp records, and a session's logout is not recorded.
 .PP

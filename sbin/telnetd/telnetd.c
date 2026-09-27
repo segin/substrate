@@ -169,7 +169,9 @@ static int handle_one_connection(int c) {
     /* Parent: forward bytes between socket and master. */
     close(slave);
 
-    uint8_t in[1024], out[1024];
+    /* IAC stuffing can double what the pty gives us (every byte 0xff),
+     * so the network-bound buffer is twice the read size. */
+    uint8_t in[1024], out[1024], stuffed[2 * sizeof(in)];
     int alive = 1;
     int cr_pending = 0;   /* NVT CR carried across a read() boundary */
     while (alive) {
@@ -193,11 +195,11 @@ static int handle_one_connection(int c) {
             /* IAC-stuff every 0xff byte on the way out; otherwise
              * pass through. */
             size_t o = 0;
-            for (ssize_t i = 0; i < r && o + 2 <= sizeof(out); i++) {
-                out[o++] = in[i];
-                if (in[i] == IAC && o < sizeof(out)) out[o++] = IAC;
+            for (ssize_t i = 0; i < r; i++) {
+                stuffed[o++] = in[i];
+                if (in[i] == IAC) stuffed[o++] = IAC;
             }
-            if (write_all(c, out, o) < 0) break;
+            if (write_all(c, stuffed, o) < 0) break;
         }
     }
     close(master);
