@@ -141,15 +141,19 @@ static int parse_one_selector(char *tok, struct selector *out)
     const char *facname = tok;
     const char *lvlname = dot + 1;
 
+    /* ANY_FAC and ANY_LVL are -1, the same value the lookups return for an
+     * unknown name, so an unknown name is caught here, before the lookup's
+     * result is stored, and never confused with a wildcard. */
     if (strcmp(facname, "*") == 0)         out->facility = ANY_FAC;
     else if (strcmp(facname, "none") == 0) out->facility = NONE_FAC;
-    else                                   out->facility = lookup_fac(facname);
+    else if ((out->facility = lookup_fac(facname)) < 0) return -1;
 
+    out->level = ANY_LVL;
     if (strcmp(lvlname, "*") == 0)         out->level = ANY_LVL;
     else if (strcmp(lvlname, "none") == 0) out->facility = NONE_FAC;
-    else                                   out->level = lookup_lvl(lvlname);
+    else if ((out->level = lookup_lvl(lvlname)) < 0) return -1;
 
-    return (out->facility == -1 || out->level == -1) ? -1 : 0;
+    return 0;
 }
 
 static void add_default_rules(void)
