@@ -432,6 +432,15 @@ int main(int argc, char **argv) {
             else usage();
             i += 3;
         }
+        else if (strcmp(cmd, "netmask") == 0 || strcmp(cmd, "broadcast") == 0 ||
+                 strcmp(cmd, "mtu") == 0 || strcmp(cmd, "hw") == 0 ||
+                 strcmp(cmd, "gateway") == 0 || strcmp(cmd, "alias") == 0 ||
+                 strcmp(cmd, "-alias") == 0 || strcmp(cmd, "inet6") == 0) {
+            /* A keyword whose argument(s) are missing: the cases above
+             * take it only when they are there. */
+            fprintf(stderr, "ifconfig: %s: missing argument\n", cmd);
+            return 1;
+        }
         else {
             /* Otherwise treat as an IPv4 address. */
             set_ipv4(iface, SIOCSIFADDR, argv[i]);

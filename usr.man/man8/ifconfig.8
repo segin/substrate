@@ -150,7 +150,9 @@ The listing was printed or every command succeeded.
 .TP
 .B 1
 A socket could not be created, the interface list could not be read,
-the interface to show does not exist,
+the interface to show does not exist, a keyword is missing its argument
+(reported as
+.BR "missing argument" ),
 an address or MAC argument could not be parsed, an
 .BR ioctl (2)
 failed while applying a command, or
@@ -204,11 +206,6 @@ Add an IPv6 address with a /64 prefix:
 .SH SEE ALSO
 .BR ioctl (2)
 .SH BUGS
-A keyword given without its argument, such as a trailing
-.BR netmask ,
-is treated as an IPv4 address and rejected with
-.BR "invalid IPv4 address" .
-.PP
 The broadcast address is not derived from the address and netmask
 by
 .BR ifconfig .

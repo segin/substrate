@@ -201,7 +201,7 @@ Suggested order, highest leverage first:
     - Site: `sbin/ifconfig/ifconfig.c:100-104`, `:319`
     - Fix: Exit 1 after reporting the error.
     - Verify: `ifconfig nosuch; echo $?` prints 1.
-- [ ] **UTL-IFCONFIG-02** (low) A keyword missing its argument is parsed as an IPv4 address (REQ: REQ-UTLA-0038)
+- [x] **UTL-IFCONFIG-02** (low) A keyword missing its argument is parsed as an IPv4 address (REQ: REQ-UTLA-0038)
     - Site: `sbin/ifconfig/ifconfig.c:350-353`
     - Fix: Report "missing argument" for a trailing `netmask`, `mtu`, `gateway` etc.
     - Verify: `ifconfig eth0 netmask` fails with that message and changes nothing.
