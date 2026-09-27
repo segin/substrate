@@ -31,7 +31,11 @@ calls
 and finally calls
 .BR reboot (2)
 with
-.BR RB_HALT_SYSTEM .
+.BR RB_HALT_SYSTEM ,
+which prints
+.B "System halted."
+and stops the processor; the machine stays down until it is reset or
+switched off.
 .PP
 If signalling init fails,
 .B halt
@@ -111,11 +115,3 @@ during an orderly shutdown.
 .BR sync (2),
 .BR poweroff (8),
 .BR reboot (8)
-.SH BUGS
-The kernel does not implement a true halt:
-.B RB_HALT_SYSTEM
-is handled exactly like
-.BR RB_AUTOBOOT ,
-so
-.B halt
-resets the machine instead of stopping it.

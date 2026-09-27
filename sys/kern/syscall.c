@@ -4617,8 +4617,18 @@ int sys_reboot(int cmd) {
         __asm__ volatile("cli");
         for (;;) __asm__ volatile("hlt");
         return 0;                       /* not reached */
-    case RB_AUTOBOOT:
     case RB_HALT_SYSTEM:
+        /*
+         * Halt: stop here, with interrupts off, and leave the machine
+         * down until it is reset or powered off by hand.  (The other CPUs
+         * are parked in hlt already.)  A halt must never turn into a
+         * reboot.
+         */
+        kprintf("System halted.\n");
+        __asm__ volatile("cli");
+        for (;;) __asm__ volatile("hlt");
+        return 0;                       /* not reached */
+    case RB_AUTOBOOT:
         break;                          /* hard reset, below */
     default:
         return -EINVAL;

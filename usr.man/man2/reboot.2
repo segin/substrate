@@ -21,7 +21,10 @@ argument can be one of the following:
 The system is immediately rebooted.
 .TP
 .B RB_HALT_SYSTEM
-The system is halted.
+The system is halted: the kernel prints
+.B "System halted."
+and stops the processor with interrupts disabled.
+The machine stays down until it is reset or switched off by hand.
 .TP
 .B RB_POWER_OFF
 The system is powered off.
