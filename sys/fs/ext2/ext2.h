@@ -400,6 +400,7 @@ typedef struct {
     uint32_t mnt_flags;
     int      readonly;
     int      force_readonly;   /* ro forced (unsupported RO_COMPAT); no rw remount */
+    int      noatime;          /* mount -o noatime: reads never update atime */
 
     /* metadata_csum seed.  Either crc32c(~0, uuid, 16) (default) or
      * the explicit s_checksum_seed value if EXT2F_INCOMPAT_CSUM_SEED

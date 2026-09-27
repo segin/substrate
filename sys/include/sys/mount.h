@@ -127,6 +127,7 @@ struct mount {
     struct fs_node      *mnt_node_root;     /* Legacy: root node of this fs */
     uint64_t            mnt_covered_ino;    /* inode of covered directory (snapshot) */
     struct mount        *mnt_covered_mp;    /* mount of covered directory (snapshot) */
+    uint32_t            mnt_vfs_caps;       /* VFS_CAP_* of the filesystem type */
 };
 
 /*

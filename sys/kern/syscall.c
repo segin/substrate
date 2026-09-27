@@ -489,6 +489,9 @@ ssize_t kern_write(int fd, const char *buf, size_t len) {
 }
 
 int truncate_fs(fs_node_t *node, off_t length) {
+    if (vfs_node_rdonly(node)) {
+        return -EROFS;
+    }
     if (node->truncate != 0) {
         return node->truncate(node, length);
     }
@@ -768,6 +771,18 @@ static int kern_open_from(const char *path, int flags, int mode, fs_node_t *root
     if ((flags & O_DIRECTORY) && (node->flags & 0x7) != FS_DIRECTORY) {
         proc_clear_fd(current_process, fd);
         return -ENOTDIR;
+    }
+
+    /* Writing to (or truncating) a file, directory or symlink on a
+     * read-only mount would change the filesystem.  Device and FIFO nodes
+     * there stay writable. */
+    if (((flags & O_ACCMODE) != O_RDONLY || (flags & O_TRUNC)) &&
+        vfs_node_rdonly(node)) {
+        uint32_t type = node->flags & 0x7;
+        if (type == FS_FILE || type == FS_DIRECTORY || type == FS_SYMLINK) {
+            proc_clear_fd(current_process, fd);
+            return -EROFS;
+        }
     }
 
     if (vfs_may_open_groups(node,
@@ -3421,6 +3436,7 @@ int sys_lchown(const char *path, int uid, int gid) {
     if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
     node = sys_lookup_path(kpath, 0);
     if (!node) return -ENOENT;
+    if (vfs_node_rdonly(node)) return -EROFS;
 
     /* Match fchown's current policy until supplementary groups exist. */
     if (uid != -1 && current_process->euid != 0)
@@ -3468,6 +3484,9 @@ int sys_fchown(int fd, int uid, int gid) {
 
     fs_node_t *node = (fs_node_t *)f->f_data;
 
+    if (vfs_node_rdonly(node))
+        return -EROFS;
+
     /* Only root may change file owner */
     if (uid != -1 && current_process->euid != 0)
         return -EPERM;
@@ -3508,6 +3527,8 @@ int sys_fchownat(int dirfd, const char *path, int uid, int gid, int flag) {
         fs_node_t *node = parent->finddir(parent, name);
         if (!node) return -ENOENT;
 
+        if (vfs_node_rdonly(node) || vfs_node_rdonly(parent))
+            return -EROFS;
         /* If it's a symlink and AT_SYMLINK_NOFOLLOW is set, operate on the link */
         if ((node->flags & 0x7) == FS_SYMLINK) {
             /* Match fchown's current policy until supplementary groups exist. */
@@ -3551,6 +3572,7 @@ int sys_fchownat(int dirfd, const char *path, int uid, int gid, int flag) {
     if (ret != 0) return ret;
     fs_node_t *node = vfs_perso_lookup(froot, fcwd, kpath);
     if (!node) return -ENOENT;
+    if (vfs_node_rdonly(node)) return -EROFS;
 
     /* Match fchown's current policy until supplementary groups exist. */
     if (uid != -1 && current_process->euid != 0)
@@ -3590,6 +3612,7 @@ int sys_lchownat(int dirfd, const char *path, int uid, int gid, int flag) {
     if ((node->flags & 0x7) != FS_SYMLINK && !(flag & AT_REMOVEDIR)) {
         /* Even for non-symlinks, we allow setting ownership */
     }
+    if (vfs_node_rdonly(node) || vfs_node_rdonly(parent)) return -EROFS;
 
     /* Match fchown's current policy until supplementary groups exist. */
     if (uid != -1 && current_process->euid != 0)
@@ -3693,14 +3716,18 @@ int vfs_unmount_legacy(const char *path);
 fs_node_t *vfs_lookup(fs_node_t *root, const char *path);
 
 int sys_mount(const char *source, const char *target, const char *fstype, unsigned long flags, void *data) {
-    char ksource[256], ktarget[256], kfstype[64];
+    char ksource[256], ktarget[256], kfstype[64], kopts[256];
     if (source) {
         if (copyinstr(source, ksource, sizeof(ksource), NULL) != 0) return -14;
     }
     if (copyinstr(target, ktarget, sizeof(ktarget), NULL) != 0) return -14;
     if (copyinstr(fstype, kfstype, sizeof(kfstype), NULL) != 0) return -14;
+    /* data is the option string (mount(8) -o); filesystems see a kernel
+     * copy, never the user pointer. */
+    if (data && copyinstr(data, kopts, sizeof(kopts), NULL) != 0) return -EFAULT;
 
-    return kern_mount(source ? ksource : NULL, ktarget, kfstype, flags, data);
+    return kern_mount(source ? ksource : NULL, ktarget, kfstype, flags,
+                      data ? kopts : NULL);
 }
 
 int kern_mount(const char *source, const char *target, const char *fstype, unsigned long flags, void *data) {

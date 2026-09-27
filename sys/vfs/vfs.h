@@ -149,6 +149,13 @@ typedef struct fs_node {
 } fs_node_t;
 
 typedef struct fs_node * (*mount_type_t)(const char *device, uint32_t flags, void *data);
+/* Mount a filesystem held on a device: `dev` is the device node and
+ * `options` the mount(2) option string ("noatime,ro", say; NULL for none).
+ * A filesystem that takes options of its own provides this beside mount;
+ * it should refuse (return NULL for) an option it does not know. */
+typedef struct fs_node * (*mount_opts_type_t)(const char *device, uint32_t flags,
+                                              struct fs_node *dev,
+                                              const char *options);
 
 /*
  * Filesystem capability bitmap.  Each backend declares which
@@ -161,12 +168,16 @@ typedef struct fs_node * (*mount_type_t)(const char *device, uint32_t flags, voi
 #define VFS_CAP_VIRTUAL         0x00000008U /* synthesised, no source */
 #define VFS_CAP_NETWORK         0x00000010U /* network-backed */
 #define VFS_CAP_USER_MOUNT      0x00000020U /* unprivileged users may mount */
+#define VFS_CAP_OWN_ATIME       0x00000040U /* keeps atime itself (relatime,
+                                               noatime): the VFS does not
+                                               stamp it on each read */
 
 struct blkdev;
 
 typedef struct filesystem {
     char name[32];
     mount_type_t mount;
+    mount_opts_type_t mount_opts;   /* optional: device mount with options */
     uint32_t caps;                  /* VFS_CAP_* bitmap */
     /*
      * Read this filesystem's on-disk volume label from a raw block
@@ -239,6 +250,7 @@ int vfs_check_permissions_groups(fs_node_t *node, uint32_t uid, uint32_t gid,
 int vfs_may_open(fs_node_t *node, uint32_t uid, uint32_t gid, int flags);
 int vfs_may_open_groups(fs_node_t *node, uint32_t uid, uint32_t gid,
                         const uint32_t *groups, int ngroups, int flags);
+int vfs_node_rdonly(fs_node_t *node);
 int vfs_may_modify_dir(fs_node_t *dir);
 int vfs_may_delete(fs_node_t *dir, fs_node_t *victim);
 int vfs_chmod_node(fs_node_t *node, uint32_t mode);

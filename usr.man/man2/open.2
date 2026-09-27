@@ -68,6 +68,13 @@ does not exist,
 was given, and the caller lacks write and search permission on the
 directory that would contain it.
 .TP
+.B EROFS
+.I pathname
+is a regular file, directory or symbolic link on a read-only mount and
+write access or
+.B O_TRUNC
+was requested, or it would be created there.
+.TP
 .B EMFILE
 Too many open files.
 .SH NOTES

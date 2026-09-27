@@ -2580,7 +2580,7 @@ int ext2_readlink(fs_node_t *node, char *buf, size_t size) {
  */
 #define EXT2_RELATIME_SECS  86400u
 static void ext2_touch_atime(ext2_node_t *ctx, fs_node_t *node) {
-    if (!ctx || !ctx->fs || ctx->fs->readonly) return;
+    if (!ctx || !ctx->fs || ctx->fs->readonly || ctx->fs->noatime) return;
     uint32_t now = (uint32_t)get_time();
     uint32_t at  = ctx->inode.i_atime;
     if (at >= ctx->inode.i_mtime && at >= ctx->inode.i_ctime &&
@@ -4419,9 +4419,56 @@ int ext2_read_label(blkdev_t *dev, char *label, size_t len) {
     return 0;
 }
 
+/*
+ * Mount with mount(8) -o options.  The generic ones (ro, nosuid, ...) have
+ * already become MNT_* flags and are skipped here; ext2's own are noatime
+ * (reads never update atime) and atime/relatime (the default: atime is
+ * refreshed on the relatime rule, see ext2_touch_atime()).  Any other
+ * option refuses the mount, as Linux does.
+ */
+static fs_node_t *ext2_mount_opts(const char *device, uint32_t flags,
+                                  fs_node_t *dev, const char *options) {
+    static const char *const generic[] = {
+        "ro", "rw", "remount", "nosuid", "nodev", "noexec", "sync", "async",
+        "defaults", NULL
+    };
+    int noatime = 0;
+    char buf[256];
+
+    strlcpy(buf, options ? options : "", sizeof(buf));
+    for (char *opt = buf, *next; opt && *opt; opt = next) {
+        int known = 0;
+        next = strchr(opt, ',');
+        if (next) *next++ = '\0';
+        if (*opt == '\0') continue;             /* ",," */
+        for (int i = 0; generic[i]; i++)
+            if (strcmp(opt, generic[i]) == 0) known = 1;
+        if (strcmp(opt, "noatime") == 0) {
+            noatime = 1;
+            known = 1;
+        } else if (strcmp(opt, "atime") == 0 || strcmp(opt, "relatime") == 0) {
+            noatime = 0;
+            known = 1;
+        }
+        if (!known) {
+            kprintf("EXT2: unknown mount option '%s'\n", opt);
+            return NULL;
+        }
+    }
+
+    fs_node_t *root = ext2_mount(device, flags, dev);
+    if (root && root->impl) {
+        ext2_node_t *ctx = (ext2_node_t *)(uintptr_t)root->impl;
+        if (ctx->fs) ctx->fs->noatime = noatime;
+    }
+    return root;
+}
+
 static filesystem_t ext2_filesystem = {
     .name = "ext2",
     .mount = ext2_mount,
+    .mount_opts = ext2_mount_opts,
+    .caps = VFS_CAP_OWN_ATIME,
     .read_label = ext2_read_label,
 };
 

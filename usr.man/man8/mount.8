@@ -167,12 +167,25 @@ Asynchronous I/O.
 Accepted and ignored.
 .RE
 .IP
-Other words are not rejected.
-The complete option string is passed to
+Other words are left to the filesystem: the complete option string is
+passed to
 .BR mount (2)
 as its
 .I data
-argument, but see BUGS.
+argument, and a filesystem on a device receives it alongside the device.
+.B ext2
+accepts
+.B noatime
+(reads never update the access time) and
+.BR atime " or " relatime
+(the default: the access time is refreshed when it is older than the
+modification or change time, or a day old), and refuses the mount for
+any option it does not know.
+.B ro
+is enforced for every filesystem: on a read-only mount, creating,
+removing or renaming entries, opening a file for writing, and changing a
+file's size, mode, owner or times fail with
+.BR EROFS .
 The kernel rejects
 .B async
 combined with
@@ -230,16 +243,6 @@ Make the root filesystem writable after checking it:
 .BR proc (5),
 .BR rootfs (7)
 .SH BUGS
-When
-.I device
-names a node under
-.IR /dev ,
-the kernel passes that device to the filesystem in place of the
-.I data
-argument, so filesystem-specific
-.B \-o
-options are only seen by filesystems mounted without a device.
-.PP
 Only the first 255 bytes of
 .I options
 are examined for the flags listed above.

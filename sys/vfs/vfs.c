@@ -367,8 +367,14 @@ int vfs_mount_legacy(const char *device, const char *path, const char *type, uin
         }
     }
 
-    // Call mount implementation with device node as data
-    fs_node_t *root = fs->mount(device, flags, dev_node ? dev_node : data);
+    /* Mount.  `data` is the mount(2) option string (sys_mount copies it
+     * in).  A filesystem on a device gets the device node in its place,
+     * so the options reach it only through mount_opts, which takes both. */
+    fs_node_t *root;
+    if (dev_node && fs->mount_opts)
+        root = fs->mount_opts(device, flags, dev_node, (const char *)data);
+    else
+        root = fs->mount(device, flags, dev_node ? dev_node : data);
     if (!root) {
         kprintf("VFS: mount(%s on %s): filesystem init failed\n",
                 type, path);
@@ -488,6 +494,7 @@ int vfs_mount_legacy(const char *device, const char *path, const char *type, uin
 
         mp->mnt_node_root = root;
         mp->mnt_node_covered = mountpoint;
+        mp->mnt_vfs_caps = fs->caps;
 
         /* Snapshot the covered node's identity for mount crossing.
          * We cannot dereference mnt_node_covered later because
@@ -529,6 +536,13 @@ int vfs_mount_legacy(const char *device, const char *path, const char *type, uin
  * this large -- `size` is bounded far below 4 GiB - 4096 -- so the range is
  * unambiguous.
  */
+/* Does the filesystem holding `node` keep atime itself?  Then its own rule
+ * (ext2's relatime, or none at all under -o noatime) must not be overridden
+ * by stamping the in-memory atime on every read. */
+static inline int vfs_fs_owns_atime(fs_node_t *node) {
+    return node->mp != NULL && (node->mp->mnt_vfs_caps & VFS_CAP_OWN_ATIME);
+}
+
 #define VFS_MAX_ERRNO  4095
 static inline int vfs_is_err_value(size_t v) {
     return v >= (size_t)-VFS_MAX_ERRNO;
@@ -555,7 +569,8 @@ ssize_t read_fs(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
         return (ssize_t)result;
     }
 
-    node->atime = get_time();
+    if (!vfs_fs_owns_atime(node))
+        node->atime = get_time();
     return (ssize_t)result;
 }
 
@@ -635,7 +650,8 @@ struct dirent *readdir_fs(fs_node_t *node, uint64_t index, struct dirent *out) {
         mutex_unlock(&readdir_lock);
         if (!de)
             return 0;
-        node->atime = get_time();
+        if (!vfs_fs_owns_atime(node))
+            node->atime = get_time();
         return out;
     } else
         return 0;
@@ -1271,14 +1287,31 @@ int vfs_may_open(fs_node_t *node, uint32_t uid, uint32_t gid, int flags) {
 }
 
 /*
+ * Is `node` on a filesystem mounted read-only?  The VFS enforces that for
+ * every filesystem -- creating, removing or renaming entries, opening a
+ * file for writing, and changing its size, mode, owner or times all fail
+ * EROFS -- so a filesystem that ignores MNT_RDONLY is read-only all the
+ * same.  Device and FIFO nodes on such a mount stay writable: writing to
+ * one does not change the filesystem.
+ */
+int vfs_node_rdonly(fs_node_t *node) {
+    return node != NULL && node->mp != NULL &&
+           (node->mp->mnt_stat.f_flags & MNT_RDONLY) != 0;
+}
+
+/*
  * May the calling process add or remove entries in directory `dir`?  POSIX
  * requires write and search permission on it for every call that changes a
  * directory's contents: creat/open(O_CREAT), mkdir, mknod, symlink, link,
  * unlink, rmdir and rename.  Checked with the effective ids and the
  * supplementary groups; root, and kernel context with no process, pass.
- * Returns 0 or -EACCES.
+ * A directory on a read-only mount cannot change at all.  Returns 0,
+ * -EROFS or -EACCES.
  */
 int vfs_may_modify_dir(fs_node_t *dir) {
+    if (vfs_node_rdonly(dir)) {
+        return -EROFS;
+    }
     if (dir == NULL || current_process == NULL || current_process->euid == 0) {
         return 0;
     }
@@ -1337,6 +1370,9 @@ int vfs_chmod_node(fs_node_t *node, uint32_t mode) {
 
     if (node == NULL) {
         return -EINVAL;
+    }
+    if (vfs_node_rdonly(node)) {
+        return -EROFS;
     }
 
     old_mask = node->mask;
@@ -1609,6 +1645,7 @@ int poll_fs(fs_node_t *node, void *waiter) {
  * don't each have to call get_realtime themselves.  */
 int setattr_fs(fs_node_t *node, const struct fs_attr *a) {
     if (!node || !a) return -EINVAL;
+    if (vfs_node_rdonly(node)) return -EROFS;
 
     struct fs_attr eff = *a;
     if (eff.mask & (FS_ATTR_ATIME_NOW | FS_ATTR_MTIME_NOW)) {

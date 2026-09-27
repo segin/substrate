@@ -174,7 +174,7 @@ Suggested order, highest leverage first:
     - Site: `sys/kern/syscall.c:4594` (`RB_HALT_SYSTEM` goes down the `RB_AUTOBOOT` path)
     - Fix: Give `RB_HALT_SYSTEM` its own path: stop the CPUs and leave the machine halted (interrupts off, `hlt`).
     - Verify: `tests/sys/`: `reboot(RB_HALT_SYSTEM)` under QEMU leaves the guest halted instead of rebooting.
-- [ ] **UTL-MOUNT-01** (medium) `mount -o` options never reach filesystems on real devices (REQ: REQ-UTLA-0032)
+- [x] **UTL-MOUNT-01** (medium) `mount -o` options never reach filesystems on real devices (REQ: REQ-UTLA-0032)
     - Site: `bin/mount/mount.c:102` with `sys/vfs/vfs.c:367` (the device node replaces the data string)
     - Fix: Pass the device and the option string to the filesystem separately.
     - Verify: `mount -o ro` (or an ext2-specific option) on `/dev/storage/virtio0` takes effect.

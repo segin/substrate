@@ -71,15 +71,28 @@ than overlaying a new one.
 .PP
 The
 .I data
-argument is filesystem-specific.  Most filesystems accept a
-NUL-terminated comma-separated options string of
-.B key=value
-pairs (parsed by the kernel's mountopt subsystem); the framework
-strips the standard options
-.RB ( ro ", " rw ", " nosuid ", " nodev ", " noexec ", " sync ", " async )
-out of that string and folds them into
-.I mountflags
-before handing the remainder to the filesystem driver.
+argument, if not NULL, is a NUL-terminated, comma-separated option
+string of at most 255 bytes, as
+.BR mount (8)
+passes for
+.BR \-o .
+The kernel copies it and hands it unchanged to the filesystem, alongside
+the device for a filesystem on one.
+The standard options
+.RB ( ro ", " nosuid ", " ...)
+are not taken from it: pass them in
+.IR mountflags .
+.B ext2
+accepts
+.BR noatime ,
+.BR atime " and " relatime ,
+ignores the standard option names, and fails the mount on anything
+else.
+A filesystem mounted with
+.B MNT_RDONLY
+is read-only whatever the filesystem itself supports: the kernel refuses
+every change to it with
+.BR EROFS .
 .SH RETURN VALUE
 On success, 0 is returned.  On error, \-1 is returned and
 .I errno
@@ -88,6 +101,15 @@ is set to indicate the error.
 .TP
 .B EPERM
 The caller's effective UID is not 0.
+.TP
+.B EFAULT
+.I data
+points outside the address space, or is longer than 255 bytes.
+.TP
+.B EIO
+The filesystem could not be mounted, including because it refused an
+option in
+.IR data .
 .TP
 .B EINVAL
 .I mountflags
