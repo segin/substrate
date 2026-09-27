@@ -37,7 +37,8 @@ resolve_group(const char *spec)
     long v = strtol(spec, &end, 10);
     if (end != spec && *end == '\0' && errno != ERANGE && v >= 0 && v <= INT_MAX) {
         /* Confirm the gid exists so a typo isn't silently accepted. */
-        return (gid_t)v;
+        if (getgrgid((gid_t)v) != NULL)
+            return (gid_t)v;
     }
 
     fprintf(stderr, "%s: group '%s' does not exist\n", prog, spec);

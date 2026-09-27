@@ -13,8 +13,8 @@ and then executes a shell.
 .I group
 may be a group name from the group database or a numeric group ID.
 A name is looked up first; if it is not found and the operand is a
-non-negative decimal number, that number is used as the group ID
-without checking that such a group exists.
+non-negative decimal number naming a group in the database, that
+number is used as the group ID; any other operand is an unknown group.
 With no operand, the group is set back to the login group from the
 password entry of the real user ID.
 .PP

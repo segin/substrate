@@ -95,7 +95,7 @@ Suggested order, highest leverage first:
     - Site: `bin/hostname/hostname.c:69`
     - Fix: Only print in the no-argument case; leave setting from `/etc/hostname` to `-F` (and `rc.d/00-hostname`).
     - Verify: `hostname` with no arguments makes no `sethostname()` call.
-- [ ] **UTL-NEWGRP-01** (low) `newgrp` accepts any numeric gid, though its comment says it is checked (REQ: REQ-UTLA-0013)
+- [x] **UTL-NEWGRP-01** (low) `newgrp` accepts any numeric gid, though its comment says it is checked (REQ: REQ-UTLA-0013)
     - Site: `bin/newgrp/newgrp.c:38-40`
     - Fix: Look the gid up in the group database and reject unknown ones.
     - Verify: `newgrp 99999` (no such group) fails.
