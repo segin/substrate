@@ -534,17 +534,19 @@ run_cmds(cmd_t *start)
 
         case C_DELETEP: {
             char *ps = G.pat.buf;
-            if (ps) {
-                char *nl = memchr(ps, '\n', G.pat.len);
-                if (nl) {
-                    size_t off = (size_t)(nl - ps) + 1;
-                    memmove(ps, ps + off, G.pat.len - off);
-                    G.pat.len -= off;
-                    if (G.pat.buf) G.pat.buf[G.pat.len] = '\0';
-                } else {
-                    db_clear(&G.pat);
-                }
+            char *nl = ps ? memchr(ps, '\n', G.pat.len) : NULL;
+            if (!nl) {
+                /* No newline: POSIX makes D a plain d -- a new cycle with
+                 * new input.  Restarting on the emptied pattern space
+                 * would never read another line. */
+                db_clear(&G.pat);
+                G.no_print = true;
+                return RC_NEWCYCLE;
             }
+            size_t off = (size_t)(nl - ps) + 1;
+            memmove(ps, ps + off, G.pat.len - off);
+            G.pat.len -= off;
+            G.pat.buf[G.pat.len] = '\0';
             G.subst_flag = false;
             return RC_RESTART;
         }

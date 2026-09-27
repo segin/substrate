@@ -274,6 +274,8 @@ Delete the pattern space and start the next cycle.
 .B D
 Delete the pattern space up to and including the first newline and
 restart the script on what remains without reading input.
+If the pattern space contains no newline, act as
+.BR d .
 .TP
 .BR e " [\fIcommand\fR]"
 Run
@@ -552,10 +554,6 @@ selects every line.
 .B q
 with status 0 only stops the current file; later files are still
 processed.
-.PP
-.B D
-on a pattern space that contains no newline never reads more input and
-loops forever.
 .PP
 The
 .IR N g

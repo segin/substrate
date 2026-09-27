@@ -208,7 +208,7 @@ Suggested order, highest leverage first:
 
 ## D. sed
 
-- [ ] **UTL-SED-01** (high) **[ran]** `D` on a pattern space with no newline loops forever (REQ: REQ-UTLA-0039)
+- [x] **UTL-SED-01** (high) **[ran]** `D` on a pattern space with no newline loops forever (REQ: REQ-UTLA-0039)
     - Site: `bin/sed/sed_exec.c:535-549`
     - Fix: Per POSIX, when the pattern space has no newline `D` behaves like `d` (start the next cycle with new input).
     - Verify: `printf 'a\n' | sed D` exits and prints nothing.
