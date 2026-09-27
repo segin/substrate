@@ -16,5 +16,6 @@ audio:x:29:root,substrate
 video:x:44:substrate
 sshd:x:22:
 messagebus:x:27:
+shadow:x:42:
 nobody:x:65534:
 substrate:x:1000:

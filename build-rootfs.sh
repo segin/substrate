@@ -942,6 +942,9 @@ EOF
     #    the user changing their own password.  ping needs it because opening
     #    a SOCK_RAW socket is root-only; it drops the privilege immediately
     #    after socket().
+    #    /etc/shadow is root:shadow 0640 (gid 42, from etc/group): no user
+    #    can read the hashes, and CDE's dtsession, which checks the user's
+    #    password to unlock the screen, is setgid shadow to read it.
     #    -I 128 prints a harmless post-2038-date warning.  128-byte inodes
     #    are kept because tools/ext2-install-boot and the ext2 boot-block
     #    scheme assume them; see docs/specs/bootloader_ext2_boot.md.
@@ -962,6 +965,13 @@ EOF
         [ -e "$1/bin/su" ] && chmod 4755 "$1/bin/su"
         [ -e "$1/bin/passwd" ] && chmod 4755 "$1/bin/passwd"
         [ -e "$1/bin/ping" ] && chmod 4755 "$1/bin/ping"
+        if [ -e "$1/etc/shadow" ]; then
+            chown 0:42 "$1/etc/shadow" && chmod 0640 "$1/etc/shadow"
+        fi
+        dts="$1/usr/dt/bin/dtsession"
+        if [ -e "$dts" ]; then
+            chown 0:42 "$dts" && chmod 2755 "$dts"
+        fi
         mke2fs -F -q -b 1024 -I 128 -O ^resize_inode -L "$4" \
                -E offset=$(( $3 * 512 )) -d "$1" "$2" "$5"
     ' _ "$DIST" "$IMAGE" "$ROOT_PART_LBA" "$ROOT_LABEL" "$root_blocks"

@@ -9,7 +9,8 @@
  *   wrongcur  with a wrong current password nothing changes;
  *   other     "passwd root" is refused and root's entry is unchanged;
  *   owner     /etc/shadow keeps its owner, group and mode afterwards, and
- *             no temporary file is left behind.
+ *             no temporary file is left behind;
+ *   private   /etc/shadow is root:shadow 0640 and the user cannot read it.
  *
  * Runs as init (root); /etc/passwd and /etc/shadow are restored afterwards.
  * Prints a "Result:" line.
@@ -87,6 +88,19 @@ static int verifies(const char *user, const char *pw) {
     return h && strcmp(h, s) == 0;
 }
 
+/* Can the test user open /etc/shadow for reading? */
+static int user_can_read_shadow(void) {
+    pid_t pid = fork();
+    if (pid == 0) {
+        if (setgid(TEST_GID) != 0 || setuid(TEST_UID) != 0)
+            _exit(98);
+        _exit(open("/etc/shadow", O_RDONLY) >= 0 ? 0 : 1);
+    }
+    int status;
+    waitpid(pid, &status, 0);
+    return WIFEXITED(status) && WEXITSTATUS(status) == 0;
+}
+
 /* Run /bin/passwd [arg] as the test user with `input` on stdin. */
 static int run_passwd(const char *arg, const char *input) {
     int in[2];
@@ -134,6 +148,12 @@ int main(void) {
     }
     chmod("/etc/shadow", before.st_mode & 07777);
     chown("/etc/shadow", before.st_uid, before.st_gid);
+
+    check("private: shadow is root:shadow 0640",
+          before.st_uid == 0 && before.st_gid == 42 &&
+          (before.st_mode & 07777) == 0640, "wrong owner or mode");
+    check("private: user cannot read shadow", !user_can_read_shadow(),
+          "an ordinary user can read the hashes");
 
     char root_before[256];
     snprintf(root_before, sizeof(root_before), "%s", stored("root"));
