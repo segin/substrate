@@ -75,7 +75,7 @@ Suggested order, highest leverage first:
     - Site: `bin/login/login.c:430-431` with `:457-467`
     - Fix: After the identity switch, an exec failure must `_exit()`, never return to the prompt loop.
     - Verify: `tests/bin/login/`: an account whose shell does not exist ends the login with an error, and no further prompt runs under that uid.
-- [ ] **UTL-LOGIN-02** (low) The utmp/wtmp login record is written before `setgid`/`setuid` succeed (REQ: REQ-UTLA-0008)
+- [x] **UTL-LOGIN-02** (low) The utmp/wtmp login record is written before `setgid`/`setuid` succeed (REQ: REQ-UTLA-0008)
     - Site: `bin/login/login.c:348-351` vs `:382-392`
     - Fix: Write the records only once the identity switch has succeeded (or write a matching logout record on failure).
     - Verify: A failed switch leaves no dangling USER_PROCESS record.

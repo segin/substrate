@@ -274,6 +274,30 @@ shadow_matches(const char *stored, const char *attempt)
     return strcmp(hashed, stored) == 0;
 }
 
+/*
+ * The session recorded in `ut` never started: the switch to the user
+ * failed.  Close it with a DEAD_PROCESS record for the same line and pid in
+ * utmp and wtmp, so no USER_PROCESS entry is left claiming the user is
+ * logged in.  (We are still root: the switch is what failed.)
+ */
+static void
+record_failed_login(struct utmp *ut)
+{
+    struct timeval tv;
+
+    ut->ut_type = DEAD_PROCESS;
+    memset(ut->ut_user, 0, sizeof(ut->ut_user));
+    memset(ut->ut_host, 0, sizeof(ut->ut_host));
+    gettimeofday(&tv, NULL);
+    ut->ut_tv.tv_sec  = (int32_t)tv.tv_sec;
+    ut->ut_tv.tv_usec = (int32_t)tv.tv_usec;
+
+    setutent();
+    pututline(ut);
+    endutent();
+    updwtmp(WTMP_FILE, ut);
+}
+
 static int
 do_login_one(const char *forced_user)
 {
@@ -326,8 +350,8 @@ do_login_one(const char *forced_user)
      * for local console logins). */
     const char *line_name = tty_basename(ttyname(0));
     const char *remote    = getenv("REMOTEHOST");
+    struct utmp ut;
     {
-        struct utmp ut;
         memset(&ut, 0, sizeof(ut));
         ut.ut_type = USER_PROCESS;
         ut.ut_pid  = getpid();
@@ -381,6 +405,7 @@ do_login_one(const char *forced_user)
      * supplementary group list. */
     if (setgid(pw->pw_gid) != 0) {
         perror("login: setgid");
+        record_failed_login(&ut);
         return 0;
     }
     if (initgroups(pw->pw_name, pw->pw_gid) != 0) {
@@ -388,6 +413,7 @@ do_login_one(const char *forced_user)
     }
     if (setuid(pw->pw_uid) != 0) {
         perror("login: setuid");
+        record_failed_login(&ut);
         return 0;
     }
 

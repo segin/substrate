@@ -102,6 +102,12 @@ group), with mode 0620.
 Sets the group ID, initializes the supplementary groups from
 .IR /etc/group ,
 and sets the user ID.
+If setting the group or user ID fails,
+.B login
+writes a
+.B DEAD_PROCESS
+record for the terminal to utmp and wtmp, so the session is not left
+recorded, and shows the user-name prompt again.
 .IP \(bu
 Removes
 .BR IFS ,
