@@ -154,7 +154,7 @@ Suggested order, highest leverage first:
     - Site: `sbin/radvd/radvd.c:175-180`
     - Fix: Exit non-zero, or log and keep advertising, but do not report success.
     - Verify: A send failure is visible in the exit status or log.
-- [ ] **UTL-RADVD-03** (low) `socket()` and `bind()` results are not checked (REQ: REQ-UTLA-0027)
+- [x] **UTL-RADVD-03** (low) `socket()` and `bind()` results are not checked (REQ: REQ-UTLA-0027)
     - Site: `sbin/radvd/radvd.c:83`, `:106`
     - Fix: Check both and exit with a message on failure.
     - Verify: Code review.

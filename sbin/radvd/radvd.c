@@ -95,6 +95,7 @@ int main(int argc, char **argv) {
 
     /* Look up interface hwaddr + ifindex + ip6 source. */
     int s4 = socket(AF_INET, SOCK_DGRAM, 0);
+    if (s4 < 0) { perror("radvd: socket"); return 1; }
     struct ifreq r;
     memset(&r, 0, sizeof(r));
     strlcpy(r.ifr_name, iface, sizeof(r.ifr_name));
@@ -117,7 +118,11 @@ int main(int argc, char **argv) {
     sll.sll_family = AF_PACKET;
     sll.sll_protocol = __builtin_bswap16(0x0003);
     sll.sll_ifindex = ifindex;
-    bind(s, (struct sockaddr *)&sll, sizeof(sll));
+    if (bind(s, (struct sockaddr *)&sll, sizeof(sll)) < 0) {
+        perror("radvd: bind");
+        close(s);
+        return 1;
+    }
 
     fprintf(stdout, "radvd: %s ifindex=%d, prefix %s/%d\n",
             iface, ifindex, argv[2], prefix_len);
