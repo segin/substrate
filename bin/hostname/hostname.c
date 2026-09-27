@@ -7,9 +7,8 @@
  *   hostname -F file       load hostname from a file (typically /etc/hostname)
  *   hostname <name>        set hostname
  *
- * If the kernel hostname is unset or still "localhost", read
- * /etc/hostname as a fallback (useful for early boot before the
- * rc.d/hostname script has fired).
+ * Printing never sets the name: /etc/hostname is applied by -F, which
+ * rc.d/00-hostname runs at boot.
  */
 
 #include <errno.h>
@@ -54,24 +53,6 @@ static int print_current(int fqdn)
     if (gethostname(buf, sizeof(buf)) < 0) {
         perror("hostname: gethostname");
         return 1;
-    }
-    if (buf[0] == '\0' || strcmp(buf, "(none)") == 0 ||
-        strcmp(buf, "localhost") == 0) {
-        FILE *f = fopen("/etc/hostname", "r");
-        if (f) {
-            char fbuf[256];
-            if (fgets(fbuf, sizeof(fbuf), f)) {
-                size_t n = strlen(fbuf);
-                while (n > 0 && (fbuf[n-1] == '\n' || fbuf[n-1] == '\r')) {
-                    fbuf[--n] = '\0';
-                }
-                if (n > 0) {
-                    sethostname(fbuf, n);
-                    snprintf(buf, sizeof(buf), "%s", fbuf);
-                }
-            }
-            fclose(f);
-        }
     }
     if (!fqdn) {
         char *dot = strchr(buf, '.');

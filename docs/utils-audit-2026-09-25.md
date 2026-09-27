@@ -91,7 +91,7 @@ Suggested order, highest leverage first:
     - Site: `sbin/ld.so/ld_main.c:244-247`
     - Fix: Keep dropping `LD_TRACE_LOADED_OBJECTS` for secure-mode programs, but have `ldd` read a setuid/setgid binary's headers directly instead of executing it.
     - Verify: `tests/usr.bin/ldd/`: `ldd` on a setuid binary lists its dependencies and does not run it.
-- [ ] **UTL-HOSTNAME-01** (medium) Printing the host name can set it (REQ: REQ-UTLA-0012)
+- [x] **UTL-HOSTNAME-01** (medium) Printing the host name can set it (REQ: REQ-UTLA-0012)
     - Site: `bin/hostname/hostname.c:69`
     - Fix: Only print in the no-argument case; leave setting from `/etc/hostname` to `-F` (and `rc.d/00-hostname`).
     - Verify: `hostname` with no arguments makes no `sethostname()` call.
