@@ -42,6 +42,12 @@ or
 .B !\&
 never matches.
 The real user ID 0 skips the prompt entirely.
+End of file before any input, or a read error, at the prompt is not
+taken as an empty password:
+.B su
+prints
+.B "no password read"
+and fails.
 .PP
 After authentication
 .B su
@@ -99,7 +105,8 @@ On success
 does not return; the exit status is that of the executed shell.
 It exits with status
 .B 1
-if an option is invalid, the user does not exist, authentication fails,
+if an option is invalid, the user does not exist, no password could be
+read, authentication fails,
 the user or group ID cannot be changed, or the shell cannot be executed.
 .SH ENVIRONMENT
 .TP

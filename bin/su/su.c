@@ -42,9 +42,16 @@ read_password(const char *prompt, char *buf, size_t bufsz)
         tcsetattr(0, TCSANOW, &new_tio);
     }
 
+    int failed = 0;
     while (i + 1 < bufsz) {
         n = read(0, &c, 1);
-        if (n <= 0 || c == '\n' || c == '\r') {
+        if (n < 0 || (n == 0 && i == 0)) {
+            /* A read error, or end of file before any input, is no
+             * password -- not the empty one. */
+            failed = 1;
+            break;
+        }
+        if (n == 0 || c == '\n' || c == '\r') {
             break;
         }
         buf[i++] = c;
@@ -56,7 +63,7 @@ read_password(const char *prompt, char *buf, size_t bufsz)
     }
     fputc('\n', stdout);
     fflush(stdout);
-    return (int)i;
+    return failed ? -1 : (int)i;
 }
 
 static const char *
@@ -146,6 +153,7 @@ main(int argc, char **argv)
     /* Root skips the password prompt. */
     if (getuid() != 0) {
         if (read_password("Password: ", pass, sizeof(pass)) < 0) {
+            fprintf(stderr, "su: no password read\n");
             return 1;
         }
         stored = lookup_shadow(target);

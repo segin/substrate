@@ -107,7 +107,7 @@ Suggested order, highest leverage first:
     - Site: `bin/passwd/passwd.c:88-97`
     - Fix: Consume the rest of the line and reject over-long input.
     - Verify: A 200-byte entry is rejected and does not answer the confirmation prompt.
-- [ ] **UTL-SU-01** (low) A password-read error check can never fire (REQ: REQ-UTLA-0016)
+- [x] **UTL-SU-01** (low) A password-read error check can never fire (REQ: REQ-UTLA-0016)
     - Site: `bin/su/su.c:155` (`read_password()` never returns a negative value)
     - Fix: Make `read_password()` report EOF/errors, and fail authentication on them.
     - Verify: `su` with stdin closed fails instead of trying an empty password.
