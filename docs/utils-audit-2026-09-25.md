@@ -47,7 +47,7 @@ Suggested order, highest leverage first:
 
 ## A. Privilege, identity and security
 
-- [ ] **UTL-KERN-01** (high) `sethostname(2)` has no privilege check (REQ: REQ-UTLA-0001)
+- [x] **UTL-KERN-01** (high) `sethostname(2)` has no privilege check (REQ: REQ-UTLA-0001)
     - Site: `sys/kern/syscall.c:1339`
     - Fix: Require euid 0 (return `-EPERM` otherwise), as `SIOCSIFGATEWAY` and the other configuration calls do; fail with `-EINVAL` rather than silently truncating a name of `MAXHOSTNAMELEN` or more.
     - Verify: `tests/sys/`: a non-root `sethostname()` fails EPERM and leaves the name unchanged; root succeeds; an over-long name fails EINVAL.

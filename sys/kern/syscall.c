@@ -1338,8 +1338,12 @@ int sys_uname(struct utsname *buf) {
 
 int sys_sethostname(const char *uname, size_t len) {
 
+    /* Renaming the host is a root operation, like the other system
+     * configuration calls; and a name that does not fit is refused rather
+     * than silently cut short. */
+    if (!current_process || current_process->euid != 0) return -EPERM;
     if (!uname || len == 0) return -EINVAL;
-    if (len >= MAXHOSTNAMELEN) len = MAXHOSTNAMELEN - 1;
+    if (len >= MAXHOSTNAMELEN) return -EINVAL;
     char kbuf[MAXHOSTNAMELEN];
     if (copyin(uname, kbuf, len) != 0) return -EFAULT;
     memcpy(kernel_hostname, kbuf, len);
