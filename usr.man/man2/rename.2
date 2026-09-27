@@ -23,10 +23,24 @@ On success, zero is returned. On error, -1 is returned.
 .SH ERRORS
 .TP
 .B EACCES
-Write permission is denied for the directory containing
+Write or search permission is denied for the directory containing
 .I oldpath
 or
-.IR newpath .
+.IR newpath ,
+or
+.I oldpath
+is a directory being moved to a new parent and the caller lacks write
+permission on it (its
+.B ..
+entry must change).
+.TP
+.B EPERM
+The directory containing
+.I oldpath
+(or containing an existing
+.IR newpath )
+has the sticky bit set, and the caller owns neither that directory nor
+the entry (and is not the superuser).
 .TP
 .B EEXIST
 .I newpath

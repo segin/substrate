@@ -61,7 +61,12 @@ does not exist and
 was not specified.
 .TP
 .B EACCES
-Access denied.
+Access denied: the requested access to the file is not allowed, or
+.I pathname
+does not exist,
+.B O_CREAT
+was given, and the caller lacks write and search permission on the
+directory that would contain it.
 .TP
 .B EMFILE
 Too many open files.

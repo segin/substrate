@@ -17,6 +17,16 @@ deletes a directory, which must be empty.
 On success, zero is returned. On error, -1 is returned.
 .SH ERRORS
 .TP
+.B EACCES
+Write or search permission denied for the directory containing
+.IR pathname .
+.TP
+.B EPERM
+The directory containing
+.I pathname
+has the sticky bit set, and the caller owns neither it nor the
+directory being removed (and is not the superuser).
+.TP
 .B ENOTEMPTY
 The directory is not empty.
 .TP

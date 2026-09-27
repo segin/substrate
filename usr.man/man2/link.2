@@ -31,6 +31,10 @@ On error, \-1 is returned, and
 is set appropriately.
 .SH ERRORS
 .TP
+.B EACCES
+Write or search permission denied for the directory that would contain
+.IR newpath .
+.TP
 .B EEXIST
 .I newpath
 already exists.

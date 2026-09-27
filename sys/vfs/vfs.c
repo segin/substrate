@@ -1270,6 +1270,66 @@ int vfs_may_open(fs_node_t *node, uint32_t uid, uint32_t gid, int flags) {
     return vfs_may_open_groups(node, uid, gid, NULL, 0, flags);
 }
 
+/*
+ * May the calling process add or remove entries in directory `dir`?  POSIX
+ * requires write and search permission on it for every call that changes a
+ * directory's contents: creat/open(O_CREAT), mkdir, mknod, symlink, link,
+ * unlink, rmdir and rename.  Checked with the effective ids and the
+ * supplementary groups; root, and kernel context with no process, pass.
+ * Returns 0 or -EACCES.
+ */
+int vfs_may_modify_dir(fs_node_t *dir) {
+    if (dir == NULL || current_process == NULL || current_process->euid == 0) {
+        return 0;
+    }
+    if (vfs_check_permissions_groups(dir, current_process->euid,
+                                     current_process->egid,
+                                     current_process->supp_groups,
+                                     current_process->n_supp_groups,
+                                     2 | 1) != 0) {
+        return -EACCES;
+    }
+    return 0;
+}
+
+/*
+ * May the calling process remove (or rename away, or replace) `victim`, an
+ * entry of `dir`?  vfs_may_modify_dir(), and in a sticky directory such as
+ * /tmp the caller must also own the directory or the entry.  `victim` may
+ * be NULL when the entry does not exist; the operation then fails on its
+ * own.  Returns 0, -EACCES, or -EPERM for the sticky rule.
+ */
+int vfs_may_delete(fs_node_t *dir, fs_node_t *victim) {
+    int ret = vfs_may_modify_dir(dir);
+
+    if (ret != 0 || dir == NULL || victim == NULL ||
+        current_process == NULL || current_process->euid == 0) {
+        return ret;
+    }
+    if ((dir->mask & S_ISVTX) &&
+        current_process->euid != dir->uid &&
+        current_process->euid != victim->uid) {
+        return -EPERM;
+    }
+    return 0;
+}
+
+/* The entry `name` of `dir`, or NULL. */
+static fs_node_t *vfs_entry(fs_node_t *dir, const char *name) {
+    char buf[256];
+    size_t n = 0;
+
+    if (dir == NULL || dir->finddir == NULL || name == NULL) {
+        return NULL;
+    }
+    while (name[n] != '\0' && n < sizeof(buf) - 1) {
+        buf[n] = name[n];
+        n++;
+    }
+    buf[n] = '\0';
+    return dir->finddir(dir, buf);
+}
+
 int vfs_chmod_node(fs_node_t *node, uint32_t mode) {
     uint32_t old_mask;
     int64_t old_ctime;
@@ -1309,6 +1369,8 @@ int readlink_fs(fs_node_t *node, char *buf, size_t size) {
 
 int symlink_fs(fs_node_t *parent, const char *target, const char *name) {
     if (parent && parent->symlink) {
+        int ret = vfs_may_modify_dir(parent);
+        if (ret != 0) return ret;
         return parent->symlink(parent, target, name);
     }
     return -ENOSYS;
@@ -1316,6 +1378,8 @@ int symlink_fs(fs_node_t *parent, const char *target, const char *name) {
 
 int link_fs(fs_node_t *parent, fs_node_t *source, const char *name) {
     if (parent && parent->link) {
+        int ret = vfs_may_modify_dir(parent);
+        if (ret != 0) return ret;
         return parent->link(parent, source, name);
     }
     return -ENOSYS;
@@ -1323,6 +1387,8 @@ int link_fs(fs_node_t *parent, fs_node_t *source, const char *name) {
 
 int unlink_fs(fs_node_t *node, const char *name) {
     if (node && node->unlink) {
+        int ret = vfs_may_delete(node, vfs_entry(node, name));
+        if (ret != 0) return ret;
         return node->unlink(node, name);
     }
     return -ENOSYS;
@@ -1330,6 +1396,8 @@ int unlink_fs(fs_node_t *node, const char *name) {
 
 int rmdir_fs(fs_node_t *node, const char *name) {
     if (node && node->rmdir) {
+        int ret = vfs_may_delete(node, vfs_entry(node, name));
+        if (ret != 0) return ret;
         return node->rmdir(node, name);
     }
     return -ENOSYS;
@@ -1337,6 +1405,18 @@ int rmdir_fs(fs_node_t *node, const char *name) {
 
 int rename_fs(fs_node_t *old_parent, const char *old_name, fs_node_t *new_parent, const char *new_name) {
     if (old_parent && old_parent->rename) {
+        fs_node_t *src = vfs_entry(old_parent, old_name);
+        int ret = vfs_may_delete(old_parent, src);
+        if (ret == 0 && new_parent != old_parent)
+            ret = vfs_may_modify_dir(new_parent);
+        /* Replacing an existing entry removes it: the sticky rule applies. */
+        if (ret == 0)
+            ret = vfs_may_delete(new_parent, vfs_entry(new_parent, new_name));
+        /* Moving a directory to a new parent rewrites its "..". */
+        if (ret == 0 && src && (src->flags & 0x7) == FS_DIRECTORY &&
+            new_parent != old_parent)
+            ret = vfs_may_modify_dir(src);
+        if (ret != 0) return ret;
         return old_parent->rename(old_parent, old_name, new_parent, new_name);
     }
     return -ENOSYS;
@@ -1487,6 +1567,8 @@ static int vfs_resolve_parent_path(const char *path, fs_node_t **parent_out,
 
 int mknod_fs(fs_node_t *node, const char *name, uint16_t mode, uint32_t dev) {
     if (node && node->mknod) {
+        int ret = vfs_may_modify_dir(node);
+        if (ret != 0) return ret;
         return node->mknod(node, name, mode, dev);
     }
     return -ENOSYS;
@@ -1644,6 +1726,10 @@ int vfs_mkdir(const char *path, uint16_t permission) {
     if (!parent_node->mkdir) {
         return -EOPNOTSUPP;
     }
+    ret = vfs_may_modify_dir(parent_node);
+    if (ret != 0) {
+        return ret;
+    }
 
     return parent_node->mkdir(parent_node, name, permission);
 }
@@ -1678,6 +1764,10 @@ int vfs_rmdir(const char *path) {
     if (!parent_node->rmdir) {
         return -EOPNOTSUPP;
     }
+    ret = vfs_may_delete(parent_node, node);
+    if (ret != 0) {
+        return ret;
+    }
 
     return parent_node->rmdir(parent_node, name);
 }
@@ -1699,6 +1789,10 @@ int vfs_mknod(const char *path, uint16_t mode, uint32_t dev) {
     }
     if (!parent_node->mknod) {
         return -EOPNOTSUPP;
+    }
+    ret = vfs_may_modify_dir(parent_node);
+    if (ret != 0) {
+        return ret;
     }
 
     return parent_node->mknod(parent_node, name, mode, dev);

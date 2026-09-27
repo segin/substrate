@@ -1843,6 +1843,10 @@ int kern_mkdirat(int dirfd, const char *p, int m) {
     if (!parent_node->mkdir) {
         return -EOPNOTSUPP;
     }
+    ret = vfs_may_modify_dir(parent_node);
+    if (ret != 0) {
+        return ret;
+    }
 
     return parent_node->mkdir(parent_node, name, apply_umask(m));
 }
@@ -2734,6 +2738,10 @@ int kern_unlinkat(int dirfd, const char *path, int flags) {
         }
         if (!parent->rmdir) {
             return -EOPNOTSUPP;
+        }
+        ret = vfs_may_delete(parent, node);
+        if (ret != 0) {
+            return ret;
         }
 
         return parent->rmdir(parent, file);

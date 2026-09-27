@@ -239,6 +239,8 @@ int vfs_check_permissions_groups(fs_node_t *node, uint32_t uid, uint32_t gid,
 int vfs_may_open(fs_node_t *node, uint32_t uid, uint32_t gid, int flags);
 int vfs_may_open_groups(fs_node_t *node, uint32_t uid, uint32_t gid,
                         const uint32_t *groups, int ngroups, int flags);
+int vfs_may_modify_dir(fs_node_t *dir);
+int vfs_may_delete(fs_node_t *dir, fs_node_t *victim);
 int vfs_chmod_node(fs_node_t *node, uint32_t mode);
 
 void vfs_register_filesystem(filesystem_t *fs);

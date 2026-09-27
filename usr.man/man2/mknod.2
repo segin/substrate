@@ -25,6 +25,10 @@ On success, zero is returned. On error, -1 is returned.
 .B EEXIST
 .I pathname
 already exists.
+.TP
+.B EACCES
+Write or search permission denied for the directory that would contain
+.IR pathname .
 
 .SH SEE ALSO
 .BR intro(2)
