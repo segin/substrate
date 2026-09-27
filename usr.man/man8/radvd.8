@@ -50,12 +50,12 @@ standard output at startup.
 .B radvd
 is not started by any of the boot scripts.
 .SH EXIT STATUS
-.TP
-.B 0
-A send failed; the error is reported on standard error.
+.B radvd
+does not exit while it is advertising.
 .TP
 .B 1
-Too few arguments, an invalid prefix or prefix length, or the interface's
+A send failed (the error is reported on standard error), or too few
+arguments, an invalid prefix or prefix length, or the interface's
 hardware address,
 index or IPv6 address could not be read, or the packet socket could not be
 created.

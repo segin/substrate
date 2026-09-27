@@ -185,11 +185,11 @@ int main(int argc, char **argv) {
 
         if (sendto(s, pkt, sizeof(pkt), 0, (struct sockaddr *)&sll, sizeof(sll))
             != (ssize_t)sizeof(pkt)) {
-            perror("sendto");
-            break;
+            /* The only way out of the loop: a failure, not success. */
+            perror("radvd: sendto");
+            close(s);
+            return 1;
         }
         sleep(60);
     }
-    close(s);
-    return 0;
 }

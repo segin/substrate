@@ -150,7 +150,7 @@ Suggested order, highest leverage first:
     - Site: `sbin/radvd/radvd.c:75`, `:159-166`
     - Fix: Accept only 0..128 and reject other values at startup.
     - Verify: `radvd eth0 fec0::/-1` and `/200` are refused.
-- [ ] **UTL-RADVD-02** (low) `radvd` exits 0 after a send failure (REQ: REQ-UTLA-0026)
+- [x] **UTL-RADVD-02** (low) `radvd` exits 0 after a send failure (REQ: REQ-UTLA-0026)
     - Site: `sbin/radvd/radvd.c:175-180`
     - Fix: Exit non-zero, or log and keep advertising, but do not report success.
     - Verify: A send failure is visible in the exit status or log.
