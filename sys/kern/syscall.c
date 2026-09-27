@@ -4666,6 +4666,12 @@ int sys_reboot(int cmd) {
      * they sit on and each backing store is left clean. */
     vfs_unmount_all();
 
+    /* The unmounts wrote everything out to the devices; make it durable
+     * before the power goes (a disk or a virtio-blk device with a write
+     * cache may still hold it).  init's shutdown calls sync(2), which does
+     * the same, but reboot(2) can be called directly. */
+    (void)blkdev_flush_all();
+
     /* Quiesce bus-mastering hardware.  A USB host controller left running
      * keeps walking its schedule rings in the old kernel's memory straight
      * through a warm reboot -- untraceable early-boot corruption on real

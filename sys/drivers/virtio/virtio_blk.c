@@ -12,6 +12,7 @@
 #include <kern/geom/geom.h>
 #include <kern/panic.h>
 #include <kern/pci.h>
+#include <sys/errno.h>
 #include <sys/random.h>
 
 #define VIRTIO_BLK_F_SIZE_MAX   1
@@ -108,6 +109,10 @@ struct vblk_dev {
      * have independent rings and must not serialise against each other. */
     volatile uint32_t io_busy;
 
+    /* VIRTIO_BLK_F_FLUSH negotiated: the device may cache writes, and
+     * BLKIOC_FLUSH (sync(2)) sends VIRTIO_BLK_T_FLUSH to make them durable. */
+    int flush_ok;
+
     /* The block-layer handle.  Embedded rather than separately allocated so
      * the I/O callbacks can find their device through blkdev_t::priv. */
     blkdev_t bdev;
@@ -162,6 +167,7 @@ static inline uint64_t vblk_phys(const void *p) {
 static int vblk_bdev_read(blkdev_t *dev, uint64_t sector, uint32_t count, void *buffer);
 static int vblk_bdev_write(blkdev_t *dev, uint64_t sector, uint32_t count,
                            const void *buffer);
+static int vblk_bdev_ioctl(blkdev_t *dev, uint32_t request, void *arg);
 
 /*
  * Devices are registered with blkdev_register_disk(), not geom_register_disk().
@@ -212,8 +218,23 @@ void virtio_blk_setup(uint8_t bus, uint8_t slot, uint8_t func) {
     outb(vb->io_base + VIRTIO_REG_DEVICE_STATUS, 
          VIRTIO_STATUS_ACKNOWLEDGE | VIRTIO_STATUS_DRIVER);
          
-    // 3. Negotiate Features (Skip for now, accept default)
-    
+    /*
+     * 3. Negotiate features: accept VIRTIO_BLK_F_FLUSH when offered.  A
+     * driver that does not negotiate it declares that it cannot flush, so
+     * the device must not cache writes (virtio 1.x 5.2.6.2): QEMU then runs
+     * the disk writethrough, following every request with an fdatasync of
+     * the image on the host -- 10 to 70 ms per write, which made every
+     * file write crawl (about 14 KB/s).  With the feature, writes are
+     * cached and made durable by the flush sync(2) sends.  Nothing else is
+     * accepted: this driver implements none of the other features.
+     */
+    {
+        uint32_t offered = inl(vb->io_base + VIRTIO_REG_HOST_FEATURES);
+        uint32_t accept = offered & (1u << VIRTIO_BLK_F_FLUSH);
+        outl(vb->io_base + VIRTIO_REG_GUEST_FEATURES, accept);
+        vb->flush_ok = accept != 0;
+    }
+
     // 4. Setup Queue 0
     uint16_t q_size = inw(vb->io_base + VIRTIO_REG_QUEUE_SIZE);
     if (q_size == 0) {
@@ -322,6 +343,7 @@ void virtio_blk_setup(uint8_t bus, uint8_t slot, uint8_t func) {
         vb->bdev.sector_size = 512;
         vb->bdev.total_sectors = capacity;
         vb->bdev.read = vblk_bdev_read;
+        vb->bdev.ioctl = vblk_bdev_ioctl;
         /* Honour a read-only device (VIRTIO_BLK_F_RO): leaving .write set
          * would let the block layer issue writes the device rejects. */
         vb->bdev.write = (host_features & (1u << VIRTIO_BLK_F_RO))
@@ -350,6 +372,8 @@ void virtio_blk_setup(uint8_t bus, uint8_t slot, uint8_t func) {
  * all pointing into the driver's own DMA region.  Caller holds vblk_lock and
  * has staged write data into the bounce buffer.
  */
+static void vblk_publish_and_wait(struct vblk_dev *d);
+
 static int virtio_blk_submit(struct vblk_dev *d, uint64_t lba,
                              uint32_t count, int write) {
     struct virtio_blk_req_hdr *hdr = &d->dma->hdr;
@@ -380,6 +404,15 @@ static int virtio_blk_submit(struct vblk_dev *d, uint64_t lba,
     d->desc[2].flags = VRING_DESC_F_WRITE;
     d->desc[2].next = 0;
 
+    vblk_publish_and_wait(d);
+    return (*status == 0) ? 0 : -1;
+}
+
+/*
+ * Hand the chain starting at descriptor 0 to the device and wait for it to
+ * complete.  Caller holds vblk_lock and has built the chain.
+ */
+static void vblk_publish_and_wait(struct vblk_dev *d) {
     // 2. Put in Avail Ring.
     //
     // Store-release between the descriptor writes above and the avail
@@ -408,8 +441,42 @@ static int virtio_blk_submit(struct vblk_dev *d, uint64_t lba,
      * the no-interrupt hint still cannot leave the (level-triggered) line
      * latched high with no handler to service it. */
     (void)inb(d->io_base + VIRTIO_REG_ISR_STATUS);
+}
 
-    return (*status == 0) ? 0 : -1;
+/*
+ * VIRTIO_BLK_T_FLUSH: make every write the device has acknowledged durable.
+ * The request is a header and a status byte, with no data.  A device we did
+ * not negotiate VIRTIO_BLK_F_FLUSH with runs writethrough and has nothing
+ * to flush.
+ */
+static int virtio_blk_flush(struct vblk_dev *d) {
+    if (!d->flush_ok)
+        return 0;
+    if (!d->dma)
+        return -EIO;
+
+    uint32_t flags = vblk_lock(d);
+    struct virtio_blk_req_hdr *hdr = &d->dma->hdr;
+    volatile uint8_t *status = &d->dma->status;
+
+    hdr->type = VIRTIO_BLK_T_FLUSH;
+    hdr->ioprio = 0;
+    hdr->sector = 0;
+    *status = 0xFF;
+
+    d->desc[0].addr = vblk_phys(hdr);
+    d->desc[0].len = sizeof(*hdr);
+    d->desc[0].flags = VRING_DESC_F_NEXT;
+    d->desc[0].next = 2;
+    d->desc[2].addr = vblk_phys((void *)status);
+    d->desc[2].len = 1;
+    d->desc[2].flags = VRING_DESC_F_WRITE;
+    d->desc[2].next = 0;
+
+    vblk_publish_and_wait(d);
+    int rc = (*status == 0) ? 0 : -EIO;
+    vblk_unlock(d, flags);
+    return rc;
 }
 
 /*
@@ -507,4 +574,20 @@ static int vblk_bdev_write(blkdev_t *dev, uint64_t sector, uint32_t count,
     /* The device only reads this buffer (VIRTIO_BLK_T_OUT); casting away
      * const is confined to handing the physical address to the ring. */
     return virtio_blk_rw(d, sector, count, (void *)(uintptr_t)buffer, 1);
+}
+
+static int vblk_bdev_ioctl(blkdev_t *dev, uint32_t request, void *arg) {
+    struct vblk_dev *d = dev ? (struct vblk_dev *)dev->priv : NULL;
+
+    (void)arg;
+    if (!d)
+        return -EINVAL;
+    switch (request) {
+    case BLKIOC_FLUSH:
+        if (dev->dead)
+            return -EIO;
+        return virtio_blk_flush(d);
+    default:
+        return -ENOTTY;
+    }
 }
