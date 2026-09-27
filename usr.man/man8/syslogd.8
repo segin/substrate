@@ -118,9 +118,17 @@ is one of
 or
 .B *
 for any level; a level matches messages of that severity or more severe.
+The level
+.B none
+excludes the facility from the rule instead:
+.B *.*;auth.none
+matches every message except those of facility
+.BR auth .
 A selector with an unknown name is skipped, and a rule with no valid
 selectors is ignored.
-A message matches a rule if it matches any of its selectors.
+A message matches a rule if it matches any of its selectors and no
+.B none
+selector names its facility.
 .PP
 If
 .I /etc/syslog.conf
@@ -197,18 +205,6 @@ mail.*      /var/log/mail.log
 Accepts the priority prefix of RFC 3164.
 There is no network (UDP 514) input or forwarding.
 .SH BUGS
-A selector with level
-.BR none ,
-such as
-.BR auth.none ,
-does not exclude its facility: it makes the whole rule match nothing.
-The
-.B *.*;auth.none;authpriv.none
-rule in the shipped
-.I /etc/syslog.conf
-therefore never writes to
-.IR /var/log/messages .
-.PP
 Comma-separated facility lists are not supported:
 .B auth,authpriv.*
 is an unknown facility, and the rule is ignored.

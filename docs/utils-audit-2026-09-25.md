@@ -122,7 +122,7 @@ Suggested order, highest leverage first:
     - Site: `etc/rc.d/60-sdm` vs `sbin/init/init.c:55-59` (compiled-in line table)
     - Fix: Read the getty lines from a configuration file (e.g. `/etc/ttys`), or correct the rc.d comment.
     - Verify: With tty1 disabled in the configuration, init starts no getty there.
-- [ ] **UTL-SYSLOG-01** (high) A `fac.none` selector suppresses every facility, so the shipped `*.*;auth.none;authpriv.none` rule never writes `/var/log/messages` (REQ: REQ-UTLA-0019)
+- [x] **UTL-SYSLOG-01** (high) A `fac.none` selector suppresses every facility, so the shipped `*.*;auth.none;authpriv.none` rule never writes `/var/log/messages` (REQ: REQ-UTLA-0019)
     - Site: `sbin/syslogd/syslogd.c:149`, `:234-241`
     - Fix: Keep the named facility with the `none` level and exclude only that facility in `rule_matches`.
     - Verify: `tests/`: with the shipped `syslog.conf`, a `daemon.info` message reaches `/var/log/messages` and an `auth.info` one does not.

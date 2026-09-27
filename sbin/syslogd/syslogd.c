@@ -74,11 +74,13 @@
 #define ANY_FAC         (-1)
 #define ANY_LVL         (-1)
 #define NONE_FAC        (-2)
+#define NONE_LVL        (-2)    /* "fac.none": exclude the facility */
 
 struct selector {
     int facility;       /* facility code (0..23), ANY_FAC, or NONE_FAC */
     int level;          /* max severity allowed: msgs <= level pass;
-                           ANY_LVL means all levels pass */
+                           ANY_LVL means all levels pass, NONE_LVL
+                           that the facility is excluded */
 };
 
 struct rule {
@@ -150,7 +152,7 @@ static int parse_one_selector(char *tok, struct selector *out)
 
     out->level = ANY_LVL;
     if (strcmp(lvlname, "*") == 0)         out->level = ANY_LVL;
-    else if (strcmp(lvlname, "none") == 0) out->facility = NONE_FAC;
+    else if (strcmp(lvlname, "none") == 0) out->level = NONE_LVL;
     else if ((out->level = lookup_lvl(lvlname)) < 0) return -1;
 
     return 0;
@@ -235,17 +237,15 @@ static int rule_matches(const struct rule *r, int fac, int lvl)
     int matched = 0;
     for (int i = 0; i < r->n_sels; i++) {
         const struct selector *s = &r->sels[i];
-        if (s->facility == NONE_FAC) {
-            if (fac == (s->facility == NONE_FAC ? fac : -1)) {
-                /* an explicit none.<x> means: never match this facility */
-                /* Conservative: if any "none" selector lists this fac,
-                 * suppress the rule entirely. */
-                return 0;
-            }
-        }
         int fac_ok = (s->facility == ANY_FAC) || (s->facility == fac);
-        int lvl_ok = (s->level    == ANY_LVL) || (lvl <= s->level);
-        if (fac_ok && lvl_ok) matched = 1;
+        if (!fac_ok)
+            continue;
+        /* "fac.none" excludes that facility (only) from the rule, however
+         * the rule's other selectors would have matched it. */
+        if (s->level == NONE_LVL)
+            return 0;
+        if (s->level == ANY_LVL || lvl <= s->level)
+            matched = 1;
     }
     return matched;
 }
