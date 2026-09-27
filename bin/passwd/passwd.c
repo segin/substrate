@@ -53,9 +53,11 @@ restore_tio_and_die(int sig)
     _exit(128 + sig);
 }
 
-/* Read a line with echo disabled.  Returns the length on success, or -1
+/* Read a line with echo disabled.  Returns the length on success, -1
  * on read error or EOF-before-any-input, so the caller can
- * tell an I/O failure from a genuinely empty entry. */
+ * tell an I/O failure from a genuinely empty entry, or PW_READ_TOOLONG
+ * for a line that does not fit (it is consumed and discarded). */
+#define PW_READ_TOOLONG (-2)
 static int
 read_password(const char *prompt, char *buf, size_t bufsz)
 {
@@ -84,7 +86,7 @@ read_password(const char *prompt, char *buf, size_t bufsz)
         sigaction(SIGTERM, &sa, NULL);
         tcsetattr(0, TCSANOW, &new_tio);
     }
-    while (i + 1 < bufsz) {
+    for (;;) {
         n = read(0, &c, 1);
         if (n < 0) { got_error = 1; break; }
         if (n == 0 || c == '\n' || c == '\r') {
@@ -92,16 +94,39 @@ read_password(const char *prompt, char *buf, size_t bufsz)
                 got_error = 1;
             break;
         }
+        if (i + 1 >= bufsz) {
+            /* Too long: drain the rest of the line, so it cannot answer
+             * the next prompt, and reject the entry whole. */
+            while (read(0, &c, 1) == 1 && c != '\n' && c != '\r')
+                ;
+            got_error = 2;
+            break;
+        }
         buf[i++] = c;
     }
     buf[i] = '\0';
+    if (got_error == 2)
+        secure_zero(buf, bufsz);
     if (tty_ok) {
         tcsetattr(0, TCSANOW, &old_tio);
         g_tio_saved = 0;
     }
     fputc('\n', stdout);
     fflush(stdout);
+    if (got_error == 2)
+        return PW_READ_TOOLONG;
     return got_error ? -1 : (int)i;
+}
+
+/* Explain a failed read_password() for the `which` password. */
+static void
+report_read_failure(int rc, const char *which)
+{
+    if (rc == PW_READ_TOOLONG)
+        fprintf(stderr, "passwd: %s password too long (at most %d characters)\n",
+            which, PW_MAX - 1);
+    else
+        fprintf(stderr, "passwd: no %s password read\n", which);
 }
 
 /* Read /etc/shadow into a buffer; on return the caller owns the
@@ -314,8 +339,9 @@ main(int argc, char **argv)
     if (my_uid != 0) {
         const char *cur_stored;
         char       *cur_hashed;
-        if (read_password("Current password: ", cur, sizeof(cur)) < 0) {
-            fprintf(stderr, "passwd: no current password read\n");
+        int rc = read_password("Current password: ", cur, sizeof(cur));
+        if (rc < 0) {
+            report_read_failure(rc, "current");
             return 1;
         }
         cur_stored = shadow_current(user, line, sizeof(line));
@@ -348,13 +374,15 @@ main(int argc, char **argv)
         secure_zero(line, sizeof(line));
     }
 
-    if (read_password("New password: ", new1, sizeof(new1)) < 0) {
-        fprintf(stderr, "passwd: no new password read\n");
+    int nrc = read_password("New password: ", new1, sizeof(new1));
+    if (nrc < 0) {
+        report_read_failure(nrc, "new");
         return 1;
     }
-    if (read_password("Retype new password: ", new2, sizeof(new2)) < 0) {
+    nrc = read_password("Retype new password: ", new2, sizeof(new2));
+    if (nrc < 0) {
         secure_zero(new1, sizeof(new1));
-        fprintf(stderr, "passwd: no new password read\n");
+        report_read_failure(nrc, "new");
         return 1;
     }
     if (strcmp(new1, new2) != 0) {

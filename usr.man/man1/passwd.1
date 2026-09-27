@@ -31,7 +31,8 @@ The superuser is not asked for the current password.
 The new password is then read twice.
 The two entries must match and must not be empty.
 Passwords are read from standard input one byte at a time up to a
-newline or carriage return; at most 127 bytes are kept.
+newline or carriage return; an entry longer than 127 bytes is read to
+the end of its line and refused.
 When standard input is a terminal, echo is turned off while a password
 is typed, and the previous terminal settings are restored if
 .BR SIGINT ,
@@ -74,7 +75,8 @@ The password was changed.
 .TP
 .B 1
 The user does not exist, permission was denied, authentication failed,
-a password could not be read, the new passwords did not match or were
+a password could not be read or was too long, the new passwords did not
+match or were
 empty, or
 .I /etc/shadow
 could not be updated.
@@ -110,6 +112,3 @@ Source of the salt.
 .BR pwdb_lock (3),
 .BR useradd (8),
 .BR usermod (8)
-.SH BUGS
-Input longer than 127 bytes is truncated silently, and the unread
-remainder of the line is consumed by the next prompt.

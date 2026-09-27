@@ -103,7 +103,7 @@ Suggested order, highest leverage first:
     - Site: `build-rootfs.sh:948-949` (only `su` and `ping` get mode 4755), `bin/passwd/passwd.c`
     - Fix: Install `/bin/passwd` setuid root, and confirm `passwd.c` restricts a non-root caller to its own entry and re-verifies the old password.
     - Verify: A non-root user changes their own password; cannot change another user's.
-- [ ] **UTL-PASSWD-02** (low) Password input over 127 bytes is truncated and the remainder feeds the next prompt (REQ: REQ-UTLA-0015)
+- [x] **UTL-PASSWD-02** (low) Password input over 127 bytes is truncated and the remainder feeds the next prompt (REQ: REQ-UTLA-0015)
     - Site: `bin/passwd/passwd.c:88-97`
     - Fix: Consume the rest of the line and reject over-long input.
     - Verify: A 200-byte entry is rejected and does not answer the confirmation prompt.

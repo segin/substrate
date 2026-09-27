@@ -7,6 +7,7 @@
  *
  *   own       with the right current password the user's password changes;
  *   wrongcur  with a wrong current password nothing changes;
+ *   toolong   a new password longer than 127 bytes is refused whole;
  *   other     "passwd root" is refused and root's entry is unchanged;
  *   owner     /etc/shadow keeps its owner, group and mode afterwards, and
  *             no temporary file is left behind;
@@ -161,6 +162,18 @@ int main(void) {
     int rc = run_passwd(NULL, "wrongpass\nnewpass1\nnewpass1\n");
     check("wrongcur: refused", rc != 0, "passwd accepted a wrong current password");
     check("wrongcur: password unchanged", verifies(TEST_USER, "oldpass"),
+          "password changed");
+
+    /* A 254-byte new password: its second half used to answer the
+     * confirmation prompt, which then "matched". */
+    char toolong[300];
+    memcpy(toolong, "oldpass\n", 8);
+    memset(toolong + 8, 'a', 254);
+    toolong[262] = '\n';
+    toolong[263] = '\0';
+    rc = run_passwd(NULL, toolong);
+    check("toolong: over-long password refused", rc != 0, "passwd accepted it");
+    check("toolong: password unchanged", verifies(TEST_USER, "oldpass"),
           "password changed");
 
     rc = run_passwd(NULL, "oldpass\nnewpass1\nnewpass1\n");
