@@ -146,5 +146,6 @@ void   tty_fs_open(struct fs_node *node);
 void   tty_fs_close(struct fs_node *node);
 int    tty_fs_poll(struct fs_node *node, void *waiter);
 void   tty_hangup(struct tty *tty);
+void   tty_hangup_session(struct tty *tty);
 
 #endif

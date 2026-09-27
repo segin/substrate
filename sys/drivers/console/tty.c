@@ -1587,20 +1587,35 @@ void tty_hangup(struct tty *tty) {
          * receive SIGHUP (stopped jobs won't process signals until continued) */
         signal_send_group(tty->pgrp, SIGCONT);
     }
-    /* And the session leader, when a job holds the foreground: the shell
-     * that owns the terminal must learn it is gone too (as Linux's
-     * tty_signal_session_leader does).  A session leader leads its own
-     * process group, whose id is the session id. */
-    if (tty->session > 0 && tty->session != tty->pgrp) {
-        signal_send_group(tty->session, SIGHUP);
-        signal_send_group(tty->session, SIGCONT);
-    }
-    
+
     /* Disassociate terminal from session */
     tty->session = 0;
     tty->pgrp = 0;
 
     TTY_UNLOCK(tty);
+}
+
+/*
+ * The terminal itself went away (a pty master was closed): hang it up as
+ * tty_hangup() does, and signal the session leader too when a job holds
+ * the foreground -- the shell that owns the terminal must learn it is
+ * gone (as Linux's tty_signal_session_leader does).  A session leader
+ * leads its own process group, whose id is the session id.  Not for
+ * TIOCNOTTY or a leader's exit, where the leader is the one leaving.
+ */
+void tty_hangup_session(struct tty *tty) {
+    if (!tty_valid(tty)) return;
+
+    TTY_LOCK(tty);
+    int session = tty->session;
+    int pgrp = tty->pgrp;
+    TTY_UNLOCK(tty);
+
+    if (session > 0 && session != pgrp) {
+        signal_send_group(session, SIGHUP);
+        signal_send_group(session, SIGCONT);
+    }
+    tty_hangup(tty);
 }
 
 /*

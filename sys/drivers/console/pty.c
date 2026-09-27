@@ -807,7 +807,7 @@ void pty_master_node_close(fs_node_t *node) {
          * stopped member).  Without it a shell left stopped on the slave --
          * Midnight Commander's subshell after mc exits -- stayed stopped
          * forever, reparented to init. */
-        tty_hangup(slave_tty);
+        tty_hangup_session(slave_tty);
     }
 
     /*
@@ -1021,7 +1021,7 @@ static void pty_bsd_master_close(fs_node_t *node) {
         spinlock_release(&st->lock);
         sched_wakeup(&st->read_wait);
         sched_wakeup(&st->poll_wait);
-        tty_hangup(st);         /* SIGHUP (+SIGCONT) to the slave's session */
+        tty_hangup_session(st); /* SIGHUP (+SIGCONT) to the slave's session */
     }
 }
 
