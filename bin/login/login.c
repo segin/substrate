@@ -166,6 +166,9 @@ set_login_env(const struct passwd *pw, const char *inherited_term)
  * ^D" so main() can respawn the prompt on the latter instead of
  * letting login exit. */
 #define LOGIN_READ_EOF (-1)
+/* The line did not fit the buffer.  Its remainder has been read and
+ * discarded, so it cannot answer the next prompt. */
+#define LOGIN_READ_TOOLONG (-2)
 
 static int
 read_line_echo(int fd, char *buf, size_t bufsz)
@@ -173,7 +176,7 @@ read_line_echo(int fd, char *buf, size_t bufsz)
     size_t i = 0;
     char   c;
     int    got_any = 0;
-    while (i + 1 < bufsz) {
+    for (;;) {
         ssize_t n = read(fd, &c, 1);
         if (n <= 0) {
             if (!got_any) { buf[0] = '\0'; return LOGIN_READ_EOF; }
@@ -182,6 +185,13 @@ read_line_echo(int fd, char *buf, size_t bufsz)
         got_any = 1;
         if (c == '\n' || c == '\r') {
             break;
+        }
+        if (i + 1 >= bufsz) {
+            /* Full: drain the rest of the line and reject it whole. */
+            while (read(fd, &c, 1) == 1 && c != '\n' && c != '\r')
+                ;
+            memset(buf, 0, bufsz);
+            return LOGIN_READ_TOOLONG;
         }
         buf[i++] = c;
     }
@@ -314,12 +324,20 @@ do_login_one(const char *forced_user)
         int n = read_line_echo(0, user, sizeof(user));
         if (n == LOGIN_READ_EOF) return -1;     /* ^D — caller respawns */
         if (n == 0) return 0;                   /* empty line — retry */
+        if (n == LOGIN_READ_TOOLONG) {          /* no such name can exist */
+            printf("Login incorrect\n");
+            return 0;
+        }
     }
 
     printf("Password: ");
     fflush(stdout);
     int pn = read_line_no_echo(0, pass, sizeof(pass));
     if (pn == LOGIN_READ_EOF) return -1;        /* ^D — caller respawns */
+    if (pn == LOGIN_READ_TOOLONG) {             /* cannot match: reject */
+        printf("Login incorrect\n");
+        return 0;
+    }
     if (pn < 0) return 0;                       /* read error — retry */
 
     pw = getpwnam(user);

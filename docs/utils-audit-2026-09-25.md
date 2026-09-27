@@ -79,7 +79,7 @@ Suggested order, highest leverage first:
     - Site: `bin/login/login.c:348-351` vs `:382-392`
     - Fix: Write the records only once the identity switch has succeeded (or write a matching logout record on failure).
     - Verify: A failed switch leaves no dangling USER_PROCESS record.
-- [ ] **UTL-LOGIN-03** (medium) A user name over 63 bytes is truncated and its remainder read as the password (REQ: REQ-UTLA-0009)
+- [x] **UTL-LOGIN-03** (medium) A user name over 63 bytes is truncated and its remainder read as the password (REQ: REQ-UTLA-0009)
     - Site: `bin/login/login.c:176-187`
     - Fix: Consume the rest of an over-long line and reject the name.
     - Verify: A 100-byte name is rejected without its tail reaching the password prompt.

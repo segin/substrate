@@ -76,6 +76,8 @@ After 3 failed attempts
 .B login
 exits.
 An empty user name counts as a failed attempt.
+A user name or password longer than 63 characters is read to the end of
+its line and rejected as a failed attempt.
 End-of-file (typing the EOF character) at either prompt does not
 count as an attempt; the user-name prompt is shown again.
 .PP
@@ -218,6 +220,3 @@ Login history.
 .BR setuid (2),
 .BR setgid (2),
 .BR getpwent_r (3)
-.SH BUGS
-User names longer than 63 characters are silently truncated, and the
-rest of the line is then read as the password.
