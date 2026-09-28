@@ -14,13 +14,22 @@
 #include "symtab.h"
 #include "util.h"
 
-/* The input files, read one after another as a single stream. */
+/*
+ * The input files, read one after another as a single stream.  The parser
+ * pushes back up to two characters (a "%%" it needs to leave for its
+ * caller), more than the single ungetc() C guarantees -- and all that
+ * Substrate's stdio gives -- so pushback is kept here.
+ */
+#define PUSHBACK_MAX 4
+
 static struct {
     int argc;
     char **argv;
     int current_arg;
     FILE *current_fp;
     int line_number;
+    int pushback[PUSHBACK_MAX];
+    int npushback;
 } in;
 
 /* Open next file or stdin */
@@ -47,10 +56,19 @@ static void open_next_file(void) {
 }
 
 static int next_char(void) {
+    int c;
+
+    if (in.npushback > 0) {
+        c = in.pushback[--in.npushback];
+        if (c == '\n')
+            in.line_number++;
+        return c;
+    }
+
     if (!in.current_fp)
         return EOF;
 
-    int c = fgetc(in.current_fp);
+    c = fgetc(in.current_fp);
     if (c == 0) {
         fprintf(stderr, "Error: input is not a text file (contains NUL)\n");
         exit(1);
@@ -68,11 +86,15 @@ static int next_char(void) {
 }
 
 static void unput_char(int c) {
-    if (in.current_fp && c != EOF) {
-        ungetc(c, in.current_fp);
-        if (c == '\n')
-            in.line_number--;
+    if (c == EOF)
+        return;
+    if (in.npushback >= PUSHBACK_MAX) {
+        fprintf(stderr, "Error: internal pushback overflow\n");
+        exit(1);
     }
+    in.pushback[in.npushback++] = c;
+    if (c == '\n')
+        in.line_number--;
 }
 
 void init_parser(int argc, char **argv) {
