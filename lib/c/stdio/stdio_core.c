@@ -460,11 +460,13 @@ int fseek(FILE *stream, long offset, int whence) {
 	stream->has_unget = 0;
 	stream->eof = 0;
 
-	off_t ret = lseek(stream->fd, offset, whence);
-	if(ret == -1) {
-		stream->error = 1;
+	/* A failed seek (ESPIPE on a pipe, EINVAL for a bad offset) is not
+	 * an I/O error: report it through errno alone, as C and POSIX
+	 * specify, and leave the error indicator clear.  Setting it made a
+	 * probing fseek(stdout, 0, SEEK_CUR) on a pipe poison the stream,
+	 * so later ferror() checks saw a write error that never happened. */
+	if (lseek(stream->fd, offset, whence) == -1)
 		return -1;
-	}
 	return 0;
 }
 
@@ -513,11 +515,13 @@ int fseeko(FILE *stream, off_t offset, int whence) {
 	stream->has_unget = 0;
 	stream->eof = 0;
 
-	off_t ret = lseek(stream->fd, offset, whence);
-	if(ret == -1) {
-		stream->error = 1;
+	/* A failed seek (ESPIPE on a pipe, EINVAL for a bad offset) is not
+	 * an I/O error: report it through errno alone, as C and POSIX
+	 * specify, and leave the error indicator clear.  Setting it made a
+	 * probing fseek(stdout, 0, SEEK_CUR) on a pipe poison the stream,
+	 * so later ferror() checks saw a write error that never happened. */
+	if (lseek(stream->fd, offset, whence) == -1)
 		return -1;
-	}
 	return 0;
 }
 

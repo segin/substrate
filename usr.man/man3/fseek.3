@@ -128,8 +128,13 @@ The
 .BR fseeko (),
 and
 .BR fsetpos ()
-functions return 0 on success; otherwise, \-1 is returned and the error
-indicator for the stream is set.
+functions return 0 on success; otherwise, \-1 is returned and
+.I errno
+is set to indicate the error.
+A failed seek does not set the stream's error indicator
+(see
+.BR ferror (3));
+only a failure to flush pending output while seeking does.
 .PP
 The
 .BR ftell ()
@@ -150,7 +155,7 @@ These functions may fail with any of the errors specified for
 .BR lseek (2),
 including:
 .TP
-.B EBADF
+.B ESPIPE
 The
 .I stream
 is not associated with a seekable file (for example, a pipe, FIFO, or
