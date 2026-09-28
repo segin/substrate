@@ -1,5 +1,5 @@
-#ifndef LEX_CODEGEN_H
-#define LEX_CODEGEN_H
+#ifndef SLEX_CODEGEN_H
+#define SLEX_CODEGEN_H
 
 #include "dfa.h"
 

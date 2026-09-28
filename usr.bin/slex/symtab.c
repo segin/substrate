@@ -1,7 +1,13 @@
+/*
+ * symtab.c - definitions-section names: substitutions and start conditions.
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
 #include "symtab.h"
+#include "util.h"
 
 static struct definition *definitions = NULL;
 static struct start_condition *start_conditions = NULL;
@@ -12,58 +18,42 @@ void init_symtab(void) {
 }
 
 void add_definition(const char *name, const char *value) {
-    struct definition *def = malloc(sizeof(struct definition));
-    if (!def) {
-        perror("malloc");
-        exit(1);
-    }
-    def->name = strdup(name);
-    def->value = strdup(value); // Value might need copy or we take ownership
+    struct definition *def = xmalloc(sizeof(struct definition));
+
+    def->name = xstrdup(name);
+    def->value = xstrdup(value);
     def->next = definitions;
     definitions = def;
 }
 
 struct definition *find_definition(const char *name) {
-    struct definition *curr = definitions;
-    while (curr) {
-        if (strcmp(curr->name, name) == 0) {
+    for (struct definition *curr = definitions; curr; curr = curr->next)
+        if (strcmp(curr->name, name) == 0)
             return curr;
-        }
-        curr = curr->next;
-    }
     return NULL;
 }
 
 void add_start_condition(const char *name, bool exclusive) {
-    struct start_condition *sc = malloc(sizeof(struct start_condition));
-    if (!sc) {
-        perror("malloc");
-        exit(1);
-    }
-    sc->name = strdup(name);
+    struct start_condition *sc = xmalloc(sizeof(struct start_condition));
+
+    sc->name = xstrdup(name);
     sc->exclusive = exclusive;
     sc->next = start_conditions;
     start_conditions = sc;
 }
 
 struct start_condition *find_start_condition(const char *name) {
-    struct start_condition *curr = start_conditions;
-    while (curr) {
-        if (strcmp(curr->name, name) == 0) {
+    for (struct start_condition *curr = start_conditions; curr; curr = curr->next)
+        if (strcmp(curr->name, name) == 0)
             return curr;
-        }
-        curr = curr->next;
-    }
     return NULL;
 }
 
 int get_num_start_conditions(void) {
     int count = 1; /* INITIAL */
-    struct start_condition *sc = start_conditions;
-    while (sc) {
+
+    for (struct start_condition *sc = start_conditions; sc; sc = sc->next)
         count++;
-        sc = sc->next;
-    }
     return count;
 }
 
@@ -72,14 +62,9 @@ struct start_condition *get_start_conditions(void) {
 }
 
 void print_symtab(void) {
-    struct definition *d = definitions;
-    while (d) {
+    for (struct definition *d = definitions; d; d = d->next)
         printf("DEF: %s = %s\n", d->name, d->value);
-        d = d->next;
-    }
-    struct start_condition *s = start_conditions;
-    while (s) {
-        printf("START: %s (%s)\n", s->name, s->exclusive ? "exclusive" : "inclusive");
-        s = s->next;
-    }
+    for (struct start_condition *s = start_conditions; s; s = s->next)
+        printf("START: %s (%s)\n", s->name,
+               s->exclusive ? "exclusive" : "inclusive");
 }

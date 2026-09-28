@@ -8,7 +8,9 @@
 #include <stdbool.h>
 #include "dfa.h"
 #include "regex.h"
+#include "rules.h"
 #include "symtab.h"
+#include "util.h"
 
 /* NFA state set for subset construction */
 #define MAX_NFA_STATES 4096
@@ -159,7 +161,7 @@ static struct dfa_state *get_dfa_state(struct dfa *d, struct nfa_set *s) {
     }
     
     /* Create new DFA state */
-    struct dfa_state *ds = malloc(sizeof(struct dfa_state));
+    struct dfa_state *ds = xmalloc(sizeof(struct dfa_state));
     ds->id = d->num_states++;
     memset(ds->transitions, -1, sizeof(ds->transitions));
     ds->accept = s->accept;
@@ -167,7 +169,7 @@ static struct dfa_state *get_dfa_state(struct dfa *d, struct nfa_set *s) {
     /* Copy multiple accepting rules */
     ds->accept_count = s->accept_count;
     if (ds->accept_count > 0) {
-        ds->accept_rules = malloc(ds->accept_count * sizeof(int));
+        ds->accept_rules = xmalloc(ds->accept_count * sizeof(int));
         /* Sort them by priority (ID) for predictable REJECT ordering */
         memcpy(ds->accept_rules, s->accept_rules, ds->accept_count * sizeof(int));
         for (int i = 0; i < ds->accept_count; i++) {
@@ -187,7 +189,7 @@ static struct dfa_state *get_dfa_state(struct dfa *d, struct nfa_set *s) {
     d->states = ds;
     
     /* Add to map */
-    struct dfa_map_entry *e = malloc(sizeof(struct dfa_map_entry));
+    struct dfa_map_entry *e = xmalloc(sizeof(struct dfa_map_entry));
     memcpy(&e->set, s, sizeof(struct nfa_set));
     e->dfa_state = ds;
     e->next = dfa_map[h];
@@ -200,17 +202,17 @@ static struct dfa_state *get_dfa_state(struct dfa *d, struct nfa_set *s) {
 static void dfa_minimize(struct dfa *d) {
     if (d->num_states <= 1) return;
     
-    int *groups = malloc(d->num_states * sizeof(int));
+    int *groups = xmalloc(d->num_states * sizeof(int));
     int num_groups = 0;
     
-    struct dfa_state **by_id = malloc(d->num_states * sizeof(struct dfa_state *));
+    struct dfa_state **by_id = xmalloc(d->num_states * sizeof(struct dfa_state *));
     for (struct dfa_state *s = d->states; s; s = s->next) by_id[s->id] = s;
     
     /* 1. Initial partition by acceptance */
     int max_accept = 0;
     for (int i = 0; i < d->num_states; i++) if (by_id[i]->accept > max_accept) max_accept = by_id[i]->accept;
     
-    int *accept_to_group = malloc((max_accept + 1) * sizeof(int));
+    int *accept_to_group = xmalloc((max_accept + 1) * sizeof(int));
     memset(accept_to_group, -1, (max_accept + 1) * sizeof(int));
     
     for (int i = 0; i < d->num_states; i++) {
@@ -231,7 +233,7 @@ static void dfa_minimize(struct dfa *d) {
     bool changed = true;
     while (changed) {
         changed = false;
-        int *new_groups = malloc(d->num_states * sizeof(int));
+        int *new_groups = xmalloc(d->num_states * sizeof(int));
         int next_group_id = 0;
         
         for (int i = 0; i < d->num_states; i++) {
@@ -262,7 +264,7 @@ static void dfa_minimize(struct dfa *d) {
     /* 3. Consolidate */
     struct dfa_state *new_list = NULL;
     for (int g = 0; g < num_groups; g++) {
-        struct dfa_state *ds = malloc(sizeof(struct dfa_state));
+        struct dfa_state *ds = xmalloc(sizeof(struct dfa_state));
         ds->id = g;
         ds->next = new_list;
         new_list = ds;
@@ -273,7 +275,7 @@ static void dfa_minimize(struct dfa *d) {
         ds->accept = by_id[rep]->accept;
         ds->accept_count = by_id[rep]->accept_count;
         if (ds->accept_count > 0) {
-            ds->accept_rules = malloc(ds->accept_count * sizeof(int));
+            ds->accept_rules = xmalloc(ds->accept_count * sizeof(int));
             memcpy(ds->accept_rules, by_id[rep]->accept_rules, ds->accept_count * sizeof(int));
         } else {
             ds->accept_rules = NULL;
@@ -309,18 +311,18 @@ struct dfa *nfa_to_dfa(void) {
     }
     
     int num_sc = get_num_start_conditions();
-    struct dfa *d = malloc(sizeof(struct dfa));
+    struct dfa *d = xmalloc(sizeof(struct dfa));
     d->states = NULL;
     d->num_states = 0;
     d->num_start_states = num_sc * 2;
-    d->start_states = malloc(d->num_start_states * sizeof(int));
+    d->start_states = xmalloc(d->num_start_states * sizeof(int));
     memset(dfa_map, 0, sizeof(dfa_map));
     
-    struct dfa_state **worklist = malloc(1024 * sizeof(struct dfa_state *));
+    struct dfa_state **worklist = xmalloc(1024 * sizeof(struct dfa_state *));
     int wl_size = 1024;
     int wl_head = 0, wl_tail = 0;
 
-    const char **sc_names = malloc(num_sc * sizeof(char *));
+    const char **sc_names = xmalloc(num_sc * sizeof(char *));
     sc_names[0] = "INITIAL";
     {
         struct start_condition *curr = get_start_conditions();
@@ -393,7 +395,7 @@ struct dfa *nfa_to_dfa(void) {
                 if (!found) {
                     if (wl_tail >= wl_size) {
                         wl_size *= 2;
-                        worklist = realloc(worklist, wl_size * sizeof(struct dfa_state *));
+                        worklist = xrealloc(worklist, wl_size * sizeof(struct dfa_state *));
                     }
                     worklist[wl_tail++] = next_ds;
                 }

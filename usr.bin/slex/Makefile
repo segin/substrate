@@ -1,7 +1,8 @@
 include ../../Makefile.inc
 
 PROG=   slex
-SRCS=   main.c options.c parser.c symtab.c regex.c dfa.c codegen.c
+SRCS=   main.c options.c parser.c symtab.c rules.c regex.c dfa.c codegen.c \
+        util.c
 OBJS=   $(SRCS:.c=.o)
 CFLAGS_LOCAL = -I.
 BINDIR= /usr/bin

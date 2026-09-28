@@ -1,5 +1,5 @@
-#ifndef LEX_DFA_H
-#define LEX_DFA_H
+#ifndef SLEX_DFA_H
+#define SLEX_DFA_H
 
 #include "regex.h"
 

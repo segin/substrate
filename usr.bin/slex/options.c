@@ -1,15 +1,21 @@
+/*
+ * options.c - command-line options.
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+
 #include "options.h"
 
+/* Table sizes start at the POSIX minimums. */
 struct lex_options opt = {
     .to_stdout = false,
     .no_stats = true,
     .verbose = false,
-    .use_pointer = false, // Implementation defined default: let's say array? Flex defaults to ?
-    .use_array = false,   // If neither, we pick one later.
-    .positions = 2500,    // POSIX min defaults
+    .use_pointer = false,
+    .use_array = false,
+    .positions = 2500,
     .states = 500,
     .transitions = 2000,
     .tree_nodes = 1000,
@@ -17,34 +23,29 @@ struct lex_options opt = {
     .output_size = 3000
 };
 
+/*
+ * POSIX leaves the statistics summary off unless -v is given; -n turns it
+ * off again.  The last of -n and -v wins.
+ */
 void parse_options(int argc, char **argv) {
     int c;
-    
-    // Reset defaults if needed, though initialization covers it.
-    // If -v is set, we turn on stats. If -n is set, we turn off stats.
-    // POSIX says: "-n" suppresses summary. "-v" writes output.
-    // "If neither -t, -v, nor -n is specified, existing implementations... may conform... using -n implied."
-    
-    // We start with no_stats = true. If -v is seen, no_stats = false. If -n is seen, no_stats = true.
-    
+
     while ((c = getopt(argc, argv, "tnv")) != -1) {
         switch (c) {
-            case 't':
-                opt.to_stdout = true;
-                break;
-            case 'n':
-                opt.no_stats = true;
-                opt.verbose = false;
-                break;
-            case 'v':
-                opt.verbose = true;
-                opt.no_stats = false;
-                break;
-            case '?':
-                fprintf(stderr, "usage: lex [-t] [-n] [-v] [file ...]\n");
-                exit(1);
-            default:
-                break;
+        case 't':
+            opt.to_stdout = true;
+            break;
+        case 'n':
+            opt.no_stats = true;
+            opt.verbose = false;
+            break;
+        case 'v':
+            opt.verbose = true;
+            opt.no_stats = false;
+            break;
+        default:
+            fprintf(stderr, "usage: slex [-t] [-n] [-v] [file ...]\n");
+            exit(1);
         }
     }
 }

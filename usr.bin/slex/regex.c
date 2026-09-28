@@ -5,23 +5,19 @@
  * The NFA is later converted to DFA for the generated scanner.
  */
 
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
 #include "regex.h"
 #include "symtab.h"
-
-static struct rule *rules = NULL;
-static int next_rule_id = 1;
+#include "util.h"
 
 /* State allocation */
 struct nfa_state *nfa_state_create(int c) {
-    struct nfa_state *s = malloc(sizeof(struct nfa_state));
-    if (!s) {
-        perror("malloc");
-        exit(1);
-    }
+    struct nfa_state *s = xmalloc(sizeof(struct nfa_state));
+
     s->c = c;
     s->out1 = NULL;
     s->out2 = NULL;
@@ -33,7 +29,6 @@ struct nfa_state *nfa_state_create(int c) {
 
 /* Parser state */
 static const char *re_pos;
-static int re_rule_id;
 
 /* NFA copying for intervals */
 struct nfa_copy_map {
@@ -51,7 +46,7 @@ static struct nfa_state *nfa_state_copy(struct nfa_state *s, struct nfa_copy_map
     }
     struct nfa_state *ns = nfa_state_create(s->c);
     ns->accept = s->accept;
-    m = malloc(sizeof(struct nfa_copy_map));
+    m = xmalloc(sizeof(struct nfa_copy_map));
     m->old_st = s;
     m->new_st = ns;
     m->next = *map;
@@ -64,10 +59,10 @@ static struct nfa_state *nfa_state_copy(struct nfa_state *s, struct nfa_copy_map
 static struct nfa_frag *copy_frag(struct nfa_frag *f) {
     struct nfa_copy_map *map = NULL;
     struct nfa_state *new_start = nfa_state_copy(f->start, &map);
-    struct nfa_frag *nf = malloc(sizeof(struct nfa_frag));
+    struct nfa_frag *nf = xmalloc(sizeof(struct nfa_frag));
     nf->start = new_start;
     nf->out_count = f->out_count;
-    nf->out = malloc(nf->out_count * sizeof(struct nfa_state **));
+    nf->out = xmalloc(nf->out_count * sizeof(struct nfa_state **));
     for (int i = 0; i < f->out_count; i++) {
         /* Find which state and which field (out1/out2) this points to */
         struct nfa_state **old_ptr = f->out[i];
@@ -106,10 +101,10 @@ static struct nfa_frag *parse_atom(void);
 
 /* Create a fragment for a single character */
 static struct nfa_frag *make_char_frag(int c) {
-    struct nfa_frag *f = malloc(sizeof(struct nfa_frag));
+    struct nfa_frag *f = xmalloc(sizeof(struct nfa_frag));
     struct nfa_state *s = nfa_state_create(c);
     f->start = s;
-    f->out = malloc(sizeof(struct nfa_state **));
+    f->out = xmalloc(sizeof(struct nfa_state **));
     f->out[0] = &s->out1;
     f->out_count = 1;
     return f;
@@ -134,11 +129,11 @@ static struct nfa_frag *alt_frag(struct nfa_frag *f1, struct nfa_frag *f2) {
     s->out1 = f1->start;
     s->out2 = f2->start;
     
-    struct nfa_frag *f = malloc(sizeof(struct nfa_frag));
+    struct nfa_frag *f = xmalloc(sizeof(struct nfa_frag));
     f->start = s;
     /* Merge out lists */
     f->out_count = f1->out_count + f2->out_count;
-    f->out = malloc(f->out_count * sizeof(struct nfa_state **));
+    f->out = xmalloc(f->out_count * sizeof(struct nfa_state **));
     memcpy(f->out, f1->out, f1->out_count * sizeof(struct nfa_state **));
     memcpy(f->out + f1->out_count, f2->out, f2->out_count * sizeof(struct nfa_state **));
     
@@ -159,9 +154,9 @@ static struct nfa_frag *star_frag(struct nfa_frag *f) {
         *(f->out[i]) = s;
     }
     
-    struct nfa_frag *nf = malloc(sizeof(struct nfa_frag));
+    struct nfa_frag *nf = xmalloc(sizeof(struct nfa_frag));
     nf->start = s;
-    nf->out = malloc(sizeof(struct nfa_state **));
+    nf->out = xmalloc(sizeof(struct nfa_state **));
     nf->out[0] = &s->out2;
     nf->out_count = 1;
     
@@ -180,9 +175,9 @@ static struct nfa_frag *plus_frag(struct nfa_frag *f) {
     }
     
     /* Start from original, not the split */
-    struct nfa_frag *nf = malloc(sizeof(struct nfa_frag));
+    struct nfa_frag *nf = xmalloc(sizeof(struct nfa_frag));
     nf->start = f->start;
-    nf->out = malloc(sizeof(struct nfa_state **));
+    nf->out = xmalloc(sizeof(struct nfa_state **));
     nf->out[0] = &s->out2;
     nf->out_count = 1;
     
@@ -196,10 +191,10 @@ static struct nfa_frag *quest_frag(struct nfa_frag *f) {
     struct nfa_state *s = nfa_state_create(EPSILON);
     s->out1 = f->start;
     
-    struct nfa_frag *nf = malloc(sizeof(struct nfa_frag));
+    struct nfa_frag *nf = xmalloc(sizeof(struct nfa_frag));
     nf->start = s;
     nf->out_count = f->out_count + 1;
-    nf->out = malloc(nf->out_count * sizeof(struct nfa_state **));
+    nf->out = xmalloc(nf->out_count * sizeof(struct nfa_state **));
     memcpy(nf->out, f->out, f->out_count * sizeof(struct nfa_state **));
     nf->out[f->out_count] = &s->out2;
     
@@ -369,9 +364,9 @@ static struct nfa_frag *parse_quoted(void) {
     if (result == NULL) {
         /* Empty string - epsilon */
         struct nfa_state *s = nfa_state_create(EPSILON);
-        result = malloc(sizeof(struct nfa_frag));
+        result = xmalloc(sizeof(struct nfa_frag));
         result->start = s;
-        result->out = malloc(sizeof(struct nfa_state **));
+        result->out = xmalloc(sizeof(struct nfa_state **));
         result->out[0] = &s->out1;
         result->out_count = 1;
     }
@@ -386,7 +381,7 @@ static struct nfa_frag *parse_subst(void) {
     while (*re_pos && *re_pos != '}') re_pos++;
     
     int len = re_pos - name_start;
-    char *name = malloc(len + 1);
+    char *name = xmalloc(len + 1);
     memcpy(name, name_start, len);
     name[len] = '\0';
     
@@ -549,8 +544,7 @@ static struct nfa_frag *parse_expr(void) {
 /* Compile pattern to NFA */
 struct nfa_frag *regex_compile(const char *pattern, int rule_id) {
     re_pos = pattern;
-    re_rule_id = rule_id;
-    
+
     struct nfa_frag *f = parse_trailing();
     if (!f) {
         fprintf(stderr, "Error: failed to compile pattern: %s\n", pattern);
@@ -566,55 +560,4 @@ struct nfa_frag *regex_compile(const char *pattern, int rule_id) {
     }
     
     return f;
-}
-
-/* Add a rule */
-void add_rule(const char *pattern, const char *action, char **start_conds, int sc_count) {
-    struct rule *r = malloc(sizeof(struct rule));
-    r->id = next_rule_id++;
-    r->pattern = strdup(pattern);
-    r->action = action ? strdup(action) : NULL;
-    r->start_conditions = malloc(sc_count * sizeof(char *));
-    for (int i = 0; i < sc_count; i++) {
-        r->start_conditions[i] = strdup(start_conds[i]);
-    }
-    r->sc_count = sc_count;
-    
-    /* Anchors */
-    r->has_bol = (pattern[0] == '^');
-    
-    /* Handle $ and / context */
-    const char *p = pattern;
-    if (r->has_bol) p++;
-    
-    /* Simple $ handling: replace with /\n */
-    char *p_modified = strdup(p);
-    int p_len = strlen(p_modified);
-    r->has_eol = false;
-    if (p_len > 0 && p_modified[p_len-1] == '$') {
-        /* Check if not escaped */
-        if (p_len == 1 || p_modified[p_len-2] != '\\') {
-            r->has_eol = true;
-            char *new_p = malloc(p_len + 2);
-            memcpy(new_p, p_modified, p_len - 1);
-            new_p[p_len-1] = '/';
-            new_p[p_len] = '\n';
-            new_p[p_len+1] = '\0';
-            free(p_modified);
-            p_modified = new_p;
-        }
-    }
-    
-    struct nfa_frag *frag = regex_compile(p_modified, r->id);
-    r->nfa = frag->start;
-    free(frag->out);
-    free(frag);
-    free(p_modified);
-    
-    r->next = rules;
-    rules = r;
-}
-
-struct rule *get_rules(void) {
-    return rules;
 }

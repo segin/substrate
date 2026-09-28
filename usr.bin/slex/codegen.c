@@ -1,10 +1,16 @@
+/*
+ * codegen.c - write the DFA, the rule actions and the runtime as lex.yy.c.
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
 #include "codegen.h"
-#include "regex.h"
 #include "options.h"
+#include "rules.h"
 #include "symtab.h"
+#include "util.h"
 
 /* Generate lex.yy.c */
 void generate_scanner(struct dfa *d, const char *def_code, const char *sub_code, int to_stdout) {
@@ -40,7 +46,7 @@ void generate_scanner(struct dfa *d, const char *def_code, const char *sub_code,
     fprintf(out, "#define INITIAL 0\n");
     {
         int count = get_num_start_conditions();
-        const char **names = malloc(count * sizeof(char *));
+        const char **names = xmalloc(count * sizeof(char *));
         struct start_condition *curr = get_start_conditions();
         for (int i = count - 1; i >= 1; i--) {
             names[i] = curr->name;
@@ -128,7 +134,7 @@ void generate_scanner(struct dfa *d, const char *def_code, const char *sub_code,
     fprintf(out, "/* DFA transition table */\n");
     fprintf(out, "#define YY_NUM_STATES %d\n\n", d->num_states);
     
-    struct dfa_state **by_id = malloc(d->num_states * sizeof(struct dfa_state *));
+    struct dfa_state **by_id = xmalloc(d->num_states * sizeof(struct dfa_state *));
     for (struct dfa_state *s = d->states; s; s = s->next) by_id[s->id] = s;
     
     /* Transition table */
@@ -148,7 +154,7 @@ void generate_scanner(struct dfa *d, const char *def_code, const char *sub_code,
     /* Accept rules tables for REJECT */
     fprintf(out, "static const int yy_accept_rules[] = {\n  ");
     int current_idx = 0;
-    int *offsets = malloc(d->num_states * sizeof(int));
+    int *offsets = xmalloc(d->num_states * sizeof(int));
     for (int i = 0; i < d->num_states; i++) {
         offsets[i] = current_idx;
         if (by_id[i]->accept_count > 0) {

@@ -1,13 +1,19 @@
+/*
+ * slex - Substrate's lex: compile a lex specification into a C scanner.
+ *
+ * parser.c reads the three sections into the symbol table (symtab.c) and
+ * the rule list (rules.c, patterns compiled to an NFA by regex.c); dfa.c
+ * turns the NFA into a minimized DFA; codegen.c writes lex.yy.c.
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+
+#include "codegen.h"
+#include "dfa.h"
 #include "options.h"
 #include "parser.h"
-#include "dfa.h"
-#include "codegen.h"
-
-/* External access to definition code buffer */
-extern char *get_def_code(void);
 
 int main(int argc, char **argv) {
     parse_options(argc, argv);

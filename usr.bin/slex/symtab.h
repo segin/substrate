@@ -1,5 +1,5 @@
-#ifndef LEX_SYMTAB_H
-#define LEX_SYMTAB_H
+#ifndef SLEX_SYMTAB_H
+#define SLEX_SYMTAB_H
 
 #include <stdbool.h>
 
