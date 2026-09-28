@@ -19,6 +19,8 @@ image.  This document catalogs the current set.
 - **GNU sed 4.9** (`contrib/sed/`)
 - **GNU m4 1.4.21** (`contrib/m4/`) — gnulib stdio-internals and
   locale-name branches for Substrate's `FILE` and C-only locale.
+- **flex 2.6.4** (`contrib/flex/`) — also `lex`, `libfl` and
+  `FlexLexer.h`; runs `/usr/bin/m4` at scanner-generation time.
 - **OpenBSD expr** (`contrib/expr/`) — single-file BSD port alongside
   the OpenBSD `tr` port at `bin/tr/`.
 - **zsh 5.9** (`contrib/zsh/`) — the bash-equivalent shell.  System
