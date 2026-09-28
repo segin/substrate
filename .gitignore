@@ -241,6 +241,7 @@ sbin/*/*
 /usr.bin/cpio/cpio
 /usr.bin/cxxfilt/c++filt
 /usr.bin/elfedit/elfedit
+/usr.bin/env/env
 /usr.bin/ld/ld
 /usr.bin/ld/ld.x64
 /usr.bin/ld/ld.x86
