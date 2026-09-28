@@ -1,6 +1,6 @@
 #!/bin/sh
 
-LEX=usr.bin/lex/lex
+LEX=usr.bin/slex/slex
 CC=cc
 
 echo "Testing Lex Start Conditions and Macros..."

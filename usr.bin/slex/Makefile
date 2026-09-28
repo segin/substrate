@@ -1,6 +1,6 @@
 include ../../Makefile.inc
 
-PROG=   lex
+PROG=   slex
 SRCS=   main.c options.c parser.c symtab.c regex.c dfa.c codegen.c
 OBJS=   $(SRCS:.c=.o)
 CFLAGS_LOCAL = -I.

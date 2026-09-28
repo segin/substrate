@@ -6,7 +6,7 @@
 # was an x86-64 glibc binary -- unrunnable in an i386 image.
 #
 # Makefile.bin.inc handles a single PROG, so the link is spelled out here the
-# way usr.bin/lex does, mirroring Makefile.bin.inc's DYNAMIC = 1 shape:
+# way usr.bin/slex does, mirroring Makefile.bin.inc's DYNAMIC = 1 shape:
 # PIE against /sbin/ld.so, libc.so.0 + libsys.so.0, branded ELFOSABI_SUBSTRATE.
 
 include ../../Makefile.inc

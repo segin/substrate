@@ -94,7 +94,7 @@ sbin/ld.so/  Substrate native dynamic linker.  Phases 1-4g live:
              docs/design/ld.so-design.md, reloc matrix in
              docs/specs/ld.so-reloc-matrix.md, kernel ABI contract
              in docs/kernel-ldso-abi-substrate.md.
-usr.bin/     extended user tools (ar, nm, readelf, ldd, yacc, lex, ...).
+usr.bin/     extended user tools (ar, nm, readelf, ldd, yacc, slex, ...).
              The C toolchain (cc/as/ld/g++/cpp) comes from the GNU
              stage-2 port under contrib/{binutils,gcc}/.
 lib/         target runtime libraries (libc/libsys/libm/libpthread/libedit/libusb...)

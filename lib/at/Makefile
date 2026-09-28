@@ -57,7 +57,7 @@ regen:
 	../../usr.bin/yacc/yacc -d -b at_parse at_parse.y
 	mv at_parse.tab.c at_parse_y.c
 	mv at_parse.tab.h at_parse_y.h
-	../../usr.bin/lex/lex at_parse.l
+	../../usr.bin/slex/slex at_parse.l
 
 at_parse_y.o: at_parse_y.c
 	$(CC) $(CFLAGS) $(LOOSE_CFLAGS) -c at_parse_y.c -o $@

@@ -1,13 +1,13 @@
-.TH LEX 1 2026-09-25 "Substrate" "User Commands"
+.TH SLEX 1 2026-09-28 "Substrate" "User Commands"
 .SH NAME
-lex \- generate a lexical analyzer in C
+slex \- generate a lexical analyzer in C
 .SH SYNOPSIS
-.B lex
+.B slex
 .RB [ \-t ]
 .RB [ \-n | \-v ]
 .RI [ file ...]
 .SH DESCRIPTION
-.B lex
+.B slex
 reads a lexical-analyzer specification from each
 .I file
 in turn, as if they were one file, or from standard input if no
@@ -23,8 +23,13 @@ and writes a C scanner to
 in the current directory, or to standard output with
 .BR \-t .
 .PP
-This is an in-tree implementation that covers a subset of POSIX
-.BR lex ;
+This is Substrate's in-tree implementation of a subset of POSIX
+.BR lex (1).
+It is installed as
+.B slex
+so that it sits alongside flex, which provides
+.B lex
+itself;
 see
 .B BUGS
 before relying on it.
@@ -232,9 +237,11 @@ int lines;
 \&.       ;
 %%
 int main(void) { yylex(); printf("%d\en", lines); return 0; }
-$ lex count.l && cc \-o count lex.yy.c
+$ slex count.l && cc \-o count lex.yy.c
 .EE
 .SH SEE ALSO
+.BR flex (1),
+.BR lex (1),
 .BR yacc (1),
 .BR cc (1),
 .BR yylex (3)

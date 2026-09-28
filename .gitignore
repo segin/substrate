@@ -244,9 +244,9 @@ sbin/*/*
 /usr.bin/ld/ld
 /usr.bin/ld/ld.x64
 /usr.bin/ld/ld.x86
-/usr.bin/lex/lex
-/usr.bin/lex/out.txt
-/usr.bin/lex/test_posix
+/usr.bin/slex/slex
+/usr.bin/slex/out.txt
+/usr.bin/slex/test_posix
 /usr.bin/nm/nm
 /usr.bin/pax/pax
 /usr.bin/pr/pr
@@ -442,7 +442,6 @@ tests/usr.lib/demangle/fuzz/corpus/
 /usr.bin/gprof/gprof
 /usr.bin/ld/ld
 /usr.bin/ldd/ldd
-/usr.bin/lex/lex
 /usr.bin/lsusb/lsusb
 /usr.bin/nm/nm
 /usr.bin/objcopy/objcopy
