@@ -60,11 +60,3 @@ int get_num_start_conditions(void) {
 struct start_condition *get_start_conditions(void) {
     return start_conditions;
 }
-
-void print_symtab(void) {
-    for (struct definition *d = definitions; d; d = d->next)
-        printf("DEF: %s = %s\n", d->name, d->value);
-    for (struct start_condition *s = start_conditions; s; s = s->next)
-        printf("START: %s (%s)\n", s->name,
-               s->exclusive ? "exclusive" : "inclusive");
-}

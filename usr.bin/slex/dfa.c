@@ -414,9 +414,7 @@ struct dfa *nfa_to_dfa(void) {
         dfa_map[i] = NULL;
     }
     
-    printf("Initial DFA: %d states\n", d->num_states);
     dfa_minimize(d);
-    printf("Minimized DFA: %d states, %d start states\n", d->num_states, d->num_start_states);
     return d;
 }
 

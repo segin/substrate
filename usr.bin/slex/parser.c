@@ -332,10 +332,8 @@ static void parse_rules(void) {
         /* Check for %% ending rules section */
         if (c == '%') {
             int c2 = next_char();
-            if (c2 == '%') {
-                printf("Mock: Found delimiter, entering User Subroutines Section\n");
+            if (c2 == '%')
                 return;
-            }
             unput_char(c2);
         }
 
@@ -449,9 +447,6 @@ static void parse_rules(void) {
         if (c != '\n' && c != EOF)
             action = read_action(c);
 
-        printf("Mock: Rule %d: pattern='%s' action='%s'\n",
-               get_rules() ? get_rules()->id + 1 : 1,
-               pattern, action ? action : "(default)");
         add_rule(pattern, action, start_conds, sc_count);
 
         free(action);
@@ -466,8 +461,6 @@ void parse_input(void) {
 
     /* Section 1: Definitions */
     init_symtab();
-
-    printf("Mock: Parsing Definitions Section\n");
     parse_definitions();
 
     /* The first %% is required. */
@@ -476,20 +469,10 @@ void parse_input(void) {
         fprintf(stderr, "Error: expected marking of rules section\n");
         exit(1);
     }
-    printf("Mock: Found delimiter, entering Rules Section\n");
     /* Consume newline after %% if present */
     while ((c = next_char()) != EOF && c != '\n')
         ;
 
     parse_rules();
     parse_subroutines();
-
-    /* Dump definitions for verification */
-    if (def_code.buf)
-        printf("Mock: Captured Code Block:\n%s\n", def_code.buf);
-    print_symtab();
-
-    printf("\nCompiled Rules:\n");
-    for (struct rule *r = get_rules(); r; r = r->next)
-        printf("  Rule %d: %s\n", r->id, r->pattern);
 }

@@ -196,8 +196,6 @@ void generate_scanner(struct dfa *d, const char *def_code, const char *sub_code,
         fprintf(out, "%s\n", sub_code);
     }
 
-    if (!to_stdout) {
+    if (!to_stdout)
         fclose(out);
-        printf("Generated lex.yy.c\n");
-    }
 }

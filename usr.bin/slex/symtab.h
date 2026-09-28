@@ -27,6 +27,4 @@ struct start_condition *find_start_condition(const char *name);
 int get_num_start_conditions(void);
 struct start_condition *get_start_conditions(void);
 
-void print_symtab(void);
-
 #endif

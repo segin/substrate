@@ -195,9 +195,15 @@ Do not print the statistics line.
 This is the default.
 .TP
 .B \-v
-Print a
-.BI "Statistics: " n " DFA states"
-line to standard output after generating the scanner.
+After generating the scanner, print a line of the form
+.PP
+.RS
+.BI "slex: " r " rules, " s " start conditions, " d " DFA states"
+.RE
+.IP
+to standard output, or to standard error when
+.B \-t
+is also given.
 .PP
 If both
 .B \-n
@@ -250,19 +256,6 @@ Partially implements
 .B lex
 as specified in POSIX.1-2024.
 .SH BUGS
-Progress and debugging messages (lines beginning with
-.BR Mock: ,
-the rule and definition dumps, the DFA state counts and
-.BR "Generated lex.yy.c" )
-are always written to standard output.
-With
-.B \-t
-they are mixed into the generated scanner, which then does not
-compile.
-The
-.B \-v
-statistics line also goes to standard output.
-.PP
 Trailing context is not separated from the match:
 .IB r / s
 matches

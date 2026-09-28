@@ -40,6 +40,12 @@ else
 	$(CC) $(TARGET_CFLAGS) $(CFLAGS_LOCAL) -c $< -o $@
 endif
 
+# Behaviour tests: build for the host and run tests/usr.bin/slex.
+test:
+	$(MAKE) clean
+	$(MAKE) NATIVE_BUILD=1
+	sh ../../tests/usr.bin/slex/run_tests.sh ./$(PROG)
+
 clean:
 	rm -f $(PROG) $(OBJS) skel.h skel.h.tmp
 
@@ -47,4 +53,4 @@ install: $(PROG)
 	mkdir -p $(DESTDIR)$(BINDIR)
 	cp $(PROG) $(DESTDIR)$(BINDIR)/$(PROG)
 
-.PHONY: all clean install
+.PHONY: all clean install test

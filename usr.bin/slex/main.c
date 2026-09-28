@@ -14,10 +14,26 @@
 #include "dfa.h"
 #include "options.h"
 #include "parser.h"
+#include "rules.h"
+#include "symtab.h"
+
+/*
+ * The -v summary.  POSIX puts it on standard output, or on standard error
+ * when -t has claimed standard output for the scanner.
+ */
+static void print_statistics(const struct dfa *d) {
+    FILE *f = opt.to_stdout ? stderr : stdout;
+    int rules = 0;
+
+    for (struct rule *r = get_rules(); r; r = r->next)
+        rules++;
+    fprintf(f, "slex: %d rules, %d start conditions, %d DFA states\n",
+            rules, get_num_start_conditions(), d->num_states);
+}
 
 int main(int argc, char **argv) {
     parse_options(argc, argv);
-    
+
     /* Parse input file(s) */
     init_parser(argc - optind, &argv[optind]);
     parse_input();
@@ -32,11 +48,9 @@ int main(int argc, char **argv) {
     /* Generate scanner */
     generate_scanner(d, get_def_code(), get_sub_code(), opt.to_stdout);
 
-    if (opt.verbose) {
-        printf("Statistics: %d DFA states\n", d->num_states);
-    }
+    if (opt.verbose)
+        print_statistics(d);
 
     dfa_free(d);
     return 0;
 }
-
