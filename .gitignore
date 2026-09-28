@@ -245,6 +245,7 @@ sbin/*/*
 /usr.bin/ld/ld.x64
 /usr.bin/ld/ld.x86
 /usr.bin/slex/slex
+/usr.bin/slex/skel.h
 /usr.bin/slex/out.txt
 /usr.bin/slex/test_posix
 /usr.bin/nm/nm

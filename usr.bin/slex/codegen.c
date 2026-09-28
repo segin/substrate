@@ -1,5 +1,9 @@
 /*
  * codegen.c - write the DFA, the rule actions and the runtime as lex.yy.c.
+ *
+ * The fixed part of the scanner lives in scanner.skel (compiled into
+ * skel.h at build time); this file writes its sections in order,
+ * interleaved with the parts that depend on the input.
  */
 
 #include <stdio.h>
@@ -9,13 +13,142 @@
 #include "codegen.h"
 #include "options.h"
 #include "rules.h"
+#include "skel.h"
 #include "symtab.h"
 #include "util.h"
 
-/* Generate lex.yy.c */
+static void emit_skel(FILE *out, const char *const *lines) {
+    for (; *lines != NULL; lines++)
+        fprintf(out, "%s\n", *lines);
+}
+
+/* Emit a comma-separated int array, 16 values to a line. */
+static void emit_int_list(FILE *out, const int *v, int n) {
+    for (int i = 0; i < n; i++) {
+        fprintf(out, "%d", v[i]);
+        if (i < n - 1)
+            fprintf(out, ", ");
+        if ((i + 1) % 16 == 0)
+            fprintf(out, "\n  ");
+    }
+}
+
+/* #define NAME n for each declared start condition, in declaration order. */
+static void emit_start_conditions(FILE *out) {
+    int count = get_num_start_conditions();
+    const char **names = xmalloc(count * sizeof(char *));
+    struct start_condition *curr = get_start_conditions();
+
+    /* The list is newest-first; index 0 is INITIAL. */
+    for (int i = count - 1; i >= 1; i--) {
+        names[i] = curr->name;
+        curr = curr->next;
+    }
+    for (int i = 1; i < count; i++)
+        fprintf(out, "#define %s %d\n", names[i], i);
+    free(names);
+}
+
+static void emit_tables(FILE *out, struct dfa *d) {
+    struct dfa_state **by_id = xmalloc(d->num_states * sizeof(struct dfa_state *));
+    int *offsets = xmalloc(d->num_states * sizeof(int));
+    int *counts = xmalloc(d->num_states * sizeof(int));
+    int current_idx = 0;
+
+    for (struct dfa_state *s = d->states; s; s = s->next)
+        by_id[s->id] = s;
+
+    /* Start state for each (start condition, at-beginning-of-line) pair */
+    fprintf(out, "static const int yy_start_state[] = {\n  ");
+    for (int i = 0; i < d->num_start_states; i++) {
+        fprintf(out, "%d", d->start_states[i]);
+        if (i < d->num_start_states - 1)
+            fprintf(out, ", ");
+    }
+    fprintf(out, "\n};\n\n");
+
+    fprintf(out, "/* DFA transition table */\n");
+    fprintf(out, "#define YY_NUM_STATES %d\n\n", d->num_states);
+
+    fprintf(out, "static const short yy_nxt[YY_NUM_STATES][256] = {\n");
+    for (int i = 0; i < d->num_states; i++) {
+        struct dfa_state *s = by_id[i];
+
+        fprintf(out, "  { /* state %d */\n    ", i);
+        for (int c = 0; c < 256; c++) {
+            fprintf(out, "%d", s ? s->transitions[c] : -1);
+            if (c < 255)
+                fprintf(out, ",");
+            if ((c + 1) % 16 == 0)
+                fprintf(out, "\n    ");
+        }
+        fprintf(out, "\n  }%s\n", (i < d->num_states - 1) ? "," : "");
+    }
+    fprintf(out, "};\n\n");
+
+    /*
+     * Every rule a state accepts, highest priority last, so REJECT can
+     * fall back to the next one: state i's rules are
+     * yy_accept_rules[yy_accept_idx[i] .. + yy_accept_cnt[i]].
+     */
+    fprintf(out, "static const int yy_accept_rules[] = {\n  ");
+    for (int i = 0; i < d->num_states; i++) {
+        offsets[i] = current_idx;
+        counts[i] = by_id[i]->accept_count;
+        if (by_id[i]->accept_count > 0) {
+            for (int k = 0; k < by_id[i]->accept_count; k++) {
+                fprintf(out, "%d, ", by_id[i]->accept_rules[k]);
+                current_idx++;
+            }
+            if (current_idx % 16 == 0)
+                fprintf(out, "\n  ");
+        }
+    }
+    fprintf(out, "0\n};\n\n");
+
+    fprintf(out, "static const int yy_accept_idx[] = {\n  ");
+    emit_int_list(out, offsets, d->num_states);
+    fprintf(out, "\n};\n\n");
+
+    fprintf(out, "static const int yy_accept_cnt[] = {\n  ");
+    emit_int_list(out, counts, d->num_states);
+    fprintf(out, "\n};\n\n");
+
+    free(counts);
+    free(offsets);
+    free(by_id);
+}
+
+/* yy_do_action(): run a rule's action; returns 1 if it did REJECT. */
+static void emit_actions(FILE *out) {
+    fprintf(out, "/* Actions */\n");
+    fprintf(out, "int yy_do_action(int rule) {\n");
+    fprintf(out, "  #undef REJECT\n");
+    fprintf(out, "  #define REJECT return 1\n");
+    fprintf(out, "  switch (rule) {\n");
+
+    for (struct rule *r = get_rules(); r; r = r->next) {
+        fprintf(out, "    case %d:\n", r->id);
+        if (r->action && r->action[0]) {
+            if (r->action[0] == '|')
+                fprintf(out, "      /* fall through */\n");
+            else
+                fprintf(out, "      %s\n", r->action);
+        } else {
+            fprintf(out, "      ECHO;\n");
+        }
+        fprintf(out, "      break;\n");
+    }
+
+    fprintf(out, "    default: ECHO; break;\n");
+    fprintf(out, "  }\n");
+    fprintf(out, "  return 0;\n");
+    fprintf(out, "}\n\n");
+}
+
 void generate_scanner(struct dfa *d, const char *def_code, const char *sub_code, int to_stdout) {
     FILE *out;
-    
+
     if (to_stdout) {
         out = stdout;
     } else {
@@ -25,305 +158,44 @@ void generate_scanner(struct dfa *d, const char *def_code, const char *sub_code,
             exit(1);
         }
     }
-    
-    /* Header */
-    fprintf(out, "/* Generated by lex */\n");
-    fprintf(out, "#include <stdio.h>\n");
-    fprintf(out, "#include <string.h>\n");
-    fprintf(out, "#include <stdlib.h>\n\n");
-    
-    fprintf(out, "/* Prototypes */\n");
-    fprintf(out, "int yylex(void);\n");
-    fprintf(out, "int yywrap(void);\n");
-    fprintf(out, "int yy_do_action(int rule);\n\n");
-    
-    /* Macros */
-    fprintf(out, "#define ECHO fwrite(yytext, yyleng, 1, yyout)\n");
-    fprintf(out, "#define BEGIN yy_start = \n\n");
 
-    /* Start Conditions */
-    fprintf(out, "/* Start Conditions */\n");
-    fprintf(out, "#define INITIAL 0\n");
-    {
-        int count = get_num_start_conditions();
-        const char **names = xmalloc(count * sizeof(char *));
-        struct start_condition *curr = get_start_conditions();
-        for (int i = count - 1; i >= 1; i--) {
-            names[i] = curr->name;
-            curr = curr->next;
-        }
-        for (int i = 1; i < count; i++) {
-            fprintf(out, "#define %s %d\n", names[i], i);
-        }
-        free(names);
-    }
+    emit_skel(out, skel_prologue);
+    emit_start_conditions(out);
     fprintf(out, "\n");
 
-    /* User definitions */
     if (def_code && *def_code) {
         fprintf(out, "/* User code from definitions section */\n");
         fprintf(out, "%s\n", def_code);
     }
-    
-    /* runtime variables */
-    fprintf(out, "/* lex runtime */\n");
-    fprintf(out, "#define YY_BUF_SIZE 65536\n");
+
+    emit_skel(out, skel_runtime_head);
     if (opt.use_array) {
         fprintf(out, "char yytext[YY_BUF_SIZE];\n");
         fprintf(out, "#ifndef YYLMAX\n#define YYLMAX YY_BUF_SIZE\n#endif\n");
     } else {
         fprintf(out, "char *yytext;\n");
     }
-    fprintf(out, "int yyleng;\n");
-    fprintf(out, "FILE *yyin = NULL;\n");
-    fprintf(out, "FILE *yyout = NULL;\n");
-    fprintf(out, "static int yy_start = 0;\n");
-    fprintf(out, "static int yy_at_bol = 1;\n");
-    fprintf(out, "static int yy_more_flag = 0;\n");
-    fprintf(out, "static char yy_buf[YY_BUF_SIZE + 2];\n");
-    fprintf(out, "static char *yy_cp = NULL, *yy_bp = NULL;\n");
-    fprintf(out, "static int yy_buf_len = 0;\n");
-    fprintf(out, "static char yy_hold_char;\n");
-    fprintf(out, "static char *yy_c_buf_p;\n\n");
-    
-    fprintf(out, "static int yy_get_next_buffer(void) {\n");
-    fprintf(out, "  if (yy_buf_len >= YY_BUF_SIZE) return 0;\n");
-    fprintf(out, "  int c = getc(yyin);\n");
-    fprintf(out, "  if (c == EOF) return 0;\n");
-    fprintf(out, "  yy_buf[yy_buf_len++] = (char)c;\n");
-    fprintf(out, "  yy_buf[yy_buf_len] = '\\0';\n");
-    fprintf(out, "  return 1;\n");
-    fprintf(out, "}\n\n");
+    emit_skel(out, skel_runtime);
 
-    fprintf(out, "void yymore(void) { yy_more_flag = 1; }\n\n");
-    fprintf(out, "#define yyless(n) do { \\\n");
-    fprintf(out, "  *yy_c_buf_p = yy_hold_char; \\\n");
-    fprintf(out, "  yyleng = (n); \\\n");
-    fprintf(out, "  yy_cp = yy_bp + yyleng; \\\n");
-    fprintf(out, "  yy_c_buf_p = yy_cp; \\\n");
-    fprintf(out, "  yy_hold_char = *yy_c_buf_p; \\\n");
-    fprintf(out, "  *yy_c_buf_p = '\\0'; \\\n");
-    fprintf(out, "} while(0)\n\n");
-    
-    fprintf(out, "int input(void) {\n");
-    fprintf(out, "  if (yy_cp && yy_cp < yy_buf + yy_buf_len) return (unsigned char)*yy_cp++;\n");
-    fprintf(out, "  if (yy_get_next_buffer()) {\n");
-    fprintf(out, "    if (!yy_cp) yy_cp = yy_buf + yy_buf_len - 1;\n");
-    fprintf(out, "    return (unsigned char)*yy_cp++;\n");
-    fprintf(out, "  }\n");
-    fprintf(out, "  return EOF;\n");
-    fprintf(out, "}\n\n");
-    
-    fprintf(out, "void unput(int c) {\n");
-    fprintf(out, "  if (yy_cp && yy_cp > yy_buf) {\n");
-    fprintf(out, "    *--yy_cp = (char)c;\n");
-    fprintf(out, "  } else {\n");
-    fprintf(out, "    ungetc(c, yyin);\n");
-    fprintf(out, "  }\n");
-    fprintf(out, "}\n\n");
-    
-    /* Start state table */
-    fprintf(out, "static const int yy_start_state[] = {\n  ");
-    for (int i = 0; i < d->num_start_states; i++) {
-        fprintf(out, "%d", d->start_states[i]);
-        if (i < d->num_start_states - 1) fprintf(out, ", ");
-    }
-    fprintf(out, "\n};\n\n");
+    emit_tables(out, d);
+    emit_actions(out);
 
-    /* DFA tables */
-    fprintf(out, "/* DFA transition table */\n");
-    fprintf(out, "#define YY_NUM_STATES %d\n\n", d->num_states);
-    
-    struct dfa_state **by_id = xmalloc(d->num_states * sizeof(struct dfa_state *));
-    for (struct dfa_state *s = d->states; s; s = s->next) by_id[s->id] = s;
-    
-    /* Transition table */
-    fprintf(out, "static const short yy_nxt[YY_NUM_STATES][256] = {\n");
-    for (int i = 0; i < d->num_states; i++) {
-        struct dfa_state *s = by_id[i];
-        fprintf(out, "  { /* state %d */\n    ", i);
-        for (int c = 0; c < 256; c++) {
-            fprintf(out, "%d", s ? s->transitions[c] : -1);
-            if (c < 255) fprintf(out, ",");
-            if ((c + 1) % 16 == 0) fprintf(out, "\n    ");
-        }
-        fprintf(out, "\n  }%s\n", (i < d->num_states - 1) ? "," : "");
-    }
-    fprintf(out, "};\n\n");
-    
-    /* Accept rules tables for REJECT */
-    fprintf(out, "static const int yy_accept_rules[] = {\n  ");
-    int current_idx = 0;
-    int *offsets = xmalloc(d->num_states * sizeof(int));
-    for (int i = 0; i < d->num_states; i++) {
-        offsets[i] = current_idx;
-        if (by_id[i]->accept_count > 0) {
-            for (int k = 0; k < by_id[i]->accept_count; k++) {
-                fprintf(out, "%d, ", by_id[i]->accept_rules[k]);
-                current_idx++;
-            }
-            if (current_idx % 16 == 0) fprintf(out, "\n  ");
-        }
-    }
-    fprintf(out, "0\n};\n\n");
-    
-    fprintf(out, "static const int yy_accept_idx[] = {\n  ");
-    for (int i = 0; i < d->num_states; i++) {
-        fprintf(out, "%d", offsets[i]);
-        if (i < d->num_states - 1) fprintf(out, ", ");
-        if ((i + 1) % 16 == 0) fprintf(out, "\n  ");
-    }
-    fprintf(out, "\n};\n\n");
-
-    fprintf(out, "static const int yy_accept_cnt[] = {\n  ");
-    for (int i = 0; i < d->num_states; i++) {
-        fprintf(out, "%d", by_id[i]->accept_count);
-        if (i < d->num_states - 1) fprintf(out, ", ");
-        if ((i + 1) % 16 == 0) fprintf(out, "\n  ");
-    }
-    fprintf(out, "\n};\n\n");
-    
-    free(offsets);
-    free(by_id);
-    
-    /* Action code - collect from rules */
-    fprintf(out, "/* Actions */\n");
-    fprintf(out, "int yy_do_action(int rule) {\n");
-    fprintf(out, "  #undef REJECT\n");
-    fprintf(out, "  #define REJECT return 1\n");
-    fprintf(out, "  switch (rule) {\n");
-    
-    struct rule *rule_list = get_rules();
-    while (rule_list) {
-        fprintf(out, "    case %d:\n", rule_list->id);
-        if (rule_list->action && rule_list->action[0]) {
-            if (rule_list->action[0] == '|') {
-                fprintf(out, "      /* fall through */\n");
-            } else {
-                fprintf(out, "      %s\n", rule_list->action);
-            }
-        } else {
-            fprintf(out, "      ECHO;\n");
-        }
-        fprintf(out, "      break;\n");
-        rule_list = rule_list->next;
-    }
-    
-    fprintf(out, "    default: ECHO; break;\n");
-    fprintf(out, "  }\n");
-    fprintf(out, "  return 0;\n");
-    fprintf(out, "}\n\n");
-    
-    /* yylex function */
-    fprintf(out, "int yylex(void) {\n");
-    fprintf(out, "    int c, state;\n");
-    fprintf(out, "    struct { int rule, len; } matches[1024];\n");
-    fprintf(out, "    int match_ptr = 0;\n");
-    fprintf(out, "    int current_match = 0;\n");
-    fprintf(out, "    \n");
-    fprintf(out, "    if (!yyin) yyin = stdin;\n");
-    fprintf(out, "    if (!yyout) yyout = stdout;\n");
-    fprintf(out, "    \n");
-    fprintf(out, "    if (!yy_cp) {\n");
-    fprintf(out, "        yy_cp = yy_bp = yy_buf;\n");
-    fprintf(out, "        yy_buf_len = 0;\n");
-    fprintf(out, "        yy_at_bol = 1;\n");
-    fprintf(out, "    }\n\n");
-    fprintf(out, "yy_restart:\n");
-    fprintf(out, "    state = yy_start_state[yy_start << 1 | yy_at_bol];\n\n");
-    fprintf(out, "    if (yy_more_flag) {\n");
-    fprintf(out, "        yy_more_flag = 0;\n");
-    fprintf(out, "    } else {\n");
-    fprintf(out, "        yy_bp = yy_cp;\n");
-    fprintf(out, "        yyleng = 0;\n");
-    fprintf(out, "    }\n");
-    fprintf(out, "    match_ptr = 0;\n\n");
-    fprintf(out, "    while (1) {\n");
-    fprintf(out, "        if (yy_cp < yy_buf + yy_buf_len) {\n");
-    fprintf(out, "            c = (unsigned char)*yy_cp++;\n");
-    fprintf(out, "        } else if (yy_get_next_buffer()) {\n");
-    fprintf(out, "            c = (unsigned char)*yy_cp++;\n");
-    fprintf(out, "        } else {\n");
-    fprintf(out, "            c = EOF;\n");
-    fprintf(out, "            break;\n");
-    fprintf(out, "        }\n\n");
-    fprintf(out, "        int next = yy_nxt[state][(unsigned char)c];\n");
-    fprintf(out, "        if (next < 0) {\n");
-    fprintf(out, "            yy_cp--;\n");
-    fprintf(out, "            break;\n");
-    fprintf(out, "        }\n\n");
-    fprintf(out, "        state = next;\n");
-    fprintf(out, "        yyleng++;\n\n");
-    fprintf(out, "        for (int k = yy_accept_cnt[state] - 1; k >= 0; k--) {\n");
-    fprintf(out, "            if (match_ptr < 1024) {\n");
-    fprintf(out, "                matches[match_ptr].rule = yy_accept_rules[yy_accept_idx[state] + k];\n");
-    fprintf(out, "                matches[match_ptr].len = yyleng;\n");
-    fprintf(out, "                match_ptr++;\n");
-    fprintf(out, "            }\n");
-    fprintf(out, "        }\n");
-    fprintf(out, "    }\n\n");
-    fprintf(out, "    if (match_ptr > 0) {\n");
-    fprintf(out, "        current_match = match_ptr - 1;\n");
-    fprintf(out, "    yy_try_match:\n");
-    fprintf(out, "        {\n");
-    fprintf(out, "            int rule = matches[current_match].rule;\n");
-    fprintf(out, "            int len = matches[current_match].len;\n");
-    fprintf(out, "            while (yyleng > len) {\n");
-    fprintf(out, "                yy_cp--;\n");
-    fprintf(out, "                yyleng--;\n");
-    fprintf(out, "            }\n");
-    fprintf(out, "            \n");
-    fprintf(out, "            yy_c_buf_p = yy_cp;\n");
-    fprintf(out, "            yy_hold_char = *yy_c_buf_p;\n");
-    fprintf(out, "            *yy_c_buf_p = '\\0';\n");
-    if (!opt.use_array) {
-        fprintf(out, "            yytext = yy_bp;\n");
-    } else {
+    emit_skel(out, skel_yylex_head);
+    if (opt.use_array) {
         fprintf(out, "            if (yyleng < YY_BUF_SIZE) {\n");
         fprintf(out, "                memcpy(yytext, yy_bp, yyleng);\n");
         fprintf(out, "                yytext[yyleng] = '\\0';\n");
         fprintf(out, "            }\n");
+    } else {
+        fprintf(out, "            yytext = yy_bp;\n");
     }
-    fprintf(out, "            if (yy_do_action(rule) == 1) {\n");
-    fprintf(out, "                *yy_c_buf_p = yy_hold_char;\n");
-    fprintf(out, "                current_match--;\n");
-    fprintf(out, "                if (current_match >= 0) goto yy_try_match;\n");
-    fprintf(out, "                else goto yy_no_match;\n");
-    fprintf(out, "            }\n");
-    fprintf(out, "            *yy_c_buf_p = yy_hold_char;\n");
-    fprintf(out, "            yy_at_bol = (yy_cp > yy_bp && yy_cp[-1] == '\\n') ? 1 : 0;\n");
-    fprintf(out, "            goto yy_restart;\n");
-    fprintf(out, "        }\n");
-    fprintf(out, "    }\n\n");
-    fprintf(out, "yy_no_match:\n");
-    fprintf(out, "    if (yyleng == 0 && c == EOF) {\n");
-    fprintf(out, "        if (yywrap()) return 0;\n");
-    fprintf(out, "        yy_cp = yy_bp = yy_buf;\n");
-    fprintf(out, "        yy_buf_len = 0;\n");
-    fprintf(out, "        yy_at_bol = 1;\n");
-    fprintf(out, "        goto yy_restart;\n");
-    fprintf(out, "    }\n");
-    fprintf(out, "    if (yy_bp < yy_buf + yy_buf_len) {\n");
-    fprintf(out, "        c = (unsigned char)*yy_bp;\n");
-    fprintf(out, "        putc(c, yyout);\n");
-    fprintf(out, "        yy_bp++;\n");
-    fprintf(out, "        yy_cp = yy_bp;\n");
-    fprintf(out, "        yy_at_bol = (c == '\\n');\n");
-    fprintf(out, "        goto yy_restart;\n");
-    fprintf(out, "    }\n");
-    fprintf(out, "    return 0;\n");
-    fprintf(out, "}\n\n");
-    
-    /* yywrap */
-    fprintf(out, "int yywrap(void) {\n");
-    fprintf(out, "  return 1;\n");
-    fprintf(out, "}\n");
-    
+    emit_skel(out, skel_yylex_tail);
+
     if (sub_code && *sub_code) {
         fprintf(out, "\n/* User subroutines */\n");
         fprintf(out, "%s\n", sub_code);
     }
-    
+
     if (!to_stdout) {
         fclose(out);
         printf("Generated lex.yy.c\n");

@@ -26,6 +26,13 @@ else
 	$(call BRAND_SUBSTRATE,$@)
 endif
 
+# The fixed text of the generated scanner, as C string arrays.
+skel.h: scanner.skel mkskel.awk
+	awk -f mkskel.awk scanner.skel > $@.tmp
+	mv $@.tmp $@
+
+codegen.o: skel.h
+
 %.o: %.c
 ifdef NATIVE_BUILD
 	$(CC) $(CFLAGS) $(CFLAGS_LOCAL) -idirafter ../../include -c $< -o $@
@@ -34,7 +41,7 @@ else
 endif
 
 clean:
-	rm -f $(PROG) $(OBJS)
+	rm -f $(PROG) $(OBJS) skel.h skel.h.tmp
 
 install: $(PROG)
 	mkdir -p $(DESTDIR)$(BINDIR)
