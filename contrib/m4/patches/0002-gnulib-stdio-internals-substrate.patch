@@ -1,0 +1,73 @@
+Subject: gnulib stdio internals: add a Substrate branch
+
+fpending, fpurge, freading and freadahead peek inside FILE and #error
+on unknown platforms.  Substrate's FILE keeps write data in
+buffer..pos and read data in pos..limit, with rw_state recording which
+(1 read, 2 write) and has_unget flagging an ungetc byte.
+
+---
+--- a/lib/fpending.c	2026-09-27 23:30:21.824669476 -0500
++++ b/lib/fpending.c	2026-09-27 23:30:27.237678800 -0500
+@@ -56,6 +56,10 @@
+   return fp->__bufp - fp->__buffer;
+ #elif defined EPLAN9                 /* Plan9 */
+   return fp->wp - fp->buf;
++#elif defined __substrate__          /* Substrate */
++  /* Buffered output runs from buffer to pos while the buffer holds
++     write data (rw_state 2); a read buffer has nothing pending.  */
++  return fp->rw_state == 2 ? (size_t) (fp->pos - fp->buffer) : 0;
+ #else
+ # error "Please port gnulib fpending.c to your platform!"
+   return 1;
+--- a/lib/fpurge.c	2026-09-27 23:30:21.827669481 -0500
++++ b/lib/fpurge.c	2026-09-27 23:30:29.281682289 -0500
+@@ -142,6 +142,12 @@
+ # elif defined EPLAN9               /* Plan9 */
+   fp->rp = fp->wp = fp->lp = fp->buf;
+   return 0;
++# elif defined __substrate__        /* Substrate */
++  /* Drop read-ahead or pending output alike, and any ungetc byte.  */
++  fp->pos = fp->limit = fp->buffer;
++  fp->has_unget = 0;
++  fp->rw_state = 0;
++  return 0;
+ # else
+ #  error "Please port gnulib fpurge.c to your platform! Look at the definitions of fflush, setvbuf and ungetc on your system, then report this to bug-gnulib."
+ # endif
+--- a/lib/freading.c	2026-09-27 23:30:21.831669488 -0500
++++ b/lib/freading.c	2026-09-27 23:30:32.370687527 -0500
+@@ -21,6 +21,10 @@
+ 
+ #include "stdio-impl.h"
+ 
++#if defined __substrate__
++# include <fcntl.h>                  /* O_ACCMODE for the FILE flags */
++#endif
++
+ /* Don't use glibc's __freading function in glibc < 2.7, see
+    <https://sourceware.org/PR4359>  */
+ #if !(HAVE___FREADING && (!defined __GLIBC__ || defined __UCLIBC__ || __GLIBC__ > 2 || (__GLIBC__ == 2 && __GLIBC_MINOR__ >= 7)))
+@@ -72,6 +76,9 @@
+   if (fp->state == 0 /* CLOSED */ || fp->state == 4 /* WR */)
+     return 0;
+   return (fp->state == 3 /* RD */ && (fp->bufl == 0 || fp->rp < fp->wp));
++# elif defined __substrate__         /* Substrate */
++  /* Read-only, or the buffer holds read data (rw_state 1).  */
++  return (fp->flags & O_ACCMODE) == O_RDONLY || fp->rw_state == 1;
+ # else
+ #  error "Please port gnulib freading.c to your platform!"
+ # endif
+--- a/lib/freadahead.c	2026-09-27 23:30:21.835669495 -0500
++++ b/lib/freadahead.c	2026-09-27 23:30:34.589691265 -0500
+@@ -94,6 +94,11 @@
+   if (fp->state == 4 /* WR */ || fp->rp >= fp->wp)
+     return 0;
+   return fp->wp - fp->rp;
++#elif defined __substrate__          /* Substrate */
++  /* Read-ahead from pos to limit while the buffer holds read data
++     (rw_state 1), plus a pending ungetc byte.  */
++  return (fp->rw_state == 1 ? (size_t) (fp->limit - fp->pos) : 0)
++         + (fp->has_unget ? 1 : 0);
+ #elif defined SLOW_BUT_NO_HACKS     /* users can define this */
+   abort ();
+   return 0;

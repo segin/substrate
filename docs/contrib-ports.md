@@ -17,6 +17,8 @@ image.  This document catalogs the current set.
 
 - **GNU make 4.4.1** (`contrib/make/`)
 - **GNU sed 4.9** (`contrib/sed/`)
+- **GNU m4 1.4.21** (`contrib/m4/`) — gnulib stdio-internals and
+  locale-name branches for Substrate's `FILE` and C-only locale.
 - **OpenBSD expr** (`contrib/expr/`) — single-file BSD port alongside
   the OpenBSD `tr` port at `bin/tr/`.
 - **zsh 5.9** (`contrib/zsh/`) — the bash-equivalent shell.  System

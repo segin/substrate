@@ -1,0 +1,33 @@
+Subject: getlocalename_l-unsafe: add a Substrate branch
+
+Substrate declares locale_t but has neither newlocale nor
+LC_GLOBAL_LOCALE, so gnulib keeps the system locale_t and then
+#errors.  Only the C locale exists: define LC_GLOBAL_LOCALE and
+answer "C" for any locale_t.
+
+---
+--- a/lib/getlocalename_l-unsafe.c	2026-09-27 23:30:21.840669504 -0500
++++ b/lib/getlocalename_l-unsafe.c	2026-09-27 23:32:01.384786191 -0500
+@@ -34,6 +34,12 @@
+ #endif
+ #include "setlocale_null.h"
+ 
++#if defined __substrate__ && !defined LC_GLOBAL_LOCALE
++/* Substrate declares locale_t but has no newlocale/uselocale, so no
++   locale_t object other than the global one can exist.  */
++# define LC_GLOBAL_LOCALE ((locale_t) -1)
++#endif
++
+ #if (__GLIBC__ >= 2 && !defined __UCLIBC__) || (defined __linux__ && HAVE_LANGINFO_H) || defined __CYGWIN__
+ # include <langinfo.h>
+ #endif
+@@ -651,6 +657,9 @@
+         /* It's the "C" or "POSIX" locale.  */
+         return (struct string_with_storage) { "C", STORAGE_INDEFINITE };
+ # endif
++#elif defined __substrate__
++      /* Substrate has only the "C" locale.  */
++      return (struct string_with_storage) { "C", STORAGE_INDEFINITE };
+ #elif defined __ANDROID__
+       /* Android API level >= 21 */
+       struct __locale_t {
