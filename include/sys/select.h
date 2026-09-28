@@ -38,6 +38,15 @@
 #include <sys/cdefs.h>
 #include <sys/time.h>
 #include <sys/types.h>
+#include <stdint.h>
+
+/* POSIX: <sys/select.h> shall define sigset_t as described in <signal.h>
+ * (pselect() takes one).  Code such as readline's declares its select
+ * wrappers with a sigset_t after including only this header. */
+#ifndef __sigset_t_defined          /* same type as in <signal.h> */
+#define __sigset_t_defined 1
+typedef uint32_t sigset_t;
+#endif
 
 /*
  * Select uses bit masks of file descriptors in longs.

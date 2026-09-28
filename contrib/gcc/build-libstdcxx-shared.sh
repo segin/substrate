@@ -68,6 +68,9 @@ cp "$SUBSTRATE_TOP/include/termios.h"       "$FIXDIR/termios.h"
 cp "$SUBSTRATE_TOP/include/stdlib.h"        "$FIXDIR/stdlib.h"
 # string.h now includes <strings.h> (bcopy/bzero/index for old code).
 cp "$SUBSTRATE_TOP/include/string.h"        "$FIXDIR/string.h"
+# sys/select.h defines sigset_t (POSIX), guarded against signal.h's.
+cp "$SUBSTRATE_TOP/include/signal.h"        "$FIXDIR/signal.h"
+cp "$SUBSTRATE_TOP/include/sys/select.h"    "$FIXDIR/sys/select.h"
 
 # Toplevel reconfigure.  Compared to build.sh stage 1 we drop
 # --disable-libstdcxx and --disable-shared so libstdc++-v3 actually

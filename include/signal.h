@@ -64,7 +64,10 @@ typedef void (*sighandler_t)(int);
 #define SIG_IGN ((sighandler_t)1)
 #define SIG_ERR ((sighandler_t)-1)
 
+#ifndef __sigset_t_defined          /* <sys/select.h> defines it too */
+#define __sigset_t_defined 1
 typedef uint32_t sigset_t;
+#endif
 
 #ifndef __sigval_t_defined
 #define __sigval_t_defined 1
