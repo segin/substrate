@@ -21,6 +21,11 @@ image.  This document catalogs the current set.
   locale-name branches for Substrate's `FILE` and C-only locale.
 - **flex 2.6.4** (`contrib/flex/`) — also `lex`, `libfl` and
   `FlexLexer.h`; runs `/usr/bin/m4` at scanner-generation time.
+- **GNU Autoconf 2.73** (`contrib/autoconf/`), **GNU Automake 1.18.1**
+  (`contrib/automake/`), **GNU Libtool 2.6.2** (`contrib/libtool/`) —
+  regenerate configure scripts natively (`autoreconf -fi`); their
+  config.guess/config.sub know substrate and libtool.m4 builds shared
+  libraries on it.
 - **OpenBSD expr** (`contrib/expr/`) — single-file BSD port alongside
   the OpenBSD `tr` port at `bin/tr/`.
 - **zsh 5.9** (`contrib/zsh/`) — the bash-equivalent shell.  System
