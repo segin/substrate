@@ -1,6 +1,6 @@
 # mkskel.awk - turn scanner.skel into skel.h.
 #
-# Each "%% section NAME" part becomes
+# Each "%% section NAME" part, up to the next one, becomes
 #     static const char *const skel_NAME[] = { "line", ..., NULL };
 # Other lines starting with "%%" are comments and are dropped.
 
@@ -23,7 +23,6 @@ function close_section() {
 }
 
 /^%%/ {
-    close_section()
     next
 }
 

@@ -64,18 +64,31 @@ void yymore(void) { yy_more_flag = 1; }
   *yy_c_buf_p = '\0'; \
 } while(0)
 
+%% While an action runs, the byte after the match (at yy_c_buf_p) is
+%% overwritten by yytext's terminating NUL and kept in yy_hold_char, to
+%% be put back when the action returns.  input() and unput() must go
+%% through yy_hold_char for that one position.
 int input(void) {
-  if (yy_cp && yy_cp < yy_buf + yy_buf_len) return (unsigned char)*yy_cp++;
-  if (yy_get_next_buffer()) {
+  int c;
+  if (!yy_cp || yy_cp >= yy_buf + yy_buf_len) {
+    if (!yy_get_next_buffer()) return EOF;
     if (!yy_cp) yy_cp = yy_buf + yy_buf_len - 1;
-    return (unsigned char)*yy_cp++;
+    if (yy_cp == yy_c_buf_p) {
+      yy_hold_char = *yy_cp;
+      *yy_cp = '\0';
+    }
   }
-  return EOF;
+  c = (yy_cp == yy_c_buf_p) ? (unsigned char)yy_hold_char : (unsigned char)*yy_cp;
+  yy_cp++;
+  return c;
 }
 
 void unput(int c) {
   if (yy_cp && yy_cp > yy_buf) {
-    *--yy_cp = (char)c;
+    if (--yy_cp == yy_c_buf_p)
+      yy_hold_char = (char)c;
+    else
+      *yy_cp = (char)c;
   } else {
     ungetc(c, yyin);
   }
