@@ -1,0 +1,144 @@
+.TH MKTEMP 1 2026-09-28 "Substrate" "User Commands"
+.SH NAME
+mktemp \- create a temporary file or directory
+.SH SYNOPSIS
+.B mktemp
+.RB [ \-dqu ]
+.RB [ \-p
+.IR dir ]
+.RB [ \-t ]
+.RI [ template ]
+.SH DESCRIPTION
+.B mktemp
+creates a file, or with
+.B \-d
+a directory, whose name is
+.I template
+with its trailing run of
+.B X
+characters replaced by random letters and digits, and writes the name
+to standard output.
+The template must end in at least three
+.BR X s;
+more make collisions less likely.
+.PP
+The file is created with mode 0600 and the directory with mode 0700,
+both owned by the caller, and creation is exclusive: an existing name
+is never reused.
+If a generated name exists, another is tried.
+.PP
+With no
+.IR template ,
+.B mktemp
+uses
+.B tmp.XXXXXXXXXX
+in the directory named by
+.BR TMPDIR ,
+or
+.B /tmp
+if
+.B TMPDIR
+is unset or empty.
+Otherwise the template is taken as given, relative to the current
+directory, unless
+.B \-p
+or
+.B \-t
+is used.
+.SH OPTIONS
+.TP
+.B \-d
+Create a directory instead of a file.
+.TP
+.BI \-p " dir"
+Create the name in
+.IR dir .
+If
+.I dir
+is empty,
+.B TMPDIR
+or
+.B /tmp
+is used.
+.TP
+.B \-q
+Fail silently: print no error messages.
+.TP
+.B \-t
+Create the name in
+.B TMPDIR
+if it is set and non-empty, else in the
+.B \-p
+directory, else in
+.BR /tmp .
+.TP
+.B \-u
+Unsafe: print a name that did not exist when it was checked, but
+create nothing.
+Another process can take the name before the caller uses it; prefer
+creating the file with
+.B mktemp
+itself.
+.PP
+With
+.B \-p
+or
+.BR \-t ,
+.I template
+must be a single name component, without
+.BR / .
+.SH EXIT STATUS
+.TP
+.B 0
+The file or directory was created (or, with
+.BR \-u ,
+a name was found) and its name printed.
+.TP
+.B 1
+An option or the template was invalid, the file or directory could not
+be created, or no unused name was found.
+.SH ENVIRONMENT
+.TP
+.B TMPDIR
+Directory for the default template,
+.BR \-t ,
+and an empty
+.B \-p
+argument.
+.SH EXAMPLES
+Use a scratch file and remove it when the script exits:
+.PP
+.EX
+tmp=$(mktemp) || exit 1
+trap 'rm \-f "$tmp"' EXIT
+sort data > "$tmp"
+.EE
+.PP
+Create a scratch directory named after the script:
+.PP
+.EX
+dir=$(mktemp \-d \-t myscript.XXXXXX) || exit 1
+.EE
+.SH SEE ALSO
+.BR mkdir (1),
+.BR mkdtemp (3),
+.BR mkstemp (3),
+.BR tmpfile (3)
+.SH STANDARDS
+.B mktemp
+is not in POSIX.
+This implementation follows GNU coreutils: the default template, at
+least three
+.BR X s,
+and the
+.BR \-d ,
+.BR \-p ,
+.BR \-q ,
+.B \-t
+and
+.B \-u
+options.
+Unlike the BSD
+.BR mktemp ,
+.B \-t
+takes no prefix argument, and only one template is accepted.

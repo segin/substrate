@@ -249,6 +249,7 @@ sbin/*/*
 /usr.bin/slex/skel.h
 /usr.bin/slex/out.txt
 /usr.bin/slex/test_posix
+/usr.bin/mktemp/mktemp
 /usr.bin/nm/nm
 /usr.bin/pax/pax
 /usr.bin/pr/pr
