@@ -59,6 +59,7 @@ rm -rf "${DESTDIR}"; mkdir -p "${DESTDIR}"
 make install DESTDIR="${DESTDIR}"
 # POSIX lex, as most distributions ship it.
 ln -sf flex "${DESTDIR}/usr/bin/lex"
+printf '.so man1/flex.1\n' > "${DESTDIR}/usr/share/man/man1/lex.1"
 find "${DESTDIR}" -name '*.la' -delete
 
 echo "==> Done.  Staged at ${DESTDIR}/usr/bin/flex"
