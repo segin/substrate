@@ -1,0 +1,30 @@
+Subject: config.sub, config.guess: recognise substrate
+
+config.sub accepts substrate as an OS name, and config.guess maps
+`uname -s` = Substrate to MACHINE-unknown-substrate, so configure
+scripts run natively on substrate can guess their build triple.
+These are the copies autoreconf -i installs into a package.
+
+---
+--- a/build-aux/config.sub	2026-09-27 23:53:49.191184751 -0500
++++ b/build-aux/config.sub	2026-09-27 23:53:52.469150787 -0500
+@@ -2115,6 +2115,7 @@
+ 	| solidbsd* \
+ 	| sortix* \
+ 	| storm-chaos* \
++	| substrate* \
+ 	| sunos \
+ 	| sunos[34]* \
+ 	| superux* \
+--- a/build-aux/config.guess	2026-09-27 23:53:49.194184720 -0500
++++ b/build-aux/config.guess	2026-09-27 23:53:56.077113599 -0500
+@@ -1427,6 +1427,9 @@
+     *:Haiku:*:*)	# Haiku modern gcc (not bound by BeOS compat)
+ 	GUESS=$UNAME_MACHINE-unknown-haiku
+ 	;;
++    *:Substrate:*:*)
++	GUESS=$UNAME_MACHINE-unknown-substrate
++	;;
+     SX-4:SUPER-UX:*:*)
+ 	GUESS=sx4-nec-superux$UNAME_RELEASE
+ 	;;
