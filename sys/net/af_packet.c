@@ -144,7 +144,7 @@ static int afpkt_install_fd(afpkt_sock_t *s) {
     file_t *f = file_alloc();
     if (!f) { proc_clear_fd(current_process, fd); return -1; }
     memset(f, 0, sizeof(*f));
-    s->node.flags = FS_FILE;
+    s->node.flags = FS_SOCKET;   /* S_IFSOCK for fstat, ESPIPE for lseek */
     s->node.mask  = 0666;
     s->node.read  = afpkt_node_read;
     s->node.write = afpkt_node_write;

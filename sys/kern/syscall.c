@@ -1138,6 +1138,12 @@ int64_t sys_lseek(int fd, uint32_t off_lo, uint32_t off_hi, int w) {
         f->f_type == DTYPE_KQUEUE) {
         return -ESPIPE;
     }
+    /* Sockets are DTYPE_VNODE files, so check the node type too (as fstat
+     * and fsync do). */
+    if (f->f_data) {
+        uint32_t ftype = ((fs_node_t *)f->f_data)->flags & 0x7;
+        if (ftype == FS_PIPE || ftype == FS_SOCKET) return -ESPIPE;
+    }
 
     off_t off = ((off_t)off_hi << 32) | off_lo;
 

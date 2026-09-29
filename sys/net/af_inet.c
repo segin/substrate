@@ -1153,7 +1153,9 @@ static int afi_install_fd(afi_sock_t *s) {
     file_t *f = file_alloc();
     if (!f) { proc_clear_fd(current_process, fd); return -1; }
     memset(f, 0, sizeof(*f));
-    s->node.flags = FS_FILE;
+    /* FS_SOCKET, as af_unix does: fstat() must say S_IFSOCK and lseek()
+     * ESPIPE.  FS_FILE made a TCP socket look like a seekable file. */
+    s->node.flags = FS_SOCKET;
     s->node.mask  = 0666;
     s->node.read  = afinet_node_read;
     s->node.write = afinet_node_write;
