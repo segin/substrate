@@ -38,14 +38,20 @@ while :; do
     rm -f /tmp/.X0-lock /tmp/.X11-unix/X0 2>/dev/null
     mkdir -p /tmp/.X11-unix
 
-    Xfbdev -ac -retro -noreset -dumbSched vt1 "$DISP" > /var/log/xlog.txt 2>&1 &
+    # A non-interactive shell starts `&` commands with SIGINT and SIGQUIT
+    # ignored, and the X server, greeter and every session they start
+    # would inherit that -- Ctrl-C could not interrupt anything run from
+    # an X terminal.  Restore the defaults in each child before exec; the
+    # subshell execs, so $! is still the program's own pid.
+    ( trap - INT QUIT; exec Xfbdev -ac -retro -noreset -dumbSched vt1 "$DISP" ) \
+        > /var/log/xlog.txt 2>&1 &
     XPID=$!
 
     # sgreet retries XOpenDisplay for ~10s, so it tolerates a slow start.
     # It runs in the background and we wait for it: a trap runs only once
     # a foreground command ends, which for the greeter means when the
     # user's session does, but `wait` is cut short by the signal.
-    DISPLAY="$DISP" "$SGREET" &
+    ( trap - INT QUIT; DISPLAY="$DISP" exec "$SGREET" ) &
     GPID=$!
     wait "$GPID"
     GPID=
