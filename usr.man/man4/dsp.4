@@ -1,4 +1,4 @@
-.TH DSP 4 "2026-06-30" "Substrate Kernel" "Kernel Interfaces"
+.TH DSP 4 "2026-09-29" "Substrate Kernel" "Kernel Interfaces"
 .SH NAME
 dsp \- OSS (Open Sound System) audio device interface
 .SH SYNOPSIS
@@ -81,7 +81,22 @@ formats map onto the framework encodings as follows:
 .IP \(bu 4
 .B AFMT_A_LAW
 \(em 8-bit A-law.
+.IP \(bu 4
+.BR AFMT_U16_LE ", " AFMT_U16_BE
+\(em unsigned 16-bit.
+.IP \(bu 4
+.B AFMT_S24_PACKED
+\(em signed 24-bit little-endian, three bytes per sample.
+.IP \(bu 4
+.BR AFMT_S32_LE ", " AFMT_S32_BE
+\(em signed 32-bit.
 .RE
+.PP
+Every format, channel count (1 to 8) and rate (4000 to 192000 Hz) is
+accepted whatever the hardware plays; the framework converts the stream,
+downmixing and resampling as needed.  See
+.BR audio (4)
+for how.
 .SS Cross-personality Dispatch
 OSS programs from different operating-system personalities encode
 .B SNDCTL_DSP_*
@@ -99,7 +114,8 @@ personality's OSS ioctls reach the correct handler.
 .B SNDCTL_DSP_SPEED
 Set the sample rate (arg: pointer to
 .BR int ).
-The actual rate the hardware accepted is written back.
+The rate set is written back; any rate in range is kept, and resampled
+if the hardware runs at another.
 .TP
 .B SNDCTL_DSP_SETFMT
 Set the sample format to one of the
@@ -123,7 +139,8 @@ formats.
 Fill a
 .B struct audio_buf_info
 describing the playback FIFO's free space (fragment size, total
-fragments, free fragments, free bytes).
+fragments, free fragments, free bytes).  Sizes are in bytes of the
+format the program writes, not the converted stream the hardware plays.
 .TP
 .B SNDCTL_DSP_GETISPACE
 Fill a

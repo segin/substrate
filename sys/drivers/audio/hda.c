@@ -2746,6 +2746,11 @@ static int hda_attach(pci_device_t *pdev)
 
 	d->audio.ops = &hda_ops;
 	d->audio.driver_data = d;
+	/* The output DAC is at least stereo: a mono stream would play on
+	 * the left only, so the framework duplicates it instead.  More than
+	 * the converter's channel count is folded down to stereo. */
+	d->audio.hw_chan_min = 2;
+	d->audio.hw_chan_max = d->dac_max_chan ? d->dac_max_chan : 2;
 	snprintf(d->audio.name, sizeof(d->audio.name), "hda");
 	if (audio_register_device(&d->audio) != 0) {
 		hda_detach_partial(d);

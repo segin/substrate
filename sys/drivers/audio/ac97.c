@@ -466,10 +466,15 @@ static int ac97_set_params(audio_dev_t *adev, audio_info_t *info)
 		kprintf("ac97: WARN: rate %u Hz rejected (wrote 0x%04x, "
 		        "readback 0x%04x); falling back to codec rate\n",
 		        info->play.sample_rate, enc, back);
-		/* Report back what the codec accepted so audio_info matches
-		 * reality. */
-		info->play.sample_rate = back;
 	}
+	/*
+	 * Report the rate the DAC actually runs at -- the codec's readback,
+	 * which also covers ac97_encode_rate() having capped the request at
+	 * 48 kHz or pinned it there for a codec without VRA.  The framework
+	 * resamples to it; leaving the requested rate here would play a
+	 * 96 kHz stream at half speed.
+	 */
+	info->play.sample_rate = back;
 
 	ac97_mixer_write(d, AC97_PCM_LR_ADC_RATE,
 	                 ac97_encode_rate(info->record.sample_rate, d->has_vra));
@@ -958,6 +963,9 @@ static int ac97_attach(pci_device_t *pdev)
 	/* Hand off to the audio framework. */
 	d->audio.ops = &ac97_ops;
 	d->audio.driver_data = d;
+	/* PCM out is interleaved stereo, whatever the stream says. */
+	d->audio.hw_chan_min = 2;
+	d->audio.hw_chan_max = 2;
 	snprintf(d->audio.name, sizeof(d->audio.name), "ac97");
 	if (audio_register_device(&d->audio) != 0) {
 		dma_free_coherent(d->chunk_buf, d->chunk_count * AC97_CHUNK_BYTES);

@@ -321,7 +321,8 @@ static int sb16_write(audio_dev_t *adev, const void *buf, size_t len)
 	sb16_program_dma16(d, copy_len);
 
 	samples = (uint16_t)((copy_len / 2) - 1);
-	mode = sb16_play_mode(d->audio.current.play.channels, 1);
+	/* What the framework hands us, not what the application wrote. */
+	mode = sb16_play_mode(d->audio.hw_play.channels, 1);
 
 	sb16_dsp_write(d, SB16_DSP_PLAY_16BIT);
 	sb16_dsp_write(d, mode);
@@ -427,6 +428,9 @@ void sb16_init(void)
 
 	d->audio.ops = &sb16_ops;
 	d->audio.driver_data = d;
+	/* The DSP plays mono or stereo; anything wider is downmixed. */
+	d->audio.hw_chan_min = 1;
+	d->audio.hw_chan_max = 2;
 	snprintf(d->audio.name, sizeof(d->audio.name), "sb16");
 	if (audio_register_device(&d->audio) != 0) {
 		return;

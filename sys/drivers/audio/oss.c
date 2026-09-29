@@ -49,6 +49,12 @@ static int oss_afmt_to_encoding(int afmt, uint32_t *enc, uint32_t *prec)
 	case AFMT_S8:     *enc = AUDIO_ENCODING_SLINEAR;    *prec = 8;  return 0;
 	case AFMT_MU_LAW: *enc = AUDIO_ENCODING_ULAW;       *prec = 8;  return 0;
 	case AFMT_A_LAW:  *enc = AUDIO_ENCODING_ALAW;       *prec = 8;  return 0;
+	case AFMT_U16_LE: *enc = AUDIO_ENCODING_ULINEAR_LE; *prec = 16; return 0;
+	case AFMT_U16_BE: *enc = AUDIO_ENCODING_ULINEAR_BE; *prec = 16; return 0;
+	case AFMT_S24_PACKED:
+			  *enc = AUDIO_ENCODING_SLINEAR_LE; *prec = 24; return 0;
+	case AFMT_S32_LE: *enc = AUDIO_ENCODING_SLINEAR_LE; *prec = 32; return 0;
+	case AFMT_S32_BE: *enc = AUDIO_ENCODING_SLINEAR_BE; *prec = 32; return 0;
 	default:          return -EINVAL;
 	}
 }
@@ -58,15 +64,25 @@ static int oss_encoding_to_afmt(uint32_t enc, uint32_t prec)
 {
 	switch (enc) {
 	case AUDIO_ENCODING_SLINEAR_LE:
-	case AUDIO_ENCODING_PCM16:
-		return AFMT_S16_LE;
-	case AUDIO_ENCODING_SLINEAR_BE:
-		return AFMT_S16_BE;
 	case AUDIO_ENCODING_SLINEAR:
-		return (prec == 8) ? AFMT_S8 : AFMT_S16_LE;
-	case AUDIO_ENCODING_ULINEAR:
+	case AUDIO_ENCODING_PCM16:
+		switch (prec) {
+		case 8:  return AFMT_S8;
+		case 24: return AFMT_S24_PACKED;
+		case 32: return AFMT_S32_LE;
+		default: return AFMT_S16_LE;
+		}
+	case AUDIO_ENCODING_SLINEAR_BE:
+		switch (prec) {
+		case 8:  return AFMT_S8;
+		case 32: return AFMT_S32_BE;
+		default: return AFMT_S16_BE;
+		}
 	case AUDIO_ENCODING_ULINEAR_LE:
+	case AUDIO_ENCODING_ULINEAR:
+		return (prec == 16) ? AFMT_U16_LE : AFMT_U8;
 	case AUDIO_ENCODING_ULINEAR_BE:
+		return (prec == 16) ? AFMT_U16_BE : AFMT_U8;
 	case AUDIO_ENCODING_PCM8:
 		return AFMT_U8;
 	case AUDIO_ENCODING_ULAW:
@@ -78,30 +94,19 @@ static int oss_encoding_to_afmt(uint32_t enc, uint32_t prec)
 	}
 }
 
-/* The formats the framework can validate and a backend can play. */
+/* The formats the framework converts for every backend. */
 #define OSS_SUPPORTED_FMTS \
-	(AFMT_S16_LE | AFMT_S16_BE | AFMT_U8 | AFMT_S8 | AFMT_MU_LAW | AFMT_A_LAW)
+	(AFMT_S16_LE | AFMT_S16_BE | AFMT_U8 | AFMT_S8 | AFMT_MU_LAW | \
+	 AFMT_A_LAW | AFMT_U16_LE | AFMT_U16_BE | AFMT_S24_PACKED | \
+	 AFMT_S32_LE | AFMT_S32_BE)
 
 /* ----------------------------------------------------------------- */
-/* Apply helper — mirrors AUDIO_SETINFO: validate, set_params, store */
+/* Apply helper — the same path as AUDIO_SETINFO                     */
 /* ----------------------------------------------------------------- */
 
 static int oss_apply(audio_dev_t *dev, audio_info_t *merged)
 {
-	int rc;
-
-	rc = audio_validate_info(merged);
-	if (rc != 0) {
-		return rc;
-	}
-	if (dev->ops != NULL && dev->ops->set_params != NULL) {
-		rc = dev->ops->set_params(dev, merged);
-		if (rc != 0) {
-			return rc;
-		}
-	}
-	dev->current = *merged;
-	return 0;
+	return audio_apply_info(dev, merged);
 }
 
 /* ----------------------------------------------------------------- */
@@ -115,10 +120,13 @@ static void oss_get_ospace(audio_dev_t *dev, audio_buf_info *bi)
 	if (dev->ops != NULL && dev->ops->get_ospace != NULL &&
 	    dev->ops->get_ospace(dev, &fragsize, &fragstotal,
 				 &fragments, &bytes) == 0) {
-		bi->fragsize   = fragsize;
+		/* The backend counts converted bytes; the caller writes its
+		 * own format, which may be wider, narrower or at a different
+		 * rate. */
+		bi->fragsize   = audio_hw_to_app_bytes(dev, fragsize);
 		bi->fragstotal = fragstotal;
 		bi->fragments  = fragments;
-		bi->bytes      = bytes;
+		bi->bytes      = audio_hw_to_app_bytes(dev, bytes);
 		return;
 	}
 
@@ -362,6 +370,7 @@ int oss_ioctl_dispatch(audio_dev_t *dev, uint32_t request, void *arg)
 			if (v < 0) {
 				v = 0;
 			}
+			v = audio_hw_to_app_bytes(dev, v);
 		}
 		if (arg == NULL || copyout(&v, arg, sizeof(v)) != 0) {
 			return -EFAULT;

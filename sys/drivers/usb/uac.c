@@ -323,10 +323,9 @@ static int uac_set_params(audio_dev_t *adev, audio_info_t *info)
 		              ((uint64_t)AUDIO_MAX_GAIN * AUDIO_MAX_GAIN));
 	}
 	/* Report the accepted source rate back; we resample it to 48 kHz. */
-	adev->current.play.sample_rate = rate;
-	adev->current.play.channels    = 2;
-	adev->current.play.precision   = 16;
-	adev->current.play.encoding    = AUDIO_ENCODING_SLINEAR_LE;
+	if (info) {
+		info->play.sample_rate = rate;
+	}
 	return 0;
 }
 
@@ -706,6 +705,9 @@ static int uac_attach(usb_device_t *dev)
 	         "USB Audio %04x:%04x", dev->vendor_id, dev->product_id);
 	d->audio.ops         = &uac_ops;
 	d->audio.driver_data = d;
+	/* The isochronous path carries S16 stereo only. */
+	d->audio.hw_chan_min = 2;
+	d->audio.hw_chan_max = 2;
 	d->audio.current.mode = AUMODE_PLAY;
 	d->audio.current.play.sample_rate = UAC_RATE_HZ;
 	d->audio.current.play.channels    = 2;

@@ -1,4 +1,4 @@
-.TH AUDIO 4 "2026-08-09" "Substrate Kernel" "Kernel Interfaces"
+.TH AUDIO 4 "2026-09-29" "Substrate Kernel" "Kernel Interfaces"
 .SH NAME
 audio, audioctl \- Substrate audio device interface
 .SH SYNOPSIS
@@ -45,32 +45,71 @@ registered when the first audio device appears.  Most userland
 .B /dev/audio
 without a unit suffix.
 .SS Sample Format
-The default and native framework format is signed 16-bit linear
+The default format is signed 16-bit little-endian linear
 .RB ( AUDIO_ENCODING_SLINEAR_LE ),
-stereo.  Sample rate, channel count, precision, and encoding are
-negotiated per device with
-.BR AUDIO_SETINFO ;
-a backend may clamp the request to what the hardware supports and report
-the effective values back through
-.BR AUDIO_GETINFO .
+stereo, 44.1 kHz.  An application may select, with
+.BR AUDIO_SETINFO :
+.IP \(bu 4
+any linear encoding
+.RB ( SLINEAR ,
+.BR SLINEAR_LE ,
+.BR SLINEAR_BE ,
+.BR ULINEAR ,
+.BR ULINEAR_LE ,
+.BR ULINEAR_BE )
+at a precision of 8, 16, 24 or 32 bits \(em 24-bit samples are packed,
+three bytes each;
+.IP \(bu 4
+.BR AUDIO_ENCODING_ULAW " or " AUDIO_ENCODING_ALAW
+(8-bit G.711),
+.BR AUDIO_ENCODING_PCM8
+(unsigned 8-bit) or
+.BR AUDIO_ENCODING_PCM16
+(signed 16-bit);
+.IP \(bu 4
+1 to 8 channels;
+.IP \(bu 4
+a sample rate from 4000 to 192000 Hz.
 .PP
-Backends only ever receive signed 16-bit little-endian PCM.  The
-framework converts anything else on the way through:
-.B AUDIO_ENCODING_ULAW
-and
-.B AUDIO_ENCODING_ALAW
-are expanded per G.711,
-.BR AUDIO_ENCODING_PCM8 " and the " ULINEAR
-variants are recentred on zero and widened, and
-.B AUDIO_ENCODING_SLINEAR_BE
-is byte-swapped.  Because the 8-bit encodings widen to 16, the hardware
-is programmed for 16-bit even when the application selected 8 \(em which
-is also what lets those encodings play on codecs that offer no 8-bit
-format at all.
-.BR AUDIO_GETINFO
-reports the encoding and precision the application asked for, not the
-converted ones.  A stream that is already signed 16-bit little-endian is
-passed to the backend untouched.
+Whatever the hardware can play, the request is accepted, and
+.B AUDIO_GETINFO
+reports it back as asked: the framework converts every stream to the
+format the backend is programmed for, which is signed 16-bit
+little-endian PCM at a channel count and rate the hardware accepts.
+.TP
+.B Sample width
+Each sample is scaled to 32 bits, mixed and resampled at that width, and
+rounded to 16 bits last, clipping at full scale.  G.711 is expanded,
+unsigned encodings are recentred on zero, and big-endian ones are
+byte-swapped.
+.TP
+.B Channels
+When the hardware takes fewer channels than the stream has, the stream is
+downmixed.  Multichannel frames are read in the order SDL, WAVE and ALSA
+use: front left, front right, centre, LFE, then the rear or side pairs
+(3 channels: FL FR LFE; 4: FL FR BL BR; 5: FL FR LFE BL BR;
+6: FL FR FC LFE BL BR; 7: FL FR FC LFE BC SL SR;
+8: FL FR FC LFE BL BR SL SR).  Folding to stereo keeps each side's
+channels on their side and puts the centre and back centre on both, all
+at \-3 dB relative to the fronts; LFE is dropped.  The mix is normalised
+so that full scale on every channel is full scale out, and cannot clip.
+Stereo to mono averages the two channels; a mono stream is played on
+every speaker.
+.TP
+.B Sample rate
+When the hardware cannot run at the stream's rate \(em an AC'97 codec
+tops out at 48 kHz, and one without variable-rate audio runs only at
+48 kHz \(em the stream is resampled to the rate the hardware reports:
+downsampled by averaging the input frames that fall in each output
+frame, which keeps most aliasing out of the audible band, and upsampled
+by linear interpolation.
+.PP
+A stream already in the backend's format is passed to it untouched.  A
+.BR write (2)
+that ends part-way through a frame is taken whole; the partial frame is
+completed by the next write.
+.BR AUDIO_FLUSH ,
+a format change and the last close discard it.
 .SS Exclusive Access
 Playback is exclusive.  The per-device software FIFO and DMA path are
 single-producer; if two processes wrote concurrently the FIFO would

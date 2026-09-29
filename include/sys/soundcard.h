@@ -62,6 +62,9 @@
 #define AFMT_U16_BE     0x00000100
 #define AFMT_MPEG       0x00000200
 #define AFMT_AC3        0x00000400
+#define AFMT_S32_LE     0x00001000   /* signed 32-bit little-endian   */
+#define AFMT_S32_BE     0x00002000   /* signed 32-bit big-endian      */
+#define AFMT_S24_PACKED 0x00040000   /* signed 24-bit LE, 3 bytes     */
 
 /* ------------------------------------------------------------------- */
 /* SNDCTL_DSP_GETOSPACE / GETISPACE payload                            */

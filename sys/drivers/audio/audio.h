@@ -23,16 +23,34 @@
 #define AUDIO_DEFAULT_LOWAT      4U
 
 /*
- * Staging buffer for encoding conversion.  Backends are handed signed
- * 16-bit little-endian PCM whatever the application wrote, so anything
- * else is translated on the way through.  The worst case is a companded
- * or 8-bit unsigned stream, which doubles in size, hence the 2:1 ratio
- * between these two.
+ * Format conversion.  Backends are handed signed 16-bit little-endian PCM
+ * at a channel count and rate they accepted, whatever the application
+ * wrote; the framework converts sample width, channel count and rate on
+ * the way through.  AUDIO_CONV_OUT is the staging buffer the converted
+ * stream is collected in before it goes to the backend.
  */
-#define AUDIO_CONV_IN            2048U
-#define AUDIO_CONV_OUT           (AUDIO_CONV_IN * 2U)
+#define AUDIO_MAX_CHANNELS       8U
+#define AUDIO_MAX_FRAME          (AUDIO_MAX_CHANNELS * 4U) /* 8 ch x 32-bit */
+#define AUDIO_CONV_OUT           4096U
 
 struct audio_dev;
+
+/*
+ * Streaming conversion state.  A write may end mid-frame, the resampler
+ * carries the previous frame and a phase from one write to the next, and
+ * the downsampler carries a partial average; all of it belongs to the
+ * current format and is reset whenever the format changes or playback is
+ * flushed.
+ */
+typedef struct audio_conv {
+	uint8_t  carry[AUDIO_MAX_FRAME]; /* partial input frame */
+	uint32_t carry_len;
+	int32_t  prev[AUDIO_MAX_CHANNELS];  /* upsampler: previous frame */
+	int64_t  acc[AUDIO_MAX_CHANNELS];   /* downsampler: running sum */
+	uint32_t acc_n;
+	uint32_t phase;                     /* Q16, see audio_conv_frame() */
+	int      primed;
+} audio_conv_t;
 
 typedef struct audio_dev_ops {
 	/*
@@ -136,33 +154,69 @@ typedef struct audio_dev {
 	 */
 	void            *play_owner;
 	/*
-	 * Encoding-conversion staging.  Only touched by the exclusive
+	 * Channel counts the backend can take, set by the driver before
+	 * audio_register_device(); 0 means no fixed limit, in which case
+	 * set_params() is asked.  AC'97 and USB audio are 2/2: they play
+	 * interleaved stereo whatever they are told.
+	 */
+	uint32_t         hw_chan_min;
+	uint32_t         hw_chan_max;
+	/*
+	 * The playback format the backend is actually programmed for: signed
+	 * 16-bit LE at the channel count and rate set_params() accepted.
+	 * `current.play` keeps the application's format; the framework
+	 * converts between the two.
+	 */
+	audio_prinfo_t   hw_play;
+	/*
+	 * Conversion state and staging.  Only touched by the exclusive
 	 * playback owner (see play_owner), so no additional locking.
 	 */
+	audio_conv_t     conv;
 	uint8_t          conv_buf[AUDIO_CONV_OUT];
 	struct audio_dev *next;
 } audio_dev_t;
 
 /*
- * Translate a requested playback format into the one the backend is
- * actually programmed for.  Backends only ever see signed 16-bit
- * little-endian PCM (or the caller's format unchanged when it already is
- * that), so companded and unsigned and big-endian streams are converted
- * by the framework rather than handed to hardware that cannot render
- * them.  Exposed for tests.
+ * The format a backend is programmed for, before channel and rate
+ * negotiation: `sw` with the encoding and precision replaced by signed
+ * 16-bit little-endian, which is all any backend is ever sent.  Exposed
+ * for tests.
  */
 void audio_hw_prinfo(const audio_prinfo_t *sw, audio_prinfo_t *hw);
 
 /*
- * Convert up to `in_len` bytes of `enc`/`prec` PCM into signed 16-bit
- * little-endian in `out`, returning the number of output bytes.  `out`
- * must have room for in_len * audio_conv_ratio(enc, prec) bytes.
+ * Validate `info`, program the backend for it (negotiating a channel
+ * count and rate the backend accepts), and make it the device's current
+ * format.  Shared by AUDIO_SETINFO and the OSS frontend.  Returns 0 or
+ * -errno; on failure the device is unchanged.
  */
-size_t audio_convert(uint32_t enc, uint32_t prec, const uint8_t *in,
-		     size_t in_len, uint8_t *out);
+int audio_apply_info(audio_dev_t *dev, audio_info_t *info);
 
-/* Output bytes produced per input byte: 2 for 8-bit sources, else 1. */
-unsigned audio_conv_ratio(uint32_t enc, uint32_t prec);
+/* Bytes per frame of a play/record format. */
+uint32_t audio_frame_bytes(const audio_prinfo_t *p);
+
+/*
+ * Convert one application frame (`sw` format) and append the resulting
+ * backend frames (`hw` format: signed 16-bit LE) to `out`.  Returns the
+ * bytes written, at most audio_conv_burst(sw, hw).  `st` carries the
+ * resampler between calls.
+ */
+size_t audio_conv_frame(audio_conv_t *st, const audio_prinfo_t *sw,
+			const audio_prinfo_t *hw, const uint8_t *frame,
+			uint8_t *out);
+
+/* Most bytes audio_conv_frame() can produce from one input frame. */
+size_t audio_conv_burst(const audio_prinfo_t *sw, const audio_prinfo_t *hw);
+
+/* Forget any partial frame and resampler history. */
+void audio_conv_reset(audio_conv_t *st);
+
+/*
+ * Scale a byte count in the backend's format to the application's, for
+ * buffer-space reports (OSS GETOSPACE / GETODELAY).
+ */
+int audio_hw_to_app_bytes(const audio_dev_t *dev, int hw_bytes);
 
 void audio_init(void);
 int  audio_register_device(audio_dev_t *dev);

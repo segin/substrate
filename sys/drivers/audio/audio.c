@@ -139,21 +139,21 @@ static int audio_validate_prinfo(audio_prinfo_t *p)
 		return -EINVAL;
 	}
 	/* Channels: 1, 2, or up to 8 (multichannel). */
-	if (p->channels == 0 || p->channels > 8) {
+	if (p->channels == 0 || p->channels > AUDIO_MAX_CHANNELS) {
 		return -EINVAL;
 	}
 	/* Sample rate: clamp to a sane range. */
 	if (p->sample_rate < 4000 || p->sample_rate > 192000) {
 		return -EINVAL;
 	}
-	/* Precision must match encoding's natural width to keep the
-	 * framework simple — backends that genuinely support oddball
-	 * combinations can override in set_params. */
+	/*
+	 * Linear PCM may be 8, 16, 24 (packed, three bytes) or 32 bits wide;
+	 * the framework converts every width to what the backend plays.  The
+	 * companded encodings and the fixed-width PCM8/PCM16 aliases have
+	 * exactly one width.
+	 */
 	switch (p->encoding) {
 	case AUDIO_ENCODING_PCM8:
-	case AUDIO_ENCODING_ULINEAR_LE:
-	case AUDIO_ENCODING_ULINEAR_BE:
-	case AUDIO_ENCODING_ULINEAR:
 	case AUDIO_ENCODING_ULAW:
 	case AUDIO_ENCODING_ALAW:
 		if (p->precision != 8) {
@@ -161,14 +161,15 @@ static int audio_validate_prinfo(audio_prinfo_t *p)
 		}
 		break;
 	case AUDIO_ENCODING_PCM16:
-	case AUDIO_ENCODING_SLINEAR_LE:
-	case AUDIO_ENCODING_SLINEAR_BE:
-	case AUDIO_ENCODING_SLINEAR:
 		if (p->precision != 16) {
 			return -EINVAL;
 		}
 		break;
 	default:
+		if (p->precision != 8 && p->precision != 16 &&
+		    p->precision != 24 && p->precision != 32) {
+			return -EINVAL;
+		}
 		break;
 	}
 	if (p->gain > AUDIO_MAX_GAIN) {
@@ -247,31 +248,10 @@ int audio_ioctl_dispatch(audio_dev_t *dev, uint32_t request, void *arg)
 		}
 		merged = dev->current;
 		audio_merge_info(&merged, &overlay);
-		rc = audio_validate_info(&merged);
+		rc = audio_apply_info(dev, &merged);
 		if (rc != 0) {
 			return rc;
 		}
-		if (dev->ops != NULL && dev->ops->set_params != NULL) {
-			/*
-			 * Program the hardware for the format it will
-			 * actually receive.  The framework converts ULAW,
-			 * ALAW, unsigned and big-endian streams to signed
-			 * 16-bit LE on the way through, so handing the
-			 * backend the application's encoding would set the
-			 * codec up to decode something it is never sent --
-			 * and, for the 8-bit encodings, at half the sample
-			 * width the converted data actually carries.
-			 */
-			audio_info_t hw = merged;
-
-			audio_hw_prinfo(&merged.play, &hw.play);
-			audio_hw_prinfo(&merged.record, &hw.record);
-			rc = dev->ops->set_params(dev, &hw);
-			if (rc != 0) {
-				return rc;
-			}
-		}
-		dev->current = merged;
 		if (copyout(&dev->current, arg, sizeof(audio_info_t)) != 0) {
 			return -EFAULT;
 		}
@@ -285,6 +265,8 @@ int audio_ioctl_dispatch(audio_dev_t *dev, uint32_t request, void *arg)
 		return 0;
 
 	case AUDIO_FLUSH:
+		/* The discarded audio takes its resampler history with it. */
+		audio_conv_reset(&dev->conv);
 		if (dev->ops != NULL && dev->ops->flush != NULL) {
 			return dev->ops->flush(dev);
 		}
@@ -389,15 +371,14 @@ int audio_ioctl_dispatch(audio_dev_t *dev, uint32_t request, void *arg)
 /* Encoding conversion                                               */
 /* ----------------------------------------------------------------- */
 /*
- * The framework accepts every encoding audio_validate_prinfo() knows
- * about, but no backend ever looked at the field: ULAW, ALAW, unsigned
- * and big-endian streams were handed to the hardware as though they were
- * signed little-endian PCM, and came out as noise.  Convert here instead,
- * once, so every backend sees one format.
- *
- * The validator constrains the problem usefully: companded and unsigned
- * encodings are 8-bit, signed linear ones are 16-bit.  So the whole
- * matrix is "expand 8-bit to signed 16-bit LE", "byteswap", or "nothing".
+ * Backends play one sample format -- signed 16-bit little-endian -- at a
+ * channel count and rate they accepted in set_params().  Applications may
+ * write any linear PCM from 8 to 32 bits (signed or unsigned, either byte
+ * order), G.711, 1 to 8 channels, 4 kHz to 192 kHz.  Each application
+ * frame is decoded to 32-bit full scale, mixed to the backend's channel
+ * count, resampled to its rate, and rounded to 16 bits last, so the
+ * extra precision of a 24- or 32-bit source survives the mixing and
+ * resampling arithmetic.
  */
 
 /* G.711 mu-law expansion (CCITT / Sun reference implementation). */
@@ -436,77 +417,374 @@ static int audio_enc_is_native(uint32_t enc, uint32_t prec)
 	                      enc == AUDIO_ENCODING_PCM16);
 }
 
-unsigned audio_conv_ratio(uint32_t enc, uint32_t prec)
+/* True when a write can go to the backend byte for byte. */
+static int audio_is_passthrough(const audio_prinfo_t *sw,
+				const audio_prinfo_t *hw)
 {
-	if (audio_enc_is_native(enc, prec)) {
-		return 1;
-	}
-	/* Every non-native encoding this framework validates is 8-bit
-	 * except the big-endian signed ones, which only need a swap. */
-	return prec == 8 ? 2 : 1;
+	return audio_enc_is_native(sw->encoding, sw->precision) &&
+	       sw->channels == hw->channels &&
+	       sw->sample_rate == hw->sample_rate;
 }
 
 void audio_hw_prinfo(const audio_prinfo_t *sw, audio_prinfo_t *hw)
 {
-	*hw = *sw;
-	if (audio_enc_is_native(sw->encoding, sw->precision)) {
-		return;
-	}
-	hw->encoding = AUDIO_ENCODING_SLINEAR_LE;
 	/*
-	 * 8-bit sources are widened rather than converted in place.  Signed
-	 * 8-bit is a format plenty of codecs decline -- QEMU's HDA codec
-	 * advertises 16-bit only -- and widening costs one shift, so it is
-	 * both simpler and more portable than asking for 8-bit output.
+	 * Whatever the width, the backend gets 16 bits: 8-bit sources are
+	 * widened (signed 8-bit is a format plenty of codecs decline --
+	 * QEMU's HDA codec advertises 16-bit only) and 24/32-bit ones are
+	 * rounded down, which every codec here can play.
 	 */
-	if (sw->precision == 8) {
-		hw->precision = 16;
+	*hw = *sw;
+	hw->encoding  = AUDIO_ENCODING_SLINEAR_LE;
+	hw->precision = 16;
+}
+
+uint32_t audio_frame_bytes(const audio_prinfo_t *p)
+{
+	return p->channels * (p->precision / 8);
+}
+
+/* One sample of any validated encoding, scaled to 32-bit full scale. */
+static int32_t audio_decode_sample(uint32_t enc, uint32_t prec,
+				   const uint8_t *p)
+{
+	uint32_t nb = prec / 8;
+	uint32_t u = 0;
+	uint32_t i;
+	int big;
+
+	switch (enc) {
+	case AUDIO_ENCODING_ULAW:
+		return (int32_t)((uint32_t)(uint16_t)audio_ulaw_to_pcm(p[0])
+				 << 16);
+	case AUDIO_ENCODING_ALAW:
+		return (int32_t)((uint32_t)(uint16_t)audio_alaw_to_pcm(p[0])
+				 << 16);
+	default:
+		break;
+	}
+
+	big = (enc == AUDIO_ENCODING_SLINEAR_BE ||
+	       enc == AUDIO_ENCODING_ULINEAR_BE);
+	for (i = 0; i < nb; i++) {
+		u = (u << 8) | p[big ? i : nb - 1 - i];
+	}
+	u <<= 32 - prec;
+	/* Unsigned: the midpoint is silence, so flip the top bit. */
+	if (enc == AUDIO_ENCODING_ULINEAR_LE ||
+	    enc == AUDIO_ENCODING_ULINEAR_BE ||
+	    enc == AUDIO_ENCODING_ULINEAR ||
+	    enc == AUDIO_ENCODING_PCM8) {
+		u ^= 0x80000000u;
+	}
+	return (int32_t)u;
+}
+
+/*
+ * Downmix weights, Q15.  Multichannel frames are taken in the order SDL,
+ * WAVE_FORMAT_EXTENSIBLE and ALSA share for 5.1 and 7.1; the centre and
+ * surrounds go to both sides at -3 dB (ITU-R BS.775) and LFE is dropped.
+ */
+enum { CH_FL, CH_FR, CH_FC, CH_LFE, CH_BL, CH_BR, CH_BC, CH_SL, CH_SR };
+
+static const uint8_t audio_layout[AUDIO_MAX_CHANNELS + 1][AUDIO_MAX_CHANNELS] = {
+	[3] = { CH_FL, CH_FR, CH_LFE },
+	[4] = { CH_FL, CH_FR, CH_BL, CH_BR },
+	[5] = { CH_FL, CH_FR, CH_LFE, CH_BL, CH_BR },
+	[6] = { CH_FL, CH_FR, CH_FC, CH_LFE, CH_BL, CH_BR },
+	[7] = { CH_FL, CH_FR, CH_FC, CH_LFE, CH_BC, CH_SL, CH_SR },
+	[8] = { CH_FL, CH_FR, CH_FC, CH_LFE, CH_BL, CH_BR, CH_SL, CH_SR },
+};
+
+#define Q15_ONE   32768
+#define Q15_M3DB  23170 /* 1/sqrt(2) */
+
+static const int32_t audio_left_w[] = {
+	[CH_FL] = Q15_ONE, [CH_FR] = 0, [CH_FC] = Q15_M3DB, [CH_LFE] = 0,
+	[CH_BL] = Q15_M3DB, [CH_BR] = 0, [CH_BC] = Q15_M3DB,
+	[CH_SL] = Q15_M3DB, [CH_SR] = 0,
+};
+
+/* A role's right-hand weight is its mirror image's left-hand one. */
+static int32_t audio_right_w(uint8_t role)
+{
+	switch (role) {
+	case CH_FL: return audio_left_w[CH_FR];
+	case CH_FR: return audio_left_w[CH_FL];
+	case CH_BL: return audio_left_w[CH_BR];
+	case CH_BR: return audio_left_w[CH_BL];
+	case CH_SL: return audio_left_w[CH_SR];
+	case CH_SR: return audio_left_w[CH_SL];
+	default:    return audio_left_w[role];
 	}
 }
 
-size_t audio_convert(uint32_t enc, uint32_t prec, const uint8_t *in,
-		     size_t in_len, uint8_t *out)
+/* Mix one frame from `s` channels to `d`. */
+static void audio_mix(const int32_t *in, uint32_t s, int32_t *out, uint32_t d)
 {
-	size_t i;
-	size_t n = 0;
+	uint32_t c;
 
-	if (audio_enc_is_native(enc, prec)) {
-		memcpy(out, in, in_len);
-		return in_len;
-	}
-
-	if (prec == 8) {
-		for (i = 0; i < in_len; i++) {
-			int16_t s;
-
-			switch (enc) {
-			case AUDIO_ENCODING_ULAW:
-				s = audio_ulaw_to_pcm(in[i]);
-				break;
-			case AUDIO_ENCODING_ALAW:
-				s = audio_alaw_to_pcm(in[i]);
-				break;
-			default:
-				/* PCM8 / ULINEAR{,_LE,_BE}: unsigned, so
-				 * recentre on zero and widen.  Byte order is
-				 * meaningless at one byte per sample. */
-				s = (int16_t)(((int)in[i] - 128) << 8);
-				break;
-			}
-			out[n++] = (uint8_t)(s & 0xFF);
-			out[n++] = (uint8_t)((s >> 8) & 0xFF);
+	if (s == d) {
+		memcpy(out, in, d * sizeof(*out));
+	} else if (s == 1) {
+		/* Mono: the same signal on every speaker. */
+		for (c = 0; c < d; c++) {
+			out[c] = in[0];
 		}
-		return n;
+	} else if (d == 1) {
+		int64_t sum = 0;
+
+		for (c = 0; c < s; c++) {
+			sum += in[c];
+		}
+		out[0] = (int32_t)(sum / (int64_t)s);
+	} else if (d == 2) {
+		/*
+		 * Weighted sum per side, divided by the sum of the weights so
+		 * that full scale on every input channel is full scale out:
+		 * the mix can never clip.
+		 */
+		int64_t l = 0, r = 0, wl = 0, wr = 0;
+
+		for (c = 0; c < s; c++) {
+			uint8_t role = audio_layout[s][c];
+			int32_t a = audio_left_w[role];
+			int32_t b = audio_right_w(role);
+
+			l += (int64_t)in[c] * a;
+			r += (int64_t)in[c] * b;
+			wl += a;
+			wr += b;
+		}
+		out[0] = (int32_t)(l / wl);
+		out[1] = (int32_t)(r / wr);
+	} else if (s < d) {
+		/* More speakers than channels: fill the first, mute the rest. */
+		memcpy(out, in, s * sizeof(*out));
+		for (c = s; c < d; c++) {
+			out[c] = 0;
+		}
+	} else {
+		/* Fewer, but not stereo: keep the leading channels. */
+		memcpy(out, in, d * sizeof(*out));
+	}
+}
+
+/* Round a 32-bit full-scale sample to 16 bits, little-endian. */
+static uint8_t *audio_put_s16(uint8_t *out, int32_t v)
+{
+	int64_t s = ((int64_t)v + 0x8000) >> 16;
+
+	if (s > 32767) {
+		s = 32767;
+	}
+	out[0] = (uint8_t)(s & 0xFF);
+	out[1] = (uint8_t)(((uint64_t)s >> 8) & 0xFF);
+	return out + 2;
+}
+
+void audio_conv_reset(audio_conv_t *st)
+{
+	memset(st, 0, sizeof(*st));
+}
+
+size_t audio_conv_burst(const audio_prinfo_t *sw, const audio_prinfo_t *hw)
+{
+	size_t frames = 1;
+
+	/* Upsampling emits up to ceil(dst / src) frames per input frame. */
+	if (sw->sample_rate < hw->sample_rate) {
+		frames = hw->sample_rate / sw->sample_rate + 2;
+	}
+	return frames * hw->channels * 2;
+}
+
+/*
+ * Rate conversion keeps a Q16 phase.  Upsampling interpolates linearly
+ * between the previous frame and this one, emitting an output frame every
+ * `step` = src/dst of an input frame, so it runs one frame behind.
+ * Downsampling averages every input frame that falls in an output frame's
+ * span -- a box filter, which keeps the worst of the aliasing out that
+ * plain decimation would fold back into the audible band.
+ */
+size_t audio_conv_frame(audio_conv_t *st, const audio_prinfo_t *sw,
+			const audio_prinfo_t *hw, const uint8_t *frame,
+			uint8_t *out)
+{
+	int32_t x[AUDIO_MAX_CHANNELS];
+	int32_t m[AUDIO_MAX_CHANNELS];
+	uint32_t bps = sw->precision / 8;
+	uint32_t d = hw->channels;
+	uint32_t c;
+	uint8_t *o = out;
+
+	for (c = 0; c < sw->channels; c++) {
+		x[c] = audio_decode_sample(sw->encoding, sw->precision,
+					   frame + c * bps);
+	}
+	audio_mix(x, sw->channels, m, d);
+
+	if (sw->sample_rate == hw->sample_rate) {
+		for (c = 0; c < d; c++) {
+			o = audio_put_s16(o, m[c]);
+		}
+	} else if (sw->sample_rate < hw->sample_rate) {
+		uint32_t step = (uint32_t)(((uint64_t)sw->sample_rate << 16) /
+					   hw->sample_rate);
+
+		if (!st->primed) {
+			memcpy(st->prev, m, d * sizeof(*m));
+			st->primed = 1;
+			st->phase = 0;
+			return 0;
+		}
+		while (st->phase < 0x10000u) {
+			for (c = 0; c < d; c++) {
+				int64_t diff = (int64_t)m[c] - st->prev[c];
+
+				o = audio_put_s16(o, (int32_t)(st->prev[c] +
+				    ((diff * st->phase) >> 16)));
+			}
+			st->phase += step;
+		}
+		st->phase -= 0x10000u;
+		memcpy(st->prev, m, d * sizeof(*m));
+	} else {
+		uint32_t step = (uint32_t)(((uint64_t)sw->sample_rate << 16) /
+					   hw->sample_rate);
+
+		for (c = 0; c < d; c++) {
+			st->acc[c] += m[c];
+		}
+		st->acc_n++;
+		st->phase += 0x10000u;
+		if (st->phase >= step) {
+			for (c = 0; c < d; c++) {
+				o = audio_put_s16(o, (int32_t)(st->acc[c] /
+				    (int64_t)st->acc_n));
+				st->acc[c] = 0;
+			}
+			st->acc_n = 0;
+			st->phase -= step;
+		}
+	}
+	return (size_t)(o - out);
+}
+
+int audio_hw_to_app_bytes(const audio_dev_t *dev, int hw_bytes)
+{
+	uint64_t app = (uint64_t)audio_frame_bytes(&dev->current.play) *
+		       dev->current.play.sample_rate;
+	uint64_t hw = (uint64_t)audio_frame_bytes(&dev->hw_play) *
+		      dev->hw_play.sample_rate;
+
+	if (hw_bytes <= 0 || app == 0 || hw == 0) {
+		return hw_bytes;
+	}
+	return (int)((uint64_t)hw_bytes * app / hw);
+}
+
+/*
+ * Find a playback format the backend takes.  The request is tried first,
+ * then -- when set_params() refuses it -- stereo in place of more
+ * channels, and the two rates every codec here supports; whatever channel
+ * count and rate the backend ends up programmed for, the write path
+ * converts to.  A backend that cannot hit the requested rate exactly may
+ * also report the rate it did set (AC'97 without VRA, SB16 above 44.1 kHz)
+ * rather than fail, and that is what gets resampled to.
+ */
+static int audio_negotiate(audio_dev_t *dev, const audio_info_t *info,
+			   audio_info_t *hw)
+{
+	static const uint32_t fallback_rates[] = { 48000, 44100 };
+	uint32_t chans[2], rates[3];
+	uint32_t nchans = 0, nrates = 0;
+	uint32_t ch, ci, ri;
+	int first_rc = 0;
+
+	*hw = *info;
+	audio_hw_prinfo(&info->play, &hw->play);
+	audio_hw_prinfo(&info->record, &hw->record);
+
+	ch = hw->play.channels;
+	if (dev->hw_chan_max != 0 && ch > dev->hw_chan_max) {
+		ch = dev->hw_chan_max;
+	}
+	if (dev->hw_chan_min != 0 && ch < dev->hw_chan_min) {
+		ch = dev->hw_chan_min;
+	}
+	hw->play.channels = ch;
+	if (dev->ops == NULL || dev->ops->set_params == NULL) {
+		return 0;
 	}
 
-	/* 16-bit big-endian: swap into little-endian.  A trailing odd byte
-	 * cannot be swapped on its own; drop it rather than emit a sample
-	 * built from the next write's first byte. */
-	for (i = 0; i + 1 < in_len; i += 2) {
-		out[n++] = in[i + 1];
-		out[n++] = in[i];
+	chans[nchans++] = ch;
+	if (ch > 2 && (dev->hw_chan_min == 0 || dev->hw_chan_min <= 2)) {
+		chans[nchans++] = 2;
 	}
-	return n;
+	rates[nrates++] = hw->play.sample_rate;
+	for (ri = 0; ri < 2; ri++) {
+		if (fallback_rates[ri] != hw->play.sample_rate) {
+			rates[nrates++] = fallback_rates[ri];
+		}
+	}
+
+	for (ci = 0; ci < nchans; ci++) {
+		for (ri = 0; ri < nrates; ri++) {
+			audio_info_t try = *hw;
+			int rc;
+
+			try.play.channels = chans[ci];
+			try.play.sample_rate = rates[ri];
+			rc = dev->ops->set_params(dev, &try);
+			if (rc != 0) {
+				if (first_rc == 0) {
+					first_rc = rc;
+				}
+				continue;
+			}
+			/* Trust what the backend reports only within reason. */
+			if (try.play.sample_rate < 4000 ||
+			    try.play.sample_rate > 192000) {
+				try.play.sample_rate = rates[ri];
+			}
+			try.play.channels  = chans[ci];
+			try.play.encoding  = AUDIO_ENCODING_SLINEAR_LE;
+			try.play.precision = 16;
+			*hw = try;
+			return 0;
+		}
+	}
+	return first_rc;
+}
+
+int audio_apply_info(audio_dev_t *dev, audio_info_t *info)
+{
+	audio_info_t hw;
+	const audio_prinfo_t *old = &dev->current.play;
+	int rc;
+
+	rc = audio_validate_info(info);
+	if (rc != 0) {
+		return rc;
+	}
+	rc = audio_negotiate(dev, info, &hw);
+	if (rc != 0) {
+		return rc;
+	}
+	/* Conversion state belongs to a format; a gain or blocksize change
+	 * must not throw away a partial frame. */
+	if (old->encoding != info->play.encoding ||
+	    old->precision != info->play.precision ||
+	    old->channels != info->play.channels ||
+	    old->sample_rate != info->play.sample_rate ||
+	    dev->hw_play.channels != hw.play.channels ||
+	    dev->hw_play.sample_rate != hw.play.sample_rate) {
+		audio_conv_reset(&dev->conv);
+	}
+	dev->current = *info;
+	dev->hw_play = hw.play;
+	return 0;
 }
 
 size_t audio_node_write(fs_node_t *node, off_t offset, size_t size,
@@ -547,13 +825,12 @@ size_t audio_node_write(fs_node_t *node, off_t offset, size_t size,
 
 	/*
 	 * Fast path: the application is already writing what the backend
-	 * wants, so hand the buffer straight down.  This is every ordinary
-	 * player, and it is byte-for-byte what happened before conversion
-	 * existed.
+	 * plays, so hand the buffer straight down.  This is every ordinary
+	 * 16-bit player, and it is byte-for-byte what happened before
+	 * conversion existed.
 	 */
-	if (audio_conv_ratio(dev->current.play.encoding,
-	                     dev->current.play.precision) == 1 &&
-	    dev->current.play.encoding != AUDIO_ENCODING_SLINEAR_BE) {
+	if (audio_is_passthrough(&dev->current.play, &dev->hw_play) &&
+	    dev->conv.carry_len == 0) {
 		rc = dev->ops->write(dev, buffer, size);
 		if (rc < 0) {
 			/* Propagate the backend errno (e.g. -EINTR from a
@@ -566,47 +843,78 @@ size_t audio_node_write(fs_node_t *node, off_t offset, size_t size,
 	}
 
 	/*
-	 * Otherwise translate in bounded chunks through the device's staging
-	 * buffer.  The byte count returned is always in the *caller's*
-	 * units, so a partial backend write has to be scaled back down.
+	 * Otherwise convert frame by frame into the staging buffer and hand
+	 * it to the backend whenever another frame's output might not fit.
+	 * A trailing partial frame is kept for the next write, so every byte
+	 * offered is consumed.  The count returned is in the caller's units:
+	 * input bytes whose output reached the backend, plus any carried.
 	 */
 	{
-		uint32_t enc = dev->current.play.encoding;
-		uint32_t prec = dev->current.play.precision;
-		unsigned ratio = audio_conv_ratio(enc, prec);
-		size_t done = 0;
+		const audio_prinfo_t *sw = &dev->current.play;
+		const audio_prinfo_t *hw = &dev->hw_play;
+		audio_conv_t *st = &dev->conv;
+		size_t fb = audio_frame_bytes(sw);
+		size_t burst = audio_conv_burst(sw, hw);
+		size_t done = 0;     /* input whose output was delivered */
+		size_t pending = 0;  /* input converted, not yet delivered */
+		size_t outn = 0;
+		size_t i = 0;
 
-		while (done < size) {
-			size_t chunk = size - done;
-			size_t outn;
+		while (i < size || outn > 0) {
+			if (i < size) {
+				const uint8_t *frame;
 
-			if (chunk > AUDIO_CONV_IN) {
-				chunk = AUDIO_CONV_IN;
+				if (st->carry_len > 0 || size - i < fb) {
+					size_t take = fb - st->carry_len;
+
+					if (take > size - i) {
+						take = size - i;
+					}
+					memcpy(st->carry + st->carry_len,
+					       buffer + i, take);
+					st->carry_len += (uint32_t)take;
+					i += take;
+					pending += take;
+					if (st->carry_len < fb) {
+						continue;  /* partial: keep it */
+					}
+					frame = st->carry;
+					st->carry_len = 0;
+				} else {
+					frame = buffer + i;
+					i += fb;
+					pending += fb;
+				}
+				outn += audio_conv_frame(st, sw, hw, frame,
+							 dev->conv_buf + outn);
+				if (i < size && outn + burst <= AUDIO_CONV_OUT) {
+					continue;
+				}
 			}
-			/* Keep 16-bit samples whole across chunks. */
-			if (prec == 16 && (chunk & 1) != 0) {
-				chunk--;
+			if (outn > 0) {
+				rc = dev->ops->write(dev, dev->conv_buf, outn);
+				if (rc < 0) {
+					/* What was converted is lost with the
+					 * write; start the next one afresh. */
+					audio_conv_reset(st);
+					dev->current.play.samples +=
+						(uint32_t)done;
+					return done ? done : (size_t)rc;
+				}
+				if ((size_t)rc < outn) {
+					/* Backend took less than offered: the
+					 * rest of this chunk is dropped rather
+					 * than replayed from the caller. */
+					break;
+				}
+				outn = 0;
 			}
-			if (chunk == 0) {
-				break;
-			}
-			outn = audio_convert(enc, prec, buffer + done, chunk,
-			                     dev->conv_buf);
-			if (outn == 0) {
-				break;
-			}
-			rc = dev->ops->write(dev, dev->conv_buf, outn);
-			if (rc < 0) {
-				/* Report the error only if nothing landed;
-				 * otherwise report the short write. */
-				return done ? done : (size_t)rc;
-			}
-			dev->current.play.samples += (uint32_t)rc;
-			done += (size_t)rc / ratio;
-			if ((size_t)rc < outn) {
-				break;   /* backend took less than offered */
-			}
+			done += pending;
+			pending = 0;
 		}
+		/* Carried bytes and a short backend write both count. */
+		done += pending;
+		dev->current.play.samples += (uint32_t)done;
 		return done;
 	}
 }
@@ -687,6 +995,11 @@ void audio_node_close(fs_node_t *node)
 		dev->play_owner = NULL;
 	}
 	spinlock_release(&audio_dev_lock);
+	if (last_close) {
+		/* A partial frame left by the last user is not the next
+		 * user's audio. */
+		audio_conv_reset(&dev->conv);
+	}
 	if (last_close && dev->ops != NULL && dev->ops->close != NULL) {
 		(void)dev->ops->close(dev);
 	}
@@ -731,12 +1044,14 @@ int audio_register_device(audio_dev_t *dev)
 	 * may apply on first start; current/audio_info still reflects the
 	 * kernel-side defaults.
 	 */
-	if (dev->ops != NULL && dev->ops->set_params != NULL) {
-		audio_info_t hw = dev->current;
+	audio_conv_reset(&dev->conv);
+	{
+		audio_info_t hw;
 
-		audio_hw_prinfo(&dev->current.play, &hw.play);
-		audio_hw_prinfo(&dev->current.record, &hw.record);
-		(void)dev->ops->set_params(dev, &hw);
+		if (audio_negotiate(dev, &dev->current, &hw) != 0) {
+			audio_hw_prinfo(&dev->current.play, &hw.play);
+		}
+		dev->hw_play = hw.play;
 	}
 
 	audio_n = &audio_nodes[unit];
