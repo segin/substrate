@@ -582,7 +582,9 @@ static char *lookup_error_string(int errnum) {
     case ESTALE: return "Stale file handle";
     case EDQUOT: return "Disk quota exceeded";
     case ECANCELED: return "Operation canceled";
+#ifdef EUNKNOWNFS   /* Substrate-only; absent from a host <errno.h> */
     case EUNKNOWNFS: return "Unknown file system type";
+#endif
     case EOVERFLOW: return "Value too large for defined data type";
     case ETIMEDOUT: return "Connection timed out";
     case EOWNERDEAD: return "Owner died";
