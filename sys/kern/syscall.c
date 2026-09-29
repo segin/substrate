@@ -4846,9 +4846,37 @@ int sys_yield(void) {
     return 0;
 }
 
+/*
+ * fsync(2) / fdatasync(2): make the file's data stable before returning.
+ * It does what sync(2) does -- deferred file-system metadata, every dirty
+ * buffer, then each device's volatile write cache -- because the buffer
+ * cache does not track which buffers belong to which file.  POSIX allows
+ * fsync to flush more than the one file; it must not flush less.
+ *
+ * Pipes, FIFOs, sockets and kqueues cannot be synchronized: EINVAL.  A
+ * write that fails on the way to the device is EIO.
+ */
 int sys_fsync(int fd) {
-    (void)fd;
-    return 0; // Stub (unwired; fsync validation lives in libc, see posix_extra.c)
+    if (fd < 0 || fd >= MAX_FD) return -EBADF;
+    file_t *f = current_process->fds[fd];
+    if (!f) return -EBADF;
+    if (f->f_type == DTYPE_PIPE || f->f_type == DTYPE_SOCKET ||
+        f->f_type == DTYPE_KQUEUE)
+        return -EINVAL;
+    /* Sockets are DTYPE_VNODE files; classify by node type, as fstat does
+     * (the low three flag bits). */
+    fs_node_t *node = (fs_node_t *)f->f_data;
+    if (node) {
+        uint32_t ftype = node->flags & 0x7;
+        if (ftype == FS_PIPE || ftype == FS_SOCKET)
+            return -EINVAL;
+    }
+
+    vfs_sync_all();
+    int err = bufsync(0);
+    if (blkdev_flush_all() != 0 && err == 0)
+        err = EIO;
+    return err ? -err : 0;
 }
 
 /*

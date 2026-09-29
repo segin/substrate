@@ -106,23 +106,15 @@ int fchdir(int fd) {
 }
 
 int fdatasync(int fd) {
-    /* No kernel SYS_FDATASYNC — fsync provides the same guarantee
-     * at coarser granularity. */
+    /* fsync already flushes data and metadata alike. */
     return fsync(fd);
 }
 
 int fsync(int fd) {
-    /* No kernel SYS_FSYNC — substrate's VFS writes are synchronous, so the
-     * flush itself is a no-op.  POSIX still requires EBADF for an invalid
-     * descriptor (fsync/5-1) and EINVAL for a descriptor that cannot be
-     * synced, e.g. a pipe (fsync/7-1); derive both from fstat. */
-    struct stat st;
-    if (fstat(fd, &st) != 0)
-        return -1;                 /* fstat set errno (EBADF) */
-    if (S_ISFIFO(st.st_mode) || S_ISSOCK(st.st_mode)) {
-        errno = EINVAL;
-        return -1;
-    }
+    /* The kernel flushes metadata, dirty buffers and the devices' write
+     * caches, and returns EBADF, EINVAL (pipe, FIFO, socket) or EIO. */
+    int64_t r = _syscall1(SYS_FSYNC, (uintptr_t)fd);
+    if (r < 0) { errno = (int)-r; return -1; }
     return 0;
 }
 

@@ -294,6 +294,10 @@
  * SYS_SIGTIMEDWAIT. */
 #define SYS_WRITEV           526
 
+/* fsync(2)/fdatasync(2): libc's fsync was a no-op, so nothing reached the
+ * device's cache.  Next free after SYS_WRITEV. */
+#define SYS_FSYNC            527
+
 void syscall_init(void);
 
 // GDT TLS entries

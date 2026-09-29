@@ -32,6 +32,7 @@ Source of truth:
 - `3 SYS_READ (read)`: read from file descriptor.
 - `4 SYS_WRITE (write)`: write to file descriptor.
 - `526 SYS_WRITEV (writev)`: gathering write; a datagram socket's buffers are sent as one datagram (UDP-API-03). See `writev(2)`.
+- `527 SYS_FSYNC (fsync)`: flush file-system metadata, dirty buffers and device write caches to stable storage; `fdatasync` uses it too. See `fsync(2)`.
 - `5 SYS_OPEN (open)`: open file path.
 - `6 SYS_CLOSE (close)`: close file descriptor.
 - `10 SYS_UNLINK (unlink)`: remove directory entry.
