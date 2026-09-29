@@ -1433,13 +1433,18 @@ int link_fs(fs_node_t *parent, fs_node_t *source, const char *name) {
     return -ENOSYS;
 }
 
+/*
+ * A file system without an unlink/rmdir hook (devfs, procfs, sysfs) does not
+ * let entries be removed.  That is EPERM -- the operation is not permitted
+ * on this file -- not ENOSYS, which says the system call does not exist.
+ */
 int unlink_fs(fs_node_t *node, const char *name) {
     if (node && node->unlink) {
         int ret = vfs_may_delete(node, vfs_entry(node, name));
         if (ret != 0) return ret;
         return node->unlink(node, name);
     }
-    return -ENOSYS;
+    return -EPERM;
 }
 
 int rmdir_fs(fs_node_t *node, const char *name) {
@@ -1448,7 +1453,7 @@ int rmdir_fs(fs_node_t *node, const char *name) {
         if (ret != 0) return ret;
         return node->rmdir(node, name);
     }
-    return -ENOSYS;
+    return -EPERM;
 }
 
 int rename_fs(fs_node_t *old_parent, const char *old_name, fs_node_t *new_parent, const char *new_name) {
@@ -1852,7 +1857,7 @@ int vfs_rmdir(const char *path) {
     }
     
     if (!parent_node->rmdir) {
-        return -EOPNOTSUPP;
+        return -EPERM;   /* file system does not allow removal */
     }
     ret = vfs_may_delete(parent_node, node);
     if (ret != 0) {

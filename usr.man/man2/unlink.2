@@ -107,10 +107,6 @@ does not exist, or
 .I path
 does not exist.
 .TP
-.B ENOSYS
-The file system does not support removing entries (devfs and procfs; see
-.BR BUGS ).
-.TP
 .B ELOOP
 Too many symbolic links were met resolving the path prefix.
 .TP
@@ -128,7 +124,8 @@ does not name a directory.
 .TP
 .B EPERM
 The containing directory has the sticky bit set and the caller owns
-neither the file nor the directory, and is not privileged.
+neither the file nor the directory, and is not privileged; or the file
+system does not allow entries to be removed (devfs, procfs, sysfs).
 .TP
 .B EROFS
 The entry is on a file system mounted read-only.
@@ -168,8 +165,3 @@ scratch_fd(void)
 .BR symlink (2)
 .SH STANDARDS
 POSIX.1-2024.
-.SH BUGS
-On devfs and procfs the call fails with
-.B ENOSYS
-rather than
-.BR EPERM .

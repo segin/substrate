@@ -29,7 +29,8 @@ is on a read-only mount.
 The directory containing
 .I pathname
 has the sticky bit set, and the caller owns neither it nor the
-directory being removed (and is not the superuser).
+directory being removed (and is not the superuser); or the file system
+does not allow directories to be removed (procfs, sysfs).
 .TP
 .B ENOTEMPTY
 The directory is not empty.

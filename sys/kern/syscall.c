@@ -2810,7 +2810,7 @@ int kern_unlinkat(int dirfd, const char *path, int flags) {
             return -ENOTDIR;
         }
         if (!parent->rmdir) {
-            return -EOPNOTSUPP;
+            return -EPERM;   /* file system does not allow removal */
         }
         ret = vfs_may_delete(parent, node);
         if (ret != 0) {

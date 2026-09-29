@@ -10,6 +10,8 @@
  *   notdir       a regular file in the directory part of a path is ENOTDIR
  *                (was ENOSYS for unlink when it was the immediate parent,
  *                ENOENT deeper down).
+ *   noremove     removing an entry from a file system that does not allow
+ *                it (devfs, procfs) is EPERM (was ENOSYS / EOPNOTSUPP).
  *
  * Runs as init; prints a "Result:" line.
  */
@@ -110,6 +112,15 @@ static void test_notdir(void)
     unlink("/tmp/pe_file");
 }
 
+static void test_noremove(void)
+{
+    expect("unlink(/dev/null)", unlink("/dev/null"), EPERM);
+    expect("unlink(/proc/version)", unlink("/proc/version"), EPERM);
+    expect("rmdir(/proc/1)", rmdir("/proc/1"), EPERM);
+    expect("unlinkat(/proc/1, AT_REMOVEDIR)",
+           unlinkat(AT_FDCWD, "/proc/1", AT_REMOVEDIR), EPERM);
+}
+
 int main(void)
 {
     mkdir("/tmp", 01777);
@@ -119,6 +130,8 @@ int main(void)
     test_eloop();
     printf("notdir\n");
     test_notdir();
+    printf("noremove\n");
+    test_noremove();
     printf("Result: %s (%d failure%s)\n", failures ? "FAIL" : "PASS",
            failures, failures == 1 ? "" : "s");
     return failures != 0;
