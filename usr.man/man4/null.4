@@ -20,10 +20,12 @@ Writes always succeed and return the requested byte count.
 operations succeed and update file offsets, but offsets do not affect device behavior.
 .PP
 .BR poll (2)
-reports
-.B POLLOUT
-as ready and does not report
-.BR POLLIN .
+and
+.BR select (2)
+always report the device ready for both reading
+.RB ( POLLIN ,
+since a read returns end of file at once) and writing
+.RB ( POLLOUT ).
 .BR ioctl (2)
 is not supported.
 .PP

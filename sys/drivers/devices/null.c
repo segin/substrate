@@ -20,7 +20,7 @@
  * U6: Ioctl (return -1, errno=ENOTTY).
  * U7: Nonblocking (O_NONBLOCK irrelevant for write/read, works).
  * U8: Concurrency (stateless).
- * E1: Poll (POLLOUT always, POLLIN never).
+ * E1: Poll (always readable and writable: a read returns EOF at once).
  * UB1: No data on read.
  * O1: mmap (DISALLOW, return EINVAL/MAP_FAILED).
  * C1: Efficiency (O(1) discard).
@@ -90,19 +90,16 @@ static int null_ioctl(fs_node_t *node, uint32_t request, void *arg) {
 
 /*
  * null_poll
- * Always returns POLLOUT. Never returns POLLIN.
- * E1.
+ * Always readable and writable.  POSIX counts a descriptor as readable
+ * when a read would not block, and a read of /dev/null returns end of
+ * file at once -- so select()/poll() must say so, or a program waiting
+ * for input on /dev/null (bash's `read -t 1 < /dev/null`) sleeps out its
+ * whole timeout.
  */
 static int null_poll(fs_node_t *node, void *waiter) {
     (void)node;
     (void)waiter;
-    /*
-     * Requirement E1:
-     * - Always writable (POLLOUT).
-     * - Not readable (POLLIN) because reads return EOF immediately,
-     *   which is not considered "data available" in this interpretation.
-     */
-    return POLLOUT;
+    return POLLIN | POLLOUT | POLLRDNORM | POLLWRNORM;
 }
 
 /*

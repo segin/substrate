@@ -64,7 +64,7 @@ static int test_null_device(void) {
 
     struct pollfd pfd = { .fd = fd, .events = POLLIN | POLLOUT, .revents = 0 };
     int rc = sys_poll(&pfd, 1, 0);
-    if (rc <= 0 || !(pfd.revents & POLLOUT) || (pfd.revents & POLLIN)) {
+    if (rc <= 0 || !(pfd.revents & POLLOUT) || !(pfd.revents & POLLIN)) {
         kprint("FAIL: /dev/null poll semantics\n");
         sys_close(fd);
         return -1;
