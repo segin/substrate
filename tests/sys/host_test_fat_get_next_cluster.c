@@ -25,6 +25,7 @@ void vfs_register_filesystem(filesystem_t *fs) {
 }
 
 #include "../../sys/fs/fat/fat.c"
+#include "fat_host_stubs.h"
 
 size_t blkdev_read_bytes(blkdev_t *dev, uint64_t offset, size_t size, void *buffer) {
     (void)dev; (void)offset; (void)size; (void)buffer;

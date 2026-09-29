@@ -488,7 +488,7 @@ host_test_ext2_readlink: host_test_ext2_readlink.c
 	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_ext2_readlink.c -o $@
 
 host_test_fat_get_next_cluster: host_test_fat_get_next_cluster.c
-	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_fat_get_next_cluster.c -o $@
+	$(CC) -m32 -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_fat_get_next_cluster.c -o $@
 
 host_test_minix_vuln: host_test_minix_vuln.c
 	$(CC) -g -Wall -DHOST_TEST -I. -I../../sys -idirafter ../../sys/include host_test_minix_vuln.c -o $@
@@ -547,13 +547,15 @@ host_test_uma_reclaim: test_uma_reclaim.c
 	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. test_uma_reclaim.c -o $@
 
 host_test_fat_inode_identity: host_test_fat_inode_identity.c
-	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_fat_inode_identity.c -o $@
+	$(CC) -m32 -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_fat_inode_identity.c -o $@
 
+# fat.c keeps node pointers in 32-bit fields (fs_node_t.impl), so the FAT
+# host tests are built -m32 like the driver they test.
 host_test_fat_mount: host_test_fat_mount.c
-	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_fat_mount.c -o $@
+	$(CC) -m32 -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_fat_mount.c -o $@
 
 host_test_fat_file_read: host_test_fat_file_read.c
-	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_fat_file_read.c -o $@
+	$(CC) -m32 -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_fat_file_read.c -o $@
 
 host_test_vm_kmem: host_test_vm_kmem.c
 	$(CC) -g -Wall -Wextra -DHOST_TEST -Ivm_kmem_mocks -I../../sys/include -I../../include -I../../sys -I. host_test_vm_kmem.c -o $@

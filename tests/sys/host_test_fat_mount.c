@@ -51,6 +51,7 @@ static size_t mock_device_read(fs_node_t *node, off_t offset, size_t size, uint8
 }
 
 #include "../../sys/fs/fat/fat.c"
+#include "fat_host_stubs.h"
 
 size_t blkdev_read_bytes(blkdev_t *dev, uint64_t offset, size_t size, void *buffer) {
     (void)dev; (void)offset; (void)size; (void)buffer;
@@ -112,17 +113,13 @@ static void test_fat_mount_accepts_minimal_fat16(void) {
     assert(strcmp(root->name, "/") == 0);
 
     /*
-     * fat_mount() now heap-allocates the fat_fs_t and returns a node from
-     * fat_alloc_node(), which lives in the parallel static caches
-     * fat_fs_node_cache[]/fat_node_cache[].  node->impl can't be used to
-     * recover the fat_node_t on a 64-bit host: fat_alloc_node() stores it
-     * as a (uint32_t)-truncated pointer (impl is target-pointer-sized).
-     * Recover the per-mount context by the node's cache index instead.
-     * fs->root_node must point back at the returned root node.
+     * fat_mount() returns a dedicated root node (copied out of the node
+     * ring cache so later lookups cannot overwrite it) whose impl points
+     * at its fat_node_t.  The test is built -m32, so impl holds the whole
+     * pointer.  fs->root_node must point back at the returned root node.
      */
-    size_t idx = (size_t)(root - fat_fs_node_cache);
-    assert(idx < FAT_NODE_CACHE_SIZE);
-    fat_node_t *root_ctx = &fat_node_cache[idx];
+    fat_node_t *root_ctx = (fat_node_t *)(uintptr_t)root->impl;
+    assert(root_ctx != NULL);
     fat_fs_t *fs = root_ctx->fs;
     assert(fs != NULL);
     assert(fs->root_node == root);
@@ -132,8 +129,9 @@ static void test_fat_mount_accepts_minimal_fat16(void) {
     assert(fs->root_dir_first_sector == 19);
     assert(fs->first_data_sector == 51);
 
-    kfree(fs->fat_table, fs->fat_table_size);
-    kfree(fs, sizeof(fat_fs_t));
+    /* The driver's own teardown frees the FAT cache, fs and root node. */
+    assert(root->unmount != NULL);
+    assert(root->unmount(root) == 0);
 }
 
 int main(void) {
