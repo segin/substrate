@@ -284,6 +284,26 @@ static int vfs_node_is_substrate_object(fs_node_t *node) {
  */
 #define VFS_PERSO_EXEC  0x01    /* resolving an execve(2) target */
 
+/*
+ * Substrate's own dynamic-linker configuration.  A foreign runtime whose
+ * personality tree has no file of that name must not be handed Substrate's:
+ * NetBSD's ld.elf_so parsed our ld.so.conf ("include /etc/ld.so.conf.d/...")
+ * and complained "No library entries for `include'" on every program start.
+ */
+static int vfs_path_is_substrate_ld_config(const char *path) {
+    static const char *const names[] = {
+        "/etc/ld.so.conf", "/etc/ld.so.conf.d", "/etc/ld.so.cache",
+    };
+
+    for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
+        size_t n = strlen(names[i]);
+        if (strncmp(path, names[i], n) == 0 &&
+            (path[n] == '\0' || path[n] == '/'))
+            return 1;
+    }
+    return 0;
+}
+
 static fs_node_t *vfs_perso_lookup_flags(fs_node_t *root, fs_node_t *cwd,
                                          const char *path, int lookup_flags) {
     if (!path) return NULL;
@@ -302,6 +322,8 @@ static fs_node_t *vfs_perso_lookup_flags(fs_node_t *root, fs_node_t *cwd,
                 }
                 return node;
             }
+            if (vfs_path_is_substrate_ld_config(path))
+                return NULL;
         }
         fs_node_t *bare = vfs_lookup(root, path);
         if (bare && foreign && !(lookup_flags & VFS_PERSO_EXEC) &&
