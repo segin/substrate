@@ -31,6 +31,12 @@ typedef struct {
     mutex_t lock;
     uint32_t readers_open;
     uint32_t writers_open;
+    /* Count every reader/writer open ever made on a FIFO.  A blocking open
+     * waits for a peer to have OPENED since it started, not for one to be
+     * open right now: a writer can open, write, close and exit before the
+     * woken reader re-checks, and the reader must still return. */
+    uint32_t reader_opens;
+    uint32_t writer_opens;
 } pipe_t;
 
 typedef struct {
@@ -724,12 +730,15 @@ int fifo_open(fs_node_t *inode, int oflags, fs_node_t **out) {
     /* Bump role counters before any potential wait.  The registry refcount
      * that keeps the pipe alive for the duration was already taken by
      * fifo_lookup_or_create() under the registry lock. */
-    if (is_reader) p->readers_open++;
-    if (is_writer) p->writers_open++;
+    if (is_reader) { p->readers_open++; p->reader_opens++; }
+    if (is_writer) { p->writers_open++; p->writer_opens++; }
+    uint32_t writers_seen = p->writer_opens;
+    uint32_t readers_seen = p->reader_opens;
 
-    /* O_RDWR never blocks. */
+    /* O_RDWR never blocks.  A blocking open is done once a peer is open or
+     * has opened since this open began (it may have closed again already). */
     if (accmode == O_RDONLY && !nonblock) {
-        while (p->writers_open == 0) {
+        while (p->writers_open == 0 && p->writer_opens == writers_seen) {
             if (fifo_open_wait(p, p->wait_read) == -EINTR)
                 return fifo_open_unwind(fifo, node, p, is_reader, is_writer,
                                         -EINTR);
@@ -742,7 +751,7 @@ int fifo_open(fs_node_t *inode, int oflags, fs_node_t **out) {
                 return fifo_open_unwind(fifo, node, p, is_reader, is_writer,
                                         -ENXIO);
             }
-            while (p->readers_open == 0) {
+            while (p->readers_open == 0 && p->reader_opens == readers_seen) {
                 if (fifo_open_wait(p, p->wait_write) == -EINTR)
                     return fifo_open_unwind(fifo, node, p, is_reader,
                                             is_writer, -EINTR);
