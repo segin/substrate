@@ -254,6 +254,7 @@ sbin/*/*
 /usr.bin/pax/pax
 /usr.bin/pr/pr
 /usr.bin/readelf/readelf
+/usr.bin/seq/seq
 /usr.bin/size/size
 /usr.bin/uudecode/uudecode
 /usr.bin/yacc/test_minimal.output
