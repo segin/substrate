@@ -14,7 +14,7 @@
  * DIFFERENT directories at the same time, each checking that every name it
  * is handed actually exists in the directory it asked about.  A name that
  * leaked in from another process's scan does not resolve under this parent,
- * so the stat fails and the child reports it.
+ * so the lstat fails and the child reports it.
  *
  * Deliberately uses directories on different filesystems (ext2 root, procfs,
  * devfs) so the shared-static case and the per-node ext2 case are both
@@ -68,7 +68,11 @@ static int walk_and_verify(const char *dir, int rounds, int *entries_seen)
             if (de->d_name[0] == '\0') { bad++; continue; }
             snprintf(path, sizeof(path), "%s/%s", dir, de->d_name);
             seen++;
-            if (stat(path, &st) != 0) {
+            /* lstat, not stat: the question is whether the NAME exists in
+             * this directory.  stat follows symlinks, and /dev/stdin ->
+             * /proc/self/fd/0 rightly fails when the process has no fd 0
+             * (this test runs as init, with no standard descriptors). */
+            if (lstat(path, &st) != 0) {
                 bad++;
                 if (bad <= 3)
                     printf("        %s: '%s' does not resolve\n", dir, de->d_name);
