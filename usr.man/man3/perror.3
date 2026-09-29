@@ -1,5 +1,5 @@
 .\" perror.3 - print error message
-.TH PERROR 3 "2026-05-30" "Substrate" "Library Functions Manual"
+.TH PERROR 3 "2026-09-29" "Substrate" "Library Functions Manual"
 .SH NAME
 perror \- print error message to standard error
 .SH LIBRARY
@@ -11,66 +11,52 @@ perror \- print error message to standard error
 .SH DESCRIPTION
 The
 .BR perror ()
-function writes a message describing the current value of the global variable
+function writes a message describing the current value of
 .I errno
 to the standard error stream
 .RB ( stderr ).
 .PP
 If
 .I s
-is non-NULL and points to a non-empty string, the output has the form:
+is non-NULL and points to a non-empty string, the output is
+.I s
+followed by a colon, a space, the message
+.BR strerror (3)
+returns for
+.IR errno ,
+and a newline:
 .PP
 .RS 4
-.IB s ": error " errno
+.EX
+/nonexistent: No such file or directory
+.EE
 .RE
 .PP
-followed by a newline.
 Otherwise (if
 .I s
-is NULL or points to an empty string), the output is:
-.PP
-.RS 4
-.BI "error " errno
-.RE
-.PP
-followed by a newline.
-.PP
-.B NOTE:
-The Substrate
-.BR perror ()
-implementation does
-.I not
-translate
-.I errno
-into a textual diagnostic message.
-The numeric value of
-.I errno
-is printed in decimal as the literal token following
-.BR error .
-This differs from the behavior mandated by ISO C and POSIX, which require a human-readable message equivalent to that returned by
-.BR strerror (3).
-Programs requiring a textual error description should call
-.BR strerror (3)
-directly.
+is NULL or points to an empty string), only the message and a newline
+are written.
 .PP
 The value of
 .I errno
-is read at the time
+is read when
 .BR perror ()
-is called; it is the caller's responsibility to invoke
-.BR perror ()
-before any intervening library call has the opportunity to modify
+is called, so it should be called before any other library call can
+change
 .IR errno .
+.BR perror ()
+leaves
+.I errno
+unchanged.
+.SH RETURN VALUE
+.BR perror ()
+returns no value.
 .SH SEE ALSO
 .BR strerror (3),
 .BR fprintf (3),
 .BR errno (3)
 .SH STANDARDS
-The
-.BR perror ()
-function conforms to ISO C99 and IEEE Std 1003.1-2008 (POSIX.1) in interface, but the Substrate implementation deviates by emitting the decimal
-.I errno
-value rather than a translated diagnostic string.
+ISO C99, POSIX.1-2024.
 .SH EXAMPLES
 The following program reports a failed open using
 .BR perror ().
@@ -91,5 +77,13 @@ main(void)
     fclose(fp);
     return 0;
 }
+.EE
+.RE
+.PP
+It prints:
+.PP
+.RS 4
+.EX
+/nonexistent: No such file or directory
 .EE
 .RE

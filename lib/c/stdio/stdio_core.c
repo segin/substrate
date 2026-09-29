@@ -610,8 +610,14 @@ char *fgets(char *s, int size, FILE *stream) {
 }
 
 void perror(const char *s) {
-    if (s && *s) fprintf(stderr, "%s: error %d\n", s, errno);
-    else fprintf(stderr, "error %d\n", errno);
+    /* Read errno before stdio can change it; perror itself leaves it as
+     * it found it. */
+    int saved = errno;
+    const char *msg = strerror(saved);
+
+    if (s && *s) fprintf(stderr, "%s: %s\n", s, msg);
+    else fprintf(stderr, "%s\n", msg);
+    errno = saved;
 }
 
 ssize_t getline(char **lineptr, size_t *n, FILE *stream) {
