@@ -3,10 +3,9 @@ Subject: tqt3integration: let the build set TQT_PLUGINS_DIR
 The plugins directory came from `pkg-config --variable=pluginsdir`,
 which in a cross build returns the value prefixed with
 PKG_CONFIG_SYSROOT_DIR -- the build host's sysroot path.  It is the
-install destination of libtqttde and is compiled into it as
-TQTTDELIBDIR, so the plugin was staged under
-<DESTDIR>/<build-host path>/opt/trinity/plugins and looked for itself
-there at run time.  Keep the pkg-config query as the default but let
+install destination of libtqttde, so the plugin was staged under
+<DESTDIR>/<build-host path>/opt/trinity/plugins, and it becomes
+TQTTDELIBDIR in the generated TQt-side tqttdeintegration_x11.cpp.  Keep the pkg-config query as the default but let
 -DTQT_PLUGINS_DIR override it.
 
 ---
