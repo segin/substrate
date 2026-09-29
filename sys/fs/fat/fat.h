@@ -92,7 +92,24 @@ typedef struct fat_fs {
     uint8_t *fat_table;             // Cached FAT table
     uint32_t fat_table_size;        // Size of cached FAT in bytes
     fs_node_t *root_node;           // Root node of the filesystem
+    /* FAT32 FSInfo sector: the free-cluster count and next-free hint other
+     * systems (and fsck) read.  fsinfo_sector is 0 when there is no valid
+     * FSInfo sector (FAT12/16, or bad signatures). */
+    uint32_t fsinfo_sector;
+    uint32_t free_count;            // Free clusters, kept current
+    uint32_t next_free;             // Hint: first cluster to try
+    int fsinfo_dirty;               // free_count/next_free not yet written
 } fat_fs_t;
+
+/* FAT32 FSInfo sector layout (Microsoft FAT specification). */
+#define FAT_FSINFO_LEAD_SIG        0x41615252
+#define FAT_FSINFO_STRUC_SIG       0x61417272
+#define FAT_FSINFO_TRAIL_SIG       0xAA550000
+#define FAT_FSINFO_LEAD_OFF        0
+#define FAT_FSINFO_STRUC_OFF       484
+#define FAT_FSINFO_FREE_OFF        488
+#define FAT_FSINFO_NEXT_OFF        492
+#define FAT_FSINFO_TRAIL_OFF       508
 
 // FAT File/Directory Node Context
 typedef struct fat_node {

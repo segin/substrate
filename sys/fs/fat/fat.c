@@ -90,6 +90,8 @@ static int fat_create_entry_locked(fs_node_t *parent, const char *name, uint8_t 
 
 static uint32_t fat_cluster_to_sector(fat_fs_t *fs, uint32_t cluster);
 static int fat_raw_fat_entry(fat_fs_t *fs, uint32_t cluster, uint32_t *out);
+static uint32_t fat_count_free(fat_fs_t *fs);
+static int fat_write_fsinfo(fat_fs_t *fs);
 
 /* Write support forward declarations */
 static size_t fat_file_write(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer);
@@ -460,8 +462,13 @@ struct dirent *fat_readdir(fs_node_t *node, uint64_t index) {
                      * it, but FAT32's root IS a normal cluster chain, so a
                      * literal 0 fell through and fat_cluster_to_sector(0)
                      * addressed first_data_sector - 2*spc -- the tail of the
-                     * FAT, parsed as directory entries. */
-                    if (cluster_num == 0 && fs->fat_type == 32) {
+                     * FAT, parsed as directory entries.  Only a directory
+                     * entry means that: an empty regular file also stores
+                     * cluster 0 ("no data yet"), and mapping it to the root
+                     * made the file's first write overwrite the root
+                     * directory. */
+                    if (cluster_num == 0 && fs->fat_type == 32 &&
+                        (entry->attr & FAT_ATTR_DIRECTORY)) {
                         cluster_num = fs->ext_bpb.root_cluster;
                     }
                     dirent->d_ino = fat_make_synth_inode(fs, 0, sector_i, i, cluster_num);
@@ -539,8 +546,13 @@ struct dirent *fat_readdir(fs_node_t *node, uint64_t index) {
                      * it, but FAT32's root IS a normal cluster chain, so a
                      * literal 0 fell through and fat_cluster_to_sector(0)
                      * addressed first_data_sector - 2*spc -- the tail of the
-                     * FAT, parsed as directory entries. */
-                    if (cluster_num == 0 && fs->fat_type == 32) {
+                     * FAT, parsed as directory entries.  Only a directory
+                     * entry means that: an empty regular file also stores
+                     * cluster 0 ("no data yet"), and mapping it to the root
+                     * made the file's first write overwrite the root
+                     * directory. */
+                    if (cluster_num == 0 && fs->fat_type == 32 &&
+                        (entry->attr & FAT_ATTR_DIRECTORY)) {
                         cluster_num = fs->ext_bpb.root_cluster;
                     }
                 dirent->d_ino = fat_make_synth_inode(fs, ctx->first_cluster, 0, i, cluster_num);
@@ -570,15 +582,7 @@ static int fat_statfs(fs_node_t *node, struct statfs *buf) {
     fat_fs_t *fs = ctx->fs;
 
     uint32_t total = fs->total_clusters;
-    uint32_t freec = 0;
-    for (uint32_t c = 2; c < total + 2; c++) {
-        uint32_t entry_val;
-        /* Must read the raw entry: fat_get_next_cluster() maps a free entry to
-         * the EOC sentinel, never to 0, so the old test could not match and df
-         * reported every FAT volume as 100% full. */
-        if (fat_raw_fat_entry(fs, c, &entry_val) == 0 && entry_val == 0)
-            freec++;
-    }
+    uint32_t freec = fat_count_free(fs);
 
     memset(buf, 0, sizeof(*buf));
     uint32_t bsize = fs->cluster_size ? fs->cluster_size :
@@ -779,8 +783,13 @@ fs_node_t *fat_finddir(fs_node_t *node, char *name) {
                      * it, but FAT32's root IS a normal cluster chain, so a
                      * literal 0 fell through and fat_cluster_to_sector(0)
                      * addressed first_data_sector - 2*spc -- the tail of the
-                     * FAT, parsed as directory entries. */
-                    if (cluster_num == 0 && fs->fat_type == 32) {
+                     * FAT, parsed as directory entries.  Only a directory
+                     * entry means that: an empty regular file also stores
+                     * cluster 0 ("no data yet"), and mapping it to the root
+                     * made the file's first write overwrite the root
+                     * directory. */
+                    if (cluster_num == 0 && fs->fat_type == 32 &&
+                        (entry->attr & FAT_ATTR_DIRECTORY)) {
                         cluster_num = fs->ext_bpb.root_cluster;
                     }
                     uint64_t inode = fat_make_synth_inode(fs, 0, sector_i, i, cluster_num);
@@ -875,8 +884,13 @@ fs_node_t *fat_finddir(fs_node_t *node, char *name) {
                      * it, but FAT32's root IS a normal cluster chain, so a
                      * literal 0 fell through and fat_cluster_to_sector(0)
                      * addressed first_data_sector - 2*spc -- the tail of the
-                     * FAT, parsed as directory entries. */
-                    if (cluster_num == 0 && fs->fat_type == 32) {
+                     * FAT, parsed as directory entries.  Only a directory
+                     * entry means that: an empty regular file also stores
+                     * cluster 0 ("no data yet"), and mapping it to the root
+                     * made the file's first write overwrite the root
+                     * directory. */
+                    if (cluster_num == 0 && fs->fat_type == 32 &&
+                        (entry->attr & FAT_ATTR_DIRECTORY)) {
                         cluster_num = fs->ext_bpb.root_cluster;
                     }
                 uint64_t inode = fat_make_synth_inode(fs, ctx->first_cluster, 0, i, cluster_num);
@@ -900,12 +914,26 @@ fs_node_t *fat_finddir(fs_node_t *node, char *name) {
     return NULL;
 }
 
+/* sync(2)/fsync(2) hook: bring the FSInfo free count up to date. */
+static int fat_syncfs(fs_node_t *root) {
+    fat_node_t *ctx = root ? (fat_node_t *)(uintptr_t)root->impl : NULL;
+    if (!ctx || !ctx->fs) return -1;
+    fat_io_lock();
+    int r = fat_write_fsinfo(ctx->fs);
+    fat_io_unlock();
+    return r;
+}
+
 static int fat_unmount(fs_node_t *root) {
     if (!root) return -1;
     fat_node_t *ctx = (fat_node_t *)(uintptr_t)root->impl;
     if (!ctx) return -1;
     fat_fs_t *fs = ctx->fs;
     if (!fs) return -1;
+
+    fat_io_lock();
+    (void)fat_write_fsinfo(fs);
+    fat_io_unlock();
 
     // Invalidate node cache for this filesystem
     for (int i = 0; i < FAT_NODE_CACHE_SIZE; i++) {
@@ -930,7 +958,7 @@ static int fat_unmount(fs_node_t *root) {
 
 // Mount FAT filesystem
 fs_node_t *fat_mount(const char *device, uint32_t flags, void *data) {
-    (void)device; (void)flags;
+    (void)device;
     
     fs_node_t *dev = (fs_node_t *)data;
     if (!dev || !dev->read) {
@@ -1050,7 +1078,39 @@ fs_node_t *fat_mount(const char *device, uint32_t flags, void *data) {
     }
     
     kprint(")\n");
-    
+
+    /*
+     * FAT32 FSInfo: other systems and fsck trust its free-cluster count and
+     * next-free hint, so keep them right.  Count the free clusters once now
+     * (the stored count is only a hint and may be stale), keep the count
+     * current as clusters are allocated and freed, and write it back on
+     * sync and unmount.  A stale stored count is corrected on the next
+     * write-back -- unless the mount is read-only.
+     */
+    if (fs->fat_type == 32 && fs->ext_bpb.fs_info != 0 &&
+        fs->ext_bpb.fs_info < fs->bpb.reserved_sectors &&
+        fs->bpb.bytes_per_sector >= 512 && fs->bpb.bytes_per_sector <= 4096) {
+        uint8_t fsi[4096];
+        if (fat_read_sectors(fs, fs->ext_bpb.fs_info, 1, fsi) == 0) {
+            uint32_t lead, struc, trail, stored_free, stored_next;
+            memcpy(&lead, fsi + FAT_FSINFO_LEAD_OFF, 4);
+            memcpy(&struc, fsi + FAT_FSINFO_STRUC_OFF, 4);
+            memcpy(&trail, fsi + FAT_FSINFO_TRAIL_OFF, 4);
+            memcpy(&stored_free, fsi + FAT_FSINFO_FREE_OFF, 4);
+            memcpy(&stored_next, fsi + FAT_FSINFO_NEXT_OFF, 4);
+            if (lead == FAT_FSINFO_LEAD_SIG && struc == FAT_FSINFO_STRUC_SIG &&
+                trail == FAT_FSINFO_TRAIL_SIG) {
+                fs->fsinfo_sector = fs->ext_bpb.fs_info;
+                fs->free_count = fat_count_free(fs);
+                fs->next_free = (stored_next >= 2 &&
+                                 stored_next < fs->total_clusters + 2)
+                                ? stored_next : 2;
+                if (stored_free != fs->free_count && !(flags & MNT_RDONLY))
+                    fs->fsinfo_dirty = 1;
+            }
+        }
+    }
+
     uint32_t root_cluster = (fs->fat_type == 32) ? fs->ext_bpb.root_cluster : 0;
     fs_node_t *tmp = fat_alloc_node(fs, "/", FAT_ROOT_INO, root_cluster, 0, FAT_ATTR_DIRECTORY);
     if (tmp) {
@@ -1066,6 +1126,7 @@ fs_node_t *fat_mount(const char *device, uint32_t flags, void *data) {
             *rn = *tmp;
             rn->impl    = (uint32_t)(uintptr_t)rc;
             rn->unmount = fat_unmount;
+            rn->syncfs  = fat_syncfs;
             fs->root_node = rn;
         } else {
             if (rn) kfree(rn, sizeof(fs_node_t));
@@ -1236,6 +1297,42 @@ static int fat_raw_fat_entry(fat_fs_t *fs, uint32_t cluster, uint32_t *out) {
     }
 }
 
+/* Number of free clusters, from the FAT itself. */
+static uint32_t fat_count_free(fat_fs_t *fs) {
+    uint32_t freec = 0;
+    for (uint32_t c = 2; c < fs->total_clusters + 2; c++) {
+        uint32_t entry_val;
+        /* Must read the raw entry: fat_get_next_cluster() maps a free entry to
+         * the EOC sentinel, never to 0. */
+        if (fat_raw_fat_entry(fs, c, &entry_val) == 0 && entry_val == 0)
+            freec++;
+    }
+    return freec;
+}
+
+/*
+ * Write the FAT32 FSInfo free count and next-free hint if they changed.
+ * Caller holds fat_io_lock.
+ */
+static int fat_write_fsinfo(fat_fs_t *fs) {
+    if (!fs->fsinfo_sector || !fs->fsinfo_dirty) return 0;
+
+    uint8_t fsi[4096];
+    if (fat_read_sectors(fs, fs->fsinfo_sector, 1, fsi) != 0) return -1;
+    fat_alloc_lock_ensure();
+    mutex_lock(&fat_alloc_lock);
+    uint32_t freec = fs->free_count, next = fs->next_free;
+    fs->fsinfo_dirty = 0;
+    mutex_unlock(&fat_alloc_lock);
+    memcpy(fsi + FAT_FSINFO_FREE_OFF, &freec, 4);
+    memcpy(fsi + FAT_FSINFO_NEXT_OFF, &next, 4);
+    if (fat_write_sectors(fs, fs->fsinfo_sector, 1, fsi) != 0) {
+        fs->fsinfo_dirty = 1;
+        return -1;
+    }
+    return 0;
+}
+
 static uint32_t fat_alloc_cluster(fat_fs_t *fs) {
     fat_alloc_lock_ensure();
     mutex_lock(&fat_alloc_lock);
@@ -1249,6 +1346,11 @@ static uint32_t fat_alloc_cluster(fat_fs_t *fs) {
         if (entry_val == 0) {
             /* Mark as EOC */
             if (fat_set_fat_entry(fs, c, fat_eoc(fs)) == 0) {
+                if (fs->fsinfo_sector) {
+                    if (fs->free_count > 0) fs->free_count--;
+                    fs->next_free = (c + 1 < fs->total_clusters + 2) ? c + 1 : 2;
+                    fs->fsinfo_dirty = 1;
+                }
                 mutex_unlock(&fat_alloc_lock);
                 return c;
             }
@@ -1264,7 +1366,13 @@ static int fat_free_chain(fat_fs_t *fs, uint32_t cluster) {
     while (cluster >= 2 && cluster < 0x0FFFFFF8) {
         if (++visited > fs->total_clusters) break;
         uint32_t next = fat_get_next_cluster(fs, cluster);
-        fat_set_fat_entry(fs, cluster, 0);
+        if (fat_set_fat_entry(fs, cluster, 0) == 0 && fs->fsinfo_sector) {
+            fat_alloc_lock_ensure();
+            mutex_lock(&fat_alloc_lock);
+            fs->free_count++;
+            fs->fsinfo_dirty = 1;
+            mutex_unlock(&fat_alloc_lock);
+        }
         cluster = next;
     }
     return 0;
@@ -1894,8 +2002,14 @@ static int fat_create_entry_locked(fs_node_t *parent, const char *name, uint8_t 
         __builtin_memset(&dotdot, 0, sizeof(dotdot));
         __builtin_memcpy(dotdot.name, "..         ", 11);
         dotdot.attr = FAT_ATTR_DIRECTORY;
-        dotdot.cluster_high = (uint16_t)(dir_cluster >> 16);
-        dotdot.cluster_low  = (uint16_t)(dir_cluster & 0xFFFF);
+        /* ".." of a directory in the root stores cluster 0, even on FAT32
+         * where the root has a real cluster (FAT specification; fsck.fat
+         * rejects the root's cluster number here). */
+        uint32_t parent_cluster = dir_cluster;
+        if (fs->fat_type == 32 && dir_cluster == fs->ext_bpb.root_cluster)
+            parent_cluster = 0;
+        dotdot.cluster_high = (uint16_t)(parent_cluster >> 16);
+        dotdot.cluster_low  = (uint16_t)(parent_cluster & 0xFFFF);
 
         fat_read_sectors(fs, new_sector, 1, zero_buf);
         __builtin_memcpy(zero_buf, &dot, 32);
