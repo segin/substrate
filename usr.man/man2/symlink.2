@@ -1,0 +1,150 @@
+.\"
+.\" SYMLINK(2) - Substrate Native Personality
+.\"
+.TH SYMLINK 2 "2026-09-29" "Substrate OS" "System Calls"
+.SH NAME
+symlink, symlinkat \- make a symbolic link
+.SH LIBRARY
+Standard C library
+.RI ( libc ,\~ \-lc )
+.SH SYNOPSIS
+.nf
+.B #include <unistd.h>
+.PP
+.BI "int symlink(const char *" target ", const char *" linkpath );
+.PP
+.BR "#include <fcntl.h>" "           /* Definition of AT_* constants */"
+.B #include <unistd.h>
+.PP
+.BI "int symlinkat(const char *" target ", int " newdirfd \
+", const char *" linkpath );
+.fi
+.SH DESCRIPTION
+.BR symlink ()
+creates a symbolic link named
+.I linkpath
+whose contents are the string
+.IR target .
+.PP
+.I target
+is stored as given and is not checked: it may be relative (resolved
+against the directory containing the link when the link is followed),
+absolute, or name nothing at all (a dangling link).
+Most path lookups follow the link to
+.IR target ;
+.BR lstat (2),
+.BR readlink (2),
+.BR unlink (2)
+and
+.BR rename (2)
+act on the link itself.
+.PP
+.BR symlinkat ()
+is the same, with a relative
+.I linkpath
+resolved against the directory open on
+.IR newdirfd .
+On Substrate only
+.B AT_FDCWD
+is supported for
+.I newdirfd
+(see
+.BR BUGS ).
+.SH RETURN VALUE
+On success, 0 is returned.
+On error, \-1 is returned and
+.I errno
+is set to indicate the error.
+.SH ERRORS
+.TP
+.B EACCES
+Write permission is denied on the directory that would contain
+.IR linkpath ,
+or search permission is denied on a directory in its path prefix.
+.TP
+.B EEXIST
+.I linkpath
+already exists (whatever it is; an existing name is never replaced).
+.TP
+.B EFAULT
+.I target
+or
+.I linkpath
+points outside the accessible address space, or is longer than 255
+bytes (see
+.BR BUGS ).
+.TP
+.B ENOENT
+A directory in the path prefix of
+.I linkpath
+does not exist, or
+.I target
+is the empty string.
+.TP
+.B ENOSYS
+.RB ( symlinkat ())
+.I newdirfd
+is not
+.BR AT_FDCWD .
+.TP
+.B EROFS
+.I linkpath
+would be on a file system mounted read-only.
+.SH NOTES
+.SS Substrate Native ABI
+.nf
+Syscall Number: 83 (SYS_SYMLINK)
+Arguments:      const char *target, const char *linkpath
+Returns:        0, or \-errno
+.fi
+.PP
+.BR symlinkat ()
+has no system call of its own; the C library calls
+.BR symlink ()
+when
+.I newdirfd
+is
+.BR AT_FDCWD .
+.SH EXAMPLE
+Point a stable name at a versioned file:
+.PP
+.EX
+#include <stdio.h>
+#include <unistd.h>
+
+int
+main(void)
+{
+    if (symlink("libfoo.so.1.2.3", "/usr/lib/libfoo.so.1") != 0) {
+        perror("symlink");
+        return 1;
+    }
+    return 0;
+}
+.EE
+.SH SEE ALSO
+.BR ln (1),
+.BR link (2),
+.BR lstat (2),
+.BR readlink (2),
+.BR rename (2),
+.BR unlink (2)
+.SH STANDARDS
+POSIX.1-2024.
+.SH BUGS
+.BR symlinkat ()
+fails with
+.B ENOSYS
+for any
+.I newdirfd
+other than
+.BR AT_FDCWD .
+.PP
+A
+.I target
+or
+.I linkpath
+longer than 255 bytes fails with
+.B EFAULT
+rather than
+.BR ENAMETOOLONG .

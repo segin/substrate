@@ -1,0 +1,189 @@
+.\"
+.\" UNLINK(2) - Substrate Native Personality
+.\"
+.TH UNLINK 2 "2026-09-29" "Substrate OS" "System Calls"
+.SH NAME
+unlink, unlinkat \- remove a directory entry
+.SH LIBRARY
+Standard C library
+.RI ( libc ,\~ \-lc )
+.SH SYNOPSIS
+.nf
+.B #include <unistd.h>
+.PP
+.BI "int unlink(const char *" path );
+.PP
+.BR "#include <fcntl.h>" "           /* Definition of AT_* constants */"
+.B #include <unistd.h>
+.PP
+.BI "int unlinkat(int " dirfd ", const char *" path ", int " flags );
+.fi
+.SH DESCRIPTION
+.BR unlink ()
+removes the directory entry
+.I path
+and decrements the link count of the file it names.
+When the count reaches zero and no process has the file open, the file's
+storage is released; if a process still has it open, the storage is
+released when the last descriptor is closed.
+If
+.I path
+names a symbolic link, the link itself is removed, not the file it
+points to.
+.PP
+.BR unlinkat ()
+does the same, except that a relative
+.I path
+is resolved against the directory open on
+.I dirfd
+(or the current directory if
+.I dirfd
+is
+.BR AT_FDCWD ),
+and that
+.I flags
+may be
+.BR AT_REMOVEDIR ,
+in which case
+.I path
+must name an empty directory, which is removed as by
+.BR rmdir (2).
+.PP
+Removing an entry requires write and search permission on the directory
+that contains it.
+If that directory has the sticky bit set
+.RB ( S_ISVTX ),
+an unprivileged caller may only remove entries for files it owns or in
+a directory it owns.
+.SH RETURN VALUE
+On success, 0 is returned.
+On error, \-1 is returned and
+.I errno
+is set to indicate the error.
+.SH ERRORS
+.TP
+.B EACCES
+Write permission is denied on the directory containing
+.IR path ,
+or search permission is denied on a directory in the path prefix.
+.TP
+.B EBADF
+.RB ( unlinkat ())
+.I path
+is relative and
+.I dirfd
+is neither
+.B AT_FDCWD
+nor an open descriptor.
+.TP
+.B EFAULT
+.I path
+points outside the accessible address space, or is longer than 255
+bytes (see
+.BR BUGS ).
+.TP
+.B EINVAL
+.I path
+is empty, or
+.RB ( unlinkat ())
+.I flags
+contains a bit other than
+.BR AT_REMOVEDIR .
+.TP
+.B EISDIR
+.I path
+names a directory (use
+.BR rmdir (2)
+or
+.B AT_REMOVEDIR
+instead).
+.TP
+.B ENOENT
+A component of
+.I path
+does not exist, or
+.I path
+does not exist.
+.TP
+.B ENOSYS
+The file system does not support removing entries (devfs and procfs),
+or a component of the path prefix is a regular file (see
+.BR BUGS ).
+.TP
+.B ENOTDIR
+.RB ( unlinkat ())
+.I path
+is relative and
+.I dirfd
+refers to a file other than a directory; or
+.B AT_REMOVEDIR
+was given and
+.I path
+does not name a directory.
+.TP
+.B EPERM
+The containing directory has the sticky bit set and the caller owns
+neither the file nor the directory, and is not privileged.
+.TP
+.B EROFS
+The entry is on a file system mounted read-only.
+.SH NOTES
+.SS Substrate Native ABI
+.nf
+unlink:    Syscall Number: 10 (SYS_UNLINK)
+           Arguments:      const char *path
+unlinkat:  Syscall Number: 301 (SYS_UNLINKAT)
+           Arguments:      int dirfd, const char *path, int flags
+Returns:   0, or \-errno
+.fi
+.SH EXAMPLE
+Create a scratch file, keep using it, and make sure its name is gone
+even if the program is killed:
+.PP
+.EX
+#include <fcntl.h>
+#include <unistd.h>
+
+int
+scratch_fd(void)
+{
+    int fd = open("/tmp/scratch", O_RDWR | O_CREAT | O_EXCL, 0600);
+
+    if (fd >= 0)
+        unlink("/tmp/scratch");   /* storage lives until close(fd) */
+    return fd;
+}
+.EE
+.SH SEE ALSO
+.BR rm (1),
+.BR close (2),
+.BR link (2),
+.BR rename (2),
+.BR rmdir (2),
+.BR symlink (2)
+.SH STANDARDS
+POSIX.1-2024.
+.SH BUGS
+These differ from POSIX:
+.IP \(bu 2
+A
+.I path
+longer than 255 bytes fails with
+.B EFAULT
+rather than
+.BR ENAMETOOLONG .
+.IP \(bu
+A path prefix that runs through a regular file fails with
+.B ENOSYS
+rather than
+.BR ENOTDIR .
+.IP \(bu
+A symbolic-link loop in the path prefix fails with
+.B ENOENT
+rather than
+.BR ELOOP .
+.IP \(bu
+On devfs and procfs the call fails with
+.B ENOSYS
+rather than
+.BR EPERM .
