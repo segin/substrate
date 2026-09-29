@@ -78,12 +78,21 @@ or
 .I linkpath
 is longer than 255 bytes.
 .TP
+.B ELOOP
+Too many symbolic links were met resolving the path prefix of
+.IR linkpath .
+.TP
 .B ENOENT
 A directory in the path prefix of
 .I linkpath
 does not exist, or
 .I target
 is the empty string.
+.TP
+.B ENOTDIR
+A component of the path prefix of
+.I linkpath
+is not a directory.
 .TP
 .B ENOSYS
 .RB ( symlinkat ())

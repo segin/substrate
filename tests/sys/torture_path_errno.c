@@ -5,6 +5,11 @@
  *                longer than 255 bytes, fails with ENAMETOOLONG (was
  *                EFAULT: path syscalls turned every copyinstr() failure
  *                into EFAULT); a bad pointer is still EFAULT.
+ *   eloop        a symbolic-link loop in the directory part of a path is
+ *                ELOOP (was ENOENT for unlink, symlink, ...);
+ *   notdir       a regular file in the directory part of a path is ENOTDIR
+ *                (was ENOSYS for unlink when it was the immediate parent,
+ *                ENOENT deeper down).
  *
  * Runs as init; prints a "Result:" line.
  */
@@ -58,11 +63,62 @@ static void test_nametoolong(void)
     expect("stat(bad pointer)", stat(bad, &st), EFAULT);
 }
 
+static void test_eloop(void)
+{
+    struct stat st;
+    int fd;
+
+    unlink("/tmp/pe_loop1");
+    unlink("/tmp/pe_loop2");
+    symlink("pe_loop2", "/tmp/pe_loop1");
+    symlink("pe_loop1", "/tmp/pe_loop2");
+
+    expect("unlink(loop/x)", unlink("/tmp/pe_loop1/x"), ELOOP);
+    expect("unlinkat(loop/x)", unlinkat(AT_FDCWD, "/tmp/pe_loop1/x", 0), ELOOP);
+    expect("symlink(t, loop/l)", symlink("t", "/tmp/pe_loop1/l"), ELOOP);
+    expect("mkdir(loop/d)", mkdir("/tmp/pe_loop1/d", 0755), ELOOP);
+    expect("rmdir(loop/d)", rmdir("/tmp/pe_loop1/d"), ELOOP);
+    expect("rename(loop/a, x)", rename("/tmp/pe_loop1/a", "/tmp/pe_x"), ELOOP);
+    expect("stat(loop/x)", stat("/tmp/pe_loop1/x", &st), ELOOP);
+    fd = open("/tmp/pe_loop1/x", O_RDONLY);
+    expect("open(loop/x)", fd, ELOOP);
+    fd = open("/tmp/pe_loop1/x", O_CREAT | O_WRONLY, 0644);
+    expect("open(loop/x, O_CREAT)", fd, ELOOP);
+    expect("chmod(loop/x)", chmod("/tmp/pe_loop1/x", 0644), ELOOP);
+}
+
+static void test_notdir(void)
+{
+    struct stat st;
+    int fd;
+
+    fd = open("/tmp/pe_file", O_CREAT | O_WRONLY, 0644);
+    close(fd);
+
+    expect("unlink(file/x)", unlink("/tmp/pe_file/x"), ENOTDIR);
+    expect("unlink(file/a/b)", unlink("/tmp/pe_file/a/b"), ENOTDIR);
+    expect("unlinkat(file/x)", unlinkat(AT_FDCWD, "/tmp/pe_file/x", 0), ENOTDIR);
+    expect("symlink(t, file/l)", symlink("t", "/tmp/pe_file/l"), ENOTDIR);
+    expect("mkdir(file/d)", mkdir("/tmp/pe_file/d", 0755), ENOTDIR);
+    expect("rmdir(file/d)", rmdir("/tmp/pe_file/d"), ENOTDIR);
+    expect("rename(file/a, x)", rename("/tmp/pe_file/a", "/tmp/pe_x"), ENOTDIR);
+    expect("stat(file/x)", stat("/tmp/pe_file/x", &st), ENOTDIR);
+    fd = open("/tmp/pe_file/x", O_RDONLY);
+    expect("open(file/x)", fd, ENOTDIR);
+    fd = open("/tmp/pe_file/x", O_CREAT | O_WRONLY, 0644);
+    expect("open(file/x, O_CREAT)", fd, ENOTDIR);
+    unlink("/tmp/pe_file");
+}
+
 int main(void)
 {
     mkdir("/tmp", 01777);
     printf("nametoolong\n");
     test_nametoolong();
+    printf("eloop\n");
+    test_eloop();
+    printf("notdir\n");
+    test_notdir();
     printf("Result: %s (%d failure%s)\n", failures ? "FAIL" : "PASS",
            failures, failures == 1 ? "" : "s");
     return failures != 0;

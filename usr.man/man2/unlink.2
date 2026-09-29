@@ -108,11 +108,14 @@ does not exist, or
 does not exist.
 .TP
 .B ENOSYS
-The file system does not support removing entries (devfs and procfs),
-or a component of the path prefix is a regular file (see
+The file system does not support removing entries (devfs and procfs; see
 .BR BUGS ).
 .TP
+.B ELOOP
+Too many symbolic links were met resolving the path prefix.
+.TP
 .B ENOTDIR
+A component of the path prefix is not a directory; or
 .RB ( unlinkat ())
 .I path
 is relative and
@@ -166,18 +169,6 @@ scratch_fd(void)
 .SH STANDARDS
 POSIX.1-2024.
 .SH BUGS
-These differ from POSIX:
-.IP \(bu 2
-A path prefix that runs through a regular file fails with
-.B ENOSYS
-rather than
-.BR ENOTDIR .
-.IP \(bu
-A symbolic-link loop in the path prefix fails with
-.B ENOENT
-rather than
-.BR ELOOP .
-.IP \(bu
 On devfs and procfs the call fails with
 .B ENOSYS
 rather than

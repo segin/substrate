@@ -349,6 +349,8 @@ static int kern_resolve_parent_at(const char *path, fs_node_t *root, fs_node_t *
         dir[dirlen] = '\0';
         parent = vfs_lookup((path[0] == '/') ? root : cwd, dir);
         *name_out = last_slash + 1;
+        if (!parent)
+            return vfs_lookup_error((path[0] == '/') ? root : cwd, dir);
     }
 
     if (!parent) return -ENOENT;
@@ -713,7 +715,7 @@ static int kern_open_from(const char *path, int flags, int mode, fs_node_t *root
 
         if (!(flags & O_CREAT)) {
             proc_clear_fd(current_process, fd);
-            return -ENOENT;
+            return vfs_lookup_error((path[0] == '/') ? root : cwd, path);
         }
 
         error = kern_resolve_parent_at(path, root, cwd, &parent, &create_name);
@@ -732,7 +734,7 @@ static int kern_open_from(const char *path, int flags, int mode, fs_node_t *root
         node = vfs_perso_lookup_flags(root, cwd, path, lookup_flags);
         if (!node) {
             proc_clear_fd(current_process, fd);
-            return -ENOENT;
+            return vfs_lookup_error((path[0] == '/') ? root : cwd, path);
         }
     } else if ((flags & (O_CREAT | O_EXCL)) == (O_CREAT | O_EXCL)) {
         proc_clear_fd(current_process, fd);
@@ -1023,10 +1025,18 @@ kern_resolve_parent_dirfd(int dirfd, const char *path, fs_node_t **parent_out, c
             return -ENAMETOOLONG;
         }
         parent = vfs_lookup(lookup_root, dir);
+        if (!parent) {
+            return vfs_lookup_error(lookup_root, dir);
+        }
     }
 
     if (!parent) {
         return -ENOENT;
+    }
+    /* A regular file as the parent used to reach the file system's unlink
+     * hook (ENOSYS) or create hook; POSIX says ENOTDIR. */
+    if ((parent->flags & 0x7) != FS_DIRECTORY) {
+        return -ENOTDIR;
     }
     if (name_out[0] == '\0') {
         return -EINVAL;
@@ -2134,7 +2144,7 @@ int kern_stat(const char *path, struct stat *buf) {
     fs_node_t *root = current_process->root_node ? current_process->root_node : fs_root;
     fs_node_t *cwd  = current_process->cwd_node  ? current_process->cwd_node  : root;
     fs_node_t *node = vfs_perso_lookup(root, cwd, path);
-    if (!node) return -ENOENT;
+    if (!node) return vfs_lookup_error((path[0] == '/') ? root : cwd, path);
     /* Match the close_fs below.  vfs_perso_lookup itself does not
      * open_fs the returned node, so without this pin bump close_fs
      * would drop a reference that was borrowed from somewhere else
@@ -2174,7 +2184,7 @@ int kern_lstat(const char *path, struct stat *buf) {
         }
     }
     if (!node) node = vfs_lookup_lstat_ref((path[0] == '/') ? root : cwd, path);
-    if (!node) return -ENOENT;
+    if (!node) return vfs_lookup_error((path[0] == '/') ? root : cwd, path);
     fill_stat(buf, node);
     close_fs(node);
     return 0;
@@ -2235,7 +2245,7 @@ int sys_utimensat(int dirfd, const char *path,
             base = (fs_node_t *)f->f_data;
         }
         node = vfs_lookup_ref(base, kpath);
-        if (!node) return -ENOENT;
+        if (!node) return vfs_lookup_error(base, kpath);
         int rc = kern_utimens_apply(node, p);
         close_fs(node);
         return rc;
@@ -2673,7 +2683,7 @@ int kern_fstatat(int dirfd, const char *path, struct stat *buf, int flags) {
     node = nofollow
         ? vfs_lookup_lstat_ref((path[0] == '/') ? root : cwd, path)
         : vfs_lookup_ref((path[0] == '/') ? root : cwd, path);
-    if (!node) return -ENOENT;
+    if (!node) return vfs_lookup_error((path[0] == '/') ? root : cwd, path);
 
     fill_stat(buf, node);
     close_fs(node);
@@ -2862,7 +2872,7 @@ int kern_statfs(const char *path, struct statfs *buf) {
     fs_node_t *root = current_process->root_node ? current_process->root_node : fs_root;
     fs_node_t *cwd = current_process->cwd_node ? current_process->cwd_node : root;
     fs_node_t *node = vfs_lookup(path[0] == '/' ? root : cwd, path);
-    if (!node) return -ENOENT;
+    if (!node) return vfs_lookup_error(path[0] == '/' ? root : cwd, path);
     return statfs_fs(node, buf);
 }
 
@@ -2887,7 +2897,7 @@ int kern_statvfs(const char *path, struct statvfs *buf) {
     fs_node_t *root = current_process->root_node ? current_process->root_node : fs_root;
     fs_node_t *cwd = current_process->cwd_node ? current_process->cwd_node : root;
     fs_node_t *node = vfs_lookup(path[0] == '/' ? root : cwd, path);
-    if (!node) return -ENOENT;
+    if (!node) return vfs_lookup_error(path[0] == '/' ? root : cwd, path);
     return statvfs_fs(node, buf);
 }
 
@@ -2932,7 +2942,7 @@ int kern_link(const char *oldpath, const char *newpath) {
      * X server running from a non-root cwd hits link("/tmp/.tX0-lock",
      * "/tmp/.X0-lock") -> ENOENT and crashes at LockServer. */
     fs_node_t *source = vfs_lookup(oldpath[0] == '/' ? root : cwd, oldpath);
-    if (!source) return -ENOENT;
+    if (!source) return vfs_lookup_error(oldpath[0] == '/' ? root : cwd, oldpath);
 
     // Resolve newpath to parent directory and name
     char dir[256];
@@ -3003,9 +3013,11 @@ int kern_symlink(const char *target, const char *linkpath) {
 
         if (strlcpy(file, last_slash + 1, sizeof(file)) >= sizeof(file)) return -ENAMETOOLONG;
         parent = vfs_lookup((linkpath[0] == '/') ? root : cwd, dir);
+        if (!parent) return vfs_lookup_error((linkpath[0] == '/') ? root : cwd, dir);
     }
 
     if (!parent) return -ENOENT;
+    if ((parent->flags & 0x7) != FS_DIRECTORY) return -ENOTDIR;
     if (!file[0]) return -EINVAL;
     if ((parent->flags & 0x07) != FS_DIRECTORY) return -ENOTDIR;
     if (parent->finddir && parent->finddir(parent, file) != NULL) return -EEXIST;
@@ -3100,7 +3112,7 @@ int kern_readlinkat(int dirfd, const char *pathname, char *buf, size_t bufsiz) {
         }
     }
     if (!node) node = vfs_lookup_lstat((pathname[0] == '/') ? root : cwd, pathname);
-    if (!node) return -ENOENT;
+    if (!node) return vfs_lookup_error((pathname[0] == '/') ? root : cwd, pathname);
     if ((node->flags & 0x07) != FS_SYMLINK) return -EINVAL;
     return readlink_fs(node, buf, bufsiz);
 }
@@ -3120,7 +3132,7 @@ int kern_access(const char *path, int mode) {
     fs_node_t *cwd = current_process->cwd_node ? current_process->cwd_node : root;
     fs_node_t *node = vfs_perso_lookup(root, cwd, path);
 
-    if (!node) return -ENOENT;
+    if (!node) return vfs_lookup_error((path[0] == '/') ? root : cwd, path);
 
     // F_OK check
     if (mode == F_OK) return 0;
@@ -3463,7 +3475,7 @@ int kern_chmodat(int dirfd, const char *path, int mode, int flags) {
     node = nofollow
         ? vfs_lookup_lstat((path[0] == '/') ? root : cwd, path)
         : vfs_lookup((path[0] == '/') ? root : cwd, path);
-    if (!node) return -ENOENT;
+    if (!node) return vfs_lookup_error((path[0] == '/') ? root : cwd, path);
 
     if (current_process->euid != 0 && current_process->euid != node->uid) {
         return -EPERM;
@@ -3619,7 +3631,7 @@ int sys_fchownat(int dirfd, const char *path, int uid, int gid, int flag) {
     ret = kern_path_roots_from_dirfd(dirfd, kpath, &froot, &fcwd);
     if (ret != 0) return ret;
     fs_node_t *node = vfs_perso_lookup(froot, fcwd, kpath);
-    if (!node) return -ENOENT;
+    if (!node) return vfs_lookup_error((kpath[0] == '/') ? froot : fcwd, kpath);
     if (vfs_node_rdonly(node)) return -EROFS;
 
     /* Match fchown's current policy until supplementary groups exist. */
@@ -3963,7 +3975,9 @@ int kern_chdir(const char *path) {
         node = vfs_lookup(cwd, path);
     }
 
-    if (!node) return -ENOENT;
+    if (!node)
+        return vfs_lookup_error((path[0] == '/') ? root :
+            (current_process->cwd_node ? current_process->cwd_node : root), path);
     if ((node->flags & 0x7) != FS_DIRECTORY) return -ENOTDIR;
 
     open_fs(node, 1, 0);

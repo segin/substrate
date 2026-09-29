@@ -265,6 +265,9 @@ void vfs_unmount_all(void);
  * called from blkdev_unregister before the blkdev is torn down. */
 void vfs_force_unmount_dev(struct blkdev *dev);
 fs_node_t *vfs_lookup(fs_node_t *root, const char *path);
+/* The errno (negative) for a lookup of path from base that returned NULL:
+ * -ENOENT, -ENOTDIR, -ELOOP or -ENAMETOOLONG. */
+int vfs_lookup_error(fs_node_t *base, const char *path);
 fs_node_t *vfs_lookup_lstat(fs_node_t *root, const char *path);
 
 /*

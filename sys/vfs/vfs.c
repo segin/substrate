@@ -1555,6 +1555,44 @@ int statvfs_fs(fs_node_t *node, struct statvfs *buf) {
     return 0;
 }
 
+/*
+ * Explain why looking up `path` from `base` failed.  vfs_lookup() reports
+ * every failure as NULL; POSIX wants ENOENT for a missing component,
+ * ENOTDIR for a component that exists but is not a directory, ELOOP for
+ * too many symbolic links and ENAMETOOLONG for a component over NAME_MAX.
+ * Walk the prefixes one component at a time and return the first of those
+ * that applies.  Only for failure paths: it repeats the lookup.
+ */
+int vfs_lookup_error(fs_node_t *base, const char *path) {
+    char prefix[256];
+    size_t len = strlen(path);
+    size_t start, end;
+
+    if (len >= sizeof(prefix)) return -ENAMETOOLONG;
+    for (start = 0; start < len; start = end) {
+        while (start < len && path[start] == '/') start++;
+        if (start >= len) break;
+        for (end = start; end < len && path[end] != '/'; end++)
+            ;
+        if (end - start > 255) return -ENAMETOOLONG;
+
+        memcpy(prefix, path, end);
+        prefix[end] = '\0';
+        if (current_thread) current_thread->vfs_symlink_eloop = 0;
+        fs_node_t *node = vfs_lookup(base, prefix);
+        if (!node) {
+            if (current_thread && current_thread->vfs_symlink_eloop) {
+                current_thread->vfs_symlink_eloop = 0;
+                return -ELOOP;
+            }
+            return -ENOENT;
+        }
+        /* Every component before the last must be a directory. */
+        if (end < len && (node->flags & 0x7) != FS_DIRECTORY) return -ENOTDIR;
+    }
+    return -ENOENT;
+}
+
 static int vfs_resolve_parent_path(const char *path, fs_node_t **parent_out,
                                    char *name_out, size_t name_out_size) {
     fs_node_t *root;
@@ -1600,6 +1638,9 @@ static int vfs_resolve_parent_path(const char *path, fs_node_t **parent_out,
             return -ENAMETOOLONG;
         }
         parent = vfs_lookup(lookup_root, dir);
+        if (!parent) {
+            return vfs_lookup_error(lookup_root, dir);
+        }
     }
 
     if (!parent) {
