@@ -643,6 +643,13 @@ size_t strftime(char *__restrict s, size_t maxsize, const char *__restrict forma
             case 'R': snprintf(tmp, sizeof(tmp), "%.2d:%.2d",
                                tp->tm_hour, tp->tm_min); break;
             case 'S': snprintf(tmp, sizeof(tmp), "%.2d", tp->tm_sec); break;
+            case 's': {
+                /* Seconds since the Epoch (a BSD/GNU extension that
+                 * `date +%s` relies on); mktime() normalises a copy. */
+                struct tm copy = *tp;
+                snprintf(tmp, sizeof(tmp), "%lld", (long long)mktime(&copy));
+                break;
+            }
             case 't': tmp[0] = '\t'; tmp[1] = '\0'; break;
             case 'T': snprintf(tmp, sizeof(tmp), "%.2d:%.2d:%.2d",
                                tp->tm_hour, tp->tm_min, tp->tm_sec); break;

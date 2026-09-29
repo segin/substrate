@@ -1,0 +1,209 @@
+.\" strftime.3 - format date and time
+.TH STRFTIME 3 "2026-09-29" "Substrate" "Library Functions Manual"
+.SH NAME
+strftime \- format date and time
+.SH LIBRARY
+.B libc
+.SH SYNOPSIS
+.B #include <time.h>
+.PP
+.BI "size_t strftime(char *restrict " s ", size_t " max ,
+.BI "                const char *restrict " format ,
+.BI "                const struct tm *restrict " tm );
+.SH DESCRIPTION
+.BR strftime ()
+formats the broken-down time
+.I tm
+according to
+.I format
+and stores the result, including a terminating null byte, in the
+.IR max -byte
+buffer
+.IR s .
+Ordinary characters in
+.I format
+are copied unchanged; each conversion specification, a
+.B %
+followed by a conversion character, is replaced as below.
+Names are those of the POSIX locale, the only locale Substrate has.
+.TP
+.B %a
+Abbreviated weekday name
+.RB ( Sun .. Sat ).
+.TP
+.B %A
+Full weekday name.
+.TP
+.BR %b ", " %h
+Abbreviated month name
+.RB ( Jan .. Dec ).
+.TP
+.B %B
+Full month name.
+.TP
+.B %c
+Date and time, as
+.BR "%a %b %e %H:%M:%S %Y" .
+.TP
+.B %C
+Century (year / 100), two digits.
+.TP
+.B %d
+Day of the month, 01\(en31.
+.TP
+.B %D
+Same as
+.BR %m/%d/%y .
+.TP
+.B %e
+Day of the month, 1\(en31, space-padded to two characters.
+.TP
+.B %F
+Same as
+.BR %Y\-%m\-%d .
+.TP
+.BR %G ", " %g
+ISO 8601 week-based year, with and without the century.
+.TP
+.B %H
+Hour, 00\(en23.
+.TP
+.B %I
+Hour, 01\(en12.
+.TP
+.B %j
+Day of the year, 001\(en366.
+.TP
+.B %m
+Month, 01\(en12.
+.TP
+.B %M
+Minute, 00\(en59.
+.TP
+.B %n
+A newline.
+.TP
+.BR %p ", " %P
+.B AM
+or
+.BR PM ;
+lower case for
+.BR %P .
+.TP
+.B %r
+Same as
+.BR "%I:%M:%S %p" .
+.TP
+.B %R
+Same as
+.BR %H:%M .
+.TP
+.B %s
+Seconds since the Epoch (1970-01-01 00:00:00 UTC), computed with
+.BR mktime (3)
+from a copy of
+.IR tm .
+.TP
+.B %S
+Second, 00\(en60.
+.TP
+.B %t
+A tab.
+.TP
+.B %T
+Same as
+.BR %H:%M:%S .
+.TP
+.B %u
+Weekday, 1\(en7, Monday = 1.
+.TP
+.B %U
+Week of the year, 00\(en53, weeks starting on Sunday.
+.TP
+.B %V
+ISO 8601 week number, 01\(en53.
+.TP
+.B %w
+Weekday, 0\(en6, Sunday = 0.
+.TP
+.B %W
+Week of the year, 00\(en53, weeks starting on Monday.
+.TP
+.B %x
+Date, as
+.BR %m/%d/%y .
+.TP
+.B %X
+Time, as
+.BR %H:%M:%S .
+.TP
+.B %y
+Year without the century, 00\(en99.
+.TP
+.B %Y
+Year.
+.TP
+.B %z
+Offset from UTC; always
+.B +0000
+on Substrate, which keeps wall-clock time in UTC.
+.TP
+.B %Z
+Time zone name; always
+.BR UTC .
+.TP
+.B %%
+A literal
+.BR % .
+.PP
+The
+.B E
+and
+.B O
+modifiers
+.RB ( %Ec ", " %Oy ", ...)"
+are accepted and ignored: the POSIX locale has no alternative
+representations.
+An unknown conversion expands to nothing.
+.SH RETURN VALUE
+The number of bytes stored in
+.IR s ,
+not counting the terminating null byte.
+If the result, including the null byte, does not fit in
+.I max
+bytes, 0 is returned and the contents of
+.I s
+are unspecified.
+A format whose result is legitimately empty also returns 0.
+.SH SEE ALSO
+.BR date (1),
+.BR gmtime (3),
+.BR localtime (3),
+.BR mktime (3),
+.BR strptime (3)
+.SH STANDARDS
+POSIX.1-2024;
+.B %s
+and
+.B %P
+are extensions found in the BSDs and GNU.
+.SH EXAMPLES
+Print the current time as seconds since the Epoch and as a date:
+.PP
+.EX
+#include <stdio.h>
+#include <time.h>
+
+int
+main(void)
+{
+    char buf[64];
+    time_t now = time(NULL);
+
+    if (strftime(buf, sizeof(buf), "%s  %Y\-%m\-%d %H:%M:%S",
+                 gmtime(&now)) == 0)
+        return 1;
+    puts(buf);
+    return 0;
+}
+.EE
