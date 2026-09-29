@@ -35,15 +35,23 @@ static int copy_fd_contents(int src_fd, int dst_fd) {
     }
 }
 
-static int _generate_job_id(char *buf, size_t sz, uid_t uid) {
-    time_t now = time(NULL);
-    // REQ-BATCH-006: Alphanumeric and periods only.
-    int n = snprintf(buf, sz, "%c%08lx.%04x", 
-        'a', // arbitrary prefix
-        (unsigned long)now, 
-        uid & 0xFFFF);
+/* Job IDs are a<time>.<uid>, plus .<seq> when that name is already taken
+ * (a second job from the same user within the same second).
+ * REQ-BATCH-006: alphanumerics and periods only. */
+static int _generate_job_id(char *buf, size_t sz, time_t now, uid_t uid,
+                            unsigned seq) {
+    int n;
+
+    if (seq == 0)
+        n = snprintf(buf, sz, "a%08lx.%04x", (unsigned long)now, uid & 0xFFFF);
+    else
+        n = snprintf(buf, sz, "a%08lx.%04x.%u", (unsigned long)now,
+                     uid & 0xFFFF, seq);
     return (n > 0 && (size_t)n < sz) ? 0 : -1;
 }
+
+/* How many .<seq> suffixes to try before giving up on a name. */
+#define AT_JOB_ID_ATTEMPTS 1000
 
 int at_spool_create_job(const struct batch_submit_request *req, struct batch_submit_result *out_res) {
     time_t sched_time;
@@ -60,8 +68,10 @@ int at_spool_create_job(const struct batch_submit_request *req, struct batch_sub
         return -1;
     }
 
-    // Phase 3.2: Generate Job ID
-    if (_generate_job_id(out_res->job_id, sizeof(out_res->job_id), req->submitter_uid) != 0) {
+    // Phase 3.2: Generate Job ID (made unique when the spool file is committed)
+    time_t id_time = time(NULL);
+    if (_generate_job_id(out_res->job_id, sizeof(out_res->job_id), id_time,
+                         req->submitter_uid, 0) != 0) {
         snprintf(out_res->diagnostics, sizeof(out_res->diagnostics), "Failed to generate job ID");
         out_res->status_code = 1;
         return -1;
@@ -128,14 +138,26 @@ int at_spool_create_job(const struct batch_submit_request *req, struct batch_sub
 
     close(fd);
 
-    snprintf(fin_path, sizeof(fin_path), "%s/%c/%s", AT_SPOOL_ROOT, req->queue, out_res->job_id);
-    if (rename(tmp_template, fin_path) != 0) {
-        snprintf(out_res->diagnostics, sizeof(out_res->diagnostics),
-                 "Failed to commit spool file: %s", strerror(errno));
-        out_res->status_code = 1;
-        unlink(tmp_template);
-        return -1;
+    /* Commit with link(), not rename(): rename silently replaces an existing
+     * job that happens to have the same ID, link fails with EEXIST and we
+     * move on to the next ID. */
+    unsigned seq = 0;
+    for (;;) {
+        snprintf(fin_path, sizeof(fin_path), "%s/%c/%s", AT_SPOOL_ROOT,
+                 req->queue, out_res->job_id);
+        if (link(tmp_template, fin_path) == 0)
+            break;
+        if (errno != EEXIST || ++seq >= AT_JOB_ID_ATTEMPTS ||
+            _generate_job_id(out_res->job_id, sizeof(out_res->job_id), id_time,
+                             req->submitter_uid, seq) != 0) {
+            snprintf(out_res->diagnostics, sizeof(out_res->diagnostics),
+                     "Failed to commit spool file: %s", strerror(errno));
+            out_res->status_code = 1;
+            unlink(tmp_template);
+            return -1;
+        }
     }
+    unlink(tmp_template);
 
     {
         struct timeval times[2];
