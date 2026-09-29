@@ -55,6 +55,11 @@ that the cross configure needs for `-I`/`-L`.
   (multiple-definition under -fno-common); add `<pthread.h>` to the
   kdesktop lock screen.
 - `0005` allow a host-built `gen` binding generator via `GEN_EXECUTABLE`.
+- `0006` let `-DTQT_PLUGINS_DIR` override pkg-config's `pluginsdir`, which
+  under `PKG_CONFIG_SYSROOT_DIR` is the build host's sysroot path.
+  Without it libtqttde installed under `/<build-host path>/opt/trinity/
+  plugins/integration` and had that path compiled in as `TQTTDELIBDIR`;
+  `build.sh` passes `/opt/trinity/plugins`.
 
 ## Toolchain notes (in `contrib/tde/substrate-tde-toolchain.cmake`)
 

@@ -62,7 +62,7 @@ cd "${TREE}"; rm -rf obj; mkdir obj; cd obj
 cmake -G "Unix Makefiles" \
     -DCMAKE_TOOLCHAIN_FILE="${TC}" -DCMAKE_MODULE_PATH="${MODULES}" \
     -DCMAKE_INSTALL_PREFIX=/opt/trinity -DQT_PREFIX_DIR="${TQ}" \
-    -DTDE_PREFIX="${TQ}" \
+    -DTDE_PREFIX="${TQ}" -DTQT_PLUGINS_DIR=/opt/trinity/plugins \
     -DMOC_EXECUTABLE="${TQ}/bin/tqmoc" -DUIC_EXECUTABLE="${TQ}/bin/tquic" \
     -DKDECONFIG_EXECUTABLE="${HOSTBIN}/tde-config" \
     -DKDE3_DCOPIDL_EXECUTABLE="${HOSTBIN}/dcopidl" \

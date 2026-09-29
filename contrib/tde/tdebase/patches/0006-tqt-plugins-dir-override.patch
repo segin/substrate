@@ -1,0 +1,36 @@
+Subject: tqt3integration: let the build set TQT_PLUGINS_DIR
+
+The plugins directory came from `pkg-config --variable=pluginsdir`,
+which in a cross build returns the value prefixed with
+PKG_CONFIG_SYSROOT_DIR -- the build host's sysroot path.  It is the
+install destination of libtqttde and is compiled into it as
+TQTTDELIBDIR, so the plugin was staged under
+<DESTDIR>/<build-host path>/opt/trinity/plugins and looked for itself
+there at run time.  Keep the pkg-config query as the default but let
+-DTQT_PLUGINS_DIR override it.
+
+---
+--- a/tqt3integration/ConfigureChecks.cmake	2026-09-29 02:39:18.718809768 -0500
++++ b/tqt3integration/ConfigureChecks.cmake	2026-09-29 02:39:26.024206355 -0500
+@@ -12,9 +12,15 @@
+ 
+ ##### check for tqt plugins dir #################
+ 
+-execute_process(
+-  COMMAND ${PKG_CONFIG_EXECUTABLE}
+-    tqt-mt --variable=pluginsdir
+-  OUTPUT_VARIABLE TQT_PLUGINS_DIR
+-  OUTPUT_STRIP_TRAILING_WHITESPACE
+-)
++# A cross build's pkg-config prefixes PKG_CONFIG_SYSROOT_DIR onto path
++# variables, so pluginsdir comes back as the build-host sysroot path; it is
++# both the install destination and a path compiled into the library.  Let
++# the build pass the target path instead.
++if( NOT TQT_PLUGINS_DIR )
++  execute_process(
++    COMMAND ${PKG_CONFIG_EXECUTABLE}
++      tqt-mt --variable=pluginsdir
++    OUTPUT_VARIABLE TQT_PLUGINS_DIR
++    OUTPUT_STRIP_TRAILING_WHITESPACE
++  )
++endif( )
