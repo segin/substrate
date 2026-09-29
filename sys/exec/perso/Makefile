@@ -12,4 +12,4 @@ perso.o: $(OBJS)
 	$(LD) $(LDFLAGS) -r -o $@ $(OBJS)
 
 clean:
-	rm -f *.o *.d
+	rm -f perso.o $(OBJS) $(OBJS:.o=.d)

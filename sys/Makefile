@@ -233,6 +233,12 @@ clean:
 	# files that reference generated sources (ksyms_*.c) or deleted headers would
 	# otherwise break the next build.
 	find . -name '*.d' -delete
+	# ...and every object.  The per-directory clean rules miss objects in
+	# subdirectories (exec/perso/{linux,freebsd,netbsd,...}, kern/geom,
+	# drivers/audio, arch/x86-common, ...).  Those survived with their .d files
+	# gone, so no later header change ever rebuilt them: the personalities
+	# kept translating struct stat from a layout two months old.
+	find . -name '*.o' -delete
 	# kernel.freebsd kept in the rm line so old build trees self-clean.
 	rm -f arch/$(ARCH)/floppy/stage1.bin arch/$(ARCH)/floppy/stage2.bin
 
