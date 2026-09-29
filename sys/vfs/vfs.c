@@ -885,24 +885,24 @@ static fs_node_t *finddir_fs_internal(fs_node_t *node, char *name, int depth, in
     return 0;
 }
 
-// Lookup a path from a root node
-fs_node_t *vfs_lookup(fs_node_t *root, const char *path) {
-    if (!path || !root) return NULL;
-    
-    /*
-     * Implement personality shadowing:
-     * Non-native processes try /perso/<name>/<path> first.
-     *
-     * Skip when the path is already under /perso/ — otherwise the
-     * recursive lookup below re-enters this branch and rewrites the
-     * path again ("/perso/linux/perso/linux/..."), each call adding
-     * ~800 bytes of stack, blowing past the 8 KB kernel stack and
-     * corrupting saved return addresses on the way down.  The earlier
-     * "Internal direct lookup to avoid infinite recursion" comment
-     * promised this guard but the code never enforced it.
-     */
-    if (current_process && current_process->perso_id != 0 && path[0] == '/' &&
-        strncmp(path, "/perso/", 7) != 0) {
+/*
+ * Personality shadowing: a non-native process looks an absolute path up
+ * under /perso/<name>/ first, with `lookup` (vfs_lookup, or vfs_lookup_lstat
+ * for the no-follow variant -- which had no shadowing, so a FreeBSD
+ * fstatat(AT_SYMLINK_NOFOLLOW) or lstat saw the native tree).  Returns the
+ * shadowed node, or NULL to fall through to the ordinary lookup.
+ *
+ * Skipped when the path is already under /perso/ — otherwise the recursive
+ * lookup re-enters this and rewrites the path again
+ * ("/perso/linux/perso/linux/..."), each call adding stack until the 8 KB
+ * kernel stack overflows.
+ */
+static fs_node_t *vfs_perso_shadow(const char *path,
+                                   fs_node_t *(*lookup)(fs_node_t *, const char *)) {
+    if (!(current_process && current_process->perso_id != 0 && path[0] == '/' &&
+          strncmp(path, "/perso/", 7) != 0))
+        return NULL;
+    {
         const char *pname = perso_name(current_process->perso_id);
         if (pname) {
             /*
@@ -925,7 +925,7 @@ fs_node_t *vfs_lookup(fs_node_t *root, const char *path) {
             char lname[32];
             size_t k, count = 0;
 
-            if (!ppath) goto perso_done;
+            if (!ppath) return NULL;
             for (k = 0; pname[k] && count < 31; k++) {
                 char c = pname[k];
                 if ((c >= 'A' && c <= 'Z')) {
@@ -939,7 +939,7 @@ fs_node_t *vfs_lookup(fs_node_t *root, const char *path) {
 
             if (count > 0) {
                 snprintf(ppath, 512, "/perso/%s%s", lname, path);
-                fs_node_t *pnode = vfs_lookup(fs_root, ppath);
+                fs_node_t *pnode = lookup(fs_root, ppath);
                 if (pnode) {
                     kfree(ppath, 512);
                     return pnode;
@@ -948,11 +948,19 @@ fs_node_t *vfs_lookup(fs_node_t *root, const char *path) {
             kfree(ppath, 512);
         }
     }
-perso_done:
+    return NULL;
+}
+
+// Lookup a path from a root node
+fs_node_t *vfs_lookup(fs_node_t *root, const char *path) {
+    if (!path || !root) return NULL;
+
+    fs_node_t *shadow = vfs_perso_shadow(path, vfs_lookup);
+    if (shadow) return shadow;
 
     if (path[0] == '/') path++; // Skip leading /
     if (path[0] == '\0') return root; // Root itself
-    
+
     fs_node_t *current = root;
     char component[256];
     const char *p = path;
@@ -1093,6 +1101,10 @@ fs_node_t *vfs_lookup_lstat_ref(fs_node_t *root, const char *path) {
 
 fs_node_t *vfs_lookup_lstat(fs_node_t *root, const char *path) {
     if (!path || !root) return NULL;
+
+    fs_node_t *shadow = vfs_perso_shadow(path, vfs_lookup_lstat);
+    if (shadow) return shadow;
+
     if (path[0] == '/') path++; // Skip leading /
     if (path[0] == '\0') return root; // Root itself
     
