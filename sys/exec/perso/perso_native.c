@@ -240,6 +240,7 @@ static void *native_syscalls[MAX_SYSCALLS] = {
     [SYS_SIGTIMEDWAIT] = (void *)&sys_sigtimedwait,
     [SYS_WRITEV]       = (void *)&sys_writev,
     [SYS_FSYNC]        = (void *)&sys_fsync,
+    [SYS_SYMLINKAT]    = (void *)&sys_symlinkat,
     [SYS_GETRANDOM] = &sys_getrandom,
 };
 
@@ -429,6 +430,7 @@ static const char *native_names[MAX_SYSCALLS] = {
     [SYS_SIGTIMEDWAIT] = "sigtimedwait",
     [SYS_WRITEV]       = "writev",
     [SYS_FSYNC]        = "fsync",
+    [SYS_SYMLINKAT]    = "symlinkat",
     [SYS_GETRANDOM] = "getrandom",
 };
 
@@ -618,6 +620,7 @@ static struct syscall_fmt native_fmts[MAX_SYSCALLS] = {
     [SYS_SIGTIMEDWAIT] = { 3, { ARG_PTR, ARG_PTR, ARG_PTR } },
     [SYS_WRITEV]       = { 3, { ARG_INT, ARG_PTR, ARG_INT } },
     [SYS_FSYNC]        = { 1, { ARG_INT } },
+    [SYS_SYMLINKAT]    = { 3, { ARG_STR, ARG_INT, ARG_STR } },
     [SYS_GETRANDOM] = { 3, { ARG_PTR, ARG_INT, ARG_HEX } },
 };
 

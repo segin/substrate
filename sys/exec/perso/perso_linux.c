@@ -1076,6 +1076,7 @@ static void *linux_syscalls[MAX_SYSCALLS] = {
     [LINUX_SYS_setgroups]      = NULL,
     [LINUX_SYS_oldselect]      = (void *)&linux_sys_oldselect,
     [LINUX_SYS_symlink]        = (void *)&kern_symlink,
+    [LINUX_SYS_symlinkat]      = (void *)&sys_symlinkat,   /* AT_FDCWD is -100 on both */
     [LINUX_SYS_lstat]          = (void *)linux_sys_lstat,
     [LINUX_SYS_readlink]       = (void *)&kern_readlink,
     [LINUX_SYS_uselib]         = (void *)&aout_sys_uselib,

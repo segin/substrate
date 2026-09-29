@@ -298,6 +298,10 @@
  * device's cache.  Next free after SYS_WRITEV. */
 #define SYS_FSYNC            527
 
+/* symlinkat(2) with a real directory descriptor; libc used to fail every
+ * newdirfd other than AT_FDCWD with ENOSYS. */
+#define SYS_SYMLINKAT        528
+
 void syscall_init(void);
 
 // GDT TLS entries

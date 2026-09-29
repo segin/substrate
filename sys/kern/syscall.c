@@ -2984,45 +2984,32 @@ int sys_symlink(const char *target, const char *linkpath) {
     return kern_symlink(ktarget, klinkpath);
 }
 
-int kern_symlink(const char *target, const char *linkpath) {
+int sys_symlinkat(const char *target, int newdirfd, const char *linkpath) {
+    char ktarget[256], klinkpath[256];
+    COPYIN_STR(target, ktarget);
+    COPYIN_STR(linkpath, klinkpath);
+    return kern_symlinkat(ktarget, newdirfd, klinkpath);
+}
+
+/* symlink(2)/symlinkat(2): a relative linkpath is resolved against
+ * newdirfd (AT_FDCWD: the current directory). */
+int kern_symlinkat(const char *target, int newdirfd, const char *linkpath) {
+    fs_node_t *parent = NULL;
+    char file[128];
+    int ret;
+
     if (!target || !linkpath) return -EINVAL;
     if (target[0] == '\0') return -ENOENT;
 
-    char dir[256];
-    char file[128];
-    const char *last_slash = NULL;
-    for (const char *p = linkpath; *p; p++) {
-        if (*p == '/') last_slash = p;
-    }
-
-    fs_node_t *root = current_process->root_node ? current_process->root_node : fs_root;
-    fs_node_t *cwd = current_process->cwd_node ? current_process->cwd_node : root;
-    fs_node_t *parent = NULL;
-
-    if (!last_slash) {
-        parent = cwd;
-        if (strlcpy(file, linkpath, sizeof(file)) >= sizeof(file)) return -ENAMETOOLONG;
-    } else if (last_slash == linkpath) {
-        parent = root;
-        if (strlcpy(file, linkpath + 1, sizeof(file)) >= sizeof(file)) return -ENAMETOOLONG;
-    } else {
-        size_t dirlen = (size_t)(last_slash - linkpath);
-        if (dirlen >= sizeof(dir)) return -ENAMETOOLONG;
-        memcpy(dir, linkpath, dirlen);
-        dir[dirlen] = '\0';
-
-        if (strlcpy(file, last_slash + 1, sizeof(file)) >= sizeof(file)) return -ENAMETOOLONG;
-        parent = vfs_lookup((linkpath[0] == '/') ? root : cwd, dir);
-        if (!parent) return vfs_lookup_error((linkpath[0] == '/') ? root : cwd, dir);
-    }
-
-    if (!parent) return -ENOENT;
-    if ((parent->flags & 0x7) != FS_DIRECTORY) return -ENOTDIR;
-    if (!file[0]) return -EINVAL;
-    if ((parent->flags & 0x07) != FS_DIRECTORY) return -ENOTDIR;
+    ret = kern_resolve_parent_dirfd(newdirfd, linkpath, &parent, file, sizeof(file));
+    if (ret != 0) return ret;
     if (parent->finddir && parent->finddir(parent, file) != NULL) return -EEXIST;
 
     return symlink_fs(parent, target, file);
+}
+
+int kern_symlink(const char *target, const char *linkpath) {
+    return kern_symlinkat(target, AT_FDCWD, linkpath);
 }
 
 int sys_readlink(const char *pathname, char *buf, size_t bufsiz) {

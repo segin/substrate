@@ -240,8 +240,10 @@ void swab(const void *src, void *dst, ssize_t nbytes) {
 }
 
 int symlinkat(const char *target, int newdirfd, const char *linkpath) {
-    if (newdirfd != AT_FDCWD) { errno = ENOSYS; return -1; }
-    return symlink(target, linkpath);
+    int64_t r = _syscall3(SYS_SYMLINKAT, (uintptr_t)target, (uintptr_t)newdirfd,
+                          (uintptr_t)linkpath);
+    if (r < 0) { errno = (int)-r; return -1; }
+    return 0;
 }
 
 pid_t vfork(void) {

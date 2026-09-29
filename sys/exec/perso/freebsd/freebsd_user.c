@@ -396,8 +396,7 @@ int freebsd_sys_symlinkat(const char *target, int newdir, const char *newpath) {
     char ktgt[256], knew[256];
     COPYIN_STR(target, ktgt);
     COPYIN_STR(newpath, knew);
-    if (newdir == AT_FDCWD) return kern_symlink(ktgt, knew);
-    return -ENOSYS;
+    return kern_symlinkat(ktgt, newdir, knew);   /* AT_FDCWD is -100 on both */
 }
 
 int freebsd_sys_unlinkat(int dirfd, const char *path, int flag) {

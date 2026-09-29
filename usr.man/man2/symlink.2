@@ -43,13 +43,13 @@ act on the link itself.
 is the same, with a relative
 .I linkpath
 resolved against the directory open on
-.IR newdirfd .
-On Substrate only
-.B AT_FDCWD
-is supported for
 .I newdirfd
-(see
-.BR BUGS ).
+(or the current directory if it is
+.BR AT_FDCWD );
+an absolute
+.I linkpath
+ignores
+.IR newdirfd .
 .SH RETURN VALUE
 On success, 0 is returned.
 On error, \-1 is returned and
@@ -92,13 +92,21 @@ is the empty string.
 .B ENOTDIR
 A component of the path prefix of
 .I linkpath
-is not a directory.
-.TP
-.B ENOSYS
+is not a directory; or
 .RB ( symlinkat ())
+.I linkpath
+is relative and
 .I newdirfd
-is not
-.BR AT_FDCWD .
+refers to a file other than a directory.
+.TP
+.B EBADF
+.RB ( symlinkat ())
+.I linkpath
+is relative and
+.I newdirfd
+is neither
+.B AT_FDCWD
+nor an open descriptor.
 .TP
 .B EROFS
 .I linkpath
@@ -106,18 +114,13 @@ would be on a file system mounted read-only.
 .SH NOTES
 .SS Substrate Native ABI
 .nf
-Syscall Number: 83 (SYS_SYMLINK)
-Arguments:      const char *target, const char *linkpath
-Returns:        0, or \-errno
+symlink:    Syscall Number: 83 (SYS_SYMLINK)
+            Arguments:      const char *target, const char *linkpath
+symlinkat:  Syscall Number: 528 (SYS_SYMLINKAT)
+            Arguments:      const char *target, int newdirfd,
+                            const char *linkpath
+Returns:    0, or \-errno
 .fi
-.PP
-.BR symlinkat ()
-has no system call of its own; the C library calls
-.BR symlink ()
-when
-.I newdirfd
-is
-.BR AT_FDCWD .
 .SH EXAMPLE
 Point a stable name at a versioned file:
 .PP
@@ -144,11 +147,3 @@ main(void)
 .BR unlink (2)
 .SH STANDARDS
 POSIX.1-2024.
-.SH BUGS
-.BR symlinkat ()
-fails with
-.B ENOSYS
-for any
-.I newdirfd
-other than
-.BR AT_FDCWD .

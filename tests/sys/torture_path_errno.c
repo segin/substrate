@@ -12,6 +12,10 @@
  *                ENOENT deeper down).
  *   noremove     removing an entry from a file system that does not allow
  *                it (devfs, procfs) is EPERM (was ENOSYS / EOPNOTSUPP).
+ *   symlinkat    a relative linkpath is created in newdirfd's directory
+ *                (libc used to fail every fd but AT_FDCWD with ENOSYS);
+ *                EBADF / ENOTDIR for a bad or non-directory fd; an
+ *                absolute linkpath ignores the fd.
  *
  * Runs as init; prints a "Result:" line.
  */
@@ -121,6 +125,46 @@ static void test_noremove(void)
            unlinkat(AT_FDCWD, "/proc/1", AT_REMOVEDIR), EPERM);
 }
 
+static void test_symlinkat(void)
+{
+    char buf[64];
+    ssize_t n;
+    int dfd, ffd;
+
+    mkdir("/tmp/pe_sa", 0755);
+    unlink("/tmp/pe_sa/l");
+    unlink("/tmp/pe_abs");
+    dfd = open("/tmp/pe_sa", O_RDONLY | O_DIRECTORY);
+    ffd = open("/tmp/pe_sa_file", O_CREAT | O_WRONLY, 0644);
+
+    if (symlinkat("target", dfd, "l") != 0) {
+        printf("FAIL: symlinkat(target, dirfd, l): errno %d (%s)\n", errno,
+               strerror(errno));
+        failures++;
+    } else {
+        n = readlink("/tmp/pe_sa/l", buf, sizeof(buf) - 1);
+        buf[n > 0 ? n : 0] = '\0';
+        if (n != 6 || strcmp(buf, "target") != 0) {
+            printf("FAIL: link made by symlinkat reads '%s'\n", buf);
+            failures++;
+        }
+    }
+    expect("symlinkat(existing)", symlinkat("t", dfd, "l"), EEXIST);
+    expect("symlinkat(bad fd)", symlinkat("t", 999, "l"), EBADF);
+    expect("symlinkat(file fd)", symlinkat("t", ffd, "l"), ENOTDIR);
+    if (symlinkat("t", 999, "/tmp/pe_abs") != 0) {
+        printf("FAIL: symlinkat with an absolute linkpath used the fd: "
+               "errno %d\n", errno);
+        failures++;
+    }
+    close(dfd);
+    close(ffd);
+    unlink("/tmp/pe_sa/l");
+    unlink("/tmp/pe_abs");
+    unlink("/tmp/pe_sa_file");
+    rmdir("/tmp/pe_sa");
+}
+
 int main(void)
 {
     mkdir("/tmp", 01777);
@@ -132,6 +176,8 @@ int main(void)
     test_notdir();
     printf("noremove\n");
     test_noremove();
+    printf("symlinkat\n");
+    test_symlinkat();
     printf("Result: %s (%d failure%s)\n", failures ? "FAIL" : "PASS",
            failures, failures == 1 ? "" : "s");
     return failures != 0;
