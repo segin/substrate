@@ -31,6 +31,7 @@
 #include <kern/version.h>
 #include <pm/pm.h>
 #include <sys/acct.h>
+#include <sys/copy.h>
 #include <sys/errno.h>
 #include <sys/exec.h>
 #include <sys/fcntl.h>
@@ -669,7 +670,7 @@ ssize_t sys_read(int fd, char *buf, size_t len) {
 
 int sys_open(const char *path, int flags, int mode) {
     char kpath[256];
-    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14;
+    COPYIN_STR(path, kpath);
     return kern_open(kpath, flags, mode);
 }
 
@@ -1137,7 +1138,7 @@ int sys_umask(int newmask) {
 
 int sys_truncate(const char *path, uint32_t lo, uint32_t hi) {
     char kpath[256];
-    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14; // EFAULT
+    COPYIN_STR(path, kpath);
     
     fs_node_t *node = vfs_lookup(current_process->root_node ? current_process->root_node : fs_root, kpath);
     if (!node) return -2; // ENOENT
@@ -1739,7 +1740,7 @@ static void fill_stat(struct stat *buf, fs_node_t *node) {
 
 int sys_chroot(const char *path) {
     char kpath[256];
-    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14;
+    COPYIN_STR(path, kpath);
     return kern_chroot(kpath);
 }
 
@@ -1792,14 +1793,14 @@ int sys_fchroot(int fd) {
 
 int sys_mkdir(const char *p, int m) {
     char kpath[256];
-    if (copyinstr(p, kpath, sizeof(kpath), NULL) != 0) return -14;
+    COPYIN_STR(p, kpath);
     return kern_mkdir(kpath, m);
 }
 
 int sys_mkdirat(int dirfd, const char *p, int m) {
     char kpath[256];
 
-    if (copyinstr(p, kpath, sizeof(kpath), NULL) != 0) return -14;
+    COPYIN_STR(p, kpath);
     return kern_mkdirat(dirfd, kpath, m);
 }
 
@@ -1872,7 +1873,7 @@ int kern_rmdir(const char *p) {
 }
 int sys_rmdir(const char *p) { 
     char kpath[256];
-    if (copyinstr(p, kpath, sizeof(kpath), NULL) != 0) return -14;
+    COPYIN_STR(p, kpath);
     return kern_rmdir(kpath); 
 }
 int sys_getuid(void) { return current_process->uid; }
@@ -2119,7 +2120,7 @@ int sys_clone(uint32_t flags, void *child_stack, int *parent_tidptr, void *tls, 
 
 int sys_stat(const char *path, struct stat *buf) { 
     char kpath[256];
-    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14;
+    COPYIN_STR(path, kpath);
     struct stat kbuf;
     int ret = kern_stat(kpath, &kbuf);
     if (ret == 0) {
@@ -2147,7 +2148,7 @@ int kern_stat(const char *path, struct stat *buf) {
 
 int sys_lstat(const char *path, struct stat *buf) {
     char kpath[256];
-    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14;
+    COPYIN_STR(path, kpath);
     struct stat kbuf;
     int ret = kern_lstat(kpath, &kbuf);
     if (ret == 0) {
@@ -2225,7 +2226,7 @@ int sys_utimensat(int dirfd, const char *path,
     fs_node_t *node = NULL;
     if (path) {
         char kpath[256];
-        if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
+        COPYIN_STR(path, kpath);
         fs_node_t *base = (kpath[0] == '/') ? root : cwd;
         if (dirfd != AT_FDCWD && kpath[0] != '/') {
             if (dirfd < 0 || dirfd >= MAX_FD) return -EBADF;
@@ -2262,7 +2263,7 @@ static int xattr_resolve(int dirfd_or_fd, const char *path, int follow,
     *out_close = 0;
     if (path != NULL) {
         char kpath[256];
-        if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
+        COPYIN_STR(path, kpath);
         fs_node_t *base = (kpath[0] == '/') ? root : cwd;
         fs_node_t *node = follow ? vfs_lookup_ref(base, kpath)
                                  : vfs_lookup_lstat_ref(base, kpath);
@@ -2753,14 +2754,14 @@ int kern_ioctl(int fd, uint32_t request, void *arg) {
 
 int sys_unlink(const char *path) {
     char kpath[256];
-    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14;
+    COPYIN_STR(path, kpath);
     return kern_unlink(kpath);
 }
 
 int sys_unlinkat(int dirfd, const char *path, int flags) {
     char kpath[256];
 
-    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14;
+    COPYIN_STR(path, kpath);
     return kern_unlinkat(dirfd, kpath, flags);
 }
 
@@ -2814,15 +2815,15 @@ int kern_unlinkat(int dirfd, const char *path, int flags) {
 
 int sys_link(const char *oldpath, const char *newpath) {
     char kold[256], knew[256];
-    if (copyinstr(oldpath, kold, sizeof(kold), NULL) != 0) return -14;
-    if (copyinstr(newpath, knew, sizeof(knew), NULL) != 0) return -14;
+    COPYIN_STR(oldpath, kold);
+    COPYIN_STR(newpath, knew);
     return kern_link(kold, knew);
 }
 
 int sys_rename(const char *oldpath, const char *newpath) {
     char kold[256], knew[256];
-    if (copyinstr(oldpath, kold, sizeof(kold), NULL) != 0) return -EFAULT;
-    if (copyinstr(newpath, knew, sizeof(knew), NULL) != 0) return -EFAULT;
+    COPYIN_STR(oldpath, kold);
+    COPYIN_STR(newpath, knew);
     return kern_rename(kold, knew);
 }
 
@@ -2849,7 +2850,7 @@ int kern_rename(const char *oldpath, const char *newpath) {
 int sys_statfs(const char *path, struct statfs *buf) {
     char kpath[256];
     struct statfs ks;
-    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
+    COPYIN_STR(path, kpath);
     int error = kern_statfs(kpath, &ks);
     if (error == 0) {
         if (copyout(&ks, buf, sizeof(struct statfs)) != 0) return -EFAULT;
@@ -2893,7 +2894,7 @@ int kern_statvfs(const char *path, struct statvfs *buf) {
 int sys_statvfs(const char *path, struct statvfs *buf) {
     char kpath[256];
     struct statvfs ks;
-    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
+    COPYIN_STR(path, kpath);
     int error = kern_statvfs(kpath, &ks);
     if (error == 0) {
         if (copyout(&ks, buf, sizeof(struct statvfs)) != 0) return -EFAULT;
@@ -2968,8 +2969,8 @@ int kern_link(const char *oldpath, const char *newpath) {
 
 int sys_symlink(const char *target, const char *linkpath) {
     char ktarget[256], klinkpath[256];
-    if (copyinstr(target, ktarget, sizeof(ktarget), NULL) != 0) return -EFAULT;
-    if (copyinstr(linkpath, klinkpath, sizeof(klinkpath), NULL) != 0) return -EFAULT;
+    COPYIN_STR(target, ktarget);
+    COPYIN_STR(linkpath, klinkpath);
     return kern_symlink(ktarget, klinkpath);
 }
 
@@ -3014,7 +3015,7 @@ int kern_symlink(const char *target, const char *linkpath) {
 
 int sys_readlink(const char *pathname, char *buf, size_t bufsiz) {
     char kpath[256];
-    if (copyinstr(pathname, kpath, sizeof(kpath), NULL) != 0) return -14;
+    COPYIN_STR(pathname, kpath);
     if (bufsiz == 0) return -22;                    /* EINVAL */
     if (bufsiz > 4096) bufsiz = 4096;
     /* readlink(2) fills the caller's
@@ -3039,7 +3040,7 @@ int sys_readlink(const char *pathname, char *buf, size_t bufsiz) {
 int sys_readlinkat(int dirfd, const char *pathname, char *buf, size_t bufsiz) {
     char kpath[256];
 
-    if (copyinstr(pathname, kpath, sizeof(kpath), NULL) != 0) return -14;
+    COPYIN_STR(pathname, kpath);
     if (bufsiz == 0) return -22;                    /* EINVAL */
     if (bufsiz > 4096) bufsiz = 4096;
     size_t kcap = bufsiz + 1;                       /* see sys_readlink */
@@ -3106,7 +3107,7 @@ int kern_readlinkat(int dirfd, const char *pathname, char *buf, size_t bufsiz) {
 
 int sys_access(const char *path, int mode) {
     char kpath[256];
-    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14;
+    COPYIN_STR(path, kpath);
     return kern_access(kpath, mode);
 }
 
@@ -3415,7 +3416,7 @@ static fs_node_t *sys_lookup_path(const char *path, int follow_final_symlink) {
 
 int sys_chmod(const char *path, int mode) {
     char kpath[256];
-    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
+    COPYIN_STR(path, kpath);
     return kern_chmodat(AT_FDCWD, kpath, mode, 0);
 }
 
@@ -3432,7 +3433,7 @@ int sys_chown(const char *path, int uid, int gid) {
  * equivalent; route through kern_chmodat with AT_SYMLINK_NOFOLLOW. */
 int sys_lchmod(const char *path, int mode) {
     char kpath[256];
-    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
+    COPYIN_STR(path, kpath);
     return kern_chmodat(AT_FDCWD, kpath, mode, AT_SYMLINK_NOFOLLOW);
 }
 
@@ -3441,7 +3442,7 @@ int sys_lchmod(const char *path, int mode) {
  * personalities translate at their wrapper layer before reaching here. */
 int sys_fchmodat(int dirfd, const char *path, int mode, int flag) {
     char kpath[256];
-    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
+    COPYIN_STR(path, kpath);
     return kern_chmodat(dirfd, kpath, mode, flag);
 }
 
@@ -3480,7 +3481,7 @@ int sys_lchown(const char *path, int uid, int gid) {
     fs_node_t *node;
 
     if (uid < -1 || gid < -1) return -EINVAL;
-    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
+    COPYIN_STR(path, kpath);
     node = sys_lookup_path(kpath, 0);
     if (!node) return -ENOENT;
     if (vfs_node_rdonly(node)) return -EROFS;
@@ -3561,7 +3562,7 @@ int sys_fchownat(int dirfd, const char *path, int uid, int gid, int flag) {
 
     if (uid < -1 || gid < -1) return -EINVAL;
 
-    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
+    COPYIN_STR(path, kpath);
 
     /* If flag has AT_SYMLINK_NOFOLLOW, resolve the path as a whole and don't
        follow the last component (lchown semantics). Otherwise, follow it. */
@@ -3645,7 +3646,7 @@ int sys_lchownat(int dirfd, const char *path, int uid, int gid, int flag) {
 
     if (uid < -1 || gid < -1) return -EINVAL;
 
-    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
+    COPYIN_STR(path, kpath);
 
     /* lchownat always operates on the link itself, never follows symlinks */
     ret = kern_resolve_parent_dirfd(dirfd, kpath, &parent, name, sizeof(name));
@@ -3725,7 +3726,7 @@ int sys_getpid(void) { if(current_process) return current_process->pid; return 0
 
 int sys_execve(const char *f, char *const a[], char *const e[]) {
     char kf[256];
-    if (copyinstr(f, kf, sizeof(kf), NULL) != 0) return -14;
+    COPYIN_STR(f, kf);
     return kern_execve(kf, a, e);
 }
 
@@ -3750,7 +3751,7 @@ int kern_execve(const char *f, char *const a[], char *const e[]) {
 
 int sys_mknod(const char *p, int m, int d) {
     char kpath[256];
-    if (copyinstr(p, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
+    COPYIN_STR(p, kpath);
     if (!current_process) return -EPERM;
     if ((m & S_IFMT) != S_IFIFO && current_process->euid != 0) return -EPERM;
     /* POSIX: the permission bits of a mknod()/mkfifo() node are modified by
@@ -3765,9 +3766,9 @@ fs_node_t *vfs_lookup(fs_node_t *root, const char *path);
 int sys_mount(const char *source, const char *target, const char *fstype, unsigned long flags, void *data) {
     char ksource[256], ktarget[256], kfstype[64], kopts[256];
     if (source) {
-        if (copyinstr(source, ksource, sizeof(ksource), NULL) != 0) return -14;
+        COPYIN_STR(source, ksource);
     }
-    if (copyinstr(target, ktarget, sizeof(ktarget), NULL) != 0) return -14;
+    COPYIN_STR(target, ktarget);
     if (copyinstr(fstype, kfstype, sizeof(kfstype), NULL) != 0) return -14;
     /* data is the option string (mount(8) -o); filesystems see a kernel
      * copy, never the user pointer. */
@@ -3817,7 +3818,7 @@ int kern_umount(const char *target) {
 
 int sys_umount2(const char *target, int flags) {
     char ktarget[256];
-    if (copyinstr(target, ktarget, sizeof(ktarget), NULL) != 0) return -EFAULT;
+    COPYIN_STR(target, ktarget);
     return kern_umount2(ktarget, flags);
 }
 
@@ -3925,7 +3926,7 @@ int sys_nanosleep(void *req, void *rem) {
 // Current working directory per-process
 int sys_chdir(const char *path) {
     char kpath[256];
-    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14;
+    COPYIN_STR(path, kpath);
     return kern_chdir(kpath);
 }
 
@@ -3937,7 +3938,7 @@ int sys_chdir(const char *path) {
  */
 int sys_revoke(const char *path) {
     char kpath[256];
-    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
+    COPYIN_STR(path, kpath);
     fs_node_t *root = current_process->root_node ? current_process->root_node : fs_root;
     fs_node_t *node = vfs_lookup(root, kpath);
     if (!node) return -ENOENT;
@@ -5004,7 +5005,7 @@ int sys_fstatat(int dirfd, const char *path, void *buf, int flags) {
     struct stat kbuf;
     int ret;
 
-    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14;
+    COPYIN_STR(path, kpath);
     ret = kern_fstatat(dirfd, kpath, &kbuf, flags);
     if (ret == 0) {
         if (copyout(&kbuf, buf, sizeof(struct stat)) != 0) return -14;

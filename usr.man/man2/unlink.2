@@ -78,9 +78,7 @@ nor an open descriptor.
 .TP
 .B EFAULT
 .I path
-points outside the accessible address space, or is longer than 255
-bytes (see
-.BR BUGS ).
+points outside the accessible address space.
 .TP
 .B EINVAL
 .I path
@@ -97,6 +95,10 @@ names a directory (use
 or
 .B AT_REMOVEDIR
 instead).
+.TP
+.B ENAMETOOLONG
+.I path
+is longer than 255 bytes.
 .TP
 .B ENOENT
 A component of
@@ -166,13 +168,6 @@ POSIX.1-2024.
 .SH BUGS
 These differ from POSIX:
 .IP \(bu 2
-A
-.I path
-longer than 255 bytes fails with
-.B EFAULT
-rather than
-.BR ENAMETOOLONG .
-.IP \(bu
 A path prefix that runs through a regular file fails with
 .B ENOSYS
 rather than

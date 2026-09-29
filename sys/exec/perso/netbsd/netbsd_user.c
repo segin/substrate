@@ -81,7 +81,7 @@ static void translate_stat_to_netbsd43(const struct stat *native, struct netbsd_
 
 int netbsd_sys_stat(const char *path, struct netbsd_stat *buf) {
     char kpath[256];
-    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14; // EFAULT
+    COPYIN_STR(path, kpath);
 
     struct stat native;
     int ret = kern_stat(kpath, &native);
@@ -95,7 +95,7 @@ int netbsd_sys_stat(const char *path, struct netbsd_stat *buf) {
 
 int netbsd_sys_lstat(const char *path, struct netbsd_stat *buf) {
     char kpath[256];
-    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14; // EFAULT
+    COPYIN_STR(path, kpath);
 
     struct stat native;
     int ret = kern_lstat(kpath, &native);
@@ -148,7 +148,7 @@ static void translate_stat_to_netbsd50(const struct stat *native,
 
 int netbsd_sys_stat50(const char *path, struct netbsd_stat50 *buf) {
     char kpath[256];
-    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14;
+    COPYIN_STR(path, kpath);
     struct stat native;
     int ret = kern_stat(kpath, &native);
     if (ret == 0) {
@@ -161,7 +161,7 @@ int netbsd_sys_stat50(const char *path, struct netbsd_stat50 *buf) {
 
 int netbsd_sys_lstat50(const char *path, struct netbsd_stat50 *buf) {
     char kpath[256];
-    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14;
+    COPYIN_STR(path, kpath);
     struct stat native;
     int ret = kern_lstat(kpath, &native);
     if (ret == 0) {
@@ -185,7 +185,7 @@ int netbsd_sys_fstat50(int fd, struct netbsd_stat50 *buf) {
 
 int netbsd_sys_compat_stat(const char *path, struct netbsd_stat43 *buf) {
     char kpath[256];
-    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14; // EFAULT
+    COPYIN_STR(path, kpath);
 
     struct stat native;
     int ret = kern_stat(kpath, &native);
@@ -199,7 +199,7 @@ int netbsd_sys_compat_stat(const char *path, struct netbsd_stat43 *buf) {
 
 int netbsd_sys_compat_lstat(const char *path, struct netbsd_stat43 *buf) {
     char kpath[256];
-    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14; // EFAULT
+    COPYIN_STR(path, kpath);
 
     struct stat native;
     int ret = kern_lstat(kpath, &native);
@@ -237,13 +237,13 @@ int netbsd_sys_chown(const char *path, int uid, int gid) {
 
 int netbsd_sys_lchmod(const char *path, int mode) {
     char kpath[256];
-    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
+    COPYIN_STR(path, kpath);
     return kern_chmodat(AT_FDCWD, kpath, mode, AT_SYMLINK_NOFOLLOW);
 }
 
 int netbsd_sys_fchmodat(int dirfd, const char *path, int mode, int flag) {
     char kpath[256];
-    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
+    COPYIN_STR(path, kpath);
     return kern_chmodat(dirfd, kpath, mode, netbsd_atflags(flag));
 }
 

@@ -37,7 +37,7 @@ static void translate_stat_to_freebsd(struct stat *native, struct freebsd_stat *
 
 int freebsd_sys_stat(const char *path, struct freebsd_stat *buf) {
     char kpath[256];
-    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14;
+    COPYIN_STR(path, kpath);
 
     struct stat native;
     int ret = kern_stat(kpath, &native);
@@ -51,7 +51,7 @@ int freebsd_sys_stat(const char *path, struct freebsd_stat *buf) {
 
 int freebsd_sys_lstat(const char *path, struct freebsd_stat *buf) {
     char kpath[256];
-    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14;
+    COPYIN_STR(path, kpath);
 
     struct stat native;
     int ret = kern_lstat(kpath, &native);
@@ -92,7 +92,7 @@ static void translate_stat_to_freebsd13(struct stat *native, struct freebsd13_st
  * since FreeBSD-13/14 binaries don't issue 493 anyway. */
 int freebsd_sys_fstatat(int dirfd, const char *path, struct freebsd13_stat *buf, int flags) {
     char kpath[256];
-    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14;
+    COPYIN_STR(path, kpath);
     struct stat native;
     int ret = kern_fstatat(dirfd, kpath, &native, freebsd_atflags(flags));
     if (ret == 0) {
@@ -126,7 +126,7 @@ static void translate_stat_to_freebsd11(struct stat *native, struct freebsd11_st
 
 int freebsd_sys_stat_v11(const char *path, struct freebsd11_stat *buf) {
     char kpath[256];
-    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14;
+    COPYIN_STR(path, kpath);
 
     struct stat native;
     int ret = kern_stat(kpath, &native);
@@ -140,7 +140,7 @@ int freebsd_sys_stat_v11(const char *path, struct freebsd11_stat *buf) {
 
 int freebsd_sys_lstat_v11(const char *path, struct freebsd11_stat *buf) {
     char kpath[256];
-    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14;
+    COPYIN_STR(path, kpath);
 
     struct stat native;
     int ret = kern_lstat(kpath, &native);
@@ -192,7 +192,7 @@ static void translate_stat_to_freebsd13(struct stat *native, struct freebsd13_st
 
 int freebsd_sys_stat_v13(const char *path, struct freebsd13_stat *buf) {
     char kpath[256];
-    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14;
+    COPYIN_STR(path, kpath);
     struct stat native;
     int ret = kern_stat(kpath, &native);
     if (ret == 0) {
@@ -205,7 +205,7 @@ int freebsd_sys_stat_v13(const char *path, struct freebsd13_stat *buf) {
 
 int freebsd_sys_lstat_v13(const char *path, struct freebsd13_stat *buf) {
     char kpath[256];
-    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14;
+    COPYIN_STR(path, kpath);
     struct stat native;
     int ret = kern_lstat(kpath, &native);
     if (ret == 0) {
@@ -285,7 +285,7 @@ static int freebsd_atflags(int f) {
 
 int freebsd_sys_open(const char *path, int flags, int mode) {
     char kpath[256];
-    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
+    COPYIN_STR(path, kpath);
     return kern_openat(AT_FDCWD, kpath, freebsd_oflags(flags), mode);
 }
 
@@ -328,7 +328,7 @@ int freebsd_sys_dup3(int oldfd, int newfd, int flags) {
 
 int freebsd_sys_openat(int dirfd, const char *path, int flags, int mode) {
     char kpath[256];
-    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
+    COPYIN_STR(path, kpath);
     return kern_openat(dirfd, kpath, freebsd_oflags(flags), mode);
 }
 
@@ -346,7 +346,7 @@ int freebsd_sys_openat(int dirfd, const char *path, int flags, int mode) {
 
 int freebsd_sys_faccessat(int dirfd, const char *path, int amode, int flag) {
     char kpath[256];
-    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
+    COPYIN_STR(path, kpath);
     (void)flag;  /* AT_EACCESS handled implicitly */
     if (dirfd == AT_FDCWD) return kern_access(kpath, amode);
     return -ENOSYS;
@@ -354,7 +354,7 @@ int freebsd_sys_faccessat(int dirfd, const char *path, int amode, int flag) {
 
 int freebsd_sys_fchmodat(int dirfd, const char *path, int mode, int flag) {
     char kpath[256];
-    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
+    COPYIN_STR(path, kpath);
     return kern_chmodat(dirfd, kpath, mode, freebsd_atflags(flag));
 }
 
@@ -366,8 +366,8 @@ int freebsd_sys_fchownat(int dirfd, const char *path, int uid, int gid, int flag
 
 int freebsd_sys_linkat(int olddir, const char *oldpath, int newdir, const char *newpath, int flag) {
     char kold[256], knew[256];
-    if (copyinstr(oldpath, kold, sizeof(kold), NULL) != 0) return -EFAULT;
-    if (copyinstr(newpath, knew, sizeof(knew), NULL) != 0) return -EFAULT;
+    COPYIN_STR(oldpath, kold);
+    COPYIN_STR(newpath, knew);
     (void)flag;  /* AT_SYMLINK_FOLLOW currently default */
     if (olddir == AT_FDCWD && newdir == AT_FDCWD) return kern_link(kold, knew);
     return -ENOSYS;
@@ -375,7 +375,7 @@ int freebsd_sys_linkat(int olddir, const char *oldpath, int newdir, const char *
 
 int freebsd_sys_mkdirat(int dirfd, const char *path, int mode) {
     char kpath[256];
-    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
+    COPYIN_STR(path, kpath);
     return kern_mkdirat(dirfd, kpath, mode);
 }
 
@@ -386,23 +386,23 @@ int freebsd_sys_readlinkat(int dirfd, const char *path, char *buf, size_t bufsiz
 
 int freebsd_sys_renameat(int olddir, const char *oldpath, int newdir, const char *newpath) {
     char kold[256], knew[256];
-    if (copyinstr(oldpath, kold, sizeof(kold), NULL) != 0) return -EFAULT;
-    if (copyinstr(newpath, knew, sizeof(knew), NULL) != 0) return -EFAULT;
+    COPYIN_STR(oldpath, kold);
+    COPYIN_STR(newpath, knew);
     if (olddir == AT_FDCWD && newdir == AT_FDCWD) return kern_rename(kold, knew);
     return -ENOSYS;
 }
 
 int freebsd_sys_symlinkat(const char *target, int newdir, const char *newpath) {
     char ktgt[256], knew[256];
-    if (copyinstr(target,  ktgt, sizeof(ktgt), NULL) != 0) return -EFAULT;
-    if (copyinstr(newpath, knew, sizeof(knew), NULL) != 0) return -EFAULT;
+    COPYIN_STR(target, ktgt);
+    COPYIN_STR(newpath, knew);
     if (newdir == AT_FDCWD) return kern_symlink(ktgt, knew);
     return -ENOSYS;
 }
 
 int freebsd_sys_unlinkat(int dirfd, const char *path, int flag) {
     char kpath[256];
-    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
+    COPYIN_STR(path, kpath);
     return kern_unlinkat(dirfd, kpath, freebsd_atflags(flag));
 }
 
@@ -427,13 +427,13 @@ int freebsd_sys_chown(const char *path, int uid, int gid) {
 
 int freebsd_sys_lchmod(const char *path, int mode) {
     char kpath[256];
-    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
+    COPYIN_STR(path, kpath);
     return kern_chmodat(AT_FDCWD, kpath, mode, AT_SYMLINK_NOFOLLOW);
 }
 
 int freebsd_sys_fstatat_v13(int dirfd, const char *path, struct freebsd13_stat *buf, int flags) {
     char kpath[256];
-    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
+    COPYIN_STR(path, kpath);
     struct stat native;
     int ret = kern_fstatat(dirfd, kpath, &native, freebsd_atflags(flags));
     if (ret == 0) {
@@ -448,7 +448,7 @@ int freebsd_sys_fstatat_v13(int dirfd, const char *path, struct freebsd13_stat *
  * semantics as the modern variant; only the output struct differs. */
 int freebsd_sys_fstatat_v11(int dirfd, const char *path, struct freebsd11_stat *buf, int flags) {
     char kpath[256];
-    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
+    COPYIN_STR(path, kpath);
     struct stat native;
     int ret = kern_fstatat(dirfd, kpath, &native, freebsd_atflags(flags));
     if (ret == 0) {
@@ -484,7 +484,7 @@ static void translate_stat_to_ostat(struct stat *native, struct freebsd_ostat *o
 
 int freebsd_sys_ostat(const char *path, struct freebsd_ostat *buf) {
     char kpath[256];
-    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
+    COPYIN_STR(path, kpath);
     struct stat native;
     int ret = kern_stat(kpath, &native);
     if (ret == 0) {
@@ -497,7 +497,7 @@ int freebsd_sys_ostat(const char *path, struct freebsd_ostat *buf) {
 
 int freebsd_sys_olstat(const char *path, struct freebsd_ostat *buf) {
     char kpath[256];
-    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
+    COPYIN_STR(path, kpath);
     struct stat native;
     int ret = kern_lstat(kpath, &native);
     if (ret == 0) {
@@ -728,7 +728,7 @@ int freebsd_sys_fpathconf(int fd, int name) {
  * ENOENT/EACCES rather than a bogus limit. */
 int freebsd_sys_pathconf(const char *path, int name) {
     char kpath[256];
-    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
+    COPYIN_STR(path, kpath);
     int r = kern_access(kpath, 0 /* F_OK */);
     if (r != 0) return r;
     return freebsd_sys_fpathconf(-1, name);
@@ -848,7 +848,7 @@ static void translate_statfs_to_freebsd(const struct statfs *ns,
 
 int freebsd_sys_statfs(const char *path, struct freebsd_statfs *buf) {
     char kpath[1024];
-    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
+    COPYIN_STR(path, kpath);
     struct statfs ns;
     memset(&ns, 0, sizeof(ns));
     int err = kern_statfs(kpath, &ns);

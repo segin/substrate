@@ -2,6 +2,7 @@
 #include <string.h>
 
 #include <exec/perso/sunos/sunos_user.h>
+#include <sys/copy.h>
 #include <sys/errno.h>
 #include <sys/kern_syscalls.h>
 #include <sys/stat.h>
@@ -26,7 +27,7 @@ static void translate_stat_to_sunos(const struct stat *native, struct sunos_stat
 
 int sunos_sys_stat(const char *path, struct sunos_stat *buf) {
     char kpath[256];
-    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14; // EFAULT
+    COPYIN_STR(path, kpath);
 
     struct stat native;
     int ret = kern_stat(kpath, &native);
@@ -40,7 +41,7 @@ int sunos_sys_stat(const char *path, struct sunos_stat *buf) {
 
 int sunos_sys_lstat(const char *path, struct sunos_stat *buf) {
     char kpath[256];
-    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14; // EFAULT
+    COPYIN_STR(path, kpath);
 
     struct stat native;
     int ret = kern_lstat(kpath, &native);

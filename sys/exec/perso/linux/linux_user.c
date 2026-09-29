@@ -115,7 +115,7 @@ static void linux_fill_statx(struct linux_statx *kbuf, const struct stat *native
 /* Linux stat translation: native -> linux_stat */
 int linux_sys_stat(const char *path, struct linux_stat *buf) {
     char kpath[256];
-    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
+    COPYIN_STR(path, kpath);
     
     struct stat native;
     int ret = kern_stat(kpath, &native);
@@ -146,7 +146,7 @@ int linux_sys_stat(const char *path, struct linux_stat *buf) {
 
 int linux_sys_lstat(const char *path, struct linux_stat *buf) {
     char kpath[256];
-    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
+    COPYIN_STR(path, kpath);
 
     struct stat native;
     int ret = kern_lstat(kpath, &native);
@@ -206,7 +206,7 @@ int linux_sys_fstat(int fd, struct linux_stat *buf) {
 /* Linux stat64 translation: native -> linux_stat64 */
 int linux_sys_stat64(const char *path, struct linux_stat64 *buf) {
     char kpath[256];
-    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
+    COPYIN_STR(path, kpath);
 
     struct stat native;
     int ret = kern_stat(kpath, &native);
@@ -220,7 +220,7 @@ int linux_sys_stat64(const char *path, struct linux_stat64 *buf) {
 
 int linux_sys_lstat64(const char *path, struct linux_stat64 *buf) {
     char kpath[256];
-    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
+    COPYIN_STR(path, kpath);
 
     struct stat native;
     int ret = kern_lstat(kpath, &native);
@@ -249,7 +249,7 @@ int linux_sys_fstatat64(int dirfd, const char *path, struct linux_stat64 *buf, i
     struct linux_stat64 kbuf;
     int ret;
 
-    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
+    COPYIN_STR(path, kpath);
 
     /* AT_EMPTY_PATH: stat dirfd itself; otherwise pass only the
      * nofollow bit through (kern_fstatat's 4th arg is a nofollow flag,
@@ -272,7 +272,7 @@ int linux_sys_statx(int dirfd, const char *path, int flags, unsigned int mask, s
     struct linux_statx kbuf;
     int ret;
 
-    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
+    COPYIN_STR(path, kpath);
 
     /*
      * AT_EMPTY_PATH with an empty path operates on dirfd itself (fstat

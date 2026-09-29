@@ -1,4 +1,5 @@
 #include <sys/acct.h>
+#include <sys/copy.h>
 #include <sys/errno.h>
 #include <sys/kern_syscalls.h>
 #include <sys/proc.h>
@@ -60,7 +61,7 @@ int sys_acct(const char *path) {
     if (path == NULL) return kern_acct(NULL);
     
     char kpath[256];
-    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14;
+    COPYIN_STR(path, kpath);
     return kern_acct(kpath);
 }
 

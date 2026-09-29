@@ -313,7 +313,7 @@ int sys_pause(void) {
 
 int sys_utime(const char *path, void *times) {
     char kpath[256];
-    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
+    COPYIN_STR(path, kpath);
 
 
     fs_node_t *root = current_process->root_node ? current_process->root_node : fs_root;

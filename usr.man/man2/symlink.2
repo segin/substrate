@@ -70,9 +70,13 @@ already exists (whatever it is; an existing name is never replaced).
 .I target
 or
 .I linkpath
-points outside the accessible address space, or is longer than 255
-bytes (see
-.BR BUGS ).
+points outside the accessible address space.
+.TP
+.B ENAMETOOLONG
+.I target
+or
+.I linkpath
+is longer than 255 bytes.
 .TP
 .B ENOENT
 A directory in the path prefix of
@@ -139,12 +143,3 @@ for any
 .I newdirfd
 other than
 .BR AT_FDCWD .
-.PP
-A
-.I target
-or
-.I linkpath
-longer than 255 bytes fails with
-.B EFAULT
-rather than
-.BR ENAMETOOLONG .
