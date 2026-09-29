@@ -976,6 +976,17 @@ EOF
         if [ -e "$dts" ]; then
             chown 0:42 "$dts" && chmod 2755 "$dts"
         fi
+        # A home directory, owned by its account, for every /etc/passwd
+        # entry whose home is under /home (substrate, uid 1000).
+        if [ -e "$1/etc/passwd" ]; then
+            while IFS=: read -r _name _pw uid gid _gecos home _shell; do
+                case "$home" in
+                    /home/?*)
+                        mkdir -p "$1$home" &&
+                        chown "$uid:$gid" "$1$home" && chmod 0755 "$1$home" ;;
+                esac
+            done < "$1/etc/passwd"
+        fi
         mke2fs -F -q -b 1024 -I 128 -O ^resize_inode -L "$4" \
                -E offset=$(( $3 * 512 )) -d "$1" "$2" "$5"
     ' _ "$DIST" "$IMAGE" "$ROOT_PART_LBA" "$ROOT_LABEL" "$root_blocks"
