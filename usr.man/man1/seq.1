@@ -1,0 +1,117 @@
+.TH SEQ 1 2026-09-29 "Substrate" "User Commands"
+.SH NAME
+seq \- print a sequence of numbers
+.SH SYNOPSIS
+.B seq
+.RB [ \-w ]
+.RB [ \-f
+.IR format ]
+.RB [ \-s
+.IR string ]
+.RI [ first
+.RI [ incr ]]
+.I last
+.SH DESCRIPTION
+.B seq
+prints the numbers from
+.I first
+to
+.I last
+in steps of
+.IR incr ,
+one per line.
+.I first
+and
+.I incr
+default to 1.
+With a negative
+.I incr
+the sequence counts down; if
+.I last
+cannot be reached (for example
+.B seq 5 1
+with the default increment), nothing is printed.
+.PP
+The numbers may have a fractional part and may be negative.
+Each value is computed as
+.IR first " + " n " \(mu " incr ,
+so steps such as 0.1 do not accumulate rounding error, and a last value
+within rounding of
+.I last
+is included.
+By default each number is printed with as many decimal places as
+.I first
+or
+.I incr
+was written with, so
+.B seq 0 0.25 1
+prints 0.00, 0.25, ... 1.00.
+.PP
+An argument that looks like a negative number (such as
+.BR \-3 )
+is an operand, not an option.
+.SH OPTIONS
+.TP
+.BI \-f " format"
+Print each number with the
+.BR printf (3)
+.IR format ,
+which must contain exactly one floating-point conversion
+.RB ( %e ,
+.BR %f ,
+.BR %g ,
+or their capitals, with optional flags, width and precision) and may
+contain
+.B %%
+and other text.
+.TP
+.BI \-s " string"
+Separate the numbers with
+.I string
+instead of a newline.
+A newline still ends the output.
+.TP
+.B \-w
+Pad the numbers with leading zeros, after any minus sign, so all have the
+same width.
+.TP
+.B \-\-
+End of options.
+.SH EXIT STATUS
+.TP
+.B 0
+The sequence was printed (possibly empty).
+.TP
+.B 1
+An operand was not a number, the increment was zero, the format was
+invalid, or the arguments were wrong.
+.SH EXAMPLES
+Count down in twos:
+.PP
+.EX
+$ seq 10 \-2 4
+10
+8
+6
+4
+.EE
+.PP
+Number files with a fixed width:
+.PP
+.EX
+$ for i in $(seq \-w 1 10); do touch file$i; done
+.EE
+.PP
+A comma-separated list:
+.PP
+.EX
+$ seq \-s , 1 5
+1,2,3,4,5
+.EE
+.SH SEE ALSO
+.BR printf (1),
+.BR printf (3)
+.SH STANDARDS
+.B seq
+is not in POSIX.
+It follows the common interface of GNU coreutils and the BSDs.
