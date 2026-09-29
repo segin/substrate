@@ -448,7 +448,7 @@ meta-compiler (host wml/wmluiltok) and installs the uil/ headers.
   image's `libfreetype.so.6` links `libharfbuzz.so.0`, which links it back;
   ld.so resolves the cycle to one copy of each.  Ports built between the two
   passes link the first build, which has the same soname and symbols.
-- **PsyMP3** (`contrib/psymp3/`, pinned to the `2.0-RC4` upstream tag
+- **PsyMP3** (`contrib/psymp3/`, pinned to the `2.0-RELEASE` upstream tag
   with a vendored patch series) — a music player built on SDL3.  Its
   codec dependencies each ship as their own port: `libogg`
   (`contrib/libogg/`), `libvorbis` (`contrib/libvorbis/`), `libopus`
@@ -478,6 +478,10 @@ meta-compiler (host wml/wmluiltok) and installs the uil/ headers.
   file dialog's flags, which reach `FileDialog.cpp` through per-target
   `CPPFLAGS` and so also precede `CXXFLAGS`; on a host with GTK 2
   installed the dialog was compiled against the host's headers.
+
+  2.0-RELEASE adds MP2 (bundled kjmp2), AC-3/E-AC-3, MLP/TrueHD and the
+  Matroska/WebM container, all decoded or parsed in tree, so the
+  dependency set is unchanged from RC4 and every patch applies as is.
 
   It is built as a unity build (`--enable-final`, all C++ sources in
   `src/psymp3.final.cpp`).  Patch `0005` extends the unity file's pugixml

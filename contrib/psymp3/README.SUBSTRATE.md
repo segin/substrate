@@ -5,7 +5,7 @@ FFT spectrum visualizer, by Kirn Gill II (segin).  This port cross-builds it
 for substrate (i386, ELFOSABI_SUBSTRATE).
 
 * Upstream: <https://github.com/segin/psymp3>
-* Pinned tag: `2.0-RC4` (commit `316d00e3872fe64648fbf34e7fe4883733b47355`)
+* Pinned tag: `2.0-RELEASE` (commit `ba12c427983580824b0447f75492e76df55176b9`)
 * License: ISC
 
 ## Build
@@ -65,6 +65,13 @@ Codecs (all enabled — every library is staged):
 | AAC              | faad2 2.11.1                      |
 | G.722            | in-tree decoder (since 2.0-RC4)   |
 | G.711 A-law/u-law| native (no external dep)          |
+| MP2              | bundled kjmp2 (since 2.0-RELEASE) |
+| AC-3 / E-AC-3    | in-tree decoder (since 2.0-RELEASE) |
+| MLP / TrueHD     | vendored decoder (since 2.0-RELEASE) |
+
+Containers: FLAC, Ogg, ISO (MP4), RIFF (WAV) and, since 2.0-RELEASE,
+Matroska/WebM (in-tree EBML reader).  None of the 2.0-RELEASE additions has
+an external dependency; configure enables them all by default.
 
 ## What is disabled (and why)
 

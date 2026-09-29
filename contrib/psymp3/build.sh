@@ -24,7 +24,9 @@
 #
 # Enabled codecs (all deps are staged in the cross sysroot):
 #   FLAC (native, no libFLAC), Vorbis, Opus, Speex, AAC (fdk-aac),
-#   G.722 (in-tree decoder since 2.0-RC4), G.711 A-law/u-law, MP3 (bundled minimp3).
+#   G.722 (in-tree decoder since 2.0-RC4), G.711 A-law/u-law, MP3 (bundled minimp3),
+#   and, since 2.0-RELEASE, MP2 (kjmp2), AC-3/E-AC-3, MLP/TrueHD and the
+#   Matroska/WebM container -- all in tree, so no new dependencies.
 #
 # 2.0-RC3 changed three dependencies from 1.99.16: SDL2 -> SDL3, faad2 ->
 # fdk-aac, and vorbis -> "vorbisenc vorbis".  All three are already staged
