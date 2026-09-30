@@ -218,6 +218,13 @@ void audio_conv_reset(audio_conv_t *st);
  */
 int audio_hw_to_app_bytes(const audio_dev_t *dev, int hw_bytes);
 
+/*
+ * Playback samples (all channels) still queued ahead of the DMA engine, in
+ * the application's format; AUDIO_GETINFO reports it as play.seek.  0 when
+ * the backend has no get_ospace().
+ */
+uint32_t audio_play_queued_samples(const audio_dev_t *dev);
+
 void audio_init(void);
 int  audio_register_device(audio_dev_t *dev);
 void audio_unregister_device(audio_dev_t *dev);

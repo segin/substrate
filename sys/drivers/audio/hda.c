@@ -2360,6 +2360,28 @@ static int hda_get_props(audio_dev_t *adev)
 	return AUDIO_PROP_PLAYBACK;
 }
 
+/*
+ * Report the software PCM FIFO's free space.  The framework turns this into
+ * AUDIO_GETINFO's play.seek (what is still queued) and OSS GETOSPACE; a
+ * "fragment" is one DMA chunk.
+ */
+static int hda_get_ospace(audio_dev_t *adev, int *fragsize, int *fragstotal,
+			  int *fragments, int *bytes)
+{
+	hda_dev_t *d = adev->driver_data;
+	size_t freeb;
+
+	if (d->fifo_buf == NULL) {
+		return -EINVAL;
+	}
+	freeb = audio_fifo_free(&d->fifo);
+	*fragsize   = (int)HDA_CHUNK_BYTES;
+	*fragstotal = (int)(HDA_FIFO_BYTES / HDA_CHUNK_BYTES);
+	*fragments  = (int)(freeb / HDA_CHUNK_BYTES);
+	*bytes      = (int)freeb;
+	return 0;
+}
+
 static audio_dev_ops_t hda_ops = {
 	.open        = hda_open,
 	.close       = hda_close,
@@ -2370,6 +2392,7 @@ static audio_dev_ops_t hda_ops = {
 	.flush       = hda_flush,
 	.get_devinfo = hda_get_devinfo,
 	.get_props   = hda_get_props,
+	.get_ospace  = hda_get_ospace,
 };
 
 /* ------------------------------------------------------------------- */

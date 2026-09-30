@@ -780,9 +780,25 @@ static int fake_write(audio_dev_t *dev, const void *buf, size_t len) {
 	return (int)len;
 }
 
+static int fake_free_bytes = -1;   /* -1: no get_ospace answer */
+
+static int fake_get_ospace(audio_dev_t *dev, int *fragsize, int *fragstotal,
+			   int *fragments, int *bytes) {
+	(void)dev;
+	if (fake_free_bytes < 0) {
+		return -EINVAL;
+	}
+	*fragsize = 4096;
+	*fragstotal = 16;
+	*fragments = fake_free_bytes / 4096;
+	*bytes = fake_free_bytes;
+	return 0;
+}
+
 static audio_dev_ops_t fake_ops = {
 	.set_params = fake_set_params,
 	.write = fake_write,
+	.get_ospace = fake_get_ospace,
 };
 
 static audio_dev_t fake_dev;
@@ -925,6 +941,32 @@ static void test_hw_to_app_bytes(void) {
 	assert(audio_hw_to_app_bytes(&fake_dev, 1000) == 250);
 }
 
+/*
+ * play.seek reports what is still queued, in samples of the application's
+ * format.  SDL3's Sun backend waits on it before each write; always 0, it
+ * wrote into a full FIFO holding its device lock and starved
+ * SDL_ResumeAudioStreamDevice for seconds.
+ */
+static void test_getinfo_reports_queued_seek(void) {
+	audio_info_t got;
+
+	fake_reset();
+	assert(fake_apply(AUDIO_ENCODING_SLINEAR_LE, 32, 2, 44100) == 0);
+	/* 64 KiB FIFO, 16 KiB free: 48 KiB of S16 queued = 24576 hw samples,
+	 * which is 24576 S32 samples too (same frame count, same channels). */
+	fake_free_bytes = 16384;
+	assert(audio_ioctl_dispatch(&fake_dev, AUDIO_GETINFO, &got) == 0);
+	assert(got.play.seek == 24576);
+	/* Empty FIFO: nothing queued. */
+	fake_free_bytes = 65536;
+	assert(audio_ioctl_dispatch(&fake_dev, AUDIO_GETINFO, &got) == 0);
+	assert(got.play.seek == 0);
+	/* A backend that cannot say reports 0, as before. */
+	fake_free_bytes = -1;
+	assert(audio_ioctl_dispatch(&fake_dev, AUDIO_GETINFO, &got) == 0);
+	assert(got.play.seek == 0);
+}
+
 int main(void) {
 	test_initinfo_marks_all_fields_unset();
 	test_default_info_populates_sensible_defaults();
@@ -971,6 +1013,7 @@ int main(void) {
 	test_write_large_upsample();
 	test_write_passthrough();
 	test_hw_to_app_bytes();
+	test_getinfo_reports_queued_seek();
 	puts("host_test_audio: PASS");
 	return 0;
 }

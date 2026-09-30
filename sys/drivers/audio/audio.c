@@ -226,10 +226,14 @@ int audio_ioctl_dispatch(audio_dev_t *dev, uint32_t request, void *arg)
 
 	switch (request) {
 	case AUDIO_GETINFO: {
+		audio_info_t info;
+
 		if (arg == NULL) {
 			return -EINVAL;
 		}
-		if (copyout(&dev->current, arg, sizeof(audio_info_t)) != 0) {
+		info = dev->current;
+		info.play.seek = audio_play_queued_samples(dev);
+		if (copyout(&info, arg, sizeof(audio_info_t)) != 0) {
 			return -EFAULT;
 		}
 		return 0;
@@ -669,6 +673,34 @@ size_t audio_conv_frame(audio_conv_t *st, const audio_prinfo_t *sw,
 		}
 	}
 	return (size_t)(o - out);
+}
+
+/*
+ * play.seek: samples written but not yet handed to the DMA engine, in the
+ * application's format.  A poll-driven writer sizes its writes from this
+ * -- SDL3's Sun/NetBSD backend waits until less than one of its buffers is
+ * queued and only then writes, because it writes holding its device lock.
+ * Left at 0 it looked permanently empty, every write blocked in the kernel
+ * with that lock held, and SDL_ResumeAudioStreamDevice() on another thread
+ * could starve behind it for many seconds: a silent start.  A backend that
+ * cannot report its queue says 0, as before.
+ */
+uint32_t audio_play_queued_samples(const audio_dev_t *dev)
+{
+	int fragsize = 0, fragstotal = 0, fragments = 0, freeb = 0;
+	int queued;
+	uint32_t bps = dev->current.play.precision / 8;
+
+	if (dev->ops == NULL || dev->ops->get_ospace == NULL || bps == 0 ||
+	    dev->ops->get_ospace((audio_dev_t *)dev, &fragsize, &fragstotal,
+				 &fragments, &freeb) != 0) {
+		return 0;
+	}
+	queued = fragsize * fragstotal - freeb;
+	if (queued <= 0) {
+		return 0;
+	}
+	return (uint32_t)audio_hw_to_app_bytes(dev, queued) / bps;
 }
 
 int audio_hw_to_app_bytes(const audio_dev_t *dev, int hw_bytes)

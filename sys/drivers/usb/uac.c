@@ -36,6 +36,7 @@
 #include <kern/time.h>
 #include <sys/audioio.h>
 #include <sys/dma.h>
+#include <sys/errno.h>
 #include <sys/kthread.h>
 #include <sys/proc.h>
 #include <vm/vm_kmem.h>
@@ -450,6 +451,25 @@ static int uac_get_props(audio_dev_t *adev)
 	return AUDIO_PROP_PLAYBACK;
 }
 
+/* Software FIFO free space, as hda/ac97 report it; a fragment is one
+ * packet (1 ms of the 48 kHz stream the FIFO holds). */
+static int uac_get_ospace(audio_dev_t *adev, int *fragsize, int *fragstotal,
+			  int *fragments, int *bytes)
+{
+	uac_dev_t *d = adev->driver_data;
+	size_t freeb;
+
+	if (d == NULL || d->fifo_buf == NULL) {
+		return -EINVAL;
+	}
+	freeb = audio_fifo_free(&d->fifo);
+	*fragsize   = (int)UAC_PKT_BYTES;
+	*fragstotal = (int)(UAC_FIFO_BYTES / UAC_PKT_BYTES);
+	*fragments  = (int)(freeb / UAC_PKT_BYTES);
+	*bytes      = (int)freeb;
+	return 0;
+}
+
 static audio_dev_ops_t uac_ops = {
 	.open        = uac_open,
 	.close       = uac_close,
@@ -460,6 +480,7 @@ static audio_dev_ops_t uac_ops = {
 	.flush       = uac_flush,
 	.get_devinfo = uac_get_devinfo,
 	.get_props   = uac_get_props,
+	.get_ospace  = uac_get_ospace,
 };
 
 /*

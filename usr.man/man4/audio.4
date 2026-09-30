@@ -153,6 +153,12 @@ below).
 Retrieve the current
 .B audio_info_t
 (play and record parameters plus runtime statistics).
+.B play.seek
+is the number of samples (counting every channel, in the application's
+format) written but not yet handed to the hardware; a program that
+polls it before writing never blocks in
+.BR write (2).
+It is 0 on a backend that cannot report its queue.
 .TP
 .B AUDIO_SETINFO
 Set play and/or record parameters.  Fields left at their initialized
