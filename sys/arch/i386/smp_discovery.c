@@ -376,27 +376,38 @@ static int smp_try_mp_tables(uint32_t bsp_id, uint32_t map_limit, smp_phys_map_f
     return 0;
 }
 
+static void smp_discover_topology(uint32_t map_limit);
+
 void smp_discover_cores(void) {
     early_uart_print("SMP: Discovering cores...\n");
     uint32_t map_limit = smp_discovery_map_limit();
-    
-    // Default to 1 CPU (Bootstrap Processor)
-    cpu_count = 1;
+
+    smp_discover_topology(map_limit);
 
     /*
-     * "nosmp" (or "up") stops here with the BSP only.  Worth having as a
-     * first-class option rather than an emulator flag: it is the cheapest
-     * way to decide whether a fault or corruption needs more than one CPU
-     * to happen, and on real hardware there is no other way to ask.
-     * Discovery is skipped entirely, so no AP is ever started.
+     * "nosmp" (or "up") keeps the BSP only.  Worth having as a first-class
+     * option rather than an emulator flag: it is the cheapest way to decide
+     * whether a fault or corruption needs more than one CPU to happen, and
+     * on real hardware there is no other way to ask.
+     *
+     * It drops the APs AFTER discovery, not instead of it.  The same walk of
+     * the MADT (or MP tables) registers the I/O APICs and the ISA overrides
+     * and sets the local APIC base, and none of that is about CPUs: skipping
+     * it left a UEFI machine with no I/O APIC, so pci_route_intx() had
+     * nothing to route PCI interrupts to and HDA refused to attach ("hda: no
+     * usable IRQ line") on a nosmp boot.
      */
     if (cmdline_has("nosmp") || cmdline_has("up")) {
-        early_uart_print("SMP: nosmp/up requested, staying uniprocessor.\n");
-        cpus[0].lapic_id = 0;
-        cpus[0].processor_id = 0;
-        cpus[0].flags = 1;
-        return;
+        if (cpu_count > 1) {
+            early_uart_print("SMP: nosmp/up requested, staying uniprocessor.\n");
+        }
+        cpu_count = 1;
     }
+}
+
+static void smp_discover_topology(uint32_t map_limit) {
+    // Default to 1 CPU (Bootstrap Processor)
+    cpu_count = 1;
 
     if (!i386_cpu_has_apic()) {
         early_uart_print("SMP: CPU/chipset has no local APIC, falling back to UP.\n");
