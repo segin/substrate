@@ -29,6 +29,7 @@
 #include <kern/console.h>
 #include <kern/driver.h>
 #include <kern/pci.h>
+#include <kern/time.h>
 #include <sys/irq.h>
 #include <sys/lock.h>
 #include <sys/netdev.h>
@@ -61,6 +62,7 @@
 
 /* TPPoll bits. */
 #define TPPOLL_NPQ          0x40   /* kick the normal-priority queue */
+#define TPPOLL_FSWINT       0x01   /* force a software interrupt (ISR.SWInt) */
 
 /* CFG9346. */
 #define CFG9346_UNLOCK      0xC0
@@ -75,8 +77,24 @@
 #define INT_LINKCHG         0x0020
 #define INT_FOVW            0x0040   /* rx fifo overflow */
 #define INT_TDU             0x0080
+#define INT_SWINT           0x0100   /* software interrupt, from TPPOLL_FSWINT */
 #define INT_TIMEOUT         0x4000
 #define INT_SERR            0x8000   /* PCI system error */
+
+/* Normal interrupt set.  Matches RL_INTRS_CPLUS / RTK_INTRS_CPLUS, including
+ * SERR: a PCI system error is exactly the thing you want to hear about on
+ * first bring-up. */
+#define R8168_IMR           (INT_ROK | INT_RER | INT_TOK | INT_TER | \
+                             INT_RDU | INT_FOVW | INT_LINKCHG | INT_SERR)
+
+/* Where the interrupt comes from (rt.irq_kind), in order of preference. */
+#define R8168_IRQ_NONE      0
+#define R8168_IRQ_MSI       1   /* vector from irq_alloc_vector() */
+#define R8168_IRQ_LINE      2   /* firmware Interrupt Line, via the PIC */
+#define R8168_IRQ_ROUTED    3   /* pci_route_intx(): I/O APIC by convention */
+
+/* How long to wait for the forced software interrupt to arrive. */
+#define R8168_IRQ_PROBE_MS  50
 
 /* RCR bits. */
 #define RCR_AAP             0x00000001   /* accept all (promiscuous) */
@@ -157,7 +175,9 @@ struct r8168_desc {
 
 static struct {
     volatile uint8_t  *mmio;
-    uint8_t            irq;
+    int                irq;          /* vector / line; -1: none */
+    int                irq_kind;     /* R8168_IRQ_* */
+    volatile uint32_t  intr_count;   /* interrupts that were ours */
     struct r8168_desc *rx_ring;
     uint32_t           rx_ring_phys;
     struct r8168_desc *tx_ring;
@@ -243,12 +263,15 @@ static int r8168_irq(unsigned int irq, void *dev_id, void *frame) {
     uint16_t isr = rt_r16(R_ISR);
     if (isr == 0)
         return 0;                    /* not ours: shared line */
+    rt.intr_count++;                 /* proof of life for r8168_setup_irq() */
 
     /* ISR is write-1-to-clear.  Acknowledge before processing so an event
      * arriving during the drain is not lost. */
     rt_w16(R_ISR, isr);
 
-    if (isr & (INT_ROK | INT_RER | INT_RDU | INT_FOVW))
+    /* Only once eth0 exists: the interrupt probe runs before registration,
+     * and a frame that happens to arrive then has nowhere to go. */
+    if (rt.registered && (isr & (INT_ROK | INT_RER | INT_RDU | INT_FOVW)))
         r8168_rx_drain();
 
     /*
@@ -262,6 +285,133 @@ static int r8168_irq(unsigned int irq, void *dev_id, void *frame) {
     /* TOK/TER need no work here: the transmit path reclaims by testing OWN
      * on the descriptor it is about to reuse. */
     return 1;
+}
+
+/* ----- interrupt setup ----- */
+
+/*
+ * Install the handler on one interrupt source.  0 on success, -1 if this
+ * source is unavailable (no MSI capability, no firmware line, no I/O APIC)
+ * or could not be claimed.
+ */
+static int r8168_irq_install(pci_device_t *pdev, int kind) {
+    int irq;
+
+    switch (kind) {
+    case R8168_IRQ_MSI:
+        if (pci_find_capability(pdev, PCI_CAP_ID_MSI) == 0)
+            return -1;
+        irq = irq_alloc_vector();
+        break;
+    case R8168_IRQ_LINE:
+        irq = pci_get_irq(pdev);
+        break;
+    case R8168_IRQ_ROUTED:
+        irq = pci_route_intx(pdev);
+        break;
+    default:
+        return -1;
+    }
+    if (irq < 0)
+        return -1;
+
+    if (request_irq((unsigned int)irq, r8168_irq, IRQF_SHARED, "r8168", &rt) != 0) {
+        kprintf("r8168: could not install IRQ %d handler\n", irq);
+        if (kind == R8168_IRQ_MSI) {
+            irq_free_vector(irq);
+        } else if (kind == R8168_IRQ_ROUTED) {
+            pci_unroute_intx(pdev, irq);
+            irq_free_vector(irq);
+        }
+        return -1;
+    }
+    /* MSI goes on only once something is there to take it. */
+    if (kind == R8168_IRQ_MSI && pci_enable_msi(pdev, (uint8_t)irq) != 0) {
+        free_irq((unsigned int)irq, &rt);
+        irq_free_vector(irq);
+        return -1;
+    }
+    rt.irq = irq;
+    rt.irq_kind = kind;
+    return 0;
+}
+
+static void r8168_irq_remove(pci_device_t *pdev) {
+    if (rt.irq_kind == R8168_IRQ_NONE)
+        return;
+    rt_w16(R_IMR, 0);
+    if (rt.irq_kind == R8168_IRQ_MSI)
+        (void)pci_disable_msi(pdev);
+    free_irq((unsigned int)rt.irq, &rt);
+    if (rt.irq_kind == R8168_IRQ_MSI) {
+        irq_free_vector(rt.irq);
+    } else if (rt.irq_kind == R8168_IRQ_ROUTED) {
+        pci_unroute_intx(pdev, rt.irq);
+        irq_free_vector(rt.irq);
+    }
+    rt.irq = -1;
+    rt.irq_kind = R8168_IRQ_NONE;
+}
+
+/* Force a software interrupt and report whether the handler saw it. */
+static int r8168_irq_proven(void) {
+    uint32_t before = rt.intr_count;
+    unsigned int ms;
+
+    /* SWInt alone: the netdev is not registered yet, so nothing else
+     * should be raising interrupts. */
+    rt_w16(R_ISR, 0xFFFF);
+    rt_w16(R_IMR, INT_SWINT);
+    rt_w8(R_TPPOLL, TPPOLL_FSWINT);
+    for (ms = 0; ms < R8168_IRQ_PROBE_MS && rt.intr_count == before; ms++)
+        timer_busywait_ms(1);
+    rt_w16(R_IMR, 0);
+    return rt.intr_count != before;
+}
+
+/*
+ * Find an interrupt that actually arrives.  Receive is interrupt-driven, so
+ * without one the interface transmits and never hears anything back.
+ *
+ * MSI first: it goes straight to the local APIC.  Under UEFI the firmware
+ * leaves PCI Interrupt Line at 0xFF, and the driver used to store
+ * pci_get_irq()'s "none" (-1) in a uint8_t, hook the resulting IRQ 255 and
+ * register an eth0 that could never receive.  Then the firmware line, then
+ * pci_route_intx()'s conventional I/O APIC routing.
+ *
+ * Each source is proven with a forced software interrupt.  If none can be
+ * proven -- a stepping whose SWInt behaves differently would look like
+ * that -- the first source that installs is kept anyway, with a warning,
+ * rather than refusing an interrupt that may well work.
+ */
+static int r8168_setup_irq(pci_device_t *pdev) {
+    static const int kinds[] = { R8168_IRQ_MSI, R8168_IRQ_LINE, R8168_IRQ_ROUTED };
+    static const char *const names[] = { "none", "MSI", "IRQ line", "routed INTx" };
+    size_t i;
+
+    rt.irq = -1;
+    rt.irq_kind = R8168_IRQ_NONE;
+
+    for (i = 0; i < sizeof(kinds) / sizeof(kinds[0]); i++) {
+        if (r8168_irq_install(pdev, kinds[i]) != 0)
+            continue;
+        if (r8168_irq_proven()) {
+            kprintf("r8168: %s %d verified\n", names[kinds[i]], rt.irq);
+            return 0;
+        }
+        kprintf("r8168: no interrupt on %s %d\n", names[kinds[i]], rt.irq);
+        r8168_irq_remove(pdev);
+    }
+
+    for (i = 0; i < sizeof(kinds) / sizeof(kinds[0]); i++) {
+        if (r8168_irq_install(pdev, kinds[i]) == 0) {
+            kprintf("r8168: WARNING: using unverified %s %d\n",
+                    names[kinds[i]], rt.irq);
+            return 0;
+        }
+    }
+    kprint("r8168: no usable interrupt; receive cannot work\n");
+    return -1;
 }
 
 /* ----- TX path ----- */
@@ -602,24 +752,12 @@ static int r8168_setup(pci_device_t *pdev) {
 
     rt_w16(R_ISR, 0xFFFF);                    /* clear anything latched */
 
-    /* Shared PCI INTx, and the result is checked: a NIC with no handler is a
-     * dead interface whose only symptom shows up much later as ENODEV. */
-    rt.irq = (uint8_t)pci_get_irq(pdev);
-    if (rt.irq) {
-        int rc = request_irq(rt.irq, r8168_irq, IRQF_SHARED, "r8168", &rt);
-        if (rc != 0) {
-            kprintf("r8168: could not install IRQ %u handler (%d)%s\n",
-                    (unsigned)rt.irq, rc,
-                    rc == -EBUSY ? " - line held exclusively by another driver"
-                                 : "");
-            return -1;
-        }
-    }
+    /* The result is checked: a NIC with no handler is a dead interface whose
+     * only symptom shows up much later as ENODEV. */
+    if (r8168_setup_irq(pdev) != 0)
+        return -1;
 
-    /* Matches RL_INTRS_CPLUS / RTK_INTRS_CPLUS, including SERR: a PCI system
-     * error is exactly the thing you want to hear about on first bring-up. */
-    rt_w16(R_IMR, INT_ROK | INT_RER | INT_TOK | INT_TER |
-                  INT_RDU | INT_FOVW | INT_LINKCHG | INT_SERR);
+    rt_w16(R_IMR, R8168_IMR);
 
     strlcpy(rt.netdev.name, "eth0", NETDEV_NAME_MAX);
     rt.netdev.mtu = 1500;
@@ -633,12 +771,13 @@ static int r8168_setup(pci_device_t *pdev) {
     /* PHYstatus is worth printing on first bring-up: if the link never comes
      * up, this says whether the PHY negotiated at all. */
     kprintf("r8168: %s (hwrev 0x%08x quirks 0x%x) "
-            "%02x:%02x:%02x:%02x:%02x:%02x irq %u phy 0x%02x\n",
+            "%02x:%02x:%02x:%02x:%02x:%02x %s %d phy 0x%02x\n",
             revname ? revname : "UNKNOWN stepping",
             (unsigned)rt.hwrev, (unsigned)rt.quirks,
             rt.netdev.hwaddr[0], rt.netdev.hwaddr[1], rt.netdev.hwaddr[2],
             rt.netdev.hwaddr[3], rt.netdev.hwaddr[4], rt.netdev.hwaddr[5],
-            (unsigned)rt.irq, (unsigned)rt_r8(R_PHYSTATUS));
+            rt.irq_kind == R8168_IRQ_MSI ? "msi" : "irq",
+            rt.irq, (unsigned)rt_r8(R_PHYSTATUS));
     if (revname == NULL) {
         /* Say so loudly: the quirk guess is the most likely reason a
          * bring-up on new silicon misbehaves, and hwrev above is exactly
