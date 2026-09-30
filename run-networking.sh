@@ -133,6 +133,23 @@ Storage
                      Both only apply to --boot=kernel: in bios/uefi the command
                      line comes from the image's grub.cfg.
 
+Input
+  --keyboard=TYPE    Keyboard: usb (default, usb-kbd) or ps2 (the i8042's
+                     keyboard).
+  --mouse=TYPE       Mouse: usb (default, usb-mouse) or ps2 (the i8042's aux
+                     port).
+                     The two are independent, so every combination can be
+                     tested: USB keyboard with PS/2 mouse, and so on.  qemu's
+                     i8042 is one controller that always carries BOTH PS/2
+                     devices, so it is switched on whenever either option is
+                     ps2; with --keyboard=ps2 --mouse=usb the guest therefore
+                     also sees a PS/2 mouse (and vice versa).  qemu hands host
+                     pointer input to whichever mouse the guest drove most
+                     recently, which for a USB mouse is as soon as the guest
+                     polls it.  With both at usb the i8042 is disabled
+                     outright, as before.  USB devices attach to the
+                     --usb-version controller.
+
 USB and audio
   --usb-version=VER  Emulated USB host controller: 1.1 = UHCI (default),
                      2.0 = EHCI, 3.0 = xHCI.  All USB devices attach to it.
@@ -196,6 +213,7 @@ Examples
   ./run-networking.sh --boot=uefi --snapshot      check the UEFI path
   MEM=512M ./run-networking.sh --boot=bios        BIOS boot, smaller guest
   ./run-networking.sh --debug --user              boot and wait for gdb :1234
+  ./run-networking.sh --keyboard=ps2 --mouse=usb  PS/2 keyboard, USB mouse
 EOF
 }
 
@@ -217,6 +235,8 @@ EXTRA_DRIVES=""
 EXTRA_CTRL_DRIVES=""
 FLOPPY_IMAGES=""           # newline-separated floppy diskette images (fd0, fd1)
 USB_VERSION="1.1"          # 1.1=UHCI (default), 2.0=EHCI, 3.0=xHCI
+KEYBOARD=usb               # usb (usb-kbd) | ps2 (i8042 keyboard)
+MOUSE=usb                  # usb (usb-mouse) | ps2 (i8042 aux port)
 VIRTIO=0                   # 1 = root on virtio-blk instead of AHCI
 IDE=0                      # 1 = root on the machine's built-in IDE controller
 UMS=0                      # 1 = root on USB Mass Storage (Bulk-Only Transport)
@@ -304,6 +324,16 @@ ${1#--floppy=}" ;;
         --rw)       RW=1 ;;
         --slow)     SLOW=1 ;;
         --shell)    SHELL_INIT=1 ;;
+        --keyboard)
+            shift
+            [ $# -gt 0 ] || { echo "run-networking.sh: --keyboard needs ps2 or usb" >&2; exit 1; }
+            KEYBOARD="$1" ;;
+        --keyboard=*) KEYBOARD="${1#--keyboard=}" ;;
+        --mouse)
+            shift
+            [ $# -gt 0 ] || { echo "run-networking.sh: --mouse needs ps2 or usb" >&2; exit 1; }
+            MOUSE="$1" ;;
+        --mouse=*)  MOUSE="${1#--mouse=}" ;;
         --usb-version=*)
             USB_VERSION="${1#--usb-version=}"
             case "$USB_VERSION" in
@@ -351,6 +381,17 @@ if [ "$AUDIO_SET" -eq 1 ] && [ "$USB_AUDIO_HOST" -eq 1 ]; then
     exit 1
 fi
 
+# Input devices.  Validated up here with the other choices, before anything
+# asks for sudo.
+case "$KEYBOARD" in
+    ps2|usb) : ;;
+    *) echo "run-networking.sh: --keyboard must be ps2 or usb (got '$KEYBOARD')" >&2; exit 1 ;;
+esac
+case "$MOUSE" in
+    ps2|usb) : ;;
+    *) echo "run-networking.sh: --mouse must be ps2 or usb (got '$MOUSE')" >&2; exit 1 ;;
+esac
+
 # Where the root disk lives.  These are alternatives to the default (AHCI port
 # 0), so at most one may be given.
 ROOT_TRANSPORTS=$((VIRTIO + IDE + UMS + UAS))
@@ -378,6 +419,24 @@ case "$USB_VERSION" in
 esac
 USB_BUS=",bus=usbctl.0"
 echo "run-networking.sh: USB $USB_VERSION host controller (${USB_CTRL#-device })"
+
+# Keyboard and mouse (--keyboard / --mouse).  qemu's i8042 carries both PS/2
+# devices or neither, so it is on when either choice is ps2 and off (the old
+# fixed default) only when both are usb.  $I8042_OPT is appended to the
+# machine type below.
+INPUT_ARGS=""
+I8042_OPT=",i8042=off"
+if [ "$KEYBOARD" = ps2 ] || [ "$MOUSE" = ps2 ]; then
+    I8042_OPT=""
+fi
+if [ "$KEYBOARD" = usb ]; then
+    INPUT_ARGS="$INPUT_ARGS -device usb-kbd$USB_BUS"
+fi
+if [ "$MOUSE" = usb ]; then
+    INPUT_ARGS="$INPUT_ARGS -device usb-mouse$USB_BUS"
+fi
+echo "run-networking.sh: keyboard $KEYBOARD, mouse $MOUSE" \
+     "(i8042 $( [ -z "$I8042_OPT" ] && echo on || echo off))"
 
 # --drive images: each gets the next port (1..5) on the boot ich9-ahci
 # controller, enumerated as guest /dev/storage/sata1, sata2, ... The list is
@@ -780,7 +839,7 @@ fi
 # ---------------------------------------------------------------------------
 QEMU_BIN=qemu-system-i386
 QEMU_CPU="qemu32,+sse,+sse2"
-QEMU_MACHINE="pc,i8042=off"
+QEMU_MACHINE="pc$I8042_OPT"
 
 # Guard the image modes: GRUB lives in the MBR (BIOS) and on the FAT32 ESP
 # (UEFI), so a bare-filesystem rootfs.img -- what build-rootfs.sh produced
@@ -811,7 +870,7 @@ case "$BOOTMODE" in
         # 32-bit -- GRUB drops to protected mode for the multiboot2 handoff.
         QEMU_BIN=qemu-system-x86_64
         QEMU_CPU="qemu64,+rdrand"
-        QEMU_MACHINE="q35,i8042=off"
+        QEMU_MACHINE="q35$I8042_OPT"
 
         command -v "$QEMU_BIN" >/dev/null 2>&1 || {
             echo "run-networking.sh: --boot=uefi needs $QEMU_BIN" >&2; exit 1; }
@@ -864,7 +923,7 @@ case "$BOOTMODE" in
         # i386, symbols load, and breakpoints and backtraces work normally.
         QEMU_BIN=qemu-system-i386
         QEMU_CPU="qemu32,+rdrand"
-        QEMU_MACHINE="q35,i8042=off"
+        QEMU_MACHINE="q35$I8042_OPT"
 
         command -v "$QEMU_BIN" >/dev/null 2>&1 || {
             echo "run-networking.sh: --boot=uefi32 needs $QEMU_BIN" >&2; exit 1; }
@@ -913,9 +972,9 @@ fi
 # qemu runs in the foreground (not exec'd) so the EXIT trap can tear the
 # macvtap down when it exits.
 #
-# i8042=off disables the emulated PS/2 controller (keyboard and mouse).
-# substrate's PS/2 mouse path is unreliable, and usb-kbd/usb-mouse below cover
-# input, so this leaves a single clean USB pointer on /dev/input/event0.
+# Input is $INPUT_ARGS plus the i8042 setting in $QEMU_MACHINE, both from
+# --keyboard/--mouse.  The default (both usb) keeps i8042=off, leaving a
+# single clean USB pointer on /dev/input/event0.
 #
 # The mode-specific arguments go in "$@" rather than a string: -append carries
 # spaces and the firmware paths could too, and only the positional parameters
@@ -962,7 +1021,7 @@ esac
   $EXTRA_DRIVE_ARGS \
   $EXTRA_CTRL_ARGS \
   $FLOPPY_ARGS \
-  $USB_CTRL $USB_ROOT_ARGS -device usb-kbd$USB_BUS -device usb-mouse$USB_BUS \
+  $USB_CTRL $USB_ROOT_ARGS $INPUT_ARGS \
   $USB_HOST_ARGS \
   $NETDEV_ARGS \
   $GFX_ARGS \
