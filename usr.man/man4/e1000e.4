@@ -1,0 +1,115 @@
+.TH E1000E 4 "2026-09-30" "Substrate Kernel" "Kernel Interfaces"
+.SH NAME
+e1000e \- Intel 82574 and I217/I218/I219 Gigabit Ethernet driver
+.SH SYNOPSIS
+.B device e1000e
+.SH DESCRIPTION
+The
+.B e1000e
+driver supports Intel's PCI Express Gigabit Ethernet controllers that
+keep the 8254x register interface but need a different bring-up from the
+parts
+.B e1000
+drives:
+.TP
+.B 82574L, 82574LA, 82583V
+discrete controllers (8086:10D3, 10F6, 150C).  QEMU's
+.B -device e1000e
+is an 82574L.
+.TP
+.B I217, I218
+the network MAC inside Lynx Point and Wildcat Point chipsets, with its
+PHY on the chipset's MDIO bus.
+.TP
+.B I219
+the same from Sunrise Point (6th-generation Core) onwards, through
+I219-LM12/V12.
+.PP
+The interface is registered as
+.BR eth0 .
+One controller is supported; a second is reported and ignored.
+.SS Data path
+One receive and one transmit ring of legacy 16-byte descriptors, 32 and 16
+entries, with 2 KiB buffers.  The Ethernet CRC is stripped on receive and
+inserted on transmit.  Every supported part accepts legacy descriptors
+while extended receive status is off, and the driver turns it off in case
+a boot ROM left it on.
+.PP
+The station address is taken from Receive Address 0, which the hardware
+loads from its NVM at reset.  The chipset parts keep that NVM in the
+system's SPI flash rather than behind an EEPROM interface.  If the
+reloaded address is invalid the one firmware left there is used; with
+neither, the driver does not attach.
+.SS Bring-up
+At attach the driver stops receive and transmit, then resets the MAC.
+On the chipset parts it resets the MAC only, never the PHY: the
+Management Engine may own the PHY (shown in the log as
+.RB \(lq "PHY reset blocked by firmware" \(rq),
+and PHY reset has proven unreliable on these parts.  The MAC reset runs
+under the software semaphore in
+.B EXTCNF_CTRL
+that arbitrates shared resources with firmware.
+.PP
+An I219 can hang in reset if descriptors were left pending, for example
+after a PXE boot; the hardware reports this in PCI configuration space.
+When it does, the driver first pushes one dummy transmit through its own
+ring and, if that is not enough, cycles the receiver, as Linux does.
+.PP
+After reset the driver sets
+.B CTRL_EXT.DRV_LOAD
+so that manageability firmware (Intel AMT on vPro machines) hands the
+port over, and leaves speed and duplex to autonegotiation.
+.SS PHY
+The PHY is reached through the MDIC register at MDIO address 1 (82574)
+or 2 (chipset parts), under the same software semaphore.  Its ID and
+control register are logged.  A PHY left powered down by a previous
+operating system is powered up and autonegotiation restarted.
+.PP
+A PHY that does not answer is logged as
+.RB \(lq "PHY not responding on MDIO (Ultra Low Power mode?)" \(rq .
+I217 and later PHYs can be left in Ultra Low Power mode, which the driver
+does not yet know how to leave; the link may still come up if firmware
+brought the PHY out of it.
+.SS Interrupts
+The driver tries MSI first, then the firmware's legacy interrupt line,
+then legacy INTx routed through the I/O APIC by the conventional PCI
+interrupt swizzle.  Each source is proven by raising a link-status-change
+cause through the Interrupt Cause Set register and waiting for it to
+arrive; one that stays silent is removed and the next is tried.  If none
+can be proven, the first that installs is kept with a warning.  On a
+shared line the handler acts only when
+.B ICR
+reports that this device asserted it.
+.PP
+Link changes are logged with speed and duplex.
+.SH FILES
+.TP
+.B sys/drivers/net/e1000e.c
+The driver.
+.SH DIAGNOSTICS
+.TP
+.B "e1000e: <part> <device-id> <MAC> msi|irq <n>"
+Attached; followed by the link state.
+.TP
+.B "e1000e: MSI <n> verified"
+The interrupt source that passed the self-test.
+.TP
+.B "e1000e: WARNING: using unverified ..."
+No source passed the self-test; receive may not work.
+.TP
+.B "e1000e: descriptor flush required before reset (I219)"
+The I219 reset-hang workaround ran.
+.SH BUGS
+The older chipset PHYs \(em 82577 and 82578 (Ibex Peak) and 82579
+(Cougar Point, Panther Point) \(em are not supported; they need
+per-generation PHY workarounds.  Ultra Low Power exit is not implemented.
+No jumbo frames, checksum offload, or segmentation offload.
+.SH SEE ALSO
+.BR ifconfig (8)
+.SH HISTORY
+Written for Substrate in 2026, following Linux's
+.B e1000e
+and iPXE's
+.B intel
+drivers.  Tested under QEMU (82574L); the I217 and I219 support awaits
+real hardware.

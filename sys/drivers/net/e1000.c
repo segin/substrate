@@ -7,10 +7,10 @@
  * (82540EM / 82544GC / 82545EM) and the physical 8254x/8257x parts that
  * speak the same register set.
  *
- * NOT covered: `e1000e` (82574L, 8086:10D3) and `igb` (82576).  Those use
- * an extended descriptor layout and a different init sequence; matching
- * their PCI IDs here would bind a driver that cannot drive them.  They need
- * their own drivers -- see the ID table at the bottom for what is claimed.
+ * NOT covered: the `e1000e` family (82574L, 8086:10D3, and the PCH-
+ * integrated I217/I218/I219) and `igb` (82576).  They need a different init
+ * sequence, so matching their PCI IDs here would bind a driver that cannot
+ * bring them up.  e1000e.c drives the first; igb has no driver yet.
  *
  * Why this matters beyond QEMU: `e1000` is the default NIC on qemu's `pc`
  * machine, so a guest with no -device at all now gets a working interface
