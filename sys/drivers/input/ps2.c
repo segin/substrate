@@ -11,6 +11,7 @@
 #include <drivers/input/mouse.h>
 #include <drivers/input/ps2.h>
 #include <kern/console.h>
+#include <kern/time.h>
 
 /* Global state */
 static int ps2_dual_channel = 0;
@@ -299,14 +300,61 @@ int ps2_init(void) {
 }
 
 /*
- * Send a single byte to the mouse and wait for the standard ACK (0xFA).
- * Returns 0 on success, -1 on any timeout/NAK.
+ * Read one byte, waiting up to `ms` milliseconds of real time.
+ *
+ * The mouse path used to wait a fixed number of status-port polls.  A poll
+ * is roughly a microsecond on real hardware, so that was about half a
+ * second -- and a touchpad's power-on self-test after RESET can take longer
+ * than that (Linux's libps2 allows 4 s for the BAT result).  This runs
+ * before interrupts are enabled, so the delay is timer_busywait_ms(), which
+ * needs no tick.  Returns 0 and the byte, or -1 on timeout; *waited (if
+ * non-NULL) gets roughly how long it took.
  */
-static int ps2_aux_cmd(uint8_t cmd) {
+static int ps2_read_data_ms(uint8_t *data, unsigned ms, unsigned *waited) {
+    unsigned t;
+
+    for (t = 0; ; t++) {
+        if (inb(PS2_STATUS_PORT) & PS2_STATUS_OUTPUT_BUFFER_FULL) {
+            *data = inb(PS2_DATA_PORT);
+            if (waited) *waited = t;
+            return 0;
+        }
+        if (t >= ms) break;
+        timer_busywait_ms(1);
+    }
+    if (waited) *waited = t;
+    return -1;
+}
+
+/*
+ * Send a single byte to the mouse and wait for the standard ACK (0xFA).
+ * Returns 0 on success, -1 on any timeout/NAK; *reply (if non-NULL) gets the
+ * byte that came back instead, or -1 for none.
+ */
+static int ps2_aux_cmd_reply(uint8_t cmd, int *reply) {
     uint8_t ack;
+
+    if (reply) *reply = -1;
     if (ps2_write_aux(cmd) != 0) return -1;
-    if (ps2_read_data_timeout(&ack, PS2_MOUSE_TIMEOUT_LOOPS) != 0) return -1;
+    if (ps2_read_data_ms(&ack, PS2_MOUSE_ACK_MS, NULL) != 0) return -1;
+    if (reply) *reply = ack;
     return (ack == PS2_DEV_ACK) ? 0 : -1;
+}
+
+static int ps2_aux_cmd(uint8_t cmd) {
+    return ps2_aux_cmd_reply(cmd, NULL);
+}
+
+static void ps2_mouse_log(const char *what, int reply) {
+    char buf[96];
+
+    if (reply < 0) {
+        snprintf(buf, sizeof(buf), "PS/2: mouse: %s: no reply\n", what);
+    } else {
+        snprintf(buf, sizeof(buf), "PS/2: mouse: %s: got 0x%02x\n", what,
+                 (unsigned)reply);
+    }
+    kprint(buf);
 }
 
 /*
@@ -338,9 +386,9 @@ static int ps2_mouse_knock(uint8_t a, uint8_t b, uint8_t c) {
 static int ps2_mouse_read_id(void) {
     uint8_t ack, id;
     if (ps2_write_aux(0xF2) != 0) return -1;
-    if (ps2_read_data_timeout(&ack, PS2_MOUSE_TIMEOUT_LOOPS) != 0) return -1;
+    if (ps2_read_data_ms(&ack, PS2_MOUSE_ACK_MS, NULL) != 0) return -1;
     if (ack != PS2_DEV_ACK) return -1;
-    if (ps2_read_data_timeout(&id, PS2_MOUSE_TIMEOUT_LOOPS) != 0) return -1;
+    if (ps2_read_data_ms(&id, PS2_MOUSE_ACK_MS, NULL) != 0) return -1;
     return (int)id;
 }
 
@@ -352,16 +400,60 @@ static int ps2_mouse_read_id(void) {
  */
 void ps2_mouse_setup(void) {
     uint8_t byte;
+    unsigned waited = 0;
+    int attempt, reply;
+    char buf[96];
 
-    /* Reset.  Expect ACK + 0xAA self-test + initial ID. */
-    if (ps2_write_aux(PS2_DEV_RESET) != 0) return;
-    if (ps2_read_data_timeout(&byte, PS2_MOUSE_TIMEOUT_LOOPS) != 0 ||
-        byte != PS2_DEV_ACK) return;
-    if (ps2_read_data_timeout(&byte, PS2_MOUSE_TIMEOUT_LOOPS) != 0 ||
-        byte != 0xAA) return;
+    /*
+     * Reset.  Expect ACK, then the self-test result (0xAA, or 0xFC on
+     * failure) once the device's BAT finishes, then its ID.
+     *
+     * Every way this can fail is logged: it used to return silently, and
+     * a laptop whose touchpad did not come up showed only the absence of
+     * "Mouse enabled".  A NAK (0xFE, resend) or a missing reply is retried
+     * -- some touchpads ignore the first command after the controller
+     * enables the port.
+     */
+    for (attempt = 1; ; attempt++) {
+        if (ps2_aux_cmd_reply(PS2_DEV_RESET, &reply) == 0) {
+            break;
+        }
+        snprintf(buf, sizeof(buf), "reset (attempt %d)", attempt);
+        ps2_mouse_log(buf, reply);
+        if (attempt >= PS2_MOUSE_RESET_TRIES) {
+            kprint("PS/2: mouse: not responding; no pointer on port 2\n");
+            return;
+        }
+        ps2_flush();
+    }
+    if (ps2_read_data_ms(&byte, PS2_MOUSE_BAT_MS, &waited) != 0) {
+        snprintf(buf, sizeof(buf),
+                 "PS/2: mouse: self-test result did not arrive within %u ms\n",
+                 (unsigned)PS2_MOUSE_BAT_MS);
+        kprint(buf);
+        return;
+    }
+    if (byte != 0xAA) {
+        snprintf(buf, sizeof(buf), "PS/2: mouse: self-test failed (0x%02x)\n",
+                 (unsigned)byte);
+        kprint(buf);
+        return;
+    }
     /* Initial device ID (post-reset).  Plain mice return 0x00 — note
      * that we will re-read it below after the knock. */
-    ps2_read_data_timeout(&byte, PS2_TIMEOUT_LOOPS);
+    reply = -1;
+    if (ps2_read_data_ms(&byte, PS2_MOUSE_ACK_MS, NULL) == 0) {
+        reply = byte;
+    }
+    snprintf(buf, sizeof(buf), "PS/2: mouse: reset OK (self-test %u ms, id ",
+             waited);
+    kprint(buf);
+    if (reply < 0) {
+        kprint("none)\n");
+    } else {
+        snprintf(buf, sizeof(buf), "0x%02x)\n", (unsigned)reply);
+        kprint(buf);
+    }
 
     ps2_mouse_generation = 0;
 
@@ -385,7 +477,9 @@ void ps2_mouse_setup(void) {
     }
 
     /* Enable data reporting. */
-    if (ps2_aux_cmd(PS2_DEV_SCAN_ON) == 0) {
+    if (ps2_aux_cmd_reply(PS2_DEV_SCAN_ON, &reply) == 0) {
         kprint("PS/2: Mouse enabled\n");
+    } else {
+        ps2_mouse_log("enable data reporting", reply);
     }
 }

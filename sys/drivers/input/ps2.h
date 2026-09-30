@@ -62,7 +62,17 @@
 #define PS2_MOUSE_ENABLE_DATA         0xF4
 
 #define PS2_TIMEOUT_LOOPS             100000U
-#define PS2_MOUSE_TIMEOUT_LOOPS       500000U
+
+/*
+ * Mouse/touchpad timeouts, in milliseconds of real time.  The BAT (power-on
+ * self-test) after RESET is the slow one: touchpads can take well over the
+ * half second the old loop count amounted to, and Linux's libps2 allows 4 s.
+ * A missing device costs only PS2_MOUSE_ACK_MS per attempt, since the BAT
+ * wait starts only after the reset was acknowledged.
+ */
+#define PS2_MOUSE_ACK_MS              200U
+#define PS2_MOUSE_BAT_MS              4000U
+#define PS2_MOUSE_RESET_TRIES         3
 
 /* Public API */
 int ps2_init(void);
