@@ -255,6 +255,10 @@ typedef struct hda_dev {
 	/* Set when d->irq came from pci_route_intx() rather than firmware:
 	 * that mapping is a convention and has to be proven before use. */
 	int             intx_routed;
+	/* Set when d->irq is an MSI vector (from irq_alloc_vector()); MSI
+	 * is enabled in config space only once the handler is registered. */
+	int             msi;
+	int             msi_enabled;
 	volatile uint32_t intr_count;
 	volatile uint8_t *mmio;
 	int              irq;
@@ -2422,9 +2426,19 @@ static void hda_detach_partial(hda_dev_t *d)
 		hda_write8(d, HDA_REG_CORBCTL, 0);
 		hda_write8(d, HDA_REG_RIRBCTL, 0);
 	}
+	if (d->msi_enabled) {
+		/* Stop the controller signalling before its vector goes. */
+		(void)pci_disable_msi(d->pdev);
+		d->msi_enabled = 0;
+	}
 	if (d->irq_claimed) {
 		free_irq((unsigned int)d->irq, d);
 		d->irq_claimed = 0;
+	}
+	if (d->msi) {
+		irq_free_vector(d->irq);
+		d->msi = 0;
+		d->irq = -1;
 	}
 	if (d->intx_routed) {
 		/* Mask the I/O APIC input and set INTx-disable, so a line this
@@ -2559,8 +2573,29 @@ static int hda_attach(pci_device_t *pdev)
 		kprintf("hda: failed to map BAR0\n");
 		return -ENODEV;
 	}
-	d->irq = pci_get_irq(pdev);
-	if (d->irq < 0) {
+	/*
+	 * Prefer MSI.  It goes straight to the local APIC, so it needs
+	 * neither the firmware's Interrupt Line byte (0xFF under UEFI) nor
+	 * an I/O APIC and a guess at the chipset's INTx routing -- the
+	 * PIRQ convention below is admittedly weakest for PCH-internal
+	 * functions like this one, and it needs MADT discovery to have
+	 * registered an I/O APIC at all.  Every Intel HDA controller since
+	 * ICH6 has the capability.  The vector is only claimed here; MSI is
+	 * switched on in config space once the handler is registered.
+	 */
+	d->irq = -1;
+	if (pci_find_capability(pdev, PCI_CAP_ID_MSI) != 0) {
+		int vec = irq_alloc_vector();
+
+		if (vec >= 0) {
+			d->irq = vec;
+			d->msi = 1;
+		}
+	}
+	if (!d->msi) {
+		d->irq = pci_get_irq(pdev);
+	}
+	if (!d->msi && d->irq < 0) {
 		/*
 		 * No firmware-provided line.  On a UEFI/APIC machine that is
 		 * the normal case, not a fault: config byte 0x3C is a
@@ -2670,6 +2705,15 @@ static int hda_attach(pci_device_t *pdev)
 		return -EBUSY;
 	}
 	d->irq_claimed = 1;
+	if (d->msi) {
+		if (pci_enable_msi(d->pdev, (uint8_t)d->irq) != 0) {
+			kprintf("hda: could not enable MSI\n");
+			hda_detach_partial(d);
+			return -ENXIO;
+		}
+		d->msi_enabled = 1;
+		kprintf("hda: using MSI vector 0x%x\n", (unsigned)d->irq);
+	}
 
 	/* Now safe to arm.  Some controllers only latch a codec response with
 	 * CIE armed, so this has to precede the first verb.
@@ -2711,8 +2755,12 @@ static int hda_attach(pci_device_t *pdev)
 	 * refuse the attach — the alternative is a /dev/audio that accepts
 	 * writes and never completes a buffer, since this driver refills
 	 * the ring from the completion path.
+	 *
+	 * MSI gets the same proof.  It is not a guess, but it is the first
+	 * interrupt path this driver takes on real UEFI hardware, and a
+	 * silent one would wedge the same way.
 	 */
-	if (d->intx_routed) {
+	if (d->intx_routed || d->msi) {
 		uint32_t before = d->intr_count;
 		uint32_t dummy;
 		unsigned int budget;
@@ -2736,9 +2784,13 @@ static int hda_attach(pci_device_t *pdev)
 		           HDA_RIRBCTL_RUN | HDA_RIRBCTL_RINTCTL);
 
 		if (d->intr_count == before) {
-			kprintf("hda: no interrupt on the routed GSI; the PIRQ "
-			        "convention does not hold for this device — "
-			        "not attaching\n");
+			if (d->msi) {
+				kprintf("hda: no MSI arrived; not attaching\n");
+			} else {
+				kprintf("hda: no interrupt on the routed GSI; "
+				        "the PIRQ convention does not hold "
+				        "for this device — not attaching\n");
+			}
 			/* Disarm before dropping the handler: a level-triggered
 			 * INTx with nobody to acknowledge it is the wedge the
 			 * note above describes. */
@@ -2746,7 +2798,8 @@ static int hda_attach(pci_device_t *pdev)
 			hda_detach_partial(d);
 			return -ENXIO;
 		}
-		kprintf("hda: routed GSI verified (%u interrupt(s))\n",
+		kprintf("hda: %s verified (%u interrupt(s))\n",
+		        d->msi ? "MSI" : "routed GSI",
 		        d->intr_count - before);
 	}
 
