@@ -1905,9 +1905,21 @@ static int ahci_pci_attach(struct device *dev) {
     return 0;
 }
 
-/* PCI ID table: Class 01h (Mass Storage), Subclass 06h (SATA), ProgIF 01h (AHCI) */
+/*
+ * PCI ID table: Class 01h (Mass Storage), Subclass 06h (SATA), ProgIF 01h
+ * (AHCI), plus controllers that are AHCI underneath but say otherwise.
+ *
+ * 8086:282a is Intel RST's RAID-mode ID ("SATA controller [RAID mode]",
+ * class 01/04).  Firmware set to RST/RAID reports it on chipsets from Lynx
+ * Point to Cannon Point, and nothing matched it here, so the internal disk
+ * silently did not exist.  The controller is a standard AHCI HBA behind
+ * BAR5 either way -- Linux's ahci driver binds this ID too -- and a disk
+ * that is not part of an RST volume reads like any other.  A disk that IS
+ * a member of an RST RAID volume shows up as its raw member here.
+ */
 static const device_id_t ahci_pci_ids[] = {
     { DEVICE_ID_ANY, DEVICE_ID_ANY, 0x00010601U, 0x00FFFFFF, 0 },
+    { 0x8086U, 0x282AU, 0, 0, 0 },          /* Intel RST, RAID mode */
     { 0, 0, 0, 0, 0 },
 };
 
