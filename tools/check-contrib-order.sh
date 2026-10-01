@@ -134,6 +134,13 @@ libxml2:libxslt
 libXfixes:libXi
 libXi:libXtst
 libXtst:tde
+tcl:tk
+libX11:tk
+libXext:tk
+libXft:tk
+libXScrnSaver:tk
+fontconfig:tk
+freetype:tk
 dbus:tde
 file:tde
 glib2:tde

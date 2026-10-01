@@ -169,6 +169,13 @@ Alongside them, one non-X.Org library:
   `MIT-MAGIC-COOKIE-1` tool).  xterm uses the core X bitmap fonts +
   Athena toolbar (Xft/freetype disabled).  No X server is ported —
   these are client-side; functional use needs an X server over TCP.
+- **Tcl 8.6.16 / Tk 8.6.16** (`contrib/tcl/`, `contrib/tk/`) — core
+  Tcl (`tclsh`, a CDE dependency) and its X11 GUI toolkit (`wish`, the Tk
+  and Ttk widget sets).  Both static; Tk is configured against Tcl's build
+  tree rather than its staged `tclConfig.sh`, whose paths name the build
+  host's `/usr`.  Tk renders text through Xft, which fontconfig feeds the
+  X bitmap fonts below, and uses `libXss` for `tk inactive`.  Builds with
+  no patches.
 - **luit** (`contrib/luit/`) — Unicode/locale ISO-2022 filter that
   bridges a UTF-8 locale to a legacy-encoded child; xterm spawns it.
 - **Window managers** — `matwm2` (`contrib/matwm2/`, the default
