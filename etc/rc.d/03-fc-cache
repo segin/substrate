@@ -1,0 +1,27 @@
+#!/bin/sh
+# /etc/rc.d/03-fc-cache — bring the fontconfig cache up to date.
+#
+# Without a cache every fontconfig client -- every Xft, cairo and Pango
+# program -- scans and parses each font file under /usr/share/fonts when it
+# starts.  With the TrueType ports (DejaVu, Liberation, Unifont, Go) that is
+# tens of megabytes read from the root device per program, which on a USB
+# stick is a visible delay.
+#
+# The cache cannot be built on the build host: it is written in the format
+# of the fontconfig that creates it, and the host's is newer than the
+# 2.14.2 on the target, whose cache version (8) it would not match.  So it
+# is built here, on first boot.  fc-cache without -f only rescans
+# directories whose modification time changed, so later boots cost a stat
+# per directory.
+#
+# Runs after 00-fsck has made / writable (the cache lives in
+# /var/cache/fontconfig) and long before 60-sdm starts X.
+
+case "${1:-start}" in
+    start)
+        [ -x /usr/bin/fc-cache ] || exit 0
+        /usr/bin/fc-cache -s >/dev/null 2>&1 || echo "fc-cache: failed (status $?)"
+        ;;
+    stop)
+        ;;
+esac
