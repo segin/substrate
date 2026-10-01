@@ -193,6 +193,20 @@ Alongside them, one non-X.Org library:
   ISO10646-1 fonts present libX11's `XmbDrawString` pairs bytes into
   bogus `XChar2b` indices → tofu boxes (the "twm font bug").  See the
   port READMEs.
+- **TrueType / OpenType fonts** for Xft, cairo and Pango clients — all
+  prebuilt upstream, so the ports only fetch, verify and stage:
+  **DejaVu 2.37** (`contrib/font-dejavu/`, the default `sans-serif`,
+  `serif` and `monospace` through fontconfig's `60-latin.conf`, plus
+  DejaVu's own rules), **Liberation 2.1.5** (`contrib/font-liberation/`,
+  metric-compatible with Arial / Times New Roman / Courier New, which the
+  stock `30-metric-aliases.conf` maps to it), **GNU Unifont 18.0.01**
+  (`contrib/font-unifont/`, BMP + upper planes, the last-resort fallback
+  ranked by `69-unifont.conf`) and the **Go fonts 2.010**
+  (`contrib/font-go/`, from the `golang.org/x/image` module zip, checked
+  against `sum.golang.org`).  `/etc/rc.d/03-fc-cache` builds the
+  fontconfig cache at boot: the host's fontconfig writes a newer cache
+  format than the target's 2.14.2 reads, and uncached, every client
+  rescans ~27 MB of fonts (25 s for `fc-list` under QEMU).
 
 ## X.Org applications
 
