@@ -49,7 +49,11 @@
 #define R_RCR               0x44   /* receive config, 32-bit */
 #define R_CFG9346           0x50   /* register-write lock */
 #define R_MISC              0xF0   /* misc control, 32-bit (8168G and later) */
+#define R_PHYAR             0x60   /* PHY access, pre-8168G */
 #define R_PHYSTATUS         0x6C
+#define R_PMCH              0x6F   /* power management, 8-bit */
+#define R_GPHY_OCP          0xB8   /* PHY access window, 8168G and later */
+#define R_CFG_D1            0xD1
 #define R_RMS               0xDA   /* rx max packet size, 16-bit */
 #define R_CPCR              0xE0   /* C+ command, 16-bit */
 #define R_RDSAR             0xE4   /* RX desc base, 64-bit */
@@ -117,6 +121,34 @@
 /* MISC bits (8168G and later). */
 #define MISC_RXDV_GATED_EN  (1u << 19)
 
+/* PHYAR / GPHY_OCP: bit 31 is the busy/complete flag; it reads back set
+ * when a read has completed and clear when a write has. */
+#define PHYAR_FLAG          0x80000000u
+#define PHY_ACCESS_US       2000         /* generous; 20 us is typical */
+#define PMCH_PHY_POWER      0x80
+
+/* PHYstatus. */
+#define PHYS_FDX            0x01
+#define PHYS_LINK           0x02
+#define PHYS_10M            0x04
+#define PHYS_100M           0x08
+#define PHYS_1000M          0x10
+
+/* PHY registers (IEEE 802.3 clause 22, plus the Realtek page select). */
+#define MII_BMCR            0x00
+#define MII_ANAR            0x04
+#define MII_CTRL1000        0x09
+#define MII_PWRSAVE         0x0E
+#define MII_PAGE            0x1F
+#define BMCR_RESET          0x8000
+#define BMCR_ANENABLE       0x1000
+#define BMCR_ANRESTART      0x0200
+#define ANAR_10_100_ALL     0x01E0       /* 10/100, half and full */
+#define ANAR_PAUSE          0x0C00       /* symmetric + asymmetric pause */
+#define ANAR_CSMA           0x0001
+#define CTRL1000_ADV        0x0300       /* 1000BASE-T half and full */
+#define PHY_RESET_MS        500
+
 /*
  * Per-stepping quirks, transcribed from NetBSD rtl8169.c's hwrev switch.
  * Only the ones that change INITIALISATION are modelled; NOJUMBO, DESCV2,
@@ -128,6 +160,15 @@
 #define Q_TXRXEN_LATER      0x0004   /* enable CR TE|RE after TCR/RCR */
 #define Q_EARLYOFF          0x0008   /* RCR early-off (8168E-VL, 8168F) */
 #define Q_EARLYOFFV2        0x0010   /* RCR early-off v2 (8168G and later) */
+#define Q_PHY_OCP           0x0020   /* PHY through the OCP window, not PHYAR */
+#define Q_PMCH              0x0040   /* PHY power gated by PMCH bit 7 */
+#define Q_FASTETH           0x0080   /* 10/100 only (810xE) */
+#define Q_8401E             0x0100   /* 8401E: also clear 0xD1 bit 3 */
+#define Q_PHY_PWRSAVE       0x0200   /* 8168 PHY: clear reg 0x0E power save */
+
+/* The 8168G generation and everything after it. */
+#define Q_GEN_G             (Q_MACSTAT | Q_RXDV_GATED | Q_TXRXEN_LATER | \
+                             Q_EARLYOFFV2 | Q_PHY_OCP | Q_PHY_PWRSAVE)
 
 /* RCR early-off bits. */
 #define RCR_EARLYOFF        0x00003800u
@@ -208,6 +249,8 @@ static struct {
     uint32_t           tx_cur;
     uint32_t           hwrev;
     uint32_t           quirks;
+    uint32_t           ocp_base;     /* PHY page, as an OCP address */
+    uint8_t            link;         /* last reported PHYstatus link bit */
     netdev_t           netdev;
     int                registered;
 } rt;
@@ -223,6 +266,8 @@ static inline uint32_t rt_r32(uint32_t o) { return *(volatile uint32_t *)(rt.mmi
 static inline void rt_w8(uint32_t o, uint8_t v)   { *(volatile uint8_t  *)(rt.mmio + o) = v; }
 static inline void rt_w16(uint32_t o, uint16_t v) { *(volatile uint16_t *)(rt.mmio + o) = v; }
 static inline void rt_w32(uint32_t o, uint32_t v) { *(volatile uint32_t *)(rt.mmio + o) = v; }
+
+static void r8168_report_link(void);
 
 /* ----- RX path ----- */
 
@@ -342,6 +387,9 @@ static int r8168_irq(unsigned int irq, void *dev_id, void *frame) {
 
         if (rt.registered && (isr & (INT_TOK | INT_TDU)))
             r8168_tx_rekick();
+
+        if (rt.registered && (isr & INT_LINKCHG))
+            r8168_report_link();
 
         isr = rt_r16(R_ISR);
         if (isr == 0xFFFF)
@@ -620,40 +668,69 @@ static const struct {
     const char *name;
 } r8168_hwrevs[] = {
     /* 8168B: MACSTAT only. */
-    { 0x30000000, Q_MACSTAT, "8168B" },
-    { 0x38000000, Q_MACSTAT, "8168B" },
-    { 0x38400000, Q_MACSTAT, "8168B" },
-    /* 8168C/CP/D/DP. */
-    { 0x3C000000, Q_MACSTAT, "8168C" },
-    { 0x3C400000, Q_MACSTAT, "8168C" },
-    { 0x3C800000, Q_MACSTAT, "8168CP" },
-    { 0x28000000, Q_MACSTAT, "8168D" },
-    { 0x28800000, Q_MACSTAT, "8168DP" },
+    { 0x30000000, Q_MACSTAT | Q_PHY_PWRSAVE, "8168B" },
+    { 0x38000000, Q_MACSTAT | Q_PHY_PWRSAVE, "8168B" },
+    { 0x38400000, Q_MACSTAT | Q_PHY_PWRSAVE, "8168B" },
+    /* 8168C/CP/D/DP.  The D/DP gate the PHY's power through PMCH. */
+    { 0x3C000000, Q_MACSTAT | Q_PHY_PWRSAVE, "8168C" },
+    { 0x3C400000, Q_MACSTAT | Q_PHY_PWRSAVE, "8168C" },
+    { 0x3C800000, Q_MACSTAT | Q_PHY_PWRSAVE, "8168CP" },
+    { 0x28000000, Q_MACSTAT | Q_PHY_PWRSAVE | Q_PMCH, "8168D" },
+    { 0x28800000, Q_MACSTAT | Q_PHY_PWRSAVE | Q_PMCH, "8168DP" },
     /* 8168E. */
-    { 0x2C000000, Q_MACSTAT, "8168E" },
+    { 0x2C000000, Q_MACSTAT | Q_PHY_PWRSAVE | Q_PMCH, "8168E" },
     /* 8168E-VL and 8168F add the early-off receive tweak. */
-    { 0x2C800000, Q_MACSTAT | Q_EARLYOFF, "8168E-VL" },
-    { 0x48000000, Q_MACSTAT | Q_EARLYOFF, "8168F" },
-    { 0x48800000, Q_MACSTAT, "8411" },
+    { 0x2C800000, Q_MACSTAT | Q_PHY_PWRSAVE | Q_EARLYOFF, "8168E-VL" },
+    { 0x48000000, Q_MACSTAT | Q_PHY_PWRSAVE | Q_EARLYOFF, "8168F" },
+    { 0x48800000, Q_MACSTAT | Q_PHY_PWRSAVE, "8411" },
     /*
      * 8168G and later -- the generation on any 2013+ board, which is what a
      * Haswell Lenovo C460 will have.  These need RXDV gating cleared and the
      * TX/RX enable moved AFTER the config registers, and like every MACSTAT
-     * part they take TXENB WITHOUT RXENB in the C+ command word.
+     * part they take TXENB WITHOUT RXENB in the C+ command word.  Their PHY
+     * is reached through the OCP window.
      */
-    { 0x4C000000, Q_MACSTAT | Q_RXDV_GATED | Q_TXRXEN_LATER | Q_EARLYOFFV2, "8168G" },
-    { 0x4C100000, Q_MACSTAT | Q_RXDV_GATED | Q_TXRXEN_LATER | Q_EARLYOFFV2, "8168G" },
-    { 0x50000000, Q_MACSTAT | Q_RXDV_GATED | Q_TXRXEN_LATER | Q_EARLYOFFV2, "8168EP" },
-    { 0x50800000, Q_MACSTAT | Q_RXDV_GATED | Q_TXRXEN_LATER | Q_EARLYOFFV2, "8168GU" },
-    { 0x50900000, Q_MACSTAT | Q_RXDV_GATED | Q_TXRXEN_LATER | Q_EARLYOFFV2, "8168G" },
-    { 0x54000000, Q_MACSTAT | Q_RXDV_GATED | Q_TXRXEN_LATER | Q_EARLYOFFV2, "8168H" },
-    { 0x54100000, Q_MACSTAT | Q_RXDV_GATED | Q_TXRXEN_LATER | Q_EARLYOFFV2, "8168H" },
-    { 0x54800000, Q_MACSTAT | Q_RXDV_GATED | Q_TXRXEN_LATER | Q_EARLYOFFV2, "8168FP" },
-    { 0x5C800000, Q_MACSTAT | Q_RXDV_GATED | Q_TXRXEN_LATER | Q_EARLYOFFV2, "8411B" },
+    { 0x4C000000, Q_GEN_G, "8168G" },
+    { 0x4C100000, Q_GEN_G, "8168G" },
+    { 0x50000000, Q_GEN_G, "8168EP" },
+    { 0x50800000, Q_GEN_G, "8168GU" },
+    { 0x50900000, Q_GEN_G, "8168G" },
+    { 0x54000000, Q_GEN_G, "8168H" },
+    { 0x54100000, Q_GEN_G, "8168H" },
+    { 0x54800000, Q_GEN_G, "8168FP" },
+    { 0x5C800000, Q_GEN_G, "8411B" },
     { 0, 0, NULL },
 };
 
-static const char *r8168_identify(void) {
+/*
+ * The 810xE Fast Ethernet parts (PCI ID 0x8136) speak the same descriptor
+ * interface but predate the 8168G generation: none of them takes the RXDV
+ * gate or the late TE/RE enable.  The oldest want RXENB in the C+ command
+ * word like a pre-8168B part, and several gate their PHY's power through
+ * PMCH.  The RTL8106E-US/8107E report 8168GU/8168H revisions and are found
+ * in the table above.
+ */
+static const struct {
+    uint32_t hwrev;
+    uint32_t quirks;
+    const char *name;
+} r810x_hwrevs[] = {
+    { 0x30800000, Q_FASTETH, "8100E" },
+    { 0x38800000, Q_FASTETH, "8100E" },
+    { 0x34000000, Q_FASTETH, "8101E" },
+    { 0x34800000, Q_FASTETH | Q_MACSTAT, "8102E" },
+    { 0x24800000, Q_FASTETH | Q_MACSTAT, "8102EL" },
+    { 0x24C00000, Q_FASTETH | Q_MACSTAT, "8102EL" },
+    { 0x34C00000, Q_FASTETH | Q_MACSTAT, "8103E" },
+    { 0x24000000, Q_FASTETH | Q_MACSTAT | Q_PMCH | Q_8401E, "8401E" },
+    { 0x40800000, Q_FASTETH | Q_MACSTAT | Q_PMCH, "8105E" },
+    { 0x40C00000, Q_FASTETH | Q_MACSTAT | Q_PMCH, "8105E" },
+    { 0x44000000, Q_FASTETH | Q_MACSTAT | Q_PMCH, "8402" },
+    { 0x44800000, Q_FASTETH | Q_MACSTAT | Q_PMCH, "8106E" },
+    { 0, 0, NULL },
+};
+
+static const char *r8168_identify(pci_device_t *pdev) {
     rt.hwrev = rt_r32(R_TCR) & TCR_HWREV_MASK;
     for (int i = 0; r8168_hwrevs[i].name != NULL; i++) {
         if (r8168_hwrevs[i].hwrev == rt.hwrev) {
@@ -661,14 +738,131 @@ static const char *r8168_identify(void) {
             return r8168_hwrevs[i].name;
         }
     }
+    if (pdev->device_id == 0x8136) {
+        for (int i = 0; r810x_hwrevs[i].name != NULL; i++) {
+            if (r810x_hwrevs[i].hwrev == rt.hwrev) {
+                rt.quirks = r810x_hwrevs[i].quirks;
+                return r810x_hwrevs[i].name;
+            }
+        }
+        /* An unknown Fast Ethernet part is an older design, not a newer
+         * one: the pre-8168G sequence, with TE/RE before TCR/RCR. */
+        rt.quirks = Q_FASTETH | Q_MACSTAT;
+        return NULL;
+    }
     /*
-     * Unknown stepping.  Assume the MODERN behaviour rather than the ancient
-     * one: everything from the 8168B onwards wants MACSTAT, and every part
-     * new enough not to be in this table is newer than 8168G.  Guessing "old"
-     * for a new chip sets RXENB on a part that must not have it.
+     * Unknown gigabit stepping.  Assume the MODERN behaviour rather than the
+     * ancient one: everything from the 8168B onwards wants MACSTAT, and
+     * every part new enough not to be in this table is newer than 8168G.
+     * Guessing "old" for a new chip sets RXENB on a part that must not have
+     * it.
      */
-    rt.quirks = Q_MACSTAT | Q_RXDV_GATED | Q_TXRXEN_LATER | Q_EARLYOFFV2;
+    rt.quirks = Q_GEN_G;
     return NULL;
+}
+
+/* ----- PHY ----- */
+
+static void r8168_phyar_wait(uint32_t reg, uint32_t want) {
+    for (unsigned us = 0; us < PHY_ACCESS_US; us += 20) {
+        if ((rt_r32(reg) & PHYAR_FLAG) == want)
+            return;
+        timer_busywait_us(20);
+    }
+}
+
+/*
+ * 8168G and later reach the PHY's registers as OCP addresses: page 0's
+ * standard registers sit at 0xA400 + 2 * reg, and writing register 0x1F
+ * moves the window to another page instead of reaching the PHY at all.
+ */
+static uint32_t r8168_ocp_addr(int reg) {
+    if (rt.ocp_base != 0xA400)
+        reg -= 0x10;
+    return rt.ocp_base + (uint32_t)reg * 2;
+}
+
+static uint16_t r8168_phy_read(int reg) {
+    if (rt.quirks & Q_PHY_OCP) {
+        if (reg == MII_PAGE)
+            return (uint16_t)(rt.ocp_base == 0xA400 ? 0 : rt.ocp_base >> 4);
+        rt_w32(R_GPHY_OCP, r8168_ocp_addr(reg) << 15);
+        r8168_phyar_wait(R_GPHY_OCP, PHYAR_FLAG);
+        return (uint16_t)rt_r32(R_GPHY_OCP);
+    }
+    rt_w32(R_PHYAR, (uint32_t)(reg & 0x1F) << 16);
+    r8168_phyar_wait(R_PHYAR, PHYAR_FLAG);
+    return (uint16_t)rt_r32(R_PHYAR);
+}
+
+static void r8168_phy_write(int reg, uint16_t val) {
+    if (rt.quirks & Q_PHY_OCP) {
+        if (reg == MII_PAGE) {
+            rt.ocp_base = val ? (uint32_t)val << 4 : 0xA400;
+            return;
+        }
+        rt_w32(R_GPHY_OCP, PHYAR_FLAG | r8168_ocp_addr(reg) << 15 | val);
+        r8168_phyar_wait(R_GPHY_OCP, 0);
+        return;
+    }
+    rt_w32(R_PHYAR, PHYAR_FLAG | (uint32_t)(reg & 0x1F) << 16 | val);
+    r8168_phyar_wait(R_PHYAR, 0);
+}
+
+/*
+ * CR.RST resets the MAC only.  A PHY left powered down -- by an OS shutdown
+ * path with WoL off, a firmware "LAN off" setting or a stopped network stack
+ * -- stays down across it, and the link never comes up.  Power the PHY, take
+ * it out of power save, reset it (which clears power-down and isolate),
+ * advertise everything it can do and restart autonegotiation.
+ */
+static void r8168_phy_bringup(void) {
+    unsigned ms;
+
+    if (rt.quirks & Q_PMCH) {
+        rt_w8(R_PMCH, rt_r8(R_PMCH) | PMCH_PHY_POWER);
+        if (rt.quirks & Q_8401E)
+            rt_w8(R_CFG_D1, rt_r8(R_CFG_D1) & ~0x08);
+        timer_busywait_ms(1);
+    }
+
+    rt.ocp_base = 0xA400;
+    r8168_phy_write(MII_PAGE, 0);
+    if (rt.quirks & Q_PHY_PWRSAVE)
+        r8168_phy_write(MII_PWRSAVE, 0);
+
+    r8168_phy_write(MII_BMCR, BMCR_RESET);
+    for (ms = 0; ms < PHY_RESET_MS; ms++) {
+        if (!(r8168_phy_read(MII_BMCR) & BMCR_RESET))
+            break;
+        timer_busywait_ms(1);
+    }
+    if (ms == PHY_RESET_MS)
+        kprint("r8168: PHY reset did not complete\n");
+
+    r8168_phy_write(MII_ANAR, ANAR_10_100_ALL | ANAR_PAUSE | ANAR_CSMA);
+    if (!(rt.quirks & Q_FASTETH))
+        r8168_phy_write(MII_CTRL1000, CTRL1000_ADV);
+    r8168_phy_write(MII_BMCR, BMCR_ANENABLE | BMCR_ANRESTART);
+}
+
+/* Follow PHYstatus into the interface's RUNNING flag, and say so. */
+static void r8168_report_link(void) {
+    uint8_t ps = rt_r8(R_PHYSTATUS);
+    uint8_t up = ps & PHYS_LINK;
+
+    if (up == rt.link)
+        return;
+    rt.link = up;
+    if (up) {
+        rt.netdev.flags |= NETDEV_IFF_RUNNING;
+        kprintf("r8168: link up, %u Mb/s %s duplex\n",
+                (ps & PHYS_1000M) ? 1000u : (ps & PHYS_100M) ? 100u : 10u,
+                (ps & PHYS_FDX) ? "full" : "half");
+    } else {
+        rt.netdev.flags &= ~NETDEV_IFF_RUNNING;
+        kprint("r8168: link down\n");
+    }
 }
 
 /* ----- setup ----- */
@@ -712,7 +906,9 @@ static int r8168_setup(pci_device_t *pdev) {
 
     /* Identify the stepping BEFORE configuring anything: the quirks it
      * selects change the C+ command word and the enable ordering. */
-    const char *revname = r8168_identify();
+    const char *revname = r8168_identify(pdev);
+
+    r8168_phy_bringup();
 
     /* MAC out of IDR0..5.  Loaded from the EEPROM by the chip at reset. */
     for (int i = 0; i < 6; i++)
@@ -861,8 +1057,10 @@ static int r8168_setup(pci_device_t *pdev) {
 
     strlcpy(rt.netdev.name, "eth0", NETDEV_NAME_MAX);
     rt.netdev.mtu = 1500;
-    rt.netdev.flags = NETDEV_IFF_UP | NETDEV_IFF_BROADCAST | NETDEV_IFF_RUNNING |
-                     NETDEV_IFF_MULTICAST;
+    /* RUNNING follows the link (r8168_report_link()), not registration. */
+    rt.netdev.flags = NETDEV_IFF_UP | NETDEV_IFF_BROADCAST |
+                      NETDEV_IFF_MULTICAST;
+    rt.link = 0;
     rt.netdev.ops = &r8168_ops;
     rt.netdev.driver_data = &rt;
     netdev_register(&rt.netdev);
@@ -882,8 +1080,13 @@ static int r8168_setup(pci_device_t *pdev) {
         /* Say so loudly: the quirk guess is the most likely reason a
          * bring-up on new silicon misbehaves, and hwrev above is exactly
          * what a new table entry needs. */
-        kprint("r8168: stepping not in table, assuming 8168G-class quirks\n");
+        kprint((rt.quirks & Q_FASTETH)
+               ? "r8168: stepping not in table, assuming 8102E-class quirks\n"
+               : "r8168: stepping not in table, assuming 8168G-class quirks\n");
     }
+    /* Autonegotiation was restarted moments ago, so this usually reports
+     * nothing; LINKCHG brings the result. */
+    r8168_report_link();
     return 0;
 }
 

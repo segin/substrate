@@ -125,40 +125,59 @@ static void tsc_calibrate(void) {
  * The spin is bounded: on hardware where OUT2 never rises this returns early
  * rather than hanging the machine.
  */
+static void pit2_oneshot_wait(uint32_t count) {
+    uint32_t guard = 0;
+    uint8_t prev;
+
+    prev = inb(NMI_STATUS_CONTROL);
+    outb(NMI_STATUS_CONTROL, (uint8_t)((prev & ~0x02U) | 0x01U));
+    outb(PIT_COMMAND, PIT_MODE2_ONESHOT);
+    outb(PIT_CHANNEL2, (uint8_t)(count & 0xFFU));
+    outb(PIT_CHANNEL2, (uint8_t)((count >> 8) & 0xFFU));
+
+    /*
+     * Bound the poll.  Each iteration is a port read costing on the order
+     * of a microsecond on real hardware, so the ceiling has to be sized in
+     * reads, not in "a big number": at 100 million this took about a
+     * hundred seconds per chunk when OUT2 never rose, which does not look
+     * like a slow machine, it looks like a dead one.  A 50ms chunk needs
+     * roughly 50k reads, so this is several times the expected count and
+     * still gives up in a fraction of a second.
+     */
+    while ((inb(NMI_STATUS_CONTROL) & 0x20U) == 0) {
+        if (++guard > 200000U) {
+            break;      /* no usable PIT: give up rather than spin on */
+        }
+    }
+    outb(NMI_STATUS_CONTROL, prev);
+}
+
 void timer_busywait_ms(unsigned ms) {
     while (ms > 0) {
         unsigned chunk = (ms > 50U) ? 50U : ms;
         uint32_t count = (uint32_t)(((uint64_t)PIT_FREQUENCY * chunk) / 1000U);
-        uint32_t guard = 0;
-        uint8_t prev;
 
         if (count == 0 || count > 0xFFFFU) {
             return;
         }
-
-        prev = inb(NMI_STATUS_CONTROL);
-        outb(NMI_STATUS_CONTROL, (uint8_t)((prev & ~0x02U) | 0x01U));
-        outb(PIT_COMMAND, PIT_MODE2_ONESHOT);
-        outb(PIT_CHANNEL2, (uint8_t)(count & 0xFFU));
-        outb(PIT_CHANNEL2, (uint8_t)((count >> 8) & 0xFFU));
-
-        /*
-         * Bound the poll.  Each iteration is a port read costing on the order
-         * of a microsecond on real hardware, so the ceiling has to be sized in
-         * reads, not in "a big number": at 100 million this took about a
-         * hundred seconds per chunk when OUT2 never rose, which does not look
-         * like a slow machine, it looks like a dead one.  A 50ms chunk needs
-         * roughly 50k reads, so this is several times the expected count and
-         * still gives up in a fraction of a second.
-         */
-        while ((inb(NMI_STATUS_CONTROL) & 0x20U) == 0) {
-            if (++guard > 200000U) {
-                break;      /* no usable PIT: give up rather than spin on */
-            }
-        }
-        outb(NMI_STATUS_CONTROL, prev);
-
+        pit2_oneshot_wait(count);
         ms -= chunk;
+    }
+}
+
+/* As timer_busywait_ms(), for the microsecond waits device register
+ * handshakes are specified in.  Resolution is one PIT count (~0.84 us),
+ * and every wait is at least one count. */
+void timer_busywait_us(unsigned us) {
+    while (us > 0) {
+        unsigned chunk = (us > 50000U) ? 50000U : us;
+        uint32_t count = (uint32_t)(((uint64_t)PIT_FREQUENCY * chunk) / 1000000U);
+
+        if (count == 0) {
+            count = 1;
+        }
+        pit2_oneshot_wait(count);
+        us -= chunk;
     }
 }
 
