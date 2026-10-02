@@ -1,4 +1,4 @@
-.TH E1000E 4 "2026-09-30" "Substrate Kernel" "Kernel Interfaces"
+.TH E1000E 4 "2026-10-02" "Substrate Kernel" "Kernel Interfaces"
 .SH NAME
 e1000e \- Intel 82574 and I217/I218/I219 Gigabit Ethernet driver
 .SH SYNOPSIS
@@ -29,59 +29,95 @@ The interface is registered as
 .BR eth0 .
 One controller is supported; a second is reported and ignored.
 .SS Data path
-One receive and one transmit ring of legacy 16-byte descriptors, 32 and 16
-entries, with 2 KiB buffers.  The Ethernet CRC is stripped on receive and
-inserted on transmit.  Every supported part accepts legacy descriptors
-while extended receive status is off, and the driver turns it off in case
-a boot ROM left it on.
+One receive and one transmit ring of legacy 16-byte descriptors, 256 and
+128 entries, with 2 KiB buffers.  The Ethernet CRC is stripped on receive
+and inserted on transmit, so a frame handed to the driver may be at most
+1514 bytes, or 1518 with an 802.1Q tag.  Every supported part accepts
+legacy descriptors while extended receive status is off, and the driver
+turns it off in case a boot ROM left it on.
+.PP
+Transmit keeps one descriptor free, since the hardware reads a tail equal
+to its head as an empty ring.  When the ring is full a sender that had
+interrupts enabled waits up to 5 ms, outside the transmit lock, for a
+slot; a sender in interrupt context gets
+.B ENOBUFS
+at once.  Frames are refused with
+.B ENETDOWN
+while there is no link.  Receive collects at most one ring's worth per
+interrupt and re-raises the interrupt for the rest.
+.PP
+Multicast is received promiscuously; the IP layer filters by group
+membership.  This keeps IPv6 neighbour discovery working without a
+multicast table entry per address.
 .PP
 The station address is taken from Receive Address 0, which the hardware
 loads from its NVM at reset.  The chipset parts keep that NVM in the
 system's SPI flash rather than behind an EEPROM interface.  If the
 reloaded address is invalid the one firmware left there is used; with
-neither, the driver does not attach.
+neither, the driver does not attach.  Receive Address entries beyond the
+first are cleared.
 .SS Bring-up
-At attach the driver stops receive and transmit, then resets the MAC.
-On the chipset parts it resets the MAC only, never the PHY: the
-Management Engine may own the PHY (shown in the log as
-.RB \(lq "PHY reset blocked by firmware" \(rq),
-and PHY reset has proven unreliable on these parts.  The MAC reset runs
-under the software semaphore in
+The driver points the ring registers at its own (empty) rings before
+anything is enabled.  An I219 can hang in reset if descriptors were left
+pending, for example after a PXE boot; the hardware reports this in PCI
+configuration space, and the driver then pushes one dummy transmit
+through its ring and, if that is not enough, cycles the receiver.  It
+then stops new bus-master requests, waits for outstanding ones to drain,
+and resets the MAC under the software semaphore in
 .B EXTCNF_CTRL
-that arbitrates shared resources with firmware.
-.PP
-An I219 can hang in reset if descriptors were left pending, for example
-after a PXE boot; the hardware reports this in PCI configuration space.
-When it does, the driver first pushes one dummy transmit through its own
-ring and, if that is not enough, cycles the receiver, as Linux does.
+that arbitrates shared resources with firmware.  On the 82574 it then
+waits for the NVM reload and PHY configuration.
 .PP
 After reset the driver sets
 .B CTRL_EXT.DRV_LOAD
 so that manageability firmware (Intel AMT on vPro machines) hands the
-port over, and leaves speed and duplex to autonegotiation.
+port over, and applies the settings each family's documentation and
+specification updates require: transmit arbitration, the Sunrise/Kaby
+Point I219 transmit errata, packet-buffer ECC, snooped and strictly
+ordered DMA, NFS filtering off, and on the 82574 its PCIe workarounds
+with ASPM disabled.  With AMT pass-through active, ARP interception is
+turned off so ARP requests reach the host.
 .SS PHY
 The PHY is reached through the MDIC register at MDIO address 1 (82574)
-or 2 (chipset parts), under the same software semaphore.  Its ID and
-control register are logged.  A PHY left powered down by a previous
-operating system is powered up and autonegotiation restarted.
+or 2 (chipset parts; pages from 768 at address 1), under the same
+software semaphore.  A register read of 0 or all-ones, or an MDIC
+completion for a different register, means the PHY did not answer.
 .PP
-A PHY that does not answer is logged as
-.RB \(lq "PHY not responding on MDIO (Ultra Low Power mode?)" \(rq .
-I217 and later PHYs can be left in Ultra Low Power mode, which the driver
-does not yet know how to leave; the link may still come up if firmware
-brought the PHY out of it.
+On the chipset parts the PHY is first brought out of Ultra Low Power
+mode (through the Management Engine if present, otherwise directly) and
+out of forced SMBus mode.  If it still does not answer, the driver tries
+forced SMBus mode, then a power cycle through the LANPHYPC pin when
+firmware allows a PHY reset, then PCIe mode again.
+.PP
+Low Power Link Up and Gigabit-disable are cleared, 10/100 half and full
+and 1000 full are advertised, and autonegotiation is restarted.  The I217
+and I219 also get carrier sense on transmit, automatic downshift and
+automatic MDI-X.
+.SS Link and recovery
+A kernel thread applies the chipset parts' speed-dependent settings at
+every link change: inter-packet gap and PHY receive latency, PLL clock
+gating, K1, the I219 pointer gap, the beacon duration, the I218 K1
+workaround on low-power platforms, and Latency Tolerance Reporting.  The
+interface's RUNNING flag follows the link.
+.PP
+The same thread resets and reprograms the controller (leaving the PHY and
+link alone) when the transmit unit has made no progress for 3 seconds
+with link up, or when the link drops with frames still queued.
 .SS Interrupts
 The driver tries MSI first, then the firmware's legacy interrupt line,
 then legacy INTx routed through the I/O APIC by the conventional PCI
 interrupt swizzle.  Each source is proven by raising a link-status-change
-cause through the Interrupt Cause Set register and waiting for it to
-arrive; one that stays silent is removed and the next is tried.  If none
-can be proven, the first that installs is kept with a warning.  On a
-shared line the handler acts only when
+cause through the Interrupt Cause Set register: the vector must be quiet
+before, deliver that cause, and be quiet again after.  One that fails is
+removed and the next is tried.  If none can be proven, the first that
+installs is kept with a warning.  On a shared line the handler acts only
+when
 .B ICR
-reports that this device asserted it.
+reports that this device asserted it.  On the I219, legacy interrupts
+keep the sideband clock their messages travel on ungated.
 .PP
-Link changes are logged with speed and duplex.
+Interrupts are not throttled.  Measured under QEMU, throttling delayed
+acknowledgement processing enough to stall bulk TCP uploads.
 .SH FILES
 .TP
 .B sys/drivers/net/e1000e.c
@@ -99,10 +135,19 @@ No source passed the self-test; receive may not work.
 .TP
 .B "e1000e: descriptor flush required before reset (I219)"
 The I219 reset-hang workaround ran.
+.TP
+.B "e1000e: PHY not responding on MDIO; left as found"
+Every recovery step failed; the link may still come up if firmware
+manages the PHY.
+.TP
+.B "e1000e: ...; resetting the controller"
+The recovery thread reset the controller after a transmit hang or a link
+loss with frames queued.
 .SH BUGS
 The older chipset PHYs \(em 82577 and 82578 (Ibex Peak) and 82579
 (Cougar Point, Panther Point) \(em are not supported; they need
-per-generation PHY workarounds.  Ultra Low Power exit is not implemented.
+per-generation PHY workarounds.  When the NVM asks software to configure
+the PHY after a reset, that configuration is not applied (it is logged).
 No jumbo frames, checksum offload, or segmentation offload.
 .SH SEE ALSO
 .BR ifconfig (8)
