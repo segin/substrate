@@ -40,10 +40,19 @@ static inline void audio_fifo_init(audio_fifo_t *f, uint8_t *buf, size_t cap)
 	f->tail = 0;
 }
 
+/*
+ * Discard everything queued.  This is a consumer-side operation -- tail
+ * catches up with head -- and never writes head, which only the producer
+ * owns.  Zeroing both counters raced a producer preempted inside
+ * audio_fifo_write(): its late publish of head = (old head + n) then sat
+ * against tail = 0, used exceeded cap, free wrapped, and the writer lapped
+ * unplayed audio.  Now a late publish just leaves that one chunk queued.
+ * The caller serialises this against the consumer (the driver's feed lock).
+ */
 static inline void audio_fifo_reset(audio_fifo_t *f)
 {
-	__atomic_store_n(&f->tail, 0, __ATOMIC_RELEASE);
-	__atomic_store_n(&f->head, 0, __ATOMIC_RELEASE);
+	__atomic_store_n(&f->tail, __atomic_load_n(&f->head, __ATOMIC_ACQUIRE),
+	                 __ATOMIC_RELEASE);
 }
 
 static inline size_t audio_fifo_used(const audio_fifo_t *f)
@@ -55,7 +64,9 @@ static inline size_t audio_fifo_used(const audio_fifo_t *f)
 
 static inline size_t audio_fifo_free(const audio_fifo_t *f)
 {
-	return f->cap - audio_fifo_used(f);
+	size_t used = audio_fifo_used(f);
+
+	return used >= f->cap ? 0 : f->cap - used;
 }
 
 /* Producer side. Returns the number of bytes accepted (<= n). */

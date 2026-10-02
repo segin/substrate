@@ -117,6 +117,47 @@ static void test_reset(void)
 	assert(audio_fifo_free(&f) == sizeof(backing));
 }
 
+/*
+ * A reset landing while the producer is inside audio_fifo_write() -- after
+ * it sampled head, before it published head + n -- must leave the indices
+ * consistent: the late publish may queue that one chunk, never more than
+ * the capacity.
+ */
+static void test_reset_races_producer(void)
+{
+	uint8_t backing[8];
+	audio_fifo_t f;
+	size_t head_snapshot;
+	uint8_t out[8];
+
+	audio_fifo_init(&f, backing, sizeof(backing));
+	audio_fifo_write(&f, "abcdef", 6);
+	(void)audio_fifo_read(&f, out, 2);
+	/* Producer samples head, is preempted... */
+	head_snapshot = f.head;
+	/* ...the stream is flushed... */
+	audio_fifo_reset(&f);
+	/* ...and the producer publishes its 2-byte append late. */
+	memcpy(backing + head_snapshot % sizeof(backing), "gh", 2);
+	__atomic_store_n(&f.head, head_snapshot + 2, __ATOMIC_RELEASE);
+	assert(audio_fifo_used(&f) == 2);
+	assert(audio_fifo_free(&f) == sizeof(backing) - 2);
+	assert(audio_fifo_read(&f, out, sizeof(out)) == 2);
+	assert(memcmp(out, "gh", 2) == 0);
+}
+
+/* used > cap can only come from a broken caller, but free must not wrap. */
+static void test_free_clamps(void)
+{
+	uint8_t backing[8];
+	audio_fifo_t f;
+
+	audio_fifo_init(&f, backing, sizeof(backing));
+	f.head = 20;
+	f.tail = 0;
+	assert(audio_fifo_free(&f) == 0);
+}
+
 int main(void)
 {
 	test_empty();
@@ -125,6 +166,8 @@ int main(void)
 	test_wraparound();
 	test_streaming_many_wraps();
 	test_reset();
+	test_reset_races_producer();
+	test_free_clamps();
 	printf("host_test_audio_fifo: all tests passed\n");
 	return 0;
 }
