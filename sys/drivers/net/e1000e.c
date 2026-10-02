@@ -25,10 +25,11 @@
  *   - CTRL_EXT.DRV_LOAD tells manageability firmware (AMT on vPro) that a
  *     driver owns the port now.
  *   - PHY access through MDIC under the EXTCNF_CTRL software flag, which
- *     arbitrates the MDIO bus with firmware.  Used to power the PHY up if a
- *     previous OS left it powered down, and to log its ID -- a PHY that does
- *     not answer is the signature of I217+ Ultra Low Power mode, which this
- *     driver does not yet know how to leave.
+ *     arbitrates the MDIO bus with firmware, with page selection for the
+ *     PCH PHYs.  At bring-up the PHY is taken out of Ultra Low Power mode
+ *     and forced SMBus mode (with a LANPHYPC power cycle if it still does
+ *     not answer), cleared of LPLU and Gigabit-disable, and set to
+ *     advertise every speed and autonegotiate.
  *
  * Not covered: the older PCH PHYs (82577/82578 on Ibex Peak, 82579 on
  * Cougar Point / Panther Point), which need per-generation PHY workarounds.
@@ -90,7 +91,28 @@
 #define R_FEXTNVM9          0x5BB4
 #define R_ITR               0x00C4   /* interrupt throttle, 256 ns units */
 
+#define R_FEXTNVM           0x0028
+#define R_FEXTNVM3          0x003C
+#define R_PHY_CTRL          0x0F10   /* MAC-side PHY power control */
+#define R_H2ME              0x5B50   /* host to manageability engine */
+
+/* FEXTNVM: the NVM wants software to configure the PHY after reset. */
+#define FEXTNVM_SW_CONFIG   0x08000000u
+
+/* FEXTNVM3: PHY configuration counter (time the PHY gets after power-up). */
+#define FEXTNVM3_PHY_CFG_COUNTER_MASK 0x0C000000u
+#define FEXTNVM3_PHY_CFG_COUNTER_50MS 0x08000000u
+
+/* PHY_CTRL. */
+#define PHY_CTRL_D0A_LPLU   0x00000002u
+#define PHY_CTRL_GBE_DISABLE 0x00000040u
+
+/* H2ME. */
+#define H2ME_ULP            0x00000800u
+#define H2ME_ENFORCE_SETTINGS 0x00001000u
+
 /* FEXTNVM7 / FEXTNVM9 (Sunrise Point and later). */
+#define FEXTNVM7_DISABLE_SMB_PERST    0x00000020u
 #define FEXTNVM7_SIDE_CLK_UNGATE      0x00000004u
 #define FEXTNVM9_IOSFSB_CLKGATE_DIS   0x00000800u
 #define FEXTNVM9_IOSFSB_CLKREQ_DIS    0x00001000u
@@ -108,7 +130,10 @@
 #define CTRL_SLU            (1u << 6)
 #define CTRL_FRCSPD         (1u << 11)
 #define CTRL_FRCDPLX        (1u << 12)
+#define CTRL_LANPHYPC_OVERRIDE (1u << 16)
+#define CTRL_LANPHYPC_VALUE (1u << 17)
 #define CTRL_RST            (1u << 26)
+#define CTRL_PHY_RST        (1u << 31)
 
 /* STATUS bits. */
 #define STATUS_FD           (1u << 0)
@@ -121,6 +146,8 @@
 #define EECD_AUTO_RD        (1u << 9)    /* NVM auto-read done */
 
 /* CTRL_EXT bits. */
+#define CTRL_EXT_LPCD       (1u << 2)    /* LANPHYPC power cycle done */
+#define CTRL_EXT_FORCE_SMBUS (1u << 11)
 #define CTRL_EXT_BIT22      (1u << 22)   /* required set on 82571+/ICH */
 #define CTRL_EXT_DRV_LOAD   (1u << 28)
 
@@ -137,6 +164,7 @@
 
 /* FWSM. */
 #define FWSM_RSPCIPHY       0x00000040u   /* PHY reset allowed */
+#define FWSM_ULP_CFG_DONE   0x00000400u
 #define FWSM_FW_VALID       0x00008000u   /* manageability firmware present */
 
 /* FEXTNVM11 (I219). */
@@ -206,9 +234,52 @@
 #define PHY_BMCR            0x00
 #define PHY_ID1             0x02
 #define PHY_ID2             0x03
+#define PHY_ANAR            0x04
+#define PHY_CTRL1000        0x09
 #define BMCR_ANRESTART      0x0200
+#define BMCR_ISOLATE        0x0400
 #define BMCR_PDOWN          0x0800
 #define BMCR_ANENABLE       0x1000
+#define BMCR_LOOPBACK       0x4000
+#define BMCR_RESET          0x8000
+#define ANAR_ADVERTISE      0x01E1   /* 10/100 half and full, IEEE 802.3 */
+#define CTRL1000_FD         0x0200   /* 1000BASE-T full duplex */
+
+/*
+ * PCH PHY registers are addressed by page and register: PHY_REG() packs
+ * both, and e2k_phy_rw_locked() unpacks them into page select plus MDIO
+ * address.
+ */
+#define PHY_REG(page, reg)  (((uint32_t)(page) << 5) | ((reg) & 0x1F))
+#define PHY_PAGE_SELECT     0x1F
+#define PHY_MULTI_PAGE_MAX  0x0F
+
+#define I82577_CFG          22       /* page 0 */
+#define I82577_CFG_DOWNSHIFT    0x0C00
+#define I82577_CFG_CRS_ON_TX    0x8000
+#define I82577_PHY_CTRL2    18       /* page 0 */
+#define I82577_CTRL2_MDIX_MASK  0x0600
+#define I82577_CTRL2_MDIX_AUTO  0x0400
+
+#define HV_OEM_BITS         PHY_REG(768, 25)
+#define HV_OEM_LPLU             0x0004
+#define HV_OEM_GBE_DIS          0x0040
+#define HV_OEM_RESTART_AN       0x0400
+#define CV_SMB_CTRL         PHY_REG(769, 23)
+#define CV_SMB_FORCE_SMBUS      0x0001
+#define HV_PM_CTRL          PHY_REG(770, 17)
+#define HV_PM_K1_CLK_REQ        0x0200
+#define HV_PM_K1_ENABLE         0x4000
+#define I218_ULP_CONFIG1    PHY_REG(779, 16)
+#define ULP_CONFIG1_START                   0x0001
+#define ULP_CONFIG1_IND                     0x0004
+#define ULP_CONFIG1_STICKY_ULP              0x0010
+#define ULP_CONFIG1_INBAND_EXIT             0x0020
+#define ULP_CONFIG1_WOL_HOST                0x0040
+#define ULP_CONFIG1_RESET_TO_SMBUS          0x0100
+#define ULP_CONFIG1_EN_ULP_LANPHYPC         0x0400
+#define ULP_CONFIG1_DIS_CLR_STICKY_ON_PERST 0x0800
+#define ULP_CONFIG1_DISABLE_SMB_PERST       0x1000
 
 /* PCI config: I219 descriptor-ring status (Linux PCICFG_DESC_RING_STATUS). */
 #define PCICFG_DESC_RING_STATUS    0xE4
@@ -238,6 +309,13 @@
 #define K_82574             1   /* 82574L / 82583V: discrete, PHY at 1 */
 #define K_LPT               2   /* I217 / I218: PCH MAC, PHY at 2 */
 #define K_SPT               3   /* I219: as LPT, plus the reset hang */
+#define K_MASK              0x0F
+
+/* Per-ID flags, ORed into driver_data above the chip class. */
+#define F_ULP               0x10   /* PHY has Ultra Low Power mode */
+#define F_CNP               0x20   /* Cannon Point or later: slower ULP exit */
+#define F_SPT_ERRATA        0x40   /* Sunrise/Kaby Point transmit errata */
+#define F_LPT_LP            0x80   /* I218 on a low-power platform: K1 erratum */
 
 /* Where the interrupt comes from, in order of preference. */
 #define IRQ_NONE_K          0
@@ -268,6 +346,8 @@ static struct {
     volatile uint8_t     *mmio;
     pci_device_t         *pdev;
     int                   kind;
+    int                   flags;         /* F_* for this device ID */
+    uint16_t              phy_rev;       /* PHY ID2 revision field */
     int                   irq;
     int                   irq_kind;
     volatile uint32_t     intr_count;    /* interrupts that were ours */
@@ -350,88 +430,349 @@ static void e2k_swflag_release(void) {
     e2k_write(R_EXTCNF_CTRL, e2k_read(R_EXTCNF_CTRL) & ~EXTCNF_SWFLAG);
 }
 
-static int e2k_phy_addr(void) {
-    return e2k.kind == K_82574 ? 1 : 2;
+/* Firmware does not hold back a PHY reset (FWSM.RSPCIPHY); always so off
+ * the PCH. */
+static int e2k_phy_reset_allowed(void) {
+    return !e2k_is_pch() || (e2k_read(R_FWSM) & FWSM_RSPCIPHY);
 }
 
-/* One MDIC transaction; caller holds the software flag. */
-static int e2k_mdic(uint32_t op, int reg, uint16_t wdata, uint16_t *rdata) {
+/*
+ * One MDIC transaction at MDIO address `addr`; caller holds the software
+ * flag.  The completed MDIC echoes the register number: a mismatch means
+ * the transaction was not ours or did not happen, and its data is junk.
+ */
+static int e2k_mdic(int addr, uint32_t op, int reg, uint16_t wdata,
+                    uint16_t *rdata) {
     uint32_t v;
-    unsigned ms;
+    unsigned us;
 
     e2k_write(R_MDIC, op | ((uint32_t)reg << MDIC_REG_SHIFT) |
-                      ((uint32_t)e2k_phy_addr() << MDIC_PHY_SHIFT) | wdata);
-    for (ms = 0; ; ms++) {
+                      ((uint32_t)addr << MDIC_PHY_SHIFT) | wdata);
+    for (us = 0; ; us += 20) {
         v = e2k_read(R_MDIC);
         if (v & MDIC_READY)
             break;
-        if (ms >= E1K2_MDIC_MS)
+        if (us >= E1K2_MDIC_MS * 1000)
             return -1;
-        timer_busywait_ms(1);
+        timer_busywait_us(20);
     }
     if (v & MDIC_ERROR)
+        return -1;
+    if (((v >> MDIC_REG_SHIFT) & 0x1F) != (uint32_t)reg)
         return -1;
     if (rdata)
         *rdata = (uint16_t)v;
     return 0;
 }
 
-static int e2k_phy_read(int reg, uint16_t *val) {
-    int rc;
+/*
+ * PHY register access by PHY_REG(page, reg); caller holds the software
+ * flag.  On the PCH PHYs, pages from 768 up live at MDIO address 1 and the
+ * rest at 2, and any register above 15 needs the page selected first
+ * (through address 1) -- page 0 included.  The 82574 is only ever asked
+ * for page 0's standard registers.
+ */
+static int e2k_phy_rw_locked(int write, uint32_t preg, uint16_t *val) {
+    int page = (int)(preg >> 5), reg = (int)(preg & 0x1F), addr;
 
-    if (e2k_swflag_acquire() != 0)
-        return -2;
-    rc = e2k_mdic(MDIC_OP_READ, reg, 0, val);
-    e2k_swflag_release();
-    return rc;
+    if (e2k.kind == K_82574) {
+        addr = 1;
+    } else {
+        addr = page >= 768 ? 1 : 2;
+        if (reg > PHY_MULTI_PAGE_MAX &&
+            e2k_mdic(1, MDIC_OP_WRITE, PHY_PAGE_SELECT,
+                     (uint16_t)(page << 5), NULL) != 0)
+            return -1;
+    }
+    if (write)
+        return e2k_mdic(addr, MDIC_OP_WRITE, reg, *val, NULL);
+    return e2k_mdic(addr, MDIC_OP_READ, reg, 0, val);
 }
 
-static int e2k_phy_write(int reg, uint16_t val) {
-    int rc;
+static int e2k_phy_read_locked(uint32_t preg, uint16_t *val) {
+    return e2k_phy_rw_locked(0, preg, val);
+}
 
-    if (e2k_swflag_acquire() != 0)
-        return -2;
-    rc = e2k_mdic(MDIC_OP_WRITE, reg, val, NULL);
-    e2k_swflag_release();
-    return rc;
+static int e2k_phy_write_locked(uint32_t preg, uint16_t val) {
+    return e2k_phy_rw_locked(1, preg, &val);
+}
+
+/* The PHY ID, or -1 if the PHY does not answer (0 and all-ones are what a
+ * dead or unreachable MDIO bus reads as).  Caller holds the flag. */
+static int e2k_phy_id_locked(uint16_t *id1, uint16_t *id2) {
+    for (int tries = 0; tries < 2; tries++) {
+        if (e2k_phy_read_locked(PHY_REG(0, PHY_ID1), id1) == 0 &&
+            e2k_phy_read_locked(PHY_REG(0, PHY_ID2), id2) == 0 &&
+            *id1 != 0 && *id1 != 0xFFFF)
+            return 0;
+    }
+    return -1;
 }
 
 /*
- * Make sure the PHY is powered and negotiating.  Best effort: a PHY this
- * driver cannot reach may still be linked up by firmware, so failures are
- * reported, not fatal.
+ * Whether the PCH PHY answers.  With no manageability firmware to own the
+ * SMBus side, a PHY that does answer is also taken out of forced SMBus
+ * mode, in the PHY and in the MAC: previous software may have left it
+ * there, and in SMBus mode the PHY never links over PCIe.  Caller holds
+ * the flag.
  */
-static void e2k_phy_bringup(void) {
-    uint16_t id1 = 0, id2 = 0, bmcr = 0;
+static int e2k_phy_accessible_locked(void) {
+    uint16_t id1, id2, v;
+
+    if (e2k_phy_id_locked(&id1, &id2) != 0)
+        return 0;
+    if (!(e2k_read(R_FWSM) & FWSM_FW_VALID)) {
+        if (e2k_phy_read_locked(CV_SMB_CTRL, &v) == 0 &&
+            (v & CV_SMB_FORCE_SMBUS))
+            (void)e2k_phy_write_locked(CV_SMB_CTRL,
+                                       (uint16_t)(v & ~CV_SMB_FORCE_SMBUS));
+        e2k_write(R_CTRL_EXT, e2k_read(R_CTRL_EXT) & ~CTRL_EXT_FORCE_SMBUS);
+    }
+    return 1;
+}
+
+/*
+ * Power-cycle the PHY through the LANPHYPC pin: drive it low for a moment,
+ * release it, and wait for the PHY to come back (CTRL_EXT.LPCD) and load
+ * its configuration.  This also brings it out of SMBus mode.
+ */
+static void e2k_toggle_lanphypc(void) {
+    uint32_t v;
+
+    v = e2k_read(R_FEXTNVM3);
+    v = (v & ~FEXTNVM3_PHY_CFG_COUNTER_MASK) | FEXTNVM3_PHY_CFG_COUNTER_50MS;
+    e2k_write(R_FEXTNVM3, v);
+
+    v = e2k_read(R_CTRL);
+    v |= CTRL_LANPHYPC_OVERRIDE;
+    v &= ~CTRL_LANPHYPC_VALUE;
+    e2k_write(R_CTRL, v);
+    e2k_flush();
+    timer_busywait_us(10);
+    v &= ~CTRL_LANPHYPC_OVERRIDE;
+    e2k_write(R_CTRL, v);
+    e2k_flush();
+
+    for (int i = 0; i < 20; i++) {
+        if (e2k_read(R_CTRL_EXT) & CTRL_EXT_LPCD)
+            break;
+        timer_busywait_ms(5);
+    }
+    timer_busywait_ms(30);
+}
+
+/* PHY reset through CTRL.PHY_RST, unless firmware holds it back. */
+static void e2k_phy_reset(void) {
+    if (!e2k_phy_reset_allowed())
+        return;
+    if (e2k_swflag_acquire() != 0)
+        return;
+    e2k_write(R_CTRL, e2k_read(R_CTRL) | CTRL_PHY_RST);
+    e2k_flush();
+    timer_busywait_us(100);
+    e2k_write(R_CTRL, e2k_read(R_CTRL) & ~CTRL_PHY_RST);
+    e2k_flush();
+    e2k_swflag_release();
+    timer_busywait_ms(50);
+}
+
+/*
+ * Leave Ultra Low Power mode.  A driver that enters ULP on the way to Sx
+ * (the usual shutdown path with Wake-on-LAN off) leaves the PHY in a state
+ * that survives a platform reset (STICKY_ULP, SMBus release on PERST#
+ * disabled): every MDIO access then fails and the link never comes up
+ * until all power is removed.  Its prior state is unknown, so it is always
+ * exited on the parts that have it.
+ *
+ * With manageability firmware the request goes to it; without, the driver
+ * does it: power-cycle through LANPHYPC, unforce SMBus, re-enable K1
+ * (hardware disables it on ULP entry), clear the ULP configuration and
+ * commit it, and let SMBus release on PERST# again.  Returns non-zero if
+ * the PHY should be reset afterwards.
+ */
+static int e2k_ulp_disable(void) {
+    uint16_t v;
+    unsigned i, limit;
+
+    if (!(e2k.flags & F_ULP))
+        return 0;
+
+    if (e2k_read(R_FWSM) & FWSM_FW_VALID) {
+        uint32_t h2me = e2k_read(R_H2ME);
+        e2k_write(R_H2ME, (h2me & ~H2ME_ULP) | H2ME_ENFORCE_SETTINGS);
+        limit = (e2k.flags & F_CNP) ? 100 : 30;
+        for (i = 0; i < limit && (e2k_read(R_FWSM) & FWSM_ULP_CFG_DONE); i++)
+            timer_busywait_ms(10);
+        if (i == limit)
+            kprint("e1000e: firmware did not confirm ULP exit\n");
+        e2k_write(R_H2ME, e2k_read(R_H2ME) & ~H2ME_ENFORCE_SETTINGS);
+        return 0;
+    }
+
+    if (e2k_swflag_acquire() != 0) {
+        kprint("e1000e: cannot leave ULP: MDIO bus held\n");
+        return 0;
+    }
+    e2k_toggle_lanphypc();
+
+    if (e2k_phy_read_locked(CV_SMB_CTRL, &v) != 0) {
+        /* The MAC may still be in PCIe mode: force SMBus to reach it. */
+        e2k_write(R_CTRL_EXT, e2k_read(R_CTRL_EXT) | CTRL_EXT_FORCE_SMBUS);
+        timer_busywait_ms(50);
+        if (e2k_phy_read_locked(CV_SMB_CTRL, &v) != 0) {
+            e2k_swflag_release();
+            kprint("e1000e: PHY unreachable while leaving ULP\n");
+            return 1;
+        }
+    }
+    (void)e2k_phy_write_locked(CV_SMB_CTRL, (uint16_t)(v & ~CV_SMB_FORCE_SMBUS));
+    e2k_write(R_CTRL_EXT, e2k_read(R_CTRL_EXT) & ~CTRL_EXT_FORCE_SMBUS);
+
+    if (e2k_phy_read_locked(HV_PM_CTRL, &v) == 0)
+        (void)e2k_phy_write_locked(HV_PM_CTRL, (uint16_t)(v | HV_PM_K1_ENABLE));
+
+    if (e2k_phy_read_locked(I218_ULP_CONFIG1, &v) == 0) {
+        v &= (uint16_t)~(ULP_CONFIG1_IND | ULP_CONFIG1_STICKY_ULP |
+                         ULP_CONFIG1_RESET_TO_SMBUS | ULP_CONFIG1_WOL_HOST |
+                         ULP_CONFIG1_INBAND_EXIT | ULP_CONFIG1_EN_ULP_LANPHYPC |
+                         ULP_CONFIG1_DIS_CLR_STICKY_ON_PERST |
+                         ULP_CONFIG1_DISABLE_SMB_PERST);
+        (void)e2k_phy_write_locked(I218_ULP_CONFIG1, v);
+        (void)e2k_phy_write_locked(I218_ULP_CONFIG1,
+                                   (uint16_t)(v | ULP_CONFIG1_START));
+    }
+    e2k_write(R_FEXTNVM7, e2k_read(R_FEXTNVM7) & ~FEXTNVM7_DISABLE_SMB_PERST);
+    e2k_swflag_release();
+    return 1;
+}
+
+/*
+ * Make the PCH PHY reachable: leave ULP, then if it still does not answer
+ * try forced SMBus mode, then a LANPHYPC power cycle (if firmware allows a
+ * PHY reset), then PCIe mode again.  Reset the PHY afterwards when its
+ * state was disturbed.  Returns non-zero if the PHY answers.
+ */
+static int e2k_pch_phy_init(void) {
+    int reset = e2k_ulp_disable();
+    int ok;
+
+    if (e2k_swflag_acquire() != 0) {
+        kprint("e1000e: MDIO bus held by firmware; PHY left as found\n");
+        return 0;
+    }
+    ok = e2k_phy_accessible_locked();
+    if (!ok) {
+        /* Let the MAC finish retrying any earlier PHY read first. */
+        e2k_write(R_CTRL_EXT, e2k_read(R_CTRL_EXT) | CTRL_EXT_FORCE_SMBUS);
+        timer_busywait_ms(50);
+        ok = e2k_phy_accessible_locked();
+    }
+    if (!ok) {
+        if (!e2k_phy_reset_allowed()) {
+            kprint("e1000e: PHY unreachable and its reset is blocked by "
+                   "firmware\n");
+        } else {
+            e2k_toggle_lanphypc();
+            ok = e2k_phy_accessible_locked();
+            if (!ok) {
+                e2k_write(R_CTRL_EXT,
+                          e2k_read(R_CTRL_EXT) & ~CTRL_EXT_FORCE_SMBUS);
+                ok = e2k_phy_accessible_locked();
+            }
+            reset = 1;
+        }
+    }
+    e2k_swflag_release();
+
+    if (ok && reset) {
+        if (e2k_read(R_FEXTNVM) & FEXTNVM_SW_CONFIG)
+            kprint("e1000e: NVM asks software to configure the PHY after "
+                   "reset; that configuration is not applied\n");
+        e2k_phy_reset();
+    }
+    return ok;
+}
+
+/*
+ * Copper link setup: powered, Gigabit allowed, every speed advertised,
+ * autonegotiating.  Best effort: a PHY this driver cannot reach may still
+ * be linked up by firmware, so failures are reported, not fatal.  Returns
+ * non-zero if the PHY answered.
+ */
+static int e2k_phy_bringup(void) {
+    uint16_t id1 = 0, id2 = 0, bmcr = 0, v;
     int rc;
 
-    rc = e2k_phy_read(PHY_ID1, &id1);
-    if (rc == 0)
-        rc = e2k_phy_read(PHY_ID2, &id2);
-    if (rc == 0)
-        rc = e2k_phy_read(PHY_BMCR, &bmcr);
-    if (rc == -2) {
+    if (e2k_is_pch() && !e2k_pch_phy_init()) {
+        kprint("e1000e: PHY not responding on MDIO; left as found\n");
+        return 0;
+    }
+
+    if (e2k_swflag_acquire() != 0) {
         kprint("e1000e: MDIO bus held by firmware; PHY left as found\n");
-        return;
+        return 0;
     }
+    rc = e2k_phy_id_locked(&id1, &id2);
+    if (rc == 0)
+        rc = e2k_phy_read_locked(PHY_REG(0, PHY_BMCR), &bmcr);
+    if (rc == 0 && bmcr == 0xFFFF)
+        rc = -1;
     if (rc != 0) {
-        kprint("e1000e: PHY not responding on MDIO (Ultra Low Power mode?); "
-               "left as found\n");
-        return;
+        e2k_swflag_release();
+        kprint("e1000e: PHY not responding on MDIO; left as found\n");
+        return 0;
     }
+    e2k.phy_rev = id2 & 0x000F;
     kprintf("e1000e: PHY id %04x:%04x, BMCR 0x%04x\n",
             (unsigned)id1, (unsigned)id2, (unsigned)bmcr);
 
-    /* A previous OS (or its suspend path) may have powered the PHY down;
-     * the link can never come up like that. */
-    if (bmcr & BMCR_PDOWN) {
-        bmcr = (uint16_t)((bmcr & ~BMCR_PDOWN) | BMCR_ANENABLE | BMCR_ANRESTART);
-        if (e2k_phy_write(PHY_BMCR, bmcr) == 0)
-            kprint("e1000e: PHY was powered down; powered up, "
-                   "autonegotiation restarted\n");
-        else
-            kprint("e1000e: PHY is powered down and could not be woken\n");
+    /*
+     * Low Power Link Up and Gigabit-disable survive a MAC reset from an
+     * earlier Sx or Wake-on-LAN path and cap the link at 100 or 10 Mb/s.
+     * The MAC's PHY_CTRL holds them, and on the PCH the PHY's OEM bits
+     * mirror it; a restart is needed for the PHY to act on the change.
+     */
+    e2k_write(R_PHY_CTRL, e2k_read(R_PHY_CTRL) &
+                          ~(PHY_CTRL_D0A_LPLU | PHY_CTRL_GBE_DISABLE));
+    if (e2k_is_pch() &&
+        e2k_phy_read_locked(HV_OEM_BITS, &v) == 0) {
+        v &= (uint16_t)~(HV_OEM_LPLU | HV_OEM_GBE_DIS);
+        if (e2k_phy_reset_allowed())
+            v |= HV_OEM_RESTART_AN;
+        (void)e2k_phy_write_locked(HV_OEM_BITS, v);
     }
+
+    /* I217/I219 copper: carrier sense during transmit (half duplex needs
+     * it), automatic speed downshift on 2-pair cable, automatic MDI-X. */
+    if (e2k_is_pch()) {
+        if (e2k_phy_read_locked(PHY_REG(0, I82577_CFG), &v) == 0)
+            (void)e2k_phy_write_locked(PHY_REG(0, I82577_CFG),
+                                       (uint16_t)(v | I82577_CFG_CRS_ON_TX |
+                                                  I82577_CFG_DOWNSHIFT));
+        if (e2k_phy_read_locked(PHY_REG(0, I82577_PHY_CTRL2), &v) == 0)
+            (void)e2k_phy_write_locked(PHY_REG(0, I82577_PHY_CTRL2),
+                                       (uint16_t)((v & ~I82577_CTRL2_MDIX_MASK) |
+                                                  I82577_CTRL2_MDIX_AUTO));
+    }
+
+    /*
+     * Advertise 10/100 half and full and 1000 full, and restart
+     * autonegotiation from a validated BMCR with power-down, isolate and
+     * loopback cleared: a speed or duplex forced by a previous driver
+     * otherwise survives a warm reboot as a duplex mismatch.
+     */
+    if (e2k_phy_reset_allowed()) {
+        (void)e2k_phy_write_locked(PHY_REG(0, PHY_ANAR), ANAR_ADVERTISE);
+        (void)e2k_phy_write_locked(PHY_REG(0, PHY_CTRL1000), CTRL1000_FD);
+        bmcr = (uint16_t)((bmcr & ~(BMCR_PDOWN | BMCR_ISOLATE |
+                                    BMCR_LOOPBACK | BMCR_RESET)) |
+                          BMCR_ANENABLE | BMCR_ANRESTART);
+        (void)e2k_phy_write_locked(PHY_REG(0, PHY_BMCR), bmcr);
+    } else if (bmcr & BMCR_PDOWN) {
+        kprint("e1000e: PHY is powered down and firmware owns it\n");
+    }
+    e2k_swflag_release();
+    return 1;
 }
 
 /* ----- RX path ----- */
@@ -1034,7 +1375,9 @@ static int e2k_setup(pci_device_t *pdev, int kind) {
         return -1;
     }
     e2k.pdev = pdev;
-    e2k.kind = kind;
+    e2k.kind = kind & K_MASK;
+    e2k.flags = kind & ~K_MASK;
+    kind = e2k.kind;
 
     /* Memory space + bus mastering. */
     uint16_t cmd = pci_read_config16(pdev->bus, pdev->slot, pdev->func,
@@ -1160,44 +1503,51 @@ fail:
 }
 
 /*
- * driver_data is the chip class.  I217/I218 (Lynx Point, Wildcat Point) and
- * I219 (Sunrise Point onwards) IDs from Linux's e1000e device table.
+ * driver_data is the chip class plus per-ID flags.  I217/I218 (Lynx Point,
+ * Wildcat Point) and I219 (Sunrise Point onwards).  Every PCH PHY from Lynx
+ * Point on has ULP except the I217 and the I218-LM2/V2; the Sunrise/Kaby
+ * Point I219s carry the transmit errata; the I218 on low-power platforms
+ * has the 1 Gb/s K1 erratum.
  */
+#define LPT_LP              (K_LPT | F_ULP | F_LPT_LP)
+#define SPT_KBP             (K_SPT | F_ULP | F_SPT_ERRATA)
+#define CNP                 (K_SPT | F_ULP | F_CNP)
+
 static const device_id_t e2k_ids[] = {
     { E1K2_VENDOR, 0x10D3, 0, 0, K_82574 },   /* 82574L - qemu `e1000e` */
     { E1K2_VENDOR, 0x10F6, 0, 0, K_82574 },   /* 82574LA */
     { E1K2_VENDOR, 0x150C, 0, 0, K_82574 },   /* 82583V */
     { E1K2_VENDOR, 0x153A, 0, 0, K_LPT },     /* I217-LM */
     { E1K2_VENDOR, 0x153B, 0, 0, K_LPT },     /* I217-V */
-    { E1K2_VENDOR, 0x155A, 0, 0, K_LPT },     /* I218-LM */
-    { E1K2_VENDOR, 0x1559, 0, 0, K_LPT },     /* I218-V */
+    { E1K2_VENDOR, 0x155A, 0, 0, LPT_LP },    /* I218-LM */
+    { E1K2_VENDOR, 0x1559, 0, 0, LPT_LP },    /* I218-V */
     { E1K2_VENDOR, 0x15A0, 0, 0, K_LPT },     /* I218-LM2 */
     { E1K2_VENDOR, 0x15A1, 0, 0, K_LPT },     /* I218-V2 */
-    { E1K2_VENDOR, 0x15A2, 0, 0, K_LPT },     /* I218-LM3 */
-    { E1K2_VENDOR, 0x15A3, 0, 0, K_LPT },     /* I218-V3 */
-    { E1K2_VENDOR, 0x156F, 0, 0, K_SPT },     /* I219-LM */
-    { E1K2_VENDOR, 0x1570, 0, 0, K_SPT },     /* I219-V */
-    { E1K2_VENDOR, 0x15B7, 0, 0, K_SPT },     /* I219-LM2 */
-    { E1K2_VENDOR, 0x15B8, 0, 0, K_SPT },     /* I219-V2 */
-    { E1K2_VENDOR, 0x15B9, 0, 0, K_SPT },     /* I219-LM3 */
-    { E1K2_VENDOR, 0x15D7, 0, 0, K_SPT },     /* I219-LM4 */
-    { E1K2_VENDOR, 0x15D8, 0, 0, K_SPT },     /* I219-V4 */
-    { E1K2_VENDOR, 0x15E3, 0, 0, K_SPT },     /* I219-LM5 */
-    { E1K2_VENDOR, 0x15D6, 0, 0, K_SPT },     /* I219-V5 */
-    { E1K2_VENDOR, 0x15BD, 0, 0, K_SPT },     /* I219-LM6 */
-    { E1K2_VENDOR, 0x15BE, 0, 0, K_SPT },     /* I219-V6 */
-    { E1K2_VENDOR, 0x15BB, 0, 0, K_SPT },     /* I219-LM7 */
-    { E1K2_VENDOR, 0x15BC, 0, 0, K_SPT },     /* I219-V7 */
-    { E1K2_VENDOR, 0x15DF, 0, 0, K_SPT },     /* I219-LM8 */
-    { E1K2_VENDOR, 0x15E0, 0, 0, K_SPT },     /* I219-V8 */
-    { E1K2_VENDOR, 0x15E1, 0, 0, K_SPT },     /* I219-LM9 */
-    { E1K2_VENDOR, 0x15E2, 0, 0, K_SPT },     /* I219-V9 */
-    { E1K2_VENDOR, 0x0D4E, 0, 0, K_SPT },     /* I219-LM10 */
-    { E1K2_VENDOR, 0x0D4F, 0, 0, K_SPT },     /* I219-V10 */
-    { E1K2_VENDOR, 0x0D4C, 0, 0, K_SPT },     /* I219-LM11 */
-    { E1K2_VENDOR, 0x0D4D, 0, 0, K_SPT },     /* I219-V11 */
-    { E1K2_VENDOR, 0x0D53, 0, 0, K_SPT },     /* I219-LM12 */
-    { E1K2_VENDOR, 0x0D55, 0, 0, K_SPT },     /* I219-V12 */
+    { E1K2_VENDOR, 0x15A2, 0, 0, LPT_LP },    /* I218-LM3 */
+    { E1K2_VENDOR, 0x15A3, 0, 0, LPT_LP },    /* I218-V3 */
+    { E1K2_VENDOR, 0x156F, 0, 0, SPT_KBP },   /* I219-LM */
+    { E1K2_VENDOR, 0x1570, 0, 0, SPT_KBP },   /* I219-V */
+    { E1K2_VENDOR, 0x15B7, 0, 0, SPT_KBP },   /* I219-LM2 */
+    { E1K2_VENDOR, 0x15B8, 0, 0, SPT_KBP },   /* I219-V2 */
+    { E1K2_VENDOR, 0x15B9, 0, 0, SPT_KBP },   /* I219-LM3 */
+    { E1K2_VENDOR, 0x15D7, 0, 0, SPT_KBP },   /* I219-LM4 */
+    { E1K2_VENDOR, 0x15D8, 0, 0, SPT_KBP },   /* I219-V4 */
+    { E1K2_VENDOR, 0x15E3, 0, 0, SPT_KBP },   /* I219-LM5 */
+    { E1K2_VENDOR, 0x15D6, 0, 0, SPT_KBP },   /* I219-V5 */
+    { E1K2_VENDOR, 0x15BD, 0, 0, CNP },       /* I219-LM6 */
+    { E1K2_VENDOR, 0x15BE, 0, 0, CNP },       /* I219-V6 */
+    { E1K2_VENDOR, 0x15BB, 0, 0, CNP },       /* I219-LM7 */
+    { E1K2_VENDOR, 0x15BC, 0, 0, CNP },       /* I219-V7 */
+    { E1K2_VENDOR, 0x15DF, 0, 0, CNP },       /* I219-LM8 */
+    { E1K2_VENDOR, 0x15E0, 0, 0, CNP },       /* I219-V8 */
+    { E1K2_VENDOR, 0x15E1, 0, 0, CNP },       /* I219-LM9 */
+    { E1K2_VENDOR, 0x15E2, 0, 0, CNP },       /* I219-V9 */
+    { E1K2_VENDOR, 0x0D4E, 0, 0, CNP },       /* I219-LM10 */
+    { E1K2_VENDOR, 0x0D4F, 0, 0, CNP },       /* I219-V10 */
+    { E1K2_VENDOR, 0x0D4C, 0, 0, CNP },       /* I219-LM11 */
+    { E1K2_VENDOR, 0x0D4D, 0, 0, CNP },       /* I219-V11 */
+    { E1K2_VENDOR, 0x0D53, 0, 0, CNP },       /* I219-LM12 */
+    { E1K2_VENDOR, 0x0D55, 0, 0, CNP },       /* I219-V12 */
     { 0, 0, 0, 0, 0 },
 };
 
