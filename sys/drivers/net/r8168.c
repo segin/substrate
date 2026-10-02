@@ -81,11 +81,13 @@
 #define INT_TIMEOUT         0x4000
 #define INT_SERR            0x8000   /* PCI system error */
 
-/* Normal interrupt set.  Matches RL_INTRS_CPLUS / RTK_INTRS_CPLUS, including
- * SERR: a PCI system error is exactly the thing you want to hear about on
- * first bring-up. */
+/* Normal interrupt set, including SERR: a PCI system error is exactly the
+ * thing you want to hear about.  TDU is in it so a doorbell the transmitter
+ * missed is rung again (r8168_tx_rekick()), and SWINT so the handler can
+ * come back for frames its receive budget left behind. */
 #define R8168_IMR           (INT_ROK | INT_RER | INT_TOK | INT_TER | \
-                             INT_RDU | INT_FOVW | INT_LINKCHG | INT_SERR)
+                             INT_RDU | INT_FOVW | INT_LINKCHG | INT_TDU | \
+                             INT_SWINT | INT_SERR)
 
 /* Where the interrupt comes from (rt.irq_kind), in order of preference. */
 #define R8168_IRQ_NONE      0
@@ -164,6 +166,18 @@
 #define R8168_BUF_SIZE      2048
 #define R8168_MAX_FRAME     1518
 
+/* Frames collected per interrupt.  The receiver refills a descriptor the
+ * moment it is handed back, so an unbounded drain under a flood never ends;
+ * whatever is left stays latched in ISR and raises the next interrupt. */
+#define R8168_RX_BUDGET     64
+
+/* Service passes per interrupt before handing the CPU back. */
+#define R8168_ISR_PASSES    4
+
+/* The descriptors live in DMA memory the NIC writes behind the compiler's
+ * back; on x86 a compiler barrier is all the ordering they need. */
+#define r8168_barrier()     __asm__ __volatile__("" ::: "memory")
+
 /* 16 bytes, and the ring base must be 256-byte aligned -- page-aligned DMA
  * memory satisfies that with room to spare. */
 struct r8168_desc {
@@ -178,9 +192,10 @@ static struct {
     int                irq;          /* vector / line; -1: none */
     int                irq_kind;     /* R8168_IRQ_* */
     volatile uint32_t  intr_count;   /* interrupts that were ours */
-    struct r8168_desc *rx_ring;
+    volatile uint16_t  imr;          /* the mask the handler restores */
+    volatile struct r8168_desc *rx_ring;
     uint32_t           rx_ring_phys;
-    struct r8168_desc *tx_ring;
+    volatile struct r8168_desc *tx_ring;
     uint32_t           tx_ring_phys;
     uint8_t           *rx_buf;
     uint32_t           rx_buf_phys;
@@ -208,14 +223,17 @@ static inline void rt_w32(uint32_t o, uint32_t v) { *(volatile uint32_t *)(rt.mm
 
 /* ----- RX path ----- */
 
-static void r8168_rx_drain(void) {
+/* Returns non-zero if the budget ran out with frames still waiting. */
+static int r8168_rx_drain(int budget) {
     for (;;) {
-        struct r8168_desc *d = &rt.rx_ring[rt.rx_cur];
+        volatile struct r8168_desc *d = &rt.rx_ring[rt.rx_cur];
         uint32_t opts1 = d->opts1;
 
         /* OWN set means the NIC still owns it -- nothing to collect. */
         if (opts1 & DESC_OWN)
-            break;
+            return 0;
+        if (budget-- <= 0)
+            return 1;
 
         uint32_t len = opts1 & DESC_FRAGLEN_MASK;
 
@@ -238,6 +256,7 @@ static void r8168_rx_drain(void) {
          * this part), so drop the trailing 4 bytes.
          */
         uint32_t stat = opts1 >> 1;
+        r8168_barrier();             /* buffer contents after the status */
         if ((opts1 & (DESC_FS | DESC_LS)) == (DESC_FS | DESC_LS) &&
             (stat & RXSTAT_RXERRSUM) == 0 &&
             len >= 18 && len <= R8168_MAX_FRAME + 4) {
@@ -248,42 +267,91 @@ static void r8168_rx_drain(void) {
         }
 
         /* Hand the descriptor back: OWN, buffer size, and EOR on the last
-         * slot so the NIC wraps instead of running off the end. */
+         * slot so the NIC wraps instead of running off the end.  OWN goes
+         * in the same store as everything else in opts1, after opts2. */
         uint32_t eor = (rt.rx_cur == R8168_RX_DESCS - 1) ? DESC_EOR : 0;
         d->opts2   = 0;
+        r8168_barrier();
         d->opts1   = DESC_OWN | eor | (R8168_BUF_SIZE & DESC_BUFLEN_MASK);
 
         rt.rx_cur = (rt.rx_cur + 1) % R8168_RX_DESCS;
     }
 }
 
+/*
+ * A doorbell write that lands while the transmitter is busy can be ignored
+ * by the PCIe parts, stranding whatever was queued behind it until the next
+ * unrelated send.  Ring it again on every TX completion while the newest
+ * queued descriptor is still owned by the NIC.
+ */
+static void r8168_tx_rekick(void) {
+    unsigned long flags = spinlock_acquire_irq(&rt_tx_lock);
+    uint32_t last = (rt.tx_cur + R8168_TX_DESCS - 1) % R8168_TX_DESCS;
+
+    if (rt.tx_ring[last].opts1 & DESC_OWN)
+        rt_w8(R_TPPOLL, TPPOLL_NPQ);
+    spinlock_release_irq(&rt_tx_lock, flags);
+}
+
 static int r8168_irq(unsigned int irq, void *dev_id, void *frame) {
     (void)irq; (void)dev_id; (void)frame;
-
-    uint16_t isr = rt_r16(R_ISR);
-    if (isr == 0)
-        return 0;                    /* not ours: shared line */
-    rt.intr_count++;                 /* proof of life for r8168_setup_irq() */
-
-    /* ISR is write-1-to-clear.  Acknowledge before processing so an event
-     * arriving during the drain is not lost. */
-    rt_w16(R_ISR, isr);
-
-    /* Only once eth0 exists: the interrupt probe runs before registration,
-     * and a frame that happens to arrive then has nowhere to go. */
-    if (rt.registered && (isr & (INT_ROK | INT_RER | INT_RDU | INT_FOVW)))
-        r8168_rx_drain();
+    int pass, more = 0;
 
     /*
-     * RDU means the NIC ran out of descriptors it owned.  The drain above
-     * has just handed them all back, but the receiver needs a nudge to go
-     * look again.
+     * All-ones is a device that has dropped off the bus: not ours, and no
+     * register writes.  Bits latched but masked in IMR are not an interrupt
+     * this device raised, so on a shared line they are someone else's.
      */
-    if (isr & (INT_RDU | INT_FOVW))
-        rt_w8(R_CR, CR_TE | CR_RE);
+    uint16_t isr = rt_r16(R_ISR);
+    if (isr == 0xFFFF || (isr & rt.imr) == 0)
+        return 0;
+    rt.intr_count++;                 /* proof of life for r8168_setup_irq() */
 
-    /* TOK/TER need no work here: the transmit path reclaims by testing OWN
-     * on the descriptor it is about to reuse. */
+    /*
+     * In MSI mode a message is sent only when (ISR & IMR) goes from zero to
+     * non-zero.  An event latching between the ISR read and its acknowledge
+     * would keep that AND non-zero forever and no further message would ever
+     * come.  So mask everything while servicing, re-read until nothing is
+     * pending, and restore IMR at the end: a bit still pending then makes a
+     * fresh edge, and the IMR write also pushes the posted acknowledge out
+     * ahead of the EOI on a level-triggered line.
+     */
+    rt_w16(R_IMR, 0);
+    for (pass = 0; pass < R8168_ISR_PASSES; pass++) {
+        isr &= rt.imr;
+        if (isr == 0)
+            break;
+        rt_w16(R_ISR, isr);          /* write-1-to-clear */
+
+        /* Only once eth0 exists: the interrupt probe runs before
+         * registration, and a frame arriving then has nowhere to go. */
+        more = 0;
+        if (rt.registered &&
+            (isr & (INT_ROK | INT_RER | INT_RDU | INT_FOVW | INT_SWINT)))
+            more = r8168_rx_drain(R8168_RX_BUDGET);
+
+        /* RDU means the NIC ran out of descriptors it owned.  The drain has
+         * handed them back, but the receiver needs a nudge to look again. */
+        if (isr & (INT_RDU | INT_FOVW))
+            rt_w8(R_CR, CR_TE | CR_RE);
+
+        if (rt.registered && (isr & (INT_TOK | INT_TDU)))
+            r8168_tx_rekick();
+
+        isr = rt_r16(R_ISR);
+        if (isr == 0xFFFF)
+            return 1;
+    }
+    rt_w16(R_IMR, rt.imr);
+    /*
+     * Frames left over by the budget were already acknowledged, so nothing
+     * latched would bring us back for them before the next arrival.  A
+     * forced software interrupt does, after the EOI, giving everything else
+     * a turn first.
+     */
+    if (more && rt.registered)
+        rt_w8(R_TPPOLL, TPPOLL_FSWINT);
+    (void)rt_r16(R_IMR);
     return 1;
 }
 
@@ -339,6 +407,7 @@ static int r8168_irq_install(pci_device_t *pdev, int kind) {
 static void r8168_irq_remove(pci_device_t *pdev) {
     if (rt.irq_kind == R8168_IRQ_NONE)
         return;
+    rt.imr = 0;
     rt_w16(R_IMR, 0);
     if (rt.irq_kind == R8168_IRQ_MSI)
         (void)pci_disable_msi(pdev);
@@ -361,10 +430,12 @@ static int r8168_irq_proven(void) {
     /* SWInt alone: the netdev is not registered yet, so nothing else
      * should be raising interrupts. */
     rt_w16(R_ISR, 0xFFFF);
+    rt.imr = INT_SWINT;
     rt_w16(R_IMR, INT_SWINT);
     rt_w8(R_TPPOLL, TPPOLL_FSWINT);
     for (ms = 0; ms < R8168_IRQ_PROBE_MS && rt.intr_count == before; ms++)
         timer_busywait_ms(1);
+    rt.imr = 0;
     rt_w16(R_IMR, 0);
     return rt.intr_count != before;
 }
@@ -424,28 +495,20 @@ static int r8168_xmit(netdev_t *dev, const void *frame, size_t len) {
     unsigned long flags = spinlock_acquire_irq(&rt_tx_lock);
 
     uint32_t slot = rt.tx_cur;
-    struct r8168_desc *d = &rt.tx_ring[slot];
+    volatile struct r8168_desc *d = &rt.tx_ring[slot];
 
     /*
-     * Do not reuse a descriptor the NIC still owns; its buffer is being
-     * DMA'd.  Bounded so a wedged NIC returns an error rather than spinning
-     * forever with interrupts disabled.
-     *
-     * It is bounded tightly when the caller had interrupts off
-     * (as rtl8139's TX poll is): the frame is dropped and the upper
-     * layer retransmits.  The caller's IF is the one saved in `flags`;
-     * inside the _irq lock interrupts are always off.
+     * The NIC clears OWN as each frame completes, so a next slot it still
+     * owns means the whole ring is in flight.  That is back-pressure, not
+     * something to wait out with interrupts disabled: drop the frame now and
+     * let the upper layer retransmit.  A transmitter that has stopped
+     * altogether is the watchdog's business.
      */
     if (d->opts1 & DESC_OWN) {
-        int spins = 0;
-        int limit = (flags & 0x200ul) ? 1000000 : 10000;
-        while (d->opts1 & DESC_OWN) {
-            if (++spins > limit) {
-                spinlock_release_irq(&rt_tx_lock, flags);
-                rt.netdev.tx_dropped++;
-                return -EIO;
-            }
-        }
+        rt_w8(R_TPPOLL, TPPOLL_NPQ);
+        spinlock_release_irq(&rt_tx_lock, flags);
+        rt.netdev.tx_dropped++;
+        return -ENOBUFS;
     }
 
     memcpy(rt.tx_buf + slot * R8168_BUF_SIZE, frame, len);
@@ -467,12 +530,15 @@ static int r8168_xmit(netdev_t *dev, const void *frame, size_t len) {
     d->addr_lo = rt.tx_buf_phys + slot * R8168_BUF_SIZE;
     d->addr_hi = 0;
     d->opts2   = 0;
-    /* OWN last: everything else must be visible to the NIC first. */
+    /* OWN last: the buffer and every other field must be visible to the
+     * NIC first, and the descriptor before the doorbell. */
+    r8168_barrier();
     d->opts1   = DESC_OWN | DESC_FS | DESC_LS | eor |
                  (xlen & DESC_BUFLEN_MASK);
 
     rt.tx_cur = (slot + 1) % R8168_TX_DESCS;
 
+    r8168_barrier();
     rt_w8(R_TPPOLL, TPPOLL_NPQ);      /* go look at the ring */
 
     spinlock_release_irq(&rt_tx_lock, flags);
@@ -757,6 +823,7 @@ static int r8168_setup(pci_device_t *pdev) {
     if (r8168_setup_irq(pdev) != 0)
         return -1;
 
+    rt.imr = R8168_IMR;
     rt_w16(R_IMR, R8168_IMR);
 
     strlcpy(rt.netdev.name, "eth0", NETDEV_NAME_MAX);
