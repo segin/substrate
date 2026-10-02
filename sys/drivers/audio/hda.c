@@ -65,9 +65,15 @@
  * unbounded refill could copy the whole 128 KiB ring in one go.
  */
 #define HDA_FEED_SLOTS_PER_IRQ     2
-/* Per-verb spin budget.  Bounded low enough that a codec that never
- * answers costs a visible pause rather than minutes of boot. */
+/* Per-verb spin budget for the interrupt proof's wait. */
 #define HDA_VERB_TIMEOUT           20000U
+/* Per-verb wait: a response takes a frame or two; this is generous. */
+#define HDA_VERB_TIMEOUT_US        50000U
+#define HDA_VERB_POLL_US           10U
+/* Consecutive timeouts after which a codec is taken as gone. */
+#define HDA_CODEC_DEAD_TIMEOUTS    3U
+/* hda_send_verb()'s "no answer". */
+#define HDA_VERB_FAILED            0xFFFFFFFFU
 /* Spin budget for RUN / SRST readbacks.  The spec bounds a stop at 40 us
  * (4.5.4); each MMIO read here costs hundreds of ns, so this is a wide
  * margin that still cannot hang the boot. */
@@ -103,9 +109,10 @@
 
 /*
  * Which payload width a command uses.  The HDA spec gives a 16-bit payload
- * to exactly four commands -- 2h and 3h (set converter format / amp gain)
- * and their Ah/Bh getters -- and an 8-bit payload to every other, 12-bit,
- * command.  The constants spell the four as 0xN00.
+ * to the 4-bit commands -- 2h and 3h (set converter format / amp gain),
+ * 4h and 5h (set processing coefficient / coefficient index), and their
+ * Ah/Bh/Ch/Dh getters -- and an 8-bit payload to every other, 12-bit,
+ * command.  The constants spell them as 0xN00.
  *
  * This used to be `verb >= 0xF00`, which is wrong in both directions: it
  * called 0xA00/0xB00 long, and it called every 0x7xx command short.  The
@@ -122,6 +129,8 @@ static int hda_verb_is_short(uint16_t verb)
 	}
 	switch ((verb >> 8) & 0x0F) {
 	case 0x2: case 0x3: case 0xA: case 0xB:
+	/* Coefficient index and processing coefficient, set and get. */
+	case 0x4: case 0x5: case 0xC: case 0xD:
 		return 1;
 	default:
 		return 0;
@@ -298,6 +307,11 @@ typedef struct hda_dev {
 	dma_addr_t       rirb_phys;
 	uint16_t         rirb_rp;
 	uint32_t         verb_timeouts;
+	/* Solicited responses still owed, per codec address. */
+	uint8_t          pending[16];
+	/* Consecutive timeouts per codec, and codecs given up on. */
+	uint8_t          codec_timeouts[16];
+	uint16_t         codec_dead;
 	/* Stream error tallies, reported on close rather than per event --
 	 * they arrive from interrupt context. */
 	uint32_t         fifo_errors;
@@ -614,9 +628,26 @@ static unsigned hda_ring_size(hda_dev_t *d, uint32_t reg, uint8_t *enc)
 	return 256;
 }
 
-static int hda_corb_rirb_setup(hda_dev_t *d)
+/* Stop both command engines and wait for them to idle (3.3.22, 3.3.29). */
+static void hda_corb_rirb_stop(hda_dev_t *d)
 {
 	uint32_t budget;
+
+	hda_write8(d, HDA_REG_CORBCTL, 0);
+	hda_write8(d, HDA_REG_RIRBCTL, 0);
+	for (budget = 0; budget < HDA_RING_TIMEOUT; budget++) {
+		if ((hda_read8(d, HDA_REG_CORBCTL) & HDA_CORBCTL_RUN) == 0 &&
+		    (hda_read8(d, HDA_REG_RIRBCTL) & HDA_RIRBCTL_RUN) == 0) {
+			return;
+		}
+	}
+	kprintf("hda: command engines did not stop\n");
+}
+
+static int hda_corb_rirb_start(hda_dev_t *d);
+
+static int hda_corb_rirb_setup(hda_dev_t *d)
+{
 	uint8_t corbsize_enc, rirbsize_enc;
 
 	d->corb_entries = hda_ring_size(d, HDA_REG_CORBSIZE, &corbsize_enc);
@@ -639,13 +670,26 @@ static int hda_corb_rirb_setup(hda_dev_t *d)
 	memset(d->rirb, 0, d->rirb_entries * sizeof(uint64_t));
 
 	/* Stop both before reprogramming. */
-	hda_write8(d, HDA_REG_CORBCTL, 0);
-	hda_write8(d, HDA_REG_RIRBCTL, 0);
+	hda_corb_rirb_stop(d);
 
-	/* Program CORB. */
 	hda_write32(d, HDA_REG_CORBLBASE, (uint32_t)d->corb_phys);
 	hda_write32(d, HDA_REG_CORBUBASE, 0);
 	hda_write8(d,  HDA_REG_CORBSIZE, corbsize_enc);
+	hda_write32(d, HDA_REG_RIRBLBASE, (uint32_t)d->rirb_phys);
+	hda_write32(d, HDA_REG_RIRBUBASE, 0);
+	hda_write8(d,  HDA_REG_RIRBSIZE, rirbsize_enc);
+	return hda_corb_rirb_start(d);
+}
+
+/*
+ * With both engines stopped and the rings' bases and sizes programmed:
+ * reset both pointers and start both engines.  Also how the rings are
+ * resynchronised after a verb timeout (hda_send_verb_locked()).
+ */
+static int hda_corb_rirb_start(hda_dev_t *d)
+{
+	uint32_t budget;
+
 	hda_write16(d, HDA_REG_CORBWP, 0);
 
 	/*
@@ -684,12 +728,11 @@ static int hda_corb_rirb_setup(hda_dev_t *d)
 	}
 	d->corb_wp = 0;
 
-	/* Program RIRB.  The write pointer reset is write-only and always
-	 * reads back 0 (3.3.27), so there is nothing to verify here. */
-	hda_write32(d, HDA_REG_RIRBLBASE, (uint32_t)d->rirb_phys);
-	hda_write32(d, HDA_REG_RIRBUBASE, 0);
-	hda_write8(d,  HDA_REG_RIRBSIZE, rirbsize_enc);
+	/* The RIRB write pointer reset is write-only and always reads back 0
+	 * (3.3.27), so there is nothing to verify here.  Drop anything latched
+	 * against the old position too. */
 	hda_write16(d, HDA_REG_RIRBWP, HDA_RIRBWP_RST);
+	hda_write8(d, HDA_REG_RIRBSTS, hda_read8(d, HDA_REG_RIRBSTS));
 	/*
 	 * Interrupt after half the ring rather than after every response.
 	 *
@@ -754,7 +797,14 @@ static int hda_send_verb_locked(hda_dev_t *d, uint8_t cad, uint8_t nid,
 {
 	uint32_t encoded = hda_pack_verb(cad, nid, verb, payload);
 	uint16_t wp;
-	uint32_t budget;
+	uint32_t us;
+
+	cad &= 0x0F;
+	/* A codec that has stopped answering costs one timeout, not one per
+	 * verb of a graph walk. */
+	if (d->codec_dead & (1u << cad)) {
+		return -EIO;
+	}
 
 	wp = (uint16_t)((d->corb_wp + 1) % d->corb_entries);
 	d->corb[wp] = encoded;
@@ -762,6 +812,7 @@ static int hda_send_verb_locked(hda_dev_t *d, uint8_t cad, uint8_t nid,
 	__sync_synchronize();
 	hda_write16(d, HDA_REG_CORBWP, wp);
 	d->corb_wp = wp;
+	d->pending[cad]++;
 
 	/*
 	 * Wait for the RIRB write pointer to move past our own read pointer,
@@ -776,12 +827,16 @@ static int hda_send_verb_locked(hda_dev_t *d, uint8_t cad, uint8_t nid,
 	 * turns into minutes of dead spinning.  Tracking our own read pointer
 	 * is what the BSD drivers do and is self-correcting.
 	 */
-	for (budget = 0; budget < HDA_VERB_TIMEOUT; budget++) {
+	for (us = 0; us < HDA_VERB_TIMEOUT_US; ) {
 		uint16_t rwp = hda_read16(d, HDA_REG_RIRBWP) & 0xFF;
 		uint64_t entry;
-		uint32_t ex;
+		uint32_t ex, rcad;
 
 		if (rwp == d->rirb_rp) {
+			/* A response takes a frame or two (20.8 us each);
+			 * bound the wait in time, not in MMIO reads. */
+			timer_busywait_us(HDA_VERB_POLL_US);
+			us += HDA_VERB_POLL_US;
 			continue;
 		}
 		d->rirb_rp = (uint16_t)((d->rirb_rp + 1) % d->rirb_entries);
@@ -802,13 +857,45 @@ static int hda_send_verb_locked(hda_dev_t *d, uint8_t cad, uint8_t nid,
 		if (ex & HDA_RIRB_EX_UNSOL) {
 			continue;
 		}
-		if ((ex & HDA_RIRB_EX_CODEC_MASK) != (uint32_t)(cad & 0x0F)) {
+		/*
+		 * Solicited responses carry no tag, only the codec address,
+		 * and come strictly in order (4.4.1).  One a codec sends after
+		 * we gave up waiting would otherwise be taken as the answer to
+		 * that codec's next verb, and every response after it would
+		 * be one verb behind for the rest of the boot.  So count what
+		 * is outstanding per codec and drop answers nobody is owed.
+		 */
+		rcad = ex & HDA_RIRB_EX_CODEC_MASK;
+		if (d->pending[rcad] == 0) {
+			continue;   /* late answer to a verb we abandoned */
+		}
+		d->pending[rcad]--;
+		if (rcad != cad) {
 			continue;   /* another codec's answer */
 		}
+		d->codec_timeouts[cad] = 0;
 		*resp = (uint32_t)entry;
 		return 0;
 	}
 	d->verb_timeouts++;
+
+	/*
+	 * Nothing came.  An answer could still arrive late; rather than
+	 * trust the count to absorb it, put both rings back to a known
+	 * position (a late answer then lands as an entry nobody is owed and
+	 * is dropped).  After a few timeouts in a row the codec is taken as
+	 * gone.
+	 */
+	memset(d->pending, 0, sizeof(d->pending));
+	hda_corb_rirb_stop(d);
+	if (hda_corb_rirb_start(d) != 0) {
+		kprintf("hda: command rings would not restart after a verb "
+		        "timeout\n");
+	}
+	if (++d->codec_timeouts[cad] >= HDA_CODEC_DEAD_TIMEOUTS) {
+		d->codec_dead |= (uint16_t)(1u << cad);
+		kprintf("hda: codec %u stopped answering\n", cad);
+	}
 	return -EIO;
 }
 
@@ -826,19 +913,33 @@ static int hda_send_verb_locked(hda_dev_t *d, uint8_t cad, uint8_t nid,
 static int hda_try_verb(hda_dev_t *d, uint8_t cad, uint8_t nid,
                         uint16_t verb, uint16_t payload, uint32_t *resp)
 {
-	unsigned long flags = spinlock_acquire_irq(&d->verb_lock);
+	/*
+	 * Not an IRQ-masking lock: the interrupt handler never touches the
+	 * command rings, and a verb that gets no answer waits tens of
+	 * milliseconds -- with interrupts masked that lost timer ticks.
+	 */
+	spinlock_acquire(&d->verb_lock);
 	int rc = hda_send_verb_locked(d, cad, nid, verb, payload, resp);
 
-	spinlock_release_irq(&d->verb_lock, flags);
+	spinlock_release(&d->verb_lock);
 	return rc;
 }
 
+/*
+ * As hda_try_verb(), returning the response -- or HDA_VERB_FAILED when the
+ * codec did not answer.  A zero response is meaningful and decodes as a
+ * plausible analog output widget with an empty connection list, so a
+ * timeout must not look like one; all-ones decodes as a vendor-defined
+ * digital widget, which every caller skips.
+ */
 static uint32_t hda_send_verb(hda_dev_t *d, uint8_t cad, uint8_t nid,
                               uint16_t verb, uint16_t payload)
 {
-	uint32_t resp = 0;
+	uint32_t resp;
 
-	(void)hda_try_verb(d, cad, nid, verb, payload, &resp);
+	if (hda_try_verb(d, cad, nid, verb, payload, &resp) != 0) {
+		return HDA_VERB_FAILED;
+	}
 	return resp;
 }
 
@@ -906,6 +1007,11 @@ static void hda_amp_unmute_out(hda_dev_t *d, uint8_t nid, uint32_t wcaps)
 	uint8_t gain = (uint8_t)HDA_AMPCAP_OFFSET(caps);
 	uint8_t steps = (uint8_t)HDA_AMPCAP_NUMSTEPS(caps);
 
+	/* Unanswered caps read all-ones: offset and steps would say
+	 * maximum gain. */
+	if (caps == HDA_VERB_FAILED) {
+		return;
+	}
 	if (gain > steps) {
 		gain = steps;
 	}
@@ -943,6 +1049,9 @@ static void hda_amp_unmute_in(hda_dev_t *d, uint8_t nid, uint32_t wcaps,
 	uint8_t gain = (uint8_t)HDA_AMPCAP_OFFSET(caps);
 	uint8_t steps = (uint8_t)HDA_AMPCAP_NUMSTEPS(caps);
 
+	if (caps == HDA_VERB_FAILED) {
+		return;
+	}
 	if (gain > steps) {
 		gain = steps;
 	}
@@ -994,11 +1103,17 @@ static int hda_conn_list(hda_dev_t *d, uint8_t nid, uint8_t *conns, int max)
 	int n = 0;
 	int i;
 
+	if (lenr == HDA_VERB_FAILED) {
+		return 0;
+	}
 	for (i = 0; i < len && n < max; i += per) {
-		uint32_t resp = hda_send_verb(d, d->codec_addr, nid,
-		                              HDA_VERB_GET_CONN_LIST,
-		                              (uint16_t)i);
+		uint32_t resp;
 		int j;
+
+		if (hda_try_verb(d, d->codec_addr, nid, HDA_VERB_GET_CONN_LIST,
+		                 (uint16_t)i, &resp) != 0) {
+			break;   /* a partial list, not a list of garbage */
+		}
 
 		for (j = 0; j < per && (i + j) < len && n < max; j++) {
 			int shift = j * (is_long ? 16 : 8);
@@ -1232,6 +1347,9 @@ static int hda_configure_codec(hda_dev_t *d)
 
 	/* Node 0's subnodes are the function groups; we want the audio one. */
 	sub = hda_get_param(d, 0, HDA_PARAM_SUBNODE_COUNT);
+	if (sub == HDA_VERB_FAILED) {
+		return -EIO;
+	}
 	start = (uint8_t)HDA_SUBNODE_START(sub);
 	count = (uint8_t)HDA_SUBNODE_COUNT(sub);
 	for (i = 0; i < count; i++) {
@@ -2996,7 +3114,8 @@ static int hda_attach(pci_device_t *pdev)
 	d->sd_index = d->iss;
 	d->sd_base = HDA_SD_BASE + ((uint32_t)d->sd_index * HDA_SD_STRIDE);
 
-	d->codec_mask = hda_read16(d, HDA_REG_STATESTS);
+	/* SDI[14:0]; bit 15 is reserved. */
+	d->codec_mask = hda_read16(d, HDA_REG_STATESTS) & 0x7FFF;
 	if (d->codec_mask == 0) {
 		kprintf("hda: no codec detected\n");
 		hda_detach_partial(d);
@@ -3081,14 +3200,41 @@ static int hda_attach(pci_device_t *pdev)
 	            HDA_INTCTL_GIE | HDA_INTCTL_CIE |
 	            HDA_INTCTL_SIE(d->sd_index));
 
-	/* First real conversation with the codec.  A timeout here is not the
-	 * same as a vendor ID of zero, and it means nothing that follows will
-	 * work either. */
-	if (hda_try_verb(d, d->codec_addr, 0, HDA_VERB_GET_PARAMETER,
-	                 HDA_PARAM_VENDOR_ID, &vendor_id) != 0) {
-		kprintf("hda: codec %u did not answer\n", d->codec_addr);
-		hda_detach_partial(d);
-		return -EIO;
+	/*
+	 * First real conversation with each codec.  STATESTS records which
+	 * SDI lines signalled during enumeration; it does not promise every
+	 * one will answer -- a display codec behind a powered-down graphics
+	 * well, or a phantom slot, may not.  Probe each, drop the silent ones,
+	 * and give up only if none answers.
+	 */
+	{
+		int i, first = -1;
+		uint32_t vid;
+
+		vendor_id = 0;
+		for (i = 0; i < HDA_MAX_CODECS; i++) {
+			if ((d->codec_mask & (1u << i)) == 0) {
+				continue;
+			}
+			if (hda_try_verb(d, (uint8_t)i, 0,
+			                 HDA_VERB_GET_PARAMETER,
+			                 HDA_PARAM_VENDOR_ID, &vid) != 0) {
+				kprintf("hda: codec %d did not answer; "
+				        "skipped\n", i);
+				d->codec_mask &= (uint16_t)~(1u << i);
+				continue;
+			}
+			if (first < 0) {
+				first = i;
+				vendor_id = vid;
+			}
+		}
+		if (first < 0) {
+			kprintf("hda: no codec answered\n");
+			hda_detach_partial(d);
+			return -EIO;
+		}
+		d->codec_addr = (uint8_t)first;
 	}
 
 	/*

@@ -36,6 +36,7 @@ static int hda_verb_is_short(uint16_t verb)
 	}
 	switch ((verb >> 8) & 0x0F) {
 	case 0x2: case 0x3: case 0xA: case 0xB:
+	case 0x4: case 0x5: case 0xC: case 0xD:
 		return 1;
 	default:
 		return 0;
@@ -507,7 +508,20 @@ static void test_pack_verb_getter_ah_is_short_form(void)
 	assert(v == ((2u << 20) | (0xA00u << 8) | 0xBEEFu));
 }
 
+/* The coefficient verbs (index 5h, set 4h, and their Dh/Ch getters) are
+ * 4-bit commands: a coefficient above 0xFF keeps its high byte. */
+static void test_pack_verb_coefficient_verbs_are_short_form(void)
+{
+	assert(hda_pack_verb(0, 0x20, 0x500, 0x46) ==
+	       ((0x20u << 20) | (0x500u << 8) | 0x46u));
+	assert(hda_pack_verb(0, 0x20, 0x400, 0x3000) ==
+	       ((0x20u << 20) | (0x400u << 8) | 0x3000u));
+	assert(hda_pack_verb(0, 0x20, 0xC00, 0) == ((0x20u << 20) | (0xC00u << 8)));
+	assert(hda_pack_verb(0, 0x20, 0xD00, 0) == ((0x20u << 20) | (0xD00u << 8)));
+}
+
 int main(void) {
+	test_pack_verb_coefficient_verbs_are_short_form();
 	test_pack_verb_0x7xx_is_long_form();
 	test_pack_verb_power_pin_eapd_conn_long_form();
 	test_pack_verb_amp_gain_keeps_16bit_payload();
