@@ -97,6 +97,8 @@
 
 /* How long to wait for the forced software interrupt to arrive. */
 #define R8168_IRQ_PROBE_MS  50
+/* How long the vector must stay silent before and after the forced one. */
+#define R8168_IRQ_QUIET_MS  10
 
 /* RCR bits. */
 #define RCR_AAP             0x00000001   /* accept all (promiscuous) */
@@ -192,6 +194,7 @@ static struct {
     int                irq;          /* vector / line; -1: none */
     int                irq_kind;     /* R8168_IRQ_* */
     volatile uint32_t  intr_count;   /* interrupts that were ours */
+    volatile uint32_t  intr_calls;   /* every handler invocation */
     volatile uint16_t  imr;          /* the mask the handler restores */
     volatile struct r8168_desc *rx_ring;
     uint32_t           rx_ring_phys;
@@ -297,6 +300,8 @@ static int r8168_irq(unsigned int irq, void *dev_id, void *frame) {
     (void)irq; (void)dev_id; (void)frame;
     int pass, more = 0;
 
+    rt.intr_calls++;
+
     /*
      * All-ones is a device that has dropped off the bus: not ours, and no
      * register writes.  Bits latched but masked in IMR are not an interrupt
@@ -373,6 +378,10 @@ static int r8168_irq_install(pci_device_t *pdev, int kind) {
         break;
     case R8168_IRQ_LINE:
         irq = pci_get_irq(pdev);
+        /* INTx Disable survives from firmware, or from an earlier routed
+         * attempt's teardown; the pin never asserts while it is set. */
+        if (irq >= 0)
+            pci_intx_enable(pdev, 1);
         break;
     case R8168_IRQ_ROUTED:
         irq = pci_route_intx(pdev);
@@ -423,13 +432,33 @@ static void r8168_irq_remove(pci_device_t *pdev) {
 }
 
 /* Force a software interrupt and report whether the handler saw it. */
+/*
+ * SWInt latches in ISR whichever route the interrupt takes, so seeing it
+ * from inside the handler proves nothing on its own: on a misrouted or
+ * shared line, any foreign invocation during the wait would find it there.
+ * The proof is therefore three-sided: the vector is quiet with our mask
+ * empty, an invocation follows the forced interrupt, and the vector is
+ * quiet again once it is acknowledged and masked.
+ */
+static int r8168_irq_quiet(void) {
+    uint32_t before = rt.intr_calls;
+
+    timer_busywait_ms(R8168_IRQ_QUIET_MS);
+    return rt.intr_calls == before;
+}
+
 static int r8168_irq_proven(void) {
-    uint32_t before = rt.intr_count;
+    uint32_t before;
     unsigned int ms;
 
-    /* SWInt alone: the netdev is not registered yet, so nothing else
-     * should be raising interrupts. */
+    rt.imr = 0;
+    rt_w16(R_IMR, 0);
     rt_w16(R_ISR, 0xFFFF);
+    (void)rt_r16(R_ISR);
+    if (!r8168_irq_quiet())
+        return 0;                    /* something else is driving it */
+
+    before = rt.intr_count;
     rt.imr = INT_SWINT;
     rt_w16(R_IMR, INT_SWINT);
     rt_w8(R_TPPOLL, TPPOLL_FSWINT);
@@ -437,7 +466,11 @@ static int r8168_irq_proven(void) {
         timer_busywait_ms(1);
     rt.imr = 0;
     rt_w16(R_IMR, 0);
-    return rt.intr_count != before;
+    rt_w16(R_ISR, 0xFFFF);
+    (void)rt_r16(R_ISR);
+    if (rt.intr_count == before)
+        return 0;
+    return r8168_irq_quiet();
 }
 
 /*
