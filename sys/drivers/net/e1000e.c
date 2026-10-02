@@ -85,6 +85,17 @@
 #define R_RAH0              0x5404
 #define R_FWSM              0x5B54
 #define R_FEXTNVM11         0x5BBC
+#define R_FEXTNVM7          0x00E4
+#define R_FEXTNVM9          0x5BB4
+#define R_ITR               0x00C4   /* interrupt throttle, 256 ns units */
+
+/* FEXTNVM7 / FEXTNVM9 (Sunrise Point and later). */
+#define FEXTNVM7_SIDE_CLK_UNGATE      0x00000004u
+#define FEXTNVM9_IOSFSB_CLKGATE_DIS   0x00000800u
+#define FEXTNVM9_IOSFSB_CLKREQ_DIS    0x00001000u
+
+/* About 8000 interrupts/s (488 x 256 ns), the usual single-vector rate. */
+#define E1K2_ITR            488
 
 #define RAH_AV              0x80000000u   /* Address Valid */
 
@@ -199,6 +210,7 @@
 #define E1K2_SWFLAG_MS      1000
 #define E1K2_MDIC_MS        20
 #define E1K2_IRQ_PROBE_MS   50
+#define E1K2_IRQ_QUIET_MS   10
 
 /* Chip classes (driver_data in the ID table). */
 #define K_82574             1   /* 82574L / 82583V: discrete, PHY at 1 */
@@ -236,7 +248,9 @@ static struct {
     int                   kind;
     int                   irq;
     int                   irq_kind;
-    volatile uint32_t     intr_count;
+    volatile uint32_t     intr_count;    /* interrupts that were ours */
+    volatile uint32_t     intr_calls;    /* every handler invocation */
+    volatile uint32_t     lsc_count;     /* ours, with LSC in ICR */
     volatile struct e1k2_rx_desc *rx_ring;
     uint32_t              rx_ring_phys;
     volatile struct e1k2_tx_desc *tx_ring;
@@ -391,13 +405,24 @@ static void e2k_phy_bringup(void) {
 
 /* ----- RX path ----- */
 
-static void e2k_rx_drain(void) {
+/*
+ * Collect up to one ring's worth of frames.  The MAC refills each
+ * descriptor as soon as it is handed back, so a drain that runs until the
+ * ring is empty never ends under a flood -- and it runs in the interrupt
+ * handler, starving the timer and everything else.  Returns non-zero if
+ * frames were left for later.
+ */
+static int e2k_rx_drain(void) {
+    int budget = E1K2_RX_DESCS;
+
     /* RDT trails our cursor by one: tail must never equal head, or the
      * hardware reads the ring as full and stops receiving. */
     for (;;) {
         volatile struct e1k2_rx_desc *d = &e2k.rx_ring[e2k.rx_cur];
         if (!(d->status & RXD_STAT_DD))
-            break;
+            return 0;
+        if (budget-- <= 0)
+            return 1;
         e2k_barrier();               /* length and buffer after DD */
 
         uint16_t len = d->length;
@@ -444,22 +469,29 @@ static int e2k_irq(unsigned int irq, void *dev_id, void *frame) {
     /* ICR is read-to-clear.  On a shared INTx line, 82571+ parts say
      * whether they asserted it; without INT_ASSERTED the causes are not
      * ours to act on (and IMS did not auto-mask).  MSI is never shared. */
+    e2k.intr_calls++;
     uint32_t icr = e2k_read(R_ICR);
-    if (icr == 0)
+    /* All-ones is a function that has stopped responding: not ours, and
+     * nothing in it to act on. */
+    if (icr == 0 || icr == 0xFFFFFFFFu)
         return 0;
     if (e2k.irq_kind != IRQ_MSI && !(icr & ICR_INT_ASSERTED))
         return 0;
     e2k.intr_count++;
+    if (icr & ICR_LSC)
+        e2k.lsc_count++;
 
     /* The interrupt probe runs before the netdev exists. */
     if (!e2k.registered)
         return 1;
 
-    if (icr & (ICR_RXT0 | ICR_RXDMT0 | ICR_RXO))
-        e2k_rx_drain();
+    /* Frames left by the budget: ICR is read-to-clear, so re-raise the
+     * cause.  It arrives after the EOI (and the ITR gap), letting the
+     * timer and everything else in first. */
+    if ((icr & (ICR_RXT0 | ICR_RXDMT0 | ICR_RXO)) && e2k_rx_drain())
+        e2k_write(R_ICS, ICR_RXT0);
     if (icr & ICR_LSC)
         e2k_report_link();
-    /* TXDW: e2k_xmit reclaims by polling DD. */
     return 1;
 }
 
@@ -662,6 +694,8 @@ static void e2k_flush_desc_rings(pci_device_t *pdev) {
 
 /* ----- interrupt setup (same ladder as r8168) ----- */
 
+static void e2k_legacy_irq_fixup(void);
+
 static int e2k_irq_install(pci_device_t *pdev, int kind) {
     int irq;
 
@@ -673,6 +707,10 @@ static int e2k_irq_install(pci_device_t *pdev, int kind) {
         break;
     case IRQ_LINE:
         irq = pci_get_irq(pdev);
+        /* INTx Disable survives from firmware, or from an earlier routed
+         * attempt's teardown; the pin never asserts while it is set. */
+        if (irq >= 0)
+            pci_intx_enable(pdev, 1);
         break;
     case IRQ_ROUTED:
         irq = pci_route_intx(pdev);
@@ -682,6 +720,8 @@ static int e2k_irq_install(pci_device_t *pdev, int kind) {
     }
     if (irq < 0)
         return -1;
+    if (kind != IRQ_MSI)
+        e2k_legacy_irq_fixup();
 
     e2k.irq_kind = kind;     /* the handler's INT_ASSERTED test needs it */
     if (request_irq((unsigned int)irq, e2k_irq, IRQF_SHARED, "e1000e", &e2k) != 0) {
@@ -722,19 +762,57 @@ static void e2k_irq_remove(pci_device_t *pdev) {
     e2k.irq_kind = IRQ_NONE_K;
 }
 
-/* Raise a link-status-change cause through ICS and see whether it lands. */
+/*
+ * Raise a link-status-change cause through ICS and see whether it lands.
+ * On INTx the device is deliberately asserting during the wait, so any
+ * foreign interrupt on a shared or misrouted vector would find
+ * INT_ASSERTED and look like proof.  The proof is therefore three-sided:
+ * the vector is quiet with everything masked, an invocation with LSC in
+ * ICR follows the ICS write, and the vector is quiet again once the cause
+ * is read and masked.
+ */
+static int e2k_irq_quiet(void) {
+    uint32_t before = e2k.intr_calls;
+
+    timer_busywait_ms(E1K2_IRQ_QUIET_MS);
+    return e2k.intr_calls == before;
+}
+
 static int e2k_irq_proven(void) {
-    uint32_t before = e2k.intr_count;
+    uint32_t before;
     unsigned ms;
 
+    e2k_write(R_IMC, 0xFFFFFFFFu);
     (void)e2k_read(R_ICR);
+    if (!e2k_irq_quiet())
+        return 0;                    /* something else is driving it */
+
+    before = e2k.lsc_count;
     e2k_write(R_IMS, ICR_LSC);
     e2k_write(R_ICS, ICR_LSC);
-    for (ms = 0; ms < E1K2_IRQ_PROBE_MS && e2k.intr_count == before; ms++)
+    for (ms = 0; ms < E1K2_IRQ_PROBE_MS && e2k.lsc_count == before; ms++)
         timer_busywait_ms(1);
     e2k_write(R_IMC, 0xFFFFFFFFu);
     (void)e2k_read(R_ICR);
-    return e2k.intr_count != before;
+    if (e2k.lsc_count == before)
+        return 0;
+    return e2k_irq_quiet();
+}
+
+/*
+ * From Sunrise Point on, INTx assert and deassert travel as IOSF sideband
+ * messages, which clock gating can lose while the port idles: a lost
+ * assert leaves RXT0 latched with no interrupt and receive stops for good;
+ * a lost deassert storms the line.  Legacy-interrupt mode must keep that
+ * clock running.  MSI needs none of this.
+ */
+static void e2k_legacy_irq_fixup(void) {
+    if (e2k.kind != K_SPT)
+        return;
+    e2k_write(R_FEXTNVM7, e2k_read(R_FEXTNVM7) | FEXTNVM7_SIDE_CLK_UNGATE);
+    e2k_write(R_FEXTNVM9, e2k_read(R_FEXTNVM9) |
+                          FEXTNVM9_IOSFSB_CLKGATE_DIS |
+                          FEXTNVM9_IOSFSB_CLKREQ_DIS);
 }
 
 /*
@@ -905,17 +983,25 @@ static int e2k_setup(pci_device_t *pdev, int kind) {
     netdev_register(&e2k.netdev);
     e2k.registered = 1;
 
-    /* Only now unmask, so nothing arrives before the netdev exists. */
-    e2k_write(R_IMS, E1K2_IMS);
-
     kprintf("e1000e: %s %04x %02x:%02x:%02x:%02x:%02x:%02x %s %d%s\n",
             kind == K_82574 ? "82574" : kind == K_LPT ? "I217/I218" : "I219",
             (unsigned)pdev->device_id,
             mac[0], mac[1], mac[2], mac[3], mac[4], mac[5],
             e2k.irq_kind == IRQ_MSI ? "msi" : "irq", e2k.irq,
             (e2k_read(R_FWSM) & FWSM_FW_VALID) ? ", manageability firmware present" : "");
+
+    /* Sample the link while LSC is still masked, so the handler and this
+     * cannot race over link_status. */
     e2k.link_status = ~0u;
     e2k_report_link();
+
+    /* Only now unmask, so nothing arrives before the netdev exists.  The
+     * probe's ICR reads may have swallowed RXT0 for frames that arrived
+     * during it; re-raise it so those are collected now rather than when
+     * the next frame comes. */
+    e2k_write(R_ITR, E1K2_ITR);
+    e2k_write(R_IMS, E1K2_IMS);
+    e2k_write(R_ICS, ICR_RXT0);
     return 0;
 }
 
