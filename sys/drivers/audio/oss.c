@@ -341,6 +341,9 @@ int oss_ioctl_dispatch(audio_dev_t *dev, uint32_t request, void *arg)
 		return 0;
 
 	case 0: /* SNDCTL_DSP_RESET — discard queued output */
+		/* A partial input frame carried over belongs to the discarded
+		 * audio; keeping it decodes every later frame at an offset. */
+		audio_conv_reset(&dev->conv);
 		if (dev->ops != NULL && dev->ops->flush != NULL) {
 			return dev->ops->flush(dev);
 		}
@@ -370,25 +373,13 @@ int oss_ioctl_dispatch(audio_dev_t *dev, uint32_t request, void *arg)
 		return 0;
 
 	case 23: /* SNDCTL_DSP_GETODELAY — bytes still queued for playback */
-	{
-		int fragsize = 0, fragstotal = 0, fragments = 0, bytes = 0;
-
-		v = 0;
-		if (dev->ops != NULL && dev->ops->get_ospace != NULL &&
-		    dev->ops->get_ospace(dev, &fragsize, &fragstotal,
-					 &fragments, &bytes) == 0) {
-			/* queued = total buffer - currently free */
-			v = (fragsize * fragstotal) - bytes;
-			if (v < 0) {
-				v = 0;
-			}
-			v = audio_hw_to_app_bytes(dev, v);
-		}
+		/* The software buffer and the DMA ring both, where the backend
+		 * can say -- A/V sync is off by the ring otherwise. */
+		v = (int)audio_play_queued_bytes(dev);
 		if (arg == NULL || copyout(&v, arg, sizeof(v)) != 0) {
 			return -EFAULT;
 		}
 		return 0;
-	}
 
 	default:
 		return -EINVAL;
@@ -420,7 +411,13 @@ static void oss_node_open(fs_node_t *node)
 
 	audio_node_open(node);
 
-	if (dev == NULL) {
+	/*
+	 * Defaults only for the open that brings the device into use.  Every
+	 * open used to apply them, so a mixer or a second player opening
+	 * /dev/dsp reprogrammed the stream another process was playing --
+	 * discarding its queued audio and decoding the rest as 8-bit mono.
+	 */
+	if (dev == NULL || dev->open_refs != 1) {
 		return;
 	}
 	info = dev->current;

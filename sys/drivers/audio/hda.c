@@ -372,6 +372,10 @@ typedef struct hda_dev {
 	int              worker_chan;
 	volatile uint64_t last_write;
 	uint64_t         wait_ticks;    /* writer's sleep bound */
+	/* Serialises format changes (set_params) end to end. */
+	mutex_t          cfg_lock;
+	/* A format change is between SDnFMT and the converter: no start. */
+	int              binding;
 	/*
 	 * A stream descriptor that would not acknowledge SRST is unusable
 	 * (3.3.35).  Latched here and returned to writers instead of retrying
@@ -1782,8 +1786,13 @@ static void hda_ring_reset(hda_dev_t *d)
 /* Start the engine on what is staged.  Caller holds feed_lock. */
 static void hda_try_start(hda_dev_t *d)
 {
-	int rc = hda_stream_start(d);
+	int rc;
 
+	/* Mid format change: the converter may still be on the old one. */
+	if (d->binding) {
+		return;
+	}
+	rc = hda_stream_start(d);
 	if (rc != 0) {
 		/* Not retried on every write: see stream_error. */
 		d->stream_error = rc;
@@ -2342,19 +2351,31 @@ static int hda_set_params(audio_dev_t *adev, audio_info_t *info)
 	if (rc != 0) {
 		return rc;
 	}
-	flags = spinlock_acquire_irq(&d->feed_lock);
+	/*
+	 * One format change at a time, start to finish: SDnFMT and the
+	 * converter's own copy (verb 2h) must describe the same stream, and
+	 * two changes interleaving could leave the descriptor on one format
+	 * and the converter on the other.
+	 */
+	mutex_lock(&d->cfg_lock);
 
-	if (fmt == d->fmt && d->running) {
-		/* Nothing to change; do not disturb a running stream. */
-		spinlock_release_irq(&d->feed_lock, flags);
+	/*
+	 * An unchanged format is not a change, running or not.  Gain or
+	 * block-size updates arrive here too, and resetting an idle ring
+	 * for them threw away PCM already buffered.  SDnFMT is rewritten
+	 * from d->fmt at every start anyway.
+	 */
+	if (fmt == d->fmt) {
+		mutex_unlock(&d->cfg_lock);
 		return 0;
 	}
+
+	flags = spinlock_acquire_irq(&d->feed_lock);
 
 	/*
 	 * Stop before touching SDnFMT.  The register is only writable with
 	 * the engine idle -- 3.3.38 and 3.3.41 both restrict descriptor
-	 * programming to a stopped stream, and FreeBSD only writes SDFMT
-	 * inside stream_start with RUN clear.  Rewriting it underneath a
+	 * programming to a stopped stream.  Rewriting it underneath a
 	 * running engine also left the PCM already queued in the ring to be
 	 * played at the new rate and channel count.
 	 *
@@ -2370,6 +2391,8 @@ static int hda_set_params(audio_dev_t *adev, audio_info_t *info)
 	 * goes through one. */
 	d->fmt = fmt;
 	hda_write16(d, d->sd_base + HDA_SD_FMT, fmt);
+	/* No start until the converter has the new format too. */
+	d->binding = 1;
 
 	spinlock_release_irq(&d->feed_lock, flags);
 	/* With RUN clear no completion will come to wake a blocked writer. */
@@ -2380,7 +2403,48 @@ static int hda_set_params(audio_dev_t *adev, audio_info_t *info)
 	 * channel count) rather than fall silent, which is worse.  Sent
 	 * outside the feed lock because it is a CORB round trip. */
 	hda_codec_bind_stream(d, fmt);
+
+	flags = spinlock_acquire_irq(&d->feed_lock);
+	d->binding = 0;
+	spinlock_release_irq(&d->feed_lock, flags);
+	mutex_unlock(&d->cfg_lock);
 	return 0;
+}
+
+/*
+ * Bytes still to be played: the software FIFO plus the ring ahead of the
+ * engine's link position.  GETOSPACE-derived figures left the ring out --
+ * up to two-thirds of a second at 48 kHz, which is what A/V sync is off by.
+ */
+static int hda_get_odelay(audio_dev_t *adev)
+{
+	hda_dev_t *d = adev->driver_data;
+	unsigned long f;
+	int64_t ring;
+	size_t used;
+
+	if (d->fifo_buf == NULL) {
+		return 0;
+	}
+	f = spinlock_acquire_irq(&d->feed_lock);
+	used = audio_fifo_used(&d->fifo);
+	ring = (int32_t)(d->writes_queued -
+	                 __atomic_load_n(&d->slots_played, __ATOMIC_ACQUIRE));
+	ring *= HDA_CHUNK_BYTES;
+	if (d->running) {
+		/* Already through the slot the counters say the engine is in. */
+		uint32_t ring_bytes = HDA_BDL_ENTRIES * HDA_CHUNK_BYTES;
+		uint32_t base = (d->slots_played % HDA_BDL_ENTRIES) *
+		                HDA_CHUNK_BYTES;
+		uint32_t pos = hda_read32(d, d->sd_base + HDA_SD_LPIB);
+
+		ring -= (int64_t)((pos + ring_bytes - base) % ring_bytes);
+	}
+	spinlock_release_irq(&d->feed_lock, f);
+	if (ring < 0) {
+		ring = 0;
+	}
+	return (int)(used + (size_t)ring);
 }
 
 /* The calling descriptor is O_NONBLOCK (see tty_read_nonblock()). */
@@ -2684,6 +2748,7 @@ static audio_dev_ops_t hda_ops = {
 	.get_props   = hda_get_props,
 	.get_ospace  = hda_get_ospace,
 	.post        = hda_post,
+	.get_odelay  = hda_get_odelay,
 };
 
 /* ------------------------------------------------------------------- */
@@ -2844,6 +2909,7 @@ static int hda_attach(pci_device_t *pdev)
 	memset(d, 0, sizeof(*d));
 	spinlock_init(&d->feed_lock, "hda_feed");
 	spinlock_init(&d->verb_lock, "hda_verb");
+	mutex_init(&d->cfg_lock, "hda_cfg");
 	d->pdev = pdev;
 
 	cmd = pci_read_config16(pdev->bus, pdev->slot, pdev->func,

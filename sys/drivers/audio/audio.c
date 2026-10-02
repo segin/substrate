@@ -12,6 +12,8 @@
 #include <drivers/audio/audio.h>
 #include <kern/cmdline.h>
 #include <kern/console.h>
+#include <kern/sched.h>
+#include <kern/time.h>
 #include <sys/audioio.h>
 #include <sys/copy.h>
 #include <sys/errno.h>
@@ -234,6 +236,14 @@ int audio_ioctl_dispatch(audio_dev_t *dev, uint32_t request, void *arg)
 		}
 		info = dev->current;
 		info.play.seek = audio_play_queued_samples(dev);
+		/* play.samples counts what has been played: what was
+		 * accepted, less what is still queued. */
+		{
+			uint32_t q = audio_play_queued_bytes(dev);
+
+			info.play.samples = dev->current.play.samples > q ?
+					    dev->current.play.samples - q : 0;
+		}
 		if (copyout(&info, arg, sizeof(audio_info_t)) != 0) {
 			return -EFAULT;
 		}
@@ -353,7 +363,9 @@ int audio_ioctl_dispatch(audio_dev_t *dev, uint32_t request, void *arg)
 	}
 
 	case AUDIO_WSEEK: {
-		uint32_t v = dev->current.play.samples;
+		/* Bytes still queued ahead of the device, not a running total
+		 * of everything ever written. */
+		uint32_t v = audio_play_queued_bytes(dev);
 		if (arg == NULL) {
 			return -EINVAL;
 		}
@@ -677,31 +689,47 @@ size_t audio_conv_frame(audio_conv_t *st, const audio_prinfo_t *sw,
 }
 
 /*
- * play.seek: samples written but not yet handed to the DMA engine, in the
- * application's format.  A poll-driven writer sizes its writes from this
- * -- SDL3's Sun/NetBSD backend waits until less than one of its buffers is
- * queued and only then writes, because it writes holding its device lock.
- * Left at 0 it looked permanently empty, every write blocked in the kernel
- * with that lock held, and SDL_ResumeAudioStreamDevice() on another thread
- * could starve behind it for many seconds: a silent start.  A backend that
- * cannot report its queue says 0, as before.
+ * Bytes written but not yet played, in the application's format: the
+ * backend's own estimate (get_odelay, which counts the DMA ring too) or
+ * else what its buffer holds.  A backend that can report neither says 0.
  */
-uint32_t audio_play_queued_samples(const audio_dev_t *dev)
+uint32_t audio_play_queued_bytes(const audio_dev_t *dev)
 {
 	int fragsize = 0, fragstotal = 0, fragments = 0, freeb = 0;
 	int queued;
-	uint32_t bps = dev->current.play.precision / 8;
 
-	if (dev->ops == NULL || dev->ops->get_ospace == NULL || bps == 0 ||
-	    dev->ops->get_ospace((audio_dev_t *)dev, &fragsize, &fragstotal,
-				 &fragments, &freeb) != 0) {
+	if (dev->ops == NULL) {
 		return 0;
 	}
-	queued = fragsize * fragstotal - freeb;
+	if (dev->ops->get_odelay != NULL) {
+		queued = dev->ops->get_odelay((audio_dev_t *)dev);
+	} else if (dev->ops->get_ospace != NULL &&
+		   dev->ops->get_ospace((audio_dev_t *)dev, &fragsize,
+					&fragstotal, &fragments, &freeb) == 0) {
+		queued = fragsize * fragstotal - freeb;
+	} else {
+		return 0;
+	}
 	if (queued <= 0) {
 		return 0;
 	}
-	return (uint32_t)audio_hw_to_app_bytes(dev, queued) / bps;
+	return (uint32_t)audio_hw_to_app_bytes(dev, queued);
+}
+
+/*
+ * play.seek: samples written but not yet played.  A poll-driven writer
+ * sizes its writes from this -- SDL3's Sun/NetBSD backend waits until less
+ * than one of its buffers is queued and only then writes, because it
+ * writes holding its device lock.  Left at 0 it looked permanently empty,
+ * every write blocked in the kernel with that lock held, and
+ * SDL_ResumeAudioStreamDevice() on another thread could starve behind it
+ * for many seconds: a silent start.
+ */
+uint32_t audio_play_queued_samples(const audio_dev_t *dev)
+{
+	uint32_t bps = dev->current.play.precision / 8;
+
+	return bps ? audio_play_queued_bytes(dev) / bps : 0;
 }
 
 int audio_hw_to_app_bytes(const audio_dev_t *dev, int hw_bytes)
@@ -800,6 +828,19 @@ int audio_apply_info(audio_dev_t *dev, audio_info_t *info)
 	rc = audio_validate_info(info);
 	if (rc != 0) {
 		return rc;
+	}
+	/*
+	 * The playback format belongs to the thread playing: changing it
+	 * stops the engine and discards what is queued.  Anyone else may
+	 * still change gain or block size, but not the format under it.
+	 */
+	if (dev->play_owner != NULL && current_thread != NULL &&
+	    dev->play_owner != (void *)current_thread &&
+	    (old->encoding != info->play.encoding ||
+	     old->precision != info->play.precision ||
+	     old->channels != info->play.channels ||
+	     old->sample_rate != info->play.sample_rate)) {
+		return -EBUSY;
 	}
 	rc = audio_negotiate(dev, info, &hw);
 	if (rc != 0) {
@@ -1056,6 +1097,19 @@ void audio_node_open(fs_node_t *node)
 		return;
 	}
 	spinlock_acquire(&audio_dev_lock);
+	/*
+	 * Wait out the previous user's teardown.  Its drain can run for
+	 * seconds, and the stop and ring reset after it would otherwise land
+	 * on this open's stream -- chopping it, then cutting it off.
+	 */
+	while (dev->closing) {
+		uint32_t hz = get_hz();
+
+		spinlock_release(&audio_dev_lock);
+		(void)sched_sleep_until((void *)&dev->closing,
+					get_ticks() + (hz ? hz / 10U : 1U));
+		spinlock_acquire(&audio_dev_lock);
+	}
 	dev->open_refs++;
 	first_open = (dev->open_refs == 1);
 	spinlock_release(&audio_dev_lock);
@@ -1086,15 +1140,23 @@ void audio_node_close(fs_node_t *node)
 	    (current_thread && dev->play_owner == (void *)current_thread)) {
 		dev->play_owner = NULL;
 	}
-	spinlock_release(&audio_dev_lock);
 	if (last_close) {
-		/* A partial frame left by the last user is not the next
-		 * user's audio. */
-		audio_conv_reset(&dev->conv);
+		dev->closing = 1;
 	}
-	if (last_close && dev->ops != NULL && dev->ops->close != NULL) {
+	spinlock_release(&audio_dev_lock);
+	if (!last_close) {
+		return;
+	}
+	/* A partial frame left by the last user is not the next user's
+	 * audio. */
+	audio_conv_reset(&dev->conv);
+	if (dev->ops != NULL && dev->ops->close != NULL) {
 		(void)dev->ops->close(dev);
 	}
+	spinlock_acquire(&audio_dev_lock);
+	dev->closing = 0;
+	spinlock_release(&audio_dev_lock);
+	sched_wakeup((void *)&dev->closing);
 }
 
 /* ----------------------------------------------------------------- */

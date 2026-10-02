@@ -55,6 +55,12 @@ int cmdline_has(const char *key) { (void)key; return 0; }
 int devfs_register_alias(const char *path, const char *target) {
 	(void)path; (void)target; return 0;
 }
+uint32_t get_hz(void) { return 100; }
+uint64_t get_ticks(void) { return 0; }
+int sched_sleep_until(void *chan, uint64_t deadline) {
+	(void)chan; (void)deadline; return 0;
+}
+void sched_wakeup(void *chan) { (void)chan; }
 
 /*
  * audio.c includes "audio.h" with a relative path; we point the include

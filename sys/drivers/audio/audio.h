@@ -150,6 +150,14 @@ typedef struct audio_dev_ops {
 	 * Returns 0 or -errno.
 	 */
 	int (*post)(struct audio_dev *dev);
+
+	/*
+	 * Optional: bytes (in the backend's format) still to be played --
+	 * the software buffer plus whatever sits in the DMA ring ahead of the
+	 * hardware's position.  Without it the framework counts only the
+	 * free space get_ospace() reports, which leaves the ring out.
+	 */
+	int (*get_odelay)(struct audio_dev *dev);
 } audio_dev_ops_t;
 
 typedef struct audio_dev {
@@ -196,6 +204,12 @@ typedef struct audio_dev {
 	 * wait on, so the device always reports itself writable, as before.
 	 */
 	void            *wait_chan;
+	/*
+	 * The last close's teardown (a drain that can take seconds, then the
+	 * backend's stop and reset) is running.  A new open waits for it:
+	 * otherwise the teardown resets the ring under the new stream.
+	 */
+	volatile int     closing;
 	struct audio_dev *next;
 } audio_dev_t;
 
@@ -241,10 +255,12 @@ void audio_conv_reset(audio_conv_t *st);
 int audio_hw_to_app_bytes(const audio_dev_t *dev, int hw_bytes);
 
 /*
- * Playback samples (all channels) still queued ahead of the DMA engine, in
- * the application's format; AUDIO_GETINFO reports it as play.seek.  0 when
- * the backend has no get_ospace().
+ * Playback still to be played, in the application's format: bytes (OSS
+ * GETODELAY, AUDIO_WSEEK) and samples, all channels (AUDIO_GETINFO's
+ * play.seek).  From the backend's get_odelay() if it has one, else from
+ * get_ospace(); 0 when it has neither.
  */
+uint32_t audio_play_queued_bytes(const audio_dev_t *dev);
 uint32_t audio_play_queued_samples(const audio_dev_t *dev);
 
 void audio_init(void);
