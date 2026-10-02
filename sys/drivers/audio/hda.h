@@ -164,7 +164,11 @@
 /* 4-bit command + 16-bit payload */
 #define HDA_VERB_SET_CONV_FORMAT 0x200
 #define HDA_VERB_SET_AMP_GAIN_MUTE       0x300
+#define HDA_VERB_SET_PROC_COEF   0x400   /* processing coefficient */
+#define HDA_VERB_SET_COEF_INDEX  0x500
 #define HDA_VERB_GET_CONV_FORMAT 0xA00
+#define HDA_VERB_GET_PROC_COEF   0xC00
+#define HDA_VERB_GET_COEF_INDEX  0xD00
 #define HDA_VERB_GET_AMP_GAIN_MUTE       0xB00
 
 /* 12-bit command + 8-bit payload */
@@ -220,6 +224,7 @@
 #define HDA_AW_FORMAT_OVERRIDE   0x00000010U
 #define HDA_AW_CONN_LIST         0x00000100U  /* connection list present */
 #define HDA_AW_DIGITAL           0x00000200U  /* SPDIF / HDMI / DisplayPort */
+#define HDA_AW_POWER_CNTRL       0x00000400U  /* widget has its own power state */
 /*
  * Maximum channels the widget supports, as a count.  The 4-bit field is
  * split: three high bits at 15:13 and the low bit at 0, holding the
@@ -256,6 +261,7 @@
 #define HDA_PIN_CTRL_HP_ENABLE   0x80
 #define HDA_PIN_CTRL_OUT_ENABLE  0x40
 #define HDA_PIN_CTRL_IN_ENABLE   0x20
+#define HDA_PIN_CTRL_VREF_MASK   0x07   /* VRefEn: mic bias, input only */
 
 /*
  * SUPPORTED_PCM_SIZE_RATES (GET_PARAMETER 0x0A), spec figure 87 and
@@ -279,6 +285,7 @@
 #define HDA_STREAM_FMT_AC3       0x00000004U
 
 /* PIN_CAPS (GET_PARAMETER 0x0C) */
+#define HDA_PINCAP_HP_DRIVE      0x00000008U
 #define HDA_PINCAP_OUTPUT        0x00000010U
 #define HDA_PINCAP_EAPD          0x00010000U
 
@@ -286,6 +293,8 @@
 #define HDA_CONFIG_PORTCONN(cd)  (((cd) >> 30) & 0x3)
 #define HDA_PORTCONN_NONE        0x1   /* no physical connection: skip */
 #define HDA_CONFIG_DEVICE(cd)    (((cd) >> 20) & 0xF)
+#define HDA_CONFIG_ASSOC(cd)     (((cd) >> 4) & 0xF)   /* 0 is reserved */
+#define HDA_CONFIG_SEQ(cd)       ((cd) & 0xF)
 #define HDA_DEVICE_LINE_OUT      0x0
 #define HDA_DEVICE_SPEAKER       0x1
 #define HDA_DEVICE_HP_OUT        0x2

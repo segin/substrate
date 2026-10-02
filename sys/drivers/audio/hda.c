@@ -100,6 +100,8 @@
 #define HDA_RING_TIMEOUT           10000U
 /* Output converters / pins considered when picking a path. */
 #define HDA_MAX_CANDIDATES         16
+/* Converters one stream may be bound to. */
+#define HDA_MAX_OUT_DACS           4
 /* STATESTS reports codec presence on SDI[14:0]. */
 #define HDA_MAX_CODECS             15
 
@@ -361,8 +363,13 @@ typedef struct hda_dev {
 	uint32_t         dac_pcm_caps;
 	uint32_t         dac_fmt_caps;
 	uint8_t          dac_max_chan;
-	uint8_t          dac_nid;
-	uint8_t          pin_nid;
+	uint8_t          dac_nid;       /* primary converter */
+	uint8_t          pin_nid;       /* primary output pin */
+	/* Every converter bound to the stream (pins that cannot reach the
+	 * primary one get another). */
+	uint8_t          dacs[HDA_MAX_OUT_DACS];
+	int              ndacs;
+	uint32_t         codec_vid;     /* configured codec's vendor/device */
 	int              have_path;
 
 	/* Back-pressure: writes_queued bumps in hda_write after we
@@ -1144,19 +1151,6 @@ static int hda_conn_list(hda_dev_t *d, uint8_t nid, uint8_t *conns, int max)
 	return n;
 }
 
-/* Offset of `target` in an already-read connection list, or -1. */
-static int hda_conn_find(const uint8_t *conns, int n, uint8_t target)
-{
-	int i;
-
-	for (i = 0; i < n; i++) {
-		if (conns[i] == target) {
-			return i;
-		}
-	}
-	return -1;
-}
-
 /*
  * Select `idx` as `nid`'s input, unless the widget has nothing to select
  * between.  Spec 7.3.4.11: "If Connection List Length is 1, there is only
@@ -1173,110 +1167,149 @@ static void hda_conn_select(hda_dev_t *d, uint8_t nid, int nconns, int idx)
 }
 
 /*
- * Point `pin` at `dac`, directly if the pin lists it, otherwise through one
- * intermediate mixer/selector.  Depth two covers the real topologies: QEMU
- * wires pin straight to DAC, while physical codecs usually interpose a
- * mixer.  Mixers take every input at once and need no selection, so only a
- * selector's index is actually committed.
- *
- * With `commit` clear this only reports whether the path exists, touching
- * nothing.  Pin and DAC used to be chosen independently and the pairing
- * discovered afterwards -- if it did not hold, the driver had already
- * committed to both and simply shrugged ("assuming hard-wired").  The
- * caller now probes candidates first and only programs a pair it knows
- * connects.
+ * The audio function group's widgets, read once per configuration: the
+ * path search revisits nodes for every pin and converter it tries, and
+ * re-asking the codec each time multiplied the verb count.
  */
-static int hda_route_pin_to_dac(hda_dev_t *d, uint8_t pin, uint8_t dac,
-                                int commit)
+#define HDA_ROUTE_DEPTH  10
+
+typedef struct hda_graph {
+	uint8_t  start, count;               /* the AFG's subnode range */
+	uint32_t caps[256];                  /* AUDIO_WIDGET_CAPS */
+	uint32_t pincap[256];                /* PIN_CAPS, pins only */
+	uint32_t cfg[256];                   /* CONFIG_DEFAULT, pins only */
+	uint8_t  nconn[256];
+	uint8_t  conn[256][HDA_MAX_CONNS];
+} hda_graph_t;
+
+/* One step of a route: `nid`, and the connection index it takes. */
+struct hda_hop {
+	uint8_t nid;
+	uint8_t idx;
+};
+
+static int hda_graph_has(const hda_graph_t *g, uint8_t nid)
 {
-	uint32_t pincaps = hda_get_param(d, pin, HDA_PARAM_AUDIO_WIDGET_CAPS);
-	uint8_t pconns[HDA_MAX_CONNS];
-	int pn;
+	return nid >= g->start && nid - g->start < g->count &&
+	       g->caps[nid] != HDA_VERB_FAILED;
+}
+
+/*
+ * Depth-first search from `nid` towards converter `dac`, through mixers
+ * and selectors, recording the connection index taken at each hop.
+ * Connection lists are the only way a converter reaches a pin -- even a
+ * single hard-wired source is listed with length 1 (7.3.4.11) -- so no
+ * route means no output.  Returns the number of hops, or -1.
+ */
+static int hda_path_dfs(const hda_graph_t *g, uint8_t nid, uint8_t dac,
+                        int depth, uint32_t *visited, struct hda_hop *path)
+{
 	int i;
-	int idx;
 
-	pn = hda_conn_list(d, pin, pconns, HDA_MAX_CONNS);
-
-	idx = hda_conn_find(pconns, pn, dac);
-	if (idx >= 0) {
-		if (!commit) {
-			return 0;
-		}
-		hda_conn_select(d, pin, pn, idx);
-		if (pincaps & HDA_AW_IN_AMP) {
-			hda_amp_unmute_in(d, pin, pincaps, (uint8_t)idx);
-		}
-		return 0;
+	if (depth >= HDA_ROUTE_DEPTH ||
+	    (visited[nid >> 5] & (1u << (nid & 31)))) {
+		return -1;
 	}
+	visited[nid >> 5] |= 1u << (nid & 31);
 
-	for (i = 0; i < pn; i++) {
-		uint8_t mid = pconns[i];
-		uint8_t mconns[HDA_MAX_CONNS];
-		uint32_t caps;
-		int type, mn, midx;
+	for (i = 0; i < g->nconn[nid]; i++) {
+		if (g->conn[nid][i] == dac) {
+			path[depth].nid = nid;
+			path[depth].idx = (uint8_t)i;
+			return depth + 1;
+		}
+	}
+	for (i = 0; i < g->nconn[nid]; i++) {
+		uint8_t c = g->conn[nid][i];
+		int type, r;
 
-		if (mid == 0) {
+		if (!hda_graph_has(g, c) || (g->caps[c] & HDA_AW_DIGITAL)) {
 			continue;
 		}
-		caps = hda_get_param(d, mid, HDA_PARAM_AUDIO_WIDGET_CAPS);
-		type = HDA_AW_TYPE(caps);
+		type = HDA_AW_TYPE(g->caps[c]);
 		if (type != HDA_AW_TYPE_MIXER && type != HDA_AW_TYPE_SELECTOR) {
 			continue;
 		}
-		mn = hda_conn_list(d, mid, mconns, HDA_MAX_CONNS);
-		midx = hda_conn_find(mconns, mn, dac);
-		if (midx < 0) {
-			continue;
+		path[depth].nid = nid;
+		path[depth].idx = (uint8_t)i;
+		r = hda_path_dfs(g, c, dac, depth + 1, visited, path);
+		if (r > 0) {
+			return r;
 		}
-		if (!commit) {
-			return 0;
-		}
-		/* A mixer sums everything it has and offers no selection; only
-		 * a selector picks one input. */
-		if (type == HDA_AW_TYPE_SELECTOR) {
-			hda_conn_select(d, mid, mn, midx);
-		}
-		/* Open the intermediate's input for the DAC, then its output. */
-		if (caps & HDA_AW_IN_AMP) {
-			hda_amp_unmute_in(d, mid, caps, (uint8_t)midx);
-		}
-		if (caps & HDA_AW_OUT_AMP) {
-			hda_amp_unmute_out(d, mid, caps);
-		}
-		hda_conn_select(d, pin, pn, i);
-		if (pincaps & HDA_AW_IN_AMP) {
-			hda_amp_unmute_in(d, pin, pincaps, (uint8_t)i);
-		}
-		return 0;
 	}
-	return -ENODEV;
+	return -1;
 }
 
-/* Tell the DAC which format and stream tag to consume.  Must match SDnFMT
- * and the tag programmed into SDCTL, and must be re-sent whenever either
- * changes -- a converter left on stream 0 is disconnected. */
+static int hda_find_path(const hda_graph_t *g, uint8_t pin, uint8_t dac,
+                         struct hda_hop *path)
+{
+	uint32_t visited[256 / 32];
+
+	memset(visited, 0, sizeof(visited));
+	return hda_path_dfs(g, pin, dac, 0, visited, path);
+}
+
+/*
+ * Program a route found by hda_find_path(): select the source on every
+ * pin or selector that has a choice (a mixer sums all its inputs and has
+ * none), and open the input amp on the connection used plus the output
+ * amp of every widget between pin and converter.  Everything comes up
+ * muted after reset (7.3.3.7), so a correctly routed graph is still
+ * silent without the unmuting.
+ */
+static void hda_commit_path(hda_dev_t *d, const hda_graph_t *g,
+                            const struct hda_hop *path, int n)
+{
+	int k;
+
+	for (k = 0; k < n; k++) {
+		uint8_t nid = path[k].nid;
+		uint32_t caps = g->caps[nid];
+
+		if (HDA_AW_TYPE(caps) != HDA_AW_TYPE_MIXER) {
+			hda_conn_select(d, nid, g->nconn[nid], path[k].idx);
+		}
+		if (caps & HDA_AW_IN_AMP) {
+			hda_amp_unmute_in(d, nid, caps, path[k].idx);
+		}
+		if (k > 0 && (caps & HDA_AW_OUT_AMP)) {
+			hda_amp_unmute_out(d, nid, caps);
+		}
+	}
+}
+
+/* Tell every converter in use which format and stream tag to consume.
+ * Must match SDnFMT and the tag programmed into SDCTL, and must be re-sent
+ * whenever either changes -- a converter left on stream 0 is disconnected.
+ * Several converters may consume one stream; each renders it. */
 static void hda_codec_bind_stream(hda_dev_t *d, uint16_t fmt)
 {
+	int i;
+
 	if (!d->have_path) {
 		return;
 	}
-	hda_send_verb(d, d->codec_addr, d->dac_nid, HDA_VERB_SET_CONV_FORMAT,
-	              fmt);
-	hda_send_verb(d, d->codec_addr, d->dac_nid, HDA_VERB_SET_CONV_STREAM,
-	              (uint16_t)((d->stream_tag << 4) | 0));
+	for (i = 0; i < d->ndacs; i++) {
+		hda_send_verb(d, d->codec_addr, d->dacs[i],
+		              HDA_VERB_SET_CONV_FORMAT, fmt);
+		hda_send_verb(d, d->codec_addr, d->dacs[i],
+		              HDA_VERB_SET_CONV_STREAM,
+		              (uint16_t)((d->stream_tag << 4) | 0));
+	}
 }
 
 /*
  * Does the chosen converter actually support this format?
  *
  * SDnFMT being able to express a rate says nothing about the codec being
- * able to render it.  Nothing consulted the converter's capabilities at
- * all, so an unsupported rate was programmed and simply came out wrong.
+ * able to render it.  The capability bits (7.3.4.7 table 139) only cover
+ * the eleven standard rates, so a rate outside that set cannot be
+ * advertised and is refused here even though hda_encode_format() can
+ * encode it -- the encoder describes the register, this the hardware.
  *
- * The capability bits (7.3.4.7 table 139) only cover the eleven standard
- * rates, so a rate outside that set cannot be advertised and is refused
- * here even though hda_encode_format() can encode it -- the encoder
- * describes the register, this describes the hardware.
+ * 48 kHz needs no bit: the spec makes it mandatory, and the converter is
+ * bound to it at attach.  A partial capability word, or a Format Override
+ * word without R7, must not disable the one guaranteed rate.
  */
 static int hda_codec_supports(hda_dev_t *d, uint32_t rate, uint32_t bits,
                               uint32_t channels)
@@ -1307,18 +1340,20 @@ static int hda_codec_supports(hda_dev_t *d, uint32_t rate, uint32_t bits,
 		return -EINVAL;
 	}
 
-	for (i = 0; i < sizeof(ratebits) / sizeof(ratebits[0]); i++) {
-		if (ratebits[i].rate != rate) {
-			continue;
+	if (rate != 48000) {
+		for (i = 0; i < sizeof(ratebits) / sizeof(ratebits[0]); i++) {
+			if (ratebits[i].rate != rate) {
+				continue;
+			}
+			if ((d->dac_pcm_caps &
+			     HDA_PCM_RATE_BIT(ratebits[i].bit)) == 0) {
+				return -EINVAL;
+			}
+			break;
 		}
-		if ((d->dac_pcm_caps &
-		     HDA_PCM_RATE_BIT(ratebits[i].bit)) == 0) {
-			return -EINVAL;
+		if (i == sizeof(ratebits) / sizeof(ratebits[0])) {
+			return -EINVAL;   /* no capability bit for this rate */
 		}
-		break;
-	}
-	if (i == sizeof(ratebits) / sizeof(ratebits[0])) {
-		return -EINVAL;   /* no capability bit exists for this rate */
 	}
 
 	/* Channel count is capped by the converter, not by SDnFMT's 4-bit
@@ -1333,17 +1368,123 @@ static int hda_codec_supports(hda_dev_t *d, uint32_t rate, uint32_t bits,
 	return 0;
 }
 
+/* A parameter, or 0 if the codec did not answer (0 means "unknown" to
+ * every capability field the caller keeps). */
+static uint32_t hda_get_param_or0(hda_dev_t *d, uint8_t nid, uint8_t param)
+{
+	uint32_t v = hda_get_param(d, nid, param);
+
+	return v == HDA_VERB_FAILED ? 0 : v;
+}
+
+/* Output pin ranking: speakers, then line out, then headphones. */
+static int hda_pin_rank(uint32_t cfg)
+{
+	switch (HDA_CONFIG_DEVICE(cfg)) {
+	case HDA_DEVICE_SPEAKER:  return 3;
+	case HDA_DEVICE_LINE_OUT: return 2;
+	case HDA_DEVICE_HP_OUT:   return 1;
+	default:                  return 0;   /* not an analog output */
+	}
+}
+
+/*
+ * Drive one output pin: a route to a converter (the primary one if it can
+ * be reached, else any other), output enabled, its output amp open.
+ * Returns the converter used, or 0.
+ */
+static uint8_t hda_drive_pin(hda_dev_t *d, const hda_graph_t *g, uint8_t pin,
+                             const uint8_t *dacs, int ndacs)
+{
+	struct hda_hop path[HDA_ROUTE_DEPTH];
+	uint32_t ctrl;
+	int i, n = -1;
+	uint8_t dac = 0;
+
+	for (i = 0; i < ndacs && n < 0; i++) {
+		n = hda_find_path(g, pin, dacs[i], path);
+		dac = dacs[i];
+	}
+	if (n < 0) {
+		return 0;
+	}
+	hda_commit_path(d, g, path, n);
+
+	/*
+	 * OUT_EN, and HP_EN only where the pin can drive headphones.  The
+	 * input enable and VRef (mic bias) bits a retaskable jack may have
+	 * been left with are cleared: an output must not carry bias or an
+	 * active input path.
+	 */
+	ctrl = hda_send_verb(d, d->codec_addr, pin,
+	                     HDA_VERB_GET_PIN_WIDGET_CONTROL, 0);
+	ctrl = ctrl == HDA_VERB_FAILED ? 0 : (ctrl & 0xFF);
+	ctrl &= ~(uint32_t)(HDA_PIN_CTRL_IN_ENABLE | HDA_PIN_CTRL_VREF_MASK |
+	                    HDA_PIN_CTRL_HP_ENABLE);
+	ctrl |= HDA_PIN_CTRL_OUT_ENABLE;
+	if (HDA_CONFIG_DEVICE(g->cfg[pin]) == HDA_DEVICE_HP_OUT &&
+	    (g->pincap[pin] & HDA_PINCAP_HP_DRIVE)) {
+		ctrl |= HDA_PIN_CTRL_HP_ENABLE;
+	}
+	hda_send_verb(d, d->codec_addr, pin, HDA_VERB_SET_PIN_WIDGET_CONTROL,
+	              (uint16_t)ctrl);
+	if (g->caps[pin] & HDA_AW_OUT_AMP) {
+		hda_amp_unmute_out(d, pin, g->caps[pin]);
+	}
+	return dac;
+}
+
+/*
+ * Codec-specific initialisation after the generic graph is committed.
+ *
+ * Realtek ALC255/ALC256-class codecs carry headset-jack behaviour in
+ * vendor coefficients of processing node 0x20 (index 0x46, bits 13:12).
+ * Which value headphones need has not been confirmed on these machines,
+ * so the coefficient is reported rather than changed; the plumbing is
+ * here for when it has been.
+ */
+static void hda_codec_vendor_init(hda_dev_t *d)
+{
+	uint32_t coef;
+
+	switch (d->codec_vid) {
+	case 0x10ec0255:
+	case 0x10ec0256:
+	case 0x10ec0236:
+	case 0x10ec0295:
+		if (hda_send_verb(d, d->codec_addr, 0x20,
+		                  HDA_VERB_SET_COEF_INDEX, 0x46) ==
+		    HDA_VERB_FAILED) {
+			return;
+		}
+		coef = hda_send_verb(d, d->codec_addr, 0x20,
+		                     HDA_VERB_GET_PROC_COEF, 0);
+		if (coef != HDA_VERB_FAILED) {
+			kprintf("hda: ALC%x headset coefficient 0x46 = 0x%04x\n",
+			        (unsigned)(d->codec_vid & 0xFFFF),
+			        (unsigned)(coef & 0xFFFF));
+		}
+		break;
+	default:
+		break;
+	}
+}
+
 static int hda_configure_codec(hda_dev_t *d)
 {
+	hda_graph_t *g;
 	uint32_t sub;
 	uint8_t start, count, i;
 	uint8_t afg = 0;
-	uint8_t dac = 0;
-	uint8_t pin = 0;
 	uint8_t dacs[HDA_MAX_CANDIDATES];
 	uint8_t pins[HDA_MAX_CANDIDATES];
-	int pin_rank[HDA_MAX_CANDIDATES];
 	int ndacs = 0, npins = 0;
+	int primary = -1, assoc0_only = 1;
+	uint8_t pdac = 0;
+	int rc = -ENODEV;
+	int j;
+
+	d->codec_vid = hda_get_param_or0(d, 0, HDA_PARAM_VENDOR_ID);
 
 	/* Node 0's subnodes are the function groups; we want the audio one. */
 	sub = hda_get_param(d, 0, HDA_PARAM_SUBNODE_COUNT);
@@ -1356,7 +1497,9 @@ static int hda_configure_codec(hda_dev_t *d)
 		uint8_t nid = (uint8_t)(start + i);
 		uint32_t t = hda_get_param(d, nid,
 		                           HDA_PARAM_FUNCTION_GROUP_TYPE);
-		if ((t & 0x7F) == HDA_FGT_AUDIO) {
+		/* NodeType is all of bits 7:0 (7.3.4.4): 0x81 is a
+		 * vendor-defined group, not audio. */
+		if (t != HDA_VERB_FAILED && (t & 0xFF) == HDA_FGT_AUDIO) {
 			afg = nid;
 			break;
 		}
@@ -1366,154 +1509,249 @@ static int hda_configure_codec(hda_dev_t *d)
 		return -ENODEV;
 	}
 	d->afg_nid = afg;
+
+	/*
+	 * Power: the function group first, then -- after it has had time to
+	 * come up -- every widget that keeps its own power state, then a
+	 * settle before anything is configured (7.3.3.10).  Only the AFG,
+	 * the converter and the pin used to be powered, and nothing waited:
+	 * a mixer or selector with its own power control stayed in D3.
+	 */
 	hda_send_verb(d, d->codec_addr, afg, HDA_VERB_SET_POWER_STATE,
 	              HDA_PS_D0);
+	timer_busywait_us(100);
 
 	/*
-	 * The AFG's amp capabilities are the defaults for every widget that
-	 * does not set Amp Param Override, which on real codecs is most of
-	 * them.  Cache them before walking the widgets.
+	 * The AFG's amp, rate and format capabilities are the defaults for
+	 * every widget without Amp Param / Format Override, which on real
+	 * codecs is most of them (7.3.4.6-8).
 	 */
-	d->afg_outamp_caps = hda_get_param(d, afg, HDA_PARAM_OUTPUT_AMP_CAPS);
-	d->afg_inamp_caps  = hda_get_param(d, afg, HDA_PARAM_INPUT_AMP_CAPS);
+	d->afg_outamp_caps = hda_get_param_or0(d, afg, HDA_PARAM_OUTPUT_AMP_CAPS);
+	d->afg_inamp_caps  = hda_get_param_or0(d, afg, HDA_PARAM_INPUT_AMP_CAPS);
+	d->afg_pcm_caps    = hda_get_param_or0(d, afg, HDA_PARAM_SUPPORTED_RATES);
+	d->afg_fmt_caps    = hda_get_param_or0(d, afg,
+	                                       HDA_PARAM_SUPPORTED_FORMATS);
 
-	/*
-	 * The AFG's PCM and stream-format capabilities stand in for any
-	 * converter that does not set Format Override, the same way its amp
-	 * caps do (7.3.4.7 / 7.3.4.8: "Audio Function Group (as default for
-	 * all widgets within the Audio Function)").
-	 */
-	d->afg_pcm_caps = hda_get_param(d, afg, HDA_PARAM_SUPPORTED_RATES);
-	d->afg_fmt_caps = hda_get_param(d, afg, HDA_PARAM_SUPPORTED_FORMATS);
-
-	/*
-	 * Collect the candidates.  This used to take the numerically first
-	 * DAC and, independently, the best-ranked pin, then discover
-	 * afterwards whether the two were connected -- and shrug if they were
-	 * not.  Gather both lists instead and pair them by actual
-	 * reachability, best pin first.
-	 */
+	g = kmalloc(sizeof(*g));
+	if (g == NULL) {
+		return -ENOMEM;
+	}
+	memset(g, 0, sizeof(*g));
 	sub = hda_get_param(d, afg, HDA_PARAM_SUBNODE_COUNT);
-	start = (uint8_t)HDA_SUBNODE_START(sub);
-	count = (uint8_t)HDA_SUBNODE_COUNT(sub);
-	for (i = 0; i < count; i++) {
-		uint8_t nid = (uint8_t)(start + i);
+	if (sub == HDA_VERB_FAILED) {
+		rc = -EIO;
+		goto out;
+	}
+	g->start = (uint8_t)HDA_SUBNODE_START(sub);
+	g->count = (uint8_t)HDA_SUBNODE_COUNT(sub);
+	if ((unsigned)g->start + g->count > 256) {
+		g->count = (uint8_t)(256 - g->start);
+	}
+
+	for (i = 0; i < g->count; i++) {
+		uint8_t nid = (uint8_t)(g->start + i);
 		uint32_t caps = hda_get_param(d, nid,
 		                              HDA_PARAM_AUDIO_WIDGET_CAPS);
 
-		/*
-		 * Skip digital widgets.  An HDMI/DisplayPort path needs the
-		 * digital converter control, channel mapping and ELD handling
-		 * this driver has none of, so adopting one would produce a
-		 * device that looks configured and stays silent.  Analog only,
-		 * and say so if that leaves nothing.
-		 */
-		if (caps & HDA_AW_DIGITAL) {
+		g->caps[nid] = caps;
+		if (caps == HDA_VERB_FAILED) {
 			continue;
 		}
+		if (caps & HDA_AW_POWER_CNTRL) {
+			hda_send_verb(d, d->codec_addr, nid,
+			              HDA_VERB_SET_POWER_STATE, HDA_PS_D0);
+		}
+		if (caps & HDA_AW_CONN_LIST) {
+			g->nconn[nid] = (uint8_t)hda_conn_list(d, nid,
+			                                       g->conn[nid],
+			                                       HDA_MAX_CONNS);
+		}
+		if (HDA_AW_TYPE(caps) == HDA_AW_TYPE_PIN) {
+			g->pincap[nid] = hda_get_param_or0(d, nid,
+			                                   HDA_PARAM_PIN_CAPS);
+			g->cfg[nid] = hda_send_verb(d, d->codec_addr, nid,
+			                            HDA_VERB_GET_CONFIG_DEFAULT,
+			                            0);
+		}
+	}
+	timer_busywait_ms(1);
 
-		switch (HDA_AW_TYPE(caps)) {
-		case HDA_AW_TYPE_DAC:
+	/*
+	 * Candidates.  Digital widgets are skipped: an HDMI/DisplayPort path
+	 * needs digital converter control, channel mapping and ELD handling
+	 * this driver has none of.  Output pins must be wired to something
+	 * and be an analog output device; association 0 is reserved and
+	 * marks a pin firmware did not assign, so those count only when no
+	 * pin has a real association.
+	 */
+	for (i = 0; i < g->count; i++) {
+		uint8_t nid = (uint8_t)(g->start + i);
+		uint32_t caps = g->caps[nid];
+		uint32_t cfg = g->cfg[nid];
+
+		if (caps == HDA_VERB_FAILED || (caps & HDA_AW_DIGITAL)) {
+			continue;
+		}
+		if (HDA_AW_TYPE(caps) == HDA_AW_TYPE_DAC) {
 			if (ndacs < HDA_MAX_CANDIDATES) {
 				dacs[ndacs++] = nid;
 			}
-			break;
-		case HDA_AW_TYPE_PIN: {
-			uint32_t pcaps = hda_get_param(d, nid,
-			                               HDA_PARAM_PIN_CAPS);
-			uint32_t cfg;
-			int rank, j;
-
-			if ((pcaps & HDA_PINCAP_OUTPUT) == 0) {
-				break;
-			}
-			cfg = hda_send_verb(d, d->codec_addr, nid,
-			                    HDA_VERB_GET_CONFIG_DEFAULT, 0);
-			if (HDA_CONFIG_PORTCONN(cfg) == HDA_PORTCONN_NONE) {
-				break;   /* not wired to anything */
-			}
-			/* Prefer speakers, then line out, then headphones;
-			 * anything else output-capable is a last resort. */
-			switch (HDA_CONFIG_DEVICE(cfg)) {
-			case HDA_DEVICE_SPEAKER:  rank = 3; break;
-			case HDA_DEVICE_LINE_OUT: rank = 2; break;
-			case HDA_DEVICE_HP_OUT:   rank = 1; break;
-			default:                  rank = 0; break;
-			}
-			if (npins >= HDA_MAX_CANDIDATES) {
-				break;
-			}
-			/* Insertion sort, best rank first. */
-			for (j = npins; j > 0 && pin_rank[j - 1] < rank; j--) {
-				pins[j] = pins[j - 1];
-				pin_rank[j] = pin_rank[j - 1];
-			}
-			pins[j] = nid;
-			pin_rank[j] = rank;
-			npins++;
-			break;
+			continue;
 		}
-		default:
-			break;
+		if (HDA_AW_TYPE(caps) != HDA_AW_TYPE_PIN ||
+		    (g->pincap[nid] & HDA_PINCAP_OUTPUT) == 0 ||
+		    cfg == HDA_VERB_FAILED ||
+		    HDA_CONFIG_PORTCONN(cfg) == HDA_PORTCONN_NONE ||
+		    hda_pin_rank(cfg) == 0 || npins >= HDA_MAX_CANDIDATES) {
+			continue;
 		}
+		if (HDA_CONFIG_ASSOC(cfg) != 0) {
+			assoc0_only = 0;
+		}
+		pins[npins++] = nid;
 	}
-
 	if (ndacs == 0 || npins == 0) {
 		kprintf("hda: no analog output widgets (dacs=%d pins=%d)\n",
 		        ndacs, npins);
-		return -ENODEV;
+		goto out;
 	}
 
-	/* Best-ranked pin that some DAC can actually reach. */
-	for (i = 0; i < (uint8_t)npins && pin == 0; i++) {
-		int j;
+	/* The primary output: best device rank, then lowest association,
+	 * then lowest sequence -- among pins some converter reaches. */
+	for (j = 0; j < npins; j++) {
+		struct hda_hop path[HDA_ROUTE_DEPTH];
+		uint32_t cfg = g->cfg[pins[j]];
+		int k;
 
-		for (j = 0; j < ndacs; j++) {
-			if (hda_route_pin_to_dac(d, pins[i], dacs[j], 0) == 0) {
-				pin = pins[i];
-				dac = dacs[j];
+		if (HDA_CONFIG_ASSOC(cfg) == 0 && !assoc0_only) {
+			continue;
+		}
+		if (primary >= 0) {
+			uint32_t pc = g->cfg[pins[primary]];
+
+			if (hda_pin_rank(cfg) < hda_pin_rank(pc) ||
+			    (hda_pin_rank(cfg) == hda_pin_rank(pc) &&
+			     (HDA_CONFIG_ASSOC(cfg) > HDA_CONFIG_ASSOC(pc) ||
+			      (HDA_CONFIG_ASSOC(cfg) == HDA_CONFIG_ASSOC(pc) &&
+			       HDA_CONFIG_SEQ(cfg) >= HDA_CONFIG_SEQ(pc))))) {
+				continue;
+			}
+		}
+		for (k = 0; k < ndacs; k++) {
+			if (hda_find_path(g, pins[j], dacs[k], path) > 0) {
+				primary = j;
+				pdac = dacs[k];
 				break;
 			}
 		}
 	}
-	if (pin == 0) {
-		/*
-		 * Nothing reachable within depth two.  A pin with a single
-		 * hard-wired source and no connection list at all still works,
-		 * so fall back to the best pin and first DAC rather than
-		 * refusing outright -- but say that is what happened.
-		 */
-		pin = pins[0];
-		dac = dacs[0];
-		kprintf("hda: no explicit route to any pin; assuming pin %u "
-		        "is hard-wired to dac %u\n", pin, dac);
+	if (primary < 0) {
+		/* Nothing reaches an output pin: there is no output path. */
+		kprintf("hda: no converter reaches an output pin\n");
+		goto out;
 	}
 
-	d->dac_nid = dac;
-	d->pin_nid = pin;
+	/*
+	 * Drive every pin of the primary output's association (a woofer
+	 * beside the speakers, say), and every headphone pin -- there is no
+	 * jack detection, and this codec class does not mute the speakers in
+	 * hardware, so headphones simply play alongside.  A pin that cannot
+	 * reach the primary converter gets another one bound to the same
+	 * stream.
+	 */
+	d->ndacs = 0;
+	d->dacs[d->ndacs++] = pdac;
+	for (j = -1; j < npins; j++) {
+		uint8_t pin = (j < 0) ? pins[primary] : pins[j];
+		uint32_t cfg = g->cfg[pin];
+		uint8_t order[HDA_MAX_CANDIDATES];
+		uint8_t used;
+		int k, n = 0;
 
-	hda_send_verb(d, d->codec_addr, dac, HDA_VERB_SET_POWER_STATE,
-	              HDA_PS_D0);
-	hda_send_verb(d, d->codec_addr, pin, HDA_VERB_SET_POWER_STATE,
-	              HDA_PS_D0);
+		if (j == primary) {
+			continue;
+		}
+		if (j >= 0 &&
+		    HDA_CONFIG_ASSOC(cfg) != HDA_CONFIG_ASSOC(g->cfg[pins[primary]]) &&
+		    HDA_CONFIG_DEVICE(cfg) != HDA_DEVICE_HP_OUT) {
+			continue;
+		}
+		/* The converters already in use first, then the rest. */
+		for (k = 0; k < d->ndacs; k++) {
+			order[n++] = d->dacs[k];
+		}
+		for (k = 0; k < ndacs; k++) {
+			int m, dup = 0;
 
-	(void)hda_route_pin_to_dac(d, pin, dac, 1);
+			for (m = 0; m < d->ndacs; m++) {
+				dup |= (dacs[k] == d->dacs[m]);
+			}
+			if (!dup) {
+				order[n++] = dacs[k];
+			}
+		}
+		used = hda_drive_pin(d, g, pin, order, n);
+		if (used == 0) {
+			kprintf("hda: pin %u reaches no converter; left off\n",
+			        pin);
+			continue;
+		}
+		for (k = 0; k < d->ndacs && d->dacs[k] != used; k++) {
+		}
+		if (k == d->ndacs && d->ndacs < HDA_MAX_OUT_DACS) {
+			d->dacs[d->ndacs++] = used;
+		}
+	}
 
 	/*
-	 * Remember what the converter can actually do, so set_params can
+	 * EAPD on every pin that has it.  The external amplifier's enable pad
+	 * often follows another pin's EAPD bit -- headphone, line-out or dock
+	 * -- or an OR of several, so asserting it on the chosen pin alone
+	 * left the speakers silent on such boards.  BTL and L/R swap (bits 0
+	 * and 2) are kept.
+	 */
+	for (i = 0; i < g->count; i++) {
+		uint8_t nid = (uint8_t)(g->start + i);
+		uint32_t eapd;
+
+		if (g->caps[nid] == HDA_VERB_FAILED ||
+		    HDA_AW_TYPE(g->caps[nid]) != HDA_AW_TYPE_PIN ||
+		    (g->pincap[nid] & HDA_PINCAP_EAPD) == 0) {
+			continue;
+		}
+		eapd = hda_send_verb(d, d->codec_addr, nid,
+		                     HDA_VERB_GET_EAPD_BTL, 0);
+		if (eapd == HDA_VERB_FAILED) {
+			continue;
+		}
+		hda_send_verb(d, d->codec_addr, nid, HDA_VERB_SET_EAPD_BTL,
+		              (uint16_t)((eapd & HDA_EAPD_MASK) |
+		                         HDA_EAPD_ENABLE));
+	}
+
+	for (j = 0; j < d->ndacs; j++) {
+		uint32_t dcaps = g->caps[d->dacs[j]];
+
+		if (dcaps & HDA_AW_OUT_AMP) {
+			hda_amp_unmute_out(d, d->dacs[j], dcaps);
+		}
+	}
+
+	/*
+	 * Remember what the primary converter can do, so set_params can
 	 * refuse a format the codec would silently mis-render.  Per 7.3.4.6 a
 	 * widget's own rate/format parameters only apply when Format Override
 	 * is set; otherwise the AFG's defaults do.
 	 */
 	{
-		uint32_t dcaps = hda_get_param(d, dac,
-		                               HDA_PARAM_AUDIO_WIDGET_CAPS);
+		uint32_t dcaps = g->caps[pdac];
 		uint32_t pcm = 0, fmts = 0;
 
 		if (dcaps & HDA_AW_FORMAT_OVERRIDE) {
-			pcm = hda_get_param(d, dac, HDA_PARAM_SUPPORTED_RATES);
-			fmts = hda_get_param(d, dac,
-			                     HDA_PARAM_SUPPORTED_FORMATS);
+			pcm = hda_get_param_or0(d, pdac,
+			                        HDA_PARAM_SUPPORTED_RATES);
+			fmts = hda_get_param_or0(d, pdac,
+			                         HDA_PARAM_SUPPORTED_FORMATS);
 		}
 		d->dac_pcm_caps = pcm ? pcm : d->afg_pcm_caps;
 		d->dac_fmt_caps = fmts ? fmts : d->afg_fmt_caps;
@@ -1522,57 +1760,22 @@ static int hda_configure_codec(hda_dev_t *d)
 		d->dac_max_chan = (uint8_t)HDA_AW_CHAN_COUNT(dcaps);
 	}
 
-	/* Enable the pin's output driver, keeping bits we did not set. */
-	{
-		uint32_t ctrl = hda_send_verb(d, d->codec_addr, pin,
-		                              HDA_VERB_GET_PIN_WIDGET_CONTROL,
-		                              0) & 0xFF;
-		ctrl |= HDA_PIN_CTRL_OUT_ENABLE;
-		if (HDA_CONFIG_DEVICE(hda_send_verb(d, d->codec_addr, pin,
-		                                    HDA_VERB_GET_CONFIG_DEFAULT,
-		                                    0)) == HDA_DEVICE_HP_OUT) {
-			ctrl |= HDA_PIN_CTRL_HP_ENABLE;
-		}
-		hda_send_verb(d, d->codec_addr, pin,
-		              HDA_VERB_SET_PIN_WIDGET_CONTROL, (uint16_t)ctrl);
-	}
-
-	/* External amplifier, where the pin has one -- laptop speakers are
-	 * usually silent without it.  BTL (bit 0) and L-R swap (bit 2) share
-	 * this byte with the EAPD bit, so assigning 0x02 outright cleared
-	 * whatever the firmware had configured for them. */
-	if (hda_get_param(d, pin, HDA_PARAM_PIN_CAPS) & HDA_PINCAP_EAPD) {
-		uint32_t eapd = hda_send_verb(d, d->codec_addr, pin,
-		                              HDA_VERB_GET_EAPD_BTL, 0);
-
-		eapd &= HDA_EAPD_MASK;
-		eapd |= HDA_EAPD_ENABLE;
-		hda_send_verb(d, d->codec_addr, pin, HDA_VERB_SET_EAPD_BTL,
-		              (uint16_t)eapd);
-	}
-
-	{
-		uint32_t dcaps = hda_get_param(d, dac,
-		                               HDA_PARAM_AUDIO_WIDGET_CAPS);
-		uint32_t pcaps = hda_get_param(d, pin,
-		                               HDA_PARAM_AUDIO_WIDGET_CAPS);
-
-		if (dcaps & HDA_AW_OUT_AMP) {
-			hda_amp_unmute_out(d, dac, dcaps);
-		}
-		if (pcaps & HDA_AW_OUT_AMP) {
-			hda_amp_unmute_out(d, pin, pcaps);
-		}
-	}
-
+	d->dac_nid = pdac;
+	d->pin_nid = pins[primary];
 	d->have_path = 1;
 	hda_codec_bind_stream(d, d->fmt);
+	hda_codec_vendor_init(d);
 
-	kprintf("hda: codec %u afg=%u dac=%u pin=%u tag=%u chan=%u "
-	        "pcm=0x%08x\n",
-	        d->codec_addr, afg, dac, pin, d->stream_tag,
-	        d->dac_max_chan, d->dac_pcm_caps);
-	return 0;
+	kprintf("hda: codec %u vid=0x%08x afg=%u dac=%u pin=%u assoc=%u "
+	        "dacs=%d tag=%u chan=%u pcm=0x%08x\n",
+	        d->codec_addr, (unsigned)d->codec_vid, afg, pdac,
+	        pins[primary],
+	        (unsigned)HDA_CONFIG_ASSOC(g->cfg[pins[primary]]),
+	        d->ndacs, d->stream_tag, d->dac_max_chan, d->dac_pcm_caps);
+	rc = 0;
+out:
+	kfree(g, sizeof(*g));
+	return rc;
 }
 
 /*
@@ -3323,11 +3526,14 @@ static int hda_attach(pci_device_t *pdev)
 	d->audio.driver_data = d;
 	/* Completions and stop paths sched_wakeup(d): poll can wait on it. */
 	d->audio.wait_chan = d;
-	/* The output DAC is at least stereo: a mono stream would play on
-	 * the left only, so the framework duplicates it instead.  More than
-	 * the converter's channel count is folded down to stereo. */
-	d->audio.hw_chan_min = 2;
+	/* A stereo converter gets stereo even for a mono stream (which would
+	 * otherwise play on the left only; the framework duplicates it), and
+	 * more channels than the converter takes are folded down.  A mono
+	 * converter's minimum is one: a minimum above the maximum made every
+	 * negotiation fail. */
 	d->audio.hw_chan_max = d->dac_max_chan ? d->dac_max_chan : 2;
+	d->audio.hw_chan_min = d->audio.hw_chan_max < 2 ?
+	                       d->audio.hw_chan_max : 2;
 	snprintf(d->audio.name, sizeof(d->audio.name), "hda");
 	if (audio_register_device(&d->audio) != 0) {
 		hda_detach_partial(d);
