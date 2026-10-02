@@ -47,7 +47,9 @@
 #include <kern/driver.h>
 #include <kern/pci.h>
 #include <kern/time.h>
+#include <kern/sched.h>
 #include <sys/irq.h>
+#include <sys/kthread.h>
 #include <sys/lock.h>
 #include <sys/netdev.h>
 #include <vm/vm_kmem.h>
@@ -132,6 +134,46 @@
 /* Receive-address entries beyond RAR0 (82574: 15 in all; PCH: 11 shared). */
 #define E1K2_RAR_82574      14
 #define E1K2_RAR_PCH        11
+
+#define R_FEXTNVM6          0x0010
+#define R_FEXTNVM4          0x0024
+#define R_KMRNCTRLSTA       0x0034   /* Kumeran control/status */
+#define R_SVCR              0x00F0
+#define R_SVT               0x00F4
+#define R_LTRV              0x00F8
+#define R_PBA               0x1000
+#define R_PCIEANACFG        0x0F18
+
+#define FEXTNVM4_BEACON_MASK 0x00000007u
+#define FEXTNVM4_BEACON_8US 0x00000007u
+#define FEXTNVM6_REQ_PLL_CLK 0x00000100u
+#define FEXTNVM6_K1_ENTRY_CONDITION 0x00000200u
+#define FEXTNVM6_K1_OFF_ENABLE 0x80000000u
+
+#define KMRN_OFFSET_SHIFT   16
+#define KMRN_OFFSET_MASK    0x001F0000u
+#define KMRN_REN            0x00200000u
+#define KMRN_K1_CONFIG      0x07
+#define KMRN_K1_ENABLE      0x0002
+
+#define TIPG_IPGT_MASK      0x000003FFu
+#define PBA_RXA_MASK        0x0000FFFFu   /* receive allocation, KB */
+
+/* LTRV: snoop latency in 15:0, no-snoop in 31:16, each value[9:0] and
+ * scale[12:10] (value x 32^scale ns) plus a requirement bit. */
+#define LTRV_VALUE_MASK     0x03FF
+#define LTRV_SCALE_SHIFT    10
+#define LTRV_SCALE_MASK     0x1C00
+#define LTRV_SCALE_MAX      5
+#define LTRV_SNOOP_REQ      (1u << 15)
+#define LTRV_NOSNOOP_SHIFT  16
+#define LTRV_NOSNOOP_REQ    (1u << 31)
+#define LTRV_SEND           (1u << 30)
+#define SVT_OFF_HWM_MASK    0x0000001Fu
+#define SVCR_OFF_EN         0x00000001u
+#define SVCR_OFF_MASKINT    0x00001000u
+#define PCI_LTR_CAP_LPT     0xA8          /* platform max snoop/no-snoop */
+#define E1K2_MAX_FRAME_LTR  1522          /* max frame incl. VLAN tag + FCS */
 
 #define R_FEXTNVM           0x0028
 #define R_FEXTNVM3          0x003C
@@ -319,6 +361,15 @@
 #define HV_PM_CTRL          PHY_REG(770, 17)
 #define HV_PM_K1_CLK_REQ        0x0200
 #define HV_PM_K1_ENABLE         0x4000
+#define I217_INBAND_CTRL    PHY_REG(770, 18)
+#define I217_INBAND_TX_TIMEOUT_MASK  0x3F00
+#define I217_INBAND_TX_TIMEOUT_SHIFT 8
+#define I217_PLL_CLOCK_GATE PHY_REG(772, 28)
+#define I217_PLL_CLOCK_GATE_MASK 0x07FF
+#define I219_PTR_GAP        PHY_REG(776, 20)
+#define I82579_EMI_ADDR     0x10     /* page 0: extended indirect access */
+#define I82579_EMI_DATA     0x11
+#define I217_RX_CONFIG      0xB20C   /* EMI: PHY receive latency */
 #define I218_ULP_CONFIG1    PHY_REG(779, 16)
 #define ULP_CONFIG1_START                   0x0001
 #define ULP_CONFIG1_IND                     0x0004
@@ -349,6 +400,8 @@
 
 #define E1K2_RESET_MS       20
 #define E1K2_MASTER_POLLS   800          /* x 100 us */
+#define E1K2_WD_MS          1000         /* worker period */
+#define E1K2_TX_HANG_S      3            /* TDH stuck behind TDT this long */
 #define E1K2_SWFLAG_MS      1000
 #define E1K2_MDIC_MS        20
 #define E1K2_IRQ_PROBE_MS   50
@@ -397,6 +450,9 @@ static struct {
     int                   kind;
     int                   flags;         /* F_* for this device ID */
     uint16_t              phy_rev;       /* PHY ID2 revision field */
+    volatile int          link_event;    /* LSC seen: worker runs fixups */
+    volatile int          resetting;     /* recovery reset in progress */
+    int                   wd_chan;       /* worker wait channel */
     int                   irq;
     int                   irq_kind;
     volatile uint32_t     intr_count;    /* interrupts that were ours */
@@ -876,12 +932,18 @@ static void e2k_report_link(void) {
         return;
     e2k.link_status = lu;
     if (lu) {
+        e2k.netdev.flags |= NETDEV_IFF_RUNNING;
         kprintf("e1000e: link up, %u Mb/s %s duplex\n",
                 speeds[(st & STATUS_SPEED_MASK) >> STATUS_SPEED_SHIFT],
                 (st & STATUS_FD) ? "full" : "half");
     } else {
+        e2k.netdev.flags &= ~NETDEV_IFF_RUNNING;
         kprint("e1000e: link down\n");
     }
+    /* The speed-dependent fixups touch the PHY, which can busy-wait for a
+     * second on the software flag: the worker does them, not the handler. */
+    e2k.link_event = 1;
+    sched_wakeup(&e2k.wd_chan);
 }
 
 static int e2k_irq(unsigned int irq, void *dev_id, void *frame) {
@@ -902,8 +964,9 @@ static int e2k_irq(unsigned int irq, void *dev_id, void *frame) {
     if (icr & ICR_LSC)
         e2k.lsc_count++;
 
-    /* The interrupt probe runs before the netdev exists. */
-    if (!e2k.registered)
+    /* The interrupt probe runs before the netdev exists, and a recovery
+     * reset rebuilds the rings under us. */
+    if (!e2k.registered || e2k.resetting)
         return 1;
 
     /* Frames left by the budget: ICR is read-to-clear, so re-raise the
@@ -951,7 +1014,7 @@ static int e2k_xmit(netdev_t *dev, const void *frame, size_t len) {
          * one LSC keeps current: a STATUS read here would put an MMIO
          * round trip in every frame's path, inside the IRQ-off lock.
          */
-        if (e2k.link_status != STATUS_LU) {
+        if (e2k.link_status != STATUS_LU || e2k.resetting) {
             spinlock_release_irq(&e2k_tx_lock, flags);
             e2k.netdev.tx_dropped++;
             return -ENETDOWN;
@@ -1594,6 +1657,291 @@ static void e2k_mng_takeover(void) {
     kprint("e1000e: manageability pass-through active; ARP taken over\n");
 }
 
+/* ----- link worker and recovery ----- */
+
+static int e2k_phy_read(uint32_t preg, uint16_t *val) {
+    int rc;
+
+    if (e2k_swflag_acquire() != 0)
+        return -2;
+    rc = e2k_phy_read_locked(preg, val);
+    e2k_swflag_release();
+    return rc;
+}
+
+static int e2k_phy_write(uint32_t preg, uint16_t val) {
+    int rc;
+
+    if (e2k_swflag_acquire() != 0)
+        return -2;
+    rc = e2k_phy_write_locked(preg, val);
+    e2k_swflag_release();
+    return rc;
+}
+
+/* Kumeran (MAC-PHY interconnect) register access; caller holds the flag. */
+static uint16_t e2k_kmrn_read_locked(uint32_t off) {
+    e2k_write(R_KMRNCTRLSTA, ((off << KMRN_OFFSET_SHIFT) & KMRN_OFFSET_MASK) |
+                             KMRN_REN);
+    e2k_flush();
+    timer_busywait_us(2);
+    return (uint16_t)e2k_read(R_KMRNCTRLSTA);
+}
+
+static void e2k_kmrn_write_locked(uint32_t off, uint16_t val) {
+    e2k_write(R_KMRNCTRLSTA, ((off << KMRN_OFFSET_SHIFT) & KMRN_OFFSET_MASK) |
+                             val);
+    e2k_flush();
+    timer_busywait_us(2);
+}
+
+static unsigned e2k_link_speed(uint32_t st) {
+    static const unsigned speeds[4] = { 10, 100, 1000, 1000 };
+    return speeds[(st & STATUS_SPEED_MASK) >> STATUS_SPEED_SHIFT];
+}
+
+/*
+ * The I218 on low-power platforms misses DMA completions at 1 Gb/s with K1
+ * enabled: receive write-backs stop while the link stays up.  At 1 Gb/s,
+ * K1 is dropped across setting FEXTNVM6.REQ_PLL_CLK; otherwise that bit is
+ * cleared, and on early PHY revisions at 10 Mb/s or 100 half the in-band
+ * link-status transmit timeout and K1 entry latency are set.
+ */
+static void e2k_k1_workaround_lpt_lp(int up, uint32_t st) {
+    uint32_t fextnvm6 = e2k_read(R_FEXTNVM6);
+    uint16_t reg;
+
+    if (up && e2k_link_speed(st) == 1000) {
+        if (e2k_swflag_acquire() != 0)
+            return;
+        reg = e2k_kmrn_read_locked(KMRN_K1_CONFIG);
+        e2k_kmrn_write_locked(KMRN_K1_CONFIG, (uint16_t)(reg & ~KMRN_K1_ENABLE));
+        timer_busywait_us(10);
+        e2k_write(R_FEXTNVM6, fextnvm6 | FEXTNVM6_REQ_PLL_CLK);
+        e2k_kmrn_write_locked(KMRN_K1_CONFIG, reg);
+        e2k_swflag_release();
+        return;
+    }
+
+    fextnvm6 &= ~FEXTNVM6_REQ_PLL_CLK;
+    if (up && e2k.phy_rev <= 5 &&
+        !(e2k_link_speed(st) == 100 && (st & STATUS_FD)) &&
+        e2k_phy_read(I217_INBAND_CTRL, &reg) == 0) {
+        reg &= ~I217_INBAND_TX_TIMEOUT_MASK;
+        if (e2k_link_speed(st) == 100) {
+            reg |= 5 << I217_INBAND_TX_TIMEOUT_SHIFT;       /* 5 x 10 us */
+            fextnvm6 &= ~FEXTNVM6_K1_ENTRY_CONDITION;
+        } else {
+            reg |= 50 << I217_INBAND_TX_TIMEOUT_SHIFT;      /* 50 x 10 us */
+            fextnvm6 |= FEXTNVM6_K1_ENTRY_CONDITION;
+        }
+        (void)e2k_phy_write(I217_INBAND_CTRL, reg);
+    }
+    e2k_write(R_FEXTNVM6, fextnvm6);
+}
+
+/* Decode an LTR value/scale pair into nanoseconds. */
+static uint64_t e2k_ltr_ns(uint16_t enc) {
+    return (uint64_t)(enc & LTRV_VALUE_MASK) <<
+           (5 * ((enc & LTRV_SCALE_MASK) >> LTRV_SCALE_SHIFT));
+}
+
+/*
+ * Latency Tolerance Reporting: how long the platform may take to service
+ * receive DMA before the packet buffer overruns, so deep package C-states
+ * do not drop frames.  Derived from the receive buffer size and the link
+ * speed, clamped to the platform's limit in config space; requirements
+ * cleared while the link is down.  OBFF gets the matching high-water mark.
+ */
+static void e2k_platform_pm(int up, uint32_t st) {
+    uint32_t reg = LTRV_SEND;
+    uint32_t hwm = 0;
+
+    if (up) {
+        unsigned speed = e2k_link_speed(st);
+        uint32_t rxa = (e2k_read(R_PBA) & PBA_RXA_MASK) * 1024;   /* bytes */
+        uint64_t lat_ns = 0;
+        uint32_t value, scale = 0;
+        uint16_t enc, max_snoop, max_nosnoop, max_enc;
+
+        if (rxa > 2 * E1K2_MAX_FRAME_LTR)
+            lat_ns = (uint64_t)(rxa - 2 * E1K2_MAX_FRAME_LTR) * 8 * 1000 / speed;
+        value = (uint32_t)lat_ns;
+        while (value > LTRV_VALUE_MASK) {
+            scale++;
+            value = (value + 31) / 32;
+        }
+        if (scale > LTRV_SCALE_MAX)
+            return;
+        enc = (uint16_t)((scale << LTRV_SCALE_SHIFT) | value);
+
+        max_snoop = pci_read_config16(e2k.pdev->bus, e2k.pdev->slot,
+                                      e2k.pdev->func, PCI_LTR_CAP_LPT);
+        max_nosnoop = pci_read_config16(e2k.pdev->bus, e2k.pdev->slot,
+                                        e2k.pdev->func, PCI_LTR_CAP_LPT + 2);
+        max_enc = max_snoop > max_nosnoop ? max_snoop : max_nosnoop;
+        if (e2k_ltr_ns(enc) > e2k_ltr_ns(max_enc))
+            enc = max_enc;
+
+        reg |= LTRV_SNOOP_REQ | LTRV_NOSNOOP_REQ | enc |
+               ((uint32_t)enc << LTRV_NOSNOOP_SHIFT);
+
+        /* Buffer left once the tolerated latency's worth has arrived. */
+        uint64_t used = e2k_ltr_ns(enc) * speed / 8 / 1000;
+        hwm = used < rxa ? (uint32_t)((rxa - used) / 1024) : 0;
+        if (hwm > SVT_OFF_HWM_MASK)
+            hwm = SVT_OFF_HWM_MASK;
+    }
+    e2k_write(R_LTRV, reg);
+    e2k_write(R_SVT, (e2k_read(R_SVT) & ~SVT_OFF_HWM_MASK) | hwm);
+    e2k_write(R_SVCR, e2k_read(R_SVCR) | SVCR_OFF_EN | SVCR_OFF_MASKINT);
+}
+
+/*
+ * Speed-dependent settings the PCH parts need at every link change, from
+ * the specification updates: transmit inter-packet gap and PHY receive
+ * latency (10 half and 10/100 full collide or lose frames otherwise), PLL
+ * clock-gate time (too short at 10/100 flaps the link), K1 clock request
+ * at 1000, the I219 pointer gap, the 8 us beacon duration (I217 packet
+ * loss), the Sunrise Point K1-off setting, the I218-LP K1 erratum and LTR.
+ */
+static void e2k_link_fixups(void) {
+    uint32_t st = e2k_read(R_STATUS);
+    int up = (st & STATUS_LU) != 0;
+    unsigned speed = e2k_link_speed(st);
+    uint16_t v;
+
+    if (!e2k_is_pch())
+        return;
+
+    if (up) {
+        uint32_t tipg = e2k_read(R_TIPG) & ~TIPG_IPGT_MASK;
+        uint16_t emi;
+
+        if (!(st & STATUS_FD) && speed == 10) {
+            tipg |= 0xFF;
+            emi = 0;
+        } else if (e2k.kind == K_SPT && (st & STATUS_FD) && speed != 1000) {
+            tipg |= 0x0C;
+            emi = 1;
+        } else {
+            tipg |= 0x08;
+            emi = 1;
+        }
+        e2k_write(R_TIPG, tipg);
+
+        if (e2k_swflag_acquire() == 0) {
+            if (e2k_phy_write_locked(PHY_REG(0, I82579_EMI_ADDR),
+                                     I217_RX_CONFIG) == 0)
+                (void)e2k_phy_write_locked(PHY_REG(0, I82579_EMI_DATA), emi);
+            if (e2k_phy_read_locked(I217_PLL_CLOCK_GATE, &v) == 0) {
+                v &= ~I217_PLL_CLOCK_GATE_MASK;
+                v |= speed == 1000 ? 0x00FA : 0x03E8;
+                (void)e2k_phy_write_locked(I217_PLL_CLOCK_GATE, v);
+            }
+            if (speed == 1000 && e2k_phy_read_locked(HV_PM_CTRL, &v) == 0)
+                (void)e2k_phy_write_locked(HV_PM_CTRL,
+                                           (uint16_t)(v | HV_PM_K1_CLK_REQ));
+            if (e2k.kind == K_SPT) {
+                if (speed == 1000) {
+                    if (e2k_phy_read_locked(I219_PTR_GAP, &v) == 0 &&
+                        ((v >> 2) & 0x3FF) < 0x18)
+                        (void)e2k_phy_write_locked(I219_PTR_GAP,
+                            (uint16_t)((v & ~(0x3FFu << 2)) | (0x18u << 2)));
+                } else {
+                    (void)e2k_phy_write_locked(I219_PTR_GAP, 0xC023);
+                }
+            }
+            e2k_swflag_release();
+        }
+    }
+
+    /* Reset can reload a wrong beacon duration from the NVM. */
+    e2k_write(R_FEXTNVM4, (e2k_read(R_FEXTNVM4) & ~FEXTNVM4_BEACON_MASK) |
+                          FEXTNVM4_BEACON_8US);
+
+    if (e2k.flags & F_LPT_LP)
+        e2k_k1_workaround_lpt_lp(up, st);
+
+    if (e2k.flags & F_SPT_ERRATA) {
+        uint32_t f6 = e2k_read(R_FEXTNVM6);
+        if (e2k_read(R_PCIEANACFG) & FEXTNVM6_K1_OFF_ENABLE)
+            f6 |= FEXTNVM6_K1_OFF_ENABLE;
+        else
+            f6 &= ~FEXTNVM6_K1_OFF_ENABLE;
+        e2k_write(R_FEXTNVM6, f6);
+    }
+
+    e2k_platform_pm(up, st);
+}
+
+/*
+ * Full reset and reprogramming, from the worker.  The PHY and its link are
+ * left alone.  Transmit is refused and the handler keeps off the rings
+ * while it runs; interrupts stay on, since the reset path can wait on
+ * firmware for the software flag.
+ */
+static void e2k_recover(const char *why) {
+    unsigned long flags = spinlock_acquire_irq(&e2k_tx_lock);
+    e2k.resetting = 1;
+    e2k_write(R_IMC, 0xFFFFFFFFu);
+    spinlock_release_irq(&e2k_tx_lock, flags);
+
+    kprintf("e1000e: %s; resetting the controller\n", why);
+    e2k_hw_reset(e2k.pdev);
+    e2k_mac_init();
+    e2k_mac_start();
+
+    flags = spinlock_acquire_irq(&e2k_tx_lock);
+    e2k.resetting = 0;
+    e2k_write(R_ITR, E1K2_ITR);
+    e2k_write(R_IMS, E1K2_IMS);
+    spinlock_release_irq(&e2k_tx_lock, flags);
+}
+
+/*
+ * Link fixups on every link change, and recovery: a transmit unit that has
+ * hung (TDH stuck behind TDT with link up), or frames left queued when the
+ * link went down (the MAC does not complete them without link, so they
+ * would sit in the ring for good).
+ */
+static void e2k_worker(void *arg) {
+    uint32_t last_tdh = 0;
+    unsigned stuck = 0;
+    int was_up = (e2k.link_status == STATUS_LU);
+
+    (void)arg;
+    for (;;) {
+        if (!e2k.link_event)
+            sched_sleep_until(&e2k.wd_chan,
+                              get_ticks() + (get_hz() * E1K2_WD_MS + 999) / 1000);
+
+        int event = e2k.link_event;
+        e2k.link_event = 0;
+        int up = (e2k.link_status == STATUS_LU);
+        uint32_t tdh = e2k_read(R_TDH), tdt = e2k_read(R_TDT);
+
+        if (event || up != was_up) {
+            e2k_link_fixups();
+            if (was_up && !up && tdh != tdt)
+                e2k_recover("link lost with frames queued");
+            was_up = up;
+            stuck = 0;
+            continue;
+        }
+
+        if (up && tdh != tdt && tdh == last_tdh) {
+            if (++stuck >= E1K2_TX_HANG_S * 1000 / E1K2_WD_MS) {
+                e2k_recover("transmit unit hung");
+                stuck = 0;
+            }
+        } else {
+            stuck = 0;
+        }
+        last_tdh = tdh;
+    }
+}
+
 static int e2k_setup(pci_device_t *pdev, int kind) {
     uint8_t mac_before[6], mac[6];
     int have_before;
@@ -1664,8 +2012,9 @@ static int e2k_setup(pci_device_t *pdev, int kind) {
 
     strlcpy(e2k.netdev.name, "eth0", NETDEV_NAME_MAX);
     e2k.netdev.mtu = 1500;
+    /* RUNNING follows the link (e2k_report_link()), not registration. */
     e2k.netdev.flags = NETDEV_IFF_UP | NETDEV_IFF_BROADCAST |
-                       NETDEV_IFF_RUNNING | NETDEV_IFF_MULTICAST;
+                       NETDEV_IFF_MULTICAST;
     e2k.netdev.ops = &e2k_ops;
     e2k.netdev.driver_data = &e2k;
     netdev_register(&e2k.netdev);
@@ -1690,6 +2039,13 @@ static int e2k_setup(pci_device_t *pdev, int kind) {
     e2k_write(R_ITR, E1K2_ITR);
     e2k_write(R_IMS, E1K2_IMS);
     e2k_write(R_ICS, ICR_RXT0);
+
+    /* Link fixups and recovery; link_event is already set, so the first
+     * pass applies the fixups for the link found above. */
+    thread_t *wt = NULL;
+    if (kthread_create(e2k_worker, NULL, &wt, "e1000e") != 0)
+        kprint("e1000e: no link worker; speed-dependent fixups and TX hang "
+               "recovery are off\n");
     return 0;
 
 fail:
