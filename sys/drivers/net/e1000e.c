@@ -91,6 +91,48 @@
 #define R_FEXTNVM9          0x5BB4
 #define R_ITR               0x00C4   /* interrupt throttle, 256 ns units */
 
+#define R_TARC0             0x3840   /* transmit arbitration, queue 0 */
+#define R_TARC1             0x3940
+#define R_IOSFPC            0x0F28
+#define R_PBECCSTS          0x100C   /* packet buffer ECC */
+#define R_GCR               0x5B00
+#define R_GCR2              0x5B64
+#define R_MANC              0x5820
+#define R_MANC2H            0x5860
+#define R_FACTPS            0x5B30
+
+/* TARC0/TARC1 required settings. */
+#define TARC0_82574_CLEAR   0x78000000u   /* bits 30:27 */
+#define TARC0_82574_SET     0x04000000u   /* bit 26 */
+#define TARC0_PCH_SET       0x0D800000u   /* bits 23, 24, 26, 27 */
+#define TARC1_PCH_SET       0x45000000u   /* bits 24, 26, 30 */
+#define TARC1_MULR_INV      0x10000000u   /* bit 28 = !TCTL.MULR */
+#define TARC0_CB_MULTIQ_MASK  0x30000000u
+#define TARC0_CB_MULTIQ_2_REQ 0x20000000u
+#define IOSFPC_RCTL_RDMTS_HEX 0x00010000u
+
+#define PBECCSTS_ECC_ENABLE 0x00010000u
+#define GCR_NO_SNOOP_ALL    0x0000003Fu
+#define GCR_BIT22           0x00400000u
+#define GCR2_BIT0           0x00000001u
+
+/* Manageability. */
+#define MANC_ARP_EN         0x00002000u
+#define MANC_RCV_TCO_EN     0x00020000u
+#define MANC_EN_MNG2HOST    0x00200000u
+#define MANC2H_PORT_623     0x00000020u
+#define MANC2H_PORT_664     0x00000040u
+#define FACTPS_MNGCG        0x20000000u
+#define FWSM_MODE_MASK      0x0000000Eu
+#define FWSM_MODE_SHIFT     1
+#define FWSM_MODE_PT        2           /* pass-through */
+#define FWSM_WLOCK_MAC_MASK 0x00000380u
+#define FWSM_WLOCK_MAC_SHIFT 7
+
+/* Receive-address entries beyond RAR0 (82574: 15 in all; PCH: 11 shared). */
+#define E1K2_RAR_82574      14
+#define E1K2_RAR_PCH        11
+
 #define R_FEXTNVM           0x0028
 #define R_FEXTNVM3          0x003C
 #define R_PHY_CTRL          0x0F10   /* MAC-side PHY power control */
@@ -132,7 +174,9 @@
 #define CTRL_FRCDPLX        (1u << 12)
 #define CTRL_LANPHYPC_OVERRIDE (1u << 16)
 #define CTRL_LANPHYPC_VALUE (1u << 17)
+#define CTRL_MEHE           (1u << 19)   /* memory error handling (PCH) */
 #define CTRL_RST            (1u << 26)
+#define CTRL_BIT29          (1u << 29)   /* must be clear on the 82574 */
 #define CTRL_PHY_RST        (1u << 31)
 
 /* STATUS bits. */
@@ -148,7 +192,9 @@
 /* CTRL_EXT bits. */
 #define CTRL_EXT_LPCD       (1u << 2)    /* LANPHYPC power cycle done */
 #define CTRL_EXT_FORCE_SMBUS (1u << 11)
+#define CTRL_EXT_RO_DIS     (1u << 17)   /* relaxed ordering disable */
 #define CTRL_EXT_BIT22      (1u << 22)   /* required set on 82571+/ICH */
+#define CTRL_EXT_BIT23      (1u << 23)   /* must be clear on the 82574 */
 #define CTRL_EXT_DRV_LOAD   (1u << 28)
 
 /* MDIC. */
@@ -181,6 +227,8 @@
 #define RCTL_SECRC          (1u << 26)   /* strip Ethernet CRC */
 
 /* RFCTL. */
+#define RFCTL_NFSW_DIS      (1u << 6)    /* NFS write filtering off */
+#define RFCTL_NFSR_DIS      (1u << 7)    /* NFS read filtering off */
 #define RFCTL_EXSTEN        (1u << 15)   /* extended RX status (descriptors) */
 
 /* TCTL bits. */
@@ -189,6 +237,7 @@
 #define TCTL_CT_SHIFT       4            /* collision threshold */
 #define TCTL_COLD_SHIFT     12           /* collision distance */
 #define TCTL_RTLC           (1u << 24)   /* retransmit on late collision */
+#define TCTL_MULR           (1u << 28)   /* multiple request support */
 
 /* TXDCTL. */
 #define TXDCTL_WTHRESH_1    (1u << 16)   /* write back each descriptor */
@@ -967,10 +1016,14 @@ static int e2k_xmit(netdev_t *dev, const void *frame, size_t len) {
     return 0;
 }
 
+/*
+ * Multicast promiscuous stays on whatever IPv4 groups come and go: IPv6
+ * neighbour discovery (ff02::1 and the solicited-node groups) needs it with
+ * no IPv4 group joined at all.  The IP layer filters by membership.
+ */
 static void e2k_set_allmulti(netdev_t *dev, int on) {
-    (void)dev;
-    uint32_t rctl = e2k_read(R_RCTL);
-    e2k_write(R_RCTL, on ? (rctl | RCTL_MPE) : (rctl & ~RCTL_MPE));
+    (void)dev; (void)on;
+    e2k_write(R_RCTL, e2k_read(R_RCTL) | RCTL_MPE);
 }
 
 static void e2k_write_rar0(const uint8_t mac[6]) {
@@ -1364,6 +1417,183 @@ static int e2k_setup_irq(pci_device_t *pdev) {
     return -1;
 }
 
+/*
+ * MAC configuration that every reset undoes.  Bits Intel's datasheets and
+ * specification updates mark as required, per family.
+ */
+static void e2k_mac_init(void) {
+    uint32_t ctrl, ext;
+
+    /* Link: let the PHY autonegotiate; the MAC follows its result. */
+    ctrl = e2k_read(R_CTRL);
+    ctrl |= CTRL_SLU | CTRL_ASDE;
+    ctrl &= ~(CTRL_LRST | CTRL_FRCSPD | CTRL_FRCDPLX);
+    if (e2k.kind == K_82574)
+        ctrl &= ~CTRL_BIT29;
+    /* Lynx Point on: report packet-buffer memory errors rather than pass
+     * a corrupted frame silently (with ECC enabled below). */
+    if (e2k_is_pch())
+        ctrl |= CTRL_MEHE;
+    e2k_write(R_CTRL, ctrl);
+
+    /* A driver owns the port now (manageability firmware backs off), and
+     * the bit Intel documents as required on these families. */
+    ext = e2k_read(R_CTRL_EXT) | CTRL_EXT_DRV_LOAD | CTRL_EXT_BIT22;
+    if (e2k.kind == K_82574)
+        ext &= ~CTRL_EXT_BIT23;
+    /* Integrated MACs: strictly ordered DMA (no relaxed ordering)... */
+    if (e2k_is_pch())
+        ext |= CTRL_EXT_RO_DIS;
+    e2k_write(R_CTRL_EXT, ext);
+
+    if (e2k.kind == K_82574) {
+        /* PCIe completion-timeout and request-ordering workarounds. */
+        e2k_write(R_GCR, e2k_read(R_GCR) | GCR_BIT22);
+        e2k_write(R_GCR2, e2k_read(R_GCR2) | GCR2_BIT0);
+    } else {
+        /* ...and snooped (no no-snoop bits). */
+        e2k_write(R_GCR, e2k_read(R_GCR) & ~GCR_NO_SNOOP_ALL);
+        e2k_write(R_KABGTXD, e2k_read(R_KABGTXD) | KABGTXD_BGSQLBIAS);
+        e2k_write(R_PBECCSTS, e2k_read(R_PBECCSTS) | PBECCSTS_ECC_ENABLE);
+    }
+
+    /* The I219 legacy-interrupt clock fix does not survive a reset. */
+    if (e2k.irq_kind != IRQ_NONE_K && e2k.irq_kind != IRQ_MSI)
+        e2k_legacy_irq_fixup();
+}
+
+/*
+ * Clear receive-address entries 1..N, so stale unicast filters a previous
+ * driver left there do not pull other stations' frames in.  On the PCH the
+ * shared entries may be write-locked by firmware (FWSM.WLOCK_MAC: 1 locks
+ * them all, n > 1 leaves 1..n writable).
+ */
+static void e2k_clear_rar(void) {
+    int n;
+
+    if (e2k.kind == K_82574) {
+        n = E1K2_RAR_82574;
+    } else {
+        int wlock = (int)((e2k_read(R_FWSM) & FWSM_WLOCK_MAC_MASK) >>
+                          FWSM_WLOCK_MAC_SHIFT);
+        if (wlock == 1)
+            return;
+        n = (wlock == 0 || wlock > E1K2_RAR_PCH) ? E1K2_RAR_PCH : wlock;
+    }
+    for (int i = 1; i <= n; i++) {
+        e2k_write(R_RAH0 + (uint32_t)i * 8, 0);    /* Address Valid off first */
+        e2k_write(R_RAL0 + (uint32_t)i * 8, 0);
+    }
+}
+
+/*
+ * Rings, filters and the transmit/receive units, from a freshly reset MAC.
+ * The receive filter keeps RCTL.MPE: the multicast table would otherwise
+ * have to carry ff02::1 and every solicited-node group, and IPv6 neighbour
+ * discovery fails without them.  The IP layer filters by membership.
+ */
+static void e2k_mac_start(void) {
+    uint32_t v, tctl;
+
+    e2k_write_rar0(e2k.netdev.hwaddr);
+    e2k_clear_rar();
+    for (int i = 0; i < 128; i++)
+        e2k_write(R_MTA + i * 4, 0);
+
+    memset((void *)(uintptr_t)e2k.rx_ring, 0,
+           E1K2_RX_DESCS * sizeof(struct e1k2_rx_desc));
+    memset((void *)(uintptr_t)e2k.tx_ring, 0,
+           E1K2_TX_DESCS * sizeof(struct e1k2_tx_desc));
+    for (int i = 0; i < E1K2_RX_DESCS; i++)
+        e2k.rx_ring[i].addr =
+            (uint64_t)(e2k.rx_buf_phys + (uint32_t)i * E1K2_BUF_SIZE);
+    e2k_barrier();
+
+    /* Legacy RX descriptors; on the PCH, NFS filtering off -- it corrupts
+     * descriptor write-back on NFSv2/UDP traffic. */
+    v = e2k_read(R_RFCTL) & ~RFCTL_EXSTEN;
+    if (e2k_is_pch())
+        v |= RFCTL_NFSW_DIS | RFCTL_NFSR_DIS;
+    e2k_write(R_RFCTL, v);
+
+    e2k_write(R_RDBAL, e2k.rx_ring_phys);
+    e2k_write(R_RDBAH, 0);
+    e2k_write(R_RDLEN, E1K2_RX_DESCS * sizeof(struct e1k2_rx_desc));
+    e2k_write(R_RDH, 0);
+    e2k_write(R_RDT, E1K2_RX_DESCS - 1);
+    e2k.rx_cur = 0;
+
+    e2k_setup_tx_ring();
+    e2k_write(R_TXDCTL, (e2k_read(R_TXDCTL) & ~(0x3Fu << 16)) |
+                        TXDCTL_WTHRESH_1 | TXDCTL_GRAN | TXDCTL_BIT22);
+
+    /* Copper defaults: IPGT 8, IPGR1 8, IPGR2 6. */
+    e2k_write(R_TIPG, 8 | (8 << 10) | (6 << 20));
+
+    /*
+     * TCTL read-modify-write: MULR (set by reset) stays set.  The transmit
+     * arbitration registers are left at reset values the datasheets mark
+     * invalid unless set, per family.
+     */
+    tctl = e2k_read(R_TCTL) & ~((0xFFu << TCTL_CT_SHIFT) |
+                                (0x3FFu << TCTL_COLD_SHIFT));
+    tctl |= TCTL_PSP | TCTL_RTLC | TCTL_MULR |
+            (0x0Fu << TCTL_CT_SHIFT) | (0x3Fu << TCTL_COLD_SHIFT);
+    if (e2k.kind == K_82574) {
+        v = e2k_read(R_TARC0);
+        v &= ~TARC0_82574_CLEAR;
+        v |= TARC0_82574_SET;
+        e2k_write(R_TARC0, v);
+    } else {
+        e2k_write(R_TARC0, e2k_read(R_TARC0) | TARC0_PCH_SET);
+        v = e2k_read(R_TARC1) | TARC1_PCH_SET;
+        if (tctl & TCTL_MULR)
+            v &= ~TARC1_MULR_INV;
+        else
+            v |= TARC1_MULR_INV;
+        e2k_write(R_TARC1, v);
+    }
+    /*
+     * Sunrise/Kaby Point I219 errata: IOSFPC works around transmit data
+     * corruption, and the DMA engine is held to two outstanding read
+     * requests instead of three ("buffer overrun while the I219 is
+     * processing DMA transactions"), which otherwise corrupts payload or
+     * hangs the transmit unit under sustained load.
+     */
+    if (e2k.flags & F_SPT_ERRATA) {
+        e2k_write(R_IOSFPC, e2k_read(R_IOSFPC) | IOSFPC_RCTL_RDMTS_HEX);
+        v = e2k_read(R_TARC0);
+        v = (v & ~TARC0_CB_MULTIQ_MASK) | TARC0_CB_MULTIQ_2_REQ;
+        e2k_write(R_TARC0, v);
+    }
+    e2k_write(R_TCTL, tctl | TCTL_EN);
+    e2k_write(R_RCTL, RCTL_EN | RCTL_BAM | RCTL_MPE | RCTL_BSIZE_2048 |
+                      RCTL_SECRC);
+}
+
+/*
+ * With manageability pass-through active (AMT in shared-IP mode), firmware
+ * leaves ARP interception on, so ARP requests matching its filter are
+ * diverted away from the host ring -- and once DRV_LOAD is set, firmware
+ * stops answering them.  The host then drops off IPv4 as peers' ARP caches
+ * expire.  Take ARP back, and pass management traffic to the host too.
+ */
+static void e2k_mng_takeover(void) {
+    uint32_t manc, fwsm;
+
+    if (!e2k_is_pch())
+        return;
+    manc = e2k_read(R_MANC);
+    fwsm = e2k_read(R_FWSM);
+    if (!(manc & MANC_RCV_TCO_EN) ||
+        (e2k_read(R_FACTPS) & FACTPS_MNGCG) ||
+        ((fwsm & FWSM_MODE_MASK) >> FWSM_MODE_SHIFT) != FWSM_MODE_PT)
+        return;
+    e2k_write(R_MANC2H, e2k_read(R_MANC2H) | MANC2H_PORT_623 | MANC2H_PORT_664);
+    e2k_write(R_MANC, (manc & ~MANC_ARP_EN) | MANC_EN_MNG2HOST);
+    kprint("e1000e: manageability pass-through active; ARP taken over\n");
+}
+
 static int e2k_setup(pci_device_t *pdev, int kind) {
     uint8_t mac_before[6], mac[6];
     int have_before;
@@ -1384,6 +1614,11 @@ static int e2k_setup(pci_device_t *pdev, int kind) {
                                      PCI_CONFIG_COMMAND);
     pci_write_config16(pdev->bus, pdev->slot, pdev->func, PCI_CONFIG_COMMAND,
                        cmd | 0x0002 | 0x0004);
+
+    /* 82574: unreliable PCIe completions are worst under ASPM, which
+     * firmware may have enabled. */
+    if (kind == K_82574)
+        pci_disable_aspm(pdev);
 
     e2k.mmio = pci_iomap(pdev, 0, 0x20000);
     if (!e2k.mmio) {
@@ -1408,19 +1643,8 @@ static int e2k_setup(pci_device_t *pdev, int kind) {
     if (e2k_is_pch() && !(e2k_read(R_FWSM) & FWSM_RSPCIPHY))
         kprint("e1000e: PHY reset blocked by firmware\n");
     e2k_hw_reset(pdev);
-
-    /* Link: let the PHY autonegotiate; the MAC follows its result. */
-    uint32_t ctrl = e2k_read(R_CTRL);
-    ctrl |= CTRL_SLU | CTRL_ASDE;
-    ctrl &= ~(CTRL_LRST | CTRL_FRCSPD | CTRL_FRCDPLX);
-    e2k_write(R_CTRL, ctrl);
-
-    /* A driver owns the port now (manageability firmware backs off), and
-     * the bit Intel documents as required on these families. */
-    e2k_write(R_CTRL_EXT, e2k_read(R_CTRL_EXT) | CTRL_EXT_DRV_LOAD |
-                          CTRL_EXT_BIT22);
-    if (e2k_is_pch())
-        e2k_write(R_KABGTXD, e2k_read(R_KABGTXD) | KABGTXD_BGSQLBIAS);
+    e2k_mac_init();
+    e2k_mng_takeover();
 
     /* Station address: the reloaded RAR0, else what firmware had there. */
     if (e2k_read_rar0(mac) != 0) {
@@ -1431,37 +1655,9 @@ static int e2k_setup(pci_device_t *pdev, int kind) {
         memcpy(mac, mac_before, 6);
     }
     memcpy(e2k.netdev.hwaddr, mac, 6);
-    e2k_write_rar0(mac);
-
-    for (int i = 0; i < 128; i++)
-        e2k_write(R_MTA + i * 4, 0);
 
     e2k_phy_bringup();
-
-    /* Rings. */
-    memset((void *)(uintptr_t)e2k.rx_ring, 0, rx_ring_bytes);
-    memset((void *)(uintptr_t)e2k.tx_ring, 0, tx_ring_bytes);
-    for (int i = 0; i < E1K2_RX_DESCS; i++)
-        e2k.rx_ring[i].addr =
-            (uint64_t)(e2k.rx_buf_phys + (uint32_t)i * E1K2_BUF_SIZE);
-
-    e2k_write(R_RFCTL, e2k_read(R_RFCTL) & ~RFCTL_EXSTEN);   /* legacy RX */
-    e2k_write(R_RDBAL, e2k.rx_ring_phys);
-    e2k_write(R_RDBAH, 0);
-    e2k_write(R_RDLEN, (uint32_t)rx_ring_bytes);
-    e2k_write(R_RDH, 0);
-    e2k_write(R_RDT, E1K2_RX_DESCS - 1);
-    e2k.rx_cur = 0;
-
-    e2k_setup_tx_ring();
-    e2k_write(R_TXDCTL, (e2k_read(R_TXDCTL) & ~(0x3Fu << 16)) |
-                        TXDCTL_WTHRESH_1 | TXDCTL_GRAN | TXDCTL_BIT22);
-
-    /* Copper defaults: IPGT 8, IPGR1 8, IPGR2 6. */
-    e2k_write(R_TIPG, 8 | (8 << 10) | (6 << 20));
-    e2k_write(R_TCTL, TCTL_EN | TCTL_PSP | TCTL_RTLC |
-                      (0x0F << TCTL_CT_SHIFT) | (0x3F << TCTL_COLD_SHIFT));
-    e2k_write(R_RCTL, RCTL_EN | RCTL_BAM | RCTL_BSIZE_2048 | RCTL_SECRC);
+    e2k_mac_start();
 
     if (e2k_setup_irq(pdev) != 0)
         goto fail;
