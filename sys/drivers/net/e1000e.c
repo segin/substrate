@@ -56,6 +56,7 @@
 /* Register offsets (BAR0, MMIO). */
 #define R_CTRL              0x0000
 #define R_STATUS            0x0008
+#define R_EECD              0x0010
 #define R_CTRL_EXT          0x0018
 #define R_MDIC              0x0020
 #define R_ICR               0x00C0   /* interrupt cause read (read clears) */
@@ -94,12 +95,14 @@
 #define FEXTNVM9_IOSFSB_CLKGATE_DIS   0x00000800u
 #define FEXTNVM9_IOSFSB_CLKREQ_DIS    0x00001000u
 
-/* About 8000 interrupts/s (488 x 256 ns), the usual single-vector rate. */
-#define E1K2_ITR            488
+/* Interrupt throttling off (see E1K2_IMS), set explicitly so a rate left
+ * by firmware or a previous driver does not linger. */
+#define E1K2_ITR            0
 
 #define RAH_AV              0x80000000u   /* Address Valid */
 
 /* CTRL bits. */
+#define CTRL_GIO_MASTER_DISABLE (1u << 2)
 #define CTRL_LRST           (1u << 3)
 #define CTRL_ASDE           (1u << 5)
 #define CTRL_SLU            (1u << 6)
@@ -112,6 +115,10 @@
 #define STATUS_LU           (1u << 1)
 #define STATUS_SPEED_SHIFT  6
 #define STATUS_SPEED_MASK   (3u << STATUS_SPEED_SHIFT)
+#define STATUS_GIO_MASTER_ENABLE (1u << 19)
+
+/* EECD (82574). */
+#define EECD_AUTO_RD        (1u << 9)    /* NVM auto-read done */
 
 /* CTRL_EXT bits. */
 #define CTRL_EXT_BIT22      (1u << 22)   /* required set on 82571+/ICH */
@@ -171,9 +178,15 @@
 #define ICR_RXT0            (1u << 7)
 #define ICR_INT_ASSERTED    (1u << 31)   /* 82571+: this device asserted INTx */
 
-/* TXDW is left masked: transmit reclaims by testing DD, so a per-frame
- * completion interrupt would only be work for nothing. */
-#define E1K2_IMS            (ICR_RXT0 | ICR_RXDMT0 | ICR_RXO | ICR_LSC)
+/*
+ * TXDW stays unmasked although transmit reclaims by testing DD.  Measured
+ * under QEMU with bulk TCP uploads: masking it, or throttling the vector
+ * through ITR, delayed ACK processing enough that uploads intermittently
+ * fell into retransmit backoff and stalled -- with no frame lost by this
+ * driver in either direction.  The stack's loss recovery is that sensitive
+ * to ACK latency, so this driver takes every interrupt as it comes.
+ */
+#define E1K2_IMS            (ICR_RXT0 | ICR_RXDMT0 | ICR_RXO | ICR_TXDW | ICR_LSC)
 
 /* The rings live in DMA memory the MAC writes behind the compiler's back;
  * on x86 a compiler barrier is all the ordering they need. */
@@ -201,12 +214,21 @@
 #define PCICFG_DESC_RING_STATUS    0xE4
 #define FLUSH_DESC_REQUIRED        0x0100
 
-#define E1K2_RX_DESCS       32
-#define E1K2_TX_DESCS       16
+/* Deep enough to absorb a burst arriving within one throttled interrupt
+ * interval (ITR) without overrunning: a dropped ACK burst costs TCP a
+ * retransmit timeout. */
+#define E1K2_RX_DESCS       256
+/* Room for a whole TCP window in flight, so a full ring is the exception. */
+#define E1K2_TX_DESCS       128
+/* How long a sender with interrupts on may wait for a free slot: several
+ * full-size frame times at 10 Mb/s. */
+#define E1K2_TX_WAIT_US     5000
+#define E1K2_TX_POLL_US     20
 #define E1K2_BUF_SIZE       2048
 #define E1K2_MAX_FRAME      1518
 
 #define E1K2_RESET_MS       20
+#define E1K2_MASTER_POLLS   800          /* x 100 us */
 #define E1K2_SWFLAG_MS      1000
 #define E1K2_MDIC_MS        20
 #define E1K2_IRQ_PROBE_MS   50
@@ -304,13 +326,22 @@ static int e2k_swflag_acquire(void) {
             return -1;
         timer_busywait_ms(1);
     }
+    /*
+     * Writing the bit is a request the arbiter may grant later, so write it
+     * once and poll.  If it is not granted in time, withdraw it: a grant
+     * arriving after we gave up would otherwise leave the flag owned for
+     * the rest of the boot, locking manageability firmware and the
+     * hardware's PHY configuration loader out of the PHY.
+     */
+    v = e2k_read(R_EXTCNF_CTRL);
+    e2k_write(R_EXTCNF_CTRL, v | EXTCNF_SWFLAG);
     for (ms = 0; ; ms++) {
-        v = e2k_read(R_EXTCNF_CTRL);
-        e2k_write(R_EXTCNF_CTRL, v | EXTCNF_SWFLAG);
         if (e2k_read(R_EXTCNF_CTRL) & EXTCNF_SWFLAG)
             return 0;
-        if (ms >= E1K2_SWFLAG_MS)
+        if (ms >= E1K2_SWFLAG_MS) {
+            e2k_write(R_EXTCNF_CTRL, e2k_read(R_EXTCNF_CTRL) & ~EXTCNF_SWFLAG);
             return -1;
+        }
         timer_busywait_ms(1);
     }
 }
@@ -516,34 +547,54 @@ static int e2k_xmit(netdev_t *dev, const void *frame, size_t len) {
                  ? E1K2_MAX_FRAME : E1K2_MAX_FRAME - 4;
     if (len > max) return -EMSGSIZE;
 
-    unsigned long flags = spinlock_acquire_irq(&e2k_tx_lock);
+    unsigned long flags;
+    uint32_t slot, next;
+    unsigned waited_us = 0;
 
-    /*
-     * The MAC stops transmit DMA while the link is down, so anything queued
-     * then would only sit in the ring; drop it now and let the upper layer
-     * retry once there is a link.
-     */
-    if (!(e2k_read(R_STATUS) & STATUS_LU)) {
+    for (;;) {
+        flags = spinlock_acquire_irq(&e2k_tx_lock);
+
+        /*
+         * The MAC stops transmit DMA while the link is down, so anything
+         * queued then would only sit in the ring; drop it now and let the
+         * upper layer retry once there is a link.  The link state is the
+         * one LSC keeps current: a STATUS read here would put an MMIO
+         * round trip in every frame's path, inside the IRQ-off lock.
+         */
+        if (e2k.link_status != STATUS_LU) {
+            spinlock_release_irq(&e2k_tx_lock, flags);
+            e2k.netdev.tx_dropped++;
+            return -ENETDOWN;
+        }
+
+        slot = e2k.tx_cur;
+        next = (slot + 1) % E1K2_TX_DESCS;
+
+        /*
+         * TDH == TDT means "no work" to the MAC, so software may own at
+         * most N-1 descriptors: the tail must never be advanced onto a
+         * descriptor the hardware has not finished with.
+         */
+        if (!e2k_tx_slot_busy(slot) && !e2k_tx_slot_busy(next))
+            break;
+
+        /*
+         * Ring full.  The stack has no transmit queue of its own, so a
+         * drop here costs TCP a retransmit timeout -- worth waiting for the
+         * oldest frame to retire, which takes at most one frame time.  But
+         * never with interrupts masked: wait outside the lock, and only if
+         * the caller had interrupts on.  From interrupt context (an ARP or
+         * ICMP reply sent from the receive handler) drop at once.  A
+         * transmitter that has stopped altogether is the watchdog's
+         * business, not this loop's.
+         */
         spinlock_release_irq(&e2k_tx_lock, flags);
-        e2k.netdev.tx_dropped++;
-        return -ENETDOWN;
-    }
-
-    uint32_t slot = e2k.tx_cur;
-    uint32_t next = (slot + 1) % E1K2_TX_DESCS;
-
-    /*
-     * TDH == TDT means "no work" to the MAC, so software may own at most
-     * N-1 descriptors: the tail must never be advanced onto a descriptor
-     * the hardware has not finished with.  A full ring is back-pressure,
-     * not something to wait out with interrupts disabled -- drop at once
-     * and let the upper layer retransmit.  A transmitter that has stopped
-     * is the watchdog's business.
-     */
-    if (e2k_tx_slot_busy(slot) || e2k_tx_slot_busy(next)) {
-        spinlock_release_irq(&e2k_tx_lock, flags);
-        e2k.netdev.tx_dropped++;
-        return -ENOBUFS;
+        if (!(flags & 0x200ul) || waited_us >= E1K2_TX_WAIT_US) {
+            e2k.netdev.tx_dropped++;
+            return -ENOBUFS;
+        }
+        timer_busywait_us(E1K2_TX_POLL_US);
+        waited_us += E1K2_TX_POLL_US;
     }
 
     uint8_t *buf = e2k.tx_buf + slot * E1K2_BUF_SIZE;
@@ -690,6 +741,128 @@ static void e2k_flush_desc_rings(pci_device_t *pdev) {
     e2k_flush();
     timer_busywait_ms(1);
     e2k_write(R_RCTL, rctl & ~RCTL_EN);
+}
+
+/*
+ * Point the receive ring registers at our ring with nothing handed to the
+ * hardware (RDH == RDT).  Whatever a pre-boot network stack left there may
+ * name buffers in memory the kernel has since reclaimed, and the I219 flush
+ * pulses the receiver: it must have nothing of anyone else's to DMA into.
+ */
+static void e2k_setup_rx_ring_idle(void) {
+    e2k_write(R_RDBAL, e2k.rx_ring_phys);
+    e2k_write(R_RDBAH, 0);
+    e2k_write(R_RDLEN, E1K2_RX_DESCS * sizeof(struct e1k2_rx_desc));
+    e2k_write(R_RDH, 0);
+    e2k_write(R_RDT, 0);
+}
+
+/*
+ * Make sure no PCIe transaction is outstanding before the MAC resets: a
+ * descriptor fetch or write-back in flight across CTRL.RST loses its
+ * completion, after which MMIO reads return all-ones or hang.  Stop new
+ * requests (GIO master disable), wait for the outstanding ones to drain,
+ * then turn everything off and let it settle.
+ */
+static void e2k_quiesce(void) {
+    unsigned i;
+
+    e2k_write(R_CTRL, e2k_read(R_CTRL) | CTRL_GIO_MASTER_DISABLE);
+    for (i = 0; i < E1K2_MASTER_POLLS; i++) {
+        if (!(e2k_read(R_STATUS) & STATUS_GIO_MASTER_ENABLE))
+            break;
+        timer_busywait_us(100);
+    }
+    if (i == E1K2_MASTER_POLLS)
+        kprint("e1000e: bus master requests did not drain; resetting anyway\n");
+
+    e2k_write(R_IMC, 0xFFFFFFFFu);
+    e2k_write(R_RCTL, 0);
+    e2k_write(R_TCTL, TCTL_PSP);
+    e2k_flush();
+    timer_busywait_ms(10);
+}
+
+/*
+ * The full path from whatever state the MAC is in to freshly reset: our
+ * rings in the ring registers, the I219 descriptor flush if the hardware
+ * asks for one, the bus-master handshake, then CTRL.RST.
+ *
+ * MAC reset only: on the PCH parts the PHY may belong to the Management
+ * Engine (FWSM.RSPCIPHY clear).  The software flag (MDIO ownership on the
+ * 82574 -- the same bit) keeps firmware off the shared configuration while
+ * the MAC resets.
+ */
+static void e2k_hw_reset(pci_device_t *pdev) {
+    unsigned i;
+
+    e2k_write(R_IMC, 0xFFFFFFFFu);
+    e2k_write(R_RCTL, e2k_read(R_RCTL) & ~RCTL_EN);
+    e2k_write(R_TCTL, e2k_read(R_TCTL) & ~TCTL_EN);
+    e2k_flush();
+    timer_busywait_ms(1);
+
+    e2k_setup_rx_ring_idle();
+    e2k_setup_tx_ring();
+    if (e2k.kind == K_SPT)
+        e2k_flush_desc_rings(pdev);
+
+    e2k_quiesce();
+
+    int owned = (e2k_swflag_acquire() == 0);
+    e2k_write(R_CTRL, e2k_read(R_CTRL) | CTRL_RST);
+    timer_busywait_ms(E1K2_RESET_MS);
+    if (owned)
+        e2k_swflag_release();
+
+    if (e2k.kind == K_82574) {
+        /* The NVM reload (EECD.AUTO_RD), then the NVM-driven PHY
+         * configuration, must finish before the NVM or PHY is touched. */
+        for (i = 0; i < 10; i++) {
+            if (e2k_read(R_EECD) & EECD_AUTO_RD)
+                break;
+            timer_busywait_ms(1);
+        }
+        timer_busywait_ms(25);
+    }
+
+    e2k_write(R_IMC, 0xFFFFFFFFu);
+    (void)e2k_read(R_ICR);
+}
+
+static void e2k_irq_remove(pci_device_t *pdev);
+
+static void e2k_dma_free(volatile void *p, size_t bytes) {
+    if (p)
+        pmm_free_contiguous((void *)(uintptr_t)p, (bytes + 4095) / 4096);
+}
+
+/*
+ * Undo a partial attach: no DMA may outlive the memory it targets, and
+ * manageability firmware must get the port back.
+ */
+static void e2k_teardown(pci_device_t *pdev) {
+    if (e2k.mmio) {
+        e2k_write(R_IMC, 0xFFFFFFFFu);
+        e2k_write(R_RCTL, e2k_read(R_RCTL) & ~RCTL_EN);
+        e2k_write(R_TCTL, e2k_read(R_TCTL) & ~TCTL_EN);
+        e2k_write(R_CTRL_EXT, e2k_read(R_CTRL_EXT) & ~CTRL_EXT_DRV_LOAD);
+        e2k_flush();
+    }
+    e2k_irq_remove(pdev);
+    uint16_t cmd = pci_read_config16(pdev->bus, pdev->slot, pdev->func,
+                                     PCI_CONFIG_COMMAND);
+    pci_write_config16(pdev->bus, pdev->slot, pdev->func, PCI_CONFIG_COMMAND,
+                       (uint16_t)(cmd & ~PCI_COMMAND_MASTER));
+    timer_busywait_ms(1);
+    e2k_dma_free(e2k.rx_ring, E1K2_RX_DESCS * sizeof(struct e1k2_rx_desc));
+    e2k_dma_free(e2k.tx_ring, E1K2_TX_DESCS * sizeof(struct e1k2_tx_desc));
+    e2k_dma_free(e2k.rx_buf, E1K2_RX_DESCS * E1K2_BUF_SIZE);
+    e2k_dma_free(e2k.tx_buf, E1K2_TX_DESCS * E1K2_BUF_SIZE);
+    e2k.rx_ring = NULL;
+    e2k.tx_ring = NULL;
+    e2k.rx_buf = NULL;
+    e2k.tx_buf = NULL;
 }
 
 /* ----- interrupt setup (same ladder as r8168) ----- */
@@ -872,50 +1045,26 @@ static int e2k_setup(pci_device_t *pdev, int kind) {
     e2k.mmio = pci_iomap(pdev, 0, 0x20000);
     if (!e2k.mmio) {
         kprint("e1000e: could not map BAR0\n");
-        return -1;
+        goto fail;
     }
-
-    /* Quiesce whatever firmware left running. */
-    e2k_write(R_IMC, 0xFFFFFFFFu);
-    e2k_write(R_RCTL, e2k_read(R_RCTL) & ~RCTL_EN);
-    e2k_write(R_TCTL, e2k_read(R_TCTL) & ~TCTL_EN);
-    e2k_flush();
-    timer_busywait_ms(10);
 
     /* The address firmware left in RAR0, in case reset does not reload it. */
     have_before = (e2k_read_rar0(mac_before) == 0);
 
-    /* DMA memory first: the I219 flush below runs on our own rings. */
+    /* DMA memory first: the reset path points the hardware at our rings
+     * before anything is enabled. */
     e2k.rx_ring = e2k_dma_alloc(rx_ring_bytes, &e2k.rx_ring_phys);
     e2k.tx_ring = e2k_dma_alloc(tx_ring_bytes, &e2k.tx_ring_phys);
     e2k.rx_buf = e2k_dma_alloc(E1K2_RX_DESCS * E1K2_BUF_SIZE, &e2k.rx_buf_phys);
     e2k.tx_buf = e2k_dma_alloc(E1K2_TX_DESCS * E1K2_BUF_SIZE, &e2k.tx_buf_phys);
     if (!e2k.rx_ring || !e2k.tx_ring || !e2k.rx_buf || !e2k.tx_buf) {
         kprint("e1000e: DMA allocation failed\n");
-        return -1;
+        goto fail;
     }
 
-    if (kind == K_SPT)
-        e2k_flush_desc_rings(pdev);
-
-    /*
-     * Reset.  MAC only: on the PCH parts the PHY may belong to the
-     * Management Engine (FWSM.RSPCIPHY clear), and iPXE found PHY reset
-     * unreliable there.  The software flag keeps firmware off the shared
-     * configuration while the MAC resets; reset itself clears it.
-     */
-    if (e2k_is_pch()) {
-        if (!(e2k_read(R_FWSM) & FWSM_RSPCIPHY))
-            kprint("e1000e: PHY reset blocked by firmware\n");
-        (void)e2k_swflag_acquire();
-    }
-    e2k_write(R_CTRL, e2k_read(R_CTRL) | CTRL_RST);
-    timer_busywait_ms(E1K2_RESET_MS);
-    if (e2k_is_pch())
-        e2k_swflag_release();
-
-    e2k_write(R_IMC, 0xFFFFFFFFu);
-    (void)e2k_read(R_ICR);
+    if (e2k_is_pch() && !(e2k_read(R_FWSM) & FWSM_RSPCIPHY))
+        kprint("e1000e: PHY reset blocked by firmware\n");
+    e2k_hw_reset(pdev);
 
     /* Link: let the PHY autonegotiate; the MAC follows its result. */
     uint32_t ctrl = e2k_read(R_CTRL);
@@ -934,7 +1083,7 @@ static int e2k_setup(pci_device_t *pdev, int kind) {
     if (e2k_read_rar0(mac) != 0) {
         if (!have_before) {
             kprint("e1000e: no valid MAC address in RAR0; not attaching\n");
-            return -1;
+            goto fail;
         }
         memcpy(mac, mac_before, 6);
     }
@@ -972,7 +1121,7 @@ static int e2k_setup(pci_device_t *pdev, int kind) {
     e2k_write(R_RCTL, RCTL_EN | RCTL_BAM | RCTL_BSIZE_2048 | RCTL_SECRC);
 
     if (e2k_setup_irq(pdev) != 0)
-        return -1;
+        goto fail;
 
     strlcpy(e2k.netdev.name, "eth0", NETDEV_NAME_MAX);
     e2k.netdev.mtu = 1500;
@@ -1003,6 +1152,11 @@ static int e2k_setup(pci_device_t *pdev, int kind) {
     e2k_write(R_IMS, E1K2_IMS);
     e2k_write(R_ICS, ICR_RXT0);
     return 0;
+
+fail:
+    e2k_teardown(pdev);
+    e2k.mmio = NULL;
+    return -1;
 }
 
 /*
