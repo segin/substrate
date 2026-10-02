@@ -33,6 +33,7 @@
 #include <sys/irq.h>
 #include <sys/lock.h>
 #include <sys/netdev.h>
+#include <sys/random.h>
 #include <vm/vm_kmem.h>
 
 #define R8168_VENDOR        0x10EC
@@ -54,7 +55,9 @@
 #define R_PMCH              0x6F   /* power management, 8-bit */
 #define R_GPHY_OCP          0xB8   /* PHY access window, 8168G and later */
 #define R_CFG_D1            0xD1
+#define R_TIMERINT          0x58   /* timer interrupt threshold, 32-bit */
 #define R_RMS               0xDA   /* rx max packet size, 16-bit */
+#define R_INTRMIT           0xE2   /* interrupt mitigation, 16-bit */
 #define R_CPCR              0xE0   /* C+ command, 16-bit */
 #define R_RDSAR             0xE4   /* RX desc base, 64-bit */
 #define R_ETHRESH           0xEC   /* early TX threshold, 8-bit */
@@ -626,15 +629,16 @@ static int r8168_xmit(netdev_t *dev, const void *frame, size_t len) {
     return 0;
 }
 
-/* RCR_AM is set, but it filters against the 64-bit MAR hash,
- * which setup zeroes -- so no multicast frame was ever accepted.  Open the
- * whole hash while any IPv4 group is joined; the IP layer filters by
- * membership. */
+/*
+ * RCR_AM filters multicast against the 64-bit MAR hash.  Setup opens it
+ * fully and it stays open whatever IPv4 groups come and go: IPv6 neighbour
+ * discovery (ff02::1 and the solicited-node groups) needs it with no IPv4
+ * group joined at all.  The IP layer filters by membership.
+ */
 static void r8168_set_allmulti(netdev_t *dev, int on) {
-    (void)dev;
-    uint32_t v = on ? 0xFFFFFFFFu : 0;
-    rt_w32(R_MAR0, v);
-    rt_w32(R_MAR0 + 4, v);
+    (void)dev; (void)on;
+    rt_w32(R_MAR0, 0xFFFFFFFFu);
+    rt_w32(R_MAR0 + 4, 0xFFFFFFFFu);
 }
 
 /* Station address: IDR0-5 as two 32-bit writes, high half first, with
@@ -879,6 +883,12 @@ static int r8168_setup(pci_device_t *pdev) {
     pci_write_config16(pdev->bus, pdev->slot, pdev->func, PCI_CONFIG_COMMAND,
                        cmd | 0x0002 | 0x0004);
 
+    /* Firmware leaves ASPM L0s/L1 and CLKREQ on for its own power policy.
+     * Without the chip-specific tuning those need, the link dropping into
+     * L1 under the driver shows up as RX stalls and TX descriptors stuck
+     * with OWN set. */
+    pci_disable_aspm(pdev);
+
     /*
      * BAR2 is the MMIO window on the 8168 (BAR0 is a legacy I/O alias that
      * not every variant implements).  Fall back to BAR1 for the handful of
@@ -914,9 +924,34 @@ static int r8168_setup(pci_device_t *pdev) {
     for (int i = 0; i < 6; i++)
         rt.netdev.hwaddr[i] = rt_r8(R_IDR0 + i);
 
-    /* Drop any stale multicast filter. */
-    rt_w32(R_MAR0, 0);
-    rt_w32(R_MAR0 + 4, 0);
+    /*
+     * A blank EEPROM or eFuse autoload area leaves zeros (or ones) in IDR,
+     * and a group address cannot be a station address.  Registering one
+     * makes DHCP and ARP fail in ways that look like a dead link, so
+     * replace it with a random locally administered unicast address and
+     * program that back into IDR.
+     */
+    {
+        uint8_t *m = rt.netdev.hwaddr;
+        int zero = (m[0] | m[1] | m[2] | m[3] | m[4] | m[5]) == 0;
+        int ones = (m[0] & m[1] & m[2] & m[3] & m[4] & m[5]) == 0xFF;
+        if (zero || ones || (m[0] & 0x01)) {
+            if (random_get_bytes(m, 6) != 6)
+                for (int i = 0; i < 6; i++)
+                    m[i] = (uint8_t)(rt.hwrev >> (i * 4)) ^ (uint8_t)(0x5A + i);
+            m[0] = (uint8_t)((m[0] & ~0x01) | 0x02);
+            r8168_set_hwaddr(&rt.netdev, m);
+            rt_w8(R_CFG9346, CFG9346_UNLOCK);   /* it re-locks; setup isn't done */
+            kprint("r8168: no valid MAC address in IDR; using a random "
+                   "locally administered one\n");
+        }
+    }
+
+    /* Open the multicast hash completely and leave it open: a 64-bit hash
+     * would have to cover ff02::1, every solicited-node group and
+     * 224.0.0.1, and the stack filters by membership anyway. */
+    rt_w32(R_MAR0, 0xFFFFFFFFu);
+    rt_w32(R_MAR0 + 4, 0xFFFFFFFFu);
 
     /* DMA memory.  pmm_alloc_contiguous returns a direct-mapped VIRTUAL
      * address; the NIC needs the physical one. */
@@ -993,8 +1028,14 @@ static int r8168_setup(pci_device_t *pdev) {
         cpcr |= CPCR_RXENB | CPCR_TXENB;
     rt_w16(R_CPCR, cpcr);
 
-    /* The BSDs sleep 10ms here before touching anything else. */
-    for (volatile int i = 0; i < 1000000; i++) { }
+    /* Interrupt moderation and the timer interrupt keep whatever firmware
+     * or a previous driver left in them; leftover thresholds delay ROK on
+     * low-rate request/response traffic. */
+    rt_w16(R_INTRMIT, 0);
+    rt_w32(R_TIMERINT, 0);
+
+    /* Let the C+ command settle before touching anything else. */
+    timer_busywait_ms(10);
 
     rt_w16(R_RMS, R8168_BUF_SIZE);            /* accept up to a full buffer */
 
