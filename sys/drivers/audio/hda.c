@@ -28,6 +28,7 @@
 #include <sys/dma.h>
 #include <sys/errno.h>
 #include <sys/irq.h>
+#include <sys/kthread.h>
 #include <sys/lock.h>
 #include <vm/vm_kmem.h>
 
@@ -47,6 +48,15 @@
 #define HDA_DEFAULT_RATE           48000U
 #define HDA_FIFO_BYTES             (256U * 1024U) /* deep software PCM FIFO */
 #define HDA_PREBUFFER_SLOTS        8U     /* DMA slots staged before start */
+/*
+ * How long staged audio may wait for more before it is padded out and
+ * started anyway -- a short effect written with the descriptor left open
+ * must not wait for the prebuffer to fill.  A producer pacing itself in
+ * real time writes again well within this.
+ */
+#define HDA_IDLE_START_MS          30U
+/* Worker poll period while a stream is active. */
+#define HDA_WORKER_MS              10U
 /*
  * Slots the completion handler may refill in one interrupt.  Each
  * completion frees exactly one, so one is enough to keep pace; the point
@@ -352,6 +362,14 @@ typedef struct hda_dev {
 	uint32_t         data_end;
 	/* SDnFIFOS + 1: how far the engine's fetch can run ahead of LPIB. */
 	uint32_t         fifo_size;
+	/*
+	 * The stream worker (hda_worker()): starts staged audio the producer
+	 * has stopped adding to, and retires halts the completion handler
+	 * flagged when nobody else is around to.  last_write is when the
+	 * producer last appended.
+	 */
+	int              worker_chan;
+	volatile uint64_t last_write;
 	/*
 	 * A stream descriptor that would not acknowledge SRST is unusable
 	 * (3.3.35).  Latched here and returned to writers instead of retrying
@@ -1759,6 +1777,18 @@ static void hda_ring_reset(hda_dev_t *d)
 	d->data_end      = 0;
 }
 
+/* Start the engine on what is staged.  Caller holds feed_lock. */
+static void hda_try_start(hda_dev_t *d)
+{
+	int rc = hda_stream_start(d);
+
+	if (rc != 0) {
+		/* Not retried on every write: see stream_error. */
+		d->stream_error = rc;
+		kprintf("hda: output stream will not start\n");
+	}
+}
+
 /*
  * Start or restart the output stream as needed.  Called from the producer;
  * takes the IRQ-safe feed lock.  While running the IRQ feeder keeps the ring
@@ -1792,22 +1822,89 @@ static void hda_kick(hda_dev_t *d)
 	 */
 	hda_feed(d, 0, HDA_BDL_ENTRIES);
 
+	/*
+	 * Start once a real cushion is staged -- including after an
+	 * underrun, so a producer paced at real time does not cycle through
+	 * stop / reset / restart on one slot at a time.  Audio the producer
+	 * stops adding to before the cushion fills is started by the worker
+	 * (HDA_IDLE_START_MS) or by drain / SNDCTL_DSP_POST.
+	 */
 	if (!d->running && d->stream_error == 0) {
 		int32_t in_flight;
 		in_flight = (int32_t)(d->writes_queued -
 		            __atomic_load_n(&d->slots_played, __ATOMIC_ACQUIRE));
-		if (in_flight >= (int32_t)HDA_PREBUFFER_SLOTS ||
-		    (in_flight > 0 && audio_fifo_used(&d->fifo) == 0)) {
-			int rc = hda_stream_start(d);
-			if (rc != 0) {
-				/* Not retried on every write: see stream_error. */
-				d->stream_error = rc;
-				kprintf("hda: output stream will not start\n");
-			}
+		if (in_flight >= (int32_t)HDA_PREBUFFER_SLOTS) {
+			hda_try_start(d);
 		}
 	}
 
 	spinlock_release_irq(&d->feed_lock, flags);
+}
+
+/*
+ * Pad the FIFO's sub-slot residue out to a whole slot, stage it, and start
+ * the engine if anything is staged: the end of a burst, as opposed to the
+ * middle of a stream.  Caller holds feed_lock.
+ */
+static void hda_flush_and_start(hda_dev_t *d)
+{
+	hda_feed(d, 1, HDA_BDL_ENTRIES);
+	if (!d->running && d->stream_error == 0 &&
+	    (int32_t)(d->writes_queued -
+	              __atomic_load_n(&d->slots_played,
+	                              __ATOMIC_ACQUIRE)) > 0) {
+		hda_try_start(d);
+	}
+}
+
+/*
+ * Stream worker.  Two jobs need process context and a clock but no
+ * producer:
+ *
+ *  - Staged audio the producer has stopped adding to: a 10 KiB effect
+ *    written with the descriptor left open never reaches the prebuffer,
+ *    so after HDA_IDLE_START_MS of no writes it is padded and started (or,
+ *    with the engine running and the ring dry, the residue padded and
+ *    queued).
+ *  - A halt the completion handler asked for, when the producer has gone
+ *    idle with the descriptor open: otherwise the engine cycles silent
+ *    slots forever, an interrupt and a 4 KiB memset per slot.
+ *
+ * Polls every HDA_WORKER_MS while a stream is active; otherwise sleeps
+ * until a write wakes it.
+ */
+static void hda_worker(void *arg)
+{
+	hda_dev_t *d = arg;
+	uint32_t hz = get_hz();
+	uint64_t poll = hz ? (hz * HDA_WORKER_MS + 999U) / 1000U : 1U;
+	uint64_t idle = hz ? (hz * HDA_IDLE_START_MS + 999U) / 1000U : 1U;
+
+	for (;;) {
+		unsigned long f = spinlock_acquire_irq(&d->feed_lock);
+		uint64_t now = get_ticks();
+		int32_t in_flight = (int32_t)(d->writes_queued -
+		                    __atomic_load_n(&d->slots_played,
+		                                    __ATOMIC_ACQUIRE));
+		size_t used = audio_fifo_used(&d->fifo);
+		int active;
+
+		if (d->halt_pending) {
+			hda_ring_reset(d);
+			in_flight = 0;
+		}
+		if (used > 0 || in_flight > 0) {
+			if (now - d->last_write >= idle &&
+			    (!d->running || in_flight <= 0)) {
+				hda_flush_and_start(d);
+			}
+		}
+		active = d->running || audio_fifo_used(&d->fifo) > 0;
+		spinlock_release_irq(&d->feed_lock, f);
+
+		(void)sched_sleep_until(&d->worker_chan,
+		                        get_ticks() + (active ? poll : hz * 10U));
+	}
 }
 
 /* ------------------------------------------------------------------- */
@@ -2306,6 +2403,12 @@ static int hda_write(audio_dev_t *adev, const void *buf, size_t len)
 		size_t n = audio_fifo_write(&d->fifo, src + total_consumed,
 		                            len - total_consumed);
 		total_consumed += n;
+		if (n > 0) {
+			d->last_write = get_ticks();
+			if (!d->running) {
+				sched_wakeup(&d->worker_chan);
+			}
+		}
 
 		hda_kick(d);   /* prime / restart; no-op while IRQ feeds */
 
@@ -2358,6 +2461,14 @@ static int hda_write(audio_dev_t *adev, const void *buf, size_t len)
  * moves, track a monotonically decreasing byte count so a wedged
  * controller gives up instead of hanging, and bail on a pending unmasked
  * signal so a killed player exits promptly.
+ *
+ * Drained means the engine has stopped on its own: the completion handler
+ * asks for that only once a whole slot of silence has followed the last
+ * audio, and BCIS for the last audio slot only means it reached the
+ * controller's FIFO, not the codec -- stopping there clipped the tail.
+ *
+ * Returns 0 once drained, -EINTR if a signal cut it short, -EIO if the
+ * controller stopped making progress or the stream cannot run.
  */
 static int hda_drain(audio_dev_t *adev)
 {
@@ -2367,6 +2478,14 @@ static int hda_drain(audio_dev_t *adev)
 	uint32_t last_remaining = 0xFFFFFFFFu;
 	uint32_t hz = get_hz();
 	uint64_t step = hz ? (hz * HDA_DRAIN_POLL_MS) / 1000U : 1U;
+	/*
+	 * Padding the residue marks the end of the stream, which only its
+	 * producer can declare.  Another thread or process draining while
+	 * the owner still writes must wait without splicing silence into
+	 * the owner's audio.
+	 */
+	int is_end = adev->play_owner == NULL ||
+	             adev->play_owner == (void *)current_thread;
 
 	if (d == NULL || d->fifo_buf == NULL || d->chunk[0] == NULL) {
 		return 0;
@@ -2380,43 +2499,48 @@ static int hda_drain(audio_dev_t *adev)
 		int32_t in_flight;
 		size_t used;
 		uint32_t remaining;
+		int stopped;
 
 		/*
 		 * End of stream: the residue left in the FIFO is shorter than
 		 * a slot and the normal path only queues whole slots, so it
 		 * would sit there forever.  Padding it out is correct here --
-		 * it really is the end of the audio.  Then kick, which starts
-		 * or restarts the engine and retires any pending halt.
+		 * it really is the end of the audio -- and the engine is
+		 * started whatever the prebuffer holds.  The kick retires a
+		 * halt the completion handler asked for.
 		 */
-		f = spinlock_acquire_irq(&d->feed_lock);
-		hda_feed(d, 1, HDA_BDL_ENTRIES);
-		spinlock_release_irq(&d->feed_lock, f);
 		hda_kick(d);
-
 		f = spinlock_acquire_irq(&d->feed_lock);
+		if (is_end) {
+			hda_flush_and_start(d);
+		}
 		used = audio_fifo_used(&d->fifo);
-		/* Signed: a completion racing past writes_queued must read as
-		 * drained, not as ~4 billion still outstanding. */
 		in_flight = (int32_t)(d->writes_queued -
 		                      __atomic_load_n(&d->slots_played,
 		                                      __ATOMIC_ACQUIRE));
+		stopped = !d->running;
 		spinlock_release_irq(&d->feed_lock, f);
 
-		if (used == 0 && in_flight <= 0) {
-			break;
+		if (d->stream_error != 0) {
+			return d->stream_error;
+		}
+		if (used == 0 && stopped && in_flight <= 0) {
+			return 0;
 		}
 		if (current_thread &&
 		    (current_thread->sig_pending & ~current_thread->sig_mask)) {
-			break;                 /* interrupted -- drop the tail */
+			return -EINTR;         /* interrupted -- drop the tail */
 		}
 
 		remaining = (uint32_t)used +
-		            (uint32_t)in_flight * HDA_CHUNK_BYTES;
+		            (uint32_t)(in_flight > 0 ? in_flight : 0) *
+		            HDA_CHUNK_BYTES;
 		if (remaining < last_remaining) {
 			last_remaining = remaining;
 			stall = 0;
 		} else if (++stall >= HDA_DRAIN_STALL_POLLS) {
-			break;                 /* controller wedged */
+			kprintf("hda: drain made no progress; giving up\n");
+			return -EIO;           /* controller wedged */
 		}
 
 		if (current_thread) {
@@ -2427,7 +2551,29 @@ static int hda_drain(audio_dev_t *adev)
 			}
 		}
 	}
-	return 0;
+	kprintf("hda: drain hit its %u s ceiling\n",
+	        (unsigned)(HDA_DRAIN_POLL_MAX * HDA_DRAIN_POLL_MS / 1000U));
+	return -EIO;
+}
+
+/*
+ * SNDCTL_DSP_POST: the application has reached a boundary in its output
+ * (the end of an effect, say) and wants what it wrote played now rather
+ * than when the prebuffer fills.
+ */
+static int hda_post(audio_dev_t *adev)
+{
+	hda_dev_t *d = adev->driver_data;
+	unsigned long f;
+
+	if (d->fifo_buf == NULL || d->chunk[0] == NULL) {
+		return 0;
+	}
+	hda_kick(d);
+	f = spinlock_acquire_irq(&d->feed_lock);
+	hda_flush_and_start(d);
+	spinlock_release_irq(&d->feed_lock, f);
+	return d->stream_error;
 }
 
 static int hda_flush(audio_dev_t *adev)
@@ -2506,6 +2652,7 @@ static audio_dev_ops_t hda_ops = {
 	.get_devinfo = hda_get_devinfo,
 	.get_props   = hda_get_props,
 	.get_ospace  = hda_get_ospace,
+	.post        = hda_post,
 };
 
 /* ------------------------------------------------------------------- */
@@ -2943,6 +3090,14 @@ static int hda_attach(pci_device_t *pdev)
 	}
 
 	hda_device_count++;
+	{
+		thread_t *wt = NULL;
+
+		if (kthread_create(hda_worker, d, &wt, "hda") != 0) {
+			kprintf("hda: no stream worker; short writes start only "
+			        "once the prebuffer fills\n");
+		}
+	}
 	kprintf("hda: %04x:%04x oss=%u iss=%u codecs=0x%04x cad=%u "
 	        "vid=0x%08x corb=%u rirb=%u\n",
 	        pdev->vendor_id, pdev->device_id, d->oss, d->iss,

@@ -134,6 +134,14 @@ typedef struct audio_dev_ops {
 	 */
 	int (*get_ospace)(struct audio_dev *dev, int *fragsize, int *fragstotal,
 			  int *fragments_avail, int *bytes_avail);
+
+	/*
+	 * Optional: the application reached an output boundary
+	 * (SNDCTL_DSP_POST) -- start playing what is queued now, padding a
+	 * partial buffer, instead of waiting for the prebuffer to fill.
+	 * Returns 0 or -errno.
+	 */
+	int (*post)(struct audio_dev *dev);
 } audio_dev_ops_t;
 
 typedef struct audio_dev {

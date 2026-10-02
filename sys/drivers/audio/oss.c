@@ -344,7 +344,12 @@ int oss_ioctl_dispatch(audio_dev_t *dev, uint32_t request, void *arg)
 		}
 		return 0;
 
-	case 8:  /* SNDCTL_DSP_POST — hint that a write boundary was reached */
+	case 8:  /* SNDCTL_DSP_POST — play what is queued now */
+		if (dev->ops != NULL && dev->ops->post != NULL) {
+			return dev->ops->post(dev);
+		}
+		return 0;
+
 	case 14: /* SNDCTL_DSP_NONBLOCK — fd nonblock toggle (handled at VFS) */
 	case 22: /* SNDCTL_DSP_SETDUPLEX */
 		return 0;
