@@ -50,6 +50,14 @@ typedef struct audio_conv {
 	uint32_t acc_n;
 	uint32_t phase;                     /* Q16, see audio_conv_frame() */
 	int      primed;
+	/*
+	 * Converted output the backend has not taken yet (a write cut short
+	 * by a signal, or a non-blocking one), at conv_buf[out_off] for
+	 * out_len bytes.  Its input was already reported written, so it is
+	 * handed to the backend first on the next write rather than dropped.
+	 */
+	uint32_t out_off;
+	uint32_t out_len;
 } audio_conv_t;
 
 typedef struct audio_dev_ops {
@@ -182,6 +190,12 @@ typedef struct audio_dev {
 	 */
 	audio_conv_t     conv;
 	uint8_t          conv_buf[AUDIO_CONV_OUT];
+	/*
+	 * The channel the backend wakes (sched_wakeup()) when playback space
+	 * frees up, for poll().  NULL: the backend wakes nothing poll can
+	 * wait on, so the device always reports itself writable, as before.
+	 */
+	void            *wait_chan;
 	struct audio_dev *next;
 } audio_dev_t;
 
@@ -289,6 +303,7 @@ void   audio_node_open(struct fs_node *node);
 void   audio_node_close(struct fs_node *node);
 void  *audio_node_mmap(struct fs_node *node, void *addr, size_t length,
 		       int prot, int flags, off_t offset);
+int    audio_node_poll(struct fs_node *node, void *waiter);
 
 /*
  * OSS (/dev/dsp) frontend, implemented in oss.c.  audio_register_device()

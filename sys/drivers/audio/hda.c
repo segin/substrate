@@ -22,14 +22,15 @@
 #include <kern/device.h>
 #include <kern/pci.h>
 #include <kern/sched.h>
-#include <kern/sleepq.h>
 #include <kern/time.h>
 #include <sys/audioio.h>
 #include <sys/dma.h>
 #include <sys/errno.h>
+#include <sys/file.h>
 #include <sys/irq.h>
 #include <sys/kthread.h>
 #include <sys/lock.h>
+#include <sys/proc.h>
 #include <vm/vm_kmem.h>
 
 #define HDA_PCI_CLASS_MULTIMEDIA   0x04
@@ -370,6 +371,7 @@ typedef struct hda_dev {
 	 */
 	int              worker_chan;
 	volatile uint64_t last_write;
+	uint64_t         wait_ticks;    /* writer's sleep bound */
 	/*
 	 * A stream descriptor that would not acknowledge SRST is unusable
 	 * (3.3.35).  Latched here and returned to writers instead of retrying
@@ -2200,6 +2202,11 @@ static int hda_output_stream_init(hda_dev_t *d)
 	audio_fifo_init(&d->fifo, (uint8_t *)d->fifo_buf, HDA_FIFO_BYTES);
 
 	d->stream_tag = 1;   /* tag 0 is reserved per spec */
+	/* Writer wait bound: about three slot periods. */
+	d->wait_ticks = get_hz() ? (get_hz() * 64U + 999U) / 1000U : 1U;
+	if (d->wait_ticks == 0) {
+		d->wait_ticks = 1;
+	}
 	d->next_idx = 0;
 
 	/* Reset stream descriptor 0 (output stream 0).  Per HDA spec
@@ -2376,6 +2383,13 @@ static int hda_set_params(audio_dev_t *adev, audio_info_t *info)
 	return 0;
 }
 
+/* The calling descriptor is O_NONBLOCK (see tty_read_nonblock()). */
+static int hda_nonblock(void)
+{
+	return current_thread && current_thread->io_file &&
+	       (current_thread->io_file->f_flag & FNONBLOCK);
+}
+
 static int hda_write(audio_dev_t *adev, const void *buf, size_t len)
 {
 	hda_dev_t *d = adev->driver_data;
@@ -2422,26 +2436,43 @@ static int hda_write(audio_dev_t *adev, const void *buf, size_t len)
 			break;
 		}
 
+		/* A non-blocking descriptor takes what fits and returns. */
+		if (hda_nonblock()) {
+			break;
+		}
 		if (current_thread) {
-			/* Killable: break the wait on a pending unmasked signal
-			 * so the player can be ^C'd / kill(1)ed instead of
-			 * wedging uninterruptibly if the device stalls. */
-			if (current_thread->sig_pending & ~current_thread->sig_mask) {
-				break;
+			/*
+			 * Wait for a completion to free space.  Interruptible,
+			 * marked before the space and signal checks so a signal
+			 * posted in between is not lost (sched_sleep() rechecks
+			 * it before blocking), and bounded by a deadline a few
+			 * slot periods out: a wakeup landing between the check
+			 * and the block costs at most that, not the scheduler's
+			 * 250 ms fallback.  No sleep queue, so nothing is left
+			 * linked when the deadline or a signal ends the wait.
+			 */
+			current_thread->flags |= THREAD_F_INTERRUPTIBLE;
+			if ((current_thread->sig_pending &
+			     ~current_thread->sig_mask) == 0 &&
+			    audio_fifo_free(&d->fifo) == 0) {
+				(void)sched_sleep_until(d,
+				                        get_ticks() + d->wait_ticks);
 			}
-			sleepq_add(d, current_thread);
-			if (audio_fifo_free(&d->fifo) > 0) {
-				sleepq_wake_all(d);
-			} else {
-				current_thread->flags |= THREAD_F_INTERRUPTIBLE;
-				sched_sleep(d);
-				current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
+			current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
+			/* Killable: break the wait on a pending unmasked
+			 * signal so the player can be ^C'd / kill(1)ed. */
+			if (current_thread->sig_pending &
+			    ~current_thread->sig_mask) {
+				break;
 			}
 		} else {
 			__asm__ volatile("pause");
 		}
 	}
 
+	if (total_consumed == 0 && hda_nonblock()) {
+		return -EAGAIN;
+	}
 	if (total_consumed == 0 && current_thread &&
 	    (current_thread->sig_pending & ~current_thread->sig_mask)) {
 		return -EINTR;
@@ -3078,6 +3109,8 @@ static int hda_attach(pci_device_t *pdev)
 
 	d->audio.ops = &hda_ops;
 	d->audio.driver_data = d;
+	/* Completions and stop paths sched_wakeup(d): poll can wait on it. */
+	d->audio.wait_chan = d;
 	/* The output DAC is at least stereo: a mono stream would play on
 	 * the left only, so the framework duplicates it instead.  More than
 	 * the converter's channel count is folded down to stereo. */

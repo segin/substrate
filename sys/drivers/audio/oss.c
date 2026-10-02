@@ -24,7 +24,9 @@
 #include <sys/audioio.h>
 #include <sys/copy.h>
 #include <sys/errno.h>
+#include <sys/file.h>
 #include <sys/major.h>
+#include <sys/proc.h>
 #include <sys/soundcard.h>
 #include <vfs/vfs.h>
 
@@ -350,7 +352,12 @@ int oss_ioctl_dispatch(audio_dev_t *dev, uint32_t request, void *arg)
 		}
 		return 0;
 
-	case 14: /* SNDCTL_DSP_NONBLOCK — fd nonblock toggle (handled at VFS) */
+	case 14: /* SNDCTL_DSP_NONBLOCK — make this descriptor non-blocking */
+		if (current_thread != NULL && current_thread->io_file != NULL) {
+			current_thread->io_file->f_flag |= FNONBLOCK;
+		}
+		return 0;
+
 	case 22: /* SNDCTL_DSP_SETDUPLEX */
 		return 0;
 
@@ -449,6 +456,7 @@ void oss_register_device(audio_dev_t *dev, int unit)
 	dsp->write = audio_node_write;
 	dsp->ioctl = oss_node_ioctl;
 	dsp->mmap  = audio_node_mmap;
+	dsp->poll  = audio_node_poll;
 	dsp->open  = oss_node_open;
 	dsp->close = audio_node_close;
 	dsp->impl  = (uintptr_t)dev;

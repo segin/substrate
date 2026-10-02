@@ -2780,7 +2780,14 @@ int kern_ioctl(int fd, uint32_t request, void *arg) {
         if ((uintptr_t)node->ioctl < KERN_BASE) {
             return -EIO;
         }
-        return node->ioctl(node, request, arg);
+        /* Expose the file_t as the read and write paths do: a driver
+         * ioctl that acts on the descriptor (OSS SNDCTL_DSP_NONBLOCK
+         * sets O_NONBLOCK on it) has no other way to reach it. */
+        struct file *prev_io = current_thread ? current_thread->io_file : NULL;
+        if (current_thread) current_thread->io_file = f;
+        int rc = node->ioctl(node, request, arg);
+        if (current_thread) current_thread->io_file = prev_io;
+        return rc;
     }
 
     /* No driver ioctl handler — Linux/BSD use ENOTTY for this. */

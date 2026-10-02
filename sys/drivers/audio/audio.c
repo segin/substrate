@@ -17,6 +17,7 @@
 #include <sys/errno.h>
 #include <sys/lock.h>
 #include <sys/major.h>
+#include <sys/poll.h>
 #include <sys/proc.h>
 #include <vfs/vfs.h>
 
@@ -856,6 +857,24 @@ size_t audio_node_write(fs_node_t *node, off_t offset, size_t size,
 	}
 
 	/*
+	 * Converted output a previous write could not hand over goes first;
+	 * until it has, none of this write's input can be taken without
+	 * reordering the stream.
+	 */
+	while (dev->conv.out_len > 0) {
+		rc = dev->ops->write(dev, dev->conv_buf + dev->conv.out_off,
+				     dev->conv.out_len);
+		if (rc < 0) {
+			return (size_t)rc;
+		}
+		if (rc == 0) {
+			return (size_t)-EAGAIN;
+		}
+		dev->conv.out_off += (uint32_t)rc;
+		dev->conv.out_len -= (uint32_t)rc;
+	}
+
+	/*
 	 * Fast path: the application is already writing what the backend
 	 * plays, so hand the buffer straight down.  This is every ordinary
 	 * 16-bit player, and it is byte-for-byte what happened before
@@ -925,26 +944,41 @@ size_t audio_node_write(fs_node_t *node, off_t offset, size_t size,
 			}
 			if (outn > 0) {
 				rc = dev->ops->write(dev, dev->conv_buf, outn);
-				if (rc < 0) {
-					/* What was converted is lost with the
-					 * write; start the next one afresh. */
+				if (rc < 0 && rc != -EAGAIN && rc != -EINTR) {
+					/* The backend cannot play: what was
+					 * converted is lost with the write. */
 					audio_conv_reset(st);
 					dev->current.play.samples +=
 						(uint32_t)done;
 					return done ? done : (size_t)rc;
 				}
+				if (rc < 0) {
+					rc = 0;
+				}
 				if ((size_t)rc < outn) {
-					/* Backend took less than offered: the
-					 * rest of this chunk is dropped rather
-					 * than replayed from the caller. */
-					break;
+					/*
+					 * Short: a signal, or a non-blocking
+					 * descriptor with the buffer full.
+					 * Keep the rest for the next write --
+					 * its input counts as written -- and
+					 * stop here.
+					 */
+					st->out_off = (uint32_t)rc;
+					st->out_len = (uint32_t)(outn - (size_t)rc);
+					done += pending;
+					if (done == 0) {
+						return (size_t)-EAGAIN;
+					}
+					dev->current.play.samples +=
+						(uint32_t)done;
+					return done;
 				}
 				outn = 0;
 			}
 			done += pending;
 			pending = 0;
 		}
-		/* Carried bytes and a short backend write both count. */
+		/* Carried bytes count: they are kept for the next write. */
 		done += pending;
 		dev->current.play.samples += (uint32_t)done;
 		return done;
@@ -985,6 +1019,32 @@ void *audio_node_mmap(fs_node_t *node, void *addr, size_t length,
 		return (void *)-1;
 	}
 	return dev->ops->mmap(dev, addr, length, prot, flags, offset);
+}
+
+/*
+ * Writable when the backend has room for at least one fragment.  A backend
+ * that reports no occupancy, or wakes no channel poll can sleep on, is
+ * always writable.  There is no capture path, so never readable.
+ */
+int audio_node_poll(fs_node_t *node, void *waiter)
+{
+	audio_dev_t *dev = audio_dev_for_node(node);
+	int fragsize = 0, fragstotal = 0, fragments = 0, freeb = 0;
+
+	if (dev == NULL) {
+		return POLLNVAL;
+	}
+	if (dev->wait_chan == NULL || dev->ops == NULL ||
+	    dev->ops->get_ospace == NULL ||
+	    dev->ops->get_ospace(dev, &fragsize, &fragstotal, &fragments,
+				 &freeb) != 0 ||
+	    freeb >= fragsize) {
+		return POLLOUT | POLLWRNORM;
+	}
+	if (waiter != NULL) {
+		*(void **)waiter = dev->wait_chan;
+	}
+	return 0;
 }
 
 void audio_node_open(fs_node_t *node)
@@ -1103,6 +1163,7 @@ int audio_register_device(audio_dev_t *dev)
 	audio_n->write = audio_node_write;
 	audio_n->ioctl = audio_node_ioctl;
 	audio_n->mmap  = audio_node_mmap;
+	audio_n->poll  = audio_node_poll;
 	audio_n->open  = audio_node_open;
 	audio_n->close = audio_node_close;
 	audio_n->impl = (uintptr_t)dev;
