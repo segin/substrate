@@ -210,7 +210,12 @@
 #define RXSTAT_CRCERR       0x00040000u
 
 #define R8168_RX_DESCS      64
-#define R8168_TX_DESCS      32
+/* Room for a whole TCP window in flight, so a full ring is the exception. */
+#define R8168_TX_DESCS      128
+/* How long a sender with interrupts on may wait for a free slot: several
+ * full-size frame times at 10 Mb/s. */
+#define R8168_TX_WAIT_US    5000
+#define R8168_TX_POLL_US    20
 #define R8168_BUF_SIZE      2048
 #define R8168_MAX_FRAME     1518
 
@@ -595,23 +600,38 @@ static int r8168_xmit(netdev_t *dev, const void *frame, size_t len) {
     if (!frame || len == 0) return -EINVAL;
     if (len > R8168_MAX_FRAME) return -EMSGSIZE;
 
-    unsigned long flags = spinlock_acquire_irq(&rt_tx_lock);
+    unsigned long flags;
+    uint32_t slot;
+    volatile struct r8168_desc *d;
+    unsigned waited_us = 0;
 
-    uint32_t slot = rt.tx_cur;
-    volatile struct r8168_desc *d = &rt.tx_ring[slot];
+    for (;;) {
+        flags = spinlock_acquire_irq(&rt_tx_lock);
+        slot = rt.tx_cur;
+        d = &rt.tx_ring[slot];
 
-    /*
-     * The NIC clears OWN as each frame completes, so a next slot it still
-     * owns means the whole ring is in flight.  That is back-pressure, not
-     * something to wait out with interrupts disabled: drop the frame now and
-     * let the upper layer retransmit.  A transmitter that has stopped
-     * altogether is the watchdog's business.
-     */
-    if (d->opts1 & DESC_OWN) {
+        /* The NIC clears OWN as each frame completes, so a next slot it
+         * still owns means the whole ring is in flight. */
+        if (!(d->opts1 & DESC_OWN))
+            break;
+
+        /*
+         * Ring full.  The stack has no transmit queue of its own, so a drop
+         * costs TCP a retransmit timeout -- worth waiting for the oldest
+         * frame to retire, which takes at most one frame time.  But never
+         * with interrupts masked: wait outside the lock, and only if the
+         * caller had interrupts on.  From interrupt context (a reply sent
+         * from the receive handler) drop at once.  A transmitter that has
+         * stopped altogether is the watchdog's business.
+         */
         rt_w8(R_TPPOLL, TPPOLL_NPQ);
         spinlock_release_irq(&rt_tx_lock, flags);
-        rt.netdev.tx_dropped++;
-        return -ENOBUFS;
+        if (!(flags & 0x200ul) || waited_us >= R8168_TX_WAIT_US) {
+            rt.netdev.tx_dropped++;
+            return -ENOBUFS;
+        }
+        timer_busywait_us(R8168_TX_POLL_US);
+        waited_us += R8168_TX_POLL_US;
     }
 
     memcpy(rt.tx_buf + slot * R8168_BUF_SIZE, frame, len);
