@@ -35,6 +35,7 @@
 
 #define HDA_PCI_CLASS_MULTIMEDIA   0x04
 #define HDA_PCI_SUBCLASS_HDA       0x03
+#define HDA_PCI_SUBCLASS_AUDIO     0x01   /* DSP-mode Intel functions */
 
 /* Vendors whose controllers need coaxing before DMA; see hda_pci_quirks(). */
 #define HDA_PCI_VENDOR_INTEL       0x8086
@@ -43,6 +44,9 @@
 #define HDA_PCI_VENDOR_NVIDIA      0x10DE
 /* Intel: Traffic Class Select, in device-specific PCI config space. */
 #define HDA_PCI_REG_TCSEL          0x44
+/* Intel: Device Control; NSNPEN lets the controller request No Snoop. */
+#define HDA_PCI_REG_DEVC           0x78
+#define HDA_DEVC_NSNPEN            0x0800
 
 #define HDA_BDL_ENTRIES            32
 #define HDA_CHUNK_BYTES            4096U
@@ -102,6 +106,12 @@
 #define HDA_MAX_CANDIDATES         16
 /* Converters one stream may be bound to. */
 #define HDA_MAX_OUT_DACS           4
+
+/* Where the interrupt comes from (irq_kind), in order of preference. */
+#define HDA_IRQ_NONE               0
+#define HDA_IRQ_MSI                1   /* vector from irq_alloc_vector() */
+#define HDA_IRQ_LINE               2   /* firmware Interrupt Line */
+#define HDA_IRQ_ROUTED             3   /* pci_route_intx() */
 /* STATESTS reports codec presence on SDI[14:0]. */
 #define HDA_MAX_CODECS             15
 
@@ -274,17 +284,12 @@ void hda_build_bdl_entry(hda_bdl_entry_t *entry, uint64_t buf_phys,
 
 typedef struct hda_dev {
 	pci_device_t   *pdev;
-	/* Set when d->irq came from pci_route_intx() rather than firmware:
-	 * that mapping is a convention and has to be proven before use. */
-	int             intx_routed;
-	/* Set when d->irq is an MSI vector (from irq_alloc_vector()); MSI
-	 * is enabled in config space only once the handler is registered. */
-	int             msi;
-	int             msi_enabled;
-	volatile uint32_t intr_count;
+	/* Where the interrupt comes from (HDA_IRQ_*); see hda_setup_irq(). */
+	int             irq_kind;
+	/* Interrupts that carried a RIRB response interrupt: the proof. */
+	volatile uint32_t rirb_intr_count;
 	volatile uint8_t *mmio;
 	int              irq;
-	int              irq_claimed;   /* request_irq() succeeded */
 
 	uint8_t          oss;           /* output streams */
 	uint8_t          iss;           /* input streams */
@@ -498,6 +503,8 @@ static void hda_write32(hda_dev_t *d, uint32_t off, uint32_t v)
  * registers, which are only cleared on power-on reset".  WAKEEN was
  * never touched at all, leaving whatever the firmware had set.
  */
+static void hda_corb_rirb_stop(hda_dev_t *d);
+
 static void hda_quiesce(hda_dev_t *d)
 {
 	uint16_t gcap = hda_read16(d, HDA_REG_GCAP);
@@ -511,13 +518,27 @@ static void hda_quiesce(hda_dev_t *d)
 		uint32_t off = HDA_SD_BASE + (i * HDA_SD_STRIDE);
 
 		hda_write8(d, off + HDA_SD_CTL, 0);
+	}
+	/* ...and verified stopped, as 3.3.7 requires, before their status
+	 * is cleared: RUN takes up to a frame to drop (4.5.4). */
+	for (i = 0; i < nstreams && i < HDA_MAX_STREAMS; i++) {
+		uint32_t off = HDA_SD_BASE + (i * HDA_SD_STRIDE);
+		int budget;
+
+		for (budget = 0; budget < HDA_STREAM_TIMEOUT; budget++) {
+			if ((hda_read8(d, off + HDA_SD_CTL) & HDA_SDCTL_RUN) == 0) {
+				break;
+			}
+		}
+		if (budget == HDA_STREAM_TIMEOUT) {
+			kprintf("hda: stream %u still running at reset\n", i);
+		}
 		hda_write8(d, off + HDA_SD_STS,
 		           HDA_SDSTS_BCIS | HDA_SDSTS_FIFOE | HDA_SDSTS_DESE);
 	}
 
-	/* Command/response engines. */
-	hda_write8(d, HDA_REG_CORBCTL, 0);
-	hda_write8(d, HDA_REG_RIRBCTL, 0);
+	/* Command/response engines, likewise verified. */
+	hda_corb_rirb_stop(d);
 
 	/* No interrupts and no wake events across the reset. */
 	hda_write32(d, HDA_REG_INTCTL, 0);
@@ -2273,6 +2294,12 @@ static void hda_one_intr(hda_dev_t *d, uint32_t status)
 		if (rsts != 0) {
 			hda_write8(d, HDA_REG_RIRBSTS, rsts);
 		}
+		/* Proof for hda_irq_proven(): this controller asserted GIS
+		 * with a response interrupt latched -- not merely some
+		 * device's interrupt on a shared vector. */
+		if (rsts & HDA_RIRBSTS_RINTFL) {
+			d->rirb_intr_count++;
+		}
 	}
 	/* ACK output stream 0 status if it fired.  BCIS = buffer
 	 * completion (one IOC-marked BDL slot drained); track for the
@@ -2450,7 +2477,6 @@ static int hda_irq_handler(unsigned int irq, void *dev_id, void *frame)
 	if (d == NULL) {
 		return 0;
 	}
-	d->intr_count++;      /* proof-of-life for the INTx routing probe */
 
 	/*
 	 * Re-read INTSTS until GIS goes away rather than servicing one
@@ -3076,6 +3102,191 @@ static audio_dev_ops_t hda_ops = {
 /* Discovery / init                                                    */
 /* ------------------------------------------------------------------- */
 
+/* ------------------------------------------------------------------- */
+/* Interrupt setup                                                     */
+/* ------------------------------------------------------------------- */
+
+/*
+ * Install the handler on one interrupt source.  0 on success, -1 if the
+ * source is unavailable (no MSI capability, no firmware line, no I/O APIC)
+ * or could not be claimed.
+ */
+static int hda_irq_install(hda_dev_t *d, int kind)
+{
+	pci_device_t *pdev = d->pdev;
+	int irq;
+
+	switch (kind) {
+	case HDA_IRQ_MSI:
+		if (pci_find_capability(pdev, PCI_CAP_ID_MSI) == 0) {
+			return -1;
+		}
+		irq = irq_alloc_vector();
+		break;
+	case HDA_IRQ_LINE:
+		irq = pci_get_irq(pdev);
+		/* INTx Disable survives from firmware or from an earlier
+		 * routed attempt's teardown; the pin never asserts with it. */
+		if (irq >= 0) {
+			pci_intx_enable(pdev, 1);
+		}
+		break;
+	case HDA_IRQ_ROUTED:
+		irq = pci_route_intx(pdev);
+		break;
+	default:
+		return -1;
+	}
+	if (irq < 0) {
+		return -1;
+	}
+	if (request_irq((unsigned int)irq, hda_irq_handler, IRQF_SHARED,
+	                "hda", d) != 0) {
+		kprintf("hda: could not claim IRQ %d\n", irq);
+		if (kind == HDA_IRQ_MSI) {
+			irq_free_vector(irq);
+		} else if (kind == HDA_IRQ_ROUTED) {
+			pci_unroute_intx(pdev, irq);
+			irq_free_vector(irq);
+		}
+		return -1;
+	}
+	/* MSI goes on only once something is there to take it. */
+	if (kind == HDA_IRQ_MSI && pci_enable_msi(pdev, (uint8_t)irq) != 0) {
+		free_irq((unsigned int)irq, d);
+		irq_free_vector(irq);
+		return -1;
+	}
+	d->irq = irq;
+	d->irq_kind = kind;
+	return 0;
+}
+
+/* Undo hda_irq_install().  The caller has disarmed INTCTL first, so a
+ * level-triggered line cannot be left asserted with nobody behind it. */
+static void hda_irq_remove(hda_dev_t *d)
+{
+	if (d->irq_kind == HDA_IRQ_NONE) {
+		return;
+	}
+	if (d->irq_kind == HDA_IRQ_MSI) {
+		/* Stop the controller signalling before its vector goes. */
+		(void)pci_disable_msi(d->pdev);
+	}
+	free_irq((unsigned int)d->irq, d);
+	if (d->irq_kind == HDA_IRQ_MSI) {
+		irq_free_vector(d->irq);
+	} else if (d->irq_kind == HDA_IRQ_ROUTED) {
+		/* Mask the I/O APIC input, set INTx Disable, and give the
+		 * vector pci_route_intx() allocated back. */
+		pci_unroute_intx(d->pdev, d->irq);
+		irq_free_vector(d->irq);
+	}
+	d->irq = -1;
+	d->irq_kind = HDA_IRQ_NONE;
+}
+
+/* RINTCNT may only change with the RIRB engine stopped (3.3.28). */
+static void hda_rirb_set_rintcnt(hda_dev_t *d, uint16_t n)
+{
+	uint32_t budget;
+
+	hda_write8(d, HDA_REG_RIRBCTL, 0);
+	for (budget = 0; budget < HDA_RING_TIMEOUT; budget++) {
+		if ((hda_read8(d, HDA_REG_RIRBCTL) & HDA_RIRBCTL_RUN) == 0) {
+			break;
+		}
+	}
+	hda_write16(d, HDA_REG_RINTCNT, n);
+	hda_write8(d, HDA_REG_RIRBCTL, HDA_RIRBCTL_RUN | HDA_RIRBCTL_RINTCTL);
+}
+
+/*
+ * Does the installed source deliver this controller's interrupts?
+ * Provoke a response interrupt -- RINTCNT dropped to 1 for a single
+ * exchange -- and wait for the handler to see it.  Only an invocation
+ * that found RIRBSTS.RINTFL latched counts: on a shared or wrongly
+ * routed line any co-sharer's interrupt would otherwise pass.  Three
+ * rounds, so one coincidence is not enough either.
+ */
+static int hda_irq_proven(hda_dev_t *d)
+{
+	int round;
+
+	for (round = 0; round < 3; round++) {
+		uint32_t before = d->rirb_intr_count;
+		uint32_t dummy;
+		unsigned int us;
+		int i, asked = 0;
+
+		hda_rirb_set_rintcnt(d, 1);
+		for (i = 0; i < HDA_MAX_CODECS && !asked; i++) {
+			if ((d->codec_mask & (1u << i)) &&
+			    hda_try_verb(d, (uint8_t)i, 0,
+			                 HDA_VERB_GET_PARAMETER,
+			                 HDA_PARAM_VENDOR_ID, &dummy) == 0) {
+				asked = 1;
+			}
+		}
+		for (us = 0; asked && us < HDA_VERB_TIMEOUT_US &&
+		             d->rirb_intr_count == before; us += 100) {
+			timer_busywait_us(100);
+		}
+		hda_rirb_set_rintcnt(d, (uint16_t)(d->rirb_entries / 2));
+		if (!asked || d->rirb_intr_count == before) {
+			return 0;
+		}
+	}
+	return 1;
+}
+
+/*
+ * Find an interrupt that actually arrives -- the ring is refilled from the
+ * completion interrupt, so without one the device accepts writes and never
+ * plays past its first buffers.  MSI first: it needs neither the firmware
+ * Interrupt Line (0xFF under UEFI) nor a guess at the chipset's INTx
+ * routing.  Then the firmware line, then pci_route_intx()'s conventional
+ * I/O APIC routing.  Each is proven before use; a silent MSI (some
+ * chipsets deliver it unreliably) now falls back to INTx instead of
+ * abandoning the controller.  INTCTL is armed only while a handler is
+ * installed.
+ */
+static int hda_setup_irq(hda_dev_t *d)
+{
+	static const int kinds[] = { HDA_IRQ_MSI, HDA_IRQ_LINE,
+	                             HDA_IRQ_ROUTED };
+	static const char *const names[] = { "none", "MSI", "IRQ line",
+	                                     "routed INTx" };
+	size_t i;
+
+	d->irq = -1;
+	d->irq_kind = HDA_IRQ_NONE;
+	for (i = 0; i < sizeof(kinds) / sizeof(kinds[0]); i++) {
+		if (hda_irq_install(d, kinds[i]) != 0) {
+			continue;
+		}
+		/*
+		 * Arm: CIE because some controllers only latch a codec
+		 * response with it set, and SIE for our output descriptor --
+		 * without it IOCE still sets BCIS on every buffer but no
+		 * interrupt is raised, so no completion is ever credited.
+		 */
+		hda_write32(d, HDA_REG_INTCTL,
+		            HDA_INTCTL_GIE | HDA_INTCTL_CIE |
+		            HDA_INTCTL_SIE(d->sd_index));
+		if (hda_irq_proven(d)) {
+			kprintf("hda: %s %d verified\n", names[kinds[i]],
+			        d->irq);
+			return 0;
+		}
+		hda_write32(d, HDA_REG_INTCTL, 0);
+		kprintf("hda: no interrupt on %s %d\n", names[kinds[i]],
+		        d->irq);
+		hda_irq_remove(d);
+	}
+	return -1;
+}
+
 /*
  * Undo a partially-completed attach.
  *
@@ -3095,30 +3306,33 @@ static void hda_detach_partial(hda_dev_t *d)
 	int i;
 
 	if (d->mmio != NULL) {
+		uint32_t budget;
+
 		hda_write32(d, HDA_REG_INTCTL, 0);
-		hda_write8(d, HDA_REG_CORBCTL, 0);
-		hda_write8(d, HDA_REG_RIRBCTL, 0);
+		/*
+		 * Every engine verifiably stopped before its memory goes:
+		 * streams and command rings, then the controller held in
+		 * reset (CRST reads back 0 only once it has sequenced in).
+		 * Clearing CORBCTL/RIRBCTL without a readback left a frame in
+		 * which the RIRB could still be written into freed pages.
+		 */
+		hda_quiesce(d);
+		hda_write32(d, HDA_REG_GCTL,
+		            hda_read32(d, HDA_REG_GCTL) & ~HDA_GCTL_CRST);
+		for (budget = 0; budget < 1000000; budget++) {
+			if ((hda_read32(d, HDA_REG_GCTL) & HDA_GCTL_CRST) == 0) {
+				break;
+			}
+		}
 	}
-	if (d->msi_enabled) {
-		/* Stop the controller signalling before its vector goes. */
-		(void)pci_disable_msi(d->pdev);
-		d->msi_enabled = 0;
-	}
-	if (d->irq_claimed) {
-		free_irq((unsigned int)d->irq, d);
-		d->irq_claimed = 0;
-	}
-	if (d->msi) {
-		irq_free_vector(d->irq);
-		d->msi = 0;
-		d->irq = -1;
-	}
-	if (d->intx_routed) {
-		/* Mask the I/O APIC input and set INTx-disable, so a line this
-		 * driver routed by convention cannot sit asserted with no
-		 * handler behind it. */
-		pci_unroute_intx(d->pdev, d->irq);
-		d->intx_routed = 0;
+	hda_irq_remove(d);
+	if (d->pdev != NULL) {
+		uint16_t cmd = pci_read_config16(d->pdev->bus, d->pdev->slot,
+		                                 d->pdev->func,
+		                                 PCI_CONFIG_COMMAND);
+		pci_write_config16(d->pdev->bus, d->pdev->slot, d->pdev->func,
+		                   PCI_CONFIG_COMMAND,
+		                   (uint16_t)(cmd & ~PCI_COMMAND_MASTER));
 	}
 
 	for (i = 0; i < HDA_BDL_ENTRIES; i++) {
@@ -3146,6 +3360,10 @@ static void hda_detach_partial(hda_dev_t *d)
 		kfree(d->fifo_buf, HDA_FIFO_BYTES);
 		d->fifo_buf = NULL;
 	}
+	if (d->mmio != NULL) {
+		iounmap((void *)(uintptr_t)d->mmio);
+		d->mmio = NULL;
+	}
 }
 
 /*
@@ -3153,52 +3371,79 @@ static void hda_detach_partial(hda_dev_t *d)
  *
  * TCSEL: Intel controllers default to a traffic class other than TC0 on
  * some chipsets, which can be routed to a virtual channel the chipset
- * does not service for audio.  FreeBSD forces TC0 unconditionally on
- * Intel parts and so do we.
+ * does not service for audio.  Force TC0.
  *
- * Snooping: this driver allocates its rings as ordinary write-back
- * cacheable memory, which is only safe if the controller's DMA snoops
- * the caches.  Intel parts do.  ATI, AMD and NVIDIA need a
- * vendor-specific bit set, and if that cannot be done the correct answer
- * is uncacheable DMA memory -- which this kernel has no way to allocate
- * yet.  Warn rather than pretend: a controller reading stale CORB or BDL
- * contents fails in ways that look nothing like a coherency problem.
+ * Snooping: this driver allocates its rings and sample buffers as
+ * ordinary write-back cacheable memory, which is only safe if the
+ * controller's DMA snoops the caches.
+ *  - Intel: DEVC (0x78) bit 11, NSNPEN, lets the controller set No Snoop
+ *    on its requests.  The 100- and 300-series PCH datasheets give DEVC a
+ *    default of 2800h -- bit set -- and only platform reset restores it,
+ *    so firmware may well leave it on: the stream engine then reads
+ *    cache-stale samples, which is audible as static.  Cleared here.
+ *  - ATI/AMD chipset functions (SB450/SB600-class and the FCH) need a
+ *    snoop enable at 0x42; NVIDIA functions one at 0x4E.
+ *  - ATI/AMD graphics HDMI audio functions have no such register and do
+ *    not snoop at all; with no uncached DMA memory here they are refused.
+ * A snoop enable that does not stick is refused too: a controller reading
+ * stale CORB or BDL contents fails in ways that look nothing like a
+ * coherency problem.  Returns 0, or -errno to abandon the attach.
  */
-static void hda_pci_quirks(hda_dev_t *d, pci_device_t *pdev)
+static int hda_pci_quirks(hda_dev_t *d, pci_device_t *pdev)
 {
 	static const struct {
 		uint16_t vendor;
-		uint8_t  reg;     /* 0 = snoops by default, nothing to do */
+		uint16_t device;  /* 0: any */
+		uint8_t  reg;
 		uint8_t  mask;
 		uint8_t  enable;
 	} snoop[] = {
-		{ HDA_PCI_VENDOR_INTEL,  0x00, 0x00, 0x00 },
-		{ HDA_PCI_VENDOR_ATI,    0x42, 0xf8, 0x02 },
-		{ HDA_PCI_VENDOR_AMD,    0x42, 0xf8, 0x02 },
-		{ HDA_PCI_VENDOR_NVIDIA, 0x4e, 0xf0, 0x0f },
+		{ HDA_PCI_VENDOR_ATI,    0x437b, 0x42, 0xf8, 0x02 },  /* SB450 */
+		{ HDA_PCI_VENDOR_ATI,    0x4383, 0x42, 0xf8, 0x02 },  /* SB600+ */
+		{ HDA_PCI_VENDOR_AMD,    0x780d, 0x42, 0xf8, 0x02 },  /* FCH */
+		{ HDA_PCI_VENDOR_AMD,    0x1457, 0x42, 0xf8, 0x02 },
+		{ HDA_PCI_VENDOR_AMD,    0x1487, 0x42, 0xf8, 0x02 },
+		{ HDA_PCI_VENDOR_AMD,    0x15e3, 0x42, 0xf8, 0x02 },
+		{ HDA_PCI_VENDOR_NVIDIA, 0,      0x4e, 0xf0, 0x0f },
 	};
 	uint16_t vendor = pdev->vendor_id;
 	size_t i;
 	uint8_t v;
 
+	(void)d;
 	if (vendor == HDA_PCI_VENDOR_INTEL) {
+		uint16_t devc;
+
 		v = pci_read_config8(pdev->bus, pdev->slot, pdev->func,
 		                     HDA_PCI_REG_TCSEL);
 		pci_write_config8(pdev->bus, pdev->slot, pdev->func,
 		                  HDA_PCI_REG_TCSEL, (uint8_t)(v & 0xF8));
+
+		devc = pci_read_config16(pdev->bus, pdev->slot, pdev->func,
+		                         HDA_PCI_REG_DEVC);
+		if (devc & HDA_DEVC_NSNPEN) {
+			pci_write_config16(pdev->bus, pdev->slot, pdev->func,
+			                   HDA_PCI_REG_DEVC,
+			                   (uint16_t)(devc & ~HDA_DEVC_NSNPEN));
+			devc = pci_read_config16(pdev->bus, pdev->slot,
+			                         pdev->func, HDA_PCI_REG_DEVC);
+			if (devc & HDA_DEVC_NSNPEN) {
+				kprintf("hda: no-snoop enable will not clear; "
+				        "DMA may read stale data\n");
+			}
+		}
+		return 0;
 	}
 
 	for (i = 0; i < sizeof(snoop) / sizeof(snoop[0]); i++) {
-		if (snoop[i].vendor != vendor) {
+		if (snoop[i].vendor != vendor ||
+		    (snoop[i].device != 0 && snoop[i].device != pdev->device_id)) {
 			continue;
-		}
-		if (snoop[i].reg == 0x00) {
-			return;          /* coherent without help */
 		}
 		v = pci_read_config8(pdev->bus, pdev->slot, pdev->func,
 		                     snoop[i].reg);
 		if ((v & snoop[i].enable) == snoop[i].enable) {
-			return;          /* firmware already enabled it */
+			return 0;        /* firmware already enabled it */
 		}
 		v = (uint8_t)((v & snoop[i].mask) | snoop[i].enable);
 		pci_write_config8(pdev->bus, pdev->slot, pdev->func,
@@ -3206,14 +3451,21 @@ static void hda_pci_quirks(hda_dev_t *d, pci_device_t *pdev)
 		v = pci_read_config8(pdev->bus, pdev->slot, pdev->func,
 		                     snoop[i].reg);
 		if ((v & snoop[i].enable) != snoop[i].enable) {
-			kprintf("hda: could not enable PCIe snoop on "
-			        "%04x; DMA may read stale data\n", vendor);
+			kprintf("hda: %04x:%04x: snoop enable will not stick; "
+			        "not attaching\n", vendor, pdev->device_id);
+			return -EIO;
 		}
-		return;
+		return 0;
 	}
 
+	if (vendor == HDA_PCI_VENDOR_ATI || vendor == HDA_PCI_VENDOR_AMD) {
+		kprintf("hda: %04x:%04x does not snoop, and uncached DMA "
+		        "memory is not available; not attaching\n",
+		        vendor, pdev->device_id);
+		return -ENODEV;
+	}
 	kprintf("hda: unknown vendor %04x; assuming coherent DMA\n", vendor);
-	(void)d;
+	return 0;
 }
 
 static int hda_attach(pci_device_t *pdev)
@@ -3233,56 +3485,27 @@ static int hda_attach(pci_device_t *pdev)
 	mutex_init(&d->cfg_lock, "hda_cfg");
 	d->pdev = pdev;
 
+	/* Traffic class and cache-snooping, before bus mastering is on. */
+	if (hda_pci_quirks(d, pdev) != 0) {
+		return -ENODEV;
+	}
+
 	cmd = pci_read_config16(pdev->bus, pdev->slot, pdev->func,
 	                        PCI_CONFIG_COMMAND);
 	cmd |= PCI_COMMAND_MEMORY | PCI_COMMAND_MASTER;
 	pci_write_config16(pdev->bus, pdev->slot, pdev->func,
 	                   PCI_CONFIG_COMMAND, cmd);
 
-	/* Traffic class and cache-snooping, before anything is DMA'd. */
-	hda_pci_quirks(d, pdev);
-
+	/* pci_iomap() brings the function to D0 and moves a 64-bit BAR
+	 * placed above 4 GiB into the 32-bit hole (or refuses it). */
 	d->mmio = pci_iomap(pdev, 0, 16384);
 	if (d->mmio == NULL) {
 		kprintf("hda: failed to map BAR0\n");
+		hda_detach_partial(d);
 		return -ENODEV;
 	}
-	/*
-	 * Prefer MSI.  It goes straight to the local APIC, so it needs
-	 * neither the firmware's Interrupt Line byte (0xFF under UEFI) nor
-	 * an I/O APIC and a guess at the chipset's INTx routing -- the
-	 * PIRQ convention below is admittedly weakest for PCH-internal
-	 * functions like this one, and it needs MADT discovery to have
-	 * registered an I/O APIC at all.  Every Intel HDA controller since
-	 * ICH6 has the capability.  The vector is only claimed here; MSI is
-	 * switched on in config space once the handler is registered.
-	 */
 	d->irq = -1;
-	if (pci_find_capability(pdev, PCI_CAP_ID_MSI) != 0) {
-		int vec = irq_alloc_vector();
-
-		if (vec >= 0) {
-			d->irq = vec;
-			d->msi = 1;
-		}
-	}
-	if (!d->msi) {
-		d->irq = pci_get_irq(pdev);
-	}
-	if (!d->msi && d->irq < 0) {
-		/*
-		 * No firmware-provided line.  On a UEFI/APIC machine that is
-		 * the normal case, not a fault: config byte 0x3C is a
-		 * PIC-era field the firmware leaves at 0xFF because the real
-		 * routing lives in the ACPI _PRT.  Fall back to the
-		 * conventional PIRQ swizzle and PROVE it below — if no
-		 * interrupt arrives, the attach is abandoned.
-		 */
-		d->irq = pci_route_intx(pdev);
-		if (d->irq >= 0) {
-			d->intx_routed = 1;
-		}
-	}
+	d->irq_kind = HDA_IRQ_NONE;
 
 	/*
 	 * Capabilities are only trustworthy once the controller is out of
@@ -3292,10 +3515,8 @@ static int hda_attach(pci_device_t *pdev)
 	 *
 	 * GCAP is RO/HwInit, so on most parts its "default" is the real
 	 * capability value and reading early happens to work -- but nothing
-	 * guarantees that, and both BSDs reset before reading it (FreeBSD
-	 * hdac_reset() then hdac_get_capabilities(), NetBSD hdaudio_reset()
-	 * then hdaudio_init()).  hda_quiesce() takes its own provisional
-	 * read to bound the loop that stops the stream engines; this is the
+	 * guarantees that.  hda_quiesce() takes its own provisional read to
+	 * bound the loop that stops the stream engines; this is the
 	 * authoritative one.
 	 */
 	if (hda_controller_reset(d) != 0) {
@@ -3324,15 +3545,6 @@ static int hda_attach(pci_device_t *pdev)
 		hda_detach_partial(d);
 		return -ENODEV;
 	}
-	{
-		int i;
-		for (i = 0; i < 15; i++) {
-			if (d->codec_mask & (1u << i)) {
-				d->codec_addr = (uint8_t)i;
-				break;
-			}
-		}
-	}
 	/* STATESTS is RW1C and comes out of reset with the codec-present bits
 	 * latched.  Clear them now, or arming CIE below immediately raises a
 	 * state-change interrupt on a level-triggered shared line. */
@@ -3344,64 +3556,19 @@ static int hda_attach(pci_device_t *pdev)
 	}
 
 	/*
-	 * Claim the IRQ line BEFORE arming the controller's interrupts.
-	 *
-	 * INTCTL.GIE makes the controller assert its PCI INTx, which is level
-	 * triggered and shared -- on the emulated 'pc' machine the HDA lands
-	 * on IRQ 10 alongside an IDE channel.  Arming it with no handler
-	 * registered means nothing ever acknowledges the source, so the line
-	 * stays asserted and the other device's handler is re-entered forever:
-	 * attach never returns, audio_init never returns, and the boot wedges
-	 * with the CPU parked in ide_irq_dispatch.  That is exactly what this
-	 * driver did, which is why it hung the moment an HDA controller was
-	 * actually present.  Registering first means the very first assertion
-	 * has somewhere to go.
+	 * An interrupt that is proven to arrive, installed BEFORE the
+	 * controller's interrupts are armed: INTCTL.GIE makes the controller
+	 * assert a level-triggered, shared INTx, and armed with no handler
+	 * behind it nothing acknowledges the source -- the line stays
+	 * asserted and the boot wedges inside some other device's handler.
+	 * This driver refills the DMA ring from the completion interrupt, so
+	 * it cannot run usefully without one: no proven interrupt, no attach.
 	 */
-	/*
-	 * No usable interrupt line means the controller must not be armed at
-	 * all.  GIE with no handler registered is the wedge described above,
-	 * just with nobody at all to service the line instead of the wrong
-	 * driver -- STATESTS and RIRBSTS would never be acknowledged and the
-	 * level-triggered INTx would stay asserted forever.  Since this
-	 * driver refills the DMA ring from the completion path, it cannot run
-	 * usefully without interrupts anyway; fail the attach rather than
-	 * register a device that can never play past its first buffers.
-	 */
-	if (d->irq < 0) {
-		kprintf("hda: no usable IRQ line; not attaching\n");
+	if (hda_setup_irq(d) != 0) {
+		kprintf("hda: no usable interrupt; not attaching\n");
 		hda_detach_partial(d);
 		return -ENXIO;
 	}
-	/* Shared PCI INTx -- see the note in ac97.c. */
-	if (request_irq((unsigned int)d->irq, hda_irq_handler,
-	                IRQF_SHARED, "hda", d) != 0) {
-		kprintf("hda: could not claim IRQ %d\n", d->irq);
-		hda_detach_partial(d);
-		return -EBUSY;
-	}
-	d->irq_claimed = 1;
-	if (d->msi) {
-		if (pci_enable_msi(d->pdev, (uint8_t)d->irq) != 0) {
-			kprintf("hda: could not enable MSI\n");
-			hda_detach_partial(d);
-			return -ENXIO;
-		}
-		d->msi_enabled = 1;
-		kprintf("hda: using MSI vector 0x%x\n", (unsigned)d->irq);
-	}
-
-	/* Now safe to arm.  Some controllers only latch a codec response with
-	 * CIE armed, so this has to precede the first verb.
-	 *
-	 * SIE for our output descriptor has to be armed here too.  Without it
-	 * SDCTL.IOCE still sets SDSTS.BCIS on every completed buffer, but the
-	 * controller never raises the interrupt, so no completion is ever
-	 * credited: the ring is refilled from the completion path, so a cyclic
-	 * stream just replays its 32 slots forever and a writer wedges as soon
-	 * as the FIFO fills. */
-	hda_write32(d, HDA_REG_INTCTL,
-	            HDA_INTCTL_GIE | HDA_INTCTL_CIE |
-	            HDA_INTCTL_SIE(d->sd_index));
 
 	/*
 	 * First real conversation with each codec.  STATESTS records which
@@ -3438,71 +3605,6 @@ static int hda_attach(pci_device_t *pdev)
 			return -EIO;
 		}
 		d->codec_addr = (uint8_t)first;
-	}
-
-	/*
-	 * If the IRQ came from pci_route_intx() rather than the firmware,
-	 * the GSI is a guess from the conventional PIRQ swizzle and has to
-	 * be proven before anything relies on it.  Nothing so far has: the
-	 * synchronous verb path polls RIRBWP, so the codec answered above
-	 * whether or not interrupts work.
-	 *
-	 * Provoke one deliberately.  RINTCNT is normally half the ring so
-	 * the boot-time graph walk does not take an interrupt per verb;
-	 * drop it to 1 for a single exchange, which must then raise the
-	 * RIRB response interrupt, and put it back.  3.3.28 wants the DMA
-	 * engine stopped while this field changes.
-	 *
-	 * A silent probe means the guess was wrong.  Give the line back and
-	 * refuse the attach — the alternative is a /dev/audio that accepts
-	 * writes and never completes a buffer, since this driver refills
-	 * the ring from the completion path.
-	 *
-	 * MSI gets the same proof.  It is not a guess, but it is the first
-	 * interrupt path this driver takes on real UEFI hardware, and a
-	 * silent one would wedge the same way.
-	 */
-	if (d->intx_routed || d->msi) {
-		uint32_t before = d->intr_count;
-		uint32_t dummy;
-		unsigned int budget;
-
-		hda_write8(d, HDA_REG_RIRBCTL, 0);
-		hda_write16(d, HDA_REG_RINTCNT, 1);
-		hda_write8(d, HDA_REG_RIRBCTL,
-		           HDA_RIRBCTL_RUN | HDA_RIRBCTL_RINTCTL);
-
-		(void)hda_try_verb(d, d->codec_addr, 0, HDA_VERB_GET_PARAMETER,
-		                   HDA_PARAM_VENDOR_ID, &dummy);
-		for (budget = 0; budget < HDA_VERB_TIMEOUT; budget++) {
-			if (d->intr_count != before) {
-				break;
-			}
-		}
-
-		hda_write8(d, HDA_REG_RIRBCTL, 0);
-		hda_write16(d, HDA_REG_RINTCNT, (uint16_t)(d->rirb_entries / 2));
-		hda_write8(d, HDA_REG_RIRBCTL,
-		           HDA_RIRBCTL_RUN | HDA_RIRBCTL_RINTCTL);
-
-		if (d->intr_count == before) {
-			if (d->msi) {
-				kprintf("hda: no MSI arrived; not attaching\n");
-			} else {
-				kprintf("hda: no interrupt on the routed GSI; "
-				        "the PIRQ convention does not hold "
-				        "for this device — not attaching\n");
-			}
-			/* Disarm before dropping the handler: a level-triggered
-			 * INTx with nobody to acknowledge it is the wedge the
-			 * note above describes. */
-			hda_write32(d, HDA_REG_INTCTL, 0);
-			hda_detach_partial(d);
-			return -ENXIO;
-		}
-		kprintf("hda: %s verified (%u interrupt(s))\n",
-		        d->msi ? "MSI" : "routed GSI",
-		        d->intr_count - before);
 	}
 
 	if (hda_output_stream_init(d) != 0) {
@@ -3549,9 +3651,10 @@ static int hda_attach(pci_device_t *pdev)
 			        "once the prebuffer fills\n");
 		}
 	}
-	kprintf("hda: %04x:%04x oss=%u iss=%u codecs=0x%04x cad=%u "
-	        "vid=0x%08x corb=%u rirb=%u\n",
-	        pdev->vendor_id, pdev->device_id, d->oss, d->iss,
+	kprintf("hda: %04x:%04x class %02x%02x%02x oss=%u iss=%u "
+	        "codecs=0x%04x cad=%u vid=0x%08x corb=%u rirb=%u\n",
+	        pdev->vendor_id, pdev->device_id, pdev->kdev->class,
+	        pdev->kdev->subclass, pdev->kdev->progif, d->oss, d->iss,
 	        d->codec_mask, d->codec_addr, vendor_id,
 	        d->corb_entries, d->rirb_entries);
 	/* Silence with a healthy-looking graph usually means verbs are being
@@ -3559,6 +3662,32 @@ static int hda_attach(pci_device_t *pdev)
 	if (d->verb_timeouts != 0) {
 		kprintf("hda: %u verb timeout(s) during configuration\n",
 		        d->verb_timeouts);
+	}
+	return 0;
+}
+
+/*
+ * Intel HD Audio functions that firmware presents as a generic audio
+ * device (class 04h, subclass 01h) when the audio DSP is enabled.  BAR0 is
+ * still the standard HDA register block and the legacy bring-up drives the
+ * analog codec normally; matching on subclass 03h alone made such a
+ * machine come up with no /dev/audio at all.
+ */
+static int hda_dsp_mode_id(const pci_device_t *pdev)
+{
+	static const uint16_t ids[] = {
+		0x9d71, 0x9dc8, 0x06c8, 0xa0c8, 0x51c8, 0x4dc8,
+	};
+	size_t i;
+
+	if (pdev->vendor_id != HDA_PCI_VENDOR_INTEL ||
+	    pdev->kdev->subclass != HDA_PCI_SUBCLASS_AUDIO) {
+		return 0;
+	}
+	for (i = 0; i < sizeof(ids) / sizeof(ids[0]); i++) {
+		if (ids[i] == pdev->device_id) {
+			return 1;
+		}
 	}
 	return 0;
 }
@@ -3576,7 +3705,7 @@ void hda_init(void)
 		cls = pdev->kdev->class;
 		sub = pdev->kdev->subclass;
 		if (cls != HDA_PCI_CLASS_MULTIMEDIA ||
-		    sub != HDA_PCI_SUBCLASS_HDA) {
+		    (sub != HDA_PCI_SUBCLASS_HDA && !hda_dsp_mode_id(pdev))) {
 			continue;
 		}
 		(void)hda_attach(pdev);

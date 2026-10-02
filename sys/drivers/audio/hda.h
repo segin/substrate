@@ -127,6 +127,8 @@
 
 /* RIRBCTL bits */
 #define HDA_RIRBCTL_RINTCTL      0x01
+/* RIRBSTS: response interrupt flag (RW1C). */
+#define HDA_RIRBSTS_RINTFL       0x01
 #define HDA_RIRBCTL_RUN          0x02
 #define HDA_RIRBCTL_OIC          0x04
 
