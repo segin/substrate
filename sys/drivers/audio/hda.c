@@ -348,6 +348,16 @@ typedef struct hda_dev {
 	 * hardware position register. */
 	volatile uint32_t writes_queued;
 	volatile uint32_t slots_played;
+	/* writes_queued just after the last slot that held real audio. */
+	uint32_t         data_end;
+	/* SDnFIFOS + 1: how far the engine's fetch can run ahead of LPIB. */
+	uint32_t         fifo_size;
+	/*
+	 * A stream descriptor that would not acknowledge SRST is unusable
+	 * (3.3.35).  Latched here and returned to writers instead of retrying
+	 * the reset on every write; cleared by flush, close or a format change.
+	 */
+	int              stream_error;
 
 	int              running;       /* SDCTL.RUN has been set; don't
 	                                 * re-write CTL on every queue */
@@ -1550,12 +1560,25 @@ static int hda_stream_reset(hda_dev_t *d)
 static int hda_stream_start(hda_dev_t *d)
 {
 	uint8_t ctl2;
+	uint32_t i;
 	int rc;
 
 	rc = hda_stream_reset(d);
 	if (rc != 0) {
 		return rc;
 	}
+
+	/*
+	 * With RUN set the engine fetches every descriptor in CBL, cyclically.
+	 * Slots 0..writes_queued-1 hold what was just staged; every other slot
+	 * may still hold audio from before a flush, format change or stop, and
+	 * would be replayed -- looping, since the counters park level once the
+	 * new data runs out.  Silence them before arming.
+	 */
+	for (i = d->writes_queued; i < HDA_BDL_ENTRIES; i++) {
+		memset(d->chunk[i], 0, HDA_CHUNK_BYTES);
+	}
+	__sync_synchronize();
 
 	hda_write32(d, d->sd_base + HDA_SD_BDPL, (uint32_t)d->bdl_phys);
 	hda_write32(d, d->sd_base + HDA_SD_BDPU, 0);
@@ -1570,6 +1593,12 @@ static int hda_stream_start(hda_dev_t *d)
 	ctl2 = (uint8_t)((ctl2 & (uint8_t)~HDA_SDCTL2_STRM_MASK) |
 	                 (uint8_t)(d->stream_tag << HDA_SDCTL2_STRM_SHIFT));
 	hda_write8(d, d->sd_base + HDA_SD_CTL2, ctl2);
+
+	/* FIFOS is valid once the format is programmed (3.3.40). */
+	d->fifo_size = (uint32_t)hda_read16(d, d->sd_base + HDA_SD_FIFOSIZE) + 1U;
+	if (d->fifo_size < 64 || d->fifo_size > HDA_CHUNK_BYTES / 2) {
+		d->fifo_size = 256;
+	}
 
 	/* Drop anything latched from the previous run before arming. */
 	hda_write8(d, d->sd_base + HDA_SD_STS,
@@ -1634,7 +1663,8 @@ static void hda_feed(hda_dev_t *d, int flush_tail, int max_slots)
 	for (; max_slots > 0; max_slots--) {
 		uint32_t played = __atomic_load_n(&d->slots_played,
 		                                  __ATOMIC_ACQUIRE);
-		uint32_t in_flight = d->writes_queued - played;
+		/* Signed: completions can run past what was queued. */
+		int32_t in_flight = (int32_t)(d->writes_queued - played);
 		size_t avail;
 		size_t copy_len;
 		uint8_t slot;
@@ -1644,13 +1674,9 @@ static void hda_feed(hda_dev_t *d, int flush_tail, int max_slots)
 		 * HDA stream is cyclic and never stops while RUN is set, so
 		 * the controller is always somewhere in the ring; filling all
 		 * HDA_BDL_ENTRIES of them means next_idx wraps onto the slot
-		 * being DMA'd right now and overwrites it mid-fetch.  The
-		 * softc's own back-pressure comment said BDL_ENTRIES - 1 all
-		 * along, and ac97_feed() uses that bound -- AC'97 just
-		 * happens to be LVI-bounded, so it stops at the end of the
-		 * queue instead of lapping it.
+		 * being DMA'd right now and overwrites it mid-fetch.
 		 */
-		if (in_flight >= (HDA_BDL_ENTRIES - 1)) {
+		if (in_flight >= (int32_t)(HDA_BDL_ENTRIES - 1)) {
 			break;
 		}
 		avail = audio_fifo_used(&d->fifo);
@@ -1659,6 +1685,35 @@ static void hda_feed(hda_dev_t *d, int flush_tail, int max_slots)
 		}
 		if (avail < HDA_CHUNK_BYTES && !flush_tail) {
 			break;   /* wait for a whole slot's worth */
+		}
+
+		/*
+		 * Near an underrun the engine may already be at or past the
+		 * slot next_idx names: completions are credited only at the
+		 * next interrupt, so the counters trail it.  Writing there
+		 * would overwrite a buffer mid-fetch and skip the start of the
+		 * new audio.  Ask LPIB where the engine is, and resume after
+		 * it -- one slot further if it is within a FIFO's worth of the
+		 * end of its slot and may already be fetching the next.  The
+		 * slots skipped play as the silence they hold.
+		 */
+		if (d->running && in_flight <= 2) {
+			uint32_t pos = hda_read32(d, d->sd_base + HDA_SD_LPIB);
+			uint32_t eng = (pos / HDA_CHUNK_BYTES) % HDA_BDL_ENTRIES;
+			uint32_t ahead = (eng + HDA_BDL_ENTRIES -
+			                  played % HDA_BDL_ENTRIES) %
+			                 HDA_BDL_ENTRIES;
+
+			if (pos % HDA_CHUNK_BYTES + d->fifo_size >=
+			    HDA_CHUNK_BYTES) {
+				ahead++;
+			}
+			if (in_flight <= (int32_t)ahead) {
+				d->writes_queued = played + ahead + 1;
+				d->next_idx = (uint8_t)(d->writes_queued %
+				                        HDA_BDL_ENTRIES);
+				continue;
+			}
 		}
 		copy_len = (avail > HDA_CHUNK_BYTES) ? HDA_CHUNK_BYTES : avail;
 
@@ -1676,8 +1731,32 @@ static void hda_feed(hda_dev_t *d, int flush_tail, int max_slots)
 		__sync_synchronize();
 
 		d->writes_queued++;
+		d->data_end = d->writes_queued;
 		d->next_idx = (uint8_t)((slot + 1U) % HDA_BDL_ENTRIES);
 	}
+}
+
+/*
+ * Stop the engine and put the ring back to a known position, in process
+ * context: spec 4.5.6 keeps the ISR off the stream Control register.  BCIS,
+ * FIFOE and DESE are sticky across clearing RUN (3.3.36), so they are
+ * cleared once RUN reads back 0; otherwise a completion latched in the last
+ * frame would be credited to the next run's fresh counters.  The next start
+ * resets the descriptor and the DMA resumes at entry 0, so staging restarts
+ * there.  Caller holds feed_lock.
+ */
+static void hda_ring_reset(hda_dev_t *d)
+{
+	/* Unconditionally: after a descriptor error running is already 0
+	 * while the control register still holds IOCE and friends. */
+	(void)hda_stream_stop(d);
+	hda_write8(d, d->sd_base + HDA_SD_STS,
+	           HDA_SDSTS_BCIS | HDA_SDSTS_FIFOE | HDA_SDSTS_DESE);
+	d->halt_pending  = 0;
+	d->next_idx      = 0;
+	d->writes_queued = 0;
+	d->slots_played  = 0;
+	d->data_end      = 0;
 }
 
 /*
@@ -1698,18 +1777,10 @@ static void hda_kick(hda_dev_t *d)
 	 * both trying to perform Read-Modify-Write cycles on the register."
 	 *
 	 * Everything really has drained by now, so the ring can go back to a
-	 * known position: the next start resets the descriptor, and the DMA
-	 * resumes at BDL entry 0 -- staging anywhere else would play the
-	 * first buffers out of order.
+	 * known position.
 	 */
 	if (d->halt_pending) {
-		if (d->running) {
-			(void)hda_stream_stop(d);
-		}
-		d->halt_pending = 0;
-		d->next_idx      = 0;
-		d->writes_queued = 0;
-		d->slots_played  = 0;
+		hda_ring_reset(d);
 	}
 
 	/*
@@ -1721,14 +1792,17 @@ static void hda_kick(hda_dev_t *d)
 	 */
 	hda_feed(d, 0, HDA_BDL_ENTRIES);
 
-	if (!d->running) {
-		uint32_t in_flight;
-		in_flight = d->writes_queued -
-		            __atomic_load_n(&d->slots_played, __ATOMIC_ACQUIRE);
-		if (in_flight >= HDA_PREBUFFER_SLOTS ||
+	if (!d->running && d->stream_error == 0) {
+		int32_t in_flight;
+		in_flight = (int32_t)(d->writes_queued -
+		            __atomic_load_n(&d->slots_played, __ATOMIC_ACQUIRE));
+		if (in_flight >= (int32_t)HDA_PREBUFFER_SLOTS ||
 		    (in_flight > 0 && audio_fifo_used(&d->fifo) == 0)) {
-			if (hda_stream_start(d) != 0) {
-				kprintf("hda: failed to start output stream\n");
+			int rc = hda_stream_start(d);
+			if (rc != 0) {
+				/* Not retried on every write: see stream_error. */
+				d->stream_error = rc;
+				kprintf("hda: output stream will not start\n");
 			}
 		}
 	}
@@ -1776,22 +1850,69 @@ static void hda_one_intr(hda_dev_t *d, uint32_t status)
 	 * write-path back-pressure. */
 	sdsts = hda_read8(d, d->sd_base + HDA_SD_STS);
 	if (sdsts & (HDA_SDSTS_BCIS | HDA_SDSTS_FIFOE | HDA_SDSTS_DESE)) {
+		/*
+		 * Acknowledge exactly the bits observed, at once.  Doing it
+		 * after the memset and copies below erased a completion that
+		 * latched meanwhile without it ever being counted.
+		 */
+		hda_write8(d, d->sd_base + HDA_SD_STS,
+		           sdsts & (HDA_SDSTS_BCIS | HDA_SDSTS_FIFOE |
+		                    HDA_SDSTS_DESE));
 		if (sdsts & HDA_SDSTS_BCIS) {
 			unsigned long f = spinlock_acquire_irq(&d->feed_lock);
-			uint32_t done = __atomic_fetch_add(&d->slots_played, 1,
-			                                   __ATOMIC_ACQ_REL);
-			/* The ring is cyclic and never stops while RUN is set,
-			 * so a slot we do not refill plays again.  Zero it now;
-			 * hda_feed below overwrites it if data is waiting. */
-			if (d->chunk[0] != NULL) {
-				memset(d->chunk[done % HDA_BDL_ENTRIES], 0,
-				       HDA_CHUNK_BYTES);
+			uint32_t done;
+			int32_t in_flight;
+
+			/*
+			 * A completion latched just before RUN was cleared can
+			 * arrive after the stop; it belongs to no stream and
+			 * must not be credited to the next one's counters.
+			 */
+			if (!d->running) {
+				spinlock_release_irq(&d->feed_lock, f);
+				goto bcis_done;
 			}
-			/* Autonomously refill the slot this completion
+			/*
+			 * Credit the slots the engine has finished with, from
+			 * its position rather than one per interrupt.  BCIS is
+			 * a single status bit, so completions coalesce, and a
+			 * count that drifts from the engine makes the handler
+			 * zero, and the feeder fill, the wrong slots.  LPIB
+			 * trails the fetch position by at most the FIFO, so a
+			 * slot before LPIB's is certainly fetched; the one LPIB
+			 * is in is credited at the next completion.
+			 */
+			done = __atomic_load_n(&d->slots_played,
+			                       __ATOMIC_ACQUIRE);
+			{
+				uint32_t pos = hda_read32(d, d->sd_base +
+				                          HDA_SD_LPIB);
+				uint32_t eng = (pos / HDA_CHUNK_BYTES) %
+				               HDA_BDL_ENTRIES;
+				uint32_t n = (eng + HDA_BDL_ENTRIES -
+				              done % HDA_BDL_ENTRIES) %
+				             HDA_BDL_ENTRIES;
+				uint32_t i;
+
+				/* The ring is cyclic and never stops while RUN
+				 * is set, so a slot we do not refill plays
+				 * again.  Zero what was consumed; hda_feed
+				 * below overwrites it if data is waiting. */
+				for (i = 0; i < n && d->chunk[0] != NULL; i++) {
+					memset(d->chunk[(done + i) %
+					                HDA_BDL_ENTRIES], 0,
+					       HDA_CHUNK_BYTES);
+				}
+				__atomic_store_n(&d->slots_played, done + n,
+				                 __ATOMIC_RELEASE);
+			}
+			/* Autonomously refill the slots this completion
 			 * freed, so playback survives producer jitter.
-			 * Bounded: one completion frees one slot, and this
-			 * runs with interrupts masked. */
+			 * Bounded: this runs with interrupts masked. */
 			hda_feed(d, 0, HDA_FEED_SLOTS_PER_IRQ);
+			in_flight = (int32_t)(d->writes_queued -
+			                      __atomic_load_n(&d->slots_played,
+			                                      __ATOMIC_ACQUIRE));
 			/*
 			 * A cyclic stream never stops on its own: with RUN set
 			 * the controller keeps walking the ring and raising a
@@ -1821,34 +1942,36 @@ static void hda_one_intr(hda_dev_t *d, uint32_t status)
 			 * little longer; the slots were zeroed above, so what
 			 * follows the tail is silence rather than stale audio.
 			 *
-			 * Tested signed and <=, not ==: BCIS is a single status
-			 * bit, so two buffers completing before the handler
-			 * runs coalesce into one interrupt and slots_played
-			 * permanently lags the ring.  An equality test would
-			 * never land -- the counters cross instead of meeting.
-			 * The FIFO check keeps this from flagging a stream that
-			 * still has data staged but not yet in the ring.
+			 * Keep the counters level on every completion that
+			 * finds the ring empty, whatever the software FIFO
+			 * holds.  The engine walks the ring whether or not it
+			 * was refilled, so with a sub-slot residue left in the
+			 * FIFO and the producer paused, slots_played used to
+			 * run past writes_queued with nothing to clamp it --
+			 * and every later feed saw a negative ring and stopped
+			 * for good.  writes_queued is brought up to the engine
+			 * (the slots in between played as silence), never
+			 * slots_played down, which would desynchronise it.
+			 *
+			 * Once a whole slot of silence has been consumed after
+			 * the last audio, that audio is out of the controller's
+			 * FIFO and the stream can be stopped.
 			 */
-			if (audio_fifo_used(&d->fifo) == 0 &&
-			    (int32_t)(d->writes_queued -
-			              __atomic_load_n(&d->slots_played,
-			                              __ATOMIC_ACQUIRE)) <= 0) {
-				/*
-				 * Park the counters level.  Completions keep
-				 * arriving until the deferred stop lands, and
-				 * hda_feed() derives in_flight as an unsigned
-				 * difference -- letting slots_played run past
-				 * writes_queued would wrap it to ~4 billion and
-				 * wedge the feeder permanently.
-				 */
-				__atomic_store_n(&d->slots_played,
-				                 d->writes_queued,
-				                 __ATOMIC_RELEASE);
-				d->halt_pending = 1;
+			if (in_flight <= 0) {
+				uint32_t sp = __atomic_load_n(&d->slots_played,
+				                              __ATOMIC_ACQUIRE);
+
+				d->writes_queued = sp;
+				d->next_idx = (uint8_t)(sp % HDA_BDL_ENTRIES);
+				if (audio_fifo_used(&d->fifo) == 0 &&
+				    (int32_t)(sp - d->data_end) >= 1) {
+					d->halt_pending = 1;
+				}
 			}
 			spinlock_release_irq(&d->feed_lock, f);
-			(void)sleepq_wake_all(d);
+			sched_wakeup(d);
 		}
+bcis_done:
 		/*
 		 * Stream errors used to be acknowledged without a word.  A
 		 * FIFO underrun means the feeder fell behind; a descriptor
@@ -1874,10 +1997,9 @@ static void hda_one_intr(hda_dev_t *d, uint32_t status)
 			d->running = 0;
 			d->halt_pending = 1;
 			spinlock_release_irq(&d->feed_lock, f);
+			/* No completion will follow: wake the writer. */
+			sched_wakeup(d);
 		}
-		hda_write8(d, d->sd_base + HDA_SD_STS,
-		           sdsts & (HDA_SDSTS_BCIS | HDA_SDSTS_FIFOE |
-		                    HDA_SDSTS_DESE));
 	}
 	/*
 	 * INTSTS deliberately not written.  All of GIS, CIS and SIS are RO
@@ -2077,25 +2199,14 @@ static int hda_close(audio_dev_t *adev)
 	 */
 	unsigned long flags = spinlock_acquire_irq(&d->feed_lock);
 
-	/* Clear RUN and wait for the engine to idle before touching anything
-	 * else -- 4.5.4, the bit does not drop on the write. */
-	(void)hda_stream_stop(d);
-	/* Drop latched status bits so stale BCIS doesn't bump the next
-	 * stream's slots_played at open. */
-	hda_write8(d, d->sd_base + HDA_SD_STS,
-	           HDA_SDSTS_BCIS | HDA_SDSTS_FIFOE | HDA_SDSTS_DESE);
-
-	/* Reset ring back-pressure state.  Otherwise the second cat
-	 * inherits writes_queued from this stream but slots_played
-	 * never catches up (no more IRQs after the stop), so the
-	 * back-pressure spin thinks the ring is permanently full. */
-	d->writes_queued = 0;
-	d->slots_played  = 0;
-	d->next_idx      = 0;
-	d->halt_pending  = 0;
+	/* Stop (RUN verified clear, 4.5.4), drop latched status and reset the
+	 * ring counters, so the next stream does not inherit them. */
+	hda_ring_reset(d);
 	audio_fifo_reset(&d->fifo);
+	d->stream_error = 0;
 
 	spinlock_release_irq(&d->feed_lock, flags);
+	sched_wakeup(d);
 
 	/* Surface anything the completion handler counted but could not
 	 * print.  Underruns point at the feeder, descriptor errors at the
@@ -2147,16 +2258,9 @@ static int hda_set_params(audio_dev_t *adev, audio_info_t *info)
 	 * a format change mid-stream is the application telling us the old
 	 * audio is finished with.
 	 */
-	if (d->running) {
-		(void)hda_stream_stop(d);
-	}
-	hda_write8(d, d->sd_base + HDA_SD_STS,
-	           HDA_SDSTS_BCIS | HDA_SDSTS_FIFOE | HDA_SDSTS_DESE);
-	d->next_idx      = 0;
-	d->writes_queued = 0;
-	d->slots_played  = 0;
-	d->halt_pending  = 0;
+	hda_ring_reset(d);
 	audio_fifo_reset(&d->fifo);
+	d->stream_error = 0;
 
 	/* Remembered because a stream reset clears SDnFMT, and every start
 	 * goes through one. */
@@ -2164,6 +2268,8 @@ static int hda_set_params(audio_dev_t *adev, audio_info_t *info)
 	hda_write16(d, d->sd_base + HDA_SD_FMT, fmt);
 
 	spinlock_release_irq(&d->feed_lock, flags);
+	/* With RUN clear no completion will come to wake a blocked writer. */
+	sched_wakeup(d);
 
 	/* The converter has its own copy of the format; leaving it on the
 	 * old one makes the codec decode the stream wrongly (wrong rate /
@@ -2203,6 +2309,12 @@ static int hda_write(audio_dev_t *adev, const void *buf, size_t len)
 
 		hda_kick(d);   /* prime / restart; no-op while IRQ feeds */
 
+		/* A descriptor that will not reset cannot play: say so rather
+		 * than block forever waiting for completions. */
+		if (d->stream_error != 0) {
+			return total_consumed ? (int)total_consumed :
+			                        d->stream_error;
+		}
 		if (total_consumed >= len) {
 			break;
 		}
@@ -2325,15 +2437,12 @@ static int hda_flush(audio_dev_t *adev)
 	/* Stop, do not park in reset: asserting SRST and leaving it set wedges
 	 * the stream descriptor for every later start.  hda_stream_stop()
 	 * waits for RUN to actually drop before we discard the ring state. */
-	(void)hda_stream_stop(d);
-	hda_write8(d, d->sd_base + HDA_SD_STS,
-	           HDA_SDSTS_BCIS | HDA_SDSTS_FIFOE | HDA_SDSTS_DESE);
-	d->next_idx      = 0;
-	d->writes_queued = 0;
-	d->slots_played  = 0;
-	d->halt_pending  = 0;
+	hda_ring_reset(d);
 	audio_fifo_reset(&d->fifo);
+	d->stream_error = 0;
 	spinlock_release_irq(&d->feed_lock, flags);
+	/* With RUN clear no completion will come to wake a blocked writer. */
+	sched_wakeup(d);
 	return 0;
 }
 
