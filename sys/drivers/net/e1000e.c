@@ -160,7 +160,13 @@
 #define ICR_RXT0            (1u << 7)
 #define ICR_INT_ASSERTED    (1u << 31)   /* 82571+: this device asserted INTx */
 
-#define E1K2_IMS            (ICR_RXT0 | ICR_RXDMT0 | ICR_RXO | ICR_TXDW | ICR_LSC)
+/* TXDW is left masked: transmit reclaims by testing DD, so a per-frame
+ * completion interrupt would only be work for nothing. */
+#define E1K2_IMS            (ICR_RXT0 | ICR_RXDMT0 | ICR_RXO | ICR_LSC)
+
+/* The rings live in DMA memory the MAC writes behind the compiler's back;
+ * on x86 a compiler barrier is all the ordering they need. */
+#define e2k_barrier()       __asm__ __volatile__("" ::: "memory")
 
 /* Legacy receive descriptor status bits. */
 #define RXD_STAT_DD         0x01
@@ -231,9 +237,9 @@ static struct {
     int                   irq;
     int                   irq_kind;
     volatile uint32_t     intr_count;
-    struct e1k2_rx_desc  *rx_ring;
+    volatile struct e1k2_rx_desc *rx_ring;
     uint32_t              rx_ring_phys;
-    struct e1k2_tx_desc  *tx_ring;
+    volatile struct e1k2_tx_desc *tx_ring;
     uint32_t              tx_ring_phys;
     uint8_t              *rx_buf;
     uint32_t              rx_buf_phys;
@@ -389,9 +395,10 @@ static void e2k_rx_drain(void) {
     /* RDT trails our cursor by one: tail must never equal head, or the
      * hardware reads the ring as full and stops receiving. */
     for (;;) {
-        struct e1k2_rx_desc *d = &e2k.rx_ring[e2k.rx_cur];
+        volatile struct e1k2_rx_desc *d = &e2k.rx_ring[e2k.rx_cur];
         if (!(d->status & RXD_STAT_DD))
             break;
+        e2k_barrier();               /* length and buffer after DD */
 
         uint16_t len = d->length;
 
@@ -409,6 +416,7 @@ static void e2k_rx_drain(void) {
         d->status = 0;
         uint32_t prev = e2k.rx_cur;
         e2k.rx_cur = (e2k.rx_cur + 1) % E1K2_RX_DESCS;
+        e2k_barrier();               /* descriptor recycled before the tail */
         e2k_write(R_RDT, prev);
     }
 }
@@ -457,43 +465,78 @@ static int e2k_irq(unsigned int irq, void *dev_id, void *frame) {
 
 /* ----- TX path ----- */
 
+/* A slot is free once its last frame has retired (or it was never used). */
+static int e2k_tx_slot_busy(uint32_t slot) {
+    volatile struct e1k2_tx_desc *d = &e2k.tx_ring[slot];
+    return d->cmd != 0 && !(d->status & TXD_STAT_DD);
+}
+
 static int e2k_xmit(netdev_t *dev, const void *frame, size_t len) {
+    const uint8_t *f = frame;
     (void)dev;
     if (!frame || len == 0) return -EINVAL;
-    if (len > E1K2_MAX_FRAME) return -EMSGSIZE;
+
+    /*
+     * The MAC appends the FCS (IFCS), so the buffer itself may be at most
+     * 1514 bytes, or 1518 with an 802.1Q tag in bytes 12-13.
+     */
+    size_t max = (len >= 14 && f[12] == 0x81 && f[13] == 0x00)
+                 ? E1K2_MAX_FRAME : E1K2_MAX_FRAME - 4;
+    if (len > max) return -EMSGSIZE;
 
     unsigned long flags = spinlock_acquire_irq(&e2k_tx_lock);
 
-    uint32_t slot = e2k.tx_cur;
-    struct e1k2_tx_desc *d = &e2k.tx_ring[slot];
-
-    /* Wait for this slot's previous frame to retire before reusing its
-     * buffer; bounded tightly when the caller had interrupts off (the RX
-     * interrupt's ARP/ICMP replies), where a long spin freezes the machine
-     * and the upper layer retransmits anyway. */
-    if (d->cmd != 0 && !(d->status & TXD_STAT_DD)) {
-        int spins = 0;
-        int limit = (flags & 0x200ul) ? 1000000 : 10000;
-        while (!(d->status & TXD_STAT_DD)) {
-            if (++spins > limit) {
-                spinlock_release_irq(&e2k_tx_lock, flags);
-                e2k.netdev.tx_dropped++;
-                return -EIO;
-            }
-        }
+    /*
+     * The MAC stops transmit DMA while the link is down, so anything queued
+     * then would only sit in the ring; drop it now and let the upper layer
+     * retry once there is a link.
+     */
+    if (!(e2k_read(R_STATUS) & STATUS_LU)) {
+        spinlock_release_irq(&e2k_tx_lock, flags);
+        e2k.netdev.tx_dropped++;
+        return -ENETDOWN;
     }
 
-    memcpy(e2k.tx_buf + slot * E1K2_BUF_SIZE, frame, len);
+    uint32_t slot = e2k.tx_cur;
+    uint32_t next = (slot + 1) % E1K2_TX_DESCS;
 
+    /*
+     * TDH == TDT means "no work" to the MAC, so software may own at most
+     * N-1 descriptors: the tail must never be advanced onto a descriptor
+     * the hardware has not finished with.  A full ring is back-pressure,
+     * not something to wait out with interrupts disabled -- drop at once
+     * and let the upper layer retransmit.  A transmitter that has stopped
+     * is the watchdog's business.
+     */
+    if (e2k_tx_slot_busy(slot) || e2k_tx_slot_busy(next)) {
+        spinlock_release_irq(&e2k_tx_lock, flags);
+        e2k.netdev.tx_dropped++;
+        return -ENOBUFS;
+    }
+
+    uint8_t *buf = e2k.tx_buf + slot * E1K2_BUF_SIZE;
+    memcpy(buf, frame, len);
+
+    /* The MAC pads short frames (TCTL.PSP) only from 17 bytes up; pad in
+     * software to the 60-byte minimum so nothing shorter reaches it. */
+    uint32_t xlen = (uint32_t)len;
+    if (xlen < 60) {
+        memset(buf + len, 0, 60 - len);
+        xlen = 60;
+    }
+
+    volatile struct e1k2_tx_desc *d = &e2k.tx_ring[slot];
     d->addr    = (uint64_t)(e2k.tx_buf_phys + slot * E1K2_BUF_SIZE);
-    d->length  = (uint16_t)len;
+    d->length  = (uint16_t)xlen;
     d->cso     = 0;
     d->css     = 0;
     d->special = 0;
     d->status  = 0;
     d->cmd     = TXD_CMD_EOP | TXD_CMD_IFCS | TXD_CMD_RS;
 
-    e2k.tx_cur = (slot + 1) % E1K2_TX_DESCS;
+    e2k.tx_cur = next;
+    /* The buffer and descriptor must be in memory before the doorbell. */
+    e2k_barrier();
     e2k_write(R_TDT, e2k.tx_cur);
 
     spinlock_release_irq(&e2k_tx_lock, flags);
@@ -826,8 +869,8 @@ static int e2k_setup(pci_device_t *pdev, int kind) {
     e2k_phy_bringup();
 
     /* Rings. */
-    memset(e2k.rx_ring, 0, rx_ring_bytes);
-    memset(e2k.tx_ring, 0, tx_ring_bytes);
+    memset((void *)(uintptr_t)e2k.rx_ring, 0, rx_ring_bytes);
+    memset((void *)(uintptr_t)e2k.tx_ring, 0, tx_ring_bytes);
     for (int i = 0; i < E1K2_RX_DESCS; i++)
         e2k.rx_ring[i].addr =
             (uint64_t)(e2k.rx_buf_phys + (uint32_t)i * E1K2_BUF_SIZE);
