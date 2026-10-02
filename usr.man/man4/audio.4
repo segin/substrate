@@ -120,11 +120,40 @@ claims the device; a second process's
 fails with
 .BR EBUSY .
 The claim is released when the owning process closes the device or
-exits.  A blocked
+exits.  While a thread holds it, only that thread may change the
+playback format (encoding, precision, channels or rate); anyone else's
+.B AUDIO_SETINFO
+doing so fails with
+.BR EBUSY ,
+though gain and block size may still be set.  A blocked
 .BR write (2)
 (FIFO full, waiting on the hardware to drain) is interruptible: a
 delivered signal breaks the wait, so a player can always be
 interrupted or killed.
+.PP
+When the last descriptor is closed the device drains what is queued
+before it stops; an
+.BR open (2)
+during that drain waits for it to finish rather than having its own
+stream cut off.
+.SS Non-blocking Use
+On a descriptor opened with
+.B O_NONBLOCK
+(or switched to it with
+.BR fcntl (2)
+or
+.BR FIONBIO ),
+a
+.BR write (2)
+takes what fits and returns the count, or fails with
+.B EAGAIN
+when nothing fits.
+.BR poll (2)
+and
+.BR select (2)
+report the device writable once a fragment of space is free.  Converted
+output a backend could not take is kept and handed over first on the
+next write, so nothing written is lost.
 .SS Backends
 The following drivers register with the framework when their hardware is
 present:
@@ -155,10 +184,17 @@ Retrieve the current
 (play and record parameters plus runtime statistics).
 .B play.seek
 is the number of samples (counting every channel, in the application's
-format) written but not yet handed to the hardware; a program that
-polls it before writing never blocks in
+format) written but not yet played, including what sits in the DMA
+ring where the backend can say; a program that polls it before writing
+never blocks in
 .BR write (2).
 It is 0 on a backend that cannot report its queue.
+.B play.samples
+is the number of bytes played so far: those written, less those still
+queued.
+.TP
+.B AUDIO_WSEEK
+Return the number of bytes written but not yet played.
 .TP
 .B AUDIO_SETINFO
 Set play and/or record parameters.  Fields left at their initialized
@@ -167,7 +203,11 @@ Set play and/or record parameters.  Fields left at their initialized
 are preserved.
 .TP
 .B AUDIO_DRAIN
-Block until all queued playback samples have been emitted.
+Block until all queued playback samples have been emitted.  Fails with
+.B EINTR
+if a signal cut the wait short and
+.B EIO
+if the hardware stopped making progress.
 .TP
 .B AUDIO_FLUSH
 Discard queued playback and capture samples immediately.
@@ -215,8 +255,20 @@ Another process already holds the device for playback.
 .B EINTR
 A signal was delivered while the write blocked waiting for the hardware
 to drain, before any data was queued.
+.TP
+.B EAGAIN
+The descriptor is non-blocking and the buffer is full.
+.TP
+.B EIO
+The hardware cannot play (a stream that will not start).
+.PP
+.B AUDIO_SETINFO
+may also fail with
+.B EBUSY
+when it would change the format of a stream another thread is playing.
 .SH SEE ALSO
 .BR ioctl (2),
+.BR poll (2),
 .BR read (2),
 .BR write (2),
 .BR dsp (4),

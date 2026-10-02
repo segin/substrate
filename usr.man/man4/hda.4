@@ -1,4 +1,4 @@
-.TH HDA 4 "2026-08-09" "Substrate Kernel" "Kernel Interfaces"
+.TH HDA 4 "2026-10-02" "Substrate Kernel" "Kernel Interfaces"
 .SH NAME
 hda \- Intel High Definition Audio controller driver
 .SH SYNOPSIS
@@ -9,7 +9,9 @@ The
 driver supports audio controllers conforming to the
 .I Intel High Definition Audio Specification
 revision 1.0a \(em PCI class 0x04, subclass 0x03, the successor to
-AC'97.  It attaches to any such controller found on the PCI bus and
+AC'97 \(em and the Intel functions firmware presents as class 0x04,
+subclass 0x01 when the audio DSP is enabled (8086:9d71, 9dc8, 06c8,
+a0c8, 51c8, 4dc8).  It attaches to any such controller found on the PCI bus and
 registers the first codec with a usable analog output path as an
 .BR audio (4)
 device, published as
@@ -24,8 +26,10 @@ reports
 .B AUDIO_PROP_PLAYBACK
 alone.
 .SS Controller
-All registers live in a single MMIO BAR.  At attach the driver stops
-every DMA engine, resets the controller, waits the 521 microseconds the
+All registers live in a single MMIO BAR, which is moved below 4 GiB if
+firmware placed it above (and the function brought to D0 if it was left
+in a low-power state).  At attach the driver stops every DMA engine,
+verifies each has stopped, resets the controller, waits the 521 microseconds the
 specification requires for codec enumeration, and brings up the CORB and
 RIRB command rings at whatever size the controller advertises in
 .B CORBSIZE
@@ -39,37 +43,55 @@ not zero.  Playback uses a cyclic ring of 32 buffer-descriptor entries of
 4 KiB each, refilled from a 256 KiB software FIFO by the completion
 interrupt.
 .PP
-An interrupt line is mandatory.  The ring is refilled from the completion
-path, so a controller with no usable IRQ is not attached rather than
-being published as a device that would stop after its first few buffers.
+The engine starts once eight buffers are staged; audio the application
+stops adding to is padded out and started after 30 ms, or at once on
+.BR SNDCTL_DSP_POST .
+A stream that runs dry is stopped once a whole buffer of silence has
+followed the last audio, so its tail is played out.
+.PP
+An interrupt is mandatory.  The ring is refilled from the completion
+path, so a controller with no working interrupt is not attached rather
+than being published as a device that would stop after its first few
+buffers.  MSI is tried first, then the firmware's interrupt line, then
+legacy INTx routed through the I/O APIC by the conventional PCI swizzle;
+each is proven by provoking a codec response interrupt three times
+before it is used.
 .SS Codec
 Every codec reported in
 .B STATESTS
-is tried in turn until one yields an output path.  Within a codec the
-driver locates the audio function group, collects the analog output
-converters and the output pins that
+is asked for its vendor ID; one that does not answer is skipped, and the
+rest are tried in turn until one yields an output path.  Within a codec
+the driver powers the audio function group and every widget with its own
+power control, locates the analog output converters and the output pins
+that
 .B CONFIG_DEFAULT
 reports as physically connected, ranks the pins (speaker, then line out,
-then headphone, then anything else), and selects the best-ranked pin that
-some converter can actually reach \(em directly or through one
-intermediate mixer or selector.
+then headphone; association, then sequence), and selects the best pin
+that some converter reaches through the codec's mixers and selectors.
+.PP
+Every pin in that pin's association, and every headphone pin, is then
+driven too \(em through a second converter bound to the same stream if
+it cannot reach the first.  There is no jack detection, so headphones
+play alongside the speakers.
 .PP
 Digital widgets are skipped.  An HDMI or DisplayPort path additionally
 needs digital converter control, channel mapping and ELD handling, none
 of which is implemented, so such a pin would appear configured and stay
 silent.
 .PP
-Amplifiers along the chosen path are unmuted and set to their 0 dB step.
+Amplifiers along the chosen paths are unmuted and set to their 0 dB step.
 Amplifier parameters come from the widget only when it sets
 .RB \(lq "Amp Param Override" \(rq;
-otherwise the function group's defaults apply.  Where the pin reports the
-capability, its external amplifier (EAPD) is enabled.
+otherwise the function group's defaults apply.  The external amplifier
+enable (EAPD) is set on every pin that has one, since the amplifier is
+often wired to a pin other than the speaker's.
 .SS Formats
 Linear PCM, 8/16/20/24/32 bits, 1 to 16 channels, at the rates the
 selected converter advertises in its
 .RB \(lq "Supported PCM Size, Rates" \(rq
 parameter \(em a subset of 8, 11.025, 16, 22.05, 32, 44.1, 48, 88.2, 96,
-176.4 and 192 kHz.  48 kHz is mandatory for all codecs.
+176.4 and 192 kHz.  48 kHz is mandatory for all codecs and is always
+accepted.
 .PP
 A rate, sample width or channel count the converter does not claim is
 rejected with
@@ -99,15 +121,16 @@ Sun/NetBSD-compatible sample and control devices; see
 OSS-compatible sample device.
 .SH DIAGNOSTICS
 .TP
-.B hda: \fIvendor\fB:\fIdevice\fB oss=\fIn\fB iss=\fIn\fB codecs=\fImask\fB cad=\fIn\fB vid=\fIid\fB corb=\fIn\fB rirb=\fIn
-Attach succeeded.  Reports the PCI IDs, the output and input stream
+.B hda: \fIvendor\fB:\fIdevice\fB class \fIccsspp\fB oss=\fIn\fB iss=\fIn\fB codecs=\fImask\fB cad=\fIn\fB vid=\fIid\fB corb=\fIn\fB rirb=\fIn
+Attach succeeded.  Reports the PCI IDs and class, the output and input stream
 counts from
 .BR GCAP ,
 the codec presence mask, the codec address in use, its vendor ID, and the
 negotiated command-ring sizes.
 .TP
-.B hda: codec \fIn\fB afg=\fInid\fB dac=\fInid\fB pin=\fInid\fB tag=\fIn\fB chan=\fIn\fB pcm=\fIcaps
-The selected output path and the converter's channel count and PCM
+.B hda: codec \fIn\fB vid=\fIid\fB afg=\fInid\fB dac=\fInid\fB pin=\fInid\fB assoc=\fIn\fB dacs=\fIn\fB tag=\fIn\fB chan=\fIn\fB pcm=\fIcaps
+The selected output path, its association, how many converters are bound
+to the stream, and the primary converter's channel count and PCM
 capability word.
 .TP
 .B hda: no codec detected
@@ -120,29 +143,45 @@ The codec has no analog converter, or no output pin that
 .B CONFIG_DEFAULT
 reports as connected.  Common on display-audio-only controllers.
 .TP
-.B hda: no explicit route to any pin; assuming pin \fIn\fB is hard-wired to dac \fIn
-No connection list joins any candidate pair within one intermediate
-widget.  A pin with a single hard-wired source and no connection list is
-legitimate, so the best-ranked pair is used anyway.
+.B hda: no converter reaches an output pin
+No connection path joins any output pin to a converter; the codec has no
+output path.
 .TP
-.B hda: no usable IRQ line; not attaching
-.BR pci_get_irq (9)
-returned no line.  See
+.B hda: no usable interrupt; not attaching
+No interrupt source passed its proof.  See
 .B Controller
 above.
 .TP
+.B hda: codec \fIn\fB did not answer; skipped
+A codec present in
+.B STATESTS
+does not respond to commands (a display codec with its power well off,
+for example).
+.TP
+.B hda: codec \fIn\fB stopped answering
+Three commands in a row timed out; the codec is not asked again.
+.TP
 .B hda: \fIn\fB verb timeout(s) during configuration
-The codec failed to answer within the per-verb budget.  The graph was
-configured from incomplete information and playback may be silent.
+The codec failed to answer within 50 ms.  The command rings are
+resynchronised after each timeout, so a late answer cannot be taken for
+the next command's; the graph was configured from incomplete
+information and playback may be silent.
 .TP
 .B hda: \fIn\fB FIFO underrun(s), \fIn\fB descriptor error(s)
 Reported on close.  Underruns mean the software FIFO was not refilled in
 time; a descriptor error is fatal to the stream and forces a restart.
 .TP
-.B hda: could not enable PCIe snoop on \fIvendor\fB; DMA may read stale data
+.B hda: \fIvendor\fB:\fIdevice\fB: snoop enable will not stick; not attaching
 An ATI, AMD or NVIDIA controller refused the snoop-enable bit.  The
-driver's DMA memory is cacheable, so the controller may fetch stale ring
-contents.
+driver's DMA memory is cacheable, so the controller would fetch stale
+ring contents.
+.TP
+.B hda: \fIvendor\fB:\fIdevice\fB does not snoop, and uncached DMA memory is not available; not attaching
+An ATI or AMD graphics HDMI audio function.
+.TP
+.B hda: ALC\fIn\fB headset coefficient 0x46 = \fIvalue
+The headset-jack configuration a Realtek ALC255-class codec came up
+with, reported for diagnosis.
 .SH SEE ALSO
 .BR audio (4),
 .BR uac (4),
@@ -163,12 +202,13 @@ Capture is not implemented.
 HDMI and DisplayPort output are not implemented; digital pins are
 ignored during path selection.
 .PP
-Only the first controller-supported analog path is used.  There is no
-mixer control beyond the framework's gain and balance, and no runtime
-selection between speaker and headphone pins \(em jack-presence
-unsolicited responses are discarded rather than acted on.
+There is no mixer control beyond the framework's gain and balance, and no
+runtime selection between speaker and headphone pins \(em jack-presence
+unsolicited responses are discarded rather than acted on, so both play.
+.PP
+The Realtek ALC255-class headset-jack coefficient is reported, not set.
 .PP
 DMA buffers are ordinary cacheable memory.  This is correct on Intel
-controllers and on any controller whose PCIe snoop bit could be set, but
-the kernel cannot currently allocate uncacheable memory for the cases
-where neither holds.
+controllers (whose no-snoop enable is cleared) and on any controller
+whose PCIe snoop bit could be set; controllers that cannot snoop are not
+attached.

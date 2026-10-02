@@ -49,11 +49,13 @@ A convenience alias for
 .BR /dev/dsp0 ,
 registered when the first audio device appears.
 .SS Default Configuration
-On
+On the
 .BR open (2)
-the device is configured to the OSS convention of 8000 Hz,
+that brings the device into use the device is configured to the OSS
+convention of 8000 Hz,
 .BR AFMT_U8 ,
-mono.  Programs normally override this immediately with
+mono; an open while another descriptor is already open leaves the
+running format alone.  Programs normally override this immediately with
 .BR SNDCTL_DSP_SETFMT ,
 .BR SNDCTL_DSP_CHANNELS ,
 and
@@ -164,10 +166,19 @@ Drain queued playback (block until emitted).
 Discard queued playback immediately.
 .TP
 .B SNDCTL_DSP_POST
-Mark a playback boundary (no-op kick).
+Mark a playback boundary: what has been written starts playing now,
+padded out to a whole buffer if need be, instead of waiting for the
+prebuffer to fill.
+.TP
+.B SNDCTL_DSP_NONBLOCK
+Make the descriptor non-blocking, as
+.B O_NONBLOCK
+does (see
+.BR audio (4)).
 .TP
 .B SNDCTL_DSP_GETODELAY
-Return the number of bytes still queued for playback.
+Return the number of bytes still queued for playback, including what
+sits in the DMA ring where the backend can say.
 .SH FILES
 .TP
 .B /dev/dsp
@@ -179,12 +190,20 @@ OSS sample devices.
 .SH ERRORS
 .TP
 .B EBUSY
-Another process already holds the device for playback.
+Another process already holds the device for playback, or a format
+ioctl
+.RB ( SNDCTL_DSP_SETFMT ,
+.BR SNDCTL_DSP_SPEED ,
+.BR SNDCTL_DSP_CHANNELS )
+would change the format of a stream another thread is playing.
 .TP
 .B EINTR
 A signal was delivered while a
 .BR write (2)
 blocked waiting for the hardware to drain, before any data was queued.
+.TP
+.B EAGAIN
+The descriptor is non-blocking and the buffer is full.
 .TP
 .B EINVAL
 An unsupported
