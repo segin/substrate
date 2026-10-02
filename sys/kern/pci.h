@@ -30,6 +30,18 @@
 #define PCI_CAP_ID_PCIE          0x10U
 #define PCI_CAP_ID_MSIX          0x11U
 
+/* Power-management capability: PMCSR and its fields. */
+#define PCI_PM_CTRL              0x04U
+#define PCI_PM_CTRL_STATE_MASK   0x0003U
+#define PCI_PM_CTRL_PME_STATUS   0x8000U
+
+/* PCI Express capability: Link Capabilities / Link Control. */
+#define PCI_EXP_LNKCAP           0x0CU
+#define PCI_EXP_LNKCAP_ASPMS     0x00000C00U
+#define PCI_EXP_LNKCTL           0x10U
+#define PCI_EXP_LNKCTL_ASPMC     0x0003U
+#define PCI_EXP_LNKCTL_CLKREQ_EN 0x0100U
+
 #define PCI_EXT_CAP_ID_AER       0x0001U
 #define PCI_EXT_CAP_ID_SRIOV     0x0010U
 
@@ -76,6 +88,9 @@ int pci_bar_type(pci_device_t *dev, int bar);
 size_t pci_bar_size(pci_device_t *dev, int bar);
 int pci_request_region(pci_device_t *dev, int bar, const char *name);
 void *pci_iomap(pci_device_t *dev, int bar, size_t max_len);
+int pci_set_power_d0(pci_device_t *dev);
+void pci_disable_aspm(pci_device_t *dev);
+void pci_intx_enable(pci_device_t *dev, int on);
 int pci_get_irq(pci_device_t *dev);
 /* Route a device's legacy INTx pin to an I/O APIC input using the
  * conventional Intel PIRQ swizzle, for machines whose firmware leaves

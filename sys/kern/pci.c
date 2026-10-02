@@ -6,6 +6,7 @@
 #include <kern/device.h>
 #include <kern/driver.h>
 #include <kern/pci.h>
+#include <kern/time.h>
 #include <sys/errno.h>
 #include <sys/irq.h>
 #include <vm/vm_kmem.h>
@@ -572,6 +573,10 @@ int pci_request_region(pci_device_t *dev, int bar, const char *name) {
     if (type == PCI_BAR_NONE || base == 0 || size == 0) {
         return -ENODEV;
     }
+    /* pci_bar_base() truncates to 32 bits; never claim the wrong window. */
+    if (type == PCI_BAR_MEM64 && (pci_bar_base64(dev, bar, NULL) >> 32) != 0) {
+        return -ERANGE;
+    }
 
     if (type == PCI_BAR_IO) {
         dev->bar_resource[bar] = request_region(base, size, name);
@@ -582,12 +587,138 @@ int pci_request_region(pci_device_t *dev, int bar, const char *name) {
     return dev->bar_resource[bar] != NULL ? 0 : -EBUSY;
 }
 
+/*
+ * Bring a function to D0 if firmware or a previous OS left it in a low-power
+ * state.  In D3hot a function answers configuration cycles but drops memory
+ * and I/O accesses, so a driver's reset writes vanish and every register
+ * reads all-ones.  The D3hot->D0 transition needs 10 ms before the function
+ * may be accessed (PCI PM 1.2 s5.6.1), and a function without No_Soft_Reset
+ * comes back with its BARs and Command register reset, so those are put
+ * back afterwards.  Returns 0 when the function is in D0.
+ */
+int pci_set_power_d0(pci_device_t *dev) {
+    uint32_t bars[PCI_BAR_COUNT];
+    uint16_t cmd, pmcsr;
+    uint8_t line;
+    int pm, i;
+
+    if (dev == NULL)
+        return -EINVAL;
+    pm = pci_find_capability(dev, PCI_CAP_ID_PM);
+    if (pm == 0)
+        return 0;                       /* no PM capability: always D0 */
+    pmcsr = pci_read_config16(dev->bus, dev->slot, dev->func,
+                              (uint16_t)(pm + PCI_PM_CTRL));
+    if ((pmcsr & PCI_PM_CTRL_STATE_MASK) == 0)
+        return 0;
+
+    for (i = 0; i < PCI_BAR_COUNT; i++)
+        bars[i] = pci_read_config32(dev->bus, dev->slot, dev->func,
+                                    (uint16_t)(0x10 + i * 4));
+    cmd = pci_read_config16(dev->bus, dev->slot, dev->func, PCI_CONFIG_COMMAND);
+    line = pci_read_config8(dev->bus, dev->slot, dev->func, 0x3CU);
+
+    /* PME_Status is write-1-to-clear; do not clear it by echoing it. */
+    pci_write_config16(dev->bus, dev->slot, dev->func,
+                       (uint16_t)(pm + PCI_PM_CTRL),
+                       (uint16_t)(pmcsr & ~(PCI_PM_CTRL_STATE_MASK |
+                                            PCI_PM_CTRL_PME_STATUS)));
+    timer_busywait_ms(10);
+
+    for (i = 0; i < PCI_BAR_COUNT; i++) {
+        uint16_t off = (uint16_t)(0x10 + i * 4);
+        if (pci_read_config32(dev->bus, dev->slot, dev->func, off) != bars[i])
+            pci_write_config32(dev->bus, dev->slot, dev->func, off, bars[i]);
+    }
+    pci_write_config8(dev->bus, dev->slot, dev->func, 0x3CU, line);
+    pci_write_config16(dev->bus, dev->slot, dev->func, PCI_CONFIG_COMMAND, cmd);
+
+    pmcsr = pci_read_config16(dev->bus, dev->slot, dev->func,
+                              (uint16_t)(pm + PCI_PM_CTRL));
+    kprintf("pci: %02x:%02x.%u moved to D0%s\n", dev->bus, dev->slot,
+            dev->func, (pmcsr & PCI_PM_CTRL_STATE_MASK) ? " (FAILED)" : "");
+    return (pmcsr & PCI_PM_CTRL_STATE_MASK) ? -EIO : 0;
+}
+
+/*
+ * Turn off PCIe ASPM L0s/L1 and clock power management (CLKREQ#) on a
+ * function's link.  Firmware enables them for its own power policy; a driver
+ * that does none of the chip-specific tuning those states need gets RX
+ * stalls and descriptors left owned by the device when the link drops into
+ * L1 under it.
+ */
+void pci_disable_aspm(pci_device_t *dev) {
+    uint32_t lnkcap;
+    uint16_t lnkctl;
+    int cap;
+
+    if (dev == NULL)
+        return;
+    cap = pci_find_capability(dev, PCI_CAP_ID_PCIE);
+    if (cap == 0)
+        return;
+    lnkcap = pci_read_config32(dev->bus, dev->slot, dev->func,
+                               (uint16_t)(cap + PCI_EXP_LNKCAP));
+    if ((lnkcap & PCI_EXP_LNKCAP_ASPMS) == 0)
+        return;
+    lnkctl = pci_read_config16(dev->bus, dev->slot, dev->func,
+                               (uint16_t)(cap + PCI_EXP_LNKCTL));
+    if ((lnkctl & (PCI_EXP_LNKCTL_ASPMC | PCI_EXP_LNKCTL_CLKREQ_EN)) == 0)
+        return;
+    pci_write_config16(dev->bus, dev->slot, dev->func,
+                       (uint16_t)(cap + PCI_EXP_LNKCTL),
+                       (uint16_t)(lnkctl & ~(PCI_EXP_LNKCTL_ASPMC |
+                                             PCI_EXP_LNKCTL_CLKREQ_EN)));
+}
+
+/*
+ * Set or clear the Command register's INTx Disable bit.  It survives from
+ * firmware and from an earlier attempt's teardown (pci_unroute_intx() sets
+ * it), and while it is set the function never asserts its pin, so a driver
+ * about to rely on legacy INTx must clear it first.
+ */
+void pci_intx_enable(pci_device_t *dev, int on) {
+    uint16_t cmd, want;
+
+    if (dev == NULL)
+        return;
+    cmd = pci_read_config16(dev->bus, dev->slot, dev->func, PCI_CONFIG_COMMAND);
+    want = on ? (uint16_t)(cmd & ~PCI_COMMAND_INTX_DISABLE)
+              : (uint16_t)(cmd | PCI_COMMAND_INTX_DISABLE);
+    if (want != cmd)
+        pci_write_config16(dev->bus, dev->slot, dev->func, PCI_CONFIG_COMMAND,
+                           want);
+}
+
 void *pci_iomap(pci_device_t *dev, int bar, size_t max_len) {
     uintptr_t base;
+    uint64_t base64;
     size_t size;
 
     if (dev == NULL || pci_bar_type(dev, bar) == PCI_BAR_IO) {
         return NULL;
+    }
+
+    /* A function in D3hot does not decode its BARs at all. */
+    if (dev->bar_resource[bar] == NULL)
+        (void)pci_set_power_d0(dev);
+
+    /*
+     * A 64-bit BAR placed above 4 GiB cannot be reached by this kernel, and
+     * pci_bar_base() would silently drop the upper dword and map whatever
+     * lives at the low 32 bits.  Move it into the 32-bit hole while nothing
+     * has claimed it yet, and refuse it if that fails.
+     */
+    base64 = pci_bar_base64(dev, bar, NULL);
+    if ((base64 >> 32) != 0) {
+        if (dev->bar_resource[bar] != NULL || pci_relocate_bar32(dev, bar) != 0) {
+            kprintf("pci: %02x:%02x.%u BAR%d at 0x%x%08x is above 4 GiB\n",
+                    dev->bus, dev->slot, dev->func, bar,
+                    (unsigned)(base64 >> 32), (unsigned)base64);
+            return NULL;
+        }
+        if ((pci_bar_base64(dev, bar, NULL) >> 32) != 0)
+            return NULL;
     }
 
     base = pci_bar_base(dev, bar);
