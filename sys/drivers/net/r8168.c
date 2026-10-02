@@ -30,7 +30,9 @@
 #include <kern/driver.h>
 #include <kern/pci.h>
 #include <kern/time.h>
+#include <kern/sched.h>
 #include <sys/irq.h>
+#include <sys/kthread.h>
 #include <sys/lock.h>
 #include <sys/netdev.h>
 #include <sys/random.h>
@@ -253,6 +255,10 @@ static struct {
     uint32_t           hwrev;
     uint32_t           quirks;
     uint32_t           ocp_base;     /* PHY page, as an OCP address */
+    uint32_t           tx_seq[R8168_TX_DESCS];  /* xmit count when queued */
+    uint32_t           tx_seq_next;
+    volatile int       need_restart; /* SERR seen: watchdog reinitialises */
+    int                wd_chan;      /* watchdog wait channel */
     uint8_t            link;         /* last reported PHYstatus link bit */
     netdev_t           netdev;
     int                registered;
@@ -393,6 +399,19 @@ static int r8168_irq(unsigned int irq, void *dev_id, void *frame) {
 
         if (rt.registered && (isr & INT_LINKCHG))
             r8168_report_link();
+
+        /*
+         * A fatal bus error during DMA halts both engines.  Recovery is a
+         * full reinitialisation, which busy-waits and so belongs to the
+         * watchdog thread; until it runs, stay masked rather than take an
+         * interrupt storm from a dead datapath.
+         */
+        if (isr & INT_SERR) {
+            rt.need_restart = 1;
+            rt.imr = 0;
+            sched_wakeup(&rt.wd_chan);
+            break;
+        }
 
         isr = rt_r16(R_ISR);
         if (isr == 0xFFFF)
@@ -620,6 +639,7 @@ static int r8168_xmit(netdev_t *dev, const void *frame, size_t len) {
     d->opts1   = DESC_OWN | DESC_FS | DESC_LS | eor |
                  (xlen & DESC_BUFLEN_MASK);
 
+    rt.tx_seq[slot] = ++rt.tx_seq_next;   /* the watchdog's progress mark */
     rt.tx_cur = (slot + 1) % R8168_TX_DESCS;
 
     r8168_barrier();
@@ -871,6 +891,274 @@ static void r8168_report_link(void) {
 
 /* ----- setup ----- */
 
+#define R8168_RX_RING_BYTES (R8168_RX_DESCS * sizeof(struct r8168_desc))
+#define R8168_TX_RING_BYTES (R8168_TX_DESCS * sizeof(struct r8168_desc))
+#define R8168_RX_BUF_BYTES  (R8168_RX_DESCS * R8168_BUF_SIZE)
+#define R8168_TX_BUF_BYTES  (R8168_TX_DESCS * R8168_BUF_SIZE)
+#define R8168_PAGES(b)      (((b) + 4095) / 4096)
+
+/* Bounded wait for the chip to finish a soft reset. */
+#define R8168_RESET_MS      100
+
+/* Watchdog: period, and how long one descriptor may stay owned. */
+#define R8168_WD_MS         1000
+#define R8168_TX_STALL_S    5
+
+static void *r8168_dma_alloc(size_t bytes, uint32_t *phys) {
+    void *p = pmm_alloc_contiguous(R8168_PAGES(bytes));
+
+    if (!p)
+        return NULL;
+    memset(p, 0, R8168_PAGES(bytes) * 4096);
+    *phys = (uint32_t)(uintptr_t)p - 0xC0000000u;
+    return p;
+}
+
+static void r8168_dma_free(volatile void *p, size_t bytes) {
+    if (p)
+        pmm_free_contiguous((void *)(uintptr_t)p, R8168_PAGES(bytes));
+}
+
+/* Soft reset; 0 once the chip has cleared RST itself. */
+static int r8168_reset(void) {
+    rt_w8(R_CR, CR_RST);
+    for (unsigned ms = 0; ms < R8168_RESET_MS * 10; ms++) {
+        if (!(rt_r8(R_CR) & CR_RST))
+            return 0;
+        timer_busywait_us(100);
+    }
+    return -1;
+}
+
+/*
+ * Everything from a MAC reset to a running datapath, on the rings already
+ * allocated: used at attach and again to recover from a fatal bus error or
+ * a stalled transmitter.  Leaves IMR at 0; the caller unmasks.  The PHY is
+ * not touched -- the link survives a MAC reset.
+ */
+static int r8168_hw_start(void) {
+    const uint8_t *mac = rt.netdev.hwaddr;
+
+    rt.imr = 0;
+    rt_w16(R_IMR, 0);
+    rt_w8(R_CR, 0);                           /* stop TX/RX DMA */
+    if (r8168_reset() != 0)
+        return -1;
+
+    rt_w8(R_CFG9346, CFG9346_UNLOCK);
+
+    /* Station address (the reset reloaded the EEPROM's), high half first. */
+    rt_w32(R_IDR0 + 4, (uint32_t)mac[4] | (uint32_t)mac[5] << 8);
+    rt_w32(R_IDR0, (uint32_t)mac[0] | (uint32_t)mac[1] << 8 |
+                   (uint32_t)mac[2] << 16 | (uint32_t)mac[3] << 24);
+
+    /* Open the multicast hash completely and leave it open: a 64-bit hash
+     * would have to cover ff02::1, every solicited-node group and
+     * 224.0.0.1, and the stack filters by membership anyway. */
+    rt_w32(R_MAR0, 0xFFFFFFFFu);
+    rt_w32(R_MAR0 + 4, 0xFFFFFFFFu);
+
+    /* Every RX descriptor starts owned by the NIC; the last carries EOR.
+     * TX descriptors start owned by us (OWN clear).  On a restart this
+     * discards whatever was in flight. */
+    for (int i = 0; i < R8168_RX_DESCS; i++) {
+        rt.rx_ring[i].addr_lo = rt.rx_buf_phys + (uint32_t)i * R8168_BUF_SIZE;
+        rt.rx_ring[i].addr_hi = 0;
+        rt.rx_ring[i].opts2   = 0;
+        rt.rx_ring[i].opts1   = DESC_OWN | R8168_BUF_SIZE |
+                                ((i == R8168_RX_DESCS - 1) ? DESC_EOR : 0);
+    }
+    for (int i = 0; i < R8168_TX_DESCS; i++) {
+        rt.tx_ring[i].opts1 = (i == R8168_TX_DESCS - 1) ? DESC_EOR : 0;
+        rt.tx_ring[i].opts2 = 0;
+    }
+    rt.rx_cur = 0;
+    rt.tx_cur = 0;
+    r8168_barrier();
+
+    /*
+     * Programming order follows the datasheet (and Linux's r8169): sizes and
+     * config registers, then the C+ command word, then the descriptor bases,
+     * then enable, then re-lock, then the receive filter, then interrupts.
+     * The 8168 latches some of these only while CFG9346 is unlocked, and the
+     * receive filter must be written AFTER RE is set or the first frames are
+     * dropped.
+     */
+    /*
+     * The C+ command register comes FIRST.  It carries the DESCRIPTOR-engine
+     * enables, which are a different thing from the CR TE|RE bits below
+     * (those drive the legacy 8139-style datapath).
+     *
+     * The enable bits are stepping-dependent and NOT symmetric: on every
+     * MACSTAT part -- which is everything from the 8168B onwards, including
+     * the 8168G generation in any recent machine -- the word is
+     * MACSTAT_DIS|TXENB with RXENB deliberately ABSENT.  Setting RXENB there
+     * is wrong.  Only the pre-8168B parts take RXENB|TXENB.
+     */
+    uint16_t cpcr = CPCR_PCI_MUL_RW;
+    if (rt.quirks & Q_MACSTAT)
+        cpcr |= CPCR_MACSTAT_DIS | CPCR_TXENB;
+    else
+        cpcr |= CPCR_RXENB | CPCR_TXENB;
+    rt_w16(R_CPCR, cpcr);
+
+    /* Interrupt moderation and the timer interrupt keep whatever firmware
+     * or a previous driver left in them; leftover thresholds delay ROK on
+     * low-rate request/response traffic. */
+    rt_w16(R_INTRMIT, 0);
+    rt_w32(R_TIMERINT, 0);
+
+    /* Let the C+ command settle before touching anything else. */
+    timer_busywait_ms(10);
+
+    rt_w16(R_RMS, R8168_BUF_SIZE);            /* accept up to a full buffer */
+
+    /*
+     * Descriptor bases, HIGH half first: on a part with a 64-bit register
+     * pair the low write is what the chip latches on.
+     */
+    rt_w32(R_TNPDS + 4, 0);
+    rt_w32(R_TNPDS,     rt.tx_ring_phys);
+    rt_w32(R_RDSAR + 4, 0);
+    rt_w32(R_RDSAR,     rt.rx_ring_phys);
+
+    /*
+     * 8168G and later gate the receive data valid signal after reset and will
+     * receive nothing until it is ungated.  Harmless to skip on older parts,
+     * fatal to skip on new ones.
+     */
+    if (rt.quirks & Q_RXDV_GATED)
+        rt_w32(R_MISC, rt_r32(R_MISC) & ~MISC_RXDV_GATED_EN);
+
+    /*
+     * Enable ordering is stepping-dependent.  Most parts want TE|RE set
+     * before TCR/RCR; the 8168G generation wants it AFTER.
+     */
+    if (!(rt.quirks & Q_TXRXEN_LATER))
+        rt_w8(R_CR, CR_TE | CR_RE);
+
+    rt_w32(R_TCR, TCR_MXDMA_UNLIMITED | TCR_IFG_NORMAL);
+    rt_w8(R_ETHRESH, 16);                     /* early TX threshold */
+
+    uint32_t rcr = RCR_MXDMA_UNLIMITED | RCR_RXFTH_NONE | RCR_RXBUF_64;
+    if (rt.quirks & Q_EARLYOFF)
+        rcr |= RCR_EARLYOFF;
+    else if (rt.quirks & Q_EARLYOFFV2)
+        rcr |= RCR_EARLYOFFV2;
+    rt_w32(R_RCR, rcr);
+
+    if (rt.quirks & Q_TXRXEN_LATER)
+        rt_w8(R_CR, CR_TE | CR_RE);
+
+    /*
+     * Receive filter: OR the accept bits into whatever the chip reports, so
+     * we do not clobber fields the part set for itself.  No AAP -- the stack
+     * does not want other stations' traffic.
+     */
+    rt_w32(R_RCR, rt_r32(R_RCR) | RCR_APM | RCR_AB | RCR_AM);
+
+    rt_w8(R_CFG9346, CFG9346_LOCK);
+
+    rt_w16(R_ISR, 0xFFFF);                    /* clear anything latched */
+    return 0;
+}
+
+/*
+ * Full reinitialisation, from thread context.  Runs under the TX lock with
+ * interrupts off, so neither the transmit path nor the handler can see the
+ * rings mid-rebuild.
+ */
+static void r8168_restart(const char *why) {
+    unsigned long flags = spinlock_acquire_irq(&rt_tx_lock);
+    int rc = r8168_hw_start();
+
+    if (rc == 0) {
+        rt.imr = R8168_IMR;
+        rt_w16(R_IMR, R8168_IMR);
+    }
+    spinlock_release_irq(&rt_tx_lock, flags);
+    kprintf("r8168: %s; controller %s\n", why,
+            rc == 0 ? "reinitialised" : "would not reset, left stopped");
+}
+
+/*
+ * The oldest descriptor the NIC still owns, or -1.  Walking forward from
+ * the producer, the first owned slot is the oldest in flight.
+ */
+static int r8168_tx_oldest_owned(void) {
+    for (int n = 0; n < R8168_TX_DESCS; n++) {
+        int s = (int)((rt.tx_cur + (uint32_t)n) % R8168_TX_DESCS);
+        if (rt.tx_ring[s].opts1 & DESC_OWN)
+            return s;
+    }
+    return -1;
+}
+
+/*
+ * Recovery: a fatal bus error (SERR) halts both DMA engines, and a
+ * transmitter can stall with descriptors owned forever.  Either leaves eth0
+ * dead until reboot without a full reinitialisation, which needs a context
+ * that may busy-wait -- hence a thread, woken by the handler on SERR and
+ * otherwise checking once a second for a descriptor owned too long.
+ */
+static void r8168_watchdog(void *arg) {
+    int last = -1;
+    uint32_t last_seq = 0;
+    unsigned stalled = 0;
+
+    (void)arg;
+    for (;;) {
+        uint64_t hz = get_hz();
+        sched_sleep_until(&rt.wd_chan,
+                          get_ticks() + (hz * R8168_WD_MS + 999) / 1000);
+
+        if (rt.need_restart) {
+            rt.need_restart = 0;
+            r8168_restart("PCI system error");
+            last = -1;
+            stalled = 0;
+            continue;
+        }
+
+        /* Without link nothing drains; that is not a stall to recover. */
+        int s = rt.link ? r8168_tx_oldest_owned() : -1;
+        if (s < 0 || s != last || rt.tx_seq[s] != last_seq) {
+            last = s;
+            last_seq = s >= 0 ? rt.tx_seq[s] : 0;
+            stalled = 0;
+            continue;
+        }
+        if (++stalled >= R8168_TX_STALL_S * 1000 / R8168_WD_MS) {
+            r8168_restart("transmitter stalled");
+            last = -1;
+            stalled = 0;
+        }
+    }
+}
+
+/* Undo a partial attach: no DMA may outlive the memory it targets. */
+static void r8168_teardown(pci_device_t *pdev) {
+    if (rt.mmio) {
+        rt.imr = 0;
+        rt_w16(R_IMR, 0);
+        rt_w8(R_CR, 0);                       /* TE|RE off */
+        (void)r8168_reset();
+    }
+    r8168_irq_remove(pdev);
+    uint16_t cmd = pci_read_config16(pdev->bus, pdev->slot, pdev->func,
+                                     PCI_CONFIG_COMMAND);
+    pci_write_config16(pdev->bus, pdev->slot, pdev->func, PCI_CONFIG_COMMAND,
+                       (uint16_t)(cmd & ~PCI_COMMAND_MASTER));
+    r8168_dma_free(rt.rx_ring, R8168_RX_RING_BYTES);
+    r8168_dma_free(rt.tx_ring, R8168_TX_RING_BYTES);
+    r8168_dma_free(rt.rx_buf, R8168_RX_BUF_BYTES);
+    r8168_dma_free(rt.tx_buf, R8168_TX_BUF_BYTES);
+    rt.rx_ring = NULL;
+    rt.tx_ring = NULL;
+    rt.rx_buf = NULL;
+    rt.tx_buf = NULL;
+}
+
 static int r8168_setup(pci_device_t *pdev) {
     if (rt.registered) {
         kprint("r8168: additional controller ignored (single instance)\n");
@@ -899,20 +1187,13 @@ static int r8168_setup(pci_device_t *pdev) {
         rt.mmio = pci_iomap(pdev, 1, 0x1000);
     if (!rt.mmio) {
         kprint("r8168: could not map MMIO BAR\n");
-        return -1;
+        goto fail;
     }
 
-    /* Soft reset and wait for the chip to clear RST itself. */
-    rt_w8(R_CR, CR_RST);
-    int spins = 0;
-    while (rt_r8(R_CR) & CR_RST) {
-        if (++spins > 1000000) {
-            kprint("r8168: reset timed out\n");
-            return -1;
-        }
+    if (r8168_reset() != 0) {
+        kprint("r8168: reset timed out\n");
+        goto fail;
     }
-
-    rt_w8(R_CFG9346, CFG9346_UNLOCK);
 
     /* Identify the stepping BEFORE configuring anything: the quirks it
      * selects change the C+ command word and the enable ordering. */
@@ -928,8 +1209,8 @@ static int r8168_setup(pci_device_t *pdev) {
      * A blank EEPROM or eFuse autoload area leaves zeros (or ones) in IDR,
      * and a group address cannot be a station address.  Registering one
      * makes DHCP and ARP fail in ways that look like a dead link, so
-     * replace it with a random locally administered unicast address and
-     * program that back into IDR.
+     * replace it with a random locally administered unicast address;
+     * r8168_hw_start() programs it back into IDR.
      */
     {
         uint8_t *m = rt.netdev.hwaddr;
@@ -940,158 +1221,31 @@ static int r8168_setup(pci_device_t *pdev) {
                 for (int i = 0; i < 6; i++)
                     m[i] = (uint8_t)(rt.hwrev >> (i * 4)) ^ (uint8_t)(0x5A + i);
             m[0] = (uint8_t)((m[0] & ~0x01) | 0x02);
-            r8168_set_hwaddr(&rt.netdev, m);
-            rt_w8(R_CFG9346, CFG9346_UNLOCK);   /* it re-locks; setup isn't done */
             kprint("r8168: no valid MAC address in IDR; using a random "
                    "locally administered one\n");
         }
     }
 
-    /* Open the multicast hash completely and leave it open: a 64-bit hash
-     * would have to cover ff02::1, every solicited-node group and
-     * 224.0.0.1, and the stack filters by membership anyway. */
-    rt_w32(R_MAR0, 0xFFFFFFFFu);
-    rt_w32(R_MAR0 + 4, 0xFFFFFFFFu);
-
     /* DMA memory.  pmm_alloc_contiguous returns a direct-mapped VIRTUAL
      * address; the NIC needs the physical one. */
-    size_t rx_ring_bytes = R8168_RX_DESCS * sizeof(struct r8168_desc);
-    size_t tx_ring_bytes = R8168_TX_DESCS * sizeof(struct r8168_desc);
-    size_t rx_buf_bytes  = R8168_RX_DESCS * R8168_BUF_SIZE;
-    size_t tx_buf_bytes  = R8168_TX_DESCS * R8168_BUF_SIZE;
-    void *p;
-
-    p = pmm_alloc_contiguous((rx_ring_bytes + 4095) / 4096);
-    if (!p) { kprint("r8168: rx ring alloc failed\n"); return -1; }
-    memset(p, 0, ((rx_ring_bytes + 4095) / 4096) * 4096);
-    rt.rx_ring = p;
-    rt.rx_ring_phys = (uint32_t)(uintptr_t)p - 0xC0000000u;
-
-    p = pmm_alloc_contiguous((tx_ring_bytes + 4095) / 4096);
-    if (!p) { kprint("r8168: tx ring alloc failed\n"); return -1; }
-    memset(p, 0, ((tx_ring_bytes + 4095) / 4096) * 4096);
-    rt.tx_ring = p;
-    rt.tx_ring_phys = (uint32_t)(uintptr_t)p - 0xC0000000u;
-
-    p = pmm_alloc_contiguous((rx_buf_bytes + 4095) / 4096);
-    if (!p) { kprint("r8168: rx buffer alloc failed\n"); return -1; }
-    memset(p, 0, ((rx_buf_bytes + 4095) / 4096) * 4096);
-    rt.rx_buf = p;
-    rt.rx_buf_phys = (uint32_t)(uintptr_t)p - 0xC0000000u;
-
-    p = pmm_alloc_contiguous((tx_buf_bytes + 4095) / 4096);
-    if (!p) { kprint("r8168: tx buffer alloc failed\n"); return -1; }
-    memset(p, 0, ((tx_buf_bytes + 4095) / 4096) * 4096);
-    rt.tx_buf = p;
-    rt.tx_buf_phys = (uint32_t)(uintptr_t)p - 0xC0000000u;
-
-    /* Every RX descriptor starts owned by the NIC; the last carries EOR. */
-    for (int i = 0; i < R8168_RX_DESCS; i++) {
-        rt.rx_ring[i].addr_lo = rt.rx_buf_phys + (uint32_t)i * R8168_BUF_SIZE;
-        rt.rx_ring[i].addr_hi = 0;
-        rt.rx_ring[i].opts2   = 0;
-        rt.rx_ring[i].opts1   = DESC_OWN | R8168_BUF_SIZE |
-                                ((i == R8168_RX_DESCS - 1) ? DESC_EOR : 0);
+    rt.rx_ring = r8168_dma_alloc(R8168_RX_RING_BYTES, &rt.rx_ring_phys);
+    rt.tx_ring = r8168_dma_alloc(R8168_TX_RING_BYTES, &rt.tx_ring_phys);
+    rt.rx_buf = r8168_dma_alloc(R8168_RX_BUF_BYTES, &rt.rx_buf_phys);
+    rt.tx_buf = r8168_dma_alloc(R8168_TX_BUF_BYTES, &rt.tx_buf_phys);
+    if (!rt.rx_ring || !rt.tx_ring || !rt.rx_buf || !rt.tx_buf) {
+        kprint("r8168: DMA allocation failed\n");
+        goto fail;
     }
-    /* TX descriptors start owned by US (OWN clear), EOR on the last. */
-    for (int i = 0; i < R8168_TX_DESCS; i++) {
-        rt.tx_ring[i].opts1 = (i == R8168_TX_DESCS - 1) ? DESC_EOR : 0;
-        rt.tx_ring[i].opts2 = 0;
+
+    if (r8168_hw_start() != 0) {
+        kprint("r8168: reset timed out\n");
+        goto fail;
     }
-    rt.rx_cur = 0;
-    rt.tx_cur = 0;
-
-    /*
-     * Programming order follows the datasheet (and Linux's r8169): sizes and
-     * config registers, then the C+ command word, then the descriptor bases,
-     * then enable, then re-lock, then the receive filter, then interrupts.
-     * The 8168 latches some of these only while CFG9346 is unlocked, and the
-     * receive filter must be written AFTER RE is set or the first frames are
-     * dropped.
-     */
-    /*
-     * The C+ command register comes FIRST -- "we must configure the C+
-     * register before all others" (NetBSD rtl8169.c).  It carries the
-     * DESCRIPTOR-engine enables, which are a different thing from the CR
-     * TE|RE bits below (those drive the legacy 8139-style datapath).
-     *
-     * The enable bits are stepping-dependent and NOT symmetric: on every
-     * MACSTAT part -- which is everything from the 8168B onwards, including
-     * the 8168G generation in any recent machine -- the word is
-     * MACSTAT_DIS|TXENB with RXENB deliberately ABSENT.  Setting RXENB there
-     * is wrong.  Only the pre-8168B parts take RXENB|TXENB.
-     */
-    uint16_t cpcr = CPCR_PCI_MUL_RW;
-    if (rt.quirks & Q_MACSTAT)
-        cpcr |= CPCR_MACSTAT_DIS | CPCR_TXENB;
-    else
-        cpcr |= CPCR_RXENB | CPCR_TXENB;
-    rt_w16(R_CPCR, cpcr);
-
-    /* Interrupt moderation and the timer interrupt keep whatever firmware
-     * or a previous driver left in them; leftover thresholds delay ROK on
-     * low-rate request/response traffic. */
-    rt_w16(R_INTRMIT, 0);
-    rt_w32(R_TIMERINT, 0);
-
-    /* Let the C+ command settle before touching anything else. */
-    timer_busywait_ms(10);
-
-    rt_w16(R_RMS, R8168_BUF_SIZE);            /* accept up to a full buffer */
-
-    /*
-     * Descriptor bases, HIGH half first -- that is the order both BSDs use,
-     * and on a part with a 64-bit register pair the low write is what the
-     * chip latches on.
-     */
-    rt_w32(R_TNPDS + 4, 0);
-    rt_w32(R_TNPDS,     rt.tx_ring_phys);
-    rt_w32(R_RDSAR + 4, 0);
-    rt_w32(R_RDSAR,     rt.rx_ring_phys);
-
-    /*
-     * 8168G and later gate the receive data valid signal after reset and will
-     * receive nothing until it is ungated.  Harmless to skip on older parts,
-     * fatal to skip on new ones.
-     */
-    if (rt.quirks & Q_RXDV_GATED)
-        rt_w32(R_MISC, rt_r32(R_MISC) & ~MISC_RXDV_GATED_EN);
-
-    /*
-     * Enable ordering is stepping-dependent.  Most parts want TE|RE set
-     * before TCR/RCR; the 8168G generation wants it AFTER (RTKQ_TXRXEN_LATER).
-     */
-    if (!(rt.quirks & Q_TXRXEN_LATER))
-        rt_w8(R_CR, CR_TE | CR_RE);
-
-    rt_w32(R_TCR, TCR_MXDMA_UNLIMITED | TCR_IFG_NORMAL);
-    rt_w8(R_ETHRESH, 16);                     /* early TX threshold */
-
-    uint32_t rcr = RCR_MXDMA_UNLIMITED | RCR_RXFTH_NONE | RCR_RXBUF_64;
-    if (rt.quirks & Q_EARLYOFF)
-        rcr |= RCR_EARLYOFF;
-    else if (rt.quirks & Q_EARLYOFFV2)
-        rcr |= RCR_EARLYOFFV2;
-    rt_w32(R_RCR, rcr);
-
-    if (rt.quirks & Q_TXRXEN_LATER)
-        rt_w8(R_CR, CR_TE | CR_RE);
-
-    /*
-     * Receive filter: OR the accept bits into whatever the chip reports, so
-     * we do not clobber fields the part set for itself.  No AAP -- the stack
-     * does not want other stations' traffic.
-     */
-    rt_w32(R_RCR, rt_r32(R_RCR) | RCR_APM | RCR_AB | RCR_AM);
-
-    rt_w8(R_CFG9346, CFG9346_LOCK);
-
-    rt_w16(R_ISR, 0xFFFF);                    /* clear anything latched */
 
     /* The result is checked: a NIC with no handler is a dead interface whose
      * only symptom shows up much later as ENODEV. */
     if (r8168_setup_irq(pdev) != 0)
-        return -1;
+        goto fail;
 
     rt.imr = R8168_IMR;
     rt_w16(R_IMR, R8168_IMR);
@@ -1128,7 +1282,17 @@ static int r8168_setup(pci_device_t *pdev) {
     /* Autonegotiation was restarted moments ago, so this usually reports
      * nothing; LINKCHG brings the result. */
     r8168_report_link();
+
+    thread_t *wd = NULL;
+    if (kthread_create(r8168_watchdog, NULL, &wd, "r8168-wd") != 0)
+        kprint("r8168: no watchdog thread; a bus error or TX stall will "
+               "need a reboot\n");
     return 0;
+
+fail:
+    r8168_teardown(pdev);
+    rt.mmio = NULL;
+    return -1;
 }
 
 /*
