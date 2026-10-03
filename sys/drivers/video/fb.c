@@ -19,6 +19,7 @@
 #include <kern/cmdline.h>
 #include <kern/console.h>
 #include <kern/resource.h>
+#include <sys/amd64_abi.h>
 #include <sys/compat32.h>
 #include <sys/copy.h>
 #include <sys/errno.h>
@@ -27,6 +28,7 @@
 #include <sys/lock.h>
 #include <sys/mman.h>
 #include <sys/proc.h>
+#include <sys/sysinfo.h>
 #include <vfs/vfs.h>
 #include <vm/vm_kmem.h>
 #include <vm/vm_map.h>
@@ -548,14 +550,49 @@ static int fb_fs_ioctl(fs_node_t *node, uint32_t request, void *arg) {
         fi.mmio_len = 0;
         fi.accel = 0;
 
+        if (proc_abi_is_amd64()) {
+            /* A native 64-bit process: the same values in its layout
+             * (<sys/amd64_abi.h>). */
+            struct amd64_fb_fix_screeninfo fi64;
+
+            memset(&fi64, 0, sizeof(fi64));
+            memcpy(fi64.id, fi.id, sizeof(fi64.id));
+            fi64.smem_start = fi.smem_start;
+            fi64.smem_len = fi.smem_len;
+            fi64.type = fi.type;
+            fi64.type_aux = fi.type_aux;
+            fi64.visual = fi.visual;
+            fi64.xpanstep = fi.xpanstep;
+            fi64.ypanstep = fi.ypanstep;
+            fi64.ywrapstep = fi.ywrapstep;
+            fi64.line_length = fi.line_length;
+            fi64.mmio_start = fi.mmio_start;
+            fi64.mmio_len = fi.mmio_len;
+            fi64.accel = fi.accel;
+            if (copyout(&fi64, arg, sizeof(fi64)) != 0) {
+                return -EFAULT;
+            }
+            return 0;
+        }
+
         if (copyout(&fi, arg, sizeof(fi)) != 0) {
             return -EFAULT;
         }
         return 0;
     } else if (request == FBIOGET_VIDEO_MODES) {
         struct video_mode_query32 query;
+        struct amd64_video_mode_query query64;
+        const int wide = proc_abi_is_amd64();
+
         if (!arg) return -EINVAL;
-        if (copyin(arg, &query, sizeof(query)) != 0) {
+        if (wide) {
+            /* The count and the array pointer, from the 64-bit layout. */
+            if (copyin(arg, &query64, sizeof(query64)) != 0) {
+                return -EFAULT;
+            }
+            query.count = query64.count;
+            query.modes = (uptr32_t)query64.modes;
+        } else if (copyin(arg, &query, sizeof(query)) != 0) {
             return -EFAULT;
         }
 
@@ -579,7 +616,12 @@ static int fb_fs_ioctl(fs_node_t *node, uint32_t request, void *arg) {
         }
 
         query.count = (uint32_t)total;
-        if (copyout(&query, arg, sizeof(query)) != 0) {
+        if (wide) {
+            query64.count = query.count;
+            if (copyout(&query64, arg, sizeof(query64)) != 0) {
+                return -EFAULT;
+            }
+        } else if (copyout(&query, arg, sizeof(query)) != 0) {
             return -EFAULT;
         }
         return 0;

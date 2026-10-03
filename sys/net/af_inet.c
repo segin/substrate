@@ -26,6 +26,7 @@
 #include <netinet/ip.h>
 #include <netinet/ip6.h>
 #include <netinet/udp.h>
+#include <sys/amd64_abi.h>
 #include <sys/compat32.h>
 #include <sys/copy.h>
 #include <sys/fcntl.h>
@@ -37,6 +38,7 @@
 #include <sys/proc.h>
 #include <sys/signal.h>
 #include <sys/socket.h>
+#include <sys/sysinfo.h>
 #include <sys/termios.h>
 #include <vfs/vfs.h>
 #include <vm/vm_kmem.h>
@@ -464,26 +466,51 @@ static int afinet_ioctl(fs_node_t *node, uint32_t request, void *arg) {
      * Both structures are the process's layout (<sys/compat32.h>). */
     if (request == SIOCGIFCONF) {
         struct ifconf32 ifc;
-        if (copyin(arg, &ifc, sizeof(ifc)) != 0) return -EFAULT;
-        int max = ifc.ifc_len / (int)sizeof(struct ifreq32);
-        struct ifreq32 *out = UPTR32(ifc.ifc_req);   /* user pointer */
+        /* A native 64-bit process has a wider struct ifconf, and its
+         * struct ifreq array has 40-byte elements (<sys/amd64_abi.h>); the
+         * members written here sit at the same offsets in each element. */
+        struct amd64_ifconf ifc64;
+        const int wide = proc_abi_is_amd64();
+        const int stride = wide ? (int)sizeof(struct amd64_ifreq)
+                                : (int)sizeof(struct ifreq32);
+        if (wide) {
+            if (copyin(arg, &ifc64, sizeof(ifc64)) != 0) return -EFAULT;
+            ifc.ifc_len = ifc64.ifc_len;
+            ifc.ifc_req = (uptr32_t)ifc64.ifc_req;
+        } else if (copyin(arg, &ifc, sizeof(ifc)) != 0) {
+            return -EFAULT;
+        }
+        int max = ifc.ifc_len / stride;
+        uint8_t *out = UPTR32(ifc.ifc_req);          /* user pointer */
         int n = 0;
         /* One entry per address, as BSD does: the interface's primary
          * address, then each alias under the same name. */
         for (netdev_t *d = netdev_first(); d && n < max; d = netdev_next(d)) {
             for (unsigned i = 0; i < 1u + d->ip4_nalias && n < max; i++) {
-                struct ifreq32 e;
-                memset(&e, 0, sizeof(e));
-                strlcpy(e.ifr_name, d->name, IFNAMSIZ);
-                struct sin_kern *sin = (struct sin_kern *)&e.ifr_addr;
+                /* One element of either size: a struct ifreq32, and for a
+                 * 64-bit process the zeroed tail of its wider union. */
+                union {
+                    struct ifreq32     e;
+                    struct amd64_ifreq e64;
+                } u;
+                memset(&u, 0, sizeof(u));
+                strlcpy(u.e.ifr_name, d->name, IFNAMSIZ);
+                struct sin_kern *sin = (struct sin_kern *)&u.e.ifr_addr;
                 sin->sin_family = AF_INET;
                 sin->sin_addr   = i ? d->ip4_alias[i - 1].addr : d->ip4_addr;
-                if (!out || copyout(&e, &out[n], sizeof(e)) != 0)
+                if (!out ||
+                    copyout(&u, out + (size_t)n * (size_t)stride,
+                            (size_t)stride) != 0)
                     return -EFAULT;
                 n++;
             }
         }
-        ifc.ifc_len = n * (int)sizeof(struct ifreq32);
+        ifc.ifc_len = n * stride;
+        if (wide) {
+            ifc64.ifc_len = ifc.ifc_len;
+            if (copyout(&ifc64, arg, sizeof(ifc64)) != 0) return -EFAULT;
+            return 0;
+        }
         if (copyout(&ifc, arg, sizeof(ifc)) != 0) return -EFAULT;
         return 0;
     }

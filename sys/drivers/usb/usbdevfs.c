@@ -16,6 +16,7 @@
 
 #include <drivers/usb/usb.h>
 #include <kern/console.h>
+#include <sys/amd64_abi.h>
 #include <sys/compat32.h>
 #include <sys/copy.h>
 #include <sys/errno.h>
@@ -35,14 +36,30 @@ static int usbdevfs_dev_ioctl(fs_node_t *node, uint32_t request, void *arg)
     }
 
     switch (request) {
-    case USBDEVFS_CONTROL32: {
-        /* The process's layout and request number (<sys/compat32.h>). */
+    case USBDEVFS_CONTROL32:
+    case USBDEVFS_CONTROL_AMD64: {
+        /* The process's layout and request number: the i386 one
+         * (<sys/compat32.h>) or, from a native 64-bit process, the LP64
+         * one (<sys/amd64_abi.h>), which is brought to the same form. */
         struct usbdevfs_ctrltransfer32 ct;
         uint8_t kbuf[260];
         uint16_t len;
         int ret;
 
-        if (copyin(arg, &ct, sizeof(ct)) != 0) {
+        if (request == USBDEVFS_CONTROL_AMD64) {
+            struct amd64_usbdevfs_ctrltransfer ct64;
+
+            if (copyin(arg, &ct64, sizeof(ct64)) != 0) {
+                return -EFAULT;
+            }
+            ct.bRequestType = ct64.bRequestType;
+            ct.bRequest = ct64.bRequest;
+            ct.wValue = ct64.wValue;
+            ct.wIndex = ct64.wIndex;
+            ct.wLength = ct64.wLength;
+            ct.timeout = ct64.timeout;
+            ct.data = (uptr32_t)ct64.data;
+        } else if (copyin(arg, &ct, sizeof(ct)) != 0) {
             return -EFAULT;
         }
         len = ct.wLength;

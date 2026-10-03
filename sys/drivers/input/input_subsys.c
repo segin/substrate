@@ -4,6 +4,7 @@
 #include <kern/console.h>
 #include <kern/sched.h>
 #include <kern/time.h>
+#include <sys/amd64_abi.h>
 #include <sys/compat32.h>
 #include <sys/copy.h>
 #include <sys/errno.h>
@@ -11,6 +12,8 @@
 #include <sys/input.h>
 #include <sys/lock.h>
 #include <sys/poll.h>
+#include <sys/proc.h>
+#include <sys/sysinfo.h>
 #include <sys/time.h>
 #include <sys/vt.h>
 #include <sys/vtio.h>
@@ -44,6 +47,14 @@ static input_dev_t *input_devices = NULL;
  * ring exists only to be read through /dev/input/event0, and a file
  * offset counts records of this size. */
 static struct input_event32 global_event_log[INPUT_QUEUE_SIZE];
+
+/* The size of one record as the calling process reads it; its file offset
+ * counts records of that size.  A native 64-bit process's struct
+ * input_event has 64-bit times (<sys/amd64_abi.h>). */
+static size_t input_record_size(void) {
+    return proc_abi_is_amd64() ? sizeof(struct amd64_input_event)
+                               : sizeof(struct input_event32);
+}
 static uint64_t global_seq = 0; // Total events written
 static uint64_t input_overflow_drops = 0; // events lost to ring overflow
 static uint64_t input_overflow_warns = 0; // rate-limit for the overflow warning
@@ -344,7 +355,7 @@ static int input_poll(fs_node_t *node, void *waiter) {
     int caller_has_pos = 0;
     if (current_thread && current_thread->io_file) {
         caller_seq = (uint64_t)current_thread->io_file->f_offset
-                     / sizeof(struct input_event32);
+                     / input_record_size();
         caller_has_pos = 1;
     }
     uint32_t __if = input_lock_take();
@@ -358,9 +369,10 @@ static int input_poll(fs_node_t *node, void *waiter) {
 
 static size_t input_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
     (void)node;
-    if (size < sizeof(struct input_event32)) return 0;
+    const size_t rec = input_record_size();
+    if (size < rec) return 0;
 
-    uint64_t current_seq = offset / sizeof(struct input_event32);
+    uint64_t current_seq = offset / rec;
 
     /* O_NONBLOCK honoring — substrate's input_read used to park
      * unconditionally, ignoring the per-fd flag.  X server probes
@@ -434,7 +446,7 @@ static size_t input_read(fs_node_t *node, off_t offset, size_t size, uint8_t *bu
     }
 
     int read_count = 0;
-    struct input_event32 *out = (struct input_event32 *)buffer;
+    uint8_t *out = buffer;
 
     uint32_t __rif = input_lock_take();
     /* Same snap inside the lock — a fast producer could have wrapped
@@ -444,17 +456,29 @@ static size_t input_read(fs_node_t *node, off_t offset, size_t size, uint8_t *bu
                           ? (global_seq - INPUT_QUEUE_SIZE)
                           : 0;
     }
-    while (current_seq < global_seq && size >= sizeof(struct input_event32)) {
+    while (current_seq < global_seq && size >= rec) {
         uint64_t idx = current_seq % INPUT_QUEUE_SIZE;
-        *out = global_event_log[idx];
-        out++;
+        const struct input_event32 *ev = &global_event_log[idx];
+        if (rec == sizeof(*ev)) {
+            memcpy(out, ev, rec);
+        } else {
+            /* A native 64-bit reader: the same event with 64-bit times. */
+            struct amd64_input_event wide;
+            wide.time_sec = ev->time_sec;
+            wide.time_usec = ev->time_usec;
+            wide.type = ev->type;
+            wide.code = ev->code;
+            wide.value = ev->value;
+            memcpy(out, &wide, rec);
+        }
+        out += rec;
         read_count++;
         current_seq++;
-        size -= sizeof(struct input_event32);
+        size -= rec;
     }
     input_lock_give(__rif);
 
-    return read_count * sizeof(struct input_event32);
+    return read_count * rec;
 }
 
 void input_register_devfs(void) {
