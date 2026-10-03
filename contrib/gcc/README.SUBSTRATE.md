@@ -58,13 +58,24 @@ Both stages are orchestrated by `../build-toolchain.sh`.
 | 0006 | `libstdc++-v3/config/os/substrate/` (new) | OS-specific config directory cloned from `os/generic`; forces `_GLIBCXX_HAVE_FENV_H` |
 | 0007 | `libstdc++-v3/configure.host` | recognise `substrate*` as host_os, point at `os/substrate` |
 | 0008 | `libstdc++-v3/crossconfig.m4` + `configure` | substrate goes with `*-linux*`/`*-gnu*`/`*-solaris*` for math + stdlib detection |
+| 0012 | `gcc/config.gcc`, `gcc/config/i386/substrate64.h` (new), `libgcc/config.host` | the `x86_64-*-substrate*` target: `LINK_EMULATION = elf_x86_64_substrate`, dynamic linker `/sbin/ld64.so`, startfiles and libraries from `/lib64` and `/usr/lib64` |
+
+## The 64-bit target
+
+`TARGET_TRIPLE=x86_64-unknown-substrate ./build.sh --stage=1` (and
+`--target-runtime`) build the 64-bit cross compiler into the same prefix
+from `build-stage1-x86_64/`.  It is not given `--with-arch`: the default
+is GCC's x86-64 baseline.  Run it through `contrib/build-toolchain64.sh`,
+which also builds substrate's 64-bit libraries, mirrors them into the
+compiler's sysroot (`scripts/sync-sysroot.sh --x86_64`), installs the
+specs (`TARGET_TRIPLE=... ./install-specs.sh`) and runs
+`tests/toolchain64/check.sh`.
 
 ## What's deliberately deferred
 
-- **x86_64-substrate**.  Kernel is i386 only today.  Binutils accepts
-  the triple but gcc/config.gcc has no stanza for it.  Adding the
-  stanza later is a 5-line patch beside the freebsd64 / linux64
-  models.
+- **A 64-bit compiler that runs on substrate.**  The
+  `x86_64-unknown-substrate` target exists (patch 0012) as a stage-1
+  cross compiler only; stage 2 is 32-bit.
 - **libstdc++ and friends.**  `--disable-libstdcxx --disable-libgomp
   --disable-libitm --disable-libsanitizer --disable-libquadmath
   --disable-libvtv --disable-libssp` — every C++/runtime library is

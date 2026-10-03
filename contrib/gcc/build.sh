@@ -18,7 +18,13 @@
 #   STAGE1_PREFIX     /opt/substrate-toolchain
 #   STAGE2_DESTDIR    ${SUBSTRATE_TOP}/dist-overlay/dist-gcc
 #   PARALLEL          $(nproc)
-#   TARGET_TRIPLE     i386-unknown-substrate
+#   TARGET_TRIPLE     i386-unknown-substrate.  Stage 1 (and
+#                     --target-runtime) also build
+#                     x86_64-unknown-substrate, the 64-bit cross
+#                     compiler, into the same prefix from its own build
+#                     directory, build-stage1-x86_64; see
+#                     contrib/build-toolchain64.sh for the whole
+#                     sequence.  Stage 2 is 32-bit only.
 #   ENABLE_LANGUAGES  c                  (add "c,c++" once libstdc++
 #                                         is sortable on substrate)
 #
@@ -70,6 +76,32 @@ STAGE1_PREFIX="${STAGE1_PREFIX:-/opt/substrate}"
 STAGE2_DESTDIR="${STAGE2_DESTDIR:-${SUBSTRATE_TOP}/dist-overlay/dist-gcc}"
 ENABLE_LANGUAGES="${ENABLE_LANGUAGES:-c,c++}"
 
+# Per-target settings.  Each target builds in its own directory, so the
+# two cross compilers do not wipe each other's trees; the 32-bit one keeps
+# the historical name.  ARCH_FLAGS is the default -march/-mtune baked into
+# the compiler: i486 for the 32-bit target (see the stage-1 block), and
+# GCC's own x86-64 baseline for the 64-bit one.
+case "$TARGET_TRIPLE" in
+    i[3-7]86-*)
+        BUILD_SUFFIX=
+        ARCH_FLAGS="--with-arch=i486 --with-tune=i486" ;;
+    *)
+        BUILD_SUFFIX="-${TARGET_TRIPLE%%-*}"
+        ARCH_FLAGS= ;;
+esac
+if [ "$STAGE" = 2 ] && [ -n "$BUILD_SUFFIX" ]; then
+    echo "build.sh: stage 2 is only wired up for the 32-bit target" >&2
+    exit 2
+fi
+
+# The directory whose permissions decide whether the stage-1 install needs
+# sudo: the prefix itself when it exists, its parent otherwise.  A prefix
+# that is ours takes the install as us -- installing it as root leaves
+# root-owned directories that the sysroot sync and install-specs.sh, which
+# run as us, then cannot write to.
+PREFIX_WDIR="$STAGE1_PREFIX"
+[ -d "$PREFIX_WDIR" ] || PREFIX_WDIR="$(dirname "$STAGE1_PREFIX")"
+
 SRC_TREE="$(ls -d "$HERE"/build/gcc-*/ 2>/dev/null | head -1 || true)"
 SRC_TREE="${SRC_TREE%/}"
 if [ -z "$SRC_TREE" ] || [ ! -d "$SRC_TREE" ]; then
@@ -98,7 +130,7 @@ if [ "$STAGE" = 1 ]; then
         exit 1
     fi
 
-    BUILD_DIR="$HERE/build-stage1"
+    BUILD_DIR="$HERE/build-stage1$BUILD_SUFFIX"
     if [ "$LIBGCC_ONLY" = 1 ]; then
         # Second pass over libgcc, reusing the tree the first pass left.
         #
@@ -136,7 +168,7 @@ if [ "$STAGE" = 1 ]; then
         #
         #   configure: error: Link tests are not allowed after
         #                     GCC_NO_EXECUTABLES.
-        _specs=$(ls "$STAGE1_PREFIX"/lib/gcc/i386-unknown-substrate/*/specs \
+        _specs=$(ls "$STAGE1_PREFIX"/lib/gcc/"$TARGET_TRIPLE"/*/specs \
                  2>/dev/null | head -1)
         if [ -n "$_specs" ] && [ -d "$BUILD_DIR/gcc" ]; then
             echo "==> Copying $_specs into the build tree"
@@ -144,7 +176,7 @@ if [ "$STAGE" = 1 ]; then
         fi
 
         LIBGCC_TARGET_CFLAGS="-g -O2 -std=gnu23"
-        _mk() { if [ -w "$(dirname "$STAGE1_PREFIX")" ]; then make "$@"; else sudo make "$@"; fi; }
+        _mk() { if [ -w "$PREFIX_WDIR" ]; then make "$@"; else sudo make "$@"; fi; }
 
         echo "==> Rebuilding libgcc now that libc is in the sysroot"
         make -j "$PARALLEL" CFLAGS_FOR_TARGET="$LIBGCC_TARGET_CFLAGS" all-target-libgcc
@@ -188,8 +220,7 @@ if [ "$STAGE" = 1 ]; then
         --target="$TARGET_TRIPLE" \
         --prefix="$STAGE1_PREFIX" \
         --with-sysroot="$SUBSTRATE_TOP/dist" \
-        --with-arch=i486 \
-        --with-tune=i486 \
+        $ARCH_FLAGS \
         --enable-threads=posix \
         --enable-languages="$ENABLE_LANGUAGES" \
         $DISABLES
@@ -220,7 +251,7 @@ if [ "$STAGE" = 1 ]; then
              "    Run again after staging more of dist/usr/include and dist/usr/lib."
 
     echo "==> Installing to $STAGE1_PREFIX"
-    if [ -w "$(dirname "$STAGE1_PREFIX")" ]; then
+    if [ -w "$PREFIX_WDIR" ]; then
         make install-gcc
         make CFLAGS_FOR_TARGET="$LIBGCC_TARGET_CFLAGS" install-target-libgcc || true
     else

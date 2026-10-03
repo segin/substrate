@@ -31,14 +31,17 @@
 # So the override has to re-state --eh-frame-hdr itself.  Keep it here, and
 # keep it %{!static:...}-guarded, exactly as LINK_EH_SPEC does.
 #
-# Env: STAGE1_PREFIX (default /opt/substrate), GCC_VERSION (default 16.1.0).
+# Env: STAGE1_PREFIX (default /opt/substrate), GCC_VERSION (default 16.1.0),
+#      TARGET_TRIPLE (default i386-unknown-substrate; x86_64-unknown-substrate
+#      does the same for the 64-bit cross toolchain and its own sysroot).
 
 set -eu
 
 : "${STAGE1_PREFIX:=/opt/substrate}"
 : "${GCC_VERSION:=16.1.0}"
+: "${TARGET_TRIPLE:=i386-unknown-substrate}"
 
-TARGET="i386-unknown-substrate"
+TARGET="${TARGET_TRIPLE}"
 SR="${STAGE1_PREFIX}/${TARGET}"
 LIBDIR="${STAGE1_PREFIX}/lib/gcc/${TARGET}/${GCC_VERSION}"
 
@@ -86,6 +89,37 @@ cat > "${LIBDIR}/specs" <<EOF
 *lib:
 + -lpthread
 EOF
+
+# The 64-bit target also has to state its *libgcc spec.
+#
+# Having a specs file at all costs the driver more than the --eh-frame-hdr
+# described above: it also skips the rewrite that turns the plain "-lgcc"
+# into the static/shared choice (-lgcc -lgcc_eh, or -lgcc_s -lgcc), so every
+# link gets libgcc.a alone -- with no unwinder, which lives in libgcc_eh.a
+# and libgcc_s.so.1:
+#
+#   undefined reference to `_Unwind_Resume'
+#   hidden symbol `__udivmodti4' in libgcc.a(_udivmoddi4.o) is referenced
+#   by DSO
+#
+# (the second from libstdc++.so.6, which leaves its 128-bit division to
+# whoever links it).  The 32-bit toolchain has the same hole and does not
+# notice: its libm.so.0 records DT_NEEDED libgcc_s.so.1, libc.so.0 needs
+# libm, and --copy-dt-needed-entries above therefore drags libgcc_s into
+# every link.  The 64-bit libm.so.0 has no such dependency, so say it here:
+# the shared libgcc first -- ahead of libgcc.a, so that a shared object's
+# reference binds to it rather than pulling a hidden archive member -- and
+# the static one only on request.  Every 64-bit program therefore needs
+# /lib64/libgcc_s.so.1 at run time, as every 32-bit one in effect does.
+case "${TARGET}" in
+x86_64-*)
+    cat >> "${LIBDIR}/specs" <<EOF
+
+*libgcc:
+%{static|static-libgcc:-lgcc -lgcc_eh;:-lgcc_s -lgcc}
+EOF
+    ;;
+esac
 
 echo "==> installed ${LIBDIR}/specs"
 

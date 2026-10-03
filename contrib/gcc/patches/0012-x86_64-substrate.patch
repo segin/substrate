@@ -1,0 +1,123 @@
+Subject: gcc, libgcc: add the x86_64-substrate target
+
+Substrate runs native 64-bit (LP64) processes beside its 32-bit userland:
+their dynamic linker is /sbin/ld64.so and their libraries and crt objects
+live in /lib64 and /usr/lib64 (docs/specs/abi-amd64.md in the substrate
+tree).  This adds the x86_64-*-substrate* target as a sibling of the
+i386 one from patches 0002-0005 and 0010:
+
+ * gcc/config.gcc: the same tm_file layering with i386/x86-64.h added,
+   the shared libgcc and posix threads.
+ * gcc/config/i386/substrate64.h: the 64-bit counterpart of
+   i386/substrate.h -- linker emulation elf_x86_64_substrate, dynamic
+   linker /sbin/ld64.so, --64 to the assembler, and the lib64 startfile
+   prefixes.
+ * libgcc/config.host: the per-CPU stanza.  The OS-level *-*-substrate*
+   stanza and the generic x86 soft-float (TFmode) fragments already
+   apply.
+
+The common substrate.h, the libstdc++ os/crossconfig patches and the
+PT_GNU_EH_FRAME change match any substrate triple and are unchanged.
+
+---
+--- a/gcc/config.gcc
++++ b/gcc/config.gcc
+@@ -2047,6 +2047,19 @@
+ 	  "" | yes | posix) thread_file='posix' ;;
+ 	esac
+ 	;;
++x86_64-*-substrate*)
++	# Substrate OS, 64-bit (LP64).  The same layering as the i386
++	# stanza above with i386/x86-64.h added; i386/substrate64.h is the
++	# 64-bit counterpart of i386/substrate.h (dynamic linker
++	# /sbin/ld64.so, libraries and crt files in /lib64 and /usr/lib64).
++	tm_file="${tm_file} i386/unix.h i386/att.h elfos.h glibc-stdint.h i386/x86-64.h substrate.h i386/substrate64.h"
++	tmake_file="${tmake_file} i386/t-crtstuff t-slibgcc"
++	gas=yes
++	gnu_ld=yes
++	case ${enable_threads} in
++	  "" | yes | posix) thread_file='posix' ;;
++	esac
++	;;
+ i[34567]86-*-freebsd*)
+ 	tm_file="${tm_file} i386/unix.h i386/att.h elfos.h ${fbsd_tm_file} i386/freebsd.h"
+ 	;;
+--- a/libgcc/config.host
++++ b/libgcc/config.host
+@@ -799,6 +799,11 @@
+ 	tmake_file="${tmake_file} i386/t-crtstuff t-dfprules"
+ 	tm_file="${tm_file} i386/elf-lib.h"
+ 	;;
++x86_64-*-substrate*)
++	# The 64-bit substrate target: as the i386 stanza above.
++	tmake_file="${tmake_file} i386/t-crtstuff t-dfprules"
++	tm_file="${tm_file} i386/elf-lib.h"
++	;;
+ i[34567]86-*-linux*)
+ 	extra_parts="$extra_parts crtprec32.o crtprec64.o crtprec80.o crtfastmath.o"
+ 	tmake_file="${tmake_file} i386/t-crtpc t-crtfm i386/t-crtstuff t-dfprules"
+--- /dev/null
++++ b/gcc/config/i386/substrate64.h
+@@ -0,0 +1,62 @@
++/* Substrate OS — x86-64 specs (link, startfile, dynamic linker).
++   Layered on top of i386/unix.h, i386/att.h, elfos.h, glibc-stdint.h,
++   i386/x86-64.h and the common substrate.h header (see gcc/config.gcc).
++   The 64-bit counterpart of i386/substrate.h: the same specs, with the
++   64-bit linker emulation, dynamic linker and library directories.  */
++
++#ifndef GCC_I386_SUBSTRATE64_H
++#define GCC_I386_SUBSTRATE64_H
++
++/* Dynamic linker.  /sbin/ld.so is the 32-bit linker; a 64-bit program's
++   PT_INTERP is /sbin/ld64.so.  */
++#define GLIBC_DYNAMIC_LINKER "/sbin/ld64.so"
++
++#undef  LINK_EMULATION
++#define LINK_EMULATION "elf_x86_64_substrate"
++
++#undef  ASM_SPEC
++#define ASM_SPEC "--64 %{msse2avx:-msse2avx}"
++
++#undef  LINK_SPEC
++#define LINK_SPEC                                                       \
++  "-m " LINK_EMULATION " "                                              \
++  "%{shared:-shared} "                                                  \
++  "%{!shared:                                                           \
++    %{!static:                                                          \
++      %{rdynamic:-export-dynamic}                                       \
++      -dynamic-linker " GLIBC_DYNAMIC_LINKER "}                         \
++    %{static:-static}}"
++
++/* Emit the PT_GNU_EH_FRAME (.eh_frame_hdr) segment so libgcc's unwinder
++   can find each module's exception frames via dl_iterate_phdr — see
++   i386/substrate.h.  */
++#undef  LINK_EH_SPEC
++#define LINK_EH_SPEC "%{!static:--eh-frame-hdr} "
++
++/* The 64-bit libraries and crt objects are installed beside the 32-bit
++   ones, in /lib64 and /usr/lib64 (both relative to the sysroot).  */
++#undef  STANDARD_STARTFILE_PREFIX_1
++#define STANDARD_STARTFILE_PREFIX_1 "/lib64/"
++#undef  STANDARD_STARTFILE_PREFIX_2
++#define STANDARD_STARTFILE_PREFIX_2 "/usr/lib64/"
++
++/* startfile / endfile specs — the same sandwich as the 32-bit target:
++   crt0.o (the entry point), crti.o / crtn.o, and GCC's crtbegin/crtend.  */
++#undef  STARTFILE_SPEC
++#define STARTFILE_SPEC                                                  \
++  "%{!shared:                                                           \
++     %{!nostartfiles:                                                   \
++       %{pg:gcrt0.o%s;:crt0.o%s}                                        \
++       crti.o%s                                                         \
++       %{static:crtbeginT.o%s;shared|pie:crtbeginS.o%s;:crtbegin.o%s}}}"
++
++#undef  ENDFILE_SPEC
++#define ENDFILE_SPEC                                                    \
++  "%{!nostartfiles:                                                     \
++     %{shared|pie:crtendS.o%s;:crtend.o%s}                              \
++     crtn.o%s}"
++
++#undef  TARGET_ASM_FILE_END
++#define TARGET_ASM_FILE_END file_end_indicate_exec_stack
++
++#endif /* GCC_I386_SUBSTRATE64_H */
