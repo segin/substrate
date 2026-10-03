@@ -13,8 +13,11 @@ typedef unsigned int uint32_t;
 typedef long long int64_t;
 typedef unsigned long long uint64_t;
 
-typedef int32_t intptr_t;
-typedef uint32_t uintptr_t;
+/* Pointer-sized types come from the compiler, so one header serves the
+ * ILP32 (i386) and LP64 (x86_64) kernels; on i386 these are int and
+ * unsigned int, as before. */
+typedef __INTPTR_TYPE__ intptr_t;
+typedef __UINTPTR_TYPE__ uintptr_t;
 
 typedef int64_t intmax_t;
 typedef uint64_t uintmax_t;
@@ -32,9 +35,12 @@ typedef uint64_t uintmax_t;
 #define INTMAX_MIN  INT64_MIN
 #define UINTMAX_MAX UINT64_MAX
 
-#define SIZE_MAX    UINT32_MAX
-#define PTRDIFF_MAX INT32_MAX
-#define PTRDIFF_MIN INT32_MIN
+#define INTPTR_MAX  __INTPTR_MAX__
+#define INTPTR_MIN  (-INTPTR_MAX - 1)
+#define UINTPTR_MAX __UINTPTR_MAX__
+#define SIZE_MAX    __SIZE_MAX__
+#define PTRDIFF_MAX __PTRDIFF_MAX__
+#define PTRDIFF_MIN (-PTRDIFF_MAX - 1)
 
 #endif
 #endif
