@@ -10,8 +10,10 @@ typedef short int16_t;
 typedef unsigned short uint16_t;
 typedef int int32_t;
 typedef unsigned int uint32_t;
-typedef long long int64_t;
-typedef unsigned long long uint64_t;
+/* The compiler's own 64-bit types: long long on i386, long on x86_64, so
+ * format checking agrees with the ABI's printf length modifiers. */
+typedef __INT64_TYPE__ int64_t;
+typedef __UINT64_TYPE__ uint64_t;
 
 /* Pointer-sized types come from the compiler, so one header serves the
  * ILP32 (i386) and LP64 (x86_64) kernels; on i386 these are int and
