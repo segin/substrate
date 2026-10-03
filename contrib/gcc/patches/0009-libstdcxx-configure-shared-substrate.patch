@@ -1,39 +1,97 @@
-Subject: [PATCH] libstdc++-v3/configure: recognize substrate for shared lib builds
+Subject: libstdc++-v3/configure: recognize substrate for shared lib builds
 
 The libtool host_os case statements that decide "does this OS support
 shared libraries via GNU ld" and "what's the dynamic linker on this
 host" only list linux* / k*bsd*-gnu / kopensolaris*-gnu / etc.  Without
-a matching arm, an i386-unknown-substrate cross build of libstdc++
-falls through to the defaults: enable_shared=no, dynamic_linker=no,
-and the build produces libstdc++.a only.
+a matching arm, a substrate cross build of libstdc++ falls through to
+the defaults: enable_shared=no, dynamic_linker=no, and the build
+produces libstdc++.a only.
 
-Add `substrate*` to those case alternatives so an --enable-shared
-configure produces a real ET_DYN libstdc++.so.6 with a SONAME entry
-and is recognised as supporting shared libraries.
+Add `substrate*` to those case alternatives so the target runtime build
+produces a real ET_DYN libstdc++.so.6 with a SONAME.
 
-Note: the libstdc++.so produced by libtool still needs a follow-up
-manual relink with -lc -lgcc_s to populate DT_NEEDED entries —
-substrate's libtool postdeps for $host_os aren't wired up to add
-those automatically yet.  See contrib/gcc/build-libstdcxx-shared.sh
-for the helper that does the end-to-end build.
+The library libtool links carries no DT_NEEDED entries: its
+deplibs_check_method for substrate is still "unknown", so it drops the
+inter-library dependencies.  Programs get libc, libm and libgcc_s from
+their own link line (see contrib/gcc/install-specs.sh).
+
+This file sat in patches/ for months in a form `patch` rejects ("Only
+garbage was found in the patch input") and was never in the series; the
+edits lived only in hand-patched source trees, so a fresh fetch built a
+static-only libstdc++.  This is the same change as a diff that applies.
 
 ---
- libstdc++-v3/configure | 12 ++++++------
- 1 file changed, 6 insertions(+), 6 deletions(-)
-
-diff --git a/libstdc++-v3/configure b/libstdc++-v3/configure
-@@ libstdc++-v3/configure @@
+--- a/libstdc++-v3/configure
++++ b/libstdc++-v3/configure
+@@ -10371,7 +10371,7 @@
+       archive_expsym_cmds='sed "s,^,_," $export_symbols >$output_objdir/$soname.expsym~$CC -shared $pic_flag $libobjs $deplibs $compiler_flags ${wl}-h,$soname ${wl}--retain-symbols-file,$output_objdir/$soname.expsym ${wl}--image-base,`expr ${RANDOM-$$} % 4096 / 2 \* 262144 + 1342177280` -o $lib'
+       ;;
+ 
 -    gnu* | linux* | tpf* | k*bsd*-gnu | kopensolaris*-gnu | uclinuxfdpiceabi)
 +    gnu* | linux* | substrate* | tpf* | k*bsd*-gnu | kopensolaris*-gnu | uclinuxfdpiceabi)
-@@ libstdc++-v3/configure @@
+       tmp_diet=no
+       if test "$host_os" = linux-dietlibc; then
+ 	case $cc_basename in
+@@ -11953,7 +11953,7 @@
+ # project, but have not yet been accepted: they are GCC-local changes
+ # for the time being.  (See
+ # https://lists.gnu.org/archive/html/libtool-patches/2018-05/msg00000.html)
 -linux* | k*bsd*-gnu | kopensolaris*-gnu | gnu* | uclinuxfdpiceabi)
 +linux* | substrate* | k*bsd*-gnu | kopensolaris*-gnu | gnu* | uclinuxfdpiceabi)
-@@ libstdc++-v3/configure @@
+   version_type=linux
+   need_lib_prefix=no
+   need_version=no
+@@ -15703,7 +15703,7 @@
+ # project, but have not yet been accepted: they are GCC-local changes
+ # for the time being.  (See
+ # https://lists.gnu.org/archive/html/libtool-patches/2018-05/msg00000.html)
+-linux* | k*bsd*-gnu | kopensolaris*-gnu | gnu* | uclinuxfdpiceabi)
++linux* | substrate* | k*bsd*-gnu | kopensolaris*-gnu | gnu* | uclinuxfdpiceabi)
+   version_type=linux
+   need_lib_prefix=no
+   need_version=no
+@@ -21475,7 +21475,7 @@
+       vxworks*)
+         ac_has_nanosleep=yes
+         ;;
 -      gnu* | linux* | kfreebsd*-gnu | knetbsd*-gnu)
 +      gnu* | linux* | substrate* | kfreebsd*-gnu | knetbsd*-gnu)
-@@ libstdc++-v3/configure @@
+         # Don't use link test for freestanding library, in case gcc_no_link=yes
+         if test x"$is_hosted" = xyes; then
+           # Versions of glibc before 2.17 needed -lrt for clock_gettime.
+@@ -52640,7 +52640,7 @@
+       freebsd*|netbsd*|openbsd*|dragonfly*|darwin*)
+         enable_libstdcxx_filesystem_ts=yes
+         ;;
 -      gnu* | linux* | kfreebsd*-gnu | knetbsd*-gnu | uclinux*)
 +      gnu* | linux* | substrate* | kfreebsd*-gnu | knetbsd*-gnu | uclinux*)
-@@ libstdc++-v3/configure @@
+         enable_libstdcxx_filesystem_ts=yes
+         ;;
+       rtems*)
+@@ -53775,7 +53775,7 @@
+   $as_echo_n "(cached) " >&6
+ else
+       case "${target_os}" in
 -      gnu* | linux* | solaris* | uclinux*)
 +      gnu* | linux* | substrate* | solaris* | uclinux*)
+ 	if test x$gcc_no_link = xyes; then
+   cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+ /* end confdefs.h.  */
+@@ -54748,7 +54748,7 @@
+   if test "x${with_libstdcxx_zoneinfo}" = xyes; then
+     # Pick a default when no specific path is set.
+     case "$target_os" in
+-      gnu* | linux* | kfreebsd*-gnu | knetbsd*-gnu)
++      gnu* | linux* | substrate* | kfreebsd*-gnu | knetbsd*-gnu)
+ 	# Not all distros ship tzdata.zi in this dir.
+ 	zoneinfo_dir="/usr/share/zoneinfo"
+ 	;;
+@@ -55266,7 +55266,7 @@
+ 
+       # Check for Glibc-specific FILE members and <stdio_ext.h> extensions.
+       case "${target_os}" in
+-	gnu* | linux* | kfreebsd*-gnu | knetbsd*-gnu)
++	gnu* | linux* | substrate* | kfreebsd*-gnu | knetbsd*-gnu)
+ 	  { $as_echo "$as_me:${as_lineno-$LINENO}: checking for FILE::_IO_write_ptr and <stdio_ext.h>" >&5
+ $as_echo_n "checking for FILE::_IO_write_ptr and <stdio_ext.h>... " >&6; }
+ 	  cat confdefs.h - <<_ACEOF >conftest.$ac_ext

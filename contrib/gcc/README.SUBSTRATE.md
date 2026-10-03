@@ -58,6 +58,7 @@ Both stages are orchestrated by `../build-toolchain.sh`.
 | 0006 | `libstdc++-v3/config/os/substrate/` (new) | OS-specific config directory cloned from `os/generic`; forces `_GLIBCXX_HAVE_FENV_H` |
 | 0007 | `libstdc++-v3/configure.host` | recognise `substrate*` as host_os, point at `os/substrate` |
 | 0008 | `libstdc++-v3/crossconfig.m4` + `configure` | substrate goes with `*-linux*`/`*-gnu*`/`*-solaris*` for math + stdlib detection |
+| 0009 | `libstdc++-v3/configure` | libtool treats `substrate*` like `linux*`, so the target runtime build produces `libstdc++.so.6` and not only the archive |
 | 0012 | `gcc/config.gcc`, `gcc/config/i386/substrate64.h` (new), `libgcc/config.host` | the `x86_64-*-substrate*` target: `LINK_EMULATION = elf_x86_64_substrate`, dynamic linker `/sbin/ld64.so`, startfiles and libraries from `/lib64` and `/usr/lib64` |
 
 ## The 64-bit target
