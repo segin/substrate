@@ -318,9 +318,6 @@ What a 64-bit process does not have yet:
 
 * `ptrace`: its requests exchange the i386 register set and 32-bit words
   only;
-* in the dynamic linker: `R_X86_64_IRELATIVE` (indirect functions) and
-  lazy binding -- as in the 32-bit linker, everything is bound at load
-  time;
 * a 64-bit `libgcc_s.so.1` and C++ runtime: the 64-bit libraries are
   built with the host compiler, and `libm.so.0` links what it needs from
   `libgcc.a`.

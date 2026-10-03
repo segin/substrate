@@ -351,13 +351,42 @@ is where libc's `__tls_get_addr` reads it (`lib/c/src/tls.c`).
 ### 22.3 amd64 relocations
 
 `R_X86_64_NONE`, `64`, `PC32`, `COPY`, `GLOB_DAT`, `JUMP_SLOT`,
-`RELATIVE`, `TPOFF64`, `DTPMOD64` and `DTPOFF64`.  The addend is
-`r_addend`; the relocated word is overwritten and never read, so applying
-a `RELATIVE` twice would be harmless there (the per-object `relocated`
-guard still applies to both).  A `PC32` whose target is out of 32-bit
-range is refused.  `R_X86_64_IRELATIVE` is **not** implemented and is
-reported as an unsupported relocation; nothing in the tree emits one.
-Binding is immediate, as on i386.
+`RELATIVE`, `TPOFF64`, `DTPMOD64`, `DTPOFF64` and `IRELATIVE`.  The
+addend is `r_addend`; the relocated word is overwritten and never read,
+so applying a `RELATIVE` twice would be harmless there (the per-object
+`relocated` guard still applies to both).  A `PC32` whose target is out
+of 32-bit range is refused.
+
+**Indirect functions.**  An `IRELATIVE`, and a `GLOB_DAT`, `JUMP_SLOT`
+or `64` whose symbol resolves to an `STT_GNU_IFUNC` definition, store
+what a resolver function returns.  The resolver is code in some loaded
+object, so it must not run before that object is relocated: the main
+pass skips such an entry and marks the object (`has_ifunc`), and a third
+pass, `ld_relocate_ifunc()`, applies them after the `COPY` pass, at
+startup and in `dlopen`.  `dlsym` and the other lookups made after
+relocation call the resolver directly.  The 32-bit linker has none of
+this.
+
+**Lazy binding.**  The 64-bit linker binds PLT slots on first call; the
+32-bit linker remains eager.  `ld_reloc_lazy_setup()` adds the load bias
+to each `JUMP_SLOT` word (which then points at its stub in `.plt`), and
+stores the object's descriptor in `GOT[1]` and `ld_plt_trampoline`
+(`ld_plt_amd64.S`) in `GOT[2]`.  The trampoline saves the integer
+argument registers, `%rax`, `%r10` and the FXSAVE state, calls
+`ld_plt_fixup(obj, index)` -- which resolves the symbol under the
+`dlopen` lock, calls an indirect function's resolver if that is what it
+found, and stores the result in the slot -- then restores everything and
+jumps to the function.  A symbol nothing defines is fatal at that point
+(`lazy binding failed`, status 127) instead of at load time.  Binding is
+eager when the object carries `DT_BIND_NOW`, `DF_BIND_NOW` or `DF_1_NOW`
+(every system library does: `SHLIB_LDFLAGS` has `-z now`), when
+`LD_BIND_NOW` is set to a non-empty value, for the objects a
+`dlopen(RTLD_NOW)` loads, and for any `DT_JMPREL` that holds something
+other than `JUMP_SLOT`/`IRELATIVE` entries or a slot that is still zero.
+Limits: FXSAVE does not cover the upper halves of `%ymm`, so a resolver
+that used AVX would spoil a 256-bit vector argument of the call being
+bound; and `RTLD_NOW` does not go back and bind an object that an
+earlier call left lazy.
 
 ### 22.4 Sharing a root
 

@@ -434,9 +434,12 @@ the context saved on every switch and in `mcontext_t`.
   program's Makefile) or statically.
 * **Relocations:** the psABI's `R_X86_64_*` set, in `DT_RELA` tables
   (`DT_PLTREL` = `DT_RELA`).  `ld64.so` supports `RELATIVE`, `GLOB_DAT`,
-  `JUMP_SLOT`, `64`, `PC32`, `COPY`, `TPOFF64`, `DTPMOD64` and
-  `DTPOFF64`, binding everything at load time.  `IRELATIVE` is not
-  supported yet: an object carrying one is refused with a diagnostic.
+  `JUMP_SLOT`, `64`, `PC32`, `COPY`, `TPOFF64`, `DTPMOD64`, `DTPOFF64`
+  and `IRELATIVE`.  Indirect functions (`STT_GNU_IFUNC`) are resolved
+  once every object is relocated.  `JUMP_SLOT`s are bound on first call
+  unless the object is linked `-z now`, `LD_BIND_NOW` is set or the
+  object was loaded by `dlopen(RTLD_NOW)`; the binding path preserves the
+  integer argument registers, `%rax`, `%r10` and the FXSAVE state.
 * **Dynamic TLS:** the thread control block at `%fs:0` is 64 bytes:
   the thread pointer at `%fs:0`, the DTV pointer at `%fs:8`, the rest
   spare.  `DTV[m]` is the address of module `m`'s block in the thread;
