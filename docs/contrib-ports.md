@@ -26,6 +26,9 @@ image.  This document catalogs the current set.
   regenerate configure scripts natively (`autoreconf -fi`); their
   config.guess/config.sub know substrate and libtool.m4 builds shared
   libraries on it.
+- **file 5.45** (`contrib/file/`) — `file(1)` and libmagic (used by
+  tdelibs and nano).  The magic database is compiled by a host build of
+  the same version, since the compiled format is version-specific.
 - **OpenBSD expr** (`contrib/expr/`) — single-file BSD port alongside
   the OpenBSD `tr` port at `bin/tr/`.
 - **zsh 5.9** (`contrib/zsh/`) — the bash-equivalent shell.  System

@@ -14,6 +14,24 @@ TREE="${HERE}/build/file-5.45"; DEST="${SUBSTRATE_TOP}/dist-overlay/dist-file"
 # and the build died on `cp -f /config.sub`.
 . "${HERE}/../substrate-autotools.sh"
 [ -d "${TREE}" ] || { echo "run ./fetch.sh first" >&2; exit 1; }
+
+# magic.mgc is compiled by a runnable `file`, and the compiled format is
+# version-specific: file 5.45 reads only format 18, so a .mgc written by the
+# host's own file(1) (5.48 writes format 21) is rejected on the target with
+# "supports only version 18 magic files".  Build a host `file` from the
+# same tarball -- its own copy, since the cross tree is configured in place
+# -- and compile the database with it.
+HOSTBUILD="${HERE}/build/host/$(basename "${TREE}")"
+if [ ! -x "${HOSTBUILD}/src/file" ]; then
+    rm -rf "${HERE}/build/host"; mkdir -p "${HERE}/build/host"
+    tar xf "${HERE}/build/$(basename "${TREE}").tar.gz" -C "${HERE}/build/host"
+    (cd "${HOSTBUILD}" && ./configure --disable-shared --enable-static \
+        --disable-zlib --disable-bzlib --disable-xzlib --disable-zstd \
+        --disable-lzlib --disable-seccomp >/dev/null &&
+     make -C src -j"${JOBS}" file >/dev/null)
+fi
+FILE_COMPILE="${HOSTBUILD}/src/file"
+
 cd "${TREE}"
 substrate_config_sub_fix "."
 sh "${SUBSTRATE_TOP}/contrib/substrate-libtool-shared.sh" ./configure >/dev/null 2>&1 || true
@@ -22,10 +40,10 @@ sh "${SUBSTRATE_TOP}/contrib/substrate-libtool-shared.sh" ./configure >/dev/null
     --disable-zlib --disable-bzlib --disable-xzlib --disable-zstd --disable-lzlib --disable-seccomp \
     CC=i386-unknown-substrate-gcc CFLAGS="-march=i486 -mtune=i486 -O2 -g -fno-pie" \
     LDFLAGS="-L${SR}/lib" LIBS="-lregex"
-# magic.mgc is compiled by a runnable `file`; cross-built file can't run on
-# the host, so use the host's file(1) as the magic compiler.
-make -j"${JOBS}" FILE_COMPILE=/usr/bin/file
-rm -rf "${DEST}"; make install DESTDIR="${DEST}" FILE_COMPILE=/usr/bin/file
+# The cross-built file can't run on the host; compile magic.mgc with the
+# host build of the same version (above).
+make -j"${JOBS}" FILE_COMPILE="${FILE_COMPILE}"
+rm -rf "${DEST}"; make install DESTDIR="${DEST}" FILE_COMPILE="${FILE_COMPILE}"
 rm -f "${DEST}"/usr/lib/*.la
 # libtool drops the regex deplib; relink libmagic.so from its archive so it
 # records libregex in DT_NEEDED (else ld.so can't resolve regcomp at load).
