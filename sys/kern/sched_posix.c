@@ -24,6 +24,7 @@
 #include <stddef.h>
 
 #include <pm/pm.h>
+#include <sys/compat32.h>
 #include <sys/copy.h>
 #include <sys/errno.h>
 #include <sys/proc.h>
@@ -219,7 +220,7 @@ int sys_sched_getparam(pid_t pid, struct sched_param *uparam)
      * instead.  The other members default to 0, which is accepted. */
     if (kp.sched_ss_max_repl < 1 || kp.sched_ss_max_repl > POSIX_SS_REPL_MAX)
         kp.sched_ss_max_repl = POSIX_SS_REPL_MAX;
-    if (copyout(&kp, uparam, sizeof(kp)) != 0) return -EFAULT;
+    if (sched_param_copyout(&kp, uparam) != 0) return -EFAULT;
     return 0;
 }
 
@@ -230,7 +231,7 @@ int sys_sched_setscheduler(pid_t pid, int policy,
     if (!policy_valid(policy)) return -EINVAL;
 
     struct sched_param kp;
-    if (copyin(uparam, &kp, sizeof(kp)) != 0) return -EFAULT;
+    if (sched_param_copyin(uparam, &kp) != 0) return -EFAULT;
     if (policy == POSIX_SCHED_SPORADIC) {
         if (!sporadic_params_ok(&kp)) return -EINVAL;
     } else {
@@ -259,7 +260,7 @@ int sys_sched_setparam(pid_t pid, const struct sched_param *uparam)
     if (pid < 0 || !uparam) return -EINVAL;
 
     struct sched_param kp;
-    if (copyin(uparam, &kp, sizeof(kp)) != 0) return -EFAULT;
+    if (sched_param_copyin(uparam, &kp) != 0) return -EFAULT;
 
     process_t *t = sched_target(pid);
     if (!t) return -ESRCH;
@@ -296,6 +297,6 @@ int sys_sched_rr_get_interval(pid_t pid, struct timespec *uts)
     struct timespec ts;
     ts.tv_sec  = 0;
     ts.tv_nsec = 10000000;         /* 10 ms round-robin quantum */
-    if (copyout(&ts, uts, sizeof(ts)) != 0) return -EFAULT;
+    if (timespec_copyout(&ts, uts) != 0) return -EFAULT;
     return 0;
 }

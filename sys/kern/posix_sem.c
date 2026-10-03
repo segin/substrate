@@ -36,6 +36,7 @@
 #include <kern/sched.h>
 #include <kern/sleepq.h>
 #include <kern/time.h>
+#include <sys/compat32.h>
 #include <sys/copy.h>
 #include <sys/fcntl.h>
 #include <sys/ipc.h>
@@ -556,7 +557,7 @@ int sys_ksem_timedwait(int id, const struct timespec *uabstime)
     struct timespec kts;
     if (!uabstime)
         return kern_ksem_timedwait(id, NULL);
-    if (copyin(uabstime, &kts, sizeof(kts)) != 0)
+    if (timespec_copyin(uabstime, &kts) != 0)
         return -EFAULT;
     return kern_ksem_timedwait(id, &kts);
 }

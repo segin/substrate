@@ -12,6 +12,7 @@
 #include <kern/console.h>
 #include <kern/osversion.h>
 #include <sys/abi32.h>
+#include <sys/compat32.h>
 #include <sys/copy.h>
 #include <sys/errno.h>
 #include <sys/lock.h>
@@ -141,8 +142,8 @@ int sys_sysctl(int *name, unsigned int namelen, void *oldp, abi_size_t *oldlenp,
 
     /* 3. Copy in old length if provided (the process's size_t) */
     if (oldlenp) {
-        abi_size_t oldlen;
-        error = copyin(oldlenp, &oldlen, sizeof(oldlen));
+        size_t oldlen;
+        error = usize_copyin(oldlenp, &oldlen);
         if (error) return error;
         req.oldlen = oldlen;
     } else {
@@ -198,8 +199,7 @@ int sys_sysctl(int *name, unsigned int namelen, void *oldp, abi_size_t *oldlenp,
     if (error == 0 && oldlenp) {
         // req.oldidx is updated by handler to indicate how much was written
         // or how much would have been written
-        abi_size_t used = (abi_size_t)req.oldidx;
-        if (copyout(&used, oldlenp, sizeof(used)) != 0) {
+        if (usize_copyout(req.oldidx, oldlenp) != 0) {
             error = EFAULT;
         }
     }

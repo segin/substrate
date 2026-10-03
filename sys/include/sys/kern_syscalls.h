@@ -17,6 +17,9 @@ struct timezone;
 struct itimerval;
 struct tms;
 struct statfs;
+struct statvfs;
+struct sysinfo;
+struct rlimit;
 
 /* Internal kernel versions of syscalls that take kernel pointers */
 struct sigaction;
@@ -68,6 +71,12 @@ int kern_access(const char *path, int mode);
 int kern_pipe(int *fds);
 int kern_statfs(const char *path, struct statfs *buf);
 int kern_fstatfs(int fd, struct statfs *buf);
+int kern_statvfs(const char *path, struct statvfs *buf);
+int kern_fstatvfs(int fd, struct statvfs *buf);
+/* sysinfo(2) into the kernel's own record. */
+int kern_sysinfo(struct sysinfo *info);
+/* setrlimit(2) from a kernel struct rlimit (<sys/resource.h>). */
+int kern_native_setrlimit(int resource, const struct rlimit *rl);
 struct rusage;
 int kern_wait4(pid_t pid, int *status, int options, struct rusage *rusage);
 int kern_waitpid(int pid, int *status, int options);

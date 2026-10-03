@@ -874,7 +874,7 @@ int sys_sigtimedwait(const uint32_t *set, siginfo_t *info,
     memset(&kinfo, 0, sizeof(kinfo));
     if (copyin(set, &kset, sizeof(uint32_t)) != 0) return -14;
     if (timeout) {
-        if (copyin(timeout, &kts, sizeof(struct timespec)) != 0) return -14;
+        if (timespec_copyin(timeout, &kts) != 0) return -14;
     }
     int ret = kern_sigtimedwait(&kset, info ? &kinfo : NULL, timeout ? &kts : NULL);
     if (ret > 0 && info) {

@@ -14,8 +14,10 @@
 #include <kern/time.h>
 #include <pm/pm.h>
 #include <sys/abi32.h>
+#include <sys/compat32.h>
 #include <sys/copy.h>
 #include <sys/errno.h>
+#include <sys/kern_syscalls.h>
 #include <sys/param.h>
 #include <sys/sysinfo.h>
 #include <sys/types.h>
@@ -29,10 +31,9 @@
  * We iterate processes directly from pm.h
  */
 
-// Internal implementation (no pointer validation)
-int do_sysinfo(struct sysinfo *info) {
-    if (!info) return -14; // EFAULT
-
+/* Fill the kernel's own record; the callers copy it out in the layout of
+ * the calling process. */
+int kern_sysinfo(struct sysinfo *info) {
     struct sysinfo kinfo;
     memset(&kinfo, 0, sizeof(kinfo));
 
@@ -65,6 +66,17 @@ int do_sysinfo(struct sysinfo *info) {
     kinfo.loads[0] = av[0] << 5;
     kinfo.loads[1] = av[1] << 5;
     kinfo.loads[2] = av[2] << 5;
+
+    *info = kinfo;
+    return 0;
+}
+
+// Internal implementation (no pointer validation)
+int do_sysinfo(struct sysinfo *info) {
+    if (!info) return -14; // EFAULT
+
+    struct sysinfo kinfo;
+    kern_sysinfo(&kinfo);
 
     // Using copyout to send result to userspace
     if (copyout(&kinfo, info, sizeof(struct sysinfo)) != 0) return -14; // EFAULT
@@ -132,12 +144,13 @@ int sys_vm_info(sys_vminfo_t *info) {
  * lands we synthesize one entry "swap0" iff swap is configured. */
 int sys_vm_swap(sys_swapinfo_t *swap, abi_size_t *count) {
     if (!count) return -14;
-    abi_size_t cap = 0;
-    if (copyin(count, &cap, sizeof(cap)) != 0) return -14;
+    /* The count is the process's size_t (<sys/compat32.h>). */
+    size_t cap = 0;
+    if (usize_copyin(count, &cap) != 0) return -14;
 
     uint64_t total = 0, free = 0;
     vm_swap_get_stats(&total, &free);
-    abi_size_t n = (total > 0) ? 1 : 0;
+    size_t n = (total > 0) ? 1 : 0;
 
     if (swap && cap > 0 && n > 0) {
         sys_swapinfo_t k;
@@ -148,10 +161,10 @@ int sys_vm_swap(sys_swapinfo_t *swap, abi_size_t *count) {
         k.total = total * PAGE_SIZE;
         k.used  = (total - free) * PAGE_SIZE;
         k.priority = 0;
-        if (copyout(&k, &swap[0], sizeof(k)) != 0) return -14;
+        if (sys_swapinfo_copyout(&k, swap, 0) != 0) return -14;
     }
 
-    if (copyout(&n, count, sizeof(n)) != 0) return -14;
+    if (usize_copyout(n, count) != 0) return -14;
     return 0;
 }
 
@@ -179,13 +192,13 @@ int sys_vm_buffers(sys_bufinfo_t *buf) {
  * records written on return. */
 int sys_vm_slabs(sys_slabinfo_t *slabs, abi_size_t *count) {
     if (!count) return -EINVAL;
-    abi_size_t cap = 0;
-    if (copyin(count, &cap, sizeof(cap)) != 0) return -EFAULT;
+    size_t cap = 0;
+    if (usize_copyin(count, &cap) != 0) return -EFAULT;
 
     memtrack_rec_t recs[MEMTRACK_SITES];
     size_t n = memtrack_snapshot(recs, MEMTRACK_SITES);
 
-    abi_size_t out_n = 0;
+    size_t out_n = 0;
     for (size_t i = 0; i < n && slabs && out_n < cap; i++) {
         sys_slabinfo_t si;
         memset(&si, 0, sizeof(si));
@@ -198,6 +211,6 @@ int sys_vm_slabs(sys_slabinfo_t *slabs, abi_size_t *count) {
         if (copyout(&si, &slabs[out_n], sizeof(si)) != 0) return -EFAULT;
         out_n++;
     }
-    if (copyout(&out_n, count, sizeof(out_n)) != 0) return -EFAULT;
+    if (usize_copyout(out_n, count) != 0) return -EFAULT;
     return 0;
 }

@@ -1545,9 +1545,8 @@ int sys_thr_join(tid_t tid, uptr32_t *status) {
     }
 
     if (status) {
-        /* The exit value is the process's pointer. */
-        uptr32_t kstatus = (uptr32_t)(uintptr_t)thread->retval;
-        if (copyout(&kstatus, status, sizeof(kstatus)) != 0) return -14; // EFAULT
+        /* The exit value is the process's pointer, at its width. */
+        if (uptr_copyout((uintptr_t)thread->retval, status) != 0) return -14; // EFAULT
     }
 
     /*
@@ -1688,7 +1687,7 @@ int sys_thr_suspend(const struct timespec *timeout) {
     /* Pull the timeout into the kernel (NULL = sleep forever). */
     struct timespec kts = {0, 0};
     if (timeout) {
-        if (copyin(timeout, &kts, sizeof(kts)) != 0) return -14;
+        if (timespec_copyin(timeout, &kts) != 0) return -14;
         return thr_park_kernel(&kts);
     }
     return thr_park_kernel(NULL);
@@ -3240,6 +3239,14 @@ int sys_native_setrlimit(int resource, const void *rlp) {
 
     struct rlimit k;
     if (copyin(rlp, &k, sizeof(k)) != 0) return -EFAULT;
+    return kern_native_setrlimit(resource, &k);
+}
+
+int kern_native_setrlimit(int resource, const struct rlimit *rl) {
+    if (!current_process) return -EINVAL;
+    if (resource < 0 || resource >= RLIM_NLIMITS) return -EINVAL;
+
+    struct rlimit k = *rl;
 
     /* A soft limit above the hard limit is nonsense, and the check has to
      * come before the privilege test so it applies to root too. */
@@ -4421,17 +4428,15 @@ static void proc_thread_count_cb(thread_t *t, void *arg) {
 }
 
 /* The in/out element counts of the sys_proc_* listings are the process's
- * size_t. */
+ * size_t, whose width follows the process (<sys/compat32.h>). */
 static int proc_count_get(const abi_size_t *ucount, size_t *count) {
-    abi_size_t v = 0;
-    if (ucount && copyin(ucount, &v, sizeof(v)) != 0) return -14;
-    *count = v;
+    *count = 0;
+    if (ucount && usize_copyin(ucount, count) != 0) return -14;
     return 0;
 }
 
 static int proc_count_put(abi_size_t *ucount, size_t count) {
-    abi_size_t v = (abi_size_t)count;
-    if (ucount && copyout(&v, ucount, sizeof(v)) != 0) return -14;
+    if (ucount && usize_copyout(count, ucount) != 0) return -14;
     return 0;
 }
 
@@ -4601,7 +4606,7 @@ int sys_proc_maps(pid_t pid, sys_map_t *maps, abi_size_t *count) {
             if (nlen >= sizeof(kbuf.name)) nlen = sizeof(kbuf.name) - 1;
             memcpy(kbuf.name, name, nlen);
             kbuf.name[nlen] = '\0';
-            if (copyout(&kbuf, &maps[n], sizeof(kbuf)) != 0) return -14;
+            if (sys_map_copyout(&kbuf, maps, n) != 0) return -14;
         }
         n++;
     }

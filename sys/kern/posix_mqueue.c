@@ -818,7 +818,7 @@ int sys_mq_timedsend(int mqd, const char *umsg, size_t len,
     struct timespec kts;
     const struct timespec *tsp = NULL;
     if (uts) {
-        if (copyin(uts, &kts, sizeof(kts)) != 0)
+        if (timespec_copyin(uts, &kts) != 0)
             return -EFAULT;
         tsp = &kts;
     }
@@ -847,7 +847,7 @@ ssize_t sys_mq_timedreceive(int mqd, char *umsg, size_t len,
     struct timespec kts;
     const struct timespec *tsp = NULL;
     if (uts) {
-        if (copyin(uts, &kts, sizeof(kts)) != 0)
+        if (timespec_copyin(uts, &kts) != 0)
             return -EFAULT;
         tsp = &kts;
     }
