@@ -169,6 +169,9 @@ build_components() {
     # new worktree, or CI, and only as "cannot find -lfoo" at the very end.
     echo "Building runtime libraries..."
     make -C "$TOP/lib" -j4
+    # The same libraries as 64-bit, beside the 32-bit ones (staged into
+    # /lib64 and /usr/lib64).
+    make -C "$TOP/lib" ARCH=x86_64 -j4
 
     echo "Building usr.lib helper libraries (libelfobj, libregex,"
     echo "libexvi, libbc, libdemangle, libjoin, libuu, ...)"
@@ -372,6 +375,14 @@ install_to_dist() {
     done
     # Sweep any libc left in /usr/lib by an earlier build of this script.
     rm -f "$DIST/usr/lib/libc.so.0" "$DIST/usr/lib/libc.so"
+
+    # The 64-bit set (make -C lib ARCH=x86_64), side by side with the above:
+    # shared objects in /lib64, archives and startup files in /usr/lib64,
+    # exactly as each library's own install target lays them out.
+    if [ -f "$TOP/lib/c/obj-x86_64/libc.so.0" ]; then
+        echo "Installing 64-bit runtime libraries to dist/lib64 + dist/usr/lib64..."
+        make -C "$TOP/lib" ARCH=x86_64 DESTDIR="$DIST" install >/dev/null
+    fi
 
     # libgcc_s.so.1 is the unwind/divide/multiply runtime libm.so.0
     # DT_NEEDEDs.  Without it, ld.so fatal-errors on EVERY dynamic

@@ -255,6 +255,8 @@ make -C sys ARCH=x86_64 -j"$JOBS"
 
 step "Stage 1b: substrate runtime libraries (lib/, usr.lib/)"
 make -C lib
+# The same libraries as 64-bit, staged into /lib64 and /usr/lib64.
+make -C lib ARCH=x86_64
 make -C usr.lib
 
 step "Stage 1c: dynamic linker (sbin/ld.so/)"
