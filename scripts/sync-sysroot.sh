@@ -22,6 +22,8 @@
 # Usage:
 #   scripts/sync-sysroot.sh                # mirror ALL dist-* + native libs
 #   scripts/sync-sysroot.sh libpng cairo   # mirror only these dist-<pkg>
+#   scripts/sync-sysroot.sh --x86_64       # the 64-bit toolchain's sysroot:
+#                                          # native libs + headers only
 #   STAGE1_PREFIX=/opt/substrate scripts/sync-sysroot.sh
 #
 # Env:
@@ -151,6 +153,56 @@ sync_native_libs_to_sysroot() {
     fi
 }
 
+# The same for the 64-bit cross toolchain (x86_64-unknown-substrate, built by
+# contrib/build-toolchain64.sh): mirror the ARCH=x86_64 builds of substrate's
+# own libraries, their crt objects and the public headers into ITS sysroot.
+#
+# The 64-bit objects live in each library's obj-x86_64/ directory, beside the
+# 32-bit ones in the directory itself, so nothing here can pick up a library
+# of the wrong word size.  The headers are the same tree for both targets --
+# include/ selects by __x86_64__ where the two ABIs differ.
+#
+# Unlike the 32-bit function this creates the sysroot when it is missing:
+# there is no earlier step that would have, and returning silently would
+# leave a compiler that cannot find <stdio.h>.
+sync_native_libs_to_sysroot64() {
+    sysroot64="${STAGE1_PREFIX}/x86_64-unknown-substrate"
+    mkdir -p "$sysroot64/lib" "$sysroot64/include" || return 1
+    for dir in "${SUBSTRATE_TOP}"/lib/*/ "${SUBSTRATE_TOP}"/usr.lib/*/; do
+        [ -d "${dir}obj-x86_64" ] || continue
+        name=$(basename "$dir")
+        [ -f "${dir}obj-x86_64/lib$name.so.0" ] &&
+            cp "${dir}obj-x86_64/lib$name.so.0" "$sysroot64/lib/"
+        [ -f "${dir}obj-x86_64/lib$name.a" ] &&
+            cp "${dir}obj-x86_64/lib$name.a" "$sysroot64/lib/"
+        # The linker name: see sync_native_libs_to_sysroot.
+        if [ -f "$sysroot64/lib/lib$name.so.0" ]; then
+            ln -sfn "lib$name.so.0" "$sysroot64/lib/lib$name.so"
+        fi
+    done
+    # libgcc_s.so.1 lives in GCC's own libdir; copy it beside the rest for
+    # links that do not go through the compiler driver.  Absent until
+    # contrib/gcc/build.sh --target-runtime has run.
+    for _gccdir in "${STAGE1_PREFIX}"/lib/gcc/x86_64-unknown-substrate/*/; do
+        [ -f "${_gccdir}libgcc_s.so.1" ] || continue
+        cp "${_gccdir}libgcc_s.so.1" "$sysroot64/lib/"
+        ln -sfn libgcc_s.so.1 "$sysroot64/lib/libgcc_s.so"
+    done
+    for crt in "${SUBSTRATE_TOP}"/lib/c/obj-x86_64/crt*.o; do
+        [ -f "$crt" ] || continue
+        cp "$crt" "$sysroot64/lib/"
+    done
+    if [ -d "${SUBSTRATE_TOP}/include" ]; then
+        # -L: materialise symlinked headers as real files.
+        cp -aL "${SUBSTRATE_TOP}/include/." "$sysroot64/include/"
+        for ver in "${STAGE1_PREFIX}"/lib/gcc/x86_64-unknown-substrate/*/include-fixed; do
+            [ -d "$ver" ] || continue
+            cp -aL "${SUBSTRATE_TOP}/include/." "$ver/" 2>/dev/null || true
+        done
+    fi
+    echo "sync-sysroot: mirrored the 64-bit native libs into $sysroot64"
+}
+
 # Mirror every dist-<pkg> found at the repo root, then the native libs.
 #
 # NOTE: the staging trees actually live under dist-overlay/dist-<pkg> now, so
@@ -177,7 +229,9 @@ sync_all_to_sysroot() {
 # build.sh).  POSIX-portable check on the invoked basename.
 case "${0##*/}" in
 sync-sysroot.sh)
-    if [ "$#" -gt 0 ]; then
+    if [ "${1:-}" = "--x86_64" ]; then
+        sync_native_libs_to_sysroot64
+    elif [ "$#" -gt 0 ]; then
         for p in "$@"; do sync_to_sysroot "$p"; done
         echo "sync-sysroot: mirrored $* into $SYSROOT"
     else

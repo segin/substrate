@@ -521,3 +521,6 @@ obj-x86_64/
 
 # 32-bit builds of the dynamic-linker tests (make -C tests/sbin/ld64 ARCH=i386)
 /tests/sbin/ld64/obj-i386/
+
+# Programs built by tests/toolchain64/check.sh
+/tests/toolchain64/out/
