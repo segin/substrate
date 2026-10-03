@@ -249,6 +249,15 @@ program, PIE or not. It:
 - re-protects library text read-only and executable, and makes
   `PT_GNU_RELRO` regions read-only after relocation (W^X and RELRO).
 
+The same sources build two linkers. `make -C sbin/ld.so` gives
+`/sbin/ld.so`, the 32-bit one described above; `make -C sbin/ld.so
+ARCH=x86_64` gives `/sbin/ld64.so`, the interpreter of 64-bit programs on
+the x86_64 kernel. The 64-bit build differs only where the architecture
+does: ELF64 structures, RELA relocations (`R_X86_64_*`), `syscall` instead
+of `int $0x80`, the `%fs` base as thread pointer, and `/lib64`,
+`/usr/lib64` as its library directories. Each refuses objects of the other
+word size, so the two sets of libraries share one root.
+
 Per-object flags stop non-idempotent relocations and run-once initialisers
 from repeating when `dlopen` walks the loaded list again.
 `dl_iterate_phdr` is what lets C++ exceptions unwind across shared-library

@@ -1,8 +1,10 @@
-.TH LD.SO 8 2026-09-25 "Substrate" "System Administration"
+.TH LD.SO 8 2026-10-03 "Substrate" "System Administration"
 .SH NAME
-ld.so \- Substrate dynamic linker/loader
+ld.so, ld64.so \- Substrate dynamic linker/loader
 .SH SYNOPSIS
 .I /sbin/ld.so
+.br
+.I /sbin/ld64.so
 .SH DESCRIPTION
 .B /sbin/ld.so
 loads the shared libraries a dynamically linked Substrate program
@@ -18,6 +20,14 @@ and passes it the program's headers through the auxiliary vector.
 .B ld.so
 is freestanding.
 It links against no library and performs its own system calls.
+.PP
+.B /sbin/ld64.so
+is the same linker built for amd64.
+It is the interpreter of 64-bit executables, which run on the x86_64
+kernel only, and loads 64-bit libraries from its own directories.
+This page describes the 32-bit linker; where the 64-bit one differs,
+see
+.BR "The 64-bit linker" .
 .SS Startup
 .IP 1. 4
 .B ld.so
@@ -114,13 +124,16 @@ After a file is mapped, its
 is compared with the objects already loaded; if it matches one, the new
 mapping is discarded and the existing object is used.
 .PP
-A file is accepted only if it is an ELF
+A file is accepted only if it is an
+.B ELFCLASS32
 .B ET_DYN
 object for
 .B EM_386
 with at most 64 program headers and a
 .BR PT_DYNAMIC
 segment.
+A file that is not is skipped, and the search continues with the next
+directory.
 The
 .B EI_OSABI
 byte is not checked.
@@ -268,6 +281,69 @@ The
 calls are serialized by one process-wide recursive lock, so a
 constructor may itself call
 .BR dlopen .
+.SS The 64-bit linker
+.B /sbin/ld64.so
+is built from the same sources and behaves as described above, with
+these differences:
+.IP \(bu 2
+It is the interpreter of
+.B ELFCLASS64
+executables whose
+.B PT_INTERP
+names
+.IR /sbin/ld64.so ,
+and accepts only
+.B ELFCLASS64
+objects for
+.BR EM_X86_64 .
+.IP \(bu
+Its built-in directories are
+.IR /lib64 ,
+.I /usr/lib64
+and
+.IR /usr/local/lib64 .
+It reads the same
+.I /etc/ld.so.conf
+as the 32-bit linker; a directory listed there that holds only 32-bit
+libraries contributes nothing, because objects of the wrong class are
+skipped.
+.IP \(bu
+Relocations are read from
+.B DT_RELA
+tables.
+The supported types are
+.BR R_X86_64_NONE ,
+.BR R_X86_64_64 ,
+.BR R_X86_64_PC32 ,
+.BR R_X86_64_COPY ,
+.BR R_X86_64_GLOB_DAT ,
+.BR R_X86_64_JUMP_SLOT ,
+.BR R_X86_64_RELATIVE ,
+.BR R_X86_64_TPOFF64 ,
+.B R_X86_64_DTPMOD64
+and
+.BR R_X86_64_DTPOFF64 .
+.B R_X86_64_IRELATIVE
+(indirect functions) is not supported and, like any other type, is
+fatal.
+.IP \(bu
+The thread pointer is the
+.B %fs
+base.
+The thread control block is 64 bytes, with the self-pointer at
+.B %fs:0
+and the dynamic thread vector at
+.BR %fs:8 ,
+and the argument of
+.B __tls_get_addr
+is two 8-byte words.
+.IP \(bu
+It names itself
+.B ld64.so
+in the
+.B LD_TRACE_LOADED_OBJECTS
+listing and in its fatal-error message, and prints addresses as 16
+hexadecimal digits.
 .SH EXIT STATUS
 On a fatal error (a missing dependency, an undefined symbol, an
 unsupported relocation, or a TLS setup failure)
@@ -328,10 +404,19 @@ The value is not examined.
 .SH FILES
 .TP
 .I /sbin/ld.so
-The dynamic linker.
+The dynamic linker for 32-bit programs.
+.TP
+.I /sbin/ld64.so
+The dynamic linker for 64-bit programs.
 .TP
 .IR /lib ", " /usr/lib ", " /usr/local/lib
-Built-in library directories, searched first.
+Built-in library directories of
+.BR ld.so ,
+searched first.
+.TP
+.IR /lib64 ", " /usr/lib64 ", " /usr/local/lib64
+Built-in library directories of
+.BR ld64.so .
 .TP
 .I /etc/ld.so.conf
 Additional library directories.

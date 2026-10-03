@@ -381,12 +381,29 @@ the context saved on every switch and in `mcontext_t`.
   `lib/sys/arch/<arch>/`).
 * **Dynamic linker:** `/sbin/ld.so` is the 32-bit linker and stays so.
   The 64-bit linker is `/sbin/ld64.so` (the `PT_INTERP` of a 64-bit
-  dynamic executable), searching `/lib64` and `/usr/lib64`.  It is not
-  built yet: until it is, the kernel refuses a 64-bit image with a
-  `PT_INTERP`, and 64-bit programs are linked statically.
-* **Relocations:** the psABI's `R_X86_64_*` set; `ld.so` must support at
-  least `RELATIVE`, `GLOB_DAT`, `JUMP_SLOT`, `64`, `PC32`, `COPY`,
-  `TPOFF64`, `DTPMOD64`, `DTPOFF64`, and `IRELATIVE`.
+  dynamic executable), searching `/lib64`, `/usr/lib64` and
+  `/usr/local/lib64`, then the directories of `/etc/ld.so.conf`; it
+  skips any object that is not `ELFCLASS64`/`EM_X86_64`.  It is built
+  from the 32-bit linker's sources (`make -C sbin/ld.so ARCH=x86_64`;
+  `docs/design/ld.so-design.md`, section 22).  The kernel maps it at
+  `0x40000000` and enters it with the stack of section 6; it relocates
+  itself, loads and relocates the program's libraries, sets up TLS and
+  jumps to `AT_ENTRY` with `%rsp` and `%rdi` as the kernel passed them
+  and `%rdx` = 0.  Programs are linked dynamically (`DYNAMIC = 1` in the
+  program's Makefile) or statically.
+* **Relocations:** the psABI's `R_X86_64_*` set, in `DT_RELA` tables
+  (`DT_PLTREL` = `DT_RELA`).  `ld64.so` supports `RELATIVE`, `GLOB_DAT`,
+  `JUMP_SLOT`, `64`, `PC32`, `COPY`, `TPOFF64`, `DTPMOD64` and
+  `DTPOFF64`, binding everything at load time.  `IRELATIVE` is not
+  supported yet: an object carrying one is refused with a diagnostic.
+* **Dynamic TLS:** the thread control block at `%fs:0` is 64 bytes:
+  the thread pointer at `%fs:0`, the DTV pointer at `%fs:8`, the rest
+  spare.  `DTV[m]` is the address of module `m`'s block in the thread;
+  `__tls_get_addr` takes a pointer to `{ module, offset }`, two 8-byte
+  words, in `%rdi`.  `ld64.so` sets the initial thread's `%fs` base with
+  the native `SYS_SET_GSBASE` call (which, for a 64-bit process, sets
+  `%fs`), and hands libpthread a block of the same layout for each new
+  thread.
 
 ## 10. 32-bit Programs on the 64-bit Kernel
 

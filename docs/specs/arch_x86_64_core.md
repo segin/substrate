@@ -249,8 +249,18 @@ a statically linked 64-bit program:
   and marks the process `BITNESS_64`.  The initial stack is laid out as
   for i386 and its word area (argc, argv, envp, auxv) widened to 8-byte
   words.  Entry is `jump_to_userspace64()`: `SEL_UCODE`, `%rsp` and `%rdi`
-  the stack.  A 64-bit image with a `PT_INTERP` is refused until
-  `/sbin/ld64.so` exists.
+  the stack.  A 64-bit image with a `PT_INTERP` gets its interpreter --
+  `/sbin/ld64.so`, itself a 64-bit `ET_DYN` -- mapped at `0x40000000` as
+  a 32-bit image gets `/sbin/ld.so`, with `AT_BASE`, `AT_PHDR`,
+  `AT_PHENT`, `AT_PHNUM` and `AT_ENTRY` in the auxiliary vector, and is
+  entered at the interpreter's entry point.
+* **Dynamic linking.** `/sbin/ld64.so` is the 32-bit linker's source
+  built for amd64 (`make -C sbin/ld.so ARCH=x86_64`;
+  `docs/design/ld.so-design.md`, section 22): RELA relocations, `%fs`
+  thread pointer, libraries from `/lib64` and `/usr/lib64`.  Programs
+  whose Makefile sets `DYNAMIC = 1` are linked against the 64-bit shared
+  objects when built with `ARCH=x86_64`; `tests/sbin/ld64/` exercises
+  libc, libm, libpthread (per-thread TLS from the linker) and `dlopen`.
 * **System calls.** `syscall_msr_init()` enables `SYSCALL`
   (`EFER.SCE`, `STAR`, `LSTAR`, `FMASK`).  `syscall_entry64` (isr.S)
   switches to the thread's kernel stack, builds the frame an interrupt
@@ -285,9 +295,15 @@ What a 64-bit process does not have yet:
   `sendmsg`/`recvmsg`, `sigevent` (POSIX timers, message queues) and the
   `sys_proc_*` listings;
 * **threads and TLS**: `%fs` base handling, `thr_new`;
-* the dynamic linker `/sbin/ld64.so`.
+* in the dynamic linker: `R_X86_64_IRELATIVE` (indirect functions) and
+  lazy binding -- as in the 32-bit linker, everything is bound at load
+  time;
+* a 64-bit `libgcc_s.so.1` and C++ runtime: the 64-bit libraries are
+  built with the host compiler, and `libm.so.0` links what it needs from
+  `libgcc.a`.
 
-`make -C bin/sh sh64` builds the in-tree shell as such a program.
+`make -C bin/sh sh64` builds the in-tree shell as a static 64-bit program;
+`make -C bin/sh ARCH=x86_64` builds it dynamically linked.
 
 ## Verification
 

@@ -29,7 +29,8 @@ paths, diagnostics, secure-exec handling).
 
 ## 4. ABI Targets
 - **i386 (primary):** System V i386 ABI. Relocations are REL (implicit addend).
-- **x86_64 (planned):** System V AMD64 ABI. Relocations are RELA (explicit addend).
+- **x86_64:** System V AMD64 ABI. Relocations are RELA (explicit addend).
+  Built from the same sources as `/sbin/ld64.so`; see section 22.
 
 ## 5. Input/Output Contracts
 ### 5.1 Inputs
@@ -86,7 +87,7 @@ The loader treats missing required entries as fatal.
 
 ### 7.3 Relocations
 - **REL (i386):** `DT_REL` / `DT_RELSZ` / `DT_RELENT`.
-- **RELA (x86_64 planned):** `DT_RELA` / `DT_RELASZ` / `DT_RELAENT`.
+- **RELA (x86_64):** `DT_RELA` / `DT_RELASZ` / `DT_RELAENT`.
 
 ### 7.4 PLT/GOT
 - Handle `DT_JMPREL` relocations for `R_*_JMP_SLOT` and
@@ -100,8 +101,9 @@ The loader treats missing required entries as fatal.
 - **Global Dynamic (GD)**
 - **Local Dynamic (LD)**
 
-TLS must integrate with Substrate kernel TLS (i386 GS segment); per-thread
-TLS must be allocated and the thread pointer adjusted per ABI.
+TLS must integrate with Substrate kernel TLS (the `%gs` base on i386, the
+`%fs` base on x86_64); per-thread TLS must be allocated and the thread
+pointer adjusted per ABI.
 
 ## 8. Loader Data Model
 ### 8.1 Object Descriptor
@@ -163,7 +165,8 @@ When resolving `DT_NEEDED` or explicit loads:
 2. Main executable.
 3. Breadth-first traversal of `DT_NEEDED` in order.
 4. `DT_RPATH` / `DT_RUNPATH` paths on the referencing object.
-5. Default system paths: `/lib`, `/usr/lib`, `/usr/local/lib`.
+5. Default system paths: `/lib`, `/usr/lib`, `/usr/local/lib` (the 64-bit
+   linker: `/lib64`, `/usr/lib64`, `/usr/local/lib64`).
 
 ### 11.2 `DT_RPATH` vs `DT_RUNPATH`
 - If **`DT_RUNPATH`** is present, use it for direct dependency search and
@@ -282,3 +285,105 @@ If the executable is setuid or setgid, `ld.so` enters secure mode:
 - Relocation matrix enumerates all targeted relocations for i386 and x86_64.
 - Symbol resolution rules documented with path and precedence details.
 - Secure-exec behavior and environment variable rules documented.
+
+## 22. The Two Builds: `ld.so` and `ld64.so`
+
+One source tree, `sbin/ld.so/`, builds both dynamic linkers:
+
+| Command | Output | Installed as | Loads |
+| :------ | :----- | :----------- | :---- |
+| `make -C sbin/ld.so` | `ld.so` | `/sbin/ld.so` | `ELFCLASS32` / `EM_386` |
+| `make -C sbin/ld.so ARCH=x86_64` | `obj-x86_64/ld64.so` | `/sbin/ld64.so` | `ELFCLASS64` / `EM_X86_64` |
+
+The 64-bit objects go under `obj-x86_64/` (the `$(O)` convention of
+`Makefile.inc`), so the two builds never share a file.  The kernel maps
+whichever one the executable's `PT_INTERP` names; a 64-bit program runs
+on the x86_64 kernel only.
+
+### 22.1 What is shared
+
+Loading, the object list, dependency search, symbol resolution
+(`DT_GNU_HASH`, `DT_HASH`, GNU versioning), the relocation passes and
+their ordering, TLS layout, constructors/destructors and the `dl*`
+interface are one implementation.  It is written against word-size
+neutral names declared in `ld.h`:
+
+* `ld_addr` -- an address, load bias or ELF size of the native class
+  (`unsigned int` on i386, exactly the type the 32-bit linker always
+  used; `unsigned long` on amd64).
+* `Elf_Ehdr`, `Elf_Phdr`, `Elf_Dyn`, `Elf_Sym` -- the ELF32 or ELF64
+  structure.  The versioning structures (`Elf_Verdef`, ...) are the same
+  in both classes.
+* `Elf_Reloc`, `LD_DT_REL`, `LD_DT_RELSZ` -- the relocation entry and the
+  dynamic tags that locate the table: `Elf_Rel` / `DT_REL` on i386,
+  `Elf_Rela` / `DT_RELA` on amd64.  `DT_JMPREL` holds the same entry type.
+* `LD_BLOOM_BITS` -- the width of a `DT_GNU_HASH` bloom word (the native
+  word; the rest of that table, and all of `DT_HASH`, is 32-bit words in
+  both classes).
+
+### 22.2 What is per architecture
+
+| Piece | i386 | amd64 |
+| :---- | :--- | :---- |
+| Start code | `ld_start.S`: self-relocates `R_386_RELATIVE` from `DT_REL`, passes `%esp` to `ld_main`, jumps to the entry with `%esp` restored and `%edx` = 0 | `ld_start_amd64.S`: self-relocates `R_X86_64_RELATIVE` from `DT_RELA`, passes `%rsp`, jumps to the entry with `%rsp` restored, `%rdi` = that stack pointer and `%rdx` = 0 |
+| Relocation types | `ld_reloc_i386.c` | `ld_reloc_amd64.c` |
+| Raw system calls (`ld_io.c`) | `int $0x80`, arguments on the stack, `-errno` in `%eax` | `syscall`, arguments in `%rdi %rsi %rdx %r10 %r8 %r9`, error in the carry flag (negated to `-errno` for the callers) |
+| `lseek` | three arguments (see note) | `fd, off_lo, off_hi, whence` |
+| `getdents` record (ld.so.conf globbing) | `d_reclen` at 8, name at 10 | `d_reclen` at 16, name at 24 |
+| Thread pointer | `%gs` base | `%fs` base |
+| TCB | 8 bytes: self, DTV | 64 bytes: self, DTV, spare (keeps `%fs:0x28` clear of the DTV) |
+| `tls_index` | two 4-byte words; `___tls_get_addr` (regparm) and `__tls_get_addr` | two 8-byte words; `__tls_get_addr` only |
+| Built-in search directories | `/lib`, `/usr/lib`, `/usr/local/lib` | `/lib64`, `/usr/lib64`, `/usr/local/lib64` |
+| Own name (`LD_TRACE_LOADED_OBJECTS`, fatal errors) | `ld.so` | `ld64.so` |
+
+Note on `lseek`: the 32-bit linker has always issued `SYS_lseek` with
+three arguments although the kernel's takes the offset as two halves; the
+kernel tolerates the resulting out-of-range `whence` as "no change", and
+the only seek the linker makes is to the position it is already at
+(`e_phoff`, straight after the file header).  That behaviour is left
+alone; the 64-bit linker passes the four arguments.
+
+Both builds set the thread pointer with the native `SYS_SET_GSBASE`
+call, which sets the `%gs` base of a 32-bit process and the `%fs` base
+of a 64-bit one.  The DTV pointer is the second TCB word in both, which
+is where libc's `__tls_get_addr` reads it (`lib/c/src/tls.c`).
+
+### 22.3 amd64 relocations
+
+`R_X86_64_NONE`, `64`, `PC32`, `COPY`, `GLOB_DAT`, `JUMP_SLOT`,
+`RELATIVE`, `TPOFF64`, `DTPMOD64` and `DTPOFF64`.  The addend is
+`r_addend`; the relocated word is overwritten and never read, so applying
+a `RELATIVE` twice would be harmless there (the per-object `relocated`
+guard still applies to both).  A `PC32` whose target is out of 32-bit
+range is refused.  `R_X86_64_IRELATIVE` is **not** implemented and is
+reported as an unsupported relocation; nothing in the tree emits one.
+Binding is immediate, as on i386.
+
+### 22.4 Sharing a root
+
+The two architectures' libraries are installed side by side (`/lib` and
+`/lib64`), and both linkers read `/etc/ld.so.conf`.  A directory named
+there may therefore hold libraries of the other word size.  Each linker
+checks `EI_CLASS` and `e_machine` before mapping anything and treats a
+mismatch like a missing file: the search moves on to the next directory,
+and a `dlopen` of such a path fails with an error.  There is no separate
+64-bit configuration file.
+
+### 22.5 Building programs against it
+
+`Makefile.bin.inc` honours `DYNAMIC = 1` for `ARCH=x86_64`: the program
+is linked as a PIE with `--dynamic-linker=/sbin/ld64.so` against
+`lib/*/obj-x86_64/lib*.so.0`, and each `-L$(TOP)/...` in its `LDADD` is
+pointed at that directory's `obj-x86_64/`.  Programs without
+`DYNAMIC = 1`, or built with `DYNAMIC=0` on the command line, are linked
+statically as before.  The 64-bit `libm.so.0` takes the compiler's
+complex-arithmetic helpers from `libgcc.a` rather than `libgcc_s.so.1`,
+since no 64-bit `libgcc_s` is installed.
+
+### 22.6 Tests
+
+`tests/sbin/ld64/` holds target tests for the 64-bit linker (printf and
+argv/envp, executable TLS and errno, libm, libpthread threads with
+per-thread TLS, `dlopen` of a module with constructors and TLS, rejection
+of a 32-bit object) and `run-ld64-tests.sh`, which also runs the in-tree
+shell built both dynamically and statically.
