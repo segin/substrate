@@ -51,6 +51,7 @@
 #include <kern/sleepq.h>
 #include <kern/time.h>
 #include <net/inet.h>
+#include <sys/amd64_abi.h>
 #include <sys/compat32.h>
 #include <sys/copy.h>
 #include <sys/file.h>
@@ -60,6 +61,7 @@
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/sysinfo.h>
 #include <sys/termios.h>
 #include <vfs/vfs.h>
 #include <vm/vm_kmem.h>
@@ -2136,8 +2138,20 @@ struct kcmsghdr {
     int      cmsg_level;
     int      cmsg_type;
 };
-/* CMSG_ALIGN as the process computes it: to its size_t, 4 bytes. */
-#define KCMSG_ALIGN(n)  (((n) + sizeof(uint32_t) - 1) & ~(sizeof(uint32_t) - 1))
+/*
+ * The process's CMSG_* macros (<sys/socket.h>) align to its size_t, so the
+ * geometry of a control message follows the process: CMSG_ALIGN rounds to
+ * 4 bytes, or to 8 for a native 64-bit process.  The data always starts
+ * right after the 12-byte header (CMSG_DATA), but cmsg_len counts the
+ * header rounded up (CMSG_LEN) -- 12 bytes, or 16 for a 64-bit process.
+ */
+static size_t kcmsg_align_to(void) {
+    return proc_abi_is_amd64() ? sizeof(uint64_t) : sizeof(uint32_t);
+}
+
+#define KCMSG_ALIGN(n)  (((n) + kcmsg_align_to() - 1) & ~(kcmsg_align_to() - 1))
+/* What cmsg_len counts for the header: CMSG_LEN(0). */
+#define KCMSG_HDRLEN    KCMSG_ALIGN(sizeof(struct kcmsghdr))
 
 /* Upper bound on a copied-in control buffer: enough for the largest
  * SCM_RIGHTS record we accept (AFUNIX_FDQ_MAX fds + header), generously
@@ -2275,14 +2289,17 @@ ssize_t sys_sendmsg(int fd, const struct msghdr *umsg, int flags) {
              * aligned advance to be non-zero so the loop must make progress
              * whatever else happens.
              */
-            if (c->cmsg_len < sizeof(*c)) { cmsg_err = -EINVAL; goto cmsg_done; }
+            if (c->cmsg_len < KCMSG_HDRLEN) { cmsg_err = -EINVAL; goto cmsg_done; }
             if (c->cmsg_len > cmsglen - off) { cmsg_err = -EINVAL; goto cmsg_done; }
-            size_t advance = KCMSG_ALIGN(c->cmsg_len);
-            if (advance == 0 || advance > cmsglen - off) {
+            size_t advance = KCMSG_ALIGN((size_t)c->cmsg_len);
+            /* The last message of a buffer sized by CMSG_LEN rather than
+             * CMSG_SPACE ends short of its alignment padding. */
+            if (advance > cmsglen - off) advance = cmsglen - off;
+            if (advance == 0) {
                 cmsg_err = -EINVAL; goto cmsg_done;
             }
             if (c->cmsg_level == SOL_SOCKET && c->cmsg_type == SCM_RIGHTS) {
-                size_t datalen = c->cmsg_len - sizeof(*c);
+                size_t datalen = c->cmsg_len - KCMSG_HDRLEN;
                 if (datalen % sizeof(int) != 0) { cmsg_err = -EINVAL; goto cmsg_done; }
                 int nfds = (int)(datalen / sizeof(int));
                 const int *fds = (const int *)(cmsgbuf + off + sizeof(*c));
@@ -2385,9 +2402,10 @@ ssize_t sys_recvmsg(int fd, struct msghdr *umsg, int flags) {
     struct msghdr kmsg;
     if (msghdr_copyin(umsg, &kmsg) != 0) return -EFAULT;
     struct msghdr *msg = &kmsg;
-    /* The results go back into the process's msghdr, whose layout is the
-     * i386 one: address its fields through that. */
-    struct msghdr32 *umsg32 = (struct msghdr32 *)(void *)umsg;
+    /* The results go back into the process's msghdr: address its fields in
+     * the layout the process uses (<sys/compat32.h>). */
+    struct msghdr_out uout;
+    msghdr_out_fields(umsg, &uout);
 
     if (msg->msg_iovlen < 0 || msg->msg_iovlen > AFUNIX_IOV_MAX)
         return -EMSGSIZE;
@@ -2439,7 +2457,7 @@ ssize_t sys_recvmsg(int fd, struct msghdr *umsg, int flags) {
         if (want_name &&
             copyout_sockaddr(kaddr, sizeof(kaddr), kaddrlen, msg->msg_name,
                              (socklen_t)msg->msg_namelen,
-                             (socklen_t *)&umsg32->msg_namelen) != 0) {
+                             (socklen_t *)uout.msg_namelen) != 0) {
             kfree(scat, cap);
             return -EFAULT;
         }
@@ -2479,7 +2497,7 @@ ssize_t sys_recvmsg(int fd, struct msghdr *umsg, int flags) {
              * passes msg_name == NULL, so it is unaffected. */
             r = do_recv_rx(fd, iov[i].iov_base, iov[i].iov_len, flags,
                            (struct sockaddr *)msg->msg_name,
-                           (socklen_t *)&umsg32->msg_namelen, &rx);
+                           (socklen_t *)uout.msg_namelen, &rx);
         } else if (i == 0) {
             r = do_recv_rx(fd, iov[i].iov_base, iov[i].iov_len, flags,
                            NULL, NULL, &rx);
@@ -2512,31 +2530,34 @@ ssize_t sys_recvmsg(int fd, struct msghdr *umsg, int flags) {
      */
     if (!s && rx.valid && afinet_pktinfo_on(fd) && msg->msg_control) {
         struct { struct kcmsghdr h; uint32_t ifindex, spec_dst, addr; } pc;
-        if ((size_t)msg->msg_controllen < sizeof(pc)) {
+        /* cmsg_len as the process's CMSG_LEN() computes it for the three
+         * words of data. */
+        size_t pclen = KCMSG_HDRLEN + sizeof(pc) - sizeof(pc.h);
+        if ((size_t)msg->msg_controllen < pclen) {
             msg->msg_flags |= MSG_CTRUNC;
         } else {
-            pc.h.cmsg_len = sizeof(pc);
+            pc.h.cmsg_len = (uint32_t)pclen;
             pc.h.cmsg_level = 0;            /* IPPROTO_IP */
             pc.h.cmsg_type = 8;             /* IP_PKTINFO */
             pc.ifindex = rx.ifindex;
             pc.spec_dst = rx.spec_dst;
             pc.addr = rx.addr;
             if (copyout(&pc, msg->msg_control, sizeof(pc)) != 0) return -EFAULT;
-            out_controllen = sizeof(pc);
+            out_controllen = (uint32_t)pclen;
         }
     }
-    if (s && msg->msg_control && (size_t)msg->msg_controllen >= sizeof(struct kcmsghdr)) {
+    if (s && msg->msg_control && (size_t)msg->msg_controllen >= KCMSG_HDRLEN) {
         size_t cmsgcap = (size_t)msg->msg_controllen;
         if (cmsgcap > AFUNIX_CMSG_MAX) cmsgcap = AFUNIX_CMSG_MAX;
         unsigned char cmsgbuf[AFUNIX_CMSG_MAX];
         mutex_lock(&s->lock);
         int nfds = s->rx_fdq_count;
         if (nfds > 0) {
-            size_t need = KCMSG_ALIGN(sizeof(struct kcmsghdr) + (size_t)nfds * sizeof(int));
+            size_t need = KCMSG_HDRLEN + (size_t)nfds * sizeof(int);
             if (need > cmsgcap) {
                 /* Truncate — fewer fds than queued — but still deliver
                  * what fits and mark MSG_CTRUNC. */
-                nfds = (int)((cmsgcap - sizeof(struct kcmsghdr)) / sizeof(int));
+                nfds = (int)((cmsgcap - KCMSG_HDRLEN) / sizeof(int));
                 if (nfds < 0) nfds = 0;
                 msg->msg_flags |= MSG_CTRUNC;
             }
@@ -2570,12 +2591,16 @@ ssize_t sys_recvmsg(int fd, struct msghdr *umsg, int flags) {
             }
             /* Build the cmsg in the kernel bounce buffer. */
             struct kcmsghdr *c = (struct kcmsghdr *)cmsgbuf;
-            c->cmsg_len   = sizeof(*c) + (uint32_t)got * sizeof(int);
+            c->cmsg_len   = (uint32_t)(KCMSG_HDRLEN + (size_t)got * sizeof(int));
             c->cmsg_level = SOL_SOCKET;
             c->cmsg_type  = SCM_RIGHTS;
             int *outfds = (int *)(cmsgbuf + sizeof(*c));
             for (int i = 0; i < got; i++) outfds[i] = allocated[i];
-            out_controllen = (uint32_t)(sizeof(*c) + (uint32_t)got * sizeof(int));
+            out_controllen = c->cmsg_len;
+            /* The bytes written are the header and the descriptors; a
+             * 64-bit process's cmsg_len also counts the header's padding,
+             * which lies past them. */
+            size_t cmsg_bytes = sizeof(*c) + (size_t)got * sizeof(int);
             /* Shift remaining unqueued fds down. */
             for (int i = got; i < s->rx_fdq_count; i++) {
                 s->rx_fdq[i - got] = s->rx_fdq[i];
@@ -2587,7 +2612,7 @@ ssize_t sys_recvmsg(int fd, struct msghdr *umsg, int flags) {
              * table — userspace simply won't learn their numbers via the
              * cmsg; report EFAULT (a misbehaving caller's problem). */
             if (out_controllen &&
-                copyout(cmsgbuf, msg->msg_control, out_controllen) != 0)
+                copyout(cmsgbuf, msg->msg_control, cmsg_bytes) != 0)
                 return -EFAULT;
         } else {
             mutex_unlock(&s->lock);
@@ -2599,11 +2624,9 @@ ssize_t sys_recvmsg(int fd, struct msghdr *umsg, int flags) {
      * do_recv above). */
     int32_t ucontrollen = (int32_t)out_controllen;
     int32_t uflags = (int32_t)msg->msg_flags;
-    if (copyout(&ucontrollen, &umsg32->msg_controllen,
-                sizeof(umsg32->msg_controllen)) != 0)
+    if (copyout(&ucontrollen, uout.msg_controllen, sizeof(ucontrollen)) != 0)
         return -EFAULT;
-    if (copyout(&uflags, &umsg32->msg_flags,
-                sizeof(umsg32->msg_flags)) != 0)
+    if (copyout(&uflags, uout.msg_flags, sizeof(uflags)) != 0)
         return -EFAULT;
     return total;
 }
