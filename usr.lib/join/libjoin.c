@@ -6,8 +6,6 @@
 #include <errno.h>
 #include <stdio.h>
 
-extern ssize_t getdelim(char **lineptr, size_t *n, int delimiter, FILE *stream);
-
 typedef struct {
     char *line;
     size_t line_len;

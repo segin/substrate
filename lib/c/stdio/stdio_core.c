@@ -621,7 +621,12 @@ void perror(const char *s) {
 }
 
 ssize_t getline(char **lineptr, size_t *n, FILE *stream) {
-    if (!lineptr || !n || !stream) return -1;
+    return getdelim(lineptr, n, '\n', stream);
+}
+
+/* POSIX getdelim(): getline() with a caller-chosen terminator. */
+ssize_t getdelim(char **lineptr, size_t *n, int delimiter, FILE *stream) {
+    if (!lineptr || !n || !stream) { errno = EINVAL; return -1; }
     if (*lineptr == NULL || *n == 0) {
         *n = 128;
         *lineptr = malloc(*n);
@@ -639,7 +644,7 @@ ssize_t getline(char **lineptr, size_t *n, FILE *stream) {
             *n = new_n;
         }
         (*lineptr)[pos++] = (char)c;
-        if (c == '\n') break;
+        if (c == delimiter) break;
     }
     if (pos == 0) return -1;
     (*lineptr)[pos] = 0;

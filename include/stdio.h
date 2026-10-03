@@ -112,6 +112,7 @@ int putc(int c, FILE *stream);
 int putchar(int c);
 int puts(const char *s);
 ssize_t getline(char **lineptr, size_t *n, FILE *stream);
+ssize_t getdelim(char **lineptr, size_t *n, int delimiter, FILE *stream);
 int ungetc(int c, FILE *stream);
 int fileno(FILE *stream);
 

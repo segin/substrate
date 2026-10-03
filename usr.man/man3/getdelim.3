@@ -1,0 +1,80 @@
+.\" getdelim.3 - delimited string input
+.TH GETDELIM 3 "2026-10-03" "Substrate" "Library Functions Manual"
+.SH NAME
+getline, getdelim \- delimited string input
+.SH LIBRARY
+.B libc
+.SH SYNOPSIS
+.B #include <stdio.h>
+.PP
+.BI "ssize_t getline(char **" lineptr ", size_t *" n ", FILE *" stream ");"
+.PP
+.BI "ssize_t getdelim(char **" lineptr ", size_t *" n ", int " delimiter ", FILE *" stream ");"
+.SH DESCRIPTION
+.BR getdelim ()
+reads from
+.I stream
+up to and including the first occurrence of
+.IR delimiter ,
+or to end of file, and stores the bytes read in the buffer
+.IR *lineptr ,
+followed by a terminating null byte.
+.PP
+If
+.I *lineptr
+is NULL or
+.I *n
+is zero on entry, a buffer is allocated with
+.BR malloc (3);
+otherwise
+.I *lineptr
+must point to a buffer of
+.I *n
+bytes obtained from
+.BR malloc (3).
+The buffer is enlarged with
+.BR realloc (3)
+as needed, and
+.I *lineptr
+and
+.I *n
+are updated to describe it.
+The caller frees it with
+.BR free (3),
+also after a failed call.
+.PP
+.BR getline ()
+is
+.BR getdelim ()
+with a
+.I delimiter
+of newline.
+.SH RETURN VALUE
+On success, both return the number of bytes read, including the delimiter
+but not the terminating null byte.
+They return \-1 on error, and at end of file when no bytes were read.
+.SH ERRORS
+.TP
+.B EINVAL
+.IR lineptr ,
+.I n
+or
+.I stream
+is NULL.
+.TP
+.B ENOMEM
+The buffer could not be allocated or enlarged.
+.SH EXAMPLE
+.nf
+char *line = NULL;
+size_t cap = 0;
+ssize_t len;
+
+while ((len = getline(&line, &cap, stdin)) != \-1)
+    fwrite(line, 1, (size_t)len, stdout);
+free(line);
+.fi
+.SH SEE ALSO
+.BR fgets (3),
+.BR fgetc (3),
+.BR malloc (3)
