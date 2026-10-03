@@ -19,10 +19,12 @@
 #include <kern/sched.h>
 #include <kern/sleepq.h>
 #include <kern/time.h>
+#include <sys/amd64_abi.h>
 #include <sys/compat32.h>
 #include <sys/errno.h>
 #include <sys/futex.h>
 #include <sys/proc.h>
+#include <sys/sysinfo.h>
 #include <sys/time.h>
 #include <vm/vm_kmem.h>
 
@@ -60,8 +62,9 @@ static int futex_read_timespec(void *uaddr, struct timespec *out) {
         return -EFAULT;
     }
 
-    /* Use copyin() to safely copy from userspace with fault handling */
-    if (copyin(uaddr, out, sizeof(struct timespec)) != 0)
+    /* Copy in with fault handling, from the layout the process uses
+     * (<sys/compat32.h>). */
+    if (timespec_copyin(uaddr, out) != 0)
         return -EFAULT;
 
     return 0;
@@ -205,6 +208,76 @@ static void futex_handle_dead_owner(int *uaddr) {
 }
 
 /*
+ * A robust list head, read from either of the two layouts a process may
+ * register (struct robust_list_head32, struct amd64_robust_list_head).
+ */
+struct robust_head {
+    uintptr_t list_next;
+    intptr_t  futex_offset;
+    uintptr_t list_op_pending;
+    int       wide;             /* 64-bit pointers in the list */
+};
+
+static int robust_len_is_wide(size_t len) {
+    return len == sizeof(struct amd64_robust_list_head);
+}
+
+static int robust_head_copyin(uintptr_t uhead, size_t len,
+                              struct robust_head *k) {
+    if (robust_len_is_wide(len)) {
+        struct amd64_robust_list_head u64;
+
+        if (copyin((const void *)uhead, &u64, sizeof(u64)) != 0)
+            return -EFAULT;
+        k->list_next = (uintptr_t)u64.list_next;
+        k->futex_offset = (intptr_t)u64.futex_offset;
+        k->list_op_pending = (uintptr_t)u64.list_op_pending;
+        k->wide = 1;
+        return 0;
+    }
+
+    struct robust_list_head32 u;
+
+    if (copyin((const void *)uhead, &u, sizeof(u)) != 0)
+        return -EFAULT;
+    k->list_next = u.list_next;
+    k->futex_offset = u.futex_offset;
+    k->list_op_pending = u.list_op_pending;
+    k->wide = 0;
+    return 0;
+}
+
+/* The futex word of the lock whose list entry is at `entry`.  A 32-bit
+ * process computes the address modulo 2^32. */
+static int *robust_futex_addr(const struct robust_head *k, uintptr_t entry) {
+    uintptr_t addr = entry + (uintptr_t)k->futex_offset;
+
+    if (!k->wide) addr = (uint32_t)addr;
+    return (int *)addr;
+}
+
+/* The next pointer stored in the list entry at `entry`. */
+static int robust_next_read(const struct robust_head *k, uintptr_t entry,
+                            uintptr_t *next) {
+    if (!validate_uaddr(entry)) return -EFAULT;
+    if (k->wide) {
+        uint64_t u64;
+
+        if (copyin((const void *)entry, &u64, sizeof(u64)) != 0)
+            return -EFAULT;
+        *next = (uintptr_t)u64;
+        return 0;
+    }
+
+    uptr32_t u;
+
+    if (copyin((const void *)entry, &u, sizeof(u)) != 0)
+        return -EFAULT;
+    *next = u;
+    return 0;
+}
+
+/*
  * Walk the robust list and cleanup on thread exit
  *
  * For each entry in the list:
@@ -217,22 +290,23 @@ void futex_thread_exit(thread_t *t) {
     /* Copy the robust_list_head from userspace into a kernel-stack local
      * to avoid direct dereferences of the userspace pointer.  It, and the
      * list it heads, are laid out as the process sees them: 32-bit
-     * pointers (<sys/compat32.h>). */
-    uptr32_t uhead = (uptr32_t)(uintptr_t)t->robust_list;
-    struct robust_list_head32 khead;
-    if (copyin(UPTR32(uhead), &khead, sizeof(khead)) != 0) {
+     * pointers (<sys/compat32.h>), or 64-bit ones for a native 64-bit
+     * process (<sys/amd64_abi.h>).  The registered length says which. */
+    uintptr_t uhead = (uintptr_t)t->robust_list;
+    struct robust_head khead;
+    if (robust_head_copyin(uhead, t->robust_list_len, &khead) != 0) {
         t->robust_list = NULL;
         t->robust_list_len = 0;
         return;
     }
 
-    uptr32_t entry;
+    uintptr_t entry;
     int count = 0;
     const int MAX_ROBUST_WALK = 256;  /* Bound exit-path work for malformed robust lists */
 
     /* Process pending entry first (in case we died mid-lock/unlock) */
     if (khead.list_op_pending) {
-        int *futex_addr = UPTR32(khead.list_op_pending + (uint32_t)khead.futex_offset);
+        int *futex_addr = robust_futex_addr(&khead, khead.list_op_pending);
         int val;
 
         if (futex_read_user(futex_addr, &val) == 0) {
@@ -248,13 +322,13 @@ void futex_thread_exit(thread_t *t) {
      * termination. */
     entry = khead.list_next;
     while (entry != uhead && count < MAX_ROBUST_WALK) {
-        uptr32_t next;
+        uintptr_t next;
 
         /* Read next pointer safely before processing */
-        if (futex_read_user(UPTR32(entry), (int *)&next) != 0) break;
+        if (robust_next_read(&khead, entry, &next) != 0) break;
 
         /* Calculate futex address from entry */
-        int *futex_addr = UPTR32(entry + (uint32_t)khead.futex_offset);
+        int *futex_addr = robust_futex_addr(&khead, entry);
         int val;
         
         if (futex_read_user(futex_addr, &val) == 0) {
@@ -316,7 +390,9 @@ int sys_set_robust_list(struct robust_list_head *head, size_t len) {
     if (!current_thread) return -EINVAL;
     
     /* Validate size matches the process's layout of the structure */
-    if (len != sizeof(struct robust_list_head32)) {
+    size_t want = proc_abi_is_amd64() ? sizeof(struct amd64_robust_list_head)
+                                      : sizeof(struct robust_list_head32);
+    if (len != want) {
         return -EINVAL;
     }
     
@@ -368,13 +444,11 @@ int sys_get_robust_list(int pid, struct robust_list_head **head_ptr, size_t *len
         return -EFAULT;
     }
     
-    /* Write results to userspace via copyout, as the process's 32-bit
-     * pointer and size_t. */
-    uptr32_t uhead = (uptr32_t)(uintptr_t)target->robust_list;
-    uint32_t ulen = (uint32_t)target->robust_list_len;
-    if (copyout(&uhead, head_ptr, sizeof(uhead)) != 0)
+    /* Write results to userspace via copyout, as the calling process's
+     * pointer and size_t (<sys/compat32.h>). */
+    if (uptr_copyout((uintptr_t)target->robust_list, head_ptr) != 0)
         return -EFAULT;
-    if (copyout(&ulen, len_ptr, sizeof(ulen)) != 0)
+    if (usize_copyout(target->robust_list_len, len_ptr) != 0)
         return -EFAULT;
     
     return 0;
