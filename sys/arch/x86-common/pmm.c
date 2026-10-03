@@ -2,7 +2,8 @@
 #include <string.h>
 
 #include <arch/x86-common/intr.h>
-#include <arch/i386/pmm.h>
+#include <machine/pmm.h>
+#include <machine/vmparam.h>
 #include <arch/x86-common/e820.h>
 #include <arch/x86-common/multiboot.h>
 #include <kern/console.h>
@@ -116,11 +117,13 @@ static void pmm_clear_boot_exclusions(void) {
     memset(boot_regions_end, 0, sizeof(boot_regions_end));
 }
 
-static uint32_t pmm_virt_to_phys(uint32_t addr) {
-    if (addr >= PMM_PHYS_VIRT_BASE) {
-        return addr - PMM_PHYS_VIRT_BASE;
+/* Multiboot hands over physical addresses, but callers sometimes pass a
+ * kernel pointer to the same thing; accept either. */
+static uint32_t pmm_virt_to_phys(uintptr_t addr) {
+    if (addr >= KERNEL_VA_START) {
+        return (uint32_t)V2P(addr);
     }
-    return addr;
+    return (uint32_t)addr;
 }
 
 static void pmm_select_metadata(uint64_t max_phys, uint64_t total_usable,
@@ -157,12 +160,9 @@ static void pmm_cb_init_buddy(phys_addr_t start, phys_addr_t length, void *arg);
 static void pmm_init_kernel_bounds(void) {
     extern uint32_t _kernel_start;
     extern uint32_t _kernel_end;
-    
-    uint32_t v_start = (uint32_t)(uintptr_t)&_kernel_start;
-    uint32_t v_end = (uint32_t)(uintptr_t)&_kernel_end;
-    
-    kernel_phys_start = v_start - 0xC0000000;
-    kernel_phys_end = v_end - 0xC0000000;
+
+    kernel_phys_start = (phys_addr_t)V2P(&_kernel_start);
+    kernel_phys_end = (phys_addr_t)V2P(&_kernel_end);
     
     /* Round to page boundaries for safety */
     kernel_phys_start &= ~(PMM_BLOCK_SIZE - 1);
@@ -219,7 +219,7 @@ static void pmm_record_multiboot_string(uint32_t phys_addr) {
         return;
     }
 
-    const char *s = (const char *)(uintptr_t)(phys_addr + PMM_PHYS_VIRT_BASE);
+    const char *s = (const char *)P2V(phys_addr);
     size_t len = strnlen(s, 4096);
     pmm_record_boot_region(phys_addr, phys_addr + (uint32_t)len + 1);
 }
@@ -236,14 +236,13 @@ static void pmm_record_module_regions(uint32_t mods_addr, uint32_t mods_count) {
     if (mods_addr_phys >= PMM_BOOTSTRAP_LOWMEM_LIMIT) {
         return;
     }
-    uint32_t mods_addr_virt = mods_addr_phys + PMM_PHYS_VIRT_BASE;
+    const multiboot_module_t *mods = P2V(mods_addr_phys);
 
     /* Limit to our array size */
     if (mods_count > PMM_MAX_MODULE_REGIONS) mods_count = PMM_MAX_MODULE_REGIONS;
 
     for (uint32_t i = 0; i < mods_count && module_region_count < PMM_MAX_MODULE_REGIONS; i++) {
-        const multiboot_module_t *mod = (const multiboot_module_t *)(uintptr_t)(
-            mods_addr_virt + i * sizeof(multiboot_module_t));
+        const multiboot_module_t *mod = &mods[i];
         uint32_t mod_start = mod->mod_start;
         uint32_t mod_end = mod->mod_end;
 
@@ -269,8 +268,7 @@ void pmm_record_boot_info(const multiboot_info_t *mbi) {
         return;
     }
 
-    uint32_t mbi_virt = (uint32_t)(uintptr_t)mbi;
-    uint32_t mbi_phys = pmm_virt_to_phys(mbi_virt);
+    uint32_t mbi_phys = pmm_virt_to_phys((uintptr_t)mbi);
 
     pmm_record_multiboot_info(mbi_phys);
     pmm_record_boot_region(mbi_phys, mbi_phys + sizeof(*mbi));
@@ -429,7 +427,7 @@ void pmm_watermark_init(uint32_t start, uint32_t end) {
 
 void* pmm_watermark_alloc(size_t bytes, size_t align) {
     if (bytes == 0) {
-        return (void *)(uintptr_t)(watermark_ptr + PMM_PHYS_VIRT_BASE);
+        return P2V(watermark_ptr);
     }
 
     if (align == 0) align = 16;
@@ -449,7 +447,7 @@ void* pmm_watermark_alloc(size_t bytes, size_t align) {
     }
 
     watermark_ptr = new_ptr;
-    return (void *)(uintptr_t)(aligned_ptr + PMM_PHYS_VIRT_BASE);
+    return P2V(aligned_ptr);
 }
 
 uint32_t pmm_watermark_used(void) {
@@ -542,8 +540,8 @@ static void pmm_reserve_kernel(void) {
 // Reclaim setup memory
 void pmm_reclaim_setup(void) {
     extern uint32_t _setup_start, _setup_end;
-    uint32_t start = (uint32_t)(uintptr_t)&_setup_start;
-    uint32_t end = (uint32_t)(uintptr_t)&_setup_end;
+    uintptr_t start = (uintptr_t)&_setup_start;
+    uintptr_t end = (uintptr_t)&_setup_end;
     
     kprint("Freeing setup memory... ");
     // ... printing logic omitted for brevity, just reclaim ...
@@ -633,13 +631,11 @@ void pmm_walk_mmap(uint32_t mmap_addr, uint32_t mmap_length, pmm_region_callback
         return;
     }
 
-    /* Validate map address is in kernel space (already mapped) */
-    if (mmap_addr < 0xC0000000) {
-        /* Physical address - need to add kernel offset */
-        mmap_addr += 0xC0000000;
-    }
-
-    const uint8_t *map_start = (const uint8_t *)(uintptr_t)mmap_addr;
+    /* A physical address (what multiboot passes) is reached through the
+     * direct map; an i386 caller may already have translated it. */
+    const uint8_t *map_start = (uintptr_t)mmap_addr >= KERNEL_VA_START
+        ? (const uint8_t *)(uintptr_t)mmap_addr
+        : (const uint8_t *)P2V(mmap_addr);
     const uint8_t *map_end = map_start + mmap_length;
     const uint8_t *ptr = map_start;
     
@@ -1077,7 +1073,7 @@ void* pmm_alloc_block(void) {
      * attributed back to it (see kern/memtrack.c). */
     p->memtrack_site = memtrack_record_alloc(
         (uintptr_t)__builtin_return_address(0), 1);
-    return (void*)(uintptr_t)(p->phys_addr + PMM_PHYS_VIRT_BASE);
+    return P2V(p->phys_addr);
 }
 
 void pmm_free_block(void* p) {
@@ -1087,7 +1083,7 @@ void pmm_free_block(void* p) {
         kprint("PMM: ignoring free outside direct-mapped window.\n");
         return;
     }
-    vm_page_t *page = vm_phys_paddr_to_page(v - PMM_PHYS_VIRT_BASE);
+    vm_page_t *page = vm_phys_paddr_to_page(V2P(v));
     if (!page) {
         kprint("PMM: ignoring free of unknown direct-mapped page.\n");
         return;
@@ -1108,7 +1104,7 @@ void* pmm_alloc_contiguous(size_t count) {
         vm_page_t *q = vm_phys_paddr_to_page(p->phys_addr + i * PMM_BLOCK_SIZE);
         if (q) q->memtrack_site = site;
     }
-    return (void*)(uintptr_t)(p->phys_addr + PMM_PHYS_VIRT_BASE);
+    return P2V(p->phys_addr);
 }
 
 void pmm_free_contiguous(void* p, size_t count) {
@@ -1137,7 +1133,7 @@ void pmm_free_contiguous(void* p, size_t count) {
              return;
          }
      }
-     vm_page_t *page = vm_phys_paddr_to_page(v - PMM_PHYS_VIRT_BASE);
+     vm_page_t *page = vm_phys_paddr_to_page(V2P(v));
      if (!page) {
          kprint("PMM: ignoring free of unknown direct-mapped range.\n");
          return;
@@ -1156,9 +1152,9 @@ size_t pmm_get_used_blocks(void) {
 
 // Redundant definitions removed
 
-void pmm_reclaim_range(uint32_t start, uint32_t end) {
-    start = pmm_virt_to_phys(start);
-    end = pmm_virt_to_phys(end);
+void pmm_reclaim_range(uintptr_t start_addr, uintptr_t end_addr) {
+    uint32_t start = pmm_virt_to_phys(start_addr);
+    uint32_t end = pmm_virt_to_phys(end_addr);
 
     if (end <= 0x100000U) {
         return;
@@ -1181,11 +1177,11 @@ struct vm_page *pmm_get_page(uintptr_t pa) {
 
 
 
-void pmm_dump_mmap(uint32_t mmap_addr, uint32_t mmap_length) {
+void pmm_dump_mmap(uintptr_t mmap_addr, uint32_t mmap_length) {
     // Keep existing dump implementation
     kprint("BIOS-e820 physical RAM map:\n");
-    multiboot_mmap_entry_t* mmap = (multiboot_mmap_entry_t*)(uintptr_t)mmap_addr;
-    while((uint32_t)(uintptr_t)mmap < mmap_addr + mmap_length) {
+    multiboot_mmap_entry_t* mmap = (multiboot_mmap_entry_t*)mmap_addr;
+    while((uintptr_t)mmap < mmap_addr + mmap_length) {
         char buf[128];
         const char* type_str = "unknown";
         if (mmap->type == MULTIBOOT_MEMORY_AVAILABLE) type_str = "usable";
@@ -1203,7 +1199,7 @@ void pmm_dump_mmap(uint32_t mmap_addr, uint32_t mmap_length) {
             type_str);
         kprint(buf);
         
-        mmap = (multiboot_mmap_entry_t*) ((uint32_t)(uintptr_t)mmap + mmap->size + sizeof(mmap->size));
+        mmap = (multiboot_mmap_entry_t*) ((uintptr_t)mmap + mmap->size + sizeof(mmap->size));
     }
 }
 

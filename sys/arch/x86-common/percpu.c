@@ -1,7 +1,8 @@
 /*
  * percpu.c - Per-CPU Data Structures
  * 
- * Provides CPU-local storage via CPU-indexed percpu arrays on i386.
+ * Provides CPU-local storage via CPU-indexed percpu arrays, on both x86
+ * kernels; struct percpu_data itself is per architecture (percpu.h).
  * The kernel keeps %gs available for user/TLS contracts, especially the
  * Linux personality path.
  */
@@ -9,9 +10,8 @@
 #include <stdio.h>
 #include <string.h>
 
-#include <arch/i386/gdt.h>
-#include <arch/i386/percpu.h>
-#include <arch/i386/smp.h>
+#include <machine/percpu.h>
+#include <machine/smp.h>
 #include <arch/x86-common/lapic.h>
 #include <kern/console.h>
 
