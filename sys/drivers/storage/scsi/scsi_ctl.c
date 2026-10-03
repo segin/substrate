@@ -14,6 +14,7 @@
 #include <drivers/storage/blkdev.h>
 #include <drivers/storage/scsi/scsi.h>
 #include <kern/console.h>
+#include <sys/abi32.h>
 #include <sys/errno.h>
 #include <sys/kern_syscalls.h>
 #include <sys/proc.h>
@@ -35,7 +36,9 @@
 #define SCSI_IOCTL_RESET_BUS    0x5306  /* Reset SCSI bus */
 
 /*
- * Device info structure returned by SCSI_IOCTL_GET_INFO
+ * Device info structure returned by SCSI_IOCTL_GET_INFO.  Both ioctl
+ * structures are the process's (i386) layout on either kernel
+ * (<sys/abi32.h>).
  */
 typedef struct scsi_ioctl_info {
     uint8_t  bus;
@@ -45,25 +48,28 @@ typedef struct scsi_ioctl_info {
     char     vendor[9];
     char     product[17];
     char     revision[5];
-    uint64_t capacity;
+    abi_uint64_t capacity;
     uint32_t sector_size;
 } scsi_ioctl_info_t;
+ABI32_ASSERT_SIZE(scsi_ioctl_info_t, 48);
 
 /*
- * Raw SCSI command structure for SCSI_IOCTL_SEND_CMD
+ * Raw SCSI command structure for SCSI_IOCTL_SEND_CMD.  The kernel only
+ * ever copies through `data`, so it stays the process's 32-bit pointer.
  */
 typedef struct scsi_ioctl_cmd {
     uint8_t  cdb[16];
     uint8_t  cdb_len;
     uint8_t  direction;     /* 0=none, 1=read, 2=write */
     uint32_t data_len;
-    void    *data;
+    uptr32_t data;          /* user buffer */
     uint8_t  sense[18];
     uint8_t  sense_len;
     uint8_t  status;
     uint32_t data_xfer;
-    int      error;
+    int32_t  error;
 } scsi_ioctl_cmd_t;
+ABI32_ASSERT_SIZE(scsi_ioctl_cmd_t, 56);
 
 /*
  * ============================================================
@@ -144,7 +150,7 @@ static int sg_ioctl(fs_node_t *node, uint32_t request, void *arg) {
         /* Validate CDB length */
         if (kcmd.cdb_len == 0 || kcmd.cdb_len > sizeof(kcmd.cdb)) return -EINVAL;
         if (kcmd.direction > 2) return -EINVAL;
-        if (kcmd.data_len != 0 && kcmd.data == NULL) return -EINVAL;
+        if (kcmd.data_len != 0 && kcmd.data == 0) return -EINVAL;
 
         /* Limit data length to avoid excessive kernel allocation (64KB) */
         if (kcmd.data_len > 65536) return -EINVAL;
@@ -162,7 +168,7 @@ static int sg_ioctl(fs_node_t *node, uint32_t request, void *arg) {
             memset(kdata, 0, kcmd.data_len);
 
             if (kcmd.direction == 2) { /* WRITE */
-                if (copyin(kcmd.data, kdata, kcmd.data_len) != 0) {
+                if (copyin(UPTR32(kcmd.data), kdata, kcmd.data_len) != 0) {
                     kfree(kdata, kcmd.data_len);
                     return -EFAULT;
                 }
@@ -206,7 +212,8 @@ static int sg_ioctl(fs_node_t *node, uint32_t request, void *arg) {
             if (copy_len > kcmd.data_len) {
                 copy_len = kcmd.data_len;
             }
-            if (copy_len != 0 && copyout(kdata, kcmd.data, copy_len) != 0) {
+            if (copy_len != 0 &&
+                copyout(kdata, UPTR32(kcmd.data), copy_len) != 0) {
                 scsi_request_free(req);
                 if (kdata) kfree(kdata, kcmd.data_len);
                 return -EFAULT;
