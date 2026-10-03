@@ -6,8 +6,9 @@
 
 #include <stdio.h>
 
-#include <arch/i386/pmap.h>
-#include <ioapic.h>
+#include <machine/pmap.h>
+#include <machine/vmparam.h>
+#include <arch/x86-common/ioapic.h>
 #include <kern/console.h>
 
 // Maximum number of IO-APICs supported
@@ -105,15 +106,18 @@ int ioapic_register(uintptr_t base, uint8_t id, uint32_t gsi_base) {
         return -1;
     }
     
-    uintptr_t phys_base = base & ~0xFFFu;
+#ifndef SUBSTRATE_ARCH_X86_64
+    /* i386 reaches it at VA == PA (MMIO_KVA), so map that page. */
+    uintptr_t phys_base = base & ~(uintptr_t)0xFFF;
     if (pmap_enter(pmap_kernel(), phys_base, phys_base,
                    VM_PROT_READ | VM_PROT_WRITE, PTE_PCD) != 0) {
         kprint("IO-APIC: Failed to map MMIO page\n");
         return -1;
     }
+#endif
 
     ioapic_t *apic = &ioapics[ioapic_count];
-    apic->base = base;
+    apic->base = MMIO_KVA(base);
     apic->id = id;
     apic->gsi_base = gsi_base;
     apic->present = true;

@@ -14,10 +14,52 @@
 #include <stdint.h>
 #include <string.h>
 
-#include <machine/efi.h>
-#include <machine/vmparam.h>
 #include <kern/console.h>
 #include <kern/efi_runtime.h>
+
+#ifdef SUBSTRATE_ARCH_X86_64
+/*
+ * The x86_64 kernel is entered through multiboot, never handed the
+ * firmware's runtime services, and calling a 64-bit firmware would need its
+ * calling convention besides: it behaves as a kernel that was not booted
+ * via EFI.
+ */
+void efi_runtime_init(void) {
+}
+
+bool efi_runtime_available(void) {
+    return false;
+}
+
+int efi_get_time(struct efi_time *time) {
+    (void)time;
+    return -1;
+}
+
+int efi_set_time(const struct efi_time *time) {
+    (void)time;
+    return -1;
+}
+
+void efi_reset_system(int type) {
+    (void)type;
+}
+
+int efi_get_variable(const char *name, const uint8_t vendor[16],
+    void *data, unsigned long *data_size) {
+    (void)name; (void)vendor; (void)data; (void)data_size;
+    return -1;
+}
+
+int efi_set_variable(const char *name, const uint8_t vendor[16],
+    uint32_t attrs, const void *data, unsigned long data_size) {
+    (void)name; (void)vendor; (void)attrs; (void)data; (void)data_size;
+    return -1;
+}
+#else
+
+#include <machine/efi.h>
+#include <machine/vmparam.h>
 
 /* Symbols exported by efi_boot.c (NULL when not EFI-booted). */
 extern EFI_RUNTIME_SERVICES *efi_saved_runtime_services __attribute__((weak));
@@ -203,3 +245,5 @@ int efi_set_variable(const char *name, const uint8_t vendor[16],
     s = rt->SetVariable(ucs2_name, &guid, attrs, data_size, (void *)data);
     return (s == EFI_SUCCESS) ? 0 : -1;
 }
+
+#endif /* SUBSTRATE_ARCH_X86_64 */

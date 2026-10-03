@@ -35,7 +35,7 @@ void stack_trace(void) {
     int depth = 0;
     
     /* Get current EBP */
-    __asm__ volatile("mov %%ebp, %0" : "=r"(frame));
+    frame = (struct stack_frame *)__builtin_frame_address(0);
     
     kprint("\n--- Stack Trace ---\n");
     
@@ -93,8 +93,8 @@ void stack_trace(void) {
  *
  * Used for exception handlers where we have saved register context.
  */
-void stack_trace_from(uint32_t ebp, uint32_t eip) {
-    struct stack_frame *frame = (struct stack_frame *)(uintptr_t)ebp;
+void stack_trace_from(uintptr_t ebp, uintptr_t eip) {
+    struct stack_frame *frame = (struct stack_frame *)ebp;
     char buf[80];
     char sym_buf[64];
     int depth = 0;

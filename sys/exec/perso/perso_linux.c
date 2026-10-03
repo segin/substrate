@@ -503,7 +503,7 @@ static int linux_ioctl_tty(int fd, uint32_t request, void *arg) {
 void *linux_sys_mmap(void *uap) {
     struct linux_mmap_arg_struct args;
     if (copyin(uap, &args, sizeof(args)) != 0) return (void *)-14; // -EFAULT
-    return sys_mmap((void*)args.addr, args.len, args.prot, args.flags, args.fd, (uint64_t)args.offset);
+    return sys_mmap((void*)(uintptr_t)args.addr, args.len, args.prot, args.flags, args.fd, (uint64_t)args.offset);
 }
 
 /*

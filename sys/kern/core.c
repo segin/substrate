@@ -168,7 +168,7 @@ int coredump(process_t *p) {
         /* Dump 8 dwords of user stack, peeked safely via copyin. */
         if (last_core_record.regs.useresp != 0) {
             uint32_t buf[8] = {0};
-            if (copyin((const void *)last_core_record.regs.useresp, buf, sizeof(buf)) == 0) {
+            if (copyin((const void *)(uintptr_t)last_core_record.regs.useresp, buf, sizeof(buf)) == 0) {
                 kprintf("CORE: stk  +00=%08x +04=%08x +08=%08x +0c=%08x\n",
                         buf[0], buf[1], buf[2], buf[3]);
                 kprintf("CORE: stk  +10=%08x +14=%08x +18=%08x +1c=%08x\n",
@@ -186,8 +186,8 @@ int coredump(process_t *p) {
             for (int i = 0; i < 16 && bp; i++) {
                 uint32_t fr[2] = {0, 0};
                 unsigned char cb[8] = {0};
-                if (copyin((const void *)bp, fr, sizeof(fr)) != 0) break;
-                if (copyin((const void *)fr[1], cb, sizeof(cb)) != 0) {
+                if (copyin((const void *)(uintptr_t)bp, fr, sizeof(fr)) != 0) break;
+                if (copyin((const void *)(uintptr_t)fr[1], cb, sizeof(cb)) != 0) {
                     kprintf("CORE: bt #%d ret=%08x ebp=%08x code: <not mapped>\n",
                             i, fr[1], fr[0]);
                     break;
@@ -202,7 +202,7 @@ int coredump(process_t *p) {
         /* Dump 16 bytes of user code at eip, peeked via copyin. */
         if (last_core_record.regs.eip != 0) {
             unsigned char ibuf[16] = {0};
-            if (copyin((const void *)last_core_record.regs.eip, ibuf, sizeof(ibuf)) == 0) {
+            if (copyin((const void *)(uintptr_t)last_core_record.regs.eip, ibuf, sizeof(ibuf)) == 0) {
                 kprintf("CORE: code @eip: %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x\n",
                         ibuf[0], ibuf[1], ibuf[2], ibuf[3],
                         ibuf[4], ibuf[5], ibuf[6], ibuf[7],

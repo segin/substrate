@@ -478,7 +478,7 @@ int elks_load(int fd, const char *path, char *const argv[], char *const envp[]) 
     if (plan.text_size > 0) {
         kern_lseek(fd, (off_t)plan.text_file_offset, 0);
         {
-            int rc = kern_read(fd, (void *)plan.text_base, plan.text_size);
+            int rc = kern_read(fd, (void *)(uintptr_t)plan.text_base, plan.text_size);
             int status = elks_read_exact_status(rc, plan.text_size);
 
             if (status != 0) {
@@ -493,7 +493,7 @@ int elks_load(int fd, const char *path, char *const argv[], char *const envp[]) 
     if (plan.fartext_size > 0) {
         kern_lseek(fd, (off_t)plan.fartext_file_offset, 0);
         {
-            int rc = kern_read(fd, (void *)plan.fartext_base, plan.fartext_size);
+            int rc = kern_read(fd, (void *)(uintptr_t)plan.fartext_base, plan.fartext_size);
             int status = elks_read_exact_status(rc, plan.fartext_size);
 
             if (status != 0) {
@@ -510,7 +510,7 @@ int elks_load(int fd, const char *path, char *const argv[], char *const envp[]) 
 
         kern_lseek(fd, (off_t)plan.data_file_offset, 0);
         {
-            int rc = kern_read(fd, (void *)data_load_base, plan.data_size);
+            int rc = kern_read(fd, (void *)(uintptr_t)data_load_base, plan.data_size);
             int status = elks_read_exact_status(rc, plan.data_size);
 
             if (status != 0) {

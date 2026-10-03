@@ -58,4 +58,8 @@ struct vm86_struct {
 
 int vm86_bios_call(int int_no, struct vm86_regs *regs);
 
+/* sysarch(I386_VM86): FreeBSD's way into virtual-8086 mode.  Long mode has
+ * no such mode, so the x86_64 kernel answers -ENOSYS. */
+int vm86_init_bsd(void *args);
+
 #endif

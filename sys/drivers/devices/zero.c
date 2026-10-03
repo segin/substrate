@@ -91,7 +91,7 @@ static void *zero_mmap(fs_node_t *node, void *addr, size_t length, int prot, int
     (void)flags;
     (void)offset;
 
-    uint32_t start = (uint32_t)addr;
+    uint32_t start = (uint32_t)(uintptr_t)addr;   /* a 32-bit user address */
     uint32_t end;
 
     if (length == 0) {

@@ -6,7 +6,8 @@
 #include <sys/types.h>
 #include <vm/vm_kmem.h>
 
-// Integer to ASCII with optional sign/space prefix
+#ifndef SUBSTRATE_ARCH_X86_64
+// Integer to ASCII with optional sign/space prefix (the float formatters')
 static void itoa(char *buf, size_t size, int64_t val, int force_sign, int space_prefix) {
     char tmp[32];
     int i = 0;
@@ -52,6 +53,7 @@ static void itoa(char *buf, size_t size, int64_t val, int force_sign, int space_
     }
     if (size > 0) buf[j < size ? j : size - 1] = '\0';
 }
+#endif
 
 // Hex conversion helper
 static void utoa_hex(char *buf, uint64_t val, int uppercase) {
@@ -96,6 +98,7 @@ static void utoa_oct(char *buf, uint64_t val) {
     buf[i] = '\0';
 }
 
+#ifndef SUBSTRATE_ARCH_X86_64
 // Floating point to ASCII
 static void ftoa(char *buf, size_t size, double val, int precision, int uppercase) {
     if (precision < 0) precision = 6;
@@ -261,6 +264,7 @@ static void gtoa(char *buf, size_t size, double val, int precision, int uppercas
         }
     }
 }
+#endif /* !SUBSTRATE_ARCH_X86_64 */
 
 enum format_length {
     LEN_NONE,
@@ -461,6 +465,7 @@ static void format_hex(struct format_state *state, struct format_flags *flags, u
     }
 }
 
+#ifndef SUBSTRATE_ARCH_X86_64
 static void format_float(struct format_state *state, struct format_flags *flags, double val, char specifier) {
     char tmp[128];
     if (specifier == 'f' || specifier == 'F') {
@@ -483,12 +488,13 @@ static void format_float(struct format_state *state, struct format_flags *flags,
         emit_padding(state, flags->width - tmp_len, ' ');
     }
 }
+#endif /* !SUBSTRATE_ARCH_X86_64 */
 
-static void format_ptr(struct format_state *state, struct format_flags *flags, unsigned int val) {
+static void format_ptr(struct format_state *state, struct format_flags *flags, uintptr_t val) {
     char tmp[32];
     utoa_hex(tmp, val, 0); // digits only
     int len_val = strlen(tmp);
-    int zeros = 8 - len_val;
+    int zeros = (int)(2 * sizeof(void *)) - len_val;   /* every digit of the width */
     if (zeros < 0) zeros = 0;
 
     int total_len = 2 + zeros + len_val; // 0x + zeros + digits
@@ -704,14 +710,20 @@ int vsnprintf(char *str, size_t size, const char *format, va_list ap) {
                 case 'G':
                 case 'a':
                 case 'A': {
+#ifdef SUBSTRATE_ARCH_X86_64
+                    /* No floating point in this kernel (it runs without the
+                     * FPU/SSE state saved), so nothing can pass a double. */
+                    emit_string(&state, "<float>", 7);
+#else
                     double val;
                     if (flags.length == LEN_LONG_DOUBLE) val = (double)va_arg(ap, long double);
                     else val = va_arg(ap, double);
                     format_float(&state, &flags, val, *f);
+#endif
                     break;
                 }
                 case 'p': {
-                    unsigned int val = (unsigned int)(uintptr_t)va_arg(ap, void*);
+                    uintptr_t val = (uintptr_t)va_arg(ap, void*);
                     format_ptr(&state, &flags, val);
                     break;
                 }

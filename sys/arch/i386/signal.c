@@ -392,7 +392,7 @@ void sendsig(void *handler_ptr, int sig, uint32_t mask, uint32_t flags, void *re
         
         /* Modify saved registers for handler execution */
         regs->useresp = esp;
-        regs->eip = (uint32_t)handler;
+        regs->eip = (uint32_t)(uintptr_t)handler;
         regs->eflags &= ~(1 << 10);  /* Clear DF */
 
         XSIG("pid=%d sendsig SA_SIGINFO done: new_esp=0x%08x new_eip=0x%08x sig=%d",
@@ -509,7 +509,7 @@ void sendsig(void *handler_ptr, int sig, uint32_t mask, uint32_t flags, void *re
      * - Pop SS (unchanged, still user stack segment)
      */
     regs->useresp = esp;            /* Stack points to signal frame */
-    regs->eip = (uint32_t)handler;  /* Execute signal handler */
+    regs->eip = (uint32_t)(uintptr_t)handler;  /* Execute signal handler */
     
     /*
      * Clear direction flag for handler (per ABI)

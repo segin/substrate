@@ -6,6 +6,7 @@
 #include <kern/console.h>
 #include <kern/pci.h>
 #include <kern/resource.h>
+#include <machine/vmparam.h>
 #include <sys/file.h>
 #include <sys/types.h>
 
@@ -34,7 +35,7 @@
 #define VBE_DISPI_ENABLED           0x01
 #define VBE_DISPI_LFB_ENABLED       0x40
 #define BGA_BANK_WINDOW_PHYS        0x000A0000U
-#define BGA_BANK_WINDOW_VIRT        0xC00A0000U
+#define BGA_BANK_WINDOW_VIRT        ((uintptr_t)P2V(BGA_BANK_WINDOW_PHYS))
 #define BGA_BANK_SIZE               0x10000U
 
 void bga_scroll(int y_offset);

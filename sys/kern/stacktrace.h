@@ -19,6 +19,6 @@ void stack_trace(void);
  *
  * Used by exception handlers to show stack at fault time.
  */
-void stack_trace_from(uint32_t ebp, uint32_t eip);
+void stack_trace_from(uintptr_t ebp, uintptr_t eip);
 
 #endif /* _STACKTRACE_H */

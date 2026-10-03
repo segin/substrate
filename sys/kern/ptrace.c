@@ -175,10 +175,10 @@ int sys_ptrace(int req, int pid, int addr, int data) {
          * reads 0/-errno.  Honour both — without the NULL case the kernel
          * copied the word to address 0, returned EFAULT, and gdb saw every
          * memory read fail (so it could not insert a breakpoint). */
-        if ((void *)(uint32_t)data == NULL) {
+        if ((void *)(uintptr_t)(uint32_t)data == NULL) {
             return (int)word;
         }
-        if (copyout(&word, (void *)(uint32_t)data, sizeof(word)) != 0) {
+        if (copyout(&word, (void *)(uintptr_t)(uint32_t)data, sizeof(word)) != 0) {
             return -EFAULT;
         }
         return 0;
@@ -200,7 +200,7 @@ int sys_ptrace(int req, int pid, int addr, int data) {
         if (!frame) return -EFAULT;
         memset(&urs, 0, sizeof(urs));
         frame_to_uregs(frame, &urs);
-        if (copyout(&urs, (void *)(uint32_t)data, sizeof(urs)) != 0) {
+        if (copyout(&urs, (void *)(uintptr_t)(uint32_t)data, sizeof(urs)) != 0) {
             return -EFAULT;
         }
         return 0;
@@ -209,7 +209,7 @@ int sys_ptrace(int req, int pid, int addr, int data) {
     case PTRACE_SETREGS: {
         struct user_regs_struct urs;
         if (!frame) return -EFAULT;
-        if (copyin((void *)(uint32_t)data, &urs, sizeof(urs)) != 0) {
+        if (copyin((void *)(uintptr_t)(uint32_t)data, &urs, sizeof(urs)) != 0) {
             return -EFAULT;
         }
         uregs_to_frame(&urs, frame);

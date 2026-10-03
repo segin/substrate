@@ -80,7 +80,7 @@ void linux_sendsig(void *handler, int sig, uint32_t mask, uint32_t flags, void *
         frame.uc.uc_flags = 0;
         frame.uc.uc_link = 0;
         if (current_thread) {
-            frame.uc.uc_stack.ss_sp = (uint32_t)current_thread->sig_alt_stack.ss_sp;
+            frame.uc.uc_stack.ss_sp = (uint32_t)(uintptr_t)current_thread->sig_alt_stack.ss_sp;
             frame.uc.uc_stack.ss_size = current_thread->sig_alt_stack.ss_size;
             frame.uc.uc_stack.ss_flags = current_thread->sig_alt_stack.ss_flags;
         }
@@ -114,7 +114,7 @@ void linux_sendsig(void *handler, int sig, uint32_t mask, uint32_t flags, void *
         }
 
         regs->useresp = esp;
-        regs->eip = (uint32_t)handler;
+        regs->eip = (uint32_t)(uintptr_t)handler;
     } else {
         /* traditional sigframe */
         struct linux_sigframe frame;
@@ -157,13 +157,13 @@ void linux_sendsig(void *handler, int sig, uint32_t mask, uint32_t flags, void *
         }
 
         regs->useresp = esp;
-        regs->eip = (uint32_t)handler;
+        regs->eip = (uint32_t)(uintptr_t)handler;
     }
 }
 
 int linux_sys_sigreturn(void *regs_ptr) {
     registers_t *regs = (registers_t *)regs_ptr;
-    struct linux_sigframe *frame = (struct linux_sigframe *)(regs->useresp - 8);
+    struct linux_sigframe *frame = (struct linux_sigframe *)(uintptr_t)(regs->useresp - 8);
     struct linux_sigcontext sc;
 
     if (copyin(&frame->sc, &sc, sizeof(sc)) != 0) return -1;
@@ -196,7 +196,7 @@ int linux_sys_sigreturn(void *regs_ptr) {
 
 int linux_sys_rt_sigreturn(void *regs_ptr) {
     registers_t *regs = (registers_t *)regs_ptr;
-    struct linux_rt_sigframe *frame = (struct linux_rt_sigframe *)(regs->useresp - 4);
+    struct linux_rt_sigframe *frame = (struct linux_rt_sigframe *)(uintptr_t)(regs->useresp - 4);
     struct linux_ucontext uc;
 
     if (copyin(&frame->uc, &uc, sizeof(uc)) != 0) return -1;

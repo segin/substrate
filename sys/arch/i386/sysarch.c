@@ -5,12 +5,12 @@
 #include <sys/errno.h>
 #include <kern/console.h>
 #include <kern/sched.h>
-#include <arch/i386/gdt.h>
-#include <arch/i386/idt.h>
+#include <machine/gdt.h>
+#include <machine/idt.h>
 #include <arch/x86-common/intr.h>
-#include <arch/i386/percpu.h>
+#include <machine/percpu.h>
 #include <arch/i386/syscall.h>
-#include <arch/i386/vm86.h>
+#include <sys/vm86.h>
 #include <exec/perso/personality.h>
 #include <exec/perso/freebsd/freebsd_user.h>
 

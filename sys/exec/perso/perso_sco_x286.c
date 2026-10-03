@@ -991,8 +991,9 @@ static int64_t x286_sys_times(struct x286_frame *f) {
     }
     memset(&native, 0, sizeof(native));
     rc = kern_times(&native);
-    if ((long)rc < 0) {
-        return (int64_t)(long)rc;
+    /* clock_t is 32 bits: a negative errno lives in its sign bit. */
+    if ((int32_t)rc < 0) {
+        return (int64_t)(int32_t)rc;
     }
     out.tms_utime  = (int32_t)native.tms_utime;
     out.tms_stime  = (int32_t)native.tms_stime;

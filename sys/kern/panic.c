@@ -109,6 +109,40 @@ static int panic_va_readable(uintptr_t va, size_t len) {
 #ifdef HOST_TEST
     (void)va; (void)len;
     return 0;
+#elif defined(SUBSTRATE_ARCH_X86_64)
+    /* The same check over the x86_64 kernel's four-level tables, which the
+     * direct map reaches whole. */
+    uint64_t cr3;
+    uintptr_t page, last;
+
+    if (len == 0)
+        return 0;
+    __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
+
+    last = va + (len - 1);
+    if (last < va)                    /* wrapped */
+        return 0;
+
+    for (page = va & ~(uintptr_t)0xFFF; page <= (last & ~(uintptr_t)0xFFF);
+         page += 0x1000) {
+        uint64_t e = cr3;
+        int present = 1;
+
+        for (int shift = 39; shift >= 12; shift -= 9) {
+            const uint64_t *table = P2V(e & 0x000FFFFFFFFFF000ULL);
+
+            e = table[(page >> shift) & 511];
+            if (!(e & 0x1)) {
+                present = 0;
+                break;
+            }
+            if (shift != 12 && shift != 39 && (e & 0x80))
+                break;                /* 1 GiB or 2 MiB page */
+        }
+        if (!present)
+            return 0;
+    }
+    return 1;
 #else
     uint32_t cr3;
     uintptr_t page, last;
@@ -158,6 +192,9 @@ static int panic_addr_is_kernel_text(uintptr_t va) {
      * trap-frame esp that happens to land in the kernel range. */
     (void)va;
     return 0;
+#elif defined(SUBSTRATE_ARCH_X86_64)
+    /* The whole upper half is the kernel's. */
+    return va >= KERNEL_VA_START;
 #else
     /* Conservative: kernel virtual addresses live in [KERNEL_VA_START, 0xFF000000). */
     return va >= KERNEL_VA_START && va < 0xFF000000U;
@@ -220,6 +257,55 @@ static void panic_dump_stack_words(uintptr_t esp, int is_user) {
     kprint(line);
 }
 
+#ifdef SUBSTRATE_ARCH_X86_64
+/*
+ * The x86_64 trap frame: 64-bit registers, and RSP/SS are pushed on every
+ * trap, kernel-mode ones included.  A 32-bit process's registers are the
+ * low halves.
+ */
+static void panic_dump_regs(const registers_t *regs) {
+    char line[200];
+    int is_user;
+
+    if (!regs) return;
+
+    is_user = (regs->cs & 0x3) != 0;
+    snprintf(line, sizeof(line),
+            "REGS rip=%016lx cs=%04x rflags=%08lx rsp=%016lx ss=%04x int=%u err=%08x\n",
+            (unsigned long)regs->rip, (unsigned)(regs->cs & 0xFFFF),
+            (unsigned long)regs->rflags, (unsigned long)regs->rsp,
+            (unsigned)(regs->ss & 0xFFFF), (unsigned)regs->int_no,
+            (unsigned)regs->err_code);
+    kprint(line);
+    if (regs->int_no == 14) {
+        uint64_t cr2;
+        __asm__ volatile("mov %%cr2, %0" : "=r"(cr2));
+        snprintf(line, sizeof(line), "CR2: %016lx\n", (unsigned long)cr2);
+        kprint(line);
+    }
+    snprintf(line, sizeof(line), "REGS rax=%016lx rbx=%016lx rcx=%016lx rdx=%016lx\n",
+            (unsigned long)regs->rax, (unsigned long)regs->rbx,
+            (unsigned long)regs->rcx, (unsigned long)regs->rdx);
+    kprint(line);
+    snprintf(line, sizeof(line), "REGS rsi=%016lx rdi=%016lx rbp=%016lx r8=%016lx\n",
+            (unsigned long)regs->rsi, (unsigned long)regs->rdi,
+            (unsigned long)regs->rbp, (unsigned long)regs->r8);
+    kprint(line);
+    snprintf(line, sizeof(line), "REGS r9=%016lx r10=%016lx r11=%016lx r12=%016lx\n",
+            (unsigned long)regs->r9, (unsigned long)regs->r10,
+            (unsigned long)regs->r11, (unsigned long)regs->r12);
+    kprint(line);
+    snprintf(line, sizeof(line), "REGS r13=%016lx r14=%016lx r15=%016lx ds=%04x es=%04x fs=%04x gs=%04x\n",
+            (unsigned long)regs->r13, (unsigned long)regs->r14,
+            (unsigned long)regs->r15,
+            (unsigned)(regs->ds & 0xFFFF), (unsigned)(regs->es & 0xFFFF),
+            (unsigned)(regs->fs & 0xFFFF), (unsigned)(regs->gs & 0xFFFF));
+    kprint(line);
+
+    panic_dump_bytes_at(TF_PC(regs), is_user);
+    panic_dump_stack_words((uintptr_t)regs->rsp, is_user);
+}
+#else
 static void panic_dump_regs(const registers_t *regs) {
     char line[160];
     int is_user;
@@ -274,6 +360,7 @@ static void panic_dump_regs(const registers_t *regs) {
     panic_dump_bytes_at(regs->eip, is_user);
     panic_dump_stack_words(fault_esp, is_user);
 }
+#endif /* SUBSTRATE_ARCH_X86_64 */
 
 static void panic_stop_other_cpus(void) {
 #ifndef HOST_TEST

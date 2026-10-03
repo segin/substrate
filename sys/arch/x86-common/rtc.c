@@ -3,7 +3,7 @@
 #include <arch/x86-common/io.h>
 #include <kern/console.h>
 #include <kern/time.h>
-#include <rtc.h>
+#include <arch/x86-common/rtc.h>
 
 
 

@@ -31,4 +31,9 @@
 #define P2V(x) ((void *)((uintptr_t)(x) + KERN_BASE))
 #define V2P(x) ((uintptr_t)(x) - KERN_BASE)
 
+/* Where the kernel reaches a chipset MMIO page above the direct map (the
+ * LAPIC at 0xFEE00000, an IOAPIC): mapped identity, at VA == PA, which on
+ * i386 lies in the kernel half that every address space shares. */
+#define MMIO_KVA(pa) ((uintptr_t)(pa))
+
 #endif

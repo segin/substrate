@@ -6,7 +6,7 @@
 #include <sys/kern_syscalls.h>
 #include <vm/vm_kmem.h>
 #include <kern/console.h>
-#include <arch/i386/gdt.h>
+#include <machine/gdt.h>
 #include <stdio.h>
 #ifndef HOST_TEST
 #include <vm/uma.h>
@@ -71,9 +71,12 @@ static void *ldt_alloc_storage(unsigned int entry_count, uint8_t *is_uma_out) {
     }
 #endif
 
+#if SIZE_MAX / LDT_ENTRY_SIZE < 0xFFFFFFFFU
+    /* Only a 32-bit size_t can overflow here. */
     if (entry_count > SIZE_MAX / LDT_ENTRY_SIZE) {
         return NULL;
     }
+#endif
     bytes = (size_t)entry_count * LDT_ENTRY_SIZE;
     ptr = kmalloc(bytes);
     if (!ptr) {
@@ -121,6 +124,17 @@ static void ldt_load_selector(uint16_t selector) {
 }
 
 static void ldt_activate_locked(process_t *proc) {
+#ifdef SUBSTRATE_ARCH_X86_64
+    /* The x86_64 kernel builds this file for its 32-bit processes.  Its
+     * LDT descriptor is a 16-byte system descriptor, which gdt.c owns. */
+    if (!proc || !proc->ldt) {
+        gdt_load_ldt(0, 0);
+        return;
+    }
+    gdt_load_ldt((uintptr_t)proc->ldt,
+                 (uint32_t)(proc->ldt_entry_count * LDT_ENTRY_SIZE) - 1U);
+    return;
+#endif
     if (!proc || !proc->ldt) {
         ldt_load_selector(0);
         return;

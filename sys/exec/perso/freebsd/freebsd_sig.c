@@ -236,7 +236,7 @@ void freebsd_sendsig(void *handler, int sig, uint32_t mask, uint32_t flags, void
 int freebsd_sys_sigreturn(void *regs_ptr) {
     registers_t *regs = (registers_t *)regs_ptr;
     /* The trampoline loaded EBX with &sf_uc (the ucontext pointer). */
-    struct freebsd_ucontext *uc_user = (struct freebsd_ucontext *)regs->ebx;
+    struct freebsd_ucontext *uc_user = (struct freebsd_ucontext *)(uintptr_t)regs->ebx;
 
     struct freebsd_ucontext uc;
     if (copyin(uc_user, &uc, sizeof(uc)) != 0) return -EFAULT;

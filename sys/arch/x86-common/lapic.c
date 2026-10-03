@@ -1,6 +1,7 @@
-#include <lapic.h>
+#include <arch/x86-common/lapic.h>
 #include <arch/x86-common/cpu.h>
 #include <kern/console.h>
+#include <machine/vmparam.h>
 
 // Default LAPIC physical address (can be overridden by MADT)
 #define LAPIC_DEFAULT_BASE  0xFEE00000
@@ -73,7 +74,7 @@ void lapic_init(void) {
     // For i386 with higher-half kernel, use direct physical access if identity mapped,
     // or map via pmap. For simplicity, assume identity-mapped in low 4GB (common for MMIO).
     // On x86, LAPIC at 0xFEE00000 is usually accessible directly.
-    lapic_base = lapic_phys_base;  // Identity map assumption
+    lapic_base = MMIO_KVA(lapic_phys_base);
     
     // Alternatively, map if needed:
     // extern pmap_t pmap_kernel(void);

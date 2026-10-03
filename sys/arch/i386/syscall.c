@@ -7,10 +7,11 @@
 #include <stdio.h>
 #include <string.h>
 
-#include <arch/i386/gdt.h>
-#include <arch/i386/idt.h>
+#include <machine/gdt.h>
+#include <machine/idt.h>
 #include <arch/x86-common/intr.h>
-#include <arch/i386/percpu.h>
+#include <machine/percpu.h>
+#include <machine/vmparam.h>
 #include <arch/i386/syscall.h>
 #include <arch/i386/syscall_abi.h>
 #include <drivers/console/uart/uart.h>
@@ -142,7 +143,7 @@ int sys_set_thread_area(struct user_desc *u_info) {
         return -14; // EFAULT
     
     // Reject TLS base addresses in kernel space
-    if (info.base_addr >= 0xC0000000)
+    if (info.base_addr >= USER32_VA_END)
         return -22; // EINVAL
     
     // If entry_number is -1, allocate a new TLS entry
@@ -514,7 +515,7 @@ void syscall_handler(registers_t *regs) {
         return;
     }
     
-    if (!p->syscall_table || (uintptr_t)p->syscall_table < 0xC0000000U) {
+    if (!p->syscall_table || (uintptr_t)p->syscall_table < KERNEL_VA_START) {
         if (trace_this) {
             syscall_trace_emit("SYSCALL: Invalid syscall table\n");
         }
@@ -557,7 +558,7 @@ void syscall_handler(registers_t *regs) {
         return;
     }
 
-    if ((uintptr_t)location < 0xC0000000U) {
+    if ((uintptr_t)location < KERNEL_VA_START) {
         if (trace_this) {
             char buf[96];
             snprintf(buf, sizeof(buf), "SYSCALL: Invalid handler %p for #%u\n",
@@ -568,7 +569,14 @@ void syscall_handler(registers_t *regs) {
         return;
     }
     
-    typedef int64_t (*sys_func_t)(uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t);
+    /*
+     * The handlers' real signatures vary; the i386 cdecl call makes eight
+     * 32-bit stack words fit all of them.  The words are passed pointer-
+     * wide so that, built into the x86_64 kernel for its 32-bit processes,
+     * a pointer parameter receives the zero-extended user address.
+     */
+    typedef int64_t (*sys_func_t)(uintptr_t, uintptr_t, uintptr_t, uintptr_t,
+                                  uintptr_t, uintptr_t, uintptr_t, uintptr_t);
     sys_func_t func = (sys_func_t)location;
 
     // Dispatch (with TSC accounting for syscall_stats)
@@ -683,7 +691,7 @@ syscall_done:
         }
     }
     
-    if (regs->cs == 0x1B && regs->useresp >= 0xC0000000) {
+    if (regs->cs == 0x1B && regs->useresp >= USER32_VA_END) {
         syscall_trace_emit("SYSCALL RET: Bad User ESP detected!\n");
         panic("Syscall returning with Kernel ESP in User Frame");
     }
@@ -765,5 +773,5 @@ int sys_rfork(int flags) {
 }
 
 void syscall_init(void) {
-    idt_set_gate(0x80, (uint32_t)isr128, 0x08, IDT_FLAG_USER_INT_GATE);
+    idt_set_gate(0x80, (uintptr_t)isr128, 0x08, IDT_FLAG_USER_INT_GATE);
 }

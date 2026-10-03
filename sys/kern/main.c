@@ -91,7 +91,7 @@ static struct {
     uint32_t cmdline;
     uint32_t pad;
 } mboot_mods_copy[8];
-static uint32_t mboot_orig_addr = 0;
+static uintptr_t mboot_orig_addr = 0;
 
 typedef struct multiboot_module {
     uint32_t mod_start;
@@ -125,13 +125,15 @@ static void init_memory(multiboot_info_t *mboot_info) {
     }
 
     if (mboot_info && (mboot_info->flags & MULTIBOOT_INFO_MEM_MAP)) {
-        mmap_addr = (uintptr_t)VIRTUAL_d(mboot_info->mmap_addr);
+        /* Physical: pmm_init() reaches it through the direct map itself,
+         * and a kernel pointer would not fit a uint32_t on x86_64. */
+        mmap_addr = mboot_info->mmap_addr;
         mmap_length = mboot_info->mmap_length;
-        
+
         // Copy mmap for reclamation safety
         uint32_t count = mmap_length / sizeof(multiboot_mmap_entry_t);
         if (count > 64) count = 64;
-        memcpy(mboot_mmap_copy, (void*)(uintptr_t)mmap_addr, count * sizeof(multiboot_mmap_entry_t));
+        memcpy(mboot_mmap_copy, VIRTUAL_d(mmap_addr), count * sizeof(multiboot_mmap_entry_t));
         mboot_copy.mmap_addr = PHYSICAL_d(mboot_mmap_copy);
         mboot_copy.mmap_length = count * sizeof(multiboot_mmap_entry_t);
         mboot_copy.flags |= MULTIBOOT_INFO_MEM_MAP;
@@ -198,8 +200,7 @@ static void init_memory(multiboot_info_t *mboot_info) {
         if (mboot_info->flags & MULTIBOOT_INFO_MODS) {
              uint32_t mods_count = mboot_info->mods_count;
              if (mods_count > 8) mods_count = 8;
-             uint32_t mods_addr_virt = (uintptr_t)VIRTUAL_d(mboot_info->mods_addr);
-             memcpy(mboot_mods_copy, (void*)(uintptr_t)mods_addr_virt, mods_count * 16);
+             memcpy(mboot_mods_copy, VIRTUAL_d(mboot_info->mods_addr), mods_count * 16);
              mboot_copy.mods_addr = PHYSICAL_d(mboot_mods_copy);
              mboot_copy.mods_count = mods_count;
         }

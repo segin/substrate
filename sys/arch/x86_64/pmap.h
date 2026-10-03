@@ -1,186 +1,181 @@
-#ifndef _X86_64_PMAP_H
-#define _X86_64_PMAP_H
+/*
+ * pmap.h - x86_64 physical map: 4-level page tables
+ *
+ * The interface is arch/i386/pmap.h's, so the machine-independent VM code
+ * drives either kernel unchanged.  Underneath:
+ *
+ * - Each address space is a PML4.  The upper half (slots 256-511) is the
+ *   kernel's and is shared: pmap_create() copies the kernel's PML4 entries,
+ *   and every kernel PML4 slot that will ever be used (the direct map, the
+ *   kernel image, the ioremap window) is populated at boot, so a new kernel
+ *   mapping shows up in every address space without pmap_growkernel().
+ * - The lower half is the process's.  Today's processes are 32-bit, so
+ *   only its first 4 GiB is ever used.
+ * - Page tables are reached through the direct map (P2V), never through a
+ *   recursive slot, so any pmap can be read or changed without loading it.
+ *
+ * The signal trampoline page sits at SIG_TRAMPOLINE_ADDR (0xFE000000) as on
+ * i386.  There that is kernel space; here it is in the 32-bit process's own
+ * 4 GiB, so pmap_create() maps it into every address space and the
+ * user-range walkers leave it alone.
+ */
+#ifndef _ARCH_X86_64_PMAP_H
+#define _ARCH_X86_64_PMAP_H
 
 #include <stdint.h>
 #include <stddef.h>
-#include <sys/queue.h>
-#include <sys/lock.h>
+#include <machine/vmparam.h>
 
-// x86_64 Page Table Flags
-#define PTE_P           0x001UL    // Present
-#define PTE_W           0x002UL    // Writeable
-#define PTE_U           0x004UL    // User-accessible
-#define PTE_PWT         0x008UL    // Write-Through
-#define PTE_PCD         0x010UL    // Cache-Disable
-#define PTE_A           0x020UL    // Accessed
-#define PTE_D           0x040UL    // Dirty
-#define PTE_PS          0x080UL    // Page Size (1GB/2MB)
-#define PTE_G           0x100UL    // Global
-#define PTE_NX          (1UL << 63) // No Execute
+/* Page-table entry flags.  The low twelve bits have the i386 meanings. */
+#define PTE_P           0x001ULL    // Present
+#define PTE_W           0x002ULL    // Writeable
+#define PTE_U           0x004ULL    // User-accessible
+#define PTE_PWT         0x008ULL    // Write-Through
+#define PTE_PCD         0x010ULL    // Cache-Disable
+#define PTE_A           0x020ULL    // Accessed
+#define PTE_D           0x040ULL    // Dirty
+#define PTE_PAT         0x080ULL    // PAT index bit for 4KB PTEs
+#define PTE_PS          0x080ULL    // Page Size (2MB PDEs, 1GB PDPTEs)
+#define PTE_G           0x100ULL    // Global
+#define PTE_NX          (1ULL << 63) // No Execute
 
-// VM Protection Flags
+/* Physical frame of an entry: bits 12-51. */
+#define PTE_FRAME       0x000FFFFFFFFFF000ULL
+
+typedef uint64_t pt_entry_t;
+
+typedef struct pmap *pmap_t;
+extern pmap_t curpmap;
+
+// Per-pmap statistics
+struct pmap_stats {
+    uint32_t faults;               // Total page faults
+    uint32_t cow_faults;           // COW page faults
+    uint32_t zero_fills;           // Zero-fill page faults
+    uint32_t protection_upgrades;  // Protection upgrades (read→write)
+    uint32_t protection_downgrades; // Protection downgrades (write→read)
+    uint32_t cow_pages_mapped;     // Total pages initially shared as COW
+    uint32_t cow_duplications;     // Pages physically duplicated during COW
+    uint32_t pages_saved_by_cow;   // Pages never duplicated (process exited clean)
+    uint32_t tlb_invlpg_count;     // Single-page TLB invalidations (invlpg)
+    uint32_t tlb_full_flush_count; // Full TLB flushes (CR3 reload)
+    uint32_t total_pmaps;          // Current number of allocated pmaps
+    uint32_t active_pmaps;         // Unique pmaps referenced by live threads
+};
+
+int sys_pmap_stats(struct pmap_stats *out);
+
+struct pmap_list_entry {
+    struct pmap *next;
+    struct pmap *prev;
+};
+
+struct pmap {
+    pt_entry_t *pml4;           // Direct-map pointer to the PML4
+    uint64_t pml4_phys;         // Its physical address: the CR3 value
+    int ref_count;              // References (for COW sharing)
+    uint32_t resident_count;    // Count of resident pages in this pmap
+    uint32_t wired_count;       // Count of wired (unpageable) pages
+    uint32_t mapped_count;      // Count of mapped pages/slots in this pmap
+    struct pmap_stats stats;    // Per-pmap statistics
+    volatile int lock;          // Spinlock for SMP safety
+    uint16_t asid;              // Address Space ID (future PCID)
+    struct pmap_list_entry list_entry;  // Global pmap list
+};
+
+// Initialization
+void pmap_bootstrap(void);
+
+// Address Space Management
+pmap_t pmap_create(void);
+void pmap_destroy(pmap_t pmap);
+void pmap_activate(pmap_t pmap);
+pmap_t pmap_kernel(void);
+uint32_t pmap_resident_count(pmap_t pmap);
+void pmap_reference(pmap_t pmap);
+void pmap_release(pmap_t pmap);
+pmap_t pmap_fork(pmap_t src_pmap);
+void pmap_share_range(pmap_t pmap, uintptr_t start, uintptr_t end);
+void pmap_growkernel(uintptr_t va);
+
+// Mapping Operations.  Return 0 on success, < 0 on error.
+int pmap_enter(pmap_t pmap, uintptr_t va, uintptr_t pa, uint32_t prot, uint32_t flags);
+int pmap_enter_batch(pmap_t pmap, uintptr_t va_start, int count, uintptr_t *pa_list, uint32_t prot, uint32_t flags);
+int pmap_enter_large(pmap_t pmap, uintptr_t va, uintptr_t pa, uint32_t prot, uint32_t flags);
+void pmap_remove(pmap_t pmap, uintptr_t va);
+void pmap_remove_range(pmap_t pmap, uintptr_t sva, uintptr_t eva);
+void pmap_fork_clear_range(pmap_t pmap, uintptr_t sva, uintptr_t eva);
+uintptr_t pmap_extract(pmap_t pmap, uintptr_t va);
+size_t pmap_copyin_other(pmap_t pmap, uintptr_t uva, void *dst, size_t len);
+size_t pmap_copyout_other(pmap_t pmap, uintptr_t uva, const void *src, size_t len);
+
+// Protection flags for pmap_enter
 #define VM_PROT_READ    0x01
 #define VM_PROT_WRITE   0x02
 #define VM_PROT_EXEC    0x04
 #define VM_PROT_USER    0x08
 #define VM_PROT_ALL     (VM_PROT_READ|VM_PROT_WRITE|VM_PROT_EXEC|VM_PROT_USER)
 
-// KERNEL_BASE for x86_64 is typically -2GB
-#define KERNEL_BASE     0xFFFFFFFF80000000UL
+// Kernel-only fast paths
+void pmap_kenter(uintptr_t va, uintptr_t pa);
+void pmap_kremove(uintptr_t va);
 
-// Number of entries in each level
-#define NPTE_LEVEL      512
+// Protection and copying
+int pmap_protect(pmap_t pmap, uintptr_t sva, uintptr_t eva, uint32_t prot);
+int pmap_copy(pmap_t dst_pmap, pmap_t src_pmap, uintptr_t sva, uintptr_t eva, int cow);
+int pmap_page_is_cow(pmap_t pmap, uintptr_t va);
 
-// Address masking
-#define PTE_ADDR_MASK   0x000FFFFFFFFFF000UL
+void pmap_copy_page(uintptr_t src_pa, uintptr_t dst_pa);
+void pmap_zero_page(uintptr_t pa);
 
-typedef uint64_t pml4e_t;
-typedef uint64_t pdpte_t;
-typedef uint64_t pde_t;
-typedef uint64_t pte_t;
-
-// Recursive Paging Virtual Addresses (based on index 510 - 0x1FE)
-// Slot 510 (0xFFFF_FF00_0000_0000) covers the recursive mapping
-#define RECURSIVE_SLOT  510UL
-
-// Sign-extended base for slot 510: 0xFFFFFF0000000000
-#define PG_V_PT     0xFFFFFF0000000000UL
-#define PG_V_PD     0xFFFFFF8000000000UL
-#define PG_V_PDPT   0xFFFFFFC000000000UL
-#define PG_V_PML4   0xFFFFFFE000000000UL
-
-/*
- * To access:
- * PML4[i]:          PG_V_PML4 + (i * 8)
- * PDPT[i][j]:       PG_V_PDPT + (i * 4096) + (j * 8)  => PG_V_PDPT + (i << 12) + (j*8)
- * PD[i][j][k]:      PG_V_PD + (i << 21) + (j << 12) + (k*8)
- * PT[i][j][k][l]:   PG_V_PT + ...
- */
-
-// Macros for accessing page tables
-#define V_PML4_INDEX(i)        ((pml4e_t *)(PG_V_PML4 + ((uint64_t)(i) * 8)))
-#define V_PDPT_INDEX(i, j)     ((pdpte_t *)(PG_V_PDPT + ((uint64_t)(i) << 12) + ((uint64_t)(j) * 8)))
-#define V_PD_INDEX(i,j,k)      ((pde_t *)(PG_V_PD + ((uint64_t)(i) << 21) + ((uint64_t)(j) << 12) + ((uint64_t)(k) * 8)))
-#define V_PT_INDEX(i,j,k,l)    ((pte_t *)(PG_V_PT + ((uint64_t)(i) << 30) + ((uint64_t)(j) << 21) + ((uint64_t)(k) << 12) + ((uint64_t)(l) * 8)))
-
-// Simplified access assuming we know the VA parts
-#define V_PML4       ((pml4e_t *)PG_V_PML4)
-// These take indices into PML4/PDPT/PD
-#define V_PDPT(pml4i)       V_PDPT_INDEX(pml4i, 0) // Points to base of PDPT page for pml4i? Warning: This must return a page-aligned pointer to the table? 
-
-#define PML4_INDEX(va)  (((va) >> 39) & 0x1FF)
-#define PDPT_INDEX(va)  (((va) >> 30) & 0x1FF)
-#define PD_INDEX(va)    (((va) >> 21) & 0x1FF)
-#define PT_INDEX(va)    (((va) >> 12) & 0x1FF)
-
-// PMAP handle
-// Breakdown of pmap statistics
-struct pmap_stats {
-    uint64_t faults;
-    uint64_t cow_faults;
-    uint64_t zero_fills;
-    uint64_t cow_pages_mapped;
-    uint64_t protection_upgrades;
-    uint64_t protection_downgrades;
-};
-
-// PMAP handle
-struct pmap {
-    pml4e_t *pml4;         // Virtual address of PML4
-    uint64_t pml4_phys;    // Physical address of PML4
-    
-    int ref_count;         // Reference count (for COW/sharing)
-    int resident_count;    // Resident page count
-    int wired_count;       // Wired page count
-    
-    struct pmap_stats stats; // Per-pmap statistics
-    
-    int lock;              // SMP lock
-    int asid;              // Address Space ID
-    
-    TAILQ_ENTRY(pmap) list_entry; // Global pmap list
-};
-typedef struct pmap *pmap_t;
-
-// Global pmap list
-TAILQ_HEAD(pmap_list, pmap);
-extern struct pmap_list global_pmap_list;
-extern spinlock_t pmap_list_lock;
-
-// Initialization
-void pmap_init(void);
-pmap_t pmap_kernel(void);
-
-// Mapping Operations
-int pmap_enter(pmap_t pmap, uint64_t va, uint64_t pa, uint64_t prot, uint32_t flags);
-void pmap_remove(pmap_t pmap, uint64_t va);
-uint64_t pmap_extract(pmap_t pmap, uint64_t va);
-int pmap_protect(pmap_t pmap, uint64_t sva, uint64_t eva, uint64_t prot);
-
-// Per-pmap management
-pmap_t pmap_create(void);
-void pmap_destroy(pmap_t pmap);
-void pmap_activate(pmap_t pmap);
-void pmap_reference(pmap_t pmap);
-
-// Page reference/modification tracking
-int pmap_is_referenced(pmap_t pmap, uint64_t va);
-int pmap_is_modified(pmap_t pmap, uint64_t va);
-void pmap_clear_reference(pmap_t pmap, uint64_t va);
-void pmap_clear_modify(pmap_t pmap, uint64_t va);
-int pmap_is_referenced_range(pmap_t pmap, uint64_t sva, uint64_t eva);
-int pmap_is_modified_range(pmap_t pmap, uint64_t sva, uint64_t eva);
-int pmap_test_and_clear_reference(pmap_t pmap, uint64_t va);
-int pmap_test_and_clear_modify(pmap_t pmap, uint64_t va);
-
-// TLB invalidation
-void pmap_invalidate_page(uint64_t va);
-
-// Copy-on-Write support
-pmap_t pmap_fork(pmap_t src_pmap);
-int pmap_page_is_cow(pmap_t pmap, uint64_t va);
-void pmap_release(pmap_t pmap);
-
-// TLB shootdown for SMP
+void pmap_invalidate_page(uintptr_t va);
 void pmap_invalidate_all(void);
-void pmap_shootdown_handler(void);
-void pmap_shootdown_page(uint64_t va);
-void pmap_shootdown_range(uint64_t va, uint64_t len);
+void pmap_flush_global_pages(void);
+
+void pmap_shootdown_page(uintptr_t va);
+void pmap_shootdown_range(uintptr_t va, uint32_t len);
 void pmap_shootdown_all(void);
-void pmap_shootdown_defer(uint64_t va);
+void pmap_shootdown_handler(void);
+void pmap_shootdown_defer(uintptr_t va);
 void pmap_shootdown_commit(void);
-void pmap_shootdown_wait(int expected_cpus);
+void pmap_shootdown_wait(uint32_t gen);
 
-// Large page support (2MB/1GB)
-int cpuid_check_1gb_pages(void);
-int pmap_enter_2mb(pmap_t pmap, uint64_t va, uint64_t pa, uint64_t prot, uint32_t flags);
-int pmap_enter_1gb(pmap_t pmap, uint64_t va, uint64_t pa, uint64_t prot, uint32_t flags);
-void pmap_remove_2mb(pmap_t pmap, uint64_t va);
-void pmap_remove_1gb(pmap_t pmap, uint64_t va);
+int pmap_is_referenced_range(pmap_t pmap, uintptr_t sva, uintptr_t eva);
+int pmap_is_referenced(pmap_t pmap, uintptr_t va);
+int pmap_is_modified(pmap_t pmap, uintptr_t va);
+void pmap_clear_reference(pmap_t pmap, uintptr_t va);
+void pmap_clear_modify(pmap_t pmap, uintptr_t va);
+int pmap_is_modified_range(pmap_t pmap, uintptr_t sva, uintptr_t eva);
 
-// Global page support (PGE)
-int cpuid_check_pge(void);
-void pmap_pge_enable(void);
-void pmap_pge_disable(void);
-int pmap_set_global(pmap_t pmap, uint64_t va);
-int pmap_clear_global(pmap_t pmap, uint64_t va);
-void pmap_invalidate_global(void);
-void pmap_mark_kernel_global(pmap_t pmap, uint64_t sva, uint64_t eva);
+struct vm_page;
+int pmap_page_is_referenced(struct vm_page *m);
+void pmap_page_clear_reference(struct vm_page *m);
+int pmap_test_and_clear_ref(struct vm_page *m);
+int pmap_test_and_clear_modify(struct vm_page *m);
+void pmap_track_access(struct vm_page *m);
+void pmap_track_modify(struct vm_page *m, uint32_t current_time);
 
-// PCID support (Process Context Identifiers)
-int cpuid_check_pcid(void);
-int cpuid_check_invpcid(void);
-void pmap_pcid_enable(void);
-int pmap_pcid_alloc(pmap_t pmap);
-void pmap_pcid_free(pmap_t pmap);
-void pmap_activate_pcid(pmap_t pmap, int noflush);
-void pmap_invpcid(int type, int pcid, uint64_t va);
-void pmap_invpcid_single(uint64_t va);
-void pmap_invpcid_context(int pcid);
-void pmap_invpcid_all(void);
-void pmap_invpcid_all_global(void);
+void pmap_dump(pmap_t pmap);
+int pmap_check(pmap_t pmap);
 
-/* Boot page table (boot.S) */
-extern uint64_t boot_pml4[];
+void pmap_null_protect(void);
+void pmap_null_allow(int enable);
 
-#endif
+void pmap_map_trampoline(void);
+
+int pmap_fault(uint32_t err_code, uintptr_t cr2);
+
+#define TLB_BATCH_THRESHOLD 32
+
+extern uint64_t pmap_destroy_anon_freed;
+extern uint64_t pmap_destroy_anon_skipped;
+extern uint64_t pmap_destroy_skip_obj;
+extern uint64_t pmap_destroy_skip_wired;
+extern uint64_t pmap_destroy_skip_refcnt;
+extern uint64_t pmap_create_calls;
+extern uint64_t pmap_destroy_calls;
+extern uint64_t pmap_destroy_anon_rc0;
+extern uint64_t pmap_destroy_anon_rc2;
+extern uint64_t pmap_destroy_anon_rc_big;
+
+#endif /* _ARCH_X86_64_PMAP_H */

@@ -168,7 +168,7 @@ void openbsd_sendsig(void *handler, int sig, uint32_t mask, uint32_t flags, void
     frame.sf_sig = native_to_openbsd_signo(sig);
     frame.sf_code = 0;
     frame.sf_scp = esp + offsetof(struct openbsd_sigframe, sf_sc);
-    frame.sf_handler = (uint32_t)handler;
+    frame.sf_handler = (uint32_t)(uintptr_t)handler;
 
     frame.sf_sc.sc_eip = regs->eip;
     frame.sf_sc.sc_eax = regs->eax;
@@ -194,12 +194,12 @@ void openbsd_sendsig(void *handler, int sig, uint32_t mask, uint32_t flags, void
     }
 
     regs->useresp = esp;
-    regs->eip = (uint32_t)handler;
+    regs->eip = (uint32_t)(uintptr_t)handler;
 }
 
 int openbsd_sys_sigreturn(void *regs_ptr) {
     registers_t *regs = (registers_t *)regs_ptr;
-    struct openbsd_sigcontext *scp_user = (struct openbsd_sigcontext *)regs->ebx;
+    struct openbsd_sigcontext *scp_user = (struct openbsd_sigcontext *)(uintptr_t)regs->ebx;
 
     struct openbsd_sigcontext sc;
     if (copyin(scp_user, &sc, sizeof(sc)) != 0) return -1;

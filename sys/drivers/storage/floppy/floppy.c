@@ -11,7 +11,7 @@
 #include <kern/resource.h>
 #include <kern/sched.h>
 #include <kern/time.h>
-#include <rtc.h>
+#include <arch/x86-common/rtc.h>
 #include <sys/copy.h>
 #include <sys/errno.h>
 #include <sys/floppy.h>

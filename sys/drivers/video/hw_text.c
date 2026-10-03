@@ -34,7 +34,7 @@ static inline void intr_restore(uint32_t flags) { (void)flags; }
 #include <sys/vtio.h>
 
 int hw_text_active = 0;
-static uint16_t *vga_buffer = (uint16_t *)0xC00B8000;
+static uint16_t *vga_buffer = (uint16_t *)P2V(0xB8000);
 static spinlock_t hw_text_lock = SPINLOCK_INIT("hw_text");
 static vt_state_t *current_vt_ctx = NULL;
 static int hw_text_cols = VT_DEFAULT_WIDTH;
@@ -47,7 +47,7 @@ static uint32_t hw_text_cursor_blink_ticks = 0;
 
 #define HW_TEXT_STATUS_COLOR 0x70
 #define HW_TEXT_VRAM_CELLS   16384U
-#define VGA_FONT_MEM_BASE ((volatile uint8_t *)(uintptr_t)0xC00A0000)
+#define VGA_FONT_MEM_BASE ((volatile uint8_t *)P2V(0xA0000))
 
 static void hw_text_write_crtc(uint8_t index, uint8_t value);
 

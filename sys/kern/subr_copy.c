@@ -51,6 +51,17 @@ int validate_user_addr(const void *addr, size_t size) {
 }
 
 /*
+ * current_thread->on_fault is pointer-wide: store it with the matching
+ * move.  On x86_64 the kernel code model guarantees a kernel address fits
+ * movq's sign-extended 32-bit immediate.
+ */
+#ifdef SUBSTRATE_ARCH_X86_64
+#define COPY_MOVP "movq"
+#else
+#define COPY_MOVP "movl"
+#endif
+
+/*
  * copyout - Copy data from kernel space to user space
  *
  * Safely copies 'size' bytes from kernel buffer 'src' to user-space
@@ -83,16 +94,16 @@ int copyout(const void *src, void *dst, size_t size) {
     int result;
     __asm__ volatile (
         /* Set on_fault = label 1f */
-        "movl $1f, (%[on_fault])\n\t"
+        COPY_MOVP " $1f, (%[on_fault])\n\t"
         "cld\n\t"
         "rep movsb\n\t"
         /* Success: clear on_fault, result = 0, jump past fault path */
-        "movl $0, (%[on_fault])\n\t"
+        COPY_MOVP " $0, (%[on_fault])\n\t"
         "xorl %[result], %[result]\n\t"
         "jmp 2f\n"
         "1:\n\t"
         /* Fault: clear on_fault, result = EFAULT */
-        "movl $0, (%[on_fault])\n\t"
+        COPY_MOVP " $0, (%[on_fault])\n\t"
         "movl %[efault], %[result]\n"
         "2:\n\t"
         : "+S"(src), "+D"(dst), "+c"(size), [result] "=&r"(result)
@@ -122,14 +133,14 @@ int copyin(const void *src, void *dst, size_t size) {
     /* See copyout() for why the fault label is embedded in the asm. */
     int result;
     __asm__ volatile (
-        "movl $1f, (%[on_fault])\n\t"
+        COPY_MOVP " $1f, (%[on_fault])\n\t"
         "cld\n\t"
         "rep movsb\n\t"
-        "movl $0, (%[on_fault])\n\t"
+        COPY_MOVP " $0, (%[on_fault])\n\t"
         "xorl %[result], %[result]\n\t"
         "jmp 2f\n"
         "1:\n\t"
-        "movl $0, (%[on_fault])\n\t"
+        COPY_MOVP " $0, (%[on_fault])\n\t"
         "movl %[efault], %[result]\n"
         "2:\n\t"
         : "+S"(src), "+D"(dst), "+c"(size), [result] "=&r"(result)

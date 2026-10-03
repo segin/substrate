@@ -34,6 +34,11 @@ SECTIONS
 	}
 	_load_end = .;
 
+	/* The i386 kernel frees its boot-only code after boot
+	 * (pmm_reclaim_setup); this one has none, so the range is empty. */
+	_setup_start = .;
+	_setup_end = .;
+
 	.bss ALIGN(4096) (NOLOAD) : AT(ADDR(.bss) - KERNEL_VMA) {
 		*(.bss.boot)
 		*(.bss .bss.*)

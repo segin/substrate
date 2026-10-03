@@ -213,13 +213,13 @@ void netbsd_sendsig(void *handler, int sig, uint32_t mask, uint32_t flags, void 
     }
 
     regs->useresp = esp;
-    regs->eip = (uint32_t)handler;
+    regs->eip = (uint32_t)(uintptr_t)handler;
 }
 
 int netbsd_sys_sigreturn(void *regs_ptr) {
     registers_t *regs = (registers_t *)regs_ptr;
     /* The trampoline loaded EBX with the ucontext_t pointer (sf_ucp). */
-    struct netbsd_ucontext_sig *ucp = (struct netbsd_ucontext_sig *)regs->ebx;
+    struct netbsd_ucontext_sig *ucp = (struct netbsd_ucontext_sig *)(uintptr_t)regs->ebx;
 
     struct netbsd_ucontext_sig uc;
     if (copyin(ucp, &uc, sizeof(uc)) != 0) return -1;

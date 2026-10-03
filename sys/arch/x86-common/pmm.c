@@ -633,9 +633,7 @@ void pmm_walk_mmap(uint32_t mmap_addr, uint32_t mmap_length, pmm_region_callback
 
     /* A physical address (what multiboot passes) is reached through the
      * direct map; an i386 caller may already have translated it. */
-    const uint8_t *map_start = (uintptr_t)mmap_addr >= KERNEL_VA_START
-        ? (const uint8_t *)(uintptr_t)mmap_addr
-        : (const uint8_t *)P2V(mmap_addr);
+    const uint8_t *map_start = (const uint8_t *)P2V(pmm_virt_to_phys(mmap_addr));
     const uint8_t *map_end = map_start + mmap_length;
     const uint8_t *ptr = map_start;
     

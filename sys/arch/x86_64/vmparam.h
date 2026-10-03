@@ -38,4 +38,10 @@ static inline uintptr_t vmparam_kva_to_phys(uintptr_t va) {
 #define P2V(x) ((void *)((uintptr_t)(x) + DMAP_BASE))
 #define V2P(x) vmparam_kva_to_phys((uintptr_t)(x))
 
+/* Where the kernel reaches a chipset MMIO page (the LAPIC, an IOAPIC):
+ * through the direct map, which covers the first 4 GiB.  VA == PA would be
+ * user space here.  The MTRRs keep that hole uncached under the map's
+ * write-back PTEs. */
+#define MMIO_KVA(pa) ((uintptr_t)P2V(pa))
+
 #endif

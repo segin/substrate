@@ -352,7 +352,7 @@ static int input_poll(fs_node_t *node, void *waiter) {
     return events;
 }
 
-static uint32_t input_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
+static size_t input_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
     (void)node;
     if (size < sizeof(input_event_t)) return 0;
 
@@ -396,14 +396,14 @@ static uint32_t input_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t
             kprint("input: event ring overflow -- pointer motion dropped\n");
         if (current_seq < snap) break;
 
-        if (nonblock) return (uint32_t)-EAGAIN;
+        if (nonblock) return (size_t)-EAGAIN;
 
         /* Pre-sleep signal check — don't park if a fatal signal is
          * already pending or we'll wedge waiting for an event that
          * may never come.  Same race-free pattern as tty_read. */
         if (current_thread &&
             (current_thread->sig_pending & ~current_thread->sig_mask)) {
-            return (uint32_t)-EINTR;
+            return (size_t)-EINTR;
         }
 
         /* Mark the sleep interruptible so psignal() will kick us out
@@ -425,7 +425,7 @@ static uint32_t input_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t
          * we have — but for this path we haven't read anything yet). */
         if (current_thread &&
             (current_thread->sig_pending & ~current_thread->sig_mask)) {
-            return (uint32_t)-EINTR;
+            return (size_t)-EINTR;
         }
     }
 

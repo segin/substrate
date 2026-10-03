@@ -1,5 +1,8 @@
 /*
- * idt.h - x86_64 Interrupt Descriptor Table
+ * idt.h - x86_64 interrupt descriptor table and trap frame
+ *
+ * The interface matches arch/i386/idt.h, so the machine-independent trap,
+ * signal, ptrace and personality code works on either kernel.
  */
 
 #ifndef _ARCH_X86_64_IDT_H
@@ -7,148 +10,122 @@
 
 #include <stdint.h>
 
-/* IDT entry (16 bytes in Long Mode) */
-struct idt_entry {
-    uint16_t offset_low;      /* Target RIP bits 0-15 */
-    uint16_t selector;        /* Code segment selector */
-    uint8_t  ist;             /* IST index (bits 0-2), reserved (bits 3-7) */
-    uint8_t  type_attr;       /* Type and attributes */
-    uint16_t offset_mid;      /* Target RIP bits 16-31 */
-    uint32_t offset_high;     /* Target RIP bits 32-63 */
-    uint32_t reserved;        /* Must be zero */
+/* IDT entry: 16 bytes in long mode. */
+struct idt_entry_struct {
+    uint16_t base_low;      /* handler bits 0-15 */
+    uint16_t sel;           /* code segment selector */
+    uint8_t  ist;           /* IST index (bits 0-2) */
+    uint8_t  flags;         /* type and attributes */
+    uint16_t base_mid;      /* handler bits 16-31 */
+    uint32_t base_high;     /* handler bits 32-63 */
+    uint32_t reserved;
 } __attribute__((packed));
 
-/* IDT pointer */
-struct idt_ptr {
+typedef struct idt_entry_struct idt_entry_t;
+
+struct idt_ptr_struct {
     uint16_t limit;
     uint64_t base;
 } __attribute__((packed));
 
-/* Gate types */
-#define IDT_INTERRUPT_GATE  0x8E    /* DPL=0, P=1, Type=1110 (interrupt) */
-#define IDT_TRAP_GATE       0x8F    /* DPL=0, P=1, Type=1111 (trap) */
-#define IDT_USER_INT_GATE   0xEE    /* DPL=3, P=1, Type=1110 (user callable) */
+typedef struct idt_ptr_struct idt_ptr_t;
+extern idt_ptr_t idt_ptr;
 
-/* Maximum IDT entries */
-#define IDT_ENTRIES 256
-/*
- * Interrupt vectors
- */
+/* Type 0xE is the 64-bit interrupt gate in long mode. */
+#define IDT_FLAG_PRESENT        0x80
+#define IDT_FLAG_DPL3           0x60
+#define IDT_FLAG_INT32_GATE     0x0E
+#define IDT_FLAG_USER_INT_GATE  (IDT_FLAG_PRESENT | IDT_FLAG_DPL3 | IDT_FLAG_INT32_GATE)
 
-/* CPU Exceptions (0-31) */
-#define INT_DIVIDE_ERROR    0
-#define INT_DEBUG           1
-#define INT_NMI             2
-#define INT_BREAKPOINT      3
-#define INT_OVERFLOW        4
-#define INT_BOUND_RANGE     5
-#define INT_INVALID_OPCODE  6
-#define INT_DEVICE_NA       7
-#define INT_DOUBLE_FAULT    8
-#define INT_COPROCESSOR     9
-#define INT_INVALID_TSS     10
-#define INT_SEGMENT_NP      11
-#define INT_STACK_SEGMENT   12
-#define INT_GPF             13
-#define INT_PAGE_FAULT      14
-#define INT_RESERVED15      15
-#define INT_X87_FP          16
-#define INT_ALIGNMENT       17
-#define INT_MACHINE_CHECK   18
-#define INT_SIMD_FP         19
-#define INT_VIRTUALIZATION  20
-#define INT_CONTROL_PROT    21
+/* Interrupt stack table slots in the TSS (gdt.c). */
+#define IST_NONE    0
+#define IST_NMI     1
+#define IST_DF      2
+#define IST_MC      3
 
-/* Hardware IRQs (remapped to 32-47) */
-#define IRQ_BASE            32
-#define IRQ_TIMER           (IRQ_BASE + 0)
-#define IRQ_KEYBOARD        (IRQ_BASE + 1)
-#define IRQ_CASCADE         (IRQ_BASE + 2)
-#define IRQ_COM2            (IRQ_BASE + 3)
-#define IRQ_COM1            (IRQ_BASE + 4)
-#define IRQ_LPT2            (IRQ_BASE + 5)
-#define IRQ_FLOPPY          (IRQ_BASE + 6)
-#define IRQ_LPT1            (IRQ_BASE + 7)
-#define IRQ_RTC             (IRQ_BASE + 8)
-#define IRQ_ACPI            (IRQ_BASE + 9)
-#define IRQ_FREE1           (IRQ_BASE + 10)
-#define IRQ_FREE2           (IRQ_BASE + 11)
-#define IRQ_MOUSE           (IRQ_BASE + 12)
-#define IRQ_FPU             (IRQ_BASE + 13)
-#define IRQ_ATA_PRIMARY     (IRQ_BASE + 14)
-#define IRQ_ATA_SECONDARY   (IRQ_BASE + 15)
-
-/* APIC vectors */
-#define IRQ_APIC_BASE       48
-#define IRQ_APIC_TIMER      (IRQ_APIC_BASE + 0)
-#define IRQ_APIC_SPURIOUS   0xFF
-
-/* Syscall vector (Linux compat) */
-#define INT_SYSCALL         0x80
-
-/* TLB shootdown IPI */
-#define INT_TLB_SHOOTDOWN   0xFC
-
-/*
- * Interrupt frame pushed by hardware/ISR stub
- */
-struct interrupt_frame {
-    /* Pushed by ISR stub */
-    uint64_t r15, r14, r13, r12;
-    uint64_t r11, r10, r9, r8;
-    uint64_t rbp, rdi, rsi, rdx, rcx, rbx, rax;
-    uint64_t int_no;
-    uint64_t err_code;
-    
-    /* Pushed by hardware */
-    uint64_t rip;
-    uint64_t cs;
-    uint64_t rflags;
-    uint64_t rsp;
-    uint64_t ss;
-} __attribute__((packed));
-
-/*
- * IDT gate types for dynamic registration
- */
-#define IDT_TYPE_INT        0x8E    /* Interrupt gate (DPL=0) */
-#define IDT_TYPE_TRAP       0x8F    /* Trap gate (DPL=0) */
-#define IDT_TYPE_USER_INT   0xEE    /* Interrupt gate (DPL=3) */
-
-/*
- * Functions
- */
-
-/* Initialize IDT */
 void idt_init(void);
+void idt_set_gate(uint8_t num, uintptr_t base, uint16_t sel, uint8_t flags);
+void idt_set_gate_ist(uint8_t num, uintptr_t base, uint16_t sel, uint8_t flags,
+                      uint8_t ist);
+void idt_flush(uintptr_t idt_ptr_addr);
+const char *idt_exception_name(unsigned int vector);
 
-/* Register a handler for a specific vector */
-void idt_set_handler(int vector, uint64_t handler, uint8_t type);
+/* Entry stubs (isr.S). */
+extern void isr0(void);  extern void isr1(void);  extern void isr2(void);
+extern void isr3(void);  extern void isr4(void);  extern void isr5(void);
+extern void isr6(void);  extern void isr7(void);  extern void isr8(void);
+extern void isr9(void);  extern void isr10(void); extern void isr11(void);
+extern void isr12(void); extern void isr13(void); extern void isr14(void);
+extern void isr15(void); extern void isr16(void); extern void isr17(void);
+extern void isr18(void); extern void isr19(void); extern void isr20(void);
+extern void isr21(void); extern void isr22(void); extern void isr23(void);
+extern void isr24(void); extern void isr25(void); extern void isr26(void);
+extern void isr27(void); extern void isr28(void); extern void isr29(void);
+extern void isr30(void); extern void isr31(void);
 
-/* Enable/disable interrupts */
-void idt_enable(void);
-void idt_disable(void);
+/* Legacy 8259 IRQs 0-15 at vectors 32-47. */
+extern void isr32(void); extern void isr33(void); extern void isr34(void);
+extern void isr35(void); extern void isr36(void); extern void isr37(void);
+extern void isr38(void); extern void isr39(void); extern void isr40(void);
+extern void isr41(void); extern void isr42(void); extern void isr43(void);
+extern void isr44(void); extern void isr45(void); extern void isr46(void);
+extern void isr47(void);
 
-/* Get exception name for debugging */
-const char *idt_exception_name(int vector);
+extern void isr128(void);   /* int $0x80: the i386 system-call gate */
+extern void isr253(void);   /* SCHED_IPI_VECTOR */
+extern void isr254(void);   /* TLB_SHOOTDOWN_VECTOR */
+extern void isr_panic_ipi(void);
+extern void isr_spurious(void);
 
-/* Exception handler stubs (isr.S) */
-void isr0(void);  void isr1(void);  void isr2(void);  void isr3(void);
-void isr4(void);  void isr5(void);  void isr6(void);  void isr7(void);
-void isr8(void);  void isr9(void);  void isr10(void); void isr11(void);
-void isr12(void); void isr13(void); void isr14(void); void isr15(void);
-void isr16(void); void isr17(void); void isr18(void); void isr19(void);
-void isr20(void); void isr21(void); void isr22(void); void isr23(void);
-void isr24(void); void isr25(void); void isr26(void); void isr27(void);
-void isr28(void); void isr29(void); void isr30(void); void isr31(void);
+/* Entry points for the dynamic (MSI) vector stubs 0x50..0xBF, indexed by
+ * (vector - IRQ_VECTOR_FIRST). */
+extern void *msi_isr_stubs[];
 
-/* IRQ handler stubs (irq.S) */
-void irq0(void);  void irq1(void);  void irq2(void);  void irq3(void);
-void irq4(void);  void irq5(void);  void irq6(void);  void irq7(void);
-void irq8(void);  void irq9(void);  void irq10(void); void irq11(void);
-void irq12(void); void irq13(void); void irq14(void); void irq15(void);
+/*
+ * Trap frame, as built by isr.S: lowest address first.
+ *
+ * Every slot is 64 bits.  The registers a 32-bit (compatibility-mode)
+ * process has carry their i386 names as well, overlaying the low half, so
+ * code written against arch/i386/idt.h -- regs->eax, regs->eip,
+ * regs->useresp -- reads and writes a 32-bit process's registers
+ * unchanged.  Writing the 32-bit name leaves the high half alone, which a
+ * compatibility-mode process cannot see.  Kernel-mode addresses (a fault
+ * inside the kernel, on_fault recovery) need the full 64-bit names; use
+ * TF_PC() and TF_SET_PC(), which work on both kernels.
+ */
+#define TF_REG(r64, r32) union { uint64_t r64; uint32_t r32; }
 
-/* Syscall vector (isr.S) */
-void isr128(void);
+typedef struct registers {
+    TF_REG(gs64, gs);               /* selectors, saved by isr.S */
+    TF_REG(fs64, fs);
+    TF_REG(es64, es);
+    TF_REG(ds64, ds);
+    uint64_t r15, r14, r13, r12, r11, r10, r9, r8;
+    TF_REG(rdi, edi);               /* the i386 pusha order */
+    TF_REG(rsi, esi);
+    TF_REG(rbp, ebp);
+    TF_REG(rsp_unused, esp);        /* placeholder for pusha's ESP slot */
+    TF_REG(rbx, ebx);
+    TF_REG(rdx, edx);
+    TF_REG(rcx, ecx);
+    TF_REG(rax, eax);
+    uint64_t int_no, err_code;
+    TF_REG(rip, eip);               /* pushed by the processor */
+    TF_REG(cs64, cs);
+    TF_REG(rflags, eflags);
+    TF_REG(rsp, useresp);
+    TF_REG(ss64, ss);
+} registers_t;
+
+#undef TF_REG
+
+#define TF_PC(r)            ((uintptr_t)(r)->rip)
+#define TF_SET_PC(r, pc)    ((r)->rip = (uint64_t)(uintptr_t)(pc))
+
+void isr_handler(registers_t *regs);
+void syscall_handler(registers_t *regs);
+void signal_handle_pending(registers_t *regs);
+int i386_trap_to_signal(const registers_t *regs, uintptr_t cr2, int *sig,
+                        int *code, uintptr_t *addr);
 
 #endif /* _ARCH_X86_64_IDT_H */
