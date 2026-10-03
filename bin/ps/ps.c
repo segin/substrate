@@ -8,7 +8,7 @@
 #include <sys/sysinfo.h>
 
 static void print_usage(const char *progname) {
-    fprintf(stderr, "usage: %s [auxleb]\n", progname);
+    fprintf(stderr, "usage: %s [auxleb] [-p pidlist] [--ppid pidlist] [-U userlist] [pid ...]\n", progname);
 }
 
 static void format_u32(char *buf, size_t bufsz, uint32_t value) {
@@ -200,15 +200,14 @@ static bool select_row(const ps_row_t *row, const ps_options_t *opts, const sys_
     uid_t self_uid = self->euid ? self->euid : self->uid;
     uid_t row_uid = row->info.euid ? row->info.euid : row->info.uid;
 
-    /* Explicit filters take precedence over the auxleb selection
-     * presets — `ps -p 123` should always show pid 123, regardless
-     * of whether it has a tty or whose uid owns it. */
-    if (opts->pid_filter_n > 0) {
+    /* Explicit selections take precedence over the auxleb presets --
+     * `ps -p 123` shows pid 123 whatever its tty or owner -- and combine
+     * as a union, as in procps: a process matching any list is shown. */
+    if (opts->pid_filter_n > 0 || opts->ppid_filter_n > 0 || opts->uid_filter_n > 0) {
         for (size_t i = 0; i < opts->pid_filter_n; i++)
             if (opts->pid_filter[i] == row->info.pid) return true;
-        return false;
-    }
-    if (opts->uid_filter_n > 0) {
+        for (size_t i = 0; i < opts->ppid_filter_n; i++)
+            if (opts->ppid_filter[i] == row->info.ppid) return true;
         for (size_t i = 0; i < opts->uid_filter_n; i++)
             if ((uid_t)opts->uid_filter[i] == row_uid) return true;
         return false;

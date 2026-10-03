@@ -20,21 +20,24 @@
 #include "getopt.h"
 #include "ps_impl.h"
 
-/* Parse a comma-separated PID list ("123,456,789") into out[].
- * Returns the count written, or -1 on syntax error / overflow. */
-static int parse_pid_list(const char *s, int *out, size_t cap) {
-    size_t n = 0;
-    while (*s) {
+/* Append a PID list to out[*n].  procps accepts the entries separated by
+ * commas, blanks or both ("123,456", "123 456"), so both are separators
+ * here.  Returns 0, or -1 on a syntax error, an empty list or overflow. */
+static int parse_pid_list(const char *s, int *out, size_t *n, size_t cap) {
+    size_t added = 0;
+    for (;;) {
+        while (*s == ',' || *s == ' ' || *s == '\t') s++;
+        if (*s == '\0') break;
         char *end = NULL;
         long v = strtol(s, &end, 10);
         if (end == s || v < 0) return -1;
-        if (n >= cap) return -1;
-        out[n++] = (int)v;
+        if (*end != '\0' && *end != ',' && *end != ' ' && *end != '\t') return -1;
+        if (*n >= cap) return -1;
+        out[(*n)++] = (int)v;
+        added++;
         s = end;
-        if (*s == ',') s++;
-        else if (*s != '\0') return -1;
     }
-    return (int)n;
+    return added ? 0 : -1;
 }
 
 /* Parse a comma-separated user list ("root,1000,jdoe") into uids.
@@ -71,10 +74,12 @@ static int parse_user_list(const char *s, int *out, size_t cap) {
 }
 
 /* The BSD cluster letters we accept dashless.  Keep in sync with
- * the optstring below and the man page. */
+ * the optstring below and the man page.  `p` takes the PID list as the
+ * next argument ("ps p 123", "ps up 123"), so it must end the cluster. */
 static int looks_like_bsd_cluster(const char *s) {
     if (!s || s[0] == '\0' || s[0] == '-') return 0;
     for (size_t i = 0; s[i]; i++) {
+        if (s[i] == 'p' && s[i + 1] == '\0') return 1;
         if (!strchr("auxleb", s[i])) return 0;
     }
     return 1;
@@ -102,7 +107,7 @@ int ps_parse_options(int argc, char **argv, ps_options_t *opts, const char **err
     /* Long options.  Use distinct val codes for long-only flags so
      * the short-option switch can route them; reuse the short letter
      * for short/long alias pairs. */
-    enum { OPT_HELP = 0x100, OPT_VERSION, OPT_NO_HEADERS };
+    enum { OPT_HELP = 0x100, OPT_VERSION, OPT_NO_HEADERS, OPT_PPID };
     static const struct option longs[] = {
         {"all",         no_argument,       NULL, 'a'},
         {"user",        no_argument,       NULL, 'u'},
@@ -110,6 +115,8 @@ int ps_parse_options(int argc, char **argv, ps_options_t *opts, const char **err
         {"bitness",     no_argument,       NULL, 'b'},
         {"environment", no_argument,       NULL, 'e'},
         {"pid",         required_argument, NULL, 'p'},
+        {"quick-pid",   required_argument, NULL, 'q'},
+        {"ppid",        required_argument, NULL, OPT_PPID},
         {"User",        required_argument, NULL, 'U'},
         {"no-headers",  no_argument,       NULL, OPT_NO_HEADERS},
         {"help",        no_argument,       NULL, OPT_HELP},
@@ -135,7 +142,7 @@ int ps_parse_options(int argc, char **argv, ps_options_t *opts, const char **err
     opterr = 0; /* we emit our own diagnostics through `*error` */
 
     int c;
-    while ((c = getopt_long(argc, argv, "auxlebp:U:", longs, NULL)) != -1) {
+    while ((c = getopt_long(argc, argv, "auxlebp:q:U:", longs, NULL)) != -1) {
         switch (c) {
         case 'a': opts->flag_a = true; break;
         case 'u': opts->flag_u = true; break;
@@ -143,12 +150,21 @@ int ps_parse_options(int argc, char **argv, ps_options_t *opts, const char **err
         case 'l': opts->flag_l = true; break;
         case 'e': opts->flag_e = true; break;
         case 'b': opts->flag_b = true; break;
-        case 'p': {
-            int n = parse_pid_list(optarg, opts->pid_filter, PS_FILTER_MAX);
-            if (n < 0) { *error = "bad -p PID list"; return -1; }
-            opts->pid_filter_n = (size_t)n;
+        case 'p':
+        case 'q':
+            if (parse_pid_list(optarg, opts->pid_filter, &opts->pid_filter_n,
+                               PS_FILTER_MAX) != 0) {
+                *error = "bad PID list";
+                return -1;
+            }
             break;
-        }
+        case OPT_PPID:
+            if (parse_pid_list(optarg, opts->ppid_filter, &opts->ppid_filter_n,
+                               PS_FILTER_MAX) != 0) {
+                *error = "bad --ppid PID list";
+                return -1;
+            }
+            break;
         case 'U': {
             int n = parse_user_list(optarg, opts->uid_filter, PS_FILTER_MAX);
             if (n < 0) { *error = "bad -U user list"; return -1; }
@@ -161,8 +177,8 @@ int ps_parse_options(int argc, char **argv, ps_options_t *opts, const char **err
         case OPT_HELP:
             *error = NULL;
             fprintf(stdout,
-                "usage: ps [-auxleb] [-p PID,PID,...] [-U USER,USER,...]\n"
-                "          [--no-headers] [--help] [--version]\n");
+                "usage: ps [-auxleb] [-p PIDLIST] [--ppid PIDLIST] [-U USERLIST]\n"
+                "          [--no-headers] [--help] [--version] [PID ...]\n");
             exit(0);
         case OPT_VERSION:
             fprintf(stdout, "ps (Substrate) 1.0\n");
@@ -174,11 +190,13 @@ int ps_parse_options(int argc, char **argv, ps_options_t *opts, const char **err
         }
     }
 
-    /* Trailing non-option arguments aren't accepted yet (no -p PID
-     * support).  Fail loudly rather than silently ignore them. */
-    if (optind < argc) {
-        *error = "unexpected non-option argument";
-        return -1;
+    /* Operands are PIDs, as in procps: "ps 123", "ps 123 456". */
+    for (; optind < argc; optind++) {
+        if (parse_pid_list(argv[optind], opts->pid_filter, &opts->pid_filter_n,
+                           PS_FILTER_MAX) != 0) {
+            *error = "operands must be process IDs";
+            return -1;
+        }
     }
 
     return 0;

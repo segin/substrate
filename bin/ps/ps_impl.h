@@ -6,9 +6,8 @@
 #include <stdint.h>
 #include <sys/sysinfo.h>
 
-/* Maximum entries in -p PID,PID,... and -U user,user,... filters.
- * Keep it modest — anyone wanting more should use scripted ps -A. */
-#define PS_FILTER_MAX 32
+/* Maximum entries in each of the -p / --ppid / -U selection lists. */
+#define PS_FILTER_MAX 256
 
 typedef struct {
     bool flag_a;
@@ -19,10 +18,14 @@ typedef struct {
     bool flag_b;
     bool flag_no_headers;
 
-    /* -p PID[,PID,...] and -U user[,user,...].  Empty arrays mean
-     * "no PID/user filter active" — as in procps semantics. */
+    /* Selection lists, as in procps: -p/-q/--pid/p and bare PID operands,
+     * --ppid, and -U.  Each takes a comma- or blank-separated list, may be
+     * repeated, and accumulates; a process is shown if it matches any
+     * entry of any list.  Empty lists mean "no such selection". */
     int    pid_filter[PS_FILTER_MAX];
     size_t pid_filter_n;
+    int    ppid_filter[PS_FILTER_MAX];
+    size_t ppid_filter_n;
     /* User filter stored both as resolved uid and as the raw token
      * (so we can fall back to a string match if getpwnam misses). */
     int    uid_filter[PS_FILTER_MAX];

@@ -8,10 +8,12 @@
 .Nm
 .Op Ar auxleb
 .Op Fl p Ar pidlist
+.Op Fl \-ppid Ar pidlist
 .Op Fl U Ar userlist
 .Op Fl \-no\-headers
 .Op Fl \-help
 .Op Fl \-version
+.Op Ar pid ...
 .Sh DESCRIPTION
 The
 .Nm
@@ -94,9 +96,26 @@ or
 .Sy ?\&
 appears when the kernel does not yet populate the field.
 This is a Substrate extension.
-.It Fl p Ar pidlist , Fl \-pid Ar pidlist
-Restrict the listing to the comma-separated process IDs in
-.Ar pidlist .
+.It Fl p Ar pidlist , Fl q Ar pidlist , Fl \-pid Ar pidlist , Cm p Ar pidlist
+Restrict the listing to the process IDs in
+.Ar pidlist ,
+whose entries are separated by commas or blanks.
+The option may be repeated; the lists accumulate.
+Operands
+.Pq Ar pid ...
+are the same selection, so
+.Ic ps 1 42
+is
+.Ic ps -p 1,42 .
+The dashless
+.Cm p
+must end its cluster
+.Pq Ic ps up 42 .
+This overrides every preset-based selection rule.
+.It Fl \-ppid Ar pidlist
+Restrict the listing to processes whose parent is in
+.Ar pidlist ,
+in the same list syntax.
 This overrides every preset-based selection rule.
 .It Fl U Ar userlist , Fl \-User Ar userlist
 Restrict the listing to processes owned by users in
@@ -105,6 +124,13 @@ List elements may be numeric UIDs or login names looked up through
 .Xr getpwnam 3 ;
 unknown names are skipped silently.
 This overrides every preset-based selection rule.
+.Pp
+The
+.Fl p ,
+.Fl \-ppid
+and
+.Fl U
+selections combine as a union: a process matching any of them is shown.
 .It Fl \-no\-headers
 Suppress the column header line.
 Useful in scripts.
@@ -239,7 +265,7 @@ Either restriction is dropped by
 .Cm ax
 selects everything.
 Explicit filters
-.Pq Fl p No or Fl U
+.Pq Fl p , Fl \-ppid , Fl U No or Ar pid No operands
 override the preset selection entirely.
 .Sh EXAMPLES
 Show processes attached to the current terminal:
@@ -295,23 +321,20 @@ could not enumerate the active set.
 or
 .Xr calloc 3
 failed to allocate the per-process row buffer.
-.It Sy ps: bad -p PID list
-The argument to
-.Fl p
-contained a non-numeric token or a negative value.
+.It Sy ps: bad PID list , Sy ps: bad --ppid PID list
+The list contained a non-numeric token or a negative value, was empty,
+or overflowed the internal selection array.
 .It Sy ps: bad -U user list
 The argument to
 .Fl U
 overflowed the internal filter array.
-.It Sy ps: unexpected non-option argument
-A trailing positional argument was given.
-Selection by PID requires
-.Fl p ;
-selection by user requires
+.It Sy ps: operands must be process IDs
+An operand was not a list of process IDs.
+Selection by user requires
 .Fl U .
 .It Sy ps: unknown option
 A short option not in
-.Sq auxlebpU
+.Sq auxlebpqU
 or an unrecognized long option was given.
 .El
 .Sh EXIT STATUS

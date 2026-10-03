@@ -50,6 +50,46 @@ static void test_pid_filter(void) {
     char *argv5[] = {"ps", "-p", "1,"};
     assert(ps_parse_options(3, argv5, &opts, &error) == 0);
     assert(opts.pid_filter_n == 1 && opts.pid_filter[0] == 1);
+
+    /* Bare operands are PIDs: "ps 123 456". */
+    char *argv6[] = {"ps", "123", "456"};
+    assert(ps_parse_options(3, argv6, &opts, &error) == 0);
+    assert(opts.pid_filter_n == 2);
+    assert(opts.pid_filter[0] == 123 && opts.pid_filter[1] == 456);
+
+    /* Blank-separated list in one argument, and repeated -p accumulates. */
+    char *argv7[] = {"ps", "-p", "1 2", "-p", "3"};
+    assert(ps_parse_options(5, argv7, &opts, &error) == 0);
+    assert(opts.pid_filter_n == 3);
+    assert(opts.pid_filter[0] == 1 && opts.pid_filter[1] == 2 && opts.pid_filter[2] == 3);
+
+    /* BSD form: "ps p 42" and a cluster ending in p, "ps up 42". */
+    char a8[] = "p";
+    char *argv8[] = {"ps", a8, "42"};
+    assert(ps_parse_options(3, argv8, &opts, &error) == 0);
+    assert(opts.pid_filter_n == 1 && opts.pid_filter[0] == 42);
+    char a9[] = "up";
+    char *argv9[] = {"ps", a9, "42"};
+    assert(ps_parse_options(3, argv9, &opts, &error) == 0);
+    assert(opts.flag_u && opts.pid_filter_n == 1 && opts.pid_filter[0] == 42);
+
+    /* -q is the same selection; options and operands combine. */
+    char *argv10[] = {"ps", "-u", "-q", "5", "6"};
+    assert(ps_parse_options(5, argv10, &opts, &error) == 0);
+    assert(opts.flag_u && opts.pid_filter_n == 2);
+    assert(opts.pid_filter[0] == 5 && opts.pid_filter[1] == 6);
+
+    /* --ppid selects by parent. */
+    char *argv11[] = {"ps", "--ppid", "1,2"};
+    assert(ps_parse_options(3, argv11, &opts, &error) == 0);
+    assert(opts.pid_filter_n == 0 && opts.ppid_filter_n == 2);
+    assert(opts.ppid_filter[0] == 1 && opts.ppid_filter[1] == 2);
+
+    /* A non-numeric operand, and an empty list, are errors. */
+    char *argv12[] = {"ps", "-a", "init"};
+    assert(ps_parse_options(3, argv12, &opts, &error) != 0);
+    char *argv13[] = {"ps", "-p", ","};
+    assert(ps_parse_options(3, argv13, &opts, &error) != 0);
 }
 
 static void test_uid_filter(void) {
