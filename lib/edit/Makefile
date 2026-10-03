@@ -19,36 +19,39 @@ all: clean
 endif
 endif
 
-all: libedit.a $(if $(NATIVE_BUILD),,libedit.so.0)
+all: $(O)libedit.a $(if $(NATIVE_BUILD),,$(O)libedit.so.0)
 
+# $(O) and $(LIBDIR): see Makefile.inc (i386 in place, x86_64 beside it).
 C_SRCS = editline.c readline.c terminal.c history.c signal.c keymap.c tokenizer.c rl_compat.c utf8.c
-OBJS     = $(C_SRCS:.c=.o)
-PIC_OBJS = $(C_SRCS:.c=.pic.o)
+OBJS     = $(C_SRCS:%.c=$(O)%.o)
+PIC_OBJS = $(C_SRCS:%.c=$(O)%.pic.o)
 
-libedit.a: $(OBJS)
+$(O)libedit.a: $(OBJS)
 	$(AR) rcs $@ $^
 
 # libedit needs libc for printf/malloc/etc.  DT_NEEDED must list
 # libc.so.0 so the resolver pulls it in.
-libedit.so.0: $(PIC_OBJS)
+$(O)libedit.so.0: $(PIC_OBJS)
 	$(CC) $(SHLIB_LDFLAGS) -Wl,-soname,libedit.so.0 \
-	      -L$(TOP)/lib/c -l:libc.so.0 \
+	      -L$(TOP)/lib/c/$(O) -l:libc.so.0 \
 	      -o $@ $(PIC_OBJS)
 
-%.o: %.c el.h
+$(O)%.o: %.c el.h
+	@mkdir -p $(dir $@)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -c -o $@ $<
 
-%.pic.o: %.c el.h
+$(O)%.pic.o: %.c el.h
+	@mkdir -p $(dir $@)
 	$(CC) $(CPPFLAGS) $(PICFLAGS) -c -o $@ $<
 
 clean:
-	rm -f *.o *.pic.o libedit.a libedit.so libedit.so.0
+	rm -f $(OBJS) $(PIC_OBJS) $(O)libedit.a $(O)libedit.so $(O)libedit.so.0
 
-install: libedit.a $(if $(NATIVE_BUILD),,libedit.so.0)
-	@mkdir -p $(DESTDIR)/usr/lib $(DESTDIR)/lib $(DESTDIR)/usr/include
-	install -m 644 libedit.a $(DESTDIR)/usr/lib/
+install: $(O)libedit.a $(if $(NATIVE_BUILD),,$(O)libedit.so.0)
+	@mkdir -p $(DESTDIR)/usr/$(LIBDIR) $(DESTDIR)/$(LIBDIR) $(DESTDIR)/usr/include
+	install -m 644 $(O)libedit.a $(DESTDIR)/usr/$(LIBDIR)/
 	install -m 644 ../../include/histedit.h $(DESTDIR)/usr/include/
 ifndef NATIVE_BUILD
-	install -m 755 libedit.so.0 $(DESTDIR)/lib/
-	@ln -sf libedit.so.0 $(DESTDIR)/lib/libedit.so
+	install -m 755 $(O)libedit.so.0 $(DESTDIR)/$(LIBDIR)/
+	@ln -sf libedit.so.0 $(DESTDIR)/$(LIBDIR)/libedit.so
 endif

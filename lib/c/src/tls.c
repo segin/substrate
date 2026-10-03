@@ -22,12 +22,17 @@ typedef struct {
     unsigned long ti_offset;
 } tls_index;
 
-/* The per-thread DTV pointer lives at TCB[1] = gs:4 (gs:0 is the TCB
- * self-pointer of the variant-II layout). */
+/* The per-thread DTV pointer lives at TCB[1], the word after the TCB
+ * self-pointer of the variant-II layout: gs:4 on i386, fs:8 on amd64, whose
+ * thread pointer is %fs (docs/specs/abi-amd64.md, section 8). */
 static inline unsigned long *tls_dtv(void)
 {
     unsigned long *dtv;
+#if defined(__x86_64__)
+    __asm__("movq %%fs:8, %0" : "=r"(dtv));
+#else
     __asm__("movl %%gs:4, %0" : "=r"(dtv));
+#endif
     return dtv;
 }
 
@@ -66,8 +71,10 @@ void *__tls_get_addr(tls_index *ti)
     return tls_addr(ti);
 }
 
+#if defined(__i386__)
 /* i386 ABI: argument arrives in %eax (regparm(1)); result returned in %eax. */
 __attribute__((regparm(1))) void *___tls_get_addr(tls_index *ti)
 {
     return tls_addr(ti);
 }
+#endif

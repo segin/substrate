@@ -3,34 +3,37 @@ include ../../Makefile.inc
 CFLAGS := $(CFLAGS) -I.
 LDFLAGS := $(USER_LDFLAGS)
 
+# $(O) and $(LIBDIR): see Makefile.inc (i386 in place, x86_64 beside it).
 SRCS = main.c yyerror.c
-OBJS     = $(SRCS:.c=.o)
-PIC_OBJS = $(SRCS:.c=.pic.o)
+OBJS     = $(SRCS:%.c=$(O)%.o)
+PIC_OBJS = $(SRCS:%.c=$(O)%.pic.o)
 
-all: liby.a $(if $(NATIVE_BUILD),,liby.so.0)
+all: $(O)liby.a $(if $(NATIVE_BUILD),,$(O)liby.so.0)
 
-liby.a: $(OBJS)
+$(O)liby.a: $(OBJS)
 	$(AR) rcs $@ $(OBJS)
 
 # liby has no DT_NEEDED — pure self-contained yacc runtime stubs.
-liby.so.0: $(PIC_OBJS)
+$(O)liby.so.0: $(PIC_OBJS)
 	$(CC) $(SHLIB_LDFLAGS) -Wl,-soname,liby.so.0 -o $@ $(PIC_OBJS)
 
-%.o: %.c
+$(O)%.o: %.c
+	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-%.pic.o: %.c
+$(O)%.pic.o: %.c
+	@mkdir -p $(dir $@)
 	$(CC) $(SHLIB_CFLAGS) -I. -c $< -o $@
 
 clean:
-	rm -f $(OBJS) $(PIC_OBJS) liby.a liby.so liby.so.0
+	rm -f $(OBJS) $(PIC_OBJS) $(O)liby.a $(O)liby.so $(O)liby.so.0
 
-install: liby.a $(if $(NATIVE_BUILD),,liby.so.0)
-	mkdir -p $(DESTDIR)/usr/lib $(DESTDIR)/lib
-	cp liby.a $(DESTDIR)/usr/lib/liby.a
+install: $(O)liby.a $(if $(NATIVE_BUILD),,$(O)liby.so.0)
+	mkdir -p $(DESTDIR)/usr/$(LIBDIR) $(DESTDIR)/$(LIBDIR)
+	cp $(O)liby.a $(DESTDIR)/usr/$(LIBDIR)/liby.a
 ifndef NATIVE_BUILD
-	install -m 755 liby.so.0 $(DESTDIR)/lib/
-	@ln -sf liby.so.0 $(DESTDIR)/lib/liby.so
+	install -m 755 $(O)liby.so.0 $(DESTDIR)/$(LIBDIR)/
+	@ln -sf liby.so.0 $(DESTDIR)/$(LIBDIR)/liby.so
 endif
 
 .PHONY: all clean install

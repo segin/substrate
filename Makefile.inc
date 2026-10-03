@@ -50,10 +50,25 @@ DESTDIR ?= $(TOP)/dist
 # to libcalls (__sync_val_compare_and_swap_4 etc) that the
 # substrate libgcc.a does not provide.  Putting it in COMMON_FLAGS
 # rather than just KERNEL_CFLAGS keeps user binaries consistent.
-COMMON_FLAGS = -m32 $(WARNFLAGS) -g -fno-stack-protector -mno-sse -mno-sse2 -mno-mmx -march=i486 -mtune=i486 -MMD -MP
+#
+# ARCH selects the target of everything built through this file.  The
+# userland libraries build for either (lib/Makefile): i386 objects in place
+# and installed under /lib and /usr/lib, x86_64 objects under each
+# directory's $(O) and installed under /lib64 and /usr/lib64, so the two
+# sets sit side by side in one tree and one root.
+ifeq ($(ARCH),x86_64)
+ARCH_M := -m64
+ARCH_CPU_FLAGS := -march=x86-64
+LIBDIR := lib64
+else
+ARCH_M := -m32
+ARCH_CPU_FLAGS := -mno-sse -mno-sse2 -mno-mmx -march=i486 -mtune=i486
+LIBDIR := lib
+endif
+COMMON_FLAGS = $(ARCH_M) $(WARNFLAGS) -g -fno-stack-protector $(ARCH_CPU_FLAGS) -MMD -MP
 USR_INCLUDE = $(TOP)/include
 SYS_INCLUDE = $(TOP)/sys/include
-GCC_INCLUDE = $(shell $(CC) -m32 -print-file-name=include 2>/dev/null)
+GCC_INCLUDE = $(shell $(CC) $(ARCH_M) -print-file-name=include 2>/dev/null)
 CFLAGS += $(COMMON_FLAGS) -std=c2x -nostdinc -I$(SYS_INCLUDE) -I$(USR_INCLUDE) -I$(TOP)/sys
 ifneq ($(strip $(GCC_INCLUDE)),)
 ifneq ($(wildcard $(GCC_INCLUDE)),)
@@ -76,7 +91,16 @@ KERNEL_CFLAGS = $(FREESTANDING_CFLAGS) $(KERNEL_I386_BASELINE_FLAGS) -I$(KERNEL_
 # x86_64 build never share a .o and either can follow the other without a
 # clean.  Subdirectory Makefiles name their objects $(O)foo.o.  $(O) is empty
 # for i386, which therefore builds in place exactly as before.
+#
+# Outside sys/ the same $(O) convention serves the userland libraries:
+# their x86_64 objects, archives and shared objects go to obj-x86_64/ in
+# each library's own directory, compiled with the user flags below.
 ifeq ($(ARCH),x86_64)
+ifeq ($(filter $(KERNEL_SRC)/%,$(CURDIR)/),)
+O := obj-x86_64/
+-include $(wildcard $(O)*.d $(O)*/*.d $(O)*/*/*.d $(O)*/*/*/*.d)
+.DEFAULT_GOAL :=
+else
 O := $(KERNEL_SRC)/arch/x86_64/obj/$(patsubst $(KERNEL_SRC)/%,%,$(CURDIR))/
 KERNEL_CFLAGS := -m64 -march=x86-64 -mcmodel=kernel -mno-red-zone \
 	-mgeneral-regs-only -ffreestanding -fno-builtin -fno-stack-protector \
@@ -100,6 +124,7 @@ $(O)%.o: %.S
 
 -include $(wildcard $(O)*.d $(O)*/*.d)
 .DEFAULT_GOAL :=
+endif
 else
 O :=
 endif
@@ -121,8 +146,8 @@ ifdef NATIVE_BUILD
     USER_LDFLAGS := $(EXTRA_USER_LDFLAGS)
     LIBGCC :=
 else
-    # Target build configuration (Substrate i386).
-    # -march=i486 already comes via COMMON_FLAGS.
+    # Target build configuration (Substrate, $(ARCH)).
+    # The ISA baseline already comes via COMMON_FLAGS.
     USER_CFLAGS := $(COMMON_FLAGS) -std=c2x -nostdinc -fno-pie -I$(USR_INCLUDE) -I$(SYS_INCLUDE) -I$(TOP)/sys
 ifneq ($(strip $(GCC_INCLUDE)),)
 ifneq ($(wildcard $(GCC_INCLUDE)),)
@@ -130,8 +155,8 @@ ifneq ($(wildcard $(GCC_INCLUDE)),)
 endif
 endif
     USER_CFLAGS += $(EXTRA_USER_CFLAGS)
-    USER_LDFLAGS := -m32 -nostdlib -fno-pie -no-pie $(EXTRA_USER_LDFLAGS)
-    _LIBGCC_PATH := $(shell $(CC) -m32 -print-libgcc-file-name 2>/dev/null)
+    USER_LDFLAGS := $(ARCH_M) -nostdlib -fno-pie -no-pie $(EXTRA_USER_LDFLAGS)
+    _LIBGCC_PATH := $(shell $(CC) $(ARCH_M) -print-libgcc-file-name 2>/dev/null)
     LIBGCC = $(if $(wildcard $(_LIBGCC_PATH)),$(_LIBGCC_PATH),)
 
     # Shared-library compile / link flags.  Same defines as
@@ -154,7 +179,7 @@ endif
     # --copy-dt-needed-entries to follow.  These dependencies are
     # deliberate -- ld.so resolves them at run time -- so --as-needed is
     # simply the wrong policy for substrate's shared libraries.
-    SHLIB_LDFLAGS := -m32 -nostdlib -nostartfiles -shared \
+    SHLIB_LDFLAGS := $(ARCH_M) -nostdlib -nostartfiles -shared \
                      -Wl,--no-as-needed \
                      -Wl,-Bsymbolic-functions \
                      -Wl,-z,max-page-size=0x1000 \

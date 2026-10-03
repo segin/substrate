@@ -13,39 +13,42 @@ CFLAGS    := $(CFLAGS)   -I. -I../../include -I../../sys/include -I../../sys
 PICFLAGS  := $(SHLIB_CFLAGS) -I. -I../../include -I../../sys/include -I../../sys
 LDFLAGS   := $(USER_LDFLAGS)
 
+# $(O) and $(LIBDIR): see Makefile.inc (i386 in place, x86_64 beside it).
 SRCS     = mq.c aio.c
-OBJS     = $(SRCS:.c=.o)
-PIC_OBJS = $(SRCS:.c=.pic.o)
+OBJS     = $(SRCS:%.c=$(O)%.o)
+PIC_OBJS = $(SRCS:%.c=$(O)%.pic.o)
 
-all: librt.a $(if $(NATIVE_BUILD),,librt.so.0)
+all: $(O)librt.a $(if $(NATIVE_BUILD),,$(O)librt.so.0)
 
-librt.a: $(OBJS)
+$(O)librt.a: $(OBJS)
 	$(AR) rcs $@ $(OBJS)
 
 # librt uses libpthread (aio worker pool) and libc.  DT_NEEDED must list both
 # so the resolver pulls them in.
-librt.so.0: $(PIC_OBJS)
+$(O)librt.so.0: $(PIC_OBJS)
 	$(CC) $(SHLIB_LDFLAGS) -Wl,-soname,librt.so.0 \
-	      -L$(TOP)/lib/pthread -l:libpthread.so.0 \
-	      -L$(TOP)/lib/c -l:libc.so.0 \
+	      -L$(TOP)/lib/pthread/$(O) -l:libpthread.so.0 \
+	      -L$(TOP)/lib/c/$(O) -l:libc.so.0 \
 	      -o $@ $(PIC_OBJS)
 	$(call BRAND_SUBSTRATE,$@)
 
-%.o: %.c
+$(O)%.o: %.c
+	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-%.pic.o: %.c
+$(O)%.pic.o: %.c
+	@mkdir -p $(dir $@)
 	$(CC) $(PICFLAGS) -c $< -o $@
 
 clean:
-	rm -f $(OBJS) $(PIC_OBJS) librt.a librt.so librt.so.0
+	rm -f $(OBJS) $(PIC_OBJS) $(O)librt.a $(O)librt.so $(O)librt.so.0
 
-install: librt.a $(if $(NATIVE_BUILD),,librt.so.0)
-	@mkdir -p $(DESTDIR)/usr/lib $(DESTDIR)/lib
-	install -m 644 librt.a $(DESTDIR)/usr/lib/
+install: $(O)librt.a $(if $(NATIVE_BUILD),,$(O)librt.so.0)
+	@mkdir -p $(DESTDIR)/usr/$(LIBDIR) $(DESTDIR)/$(LIBDIR)
+	install -m 644 $(O)librt.a $(DESTDIR)/usr/$(LIBDIR)/
 ifndef NATIVE_BUILD
-	install -m 755 librt.so.0 $(DESTDIR)/lib/
-	@ln -sf librt.so.0 $(DESTDIR)/lib/librt.so
+	install -m 755 $(O)librt.so.0 $(DESTDIR)/$(LIBDIR)/
+	@ln -sf librt.so.0 $(DESTDIR)/$(LIBDIR)/librt.so
 endif
 
 .PHONY: all clean install

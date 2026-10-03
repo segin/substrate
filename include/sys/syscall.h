@@ -1,15 +1,18 @@
 /*
  * Generic syscall header.
- * Redirects to the architecture-specific syscall definitions.
+ * Redirects to the system-call number table.
  */
 
 #ifndef _SYS_SYSCALL_H
 #define _SYS_SYSCALL_H
 
-#if defined(__i386__)
+/*
+ * The native system-call numbers are one table for both architectures
+ * (docs/specs/abi-amd64.md, section 3): a 64-bit program uses the i386
+ * numbers and differs only in how it passes arguments.
+ */
+#if defined(__i386__) || defined(__x86_64__)
 #include <arch/i386/syscall.h>
-#elif defined(__x86_64__)
-#include <arch/x86_64/syscall.h>
 #else
 #error "Unsupported architecture for syscalls"
 #endif

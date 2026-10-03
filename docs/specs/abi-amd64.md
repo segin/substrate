@@ -372,13 +372,16 @@ the context saved on every switch and in `mcontext_t`.
 * **Toolchain:** target `x86_64-unknown-substrate`, BFD output vector
   `elf64-x86-64-substrate`; non-PIE text at `0x400000`, maximum page size
   `0x200000`.
-* **Dynamic linker and libraries:** when the 64-bit userland exists, the
-  native linker is `/sbin/ld.so` with libraries in `/lib` and `/usr/lib`;
-  the 32-bit linker moves to `/sbin/ld32.so` with `/lib32` and
-  `/usr/lib32`, and the kernel substitutes `/sbin/ld32.so` when a 32-bit
-  binary names `/sbin/ld.so` and the 32-bit linker is installed (as
-  FreeBSD does for its lib32 compatibility).  Until then nothing moves:
-  the system is 32-bit and keeps today's paths.
+* **Libraries:** the two architectures' libraries sit side by side.  The
+  32-bit ones keep `/lib` and `/usr/lib`; the 64-bit ones go in `/lib64`
+  and `/usr/lib64`.  `make -C lib ARCH=x86_64` builds the 64-bit set from
+  the same sources, under each library's `obj-x86_64/`, and installs it
+  there (`make -C lib both` / `install-both` for the pair).  The startup
+  and system-call code is per architecture (`lib/c/arch/<arch>/`,
+  `lib/sys/arch/<arch>/`).
+* **Dynamic linker:** `/sbin/ld.so` is the 32-bit linker and stays so; a
+  64-bit linker, searching `/lib64` and `/usr/lib64`, comes with the
+  64-bit userland.
 * **Relocations:** the psABI's `R_X86_64_*` set; `ld.so` must support at
   least `RELATIVE`, `GLOB_DAT`, `JUMP_SLOT`, `64`, `PC32`, `COPY`,
   `TPOFF64`, `DTPMOD64`, `DTPOFF64`, and `IRELATIVE`.

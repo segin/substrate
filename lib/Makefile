@@ -10,9 +10,26 @@ include ../Makefile.inc
 # guaranteed to be linkable.
 SUBDIRS = m sys c pthread rt dl edit usb yacc at dbm kvm proc pwdb resolv
 
-.PHONY: all clean install $(SUBDIRS)
+.PHONY: all clean install $(SUBDIRS) all64 clean64 install64 both install-both
 
+# The libraries build for either architecture from this one tree
+# (Makefile.inc): the default, ARCH=i386, builds in place and installs into
+# /lib and /usr/lib; ARCH=x86_64 builds under each library's obj-x86_64/
+# and installs into /lib64 and /usr/lib64.  Neither build disturbs the
+# other's objects, so both can be kept current side by side:
+#
+#   make -C lib                  32-bit
+#   make -C lib ARCH=x86_64      64-bit     (same as: make -C lib all64)
+#   make -C lib both             both
+#   make -C lib install-both     both, installed into one $(DESTDIR)
 all: $(SUBDIRS)
+
+all64 clean64 install64:
+	$(MAKE) ARCH=x86_64 $(@:64=)
+
+both: all all64
+
+install-both: install install64
 
 $(SUBDIRS):
 	@echo ">>> Entering lib/$@"

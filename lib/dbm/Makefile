@@ -4,33 +4,36 @@ CFLAGS    := $(CFLAGS) -I.
 PICFLAGS  := $(SHLIB_CFLAGS) -I.
 LDFLAGS   := $(USER_LDFLAGS)
 
+# $(O) and $(LIBDIR): see Makefile.inc (i386 in place, x86_64 beside it).
 SRCS = dbm.c
-OBJS     = $(SRCS:.c=.o)
-PIC_OBJS = $(SRCS:.c=.pic.o)
+OBJS     = $(SRCS:%.c=$(O)%.o)
+PIC_OBJS = $(SRCS:%.c=$(O)%.pic.o)
 
-all: libdbm.a $(if $(NATIVE_BUILD),,libdbm.so.0)
+all: $(O)libdbm.a $(if $(NATIVE_BUILD),,$(O)libdbm.so.0)
 
-libdbm.a: $(OBJS)
+$(O)libdbm.a: $(OBJS)
 	$(AR) rcs $@ $(OBJS)
 
-libdbm.so.0: $(PIC_OBJS)
+$(O)libdbm.so.0: $(PIC_OBJS)
 	$(CC) $(SHLIB_LDFLAGS) -Wl,-soname,libdbm.so.0 \
-	      -L$(TOP)/lib/c -l:libc.so.0 \
+	      -L$(TOP)/lib/c/$(O) -l:libc.so.0 \
 	      -o $@ $(PIC_OBJS)
 
-%.o: %.c
+$(O)%.o: %.c
+	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-%.pic.o: %.c
+$(O)%.pic.o: %.c
+	@mkdir -p $(dir $@)
 	$(CC) $(PICFLAGS) -c $< -o $@
 
 clean:
-	rm -f $(OBJS) $(PIC_OBJS) libdbm.a libdbm.so libdbm.so.0
+	rm -f $(OBJS) $(PIC_OBJS) $(O)libdbm.a $(O)libdbm.so $(O)libdbm.so.0
 
-install: libdbm.a $(if $(NATIVE_BUILD),,libdbm.so.0)
-	@mkdir -p $(DESTDIR)/usr/lib $(DESTDIR)/lib
-	install -m 644 libdbm.a $(DESTDIR)/usr/lib/
+install: $(O)libdbm.a $(if $(NATIVE_BUILD),,$(O)libdbm.so.0)
+	@mkdir -p $(DESTDIR)/usr/$(LIBDIR) $(DESTDIR)/$(LIBDIR)
+	install -m 644 $(O)libdbm.a $(DESTDIR)/usr/$(LIBDIR)/
 ifndef NATIVE_BUILD
-	install -m 755 libdbm.so.0 $(DESTDIR)/lib/
-	@ln -sf libdbm.so.0 $(DESTDIR)/lib/libdbm.so
+	install -m 755 $(O)libdbm.so.0 $(DESTDIR)/$(LIBDIR)/
+	@ln -sf libdbm.so.0 $(DESTDIR)/$(LIBDIR)/libdbm.so
 endif

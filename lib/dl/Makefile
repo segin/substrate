@@ -7,21 +7,22 @@ include ../../Makefile.inc
 CFLAGS    := $(USER_CFLAGS) -I../../include
 PICFLAGS  := $(SHLIB_CFLAGS) -I../../include
 
+# $(O) and $(LIBDIR): see Makefile.inc (i386 in place, x86_64 beside it).
 SRCS = dl.c
-OBJS     = $(SRCS:.c=.o)
-PIC_OBJS = $(SRCS:.c=.pic.o)
+OBJS     = $(SRCS:%.c=$(O)%.o)
+PIC_OBJS = $(SRCS:%.c=$(O)%.pic.o)
 
 .PHONY: all clean install
 
-all: libdl.a $(if $(NATIVE_BUILD),,libdl.so.0)
+all: $(O)libdl.a $(if $(NATIVE_BUILD),,$(O)libdl.so.0)
 
-libdl.a: $(OBJS)
+$(O)libdl.a: $(OBJS)
 	$(AR) rcs $@ $(OBJS)
 
 # libdl has no DT_NEEDED — the __ldso_dl* references are weak and
 # resolve at runtime against /sbin/ld.so itself (which is always
 # loaded for any dynamic binary that pulled libdl in).
-libdl.so.0: $(PIC_OBJS)
+$(O)libdl.so.0: $(PIC_OBJS)
 	$(CC) $(SHLIB_LDFLAGS) -Wl,-soname,libdl.so.0 \
 	      -Wl,--unresolved-symbols=ignore-all \
 	      -o $@ $(PIC_OBJS)
@@ -31,19 +32,21 @@ libdl.so.0: $(PIC_OBJS)
 	@# (ELFOSABI_SUBSTRATE).  Same recipe as lib/c, lib/m, lib/sys.
 	@printf '\x40' | dd of=$@ bs=1 count=1 seek=7 conv=notrunc status=none
 
-%.o: %.c
+$(O)%.o: %.c
+	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-%.pic.o: %.c
+$(O)%.pic.o: %.c
+	@mkdir -p $(dir $@)
 	$(CC) $(PICFLAGS) -c $< -o $@
 
 clean:
-	rm -f $(OBJS) $(PIC_OBJS) libdl.a libdl.so.0
+	rm -f $(OBJS) $(PIC_OBJS) $(O)libdl.a $(O)libdl.so.0
 
-install: libdl.a $(if $(NATIVE_BUILD),,libdl.so.0)
-	@mkdir -p $(DESTDIR)/usr/lib $(DESTDIR)/lib
-	install -m 644 libdl.a $(DESTDIR)/usr/lib/
+install: $(O)libdl.a $(if $(NATIVE_BUILD),,$(O)libdl.so.0)
+	@mkdir -p $(DESTDIR)/usr/$(LIBDIR) $(DESTDIR)/$(LIBDIR)
+	install -m 644 $(O)libdl.a $(DESTDIR)/usr/$(LIBDIR)/
 ifndef NATIVE_BUILD
-	install -m 755 libdl.so.0 $(DESTDIR)/lib/
-	@ln -sf libdl.so.0 $(DESTDIR)/lib/libdl.so
+	install -m 755 $(O)libdl.so.0 $(DESTDIR)/$(LIBDIR)/
+	@ln -sf libdl.so.0 $(DESTDIR)/$(LIBDIR)/libdl.so
 endif

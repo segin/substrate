@@ -733,8 +733,14 @@ static int star_value(int argpos, const union argval *vals, int maxidx,
     return va_arg(*seq_ap, int);      /* sequential * */
 }
 
-int vsnprintf(char *str, size_t size, const char *format, va_list ap) {
+int vsnprintf(char *str, size_t size, const char *format, va_list args) {
     struct outbuf o = { str, size, 0 };
+
+    /* The helpers below take a va_list *.  Where va_list is an array type
+     * (amd64) a va_list parameter has decayed to a pointer, so its address
+     * is not one; work on a local copy, which has the real type. */
+    va_list ap;
+    va_copy(ap, args);
 
     /* Detect positional usage anywhere in the format. */
     int positional = 0;
@@ -817,6 +823,7 @@ int vsnprintf(char *str, size_t size, const char *format, va_list ap) {
         if (o.remaining > 0) *o.s = '\0';
         else str[size - 1] = '\0';
     }
+    va_end(ap);
     return (int)o.len;
 }
 
