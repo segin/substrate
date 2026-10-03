@@ -24,9 +24,12 @@ SRCS ?= $(PROG).c
 #
 # ARCH=x86_64 builds the program as a native 64-bit one, beside the 32-bit
 # build: objects and the program itself go under $(O) (obj-x86_64/), so the
-# two never share a file.  There is no 64-bit dynamic linker yet, so a
-# 64-bit program is always linked statically, against the 64-bit libraries
-# of `make -C lib ARCH=x86_64`.
+# two never share a file.  It links against the 64-bit libraries of
+# `make -C lib ARCH=x86_64`: dynamically, with /sbin/ld64.so as its
+# interpreter, when the program's Makefile sets DYNAMIC = 1, and statically
+# otherwise -- the same choice the 32-bit build makes.  DYNAMIC=0 on the
+# command line forces the static link (clean first: the two are compiled
+# with different flags into the same objects).
 ifdef NATIVE_BUILD
 OBJS = $(SRCS:.c=.host.o)
 else
@@ -59,8 +62,17 @@ ifdef NATIVE_BUILD
     # Host build — DYNAMIC is irrelevant; let host cc do its default.
     BIN_CFLAGS  = $(USER_CFLAGS)
     LDFLAGS    := $(USER_LDFLAGS)
+else ifeq ($(BIN64)$(DYNAMIC),11)
+    # 64-bit PIE, loaded by the 64-bit dynamic linker.  Same shape as the
+    # 32-bit dynamic branch below.
+    BIN64_DYNAMIC := 1
+    BIN_CFLAGS  = $(filter-out -fno-pie,$(USER_CFLAGS)) -fPIE
+    LDFLAGS    := -m64 -nostdlib -pie -fPIE \
+                  -Wl,--dynamic-linker=/sbin/ld64.so \
+                  -Wl,--unresolved-symbols=ignore-in-shared-libs \
+                  -Wl,-z,max-page-size=0x1000
 else ifdef BIN64
-    # 64-bit: static whatever DYNAMIC says (see above).
+    # 64-bit, no DYNAMIC = 1: static.
     BIN_CFLAGS  = $(USER_CFLAGS)
     LDFLAGS    := $(USER_LDFLAGS) -static -Wl,-z,max-page-size=0x1000
 else ifeq ($(DYNAMIC),1)
@@ -97,13 +109,24 @@ ifdef NATIVE_BUILD
     CRT0 =
     LIBS =
     BRAND_CMD =
+else ifdef BIN64_DYNAMIC
+    # The 64-bit shared objects live in each library's $(O) directory.  A
+    # per-program LDADD names its libraries by directory
+    # (-L$(TOP)/lib/edit -l:libedit.so.0); BIN_LDADD points each such -L at
+    # the $(O) subdirectory, leaving alone one that already names it.
+    CRT0 = $(LIBC_DIR)/$(O)crt0.o
+    LIBS = -L$(LIBC_DIR)/$(O) -l:libc.so.0 \
+           -L$(TOP)/lib/sys/$(O) -l:libsys.so.0 $(LIBGCC)
+    BIN_LDADD = $(foreach w,$(LDADD),$(if $(filter -L$(TOP)/%,$(w)),$(if $(findstring /$(O:/=),$(w)),$(w),$(w)/$(O:/=)),$(w)))
+    BRAND_CMD = $(call BRAND_SUBSTRATE,$@)
 else ifdef BIN64
     # Every 64-bit archive in one group, in place of the per-program LDADD
-    # (which names the 32-bit shared objects): the link takes what it
+    # (which names the shared objects): the link takes what it
     # references and nothing else.
     CRT0 = $(LIBC_DIR)/$(O)crt0.o
     LIBS =-Wl,--start-group $(wildcard $(TOP)/lib/*/$(O)lib*.a) \
            $(wildcard $(TOP)/usr.lib/*/$(O)lib*.a) -Wl,--end-group $(LIBGCC)
+    BIN_LDADD =
     BRAND_CMD = $(call BRAND_SUBSTRATE,$@)
 else
     # Substrate build: manual linking.
@@ -137,7 +160,7 @@ $(OBJS) $(O)$(PROG): $(BUILD_RULE_DEPS)
 
 $(O)$(PROG): $(OBJS)
 	@mkdir -p $(dir $@)
-	$(CC) $(LDFLAGS) -o $@ $(OBJS) $(CRT0) $(if $(BIN64),,$(LDADD)) $(LIBS)
+	$(CC) $(LDFLAGS) -o $@ $(OBJS) $(CRT0) $(if $(BIN64),$(BIN_LDADD),$(LDADD)) $(LIBS)
 	$(BRAND_CMD)
 
 $(O)%.o: %.c

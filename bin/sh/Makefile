@@ -23,15 +23,19 @@ ifndef NATIVE_BUILD
 USER_CFLAGS += -I$(TOP)/sys
 endif
 
-# sh64: this shell as a native 64-bit program -- the ARCH=x86_64 build
-# (Makefile.bin.inc: static, against the 64-bit libraries), under the name
-# it is installed by, /bin/sh64, beside the 32-bit userland.  It runs on
-# the x86_64 kernel only.
+# sh64: this shell as a native 64-bit program, under the name it is
+# installed by, /bin/sh64, beside the 32-bit userland.  It runs on the
+# x86_64 kernel only.  It is the STATIC ARCH=x86_64 build (DYNAMIC=0), so
+# it needs neither /sbin/ld64.so nor /lib64 on the system it lands on; a
+# plain `make ARCH=x86_64` builds the dynamically linked obj-x86_64/sh.
+# The two share obj-x86_64/ but not compiler flags, hence the cleans.
 .PHONY: sh64
 sh64:
 	$(MAKE) -C $(TOP)/lib ARCH=x86_64
-	$(MAKE) ARCH=x86_64
+	$(MAKE) ARCH=x86_64 DYNAMIC=0 clean
+	$(MAKE) ARCH=x86_64 DYNAMIC=0
 	cp obj-x86_64/sh sh64
+	$(MAKE) ARCH=x86_64 DYNAMIC=0 clean
 
 TESTS = ../../tests/bin/sh
 
