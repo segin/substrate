@@ -363,7 +363,7 @@ static int pv_entry_ptr_sane(const struct pv_entry *entry) {
         return 1;
     }
 
-    if (addr < KERN_BASE) {
+    if (addr < KERNEL_VA_START) {
         return 0;
     }
 

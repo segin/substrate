@@ -2,6 +2,7 @@
 
 #include <machine/pmap.h>
 #include <machine/pmm.h>
+#include <machine/vmparam.h>
 #include <kern/console.h>
 #include <sys/copy.h>
 #include <sys/errno.h>
@@ -124,7 +125,7 @@ static size_t mem_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buff
             chunk = MEM_DIRECT_MAP_LIMIT - (uintptr_t)offset;
             if (chunk > size) chunk = size;
 
-            uintptr_t kernel_va = 0xC0000000 + (uintptr_t)offset;
+            uintptr_t kernel_va = (uintptr_t)P2V(offset);
             /* buffer is a kernel pointer here (sys_read double-buffers via IO_CHUNK_SIZE) */
             memcpy(buffer, (void*)kernel_va, chunk);
         } else {
@@ -166,7 +167,7 @@ static size_t mem_write(fs_node_t *node, off_t offset, size_t size, const uint8_
             chunk = MEM_DIRECT_MAP_LIMIT - (uintptr_t)offset;
             if (chunk > size) chunk = size;
 
-            uintptr_t kernel_va = 0xC0000000 + (uintptr_t)offset;
+            uintptr_t kernel_va = (uintptr_t)P2V(offset);
             /* buffer is a kernel pointer here (sys_write double-buffers via IO_CHUNK_SIZE) */
             memcpy((void*)kernel_va, buffer, chunk);
         } else {

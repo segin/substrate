@@ -2,6 +2,7 @@
 #include <string.h>
 
 #include <machine/idt.h>
+#include <machine/vmparam.h>
 #include <exec/perso/personality.h>
 #include <kern/cmdline.h>
 #include <kern/console.h>
@@ -608,7 +609,7 @@ int sys_sigaction(int sig, const void *act, void *oact) {
             /* Walk the EBP chain to recover caller frames. */
             uint32_t fp = r->ebp;
             uint32_t victim_ebp = 0;
-            for (int d = 0; d < 6 && fp >= 0x08000000 && fp < 0xC0000000; d++) {
+            for (int d = 0; d < 6 && fp >= 0x08000000 && fp < USER32_VA_END; d++) {
                 uint32_t frame[2] = {0};
                 copyin((const void *)(uintptr_t)fp, frame, sizeof(frame));
                 kprintf("[ABORT] frame[%d] ebp=0x%08x saved_ebp=0x%08x ret=0x%08x\n",

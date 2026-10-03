@@ -93,7 +93,6 @@ struct usb_msc_csw {
  * below.  Submit_lock serializes everything, so concurrent control transfers
  * can't race for TDs. */
 #define USB_MSC_MAX_XFER        16384
-#define USB_MSC_KERN_BASE       0xC0000000U
 
 typedef struct usb_msc_dev {
     usb_device_t    *udev;

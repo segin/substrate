@@ -18,6 +18,7 @@
 
 #include <machine/gdt.h>
 #include <machine/pmap.h>
+#include <machine/vmparam.h>
 #include <exec/formats/xout.h>
 #include <exec/perso/personality.h>
 #include <kern/arch.h>
@@ -122,7 +123,7 @@ static int xout_populate(vm_map_t *map, pmap_t pmap, vm_object_t *obj,
             return -ENOMEM;
         }
         /* Zero via the kernel direct map -- the user VA is not mapped yet. */
-        page_kva = (void *)(uintptr_t)(page->phys_addr + 0xC0000000U);
+        page_kva = P2V(page->phys_addr);
         memset(page_kva, 0, XOUT_PAGE);
         (void)map;
         if (pmap_enter(pmap, va, page->phys_addr, prot, 0) < 0) {
@@ -317,7 +318,7 @@ static int xout_load(int fd, const char *path, char *const argv[],
     }
     current_process->pmap = (struct pmap *)pmap;
     pmap_activate(pmap);
-    map = vm_map_create(pmap, 0x10000, 0xC0000000U);
+    map = vm_map_create(pmap, 0x10000, USER32_VA_END);
     if (!map) {
         return xout_fail(fd, -ENOMEM, "xout: vm_map_create failed");
     }

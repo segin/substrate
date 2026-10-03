@@ -18,6 +18,7 @@
 
 #include <machine/intr.h>
 #include <machine/pmm.h>
+#include <machine/vmparam.h>
 #include <arch/x86-common/io.h>
 #include <kern/console.h>
 #include <kern/driver.h>
@@ -321,14 +322,14 @@ int rtl8139_setup(pci_device_t *pdev) {
     if (!rxvirt) { kprint("rtl8139: rx alloc fail\n"); return -1; }
     memset(rxvirt, 0, RTL_RX_PAGES * 4096);
     rtl.rx_ring = (uint8_t *)rxvirt;
-    rtl.rx_ring_phys = (uint32_t)rxvirt - 0xC0000000;
+    rtl.rx_ring_phys = (uint32_t)V2P(rxvirt);
     outl(rtl.io_base + R_RBSTART, rtl.rx_ring_phys);
 
     /* Allocate TX buffers — one page each, plenty for max frame. */
     for (int i = 0; i < RTL_TX_DESCS; i++) {
         rtl.tx_buf[i] = (uint8_t *)pmm_alloc_block();
         memset(rtl.tx_buf[i], 0, 4096);
-        rtl.tx_buf_phys[i] = (uint32_t)rtl.tx_buf[i] - 0xC0000000;
+        rtl.tx_buf_phys[i] = (uint32_t)V2P(rtl.tx_buf[i]);
     }
 
     /* Configure RX: APM | AB | AM | WRAP, 8 KiB ring (RBLEN=00). */

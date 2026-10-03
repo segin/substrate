@@ -15,6 +15,7 @@
 #include <string.h>
 
 #include <machine/efi.h>
+#include <machine/vmparam.h>
 #include <kern/console.h>
 #include <kern/efi_runtime.h>
 
@@ -50,13 +51,13 @@ void efi_runtime_init(void) {
      * kernel direct-map range (physical < kernel_direct_map_size
      * i.e. first 16 MB identity-mapped in boot page tables), use
      * it directly.  Otherwise, convert using the standard
-     * phys + 0xC0000000 direct-map convention where applicable.
+     * P2V(phys) direct-map convention where applicable.
      */
     uint32_t phys = (uint32_t)(uintptr_t)efi_saved_runtime_services;
 
     if (phys < 0x40000000) {
         /* Low physical: accessible through identity map or direct map */
-        rt = (EFI_RUNTIME_SERVICES *)(uintptr_t)(phys + 0xC0000000);
+        rt = (EFI_RUNTIME_SERVICES *)P2V(phys);
     } else {
         /*
          * High physical address.  On i386 we cannot trivially ioremap

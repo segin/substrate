@@ -3,7 +3,7 @@
 
 #ifndef HOST_TEST
 #include <machine/pmm.h>
-#define KERNEL_BASE 0xC0000000U
+#include <machine/vmparam.h>
 #else
 #include <stdlib.h>
 #include <stdint.h>
@@ -22,11 +22,11 @@ dma_addr_t dma_map_single(void *cpu_addr, size_t size, enum dma_data_direction d
         return (dma_addr_t)0;
     }
 #ifndef HOST_TEST
-    /* All kernel memory is direct-mapped at KERNEL_BASE; validate range */
-    if ((uintptr_t)cpu_addr < KERNEL_BASE) {
+    /* All kernel memory is direct-mapped; validate range */
+    if ((uintptr_t)cpu_addr < KERNEL_VA_START) {
         return (dma_addr_t)0;
     }
-    return (dma_addr_t)((uintptr_t)cpu_addr - KERNEL_BASE);
+    return (dma_addr_t)V2P(cpu_addr);
 #else
     return (dma_addr_t)(uintptr_t)cpu_addr;
 #endif

@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include <machine/idt.h>
+#include <machine/vmparam.h>
 #include <arch/x86-common/lapic.h>
 #include <drivers/console/uart/uart.h>
 #include <drivers/video/fb.h>
@@ -16,8 +17,6 @@
 #ifdef HOST_TEST
 void panic_test_halt(void);
 #endif
-
-#define KERN_BASE 0xC0000000U
 
 /*
  * Reentrancy guard.  panic() and panic_with_regs() route through
@@ -123,7 +122,7 @@ static int panic_va_readable(uintptr_t va, size_t len) {
     if ((cr3 & 0xFFFFF000U) >= (0xFFFFFFFFU - KERN_BASE))
         return 0;
 
-    uint32_t *pd = (uint32_t *)((cr3 & 0xFFFFF000U) + KERN_BASE);
+    uint32_t *pd = (uint32_t *)P2V(cr3 & 0xFFFFF000U);
 
     last = va + (len - 1);
     if (last < va)                    /* wrapped */
@@ -139,7 +138,7 @@ static int panic_va_readable(uintptr_t va, size_t len) {
 
         if ((pde & 0xFFFFF000U) >= (0xFFFFFFFFU - KERN_BASE))
             return 0;
-        uint32_t *pt = (uint32_t *)((pde & 0xFFFFF000U) + KERN_BASE);
+        uint32_t *pt = (uint32_t *)P2V(pde & 0xFFFFF000U);
         if (!(pt[(page >> 12) & 0x3FF] & 0x1))
             return 0;
     }
@@ -160,8 +159,8 @@ static int panic_addr_is_kernel_text(uintptr_t va) {
     (void)va;
     return 0;
 #else
-    /* Conservative: kernel virtual addresses live in [KERN_BASE, 0xFF000000). */
-    return va >= KERN_BASE && va < 0xFF000000U;
+    /* Conservative: kernel virtual addresses live in [KERNEL_VA_START, 0xFF000000). */
+    return va >= KERNEL_VA_START && va < 0xFF000000U;
 #endif
 }
 

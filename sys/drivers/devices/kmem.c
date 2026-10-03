@@ -11,6 +11,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <machine/vmparam.h>
 #include <kern/console.h>
 #include <sys/copy.h>
 #include <sys/errno.h>
@@ -100,7 +101,7 @@ static size_t kmem_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buf
     uintptr_t kva_start = (uintptr_t)offset;
     uintptr_t kva_end = kva_start + size;
     /* Reject if: outside kernel space, or wraps around */
-    if (kva_start < 0xC0000000 || kva_end < kva_start || size == 0) {
+    if (kva_start < KERNEL_VA_START || kva_end < kva_start || size == 0) {
         return (size_t)-EFAULT;
     }
 
@@ -138,7 +139,7 @@ static size_t kmem_write(fs_node_t *node, off_t offset, size_t size, const uint8
     /* 3. Address Validation */
     uintptr_t kva_start = (uintptr_t)offset;
     uintptr_t kva_end = kva_start + size;
-    if (kva_start < 0xC0000000 || kva_end < kva_start || size == 0) {
+    if (kva_start < KERNEL_VA_START || kva_end < kva_start || size == 0) {
         return (size_t)-EFAULT;
     }
 

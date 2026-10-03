@@ -26,6 +26,7 @@
 
 #include <machine/intr.h>
 #include <machine/pmm.h>
+#include <machine/vmparam.h>
 #include <kern/console.h>
 #include <kern/driver.h>
 #include <kern/pci.h>
@@ -930,7 +931,7 @@ static void *r8168_dma_alloc(size_t bytes, uint32_t *phys) {
     if (!p)
         return NULL;
     memset(p, 0, R8168_PAGES(bytes) * 4096);
-    *phys = (uint32_t)(uintptr_t)p - 0xC0000000u;
+    *phys = (uint32_t)V2P(p);
     return p;
 }
 

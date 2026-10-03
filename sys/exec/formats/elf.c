@@ -25,6 +25,7 @@
 #include <sys/mount.h>   /* struct mount, MNT_NOSUID */
 #include <sys/lock.h>    /* elf_image_cache spinlock */
 #include <machine/pmm.h>
+#include <machine/vmparam.h>
 #if defined(__i386__) || defined(HOST_TEST)
 #include <machine/pmap.h>
 #include <machine/gdt.h>
@@ -522,7 +523,7 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, int is_main_image,
     }
 
     entry = ehdr->e_entry + load_base;
-    if (entry >= 0xC0000000U) {
+    if (entry >= USER32_VA_END) {
         kprint("ELF: entry point in kernel space, rejecting\n");
         kfree(image, sizeof(*image));
         return 0;
@@ -571,8 +572,8 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, int is_main_image,
         if (phdr.p_type == PT_TLS) {
             uint32_t tls_end = phdr.p_vaddr + load_base + phdr.p_memsz;
             // SECURITY CHECK: Validate TLS segment bounds
-            if (tls_end < phdr.p_vaddr + load_base || tls_end >= 0xC0000000 ||
-                phdr.p_vaddr + load_base >= 0xC0000000) {
+            if (tls_end < phdr.p_vaddr + load_base || tls_end >= USER32_VA_END ||
+                phdr.p_vaddr + load_base >= USER32_VA_END) {
                 kprint("ELF: PT_TLS segment has invalid bounds\n");
                 kfree(image, sizeof(*image));
                 return 0;
@@ -634,7 +635,7 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, int is_main_image,
             }
 
             // SECURITY/ROBUSTNESS CHECK: Disallow loading ELF segments into kernel space
-            if (vaddr >= 0xC0000000 || (vaddr + phdr.p_memsz) >= 0xC0000000) {
+            if (vaddr >= USER32_VA_END || (vaddr + phdr.p_memsz) >= USER32_VA_END) {
                 kprint("ELF: Refusing to load segment into kernel space\n");
                 kfree(image, sizeof(*image));
                 return 0;
@@ -777,7 +778,7 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, int is_main_image,
 
                 // Map with permissions from segment header
                 // pmap_enter expects physical address, convert virtual to physical
-                uint32_t pa_phys = (uint32_t)(uintptr_t)pa - 0xC0000000;
+                uint32_t pa_phys = (uint32_t)V2P(pa);
                 if (pmap_enter(pmap, va, pa_phys, prot, 0) < 0) {
                     kprint("ELF: Failed to map page\n");
                     pmm_free_block(pa);   /* current page: not yet owned by seg_obj */
@@ -960,7 +961,7 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, int is_main_image,
 }
 
 static int is_user_ptr(const void *ptr) {
-    return (uintptr_t)ptr < 0xC0000000;
+    return (uintptr_t)ptr < KERNEL_VA_START;
 }
 
 static int capture_ptr(char *const array[], int index, char **out) {
@@ -1048,7 +1049,7 @@ static int exec_setup_stack(pmap_t pmap, uint32_t *sp_out, char **k_argv, int ar
                             uint32_t at_entry, uint32_t at_base, uint32_t at_phdr,
                             const elf_image_info_t *image,
                             uint32_t *ps_strings_out) {
-    uint32_t user_stack_top = 0xC0000000;
+    uint32_t user_stack_top = USER32_VA_END;
     /*
      * Demand-paged user stack.  Only a small region at the top is
      * mapped up front — enough for argv/envp/auxv and the program's
@@ -1091,7 +1092,7 @@ static int exec_setup_stack(pmap_t pmap, uint32_t *sp_out, char **k_argv, int ar
             kfree(stack_pages, sizeof(stack_page_t) * user_stack_size);
             return -1;
         }
-        uint32_t pa_phys = (uint32_t)(uintptr_t)pa - 0xC0000000;
+        uint32_t pa_phys = (uint32_t)V2P(pa);
         if (pmap_enter(pmap, va, pa_phys, VM_PROT_WRITE, 0) < 0) {
             kprint("execve: Failed to map user stack\n");
             pmm_free_block(pa);
@@ -1371,7 +1372,7 @@ static int exec_setup_stack(pmap_t pmap, uint32_t *sp_out, char **k_argv, int ar
          * via _elf_aux_info, falling back to a sysctl(kern.usrstack) we
          * don't implement -- without them it aborts ("Cannot get
          * kern.usrstack", thr_init.c).  libc only serves non-zero values. */
-        sp -= 4; STACK_WRITE32(sp, user_stack_top);     /* 0xC0000000 */
+        sp -= 4; STACK_WRITE32(sp, user_stack_top);     /* USER32_VA_END */
         sp -= 4; STACK_WRITE32(sp, AT_FBSD_USRSTACKBASE);
         sp -= 4; STACK_WRITE32(sp, USER_STACK_MAX);     /* 8 MiB ceiling */
         sp -= 4; STACK_WRITE32(sp, AT_FBSD_USRSTACKLIM);
@@ -1634,7 +1635,7 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
     // elf_load() can use vm_map_insert() against vnode-backed shared
     // objects (.text/.rodata pages of the same binary will then
     // physically share between every process exec'ing it).
-    new_vm_map = vm_map_create(new_pmap, 0x10000, 0xC0000000);
+    new_vm_map = vm_map_create(new_pmap, 0x10000, USER32_VA_END);
     if (!new_vm_map) {
         kprint("execve: Failed to create vm_map\n");
         error_code = -ENOMEM;

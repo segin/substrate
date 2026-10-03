@@ -48,6 +48,7 @@
 #include <machine/gdt.h>
 #include <machine/idt.h>
 #include <machine/pmap.h>
+#include <machine/vmparam.h>
 #include <exec/formats/xout286.h>
 #include <exec/perso/personality.h>
 #include <exec/perso/sco_x286/sco_x286_syscalls.h>
@@ -1853,7 +1854,7 @@ static int x286_is_syscall_int(registers_t *regs) {
                       &linear_ip) != 0) {
         return 0;
     }
-    if (linear_ip >= 0xC0000000U) {
+    if (linear_ip >= USER32_VA_END) {
         return 0;
     }
     if (copyin((const void *)linear_ip, insn, sizeof(insn)) != 0) {
@@ -1910,7 +1911,7 @@ static int x286_fixup_fpu_insn(registers_t *regs) {
                       &linear) != 0) {
         return 0;
     }
-    if (linear >= 0xC0000000U) {
+    if (linear >= USER32_VA_END) {
         return 0;
     }
     if (copyin((const void *)linear, insn, sizeof(insn)) != 0) {

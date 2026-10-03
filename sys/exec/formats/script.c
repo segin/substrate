@@ -11,6 +11,7 @@
 
 #include <string.h>
 
+#include <machine/vmparam.h>
 #include <exec/formats/script.h>
 #include <kern/sched.h>
 #include <sys/errno.h>
@@ -103,7 +104,7 @@ static int script_load(int fd, const char *path, char *const argv[],
 
     /* Copy remaining original argv (skip argv[0]) */
     if (argv) {
-        int is_user = (uintptr_t)argv < 0xC0000000;
+        int is_user = (uintptr_t)argv < KERNEL_VA_START;
         for (i = 1; argc < SCRIPT_MAX_ARGV - 1; i++) {
             char *uarg;
             if (is_user) {

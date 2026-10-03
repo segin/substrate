@@ -17,6 +17,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <machine/vmparam.h>
 #include <arch/x86-common/io.h>
 #include <drivers/audio/audio.h>
 #include <drivers/audio/sb16.h>
@@ -419,7 +420,7 @@ void sb16_init(void)
 		return;
 	}
 	d->dma_phys = vm_page_to_phys(pages);
-	d->dma_buf  = (void *)(d->dma_phys + 0xC0000000U);
+	d->dma_buf  = P2V(d->dma_phys);
 	d->dma_size = npages * 4096u;
 	memset(d->dma_buf, 0, d->dma_size);
 

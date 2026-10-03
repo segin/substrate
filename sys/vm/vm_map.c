@@ -1,6 +1,7 @@
 #include <stddef.h>
 
 #include <machine/pmap.h>
+#include <machine/vmparam.h>
 #include <kern/console.h>
 #include <kern/panic.h>
 #include <vm/vm_commit.h>
@@ -41,7 +42,7 @@ void vm_map_audit(vm_map_t *map, const char *where) {
         }
         vm_object_t *o = e->object;
         if (!o) continue;
-        if ((uintptr_t)o < 0xC0000000u || ((uintptr_t)o & 3u)) {
+        if ((uintptr_t)o < KERNEL_VA_START || ((uintptr_t)o & 3u)) {
             kprintf("vm_map_audit[%s]: entry %p [%08x-%08x] bogus object %p\n",
                     where, (void *)e, (unsigned)e->start, (unsigned)e->end,
                     (void *)o);

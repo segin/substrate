@@ -8,6 +8,7 @@
 #include <kern/time.h>
 #include <vm/vm_kmem.h>
 #include <drivers/console/console.h>
+#include <machine/vmparam.h>
 #include <string.h>
 
 #ifndef HOST_TEST
@@ -111,7 +112,7 @@ static int bio_hash_reports = 0;
  * Is this even a plausible struct buf address?
  *
  * Every buf comes from kmalloc and so lives in the kernel direct map;
- * anything below KERN_BASE cannot be one.  This matters because a corrupt
+ * anything below KERNEL_VA_START cannot be one.  This matters because a corrupt
  * chain entry is not merely wrong, it is fatal in a way that hides its own
  * cause: bio_lookup_locked() runs underneath vnode_pager_getpages(), which
  * runs underneath vm_fault() holding the vm_fault mutex.  Dereferencing a
@@ -122,7 +123,7 @@ static int bio_hash_reports = 0;
  */
 static inline int bio_buf_plausible(const struct buf *bp)
 {
-    return bp != NULL && (uintptr_t)bp >= (uintptr_t)KERN_BASE;
+    return bp != NULL && (uintptr_t)bp >= (uintptr_t)KERNEL_VA_START;
 }
 
 static struct buf *
@@ -145,7 +146,7 @@ bio_lookup_locked(struct vnode *vp, int64_t blkno)
             if (bio_hash_reports < BIO_HASH_MAX_REPORTS) {
                 bio_hash_reports++;
                 kprintf("bio: hash bucket %u entry %u is an implausible buf "
-                        "%p (below KERN_BASE) -- chain corrupted, walk "
+                        "%p (below KERNEL_VA_START) -- chain corrupted, walk "
                         "truncated\n", hash, steps, (const void *)bp);
             }
             break;

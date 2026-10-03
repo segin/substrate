@@ -25,6 +25,7 @@
 
 #include <machine/intr.h>
 #include <machine/pmm.h>
+#include <machine/vmparam.h>
 #include <kern/console.h>
 #include <kern/driver.h>
 #include <kern/pci.h>
@@ -359,25 +360,25 @@ static int e1000_setup(pci_device_t *pdev) {
     if (!p) { kprint("e1000: rx ring alloc failed\n"); return -1; }
     memset(p, 0, ((rx_ring_bytes + 4095) / 4096) * 4096);
     e1k.rx_ring = p;
-    e1k.rx_ring_phys = (uint32_t)(uintptr_t)p - 0xC0000000u;
+    e1k.rx_ring_phys = (uint32_t)V2P(p);
 
     p = pmm_alloc_contiguous((tx_ring_bytes + 4095) / 4096);
     if (!p) { kprint("e1000: tx ring alloc failed\n"); return -1; }
     memset(p, 0, ((tx_ring_bytes + 4095) / 4096) * 4096);
     e1k.tx_ring = p;
-    e1k.tx_ring_phys = (uint32_t)(uintptr_t)p - 0xC0000000u;
+    e1k.tx_ring_phys = (uint32_t)V2P(p);
 
     p = pmm_alloc_contiguous((rx_buf_bytes + 4095) / 4096);
     if (!p) { kprint("e1000: rx buffer alloc failed\n"); return -1; }
     memset(p, 0, ((rx_buf_bytes + 4095) / 4096) * 4096);
     e1k.rx_buf = p;
-    e1k.rx_buf_phys = (uint32_t)(uintptr_t)p - 0xC0000000u;
+    e1k.rx_buf_phys = (uint32_t)V2P(p);
 
     p = pmm_alloc_contiguous((tx_buf_bytes + 4095) / 4096);
     if (!p) { kprint("e1000: tx buffer alloc failed\n"); return -1; }
     memset(p, 0, ((tx_buf_bytes + 4095) / 4096) * 4096);
     e1k.tx_buf = p;
-    e1k.tx_buf_phys = (uint32_t)(uintptr_t)p - 0xC0000000u;
+    e1k.tx_buf_phys = (uint32_t)V2P(p);
 
     for (int i = 0; i < E1000_RX_DESCS; i++) {
         e1k.rx_ring[i].addr =

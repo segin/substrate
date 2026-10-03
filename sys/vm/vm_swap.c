@@ -5,6 +5,7 @@
 #include <stddef.h>
 #include <string.h>
 
+#include <machine/vmparam.h>
 #include <kern/console.h>
 #include <sys/lock.h>
 #include <vfs/vfs.h>
@@ -86,8 +87,6 @@ static void swap_pager_dealloc(struct vm_pager *p) {
 
 // Global swap state
 struct fs_node *swap_node = NULL;
-
-#define P2V(x) ((uintptr_t)(x) + 0xC0000000)
 
 static int swap_pager_getpage(struct vm_pager *p, vm_page_t *m, bool sync) {
     (void)sync;

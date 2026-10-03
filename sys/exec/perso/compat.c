@@ -217,7 +217,7 @@ int sys_mprotect(void *addr, size_t len, int prot) {
     uintptr_t end = (start + len + 0xFFF) & ~0xFFF;
 
     /* Validate range is in user space (below 0xC0000000) */
-    if (start >= 0xC0000000 || end > 0xC0000000)
+    if (start >= USER32_VA_END || end > USER32_VA_END)
         return -EINVAL;
 
     if (!current_process->pmap)

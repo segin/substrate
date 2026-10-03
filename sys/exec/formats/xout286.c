@@ -29,6 +29,7 @@
 
 #include <machine/gdt.h>
 #include <machine/pmap.h>
+#include <machine/vmparam.h>
 #include <exec/formats/xout.h>
 #include <exec/formats/xout286.h>
 #include <exec/perso/personality.h>
@@ -73,7 +74,7 @@ static int x286_debug_enabled(void) {
  * kernel memory before pmap_create(), and build the new stack from the copy.
  */
 static int x286_is_user_ptr(const void *p) {
-    return (uintptr_t)p < 0xC0000000U;
+    return (uintptr_t)p < KERNEL_VA_START;
 }
 
 static int x286_capture_ptr(char *const array[], int index, char **out) {
@@ -233,7 +234,7 @@ static int x286_populate(pmap_t pmap, vm_object_t *obj, uint32_t base,
         if (page->phys_addr >= X286_PHYS_LIMIT) {
             return -ENOMEM;
         }
-        page_kva = (void *)(uintptr_t)(page->phys_addr + 0xC0000000U);
+        page_kva = P2V(page->phys_addr);
         memset(page_kva, 0, X286_PAGE);
         if (pmap_enter(pmap, base + o, page->phys_addr, prot, 0) < 0) {
             return -ENOMEM;
@@ -550,7 +551,7 @@ static int x286_load(int fd, const char *path, char *const argv[],
     }
     current_process->pmap = (struct pmap *)pmap;
     pmap_activate(pmap);
-    map = vm_map_create(pmap, 0x10000, 0xC0000000U);
+    map = vm_map_create(pmap, 0x10000, USER32_VA_END);
     if (!map) {
         return x286_fail_v(fd, kargv, kenvp, -ENOMEM, "xout286: vm_map_create failed");
     }

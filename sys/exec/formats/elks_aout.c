@@ -3,6 +3,7 @@
 
 #include <machine/pmap.h>
 #include <machine/pmm.h>
+#include <machine/vmparam.h>
 #include <exec/formats/elks_aout.h>
 #include <exec/perso/personality.h>
 #include <kern/arch.h>
@@ -132,7 +133,7 @@ static int elks_map_object_pages(vm_map_t *map, pmap_t pmap, uint32_t start,
         if (page->phys_addr >= 0x3EC00000U) {
             return -ENOMEM;
         }
-        page_kva = (void *)(uintptr_t)(page->phys_addr + 0xC0000000U);
+        page_kva = P2V(page->phys_addr);
         memset(page_kva, 0, 0x1000U);
 
         if (pmap_enter(pmap, va, page->phys_addr, prot, 0) < 0) {
@@ -147,7 +148,7 @@ static int elks_map_object_pages(vm_map_t *map, pmap_t pmap, uint32_t start,
 }
 
 static int elks_is_user_ptr(const void *ptr) {
-    return (uintptr_t)ptr < 0xC0000000U;
+    return (uintptr_t)ptr < KERNEL_VA_START;
 }
 
 static int elks_capture_ptr(char *const array[], int index, char **out) {
@@ -427,7 +428,7 @@ int elks_load(int fd, const char *path, char *const argv[], char *const envp[]) 
     
     current_process->pmap = (struct pmap*)pmap;
     pmap_activate(pmap);
-    map = vm_map_create(pmap, 0x10000, 0xC0000000U);
+    map = vm_map_create(pmap, 0x10000, USER32_VA_END);
     if (!map) {
         elks_free_kernel_vector(kargv);
         elks_free_kernel_vector(kenvp);

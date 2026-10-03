@@ -2724,7 +2724,7 @@ int sys_ioctl(int fd, uint32_t request, void *arg) {
     // However, many ioctls use small structs.
     // This is hard to fix generically without a table.
     // For now, at least validate the pointer if it looks like one.
-    if ((uintptr_t)arg >= KERN_BASE) {
+    if ((uintptr_t)arg >= USER32_VA_END) {
         return -EFAULT;
     }
     return kern_ioctl(fd, request, arg);
@@ -2770,14 +2770,14 @@ int kern_ioctl(int fd, uint32_t request, void *arg) {
         return 0;
     }
 
-    if ((uintptr_t)f->f_data < KERN_BASE) {
+    if ((uintptr_t)f->f_data < KERNEL_VA_START) {
         return -EIO;
     }
 
     fs_node_t *node = (fs_node_t *)f->f_data;
 
     if (node->ioctl) {
-        if ((uintptr_t)node->ioctl < KERN_BASE) {
+        if ((uintptr_t)node->ioctl < KERNEL_VA_START) {
             return -EIO;
         }
         /* Expose the file_t as the read and write paths do: a driver
@@ -4241,13 +4241,13 @@ int kern_proc_info(pid_t pid, sys_procinfo_t *info) {
      * PTY slaves announce as "ptyslave". */
     info->tty = SYS_TTY_NONE;
     if (target->tty &&
-        ((uintptr_t)target->tty >= 0xC0000000U) &&
+        ((uintptr_t)target->tty >= KERNEL_VA_START) &&
         target->tty->magic == 0x5401 /* TTY_MAGIC */) {
         const char *dn = "";
         if (target->tty->driver &&
-            (uintptr_t)target->tty->driver >= 0xC0000000U &&
+            (uintptr_t)target->tty->driver >= KERNEL_VA_START &&
             target->tty->driver->driver_name &&
-            (uintptr_t)target->tty->driver->driver_name >= 0xC0000000U) {
+            (uintptr_t)target->tty->driver->driver_name >= KERNEL_VA_START) {
             dn = target->tty->driver->driver_name;
         }
         int idx = target->tty->index;

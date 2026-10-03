@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include <machine/idt.h>
+#include <machine/vmparam.h>
 #include <exec/formats/elks_aout.h>
 #include <exec/perso/elks_kmem.h>
 #include <exec/perso/elks_syscall_table.h>
@@ -749,7 +750,7 @@ static int elks_decode_softint(registers_t *regs, uint8_t *vector, uintptr_t *ad
                                       &linear_ip) != 0) {
         return 0;
     }
-    if (linear_ip >= 0xC0000000U) {
+    if (linear_ip >= USER32_VA_END) {
         return 0;
     }
 

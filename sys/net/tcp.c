@@ -3272,12 +3272,12 @@ int tcp_take_so_error(tcp_pcb_t *p) {
 int tcp_close(tcp_pcb_t *p) {
     if (!p) return 0;
     /* Defensive: a tcp_pcb_t always lives in the kernel direct map
-     * (>= 0xC0000000).  A low/garbage pointer here means the owning
+     * (>= KERNEL_VA_START).  A low/garbage pointer here means the owning
      * socket's ->tcp field was corrupted; dereferencing it would
      * triple-fault.  Drop it instead so one bad socket can't take
      * the kernel down.  (The corruptor itself is a separate bug —
      * tracked via tests/lib/c/test_tcp.c, which reproduces it.) */
-    if ((uintptr_t)p < 0xC0000000u) {
+    if ((uintptr_t)p < KERNEL_VA_START) {
         kprintf("tcp_close: refusing bogus pcb %p — socket ->tcp corrupted\n", p);
         return 0;
     }

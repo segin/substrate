@@ -1630,7 +1630,7 @@ void tty_hangup_session(struct tty *tty) {
  * denied the controlling terminal (TIOCSCTTY -> EPERM).
  */
 int tty_revoke(struct tty *tty) {
-    if (!tty || (unsigned long)tty < 0xC0000000UL || !tty_valid(tty)) {
+    if (!tty || (uintptr_t)tty < KERNEL_VA_START || !tty_valid(tty)) {
         return -ENOTTY;
     }
     TTY_LOCK(tty);

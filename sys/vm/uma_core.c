@@ -18,7 +18,7 @@
 #endif
 
 #include <kern/panic.h>
-#include <sys/param.h>   /* KERN_BASE */
+#include <sys/param.h>   /* KERNEL_VA_START */
 
 
 static uma_zone_t *uma_zones = NULL;
@@ -129,12 +129,12 @@ static int uma_hash_corrupt_reports = 0;
  *
  * Every slab header lives in the kernel direct map -- an on-page header at
  * page + PAGE_SIZE - overhead, an off-page one from kzalloc -- so anything
- * below KERN_BASE cannot be one.  Checking the POINTER before dereferencing
+ * below KERNEL_VA_START cannot be one.  Checking the POINTER before dereferencing
  * it is what turns "unhandled kernel exception" into a report naming the
  * bucket.
  */
 static inline int uma_slab_ptr_plausible(const uma_slab_t *s) {
-    return s != NULL && (uintptr_t)s >= (uintptr_t)KERN_BASE;
+    return s != NULL && (uintptr_t)s >= (uintptr_t)KERNEL_VA_START;
 }
 
 static void uma_hash_report_corrupt(uint32_t bucket, uma_slab_t *slab, uint32_t depth) {
@@ -145,7 +145,7 @@ static void uma_hash_report_corrupt(uint32_t bucket, uma_slab_t *slab, uint32_t 
     if (!uma_slab_ptr_plausible(slab)) {
         /* The pointer itself is the wreckage -- do not dereference it. */
         kprintf("UMA: hash bucket %u entry %u has an implausible slab pointer "
-                "%p (below KERN_BASE) -- chain corrupted\n",
+                "%p (below KERNEL_VA_START) -- chain corrupted\n",
                 bucket, depth, (void *)slab);
         return;
     }
@@ -663,7 +663,7 @@ static uma_slab_t *uma_slab_alloc(uma_zone_t *zone) {
          * on an 8GB guest.
          *
          * Every slab header lives in the kernel direct map, so anything below
-         * KERN_BASE cannot be one.  Treat it as an allocation failure: the
+         * KERNEL_VA_START cannot be one.  Treat it as an allocation failure: the
          * caller already handles that path, and the frame is released below.
          */
         if (!uma_slab_ptr_plausible(slab)) {

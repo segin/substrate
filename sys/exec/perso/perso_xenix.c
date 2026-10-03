@@ -25,6 +25,7 @@
 #include <string.h>
 
 #include <machine/idt.h>
+#include <machine/vmparam.h>
 #include <exec/perso/personality.h>
 #include <exec/perso/svr3/svr3_syscalls.h>
 #include <kern/cmdline.h>
@@ -166,7 +167,7 @@ static int xenix_is_syscall_lcall(registers_t *regs) {
     if (xenix_seg_to_linear((uint16_t)regs->cs, regs->eip, &linear_ip) != 0) {
         return 0;
     }
-    if (linear_ip >= 0xC0000000U) {
+    if (linear_ip >= USER32_VA_END) {
         return 0;
     }
     if (copyin((const void *)linear_ip, insn, sizeof(insn)) != 0) {

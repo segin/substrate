@@ -1,6 +1,7 @@
 #include <stdint.h>
 #include <string.h>
 
+#include <machine/vmparam.h>
 #include <arch/x86-common/io.h>
 #include <drivers/video/fb.h>
 #include <drivers/video/vga.h>
@@ -491,7 +492,7 @@ static int vga_set_mode_internal(int mode_id) {
      * writing to its tty.  The raw low alias (0xA0000) is only in the kernel
      * pmap; pmap_create() clears the low PDEs, so a userland pmap leaves it
      * unmapped and userspace output would never reach the screen. */
-    fb.addr = (uint32_t*)(mode->mem_base + 0xC0000000U);
+    fb.addr = (uint32_t*)P2V(mode->mem_base);
     fb.phys = mode->mem_base;
     fb.putpixel = mode->putpixel;
     fb.copyarea = NULL;

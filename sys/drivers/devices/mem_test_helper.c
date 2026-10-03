@@ -3,6 +3,7 @@
 
 #include <machine/pmap.h>
 #include <machine/pmm.h>
+#include <machine/vmparam.h>
 #include <kern/console.h>
 #include <sys/types.h>
 #include <vfs/vfs.h>
@@ -45,7 +46,7 @@ void mem_test_init(void) {
 
     // Get Physical Address
     // test_page_virt is kernel direct mapped address (0xC0000000 + PA)
-    test_page_phys = (uintptr_t)test_page_virt - 0xC0000000;
+    test_page_phys = V2P(test_page_virt);
 
     // Register device
     memset(&mem_test_node, 0, sizeof(fs_node_t));

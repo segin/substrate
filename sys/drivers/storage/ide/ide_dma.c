@@ -7,6 +7,7 @@
 #include <string.h>
 
 #include <machine/pmap.h>
+#include <machine/vmparam.h>
 #include <drivers/storage/ide/ide.h>
 #include <drivers/storage/ide/ide_priv.h>
 #include <kern/console.h>
@@ -105,14 +106,12 @@ int ide_prdt_build_entries(prdt_entry_t *prdt, size_t max_entries,
  * the first attempt.
  *
  * Every buffer reaching here is in the kernel direct map, so the translation
- * is the fixed KERN_BASE offset and needs no page-table walk at all.
+ * is the fixed KERN_BASE offset (V2P) and needs no page-table walk at all.
  */
-#define IDE_KERN_BASE  0xC0000000U
-
 static inline uint32_t ide_kva_to_phys(uintptr_t va) {
-    if (va < IDE_KERN_BASE)
+    if (va < KERN_BASE)
         return 0;                       /* not a direct-mapped kernel address */
-    return (uint32_t)(va - IDE_KERN_BASE);
+    return (uint32_t)V2P(va);
 }
 
 int ide_prdt_setup(uint8_t channel, void *buffer, uint32_t byte_count) {

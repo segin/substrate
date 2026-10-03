@@ -44,7 +44,7 @@ int validate_user_addr(const void *addr, size_t size) {
         return EFAULT;
 
     /* Must be below kernel space */
-    if (end > KERN_BASE)
+    if (end > USER32_VA_END)
         return EFAULT;
 
     return 0;

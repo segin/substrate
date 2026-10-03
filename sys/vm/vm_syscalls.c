@@ -81,10 +81,10 @@ static int vm_user_range_valid(uintptr_t start, size_t length) {
     if (length == 0) {
         return -1;
     }
-    if (start < USER_STACK_MIN || start >= KERN_BASE) {
+    if (start < USER_STACK_MIN || start >= USER32_VA_END) {
         return -1;
     }
-    if (length > (size_t)(KERN_BASE - start)) {
+    if (length > (size_t)(USER32_VA_END - start)) {
         return -1;
     }
     return 0;
@@ -95,7 +95,7 @@ static void brk_unmap_free_pages(pmap_t pmap, uintptr_t start, uintptr_t end) {
         uintptr_t pa = pmap_extract(pmap, va);
         if (pa != 0) {
             pmap_remove(pmap, va);
-            pmm_free_block((void *)((pa & ~0xFFFU) + KERN_BASE));
+            pmm_free_block(P2V(pa & ~0xFFFU));
         }
     }
 }
@@ -582,7 +582,7 @@ static void *sys_brk_locked(void *addr) {
     }
 
     // Don't allow mapping into kernel address space
-    if (new_brk >= 0xC0000000)
+    if (new_brk >= USER32_VA_END)
         return (void *)(uintptr_t)old_brk;
 
     if (old_brk + 0xFFF < old_brk || new_brk + 0xFFF < new_brk)
@@ -625,7 +625,7 @@ static void *sys_brk_locked(void *addr) {
                 if (!pa_virt) {
                      // Cleanup current batch (not mapped yet)
                      for (int k = 0; k < batch_count; k++) {
-                         pmm_free_block((void*)(pa_batch[k] + 0xC0000000));
+                         pmm_free_block(P2V(pa_batch[k]));
                      }
                      brk_unmap_free_pages(brk_pmap, old_page_end, batch_va_start);
                      vm_commit_uncharge(grow_pages); /* grow aborted */
@@ -634,7 +634,7 @@ static void *sys_brk_locked(void *addr) {
                      }
                      return (void *)(uintptr_t)old_brk; // Out of memory
                 }
-                pa_batch[batch_count++] = (uintptr_t)pa_virt - 0xC0000000;
+                pa_batch[batch_count++] = V2P(pa_virt);
 
                 // Zero page immediately (warm cache)
                 memset(pa_virt, 0, 0x1000);
@@ -651,7 +651,7 @@ static void *sys_brk_locked(void *addr) {
                      if (mapped_pa == pa_batch[k]) {
                          pmap_remove(brk_pmap, page_va);
                      }
-                     pmm_free_block((void *)(pa_batch[k] + KERN_BASE));
+                     pmm_free_block(P2V(pa_batch[k]));
                  }
                  brk_unmap_free_pages(brk_pmap, old_page_end, batch_va_start);
                  vm_commit_uncharge(grow_pages); /* grow aborted */

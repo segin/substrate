@@ -1,13 +1,13 @@
 #include <string.h>
 
 #include <machine/pmm.h>
+#include <machine/vmparam.h>
 #include <arch/x86-common/io.h>
 #include <drivers/virtio/virtio.h>
 #include <kern/console.h>
 
 #define VIRTIO_GPU_CTRLQ_INDEX   0
 #define VIRTIO_GPU_CURSORQ_INDEX 1
-#define VIRTIO_GPU_KERNEL_BASE   0xC0000000u
 
 #define VIRTIO_GPU_CMD_GET_DISPLAY_INFO       0x0100U
 #define VIRTIO_GPU_CMD_RESOURCE_CREATE_2D     0x0101U
@@ -147,8 +147,8 @@ static uintptr_t virtio_gpu_phys_addr(const void *ptr) {
 #ifdef HOST_TEST
     return addr;
 #else
-    if (addr >= VIRTIO_GPU_KERNEL_BASE) {
-        addr -= VIRTIO_GPU_KERNEL_BASE;
+    if (addr >= KERN_BASE) {
+        addr = V2P(addr);
     }
     return addr;
 #endif

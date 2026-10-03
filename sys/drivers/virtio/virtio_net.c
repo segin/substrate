@@ -20,6 +20,7 @@
 
 #include <machine/intr.h>
 #include <machine/pmm.h>
+#include <machine/vmparam.h>
 #include <arch/x86-common/io.h>
 #include <drivers/virtio/virtio.h>
 #include <kern/console.h>
@@ -128,7 +129,7 @@ static int vnet_queue_init(vnet_queue_t *q, uint16_t qsel) {
         return -ENOMEM;
     }
     memset(page, 0, pages * 4096);
-    uint32_t page_phys = (uint32_t)page - 0xC0000000;
+    uint32_t page_phys = (uint32_t)V2P(page);
 
     q->desc  = (struct vring_desc *)page;
     q->avail = (struct vring_avail *)((uint8_t *)page + 16 * qsz);
@@ -154,7 +155,7 @@ static int vnet_queue_init(vnet_queue_t *q, uint16_t qsel) {
 
 static void vnet_rx_post(int i) {
     vnet_queue_t *q = &vn.rxq;
-    uint32_t buf_phys = (uint32_t)q->bufs[i] - 0xC0000000;
+    uint32_t buf_phys = (uint32_t)V2P(q->bufs[i]);
     q->desc[i].addr  = buf_phys;
     q->desc[i].len   = VIRTIO_NET_HDR_LEN + VNET_FRAME_MAX;
     q->desc[i].flags = VRING_DESC_F_WRITE;   /* device writes into us */
@@ -276,7 +277,7 @@ static int vnet_xmit(netdev_t *dev, const void *frame, size_t len) {
     memset(buf, 0, VIRTIO_NET_HDR_LEN);   /* zero header */
     memcpy(buf + VIRTIO_NET_HDR_LEN, frame, len);
 
-    uint32_t buf_phys = (uint32_t)buf - 0xC0000000;
+    uint32_t buf_phys = (uint32_t)V2P(buf);
     q->desc[desc_id].addr  = buf_phys;
     q->desc[desc_id].len   = VIRTIO_NET_HDR_LEN + len;
     q->desc[desc_id].flags = 0;   /* read by device */

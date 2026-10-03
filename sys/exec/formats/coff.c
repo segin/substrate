@@ -13,6 +13,7 @@
 #include <sys/proc.h>
 #include <machine/pmap.h>
 #endif
+#include <machine/vmparam.h>
 
 #include <string.h>
 
@@ -188,7 +189,7 @@ int coff_load_file(void *file, uint32_t size) {
         if (scnhdr[i].s_size == 0) continue;
 
         // Check for overflow and reject sections mapping into kernel space
-        if (va_end < va_start || va_start >= 0xC0000000 || va_end > 0xC0000000) {
+        if (va_end < va_start || va_start >= USER32_VA_END || va_end > USER32_VA_END) {
             kprint("COFF: Section maps into kernel space\n");
             return -1;
         }

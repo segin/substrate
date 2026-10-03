@@ -188,9 +188,8 @@ int pmap_fault(uint32_t err_code, uint32_t cr2);
 #define PT_INDEX(va)    ((((uint32_t)(va)) >> 12) & 0x3FF)
 #define PTE_FRAME       0xFFFFF000 // Frame address mask
 
-// Kernel Address Space Translations (Higher Half)
-#define V2P(x) ((uint32_t)(x) - 0xC0000000)
-#define P2V(x) ((void*)((uint32_t)(x) + 0xC0000000))
+// Kernel Address Space Translations (Higher Half): V2P/P2V
+#include <arch/i386/vmparam.h>
 
 // Threshold for switching to full TLB flush vs individual INVLPG
 #define TLB_BATCH_THRESHOLD 32

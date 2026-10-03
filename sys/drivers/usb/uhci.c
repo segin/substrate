@@ -25,6 +25,7 @@ void intr_enable(void);
 #include <machine/intr.h>
 #include <arch/x86-common/io.h>
 #endif
+#include <machine/vmparam.h>
 #include <drivers/usb/uhci.h>
 #include <drivers/usb/usb.h>
 #include <kern/bus.h>
@@ -547,7 +548,7 @@ static int uhci_poll_td(uhci_hc_t *hc, struct uhci_td *td,
         /* Move to next TD */
         if (td->link & UHCI_TD_LINK_T)
             break;
-        td = (struct uhci_td *)((uintptr_t)(td->link & ~0xF) + 0xC0000000);
+        td = (struct uhci_td *)P2V(td->link & ~0xF);
     }
 
     if (actual_len)
@@ -577,7 +578,7 @@ static void uhci_quiesce_chain(uhci_hc_t *hc, struct uhci_td *first_td)
         td->ctrl_status &= ~UHCI_TD_CTRL_ACTIVE;
         if (td->link & UHCI_TD_LINK_T)
             break;
-        td = (struct uhci_td *)((uintptr_t)(td->link & ~0xF) + 0xC0000000);
+        td = (struct uhci_td *)P2V(td->link & ~0xF);
     }
     __sync_synchronize();
 
@@ -727,7 +728,7 @@ cleanup:
         while (td) {
             struct uhci_td *next = NULL;
             if (!(td->link & UHCI_TD_LINK_T))
-                next = (struct uhci_td *)((uintptr_t)(td->link & ~0xF) + 0xC0000000);
+                next = (struct uhci_td *)P2V(td->link & ~0xF);
             uhci_free_td(hc, td);
             td = next;
         }
@@ -863,7 +864,7 @@ static int uhci_bulk_transfer(uhci_hc_t *hc, usb_transfer_t *xfer)
             }
 
             if (td->link & UHCI_TD_LINK_T) break;
-            td = (struct uhci_td *)((uintptr_t)(td->link & ~0xF) + 0xC0000000);
+            td = (struct uhci_td *)P2V(td->link & ~0xF);
         }
     }
 
@@ -874,7 +875,7 @@ cleanup:
         while (td) {
             struct uhci_td *next = NULL;
             if (!(td->link & UHCI_TD_LINK_T))
-                next = (struct uhci_td *)((uintptr_t)(td->link & ~0xF) + 0xC0000000);
+                next = (struct uhci_td *)P2V(td->link & ~0xF);
             uhci_free_td(hc, td);
             td = next;
         }

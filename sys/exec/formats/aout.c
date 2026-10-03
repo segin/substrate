@@ -168,7 +168,7 @@ static int aout_check(const char *path, const char *header_buf, size_t len) {
 #define AOUT_PAGE       0x1000U
 #define AOUT_PAGE_MASK  (AOUT_PAGE - 1U)
 #define AOUT_ROUND_UP(x) (((x) + AOUT_PAGE_MASK) & ~AOUT_PAGE_MASK)
-#define AOUT_USER_MAX    0xC0000000U
+#define AOUT_USER_MAX    USER32_VA_END
 #define AOUT_PHYS_LIMIT  0x3EC00000U     /* kernel direct-map ceiling */
 
 static int aout_debug_enabled(void) {
@@ -299,7 +299,7 @@ static int aout_map_region(pmap_t pmap, vm_map_t *map, uint32_t va,
         if (page->phys_addr >= AOUT_PHYS_LIMIT) {
             return -ENOMEM;
         }
-        kva = (void *)(uintptr_t)(page->phys_addr + 0xC0000000U);
+        kva = P2V(page->phys_addr);
         memset(kva, 0, AOUT_PAGE);
         if (pmap_enter(pmap, o, page->phys_addr, prot, 0) < 0) {
             return -ENOMEM;
@@ -346,7 +346,7 @@ static int aout_build_stack(pmap_t pmap, char **kargv, int argc,
         if (!pa) {
             goto oom;
         }
-        phys = (uint32_t)(uintptr_t)pa - 0xC0000000U;
+        phys = (uint32_t)V2P(pa);
         if (pmap_enter(pmap, base + i2 * AOUT_PAGE, phys, VM_PROT_WRITE, 0) < 0) {
             pmm_free_block(pa);
             goto oom;

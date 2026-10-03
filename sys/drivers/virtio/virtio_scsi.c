@@ -15,6 +15,7 @@
 
 #include <machine/percpu.h>
 #include <machine/pmm.h>
+#include <machine/vmparam.h>
 #include <arch/x86-common/io.h>
 #include <drivers/storage/scsi/scsi.h>
 #include <drivers/virtio/virtio.h>
@@ -143,7 +144,6 @@ struct virtio_scsi_event {
     uint32_t reason;
 } __attribute__((packed));
 
-#define VIRTIO_SCSI_KERNEL_BASE 0xC0000000u
 #define VIRTIO_SCSI_EVENT_SLOTS 4
 
 /*
@@ -212,8 +212,8 @@ static uint32_t vscsi_phys_addr(const void *ptr) {
 #ifdef HOST_TEST
     return (uint32_t)addr;
 #else
-    if (addr >= VIRTIO_SCSI_KERNEL_BASE) {
-        addr -= VIRTIO_SCSI_KERNEL_BASE;
+    if (addr >= KERN_BASE) {
+        addr = V2P(addr);
     }
     return (uint32_t)addr;
 #endif

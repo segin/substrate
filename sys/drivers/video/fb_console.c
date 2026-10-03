@@ -10,6 +10,7 @@
 #include <string.h>
 
 #include <machine/intr.h>
+#include <machine/vmparam.h>
 #include <drivers/video/fb.h>
 #include <drivers/video/fb_console.h>
 #include <drivers/video/fb_ops.h>
@@ -116,7 +117,7 @@ static inline int fbcon_shadow_ok(void) {
  * synchronous write path (the writing thread's context).
  */
 static inline int fbcon_present_safe_in_irq(void) {
-    return (uintptr_t)fb.addr >= 0xC0000000U;
+    return (uintptr_t)fb.addr >= KERNEL_VA_START;
 }
 
 /* Planar VGA/EGA — distinguished by the batched plane-write hook.  Planar

@@ -5,6 +5,7 @@
 #include <machine/intr.h>
 #include <machine/pmap.h>
 #include <machine/pmm.h>
+#include <machine/vmparam.h>
 #include <arch/x86-common/io.h>
 #include <drivers/storage/blkdev.h>
 #include <drivers/virtio/virtio.h>
@@ -33,11 +34,6 @@
  * capacity in 512-byte sectors.
  */
 #define VIRTIO_BLK_CFG_CAPACITY 0x14
-
-/* Kernel direct map: every page the PMM hands out is reachable at
- * phys + 0xC0000000, so a physical address is a plain subtraction.  Same
- * constant virtio_net and virtio_scsi use. */
-#define VIRTIO_BLK_KERNEL_BASE  0xC0000000u
 
 /* Size of the driver-owned DMA bounce region's data area.  Requests larger
  * than this are split; 64 KiB comfortably covers the block layer's
@@ -159,9 +155,11 @@ static inline void vblk_unlock(struct vblk_dev *d, uint32_t flags) {
 
 /* Physical address of a direct-mapped kernel pointer.  Only valid for
  * memory obtained from the PMM (the ring and the DMA region), which is
- * exactly what this driver hands to the device. */
+ * exactly what this driver hands to the device: every page the PMM hands
+ * out is reachable through the kernel direct map, so V2P is a plain
+ * subtraction of KERN_BASE. */
 static inline uint64_t vblk_phys(const void *p) {
-    return (uint64_t)((uintptr_t)p - VIRTIO_BLK_KERNEL_BASE);
+    return (uint64_t)V2P(p);
 }
 
 static int vblk_bdev_read(blkdev_t *dev, uint64_t sector, uint32_t count, void *buffer);

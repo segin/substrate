@@ -101,8 +101,8 @@ typedef struct multiboot_module {
 } __attribute__((packed)) multiboot_module_t;
 
 // 1. Address Translation Macros (since we are Higher Half)
-#define PHYSICAL_d(x) ((uint32_t)(x) - KERN_BASE)
-#define VIRTUAL_d(x)  ((void*)(uintptr_t)((uint32_t)(x) + KERN_BASE))
+#define PHYSICAL_d(x) ((uint32_t)V2P(x))
+#define VIRTUAL_d(x)  P2V((uint32_t)(x))
 
 /* RSDP copied out of the multiboot2 ACPI tag; see multiboot_get_acpi_rsdp(). */
 static uint8_t mboot_acpi_rsdp[36];

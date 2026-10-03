@@ -13,6 +13,7 @@
 
 #include <machine/pmap.h>
 #include <machine/pmm.h>
+#include <machine/vmparam.h>
 #include <kern/console.h>
 #include <sys/errno.h>
 #include <sys/mman.h>
@@ -20,14 +21,12 @@
 #include <sys/proc.h>
 #include <vfs/vfs.h>
 
-#define KERNEL_DIRECT_MAP_BASE 0xC0000000U
-
 static inline uint32_t zero_phys_from_virt(void *virt) {
-    return (uint32_t)(uintptr_t)virt - KERNEL_DIRECT_MAP_BASE;
+    return (uint32_t)V2P(virt);
 }
 
 static inline void *zero_virt_from_phys(uint32_t phys) {
-    return (void *)(uintptr_t)(phys + KERNEL_DIRECT_MAP_BASE);
+    return P2V(phys);
 }
 
 static fs_node_t zero_node;

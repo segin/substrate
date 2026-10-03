@@ -8,6 +8,7 @@
 #include <stdint.h>
 #include <stdio.h>
 
+#include <machine/vmparam.h>
 #include <kern/console.h>
 #include <kern/ksyms.h>
 #include <kern/panic.h>
@@ -18,7 +19,7 @@
 /* Stack frame structure (standard x86 calling convention) */
 struct stack_frame {
     struct stack_frame *ebp;  /* Saved EBP (previous frame) */
-    uint32_t eip;             /* Return address */
+    uintptr_t eip;            /* Return address */
 };
 
 /*
@@ -39,16 +40,16 @@ void stack_trace(void) {
     kprint("\n--- Stack Trace ---\n");
     
     while (frame && depth < MAX_STACK_FRAMES) {
-        /* Validate frame pointer is in kernel space (0xC0000000+) to prevent crashes */
-        if ((uint32_t)frame < 0xC0000000 || (uint32_t)frame > 0xFFFFFFFF - sizeof(*frame)) {
-            snprintf(buf, sizeof(buf), "  #%d: [Invalid frame pointer 0x%08x]\n", depth, (uint32_t)frame);
+        /* Validate frame pointer is in kernel space to prevent crashes */
+        if ((uintptr_t)frame < KERNEL_VA_START || (uintptr_t)frame > UINTPTR_MAX - sizeof(*frame)) {
+            snprintf(buf, sizeof(buf), "  #%d: [Invalid frame pointer %p]\n", depth, (void *)frame);
             kprint(buf);
             break;
         }
-        
+
         /* Check alignment (EBP should be 4-byte aligned) */
-        if ((uint32_t)frame & 0x3) {
-            snprintf(buf, sizeof(buf), "  #%d: [Misaligned frame 0x%08x]\n", depth, (uint32_t)frame);
+        if ((uintptr_t)frame & 0x3) {
+            snprintf(buf, sizeof(buf), "  #%d: [Misaligned frame %p]\n", depth, (void *)frame);
             kprint(buf);
             break;
         }
@@ -63,11 +64,11 @@ void stack_trace(void) {
          * corrupted frame chain can easily walk into.
          */
         if (!panic_addr_readable((uintptr_t)frame, sizeof(*frame))) {
-            snprintf(buf, sizeof(buf), "  #%d: [Unmapped frame 0x%08x]\n", depth, (uint32_t)frame);
+            snprintf(buf, sizeof(buf), "  #%d: [Unmapped frame %p]\n", depth, (void *)frame);
             kprint(buf);
             break;
         }
-        
+
         /* Resolve symbol for EIP */
         ksym_resolve(frame->eip, sym_buf, sizeof(sym_buf));
         snprintf(buf, sizeof(buf), "  #%d: %s\n", depth, sym_buf);
@@ -93,7 +94,7 @@ void stack_trace(void) {
  * Used for exception handlers where we have saved register context.
  */
 void stack_trace_from(uint32_t ebp, uint32_t eip) {
-    struct stack_frame *frame = (struct stack_frame *)ebp;
+    struct stack_frame *frame = (struct stack_frame *)(uintptr_t)ebp;
     char buf[80];
     char sym_buf[64];
     int depth = 0;
@@ -108,14 +109,14 @@ void stack_trace_from(uint32_t ebp, uint32_t eip) {
     
     while (frame && depth < MAX_STACK_FRAMES) {
         /* Validate frame pointer */
-        if ((uint32_t)frame < 0xC0000000 || (uint32_t)frame > 0xFFFFFFFF - sizeof(*frame)) {
-            snprintf(buf, sizeof(buf), "  #%d: [Invalid frame 0x%08x]\n", depth, (uint32_t)frame);
+        if ((uintptr_t)frame < KERNEL_VA_START || (uintptr_t)frame > UINTPTR_MAX - sizeof(*frame)) {
+            snprintf(buf, sizeof(buf), "  #%d: [Invalid frame %p]\n", depth, (void *)frame);
             kprint(buf);
             break;
         }
-        
-        if ((uint32_t)frame & 0x3) {
-            snprintf(buf, sizeof(buf), "  #%d: [Misaligned frame 0x%08x]\n", depth, (uint32_t)frame);
+
+        if ((uintptr_t)frame & 0x3) {
+            snprintf(buf, sizeof(buf), "  #%d: [Misaligned frame %p]\n", depth, (void *)frame);
             kprint(buf);
             break;
         }
@@ -126,7 +127,7 @@ void stack_trace_from(uint32_t ebp, uint32_t eip) {
          * straight from the faulting trap frame, so it is the likeliest of
          * the two to be handed a corrupted chain. */
         if (!panic_addr_readable((uintptr_t)frame, sizeof(*frame))) {
-            snprintf(buf, sizeof(buf), "  #%d: [Unmapped frame 0x%08x]\n", depth, (uint32_t)frame);
+            snprintf(buf, sizeof(buf), "  #%d: [Unmapped frame %p]\n", depth, (void *)frame);
             kprint(buf);
             break;
         }
