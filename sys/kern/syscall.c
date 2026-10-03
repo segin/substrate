@@ -37,6 +37,7 @@
 #include <sys/fcntl.h>
 #include <sys/file.h>
 #include <sys/ioctl.h>
+#include <sys/compat32.h>
 #include <sys/kern_syscalls.h>
 #include <sys/lock.h>
 #include <sys/mount.h>
@@ -1441,8 +1442,9 @@ int sys__exit(int code) {
 
 int sys_thr_new(struct thr_param *param, int param_size) {
     struct thr_param kparam;
-    if (param_size < (int)sizeof(struct thr_param)) return -EINVAL;
-    if (copyin(param, &kparam, sizeof(struct thr_param)) != 0) return -14;
+    /* The process passes the i386 layout (<sys/compat32.h>). */
+    if (param_size < (int)sizeof(struct thr_param32)) return -EINVAL;
+    if (thr_param_copyin(param, &kparam) != 0) return -14;
 
     // We also need to handle child_tid if it is provided
     // kern_thr_new writes to *p.child_tid
@@ -1454,7 +1456,9 @@ int sys_thr_new(struct thr_param *param, int param_size) {
     int ret = kern_thr_new(&kparam, sizeof(struct thr_param));
 
     if (ret == 0 && orig_child_tid) {
-        if (copyout(&kchild_tid, orig_child_tid, sizeof(long)) != 0) return -14;
+        /* The process's long is 32 bits. */
+        abi_long_t utid = (abi_long_t)kchild_tid;
+        if (copyout(&utid, orig_child_tid, sizeof(utid)) != 0) return -14;
     }
     return ret;
 }

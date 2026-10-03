@@ -43,6 +43,7 @@
 #include <kern/sleepq.h>
 #include <kern/time.h>
 #include <pm/pm.h>
+#include <sys/compat32.h>
 #include <sys/copy.h>
 #include <sys/fcntl.h>
 #include <sys/ipc.h>
@@ -877,7 +878,8 @@ int sys_mq_notify(int mqd, const struct sigevent *usev)
     struct sigevent ksev;
     const struct sigevent *sevp = NULL;
     if (usev) {
-        if (copyin(usev, &ksev, sizeof(ksev)) != 0)
+        /* The process's struct sigevent is the i386 one. */
+        if (sigevent_copyin(usev, &ksev) != 0)
             return -EFAULT;
         sevp = &ksev;
     }

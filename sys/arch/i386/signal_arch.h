@@ -6,7 +6,8 @@
 #define _ARCH_I386_SIGNAL_ARCH_H
 
 #include <stdint.h>
-#include <sys/signal.h>  /* For stack_t, siginfo_t */
+#include <sys/signal.h>
+#include <sys/compat32.h>  /* stack32_t, siginfo32_t: the process's layouts */
 
 /*
  * Signal trampoline address - mapped by kernel at a fixed location.
@@ -144,11 +145,12 @@ typedef struct mcontext {
  */
 typedef struct ucontext {
     uint32_t         uc_flags;
-    struct ucontext *uc_link;       /* Pointer to context resumed when this returns */
-    stack_t          uc_stack;      /* Stack used by this context */
+    uptr32_t         uc_link;       /* struct ucontext *: context resumed when this returns */
+    stack32_t        uc_stack;      /* Stack used by this context */
     mcontext_t       uc_mcontext;   /* Machine-specific context */
     uint32_t         uc_sigmask;    /* Signal mask */
 } ucontext_t;
+ABI32_ASSERT_SIZE(ucontext_t, 620);
 
 /*
  * SA_SIGINFO Signal Frame (siginfo_frame)
@@ -171,9 +173,10 @@ struct siginfo_frame {
     int         sig;            /* Argument 1: Signal number */
     uint32_t    info_ptr;       /* Argument 2: Pointer to siginfo_t */
     uint32_t    ucontext_ptr;   /* Argument 3: Pointer to ucontext_t */
-    siginfo_t   info;           /* siginfo_t structure */
+    siginfo32_t info;           /* siginfo_t, as the process sees it */
     ucontext_t  uc;             /* ucontext_t structure */
 };
+ABI32_ASSERT_SIZE(struct siginfo_frame, 768);
 
 extern unsigned char sig_trampoline_code[];
 extern unsigned int sig_trampoline_size;

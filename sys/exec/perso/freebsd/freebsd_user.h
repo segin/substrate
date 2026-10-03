@@ -103,13 +103,8 @@ struct freebsd_rusage {
     int32_t ru_nivcsw;
 };
 
-/*
- * FreeBSD iovec (for readv/writev)
- */
-struct freebsd_iovec {
-    void   *iov_base;
-    size_t  iov_len;
-};
+/* FreeBSD's i386 iovec is the native one: iovec_copyin() reads it
+ * (<sys/compat32.h>). */
 
 /*
  * FreeBSD stat structure.
@@ -609,8 +604,7 @@ int     freebsd_sys_pathconf(const char *path, int name);
 int     freebsd_sys_sched_prio_max(int policy);
 int     freebsd_sys_sched_prio_min(int policy);
 int     freebsd_sys_kenv(int what, const char *name, char *value, int len);
-int     freebsd_sys_nmount(const struct freebsd_iovec *iov, unsigned int niov,
-                           int flags);
+int     freebsd_sys_nmount(const void *iov, unsigned int niov, int flags);
 
 int freebsd_sys_open(const char *path, int flags, int mode);
 int freebsd_sys_openat(int dirfd, const char *path, int flags, int mode);

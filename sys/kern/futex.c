@@ -19,6 +19,7 @@
 #include <kern/sched.h>
 #include <kern/sleepq.h>
 #include <kern/time.h>
+#include <sys/compat32.h>
 #include <sys/errno.h>
 #include <sys/futex.h>
 #include <sys/proc.h>
@@ -214,43 +215,46 @@ void futex_thread_exit(thread_t *t) {
     if (!t || !t->robust_list) return;
     
     /* Copy the robust_list_head from userspace into a kernel-stack local
-     * to avoid direct dereferences of the userspace pointer */
-    struct robust_list_head *uhead = t->robust_list;
-    struct robust_list_head khead;
-    if (copyin(uhead, &khead, sizeof(khead)) != 0) {
+     * to avoid direct dereferences of the userspace pointer.  It, and the
+     * list it heads, are laid out as the process sees them: 32-bit
+     * pointers (<sys/compat32.h>). */
+    uptr32_t uhead = (uptr32_t)(uintptr_t)t->robust_list;
+    struct robust_list_head32 khead;
+    if (copyin(UPTR32(uhead), &khead, sizeof(khead)) != 0) {
         t->robust_list = NULL;
         t->robust_list_len = 0;
         return;
     }
-    
-    struct robust_list *entry;
+
+    uptr32_t entry;
     int count = 0;
     const int MAX_ROBUST_WALK = 256;  /* Bound exit-path work for malformed robust lists */
-    
+
     /* Process pending entry first (in case we died mid-lock/unlock) */
     if (khead.list_op_pending) {
-        int *futex_addr = (int *)((char *)khead.list_op_pending + khead.futex_offset);
+        int *futex_addr = UPTR32(khead.list_op_pending + (uint32_t)khead.futex_offset);
         int val;
-        
+
         if (futex_read_user(futex_addr, &val) == 0) {
             if ((val & FUTEX_TID_MASK) == (uint32_t)t->tid) {
                 futex_handle_dead_owner(futex_addr);
             }
         }
     }
-    
+
     /* Walk the circular list.
-     * The list head sentinel is at &uhead->list (userspace address),
-     * so we compare against that for list termination. */
-    entry = khead.list.next;
-    while (entry != &uhead->list && count < MAX_ROBUST_WALK) {
-        struct robust_list *next;
-        
+     * The list head sentinel is the head's own list member, at the start of
+     * the head (userspace address), so we compare against that for list
+     * termination. */
+    entry = khead.list_next;
+    while (entry != uhead && count < MAX_ROBUST_WALK) {
+        uptr32_t next;
+
         /* Read next pointer safely before processing */
-        if (futex_read_user((int *)&entry->next, (int *)&next) != 0) break;
-        
+        if (futex_read_user(UPTR32(entry), (int *)&next) != 0) break;
+
         /* Calculate futex address from entry */
-        int *futex_addr = (int *)((char *)entry + khead.futex_offset);
+        int *futex_addr = UPTR32(entry + (uint32_t)khead.futex_offset);
         int val;
         
         if (futex_read_user(futex_addr, &val) == 0) {
@@ -311,8 +315,8 @@ int sys_set_tid_address(int *tidptr) {
 int sys_set_robust_list(struct robust_list_head *head, size_t len) {
     if (!current_thread) return -EINVAL;
     
-    /* Validate size matches expected structure size */
-    if (len != sizeof(struct robust_list_head)) {
+    /* Validate size matches the process's layout of the structure */
+    if (len != sizeof(struct robust_list_head32)) {
         return -EINVAL;
     }
     
@@ -364,10 +368,13 @@ int sys_get_robust_list(int pid, struct robust_list_head **head_ptr, size_t *len
         return -EFAULT;
     }
     
-    /* Write results to userspace via copyout */
-    if (copyout(&target->robust_list, head_ptr, sizeof(*head_ptr)) != 0)
+    /* Write results to userspace via copyout, as the process's 32-bit
+     * pointer and size_t. */
+    uptr32_t uhead = (uptr32_t)(uintptr_t)target->robust_list;
+    uint32_t ulen = (uint32_t)target->robust_list_len;
+    if (copyout(&uhead, head_ptr, sizeof(uhead)) != 0)
         return -EFAULT;
-    if (copyout(&target->robust_list_len, len_ptr, sizeof(*len_ptr)) != 0)
+    if (copyout(&ulen, len_ptr, sizeof(ulen)) != 0)
         return -EFAULT;
     
     return 0;

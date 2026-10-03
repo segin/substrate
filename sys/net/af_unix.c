@@ -51,6 +51,7 @@
 #include <kern/sleepq.h>
 #include <kern/time.h>
 #include <net/inet.h>
+#include <sys/compat32.h>
 #include <sys/copy.h>
 #include <sys/file.h>
 #include <sys/lock.h>
@@ -89,10 +90,8 @@ static int sock_fd_invalid(int fd) {
 }
 
 
-/* Substrate uses BSD-style msghdr; mirror the user-visible field set
- * for the iov walk in sys_send/recvmsg.  Kernel socket.h has a
- * narrower form, so cast through this struct's interpretation. */
-/* struct iovec_local: <net/inet.h>. */
+/* sendmsg/recvmsg take the process's msghdr and iovecs, in the i386 layout,
+ * through msghdr_copyin() and iovec_copyin() (<sys/compat32.h>). */
 
 /* ============================================================
  * Buffer
@@ -2137,7 +2136,8 @@ struct kcmsghdr {
     int      cmsg_level;
     int      cmsg_type;
 };
-#define KCMSG_ALIGN(n)  (((n) + sizeof(size_t) - 1) & ~(sizeof(size_t) - 1))
+/* CMSG_ALIGN as the process computes it: to its size_t, 4 bytes. */
+#define KCMSG_ALIGN(n)  (((n) + sizeof(uint32_t) - 1) & ~(sizeof(uint32_t) - 1))
 
 /* Upper bound on a copied-in control buffer: enough for the largest
  * SCM_RIGHTS record we accept (AFUNIX_FDQ_MAX fds + header), generously
@@ -2169,7 +2169,7 @@ int sock_fd_is_dgram(int fd) {
 }
 
 /* Sum the iovec lengths, rejecting an overflowing total. */
-static ssize_t iov_total(const struct iovec_local *iov, int n, size_t *out) {
+static ssize_t iov_total(const struct iovec *iov, int n, size_t *out) {
     size_t total = 0;
     for (int i = 0; i < n; i++) {
         if (iov[i].iov_len > (size_t)0xFFFFFFFFu - total) return -EMSGSIZE;
@@ -2187,7 +2187,7 @@ static ssize_t iov_total(const struct iovec_local *iov, int n, size_t *out) {
  * which used to send one datagram per iovec and destroy the framing.
  * Returns the bytes sent or a negative errno.
  */
-ssize_t sock_dgram_sendv(int fd, const struct iovec_local *kiov, int iovcnt,
+ssize_t sock_dgram_sendv(int fd, const struct iovec *kiov, int iovcnt,
                          int flags, const struct sockaddr *uaddr,
                          socklen_t addrlen) {
     size_t need = 0;
@@ -2216,16 +2216,15 @@ ssize_t sock_dgram_sendv(int fd, const struct iovec_local *kiov, int iovcnt,
 ssize_t sys_sendmsg(int fd, const struct msghdr *umsg, int flags) {
     if (!umsg) return -EFAULT;
     struct msghdr kmsg;
-    if (copyin(umsg, &kmsg, sizeof(kmsg)) != 0) return -EFAULT;
+    if (msghdr_copyin(umsg, &kmsg) != 0) return -EFAULT;
     struct msghdr *msg = &kmsg;
 
     if (msg->msg_iovlen < 0 || msg->msg_iovlen > AFUNIX_IOV_MAX)
         return -EMSGSIZE;
-    struct iovec_local kiov[AFUNIX_IOV_MAX];
+    struct iovec kiov[AFUNIX_IOV_MAX];
     if (msg->msg_iovlen > 0) {
         if (!msg->msg_iov) return -EFAULT;
-        if (copyin(msg->msg_iov, kiov,
-                   (size_t)msg->msg_iovlen * sizeof(kiov[0])) != 0)
+        if (iovec_copyin(msg->msg_iov, kiov, msg->msg_iovlen) != 0)
             return -EFAULT;
     }
 
@@ -2329,7 +2328,7 @@ cmsg_done:
     ssize_t total = 0;
     /* kiov was copied in above; iov_base entries are still user pointers,
      * but sys_send/sys_sendto copyin them on their own. */
-    struct iovec_local *iov = kiov;
+    struct iovec *iov = kiov;
 
     /*
      * On a datagram socket the iovecs are ONE message.  Gather them
@@ -2384,16 +2383,18 @@ ssize_t sys_recvmsg(int fd, struct msghdr *umsg, int flags) {
      * msg_name / iov_base / msg_control remain user pointers — the
      * helpers they are handed (sys_recvfrom, copyout) validate them. */
     struct msghdr kmsg;
-    if (copyin(umsg, &kmsg, sizeof(kmsg)) != 0) return -EFAULT;
+    if (msghdr_copyin(umsg, &kmsg) != 0) return -EFAULT;
     struct msghdr *msg = &kmsg;
+    /* The results go back into the process's msghdr, whose layout is the
+     * i386 one: address its fields through that. */
+    struct msghdr32 *umsg32 = (struct msghdr32 *)(void *)umsg;
 
     if (msg->msg_iovlen < 0 || msg->msg_iovlen > AFUNIX_IOV_MAX)
         return -EMSGSIZE;
-    struct iovec_local kiov[AFUNIX_IOV_MAX];
+    struct iovec kiov[AFUNIX_IOV_MAX];
     if (msg->msg_iovlen > 0) {
         if (!msg->msg_iov) return -EFAULT;
-        if (copyin(msg->msg_iov, kiov,
-                   (size_t)msg->msg_iovlen * sizeof(kiov[0])) != 0)
+        if (iovec_copyin(msg->msg_iov, kiov, msg->msg_iovlen) != 0)
             return -EFAULT;
     }
     msg->msg_flags = 0;
@@ -2402,7 +2403,7 @@ ssize_t sys_recvmsg(int fd, struct msghdr *umsg, int flags) {
     int scattered = 0;
     struct afi_rxinfo rx;
     memset(&rx, 0, sizeof(rx));
-    struct iovec_local *iov = kiov;
+    struct iovec *iov = kiov;
 
     /*
      * One recvmsg must consume exactly ONE datagram
@@ -2438,7 +2439,7 @@ ssize_t sys_recvmsg(int fd, struct msghdr *umsg, int flags) {
         if (want_name &&
             copyout_sockaddr(kaddr, sizeof(kaddr), kaddrlen, msg->msg_name,
                              (socklen_t)msg->msg_namelen,
-                             (socklen_t *)&umsg->msg_namelen) != 0) {
+                             (socklen_t *)&umsg32->msg_namelen) != 0) {
             kfree(scat, cap);
             return -EFAULT;
         }
@@ -2478,7 +2479,7 @@ ssize_t sys_recvmsg(int fd, struct msghdr *umsg, int flags) {
              * passes msg_name == NULL, so it is unaffected. */
             r = do_recv_rx(fd, iov[i].iov_base, iov[i].iov_len, flags,
                            (struct sockaddr *)msg->msg_name,
-                           (socklen_t *)&umsg->msg_namelen, &rx);
+                           (socklen_t *)&umsg32->msg_namelen, &rx);
         } else if (i == 0) {
             r = do_recv_rx(fd, iov[i].iov_base, iov[i].iov_len, flags,
                            NULL, NULL, &rx);
@@ -2596,11 +2597,13 @@ ssize_t sys_recvmsg(int fd, struct msghdr *umsg, int flags) {
     /* Publish the updated ancillary length and flags back to the user
      * msghdr (msg_name / msg_namelen were already updated in place by
      * do_recv above). */
-    if (copyout(&out_controllen, &umsg->msg_controllen,
-                sizeof(umsg->msg_controllen)) != 0)
+    int32_t ucontrollen = (int32_t)out_controllen;
+    int32_t uflags = (int32_t)msg->msg_flags;
+    if (copyout(&ucontrollen, &umsg32->msg_controllen,
+                sizeof(umsg32->msg_controllen)) != 0)
         return -EFAULT;
-    if (copyout(&msg->msg_flags, &umsg->msg_flags,
-                sizeof(umsg->msg_flags)) != 0)
+    if (copyout(&uflags, &umsg32->msg_flags,
+                sizeof(umsg32->msg_flags)) != 0)
         return -EFAULT;
     return total;
 }

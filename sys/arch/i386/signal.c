@@ -221,11 +221,11 @@ static void populate_ucontext(ucontext_t *uc, uint32_t mask, registers_t *regs) 
     memset(uc, 0, sizeof(*uc));
     
     uc->uc_flags = 0;
-    uc->uc_link = NULL;
-    
+    uc->uc_link = 0;
+
     /* Copy alt stack info if configured */
     if (current_thread) {
-        uc->uc_stack = current_thread->sig_alt_stack;
+        stack_to32(&current_thread->sig_alt_stack, &uc->uc_stack);
     }
     
     /* Signal mask */
@@ -374,12 +374,15 @@ void sendsig(void *handler_ptr, int sig, uint32_t mask, uint32_t flags, void *re
         sif.info_ptr = esp + offsetof(struct siginfo_frame, info);
         sif.ucontext_ptr = esp + offsetof(struct siginfo_frame, uc);
         
-        /* Populate the siginfo_t structure */
+        /* Populate the siginfo_t structure, then lay it out as the
+         * process sees one. */
+        siginfo_t ksi;
         if (current_thread && current_thread->trap_signo == sig) {
-            populate_siginfo(&sif.info, sig, current_thread->trap_code);
+            populate_siginfo(&ksi, sig, current_thread->trap_code);
         } else {
-            populate_siginfo(&sif.info, sig, SI_USER);
+            populate_siginfo(&ksi, sig, SI_USER);
         }
+        siginfo_to32(&ksi, &sif.info);
         
         /* Populate the ucontext_t structure */
         populate_ucontext(&sif.uc, mask, regs);

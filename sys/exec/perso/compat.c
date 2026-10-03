@@ -14,6 +14,7 @@
 #include <kern/version.h>
 #include <net/inet.h>
 #include <pm/pm.h>
+#include <sys/compat32.h>
 #include <sys/compiler.h>
 #include <sys/copy.h>
 #include <sys/fcntl.h>
@@ -545,11 +546,12 @@ int sys_cap_nosys(void) { return -ENOSYS; }
 ssize_t sys_readv(int fd, const void *iov_user, int iovcnt) {
     if (iovcnt < 0 || iovcnt > 1024) return -EINVAL;
     if (iovcnt == 0) return 0;
-    struct freebsd_iovec stackbuf[IOV_STACK];
-    size_t sz = (size_t)iovcnt * sizeof(struct freebsd_iovec);
-    struct freebsd_iovec *kiov = (iovcnt <= IOV_STACK) ? stackbuf : kmalloc(sz);
+    struct iovec stackbuf[IOV_STACK];
+    size_t sz = (size_t)iovcnt * sizeof(struct iovec);
+    struct iovec *kiov = (iovcnt <= IOV_STACK) ? stackbuf : kmalloc(sz);
     if (!kiov) return -ENOMEM;
-    if (copyin(iov_user, kiov, sz) != 0) {
+    /* The process's iovecs are the i386 layout (<sys/compat32.h>). */
+    if (iovec_copyin(iov_user, kiov, iovcnt) != 0) {
         if (kiov != stackbuf) kfree(kiov, sz);
         return -EFAULT;
     }
@@ -670,23 +672,21 @@ int netbsd_sys_getsockopt(int fd, int level, int optname, void *optval,
 ssize_t sys_writev(int fd, const void *iov_user, int iovcnt) {
     if (iovcnt < 0 || iovcnt > 1024) return -EINVAL;
     if (iovcnt == 0) return 0;
-    struct freebsd_iovec stackbuf[IOV_STACK];
-    size_t sz = (size_t)iovcnt * sizeof(struct freebsd_iovec);
-    struct freebsd_iovec *kiov = (iovcnt <= IOV_STACK) ? stackbuf : kmalloc(sz);
+    struct iovec stackbuf[IOV_STACK];
+    size_t sz = (size_t)iovcnt * sizeof(struct iovec);
+    struct iovec *kiov = (iovcnt <= IOV_STACK) ? stackbuf : kmalloc(sz);
     if (!kiov) return -ENOMEM;
-    if (copyin(iov_user, kiov, sz) != 0) {
+    /* The process's iovecs are the i386 layout (<sys/compat32.h>). */
+    if (iovec_copyin(iov_user, kiov, iovcnt) != 0) {
         if (kiov != stackbuf) kfree(kiov, sz);
         return -EFAULT;
     }
     /* On a datagram socket the iovecs are one message.  The
      * loop below issued one write per iovec, so writev() on a connected UDP
      * socket put N datagrams on the wire for one call and destroyed the
-     * framing.  freebsd_iovec and iovec_local share a layout. */
+     * framing. */
     if (sock_fd_is_dgram(fd)) {
-        _Static_assert(sizeof(struct freebsd_iovec) == sizeof(struct iovec_local),
-                       "iovec layouts differ");
-        ssize_t r = sock_dgram_sendv(fd, (const struct iovec_local *)kiov,
-                                     iovcnt, 0, NULL, 0);
+        ssize_t r = sock_dgram_sendv(fd, kiov, iovcnt, 0, NULL, 0);
         if (kiov != stackbuf) kfree(kiov, sz);
         return r;
     }

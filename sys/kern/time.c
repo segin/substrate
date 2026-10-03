@@ -12,6 +12,7 @@
 #include <kern/sched.h>
 #include <kern/time.h>
 #include <pm/pm.h>
+#include <sys/compat32.h>
 #include <sys/copy.h>
 #include <sys/errno.h>
 #include <sys/kern_syscalls.h>
@@ -1040,7 +1041,8 @@ int sys_timer_create(int clockid, struct sigevent *sevp, int *timerid) {
         return -EFAULT;
     }
     if (sevp) {
-        if (copyin(sevp, &kev, sizeof(kev)) != 0) {
+        /* The process's struct sigevent is the i386 one. */
+        if (sigevent_copyin(sevp, &kev) != 0) {
             return -EFAULT;
         }
         evp = &kev;

@@ -11,6 +11,7 @@
 #include <kern/sleepq.h>
 #include <kern/time.h>
 #include <pm/pm.h>
+#include <sys/compat32.h>
 #include <sys/copy.h>
 #include <sys/core.h>
 #include <sys/errno.h>
@@ -571,7 +572,7 @@ int sys_sigaction(int sig, const void *act, void *oact) {
         if (nosigalrm_cached) {
             if (oact) {
                 struct sigaction zero = { 0 };
-                if (copyout(&zero, oact, sizeof(zero)) != 0) return -14;
+                if (sigaction_copyout(&zero, oact) != 0) return -14;
             }
             if (current_process) {
                 struct sigaction ign = { 0 };
@@ -582,8 +583,9 @@ int sys_sigaction(int sig, const void *act, void *oact) {
         }
     }
 
+    /* The process's struct sigaction is the i386 one (<sys/compat32.h>). */
     if (act) {
-        if (copyin(act, &kact, sizeof(struct sigaction)) != 0) return -14;
+        if (sigaction_copyin(act, &kact) != 0) return -14;
         p_kact = &kact;
     }
 
@@ -638,7 +640,7 @@ int sys_sigaction(int sig, const void *act, void *oact) {
 
     int ret = kern_sigaction(sig, p_kact, oact ? &koact : NULL);
     if (ret == 0 && oact) {
-        if (copyout(&koact, oact, sizeof(struct sigaction)) != 0) return -14;
+        if (sigaction_copyout(&koact, oact) != 0) return -14;
     }
     return ret;
 }
@@ -767,14 +769,15 @@ int sys_sigaltstack(const void *ss, void *oss) {
     stack_t kss, koss;
     stack_t *p_kss = NULL;
     
+    /* The process's stack_t is the i386 one (<sys/compat32.h>). */
     if (ss) {
-        if (copyin(ss, &kss, sizeof(stack_t)) != 0) return -14;
+        if (stack_copyin(ss, &kss) != 0) return -14;
         p_kss = &kss;
     }
-    
+
     int ret = kern_sigaltstack(p_kss, oss ? &koss : NULL);
     if (ret == 0 && oss) {
-        if (copyout(&koss, oss, sizeof(stack_t)) != 0) return -14;
+        if (stack_copyout(&koss, oss) != 0) return -14;
     }
     return ret;
 }
@@ -875,7 +878,7 @@ int sys_sigtimedwait(const uint32_t *set, siginfo_t *info,
     }
     int ret = kern_sigtimedwait(&kset, info ? &kinfo : NULL, timeout ? &kts : NULL);
     if (ret > 0 && info) {
-        if (copyout(&kinfo, info, sizeof(siginfo_t)) != 0) return -14;
+        if (siginfo_copyout(&kinfo, info) != 0) return -14;
     }
     return ret;
 }

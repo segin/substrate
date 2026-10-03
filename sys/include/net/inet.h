@@ -18,6 +18,7 @@
 #include <sys/types.h>
 #include <sys/socket.h>   /* socklen_t */
 #include <sys/netdev.h>
+#include <sys/uio.h>      /* struct iovec */
 
 struct fs_node;
 
@@ -383,15 +384,12 @@ ssize_t afpacket_recvfrom(int fd, void *buf, size_t len, int flags,
                           void *sll, socklen_t *addrlen);
 size_t  afpkt_node_read(struct fs_node *, off_t, size_t, uint8_t *);
 
-/* A kernel copy of one iovec (its iov_base is still a user pointer).  The
- * personality iovec types share this layout. */
-struct iovec_local { void *iov_base; size_t iov_len; };
-
 /* Is fd a datagram socket (AF_UNIX/AF_INET SOCK_DGRAM, or
- * SOCK_RAW)?  And send a kernel-copied iovec array on one as a single
- * datagram (sendmsg/writev), returning the bytes sent or -errno. */
+ * SOCK_RAW)?  And send a kernel-copied iovec array (iovec_copyin(); the
+ * iov_base values are still user pointers) on one as a single datagram
+ * (sendmsg/writev), returning the bytes sent or -errno. */
 int     sock_fd_is_dgram(int fd);
-ssize_t sock_dgram_sendv(int fd, const struct iovec_local *kiov, int iovcnt,
+ssize_t sock_dgram_sendv(int fd, const struct iovec *kiov, int iovcnt,
                          int flags, const struct sockaddr *uaddr,
                          socklen_t addrlen);
 

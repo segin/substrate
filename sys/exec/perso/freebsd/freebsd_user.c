@@ -1,6 +1,7 @@
 #include <string.h>
 
 #include <exec/perso/freebsd/freebsd_user.h>
+#include <sys/compat32.h>
 #include <sys/copy.h>
 #include <sys/errno.h>
 #include <sys/fcntl.h>
@@ -763,13 +764,13 @@ int freebsd_sys_kenv(int what, const char *name, char *value, int len) {
  * substrate's kern_mount(source, target, fstype, flags, data) and forward;
  * fs-specific options are ignored.
  */
-int freebsd_sys_nmount(const struct freebsd_iovec *iov, unsigned int niov,
-                       int flags) {
+int freebsd_sys_nmount(const void *iov, unsigned int niov, int flags) {
     if (niov == 0 || (niov & 1) || niov > 64) {
         return -EINVAL;
     }
-    struct freebsd_iovec kiov[64];
-    if (copyin(iov, kiov, niov * sizeof(kiov[0])) != 0) {
+    struct iovec kiov[64];
+    /* The process's iovecs are the i386 layout (<sys/compat32.h>). */
+    if (iovec_copyin(iov, kiov, (int)niov) != 0) {
         return -EFAULT;
     }
 
