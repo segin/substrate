@@ -28,6 +28,7 @@ Legend:
 | `R_386_JMP_SLOT`   | S           | PLT/GOT     | Resolved on first call unless bound now. |
 | `R_386_RELATIVE`   | B + A       | Relative    | Fast path; no symbol lookup.             |
 | `R_386_COPY`       | S           | Copy reloc  | Executable copies DSO data.              |
+| `R_386_IRELATIVE`  | (B + A)()   | Indirect    | Resolver's result, after all other relocs. |
 | `R_386_16`         | S + A       | Absolute    | Truncated to 16 bits.                    |
 | `R_386_PC16`       | S + A - P   | PC-relative | Truncated to 16 bits.                    |
 | `R_386_8`          | S + A       | Absolute    | Truncated to 8 bits.                     |

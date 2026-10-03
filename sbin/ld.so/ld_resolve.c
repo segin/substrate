@@ -280,7 +280,7 @@ static int resolve_pred(const ld_obj_t *o, ld_u32 sym_idx, void *arg) {
  * place to deposit the symbol's st_size for R_386_COPY callers, and the
  * requesting object (so a program's own relocations don't pick up its
  * own canonical-PLT entry - see resolve_pred). */
-/* An indirect function (STT_GNU_IFUNC, amd64 only) has a resolver at its
+/* An indirect function (STT_GNU_IFUNC) has a resolver at its
  * st_value, and its address is whatever the resolver returns.  A caller
  * that passes ifunc_out gets the resolver's address and the flag, and
  * calls it when the resolver's object is relocated; for everyone else
@@ -296,15 +296,11 @@ static ld_addr resolve_internal(const char *name, ld_u32 want_ver_hash,
         if (!s) continue;
         if (size_out) *size_out = s->st_size;
         ld_addr v = s->st_value + o->base;
-#ifdef LD_ARCH_AMD64
         if (s->st_shndx != SHN_UNDEF &&
             ELF_ST_TYPE(s->st_info) == STT_GNU_IFUNC) {
             if (ifunc_out) *ifunc_out = 1;
             else v = ld_ifunc_call(v);
         }
-#else
-        (void)ifunc_out;
-#endif
         return v;
     }
     if (size_out) *size_out = 0;

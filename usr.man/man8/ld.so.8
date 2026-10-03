@@ -56,10 +56,10 @@ Thread-local storage is laid out (see
 .IP 5.
 Every object is relocated, with
 .B R_386_COPY
-relocations applied last so they copy already-relocated data.
-The 32-bit linker binds every function at this point; the 64-bit
-linker may leave them for the first call (see
-.BR "The 64-bit linker" ).
+relocations applied after the others so they copy already-relocated
+data, and indirect functions resolved last.
+Function calls may be left to be bound on first use (see
+.BR "Symbol resolution" ).
 .IP 6.
 Each library's
 .B PT_LOAD
@@ -195,10 +195,44 @@ Supported relocation types are
 .BR R_386_JMP_SLOT ,
 .BR R_386_RELATIVE ,
 .BR R_386_TLS_TPOFF ,
-.B R_386_TLS_DTPMOD32
+.BR R_386_TLS_DTPMOD32 ,
+.B R_386_TLS_DTPOFF32
 and
-.BR R_386_TLS_DTPOFF32 .
+.BR R_386_IRELATIVE .
 Any other type is fatal.
+.PP
+Indirect functions are supported: an
+.B IRELATIVE
+relocation, and a reference to an
+.B STT_GNU_IFUNC
+symbol, receive the address returned by the function's resolver.
+Resolvers are called after every object has been relocated;
+.BR dlsym (3)
+returns the resolved address too.
+.PP
+Functions are bound lazily.
+A call through the procedure linkage table is resolved the first time
+it is made, so a function nothing defines stops the program when it is
+called (with a message and exit status 127) rather than when the
+object is loaded.
+Everything is bound at load time instead for an object linked with
+.B "\-z now"
+.RB ( DT_BIND_NOW ,
+.B DF_BIND_NOW
+or
+.BR DF_1_NOW ),
+which is how the system libraries are built; when
+.B LD_BIND_NOW
+is set; and for the objects loaded by a
+.B dlopen
+with
+.BR RTLD_NOW .
+The first call of a function preserves
+.BR %eax ,
+.B %edx
+and
+.BR %ecx ,
+which carry the arguments of regparm and fastcall functions.
 .SS Thread-local storage
 .B ld.so
 uses the i386 variant II layout: each module's
@@ -250,13 +284,11 @@ If any step fails every object loaded by that call is unmapped.
 and
 .B RTLD_LOCAL
 are ignored: every object joins the global scope.
+.B RTLD_NOW
+binds every function of the objects that call loads before it returns;
+with
 .B RTLD_LAZY
-and
-.B RTLD_NOW
-make no difference to the 32-bit linker, which always binds
-immediately; with the 64-bit linker
-.B RTLD_NOW
-binds every function of the objects that call loads before it returns.
+they are bound on first use unless the object itself asks otherwise.
 .B RTLD_NOLOAD
 returns a handle only if the object is already loaded.
 .B dlopen(NULL)
@@ -332,32 +364,11 @@ and
 .BR R_X86_64_IRELATIVE .
 Any other type is fatal.
 .IP \(bu
-Indirect functions are supported: an
-.B R_X86_64_IRELATIVE
-relocation, and a reference to an
-.B STT_GNU_IFUNC
-symbol, receive the address returned by the function's resolver.
-Resolvers are called after every object has been relocated;
-.BR dlsym (3)
-returns the resolved address too.
-.IP \(bu
-Functions are bound lazily.
-A call through the procedure linkage table is resolved the first time
-it is made, so a function nothing defines stops the program when it is
-called (with a message and exit status 127) rather than when the
-object is loaded.
-Everything is bound at load time instead for an object linked with
-.B "\-z now"
-.RB ( DT_BIND_NOW ,
-.B DF_BIND_NOW
-or
-.BR DF_1_NOW ),
-which is how the system libraries are built; when
-.B LD_BIND_NOW
-is set; and for the objects loaded by a
-.B dlopen
-with
-.BR RTLD_NOW .
+The first call of a lazily bound function preserves the six integer
+argument registers,
+.BR %rax ,
+.B %r10
+and the FXSAVE state (the SSE and x87 registers).
 .IP \(bu
 The thread pointer is the
 .B %fs
@@ -436,8 +447,7 @@ The value is not examined.
 .TP
 .B LD_BIND_NOW
 If set to a non-empty value, bind every function when its object is
-loaded.
-Only the 64-bit linker binds lazily, so only it is affected.
+loaded instead of on first use.
 .SH FILES
 .TP
 .I /sbin/ld.so
@@ -485,7 +495,16 @@ directory.
 At most 192 objects can be loaded, and library paths are limited to
 255 bytes.
 .PP
-The 32-bit linker has no lazy binding and no indirect functions.
+A
+.B dlopen
+with
+.B RTLD_NOW
+does not bind an object that an earlier call loaded lazily.
+The resolver of an indirect function must leave the vector registers
+alone when it runs during a first call: the 32-bit linker saves none of
+them, and the 64-bit one not the upper halves of
+.BR %ymm .
+.PP
 There is no
 .BR LD_LIBRARY_PATH ,
 no

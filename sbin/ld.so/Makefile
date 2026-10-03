@@ -28,7 +28,7 @@ C_SRCS  += ld_reloc_amd64.c
 LD_ARCH_CFLAGS := -m64 -mgeneral-regs-only
 else
 PROG     = ld.so
-START    = ld_start.S
+START    = ld_start.S ld_plt_i386.S
 C_SRCS  += ld_reloc_i386.c
 LD_ARCH_CFLAGS := -m32 -mno-sse -mno-sse2 -mno-mmx -mno-80387 \
                   -mno-3dnow -mno-avx

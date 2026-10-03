@@ -229,8 +229,8 @@ ld_addr ld_main(ld_addr *initial_stack) {
             if (i == sizeof(k_preload) - 1 && e[i] != '\0')
                 preload_list = e + i;
             /* LD_BIND_NOW counts only with a value, as in glibc: bind
-             * every PLT slot at load time (the amd64 linker would
-             * otherwise bind lazily - ld_reloc_amd64.c). */
+             * every PLT slot at load time instead of on first call
+             * (ld_reloc.c). */
             for (i = 0; i < sizeof(k_bindnow) - 1; i++)
                 if (e[i] != k_bindnow[i]) break;
             if (i == sizeof(k_bindnow) - 1 && e[i] != '\0')

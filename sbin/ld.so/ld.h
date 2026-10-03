@@ -270,6 +270,7 @@ typedef Elf_Rel Elf_Reloc;
 #define R_386_TLS_LDM     19
 #define R_386_TLS_DTPMOD32 35  /* module id of GD/LD tls_index slot */
 #define R_386_TLS_DTPOFF32 36  /* offset within module for GD/LD tls_index */
+#define R_386_IRELATIVE    42  /* indirect function: resolver at B + A */
 
 /* amd64 relocation types (psABI Table 4.10). */
 #define R_X86_64_NONE      0
@@ -284,14 +285,20 @@ typedef Elf_Rel Elf_Reloc;
 #define R_X86_64_TPOFF64   18  /* offset from the thread pointer */
 #define R_X86_64_IRELATIVE 37  /* indirect function: resolver at B + A */
 
-/* The copy relocation of the architecture being built, which the common
- * relocation loop defers to a final pass (see ld_reloc.c). */
+/* The relocation types of the architecture being built that the common
+ * code in ld_reloc.c has to recognise: the copy relocation, which it
+ * defers to a final pass, and the two that may sit in DT_JMPREL, which
+ * it can leave to be bound on first call. */
 #ifdef LD_ARCH_AMD64
 #define LD_R_COPY       R_X86_64_COPY
 #define LD_R_COPY_NAME  "R_X86_64_COPY"
+#define LD_R_JMP_SLOT   R_X86_64_JUMP_SLOT
+#define LD_R_IRELATIVE  R_X86_64_IRELATIVE
 #else
 #define LD_R_COPY       R_386_COPY
 #define LD_R_COPY_NAME  "R_386_COPY"
+#define LD_R_JMP_SLOT   R_386_JMP_SLOT
+#define LD_R_IRELATIVE  R_386_IRELATIVE
 #endif
 
 /* Auxv entries */
@@ -526,7 +533,7 @@ typedef struct ld_obj {
     int             refcount;       /* dlopen refs; fini at last close */
     int             protected;      /* W^X + RELRO applied */
 
-    /* Lazy binding and indirect functions (amd64; see ld_reloc_amd64.c).
+    /* Lazy binding and indirect functions (see ld_reloc.c).
      * `pltgot` is DT_PLTGOT: words 1 and 2 are the linker's, and the PLT
      * slots follow.  `bind_now` records DT_BIND_NOW / DF_BIND_NOW /
      * DF_1_NOW.  `lazy` is set once the PLT slots have been left for
@@ -632,7 +639,7 @@ int ld_relocate_copy(ld_obj_t *obj);
  * IRELATIVE, and references to STT_GNU_IFUNC symbols.  Must run after
  * every object has been through ld_relocate() and ld_relocate_copy(), so
  * the resolver runs in fully relocated code.  A no-op for an object with
- * no such entries, which is every object on i386. */
+ * no such entries. */
 int ld_relocate_ifunc(ld_obj_t *obj);
 
 /* Non-zero when every PLT slot must be bound at load time: LD_BIND_NOW in
@@ -641,21 +648,21 @@ extern int ld_bind_now;
 
 /* Arrange for the DT_JMPREL slots of `obj` to be bound on first call
  * instead of now.  Returns 1 if it did (the caller then skips DT_JMPREL),
- * 0 if the object must be bound eagerly.  Always 0 on i386. */
+ * 0 if the object must be bound eagerly. */
 int ld_reloc_lazy_setup(ld_obj_t *obj);
 
-#ifdef LD_ARCH_AMD64
 /* Call an indirect function's resolver; it returns the implementation. */
 static inline ld_addr ld_ifunc_call(ld_addr resolver) {
-    return ((ld_addr (*)(void))resolver)();
+    return ((ld_addr (*)(void))(unsigned long)resolver)();
 }
 
-/* Lazy binding.  ld_plt_trampoline (ld_plt_amd64.S) is what PLT0 jumps
- * to; it preserves the argument registers around ld_plt_fixup(), which
- * binds entry `idx` of obj's DT_JMPREL and returns the function. */
+/* Lazy binding.  ld_plt_trampoline (ld_plt_i386.S, ld_plt_amd64.S) is
+ * what PLT0 jumps to; it preserves the argument registers around
+ * ld_plt_fixup(), which binds one entry of obj's DT_JMPREL and returns
+ * the function.  `arg` is what the PLT stub pushed to name the entry:
+ * its index on amd64, its byte offset into the table on i386. */
 void    ld_plt_trampoline(void);
-ld_addr ld_plt_fixup(ld_obj_t *obj, ld_addr idx);
-#endif
+ld_addr ld_plt_fixup(ld_obj_t *obj, ld_addr arg);
 
 /* The architecture's relocation processor (ld_reloc_i386.c,
  * ld_reloc_amd64.c): apply one entry of `obj`.  Returns 0 on success,

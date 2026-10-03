@@ -16,28 +16,10 @@
  *
  *   R_X86_64_IRELATIVE - *p = the value returned by the resolver at B + A
  *
- * Indirect functions.  IRELATIVE, and a GLOB_DAT / JUMP_SLOT / 64 whose
- * symbol resolves to an STT_GNU_IFUNC definition, store what a resolver
- * function returns.  The resolver is ordinary code in some object, so it
- * is not called from the main pass, where that object may not be
- * relocated yet: the entry is skipped, the object marked has_ifunc, and
- * ld_relocate_ifunc() comes back for it with ifunc_pass set once every
- * object is relocated.  In that pass everything else is left alone.
- *
- * Lazy binding.  An object linked without -z now has, in each PLT slot
- * of .got.plt, the link-time address of that slot's stub in .plt; the
- * stub pushes the slot's index into DT_JMPREL and jumps to PLT0, which
- * pushes GOT[1] and jumps through GOT[2].  ld_reloc_lazy_setup() biases
- * the slots, puts the object in GOT[1] and ld_plt_trampoline in GOT[2],
- * and the first call of each function then arrives in ld_plt_fixup(),
- * which resolves the symbol, stores it in the slot and returns it for
- * the trampoline to jump to.  An undefined function is therefore
- * reported when it is first called, not when the object is loaded.
- * Binding is eager instead when the object asks for it (DT_BIND_NOW,
- * DF_BIND_NOW, DF_1_NOW - which is how the system libraries are built),
- * when LD_BIND_NOW is set, and for what a dlopen(RTLD_NOW) loads.
- *
- * See ld_reloc.c for the table walk and the ordering of the passes.
+ * IRELATIVE, and a GLOB_DAT / JUMP_SLOT / 64 whose symbol resolves to an
+ * indirect function, are deferred to the indirect-function pass.  See
+ * ld_reloc.c for that, for the table walk and the ordering of the
+ * passes, and for lazy binding.
  */
 
 #include "ld.h"
@@ -249,55 +231,4 @@ int ld_reloc_apply(ld_obj_t *obj, Elf_Reloc *r) {
         ld_puts(" in "); ld_puts(obj->name); ld_puts("\n");
         return -1;
     }
-}
-
-int ld_reloc_lazy_setup(ld_obj_t *obj) {
-    if (ld_bind_now || obj->bind_now || !obj->pltgot) return 0;
-
-    /* Only a table of plain PLT slots, each still holding its stub's
-     * address, can be left for later; anything else is bound now. */
-    ld_addr n = obj->pltrelsz / sizeof(Elf_Reloc);
-    for (ld_addr i = 0; i < n; i++) {
-        const Elf_Reloc *r = &obj->jmprel[i];
-        ld_u32 type = ELF_R_TYPE(r->r_info);
-        if (type == R_X86_64_IRELATIVE) continue;
-        if (type != R_X86_64_JUMP_SLOT) return 0;
-        if (*(ld_addr *)(r->r_offset + obj->base) == 0) return 0;
-    }
-
-    for (ld_addr i = 0; i < n; i++) {
-        const Elf_Reloc *r = &obj->jmprel[i];
-        if (ELF_R_TYPE(r->r_info) == R_X86_64_IRELATIVE) {
-            obj->has_ifunc = 1;     /* ld_relocate_ifunc fills the slot */
-            continue;
-        }
-        *(ld_addr *)(r->r_offset + obj->base) += obj->base;
-    }
-    obj->pltgot[1] = (ld_addr)obj;
-    obj->pltgot[2] = (ld_addr)ld_plt_trampoline;
-    obj->lazy = 1;
-    return 1;
-}
-
-ld_addr ld_plt_fixup(ld_obj_t *obj, ld_addr idx) {
-    /* The lookup walks the loaded-object list, which a dlopen in another
-     * thread may be extending. */
-    ld_dl_lock();
-    if (idx >= obj->pltrelsz / sizeof(Elf_Reloc))
-        ld_die("lazy binding: PLT index out of range");
-
-    const Elf_Reloc *r = &obj->jmprel[idx];
-    ld_u32 sym = ELF_R_SYM(r->r_info);
-    const char *name = obj->strtab + obj->symtab[sym].st_name;
-    int ifunc = 0;
-    ld_addr v = ld_reloc_resolve_ifunc(obj, sym, name, &ifunc);
-    if (v == 0) {
-        /* There is nothing to jump to: the function is being called. */
-        undefined_symbol(obj, "symbol", name);
-        ld_die("lazy binding failed");
-    }
-    if (ifunc) v = ld_ifunc_call(v);
-    *(ld_addr *)(r->r_offset + obj->base) = v;
-    ld_dl_unlock();
-    return v;
 }

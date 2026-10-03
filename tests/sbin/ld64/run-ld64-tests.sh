@@ -6,10 +6,15 @@
 # linked 64-bit shell as $D/sh and a statically linked one as
 # $D/sh-static.
 #
+# With a second argument of 32 it runs the `make ARCH=i386` build
+# instead, on either kernel: only ifunc, lazy and rtldnext, with the
+# modules in /lib.
+#
 # Prints "ld64: <test> OK" or "ld64: <test> FAIL" per test and exits with
 # the number of failures.
 
 D=${1:-/root/ld64}
+BITS=${2:-64}
 fail=0
 
 run() {
@@ -27,18 +32,20 @@ run() {
 LD64_TEST=yes
 export LD64_TEST
 
-run hello   $D/hello one two
-run tls     $D/tls
-run math    $D/math
-run threads $D/threads
-run dlopen  $D/dlmain libld64mod.so
-run trace   env LD_TRACE_LOADED_OBJECTS=1 $D/threads
-run sh      $D/sh -c 'echo hi; ls / | head -3'
-run static  $D/sh-static -c 'echo static hi; ls / | head -3'
+if [ "$BITS" = 64 ]; then
+    run hello   $D/hello one two
+    run tls     $D/tls
+    run math    $D/math
+    run threads $D/threads
+    run dlopen  $D/dlmain libld64mod.so
+    run trace   env LD_TRACE_LOADED_OBJECTS=1 $D/threads
+    run sh      $D/sh -c 'echo hi; ls / | head -3'
+    run static  $D/sh-static -c 'echo static hi; ls / | head -3'
+    run bindnow env LD_BIND_NOW=1 $D/threads
+fi
 run ifunc   $D/ifunc
 run lazy    $D/lazy
 run next    $D/rtldnext
-run bindnow env LD_BIND_NOW=1 $D/threads
 
 # lazy has a PLT slot for a function that does not exist.  Calling it
 # must end the program there, in the linker; binding eagerly must keep

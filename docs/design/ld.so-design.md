@@ -232,6 +232,50 @@ For each undefined reference:
 - If `LD_BIND_NOW` or `DF_BIND_NOW` is set, all PLT entries are resolved at
   load time.
 
+### 14.3 As Implemented
+Both linkers bind lazily; the code is shared (`ld_reloc.c`) apart from
+the trampoline.
+
+- `ld_reloc_lazy_setup()` adds the load bias to each `JMP_SLOT` word
+  (which then points at its stub in `.plt`), and stores the object's
+  descriptor in `GOT[1]` and `ld_plt_trampoline` in `GOT[2]`.
+- The trampoline (`ld_plt_i386.S`, `ld_plt_amd64.S`) preserves the
+  registers a call may carry arguments in, calls `ld_plt_fixup()`, and
+  jumps to what it returns.  i386 saves `%eax`, `%edx` and `%ecx`
+  (regparm and fastcall; `___tls_get_addr` takes its argument in `%eax`);
+  amd64 saves the six integer argument registers, `%rax`, `%r10` and the
+  FXSAVE state.  The PLT stub names its `DT_JMPREL` entry by byte offset
+  on i386 and by index on amd64.
+- `ld_plt_fixup()` resolves the symbol under the `dlopen` lock, calls an
+  indirect function's resolver if that is what it found, and stores the
+  result in the slot.  A symbol nothing defines is fatal at that point
+  (`lazy binding failed`, status 127) instead of at load time.
+- Binding is eager when the object carries `DT_BIND_NOW`, `DF_BIND_NOW`
+  or `DF_1_NOW` (every system library does: `SHLIB_LDFLAGS` has
+  `-z now`), when `LD_BIND_NOW` is set to a non-empty value, for the
+  objects a `dlopen(RTLD_NOW)` loads, and for any `DT_JMPREL` that holds
+  something other than `JMP_SLOT`/`IRELATIVE` entries or a slot that is
+  still zero.
+- Limits.  `RTLD_NOW` does not go back and bind an object that an
+  earlier call left lazy.  A resolver run from the fixup must not
+  disturb vector argument registers the trampoline does not save: all of
+  them on i386, the upper halves of `%ymm` on amd64.  A process that
+  forks while another thread is inside `dlopen` gets a child in which
+  the first unbound call blocks on the `dlopen` lock.
+
+### 14.4 Indirect Functions
+An `IRELATIVE` relocation, and a `GLOB_DAT`, `JMP_SLOT` or absolute
+relocation whose symbol resolves to an `STT_GNU_IFUNC` definition, store
+what a resolver function returns.  The resolver is code in some loaded
+object, so it must not run before that object is relocated: the main
+pass skips such an entry and marks the object (`has_ifunc`), and a third
+pass, `ld_relocate_ifunc()`, applies them after the `COPY` pass, at
+startup and in `dlopen`.  In that pass `ld_reloc_apply()` touches
+nothing else, which on i386 -- where the addend is the relocated word
+itself -- is what keeps the other entries from being applied twice.
+`dlsym` and the other lookups made after relocation call the resolver
+directly.
+
 ## 15. TLS Details
 ### 15.1 TLS Layout
 - Each module with PT_TLS contributes a TLS block.
@@ -355,38 +399,8 @@ is where libc's `__tls_get_addr` reads it (`lib/c/src/tls.c`).
 addend is `r_addend`; the relocated word is overwritten and never read,
 so applying a `RELATIVE` twice would be harmless there (the per-object
 `relocated` guard still applies to both).  A `PC32` whose target is out
-of 32-bit range is refused.
-
-**Indirect functions.**  An `IRELATIVE`, and a `GLOB_DAT`, `JUMP_SLOT`
-or `64` whose symbol resolves to an `STT_GNU_IFUNC` definition, store
-what a resolver function returns.  The resolver is code in some loaded
-object, so it must not run before that object is relocated: the main
-pass skips such an entry and marks the object (`has_ifunc`), and a third
-pass, `ld_relocate_ifunc()`, applies them after the `COPY` pass, at
-startup and in `dlopen`.  `dlsym` and the other lookups made after
-relocation call the resolver directly.  The 32-bit linker has none of
-this.
-
-**Lazy binding.**  The 64-bit linker binds PLT slots on first call; the
-32-bit linker remains eager.  `ld_reloc_lazy_setup()` adds the load bias
-to each `JUMP_SLOT` word (which then points at its stub in `.plt`), and
-stores the object's descriptor in `GOT[1]` and `ld_plt_trampoline`
-(`ld_plt_amd64.S`) in `GOT[2]`.  The trampoline saves the integer
-argument registers, `%rax`, `%r10` and the FXSAVE state, calls
-`ld_plt_fixup(obj, index)` -- which resolves the symbol under the
-`dlopen` lock, calls an indirect function's resolver if that is what it
-found, and stores the result in the slot -- then restores everything and
-jumps to the function.  A symbol nothing defines is fatal at that point
-(`lazy binding failed`, status 127) instead of at load time.  Binding is
-eager when the object carries `DT_BIND_NOW`, `DF_BIND_NOW` or `DF_1_NOW`
-(every system library does: `SHLIB_LDFLAGS` has `-z now`), when
-`LD_BIND_NOW` is set to a non-empty value, for the objects a
-`dlopen(RTLD_NOW)` loads, and for any `DT_JMPREL` that holds something
-other than `JUMP_SLOT`/`IRELATIVE` entries or a slot that is still zero.
-Limits: FXSAVE does not cover the upper halves of `%ymm`, so a resolver
-that used AVX would spoil a 256-bit vector argument of the call being
-bound; and `RTLD_NOW` does not go back and bind an object that an
-earlier call left lazy.
+of 32-bit range is refused.  Lazy binding and indirect functions are as
+described in sections 14.3 and 14.4.
 
 ### 22.4 Sharing a root
 
@@ -415,4 +429,7 @@ since no 64-bit `libgcc_s` is installed.
 argv/envp, executable TLS and errno, libm, libpthread threads with
 per-thread TLS, `dlopen` of a module with constructors and TLS, rejection
 of a 32-bit object) and `run-ld64-tests.sh`, which also runs the in-tree
-shell built both dynamically and statically.
+shell built both dynamically and statically.  Three of its tests cover
+what both linkers do -- `ifunc`, `lazy` and `rtldnext` -- and
+`make -C tests/sbin/ld64 ARCH=i386` builds those as non-PIE 32-bit
+programs for `/sbin/ld.so`; `run-ld64-tests.sh DIR 32` runs them.

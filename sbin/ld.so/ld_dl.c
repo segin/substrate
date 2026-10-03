@@ -132,8 +132,8 @@ LD_PUBLIC const char *__ldso_dlerror(void) {
 
 static void *dlopen_locked(const char *path, int flags) {
     /* Every object is global (RTLD_GLOBAL/LOCAL are not told apart).
-     * RTLD_NOW forces eager binding where the linker would bind lazily
-     * (amd64); RTLD_NOLOAD loads nothing. */
+     * RTLD_NOW forces eager binding where the linker would bind lazily;
+     * RTLD_NOLOAD loads nothing. */
     if (!path) {
         /* dlopen(NULL) - return a handle representing the main
          * program (== head of loaded-object list). */
@@ -491,13 +491,11 @@ static ld_u32 dl_sysv_hash(const char *s) {
 }
 
 /* The address a symbol found by ld_lookup_in_obj stands for: its value,
- * or for an indirect function (amd64) what its resolver returns. */
+ * or for an indirect function what its resolver returns. */
 static ld_addr dl_sym_addr(const ld_obj_t *o, const Elf_Sym *s) {
     ld_addr v = s->st_value + o->base;
-#ifdef LD_ARCH_AMD64
     if (s->st_shndx != SHN_UNDEF && ELF_ST_TYPE(s->st_info) == STT_GNU_IFUNC)
         v = ld_ifunc_call(v);
-#endif
     return v;
 }
 

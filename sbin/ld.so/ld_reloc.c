@@ -16,9 +16,29 @@
  * running it while the providing library is still unrelocated copies
  * zero.
  *
- * Indirect functions get a third pass (ld_relocate_ifunc) for the same
- * reason: a resolver is code in some object, and may only be called once
- * that object is relocated.
+ * Indirect functions.  An IRELATIVE relocation, and a GLOB_DAT /
+ * JMP_SLOT / absolute relocation whose symbol resolves to an
+ * STT_GNU_IFUNC definition, store what a resolver function returns.  The
+ * resolver is ordinary code in some object, so it is not called from the
+ * main pass, where that object may not be relocated yet: ld_reloc_apply
+ * skips the entry and marks the object has_ifunc, and a third pass,
+ * ld_relocate_ifunc(), comes back with ifunc_pass set once every object
+ * is relocated.  In that pass ld_reloc_apply leaves everything else
+ * alone - which on i386, where the addend is the word itself, is what
+ * keeps the other entries from being applied twice.
+ *
+ * Lazy binding.  An object linked without -z now has, in each PLT slot
+ * of .got.plt, the link-time address of that slot's stub in .plt; the
+ * stub pushes a word naming its DT_JMPREL entry and jumps to PLT0, which
+ * pushes GOT[1] and jumps through GOT[2].  ld_reloc_lazy_setup() biases
+ * the slots, puts the object in GOT[1] and ld_plt_trampoline in GOT[2],
+ * and the first call of each function then arrives in ld_plt_fixup(),
+ * which resolves the symbol, stores it in the slot and returns it for
+ * the trampoline to jump to.  An undefined function is therefore
+ * reported when it is first called, not when the object is loaded.
+ * Binding is eager instead when the object asks for it (DT_BIND_NOW,
+ * DF_BIND_NOW, DF_1_NOW - which is how the system libraries are built),
+ * when LD_BIND_NOW is set, and for what a dlopen(RTLD_NOW) loads.
  */
 
 #include "ld.h"
@@ -73,6 +93,63 @@ ld_addr ld_reloc_resolve_ifunc(const ld_obj_t *obj, ld_u32 sym_idx,
 
 int ld_bind_now;
 
+int ld_reloc_lazy_setup(ld_obj_t *obj) {
+    if (ld_bind_now || obj->bind_now || !obj->pltgot) return 0;
+
+    /* Only a table of plain PLT slots, each still holding its stub's
+     * address, can be left for later; anything else is bound now. */
+    ld_addr n = obj->pltrelsz / sizeof(Elf_Reloc);
+    for (ld_addr i = 0; i < n; i++) {
+        const Elf_Reloc *r = &obj->jmprel[i];
+        ld_u32 type = ELF_R_TYPE(r->r_info);
+        if (type == LD_R_IRELATIVE) continue;
+        if (type != LD_R_JMP_SLOT) return 0;
+        if (*(ld_addr *)(r->r_offset + obj->base) == 0) return 0;
+    }
+
+    for (ld_addr i = 0; i < n; i++) {
+        const Elf_Reloc *r = &obj->jmprel[i];
+        if (ELF_R_TYPE(r->r_info) == LD_R_IRELATIVE) {
+            obj->has_ifunc = 1;     /* ld_relocate_ifunc fills the slot */
+            continue;
+        }
+        *(ld_addr *)(r->r_offset + obj->base) += obj->base;
+    }
+    obj->pltgot[1] = (ld_addr)(unsigned long)obj;
+    obj->pltgot[2] = (ld_addr)(unsigned long)ld_plt_trampoline;
+    obj->lazy = 1;
+    return 1;
+}
+
+ld_addr ld_plt_fixup(ld_obj_t *obj, ld_addr arg) {
+#ifdef LD_ARCH_AMD64
+    ld_addr idx = arg;                      /* the stub pushed an index */
+#else
+    ld_addr idx = arg / sizeof(Elf_Reloc);  /* ... a byte offset */
+#endif
+    /* The lookup walks the loaded-object list, which a dlopen in another
+     * thread may be extending. */
+    ld_dl_lock();
+    if (idx >= obj->pltrelsz / sizeof(Elf_Reloc))
+        ld_die("lazy binding: PLT entry out of range");
+
+    const Elf_Reloc *r = &obj->jmprel[idx];
+    ld_u32 sym = ELF_R_SYM(r->r_info);
+    const char *name = obj->strtab + obj->symtab[sym].st_name;
+    int ifunc = 0;
+    ld_addr v = ld_reloc_resolve_ifunc(obj, sym, name, &ifunc);
+    if (v == 0) {
+        /* There is nothing to jump to: the function is being called. */
+        ld_puts(LD_SELF_NAME ": undefined symbol: "); ld_puts(name);
+        ld_puts(" in "); ld_puts(obj->name); ld_puts("\n");
+        ld_die("lazy binding failed");
+    }
+    if (ifunc) v = ld_ifunc_call(v);
+    *(ld_addr *)(r->r_offset + obj->base) = v;
+    ld_dl_unlock();
+    return v;
+}
+
 int ld_relocate(ld_obj_t *obj) {
     /* A RELATIVE relocation on i386 is `*p += base` (non-idempotent).
      * Apply relocations exactly once per object - re-running on an
@@ -92,7 +169,7 @@ int ld_relocate(ld_obj_t *obj) {
         }
     }
     /* The PLT slots are bound now unless the architecture can leave them
-     * for the first call (amd64: ld_reloc_lazy_setup). */
+     * for the first call. */
     if (obj->jmprel && !ld_reloc_lazy_setup(obj)) {
         ld_addr n = obj->pltrelsz / sizeof(Elf_Reloc);
         for (ld_addr i = 0; i < n; i++) {

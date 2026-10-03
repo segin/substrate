@@ -7,28 +7,46 @@
  *                    ld_start.S for our own image; included here
  *                    for shared libraries the loader brings in).
  *   R_386_GLOB_DAT - *p  = S
- *   R_386_JMP_SLOT - *p  = S  (eager binding; no lazy stub)
+ *   R_386_JMP_SLOT - *p  = S  (bound on first call when the object
+ *                    allows it)
  *   R_386_32       - *p  = S + A   (A = current contents of p)
  *   R_386_PC32     - *p  = S + A - P
  *   R_386_COPY     - copy the symbol's bytes from the providing DSO
  *   R_386_TLS_TPOFF, R_386_TLS_DTPMOD32, R_386_TLS_DTPOFF32
+ *   R_386_IRELATIVE - *p = the value returned by the resolver at B + A
  *
- * No DT_RELA on i386 by spec.  See ld_reloc.c for the table walk and
- * the ordering of the COPY pass.
+ * No DT_RELA on i386 by spec.  IRELATIVE, and a GLOB_DAT / JMP_SLOT / 32
+ * whose symbol resolves to an indirect function, are deferred to the
+ * indirect-function pass.  See ld_reloc.c for that, for the table walk
+ * and the ordering of the passes, and for lazy binding.
  */
 
 #include "ld.h"
-
-/* The 32-bit linker binds every PLT slot at load time. */
-int ld_reloc_lazy_setup(ld_obj_t *obj) {
-    (void)obj;
-    return 0;
-}
 
 int ld_reloc_apply(ld_obj_t *obj, Elf_Reloc *r) {
     ld_u32 type = ELF_R_TYPE(r->r_info);
     ld_u32 sym  = ELF_R_SYM(r->r_info);
     ld_u32 *p   = (ld_u32 *)(r->r_offset + obj->base);
+
+    /* The indirect-function pass revisits only what the main pass
+     * deferred to it.  Everything else has been applied, and with the
+     * addend in the word itself must not be applied again. */
+    if (obj->ifunc_pass) {
+        switch (type) {
+        case R_386_IRELATIVE:
+            break;
+        case R_386_GLOB_DAT:
+        case R_386_32:
+            if (sym == 0) return 0;
+            break;
+        case R_386_JMP_SLOT:
+            /* Lazily bound slots stay with ld_plt_fixup. */
+            if (sym == 0 || obj->lazy) return 0;
+            break;
+        default:
+            return 0;
+        }
+    }
 
     switch (type) {
     case R_386_NONE:
@@ -41,6 +59,13 @@ int ld_reloc_apply(ld_obj_t *obj, Elf_Reloc *r) {
         *p += obj->base;
         return 0;
 
+    case R_386_IRELATIVE:
+        /* The word holds the resolver's link-time address until the
+         * indirect-function pass replaces it with what that returns. */
+        if (!obj->ifunc_pass) { obj->has_ifunc = 1; return 0; }
+        *p = ld_ifunc_call(obj->base + *p);
+        return 0;
+
     case R_386_GLOB_DAT:
     case R_386_JMP_SLOT: {
         if (sym == 0) {
@@ -49,7 +74,8 @@ int ld_reloc_apply(ld_obj_t *obj, Elf_Reloc *r) {
             return -1;
         }
         const char *name = obj->strtab + obj->symtab[sym].st_name;
-        ld_u32 v = ld_reloc_resolve(obj, sym, name);
+        int ifunc = 0;
+        ld_u32 v = ld_reloc_resolve_ifunc(obj, sym, name, &ifunc);
         if (v == 0) {
             /* Weak undefined symbols are allowed to remain 0. */
             unsigned char bind = ELF_ST_BIND(obj->symtab[sym].st_info);
@@ -58,6 +84,12 @@ int ld_reloc_apply(ld_obj_t *obj, Elf_Reloc *r) {
             ld_puts(" in "); ld_puts(obj->name); ld_puts("\n");
             return -1;
         }
+        if (ifunc) {
+            if (!obj->ifunc_pass) { obj->has_ifunc = 1; return 0; }
+            v = ld_ifunc_call(v);
+        } else if (obj->ifunc_pass) {
+            return 0;               /* applied by the main pass */
+        }
         *p = v;
         return 0;
     }
@@ -65,12 +97,19 @@ int ld_reloc_apply(ld_obj_t *obj, Elf_Reloc *r) {
     case R_386_32: {
         if (sym == 0) { *p += obj->base; return 0; }
         const char *name = obj->strtab + obj->symtab[sym].st_name;
-        ld_u32 v = ld_reloc_resolve(obj, sym, name);
+        int ifunc = 0;
+        ld_u32 v = ld_reloc_resolve_ifunc(obj, sym, name, &ifunc);
         if (v == 0) {
             unsigned char bind = ELF_ST_BIND(obj->symtab[sym].st_info);
             if (bind == STB_WEAK) { /* keep addend */ return 0; }
             ld_puts("ld.so: undefined R_386_32: "); ld_puts(name); ld_puts("\n");
             return -1;
+        }
+        if (ifunc) {
+            if (!obj->ifunc_pass) { obj->has_ifunc = 1; return 0; }
+            v = ld_ifunc_call(v);
+        } else if (obj->ifunc_pass) {
+            return 0;               /* applied by the main pass */
         }
         *p = v + *p;            /* S + A; A = current contents */
         return 0;
