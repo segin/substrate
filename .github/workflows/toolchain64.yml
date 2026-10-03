@@ -1,0 +1,150 @@
+name: toolchain64
+
+# The 64-bit cross toolchain, x86_64-unknown-substrate: binutils and GCC
+# (C and C++) that run on the runner and produce native 64-bit substrate
+# programs.  contrib/build-toolchain64.sh is the whole job; this file only
+# supplies the packages, the cache and the diagnostics.
+#
+# Separate from bootstrap.yml, which builds the 32-bit toolchain and
+# everything on top of it and is long enough already, and from ci.yml,
+# which cancels a run when a newer push arrives -- right for jobs measured
+# in seconds, fatal for a compiler build.
+#
+# What it proves: the patch series applies, both packages build for the
+# target, and the compiler links C and C++ programs with the properties a
+# 64-bit substrate program must have (tests/toolchain64/check.sh).  It does
+# NOT run those programs: no job here boots a VM.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'contrib/binutils/**'
+      - 'contrib/gcc/**'
+      - 'contrib/build-toolchain64.sh'
+      - 'scripts/sync-sysroot.sh'
+      - 'tests/toolchain64/**'
+      - 'lib/**'
+      - 'usr.lib/**'
+      - 'include/**'
+      - 'Makefile.inc'
+      - '.github/workflows/toolchain64.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: toolchain64-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  toolchain64:
+    name: x86_64-unknown-substrate binutils + gcc
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v7
+
+      # texinfo/bison/flex build binutils and gcc; gcc's own
+      # contrib/download_prerequisites (run by contrib/gcc/fetch.sh) fetches
+      # gmp/mpfr/mpc/isl, so those need no -dev packages.  gcc-multilib is
+      # not needed: substrate's 64-bit libraries build with the host
+      # compiler's native -m64.
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential python3 \
+            texinfo bison flex gawk curl wget xz-utils
+
+      # Ours, so that neither the install nor the sysroot sync needs root.
+      - name: Prepare /opt/substrate
+        run: |
+          sudo install -d -o "$(id -un)" -g "$(id -gn)" /opt/substrate
+
+      # The installed toolchain, keyed on its own inputs.  Hash the tracked
+      # inputs only: 'contrib/gcc/**' would also match contrib/gcc/build/,
+      # where the source is unpacked and built, and hashFiles gives up after
+      # 120 seconds (see bootstrap.yml).
+      #
+      # The cached libgcc_s.so.1 and libstdc++ are compiled against
+      # substrate's 64-bit libc headers, which the key does not cover.  Bump
+      # the version in the key when a header ABI those libraries use changes.
+      - name: Restore the toolchain cache
+        id: tc
+        uses: actions/cache/restore@v6
+        with:
+          path: /opt/substrate
+          key: substrate-toolchain64-v1-${{ runner.os }}-${{ hashFiles('contrib/binutils/patches/**', 'contrib/binutils/series', 'contrib/binutils/*.sh', 'contrib/gcc/patches/**', 'contrib/gcc/series', 'contrib/gcc/*.sh', 'contrib/build-toolchain64.sh') }}
+
+      - name: Disk space before
+        run: df -h /
+
+      # On a cache hit the compiler is reused, and only substrate's
+      # libraries, the sysroot and the tests are redone -- which is what a
+      # change under lib/ or include/ needs checked.
+      - name: Build the toolchain and run its checks
+        env:
+          SKIP_BUILD: ${{ steps.tc.outputs.cache-hit == 'true' && '1' || '0' }}
+        run: contrib/build-toolchain64.sh
+
+      # "C compiler cannot create executables" points at a config.log that
+      # is gone when the job ends; print the part that says why.
+      - name: configure logs (on failure)
+        if: failure()
+        run: |
+          shopt -s nullglob
+          for log in contrib/*/build-stage1-x86_64/config.log \
+                     contrib/gcc/build-stage1-x86_64/x86_64-unknown-substrate/*/config.log; do
+            echo "::group::$log"
+            awk '/checking whether the C compiler works/ {f=1}
+                 f && n++ < 120' "$log"
+            echo "::endgroup::"
+          done
+          for log in tests/toolchain64/out/*.log; do
+            echo "::group::$log"
+            cat "$log"
+            echo "::endgroup::"
+          done
+
+      # Save from a failing run too, so a failure in the checks does not
+      # cost a second compiler build -- but only a toolchain that is whole:
+      # a half-built one would be restored and then never rebuilt.
+      - name: Is the toolchain complete?
+        id: tcok
+        if: always()
+        run: |
+          p=/opt/substrate/bin/x86_64-unknown-substrate
+          ok=false
+          if [ -x "$p-gcc" ] && [ -x "$p-g++" ]; then
+            t=$(mktemp -d)
+            printf 'int main(void){return 0;}\n' > "$t/t.c"
+            printf '#include <string>\nint main(){std::string s("x");return s.size()-1;}\n' > "$t/t.cc"
+            if "$p-gcc" -o "$t/t" "$t/t.c" 2>/dev/null \
+               && "$p-g++" -o "$t/u" "$t/t.cc" 2>/dev/null; then ok=true; fi
+            rm -rf "$t"
+          fi
+          echo "ok=$ok" >> "$GITHUB_OUTPUT"
+          echo "toolchain usable: $ok"
+
+      - name: Save the toolchain cache
+        if: always() && steps.tc.outputs.cache-hit != 'true' && steps.tcok.outputs.ok == 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: /opt/substrate
+          # Must match the restore key above verbatim.
+          key: substrate-toolchain64-v1-${{ runner.os }}-${{ hashFiles('contrib/binutils/patches/**', 'contrib/binutils/series', 'contrib/binutils/*.sh', 'contrib/gcc/patches/**', 'contrib/gcc/series', 'contrib/gcc/*.sh', 'contrib/build-toolchain64.sh') }}
+
+      - name: Disk space after
+        run: df -h /
+
+      # The programs the checks built, to run on a 64-bit substrate system.
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: toolchain64-test-programs
+          path: tests/toolchain64/out/
+          if-no-files-found: warn
+          retention-days: 7
