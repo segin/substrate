@@ -9,8 +9,14 @@
  * types to make that hold by construction:
  *
  *   abi_long_t / abi_ulong_t     a C long of the i386 ABI: 32 bits
+ *   abi_size_t                   a size_t of the i386 ABI: 32 bits
  *   abi_int64_t / abi_uint64_t   a 64-bit field aligned as the i386 ABI
  *                                aligns one in a structure: to 4 bytes
+ *   uptr32_t                     a user pointer as the process stores it
+ *
+ * The same types describe the process's side of a system call argument: a
+ * handler whose parameter is the user's long, size_t or pointer slot
+ * declares it with them rather than with the native type.
  *
  * On the i386 kernel they are exactly the types they replace.  On the
  * x86_64 kernel an LP64 long would be 64 bits and a 64-bit field would be
@@ -22,19 +28,28 @@
 #ifndef _SYS_ABI32_H
 #define _SYS_ABI32_H
 
+#include <stddef.h>
 #include <stdint.h>
 
 #ifdef SUBSTRATE_ARCH_X86_64
 typedef int32_t  abi_long_t;
 typedef uint32_t abi_ulong_t;
+typedef uint32_t abi_size_t;
 typedef int64_t  abi_int64_t  __attribute__((aligned(4)));
 typedef uint64_t abi_uint64_t __attribute__((aligned(4)));
 #else
 typedef long          abi_long_t;
 typedef unsigned long abi_ulong_t;
+typedef size_t        abi_size_t;
 typedef int64_t       abi_int64_t;
 typedef uint64_t      abi_uint64_t;
 #endif
+
+/* A pointer as the process stores it: its 32-bit address. */
+typedef uint32_t uptr32_t;
+
+/* A user pointer value, as the kernel can hold it. */
+#define UPTR32(p) ((void *)(uintptr_t)(uptr32_t)(p))
 
 /*
  * Pin a structure to its i386 size on either kernel, so a field that

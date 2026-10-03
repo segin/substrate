@@ -7,6 +7,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include <sys/abi32.h>
 
 /* 32-bit lseek for foreign personalities with 32-bit off_t */
 int32_t compat_lseek32(int fd, int32_t offset, int whence);
@@ -23,6 +24,10 @@ int64_t freebsd_sys_lseek(int fd, int pad, uint32_t off_lo, uint32_t off_hi, int
 int64_t freebsd_sys_olseek(int fd, int32_t offset, int whence);
 int64_t freebsd_sys_lseek13(int fd, uint32_t off_lo, uint32_t off_hi, int whence);
 void *freebsd_sys_mmap(void *addr, size_t len, int prot, int flags, int fd, uint32_t off_lo, uint32_t off_hi);
+
+/* mmap with a 32-bit (C long) offset: SVR4, SunOS, OpenBSD's old mmap. */
+void *sys_mmap_off32(void *addr, size_t len, int prot, int flags, int fd,
+                     abi_long_t offset);
 int freebsd_sys_ioctl(int fd, uint32_t request, void *arg);
 int freebsd_sys_fcntl(int fd, int cmd, int arg);
 
@@ -32,7 +37,7 @@ int freebsd_sys_fcntl(int fd, int cmd, int arg);
  * thread.  libthr passes &curthread->tid; the native sys_thr_exit only wakes
  * native (thread-object) joiners, not the umtx word a FreeBSD joiner sleeps on.
  */
-int freebsd_sys_thr_exit(long *state);
+int freebsd_sys_thr_exit(abi_long_t *state);
 
 /*
  * FreeBSD thr_self(long *id): the kernel writes the calling thread's id through
@@ -41,11 +46,11 @@ int freebsd_sys_thr_exit(long *state);
  * main-thread tid 0, which collides with UMUTEX_UNOWNED and corrupts owned-mutex
  * bookkeeping.  This honors the real out-pointer ABI.
  */
-int freebsd_sys_thr_self(long *id);
+int freebsd_sys_thr_self(abi_long_t *id);
 
 /* rtprio_thread(2): thread realtime/idle scheduling class — accepted as a
  * no-op (substrate has no rtprio classes; libthr only needs it not to fail). */
-int freebsd_sys_rtprio_thread(int function, long lwpid, void *rtp);
+int freebsd_sys_rtprio_thread(int function, abi_long_t lwpid, void *rtp);
 
 /* clock_gettime(2) with FreeBSD clockid translation (CLOCK_MONOTONIC=4 etc.
  * -> substrate native 0/1).  std::chrono::steady_clock depends on this. */

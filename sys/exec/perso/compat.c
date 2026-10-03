@@ -149,6 +149,17 @@ void *freebsd_sys_mmap(void *addr, size_t len, int prot, int flags, int fd, uint
     return sys_mmap(addr, len, prot, kflags, fd, offset);
 }
 
+/*
+ * mmap whose offset is the process's 32-bit off_t (a C long): SVR4 and SunOS
+ * mmap, and the 4.3BSD-era mmap OpenBSD keeps as syscall 71.  Native sys_mmap
+ * takes a 64-bit offset, which i386 cdecl would assemble from this argument
+ * and whatever follows it on the stack.
+ */
+void *sys_mmap_off32(void *addr, size_t len, int prot, int flags, int fd,
+                     abi_long_t offset) {
+    return sys_mmap(addr, len, prot, flags, fd, (uint64_t)(int64_t)offset);
+}
+
 /* Generic syscall stubs - returning -ENOSYS */
 
 
@@ -366,7 +377,7 @@ int sys_utime(const char *path, void *times) {
 #define UL_GETMAXBRK 3  /* get the maximum possible break value */
 #define UL_GETMAXFDS 4  /* get the descriptor limit */
 
-int sys_ulimit(int cmd, long limit) {
+int sys_ulimit(int cmd, abi_long_t limit) {
     if (!current_process) return -EINVAL;
 
     switch (cmd) {
@@ -975,7 +986,7 @@ int freebsd_sys_wait4(int pid, int *status, int options, void *rusage) {
     return ret;
 }
 
-int freebsd_sys_rtprio_thread(int function, long lwpid, void *rtp) {
+int freebsd_sys_rtprio_thread(int function, abi_long_t lwpid, void *rtp) {
     /*
      * rtprio_thread(2): query/set a thread's realtime/idle scheduling class.
      * substrate's scheduler has no FreeBSD rtprio classes; libthr calls this
@@ -996,7 +1007,7 @@ int freebsd_sys_rtprio_thread(int function, long lwpid, void *rtp) {
     return 0;
 }
 
-int freebsd_sys_thr_exit(long *state) {
+int freebsd_sys_thr_exit(abi_long_t *state) {
     /*
      * FreeBSD's thr_exit(2) publishes the thread's death to a pthread_join()
      * waiter before tearing the thread down: it writes TID_TERMINATED (1) to
@@ -1008,14 +1019,14 @@ int freebsd_sys_thr_exit(long *state) {
      * native thread-object joiners).
      */
     if (state) {
-        long terminated = 1;            /* TID_TERMINATED */
-        (void)copyout(&terminated, state, sizeof(long));
+        abi_long_t terminated = 1;      /* TID_TERMINATED */
+        (void)copyout(&terminated, state, sizeof(terminated));
         kern_umtx_wake(state, 0x7fffffff);
     }
     return sys_thr_exit((void *)0);
 }
 
-int freebsd_sys_thr_self(long *id) {
+int freebsd_sys_thr_self(abi_long_t *id) {
     /*
      * FreeBSD thr_self(2) ABI: int thr_self(long *id).  The kernel WRITES the
      * caller-thread id through *id (suword_lwpid) and returns 0 — it does NOT
@@ -1033,7 +1044,7 @@ int freebsd_sys_thr_self(long *id) {
      * its true, non-zero tid.  FreeBSD i386 long is 4 bytes.
      */
     if (id) {
-        long tid = sched_get_current_tid();
+        abi_long_t tid = sched_get_current_tid();
         if (copyout(&tid, id, sizeof(tid)) != 0)
             return -EFAULT;
     }
@@ -1094,7 +1105,24 @@ int sys_pathconf(const char *path, int name) {
  * sys_sysctlbyname - FreeBSD sysctlbyname(2) stub
  * Handles key queries needed by jemalloc and libc startup.
  */
-int sys_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void *newp, size_t newlen) {
+/*
+ * The sysctl length word (*oldlenp) is the process's size_t, so it is read
+ * and written as an abi_size_t.
+ */
+static int sysctl_get_oldlen(const abi_size_t *oldlenp, size_t *len) {
+    abi_size_t v = 0;
+    if (oldlenp && copyin(oldlenp, &v, sizeof(v)) != 0) return -EFAULT;
+    *len = v;
+    return 0;
+}
+
+static int sysctl_put_oldlen(abi_size_t *oldlenp, size_t len) {
+    abi_size_t v = (abi_size_t)len;
+    if (oldlenp && copyout(&v, oldlenp, sizeof(v)) != 0) return -EFAULT;
+    return 0;
+}
+
+int sys_sysctlbyname(const char *name, void *oldp, abi_size_t *oldlenp, void *newp, size_t newlen) {
     (void)newp; (void)newlen;
     char kname[128];
     if (copyinstr(name, kname, sizeof(kname), NULL) != 0) return -EFAULT;
@@ -1102,19 +1130,19 @@ int sys_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void *newp, 
     if (strcmp(kname, "hw.ncpu") == 0 || strcmp(kname, "hw.logicalcpu") == 0) {
         int val = sys_cpu_count();
         if (val < 1) val = 1;
-        if (oldlenp) { size_t want = sizeof(int); copyout(&want, oldlenp, sizeof(size_t)); }
+        (void)sysctl_put_oldlen(oldlenp, sizeof(int));
         if (oldp) return copyout(&val, oldp, sizeof(int));
         return 0;
     }
     if (strcmp(kname, "vm.pagesize") == 0 || strcmp(kname, "hw.pagesize") == 0) {
         int val = 4096;
-        if (oldlenp) { size_t want = sizeof(int); copyout(&want, oldlenp, sizeof(size_t)); }
+        (void)sysctl_put_oldlen(oldlenp, sizeof(int));
         if (oldp) return copyout(&val, oldp, sizeof(int));
         return 0;
     }
     if (strcmp(kname, "kern.osreldate") == 0) {
         int val = 1403000; /* FreeBSD 14.3 */
-        if (oldlenp) { size_t want = sizeof(int); copyout(&want, oldlenp, sizeof(size_t)); }
+        (void)sysctl_put_oldlen(oldlenp, sizeof(int));
         if (oldp) return copyout(&val, oldp, sizeof(int));
         return 0;
     }
@@ -1133,15 +1161,15 @@ int sys_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void *newp, 
  * hw.machine this way and tolerates ENOMEM, so a sane string here is what
  * makes `uname` work.
  */
-static int fbsd_sysctl_str(const char *s, void *oldp, size_t *oldlenp) {
+static int fbsd_sysctl_str(const char *s, void *oldp, abi_size_t *oldlenp) {
     size_t need = strlen(s) + 1;          /* include the NUL */
     size_t avail = 0;
-    if (oldlenp && copyin(oldlenp, &avail, sizeof(size_t)) != 0) return -EFAULT;
+    if (sysctl_get_oldlen(oldlenp, &avail) != 0) return -EFAULT;
     if (oldp) {
         size_t n = (oldlenp && avail < need) ? avail : need;
         if (n && copyout((void *)s, oldp, n) != 0) return -EFAULT;
     }
-    if (oldlenp && copyout(&need, oldlenp, sizeof(size_t)) != 0) return -EFAULT;
+    if (sysctl_put_oldlen(oldlenp, need) != 0) return -EFAULT;
     if (oldp && oldlenp && avail < need) return -ENOMEM;
     return 0;
 }
@@ -1243,7 +1271,7 @@ static char fbsd_proc_stat(uint8_t st) {
  * oldp == NULL is a size probe; otherwise fill as many kinfo_proc as fit.
  */
 static int fbsd_kern_proc(const int *kname, unsigned int namelen,
-                          void *oldp, size_t *oldlenp) {
+                          void *oldp, abi_size_t *oldlenp) {
     int op  = (namelen >= 3) ? kname[2] : 0;
     int arg = (namelen >= 4) ? kname[3] : 0;
 
@@ -1252,7 +1280,7 @@ static int fbsd_kern_proc(const int *kname, unsigned int namelen,
     if (np < 0) np = 0;
 
     size_t want = 0;
-    if (oldlenp && copyin(oldlenp, &want, sizeof(want)) != 0) return -EFAULT;
+    if (sysctl_get_oldlen(oldlenp, &want) != 0) return -EFAULT;
 
     size_t produced = 0, copied = 0;
     for (int i = 0; i < np; i++) {
@@ -1287,14 +1315,12 @@ static int fbsd_kern_proc(const int *kname, unsigned int namelen,
         }
         produced += sizeof(struct fbsd_kinfo_proc);
     }
-    if (oldlenp) {
-        size_t total = (oldp == NULL) ? produced : copied;
-        if (copyout(&total, oldlenp, sizeof(total)) != 0) return -EFAULT;
-    }
+    if (sysctl_put_oldlen(oldlenp, (oldp == NULL) ? produced : copied) != 0)
+        return -EFAULT;
     return 0;
 }
 
-int freebsd_sys_sysctl(int *name, unsigned int namelen, void *oldp, size_t *oldlenp, void *newp, size_t newlen) {
+int freebsd_sys_sysctl(int *name, unsigned int namelen, void *oldp, abi_size_t *oldlenp, void *newp, size_t newlen) {
     (void)newp; (void)newlen;
     if (!name || namelen < 1) return -EINVAL;
 
@@ -1311,13 +1337,13 @@ int freebsd_sys_sysctl(int *name, unsigned int namelen, void *oldp, size_t *oldl
         if (kname[1] == 3) { /* HW_NCPU */
             int val = sys_cpu_count();
             if (val < 1) val = 1;
-            if (oldlenp) { size_t want = sizeof(int); copyout(&want, oldlenp, sizeof(size_t)); }
+            (void)sysctl_put_oldlen(oldlenp, sizeof(int));
             if (oldp) return copyout(&val, oldp, sizeof(int));
             return 0;
         }
         if (kname[1] == 7) { /* HW_PAGESIZE */
             int val = 4096;
-            if (oldlenp) { size_t want = sizeof(int); copyout(&want, oldlenp, sizeof(size_t)); }
+            (void)sysctl_put_oldlen(oldlenp, sizeof(int));
             if (oldp) return copyout(&val, oldp, sizeof(int));
             return 0;
         }
@@ -1347,7 +1373,7 @@ int freebsd_sys_sysctl(int *name, unsigned int namelen, void *oldp, size_t *oldl
         }
         if (kname[1] == 24) { /* KERN_OSRELDATE */
             int val = 1403000;
-            if (oldlenp) { size_t want = sizeof(int); copyout(&want, oldlenp, sizeof(size_t)); }
+            (void)sysctl_put_oldlen(oldlenp, sizeof(int));
             if (oldp) return copyout(&val, oldp, sizeof(int));
             return 0;
         }
@@ -1359,19 +1385,19 @@ int freebsd_sys_sysctl(int *name, unsigned int namelen, void *oldp, size_t *oldl
              * getty (re)spawn. */
             int val = -1;
             if (oldp && copyout(&val, oldp, sizeof(int)) != 0) return -EFAULT;
-            if (oldlenp) { size_t want = sizeof(int); if (copyout(&want, oldlenp, sizeof(size_t)) != 0) return -EFAULT; }
+            if (sysctl_put_oldlen(oldlenp, sizeof(int)) != 0) return -EFAULT;
             return 0;
         }
         if (kname[1] == 37) { /* KERN_ARND - secure random bytes */
 
             size_t want = 0;
-            if (oldlenp && copyin(oldlenp, &want, sizeof(size_t)) != 0) return -EFAULT;
+            if (sysctl_get_oldlen(oldlenp, &want) != 0) return -EFAULT;
             if (want == 0 || want > 4096) return -EINVAL;
             uint8_t kbuf[256];
             if (want > sizeof(kbuf)) want = sizeof(kbuf);
             if (random_get_bytes_flags(kbuf, want, 0x4 /*GRND_INSECURE*/) != (int)want) return -EIO;
             if (oldp && copyout(kbuf, oldp, want) != 0) return -EFAULT;
-            if (oldlenp && copyout(&want, oldlenp, sizeof(size_t)) != 0) return -EFAULT;
+            if (sysctl_put_oldlen(oldlenp, want) != 0) return -EFAULT;
             return 0;
         }
     }

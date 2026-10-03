@@ -11,6 +11,7 @@
 #include <machine/early_boot.h>
 #include <kern/console.h>
 #include <kern/osversion.h>
+#include <sys/abi32.h>
 #include <sys/copy.h>
 #include <sys/errno.h>
 #include <sys/lock.h>
@@ -105,7 +106,7 @@ void sysctl_init(void) {
 /*
  * Implementation of sys_sysctl System Call
  */
-int sys_sysctl(int *name, unsigned int namelen, void *oldp, size_t *oldlenp, void *newp, size_t newlen) {
+int sys_sysctl(int *name, unsigned int namelen, void *oldp, abi_size_t *oldlenp, void *newp, size_t newlen) {
     int error = 0;
     struct sysctl_oid *oid;
     struct sysctl_req req;
@@ -138,9 +139,9 @@ int sys_sysctl(int *name, unsigned int namelen, void *oldp, size_t *oldlenp, voi
     req.newptr = newp;
     req.newlen = newlen;
 
-    /* 3. Copy in old length if provided */
+    /* 3. Copy in old length if provided (the process's size_t) */
     if (oldlenp) {
-        size_t oldlen;
+        abi_size_t oldlen;
         error = copyin(oldlenp, &oldlen, sizeof(oldlen));
         if (error) return error;
         req.oldlen = oldlen;
@@ -197,7 +198,7 @@ int sys_sysctl(int *name, unsigned int namelen, void *oldp, size_t *oldlenp, voi
     if (error == 0 && oldlenp) {
         // req.oldidx is updated by handler to indicate how much was written
         // or how much would have been written
-        size_t used = req.oldidx;
+        abi_size_t used = (abi_size_t)req.oldidx;
         if (copyout(&used, oldlenp, sizeof(used)) != 0) {
             error = EFAULT;
         }

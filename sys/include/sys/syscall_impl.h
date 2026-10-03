@@ -11,6 +11,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <sys/types.h>
+#include <sys/abi32.h>
 #include <sys/resource.h>
 #include <sys/sysinfo.h>
 
@@ -39,7 +40,7 @@ extern int sys_getpgid(int);
 extern int sys_clone(uint32_t, void*, int*, void*, int*);
 extern int sys_ptrace(int, int, int, int);
 extern int sys_vm86(void *);
-extern int sys_ulimit(int, long);
+extern int sys_ulimit(int, abi_long_t);
 extern int sys_prof(void*, size_t, unsigned long, unsigned int);
 
 /* User/group management */
@@ -222,19 +223,19 @@ extern int sys_modify_ldt(int, void*, unsigned long);
 extern int sys_fsync(int);
 extern int sys_umask(int);
 extern int sys_reboot(int);
-extern int sys_sysctl(int *name, unsigned int namelen, void *oldp, size_t *oldlenp, void *newp, size_t newlen);
+extern int sys_sysctl(int *name, unsigned int namelen, void *oldp, abi_size_t *oldlenp, void *newp, size_t newlen);
 
 extern int sys_thr_exit(void*);
-extern int sys_thr_join(tid_t, void**);
+extern int sys_thr_join(tid_t, uptr32_t*);
 extern int sys_thr_self(void);
 extern int sys_thr_new(struct thr_param*, int);
-extern int sys_thr_kill(long, int);
-extern int sys_thr_kill2(pid_t, long, int);
+extern int sys_thr_kill(abi_long_t, int);
+extern int sys_thr_kill2(pid_t, abi_long_t, int);
 struct timespec;
 extern int sys_thr_suspend(const struct timespec *);
 extern int thr_park_kernel(const struct timespec *);
-extern int sys_thr_wake(long);
-extern int sys_thr_set_name(long, const char *);
+extern int sys_thr_wake(abi_long_t);
+extern int sys_thr_set_name(abi_long_t, const char *);
 extern int sys_yield(void);
 /* POSIX process scheduling (sys/kern/sched_posix.c). */
 struct sched_param;
@@ -250,16 +251,16 @@ extern int sys_pmap_stats(struct pmap_stats*);
 extern int sys_proc_info(pid_t, sys_procinfo_t*);
 extern int sys_proc_list(pid_t*, size_t);
 extern int sys_proc_count(void);
-extern int sys_proc_threads(pid_t, tid_t*, size_t*);
+extern int sys_proc_threads(pid_t, tid_t*, abi_size_t*);
 struct sys_thrinfo;
 extern int sys_proc_thr_count(pid_t);
 extern int sys_proc_thr_list(pid_t, struct sys_thrinfo*, size_t);
-extern int sys_proc_fds(pid_t, sys_fd_t*, size_t*);
-extern int sys_proc_maps(pid_t, sys_map_t*, size_t*);
+extern int sys_proc_fds(pid_t, sys_fd_t*, abi_size_t*);
+extern int sys_proc_maps(pid_t, sys_map_t*, abi_size_t*);
 extern int sys_proc_cwd(pid_t, char*, size_t);
 extern int sys_proc_exe(pid_t, char*, size_t);
-extern int sys_proc_cmdline(pid_t, char**, size_t*);
-extern int sys_proc_environ(pid_t, char**, size_t*);
+extern int sys_proc_cmdline(pid_t, char**, abi_size_t*);
+extern int sys_proc_environ(pid_t, char**, abi_size_t*);
 extern int sys_cpu_count(void);
 extern int sys_hostname(char*, size_t);
 extern int sys_rt_sigreturn(void*);
@@ -315,7 +316,7 @@ extern ssize_t sys_recvmsg(int, void*, int);
 extern ssize_t sys_sendmsg(int, const void*, int);
 extern ssize_t sys_send(int, const void*, size_t, int);
 extern ssize_t sys_recv(int, void*, size_t, int);
-extern int sys_sysctlbyname(const char*, void*, size_t*, void*, size_t);
+extern int sys_sysctlbyname(const char*, void*, abi_size_t*, void*, size_t);
 extern int sys_sigwaitinfo(const void*, void*);
 extern int sys_getdtablesize(void);
 extern int sys_pathconf(const char*, int);
@@ -323,7 +324,7 @@ extern int sys_shutdown(int, int);
 extern int sys_socketpair(int, int, int, int*);
 extern int sys_msync(void*, size_t, int);
 extern int sys_pdfork(int*, int);
-extern int freebsd_sys_sysctl(int*, unsigned int, void*, size_t*, void*, size_t);
+extern int freebsd_sys_sysctl(int*, unsigned int, void*, abi_size_t*, void*, size_t);
 
 /* Native syscall declarations for personality mapping */
 extern int sys_mlock(const void *addr, size_t len);
@@ -333,12 +334,12 @@ extern int sys_getrusage(int who, struct rusage *usage);
 extern int sys_stime(time_t *t);
 extern int sys_ioctl(int fd, uint32_t request, void *arg);
 extern int sys_reboot(int cmd);
-extern int sys_sysctl(int *name, unsigned int namelen, void *oldp, size_t *oldlenp, void *newp, size_t newlen);
+extern int sys_sysctl(int *name, unsigned int namelen, void *oldp, abi_size_t *oldlenp, void *newp, size_t newlen);
 extern int sys_vm_stats(sys_vmstat_t *stats);
 extern int sys_vm_info(sys_vminfo_t *info);
-extern int sys_vm_swap(sys_swapinfo_t *swap, size_t *count);
+extern int sys_vm_swap(sys_swapinfo_t *swap, abi_size_t *count);
 extern int sys_vm_buffers(sys_bufinfo_t *buf);
-extern int sys_vm_slabs(sys_slabinfo_t *slabs, size_t *count);
+extern int sys_vm_slabs(sys_slabinfo_t *slabs, abi_size_t *count);
 extern int sys_setpriority(int which, int who, int prio);
 extern int sys_getpriority(int which, int who);
 extern int sys_sethostname(const char *name, size_t len);

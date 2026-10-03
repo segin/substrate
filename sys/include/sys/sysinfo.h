@@ -180,24 +180,24 @@ typedef struct sys_slabinfo {
 } sys_slabinfo_t;
 
 int sys_vm_info(sys_vminfo_t *info);
-int sys_vm_swap(sys_swapinfo_t *swap, size_t *count);
+int sys_vm_swap(sys_swapinfo_t *swap, abi_size_t *count);
 int sys_vm_buffers(sys_bufinfo_t *buf);
-int sys_vm_slabs(sys_slabinfo_t *slabs, size_t *count);
+int sys_vm_slabs(sys_slabinfo_t *slabs, abi_size_t *count);
 
 #ifndef _KERNEL
 int sysinfo(struct sysinfo *info);
 int sys_proc_count(void);
 int sys_proc_list(pid_t *pids, size_t count);
 int sys_proc_info(pid_t pid, sys_procinfo_t *info);
-int sys_proc_threads(pid_t pid, tid_t *tids, size_t *count);
+int sys_proc_threads(pid_t pid, tid_t *tids, abi_size_t *count);
 int sys_proc_thr_count(pid_t pid);
 int sys_proc_thr_list(pid_t pid, sys_thrinfo_t *array, size_t size_bytes);
-int sys_proc_fds(pid_t pid, sys_fd_t *fds, size_t *count);
-int sys_proc_maps(pid_t pid, sys_map_t *maps, size_t *count);
+int sys_proc_fds(pid_t pid, sys_fd_t *fds, abi_size_t *count);
+int sys_proc_maps(pid_t pid, sys_map_t *maps, abi_size_t *count);
 int sys_proc_cwd(pid_t pid, char *buf, size_t len);
 int sys_proc_exe(pid_t pid, char *buf, size_t len);
-int sys_proc_cmdline(pid_t pid, char **argv, size_t *argc);
-int sys_proc_environ(pid_t pid, char **envp, size_t *envc);
+int sys_proc_cmdline(pid_t pid, char **argv, abi_size_t *argc);
+int sys_proc_environ(pid_t pid, char **envp, abi_size_t *envc);
 #endif
 
 #endif

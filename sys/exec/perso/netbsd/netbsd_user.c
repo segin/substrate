@@ -275,7 +275,8 @@ int netbsd_sys_fchownat(int dirfd, const char *path, int uid, int gid, int flag)
 #define KERN_MAP_PRIVATE    0x002
 #define KERN_MAP_SHARED     0x001
 void *netbsd_sys_mmap(void *addr, size_t len, int prot, int flags,
-                      int fd, long pad, uint64_t pos) {
+                      int fd, abi_long_t pad, uint32_t pos_lo, uint32_t pos_hi) {
+    uint64_t pos = ((uint64_t)pos_hi << 32) | pos_lo;
     (void)pad;
     int kflags = flags & (KERN_MAP_SHARED | KERN_MAP_PRIVATE | KERN_MAP_FIXED);
     if (flags & NETBSD_MAP_ANON)
@@ -547,13 +548,14 @@ long netbsd_sys_lwp_park(int clock_id, int flags,
  * A fresh MAP_ANON page is already zero-filled, which reads as
  * lc_curcpu = 0 (CPU 0) / lc_pctr = 0 — a valid static view for a system
  * that does not migrate the caller mid-syscall. */
-long netbsd_sys_lwp_ctl(int features, void **address) {
+long netbsd_sys_lwp_ctl(int features, uptr32_t *address) {
     (void)features;
     void *page = sys_mmap(NULL, 4096, 0x3 /* PROT_READ|PROT_WRITE */,
                           0x22 /* MAP_ANONYMOUS|MAP_PRIVATE */, -1, 0);
     if ((uintptr_t)page > (uintptr_t)-4096UL)
         return (long)(intptr_t)page;            /* -errno from sys_mmap */
-    if (copyout(&page, address, sizeof(page)) != 0)
+    uptr32_t upage = (uptr32_t)(uintptr_t)page; /* the process's pointer */
+    if (copyout(&upage, address, sizeof(upage)) != 0)
         return -EFAULT;
     return 0;
 }

@@ -3,6 +3,7 @@
 
 #include <stddef.h>
 #include <sys/types.h>
+#include <sys/abi32.h>
 #include <exec/perso/freebsd/freebsd_user.h>
 
 struct freebsd_stat;
@@ -310,7 +311,7 @@ ssize_t sys_writev(int fd, const void *iov, int iovcnt);
 int sys_getgroups(int gidsetsize, void *gidset);
 int sys_setgroups(int gidsetsize, const void *gidset);
 int sys_getlogin(char *namebuf, unsigned int namelen);
-int sys_thr_kill(long tid, int sig);
+int sys_thr_kill(abi_long_t tid, int sig);
 int sys_umtx_op(void *obj, int op, unsigned long val, void *uaddr, void *uaddr2);
 int sys_clock_nanosleep(int clockid, int flags, const void *rqtp, void *rmtp);
 int sys_pselect(int nfds, void *rfds, void *wfds, void *efds, const void *timeout, const void *sigmask);
@@ -331,7 +332,7 @@ int sys_getsockopt(int s, int level, int optname, void *optval, int *optlen);
 int sys_setsockopt(int s, int level, int optname, const void *optval, int optlen);
 ssize_t sys_recvmsg(int s, void *msg, int flags);
 ssize_t sys_sendmsg(int s, const void *msg, int flags);
-int sys_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void *newp, size_t newlen);
+int sys_sysctlbyname(const char *name, void *oldp, abi_size_t *oldlenp, void *newp, size_t newlen);
 int sys_sigwaitinfo(const void *set, void *info);
 int sys_getdtablesize(void);
 int sys_pathconf(const char *path, int name);
@@ -340,6 +341,6 @@ int sys_socketpair(int domain, int type, int protocol, int *sv);
 int sys_msync(void *addr, size_t len, int flags);
 int sys_pdfork(int *fdp, int flags);
 int sys_getpriority(int which, int who);
-int freebsd_sys_sysctl(int *name, unsigned int namelen, void *oldp, size_t *oldlenp, void *newp, size_t newlen);
+int freebsd_sys_sysctl(int *name, unsigned int namelen, void *oldp, abi_size_t *oldlenp, void *newp, size_t newlen);
 
 #endif /* _FREEBSD_SYSCALLS_H */

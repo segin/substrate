@@ -872,7 +872,7 @@ int freebsd_sys_fstatfs(int fd, struct freebsd_statfs *buf) {
     return 0;
 }
 
-int freebsd_sys_getfsstat(struct freebsd_statfs *buf, long bufsize, int mode) {
+int freebsd_sys_getfsstat(struct freebsd_statfs *buf, abi_long_t bufsize, int mode) {
     struct mount *mp;
     int count = 0;
     long maxent = buf ? (bufsize / (long)sizeof(struct freebsd_statfs)) : 0;

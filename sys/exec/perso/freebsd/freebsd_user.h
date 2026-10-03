@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <sys/types.h>
+#include <sys/abi32.h>
 
 /*
  * FreeBSD 14.3 kinfo_proc layout for i386 stability.
@@ -587,7 +588,7 @@ uint32_t native_to_freebsd_sigmask(uint32_t m);
 
 /* FreeBSD signal syscall wrappers that translate the number/mask. */
 int freebsd_sys_kill(int pid, int sig);
-int freebsd_sys_thr_kill(long tid, int sig);
+int freebsd_sys_thr_kill(abi_long_t tid, int sig);
 int freebsd_sys_sigprocmask(int how, const void *set, void *oset);
 int freebsd_sys_sigsuspend(const void *mask);
 int freebsd_sys_sigpending(void *set);
@@ -677,6 +678,6 @@ struct freebsd_statfs {
 
 int freebsd_sys_statfs(const char *path, struct freebsd_statfs *buf);
 int freebsd_sys_fstatfs(int fd, struct freebsd_statfs *buf);
-int freebsd_sys_getfsstat(struct freebsd_statfs *buf, long bufsize, int mode);
+int freebsd_sys_getfsstat(struct freebsd_statfs *buf, abi_long_t bufsize, int mode);
 
 #endif /* _FREEBSD_USER_H */

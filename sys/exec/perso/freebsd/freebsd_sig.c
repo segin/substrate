@@ -347,7 +347,7 @@ int freebsd_sys_kill(int pid, int sig) {
 }
 
 /* thr_kill(2): the signo is FreeBSD-numbered (libthr pthread_kill). */
-int freebsd_sys_thr_kill(long tid, int sig) {
+int freebsd_sys_thr_kill(abi_long_t tid, int sig) {
     return sys_thr_kill(tid, freebsd_to_native_signo(sig));
 }
 

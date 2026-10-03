@@ -5,6 +5,7 @@
 #include <stddef.h>
 
 #include <machine/syscall.h>
+#include <exec/perso/compat.h>
 #include <exec/perso/personality.h>
 #include <exec/perso/svr4/svr4_syscalls.h>
 #include <sys/syscall_impl.h>
@@ -50,7 +51,7 @@ static void *svr4_syscalls[MAX_SYSCALLS] = {
     [SVR4_SYS_rmdir]       = &sys_rmdir,
     [SVR4_SYS_mkdir]       = &sys_mkdir,
     [SVR4_SYS_getdents]    = &sys_getdents,
-    [SVR4_SYS_mmap]        = &sys_mmap,
+    [SVR4_SYS_mmap]        = &sys_mmap_off32,
     [SVR4_SYS_munmap]      = &sys_munmap,
     [SVR4_SYS_mprotect]    = &sys_mprotect,
     [SVR4_SYS_sigaction]   = &sys_sigaction,

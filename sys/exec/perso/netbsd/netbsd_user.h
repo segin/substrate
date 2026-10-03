@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include <sys/abi32.h>
 
 /*
  * NetBSD 10 delivers EVERY caught signal through sendsig_siginfo (the
@@ -235,9 +236,10 @@ int netbsd_sys_lchmod(const char *path, int mode);
 int netbsd_sys_fchmodat(int dirfd, const char *path, int mode, int flag);
 int netbsd_sys_fchownat(int dirfd, const char *path, int uid, int gid, int flag);
 
-/* Slot 197: modern mmap with `long pad` between fd and pos. */
+/* Slot 197: modern mmap with `long pad` between fd and pos.  The 64-bit pos
+ * arrives as two 32-bit argument words. */
 void *netbsd_sys_mmap(void *addr, size_t len, int prot, int flags,
-                      int fd, long pad, uint64_t pos);
+                      int fd, abi_long_t pad, uint32_t pos_lo, uint32_t pos_hi);
 
 /* LWP park/unpark + lwpctl — libpthread's threading primitives.  Mapped
  * onto substrate's native thr_suspend/thr_wake parking contract.  The
@@ -250,7 +252,7 @@ long netbsd_sys_lwp_unpark_all(const int *targets, unsigned int ntargets,
 long netbsd_sys_lwp_park(int clock_id, int flags,
                          const struct netbsd_timespec50 *ts,
                          int unpark, const void *hint, const void *unparkhint);
-long netbsd_sys_lwp_ctl(int features, void **address);
+long netbsd_sys_lwp_ctl(int features, uptr32_t *address);
 void *netbsd_sys_lwp_getprivate(void);
 long netbsd_sys_lwp_create(const void *ucp, unsigned long flags, int *new_lwp);
 long netbsd_sys_lwp_exit(void);

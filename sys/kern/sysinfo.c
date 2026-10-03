@@ -13,6 +13,7 @@
 #include <kern/sched.h>
 #include <kern/time.h>
 #include <pm/pm.h>
+#include <sys/abi32.h>
 #include <sys/copy.h>
 #include <sys/errno.h>
 #include <sys/param.h>
@@ -129,14 +130,14 @@ int sys_vm_info(sys_vminfo_t *info) {
  * (capacity → actual).  Substrate currently exposes a single
  * aggregate via vm_swap_get_stats; until per-device enumeration
  * lands we synthesize one entry "swap0" iff swap is configured. */
-int sys_vm_swap(sys_swapinfo_t *swap, size_t *count) {
+int sys_vm_swap(sys_swapinfo_t *swap, abi_size_t *count) {
     if (!count) return -14;
-    size_t cap = 0;
+    abi_size_t cap = 0;
     if (copyin(count, &cap, sizeof(cap)) != 0) return -14;
 
     uint64_t total = 0, free = 0;
     vm_swap_get_stats(&total, &free);
-    size_t n = (total > 0) ? 1 : 0;
+    abi_size_t n = (total > 0) ? 1 : 0;
 
     if (swap && cap > 0 && n > 0) {
         sys_swapinfo_t k;
@@ -176,15 +177,15 @@ int sys_vm_buffers(sys_bufinfo_t *buf) {
  *   slabs          pages freed back over the lifetime
  * `*count` is the caller's array capacity on entry and the number of
  * records written on return. */
-int sys_vm_slabs(sys_slabinfo_t *slabs, size_t *count) {
+int sys_vm_slabs(sys_slabinfo_t *slabs, abi_size_t *count) {
     if (!count) return -EINVAL;
-    size_t cap = 0;
+    abi_size_t cap = 0;
     if (copyin(count, &cap, sizeof(cap)) != 0) return -EFAULT;
 
     memtrack_rec_t recs[MEMTRACK_SITES];
     size_t n = memtrack_snapshot(recs, MEMTRACK_SITES);
 
-    size_t out_n = 0;
+    abi_size_t out_n = 0;
     for (size_t i = 0; i < n && slabs && out_n < cap; i++) {
         sys_slabinfo_t si;
         memset(&si, 0, sizeof(si));

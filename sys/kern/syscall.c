@@ -1519,7 +1519,7 @@ int sys_thr_exit(void *retval) {
     return 0; // Not reached
 }
 
-int sys_thr_join(tid_t tid, void **status) {
+int sys_thr_join(tid_t tid, uptr32_t *status) {
     thread_t *thread = sched_get_thread(tid);
     if (!thread || thread->proc != current_process) return -3; // ESRCH
 
@@ -1533,8 +1533,9 @@ int sys_thr_join(tid_t tid, void **status) {
     }
 
     if (status) {
-        void *kstatus = thread->retval;
-        if (copyout(&kstatus, status, sizeof(void*)) != 0) return -14; // EFAULT
+        /* The exit value is the process's pointer. */
+        uptr32_t kstatus = (uptr32_t)(uintptr_t)thread->retval;
+        if (copyout(&kstatus, status, sizeof(kstatus)) != 0) return -14; // EFAULT
     }
 
     /*
@@ -1602,7 +1603,7 @@ static void thr_kill_visit(thread_t *t, void *arg) {
         signal_post_thread(t, c->sig);
 }
 
-int sys_thr_kill(long id, int sig) {
+int sys_thr_kill(abi_long_t id, int sig) {
     if (sig < 0 || sig >= NSIG) return -22; /* EINVAL */
     if (id == -1) {
         /* All other threads in this process. */
@@ -1621,7 +1622,7 @@ int sys_thr_kill(long id, int sig) {
     return 0;
 }
 
-int sys_thr_kill2(pid_t pid, long id, int sig) {
+int sys_thr_kill2(pid_t pid, abi_long_t id, int sig) {
     if (sig < 0 || sig >= NSIG) return -22;
     process_t *target_proc = (pid == 0) ? current_process : proc_find(pid);
     if (!target_proc) return -3;
@@ -1681,7 +1682,7 @@ int sys_thr_suspend(const struct timespec *timeout) {
     return thr_park_kernel(NULL);
 }
 
-int sys_thr_wake(long id) {
+int sys_thr_wake(abi_long_t id) {
     if (id == 0) id = current_thread->tid;
     thread_t *t = sched_get_thread((int)id);
     if (!t) return -3;
@@ -1692,7 +1693,7 @@ int sys_thr_wake(long id) {
     return 0;
 }
 
-int sys_thr_set_name(long id, const char *name) {
+int sys_thr_set_name(abi_long_t id, const char *name) {
     if (id == 0) id = current_thread->tid;
     thread_t *t = thr_lookup_in_proc(id, current_process);
     if (!t) return -3;
@@ -4393,12 +4394,27 @@ static void proc_thread_count_cb(thread_t *t, void *arg) {
     c->n++;
 }
 
-int sys_proc_threads(pid_t pid, tid_t *tids, size_t *count) {
+/* The in/out element counts of the sys_proc_* listings are the process's
+ * size_t. */
+static int proc_count_get(const abi_size_t *ucount, size_t *count) {
+    abi_size_t v = 0;
+    if (ucount && copyin(ucount, &v, sizeof(v)) != 0) return -14;
+    *count = v;
+    return 0;
+}
+
+static int proc_count_put(abi_size_t *ucount, size_t count) {
+    abi_size_t v = (abi_size_t)count;
+    if (ucount && copyout(&v, ucount, sizeof(v)) != 0) return -14;
+    return 0;
+}
+
+int sys_proc_threads(pid_t pid, tid_t *tids, abi_size_t *count) {
     process_t *target = (pid == 0) ? current_process : proc_find(pid);
     if (!target) return -3;
 
     size_t cap = 0;
-    if (count && copyin(count, &cap, sizeof(cap)) != 0) return -14;
+    if (proc_count_get(count, &cap) != 0) return -14;
 
     struct proc_thread_collect c = {
         .proc = target, .out_array = tids, .cap = cap, .n = 0, .copy_err = 0
@@ -4406,8 +4422,7 @@ int sys_proc_threads(pid_t pid, tid_t *tids, size_t *count) {
     sched_iterate_threads(proc_thread_count_cb, &c);
     if (c.copy_err) return c.copy_err;
 
-    if (count && copyout(&c.n, count, sizeof(c.n)) != 0) return -14;
-    return 0;
+    return proc_count_put(count, c.n);
 }
 
 /* sys_proc_thr_count(pid) — return number of threads owned by the
@@ -4507,13 +4522,13 @@ static int proc_inspect_allowed(process_t *target) {
     return target->uid == current_process->euid; /* otherwise same owner */
 }
 
-int sys_proc_fds(pid_t pid, sys_fd_t *fds, size_t *count) {
+int sys_proc_fds(pid_t pid, sys_fd_t *fds, abi_size_t *count) {
     process_t *target = (pid == 0) ? current_process : proc_find(pid);
     if (!target) return -3;
     if (!proc_inspect_allowed(target)) return -EPERM;
 
     size_t cap = 0;
-    if (count && copyin(count, &cap, sizeof(cap)) != 0) return -14;
+    if (proc_count_get(count, &cap) != 0) return -14;
 
     size_t n = 0;
     for (int i = 0; i < MAX_FD; i++) {
@@ -4533,17 +4548,16 @@ int sys_proc_fds(pid_t pid, sys_fd_t *fds, size_t *count) {
         n++;
     }
 
-    if (count && copyout(&n, count, sizeof(n)) != 0) return -14;
-    return 0;
+    return proc_count_put(count, n);
 }
 
-int sys_proc_maps(pid_t pid, sys_map_t *maps, size_t *count) {
+int sys_proc_maps(pid_t pid, sys_map_t *maps, abi_size_t *count) {
     process_t *target = (pid == 0) ? current_process : proc_find(pid);
     if (!target) return -3;
     if (!proc_inspect_allowed(target)) return -EPERM;
 
     size_t cap = 0;
-    if (count && copyin(count, &cap, sizeof(cap)) != 0) return -14;
+    if (proc_count_get(count, &cap) != 0) return -14;
 
     size_t n = 0;
     for (vm_area_t *a = target->vm_areas; a; a = a->next) {
@@ -4566,8 +4580,7 @@ int sys_proc_maps(pid_t pid, sys_map_t *maps, size_t *count) {
         n++;
     }
 
-    if (count && copyout(&n, count, sizeof(n)) != 0) return -14;
-    return 0;
+    return proc_count_put(count, n);
 }
 
 int sys_proc_cwd(pid_t pid, char *buf, size_t len) {
@@ -4606,22 +4619,21 @@ int sys_proc_exe(pid_t pid, char *buf, size_t len) {
  * caller can re-allocate and retry.  The kernel doesn't reconstruct
  * the per-arg pointer array — userland tools (ps, /proc/N/cmdline
  * helpers) split on NUL themselves. */
-int sys_proc_cmdline(pid_t pid, char **argv, size_t *argc) {
+int sys_proc_cmdline(pid_t pid, char **argv, abi_size_t *argc) {
     process_t *target = (pid == 0) ? current_process : proc_find(pid);
     if (!target) return -3;
     if (!proc_inspect_allowed(target)) return -EPERM;
 
     size_t need = (size_t)target->cmdline_tail_len;
     size_t cap = 0;
-    if (argc && copyin(argc, &cap, sizeof(cap)) != 0) return -14;
+    if (proc_count_get(argc, &cap) != 0) return -14;
 
     if (argv && cap > 0 && need > 0) {
         size_t n = need < cap ? need : cap;
         if (copyout(target->cmdline_tail, (char *)argv, n) != 0) return -14;
     }
 
-    if (argc && copyout(&need, argc, sizeof(need)) != 0) return -14;
-    return 0;
+    return proc_count_put(argc, need);
 }
 
 /* kern_proc_argv: fill `buf` with a process's argv as NUL-separated strings
@@ -4643,15 +4655,12 @@ int kern_proc_argv(pid_t pid, char *buf, size_t buflen, int *nargv) {
  * environ-snapshot lands, the implementation matches the cmdline path
  * verbatim — until then, callers see "no environ available" rather
  * than ENOSYS, which keeps `ps -e` and procfs from erroring out. */
-int sys_proc_environ(pid_t pid, char **envp, size_t *envc) {
+int sys_proc_environ(pid_t pid, char **envp, abi_size_t *envc) {
     (void)envp;
     process_t *target = (pid == 0) ? current_process : proc_find(pid);
     if (!target) return -3;
 
-    if (envc) {
-        size_t zero = 0;
-        if (copyout(&zero, envc, sizeof(size_t)) != 0) return -14;
-    }
+    if (proc_count_put(envc, 0) != 0) return -14;
     return 0;
 }
 

@@ -26,11 +26,6 @@
 #include <sys/thr.h>
 #include <sys/uio.h>
 
-typedef uint32_t uptr32_t;
-
-/* A user pointer value, as the kernel can hold it. */
-#define UPTR32(p) ((void *)(uintptr_t)(uptr32_t)(p))
-
 struct sigaction32 {
     uptr32_t sa_handler;
     uint32_t sa_mask;
