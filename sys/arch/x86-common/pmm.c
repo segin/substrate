@@ -88,6 +88,62 @@ static int pmm_metadata_needs_promotion = 0;
 
 struct pmm_stats_ctx;
 
+#ifdef PMM_HIGHMEM_BASE
+/*
+ * High memory (the x86_64 kernel only; see arch/x86_64/pmm.h).
+ *
+ * Everything else in this file works below PMM_PHYS_RAM_CAP with 32-bit
+ * physical addresses and is shared with i386.  Usable RAM the firmware
+ * reports above PMM_HIGHMEM_BASE is only noted while the memory map is
+ * walked for the first time, and handed to the allocator later, by
+ * pmm_add_high_memory(), as a segment of its own.
+ */
+#define PMM_MAX_HIGH_RANGES 32
+static struct {
+    uint64_t start;
+    uint64_t end;
+} pmm_high_ranges[PMM_MAX_HIGH_RANGES];
+static int pmm_high_range_count;
+static int pmm_high_recording;
+uint64_t pmm_high_mapped_end = PMM_HIGHMEM_BASE;
+
+static void pmm_note_high_range(uint64_t start, uint64_t end) {
+    if (!pmm_high_recording || end < start) {
+        return;
+    }
+    if (start < PMM_HIGHMEM_BASE) start = PMM_HIGHMEM_BASE;
+    if (end > PMM_HIGHMEM_CAP) end = PMM_HIGHMEM_CAP;
+    start = (start + PMM_BLOCK_SIZE - 1) & ~(uint64_t)(PMM_BLOCK_SIZE - 1);
+    end &= ~(uint64_t)(PMM_BLOCK_SIZE - 1);
+    if (start >= end || pmm_high_range_count >= PMM_MAX_HIGH_RANGES) {
+        return;
+    }
+    /* Firmware maps are sorted and disjoint in practice; an entry that
+     * overlaps one already taken is dropped rather than trusted. */
+    for (int i = 0; i < pmm_high_range_count; i++) {
+        if (start < pmm_high_ranges[i].end && end > pmm_high_ranges[i].start) {
+            return;
+        }
+    }
+    pmm_high_ranges[pmm_high_range_count].start = start;
+    pmm_high_ranges[pmm_high_range_count].end = end;
+    pmm_high_range_count++;
+}
+
+static void pmm_high_recording_begin(void) {
+    pmm_high_range_count = 0;
+    pmm_high_recording = 1;
+}
+
+static void pmm_high_recording_end(void) {
+    pmm_high_recording = 0;
+}
+#else
+#define pmm_note_high_range(start, end) ((void)0)
+#define pmm_high_recording_begin()      ((void)0)
+#define pmm_high_recording_end()        ((void)0)
+#endif
+
 typedef struct multiboot_module {
     uint32_t mod_start;
     uint32_t mod_end;
@@ -679,6 +735,9 @@ void pmm_walk_mmap(uint32_t mmap_addr, uint32_t mmap_length, pmm_region_callback
         
         /* Validate and process usable entry */
         phys_addr_t start, end;
+        if (pmm_is_usable_type(entry->type) && entry->len != 0) {
+            pmm_note_high_range(entry->addr, entry->addr + entry->len);
+        }
         if (pmm_validate_mmap_entry(entry, &start, &end) == 0) {
             cb(start, end - start, arg);
         }
@@ -1006,11 +1065,13 @@ void pmm_init(uint32_t mmap_addr, uint32_t mmap_length,
 
     // 2. Pass 1: Find limits with 64-bit accumulation for >4GB systems
     struct pmm_stats_ctx stats = { .max_phys = 0x1000000, .total_usable = 0 };
+    pmm_high_recording_begin();
     if (mmap_addr && mmap_length) {
         pmm_walk_mmap(mmap_addr, mmap_length, pmm_cb_stats, &stats);
     } else if (mem_upper_kb || mem_lower_kb) {
         pmm_seed_legacy_memory(mem_lower_kb, mem_upper_kb, &stats);
     }
+    pmm_high_recording_end();
     
     /* Save global stats for reporting */
     pmm_total_usable_ram = stats.total_usable;
@@ -1054,13 +1115,74 @@ void pmm_init(uint32_t mmap_addr, uint32_t mmap_length,
     pmm_mark_watermark_used();
 }
 
+#ifdef PMM_HIGHMEM_BASE
+uint64_t pmm_high_memory_end(void) {
+    uint64_t end = PMM_HIGHMEM_BASE;
+
+    for (int i = 0; i < pmm_high_range_count; i++) {
+        if (pmm_high_ranges[i].end > end) {
+            end = pmm_high_ranges[i].end;
+        }
+    }
+    return end;
+}
+
+/*
+ * Hand the RAM above PMM_HIGHMEM_BASE to the allocator as its high
+ * segment.  The page structures for it are carved out of the high memory
+ * itself -- at 1/40th of what they describe they would otherwise take a
+ * large bite out of low memory, which is the scarce kind -- so the direct
+ * map must already cover [PMM_HIGHMEM_BASE, pmm_high_memory_end()).
+ */
+void pmm_add_high_memory(void) {
+    uint64_t top = pmm_high_memory_end();
+    uint64_t npages, array_bytes;
+    int home = -1;
+
+    if (top <= PMM_HIGHMEM_BASE) {
+        return;
+    }
+    npages = (top - PMM_HIGHMEM_BASE) / PMM_BLOCK_SIZE;
+    array_bytes = (npages * sizeof(vm_page_t) + PMM_BLOCK_SIZE - 1) &
+                  ~(uint64_t)(PMM_BLOCK_SIZE - 1);
+
+    for (int i = 0; i < pmm_high_range_count; i++) {
+        if (pmm_high_ranges[i].end - pmm_high_ranges[i].start > array_bytes) {
+            home = i;
+            break;
+        }
+    }
+    if (home < 0) {
+        kprint("PMM: no room for the high-memory page array; "
+               "RAM above 4 GiB left unused.\n");
+        return;
+    }
+
+    pmm_high_mapped_end = top;
+    vm_phys_add_high_segment((vm_page_t *)P2V(pmm_high_ranges[home].start),
+                             (uintptr_t)PMM_HIGHMEM_BASE, (size_t)npages);
+    pmm_high_ranges[home].start += array_bytes;
+
+    for (int i = 0; i < pmm_high_range_count; i++) {
+        vm_phys_add_range((uintptr_t)pmm_high_ranges[i].start,
+                          (uintptr_t)pmm_high_ranges[i].end);
+    }
+    kprint("PMM: RAM above 4 GiB added as high memory.\n");
+}
+#endif
+
+/*
+ * Bytes of LOW memory -- the pool pmm_alloc_block() draws on, and the
+ * whole of memory on i386.  Callers size kernel caches by these.  System
+ * totals, which on the x86_64 kernel include high memory and do not fit
+ * in 32 bits, come from vm_phys_get_free() / vm_phys_get_used() in pages.
+ */
 uint32_t pmm_get_total_memory(void) {
-    // vm_phys_get_used() + vm_phys_get_free() = total
-    return (uint32_t)((vm_phys_get_used() + vm_phys_get_free()) * PMM_BLOCK_SIZE);
+    return (uint32_t)(vm_phys_get_low_total() * PMM_BLOCK_SIZE);
 }
 
 uint32_t pmm_get_free_memory(void) {
-    return (uint32_t)(vm_phys_get_free() * PMM_BLOCK_SIZE);
+    return (uint32_t)(vm_phys_get_low_free() * PMM_BLOCK_SIZE);
 }
 
 // Allocation Hooks
@@ -1304,7 +1426,10 @@ void pmm_walk_e820(const e820_entry_t *map, uint32_t count,
             }
             continue;  /* Don't process as usable */
         }
-        
+
+        if (pmm_is_e820_usable_type(map[i].type) && map[i].len != 0) {
+            pmm_note_high_range(map[i].addr, map[i].addr + map[i].len);
+        }
         if (pmm_validate_e820_entry(&map[i], &start, &end) == 0) {
             cb(start, end - start, arg);
         }
@@ -1387,8 +1512,10 @@ void pmm_init_e820(e820_entry_t *map, uint32_t count) {
     
     /* Pass 1: Find limits with 64-bit accumulation */
     struct pmm_stats_ctx stats = { .max_phys = 0x1000000, .total_usable = 0 };
+    pmm_high_recording_begin();
     pmm_walk_e820(map, count, pmm_cb_stats, &stats);
-    
+    pmm_high_recording_end();
+
     /* Save global stats */
     pmm_total_usable_ram = stats.total_usable;
     

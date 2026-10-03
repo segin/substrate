@@ -230,7 +230,10 @@ static int usb_msc_bot_transfer(usb_msc_dev_t *msc, uint8_t lun,
          * here; anything else takes the bounce-buffer path, which is correct
          * for kmem buffers and merely slower.
          */
-        int direct = pmm_virt_is_direct_mapped((uintptr_t)data);
+        /* And not high memory: such a page is direct-mapped but its
+         * physical address is beyond what the host controllers take. */
+        int direct = pmm_virt_is_direct_mapped((uintptr_t)data) &&
+                     !pmm_virt_is_high((uintptr_t)data);
 
         if (direct) {
             while (remaining > 0) {

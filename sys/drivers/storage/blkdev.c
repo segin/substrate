@@ -4,6 +4,7 @@
 #include <drivers/storage/blkdev.h>
 #include <kern/console.h>
 #include <kern/geom/geom.h>
+#include <machine/pmm.h>
 #include <sys/errno.h>
 #include <sys/lock.h>
 #include <vfs/buf.h>
@@ -307,6 +308,83 @@ static void blkdev_prefetch(blkdev_t *dev, uint64_t start, uint32_t window) {
 }
 
 /*
+ * The device's own read and write, for a buffer that may be a
+ * high-memory page.
+ *
+ * Drivers hand the buffer to their controller by physical address, most
+ * in a 32-bit field.  Every kernel allocation is low memory and fits; the
+ * exception is a page the VM owns (a pager or swap filling a process's
+ * page through its direct-map address), which on the x86_64 kernel can
+ * lie above 4 GiB.  Such a buffer is copied through a low one here, a
+ * chunk at a time, so no driver ever sees it.
+ */
+#define BLKDEV_BOUNCE_PAGES 16U
+
+static int blkdev_dev_read(blkdev_t *dev, uint64_t sector, uint32_t count,
+                           void *buffer) {
+    uint32_t ss = dev->sector_size;
+    uint32_t chunk, done = 0;
+    uint8_t *bounce;
+    int ret = 0;
+
+    if (!pmm_virt_is_high((uintptr_t)buffer) || count == 0 || ss == 0) {
+        return dev->read(dev, sector, count, buffer);
+    }
+    bounce = pmm_alloc_contiguous(BLKDEV_BOUNCE_PAGES);
+    if (!bounce) {
+        return -ENOMEM;
+    }
+    chunk = (BLKDEV_BOUNCE_PAGES * PMM_BLOCK_SIZE) / ss;
+    if (chunk == 0) {
+        pmm_free_contiguous(bounce, BLKDEV_BOUNCE_PAGES);
+        return -EINVAL;
+    }
+    while (done < count && ret == 0) {
+        uint32_t n = count - done < chunk ? count - done : chunk;
+
+        ret = dev->read(dev, sector + done, n, bounce);
+        if (ret == 0) {
+            memcpy((uint8_t *)buffer + (size_t)done * ss, bounce,
+                   (size_t)n * ss);
+            done += n;
+        }
+    }
+    pmm_free_contiguous(bounce, BLKDEV_BOUNCE_PAGES);
+    return ret;
+}
+
+static int blkdev_dev_write(blkdev_t *dev, uint64_t sector, uint32_t count,
+                            const void *buffer) {
+    uint32_t ss = dev->sector_size;
+    uint32_t chunk, done = 0;
+    uint8_t *bounce;
+    int ret = 0;
+
+    if (!pmm_virt_is_high((uintptr_t)buffer) || count == 0 || ss == 0) {
+        return dev->write(dev, sector, count, buffer);
+    }
+    bounce = pmm_alloc_contiguous(BLKDEV_BOUNCE_PAGES);
+    if (!bounce) {
+        return -ENOMEM;
+    }
+    chunk = (BLKDEV_BOUNCE_PAGES * PMM_BLOCK_SIZE) / ss;
+    if (chunk == 0) {
+        pmm_free_contiguous(bounce, BLKDEV_BOUNCE_PAGES);
+        return -EINVAL;
+    }
+    while (done < count && ret == 0) {
+        uint32_t n = count - done < chunk ? count - done : chunk;
+
+        memcpy(bounce, (const uint8_t *)buffer + (size_t)done * ss,
+               (size_t)n * ss);
+        ret = dev->write(dev, sector + done, n, bounce);
+        done += n;
+    }
+    pmm_free_contiguous(bounce, BLKDEV_BOUNCE_PAGES);
+    return ret;
+}
+
+/*
  * Read `count` sectors at `sector` into `buffer`: serve cached sectors from
  * the buffer cache and coalesce each maximal run of contiguous uncached
  * sectors into one device read.  Returns 0 on success, else the driver's
@@ -322,7 +400,8 @@ static int blkdev_do_read(blkdev_t *dev, uint64_t sector, uint32_t count, void *
         struct buf *bp = bio_dev_get(dev, (int64_t)(sector + i), ss);
         if (!bp) {
             /* Cache exhausted (low memory): read the remainder directly. */
-            return dev->read(dev, sector + i, count - i, out + (size_t)i * ss);
+            return blkdev_dev_read(dev, sector + i, count - i,
+                                   out + (size_t)i * ss);
         }
 
         if (bp->b_flags & B_CACHE) {            /* hit */
@@ -341,7 +420,7 @@ static int blkdev_do_read(blkdev_t *dev, uint64_t sector, uint32_t count, void *
         while (i + run < count && !bio_dev_cached(dev, (int64_t)(sector + i + run)))
             run++;
 
-        int ret = dev->read(dev, sector + i, run, out + (size_t)i * ss);
+        int ret = blkdev_dev_read(dev, sector + i, run, out + (size_t)i * ss);
         if (ret != 0) {
             bp->b_flags |= B_INVAL;             /* never cache a failed read */
             bio_dev_release(bp);
@@ -458,7 +537,7 @@ static int blkdev_do_write(blkdev_t *dev, uint64_t sector, uint32_t count, const
     uint32_t ss = dev->sector_size;
     const uint8_t *in = (const uint8_t *)buffer;
 
-    int ret = dev->write(dev, sector, count, buffer);
+    int ret = blkdev_dev_write(dev, sector, count, buffer);
 
     /* Keep any overlapping partition-cache blocks coherent with this raw
      * write regardless of outcome (on failure the on-disk contents are

@@ -11,6 +11,7 @@
 #include <kern/debug.h>
 #include <kern/sysrq.h>
 #include <machine/pmm.h>
+#include <vm/phys_mem.h>
 #include <arch/x86-common/io.h>
 
 void sysrq_init(void)
@@ -43,8 +44,9 @@ static void sysrq_show_tasks(void)
 
 static void sysrq_show_memory(void)
 {
-	uint32_t total_kb = pmm_get_total_memory() / 1024;
-	uint32_t free_kb = pmm_get_free_memory() / 1024;
+	/* Pages * 4 = kB; see gen_meminfo() in fs/procfs.c. */
+	uint32_t free_kb = (uint32_t)(vm_phys_get_free() * 4);
+	uint32_t total_kb = free_kb + (uint32_t)(vm_phys_get_used() * 4);
 
 	kprintf("SysRq: Memory Info\n");
 	kprintf("  Total: %u KB\n", total_kb);

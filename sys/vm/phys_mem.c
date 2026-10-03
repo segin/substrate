@@ -22,7 +22,45 @@ static size_t vm_phys_page_count;
 
 static size_t vm_phys_low_watermark = 128; // 512 KB target
 
+/*
+ * The high segment: physical memory that begins at vm_phys_hi_base, well
+ * above the end of the page array (the x86_64 kernel's RAM at and above
+ * 4 GiB; unused, and all zero, on i386).  It has a page array and free
+ * lists of its own, so it is a second zone:
+ *
+ *   - vm_phys_alloc_page() and vm_phys_alloc_contiguous(), which is what
+ *     the VM uses for pages it maps into processes, take from the high
+ *     zone first and fall back to the low one;
+ *   - the _below() forms, which is what pmm_alloc_block() and so every
+ *     kernel and driver allocation use, only ever see the low zone, and
+ *     find a page there at once instead of walking past every high page
+ *     on a shared list.
+ *
+ * A buddy block never spans the two: the segments are not adjacent, so
+ * the buddy of a block at either edge has no page structure.
+ */
+static vm_page_t *vm_phys_hi_free_lists[PMM_MAX_ORDER];
+static size_t vm_phys_hi_free_count;
+static vm_page_t *vm_phys_hi_array;
+static uintptr_t vm_phys_hi_base;
+static size_t vm_phys_hi_count;
+
 vm_page_t *vm_phys_paddr_to_page(uintptr_t pa);
+
+static int vm_phys_page_is_high(const vm_page_t *page) {
+    return vm_phys_hi_array != NULL && page->phys_addr >= vm_phys_hi_base;
+}
+
+/* The free lists and the free-page counter of the zone `page` is in. */
+static vm_page_t **vm_phys_lists_of(const vm_page_t *page) {
+    return vm_phys_page_is_high(page) ? vm_phys_hi_free_lists
+                                      : vm_phys_free_lists;
+}
+
+static size_t *vm_phys_count_of(const vm_page_t *page) {
+    return vm_phys_page_is_high(page) ? &vm_phys_hi_free_count
+                                      : &vm_phys_free_count;
+}
 
 static void vm_phys_reset_page_metadata(vm_page_t *page) {
     if (!page) {
@@ -57,10 +95,10 @@ static void vm_phys_prepare_allocated_block(vm_page_t *page, int order) {
          * marked allocated.  Catches buddy-allocator accounting bugs
          * at the moment they would hand the same page out twice. */
         if (p->flags & PG_PMM_ALLOC) {
-            kprintf("VM: buddy DOUBLE-ALLOC pfn=%u pa=0x%08x order=%d "
+            kprintf("VM: buddy DOUBLE-ALLOC pfn=%lu pa=0x%08lx order=%d "
                     "flags=0x%04x\n",
-                    (unsigned)(p - vm_phys_page_array),
-                    (unsigned)p->phys_addr, order, p->flags);
+                    (unsigned long)(p->phys_addr / PMM_BLOCK_SIZE),
+                    (unsigned long)p->phys_addr, order, p->flags);
             panic("vm_phys: double allocation");
         }
         uintptr_t pa = p->phys_addr;
@@ -73,12 +111,14 @@ static void vm_phys_prepare_allocated_block(vm_page_t *page, int order) {
 
 // Internal Helpers
 static void vm_phys_buddy_enqueue(int order, vm_page_t *page) {
-    page->next = vm_phys_free_lists[order];
+    vm_page_t **lists = vm_phys_lists_of(page);
+
+    page->next = lists[order];
     page->prev = NULL;
-    if (vm_phys_free_lists[order]) {
-        vm_phys_free_lists[order]->prev = page;
+    if (lists[order]) {
+        lists[order]->prev = page;
     }
-    vm_phys_free_lists[order] = page;
+    lists[order] = page;
     page->order = order;
     page->flags |= PG_FREE;
 }
@@ -87,7 +127,7 @@ static void vm_phys_buddy_dequeue(int order, vm_page_t *page) {
     if (page->prev) {
         page->prev->next = page->next;
     } else {
-        vm_phys_free_lists[order] = page->next;
+        vm_phys_lists_of(page)[order] = page->next;
     }
     if (page->next) {
         page->next->prev = page->prev;
@@ -105,20 +145,26 @@ static void vm_phys_buddy_dequeue(int order, vm_page_t *page) {
  * canaries.  Checking the bounds FIRST matters -- the whole point is to be
  * callable on a pointer that may be garbage, and vm_page_valid() dereferences.
  */
-int vm_phys_page_is_valid(const vm_page_t *p) {
+static int vm_phys_page_in_array(const vm_page_t *p, const vm_page_t *array,
+                                 size_t count) {
     uintptr_t off;
 
-    if (!p || !vm_phys_page_array || !vm_phys_page_count) {
+    if (!array || !count || (uintptr_t)p < (uintptr_t)array) {
         return 0;
     }
-    if ((uintptr_t)p < (uintptr_t)vm_phys_page_array) {
+    off = (uintptr_t)p - (uintptr_t)array;
+    if (off >= count * sizeof(vm_page_t)) {
         return 0;
     }
-    off = (uintptr_t)p - (uintptr_t)vm_phys_page_array;
-    if (off >= vm_phys_page_count * sizeof(vm_page_t)) {
+    return (off % sizeof(vm_page_t)) == 0;
+}
+
+int vm_phys_page_is_valid(const vm_page_t *p) {
+    if (!p) {
         return 0;
     }
-    if (off % sizeof(vm_page_t)) {
+    if (!vm_phys_page_in_array(p, vm_phys_page_array, vm_phys_page_count) &&
+        !vm_phys_page_in_array(p, vm_phys_hi_array, vm_phys_hi_count)) {
         return 0;
     }
     return vm_page_valid(p);
@@ -146,15 +192,38 @@ vm_page_t *vm_phys_paddr_to_page(uintptr_t pa) {
     if (idx < vm_phys_page_count) {
         return &vm_phys_page_array[idx];
     }
+    if (vm_phys_hi_array && pa >= vm_phys_hi_base) {
+        idx = (pa - vm_phys_hi_base) / PMM_BLOCK_SIZE;
+        if (idx < vm_phys_hi_count) {
+            return &vm_phys_hi_array[idx];
+        }
+    }
     return NULL;
 }
 
+static vm_page_t *vm_phys_alloc_from(vm_page_t **lists, size_t *free_count,
+                                     int order);
+
+/* A block from anywhere: the high zone while it has one, so that the low
+ * zone is left for the allocations that can use nothing else. */
 static vm_page_t* vm_phys_alloc_locked(int order) {
+    vm_page_t *page;
+
     if (order >= PMM_MAX_ORDER) return NULL;
 
+    page = vm_phys_alloc_from(vm_phys_hi_free_lists, &vm_phys_hi_free_count,
+                              order);
+    if (page) {
+        return page;
+    }
+    return vm_phys_alloc_from(vm_phys_free_lists, &vm_phys_free_count, order);
+}
+
+static vm_page_t *vm_phys_alloc_from(vm_page_t **lists, size_t *free_count,
+                                     int order) {
     for (int i = order; i < PMM_MAX_ORDER; i++) {
-        if (vm_phys_free_lists[i]) {
-            vm_page_t *page = vm_phys_free_lists[i];
+        if (lists[i]) {
+            vm_page_t *page = lists[i];
             vm_phys_buddy_dequeue(i, page);
 
             while (i > order) {
@@ -166,7 +235,7 @@ static vm_page_t* vm_phys_alloc_locked(int order) {
                 }
             }
             
-            vm_phys_free_count -= (1 << order);
+            *free_count -= ((size_t)1U << order);
             vm_phys_prepare_allocated_block(page, order);
             return page;
         }
@@ -200,6 +269,10 @@ static vm_page_t *vm_phys_alloc_locked_below(int order, uintptr_t phys_limit) {
         return NULL;
     }
 
+    /* Only the low zone is searched: every limit a caller passes is the
+     * ceiling for kernel and device memory, which lies below the high
+     * segment. */
+
     for (int i = order; i < PMM_MAX_ORDER; i++) {
         vm_page_t *page = vm_phys_free_lists[i];
 
@@ -231,7 +304,7 @@ static vm_page_t *vm_phys_alloc_locked_below(int order, uintptr_t phys_limit) {
 static void vm_phys_free_locked(vm_page_t *page, int order) {
     if (!page || order >= PMM_MAX_ORDER) return;
 
-    vm_phys_free_count += (1 << order);
+    *vm_phys_count_of(page) += ((size_t)1U << order);
 
     while (order < PMM_MAX_ORDER - 1) {
         uintptr_t buddy_pa = page->phys_addr ^ ((1 << order) * PMM_BLOCK_SIZE);
@@ -297,7 +370,7 @@ void vm_phys_add_range(uintptr_t start, uintptr_t end) {
         vm_page_t *page = vm_phys_paddr_to_page(addr);
         if (page) {
              vm_phys_buddy_enqueue(order, page);
-             vm_phys_free_count += (1 << order);
+             *vm_phys_count_of(page) += ((size_t)1U << order);
         }
         
         addr += (1 << order) * PMM_BLOCK_SIZE;
@@ -312,7 +385,7 @@ vm_page_t *vm_phys_alloc_page(void) {
     spinlock_acquire(&vm_phys_lock);
 
     vm_page_t *page = vm_phys_alloc_locked(0);
-    size_t free_left = vm_phys_free_count;
+    size_t free_left = vm_phys_free_count + vm_phys_hi_free_count;
 
     spinlock_release(&vm_phys_lock);
     intr_restore(flags);
@@ -358,10 +431,10 @@ void vm_phys_free_page(vm_page_t *page) {
         page->ref_count--;
     } else {
         if (!(page->flags & PG_PMM_ALLOC)) {
-            kprintf("VM: buddy FREE of unallocated pfn=%u pa=0x%08x "
+            kprintf("VM: buddy FREE of unallocated pfn=%lu pa=0x%08lx "
                     "flags=0x%04x\n",
-                    (unsigned)(page - vm_phys_page_array),
-                    (unsigned)page->phys_addr, page->flags);
+                    (unsigned long)(page->phys_addr / PMM_BLOCK_SIZE),
+                    (unsigned long)page->phys_addr, page->flags);
             panic("vm_phys: free of unallocated page");
         }
         page->flags &= ~PG_PMM_ALLOC;
@@ -383,7 +456,7 @@ vm_page_t *vm_phys_alloc_contiguous(size_t count) {
     spinlock_acquire(&vm_phys_lock);
 
     vm_page_t *page = vm_phys_alloc_locked(order);
-    size_t free_left = vm_phys_free_count;
+    size_t free_left = vm_phys_free_count + vm_phys_hi_free_count;
 
     spinlock_release(&vm_phys_lock);
     intr_restore(flags);
@@ -429,11 +502,11 @@ void vm_phys_free_contiguous(vm_page_t *page, size_t count) {
          size_t n = (size_t)1U << order;
          for (size_t i = 0; i < n; i++) {
              if (!(page[i].flags & PG_PMM_ALLOC)) {
-                 kprintf("VM: buddy FREE-CONTIG unallocated pfn=%u "
-                         "pa=0x%08x (block pa=0x%08x order=%d)\n",
-                         (unsigned)(&page[i] - vm_phys_page_array),
-                         (unsigned)page[i].phys_addr,
-                         (unsigned)page->phys_addr, order);
+                 kprintf("VM: buddy FREE-CONTIG unallocated pfn=%lu "
+                         "pa=0x%08lx (block pa=0x%08lx order=%d)\n",
+                         (unsigned long)(page[i].phys_addr / PMM_BLOCK_SIZE),
+                         (unsigned long)page[i].phys_addr,
+                         (unsigned long)page->phys_addr, order);
                  panic("vm_phys: free of unallocated page");
              }
              page[i].flags &= ~PG_PMM_ALLOC;
@@ -448,7 +521,7 @@ void vm_phys_free_contiguous(vm_page_t *page, size_t count) {
 size_t vm_phys_get_free(void) {
     uint32_t flags = intr_disable();
     spinlock_acquire(&vm_phys_lock);
-    size_t free_count = vm_phys_free_count;
+    size_t free_count = vm_phys_free_count + vm_phys_hi_free_count;
     spinlock_release(&vm_phys_lock);
     intr_restore(flags);
     return free_count;
@@ -457,10 +530,59 @@ size_t vm_phys_get_free(void) {
 size_t vm_phys_get_used(void) {
     uint32_t flags = intr_disable();
     spinlock_acquire(&vm_phys_lock);
-    size_t used = vm_phys_page_count - vm_phys_free_count;
+    size_t used = (vm_phys_page_count - vm_phys_free_count) +
+                  (vm_phys_hi_count - vm_phys_hi_free_count);
     spinlock_release(&vm_phys_lock);
     intr_restore(flags);
     return used;
+}
+
+/* The low zone alone: what kernel and driver allocations can draw on. */
+size_t vm_phys_get_low_free(void) {
+    uint32_t flags = intr_disable();
+    spinlock_acquire(&vm_phys_lock);
+    size_t free_count = vm_phys_free_count;
+    spinlock_release(&vm_phys_lock);
+    intr_restore(flags);
+    return free_count;
+}
+
+size_t vm_phys_get_low_total(void) {
+    return vm_phys_page_count;
+}
+
+/*
+ * Give the allocator a second run of physical memory, [base, base +
+ * page_count pages), described by `pages`.  Called once, single-threaded,
+ * before any page of it is added with vm_phys_add_range().  `base` must be
+ * aligned to the largest buddy block and lie beyond the low page array.
+ */
+void vm_phys_add_high_segment(vm_page_t *pages, uintptr_t base,
+                              size_t page_count) {
+    uintptr_t max_block = ((uintptr_t)1 << (PMM_MAX_ORDER - 1)) * PMM_BLOCK_SIZE;
+
+    if (!pages || !page_count || vm_phys_hi_array ||
+        (base & (max_block - 1)) != 0 ||
+        base / PMM_BLOCK_SIZE < vm_phys_page_count) {
+        return;
+    }
+
+    memset(pages, 0, page_count * sizeof(vm_page_t));
+    for (size_t i = 0; i < page_count; i++) {
+        pages[i].magic_head = VM_PAGE_MAGIC;
+        pages[i].magic_tail = VM_PAGE_MAGIC;
+        pages[i].phys_addr = base + i * PMM_BLOCK_SIZE;
+    }
+
+    uint32_t flags = intr_disable();
+    spinlock_acquire(&vm_phys_lock);
+    memset(vm_phys_hi_free_lists, 0, sizeof(vm_phys_hi_free_lists));
+    vm_phys_hi_free_count = 0;
+    vm_phys_hi_base = base;
+    vm_phys_hi_count = page_count;
+    vm_phys_hi_array = pages;
+    spinlock_release(&vm_phys_lock);
+    intr_restore(flags);
 }
 
 size_t vm_phys_get_order_free_count(int order) {

@@ -128,15 +128,41 @@ the boot is the i386 one: memory, devices, the root mount, then
 | Region | Address | Notes |
 | :----- | :------ | :---- |
 | user space | `0` .. `0xBFFFFFFF` | `USER32_VA_END`: the i386 kernel's user layout, so no 32-bit binary sees a difference |
-| direct map | `0xFFFFF80000000000` + 4 GiB | `DMAP_BASE` = `KERN_BASE`; `P2V()` lands here.  2 MiB pages |
+| direct map | `0xFFFFF80000000000` + 4 GiB, extended over the RAM above 4 GiB (up to 512 GiB) | `DMAP_BASE` = `KERN_BASE`; `P2V()` lands here.  2 MiB pages below 4 GiB; 1 GiB pages above where the CPU has them |
 | kernel image | `0xFFFFFFFF80000000` + 1 MiB | `KERNEL_VMA`; loaded at physical 1 MiB.  `V2P()` accepts either view |
 | MMIO window | `0xFFFFFFFFC0000000` .. `0xFFFFFFFFC1000000` | `IOREMAP_BASE`..`IOREMAP_LIMIT` |
 
 The direct map is placed where FreeBSD/amd64 puts it.  Physical memory is
-managed below `PMM_PHYS_RAM_CAP` (3 GiB), as on i386, so `phys_addr_t`
-stays 32 bits and every managed frame is inside the direct map.  The
-`pmm_alloc_block()` contract of the project notes holds on both kernels:
-it returns the frame's `P2V()` address.
+managed in two parts (`arch/x86_64/pmm.h`):
+
+* **Low memory**, below `PMM_PHYS_RAM_CAP` (3 GiB), is set up by the
+  allocator shared with i386, with 32-bit `phys_addr_t`.  It is all that
+  `pmm_alloc_block()` and `pmm_alloc_contiguous()` hand out, so every
+  kernel and driver allocation is low and a driver may keep a bus address
+  in 32 bits.  The `pmm_alloc_block()` contract of the project notes holds
+  on both kernels: it returns the frame's `P2V()` address.
+* **High memory**, at and above 4 GiB, is noted while the firmware memory
+  map is first walked and added once `pmap_bootstrap()` has extended the
+  direct map over it (`pmap_extend_dmap()`, `pmm_add_high_memory()`).  Its
+  page structures are carved out of high memory itself.  In the buddy
+  allocator it is a second zone (`vm/phys_mem.c`): `vm_phys_alloc_page()`
+  -- what the VM uses for pages it maps into processes -- takes from it
+  first and falls back to low memory; the `_below()` allocators never see
+  it.
+
+A high page has a `P2V()` address like any other but must not be given to
+a device.  The one place that could happen is block I/O straight into a
+page the VM owns (a pager or swap filling it through its direct-map
+address); `blkdev_dev_read()`/`blkdev_dev_write()` copy such a buffer
+through low memory, the USB mass-storage direct path treats it as not
+direct-mapped, and virtio-9p refuses it.
+
+RAM the firmware reports between 3 GiB and 4 GiB is not used: that range
+is where the PCI layer places 32-bit MMIO windows of its own.  Memory
+totals are reported in pages (`/proc/meminfo`, `sys_vm_stats`); `sysinfo`
+switches `mem_unit` to the page size once the total no longer fits in 32
+bits, and `pmm_get_total_memory()`/`pmm_get_free_memory()` count low
+memory only, which is what the kernel caches they size live in.
 
 The pmap (`pmap.c`) is four-level.  It reaches every page-table page
 through the direct map rather than a recursive slot, so it can edit any

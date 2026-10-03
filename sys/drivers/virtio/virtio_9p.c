@@ -156,6 +156,10 @@ static int v9p_direct_mapped(const void *p, uint32_t len) {
 
     if (va < KERN_BASE)
         return 0;
+    /* A high-memory page is direct-mapped, but the descriptors below
+     * carry only 32 bits of its physical address. */
+    if (pmm_virt_is_high(va))
+        return 0;
     /* No wrap off the top of the address space. */
     if ((uintptr_t)len > (uintptr_t)0 - va)
         return 0;

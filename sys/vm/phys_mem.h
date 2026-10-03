@@ -12,6 +12,13 @@
 void vm_phys_early_init(void *bitmap, size_t bitmap_size, vm_page_t *pages, size_t page_count);
 void vm_phys_add_range(uintptr_t start, uintptr_t end); // Add range to buddy allocator
 
+/* A second run of physical memory far above the page array, with a page
+ * array of its own (RAM at and above 4 GiB on the x86_64 kernel).  It is
+ * a separate zone: the unrestricted allocators prefer it, the _below()
+ * ones never see it.  See phys_mem.c. */
+void vm_phys_add_high_segment(vm_page_t *pages, uintptr_t base,
+                              size_t page_count);
+
 // Allocation
 vm_page_t *vm_phys_alloc_page(void);
 vm_page_t *vm_phys_alloc_page_below(uintptr_t phys_limit);
@@ -23,6 +30,10 @@ void vm_phys_free_contiguous(vm_page_t *page, size_t count);
 // Diagnostics/Stats
 size_t vm_phys_get_free(void);
 size_t vm_phys_get_used(void);
+/* Pages of the low zone -- the memory kernel and driver allocations
+ * (pmm_alloc_block) come from -- free, and in all. */
+size_t vm_phys_get_low_free(void);
+size_t vm_phys_get_low_total(void);
 size_t vm_phys_get_order_free_count(int order);
 uintptr_t vm_phys_get_order_head_phys(int order);
 void vm_phys_mark_used(uintptr_t pa); // For legacy/reservation usage

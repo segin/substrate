@@ -122,4 +122,17 @@ static inline int pmm_virt_is_direct_mapped(uintptr_t va) {
            (va - PMM_PHYS_VIRT_BASE) < PMM_DIRECTMAP_PHYS_LIMIT;
 }
 
+/* True for memory a device can be given.  All of it is, here; the x86_64
+ * kernel has memory above 4 GiB that is not. */
+static inline int pmm_phys_is_low(uintptr_t pa) {
+    (void)pa;
+    return 1;
+}
+
+/* No kernel address here is a high-memory page's. */
+static inline int pmm_virt_is_high(uintptr_t va) {
+    (void)va;
+    return 0;
+}
+
 #endif

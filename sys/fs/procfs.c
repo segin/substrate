@@ -33,6 +33,7 @@
 #include <sys/tty.h>
 #include <vfs/buf.h>
 #include <vfs/vfs.h>
+#include <vm/phys_mem.h>
 #include <vm/vm_commit.h>
 #include <vm/vm_kmem.h>
 #include <vm/vm_map.h>
@@ -98,8 +99,11 @@ struct procfs_driver_entry {
 static uint32_t gen_meminfo(char *buf, size_t size, void *opaque) {
     (void)opaque;
     /* Get real values from PMM when available */
-    uint32_t total_kb = pmm_get_total_memory() / 1024;
-    uint32_t free_kb = pmm_get_free_memory() / 1024;
+    /* In pages: pmm_get_*_memory() count low memory only, and bytes of
+     * the whole do not fit in 32 bits on the x86_64 kernel.  4 KiB pages
+     * -> kB is pages * 4. */
+    uint32_t free_kb = (uint32_t)(vm_phys_get_free() * 4);
+    uint32_t total_kb = free_kb + (uint32_t)(vm_phys_get_used() * 4);
     uint32_t used_kb = total_kb - free_kb;
 
     /* Strict-commit accounting (no overcommit).  CommitLimit is the

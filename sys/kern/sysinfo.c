@@ -44,9 +44,19 @@ int kern_sysinfo(struct sysinfo *info) {
     unsigned long free_pages = vm_phys_get_free();
     unsigned long used_pages = vm_phys_get_used();
 
-    kinfo.totalram = (free_pages + used_pages) * PAGE_SIZE;
-    kinfo.freeram = free_pages * PAGE_SIZE;
-    kinfo.mem_unit = 1;
+    /* The fields are 32 bits wide.  Report bytes while that holds the
+     * total, as always; with 4 GiB or more (the x86_64 kernel's high
+     * memory) report pages and say so in mem_unit, which is what the
+     * field exists for. */
+    if ((uint64_t)(free_pages + used_pages) * PAGE_SIZE <= 0xFFFFFFFFULL) {
+        kinfo.totalram = (free_pages + used_pages) * PAGE_SIZE;
+        kinfo.freeram = free_pages * PAGE_SIZE;
+        kinfo.mem_unit = 1;
+    } else {
+        kinfo.totalram = free_pages + used_pages;
+        kinfo.freeram = free_pages;
+        kinfo.mem_unit = PAGE_SIZE;
+    }
     
     // Process Count
     // Iterate global process table

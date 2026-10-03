@@ -17,6 +17,7 @@
 #include <sys/sysarch.h>
 #include <sys/syscall_impl.h>
 #include <machine/pmm.h>
+#include <vm/phys_mem.h>
 #include <exec/perso/netbsd/netbsd_syscalls.h>
 #include <exec/perso/netbsd/netbsd_user.h>
 
@@ -803,7 +804,9 @@ static int nb_ncpu(void) { int n = sys_cpu_count(); return n < 1 ? 1 : n; }
 /* kern.hostname tracks the live hostname (sethostname(2)), not a constant. */
 static int nb_hostname(char *buf, size_t len) { return kern_hostname(buf, len); }
 /* hw.physmem64 -- total RAM in bytes (ps uses it for %MEM). */
-static uint64_t nb_physmem64(void) { return (uint64_t)pmm_get_total_memory(); }
+static uint64_t nb_physmem64(void) {
+    return (uint64_t)(vm_phys_get_free() + vm_phys_get_used()) * PAGE_SIZE;
+}
 
 #define NB_INT(no,nm,v)  { (no), (nm), NBSD_CTLTYPE_INT,    (v), 0, 0, 0, 0, 0, 0 }
 #define NB_FN(no,nm,fn)  { (no), (nm), NBSD_CTLTYPE_INT,    0, 0, (fn), 0, 0, 0, 0 }

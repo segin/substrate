@@ -6,10 +6,25 @@
  * returns a direct-map (DMAP_BASE) address, as on i386 it returns one at
  * KERN_BASE: memset it directly, V2P() it for page tables and hardware.
  *
- * Physical memory is managed below PMM_PHYS_RAM_CAP only, as on i386.
- * Drivers still keep bus addresses in 32-bit fields and most DMA engines
- * they drive are 32-bit, so RAM above the cap waits for a DMA-zone
- * allocator; the boot direct map covers all of it either way.
+ * Physical memory is managed in two parts.
+ *
+ * Low memory, below PMM_PHYS_RAM_CAP, is what the shared allocator sets
+ * up exactly as on i386, and is all that pmm_alloc_block() and
+ * pmm_alloc_contiguous() hand out.  Every kernel and driver allocation
+ * comes from there, which is what lets drivers keep bus addresses in
+ * 32-bit fields and drive 32-bit DMA engines.
+ *
+ * High memory, at and above PMM_HIGHMEM_BASE (4 GiB), is added by
+ * pmm_add_high_memory() once pmap_bootstrap() has extended the direct map
+ * over it.  It is only reachable through vm_phys_alloc_page(), that is,
+ * as pages the VM maps into processes; such a page has a P2V() address
+ * like any other, but its physical address does not fit in 32 bits and
+ * it must not be handed to a device (the block layer copies through a
+ * low buffer when it is given one).
+ *
+ * RAM between the two (3 GiB to 4 GiB, where the firmware leaves one)
+ * stays unused: that range is where the PCI layer places 32-bit MMIO
+ * windows of its own.
  */
 #ifndef _ARCH_X86_64_PMM_H
 #define _ARCH_X86_64_PMM_H
@@ -31,6 +46,21 @@
 
 /* Everything managed is direct-mapped: the map has no carve-outs here. */
 #define PMM_DIRECTMAP_PHYS_LIMIT ((uint32_t)PMM_PHYS_RAM_CAP)
+
+/* High memory: from 4 GiB up to what one PML4 slot of direct map covers
+ * (boot.S gives DMAP_BASE a single PDPT, 512 GiB). */
+#define PMM_HIGHMEM_BASE 0x100000000ULL
+#define PMM_HIGHMEM_CAP  0x8000000000ULL
+
+/* End of the high memory the firmware reported (PMM_HIGHMEM_BASE if
+ * none), and the call that hands it to the allocator.  The caller must
+ * have direct-mapped [PMM_HIGHMEM_BASE, pmm_high_memory_end()) first. */
+uint64_t pmm_high_memory_end(void);
+void pmm_add_high_memory(void);
+
+/* End of the direct-mapped high memory; PMM_HIGHMEM_BASE until
+ * pmm_add_high_memory() has run. */
+extern uint64_t pmm_high_mapped_end;
 
 typedef uint32_t phys_addr_t;
 
@@ -66,13 +96,27 @@ extern struct vm_page *pmm_page_array;
 extern size_t pmm_total_pages;
 struct vm_page *pmm_get_page(uintptr_t pa);
 
-static inline int pmm_phys_is_direct_mapped(uint32_t pa) {
-    return pa < PMM_DIRECTMAP_PHYS_LIMIT;
+static inline int pmm_phys_is_direct_mapped(uintptr_t pa) {
+    return pa < PMM_DIRECTMAP_PHYS_LIMIT ||
+           (pa >= PMM_HIGHMEM_BASE && pa < pmm_high_mapped_end);
 }
 
 static inline int pmm_virt_is_direct_mapped(uintptr_t va) {
     return va >= PMM_PHYS_VIRT_BASE &&
-           (va - PMM_PHYS_VIRT_BASE) < PMM_DIRECTMAP_PHYS_LIMIT;
+           pmm_phys_is_direct_mapped(va - PMM_PHYS_VIRT_BASE);
+}
+
+/* True for memory a device can be given: below the low-memory cap. */
+static inline int pmm_phys_is_low(uintptr_t pa) {
+    return pa < PMM_DIRECTMAP_PHYS_LIMIT;
+}
+
+/* True for the direct-map address of a high-memory page: a buffer whose
+ * physical address does not fit in 32 bits, which I/O must copy through
+ * low memory instead of handing to a device. */
+static inline int pmm_virt_is_high(uintptr_t va) {
+    return va >= PMM_PHYS_VIRT_BASE + PMM_HIGHMEM_BASE &&
+           va < PMM_PHYS_VIRT_BASE + pmm_high_mapped_end;
 }
 
 #endif

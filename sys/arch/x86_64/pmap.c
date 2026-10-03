@@ -301,6 +301,74 @@ static int pmap_install_trampoline(pmap_t pmap) {
 
 /* ==================== Bootstrap ==================== */
 
+/* CPUID.80000001H:EDX bit 26: 1 GiB pages. */
+static int pmap_cpu_has_1g_pages(void) {
+    uint32_t eax = 0x80000000U, ebx, ecx = 0, edx;
+
+    __asm__ volatile("cpuid" : "+a"(eax), "=b"(ebx), "+c"(ecx), "=d"(edx));
+    if (eax < 0x80000001U) {
+        return 0;
+    }
+    eax = 0x80000001U;
+    ecx = 0;
+    __asm__ volatile("cpuid" : "+a"(eax), "=b"(ebx), "+c"(ecx), "=d"(edx));
+    return (edx >> 26) & 1;
+}
+
+/*
+ * Extend the direct map from the 4 GiB boot.S built to `phys_end`, so
+ * that the RAM above 4 GiB has P2V() addresses like the rest.
+ *
+ * boot.S gave DMAP_BASE one PDPT and filled its first four entries; the
+ * rest of that table is ours to fill, one entry per GiB: a 1 GiB page
+ * where the processor has them, otherwise a page directory of 2 MiB
+ * pages taken from low memory.  The PDPT hangs off a kernel PML4 slot
+ * that every address space shares, so nothing has to be propagated.
+ *
+ * Returns 0, or -1 if a page directory could not be allocated -- the
+ * caller then leaves high memory unused.
+ */
+static int pmap_extend_dmap(uint64_t phys_end) {
+    pt_entry_t *pdpt;
+    int use_1g;
+
+    if (phys_end <= PMAP_DMAP_LIMIT) {
+        return 0;
+    }
+    if (phys_end > PMM_HIGHMEM_CAP) {
+        phys_end = PMM_HIGHMEM_CAP;
+    }
+
+    pdpt = (pt_entry_t *)P2V(boot_pml4[PT_IDX(DMAP_BASE, PML4_SHIFT)] &
+                             PTE_FRAME);
+    use_1g = pmap_cpu_has_1g_pages();
+
+    for (uint64_t pa = PMAP_DMAP_LIMIT; pa < phys_end; pa += PAGE_1G) {
+        pt_entry_t *slot = &pdpt[PT_IDX(DMAP_BASE + pa, PDPT_SHIFT)];
+
+        if (*slot & PTE_P) {
+            continue;
+        }
+        if (use_1g) {
+            *slot = pa | PTE_P | PTE_W | PTE_PS;
+        } else {
+            pt_entry_t *pd = (pt_entry_t *)pmm_alloc_block();
+
+            if (!pd) {
+                kprint("PMAP: out of memory extending the direct map\n");
+                return -1;
+            }
+            for (int i = 0; i < 512; i++) {
+                pd[i] = (pa + (uint64_t)i * PAGE_2M) | PTE_P | PTE_W | PTE_PS;
+            }
+            *slot = (pt_entry_t)V2P(pd) | PTE_P | PTE_W;
+        }
+    }
+    kprintf("PMAP: direct map extended to %lu MiB (%s pages)\n",
+            (unsigned long)(phys_end >> 20), use_1g ? "1 GiB" : "2 MiB");
+    return 0;
+}
+
 void pmap_bootstrap(void) {
     kprint("PMAP: Bootstrapping (4-level, direct map at DMAP_BASE)...\n");
 
@@ -315,6 +383,11 @@ void pmap_bootstrap(void) {
 
     pmm_enable_highmem();
     kprint("PMAP: Paging Enabled (kernel at KERNEL_VMA, 4 GiB direct map)\n");
+
+    /* RAM above 4 GiB: map it, then let the allocator have it. */
+    if (pmap_extend_dmap(pmm_high_memory_end()) == 0) {
+        pmm_add_high_memory();
+    }
 }
 
 /* Page 0 is never mapped on this kernel: the identity window that held it
