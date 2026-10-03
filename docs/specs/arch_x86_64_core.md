@@ -260,14 +260,30 @@ a statically linked 64-bit program:
   result to the carry-flag convention.  `execve` reads a 64-bit caller's
   argv and envp as 8-byte pointers.
 
+* **Structures.**  A 64-bit process uses the LP64 layouts of
+  abi-amd64.md, while the kernel's own structures keep the i386 layout
+  (see Compat32).  `<sys/amd64_abi.h>` declares the 64-bit side, pinned
+  with `ABI64_ASSERT_SIZE`, and the conversion happens in one of two
+  places:
+  * *value structures* -- `stat`, `timespec`, `rusage`, the `getdents`
+    record, the 16-byte `sigset_t` -- in a wrapper the dispatcher picks
+    for 64-bit frames (`exec/perso/perso_native64.c`,
+    `native_amd64_syscall()`), which runs the kernel-internal form of the
+    call and converts at the boundary;
+  * *pointer-carrying structures* -- `iovec`, `sigaction`, `stack_t`,
+    `siginfo_t` -- in the converters the 32-bit path already uses
+    (`kern/compat32.c`), which read the calling process's layout
+    (`proc_abi_is_amd64()`).
+* **Signals.**  `sendsig()` hands a 64-bit frame to `sendsig_amd64()`
+  (`arch/x86_64/signal64.c`): `struct sigframe` below the red zone, the
+  FreeBSD `mcontext` with the FXSAVE image, and a 64-bit trampoline at
+  `0xFE000060` that calls the handler and then `sigreturn(&sf_uc)`.
+
 What a 64-bit process does not have yet:
 
-* **structure-carrying system calls.**  The kernel still reads and writes
-  every user structure in the i386 layout (see Compat32), which is not
-  the LP64 layout a 64-bit program is compiled with: `stat`, `sigaction`,
-  `readv`, `gettimeofday`, ... return or take the wrong fields.  Calls
-  whose arguments are scalars, strings and byte buffers work;
-* **signal delivery**: the frame pushed is the i386 one;
+* the remaining structure-carrying calls: `statfs`, `sysctl` lengths,
+  `sendmsg`/`recvmsg`, `sigevent` (POSIX timers, message queues) and the
+  `sys_proc_*` listings;
 * **threads and TLS**: `%fs` base handling, `thr_new`;
 * the dynamic linker `/sbin/ld64.so`.
 
