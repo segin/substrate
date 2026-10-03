@@ -183,6 +183,9 @@ build_components() {
 
     echo "Building dynamic linker..."
     make -C "$TOP/sbin/ld.so" -j4
+    # The same linker as 64-bit: obj-x86_64/ld64.so, staged as /sbin/ld64.so,
+    # the interpreter of 64-bit dynamic programs.
+    make -C "$TOP/sbin/ld.so" ARCH=x86_64 -j4
 
     echo "Building target toolchain..."
     for dir in cc as ld ar ranlib nm objdump objcopy readelf strip strings size addr2line elfedit; do
@@ -451,6 +454,11 @@ install_to_dist() {
     if [ -f "$TOP/sbin/ld.so/ld.so" ]; then
         cp "$TOP/sbin/ld.so/ld.so" "$DIST/sbin/ld.so"
         chmod +x "$DIST/sbin/ld.so"
+    fi
+    # Its 64-bit build, for the programs that use the /lib64 libraries.
+    if [ -f "$TOP/sbin/ld.so/obj-x86_64/ld64.so" ]; then
+        cp "$TOP/sbin/ld.so/obj-x86_64/ld64.so" "$DIST/sbin/ld64.so"
+        chmod +x "$DIST/sbin/ld64.so"
     fi
 
     echo "Installing userland binaries to dist/bin..."

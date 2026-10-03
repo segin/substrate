@@ -261,6 +261,8 @@ make -C usr.lib
 
 step "Stage 1c: dynamic linker (sbin/ld.so/)"
 make -C sbin/ld.so
+# The 64-bit linker, /sbin/ld64.so, from the same sources.
+make -C sbin/ld.so ARCH=x86_64
 
 step "Stage 1d: base userland (bin/, sbin/)"
 make -C bin
