@@ -30,6 +30,7 @@
 #define PTE_PS          0x080
 
 #define CR0_PG          0x80000000
+#define CR0_WP          0x00010000
 #define CR4_PAE         0x00000020
 #define CR4_PGE         0x00000080
 #define MSR_EFER        0xC0000080
@@ -159,7 +160,7 @@ _start:
     orl $EFER_NXE, %eax
 4:  wrmsr
     movl %cr0, %eax
-    orl $CR0_PG, %eax
+    orl $(CR0_PG | CR0_WP), %eax
     movl %eax, %cr0
 
     popl %esi                       /* information */
