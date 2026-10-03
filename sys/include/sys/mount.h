@@ -2,6 +2,7 @@
 #define _SYS_MOUNT_H
 
 #include <sys/types.h>
+#include <sys/abi32.h>
 #include <sys/queue.h>
 #include <sys/lock.h>
 #include <stdint.h>
@@ -46,16 +47,17 @@ struct mount_args {
 /*
  * Filesystem statistics
  */
+/* The i386 layout on both kernels (<sys/abi32.h>). */
 struct statfs {
     uint32_t    f_type;         /* type of filesystem */
-    uint64_t    f_bsize;        /* optimal transfer block size */
-    uint64_t    f_iosize;       /* optimal transfer block size */
-    uint64_t    f_blocks;       /* total data blocks in filesystem */
-    uint64_t    f_bfree;        /* free blocks in fs */
-    uint64_t    f_bavail;       /* free blocks avail to non-superuser */
-    uint64_t    f_files;        /* total file nodes in filesystem */
-    uint64_t    f_ffree;        /* free file nodes in fs */
-    int64_t     f_fsid;         /* filesystem id */
+    abi_uint64_t f_bsize;       /* optimal transfer block size */
+    abi_uint64_t f_iosize;      /* optimal transfer block size */
+    abi_uint64_t f_blocks;      /* total data blocks in filesystem */
+    abi_uint64_t f_bfree;       /* free blocks in fs */
+    abi_uint64_t f_bavail;      /* free blocks avail to non-superuser */
+    abi_uint64_t f_files;       /* total file nodes in filesystem */
+    abi_uint64_t f_ffree;       /* free file nodes in fs */
+    abi_int64_t f_fsid;         /* filesystem id */
     uid_t       f_owner;        /* user that mounted the filesystem */
     short       f_flags;        /* copy of mount exported flags */
     short       f_syncwrites;   /* count of sync writes since mount */
@@ -64,6 +66,7 @@ struct statfs {
     char        f_mntonname[128]; /* directory on which mounted */
     char        f_mntfromname[128]; /* mounted filesystem */
 };
+ABI32_ASSERT_SIZE(struct statfs, 352);
 
 TAILQ_HEAD(vnode_list, vnode);
 

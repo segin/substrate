@@ -18,6 +18,7 @@
 #define _SYS_MQUEUE_H
 
 #include <sys/types.h>
+#include <sys/abi32.h>
 #include <sys/ipc.h>
 
 /* Forward declarations — the full definitions live in <sys/time.h> and
@@ -28,11 +29,12 @@ struct sigevent;
 
 /* POSIX message-queue attributes (matches include/mqueue.h). */
 struct mq_attr {
-    long mq_flags;    /* O_NONBLOCK — per open description */
-    long mq_maxmsg;   /* max # of messages on the queue */
-    long mq_msgsize;  /* max size of a single message (bytes) */
-    long mq_curmsgs;  /* # of messages currently queued */
+    abi_long_t mq_flags;    /* O_NONBLOCK — per open description */
+    abi_long_t mq_maxmsg;   /* max # of messages on the queue */
+    abi_long_t mq_msgsize;  /* max size of a single message (bytes) */
+    abi_long_t mq_curmsgs;  /* # of messages currently queued */
 };
+ABI32_ASSERT_SIZE(struct mq_attr, 16);
 
 /* Implementation limits.  Values follow FreeBSD's mqueuefs (the BSD way):
  * MQ_PRIO_MAX 64, and the kern.mqueue.maxmsg / maxmsgsize defaults. */

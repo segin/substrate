@@ -10,6 +10,7 @@
 #define _SYS_SEM_H
 
 #include <sys/types.h>
+#include <sys/abi32.h>
 #include <sys/ipc.h>
 
 /* semop(2) flag (in sembuf.sem_flg). */
@@ -32,10 +33,11 @@ struct sembuf {
 
 struct semid_ds {
     struct ipc_perm sem_perm; /* ownership / permissions */
-    time_t          sem_otime;/* last semop time */
-    time_t          sem_ctime;/* last change time */
-    unsigned long   sem_nsems;/* number of semaphores in set */
+    abi_int64_t     sem_otime;/* last semop time (time_t) */
+    abi_int64_t     sem_ctime;/* last change time (time_t) */
+    abi_ulong_t     sem_nsems;/* number of semaphores in set */
 };
+ABI32_ASSERT_SIZE(struct semid_ds, 48);
 
 union semun {
     int              val;     /* SETVAL */

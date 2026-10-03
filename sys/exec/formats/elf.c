@@ -30,6 +30,7 @@
 #include <machine/gdt.h>
 #include <sys/ldt.h>
 #include <pm/pm.h>
+#include <kern/arch.h>
 #include <kern/cmdline.h>
 #include <stdio.h>
 
@@ -965,7 +966,16 @@ static int is_user_ptr(const void *ptr) {
 
 static int capture_ptr(char *const array[], int index, char **out) {
     if (is_user_ptr(array)) {
-        return copyin(&array[index], out, sizeof(char*));
+        /* A user argv/envp holds the process's own pointers, which are 32
+         * bits wide -- every process is an i386-ABI one, on the x86_64
+         * kernel too -- so step and read it in 32-bit words. */
+        uint32_t uptr;
+        int ret = copyin((const uint32_t *)(const void *)array + index,
+                         &uptr, sizeof(uptr));
+        if (ret == 0) {
+            *out = (char *)(uintptr_t)uptr;
+        }
+        return ret;
     } else {
         *out = array[index];
         return 0;
@@ -1776,7 +1786,7 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
     }
 
     // Set up kernel stack for this process in TSS
-    set_kernel_stack((uint32_t)current_thread->kstack_top);
+    arch_set_kernel_stack(current_thread->kstack_top);
 
     /*
      * exec_setup_stack writes user pages in the *new* pmap; on failure we

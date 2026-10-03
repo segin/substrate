@@ -2,6 +2,7 @@
 #define _SYS_RESOURCE_H
 
 #include <sys/types.h>
+#include <sys/abi32.h>
 #include <sys/time.h>
 
 #define RUSAGE_SELF     0
@@ -15,7 +16,9 @@
 #define PRIO_MIN        -20
 #define PRIO_MAX        20
 
-typedef unsigned long rlim_t;
+/* A long of the i386 ABI on both kernels (<sys/abi32.h>): struct rlimit
+ * crosses the syscall boundary by value. */
+typedef abi_ulong_t rlim_t;
 
 #define RLIM_INFINITY ((rlim_t)-1)
 
@@ -53,24 +56,28 @@ struct rlimit {
     rlim_t rlim_max;
 };
 
+ABI32_ASSERT_SIZE(struct rlimit, 8);
+
+/* The i386 layout on both kernels (<sys/abi32.h>). */
 struct rusage {
     struct timeval ru_utime; /* user time used */
     struct timeval ru_stime; /* system time used */
-    long   ru_maxrss;        /* maximum resident set size */
-    long   ru_ixrss;         /* integral shared memory size */
-    long   ru_idrss;         /* integral unshared data size */
-    long   ru_isrss;         /* integral unshared stack size */
-    long   ru_minflt;        /* page reclaims */
-    long   ru_majflt;        /* page faults */
-    long   ru_nswap;         /* swaps */
-    long   ru_inblock;       /* block input operations */
-    long   ru_oublock;       /* block output operations */
-    long   ru_msgsnd;        /* messages sent */
-    long   ru_msgrcv;        /* messages received */
-    long   ru_nsignals;      /* signals received */
-    long   ru_nvcsw;         /* voluntary context switches */
-    long   ru_nivcsw;        /* involuntary context switches */
+    abi_long_t ru_maxrss;    /* maximum resident set size */
+    abi_long_t ru_ixrss;     /* integral shared memory size */
+    abi_long_t ru_idrss;     /* integral unshared data size */
+    abi_long_t ru_isrss;     /* integral unshared stack size */
+    abi_long_t ru_minflt;    /* page reclaims */
+    abi_long_t ru_majflt;    /* page faults */
+    abi_long_t ru_nswap;     /* swaps */
+    abi_long_t ru_inblock;   /* block input operations */
+    abi_long_t ru_oublock;   /* block output operations */
+    abi_long_t ru_msgsnd;    /* messages sent */
+    abi_long_t ru_msgrcv;    /* messages received */
+    abi_long_t ru_nsignals;  /* signals received */
+    abi_long_t ru_nvcsw;     /* voluntary context switches */
+    abi_long_t ru_nivcsw;    /* involuntary context switches */
 };
+ABI32_ASSERT_SIZE(struct rusage, 88);
 
 int getpriority(int which, id_t who);
 int setpriority(int which, id_t who, int prio);

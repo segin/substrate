@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <sys/types.h>
+#include <sys/abi32.h>
 
 // Process Bitness
 typedef enum {
@@ -111,22 +112,24 @@ typedef struct sys_thrinfo {
     uint16_t time_slice_max;
 } sys_thrinfo_t;
 
+/* The i386 layout on both kernels (<sys/abi32.h>). */
 struct sysinfo {
-    long uptime;             /* Seconds since boot */
-    unsigned long loads[3];  /* 1, 5, and 15 minute load averages */
-    unsigned long totalram;  /* Total usable main memory size */
-    unsigned long freeram;   /* Available memory size */
-    unsigned long sharedram; /* Amount of shared memory */
-    unsigned long bufferram; /* Memory used by buffers */
-    unsigned long totalswap; /* Total swap space size */
-    unsigned long freeswap;  /* swap space still available */
+    abi_long_t uptime;       /* Seconds since boot */
+    abi_ulong_t loads[3];    /* 1, 5, and 15 minute load averages */
+    abi_ulong_t totalram;    /* Total usable main memory size */
+    abi_ulong_t freeram;     /* Available memory size */
+    abi_ulong_t sharedram;   /* Amount of shared memory */
+    abi_ulong_t bufferram;   /* Memory used by buffers */
+    abi_ulong_t totalswap;   /* Total swap space size */
+    abi_ulong_t freeswap;    /* swap space still available */
     unsigned short procs;    /* Number of current processes */
     unsigned short pad;      /* Explicit padding for 32-bit alignment */
-    unsigned long totalhigh; /* Total high memory size */
-    unsigned long freehigh;  /* Available high memory size */
+    abi_ulong_t totalhigh;   /* Total high memory size */
+    abi_ulong_t freehigh;    /* Available high memory size */
     unsigned int mem_unit;   /* Memory unit size in bytes */
-    char _f[20-2*sizeof(long)-sizeof(int)]; /* Padding to 64 bytes */
+    char _f[20-2*sizeof(abi_long_t)-sizeof(int)]; /* Padding to 64 bytes */
 };
+ABI32_ASSERT_SIZE(struct sysinfo, 64);
 
 /* VM Statistics Structure */
 typedef struct sys_vmstat {
@@ -154,10 +157,11 @@ typedef struct sys_vminfo {
 
 typedef struct sys_swapinfo {
     char path[256];
-    uint64_t total;
-    uint64_t used;
+    abi_uint64_t total;
+    abi_uint64_t used;
     int priority;
 } sys_swapinfo_t;
+ABI32_ASSERT_SIZE(struct sys_swapinfo, 276);
 
 typedef struct sys_bufinfo {
     uint64_t nr_buffers;

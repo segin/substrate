@@ -2,29 +2,33 @@
 #define _SYS_STAT_H
 
 #include <sys/types.h>
+#include <sys/abi32.h>
 
+/* The i386 layout on both kernels (<sys/abi32.h>): the 64-bit fields are
+ * ino_t, off_t, blkcnt_t and time_t, aligned to 4. */
 struct stat {
     uint32_t       st_dev;
-    ino_t          st_ino;
+    abi_uint64_t   st_ino;
     mode_t         st_mode;
     nlink_t        st_nlink;
     uid_t          st_uid;
     gid_t          st_gid;
     uint32_t       st_rdev;
-    off_t          st_size;    // 64-bit size
+    abi_int64_t    st_size;    // 64-bit size
     uint32_t       st_blksize;
     uint32_t       st_pad1;    // padding
-    blkcnt_t       st_blocks;  // 64-bit block count
-    time_t         st_atime;   // 64-bit time
+    abi_int64_t    st_blocks;  // 64-bit block count
+    abi_int64_t    st_atime;   // 64-bit time
     uint32_t       st_atime_nsec;
     uint32_t       st_pad2;
-    time_t         st_mtime;
+    abi_int64_t    st_mtime;
     uint32_t       st_mtime_nsec;
     uint32_t       st_pad3;
-    time_t         st_ctime;
+    abi_int64_t    st_ctime;
     uint32_t       st_ctime_nsec;
     uint32_t       st_pad4;
 };
+ABI32_ASSERT_SIZE(struct stat, 104);
 
 // Mode bits
 #define S_IFMT  0170000

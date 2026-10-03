@@ -1210,10 +1210,10 @@ int sys_ftruncate(int fd, uint32_t lo, uint32_t hi) {
 
 
 
-// Linux dirent structure for getdents
+// Linux dirent structure for getdents: the i386 layout (<sys/abi32.h>)
 struct linux_dirent {
-    unsigned long  d_ino;
-    unsigned long  d_off;
+    abi_ulong_t    d_ino;
+    abi_ulong_t    d_off;
     unsigned short d_reclen;
     char           d_name[];
 };
@@ -1296,7 +1296,7 @@ int kern_getdents(unsigned int fd, void *dirp, unsigned int count) {
         int name_len = 0;
         while(d->d_name[name_len]) name_len++;
         
-        int reclen = sizeof(unsigned long) * 2 + sizeof(unsigned short) + name_len + 1;
+        int reclen = (int)offsetof(struct linux_dirent, d_name) + name_len + 1;
         reclen = (reclen + 3) & ~3; // Align to 4 bytes
         
         if (bpos + reclen > count) {

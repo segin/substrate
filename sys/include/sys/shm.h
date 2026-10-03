@@ -17,6 +17,7 @@
 #define _SYS_SHM_H
 
 #include <sys/types.h>
+#include <sys/abi32.h>
 #include <sys/ipc.h>
 #include <stddef.h>
 
@@ -39,18 +40,20 @@
 /* Attach boundary: shmaddr with SHM_RND is rounded down to a multiple. */
 #define SHMLBA     4096
 
-typedef unsigned long shmatt_t;
+typedef abi_ulong_t shmatt_t;
 
+/* The i386 layout on both kernels (<sys/abi32.h>). */
 struct shmid_ds {
     struct ipc_perm shm_perm;   /* ownership / permissions */
-    size_t   shm_segsz;         /* size of segment in bytes */
-    time_t   shm_atime;         /* last attach time */
-    time_t   shm_dtime;         /* last detach time */
-    time_t   shm_ctime;         /* last change time */
+    abi_ulong_t shm_segsz;      /* size of segment in bytes (size_t) */
+    abi_int64_t shm_atime;      /* last attach time (time_t) */
+    abi_int64_t shm_dtime;      /* last detach time */
+    abi_int64_t shm_ctime;      /* last change time */
     pid_t    shm_cpid;          /* pid of creator */
     pid_t    shm_lpid;          /* pid of last attach/detach */
     shmatt_t shm_nattch;        /* number of current attaches */
 };
+ABI32_ASSERT_SIZE(struct shmid_ds, 68);
 
 /* Implementation limits. */
 #define SHMMNI    128                       /* max segments system-wide */

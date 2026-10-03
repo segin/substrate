@@ -6,10 +6,13 @@
 #define _SYS_DIRENT_H
 
 #include <sys/types.h>
+#include <sys/abi32.h>
 
+/* The i386 layout on both kernels (<sys/abi32.h>): getdents copies these
+ * out whole. */
 struct dirent {
-    uint64_t d_ino;       /* File serial number */
-    uint64_t d_off;       /* Opaque cursor for the NEXT entry.  A filesystem
+    abi_uint64_t d_ino;   /* File serial number */
+    abi_uint64_t d_off;   /* Opaque cursor for the NEXT entry.  A filesystem
                            * that has a deletion-stable position (ext2 uses a
                            * byte offset) reports it here so a reader that
                            * unlink()s entries mid-scan never skips surviving
@@ -20,6 +23,7 @@ struct dirent {
     uint8_t  d_namlen;    /* Length of string in d_name */
     char     d_name[256]; /* Entry name (null-terminated) */
 };
+ABI32_ASSERT_SIZE(struct dirent, 276);
 
 /*
  * File types (d_type)

@@ -42,5 +42,6 @@ struct sched_param {
     struct timespec sched_ss_init_budget;   /* initial execution budget   */
     int             sched_ss_max_repl;      /* max pending replenishments */
 };
+ABI32_ASSERT_SIZE(struct sched_param, 36);
 
 #endif /* _SYS_SCHED_POSIX_H */
