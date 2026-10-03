@@ -139,7 +139,8 @@ int netbsd_sys_wait450(int pid, int *status, int options, struct rusage *rusage)
  * NetBSD-layout timeval explicitly.  (struct timespec already matches at 12
  * bytes, so __clock_gettime50 needs no such wrapper.)
  */
-struct netbsd_timeval { int64_t tv_sec; int32_t tv_usec; };
+struct netbsd_timeval { abi_int64_t tv_sec; int32_t tv_usec; };
+ABI32_ASSERT_SIZE(struct netbsd_timeval, 12);
 
 int netbsd_sys_gettimeofday(struct netbsd_timeval *tv, struct timezone *tz) {
     struct timeval ktv;

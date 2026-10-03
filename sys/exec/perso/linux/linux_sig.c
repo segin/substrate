@@ -31,9 +31,9 @@ static void populate_linux_siginfo(linux_siginfo_t *info, int sig, int code) {
         /* Trap/Fault signals */
         if (current_thread && current_thread->trap_signo == linux_to_native_signal(sig)) {
             info->_sifields._sigfault._addr =
-                (void *)(uintptr_t)current_thread->trap_addr;
+                (uptr32_t)current_thread->trap_addr;
         } else {
-            info->_sifields._sigfault._addr = NULL;
+            info->_sifields._sigfault._addr = 0;
         }
     }
 }

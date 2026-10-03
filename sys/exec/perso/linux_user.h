@@ -11,6 +11,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <sys/abi32.h>
 #include <sys/signal.h>
 
 /* Forward declarations */
@@ -88,26 +89,27 @@ struct linux_stat {
  * Large File Support stat for >2GB files
  */
 struct linux_stat64 {
-    uint64_t st_dev;
+    abi_uint64_t st_dev;
     uint32_t __pad1;
     uint32_t __st_ino;    /* Old 32-bit ino for compat */
     uint32_t st_mode;
     uint32_t st_nlink;
     uint32_t st_uid;
     uint32_t st_gid;
-    uint64_t st_rdev;
+    abi_uint64_t st_rdev;
     uint32_t __pad2;
-    int64_t  st_size;
+    abi_int64_t  st_size;
     uint32_t st_blksize;
-    uint64_t st_blocks;
+    abi_uint64_t st_blocks;
     uint32_t st_atime;
     uint32_t st_atime_nsec;
     uint32_t st_mtime;
     uint32_t st_mtime_nsec;
     uint32_t st_ctime;
     uint32_t st_ctime_nsec;
-    uint64_t st_ino;      /* Real 64-bit ino */
+    abi_uint64_t st_ino;  /* Real 64-bit ino */
 };
+ABI32_ASSERT_SIZE(struct linux_stat64, 96);
 
 struct linux_statx_timestamp {
     int64_t  tv_sec;
@@ -342,34 +344,35 @@ typedef struct {
             int _tid;
             int _overrun;
             char _pad[sizeof(int) - sizeof(int)];
-            void *_sigval;
+            uptr32_t _sigval;
             int _sys_private;
         } _timer;
 
         struct {
             int _pid;
             unsigned int _uid;
-            void *_sigval;
+            uptr32_t _sigval;
         } _rt;
 
         struct {
             int _pid;
             unsigned int _uid;
             int _status;
-            long _utime;
-            long _stime;
+            abi_long_t _utime;
+            abi_long_t _stime;
         } _sigchld;
 
         struct {
-            void *_addr;
+            uptr32_t _addr;
         } _sigfault;
 
         struct {
-            long _band;
+            abi_long_t _band;
             int _fd;
         } _sigpoll;
     } _sifields;
 } linux_siginfo_t;
+ABI32_ASSERT_SIZE(linux_siginfo_t, 128);
 
 /* Linux rt_sigframe (real-time signals) */
 struct linux_rt_sigframe {
@@ -381,6 +384,7 @@ struct linux_rt_sigframe {
     struct linux_ucontext uc;
     char     retcode[8];
 };
+ABI32_ASSERT_SIZE(struct linux_rt_sigframe, 268);
 
 /* Linux Socket Definitions */
 #define LINUX_AF_UNSPEC     0

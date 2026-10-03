@@ -20,6 +20,7 @@
 #include <string.h>
 
 #include <exec/perso/perso_ipc_shm.h>
+#include <sys/abi32.h>
 #include <sys/copy.h>
 #include <sys/ipc.h>
 #include <sys/sem.h>
@@ -311,10 +312,11 @@ struct netbsd_ipc_perm32 {     /* netbsd32_ipc_perm */
 struct netbsd_semid_ds32 {     /* netbsd32_semid_ds (____semctl50: time_t-64) */
     struct netbsd_ipc_perm32 sem_perm;
     uint16_t sem_nsems;
-    int64_t  sem_otime;
-    int64_t  sem_ctime;
+    abi_int64_t sem_otime;
+    abi_int64_t sem_ctime;
     uint32_t _sem_base;
 };
+ABI32_ASSERT_SIZE(struct netbsd_semid_ds32, 48);
 
 int netbsd_sys_semget(key_t key, int nsems, int semflg)
 {

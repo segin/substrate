@@ -65,13 +65,15 @@ struct linux_oldoldutsname {
 };
 
 /* oldselect(2) — syscall 82: all args packed into one struct */
+/* The old select(2) argument block, as the i386 process lays it out. */
 struct linux_oldselect {
-    int nfds;
-    void *readfds;
-    void *writefds;
-    void *exceptfds;
-    void *timeout;
+    int32_t  nfds;
+    uptr32_t readfds;
+    uptr32_t writefds;
+    uptr32_t exceptfds;
+    uptr32_t timeout;
 };
+ABI32_ASSERT_SIZE(struct linux_oldselect, 20);
 
 /* Signal Translation Tables */
 #define LINUX_SIGHUP        1
@@ -890,8 +892,8 @@ static int linux_sys_oldselect(void *lsp) {
     if(!lsp) return(-EFAULT);
     if(copyin(lsp, &ls, sizeof(ls)) != 0)
         return(-EFAULT);
-    return sys_select(ls.nfds, ls.readfds, ls.writefds,
-                      ls.exceptfds, ls.timeout);
+    return sys_select(ls.nfds, UPTR32(ls.readfds), UPTR32(ls.writefds),
+                      UPTR32(ls.exceptfds), UPTR32(ls.timeout));
 }
 
 static int linux_sys_clone(uint32_t flags, void *child_stack, int *parent_tidptr, void *tls, int *child_tidptr) {

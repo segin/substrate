@@ -1254,14 +1254,15 @@ int netbsd_sys_fpathconf(int fd, int name) {
  * are filled and the rest zeroed.
  */
 struct netbsd_rusage50 {
-    int64_t  ru_utime_sec;  int32_t ru_utime_usec;
-    int64_t  ru_stime_sec;  int32_t ru_stime_usec;
+    abi_int64_t ru_utime_sec;  int32_t ru_utime_usec;
+    abi_int64_t ru_stime_sec;  int32_t ru_stime_usec;
     int32_t  ru_maxrss, ru_ixrss, ru_idrss, ru_isrss;
     int32_t  ru_minflt, ru_majflt, ru_nswap;
     int32_t  ru_inblock, ru_oublock;
     int32_t  ru_msgsnd, ru_msgrcv, ru_nsignals;
     int32_t  ru_nvcsw, ru_nivcsw;
 };
+ABI32_ASSERT_SIZE(struct netbsd_rusage50, 80);
 
 int netbsd_sys_getrusage50(int who, void *urusage) {
     if (who != RUSAGE_SELF && who != RUSAGE_CHILDREN) return -EINVAL;

@@ -417,11 +417,12 @@ int linux_sys_fstatfs64(int fd, size_t sz, struct linux_statfs64 *buf) {
  * Returns 1 when an entry was read, 0 at end-of-directory, -errno on error.
  */
 struct old_linux_dirent {
-    unsigned long  d_ino;
-    unsigned long  d_offset;
+    abi_ulong_t    d_ino;
+    abi_ulong_t    d_offset;
     unsigned short d_namlen;
     char           d_name[256];
 };
+ABI32_ASSERT_SIZE(struct old_linux_dirent, 268);
 
 int linux_old_readdir(unsigned int fd, void *dirp, unsigned int count) {
     (void)count;   /* old readdir ignores count and returns a single entry */

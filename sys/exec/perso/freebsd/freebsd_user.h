@@ -114,10 +114,12 @@ struct freebsd_rusage {
  * The layout differs significantly between i386 and amd64.
  */
 
-#if defined(__i386__)
+/* The x86_64 kernel serves i386 FreeBSD processes, so it takes the i386
+ * layout too (<sys/abi32.h>). */
+#if defined(__i386__) || defined(SUBSTRATE_ARCH_X86_64)
 struct freebsd_stat {
     uint32_t st_dev;
-    uint64_t st_ino;        /* 64-bit inode on FreeBSD 12+ (i386) */
+    abi_uint64_t st_ino;    /* 64-bit inode on FreeBSD 12+ (i386) */
     uint16_t st_mode;
     uint16_t st_nlink;
     uint32_t st_uid;
@@ -127,14 +129,15 @@ struct freebsd_stat {
     struct freebsd_timespec st_mtim;
     struct freebsd_timespec st_ctim;
     struct freebsd_timespec st_birthtim;
-    int64_t  st_size;
-    int64_t  st_blocks;
+    abi_int64_t  st_size;
+    abi_int64_t  st_blocks;
     uint32_t st_blksize;
     uint32_t st_flags;
-    uint64_t st_gen;
+    abi_uint64_t st_gen;
     int32_t  st_lspare;     /* Padding/Spare */
-    int64_t  st_qspare[2];  /* Spares */
+    abi_int64_t  st_qspare[2];  /* Spares */
 };
+ABI32_ASSERT_SIZE(struct freebsd_stat, 112);
 #elif defined(__x86_64__)
 struct freebsd_stat {
     uint32_t st_dev;
@@ -187,6 +190,7 @@ struct freebsd11_stat {
     int32_t  st_lspare;
     struct freebsd_timespec st_birthtim;
 };
+ABI32_ASSERT_SIZE(struct freebsd11_stat, 88);
 
 
 /*
@@ -235,6 +239,7 @@ struct freebsd13_stat {
     uint64_t st_spare[9];     /* offset 136 */
     /* total: 208 bytes (0xD0) */
 };
+ABI32_ASSERT_SIZE(struct freebsd13_stat, 208);
 #endif
 
 /*

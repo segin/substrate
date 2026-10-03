@@ -17,6 +17,7 @@
 #include <string.h>
 
 #include <exec/perso/perso_ipc_shm.h>
+#include <sys/abi32.h>
 #include <sys/copy.h>
 #include <sys/ipc.h>
 #include <sys/shm.h>
@@ -260,11 +261,12 @@ struct netbsd_shmid_ds32 {      /* netbsd32_shmid_ds (____shmctl50: time_t-64) *
     int32_t  shm_lpid;
     int32_t  shm_cpid;
     uint32_t shm_nattch;        /* shmatt_t (unsigned int on NetBSD) */
-    int64_t  shm_atime;
-    int64_t  shm_dtime;
-    int64_t  shm_ctime;
+    abi_int64_t shm_atime;
+    abi_int64_t shm_dtime;
+    abi_int64_t shm_ctime;
     uint32_t _shm_internal;     /* netbsd32_voidp */
 };
+ABI32_ASSERT_SIZE(struct netbsd_shmid_ds32, 68);
 
 int netbsd_sys_shmget(key_t key, size_t size, int shmflg)
 {
