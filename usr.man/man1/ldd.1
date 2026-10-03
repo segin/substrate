@@ -10,8 +10,9 @@ ldd \- list the shared libraries an ELF file depends on
 .BR \-h | \-\-help
 .SH DESCRIPTION
 .B ldd
-reports the shared-library dependencies of each 32-bit ELF
-.IR file .
+reports the shared-library dependencies of each ELF
+.IR file ,
+32-bit or 64-bit.
 When more than one
 .I file
 is given, each report is preceded by a line holding the file name and a
@@ -44,9 +45,11 @@ byte.
 .IP \(bu
 A file whose
 .B PT_INTERP
-is
-.I /sbin/ld.so
-(a native dynamic executable), unless it is set-user-ID or set-group-ID,
+is the native linker of its class
+.RI ( /sbin/ld.so
+for a 32-bit file,
+.I /sbin/ld64.so
+for a 64-bit one), unless it is set-user-ID or set-group-ID,
 is executed with
 .B LD_TRACE_LOADED_OBJECTS=1
 in its environment and no arguments.
@@ -57,7 +60,8 @@ program.
 See
 .BR ld.so (8)
 for the format.
-If the child exits with status 127 (the file could not be executed, or
+If the child exits with status 127 (the file could not be executed
+\(em a 64-bit program on the 32-bit kernel, for one \(em or
 .B ld.so
 hit a fatal error such as a missing library),
 .B ldd
@@ -91,7 +95,8 @@ entry of the file itself,
 .EE
 .RE
 .IP
-Only direct dependencies are listed, and no load address is known.
+Only direct dependencies are listed, and no load address is known (a
+64-bit file shows sixteen question marks).
 Names are looked up as regular files in a fixed list of directories
 chosen from the
 .B EI_OSABI
@@ -111,10 +116,15 @@ Linux
 .IR /perso/linux/lib ,
 .I /perso/linux/usr/lib
 .TP
-otherwise
+otherwise, 32-bit
 .IR /lib ,
 .IR /usr/lib ,
 .I /usr/local/lib
+.TP
+otherwise, 64-bit
+.IR /lib64 ,
+.IR /usr/lib64 ,
+.I /usr/local/lib64
 .RE
 .SH OPTIONS
 .TP
@@ -134,7 +144,7 @@ No
 .I file
 was given, or at least one
 .I file
-could not be read, was not a 32-bit ELF file, had malformed program
+could not be read, was not an ELF file, had malformed program
 headers or had no usable
 .BR DT_STRTAB .
 .SH EXAMPLE
@@ -161,8 +171,6 @@ Substrate's own brand,
 The fallback method does not read
 .I /etc/ld.so.conf
 and does not follow indirect dependencies.
-.PP
-Only 32-bit ELF files are supported.
 .PP
 With several files and standard output not a terminal, the file-name
 header line can appear after that file's listing, because output is
