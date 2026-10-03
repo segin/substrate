@@ -2,7 +2,7 @@
  * lib/c/src/posix_extra.c — POSIX surface entries that weren't
  * already in lib/c/src/sys.c or lib/sys/.  Most are wrappers over
  * existing primitives; a handful are ENOSYS stubs for kernel calls
- * substrate doesn't have yet (mprotect, fsync, waitid, fchdir,
+ * substrate doesn't have yet (fsync, waitid, fchdir,
  * setresuid/gid, ...).  Each stub carries the right signature so
  * consumers compile, with the underlying gap documented.
  *
@@ -450,12 +450,9 @@ ssize_t pwritev(int fd, const struct iovec *iov, int iovcnt, off_t offset) {
  * ============================================================ */
 
 int mprotect(void *addr, size_t len, int prot) {
-    /* No kernel SYS_MPROTECT yet.  Critical for JIT / mmap-based
-     * dynamic linking — flag as ENOSYS so callers can detect and
-     * either bail or fall back to remap. */
-    (void)addr; (void)len; (void)prot;
-    errno = ENOSYS;
-    return -1;
+    long r = syscall(SYS_MPROTECT, (uintptr_t)addr, (uintptr_t)len, (uintptr_t)prot);
+    if (r < 0) { errno = (int)-r; return -1; }
+    return 0;
 }
 
 int msync(void *addr, size_t len, int flags) {
