@@ -305,8 +305,6 @@ static int elf_read_image_info(fs_node_t *file, elf_image_info_t *image) {
         if (image->is64) {
             int rc = elf64_read_phdr(file, ph_offset, phdr);
             if (rc != 0) return rc;
-            /* No 64-bit dynamic linker exists yet: static images only. */
-            if (phdr->p_type == PT_INTERP) return -ENOEXEC;
         } else
 #endif
         if (file->read(file, ph_offset, sizeof(Elf32_Phdr), (uint8_t *)phdr) != sizeof(Elf32_Phdr)) {
@@ -1810,10 +1808,22 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
             goto cleanup;
         }
 
+        /* The program's word size, before loading the interpreter records
+         * its own in its place. */
+        uint8_t main_bitness = current_process ? current_process->bitness : 0;
+
         uint32_t interp_base = 0x40000000;
         uint32_t interp_entry = elf_load(interp_file, interp_base, 0, NULL, NULL);
         if (interp_entry == 0) {
             kprint("execve: Failed to load interpreter\n");
+            error_code = -ENOEXEC;
+            goto cleanup;
+        }
+        /* A program and its interpreter are one address space and one ABI:
+         * a 64-bit program needs the 64-bit linker (/sbin/ld64.so) and a
+         * 32-bit one the 32-bit linker. */
+        if (current_process && current_process->bitness != main_bitness) {
+            kprint("execve: interpreter and program differ in word size\n");
             error_code = -ENOEXEC;
             goto cleanup;
         }
