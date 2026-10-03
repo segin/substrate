@@ -1,34 +1,39 @@
 include ../../Makefile.inc
 
+# $(O) and $(LIBDIR): see Makefile.inc (i386 in place, x86_64 beside it).
+# LIB and SHLIB stay bare names (soname, install link); the files
+# themselves are $(O)$(LIB) and $(O)$(SHLIB).
 LIB    = libuu.a
 SHLIB  = libuu.so.0
 SRCS   = uudecode.c
-OBJS     = $(SRCS:.c=.o)
-PIC_OBJS = $(SRCS:.c=.pic.o)
+OBJS     = $(SRCS:%.c=$(O)%.o)
+PIC_OBJS = $(SRCS:%.c=$(O)%.pic.o)
 
-all: $(LIB) $(if $(NATIVE_BUILD),,$(SHLIB))
+all: $(O)$(LIB) $(if $(NATIVE_BUILD),,$(O)$(SHLIB))
 
-$(LIB): $(OBJS)
+$(O)$(LIB): $(OBJS)
 	$(AR) rcs $@ $(OBJS)
 
-$(SHLIB): $(PIC_OBJS)
+$(O)$(SHLIB): $(PIC_OBJS)
 	$(CC) $(SHLIB_LDFLAGS) -Wl,-soname,$(SHLIB) \
-	      -L$(TOP)/lib/c -l:libc.so.0 \
+	      -L$(TOP)/lib/c/$(O) -l:libc.so.0 \
 	      -o $@ $(PIC_OBJS)
 
-%.o: %.c
+$(O)%.o: %.c
+	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -I. -c $< -o $@
 
-%.pic.o: %.c
+$(O)%.pic.o: %.c
+	@mkdir -p $(dir $@)
 	$(CC) $(SHLIB_CFLAGS) -I. -c $< -o $@
 
 clean:
-	rm -f $(OBJS) $(PIC_OBJS) $(LIB) $(SHLIB)
+	rm -f $(OBJS) $(PIC_OBJS) $(O)$(LIB) $(O)$(SHLIB)
 
-install: $(LIB) $(if $(NATIVE_BUILD),,$(SHLIB))
-	@mkdir -p $(DESTDIR)/usr/lib $(DESTDIR)/lib
-	install -m 644 $(LIB) $(DESTDIR)/usr/lib/
+install: $(O)$(LIB) $(if $(NATIVE_BUILD),,$(O)$(SHLIB))
+	@mkdir -p $(DESTDIR)/usr/$(LIBDIR) $(DESTDIR)/$(LIBDIR)
+	install -m 644 $(O)$(LIB) $(DESTDIR)/usr/$(LIBDIR)/
 ifndef NATIVE_BUILD
-	install -m 755 $(SHLIB) $(DESTDIR)/lib/
-	@ln -sf $(SHLIB) $(DESTDIR)/lib/libuu.so
+	install -m 755 $(O)$(SHLIB) $(DESTDIR)/$(LIBDIR)/
+	@ln -sf $(SHLIB) $(DESTDIR)/$(LIBDIR)/libuu.so
 endif

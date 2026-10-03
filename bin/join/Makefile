@@ -14,12 +14,16 @@ ifdef NATIVE_BUILD
 JOINLIB = $(TOP)/usr.lib/join/libjoin.a
 LDADD   = -L$(TOP)/usr.lib/join -ljoin
 USER_CFLAGS += -idirafter $(TOP)/include
+else ifdef BIN64
+# 64-bit: static, from the archive `make -C usr.lib/join ARCH=x86_64`
+# leaves under $(O); Makefile.bin.inc picks it up in place of LDADD.
+JOINLIB = $(TOP)/usr.lib/join/$(O)libjoin.a
 else
 JOINLIB = $(TOP)/usr.lib/join/libjoin.so.0
 LDADD   = -L$(TOP)/usr.lib/join -l:libjoin.so.0
 endif
 
-$(PROG): $(JOINLIB)
+$(O)$(PROG): $(JOINLIB)
 
 # Recurse unconditionally and let usr.lib/join decide.  A rule that fires
 # only when the library is MISSING leaves a stale one in place, and this

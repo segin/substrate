@@ -1,6 +1,6 @@
 PROG = grep
 SRCS = grep.c grep_opts.c grep_pattern.c
-EXTRA_CLEAN = egrep fgrep hostshim
+EXTRA_CLEAN = $(O)egrep $(O)fgrep hostshim
 .DEFAULT_GOAL := all
 
 # Link the in-tree regex engine.  The target build uses the shared object and
@@ -21,8 +21,8 @@ $(shell mkdir -p hostshim/regex && \
         ln -sf $(abspath ../../include/regex/flags.h) hostshim/regex/flags.h)
 USER_CFLAGS += -Ihostshim
 else
-REGEX_LIB = $(TOP)/usr.lib/regex/libregex.so.0
-LDADD = -L$(TOP)/usr.lib/regex -l:libregex.so.0
+REGEX_LIB = $(TOP)/usr.lib/regex/$(O)libregex.so.0
+LDADD = -L$(TOP)/usr.lib/regex/$(O) -l:libregex.so.0
 USER_CFLAGS += -I$(TOP)/include -I$(TOP)/sys/include
 endif
 
@@ -39,14 +39,16 @@ regexlib:
 
 $(REGEX_LIB): regexlib
 
-$(PROG): $(REGEX_LIB)
+$(O)$(PROG): $(REGEX_LIB)
 
 # egrep / fgrep are the same binary, selected by argv[0] (REQ-GREP-004/005).
+# The links sit beside the program: in place for i386, under $(O) for
+# ARCH=x86_64 (see Makefile.inc).
 all: grep-links
 
-grep-links: $(PROG)
-	ln -sf $(PROG) egrep
-	ln -sf $(PROG) fgrep
+grep-links: $(O)$(PROG)
+	ln -sf $(PROG) $(O)egrep
+	ln -sf $(PROG) $(O)fgrep
 
 # egrep / fgrep are installed as shebang wrapper scripts rather than
 # symlinks: the image is populated from dist/ via debugfs `write`, which
@@ -59,4 +61,8 @@ install-grep-links:
 	printf '#!/bin/sh\n# fgrep -- grep in fixed-string mode.\nexec grep -F "$$@"\n' > $(BINDIR)/fgrep
 	chmod 0755 $(BINDIR)/egrep $(BINDIR)/fgrep
 
+# The 64-bit grep is not installed (Makefile.bin.inc), so neither are its
+# wrappers.
+ifndef BIN64
 install: install-grep-links
+endif

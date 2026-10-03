@@ -12,10 +12,12 @@ DYNAMIC = 1
 include ../../Makefile.inc
 include ../../Makefile.bin.inc
 
-OBJS += modeparse.o
-EXTRA_CLEAN += modeparse.o
+# $(O): see Makefile.inc (i386 in place, x86_64 under obj-x86_64/).
+OBJS += $(O)modeparse.o
+EXTRA_CLEAN += $(O)modeparse.o
 
-$(PROG): modeparse.o
+$(O)$(PROG): $(O)modeparse.o
 
-modeparse.o: ../../lib/modeparse.c ../../include/modeparse.h $(BUILD_RULE_DEPS)
+$(O)modeparse.o: ../../lib/modeparse.c ../../include/modeparse.h $(BUILD_RULE_DEPS)
+	@mkdir -p $(dir $@)
 	$(CC) $(USER_CFLAGS) -c ../../lib/modeparse.c -o $@

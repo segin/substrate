@@ -10,13 +10,16 @@ endif
 SRCS = src/compile.c src/exec.c src/util.c src/engine_posix.c src/engine_safe.c \
        src/engine_pcre2_adapter.c src/posix_compat.c
 
-OBJS     = $(SRCS:.c=.o)
-PIC_OBJS = $(SRCS:.c=.pic.o)
+# $(O) and $(LIBDIR): see Makefile.inc (i386 in place, x86_64 beside it).
+# LIBNAME and SHLIB stay bare names (soname, install link); the files
+# themselves are $(O)$(LIBNAME) and $(O)$(SHLIB).
+OBJS     = $(SRCS:%.c=$(O)%.o)
+PIC_OBJS = $(SRCS:%.c=$(O)%.pic.o)
 
 LIBNAME = libregex.a
 SHLIB   = libregex.so.0
 BUILD_MODE := $(if $(NATIVE_BUILD),native,target)
-MODE_STAMP = .build-mode
+MODE_STAMP = $(O).build-mode
 
 # Optional integrations
 # USE_PCRE2=1 enables PCRE2 adapter (requires pcre2 headers/libs on host)
@@ -32,61 +35,64 @@ endif
 
 .PHONY: all clean install FORCE
 
-all: $(LIBNAME) $(if $(NATIVE_BUILD),,$(SHLIB))
+all: $(O)$(LIBNAME) $(if $(NATIVE_BUILD),,$(O)$(SHLIB))
 
-$(LIBNAME): $(OBJS)
+$(O)$(LIBNAME): $(OBJS)
 	$(AR) rcs $@ $(OBJS)
 
-$(SHLIB): $(PIC_OBJS)
+$(O)$(SHLIB): $(PIC_OBJS)
 	$(CC) $(SHLIB_LDFLAGS) -Wl,-soname,$(SHLIB) \
-	      -L$(TOP)/lib/c -l:libc.so.0 \
+	      -L$(TOP)/lib/c/$(O) -l:libc.so.0 \
 	      -o $@ $(PIC_OBJS)
 	# libregex is a shared dependency: provide the -lregex link-time name in the
 	# source tree so in-tree consumers (sed, ex, vi, find, diff, exvi, ...) link
 	# DT_NEEDED libregex.so.0 rather than baking in libregex.a.  (grep already
 	# links -l:libregex.so.0 explicitly.)
-	@ln -sf $(SHLIB) libregex.so
+	@ln -sf $(SHLIB) $(O)libregex.so
 
 $(OBJS) $(PIC_OBJS): $(MODE_STAMP)
 
 $(MODE_STAMP): FORCE
+	@mkdir -p $(dir $@)
 	@mode="$(BUILD_MODE)"; \
 	cur=""; \
 	if [ -f "$(MODE_STAMP)" ]; then cur=$$(cat "$(MODE_STAMP)"); fi; \
 	if [ "$$cur" != "$$mode" ]; then \
-		rm -f $(OBJS) $(PIC_OBJS) $(LIBNAME) $(SHLIB); \
+		rm -f $(OBJS) $(PIC_OBJS) $(O)$(LIBNAME) $(O)$(SHLIB); \
 		printf '%s\n' "$$mode" > "$(MODE_STAMP).tmp"; \
 		mv "$(MODE_STAMP).tmp" "$(MODE_STAMP)"; \
 	elif [ ! -f "$(MODE_STAMP)" ]; then \
 		printf '%s\n' "$$mode" > "$(MODE_STAMP)"; \
 	fi
 
-%.o: %.c
+$(O)%.o: %.c
+	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-%.pic.o: %.c
+$(O)%.pic.o: %.c
+	@mkdir -p $(dir $@)
 	$(CC) $(PIC_CFLAGS) -c $< -o $@
 
 clean:
-	rm -f $(OBJS) $(PIC_OBJS) $(LIBNAME) $(SHLIB) libregex.so $(MODE_STAMP)
+	rm -f $(OBJS) $(PIC_OBJS) $(O)$(LIBNAME) $(O)$(SHLIB) $(O)libregex.so $(MODE_STAMP)
 
-install: $(LIBNAME) $(if $(NATIVE_BUILD),,$(SHLIB))
-	@mkdir -p $(DESTDIR)/usr/lib $(DESTDIR)/lib
+install: $(O)$(LIBNAME) $(if $(NATIVE_BUILD),,$(O)$(SHLIB))
+	@mkdir -p $(DESTDIR)/usr/$(LIBDIR) $(DESTDIR)/$(LIBDIR)
 	@mkdir -p $(DESTDIR)/usr/include/regex
-	@mkdir -p $(DESTDIR)/usr/lib/pkgconfig
+	@mkdir -p $(DESTDIR)/usr/$(LIBDIR)/pkgconfig
 	@mkdir -p $(DESTDIR)/usr/man/man3
-	cp $(LIBNAME) $(DESTDIR)/usr/lib/
+	cp $(O)$(LIBNAME) $(DESTDIR)/usr/$(LIBDIR)/
 	cp ../../include/regex.h $(DESTDIR)/usr/include/
 	cp ../../include/regex/flags.h $(DESTDIR)/usr/include/regex/
-	cp regex.pc $(DESTDIR)/usr/lib/pkgconfig/
+	cp regex.pc $(DESTDIR)/usr/$(LIBDIR)/pkgconfig/
 	if [ -f man3/regex.3 ]; then cp man3/regex.3 $(DESTDIR)/usr/man/man3/; fi
 ifndef NATIVE_BUILD
-	install -m 755 $(SHLIB) $(DESTDIR)/lib/
-	@ln -sf $(SHLIB) $(DESTDIR)/lib/libregex.so
+	install -m 755 $(O)$(SHLIB) $(DESTDIR)/$(LIBDIR)/
+	@ln -sf $(SHLIB) $(DESTDIR)/$(LIBDIR)/libregex.so
 	# Also stage the shared object + its link-time symlink under /usr/lib so
 	# -lregex resolves to the shared library (DT_NEEDED libregex.so.0) for both
 	# the cross sysroot and on-target compilation, making libregex a real shared
 	# dependency instead of a static archive baked into every consumer.
-	install -m 755 $(SHLIB) $(DESTDIR)/usr/lib/
-	@ln -sf $(SHLIB) $(DESTDIR)/usr/lib/libregex.so
+	install -m 755 $(O)$(SHLIB) $(DESTDIR)/usr/$(LIBDIR)/
+	@ln -sf $(SHLIB) $(DESTDIR)/usr/$(LIBDIR)/libregex.so
 endif
