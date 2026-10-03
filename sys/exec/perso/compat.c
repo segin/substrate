@@ -3,7 +3,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#include <arch/i386/pmap.h>
+#include <machine/pmap.h>
 #include <drivers/console/console.h>
 #include <exec/perso/compat.h>
 #include <exec/perso/freebsd/freebsd_syscalls.h>

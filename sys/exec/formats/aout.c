@@ -24,9 +24,9 @@
 #include <vm/vm_object.h>
 #include <vm/vm_page.h>
 #include <vm/vm_kmem.h>
-#include <arch/i386/pmap.h>
-#include <arch/i386/pmm.h>
-#include <arch/i386/gdt.h>
+#include <machine/pmap.h>
+#include <machine/pmm.h>
+#include <machine/gdt.h>
 #include <exec/perso/personality.h>
 #include <stdio.h>
 #endif

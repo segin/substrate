@@ -11,8 +11,8 @@
 #include <stdio.h>
 #include <string.h>
 
-#include <arch/i386/intr.h>
-#include <arch/i386/pmap.h>
+#include <machine/intr.h>
+#include <machine/pmap.h>
 #include <arch/x86-common/io.h>
 #include <drivers/audio/ac97.h>
 #include <drivers/audio/audio.h>

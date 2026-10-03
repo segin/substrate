@@ -6,8 +6,8 @@
 
 #include <stdint.h>
 
-#include <arch/i386/percpu.h>
-#include <arch/i386/smp.h>
+#include <machine/percpu.h>
+#include <machine/smp.h>
 #include <arch/x86-common/lapic.h>
 #include <kern/runqueue.h>
 #include <kern/sched.h>

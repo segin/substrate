@@ -3,7 +3,7 @@
 #include <kern/console.h>
 #include <sys/sysinfo.h> // For BITNESS_*
 #include <sys/proc.h>
-#include <arch/i386/idt.h>   /* registers_t for the ptrace exec-stop frame */
+#include <machine/idt.h>   /* registers_t for the ptrace exec-stop frame */
 #include <kern/panic.h>
 #include <string.h>
 #include <vm/vm_map.h>
@@ -24,10 +24,10 @@
 #include <sys/stat.h>
 #include <sys/mount.h>   /* struct mount, MNT_NOSUID */
 #include <sys/lock.h>    /* elf_image_cache spinlock */
-#include <arch/i386/pmm.h>
+#include <machine/pmm.h>
 #if defined(__i386__) || defined(HOST_TEST)
-#include <arch/i386/pmap.h>
-#include <arch/i386/gdt.h>
+#include <machine/pmap.h>
+#include <machine/gdt.h>
 #elif defined(__x86_64__)
 #include <arch/x86_64/pmap.h>
 #endif

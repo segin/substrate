@@ -12,7 +12,7 @@
 static inline uint32_t intr_disable(void) { return 0; }
 static inline void intr_restore(uint32_t flags) { (void)flags; }
 #else
-#include <arch/i386/intr.h>
+#include <machine/intr.h>
 #endif
 #include <arch/x86-common/io.h>
 #include <arch/x86-common/rtc.h>

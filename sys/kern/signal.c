@@ -1,7 +1,7 @@
 #include <stddef.h>
 #include <string.h>
 
-#include <arch/i386/idt.h>
+#include <machine/idt.h>
 #include <exec/perso/personality.h>
 #include <kern/cmdline.h>
 #include <kern/console.h>

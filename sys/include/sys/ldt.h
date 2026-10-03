@@ -4,7 +4,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <errno.h>
-#include <arch/i386/gdt.h>
+#include <machine/gdt.h>
 
 /*
  * Linux-compatible user_desc structure for modify_ldt

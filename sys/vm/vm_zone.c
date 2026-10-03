@@ -1,7 +1,7 @@
 #include <stddef.h>
 #include <string.h>
 
-#include <arch/i386/pmm.h>
+#include <machine/pmm.h>
 #include <vm/vm_zone.h>
 
 // Internal structure for free list items

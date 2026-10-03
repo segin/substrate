@@ -46,10 +46,10 @@
 #include <kern/sched.h>
 #include <kern/sleepq.h>
 #include <kern/time.h>
-#include <arch/i386/intr.h>
-#include <arch/i386/pmap.h>
-#include <arch/i386/pmm.h>
-#include <arch/i386/fpu/fpu_emu.h>
+#include <machine/intr.h>
+#include <machine/pmap.h>
+#include <machine/pmm.h>
+#include <machine/fpu_emu.h>
 #include <exec/perso/personality.h>
 
 /* current_process is per-CPU: a macro over curproc_slot() (arch percpu.c). */

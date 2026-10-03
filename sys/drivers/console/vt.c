@@ -5,7 +5,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include <arch/i386/intr.h>
+#include <machine/intr.h>
 #include <arch/x86-common/rtc.h>
 #include <drivers/input/keyboard.h>
 #include <drivers/video/fb.h>

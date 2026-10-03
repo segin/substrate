@@ -14,7 +14,7 @@
  * latency.  ~64ms at HZ=128. */
 #define WAIT_POLL_TICKS 8
 #include <sys/kern_syscalls.h>
-#include <arch/i386/pmap.h>
+#include <machine/pmap.h>
 #include <sys/ldt.h>
 #include <vm/vm_map.h>
 #include <fs/procfs.h>

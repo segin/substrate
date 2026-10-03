@@ -8,7 +8,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include <arch/i386/pmm.h>
+#include <machine/pmm.h>
 #include <kern/memtrack.h>
 #include <kern/sched.h>
 #include <kern/time.h>

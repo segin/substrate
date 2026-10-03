@@ -11,7 +11,7 @@
 #include <vm/vm_object.h>
 #include <vm/vm_page.h>
 #include <sys/proc.h>
-#include <arch/i386/pmap.h>
+#include <machine/pmap.h>
 #endif
 
 #include <string.h>

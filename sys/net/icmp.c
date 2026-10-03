@@ -15,7 +15,7 @@
 #include <stddef.h>
 #include <string.h>
 
-#include <arch/i386/intr.h>
+#include <machine/intr.h>
 #include <kern/console.h>
 #include <kern/time.h>
 #include <net/inet.h>

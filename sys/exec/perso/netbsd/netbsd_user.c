@@ -15,7 +15,7 @@
 #include <sys/stat.h>
 #include <sys/sysarch.h>
 #include <sys/syscall_impl.h>
-#include <arch/i386/pmm.h>
+#include <machine/pmm.h>
 #include <exec/perso/netbsd/netbsd_syscalls.h>
 #include <exec/perso/netbsd/netbsd_user.h>
 

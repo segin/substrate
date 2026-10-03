@@ -2,7 +2,7 @@
 #define _KEYBOARD_H
 
 #include <stdint.h>
-#include <arch/i386/idt.h>
+#include <machine/idt.h>
 
 struct keymap;
 

@@ -26,8 +26,8 @@
 
 #include <string.h>
 
-#include <arch/i386/idt.h>
-#include <arch/i386/pmap.h>
+#include <machine/idt.h>
+#include <machine/pmap.h>
 #include <pm/pm.h>
 #include <sys/copy.h>
 #include <sys/errno.h>

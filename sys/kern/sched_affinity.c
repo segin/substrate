@@ -6,7 +6,7 @@
 
 #include <string.h>
 
-#include <arch/i386/percpu.h>
+#include <machine/percpu.h>
 #include <kern/sched.h>
 #include <sys/proc.h>
 

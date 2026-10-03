@@ -1,10 +1,10 @@
 #include <stdio.h>
 #include <string.h>
 
-#include <arch/i386/cpu.h>
-#include <arch/i386/intr.h>
-#include <arch/i386/pmap.h>
-#include <arch/i386/pmm.h>
+#include <machine/cpu.h>
+#include <machine/intr.h>
+#include <machine/pmap.h>
+#include <machine/pmm.h>
 #include <arch/x86-common/io.h>
 #include <drivers/storage/blkdev.h>
 #include <drivers/virtio/virtio.h>

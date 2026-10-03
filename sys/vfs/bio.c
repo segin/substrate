@@ -11,7 +11,7 @@
 #include <string.h>
 
 #ifndef HOST_TEST
-#include <arch/i386/pmm.h>
+#include <machine/pmm.h>
 #else
 /* Host harness supplies a stub. */
 uint32_t pmm_get_free_memory(void);

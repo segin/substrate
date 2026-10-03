@@ -4,7 +4,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include <arch/i386/cpu.h>
+#include <machine/cpu.h>
 #include <fs/procfs.h>
 #include <kern/console.h>
 #include <sys/smp.h>

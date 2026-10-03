@@ -3,9 +3,9 @@
 #include <vm/vm_page.h>
 #include <vm/phys_mem.h>
 #include <vm/vm_pager.h>
-#include <arch/i386/pmap.h>
-#include <arch/i386/pmm.h>
-#include <arch/i386/cpu.h>
+#include <machine/pmap.h>
+#include <machine/pmm.h>
+#include <machine/cpu.h>
 #include <kern/panic.h>
 #include <kern/console.h>
 #include <sys/lock.h>

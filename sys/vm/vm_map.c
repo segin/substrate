@@ -1,6 +1,6 @@
 #include <stddef.h>
 
-#include <arch/i386/pmap.h>
+#include <machine/pmap.h>
 #include <kern/console.h>
 #include <kern/panic.h>
 #include <vm/vm_commit.h>

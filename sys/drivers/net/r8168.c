@@ -24,8 +24,8 @@
 #include <stdint.h>
 #include <string.h>
 
-#include <arch/i386/intr.h>
-#include <arch/i386/pmm.h>
+#include <machine/intr.h>
+#include <machine/pmm.h>
 #include <kern/console.h>
 #include <kern/driver.h>
 #include <kern/pci.h>

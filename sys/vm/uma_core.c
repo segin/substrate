@@ -6,7 +6,7 @@
 
 #include <vm/uma.h>
 #include <vm/vm_kmem.h>
-#include <arch/i386/pmm.h>
+#include <machine/pmm.h>
 #include <kern/console.h>
 #include <stddef.h>
 #include <string.h>
@@ -14,7 +14,7 @@
 #include <sys/smp.h>
 #ifndef HOST_TEST
 #include <sys/lock.h>
-#include <arch/i386/intr.h>
+#include <machine/intr.h>
 #endif
 
 #include <kern/panic.h>

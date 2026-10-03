@@ -1,8 +1,8 @@
 #include <stddef.h>
 #include <string.h>
 
-#include <arch/i386/pmap.h>
-#include <arch/i386/pmm.h>
+#include <machine/pmap.h>
+#include <machine/pmm.h>
 #include <drivers/console/console.h>
 #include <kern/sched.h>
 #include <kern/time.h>

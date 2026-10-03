@@ -2,7 +2,7 @@
 #include <string.h>
 
 #ifndef HOST_TEST
-#include <arch/i386/pmm.h>
+#include <machine/pmm.h>
 #define KERNEL_BASE 0xC0000000U
 #else
 #include <stdlib.h>

@@ -16,7 +16,7 @@
  */
 
 #include <stdio.h>
-#include <arch/i386/pmm.h>
+#include <machine/pmm.h>
 #include <string.h>
 
 #include <drivers/storage/scsi/scsi.h>

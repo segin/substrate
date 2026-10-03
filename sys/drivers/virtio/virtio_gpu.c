@@ -1,6 +1,6 @@
 #include <string.h>
 
-#include <arch/i386/pmm.h>
+#include <machine/pmm.h>
 #include <arch/x86-common/io.h>
 #include <drivers/virtio/virtio.h>
 #include <kern/console.h>

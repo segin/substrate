@@ -2,8 +2,8 @@
 #include <stdint.h>
 #include <string.h>
 
-#include <arch/i386/idt.h>
-#include <arch/i386/signal_arch.h>
+#include <machine/idt.h>
+#include <machine/signal_arch.h>
 #include <exec/perso/linux/linux_user.h>
 #include <sys/copy.h>
 #include <sys/proc.h>

@@ -25,7 +25,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include <arch/i386/intr.h>
+#include <machine/intr.h>
 #include <drivers/console/pty.h>
 #include <kern/console.h>
 #include <kern/sched.h>

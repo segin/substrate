@@ -1,6 +1,6 @@
 #include <stddef.h>
 
-#include <arch/i386/pmap.h>
+#include <machine/pmap.h>
 #include <sys/lock.h>
 #include <vfs/vfs.h>
 #include <vm/vm_kmem.h>

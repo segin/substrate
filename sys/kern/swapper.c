@@ -9,7 +9,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#include <arch/i386/intr.h>
+#include <machine/intr.h>
 #include <kern/sched.h>
 #include <pm/pm.h>
 #include <sys/proc.h>

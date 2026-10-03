@@ -1,9 +1,9 @@
 #include <stdint.h>
 #include <string.h>
 
-#include <arch/i386/cpu.h>
-#include <arch/i386/intr.h>
-#include <arch/i386/percpu.h>
+#include <machine/cpu.h>
+#include <machine/intr.h>
+#include <machine/percpu.h>
 #include <arch/x86-common/io.h>
 #include <drivers/storage/floppy/floppy.h>
 #include <drivers/video/fb_console.h>

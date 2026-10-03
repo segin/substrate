@@ -3,7 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include <arch/i386/idt.h>
+#include <machine/idt.h>
 #include <exec/formats/elks_aout.h>
 #include <exec/perso/elks_kmem.h>
 #include <exec/perso/elks_syscall_table.h>

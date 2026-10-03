@@ -4,8 +4,8 @@
 #include <sys/errno.h>
 #include <sys/futex.h>
 #include <pm/pm.h>
-#include <arch/i386/pmm.h>
-#include <arch/i386/pmap.h>
+#include <machine/pmm.h>
+#include <machine/pmap.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
@@ -81,8 +81,8 @@ static thread_t *rr_last = NULL;
 
 
 #include <kern/arch.h>
-#include <arch/i386/percpu.h>
-#include <arch/i386/intr.h>
+#include <machine/percpu.h>
+#include <machine/intr.h>
 #include <sys/preempt.h>
 #include <sys/smp.h>
 

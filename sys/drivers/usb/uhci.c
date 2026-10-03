@@ -22,7 +22,7 @@ uint32_t intr_disable(void);
 void intr_restore(uint32_t eflags);
 void intr_enable(void);
 #else
-#include <arch/i386/intr.h>
+#include <machine/intr.h>
 #include <arch/x86-common/io.h>
 #endif
 #include <drivers/usb/uhci.h>

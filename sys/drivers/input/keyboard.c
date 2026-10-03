@@ -8,9 +8,9 @@
 #include <stdint.h>
 #include <string.h>
 
-#include <arch/i386/cpu.h>
-#include <arch/i386/idt.h>
-#include <arch/i386/intr.h>
+#include <machine/cpu.h>
+#include <machine/idt.h>
+#include <machine/intr.h>
 #include <arch/x86-common/io.h>
 #include <drivers/input/ps2.h>
 #include <kern/console.h>

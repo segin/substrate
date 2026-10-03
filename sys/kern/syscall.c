@@ -12,7 +12,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include <arch/i386/pmap.h>
+#include <machine/pmap.h>
 #include <arch/x86-common/io.h>
 #include <drivers/console/console.h>
 #include <drivers/console/pty.h>

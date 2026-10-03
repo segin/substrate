@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include <arch/i386/pmm.h>
+#include <machine/pmm.h>
 #include <kern/console.h>
 #include <kern/device.h>
 #include <kern/driver.h>

@@ -1,6 +1,6 @@
 #include <string.h>
 
-#include <arch/i386/intr.h>
+#include <machine/intr.h>
 #include <sys/errno.h>
 #include <sys/irq.h>
 #include <sys/lock.h>

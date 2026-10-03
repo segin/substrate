@@ -4,7 +4,7 @@
 
 #include <stddef.h>
 
-#include <arch/i386/syscall.h>
+#include <machine/syscall.h>
 #include <exec/perso/personality.h>
 #include <exec/perso/svr4/svr4_syscalls.h>
 #include <sys/syscall_impl.h>

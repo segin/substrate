@@ -8,7 +8,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#include <arch/i386/intr.h>
+#include <machine/intr.h>
 #include <kern/sched.h>
 #include <kern/sleepq.h>
 #include <sys/preempt.h>

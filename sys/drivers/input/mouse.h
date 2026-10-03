@@ -2,7 +2,7 @@
 #define _MOUSE_H
 
 #include <stdint.h>
-#include <arch/i386/idt.h>
+#include <machine/idt.h>
 
 /*
  * mouse_event_t.buttons bit layout (left to right, LSB first):

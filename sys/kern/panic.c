@@ -2,7 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include <arch/i386/idt.h>
+#include <machine/idt.h>
 #include <arch/x86-common/lapic.h>
 #include <drivers/console/uart/uart.h>
 #include <drivers/video/fb.h>

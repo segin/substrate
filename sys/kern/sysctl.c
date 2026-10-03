@@ -8,7 +8,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#include <arch/i386/early_boot.h>
+#include <machine/early_boot.h>
 #include <kern/console.h>
 #include <kern/osversion.h>
 #include <sys/copy.h>

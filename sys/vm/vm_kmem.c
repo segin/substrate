@@ -8,7 +8,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#include <arch/i386/pmm.h>
+#include <machine/pmm.h>
 #include <kern/console.h>
 #include <sys/lock.h>
 #include <vm/uma.h>

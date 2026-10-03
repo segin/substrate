@@ -1,7 +1,7 @@
 #include <stdio.h>
 
-#include <arch/i386/cpu.h>
-#include <arch/i386/pci.h>
+#include <machine/cpu.h>
+#include <machine/pci.h>
 #include <arch/x86-common/io.h>
 #include <drivers/virtio/virtio.h>
 #include <kern/console.h>

@@ -22,7 +22,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include <arch/i386/cpu.h>
+#include <machine/cpu.h>
 #include <drivers/storage/blkdev.h>
 #include <drivers/storage/ide/ide.h>
 #include <drivers/storage/ide/ide_priv.h>

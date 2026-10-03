@@ -4,8 +4,8 @@
 #include <vm/vm_kmem.h>
 
 #ifndef HOST_TEST
-#include <arch/i386/pmap.h>
-#include <arch/i386/cpu.h>
+#include <machine/pmap.h>
+#include <machine/cpu.h>
 #else
 #include <kern/ioremap_host.h>
 #endif

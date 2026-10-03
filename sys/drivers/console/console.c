@@ -2,7 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include <arch/i386/intr.h>
+#include <machine/intr.h>
 #include <arch/x86-common/lapic.h>
 #include <drivers/console/uart/uart.h>
 #include <kern/cmdline.h>

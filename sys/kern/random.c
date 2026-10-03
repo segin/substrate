@@ -12,9 +12,9 @@
 
 #include <string.h>
 
-#include <arch/i386/cpu.h>
+#include <machine/cpu.h>
 #include <arch/x86-common/io.h>
-#include <arch/i386/percpu.h>
+#include <machine/percpu.h>
 #include <kern/console.h>
 #include <kern/random.h>
 #include <kern/sched.h>

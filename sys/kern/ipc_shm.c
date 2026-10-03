@@ -27,8 +27,8 @@
 #include <stdint.h>
 #include <string.h>
 
-#include <arch/i386/pmap.h>
-#include <arch/i386/pmm.h>
+#include <machine/pmap.h>
+#include <machine/pmm.h>
 #include <sys/copy.h>
 #include <sys/ipc.h>
 #include <sys/kern_syscalls.h>

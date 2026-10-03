@@ -4,7 +4,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <vm/vm_page.h>
-#include <arch/i386/pmap.h> // Note: This should ideally be abstracted
+#include <machine/pmap.h> // Note: This should ideally be abstracted
 #include <sys/lock.h>
 
 // Forward declarations

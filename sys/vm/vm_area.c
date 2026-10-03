@@ -1,6 +1,6 @@
 #include <string.h>
 
-#include <arch/i386/pmm.h>
+#include <machine/pmm.h>
 #include <vm/vm_area.h>
 
 vm_area_t *vm_area_create(uint32_t start, uint32_t end, uint32_t prot, uint32_t flags) {

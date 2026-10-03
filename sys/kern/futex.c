@@ -15,7 +15,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include <arch/i386/pmap.h>
+#include <machine/pmap.h>
 #include <kern/sched.h>
 #include <kern/sleepq.h>
 #include <kern/time.h>

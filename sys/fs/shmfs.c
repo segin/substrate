@@ -42,8 +42,8 @@
 #include <stddef.h>
 #include <string.h>
 
-#include <arch/i386/pmap.h>
-#include <arch/i386/pmm.h>
+#include <machine/pmap.h>
+#include <machine/pmm.h>
 #include <kern/time.h>
 #include <sys/lock.h>
 #include <sys/mman.h>

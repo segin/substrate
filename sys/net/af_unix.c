@@ -43,7 +43,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#include <arch/i386/intr.h>
+#include <machine/intr.h>
 #include <kern/cmdline.h>
 #include <kern/console.h>
 #include <kern/file.h>

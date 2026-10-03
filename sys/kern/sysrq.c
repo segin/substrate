@@ -10,7 +10,7 @@
 #include <kern/console.h>
 #include <kern/debug.h>
 #include <kern/sysrq.h>
-#include <arch/i386/pmm.h>
+#include <machine/pmm.h>
 #include <arch/x86-common/io.h>
 
 void sysrq_init(void)

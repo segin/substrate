@@ -10,7 +10,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#include <arch/i386/syscall.h>
+#include <machine/syscall.h>
 #include <exec/perso/compat.h>
 #include <exec/perso/netbsd/netbsd_syscalls.h>
 #include <exec/perso/netbsd/netbsd_user.h>

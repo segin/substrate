@@ -16,8 +16,8 @@
 #include <stdio.h>
 #include <string.h>
 
-#include <arch/i386/gdt.h>
-#include <arch/i386/pmap.h>
+#include <machine/gdt.h>
+#include <machine/pmap.h>
 #include <exec/formats/xout.h>
 #include <exec/perso/personality.h>
 #include <kern/arch.h>

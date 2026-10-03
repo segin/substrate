@@ -14,7 +14,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#include <arch/i386/efi.h>
+#include <machine/efi.h>
 #include <kern/console.h>
 #include <kern/efi_runtime.h>
 

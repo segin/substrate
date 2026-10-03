@@ -7,7 +7,7 @@
 #define _SYS_SYSCALL_H
 
 #if defined(__i386__)
-#include <arch/i386/syscall.h>
+#include <machine/syscall.h>
 #elif defined(__x86_64__)
 #include <arch/x86_64/syscall.h>
 #else

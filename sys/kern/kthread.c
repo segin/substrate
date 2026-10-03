@@ -1,6 +1,6 @@
 #include <stddef.h>
 
-#include <arch/i386/pmm.h>
+#include <machine/pmm.h>
 #include <kern/sched.h>
 #include <sys/kthread.h>
 #include <sys/proc.h>

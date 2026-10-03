@@ -33,7 +33,7 @@
 #include <stddef.h>
 #include <string.h>
 
-#include <arch/i386/intr.h>
+#include <machine/intr.h>
 #include <kern/console.h>
 #include <kern/sched.h>
 #include <kern/time.h>

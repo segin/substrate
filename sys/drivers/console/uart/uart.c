@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include <arch/i386/idt.h>
+#include <machine/idt.h>
 #include <arch/x86-common/io.h>
 #include <drivers/console/uart/uart.h>
 #include <kern/console.h>

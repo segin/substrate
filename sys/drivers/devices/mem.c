@@ -1,7 +1,7 @@
 #include <string.h>
 
-#include <arch/i386/pmap.h>
-#include <arch/i386/pmm.h>
+#include <machine/pmap.h>
+#include <machine/pmm.h>
 #include <kern/console.h>
 #include <sys/copy.h>
 #include <sys/errno.h>
