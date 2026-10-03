@@ -28,6 +28,59 @@ and are reapplied by each port's `fetch.sh`; nothing in
 
   On the image, `cc` is a symlink to `gcc`.
 
+## The 64-bit cross toolchain
+
+`contrib/build-toolchain64.sh` builds a second stage-1 toolchain,
+`x86_64-unknown-substrate-{gcc,g++,as,ld,...}`, into the same
+`STAGE1_PREFIX`.  It produces native 64-bit substrate programs (LP64,
+`docs/specs/abi-amd64.md`): `PT_INTERP` is `/sbin/ld64.so` and the
+libraries come from `/lib64` and `/usr/lib64`.  It is a separate target,
+not a multilib of the 32-bit one, and the two do not share a build
+directory, a sysroot or a tool name.
+
+There is no 64-bit stage 2: nothing 64-bit that runs on substrate is a
+compiler.
+
+The script's order is the 32-bit bootstrap's, in one place:
+
+1. substrate's 64-bit libraries, `make -C lib ARCH=x86_64` and
+   `make -C usr.lib ARCH=x86_64`.  These are built by the host compiler
+   (as the whole in-tree userland is, for both architectures), so they
+   do not wait for the cross compiler.
+2. binutils, then gcc (`TARGET_TRIPLE=x86_64-unknown-substrate` to each
+   port's `build.sh --stage=1`; build trees in `build-stage1-x86_64/`).
+3. `scripts/sync-sysroot.sh --x86_64` mirrors the libraries, crt objects
+   and `include/` into `$STAGE1_PREFIX/x86_64-unknown-substrate/`.
+4. `contrib/gcc/build.sh --target-runtime` builds the runtime that links
+   against those libraries (`libgcc_s.so.1`, libstdc++).
+5. `contrib/gcc/install-specs.sh` (with `TARGET_TRIPLE` set) writes the
+   specs override and the `libX.so` linker names.
+6. `tests/toolchain64/check.sh` links C and C++ programs and checks their
+   class, interpreter, `DT_NEEDED` and page alignment.
+
+`SKIP_BUILD=1` skips 2 and 4 and reuses an installed toolchain.  The
+`toolchain64` GitHub workflow runs the script and caches `/opt/substrate`.
+
+Three things to know when using it:
+
+- Every program it links records `DT_NEEDED libgcc_s.so.1` (the 64-bit
+  specs name the shared libgcc outright; `install-specs.sh` explains
+  why), and C++ programs `libstdc++.so.6` as well.  Both are in
+  `$STAGE1_PREFIX/x86_64-unknown-substrate/lib/` and have to be put in
+  `/lib64` on the system that runs the program; nothing stages them into
+  `dist/` yet.
+- `-static` does not work, as with the 32-bit cross compiler: the
+  driver's `LIB_SPEC` names `libc.so.0`.
+- The sysroot must be synced before gcc builds libgcc, which the script
+  does.  libgcc's unwinder reads `struct dl_phdr_info` from `<link.h>`;
+  built against a stale 32-bit copy of that header it aborts on the
+  first `throw`.
+
+What the 64-bit side needs from the patch series is small, because most
+of it was already target-neutral: binutils patch 0012 (the emulation's
+interpreter and `lib64` search path) and gcc patch 0012 (the
+`x86_64-*-substrate*` stanzas and `i386/substrate64.h`).
+
 ## Bootstrap orchestrator
 
 `contrib/build-toolchain.sh` drives all four phases (binutils stage 1,

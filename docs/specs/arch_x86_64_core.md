@@ -318,12 +318,17 @@ What a 64-bit process does not have yet:
 
 * `ptrace`: its requests exchange the i386 register set and 32-bit words
   only;
-* a 64-bit `libgcc_s.so.1` and C++ runtime: the 64-bit libraries are
-  built with the host compiler, and `libm.so.0` links what it needs from
-  `libgcc.a`.
+* the C++ runtime on the system image: the 64-bit cross toolchain
+  (`contrib/build-toolchain64.sh`, `docs/toolchain.md`) builds
+  `libgcc_s.so.1` and `libstdc++.so.6`, and every program it links needs
+  the former in `/lib64`, but nothing stages them into `dist/` yet.  The
+  in-tree 64-bit libraries are still built with the host compiler, and
+  `libm.so.0` links what it needs from `libgcc.a`.
 
-`make -C bin/sh sh64` builds the in-tree shell as a static 64-bit program;
-`make -C bin/sh ARCH=x86_64` builds it dynamically linked.
+`make -C bin/sh sh64` builds the in-tree shell as a dynamically linked
+64-bit program (`DYNAMIC=0` for a static one).  Programs outside the tree
+are built with `x86_64-unknown-substrate-gcc` / `-g++`; C++ exceptions,
+`thread_local` and iostreams are exercised by `tests/toolchain64/`.
 
 ## Verification
 
