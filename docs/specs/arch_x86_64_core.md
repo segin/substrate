@@ -318,7 +318,6 @@ What a 64-bit process does not have yet:
 
 * `ptrace`: its requests exchange the i386 register set and 32-bit words
   only;
-* **threads and TLS**: `%fs` base handling, `thr_new`;
 * in the dynamic linker: `R_X86_64_IRELATIVE` (indirect functions) and
   lazy binding -- as in the 32-bit linker, everything is bound at load
   time;
