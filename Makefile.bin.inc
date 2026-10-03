@@ -7,6 +7,13 @@
 
 include ../../Makefile.inc
 
+# No built-in rules: every object here is built by the rules below, into
+# the directory its mode owns.  Make's own "%: %.o" and "%.o: %.c" would
+# otherwise step in for a per-program extra target that names the program
+# in place, and drop an object of the wrong architecture beside the source.
+MAKEFLAGS += --no-builtin-rules
+.SUFFIXES:
+
 SRCS ?= $(PROG).c
 # Host (NATIVE_BUILD=1) and target builds must not share .o files: the
 # host produces ELFCLASS64 x86-64 objects, the target produces ELFCLASS32
@@ -14,10 +21,21 @@ SRCS ?= $(PROG).c
 # re-enters the same directory, the stale host .o looks up-to-date vs.
 # its .c source and the target link fails with "wrong format".  Suffix
 # host objects with .host.o so the two modes coexist.
+#
+# ARCH=x86_64 builds the program as a native 64-bit one, beside the 32-bit
+# build: objects and the program itself go under $(O) (obj-x86_64/), so the
+# two never share a file.  There is no 64-bit dynamic linker yet, so a
+# 64-bit program is always linked statically, against the 64-bit libraries
+# of `make -C lib ARCH=x86_64`.
 ifdef NATIVE_BUILD
 OBJS = $(SRCS:.c=.host.o)
 else
-OBJS = $(SRCS:.c=.o)
+OBJS = $(SRCS:%.c=$(O)%.o)
+endif
+ifeq ($(ARCH),x86_64)
+ifndef NATIVE_BUILD
+BIN64 := 1
+endif
 endif
 # Cleaning sweeps both mode suffixes — running `make clean` once should
 # leave the directory clean regardless of which mode was last used.
@@ -41,6 +59,10 @@ ifdef NATIVE_BUILD
     # Host build — DYNAMIC is irrelevant; let host cc do its default.
     BIN_CFLAGS  = $(USER_CFLAGS)
     LDFLAGS    := $(USER_LDFLAGS)
+else ifdef BIN64
+    # 64-bit: static whatever DYNAMIC says (see above).
+    BIN_CFLAGS  = $(USER_CFLAGS)
+    LDFLAGS    := $(USER_LDFLAGS) -static -Wl,-z,max-page-size=0x1000
 else ifeq ($(DYNAMIC),1)
     # Clean PIE flags — do NOT inherit USER_LDFLAGS' -fno-pie /
     # -no-pie or we'd get conflicting modes on the link line.
@@ -68,13 +90,21 @@ all: clean
 endif
 endif
 
-all: $(PROG)
+all: $(O)$(PROG)
 
 ifdef NATIVE_BUILD
     # Native build: use host toolchain defaults
     CRT0 =
     LIBS =
     BRAND_CMD =
+else ifdef BIN64
+    # Every 64-bit archive in one group, in place of the per-program LDADD
+    # (which names the 32-bit shared objects): the link takes what it
+    # references and nothing else.
+    CRT0 = $(LIBC_DIR)/$(O)crt0.o
+    LIBS =-Wl,--start-group $(wildcard $(TOP)/lib/*/$(O)lib*.a) \
+           $(wildcard $(TOP)/usr.lib/*/$(O)lib*.a) -Wl,--end-group $(LIBGCC)
+    BRAND_CMD = $(call BRAND_SUBSTRATE,$@)
 else
     # Substrate build: manual linking.
     #
@@ -103,22 +133,31 @@ else
     BRAND_CMD = $(call BRAND_SUBSTRATE,$@)
 endif
 
-$(OBJS) $(PROG): $(BUILD_RULE_DEPS)
+$(OBJS) $(O)$(PROG): $(BUILD_RULE_DEPS)
 
-$(PROG): $(OBJS)
-	$(CC) $(LDFLAGS) -o $@ $(OBJS) $(CRT0) $(LDADD) $(LIBS)
+$(O)$(PROG): $(OBJS)
+	@mkdir -p $(dir $@)
+	$(CC) $(LDFLAGS) -o $@ $(OBJS) $(CRT0) $(if $(BIN64),,$(LDADD)) $(LIBS)
 	$(BRAND_CMD)
 
-%.o: %.c
+$(O)%.o: %.c
+	@mkdir -p $(dir $@)
 	$(CC) $(BIN_CFLAGS) -c $< -o $@
 
 %.host.o: %.c
 	$(CC) $(BIN_CFLAGS) -c $< -o $@
 
 clean:
-	rm -f $(PROG) $(ALL_MODE_OBJS) $(EXTRA_CLEAN)
+	rm -f $(O)$(PROG) $(OBJS) $(ALL_MODE_OBJS) $(EXTRA_CLEAN)
 
 BINDIR ?= $(DESTDIR)/bin
 
-install: $(PROG)
-	install -D $(PROG) $(BINDIR)/$(PROG)
+ifdef BIN64
+# Where the 64-bit programs live on the installed system is not settled;
+# installing one over its 32-bit namesake is certainly wrong.
+install:
+	@echo "$(PROG): 64-bit build is not installed (see Makefile.bin.inc)"
+else
+install: $(O)$(PROG)
+	install -D $(O)$(PROG) $(BINDIR)/$(PROG)
+endif
