@@ -66,7 +66,15 @@ typedef void (*sighandler_t)(int);
 
 #ifndef __sigset_t_defined          /* <sys/select.h> defines it too */
 #define __sigset_t_defined 1
+#if defined(__x86_64__)
+/* amd64 ABI: 128 bits, as FreeBSD (docs/specs/abi-amd64.md).  Signals 1..32
+ * are the low word; the rest is reserved and kept zero. */
+typedef struct { uint32_t __bits[4]; } sigset_t;
+#define __SIGSET_WORD(setp) ((setp)->__bits[0])
+#else
 typedef uint32_t sigset_t;
+#define __SIGSET_WORD(setp) (*(setp))
+#endif
 #endif
 
 #ifndef __sigval_t_defined
@@ -84,6 +92,20 @@ union sigval {
  * the value delivered by a queued RT signal; it sits in the former
  * padding, so existing si_signo..si_status offsets are unchanged.
  */
+#if defined(__x86_64__)
+/* The amd64 ABI's siginfo_t: FreeBSD's order, 80 bytes. */
+typedef struct {
+    int          si_signo;
+    int          si_errno;
+    int          si_code;
+    int          si_pid;
+    unsigned int si_uid;
+    int          si_status;
+    void        *si_addr;
+    union sigval si_value;
+    long         _reason[5];
+} siginfo_t;
+#else
 typedef struct {
     int          si_signo;
     int          si_errno;
@@ -95,6 +117,7 @@ typedef struct {
     union sigval si_value;
     int          _pad[25];
 } siginfo_t;
+#endif
 
 /* si_code values for SIGFPE / SIGILL / SIGSEGV / SIGBUS / SIGTRAP. */
 #define SI_USER        0
@@ -133,8 +156,13 @@ struct sigaction {
         sighandler_t sa_handler;
         void       (*sa_sigaction)(int, siginfo_t *, void *);
     };
+#if defined(__x86_64__)
+    int          sa_flags;      /* the amd64 ABI's order: flags, then mask */
+    sigset_t     sa_mask;
+#else
     sigset_t     sa_mask;
     int          sa_flags;
+#endif
 };
 
 #define SA_NOCLDSTOP 0x00000001
@@ -192,8 +220,13 @@ int sigismember(const sigset_t *set, int signo);
 /* POSIX extensions implemented in lib/c/src/posix_extra2.c. */
 typedef struct {
     void  *ss_sp;
+#if defined(__x86_64__)
+    size_t ss_size;             /* the amd64 ABI's order: size, then flags */
+    int    ss_flags;
+#else
     int    ss_flags;
     size_t ss_size;
+#endif
 } stack_t;
 
 #define SS_ONSTACK 1

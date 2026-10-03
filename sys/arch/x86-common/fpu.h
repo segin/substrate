@@ -41,5 +41,9 @@ void fpu_save_context(struct process *p);
 void fpu_restore_context(struct process *p);
 void fpu_switch(void);
 void fpu_forget_process(struct process *p);
+/* The current process's FXSAVE image (512 bytes), out to and back from a
+ * signal frame.  fpu_signal_save() returns 0 if there is no FP state. */
+int fpu_signal_save(void *image);
+void fpu_signal_restore(const void *image);
 
 #endif

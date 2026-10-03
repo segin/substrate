@@ -104,7 +104,17 @@ unsigned char sig_trampoline_code[4096] __attribute__((aligned(4096))) = {
     0xB8, 0xF7, 0x00, 0x00, 0x00, // mov $247, %eax      ; SYS_rt_sigreturn
     0xCD, 0x80,                   // int $0x80           ; Syscall
     0xEB, 0xFE,                   // jmp .               ; Halt if return
-    0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90 // padding (total 16 bytes)
+    0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, // padding (total 16 bytes)
+
+    /* Offset 0x60: native amd64 trampoline (AMD64_SIG_TRAMPOLINE_ADDR;
+     * docs/specs/abi-amd64.md, section 7).  64-bit code: entered with %rsp
+     * at the struct sigframe and the handler's arguments in %rdi/%rsi/%rdx.
+     * Calls the handler through sf_ahu, then sigreturn(&sf_uc). */
+    0xFF, 0x14, 0x24,             // call *(%rsp)         ; sf_ahu
+    0x48, 0x8D, 0x7C, 0x24, 0x10, // lea 0x10(%rsp), %rdi ; &sf_uc
+    0xB8, 0x77, 0x00, 0x00, 0x00, // mov $119, %eax       ; SYS_sigreturn
+    0x0F, 0x05,                   // syscall
+    0xEB, 0xFE                    // jmp .                ; Halt if return
 };
 
 unsigned int sig_trampoline_size = 4096;

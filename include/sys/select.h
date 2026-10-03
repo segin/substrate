@@ -45,7 +45,15 @@
  * wrappers with a sigset_t after including only this header. */
 #ifndef __sigset_t_defined          /* same type as in <signal.h> */
 #define __sigset_t_defined 1
+#if defined(__x86_64__)
+/* amd64 ABI: 128 bits, as FreeBSD (docs/specs/abi-amd64.md).  Signals 1..32
+ * are the low word; the rest is reserved and kept zero. */
+typedef struct { uint32_t __bits[4]; } sigset_t;
+#define __SIGSET_WORD(setp) ((setp)->__bits[0])
+#else
 typedef uint32_t sigset_t;
+#define __SIGSET_WORD(setp) (*(setp))
+#endif
 #endif
 
 /*

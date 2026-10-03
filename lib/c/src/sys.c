@@ -501,31 +501,32 @@ mode_t umask(mode_t mask) {
 
 int sigemptyset(sigset_t *set) {
     if (!set) { errno = EINVAL; return -1; }
-    *set = 0;
+    memset(set, 0, sizeof(*set));
     return 0;
 }
 
 int sigfillset(sigset_t *set) {
     if (!set) { errno = EINVAL; return -1; }
-    *set = 0xFFFFFFFF;
+    memset(set, 0, sizeof(*set));
+    __SIGSET_WORD(set) = 0xFFFFFFFF;
     return 0;
 }
 
 int sigaddset(sigset_t *set, int signo) {
     if (!set || signo <= 0 || signo > 32) { errno = EINVAL; return -1; }
-    *set |= (1U << (signo - 1));
+    __SIGSET_WORD(set) |= (1U << (signo - 1));
     return 0;
 }
 
 int sigdelset(sigset_t *set, int signo) {
     if (!set || signo <= 0 || signo > 32) { errno = EINVAL; return -1; }
-    *set &= ~(1U << (signo - 1));
+    __SIGSET_WORD(set) &= ~(1U << (signo - 1));
     return 0;
 }
 
 int sigismember(const sigset_t *set, int signo) {
     if (!set || signo <= 0 || signo > 32) { errno = EINVAL; return -1; }
-    return (*set & (1U << (signo - 1))) != 0;
+    return (__SIGSET_WORD(set) & (1U << (signo - 1))) != 0;
 }
 
 /* ... */

@@ -32,6 +32,7 @@
 
 #include <string.h>
 
+#include <machine/gdt.h>
 #include <machine/idt.h>
 #include <machine/signal_arch.h>
 #include <kern/cmdline.h>
@@ -143,7 +144,7 @@ int i386_trap_to_signal(const registers_t *regs, uintptr_t cr2, int *sig,
  *
  * Populates the siginfo_t with signal details based on signal source.
  */
-static void populate_siginfo(siginfo_t *info, int sig, int code) {
+void populate_siginfo(siginfo_t *info, int sig, int code) {
     memset(info, 0, sizeof(*info));
     info->si_signo = sig;
     info->si_errno = 0;
@@ -295,6 +296,14 @@ void sendsig(void *handler_ptr, int sig, uint32_t mask, uint32_t flags, void *re
         kprint("sendsig: No current thread\n");
         return;
     }
+
+#ifdef SUBSTRATE_ARCH_X86_64
+    /* A native 64-bit process gets the amd64 frame, not an i386 one. */
+    if (regs->cs == SEL_UCODE_RPL3) {
+        sendsig_amd64(handler_ptr, sig, mask, flags, regs_ptr);
+        return;
+    }
+#endif
 
     XSIG("pid=%d comm=%s sendsig sig=%d handler=0x%08x "
          "saved_eip=0x%08x saved_esp=0x%08x saved_ebp=0x%08x "

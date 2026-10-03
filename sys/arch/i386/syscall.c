@@ -322,6 +322,13 @@ static inline void syscall_trace_emit(const char *s) {
  * audit condition" and bounces the user back to the login prompt.
  */
 static void syscall_emit_enosys(registers_t *regs, struct personality *p) {
+#ifdef SUBSTRATE_ARCH_X86_64
+    if (regs->cs == SEL_UCODE_RPL3) {       /* native 64-bit: carry + errno */
+        regs->rax = 38;
+        regs->rflags |= 1;
+        return;
+    }
+#endif
     if (p && (p->id == PERS_FREEBSD || p->id == PERS_NETBSD ||
               p->id == PERS_OPENBSD)) {
         regs->eax = bsd_errno_xlate(38, p->id);   /* native ENOSYS -> BSD ENOSYS (78) */
@@ -377,24 +384,9 @@ static void amd64_syscall_return(registers_t *regs) {
     }
 }
 
-static void syscall_dispatch(registers_t *regs);
-
-void syscall_handler(registers_t *regs) {
-    int amd64 = syscall_frame_is_amd64(regs);
-
-    syscall_dispatch(regs);
-    /* A sigreturn has replaced the frame with one that is not a system
-     * call's; leave it alone. */
-    if (amd64 && syscall_frame_is_amd64(regs) &&
-        !(current_thread && current_thread->frame_replaced)) {
-        amd64_syscall_return(regs);
-    }
-}
-
-static void syscall_dispatch(registers_t *regs) {
-#else
-void syscall_handler(registers_t *regs) {
 #endif
+
+void syscall_handler(registers_t *regs) {
     __asm__ volatile("sti");
     thread_t *cpu_thread = CURRENT_THREAD();
     current_thread = cpu_thread;
@@ -431,7 +423,10 @@ void syscall_handler(registers_t *regs) {
     uint32_t args[8];
     i386_extract_syscall_args(p, regs, args);
 #ifdef SUBSTRATE_ARCH_X86_64
-    if (syscall_frame_is_amd64(regs)) {
+    /* Latched now: by the time the call returns the frame may be another
+     * (exec, sigreturn). */
+    const int amd64_frame = syscall_frame_is_amd64(regs);
+    if (amd64_frame) {
         amd64_extract_syscall_args(regs, args);
     }
 #endif
@@ -748,6 +743,15 @@ void syscall_handler(registers_t *regs) {
             ? (uint32_t)((ret >> 32) & 0xFFFFFFFF)
             : 0;
     }
+
+#ifdef SUBSTRATE_ARCH_X86_64
+    /* A completed call from a 64-bit process returns by the carry-flag
+     * convention.  (A sigreturn skips this: it jumps to syscall_done with
+     * the frame holding a restored context.) */
+    if (amd64_frame) {
+        amd64_syscall_return(regs);
+    }
+#endif
 
 syscall_done:
     if (trace_this) {

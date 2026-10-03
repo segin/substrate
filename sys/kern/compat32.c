@@ -20,6 +20,20 @@
 int sigaction_copyin(const void *uaddr, struct sigaction *k) {
     struct sigaction32 u;
 
+#ifdef SUBSTRATE_ARCH_X86_64
+    if (proc_abi_is_amd64()) {
+        struct amd64_sigaction u64;
+
+        if (copyin(uaddr, &u64, sizeof(u64)) != 0)
+            return EFAULT;
+        memset(k, 0, sizeof(*k));
+        k->sa_handler = (sig_t)(uintptr_t)u64.sa_handler;
+        k->sa_mask = u64.sa_mask.bits[0];
+        k->sa_flags = u64.sa_flags;
+        return 0;
+    }
+#endif
+
     if (copyin(uaddr, &u, sizeof(u)) != 0)
         return EFAULT;
     memset(k, 0, sizeof(*k));
@@ -31,6 +45,18 @@ int sigaction_copyin(const void *uaddr, struct sigaction *k) {
 
 int sigaction_copyout(const struct sigaction *k, void *uaddr) {
     struct sigaction32 u;
+
+#ifdef SUBSTRATE_ARCH_X86_64
+    if (proc_abi_is_amd64()) {
+        struct amd64_sigaction u64;
+
+        memset(&u64, 0, sizeof(u64));
+        u64.sa_handler = (uint64_t)(uintptr_t)k->sa_handler;
+        u64.sa_mask.bits[0] = k->sa_mask;
+        u64.sa_flags = k->sa_flags;
+        return copyout(&u64, uaddr, sizeof(u64));
+    }
+#endif
 
     memset(&u, 0, sizeof(u));
     u.sa_handler = (uptr32_t)(uintptr_t)k->sa_handler;
@@ -49,6 +75,20 @@ void stack_to32(const stack_t *k, stack32_t *u) {
 int stack_copyin(const void *uaddr, stack_t *k) {
     stack32_t u;
 
+#ifdef SUBSTRATE_ARCH_X86_64
+    if (proc_abi_is_amd64()) {
+        struct amd64_stack u64;
+
+        if (copyin(uaddr, &u64, sizeof(u64)) != 0)
+            return EFAULT;
+        memset(k, 0, sizeof(*k));
+        k->ss_sp = (void *)(uintptr_t)u64.ss_sp;
+        k->ss_flags = u64.ss_flags;
+        k->ss_size = (size_t)u64.ss_size;
+        return 0;
+    }
+#endif
+
     if (copyin(uaddr, &u, sizeof(u)) != 0)
         return EFAULT;
     memset(k, 0, sizeof(*k));
@@ -58,8 +98,36 @@ int stack_copyin(const void *uaddr, stack_t *k) {
     return 0;
 }
 
+void stack_to_amd64(const stack_t *k, struct amd64_stack *u) {
+    memset(u, 0, sizeof(*u));
+    u->ss_sp = (uint64_t)(uintptr_t)k->ss_sp;
+    u->ss_size = k->ss_size;
+    u->ss_flags = k->ss_flags;
+}
+
+void siginfo_to_amd64(const siginfo_t *k, struct amd64_siginfo *u) {
+    memset(u, 0, sizeof(*u));
+    u->si_signo = k->si_signo;
+    u->si_errno = k->si_errno;
+    u->si_code = k->si_code;
+    u->si_pid = k->si_pid;
+    u->si_uid = k->si_uid;
+    u->si_status = k->si_status;
+    u->si_addr = (uint64_t)(uintptr_t)k->si_addr;
+    u->si_value = (uint64_t)(uintptr_t)k->si_value.sival_ptr;
+}
+
 int stack_copyout(const stack_t *k, void *uaddr) {
     stack32_t u;
+
+#ifdef SUBSTRATE_ARCH_X86_64
+    if (proc_abi_is_amd64()) {
+        struct amd64_stack u64;
+
+        stack_to_amd64(k, &u64);
+        return copyout(&u64, uaddr, sizeof(u64));
+    }
+#endif
 
     stack_to32(k, &u);
     return copyout(&u, uaddr, sizeof(u));
@@ -114,6 +182,15 @@ void siginfo_to32(const siginfo_t *k, siginfo32_t *u) {
 
 int siginfo_copyout(const siginfo_t *k, void *uaddr) {
     siginfo32_t u;
+
+#ifdef SUBSTRATE_ARCH_X86_64
+    if (proc_abi_is_amd64()) {
+        struct amd64_siginfo u64;
+
+        siginfo_to_amd64(k, &u64);
+        return copyout(&u64, uaddr, sizeof(u64));
+    }
+#endif
 
     siginfo_to32(k, &u);
     return copyout(&u, uaddr, sizeof(u));

@@ -19,6 +19,7 @@
 #include <stdint.h>
 #include <string.h>
 
+#include <machine/signal_arch.h>
 #include <machine/syscall.h>
 #include <kern/file.h>
 #include <sys/amd64_abi.h>
@@ -250,7 +251,37 @@ static int amd64_sys_getdents(unsigned int fd, void *dirp, unsigned int count) {
     return (int)bpos;
 }
 
+/*
+ * sigset_t is 16 bytes in the amd64 ABI, with the 32 signals the kernel
+ * has in its first word.  A set read from the process is that word, which
+ * the ordinary handlers already take; a set written back must also clear
+ * the other three.
+ */
+static int sigset_zero_tail(void *uset) {
+    static const uint32_t zeros[3];
+
+    return copyout(zeros, (char *)uset + sizeof(uint32_t), sizeof(zeros)) != 0
+               ? -EFAULT : 0;
+}
+
+static int amd64_sys_sigprocmask(int how, const void *set, void *oset) {
+    int ret = sys_sigprocmask(how, set, oset);
+
+    if (ret == 0 && oset) ret = sigset_zero_tail(oset);
+    return ret;
+}
+
+static int amd64_sys_sigpending(void *set) {
+    int ret = sys_sigpending(set);
+
+    if (ret == 0 && set) ret = sigset_zero_tail(set);
+    return ret;
+}
+
 static void *native_amd64_syscalls[MAX_SYSCALLS] = {
+    [SYS_SIGRETURN]     = (void *)&amd64_sys_sigreturn,
+    [SYS_SIGPROCMASK]   = (void *)&amd64_sys_sigprocmask,
+    [SYS_SIGPENDING]    = (void *)&amd64_sys_sigpending,
     [SYS_STAT]          = (void *)&amd64_sys_stat,
     [SYS_LSTAT]         = (void *)&amd64_sys_lstat,
     [SYS_FSTAT]         = (void *)&amd64_sys_fstat,

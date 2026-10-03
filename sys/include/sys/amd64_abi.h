@@ -16,6 +16,7 @@
 #define _SYS_AMD64_ABI_H
 
 #include <stdint.h>
+#include <sys/signal.h>
 
 #define ABI64_ASSERT_SIZE(type, size) \
     _Static_assert(sizeof(type) == (size), #type " must keep its amd64 size")
@@ -96,6 +97,85 @@ struct amd64_rusage {
 };
 ABI64_ASSERT_SIZE(struct amd64_rusage, 144);
 
+/* sigset_t: 128 bits.  Signals 1..32 are word 0; the rest is zero. */
+struct amd64_sigset {
+    uint32_t bits[4];
+};
+
+struct amd64_sigaction {
+    uint64_t sa_handler;
+    int32_t  sa_flags;
+    struct amd64_sigset sa_mask;
+    uint32_t pad;
+};
+ABI64_ASSERT_SIZE(struct amd64_sigaction, 32);
+
+struct amd64_stack {
+    uint64_t ss_sp;
+    uint64_t ss_size;
+    int32_t  ss_flags;
+    uint32_t pad;
+};
+ABI64_ASSERT_SIZE(struct amd64_stack, 24);
+
+struct amd64_siginfo {
+    int32_t  si_signo;
+    int32_t  si_errno;
+    int32_t  si_code;
+    int32_t  si_pid;
+    uint32_t si_uid;
+    int32_t  si_status;
+    uint64_t si_addr;
+    uint64_t si_value;
+    uint64_t reason[5];
+};
+ABI64_ASSERT_SIZE(struct amd64_siginfo, 80);
+
+/* The FreeBSD/amd64 machine context. */
+struct amd64_mcontext {
+    uint64_t mc_onstack;
+    uint64_t mc_rdi, mc_rsi, mc_rdx, mc_rcx, mc_r8, mc_r9, mc_rax, mc_rbx,
+             mc_rbp, mc_r10, mc_r11, mc_r12, mc_r13, mc_r14, mc_r15;
+    uint32_t mc_trapno;
+    uint16_t mc_fs, mc_gs;
+    uint64_t mc_addr;
+    uint32_t mc_flags;
+    uint16_t mc_es, mc_ds;
+    uint64_t mc_err, mc_rip, mc_cs, mc_rflags, mc_rsp, mc_ss;
+    uint64_t mc_len;                /* sizeof(struct amd64_mcontext) */
+    uint64_t mc_fpformat;
+    uint64_t mc_ownedfp;
+    uint8_t  mc_fpstate[512] __attribute__((aligned(16)));   /* FXSAVE image */
+    uint64_t mc_fsbase, mc_gsbase;
+    uint64_t mc_xfpustate, mc_xfpustate_len;
+    uint64_t mc_spare[4];
+};
+ABI64_ASSERT_SIZE(struct amd64_mcontext, 800);
+
+#define AMD64_MC_FPFMT_NODEV  0x10000   /* no FP state in the context */
+#define AMD64_MC_FPFMT_XMM    0x10002   /* mc_fpstate is an FXSAVE image */
+#define AMD64_MC_FPOWNED_NONE 0x20000
+#define AMD64_MC_FPOWNED_FPU  0x20001
+
+struct amd64_ucontext {
+    struct amd64_sigset   uc_sigmask;
+    struct amd64_mcontext uc_mcontext;
+    uint64_t              uc_link;
+    struct amd64_stack    uc_stack;
+    int32_t               uc_flags;
+    int32_t               spare[4];
+} __attribute__((aligned(16)));
+ABI64_ASSERT_SIZE(struct amd64_ucontext, 880);
+
+/* What signal delivery pushes; %rsp points at it on entry to the
+ * trampoline, which calls *sf_ahu and then sigreturn(&sf_uc). */
+struct amd64_sigframe {
+    uint64_t              sf_ahu;
+    struct amd64_ucontext sf_uc;
+    struct amd64_siginfo  sf_si;
+};
+ABI64_ASSERT_SIZE(struct amd64_sigframe, 976);
+
 /*
  * Is the calling process a native 64-bit one?  The converters shared with
  * 32-bit processes (kern/compat32.c) ask this to pick the user layout.
@@ -107,6 +187,11 @@ ABI64_ASSERT_SIZE(struct amd64_rusage, 144);
 #else
 #define proc_abi_is_amd64() 0
 #endif
+
+/* Kernel structure -> its amd64 user layout (kern/compat32.c), for the
+ * signal frame.  The callers include <sys/signal.h>. */
+void stack_to_amd64(const stack_t *k, struct amd64_stack *u);
+void siginfo_to_amd64(const siginfo_t *k, struct amd64_siginfo *u);
 
 /*
  * The handler a 64-bit native process gets for system call `num`, or NULL

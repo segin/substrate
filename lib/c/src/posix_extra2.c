@@ -429,7 +429,7 @@ int __sigsetjmp_mask(sigjmp_buf env, int savemask) {
         sigset_t curr;
         sigemptyset(&curr);
         sigprocmask(SIG_BLOCK, NULL, &curr);
-        env[0].__mask = (unsigned int)curr;
+        env[0].__mask = __SIGSET_WORD(&curr);
     } else {
         env[0].__mask = 0;
     }
@@ -438,7 +438,9 @@ int __sigsetjmp_mask(sigjmp_buf env, int savemask) {
 
 void siglongjmp(sigjmp_buf env, int val) {
     if (env[0].__savemask) {
-        sigset_t restore = (sigset_t)env[0].__mask;
+        sigset_t restore;
+        sigemptyset(&restore);
+        __SIGSET_WORD(&restore) = env[0].__mask;
         sigprocmask(SIG_SETMASK, &restore, NULL);
     }
     longjmp(env[0].__env, val);

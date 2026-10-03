@@ -44,7 +44,7 @@ LDFLAGS64 := -m elf_x86_64 -nostdlib -z max-page-size=0x1000 -T linker.ld
 # the LDT -- which 32-bit processes get unchanged on this kernel
 # (docs/specs/abi-amd64.md, section 10).
 ARCH_SRCS := boot/boot.S isr.S kmain.c cons.c early_boot.c gdt.c idt.c \
-	pmap.c sched.c smp.c vm86.c \
+	pmap.c sched.c signal64.c smp.c vm86.c \
 	../x86-common/trap.c ../x86-common/cpu.c ../x86-common/pci.c \
 	../x86-common/pmm.c ../x86-common/percpu.c ../x86-common/fpu.c \
 	../x86-common/lapic.c ../x86-common/ioapic.c ../x86-common/rtc.c \

@@ -36,6 +36,7 @@
  */
 #define LINUX_SIG_TRAMPOLINE_ADDR    0xFE000040 /* Linux: popl %eax, then sigreturn */
 #define LINUX_RT_SIG_TRAMPOLINE_ADDR 0xFE000050 /* Linux: rt_sigreturn, no pop */
+#define AMD64_SIG_TRAMPOLINE_ADDR    0xFE000060 /* native 64-bit processes */
 
 /*
  * Signal Context (sigcontext)
@@ -177,6 +178,17 @@ struct siginfo_frame {
     ucontext_t  uc;             /* ucontext_t structure */
 };
 ABI32_ASSERT_SIZE(struct siginfo_frame, 768);
+
+/* Fill a siginfo for signal `sig` raised with `code` on the current thread. */
+void populate_siginfo(siginfo_t *info, int sig, int code);
+
+#ifdef SUBSTRATE_ARCH_X86_64
+/* Signal delivery to, and sigreturn from, a native 64-bit process
+ * (arch/x86_64/signal64.c).  `regs` is the registers_t to redirect. */
+void sendsig_amd64(void *handler, int sig, uint32_t mask, uint32_t flags,
+                   void *regs);
+int amd64_sys_sigreturn(void *ucp);
+#endif
 
 extern unsigned char sig_trampoline_code[];
 extern unsigned int sig_trampoline_size;

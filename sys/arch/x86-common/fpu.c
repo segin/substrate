@@ -3,7 +3,9 @@
 #include <kern/console.h>
 #include <arch/x86-common/cpu.h>
 #include <arch/x86-common/fpu.h>
+#include <arch/x86-common/intr.h>
 #include <arch/x86-common/io.h>
+#include <string.h>
 #include <machine/idt.h>
 #include <machine/percpu.h>
 
@@ -108,6 +110,64 @@ void fpu_forget_process(struct process *p) {
     for (int i = 0; i < MAX_CPUS; i++)
         if (fpu_owner[i] == p)
             fpu_owner[i] = NULL;
+}
+
+/*
+ * Signal delivery and return (the amd64 signal frame carries the FXSAVE
+ * image, since 64-bit code keeps live values in the SSE registers across
+ * any instruction a signal can interrupt).
+ *
+ * fpu_signal_save() copies the current process's FP state into `image`
+ * (512 bytes) and returns 1, or returns 0 if the process has never used
+ * the FPU.  fpu_signal_restore() makes `image` the process's FP state.
+ * Both go through the saved area: if the process owns the live registers
+ * they are first written back to it (save) or disowned so the next use
+ * reloads from it (restore).
+ */
+int fpu_signal_save(void *image) {
+    struct process *p = current_process;
+
+    if (!p || !fpu_use_fxsave || !p->fpu_ctx.fpu_used)
+        return 0;
+#ifndef HOST_TEST
+    unsigned long flags = intr_disable();
+    if (fpu_owner[fpu_cpu()] == p) {
+        __asm__ volatile("clts");
+        fpu_save_context(p);
+    }
+    memcpy(image, fpu_area(p), 512);
+    intr_restore(flags);
+#else
+    (void)image;
+#endif
+    return 1;
+}
+
+void fpu_signal_restore(const void *image) {
+    struct process *p = current_process;
+
+    if (!p || !fpu_use_fxsave)
+        return;
+#ifndef HOST_TEST
+    unsigned long flags = intr_disable();
+    int cpu = fpu_cpu();
+    if (fpu_owner[cpu] == p) {
+        fpu_owner[cpu] = NULL;
+        fpu_switch();               /* TS: the next use reloads the area */
+    }
+    uint8_t *area = fpu_area(p);
+    memcpy(area, image, 512);
+    /* MXCSR comes from user memory: clear its reserved bits, which
+     * FXRSTOR faults on. */
+    uint32_t mxcsr;
+    memcpy(&mxcsr, area + 24, sizeof(mxcsr));
+    mxcsr &= 0xFFBF;
+    memcpy(area + 24, &mxcsr, sizeof(mxcsr));
+    p->fpu_ctx.fpu_used = 1;
+    intr_restore(flags);
+#else
+    (void)image;
+#endif
 }
 
 // FPU Device Not Available Exception (Interrupt 7)
