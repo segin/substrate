@@ -11,7 +11,10 @@
 #include <errno.h>
 #include <string.h>
 
+#include <sys/amd64_abi.h>
 #include <sys/compat32.h>
+#include <sys/proc.h>
+#include <sys/sysinfo.h>
 #include <sys/copy.h>
 
 int sigaction_copyin(const void *uaddr, struct sigaction *k) {
@@ -148,6 +151,22 @@ int msghdr_copyout(const struct msghdr *k, void *uaddr) {
 
 int iovec_copyin(const void *uaddr, struct iovec *k, int count) {
     const struct iovec32 *uiov = uaddr;
+
+#ifdef SUBSTRATE_ARCH_X86_64
+    if (proc_abi_is_amd64()) {
+        const struct amd64_iovec *uiov64 = uaddr;
+
+        for (int i = 0; i < count; i++) {
+            struct amd64_iovec u;
+
+            if (copyin(&uiov64[i], &u, sizeof(u)) != 0)
+                return EFAULT;
+            k[i].iov_base = (void *)(uintptr_t)u.iov_base;
+            k[i].iov_len = (size_t)u.iov_len;
+        }
+        return 0;
+    }
+#endif
 
     for (int i = 0; i < count; i++) {
         struct iovec32 u;

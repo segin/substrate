@@ -34,6 +34,10 @@ int kern_stat(const char *path, struct stat *buf);
 int kern_lstat(const char *path, struct stat *buf);
 int kern_fstat(int fd, struct stat *buf);
 int kern_fstatat(int dirfd, const char *path, struct stat *buf, int flags);
+/* `path` is the user's string (NULL: act on dirfd); `times` is a kernel
+ * array of two, or NULL for the current time. */
+int kern_utimensat(int dirfd, const char *path, const struct timespec *times,
+                   int flags);
 int kern_lseek(int fd, off_t offset, int whence);
 int kern_sigaction(int sig, const struct sigaction *act, struct sigaction *oact);
 int kern_sigaltstack(const stack_t *ss, stack_t *oss);

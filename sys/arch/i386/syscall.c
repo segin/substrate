@@ -23,6 +23,7 @@
 #include <kern/version.h>
 #include <pm/pm.h>
 #include <sys/acct.h>
+#include <sys/amd64_abi.h>
 #include <sys/copy.h>
 #include <sys/errno.h>
 #include <sys/exec.h>
@@ -592,6 +593,14 @@ void syscall_handler(registers_t *regs) {
     }
 
     void *location = p->syscall_table[syscall_num];
+#ifdef SUBSTRATE_ARCH_X86_64
+    /* A 64-bit native process: the calls whose structures differ in the
+     * LP64 ABI have their own handlers (exec/perso/perso_native64.c). */
+    if (p->id == PERS_NATIVE && syscall_frame_is_amd64(regs)) {
+        void *location64 = native_amd64_syscall(syscall_num);
+        if (location64) location = location64;
+    }
+#endif
 
     // Check for special sigreturn handling
     if (syscall_num == 119 && p->sigreturn) {

@@ -2260,13 +2260,16 @@ static int kern_utimens_apply(fs_node_t *node, const struct timespec *kts) {
 
 int sys_utimensat(int dirfd, const char *path,
                   const struct timespec times[2], int flags) {
-    (void)flags;   /* AT_SYMLINK_NOFOLLOW not honored yet */
     struct timespec kts[2];
-    struct timespec *p = NULL;
-    if (times) {
-        if (copyin(times, kts, sizeof(kts)) != 0) return -EFAULT;
-        p = kts;
-    }
+    if (times && copyin(times, kts, sizeof(kts)) != 0) return -EFAULT;
+    return kern_utimensat(dirfd, path, times ? kts : NULL, flags);
+}
+
+/* utimensat(2) with the two timespecs already in the kernel (NULL: now);
+ * `path` is still the user's string, or NULL for the futimens form. */
+int kern_utimensat(int dirfd, const char *path, const struct timespec *p,
+                   int flags) {
+    (void)flags;   /* AT_SYMLINK_NOFOLLOW not honored yet */
     fs_node_t *root = current_process->root_node ? current_process->root_node : fs_root;
     fs_node_t *cwd  = current_process->cwd_node  ? current_process->cwd_node  : root;
     fs_node_t *node = NULL;

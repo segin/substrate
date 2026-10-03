@@ -8,6 +8,37 @@ extern "C" {
 #include <sys/types.h>
 #include <sys/time.h>   /* struct timespec for st_atim & co. */
 
+#if defined(__x86_64__)
+/*
+ * The amd64 ABI's struct stat (docs/specs/abi-amd64.md, section 5): the
+ * FreeBSD/amd64 layout, with a 32-bit st_mode where FreeBSD has a 16-bit
+ * st_mode and st_bsdflags.
+ */
+struct stat {
+    uint64_t       st_dev;
+    ino_t          st_ino;
+    uint64_t       st_nlink;
+    mode_t         st_mode;
+    uid_t          st_uid;
+    gid_t          st_gid;
+    int32_t        st_padding1;
+    uint64_t       st_rdev;
+    struct timespec st_atim;
+    struct timespec st_mtim;
+    struct timespec st_ctim;
+    struct timespec st_birthtim;
+    off_t          st_size;
+    blkcnt_t       st_blocks;
+    int32_t        st_blksize;
+    uint32_t       st_flags;
+    uint64_t       st_gen;
+    uint64_t       st_spare[10];
+};
+#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L && !defined(__cplusplus)
+_Static_assert(sizeof(struct stat) == 224,
+               "struct stat ABI changed; see docs/specs/abi-amd64.md");
+#endif
+#else
 struct stat {
     uint32_t       st_dev;
     ino_t          st_ino;
@@ -35,6 +66,7 @@ struct stat {
     struct timespec st_ctim;
     uint32_t       st_pad4;
 };
+#endif
 
 #define st_atime       st_atim.tv_sec
 #define st_mtime       st_mtim.tv_sec
