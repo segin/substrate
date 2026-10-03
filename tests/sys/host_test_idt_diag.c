@@ -111,7 +111,7 @@ int cmdline_debug_enabled(const char *channel) { (void)channel; return 0; }
 int cmdline_has(const char *key) { (void)key; return 0; }
 struct personality *perso_lookup(int id) { (void)id; return NULL; }
 void trapsignal(process_t *p, int sig, int code) { (void)p; (void)sig; (void)code; }
-int i386_trap_to_signal(const registers_t *regs, uint32_t cr2, int *sig, int *code, uintptr_t *addr) {
+int i386_trap_to_signal(const registers_t *regs, uintptr_t cr2, int *sig, int *code, uintptr_t *addr) {
     (void)regs; (void)cr2; (void)sig; (void)code; (void)addr; return 0;
 }
 
@@ -141,6 +141,7 @@ void isr128(void) {}
 void idt_flush(uint32_t ptr) { (void)ptr; }
 
 #include "../../sys/arch/i386/idt.c"
+#include "../../sys/arch/x86-common/trap.c"
 
 static void reset_state(void) {
     memset(outbuf, 0, sizeof(outbuf));

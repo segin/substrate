@@ -32,8 +32,8 @@
 
 #include <string.h>
 
-#include <arch/i386/idt.h>
-#include <arch/i386/signal_arch.h>
+#include <machine/idt.h>
+#include <machine/signal_arch.h>
 #include <kern/cmdline.h>
 #include <kern/console.h>
 #include <sys/proc.h>
@@ -56,7 +56,7 @@ static inline int xsig_trace(void) {
     if (xsig_trace()) kprintf("xsig: " fmt "\n", ##__VA_ARGS__); \
 } while (0)
 
-int i386_trap_to_signal(const registers_t *regs, uint32_t cr2, int *sig,
+int i386_trap_to_signal(const registers_t *regs, uintptr_t cr2, int *sig,
                         int *code, uintptr_t *addr) {
     if (!regs || !sig || !code || !addr) {
         return 0;

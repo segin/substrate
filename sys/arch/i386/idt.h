@@ -106,10 +106,16 @@ typedef struct registers {
      uint32_t eip, cs, eflags, useresp, ss; // Pushed by processor
 } registers_t;
 
+/* The interrupted program counter, as a full address.  The x86_64 trap
+ * frame (arch/x86_64/idt.h) is wider; code that can see a kernel address
+ * uses these on both. */
+#define TF_PC(r)            ((uintptr_t)(r)->eip)
+#define TF_SET_PC(r, pc)    ((r)->eip = (uint32_t)(uintptr_t)(pc))
+
 void isr_handler(registers_t *regs);
 void syscall_handler(registers_t *regs);
 void signal_handle_pending(registers_t *regs);
-int i386_trap_to_signal(const registers_t *regs, uint32_t cr2, int *sig,
+int i386_trap_to_signal(const registers_t *regs, uintptr_t cr2, int *sig,
                         int *code, uintptr_t *addr);
 
 #endif
