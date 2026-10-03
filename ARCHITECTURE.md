@@ -192,7 +192,9 @@ personality: `README.md`; specifications:
 i386, not a replacement: the personality and the bitness of a process are
 independent. Both kernels build from the same tree; `make -C sys
 ARCH=x86_64` builds the 64-bit one into its own object directory and
-produces `kernel-x86_64.bin`, installed as `/vmunix64`. It boots through
+produces `kernel-x86_64.elf`, installed as `/vmunix64` and loaded by GRUB
+with `multiboot2` (plus a flat `kernel-x86_64.bin` for `qemu -kernel`). It
+boots through
 multiboot 1 or 2 to the higher half with a direct map, runs the whole
 machine-independent kernel LP64 on a 4-level pmap, and runs the unchanged
 i386 userland in compatibility mode. Shared code reaches the arch through

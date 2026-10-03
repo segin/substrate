@@ -304,10 +304,12 @@ install_to_dist() {
     else
         cp "$TOP/sys/kernel.multiboot" "$DIST/vmunix"
     fi
-    # The 64-bit kernel (make -C sys ARCH=x86_64), still in bring-up: it
-    # runs no userland yet, so nothing boots it by default.
-    if [ -f "$TOP/sys/kernel-x86_64.bin" ]; then
-        cp "$TOP/sys/kernel-x86_64.bin" "$DIST/vmunix64"
+    # The 64-bit kernel (make -C sys ARCH=x86_64), as its ELF file: GRUB
+    # boots it with multiboot2, and the ELF is what file(1), gdb and
+    # addr2line understand.  The flat kernel-x86_64.bin is only for
+    # qemu -kernel, which refuses an ELF64.
+    if [ -f "$TOP/sys/kernel-x86_64.elf" ]; then
+        cp "$TOP/sys/kernel-x86_64.elf" "$DIST/vmunix64"
     fi
 
     echo "Installing libc + runtime libraries to dist/usr/lib + dist/lib..."
@@ -845,13 +847,12 @@ menuentry "Substrate (serial console + verbose)" {
 }
 
 # The 64-bit kernel (/vmunix64), running the same 32-bit userland.  Like
-# /vmunix it asks the loader for a linear framebuffer.  Always multiboot 1,
-# on EFI too: /vmunix64 is the flat image
-# with an a.out-kludge header, and multiboot2 accepts only the ELF file.
+# /vmunix it asks the loader for a linear framebuffer.  Always multiboot2,
+# on BIOS too: /vmunix64 is an ELF64 file, which multiboot 1 refuses.
 function substrate_boot64 {
     set root=\$subroot
     echo "Loading /vmunix64 from $ROOT_LABEL ro nosmp \$*"
-    multiboot /vmunix64 root=LABEL=$ROOT_LABEL ro nosmp \$*
+    multiboot2 /vmunix64 root=LABEL=$ROOT_LABEL ro nosmp \$*
     boot
 }
 

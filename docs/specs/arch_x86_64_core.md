@@ -41,9 +41,13 @@ linked into the second.  Outputs:
 | `sys/kernel-x86_64.elf` | ELF64, with symbols | GRUB `multiboot2`; gdb; `addr2line` |
 | `sys/kernel-x86_64.bin` | flat image with a multiboot 1 a.out-kludge header | QEMU `-kernel`; GRUB `multiboot` |
 
-The flat image is installed on the root filesystem as `/vmunix64`, next to
+The ELF file is installed on the root filesystem as `/vmunix64`, next to
 the i386 `/vmunix`, and GRUB carries x86_64 copies of the first two boot
-entries.
+entries, which load it with `multiboot2` on BIOS and UEFI alike.  Its
+multiboot 2 header names the physical entry point (the ELF entry is the
+higher-half link address) and requests the same information tags and
+framebuffer as the i386 kernel.  The flat image exists for QEMU's
+`-kernel`, which refuses an ELF64.
 
 Code generation: `-m64 -mcmodel=kernel -mno-red-zone -mgeneral-regs-only`.
 The kernel is linked in the top 2 GiB (`kernel` code model); the red zone

@@ -19,12 +19,13 @@
  * virtual one, so every absolute reference in it is written sym - KERNEL_VMA.
  */
 
+#define ASM_FILE 1
+#include <arch/x86-common/multiboot.h>
 #include <arch/x86_64/layout.h>
 
 #define MB1_MAGIC       0x1BADB002
 #define MB1_FLAGS       0x00010007  /* page-align, memory map, video mode,
                                        a.out kludge */
-#define MB2_MAGIC       0xE85250D6
 
 #define PTE_P           0x001
 #define PTE_W           0x002
@@ -67,25 +68,48 @@ mb1_header:
     .long 800                       /* height */
     .long 32                        /* depth */
 
-/* Multiboot 2 header: GRUB's `multiboot2` loads the ELF64 file directly. */
+/*
+ * Multiboot 2 header: GRUB's `multiboot2` loads the ELF64 file (installed
+ * as /vmunix64) directly, by its segments' physical addresses.
+ */
 .section .multiboot2, "a"
 .align 8
 mb2_header:
-    .long MB2_MAGIC
-    .long 0                         /* architecture: i386 protected mode */
+    .long MULTIBOOT2_HEADER_MAGIC
+    .long MULTIBOOT2_ARCH_I386      /* entered in 32-bit protected mode */
     .long mb2_header_end - mb2_header
-    .long -(MB2_MAGIC + 0 + (mb2_header_end - mb2_header))
-    /* The same framebuffer request; optional, so a loader that cannot
-     * set a graphics mode still boots the kernel. */
+    .long -(MULTIBOOT2_HEADER_MAGIC + MULTIBOOT2_ARCH_I386 + (mb2_header_end - mb2_header))
+    /* The ELF entry point is _start's higher-half link address, which the
+     * loader cannot jump to with paging off; name the physical one. */
     .align 8
-    .short 5                        /* framebuffer tag */
+    .short MULTIBOOT2_HEADER_TAG_ENTRY_ADDRESS
+    .short 0
+    .long 12
+    .long PHYS(_start)
+    /* The information tags the kernel reads, as the i386 kernel asks. */
+    .align 8
+mb2_inforeq:
+    .short MULTIBOOT2_HEADER_TAG_INFO_REQUEST
+    .short 0
+    .long mb2_inforeq_end - mb2_inforeq
+    .long MULTIBOOT2_TAG_TYPE_CMDLINE
+    .long MULTIBOOT2_TAG_TYPE_BASIC_MEMINFO
+    .long MULTIBOOT2_TAG_TYPE_MMAP
+    .long MULTIBOOT2_TAG_TYPE_FRAMEBUFFER
+    .long MULTIBOOT2_TAG_TYPE_ACPI_OLD
+    .long MULTIBOOT2_TAG_TYPE_ACPI_NEW
+mb2_inforeq_end:
+    /* The same framebuffer request as the multiboot 1 header; optional, so
+     * a loader that cannot set a graphics mode still boots the kernel. */
+    .align 8
+    .short MULTIBOOT2_HEADER_TAG_FRAMEBUFFER
     .short 1                        /* optional */
     .long 20
     .long 1280                      /* width */
     .long 800                       /* height */
     .long 32                        /* depth */
     .align 8
-    .short 0                        /* end tag */
+    .short MULTIBOOT2_HEADER_TAG_END
     .short 0
     .long 8
 mb2_header_end:
