@@ -1,12 +1,12 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <exec/perso/personality.h>
+#include <exec/perso/compat.h>
 #include <arch/i386/syscall.h>
 
 extern int sys_exit(int);
 extern int sys_read(int, char*, int);
 extern int sys_write(int, const char*, int);
-extern void *sys_mmap(void*, size_t, int, int, int, uint64_t);
 
 bool test_svr3_personality_table(void) {
     if (personality_svr3.syscall_table[1] != &sys_exit) return false;
@@ -17,7 +17,9 @@ bool test_svr3_personality_table(void) {
 
 bool test_svr4_personality_table(void) {
     if (personality_svr4.syscall_table[1] != &sys_exit) return false;
-    if (personality_svr4.syscall_table[91] != &sys_mmap) return false;
+    /* SVR4's mmap takes a 32-bit file offset, so the table holds the
+     * off32 entry point rather than the native 64-bit-offset one. */
+    if (personality_svr4.syscall_table[91] != &sys_mmap_off32) return false;
     if (personality_svr4.syscall_table[105] == NULL) return false; // sigaction
     return true;
 }

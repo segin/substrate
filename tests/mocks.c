@@ -7,7 +7,7 @@
 #include <stdbool.h>
 #include <sys/types.h>
 #include "../sys/arch/i386/pmap.h"
-#include "../sys/arch/i386/cpu.h"
+#include "../sys/arch/x86-common/cpu.h"
 #include "../sys/vm/vm_map.h"
 #include "../sys/include/sys/lock.h"
 #include "../sys/include/sys/proc.h"

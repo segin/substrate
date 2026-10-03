@@ -5,6 +5,7 @@
 #include <sys/time.h>
 #include <sys/proc.h>
 #include <sys/session.h>
+#include <sys/compat32.h>
 #include <arch/i386/idt.h>
 #include <pm/pm.h>
 #include <kern/sched.h>
@@ -196,15 +197,18 @@ bool test_signal_uncatchable_invariants(void) {
 bool test_signal_altstack(void) {
     sched_init();
 
-    stack_t ss = {
-        .ss_sp = (void *)0x400000,
+    /* sigaltstack(2) exchanges the PROCESS's stack_t, which for the i386
+     * ABI these tests run under is the 12-byte stack32_t, not the
+     * kernel's own structure. */
+    stack32_t ss = {
+        .ss_sp = 0x400000,
         .ss_flags = 0,
         .ss_size = MINSIGSTKSZ,
     };
-    stack_t old = {0};
+    stack32_t old = {0};
 
     if (sys_sigaltstack(&ss, &old) != 0) return false;
-    if (current_thread->sig_alt_stack.ss_sp != ss.ss_sp) return false;
+    if (current_thread->sig_alt_stack.ss_sp != (void *)0x400000) return false;
     if (current_thread->sig_alt_stack.ss_size != ss.ss_size) return false;
     if (current_thread->sig_alt_stack.ss_flags & SS_DISABLE) return false;
 
@@ -212,8 +216,8 @@ bool test_signal_altstack(void) {
     if (sys_sigaltstack(&ss, NULL) == 0) return false;
     current_thread->sig_on_stack = 0;
 
-    stack_t disable = {
-        .ss_sp = NULL,
+    stack32_t disable = {
+        .ss_sp = 0,
         .ss_flags = SS_DISABLE,
         .ss_size = 0,
     };

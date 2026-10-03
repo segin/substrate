@@ -19,7 +19,7 @@ CFLAGS_TEST = $(CFLAGS_COMMON) -I../sys/include -I../sys -I. -DNO_MAIN
 # Core kernel objects for testing
 CORE_OBJS = vm_page.o vm_map_host.o vm_object.o vm_fault.o vm_syscalls.o vm_pager.o vm_swap.o vm_zone.o \
             spinlock.o mutex.o semaphore.o kthread.o time.o signal.o futex.o sleepq.o \
-            string.o printf.o div64.o compat.o acct.o sysinfo.o \
+            string.o printf.o div64.o compat.o compat32.o acct.o sysinfo.o \
             vfs.o vfs_cache.o vfs_lookup.o vnode.o vnode_ops.o syscall.o sched_i386.o sched_pm.o process.o wait.o sched_decay.o libc_wrappers.o \
             pipe.o ansi_handler.o psf.o font_8x16.o
 
@@ -158,10 +158,10 @@ host_test_bm2: sys/host_test_bm2.c
 host_test_wait_logic: sys/host_test_wait_logic.c
 	$(CC) $(CFLAGS_KERN) $< -o $@
 
-# ABI conformance test for lib/sys/syscall.S — must be built -m32
-# so the i386 stub object can be linked in and the int $0x80 site
+# ABI conformance test for lib/sys/arch/i386/syscall.S — must be built
+# -m32 so the i386 stub object can be linked in and the int $0x80 site
 # patched at runtime.
-host_test_syscall_abi: lib/sys/host_test_syscall_abi.c ../lib/sys/syscall.S
+host_test_syscall_abi: lib/sys/host_test_syscall_abi.c ../lib/sys/arch/i386/syscall.S
 	$(CC) -m32 -Wall -O0 -g -D_GNU_SOURCE $^ -o $@
 
 # Static audit: every SYS_* used in lib/sys must be defined in
@@ -250,17 +250,21 @@ host_test_rusage: sys/host_test_rusage.c ../sys/pm/rusage.c
 host_test_proc_lifecycle: sys/host_test_proc_lifecycle.c ../sys/pm/process.c ../sys/pm/wait.c
 	$(CC) $(CFLAGS_KERN) $< sys/proc_host_stubs.c -o $@
 
-host_test_i386_signal: sys/host_test_i386_signal.c ../sys/arch/i386/signal.c
-	$(CC) $(CFLAGS_KERN) $< -o $@
+# signal.c converts the kernel's structures to the i386 user layouts with
+# the helpers in kern/compat32.c (stack_to32, siginfo_to32).
+host_test_i386_signal: sys/host_test_i386_signal.c ../sys/arch/i386/signal.c ../sys/kern/compat32.c
+	$(CC) $(CFLAGS_KERN) $< ../sys/kern/compat32.c -o $@
 
 host_test_linux_signal: sys/host_test_linux_signal.c
 	$(CC) $(CFLAGS_KERN) $< -o $@
 
-host_test_signal_restart: sys/host_test_signal_restart.c ../sys/kern/signal.c
-	$(CC) $(CFLAGS_KERN) $< sys/signal_host_stubs.c -o $@
+# kern/signal.c copies sigaction, stack_t, siginfo and timespec through
+# the user-layout helpers in kern/compat32.c.
+host_test_signal_restart: sys/host_test_signal_restart.c ../sys/kern/signal.c ../sys/kern/compat32.c
+	$(CC) $(CFLAGS_KERN) $< sys/signal_host_stubs.c ../sys/kern/compat32.c -o $@
 
-host_test_signal_integration: sys/host_test_signal_integration.c ../sys/kern/signal.c
-	$(CC) $(CFLAGS_KERN) $< sys/signal_host_stubs.c -o $@
+host_test_signal_integration: sys/host_test_signal_integration.c ../sys/kern/signal.c ../sys/kern/compat32.c
+	$(CC) $(CFLAGS_KERN) $< sys/signal_host_stubs.c ../sys/kern/compat32.c -o $@
 
 host_test_proc_signal_state: sys/host_test_proc_signal_state.c
 	$(CC) $(CFLAGS_KERN) $< sys/proc_host_stubs.c -o $@
