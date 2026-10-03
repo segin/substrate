@@ -58,6 +58,42 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
+  # The 64-bit kernel, from the same tree (docs/specs/arch_x86_64_core.md).
+  # It builds with the host gcc's -m64, so multilib is not needed.
+  kernel-x86_64:
+    name: kernel (x86_64)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential python3
+
+      - name: Toolchain versions
+        run: |
+          cc --version | head -1
+          ld --version | head -1
+          echo "gcc 64-bit include: $(cc -print-file-name=include)"
+
+      - name: Build kernel
+        run: make -C sys ARCH=x86_64 -j"$(nproc)"
+
+      - name: Kernel artifacts
+        run: ls -l sys/kernel-x86_64.bin sys/kernel-x86_64.elf
+
+      - uses: actions/upload-artifact@v7
+        if: success()
+        with:
+          name: kernel-x86_64
+          path: |
+            sys/kernel-x86_64.bin
+            sys/kernel-x86_64.elf
+          if-no-files-found: warn
+          retention-days: 7
+
   host-tests:
     name: host testsuite
     runs-on: ubuntu-latest
@@ -152,6 +188,10 @@ jobs:
 
           echo "--- kernel present in the image? ---"
           debugfs "rootfs.img?offset=$ROOT_OFF" -R "stat /vmunix" 2>/dev/null \
+            | grep -E "Size:|Mode:"
+
+          echo "--- 64-bit kernel present in the image? ---"
+          debugfs "rootfs.img?offset=$ROOT_OFF" -R "stat /vmunix64" 2>/dev/null \
             | grep -E "Size:|Mode:"
 
           echo "--- init present? ---"

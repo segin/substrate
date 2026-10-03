@@ -157,6 +157,8 @@ build_bootloader() {
 build_components() {
     echo "Building kernel..."
     make -C "$TOP/sys" -j4
+    # The 64-bit kernel, from the same tree; staged as /vmunix64.
+    make -C "$TOP/sys" ARCH=x86_64 -j4
 
     # Build the whole lib/ tree rather than a hand-picked list.  Its SUBDIRS
     # is already in dependency order -- m and sys ahead of c, which links
