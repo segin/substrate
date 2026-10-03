@@ -29,6 +29,7 @@
 #include <sys/acct.h>
 #include <sys/ldt.h>
 #include <sys/smp.h>
+#include <sys/sysinfo.h>
 #include <vfs/vfs.h>
 
 /* switch_stacks() pops these, lowest address first, then returns. */
@@ -222,7 +223,9 @@ thread_t *sched_create_thread(process_t *proc, void (*entry_point)(void*), void 
         sf->r15 = (uint64_t)(uintptr_t)entry_point;    /* user_entry */
         sf->r14 = (uint64_t)(uintptr_t)stack;          /* user_stack */
         sf->r13 = (uint64_t)(uintptr_t)arg;            /* user_arg */
-        sf->ret = (uint64_t)(uintptr_t)new_user_thread_trampoline;
+        sf->ret = (proc->bitness == BITNESS_64)
+            ? (uint64_t)(uintptr_t)new_user_thread_trampoline64
+            : (uint64_t)(uintptr_t)new_user_thread_trampoline;
     }
 
     t->kstack_ptr = sp;

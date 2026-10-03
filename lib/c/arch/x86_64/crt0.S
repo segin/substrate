@@ -38,6 +38,11 @@ _start:
     movq %r14, %rdi
     call __init_stack_guard@PLT
 
+    /* Thread-local storage for a statically linked program (a no-op when
+     * the dynamic linker has already set it up). */
+    movq %r14, %rdi
+    call __libc_static_tls_init@PLT
+
     call __stdio_init@PLT
 
     /* main(argc, argv, envp) */

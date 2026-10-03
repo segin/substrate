@@ -37,6 +37,7 @@
 #include <sys/fcntl.h>
 #include <sys/file.h>
 #include <sys/ioctl.h>
+#include <sys/amd64_abi.h>
 #include <sys/compat32.h>
 #include <sys/kern_syscalls.h>
 #include <sys/lock.h>
@@ -1445,8 +1446,11 @@ int sys__exit(int code) {
 
 int sys_thr_new(struct thr_param *param, int param_size) {
     struct thr_param kparam;
-    /* The process passes the i386 layout (<sys/compat32.h>). */
-    if (param_size < (int)sizeof(struct thr_param32)) return -EINVAL;
+    /* The process passes its own layout: i386 (<sys/compat32.h>) or, for a
+     * native 64-bit process, amd64 (<sys/amd64_abi.h>). */
+    int min_size = proc_abi_is_amd64() ? (int)sizeof(struct amd64_thr_param)
+                                       : (int)sizeof(struct thr_param32);
+    if (param_size < min_size) return -EINVAL;
     if (thr_param_copyin(param, &kparam) != 0) return -14;
 
     // We also need to handle child_tid if it is provided
@@ -1459,7 +1463,12 @@ int sys_thr_new(struct thr_param *param, int param_size) {
     int ret = kern_thr_new(&kparam, sizeof(struct thr_param));
 
     if (ret == 0 && orig_child_tid) {
-        /* The process's long is 32 bits. */
+        /* The process's long: 64 bits for a native amd64 process, else 32. */
+        if (proc_abi_is_amd64()) {
+            int64_t utid64 = kchild_tid;
+            if (copyout(&utid64, orig_child_tid, sizeof(utid64)) != 0) return -14;
+            return ret;
+        }
         abi_long_t utid = (abi_long_t)kchild_tid;
         if (copyout(&utid, orig_child_tid, sizeof(utid)) != 0) return -14;
     }

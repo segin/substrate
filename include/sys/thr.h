@@ -15,6 +15,11 @@ struct thr_param {
     long    *child_tid;     /* kernel writes new TID here */
     long    *parent_tid;
     int     flags;
+#if defined(__x86_64__)
+    /* The amd64 ABI's tail (docs/specs/abi-amd64.md): 104 bytes in all. */
+    void    *rtp;           /* accepted and ignored */
+    void    *spare[3];      /* must be zero */
+#endif
 };
 
 /* Substrate-native thread syscall numbers (chosen to overlap the

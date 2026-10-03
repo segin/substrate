@@ -186,10 +186,17 @@ isr_exit:
     popq %rax
     testb $3, (TF_CS - 8)(%rsp)         /* the gs slot is already popped */
     jz 3f
+    /* A 64-bit process keeps its thread pointer in the %fs base, which a
+     * selector load would clear; the context switch owns %fs and %gs for
+     * it (i386_load_gs_for_thread), so leave both alone. */
+    cmpq $0x2B, (TF_CS - 8)(%rsp)
+    je 5f
     movw %ax, %gs
     popq %rax
     movw %ax, %fs
-    popq %rax
+    jmp 6f
+5:  addq $8, %rsp                       /* the fs slot */
+6:  popq %rax
     movw %ax, %es
     popq %rax
     movw %ax, %ds
@@ -410,6 +417,46 @@ jump_to_userspace64:
     pushq $0x2B                 /* CS: 64-bit user code */
     pushq %rdi                  /* RIP */
     movq %rsi, %rdi
+    xorl %eax, %eax
+    xorl %ebx, %ebx
+    xorl %ecx, %ecx
+    xorl %edx, %edx
+    xorl %esi, %esi
+    xorl %ebp, %ebp
+    xorl %r8d, %r8d
+    xorl %r9d, %r9d
+    xorl %r10d, %r10d
+    xorl %r11d, %r11d
+    xorl %r12d, %r12d
+    xorl %r13d, %r13d
+    xorl %r14d, %r14d
+    xorl %r15d, %r15d
+    iretq
+
+/*
+ * First entry of a new thread of a 64-bit process (thr_new):
+ *   %r15 = entry, %r14 = top of its stack, %r13 = argument.
+ * The psABI's call-time state: argument in %rdi, and %rsp 16-byte aligned
+ * before a return address, which is 0 -- the entry function does not
+ * return.  %fs is the context switch's (the thread pointer).
+ */
+.global new_user_thread_trampoline64
+new_user_thread_trampoline64:
+    cli
+    andq $~0xF, %r14
+    subq $8, %r14
+    movq $0, (%r14)
+
+    movw $0x23, %ax
+    movw %ax, %ds
+    movw %ax, %es
+
+    pushq $0x23                 /* SS */
+    pushq %r14                  /* RSP */
+    pushq $0x202                /* RFLAGS: IF */
+    pushq $0x2B                 /* CS: 64-bit user code */
+    pushq %r15                  /* RIP */
+    movq %r13, %rdi
     xorl %eax, %eax
     xorl %ebx, %ebx
     xorl %ecx, %ecx

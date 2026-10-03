@@ -131,6 +131,22 @@ struct amd64_siginfo {
 };
 ABI64_ASSERT_SIZE(struct amd64_siginfo, 80);
 
+struct amd64_thr_param {
+    uint64_t start_func;
+    uint64_t arg;
+    uint64_t stack_base;
+    uint64_t stack_size;
+    uint64_t tls_base;
+    uint64_t tls_size;
+    uint64_t child_tid;         /* long * in the process */
+    uint64_t parent_tid;
+    int32_t  flags;
+    uint32_t pad;
+    uint64_t rtp;               /* accepted and ignored */
+    uint64_t spare[3];
+};
+ABI64_ASSERT_SIZE(struct amd64_thr_param, 104);
+
 /* The FreeBSD/amd64 machine context. */
 struct amd64_mcontext {
     uint64_t mc_onstack;

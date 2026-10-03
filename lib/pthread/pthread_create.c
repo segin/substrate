@@ -7,6 +7,7 @@
 #include <sched.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 
 #include <pthread_internal.h>
@@ -196,7 +197,11 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr,
      * case __ldso_alloc_tls is NULL and we pass tls_base=NULL, which the
      * kernel treats as "inherit / no change". */
     extern void *__ldso_alloc_tls(void) __attribute__((weak));
-    void *tp = __ldso_alloc_tls ? __ldso_alloc_tls() : NULL;
+    /* A statically linked program has no dynamic linker; libc lays out its
+     * TLS itself where it supports that (lib/c/src/tls_static.c). */
+    extern void *__libc_alloc_tls(void) __attribute__((weak));
+    void *tp = __ldso_alloc_tls ? __ldso_alloc_tls()
+             : __libc_alloc_tls ? __libc_alloc_tls() : NULL;
 
     /* Link the node before spawning so a joiner/reaper can find it as
      * soon as the kernel publishes the tid (via child_tid below).  tid is
@@ -208,7 +213,8 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr,
     TT_UNLOCK();
 
     struct thr_param param;
-    param.start_func = (void(*)(void*))(uintptr_t)__pthread_trampoline;
+    memset(&param, 0, sizeof(param));   /* reserved fields must be zero */
+    param.start_func =(void(*)(void*))(uintptr_t)__pthread_trampoline;
     param.arg = ta;
     param.stack_base = ti->stack;
     param.stack_size = ti->stack_size;

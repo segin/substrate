@@ -153,6 +153,26 @@ int sigevent_copyin(const void *uaddr, struct sigevent *k) {
 int thr_param_copyin(const void *uaddr, struct thr_param *k) {
     struct thr_param32 u;
 
+#ifdef SUBSTRATE_ARCH_X86_64
+    if (proc_abi_is_amd64()) {
+        struct amd64_thr_param u64;
+
+        if (copyin(uaddr, &u64, sizeof(u64)) != 0)
+            return EFAULT;
+        memset(k, 0, sizeof(*k));
+        k->start_func = (void (*)(void *))(uintptr_t)u64.start_func;
+        k->arg = (void *)(uintptr_t)u64.arg;
+        k->stack_base = (void *)(uintptr_t)u64.stack_base;
+        k->stack_size = (size_t)u64.stack_size;
+        k->tls_base = (void *)(uintptr_t)u64.tls_base;
+        k->tls_size = (size_t)u64.tls_size;
+        k->child_tid = (long *)(uintptr_t)u64.child_tid;
+        k->parent_tid = (long *)(uintptr_t)u64.parent_tid;
+        k->flags = u64.flags;
+        return 0;
+    }
+#endif
+
     if (copyin(uaddr, &u, sizeof(u)) != 0)
         return EFAULT;
     memset(k, 0, sizeof(*k));

@@ -9,7 +9,10 @@
 #include <machine/idt.h>
 #include <arch/x86-common/intr.h>
 #include <machine/percpu.h>
+#include <machine/vmparam.h>
+#include <arch/x86-common/msr.h>
 #include <arch/i386/syscall.h>
+#include <sys/sysinfo.h>
 #include <sys/vm86.h>
 #include <exec/perso/personality.h>
 #include <exec/perso/freebsd/freebsd_user.h>
@@ -24,7 +27,7 @@
  * second process to set its TLS clobbers everyone else's, and on resume the
  * %gs selector still loads but reads from the wrong (or zeroed) base.
  */
-void i386_load_gs_for_thread(thread_t *t) {
+static void i386_load_gs_slot(thread_t *t) {
     /* Only touch the GDT TLS slot if this thread actually established a
      * gs base via sysarch(I386_SET_GSBASE).  Kernel-only threads (swapper,
      * syncer, USB poll, vm_pagedaemon, kinit before exec) never set one;
@@ -35,7 +38,43 @@ void i386_load_gs_for_thread(thread_t *t) {
     gdt_set_gate(GDT_TLS_START, t->gs_base, 0xFFFFF, 0xF2, 0xC0);
 }
 
+#ifdef SUBSTRATE_ARCH_X86_64
+/*
+ * A native 64-bit thread's pointer is the %fs base (docs/specs/
+ * abi-amd64.md, section 8), held in thread->gs_base like the i386 TLS base
+ * -- user space ends below 4 GiB, so it fits.  Loading the null selector
+ * clears the hidden base, so the MSR is written after it.
+ */
+#define MSR_FS_BASE 0xC0000100
+
+static int thread_is_amd64(const thread_t *t) {
+    return t && t->proc && t->proc->bitness == BITNESS_64;
+}
+
+static void amd64_write_fsbase(uint32_t base) {
+    __asm__ volatile("mov %0, %%fs" : : "r"((uint16_t)0));
+    wrmsr(MSR_FS_BASE, base);
+}
+#endif
+
+void i386_load_gs_for_thread(thread_t *t) {
+#ifdef SUBSTRATE_ARCH_X86_64
+    if (thread_is_amd64(t)) {
+        amd64_write_fsbase(t->gs_base);
+        return;
+    }
+#endif
+    i386_load_gs_slot(t);
+}
+
 static int set_gsbase(uint32_t base) {
+#ifdef SUBSTRATE_ARCH_X86_64
+    if (thread_is_amd64(current_thread)) {
+        current_thread->gs_base = base;
+        amd64_write_fsbase(base);
+        return 0;
+    }
+#endif
     /* Ring-3 32-bit data segment: present, DPL=3, writable, 4GB limit */
     gdt_set_gate(GDT_TLS_START, base, 0xFFFFF, 0xF2, 0xC0);
 
@@ -137,6 +176,33 @@ int sys_sysarch(int op, void *parms) {
 
         case I386_GET_FSBASE:
             return -EINVAL;
+
+#ifdef SUBSTRATE_ARCH_X86_64
+        case AMD64_SET_FSBASE: {
+            uint64_t base;
+            if (!thread_is_amd64(current_thread)) return -EINVAL;
+            if (copyin(parms, &base, sizeof(base)) != 0)
+                return -EFAULT;
+            if (base >= USER32_VA_END) return -EINVAL;
+            return set_gsbase((uint32_t)base);
+        }
+
+        case AMD64_GET_FSBASE: {
+            uint64_t base = current_thread ? current_thread->gs_base : 0;
+            if (!thread_is_amd64(current_thread)) return -EINVAL;
+            return copyout(&base, parms, sizeof(base)) != 0 ? -EFAULT : 0;
+        }
+
+        /* %gs is not used by the amd64 ABI; its base reads as 0. */
+        case AMD64_GET_GSBASE: {
+            uint64_t zero = 0;
+            if (!thread_is_amd64(current_thread)) return -EINVAL;
+            return copyout(&zero, parms, sizeof(zero)) != 0 ? -EFAULT : 0;
+        }
+
+        case AMD64_SET_GSBASE:
+            return -EINVAL;
+#endif
 
         default:
             return -EINVAL;

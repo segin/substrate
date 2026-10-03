@@ -60,7 +60,7 @@ SRCS = src/sys.c src/atomic.c src/stdlib.c src/string.c src/ctype.c src/assert.c
        src/shadow.c src/mntent.c src/getdate.c \
        src/posix_extra.c src/posix_extra2.c src/posix_extra3.c src/ifaddrs.c src/nl_types.c src/utmp.c \
        src/lfs64.c src/spawn.c \
-       src/syslog.c src/err.c src/libintl.c src/tls.c src/dl_iterate_phdr.c \
+       src/syslog.c src/err.c src/libintl.c src/tls.c src/tls_static.c src/dl_iterate_phdr.c \
        stdio/stdio_core.c stdio/stdstreams.c stdio/printf.c stdio/scanf.c src/sysctl_helpers.c
 # Startup and system-call code is per architecture (arch/i386, arch/x86_64).
 ASM_SRCS = arch/$(ARCH)/syscall.S arch/$(ARCH)/crt0.S arch/$(ARCH)/setjmp.S

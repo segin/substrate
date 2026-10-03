@@ -9,6 +9,13 @@
 #define I386_GET_GSBASE 9
 #define I386_SET_GSBASE 10
 
+/* Native 64-bit processes (docs/specs/abi-amd64.md, section 8): the
+ * argument is a pointer to the 64-bit base.  The thread pointer is %fs. */
+#define AMD64_GET_FSBASE 128
+#define AMD64_SET_FSBASE 129
+#define AMD64_GET_GSBASE 130
+#define AMD64_SET_GSBASE 131
+
 // Sub-functions for I386_VM86
 #define VM86_INIT       1
 #define VM86_GET_VME    2

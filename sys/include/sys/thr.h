@@ -15,6 +15,13 @@ struct thr_param {
     long    *child_tid;     /* kernel writes new TID here */
     long    *parent_tid;
     int     flags;
+#if defined(__x86_64__) && !defined(SUBSTRATE_ARCH_X86_64)
+    /* A 64-bit userland build (libpthread includes this copy): the amd64
+     * ABI's tail, 104 bytes in all.  The kernel's own form stops above and
+     * takes the process's block through thr_param_copyin(). */
+    void    *rtp;           /* accepted and ignored */
+    void    *spare[3];      /* must be zero */
+#endif
 };
 
 /* Substrate-native thread syscall numbers (chosen to overlap the
