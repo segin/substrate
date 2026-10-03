@@ -11,8 +11,8 @@ running are covered in `README.md`; engineering rules in `AGENTS.md`.
 substrate/
 ├── sys/                  # The kernel
 │   ├── arch/i386/        #   CPU, MMU, interrupts, boot, SMP discovery
-│   ├── arch/x86-common/  #   code shared by both x86 ports (I/O APIC, port I/O)
-│   ├── arch/x86_64/      #   x86-64 port: boots to long mode (milestone 0)
+│   ├── arch/x86-common/  #   code shared by both x86 ports (traps, PMM, APICs, FPU, PCI)
+│   ├── arch/x86_64/      #   x86-64 port: runs the i386 userland via compat32
 │   ├── boot/             #   in-tree BIOS bootloader (stage 1 asm + stage 2 C)
 │   ├── core/             #   early initialisation
 │   ├── kern/             #   scheduler, signals, time, sync, IPC, syscalls, PCI
@@ -193,11 +193,16 @@ i386, not a replacement: the personality and the bitness of a process are
 independent. Both kernels build from the same tree; `make -C sys
 ARCH=x86_64` builds the 64-bit one into its own object directory and
 produces `kernel-x86_64.bin`, installed as `/vmunix64`. It boots through
-multiboot 1 or 2 to the higher half with a direct map, and has its GDT
-(including the 32-bit user code segment), TSS and IDT; the machine-
-independent kernel, the 4-level pmap and the compat32 path that runs the
-existing i386 userland are next. The userland stays 32-bit for now. Native
-64-bit programs will use the FreeBSD/amd64-based ABI in
+multiboot 1 or 2 to the higher half with a direct map, runs the whole
+machine-independent kernel LP64 on a 4-level pmap, and runs the unchanged
+i386 userland in compatibility mode. Shared code reaches the arch through
+`<machine/*.h>`; `sys/arch/x86-common/` holds what both kernels compile
+unchanged, and the i386 system-call, signal and sysarch code is compiled
+into both. The compat32 layer keeps every user-visible structure in its
+i386 form: value structures are declared with the `<sys/abi32.h>` types,
+pointer-carrying ones have twins in `<sys/compat32.h>` converted by
+`kern/compat32.c`. The userland stays 32-bit for now. Native 64-bit
+programs will use the FreeBSD/amd64-based ABI in
 `docs/specs/abi-amd64.md`; the port itself is described in
 `docs/specs/arch_x86_64_core.md`.
 
@@ -460,9 +465,8 @@ Building and running: `README.md`. Test layers:
 
 ## 9. Future Considerations / Roadmap
 
-- x86-64, added alongside i386: the MI kernel, 4-level pmap, compat32 for
-  the i386 userland, then a native amd64 userland
-  (`docs/specs/arch_x86_64_core.md`).
+- x86-64, added alongside i386: SMP and EFI boot on the 64-bit kernel,
+  then a native amd64 userland (`docs/specs/arch_x86_64_core.md`).
 - Scheduling on application processors (they are started but idle).
 - pmap: allocate page tables on demand instead of mapping 32 kernel page
   directory entries into every process.

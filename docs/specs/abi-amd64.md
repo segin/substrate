@@ -397,12 +397,21 @@ Substrate userland unchanged.
   respect: `int $0x80`, the number in `%eax`, arguments on the stack,
   `-errno` in `%eax`, the i386 structure layouts, the i386 signal frame,
   and TLS through `%gs` and `sysarch(I386_SET_GSBASE)`.
-* The kernel converts at the boundary, in a compat32 layer: pointers are
-  zero-extended on the way in, and every structure whose layout differs
-  (`stat`, `dirent`, `timespec` and everything that embeds it, `iovec`,
-  `msghdr`, `stack_t`, `sigaction`, `rusage`, `thr_param`, …) is
-  translated to and from the native LP64 structure.  The signal frame for a
-  32-bit thread is the i386 one.
+* The kernel keeps the i386 forms at the boundary, in a compat32 layer
+  (detail in [`arch_x86_64_core.md`](arch_x86_64_core.md#compat32)):
+  * system-call arguments arrive as 32-bit words, zero-extended; a
+    handler declares the process's `long`, `size_t *` or pointer slot with
+    the `<sys/abi32.h>` types, and takes a 64-bit value as its two words;
+  * structures without pointers (`stat`, `dirent`, `timespec` and
+    everything that embeds it, `rusage`, `statfs`, …) are declared in the
+    i386 layout on both kernels, with the `<sys/abi32.h>` field types, and
+    pinned to their i386 size;
+  * structures with pointers (`iovec`, `msghdr`, `stack_t`, `sigaction`,
+    `siginfo_t`, `sigevent`, `thr_param`, and ioctl structures such as
+    `ifreq`) have an i386-layout twin in `<sys/compat32.h>` and are
+    converted at the copyin/copyout.
+
+  The signal frame for a 32-bit thread is the i386 one.
 * System-call dispatch is keyed on both the personality and the process's
   bitness: (native, i386), (native, amd64), (Linux, i386), (Linux, amd64),
   (FreeBSD, i386), … .  The foreign personalities' i386 ABIs run in
