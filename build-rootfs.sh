@@ -844,8 +844,9 @@ menuentry "Substrate (serial console + verbose)" {
     substrate_boot serial_debug console=serial0
 }
 
-# The 64-bit kernel (/vmunix64), still in bring-up: serial console only, no
-# userland yet.  Always multiboot 1, on EFI too: /vmunix64 is the flat image
+# The 64-bit kernel (/vmunix64), running the same 32-bit userland.  Like
+# /vmunix it asks the loader for a linear framebuffer.  Always multiboot 1,
+# on EFI too: /vmunix64 is the flat image
 # with an a.out-kludge header, and multiboot2 accepts only the ELF file.
 function substrate_boot64 {
     set root=\$subroot

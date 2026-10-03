@@ -22,7 +22,8 @@
 #include <arch/x86_64/layout.h>
 
 #define MB1_MAGIC       0x1BADB002
-#define MB1_FLAGS       0x00010003  /* page-align, memory map, a.out kludge */
+#define MB1_FLAGS       0x00010007  /* page-align, memory map, video mode,
+                                       a.out kludge */
 #define MB2_MAGIC       0xE85250D6
 
 #define PTE_P           0x001
@@ -58,6 +59,13 @@ mb1_header:
     .long PHYS(_load_end)           /* load_end_addr */
     .long PHYS(_bss_end)            /* bss_end_addr */
     .long PHYS(_start)              /* entry_addr */
+    /* The video request of the i386 /vmunix (kernel.fb.bin): a linear
+     * framebuffer, which the loader sets up and reports in the
+     * information structure for the framebuffer console and X. */
+    .long 0                         /* mode_type: linear framebuffer */
+    .long 1280                      /* width */
+    .long 800                       /* height */
+    .long 32                        /* depth */
 
 /* Multiboot 2 header: GRUB's `multiboot2` loads the ELF64 file directly. */
 .section .multiboot2, "a"
@@ -67,6 +75,15 @@ mb2_header:
     .long 0                         /* architecture: i386 protected mode */
     .long mb2_header_end - mb2_header
     .long -(MB2_MAGIC + 0 + (mb2_header_end - mb2_header))
+    /* The same framebuffer request; optional, so a loader that cannot
+     * set a graphics mode still boots the kernel. */
+    .align 8
+    .short 5                        /* framebuffer tag */
+    .short 1                        /* optional */
+    .long 20
+    .long 1280                      /* width */
+    .long 800                       /* height */
+    .long 32                        /* depth */
     .align 8
     .short 0                        /* end tag */
     .short 0
