@@ -21,7 +21,7 @@ C_SRCS = ld_main.c ld_io.c ld_load.c ld_resolve.c ld_reloc.c ld_tls.c ld_dl.c
 
 ifeq ($(ARCH),x86_64)
 PROG     = ld64.so
-START    = ld_start_amd64.S
+START    = ld_start_amd64.S ld_plt_amd64.S
 C_SRCS  += ld_reloc_amd64.c
 # No SSE/x87 in the linker: it runs before the program and inside calls
 # the program makes (dlopen, __tls_get_addr), and has no use for either.
@@ -34,7 +34,7 @@ LD_ARCH_CFLAGS := -m32 -mno-sse -mno-sse2 -mno-mmx -mno-80387 \
                   -mno-3dnow -mno-avx
 endif
 
-OBJS = $(O)$(START:.S=.o) $(C_SRCS:%.c=$(O)%.o)
+OBJS = $(START:%.S=$(O)%.o) $(C_SRCS:%.c=$(O)%.o)
 
 LD_CFLAGS  := -nostdlib -nostartfiles -fpic -ffreestanding \
               -Wall -Wextra -Werror -fno-stack-protector \

@@ -210,6 +210,7 @@ ld_addr ld_main(ld_addr *initial_stack) {
         const char k_trace[]   = "LD_TRACE_LOADED_OBJECTS=";
         const char k_debug[]   = "LD_DEBUG=";
         const char k_preload[] = "LD_PRELOAD=";
+        const char k_bindnow[] = "LD_BIND_NOW=";
         while (*p) {
             const char *e = (const char *)(unsigned long)*p;
             unsigned i;
@@ -227,6 +228,13 @@ ld_addr ld_main(ld_addr *initial_stack) {
                 if (e[i] != k_preload[i]) break;
             if (i == sizeof(k_preload) - 1 && e[i] != '\0')
                 preload_list = e + i;
+            /* LD_BIND_NOW counts only with a value, as in glibc: bind
+             * every PLT slot at load time (the amd64 linker would
+             * otherwise bind lazily - ld_reloc_amd64.c). */
+            for (i = 0; i < sizeof(k_bindnow) - 1; i++)
+                if (e[i] != k_bindnow[i]) break;
+            if (i == sizeof(k_bindnow) - 1 && e[i] != '\0')
+                ld_bind_now = 1;
             p++;
         }
     }
@@ -345,6 +353,7 @@ ld_addr ld_main(ld_addr *initial_stack) {
         ld_addr rel_off=0, jmprel_off=0;
         ld_addr init_off=0, fini_off=0, init_arr_off=0, fini_arr_off=0;
         ld_addr versym_off=0, verdef_off=0, verneed_off=0;
+        ld_addr pltgot_off=0;
         for (Elf_Dyn *d = dyn; d->d_tag != DT_NULL; d++) {
             switch (d->d_tag) {
             case DT_STRTAB:   strtab_off   = d->d_un.d_ptr; break;
@@ -371,8 +380,17 @@ ld_addr ld_main(ld_addr *initial_stack) {
             case DT_VERDEFNUM:  prog_obj.verdefnum  = d->d_un.d_val; break;
             case DT_VERNEED:    verneed_off = d->d_un.d_ptr; break;
             case DT_VERNEEDNUM: prog_obj.verneednum = d->d_un.d_val; break;
+            case DT_PLTGOT:     pltgot_off = d->d_un.d_ptr; break;
+            case DT_BIND_NOW:   prog_obj.bind_now = 1; break;
+            case DT_FLAGS:
+                if (d->d_un.d_val & DF_BIND_NOW) prog_obj.bind_now = 1;
+                break;
+            case DT_FLAGS_1:
+                if (d->d_un.d_val & DF_1_NOW) prog_obj.bind_now = 1;
+                break;
             }
         }
+        prog_obj.pltgot   = pltgot_off   ? (ld_addr    *)(pltgot_off   + bias) : 0;
         prog_obj.strtab   = strtab_off   ? (const char *)(strtab_off   + bias) : 0;
         prog_obj.symtab   = symtab_off   ? (Elf_Sym  *)(symtab_off   + bias) : 0;
         prog_obj.hash     = hash_off     ? (ld_u32     *)(hash_off     + bias) : 0;
@@ -568,6 +586,15 @@ ld_addr ld_main(ld_addr *initial_stack) {
     for (ld_obj_t *o = ld_obj_list(); o; o = o->next) {
         if (ld_relocate_copy(o) != 0) {
             ld_die(LD_R_COPY_NAME " relocation failed");
+        }
+    }
+
+    /* Last, the entries that store what an indirect function's resolver
+     * returns: the resolver is code in one of the objects above, and can
+     * only run now that all of them are relocated. */
+    for (ld_obj_t *o = ld_obj_list(); o; o = o->next) {
+        if (ld_relocate_ifunc(o) != 0) {
+            ld_die("indirect function relocation failed");
         }
     }
 

@@ -280,9 +280,14 @@ static int resolve_pred(const ld_obj_t *o, ld_u32 sym_idx, void *arg) {
  * place to deposit the symbol's st_size for R_386_COPY callers, and the
  * requesting object (so a program's own relocations don't pick up its
  * own canonical-PLT entry - see resolve_pred). */
+/* An indirect function (STT_GNU_IFUNC, amd64 only) has a resolver at its
+ * st_value, and its address is whatever the resolver returns.  A caller
+ * that passes ifunc_out gets the resolver's address and the flag, and
+ * calls it when the resolver's object is relocated; for everyone else
+ * (dlsym and friends, which run after relocation) it is called here. */
 static ld_addr resolve_internal(const char *name, ld_u32 want_ver_hash,
                                 const ld_obj_t *skip, ld_addr *size_out,
-                                const ld_obj_t *requester) {
+                                const ld_obj_t *requester, int *ifunc_out) {
     struct resolve_ctx ctx = { want_ver_hash, requester };
     for (ld_obj_t *o = ld_obj_list(); o; o = o->next) {
         if (o == skip) continue;
@@ -290,23 +295,33 @@ static ld_addr resolve_internal(const char *name, ld_u32 want_ver_hash,
         if (!s) s = lookup_sysv(o, name, resolve_pred, &ctx);
         if (!s) continue;
         if (size_out) *size_out = s->st_size;
-        return s->st_value + o->base;
+        ld_addr v = s->st_value + o->base;
+#ifdef LD_ARCH_AMD64
+        if (s->st_shndx != SHN_UNDEF &&
+            ELF_ST_TYPE(s->st_info) == STT_GNU_IFUNC) {
+            if (ifunc_out) *ifunc_out = 1;
+            else v = ld_ifunc_call(v);
+        }
+#else
+        (void)ifunc_out;
+#endif
+        return v;
     }
     if (size_out) *size_out = 0;
     return 0;
 }
 
 ld_addr ld_resolve(const char *name) {
-    return resolve_internal(name, 0, 0, 0, 0);
+    return resolve_internal(name, 0, 0, 0, 0, 0);
 }
 
 ld_addr ld_resolve_skip(const char *name, const ld_obj_t *skip) {
-    return resolve_internal(name, 0, skip, 0, 0);
+    return resolve_internal(name, 0, skip, 0, 0, 0);
 }
 
 ld_addr ld_resolve_with_size(const char *name, const ld_obj_t *skip,
                              ld_addr *size_out) {
-    return resolve_internal(name, 0, skip, size_out, 0);
+    return resolve_internal(name, 0, skip, size_out, 0, 0);
 }
 
 /* Resolve an imported TLS symbol (initial-exec model - e.g. a program
@@ -334,10 +349,15 @@ ld_addr ld_resolve_tls(const char *name, const ld_obj_t *requester,
  * PLT entry is not handed back to itself. */
 ld_addr ld_resolve_req(const char *name, ld_u32 vh_hash,
                        const ld_obj_t *requester) {
-    return resolve_internal(name, vh_hash, 0, 0, requester);
+    return resolve_internal(name, vh_hash, 0, 0, requester, 0);
+}
+
+ld_addr ld_resolve_req_ifunc(const char *name, ld_u32 vh_hash,
+                             const ld_obj_t *requester, int *ifunc_out) {
+    return resolve_internal(name, vh_hash, 0, 0, requester, ifunc_out);
 }
 
 ld_addr ld_resolve_versioned(const char *name, ld_u32 vh_hash,
                              const ld_obj_t *skip, ld_addr *size_out) {
-    return resolve_internal(name, vh_hash, skip, size_out, 0);
+    return resolve_internal(name, vh_hash, skip, size_out, 0, 0);
 }

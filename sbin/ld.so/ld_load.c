@@ -156,6 +156,7 @@ static void ld_cache_dynamic(ld_obj_t *o) {
     ld_addr soname_str = 0;
     int    soname_seen = 0;
     ld_addr versym_off = 0, verdef_off = 0, verneed_off = 0;
+    ld_addr pltgot_off = 0;
 
     for (Elf_Dyn *d = o->dynamic; d->d_tag != DT_NULL; d++) {
         switch (d->d_tag) {
@@ -180,9 +181,18 @@ static void ld_cache_dynamic(ld_obj_t *o) {
         case DT_VERDEFNUM: o->verdefnum  = d->d_un.d_val; break;
         case DT_VERNEED:   verneed_off = d->d_un.d_ptr; break;
         case DT_VERNEEDNUM: o->verneednum = d->d_un.d_val; break;
+        case DT_PLTGOT:    pltgot_off = d->d_un.d_ptr; break;
+        case DT_BIND_NOW:  o->bind_now = 1; break;
+        case DT_FLAGS:
+            if (d->d_un.d_val & DF_BIND_NOW) o->bind_now = 1;
+            break;
+        case DT_FLAGS_1:
+            if (d->d_un.d_val & DF_1_NOW) o->bind_now = 1;
+            break;
         }
     }
 
+    o->pltgot   = pltgot_off   ? (ld_addr    *)(pltgot_off   + o->base) : 0;
     o->strtab   = strtab_off   ? (const char *)(strtab_off   + o->base) : 0;
     o->symtab   = symtab_off   ? (Elf_Sym  *)(symtab_off   + o->base) : 0;
     o->hash     = hash_off     ? (ld_u32     *)(hash_off     + o->base) : 0;

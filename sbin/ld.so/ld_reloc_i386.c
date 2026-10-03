@@ -19,6 +19,12 @@
 
 #include "ld.h"
 
+/* The 32-bit linker binds every PLT slot at load time. */
+int ld_reloc_lazy_setup(ld_obj_t *obj) {
+    (void)obj;
+    return 0;
+}
+
 int ld_reloc_apply(ld_obj_t *obj, Elf_Reloc *r) {
     ld_u32 type = ELF_R_TYPE(r->r_info);
     ld_u32 sym  = ELF_R_SYM(r->r_info);

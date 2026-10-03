@@ -131,8 +131,9 @@ LD_PUBLIC const char *__ldso_dlerror(void) {
  * -------------------------------------------------------------------- */
 
 static void *dlopen_locked(const char *path, int flags) {
-    /* RTLD_LAZY/NOW/GLOBAL/LOCAL all behave eager+global today; only
-     * RTLD_NOLOAD changes what we do. */
+    /* Every object is global (RTLD_GLOBAL/LOCAL are not told apart).
+     * RTLD_NOW forces eager binding where the linker would bind lazily
+     * (amd64); RTLD_NOLOAD loads nothing. */
     if (!path) {
         /* dlopen(NULL) - return a handle representing the main
          * program (== head of loaded-object list). */
@@ -197,12 +198,22 @@ static void *dlopen_locked(const char *path, int flags) {
             return 0;
         }
     }
-    for (ld_obj_t *r = ld_obj_list(); r; r = r->next) {
-        if (ld_relocate(r) != 0) {
-            ld_dl_error("dlopen(\"", path, "\"): relocation failed", 0);
-            ld_obj_restore(snap_tail, snap_count);
-            return 0;
-        }
+    /* RTLD_NOW: bind the PLT slots of everything this call loaded while
+     * it is relocated (objects loaded earlier have `relocated` set and
+     * are not revisited, so one already bound lazily stays that way). */
+    int saved_bind_now = ld_bind_now;
+    int reloc_failed = 0;
+    if (flags & RTLD_NOW) ld_bind_now = 1;
+    for (ld_obj_t *r = ld_obj_list(); r && !reloc_failed; r = r->next)
+        reloc_failed = ld_relocate(r) != 0;
+    ld_bind_now = saved_bind_now;
+    /* Indirect functions, once every new object is relocated. */
+    for (ld_obj_t *r = ld_obj_list(); r && !reloc_failed; r = r->next)
+        reloc_failed = ld_relocate_ifunc(r) != 0;
+    if (reloc_failed) {
+        ld_dl_error("dlopen(\"", path, "\"): relocation failed", 0);
+        ld_obj_restore(snap_tail, snap_count);
+        return 0;
     }
     /* Apply W^X + RELRO to the newly-mapped objects (idempotent guard
      * skips ones already protected) before their constructors run. */
@@ -479,6 +490,17 @@ static ld_u32 dl_sysv_hash(const char *s) {
     return h;
 }
 
+/* The address a symbol found by ld_lookup_in_obj stands for: its value,
+ * or for an indirect function (amd64) what its resolver returns. */
+static ld_addr dl_sym_addr(const ld_obj_t *o, const Elf_Sym *s) {
+    ld_addr v = s->st_value + o->base;
+#ifdef LD_ARCH_AMD64
+    if (s->st_shndx != SHN_UNDEF && ELF_ST_TYPE(s->st_info) == STT_GNU_IFUNC)
+        v = ld_ifunc_call(v);
+#endif
+    return v;
+}
+
 ld_addr ld_lookup_in_obj(const ld_obj_t *o, const char *name) {
     if (!o || !name || !o->symtab || !o->strtab) return 0;
 
@@ -504,7 +526,7 @@ ld_addr ld_lookup_in_obj(const ld_obj_t *o, const char *name) {
             if (((chain_v ^ hv) >> 1) == 0) {
                 Elf_Sym *s = &o->symtab[idx];
                 if (dl_streq(o->strtab + s->st_name, name))
-                    return s->st_value + o->base;
+                    return dl_sym_addr(o, s);
             }
             if (chain_v & 1) break;
             idx++;
@@ -524,7 +546,7 @@ ld_addr ld_lookup_in_obj(const ld_obj_t *o, const char *name) {
             Elf_Sym *s = &o->symtab[idx];
             if (s->st_shndx == SHN_UNDEF) continue;
             if (dl_streq(o->strtab + s->st_name, name))
-                return s->st_value + o->base;
+                return dl_sym_addr(o, s);
         }
     }
     return 0;

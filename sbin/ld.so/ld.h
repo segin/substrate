@@ -232,6 +232,13 @@ typedef Elf_Rel Elf_Reloc;
 #define DT_FINI_ARRAY    26
 #define DT_INIT_ARRAYSZ  27
 #define DT_FINI_ARRAYSZ  28
+/* Binding-time requests.  An object carrying any of them wants every PLT
+ * slot bound before it runs (ld -z now). */
+#define DT_BIND_NOW      24
+#define DT_FLAGS         30
+#define DT_FLAGS_1       0x6ffffffb
+#define DF_BIND_NOW      0x8        /* in DT_FLAGS */
+#define DF_1_NOW         0x1        /* in DT_FLAGS_1 */
 
 /* Program-header types */
 #define PT_LOAD     1
@@ -275,7 +282,7 @@ typedef Elf_Rel Elf_Reloc;
 #define R_X86_64_DTPMOD64  16  /* module id of a tls_index */
 #define R_X86_64_DTPOFF64  17  /* offset within module of a tls_index */
 #define R_X86_64_TPOFF64   18  /* offset from the thread pointer */
-#define R_X86_64_IRELATIVE 37  /* indirect function - not supported */
+#define R_X86_64_IRELATIVE 37  /* indirect function: resolver at B + A */
 
 /* The copy relocation of the architecture being built, which the common
  * relocation loop defers to a final pass (see ld_reloc.c). */
@@ -335,6 +342,7 @@ typedef Elf_Rel Elf_Reloc;
 #define STB_GLOBAL 1
 #define STB_WEAK   2
 #define STT_FUNC   2   /* ELF_ST_TYPE: symbol names a function */
+#define STT_GNU_IFUNC 10 /* st_value is a resolver returning the function */
 #define STN_UNDEF  0
 #define SHN_UNDEF  0
 
@@ -518,6 +526,20 @@ typedef struct ld_obj {
     int             refcount;       /* dlopen refs; fini at last close */
     int             protected;      /* W^X + RELRO applied */
 
+    /* Lazy binding and indirect functions (amd64; see ld_reloc_amd64.c).
+     * `pltgot` is DT_PLTGOT: words 1 and 2 are the linker's, and the PLT
+     * slots follow.  `bind_now` records DT_BIND_NOW / DF_BIND_NOW /
+     * DF_1_NOW.  `lazy` is set once the PLT slots have been left for
+     * ld_plt_fixup to bind on first call.  `has_ifunc` is set by the
+     * main relocation pass when it defers an entry to ld_relocate_ifunc,
+     * and `ifunc_pass` is non-zero while that pass is running. */
+    ld_addr        *pltgot;
+    int             bind_now;
+    int             lazy;
+    int             has_ifunc;
+    int             ifunc_pass;
+    int             ifunc_relocated;
+
     /* Phase 5 (C++ linkage): GNU symbol-versioning sections.  All
      * three are biased pointers into the loaded image.  NULL when
      * the DSO doesn't carry versioning (substrate libc, libm, etc.
@@ -555,6 +577,12 @@ ld_addr ld_resolve(const char *name);
  * ld_resolve.c resolve_pred). */
 ld_addr ld_resolve_req(const char *name, ld_u32 vh_hash,
                        const ld_obj_t *requester);
+
+/* ld_resolve_req for a caller that handles indirect functions itself:
+ * see ld_reloc_resolve_ifunc.  Every other resolve function calls the
+ * resolver of an indirect function and returns the implementation. */
+ld_addr ld_resolve_req_ifunc(const char *name, ld_u32 vh_hash,
+                             const ld_obj_t *requester, int *ifunc_out);
 
 /* Same, but skip `skip` while searching.  Used by the COPY relocation,
  * which must find the source-of-truth in a SHARED library, not in the
@@ -599,6 +627,36 @@ int ld_relocate(ld_obj_t *obj);
  * the copy source already holds its relocated value. */
 int ld_relocate_copy(ld_obj_t *obj);
 
+/* Final pass for indirect functions: apply the entries of `obj` that
+ * ld_relocate() deferred because they need a resolver function called -
+ * IRELATIVE, and references to STT_GNU_IFUNC symbols.  Must run after
+ * every object has been through ld_relocate() and ld_relocate_copy(), so
+ * the resolver runs in fully relocated code.  A no-op for an object with
+ * no such entries, which is every object on i386. */
+int ld_relocate_ifunc(ld_obj_t *obj);
+
+/* Non-zero when every PLT slot must be bound at load time: LD_BIND_NOW in
+ * the environment, or while a dlopen(RTLD_NOW) relocates what it loaded. */
+extern int ld_bind_now;
+
+/* Arrange for the DT_JMPREL slots of `obj` to be bound on first call
+ * instead of now.  Returns 1 if it did (the caller then skips DT_JMPREL),
+ * 0 if the object must be bound eagerly.  Always 0 on i386. */
+int ld_reloc_lazy_setup(ld_obj_t *obj);
+
+#ifdef LD_ARCH_AMD64
+/* Call an indirect function's resolver; it returns the implementation. */
+static inline ld_addr ld_ifunc_call(ld_addr resolver) {
+    return ((ld_addr (*)(void))resolver)();
+}
+
+/* Lazy binding.  ld_plt_trampoline (ld_plt_amd64.S) is what PLT0 jumps
+ * to; it preserves the argument registers around ld_plt_fixup(), which
+ * binds entry `idx` of obj's DT_JMPREL and returns the function. */
+void    ld_plt_trampoline(void);
+ld_addr ld_plt_fixup(ld_obj_t *obj, ld_addr idx);
+#endif
+
 /* The architecture's relocation processor (ld_reloc_i386.c,
  * ld_reloc_amd64.c): apply one entry of `obj`.  Returns 0 on success,
  * -1 after printing a diagnostic. */
@@ -609,6 +667,12 @@ int ld_reloc_apply(ld_obj_t *obj, Elf_Reloc *r);
  * relocation processors. */
 ld_addr ld_reloc_resolve(const ld_obj_t *obj, ld_u32 sym_idx,
                          const char *name);
+
+/* The same, reporting an indirect function: when the definition found is
+ * STT_GNU_IFUNC, *ifunc_out is set to 1 and the value returned is the
+ * resolver's address, which the caller calls when it is safe to. */
+ld_addr ld_reloc_resolve_ifunc(const ld_obj_t *obj, ld_u32 sym_idx,
+                               const char *name, int *ifunc_out);
 
 /* Public head of the loaded-object list. */
 ld_obj_t *ld_obj_list(void);
@@ -626,6 +690,7 @@ ld_obj_t *ld_obj_find_loaded(const char *name);
  * dlopen() flag bits ld.so acts on.  ld.so is freestanding and does not
  * include libc's <dlfcn.h>, so this must be kept in step with it.
  */
+#define RTLD_NOW    0x0002
 #define RTLD_NOLOAD 0x0004
 
 /* Re-protect an ld.so-mapped object after relocation: each PT_LOAD to

@@ -15,6 +15,10 @@
  * because the copy reads the source variable's *relocated* value -
  * running it while the providing library is still unrelocated copies
  * zero.
+ *
+ * Indirect functions get a third pass (ld_relocate_ifunc) for the same
+ * reason: a resolver is code in some object, and may only be called once
+ * that object is relocated.
  */
 
 #include "ld.h"
@@ -61,6 +65,14 @@ ld_addr ld_reloc_resolve(const ld_obj_t *obj, ld_u32 sym_idx,
     return ld_resolve_req(name, vh, obj);
 }
 
+ld_addr ld_reloc_resolve_ifunc(const ld_obj_t *obj, ld_u32 sym_idx,
+                               const char *name, int *ifunc_out) {
+    ld_u32 vh = importer_version_hash(obj, sym_idx);
+    return ld_resolve_req_ifunc(name, vh, obj, ifunc_out);
+}
+
+int ld_bind_now;
+
 int ld_relocate(ld_obj_t *obj) {
     /* A RELATIVE relocation on i386 is `*p += base` (non-idempotent).
      * Apply relocations exactly once per object - re-running on an
@@ -79,13 +91,41 @@ int ld_relocate(ld_obj_t *obj) {
             if (ld_reloc_apply(obj, &obj->rel[i]) != 0) return -1;
         }
     }
-    if (obj->jmprel) {
+    /* The PLT slots are bound now unless the architecture can leave them
+     * for the first call (amd64: ld_reloc_lazy_setup). */
+    if (obj->jmprel && !ld_reloc_lazy_setup(obj)) {
         ld_addr n = obj->pltrelsz / sizeof(Elf_Reloc);
         for (ld_addr i = 0; i < n; i++) {
             if (ld_reloc_apply(obj, &obj->jmprel[i]) != 0) return -1;
         }
     }
     obj->relocated = 1;
+    return 0;
+}
+
+int ld_relocate_ifunc(ld_obj_t *obj) {
+    /* Entries that need a resolver called, which ld_reloc_apply left
+     * alone (and noted in has_ifunc) while other objects were still
+     * unrelocated.  With ifunc_pass set it applies those and nothing
+     * else. */
+    if (obj->ifunc_relocated) return 0;
+    if (obj->has_ifunc) {
+        int rc = 0;
+        obj->ifunc_pass = 1;
+        if (obj->rel) {
+            ld_addr n = obj->relsz / sizeof(Elf_Reloc);
+            for (ld_addr i = 0; rc == 0 && i < n; i++)
+                rc = ld_reloc_apply(obj, &obj->rel[i]);
+        }
+        if (obj->jmprel) {
+            ld_addr n = obj->pltrelsz / sizeof(Elf_Reloc);
+            for (ld_addr i = 0; rc == 0 && i < n; i++)
+                rc = ld_reloc_apply(obj, &obj->jmprel[i]);
+        }
+        obj->ifunc_pass = 0;
+        if (rc != 0) return -1;
+    }
+    obj->ifunc_relocated = 1;
     return 0;
 }
 
