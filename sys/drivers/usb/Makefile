@@ -1,14 +1,14 @@
 include ../../../Makefile.inc
 
-CFLAGS := $(KERNEL_CFLAGS) -I. -I../../drivers/storage -I../../drivers/input -I../../arch/i386 -I../../arch/x86-common
+CFLAGS := $(KERNEL_CFLAGS) -I. -I../../drivers/storage -I../../drivers/input -I../../arch/$(ARCH) -I../../arch/x86-common
 LDFLAGS := $(FREESTANDING_LDFLAGS)
 
 SRCS = usb.c usbdevfs.c uhci.c ehci.c xhci.c usb_msc.c usb_hid.c usb_hid_mouse.c usb_hub.c uac.c uas.c
-OBJS = $(SRCS:.c=.o)
+OBJS = $(addprefix $(O),$(SRCS:.c=.o))
 
-all: usb_drv.o
+all: $(O)usb_drv.o
 
-usb_drv.o: $(OBJS)
+$(O)usb_drv.o: $(OBJS)
 	$(LD) $(LDFLAGS) -r -o $@ $(OBJS)
 
 clean:

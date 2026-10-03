@@ -5,11 +5,11 @@ LDFLAGS := $(FREESTANDING_LDFLAGS)
 
 SRCS = af_unix.c netdev.c af_packet.c \
        inet.c inet_csum.c arp.c icmp.c inet6.c udp.c af_inet.c loopback.c tcp.c
-OBJS = $(SRCS:.c=.o)
+OBJS = $(addprefix $(O),$(SRCS:.c=.o))
 
-all: net.o
+all: $(O)net.o
 
-net.o: $(OBJS)
+$(O)net.o: $(OBJS)
 	$(LD) $(LDFLAGS) -r -o $@ $(OBJS)
 
 clean:

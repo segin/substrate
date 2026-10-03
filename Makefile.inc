@@ -70,6 +70,40 @@ KERNEL_SRC = $(TOP)/sys
 KERNEL_I386_BASELINE_FLAGS = -march=i486 -mtune=i486
 KERNEL_CFLAGS = $(FREESTANDING_CFLAGS) $(KERNEL_I386_BASELINE_FLAGS) -I$(KERNEL_SRC)
 
+# The 64-bit kernel (make -C sys ARCH=x86_64; docs/specs/arch_x86_64_core.md)
+# builds from the same subdirectory Makefiles, but into its own object tree:
+# every object lands under sys/arch/x86_64/obj/<subdir>/, so an i386 and an
+# x86_64 build never share a .o and either can follow the other without a
+# clean.  Subdirectory Makefiles name their objects $(O)foo.o.  $(O) is empty
+# for i386, which therefore builds in place exactly as before.
+ifeq ($(ARCH),x86_64)
+O := $(KERNEL_SRC)/arch/x86_64/obj/$(patsubst $(KERNEL_SRC)/%,%,$(CURDIR))/
+KERNEL_CFLAGS := -m64 -march=x86-64 -mcmodel=kernel -mno-red-zone \
+	-mgeneral-regs-only -ffreestanding -fno-builtin -fno-stack-protector \
+	-fno-pie -fno-pic -fno-asynchronous-unwind-tables \
+	-fno-omit-frame-pointer -ffunction-sections -fdata-sections \
+	-std=c2x $(WARNFLAGS) -g -MMD -MP -nostdinc \
+	-I$(SYS_INCLUDE) -I$(USR_INCLUDE) -I$(KERNEL_SRC) \
+	-isystem $(shell $(CC) -print-file-name=include) \
+	-DSUBSTRATE_ARCH_X86_64
+FREESTANDING_CFLAGS := $(KERNEL_CFLAGS)
+FREESTANDING_LDFLAGS := -m elf_x86_64 -nostdlib
+CFLAGS := $(KERNEL_CFLAGS)
+
+$(O)%.o: %.c
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(O)%.o: %.S
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -D__ASSEMBLER__ -c $< -o $@
+
+-include $(wildcard $(O)*.d $(O)*/*.d)
+.DEFAULT_GOAL :=
+else
+O :=
+endif
+
 # Userland flags (for standard libraries and utils)
 # These will eventually link against our own libc
 # Userland flags (for standard libraries and utils)

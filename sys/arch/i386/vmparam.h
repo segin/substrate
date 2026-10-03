@@ -20,6 +20,12 @@
 /* End of a 32-bit process's address space (exclusive). */
 #define USER32_VA_END       0xC0000000U
 
+/* Kernel VA that ioremap() hands out for device mappings.  It lies inside
+ * the direct map, whose PTEs it replaces, so the PMM keeps the frames
+ * behind it out of circulation (PMM_DIRECTMAP_PHYS_LIMIT in pmm.h). */
+#define IOREMAP_BASE        0xF7000000U
+#define IOREMAP_LIMIT       0xF8000000U
+
 /* Physical address to its direct-map kernel address, and back.  The kernel
  * image sits inside the direct map, so V2P works for any kernel address. */
 #define P2V(x) ((void *)((uintptr_t)(x) + KERN_BASE))

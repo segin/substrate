@@ -1,9 +1,11 @@
 include ../../../Makefile.inc
 
-OBJS = virtio.o virtio_blk.o virtio_9p.o virtio_scsi.o virtio_gpu.o virtio_net.o
+OBJS = $(addprefix $(O),virtio.o virtio_blk.o virtio_9p.o virtio_scsi.o virtio_gpu.o virtio_net.o)
 
-virtio_drv.o: $(OBJS)
-	$(LD) -m elf_i386 -nostdlib -r -o virtio_drv.o $(OBJS)
+all: $(O)virtio_drv.o
+
+$(O)virtio_drv.o: $(OBJS)
+	$(LD) $(FREESTANDING_LDFLAGS) -r -o $@ $(OBJS)
 
 %.o: %.c
 	$(CC) $(CFLAGS) -I../../include -I../../ -c -o $@ $<

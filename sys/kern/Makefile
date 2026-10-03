@@ -10,11 +10,11 @@ SRCS = acct.c time.c main.c panic.c stacktrace.c ksyms.c core.c spinlock.c mutex
        kern_uio.c subr_copy.c ipc_sem.c ipc_shm.c posix_sem.c posix_mqueue.c \
        efi_runtime.c \
        geom/geom_subr.c geom/geom_mbr.c geom/geom_gpt.c geom/geom_bsd.c
-OBJS = $(SRCS:.c=.o)
+OBJS = $(addprefix $(O),$(SRCS:.c=.o))
 
-all: kern.o
+all: $(O)kern.o
 
-kern.o: $(OBJS)
+$(O)kern.o: $(OBJS)
 	$(LD) $(LDFLAGS) -r -o $@ $(OBJS)
 
 clean:

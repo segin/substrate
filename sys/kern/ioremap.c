@@ -10,12 +10,10 @@
 #include <kern/ioremap_host.h>
 #endif
 
-/* Must match PMM_IOREMAP_VA_BASE: the PMM refuses to hand out any frame whose
- * direct-map address would land in this window, because ioremap() replaces the
- * direct map's PTEs here.  If these two ever disagree, the allocator starts
- * returning RAM that device mappings have taken over. */
-#define IOREMAP_BASE  0xF7000000U
-#define IOREMAP_LIMIT 0xF8000000U
+/* IOREMAP_BASE..IOREMAP_LIMIT, the window device mappings are placed in, come
+ * from <machine/vmparam.h> (via <sys/param.h>).  On i386 it lies inside the
+ * direct map, and the PMM refuses frames whose direct-map address would land
+ * in it (PMM_IOREMAP_VA_BASE), because ioremap() replaces those PTEs. */
 
 struct ioremap_region {
     void *addr;

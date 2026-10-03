@@ -4,11 +4,11 @@ CFLAGS := $(KERNEL_CFLAGS) -I.
 LDFLAGS := $(FREESTANDING_LDFLAGS)
 
 SRCS = vfs.c vnode.c vnode_fsnode.c vfs_lookup.c vfs_cache.c vfs_mount.c vnode_ops.c bio.c mountopt.c
-OBJS = $(SRCS:.c=.o)
+OBJS = $(addprefix $(O),$(SRCS:.c=.o))
 
-all: vfs_subsys.o
+all: $(O)vfs_subsys.o
 
-vfs_subsys.o: $(OBJS)
+$(O)vfs_subsys.o: $(OBJS)
 	$(LD) $(LDFLAGS) -r -o $@ $(OBJS)
 
 clean:

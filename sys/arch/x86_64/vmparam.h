@@ -25,6 +25,12 @@
 /* End of a 32-bit process's address space (exclusive), as on i386. */
 #define USER32_VA_END       0xC0000000UL
 
+/* Kernel VA that ioremap() hands out for device mappings: the top 16 MiB
+ * window of the last gigabyte, above the kernel image's.  Every address
+ * space shares it through the kernel's PML4 slot. */
+#define IOREMAP_BASE        0xFFFFFFFFC0000000UL
+#define IOREMAP_LIMIT       0xFFFFFFFFC1000000UL
+
 static inline uintptr_t vmparam_kva_to_phys(uintptr_t va) {
     return va >= KERNEL_VMA ? va - KERNEL_VMA : va - DMAP_BASE;
 }

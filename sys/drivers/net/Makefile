@@ -1,13 +1,13 @@
 include ../../../Makefile.inc
 
-CFLAGS := $(KERNEL_CFLAGS) -I. -I../../include -I../../arch/i386 -I../../arch/x86-common
+CFLAGS := $(KERNEL_CFLAGS) -I. -I../../include -I../../arch/$(ARCH) -I../../arch/x86-common
 
 SRCS = rtl8139.c e1000.c e1000e.c r8168.c
-OBJS = $(SRCS:.c=.o)
+OBJS = $(addprefix $(O),$(SRCS:.c=.o))
 
-all: net_drv.o
+all: $(O)net_drv.o
 
-net_drv.o: $(OBJS)
+$(O)net_drv.o: $(OBJS)
 	$(LD) $(FREESTANDING_LDFLAGS) -r -o $@ $(OBJS)
 
 %.o: %.c

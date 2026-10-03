@@ -52,7 +52,7 @@
  *
  * So the ceiling is the LOWER of the two carve-outs, not just the trampoline.
  */
-#define PMM_IOREMAP_VA_BASE     0xF7000000U
+#define PMM_IOREMAP_VA_BASE     IOREMAP_BASE
 
 #define PMM_DIRECTMAP_PHYS_LIMIT                                        \
         ((uint32_t)((SIG_TRAMPOLINE_ADDR < PMM_IOREMAP_VA_BASE          \

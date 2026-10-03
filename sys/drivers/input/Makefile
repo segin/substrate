@@ -4,11 +4,11 @@ CFLAGS := $(KERNEL_CFLAGS) -I. -I../../video -I$(SYS_INCLUDE)
 LDFLAGS := $(FREESTANDING_LDFLAGS)
 
 SRCS = input_subsys.c keyboard.c ps2.c mouse.c
-OBJS = $(SRCS:.c=.o)
+OBJS = $(addprefix $(O),$(SRCS:.c=.o))
 
-all: input.o
+all: $(O)input.o
 
-input.o: $(OBJS)
+$(O)input.o: $(OBJS)
 	$(LD) $(LDFLAGS) -r -o $@ $(OBJS)
 
 clean:

@@ -1,14 +1,14 @@
 include ../../../Makefile.inc
 
-CFLAGS := $(KERNEL_CFLAGS) -I. -I../../include -I../../arch/i386
+CFLAGS := $(KERNEL_CFLAGS) -I. -I../../include -I../../arch/$(ARCH)
 LDFLAGS := $(FREESTANDING_LDFLAGS)
 
 SRCS = ansi_handler.c console.c tty.c vt.c pty.c
-OBJS = $(SRCS:.c=.o)
+OBJS = $(addprefix $(O),$(SRCS:.c=.o))
 
-all: console_subsys.o
+all: $(O)console_subsys.o
 
-console_subsys.o: $(OBJS)
+$(O)console_subsys.o: $(OBJS)
 	$(LD) $(LDFLAGS) -r -o $@ $(OBJS)
 
 clean:
