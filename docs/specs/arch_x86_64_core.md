@@ -276,14 +276,39 @@ a statically linked 64-bit program:
   with `ABI64_ASSERT_SIZE`, and the conversion happens in one of two
   places:
   * *value structures* -- `stat`, `timespec`, `rusage`, the `getdents`
-    record, the 16-byte `sigset_t` -- in a wrapper the dispatcher picks
-    for 64-bit frames (`exec/perso/perso_native64.c`,
-    `native_amd64_syscall()`), which runs the kernel-internal form of the
-    call and converts at the boundary;
+    record, the 16-byte `sigset_t`, `statfs`, `statvfs`, `sysinfo`,
+    `sys_procinfo_t`, `rlimit`, `itimerspec`, `mq_attr`, `shmid_ds`,
+    `semid_ds` -- in a wrapper the dispatcher picks for 64-bit frames
+    (`exec/perso/perso_native64.c`, `native_amd64_syscall()`), which runs
+    the kernel-internal form of the call and converts at the boundary.
+    The wrappers for `thr_exit` and `sigqueue` exist for another reason:
+    their argument is pointer-sized data rather than an address, so they
+    take all 64 bits of it from the saved frame instead of the 32-bit
+    argument word;
   * *pointer-carrying structures* -- `iovec`, `sigaction`, `stack_t`,
-    `siginfo_t` -- in the converters the 32-bit path already uses
-    (`kern/compat32.c`), which read the calling process's layout
-    (`proc_abi_is_amd64()`).
+    `siginfo_t`, `sigevent`, `msghdr` -- in the converters the 32-bit
+    path already uses (`kern/compat32.c`), which read the calling
+    process's layout (`proc_abi_is_amd64()`);
+  * *what a handler copies in the middle of its work* -- a `size_t` or
+    pointer result (`sysctl`'s `oldlenp`, the counts of the `sys_proc_*`
+    and `sys_vm_*` listings, `thr_join`'s status), a `struct timespec`
+    timeout (`sigtimedwait`, `thr_suspend`, `ksem_timedwait`,
+    `mq_timedsend`/`mq_timedreceive`, `futex`, `sched_rr_get_interval`),
+    `struct sched_param`, and the elements of a `sys_map_t` or
+    `sys_swapinfo_t` array -- in helpers of the same file
+    (`usize_copyin()`, `uptr_copyout()`, `timespec_copyin()`, ...), which
+    the handlers call instead of a bare `copyin`/`copyout`.
+
+  Three things follow the process without a structure of their own.
+  Control messages (`sys/net/af_unix.c`): the process's `CMSG_ALIGN`
+  rounds to its `size_t`, so for a 64-bit process `cmsg_len` counts a
+  16-byte header and records advance in steps of 8, while the data still
+  starts 12 bytes in, where its `CMSG_DATA` looks.  Robust futex lists
+  (`kern/futex.c`): the head is 24 bytes with 64-bit links, and the
+  length registered by `set_robust_list` selects the walk.  Device
+  records: `SIOCGIFCONF`, `FBIOGET_FSCREENINFO`, `FBIOGET_VIDEO_MODES`,
+  `USBDEVFS_CONTROL` and the events read from `/dev/input/event0` are
+  produced in the caller's layout by the drivers themselves.
 * **Signals.**  `sendsig()` hands a 64-bit frame to `sendsig_amd64()`
   (`arch/x86_64/signal64.c`): `struct sigframe` below the red zone, the
   FreeBSD `mcontext` with the FXSAVE image, and a 64-bit trampoline at
@@ -291,9 +316,8 @@ a statically linked 64-bit program:
 
 What a 64-bit process does not have yet:
 
-* the remaining structure-carrying calls: `statfs`, `sysctl` lengths,
-  `sendmsg`/`recvmsg`, `sigevent` (POSIX timers, message queues) and the
-  `sys_proc_*` listings;
+* `ptrace`: its requests exchange the i386 register set and 32-bit words
+  only;
 * **threads and TLS**: `%fs` base handling, `thr_new`;
 * in the dynamic linker: `R_X86_64_IRELATIVE` (indirect functions) and
   lazy binding -- as in the 32-bit linker, everything is bound at load

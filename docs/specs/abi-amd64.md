@@ -248,6 +248,47 @@ Unchanged from i386: six 256-byte fields.  `machine` is `"amd64"`.
 
 Byte-identical to i386: they contain no pointers or `long`s.
 
+### Other structures
+
+Every other structure a system call carries has the natural LP64 layout
+of its declaration in the userland headers: a `long`, `size_t`, `time_t`
+or pointer member is 8 bytes and aligned to 8.  The ones whose size
+differs from i386:
+
+| Structure | Header | Size | Calls |
+| :-------- | :----- | :--- | :---- |
+| `struct itimerspec` | `<time.h>` | 32 | `timer_settime`, `timer_gettime` |
+| `struct rlimit` | `<sys/resource.h>` | 16 | `getrlimit`, `setrlimit` (`rlim_t` is 64 bits; `RLIM_INFINITY` all ones) |
+| `struct statfs` | `<sys/statfs.h>` | 120 | `statfs`, `fstatfs` |
+| `struct statvfs` | `<sys/statvfs.h>` | 120 | `statvfs`, `fstatvfs` |
+| `struct sysinfo` | `<sys/sysinfo.h>` | 112 | `sysinfo` |
+| `sys_procinfo_t` | `<sys/sysinfo.h>` | 92 | `sys_proc_info` |
+| `sys_map_t` | `<sys/sysinfo.h>` | 280 | `sys_proc_maps` |
+| `sys_swapinfo_t` | `<sys/sysinfo.h>` | 280 | `sys_vm_swap` |
+| `struct mq_attr` | `<mqueue.h>` | 32 | `mq_open`, `mq_getattr`, `mq_setattr` |
+| `struct sched_param` | `<sched.h>` | 48 | `sched_getparam`, `sched_setparam`, `sched_setscheduler` |
+| `struct shmid_ds` | `<sys/shm.h>` | 80 | `shmctl` |
+| `struct semid_ds` | `<sys/sem.h>` | 56 | `semctl` |
+| `struct sigevent` | `<signal.h>` | 32 | `timer_create`, `mq_notify` |
+| `struct msghdr` | `<sys/socket.h>` | 48 | `sendmsg`, `recvmsg` |
+| `struct robust_list_head` | `<sys/futex.h>` | 24 | `set_robust_list`, `get_robust_list` |
+
+A `size_t *` or `void **` result — `sysctl`'s `oldlenp`, the element
+counts of the `sys_proc_*` and `sys_vm_*` listings, the status of
+`thr_join` — is read and written as 8 bytes.  The exit value given to
+`thr_exit` and the value given to `sigqueue` are carried at their full 64
+bits.
+
+`struct cmsghdr` is 12 bytes (`socklen_t cmsg_len`, two `int`s) and
+`CMSG_ALIGN` rounds to 8, so `cmsg_len` is 16 plus the length of the data
+(`CMSG_LEN`), the data starts 12 bytes into the record (`CMSG_DATA`), and
+the next record starts at `cmsg_len` rounded up to 8.
+
+`struct ifreq` is 40 bytes (the union widens with `struct ifmap`), so the
+array `SIOCGIFCONF` fills has 40-byte elements and `struct ifconf` is 16
+bytes; `struct fb_fix_screeninfo` is 80 bytes, `struct video_mode_query`
+16, `struct input_event` 24 and `struct usbdevfs_ctrltransfer` 24.
+
 ## 6. Process Initialization
 
 At the first instruction of the entry point (the executable's, or the
