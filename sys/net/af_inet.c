@@ -26,6 +26,7 @@
 #include <netinet/ip.h>
 #include <netinet/ip6.h>
 #include <netinet/udp.h>
+#include <sys/compat32.h>
 #include <sys/copy.h>
 #include <sys/fcntl.h>
 #include <sys/ioctl.h>
@@ -459,18 +460,19 @@ static int afinet_ioctl(fs_node_t *node, uint32_t request, void *arg) {
 
     /* SIOCGIFCONF takes struct ifconf; everything else takes struct ifreq.
      * Both `arg` and (for SIOCGIFCONF) the ifc_req array it points at are
-     * user-space pointers — copy in/out rather than dereferencing them. */
+     * user-space pointers — copy in/out rather than dereferencing them.
+     * Both structures are the process's layout (<sys/compat32.h>). */
     if (request == SIOCGIFCONF) {
-        struct ifconf ifc;
+        struct ifconf32 ifc;
         if (copyin(arg, &ifc, sizeof(ifc)) != 0) return -EFAULT;
-        int max = ifc.ifc_len / (int)sizeof(struct ifreq);
-        struct ifreq *out = ifc.ifc_req;   /* user pointer */
+        int max = ifc.ifc_len / (int)sizeof(struct ifreq32);
+        struct ifreq32 *out = UPTR32(ifc.ifc_req);   /* user pointer */
         int n = 0;
         /* One entry per address, as BSD does: the interface's primary
          * address, then each alias under the same name. */
         for (netdev_t *d = netdev_first(); d && n < max; d = netdev_next(d)) {
             for (unsigned i = 0; i < 1u + d->ip4_nalias && n < max; i++) {
-                struct ifreq e;
+                struct ifreq32 e;
                 memset(&e, 0, sizeof(e));
                 strlcpy(e.ifr_name, d->name, IFNAMSIZ);
                 struct sin_kern *sin = (struct sin_kern *)&e.ifr_addr;
@@ -481,7 +483,7 @@ static int afinet_ioctl(fs_node_t *node, uint32_t request, void *arg) {
                 n++;
             }
         }
-        ifc.ifc_len = n * (int)sizeof(struct ifreq);
+        ifc.ifc_len = n * (int)sizeof(struct ifreq32);
         if (copyout(&ifc, arg, sizeof(ifc)) != 0) return -EFAULT;
         return 0;
     }
@@ -529,11 +531,11 @@ static int afinet_ioctl(fs_node_t *node, uint32_t request, void *arg) {
     if (request == SIOCAIFADDR)
         return afinet_add_alias(arg);
 
-    struct ifreq kr;
+    struct ifreq32 kr;
     if (copyin(arg, &kr, sizeof(kr)) != 0) return -EFAULT;
     /* Ensure the name field is NUL-terminated before using it. */
     kr.ifr_name[IFNAMSIZ - 1] = '\0';
-    struct ifreq *r = &kr;
+    struct ifreq32 *r = &kr;
     netdev_t *dev = afinet_find_dev(r->ifr_name);
     if (!dev) return -ENODEV;
 

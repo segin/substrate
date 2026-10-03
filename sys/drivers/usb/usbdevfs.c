@@ -16,6 +16,7 @@
 
 #include <drivers/usb/usb.h>
 #include <kern/console.h>
+#include <sys/compat32.h>
 #include <sys/copy.h>
 #include <sys/errno.h>
 #include <sys/usbdevfs.h>
@@ -34,8 +35,9 @@ static int usbdevfs_dev_ioctl(fs_node_t *node, uint32_t request, void *arg)
     }
 
     switch (request) {
-    case USBDEVFS_CONTROL: {
-        struct usbdevfs_ctrltransfer ct;
+    case USBDEVFS_CONTROL32: {
+        /* The process's layout and request number (<sys/compat32.h>). */
+        struct usbdevfs_ctrltransfer32 ct;
         uint8_t kbuf[260];
         uint16_t len;
         int ret;
@@ -68,7 +70,8 @@ static int usbdevfs_dev_ioctl(fs_node_t *node, uint32_t request, void *arg)
                 if (len > srclen) {
                     len = srclen;
                 }
-                if (len && ct.data != NULL && copyout(src, ct.data, len) != 0) {
+                if (len && ct.data != 0 &&
+                    copyout(src, UPTR32(ct.data), len) != 0) {
                     return -EFAULT;
                 }
                 return len;
@@ -98,12 +101,13 @@ static int usbdevfs_dev_ioctl(fs_node_t *node, uint32_t request, void *arg)
                 if (moved > len) {
                     moved = len;                /* never trust it past our buf */
                 }
-                if (moved && ct.data != NULL &&
-                    copyout(kbuf, ct.data, moved) != 0) {
+                if (moved && ct.data != 0 &&
+                    copyout(kbuf, UPTR32(ct.data), moved) != 0) {
                     return -EFAULT;
                 }
             } else {                             /* OUT: host -> device */
-                if (len && ct.data != NULL && copyin(ct.data, kbuf, len) != 0) {
+                if (len && ct.data != 0 &&
+                    copyin(UPTR32(ct.data), kbuf, len) != 0) {
                     return -EFAULT;
                 }
                 ret = usb_control_transfer_actual(dev, ct.bRequestType,

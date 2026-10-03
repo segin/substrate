@@ -19,6 +19,7 @@
 #include <kern/cmdline.h>
 #include <kern/console.h>
 #include <kern/resource.h>
+#include <sys/compat32.h>
 #include <sys/copy.h>
 #include <sys/errno.h>
 #include <sys/fb.h>
@@ -513,8 +514,9 @@ static int fb_fs_ioctl(fs_node_t *node, uint32_t request, void *arg) {
     } else if (request == FBIOGET_FSCREENINFO) {
         /* Linux fb_fix_screeninfo — what's static about the device.
          * Ported software (xorg-server's kdrive/fbdev backend) hits
-         * this immediately after FBIOGET_VSCREENINFO. */
-        struct fb_fix_screeninfo fi;
+         * this immediately after FBIOGET_VSCREENINFO.  Built in the
+         * process's layout (<sys/compat32.h>). */
+        struct fb_fix_screeninfo32 fi;
         if (!arg) return -EINVAL;
 
         memset(&fi, 0, sizeof(fi));
@@ -523,14 +525,14 @@ static int fb_fs_ioctl(fs_node_t *node, uint32_t request, void *arg) {
          * the kernel virtual address (the consumer mmaps /dev/fb0
          * to get a userland mapping; the absolute physical value
          * isn't meaningful to userland but Linux puts it here for
-         * informational use). */
+         * informational use; the process's field holds 32 bits of it). */
         if (fb.blit_indexed != NULL) {
             /* Planar: report the 8bpp linear shim, not the planar aperture. */
             fi.smem_start = 0;   /* RAM shim, allocated on first mmap */
-            fi.smem_len = (unsigned long)((size_t)fb.width * (size_t)fb.height);
+            fi.smem_len = (uint32_t)((size_t)fb.width * (size_t)fb.height);
             fi.line_length = fb.width;
         } else {
-            fi.smem_start = (unsigned long)(uintptr_t)fb.addr;
+            fi.smem_start = (uint32_t)(uintptr_t)fb.addr;
             fi.smem_len = fb.pitch * fb.height;
             fi.line_length = fb.pitch;
         }
@@ -551,9 +553,9 @@ static int fb_fs_ioctl(fs_node_t *node, uint32_t request, void *arg) {
         }
         return 0;
     } else if (request == FBIOGET_VIDEO_MODES) {
-        struct video_mode_query query;
+        struct video_mode_query32 query;
         if (!arg) return -EINVAL;
-        if (copyin(arg, &query, sizeof(struct video_mode_query)) != 0) {
+        if (copyin(arg, &query, sizeof(query)) != 0) {
             return -EFAULT;
         }
 
@@ -569,7 +571,7 @@ static int fb_fs_ioctl(fs_node_t *node, uint32_t request, void *arg) {
             if (!kmodes) return -ENOMEM;
 
             current_driver->list_modes(kmodes, (int)to_copy);
-            if (copyout(kmodes, query.modes, to_copy * sizeof(struct video_mode_info)) != 0) {
+            if (copyout(kmodes, UPTR32(query.modes), to_copy * sizeof(struct video_mode_info)) != 0) {
                 kfree(kmodes, to_copy * sizeof(struct video_mode_info));
                 return -EFAULT;
             }
@@ -577,7 +579,7 @@ static int fb_fs_ioctl(fs_node_t *node, uint32_t request, void *arg) {
         }
 
         query.count = (uint32_t)total;
-        if (copyout(&query, arg, sizeof(struct video_mode_query)) != 0) {
+        if (copyout(&query, arg, sizeof(query)) != 0) {
             return -EFAULT;
         }
         return 0;

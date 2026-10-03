@@ -14,6 +14,13 @@
  * so the layout is the same on both kernels and the conversion is exact on
  * the i386 one (where it amounts to a copy).  A user pointer is a uptr32_t:
  * the 32-bit address as the process stores it.
+ *
+ * The device and socket ioctl structures further down are here for a second
+ * reason: their declarations (<sys/fb.h>, <sys/input.h>, <net/if.h>,
+ * <sys/usbdevfs.h>) are shared with userland and spell their fields in
+ * native C types -- long, pointers -- that cannot change without changing
+ * the userland headers.  The kernel uses these twins wherever it exchanges
+ * such a structure with the process instead.
  */
 #ifndef _SYS_COMPAT32_H
 #define _SYS_COMPAT32_H
@@ -25,6 +32,7 @@
 #include <sys/socket.h>
 #include <sys/thr.h>
 #include <sys/uio.h>
+#include <sys/usbdevfs.h>
 
 struct sigaction32 {
     uptr32_t sa_handler;
@@ -105,6 +113,96 @@ struct robust_list_head32 {
     uptr32_t list_op_pending;
 };
 ABI32_ASSERT_SIZE(struct robust_list_head32, 12);
+
+/* FBIOGET_FSCREENINFO: struct fb_fix_screeninfo (<sys/fb.h>), whose two
+ * unsigned longs are 32 bits in the process. */
+struct fb_fix_screeninfo32 {
+    char     id[16];
+    uint32_t smem_start;
+    uint32_t smem_len;
+    uint32_t type;
+    uint32_t type_aux;
+    uint32_t visual;
+    uint16_t xpanstep;
+    uint16_t ypanstep;
+    uint16_t ywrapstep;
+    uint32_t line_length;
+    uint32_t mmio_start;
+    uint32_t mmio_len;
+    uint32_t accel;
+    uint16_t reserved[3];
+};
+ABI32_ASSERT_SIZE(struct fb_fix_screeninfo32, 68);
+
+/* FBIOGET_VIDEO_MODES: struct video_mode_query (<sys/fb.h>).  `modes`
+ * points at the process's array of struct video_mode_info, which has no
+ * pointers and the same layout on both kernels. */
+struct video_mode_query32 {
+    uint32_t count;
+    uptr32_t modes;
+};
+ABI32_ASSERT_SIZE(struct video_mode_query32, 8);
+
+/* A record read from /dev/input/event0: struct input_event (<sys/input.h>),
+ * the i386 Linux evdev layout with a 32-bit long seconds/microseconds. */
+struct input_event32 {
+    int32_t  time_sec;
+    int32_t  time_usec;
+    uint16_t type;
+    uint16_t code;
+    int32_t  value;
+};
+ABI32_ASSERT_SIZE(struct input_event32, 16);
+
+/*
+ * The interface ioctls: struct ifreq and struct ifconf (<net/if.h>).  The
+ * union members keep their <net/if.h> names so its ifr_addr, ifr_flags,
+ * ifc_req, ... accessor macros apply to these as well.  ifru_map stands in
+ * for struct ifmap, whose two longs make it 16 bytes in the process.
+ */
+struct ifreq32 {
+    char ifr_name[16];                  /* IFNAMSIZ */
+    union {
+        struct sockaddr ifru_addr;
+        struct sockaddr ifru_dstaddr;
+        struct sockaddr ifru_broadaddr;
+        struct sockaddr ifru_netmask;
+        struct sockaddr ifru_hwaddr;
+        int16_t         ifru_flags;
+        int32_t         ifru_ivalue;
+        int32_t         ifru_mtu;
+        uint8_t         ifru_map[16];
+        char            ifru_slave[16];
+        char            ifru_newname[16];
+        uptr32_t        ifru_data;
+    } ifr_ifru;
+};
+ABI32_ASSERT_SIZE(struct ifreq32, 32);
+
+struct ifconf32 {
+    int32_t ifc_len;
+    union {
+        uptr32_t ifcu_buf;
+        uptr32_t ifcu_req;              /* struct ifreq32 * in the process */
+    } ifc_ifcu;
+};
+ABI32_ASSERT_SIZE(struct ifconf32, 8);
+
+/* USBDEVFS_CONTROL: struct usbdevfs_ctrltransfer (<sys/usbdevfs.h>).  The
+ * request number encodes the argument's size, so the process's number is
+ * the one built from this layout. */
+struct usbdevfs_ctrltransfer32 {
+    uint8_t  bRequestType;
+    uint8_t  bRequest;
+    uint16_t wValue;
+    uint16_t wIndex;
+    uint16_t wLength;
+    uint32_t timeout;
+    uptr32_t data;
+};
+ABI32_ASSERT_SIZE(struct usbdevfs_ctrltransfer32, 16);
+
+#define USBDEVFS_CONTROL32 _IOWR('U', 0, struct usbdevfs_ctrltransfer32)
 
 /*
  * Copy a structure in from, or out to, the process at `uaddr`, converting
