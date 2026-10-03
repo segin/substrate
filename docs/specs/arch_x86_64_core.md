@@ -229,16 +229,49 @@ same layer.
 | M1 | Machine-independent kernel built LP64-clean into the per-arch object directory | done |
 | M2 | Physical memory manager and 4-level pmap over the direct map; kernel heap | done |
 | M3 | Compat32: the existing i386 userland up to a shell | done: init, `rc.d` and the login services run; the torture suite matches the i386 kernel's results |
-| M4 | Native amd64 userland per abi-amd64.md | |
+| M4 | Native amd64 userland per abi-amd64.md | started: static 64-bit programs load and run (see below) |
 
 Open items on the 64-bit kernel:
 
 * one CPU only (`smp.c` brings up the BSP);
 * no EFI boot path (`efi_runtime.c` is stubbed) and no vm86
   (`vm86.c` returns `ENOSYS`);
-* `SYSCALL`/`SYSRET` (`syscall.c`) is not built: it belongs to the native
-  64-bit ABI of M4;
-* `uname` reports `i386`, the ABI the processes see.
+
+## Native 64-bit processes (M4, first stage)
+
+The 64-bit libraries build beside the 32-bit ones (`make -C lib
+ARCH=x86_64`, installed in `/lib64` and `/usr/lib64`), and the kernel runs
+a statically linked 64-bit program:
+
+* **Loading.** `exec/formats/elf.c` reads an `ELFCLASS64`/`EM_X86_64`
+  image into the 32-bit ELF structures the loader works on -- user space
+  ends below 4 GiB, so everything fits, and what does not is refused --
+  and marks the process `BITNESS_64`.  The initial stack is laid out as
+  for i386 and its word area (argc, argv, envp, auxv) widened to 8-byte
+  words.  Entry is `jump_to_userspace64()`: `SEL_UCODE`, `%rsp` and `%rdi`
+  the stack.  A 64-bit image with a `PT_INTERP` is refused until
+  `/sbin/ld64.so` exists.
+* **System calls.** `syscall_msr_init()` enables `SYSCALL`
+  (`EFER.SCE`, `STAR`, `LSTAR`, `FMASK`).  `syscall_entry64` (isr.S)
+  switches to the thread's kernel stack, builds the frame an interrupt
+  gate would have pushed and joins the `int $0x80` path, returning by
+  `IRETQ`.  The dispatcher takes a 64-bit frame's arguments from
+  `%rdi %rsi %rdx %r10 %r8 %r9` (and two from the stack) and converts the
+  result to the carry-flag convention.  `execve` reads a 64-bit caller's
+  argv and envp as 8-byte pointers.
+
+What a 64-bit process does not have yet:
+
+* **structure-carrying system calls.**  The kernel still reads and writes
+  every user structure in the i386 layout (see Compat32), which is not
+  the LP64 layout a 64-bit program is compiled with: `stat`, `sigaction`,
+  `readv`, `gettimeofday`, ... return or take the wrong fields.  Calls
+  whose arguments are scalars, strings and byte buffers work;
+* **signal delivery**: the frame pushed is the i386 one;
+* **threads and TLS**: `%fs` base handling, `thr_new`;
+* the dynamic linker `/sbin/ld64.so`.
+
+`make -C bin/sh sh64` builds the in-tree shell as such a program.
 
 ## Verification
 

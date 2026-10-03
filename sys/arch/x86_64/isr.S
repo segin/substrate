@@ -386,3 +386,62 @@ jump_to_elks:
     xorl %edi, %edi
     xorl %ebp, %ebp
     iretq
+
+/*
+ * void jump_to_userspace64(uint64_t entry, uint64_t stack)
+ *
+ * First entry into a native 64-bit process (docs/specs/abi-amd64.md,
+ * section 6): 64-bit user code segment, %rsp and %rdi the initial stack,
+ * every other register clear.
+ */
+.global jump_to_userspace64
+jump_to_userspace64:
+    cli
+    movw $0x23, %ax
+    movw %ax, %ds
+    movw %ax, %es
+    xorw %ax, %ax
+    movw %ax, %fs
+    movw %ax, %gs
+
+    pushq $0x23                 /* SS */
+    pushq %rsi                  /* RSP */
+    pushq $0x202                /* RFLAGS: IF */
+    pushq $0x2B                 /* CS: 64-bit user code */
+    pushq %rdi                  /* RIP */
+    movq %rsi, %rdi
+    xorl %eax, %eax
+    xorl %ebx, %ebx
+    xorl %ecx, %ecx
+    xorl %edx, %edx
+    xorl %esi, %esi
+    xorl %ebp, %ebp
+    xorl %r8d, %r8d
+    xorl %r9d, %r9d
+    xorl %r10d, %r10d
+    xorl %r11d, %r11d
+    xorl %r12d, %r12d
+    xorl %r13d, %r13d
+    xorl %r14d, %r14d
+    xorl %r15d, %r15d
+    iretq
+
+/*
+ * SYSCALL entry from a 64-bit process.  The instruction leaves the return
+ * %rip in %rcx and %rflags in %r11 and does not switch stacks, and FMASK
+ * has cleared IF.  Move to the thread's kernel stack, build the frame an
+ * interrupt gate would have pushed, and join the int $0x80 path: the frame
+ * is a registers_t like any other, and the return is the common IRETQ.
+ */
+.global syscall_entry64
+syscall_entry64:
+    movq %rsp, syscall_user_rsp(%rip)
+    movq syscall_kernel_rsp(%rip), %rsp
+    pushq $0x23                 /* SS */
+    pushq syscall_user_rsp(%rip)
+    pushq %r11                  /* RFLAGS */
+    pushq $0x2B                 /* CS */
+    pushq %rcx                  /* RIP */
+    pushq $0                    /* error code */
+    pushq $128                  /* vector: the system-call path */
+    jmp isr_common_stub

@@ -379,9 +379,11 @@ the context saved on every switch and in `mcontext_t`.
   there (`make -C lib both` / `install-both` for the pair).  The startup
   and system-call code is per architecture (`lib/c/arch/<arch>/`,
   `lib/sys/arch/<arch>/`).
-* **Dynamic linker:** `/sbin/ld.so` is the 32-bit linker and stays so; a
-  64-bit linker, searching `/lib64` and `/usr/lib64`, comes with the
-  64-bit userland.
+* **Dynamic linker:** `/sbin/ld.so` is the 32-bit linker and stays so.
+  The 64-bit linker is `/sbin/ld64.so` (the `PT_INTERP` of a 64-bit
+  dynamic executable), searching `/lib64` and `/usr/lib64`.  It is not
+  built yet: until it is, the kernel refuses a 64-bit image with a
+  `PT_INTERP`, and 64-bit programs are linked statically.
 * **Relocations:** the psABI's `R_X86_64_*` set; `ld.so` must support at
   least `RELATIVE`, `GLOB_DAT`, `JUMP_SLOT`, `64`, `PC32`, `COPY`,
   `TPOFF64`, `DTPMOD64`, `DTPOFF64`, and `IRELATIVE`.

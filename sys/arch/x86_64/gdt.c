@@ -18,6 +18,7 @@
 
 #include <arch/x86_64/boot.h>
 #include <arch/x86_64/gdt.h>
+#include <arch/x86-common/msr.h>
 #include <sys/smp.h>
 
 /* System descriptor (TSS, LDT): 16 bytes, two GDT slots, in long mode. */
@@ -200,14 +201,35 @@ void gdt_init_percpu(int cpu_id, uint64_t rsp0) {
 void gdt_init(void) {
     /* The boot stack until there are threads with their own. */
     gdt_init_percpu(0, (uint64_t)boot_stack_top);
+    syscall_msr_init();
 }
 
 void set_kernel_stack(uintptr_t stack) {
     tss_set_rsp0((uint64_t)stack);
 }
 
+/* The kernel stack SYSCALL switches to: the instruction, unlike an
+ * interrupt gate, does not take it from the TSS (isr.S, syscall_entry64). */
+uint64_t syscall_kernel_rsp;
+uint64_t syscall_user_rsp;
+
 void tss_set_rsp0(uint64_t rsp0) {
     per_cpu_tss[gdt_cpu()].rsp0 = rsp0;
+    syscall_kernel_rsp = rsp0;
+}
+
+/*
+ * Enable SYSCALL for native 64-bit processes (docs/specs/abi-amd64.md,
+ * section 3).  STAR names the kernel selectors SYSCALL loads; the return
+ * is by IRETQ through the common trap exit, so the SYSRET half is unused.
+ * FMASK clears IF until the entry stub is on the kernel stack, and DF/TF.
+ */
+void syscall_msr_init(void) {
+    wrmsr(MSR_EFER, rdmsr(MSR_EFER) | EFER_SCE);
+    wrmsr(0xC0000081 /* STAR */,
+          ((uint64_t)SEL_KCODE << 32) | ((uint64_t)SEL_UCODE32_RPL3 << 48));
+    wrmsr(0xC0000082 /* LSTAR */, (uint64_t)(uintptr_t)syscall_entry64);
+    wrmsr(0xC0000084 /* FMASK */, 0x200 | 0x400 | 0x100);
 }
 
 struct tss64 *tss_get(void) {

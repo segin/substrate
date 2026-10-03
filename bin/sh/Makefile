@@ -23,6 +23,26 @@ ifndef NATIVE_BUILD
 USER_CFLAGS += -I$(TOP)/sys
 endif
 
+# sh64: this shell as a native 64-bit program, linked statically against
+# the 64-bit libraries (make -C lib ARCH=x86_64) -- there is no 64-bit
+# dynamic linker yet.  It runs on the x86_64 kernel only, and is installed
+# as /bin/sh64 beside the 32-bit userland.
+SH64_LIBS = $(TOP)/lib/edit/obj-x86_64/libedit.a $(TOP)/lib/c/obj-x86_64/libc.a \
+            $(TOP)/lib/sys/obj-x86_64/libsys.a $(TOP)/lib/m/obj-x86_64/libm.a
+SH64_CFLAGS = -m64 -march=x86-64 $(WARNFLAGS) -g -fno-stack-protector \
+              -std=c2x -nostdinc -fno-pie -I$(TOP)/include -I$(TOP)/sys/include \
+              -I$(TOP)/sys -I$(shell $(CC) -m64 -print-file-name=include)
+
+sh64: $(SRCS) $(SH64_LIBS) $(TOP)/lib/c/obj-x86_64/crt0.o
+	$(CC) $(SH64_CFLAGS) -o $@ $(SRCS) -nostdlib -static -no-pie \
+	      -Wl,-z,max-page-size=0x1000 $(TOP)/lib/c/obj-x86_64/crt0.o \
+	      -Wl,--start-group $(SH64_LIBS) \
+	      $(shell $(CC) -m64 -print-libgcc-file-name) -Wl,--end-group
+	$(call BRAND_SUBSTRATE,$@)
+
+$(SH64_LIBS) $(TOP)/lib/c/obj-x86_64/crt0.o:
+	$(MAKE) -C $(TOP)/lib ARCH=x86_64
+
 TESTS = ../../tests/bin/sh
 
 test_lexer: lexer.c util.c shell_var.c $(TESTS)/test_lexer.c

@@ -330,7 +330,70 @@ static void syscall_emit_enosys(registers_t *regs, struct personality *p) {
     }
 }
 
+#ifdef SUBSTRATE_ARCH_X86_64
+/*
+ * Native 64-bit processes (docs/specs/abi-amd64.md, section 3).  They
+ * enter through SYSCALL with the number in %rax and the arguments in
+ * %rdi %rsi %rdx %r10 %r8 %r9, a seventh and eighth at 8(%rsp) and
+ * 16(%rsp).  User space ends below 4 GiB, so every argument that is an
+ * address fits the 32-bit argument words the dispatcher carries.
+ */
+static int syscall_frame_is_amd64(const registers_t *regs) {
+    return regs->cs == SEL_UCODE_RPL3;
+}
+
+static void amd64_extract_syscall_args(const registers_t *regs, uint32_t *args) {
+    uint64_t stk[3];
+
+    args[0] = (uint32_t)regs->rdi;
+    args[1] = (uint32_t)regs->rsi;
+    args[2] = (uint32_t)regs->rdx;
+    args[3] = (uint32_t)regs->r10;
+    args[4] = (uint32_t)regs->r8;
+    args[5] = (uint32_t)regs->r9;
+    args[6] = args[7] = 0;
+    if (copyin((const void *)(uintptr_t)regs->rsp, stk, sizeof(stk)) == 0) {
+        args[6] = (uint32_t)stk[1];
+        args[7] = (uint32_t)stk[2];
+    }
+}
+
+/*
+ * The amd64 return convention: carry clear and the result in %rax, or
+ * carry set and the positive errno.  The handlers return -errno in the
+ * low word, as for a 32-bit process; a result is zero-extended, which is
+ * right for the addresses and counts they produce.
+ */
+static void amd64_syscall_return(registers_t *regs) {
+    int32_t r = (int32_t)regs->eax;
+
+    if (r < 0 && r >= -4095) {
+        regs->rax = (uint64_t)(uint32_t)(-r);
+        regs->rflags |= 1;
+    } else {
+        regs->rax = (uint64_t)(uint32_t)r;
+        regs->rflags &= ~1UL;
+    }
+}
+
+static void syscall_dispatch(registers_t *regs);
+
 void syscall_handler(registers_t *regs) {
+    int amd64 = syscall_frame_is_amd64(regs);
+
+    syscall_dispatch(regs);
+    /* A sigreturn has replaced the frame with one that is not a system
+     * call's; leave it alone. */
+    if (amd64 && syscall_frame_is_amd64(regs) &&
+        !(current_thread && current_thread->frame_replaced)) {
+        amd64_syscall_return(regs);
+    }
+}
+
+static void syscall_dispatch(registers_t *regs) {
+#else
+void syscall_handler(registers_t *regs) {
+#endif
     __asm__ volatile("sti");
     thread_t *cpu_thread = CURRENT_THREAD();
     current_thread = cpu_thread;
@@ -366,6 +429,11 @@ void syscall_handler(registers_t *regs) {
 
     uint32_t args[8];
     i386_extract_syscall_args(p, regs, args);
+#ifdef SUBSTRATE_ARCH_X86_64
+    if (syscall_frame_is_amd64(regs)) {
+        amd64_extract_syscall_args(regs, args);
+    }
+#endif
 
     /* If `trace_pid=N` was set, only emit trace lines for that PID. */
     int trace_this = syscall_trace_enabled &&

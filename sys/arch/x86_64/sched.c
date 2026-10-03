@@ -139,6 +139,11 @@ static void sched_build_child_frame(thread_t *t, const registers_t *regs,
     registers_t *child = (registers_t *)sp;
     *child = *regs;
     child->rax = 0;                     /* the child's return value */
+    if (regs->cs == SEL_UCODE_RPL3) {
+        /* A 64-bit child does not pass through the system-call return
+         * path, which is what clears carry for "no error". */
+        child->rflags &= ~1UL;
+    }
     child->useresp = user_sp;
 
     sp -= sizeof(struct switch_frame);

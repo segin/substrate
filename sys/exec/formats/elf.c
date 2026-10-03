@@ -38,6 +38,7 @@ typedef struct elf_image_info {
     Elf32_Ehdr ehdr;
     Elf32_Phdr phdrs[256];
     uint16_t phnum;
+    uint8_t is64;           /* an ELFCLASS64 image, read into the above */
     int detected_os;
     uint32_t at_phdr;
     char interp_path[256];
@@ -188,6 +189,69 @@ static int elf_cache_matches(const elf_image_cache_entry_t *entry, fs_node_t *fi
            entry->ctime == file->ctime;
 }
 
+#ifdef SUBSTRATE_ARCH_X86_64
+/*
+ * A native amd64 image (docs/specs/abi-amd64.md, section 9).  User space
+ * ends below 4 GiB on this kernel, so every address, offset and size of a
+ * loadable 64-bit image fits the 32-bit ELF structures the loader works
+ * on: the 64-bit headers are read into those, and anything that does not
+ * fit is refused.  e_ident keeps ELFCLASS64, which is what marks the
+ * process 64-bit.
+ */
+static int elf64_fits(uint64_t v) {
+    return v <= 0xFFFFFFFFULL;
+}
+
+static int elf64_read_ehdr(fs_node_t *file, elf_image_info_t *image) {
+    Elf64_Ehdr e;
+
+    if (file->read(file, 0, sizeof(e), (uint8_t *)&e) != sizeof(e)) {
+        return -ENOEXEC;
+    }
+    if (!elf64_fits(e.e_entry) || !elf64_fits(e.e_phoff) ||
+        e.e_phentsize < sizeof(Elf64_Phdr)) {
+        return -ENOEXEC;
+    }
+    image->ehdr.e_type      = e.e_type;
+    image->ehdr.e_machine   = e.e_machine;
+    image->ehdr.e_version   = e.e_version;
+    image->ehdr.e_entry     = (uint32_t)e.e_entry;
+    image->ehdr.e_phoff     = (uint32_t)e.e_phoff;
+    image->ehdr.e_shoff     = 0;
+    image->ehdr.e_flags     = e.e_flags;
+    image->ehdr.e_ehsize    = e.e_ehsize;
+    image->ehdr.e_phentsize = e.e_phentsize;
+    image->ehdr.e_phnum     = e.e_phnum;
+    image->ehdr.e_shentsize = 0;
+    image->ehdr.e_shnum     = 0;
+    image->ehdr.e_shstrndx  = 0;
+    image->is64 = 1;
+    return 0;
+}
+
+static int elf64_read_phdr(fs_node_t *file, uint32_t offset, Elf32_Phdr *out) {
+    Elf64_Phdr p;
+
+    if (file->read(file, offset, sizeof(p), (uint8_t *)&p) != sizeof(p)) {
+        return -ENOEXEC;
+    }
+    if (!elf64_fits(p.p_offset) || !elf64_fits(p.p_vaddr) ||
+        !elf64_fits(p.p_paddr) || !elf64_fits(p.p_filesz) ||
+        !elf64_fits(p.p_memsz) || !elf64_fits(p.p_align)) {
+        return -ENOEXEC;
+    }
+    out->p_type   = p.p_type;
+    out->p_offset = (uint32_t)p.p_offset;
+    out->p_vaddr  = (uint32_t)p.p_vaddr;
+    out->p_paddr  = (uint32_t)p.p_paddr;
+    out->p_filesz = (uint32_t)p.p_filesz;
+    out->p_memsz  = (uint32_t)p.p_memsz;
+    out->p_flags  = p.p_flags;
+    out->p_align  = (uint32_t)p.p_align;
+    return 0;
+}
+#endif
+
 static int elf_read_image_info(fs_node_t *file, elf_image_info_t *image) {
     if (!file || !file->read || !image) {
         return -ENOEXEC;
@@ -202,6 +266,13 @@ static int elf_read_image_info(fs_node_t *file, elf_image_info_t *image) {
     if (!elf_check_file(&image->ehdr)) {
         return -ENOEXEC;
     }
+
+#ifdef SUBSTRATE_ARCH_X86_64
+    if (image->ehdr.e_ident[EI_CLASS] == ELFCLASS64) {
+        int rc = elf64_read_ehdr(file, image);
+        if (rc != 0) return rc;
+    }
+#endif
 
     if (image->ehdr.e_phnum > (sizeof(image->phdrs) / sizeof(image->phdrs[0]))) {
         return -ENOEXEC;
@@ -230,6 +301,14 @@ static int elf_read_image_info(fs_node_t *file, elf_image_info_t *image) {
         uint32_t ph_offset = (uint32_t)ph_offset64;
         Elf32_Phdr *phdr = &image->phdrs[i];
 
+#ifdef SUBSTRATE_ARCH_X86_64
+        if (image->is64) {
+            int rc = elf64_read_phdr(file, ph_offset, phdr);
+            if (rc != 0) return rc;
+            /* No 64-bit dynamic linker exists yet: static images only. */
+            if (phdr->p_type == PT_INTERP) return -ENOEXEC;
+        } else
+#endif
         if (file->read(file, ph_offset, sizeof(Elf32_Phdr), (uint8_t *)phdr) != sizeof(Elf32_Phdr)) {
             return -ENOEXEC;
         }
@@ -418,8 +497,12 @@ static int elf_machine_matches_kernel(const Elf32_Ehdr *ehdr) {
 
 #if defined(__i386__) || defined(SUBSTRATE_ARCH_X86_64)
     /* The x86_64 kernel runs i386 programs in compatibility mode
-     * (docs/specs/abi-amd64.md, section 10); native amd64 ones are for
-     * later. */
+     * (docs/specs/abi-amd64.md, section 10) and native amd64 ones. */
+#ifdef SUBSTRATE_ARCH_X86_64
+    if (ehdr->e_ident[EI_CLASS] == ELFCLASS64 && ehdr->e_machine == EM_X86_64) {
+        return 1;
+    }
+#endif
     if (ehdr->e_ident[EI_CLASS] != ELFCLASS32 || ehdr->e_machine != EM_386) {
         char buf[96];
         snprintf(buf, sizeof(buf), "ELF: Unsupported machine/class (machine=%u class=%u)\n",
@@ -966,9 +1049,20 @@ static int is_user_ptr(const void *ptr) {
 
 static int capture_ptr(char *const array[], int index, char **out) {
     if (is_user_ptr(array)) {
-        /* A user argv/envp holds the process's own pointers, which are 32
-         * bits wide -- every process is an i386-ABI one, on the x86_64
-         * kernel too -- so step and read it in 32-bit words. */
+        /* A user argv/envp holds the process's own pointers: 32 bits wide
+         * for an i386-ABI process (on the x86_64 kernel too), 64 for a
+         * native amd64 one, whose addresses still fit 32 bits. */
+#ifdef SUBSTRATE_ARCH_X86_64
+        if (current_process && current_process->bitness == BITNESS_64) {
+            uint64_t uptr64;
+            int ret64 = copyin((const uint64_t *)(const void *)array + index,
+                               &uptr64, sizeof(uptr64));
+            if (ret64 == 0) {
+                *out = (char *)(uintptr_t)uptr64;
+            }
+            return ret64;
+        }
+#endif
         uint32_t uptr;
         int ret = copyin((const uint32_t *)(const void *)array + index,
                          &uptr, sizeof(uptr));
@@ -1260,6 +1354,11 @@ static int exec_setup_stack(pmap_t pmap, uint32_t *sp_out, char **k_argv, int ar
 
     /* Align to 16 before the auxv array. */
     sp &= ~15;
+    /* Everything pushed from here down -- the auxv, envp[], argv[], argc --
+     * is 32-bit words; a 64-bit image has them widened at the end. */
+#ifdef SUBSTRATE_ARCH_X86_64
+    uint32_t words_top = sp;
+#endif
 
     if (!image) {
         kprint("execve: Missing ELF image metadata for AUXV\n");
@@ -1491,6 +1590,34 @@ static int exec_setup_stack(pmap_t pmap, uint32_t *sp_out, char **k_argv, int ar
         current_process->perso_id == PERS_FREEBSD) {
         current_thread->fbsd_init_curthread = user_stack_base;  /* zeroed block */
     }
+
+#ifdef SUBSTRATE_ARCH_X86_64
+    /*
+     * A 64-bit process reads argc, the argument and environment vectors
+     * and the auxiliary vector as 8-byte words (docs/specs/abi-amd64.md,
+     * section 6).  They were laid out above as a contiguous run of 32-bit
+     * words; rewrite the run in place as zero-extended 64-bit words ending
+     * 16-byte aligned.  Word i moves to a lower address than any word not
+     * yet read, so one ascending pass is safe.
+     */
+    if (image->is64) {
+        uint32_t nwords = (words_top - sp) / 4;
+        uint32_t new_sp = (sp - nwords * 4) & ~15U;
+        if (new_sp < user_stack_base) {
+            kfree(stack_pages, sizeof(stack_page_t) * user_stack_size);
+            return -E2BIG;
+        }
+        for (uint32_t i = 0; i < nwords; i++) {
+            uint32_t from = sp + i * 4;
+            uint32_t v = *(uint32_t *)((uint8_t *)
+                stack_pages[(from - user_stack_base) / 0x1000].pa +
+                (from - user_stack_base) % 0x1000);
+            STACK_WRITE32(new_sp + i * 8, v);
+            STACK_WRITE32(new_sp + i * 8 + 4, 0);
+        }
+        sp = new_sp;
+    }
+#endif
 
     #undef STACK_WRITE32
     #undef PUSH_STRING
@@ -1920,6 +2047,11 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
         entry_ebx = tf.ebx;
     }
 
+#ifdef SUBSTRATE_ARCH_X86_64
+    if (current_process && current_process->bitness == BITNESS_64) {
+        jump_to_userspace64(entry, sp);
+    }
+#endif
     jump_to_userspace(entry, sp, entry_ebx);
     
     // Should never reach here

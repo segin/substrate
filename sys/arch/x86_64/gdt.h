@@ -102,6 +102,11 @@ void gdt_load_ldt(uintptr_t base, uint32_t limit);
 /* Enter a 32-bit process at `entry` with stack `stack` and %ebx = `ebx`,
  * on the flat user selectors (isr.S). */
 void jump_to_userspace(uint32_t entry, uint32_t stack, uint32_t ebx);
+/* Enter a native 64-bit process: SEL_UCODE, %rsp and %rdi = stack. */
+void jump_to_userspace64(uint64_t entry, uint64_t stack) __attribute__((noreturn));
+/* The SYSCALL instruction's entry point (isr.S), and its MSR setup. */
+void syscall_entry64(void);
+void syscall_msr_init(void);
 
 /* The same with the given selectors, for segmented programs; %edx =
  * dx_value at entry. */
