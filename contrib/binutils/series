@@ -12,3 +12,4 @@
 0009-ld-emulparams-substrate.patch
 0010-ld-makefile-wire-substrate.patch
 0011-readelf-substrate-osabi-name.patch
+0012-ld-emulparams-substrate-x86_64-lib64.patch

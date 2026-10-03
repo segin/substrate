@@ -1,0 +1,28 @@
+Subject: ld: elf_x86_64_substrate uses /sbin/ld64.so and the lib64 directories
+
+The 64-bit emulation was written before substrate had a 64-bit userland
+and named /sbin/ld.so, which is the 32-bit dynamic linker.  A 64-bit
+program's PT_INTERP is /sbin/ld64.so, and its libraries live in /lib64,
+/usr/lib64 and /usr/local/lib64 beside the 32-bit ones in /lib and
+/usr/lib (docs/specs/abi-amd64.md, section 9).  LIBPATH_SUFFIX=64 makes
+ld search those first, as the Linux emulation does.
+
+---
+diff --git a/ld/emulparams/elf_x86_64_substrate.sh b/ld/emulparams/elf_x86_64_substrate.sh
+--- a/ld/emulparams/elf_x86_64_substrate.sh
++++ b/ld/emulparams/elf_x86_64_substrate.sh
+@@ -5,6 +5,11 @@
+ # e_ident byte.  Defined in bfd/elf64-x86-64.c.
+ OUTPUT_FORMAT="elf64-x86-64-substrate"
+
+-# Substrate's dynamic linker (same path on x86_64 — the kernel
+-# normalises this regardless of word size).
+-ELF_INTERPRETER_NAME=\"/sbin/ld.so\"
++# Substrate's 64-bit dynamic linker.  /sbin/ld.so is the 32-bit one and
++# refuses ELFCLASS64 objects.
++ELF_INTERPRETER_NAME=\"/sbin/ld64.so\"
++
++# The 64-bit libraries are installed beside the 32-bit ones, in /lib64,
++# /usr/lib64 and /usr/local/lib64; search those ahead of the unsuffixed
++# directories.
++LIBPATH_SUFFIX=64

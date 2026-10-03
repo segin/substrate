@@ -28,7 +28,12 @@
 #                        /opt/substrate-toolchain)
 #   STAGE2_DESTDIR       DESTDIR for stage-2 staging (default
 #                        ${SUBSTRATE_TOP}/dist-overlay/dist-toolchain)
-#   TARGET_TRIPLE        default i386-unknown-substrate
+#   TARGET_TRIPLE        default i386-unknown-substrate.  Stage 1 also
+#                        builds x86_64-unknown-substrate, the 64-bit cross
+#                        toolchain, into the same prefix (the tools are
+#                        prefixed with the triple) from its own build
+#                        directory, build-stage1-x86_64.  Stage 2 is
+#                        32-bit only.
 #   PARALLEL             default $(nproc)
 #
 # Usage:
@@ -76,6 +81,17 @@ PARALLEL="${PARALLEL:-$(nproc 2>/dev/null || echo 4)}"
 STAGE1_PREFIX="${STAGE1_PREFIX:-/opt/substrate}"
 STAGE2_DESTDIR="${STAGE2_DESTDIR:-${SUBSTRATE_TOP}/dist-overlay/dist-toolchain}"
 
+# Each target builds in its own directory, so the two cross toolchains do
+# not wipe each other's trees.  The 32-bit one keeps the historical name.
+case "$TARGET_TRIPLE" in
+    i[3-7]86-*) BUILD_SUFFIX= ;;
+    *)          BUILD_SUFFIX="-${TARGET_TRIPLE%%-*}" ;;
+esac
+if [ "$STAGE" = 2 ] && [ -n "$BUILD_SUFFIX" ]; then
+    echo "build.sh: stage 2 is only wired up for the 32-bit target" >&2
+    exit 2
+fi
+
 # Locate the patched source tree.  fetch.sh extracts to ./build/binutils-X.Y.Z/
 SRC_TREE="$(ls -d "$HERE"/build/binutils-*/ 2>/dev/null | head -1 || true)"
 if [ -z "$SRC_TREE" ] || [ ! -d "$SRC_TREE" ]; then
@@ -92,7 +108,7 @@ echo "==> stage             = $STAGE"
 
 # ------------------------------------------------------------------ stage 1
 if [ "$STAGE" = 1 ]; then
-    BUILD_DIR="$HERE/build-stage1"
+    BUILD_DIR="$HERE/build-stage1$BUILD_SUFFIX"
     rm -rf "$BUILD_DIR"
     mkdir -p "$BUILD_DIR"
     cd "$BUILD_DIR"
@@ -110,7 +126,13 @@ if [ "$STAGE" = 1 ]; then
     make -j "$PARALLEL"
 
     echo "==> Installing to $STAGE1_PREFIX"
-    if [ -w "$(dirname "$STAGE1_PREFIX")" ]; then
+    # sudo only when it is needed: a prefix that exists and is ours takes
+    # the install as us, whatever its parent's permissions.  Installing a
+    # user-owned prefix as root leaves root-owned directories in it that
+    # the sysroot sync, which runs as us, then cannot write to.
+    _wdir="$STAGE1_PREFIX"
+    [ -d "$_wdir" ] || _wdir="$(dirname "$STAGE1_PREFIX")"
+    if [ -w "$_wdir" ]; then
         make install
     else
         echo "    (sudo required for $STAGE1_PREFIX)"

@@ -65,6 +65,15 @@ requested stage in the right order.
 | 0009 | `ld/emulparams/elf_{i386,x86_64}_substrate.sh` | new emuls — set `OUTPUT_FORMAT` to the OSABI-stamping vec and `ELF_INTERPRETER_NAME = /sbin/ld.so` |
 | 0010 | `ld/Makefile.am`, `ld/Makefile.in` | hook the new emuls into the build |
 | 0011 | `binutils/readelf.c` | pretty-print `OS/ABI: Substrate` instead of `<unknown: 40>` for substrate ELFs |
+| 0012 | `ld/emulparams/elf_x86_64_substrate.sh` | the 64-bit emul names `/sbin/ld64.so` (0009 wrote `/sbin/ld.so`, the 32-bit linker) and sets `LIBPATH_SUFFIX=64` so `/lib64`, `/usr/lib64` are searched first |
+
+## The 64-bit target
+
+`TARGET_TRIPLE=x86_64-unknown-substrate ./build.sh --stage=1` builds the
+64-bit cross binutils into the same prefix from `build-stage1-x86_64/`;
+the tools are triple-prefixed, so the two sets coexist.  Stage 2 is
+32-bit only.  `contrib/build-toolchain64.sh` runs this together with GCC
+and the sysroot steps.
 
 ## What's deliberately deferred
 
