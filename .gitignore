@@ -518,3 +518,6 @@ tests/usr.lib/elfobj/test_*
 
 # x86_64 userland library objects (make -C lib ARCH=x86_64)
 obj-x86_64/
+
+# 32-bit builds of the dynamic-linker tests (make -C tests/sbin/ld64 ARCH=i386)
+/tests/sbin/ld64/obj-i386/
