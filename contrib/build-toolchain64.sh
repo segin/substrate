@@ -73,6 +73,19 @@ if [ "${SKIP_BUILD:-0}" != 1 ]; then
     step "sysroot (headers and libraries for the libgcc build)"
     "$SUBSTRATE_TOP/scripts/sync-sysroot.sh" --x86_64
 
+    # gcc is configured --with-sysroot=dist, and its fixincludes step
+    # insists that $sysroot/usr/include exist while gcc is being built:
+    #
+    #   The directory (BUILD_SYSTEM_HEADER_DIR) that should contain system
+    #   headers does not exist: .../dist/usr/include
+    #
+    # On a fresh checkout nothing has staged dist/ yet, so seed it with
+    # substrate's own headers, as the top-level build.sh does for the
+    # 32-bit toolchain.  On a developer's machine this also brings a
+    # stale staging of those headers up to date.
+    mkdir -p "$SUBSTRATE_TOP/dist/usr/include"
+    cp -aL "$SUBSTRATE_TOP/include/." "$SUBSTRATE_TOP/dist/usr/include/"
+
     step "3/7 gcc (compiler and libgcc)"
     (cd "$HERE/gcc" && ./build.sh --stage=1)
 else
