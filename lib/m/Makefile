@@ -25,11 +25,25 @@ all: $(O)libm.a $(if $(NATIVE_BUILD),,$(O)libm.so.0)
 $(O)libm.a: $(OBJS)
 	$(AR) rcs $@ $(OBJS)
 
+# The compiler's complex-arithmetic helpers (see below).  The 32-bit
+# library takes them from libgcc_s.so.1, which the substrate toolchain
+# installs in /lib.  There is no 64-bit libgcc_s on the system -- the
+# 64-bit libraries are built with the host compiler -- so the 64-bit
+# libm.so.0 links the few it needs from libgcc.a instead (they are
+# hidden there, and stay private to libm).  A DT_NEEDED libgcc_s.so.1
+# would make every 64-bit dynamic program fail to load, since libc.so.0
+# needs libm.so.0.
+ifeq ($(ARCH),x86_64)
+LIBM_LIBGCC = $(LIBGCC)
+else
+LIBM_LIBGCC = -lgcc_s
+endif
+
 # libm has no DT_NEEDED — math is self-contained, no syscalls.
 # No libm.so symlink in source tree — see lib/c/Makefile.
 $(O)libm.so.0: $(PIC_OBJS)
 	$(CC) $(SHLIB_LDFLAGS) -Wl,-soname,libm.so.0 -o $@ $(PIC_OBJS) \
-	      -lgcc_s
+	      $(LIBM_LIBGCC)
 # DT_NEEDED libgcc_s.so.1: substrate's stage-2 gcc emits __divxc3 /
 # __mulxc3 (long-double complex division/multiplication helpers) for
 # some operations in cmath_special.c.  These live in libgcc_s.so.1;

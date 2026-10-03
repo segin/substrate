@@ -14,15 +14,21 @@
 #include <elf.h>
 #include <stddef.h>
 
+/* ElfW(type): the ELF type of the native class - Elf32_ on i386, Elf64_
+ * on amd64, whose objects /sbin/ld64.so loads. */
 #ifndef ElfW
+#if defined(__x86_64__)
+#define ElfW(type) Elf64_##type
+#else
 #define ElfW(type) Elf32_##type
+#endif
 #endif
 
 struct dl_phdr_info {
-	Elf32_Addr		dlpi_addr;	/* module load bias */
+	ElfW(Addr)		dlpi_addr;	/* module load bias */
 	const char	       *dlpi_name;	/* module name / path */
-	const Elf32_Phdr       *dlpi_phdr;	/* program header table */
-	Elf32_Half		dlpi_phnum;	/* number of program headers */
+	const ElfW(Phdr)       *dlpi_phdr;	/* program header table */
+	ElfW(Half)		dlpi_phnum;	/* number of program headers */
 	/*
 	 * glibc ABI extension.  Substrate does not maintain the load-event
 	 * counters, and dl_iterate_phdr() reports the size of just the four
