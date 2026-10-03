@@ -25,17 +25,18 @@ endif
 
 # sh64: this shell as a native 64-bit program, under the name it is
 # installed by, /bin/sh64, beside the 32-bit userland.  It runs on the
-# x86_64 kernel only.  It is the STATIC ARCH=x86_64 build (DYNAMIC=0), so
-# it needs neither /sbin/ld64.so nor /lib64 on the system it lands on; a
-# plain `make ARCH=x86_64` builds the dynamically linked obj-x86_64/sh.
-# The two share obj-x86_64/ but not compiler flags, hence the cleans.
+# x86_64 kernel only.  It is the plain ARCH=x86_64 build, dynamically
+# linked: it needs /sbin/ld64.so and libedit, libc, libsys and libm in
+# /lib64.  `make sh64 DYNAMIC=0` links it statically instead, for a
+# system without those.  The two share obj-x86_64/ but not compiler
+# flags, hence the cleans.
 .PHONY: sh64
 sh64:
 	$(MAKE) -C $(TOP)/lib ARCH=x86_64
-	$(MAKE) ARCH=x86_64 DYNAMIC=0 clean
-	$(MAKE) ARCH=x86_64 DYNAMIC=0
+	$(MAKE) ARCH=x86_64 clean
+	$(MAKE) ARCH=x86_64
 	cp obj-x86_64/sh sh64
-	$(MAKE) ARCH=x86_64 DYNAMIC=0 clean
+	$(MAKE) ARCH=x86_64 clean
 
 TESTS = ../../tests/bin/sh
 
