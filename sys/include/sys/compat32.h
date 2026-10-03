@@ -222,6 +222,42 @@ int msghdr_copyout(const struct msghdr *k, void *uaddr);
 /* `count` user I/O vectors at `uaddr` into k[0..count). */
 int iovec_copyin(const void *uaddr, struct iovec *k, int count);
 
+/*
+ * recvmsg() writes three fields back into the process's msghdr; these are
+ * their addresses in the layout the process uses.
+ */
+struct msghdr_out {
+    void *msg_namelen;      /* socklen_t */
+    void *msg_controllen;   /* socklen_t */
+    void *msg_flags;        /* int */
+};
+void msghdr_out_fields(void *uaddr, struct msghdr_out *out);
+
+/*
+ * The scalars and small records a handler reads or writes through a user
+ * pointer in the middle of its work, whose width follows the process: a
+ * size_t or a pointer (32 bits, or 64 for a native 64-bit process), and
+ * struct timespec and struct sched_param (the kernel's i386 layout, or the
+ * LP64 one of <sys/amd64_abi.h>).
+ */
+struct sched_param;
+struct timespec;
+int usize_copyin(const void *uaddr, size_t *k);
+int usize_copyout(size_t v, void *uaddr);
+int uptr_copyout(uintptr_t v, void *uaddr);
+int timespec_copyin(const void *uaddr, struct timespec *k);
+int timespec_copyout(const struct timespec *k, void *uaddr);
+int sched_param_copyin(const void *uaddr, struct sched_param *k);
+int sched_param_copyout(const struct sched_param *k, void *uaddr);
+
+/* Element `index` of the process's sys_map_t / sys_swapinfo_t array at
+ * `uarray` (<sys/sysinfo.h>). */
+struct sys_map;
+struct sys_swapinfo;
+int sys_map_copyout(const struct sys_map *k, void *uarray, size_t index);
+int sys_swapinfo_copyout(const struct sys_swapinfo *k, void *uarray,
+                         size_t index);
+
 /* The process's layout of a siginfo, for building a signal frame. */
 void siginfo_to32(const siginfo_t *k, siginfo32_t *u);
 void stack_to32(const stack_t *k, stack32_t *u);

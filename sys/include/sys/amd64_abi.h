@@ -9,14 +9,21 @@
  * these are the 64-bit side.
  *
  * Structures whose amd64 layout happens to equal the kernel's -- struct
- * timeval, itimerval, rlimit, pollfd, utsname, termios, the socket
- * addresses -- need no twin here.
+ * timeval, itimerval, pollfd, utsname, termios, tms, sembuf, ipc_perm,
+ * the socket addresses, and the <sys/sysinfo.h> records made only of
+ * fixed-width fields -- need no twin here.
+ *
+ * Where section 5 of the specification is silent, the 64-bit side is the
+ * natural LP64 layout of the declaration in the userland header, which is
+ * what a 64-bit process was compiled with.
  */
 #ifndef _SYS_AMD64_ABI_H
 #define _SYS_AMD64_ABI_H
 
 #include <stdint.h>
+#include <sys/ipc.h>
 #include <sys/signal.h>
+#include <sys/usbdevfs.h>
 
 #define ABI64_ASSERT_SIZE(type, size) \
     _Static_assert(sizeof(type) == (size), #type " must keep its amd64 size")
@@ -146,6 +153,281 @@ struct amd64_thr_param {
     uint64_t spare[3];
 };
 ABI64_ASSERT_SIZE(struct amd64_thr_param, 104);
+
+struct amd64_itimerspec {
+    struct amd64_timespec it_interval;
+    struct amd64_timespec it_value;
+};
+ABI64_ASSERT_SIZE(struct amd64_itimerspec, 32);
+
+/* struct rlimit: rlim_t is an unsigned long, and RLIM_INFINITY all ones. */
+struct amd64_rlimit {
+    uint64_t rlim_cur;
+    uint64_t rlim_max;
+};
+ABI64_ASSERT_SIZE(struct amd64_rlimit, 16);
+
+#define AMD64_RLIM_INFINITY (~(uint64_t)0)
+
+/* <sys/statfs.h>: the Linux-shaped record the userland header declares,
+ * not the BSD-shaped struct statfs the kernel keeps (<sys/mount.h>). */
+struct amd64_statfs {
+    uint32_t f_type;
+    uint32_t pad0;
+    uint64_t f_bsize;
+    uint64_t f_blocks;
+    uint64_t f_bfree;
+    uint64_t f_bavail;
+    uint64_t f_files;
+    uint64_t f_ffree;
+    int64_t  f_fsid;
+    uint32_t f_namelen;
+    uint32_t pad1;
+    uint64_t f_frsize;
+    uint32_t f_flags;
+    uint32_t pad2;
+    uint64_t f_spare[4];
+};
+ABI64_ASSERT_SIZE(struct amd64_statfs, 120);
+
+struct amd64_statvfs {
+    uint64_t f_bsize;
+    uint64_t f_frsize;
+    uint64_t f_blocks;
+    uint64_t f_bfree;
+    uint64_t f_bavail;
+    uint64_t f_files;
+    uint64_t f_ffree;
+    uint64_t f_favail;
+    uint64_t f_fsid;
+    uint64_t f_flag;
+    uint64_t f_namemax;
+    char     f_fstypename[16];
+    char     f_basetype[16];
+};
+ABI64_ASSERT_SIZE(struct amd64_statvfs, 120);
+
+struct amd64_mq_attr {
+    int64_t mq_flags;
+    int64_t mq_maxmsg;
+    int64_t mq_msgsize;
+    int64_t mq_curmsgs;
+};
+ABI64_ASSERT_SIZE(struct amd64_mq_attr, 32);
+
+struct amd64_sched_param {
+    int32_t sched_priority;
+    int32_t sched_ss_low_priority;
+    struct amd64_timespec sched_ss_repl_period;
+    struct amd64_timespec sched_ss_init_budget;
+    int32_t sched_ss_max_repl;
+    uint32_t pad;
+};
+ABI64_ASSERT_SIZE(struct amd64_sched_param, 48);
+
+/* struct ipc_perm has only 32-bit and narrower members, so it is the same
+ * 28 bytes in both layouts and the two records below embed it as it is. */
+struct amd64_shmid_ds {
+    struct ipc_perm shm_perm;
+    uint32_t pad;
+    uint64_t shm_segsz;
+    int64_t  shm_atime;
+    int64_t  shm_dtime;
+    int64_t  shm_ctime;
+    int32_t  shm_cpid;
+    int32_t  shm_lpid;
+    uint64_t shm_nattch;
+};
+ABI64_ASSERT_SIZE(struct amd64_shmid_ds, 80);
+
+struct amd64_semid_ds {
+    struct ipc_perm sem_perm;
+    uint32_t pad;
+    int64_t  sem_otime;
+    int64_t  sem_ctime;
+    uint64_t sem_nsems;
+};
+ABI64_ASSERT_SIZE(struct amd64_semid_ds, 56);
+
+struct amd64_sysinfo {
+    int64_t  uptime;
+    uint64_t loads[3];
+    uint64_t totalram;
+    uint64_t freeram;
+    uint64_t sharedram;
+    uint64_t bufferram;
+    uint64_t totalswap;
+    uint64_t freeswap;
+    uint16_t procs;
+    uint16_t pad;
+    uint32_t pad1;
+    uint64_t totalhigh;
+    uint64_t freehigh;
+    uint32_t mem_unit;
+    uint32_t pad2;
+};
+ABI64_ASSERT_SIZE(struct amd64_sysinfo, 112);
+
+/* sys_procinfo_t as the userland <sys/sysinfo.h> declares it: the kernel's
+ * record without its trailing is_kernel member. */
+struct amd64_procinfo {
+    int32_t  pid;
+    int32_t  ppid;
+    int32_t  pgid;
+    int32_t  sid;
+    uint32_t uid;
+    uint32_t gid;
+    uint32_t euid;
+    uint32_t egid;
+    uint8_t  state;
+    uint8_t  bitness;
+    int16_t  perso_id;
+    int16_t  tty;
+    uint16_t nice;
+    char     name[32];
+    uint32_t start_time;
+    uint32_t user_time;
+    uint32_t sys_time;
+    uint32_t vsize;
+    uint32_t rss;
+};
+ABI64_ASSERT_SIZE(struct amd64_procinfo, 92);
+
+/* sys_map_t: start and end are uintptr_t. */
+struct amd64_map {
+    uint64_t start;
+    uint64_t end;
+    uint32_t flags;
+    char     name[256];
+    uint32_t pad;
+};
+ABI64_ASSERT_SIZE(struct amd64_map, 280);
+
+/* sys_swapinfo_t: the same members, padded to the alignment of its 64-bit
+ * ones. */
+struct amd64_swapinfo {
+    char     path[256];
+    uint64_t total;
+    uint64_t used;
+    int32_t  priority;
+    uint32_t pad;
+};
+ABI64_ASSERT_SIZE(struct amd64_swapinfo, 280);
+
+struct amd64_sigevent {
+    int32_t  sigev_notify;
+    int32_t  sigev_signo;
+    uint64_t sigev_value;
+    uint64_t sigev_notify_function;
+    uint64_t sigev_notify_attributes;
+};
+ABI64_ASSERT_SIZE(struct amd64_sigevent, 32);
+
+struct amd64_msghdr {
+    uint64_t msg_name;
+    uint32_t msg_namelen;
+    uint32_t pad0;
+    uint64_t msg_iov;
+    int32_t  msg_iovlen;
+    uint32_t pad1;
+    uint64_t msg_control;
+    uint32_t msg_controllen;
+    int32_t  msg_flags;
+};
+ABI64_ASSERT_SIZE(struct amd64_msghdr, 48);
+
+/* struct robust_list_head (<sys/futex.h>); the list it heads is a chain of
+ * 64-bit next pointers. */
+struct amd64_robust_list_head {
+    uint64_t list_next;
+    int64_t  futex_offset;
+    uint64_t list_op_pending;
+};
+ABI64_ASSERT_SIZE(struct amd64_robust_list_head, 24);
+
+/*
+ * The device and socket ioctl records, whose userland declarations
+ * (<sys/fb.h>, <sys/input.h>, <net/if.h>, <sys/usbdevfs.h>) spell their
+ * fields with long and pointers.  The i386 twins are in <sys/compat32.h>.
+ */
+
+/* FBIOGET_FSCREENINFO: struct fb_fix_screeninfo. */
+struct amd64_fb_fix_screeninfo {
+    char     id[16];
+    uint64_t smem_start;
+    uint32_t smem_len;
+    uint32_t type;
+    uint32_t type_aux;
+    uint32_t visual;
+    uint16_t xpanstep;
+    uint16_t ypanstep;
+    uint16_t ywrapstep;
+    uint16_t pad0;
+    uint32_t line_length;
+    uint32_t pad1;
+    uint64_t mmio_start;
+    uint32_t mmio_len;
+    uint32_t accel;
+    uint16_t reserved[3];
+    uint16_t pad2;
+};
+ABI64_ASSERT_SIZE(struct amd64_fb_fix_screeninfo, 80);
+
+/* FBIOGET_VIDEO_MODES: struct video_mode_query. */
+struct amd64_video_mode_query {
+    uint32_t count;
+    uint32_t pad;
+    uint64_t modes;
+};
+ABI64_ASSERT_SIZE(struct amd64_video_mode_query, 16);
+
+/* A record read from /dev/input/event0: struct input_event. */
+struct amd64_input_event {
+    int64_t  time_sec;
+    int64_t  time_usec;
+    uint16_t type;
+    uint16_t code;
+    int32_t  value;
+};
+ABI64_ASSERT_SIZE(struct amd64_input_event, 24);
+
+/* struct ifreq: the name, then a union that struct ifmap's two longs widen
+ * to 24 bytes.  Every member the kernel exchanges lies in the union's first
+ * 16 bytes, at the offsets of struct ifreq32. */
+struct amd64_ifreq {
+    char    ifr_name[16];
+    uint8_t ifr_ifru[24];
+};
+ABI64_ASSERT_SIZE(struct amd64_ifreq, 40);
+
+/* The union keeps its <net/if.h> member names, as struct ifconf32 does, so
+ * the ifc_buf and ifc_req accessor macros apply. */
+struct amd64_ifconf {
+    int32_t  ifc_len;
+    uint32_t pad;
+    union {
+        uint64_t ifcu_buf;
+        uint64_t ifcu_req;          /* struct ifreq * in the process */
+    } ifc_ifcu;
+};
+ABI64_ASSERT_SIZE(struct amd64_ifconf, 16);
+
+/* USBDEVFS_CONTROL: struct usbdevfs_ctrltransfer.  The request number
+ * encodes the argument's size, so a 64-bit process issues this one. */
+struct amd64_usbdevfs_ctrltransfer {
+    uint8_t  bRequestType;
+    uint8_t  bRequest;
+    uint16_t wValue;
+    uint16_t wIndex;
+    uint16_t wLength;
+    uint32_t timeout;
+    uint32_t pad;
+    uint64_t data;
+};
+ABI64_ASSERT_SIZE(struct amd64_usbdevfs_ctrltransfer, 24);
+
+#define USBDEVFS_CONTROL_AMD64 \
+    _IOWR('U', 0, struct amd64_usbdevfs_ctrltransfer)
 
 /* The FreeBSD/amd64 machine context. */
 struct amd64_mcontext {
