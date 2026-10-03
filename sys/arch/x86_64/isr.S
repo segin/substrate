@@ -135,17 +135,19 @@ isr_common_stub:
     /* Save data segment registers (might be user values) */
     /* In Long Mode, DS/ES/SS are largely unused but save for completeness */
     
-    /* Pass pointer to interrupt_frame as argument */
+    /* Pass pointer to interrupt_frame as argument; keep it in %rbx,
+     * which the C handler preserves (%rdi it may not), so the stack can
+     * be restored after realigning it.  %rbx's own value is in the frame. */
     movq %rsp, %rdi
-    
+    movq %rsp, %rbx
+
     /* Ensure 16-byte stack alignment for C ABI */
     andq $~0x0F, %rsp
-    
+
     /* Call C handler */
     call exception_handler
-    
-    /* Restore RSP (handler may return on different stack) */
-    movq %rdi, %rsp
+
+    movq %rbx, %rsp
     
     /* Restore registers */
     popq %r15
@@ -191,11 +193,12 @@ irq_common_stub:
     pushq %r15
     
     movq %rsp, %rdi
+    movq %rsp, %rbx             /* callee-saved; see isr_common_stub */
     andq $~0x0F, %rsp
-    
+
     call irq_handler
-    
-    movq %rdi, %rsp
+
+    movq %rbx, %rsp
     
     popq %r15
     popq %r14

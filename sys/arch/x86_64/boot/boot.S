@@ -1,275 +1,231 @@
 /*
- * boot.S - x86_64 Long Mode Bootstrap
+ * boot.S - x86_64 kernel entry: 32-bit protected mode to the higher half
  *
- * This code is initially executed in 32-bit protected mode (from Multiboot2
- * or UEFI) and transitions to 64-bit Long Mode before jumping to kmain.
+ * The loader (GRUB with multiboot or multiboot2, or QEMU's -kernel, which
+ * speaks multiboot 1) enters _start in 32-bit protected mode with paging
+ * off, at the kernel's physical load address.  This code builds the boot
+ * page tables, enables PAE and long mode, enters 64-bit mode, jumps to the
+ * kernel's link address in the top 2 GiB and calls kmain64(magic, info).
  *
- * Memory Map (after bootstrap):
- *   0x0000000000000000 - 0x00007FFFFFFFFFFF : User space (128 TB)
- *   0xFFFF800000000000 - 0xFFFF8FFFFFFFFFFF : Direct physical mapping
- *   0xFFFFFFFF80000000 - 0xFFFFFFFFFFFFFFFF : Kernel (-2GB)
+ * Boot page tables (2 MiB pages; replaced once the 4-level pmap exists):
+ *
+ *   0x0000000000000000 + 1 GiB  identity, needed only across the jump to
+ *                               the higher half; dropped in kmain64()
+ *   KERNEL_VMA         + 1 GiB  the kernel image (phys 0 .. 1 GiB)
+ *   DMAP_BASE          + 4 GiB  direct map of the first 4 GiB of physical
+ *                               memory (MMIO and the loader's structures)
+ *
+ * The 32-bit code runs at its physical address while linked at its
+ * virtual one, so every absolute reference in it is written sym - KERNEL_VMA.
  */
 
-#define ASM_FILE 1
+#include <arch/x86_64/layout.h>
 
-/* Multiboot2 constants */
+#define MB1_MAGIC       0x1BADB002
+#define MB1_FLAGS       0x00010003  /* page-align, memory map, a.out kludge */
 #define MB2_MAGIC       0xE85250D6
-#define MB2_ARCH_I386   0
-#define MB2_HEADER_LEN  (mb2_header_end - mb2_header)
-#define MB2_CHECKSUM    -(MB2_MAGIC + MB2_ARCH_I386 + MB2_HEADER_LEN)
 
-/* Page table entry flags */
-#define PTE_P           0x001   /* Present */
-#define PTE_W           0x002   /* Writable */
-#define PTE_PS          0x080   /* Page Size (2MB/1GB) */
-#define PTE_NX          0x8000000000000000  /* No Execute */
+#define PTE_P           0x001
+#define PTE_W           0x002
+#define PTE_PS          0x080
 
-/* CR0 bits */
-#define CR0_PE          0x00000001  /* Protected Mode Enable */
-#define CR0_PG          0x80000000  /* Paging Enable */
-
-/* CR4 bits */
-#define CR4_PAE         0x00000020  /* PAE */
-#define CR4_PGE         0x00000080  /* Page Global Enable */
-
-/* MSR addresses */
+#define CR0_PG          0x80000000
+#define CR4_PAE         0x00000020
+#define CR4_PGE         0x00000080
 #define MSR_EFER        0xC0000080
-#define EFER_LME        0x100       /* Long Mode Enable */
-#define EFER_NXE        0x800       /* No Execute Enable */
+#define EFER_LME        0x00000100
+#define EFER_NXE        0x00000800
 
-/* Kernel virtual base */
-#define KERNEL_VMA      0xFFFFFFFF80000000
-
-.code32
+#define PHYS(sym)       ((sym) - KERNEL_VMA)
+#define PML4_SLOT(va)   (((va) >> 39) & 511)
+#define PDPT_SLOT(va)   (((va) >> 30) & 511)
 
 /*
- * Multiboot2 Header
+ * Multiboot 1 header.  The a.out-kludge fields describe the flat image
+ * (kernel-x86_64.bin) by physical address, which is what lets QEMU's
+ * -kernel and GRUB's `multiboot` load a 64-bit kernel at all: both refuse
+ * an ELF64 file otherwise.
  */
+.section .multiboot, "a"
+.align 4
+mb1_header:
+    .long MB1_MAGIC
+    .long MB1_FLAGS
+    .long -(MB1_MAGIC + MB1_FLAGS)
+    .long PHYS(mb1_header)          /* header_addr */
+    .long PHYS(_kernel_start)       /* load_addr */
+    .long PHYS(_load_end)           /* load_end_addr */
+    .long PHYS(_bss_end)            /* bss_end_addr */
+    .long PHYS(_start)              /* entry_addr */
+
+/* Multiboot 2 header: GRUB's `multiboot2` loads the ELF64 file directly. */
 .section .multiboot2, "a"
 .align 8
 mb2_header:
     .long MB2_MAGIC
-    .long MB2_ARCH_I386
-    .long MB2_HEADER_LEN
-    .long MB2_CHECKSUM
-    
-    /* Framebuffer tag */
+    .long 0                         /* architecture: i386 protected mode */
+    .long mb2_header_end - mb2_header
+    .long -(MB2_MAGIC + 0 + (mb2_header_end - mb2_header))
     .align 8
-    .short 5        /* Type: framebuffer */
-    .short 0        /* Flags */
-    .long 20        /* Size */
-    .long 1024      /* Width */
-    .long 768       /* Height */
-    .long 32        /* Depth */
-    
-    /* End tag */
-    .align 8
-    .short 0
+    .short 0                        /* end tag */
     .short 0
     .long 8
 mb2_header_end:
 
-/*
- * Entry point (32-bit protected mode)
- */
 .section .text.boot, "ax"
+.code32
 .global _start
 .type _start, @function
 _start:
     cli
     cld
-    
-    /* Save Multiboot2 info pointer (EBX) and magic (EAX) */
-    movl %eax, %esi
-    movl %ebx, %edi
+    movl $PHYS(boot_stack_top), %esp
+    /* Loader magic and the multiboot information's physical address, kept
+     * on the stack: every general register is needed for the setup. */
+    pushl %eax
+    pushl %ebx
 
-    /* Check for Long Mode support */
+    /* Long mode? */
     movl $0x80000000, %eax
     cpuid
     cmpl $0x80000001, %eax
     jb no_long_mode
-    
     movl $0x80000001, %eax
     cpuid
-    testl $(1 << 29), %edx      /* LM bit */
+    testl $(1 << 29), %edx
     jz no_long_mode
+    movl %edx, %ebp                 /* remember NX support (bit 20) */
 
-    /*
-     * Setup 4-level page tables for Long Mode
-     * Using 2MB pages (PS bit) for simplicity during bootstrap
-     *
-     * PML4[0] -> PDPT (identity, low 512GB)
-     * PML4[511] -> PDPT (kernel, high 512GB)
-     * PDPT[0] -> PD (first 1GB)
-     * PDPT[510] -> PD (for kernel at -2GB)
-     * PD entries: 2MB pages mapping first 1GB
-     */
-    
-    /* Clear page tables */
-    movl $(boot_pml4 - KERNEL_VMA), %edi
-    xorl %eax, %eax
-    movl $(4096 * 4 / 4), %ecx  /* 4 pages */
-    rep stosl
-    
-    /* PML4[0] = PDPT | Present | Writable */
-    movl $(boot_pml4 - KERNEL_VMA), %edi
-    movl $(boot_pdpt - KERNEL_VMA), %eax
+    /* The page tables live in .bss, which the loader has zeroed. */
+
+    /* PML4: identity, direct map, kernel. */
+    movl $PHYS(boot_pdpt_lo), %eax
     orl $(PTE_P | PTE_W), %eax
-    movl %eax, (%edi)
-    
-    /* PML4[511] = PDPT | Present | Writable (for -2GB kernel) */
-    movl %eax, 511*8(%edi)
-    
-    /* PDPT[0] = PD | Present | Writable (identity map first 1GB) */
-    movl $(boot_pdpt - KERNEL_VMA), %edi
-    movl $(boot_pd - KERNEL_VMA), %eax
+    movl %eax, PHYS(boot_pml4) + 8 * 0
+    movl $PHYS(boot_pdpt_dmap), %eax
     orl $(PTE_P | PTE_W), %eax
-    movl %eax, (%edi)
-    
-    /* PDPT[510] = PD | Present | Writable (kernel at -2GB) */
-    movl %eax, 510*8(%edi)
-    
-    /* Fill PD with 2MB pages (512 entries = 1GB) */
-    movl $(boot_pd - KERNEL_VMA), %edi
-    movl $(PTE_P | PTE_W | PTE_PS), %eax  /* 2MB page, P, W */
-    xorl %ebx, %ebx                        /* Physical address counter */
+    movl %eax, PHYS(boot_pml4) + 8 * PML4_SLOT(DMAP_BASE)
+    movl $PHYS(boot_pdpt_hi), %eax
+    orl $(PTE_P | PTE_W), %eax
+    movl %eax, PHYS(boot_pml4) + 8 * PML4_SLOT(KERNEL_VMA)
+
+    /* Identity and kernel windows share one directory: phys 0 .. 1 GiB. */
+    movl $PHYS(boot_pd), %eax
+    orl $(PTE_P | PTE_W), %eax
+    movl %eax, PHYS(boot_pdpt_lo)
+    movl %eax, PHYS(boot_pdpt_hi) + 8 * PDPT_SLOT(KERNEL_VMA)
+
+    movl $PHYS(boot_pd), %edi
+    movl $(PTE_P | PTE_W | PTE_PS), %eax
     movl $512, %ecx
-1:
-    movl %eax, (%edi)
-    movl %ebx, 4(%edi)                     /* High 32 bits of address (0 for <4GB) */
-    addl $(2 * 1024 * 1024), %eax          /* Next 2MB */
-    adcl $0, %ebx
+1:  movl %eax, (%edi)
+    movl $0, 4(%edi)
+    addl $0x200000, %eax
     addl $8, %edi
-    decl %ecx
-    jnz 1b
+    loop 1b
 
-    /*
-     * Enable Long Mode
-     */
-    
-    /* Load CR3 with PML4 physical address */
-    movl $(boot_pml4 - KERNEL_VMA), %eax
+    /* Direct map: four directories, phys 0 .. 4 GiB. */
+    movl $PHYS(boot_pdpt_dmap), %edi
+    movl $PHYS(boot_pd_dmap), %eax
+    orl $(PTE_P | PTE_W), %eax
+    movl $4, %ecx
+2:  movl %eax, (%edi)
+    addl $4096, %eax
+    addl $8, %edi
+    loop 2b
+
+    movl $PHYS(boot_pd_dmap), %edi
+    movl $(PTE_P | PTE_W | PTE_PS), %eax
+    xorl %edx, %edx                 /* bits 63:32 of the physical address */
+    movl $2048, %ecx
+3:  movl %eax, (%edi)
+    movl %edx, 4(%edi)
+    addl $0x200000, %eax
+    adcl $0, %edx
+    addl $8, %edi
+    loop 3b
+
+    /* Enter long mode. */
+    movl $PHYS(boot_pml4), %eax
     movl %eax, %cr3
-    
-    /* Enable PAE in CR4 */
     movl %cr4, %eax
     orl $(CR4_PAE | CR4_PGE), %eax
     movl %eax, %cr4
-    
-    /* Enable Long Mode in EFER MSR */
     movl $MSR_EFER, %ecx
     rdmsr
-    orl $(EFER_LME | EFER_NXE), %eax
-    wrmsr
-    
-    /* Enable paging in CR0 (activates Long Mode) */
+    orl $EFER_LME, %eax
+    testl $(1 << 20), %ebp
+    jz 4f
+    orl $EFER_NXE, %eax
+4:  wrmsr
     movl %cr0, %eax
-    orl $(CR0_PE | CR0_PG), %eax
+    orl $CR0_PG, %eax
     movl %eax, %cr0
 
-    /*
-     * Load 64-bit GDT and jump to 64-bit code
-     */
-    lgdt (boot_gdt_ptr - KERNEL_VMA)
-    
-    /* Far jump to 64-bit code segment */
-    ljmp $0x08, $(long_mode_entry - KERNEL_VMA)
+    popl %esi                       /* information */
+    popl %edi                       /* magic */
+    lgdt PHYS(boot_gdt_ptr)
+    ljmp $0x08, $PHYS(long_mode_entry)
 
 no_long_mode:
-    /* Display error and halt */
+    /* No serial yet: say it on the VGA text screen. */
     movl $0xB8000, %edi
-    movl $0x4F454F4E, (%edi)          /* "NE" red on white */
-    movl $0x4F4C4F4F, 4(%edi)         /* "OL" */
-    movl $0x4F204F4D, 8(%edi)         /* "M " */
-1:  hlt
-    jmp 1b
+    movl $0x4F6F4F4E, (%edi)        /* "No" */
+    movl $0x4F364F20, 4(%edi)       /* " 6" */
+    movl $0x4F2D4F34, 8(%edi)       /* "4-" */
+    movl $0x4F694F62, 12(%edi)      /* "bi" */
+    movl $0x4F204F74, 16(%edi)      /* "t " */
+5:  hlt
+    jmp 5b
 
-/*
- * 64-bit Long Mode entry point
- */
 .code64
-.section .text.boot64, "ax"
 long_mode_entry:
-    /* Load 64-bit data segments */
     movw $0x10, %ax
     movw %ax, %ds
     movw %ax, %es
+    movw %ax, %ss
+    xorw %ax, %ax
     movw %ax, %fs
     movw %ax, %gs
-    movw %ax, %ss
-    
-    /* Jump to higher half using absolute address */
     movabsq $higher_half, %rax
     jmp *%rax
 
 .section .text
 higher_half:
-    /* Setup kernel stack */
-    movabsq $stack_top, %rsp
-    
-    /* Clear identity mapping (PML4[0]) */
-    movabsq $boot_pml4, %rdi
-    movq $0, (%rdi)
-    
-    /* Flush TLB */
-    movq %cr3, %rax
-    movq %rax, %cr3
-    
-    /* Clear RFLAGS */
+    movabsq $boot_stack_top, %rsp
+    xorl %ebp, %ebp
     pushq $0
     popfq
-    
-    /* Convert Multiboot info pointer to virtual address */
-    movl %edi, %edi             /* Zero-extend */
-    addq $KERNEL_VMA, %rdi      /* Physical + KERNEL_VMA */
-    
-    /* Zero-extend magic number */
-    movl %esi, %esi
-    
-    /* Call kmain(magic, info) - System V AMD64 ABI */
-    movq %rsi, %rdi             /* Arg1: magic */
-    /* RDI already has info pointer */
-    xchgq %rdi, %rsi            /* Swap: RDI=magic, RSI=info */
-    
-    call kmain
+    /* kmain64(magic, info): %edi and %esi, loaded by 32-bit pops, so the
+     * upper halves are zero. */
+    call kmain64
+6:  cli
+    hlt
+    jmp 6b
 
-    /* Shouldn't return, but halt if it does */
-    cli
-1:  hlt
-    jmp 1b
-
-/*
- * Bootstrap GDT (minimal for Long Mode entry)
- */
-.section .rodata.boot
+.section .rodata
 .align 16
 boot_gdt:
-    .quad 0x0000000000000000    /* Null descriptor */
-    .quad 0x00AF9A000000FFFF    /* 64-bit code: DPL=0, L=1, D=0 */
-    .quad 0x00AF92000000FFFF    /* 64-bit data: DPL=0 */
+    .quad 0x0000000000000000
+    .quad 0x00AF9A000000FFFF        /* 0x08: kernel code, 64-bit */
+    .quad 0x00CF92000000FFFF        /* 0x10: kernel data */
 boot_gdt_end:
-
 boot_gdt_ptr:
     .word boot_gdt_end - boot_gdt - 1
-    .quad boot_gdt - KERNEL_VMA
+    .long PHYS(boot_gdt)
 
-/*
- * Bootstrap page tables (4KB aligned)
- */
-.section .bss.boot
+.section .bss.boot, "aw", @nobits
 .align 4096
-boot_pml4:
-    .skip 4096
-boot_pdpt:
-    .skip 4096
-boot_pd:
-    .skip 4096
+.global boot_pml4
+boot_pml4:      .skip 4096
+boot_pdpt_lo:   .skip 4096
+boot_pdpt_hi:   .skip 4096
+boot_pdpt_dmap: .skip 4096
+boot_pd:        .skip 4096
+boot_pd_dmap:   .skip 4096 * 4
 
-/*
- * Kernel stack
- */
 .section .bss
 .align 16
-stack_bottom:
-    .skip 32768                 /* 32KB stack */
-stack_top:
+.global boot_stack_top
+boot_stack:     .skip 16384
+boot_stack_top:

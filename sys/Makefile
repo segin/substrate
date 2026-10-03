@@ -4,6 +4,17 @@ include ../Makefile.inc
 ARCH ?= i386
 # Note: No libgcc needed - we implement our own 64-bit helpers in kern/lib.c
 
+ifeq ($(ARCH),x86_64)
+# The 64-bit kernel is built from this same tree by arch/x86_64/Makefile,
+# into its own object directory (the i386 build below compiles in place),
+# producing kernel-x86_64.elf and kernel-x86_64.bin.  See
+# docs/specs/arch_x86_64_core.md for what it covers so far.
+.PHONY: all clean
+all clean:
+	$(MAKE) -C arch/x86_64 $@
+else
+
+
 # Set KERNEL_TESTS=1 to compile the kernel test suite into the kernel.
 # By default, tests are NOT included - use a dedicated test build for that.
 KERNEL_TESTS ?= 0
@@ -273,3 +284,5 @@ install: kernel.bin
 	@echo "Installing Kernel to $(DESTDIR)/vmunix..."
 	@mkdir -p $(DESTDIR)
 	@cp kernel.bin $(DESTDIR)/vmunix
+
+endif # ARCH

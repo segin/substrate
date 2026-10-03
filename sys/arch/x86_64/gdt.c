@@ -14,6 +14,7 @@
 #include <stdint.h>
 #include <string.h>
 
+#include <arch/x86_64/boot.h>
 #include <arch/x86_64/gdt.h>
 #include <sys/smp.h>
 
@@ -45,14 +46,6 @@ struct gdt_ptr {
     uint64_t base;
 } __attribute__((packed));
 
-/* GDT Selectors */
-#define GDT_NULL        0x00
-#define GDT_KERNEL_CODE 0x08
-#define GDT_KERNEL_DATA 0x10
-#define GDT_USER_DATA   0x18    /* Note: User data before code for SYSRET */
-#define GDT_USER_CODE   0x20
-#define GDT_TSS         0x28    /* TSS is 16 bytes (2 GDT slots) */
-
 /* Access byte flags */
 #define GDT_PRESENT     0x80
 #define GDT_DPL0        0x00
@@ -63,10 +56,11 @@ struct gdt_ptr {
 
 /* Granularity byte flags */
 #define GDT_LONG_MODE   0x20    /* L bit: Long Mode code segment */
+#define GDT_SIZE_32     0x40    /* D bit: 32-bit default operand size */
 #define GDT_GRAN_4K     0x80    /* 4KB granularity */
 
 /* Per-CPU GDT and TSS (index 0 is BSP) */
-static struct gdt_entry per_cpu_gdt[MAX_CPUS][7] __attribute__((aligned(16)));
+static struct gdt_entry per_cpu_gdt[MAX_CPUS][GDT_SLOTS] __attribute__((aligned(16)));
 static struct tss64 per_cpu_tss[MAX_CPUS] __attribute__((aligned(16)));
 
 /* Interrupt stacks for IST (per-CPU) */
@@ -138,31 +132,35 @@ void gdt_init_percpu(int cpu_id, uint64_t rsp0) {
     /* Null descriptor */
     gdt_set_entry_at(gdt, 0, 0, 0, 0, 0);
     
-    /* Kernel code segment (selector 0x08)
-     * Long Mode: base and limit ignored, but L bit must be set */
-    gdt_set_entry_at(gdt, 1, 0, 0xFFFFF,
+    /* Kernel code (0x08).  Long mode ignores base and limit; L is set. */
+    gdt_set_entry_at(gdt, SEL_KCODE >> 3, 0, 0xFFFFF,
                   GDT_PRESENT | GDT_DPL0 | GDT_TYPE_CODE,
                   GDT_LONG_MODE | GDT_GRAN_4K);
-    
-    /* Kernel data segment (selector 0x10) */
-    gdt_set_entry_at(gdt, 2, 0, 0xFFFFF,
+
+    /* Kernel data (0x10) */
+    gdt_set_entry_at(gdt, SEL_KDATA >> 3, 0, 0xFFFFF,
                   GDT_PRESENT | GDT_DPL0 | GDT_TYPE_DATA,
-                  GDT_GRAN_4K);
-    
-    /* User data segment (selector 0x18)
-     * Must come before user code for SYSRET to work correctly */
-    gdt_set_entry_at(gdt, 3, 0, 0xFFFFF,
+                  GDT_SIZE_32 | GDT_GRAN_4K);
+
+    /* User code, 32-bit (0x18): flat 4 GiB, D set, L clear -- IA-32
+     * compatibility mode for the i386 userland. */
+    gdt_set_entry_at(gdt, SEL_UCODE32 >> 3, 0, 0xFFFFF,
+                  GDT_PRESENT | GDT_DPL3 | GDT_TYPE_CODE,
+                  GDT_SIZE_32 | GDT_GRAN_4K);
+
+    /* User data (0x20): flat 4 GiB, for both bitnesses. */
+    gdt_set_entry_at(gdt, SEL_UDATA >> 3, 0, 0xFFFFF,
                   GDT_PRESENT | GDT_DPL3 | GDT_TYPE_DATA,
-                  GDT_GRAN_4K);
-    
-    /* User code segment (selector 0x20) */
-    gdt_set_entry_at(gdt, 4, 0, 0xFFFFF,
+                  GDT_SIZE_32 | GDT_GRAN_4K);
+
+    /* User code, 64-bit (0x28) */
+    gdt_set_entry_at(gdt, SEL_UCODE >> 3, 0, 0xFFFFF,
                   GDT_PRESENT | GDT_DPL3 | GDT_TYPE_CODE,
                   GDT_LONG_MODE | GDT_GRAN_4K);
-    
-    /* TSS (selector 0x28, spans slots 5-6) */
+
+    /* TSS (0x30, two slots) */
     tss_init(&per_cpu_tss[cpu_id], cpu_id, rsp0);
-    gdt_set_tss_at(gdt, 5, (uint64_t)&per_cpu_tss[cpu_id], sizeof(struct tss64) - 1);
+    gdt_set_tss_at(gdt, SEL_TSS >> 3, (uint64_t)&per_cpu_tss[cpu_id], sizeof(struct tss64) - 1);
     
     /* Load GDT */
     struct gdt_ptr gp;
@@ -170,28 +168,38 @@ void gdt_init_percpu(int cpu_id, uint64_t rsp0) {
     gp.base = (uint64_t)gdt;
     
 #ifndef HOST_TEST
+    /*
+     * Load it, then reload every segment register from it: CS through a
+     * far return, the data segments directly.  The loader's GDT (boot.S)
+     * sits at a physical address that stops being mapped once the
+     * identity window is dropped.
+     */
     __asm__ volatile(
         "lgdt %0\n\t"
-        /* Reload segment registers */
-        "movw $0x10, %%ax\n\t"
+        "pushq %1\n\t"
+        "leaq 1f(%%rip), %%rax\n\t"
+        "pushq %%rax\n\t"
+        "lretq\n"
+        "1:\n\t"
+        "movw %w2, %%ax\n\t"
         "movw %%ax, %%ds\n\t"
         "movw %%ax, %%es\n\t"
         "movw %%ax, %%ss\n\t"
-        "xorw %%ax, %%ax\n\t"    /* Clear FS/GS for now (TLS sets later) */
+        "xorw %%ax, %%ax\n\t"    /* FS/GS bases are set through MSRs */
         "movw %%ax, %%fs\n\t"
         "movw %%ax, %%gs\n\t"
         :
-        : "m"(gp)
+        : "m"(gp), "i"((uint64_t)SEL_KCODE), "i"(SEL_KDATA)
         : "rax", "memory"
     );
 #endif
-    
+
     /* Load TSS */
 #ifndef HOST_TEST
     __asm__ volatile(
         "ltr %w0"
         :
-        : "r"((uint16_t)GDT_TSS)
+        : "r"((uint16_t)SEL_TSS)
     );
 #endif
 }
@@ -200,9 +208,8 @@ void gdt_init_percpu(int cpu_id, uint64_t rsp0) {
  * Initialize GDT and TSS for Long Mode (BSP)
  */
 void gdt_init(void) {
-    extern char stack_top[];  /* From boot.S */
-    /* Initialize BSP (CPU 0) */
-    gdt_init_percpu(0, (uint64_t)stack_top);
+    /* The boot stack until there are threads with their own. */
+    gdt_init_percpu(0, (uint64_t)boot_stack_top);
 }
 
 /*

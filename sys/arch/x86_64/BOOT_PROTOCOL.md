@@ -1,42 +1,37 @@
-# x86_64 Boot & System Call Protocol
+# x86_64 Boot Protocol
 
-## System Call Interface
+How the 64-bit kernel is entered.  The full bring-up, memory layout and
+selector contract are in `docs/specs/arch_x86_64_core.md`.  The
+system-call interface programs see is in `docs/specs/abi-amd64.md`.
 
-The kernel implements a standard x86_64 system call interface using the `syscall` instruction.
+## Images
 
-### Calling Convention
-*   **Instruction:** `syscall`
-*   **Return Address:** `rcx` (destroyed by `syscall`)
-*   **Flags:** `r11` (destroyed by `syscall`)
-*   **Return Value:** `rax`
-*   **Arguments:**
-    1.  `rdi`
-    2.  `rsi`
-    3.  `rdx`
-    4.  `r10` (NOT `rcx`, as `syscall` uses it)
-    5.  `r8`
-    6.  `r9`
-*   **Kernel Stack:** Switched automatically via `RSP` in TSS (or `MSR_SYSCALL_MSR` logic).
+| File | Header | Loader |
+| :--- | :----- | :----- |
+| `sys/kernel-x86_64.bin` (`/vmunix64`) | multiboot 1, a.out kludge | QEMU `-kernel`, GRUB `multiboot` |
+| `sys/kernel-x86_64.elf` | multiboot 2 | GRUB `multiboot2` |
 
-### Interrupt 0x80
-For compatibility/legacy/simplicity, `int 0x80` is also supported with the same calling convention as i386 (arguments in `ebx`, `ecx`, `edx`, etc.), but truncated to 32-bit.
+Multiboot 1 loaders refuse ELF64 files, so the flat image's header gives
+the load addresses itself: `load_addr` 1 MiB, `load_end_addr` the end of
+`.data`, `bss_end_addr` the end of `.bss` (zeroed by the loader),
+`entry_addr` the physical address of `_start`.
 
-## Boot Protocol
+## Entry state
 
-The kernel supports two entry methods:
+Either protocol: 32-bit protected mode, paging off, flat segments, `%eax`
+the loader magic (`0x2BADB002` or `0x36D76289`), `%ebx` the physical
+address of the information structure.  `_start` switches to long mode
+itself and calls `kmain64(magic, info)`, which accepts both formats.
 
-### 1. Multiboot2 (Legacy BIOS / UEFI via GRUB)
-*   **Magic:** `0xE85250D6`
-*   **Architecture:** `0` (i386) or `4` (MIPS)? No, for x86_64, usually we boot into 32-bit protected mode via Multiboot2 and trampoline to Long Mode.
-*   **Entry State:** 32-bit Protected Mode, Paging Disabled.
+## Layout
 
-### 2. EFI Native Boot
-*   The kernel file can be compiled/linked as a valid PE32+ executable.
-*   **Entry Point:** `efi_main`
-*   **Subsystem:** `EFI_APPLICATION` (10)
-*   **State:** 64-bit Long Mode, Identity Mapped (by Firmware), UEFI Boot Services active.
-*   **Responsibility:** The kernel must exit Boot Services and set up its own page tables and GDT.
+* Physical load address: 1 MiB (`KERNEL_LOAD_PHYS`).
+* Link address: `0xFFFFFFFF80000000` + 1 MiB (`KERNEL_VMA`).
+* Direct map of physical memory at `0xFFFFF80000000000` (`DMAP_BASE`).
 
-## Memory Map
-*   **Kernel Physical Load Address:** 2MB (`0x200000`)
-*   **Kernel Virtual Base:** `0xFFFFFFFF80000000` (Higher Half)
+All three are in `layout.h`.
+
+## EFI
+
+`efi/` holds the start of a native PE32+ entry (`efi_main`); it is not
+built yet.

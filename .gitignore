@@ -477,6 +477,8 @@ tests/lib/c/repro_*
 # Kernel framebuffer-console build variants
 /sys/kernel.fb.bin
 /sys/kernel.fb.multiboot
+/sys/kernel-x86_64.bin
+/sys/arch/x86_64/obj/
 
 # Upstream tarballs downloaded by contrib/<pkg>/fetch.sh (never vendored)
 /contrib/*/*.tar.gz

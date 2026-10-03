@@ -12,7 +12,7 @@ substrate/
 ├── sys/                  # The kernel
 │   ├── arch/i386/        #   CPU, MMU, interrupts, boot, SMP discovery
 │   ├── arch/x86-common/  #   code shared by both x86 ports (I/O APIC, port I/O)
-│   ├── arch/x86_64/      #   x86-64 port: early stub (boot, GDT/IDT, pmap)
+│   ├── arch/x86_64/      #   x86-64 port: boots to long mode (milestone 0)
 │   ├── boot/             #   in-tree BIOS bootloader (stage 1 asm + stage 2 C)
 │   ├── core/             #   early initialisation
 │   ├── kern/             #   scheduler, signals, time, sync, IPC, syscalls, PCI
@@ -188,9 +188,18 @@ personality: `README.md`; specifications:
 `docs/specs/personality_targets.md`, `docs/specs/personality_elks.md`,
 `usr.man/man4/sco_x286.4`, `usr.man/man4/xout286.4`.
 
-**x86-64.** `sys/arch/x86_64` holds an early stub. The port is planned as
-an addition alongside i386, not a replacement: the personality and the
-bitness of a process are independent.
+**x86-64.** `sys/arch/x86_64` is the 64-bit port, an addition alongside
+i386, not a replacement: the personality and the bitness of a process are
+independent. Both kernels build from the same tree; `make -C sys
+ARCH=x86_64` builds the 64-bit one into its own object directory and
+produces `kernel-x86_64.bin`, installed as `/vmunix64`. It boots through
+multiboot 1 or 2 to the higher half with a direct map, and has its GDT
+(including the 32-bit user code segment), TSS and IDT; the machine-
+independent kernel, the 4-level pmap and the compat32 path that runs the
+existing i386 userland are next. The userland stays 32-bit for now. Native
+64-bit programs will use the FreeBSD/amd64-based ABI in
+`docs/specs/abi-amd64.md`; the port itself is described in
+`docs/specs/arch_x86_64_core.md`.
 
 Kernel specifications, in `docs/specs/`:
 
@@ -451,7 +460,9 @@ Building and running: `README.md`. Test layers:
 
 ## 9. Future Considerations / Roadmap
 
-- x86-64, added alongside i386.
+- x86-64, added alongside i386: the MI kernel, 4-level pmap, compat32 for
+  the i386 userland, then a native amd64 userland
+  (`docs/specs/arch_x86_64_core.md`).
 - Scheduling on application processors (they are started but idle).
 - pmap: allocate page tables on demand instead of mapping 32 kernel page
   directory entries into every process.
@@ -464,7 +475,7 @@ Building and running: `README.md`. Test layers:
 ## 10. Project Identification
 
 - **Name:** Substrate
-- **Target:** i386 (32-bit x86); x86-64 planned.
+- **Target:** i386 (32-bit x86); x86-64 kernel in bring-up.
 - **Toolchain triple:** `i386-unknown-substrate`
 - **Licence:** © 2026 Kirn Gill II, all rights reserved (`LICENSE`);
   third-party ports keep their own licences.

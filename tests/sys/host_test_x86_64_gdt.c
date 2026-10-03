@@ -4,7 +4,7 @@
 #include <string.h>
 
 static int current_cpu_id;
-char stack_top[4096];
+char boot_stack_top[4096];
 
 int smp_get_cpu_id(void) {
     return current_cpu_id;
@@ -20,10 +20,15 @@ int main(void) {
     current_cpu_id = 0;
     gdt_init_percpu(0, 0x1111222233334444ULL);
 
-    assert(per_cpu_gdt[0][1].access == (GDT_PRESENT | GDT_DPL0 | GDT_TYPE_CODE));
-    assert((per_cpu_gdt[0][1].granularity & GDT_LONG_MODE) != 0);
-    assert(per_cpu_gdt[0][3].access == (GDT_PRESENT | GDT_DPL3 | GDT_TYPE_DATA));
-    assert(per_cpu_gdt[0][4].access == (GDT_PRESENT | GDT_DPL3 | GDT_TYPE_CODE));
+    assert(per_cpu_gdt[0][SEL_KCODE >> 3].access == (GDT_PRESENT | GDT_DPL0 | GDT_TYPE_CODE));
+    assert((per_cpu_gdt[0][SEL_KCODE >> 3].granularity & GDT_LONG_MODE) != 0);
+    assert(per_cpu_gdt[0][SEL_KDATA >> 3].access == (GDT_PRESENT | GDT_DPL0 | GDT_TYPE_DATA));
+    /* 32-bit user code: compatibility mode, so D=1 and L=0. */
+    assert(per_cpu_gdt[0][SEL_UCODE32 >> 3].access == (GDT_PRESENT | GDT_DPL3 | GDT_TYPE_CODE));
+    assert((per_cpu_gdt[0][SEL_UCODE32 >> 3].granularity & GDT_LONG_MODE) == 0);
+    assert(per_cpu_gdt[0][SEL_UDATA >> 3].access == (GDT_PRESENT | GDT_DPL3 | GDT_TYPE_DATA));
+    assert(per_cpu_gdt[0][SEL_UCODE >> 3].access == (GDT_PRESENT | GDT_DPL3 | GDT_TYPE_CODE));
+    assert((per_cpu_gdt[0][SEL_UCODE >> 3].granularity & GDT_LONG_MODE) != 0);
 
     assert(per_cpu_tss[0].rsp0 == 0x1111222233334444ULL);
     assert(per_cpu_tss[0].ist1 != 0);

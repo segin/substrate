@@ -41,7 +41,7 @@ int main(void) {
     const struct syscall64_host_snapshot *snap = syscall64_host_get_snapshot();
     assert(snap->msr_lstar == (uint64_t)syscall_entry);
     assert(snap->msr_fmask == 0x0200);
-    assert(snap->msr_star == (((uint64_t)0x08 << 32) | ((uint64_t)0x10 << 48)));
+    assert(snap->msr_star == (((uint64_t)0x08 << 32) | ((uint64_t)0x1B << 48)));
 
     syscall_handler_64(2, 1, 2, 3, 4, 5, 6);
     assert(snap->last_return == 21);

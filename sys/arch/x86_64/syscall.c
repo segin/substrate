@@ -1,5 +1,6 @@
 #include <errno.h>
 
+#include <arch/x86_64/gdt.h>
 #include <arch/x86_64/syscall.h>
 #include <exec/perso/personality.h>
 #include <sys/proc.h>
@@ -49,15 +50,11 @@ void syscall_init_64(void) {
     // Clear IF (interrupts), DF, TF, etc.
     wrmsr(MSR_FMASK, 0x0200); // Clear IF (bit 9)
 
-    // 3. Set STAR
-    // Bits 32-47: Kernel CS (for syscall)
-    // Bits 48-63: User CS (for sysret) - actually it expects (UserCS - 16) usually
-    // Assuming GDT layout: Null(0), KCode(8), KData(16), UCode(24), UData(32)
-    // Syscall loads CS=KCode, SS=KData
-    // Sysret loads CS=UCode (STAR[48:63]+16), SS=UData (STAR[48:63]+8)
-    // This is tricky x86 logic.
-    // Let's assume KCode=0x08, UCode=0x18 (or similar).
-    wrmsr(MSR_STAR, ((uint64_t)0x08 << 32) | ((uint64_t)0x10 << 48)); 
+    // 3. Set STAR: SYSCALL enters on SEL_KCODE/SEL_KDATA; SYSRET leaves on
+    // SEL_UCODE32 + 16 (64-bit) or SEL_UCODE32 (32-bit), with SEL_UDATA.
+    // The selector order this relies on is described in gdt.h.
+    wrmsr(MSR_STAR, ((uint64_t)SEL_KCODE << 32) |
+                    ((uint64_t)SEL_UCODE32_RPL3 << 48));
 }
 
 void syscall_handler_64(uint64_t syscall_number, uint64_t arg1, uint64_t arg2, uint64_t arg3, uint64_t arg4, uint64_t arg5, uint64_t arg6) {

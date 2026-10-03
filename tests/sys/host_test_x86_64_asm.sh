@@ -5,9 +5,9 @@ repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 workdir=$(mktemp -d)
 trap 'rm -rf "$workdir"' EXIT INT TERM
 
-cc -m64 -c "$repo_root/sys/arch/x86_64/boot/boot.S" -o "$workdir/boot.o"
-cc -m64 -c "$repo_root/sys/arch/x86_64/isr.S" -o "$workdir/isr.o"
-cc -m64 -c "$repo_root/sys/arch/x86_64/switch.S" -o "$workdir/switch.o"
+cc -m64 -I"$repo_root/sys" -c "$repo_root/sys/arch/x86_64/boot/boot.S" -o "$workdir/boot.o"
+cc -m64 -I"$repo_root/sys" -c "$repo_root/sys/arch/x86_64/isr.S" -o "$workdir/isr.o"
+cc -m64 -I"$repo_root/sys" -c "$repo_root/sys/arch/x86_64/switch.S" -o "$workdir/switch.o"
 
 nm "$workdir/boot.o" > "$workdir/boot.nm"
 nm "$workdir/isr.o" > "$workdir/isr.nm"

@@ -8,18 +8,29 @@
 #include <stdint.h>
 
 /*
- * GDT Segment Selectors
+ * GDT segment selectors.
+ *
+ * The order is fixed by SYSCALL/SYSRET.  STAR[47:32] = SEL_KCODE: SYSCALL
+ * loads CS from it and SS from it + 8 (SEL_KDATA).  STAR[63:48] =
+ * SEL_UCODE32: a 64-bit SYSRET loads CS from it + 16 (SEL_UCODE) and SS
+ * from it + 8 (SEL_UDATA); a 32-bit SYSRET loads CS from it directly.
+ * SEL_UCODE32 is also what 32-bit (IA-32 compatibility mode) processes
+ * run on -- the existing i386 userland (docs/specs/abi-amd64.md,
+ * section 10).  One data segment serves both bitnesses.
  */
 #define SEL_NULL        0x00
-#define SEL_KCODE       0x08    /* Kernel code segment */
-#define SEL_KDATA       0x10    /* Kernel data segment */
-#define SEL_UDATA       0x18    /* User data segment (before code for SYSRET) */
-#define SEL_UCODE       0x20    /* User code segment */
-#define SEL_TSS         0x28    /* Task State Segment */
+#define SEL_KCODE       0x08    /* kernel code, 64-bit */
+#define SEL_KDATA       0x10    /* kernel data */
+#define SEL_UCODE32     0x18    /* user code, 32-bit (compatibility mode) */
+#define SEL_UDATA       0x20    /* user data */
+#define SEL_UCODE       0x28    /* user code, 64-bit */
+#define SEL_TSS         0x30    /* TSS: a 16-byte descriptor, two slots */
+#define GDT_SLOTS       8
 
 /* Selector with RPL (Ring Privilege Level) */
-#define SEL_UCODE_RPL3  (SEL_UCODE | 3)
-#define SEL_UDATA_RPL3  (SEL_UDATA | 3)
+#define SEL_UCODE32_RPL3 (SEL_UCODE32 | 3)
+#define SEL_UCODE_RPL3   (SEL_UCODE | 3)
+#define SEL_UDATA_RPL3   (SEL_UDATA | 3)
 
 /*
  * 64-bit Task State Segment
