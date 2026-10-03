@@ -2,10 +2,18 @@
 #include <sys/smp.h>
 #include <kern/console.h>
 #include <arch/x86-common/cpu.h>
-#include <arch/i386/idt.h>
-#include <arch/i386/fpu/fpu_emu.h>
-#include <arch/i386/percpu.h>
+#include <arch/x86-common/fpu.h>
 #include <arch/x86-common/io.h>
+#include <machine/idt.h>
+#include <machine/percpu.h>
+
+/*
+ * fpu.c - lazy x87/SSE context switching, shared by the i386 and x86_64
+ * kernels.  The control registers go through unsigned long, which is the
+ * register width either kernel can move to and from %cr0/%cr4.  FXSAVE
+ * without REX.W writes the 32-bit format, which is the one a 32-bit
+ * process on the x86_64 kernel needs.
+ */
 static int fpu_use_fxsave = 0;
 
 /*
@@ -81,7 +89,7 @@ void fpu_restore_context(struct process *p) {
  */
 void fpu_switch(void) {
 #ifndef HOST_TEST
-    uint32_t cr0;
+    unsigned long cr0;
     __asm__ volatile("mov %%cr0, %0" : "=r"(cr0));
     cr0 |= 0x08; // Set TS
     __asm__ volatile("mov %0, %%cr0" : : "r"(cr0));
@@ -107,7 +115,7 @@ void fpu_handler(registers_t *regs) {
     (void)regs;
 #ifndef HOST_TEST
     // Clear TS bit in CR0 to allow FPU access for the faulting instruction.
-    uint32_t cr0;
+    unsigned long cr0;
     __asm__ volatile("mov %%cr0, %0" : "=r"(cr0));
     cr0 &= ~0x08; // Clear TS
     __asm__ volatile("mov %0, %%cr0" : : "r"(cr0));
@@ -155,7 +163,7 @@ static int fpu_present = 0;
 void fpu_init(void) {
 #ifndef HOST_TEST
     // Detect FPU presence using CPUID or CR0 probing
-    uint32_t cr0;
+    unsigned long cr0;
     __asm__ volatile("mov %%cr0, %0" : "=r"(cr0));
     
     // Clear EM (emulation) bit to test for FPU
@@ -192,7 +200,7 @@ void fpu_init(void) {
              * legacy #UD fallback.  We gate this on FXSR availability
              * because OSFXSR without FXSAVE/FXRSTOR is meaningless. */
             if (i386_cpu_has_cr4()) {
-                uint32_t cr4;
+                unsigned long cr4;
                 __asm__ volatile("mov %%cr4, %0" : "=r"(cr4));
                 cr4 |= 0x200;   /* CR4.OSFXSR */
                 cr4 |= 0x400;   /* CR4.OSXMMEXCPT */
@@ -215,5 +223,5 @@ void fpu_init(void) {
 #endif
     
     // Register INT 7 handler for #NM (Device Not Available)
-    idt_set_gate(7, (uint32_t)isr7, 0x08, 0x8E);
+    idt_set_gate(7, (uintptr_t)isr7, 0x08, 0x8E);
 }

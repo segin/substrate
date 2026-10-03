@@ -577,7 +577,7 @@ int ext2_xattr_get(fs_node_t *node, const char *full_name, void *out,
 int ext2_xattr_list(fs_node_t *node, void *out, size_t out_size, size_t *result_size)
 { (void)node; (void)out; (void)out_size; if (result_size) *result_size = 0; return -1; }
 
-/* --- FPU (arch/i386/fpu/fpu_emu.h) --- */
+/* --- FPU (arch/x86-common/fpu.h) --- */
 void fpu_forget_process(struct process *p) { (void)p; }
 void fpu_switch(void) { }
 

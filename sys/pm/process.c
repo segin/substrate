@@ -49,7 +49,7 @@
 #include <machine/intr.h>
 #include <machine/pmap.h>
 #include <machine/pmm.h>
-#include <machine/fpu_emu.h>
+#include <machine/fpu.h>
 #include <exec/perso/personality.h>
 
 /* current_process is per-CPU: a macro over curproc_slot() (arch percpu.c). */

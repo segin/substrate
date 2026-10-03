@@ -26,7 +26,7 @@
 #include <kern/sched.h>
 #include <kern/time.h>
 #include <machine/cpu.h>
-#include <machine/fpu_emu.h>
+#include <machine/fpu.h>
 #include <machine/idt.h>
 #include <machine/percpu.h>
 #include <machine/pmap.h>

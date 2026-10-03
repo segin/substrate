@@ -5,7 +5,7 @@
 
 #include <machine/cpu.h>
 #include <machine/early_boot.h>
-#include <machine/fpu_emu.h>
+#include <machine/fpu.h>
 #include <machine/gdt.h>
 #include <machine/idt.h>
 #include <machine/intr.h>

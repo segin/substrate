@@ -2,7 +2,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#include <arch/i386/fpu/fpu_emu.h>
+#include <arch/x86-common/fpu.h>
 #include <arch/x86-common/intr.h>
 #include <arch/i386/percpu.h>
 #include <arch/i386/pmap.h>

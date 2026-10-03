@@ -1,8 +1,11 @@
-#ifndef _FPU_EMU_H
-#define _FPU_EMU_H
+/*
+ * fpu.h - lazy FPU context switching, shared by the i386 and x86_64 kernels
+ */
+#ifndef _ARCH_X86_COMMON_FPU_H
+#define _ARCH_X86_COMMON_FPU_H
 
 #include <stdint.h>
-#include <arch/i386/idt.h>
+#include <machine/idt.h>
 
 // FPU Status Word
 #define SW_INVALID      0x0001
