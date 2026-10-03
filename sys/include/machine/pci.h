@@ -1,12 +1,8 @@
 /*
- * machine/pci.h - PCI configuration-space access of the architecture being
- * built
+ * machine/pci.h - PCI configuration-space access
  *
  * Machine-independent code includes <machine/X.h> rather than naming an
- * architecture; the 64-bit kernel's Makefile defines SUBSTRATE_ARCH_X86_64.
+ * architecture.  Configuration mechanism #1 is port I/O on both x86
+ * kernels, so this one is shared.
  */
-#ifdef SUBSTRATE_ARCH_X86_64
-#include <arch/x86_64/pci.h>
-#else
-#include <arch/i386/pci.h>
-#endif
+#include <arch/x86-common/pci.h>

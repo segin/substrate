@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include <intr.h>
+#include <machine/intr.h>
 #include <kern/console.h>
 #include <kern/sched.h>
 #include <kern/time.h>

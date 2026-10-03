@@ -1,5 +1,5 @@
 #include <lapic.h>
-#include <arch/i386/cpu.h>
+#include <arch/x86-common/cpu.h>
 #include <kern/console.h>
 
 // Default LAPIC physical address (can be overridden by MADT)

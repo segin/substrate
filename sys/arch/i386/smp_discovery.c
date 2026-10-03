@@ -4,7 +4,7 @@
 #include <string.h>
 #include <arch/x86-common/multiboot.h>
 
-#include <arch/i386/cpu.h>
+#include <arch/x86-common/cpu.h>
 #include <arch/i386/early_boot.h>
 #include <arch/i386/gdt.h>
 #include <arch/i386/idt.h>

@@ -1,7 +1,7 @@
 #include <sys/proc.h>
 #include <sys/smp.h>
 #include <kern/console.h>
-#include <arch/i386/cpu.h>
+#include <arch/x86-common/cpu.h>
 #include <arch/i386/idt.h>
 #include <arch/i386/fpu/fpu_emu.h>
 #include <arch/i386/percpu.h>

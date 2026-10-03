@@ -1,4 +1,4 @@
-#include <arch/i386/pci.h>
+#include <arch/x86-common/pci.h>
 #include <arch/x86-common/io.h>
 
 typedef struct pci_ecam_window {

@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include <arch/i386/intr.h>
+#include <arch/x86-common/intr.h>
 #include <arch/i386/pmm.h>
 #include <arch/x86-common/e820.h>
 #include <arch/x86-common/multiboot.h>

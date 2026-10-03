@@ -3,7 +3,7 @@
 #include <string.h>
 
 #include <arch/i386/fpu/fpu_emu.h>
-#include <arch/i386/intr.h>
+#include <arch/x86-common/intr.h>
 #include <arch/i386/percpu.h>
 #include <arch/i386/pmap.h>
 #include <arch/i386/pmm.h>

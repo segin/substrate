@@ -9,7 +9,7 @@
 
 #include <arch/i386/gdt.h>
 #include <arch/i386/idt.h>
-#include <arch/i386/intr.h>
+#include <arch/x86-common/intr.h>
 #include <arch/i386/percpu.h>
 #include <arch/i386/syscall.h>
 #include <arch/i386/syscall_abi.h>

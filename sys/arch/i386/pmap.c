@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include <arch/i386/cpu.h>
+#include <arch/x86-common/cpu.h>
 #include <arch/i386/percpu.h>
 #include <arch/i386/pmap.h>
 #include <arch/i386/pmap_hal.h>

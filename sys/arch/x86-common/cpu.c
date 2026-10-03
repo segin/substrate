@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include <arch/i386/cpu.h>
+#include <arch/x86-common/cpu.h>
 #include <arch/x86-common/msr.h>
 #include <kern/console.h>
 
@@ -13,14 +13,17 @@ static volatile uint32_t cpu_cycle_fallback = 0;
 #define IA32_PAT_ENTRY_MASK(index) (0xFFull << IA32_PAT_ENTRY_SHIFT(index))
 #define IA32_PAT_WC_SLOT 5u
 
+/* EFLAGS through a register of the native width: a 64-bit kernel can only
+ * push and pop RFLAGS whole.  EFLAGS is its low half. */
 static uint32_t i386_read_eflags(void) {
-    uint32_t flags;
-    __asm__ volatile("pushfl; popl %0" : "=r"(flags));
-    return flags;
+    unsigned long flags;
+    __asm__ volatile("pushf; pop %0" : "=r"(flags));
+    return (uint32_t)flags;
 }
 
 static void i386_write_eflags(uint32_t flags) {
-    __asm__ volatile("pushl %0; popfl" :: "r"(flags) : "cc");
+    unsigned long f = flags;
+    __asm__ volatile("push %0; popf" :: "r"(f) : "cc");
 }
 
 static int i386_eflags_bit_toggle_supported(uint32_t mask) {
@@ -185,9 +188,10 @@ int i386_cpu_has_rdseed(void) { return cpu_features.has_rdseed; }
 
 uint64_t i386_cpu_cycle_counter(void) {
     if (cpu_features.has_tsc) {
-        uint64_t tsc;
-        __asm__ volatile("rdtsc" : "=A"(tsc));
-        return tsc;
+        /* Not "=A": on x86_64 that names %rax alone, not %edx:%eax. */
+        uint32_t lo, hi;
+        __asm__ volatile("rdtsc" : "=a"(lo), "=d"(hi));
+        return ((uint64_t)hi << 32) | lo;
     }
 
     return ++cpu_cycle_fallback;

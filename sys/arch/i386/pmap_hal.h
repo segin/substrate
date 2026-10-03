@@ -1,7 +1,7 @@
 #ifndef _PMAP_HAL_H
 #define _PMAP_HAL_H
 
-#include <arch/i386/cpu.h>
+#include <arch/x86-common/cpu.h>
 #include <stdint.h>
 
 // ==================== HAL Layer ====================
