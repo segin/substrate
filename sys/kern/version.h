@@ -8,15 +8,6 @@
  * without the externs below. */
 #include <kern/osversion.h>
 
-/* Build target architecture, for the boot banner / version strings.  Detected
- * from the compiler so it tracks whatever target the kernel is built for. */
-#if defined(__x86_64__)
-#define OS_ARCH "x86_64"
-#elif defined(__i386__)
-#define OS_ARCH "i386"
-#else
-#define OS_ARCH "unknown"
-#endif
 
 extern int serial_debug_enabled;
 #define MAXHOSTNAMELEN 256

@@ -110,8 +110,19 @@ int main(int argc, char *argv[]) {
         space = 1;
     }
     if (flags & FLAG_PROCESSOR) {
-        // v1 maps processor directly to machine
-        printf("%s%s", space ? " " : "", name.machine);
+        /*
+         * The processor ABI this program runs: i386 for a 32-bit process
+         * even on the x86_64 kernel, whose name -m reports.  As FreeBSD's
+         * hw.machine_arch does for its 32-bit programs.
+         */
+#if defined(__x86_64__)
+        const char *processor = "x86_64";
+#elif defined(__i386__)
+        const char *processor = "i386";
+#else
+        const char *processor = name.machine;
+#endif
+        printf("%s%s", space ? " " : "", processor);
         space = 1;
     }
     if (flags & FLAG_OS) {

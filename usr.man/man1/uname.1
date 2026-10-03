@@ -28,13 +28,23 @@ and
 were specified.
 .TP
 .BR \-m ", " \-\-machine
-Print the machine hardware name.
+Print the machine hardware name: the kernel's architecture,
+.B i386
+or
+.BR x86_64 .
 .TP
 .BR \-n ", " \-\-nodename
 Print the network node hostname.
 .TP
 .BR \-p ", " \-\-processor
-Print the processor type (application execution architecture).
+Print the processor type (application execution architecture): the ABI
+.B uname
+itself was built for.  A 32-bit program reports
+.B i386
+on either kernel, so on the 64-bit kernel
+.B uname \-mp
+prints
+.BR "x86_64 i386" .
 .TP
 .BR \-r ", " \-\-kernel\-release
 Print the operating system release.

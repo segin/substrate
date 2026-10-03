@@ -1421,7 +1421,10 @@ int kern_uname(struct utsname *buf) {
     buf->release[255] = '\0';
     strlcpy(buf->version, "Kernel", sizeof(buf->version));
     buf->version[255] = '\0';
-    strlcpy(buf->machine, "i386", sizeof(buf->machine));
+    /* The kernel's architecture, as Linux and the BSDs report it to a
+     * 32-bit process on a 64-bit kernel; the processor ABI the process
+     * itself was built for is uname -p's business. */
+    strlcpy(buf->machine, OS_ARCH, sizeof(buf->machine));
     buf->machine[255] = '\0';
     buf->domainname[0] = '\0';
     

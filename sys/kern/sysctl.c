@@ -54,7 +54,7 @@ SYSCTL_STRING(kern, KERN_HOSTNAME, hostname, CTLFLAG_RW, kernel_hostname, sizeof
 SYSCTL_STRING(kern, KERN_DOMAINNAME, domainname, CTLFLAG_RW, kernel_domainname, sizeof(kernel_domainname), "Domain name");
 
 /* HW Variables */
-static char hw_machine[] = "i386";
+static char hw_machine[] = OS_ARCH;
 static char hw_model[] = "Generic x86 PC";
 static int hw_ncpu = 1;
 static int hw_pagesize = 4096;

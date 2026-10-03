@@ -11,6 +11,7 @@
 #include <sys/proc.h>
 #include <sys/random.h>
 #include <sys/thr.h>
+#include <kern/osversion.h>
 #include <kern/sched.h>
 #include <sys/stat.h>
 #include <sys/sysarch.h>
@@ -827,12 +828,12 @@ static const struct nbnode nb_kern[] = {
     NB_INT(200, "boothowto",  0),      /* multiuser, no special flags */
 };
 static const struct nbnode nb_hw[] = {
-    NB_STR (1,  "machine",      "i386"),
+    NB_STR (1,  "machine",      OS_ARCH_BSD),     /* the kernel's */
     NB_STR (2,  "model",        "Substrate i386"),
     NB_FN  (3,  "ncpu",         nb_ncpu),
     NB_QUAD(13, "physmem64",    nb_physmem64),  /* HW_PHYSMEM64: total RAM */
     NB_INT (7,  "pagesize",     4096),
-    NB_STR (10, "machine_arch", "i386"),
+    NB_STR (10, "machine_arch", "i386"),          /* the process's ABI */
 };
 static const struct nbnode nb_vm[] = {
     NB_INT(9,   "maxslp", 20),      /* MAXSLP */

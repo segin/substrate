@@ -25,6 +25,24 @@
 #define OS_OSRELEASE    OS_RELEASE OS_RELEASE_TAG /* sysctl kern.osrelease */
 #define OS_VERSION      OS_RELEASE ".0"           /* boot banner, x.y.z */
 
+/* Build target architecture: the boot banner, uname -m and sysctl
+ * hw.machine.  Detected from the compiler so it tracks whatever target the
+ * kernel is built for. */
+#if defined(__x86_64__)
+#define OS_ARCH "x86_64"
+#elif defined(__i386__)
+#define OS_ARCH "i386"
+#else
+#define OS_ARCH "unknown"
+#endif
+
+/* The same architecture as the BSD personalities name it (hw.machine). */
+#if defined(__x86_64__)
+#define OS_ARCH_BSD "amd64"
+#else
+#define OS_ARCH_BSD OS_ARCH
+#endif
+
 /* Build identity for sysctl kern.version, for example
  *     Substrate 0.4-ALPHA (GENERIC) #0: Sun Sep 13 22:30:00 UTC 2026
  * The date is the time of the build: sys/Makefile regenerates vers.c, which

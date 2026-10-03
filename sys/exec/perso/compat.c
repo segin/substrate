@@ -1408,9 +1408,9 @@ int freebsd_sys_sysctl(int *name, unsigned int namelen, void *oldp, abi_size_t *
 
     /* CTL_KERN=1, CTL_HW=6 */
     if (kname[0] == 6 && namelen >= 2) { /* CTL_HW */
-        if (kname[1] == 1)   /* HW_MACHINE */
-            return fbsd_sysctl_str("i386", oldp, oldlenp);
-        if (kname[1] == 11)  /* HW_MACHINE_ARCH */
+        if (kname[1] == 1)   /* HW_MACHINE: the kernel's ("amd64" on x86_64) */
+            return fbsd_sysctl_str(OS_ARCH_BSD, oldp, oldlenp);
+        if (kname[1] == 11)  /* HW_MACHINE_ARCH: the process's ABI */
             return fbsd_sysctl_str("i386", oldp, oldlenp);
         if (kname[1] == 3) { /* HW_NCPU */
             int val = sys_cpu_count();
