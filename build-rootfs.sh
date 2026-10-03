@@ -437,6 +437,28 @@ install_to_dist() {
     fi
     unset _libstdcxx_src _soname
 
+    # The same two libraries for 64-bit programs, into /lib64.  They come
+    # from the 64-bit cross toolchain (contrib/build-toolchain64.sh), whose
+    # specs make EVERY program it links need libgcc_s.so.1, and C++ ones
+    # libstdc++.so.6 as well.  The in-tree 64-bit userland is built with
+    # the host compiler and needs neither, so their absence is not an
+    # error: an image built without that toolchain simply cannot run
+    # programs compiled with it.
+    _sr64="$STAGE1_PREFIX/x86_64-unknown-substrate/lib"
+    if [ -d "$DIST/lib64" ] && [ -f "$_sr64/libgcc_s.so.1" ]; then
+        echo "Installing the 64-bit libgcc_s.so.1 and libstdc++.so.6 to dist/lib64..."
+        cp "$_sr64/libgcc_s.so.1" "$DIST/lib64/libgcc_s.so.1"
+        ln -sf libgcc_s.so.1 "$DIST/lib64/libgcc_s.so"
+        _libstdcxx_src=$(ls "$_sr64"/libstdc++.so.6.[0-9]* 2>/dev/null \
+                         | grep -v -- '-gdb.py' | head -1)
+        if [ -n "$_libstdcxx_src" ] && [ -f "$_libstdcxx_src" ]; then
+            _soname=$(basename "$_libstdcxx_src")
+            cp "$_libstdcxx_src" "$DIST/lib64/$_soname"
+            ln -sf "$_soname" "$DIST/lib64/libstdc++.so.6"
+        fi
+    fi
+    unset _sr64 _libstdcxx_src _soname
+
     # crt0.o lives next to libc.a — userland Makefiles reference it as
     # $(TOP)/lib/c/crt0.o at link time, but on-target it's expected at
     # /usr/lib/crt0.o for the substrate-native compiler.
