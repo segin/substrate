@@ -21,7 +21,7 @@
  * These will be overridden by the generated ksyms_table.o in the second pass.
  */
 __attribute__((weak)) struct ksym ksym_table[] = {
-    { 0xFFFFFFFF, "" }
+    { UINTPTR_MAX, "" }
 };
 __attribute__((weak)) int ksym_count = 0;
 
@@ -31,7 +31,7 @@ __attribute__((weak)) int ksym_count = 0;
  * Returns pointer to symbol entry, or NULL if not found.
  * Uses binary search for efficiency.
  */
-const struct ksym *ksym_lookup(uint32_t addr) {
+const struct ksym *ksym_lookup(uintptr_t addr) {
     if (ksym_count == 0) return NULL;
     if (addr < ksym_table[0].addr || addr > ksym_table[ksym_count - 1].addr) {
         return NULL;
@@ -62,28 +62,29 @@ const struct ksym *ksym_lookup(uint32_t addr) {
  * Writes result to buf: "function_name+0x123" or "0xADDRESS" if unknown.
  * Returns length written.
  */
-int ksym_resolve(uint32_t addr, char *buf, int buflen) {
+int ksym_resolve(uintptr_t addr, char *buf, int buflen) {
     const struct ksym *sym = ksym_lookup(addr);
     if (!buf || buflen <= 0) {
         return 0;
     }
     
     if (sym && sym->name[0]) {
-        uint32_t offset = addr - sym->addr;
+        uintptr_t offset = addr - sym->addr;
         if (offset == 0) {
             return snprintf(buf, (size_t)buflen, "%s", sym->name);
         } else {
-            return snprintf(buf, (size_t)buflen, "%s+0x%x", sym->name, offset);
+            return snprintf(buf, (size_t)buflen, "%s+0x%lx", sym->name,
+                            (unsigned long)offset);
         }
     } else {
-        return snprintf(buf, (size_t)buflen, "0x%08x", addr);
+        return snprintf(buf, (size_t)buflen, "%p", (void *)addr);
     }
 }
 
 /*
  * ksym_print - Print address with symbol resolution
  */
-void ksym_print(uint32_t addr) {
+void ksym_print(uintptr_t addr) {
     char buf[80];
     ksym_resolve(addr, buf, sizeof(buf));
     kprint(buf);

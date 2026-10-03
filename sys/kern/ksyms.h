@@ -5,7 +5,7 @@
 
 /* Symbol table entry */
 struct ksym {
-    uint32_t addr;      /* Symbol address */
+    uintptr_t addr;     /* Symbol address */
     char name[56];      /* Symbol name (truncated) */
 };
 
@@ -32,7 +32,7 @@ void ksym_init(void);
  * Returns pointer to symbol entry with largest address <= addr,
  * or NULL if no symbols loaded.
  */
-const struct ksym *ksym_lookup(uint32_t addr);
+const struct ksym *ksym_lookup(uintptr_t addr);
 
 /*
  * ksym_resolve - Resolve address to symbol string
@@ -44,7 +44,7 @@ const struct ksym *ksym_lookup(uint32_t addr);
  * Writes "function+0xoffset" or "0xaddress" if unknown.
  * Returns length written.
  */
-int ksym_resolve(uint32_t addr, char *buf, int buflen);
+int ksym_resolve(uintptr_t addr, char *buf, int buflen);
 
 /*
  * ksym_print - Print address with resolved symbol
@@ -53,6 +53,6 @@ int ksym_resolve(uint32_t addr, char *buf, int buflen);
  *
  * Outputs to console: "function+0xoffset" or hex address.
  */
-void ksym_print(uint32_t addr);
+void ksym_print(uintptr_t addr);
 
 #endif /* _KSYMS_H */

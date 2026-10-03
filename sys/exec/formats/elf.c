@@ -26,12 +26,8 @@
 #include <sys/lock.h>    /* elf_image_cache spinlock */
 #include <machine/pmm.h>
 #include <machine/vmparam.h>
-#if defined(__i386__) || defined(HOST_TEST)
 #include <machine/pmap.h>
 #include <machine/gdt.h>
-#elif defined(__x86_64__)
-#include <arch/x86_64/pmap.h>
-#endif
 #include <sys/ldt.h>
 #include <pm/pm.h>
 #include <kern/cmdline.h>
@@ -419,10 +415,13 @@ static fs_node_t *elf_lookup_interpreter(fs_node_t *root, const char *interp_pat
 static int elf_machine_matches_kernel(const Elf32_Ehdr *ehdr) {
     if (!ehdr) return 0;
 
-#if defined(__i386__)
+#if defined(__i386__) || defined(SUBSTRATE_ARCH_X86_64)
+    /* The x86_64 kernel runs i386 programs in compatibility mode
+     * (docs/specs/abi-amd64.md, section 10); native amd64 ones are for
+     * later. */
     if (ehdr->e_ident[EI_CLASS] != ELFCLASS32 || ehdr->e_machine != EM_386) {
         char buf[96];
-        snprintf(buf, sizeof(buf), "ELF: Unsupported machine/class for i386 kernel (machine=%u class=%u)\n",
+        snprintf(buf, sizeof(buf), "ELF: Unsupported machine/class (machine=%u class=%u)\n",
                 (unsigned int)ehdr->e_machine, (unsigned int)ehdr->e_ident[EI_CLASS]);
         kprint(buf);
         return 0;

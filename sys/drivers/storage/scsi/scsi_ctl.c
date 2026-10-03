@@ -285,7 +285,7 @@ static int scsi_create_generic_node(scsi_device_t *dev) {
     strlcpy(sg->node.name, want, sizeof(sg->node.name));
 
     sg->node.flags = FS_CHARDEVICE;
-    sg->node.impl = (uint32_t)(uintptr_t)sg;
+    sg->node.impl = (uintptr_t)sg;
     sg->node.ioctl = sg_ioctl;
     
     devfs_register_device(&sg->node);
@@ -377,7 +377,7 @@ int scsi_create_bus_node(scsi_link_t *link, uint8_t bus_id) {
     bn->bus_id = bus_id;
     snprintf(bn->node.name, sizeof(bn->node.name), "storage/scsi/%d", bus_id);
     bn->node.flags = FS_CHARDEVICE;
-    bn->node.impl = (uint32_t)(uintptr_t)bn;
+    bn->node.impl = (uintptr_t)bn;
     bn->node.ioctl = bus_ioctl;
     
     devfs_register_device(&bn->node);

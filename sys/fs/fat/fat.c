@@ -690,7 +690,7 @@ static fs_node_t *fat_alloc_node(fat_fs_t *fs, const char *name, uint64_t inode,
     memset(node, 0, sizeof(fs_node_t));
     strlcpy(node->name, name, sizeof(node->name));
     node->name[127] = '\0';
-    node->impl = (uint32_t)(uintptr_t)ctx;
+    node->impl = (uintptr_t)ctx;
     node->inode = inode;
     node->length = size;
     node->mask = fat_default_mask(attr);
@@ -1124,7 +1124,7 @@ fs_node_t *fat_mount(const char *device, uint32_t flags, void *data) {
         if (rn && rc) {
             *rc = *(fat_node_t *)(uintptr_t)tmp->impl;
             *rn = *tmp;
-            rn->impl    = (uint32_t)(uintptr_t)rc;
+            rn->impl    = (uintptr_t)rc;
             rn->unmount = fat_unmount;
             rn->syncfs  = fat_syncfs;
             fs->root_node = rn;

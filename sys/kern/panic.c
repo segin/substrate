@@ -557,10 +557,15 @@ void panic(const char *msg) {
         fake.cs = 0x08; /* kernel cs (ring 0) */
         fake.ss = 0x10;
         fake.ds = fake.es = fake.fs = fake.gs = 0x10;
-        fake.eip = (uint32_t)(uintptr_t)__builtin_return_address(0);
+        TF_SET_PC(&fake, __builtin_return_address(0));
+#ifdef SUBSTRATE_ARCH_X86_64
+        fake.rbp = (uint64_t)(uintptr_t)__builtin_frame_address(0);
+        __asm__ volatile("mov %%rsp, %0" : "=r"(fake.rsp));
+#else
         fake.ebp = (uint32_t)(uintptr_t)__builtin_frame_address(0);
         __asm__ volatile("mov %%esp, %0" : "=r"(fake.esp));
         fake.useresp = fake.esp;
+#endif
         panic_dump_regs(&fake);
     }
     panic_finish();

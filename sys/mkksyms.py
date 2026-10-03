@@ -12,7 +12,7 @@ def main():
     print('#include <stdint.h>')
     print('')
     print('struct ksym {')
-    print('    uint32_t addr;')
+    print('    uintptr_t addr;')
     print('    char name[56];')
     print('};')
     print('')
@@ -64,10 +64,10 @@ def main():
         # Truncate to 55 chars
         if len(name) > 55:
             name = name[:55]
-        print(f'    {{ (uint32_t)(uintptr_t)&{name}, "{name}" }},')
+        print(f'    {{ (uintptr_t)&{name}, "{name}" }},')
         count += 1
 
-    print('    { 0xFFFFFFFF, "" }')
+    print('    { UINTPTR_MAX, "" }')
     print('};')
     print('')
     print(f'int ksym_count = {count};')

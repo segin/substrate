@@ -83,8 +83,13 @@ mi:
 
 $(MI_OBJS): mi
 
-$(KERNEL).elf: $(ARCH_OBJS) $(MI_OBJS) $(EXTRA_OBJS) linker.ld
-	$(LD) $(LDFLAGS64) -o $@ $(ARCH_OBJS) $(MI_OBJS) $(EXTRA_OBJS)
+# Two passes, as for i386: the first link's symbols become the kernel's own
+# symbol table (kern/ksyms.c, for stack traces), linked into the second.
+$(KERNEL).elf: $(ARCH_OBJS) $(MI_OBJS) $(EXTRA_OBJS) linker.ld $(SYS)/mkksyms.py
+	$(LD) $(LDFLAGS64) -o $(OBJDIR)/kernel.tmp $(ARCH_OBJS) $(MI_OBJS) $(EXTRA_OBJS)
+	nm $(OBJDIR)/kernel.tmp | python3 $(SYS)/mkksyms.py > $(OBJDIR)/ksyms_table.c
+	$(CC) $(CFLAGS64) -c $(OBJDIR)/ksyms_table.c -o $(OBJDIR)/ksyms_table.o
+	$(LD) $(LDFLAGS64) -o $@ $(ARCH_OBJS) $(MI_OBJS) $(EXTRA_OBJS) $(OBJDIR)/ksyms_table.o
 
 $(KERNEL).bin: $(KERNEL).elf
 	$(OBJCOPY) -O binary $< $@

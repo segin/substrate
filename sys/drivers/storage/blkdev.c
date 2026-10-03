@@ -114,7 +114,7 @@ void blkdev_register(blkdev_t *dev) {
     dev->node.uid = 0;
     dev->node.gid = 0;
     dev->node.length = dev->total_sectors * dev->sector_size;
-    dev->node.impl = (uint32_t)(uintptr_t)dev;
+    dev->node.impl = (uintptr_t)dev;
     dev->node.read = blkdev_vfs_read;
     dev->node.write = blkdev_vfs_write;
     dev->node.ioctl = blkdev_vfs_ioctl;

@@ -32,10 +32,11 @@
  * 1. Address is in user space (< KERNEL_BASE)
  * 2. Address is 4-byte aligned (futex word requirement)
  */
-#ifdef __x86_64__
+#if defined(__x86_64__) && !defined(SUBSTRATE_ARCH_X86_64)
+/* The host tests, whose futex words are host user pointers. */
 #define USER_SPACE_MAX 0x00007FFFFFFFFFFFULL
 #else
-#define USER_SPACE_MAX 0xBFFFFFFFU
+#define USER_SPACE_MAX (USER32_VA_END - 1)
 #endif
 
 static inline int validate_uaddr(uintptr_t addr) {
