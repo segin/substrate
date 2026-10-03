@@ -18,19 +18,19 @@
  * are skipped over - same logic as the asm AT_ENTRY scanner from
  * Phase 1, just doing it in C now that we can. */
 typedef struct {
-    ld_u32 phdr;
-    ld_u32 phent;
-    ld_u32 phnum;
-    ld_u32 base;
-    ld_u32 entry;
-    ld_u32 pagesz;
-    ld_u32 secure;
+    ld_addr phdr;
+    ld_addr phent;
+    ld_addr phnum;
+    ld_addr base;
+    ld_addr entry;
+    ld_addr pagesz;
+    ld_addr secure;
 } ld_auxv_t;
 
-static void parse_auxv(ld_u32 *initial_stack, ld_auxv_t *out) {
+static void parse_auxv(ld_addr *initial_stack, ld_auxv_t *out) {
     /* initial_stack[0] = argc */
-    ld_u32 argc = initial_stack[0];
-    ld_u32 *p = initial_stack + 1;
+    ld_addr argc = initial_stack[0];
+    ld_addr *p = initial_stack + 1;
     /* Skip argv */
     p += argc + 1;          /* argv[0..argc-1] + NULL */
     /* Skip envp until terminating NULL */
@@ -42,8 +42,8 @@ static void parse_auxv(ld_u32 *initial_stack, ld_auxv_t *out) {
     out->base = out->entry = out->pagesz = 0;
     out->secure = 0;
     while (*p) {
-        ld_u32 tag = p[0];
-        ld_u32 val = p[1];
+        ld_addr tag = p[0];
+        ld_addr val = p[1];
         switch (tag) {
         case AT_PHDR:   out->phdr = val;   break;
         case AT_PHENT:  out->phent = val;  break;
@@ -61,14 +61,14 @@ static void parse_auxv(ld_u32 *initial_stack, ld_auxv_t *out) {
  * pointer or NULL if absent (static binary).  Also returns the
  * PIE load bias via *load_bias_out so subsequent address math is
  * straightforward. */
-static Elf32_Dyn *find_dynamic(const ld_auxv_t *a, ld_u32 *load_bias_out) {
-    Elf32_Phdr *ph = (Elf32_Phdr *)a->phdr;
-    ld_u32 ph_load_min = 0xFFFFFFFFu;
-    ld_u32 ph_load_min_vaddr = 0xFFFFFFFFu;
-    Elf32_Phdr *dyn_ph = 0;
+static Elf_Dyn *find_dynamic(const ld_auxv_t *a, ld_addr *load_bias_out) {
+    Elf_Phdr *ph = (Elf_Phdr *)a->phdr;
+    ld_addr ph_load_min = LD_ADDR_MAX;
+    ld_addr ph_load_min_vaddr = LD_ADDR_MAX;
+    Elf_Phdr *dyn_ph = 0;
 
-    for (ld_u32 i = 0; i < a->phnum; i++) {
-        Elf32_Phdr *p = (Elf32_Phdr *)((char *)ph + i * a->phent);
+    for (ld_addr i = 0; i < a->phnum; i++) {
+        Elf_Phdr *p = (Elf_Phdr *)((char *)ph + i * a->phent);
         if (p->p_type == PT_LOAD && p->p_vaddr < ph_load_min_vaddr) {
             ph_load_min_vaddr = p->p_vaddr;
             /* Lowest PT_LOAD's runtime address - vaddr = load bias.
@@ -108,10 +108,10 @@ static Elf32_Dyn *find_dynamic(const ld_auxv_t *a, ld_u32 *load_bias_out) {
      * PT_LOAD's link-time vaddr at offset 0 in the file.  For Phase
      * 2 we just report PT_DYNAMIC's link-time vaddr; the caller
      * can adjust once we wire the bias computation. */
-    ld_u32 bias = 0;
+    ld_addr bias = 0;
     /* Try PT_PHDR -> bias = AT_PHDR - phdr_phdr->p_vaddr */
-    for (ld_u32 i = 0; i < a->phnum; i++) {
-        Elf32_Phdr *p = (Elf32_Phdr *)((char *)ph + i * a->phent);
+    for (ld_addr i = 0; i < a->phnum; i++) {
+        Elf_Phdr *p = (Elf_Phdr *)((char *)ph + i * a->phent);
         if (p->p_type == PT_PHDR) {
             bias = a->phdr - p->p_vaddr;
             break;
@@ -129,25 +129,25 @@ static Elf32_Dyn *find_dynamic(const ld_auxv_t *a, ld_u32 *load_bias_out) {
     }
 
     *load_bias_out = bias;
-    return (Elf32_Dyn *)(dyn_ph->p_vaddr + bias);
+    return (Elf_Dyn *)(dyn_ph->p_vaddr + bias);
 }
 
 /* Walk the dynamic table and report what we found.  Phase 2 just
  * prints; Phase 3 will store this in a per-object descriptor and
  * actually use it. */
-static void summarize_dynamic(Elf32_Dyn *dyn, ld_u32 bias) {
-    ld_u32 needed_count = 0;
-    ld_u32 strtab = 0;
-    ld_u32 strsz  = 0;
-    ld_u32 symtab = 0;
-    ld_u32 hash = 0;
-    ld_u32 gnu_hash = 0;
-    ld_u32 rel = 0;
-    ld_u32 relsz = 0;
-    ld_u32 jmprel = 0;
-    ld_u32 pltrelsz = 0;
+static void summarize_dynamic(Elf_Dyn *dyn, ld_addr bias) {
+    ld_addr needed_count = 0;
+    ld_addr strtab = 0;
+    ld_addr strsz  = 0;
+    ld_addr symtab = 0;
+    ld_addr hash = 0;
+    ld_addr gnu_hash = 0;
+    ld_addr rel = 0;
+    ld_addr relsz = 0;
+    ld_addr jmprel = 0;
+    ld_addr pltrelsz = 0;
 
-    for (Elf32_Dyn *d = dyn; d->d_tag != DT_NULL; d++) {
+    for (Elf_Dyn *d = dyn; d->d_tag != DT_NULL; d++) {
         switch (d->d_tag) {
         case DT_NEEDED:    needed_count++;        break;
         case DT_STRTAB:    strtab = d->d_un.d_ptr; break;
@@ -155,8 +155,8 @@ static void summarize_dynamic(Elf32_Dyn *dyn, ld_u32 bias) {
         case DT_SYMTAB:    symtab = d->d_un.d_ptr; break;
         case DT_HASH:      hash   = d->d_un.d_ptr; break;
         case DT_GNU_HASH:  gnu_hash = d->d_un.d_ptr; break;
-        case DT_REL:       rel    = d->d_un.d_ptr; break;
-        case DT_RELSZ:     relsz  = d->d_un.d_val; break;
+        case LD_DT_REL:    rel    = d->d_un.d_ptr; break;
+        case LD_DT_RELSZ:  relsz  = d->d_un.d_val; break;
         case DT_JMPREL:    jmprel = d->d_un.d_ptr; break;
         case DT_PLTRELSZ:  pltrelsz = d->d_un.d_val; break;
         }
@@ -164,21 +164,21 @@ static void summarize_dynamic(Elf32_Dyn *dyn, ld_u32 bias) {
 
     if (!ld_debug) return;       /* whole function is diagnostics */
 
-    ld_puts("ld.so: program PT_DYNAMIC at "); ld_putx((ld_u32)(unsigned long)dyn); ld_puts("\n");
+    ld_puts("ld.so: program PT_DYNAMIC at "); ld_putx((ld_addr)(unsigned long)dyn); ld_puts("\n");
     ld_puts("ld.so:   load bias = "); ld_putx(bias); ld_puts("\n");
     ld_puts("ld.so:   DT_NEEDED count = "); ld_putd(needed_count); ld_puts("\n");
     if (strtab) { ld_puts("ld.so:   DT_STRTAB  = "); ld_putx(strtab + bias); ld_puts(" ("); ld_putd(strsz); ld_puts(" bytes)\n"); }
     if (symtab) { ld_puts("ld.so:   DT_SYMTAB  = "); ld_putx(symtab + bias); ld_puts("\n"); }
     if (hash)   { ld_puts("ld.so:   DT_HASH    = "); ld_putx(hash + bias); ld_puts("\n"); }
     if (gnu_hash){ld_puts("ld.so:   DT_GNU_HASH= "); ld_putx(gnu_hash + bias); ld_puts("\n"); }
-    if (rel)    { ld_puts("ld.so:   DT_REL     = "); ld_putx(rel + bias); ld_puts(" ("); ld_putd(relsz / 8); ld_puts(" entries)\n"); }
-    if (jmprel) { ld_puts("ld.so:   DT_JMPREL  = "); ld_putx(jmprel + bias); ld_puts(" ("); ld_putd(pltrelsz / 8); ld_puts(" entries)\n"); }
+    if (rel)    { ld_puts("ld.so:   DT_REL     = "); ld_putx(rel + bias); ld_puts(" ("); ld_putd(relsz / sizeof(Elf_Reloc)); ld_puts(" entries)\n"); }
+    if (jmprel) { ld_puts("ld.so:   DT_JMPREL  = "); ld_putx(jmprel + bias); ld_puts(" ("); ld_putd(pltrelsz / sizeof(Elf_Reloc)); ld_puts(" entries)\n"); }
 
     /* List DT_NEEDED entries by name. */
     if (needed_count > 0 && strtab) {
         const char *s = (const char *)(strtab + bias);
-        ld_u32 idx = 0;
-        for (Elf32_Dyn *d = dyn; d->d_tag != DT_NULL; d++) {
+        ld_addr idx = 0;
+        for (Elf_Dyn *d = dyn; d->d_tag != DT_NULL; d++) {
             if (d->d_tag == DT_NEEDED) {
                 ld_puts("ld.so:   needed[");
                 ld_putd(idx++);
@@ -190,7 +190,7 @@ static void summarize_dynamic(Elf32_Dyn *dyn, ld_u32 bias) {
     }
 }
 
-ld_u32 ld_main(ld_u32 *initial_stack) {
+ld_addr ld_main(ld_addr *initial_stack) {
     ld_auxv_t a;
     parse_auxv(initial_stack, &a);
 
@@ -205,8 +205,8 @@ ld_u32 ld_main(ld_u32 *initial_stack) {
     int trace_mode = 0;
     const char *preload_list = 0;
     {
-        ld_u32 argc = initial_stack[0];
-        ld_u32 *p = initial_stack + 1 + argc + 1;   /* skip argv + NULL */
+        ld_addr argc = initial_stack[0];
+        ld_addr *p = initial_stack + 1 + argc + 1;   /* skip argv + NULL */
         const char k_trace[]   = "LD_TRACE_LOADED_OBJECTS=";
         const char k_debug[]   = "LD_DEBUG=";
         const char k_preload[] = "LD_PRELOAD=";
@@ -261,8 +261,8 @@ ld_u32 ld_main(ld_u32 *initial_stack) {
     if (a.phdr == 0 || a.phnum == 0)
         ld_die("AT_PHDR/AT_PHNUM missing from auxv");
 
-    ld_u32 bias = 0;
-    Elf32_Dyn *dyn = find_dynamic(&a, &bias);
+    ld_addr bias = 0;
+    Elf_Dyn *dyn = find_dynamic(&a, &bias);
     if (!dyn) {
         LD_DBG(ld_puts("ld.so: program has no PT_DYNAMIC (static-PIE)\n"));
         return a.entry;
@@ -280,12 +280,12 @@ ld_u32 ld_main(ld_u32 *initial_stack) {
     /* Compute the load span from the program's PT_LOAD phdrs.  Needed
      * by __ldso_dladdr() to map addresses back to the program. */
     {
-        Elf32_Phdr *ph = (Elf32_Phdr *)a.phdr;
-        ld_u32 lo = 0xFFFFFFFFu, hi = 0;
-        for (ld_u32 i = 0; i < a.phnum; i++) {
+        Elf_Phdr *ph = (Elf_Phdr *)a.phdr;
+        ld_addr lo = LD_ADDR_MAX, hi = 0;
+        for (ld_addr i = 0; i < a.phnum; i++) {
             if (ph[i].p_type != PT_LOAD) continue;
-            ld_u32 vstart = ph[i].p_vaddr & ~0xFFFu;
-            ld_u32 vend   = (ph[i].p_vaddr + ph[i].p_memsz + 0xFFFu) & ~0xFFFu;
+            ld_addr vstart = ph[i].p_vaddr & ~LD_PAGE_MASK;
+            ld_addr vend   = (ph[i].p_vaddr + ph[i].p_memsz + LD_PAGE_MASK) & ~LD_PAGE_MASK;
             if (vstart < lo) lo = vstart;
             if (vend   > hi) hi = vend;
         }
@@ -323,9 +323,9 @@ ld_u32 ld_main(ld_u32 *initial_stack) {
     /* Detect PT_TLS in the program's phdrs.  AT_PHDR is the
      * program's own phdr table at runtime; iterate by AT_PHNUM. */
     {
-        Elf32_Phdr *php = (Elf32_Phdr *)a.phdr;
-        for (ld_u32 i = 0; i < a.phnum; i++) {
-            Elf32_Phdr *pp = (Elf32_Phdr *)((char *)php + i * a.phent);
+        Elf_Phdr *php = (Elf_Phdr *)a.phdr;
+        for (ld_addr i = 0; i < a.phnum; i++) {
+            Elf_Phdr *pp = (Elf_Phdr *)((char *)php + i * a.phent);
             if (pp->p_type == PT_TLS) {
                 prog_obj.tls_image  = (const void *)(pp->p_vaddr + bias);
                 prog_obj.tls_filesz = pp->p_filesz;
@@ -341,19 +341,19 @@ ld_u32 ld_main(ld_u32 *initial_stack) {
     }
     /* Cache dynamic-table pointers on the program too. */
     {
-        ld_u32 strtab_off=0, symtab_off=0, hash_off=0, gnu_hash_off=0;
-        ld_u32 rel_off=0, jmprel_off=0;
-        ld_u32 init_off=0, fini_off=0, init_arr_off=0, fini_arr_off=0;
-        ld_u32 versym_off=0, verdef_off=0, verneed_off=0;
-        for (Elf32_Dyn *d = dyn; d->d_tag != DT_NULL; d++) {
+        ld_addr strtab_off=0, symtab_off=0, hash_off=0, gnu_hash_off=0;
+        ld_addr rel_off=0, jmprel_off=0;
+        ld_addr init_off=0, fini_off=0, init_arr_off=0, fini_arr_off=0;
+        ld_addr versym_off=0, verdef_off=0, verneed_off=0;
+        for (Elf_Dyn *d = dyn; d->d_tag != DT_NULL; d++) {
             switch (d->d_tag) {
             case DT_STRTAB:   strtab_off   = d->d_un.d_ptr; break;
             case DT_STRSZ:    prog_obj.strsz    = d->d_un.d_val; break;
             case DT_SYMTAB:   symtab_off   = d->d_un.d_ptr; break;
             case DT_HASH:     hash_off     = d->d_un.d_ptr; break;
             case DT_GNU_HASH: gnu_hash_off = d->d_un.d_ptr; break;
-            case DT_REL:      rel_off      = d->d_un.d_ptr; break;
-            case DT_RELSZ:    prog_obj.relsz    = d->d_un.d_val; break;
+            case LD_DT_REL:   rel_off      = d->d_un.d_ptr; break;
+            case LD_DT_RELSZ: prog_obj.relsz    = d->d_un.d_val; break;
             case DT_JMPREL:   jmprel_off   = d->d_un.d_ptr; break;
             case DT_PLTRELSZ: prog_obj.pltrelsz = d->d_un.d_val; break;
             case DT_INIT:         init_off     = d->d_un.d_ptr; break;
@@ -374,24 +374,22 @@ ld_u32 ld_main(ld_u32 *initial_stack) {
             }
         }
         prog_obj.strtab   = strtab_off   ? (const char *)(strtab_off   + bias) : 0;
-        prog_obj.symtab   = symtab_off   ? (Elf32_Sym  *)(symtab_off   + bias) : 0;
+        prog_obj.symtab   = symtab_off   ? (Elf_Sym  *)(symtab_off   + bias) : 0;
         prog_obj.hash     = hash_off     ? (ld_u32     *)(hash_off     + bias) : 0;
         prog_obj.gnu_hash = gnu_hash_off ? (ld_u32     *)(gnu_hash_off + bias) : 0;
-        prog_obj.rel      = rel_off      ? (Elf32_Rel  *)(rel_off      + bias) : 0;
-        prog_obj.jmprel   = jmprel_off   ? (Elf32_Rel  *)(jmprel_off   + bias) : 0;
+        prog_obj.rel      = rel_off      ? (Elf_Reloc  *)(rel_off      + bias) : 0;
+        prog_obj.jmprel   = jmprel_off   ? (Elf_Reloc  *)(jmprel_off   + bias) : 0;
         prog_obj.init       = init_off       ? (void (*)(void))(init_off       + bias) : 0;
         prog_obj.fini       = fini_off       ? (void (*)(void))(fini_off       + bias) : 0;
         prog_obj.init_array = init_arr_off   ? (void (**)(void))(init_arr_off  + bias) : 0;
         prog_obj.fini_array = fini_arr_off   ? (void (**)(void))(fini_arr_off  + bias) : 0;
-        prog_obj.versym  = versym_off  ? (Elf32_Half    *)(versym_off  + bias) : 0;
-        prog_obj.verdef  = verdef_off  ? (Elf32_Verdef  *)(verdef_off  + bias) : 0;
-        prog_obj.verneed = verneed_off ? (Elf32_Verneed *)(verneed_off + bias) : 0;
+        prog_obj.versym  = versym_off  ? (Elf_Half    *)(versym_off  + bias) : 0;
+        prog_obj.verdef  = verdef_off  ? (Elf_Verdef  *)(verdef_off  + bias) : 0;
+        prog_obj.verneed = verneed_off ? (Elf_Verneed *)(verneed_off + bias) : 0;
     }
 
     /* Splice the program into the loaded-object list head so the
      * resolver scans it first per the standard ELF lookup order. */
-    extern void ld_obj_prepend(ld_obj_t *o);   /* see ld_load.c */
-    extern void ld_obj_append(ld_obj_t *o);    /* see ld_load.c */
     ld_obj_prepend(&prog_obj);
 
     /* Build an ld_obj_t for ld.so itself and append it to the
@@ -400,8 +398,7 @@ ld_u32 ld_main(ld_u32 *initial_stack) {
      * accessible by name; the load base is AT_BASE. */
     static ld_obj_t self_obj;
     {
-        extern Elf32_Dyn _DYNAMIC[];
-        const char self_name[] = "ld.so";
+        const char self_name[] = LD_SELF_NAME;
         for (ld_size i = 0; i < sizeof(self_name); i++)
             self_obj.name[i] = self_name[i];
         self_obj.base       = a.base;
@@ -436,9 +433,9 @@ ld_u32 ld_main(ld_u32 *initial_stack) {
         /* Walk our own dynamic table the same way ld_cache_dynamic
          * does for shared libraries, but inline because that helper
          * is static to ld_load.c. */
-        ld_u32 strtab_off = 0, symtab_off = 0;
-        ld_u32 hash_off = 0, gnu_hash_off = 0;
-        for (Elf32_Dyn *d = _DYNAMIC; d->d_tag != DT_NULL; d++) {
+        ld_addr strtab_off = 0, symtab_off = 0;
+        ld_addr hash_off = 0, gnu_hash_off = 0;
+        for (Elf_Dyn *d = _DYNAMIC; d->d_tag != DT_NULL; d++) {
             switch (d->d_tag) {
             case DT_STRTAB:   strtab_off   = d->d_un.d_ptr; break;
             case DT_STRSZ:    self_obj.strsz = d->d_un.d_val; break;
@@ -448,7 +445,7 @@ ld_u32 ld_main(ld_u32 *initial_stack) {
             }
         }
         self_obj.strtab   = strtab_off   ? (const char *)(strtab_off   + a.base) : 0;
-        self_obj.symtab   = symtab_off   ? (Elf32_Sym  *)(symtab_off   + a.base) : 0;
+        self_obj.symtab   = symtab_off   ? (Elf_Sym  *)(symtab_off   + a.base) : 0;
         self_obj.hash     = hash_off     ? (ld_u32     *)(hash_off     + a.base) : 0;
         self_obj.gnu_hash = gnu_hash_off ? (ld_u32     *)(gnu_hash_off + a.base) : 0;
         /* ld.so already self-relocated in ld_start.S and has no
@@ -482,7 +479,7 @@ ld_u32 ld_main(ld_u32 *initial_stack) {
             while (*p == ':' || *p == ' ') p++;
             if (!*p) break;
             /* Copy one path. */
-            ld_u32 n = 0;
+            ld_addr n = 0;
             while (*p && *p != ':' && *p != ' ' && n + 1 < sizeof(path))
                 path[n++] = *p++;
             path[n] = '\0';
@@ -517,7 +514,7 @@ ld_u32 ld_main(ld_u32 *initial_stack) {
      * symbol resolution scope. */
     for (ld_obj_t *cur = ld_obj_list(); cur; cur = cur->next) {
         if (!cur->dynamic || !cur->strtab) continue;
-        for (Elf32_Dyn *d = cur->dynamic; d->d_tag != DT_NULL; d++) {
+        for (Elf_Dyn *d = cur->dynamic; d->d_tag != DT_NULL; d++) {
             if (d->d_tag != DT_NEEDED) continue;
             const char *soname = cur->strtab + d->d_un.d_val;
             ld_obj_t *o = ld_load_object(soname);
@@ -570,7 +567,7 @@ ld_u32 ld_main(ld_u32 *initial_stack) {
      * state - e.g. libXt's `sessionShellWidgetClass`. */
     for (ld_obj_t *o = ld_obj_list(); o; o = o->next) {
         if (ld_relocate_copy(o) != 0) {
-            ld_die("R_386_COPY relocation failed");
+            ld_die(LD_R_COPY_NAME " relocation failed");
         }
     }
 
@@ -591,7 +588,7 @@ ld_u32 ld_main(ld_u32 *initial_stack) {
             if (o == ld_obj_list()) continue;       /* skip program */
             ld_puts("\t");
             ld_puts(o->name);
-            int is_self = o->name[0]=='l'&&o->name[1]=='d'&&o->name[2]=='.';
+            int is_self = (o == &self_obj);
             if (is_self) {
                 /* ld.so itself - no resolved path. */
                 ld_puts(" (");
@@ -602,7 +599,7 @@ ld_u32 ld_main(ld_u32 *initial_stack) {
                 if (o->path[0])
                     ld_puts(o->path);
                 else {
-                    ld_puts("/lib/");
+                    ld_puts(LD_DEFAULT_LIBDIR "/");
                     ld_puts(o->name);
                 }
                 ld_puts(" (");
@@ -610,15 +607,7 @@ ld_u32 ld_main(ld_u32 *initial_stack) {
             ld_putx(o->base);
             ld_puts(")\n");
         }
-        /* exit(0) via raw SYS_exit. */
-        __asm__ volatile (
-            "subl $8, %%esp\n\t"
-            "movl $0, 4(%%esp)\n\t"
-            "movl $1, %%eax\n\t"
-            "int $0x80\n\t"
-            : : : "eax", "memory"
-        );
-        for (;;) {}
+        ld_exit(0);
     }
 
     /* glibc-rtld parity: publish `environ` BEFORE any constructor runs.
@@ -629,9 +618,9 @@ ld_u32 ld_main(ld_u32 *initial_stack) {
      * ld_resolve returns the canonical symbol (the program's copy when
      * it defines/copies one), which is the same object crt0 assigns. */
     {
-        ld_u32 envaddr = ld_resolve("environ");
+        ld_addr envaddr = ld_resolve("environ");
         if (envaddr) {
-            ld_u32 argc = initial_stack[0];
+            ld_addr argc = initial_stack[0];
             char **envp = (char **)(initial_stack + 1 + argc + 1);
             *(char ***)envaddr = envp;
         }
@@ -655,8 +644,8 @@ void __ldso_run_fini(void) {
     for (ld_obj_t *o = ld_obj_list(); o; o = o->next) {
         if (o->finalized) continue;
         if (o->fini_array && o->fini_arraysz >= sizeof(void (*)(void))) {
-            ld_u32 cnt = o->fini_arraysz / sizeof(void (*)(void));
-            for (ld_u32 j = cnt; j > 0; j--) {
+            ld_addr cnt = o->fini_arraysz / sizeof(void (*)(void));
+            for (ld_addr j = cnt; j > 0; j--) {
                 if (o->fini_array[j - 1]) o->fini_array[j - 1]();
             }
         }
@@ -704,12 +693,12 @@ void ld_run_init_arrays(void) {
             o->init();
         }
         if (o->init_array && o->init_arraysz >= sizeof(void (*)(void))) {
-            ld_u32 cnt = o->init_arraysz / sizeof(void (*)(void));
+            ld_addr cnt = o->init_arraysz / sizeof(void (*)(void));
             if (ld_debug) {
                 ld_puts("ld.so: init "); ld_puts(o->name);
                 ld_puts(" (DT_INIT_ARRAY x"); ld_putd(cnt); ld_puts(")\n");
             }
-            for (ld_u32 j = 0; j < cnt; j++) {
+            for (ld_addr j = 0; j < cnt; j++) {
                 if (o->init_array[j]) o->init_array[j]();
             }
         }

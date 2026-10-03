@@ -1,18 +1,152 @@
 /*
- * ld.h - internal types for /sbin/ld.so.
+ * ld.h - internal types for the Substrate dynamic linker.
  *
- * Phase 2 surface: enough of the ELF / auxv types to walk the
- * program's PT_DYNAMIC.  We deliberately do NOT include any
- * Substrate libc headers; the linker is freestanding.
+ * One source tree builds two linkers: /sbin/ld.so, the 32-bit one for
+ * i386 programs, and /sbin/ld64.so, the 64-bit one for amd64 programs.
+ * Everything that depends on the word size is selected here: the ELF
+ * structures (Elf_Ehdr, Elf_Phdr, Elf_Dyn, Elf_Sym, Elf_Reloc), the
+ * address type (ld_addr), the relocation table the architecture uses
+ * (REL on i386, RELA on amd64) and the library search directories.
+ *
+ * We deliberately do NOT include any Substrate libc headers; the linker
+ * is freestanding.
  */
 
 #ifndef _LD_SO_LD_H
 #define _LD_SO_LD_H
 
-typedef unsigned int   ld_u32;
-typedef int            ld_i32;
-typedef unsigned short ld_u16;
-typedef unsigned long  ld_size;
+typedef unsigned int       ld_u32;
+typedef int                ld_i32;
+typedef unsigned short     ld_u16;
+typedef unsigned long long ld_u64;
+typedef long long          ld_i64;
+typedef unsigned long      ld_size;
+
+/*
+ * ld_addr: an address, a load bias, or a size read from an ELF structure
+ * of the native class.  On i386 it is the same `unsigned int` the linker
+ * has always used, so the 32-bit build is unchanged.
+ */
+#if defined(__x86_64__)
+#define LD_ARCH_AMD64   1
+typedef unsigned long      ld_addr;
+#elif defined(__i386__)
+#define LD_ARCH_I386    1
+typedef ld_u32             ld_addr;
+#else
+#error "ld.so: unsupported architecture"
+#endif
+
+#define LD_ADDR_MAX     ((ld_addr)-1)
+#define LD_PAGE_SIZE    ((ld_addr)0x1000)
+#define LD_PAGE_MASK    (LD_PAGE_SIZE - 1)
+
+/* e_ident[] indices and the values an object must carry to be loaded. */
+#define EI_CLASS        4
+#define ELFCLASS32      1
+#define ELFCLASS64      2
+#define ET_DYN          3
+#define EM_386          3
+#define EM_X86_64       62
+
+#ifdef LD_ARCH_AMD64
+
+#define LD_ELFCLASS     ELFCLASS64
+#define LD_EM           EM_X86_64
+#define LD_SELF_NAME    "ld64.so"       /* how the linker lists itself */
+#define LD_DEFAULT_LIBDIR "/lib64"
+
+/* ELF64 file header. */
+typedef struct {
+    unsigned char e_ident[16];
+    ld_u16 e_type;
+    ld_u16 e_machine;
+    ld_u32 e_version;
+    ld_u64 e_entry;
+    ld_u64 e_phoff;
+    ld_u64 e_shoff;
+    ld_u32 e_flags;
+    ld_u16 e_ehsize;
+    ld_u16 e_phentsize;
+    ld_u16 e_phnum;
+    ld_u16 e_shentsize;
+    ld_u16 e_shnum;
+    ld_u16 e_shstrndx;
+} Elf_Ehdr;
+
+/* ELF64 program header - note p_flags moves up next to p_type. */
+typedef struct {
+    ld_u32 p_type;
+    ld_u32 p_flags;
+    ld_u64 p_offset;
+    ld_u64 p_vaddr;
+    ld_u64 p_paddr;
+    ld_u64 p_filesz;
+    ld_u64 p_memsz;
+    ld_u64 p_align;
+} Elf_Phdr;
+
+/* ELF64 dynamic entry (16 bytes). */
+typedef struct {
+    ld_i64 d_tag;
+    union { ld_u64 d_val; ld_u64 d_ptr; } d_un;
+} Elf_Dyn;
+
+/* ELF64 symbol (24 bytes). */
+typedef struct {
+    ld_u32 st_name;
+    unsigned char st_info;
+    unsigned char st_other;
+    ld_u16 st_shndx;
+    ld_u64 st_value;
+    ld_u64 st_size;
+} Elf_Sym;
+
+/* ELF64 RELA relocation: the addend is explicit, not stored in place. */
+typedef struct {
+    ld_u64 r_offset;
+    ld_u64 r_info;
+    ld_i64 r_addend;
+} Elf_Rela;
+
+#define ELF_R_TYPE(i)   ((ld_u32)(i))
+#define ELF_R_SYM(i)    ((ld_u32)((i) >> 32))
+
+/* amd64 objects carry DT_RELA tables (and DT_PLTREL = DT_RELA). */
+typedef Elf_Rela Elf_Reloc;
+#define LD_DT_REL       DT_RELA
+#define LD_DT_RELSZ     DT_RELASZ
+
+/* The 64-bit getdents record (struct amd64_dirent in the kernel's
+ * <sys/amd64_abi.h>): d_fileno(8) d_off(8) d_reclen(2) d_type(1) pad(1)
+ * d_namlen(2) pad(2) d_name[]. */
+#define LD_DIRENT_RECLEN_OFF 16
+#define LD_DIRENT_NAME_OFF   24
+
+#else /* LD_ARCH_I386 */
+
+#define LD_ELFCLASS     ELFCLASS32
+#define LD_EM           EM_386
+#define LD_SELF_NAME    "ld.so"
+#define LD_DEFAULT_LIBDIR "/lib"
+
+/* ELF32 file header - only the fields ld.so reads at load time. */
+typedef struct {
+    unsigned char e_ident[16];
+    ld_u16 e_type;
+    ld_u16 e_machine;
+    ld_u32 e_version;
+    ld_u32 e_entry;
+    ld_u32 e_phoff;
+    ld_u32 e_shoff;
+    ld_u32 e_flags;
+    ld_u16 e_ehsize;
+    ld_u16 e_phentsize;
+    ld_u16 e_phnum;
+    ld_u16 e_shentsize;
+    ld_u16 e_shnum;
+    ld_u16 e_shstrndx;
+} Elf_Ehdr;
 
 /* ELF32 program header - System V ELF spec Fig. 2-1 */
 typedef struct {
@@ -24,24 +158,45 @@ typedef struct {
     ld_u32 p_memsz;
     ld_u32 p_flags;
     ld_u32 p_align;
-} Elf32_Phdr;
+} Elf_Phdr;
 
 /* ELF32 dynamic entry */
 typedef struct {
     ld_i32 d_tag;
     union { ld_u32 d_val; ld_u32 d_ptr; } d_un;
-} Elf32_Dyn;
+} Elf_Dyn;
 
-/* ELF32 REL relocation */
+/* ELF32 symbol */
+typedef struct {
+    ld_u32 st_name;
+    ld_u32 st_value;
+    ld_u32 st_size;
+    unsigned char st_info;
+    unsigned char st_other;
+    ld_u16 st_shndx;
+} Elf_Sym;
+
+/* ELF32 REL relocation: the addend is the word being relocated. */
 typedef struct {
     ld_u32 r_offset;
     ld_u32 r_info;
-} Elf32_Rel;
+} Elf_Rel;
 
-#define ELF32_R_TYPE(i) ((i) & 0xff)
-#define ELF32_R_SYM(i)  ((i) >> 8)
+#define ELF_R_TYPE(i)   ((i) & 0xff)
+#define ELF_R_SYM(i)    ((i) >> 8)
 
-/* Dynamic tags we use in Phase 2.  Full list lands in Phase 3. */
+/* i386 objects carry DT_REL tables; there is no DT_RELA by spec. */
+typedef Elf_Rel Elf_Reloc;
+#define LD_DT_REL       DT_REL
+#define LD_DT_RELSZ     DT_RELSZ
+
+/* The 32-bit getdents record: d_ino(4) d_off(4) d_reclen(2) d_name[]. */
+#define LD_DIRENT_RECLEN_OFF 8
+#define LD_DIRENT_NAME_OFF   10
+
+#endif /* LD_ARCH_* */
+
+/* Dynamic tags. */
 #define DT_NULL     0
 #define DT_NEEDED   1
 #define DT_HASH     4
@@ -86,7 +241,7 @@ typedef struct {
 #define PT_TLS      7
 #define PT_GNU_RELRO 0x6474e552   /* segment to make read-only after reloc */
 
-/* i386 relocation types - only R_386_RELATIVE used by self-reloc */
+/* i386 relocation types */
 #define R_386_NONE     0
 #define R_386_32       1
 #define R_386_PC32     2
@@ -109,7 +264,30 @@ typedef struct {
 #define R_386_TLS_DTPMOD32 35  /* module id of GD/LD tls_index slot */
 #define R_386_TLS_DTPOFF32 36  /* offset within module for GD/LD tls_index */
 
-/* Auxv entries used in Phase 2 */
+/* amd64 relocation types (psABI Table 4.10). */
+#define R_X86_64_NONE      0
+#define R_X86_64_64        1   /* S + A */
+#define R_X86_64_PC32      2   /* S + A - P, 32-bit */
+#define R_X86_64_COPY      5
+#define R_X86_64_GLOB_DAT  6   /* S */
+#define R_X86_64_JUMP_SLOT 7   /* S */
+#define R_X86_64_RELATIVE  8   /* B + A */
+#define R_X86_64_DTPMOD64  16  /* module id of a tls_index */
+#define R_X86_64_DTPOFF64  17  /* offset within module of a tls_index */
+#define R_X86_64_TPOFF64   18  /* offset from the thread pointer */
+#define R_X86_64_IRELATIVE 37  /* indirect function - not supported */
+
+/* The copy relocation of the architecture being built, which the common
+ * relocation loop defers to a final pass (see ld_reloc.c). */
+#ifdef LD_ARCH_AMD64
+#define LD_R_COPY       R_X86_64_COPY
+#define LD_R_COPY_NAME  "R_X86_64_COPY"
+#else
+#define LD_R_COPY       R_386_COPY
+#define LD_R_COPY_NAME  "R_386_COPY"
+#endif
+
+/* Auxv entries */
 #define AT_NULL    0
 #define AT_PHDR    3
 #define AT_PHENT   4
@@ -122,7 +300,8 @@ typedef struct {
 #define AT_SECURE  23   /* nonzero => secure exec (setuid/setgid): ignore LD_* */
 #define AT_EXECFN  31
 
-/* Native syscall numbers we actually issue from the linker. */
+/* Native syscall numbers we actually issue from the linker.  The 64-bit
+ * native personality uses the same table as i386. */
 #define SYS_exit   1
 #define SYS_read   3
 #define SYS_write  4
@@ -149,79 +328,53 @@ typedef struct {
 /* open() flags */
 #define LD_O_RDONLY 0
 
-/* ELF32 file header - only the fields ld.so reads at load time. */
-typedef struct {
-    unsigned char e_ident[16];
-    ld_u16 e_type;
-    ld_u16 e_machine;
-    ld_u32 e_version;
-    ld_u32 e_entry;
-    ld_u32 e_phoff;
-    ld_u32 e_shoff;
-    ld_u32 e_flags;
-    ld_u16 e_ehsize;
-    ld_u16 e_phentsize;
-    ld_u16 e_phnum;
-    ld_u16 e_shentsize;
-    ld_u16 e_shnum;
-    ld_u16 e_shstrndx;
-} Elf32_Ehdr;
-
-/* ELF32 symbol */
-typedef struct {
-    ld_u32 st_name;
-    ld_u32 st_value;
-    ld_u32 st_size;
-    unsigned char st_info;
-    unsigned char st_other;
-    ld_u16 st_shndx;
-} Elf32_Sym;
-
-#define ELF32_ST_BIND(i) ((i) >> 4)
-#define ELF32_ST_TYPE(i) ((i) & 0xf)
+/* st_info is laid out the same way in both ELF classes. */
+#define ELF_ST_BIND(i) ((i) >> 4)
+#define ELF_ST_TYPE(i) ((i) & 0xf)
 #define STB_LOCAL  0
 #define STB_GLOBAL 1
 #define STB_WEAK   2
-#define STT_FUNC   2   /* ELF32_ST_TYPE: symbol names a function */
+#define STT_FUNC   2   /* ELF_ST_TYPE: symbol names a function */
 #define STN_UNDEF  0
 #define SHN_UNDEF  0
 
 /* GNU symbol versioning - DT_VERDEF / DT_VERNEED / DT_VERSYM blocks.
- * Layout per glibc / binutils elf/external.h.  Strings live in the
- * dynamic strtab; the version-name HASH is computed via the standard
- * ELF hash function (NOT the GNU hash). */
-typedef ld_u16 Elf32_Half;
+ * Layout per glibc / binutils elf/external.h; it is built from 16- and
+ * 32-bit fields only, so it is identical in ELF32 and ELF64.  Strings
+ * live in the dynamic strtab; the version-name HASH is computed via the
+ * standard ELF hash function (NOT the GNU hash). */
+typedef ld_u16 Elf_Half;
 
 typedef struct {
-    Elf32_Half vd_version;  /* always 1 */
-    Elf32_Half vd_flags;    /* VER_FLG_BASE (1) for the base def slot */
-    Elf32_Half vd_ndx;      /* version index (1..N), matches VERSYM */
-    Elf32_Half vd_cnt;      /* number of vd_aux entries (>=1) */
+    Elf_Half   vd_version;  /* always 1 */
+    Elf_Half   vd_flags;    /* VER_FLG_BASE (1) for the base def slot */
+    Elf_Half   vd_ndx;      /* version index (1..N), matches VERSYM */
+    Elf_Half   vd_cnt;      /* number of vd_aux entries (>=1) */
     ld_u32     vd_hash;     /* ELF hash of the version name */
-    ld_u32     vd_aux;      /* byte offset to first Elf32_Verdaux */
-    ld_u32     vd_next;     /* byte offset to next Elf32_Verdef (0=end) */
-} Elf32_Verdef;
+    ld_u32     vd_aux;      /* byte offset to first Elf_Verdaux */
+    ld_u32     vd_next;     /* byte offset to next Elf_Verdef (0=end) */
+} Elf_Verdef;
 
 typedef struct {
     ld_u32     vda_name;    /* offset into strtab - version name */
     ld_u32     vda_next;    /* byte offset to next aux (0=end) */
-} Elf32_Verdaux;
+} Elf_Verdaux;
 
 typedef struct {
-    Elf32_Half vn_version;  /* always 1 */
-    Elf32_Half vn_cnt;      /* number of vn_aux entries */
+    Elf_Half   vn_version;  /* always 1 */
+    Elf_Half   vn_cnt;      /* number of vn_aux entries */
     ld_u32     vn_file;     /* offset into strtab - providing soname */
-    ld_u32     vn_aux;      /* byte offset to first Elf32_Vernaux */
-    ld_u32     vn_next;     /* byte offset to next Elf32_Verneed (0=end) */
-} Elf32_Verneed;
+    ld_u32     vn_aux;      /* byte offset to first Elf_Vernaux */
+    ld_u32     vn_next;     /* byte offset to next Elf_Verneed (0=end) */
+} Elf_Verneed;
 
 typedef struct {
     ld_u32     vna_hash;    /* ELF hash of the required version name */
-    Elf32_Half vna_flags;
-    Elf32_Half vna_other;   /* version index - matches VERSYM in this DSO */
+    Elf_Half   vna_flags;
+    Elf_Half   vna_other;   /* version index - matches VERSYM in this DSO */
     ld_u32     vna_name;    /* offset into strtab - version name */
     ld_u32     vna_next;    /* byte offset to next aux (0=end) */
-} Elf32_Vernaux;
+} Elf_Vernaux;
 
 /* VERSYM is a Half[] parallel to .dynsym.  Index meanings:
  *   0 = VER_NDX_LOCAL    (symbol not exported)
@@ -238,21 +391,40 @@ typedef struct {
 #define VER_FLG_BASE     1
 #define VER_FLG_WEAK     2
 
-/* TLS module descriptor passed to __tls_get_addr() for GD/LD models.
- * On i386 the call is regparm(1) - pointer in %eax - but our exported
- * symbol is plain cdecl since GCC emits a normal call instruction
- * with the pointer pushed on the stack for the GD sequence. */
+/* DT_GNU_HASH: the header and the bucket/chain arrays are 32-bit words in
+ * both classes, but the bloom filter is made of native words. */
+#define LD_BLOOM_BITS    ((ld_u32)(sizeof(ld_addr) * 8))
+
+/* TLS module descriptor passed to __tls_get_addr() for GD/LD models: two
+ * native words (8 bytes on i386, 16 on amd64).  On i386 the GD sequence
+ * calls ___tls_get_addr with the pointer in %eax (regparm(1)); the
+ * two-underscore symbol takes it as an ordinary argument on both. */
 typedef struct {
-    ld_u32 ti_module;
-    ld_u32 ti_offset;
+    ld_addr ti_module;
+    ld_addr ti_offset;
 } tls_index;
+
+/*
+ * Thread control block, at the thread pointer (%gs base on i386, %fs base
+ * on amd64).  Word 0 is the thread pointer itself and word 1 the DTV
+ * pointer -- where libc's __tls_get_addr reads it (lib/c/src/tls.c).  The
+ * DTV is laid out immediately after the TCB.  On amd64 the TCB is 64
+ * bytes, the size libc's static-TLS setup also uses, which keeps the
+ * psABI's stack-protector slot (%fs:0x28) clear of the DTV.
+ */
+#ifdef LD_ARCH_AMD64
+#define LD_TLS_TCB_SIZE 64
+#else
+#define LD_TLS_TCB_SIZE 8
+#endif
 
 /* Tiny IO helpers - implemented in ld_io.c. */
 void  ld_write(int fd, const char *buf, ld_size len);
 void  ld_puts(const char *s);
-void  ld_putx(ld_u32 v);
+void  ld_putx(ld_addr v);
 void  ld_putd(ld_u32 v);
 void  ld_die(const char *msg) __attribute__((noreturn));
+void  ld_exit(int status) __attribute__((noreturn));
 
 /* When non-zero, emit the verbose loading / relocating / TLS / etc.
  * trace.  Set from LD_DEBUG=<anything> in envp.  Errors and the
@@ -261,14 +433,16 @@ void  ld_die(const char *msg) __attribute__((noreturn));
 extern int ld_debug;
 #define LD_DBG(stmt) do { if (ld_debug) { stmt; } } while (0)
 
-/* Filesystem + mapping syscalls.  Return -errno on failure. */
+/* Filesystem + mapping syscalls.  Return -errno on failure, on both
+ * architectures: the amd64 system-call path reports an error in the carry
+ * flag with a positive errno, which the raw wrappers in ld_io.c negate. */
 int   ld_open(const char *path, int flags);
 int   ld_close(int fd);
 long  ld_read(int fd, void *buf, ld_size n);
 long  ld_lseek(int fd, long off, int whence);
 long  ld_getdents(int fd, void *buf, ld_size n);
 void *ld_mmap(void *addr, ld_size len, int prot, int flags,
-              int fd, ld_u32 page_off);
+              int fd, ld_addr page_off);
 long  ld_munmap(void *addr, ld_size len);
 long  ld_mprotect(void *addr, ld_size len, int prot);
 
@@ -279,7 +453,7 @@ long  ld_mprotect(void *addr, ld_size len, int prot);
  * be mis-rejected as an error.  This surfaced once a large dependency graph
  * (GTK+ 2.x: ~40 DSOs) pushed later libraries past the 2 GiB line. */
 static inline int ld_mmap_failed(void *p) {
-    return (ld_u32)(unsigned long)p >= (ld_u32)-4095;
+    return (ld_addr)(unsigned long)p >= (ld_addr)-4095;
 }
 
 /* Phase-3 surface: per-loaded-object descriptor.  Both the program
@@ -288,69 +462,69 @@ static inline int ld_mmap_failed(void *p) {
 typedef struct ld_obj {
     char            name[64];   /* SONAME or basename, for diagnostics */
     char            path[256];  /* full filesystem path it resolved from (ldd) */
-    ld_u32          base;       /* load bias */
-    ld_u32          load_start; /* low end of PT_LOAD span (absolute) */
-    ld_u32          load_end;   /* high end of PT_LOAD span (absolute) */
-    Elf32_Dyn      *dynamic;    /* PT_DYNAMIC pointer (already biased) */
+    ld_addr         base;       /* load bias */
+    ld_addr         load_start; /* low end of PT_LOAD span (absolute) */
+    ld_addr         load_end;   /* high end of PT_LOAD span (absolute) */
+    Elf_Dyn        *dynamic;    /* PT_DYNAMIC pointer (already biased) */
 
     /* In-memory program-header table, for dl_iterate_phdr(3) - which
      * libgcc's DWARF unwinder uses (USE_PT_GNU_EH_FRAME) to locate each
      * loaded object's PT_GNU_EH_FRAME / .eh_frame_hdr.  Without this,
      * C++ exceptions can't unwind across DSO boundaries. */
-    const void     *phdr;       /* runtime address of the Elf32_Phdr[] */
+    const void     *phdr;       /* runtime address of the Elf_Phdr[] */
     ld_u32          phnum;       /* number of program headers */
 
     /* Cached dynamic-table pointers (all already biased). */
     const char     *strtab;
-    Elf32_Sym      *symtab;
-    ld_u32          strsz;
+    Elf_Sym        *symtab;
+    ld_addr         strsz;
 
     ld_u32         *gnu_hash;   /* DT_GNU_HASH (preferred) */
     ld_u32         *hash;       /* DT_HASH (fallback) */
 
-    Elf32_Rel      *rel;        /* DT_REL */
-    ld_u32          relsz;      /* bytes */
-    Elf32_Rel      *jmprel;     /* DT_JMPREL */
-    ld_u32          pltrelsz;   /* bytes */
+    Elf_Reloc      *rel;        /* DT_REL (i386) / DT_RELA (amd64) */
+    ld_addr         relsz;      /* bytes */
+    Elf_Reloc      *jmprel;     /* DT_JMPREL */
+    ld_addr         pltrelsz;   /* bytes */
 
     /* Initializers / finalizers (DT_INIT, DT_INIT_ARRAY, ...). */
     void          (*init)(void);
     void          (**init_array)(void);
-    ld_u32          init_arraysz;   /* bytes - count = sz / sizeof(fn ptr) */
+    ld_addr         init_arraysz;   /* bytes - count = sz / sizeof(fn ptr) */
     void          (*fini)(void);
     void          (**fini_array)(void);
-    ld_u32          fini_arraysz;
+    ld_addr         fini_arraysz;
 
     /* PT_TLS metadata, populated when an object carries a thread-
      * local segment.  `tls_offset` is the negative offset from the
      * thread pointer at which this module's TLS image lives in the
      * combined per-thread block - assigned by ld_setup_tls(). */
     const void     *tls_image;      /* file-image (PT_TLS at p_offset+base) */
-    ld_u32          tls_filesz;
-    ld_u32          tls_memsz;
-    ld_u32          tls_align;
-    ld_u32          tls_offset;     /* abs(offset) below thread pointer */
+    ld_addr         tls_filesz;
+    ld_addr         tls_memsz;
+    ld_addr         tls_align;
+    ld_addr         tls_offset;     /* abs(offset) below thread pointer */
 
-    /* Per-object guards.  R_386_RELATIVE is `*p += base` -
+    /* Per-object guards.  A RELATIVE relocation on i386 is `*p += base` -
      * non-idempotent - so re-running ld_relocate on an already-
      * relocated object would double the bias and silently corrupt
      * every relative pointer (notably DT_FINI_ARRAY entries).
      * Same concern for init/fini arrays which must fire exactly
      * once. */
     int             relocated;
-    int             copy_relocated; /* R_386_COPY final pass done */
+    int             copy_relocated; /* COPY final pass done */
     int             initialized;
     int             finalized;
     int             refcount;       /* dlopen refs; fini at last close */
-    int             protected;      /* W^X + RELRO applied (LDSO-08b) */
+    int             protected;      /* W^X + RELRO applied */
 
     /* Phase 5 (C++ linkage): GNU symbol-versioning sections.  All
      * three are biased pointers into the loaded image.  NULL when
      * the DSO doesn't carry versioning (substrate libc, libm, etc.
      * currently don't - libstdc++.so.6 does). */
-    Elf32_Half     *versym;     /* DT_VERSYM - parallel to symtab */
-    Elf32_Verdef   *verdef;     /* DT_VERDEF - what we EXPORT */
-    Elf32_Verneed  *verneed;    /* DT_VERNEED - what we IMPORT */
+    Elf_Half       *versym;     /* DT_VERSYM - parallel to symtab */
+    Elf_Verdef     *verdef;     /* DT_VERDEF - what we EXPORT */
+    Elf_Verneed    *verneed;    /* DT_VERNEED - what we IMPORT */
     ld_u32          verdefnum;  /* count of verdef entries */
     ld_u32          verneednum; /* count of verneed entries */
 
@@ -363,6 +537,9 @@ typedef struct ld_obj {
     struct ld_obj  *next;
 } ld_obj_t;
 
+/* The linker's own dynamic section (defined by the link editor). */
+extern Elf_Dyn _DYNAMIC[];
+
 /* Load a shared object by absolute path.  Returns NULL on failure
  * with a diagnostic via ld_die.  Already-loaded SONAMEs are
  * deduplicated; the cached descriptor is returned. */
@@ -370,19 +547,19 @@ ld_obj_t *ld_load_object(const char *path);
 
 /* Walk the loaded-object list looking for `name`.  Returns the
  * symbol's runtime address, or 0 if undefined / weak-undef. */
-ld_u32 ld_resolve(const char *name);
+ld_addr ld_resolve(const char *name);
 
 /* Requester-aware resolve for the relocation processor: `requester` is
  * the object being relocated, so a program's own PLT slot isn't bound to
  * its own canonical-PLT entry (function-address equality - see
  * ld_resolve.c resolve_pred). */
-ld_u32 ld_resolve_req(const char *name, ld_u32 vh_hash,
-                      const ld_obj_t *requester);
+ld_addr ld_resolve_req(const char *name, ld_u32 vh_hash,
+                       const ld_obj_t *requester);
 
-/* Same, but skip `skip` while searching.  Used by R_386_COPY which
- * must find the source-of-truth in a SHARED library, not in the
+/* Same, but skip `skip` while searching.  Used by the COPY relocation,
+ * which must find the source-of-truth in a SHARED library, not in the
  * executable that's about to receive the copy. */
-ld_u32 ld_resolve_skip(const char *name, const ld_obj_t *skip);
+ld_addr ld_resolve_skip(const char *name, const ld_obj_t *skip);
 
 /* Version-aware resolution.  When the IMPORTER's VERSYM marks a
  * reference with a non-default version index, the resolver only
@@ -391,35 +568,55 @@ ld_u32 ld_resolve_skip(const char *name, const ld_obj_t *skip);
  * indicating a default version).  vh_hash is the ELF hash of the
  * importer's required-version-name; pass 0 for unversioned
  * lookups (caller wants the default version). */
-ld_u32 ld_resolve_versioned(const char *name, ld_u32 vh_hash,
-                            const ld_obj_t *skip, ld_u32 *size_out);
+ld_addr ld_resolve_versioned(const char *name, ld_u32 vh_hash,
+                             const ld_obj_t *skip, ld_addr *size_out);
 
 /* Standard ELF hash function - re-used for version-name hashing
  * (the SAME function ELF uses for the SysV symbol-name hash table). */
 ld_u32 ld_elf_hash(const char *s);
 
-/* Same, but also returns the symbol size (for R_386_COPY).
+/* Same, but also returns the symbol size (for the COPY relocation).
  * Returns 0 (and *size_out=0) if not found. */
-ld_u32 ld_resolve_with_size(const char *name, const ld_obj_t *skip,
-                            ld_u32 *size_out);
+ld_addr ld_resolve_with_size(const char *name, const ld_obj_t *skip,
+                             ld_addr *size_out);
 
 /* Resolve an imported TLS symbol (initial-exec): returns the symbol's raw
  * st_value (offset within its defining module's PT_TLS image) and the
  * defining module via *def_out (NULL if unresolved). */
-ld_u32 ld_resolve_tls(const char *name, const ld_obj_t *requester,
-                      const ld_obj_t **def_out);
+ld_addr ld_resolve_tls(const char *name, const ld_obj_t *requester,
+                       const ld_obj_t **def_out);
 
-/* Apply DT_REL and DT_JMPREL on `obj`, EXCEPT R_386_COPY.  Returns
- * 0 on success. */
+/* Look `name` up in one object's own symbol table only (dlsym with an
+ * object handle, RTLD_NEXT).  Returns its runtime address or 0. */
+ld_addr ld_lookup_in_obj(const ld_obj_t *o, const char *name);
+
+/* Apply the object's relocation table and DT_JMPREL on `obj`, EXCEPT
+ * the COPY relocations.  Returns 0 on success. */
 int ld_relocate(ld_obj_t *obj);
 
-/* Apply the R_386_COPY relocations of `obj` only.  Must run as a
+/* Apply the COPY relocations of `obj` only.  Must run as a
  * final pass after every object has been through ld_relocate(), so
  * the copy source already holds its relocated value. */
 int ld_relocate_copy(ld_obj_t *obj);
 
+/* The architecture's relocation processor (ld_reloc_i386.c,
+ * ld_reloc_amd64.c): apply one entry of `obj`.  Returns 0 on success,
+ * -1 after printing a diagnostic. */
+int ld_reloc_apply(ld_obj_t *obj, Elf_Reloc *r);
+
+/* Version-aware symbol lookup on behalf of a relocation of `obj` against
+ * its symbol `sym_idx` (named `name`).  Shared by the per-architecture
+ * relocation processors. */
+ld_addr ld_reloc_resolve(const ld_obj_t *obj, ld_u32 sym_idx,
+                         const char *name);
+
 /* Public head of the loaded-object list. */
 ld_obj_t *ld_obj_list(void);
+
+/* Put an externally allocated descriptor at the head (the program) or the
+ * tail (the linker itself) of the loaded-object list. */
+void ld_obj_prepend(ld_obj_t *o);
+void ld_obj_append(ld_obj_t *o);
 
 /* Look up an already-loaded object by SONAME/basename without loading
  * anything.  Returns NULL if it is not present.  Backs dlopen(RTLD_NOLOAD). */
@@ -458,8 +655,9 @@ __attribute__((visibility("default")))
 void __ldso_run_fini(void);
 
 /* Allocate the per-thread TLS region, copy each loaded object's
- * PT_TLS image into it, install the GS base via the new native
- * sys_set_gsbase syscall.  Returns 0 on success or a negative
+ * PT_TLS image into it, install the thread pointer via the native
+ * sys_set_gsbase syscall (which sets the %gs base of a 32-bit process
+ * and the %fs base of a 64-bit one).  Returns 0 on success or a negative
  * errno.  Called once after relocations and before init arrays. */
 int ld_setup_tls(void);
 /* Lay out a PT_TLS module that arrived after ld_setup_tls() (i.e. via dlopen)
@@ -477,7 +675,7 @@ void ld_dl_unlock(void);
 
 /* Native syscall: install a TLS base for the current thread.
  * Returns 0 on success or -errno. */
-int ld_sys_set_gsbase(ld_u32 base);
+int ld_sys_set_gsbase(ld_addr base);
 
 /* futex(2) - op is FUTEX_WAIT (0) or FUTEX_WAKE (1); timeout/uaddr2/
  * val3 are always 0 for ld.so's mutex.  Returns the raw kernel result.
@@ -487,8 +685,8 @@ int ld_sys_set_gsbase(ld_u32 base);
 long ld_futex(int *uaddr, int op, int val);
 
 /* thr_self(2) - current kernel thread id, used as the recursive-lock
- * owner token in ld_dl.c (always valid, unlike gs:0 for a no-TLS
- * program). */
+ * owner token in ld_dl.c (always valid, unlike the thread pointer for a
+ * no-TLS program). */
 int ld_thr_self(void);
 
 /* Per-process upper bound on objects we'll iterate during init.
@@ -497,7 +695,9 @@ int ld_thr_self(void);
  * pulling in ld_load.c's private constants. */
 #define LD_MAX_OBJS_INIT_LIMIT 192
 
-/* Phase 2 entry point from asm. */
-ld_u32 ld_main(ld_u32 *initial_stack);
+/* Entry point from the start code (ld_start.S, ld_start_amd64.S): takes
+ * the kernel-built initial stack pointer (where argc lives, in native
+ * words) and returns the program's entry address. */
+ld_addr ld_main(ld_addr *initial_stack);
 
 #endif /* _LD_SO_LD_H */

@@ -21,7 +21,7 @@
 #include "ld.h"
 
 #define LD_MAX_OBJS 192   /* was 32; a full GTK+ 2.x app loads ~40-60 DSOs */
-#define PAGE_SIZE   0x1000
+#define PAGE_SIZE   LD_PAGE_SIZE
 
 static ld_obj_t  ld_obj_pool[LD_MAX_OBJS];
 static ld_size   ld_obj_count = 0;
@@ -29,11 +29,19 @@ static ld_obj_t *ld_obj_head = 0;
 static ld_obj_t *ld_obj_tail = 0;
 
 /* Built-in (trusted) system search paths, always searched first.
- * Extending the list is just adding an entry - keep terminating NULL. */
+ * Extending the list is just adding an entry - keep terminating NULL.
+ * The two architectures' libraries sit side by side in one root: the
+ * 32-bit linker searches the lib directories, the 64-bit one lib64. */
 static const char *const ld_search_paths[] = {
+#ifdef LD_ARCH_AMD64
+    "/lib64",
+    "/usr/lib64",
+    "/usr/local/lib64",
+#else
     "/lib",
     "/usr/lib",
     "/usr/local/lib",
+#endif
     0,
 };
 
@@ -130,34 +138,34 @@ ld_obj_t *ld_obj_find_loaded(const char *name) {
     return (base != name) ? find_loaded(base) : 0;
 }
 
-/* Walk an Elf32_Dyn array, populating the cached pointers in `o`.
+/* Walk an Elf_Dyn array, populating the cached pointers in `o`.
  * `o->base` and `o->dynamic` must already be set; everything else
  * is filled here.  We compute SONAME late because we need DT_STRTAB
  * first. */
 static void ld_cache_dynamic(ld_obj_t *o) {
-    ld_u32 strtab_off = 0;
-    ld_u32 symtab_off = 0;
-    ld_u32 rel_off = 0;
-    ld_u32 jmprel_off = 0;
-    ld_u32 hash_off = 0;
-    ld_u32 gnu_hash_off = 0;
-    ld_u32 init_off = 0;
-    ld_u32 fini_off = 0;
-    ld_u32 init_arr_off = 0;
-    ld_u32 fini_arr_off = 0;
-    ld_u32 soname_str = 0;
+    ld_addr strtab_off = 0;
+    ld_addr symtab_off = 0;
+    ld_addr rel_off = 0;
+    ld_addr jmprel_off = 0;
+    ld_addr hash_off = 0;
+    ld_addr gnu_hash_off = 0;
+    ld_addr init_off = 0;
+    ld_addr fini_off = 0;
+    ld_addr init_arr_off = 0;
+    ld_addr fini_arr_off = 0;
+    ld_addr soname_str = 0;
     int    soname_seen = 0;
-    ld_u32 versym_off = 0, verdef_off = 0, verneed_off = 0;
+    ld_addr versym_off = 0, verdef_off = 0, verneed_off = 0;
 
-    for (Elf32_Dyn *d = o->dynamic; d->d_tag != DT_NULL; d++) {
+    for (Elf_Dyn *d = o->dynamic; d->d_tag != DT_NULL; d++) {
         switch (d->d_tag) {
         case DT_STRTAB:    strtab_off = d->d_un.d_ptr; break;
         case DT_STRSZ:     o->strsz   = d->d_un.d_val; break;
         case DT_SYMTAB:    symtab_off = d->d_un.d_ptr; break;
         case DT_HASH:      hash_off   = d->d_un.d_ptr; break;
         case DT_GNU_HASH:  gnu_hash_off = d->d_un.d_ptr; break;
-        case DT_REL:       rel_off    = d->d_un.d_ptr; break;
-        case DT_RELSZ:     o->relsz   = d->d_un.d_val; break;
+        case LD_DT_REL:    rel_off    = d->d_un.d_ptr; break;
+        case LD_DT_RELSZ:  o->relsz   = d->d_un.d_val; break;
         case DT_JMPREL:    jmprel_off = d->d_un.d_ptr; break;
         case DT_PLTRELSZ:  o->pltrelsz = d->d_un.d_val; break;
         case DT_INIT:      init_off   = d->d_un.d_ptr; break;
@@ -176,18 +184,18 @@ static void ld_cache_dynamic(ld_obj_t *o) {
     }
 
     o->strtab   = strtab_off   ? (const char *)(strtab_off   + o->base) : 0;
-    o->symtab   = symtab_off   ? (Elf32_Sym  *)(symtab_off   + o->base) : 0;
+    o->symtab   = symtab_off   ? (Elf_Sym  *)(symtab_off   + o->base) : 0;
     o->hash     = hash_off     ? (ld_u32     *)(hash_off     + o->base) : 0;
     o->gnu_hash = gnu_hash_off ? (ld_u32     *)(gnu_hash_off + o->base) : 0;
-    o->rel      = rel_off      ? (Elf32_Rel  *)(rel_off      + o->base) : 0;
-    o->jmprel   = jmprel_off   ? (Elf32_Rel  *)(jmprel_off   + o->base) : 0;
+    o->rel      = rel_off      ? (Elf_Reloc  *)(rel_off      + o->base) : 0;
+    o->jmprel   = jmprel_off   ? (Elf_Reloc  *)(jmprel_off   + o->base) : 0;
     o->init       = init_off       ? (void (*)(void))(init_off       + o->base) : 0;
     o->fini       = fini_off       ? (void (*)(void))(fini_off       + o->base) : 0;
     o->init_array = init_arr_off   ? (void (**)(void))(init_arr_off  + o->base) : 0;
     o->fini_array = fini_arr_off   ? (void (**)(void))(fini_arr_off  + o->base) : 0;
-    o->versym  = versym_off  ? (Elf32_Half    *)(versym_off  + o->base) : 0;
-    o->verdef  = verdef_off  ? (Elf32_Verdef  *)(verdef_off  + o->base) : 0;
-    o->verneed = verneed_off ? (Elf32_Verneed *)(verneed_off + o->base) : 0;
+    o->versym  = versym_off  ? (Elf_Half    *)(versym_off  + o->base) : 0;
+    o->verdef  = verdef_off  ? (Elf_Verdef  *)(verdef_off  + o->base) : 0;
+    o->verneed = verneed_off ? (Elf_Verneed *)(verneed_off + o->base) : 0;
 
     /* DT_SONAME overwrites the basename placeholder set by the loader -
      * the SONAME is the canonical dedup key (DT_NEEDED entries carry
@@ -261,7 +269,7 @@ static ld_obj_t *load_from_path(const char *path) {
     if (fd < 0) return 0;
 
     /* Read just the file header so we can locate phdrs. */
-    Elf32_Ehdr eh;
+    Elf_Ehdr eh;
     if (ld_read(fd, &eh, sizeof(eh)) != (long)sizeof(eh)) {
         ld_close(fd);
         return 0;
@@ -271,11 +279,21 @@ static ld_obj_t *load_from_path(const char *path) {
         ld_close(fd);
         return 0;
     }
-    if (eh.e_type != 3 /* ET_DYN */ || eh.e_machine != 3 /* EM_386 */) {
+    /* An object of the other word size is not ours to load: the 32- and
+     * 64-bit libraries share a root (and /etc/ld.so.conf), so a search
+     * directory may well hold the other architecture's copy of a soname.
+     * The class is checked first - the rest of the header is laid out
+     * differently in the other class.  Returning NULL here lets the
+     * search move on to the next directory. */
+    if (eh.e_ident[EI_CLASS] != LD_ELFCLASS) {
         ld_close(fd);
         return 0;
     }
-    if (eh.e_phnum == 0 || eh.e_phentsize != sizeof(Elf32_Phdr)) {
+    if (eh.e_type != ET_DYN || eh.e_machine != LD_EM) {
+        ld_close(fd);
+        return 0;
+    }
+    if (eh.e_phnum == 0 || eh.e_phentsize != sizeof(Elf_Phdr)) {
         ld_close(fd);
         return 0;
     }
@@ -286,9 +304,9 @@ static ld_obj_t *load_from_path(const char *path) {
         ld_close(fd);
         return 0;
     }
-    Elf32_Phdr ph[64];
+    Elf_Phdr ph[64];
     if (ld_lseek(fd, (long)eh.e_phoff, 0) < 0) { ld_close(fd); return 0; }
-    ld_size ph_bytes = (ld_size)eh.e_phnum * sizeof(Elf32_Phdr);
+    ld_size ph_bytes = (ld_size)eh.e_phnum * sizeof(Elf_Phdr);
     if (ld_read(fd, ph, ph_bytes) != (long)ph_bytes) {
         ld_close(fd);
         return 0;
@@ -298,13 +316,13 @@ static ld_obj_t *load_from_path(const char *path) {
      * reserve a contiguous run of address space and let the kernel
      * pick the base, then fix up subsequent segments at MAP_FIXED
      * offsets relative to that base. */
-    ld_u32 lo = 0xFFFFFFFFu, hi = 0;
+    ld_addr lo = LD_ADDR_MAX, hi = 0;
     int    have_load = 0;
     for (int i = 0; i < eh.e_phnum; i++) {
         if (ph[i].p_type != PT_LOAD) continue;
         have_load = 1;
-        ld_u32 vstart = ph[i].p_vaddr & ~(PAGE_SIZE - 1);
-        ld_u32 vend   = (ph[i].p_vaddr + ph[i].p_memsz + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
+        ld_addr vstart = ph[i].p_vaddr & ~(PAGE_SIZE - 1);
+        ld_addr vend   = (ph[i].p_vaddr + ph[i].p_memsz + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
         if (vstart < lo) lo = vstart;
         if (vend   > hi) hi = vend;
     }
@@ -317,7 +335,7 @@ static ld_obj_t *load_from_path(const char *path) {
     void *base_v = ld_mmap(0, span, LD_PROT_READ,
                            LD_MAP_PRIVATE | LD_MAP_ANON, -1, 0);
     if (ld_mmap_failed(base_v)) { ld_close(fd); return 0; }
-    ld_u32 base = (ld_u32)(unsigned long)base_v - lo;
+    ld_addr base = (ld_addr)(unsigned long)base_v - lo;
 
     /* Map each PT_LOAD over the reserved range. */
     for (int i = 0; i < eh.e_phnum; i++) {
@@ -327,9 +345,9 @@ static ld_obj_t *load_from_path(const char *path) {
         if (ph[i].p_flags & 0x2) prot |= LD_PROT_WRITE;
         if (ph[i].p_flags & 0x4) prot |= LD_PROT_READ;
 
-        ld_u32 vaddr = (ph[i].p_vaddr + base) & ~(PAGE_SIZE - 1);
-        ld_u32 voff  = ph[i].p_vaddr - (ph[i].p_vaddr & ~(PAGE_SIZE - 1));
-        ld_u32 fileoff_pages = (ph[i].p_offset & ~(PAGE_SIZE - 1)) / PAGE_SIZE;
+        ld_addr vaddr = (ph[i].p_vaddr + base) & ~(PAGE_SIZE - 1);
+        ld_addr voff  = ph[i].p_vaddr - (ph[i].p_vaddr & ~(PAGE_SIZE - 1));
+        ld_addr fileoff_pages = (ph[i].p_offset & ~(PAGE_SIZE - 1)) / PAGE_SIZE;
         ld_size mapsz = (voff + ph[i].p_filesz + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
 
         if (ph[i].p_filesz > 0) {
@@ -354,16 +372,16 @@ static ld_obj_t *load_from_path(const char *path) {
          *      page-aligned end of memsz) get an anonymous
          *      MAP_FIXED mapping - anon pages are kernel-zeroed. */
         if (ph[i].p_memsz > ph[i].p_filesz) {
-            ld_u32 bss_start  = ph[i].p_vaddr + base + ph[i].p_filesz;
-            ld_u32 bss_actual_end = ph[i].p_vaddr + base + ph[i].p_memsz;
-            ld_u32 file_page_end  = vaddr + mapsz;
+            ld_addr bss_start  = ph[i].p_vaddr + base + ph[i].p_filesz;
+            ld_addr bss_actual_end = ph[i].p_vaddr + base + ph[i].p_memsz;
+            ld_addr file_page_end  = vaddr + mapsz;
             if (bss_start < file_page_end) {
-                ld_u32 zlen = (bss_actual_end < file_page_end ? bss_actual_end : file_page_end) - bss_start;
+                ld_addr zlen = (bss_actual_end < file_page_end ? bss_actual_end : file_page_end) - bss_start;
                 unsigned char *z = (unsigned char *)(unsigned long)bss_start;
-                for (ld_u32 k = 0; k < zlen; k++) z[k] = 0;
+                for (ld_addr k = 0; k < zlen; k++) z[k] = 0;
             }
-            ld_u32 anon_start = file_page_end;
-            ld_u32 mem_end    = (bss_actual_end + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
+            ld_addr anon_start = file_page_end;
+            ld_addr mem_end    = (bss_actual_end + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
             if (anon_start < mem_end) {
                 void *a = ld_mmap((void *)anon_start, mem_end - anon_start,
                                   prot | LD_PROT_WRITE,
@@ -384,12 +402,12 @@ static ld_obj_t *load_from_path(const char *path) {
     ld_close(fd);
 
     /* Locate PT_DYNAMIC and PT_TLS. */
-    Elf32_Dyn *dyn = 0;
+    Elf_Dyn *dyn = 0;
     const void *tls_image = 0;
-    ld_u32 tls_filesz = 0, tls_memsz = 0, tls_align = 1;
+    ld_addr tls_filesz = 0, tls_memsz = 0, tls_align = 1;
     for (int i = 0; i < eh.e_phnum; i++) {
         if (ph[i].p_type == PT_DYNAMIC) {
-            dyn = (Elf32_Dyn *)(ph[i].p_vaddr + base);
+            dyn = (Elf_Dyn *)(ph[i].p_vaddr + base);
         } else if (ph[i].p_type == PT_TLS) {
             tls_image  = (const void *)(ph[i].p_vaddr + base);
             tls_filesz = ph[i].p_filesz;
@@ -550,13 +568,15 @@ static void ld_conf_include(const char *pattern, int depth) {
         long n = ld_getdents(fd, dents, sizeof(dents));
         if (n <= 0) break;
         long off = 0;
-        while (off + 10 <= n) {
-            /* struct dirent: d_ino(4) d_off(4) d_reclen(2) d_name[] */
+        while (off + LD_DIRENT_NAME_OFF <= n) {
+            /* The record layout is the architecture's (ld.h): d_reclen
+             * and d_name sit at different offsets in the two ABIs. */
             unsigned short reclen;
-            reclen = (unsigned short)((unsigned char)dents[off + 8] |
-                     ((unsigned char)dents[off + 9] << 8));
-            if (reclen < 11 || off + reclen > n) break;
-            const char *name = dents + off + 10;
+            reclen = (unsigned short)(
+                     (unsigned char)dents[off + LD_DIRENT_RECLEN_OFF] |
+                     ((unsigned char)dents[off + LD_DIRENT_RECLEN_OFF + 1] << 8));
+            if (reclen < LD_DIRENT_NAME_OFF + 1 || off + reclen > n) break;
+            const char *name = dents + off + LD_DIRENT_NAME_OFF;
             if (ld_fnmatch(glob, name)) {
                 char full[512];
                 if (ld_path_join(full, sizeof(full), dir, name) >= 0) {
@@ -655,16 +675,16 @@ static void ld_keep_helpers(void) {
 void ld_protect_object(ld_obj_t *o) {
     if (o->protected || !o->path[0] || !o->phdr) return;
     o->protected = 1;
-    const Elf32_Phdr *ph = (const Elf32_Phdr *)o->phdr;
+    const Elf_Phdr *ph = (const Elf_Phdr *)o->phdr;
 
-    for (ld_u32 i = 0; i < o->phnum; i++) {
+    for (ld_addr i = 0; i < o->phnum; i++) {
         if (ph[i].p_type != PT_LOAD) continue;
         int prot = 0;
         if (ph[i].p_flags & 0x1) prot |= LD_PROT_EXEC;
         if (ph[i].p_flags & 0x2) prot |= LD_PROT_WRITE;
         if (ph[i].p_flags & 0x4) prot |= LD_PROT_READ;
-        ld_u32 start = (ph[i].p_vaddr + o->base) & ~(PAGE_SIZE - 1);
-        ld_u32 end   = (ph[i].p_vaddr + o->base + ph[i].p_memsz
+        ld_addr start = (ph[i].p_vaddr + o->base) & ~(PAGE_SIZE - 1);
+        ld_addr end   = (ph[i].p_vaddr + o->base + ph[i].p_memsz
                         + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
         if (end > start)
             ld_mprotect((void *)(unsigned long)start, end - start, prot);
@@ -673,10 +693,10 @@ void ld_protect_object(ld_obj_t *o) {
     /* RELRO after the PT_LOAD pass so it wins over the data segment's
      * writable protection.  The region's end rounds DOWN to a page so a
      * trailing partial page shared with still-writable data stays RW. */
-    for (ld_u32 i = 0; i < o->phnum; i++) {
+    for (ld_addr i = 0; i < o->phnum; i++) {
         if (ph[i].p_type != PT_GNU_RELRO) continue;
-        ld_u32 start = (ph[i].p_vaddr + o->base) & ~(PAGE_SIZE - 1);
-        ld_u32 end   = (ph[i].p_vaddr + o->base + ph[i].p_memsz)
+        ld_addr start = (ph[i].p_vaddr + o->base) & ~(PAGE_SIZE - 1);
+        ld_addr end   = (ph[i].p_vaddr + o->base + ph[i].p_memsz)
                        & ~(PAGE_SIZE - 1);
         if (end > start)
             ld_mprotect((void *)(unsigned long)start, end - start,

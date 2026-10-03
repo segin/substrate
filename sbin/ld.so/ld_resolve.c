@@ -64,7 +64,8 @@ static int strcmp_local(const char *a, const char *b) {
  *   uint32 buckets[nbuckets]
  *   uint32 chain[nsymbols - symbias]
  *
- * On i386 size_t is 4 bytes so bloom words are 32-bit.
+ * The bloom words are native words: 32-bit on i386, 64-bit on amd64
+ * (LD_BLOOM_BITS).  Everything else is 32-bit in both classes.
  *
  * Returns the first chain entry whose name matches `name` AND whose
  * st_shndx + binding + version pass `pred(o, sym_idx, pred_arg)`.
@@ -74,7 +75,7 @@ static int strcmp_local(const char *a, const char *b) {
  * name match. */
 typedef int (*sym_pred_t)(const ld_obj_t *o, ld_u32 sym_idx, void *arg);
 
-static Elf32_Sym *lookup_gnu(const ld_obj_t *o, const char *name,
+static Elf_Sym *lookup_gnu(const ld_obj_t *o, const char *name,
                              sym_pred_t pred, void *pred_arg) {
     if (!o->gnu_hash || !o->symtab || !o->strtab) return 0;
 
@@ -83,18 +84,19 @@ static Elf32_Sym *lookup_gnu(const ld_obj_t *o, const char *name,
     ld_u32 symbias    = h[1];
     ld_u32 bloom_size = h[2];
     ld_u32 bloom_shift = h[3];
-    const ld_u32 *bloom = h + 4;
-    const ld_u32 *buckets = bloom + bloom_size;
+    const ld_addr *bloom = (const ld_addr *)(h + 4);
+    const ld_u32 *buckets = (const ld_u32 *)(bloom + bloom_size);
     const ld_u32 *chain   = buckets + nbuckets;
 
     if (nbuckets == 0) return 0;
 
     ld_u32 hv = gnu_hash(name);
 
-    /* Bloom filter: if the (hv % 32) bit AND the ((hv >> shift) % 32)
+    /* Bloom filter: if the (hv % bits) bit AND the ((hv >> shift) % bits)
      * bit aren't both set in the chosen word, the symbol is absent. */
-    ld_u32 word = bloom[(hv / 32) & (bloom_size - 1)];
-    ld_u32 mask = (1u << (hv & 31)) | (1u << ((hv >> bloom_shift) & 31));
+    ld_addr word = bloom[(hv / LD_BLOOM_BITS) & (bloom_size - 1)];
+    ld_addr mask = ((ld_addr)1 << (hv % LD_BLOOM_BITS)) |
+                   ((ld_addr)1 << ((hv >> bloom_shift) % LD_BLOOM_BITS));
     if ((word & mask) != mask) return 0;
 
     ld_u32 idx = buckets[hv % nbuckets];
@@ -102,7 +104,7 @@ static Elf32_Sym *lookup_gnu(const ld_obj_t *o, const char *name,
     for (;;) {
         ld_u32 chain_v = chain[idx - symbias];
         if (((chain_v ^ hv) >> 1) == 0) {
-            Elf32_Sym *s = &o->symtab[idx];
+            Elf_Sym *s = &o->symtab[idx];
             const char *sname = o->strtab + s->st_name;
             if (strcmp_local(sname, name) == 0 && pred(o, idx, pred_arg))
                 return s;
@@ -122,7 +124,7 @@ static Elf32_Sym *lookup_gnu(const ld_obj_t *o, const char *name,
  *
  * Same multi-version handling as lookup_gnu: walk past name matches
  * that fail the predicate. */
-static Elf32_Sym *lookup_sysv(const ld_obj_t *o, const char *name,
+static Elf_Sym *lookup_sysv(const ld_obj_t *o, const char *name,
                               sym_pred_t pred, void *pred_arg) {
     if (!o->hash || !o->symtab || !o->strtab) return 0;
     ld_u32 nbuckets = o->hash[0];
@@ -139,7 +141,7 @@ static Elf32_Sym *lookup_sysv(const ld_obj_t *o, const char *name,
     for (ld_u32 idx = buckets[hv % nbuckets];
          idx != 0 && idx < nchains && guard < nchains;
          idx = chains[idx], guard++) {
-        Elf32_Sym *s = &o->symtab[idx];
+        Elf_Sym *s = &o->symtab[idx];
         /* Don't blanket-skip UNDEF here: a program's canonical-PLT
          * symbol (function-address equality, see resolve_pred) is UND
          * but must still satisfy address lookups.  Let the predicate
@@ -184,7 +186,7 @@ ld_u32 ld_elf_hash(const char *s) {
 static int version_matches(const ld_obj_t *o, ld_u32 sym_index,
                            ld_u32 want_hash) {
     if (!o->versym || !o->verdef) return 1;   /* unversioned exporter */
-    Elf32_Half vs = o->versym[sym_index];
+    Elf_Half vs = o->versym[sym_index];
     ld_u32 ndx = VER_NDX(vs);
     int hidden = VER_IS_HIDDEN(vs);
 
@@ -198,7 +200,7 @@ static int version_matches(const ld_obj_t *o, ld_u32 sym_index,
         /* Look up vd_flags for this index. */
         unsigned char *p = (unsigned char *)o->verdef;
         for (ld_u32 i = 0; i < o->verdefnum; i++) {
-            Elf32_Verdef *vd = (Elf32_Verdef *)p;
+            Elf_Verdef *vd = (Elf_Verdef *)p;
             if (vd->vd_ndx == ndx)
                 return (vd->vd_flags & VER_FLG_BASE) != 0
                     || (vd->vd_flags & VER_FLG_WEAK) != 0
@@ -214,7 +216,7 @@ static int version_matches(const ld_obj_t *o, ld_u32 sym_index,
                                                  satisfy versioned req */
     unsigned char *p = (unsigned char *)o->verdef;
     for (ld_u32 i = 0; i < o->verdefnum; i++) {
-        Elf32_Verdef *vd = (Elf32_Verdef *)p;
+        Elf_Verdef *vd = (Elf_Verdef *)p;
         if (vd->vd_ndx == ndx)
             return vd->vd_hash == want_hash;
         if (vd->vd_next == 0) break;
@@ -242,7 +244,7 @@ struct resolve_ctx { ld_u32 want; const ld_obj_t *requester; };
 static int resolve_pred(const ld_obj_t *o, ld_u32 sym_idx, void *arg) {
     struct resolve_ctx *ctx = (struct resolve_ctx *)arg;
     ld_u32 want = ctx->want;
-    Elf32_Sym *s = &o->symtab[sym_idx];
+    Elf_Sym *s = &o->symtab[sym_idx];
     if (s->st_shndx == SHN_UNDEF) {
         /* Canonical function address (function-pointer equality across
          * the executable/DSO boundary).  A non-PIE executable that takes
@@ -265,11 +267,11 @@ static int resolve_pred(const ld_obj_t *o, ld_u32 sym_idx, void *arg) {
          * program's own PLT stub and any call through it self-loops
          * (which hung Xfbdev for every address-taken-and-called func). */
         if (o == ld_obj_list() && o != ctx->requester && s->st_value != 0 &&
-            ELF32_ST_TYPE(s->st_info) == STT_FUNC)
+            ELF_ST_TYPE(s->st_info) == STT_FUNC)
             return version_matches(o, sym_idx, want);
         return 0;
     }
-    unsigned char bind = ELF32_ST_BIND(s->st_info);
+    unsigned char bind = ELF_ST_BIND(s->st_info);
     if (bind != STB_GLOBAL && bind != STB_WEAK) return 0;
     return version_matches(o, sym_idx, want);
 }
@@ -278,13 +280,13 @@ static int resolve_pred(const ld_obj_t *o, ld_u32 sym_idx, void *arg) {
  * place to deposit the symbol's st_size for R_386_COPY callers, and the
  * requesting object (so a program's own relocations don't pick up its
  * own canonical-PLT entry - see resolve_pred). */
-static ld_u32 resolve_internal(const char *name, ld_u32 want_ver_hash,
-                               const ld_obj_t *skip, ld_u32 *size_out,
-                               const ld_obj_t *requester) {
+static ld_addr resolve_internal(const char *name, ld_u32 want_ver_hash,
+                                const ld_obj_t *skip, ld_addr *size_out,
+                                const ld_obj_t *requester) {
     struct resolve_ctx ctx = { want_ver_hash, requester };
     for (ld_obj_t *o = ld_obj_list(); o; o = o->next) {
         if (o == skip) continue;
-        Elf32_Sym *s = lookup_gnu(o, name, resolve_pred, &ctx);
+        Elf_Sym *s = lookup_gnu(o, name, resolve_pred, &ctx);
         if (!s) s = lookup_sysv(o, name, resolve_pred, &ctx);
         if (!s) continue;
         if (size_out) *size_out = s->st_size;
@@ -294,16 +296,16 @@ static ld_u32 resolve_internal(const char *name, ld_u32 want_ver_hash,
     return 0;
 }
 
-ld_u32 ld_resolve(const char *name) {
+ld_addr ld_resolve(const char *name) {
     return resolve_internal(name, 0, 0, 0, 0);
 }
 
-ld_u32 ld_resolve_skip(const char *name, const ld_obj_t *skip) {
+ld_addr ld_resolve_skip(const char *name, const ld_obj_t *skip) {
     return resolve_internal(name, 0, skip, 0, 0);
 }
 
-ld_u32 ld_resolve_with_size(const char *name, const ld_obj_t *skip,
-                            ld_u32 *size_out) {
+ld_addr ld_resolve_with_size(const char *name, const ld_obj_t *skip,
+                             ld_addr *size_out) {
     return resolve_internal(name, 0, skip, size_out, 0);
 }
 
@@ -313,11 +315,11 @@ ld_u32 ld_resolve_with_size(const char *name, const ld_obj_t *skip,
  * image, NOT biased by the load base) and hands that module back via
  * *def_out, so the relocator can apply the defining module's tls_offset.
  * *def_out is NULL when the symbol is unresolved. */
-ld_u32 ld_resolve_tls(const char *name, const ld_obj_t *requester,
-                      const ld_obj_t **def_out) {
+ld_addr ld_resolve_tls(const char *name, const ld_obj_t *requester,
+                       const ld_obj_t **def_out) {
     struct resolve_ctx ctx = { 0, requester };
     for (ld_obj_t *o = ld_obj_list(); o; o = o->next) {
-        Elf32_Sym *s = lookup_gnu(o, name, resolve_pred, &ctx);
+        Elf_Sym *s = lookup_gnu(o, name, resolve_pred, &ctx);
         if (!s) s = lookup_sysv(o, name, resolve_pred, &ctx);
         if (!s) continue;
         if (def_out) *def_out = o;
@@ -330,12 +332,12 @@ ld_u32 ld_resolve_tls(const char *name, const ld_obj_t *requester,
 /* Requester-aware resolve used by the relocation processor: `requester`
  * is the object whose relocation is being applied, so its own canonical
  * PLT entry is not handed back to itself. */
-ld_u32 ld_resolve_req(const char *name, ld_u32 vh_hash,
-                      const ld_obj_t *requester) {
+ld_addr ld_resolve_req(const char *name, ld_u32 vh_hash,
+                       const ld_obj_t *requester) {
     return resolve_internal(name, vh_hash, 0, 0, requester);
 }
 
-ld_u32 ld_resolve_versioned(const char *name, ld_u32 vh_hash,
-                            const ld_obj_t *skip, ld_u32 *size_out) {
+ld_addr ld_resolve_versioned(const char *name, ld_u32 vh_hash,
+                             const ld_obj_t *skip, ld_addr *size_out) {
     return resolve_internal(name, vh_hash, skip, size_out, 0);
 }

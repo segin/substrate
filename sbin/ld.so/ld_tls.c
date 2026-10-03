@@ -1,7 +1,12 @@
 /*
- * ld_tls.c - install per-thread TLS (i386 variant 2 layout).
+ * ld_tls.c - install per-thread TLS (variant II layout).
  *
- * i386 variant-II TLS:
+ * Both architectures use variant II and differ only in the register
+ * holding the thread pointer (%gs on i386, %fs on amd64), the word size
+ * of the TCB and DTV, and the TCB's size (LD_TLS_TCB_SIZE in ld.h).  The
+ * description below says gs; read fs for amd64.
+ *
+ * Variant-II TLS:
  *
  *   low addr                                              high addr
  *   +-------+-------+-------+-----+
@@ -35,7 +40,8 @@
 
 #include "ld.h"
 
-#define LD_TLS_TCB_SIZE 8       /* TCB[0]=self-ptr, TCB[1]=DTV reserved */
+/* LD_TLS_TCB_SIZE (ld.h): TCB[0]=self-ptr, TCB[1]=DTV pointer; the DTV,
+ * an array of native words, follows the TCB. */
 #define LD_TLS_MAX_BYTES 0x8000 /* sanity cap on total per-thread block */
 
 /*
@@ -61,7 +67,7 @@
 #define LD_TLS_SURPLUS      0x1000  /* bytes reserved for dlopen'd modules */
 #define LD_TLS_SURPLUS_MODS 16      /* extra DTV slots for the same */
 
-static ld_u32 align_up(ld_u32 v, ld_u32 a) {
+static ld_addr align_up(ld_addr v, ld_addr a) {
     return a <= 1 ? v : (v + a - 1) & ~(a - 1);
 }
 
@@ -76,22 +82,22 @@ static ld_u32 align_up(ld_u32 v, ld_u32 a) {
  * __ldso_alloc_tls below); __tls_get_addr() reads gs:0 instead of
  * ld_tp when running on a non-initial thread.  Since gs:0 *is* the
  * TP (TCB self-pointer), this works for both. */
-static ld_u32 ld_tp = 0;
+static ld_addr ld_tp = 0;
 
 /* Total per-thread block size (cursor + TCB), cached after the
  * first ld_setup_tls() pass so __ldso_alloc_tls can allocate
  * additional blocks for pthread_create-spawned threads with the
  * same layout. */
-static ld_u32 ld_tls_total = 0;
-static ld_u32 ld_tls_cursor = 0;  /* block base to TP: startup modules + surplus */
-static ld_u32 ld_tls_modcount = 0; /* number of PT_TLS modules (DTV length) */
+static ld_addr ld_tls_total = 0;
+static ld_addr ld_tls_cursor = 0;  /* block base to TP: startup modules + surplus */
+static ld_addr ld_tls_modcount = 0; /* number of PT_TLS modules (DTV length) */
 
 /* Highest |offset| actually handed out so far.  Startup leaves this at the end
  * of the startup modules; ld_tls_add_module() grows it into the surplus, up to
  * ld_tls_cursor.  The gap between the two is the free surplus. */
-static ld_u32 ld_tls_alloc_cursor = 0;
+static ld_addr ld_tls_alloc_cursor = 0;
 /* Largest module id the DTV has room for (modcount + LD_TLS_SURPLUS_MODS). */
-static ld_u32 ld_tls_modcap = 0;
+static ld_addr ld_tls_modcap = 0;
 
 /*
  * Registry of live per-thread TLS blocks, threaded through the blocks
@@ -110,24 +116,24 @@ static ld_u32 ld_tls_modcap = 0;
  * Mutated under the dlopen lock, which pthread_create's TLS allocation and
  * dlopen both take, so the list never changes underfoot.
  */
-static ld_u32 ld_tls_thread_head = 0;
+static ld_addr ld_tls_thread_head = 0;
 
 /* Byte offset from TP to the registry link word (immediately past the DTV). */
-static ld_u32 ld_tls_link_off(void) {
-    return LD_TLS_TCB_SIZE + (ld_tls_modcap + 1) * 4;
+static ld_addr ld_tls_link_off(void) {
+    return LD_TLS_TCB_SIZE + (ld_tls_modcap + 1) * sizeof(ld_addr);
 }
 
-static ld_u32 *ld_tls_link_at(ld_u32 tp) {
-    return (ld_u32 *)(unsigned long)(tp + ld_tls_link_off());
+static ld_addr *ld_tls_link_at(ld_addr tp) {
+    return (ld_addr *)(unsigned long)(tp + ld_tls_link_off());
 }
 
-static void ld_tls_register(ld_u32 tp) {
+static void ld_tls_register(ld_addr tp) {
     *ld_tls_link_at(tp) = ld_tls_thread_head;
     ld_tls_thread_head = tp;
 }
 
-static void ld_tls_unregister(ld_u32 tp) {
-    ld_u32 *pp = &ld_tls_thread_head;
+static void ld_tls_unregister(ld_addr tp) {
+    ld_addr *pp = &ld_tls_thread_head;
     while (*pp) {
         if (*pp == tp) { *pp = *ld_tls_link_at(tp); return; }
         pp = ld_tls_link_at(*pp);
@@ -138,15 +144,15 @@ static void ld_tls_unregister(ld_u32 tp) {
  * Copy a module's PT_TLS image into one thread's slot and publish it in that
  * thread's DTV.  Idempotent: a non-zero DTV entry means it is already there.
  */
-static void ld_tls_init_in(ld_u32 tp, ld_obj_t *o) {
-    ld_u32 *dtv = (ld_u32 *)(unsigned long)(tp + LD_TLS_TCB_SIZE);
+static void ld_tls_init_in(ld_addr tp, ld_obj_t *o) {
+    ld_addr *dtv = (ld_addr *)(unsigned long)(tp + LD_TLS_TCB_SIZE);
 
     if (o->tls_modid == 0 || o->tls_modid > ld_tls_modcap) return;
     if (dtv[o->tls_modid]) return;                  /* already initialized */
 
     unsigned char *slot = (unsigned char *)(unsigned long)(tp - o->tls_offset);
     const unsigned char *src = (const unsigned char *)o->tls_image;
-    ld_u32 i;
+    ld_addr i;
     for (i = 0; i < o->tls_filesz; i++) slot[i] = src[i];
     for (; i < o->tls_memsz; i++)       slot[i] = 0;
 
@@ -159,20 +165,20 @@ static void ld_tls_init_in(ld_u32 tp, ld_obj_t *o) {
  * __tls_get_addr in libc reads gs:4 and returns DTV[ti_module] + ti_offset.
  * The DTV is carved out of the block immediately above the TCB (the block was
  * sized to leave room). */
-static void ld_fill_dtv(ld_u32 tp) {
-    ld_u32 *dtv = (ld_u32 *)(unsigned long)(tp + LD_TLS_TCB_SIZE);
+static void ld_fill_dtv(ld_addr tp) {
+    ld_addr *dtv = (ld_addr *)(unsigned long)(tp + LD_TLS_TCB_SIZE);
     dtv[0] = ld_tls_modcount;
     /* Zero every slot first.  An empty slot is what marks a module as "not yet
      * present in this thread", which is the signal libc's __tls_get_addr uses
      * to call back into __ldso_tls_update().  mmap hands back zeroed pages, so
      * this only matters for a block being re-filled. */
-    for (ld_u32 m = 1; m <= ld_tls_modcap; m++) dtv[m] = 0;
+    for (ld_addr m = 1; m <= ld_tls_modcap; m++) dtv[m] = 0;
     for (ld_obj_t *o = ld_obj_list(); o; o = o->next) {
         if (o->tls_memsz == 0 || o->tls_modid == 0) continue;
         if (o->tls_modid > ld_tls_modcap) continue;
         dtv[o->tls_modid] = tp - o->tls_offset;   /* module's TLS block base */
     }
-    ((ld_u32 *)(unsigned long)tp)[1] = (ld_u32)(unsigned long)dtv;  /* TCB[1] */
+    ((ld_addr *)(unsigned long)tp)[1] = (ld_addr)(unsigned long)dtv;  /* TCB[1] */
 }
 
 int ld_setup_tls(void) {
@@ -185,12 +191,12 @@ int ld_setup_tls(void) {
      * Module IDs are 1-based (0 means "no TLS"), allocated in the
      * same load order so GD/LD relocations can find the matching
      * object via a linear scan in __tls_get_addr(). */
-    ld_u32 cursor = 0;     /* running |offset| from TP, grows with each module */
-    ld_u32 max_align = LD_TLS_TCB_SIZE;
-    ld_u32 next_modid = 1;
+    ld_addr cursor = 0;     /* running |offset| from TP, grows with each module */
+    ld_addr max_align = LD_TLS_TCB_SIZE;
+    ld_addr next_modid = 1;
     for (ld_obj_t *o = ld_obj_list(); o; o = o->next) {
         if (o->tls_memsz == 0) continue;
-        ld_u32 align = o->tls_align ? o->tls_align : 1;
+        ld_addr align = o->tls_align ? o->tls_align : 1;
         cursor = align_up(cursor + o->tls_memsz, align);
         o->tls_offset = cursor;     /* slot starts at TP - cursor */
         o->tls_modid  = next_modid++;
@@ -233,9 +239,10 @@ int ld_setup_tls(void) {
      * mmap is happy and the TCB ends on a fixed alignment.  Stash
      * the cursor + total so __ldso_alloc_tls can replicate this
      * layout for new threads later. */
-    /* + 4 for the registry link word that follows the DTV. */
+    /* + one word for the registry link that follows the DTV. */
     ld_size total = align_up(cursor + LD_TLS_TCB_SIZE
-                             + (ld_tls_modcap + 1) * 4 + 4, 0x1000);
+                             + (ld_tls_modcap + 1) * sizeof(ld_addr)
+                             + sizeof(ld_addr), 0x1000);
     ld_tls_cursor = cursor;
     ld_tls_total  = total;
     void *block = ld_mmap(0, total, LD_PROT_READ | LD_PROT_WRITE,
@@ -247,8 +254,8 @@ int ld_setup_tls(void) {
 
     /* Thread pointer = &block[cursor] (immediately above all TLS
      * data, and the TCB starts at that address). */
-    ld_u32 tp = (ld_u32)(unsigned long)block + cursor;
-    ld_u32 *tcb = (ld_u32 *)(unsigned long)tp;
+    ld_addr tp = (ld_addr)(unsigned long)block + cursor;
+    ld_addr *tcb = (ld_addr *)(unsigned long)tp;
     tcb[0] = tp;            /* self-pointer for `mov %gs:0,%eax` */
     ld_fill_dtv(tp);        /* TCB[1] = DTV for the GD/LD model */
 
@@ -258,7 +265,7 @@ int ld_setup_tls(void) {
         if (o->tls_memsz == 0) continue;
         unsigned char *slot = (unsigned char *)(unsigned long)(tp - o->tls_offset);
         const unsigned char *src = (const unsigned char *)o->tls_image;
-        ld_u32 i;
+        ld_addr i;
         for (i = 0; i < o->tls_filesz; i++) slot[i] = src[i];
         for (; i < o->tls_memsz; i++)        slot[i] = 0;
         if (ld_debug) {
@@ -276,7 +283,7 @@ int ld_setup_tls(void) {
     int rc = ld_sys_set_gsbase(tp);
     if (rc < 0) {
         ld_puts("ld.so: sys_set_gsbase failed: ");
-        ld_putd((ld_u32)(-rc));
+        ld_putd((ld_addr)(-rc));
         ld_puts("\n");
         return rc;
     }
@@ -312,9 +319,13 @@ int ld_setup_tls(void) {
  * thr_param.tls_base via kern_thr_new).  Cheaper and more correct
  * than reading the static ld_tp - which only knows about the
  * initial thread's block. */
-static inline ld_u32 current_tp(void) {
-    ld_u32 tp;
+static inline ld_addr current_tp(void) {
+    ld_addr tp;
+#ifdef LD_ARCH_AMD64
+    __asm__ volatile ("movq %%fs:0, %0" : "=r"(tp));
+#else
     __asm__ volatile ("movl %%gs:0, %0" : "=r"(tp));
+#endif
     return tp;
 }
 
@@ -347,8 +358,8 @@ int ld_tls_add_module(ld_obj_t *o) {
         return -1;
     }
 
-    ld_u32 align  = o->tls_align ? o->tls_align : 1;
-    ld_u32 newcur = align_up(ld_tls_alloc_cursor + o->tls_memsz, align);
+    ld_addr align  = o->tls_align ? o->tls_align : 1;
+    ld_addr newcur = align_up(ld_tls_alloc_cursor + o->tls_memsz, align);
 
     if (newcur > ld_tls_cursor || ld_tls_modcount + 1 > ld_tls_modcap) {
         ld_puts("ld.so: surplus static TLS exhausted loading ");
@@ -367,8 +378,8 @@ int ld_tls_add_module(ld_obj_t *o) {
      * reference from a thread that predates this dlopen reads the module's
      * initialization image rather than whatever the surplus happened to hold. */
     unsigned live = 0;
-    for (ld_u32 tp = ld_tls_thread_head; tp; tp = *ld_tls_link_at(tp)) {
-        ld_u32 *dtv = (ld_u32 *)(unsigned long)(tp + LD_TLS_TCB_SIZE);
+    for (ld_addr tp = ld_tls_thread_head; tp; tp = *ld_tls_link_at(tp)) {
+        ld_addr *dtv = (ld_addr *)(unsigned long)(tp + LD_TLS_TCB_SIZE);
         ld_tls_init_in(tp, o);
         dtv[0] = ld_tls_modcount;
         live++;
@@ -414,8 +425,8 @@ LD_PUBLIC void *__ldso_tls_update(unsigned long modid) {
 
     ld_dl_lock();
     for (ld_obj_t *o = ld_obj_list(); o; o = o->next) {
-        if (o->tls_modid != (ld_u32)modid) continue;
-        ld_u32 tp = current_tp();
+        if (o->tls_modid != (ld_addr)modid) continue;
+        ld_addr tp = current_tp();
         ld_tls_init_in(tp, o);              /* copies image, sets DTV slot */
         base = (void *)(unsigned long)(tp - o->tls_offset);
         break;
@@ -426,8 +437,8 @@ LD_PUBLIC void *__ldso_tls_update(unsigned long modid) {
 
 static void *ld_tls_get_addr(tls_index *idx) {
     if (!idx || idx->ti_module == 0) return 0;
-    ld_u32 tp = current_tp();
-    ld_u32 *dtv = (ld_u32 *)(unsigned long)(tp + LD_TLS_TCB_SIZE);
+    ld_addr tp = current_tp();
+    ld_addr *dtv = (ld_addr *)(unsigned long)(tp + LD_TLS_TCB_SIZE);
 
     /* Same contract as libc's copy: trust the DTV, fill it in on a miss. */
     if (idx->ti_module <= ld_tls_modcap && dtv[idx->ti_module])
@@ -465,8 +476,8 @@ LD_PUBLIC void *__ldso_alloc_tls(void) {
                           LD_MAP_PRIVATE | LD_MAP_ANON, -1, 0);
     if (ld_mmap_failed(block)) return 0;
 
-    ld_u32 tp = (ld_u32)(unsigned long)block + ld_tls_cursor;
-    ld_u32 *tcb = (ld_u32 *)(unsigned long)tp;
+    ld_addr tp = (ld_addr)(unsigned long)block + ld_tls_cursor;
+    ld_addr *tcb = (ld_addr *)(unsigned long)tp;
     tcb[0] = tp;            /* variant-II self-pointer */
 
     /* Under the dlopen lock: a concurrent dlopen walks the registry to
@@ -478,7 +489,7 @@ LD_PUBLIC void *__ldso_alloc_tls(void) {
         if (o->tls_memsz == 0) continue;
         unsigned char *slot = (unsigned char *)(unsigned long)(tp - o->tls_offset);
         const unsigned char *src = (const unsigned char *)o->tls_image;
-        ld_u32 i;
+        ld_addr i;
         for (i = 0; i < o->tls_filesz; i++) slot[i] = src[i];
         for (; i < o->tls_memsz; i++)        slot[i] = 0;
     }
@@ -496,7 +507,7 @@ LD_PUBLIC void __ldso_free_tls(void *tp_ptr) {
     /* Leave the registry before the memory goes back, or a later dlopen would
      * walk into an unmapped block. */
     ld_dl_lock();
-    ld_tls_unregister((ld_u32)(unsigned long)tp_ptr);
+    ld_tls_unregister((ld_addr)(unsigned long)tp_ptr);
     ld_dl_unlock();
     /* The block was mmap'd at (tp - ld_tls_cursor) for ld_tls_total
      * bytes (see __ldso_alloc_tls / ld_setup_tls); hand the whole
@@ -512,7 +523,11 @@ LD_PUBLIC void __ldso_free_tls(void *tp_ptr) {
  * i.e. the tls_index pointer is passed in %eax, NOT on the stack.  So
  * ___tls_get_addr (three underscores) takes its argument with regparm(1);
  * it is NOT a plain alias of the stack-convention __tls_get_addr - aliasing
- * the two would make ___tls_get_addr read a garbage "pointer" off the stack. */
+ * the two would make ___tls_get_addr read a garbage "pointer" off the stack.
+ * amd64 has no such second entry: its GD sequence calls __tls_get_addr with
+ * the pointer in %rdi, the ordinary first argument. */
+#ifdef LD_ARCH_I386
 LD_PUBLIC __attribute__((regparm(1))) void *___tls_get_addr(tls_index *idx) {
     return ld_tls_get_addr(idx);
 }
+#endif

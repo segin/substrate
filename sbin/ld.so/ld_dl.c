@@ -174,7 +174,7 @@ static void *dlopen_locked(const char *path, int flags) {
      * startup BFS), not silently ignored. */
     for (ld_obj_t *cur = o; cur; cur = cur->next) {
         if (!cur->dynamic || !cur->strtab) continue;
-        for (Elf32_Dyn *d = cur->dynamic; d->d_tag != DT_NULL; d++) {
+        for (Elf_Dyn *d = cur->dynamic; d->d_tag != DT_NULL; d++) {
             if (d->d_tag != DT_NEEDED) continue;
             const char *soname = cur->strtab + d->d_un.d_val;
             if (!ld_load_object(soname)) {
@@ -233,15 +233,13 @@ LD_PUBLIC void *__ldso_dlopen(const char *path, int flags) {
 
 /* Find the DSO that owns the given address.  NULL if address is
  * outside every loaded object's PT_LOAD span. */
-static ld_obj_t *dl_obj_for_addr(ld_u32 addr) {
+static ld_obj_t *dl_obj_for_addr(ld_addr addr) {
     for (ld_obj_t *o = ld_obj_list(); o; o = o->next) {
         if (o->load_start == 0 && o->load_end == 0) continue;
         if (addr >= o->load_start && addr < o->load_end) return o;
     }
     return 0;
 }
-
-extern ld_u32 ld_lookup_in_obj(const ld_obj_t *o, const char *name);
 
 static void *dlsym_locked(void *handle, const char *name, void *caller_pc) {
     if (!name) { ld_dl_error("dlsym: null name", 0, 0, 0); return 0; }
@@ -250,7 +248,7 @@ static void *dlsym_locked(void *handle, const char *name, void *caller_pc) {
      * list head): both mean "search the whole global scope" per POSIX,
      * not just the executable's own symbol table. */
     if (handle == LD_RTLD_DEFAULT || handle == (void *)ld_obj_list()) {
-        ld_u32 v = ld_resolve(name);
+        ld_addr v = ld_resolve(name);
         if (!v) ld_dl_error("dlsym(\"", name, "\"): not found", 0);
         return (void *)(unsigned long)v;
     }
@@ -263,7 +261,7 @@ static void *dlsym_locked(void *handle, const char *name, void *caller_pc) {
             ld_dl_error("dlsym(RTLD_NEXT): no caller PC", 0, 0, 0);
             return 0;
         }
-        ld_obj_t *caller = dl_obj_for_addr((ld_u32)(unsigned long)caller_pc);
+        ld_obj_t *caller = dl_obj_for_addr((ld_addr)(unsigned long)caller_pc);
         if (!caller) {
             ld_dl_error("dlsym(RTLD_NEXT): caller not in any DSO", 0, 0, 0);
             return 0;
@@ -276,7 +274,7 @@ static void *dlsym_locked(void *handle, const char *name, void *caller_pc) {
                 if (o == caller) past_caller = 1;
                 continue;
             }
-            ld_u32 v = ld_lookup_in_obj(o, name);
+            ld_addr v = ld_lookup_in_obj(o, name);
             if (v) return (void *)(unsigned long)v;
         }
         ld_dl_error("dlsym(RTLD_NEXT, \"", name, "\"): not found", 0);
@@ -291,7 +289,7 @@ static void *dlsym_locked(void *handle, const char *name, void *caller_pc) {
         return 0;
     }
     ld_obj_t *target = (ld_obj_t *)handle;
-    ld_u32 v = ld_lookup_in_obj(target, name);
+    ld_addr v = ld_lookup_in_obj(target, name);
     if (!v) ld_dl_error("dlsym(\"", name, "\"): not found in handle", 0);
     return (void *)(unsigned long)v;
 }
@@ -321,7 +319,7 @@ static int dl_streq(const char *a, const char *b);   /* defined below */
 static int dl_object_still_needed(const ld_obj_t *o) {
     for (ld_obj_t *c = ld_obj_list(); c; c = c->next) {
         if (c == o || !c->dynamic || !c->strtab) continue;
-        for (Elf32_Dyn *d = c->dynamic; d->d_tag != DT_NULL; d++) {
+        for (Elf_Dyn *d = c->dynamic; d->d_tag != DT_NULL; d++) {
             if (d->d_tag != DT_NEEDED) continue;
             if (dl_streq(c->strtab + d->d_un.d_val, o->name)) return 1;
         }
@@ -380,7 +378,9 @@ static ld_u32 dl_dynsym_count(const ld_obj_t *o) {
         ld_u32 nbuckets   = h[0];
         ld_u32 symbias    = h[1];
         ld_u32 bloom_size = h[2];
-        const ld_u32 *buckets = h + 4 + bloom_size;
+        /* The bloom filter is bloom_size native words (ld_resolve.c). */
+        const ld_u32 *buckets =
+            (const ld_u32 *)((const ld_addr *)(h + 4) + bloom_size);
         const ld_u32 *chain   = buckets + nbuckets;
         ld_u32 maxidx = symbias;        /* symbols [0, symbias) aren't hashed */
         for (ld_u32 b = 0; b < nbuckets; b++) {
@@ -398,7 +398,7 @@ static ld_u32 dl_dynsym_count(const ld_obj_t *o) {
     return 0;
 }
 
-static Elf32_Sym *dl_find_sym_in_obj(const ld_obj_t *o, ld_u32 target) {
+static Elf_Sym *dl_find_sym_in_obj(const ld_obj_t *o, ld_addr target) {
     if (!o->symtab) return 0;
     /* Bound the walk by the exact dynsym count from the hash section.
      * The old 65536 + zero-run heuristic reinterpreted strtab bytes as
@@ -406,16 +406,16 @@ static Elf32_Sym *dl_find_sym_in_obj(const ld_obj_t *o, ld_u32 target) {
     ld_u32 nsyms = dl_dynsym_count(o);
     if (nsyms == 0) return 0;
     if (nsyms > 65536) nsyms = 65536;   /* backstop vs a corrupt count */
-    Elf32_Sym *best = 0;
-    ld_u32 best_off = 0xFFFFFFFFu;
+    Elf_Sym *best = 0;
+    ld_addr best_off = LD_ADDR_MAX;
     for (ld_u32 i = 0; i < nsyms; i++) {
-        Elf32_Sym *s = &o->symtab[i];
+        Elf_Sym *s = &o->symtab[i];
         if (o->strsz && s->st_name >= o->strsz) continue;  /* bad name idx */
         if (s->st_shndx == 0 /* SHN_UNDEF */) continue;
         if (s->st_size == 0) continue;
-        ld_u32 sv = s->st_value + o->base;
+        ld_addr sv = s->st_value + o->base;
         if (target < sv) continue;
-        ld_u32 off = target - sv;
+        ld_addr off = target - sv;
         if (off >= s->st_size) continue;
         if (off < best_off) { best = s; best_off = off; }
     }
@@ -440,14 +440,14 @@ LD_PUBLIC int __ldso_dladdr(const void *addr, void *info_out) {
     info->dli_sname = 0;
     info->dli_saddr = 0;
 
-    ld_u32 target = (ld_u32)(unsigned long)addr;
+    ld_addr target = (ld_addr)(unsigned long)addr;
     ld_obj_t *o = dl_obj_for_addr(target);
     if (!o) return 0;
 
     info->dli_fname = o->name;
     info->dli_fbase = (void *)(unsigned long)o->load_start;
 
-    Elf32_Sym *s = dl_find_sym_in_obj(o, target);
+    Elf_Sym *s = dl_find_sym_in_obj(o, target);
     if (s) {
         info->dli_sname = o->strtab + s->st_name;
         info->dli_saddr = (void *)(unsigned long)(s->st_value + o->base);
@@ -479,7 +479,7 @@ static ld_u32 dl_sysv_hash(const char *s) {
     return h;
 }
 
-ld_u32 ld_lookup_in_obj(const ld_obj_t *o, const char *name) {
+ld_addr ld_lookup_in_obj(const ld_obj_t *o, const char *name) {
     if (!o || !name || !o->symtab || !o->strtab) return 0;
 
     if (o->gnu_hash) {
@@ -488,20 +488,21 @@ ld_u32 ld_lookup_in_obj(const ld_obj_t *o, const char *name) {
         ld_u32 symbias    = h[1];
         ld_u32 bloom_size = h[2];
         ld_u32 bloom_shift = h[3];
-        const ld_u32 *bloom   = h + 4;
-        const ld_u32 *buckets = bloom + bloom_size;
+        const ld_addr *bloom  = (const ld_addr *)(h + 4);
+        const ld_u32 *buckets = (const ld_u32 *)(bloom + bloom_size);
         const ld_u32 *chain   = buckets + nbuckets;
         if (nbuckets == 0) return 0;
         ld_u32 hv = dl_gnu_hash(name);
-        ld_u32 word = bloom[(hv / 32) & (bloom_size - 1)];
-        ld_u32 mask = (1u << (hv & 31)) | (1u << ((hv >> bloom_shift) & 31));
+        ld_addr word = bloom[(hv / LD_BLOOM_BITS) & (bloom_size - 1)];
+        ld_addr mask = ((ld_addr)1 << (hv % LD_BLOOM_BITS)) |
+                       ((ld_addr)1 << ((hv >> bloom_shift) % LD_BLOOM_BITS));
         if ((word & mask) != mask) return 0;
         ld_u32 idx = buckets[hv % nbuckets];
         if (idx < symbias) return 0;
         for (;;) {
             ld_u32 chain_v = chain[idx - symbias];
             if (((chain_v ^ hv) >> 1) == 0) {
-                Elf32_Sym *s = &o->symtab[idx];
+                Elf_Sym *s = &o->symtab[idx];
                 if (dl_streq(o->strtab + s->st_name, name))
                     return s->st_value + o->base;
             }
@@ -520,7 +521,7 @@ ld_u32 ld_lookup_in_obj(const ld_obj_t *o, const char *name) {
         ld_u32 hv = dl_sysv_hash(name);
         for (ld_u32 idx = buckets[hv % nbuckets]; idx != 0 && idx < nchains;
              idx = chains[idx]) {
-            Elf32_Sym *s = &o->symtab[idx];
+            Elf_Sym *s = &o->symtab[idx];
             if (s->st_shndx == SHN_UNDEF) continue;
             if (dl_streq(o->strtab + s->st_name, name))
                 return s->st_value + o->base;
@@ -540,7 +541,7 @@ ld_u32 ld_lookup_in_obj(const ld_obj_t *o, const char *name) {
  * dlpi_adds/dlpi_subs cache fields we don't maintain.
  */
 struct ld_dl_phdr_info {
-    ld_u32        dlpi_addr;
+    ld_addr       dlpi_addr;
     const char   *dlpi_name;
     const void   *dlpi_phdr;
     ld_u16        dlpi_phnum;
