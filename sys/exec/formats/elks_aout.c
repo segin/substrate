@@ -130,7 +130,7 @@ static int elks_map_object_pages(vm_map_t *map, pmap_t pmap, uint32_t start,
          * The plumb-through fix is for vm_page_alloc to grow a "low memory"
          * variant; for now bail and the caller can retry / fail exec.
          */
-        if (page->phys_addr >= 0x3EC00000U) {
+        if (!pmm_phys_is_direct_mapped(page->phys_addr)) {
             return -ENOMEM;
         }
         page_kva = P2V(page->phys_addr);

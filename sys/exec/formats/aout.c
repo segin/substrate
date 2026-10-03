@@ -169,7 +169,6 @@ static int aout_check(const char *path, const char *header_buf, size_t len) {
 #define AOUT_PAGE_MASK  (AOUT_PAGE - 1U)
 #define AOUT_ROUND_UP(x) (((x) + AOUT_PAGE_MASK) & ~AOUT_PAGE_MASK)
 #define AOUT_USER_MAX    USER32_VA_END
-#define AOUT_PHYS_LIMIT  0x3EC00000U     /* kernel direct-map ceiling */
 
 static int aout_debug_enabled(void) {
     return cmdline_debug_enabled("perso:linux:aout");
@@ -290,7 +289,7 @@ static int aout_map_region(pmap_t pmap, vm_map_t *map, uint32_t va,
             return -ENOMEM;
         }
         vm_object_add_page(obj, page);
-        if (page->phys_addr >= AOUT_PHYS_LIMIT) {
+        if (!pmm_phys_is_direct_mapped(page->phys_addr)) {
             return -ENOMEM;
         }
         kva = P2V(page->phys_addr);

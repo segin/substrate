@@ -29,6 +29,7 @@
 
 #include <machine/gdt.h>
 #include <machine/pmap.h>
+#include <machine/pmm.h>
 #include <machine/vmparam.h>
 #include <exec/formats/xout.h>
 #include <exec/formats/xout286.h>
@@ -54,9 +55,6 @@
 #define X286_PAGE_MASK   (X286_PAGE - 1U)
 #define X286_ROUND_UP(x) (((x) + X286_PAGE_MASK) & ~X286_PAGE_MASK)
 
-/* Pages above this cannot be reached through the kernel direct map while we
- * zero them at load time (mirrors the ELKS/xout loaders). */
-#define X286_PHYS_LIMIT  0x3EC00000U
 
 /* Bounds on the startup stack image so a hostile argv cannot run DGROUP out
  * of room before the program has drawn its first character. */
@@ -227,7 +225,9 @@ static int x286_populate(pmap_t pmap, vm_object_t *obj, uint32_t base,
             return -ENOMEM;
         }
         vm_object_add_page(obj, page);
-        if (page->phys_addr >= X286_PHYS_LIMIT) {
+        /* The page is zeroed and filled through the kernel direct map,
+         * whose extent is the architecture's (<machine/pmm.h>). */
+        if (!pmm_phys_is_direct_mapped(page->phys_addr)) {
             return -ENOMEM;
         }
         page_kva = P2V(page->phys_addr);

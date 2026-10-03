@@ -18,6 +18,7 @@
 
 #include <machine/gdt.h>
 #include <machine/pmap.h>
+#include <machine/pmm.h>
 #include <machine/vmparam.h>
 #include <exec/formats/xout.h>
 #include <exec/perso/personality.h>
@@ -50,10 +51,6 @@
 #define XOUT_PAGE        0x1000U
 #define XOUT_PAGE_MASK   (XOUT_PAGE - 1U)
 #define XOUT_ROUND_UP(x) (((x) + XOUT_PAGE_MASK) & ~XOUT_PAGE_MASK)
-
-/* Direct-map ceiling: pages above this cannot be touched through the kernel
- * direct map while we populate them (see elks_map_object_pages). */
-#define XOUT_PHYS_LIMIT  0x3EC00000U
 
 static int xout_debug_enabled(void) {
     return cmdline_debug_enabled("perso:xenix:xout");
@@ -119,7 +116,7 @@ static int xout_populate(vm_map_t *map, pmap_t pmap, vm_object_t *obj,
             return -ENOMEM;
         }
         vm_object_add_page(obj, page);
-        if (page->phys_addr >= XOUT_PHYS_LIMIT) {
+        if (!pmm_phys_is_direct_mapped(page->phys_addr)) {
             return -ENOMEM;
         }
         /* Zero via the kernel direct map -- the user VA is not mapped yet. */
