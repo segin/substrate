@@ -302,6 +302,11 @@ install_to_dist() {
     else
         cp "$TOP/sys/kernel.multiboot" "$DIST/vmunix"
     fi
+    # The 64-bit kernel (make -C sys ARCH=x86_64), still in bring-up: it
+    # runs no userland yet, so nothing boots it by default.
+    if [ -f "$TOP/sys/kernel-x86_64.bin" ]; then
+        cp "$TOP/sys/kernel-x86_64.bin" "$DIST/vmunix64"
+    fi
 
     echo "Installing libc + runtime libraries to dist/usr/lib + dist/lib..."
     mkdir -p "$DIST/usr/include"

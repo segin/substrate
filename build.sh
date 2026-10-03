@@ -250,6 +250,8 @@ export PATH="${STAGE1_PREFIX}/bin:${PATH}"
 #-----------------------------------------------------------------------
 step "Stage 1a: kernel (sys/)"
 make -C sys -j"$JOBS"
+# The 64-bit kernel, from the same tree (installed as /vmunix64).
+make -C sys ARCH=x86_64 -j"$JOBS"
 
 step "Stage 1b: substrate runtime libraries (lib/, usr.lib/)"
 make -C lib
