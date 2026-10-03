@@ -194,12 +194,8 @@ static int aout_dup_vector(char *const src[], char ***out, int *count_out) {
     if (src) {
         while (n < ARG_MAX_COUNT) {
             char *e;
-            if (aout_is_user_ptr(src)) {
-                if (copyin(&src[n], &e, sizeof(e)) != 0) {
-                    return -EFAULT;
-                }
-            } else {
-                e = src[n];
+            if (exec_vec_ptr(src, n, &e) != 0) {
+                return -EFAULT;
             }
             if (!e) {
                 break;
@@ -217,10 +213,8 @@ static int aout_dup_vector(char *const src[], char ***out, int *count_out) {
         char buf[ARG_STR_MAX];
         size_t copied = 0;
 
-        if (aout_is_user_ptr(src)) {
-            copyin(&src[i], &e, sizeof(e));
-        } else {
-            e = src[i];
+        if (exec_vec_ptr(src, i, &e) != 0) {
+            e = NULL;
         }
         if (aout_is_user_ptr(e)) {
             if (copyinstr(e, buf, sizeof(buf), &copied) != 0) {

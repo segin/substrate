@@ -17,12 +17,14 @@
 #include <kern/console.h>
 #include <kern/sched.h>
 #include <sys/errno.h>
+#include <sys/copy.h>
 #include <sys/exec.h>
 #include <sys/fcntl.h>
 #include <sys/file.h>
 #include <sys/kern_syscalls.h>
 #include <sys/proc.h>
 #include <sys/stat.h>
+#include <sys/sysinfo.h>
 #include <sys/syscall_impl.h>
 #include <sys/types.h>
 #include <vfs/vfs.h>
@@ -154,6 +156,37 @@ void exec_cleanup_drain(void) {
  * Reads the first chunk of the file to determine the format, then calls the
  * appropriate loader.
  */
+/*
+ * Fetch entry `index` of an argv/envp vector.
+ *
+ * A vector still in user memory holds the calling process's own pointers:
+ * 32 bits wide for an i386-ABI process -- on the x86_64 kernel too, where
+ * a native `char *` is twice that -- and 64 for a native amd64 one.  A
+ * vector already in the kernel is an ordinary array.  Every executable
+ * loader captures its arguments through this, so none of them reads a
+ * 32-bit process's vector at the kernel's pointer width.
+ */
+int exec_vec_ptr(char *const array[], int index, char **out) {
+    if ((uintptr_t)array >= KERNEL_VA_START) {
+        *out = array[index];
+        return 0;
+    }
+#ifdef SUBSTRATE_ARCH_X86_64
+    if (current_process && current_process->bitness == BITNESS_64) {
+        uint64_t uptr64;
+        int ret64 = copyin((const uint64_t *)(const void *)array + index,
+                           &uptr64, sizeof(uptr64));
+        if (ret64 == 0) *out = (char *)(uintptr_t)uptr64;
+        return ret64;
+    }
+#endif
+    uint32_t uptr;
+    int ret = copyin((const uint32_t *)(const void *)array + index,
+                     &uptr, sizeof(uptr));
+    if (ret == 0) *out = (char *)(uintptr_t)uptr;
+    return ret;
+}
+
 int exec_dispatch(const char *path, char *const argv[], char *const envp[]) {
     /* Historically this barrier was required: removing it reliably hung
      * init exec, blamed on an interrupt-context reader seeing a stale

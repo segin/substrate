@@ -152,11 +152,7 @@ static int elks_is_user_ptr(const void *ptr) {
 }
 
 static int elks_capture_ptr(char *const array[], int index, char **out) {
-    if (elks_is_user_ptr(array)) {
-        return copyin(&array[index], out, sizeof(char *));
-    }
-    *out = array[index];
-    return 0;
+    return exec_vec_ptr(array, index, out);
 }
 
 static void elks_free_kernel_vector(char **vec) {

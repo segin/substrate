@@ -1048,32 +1048,7 @@ static int is_user_ptr(const void *ptr) {
 }
 
 static int capture_ptr(char *const array[], int index, char **out) {
-    if (is_user_ptr(array)) {
-        /* A user argv/envp holds the process's own pointers: 32 bits wide
-         * for an i386-ABI process (on the x86_64 kernel too), 64 for a
-         * native amd64 one, whose addresses still fit 32 bits. */
-#ifdef SUBSTRATE_ARCH_X86_64
-        if (current_process && current_process->bitness == BITNESS_64) {
-            uint64_t uptr64;
-            int ret64 = copyin((const uint64_t *)(const void *)array + index,
-                               &uptr64, sizeof(uptr64));
-            if (ret64 == 0) {
-                *out = (char *)(uintptr_t)uptr64;
-            }
-            return ret64;
-        }
-#endif
-        uint32_t uptr;
-        int ret = copyin((const uint32_t *)(const void *)array + index,
-                         &uptr, sizeof(uptr));
-        if (ret == 0) {
-            *out = (char *)(uintptr_t)uptr;
-        }
-        return ret;
-    } else {
-        *out = array[index];
-        return 0;
-    }
+    return exec_vec_ptr(array, index, out);
 }
 
 #define ARG_MAX_BYTES (32 * 1024)

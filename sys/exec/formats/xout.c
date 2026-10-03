@@ -174,24 +174,27 @@ static uint32_t xout_build_stack(uint8_t *data_seg, uint32_t seg_size,
     uint32_t argv_off[64];
     uint32_t envp_off[64];
 
-    for (argc = 0; argc < 63 && argv && argv[argc]; argc++) {
-        ;
+    /* The vectors hold the caller's pointers; fetch them at its width. */
+    char *argp[64], *envpp[64];
+
+    for (argc = 0; argc < 63 && argv; argc++) {
+        if (exec_vec_ptr(argv, argc, &argp[argc]) != 0 || !argp[argc]) break;
     }
-    for (envc = 0; envc < 63 && envp && envp[envc]; envc++) {
-        ;
+    for (envc = 0; envc < 63 && envp; envc++) {
+        if (exec_vec_ptr(envp, envc, &envpp[envc]) != 0 || !envpp[envc]) break;
     }
 
     /* Copy strings into the top of the segment, recording their offsets. */
     for (i = argc - 1; i >= 0; i--) {
-        uint32_t len = (uint32_t)strlen(argv[i]) + 1U;
+        uint32_t len = (uint32_t)strlen(argp[i]) + 1U;
         strtop -= len;
-        memcpy(data_seg + strtop, argv[i], len);
+        memcpy(data_seg + strtop, argp[i], len);
         argv_off[i] = strtop;
     }
     for (i = envc - 1; i >= 0; i--) {
-        uint32_t len = (uint32_t)strlen(envp[i]) + 1U;
+        uint32_t len = (uint32_t)strlen(envpp[i]) + 1U;
         strtop -= len;
-        memcpy(data_seg + strtop, envp[i], len);
+        memcpy(data_seg + strtop, envpp[i], len);
         envp_off[i] = strtop;
     }
 

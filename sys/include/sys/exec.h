@@ -45,6 +45,9 @@ void exec_init(void);
  * Reads the header once and iterates through handlers.
  */
 int exec_dispatch(const char *path, char *const argv[], char *const envp[]);
+/* Entry `index` of an argv/envp vector, read at the calling process's
+ * pointer width when the vector is still in user memory.  0 or EFAULT. */
+int exec_vec_ptr(char *const array[], int index, char **out);
 void exec_pin_current_thread(void);
 void exec_unpin_current_thread(void);
 void exec_maybe_unpin_current_thread(int from_user);

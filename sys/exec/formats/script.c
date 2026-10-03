@@ -104,14 +104,9 @@ static int script_load(int fd, const char *path, char *const argv[],
 
     /* Copy remaining original argv (skip argv[0]) */
     if (argv) {
-        int is_user = (uintptr_t)argv < KERNEL_VA_START;
         for (i = 1; argc < SCRIPT_MAX_ARGV - 1; i++) {
             char *uarg;
-            if (is_user) {
-                if (copyin(&argv[i], &uarg, sizeof(char*)) != 0) break;
-            } else {
-                uarg = argv[i];
-            }
+            if (exec_vec_ptr(argv, i, &uarg) != 0) break;
             if (!uarg) break;
             new_argv[argc++] = uarg;
         }
