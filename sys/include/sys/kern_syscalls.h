@@ -81,6 +81,11 @@ time_t kern_time(time_t *tloc);
 int kern_stime(time_t *t);
 int kern_gettimeofday(struct timeval *tv, struct timezone *tz);
 int kern_clock_gettime(clockid_t clk_id, struct timespec *tp);
+/* Sleep for *req.  On -EINTR, *rem (when non-NULL) holds the time left. */
+int kern_nanosleep(const struct timespec *req, struct timespec *rem);
+/* select(2) on user fd_sets with a kernel timeout (NULL: block). */
+int kern_select(int nfds, void *rfds, void *wfds, void *efds,
+                const struct timeval *timeout);
 clock_t kern_times(struct tms *buf);
 unsigned int kern_alarm(unsigned int sec);
 int kern_getitimer(int which, struct itimerval *curr_value);

@@ -64,6 +64,15 @@ int freebsd_sys_wait4(int pid, int *status, int options, void *rusage);
  * 1/HZ tick resolution (substrate has no native sys_clock_getres). */
 int freebsd_sys_clock_getres(int clk_id, void *res);
 
+/* Calls taking FreeBSD i386's 8-byte timespec/timeval (32-bit time_t),
+ * converted around the native implementation. */
+int freebsd_sys_nanosleep(const void *rqtp, void *rmtp);
+int freebsd_sys_clock_nanosleep(int clockid, int flags, const void *rqtp,
+                                void *rmtp);
+int freebsd_sys_select(int nfds, void *rfds, void *wfds, void *efds,
+                       const void *timeout);
+int freebsd_sys_setitimer(int which, const void *uvalue, void *uovalue);
+
 /* setsockopt(2)/getsockopt(2) for the BSD personalities
  * (FreeBSD, NetBSD, OpenBSD share these numbers).  sys_setsockopt() and
  * sys_getsockopt() speak the native numbering, which is Linux's; a BSD

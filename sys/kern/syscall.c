@@ -3871,8 +3871,22 @@ int sys_umount(const char *target) {
 int sys_nanosleep(void *req, void *rem) {
     if (!req) return -EFAULT;
 
-    struct timespec kreq;
+    struct timespec kreq, krem;
     if (copyin(req, &kreq, sizeof(struct timespec)) != 0) return -EFAULT;
+
+    int ret = kern_nanosleep(&kreq, rem ? &krem : NULL);
+    if (ret == -EINTR && rem &&
+        copyout(&krem, rem, sizeof(struct timespec)) != 0)
+        return -EFAULT;
+    return ret;
+}
+
+/*
+ * The body of nanosleep(2), on kernel timespecs, so a personality whose
+ * timespec differs (FreeBSD i386's 32-bit time_t) can convert around it.
+ */
+int kern_nanosleep(const struct timespec *req, struct timespec *rem) {
+    struct timespec kreq = *req;
 
     if (kreq.tv_nsec < 0 || kreq.tv_nsec >= 1000000000) return -EINVAL;
     if (kreq.tv_sec < 0) return -EINVAL;
@@ -3947,11 +3961,8 @@ int sys_nanosleep(void *req, void *rem) {
                 now = get_ticks();
                 if (now < deadline) {
                     uint64_t diff = deadline - now;
-                    struct timespec remaining;
-                    remaining.tv_sec = diff / hz;
-                    remaining.tv_nsec = ((diff % hz) * 1000000000) / hz;
-                    if (copyout(&remaining, rem, sizeof(struct timespec)) != 0)
-                        return -EFAULT;
+                    rem->tv_sec = diff / hz;
+                    rem->tv_nsec = ((diff % hz) * 1000000000) / hz;
                 } else {
                     return 0;
                 }
@@ -4937,6 +4948,15 @@ int sys_fsync(int fd) {
  * (N / NFDBITS).  Substrate fd_set is the same shape.
  */
 int sys_select(int nfds, void *rfds, void *wfds, void *efds, void *timeout) {
+    struct timeval ktv;
+    if (timeout && copyin(timeout, &ktv, sizeof(ktv)) != 0) return -EFAULT;
+    return kern_select(nfds, rfds, wfds, efds, timeout ? &ktv : NULL);
+}
+
+/* select(2) with the timeout already in the kernel (NULL: block), so a
+ * personality whose timeval differs can convert it first. */
+int kern_select(int nfds, void *rfds, void *wfds, void *efds,
+                const struct timeval *timeout) {
     if (nfds < 0 || nfds > 1024) return -EINVAL;
 
     /* Copy in the three bitmaps.  Size in bytes = ceil(nfds/8). */
@@ -4990,14 +5010,7 @@ int sys_select(int nfds, void *rfds, void *wfds, void *efds, void *timeout) {
      * timeout.  NULL means block forever (-1); zero means non-block. */
     int tmo = -1;
     if (timeout) {
-        struct timeval tv;
-        if (copyin(timeout, &tv, sizeof(tv)) != 0) {
-            kfree(pfds, pfds_bytes);
-            if (kr) kfree(kr, lbytes);
-            if (kw) kfree(kw, lbytes);
-            if (ke) kfree(ke, lbytes);
-            return -EFAULT;
-        }
+        const struct timeval tv = *timeout;
         if (tv.tv_sec < 0 || tv.tv_usec < 0) tmo = 0;
         else if (tv.tv_sec > 2000000) tmo = -1;       /* effectively forever */
         else tmo = (int)(tv.tv_sec * 1000 + tv.tv_usec / 1000);

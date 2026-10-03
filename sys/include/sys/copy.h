@@ -2,6 +2,7 @@
 #define _SYS_COPY_H
 
 #include <stddef.h>
+#include <stdint.h>
 #include <sys/compiler.h>
 
 /*
@@ -20,6 +21,10 @@ int validate_user_addr(const void *addr, size_t size);
 int copyin(const void *src, void *dst, size_t size);
 int copyout(const void *src, void *dst, size_t size);
 int copyinstr(const void *src, void *dst, size_t maxlen, size_t *len);
+/* Atomic compare-and-swap on an aligned user word; *prev gets the value
+ * found.  0 or EFAULT. */
+int casuword32(volatile uint32_t *uaddr, uint32_t oldval, uint32_t newval,
+               uint32_t *prev);
 
 /*
  * Copy the NUL-terminated user string at uaddr (a path or a file name) into

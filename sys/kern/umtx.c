@@ -27,6 +27,7 @@
 #include <stdint.h>
 
 #include <machine/pmap.h>
+#include <exec/perso/freebsd/freebsd_user.h>
 #include <kern/sched.h>
 #include <kern/sleepq.h>
 #include <kern/time.h>
@@ -113,7 +114,8 @@ static int umtx_read_timeout(const void *utime, uint64_t *deadline_ticks) {
     *deadline_ticks = 0;
     if (!utime) return 0;
     if (!umtx_valid((uintptr_t)utime)) return -EFAULT;
-    struct timespec ts;
+    /* FreeBSD i386's timespec: 32-bit time_t, 8 bytes. */
+    struct freebsd_timespec ts;
     if (copyin(utime, &ts, sizeof(ts)) != 0) return -EFAULT;
     if (ts.tv_nsec < 0 || ts.tv_nsec >= 1000000000) return -EINVAL;
     if (ts.tv_sec == 0 && ts.tv_nsec == 0) {
@@ -206,11 +208,26 @@ static int umtx_mutex_wait(volatile uint32_t *uaddr, const void *utime) {
     int terr = umtx_read_timeout(utime, &deadline);
     if (terr) return terr;
 
+    /*
+     * Mark the lock contested before sleeping, as FreeBSD's kernel does
+     * (do_lock_umutex, _UMUTEX_WAIT): libthr's unlock fast path releases the
+     * word in userspace and enters the kernel to wake a waiter only when it
+     * sees UMUTEX_CONTESTED, and libthr does not set the bit itself before
+     * calling MUTEX_WAIT.  Without it the owner's unlock never woke us.
+     */
     uint32_t owner;
     if (umtx_read32(uaddr, &owner) != 0) return -EFAULT;
-    /* If unowned (or only the contested bit is set with no owner), the lock
-     * is free — return so libthr retries the userspace cmpset. */
-    if ((owner & ~UMUTEX_CONTESTED) == UMUTEX_UNOWNED) return 0;
+    for (;;) {
+        /* If unowned (or only the contested bit is set with no owner), the
+         * lock is free — return so libthr retries the userspace cmpset. */
+        if ((owner & ~UMUTEX_CONTESTED) == UMUTEX_UNOWNED) return 0;
+        if (owner & UMUTEX_CONTESTED) break;
+        uint32_t found;
+        if (casuword32(uaddr, owner, owner | UMUTEX_CONTESTED, &found) != 0)
+            return -EFAULT;
+        if (found == owner) break;
+        owner = found;
+    }
 
     if (deadline) {
         if (deadline <= get_ticks()) return -ETIMEDOUT;

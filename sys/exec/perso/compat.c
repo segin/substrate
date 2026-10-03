@@ -885,6 +885,84 @@ int freebsd_sys_clock_getres(int clk_id, void *res) {
 }
 
 /*
+ * The calls below take a FreeBSD i386 timespec/timeval (8 bytes, 32-bit
+ * time_t) from the caller.  Handing that pointer to the native handler made
+ * it read a 12/16-byte native structure: the seconds took the caller's
+ * nanoseconds as their high half and the nanoseconds came from whatever
+ * followed on the stack, so a sleep failed with EINVAL or ran for decades
+ * depending on the stack contents.  Convert explicitly instead.
+ */
+static int fbsd_timespec_in(const void *uts, struct timespec *kts) {
+    struct freebsd_timespec fts;
+    if (copyin(uts, &fts, sizeof(fts)) != 0) return -EFAULT;
+    kts->tv_sec  = fts.tv_sec;
+    kts->tv_nsec = fts.tv_nsec;
+    return 0;
+}
+
+static int fbsd_timespec_out(const struct timespec *kts, void *uts) {
+    struct freebsd_timespec fts;
+    fts.tv_sec  = (int32_t)kts->tv_sec;
+    fts.tv_nsec = (int32_t)kts->tv_nsec;
+    return copyout(&fts, uts, sizeof(fts)) != 0 ? -EFAULT : 0;
+}
+
+static int fbsd_timeval_in(const void *utv, struct timeval *ktv) {
+    struct freebsd_timeval ftv;
+    if (copyin(utv, &ftv, sizeof(ftv)) != 0) return -EFAULT;
+    ktv->tv_sec  = ftv.tv_sec;
+    ktv->tv_usec = ftv.tv_usec;
+    return 0;
+}
+
+static void fbsd_timeval_from(const struct timeval *ktv,
+                              struct freebsd_timeval *ftv) {
+    ftv->tv_sec  = (int32_t)ktv->tv_sec;
+    ftv->tv_usec = (int32_t)ktv->tv_usec;
+}
+
+int freebsd_sys_nanosleep(const void *rqtp, void *rmtp) {
+    struct timespec kreq, krem;
+    if (!rqtp) return -EFAULT;
+    if (fbsd_timespec_in(rqtp, &kreq) != 0) return -EFAULT;
+    int ret = kern_nanosleep(&kreq, rmtp ? &krem : NULL);
+    if (ret == -EINTR && rmtp && fbsd_timespec_out(&krem, rmtp) != 0)
+        return -EFAULT;
+    return ret;
+}
+
+/* clockid and TIMER_ABSTIME are not honoured, as for the native call. */
+int freebsd_sys_clock_nanosleep(int clockid, int flags, const void *rqtp,
+                                void *rmtp) {
+    (void)clockid; (void)flags;
+    return freebsd_sys_nanosleep(rqtp, rmtp);
+}
+
+int freebsd_sys_select(int nfds, void *rfds, void *wfds, void *efds,
+                       const void *timeout) {
+    struct timeval ktv;
+    if (timeout && fbsd_timeval_in(timeout, &ktv) != 0) return -EFAULT;
+    return kern_select(nfds, rfds, wfds, efds, timeout ? &ktv : NULL);
+}
+
+int freebsd_sys_setitimer(int which, const void *uvalue, void *uovalue) {
+    struct freebsd_itimerval fit;
+    struct itimerval knew, kold;
+    if (!uvalue || copyin(uvalue, &fit, sizeof(fit)) != 0) return -EFAULT;
+    knew.it_interval.tv_sec  = fit.it_interval.tv_sec;
+    knew.it_interval.tv_usec = fit.it_interval.tv_usec;
+    knew.it_value.tv_sec     = fit.it_value.tv_sec;
+    knew.it_value.tv_usec    = fit.it_value.tv_usec;
+    int ret = kern_setitimer(which, &knew, uovalue ? &kold : NULL);
+    if (ret == 0 && uovalue) {
+        fbsd_timeval_from(&kold.it_interval, &fit.it_interval);
+        fbsd_timeval_from(&kold.it_value, &fit.it_value);
+        if (copyout(&fit, uovalue, sizeof(fit)) != 0) return -EFAULT;
+    }
+    return ret;
+}
+
+/*
  * freebsd_sys_gettimeofday - gettimeofday(2) with FreeBSD i386 struct layout.
  *
  * FreeBSD i386 `struct timeval` is 8 bytes (int32 tv_sec + int32 tv_usec),

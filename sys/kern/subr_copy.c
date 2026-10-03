@@ -152,6 +152,46 @@ int copyin(const void *src, void *dst, size_t size) {
 }
 
 /*
+ * casuword32 - atomic compare-and-swap on a 32-bit word in user space
+ *
+ * If the word at 'uaddr' equals 'oldval', replace it with 'newval'.  The
+ * value found there is stored in *prev either way.  The fault label lives
+ * in the asm for the reason given at copyout().
+ *
+ * Returns:
+ *   0 on success (whether or not the swap happened)
+ *   EFAULT on an invalid or misaligned address
+ */
+int casuword32(volatile uint32_t *uaddr, uint32_t oldval, uint32_t newval,
+               uint32_t *prev) {
+    if (((uintptr_t)uaddr & 3) != 0 ||
+        validate_user_addr((const void *)uaddr, sizeof(uint32_t)) != 0) {
+        return EFAULT;
+    }
+
+    int result;
+    uint32_t found = oldval;
+    __asm__ volatile (
+        COPY_MOVP " $1f, (%[on_fault])\n\t"
+        "lock cmpxchgl %[newval], (%[uaddr])\n\t"
+        COPY_MOVP " $0, (%[on_fault])\n\t"
+        "xorl %[result], %[result]\n\t"
+        "jmp 2f\n"
+        "1:\n\t"
+        COPY_MOVP " $0, (%[on_fault])\n\t"
+        "movl %[efault], %[result]\n"
+        "2:\n\t"
+        : "+a"(found), [result] "=&r"(result)
+        : [uaddr] "r"(uaddr), [newval] "r"(newval),
+          [on_fault] "r"(&current_thread->on_fault),
+          [efault] "i"(EFAULT)
+        : "memory", "cc"
+    );
+    if (result == 0 && prev) *prev = found;
+    return result;
+}
+
+/*
  * copyinstr - Copy string from user space to kernel space
  *
  * Safely copies a null-terminated string from 'src' in user space
