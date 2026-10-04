@@ -207,7 +207,13 @@ large-data — in the C runtime before `main`.
 
 ## Media layout
 
-`~/Downloads/286` (not in the repo — distribution images):
+The source media is the "Xenix 286 dump 2.3.2b" archive, downloaded from
+Vetusware:
+
+<https://vetusware.com/download/Xenix%20286%20dump%202.3.2b/?id=13487>
+
+Its contents are what `build-image.sh` reads from its media directory, by
+default `~/Downloads/286` (not in the repo — distribution images):
 
     rts/   Xenix 2.3.2 runtime: n1 (install floppy, a filesystem),
            b1 b2 (base), x1-x4 (extended), ga, n2 n3 (headers)

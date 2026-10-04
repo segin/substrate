@@ -9,6 +9,9 @@
 # Xenix's.  (To read a genuine Xenix filesystem, see xenixfs.py beside this.)
 #
 # WHERE THE FILES COME FROM
+#   The media is the "Xenix 286 dump 2.3.2b" archive from Vetusware:
+#   https://vetusware.com/download/Xenix%20286%20dump%202.3.2b/?id=13487
+#
 #   rts/{b1,b2,x1..x4,ga,n2,n3}.img   tar archives: the runtime system and
 #                                     extended utilities (~1047 files)
 #   rts/n1.img                        NOT a tar -- a bootable Xenix filesystem,
