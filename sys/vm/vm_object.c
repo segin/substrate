@@ -1,3 +1,5 @@
+#include <string.h>
+
 #include <vm/vm_object.h>
 #include <vm/phys_mem.h>
 #include <vm/vm_kmem.h>
@@ -12,6 +14,111 @@ static vm_object_t bootstrap_objects[MAX_BOOTSTRAP_OBJECTS];
 static int next_bootstrap_object = 0;
 static int kmalloc_ready = 0;
 static spinlock_t vm_object_teardown_lock = SPINLOCK_INIT("vmobj_teardown");
+
+/*
+ * The page lookup hash.
+ *
+ * An object's pages are on a list (obj_next/obj_prev), which is what
+ * teardown and collapse walk.  Finding the page at one pindex by walking
+ * that list made every fault cost the number of pages the object already
+ * had, so touching N pages of one mapping cost N^2 -- a process filling
+ * 128 MiB took most of a minute, and each doubling took four times as
+ * long.  Lookups go through this table instead: every page linked into an
+ * object is also on the chain of the bucket its (object, pindex) hashes
+ * to, and has PG_HASHED set.
+ *
+ * The table is global and fixed in size.  Objects are locked by their
+ * users, each in its own way, so two objects' pages can be inserted at
+ * once; the table has a lock of its own, taken with interrupts off like
+ * the buddy allocator's.  A page must leave the table before its object
+ * or pindex changes, since both are its key.
+ */
+#if __SIZEOF_POINTER__ == 8
+#define VM_OBJ_HASH_BUCKETS (1U << 18)
+#else
+#define VM_OBJ_HASH_BUCKETS (1U << 16)
+#endif
+
+static vm_page_t *vm_obj_hash[VM_OBJ_HASH_BUCKETS];
+static spinlock_t vm_obj_hash_lock = SPINLOCK_INIT("vmobj_hash");
+
+static unsigned vm_obj_hash_bucket(const vm_object_t *object, uint64_t pindex) {
+    /* Objects come from one allocator and differ in the middle bits;
+     * consecutive pindexes land in consecutive buckets, which spreads the
+     * common case -- one large object -- perfectly. */
+    uintptr_t h = ((uintptr_t)object >> 4) * (uintptr_t)0x9E3779B1U;
+
+    h += (uintptr_t)pindex;
+    return (unsigned)(h & (VM_OBJ_HASH_BUCKETS - 1));
+}
+
+static void vm_obj_hash_remove(vm_page_t *page);
+
+static void vm_obj_hash_insert(vm_page_t *page) {
+    unsigned b;
+    unsigned long f;
+
+    /* Never twice: a page linked onto a chain it is already on makes the
+     * chain a loop. */
+    vm_obj_hash_remove(page);
+
+    b = vm_obj_hash_bucket(page->object, page->pindex);
+    f = spinlock_acquire_irq(&vm_obj_hash_lock);
+
+    page->obj_hash_next = vm_obj_hash[b];
+    vm_obj_hash[b] = page;
+    page->flags |= PG_HASHED;
+    spinlock_release_irq(&vm_obj_hash_lock, f);
+}
+
+static int vm_obj_hash_unlink(unsigned bucket, vm_page_t *page) {
+    vm_page_t **pp = &vm_obj_hash[bucket];
+
+    while (*pp && *pp != page) {
+        pp = &(*pp)->obj_hash_next;
+    }
+    if (*pp != page) {
+        return 0;
+    }
+    *pp = page->obj_hash_next;
+    return 1;
+}
+
+/*
+ * Take `page` out of the table.  Call it while page->object and
+ * page->pindex are still what they were when it went in.
+ *
+ * A page whose key was changed behind the table's back is not on the
+ * chain its key now names.  Leaving it wherever it is would be fatal --
+ * the page goes back to the allocator, its chain pointer is cleared for
+ * the next owner, and every page behind it on that chain is lost -- so
+ * that case searches the whole table, slowly, and says so.
+ */
+static void vm_obj_hash_remove(vm_page_t *page) {
+    unsigned long f;
+
+    if (!(page->flags & PG_HASHED)) {
+        return;
+    }
+    f = spinlock_acquire_irq(&vm_obj_hash_lock);
+    if (!vm_obj_hash_unlink(vm_obj_hash_bucket(page->object, page->pindex),
+                            page)) {
+        unsigned b;
+
+        for (b = 0; b < VM_OBJ_HASH_BUCKETS; b++) {
+            if (vm_obj_hash_unlink(b, page)) {
+                break;
+            }
+        }
+        kprintf("VM: page %p was hashed under another key (object %p, "
+                "pindex %lu)\n", (void *)page, (void *)page->object,
+                (unsigned long)page->pindex);
+    }
+    page->obj_hash_next = NULL;
+    page->flags &= ~PG_HASHED;
+    spinlock_release_irq(&vm_obj_hash_lock, f);
+}
+
 
 static vm_object_t *alloc_object(void) {
     /*
@@ -138,6 +245,7 @@ void vm_object_deallocate(vm_object_t *object) {
         vm_page_t *p = pages;
         while (p) {
             vm_page_t *next = p->obj_next;
+            vm_obj_hash_remove(p);
             p->obj_next = NULL;
             p->obj_prev = NULL;
             p->object = NULL;
@@ -214,9 +322,32 @@ void vm_object_add_page(vm_object_t *object, vm_page_t *page) {
     page->obj_prev = NULL;
 
     object->page_count++;
+    vm_obj_hash_insert(page);
 }
 
+void vm_object_forget_page(vm_page_t *page) {
+    vm_obj_hash_remove(page);
+}
+
+#ifdef HOST_TEST
+/*
+ * The host unit tests build vm_page_t's on the stack, link them into
+ * objects and return without unlinking them.  In the kernel a page
+ * structure lives in the page array forever; there, the table would be
+ * left pointing into dead stack frames.  The test runner empties it
+ * between tests.
+ */
+void vm_object_hash_reset(void) {
+    memset(vm_obj_hash, 0, sizeof(vm_obj_hash));
+}
+#endif
+
 void vm_object_remove_page(vm_object_t *object, vm_page_t *page) {
+    /* Out of the lookup table first, while object and pindex -- its key
+     * there -- are intact.  page->object is what it was hashed under;
+     * a page that is not hashed is left alone. */
+    vm_obj_hash_remove(page);
+
     /* Defensive: if the page isn't actually linked into this object's list,
      * skip removal so we don't clobber object->pages. */
     if (object->pages != page && page->obj_prev == NULL) {
@@ -241,6 +372,9 @@ vm_page_t *vm_object_lookup_page(vm_object_t *object, uint64_t pindex) {
     vm_page_t *p;
 
     /*
+     * The page is found on its hash chain, not on the object's list (see
+     * the comment at vm_obj_hash).
+     *
      * Stop at the first link that is not a real page rather than walking
      * into it.  A single bad pointer in this list used to be handed straight
      * back to vm_fault, which mapped `m->phys_addr` -- read out of whatever
@@ -256,13 +390,20 @@ vm_page_t *vm_object_lookup_page(vm_object_t *object, uint64_t pindex) {
      * already lost; the alternative is mapping arbitrary memory into
      * userspace.
      */
-    for (p = object->pages; p != NULL; p = p->obj_next) {
+    unsigned long f = spinlock_acquire_irq(&vm_obj_hash_lock);
+
+    for (p = vm_obj_hash[vm_obj_hash_bucket(object, pindex)]; p != NULL;
+         p = p->obj_hash_next) {
         if (!vm_phys_page_is_valid(p)) {
-            return NULL;
+            p = NULL;
+            break;
         }
-        if (p->pindex == pindex) return p;
+        if (p->object == object && p->pindex == pindex) {
+            break;
+        }
     }
-    return NULL;
+    spinlock_release_irq(&vm_obj_hash_lock, f);
+    return p;
 }
 
 // Create a shadow object backed by the source object
@@ -322,6 +463,9 @@ int vm_object_collapse(vm_object_t *object) {
     vm_page_t *p = shadow->pages;
     while (p) {
         vm_page_t *next = p->obj_next;
+        /* Every branch below detaches the page from the shadow, and one
+         * re-keys it: out of the lookup table before any of that. */
+        vm_obj_hash_remove(p);
         uint64_t op = (p->pindex >= shadow_offset_pages)
                           ? (p->pindex - shadow_offset_pages)
                           : (uint64_t)-1;

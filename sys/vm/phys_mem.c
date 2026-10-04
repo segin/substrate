@@ -69,6 +69,7 @@ static void vm_phys_reset_page_metadata(vm_page_t *page) {
 
     page->next = NULL;
     page->prev = NULL;
+    page->obj_hash_next = NULL;
     page->object = NULL;
     page->pindex = 0;
     page->flags = 0;

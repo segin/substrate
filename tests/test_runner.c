@@ -408,6 +408,9 @@ int main(int argc, char **argv) {
         }
         total++;
         printf("[%02d] Testing %-20s ... ", i + 1, tests[i].name);
+        /* Tests link stack-allocated pages into objects and leave them
+         * there; start each with an empty page-lookup hash. */
+        vm_object_hash_reset();
         if (tests[i].func()) {
             printf("PASS\n");
             passed++;

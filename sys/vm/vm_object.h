@@ -81,6 +81,13 @@ int vm_object_collapse(vm_object_t *object);
 // Page management
 void vm_object_add_page(vm_object_t *object, vm_page_t *page);
 void vm_object_remove_page(vm_object_t *object, vm_page_t *page);
+/* Drop `page` from the page-lookup hash if it is still there.  Called
+ * when a page is freed, as a backstop to vm_object_remove_page(). */
+void vm_object_forget_page(vm_page_t *page);
+#ifdef HOST_TEST
+/* Empty the page-lookup hash (host unit tests only; see vm_object.c). */
+void vm_object_hash_reset(void);
+#endif
 vm_page_t *vm_object_lookup_page(vm_object_t *object, uint64_t pindex);
 
 /*

@@ -26,6 +26,10 @@ typedef struct vm_page {
     struct vm_page *obj_next;
     struct vm_page *obj_prev;
 
+    // Chain in the (object, pindex) hash that vm_object_lookup_page()
+    // searches; meaningful while PG_HASHED is set (vm/vm_object.c).
+    struct vm_page *obj_hash_next;
+
     // Physical address of this page
     uintptr_t phys_addr;
 
@@ -49,6 +53,7 @@ typedef struct vm_page {
     #define PG_WRITEBACK 0x0200 // Writeback in progress
     #define PG_NEEDSYNC  0x0400 // Needs writeback to swap/file
     #define PG_PMM_ALLOC 0x0800 // Buddy allocator: page is handed out
+    #define PG_HASHED    0x1000 // In the (object, pindex) lookup hash
 
     // Reference count (number of mappings)
     uint16_t wire_count;  // Wired down (cannot be paged out)

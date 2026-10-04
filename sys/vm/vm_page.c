@@ -584,6 +584,9 @@ void vm_page_free(vm_page_t *m) {
 	// Unlink from owning object (outside the queue lock — leaf discipline).
 	if(m->object)
 		vm_page_remove(m);
+	/* And out of the object lookup hash, in case a caller detached the
+	 * page by hand without going through vm_object_remove_page(). */
+	vm_object_forget_page(m);
 
 	// Remove all pv_entry backlinks
 	pv_remove_all(m);
