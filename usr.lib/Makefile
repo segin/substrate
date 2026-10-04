@@ -2,9 +2,24 @@ include ../Makefile.inc
 
 SUBDIRS = bc regex demangle libuu elfobj exvi
 
-.PHONY: all clean install $(SUBDIRS)
+.PHONY: all clean install $(SUBDIRS) all64 clean64 install64 both install-both
 
+# Like lib/, these build for either architecture from this one tree: the
+# default, ARCH=i386, in place; ARCH=x86_64 under each library's
+# obj-x86_64/, installed into /lib64 and /usr/lib64.
+#
+#   make -C usr.lib                  32-bit
+#   make -C usr.lib ARCH=x86_64      64-bit     (same as: make -C usr.lib all64)
+#   make -C usr.lib both             both
+#   make -C usr.lib install-both     both, installed into one $(DESTDIR)
 all: $(SUBDIRS)
+
+all64 clean64 install64:
+	$(MAKE) ARCH=x86_64 $(@:64=)
+
+both: all all64
+
+install-both: install install64
 
 $(SUBDIRS):
 	@echo ">>> Entering usr.lib/$@"
