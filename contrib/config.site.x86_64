@@ -1,0 +1,9 @@
+# config.site for 64-bit substrate ports (contrib/port64.sh sets CONFIG_SITE
+# to this file).  autoconf reads it before the command line is applied.
+#
+# The 64-bit libraries live in /usr/lib64, beside the 32-bit ones in
+# /usr/lib; a configure script that is not told otherwise would install
+# into ${exec_prefix}/lib.  Only set it when the port did not.
+if test "x$libdir" = 'x${exec_prefix}/lib'; then
+    libdir='${exec_prefix}/lib64'
+fi

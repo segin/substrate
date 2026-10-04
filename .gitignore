@@ -128,6 +128,11 @@ dist/
 # Unpacked upstream sources for every contrib/<pkg>/ port — `fetch.sh`
 # downloads + extracts into here.  Never vendored.
 /contrib/*/build/
+# The same for the 64-bit target, and the retargeted copies of each port's
+# scripts that contrib/port64.sh writes beside the originals.
+/contrib/*/build64/
+/contrib/*/.fetch64.sh
+/contrib/*/.build64.sh
 
 
 # Patterns formerly carried in subtree .gitignore files
