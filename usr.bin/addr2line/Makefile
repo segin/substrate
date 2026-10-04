@@ -17,12 +17,14 @@ include ../../Makefile.bin.inc
 
 BINDIR := $(DESTDIR)/usr/bin
 
-$(PROG): ../../usr.lib/elfobj/libelfobj.so.0 ../../usr.lib/demangle/libdemangle.so.0
+# $(O): see Makefile.inc (i386 in place, x86_64 under obj-x86_64/) -- both
+# the program and the libraries it waits for live there.
+$(O)$(PROG): ../../usr.lib/elfobj/$(O)libelfobj.so.0 ../../usr.lib/demangle/$(O)libdemangle.so.0
 
-../../usr.lib/elfobj/libelfobj.so.0:
+../../usr.lib/elfobj/$(O)libelfobj.so.0:
 	$(MAKE) -C ../../usr.lib/elfobj $(if $(NATIVE_BUILD),NATIVE_BUILD=1)
 
-../../usr.lib/demangle/libdemangle.so.0:
+../../usr.lib/demangle/$(O)libdemangle.so.0:
 	$(MAKE) -C ../../usr.lib/demangle $(if $(NATIVE_BUILD),NATIVE_BUILD=1)
 
 .PHONY: install-man

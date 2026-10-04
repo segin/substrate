@@ -2,6 +2,7 @@ PROG = batch
 SRCS = batch.c
 
 DYNAMIC = 1
+BINDIR = $(DESTDIR)/usr/bin
 
 include ../../Makefile.bin.inc
 

@@ -44,12 +44,14 @@ demangle-build-native:
 	$(MAKE) -C ../../usr.lib/demangle clean
 	$(MAKE) -C ../../usr.lib/demangle NATIVE_BUILD=1
 else
-$(PROG): ../../usr.lib/elfobj/libelfobj.so.0 ../../usr.lib/demangle/libdemangle.so.0
+# $(O): see Makefile.inc (i386 in place, x86_64 under obj-x86_64/) -- both
+# the program and the libraries it waits for live there.
+$(O)$(PROG): ../../usr.lib/elfobj/$(O)libelfobj.so.0 ../../usr.lib/demangle/$(O)libdemangle.so.0
 
-../../usr.lib/elfobj/libelfobj.so.0:
+../../usr.lib/elfobj/$(O)libelfobj.so.0:
 	$(MAKE) -C ../../usr.lib/elfobj
 
-../../usr.lib/demangle/libdemangle.so.0:
+../../usr.lib/demangle/$(O)libdemangle.so.0:
 	$(MAKE) -C ../../usr.lib/demangle
 endif
 

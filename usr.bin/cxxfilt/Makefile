@@ -1,46 +1,50 @@
-include ../../Makefile.inc
+# Makefile for usr.bin/cxxfilt (c++filt)
+#
+# Built through Makefile.bin.inc like every other program, so that it gets
+# the same three builds from one description: i386 in place, x86_64 under
+# obj-x86_64/ (ARCH=x86_64), and the host build (NATIVE_BUILD=1).  The link
+# this file used to spell out by hand said -m32 and /sbin/ld.so, and so
+# could only ever produce the first.
 
 PROG = c++filt
 SRCS = cxxfilt.c
-OBJS = $(SRCS:.c=.o)
 
-# Dynamic-link the target build (mirrors Makefile.bin.inc DYNAMIC=1).
-TARGET_CFLAGS = $(filter-out -fno-pie,$(USER_CFLAGS)) -fPIE
-TARGET_LDFLAGS = -m32 -nostdlib -pie -fPIE \
-                 -Wl,--dynamic-linker=/sbin/ld.so \
-                 -Wl,--unresolved-symbols=ignore-in-shared-libs
+DYNAMIC = 1
+BINDIR = $(DESTDIR)/usr/bin
 
-DEMANGLE_SHLIB = ../../usr.lib/demangle/libdemangle.so.0
+include ../../Makefile.bin.inc
 
-.PHONY: all clean install
-
-all: $(PROG)
-
-$(PROG): $(OBJS) $(DEMANGLE_SHLIB)
+# The demangler lives in usr.lib/demangle.  The target links the shared
+# object by its exact file name ($(O): i386 in place, x86_64 under
+# obj-x86_64/; Makefile.bin.inc points the -L there); the host build has
+# only the archive.
 ifdef NATIVE_BUILD
-	$(CC) $(CFLAGS) -o $@ $(OBJS) ../../usr.lib/demangle/libdemangle.a
+USER_CFLAGS += -idirafter ../../include
+DEMANGLE_LIB = $(TOP)/usr.lib/demangle/libdemangle.a
+LDADD = $(DEMANGLE_LIB)
 else
-	$(CC) $(TARGET_LDFLAGS) -o $@ $(OBJS) $(TOP)/lib/c/crt0.o \
-	      -L$(TOP)/usr.lib/demangle -l:libdemangle.so.0 \
-	      -L$(TOP)/lib/c -l:libc.so.0 $(LIBGCC)
-	$(call BRAND_SUBSTRATE,$@)
+DEMANGLE_LIB = $(TOP)/usr.lib/demangle/$(O)libdemangle.so.0
+LDADD = -L$(TOP)/usr.lib/demangle -l:libdemangle.so.0
 endif
 
-$(DEMANGLE_SHLIB):
-	$(MAKE) -C ../../usr.lib/demangle $(if $(NATIVE_BUILD),NATIVE_BUILD=1)
+$(O)$(PROG): $(DEMANGLE_LIB)
 
-%.o: %.c
-ifdef NATIVE_BUILD
-	$(CC) $(CFLAGS) -idirafter ../../include -c $< -o $@
-else
-	$(CC) $(TARGET_CFLAGS) -c $< -o $@
-endif
+# Recurse unconditionally and let usr.lib/demangle decide, as bin/join does
+# for its library: the archive is built in two incompatible modes under
+# one name, and a rule that fires only when it is missing would hand a
+# target build's i386 libdemangle.a to the host linker.  usr.lib/demangle
+# keeps a .build-mode stamp and rebuilds when the mode changes, but only
+# if it is entered.  c++filt relinks only when the library is touched.
+.PHONY: FORCE
+FORCE:
 
-clean:
-	rm -f $(PROG) $(OBJS)
+$(DEMANGLE_LIB): FORCE
+	$(MAKE) -C $(TOP)/usr.lib/demangle $(if $(NATIVE_BUILD),NATIVE_BUILD=1)
 
-install: $(PROG)
-	@mkdir -p $(DESTDIR)/usr/bin
-	@mkdir -p $(DESTDIR)/usr/man/man1
-	cp $(PROG) $(DESTDIR)/usr/bin/$(PROG)
-	cp c++filt.1 $(DESTDIR)/usr/man/man1/
+.PHONY: install-man
+
+install: install-man
+
+install-man:
+	mkdir -p $(DESTDIR)/usr/man/man1
+	install -m 0644 c++filt.1 $(DESTDIR)/usr/man/man1/c++filt.1

@@ -1,48 +1,27 @@
 # Makefile for usr.bin/yacc
+#
+# Built through Makefile.bin.inc like every other program, so that it gets
+# the same three builds from one description: i386 in place, x86_64 under
+# obj-x86_64/ (ARCH=x86_64), and the host build (NATIVE_BUILD=1).  The link
+# this file used to spell out by hand said -m32 and /sbin/ld.so, and so
+# could only ever produce the first.
 
-include ../../Makefile.inc
+PROG = yacc
+SRCS = main.c reader.c lr0.c lalr.c mkpar.c output.c graph.c symtab.c warshall.c closure.c verbose.c
 
-PROG=   yacc
-SRCS=   main.c reader.c lr0.c lalr.c mkpar.c output.c graph.c symtab.c warshall.c closure.c verbose.c
-OBJS=   $(SRCS:.c=.o)
-CFLAGS_LOCAL = -Wno-unused-parameter -I.
-BINDIR= /usr/bin
+DYNAMIC = 1
+BINDIR = $(DESTDIR)/usr/bin
 
-# Test binaries
-TEST_OBJS = test_yacc.o
+include ../../Makefile.bin.inc
 
-# Dynamic-link the target build (mirrors Makefile.bin.inc DYNAMIC=1).
-TARGET_CFLAGS = $(filter-out -fno-pie,$(USER_CFLAGS)) -fPIE
-TARGET_LDFLAGS = -m32 -nostdlib -pie -fPIE \
-                 -Wl,--dynamic-linker=/sbin/ld.so \
-                 -Wl,--unresolved-symbols=ignore-in-shared-libs
-
-all: $(PROG)
-
-$(PROG): $(OBJS)
+USER_CFLAGS += -Wno-unused-parameter -I.
 ifdef NATIVE_BUILD
-	$(CC) $(CFLAGS) -o $@ $(OBJS)
-else
-	$(CC) $(TARGET_LDFLAGS) -o $@ $(OBJS) $(TOP)/lib/c/crt0.o \
-	      -L$(TOP)/lib/c -l:libc.so.0 $(LIBGCC)
-	$(call BRAND_SUBSTRATE,$@)
+USER_CFLAGS += -idirafter ../../include
 endif
 
-%.o: %.c
-ifdef NATIVE_BUILD
-	$(CC) $(CFLAGS) $(CFLAGS_LOCAL) -idirafter ../../include -c $< -o $@
-else
-	$(CC) $(TARGET_CFLAGS) $(CFLAGS_LOCAL) -c $< -o $@
-endif
+EXTRA_CLEAN += test_yacc.o y.tab.c y.tab.h y.output
+
+.PHONY: test
 
 test: $(PROG) test_yacc.sh
 	sh test_yacc.sh
-
-clean:
-	rm -f $(PROG) $(OBJS) $(TEST_OBJS) y.tab.c y.tab.h y.output *.o
-
-install: $(PROG)
-	mkdir -p $(DESTDIR)$(BINDIR)
-	cp $(PROG) $(DESTDIR)$(BINDIR)/$(PROG)
-
-.PHONY: all clean install test

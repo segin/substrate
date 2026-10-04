@@ -1,56 +1,40 @@
-include ../../Makefile.inc
+# Makefile for usr.bin/slex
+#
+# Built through Makefile.bin.inc like every other program, so that it gets
+# the same three builds from one description: i386 in place, x86_64 under
+# obj-x86_64/ (ARCH=x86_64), and the host build (NATIVE_BUILD=1).  The link
+# this file used to spell out by hand said -m32 and /sbin/ld.so, and so
+# could only ever produce the first.
 
-PROG=   slex
-SRCS=   main.c options.c parser.c symtab.c rules.c regex.c dfa.c codegen.c \
-        util.c
-OBJS=   $(SRCS:.c=.o)
-CFLAGS_LOCAL = -I.
-BINDIR= /usr/bin
+PROG = slex
+SRCS = main.c options.c parser.c symtab.c rules.c regex.c dfa.c codegen.c \
+       util.c
 
-# Dynamic-link the target build: PIE + /sbin/ld.so + libc.so.0.
-# Mirrors the toggle in Makefile.bin.inc so this hand-rolled
-# Makefile produces the same artifact shape as the simpler ones.
-TARGET_CFLAGS = $(filter-out -fno-pie,$(USER_CFLAGS)) -fPIE
-TARGET_LDFLAGS = -m32 -nostdlib -pie -fPIE \
-                 -Wl,--dynamic-linker=/sbin/ld.so \
-                 -Wl,--unresolved-symbols=ignore-in-shared-libs
+DYNAMIC = 1
+BINDIR = $(DESTDIR)/usr/bin
 
-all: $(PROG)
+include ../../Makefile.bin.inc
 
-$(PROG): $(OBJS)
+USER_CFLAGS += -I.
 ifdef NATIVE_BUILD
-	$(CC) $(CFLAGS) -o $@ $(OBJS)
-else
-	$(CC) $(TARGET_LDFLAGS) -o $@ $(OBJS) $(TOP)/lib/c/crt0.o \
-	      -L$(TOP)/lib/c -l:libc.so.0 $(LIBGCC)
-	$(call BRAND_SUBSTRATE,$@)
+USER_CFLAGS += -idirafter ../../include
 endif
 
-# The fixed text of the generated scanner, as C string arrays.
+EXTRA_CLEAN += skel.h skel.h.tmp
+
+# The fixed text of the generated scanner, as C string arrays.  It is
+# generated beside the sources and is the same for every build, so every
+# mode's codegen object waits for the one file.
 skel.h: scanner.skel mkskel.awk
 	awk -f mkskel.awk scanner.skel > $@.tmp
 	mv $@.tmp $@
 
-codegen.o: skel.h
+$(O)codegen.o codegen.host.o: skel.h
 
-%.o: %.c
-ifdef NATIVE_BUILD
-	$(CC) $(CFLAGS) $(CFLAGS_LOCAL) -idirafter ../../include -c $< -o $@
-else
-	$(CC) $(TARGET_CFLAGS) $(CFLAGS_LOCAL) -c $< -o $@
-endif
+.PHONY: test
 
 # Behaviour tests: build for the host and run tests/usr.bin/slex.
 test:
 	$(MAKE) clean
 	$(MAKE) NATIVE_BUILD=1
 	sh ../../tests/usr.bin/slex/run_tests.sh ./$(PROG)
-
-clean:
-	rm -f $(PROG) $(OBJS) skel.h skel.h.tmp
-
-install: $(PROG)
-	mkdir -p $(DESTDIR)$(BINDIR)
-	cp $(PROG) $(DESTDIR)$(BINDIR)/$(PROG)
-
-.PHONY: all clean install test
