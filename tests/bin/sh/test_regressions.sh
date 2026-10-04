@@ -63,6 +63,22 @@ else
     FAIL=1
 fi
 
+# "!" negates a pipeline's status.  It used to be run as a command named
+# "!", which is not found: status 127, so "if ! cmd" always took the else
+# branch.
+check_eq "! false in if" \
+    "$($SH -c 'if ! false; then echo yes; else echo no; fi')" "yes"
+check_eq "! true in if" \
+    "$($SH -c 'if ! true; then echo yes; else echo no; fi')" "no"
+check_eq "! status" \
+    "$($SH -c '! true; echo $?; ! false; echo $?' | tr '\n' ' ')" "1 0 "
+check_eq "! negates a whole pipeline" \
+    "$($SH -c 'if ! echo abc | grep -q zzz; then echo yes; else echo no; fi')" "yes"
+check_eq "! is an ordinary word elsewhere" \
+    "$($SH -c 'echo ! "!"; [ ! -e /nonexistent ] && echo ok' | tr '\n' ' ')" "! ! ok "
+check_eq "! pipeline is exempt from set -e" \
+    "$($SH -c 'set -e; ! true; ! false; echo alive')" "alive"
+
 rm -rf "$TMPDIR"
 
 if [ "$FAIL" -ne 0 ]; then

@@ -363,9 +363,21 @@ int execute_ast(ast_node_t *node, exec_info_t *info) {
         case NODE_SIMPLE_COMMAND:
             status = execute_simple_command((ast_simple_command_t *)node, info);
             break;
-        case NODE_PIPELINE:
-            status = execute_pipeline((ast_pipeline_t *)node, info);
+        case NODE_PIPELINE: {
+            ast_pipeline_t *pl = (ast_pipeline_t *)node;
+            if (pl->negate) {
+                /* "! pipeline": the status is inverted, and neither the
+                 * pipeline's own failure nor the inverted result trips
+                 * set -e (POSIX exempts a pipeline preceded by "!"). */
+                errexit_disabled++;
+                status = !execute_pipeline(pl, info);
+                errexit_disabled--;
+                if (saved_fds) restore_redirections(saved_fds);
+                return status;
+            }
+            status = execute_pipeline(pl, info);
             break;
+        }
         case NODE_BINARY_OP: {
             ast_binary_op_t *bin = (ast_binary_op_t *)node;
             /* AND/OR lists handle errors internally - skip errexit check for their result */

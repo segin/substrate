@@ -54,6 +54,7 @@ typedef struct ast_pipeline {
     ast_node_t **commands;  // Array of SIMPLE_COMMANDs
     int command_count;
     int command_capacity;
+    int negate;             // "! pipeline": exit status is inverted
 } ast_pipeline_t;
 
 typedef enum {

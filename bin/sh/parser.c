@@ -1102,13 +1102,28 @@ static void pipeline_add_command(ast_pipeline_t *pipe, ast_node_t *cmd) {
 }
 
 static ast_node_t *parse_pipeline(lexer_t *l) {
-    ast_node_t *left = parse_command(l);
-    if (!left) return NULL;
-
+    /* POSIX: pipeline : [ "!" ] pipe_sequence.  "!" is a reserved word
+     * only here, at the start of a pipeline; anywhere else it is an
+     * ordinary word (an argument to test, say). */
+    int negate = 0;
     token_t *t = lexer_peek(l);
-    if (t && t->type == TOKEN_OPERATOR && strcmp(t->value, "|") == 0) {
-        // It's a pipeline
+    if (t && t->type == TOKEN_WORD && strcmp(t->value, "!") == 0) {
+        t = lexer_next(l);
+        token_free(t);
+        negate = 1;
+    }
+
+    ast_node_t *left = parse_command(l);
+    if (!left) {
+        if (negate) parser_error(l, "expected command after !");
+        return NULL;
+    }
+
+    t = lexer_peek(l);
+    if (negate || (t && t->type == TOKEN_OPERATOR && strcmp(t->value, "|") == 0)) {
+        // It's a pipeline (a negated single command is one of one command)
         ast_pipeline_t *pipe = create_pipeline();
+        pipe->negate = negate;
         pipeline_add_command(pipe, left);
 
         while (1) {
