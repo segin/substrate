@@ -5,6 +5,9 @@ set -e
 
 TOP="$(cd "$(dirname "$0")" && pwd)"
 DIST="$TOP/dist"
+# An IMAGE from the environment is honoured for either architecture;
+# otherwise --arch=x86_64 switches the default to rootfs64.img below.
+IMAGE_SET_BY_USER="${IMAGE:+yes}"
 IMAGE="${IMAGE:-$TOP/rootfs.img}"
 # Overridable so a smaller image can be baked for a quick boot test:
 #   IMAGE_SIZE_MIB=512 ./build-rootfs.sh --image
@@ -20,6 +23,9 @@ usage() {
     echo "               (gcc + binutils built by contrib/build-toolchain.sh --stage=2)"
     echo "  --image      Create a ${IMAGE_SIZE_MIB}MiB ext2 filesystem image (rootfs.img)"
     echo "  --no-boot    Skip building the sys/boot bootloader"
+    echo "  --arch=x86_64  Build the 64-bit image instead: dist64/ and rootfs64.img,"
+    echo "               a 64-bit userland on /vmunix64 with both architectures'"
+    echo "               libraries (default: --arch=i386, dist/ and rootfs.img)"
     echo "  --help       Show this help message"
     echo ""
     echo "Typical full bootstrap sequence:"
@@ -295,6 +301,45 @@ finalize_x_fonts() {
     fi
 }
 
+# libgcc_s.so.1 and libstdc++.so.6 for 64-bit programs, into /lib64.  They
+# come from the 64-bit cross toolchain (contrib/build-toolchain64.sh), whose
+# specs make EVERY program it links need libgcc_s.so.1, and C++ ones
+# libstdc++.so.6 as well.  The in-tree 64-bit userland is built with the
+# host compiler and needs neither, so their absence is not an error: an
+# image built without that toolchain simply cannot run programs compiled
+# with it.
+stage_toolchain64_runtime() {
+    : "${STAGE1_PREFIX:=/opt/substrate}"
+    local sr64="$STAGE1_PREFIX/x86_64-unknown-substrate/lib" src soname
+    if [ -d "$DIST/lib64" ] && [ -f "$sr64/libgcc_s.so.1" ]; then
+        echo "Installing the 64-bit libgcc_s.so.1 and libstdc++.so.6 to $DIST/lib64..."
+        cp "$sr64/libgcc_s.so.1" "$DIST/lib64/libgcc_s.so.1"
+        ln -sf libgcc_s.so.1 "$DIST/lib64/libgcc_s.so"
+        src=$(ls "$sr64"/libstdc++.so.6.[0-9]* 2>/dev/null \
+              | grep -v -- '-gdb.py' | head -1)
+        if [ -n "$src" ] && [ -f "$src" ]; then
+            soname=$(basename "$src")
+            cp "$src" "$DIST/lib64/$soname"
+            ln -sf "$soname" "$DIST/lib64/libstdc++.so.6"
+        fi
+    fi
+}
+
+# etc/ and what hangs off it: the same on both images.
+install_etc_to_dist() {
+    echo "Installing configuration from etc/..."
+    cp -r "$TOP/etc/." "$DIST/etc/"
+
+    # Mirror the precompiled terminfo database to its canonical
+    # location.  /etc/terminfo is also a path ncurses-style consumers
+    # check, but every shell/editor convention expects
+    # /usr/share/terminfo/<first-char>/<name>, so install there too.
+    if [ -d "$TOP/etc/terminfo" ]; then
+        mkdir -p "$DIST/usr/share/terminfo"
+        cp -r "$TOP/etc/terminfo/." "$DIST/usr/share/terminfo/"
+    fi
+}
+
 install_to_dist() {
     echo "Installing kernel to dist/boot and dist/vmunix..."
     cp "$TOP/sys/kernel.bin" "$DIST/boot/"
@@ -437,27 +482,7 @@ install_to_dist() {
     fi
     unset _libstdcxx_src _soname
 
-    # The same two libraries for 64-bit programs, into /lib64.  They come
-    # from the 64-bit cross toolchain (contrib/build-toolchain64.sh), whose
-    # specs make EVERY program it links need libgcc_s.so.1, and C++ ones
-    # libstdc++.so.6 as well.  The in-tree 64-bit userland is built with
-    # the host compiler and needs neither, so their absence is not an
-    # error: an image built without that toolchain simply cannot run
-    # programs compiled with it.
-    _sr64="$STAGE1_PREFIX/x86_64-unknown-substrate/lib"
-    if [ -d "$DIST/lib64" ] && [ -f "$_sr64/libgcc_s.so.1" ]; then
-        echo "Installing the 64-bit libgcc_s.so.1 and libstdc++.so.6 to dist/lib64..."
-        cp "$_sr64/libgcc_s.so.1" "$DIST/lib64/libgcc_s.so.1"
-        ln -sf libgcc_s.so.1 "$DIST/lib64/libgcc_s.so"
-        _libstdcxx_src=$(ls "$_sr64"/libstdc++.so.6.[0-9]* 2>/dev/null \
-                         | grep -v -- '-gdb.py' | head -1)
-        if [ -n "$_libstdcxx_src" ] && [ -f "$_libstdcxx_src" ]; then
-            _soname=$(basename "$_libstdcxx_src")
-            cp "$_libstdcxx_src" "$DIST/lib64/$_soname"
-            ln -sf "$_soname" "$DIST/lib64/libstdc++.so.6"
-        fi
-    fi
-    unset _sr64 _libstdcxx_src _soname
+    stage_toolchain64_runtime
 
     # crt0.o lives next to libc.a — userland Makefiles reference it as
     # $(TOP)/lib/c/crt0.o at link time, but on-target it's expected at
@@ -544,17 +569,7 @@ install_to_dist() {
         "$TOP/tools/check-dt-needed.sh" "$DIST" || true
     fi
 
-    echo "Installing configuration from etc/..."
-    cp -r "$TOP/etc/." "$DIST/etc/"
-
-    # Mirror the precompiled terminfo database to its canonical
-    # location.  /etc/terminfo is also a path ncurses-style consumers
-    # check, but every shell/editor convention expects
-    # /usr/share/terminfo/<first-char>/<name>, so install there too.
-    if [ -d "$TOP/etc/terminfo" ]; then
-        mkdir -p "$DIST/usr/share/terminfo"
-        cp -r "$TOP/etc/terminfo/." "$DIST/usr/share/terminfo/"
-    fi
+    install_etc_to_dist
 
     # init was migrated from etc/init.sh (shell) to sbin/init (C
     # binary) in 5116c3a3.  Prefer the built C binary; only fall back
@@ -1138,7 +1153,11 @@ install_grub() {
     # what fat_read_label() (and therefore LABEL=sub-boot) actually reads.
     mkfs.vfat -F 32 -n "$BOOT_LABEL" "$esp" >/dev/null 2>&1
 
-    write_grub_cfg "$gdir/grub.cfg"
+    if [ "$ARCH64" = true ]; then
+        write_grub_cfg64 "$gdir/grub.cfg"
+    else
+        write_grub_cfg "$gdir/grub.cfg"
+    fi
 
     mmd -i "$esp" ::/EFI ::/EFI/BOOT ::/boot ::/boot/grub >/dev/null 2>&1
     mcopy -i "$esp" "$gdir/grub.cfg" ::/boot/grub/grub.cfg
@@ -1217,6 +1236,171 @@ install_bootloader() {
     python3 "$TOP/tools/ext2-install-boot" "$IMAGE" "$stage1" "$stage2"
 }
 
+#-----------------------------------------------------------------------
+# The 64-bit image (--arch=x86_64): dist64/ and rootfs64.img.
+#
+# A root whose own userland is 64-bit: /vmunix64 is the only kernel, and
+# init, the shell and every in-tree program are the ARCH=x86_64 builds
+# (each directory's obj-x86_64/), linked against /lib64 and run by
+# /sbin/ld64.so.  It is biarch at the library level: the 32-bit lib/ and
+# usr.lib/ libraries and /sbin/ld.so are installed beside the 64-bit ones,
+# so a 32-bit substrate program still loads and runs on it.
+#
+# It carries no contrib ports: those are built by the 32-bit cross
+# toolchain into dist-overlay/, for the 32-bit image.  What the 64-bit
+# cross toolchain builds is staged under dist-overlay64/dist-<pkg> and
+# overlaid here when present.
+#-----------------------------------------------------------------------
+build_components64() {
+    echo "Building the 64-bit kernel..."
+    make -C "$TOP/sys" ARCH=x86_64 -j4
+
+    echo "Building runtime libraries (both architectures)..."
+    make -C "$TOP/lib" both -j4
+    make -C "$TOP/usr.lib" both -j4
+
+    echo "Building the dynamic linkers..."
+    make -C "$TOP/sbin/ld.so" -j4
+    make -C "$TOP/sbin/ld.so" ARCH=x86_64 -j4
+
+    echo "Building the 64-bit userland (bin, sbin, usr.bin, usr.sbin)..."
+    make -C "$TOP/bin" ARCH=x86_64 -j4
+    # bin/Makefile leaves these three out: on the 32-bit image the contrib
+    # zsh and bsdtar stand in for sh and tar.  This image has neither, and
+    # /bin/sh is what init, the rc scripts and every login run.
+    local prog
+    for prog in sh tar which; do
+        make -C "$TOP/bin/$prog" ARCH=x86_64 -j4
+    done
+    make -C "$TOP/sbin" ARCH=x86_64 -j4
+    make -C "$TOP/usr.bin" ARCH=x86_64 -j4
+    make -C "$TOP/usr.sbin" ARCH=x86_64 -j4
+}
+
+# Copy every 64-bit program of one source directory ($1: bin, sbin, ...)
+# into $DIST/$2.  A program named NAME is built as NAME/obj-x86_64/NAME.
+install_programs64() {
+    local srcdir="$TOP/$1" dest="$DIST/$2" dir name n=0
+    mkdir -p "$dest"
+    for dir in "$srcdir"/*/; do
+        name=$(basename "$dir")
+        [ -f "${dir}obj-x86_64/$name" ] || continue
+        cp "${dir}obj-x86_64/$name" "$dest/$name"
+        n=$((n + 1))
+    done
+    echo "  $1: $n programs -> /$2"
+}
+
+install_to_dist64() {
+    mkdir -p "$DIST"/{lib64,usr/lib64}
+
+    echo "Installing the 64-bit kernel as $DIST/vmunix64..."
+    cp "$TOP/sys/kernel-x86_64.elf" "$DIST/vmunix64"
+
+    echo "Installing runtime libraries (both architectures)..."
+    make -C "$TOP/lib" install-both DESTDIR="$DIST" >/dev/null
+    make -C "$TOP/usr.lib" install-both DESTDIR="$DIST" >/dev/null
+
+    # The dynamic linkers: ld64.so for the userland, ld.so for 32-bit
+    # programs.  sbin/ld.so is skipped by install_programs64 below because
+    # its 64-bit build is named ld64.so, not ld.so.
+    cp "$TOP/sbin/ld.so/obj-x86_64/ld64.so" "$DIST/sbin/ld64.so"
+    cp "$TOP/sbin/ld.so/ld.so" "$DIST/sbin/ld.so"
+    chmod 755 "$DIST/sbin/ld64.so" "$DIST/sbin/ld.so"
+
+    stage_toolchain64_runtime
+    # The 32-bit libm.so.0 needs libgcc_s.so.1, and libc.so.0 needs libm:
+    # without it no 32-bit dynamic program loads.  It comes from the 32-bit
+    # cross toolchain, which a 64-bit-only build need not have.
+    : "${STAGE1_PREFIX:=/opt/substrate}"
+    if [ -f "$STAGE1_PREFIX/i386-unknown-substrate/lib/libgcc_s.so.1" ]; then
+        cp "$STAGE1_PREFIX/i386-unknown-substrate/lib/libgcc_s.so.1" "$DIST/lib/"
+        ln -sf libgcc_s.so.1 "$DIST/lib/libgcc_s.so"
+    else
+        echo "build-rootfs: note: no 32-bit libgcc_s.so.1; 32-bit dynamic" \
+             "programs will not load on this image"
+    fi
+
+    echo "Installing the 64-bit userland..."
+    install_programs64 bin bin
+    install_programs64 sbin sbin
+    install_programs64 usr.bin usr/bin
+    install_programs64 usr.sbin usr/sbin
+    # egrep/fgrep are shebang wrappers, the same on either architecture.
+    if [ -f "$DIST/bin/grep" ]; then
+        make -C "$TOP/bin/grep" install-grep-links DESTDIR="$DIST" >/dev/null 2>&1 || true
+    fi
+    if [ ! -x "$DIST/sbin/init" ] || [ ! -x "$DIST/bin/sh" ]; then
+        echo "Error: the 64-bit init or shell did not build" >&2
+        exit 1
+    fi
+
+    echo "Installing substrate-native man pages from usr.man/..."
+    make -C "$TOP/usr.man" install DESTDIR="$DIST" >/dev/null
+
+    install_etc_to_dist
+    # etc/passwd gives root the contrib zsh, which this image does not
+    # have; an account whose shell is missing cannot log in.
+    if [ ! -e "$DIST/usr/bin/zsh" ] && [ -f "$DIST/etc/passwd" ]; then
+        sed -i 's|:/usr/bin/zsh$|:/bin/sh|' "$DIST/etc/passwd"
+    fi
+
+    # Whatever the 64-bit cross toolchain has built and staged.
+    local stage
+    for stage in "$TOP"/dist-overlay64/dist-*; do
+        [ -d "$stage" ] || continue
+        echo "Overlaying $(basename "$stage")..."
+        cp -a "$stage/." "$DIST/"
+    done
+
+    build_man_db
+    "$TOP/tools/check-dt-needed.sh" "$DIST" || true
+}
+
+# grub.cfg for the 64-bit image: /vmunix64 only, always multiboot2 (it is
+# an ELF64 file, which multiboot 1 refuses).  See write_grub_cfg for the
+# reasoning behind "ro" and "nosmp".
+write_grub_cfg64() {
+    cat > "$1" <<EOF
+serial --unit=0 --speed=115200
+terminal_output serial console
+terminal_input serial console
+set timeout=5
+set default=0
+
+insmod part_msdos
+insmod fat
+insmod ext2
+insmod search_label
+
+search --no-floppy --label $ROOT_LABEL --set=subroot
+
+function substrate_boot64 {
+    set root=\$subroot
+    echo "Loading /vmunix64 from $ROOT_LABEL ro nosmp \$*"
+    multiboot2 /vmunix64 root=LABEL=$ROOT_LABEL ro nosmp \$*
+    boot
+}
+
+menuentry "Substrate x86_64" {
+    substrate_boot64
+}
+
+menuentry "Substrate x86_64 (serial console + verbose)" {
+    substrate_boot64 serial_debug console=serial0
+}
+
+menuentry "Substrate x86_64 (USB bring-up trace)" {
+    substrate_boot64 xhcidebug ehcidebug
+}
+
+menuentry "Substrate x86_64 (no USB BIOS handoff)" {
+    substrate_boot64 nousbhandoff
+}
+
+EOF
+}
+
 # Parse arguments
 if [ $# -eq 0 ]; then
     usage
@@ -1226,9 +1410,17 @@ DO_DIST=false
 DO_TOOLCHAIN=false
 DO_IMAGE=false
 DO_BOOT=true
+ARCH64=false
 
 while [[ $# -gt 0 ]]; do
     case $1 in
+        --arch=x86_64)
+            ARCH64=true
+            shift
+            ;;
+        --arch=i386)
+            shift
+            ;;
         --dist)
             DO_DIST=true
             shift
@@ -1255,7 +1447,26 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-if [ "$DO_DIST" = true ]; then
+# The 64-bit image has a staging tree, an image file and volume labels of
+# its own, so that it can be built beside the 32-bit one and both disks
+# attached to one machine: the kernel finds its root by label.
+if [ "$ARCH64" = true ]; then
+    DIST="$TOP/dist64"
+    [ -n "${IMAGE_SET_BY_USER:-}" ] || IMAGE="$TOP/rootfs64.img"
+    BOOT_LABEL=sub-boot64
+    ROOT_LABEL=sub-root64
+    if [ "$DO_TOOLCHAIN" = true ]; then
+        echo "Error: --toolchain overlays the 32-bit stage-2 compiler;" \
+             "there is no 64-bit one." >&2
+        exit 1
+    fi
+fi
+
+if [ "$DO_DIST" = true ] && [ "$ARCH64" = true ]; then
+    clean_dist
+    build_components64
+    install_to_dist64
+elif [ "$DO_DIST" = true ]; then
     clean_dist
     # Build bootloader first so it's ready for image creation
     if [ "$DO_BOOT" = true ]; then

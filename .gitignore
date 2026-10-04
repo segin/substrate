@@ -75,6 +75,13 @@ vgcore.*
 # Root filesystem staging only
 /dist/
 /host_dist/
+# The 64-bit image's staging tree, port staging and image
+# (build-rootfs.sh --arch=x86_64)
+/dist64/
+/dist-overlay64/
+/rootfs64.img
+/rootfs64.img.zst
+/tests/rootfs64/boot-test.log
 
 # Per-contrib-port DESTDIR staging — each `contrib/<pkg>/build.sh`
 # installs into $(SUBSTRATE_TOP)/dist-overlay/dist-<pkg>/ which
