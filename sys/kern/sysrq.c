@@ -10,6 +10,7 @@
 #include <kern/console.h>
 #include <kern/debug.h>
 #include <kern/sysrq.h>
+#include <machine/cpu.h>
 #include <machine/pmm.h>
 #include <vm/phys_mem.h>
 #include <arch/x86-common/io.h>
@@ -27,7 +28,7 @@ static void sysrq_reboot(void)
 		;
 	outb(0x64, 0xFE);
 	/* Fallback: triple fault */
-	__asm__ volatile("lidt %0; int3" :: "m"((uint16_t[3]){0, 0, 0}));
+	x86_triple_fault();
 }
 
 static void sysrq_sync(void)

@@ -12,6 +12,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <machine/cpu.h>
 #include <machine/pmap.h>
 #include <arch/x86-common/io.h>
 #include <drivers/console/console.h>
@@ -4806,8 +4807,8 @@ int sys_reboot(int cmd) {
     
     // Fallback if that fails: Triple fault
     // (by loading 0-length IDT and causing exception)
-    __asm__ volatile("lidt %0; int3"::"m"((uint16_t[3]){0,0,0}));
-    
+    x86_triple_fault();
+
     return 0;
 }
 
