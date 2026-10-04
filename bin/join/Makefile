@@ -14,12 +14,13 @@ ifdef NATIVE_BUILD
 JOINLIB = $(TOP)/usr.lib/join/libjoin.a
 LDADD   = -L$(TOP)/usr.lib/join -ljoin
 USER_CFLAGS += -idirafter $(TOP)/include
-else ifdef BIN64
-# 64-bit: static, from the archive `make -C usr.lib/join ARCH=x86_64`
-# leaves under $(O); Makefile.bin.inc picks it up in place of LDADD.
-JOINLIB = $(TOP)/usr.lib/join/$(O)libjoin.a
 else
-JOINLIB = $(TOP)/usr.lib/join/libjoin.so.0
+# $(O) is empty for i386 and obj-x86_64/ for ARCH=x86_64, where
+# `make -C usr.lib/join ARCH=x86_64` leaves the 64-bit library.  LDADD
+# names the library's directory without $(O): Makefile.bin.inc adds it
+# for the 64-bit dynamic link, and replaces LDADD with the archives for a
+# 64-bit static one (DYNAMIC=0).
+JOINLIB = $(TOP)/usr.lib/join/$(O)libjoin.so.0
 LDADD   = -L$(TOP)/usr.lib/join -l:libjoin.so.0
 endif
 

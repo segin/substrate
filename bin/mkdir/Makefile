@@ -18,9 +18,12 @@ EXTRA_CLEAN += $(O)modeparse.o mkdir_host $(UNIT_BINS)
 
 $(O)$(PROG): $(O)modeparse.o
 
+# BIN_CFLAGS, not USER_CFLAGS: this object goes into the same link as the
+# ones Makefile.bin.inc compiles, so it has to be built the same way.
+# DYNAMIC = 1 makes that link a PIE, and USER_CFLAGS says -fno-pie.
 $(O)modeparse.o: ../../lib/modeparse.c ../../include/modeparse.h $(BUILD_RULE_DEPS)
 	@mkdir -p $(dir $@)
-	$(CC) $(USER_CFLAGS) -c ../../lib/modeparse.c -o $@
+	$(CC) $(BIN_CFLAGS) -c ../../lib/modeparse.c -o $@
 
 TEST_CFLAGS = -O2 -g -Wall -Wextra -Werror -D_GNU_SOURCE -I. -iquote ../../include
 PYTHON ?= python3

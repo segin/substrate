@@ -6,17 +6,20 @@ install:
 else
 PROG = ldtctl
 SRCS = ldtctl.c
-EXTRA_CLEAN = setldt
+EXTRA_CLEAN = $(O)setldt
 USER_CFLAGS += -I../../sys/include
 
 DYNAMIC = 1
 
 include ../../Makefile.bin.inc
 
-all: setldt
+# $(O): see Makefile.inc (i386 in place, x86_64 under obj-x86_64/).  The
+# link sits beside the program it names, so it waits for that one and not
+# for the other architecture's.
+all: $(O)setldt
 
-setldt: ldtctl
-	ln -sf ldtctl setldt
+$(O)setldt: $(O)ldtctl
+	ln -sf ldtctl $@
 
 install-setldt:
 	install -d $(BINDIR)
