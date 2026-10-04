@@ -3,9 +3,10 @@
 # itself by smokeinit (tests/rootfs64/boot-test.sh).  Every check prints
 # "ok" or "FAIL"; the exit status is the number of failures.
 #
-# It runs under the image's own /bin/sh, the in-tree shell built 64-bit,
-# so getting this far already means /sbin/ld64.so loaded a 64-bit program
-# against /lib64.
+# It runs under the image's own /bin/sh -- zsh where the image has the
+# port, the in-tree shell built 64-bit where it does not -- so getting
+# this far already means /sbin/ld64.so loaded a 64-bit program against
+# /lib64.
 #
 # Each check is one command string handed to `sh -c`.  The in-tree shell
 # does not split "$@" into words, so a helper that takes the command as

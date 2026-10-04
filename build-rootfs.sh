@@ -1285,6 +1285,10 @@ install_programs64() {
     for dir in "$srcdir"/*/; do
         name=$(basename "$dir")
         [ -f "${dir}obj-x86_64/$name" ] || continue
+        # Remove first: $DIST survives from the last bake, where /bin/sh
+        # may be a symlink to /usr/bin/zsh -- an absolute path, which cp
+        # would follow to the BUILD HOST's zsh.
+        rm -f "$dest/$name"
         cp "${dir}obj-x86_64/$name" "$dest/$name"
         n=$((n + 1))
     done
@@ -1348,10 +1352,21 @@ install_to_dist64() {
         cp -a "$stage/." "$DIST/"
     done
 
-    # etc/passwd gives root the contrib zsh.  Decided after the overlays,
-    # which are what bring zsh: without the port an account whose shell is
-    # missing cannot log in, so fall back to the in-tree shell.
-    if [ ! -e "$DIST/usr/bin/zsh" ] && [ -f "$DIST/etc/passwd" ]; then
+    # The shell, decided after the overlays, which are what bring zsh.
+    #
+    # With the port, /bin/sh is zsh in sh-emulation mode, as on the 32-bit
+    # image, and for the same reason: the rc.d scripts are written for a
+    # POSIX shell, and the in-tree one is not yet one -- it has no "!"
+    # pipeline negation, so 00-fsck's "if ! grep -q ro /proc/mounts" took
+    # a read-write root for a read-only one and ran e2fsck on it.
+    #
+    # Without the port the in-tree shell is all there is; etc/passwd gives
+    # root the contrib zsh, and an account whose shell is missing cannot
+    # log in, so point it at /bin/sh.
+    if [ -e "$DIST/usr/bin/zsh" ]; then
+        ln -sf /usr/bin/zsh "$DIST/bin/sh"
+        echo "Installed /bin/sh -> /usr/bin/zsh"
+    elif [ -f "$DIST/etc/passwd" ]; then
         sed -i 's|:/usr/bin/zsh$|:/bin/sh|' "$DIST/etc/passwd"
     fi
 
