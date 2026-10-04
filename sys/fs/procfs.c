@@ -1669,8 +1669,12 @@ static void procfs_tid_lookup_visit(thread_t *t, void *arg) {
     if (t->proc->pid != l->pid || t->tid != l->want_tid) return;
     l->found = 1;
     /* Copy fields while under sched_iterate_threads' implicit guard. */
+    /* A thread nobody named goes by its process's name, as on Linux, where
+     * a new thread inherits comm; an empty Name:/comm tells the reader
+     * nothing. */
+    const char *name = t->name[0] ? t->name : t->proc->comm;
     size_t i = 0;
-    while (i < sizeof(l->name) - 1 && t->name[i]) { l->name[i] = t->name[i]; i++; }
+    while (i < sizeof(l->name) - 1 && name[i]) { l->name[i] = name[i]; i++; }
     l->name[i] = '\0';
     l->state       = (int)t->state;
     l->priority    = t->priority;
@@ -1847,24 +1851,30 @@ static size_t proc_pid_task_status_read(fs_node_t *node, off_t offset, size_t si
     struct procfs_tid_lookup l;
     if (procfs_task_collect(node, &l) < 0) return 0;
     char buf[512];
+    /* The values line up in one column at the second tab stop: a label
+     * shorter than a tab stop is followed by two tabs, a longer one by
+     * one.  (With one tab after every label, the three labels of eight
+     * characters or more pushed their values a stop to the right.) */
     int len = snprintf(buf, sizeof(buf),
-        "Name:\t%s\n"
-        "Tgid:\t%d\n"
-        "Pid:\t%d\n"
-        "State:\t%c\n"
-        "Prio:\t%d\n"
-        "SigPnd:\t%08x\n"
-        "SigBlk:\t%08x\n"
+        "Name:\t\t%s\n"
+        "Tgid:\t\t%d\n"
+        "Pid:\t\t%d\n"
+        "State:\t\t%c\n"
+        "Prio:\t\t%d\n"
+        "SigPnd:\t\t%08x\n"
+        "SigBlk:\t\t%08x\n"
         "Cpus_allowed:\t%08x\n"
         "BoundCpu:\t%d\n"
-        "Flags:\t%08x\n"
-        "WaitChan:\t%08x\n"
+        "Flags:\t\t%08x\n"
+        "WaitChan:\t%0*llx\n"
         "SleepExp:\t%llu\n",
         l.name, l.pid, l.want_tid,
         procfs_thread_state_char(l.state),
         l.priority, l.sig_pending, l.sig_mask,
         0u, l.bound_cpu, l.flags,
-        (unsigned)l.wait_chan, (unsigned long long)l.sleep_expiry);
+        /* A kernel address: the full width of one, not its low 32 bits. */
+        (int)(2 * sizeof(l.wait_chan)), (unsigned long long)l.wait_chan,
+        (unsigned long long)l.sleep_expiry);
     return procfs_emit_slice(buf, len, offset, size, buffer);
 }
 
