@@ -1,0 +1,163 @@
+name: bootstrap64
+
+# The 64-bit counterpart of bootstrap.yml: the x86_64-unknown-substrate
+# cross toolchain, the in-tree userland built 64-bit, and rootfs64.img --
+# an image whose kernel and userland are both 64-bit -- which is then
+# BOOTED, with a smoke test run on it.  build64.sh is the whole job.
+#
+# bootstrap.yml builds the 32-bit toolchain, 71 ports and rootfs.img, and
+# checks the image by looking inside it.  This one has no ports to build
+# yet, so it can afford to do what that one cannot: run the system it
+# built.  The runner has no KVM, so the guest is emulated.
+#
+# Like bootstrap.yml it must not be cancelled by a newer push: it contains
+# a compiler build.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: bootstrap64-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  bootstrap64:
+    name: 64-bit toolchain + userland + rootfs64.img + boot
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v7
+
+      # texinfo/bison/flex build binutils and gcc.  gcc-multilib is needed
+      # here, unlike in toolchain64.yml: the image is biarch at the library
+      # level, so lib/ and usr.lib/ are also built 32-bit (-m32).  The rest
+      # is what build-rootfs.sh's image bake uses, plus qemu for the boot
+      # test.
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential gcc-multilib python3 \
+            texinfo bison flex gawk curl wget xz-utils \
+            e2fsprogs dosfstools mtools fakeroot \
+            grub-common grub-pc-bin util-linux zstd qemu-system-x86
+
+      - name: Prepare /opt/substrate
+        run: |
+          sudo install -d -o "$(id -un)" -g "$(id -gn)" /opt/substrate
+
+      # The same cache toolchain64.yml writes: same key, same contents.
+      # Whichever workflow builds the compiler first saves it for both.
+      - name: Restore the toolchain cache
+        id: tc
+        uses: actions/cache/restore@v6
+        with:
+          path: /opt/substrate
+          key: substrate-toolchain64-v1-${{ runner.os }}-${{ hashFiles('contrib/binutils/patches/**', 'contrib/binutils/series', 'contrib/binutils/*.sh', 'contrib/gcc/patches/**', 'contrib/gcc/series', 'contrib/gcc/*.sh', 'contrib/build-toolchain64.sh') }}
+
+      - name: Disk space before
+        run: df -h /
+
+      - name: Build everything and boot it
+        env:
+          SKIP_TOOLCHAIN: ${{ steps.tc.outputs.cache-hit == 'true' && '1' || '0' }}
+          TIMEOUT: 900
+        run: ./build64.sh
+
+      - name: configure logs (on failure)
+        if: failure()
+        run: |
+          shopt -s nullglob
+          for log in contrib/*/build-stage1-x86_64/config.log \
+                     contrib/gcc/build-stage1-x86_64/x86_64-unknown-substrate/*/config.log; do
+            echo "::group::$log"
+            awk '/checking whether the C compiler works/ {f=1}
+                 f && n++ < 120' "$log"
+            echo "::endgroup::"
+          done
+
+      # The whole serial log of the boot test, pass or fail: it is the
+      # only record of what the booted system did.
+      - name: Boot log
+        if: always()
+        run: |
+          if [ -f tests/rootfs64/boot-test.log ]; then
+            tr -d '\r' < tests/rootfs64/boot-test.log | tail -n 300
+          else
+            echo "no boot log: the build did not get that far"
+          fi
+
+      - name: Is the toolchain complete?
+        id: tcok
+        if: always()
+        run: |
+          p=/opt/substrate/bin/x86_64-unknown-substrate
+          ok=false
+          if [ -x "$p-gcc" ] && [ -x "$p-g++" ] \
+             && ls /opt/substrate/x86_64-unknown-substrate/lib/libstdc++.so.6 >/dev/null 2>&1; then
+            t=$(mktemp -d)
+            printf 'int main(void){return 0;}\n' > "$t/t.c"
+            printf '#include <string>\nint main(){std::string s("x");return s.size()-1;}\n' > "$t/t.cc"
+            if "$p-gcc" -o "$t/t" "$t/t.c" 2>/dev/null \
+               && "$p-g++" -o "$t/u" "$t/t.cc" 2>/dev/null; then ok=true; fi
+            rm -rf "$t"
+          fi
+          echo "ok=$ok" >> "$GITHUB_OUTPUT"
+          echo "toolchain usable: $ok"
+
+      - name: Save the toolchain cache
+        if: always() && steps.tc.outputs.cache-hit != 'true' && steps.tcok.outputs.ok == 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: /opt/substrate
+          # Must match the restore key above verbatim.
+          key: substrate-toolchain64-v1-${{ runner.os }}-${{ hashFiles('contrib/binutils/patches/**', 'contrib/binutils/series', 'contrib/binutils/*.sh', 'contrib/gcc/patches/**', 'contrib/gcc/series', 'contrib/gcc/*.sh', 'contrib/build-toolchain64.sh') }}
+
+      - name: Verify image
+        run: |
+          set -euo pipefail
+          test -f rootfs64.img
+          ROOT_OFF=$((104448 * 512))
+          e2fsck -fn "rootfs64.img?offset=$ROOT_OFF"
+          missing=""
+          for f in /vmunix64 /sbin/init /sbin/ld64.so /sbin/ld.so /bin/sh \
+                   /bin/ls /bin/ps /lib64/libc.so.0 /lib/libc.so.0 \
+                   /usr/lib64/libc.a /usr/bin/ldd \
+                   /usr/libexec/rootfs64/smokeinit; do
+            printf '%-36s ' "$f"
+            sz=$(debugfs "rootfs64.img?offset=$ROOT_OFF" -R "stat $f" 2>/dev/null \
+                 | grep -oE "Size: [0-9]+" | head -1 || true)
+            if [ -n "$sz" ]; then
+              echo "$sz"
+            else
+              echo "MISSING"
+              missing="$missing $f"
+            fi
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::not in the image:$missing"
+            exit 1
+          fi
+
+      - name: Compress the image
+        run: |
+          zstd -T0 -3 --rm -f rootfs64.img
+          ls -lh rootfs64.img.zst
+
+      - uses: actions/upload-artifact@v7
+        if: success()
+        with:
+          name: rootfs64-image
+          path: |
+            rootfs64.img.zst
+            sys/kernel-x86_64.bin
+            sys/kernel-x86_64.elf
+          compression-level: 0
+          if-no-files-found: warn
+          retention-days: 7
