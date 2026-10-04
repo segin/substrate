@@ -1352,6 +1352,24 @@ install_to_dist64() {
         cp -a "$stage/." "$DIST/"
     done
 
+    # What install_to_dist does for the 32-bit image once its overlays are
+    # in, where the 64-bit ports give it something to work on: /usr/var ->
+    # /var (contrib/dbus looks for the system bus under /usr/var; see
+    # there), the merged X font directories, and the display manager,
+    # whose greeter is an Xlib client and so can only be built now.
+    if [ -d "$DIST/usr/var" ] && [ ! -L "$DIST/usr/var" ] &&
+       [ -z "$(find "$DIST/usr/var" -type f -o -type l 2>/dev/null | head -1)" ]; then
+        rm -rf "$DIST/usr/var"
+        ln -sfn ../var "$DIST/usr/var"
+        echo "Linked /usr/var -> /var (dbus localstatedir compat)"
+    fi
+    finalize_x_fonts
+    if [ -d "$TOP/dist-overlay64/dist-libX11/usr/lib64" ]; then
+        echo "Building + installing display manager (sdm + sgreet)..."
+        make -C "$TOP/sbin/sdm" ARCH=x86_64 install DESTDIR="$DIST" \
+            CROSS=/opt/substrate/bin/x86_64-unknown-substrate- >/dev/null
+    fi
+
     # The shell, decided after the overlays, which are what bring zsh.
     #
     # With the port, /bin/sh is zsh in sh-emulation mode, as on the 32-bit
