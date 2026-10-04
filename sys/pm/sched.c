@@ -518,6 +518,18 @@ rescan:
         return;
     }
 
+    /* The scan above looks only at READY threads, so it cannot weigh the
+     * thread that is running now against what it found.  When all it found
+     * is an idle-class thread, a running thread of a better class keeps the
+     * CPU: the idle class runs only when nothing else can.  (Without this a
+     * timer tick handed the CPU from a busy process to the idle loop.) */
+    if (best_thread && best_thread->sched_class == SCHED_IDLE &&
+        current_thread->state == THREAD_RUNNING &&
+        current_thread->sched_class != SCHED_IDLE) {
+        intr_restore(_pflags);
+        return;
+    }
+
     if (best_thread) {
         rr_last = best_thread;
         sched_context_switch(current_thread, best_thread);
