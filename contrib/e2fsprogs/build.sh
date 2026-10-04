@@ -50,6 +50,21 @@ cd "${BUILD_DIR}"
 # used instead, which is correct for substrate's C locale.
 export ac_cv_func_mbstowcs=no
 
+# The libraries are static (--disable-elf-shlibs), and other ports link
+# them into shared objects: python's _uuid module takes libuuid.a.  i386
+# lets a non-PIC archive member into a shared object as text relocations;
+# x86-64 does not (R_X86_64_32 "recompile with -fPIC"), so the 64-bit
+# build (contrib/port64.sh sets SUBSTRATE_ARCH) compiles them PIC.
+PIC_CFLAGS="-fno-pie"
+if [ "${SUBSTRATE_ARCH:-i386}" = x86_64 ]; then
+    PIC_CFLAGS="-fPIC"
+fi
+
+# --enable-libuuid/--enable-libblkid: always build the bundled libraries.
+# Left to itself configure uses a libuuid it finds in the sysroot -- which,
+# on any build after the first, is the copy this very port put there.  The
+# port then stops shipping libuuid.a and the sysroot keeps a stale one.
+
 echo "==> configure"
 "${TREE_DIR}/configure" \
     --host=i386-unknown-substrate \
@@ -59,11 +74,13 @@ echo "==> configure"
     --disable-fuse2fs \
     --disable-uuidd \
     --disable-elf-shlibs \
+    --enable-libuuid \
+    --enable-libblkid \
     CC=i386-unknown-substrate-gcc \
     AR=i386-unknown-substrate-ar \
     RANLIB=i386-unknown-substrate-ranlib \
     BUILD_CC=gcc \
-    CFLAGS="-march=i486 -mtune=i486 -O2 -g -fno-pie -include sys/time.h" \
+    CFLAGS="-march=i486 -mtune=i486 -O2 -g ${PIC_CFLAGS} -include sys/time.h" \
     LDFLAGS="-fno-pie -Wl,--copy-dt-needed-entries"
 
 # RDYNAMIC= : configure unconditionally sets RDYNAMIC=-rdynamic for
