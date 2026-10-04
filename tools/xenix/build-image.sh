@@ -21,7 +21,9 @@
 #
 # The shipped termdesc has a damaged "ansi" entry -- verified identical on the
 # 1987 distribution floppy, so it is Microsoft's defect, not media rot -- and
-# bin/xenix/fix-termdesc-ansi.sh repairs it here.  See that script for why.
+# knows nothing of xterm.  bin/xenix/termdesc.patch, applied here, repairs the
+# one and adds entries for the other; bin/xenix/fix-termdesc-ansi.sh, which
+# makes the same repair on its own, explains the ansi entry line by line.
 #
 # EXECUTE-ONLY FILES
 #   Xenix ships ~20 uucp binaries mode 0111/0100, which the build user cannot
@@ -54,7 +56,7 @@ while [ $# -gt 0 ]; do
 done
 [ -n "$OUT" ] || OUT=$TOP/xenix286s.img
 
-for tool in mke2fs fakeroot debugfs e2fsck tar python3; do
+for tool in mke2fs fakeroot debugfs e2fsck tar python3 patch; do
     command -v "$tool" >/dev/null || { echo "$0: need $tool" >&2; exit 65; }
 done
 [ -d "$MEDIA/rts" ] || { echo "$0: no rts/ under $MEDIA" >&2; exit 66; }
@@ -92,7 +94,11 @@ if [ -f "$MEDIA/msw/word.img" ]; then
     echo "==> adding Microsoft Word 3.0"
     ( cd "$ROOT" && tar xf "$MEDIA/msw/word.img" )
     if [ -f "$ROOT/usr/lib/MSTOOLS/termdesc" ]; then
-        "$TOP/bin/xenix/fix-termdesc-ansi.sh" "$ROOT/usr/lib/MSTOOLS/termdesc"
+        # The ansi repair and the xterm entries, as one diff against the
+        # shipped file; a termdesc that isn't that file fails the build here
+        # rather than going into the image half-patched.
+        patch -p1 -s -d "$ROOT" --no-backup-if-mismatch \
+            < "$TOP/bin/xenix/termdesc.patch"
     fi
 fi
 

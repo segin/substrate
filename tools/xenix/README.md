@@ -86,8 +86,10 @@ Defaults: media `~/Downloads/286`, output `<repo>/xenix286s.img`, 64 MB, and
 **every product on the media**. `--minimal` is the runtime system plus Word.
 
 It stages the tar volumes, pulls `/bin` out of `n1.img` with `xenixfs.py`,
-adds Word 3.0 from `msw/word.img`, runs `bin/xenix/fix-termdesc-ansi.sh` over
-the staged `termdesc`, then installs the Development System, manual pages,
+adds Word 3.0 from `msw/word.img`, applies `bin/xenix/termdesc.patch` to the
+staged `termdesc` (the `ansi` repair that `bin/xenix/fix-termdesc-ansi.sh`
+explains, plus five `xterm` entries), then installs the Development System,
+manual pages,
 text processing, CGI, Lyrix, COBOL, FoxBASE, BASIC, Multiplan, the public
 domain supplement, PET, Demos Commander and the precompiled utilities.
 

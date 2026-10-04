@@ -187,6 +187,7 @@ bin/*/*
 !bin/*/*.h
 !bin/*/*.l
 !bin/*/*.md
+!bin/*/*.patch
 !bin/*/*.pl
 !bin/*/*.py
 !bin/*/*.sh
