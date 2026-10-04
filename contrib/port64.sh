@@ -71,21 +71,44 @@ export SUBSTRATE_TOP STAGE1_PREFIX
 export SUBSTRATE_ARCH=x86_64
 export PATH="$STAGE1_PREFIX/bin:$PATH"
 export CONFIG_SITE="$HERE/config.site.x86_64"
-# pkg-config must only ever answer from the 64-bit sysroot, and with the
-# sysroot in front of every path it hands out.  This matters more here
-# than for the 32-bit target.  A .pc file says libdir=/usr/lib64, the
-# on-target path; unprefixed, that is -L/usr/lib64 -- the BUILD HOST's
-# library directory.  A 32-bit link skips what it finds there as the wrong
-# format; a 64-bit one is link-compatible with it and takes the host's
-# libz.so without a word.  The sysroot keeps its libraries in lib/ and its
-# headers in include/, so give it the usr/ names the .pc files use.
+# pkg-config, for the cross build, must only ever answer from the 64-bit
+# sysroot, and with the sysroot in front of every path it hands out.  This
+# matters more here than for the 32-bit target.  A .pc file says
+# libdir=/usr/lib64, the on-target path; unprefixed, that is -L/usr/lib64
+# -- the BUILD HOST's library directory.  A 32-bit link skips what it finds
+# there as the wrong format; a 64-bit one is link-compatible with it and
+# takes the host's libz.so without a word.  The sysroot keeps its libraries
+# in lib/ and its headers in include/, so give it the usr/ names the .pc
+# files use.
+#
+# It is given to the cross build alone, as x86_64-unknown-substrate-
+# pkg-config: a configure run with --host looks for that name before
+# plain pkg-config.  Exporting PKG_CONFIG_LIBDIR instead would also reach
+# the build-HOST stages some ports have (python builds a host interpreter
+# first, and its configure then found substrate's tcl), which must see the
+# host's own .pc files.  A script that sets PKG_CONFIG_LIBDIR or
+# PKG_CONFIG_SYSROOT_DIR itself is taken at its word.
+#
+# For a build that calls plain pkg-config, as the 32-bit one does, the
+# host's pkg-config already drops -L/usr/lib as a system directory; tell it
+# /usr/lib64 is one too.
 mkdir -p "$SYSROOT/usr" "$SYSROOT/lib" "$SYSROOT/include"
 [ -e "$SYSROOT/usr/lib64" ]   || ln -s ../lib "$SYSROOT/usr/lib64"
 [ -e "$SYSROOT/usr/lib" ]     || ln -s ../lib "$SYSROOT/usr/lib"
 [ -e "$SYSROOT/usr/include" ] || ln -s ../include "$SYSROOT/usr/include"
-export PKG_CONFIG_LIBDIR="$SYSROOT/lib/pkgconfig:$SYSROOT/share/pkgconfig"
-export PKG_CONFIG_SYSROOT_DIR="$SYSROOT"
-unset PKG_CONFIG_PATH DESTDIR
+mkdir -p "$HERE/.bin64"
+cat > "$HERE/.bin64/$TRIPLE-pkg-config" <<EOF
+#!/bin/sh
+# Written by contrib/port64.sh: pkg-config for the 64-bit cross build.
+: "\${PKG_CONFIG_LIBDIR:=$SYSROOT/lib/pkgconfig:$SYSROOT/share/pkgconfig}"
+: "\${PKG_CONFIG_SYSROOT_DIR:=$SYSROOT}"
+export PKG_CONFIG_LIBDIR PKG_CONFIG_SYSROOT_DIR
+exec pkg-config "\$@"
+EOF
+chmod +x "$HERE/.bin64/$TRIPLE-pkg-config"
+export PATH="$HERE/.bin64:$PATH"
+export PKG_CONFIG_SYSTEM_LIBRARY_PATH=/usr/lib64:/usr/lib
+unset PKG_CONFIG_PATH PKG_CONFIG_LIBDIR PKG_CONFIG_SYSROOT_DIR DESTDIR
 
 retarget() {
     sed -e 's/i386-unknown-substrate/x86_64-unknown-substrate/g' \
@@ -102,7 +125,8 @@ retarget() {
         -e 's#/\(usr\.\)\{0,1\}lib/\([a-z]*\|\$[{]\{0,1\}[_a-zA-Z]*[}]\{0,1\}\)/\(lib[^/ "]*\.\(so\.0\|a\)\)#/\1lib/\2/obj-x86_64/\3#g' \
         -e 's#/lib/c/\(crt[0in]\.o\)#/lib/c/obj-x86_64/\1#g' \
         -e 's#/sbin/ld\.so/ld\.so#/sbin/ld.so/obj-x86_64/ld64.so#g' \
-        -e 's#substrate-autotools\.sh#.substrate-autotools64.sh#g' \
+        -e 's#/binutils/build64/#/binutils/build/#g' \
+        -e 's#\(substrate-[a-z-]*\)\.sh#.\164.sh#g' \
         -e 's#\(dynamic-linker[=, ]\)/sbin/ld\.so#\1/sbin/ld64.so#g' \
         -e 's#\(toolchain\)\.cmake#\1.x86_64.cmake#g' \
         -e 's#SYSTEM_PROCESSOR i[3456]86#SYSTEM_PROCESSOR x86_64#g' \
@@ -110,10 +134,20 @@ retarget() {
     chmod +x "$2"
 }
 
-# The helper that about a hundred build.sh files source assembles sysroots
-# out of the staging trees and the in-tree libraries; it is retargeted the
-# same way, once, and the scripts are pointed at the copy.
-retarget "$HERE/substrate-autotools.sh" "$HERE/.substrate-autotools64.sh"
+# The helpers the build.sh files source (substrate-autotools.sh, which
+# about a hundred of them use to assemble sysroots out of the staging trees
+# and the in-tree libraries; substrate-codec.sh, which IS the fetch and
+# build of the audio codecs) are retargeted the same way, and the scripts
+# are pointed at the copies.
+#
+# One path is put back: the helpers take config.sub from the binutils
+# port's extracted tree, contrib/binutils/build, which is not a port tree
+# to be redirected -- and whose config.sub is the only one that knows
+# x86_64-unknown-substrate when the port's own dates from 2001.
+for helper in "$HERE"/substrate-*.sh; do
+    [ -f "$helper" ] || continue
+    retarget "$helper" "$HERE/.$(basename "${helper%.sh}")64.sh"
+done
 
 # Likewise the CMake toolchain files, which name the compiler, the sysroot
 # and the processor where no build.sh rule can reach them: a port built
@@ -212,7 +246,9 @@ if [ "$MODE" != fetch ]; then
     # Mirror into the toolchain sysroot for the ports that follow.
     if [ -d "$STAGE/usr/lib64" ]; then
         mkdir -p "$SYSROOT/lib"
-        cp -a "$STAGE/usr/lib64/." "$SYSROOT/lib/"
+        # --remove-destination: e2fsprogs installs its archives read-only,
+        # and a rebuild must be able to replace the copy from last time.
+        cp -a --remove-destination "$STAGE/usr/lib64/." "$SYSROOT/lib/"
     fi
     if [ -d "$STAGE/usr/include" ]; then
         mkdir -p "$SYSROOT/include"

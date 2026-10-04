@@ -3,7 +3,14 @@
 #
 # The 64-bit libraries live in /usr/lib64, beside the 32-bit ones in
 # /usr/lib; a configure script that is not told otherwise would install
-# into ${exec_prefix}/lib.  Only set it when the port did not.
-if test "x$libdir" = 'x${exec_prefix}/lib'; then
-    libdir='${exec_prefix}/lib64'
-fi
+# into ${exec_prefix}/lib.  Only set it when the port did not -- and only
+# for the cross build: some ports configure a build-HOST stage first (a
+# host python, a host file(1)), which inherits CONFIG_SITE and is none of
+# this file's business.
+case "$host_alias" in
+x86_64-*-substrate*)
+    if test "x$libdir" = 'x${exec_prefix}/lib'; then
+        libdir='${exec_prefix}/lib64'
+    fi
+    ;;
+esac
