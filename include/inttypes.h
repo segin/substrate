@@ -7,52 +7,69 @@ extern "C" {
 
 #include <stdint.h>
 
+/*
+ * Length modifiers for the types whose underlying type depends on the
+ * data model.  These follow <stdint.h> exactly: on x86_64 (LP64) int64_t,
+ * intmax_t and intptr_t are all `long`; on i386 (ILP32) int64_t and
+ * intmax_t are `long long` and intptr_t is `int`.  A modifier that names
+ * the wrong type of the right width (%llu for an unsigned long) is a
+ * -Wformat error, and one of the wrong width (%x for a 64-bit uintptr_t)
+ * prints half the value.
+ */
+#if defined(__x86_64__) || defined(_M_X64)
+#define __PRI64_MOD  "l"
+#define __PRIPTR_MOD "l"
+#else
+#define __PRI64_MOD  "ll"
+#define __PRIPTR_MOD ""
+#endif
+
 /* Printf format macros for exact-width types */
 #define PRId8   "d"
 #define PRId16  "d"
 #define PRId32  "d"
-#define PRId64  "lld"
+#define PRId64  __PRI64_MOD "d"
 
 #define PRIi8   "i"
 #define PRIi16  "i"
 #define PRIi32  "i"
-#define PRIi64  "lli"
+#define PRIi64  __PRI64_MOD "i"
 
 #define PRIu8   "u"
 #define PRIu16  "u"
 #define PRIu32  "u"
-#define PRIu64  "llu"
+#define PRIu64  __PRI64_MOD "u"
 
 #define PRIo8   "o"
 #define PRIo16  "o"
 #define PRIo32  "o"
-#define PRIo64  "llo"
+#define PRIo64  __PRI64_MOD "o"
 
 #define PRIx8   "x"
 #define PRIx16  "x"
 #define PRIx32  "x"
-#define PRIx64  "llx"
+#define PRIx64  __PRI64_MOD "x"
 
 #define PRIX8   "X"
 #define PRIX16  "X"
 #define PRIX32  "X"
-#define PRIX64  "llX"
+#define PRIX64  __PRI64_MOD "X"
 
 /* Scanf format macros */
 #define SCNd8   "hhd"
 #define SCNd16  "hd"
 #define SCNd32  "d"
-#define SCNd64  "lld"
+#define SCNd64  __PRI64_MOD "d"
 
 #define SCNu8   "hhu"
 #define SCNu16  "hu"
 #define SCNu32  "u"
-#define SCNu64  "llu"
+#define SCNu64  __PRI64_MOD "u"
 
 #define SCNx8   "hhx"
 #define SCNx16  "hx"
 #define SCNx32  "x"
-#define SCNx64  "llx"
+#define SCNx64  __PRI64_MOD "x"
 
 /* Least-width types */
 #define PRIdLEAST8  PRId8
@@ -117,28 +134,28 @@ extern "C" {
 #define SCNxFAST64  SCNx64
 
 /* Pointer */
-#define PRIdPTR "d"
-#define PRIuPTR "u"
-#define PRIxPTR "x"
-#define PRIoPTR "o"
-#define PRIXPTR "X"
+#define PRIdPTR __PRIPTR_MOD "d"
+#define PRIuPTR __PRIPTR_MOD "u"
+#define PRIxPTR __PRIPTR_MOD "x"
+#define PRIoPTR __PRIPTR_MOD "o"
+#define PRIXPTR __PRIPTR_MOD "X"
 
-/* Maximum-width type */
-#define PRIdMAX "lld"
-#define PRIiMAX "lli"
-#define PRIuMAX "llu"
-#define PRIxMAX "llx"
-#define PRIoMAX "llo"
-#define PRIXMAX "llX"
+/* Maximum-width type: intmax_t is int64_t on both data models. */
+#define PRIdMAX __PRI64_MOD "d"
+#define PRIiMAX __PRI64_MOD "i"
+#define PRIuMAX __PRI64_MOD "u"
+#define PRIxMAX __PRI64_MOD "x"
+#define PRIoMAX __PRI64_MOD "o"
+#define PRIXMAX __PRI64_MOD "X"
 
 /* PRIi for pointer-width signed type — mirror of PRId*PTR. */
-#define PRIiPTR "i"
+#define PRIiPTR __PRIPTR_MOD "i"
 
-#define SCNdMAX "lld"
-#define SCNiMAX "lli"
-#define SCNuMAX "llu"
-#define SCNxMAX "llx"
-#define SCNoMAX "llo"
+#define SCNdMAX __PRI64_MOD "d"
+#define SCNiMAX __PRI64_MOD "i"
+#define SCNuMAX __PRI64_MOD "u"
+#define SCNxMAX __PRI64_MOD "x"
+#define SCNoMAX __PRI64_MOD "o"
 
 typedef struct { intmax_t quot; intmax_t rem; } imaxdiv_t;
 
