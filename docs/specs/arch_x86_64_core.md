@@ -351,6 +351,33 @@ What a 64-bit process does not have yet:
   in-tree 64-bit libraries are still built with the host compiler, and
   `libm.so.0` links what it needs from `libgcc.a`.
 
+### The 64-bit image
+
+`./build64.sh` builds `rootfs64.img`, a root whose kernel and userland are
+both 64-bit (`./build-rootfs.sh --arch=x86_64 --dist --image` is the image
+step alone; staging tree `dist64/`, volume labels `sub-root64` and
+`sub-boot64`, so it can sit beside the 32-bit disk):
+
+* `/vmunix64` is its only kernel, and its GRUB menu offers nothing else.
+* `init`, `/bin/sh` and every program of `bin/`, `sbin/`, `usr.bin/` and
+  `usr.sbin/` are the `ARCH=x86_64` builds, run by `/sbin/ld64.so`
+  against `/lib64`.
+* It is biarch at the library level: `lib/` and `usr.lib/` are installed
+  for both architectures (`make -C lib install-both`, the same in
+  `usr.lib`), with `/sbin/ld.so`, so a 32-bit substrate program still
+  loads there.
+* It has no contrib ports.  Those are built by the 32-bit cross
+  toolchain; anything the 64-bit one builds is staged under
+  `dist-overlay64/dist-<pkg>` and overlaid.  Root's shell is therefore
+  the in-tree `/bin/sh`, and the rc scripts for sshd, nginx, inetd and
+  the display manager find nothing to start.
+
+`tests/rootfs64/boot-test.sh` boots it with a cross-compiled program as
+PID 1 that runs `smoke.sh` on the image: both `uname` answers, the shell
+under `ld64.so`, the base utilities, and the cross toolchain's C and C++
+test programs.  The `bootstrap64` workflow runs `build64.sh`, boot test
+included.
+
 `make -C bin/sh sh64` builds the in-tree shell as a dynamically linked
 64-bit program (`DYNAMIC=0` for a static one).  Programs outside the tree
 are built with `x86_64-unknown-substrate-gcc` / `-g++`; C++ exceptions,
