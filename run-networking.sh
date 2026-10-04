@@ -58,6 +58,17 @@ Boot mode
                      Rebuild with ./build-rootfs.sh --image to pick up a new
                      kernel; edit the ESP's /boot/grub/grub.cfg for boot args.
 
+Image
+  --64               Boot the 64-bit image, rootfs64.img (./build64.sh), instead
+                     of rootfs.img: a 64-bit userland on the 64-bit kernel.
+                     qemu-system-x86_64 with a 64-bit CPU in every boot mode.
+                     With --boot=kernel the kernel is sys/kernel-x86_64.bin and
+                     the root is found by its own label, sub-root64; in
+                     bios/uefi GRUB loads /vmunix64 from the image.  Not with
+                     --boot=uefi32, whose 32-bit emulator cannot run it.  The
+                     64-bit kernel uses the RAM above 4 GiB, so $MEM is all
+                     usable here.
+
 Machine
   --kvm              Use -accel kvm.  Default is TCG: KVM has an i386 coherence
                      bug that corrupts a single-byte read right after SIGALRM
@@ -195,7 +206,8 @@ Debugging
 Environment
   MEM        Guest RAM (default 8G; any qemu -m syntax).  See the note at the
              top of this script: substrate can only address the first 992 MiB.
-  ROOT       Root filesystem for --boot=kernel (default LABEL=sub-root).  Set
+  ROOT       Root filesystem for --boot=kernel (default LABEL=sub-root, or
+             LABEL=sub-root64 with --64).  Set
              it to e.g. /dev/storage/sata0 for images predating the label
              layout.
   NIC        Host interface to bridge in macvtap mode (default: the
@@ -214,6 +226,7 @@ Examples
   MEM=512M ./run-networking.sh --boot=bios        BIOS boot, smaller guest
   ./run-networking.sh --debug --user              boot and wait for gdb :1234
   ./run-networking.sh --keyboard=ps2 --mouse=usb  PS/2 keyboard, USB mouse
+  ./run-networking.sh --64 --user --kvm --snapshot   the 64-bit image
 EOF
 }
 
@@ -246,9 +259,11 @@ SLOW=0                     # 1 = append "slow" (half-second pause per output lin
 SHELL_INIT=0               # 1 = append init=/bin/sh instead of /sbin/init
 ROOT_DEV_ARGS=""           # root disk device (AHCI/virtio/IDE)
 USB_ROOT_ARGS=""           # root disk devices that must follow $USB_CTRL
+BITS64=0                   # 1 = --64: rootfs64.img on the 64-bit kernel
 while [ $# -gt 0 ]; do
     case "$1" in
         --help|-h)  usage; exit 0 ;;
+        --64)       BITS64=1 ;;
         --boot=*)   BOOTMODE="${1#--boot=}"
                     case "$BOOTMODE" in
                         kernel|bios|uefi|uefi32) : ;;
@@ -353,6 +368,21 @@ done
 # down, so the handler tests for each rather than being installed twice -- a
 # second `trap ... EXIT` would silently replace the first and leak whichever
 # resource was registered earlier.
+# Which image, and what goes with it.  The 64-bit image is a disk of its own
+# with its own root label, and needs the 64-bit kernel and a 64-bit CPU.
+if [ "$BITS64" -eq 1 ]; then
+    IMG=rootfs64.img
+    DEFAULT_ROOT=LABEL=sub-root64
+    if [ "$BOOTMODE" = uefi32 ]; then
+        echo "run-networking.sh: --64 cannot be combined with --boot=uefi32:" \
+             "that mode runs qemu-system-i386, which has no 64-bit CPU" >&2
+        exit 1
+    fi
+else
+    IMG=rootfs.img
+    DEFAULT_ROOT=LABEL=sub-root
+fi
+
 MACVTAP_DEV=""
 OVMF_VARS=""
 cleanup() {
@@ -551,25 +581,25 @@ IFS=$OLDIFS
 # keeps working.
 if [ "$VIRTIO" -eq 1 ]; then
     ROOT_DEV_ARGS="-device virtio-blk-pci,drive=drive0,id=vblk0"
-    echo "run-networking.sh: rootfs.img on virtio-blk"
+    echo "run-networking.sh: $IMG on virtio-blk"
 elif [ "$IDE" -eq 1 ]; then
     # The machine's own IDE controller (piix3-ide on 'pc'), bus ide.0 unit 0 --
     # primary master.  Guest sees /dev/storage/ide0.  q35 has no piix3, so this
     # is rejected above for --boot=uefi.
     ROOT_DEV_ARGS="-device ide-hd,bus=ide.0,unit=0,drive=drive0"
-    echo "run-networking.sh: rootfs.img on IDE (primary master)"
+    echo "run-networking.sh: $IMG on IDE (primary master)"
 elif [ "$UMS" -eq 1 ]; then
     # USB Mass Storage, Bulk-Only Transport.  The guest reaches it through the
     # SCSI midlayer, so it registers as /dev/storage/scsiN, not umsN.
     # Emitted via USB_ROOT_ARGS, after the host controller -- qemu resolves
     # bus=usbctl.0 at parse time and errors out if the controller comes later.
     USB_ROOT_ARGS="-device usb-storage,drive=drive0,id=ums0$USB_BUS"
-    echo "run-networking.sh: rootfs.img on USB Mass Storage (BOT, $USB_VERSION)"
+    echo "run-networking.sh: $IMG on USB Mass Storage (BOT, $USB_VERSION)"
 elif [ "$UAS" -eq 1 ]; then
     # USB Attached SCSI: a usb-uas HBA carrying a scsi-hd.  Also arrives via
     # the SCSI midlayer as /dev/storage/scsiN.
     USB_ROOT_ARGS="-device usb-uas,id=uas0$USB_BUS -device scsi-hd,bus=uas0.0,drive=drive0"
-    echo "run-networking.sh: rootfs.img on USB Attached SCSI (UAS, $USB_VERSION)"
+    echo "run-networking.sh: $IMG on USB Attached SCSI (UAS, $USB_VERSION)"
 else
     ROOT_DEV_ARGS="-device ide-hd,bus=sata0.0,unit=0,drive=drive0"
 fi
@@ -582,7 +612,7 @@ fi
 # it is what GRUB and /etc/fstab already use, so all three boot modes agree.
 # $ROOT overrides it for images that predate the labelled layout, e.g.
 #   ROOT=/dev/storage/sata0 ./run-networking.sh
-ROOT_DEV=${ROOT:-LABEL=sub-root}
+ROOT_DEV=${ROOT:-$DEFAULT_ROOT}
 APPEND="root=$ROOT_DEV trap"
 if [ "$SHELL_INIT" -eq 1 ]; then
     # Straight to a shell instead of /sbin/init -- no getty, no rc.d.
@@ -761,7 +791,17 @@ fi
 # direct-kernel mode loads one from the host -- bios/uefi boot /vmunix out of
 # the image, so a missing sys/kernel.bin is not an error there.
 KERNEL=""
-if [ "$BOOTMODE" = kernel ]; then
+if [ "$BOOTMODE" = kernel ] && [ "$BITS64" -eq 1 ]; then
+    # The flat image with the multiboot 1 header, which is what qemu's
+    # -kernel takes; the ELF (sys/kernel-x86_64.elf) is what GRUB loads.
+    if [ -f sys/kernel-x86_64.bin ]; then
+        KERNEL=sys/kernel-x86_64.bin
+    else
+        echo "run-networking.sh: sys/kernel-x86_64.bin not found;" \
+             "build it with: make -C sys ARCH=x86_64" >&2
+        exit 1
+    fi
+elif [ "$BOOTMODE" = kernel ]; then
     if [ -f kernel.bin ]; then
         KERNEL=kernel.bin
     elif [ -f sys/kernel.bin ]; then
@@ -791,6 +831,9 @@ if [ "$DEBUG" -eq 1 ]; then
     # Symbols still come from the host build; the image's /vmunix is the
     # framebuffer variant of the same tree.
     SYMFILE=${KERNEL:-sys/kernel.fb.bin}
+    if [ "$BITS64" -eq 1 ]; then
+        SYMFILE=sys/kernel-x86_64.elf
+    fi
     GDBPORT=${GDBPORT:-1234}
     DEBUG_ARGS="-gdb tcp::$GDBPORT"
     HALTNOTE=""
@@ -818,17 +861,20 @@ echo "run-networking.sh: serial console mirrored to $SERIALLOG (override with \$
 
 # Find the rootfs image. Decompress rootfs.img.zst in place if only the
 # compressed form exists; a present rootfs.img takes precedence.
-if [ -f rootfs.img ]; then
+if [ -f "$IMG" ]; then
     :
-elif [ -f rootfs.img.zst ]; then
+elif [ -f "$IMG.zst" ]; then
     if ! command -v zstd >/dev/null 2>&1; then
-        echo "run-networking.sh: rootfs.img.zst present but zstd not installed" >&2
+        echo "run-networking.sh: $IMG.zst present but zstd not installed" >&2
         exit 1
     fi
-    echo "run-networking.sh: decompressing rootfs.img.zst -> rootfs.img"
-    zstd -d --keep -- rootfs.img.zst
+    echo "run-networking.sh: decompressing $IMG.zst -> $IMG"
+    zstd -d --keep -- "$IMG.zst"
 else
-    echo "run-networking.sh: neither rootfs.img nor rootfs.img.zst found" >&2
+    echo "run-networking.sh: neither $IMG nor $IMG.zst found" >&2
+    if [ "$BITS64" -eq 1 ]; then
+        echo "  build the 64-bit image with ./build64.sh" >&2
+    fi
     exit 1
 fi
 
@@ -840,6 +886,14 @@ fi
 QEMU_BIN=qemu-system-i386
 QEMU_CPU="qemu32,+sse,+sse2"
 QEMU_MACHINE="pc$I8042_OPT"
+if [ "$BITS64" -eq 1 ]; then
+    # The 64-bit kernel needs long mode whichever way it is loaded.  (The
+    # uefi case below picks the same emulator and CPU for its own reasons.)
+    QEMU_BIN=qemu-system-x86_64
+    QEMU_CPU="qemu64,+rdrand"
+    command -v "$QEMU_BIN" >/dev/null 2>&1 || {
+        echo "run-networking.sh: --64 needs $QEMU_BIN" >&2; exit 1; }
+fi
 
 # Guard the image modes: GRUB lives in the MBR (BIOS) and on the FAT32 ESP
 # (UEFI), so a bare-filesystem rootfs.img -- what build-rootfs.sh produced
@@ -847,9 +901,9 @@ QEMU_MACHINE="pc$I8042_OPT"
 # Check for the 0x55AA boot signature rather than letting the user stare at a
 # blinking cursor.
 if [ "$BOOTMODE" != kernel ]; then
-    sig=$(dd if=rootfs.img bs=1 skip=510 count=2 2>/dev/null | od -An -tx1 | tr -d ' \n')
+    sig=$(dd if="$IMG" bs=1 skip=510 count=2 2>/dev/null | od -An -tx1 | tr -d ' \n')
     if [ "$sig" != "55aa" ]; then
-        echo "run-networking.sh: rootfs.img has no MBR boot signature (found '${sig:-nothing}')." \
+        echo "run-networking.sh: $IMG has no MBR boot signature (found '${sig:-nothing}')." \
              "--boot=$BOOTMODE needs the partitioned GRUB image; rebuild with" \
              "./build-rootfs.sh --image" >&2
         exit 1
@@ -861,7 +915,7 @@ case "$BOOTMODE" in
         echo "run-networking.sh: direct kernel boot ($KERNEL)"
         ;;
     bios)
-        echo "run-networking.sh: BIOS boot from rootfs.img (GRUB in the MBR -> /vmunix)"
+        echo "run-networking.sh: BIOS boot from $IMG (GRUB in the MBR -> its kernel)"
         echo "run-networking.sh: kernel + boot args come from the image's grub.cfg, not this script"
         ;;
     uefi)
@@ -903,7 +957,7 @@ case "$BOOTMODE" in
         OVMF_VARS=$(mktemp -t substrate-ovmf-vars-XXXXXX.fd)
         cp "$OVMF_VARS_TEMPLATE" "$OVMF_VARS"
 
-        echo "run-networking.sh: UEFI boot from rootfs.img (OVMF -> /EFI/BOOT/BOOTX64.EFI -> /vmunix)"
+        echo "run-networking.sh: UEFI boot from $IMG (OVMF -> /EFI/BOOT/BOOTX64.EFI -> its kernel)"
         echo "run-networking.sh: firmware $OVMF_CODE"
         echo "run-networking.sh: kernel + boot args come from the image's grub.cfg, not this script"
         ;;
@@ -1015,7 +1069,7 @@ esac
   -machine "$QEMU_MACHINE" \
   $SNAPSHOT_ARG \
   "$@" \
-  -drive file=rootfs.img,format=raw,if=none,id=drive0 \
+  -drive "file=$IMG,format=raw,if=none,id=drive0" \
   -device ich9-ahci,id=sata0$BOOT_AHCI_ADDR \
   $ROOT_DEV_ARGS \
   $EXTRA_DRIVE_ARGS \
