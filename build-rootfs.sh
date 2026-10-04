@@ -1339,11 +1339,6 @@ install_to_dist64() {
     make -C "$TOP/usr.man" install DESTDIR="$DIST" >/dev/null
 
     install_etc_to_dist
-    # etc/passwd gives root the contrib zsh, which this image does not
-    # have; an account whose shell is missing cannot log in.
-    if [ ! -e "$DIST/usr/bin/zsh" ] && [ -f "$DIST/etc/passwd" ]; then
-        sed -i 's|:/usr/bin/zsh$|:/bin/sh|' "$DIST/etc/passwd"
-    fi
 
     # Whatever the 64-bit cross toolchain has built and staged.
     local stage
@@ -1352,6 +1347,13 @@ install_to_dist64() {
         echo "Overlaying $(basename "$stage")..."
         cp -a "$stage/." "$DIST/"
     done
+
+    # etc/passwd gives root the contrib zsh.  Decided after the overlays,
+    # which are what bring zsh: without the port an account whose shell is
+    # missing cannot log in, so fall back to the in-tree shell.
+    if [ ! -e "$DIST/usr/bin/zsh" ] && [ -f "$DIST/etc/passwd" ]; then
+        sed -i 's|:/usr/bin/zsh$|:/bin/sh|' "$DIST/etc/passwd"
+    fi
 
     build_man_db
     "$TOP/tools/check-dt-needed.sh" "$DIST" || true
