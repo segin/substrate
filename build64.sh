@@ -7,9 +7,9 @@
 #       x86_64-unknown-substrate cross binutils and GCC, their runtime
 #       (libgcc_s.so.1, libstdc++.so.6) and the toolchain checks.
 #   2.  programs built with that toolchain, staged for the image under
-#       dist-overlay64/: the boot test's init and the toolchain test
-#       programs.  (Contrib ports for the 64-bit target would be staged
-#       the same way; none has been ported yet.)
+#       dist-overlay64/: the boot test's init, the toolchain test
+#       programs, and the contrib ports that build for the 64-bit target
+#       (contrib/port64.sh; the list is DEFAULT_CONTRIB64 below).
 #   3.  ./build-rootfs.sh --arch=x86_64 --dist --image — the 64-bit kernel,
 #       the in-tree userland built 64-bit, both architectures' libraries,
 #       and the image.
@@ -54,6 +54,20 @@ install -m 755 tests/rootfs64/smoke.sh "$STAGE/usr/libexec/rootfs64/smoke.sh"
 # them: run on the image by smoke.sh.
 for p in hello cxx; do
     install -m 755 "tests/toolchain64/out/$p" "$STAGE/usr/libexec/rootfs64/$p"
+done
+
+step "Stage 2b: contrib ports for the 64-bit target"
+# contrib/port64.sh builds a port with the 64-bit toolchain from the port's
+# own scripts and stages it under dist-overlay64/dist-<port>, which
+# build-rootfs.sh --arch=x86_64 overlays.  The order is build.sh's
+# DEFAULT_CONTRIB order -- each port may need the ones before it -- and
+# the list is the prefix of it that is known to build for 64-bit.
+# ONLY64="a b c" overrides it; ONLY64="" builds none.
+DEFAULT_CONTRIB64="bzip2 libiconv zlib openssl ncurses gzip tzdata make sed m4 flex autoconf automake libtool expr libarchive mpg123 curl nginx inetutils zsh e2fsprogs e2tools gmp mpfr"
+: "${ONLY64=${DEFAULT_CONTRIB64}}"
+for pkg in $ONLY64; do
+    step "Stage 2b: contrib/$pkg (64-bit)"
+    contrib/port64.sh "$pkg"
 done
 
 step "Stage 3: 64-bit userland and rootfs64.img"

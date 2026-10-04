@@ -1,14 +1,15 @@
 name: bootstrap64
 
 # The 64-bit counterpart of bootstrap.yml: the x86_64-unknown-substrate
-# cross toolchain, the in-tree userland built 64-bit, and rootfs64.img --
-# an image whose kernel and userland are both 64-bit -- which is then
+# cross toolchain, the in-tree userland built 64-bit, the contrib ports
+# that build for the 64-bit target (contrib/port64.sh), and rootfs64.img
+# -- an image whose kernel and userland are both 64-bit -- which is then
 # BOOTED, with a smoke test run on it.  build64.sh is the whole job.
 #
 # bootstrap.yml builds the 32-bit toolchain, 71 ports and rootfs.img, and
-# checks the image by looking inside it.  This one has no ports to build
-# yet, so it can afford to do what that one cannot: run the system it
-# built.  The runner has no KVM, so the guest is emulated.
+# checks the image by looking inside it.  This one builds far fewer ports,
+# so it can afford to do what that one cannot: run the system it built,
+# ports included.  The runner has no KVM, so the guest is emulated.
 #
 # Like bootstrap.yml it must not be cancelled by a newer push: it contains
 # a compiler build.
@@ -38,13 +39,15 @@ jobs:
       # here, unlike in toolchain64.yml: the image is biarch at the library
       # level, so lib/ and usr.lib/ are also built 32-bit (-m32).  The rest
       # is what build-rootfs.sh's image bake uses, plus qemu for the boot
-      # test.
+      # test.  libfl-dev, cmake, gettext, pkg-config and autoconf-archive
+      # are for the ports, as in bootstrap.yml.
       - name: Install build tools
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             build-essential gcc-multilib python3 \
-            texinfo bison flex gawk curl wget xz-utils \
+            texinfo bison flex libfl-dev gawk curl wget xz-utils cmake \
+            gettext pkg-config autoconf-archive \
             e2fsprogs dosfstools mtools fakeroot \
             grub-common grub-pc-bin util-linux zstd qemu-system-x86
 
@@ -129,6 +132,7 @@ jobs:
           for f in /vmunix64 /sbin/init /sbin/ld64.so /sbin/ld.so /bin/sh \
                    /bin/ls /bin/ps /lib64/libc.so.0 /lib/libc.so.0 \
                    /usr/lib64/libc.a /usr/bin/ldd \
+                   /usr/bin/zsh /usr/bin/curl /usr/lib64/libssl.so.3 \
                    /usr/libexec/rootfs64/smokeinit; do
             printf '%-36s ' "$f"
             sz=$(debugfs "rootfs64.img?offset=$ROOT_OFF" -R "stat $f" 2>/dev/null \

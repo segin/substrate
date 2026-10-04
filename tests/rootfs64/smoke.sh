@@ -65,5 +65,26 @@ else
     echo "skip cross-compiled C++ program (not installed)"
 fi
 
+# Contrib ports built for the 64-bit target (contrib/port64.sh), where the
+# image has them.  Each of these is a different slice of the port set:
+# zsh is the login shell and pulls in ncurses and libiconv, openssl and
+# curl exercise the crypto and network libraries, bsdtar libarchive.
+port_check() {
+    if [ -x "$1" ]; then
+        check "$2" "$3"
+    else
+        echo "skip $2 (not installed)"
+    fi
+}
+port_check /usr/bin/zsh     "zsh"      '/usr/bin/zsh -c "print -l a b c" | wc -l | grep -q 3'
+port_check /usr/bin/zsh     "zsh is a 64-bit program" 'ldd /usr/bin/zsh 2>&1 | grep -q ld64.so'
+port_check /usr/bin/openssl "openssl"  '/usr/bin/openssl version | grep -q OpenSSL'
+port_check /usr/bin/openssl "openssl sha256" \
+    'echo abc | /usr/bin/openssl dgst -sha256 | grep -q edeaaff3f1774ad2888673770c6d64097e391bc362d7d6fb34982ddf0efd18cb'
+port_check /usr/bin/curl    "curl"     '/usr/bin/curl --version | grep -q libcurl'
+port_check /usr/bin/bsdtar  "bsdtar"   'cd /tmp && /usr/bin/bsdtar cf smoke.tar /etc/passwd 2>/dev/null; /usr/bin/bsdtar tf /tmp/smoke.tar | grep -q passwd'
+port_check /usr/bin/gzip    "gzip"     'echo hello | /usr/bin/gzip | /usr/bin/gzip -d | grep -q hello'
+port_check /usr/bin/make    "make"     '/usr/bin/make --version | grep -q "GNU Make"'
+
 echo "smoke: $fail failure(s)"
 exit $fail

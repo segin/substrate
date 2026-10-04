@@ -13,6 +13,37 @@ layout per port:
 `build-rootfs.sh` overlays every `dist-overlay/dist-*` tree onto the
 image.  This document catalogs the current set.
 
+## Ports for the 64-bit target
+
+The ports' scripts are written for the 32-bit target.  `contrib/port64.sh
+<pkg>` builds a port for `x86_64-unknown-substrate` from those same
+scripts, by a fixed textual retargeting (triple, `-m32`/`-march`,
+`/usr/lib` -> `/usr/lib64`, the in-tree libraries' `obj-x86_64/` builds),
+in a separate tree (`contrib/<pkg>/build64`) and a separate staging tree
+(`dist-overlay64/dist-<pkg>`), so the 32-bit build of the port is left
+alone.  `build-rootfs.sh --arch=x86_64` overlays `dist-overlay64/dist-*`
+onto `rootfs64.img`.  The retargeting rules are listed at the top of the
+script.
+
+Three things it does beyond retargeting, each because a 64-bit substrate
+link is format-compatible with the build host's own libraries and will
+take them silently:
+
+- pkg-config answers only from the 64-bit sysroot, with the sysroot
+  prefixed to every path (`PKG_CONFIG_SYSROOT_DIR`); unprefixed, a `.pc`
+  file's `libdir=/usr/lib64` is the host's directory;
+- libtool archives (`*.la`) are deleted from the staging tree, for the
+  same reason;
+- every staged ELF file is checked for glibc symbol versions and sonames,
+  and the port fails if one has them.
+
+Ports that build for 64-bit, in build order (`DEFAULT_CONTRIB64` in
+`build64.sh`, which builds them into the image; `ONLY64="..."` selects
+others): bzip2, libiconv, zlib, openssl, ncurses, gzip, tzdata, make, sed,
+m4, flex, autoconf, automake, libtool, expr, libarchive, mpg123, curl,
+nginx, inetutils, zsh, e2fsprogs, e2tools, gmp, mpfr.  The rest of the
+catalog below has not been tried.
+
 ## Core system / shell / text
 
 - **GNU make 4.4.1** (`contrib/make/`)
