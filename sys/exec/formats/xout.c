@@ -447,6 +447,23 @@ static int xout_load(int fd, const char *path, char *const argv[],
     current_process->vm_map = map;
     arch_set_kernel_stack((uintptr_t)current_thread->kstack_top);
 
+    /* What ps and /proc/<pid>/cmdline report: the new argv, not the argv
+     * snapshot and argv-region bounds inherited from the parent at fork.
+     * The vector still holds the caller's pointers, as xout_build_stack
+     * reads them below. */
+    {
+        char *cmd_argv[64];
+        int n;
+
+        for (n = 0; n < 63 && argv; n++) {
+            if (exec_vec_ptr(argv, n, &cmd_argv[n]) != 0 || !cmd_argv[n]) break;
+        }
+        cmd_argv[n] = NULL;
+        current_process->arg_start = 0;
+        current_process->arg_end = 0;
+        proc_capture_cmdline(current_process, cmd_argv);
+    }
+
     /* --- initial stack (built directly in the data segment) --- */
     user_sp = xout_build_stack((uint8_t *)(uintptr_t)data_base, data_total,
                                argv, envp);

@@ -714,6 +714,16 @@ static int x286_load(int fd, const char *path, char *const argv[],
     current_process->vm_map = map;
     arch_set_kernel_stack((uintptr_t)current_thread->kstack_top);
 
+    /* What ps and /proc/<pid>/cmdline report.  The process arrived here by
+     * fork, so it still carries its parent's argv snapshot and the bounds
+     * of its parent's argv region; left alone, a Xenix/286 program showed
+     * its parent's command line.  The new argv is far pointers in DGROUP,
+     * not a flat region procfs can read back, so drop the bounds and keep
+     * the snapshot. */
+    current_process->arg_start = 0;
+    current_process->arg_end = 0;
+    proc_capture_cmdline(current_process, kargv);
+
     /* --- startup stack, written through DGROUP's linear window --- */
     rc = x286_build_stack((uint8_t *)(uintptr_t)dgroup_base, kargv, kenvp,
                           ds_sel, (hdr.x_renv & XE_LDATA) ? 1 : 0,
