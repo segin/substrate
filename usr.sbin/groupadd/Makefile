@@ -1,5 +1,6 @@
 PROG = groupadd
 SRCS = groupadd.c
+BINDIR = $(DESTDIR)/usr/sbin
 
 include ../../Makefile.bin.inc
 
