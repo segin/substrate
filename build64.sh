@@ -21,7 +21,8 @@
 #   SKIP_TOOLCHAIN=1  reuse an installed toolchain: build-toolchain64.sh
 #                     then only refreshes the libraries, sysroot and checks
 #   SKIP_BOOT_TEST=1  stop after baking the image
-#   IMAGE_SIZE_MIB    image size                            (default 1024)
+#   IMAGE_SIZE_MIB    image size                            (default 4096,
+#                     build-rootfs.sh's own; the file is sparse)
 #
 # Usage:
 #   ./build64.sh
@@ -34,10 +35,7 @@ cd "$HERE"
 : "${STAGE1_PREFIX:=/opt/substrate}"
 : "${SKIP_TOOLCHAIN:=0}"
 : "${SKIP_BOOT_TEST:=0}"
-# The 64-bit image holds the in-tree userland only; it does not need the
-# 4 GiB the 32-bit one reserves for the desktop.
-: "${IMAGE_SIZE_MIB:=1024}"
-export STAGE1_PREFIX IMAGE_SIZE_MIB
+export STAGE1_PREFIX
 
 step() { echo ""; echo "=========================  $*  ========================="; }
 
