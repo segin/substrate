@@ -1,6 +1,6 @@
 include ../Makefile.inc
 
-SUBDIRS = bc regex demangle libuu elfobj exvi
+SUBDIRS = bc regex demangle libuu elfobj exvi join
 
 .PHONY: all clean install $(SUBDIRS) all64 clean64 install64 both install-both
 
