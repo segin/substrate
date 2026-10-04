@@ -63,7 +63,7 @@ step "Stage 2b: contrib ports for the 64-bit target"
 # DEFAULT_CONTRIB order -- each port may need the ones before it -- and
 # the list is the prefix of it that is known to build for 64-bit.
 # ONLY64="a b c" overrides it; ONLY64="" builds none.
-DEFAULT_CONTRIB64="bzip2 libiconv zlib openssl ncurses gzip tzdata make sed m4 flex autoconf automake libtool expr libarchive mpg123 curl nginx inetutils zsh e2fsprogs e2tools gmp mpfr"
+DEFAULT_CONTRIB64="bzip2 libiconv zlib openssl ncurses gzip tzdata make sed m4 flex autoconf automake libtool expr libarchive mpg123 curl nginx inetutils zsh e2fsprogs e2tools gmp mpfr gdb cmake xorgproto xcb-proto libXau xtrans libxcb libX11 libXext libICE libSM libXt libXmu libXpm libXaw libXinerama libjpeg lmdb mksh tcl libtirpc xterm xauth luit xrdb libXdmcp pixman libxshmfence libfontenc libXfont libxkbfile xkbcomp xkeyboard-config encodings font-util font-misc-misc font-adobe-75dpi font-adobe-100dpi font-bh-lucida xorg-server"
 : "${ONLY64=${DEFAULT_CONTRIB64}}"
 for pkg in $ONLY64; do
     step "Stage 2b: contrib/$pkg (64-bit)"

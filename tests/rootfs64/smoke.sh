@@ -85,6 +85,14 @@ port_check /usr/bin/curl    "curl"     '/usr/bin/curl --version | grep -q libcur
 port_check /usr/bin/bsdtar  "bsdtar"   'cd /tmp && /usr/bin/bsdtar cf smoke.tar /etc/passwd 2>/dev/null; /usr/bin/bsdtar tf /tmp/smoke.tar | grep -q passwd'
 port_check /usr/bin/gzip    "gzip"     'echo hello | /usr/bin/gzip | /usr/bin/gzip -d | grep -q hello'
 port_check /usr/bin/make    "make"     '/usr/bin/make --version | grep -q "GNU Make"'
+port_check /usr/bin/gdb     "gdb"      '/usr/bin/gdb --version | grep -q "GNU gdb"'
+port_check /usr/bin/cmake   "cmake"    '/usr/bin/cmake --version | grep -q "cmake version"'
+port_check /bin/mksh        "mksh"     '/bin/mksh -c "echo \$KSH_VERSION" | grep -q MIRBSD'
+port_check /usr/bin/tclsh   "tclsh"    'echo "puts [expr 6*7]" | /usr/bin/tclsh | grep -q 42'
+# X clients with no server to talk to: enough to show that the X libraries
+# load and that the client gets as far as trying the display.
+port_check /usr/bin/xterm   "xterm"    '/usr/bin/xterm -version | grep -q XTerm'
+port_check /usr/bin/xauth   "xauth links libX11" 'ldd /usr/bin/xauth 2>&1 | grep -q /usr/lib64/libX11.so'
 
 echo "smoke: $fail failure(s)"
 exit $fail
