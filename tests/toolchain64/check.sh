@@ -97,5 +97,13 @@ else
     bad "no $CXX"
 fi
 
+# The driver must not hand the linker the build host's library directories
+# (contrib/gcc/install-specs.sh): to a 64-bit link they hold compatible
+# objects, and libtool names /usr/lib64 at every install-time relink.
+hostdirs=$("$CC" -v -L/usr/lib64 -L /usr/lib -o "$OUT/hello" "$HERE/hello.c" 2>&1 |
+           grep collect2 | tr ' ' '\n' | grep -c '^-L/usr/lib' || true)
+[ "$hostdirs" = 0 ] && ok "-L/usr/lib64 and -L/usr/lib are dropped from the link" ||
+    bad "the driver passes the build host's library directories to ld"
+
 echo "toolchain64: $fail failure(s); programs are in $OUT"
 exit $fail

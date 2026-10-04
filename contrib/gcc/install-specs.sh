@@ -118,6 +118,28 @@ x86_64-*)
 *libgcc:
 %{static|static-libgcc:-lgcc -lgcc_eh;:-lgcc_s -lgcc}
 EOF
+
+    # ... and has to refuse the build host's library directories.
+    #
+    # -L/usr/lib64 names the TARGET's directory to whoever wrote it -- it is
+    # the libdir of every 64-bit library -- but the linker runs on the build
+    # host, where that path is the host's own library directory.  libtool
+    # writes exactly this when it relinks a library at install time
+    # (-L\$libdir).  The 32-bit toolchain survives it because the linker
+    # skips what it finds there as the wrong format.  A 64-bit link cannot:
+    # the host's libraries are x86-64 ELF too, and
+    #
+    #   ld: errno: TLS definition in /usr/lib64/libc.a(errno.o) section
+    #   .tbss mismatches non-TLS reference in .../usr/lib64/libxcb.so
+    #
+    # is the lucky outcome -- the unlucky one links the host's libz.so and
+    # says nothing.  Drop both directories from the link; the target's own
+    # are already on the search path through the sysroot.
+    cat >> "${LIBDIR}/specs" <<EOF
+
+*link:
++ %<L/usr/lib64 %<L/usr/lib
+EOF
     ;;
 esac
 
