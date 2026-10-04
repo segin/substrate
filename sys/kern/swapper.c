@@ -96,13 +96,28 @@ void swapper_idle_loop(void) {
             continue;
         }
 
+        /* A wakeup marks the running thread -- this one -- needs_resched
+         * (sched_wakeup_n).  Nothing else acts on the flag here, so give
+         * the CPU to whatever became runnable. */
         if (current_thread && current_thread->needs_resched) {
+            current_thread->needs_resched = 0;
             intr_restore(flags);
+            sched_yield();
             continue;
         }
 
-        intr_restore(flags);
+        /* Halt with interrupts still disabled up to the instruction itself:
+         * wait_for_interrupt() is "sti; hlt", which takes a pending IRQ only
+         * after the hlt.  Restoring the flags first would let an interrupt
+         * wake a thread between the check above and the hlt, and the CPU
+         * would then sleep through it until the next tick. */
         wait_for_interrupt();
+
+        /* Whatever the interrupt made runnable runs now, not at the next
+         * tick; not every wake path sets needs_resched.  sched_yield() also
+         * reaps the zombies queued for it, and returns at once when there
+         * is nothing to run. */
+        sched_yield();
     }
 }
 

@@ -816,15 +816,12 @@ static void enter_kernel_idle_loop(void) {
     kprint("Entering main loop...\n");
     /* This thread is the boot CPU's idle thread from here on, and has to be
      * scheduled as one.  Left in the timeshare class it took turns with
-     * whatever was running: every other time slice went to the hlt below,
-     * with a runnable thread waiting, so a CPU-bound process got half the
+     * whatever was running: every other time slice went to the idle loop's
+     * hlt, with a runnable thread waiting, so a CPU-bound process got half the
      * processor.  The secondary CPUs' idle threads are created in the idle
      * class (smp_boot_ap). */
     sched_set_priority(sched_get_current_tid(), SCHED_IDLE, 0);
-    while (1) {
-        sched_yield();
-        __asm__ volatile("sti; hlt");
-    }
+    swapper_idle_loop();
 }
 
 static void register_boot_ramdisks(multiboot_info_t *mboot_info) {

@@ -93,6 +93,9 @@ void sched_init(void);
 void sched_init_generic(void);
 void sched_smp_init(int cpu_count);
 void swapper_request_work(void);
+/* The idle thread's body: never returns.  The caller must already be an
+ * idle-class thread (SCHED_IDLE). */
+void swapper_idle_loop(void) __attribute__((noreturn));
 
 /* Thread Creation */
 thread_t *sched_alloc_thread(process_t *proc);
