@@ -6,10 +6,11 @@ name: bootstrap64
 # -- an image whose kernel and userland are both 64-bit -- which is then
 # BOOTED, with a smoke test run on it.  build64.sh is the whole job.
 #
-# bootstrap.yml builds the 32-bit toolchain, 71 ports and rootfs.img, and
-# checks the image by looking inside it.  This one builds far fewer ports,
-# so it can afford to do what that one cannot: run the system it built,
-# ports included.  The runner has no KVM, so the guest is emulated.
+# bootstrap.yml builds the 32-bit toolchain, the ports and rootfs.img, and
+# checks the image by looking inside it.  This one builds the same port
+# list for the 64-bit target (less build64.sh's NOT64) and then does what
+# that one does not: runs the system it built, ports included.  The runner
+# has no KVM, so the guest is emulated.
 #
 # Like bootstrap.yml it must not be cancelled by a newer push: it contains
 # a compiler build.
@@ -31,7 +32,7 @@ jobs:
   bootstrap64:
     name: 64-bit toolchain + userland + rootfs64.img + boot
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 340
     steps:
       - uses: actions/checkout@v7
 
@@ -39,15 +40,25 @@ jobs:
       # here, unlike in toolchain64.yml: the image is biarch at the library
       # level, so lib/ and usr.lib/ are also built 32-bit (-m32).  The rest
       # is what build-rootfs.sh's image bake uses, plus qemu for the boot
-      # test.  libfl-dev, cmake, gettext, pkg-config and autoconf-archive
-      # are for the ports, as in bootstrap.yml.
+      # test.  Everything from libfl-dev on is for the ports and their
+      # build-host stages: the same list as bootstrap.yml, which explains
+      # each entry, because it is the same port list.
       - name: Install build tools
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             build-essential gcc-multilib python3 \
             texinfo bison flex libfl-dev gawk curl wget xz-utils cmake \
-            gettext pkg-config autoconf-archive \
+            gettext pkg-config \
+            libmotif-dev libx11-dev libxt-dev libxext-dev libxmu-dev \
+            libxpm-dev libxinerama-dev libxft-dev libtirpc-dev tcl-dev \
+            libfontenc-dev libfreetype-dev zlib1g-dev \
+            libjpeg-dev liblmdb-dev libpam0g-dev libutempter-dev \
+            libice-dev libsm-dev libxrender-dev libxau-dev libxdmcp-dev \
+            libcrypt-dev x11-xserver-utils xbitmaps gperf chrpath \
+            libmagic-dev libglib2.0-dev libxml2-dev libxslt1-dev \
+            libdbus-1-dev intltool meson ninja-build \
+            autoconf-archive \
             e2fsprogs dosfstools mtools fakeroot \
             grub-common grub-pc-bin util-linux zstd qemu-system-x86
 

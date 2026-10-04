@@ -8,8 +8,8 @@
 #       (libgcc_s.so.1, libstdc++.so.6) and the toolchain checks.
 #   2.  programs built with that toolchain, staged for the image under
 #       dist-overlay64/: the boot test's init, the toolchain test
-#       programs, and the contrib ports that build for the 64-bit target
-#       (contrib/port64.sh; the list is DEFAULT_CONTRIB64 below).
+#       programs, and the contrib ports, built for the 64-bit target by
+#       contrib/port64.sh (build.sh's list, less NOT64 below).
 #   3.  ./build-rootfs.sh --arch=x86_64 --dist --image — the 64-bit kernel,
 #       the in-tree userland built 64-bit, both architectures' libraries,
 #       and the image.
@@ -59,11 +59,21 @@ done
 step "Stage 2b: contrib ports for the 64-bit target"
 # contrib/port64.sh builds a port with the 64-bit toolchain from the port's
 # own scripts and stages it under dist-overlay64/dist-<port>, which
-# build-rootfs.sh --arch=x86_64 overlays.  The order is build.sh's
-# DEFAULT_CONTRIB order -- each port may need the ones before it -- and
-# the list is the prefix of it that is known to build for 64-bit.
+# build-rootfs.sh --arch=x86_64 overlays.  The list and its order are
+# build.sh's DEFAULT_CONTRIB -- each port may need the ones before it --
+# less the ports that have not been built for 64-bit:
+#
+#   tde    not attempted yet (five layers and a host TQt3 build)
+#
 # ONLY64="a b c" overrides it; ONLY64="" builds none.
-DEFAULT_CONTRIB64="bzip2 libiconv zlib openssl ncurses gzip tzdata make sed m4 flex autoconf automake libtool expr libarchive mpg123 curl nginx inetutils zsh e2fsprogs e2tools gmp mpfr gdb cmake xorgproto xcb-proto libXau xtrans libxcb libX11 libXext libICE libSM libXt libXmu libXpm libXaw libXinerama libjpeg lmdb mksh tcl libtirpc xterm xauth luit xrdb libXdmcp pixman libxshmfence libfontenc libXfont libxkbfile xkbcomp xkeyboard-config encodings font-util font-misc-misc font-adobe-75dpi font-adobe-100dpi font-bh-lucida xorg-server"
+NOT64="tde"
+DEFAULT_CONTRIB64=""
+for pkg in $(sed -n 's/^DEFAULT_CONTRIB="\(.*\)"$/\1/p' build.sh); do
+    case " $NOT64 " in *" $pkg "*) continue ;; esac
+    DEFAULT_CONTRIB64="$DEFAULT_CONTRIB64 $pkg"
+done
+[ -n "$DEFAULT_CONTRIB64" ] || {
+    echo "build64.sh: could not read DEFAULT_CONTRIB from build.sh" >&2; exit 1; }
 : "${ONLY64=${DEFAULT_CONTRIB64}}"
 for pkg in $ONLY64; do
     step "Stage 2b: contrib/$pkg (64-bit)"

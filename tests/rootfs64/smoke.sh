@@ -94,6 +94,12 @@ port_check /usr/bin/tclsh   "tclsh"    'echo "puts [expr 6*7]" | /usr/bin/tclsh 
 # load and that the client gets as far as trying the display.
 port_check /usr/bin/xterm   "xterm"    '/usr/bin/xterm -version | grep -q XTerm'
 port_check /usr/bin/xauth   "xauth links libX11" 'ldd /usr/bin/xauth 2>&1 | grep -q /usr/lib64/libX11.so'
+port_check /usr/bin/python3 "python"   '/usr/bin/python3 -c "import hashlib, sqlite3, uuid; print(6 * 7)" | grep -q 42'
+port_check /usr/bin/perl    "perl"     '/usr/bin/perl -e "print 6 * 7" | grep -q 42'
+port_check /usr/bin/sqlite3 "sqlite3"  '/usr/bin/sqlite3 :memory: "select 6 * 7" | grep -q 42'
+port_check /usr/bin/ssh     "ssh"      '/usr/bin/ssh -V 2>&1 | grep -q OpenSSH'
+port_check /usr/bin/psymp3  "psymp3 links SDL3 and taglib" \
+    'ldd /usr/bin/psymp3 2>&1 | grep -q libSDL3 && ldd /usr/bin/psymp3 2>&1 | grep -q libtag'
 
 echo "smoke: $fail failure(s)"
 exit $fail

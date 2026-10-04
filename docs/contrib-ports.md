@@ -37,12 +37,26 @@ take them silently:
 - every staged ELF file is checked for glibc symbol versions and sonames,
   and the port fails if one has them.
 
-Ports that build for 64-bit, in build order (`DEFAULT_CONTRIB64` in
-`build64.sh`, which builds them into the image; `ONLY64="..."` selects
-others): bzip2, libiconv, zlib, openssl, ncurses, gzip, tzdata, make, sed,
-m4, flex, autoconf, automake, libtool, expr, libarchive, mpg123, curl,
-nginx, inetutils, zsh, e2fsprogs, e2tools, gmp, mpfr.  The rest of the
-catalog below has not been tried.
+It also fails a port that stages a 32-bit object or a 64-bit program
+naming the 32-bit dynamic linker (a part of the build the retargeting did
+not reach), retargets CMake toolchain files, Meson cross files, the
+`contrib/substrate-*.sh` helpers and the scripts of any other port a
+port runs, and gives the cross build its own
+`x86_64-unknown-substrate-pkg-config` so that a port's build-host stage
+(python, file, CDE's hosttools) still sees the host's `.pc` files.
+
+`build64.sh` builds `build.sh`'s whole `DEFAULT_CONTRIB` list for 64-bit
+and into the image, less the ports in its `NOT64` (`ONLY64="..."`
+selects others).  Every port in that list builds for 64-bit except TDE,
+which has not been attempted.  One port carries a 64-bit difference in
+its own `build.sh`, behind `$SUBSTRATE_ARCH`: e2fsprogs compiles its
+static libraries PIC, because x86-64 does not allow a non-PIC archive
+member in a shared object.
+
+What is built is not thereby tested: the 64-bit image's smoke test
+(`tests/rootfs64/smoke.sh`) runs a couple of dozen of these programs, and
+the graphical stack (Xfbdev, CDE, the window managers) has not been run
+on the 64-bit kernel at all.
 
 ## Core system / shell / text
 
