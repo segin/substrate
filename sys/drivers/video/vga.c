@@ -527,7 +527,7 @@ static int vga_set_mode_internal(int mode_id) {
  * Returns 0 if VGA is present, -1 otherwise.
  */
 static int vga_probe(void) {
-    volatile uint8_t *bda = (volatile uint8_t *)0xC0000400; /* BDA at phys 0x400, mapped via direct map */
+    volatile uint8_t *bda = (volatile uint8_t *)P2V(0x400); /* BDA at phys 0x400, mapped via direct map */
     uint8_t bda_mode;
     uint16_t bda_crtc;
     uint8_t stat1, saved_seq, readback;
