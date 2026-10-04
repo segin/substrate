@@ -58,7 +58,7 @@ PORT="$HERE/$PKG"
 : "${STAGE1_PREFIX:=/opt/substrate}"
 TRIPLE=x86_64-unknown-substrate
 SYSROOT="$STAGE1_PREFIX/$TRIPLE"
-STAGE="$SUBSTRATE_TOP/dist-overlay64/dist-$PKG"
+STAGE_OWN="$SUBSTRATE_TOP/dist-overlay64/dist-$PKG"
 
 [ -f "$PORT/build.sh" ] || { echo "port64.sh: no such port: $PKG" >&2; exit 1; }
 [ -x "$STAGE1_PREFIX/bin/$TRIPLE-gcc" ] || {
@@ -113,6 +113,9 @@ unset PKG_CONFIG_PATH PKG_CONFIG_LIBDIR PKG_CONFIG_SYSROOT_DIR DESTDIR
 retarget() {
     sed -e 's/i386-unknown-substrate/x86_64-unknown-substrate/g' \
         -e 's/i[3456]86-unknown-substrate/x86_64-unknown-substrate/g' \
+        -e "s/'-m\\(arch\\|tune\\)=i[3456]86', *//g" \
+        -e "s/cpu_family = 'x86'/cpu_family = 'x86_64'/" \
+        -e "s/cpu = 'i[3456]86'/cpu = 'x86_64'/" \
         -e 's/ *-march=i[3456]86//g' \
         -e 's/ *-mtune=i[3456]86//g' \
         -e 's/\([^a-zA-Z0-9_]\)-m32\([^a-zA-Z0-9_]\)/\1-m64\2/g' \
@@ -126,7 +129,9 @@ retarget() {
         -e 's#/lib/c/\(crt[0in]\.o\)#/lib/c/obj-x86_64/\1#g' \
         -e 's#/sbin/ld\.so/ld\.so#/sbin/ld.so/obj-x86_64/ld64.so#g' \
         -e 's#/binutils/build64/#/binutils/build/#g' \
-        -e 's#\(substrate-[a-z-]*\)\.sh#.\164.sh#g' \
+        -e 's#/\(substrate-[a-z-]*\)\.sh#/.\164.sh#g' \
+        -e 's#\(/cmake/\)\.\(substrate-[a-z-]*\)64\.sh#\1\2.sh#g' \
+        -e 's#\(/\.\./[A-Za-z0-9_+.-]*/\)\(build\|fetch\)\.sh#\1.\264.sh#g' \
         -e 's#\(dynamic-linker[=, ]\)/sbin/ld\.so#\1/sbin/ld64.so#g' \
         -e 's#\(toolchain\)\.cmake#\1.x86_64.cmake#g' \
         -e 's#SYSTEM_PROCESSOR i[3456]86#SYSTEM_PROCESSOR x86_64#g' \
@@ -160,6 +165,18 @@ for tc in "$HERE"/*/*toolchain.cmake; do
     chmod -x "${tc%.cmake}.x86_64.cmake"
 done
 
+# And the scripts of any OTHER port this one runs (freetype-harfbuzz is
+# freetype's build.sh run again with one more option): the reference is
+# retargeted to the sibling's .build64.sh, so that has to exist.  Run
+# unretargeted, the sibling builds its 32-bit tree and stages the result
+# over the 64-bit one.
+for sib in $(sed -n 's#.*/\.\./\([A-Za-z0-9_+.-]*\)/\(build\|fetch\)\.sh.*#\1#p' \
+                 "$PORT/build.sh" "$PORT/fetch.sh" 2>/dev/null | sort -u); do
+    [ -f "$HERE/$sib/build.sh" ] || continue
+    retarget "$HERE/$sib/build.sh" "$HERE/$sib/.build64.sh"
+    [ -f "$HERE/$sib/fetch.sh" ] && retarget "$HERE/$sib/fetch.sh" "$HERE/$sib/.fetch64.sh"
+done
+
 if [ "$MODE" != build ]; then
     retarget "$PORT/fetch.sh" "$PORT/.fetch64.sh"
     # Reuse a tarball the 32-bit build already downloaded.
@@ -172,10 +189,9 @@ if [ "$MODE" != build ]; then
     ( cd "$PORT" && ./.fetch64.sh )
 fi
 
-if [ "$MODE" != fetch ]; then
-    retarget "$PORT/build.sh" "$PORT/.build64.sh"
-    echo "==> [port64] $PKG: build"
-    ( cd "$PORT" && ./.build64.sh )
+# What is done to a staging tree ($1) once the port's build has filled it.
+finish_stage() {
+    STAGE="$1"
 
     # A port that ignored libdir and installed 64-bit libraries into
     # /usr/lib would shadow nothing at link time but would never be found
@@ -250,6 +266,13 @@ if [ "$MODE" != fetch ]; then
         # and a rebuild must be able to replace the copy from last time.
         cp -a --remove-destination "$STAGE/usr/lib64/." "$SYSROOT/lib/"
     fi
+    # What is still under usr/lib after the move above is in a directory
+    # of the port's own (quickjs keeps libquickjs.a in usr/lib/quickjs,
+    # and elinks looks for it by that name); the sysroot has one library
+    # directory under both names, so it goes there too.
+    if [ -d "$STAGE/usr/lib" ]; then
+        cp -a --remove-destination "$STAGE/usr/lib/." "$SYSROOT/lib/"
+    fi
     if [ -d "$STAGE/usr/include" ]; then
         mkdir -p "$SYSROOT/include"
         cp -aL "$STAGE/usr/include/." "$SYSROOT/include/"
@@ -259,4 +282,24 @@ if [ "$MODE" != fetch ]; then
         done
     fi
     echo "==> [port64] $PKG: staged at $STAGE"
+}
+
+if [ "$MODE" != fetch ]; then
+    retarget "$PORT/build.sh" "$PORT/.build64.sh"
+    echo "==> [port64] $PKG: build"
+    marker="$HERE/.bin64/.started-$PKG"
+    : > "$marker"
+    ( cd "$PORT" && ./.build64.sh )
+
+    # Finish every staging tree the build wrote to, not only the one named
+    # after the port: freetype-harfbuzz restages dist-freetype, and a port
+    # made of layers stages each under its own name.
+    for stage in "$SUBSTRATE_TOP"/dist-overlay64/dist-*; do
+        [ -d "$stage" ] || continue
+        if [ "$stage" = "$STAGE_OWN" ] ||
+           [ -n "$(find "$stage" -newer "$marker" -print -quit)" ]; then
+            finish_stage "$stage"
+        fi
+    done
+    rm -f "$marker"
 fi
