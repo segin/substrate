@@ -103,6 +103,9 @@ retarget() {
         -e 's#/lib/c/\(crt[0in]\.o\)#/lib/c/obj-x86_64/\1#g' \
         -e 's#/sbin/ld\.so/ld\.so#/sbin/ld.so/obj-x86_64/ld64.so#g' \
         -e 's#substrate-autotools\.sh#.substrate-autotools64.sh#g' \
+        -e 's#\(dynamic-linker[=, ]\)/sbin/ld\.so#\1/sbin/ld64.so#g' \
+        -e 's#\(toolchain\)\.cmake#\1.x86_64.cmake#g' \
+        -e 's#SYSTEM_PROCESSOR i[3456]86#SYSTEM_PROCESSOR x86_64#g' \
         "$1" > "$2"
     chmod +x "$2"
 }
@@ -111,6 +114,17 @@ retarget() {
 # out of the staging trees and the in-tree libraries; it is retargeted the
 # same way, once, and the scripts are pointed at the copy.
 retarget "$HERE/substrate-autotools.sh" "$HERE/.substrate-autotools64.sh"
+
+# Likewise the CMake toolchain files, which name the compiler, the sysroot
+# and the processor where no build.sh rule can reach them: a port built
+# through an unretargeted one comes out 32-bit without complaint.  Each
+# <name>toolchain.cmake gets a retargeted <name>toolchain.x86_64.cmake
+# beside it, where its relative references still resolve.
+for tc in "$HERE"/*/*toolchain.cmake; do
+    [ -f "$tc" ] || continue
+    retarget "$tc" "${tc%.cmake}.x86_64.cmake"
+    chmod -x "${tc%.cmake}.x86_64.cmake"
+done
 
 if [ "$MODE" != build ]; then
     retarget "$PORT/fetch.sh" "$PORT/.fetch64.sh"
@@ -171,6 +185,27 @@ if [ "$MODE" != fetch ]; then
     if [ -n "$hostlinked" ]; then
         echo "port64.sh: $PKG linked against the BUILD HOST's libraries:" >&2
         echo "$hostlinked" | sed 's/^/    /' >&2
+        exit 1
+    fi
+
+    # Nor may anything staged be a 32-bit object: that is a part of the
+    # port's build the retargeting did not reach (a toolchain file, a
+    # hard-coded compiler name), and on the image it is a program that
+    # needs 32-bit libraries the port never provided.  The same goes for a
+    # 64-bit program that names the 32-bit dynamic linker, which a port
+    # that spells out its own link line can produce: the kernel refuses it
+    # with ENOEXEC.
+    wrongclass=$(find "$STAGE" -type f | while IFS= read -r f; do
+        if [ "$(od -An -tu1 -N5 "$f" 2>/dev/null | tr -s ' ')" = " 127 69 76 70 1" ]; then
+            echo "$f"
+        elif "$TRIPLE-readelf" -l "$f" 2>/dev/null |
+                 grep -q 'program interpreter: /sbin/ld\.so\]'; then
+            echo "$f (interpreter /sbin/ld.so)"
+        fi
+    done)
+    if [ -n "$wrongclass" ]; then
+        echo "port64.sh: $PKG staged 32-bit objects:" >&2
+        echo "$wrongclass" | sed 's/^/    /' >&2
         exit 1
     fi
 

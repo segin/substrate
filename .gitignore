@@ -134,6 +134,7 @@ dist/
 /contrib/*/.fetch64.sh
 /contrib/*/.build64.sh
 /contrib/.substrate-autotools64.sh
+/contrib/*/*toolchain.x86_64.cmake
 
 
 # Patterns formerly carried in subtree .gitignore files
