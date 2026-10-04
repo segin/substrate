@@ -53,7 +53,7 @@ while [ $# -gt 0 ]; do
     -o|--output) OUT=$2; shift 2 ;;
     -s|--size)   SIZE_MB=$2; shift 2 ;;
     --minimal)   MINIMAL=yes; shift ;;
-    -h|--help)   sed -n '2,30p' "$0"; exit 0 ;;
+    -h|--help)   sed -n '2,39p' "$0"; exit 0 ;;
     *) echo "$0: unknown argument: $1" >&2; exit 64 ;;
     esac
 done
