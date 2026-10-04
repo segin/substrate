@@ -4,7 +4,24 @@ include ../Makefile.inc
 ifdef NATIVE_BUILD
 SUBDIRS = mkfs fsck
 else
-SUBDIRS = init ld.so mkfs fsck getty echod syslogd radvd telnetd
+# Every directory here that ships, which is every one but sdm: sgreet is an
+# Xlib client that needs the contrib X stack staged and the cross compiler
+# (see sdm/Makefile), so build-rootfs.sh builds it separately.
+SUBDIRS = \
+	init \
+	ld.so \
+	mkfs \
+	fsck \
+	getty \
+	echod \
+	syslogd \
+	radvd \
+	telnetd \
+	dhclient \
+	ifconfig \
+	halt \
+	poweroff \
+	reboot
 endif
 
 
