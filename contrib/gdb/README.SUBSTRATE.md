@@ -108,6 +108,21 @@ top of the kernel ptrace work:
   maps the amd64 registers instead, from the x86-64 `user_regs_struct` a
   64-bit tracer is given, and `pid_to_exec_file` reads `/proc/<pid>/exe` so
   that `gdb -p` finds the program and its architecture.
+  The floating-point and vector registers come in whichever layout the
+  kernel saves them in -- the XSAVE area (`PTRACE_GETXSTATE`), the FXSAVE
+  image (`PTRACE_GETFPXREGS`) or, on a 486, the FNSAVE image
+  (`PTRACE_GETFPREGS`) -- and `read_description` offers x87, SSE or AVX
+  registers to match, so `$st0`, `$xmm0` and `$ymm0` read and write.
+
+**Known defect, i386 only: backtraces and arguments are wrong** (`add (a=0,
+b=0)`, a one-frame `bt`).  It is not gdb's: the i386 cross GCC numbers
+`%ebp` as DWARF register 4 and `%esp` as 5, the reverse of the i386 ELF
+psABI that gdb (and every other DWARF consumer) assumes, so the CFA is
+computed from the wrong register.  `.cfi_def_cfa_register 4` after `mov
+%esp,%ebp` in `gcc -S` output shows it.  C++ unwinding is unaffected, since
+libgcc's unwinder is built by the same compiler.  The fix belongs in the GCC
+target (`DBX_REGISTER_NUMBER` → `svr4_dbx_register_map`) and means
+rebuilding everything that carries `.eh_frame`.  x86-64 is not affected.
 
 **configure + build:**
 ```

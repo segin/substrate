@@ -8,8 +8,11 @@
    Inspects the inferior through Substrate's ptrace(2): the general-purpose
    registers via PTRACE_GETREGS/SETREGS into a struct user_regs_struct
    (sys/ptrace.h), while memory access and run control (CONT, SINGLESTEP, KILL,
-   wait) come from the generic inf-ptrace target.  Floating-point / SSE state is
-   not transferred yet and is reported unavailable.
+   wait) come from the generic inf-ptrace target.  The floating-point and
+   vector registers come in the CPU's own save layout -- the XSAVE area
+   (PTRACE_GETXSTATE), the FXSAVE image (PTRACE_GETFPXREGS) or the FNSAVE
+   image (PTRACE_GETFPREGS), whichever the kernel uses -- and the target
+   description offers x87, SSE or AVX registers to match.
 
    A 64-bit gdb gets the Linux/amd64 user_regs_struct from the kernel and
    8-byte PEEK/POKE words (its sizeof(long)), whatever the inferior's width.
@@ -27,10 +30,17 @@
 #include <unistd.h>
 
 #include "i386-tdep.h"
+#include "i387-tdep.h"
 #ifdef __x86_64__
 #include "amd64-tdep.h"
 #endif
 #include "inf-ptrace.h"
+#include "gdbsupport/x86-xstate.h"
+#include "gdbsupport/byte-vector.h"
+
+/* %cs of a 64-bit process: the kernel's SEL_UCODE at ring 3.  A 32-bit
+   process under the 64-bit kernel has the compatibility-mode selector.  */
+#define SUBSTRATE_UCODE64_SEL 0x2b
 
 /* Offset in `struct user_regs_struct' of a member.  */
 #define REG_OFFSET(member) offsetof (struct user_regs_struct, member)
@@ -167,11 +177,73 @@ getregs_supplies (const struct regcache *regcache, int regnum)
   return false;
 }
 
+/* How the kernel hands over the floating-point and vector registers.  It
+   is the CPU's own save format, so it is found once: the XSAVE area (x87,
+   SSE, AVX, ...) where the CPU has XSAVE, else the FXSAVE image (x87 and
+   SSE), else -- a 486 -- the FNSAVE image.  */
+
+enum substrate_fp_kind
+{
+  FP_UNPROBED,
+  FP_NONE,
+  FP_FSAVE,
+  FP_FXSAVE,
+  FP_XSAVE,
+};
+
+static enum substrate_fp_kind substrate_fp = FP_UNPROBED;
+static uint64_t substrate_xcr0;		/* FP_XSAVE: the components saved */
+static size_t substrate_xsave_len;	/* FP_XSAVE: the size of the area */
+
+static void
+substrate_probe_fp (pid_t pid)
+{
+  struct ptrace_xstate_info info;
+  gdb_byte buf[PTRACE_FPXREGS_SIZE];
+
+  if (substrate_fp != FP_UNPROBED)
+    return;
+
+  if (ptrace (PTRACE_GETXSTATE_INFO, pid, nullptr, &info) == 0
+      && info.xsave_len >= PTRACE_FPXREGS_SIZE)
+    {
+      substrate_fp = FP_XSAVE;
+      substrate_xcr0 = info.xsave_mask;
+      substrate_xsave_len = info.xsave_len;
+    }
+  else if (ptrace (PTRACE_GETFPXREGS, pid, nullptr, buf) == 0)
+    substrate_fp = FP_FXSAVE;
+  else if (ptrace (PTRACE_GETFPREGS, pid, nullptr, buf) == 0)
+    substrate_fp = FP_FSAVE;
+  else
+    substrate_fp = FP_NONE;
+}
+
+/* The XCR0 value describing the registers the kernel hands over.  */
+
+static uint64_t
+substrate_fp_xcr0 ()
+{
+  switch (substrate_fp)
+    {
+    case FP_XSAVE:
+      return substrate_xcr0 & X86_XSTATE_ALL_MASK;
+    case FP_FXSAVE:
+      return X86_XSTATE_SSE_MASK;
+    default:
+      return X86_XSTATE_X87_MASK;
+    }
+}
+
 class substrate_nat_target final : public inf_ptrace_target
 {
 public:
   void fetch_registers (struct regcache *, int) override;
   void store_registers (struct regcache *, int) override;
+
+  /* The registers the inferior has: 64-bit or 32-bit, and x87, SSE or AVX
+     according to what the kernel saves.  */
+  const struct target_desc *read_description () override;
 
   /* Substrate needs no post-exec ptrace setup (no PTRACE_SETOPTIONS); the
      traced child is already stopped at its first signal-delivery stop. */
@@ -196,7 +268,159 @@ substrate_nat_target::pid_to_exec_file (int pid)
   return buf;
 }
 
+const struct target_desc *
+substrate_nat_target::read_description ()
+{
+  if (inferior_ptid == null_ptid)
+    return this->beneath ()->read_description ();
+
+  pid_t pid = get_ptrace_pid (inferior_ptid);
+
+  substrate_probe_fp (pid);
+#ifdef __x86_64__
+  struct user_regs_struct regs;
+
+  if (ptrace (PTRACE_GETREGS, pid, nullptr, &regs) == -1)
+    perror_with_name (_("Couldn't get registers"));
+  /* The kernel's 64-bit user code selector; a 32-bit process runs on its
+     compatibility-mode one.  */
+  if (regs.cs == SUBSTRATE_UCODE64_SEL)
+    return amd64_target_description (substrate_fp_xcr0 (), true);
+#endif
+  return i386_target_description (substrate_fp_xcr0 (), false);
+}
+
 static substrate_nat_target the_substrate_nat_target;
+
+/* Is REGCACHE's architecture a 64-bit one?  */
+
+static bool
+substrate_regcache_is_64bit (const struct regcache *regcache)
+{
+#ifdef __x86_64__
+  return gdbarch_ptr_bit (regcache->arch ()) == 64;
+#else
+  (void) regcache;
+  return false;
+#endif
+}
+
+/* Fetch the floating-point and vector registers: REGNUM, or all of them
+   if it is -1.  */
+
+static void
+substrate_fetch_fpregs (struct regcache *regcache, pid_t pid, int regnum)
+{
+  bool is64 = substrate_regcache_is_64bit (regcache);
+
+  substrate_probe_fp (pid);
+  switch (substrate_fp)
+    {
+    case FP_XSAVE:
+      {
+	gdb::byte_vector buf (substrate_xsave_len);
+
+	if (ptrace (PTRACE_GETXSTATE, pid, (void *) substrate_xsave_len,
+		    buf.data ()) == -1)
+	  perror_with_name (_("Couldn't get extended state"));
+#ifdef __x86_64__
+	if (is64)
+	  amd64_supply_xsave (regcache, regnum, buf.data ());
+	else
+#endif
+	  i387_supply_xsave (regcache, regnum, buf.data ());
+	break;
+      }
+    case FP_FXSAVE:
+      {
+	gdb_byte buf[PTRACE_FPXREGS_SIZE];
+
+	if (ptrace (PTRACE_GETFPXREGS, pid, nullptr, buf) == -1)
+	  perror_with_name (_("Couldn't get floating point status"));
+#ifdef __x86_64__
+	if (is64)
+	  amd64_supply_fxsave (regcache, regnum, buf);
+	else
+#endif
+	  i387_supply_fxsave (regcache, regnum, buf);
+	break;
+      }
+    case FP_FSAVE:
+      {
+	gdb_byte buf[PTRACE_FPREGS_SIZE];
+
+	if (ptrace (PTRACE_GETFPREGS, pid, nullptr, buf) == -1)
+	  perror_with_name (_("Couldn't get floating point status"));
+	i387_supply_fsave (regcache, regnum, buf);
+	break;
+      }
+    default:
+      break;
+    }
+  (void) is64;
+}
+
+/* Store them: read the kernel's copy, replace REGNUM (or everything) in
+   it, write it back.  */
+
+static void
+substrate_store_fpregs (struct regcache *regcache, pid_t pid, int regnum)
+{
+  bool is64 = substrate_regcache_is_64bit (regcache);
+
+  substrate_probe_fp (pid);
+  switch (substrate_fp)
+    {
+    case FP_XSAVE:
+      {
+	gdb::byte_vector buf (substrate_xsave_len);
+
+	if (ptrace (PTRACE_GETXSTATE, pid, (void *) substrate_xsave_len,
+		    buf.data ()) == -1)
+	  perror_with_name (_("Couldn't get extended state"));
+#ifdef __x86_64__
+	if (is64)
+	  amd64_collect_xsave (regcache, regnum, buf.data (), 0);
+	else
+#endif
+	  i387_collect_xsave (regcache, regnum, buf.data (), 0);
+	if (ptrace (PTRACE_SETXSTATE, pid, (void *) substrate_xsave_len,
+		    buf.data ()) == -1)
+	  perror_with_name (_("Couldn't write extended state"));
+	break;
+      }
+    case FP_FXSAVE:
+      {
+	gdb_byte buf[PTRACE_FPXREGS_SIZE];
+
+	if (ptrace (PTRACE_GETFPXREGS, pid, nullptr, buf) == -1)
+	  perror_with_name (_("Couldn't get floating point status"));
+#ifdef __x86_64__
+	if (is64)
+	  amd64_collect_fxsave (regcache, regnum, buf);
+	else
+#endif
+	  i387_collect_fxsave (regcache, regnum, buf);
+	if (ptrace (PTRACE_SETFPXREGS, pid, nullptr, buf) == -1)
+	  perror_with_name (_("Couldn't write floating point status"));
+	break;
+      }
+    case FP_FSAVE:
+      {
+	gdb_byte buf[PTRACE_FPREGS_SIZE];
+
+	if (ptrace (PTRACE_GETFPREGS, pid, nullptr, buf) == -1)
+	  perror_with_name (_("Couldn't get floating point status"));
+	i387_collect_fsave (regcache, regnum, buf);
+	if (ptrace (PTRACE_SETFPREGS, pid, nullptr, buf) == -1)
+	  perror_with_name (_("Couldn't write floating point status"));
+	break;
+      }
+    default:
+      break;
+    }
+  (void) is64;
+}
 
 /* Supply the GPRs in GREGS to REGCACHE.  */
 
@@ -250,6 +474,9 @@ substrate_nat_target::fetch_registers (struct regcache *regcache, int regnum)
 
       substrate_supply_gregset (regcache, &regs);
     }
+
+  if (regnum == -1 || !getregs_supplies (regcache, regnum))
+    substrate_fetch_fpregs (regcache, pid, regnum);
 }
 
 void
@@ -269,6 +496,9 @@ substrate_nat_target::store_registers (struct regcache *regcache, int regnum)
       if (ptrace (PTRACE_SETREGS, pid, nullptr, &regs) == -1)
 	perror_with_name (_("Couldn't write registers"));
     }
+
+  if (regnum == -1 || !getregs_supplies (regcache, regnum))
+    substrate_store_fpregs (regcache, pid, regnum);
 }
 
 void _initialize_substrate_nat ();

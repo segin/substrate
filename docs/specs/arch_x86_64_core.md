@@ -361,8 +361,8 @@ a statically linked 64-bit program:
 
 What a 64-bit process does not have yet:
 
-* in the debugger: floating-point and vector registers, thread-local
-  variables, and the symbols of shared libraries -- `ld64.so`, like
+* in the debugger: thread-local variables, and the symbols of shared
+  libraries -- `ld64.so`, like
   `ld.so`, publishes no `r_debug` for gdb to find them through;
 * the in-tree 64-bit libraries are still built with the host compiler,
   and `libm.so.0` links what it needs from `libgcc.a`.

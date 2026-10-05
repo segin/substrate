@@ -2028,6 +2028,12 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
         tf.useresp = sp;
         tf.ebx = entry_ebx;
         tf.cs = 0x1B;                                   /* user code segment */
+#ifdef SUBSTRATE_ARCH_X86_64
+        /* A 64-bit image runs on the 64-bit code segment, and its debugger
+         * tells the two kinds of process apart by this. */
+        if (current_process->bitness == BITNESS_64)
+            tf.cs = SEL_UCODE_RPL3;
+#endif
         tf.ss = tf.ds = tf.es = tf.fs = tf.gs = 0x23;   /* user data segment */
         tf.eflags = 0x202;                              /* reserved bit 1 + IF */
         ptrace_exec_stop(&tf);
