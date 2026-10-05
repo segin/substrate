@@ -1073,8 +1073,10 @@ EOF
         fi
         # nethack(6) likewise: the game is setgid games, and its scores,
         # logs, bones and saved games live in a group-writable /var/games.
-        if [ -e "$1/usr/lib/nethack/nethack" ]; then
-            chown 0:100 "$1/usr/lib/nethack/nethack" && chmod 2755 "$1/usr/lib/nethack/nethack"
+        # (/usr/lib64/nethack on the 64-bit image.)
+        for nh in "$1/usr/lib/nethack/nethack" "$1/usr/lib64/nethack/nethack"; do
+            [ -e "$nh" ] || continue
+            chown 0:100 "$nh" && chmod 2755 "$nh"
             if [ -d "$1/var/games/nethack" ]; then
                 chown -R 0:100 "$1/var/games/nethack"
                 chmod 0775 "$1/var/games/nethack" "$1/var/games/nethack/save"
@@ -1082,7 +1084,7 @@ EOF
                     [ -e "$1/var/games/nethack/$f" ] && chmod 0664 "$1/var/games/nethack/$f"
                 done
             fi
-        fi
+        done
         if [ -e "$1/etc/shadow" ]; then
             chown 0:42 "$1/etc/shadow" && chmod 0640 "$1/etc/shadow"
         fi

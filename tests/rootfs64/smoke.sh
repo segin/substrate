@@ -100,6 +100,19 @@ port_check /usr/bin/sqlite3 "sqlite3"  '/usr/bin/sqlite3 :memory: "select 6 * 7"
 port_check /usr/bin/ssh     "ssh"      '/usr/bin/ssh -V 2>&1 | grep -q OpenSSH'
 port_check /usr/bin/psymp3  "psymp3 links SDL3 and taglib" \
     'ldd /usr/bin/psymp3 2>&1 | grep -q libSDL3 && ldd /usr/bin/psymp3 2>&1 | grep -q libtag'
+# sudo has to be setuid root to be any use, and reads its policy at once:
+# as root, with the shipped sudoers, it runs the command.
+port_check /usr/bin/sudo    "sudo is setuid root" 'ls -l /usr/bin/sudo | grep -q "^-rws"'
+port_check /usr/bin/sudo    "sudo runs a command" '/usr/bin/sudo -n /bin/echo sudo-ok | grep -q sudo-ok'
+port_check /usr/sbin/visudo "visudo accepts /etc/sudoers" '/usr/sbin/visudo -c >/dev/null 2>&1'
+# The games: each reads its data files to answer these, which is where a
+# level file built for the wrong word size, or a missing data tree, shows.
+port_check /usr/bin/rogue   "rogue prints its scoreboard" '/usr/bin/rogue -s 2>&1 | grep -q "Top Ten"'
+port_check /usr/bin/nethack "nethack reads its data (nhdat)" \
+    '/usr/bin/nethack --version 2>&1 | grep -q "NetHack Version 3.6.7"'
+port_check /usr/bin/nethack "nethack is setgid games" \
+    'ls -l /usr/lib64/nethack/nethack | grep -q "^-rwxr-sr-x"'
+port_check /usr/bin/angband "angband" 'LANG=en_US.UTF-8 /usr/bin/angband --help 2>&1 | grep -q "Usage: angband"'
 
 echo "smoke: $fail failure(s)"
 exit $fail
