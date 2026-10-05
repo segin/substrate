@@ -1071,6 +1071,18 @@ EOF
                 [ -e "$1/var/games/rogue/rogue.scr" ] && chmod 0664 "$1/var/games/rogue/rogue.scr"
             fi
         fi
+        # nethack(6) likewise: the game is setgid games, and its scores,
+        # logs, bones and saved games live in a group-writable /var/games.
+        if [ -e "$1/usr/lib/nethack/nethack" ]; then
+            chown 0:100 "$1/usr/lib/nethack/nethack" && chmod 2755 "$1/usr/lib/nethack/nethack"
+            if [ -d "$1/var/games/nethack" ]; then
+                chown -R 0:100 "$1/var/games/nethack"
+                chmod 0775 "$1/var/games/nethack" "$1/var/games/nethack/save"
+                for f in perm record logfile xlogfile; do
+                    [ -e "$1/var/games/nethack/$f" ] && chmod 0664 "$1/var/games/nethack/$f"
+                done
+            fi
+        fi
         if [ -e "$1/etc/shadow" ]; then
             chown 0:42 "$1/etc/shadow" && chmod 0640 "$1/etc/shadow"
         fi

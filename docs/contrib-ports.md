@@ -172,6 +172,12 @@ on the 64-bit kernel at all.
 - **rogue 5.4.4** (`contrib/rogue/`) — the original dungeon crawl, over
   ncurses.  No patches.  Setgid `games` for the shared scoreboard in
   `/var/games/rogue` (modes applied by `build-rootfs.sh`).
+- **nethack 3.6.7** (`contrib/nethack/`) — tty and curses interfaces.  No
+  patches.  NetHack 3.6 cannot cross-compile, so `build.sh` builds its
+  level and dungeon compilers for the build machine (`cc -m32`, so the
+  binary level files have the target's layout) and cross-compiles only
+  the game.  Setgid `games`; state in `/var/games/nethack`.  Pattern
+  options are globs, not regexes (see the port's README).
 - **qman 1.5.1** (`contrib/qman/`) — fetched but not yet buildable on
   substrate (needs meson, cog, libbsd, ncursesw).  Tracked under
   `contrib/qman/README.SUBSTRATE.md`.
