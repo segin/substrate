@@ -130,7 +130,7 @@ retarget() {
         -e 's#/sbin/ld\.so/ld\.so#/sbin/ld.so/obj-x86_64/ld64.so#g' \
         -e 's#/binutils/build64/#/binutils/build/#g' \
         -e 's#/\(substrate-[a-z-]*\)\.sh#/.\164.sh#g' \
-        -e 's#\(/cmake/\)\.\(substrate-[a-z-]*\)64\.sh#\1\2.sh#g' \
+        -e 's#/\.\(substrate-osabi-stamp\)64\.sh#/\1.sh#g' \
         -e 's#\(/\.\./[A-Za-z0-9_+.-]*/\)\(build\|fetch\)\.sh#\1.\264.sh#g' \
         -e 's#\(dynamic-linker[=, ]\)/sbin/ld\.so#\1/sbin/ld64.so#g' \
         -e 's#\(toolchain\)\.cmake#\1.x86_64.cmake#g' \
