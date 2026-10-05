@@ -43,22 +43,39 @@
 
 /* ---- register marshalling: kernel registers_t <-> user_regs_struct ------- */
 
+/* The flags a tracer may change: CF PF AF ZF SF TF DF OF.  IF, IOPL, NT,
+ * RF, VM and AC stay the kernel's -- a tracer must not be able to run its
+ * tracee with interrupts off or with I/O privilege. */
+#define EFLAGS_USER_MASK 0x00000DD5u
+
+/* A selector is 16 bits; the rest of its slot in the trap frame is whatever
+ * the push left there. */
 static void frame_to_uregs(const registers_t *f, struct user_regs_struct *u) {
     u->ebx = f->ebx; u->ecx = f->ecx; u->edx = f->edx;
     u->esi = f->esi; u->edi = f->edi; u->ebp = f->ebp; u->eax = f->eax;
-    u->xds = f->ds; u->xes = f->es; u->xfs = f->fs; u->xgs = f->gs;
+    u->xds = f->ds & 0xFFFF; u->xes = f->es & 0xFFFF;
+    u->xfs = f->fs & 0xFFFF; u->xgs = f->gs & 0xFFFF;
     u->orig_eax = f->eax;
-    u->eip = f->eip; u->xcs = f->cs; u->eflags = f->eflags;
+    u->eip = f->eip; u->xcs = f->cs & 0xFFFF; u->eflags = f->eflags;
     u->esp = f->useresp;        /* user stack pointer (CPU-pushed, not pusha's) */
-    u->xss = f->ss;
+    u->xss = f->ss & 0xFFFF;
 }
 
+/*
+ * The general registers, the instruction and stack pointers and the
+ * arithmetic flags come from the tracer.  The segment registers and the
+ * other flags do not: the frame is what the kernel's IRET returns through,
+ * so a tracer that could set %cs or %ss would resume its tracee in ring 0,
+ * one that could set IOPL would give it the I/O ports, and a selector that
+ * does not load faults inside the kernel.  They keep the tracee's values.
+ */
 static void uregs_to_frame(const struct user_regs_struct *u, registers_t *f) {
     f->ebx = u->ebx; f->ecx = u->ecx; f->edx = u->edx;
     f->esi = u->esi; f->edi = u->edi; f->ebp = u->ebp; f->eax = u->eax;
-    f->ds = u->xds; f->es = u->xes; f->fs = u->xfs; f->gs = u->xgs;
-    f->eip = u->eip; f->cs = u->xcs; f->eflags = u->eflags;
-    f->useresp = u->esp; f->ss = u->xss;
+    f->eip = u->eip;
+    f->eflags = (f->eflags & ~EFLAGS_USER_MASK) |
+                (u->eflags & EFLAGS_USER_MASK);
+    f->useresp = u->esp;
 }
 
 #ifdef SUBSTRATE_ARCH_X86_64
@@ -72,11 +89,6 @@ static void uregs_to_frame(const struct user_regs_struct *u, registers_t *f) {
 static int ptrace_tracer_is_amd64(void) {
     return current_process && current_process->bitness == BITNESS_64;
 }
-
-/* The flags a tracer may change: CF PF AF ZF SF TF DF OF.  IF, IOPL, NT,
- * RF, VM and AC stay the kernel's -- a tracer must not be able to run its
- * tracee with interrupts off or with I/O privilege. */
-#define EFLAGS_USER_MASK 0x00000DD5u
 
 /* Lowest non-canonical address.  iretq to a non-canonical RIP or RSP faults
  * in ring 0, so neither may come from a tracer. */
