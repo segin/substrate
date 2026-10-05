@@ -1,0 +1,32 @@
+Subject: gcc/config/i386/substrate.h: psABI DWARF register numbers
+
+The i386 target took i386.h's default DEBUGGER_REGNO, the old DBX map, in
+which %ebp is DWARF register 4 and %esp is 5 -- the reverse of the i386
+psABI numbering that every other ELF i386 target selects (gnu-user.h,
+sysv4.h, i386elf.h) and that gdb, readelf and libunwind assume.  CFI was
+self-consistent, since libgcc's unwinder is compiled with the same map, so
+C++ exceptions worked; but gdb computed every CFA from the wrong register
+and showed one-frame backtraces with zeroed arguments.
+
+Select svr4_debugger_register_map.  This changes the register numbers in
+.eh_frame and .debug_frame, so libgcc and everything carrying unwind
+tables has to be rebuilt together.  x86_64 already used the psABI map.
+---
+diff --git a/gcc/config/i386/substrate.h b/gcc/config/i386/substrate.h
+--- a/gcc/config/i386/substrate.h
++++ b/gcc/config/i386/substrate.h
+@@ -59,4 +59,14 @@
+ #undef  TARGET_ASM_FILE_END
+ #define TARGET_ASM_FILE_END file_end_indicate_exec_stack
+ 
++/* DWARF register numbers: the i386 psABI's (System V ABI, Intel386
++   supplement, figure 3-36), in which %esp is 4 and %ebp is 5, as on every
++   other ELF i386 target.  Without this the port inherits i386.h's default
++   map, the old DBX one, which has the two the other way round: everything
++   built agreed with itself (libgcc's unwinder uses the same map), but a
++   debugger computed each frame from the wrong register.  */
++#undef  DEBUGGER_REGNO
++#define DEBUGGER_REGNO(n) \
++  (TARGET_64BIT ? debugger64_register_map[n] : svr4_debugger_register_map[n])
++
+ #endif /* GCC_I386_SUBSTRATE_H */

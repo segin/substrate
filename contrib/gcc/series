@@ -12,3 +12,4 @@
 0010-libgcc-pt-gnu-eh-frame-substrate.patch
 0011-c-default-gnu17.patch
 0012-x86_64-substrate.patch
+0013-i386-substrate-psabi-dwarf-regnos.patch
