@@ -69,8 +69,40 @@ struct sigcontext {
 };
 
 /*
+ * FPU state in a signal frame.
+ *
+ * The image is what FXSAVE writes (512 bytes), or FNSAVE (the first 108)
+ * on a CPU without it; fp_format says which, in the values of
+ * FPU_SIG_* (machine/fpu.h), as does mc_fpformat for the image in a
+ * ucontext's mc_fpstate.
+ *
+ * With XSAVE there is more state than FXSAVE's image holds -- the XSAVE
+ * header and the extended components, so the upper halves of the YMM
+ * registers.  That goes in a block higher on the stack, and the image
+ * says where: FXSAVE leaves its last 48 bytes to software, and the kernel
+ * keeps a struct sig_fpx there, at SIG_FPX_OFFSET.
+ */
+#define SIG_FP_IMAGE_SIZE   512
+#define SIG_FPX_OFFSET      464
+#define SIG_FPX_MAGIC       0x58534653u     /* "SFSX" */
+#define SIGFRAME_FP_MAGIC   0x50464653u     /* "SFFP" */
+
+struct sig_fpx {
+    uint32_t magic;         /* SIG_FPX_MAGIC */
+    uint32_t addr;          /* the extended block */
+    uint32_t len;           /* its size */
+};
+
+struct sigframe_fp {
+    uint32_t fp_magic;      /* SIGFRAME_FP_MAGIC */
+    uint32_t fp_format;     /* FPU_SIG_* */
+    uint32_t fp_pad[2];
+    uint8_t  fp_image[SIG_FP_IMAGE_SIZE];
+};
+
+/*
  * Signal Frame (sigframe)
- * 
+ *
  * The actual stack layout seen by the signal handler.
  * 
  * Stack grows down:
@@ -102,8 +134,14 @@ struct sigframe {
     // [ sigcontext  ] (at esp + offset)
     // [ sig         ] (at esp + 4)
     // [ retaddr     ] (at esp) -> points to trampoline
-    
+
     struct sigcontext sc;
+
+    /* The FPU state, which struct sigcontext has no room for.  It follows
+     * the sigcontext so that sigreturn(scp) finds it; a sigcontext that
+     * did not come from sendsig() has no SIGFRAME_FP_MAGIC behind it and
+     * restores no FPU state. */
+    struct sigframe_fp fp;
 };
 
 /*

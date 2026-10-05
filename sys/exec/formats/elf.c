@@ -4,6 +4,7 @@
 #include <sys/sysinfo.h> // For BITNESS_*
 #include <sys/proc.h>
 #include <machine/idt.h>   /* registers_t for the ptrace exec-stop frame */
+#include <machine/fpu.h>
 #include <kern/panic.h>
 #include <string.h>
 #include <vm/vm_map.h>
@@ -1948,6 +1949,9 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
     if (current_process) {
         exec_reset_signals();
     }
+    /* And it starts with the FPU in its initial state, not with what the
+     * old image left in the registers. */
+    fpu_thread_reset(current_thread);
 
     char hexbuf[16];
     uint32_t val;

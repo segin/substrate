@@ -57,7 +57,29 @@ void fpu_thread_free(struct thread *t);
 int fpu_signal_save(void *image);
 size_t fpu_signal_extra_len(void);
 int fpu_signal_copyout_extra(void *uaddr);
-int fpu_signal_restore(const void *image, const void *uextra,
+int fpu_signal_restore(int format, const void *image, const void *uextra,
                        size_t extra_len);
+
+/* What fpu_signal_save() put in the image.  The i386 mcontext's mc_fpformat
+ * holds these values. */
+#define FPU_SIG_NONE    0
+#define FPU_SIG_FNSAVE  1       /* 108 bytes, x87 only */
+#define FPU_SIG_FXSAVE  2       /* 512 bytes */
+
+/* execve(2): back to the initial state. */
+void fpu_thread_reset(struct thread *t);
+
+/* ptrace(2): a stopped thread's registers in one of these layouts, to and
+ * from a kernel buffer of exactly the layout's size.  -EIO if the CPU does
+ * not save in that layout. */
+#define FPU_REGS_FNSAVE 1       /* 108 bytes; only on a CPU without FXSAVE */
+#define FPU_REGS_FXSAVE 2       /* 512 bytes */
+#define FPU_REGS_XSAVE  3       /* fpu_xstate_info()'s length */
+#define FPU_REGS_MAX    4096    /* no layout is larger */
+int fpu_thread_get_regs(struct thread *t, int layout, void *kbuf, size_t len);
+int fpu_thread_set_regs(struct thread *t, int layout, const void *kbuf,
+                        size_t len);
+/* The components XSAVE keeps (XCR0) and the size of its area. */
+int fpu_xstate_info(uint64_t *xcr0, uint32_t *len);
 
 #endif

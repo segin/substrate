@@ -108,6 +108,50 @@ int kprintf(const char *fmt, ...) { (void)fmt; return 0; }
 int cmdline_debug_enabled(const char *channel) { (void)channel; return 0; }
 int cmdline_has(const char *key) { (void)key; return 0; }
 
+/*
+ * The FPU, as a CPU with XSAVE presents it to sendsig() (machine/fpu.h):
+ * an FXSAVE image and FPU_STUB_EXTRA bytes of extended state.  What comes
+ * back through sigreturn is recorded.
+ */
+#include <machine/fpu.h>
+
+#define FPU_STUB_EXTRA 320
+static int fpu_stub_format = FPU_SIG_FXSAVE;
+static int fpu_restored_format = -1;
+static uint8_t fpu_restored_image[512];
+static uint8_t fpu_restored_extra[FPU_STUB_EXTRA];
+static size_t fpu_restored_extra_len;
+
+int fpu_signal_save(void *image) {
+    if (fpu_stub_format != FPU_SIG_NONE) memset(image, 0xA7, 512);
+    return fpu_stub_format;
+}
+size_t fpu_signal_extra_len(void) { return FPU_STUB_EXTRA; }
+int fpu_signal_copyout_extra(void *uaddr) {
+    uint8_t extra[FPU_STUB_EXTRA];
+    memset(extra, 0x3C, sizeof(extra));
+    return copyout(extra, uaddr, sizeof(extra));
+}
+int fpu_signal_restore(int format, const void *image, const void *uextra,
+                       size_t extra_len) {
+    fpu_restored_format = format;
+    memcpy(fpu_restored_image, image, sizeof(fpu_restored_image));
+    fpu_restored_extra_len = extra_len;
+    if (uextra && extra_len == FPU_STUB_EXTRA)
+        memcpy(fpu_restored_extra, uextra, extra_len);
+    return 0;
+}
+
+/* The image and block the stubs above produce came back unchanged, apart
+ * from the image's software bytes, which name the block. */
+static void assert_fpu_restored(void) {
+    assert(fpu_restored_format == FPU_SIG_FXSAVE);
+    for (int i = 0; i < 464; i++) assert(fpu_restored_image[i] == 0xA7);
+    assert(fpu_restored_extra_len == FPU_STUB_EXTRA);
+    for (int i = 0; i < FPU_STUB_EXTRA; i++)
+        assert(fpu_restored_extra[i] == 0x3C);
+}
+
 #include "../../sys/arch/i386/signal.c"
 
 static void test_legacy_sendsig_and_sigreturn(void) {
@@ -140,8 +184,22 @@ static void test_legacy_sendsig_and_sigreturn(void) {
     regs.ss = 0x23;
     regs.eflags = 0x00033200;
 
+    /* The frame carries the FPU state behind the sigcontext, and the
+     * extended block above the frame. */
+    assert(frame->fp.fp_magic == SIGFRAME_FP_MAGIC);
+    assert(frame->fp.fp_format == FPU_SIG_FXSAVE);
+    assert(frame->fp.fp_image[0] == 0xA7);
+    struct sig_fpx fpx;
+    memcpy(&fpx, frame->fp.fp_image + SIG_FPX_OFFSET, sizeof(fpx));
+    assert(fpx.magic == SIG_FPX_MAGIC && fpx.len == FPU_STUB_EXTRA);
+    assert((fpx.addr & 63) == 0);
+    assert(fpx.addr >= regs.useresp + sizeof(struct sigframe));
+    assert(fpx.addr + fpx.len <= saved.useresp);
+
     thread.sig_mask = 0;
+    fpu_restored_format = -1;
     assert(sys_sigreturn(&frame->sc) == (int)saved.eax);
+    assert_fpu_restored();
     assert(regs.eip == saved.eip);
     assert(regs.ebx == saved.ebx);
     assert(regs.ecx == saved.ecx);
@@ -185,8 +243,14 @@ static void test_siginfo_sendsig_and_rt_sigreturn(void) {
     regs.ss = 0x23;
     regs.eflags = 0x00033200;
 
+    /* The ucontext carries the FPU state in mc_fpstate. */
+    assert(frame->uc.uc_mcontext.mc_fpformat == FPU_SIG_FXSAVE);
+    assert(frame->uc.uc_mcontext.mc_ownedfp == 1);
+
     thread.sig_mask = 0;
+    fpu_restored_format = -1;
     assert(sys_rt_sigreturn(&frame->uc) == (int)saved.eax);
+    assert_fpu_restored();
     assert(regs.eip == saved.eip);
     assert(regs.ebx == saved.ebx);
     assert(regs.ecx == saved.ecx);

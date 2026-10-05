@@ -208,7 +208,8 @@ int amd64_sys_sigreturn(void *ucp) {
             uextra = (const void *)(uintptr_t)mc->mc_xfpustate;
             xlen = (size_t)mc->mc_xfpustate_len;
         }
-        if (fpu_signal_restore(mc->mc_fpstate, uextra, xlen) != 0)
+        if (fpu_signal_restore(FPU_SIG_FXSAVE, mc->mc_fpstate, uextra,
+                               xlen) != 0)
             return -EINVAL;
     }
 

@@ -16,6 +16,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <machine/fpu.h>
 #include <machine/gdt.h>
 #include <machine/pmap.h>
 #include <machine/pmm.h>
@@ -445,6 +446,8 @@ static int xout_load(int fd, const char *path, char *const argv[],
         vm_map_destroy(current_process->vm_map);
     }
     current_process->vm_map = map;
+    /* The new image starts with the FPU in its initial state. */
+    fpu_thread_reset(current_thread);
     arch_set_kernel_stack((uintptr_t)current_thread->kstack_top);
 
     /* What ps and /proc/<pid>/cmdline report: the new argv, not the argv

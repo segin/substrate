@@ -32,6 +32,7 @@
 
 #include <string.h>
 
+#include <machine/fpu.h>
 #include <machine/gdt.h>
 #include <machine/idt.h>
 #include <machine/signal_arch.h>
@@ -214,6 +215,69 @@ void populate_siginfo(siginfo_t *info, int sig, int code) {
 }
 
 /*
+ * sig_fp_save - the thread's FPU state, for a signal frame about to be built
+ *
+ * Fills `image` (SIG_FP_IMAGE_SIZE bytes) and returns its format, one of
+ * FPU_SIG_*.  With XSAVE, the state beyond the image is written to a block
+ * reserved below *espp, which is moved down past it, and the image's
+ * struct sig_fpx names the block.  Returns -1 if that block cannot be
+ * written.
+ */
+static int sig_fp_save(uint8_t *image, uint32_t *espp) {
+    memset(image, 0, SIG_FP_IMAGE_SIZE);
+
+    int format = fpu_signal_save(image);
+    if (format != FPU_SIG_FXSAVE) {
+        return format;
+    }
+
+    /* Written even when there is no block, so that whatever FXSAVE left
+     * in these bytes is never read as one. */
+    struct sig_fpx fpx = { 0, 0, 0 };
+    size_t xlen = fpu_signal_extra_len();
+
+    if (xlen != 0) {
+        /* XSAVE areas are 64-byte aligned. */
+        uint32_t xsp = (*espp - (uint32_t)xlen) & ~63U;
+
+        if (validate_user_addr((void *)(uintptr_t)xsp, xlen) != 0 ||
+            fpu_signal_copyout_extra((void *)(uintptr_t)xsp) != 0) {
+            return -1;
+        }
+        fpx.magic = SIG_FPX_MAGIC;
+        fpx.addr = xsp;
+        fpx.len = (uint32_t)xlen;
+        *espp = xsp;
+    }
+    memcpy(image + SIG_FPX_OFFSET, &fpx, sizeof(fpx));
+    return format;
+}
+
+/*
+ * sig_fp_restore - make a signal frame's image the thread's FPU state
+ *
+ * The extended block is used only if the image names one of the size the
+ * kernel writes, in user memory; otherwise the image alone is restored.
+ */
+static void sig_fp_restore(uint32_t format, const uint8_t *image) {
+    const void *uextra = NULL;
+    size_t xlen = 0;
+
+    if (format == FPU_SIG_FXSAVE) {
+        struct sig_fpx fpx;
+
+        memcpy(&fpx, image + SIG_FPX_OFFSET, sizeof(fpx));
+        if (fpx.magic == SIG_FPX_MAGIC && fpx.len != 0 &&
+            fpx.len == fpu_signal_extra_len() &&
+            validate_user_addr((void *)(uintptr_t)fpx.addr, fpx.len) == 0) {
+            uextra = (const void *)(uintptr_t)fpx.addr;
+            xlen = fpx.len;
+        }
+    }
+    (void)fpu_signal_restore((int)format, image, uextra, xlen);
+}
+
+/*
  * populate_ucontext - Fill in ucontext_t structure with machine context
  *
  * Populates the ucontext with the full machine state for context manipulation.
@@ -352,9 +416,19 @@ void sendsig(void *handler_ptr, int sig, uint32_t mask, uint32_t flags, void *re
     /*
      * Handle SA_SIGINFO - extended frame with siginfo_t and ucontext
      */
+    /* The FPU state, and with XSAVE the block of it that goes above the
+     * frame.  A handler is free to use the x87 and the vector registers;
+     * without this the interrupted code resumes on what it left there. */
+    uint8_t fp_image[SIG_FP_IMAGE_SIZE];
+    int fp_format = sig_fp_save(fp_image, &esp);
+    if (fp_format < 0) {
+        sigexit(current_process, SIGSEGV);
+        return;
+    }
+
     if (flags & SA_SIGINFO) {
         struct siginfo_frame sif;
-        
+
         /* Reserve space for siginfo frame */
         esp -= sizeof(struct siginfo_frame);
 
@@ -395,7 +469,10 @@ void sendsig(void *handler_ptr, int sig, uint32_t mask, uint32_t flags, void *re
         
         /* Populate the ucontext_t structure */
         populate_ucontext(&sif.uc, mask, regs);
-        
+        sif.uc.uc_mcontext.mc_fpformat = (uint32_t)fp_format;
+        sif.uc.uc_mcontext.mc_ownedfp = fp_format != FPU_SIG_NONE;
+        memcpy(sif.uc.uc_mcontext.mc_fpstate, fp_image, sizeof(fp_image));
+
         /* Copy siginfo_frame to user stack */
         if (copyout(&sif, (void*)(uintptr_t)esp, sizeof(sif)) != 0) {
             sigexit(current_process, SIGSEGV);
@@ -488,6 +565,11 @@ void sendsig(void *handler_ptr, int sig, uint32_t mask, uint32_t flags, void *re
      */
     sf.retaddr = SIG_TRAMPOLINE_ADDR;  /* Return to trampoline */
     sf.sig = sig;                       /* Signal number (handler arg 1) */
+
+    memset(&sf.fp, 0, sizeof(sf.fp));
+    sf.fp.fp_magic = SIGFRAME_FP_MAGIC;
+    sf.fp.fp_format = (uint32_t)fp_format;
+    memcpy(sf.fp.fp_image, fp_image, sizeof(fp_image));
     
     /* Log the sigframe destination range so we can cross-reference
      * against userland's live heap blocks.  If esp lands in heap
@@ -652,6 +734,18 @@ int sys_sigreturn(void *scp_ptr) {
         current_thread->sig_alt_stack.ss_flags &= ~SS_ONSTACK;
     }
     
+    /* The FPU state sendsig() put behind the sigcontext.  A sigcontext
+     * from anywhere else has none there, or nothing readable. */
+    {
+        struct sigframe_fp fp;
+
+        if (copyin((const uint8_t *)scp + sizeof(struct sigcontext), &fp,
+                   sizeof(fp)) == 0 &&
+            fp.fp_magic == SIGFRAME_FP_MAGIC) {
+            sig_fp_restore(fp.fp_format, fp.fp_image);
+        }
+    }
+
     XSIG("pid=%d sigreturn: restored eip=0x%08x ebp=0x%08x esp=0x%08x eax=0x%08x",
          current_process ? current_process->pid : -1,
          sc.eip, sc.ebp, sc.user_esp, sc.eax);
@@ -784,6 +878,10 @@ int sys_rt_sigreturn(void *ucp_ptr) {
         current_thread->sig_alt_stack.ss_flags &= ~SS_ONSTACK;
     }
     
+    if (mc->mc_ownedfp != 0) {
+        sig_fp_restore(mc->mc_fpformat, (const uint8_t *)mc->mc_fpstate);
+    }
+
     XSIG("pid=%d rt_sigreturn: restored eip=0x%08x ebp=0x%08x esp=0x%08x eax=0x%08x",
          current_process ? current_process->pid : -1,
          mc->mc_eip, mc->mc_ebp, mc->mc_esp, mc->mc_eax);

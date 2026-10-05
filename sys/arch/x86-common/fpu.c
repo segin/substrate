@@ -37,6 +37,7 @@
  *   FXSAVE  x87 and SSE, 512 bytes.
  *   FNSAVE  x87 only, 108 bytes.
  */
+static int fpu_present = 0;
 static int fpu_use_fxsave = 0;
 static int fpu_use_xsave = 0;
 
@@ -47,6 +48,7 @@ static uint64_t fpu_xcr0 = 0;
 static uint32_t fpu_area_size = 512;
 
 #define FPU_LEGACY_SIZE     512U
+#define FPU_FNSAVE_SIZE     108U
 #define FPU_XSAVE_HDR_SIZE  64U
 #define FPU_AREA_ALIGN      64U         /* XSAVE's; FXSAVE needs only 16 */
 #define FPU_AREA_MAX        4096U       /* above this, AVX-512 is left off */
@@ -162,7 +164,8 @@ static void fpu_restore(thread_t *t) {
                              "m"(*(const char (*)[FPU_LEGACY_SIZE])area));
     } else {
         __asm__ volatile("frstor (%0)"
-                         : : "r"(area), "m"(*(const char (*)[108])area));
+                         : : "r"(area),
+                             "m"(*(const char (*)[FPU_FNSAVE_SIZE])area));
     }
 #else
     (void)t;
@@ -192,7 +195,48 @@ static void fpu_sync(thread_t *t) {
     if (fpu_owner[fpu_cpu()] == t) {
         fpu_clear_ts();
         fpu_save(t);
+        /* FNSAVE reinitialises the x87 once it has stored it, and T still
+         * owns the registers: put them back. */
+        if (!fpu_use_fxsave)
+            fpu_restore(t);
+        /* Only the owner may run with TS clear. */
+        if (t != current_thread)
+            fpu_set_ts();
     }
+}
+
+/*
+ * User data is about to become the area XRSTOR, FXRSTOR or FRSTOR loads.
+ * MXCSR loses its reserved bits, which fault.  The XSAVE header is rebuilt
+ * around the caller's XSTATE_BV: XRSTOR faults on a component XCR0 does not
+ * enable, on the compacted format, and on any reserved header byte.  The
+ * legacy components are always marked present, so that the legacy region
+ * -- which every format here fills in -- is what gets loaded.
+ */
+static void fpu_sanitize_area(uint8_t *area) {
+    if (!fpu_use_fxsave)
+        return;
+
+    uint32_t mxcsr;
+    memcpy(&mxcsr, area + FPU_MXCSR_OFFSET, sizeof(mxcsr));
+    mxcsr &= FPU_MXCSR_VALID;
+    memcpy(area + FPU_MXCSR_OFFSET, &mxcsr, sizeof(mxcsr));
+
+    if (fpu_use_xsave) {
+        uint8_t *hdr = area + FPU_LEGACY_SIZE;
+        uint64_t bv;
+
+        memcpy(&bv, hdr, sizeof(bv));
+        bv = (bv & fpu_xcr0) | XCR0_X87 | XCR0_SSE;
+        memset(hdr, 0, FPU_XSAVE_HDR_SIZE);
+        memcpy(hdr, &bv, sizeof(bv));
+    }
+}
+
+/* The size of the image a signal frame or a debugger sees first: FXSAVE's,
+ * or FNSAVE's on a CPU without it. */
+static size_t fpu_legacy_len(void) {
+    return fpu_use_fxsave ? FPU_LEGACY_SIZE : FPU_FNSAVE_SIZE;
 }
 
 /* T's registers are no longer the live ones: its next use reloads its
@@ -281,24 +325,31 @@ void fpu_thread_inherit(thread_t *parent, thread_t *child) {
  * halves of the YMM registers among them -- goes into a separate block on
  * the user stack that the frame points to (mc_xfpustate, as on FreeBSD).
  *
- * fpu_signal_save() copies the legacy image to `image` and returns 1, or
- * returns 0 if the thread has never used the FPU.  fpu_signal_extra_len()
- * is the size of the extended block, 0 without XSAVE, and
- * fpu_signal_copyout_extra() writes it to user memory; it must follow a
- * fpu_signal_save() that returned 1, with no return to user mode between.
- * fpu_signal_restore() makes the frame's image, and the extended block if
- * it is given one of the right size, the thread's state.
+ * The i386 frames do the same: the image in the ucontext's mc_fpstate, or
+ * after the sigcontext of a plain handler's frame, with the extended block
+ * found through the image's software-defined bytes (arch/i386/signal.c).
+ *
+ * fpu_signal_save() copies the legacy image to `image` (512 bytes of room)
+ * and returns its format, FPU_SIG_FXSAVE or, on a CPU without FXSAVE,
+ * FPU_SIG_FNSAVE (108 bytes); or returns FPU_SIG_NONE if the thread has
+ * never used the FPU.  fpu_signal_extra_len() is the size of the extended
+ * block, 0 without XSAVE, and fpu_signal_copyout_extra() writes it to user
+ * memory; it must follow a fpu_signal_save() that returned a format, with
+ * no return to user mode between.  fpu_signal_restore() makes an image of
+ * the kernel's own format, and the extended block if it is given one of
+ * the right size, the thread's state; an image of any other format is
+ * ignored.
  */
 int fpu_signal_save(void *image) {
     thread_t *t = current_thread;
 
-    if (!t || !fpu_use_fxsave || !t->fpu_used || !t->fpu_area)
-        return 0;
+    if (!t || !fpu_present || !t->fpu_used || !t->fpu_area)
+        return FPU_SIG_NONE;
     unsigned long flags = intr_disable();
     fpu_sync(t);
-    memcpy(image, t->fpu_area, FPU_LEGACY_SIZE);
+    memcpy(image, t->fpu_area, fpu_legacy_len());
     intr_restore(flags);
-    return 1;
+    return fpu_use_fxsave ? FPU_SIG_FXSAVE : FPU_SIG_FNSAVE;
 }
 
 size_t fpu_signal_extra_len(void) {
@@ -317,11 +368,12 @@ int fpu_signal_copyout_extra(void *uaddr) {
                    len) != 0 ? -EFAULT : 0;
 }
 
-int fpu_signal_restore(const void *image, const void *uextra,
+int fpu_signal_restore(int format, const void *image, const void *uextra,
                        size_t extra_len) {
     thread_t *t = current_thread;
 
-    if (!t || !fpu_use_fxsave)
+    if (!t || !fpu_present ||
+        format != (fpu_use_fxsave ? FPU_SIG_FXSAVE : FPU_SIG_FNSAVE))
         return 0;
     if (!fpu_thread_area(t))
         return -ENOMEM;
@@ -334,36 +386,128 @@ int fpu_signal_restore(const void *image, const void *uextra,
     intr_restore(flags);
 
     uint8_t *area = t->fpu_area;
-    memcpy(area, image, FPU_LEGACY_SIZE);
-    uint32_t mxcsr;
-    memcpy(&mxcsr, area + FPU_MXCSR_OFFSET, sizeof(mxcsr));
-    mxcsr &= FPU_MXCSR_VALID;
-    memcpy(area + FPU_MXCSR_OFFSET, &mxcsr, sizeof(mxcsr));
+    memcpy(area, image, fpu_legacy_len());
 
     if (fpu_use_xsave) {
         uint8_t *hdr = area + FPU_LEGACY_SIZE;
-        uint64_t bv = 0;
 
         if (uextra && extra_len == fpu_signal_extra_len()) {
             if (copyin(uextra, hdr, extra_len) != 0) {
                 /* Half-written: fall back to the initial extended state. */
                 memset(hdr, 0, extra_len);
             }
-            memcpy(&bv, hdr, sizeof(bv));
         } else {
             /* A frame without the block: its handler saw, and may have
              * changed, only the legacy state.  The extended components
              * go back to their initial configuration. */
             memset(hdr, 0, fpu_area_size - FPU_LEGACY_SIZE);
         }
-        /* The header is user data.  XRSTOR faults on a component XCR0
-         * does not enable, on the compacted format, and on any reserved
-         * header byte; and the legacy image above must be loaded. */
-        bv = (bv & fpu_xcr0) | XCR0_X87 | XCR0_SSE;
-        memset(hdr, 0, FPU_XSAVE_HDR_SIZE);
-        memcpy(hdr, &bv, sizeof(bv));
     }
+    fpu_sanitize_area(area);
     t->fpu_used = 1;
+    return 0;
+}
+
+/*
+ * execve(2): the new image starts with the FPU in its initial state, not
+ * with what the old one left in the registers.  The area is kept; the
+ * thread's next use reinitialises it.
+ */
+void fpu_thread_reset(thread_t *t) {
+    if (!t) return;
+    unsigned long flags = intr_disable();
+    fpu_disown(t);
+    t->fpu_used = 0;
+    intr_restore(flags);
+}
+
+/*
+ * ptrace(2): a stopped thread's state, out to and in from a debugger, in
+ * one of three layouts -- FPU_REGS_FNSAVE (108 bytes; a CPU without
+ * FXSAVE only), FPU_REGS_FXSAVE (512 bytes), and FPU_REGS_XSAVE (the whole
+ * XSAVE area, fpu_xstate_info() giving its size and components).  A
+ * layout the CPU does not save in is -EIO.  A thread that has not used the
+ * FPU reads as the initial state.  KBUF is kernel memory of LEN bytes,
+ * which must be the layout's size.
+ */
+static int fpu_regs_len(int layout, size_t *len) {
+    switch (layout) {
+    case FPU_REGS_FNSAVE:
+        if (!fpu_present || fpu_use_fxsave) return -EIO;
+        *len = FPU_FNSAVE_SIZE;
+        return 0;
+    case FPU_REGS_FXSAVE:
+        if (!fpu_use_fxsave) return -EIO;
+        *len = FPU_LEGACY_SIZE;
+        return 0;
+    case FPU_REGS_XSAVE:
+        if (!fpu_use_xsave) return -EIO;
+        *len = fpu_area_size;
+        return 0;
+    default:
+        return -EINVAL;
+    }
+}
+
+int fpu_xstate_info(uint64_t *xcr0, uint32_t *len) {
+    if (!fpu_use_xsave) return -EIO;
+    *xcr0 = fpu_xcr0;
+    *len = fpu_area_size;
+    return 0;
+}
+
+int fpu_thread_get_regs(thread_t *t, int layout, void *kbuf, size_t len) {
+    size_t want;
+    int rc = fpu_regs_len(layout, &want);
+
+    if (rc != 0) return rc;
+    if (!t || len != want) return -EINVAL;
+
+    if (!t->fpu_used || !t->fpu_area) {
+        if (fpu_use_fxsave) {
+            uint16_t fcw = FPU_FCW_DEFAULT;
+            uint32_t mxcsr = FPU_MXCSR_DEFAULT;
+
+            memset(kbuf, 0, len);
+            memcpy(kbuf, &fcw, sizeof(fcw));
+            memcpy((uint8_t *)kbuf + FPU_MXCSR_OFFSET, &mxcsr, sizeof(mxcsr));
+        } else {
+            /* What FNINIT leaves: control word, clear status, every
+             * register tagged empty.  Each is 16 bits in a 32-bit slot. */
+            uint32_t env[3] = { FPU_FCW_DEFAULT, 0, 0xFFFF };
+
+            memset(kbuf, 0, len);
+            memcpy(kbuf, env, sizeof(env));
+        }
+        return 0;
+    }
+    unsigned long flags = intr_disable();
+    fpu_sync(t);
+    memcpy(kbuf, t->fpu_area, len);
+    intr_restore(flags);
+    return 0;
+}
+
+int fpu_thread_set_regs(thread_t *t, int layout, const void *kbuf,
+                        size_t len) {
+    size_t want;
+    int rc = fpu_regs_len(layout, &want);
+
+    if (rc != 0) return rc;
+    if (!t || len != want) return -EINVAL;
+    if (!fpu_thread_area(t)) return -ENOMEM;
+
+    unsigned long flags = intr_disable();
+    if (t->fpu_used) {
+        fpu_sync(t);            /* what the image leaves alone is kept */
+    } else if (fpu_use_fxsave) {
+        fpu_init_area(t->fpu_area);
+    }
+    fpu_disown(t);
+    memcpy(t->fpu_area, kbuf, len);
+    fpu_sanitize_area(t->fpu_area);
+    t->fpu_used = 1;
+    intr_restore(flags);
     return 0;
 }
 
@@ -425,8 +569,6 @@ void fpu_handler(registers_t *regs) {
 
     // Re-executing the faulting instruction will now work.
 }
-
-static int fpu_present = 0;
 
 #ifndef HOST_TEST
 /*
@@ -535,7 +677,7 @@ void fpu_init(void) {
                 kprint("FPU: Using FXSAVE/FXRSTOR context format\n");
             }
         } else {
-            fpu_area_size = 108;
+            fpu_area_size = FPU_FNSAVE_SIZE;
             kprint("FPU: Using FNSAVE/FRSTOR context format\n");
         }
     } else {

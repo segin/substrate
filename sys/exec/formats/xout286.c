@@ -27,6 +27,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <machine/fpu.h>
 #include <machine/gdt.h>
 #include <machine/pmap.h>
 #include <machine/pmm.h>
@@ -690,6 +691,8 @@ static int x286_load(int fd, const char *path, char *const argv[],
      * personality are far pointers into an address space that no longer
      * exists. */
     proc_exec_reset_signals();
+    /* And the new image starts with the FPU in its initial state. */
+    fpu_thread_reset(current_thread);
     {
         const char *name = path ? path : "";
         const char *p;

@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <machine/fpu.h>
 #include <machine/pmap.h>
 #include <machine/pmm.h>
 #include <machine/vmparam.h>
@@ -529,6 +530,8 @@ int elks_load(int fd, const char *path, char *const argv[], char *const envp[]) 
     
     elks_apply_exec_state(current_process, &plan, path);
     proc_capture_cmdline(current_process, kargv);
+    /* The new image starts with the FPU in its initial state. */
+    fpu_thread_reset(current_thread);
     if (current_process->vm_map) {
         vm_map_destroy(current_process->vm_map);
     }
