@@ -178,6 +178,10 @@ on the 64-bit kernel at all.
   binary level files have the target's layout) and cross-compiles only
   the game.  Setgid `games`; state in `/var/games/nethack`.  Pattern
   options are globs, not regexes (see the port's README).
+- **angband 4.2.5** (`contrib/angband/`) — curses and X11 front ends.  No
+  patches.  `--with-private-dirs`: saves and scores in
+  `~/.angband/Angband/`, no setgid.  Needs a UTF-8 locale, which
+  `/etc/profile` provides.
 - **qman 1.5.1** (`contrib/qman/`) — fetched but not yet buildable on
   substrate (needs meson, cog, libbsd, ncursesw).  Tracked under
   `contrib/qman/README.SUBSTRATE.md`.
