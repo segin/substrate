@@ -29,6 +29,8 @@
 #include <sys/poll.h>
 #include <sys/proc.h>
 #include <sys/statvfs.h>
+#include <kern/stacktrace.h>
+#include <machine/vmparam.h>
 #include <vfs/buf.h>
 #include <vfs/vfs.h>
 #include <vfs/vnode.h>
@@ -612,8 +614,39 @@ void close_fs(fs_node_t *node) {
      * a process that opened such an fd panics in fd_close_all. */
     if (!node) return;
     __sync_fetch_and_add(&fs_close_count, 1);
-    if (node->close != 0)
+    if (node->close != 0) {
+        /*
+         * node->close must be a kernel code pointer.  A value below the
+         * kernel base means the fs_node_t has already been freed and its
+         * storage reused: the pipe/pty/device close handlers kfree() the
+         * node, so a node closed twice (or closed after the pair that owns
+         * it was destroyed) is read back here with whatever now occupies
+         * the memory.  Observed at graphical-session shutdown as the
+         * pmap pv-entry sentinel PV_POISON_LIVE (0x504c4956) -- a freed
+         * node whose 408 bytes had been handed to the pv-entry allocator.
+         *
+         * Calling such a pointer jumps into data and #PFs on the
+         * instruction fetch; the fault handler's own stack unwind then
+         * faults again, giving a recursive panic with no backtrace -- the
+         * worst possible diagnostic.  Catch it here instead: name the
+         * dangling node and the bad pointer, print the real backtrace
+         * (which identifies the caller that held the stale reference), and
+         * skip the call so an in-progress shutdown still completes rather
+         * than wedging the machine.  This is a guard against a
+         * use-after-free, not a fix for one.
+         */
+        if ((uintptr_t)node->close < KERNEL_VA_START) {
+            char buf[112];
+            snprintf(buf, sizeof(buf),
+                     "close_fs: node %p has corrupt close handler %p "
+                     "(use-after-free) -- skipping\n",
+                     (void *)node, (void *)(uintptr_t)node->close);
+            kprint(buf);
+            stack_trace();
+            return;
+        }
         node->close(node);
+    }
 }
 
 /*
