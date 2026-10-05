@@ -67,6 +67,18 @@ STAGE_OWN="$SUBSTRATE_TOP/dist-overlay64/dist-$PKG"
     exit 1
 }
 
+# The helpers copy config.sub out of the binutils port's EXTRACTED tree
+# (see the note at the helper loop below).  Their fallback, patching the
+# port's own config.sub in place, teaches it the OS name only: enough for
+# i386-unknown-substrate, but a config.sub from 2001 (glib 1.2) has never
+# heard of x86_64 either.  The tree is there after a toolchain build and
+# absent when the toolchain came out of a cache, which is exactly when
+# nothing else would have noticed -- so make sure of it here.
+if ! ls -d "$HERE"/binutils/build/binutils-*/ >/dev/null 2>&1; then
+    echo "==> [port64] extracting binutils, for its config.sub"
+    ( cd "$HERE/binutils" && ./fetch.sh )
+fi
+
 export SUBSTRATE_TOP STAGE1_PREFIX
 export SUBSTRATE_ARCH=x86_64
 export PATH="$STAGE1_PREFIX/bin:$PATH"
