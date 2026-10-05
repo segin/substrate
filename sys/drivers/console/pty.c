@@ -284,12 +284,16 @@ static void pty_publish_slave_node(pty_pair_t *p) {
     snprintf(node->name, sizeof(node->name), "pts/%d", p->index);
     node->flags = FS_CHARDEVICE;
     /*
-     * /dev/pts/N: 0620 root:tty until the master's grantpt(3) is
-     * invoked; grantpt() chowns to the calling user.  Matches
-     * Unix98 / glibc behaviour.
+     * /dev/pts/N: 0620 <opener>:tty.  The slave belongs to whoever
+     * opened /dev/ptmx, from the start, as on Linux's devpts: grantpt(3)
+     * has nothing left to do, and libc's does nothing.  It used to be
+     * created owned by root "until grantpt() chowns it", which no
+     * unprivileged process could do -- so only root could open the
+     * slave of its own pty, and openpty(3) failed with EACCES for
+     * everyone else.
      */
     node->mask  = 0620;
-    node->uid   = GID_ROOT;
+    node->uid   = current_process ? current_process->euid : GID_ROOT;
     node->gid   = GID_TTY;
     /* Unix98 PTY slaves live at major 136, minor = pair index. */
     node->rdev  = makedev(UNIX98_PTS_MAJOR, p->index & 0xFF);
