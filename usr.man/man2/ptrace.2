@@ -4,7 +4,10 @@ ptrace \- process trace
 .SH SYNOPSIS
 .B #include <sys/ptrace.h>
 .PP
-.BI "long ptrace(int " request ", pid_t " pid ", void *" addr ", int " data ");"
+.BI "long ptrace(int " request ", pid_t " pid ", void *" addr ", void *" data ");"
+.SH LIBRARY
+System call library
+.RI ( libsys ", " \-lsys )
 .SH DESCRIPTION
 The
 .BR ptrace ()
@@ -13,6 +16,62 @@ observe and control the execution of another process (the "tracee"),
 and examine and change the tracee's memory and registers.  It is
 primarily used to implement breakpoint debugging and system call
 tracing.
+.PP
+The requests are:
+.TP
+.B PTRACE_TRACEME
+The caller asks to be traced by its parent.  It stops with
+.B SIGTRAP
+when it next executes a program.
+.TP
+.B PTRACE_ATTACH
+Stop
+.I pid
+and become its tracer.  A process that is asleep in a system call stops
+there and resumes the call when it is continued.
+.TP
+.BR PTRACE_PEEKTEXT ", " PTRACE_PEEKDATA
+Return the word at
+.I addr
+in the tracee.
+.TP
+.BR PTRACE_POKETEXT ", " PTRACE_POKEDATA
+Store the word
+.I data
+at
+.I addr
+in the tracee.
+.TP
+.BR PTRACE_GETREGS ", " PTRACE_SETREGS
+Copy the tracee's general registers to or from the
+.B struct user_regs_struct
+that
+.I data
+points to.
+.TP
+.BR PTRACE_CONT ", " PTRACE_SINGLESTEP
+Resume the tracee, to its next stop or for one instruction.
+.TP
+.B PTRACE_DETACH
+Stop tracing the tracee and resume it.
+.TP
+.B PTRACE_KILL
+Terminate the tracee.
+.PP
+A word is one
+.BR long :
+4 bytes for a 32-bit tracer, 8 for a 64-bit one.
+.B struct user_regs_struct
+likewise follows the tracer: the i386 register set for a 32-bit tracer,
+and for a 64-bit one the x86-64 set (r15 through gs, with the thread
+pointer in
+.IR fs_base ),
+in which a 32-bit tracee's registers appear zero-extended.
+.PP
+.B PTRACE_SETREGS
+from a 64-bit tracer sets the general registers, the instruction and
+stack pointers and the arithmetic, direction and trap flags.  The
+segment registers and the remaining flags keep the tracee's values.
 .SH RETURN VALUE
 On success,
 .BR ptrace ()
@@ -25,10 +84,21 @@ is set appropriately.
 The specified process cannot be traced.
 .TP
 .B ESRCH
-The specified process does not exist.
+The specified process does not exist, or the caller is not its tracer.
 .TP
-.B ENOSYS
-The system does not currently implement this request.
+.B EFAULT
+.I addr
+or
+.I data
+is not a valid address, or the tracee is not stopped.
+.TP
+.B EIO
+.B PTRACE_SETREGS
+was given an instruction pointer, stack pointer or thread pointer that
+the tracee could not resume with.
+.TP
+.B EINVAL
+The request is not one of those above.
 .SH CONFORMING TO
 SVr4, 4.3BSD.
 .SH SEE ALSO

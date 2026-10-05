@@ -26,11 +26,23 @@
 #define PTRACE_ATTACH       16
 #define PTRACE_DETACH       17
 
+#if defined(__x86_64__)
+/* A 64-bit tracer's register set: the Linux/amd64 layout.  PEEK and POKE
+ * move one long (8 bytes) at a time. */
+struct user_regs_struct {
+    unsigned long long r15, r14, r13, r12, rbp, rbx, r11, r10;
+    unsigned long long r9, r8, rax, rcx, rdx, rsi, rdi, orig_rax;
+    unsigned long long rip, cs, eflags, rsp, ss;
+    unsigned long long fs_base, gs_base;
+    unsigned long long ds, es, fs, gs;
+};
+#else
 struct user_regs_struct {
     unsigned int ebx, ecx, edx, esi, edi, ebp, eax;
     unsigned int xds, xes, xfs, xgs, orig_eax;
     unsigned int eip, xcs, eflags, esp, xss;
 };
+#endif
 
 #ifdef __cplusplus
 extern "C" {

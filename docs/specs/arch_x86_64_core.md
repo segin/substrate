@@ -340,16 +340,22 @@ a statically linked 64-bit program:
   FreeBSD `mcontext` with the FXSAVE image, and a 64-bit trampoline at
   `0xFE000060` that calls the handler and then `sigreturn(&sf_uc)`.
 
+* **ptrace.**  What a tracer exchanges follows the tracer's width
+  (`kern/ptrace.c`): a 64-bit one gets the Linux/amd64
+  `user_regs_struct` from `PTRACE_GETREGS` and 8-byte `PEEK`/`POKE`
+  words, a 32-bit one the i386 forms.  A 64-bit `PTRACE_SETREGS` leaves
+  the selectors and the system flags alone and refuses a pointer the
+  tracee could not `iretq` to.  The 64-bit gdb is a native debugger
+  through this (`contrib/gdb/substrate-nat.c`): `run`, `attach`,
+  breakpoints, registers, memory and single-stepping.
+
 What a 64-bit process does not have yet:
 
-* `ptrace`: its requests exchange the i386 register set and 32-bit words
-  only;
-* the C++ runtime on the system image: the 64-bit cross toolchain
-  (`contrib/build-toolchain64.sh`, `docs/toolchain.md`) builds
-  `libgcc_s.so.1` and `libstdc++.so.6`, and every program it links needs
-  the former in `/lib64`, but nothing stages them into `dist/` yet.  The
-  in-tree 64-bit libraries are still built with the host compiler, and
-  `libm.so.0` links what it needs from `libgcc.a`.
+* in the debugger: floating-point and vector registers, thread-local
+  variables, and the symbols of shared libraries -- `ld64.so`, like
+  `ld.so`, publishes no `r_debug` for gdb to find them through;
+* the in-tree 64-bit libraries are still built with the host compiler,
+  and `libm.so.0` links what it needs from `libgcc.a`.
 
 ### The 64-bit image
 

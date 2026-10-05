@@ -12,7 +12,8 @@
  *   PTRACE_TRACEME              caller asks to be traced by its parent.
  *   PTRACE_ATTACH               stop pid and become its tracer.
  *   PTRACE_PEEKTEXT/PEEKDATA    read one word at `addr`; the word is stored
- *                               through `data` (a uint32_t*).  Returns 0/-errno
+ *                               through `data` (a uint32_t*, or a uint64_t*
+ *                               when the tracer is 64-bit).  Returns 0/-errno
  *                               (no in-band -1/word ambiguity — the libc
  *                               wrapper re-exposes the classic "returns word").
  *   PTRACE_POKETEXT/POKEDATA    write the word `data` at `addr`.
@@ -46,6 +47,23 @@ struct user_regs_struct {
     unsigned int ebx, ecx, edx, esi, edi, ebp, eax;
     unsigned int xds, xes, xfs, xgs, orig_eax;
     unsigned int eip, xcs, eflags, esp, xss;
+};
+
+/*
+ * The register set a 64-bit tracer exchanges with PTRACE_GETREGS / SETREGS:
+ * the Linux/amd64 user_regs_struct, field for field, so gdb's stock amd64
+ * register offsets apply.  A 64-bit tracer gets this layout whatever its
+ * tracee is; a 32-bit tracee's registers come back zero-extended.  Userland
+ * sees it as struct user_regs_struct when compiled for x86-64
+ * (include/sys/ptrace.h).  A 64-bit tracer's PEEK and POKE move 8-byte
+ * words, its sizeof(long).
+ */
+struct user_regs_struct64 {
+    unsigned long long r15, r14, r13, r12, rbp, rbx, r11, r10;
+    unsigned long long r9, r8, rax, rcx, rdx, rsi, rdi, orig_rax;
+    unsigned long long rip, cs, eflags, rsp, ss;
+    unsigned long long fs_base, gs_base;
+    unsigned long long ds, es, fs, gs;
 };
 
 #endif /* _SYS_PTRACE_H */

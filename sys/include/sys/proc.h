@@ -644,6 +644,7 @@ void rusage_add_tick(struct process *p, int is_usermode);
 struct registers;
 void  signal_resume_process_threads(struct process *p);
 void *ptrace_user_frame(struct process *p);
+thread_t *ptrace_user_thread(struct process *p);
 void  ptrace_exec_stop(struct registers *frame);
 
 #endif

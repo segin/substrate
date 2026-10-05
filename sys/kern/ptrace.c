@@ -28,6 +28,7 @@
 
 #include <machine/idt.h>
 #include <machine/pmap.h>
+#include <machine/vmparam.h>
 #include <pm/pm.h>
 #include <sys/copy.h>
 #include <sys/errno.h>
@@ -35,6 +36,7 @@
 #include <sys/proc.h>
 #include <sys/ptrace.h>
 #include <sys/signal.h>
+#include <sys/sysinfo.h>
 #include <vm/vm_fault.h>
 
 #define EFLAGS_TF 0x00000100u   /* trap flag — single-step after each insn */
@@ -58,6 +60,77 @@ static void uregs_to_frame(const struct user_regs_struct *u, registers_t *f) {
     f->eip = u->eip; f->cs = u->xcs; f->eflags = u->eflags;
     f->useresp = u->esp; f->ss = u->xss;
 }
+
+#ifdef SUBSTRATE_ARCH_X86_64
+/*
+ * A 64-bit tracer (gdb built for x86-64) exchanges the amd64 register set
+ * and moves 8-byte memory words -- its sizeof(long).  What decides is the
+ * tracer's width, not the tracee's: a 64-bit debugger expects the 64-bit
+ * layout even for a 32-bit tracee, whose registers come back zero-extended,
+ * as on Linux.
+ */
+static int ptrace_tracer_is_amd64(void) {
+    return current_process && current_process->bitness == BITNESS_64;
+}
+
+/* The flags a tracer may change: CF PF AF ZF SF TF DF OF.  IF, IOPL, NT,
+ * RF, VM and AC stay the kernel's -- a tracer must not be able to run its
+ * tracee with interrupts off or with I/O privilege. */
+#define EFLAGS_USER_MASK 0x00000DD5u
+
+/* Lowest non-canonical address.  iretq to a non-canonical RIP or RSP faults
+ * in ring 0, so neither may come from a tracer. */
+#define PTRACE_CANONICAL_LIMIT 0x0000800000000000ULL
+
+static void frame_to_uregs64(const registers_t *f, const thread_t *t,
+                             const process_t *tracee,
+                             struct user_regs_struct64 *u) {
+    u->r15 = f->r15; u->r14 = f->r14; u->r13 = f->r13; u->r12 = f->r12;
+    u->r11 = f->r11; u->r10 = f->r10; u->r9  = f->r9;  u->r8  = f->r8;
+    u->rbp = f->rbp; u->rbx = f->rbx; u->rax = f->rax; u->rcx = f->rcx;
+    u->rdx = f->rdx; u->rsi = f->rsi; u->rdi = f->rdi;
+    u->orig_rax = f->rax;
+    u->rip = f->rip; u->cs = f->cs64; u->eflags = f->rflags;
+    u->rsp = f->rsp; u->ss = f->ss64;
+    u->ds = f->ds64; u->es = f->es64; u->fs = f->fs64; u->gs = f->gs64;
+    /* A 64-bit thread's pointer is its %fs base, kept in gs_base
+     * (arch/i386/sysarch.c). */
+    u->fs_base = (t && tracee->bitness == BITNESS_64) ? t->gs_base : 0;
+    u->gs_base = 0;
+}
+
+/*
+ * The registers a tracer may set.  The selectors stay the tracee's own: a
+ * tracer-supplied %cs or %ss could name a kernel segment, and the tracee
+ * would then be resumed in ring 0.  Only the user flags are taken, and a
+ * RIP or RSP that is not canonical is refused.
+ */
+static int uregs64_to_frame(const struct user_regs_struct64 *u, registers_t *f,
+                            thread_t *t, const process_t *tracee) {
+    if (u->rip >= PTRACE_CANONICAL_LIMIT || u->rsp >= PTRACE_CANONICAL_LIMIT) {
+        return -EIO;
+    }
+    /* A 32-bit tracee returns to a compatibility-mode segment, where an
+     * instruction pointer above 4 GiB is past the segment limit. */
+    if (tracee->bitness != BITNESS_64 &&
+        (u->rip > 0xFFFFFFFFULL || u->rsp > 0xFFFFFFFFULL)) {
+        return -EIO;
+    }
+    if (t && tracee->bitness == BITNESS_64 && u->fs_base != t->gs_base) {
+        /* The base is kept in 32 bits; user space ends below 4 GiB. */
+        if (u->fs_base >= USER32_VA_END) return -EIO;
+        t->gs_base = (uint32_t)u->fs_base;
+    }
+    f->r15 = u->r15; f->r14 = u->r14; f->r13 = u->r13; f->r12 = u->r12;
+    f->r11 = u->r11; f->r10 = u->r10; f->r9  = u->r9;  f->r8  = u->r8;
+    f->rbp = u->rbp; f->rbx = u->rbx; f->rax = u->rax; f->rcx = u->rcx;
+    f->rdx = u->rdx; f->rsi = u->rsi; f->rdi = u->rdi;
+    f->rip = u->rip; f->rsp = u->rsp;
+    f->rflags = (f->rflags & ~(uint64_t)EFLAGS_USER_MASK) |
+                (u->eflags & EFLAGS_USER_MASK);
+    return 0;
+}
+#endif
 
 /* ---- children-list surgery for PTRACE_ATTACH reparenting ------------------ */
 
@@ -160,6 +233,25 @@ int sys_ptrace(int req, int pid, int addr, int data) {
     switch (req) {
     case PTRACE_PEEKTEXT:
     case PTRACE_PEEKDATA: {
+#ifdef SUBSTRATE_ARCH_X86_64
+        if (ptrace_tracer_is_amd64()) {
+            /* A 64-bit tracer's word is 8 bytes.  libsys always passes an
+             * out-pointer, so there is no in-band form to honour: the
+             * return value is 32 bits wide and could not carry the word. */
+            uint64_t word64 = 0;
+            ptrace_fault_in(tracee, (uint32_t)addr, sizeof(word64));
+            if (pmap_copyin_other(tracee->pmap, (uintptr_t)(uint32_t)addr,
+                                  &word64, sizeof(word64)) != sizeof(word64)) {
+                return -EFAULT;
+            }
+            if ((void *)(uintptr_t)(uint32_t)data == NULL) return -EINVAL;
+            if (copyout(&word64, (void *)(uintptr_t)(uint32_t)data,
+                        sizeof(word64)) != 0) {
+                return -EFAULT;
+            }
+            return 0;
+        }
+#endif
         /* Read one word from the tracee at `addr`; store it through the
          * tracer's `data` pointer.  Returns 0/-errno (the libc wrapper turns
          * this back into the classic "PEEK returns the word"). */
@@ -186,6 +278,22 @@ int sys_ptrace(int req, int pid, int addr, int data) {
 
     case PTRACE_POKETEXT:
     case PTRACE_POKEDATA: {
+#ifdef SUBSTRATE_ARCH_X86_64
+        if (ptrace_tracer_is_amd64()) {
+            /* The dispatcher hands handlers the low word of each argument;
+             * a 64-bit word to store is taken whole from the tracer's
+             * syscall frame (argument 4 is %r10). */
+            const registers_t *sr =
+                (const registers_t *)current_thread->syscall_regs;
+            uint64_t word64 = sr ? sr->r10 : (uint32_t)data;
+            ptrace_fault_in(tracee, (uint32_t)addr, sizeof(word64));
+            if (pmap_copyout_other(tracee->pmap, (uintptr_t)(uint32_t)addr,
+                                   &word64, sizeof(word64)) != sizeof(word64)) {
+                return -EFAULT;
+            }
+            return 0;
+        }
+#endif
         uint32_t word = (uint32_t)data;
         ptrace_fault_in(tracee, (uint32_t)addr, sizeof(word));
         if (pmap_copyout_other(tracee->pmap, (uintptr_t)(uint32_t)addr,
@@ -198,6 +306,18 @@ int sys_ptrace(int req, int pid, int addr, int data) {
     case PTRACE_GETREGS: {
         struct user_regs_struct urs;
         if (!frame) return -EFAULT;
+#ifdef SUBSTRATE_ARCH_X86_64
+        if (ptrace_tracer_is_amd64()) {
+            struct user_regs_struct64 u64;
+            memset(&u64, 0, sizeof(u64));
+            frame_to_uregs64(frame, ptrace_user_thread(tracee), tracee, &u64);
+            if (copyout(&u64, (void *)(uintptr_t)(uint32_t)data,
+                        sizeof(u64)) != 0) {
+                return -EFAULT;
+            }
+            return 0;
+        }
+#endif
         memset(&urs, 0, sizeof(urs));
         frame_to_uregs(frame, &urs);
         if (copyout(&urs, (void *)(uintptr_t)(uint32_t)data, sizeof(urs)) != 0) {
@@ -209,6 +329,17 @@ int sys_ptrace(int req, int pid, int addr, int data) {
     case PTRACE_SETREGS: {
         struct user_regs_struct urs;
         if (!frame) return -EFAULT;
+#ifdef SUBSTRATE_ARCH_X86_64
+        if (ptrace_tracer_is_amd64()) {
+            struct user_regs_struct64 u64;
+            if (copyin((void *)(uintptr_t)(uint32_t)data, &u64,
+                       sizeof(u64)) != 0) {
+                return -EFAULT;
+            }
+            return uregs64_to_frame(&u64, frame, ptrace_user_thread(tracee),
+                                    tracee);
+        }
+#endif
         if (copyin((void *)(uintptr_t)(uint32_t)data, &urs, sizeof(urs)) != 0) {
             return -EFAULT;
         }

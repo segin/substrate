@@ -414,20 +414,52 @@ static void signal_die_if_killed(void) {
 /* ptrace(2) helper: the saved user trapframe a stopped tracee will resume with
  * (its first thread's user_frame, captured at the signal-delivery stop).
  * Returns NULL if no thread of p is parked in a stop. */
+/*
+ * ptrace signal-delivery stop: park the traced current process for its
+ * tracer, recording FRAME -- the user frame it will resume with -- so that
+ * PTRACE_GETREGS/SETREGS see and edit it.  The signal is consumed; the tracer
+ * can re-request delivery through PTRACE_CONT's data argument.  Returns once
+ * the tracer resumes it (or it has been killed meanwhile).
+ */
+static void signal_ptrace_stop(int sig, void *frame) {
+    process_t *tracer = current_process->p_tracer ?
+                        current_process->p_tracer : current_process->p_parent;
+    current_thread->user_frame = frame;
+    current_process->p_xsig = (uint8_t)sig;
+    signal_stop_process_threads(current_process, "ptrace-stop");
+    if (tracer) {
+        psignal(tracer, SIGCHLD);
+        sched_wakeup(&tracer->p_children);
+    }
+    sched_yield();
+    signal_die_if_killed();
+    /* Resumed: the frame is no longer a stop the tracer may inspect. */
+    current_thread->user_frame = NULL;
+}
+
 void *ptrace_user_frame(process_t *p) {
+    thread_t *t = ptrace_user_thread(p);
+
+    return t ? t->user_frame : NULL;
+}
+
+/* The tracee thread whose stop ptrace_user_frame() reports: the one parked
+ * with a saved user frame.  ptrace wants the thread itself for state that
+ * lives beside the frame, such as a 64-bit thread's %fs base. */
+thread_t *ptrace_user_thread(process_t *p) {
     if (!p) {
         return NULL;
     }
-    void *frame = NULL;
+    thread_t *found = NULL;
     unsigned long rf = thread_registry_lock();
     FOREACH_THREAD(thread) {
         if (thread->proc == p && thread->user_frame) {
-            frame = thread->user_frame;
+            found = thread;
             break;
         }
     }
     thread_registry_unlock(rf);
-    return frame;
+    return found;
 }
 
 /* ptrace exec-stop.  A freshly-exec'd traced process must stop at the entry of
@@ -1022,6 +1054,26 @@ int signal_sleep_interrupted(void) {
     uint32_t pending = current_thread->sig_pending & ~current_thread->sig_mask;
     if (pending == 0) {
         return 0;   /* spurious wake (e.g. lost-wakeup fallback): resume */
+    }
+
+    /*
+     * A traced sleeper stops for its tracer here, the way the delivery path
+     * would on the way out, and goes back to sleep when continued.  Without
+     * this a stop signal suspended it in place below with no user frame
+     * recorded: PTRACE_ATTACH to a process in sleep(3) reported a stop, and
+     * every PTRACE_GETREGS then failed with EFAULT.  Its frame is the one it
+     * entered the system call with, which is the one it will return on.
+     */
+    if (current_process->p_flag & P_TRACED) {
+        for (int i = 0; i < NSIG; i++) {
+            int sig = i + 1;
+            if (!(pending & (1u << i)) || sig == SIGKILL) {
+                continue;
+            }
+            __sync_fetch_and_and(&current_thread->sig_pending, ~sigmask(sig));
+            signal_ptrace_stop(sig, current_thread->syscall_regs);
+            return 0;
+        }
     }
 
     int stop_sig = 0;
@@ -1736,18 +1788,8 @@ void signal_handle_pending(registers_t *regs) {
      * re-request delivery through PTRACE_CONT's data argument.  user_frame is
      * captured so PTRACE_GETREGS/SETREGS see the frame it will resume with. */
     if ((current_process->p_flag & P_TRACED) && sig != SIGKILL) {
-        process_t *tracer = current_process->p_tracer ?
-                            current_process->p_tracer : current_process->p_parent;
-        current_thread->user_frame = regs;
-        current_process->p_xsig = (uint8_t)sig;
-        signal_stop_process_threads(current_process, "ptrace-stop");
-        if (tracer) {
-            psignal(tracer, SIGCHLD);
-            sched_wakeup(&tracer->p_children);
-        }
         signal_clear_trap_context(current_thread, sig);
-        sched_yield();
-        signal_die_if_killed();
+        signal_ptrace_stop(sig, regs);
         return;
     }
 
