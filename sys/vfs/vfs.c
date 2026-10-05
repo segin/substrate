@@ -635,6 +635,9 @@ void close_fs(fs_node_t *node) {
          * than wedging the machine.  This is a guard against a
          * use-after-free, not a fix for one.
          */
+#ifndef HOST_TEST
+        /* Not in the host unit tests: their handlers are host functions,
+         * which no kernel address range describes. */
         if ((uintptr_t)node->close < KERNEL_VA_START) {
             char buf[112];
             snprintf(buf, sizeof(buf),
@@ -645,6 +648,7 @@ void close_fs(fs_node_t *node) {
             stack_trace();
             return;
         }
+#endif
         node->close(node);
     }
 }
