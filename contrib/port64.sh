@@ -79,7 +79,12 @@ if ! ls -d "$HERE"/binutils/build/binutils-*/ >/dev/null 2>&1; then
     ( cd "$HERE/binutils" && ./fetch.sh )
 fi
 
-export SUBSTRATE_TOP STAGE1_PREFIX
+# contrib/strip-staging.sh, which a port's build.sh may call (freetype-
+# harfbuzz does), strips with ${TARGET_TRIPLE}-strip and defaults that to
+# the 32-bit triple -- a tool a machine that has only the 64-bit toolchain
+# does not have.
+TARGET_TRIPLE="$TRIPLE"
+export SUBSTRATE_TOP STAGE1_PREFIX TARGET_TRIPLE
 export SUBSTRATE_ARCH=x86_64
 export PATH="$STAGE1_PREFIX/bin:$PATH"
 export CONFIG_SITE="$HERE/config.site.x86_64"
