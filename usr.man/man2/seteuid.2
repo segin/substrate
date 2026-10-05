@@ -1,0 +1,66 @@
+.\" seteuid.2 - set the effective user or group ID
+.TH SETEUID 2 "2026-10-05" "Substrate" "System Calls Manual"
+.SH NAME
+seteuid, setegid \- set the effective user or group ID
+.SH LIBRARY
+.B libc
+.SH SYNOPSIS
+.B #include <unistd.h>
+.PP
+.BI "int seteuid(uid_t " euid ");"
+.br
+.BI "int setegid(gid_t " egid ");"
+.SH DESCRIPTION
+.BR seteuid ()
+sets the effective user ID of the calling process to
+.IR euid ,
+and
+.BR setegid ()
+its effective group ID to
+.IR egid .
+The real and saved IDs are not changed, which is what lets a set-user-ID
+program give up its privilege for a while and take it back.
+.PP
+A process whose effective user ID is 0 may set either ID to any value.
+Any other process may set the effective user ID only to its real,
+effective or saved user ID, and the effective group ID only to its real,
+effective or saved group ID.
+.SH RETURN VALUE
+On success, 0 is returned.  On error, \-1 is returned, and
+.I errno
+is set appropriately.
+.SH ERRORS
+.TP
+.B EPERM
+The process is not privileged and the ID is not one of its real,
+effective or saved IDs.
+.SH EXAMPLE
+A set-user-ID-root program does part of its work as the user who ran it:
+.PP
+.RS 4
+.EX
+#include <stdio.h>
+#include <unistd.h>
+
+int
+main(void)
+{
+    if (seteuid(getuid()) == \-1) {     /* drop */
+        perror("seteuid");
+        return 1;
+    }
+    /* ... work as the invoking user ... */
+    if (seteuid(0) == \-1) {            /* take it back */
+        perror("seteuid");
+        return 1;
+    }
+    return 0;
+}
+.EE
+.RE
+.SH SEE ALSO
+.BR setuid (2),
+.BR setreuid (2),
+.BR setresuid (2)
+.SH STANDARDS
+POSIX.1-2001, POSIX.1-2008, 4.3BSD.

@@ -302,6 +302,20 @@
  * newdirfd other than AT_FDCWD with ENOSYS. */
 #define SYS_SYMLINKAT        528
 
+/* The rest of the credential calls (sys/kern/syscall.c).  Only setuid,
+ * setgid and seteuid had native numbers, so libc faked the others out of
+ * those: setegid() changed the real gid as well, setreuid()/setregid()
+ * refused any request that set the two ids differently, and setresuid()
+ * did not exist -- which is every way a setuid program drops and regains
+ * privilege.  Next free after SYS_SYMLINKAT. */
+#define SYS_SETEGID          529
+#define SYS_SETREUID         530
+#define SYS_SETREGID         531
+#define SYS_SETRESUID        532
+#define SYS_SETRESGID        533
+#define SYS_GETRESUID        534
+#define SYS_GETRESGID        535
+
 void syscall_init(void);
 
 // GDT TLS entries

@@ -183,12 +183,13 @@ ssize_t readlinkat(int dirfd, const char *path, char *buf, size_t bufsiz) {
 }
 
 int setegid(gid_t egid) {
-    /* Substrate has no SYS_SETRESGID / SETEGID — but setgid changes
-     * BOTH real and effective; that's an over-approximation for a
-     * caller that wanted only the effective change.  POSIX allows
-     * this when the caller is privileged (root can drop to anything
-     * either way); for non-root the call would refuse. */
-    return setgid(egid);
+    /* Change ONLY the effective gid.  This was setgid(), which for a
+     * privileged caller changes the real and saved gids too, so a setgid
+     * or setuid-root program that dropped its group could not get it
+     * back. */
+    long r = syscall(SYS_SETEGID, (long)egid);
+    if (r < 0) { errno = (int)-r; return -1; }
+    return 0;
 }
 
 int seteuid(uid_t euid) {
@@ -206,22 +207,47 @@ int setpgrp(void) {
     return setpgid(0, 0);
 }
 
+/*
+ * The real/effective and real/effective/saved setters, each a system call
+ * of its own.  setreuid() and setregid() used to be built out of setuid()
+ * and seteuid() and refused, with EPERM, any request for a real id that
+ * differed from the effective one -- the request a setuid program makes
+ * to swap them.  An argument of -1 leaves that id alone.
+ */
 int setregid(gid_t rgid, gid_t egid) {
-    if (rgid == (gid_t)-1) return setegid(egid);
-    if (egid != rgid && egid != (gid_t)-1) {
-        errno = EPERM;   /* can't split when there's no setres path */
-        return -1;
-    }
-    return setgid(rgid);
+    long r = syscall(SYS_SETREGID, (long)rgid, (long)egid);
+    if (r < 0) { errno = (int)-r; return -1; }
+    return 0;
 }
 
 int setreuid(uid_t ruid, uid_t euid) {
-    if (ruid == (uid_t)-1) return seteuid(euid);
-    if (euid != ruid && euid != (uid_t)-1) {
-        errno = EPERM;
-        return -1;
-    }
-    return setuid(ruid);
+    long r = syscall(SYS_SETREUID, (long)ruid, (long)euid);
+    if (r < 0) { errno = (int)-r; return -1; }
+    return 0;
+}
+
+int setresuid(uid_t ruid, uid_t euid, uid_t suid) {
+    long r = syscall(SYS_SETRESUID, (long)ruid, (long)euid, (long)suid);
+    if (r < 0) { errno = (int)-r; return -1; }
+    return 0;
+}
+
+int setresgid(gid_t rgid, gid_t egid, gid_t sgid) {
+    long r = syscall(SYS_SETRESGID, (long)rgid, (long)egid, (long)sgid);
+    if (r < 0) { errno = (int)-r; return -1; }
+    return 0;
+}
+
+int getresuid(uid_t *ruid, uid_t *euid, uid_t *suid) {
+    long r = syscall(SYS_GETRESUID, ruid, euid, suid);
+    if (r < 0) { errno = (int)-r; return -1; }
+    return 0;
+}
+
+int getresgid(gid_t *rgid, gid_t *egid, gid_t *sgid) {
+    long r = syscall(SYS_GETRESGID, rgid, egid, sgid);
+    if (r < 0) { errno = (int)-r; return -1; }
+    return 0;
 }
 
 void swab(const void *src, void *dst, ssize_t nbytes) {

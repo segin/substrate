@@ -1,0 +1,81 @@
+.\" setresuid.2 - set or get the real, effective and saved IDs
+.TH SETRESUID 2 "2026-10-05" "Substrate" "System Calls Manual"
+.SH NAME
+setresuid, setresgid, getresuid, getresgid \- set or get the real,
+effective and saved user or group IDs
+.SH LIBRARY
+.B libc
+.SH SYNOPSIS
+.B #include <unistd.h>
+.PP
+.BI "int setresuid(uid_t " ruid ", uid_t " euid ", uid_t " suid ");"
+.br
+.BI "int setresgid(gid_t " rgid ", gid_t " egid ", gid_t " sgid ");"
+.PP
+.BI "int getresuid(uid_t *" ruid ", uid_t *" euid ", uid_t *" suid ");"
+.br
+.BI "int getresgid(gid_t *" rgid ", gid_t *" egid ", gid_t *" sgid ");"
+.SH DESCRIPTION
+.BR setresuid ()
+sets the real, effective and saved user IDs of the calling process, and
+.BR setresgid ()
+its real, effective and saved group IDs, each independently of the others.
+An argument of \-1 leaves the corresponding ID unchanged.
+.PP
+A process whose effective user ID is 0 may set the IDs to any values.
+Any other process may set each ID only to one of its current real,
+effective or saved IDs.
+.PP
+.BR getresuid ()
+and
+.BR getresgid ()
+store the three IDs through their arguments.
+A NULL argument is skipped.
+.SH RETURN VALUE
+On success, 0 is returned.  On error, \-1 is returned, and
+.I errno
+is set appropriately; no ID is changed.
+.SH ERRORS
+.TP
+.B EPERM
+.RB ( setresuid (),
+.BR setresgid ())
+The process is not privileged and an argument is not one of its current
+real, effective or saved IDs.
+.TP
+.B EFAULT
+.RB ( getresuid (),
+.BR getresgid ())
+An argument points outside the process's address space.
+.SH EXAMPLE
+Give up root for good, and check that it is gone:
+.PP
+.RS 4
+.EX
+#include <stdio.h>
+#include <unistd.h>
+
+int
+main(void)
+{
+    uid_t r, e, s, me = getuid();
+
+    if (setresuid(me, me, me) == \-1) {
+        perror("setresuid");
+        return 1;
+    }
+    if (getresuid(&r, &e, &s) == \-1 || r != me || e != me || s != me) {
+        fprintf(stderr, "still privileged\en");
+        return 1;
+    }
+    return 0;
+}
+.EE
+.RE
+.SH SEE ALSO
+.BR setuid (2),
+.BR seteuid (2),
+.BR setreuid (2)
+.SH STANDARDS
+Not in POSIX.  Present on Linux, FreeBSD and OpenBSD with these
+semantics.

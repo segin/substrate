@@ -1,0 +1,70 @@
+.\" setreuid.2 - set the real and effective user or group ID
+.TH SETREUID 2 "2026-10-05" "Substrate" "System Calls Manual"
+.SH NAME
+setreuid, setregid \- set the real and effective user or group ID
+.SH LIBRARY
+.B libc
+.SH SYNOPSIS
+.B #include <unistd.h>
+.PP
+.BI "int setreuid(uid_t " ruid ", uid_t " euid ");"
+.br
+.BI "int setregid(gid_t " rgid ", gid_t " egid ");"
+.SH DESCRIPTION
+.BR setreuid ()
+sets the real user ID of the calling process to
+.I ruid
+and its effective user ID to
+.IR euid .
+.BR setregid ()
+does the same for the real and effective group IDs.
+An argument of \-1 leaves the corresponding ID unchanged.
+.PP
+A process whose effective user ID is 0 may set the IDs to any values.
+Any other process may set the real ID only to its current real or
+effective ID, and the effective ID only to its current real, effective or
+saved ID.
+.PP
+If the real ID is changed, or the effective ID is set to a value that is
+not the real ID, the saved ID is set to the new effective ID.
+.SH RETURN VALUE
+On success, 0 is returned.  On error, \-1 is returned, and
+.I errno
+is set appropriately; no ID is changed.
+.SH ERRORS
+.TP
+.B EPERM
+The process is not privileged and asked for an ID it is not allowed to
+take.
+.SH EXAMPLE
+Swap the real and effective user IDs, and swap them back:
+.PP
+.RS 4
+.EX
+#include <stdio.h>
+#include <unistd.h>
+
+int
+main(void)
+{
+    uid_t ruid = getuid(), euid = geteuid();
+
+    if (setreuid(euid, ruid) == \-1) {
+        perror("setreuid");
+        return 1;
+    }
+    /* ... the invoking user's ID is now the effective one ... */
+    if (setreuid(ruid, euid) == \-1) {
+        perror("setreuid");
+        return 1;
+    }
+    return 0;
+}
+.EE
+.RE
+.SH SEE ALSO
+.BR setuid (2),
+.BR seteuid (2),
+.BR setresuid (2)
+.SH STANDARDS
+POSIX.1-2001, POSIX.1-2008, 4.3BSD.

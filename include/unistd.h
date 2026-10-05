@@ -178,6 +178,10 @@ int    seteuid(uid_t euid);
 int    setpgrp(void);
 int    setregid(gid_t rgid, gid_t egid);
 int    setreuid(uid_t ruid, uid_t euid);
+int    setresuid(uid_t ruid, uid_t euid, uid_t suid);
+int    setresgid(gid_t rgid, gid_t egid, gid_t sgid);
+int    getresuid(uid_t *ruid, uid_t *euid, uid_t *suid);
+int    getresgid(gid_t *rgid, gid_t *egid, gid_t *sgid);
 void   swab(const void *src, void *dst, ssize_t nbytes);
 int    symlinkat(const char *target, int newdirfd, const char *linkpath);
 pid_t  vfork(void);
@@ -223,6 +227,15 @@ int isatty(int fd);
 char *ttyname(int fd);
 int   ttyname_r(int fd, char *buf, size_t buflen);
 char *mktemp(char *_template);
+
+/* crypt(3).  POSIX (XSI) declares it here; <crypt.h>, where the description
+ * of the hash formats and crypt_r() live, declares it too. */
+char *crypt(const char *key, const char *setting);
+
+/* The permitted login shells, from /etc/shells (getusershell(3)). */
+char *getusershell(void);
+void  setusershell(void);
+void  endusershell(void);
 
 /* POSIX configurable path/file limit query.  Substrate returns
  * conservative defaults; the values are documented in

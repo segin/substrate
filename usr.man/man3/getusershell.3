@@ -1,0 +1,94 @@
+.\" getusershell.3 - the permitted login shells
+.TH GETUSERSHELL 3 "2026-10-05" "Substrate" "Library Functions Manual"
+.SH NAME
+getusershell, setusershell, endusershell \- get the permitted login shells
+.SH LIBRARY
+.B libc
+.SH SYNOPSIS
+.B #include <unistd.h>
+.PP
+.B "char *getusershell(void);"
+.br
+.B "void setusershell(void);"
+.br
+.B "void endusershell(void);"
+.SH DESCRIPTION
+The
+.BR getusershell ()
+function returns the next shell from the list of permitted login shells in
+.IR /etc/shells ,
+opening the file on the first call.
+.PP
+Each line of
+.I /etc/shells
+names one shell by its absolute pathname.
+Leading blanks are skipped, the name ends at a blank or a
+.RB ' # ',
+and a line that does not then begin with
+.RB ' / '
+is ignored, so that blank lines and comments may be used freely.
+.PP
+If
+.I /etc/shells
+does not exist, the list is
+.I /bin/sh
+alone.
+.PP
+The
+.BR setusershell ()
+function rewinds the list, so that the next call to
+.BR getusershell ()
+returns its first entry.
+The
+.BR endusershell ()
+function closes the file.
+.SH RETURN VALUE
+The
+.BR getusershell ()
+function returns a pointer to the pathname, in a static buffer that the
+next call overwrites, or NULL at the end of the list.
+It does not set
+.IR errno .
+.SH FILES
+.TP
+.I /etc/shells
+The permitted login shells, one per line.
+.SH NOTES
+The functions share one static buffer and one open file, and are not
+thread-safe.
+.SH EXAMPLE
+The following program reports whether its argument is a permitted shell.
+.PP
+.RS 4
+.EX
+#include <stdio.h>
+#include <string.h>
+#include <unistd.h>
+
+int
+main(int argc, char *argv[])
+{
+    char *shell;
+    int found = 0;
+
+    if (argc != 2)
+        return 2;
+    setusershell();
+    while ((shell = getusershell()) != NULL) {
+        if (strcmp(shell, argv[1]) == 0) {
+            found = 1;
+            break;
+        }
+    }
+    endusershell();
+    printf("%s is %sa permitted shell\en", argv[1], found ? "" : "not ");
+    return !found;
+}
+.EE
+.RE
+.SH SEE ALSO
+.BR getpwent (3),
+.BR crypt (3)
+.SH STANDARDS
+4.3BSD.
+Not in POSIX.
