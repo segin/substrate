@@ -135,7 +135,8 @@ the boot is the i386 one: memory, devices, the root mount, then
 The direct map is placed where FreeBSD/amd64 puts it.  Physical memory is
 managed in two parts (`arch/x86_64/pmm.h`):
 
-* **Low memory**, below `PMM_PHYS_RAM_CAP` (3 GiB), is set up by the
+* **Low memory**, below `PMM_PHYS_RAM_CAP` (the IOAPIC at `0xFEC00000`:
+  whatever RAM the firmware reports under 4 GiB), is set up by the
   allocator shared with i386, with 32-bit `phys_addr_t`.  It is all that
   `pmm_alloc_block()` and `pmm_alloc_contiguous()` hand out, so every
   kernel and driver allocation is low and a driver may keep a bus address
@@ -157,8 +158,15 @@ address); `blkdev_dev_read()`/`blkdev_dev_write()` copy such a buffer
 through low memory, the USB mass-storage direct path treats it as not
 direct-mapped, and virtio-9p refuses it.
 
-RAM the firmware reports between 3 GiB and 4 GiB is not used: that range
-is where the PCI layer places 32-bit MMIO windows of its own.  Memory
+RAM the firmware reports between 3 GiB and 4 GiB is used like the rest of
+low memory.  (The i386 kernel stops at 3 GiB, because its direct map has
+no room for more, and the 64-bit kernel used to copy that limit; a guest
+with 3500 MiB under 4 GiB lost 427 MiB of it.)  The PCI layer, which on
+i386 treats everything from 3 GiB up as its own, has no such fixed floor
+here: when it must place a 32-bit MMIO window itself -- a 64-bit BAR the
+firmware put above 4 GiB -- `pci_alloc_mmio32()` takes the largest
+stretch between the end of RAM and the IOAPIC that the firmware's memory
+map does not call reserved and no 32-bit BAR already occupies.  Memory
 totals are reported in pages (`/proc/meminfo`, `sys_vm_stats`); `sysinfo`
 switches `mem_unit` to the page size once the total no longer fits in 32
 bits, and `pmm_get_total_memory()`/`pmm_get_free_memory()` count low

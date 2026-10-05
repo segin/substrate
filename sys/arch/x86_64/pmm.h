@@ -22,9 +22,13 @@
  * it must not be handed to a device (the block layer copies through a
  * low buffer when it is given one).
  *
- * RAM between the two (3 GiB to 4 GiB, where the firmware leaves one)
- * stays unused: that range is where the PCI layer places 32-bit MMIO
- * windows of its own.
+ * Low memory is whatever the firmware reports usable below the cap, which
+ * sits at the IOAPIC.  The i386 kernel stops at 3 GiB because its direct
+ * map has no room for more; this one maps the whole first 4 GiB, so RAM
+ * a machine has between 3 GiB and 4 GiB is RAM like any other.  The PCI
+ * layer, which used to treat everything from 3 GiB up as its own, finds
+ * room for 32-bit MMIO windows from the memory map instead
+ * (pci_alloc_mmio32(), through pmm_low_ram_end() and pmm_reserved_range()).
  */
 #ifndef _ARCH_X86_64_PMM_H
 #define _ARCH_X86_64_PMM_H
@@ -40,9 +44,11 @@
 #define PMM_BLOCKS_PER_BYTE 8
 #define PMM_PHYS_VIRT_BASE KERN_BASE
 
-/* Highest RAM managed, and the PCI layer's floor for 32-bit MMIO windows
- * it has to place itself (see pci_alloc_mmio32()). */
-#define PMM_PHYS_RAM_CAP 0xC0000000ULL
+/* End of low memory: the IOAPIC's address.  From there to 4 GiB is the
+ * IOAPIC, the HPET, the local APIC and the firmware's flash, never RAM,
+ * and stopping short of 4 GiB keeps every low address, and every END of a
+ * low range, inside the 32-bit phys_addr_t the shared allocator uses. */
+#define PMM_PHYS_RAM_CAP 0xFEC00000ULL
 
 /* Everything managed is direct-mapped: the map has no carve-outs here. */
 #define PMM_DIRECTMAP_PHYS_LIMIT ((uint32_t)PMM_PHYS_RAM_CAP)
@@ -83,6 +89,14 @@ void pmm_dump_managed(void);
 void pmm_dump_mmap(uintptr_t mmap_addr, uint32_t mmap_length);
 uint32_t pmm_get_total_memory(void);
 uint32_t pmm_get_free_memory(void);
+
+/* The firmware memory map below the cap, for whoever has to place
+ * something in physical address space: the end of the highest usable RAM,
+ * and the ranges the firmware marked reserved (ACPI, NVS, bad, reserved).
+ * pmm_reserved_range() returns 0 and fills in range `idx`, or -1 past the
+ * last; a range may appear more than once. */
+uint32_t pmm_low_ram_end(void);
+int pmm_reserved_range(int idx, uint32_t *start, uint32_t *end);
 
 void pmm_walk_e820(const e820_entry_t *map, uint32_t count, pmm_region_callback cb, void *arg);
 void pmm_dump_e820(const e820_entry_t *map, uint32_t count);

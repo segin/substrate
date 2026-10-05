@@ -357,6 +357,16 @@ void pmm_record_boot_info(const multiboot_info_t *mbi) {
  * Returns 0 on success, -1 if region array is full.
  */
 static int pmm_add_region(phys_addr_t start, phys_addr_t end, uint32_t type) {
+    /* The memory map is walked more than once, and each walk reports the
+     * same regions.  Recording them again would only fill the array, and
+     * a firmware map with fifty reserved entries would then push the last
+     * of them out of it. */
+    for (int i = 0; i < pmm_region_count; i++) {
+        if (pmm_regions[i].valid && pmm_regions[i].start == start &&
+            pmm_regions[i].end == end && pmm_regions[i].type == type) {
+            return 0;
+        }
+    }
     if (pmm_region_count >= PMM_MAX_REGIONS) {
         return -1;
     }
@@ -1020,6 +1030,37 @@ void pmm_dump_managed(void)
             (unsigned)(pmm_get_total_memory() >> 20),
             (unsigned)(pmm_get_free_memory() >> 20));
 }
+
+#ifdef PMM_HIGHMEM_BASE
+/*
+ * The firmware memory map, for the PCI layer (x86_64 only: on i386 nothing
+ * above the cap is memory and it needs no map to know that).
+ */
+uint32_t pmm_low_ram_end(void) {
+    uint32_t top = 0;
+
+    for (int i = 0; i < pmm_usable_range_count; i++) {
+        if (pmm_usable_ranges[i].end > top) {
+            top = pmm_usable_ranges[i].end;
+        }
+    }
+    return top;
+}
+
+int pmm_reserved_range(int idx, uint32_t *start, uint32_t *end) {
+    int n = 0;
+
+    for (int i = 0; i < pmm_region_count; i++) {
+        if (!pmm_regions[i].valid) continue;
+        if (n++ == idx) {
+            *start = pmm_regions[i].start;
+            *end = pmm_regions[i].end;
+            return 0;
+        }
+    }
+    return -1;
+}
+#endif
 
 void pmm_enable_highmem(void) {
     uint32_t seed_limit = PMM_DIRECTMAP_PHYS_LIMIT;

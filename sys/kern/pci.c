@@ -406,17 +406,20 @@ size_t pci_bar_size(pci_device_t *dev, int bar) {
  */
 #define PCI_MMIO32_TOP    0xFEC00000U
 /*
- * Floor when no 32-bit BAR exists to infer the hole from -- which is what
- * UEFI leaves when it places every 64-bit-capable BAR high.  This is not a
- * guess: PMM_PHYS_RAM_CAP is the ceiling on physical RAM the kernel will
- * manage, deliberately set at 3 GiB rather than chasing the last fraction
- * below the PCI hole, so nothing at or above it is ever memory.  The two
- * constants are the same number by design; see the comment on the cap.
+ * i386: the floor when no 32-bit BAR exists to infer the hole from -- which
+ * is what UEFI leaves when it places every 64-bit-capable BAR high.  This
+ * is not a guess: PMM_PHYS_RAM_CAP is the ceiling on physical RAM the i386
+ * kernel will manage, deliberately set at 3 GiB rather than chasing the
+ * last fraction below the PCI hole, so nothing at or above it is ever
+ * memory.  The two constants are the same number by design; see the
+ * comment on the cap.  (The x86_64 kernel has no such ceiling and finds
+ * its window from the memory map; see its pci_mmio32_init().)
  */
 #define PCI_MMIO32_FLOOR  ((uint32_t)PMM_PHYS_RAM_CAP)
 #define PCI_MMIO32_GRAIN  0x00100000U   /* keep assignments 1 MiB-tidy */
 
 static uint32_t pci_mmio32_next;
+static uint32_t pci_mmio32_limit = PCI_MMIO32_TOP;  /* end of the window */
 static int      pci_mmio32_ready;
 
 /* Base of a memory BAR as firmware left it, full width.  Returns 0 for an
@@ -441,6 +444,111 @@ static uint64_t pci_bar_base64(pci_device_t *dev, int bar, int *is64) {
     return base;
 }
 
+#ifdef SUBSTRATE_ARCH_X86_64
+/*
+ * The x86_64 kernel uses RAM all the way up to the PCI hole, wherever the
+ * firmware put that, so there is no fixed address above which nothing is
+ * memory.  The window is found instead: the largest stretch between the
+ * end of RAM and PCI_MMIO32_TOP that the firmware's memory map does not
+ * call reserved (the ECAM area, a chipset's own MMIO, stolen graphics
+ * memory) and that no 32-bit BAR already occupies.
+ */
+#define PCI_MMIO32_MAX_BUSY 96
+
+struct pci_busy {
+    uint32_t start, end;
+};
+
+/* Insert [start, end), clipped to [lo, PCI_MMIO32_TOP), keeping the list
+ * sorted by start.  A full list drops the range and reports it. */
+static int pci_busy_add(struct pci_busy *busy, int *n, uint32_t lo,
+                        uint64_t start, uint64_t end) {
+    int i;
+
+    if (start < lo) start = lo;
+    if (end > PCI_MMIO32_TOP) end = PCI_MMIO32_TOP;
+    if (start >= end)
+        return 0;
+    if (*n >= PCI_MMIO32_MAX_BUSY)
+        return -1;
+    for (i = *n; i > 0 && busy[i - 1].start > (uint32_t)start; i--)
+        busy[i] = busy[i - 1];
+    busy[i].start = (uint32_t)start;
+    busy[i].end = (uint32_t)end;
+    (*n)++;
+    return 0;
+}
+
+static void pci_mmio32_init(void) {
+    static struct pci_busy busy[PCI_MMIO32_MAX_BUSY];
+    pci_device_t *dev;
+    uint32_t lo, rs, re, cursor, best_start = 0, best_len = 0;
+    int n = 0, overflow = 0, i;
+
+    if (pci_mmio32_ready)
+        return;
+    pci_mmio32_ready = 1;
+
+    /* Nothing below the end of RAM, rounded up to the allocation grain. */
+    lo = pmm_low_ram_end();
+    lo = (uint32_t)(((uint64_t)lo + (PCI_MMIO32_GRAIN - 1)) &
+                    ~(uint64_t)(PCI_MMIO32_GRAIN - 1));
+    if (lo >= PCI_MMIO32_TOP) {
+        pci_mmio32_next = pci_mmio32_limit = PCI_MMIO32_TOP;
+        return;
+    }
+
+    for (i = 0; pmm_reserved_range(i, &rs, &re) == 0; i++)
+        overflow |= pci_busy_add(busy, &n, lo, rs, re);
+
+    for (dev = pci_first_device(); dev != NULL; dev = pci_next_device(dev)) {
+        int bar;
+        for (bar = 0; bar < PCI_BAR_COUNT; bar++) {
+            int is64 = 0;
+            uint64_t base = pci_bar_base64(dev, bar, &is64);
+
+            if (base != 0 && (base >> 32) == 0) {
+                size_t size = pci_bar_size(dev, bar);
+                if (size != 0)
+                    overflow |= pci_busy_add(busy, &n, lo, base,
+                                             base + (uint64_t)size);
+            }
+            if (is64)
+                bar++;              /* upper half is not a BAR of its own */
+        }
+    }
+
+    /* The gaps between the busy ranges, which are sorted by start and may
+     * overlap one another. */
+    cursor = lo;
+    for (i = 0; i <= n; i++) {
+        uint32_t gap_end = (i < n) ? busy[i].start : PCI_MMIO32_TOP;
+
+        if (gap_end > cursor) {
+            uint32_t start = (uint32_t)(((uint64_t)cursor +
+                                         (PCI_MMIO32_GRAIN - 1)) &
+                                        ~(uint64_t)(PCI_MMIO32_GRAIN - 1));
+            if (start < gap_end && gap_end - start > best_len) {
+                best_start = start;
+                best_len = gap_end - start;
+            }
+        }
+        if (i < n && busy[i].end > cursor)
+            cursor = busy[i].end;
+    }
+
+    if (overflow || best_len == 0) {
+        /* Without the whole picture, placing a window is a guess. */
+        kprintf("pci: no usable 32-bit MMIO window (RAM ends at 0x%x, "
+                "%d busy range(s)%s)\n", (unsigned)lo, n,
+                overflow ? ", list overflowed" : "");
+        pci_mmio32_next = pci_mmio32_limit = PCI_MMIO32_TOP;
+        return;
+    }
+    pci_mmio32_next = best_start;
+    pci_mmio32_limit = best_start + best_len;
+}
+#else
 static void pci_mmio32_init(void) {
     pci_device_t *dev;
     uint64_t top = 0;
@@ -475,6 +583,7 @@ static void pci_mmio32_init(void) {
     top = (top + (PCI_MMIO32_GRAIN - 1)) & ~(uint64_t)(PCI_MMIO32_GRAIN - 1);
     pci_mmio32_next = (uint32_t)top;
 }
+#endif /* SUBSTRATE_ARCH_X86_64 */
 
 uint32_t pci_alloc_mmio32(uint64_t size, uint64_t align) {
     uint64_t base;
@@ -490,10 +599,11 @@ uint32_t pci_alloc_mmio32(uint64_t size, uint64_t align) {
         align = 0x1000U;
 
     base = ((uint64_t)pci_mmio32_next + (align - 1)) & ~(align - 1);
-    if (base + size > PCI_MMIO32_TOP) {
+    if (base + size > pci_mmio32_limit) {
         kprintf("pci: no 32-bit MMIO space left for a %u-byte window "
                 "(next=0x%x, top=0x%x)\n",
-                (unsigned)size, (unsigned)pci_mmio32_next, PCI_MMIO32_TOP);
+                (unsigned)size, (unsigned)pci_mmio32_next,
+                (unsigned)pci_mmio32_limit);
         return 0;
     }
     pci_mmio32_next = (uint32_t)(base + size);
