@@ -26,6 +26,7 @@
 
 #include <string.h>
 
+#include <machine/fpu.h>
 #include <machine/idt.h>
 #include <machine/pmap.h>
 #include <machine/vmparam.h>
@@ -38,6 +39,7 @@
 #include <sys/signal.h>
 #include <sys/sysinfo.h>
 #include <vm/vm_fault.h>
+#include <vm/vm_kmem.h>
 
 #define EFLAGS_TF 0x00000100u   /* trap flag — single-step after each insn */
 
@@ -143,6 +145,38 @@ static int uregs64_to_frame(const struct user_regs_struct64 *u, registers_t *f,
     return 0;
 }
 #endif
+
+/* ---- floating-point and vector registers --------------------------------- */
+
+/*
+ * Move the tracee's FPU state, in one of machine/fpu.h's FPU_REGS_*
+ * layouts, to (set == 0) or from the tracer's buffer at `uaddr`, which is
+ * `len` bytes.  The layouts are the CPU's own save formats and the same
+ * for a tracer of either width.
+ */
+static int ptrace_fp_xfer(process_t *tracee, int layout, size_t len,
+                          uint32_t uaddr, int set) {
+    thread_t *t = ptrace_user_thread(tracee);
+    void *buf;
+    int rc;
+
+    if (!t) return -ESRCH;
+    if (len == 0 || len > FPU_REGS_MAX) return -EINVAL;
+    buf = kmalloc(len);
+    if (!buf) return -ENOMEM;
+
+    if (set) {
+        rc = copyin((void *)(uintptr_t)uaddr, buf, len) != 0
+                 ? -EFAULT
+                 : fpu_thread_set_regs(t, layout, buf, len);
+    } else {
+        rc = fpu_thread_get_regs(t, layout, buf, len);
+        if (rc == 0 && copyout(buf, (void *)(uintptr_t)uaddr, len) != 0)
+            rc = -EFAULT;
+    }
+    kfree(buf, len);
+    return rc;
+}
 
 /* ---- children-list surgery for PTRACE_ATTACH reparenting ------------------ */
 
@@ -358,6 +392,39 @@ int sys_ptrace(int req, int pid, int addr, int data) {
         uregs_to_frame(&urs, frame);
         return 0;
     }
+
+    case PTRACE_GETFPREGS:
+    case PTRACE_SETFPREGS:
+        return ptrace_fp_xfer(tracee, FPU_REGS_FNSAVE, PTRACE_FPREGS_SIZE,
+                              (uint32_t)data, req == PTRACE_SETFPREGS);
+
+    case PTRACE_GETFPXREGS:
+    case PTRACE_SETFPXREGS:
+        return ptrace_fp_xfer(tracee, FPU_REGS_FXSAVE, PTRACE_FPXREGS_SIZE,
+                              (uint32_t)data, req == PTRACE_SETFPXREGS);
+
+    case PTRACE_GETXSTATE_INFO: {
+        struct ptrace_xstate_info info;
+        uint64_t mask;
+        uint32_t len;
+        int rc = fpu_xstate_info(&mask, &len);
+
+        if (rc != 0) return rc;
+        memset(&info, 0, sizeof(info));
+        info.xsave_mask = mask;
+        info.xsave_len = len;
+        if (copyout(&info, (void *)(uintptr_t)(uint32_t)data,
+                    sizeof(info)) != 0) {
+            return -EFAULT;
+        }
+        return 0;
+    }
+
+    case PTRACE_GETXSTATE:
+    case PTRACE_SETXSTATE:
+        /* `addr` is the buffer's length, which must be the area's. */
+        return ptrace_fp_xfer(tracee, FPU_REGS_XSAVE, (size_t)(uint32_t)addr,
+                              (uint32_t)data, req == PTRACE_SETXSTATE);
 
     case PTRACE_SINGLESTEP:
         if (frame) frame->eflags |= EFLAGS_TF;

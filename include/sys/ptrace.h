@@ -23,8 +23,28 @@
 #define PTRACE_SINGLESTEP   9
 #define PTRACE_GETREGS      12
 #define PTRACE_SETREGS      13
+#define PTRACE_GETFPREGS    14
+#define PTRACE_SETFPREGS    15
 #define PTRACE_ATTACH       16
 #define PTRACE_DETACH       17
+#define PTRACE_GETFPXREGS   18
+#define PTRACE_SETFPXREGS   19
+#define PTRACE_GETXSTATE_INFO 0x4300
+#define PTRACE_GETXSTATE    0x4301
+#define PTRACE_SETXSTATE    0x4302
+
+/* Floating-point and vector registers, in the CPU's own save layouts: the
+ * XSAVE area (`data` the buffer, `addr` its length, from
+ * PTRACE_GETXSTATE_INFO), the FXSAVE image, or -- only on a CPU without
+ * FXSAVE -- the FNSAVE image.  A layout the CPU does not use is EIO. */
+#define PTRACE_FPREGS_SIZE  108
+#define PTRACE_FPXREGS_SIZE 512
+
+struct ptrace_xstate_info {
+    unsigned long long xsave_mask;  /* the components saved: XCR0 */
+    unsigned int       xsave_len;   /* size of the XSAVE area */
+    unsigned int       pad;
+};
 
 #if defined(__x86_64__)
 /* A 64-bit tracer's register set: the Linux/amd64 layout.  PEEK and POKE

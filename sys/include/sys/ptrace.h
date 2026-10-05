@@ -35,8 +35,39 @@
 #define PTRACE_SINGLESTEP   9
 #define PTRACE_GETREGS      12
 #define PTRACE_SETREGS      13
+#define PTRACE_GETFPREGS    14
+#define PTRACE_SETFPREGS    15
 #define PTRACE_ATTACH       16
 #define PTRACE_DETACH       17
+#define PTRACE_GETFPXREGS   18
+#define PTRACE_SETFPXREGS   19
+#define PTRACE_GETXSTATE_INFO 0x4300
+#define PTRACE_GETXSTATE    0x4301
+#define PTRACE_SETXSTATE    0x4302
+
+/*
+ * Floating-point and vector registers, in the CPU's own save layouts,
+ * which do not depend on the tracer's width.  A layout the CPU does not
+ * save in is EIO; a debugger tries them from the richest down.
+ *
+ *   PTRACE_GETXSTATE/SETXSTATE    the XSAVE area (x87, SSE, AVX, ...):
+ *                                 `data` is the buffer, `addr` its length,
+ *                                 which must be xsave_len.
+ *   PTRACE_GETXSTATE_INFO         `data` is a struct ptrace_xstate_info*.
+ *   PTRACE_GETFPXREGS/SETFPXREGS  the FXSAVE image (x87 and SSE): `data`
+ *                                 is a PTRACE_FPXREGS_SIZE-byte buffer.
+ *   PTRACE_GETFPREGS/SETFPREGS    the FNSAVE image (x87): `data` is a
+ *                                 PTRACE_FPREGS_SIZE-byte buffer.  Only on
+ *                                 a CPU without FXSAVE.
+ */
+#define PTRACE_FPREGS_SIZE  108
+#define PTRACE_FPXREGS_SIZE 512
+
+struct ptrace_xstate_info {
+    unsigned long long xsave_mask;  /* the components saved: XCR0 */
+    unsigned int       xsave_len;   /* size of the XSAVE area */
+    unsigned int       pad;
+};
 
 /*
  * Register layout for PTRACE_GETREGS / PTRACE_SETREGS.  Field order matches the

@@ -49,6 +49,42 @@ that
 .I data
 points to.
 .TP
+.BR PTRACE_GETXSTATE ", " PTRACE_SETXSTATE
+Copy the tracee's floating-point and vector registers (x87, SSE, AVX and
+whatever else the system saves) to or from the buffer at
+.IR data ,
+in the layout of the CPU's XSAVE area.
+.I addr
+is the buffer's length, which must be the
+.I xsave_len
+that
+.B PTRACE_GETXSTATE_INFO
+reports.
+.TP
+.B PTRACE_GETXSTATE_INFO
+Store in the
+.B struct ptrace_xstate_info
+at
+.I data
+the components the XSAVE area holds
+.RI ( xsave_mask ,
+the value of XCR0) and its size
+.RI ( xsave_len ).
+.TP
+.BR PTRACE_GETFPXREGS ", " PTRACE_SETFPXREGS
+Copy the x87 and SSE registers to or from the
+.BR PTRACE_FPXREGS_SIZE -byte
+buffer at
+.IR data ,
+in the FXSAVE layout.
+.TP
+.BR PTRACE_GETFPREGS ", " PTRACE_SETFPREGS
+Copy the x87 registers to or from the
+.BR PTRACE_FPREGS_SIZE -byte
+buffer at
+.IR data ,
+in the FNSAVE layout.  Only on a CPU without FXSAVE.
+.TP
 .BR PTRACE_CONT ", " PTRACE_SINGLESTEP
 Resume the tracee, to its next stop or for one instruction.
 .TP
@@ -97,8 +133,18 @@ is not a valid address, or the tracee is not stopped.
 was given an instruction pointer, stack pointer or thread pointer that
 the tracee could not resume with.
 .TP
+.B EIO
+The CPU does not save its floating-point state in the layout the request
+names: no XSAVE, no FXSAVE, or, for
+.BR PTRACE_GETFPREGS ,
+a CPU that has FXSAVE.
+.TP
 .B EINVAL
-The request is not one of those above.
+The request is not one of those above, or the length given to
+.B PTRACE_GETXSTATE
+or
+.B PTRACE_SETXSTATE
+is not the size of the XSAVE area.
 .SH CONFORMING TO
 SVr4, 4.3BSD.
 .SH SEE ALSO
