@@ -113,6 +113,10 @@ mkdir -p "$SYSROOT/usr" "$SYSROOT/lib" "$SYSROOT/include"
 [ -e "$SYSROOT/usr/lib64" ]   || ln -s ../lib "$SYSROOT/usr/lib64"
 [ -e "$SYSROOT/usr/lib" ]     || ln -s ../lib "$SYSROOT/usr/lib"
 [ -e "$SYSROOT/usr/include" ] || ln -s ../include "$SYSROOT/usr/include"
+# And lib64 at the top, for a build that reaches the sysroot through a
+# link that IS its /usr (tde's build-root: usr -> the sysroot), where
+# /usr/lib64 is then <sysroot>/lib64.
+[ -e "$SYSROOT/lib64" ]       || ln -s lib "$SYSROOT/lib64"
 mkdir -p "$HERE/.bin64"
 cat > "$HERE/.bin64/$TRIPLE-pkg-config" <<EOF
 #!/bin/sh
@@ -141,6 +145,7 @@ retarget() {
         -e 's#\([{}/]\)build\([/"}]\)#\1build64\2#g' \
         -e 's#/build$#/build64#' \
         -e 's#dist-overlay/#dist-overlay64/#g' \
+        -e 's#/dist-overlay"#/dist-overlay64"#g' \
         -e 's#/usr/lib\([^6a-zA-Z0-9_.-]\|$\)#/usr/lib64\1#g' \
         -e 's#/\(usr\.\)\{0,1\}lib/\([a-z]*\|\$[{]\{0,1\}[_a-zA-Z]*[}]\{0,1\}\)/\(lib[^/ "]*\.\(so\.0\|a\)\)#/\1lib/\2/obj-x86_64/\3#g' \
         -e 's#/lib/c/\(crt[0in]\.o\)#/lib/c/obj-x86_64/\1#g' \
@@ -152,9 +157,11 @@ retarget() {
         -e 's#\(dynamic-linker[=, ]\)/sbin/ld\.so#\1/sbin/ld64.so#g' \
         -e 's#\(toolchain\)\.cmake#\1.x86_64.cmake#g' \
         -e 's#SYSTEM_PROCESSOR i[3456]86#SYSTEM_PROCESSOR x86_64#g' \
+        ${LAYER_SED:+-f "$LAYER_SED"} \
         "$1" > "$2"
     chmod +x "$2"
 }
+LAYER_SED=
 
 # The helpers the build.sh files source (substrate-autotools.sh, which
 # about a hundred of them use to assemble sysroots out of the staging trees
@@ -193,6 +200,65 @@ for sib in $(sed -n 's#.*/\.\./\([A-Za-z0-9_+.-]*\)/\(build\|fetch\)\.sh.*#\1#p'
     retarget "$HERE/$sib/build.sh" "$HERE/$sib/.build64.sh"
     [ -f "$HERE/$sib/fetch.sh" ] && retarget "$HERE/$sib/fetch.sh" "$HERE/$sib/.fetch64.sh"
 done
+
+# A port made of layers (tde: eight sub-ports, each a directory with a
+# fetch.sh and build.sh of its own, and helper scripts beside them) runs
+# scripts that none of the above reaches: they are neither the port's top
+# two, nor a sibling port's, nor one of the shared helpers.  Every script
+# under the port gets a retargeted .<name>64.sh beside it, and -- for such
+# a port only -- references to them are rewritten by name:
+#
+#   .../<layer>/build.sh, ./build.sh   ->  .build64.sh   (and fetch.sh)
+#   .../merge-staging.sh               ->  .merge-staging64.sh
+#
+# The rules are built from the port's own script names because a blanket
+# "*.sh" rule would also rewrite scripts inside the sources being built
+# (sh sys/unix/setup.sh).
+#
+# Only for the ports named here, and only two levels down.  Other ports
+# keep scripts below their top two that must NOT be retargeted: cde's
+# hosttools/build.sh builds for the build machine, next to a whole
+# unpacked source tree full of *.sh.
+LAYERED="tde"
+nested=
+case " $LAYERED " in *" $PKG "*)
+    nested=$(find "$PORT" -maxdepth 2 \( -name build -o -name build64 \) -prune -o \
+                  -type f -name '*.sh' ! -name '.*' -print |
+             grep -v -x -e "$PORT/build.sh" -e "$PORT/fetch.sh" || true)
+    ;;
+esac
+if [ -n "$nested" ]; then
+    LAYER_SED="$HERE/.bin64/layer-$PKG.sed"
+    {
+        echo 's#/\(build\|fetch\)\.sh#/.\164.sh#g'
+        for s in $nested; do
+            b=$(basename "$s" .sh)
+            case "$b" in build|fetch) continue ;; esac
+            echo "s#/$b\\.sh#/.${b}64.sh#g"
+        done | sort -u
+    } > "$LAYER_SED"
+    # A qmake mkspec is the same kind of thing as a CMake toolchain file:
+    # it names the compiler and the sysroot where no script rule reaches.
+    # tqt3 keeps one in <layer>/substrate-g++/ and its fetch.sh copies the
+    # directory into the tree as "${HERE}/substrate-g++".  Each such
+    # directory gets a retargeted .<name>64 beside it, and "}/<name>" --
+    # the reference through ${HERE}, not the copy's destination under
+    # mkspecs/ -- is pointed at it.
+    for conf in "$PORT"/*/*/qmake.conf; do
+        [ -f "$conf" ] || continue
+        d=$(dirname "$conf"); n=$(basename "$d"); d64="$(dirname "$d")/.${n}64"
+        rm -rf "$d64"; mkdir -p "$d64"
+        for f in "$d"/*; do
+            [ -f "$f" ] || continue
+            retarget "$f" "$d64/$(basename "$f")"
+            chmod -x "$d64/$(basename "$f")"
+        done
+        echo "s#}/$n\"#}/.${n}64\"#g" >> "$LAYER_SED"
+    done
+    for s in $nested; do
+        retarget "$s" "$(dirname "$s")/.$(basename "$s" .sh)64.sh"
+    done
+fi
 
 if [ "$MODE" != build ]; then
     retarget "$PORT/fetch.sh" "$PORT/.fetch64.sh"
@@ -313,6 +379,12 @@ if [ "$MODE" != fetch ]; then
     # made of layers stages each under its own name.
     for stage in "$SUBSTRATE_TOP"/dist-overlay64/dist-*; do
         [ -d "$stage" ] || continue
+        # tde's merge-staging.sh output is build scaffolding, not a
+        # package: build-rootfs.sh never overlays it, and it rightly holds
+        # TQt3's build-HOST tools (tqmoc, tquic), which the layers above
+        # run.  The check for host-linked files is for what goes on the
+        # image.
+        case "$(basename "$stage")" in dist-tde-sysroot) continue ;; esac
         if [ "$stage" = "$STAGE_OWN" ] ||
            [ -n "$(find "$stage" -newer "$marker" -print -quit)" ]; then
             finish_stage "$stage"

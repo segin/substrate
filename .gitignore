@@ -133,6 +133,11 @@ dist/
 /contrib/*/build64/
 /contrib/*/.fetch64.sh
 /contrib/*/.build64.sh
+# ... and of the scripts below a layered port's top two (tde).
+/contrib/*/.*64.sh
+/contrib/*/*/.*64.sh
+/contrib/*/*/.*64/
+/contrib/*/*/build64/
 /contrib/.substrate-*64.sh
 /contrib/.bin64/
 /contrib/*/*toolchain.x86_64.cmake

@@ -102,7 +102,20 @@ make -j"${JOBS}" tdeconfig_compiler maketdewidgets tde-config dcopidl dcopidl2cp
 # trees + ${HB}/lib, so they self-resolve.
 cp -f "${OBJ}/tdecore/tdeconfig_compiler/tdeconfig_compiler" "${HB}/bin/tdeconfig_compiler"
 cp -f "${OBJ}/tdewidgets/maketdewidgets"                     "${HB}/bin/maketdewidgets"
-cp -f "${OBJ}/tdecore/tde-config"                            "${HB}/bin/tde-config"
+cp -f "${OBJ}/tdecore/tde-config"                            "${HB}/bin/tde-config.bin"
+# tde-config goes in behind a wrapper.  FindTDE.cmake runs it with
+# LD_LIBRARY_PATH set to the TARGET's library directory, and
+# LD_LIBRARY_PATH is searched before RUNPATH.  The build host's loader
+# skips an i386 libtdecore.so there as the wrong word size and goes on to
+# the native one; an x86-64 substrate libtdecore.so is the right word size,
+# and it stops: "ELF file OS ABI invalid".  This is a build-host program
+# and has no business with the target's libraries either way.
+cat > "${HB}/bin/tde-config" <<'WRAP'
+#!/bin/sh
+unset LD_LIBRARY_PATH
+exec "$(dirname "$0")/tde-config.bin" "$@"
+WRAP
+chmod +x "${HB}/bin/tde-config"
 cp -f "${OBJ}/dcop/dcopidl/dcopidl"                          "${HB}/bin/dcopidl"
 cp -f "${OBJ}/dcop/dcopidl2cpp/dcopidl2cpp"                  "${HB}/bin/dcopidl2cpp"
 
