@@ -8,6 +8,7 @@
 #include <sys/errno.h>
 #include <pm/pm.h>
 #include <sys/mount.h>
+#include <sys/poll.h>
 #include <sys/proc.h>
 #include <sys/tty.h>
 #include <vfs/vfs.h>
@@ -46,6 +47,23 @@ static int tty_ioctl_proxy(fs_node_t *node, uint32_t request, void *arg) {
     return -ENOTTY;
 }
 
+/*
+ * poll(2) on /dev/tty is poll on the caller's controlling terminal, like
+ * every other operation here.  Without a handler the node was never ready
+ * for anything: a program that opens /dev/tty and waits until it can write
+ * to it -- sudo relaying a command's output, for one -- waited forever on
+ * a terminal that poll() called writable through any other descriptor.
+ */
+static int tty_poll_proxy(fs_node_t *node, void *waiter) {
+    (void)node;
+    if (current_process && current_process->tty) {
+        return tty_poll(current_process->tty, waiter);
+    }
+    fs_node_t *cons = console_get_node();
+    if (cons && cons->poll) return cons->poll(cons, waiter);
+    return POLLNVAL;
+}
+
 static fs_node_t tty_node = {
     .name = "tty",
     .flags = FS_CHARDEVICE,
@@ -54,7 +72,8 @@ static fs_node_t tty_node = {
     .gid = 0,
     .read = tty_read_proxy,
     .write = tty_write_proxy,
-    .ioctl = tty_ioctl_proxy
+    .ioctl = tty_ioctl_proxy,
+    .poll = tty_poll_proxy
 };
 
 typedef struct devfs_entry {
