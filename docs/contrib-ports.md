@@ -537,7 +537,7 @@ meta-compiler (host wml/wmluiltok) and installs the uil/ headers.
   image's `libfreetype.so.6` links `libharfbuzz.so.0`, which links it back;
   ld.so resolves the cycle to one copy of each.  Ports built between the two
   passes link the first build, which has the same soname and symbols.
-- **PsyMP3** (`contrib/psymp3/`, pinned to the `2.0-RELEASE` upstream tag
+- **PsyMP3** (`contrib/psymp3/`, pinned to the `2.1.1-RELEASE` upstream tag
   with a vendored patch series) — a music player built on SDL3.  Its
   codec dependencies each ship as their own port: `libogg`
   (`contrib/libogg/`), `libvorbis` (`contrib/libvorbis/`), `libopus`

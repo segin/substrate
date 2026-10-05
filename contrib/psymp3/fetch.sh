@@ -4,7 +4,7 @@ set -eu
 REPO="https://github.com/segin/psymp3"
 # Pinned to a release tag.  Bump REF to move the port; every patch in series
 # applies unchanged at this revision.
-REF="2.0-RELEASE"
+REF="2.1.1-RELEASE"
 HERE="$(cd "$(dirname "$0")" && pwd)"; BUILD_DIR="${HERE}/build"; TREE="${BUILD_DIR}/psymp3"
 mkdir -p "${BUILD_DIR}"
 if [ ! -d "${TREE}/.git" ]; then

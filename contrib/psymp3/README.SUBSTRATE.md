@@ -5,7 +5,7 @@ FFT spectrum visualizer, by Kirn Gill II (segin).  This port cross-builds it
 for substrate (i386, ELFOSABI_SUBSTRATE).
 
 * Upstream: <https://github.com/segin/psymp3>
-* Pinned tag: `2.0-RELEASE` (commit `ba12c427983580824b0447f75492e76df55176b9`)
+* Pinned tag: `2.1.1-RELEASE` (commit `47d6b624038f20c2af9f53f29b2999d64fa25093`)
 * License: ISC
 
 ## Build
@@ -105,6 +105,13 @@ GCC 16 reports the same diagnostic as `-Wuninitialized`, and the project's
 
 See `series` / `patches/`.  Each patch is a focused, upstream-shaped change kept
 git-apply-able against the pinned tree.  Rationale is in the patch headers.
+
+Patch `0003` (MemoryTracker) went away with the move to 2.1.1-RELEASE.  It
+did two things.  Upstream now does one itself: the memory-pressure figure is
+computed in 64 bits, where a 32-bit `size_t` used to overflow and make an
+idle machine look full.  The other, falling back to `MemFree` when
+`/proc/meminfo` has no `MemAvailable`, substrate never needed: its
+`/proc/meminfo` has the field.
 
 ## Notes
 
