@@ -1,7 +1,9 @@
 # Substrate
 
-Substrate is a Unix-like operating system for 32-bit x86 (i386). The tree
-holds the whole system, not just a kernel:
+Substrate is a Unix-like operating system for x86. i386 is the primary
+target and the most complete; a 64-bit (x86-64) kernel and userland build
+and boot too (see below). The tree holds the whole system, not just a
+kernel:
 
 - **Kernel** — monolithic, with its own VM, VFS, network stack, and drivers
   for AHCI/IDE/NVMe/USB storage, UHCI/EHCI/xHCI, HD Audio/AC'97/SB16/USB
@@ -11,7 +13,9 @@ holds the whole system, not just a kernel:
   `sbin/` and `usr.bin/`.
 - **A native GNU toolchain** — binutils 2.46 and GCC 16.1, patched for the
   `i386-unknown-substrate` target. A cross compiler builds the system on a
-  Linux host; the same toolchain, plus gdb, then runs *on* Substrate.
+  Linux host; the same toolchain, plus gdb, then runs *on* Substrate. A
+  second cross toolchain targets `x86_64-unknown-substrate` for the 64-bit
+  port.
 - **227 third-party ports** under `contrib/`, each a patch series against an
   upstream release: zsh, ncurses, OpenSSL, curl, Python, Perl, Tcl/Tk, the
   X11 client stack with the `Xfbdev` framebuffer server, SDL3, GTK 2, TrueType
@@ -31,8 +35,20 @@ or Xenix `x.out` header):
 | Linux | Active development. |
 | OpenBSD, SunOS 4.x, SVR3/SVR4 | Early stage. |
 
-An x86-64 port is a stub (`sys/arch/x86_64`); i386 is the only working
-target. `ARCHITECTURE.md` describes how the system fits together.
+## The 64-bit port
+
+The x86-64 port (`sys/arch/x86_64`) is real, not a stub. Its kernel runs
+the existing i386 userland through a 32-bit compatibility layer, and it
+also runs **native 64-bit (LP64) processes**: a separate
+`x86_64-unknown-substrate` C/C++ cross toolchain, a 64-bit dynamic linker
+`/sbin/ld64.so` loading from `/lib64`, and the in-tree userland and nearly
+every `contrib/` port rebuilt 64-bit. `./build64.sh` produces
+`rootfs64.img`, an image whose kernel (`/vmunix64`) and userland are both
+64-bit, which boots to a graphical login. i386 remains the primary and
+most complete target; `docs/specs/arch_x86_64_core.md` details what the
+64-bit port does and does not yet have.
+
+`ARCHITECTURE.md` describes how the system fits together.
 
 ## Building
 
@@ -117,6 +133,19 @@ The results:
 | `/opt/substrate/` | Cross toolchain: `i386-unknown-substrate-gcc` and friends, with the sysroot under `i386-unknown-substrate/`. |
 | `dist/` | The staged root filesystem the image is baked from. |
 
+### The 64-bit image
+
+```sh
+./build64.sh
+```
+
+The counterpart of `build.sh` for x86-64: it builds the
+`x86_64-unknown-substrate` cross toolchain, the kernel and userland 64-bit,
+the `contrib/` ports for the 64-bit target (all but TDE), and bakes and
+boot-tests `rootfs64.img` — a 4 GiB image labelled `sub-root64`/`sub-boot64`
+whose only kernel is `/vmunix64`. `SKIP_TOOLCHAIN=1` reuses an installed
+64-bit toolchain; `ONLY64="pkg …"` selects which ports to build.
+
 ### Rebuilding parts
 
 The kernel alone (the project always cleans before a kernel build):
@@ -186,6 +215,7 @@ keep changes. The most useful options:
 | `--audio=hda`, `sb16`, `usb` | Emulate a different sound device. |
 | `--keyboard=ps2`, `--mouse=ps2` | PS/2 input instead of USB. |
 | `--usb-version=2.0`, `3.0` | EHCI or xHCI instead of UHCI. |
+| `--64` | Boot the 64-bit image (`rootfs64.img`, `sys/kernel-x86_64.bin`) under `qemu-system-x86_64`. |
 | `--debug` | Verbose kernel log on serial, and QEMU's gdb stub on port 1234. |
 
 Without `--user` it bridges onto a host NIC with macvtap, which needs sudo
