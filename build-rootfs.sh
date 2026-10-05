@@ -1019,7 +1019,8 @@ EOF
     #       fakes `chown -R 0:0` (without touching the real dist/) so mke2fs
     #       records uid/gid 0 — matching what the old debugfs path produced.
     #
-    #    su(1), passwd(1), at(1), batch(1) and ping(8) are the setuid-root
+    #    su(1), passwd(1), at(1), batch(1), ping(8) and, when the port is
+    #    staged, sudo(8) are the setuid-root
     #    binaries (dist/ has no other setuid files); chown clears the bit so
     #    it is re-set inside the fakeroot session.  passwd needs it to
     #    rewrite /etc/shadow for the user changing their own password; at
@@ -1052,6 +1053,14 @@ EOF
         [ -e "$1/usr/bin/at" ] && chmod 4755 "$1/usr/bin/at"
         [ -e "$1/usr/bin/batch" ] && chmod 4755 "$1/usr/bin/batch"
         [ -e "$1/bin/ping" ] && chmod 4755 "$1/bin/ping"
+        # sudo(8) is setuid root, and refuses a sudoers file or directory
+        # that anyone but root can write (or, for the file, that is not
+        # mode 0440).
+        if [ -e "$1/usr/bin/sudo" ]; then
+            chmod 4755 "$1/usr/bin/sudo"
+            [ -e "$1/etc/sudoers" ] && chmod 0440 "$1/etc/sudoers"
+            [ -d "$1/etc/sudoers.d" ] && chmod 0750 "$1/etc/sudoers.d"
+        fi
         if [ -e "$1/etc/shadow" ]; then
             chown 0:42 "$1/etc/shadow" && chmod 0640 "$1/etc/shadow"
         fi

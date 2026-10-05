@@ -162,6 +162,13 @@ on the 64-bit kernel at all.
 - **less 692** (`contrib/less/`) — system `$PAGER` (also wired as
   `more`).  Configured with `--with-regex=posix` against libregex;
   tinfo/pcre auto-detection is suppressed via `ac_cv_lib_*=no`.
+- **sudo 1.9.17p2** (`contrib/sudo/`) — `sudo`, `sudoedit`, `visudo`,
+  `sudoreplay`, `cvtsudoers`.  No patches.  Authenticates against
+  `/etc/shadow` (no PAM); the sudoers policy is built into the binary
+  (`--enable-static-sudoers`) because `ld.so` has no `DT_RUNPATH` to find
+  sudo's private libraries by.  `build-rootfs.sh` sets the setuid bit and
+  the sudoers modes.  Ships the upstream policy: root only, plus
+  `/etc/sudoers.d/`.
 - **qman 1.5.1** (`contrib/qman/`) — fetched but not yet buildable on
   substrate (needs meson, cog, libbsd, ncursesw).  Tracked under
   `contrib/qman/README.SUBSTRATE.md`.
