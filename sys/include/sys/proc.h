@@ -87,17 +87,6 @@ static inline void fdset_clear(uint32_t *bm, int fd) {
     bm[(unsigned)fd >> 5] &= ~(1u << ((unsigned)fd & 31));
 }
 
-// FPU Context Structure
-typedef struct {
-    /* FXSAVE/FXRSTOR require a 16-byte-aligned operand.  struct process is
-     * kmalloc'd and kmalloc does not guarantee 16-byte alignment, so the
-     * aligned(16) attribute on the field (which only fixes the offset) is not
-     * enough — the struct base can be misaligned.  Over-allocate by 15 bytes
-     * and align the pointer at runtime (see fpu_area() in arch/x86-common/fpu.c). */
-    uint8_t fpu_state[512 + 15];  // FXSAVE area (512B) + slack for 16-byte alignment
-    int fpu_used;                 // Flag: has this process used FPU?
-} fpu_context_t;
-
 // Process Structure
 typedef struct process {
     int pid;
@@ -219,10 +208,7 @@ typedef struct process {
     uint64_t itimer_value_ticks[PROC_ITIMER_COUNT];
     uint64_t itimer_interval_ticks[PROC_ITIMER_COUNT];
     spinlock_t itimer_lock;
-    
-    // FPU Context
-    fpu_context_t fpu_ctx;
-    
+
     // mmap regions
     struct vm_area *vm_areas;  // Linked list of mapped regions
     struct vm_map *vm_map;    // Substrate VM Map
@@ -366,6 +352,16 @@ typedef struct thread {
      * (manifesting as SEGV in libc's TLS-relative loads — e.g. jemalloc
      * __free reads %gs:0 which becomes 0 when the slot is empty). */
     uint32_t  gs_base;
+
+    /* The thread's x87/SSE/AVX register state while it does not own the
+     * CPU's live registers (arch/x86-common/fpu.c).  The registers belong
+     * to a thread, not to its process: two threads of one process are
+     * preempted in the middle of different computations.  fpu_area is
+     * allocated at the thread's first use, sized and aligned for the save
+     * format the CPU has; fpu_raw is the allocation it was carved from. */
+    void     *fpu_area;
+    void     *fpu_raw;
+    uint8_t   fpu_used;     /* has state worth restoring */
 
     // Scheduling - Basic
     int           priority;

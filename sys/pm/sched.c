@@ -4,6 +4,7 @@
 #include <sys/errno.h>
 #include <sys/futex.h>
 #include <pm/pm.h>
+#include <machine/fpu.h>
 #include <machine/pmm.h>
 #include <machine/pmap.h>
 #include <stddef.h>
@@ -307,6 +308,10 @@ thread_t *sched_alloc_thread(process_t *proc) {
     thread->tid = tid;
     sched_link_locked(thread);
     spinlock_release_irq(&tid_lock, tf);
+
+    /* fork(2) and thread creation both start the new thread with its
+     * creator's floating-point state. */
+    fpu_thread_inherit(current_thread, thread);
 
     return thread;
 }
@@ -966,6 +971,7 @@ void sched_reap_thread(thread_t *t) {
     }
 
     sched_release_thread_storage(t);
+    fpu_thread_free(t);
 
     unsigned long tf = spinlock_acquire_irq(&tid_lock);
     sched_unlink_locked(t);

@@ -26,13 +26,13 @@ void arch_switch_to(thread_t *prev, thread_t *next) {
     // Switch LDT if needed
     if (next->proc != prev->proc) {
         ldt_activate(next->proc);
-
-        /* Re-arm CR0.TS (lazy FPU): the incoming process must trap (#NM) on
-         * its first FPU/SSE use so fpu_handler saves the outgoing owner's
-         * live registers and loads the incoming one's, instead of running
-         * with another process's x87/SSE state. */
-        fpu_switch();
     }
+
+    /* Lazy FPU, per thread: unless the live registers are already the
+     * incoming thread's, it must trap (#NM) on its first FPU/SSE use so
+     * fpu_handler saves the owner's registers and loads its own.  Two
+     * threads of one process are no exception. */
+    fpu_switch(next);
 
     /* Reload per-thread %gs TLS base into the shared GDT_TLS_START slot.
      * No-op when next->gs_base == 0 (kernel-only threads and user threads

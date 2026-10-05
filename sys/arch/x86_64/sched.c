@@ -55,10 +55,12 @@ void arch_switch_to(thread_t *prev, thread_t *next) {
 
     if (next->proc != prev->proc) {
         ldt_activate(next->proc);
-        /* Lazy FPU: the incoming process traps (#NM) on its first FPU use,
-         * so its registers are loaded and the outgoing owner's saved. */
-        fpu_switch();
     }
+
+    /* Lazy FPU, per thread: unless the live registers are already the
+     * incoming thread's, it traps (#NM) on its first FPU use, so that its
+     * registers are loaded and the owner's saved. */
+    fpu_switch(next);
 
     /* The thread's TLS base into GDT slot 6, which its %gs selects. */
     i386_load_gs_for_thread(next);

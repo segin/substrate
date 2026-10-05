@@ -579,7 +579,9 @@ int ext2_xattr_list(fs_node_t *node, void *out, size_t out_size, size_t *result_
 
 /* --- FPU (arch/x86-common/fpu.h) --- */
 void fpu_forget_process(struct process *p) { (void)p; }
-void fpu_switch(void) { }
+void fpu_switch(struct thread *next) { (void)next; }
+void fpu_thread_inherit(struct thread *parent, struct thread *child) { (void)parent; (void)child; }
+void fpu_thread_free(struct thread *t) { (void)t; }
 
 /* --- umtx (include/sys/umtx.h) --- */
 int kern_umtx_op(void *obj, int op, unsigned long val, void *uaddr, void *uaddr2)

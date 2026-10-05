@@ -14,6 +14,7 @@ struct i386_cpu_features {
     uint8_t has_pae;
     uint8_t has_pge;
     uint8_t has_fxsr;
+    uint8_t has_xsave;
     uint8_t has_msr;
     uint8_t has_pat;
     uint8_t pat_wc_enabled;
@@ -38,6 +39,13 @@ int i386_cpu_has_pse(void);
 int i386_cpu_has_pae(void);
 int i386_cpu_has_pge(void);
 int i386_cpu_has_fxsr(void);
+int i386_cpu_has_xsave(void);
+/* CPUID(leaf, subleaf) into eax, ebx, ecx, edx.  The caller must know the
+ * CPU has CPUID and that the leaf is within its range. */
+void i386_cpuid(uint32_t leaf, uint32_t subleaf, uint32_t *eax, uint32_t *ebx,
+                uint32_t *ecx, uint32_t *edx);
+/* The highest basic CPUID leaf, 0 if the CPU has no CPUID. */
+uint32_t i386_cpuid_max_basic(void);
 int i386_cpu_has_msr(void);
 int i386_cpu_has_pat(void);
 int i386_cpu_pat_wc_enabled(void);

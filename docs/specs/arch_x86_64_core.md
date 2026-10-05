@@ -339,6 +339,16 @@ a statically linked 64-bit program:
   (`arch/x86_64/signal64.c`): `struct sigframe` below the red zone, the
   FreeBSD `mcontext` with the FXSAVE image, and a 64-bit trampoline at
   `0xFE000060` that calls the handler and then `sigreturn(&sf_uc)`.
+  With XSAVE the rest of the state -- the XSAVE header and the extended
+  components, so the upper halves of the YMM registers -- goes in a block
+  above the frame that `mc_xfpustate`/`mc_xfpustate_len` name, as on
+  FreeBSD; `sigreturn` takes it back only from a block of that size, and
+  sanitises its header.
+* **FPU, SSE, AVX.**  `arch/x86-common/fpu.c`, shared with i386: the
+  state is per thread, switched lazily (#NM), saved with XSAVE where the
+  CPU has it (x87, SSE, AVX, and AVX-512 if its area fits in a page),
+  else FXSAVE.  `CR4.OSXSAVE` is what lets user code use AVX at all.  A
+  new thread or forked child starts with a copy of its creator's state.
 
 * **ptrace.**  What a tracer exchanges follows the tracer's width
   (`kern/ptrace.c`): a 64-bit one gets the Linux/amd64

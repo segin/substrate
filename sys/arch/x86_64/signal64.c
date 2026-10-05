@@ -49,9 +49,20 @@ void sendsig_amd64(void *handler, int sig, uint32_t mask, uint32_t flags,
     } else {
         sp = regs->rsp - AMD64_REDZONE;
     }
+    /* Above the frame, room for the part of the FP state the frame's
+     * FXSAVE image has no place for (the upper halves of the YMM registers,
+     * with AVX).  XSAVE areas are 64-byte aligned. */
+    size_t xlen = fpu_signal_extra_len();
+    uint64_t xsp = 0;
+    if (xlen != 0) {
+        sp = (sp - xlen) & ~63UL;
+        xsp = sp;
+    }
     sp = (sp - sizeof(sf)) & ~15UL;
 
-    if (validate_user_addr((void *)(uintptr_t)sp, sizeof(sf)) != 0) {
+    if (validate_user_addr((void *)(uintptr_t)sp, sizeof(sf)) != 0 ||
+        (xlen != 0 &&
+         validate_user_addr((void *)(uintptr_t)xsp, xlen) != 0)) {
         sigexit(current_process, SIGSEGV);
         return;
     }
@@ -95,6 +106,14 @@ void sendsig_amd64(void *handler, int sig, uint32_t mask, uint32_t flags,
     if (fpu_signal_save(mc->mc_fpstate)) {
         mc->mc_fpformat = AMD64_MC_FPFMT_XMM;
         mc->mc_ownedfp = AMD64_MC_FPOWNED_FPU;
+        if (xlen != 0) {
+            if (fpu_signal_copyout_extra((void *)(uintptr_t)xsp) != 0) {
+                sigexit(current_process, SIGSEGV);
+                return;
+            }
+            mc->mc_xfpustate = xsp;
+            mc->mc_xfpustate_len = xlen;
+        }
     } else {
         mc->mc_fpformat = AMD64_MC_FPFMT_NODEV;
         mc->mc_ownedfp = AMD64_MC_FPOWNED_NONE;
@@ -174,8 +193,24 @@ int amd64_sys_sigreturn(void *ucp) {
                    (mc->mc_rflags & AMD64_RFLAGS_USER);
 
     if (mc->mc_fpformat == AMD64_MC_FPFMT_XMM &&
-        mc->mc_ownedfp == AMD64_MC_FPOWNED_FPU)
-        fpu_signal_restore(mc->mc_fpstate);
+        mc->mc_ownedfp == AMD64_MC_FPOWNED_FPU) {
+        const void *uextra = NULL;
+        size_t xlen = 0;
+
+        /* The extended block is used only if it is where and what the
+         * kernel would have written; anything else restores the legacy
+         * state alone. */
+        if (mc->mc_xfpustate != 0 &&
+            mc->mc_xfpustate_len == fpu_signal_extra_len() &&
+            mc->mc_xfpustate < USER32_VA_END &&
+            validate_user_addr((void *)(uintptr_t)mc->mc_xfpustate,
+                               (size_t)mc->mc_xfpustate_len) == 0) {
+            uextra = (const void *)(uintptr_t)mc->mc_xfpustate;
+            xlen = (size_t)mc->mc_xfpustate_len;
+        }
+        if (fpu_signal_restore(mc->mc_fpstate, uextra, xlen) != 0)
+            return -EINVAL;
+    }
 
     current_thread->sig_mask = uc.uc_sigmask.bits[0];
     current_thread->sig_on_stack = 0;

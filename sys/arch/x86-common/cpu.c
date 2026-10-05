@@ -45,6 +45,17 @@ static void i386_cpuid_leaf(uint32_t leaf, uint32_t subleaf,
                      : "a"(leaf), "c"(subleaf));
 }
 
+static uint32_t cpuid_max_basic;
+
+void i386_cpuid(uint32_t leaf, uint32_t subleaf, uint32_t *eax, uint32_t *ebx,
+                uint32_t *ecx, uint32_t *edx) {
+    i386_cpuid_leaf(leaf, subleaf, eax, ebx, ecx, edx);
+}
+
+uint32_t i386_cpuid_max_basic(void) {
+    return cpuid_max_basic;
+}
+
 static void i386_cpu_enable_pat_wc(void) {
     uint64_t pat;
 
@@ -80,6 +91,7 @@ void i386_cpu_init_early(void) {
 
         i386_cpuid_leaf(0, 0, &eax, &ebx, &ecx, &edx);
         max_basic = eax;
+        cpuid_max_basic = max_basic;
         memcpy(cpu_features.vendor + 0, &ebx, sizeof(ebx));
         memcpy(cpu_features.vendor + 4, &edx, sizeof(edx));
         memcpy(cpu_features.vendor + 8, &ecx, sizeof(ecx));
@@ -116,6 +128,10 @@ void i386_cpu_init_early(void) {
             cpu_features.has_pge = cpu_features.has_cr4 && ((edx >> 13) & 1u);
             cpu_features.has_pat = cpu_features.has_msr && ((edx >> 16) & 1u);
             cpu_features.has_fxsr = (edx >> 24) & 1u;
+            /* XSAVE needs leaf 0xD to size its area; a CPU that reports
+             * the feature without the leaf is treated as not having it. */
+            cpu_features.has_xsave = cpu_features.has_cr4 && max_basic >= 0xD &&
+                                     ((ecx >> 26) & 1u);
             cpu_features.has_pcid = cpu_features.has_cr4 && ((ecx >> 17) & 1u);
             cpu_features.has_rdrand = (ecx >> 30) & 1u;
         }
@@ -179,6 +195,7 @@ int i386_cpu_has_pse(void) { return cpu_features.has_pse; }
 int i386_cpu_has_pae(void) { return cpu_features.has_pae; }
 int i386_cpu_has_pge(void) { return cpu_features.has_pge; }
 int i386_cpu_has_fxsr(void) { return cpu_features.has_fxsr; }
+int i386_cpu_has_xsave(void) { return cpu_features.has_xsave; }
 int i386_cpu_has_msr(void) { return cpu_features.has_msr; }
 int i386_cpu_has_pat(void) { return cpu_features.has_pat; }
 int i386_cpu_pat_wc_enabled(void) { return cpu_features.pat_wc_enabled; }

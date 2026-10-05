@@ -4,6 +4,7 @@
 #ifndef _ARCH_X86_COMMON_FPU_H
 #define _ARCH_X86_COMMON_FPU_H
 
+#include <stddef.h>
 #include <stdint.h>
 #include <machine/idt.h>
 
@@ -32,18 +33,31 @@
 #define CW_PRECISION    0x0020
 // ... precision control, rounding control ...
 
-// Forward declaration
+// Forward declarations
 struct process;
+struct thread;
 
 void fpu_init(void);
 void fpu_handler(registers_t *regs);
-void fpu_save_context(struct process *p);
-void fpu_restore_context(struct process *p);
-void fpu_switch(void);
+/* NEXT is being scheduled on this CPU: let it use the FPU only if the live
+ * registers are its own. */
+void fpu_switch(struct thread *next);
 void fpu_forget_process(struct process *p);
-/* The current process's FXSAVE image (512 bytes), out to and back from a
- * signal frame.  fpu_signal_save() returns 0 if there is no FP state. */
+/* A new thread starts with a copy of its creator's state; a thread being
+ * freed gives its save area back. */
+void fpu_thread_inherit(struct thread *parent, struct thread *child);
+void fpu_thread_free(struct thread *t);
+/*
+ * The current thread's state, out to and back from a signal frame: the
+ * FXSAVE image (512 bytes) in the frame itself, and, with XSAVE, a block of
+ * fpu_signal_extra_len() bytes in user memory for what follows it (the
+ * XSAVE header and the extended components).  fpu_signal_save() returns 0
+ * if there is no state; see fpu.c for the order these must be called in.
+ */
 int fpu_signal_save(void *image);
-void fpu_signal_restore(const void *image);
+size_t fpu_signal_extra_len(void);
+int fpu_signal_copyout_extra(void *uaddr);
+int fpu_signal_restore(const void *image, const void *uextra,
+                       size_t extra_len);
 
 #endif
