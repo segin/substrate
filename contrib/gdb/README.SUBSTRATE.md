@@ -95,13 +95,19 @@ top of the kernel ptrace work:
 - `config.sub`: accept `*-substrate` (`patches/0001`).
 - `bfd/`: the binutils substrate ELF vecs (binutils `patches/0002..0006`) plus
   an `x86_64-*-substrate*` case in `bfd/config.bfd`.
-- `gdb/configure.host`: `i[34567]86-*-substrate*) gdb_host=substrate ;;`.
+- `gdb/configure.host`: `i[34567]86-*-substrate*) gdb_host=substrate ;;`,
+  and the same for `x86_64-*-substrate*`.  Without the host line gdb links
+  with no native target at all and answers `run` and `attach` with "Don't
+  know how to run" -- which is what the 64-bit gdb did until it had one.
 - `gdb/configure.nat`: a `substrate` case → `inf-ptrace.o fork-child.o
   nat/fork-inferior.o` + cpu `i386` adds `substrate-nat.o`.
 - `gdb/substrate-nat.c`: the native backend (saved here as `substrate-nat.c`) —
   an `inf_ptrace_target` subclass that maps gdb's i386 regs to/from
   `struct user_regs_struct` via PTRACE_GETREGS/SETREGS; memory + run control
-  come from generic `inf-ptrace`.
+  come from generic `inf-ptrace`.  Built 64-bit (`contrib/port64.sh gdb`) it
+  maps the amd64 registers instead, from the x86-64 `user_regs_struct` a
+  64-bit tracer is given, and `pid_to_exec_file` reads `/proc/<pid>/exe` so
+  that `gdb -p` finds the program and its architecture.
 
 **configure + build:**
 ```

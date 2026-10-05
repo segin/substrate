@@ -8,6 +8,14 @@
  i[34567]86-*-gnu*)	gdb_host=i386gnu ;;
  i[34567]86-*-openbsd*)	gdb_host=obsd ;;
  i[34567]86-*-solaris2* | x86_64-*-solaris2*)
+@@ -174,6 +175,7 @@
+ vax-*-openbsd*)		gdb_host=obsd ;;
+
+ x86_64-*-linux*)	gdb_host=linux64 ;;
++x86_64-*-substrate*)	gdb_host=substrate ;;
+ x86_64-*-freebsd* | x86_64-*-kfreebsd*-gnu)
+ 			gdb_host=fbsd64 ;;
+ x86_64-*-netbsd* | x86_64-*-knetbsd*-gnu)
 --- a/gdb/configure.nat
 +++ b/gdb/configure.nat
 @@ -74,6 +74,14 @@
