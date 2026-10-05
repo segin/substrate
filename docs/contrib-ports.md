@@ -169,6 +169,9 @@ on the 64-bit kernel at all.
   sudo's private libraries by.  `build-rootfs.sh` sets the setuid bit and
   the sudoers modes.  Ships the upstream policy: root only, plus
   `/etc/sudoers.d/`.
+- **rogue 5.4.4** (`contrib/rogue/`) — the original dungeon crawl, over
+  ncurses.  No patches.  Setgid `games` for the shared scoreboard in
+  `/var/games/rogue` (modes applied by `build-rootfs.sh`).
 - **qman 1.5.1** (`contrib/qman/`) — fetched but not yet buildable on
   substrate (needs meson, cog, libbsd, ncursesw).  Tracked under
   `contrib/qman/README.SUBSTRATE.md`.

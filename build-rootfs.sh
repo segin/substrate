@@ -1061,6 +1061,16 @@ EOF
             [ -e "$1/etc/sudoers" ] && chmod 0440 "$1/etc/sudoers"
             [ -d "$1/etc/sudoers.d" ] && chmod 0750 "$1/etc/sudoers.d"
         fi
+        # rogue(6) keeps one scoreboard for every player: the game is setgid
+        # games (gid 100, from etc/group) and its directory group-writable.
+        if [ -e "$1/usr/bin/rogue" ]; then
+            chown 0:100 "$1/usr/bin/rogue" && chmod 2755 "$1/usr/bin/rogue"
+            if [ -d "$1/var/games/rogue" ]; then
+                chown -R 0:100 "$1/var/games/rogue"
+                chmod 0775 "$1/var/games/rogue"
+                [ -e "$1/var/games/rogue/rogue.scr" ] && chmod 0664 "$1/var/games/rogue/rogue.scr"
+            fi
+        fi
         if [ -e "$1/etc/shadow" ]; then
             chown 0:42 "$1/etc/shadow" && chmod 0640 "$1/etc/shadow"
         fi
