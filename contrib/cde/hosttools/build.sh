@@ -36,7 +36,11 @@ WORK="${HERE}/build"
 PREFIX="${HERE}/prefix"
 
 SUBSTRATE_TOP="$(cd "${HERE}/../../.." && pwd)"
-SRC="${HERE}/../build/cdesktopenv/cde"
+# The CDE tree to build the native copies from.  The port's build.sh passes
+# its own: the 64-bit build keeps its tree in ../build64, and on a machine
+# that has only ever built that one there is no ../build.  The tools are
+# built for the build host either way.
+SRC="${CDE_SRC:-${HERE}/../build/cdesktopenv/cde}"
 : "${JOBS:=$(nproc 2>/dev/null || echo 4)}"
 
 mkdir -p "${WORK}" "${PREFIX}/bin"

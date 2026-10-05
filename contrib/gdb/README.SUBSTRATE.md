@@ -114,15 +114,16 @@ top of the kernel ptrace work:
   (`PTRACE_GETFPREGS`) -- and `read_description` offers x87, SSE or AVX
   registers to match, so `$st0`, `$xmm0` and `$ymm0` read and write.
 
-**Known defect, i386 only: backtraces and arguments are wrong** (`add (a=0,
-b=0)`, a one-frame `bt`).  It is not gdb's: the i386 cross GCC numbers
-`%ebp` as DWARF register 4 and `%esp` as 5, the reverse of the i386 ELF
-psABI that gdb (and every other DWARF consumer) assumes, so the CFA is
-computed from the wrong register.  `.cfi_def_cfa_register 4` after `mov
-%esp,%ebp` in `gcc -S` output shows it.  C++ unwinding is unaffected, since
-libgcc's unwinder is built by the same compiler.  The fix belongs in the GCC
-target (`DBX_REGISTER_NUMBER` → `svr4_dbx_register_map`) and means
-rebuilding everything that carries `.eh_frame`.  x86-64 is not affected.
+**i386 backtraces need objects from a toolchain with GCC patch 0013.**
+Before it, the i386 cross GCC numbered `%ebp` as DWARF register 4 and
+`%esp` as 5, the reverse of the i386 ELF psABI that gdb (and every other
+DWARF consumer) assumes, so gdb computed each frame from the wrong
+register: `add (a=0, b=0)` and a one-frame `bt`.  The patch selects the
+psABI numbering (`.cfi_def_cfa_register 5` after `mov %esp,%ebp` in
+`gcc -S` output), and a program built since backtraces correctly.  One
+built before does not, and must not be mixed with a new libgcc: the
+unwinder and the tables it reads have to agree.  x86-64 was never
+affected.
 
 **configure + build:**
 ```

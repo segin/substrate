@@ -49,7 +49,7 @@ SR="${HERE}/build/sysroot"
 
 # Build-host programs CDE's configure requires, plus the native objdir.
 [ -x "${HOSTTOOLS}/rpcgen" ] && [ -f "${CDE_HOST}/.substrate-hostbuild-done" ] || \
-    ( cd "${HERE}/hosttools" && ./build.sh )
+    ( cd "${HERE}/hosttools" && CDE_SRC="${TREE_DIR}" ./build.sh )
 PATH="${STAGE1_PREFIX}/bin:${HOSTTOOLS}:${PATH}"; export PATH
 
 # --- sysroot ---------------------------------------------------------------
