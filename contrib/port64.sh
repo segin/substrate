@@ -303,7 +303,13 @@ finish_stage() {
     # and links /usr/lib64/libfoo.so -- the host's, successfully.  Nothing
     # on the image needs them, so they are dropped from the staging tree
     # itself, not only from the sysroot copy.
-    find "$STAGE" -name '*.la' -exec rm -f {} +
+    #
+    # Except TDE's, under /opt/trinity, which the image does need: they
+    # are not what libtool installed (tde/gen-libtool-la.sh writes them,
+    # with no dependency_libs) but what KLibLoader opens to find a plugin.
+    # Without them twin starts, reports "No window decoration plugin
+    # library was found" and exits, taking the session with it.
+    find "$STAGE" -name '*.la' ! -path '*/opt/trinity/*' -exec rm -f {} +
 
     # Nothing staged may have been linked against the build host.  A glibc
     # symbol version or soname in a substrate binary means some -L reached

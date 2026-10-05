@@ -61,12 +61,12 @@ step "Stage 2b: contrib ports for the 64-bit target"
 # own scripts and stages it under dist-overlay64/dist-<port>, which
 # build-rootfs.sh --arch=x86_64 overlays.  The list and its order are
 # build.sh's DEFAULT_CONTRIB -- each port may need the ones before it --
-# less the ports that have not been built for 64-bit:
-#
-#   tde    not attempted yet (five layers and a host TQt3 build)
+# less any port named in NOT64, which is empty: every port builds for
+# 64-bit.  (tde was the last, held back by its eight layers of nested
+# scripts until port64.sh learned to retarget those.)
 #
 # ONLY64="a b c" overrides it; ONLY64="" builds none.
-NOT64="tde"
+NOT64=""
 DEFAULT_CONTRIB64=""
 for pkg in $(sed -n 's/^DEFAULT_CONTRIB="\(.*\)"$/\1/p' build.sh); do
     case " $NOT64 " in *" $pkg "*) continue ;; esac

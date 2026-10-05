@@ -113,6 +113,20 @@ port_check /usr/bin/nethack "nethack reads its data (nhdat)" \
 port_check /usr/bin/nethack "nethack is setgid games" \
     'ls -l /usr/lib64/nethack/nethack | grep -q "^-rwxr-sr-x"'
 port_check /usr/bin/angband "angband" 'LANG=en_US.UTF-8 /usr/bin/angband --help 2>&1 | grep -q "Usage: angband"'
+# TDE, as far as it goes without a display: its libraries are found and
+# are the 64-bit ones, a C++ program linked against tdecore and TQt starts
+# and answers, and the desktop's own programs resolve everything they need.
+T=/opt/trinity
+port_check $T/bin/tde-config "tde-config runs (tdecore + TQt load)" \
+    "$T/bin/tde-config --version 2>&1 | grep -q 'TDE: R14'"
+port_check $T/bin/tde-config "tde-config is a 64-bit program" \
+    "ldd $T/bin/tde-config 2>&1 | grep -q ld64.so"
+port_check $T/bin/kicker "kicker's libraries all resolve" \
+    "! ldd $T/bin/kicker 2>&1 | grep -q 'not found'"
+port_check $T/bin/twin "twin's libraries all resolve" \
+    "! ldd $T/bin/twin 2>&1 | grep -q 'not found'"
+port_check $T/bin/kcalc "kcalc's libraries all resolve" \
+    "! ldd $T/bin/kcalc 2>&1 | grep -q 'not found'"
 
 echo "smoke: $fail failure(s)"
 exit $fail

@@ -1381,8 +1381,15 @@ install_to_dist64() {
     local stage
     for stage in "$TOP"/dist-overlay64/dist-*; do
         [ -d "$stage" ] || continue
+        # contrib/tde/merge-staging.sh's scaffolding, as for the 32-bit
+        # image: every file in it is overlaid from the sub-port's own
+        # tree, and it also holds TQt3's build-HOST tools.
+        case "$(basename "$stage")" in dist-tde-sysroot) continue ;; esac
         echo "Overlaying $(basename "$stage")..."
-        cp -a "$stage/." "$DIST/"
+        # Through tar, as the 32-bit overlay goes: it replaces a file
+        # that is already there read-only (TQt's generated headers are
+        # installed 0444, by more than one tree), where cp -a stops.
+        (cd "$stage" && tar -cf - .) | (cd "$DIST" && tar -xf -)
     done
 
     # What install_to_dist does for the 32-bit image once its overlays are
