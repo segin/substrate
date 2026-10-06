@@ -624,6 +624,9 @@ int svr4_streams_open(const char *path, int flags, int64_t *result) {
     size_t i;
     int fd, rc;
 
+    if (strncmp(path, "/dev/", 5) == 0) {
+        streams_log(path, -1, NULL, 0);          /* which device, in a trace */
+    }
     for (i = 0; i < sizeof(devices) / sizeof(devices[0]); i++) {
         if (strcmp(path, devices[i].path) == 0) {
             *result = stream_create(devices[i].family, devices[i].type,
@@ -916,15 +919,21 @@ int svr4_streams_ioctl(struct sysv386_frame *f, int64_t *result) {
         return 1;
     case SVR4_I_NREAD:
     case SVR4_FIONREAD:
+        if (sysv386_span(arg, sizeof(value)) != 0) {
+            *result = -EFAULT;
+            return 1;
+        }
         if (s->qlen) {
             value = s->q[s->qhead].len;
+            rc = user_put(arg, &value, sizeof(value));
         } else {
-            rc = kern_ioctl(fd, FIONREAD, &value);
-            if (rc != 0) {
-                value = 0;
+            /* The socket answers into the caller's own word: its ioctl
+             * copies out, and will not to an address in the kernel. */
+            rc = kern_ioctl(fd, FIONREAD, (void *)(uintptr_t)arg);
+            if (rc == 0) {
+                rc = user_get(arg, &value, sizeof(value));
             }
         }
-        rc = user_put(arg, &value, sizeof(value));
         /* I_NREAD also says how many messages there are. */
         *result = rc != 0 ? rc
                 : f->a[1] == SVR4_I_NREAD ? (value > 0 || s->qlen) : 0;
@@ -1178,6 +1187,8 @@ int64_t svr4_sys_poll(struct sysv386_frame *f) {
             rc++;
         }
     }
+    streams_log("poll", (int)nfds, (const uint8_t *)fds,
+                (uint32_t)(size > 32 ? 32 : size));
     if (user_put(f->a[0], fds, (uint32_t)size) != 0) {
         rc = -EFAULT;
     }
