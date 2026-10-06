@@ -9,7 +9,7 @@
  * /perso/svr4.
  *
  * Such a program enters the kernel with `lcall $7,$0`, as Xenix/386 does
- * and with the same conventions (exec/perso/xenix/sysv386.h).  There is no
+ * and with the same conventions (perso_sysv386.c).  There is no
  * call gate behind selector 7, so the call faults and reaches the
  * handle_trap hook; the calls themselves are in svr4/svr4_calls.c.  No
  * Release 4 program issues `int $0x80`, so there is no syscall table.

@@ -344,6 +344,11 @@ set is a strict subset.
 .I sys/exec/perso/perso_xenix.c
 The personality, both halves.
 .TP
+.I sys/exec/perso/perso_sysv386.c
+The 32-bit entry convention, signal frame and calls, which UNIX System
+V/386 has too; see
+.BR svr4 (4).
+.TP
 .I sys/exec/perso/xenix/xenix286_syscalls.h
 Call numbers and call-40 sub-functions, read out of the SCO Xenix 286
 Development System's own libc.

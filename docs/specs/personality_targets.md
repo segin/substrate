@@ -58,8 +58,10 @@ the interpreter, `/usr/lib/libc.so.1`, or, for a static program, by its
 being under the personality's root.  The system call interface is
 Xenix/386's -- `lcall $7,$0`, stack arguments, carry for errors, EDX for a
 second result, a libc trampoline and `lcall $0xf,$0` out of a signal
-handler -- and the two share the entry code and calls 1 to 63
-(`exec/perso/xenix/sysv386.h`).  What Release 4 added is in
+handler -- and calls 1 to 63 are numbered alike.  That much belongs to
+neither personality and is in `exec/perso/perso_sysv386.c`; each describes
+what is its own (signal and open-flag numbering, the calls it adds) with a
+`struct sysv386_abi`.  What Release 4 added is in
 `exec/perso/svr4/svr4_calls.c`.
 
 State: the vendor's static `/sbin/sh`, and `ksh` and the basic utilities

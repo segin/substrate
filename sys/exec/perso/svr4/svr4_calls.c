@@ -1,8 +1,8 @@
 /*
  * svr4_calls.c - System V Release 4 (i386) system calls.
  *
- * The entry convention and the calls System V has always had are shared
- * with Xenix/386 (exec/perso/xenix/sysv386.h).  This file holds what
+ * The entry convention and the calls System V has had from the start are
+ * common to it and Xenix/386 (exec/perso/perso_sysv386.c).  This file holds what
  * Release 4 changed or added: its signal numbering and the POSIX signal
  * calls, the expanded struct stat (xstat), getdents, termios, waitid,
  * mmap, process groups and sessions, resource limits, and the handful of
@@ -19,7 +19,7 @@
 #include <exec/perso/personality.h>
 #include <exec/perso/svr4/svr4.h>
 #include <exec/perso/svr4/svr4_syscalls.h>
-#include <exec/perso/xenix/sysv386.h>
+#include <exec/perso/sysv386.h>
 #include <kern/cmdline.h>
 #include <pm/pm.h>
 #include <sys/copy.h>
@@ -44,7 +44,7 @@ static int svr4_trace_enabled(void) {
 
 /* Copy a kernel object out to a user address. */
 static int svr4_put(uint32_t dst, const void *src, uint32_t len) {
-    if (x386_span(dst, len) != 0 ||
+    if (sysv386_span(dst, len) != 0 ||
         copyout(src, (void *)(uintptr_t)dst, len) != 0) {
         return -EFAULT;
     }
@@ -52,7 +52,7 @@ static int svr4_put(uint32_t dst, const void *src, uint32_t len) {
 }
 
 static int svr4_get(uint32_t src, void *dst, uint32_t len) {
-    if (x386_span(src, len) != 0 ||
+    if (sysv386_span(src, len) != 0 ||
         copyin((const void *)(uintptr_t)src, dst, len) != 0) {
         return -EFAULT;
     }
@@ -145,7 +145,7 @@ struct svr4_sigaction {
  * which is where a handler returns to; it is kept per signal in the slot
  * the Linux personality uses for sa_restorer.
  */
-static int64_t svr4_sys_sigaction(struct x386_frame *f) {
+static int64_t svr4_sys_sigaction(struct sysv386_frame *f) {
     int sig = svr4_signo(f->a[0]);
     struct svr4_sigaction user;
     struct sigaction act, old;
@@ -195,7 +195,7 @@ static int64_t svr4_sys_sigaction(struct x386_frame *f) {
 }
 
 /* sigprocmask(how, set, oset): `how` is 1, 2, 3 as it is natively. */
-static int64_t svr4_sys_sigprocmask(struct x386_frame *f) {
+static int64_t svr4_sys_sigprocmask(struct sysv386_frame *f) {
     struct svr4_sigset user;
     uint32_t set = 0, old = 0;
     int rc;
@@ -219,7 +219,7 @@ static int64_t svr4_sys_sigprocmask(struct x386_frame *f) {
     return 0;
 }
 
-static int64_t svr4_sys_sigsuspend(struct x386_frame *f) {
+static int64_t svr4_sys_sigsuspend(struct sysv386_frame *f) {
     struct svr4_sigset user;
     uint32_t mask;
     int rc = svr4_get(f->a[0], &user, sizeof(user));
@@ -231,7 +231,7 @@ static int64_t svr4_sys_sigsuspend(struct x386_frame *f) {
     return kern_sigsuspend(&mask);
 }
 
-static int64_t svr4_sys_sigpending(struct x386_frame *f) {
+static int64_t svr4_sys_sigpending(struct sysv386_frame *f) {
     struct svr4_sigset user;
     uint32_t pending = 0;
     int rc;
@@ -250,76 +250,12 @@ static int64_t svr4_sys_sigpending(struct x386_frame *f) {
     return svr4_put(f->a[1], &user, sizeof(user));
 }
 
-static int64_t svr4_sys_kill(struct x386_frame *f) {
-    int sig = 0;
-
-    if (f->a[1] != 0) {
-        sig = svr4_signo(f->a[1]);
-        if (sig < 0) {
-            return sig;
-        }
-    }
-    return sys_kill((int)f->a[0], sig);
-}
-
-/*
- * signal(2) and its relatives.  The Xenix handler does all of it but
- * counts signals Xenix's way, which agrees with Release 4 up to SIGCLD;
- * above that, only the plain forms are provided here.
- */
-static int64_t svr4_sys_signal(struct x386_frame *f, int *known) {
-    uint32_t signo = f->a[0] & 0xFFU;
-    uint32_t variant = f->a[0] & ~0xFFU;
-    struct sigaction act, old;
-    int sig, rc;
-
-    if (signo <= SVR4_SIGCLD) {
-        return xenix386_call(f, known);
-    }
-    sig = svr4_signo(signo);
-    if (sig < 0) {
-        return sig;
-    }
-    if (variant != 0 && variant != 0x100U) {
-        return -EINVAL;
-    }
-    memset(&act, 0, sizeof(act));
-    memset(&old, 0, sizeof(old));
-    act.sa_handler = (void *)(uintptr_t)f->a[1];
-    if (variant == 0 && f->a[1] > 1U) {
-        act.sa_flags = SA_RESETHAND | SA_NODEFER;
-    }
-    rc = kern_sigaction(sig, &act, &old);
-    if (rc != 0) {
-        return rc;
-    }
-    if (current_process) {
-        current_process->linux_sig_restorer[sig - 1] =
-            (void *)(uintptr_t)f->regs->edx;
-    }
-    return (int64_t)(uint32_t)(uintptr_t)old.sa_handler;
-}
-
-void svr4_sendsig(void *handler, int sig, uint32_t mask, uint32_t flags,
-                  void *regs) {
-    uint32_t tramp = 0;
-
-    (void)flags;
-    if (!regs || !current_process) {
-        return;
-    }
-    if (sig >= 1 && sig <= NSIG) {
-        tramp = (uint32_t)(uintptr_t)
-                current_process->linux_sig_restorer[sig - 1];
-    }
-    /* handler(signo, siginfo, ucontext), the last two null: nothing has
-     * asked for them yet. */
-    sysv386_sendsig(handler, svr4_from_native_sig(sig), mask,
-                    (registers_t *)regs, tramp, 3);
-}
+/* kill(2) and signal(2) with its relatives are the shared ones, counting
+ * signals through svr4_signo. */
 
 /* ---- files ----------------------------------------------------------- */
 
+/* open(2) and fcntl(2) are the shared ones, with these flags. */
 static int svr4_open_flags(uint32_t f) {
     int flags = (int)(f & 3U);
 
@@ -340,33 +276,6 @@ static uint32_t svr4_from_open_flags(int flags) {
     if (flags & O_APPEND)   f |= SVR4_O_APPEND;
     if (flags & O_SYNC)     f |= SVR4_O_SYNC;
     return f;
-}
-
-static int64_t svr4_sys_open(struct x386_frame *f) {
-    char *path = NULL;
-    int rc = x386_string(f->a[0], &path);
-
-    if (rc != 0) {
-        return rc;
-    }
-    rc = kern_open(path, svr4_open_flags(f->a[1]), (int)f->a[2]);
-    x386_free_string(path);
-    return rc;
-}
-
-static int64_t svr4_sys_fcntl(struct x386_frame *f, int *known) {
-    int fd = (int)f->a[0];
-    int rc;
-
-    switch (f->a[1]) {
-    case F_GETFL:
-        rc = sys_fcntl(fd, F_GETFL, 0);
-        return rc < 0 ? rc : (int64_t)svr4_from_open_flags(rc);
-    case F_SETFL:
-        return sys_fcntl(fd, F_SETFL, svr4_open_flags(f->a[2]));
-    default:
-        return xenix386_call(f, known);
-    }
 }
 
 /* The expanded struct stat, 136 bytes. */
@@ -413,21 +322,21 @@ static int64_t svr4_put_xstat(const struct stat *native, uint32_t dst) {
 }
 
 /* xstat(version, path, buf) and lxstat. */
-static int64_t svr4_sys_xstat(struct x386_frame *f) {
+static int64_t svr4_sys_xstat(struct sysv386_frame *f) {
     char *path = NULL;
     struct stat native;
-    int rc = x386_string(f->a[1], &path);
+    int rc = sysv386_string(f->a[1], &path);
 
     if (rc != 0) {
         return rc;
     }
     rc = f->nr == SVR4_SYS_lxstat ? kern_lstat(path, &native)
                                   : kern_stat(path, &native);
-    x386_free_string(path);
+    sysv386_free_string(path);
     return rc != 0 ? rc : svr4_put_xstat(&native, f->a[2]);
 }
 
-static int64_t svr4_sys_fxstat(struct x386_frame *f) {
+static int64_t svr4_sys_fxstat(struct sysv386_frame *f) {
     struct stat native;
     int rc = kern_fstat((int)f->a[1], &native);
 
@@ -438,22 +347,22 @@ static int64_t svr4_sys_fxstat(struct x386_frame *f) {
 static int64_t svr4_path_int(uint32_t addr, int arg,
                              int (*fn)(const char *, int)) {
     char *path = NULL;
-    int rc = x386_string(addr, &path);
+    int rc = sysv386_string(addr, &path);
 
     if (rc == 0) {
         rc = fn(path, arg);
-        x386_free_string(path);
+        sysv386_free_string(path);
     }
     return rc;
 }
 
 static int64_t svr4_path(uint32_t addr, int (*fn)(const char *)) {
     char *path = NULL;
-    int rc = x386_string(addr, &path);
+    int rc = sysv386_string(addr, &path);
 
     if (rc == 0) {
         rc = fn(path);
-        x386_free_string(path);
+        sysv386_free_string(path);
     }
     return rc;
 }
@@ -461,24 +370,24 @@ static int64_t svr4_path(uint32_t addr, int (*fn)(const char *)) {
 static int64_t svr4_path2(uint32_t a, uint32_t b,
                           int (*fn)(const char *, const char *)) {
     char *pa = NULL, *pb = NULL;
-    int rc = x386_string(a, &pa);
+    int rc = sysv386_string(a, &pa);
 
     if (rc == 0) {
-        rc = x386_string(b, &pb);
+        rc = sysv386_string(b, &pb);
     }
     if (rc == 0) {
         rc = fn(pa, pb);
     }
-    x386_free_string(pa);
-    x386_free_string(pb);
+    sysv386_free_string(pa);
+    sysv386_free_string(pb);
     return rc;
 }
 
-static int64_t svr4_sys_readlink(struct x386_frame *f) {
+static int64_t svr4_sys_readlink(struct sysv386_frame *f) {
     char *path = NULL;
     char *buf;
     uint32_t len = f->a[2];
-    int rc = x386_string(f->a[0], &path);
+    int rc = sysv386_string(f->a[0], &path);
 
     if (rc != 0) {
         return rc;
@@ -488,7 +397,7 @@ static int64_t svr4_sys_readlink(struct x386_frame *f) {
     }
     buf = kmalloc(len ? len : 1U);
     if (!buf) {
-        x386_free_string(path);
+        sysv386_free_string(path);
         return -ENOMEM;
     }
     rc = kern_readlink(path, buf, len);
@@ -496,17 +405,17 @@ static int64_t svr4_sys_readlink(struct x386_frame *f) {
         rc = -EFAULT;
     }
     kfree(buf, len ? len : 1U);
-    x386_free_string(path);
+    sysv386_free_string(path);
     return rc;
 }
 
-static int64_t svr4_sys_lchown(struct x386_frame *f) {
+static int64_t svr4_sys_lchown(struct sysv386_frame *f) {
     char *path = NULL;
-    int rc = x386_string(f->a[0], &path);
+    int rc = sysv386_string(f->a[0], &path);
 
     if (rc == 0) {
         rc = sys_lchown(path, (int)f->a[1], (int)f->a[2]);
-        x386_free_string(path);
+        sysv386_free_string(path);
     }
     return rc;
 }
@@ -518,7 +427,7 @@ static int64_t svr4_sys_lchown(struct x386_frame *f) {
  */
 #define SVR4_GETDENTS_MAX 4096U
 
-static int64_t svr4_sys_getdents(struct x386_frame *f) {
+static int64_t svr4_sys_getdents(struct sysv386_frame *f) {
     uint32_t count = f->a[2] > SVR4_GETDENTS_MAX ? SVR4_GETDENTS_MAX : f->a[2];
     char *buf;
     int got;
@@ -611,7 +520,7 @@ static void svr4_termios_to_native(struct termios *dst,
  * translated here, and the rest fail as they would on a file that is not
  * a terminal.
  */
-static int64_t svr4_sys_ioctl(struct x386_frame *f, int *known) {
+static int64_t svr4_sys_ioctl(struct sysv386_frame *f, int *known) {
     int fd = (int)f->a[0];
     uint32_t arg = f->a[2];
     struct termios native;
@@ -620,8 +529,9 @@ static int64_t svr4_sys_ioctl(struct x386_frame *f, int *known) {
     int32_t pgrp;
     int rc;
 
-    if (f->a[1] >= 0x5401U && f->a[1] <= 0x5407U) {
-        return xenix386_call(f, known);   /* TCGETA .. TCFLSH */
+    if (f->a[1] >= SYSV_TCGETA && f->a[1] <= SYSV_TCFLSH) {
+        *known = 0;                       /* the shared handler's */
+        return 0;
     }
     switch (f->a[1]) {
     case SVR4_TCGETS:
@@ -665,7 +575,7 @@ static int64_t svr4_sys_ioctl(struct x386_frame *f, int *known) {
 
 /* ---- processes ------------------------------------------------------- */
 
-static int64_t svr4_sys_pgrpsys(struct x386_frame *f) {
+static int64_t svr4_sys_pgrpsys(struct sysv386_frame *f) {
     switch (f->a[0]) {
     case SVR4_PGRP_getpgrp:
         return sys_getpgrp();
@@ -702,7 +612,7 @@ struct svr4_siginfo_cld {
     int32_t pad[25];
 };
 
-static int64_t svr4_sys_waitsys(struct x386_frame *f) {
+static int64_t svr4_sys_waitsys(struct sysv386_frame *f) {
     struct svr4_siginfo_cld info;
     int status = 0, options = 0, pid, who;
 
@@ -741,7 +651,7 @@ static int64_t svr4_sys_waitsys(struct x386_frame *f) {
     return 0;
 }
 
-static int64_t svr4_sys_rlimit(struct x386_frame *f) {
+static int64_t svr4_sys_rlimit(struct sysv386_frame *f) {
     int res = (int)f->a[0];
     struct rlimit lim;
     int rc;
@@ -768,7 +678,7 @@ static int64_t svr4_sys_rlimit(struct x386_frame *f) {
  * gap is in memory the image already has, so it succeeds without moving
  * anything.
  */
-static int64_t svr4_sys_brk(struct x386_frame *f) {
+static int64_t svr4_sys_brk(struct sysv386_frame *f) {
     uint32_t want = f->a[0];
     uint32_t start = current_process ? (uint32_t)current_process->brk_start
                                      : 0;
@@ -782,7 +692,7 @@ static int64_t svr4_sys_brk(struct x386_frame *f) {
 }
 
 /* mmap(addr, len, prot, flags, fd, off).  The protection bits agree. */
-static int64_t svr4_sys_mmap(struct x386_frame *f) {
+static int64_t svr4_sys_mmap(struct sysv386_frame *f) {
     int flags = 0;
     void *p;
 
@@ -822,7 +732,7 @@ static const char *svr4_sysinfo_string(uint32_t which,
     }
 }
 
-static int64_t svr4_sys_uname(struct x386_frame *f) {
+static int64_t svr4_sys_uname(struct sysv386_frame *f) {
     struct utsname native;
     struct svr4_utsname *out;
     int rc;
@@ -853,7 +763,7 @@ static int64_t svr4_sys_uname(struct x386_frame *f) {
 
 /* systeminfo(command, buf, count): the length of the string with its
  * terminator, which may exceed count. */
-static int64_t svr4_sys_systeminfo(struct x386_frame *f) {
+static int64_t svr4_sys_systeminfo(struct sysv386_frame *f) {
     struct utsname native;
     const char *s;
     uint32_t len;
@@ -882,7 +792,7 @@ static int64_t svr4_sys_systeminfo(struct x386_frame *f) {
 
 /* sysi86(SI86FPHW, &type): what floating point hardware there is.  libc
  * asks at startup; the answer is a 387. */
-static int64_t svr4_sys_sysi86(struct x386_frame *f) {
+static int64_t svr4_sys_sysi86(struct sysv386_frame *f) {
     int32_t fp = SVR4_FP_387;
 
     if (f->a[0] != SVR4_SI86FPHW) {
@@ -891,7 +801,7 @@ static int64_t svr4_sys_sysi86(struct x386_frame *f) {
     return svr4_put(f->a[1], &fp, sizeof(fp));
 }
 
-static int64_t svr4_sys_sysconfig(struct x386_frame *f) {
+static int64_t svr4_sys_sysconfig(struct sysv386_frame *f) {
     switch (f->a[0]) {
     case SVR4_CONFIG_NGROUPS:    return 16;
     case SVR4_CONFIG_CHILD_MAX:  return 256;
@@ -920,19 +830,22 @@ static int64_t svr4_errno(int64_t ret) {
     }
 }
 
-static int64_t svr4_call_raw(struct x386_frame *f, int *known) {
-    /* Past 255 the number no longer fits AL; no Release 4.0 call is up
-     * there, and AH is the multiplexed calls' sub-function. */
+/*
+ * What Release 4 added, and the older calls it does its own way.  The rest
+ * are left unknown, for the shared ones.
+ */
+static int64_t svr4_call(struct sysv386_frame *f, int *known) {
+    /* The whole of EAX is the number.  (The shared entry takes AL, for the
+     * sake of Xenix's multiplexed call 40, which is not provided here.) */
+    f->nr = f->regs->eax;
+    f->sub = 0;
+
     switch (f->nr) {
     case SVR4_SYS_brk:         return svr4_sys_brk(f);
-    case SVR4_SYS_open:        return svr4_sys_open(f);
-    case SVR4_SYS_kill:        return svr4_sys_kill(f);
     case SVR4_SYS_pgrpsys:     return svr4_sys_pgrpsys(f);
-    case SVR4_SYS_signal:      return svr4_sys_signal(f, known);
     case SVR4_SYS_sysi86:      return svr4_sys_sysi86(f);
     case SVR4_SYS_ioctl:       return svr4_sys_ioctl(f, known);
     case SVR4_SYS_fsync:       return sys_fsync((int)f->a[0]);
-    case SVR4_SYS_fcntl:       return svr4_sys_fcntl(f, known);
     case SVR4_SYS_rmdir:       return svr4_path(f->a[0], kern_rmdir);
     case SVR4_SYS_mkdir:       return svr4_path_int(f->a[0], (int)f->a[1],
                                                     kern_mkdir);
@@ -954,13 +867,11 @@ static int64_t svr4_call_raw(struct x386_frame *f, int *known) {
                                                    (int)f->a[2]);
     case SVR4_SYS_munmap:      return sys_munmap((void *)(uintptr_t)f->a[0],
                                                  (size_t)f->a[1]);
-    case SVR4_SYS_vfork: {
-        /* fork's two-register result, from the shared handler. */
-        struct x386_frame fork = *f;
-
-        fork.nr = 2;
-        return xenix386_call(&fork, known);
-    }
+    case SVR4_SYS_vfork:
+        /* The shared fork, with its two-register result. */
+        f->nr = SYSV_SYS_fork;
+        *known = 0;
+        return 0;
     case SVR4_SYS_fchdir:      return sys_fchdir((int)f->a[0]);
     case SVR4_SYS_xstat:
     case SVR4_SYS_lxstat:      return svr4_sys_xstat(f);
@@ -976,43 +887,45 @@ static int64_t svr4_call_raw(struct x386_frame *f, int *known) {
     case SVR4_SYS_systeminfo:  return svr4_sys_systeminfo(f);
     case SVR4_SYS_seteuid:     return sys_seteuid((int)f->a[0]);
     default:
-        return xenix386_call(f, known);
+        *known = 0;
+        return 0;
     }
 }
 
-static int64_t svr4_call(struct x386_frame *f, int *known) {
-    int64_t ret;
-
-    /* The whole of EAX is the number here; only xenix(40) uses AH. */
-    if ((f->regs->eax & 0xFFU) != 40U) {
-        f->nr = f->regs->eax;
-        f->sub = 0;
-    }
-    ret = svr4_call_raw(f, known);
-    if (!*known) {
-        ret = -ENOSYS;
-    }
-    return ret < 0 ? svr4_errno(ret) : ret;
+static int svr4_abi_signo(uint32_t sig) {
+    return svr4_signo(sig);
 }
 
-int svr4_handle_trap(void *regs_ptr) {
-    registers_t *regs = (registers_t *)regs_ptr;
+static const struct sysv386_abi svr4_abi = {
+    .tag = "SVR4",
+    .trace = svr4_trace_enabled,
+    .call_name = NULL,
+    .call = svr4_call,
+    .nosys = ENOSYS,
+    .fix_errno = svr4_errno,
+    .signo = svr4_abi_signo,
+    .signo_from = svr4_from_native_sig,
+    /* handler(signo, siginfo, ucontext); the last two are null, nothing
+     * having asked for them yet. */
+    .sig_args = 3,
+    .open_flags = svr4_open_flags,
+    .from_open_flags = svr4_from_open_flags,
+    .read_dir = NULL,
+    .sysname = "UNIX_SV",
+    .release = "4.0",
+    .version = "2",
+    .machine = "i386",
+};
 
+int svr4_handle_trap(void *regs) {
     if (!regs || !current_process || current_process->perso_id != PERS_SVR4) {
         return 0;
     }
-    /* An lcall through a selector with nothing behind it: #GP or #NP. */
-    if (regs->int_no != 11 && regs->int_no != 13) {
-        return 0;
-    }
-    switch (sysv386_lcall_kind(regs)) {
-    case SYSV386_SYSCALL:
-        return sysv386_syscall(regs, svr4_call, "SVR4",
-                               svr4_trace_enabled());
-    case SYSV386_SIGRETURN:
-        /* The trampoline has dropped signo; siginfo and ucontext remain. */
-        return sysv386_sigreturn(regs, 2);
-    default:
-        return 0;
-    }
+    return sysv386_handle_trap((registers_t *)regs, &svr4_abi);
+}
+
+void svr4_sendsig(void *handler, int sig, uint32_t mask, uint32_t flags,
+                  void *regs) {
+    (void)flags;
+    sysv386_sendsig(&svr4_abi, handler, sig, mask, (registers_t *)regs);
 }

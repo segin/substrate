@@ -39,9 +39,10 @@ reports failure with the errno in
 .BR EAX ;
 a second result is returned in
 .BR EDX .
-This is the interface of the 32-bit half of
-.BR xenix (4),
-with which the entry code and the calls numbered below 64 are shared.
+This is also the interface of the 32-bit half of
+.BR xenix (4);
+the entry code and the calls numbered below 64 are common to both and
+belong to neither.  Xenix's own multiplexed call 40 is not provided.
 There is no call gate behind selector 7, so the call faults and is
 emulated from the fault.  No Release 4 program issues
 .BR "int $0x80" ,
@@ -138,8 +139,9 @@ The personality.
 .I sys/exec/perso/svr4/svr4_calls.c
 Its system calls.
 .TP
-.I sys/exec/perso/xenix/sysv386.h
-The entry convention shared with Xenix/386.
+.I sys/exec/perso/perso_sysv386.c
+The entry convention, signal frame and calls it has in common with
+Xenix/386.
 .SH KNOWN LIMITATIONS
 .IP \(bu 2
 .BR context " (" getcontext ", " setcontext ),

@@ -187,11 +187,12 @@ number, and `xout.c` loads all three: 8086 and 80286 programs as 16-bit
 them run under the one Xenix personality (`perso_xenix.c`, rooted at
 `/perso/xenix`), whose two halves are chosen by the process's word size:
 a Xenix/386 system holds all three kinds of binary in one tree. UNIX
-System V Release 4 enters the kernel the same way as Xenix/386, so its
-personality (`perso_svr4.c`, `svr4/svr4_calls.c`, rooted at `/perso/svr4`)
-shares that entry code and the classic calls through
-`exec/perso/xenix/sysv386.h`; its programs are ELF, recognised by their
-`/usr/lib/libc.so.1` interpreter. State of each
+System V Release 4 (`perso_svr4.c`, `svr4/svr4_calls.c`, rooted at
+`/perso/svr4`) enters the kernel the same way as Xenix/386, so that entry
+code, the signal frame and calls 1 to 63 belong to neither and live in
+`perso_sysv386.c`; a personality supplies a `struct sysv386_abi` with its
+signal and open-flag numbering and its own calls. SVR4 programs are ELF,
+recognised by their `/usr/lib/libc.so.1` interpreter. State of each
 personality: `README.md`; specifications:
 `docs/specs/personality_targets.md`, `docs/specs/personality_elks.md`,
 `usr.man/man4/xenix.4`, `usr.man/man4/xout286.4`, `usr.man/man4/svr4.4`.
