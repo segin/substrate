@@ -917,6 +917,49 @@ static const struct sysv386_abi svr4_abi = {
     .machine = "i386",
 };
 
+/*
+ * Release 3.  Release 4 runs Release 3's COFF programs unchanged, so what
+ * serves one serves the other: the calls are the same ones, numbered the
+ * same way, as are the signals and the open flags as far as Release 3 has
+ * them.  What differs is what a program is told it is running on, and
+ * that a handler is entered with the signal number alone.
+ */
+static int svr3_trace_enabled(void) {
+    return cmdline_debug_enabled("perso:svr3:syscall");
+}
+
+static const struct sysv386_abi svr3_abi = {
+    .tag = "SVR3",
+    .trace = svr3_trace_enabled,
+    .call_name = NULL,
+    .call = svr4_call,
+    .nosys = EINVAL,               /* Release 3 has no ENOSYS */
+    .fix_errno = svr4_errno,
+    .signo = svr4_abi_signo,
+    .signo_from = svr4_from_native_sig,
+    .sig_args = 1,                 /* handler(signo) */
+    .open_flags = svr4_open_flags,
+    .from_open_flags = svr4_from_open_flags,
+    .read_dir = NULL,
+    .sysname = "UNIX",
+    .release = "3.2",
+    .version = "3",
+    .machine = "i386",
+};
+
+int svr3_handle_trap(void *regs) {
+    if (!regs || !current_process || current_process->perso_id != PERS_SVR3) {
+        return 0;
+    }
+    return sysv386_handle_trap((registers_t *)regs, &svr3_abi);
+}
+
+void svr3_sendsig(void *handler, int sig, uint32_t mask, uint32_t flags,
+                  void *regs) {
+    (void)flags;
+    sysv386_sendsig(&svr3_abi, handler, sig, mask, (registers_t *)regs);
+}
+
 int svr4_handle_trap(void *regs) {
     if (!regs || !current_process || current_process->perso_id != PERS_SVR4) {
         return 0;

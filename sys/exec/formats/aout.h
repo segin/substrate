@@ -123,10 +123,40 @@ int aout_validate_header(const struct aout_exec *hdr, uint32_t file_size);
 void aout_init_handler(void);
 
 #ifndef HOST_TEST
+#include <machine/pmap.h>
+#include <vm/vm_map.h>
+
 /* Linux uselib(2): map an old-style a.out shared library (libc.so.4, ld.so)
  * at its fixed embedded load address into the caller's address space. */
 int aout_sys_uselib(uint32_t upath, uint32_t a1, uint32_t a2, uint32_t a3,
                     uint32_t a4, uint32_t a5, uint32_t a6, uint32_t a7);
+
+/*
+ * What loading a flat 32-bit image takes, whatever its header -- used by
+ * the COFF loader too, whose images are laid out and started the same way.
+ */
+
+/* Kernel copies of an argv or envp vector, taken before the address space
+ * they point into is replaced; *count_out is the number of strings. */
+int aout_dup_vector(char *const src[], char ***out, int *count_out);
+void aout_free_vector(char **kv, int n);
+
+/* Map [va, va+memsz) as anonymous memory and read `filesz` bytes into its
+ * front from offset `foff` of `fd`; the rest is zero on demand. */
+int aout_map_region(pmap_t pmap, vm_map_t *map, uint32_t va,
+                    uint32_t filesz, uint32_t memsz, uint8_t prot,
+                    int fd, uint32_t foff);
+
+/*
+ * The startup stack at the top of user space, with no auxiliary vector;
+ * *sp_out is the initial stack pointer.  Old Linux a.out is handed argc
+ * and pointers to the argv[] and envp[] arrays; with `inline_vectors` the
+ * arrays themselves follow argc, as System V has it: argc, argv[], NULL,
+ * envp[], NULL.
+ */
+int aout_build_stack(pmap_t pmap, char **kargv, int argc,
+                     char **kenvp, int envc, int inline_vectors,
+                     uint32_t *sp_out);
 #endif
 
 #endif /* _AOUT_H */

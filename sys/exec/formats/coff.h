@@ -89,6 +89,17 @@ typedef struct {
 #define AOUT_OMAGIC 0x0107
 #define AOUT_NMAGIC 0x0108
 #define AOUT_ZMAGIC 0x010B
+/* A static shared library (/shlib/libc_s): sections at fixed addresses,
+ * mapped into every program that names it in its .lib section. */
+#define AOUT_LIBMAGIC 0x0123
+
+/* f_flags: the file is executable (no unresolved references). */
+#define COFF_F_EXEC 0x0002
+
+/* s_flags: a .lib section, the list of shared libraries the image needs.
+ * Each entry is two longs -- the entry's size and the offset of the path
+ * within it, both counted in longs -- and then the path. */
+#define STYP_LIB 0x0800
 
 /* COFF page granularity for ZMAGIC layouts (matches SVR3 PAGSIZ). */
 #define COFF_PAGE_SIZE 4096U
@@ -102,7 +113,7 @@ int coff_validate_filehdr(const coff_filehdr_t *fh, uint32_t file_size);
 
 /*
  * coff_validate_aouthdr - validate the ZMAGIC optional header that follows
- * the file header.  Verifies magic, segment sizes, page alignment, and that
+ * the file header.  Verifies magic, segment sizes, their order, and that
  * the entry point lies within [text_start, text_start + tsize).  Caller is
  * responsible for confirming f_opthdr >= sizeof(coff_aouthdr_t) before call.
  *
@@ -144,6 +155,7 @@ int coff_apply_relocations(uint8_t *section_data, uint32_t section_va,
                            const coff_reloc_t *relocs, uint32_t nrelocs,
                            coff_symbol_resolver_t resolve, void *ctx);
 
-int coff_load_file(void *file, uint32_t size);
+/* Register the COFF executable handler with exec. */
+void coff_init_handler(void);
 
 #endif

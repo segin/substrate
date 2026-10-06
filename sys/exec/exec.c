@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include <exec/formats/aout.h>
+#include <exec/formats/coff.h>
 #include <exec/formats/elf.h>
 #include <exec/formats/elks_aout.h>
 #include <exec/formats/script.h>
@@ -34,6 +35,7 @@ void exec_init(void) {
     elks_init_handler();
     xout_init_handler();
     aout_init_handler();
+    coff_init_handler();
     script_init_handler();
 }
 

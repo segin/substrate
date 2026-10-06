@@ -1,0 +1,152 @@
+.TH SVR3 4 "2026-10-05" "Substrate" "Kernel Interfaces"
+.SH NAME
+svr3 \- UNIX System V Release 3 execution personality and COFF loader
+.SH DESCRIPTION
+The
+.B SVR3
+personality
+.RB ( PERS_SVR3 )
+runs the i386 COFF programs of UNIX System V/386 Release 3 and of the
+systems built on it, INTERACTIVE UNIX among them.  It is rooted at
+.IR /perso/svr3 ,
+which is where a program's absolute paths and its shared libraries are
+looked for first.
+.SS Executable format
+Every i386 COFF executable
+.RB ( f_magic
+0x14c, the
+.B F_EXEC
+flag, a
+.B ZMAGIC
+optional header) is given this personality.  Such a file is laid out to be
+paged straight from disk and is loaded as it lies:
+.B .text
+at the address that is its offset in the file, just past the headers in
+the first page;
+.B .data
+4 MiB above, at the same offset within its page that it has in the file;
+.B .bss
+after it.  Nothing is relocated.  Sections marked
+.B NOLOAD
+or
+.B DSECT
+are left out.  The stack is at the top of user space and starts with
+.IR argc ,
+.IR argv[] ,
+a null pointer,
+.IR envp[] ,
+and a null pointer.
+.SS Shared libraries
+Most programs are linked against a static shared library,
+.IR /shlib/libc_s :
+a COFF file of its own (optional-header magic 0443) whose sections are at
+fixed addresses from 0xa0000000 up.  A program lists the libraries it needs
+in a
+.B .lib
+section, and each is mapped at its addresses when the program is loaded.
+The mappings are private to the process.  A program whose library cannot
+be opened is not run.
+.SS System call interface
+A system call is
+.BR "lcall $7,$0" ,
+as in
+.BR svr4 (4)
+and the 32-bit half of
+.BR xenix (4):
+the number in
+.BR EAX ,
+arguments on the stack, carry for an error, a second result in
+.BR EDX .
+Release 4 kept Release 3's calls as they were, so the calls are those
+.BR svr4 (4)
+lists, served by the same code; what differs is that
+.B utssys
+reports Release 3.2 and that a signal handler is entered with the signal
+number alone.  A call that is not implemented fails with
+.BR EINVAL .
+.PP
+.BR ulimit (2)
+command 3, the highest break the process may have, answers the current
+break and 16 MiB: programs such as
+.BR sort (1)
+take all of the difference for working memory.
+.SH DEBUGGING
+.B debug=perso:svr3:syscall
+on the kernel command line traces every call;
+.B debug=exec:coff
+reports the libraries a program loads and where it is entered.
+.SH FILES
+.TP
+.I /perso/svr3
+The personality's root.
+.I tools/svr3/build-image.sh
+builds an image of it from AT&T's Release 3 media, and
+.I tools/svr3/build-image-isc.sh
+from INTERACTIVE UNIX's; neither set is part of substrate.
+.TP
+.I sys/exec/formats/coff.c
+The loader.
+.TP
+.I sys/exec/perso/perso_svr3.c
+The personality.
+.TP
+.I sys/exec/perso/svr4/svr4_calls.c
+Its calls, with Release 4's.
+.TP
+.I sys/exec/perso/perso_sysv386.c
+The entry convention and the calls common to it and Xenix/386.
+.SH KNOWN LIMITATIONS
+.IP \(bu 2
+Only
+.B ZMAGIC
+executables are loaded;
+.B OMAGIC
+and
+.B NMAGIC
+ones are refused.
+.IP \(bu
+A shared library's text is copied into each process, not shared between
+them.
+.IP \(bu
+.BR ps
+reports that it cannot find a controlling terminal.
+.IP \(bu
+The STREAMS calls, System V IPC,
+.BR mount ,
+.BR statfs ,
+.BR poll
+and
+.B ptrace
+are not implemented.
+.SH VERIFIED
+Against AT&T UNIX System V/386 Release 3.2.3 and INTERACTIVE UNIX 3.0, on
+the i386 and x86_64 kernels: the statically linked
+.I /bin/sh
+with pipes, command substitution, redirection, traps and exit statuses;
+.BR ksh ;
+programs linked against
+.I /shlib/libc_s
+.RB ( ls ,
+.BR cat ,
+.BR date ,
+.BR id ,
+.BR uname ,
+.BR sort ,
+.BR wc ,
+.BR grep ,
+.BR sed ,
+.BR expr ,
+.BR awk ,
+.BR file );
+and each system's C compiler, which compiles and links a program that then
+runs.
+.SH SEE ALSO
+.BR svr4 (4),
+.BR xenix (4),
+.BR execve (2)
+.SH HISTORY
+A COFF loader that mapped sections from a file already in memory, and a
+personality that was a table of native calls, existed from early on;
+neither was reachable from
+.BR execve (2).
+The loader and personality described here date from October 2026.

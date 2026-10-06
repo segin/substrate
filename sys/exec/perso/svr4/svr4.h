@@ -19,4 +19,10 @@ int svr4_handle_trap(void *regs);
 void svr4_sendsig(void *handler, int sig, uint32_t mask, uint32_t flags,
                   void *regs);
 
+/* The same two hooks for the Release 3 personality, whose calls are a
+ * subset of Release 4's (perso_svr3.c). */
+int svr3_handle_trap(void *regs);
+void svr3_sendsig(void *handler, int sig, uint32_t mask, uint32_t flags,
+                  void *regs);
+
 #endif /* _EXEC_PERSO_SVR4_SVR4_H */

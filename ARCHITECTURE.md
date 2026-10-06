@@ -192,10 +192,14 @@ System V Release 4 (`perso_svr4.c`, `svr4/svr4_calls.c`, rooted at
 code, the signal frame and calls 1 to 63 belong to neither and live in
 `perso_sysv386.c`; a personality supplies a `struct sysv386_abi` with its
 signal and open-flag numbering and its own calls. SVR4 programs are ELF,
-recognised by their `/usr/lib/libc.so.1` interpreter. State of each
+recognised by their `/usr/lib/libc.so.1` interpreter. System V Release 3
+(`perso_svr3.c`, rooted at `/perso/svr3`) is a third client, served by the
+Release 4 calls; its programs are COFF, loaded by `formats/coff.c` together
+with the static shared libraries (`/shlib/libc_s`) they name. State of each
 personality: `README.md`; specifications:
 `docs/specs/personality_targets.md`, `docs/specs/personality_elks.md`,
-`usr.man/man4/xenix.4`, `usr.man/man4/xout286.4`, `usr.man/man4/svr4.4`.
+`usr.man/man4/xenix.4`, `usr.man/man4/xout286.4`, `usr.man/man4/svr4.4`,
+`usr.man/man4/svr3.4`.
 
 **x86-64.** `sys/arch/x86_64` is the 64-bit port, an addition alongside
 i386, not a replacement: the personality and the bitness of a process are

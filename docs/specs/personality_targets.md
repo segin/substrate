@@ -64,7 +64,24 @@ what is its own (signal and open-flag numbering, the calls it adds) with a
 `struct sysv386_abi`.  What Release 4 added is in
 `exec/perso/svr4/svr4_calls.c`.
 
-State: the vendor's static `/sbin/sh`, and `ksh` and the basic utilities
+## System V Release 3
+
+`SVR3`, id 5 (`PERS_SVR3`), rooted at `/perso/svr3`: the i386 COFF programs
+of UNIX System V/386 Release 3 and of what was built on it (INTERACTIVE
+UNIX).  `exec/formats/coff.c` loads them -- a ZMAGIC COFF file is mapped as
+it lies, text in the first page and data 4 MiB up, with nothing to
+relocate -- and maps the static shared libraries (`/shlib/libc_s`, at
+0xa0000000) a program names in its `.lib` section.
+
+The calls are Release 4's: Release 4 kept Release 3's as they were, so
+`svr4_calls.c` serves both, with a second `struct sysv386_abi` for what a
+Release 3 program is told and how its signal handlers are entered.
+
+State: against AT&T Release 3.2.3 and INTERACTIVE UNIX 3.0, the shells and
+utilities run and each system's C compiler compiles and links a program
+that runs.  Documented in `usr.man/man4/svr3.4`.
+
+State of Release 4: the vendor's static `/sbin/sh`, and `ksh` and the basic utilities
 dynamically linked against the vendor's own `libc.so.1`, run.  Documented
 in `usr.man/man4/svr4.4`.  Solaris x86 is the same family with a different
 interpreter (`/usr/lib/ld.so.1`) and is not wired up.

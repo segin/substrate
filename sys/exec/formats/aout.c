@@ -185,7 +185,7 @@ static int aout_is_user_ptr(const void *p) {
  * execve) and kernel-constructed ones (init / #! interpreters), whose element
  * pointers may themselves be kernel or user.  Caller frees via aout_free_vec.
  */
-static int aout_dup_vector(char *const src[], char ***out, int *count_out) {
+int aout_dup_vector(char *const src[], char ***out, int *count_out) {
     int n = 0;
     char **kv;
 
@@ -241,7 +241,7 @@ static int aout_dup_vector(char *const src[], char ***out, int *count_out) {
     return 0;
 }
 
-static void aout_free_vector(char **kv, int n) {
+void aout_free_vector(char **kv, int n) {
     if (!kv) {
         return;
     }
@@ -259,9 +259,9 @@ static void aout_free_vector(char **kv, int n) {
  * file-backed pages are eager-backed so the kern_read writes to present pages;
  * the trailing bss faults in on demand (VM_OBJ_TYPE_DEFAULT zero-fill).
  */
-static int aout_map_region(pmap_t pmap, vm_map_t *map, uint32_t va,
-                           uint32_t filesz, uint32_t memsz, uint8_t prot,
-                           int fd, uint32_t foff) {
+int aout_map_region(pmap_t pmap, vm_map_t *map, uint32_t va,
+                    uint32_t filesz, uint32_t memsz, uint8_t prot,
+                    int fd, uint32_t foff) {
     uint32_t start = va & ~AOUT_PAGE_MASK;
     uint32_t end = AOUT_ROUND_UP(va + memsz);
     uint32_t len = end - start;
@@ -314,8 +314,9 @@ static int aout_map_region(pmap_t pmap, vm_map_t *map, uint32_t va,
  * space:  esp -> argc, argv[], NULL, envp[], NULL.  (a.out predates the ELF
  * auxiliary vector; crt0 stops at the envp NULL.)  Returns the initial esp.
  */
-static int aout_build_stack(pmap_t pmap, char **kargv, int argc,
-                            char **kenvp, int envc, uint32_t *sp_out) {
+int aout_build_stack(pmap_t pmap, char **kargv, int argc,
+                     char **kenvp, int envc, int inline_vectors,
+                     uint32_t *sp_out) {
     const uint32_t top = AOUT_USER_MAX;
     const uint32_t eager = 32;                 /* 128 KiB mapped up front */
     uint32_t base = top - eager * AOUT_PAGE;
@@ -393,10 +394,17 @@ static int aout_build_stack(pmap_t pmap, char **kargv, int argc,
     }
     *(uint32_t *)(uintptr_t)(argv_arr + (uint32_t)argc * 4U) = 0;
 
-    sp &= ~0xFU;
-    sp -= 12U;
-    {
-        uint32_t *v = (uint32_t *)(uintptr_t)sp;
+    if (inline_vectors) {
+        /* System V: argc directly below argv[], which runs on into envp[]
+         * -- the two arrays were laid down adjacent above. */
+        sp -= 4U;
+        *(uint32_t *)(uintptr_t)sp = (uint32_t)argc;
+    } else {
+        uint32_t *v;
+
+        sp &= ~0xFU;
+        sp -= 12U;
+        v = (uint32_t *)(uintptr_t)sp;
         v[0] = (uint32_t)argc;
         v[1] = argv_arr;
         v[2] = envp_arr;
@@ -573,7 +581,7 @@ static int aout_load(int fd, const char *path, char *const argv[],
     current_process->vm_map = map;
     arch_set_kernel_stack((uintptr_t)current_thread->kstack_top);
 
-    rc = aout_build_stack(pmap, kargv, argc, kenvp, envc, &sp);
+    rc = aout_build_stack(pmap, kargv, argc, kenvp, envc, 0, &sp);
     aout_free_vector(kargv, argc);
     aout_free_vector(kenvp, envc);
     if (rc != 0) {

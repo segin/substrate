@@ -1,17 +1,27 @@
 #include <exec/formats/coff.h>
 
 #ifndef HOST_TEST
-#include <kern/console.h>
-#include <exec/perso/personality.h>
-#include <kern/sched.h>
-#include <sys/sysinfo.h>
-#include <pm/pm.h>
 #include <stdio.h>
+#include <machine/fpu.h>
+#include <machine/gdt.h>
+#include <machine/pmap.h>
+#include <exec/formats/aout.h>
+#include <exec/perso/personality.h>
+#include <kern/arch.h>
+#include <kern/cmdline.h>
+#include <kern/console.h>
+#include <kern/sched.h>
+#include <pm/pm.h>
+#include <sys/errno.h>
+#include <sys/exec.h>
+#include <sys/fcntl.h>
+#include <sys/kern_syscalls.h>
+#include <sys/proc.h>
+#include <sys/sysinfo.h>
+#include <vm/vm_kmem.h>
 #include <vm/vm_map.h>
 #include <vm/vm_object.h>
 #include <vm/vm_page.h>
-#include <sys/proc.h>
-#include <machine/pmap.h>
 #endif
 #include <machine/vmparam.h>
 
@@ -56,10 +66,10 @@ int coff_validate_aouthdr(const coff_aouthdr_t *opt) {
     if (opt->dsize < 0 || (uint32_t)opt->dsize > COFF_MAX_SEGMENT_BYTES) return -1;
     if (opt->bsize < 0 || (uint32_t)opt->bsize > COFF_MAX_SEGMENT_BYTES) return -1;
 
-    /* ZMAGIC requires page-aligned tsize so .text and .data live in disjoint
-     * page frames — without this, demand paging would have to copy partial
-     * pages on first fault.  dsize/bsize need only sub-page accuracy. */
-    if ((uint32_t)opt->tsize & (COFF_PAGE_SIZE - 1U)) return -1;
+    /* tsize is the text section's size to the byte.  What keeps text and
+     * data in disjoint page frames is the linker's layout -- data starts
+     * 4 MiB up, at the same offset within its page that it has in the file
+     * -- and not any rounding of the sizes. */
 
     /* REQ-05-0420: text_start must be strictly below data_start when both
      * are present, and text+tsize must fit before data_start.  When the
@@ -149,156 +159,362 @@ int coff_apply_relocations(uint8_t *section_data, uint32_t section_va,
 }
 
 #ifndef HOST_TEST
-int coff_load_file(void *file, uint32_t size) {
-    coff_filehdr_t *filehdr = (coff_filehdr_t *)file;
+/*
+ * ---- the executable handler ------------------------------------------
+ *
+ * A System V/386 executable is a ZMAGIC COFF file laid out so that it can
+ * be paged straight from disk: .text is at the address that is its offset
+ * in the file (0xd0, just past the headers), .data is 4 MiB up at the same
+ * offset within its page that it has in the file, and .bss follows it.
+ * Nothing is relocated.  The stack is at the top of user space and starts
+ * with argc, argv[], NULL, envp[], NULL.
+ *
+ * Most programs are linked against a static shared library, /shlib/libc_s:
+ * a COFF file of its own (magic 0443) whose sections sit at fixed
+ * addresses, 0xa0000000 and up.  A program names the libraries it needs in
+ * a .lib section, and holds their address ranges with NOLOAD sections that
+ * are not to be loaded from it.  Each library is mapped privately -- its
+ * data is per-process and its text, being small, is not worth sharing.
+ */
+#define COFF_MAX_SECTIONS 32
+#define COFF_MAX_LIBS     8
+#define COFF_LIB_PATH_MAX 128
 
-    if (coff_validate_filehdr(filehdr, size) != 0) {
-        kprint("COFF: Invalid file header\n");
-        return -1;
+struct coff_image {
+    coff_filehdr_t fh;
+    coff_aouthdr_t opt;
+    coff_scnhdr_t  scn[COFF_MAX_SECTIONS];
+};
+
+static int coff_debug_enabled(void) {
+    return cmdline_debug_enabled("exec:coff");
+}
+
+static int coff_fail(int fd, int err, const char *msg) {
+    if (msg) {
+        kprint(msg);
+        kprint("\n");
     }
-
-    kprint("Loading COFF file...\n");
-
-    // If it has an optional header, parse it for entry point
-    if (filehdr->f_opthdr >= sizeof(coff_aouthdr_t)) {
-        coff_aouthdr_t *aouthdr = (coff_aouthdr_t *)((uintptr_t)file + sizeof(coff_filehdr_t));
-        if (coff_validate_aouthdr(aouthdr) != 0) {
-            kprint("COFF: Invalid optional header (magic/size/entry)\n");
-            return -1;
-        }
-        char buf[64];
-        snprintf(buf, sizeof(buf), "COFF: Entry point at 0x%08x\n", aouthdr->entry);
-        kprint(buf);
+    if (fd >= 0) {
+        kern_close(fd);
     }
+    return err;
+}
 
-    // Identify and map sections
-    coff_scnhdr_t *scnhdr = (coff_scnhdr_t *)((uintptr_t)file + sizeof(coff_filehdr_t) + filehdr->f_opthdr);
-    for (int i = 0; i < filehdr->f_nscns; i++) {
-        char name[9];
-        strncpy(name, scnhdr[i].s_name, 8);
-        name[8] = '\0';
-        char buf[64];
-        snprintf(buf, sizeof(buf), "COFF: Mapping section %s\n", name);
-        kprint(buf);
-        
-        // Use vm_map_insert to map section raw data
-        uint32_t va_start = scnhdr[i].s_vaddr;
-        uint32_t va_end = va_start + scnhdr[i].s_size;
+/* Read the headers of the COFF file open on `fd`. */
+static int coff_read_image(int fd, struct coff_image *img) {
+    int bytes;
 
-        // Skip empty sections
-        if (scnhdr[i].s_size == 0) continue;
-
-        // Check for overflow and reject sections mapping into kernel space
-        if (va_end < va_start || va_start >= USER32_VA_END || va_end > USER32_VA_END) {
-            kprint("COFF: Section maps into kernel space\n");
-            return -1;
-        }
-
-        // Align to page boundaries
-        uint32_t map_start = va_start & ~0xFFF;
-        uint32_t map_end = (va_end + 0xFFF) & ~0xFFF;
-        uint32_t map_size = map_end - map_start;
-
-        if (map_size == 0) continue;
-
-        // Determine permissions
-        uint8_t prot = VM_PROT_USER; // Always allow user access for loaded sections
-        if (scnhdr[i].s_flags & STYP_TEXT) prot |= VM_PROT_READ | VM_PROT_EXEC;
-        if (scnhdr[i].s_flags & STYP_DATA) prot |= VM_PROT_READ | VM_PROT_WRITE;
-        if (scnhdr[i].s_flags & STYP_BSS)  prot |= VM_PROT_READ | VM_PROT_WRITE;
-
-        // Fallback default
-        if (prot == VM_PROT_USER) prot |= VM_PROT_READ | VM_PROT_WRITE;
-
-        // Allocate VM Object (Anonymous)
-        vm_object_t *obj = vm_object_allocate(VM_OBJ_TYPE_DEFAULT, map_size);
-        if (!obj) {
-             kprint("COFF: Failed to allocate VM object\n");
-             return -1;
-        }
-
-        // Insert into VM Map
-        if (current_process && current_process->vm_map) {
-             if (vm_map_insert(current_process->vm_map, obj, 0, map_start, map_end, prot, VM_PROT_ALL, VM_INHERIT_COPY) != 0) {
-                 kprint("COFF: Failed to insert into vm_map (overlap?)\n");
-                 vm_object_deallocate(obj);
-                 // We might fail if sections overlap on pages. For now, fail hard.
-                 return -1;
-             }
-        } else {
-             kprint("COFF: No current process vm_map!\n");
-             vm_object_deallocate(obj);
-             return -1;
-        }
-
-        // Copy Data to Pages if not BSS and data pointer is valid
-        if (scnhdr[i].s_scnptr != 0 && !(scnhdr[i].s_flags & STYP_BSS)) {
-             if ((uint32_t)scnhdr[i].s_scnptr + (uint32_t)scnhdr[i].s_size > size) {
-                 kprint("COFF: Section data out of bounds\n");
-                 // Cleanup allocated map/object ideally, but process load failure cleans up whole address space usually.
-                 return -1;
-             }
-
-             uint8_t *file_data = (uint8_t *)file + scnhdr[i].s_scnptr;
-             uint32_t data_size = scnhdr[i].s_size;
-
-             // Iterate pages
-             for (uint32_t offset = 0; offset < map_size; offset += 0x1000) {
-                  uint32_t page_va = map_start + offset;
-
-                  // Allocate page
-                  vm_page_t *page = vm_page_alloc(obj, offset / 0x1000, 0);
-                  if (!page) {
-                       kprint("COFF: Page allocation failed\n");
-                       return -1;
-                  }
-
-                  // Get kernel mapping for page physical address
-                  void *page_kva = (void *)P2V(page->phys_addr);
-
-                  // Zero the page first
-                  memset(page_kva, 0, 0x1000);
-
-                  // Determine overlap with file data
-                  uint32_t page_start_va = page_va;
-                  uint32_t page_end_va = page_va + 0x1000;
-
-                  // Data range in VA
-                  uint32_t data_start_va = va_start;
-                  uint32_t data_end_va = va_start + data_size;
-
-                  // Intersection
-                  uint32_t copy_start = (page_start_va > data_start_va) ? page_start_va : data_start_va;
-                  uint32_t copy_end = (page_end_va < data_end_va) ? page_end_va : data_end_va;
-
-                  if (copy_start < copy_end) {
-                       uint32_t copy_len = copy_end - copy_start;
-                       uint32_t src_offset = copy_start - data_start_va;
-                       uint32_t dst_offset = copy_start - page_start_va;
-
-                       memcpy((uint8_t*)page_kva + dst_offset, file_data + src_offset, copy_len);
-                  }
-
-                  // Add page to object
-                  vm_object_add_page(obj, page);
-
-                  // Map into current pmap immediately
-                  if (current_process && current_process->pmap) {
-                      pmap_enter(current_process->pmap, page_va, page->phys_addr, prot, 0);
-                  }
-             }
-        }
+    kern_lseek(fd, 0, 0);
+    if (kern_read(fd, (char *)&img->fh, sizeof(img->fh)) != (int)sizeof(img->fh) ||
+        img->fh.f_magic != COFF_MAGIC_I386 ||
+        img->fh.f_opthdr < sizeof(img->opt) ||
+        img->fh.f_nscns == 0 || img->fh.f_nscns > COFF_MAX_SECTIONS) {
+        return -ENOEXEC;
     }
-
-    // Default to SVR3 for now if we detect a 386 COFF binary
-    if (current_process) {
-        current_process->perso_id = PERS_SVR3;
-        proc_set_bitness(current_process, BITNESS_32);
+    if (kern_read(fd, (char *)&img->opt, sizeof(img->opt)) != (int)sizeof(img->opt)) {
+        return -ENOEXEC;
     }
-
-    kprint("COFF Loader invoked (header parsed).\n");
-
+    kern_lseek(fd, (off_t)(sizeof(img->fh) + img->fh.f_opthdr), 0);
+    bytes = (int)(img->fh.f_nscns * sizeof(coff_scnhdr_t));
+    if (kern_read(fd, (char *)img->scn, bytes) != bytes) {
+        return -ENOEXEC;
+    }
     return 0;
+}
+
+/*
+ * Map the loadable sections of `img` from `fd`: text, and data with the
+ * bss after it as one region.  *end_out is the end of the bss.
+ */
+static int coff_map_sections(pmap_t pmap, vm_map_t *map, int fd,
+                             const struct coff_image *img, uint32_t *end_out) {
+    const coff_scnhdr_t *data = NULL, *bss = NULL;
+    uint32_t end = 0;
+    int i, rc;
+
+    for (i = 0; i < img->fh.f_nscns; i++) {
+        const coff_scnhdr_t *s = &img->scn[i];
+        uint32_t va = (uint32_t)s->s_vaddr;
+        uint32_t size = (uint32_t)s->s_size;
+
+        if (size == 0 || (s->s_flags & (STYP_NOLOAD | STYP_DSECT | STYP_LIB))) {
+            continue;
+        }
+        if (va >= USER32_VA_END || size > USER32_VA_END - va) {
+            return -ENOEXEC;
+        }
+        if (s->s_flags & STYP_TEXT) {
+            /* Writable as mapped: the image is read in through it. */
+            rc = aout_map_region(pmap, map, va, size, size,
+                                 VM_PROT_READ | VM_PROT_WRITE | VM_PROT_EXEC,
+                                 fd, (uint32_t)s->s_scnptr);
+            if (rc != 0) {
+                return rc;
+            }
+        } else if ((s->s_flags & STYP_DATA) && !data) {
+            data = s;
+        } else if ((s->s_flags & STYP_BSS) && !bss) {
+            bss = s;
+        }
+    }
+    if (data || bss) {
+        uint32_t va = (uint32_t)(data ? data->s_vaddr : bss->s_vaddr);
+        uint32_t filesz = data ? (uint32_t)data->s_size : 0;
+
+        end = va + filesz;
+        if (bss && (uint32_t)bss->s_vaddr + (uint32_t)bss->s_size > end) {
+            end = (uint32_t)bss->s_vaddr + (uint32_t)bss->s_size;
+        }
+        rc = aout_map_region(pmap, map, va, filesz, end - va,
+                             VM_PROT_READ | VM_PROT_WRITE | VM_PROT_EXEC,
+                             fd, data ? (uint32_t)data->s_scnptr : 0);
+        if (rc != 0) {
+            return rc;
+        }
+    }
+    if (end_out) {
+        *end_out = end;
+    }
+    return 0;
+}
+
+/* The paths in the .lib sections of `img`, read from `fd`. */
+static int coff_read_libs(int fd, const struct coff_image *img,
+                          char libs[][COFF_LIB_PATH_MAX], int *count_out) {
+    int i, n = 0;
+
+    for (i = 0; i < img->fh.f_nscns; i++) {
+        const coff_scnhdr_t *s = &img->scn[i];
+        uint32_t size = (uint32_t)s->s_size;
+        uint32_t pos = 0;
+        char *buf;
+
+        if (!(s->s_flags & STYP_LIB) || size == 0) {
+            continue;
+        }
+        if (size > 4096U) {
+            return -ENOEXEC;
+        }
+        buf = kmalloc(size);
+        if (!buf) {
+            return -ENOMEM;
+        }
+        kern_lseek(fd, (off_t)s->s_scnptr, 0);
+        if (kern_read(fd, buf, (int)size) != (int)size) {
+            kfree(buf, size);
+            return -ENOEXEC;
+        }
+        while (pos + 8U <= size) {
+            uint32_t entry, path;
+
+            memcpy(&entry, buf + pos, 4);       /* both counted in longs */
+            memcpy(&path, buf + pos + 4, 4);
+            if (entry < 2U || entry > (size - pos) / 4U || path >= entry) {
+                break;
+            }
+            if (n < COFF_MAX_LIBS) {
+                uint32_t len = (entry - path) * 4U;
+
+                if (len >= COFF_LIB_PATH_MAX) {
+                    len = COFF_LIB_PATH_MAX - 1U;
+                }
+                memcpy(libs[n], buf + pos + path * 4U, len);
+                libs[n][len] = '\0';
+                n++;
+            }
+            pos += entry * 4U;
+        }
+        kfree(buf, size);
+    }
+    *count_out = n;
+    return 0;
+}
+
+static int coff_check_file(const char *path, const char *header, size_t len) {
+    const coff_filehdr_t *fh = (const coff_filehdr_t *)(const void *)header;
+    const coff_aouthdr_t *opt;
+
+    (void)path;
+    if (!header || len < sizeof(*fh) + sizeof(*opt)) {
+        return -ENOEXEC;
+    }
+    opt = (const coff_aouthdr_t *)(const void *)(header + sizeof(*fh));
+    if (fh->f_magic != COFF_MAGIC_I386 || !(fh->f_flags & COFF_F_EXEC) ||
+        fh->f_opthdr < sizeof(*opt) || opt->magic != AOUT_ZMAGIC) {
+        return -ENOEXEC;
+    }
+    return 0;
+}
+
+static int coff_load(int fd, const char *path, char *const argv[],
+                     char *const envp[]) {
+    struct coff_image *img;
+    char (*libs)[COFF_LIB_PATH_MAX];
+    char **kargv = NULL, **kenvp = NULL;
+    int argc = 0, envc = 0, nlibs = 0;
+    uint32_t brk = 0, sp = 0, entry;
+    pmap_t pmap;
+    vm_map_t *map;
+    int rc, i;
+
+    img = kmalloc(sizeof(*img));
+    libs = kmalloc(COFF_MAX_LIBS * COFF_LIB_PATH_MAX);
+    if (!img || !libs) {
+        rc = -ENOMEM;
+        goto fail;
+    }
+    rc = coff_read_image(fd, img);
+    if (rc == 0 && coff_validate_aouthdr(&img->opt) != 0) {
+        rc = -ENOEXEC;
+    }
+    if (rc == 0) {
+        rc = coff_read_libs(fd, img, libs, &nlibs);
+    }
+    if (rc != 0) {
+        goto fail;
+    }
+    entry = (uint32_t)img->opt.entry;
+
+    /* argv and envp point into the address space about to be replaced. */
+    rc = aout_dup_vector(argv, &kargv, &argc);
+    if (rc == 0) {
+        rc = aout_dup_vector(envp, &kenvp, &envc);
+    }
+    if (rc != 0) {
+        goto fail;
+    }
+
+    pmap = pmap_create();
+    if (!pmap) {
+        rc = -ENOMEM;
+        goto fail;
+    }
+    current_process->pmap = (struct pmap *)pmap;
+    pmap_activate(pmap);
+    /* Text starts in the first page, so the map does too. */
+    map = vm_map_create(pmap, 0, USER32_VA_END);
+    if (!map) {
+        rc = -ENOMEM;
+        goto fail;
+    }
+
+    rc = coff_map_sections(pmap, map, fd, img, &brk);
+    if (rc != 0) {
+        goto fail;
+    }
+
+    /* The process is SVR3 from here, so that the libraries are looked for
+     * under the personality's root. */
+    current_process->perso_id = PERS_SVR3;
+    current_process->bitness = BITNESS_32;
+    for (i = 0; i < nlibs; i++) {
+        int lfd = kern_open(libs[i], O_RDONLY, 0);
+
+        if (coff_debug_enabled()) {
+            kprint("COFF: shared library ");
+            kprint(libs[i]);
+            kprint("\n");
+        }
+        if (lfd < 0) {
+            kprint("COFF: cannot open shared library ");
+            kprint(libs[i]);
+            kprint("\n");
+            rc = -ENOENT;
+            goto fail;
+        }
+        rc = coff_read_image(lfd, img);
+        if (rc == 0 && img->opt.magic != AOUT_LIBMAGIC) {
+            rc = -ENOEXEC;
+        }
+        if (rc == 0) {
+            rc = coff_map_sections(pmap, map, lfd, img, NULL);
+        }
+        kern_close(lfd);
+        if (rc != 0) {
+            kprint("COFF: bad shared library\n");
+            goto fail;
+        }
+    }
+
+    /* Caught signals revert to their defaults across exec, and the new
+     * image starts with the FPU in its initial state. */
+    proc_exec_reset_signals();
+    fpu_thread_reset(current_thread);
+
+    /* Pointers into the first page are good ones here. */
+    current_process->low_va_valid = 1;
+    /* Not rounded: libc counts the break up from its own `end`. */
+    current_process->brk_start = brk;
+    current_process->brk = brk;
+    {
+        const char *name = path ? path : "";
+        const char *p;
+
+        for (p = name; *p; p++) {
+            if (*p == '/') {
+                name = p + 1;
+            }
+        }
+        strlcpy(current_process->comm, name, sizeof(current_process->comm));
+        strlcpy(current_process->exec_path, path ? path : "",
+                sizeof(current_process->exec_path));
+    }
+
+    if (current_process->vm_map) {
+        vm_map_destroy(current_process->vm_map);
+    }
+    current_process->vm_map = map;
+    arch_set_kernel_stack((uintptr_t)current_thread->kstack_top);
+
+    current_process->arg_start = 0;
+    current_process->arg_end = 0;
+    proc_capture_cmdline(current_process, kargv);
+
+    rc = aout_build_stack(pmap, kargv, argc, kenvp, envc, 1, &sp);
+    if (rc != 0) {
+        goto fail;
+    }
+    aout_free_vector(kargv, argc);
+    aout_free_vector(kenvp, envc);
+    kfree(libs, COFF_MAX_LIBS * COFF_LIB_PATH_MAX);
+    kfree(img, sizeof(*img));
+
+    proc_close_cloexec(current_process);
+    kern_close(fd);
+
+    if (coff_debug_enabled()) {
+        char b[64];
+
+        snprintf(b, sizeof(b), "COFF: enter eip=0x%x esp=0x%x\n", entry, sp);
+        kprint(b);
+    }
+
+    pmap_activate((pmap_t)(uintptr_t)current_process->pmap);
+    jump_to_userspace(entry, sp, 0);
+    return 0;   /* not reached */
+
+fail:
+    aout_free_vector(kargv, argc);
+    aout_free_vector(kenvp, envc);
+    if (libs) {
+        kfree(libs, COFF_MAX_LIBS * COFF_LIB_PATH_MAX);
+    }
+    if (img) {
+        kfree(img, sizeof(*img));
+    }
+    return coff_fail(fd, rc, coff_debug_enabled() ? "COFF: load failed" : NULL);
+}
+
+static struct exec_binary_handler coff_handler = {
+    .name = "COFF",
+    .check = coff_check_file,
+    .load = coff_load,
+    .next = NULL,
+};
+
+void coff_init_handler(void) {
+    exec_register_handler(&coff_handler);
 }
 #endif /* !HOST_TEST */
 

@@ -109,11 +109,13 @@ static void test_aouthdr_sizes(void) {
                  0x08000000, 0x08000000, 0x08010000);
     EXPECT(coff_validate_aouthdr(&opt) != 0, "negative tsize accepted");
 
-    /* Page-misaligned tsize for ZMAGIC. */
+    /* tsize is the text's size to the byte, not a page count: every
+     * System V/386 binary has one that is not a multiple of the page size
+     * (/bin/sh of Release 3.2.3 has 0xb66c). */
     make_aouthdr(&opt, AOUT_ZMAGIC,
                  0x1FFF, 0x1000, 0,
                  0x08000010, 0x08000000, 0x08010000);
-    EXPECT(coff_validate_aouthdr(&opt) != 0, "misaligned tsize accepted");
+    EXPECT(coff_validate_aouthdr(&opt) == 0, "unrounded tsize rejected");
 
     /* Excessive tsize ( > 1 GiB ). */
     make_aouthdr(&opt, AOUT_ZMAGIC,

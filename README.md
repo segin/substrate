@@ -34,7 +34,8 @@ or Xenix `x.out` header):
 | FreeBSD, NetBSD | Their dynamic linkers and libc come up; dynamically linked binaries run. |
 | Linux | Active development. |
 | System V Release 4 (i386 ELF) | Active: the vendor's shells and basic utilities run, static and dynamically linked against its own `libc.so.1`. |
-| OpenBSD, SunOS 4.x, SVR3 | Early stage. |
+| System V Release 3 (i386 COFF) | Active: AT&T Release 3.2.3 and INTERACTIVE UNIX 3.0 shells and utilities run, with `/shlib/libc_s`; each system's `cc` compiles and links a program that runs. |
+| OpenBSD, SunOS 4.x | Early stage. |
 
 ## The 64-bit port
 

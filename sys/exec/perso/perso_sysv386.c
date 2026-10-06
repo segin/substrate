@@ -567,10 +567,36 @@ static int64_t sysv386_sys_umask(struct sysv386_frame *f) {
     return sys_umask((int)f->a[0]);
 }
 
-static int64_t sysv386_sys_ulimit(struct sysv386_frame *f) {
-    int rc = sys_ulimit((int)f->a[0], (long)(int32_t)f->a[1]);
+/*
+ * ulimit(cmd, newlimit).  1 and 2 get and set the file size limit and are
+ * the native call's.  3 asks for the highest break the process may have:
+ * programs size their working memory from the difference between that and
+ * the break they have now (sort(1) takes all of it), so the answer is the
+ * current break and a fixed allowance, not the end of the address space.
+ * 4 is the number of files it may have open.
+ */
+#define SYSV_UL_GMEMLIM   3
+#define SYSV_UL_GDESLIM   4
+#define SYSV386_BRK_ROOM  (16U * 1024U * 1024U)
 
-    return rc < 0 ? rc : (int64_t)(uint32_t)rc;
+static int64_t sysv386_sys_ulimit(struct sysv386_frame *f) {
+    int rc;
+
+    switch (f->a[0]) {
+    case SYSV_UL_GMEMLIM: {
+        uint32_t brk = (uint32_t)(uintptr_t)sys_brk(NULL);
+
+        if (brk > USER32_VA_END - SYSV386_BRK_ROOM) {
+            return (int64_t)USER32_VA_END;
+        }
+        return (int64_t)(brk + SYSV386_BRK_ROOM);
+    }
+    case SYSV_UL_GDESLIM:
+        return MAX_FD;
+    default:
+        rc = sys_ulimit((int)f->a[0], (long)(int32_t)f->a[1]);
+        return rc < 0 ? rc : (int64_t)(uint32_t)rc;
+    }
 }
 
 /* The command numbers are substrate's; F_GETFL and F_SETFL carry open

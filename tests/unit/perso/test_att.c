@@ -7,20 +7,31 @@
 #include <exec/perso/compat.h>
 #include <arch/i386/syscall.h>
 
-extern int sys_exit(int);
-extern int sys_read(int, char*, int);
-extern int sys_write(int, const char*, int);
+/* The System V calls are svr4/svr4_calls.c, which needs the whole kernel
+ * behind it; this test links only the two struct personality, so their
+ * hooks are stood in for here. */
+int svr3_handle_trap(void *regs) {
+    (void)regs;
+    return 0;
+}
 
+void svr3_sendsig(void *handler, int sig, uint32_t mask, uint32_t flags,
+                  void *regs) {
+    (void)handler; (void)sig; (void)mask; (void)flags; (void)regs;
+}
+
+/* As for SVR4 below: calls arrive as `lcall $7,$0` faults, so there are
+ * hooks and a root and no syscall table. */
 bool test_svr3_personality_table(void) {
-    if (personality_svr3.syscall_table[1] != &sys_exit) return false;
-    if (personality_svr3.syscall_table[3] != &sys_read) return false;
-    if (personality_svr3.syscall_table[18] == NULL) return false; // stat
+    if (personality_svr3.id != PERS_SVR3) return false;
+    if (personality_svr3.syscall_table != NULL) return false;
+    if (personality_svr3.syscall_count != 0) return false;
+    if (personality_svr3.handle_trap != svr3_handle_trap) return false;
+    if (personality_svr3.sendsig != svr3_sendsig) return false;
+    if (strcmp(personality_svr3.path_prefix, "/perso/svr3") != 0) return false;
     return true;
 }
 
-/* The SVR4 calls are svr4/svr4_calls.c, which needs the whole kernel behind
- * it; this test links only the struct personality, so its two hooks are
- * stood in for here. */
 int svr4_handle_trap(void *regs) {
     (void)regs;
     return 0;

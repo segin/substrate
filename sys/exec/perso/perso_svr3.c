@@ -1,140 +1,31 @@
 /*
- * perso_svr3.c - AT&T UNIX System V Release 3 Personality
+ * perso_svr3.c - AT&T UNIX System V Release 3 personality (i386).
+ *
+ * Runs the COFF programs of UNIX System V/386 Release 3 and the systems
+ * built on it (Interactive UNIX among them).  The COFF loader
+ * (exec/formats/coff.c) gives every i386 COFF executable this personality.
+ *
+ * Such a program enters the kernel with `lcall $7,$0` (perso_sysv386.c).
+ * There is no call gate behind selector 7, so the call faults and reaches
+ * the handle_trap hook.  Release 4 kept Release 3's calls as they were and
+ * runs its binaries unchanged, so the calls are served by the Release 4
+ * code (svr4/svr4_calls.c) under a description of their own.  No Release 3
+ * program issues `int $0x80`, so there is no syscall table.
  */
 
 #include <stddef.h>
 
-#include <machine/syscall.h>
 #include <exec/perso/personality.h>
-#include <exec/perso/svr3/svr3_syscalls.h>
-#include <sys/syscall_impl.h>
-
-static void *svr3_syscalls[MAX_SYSCALLS] = {
-    [SVR3_SYS_exit]     = &sys_exit,
-    [SVR3_SYS_fork]     = &sys_fork,
-    [SVR3_SYS_read]     = &sys_read,
-    [SVR3_SYS_write]    = &sys_write,
-    [SVR3_SYS_open]     = &sys_open,
-    [SVR3_SYS_close]    = &sys_close,
-    [SVR3_SYS_wait]     = &sys_waitpid,
-    [SVR3_SYS_link]     = &sys_link,
-    [SVR3_SYS_unlink]   = &sys_unlink,
-    [SVR3_SYS_chdir]    = &sys_chdir,
-    [SVR3_SYS_time]     = &sys_time,
-    [SVR3_SYS_mknod]    = &sys_mknod,
-    [SVR3_SYS_chmod]    = &sys_chmod,
-    [SVR3_SYS_chown]    = &sys_lchown,
-    [SVR3_SYS_stat]     = &sys_stat,
-    [SVR3_SYS_lseek]    = &sys_lseek,
-    [SVR3_SYS_getpid]   = &sys_getpid,
-    [SVR3_SYS_mount]    = &sys_mount,
-    [SVR3_SYS_umount]   = &sys_umount,
-    [SVR3_SYS_setuid]   = &sys_setuid,
-    [SVR3_SYS_getuid]   = &sys_getuid,
-    [SVR3_SYS_access]   = &sys_access,
-    [SVR3_SYS_nice]     = &sys_nice,
-    [SVR3_SYS_sync]     = &sys_sync,
-    [SVR3_SYS_kill]     = &sys_kill,
-    [SVR3_SYS_dup]      = &sys_dup,
-    [SVR3_SYS_pipe]     = &sys_pipe,
-    [SVR3_SYS_setgid]   = &sys_setgid,
-    [SVR3_SYS_getgid]   = &sys_getgid,
-    [SVR3_SYS_acct]     = &sys_acct,
-    [SVR3_SYS_ioctl]    = &sys_ioctl,
-    [SVR3_SYS_execve]   = &sys_execve,
-    [SVR3_SYS_chroot]   = &sys_chroot,
-    [SVR3_SYS_fcntl]    = &sys_fcntl,
-    [SVR3_SYS_ulimit]   = &sys_ulimit,
-    [SVR3_SYS_rmdir]    = &sys_rmdir,
-    [SVR3_SYS_mkdir]    = &sys_mkdir,
-    [SVR3_SYS_getdents] = &sys_getdents,
-    [SVR3_SYS_getcwd]   = &sys_getcwd,
-};
-
-static const char *svr3_names[MAX_SYSCALLS] = {
-    [SVR3_SYS_exit]     = "exit",
-    [SVR3_SYS_fork]     = "fork",
-    [SVR3_SYS_read]     = "read",
-    [SVR3_SYS_write]    = "write",
-    [SVR3_SYS_open]     = "open",
-    [SVR3_SYS_close]    = "close",
-    [SVR3_SYS_wait]     = "wait",
-    [SVR3_SYS_link]     = "link",
-    [SVR3_SYS_unlink]   = "unlink",
-    [SVR3_SYS_chdir]    = "chdir",
-    [SVR3_SYS_time]     = "time",
-    [SVR3_SYS_mknod]    = "mknod",
-    [SVR3_SYS_chmod]    = "chmod",
-    [SVR3_SYS_chown]    = "chown",
-    [SVR3_SYS_stat]     = "stat",
-    [SVR3_SYS_lseek]    = "lseek",
-    [SVR3_SYS_getpid]   = "getpid",
-    [SVR3_SYS_mount]    = "mount",
-    [SVR3_SYS_umount]   = "umount",
-    [SVR3_SYS_setuid]   = "setuid",
-    [SVR3_SYS_getuid]   = "getuid",
-    [SVR3_SYS_access]   = "access",
-    [SVR3_SYS_nice]     = "nice",
-    [SVR3_SYS_sync]     = "sync",
-    [SVR3_SYS_kill]     = "kill",
-    [SVR3_SYS_dup]      = "dup",
-    [SVR3_SYS_pipe]     = "pipe",
-    [SVR3_SYS_setgid]   = "setgid",
-    [SVR3_SYS_getgid]   = "getgid",
-    [SVR3_SYS_acct]     = "acct",
-    [SVR3_SYS_ioctl]    = "ioctl",
-    [SVR3_SYS_execve]   = "exece",
-    [SVR3_SYS_chroot]   = "chroot",
-    [SVR3_SYS_fcntl]    = "fcntl",
-    [SVR3_SYS_ulimit]   = "ulimit",
-    [SVR3_SYS_rmdir]    = "rmdir",
-    [SVR3_SYS_mkdir]    = "mkdir",
-    [SVR3_SYS_getdents] = "getdents",
-    [SVR3_SYS_getcwd]   = "getcwd",
-};
-
-static struct syscall_fmt svr3_fmts[MAX_SYSCALLS] = {
-    [SVR3_SYS_exit]     = { 1, { ARG_INT } },
-    [SVR3_SYS_read]     = { 3, { ARG_INT, ARG_PTR, ARG_INT } },
-    [SVR3_SYS_write]    = { 3, { ARG_INT, ARG_STR, ARG_INT } },
-    [SVR3_SYS_open]     = { 3, { ARG_STR, ARG_HEX, ARG_HEX } },
-    [SVR3_SYS_close]    = { 1, { ARG_INT } },
-    [SVR3_SYS_wait]     = { 0, { 0 } },
-    [SVR3_SYS_link]     = { 2, { ARG_STR, ARG_STR } },
-    [SVR3_SYS_unlink]   = { 1, { ARG_STR } },
-    [SVR3_SYS_chdir]    = { 1, { ARG_STR } },
-    [SVR3_SYS_time]     = { 1, { ARG_PTR } },
-    [SVR3_SYS_mknod]    = { 3, { ARG_STR, ARG_HEX, ARG_HEX } },
-    [SVR3_SYS_chmod]    = { 2, { ARG_STR, ARG_HEX } },
-    [SVR3_SYS_chown]    = { 3, { ARG_STR, ARG_INT, ARG_INT } },
-    [SVR3_SYS_stat]     = { 2, { ARG_STR, ARG_PTR } },
-    [SVR3_SYS_lseek]    = { 3, { ARG_INT, ARG_INT, ARG_INT } },
-    [SVR3_SYS_mount]    = { 5, { ARG_STR, ARG_STR, ARG_STR, ARG_HEX, ARG_PTR } },
-    [SVR3_SYS_umount]   = { 1, { ARG_STR } },
-    [SVR3_SYS_setuid]   = { 1, { ARG_INT } },
-    [SVR3_SYS_access]   = { 2, { ARG_STR, ARG_HEX } },
-    [SVR3_SYS_nice]     = { 1, { ARG_INT } },
-    [SVR3_SYS_kill]     = { 2, { ARG_INT, ARG_INT } },
-    [SVR3_SYS_dup]      = { 1, { ARG_INT } },
-    [SVR3_SYS_pipe]     = { 1, { ARG_PTR } },
-    [SVR3_SYS_setgid]   = { 1, { ARG_INT } },
-    [SVR3_SYS_acct]     = { 1, { ARG_STR } },
-    [SVR3_SYS_ioctl]    = { 3, { ARG_INT, ARG_HEX, ARG_HEX } },
-    [SVR3_SYS_execve]   = { 3, { ARG_STR, ARG_PTR, ARG_PTR } },
-    [SVR3_SYS_chroot]   = { 1, { ARG_STR } },
-    [SVR3_SYS_fcntl]    = { 3, { ARG_INT, ARG_INT, ARG_INT } },
-    [SVR3_SYS_ulimit]   = { 2, { ARG_INT, ARG_INT } },
-    [SVR3_SYS_rmdir]    = { 1, { ARG_STR } },
-    [SVR3_SYS_mkdir]    = { 2, { ARG_STR, ARG_HEX } },
-    [SVR3_SYS_getdents] = { 3, { ARG_INT, ARG_PTR, ARG_INT } },
-    [SVR3_SYS_getcwd]   = { 2, { ARG_PTR, ARG_INT } },
-};
+#include <exec/perso/svr4/svr4.h>
 
 struct personality personality_svr3 = {
     .name = "AT&T UNIX SVR3",
-    .syscall_table = svr3_syscalls,
-    .syscall_names = svr3_names,
-    .syscall_fmts = svr3_fmts,
-    .syscall_count = MAX_SYSCALLS,
-    .path_prefix = "/perso/svr3"
+    .id = PERS_SVR3,
+    .syscall_table = NULL,
+    .syscall_names = NULL,
+    .syscall_fmts = NULL,
+    .syscall_count = 0,
+    .path_prefix = "/perso/svr3",
+    .sendsig = svr3_sendsig,
+    .handle_trap = svr3_handle_trap,
 };
