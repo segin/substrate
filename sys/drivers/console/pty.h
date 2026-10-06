@@ -52,6 +52,12 @@ int    pty_master_node_poll(struct fs_node *node, void *waiter);
  * `node` is a pty master, 0 otherwise. */
 int    pty_set_nonblock(struct fs_node *node, int on);
 
+/* TIOCGPTN and TIOCSPTLCK(0) without a user address: the slave index of
+ * the pair `node` is the /dev/ptmx master of, and unlocking that slave.
+ * -ENOTTY if `node` is not such a master. */
+int    pty_master_index(struct fs_node *node);
+int    pty_master_unlock(struct fs_node *node);
+
 /*
  * BSD-style pty grid (/dev/pty[pq][0-9a-f] master, /dev/tty[pq][0-9a-f]
  * slave).  The open(2) path consults these so an already-open master can

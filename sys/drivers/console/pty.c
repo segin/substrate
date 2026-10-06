@@ -527,6 +527,21 @@ static void pty_slave_node_open(fs_node_t *node) {
         if (p && p->magic == PTY_MAGIC) {
             spinlock_acquire(&p->lock);
             p->slave_open = 1;
+            /*
+             * The slave's last close hangs the pair up (pty_slave_drv_close)
+             * so that the master reads end-of-file.  That is the state of a
+             * pair between slave holders, not the end of it while the
+             * master is open: a slave opened again is a terminal again.
+             * And the first "last close" may come before anyone has used
+             * the slave at all -- stat(2) on /dev/pts/N opens and closes
+             * the node, which is what System V's grantpt() does to it
+             * before the slave is opened, and what `ls -l /dev/pts` does
+             * to every pty that is waiting for its child.  Left dead, such
+             * a pair gave its master end-of-file for ever.
+             */
+            if (p->master_open) {
+                p->dead = 0;
+            }
             spinlock_release(&p->lock);
         }
     }
@@ -920,6 +935,47 @@ int pty_set_nonblock(fs_node_t *node, int on) {
         return 0;
     p->master_nonblock = on ? 1 : 0;
     return 1;
+}
+
+/* The pair `node` is the /dev/ptmx master of, or NULL. */
+static pty_pair_t *pty_pair_of_master(fs_node_t *node) {
+    if (!node)
+        return NULL;
+    fs_node_t *master = (node->read == ptmx_node_read)
+        ? (fs_node_t *)node->impl
+        : node;
+    if (!master || master->read != pty_master_node_read)
+        return NULL;
+    pty_pair_t *p = (pty_pair_t *)master->ptr;
+    return (p && p->magic == PTY_MAGIC) ? p : NULL;
+}
+
+/*
+ * TIOCGPTN and TIOCSPTLCK(0) for a caller inside the kernel, which has no
+ * user address for the ioctls to copy through: the index of the slave
+ * `node` is the master of, and unlocking it.  -ENOTTY if `node` is not a
+ * /dev/ptmx master.
+ */
+int pty_master_index(fs_node_t *node) {
+    pty_pair_t *p = pty_pair_of_master(node);
+
+    return p ? p->index : -ENOTTY;
+}
+
+int pty_master_unlock(fs_node_t *node) {
+    pty_pair_t *p = pty_pair_of_master(node);
+    int was_locked;
+
+    if (!p)
+        return -ENOTTY;
+    spinlock_acquire(&p->lock);
+    was_locked = p->locked;
+    p->locked = 0;
+    spinlock_release(&p->lock);
+    if (was_locked && !p->slave_node) {
+        pty_publish_slave_node(p);
+    }
+    return 0;
 }
 
 /* ------------------------------------------------------------------ */
