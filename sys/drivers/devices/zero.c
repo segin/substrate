@@ -19,15 +19,8 @@
 #include <sys/mman.h>
 #include <sys/poll.h>
 #include <sys/proc.h>
+#include <sys/syscall_impl.h>
 #include <vfs/vfs.h>
-
-static inline uint32_t zero_phys_from_virt(void *virt) {
-    return (uint32_t)V2P(virt);
-}
-
-static inline void *zero_virt_from_phys(uint32_t phys) {
-    return P2V(phys);
-}
 
 static fs_node_t zero_node;
 
@@ -82,60 +75,17 @@ static int zero_poll(fs_node_t *node, void *waiter) {
 /*
  * zero_mmap - Map zero-filled pages.
  *
- * The current VM path eagerly maps pages for device-backed mappings,
- * so this implementation allocates and zeros pages up front.
+ * Mapping /dev/zero is how a program asked for anonymous memory before
+ * there was MAP_ANONYMOUS -- the System V Release 4 dynamic linker gets
+ * all of its own this way -- and it means the same thing.
  */
 static void *zero_mmap(fs_node_t *node, void *addr, size_t length, int prot, int flags, off_t offset) {
     (void)node;
-    (void)prot;
-    (void)flags;
     (void)offset;
 
-    uint32_t start = (uint32_t)(uintptr_t)addr;   /* a 32-bit user address */
-    uint32_t end;
-
-    if (length == 0) {
-        return (void *)-1;
-    }
-
-    length = (length + 0xFFFU) & ~0xFFFU;
-    end = start + (uint32_t)length;
-    if (end < start) {
-        return (void *)-1;
-    }
-
-
-    for (uint32_t virt = start; virt < end; virt += 4096) {
-        void *page_virt = pmm_alloc_block();
-        if (!page_virt) {
-            for (uint32_t cleanup_virt = start; cleanup_virt < virt; cleanup_virt += 4096) {
-                uint32_t phys = pmap_extract(current_process->pmap, cleanup_virt);
-                if (phys) {
-                    pmm_free_block(zero_virt_from_phys(phys));
-                    pmap_remove(current_process->pmap, cleanup_virt);
-                }
-            }
-            kprint("zero_mmap: OOM\n");
-            return (void *)-1;
-        }
-
-        memset(page_virt, 0, 4096);
-
-        if (pmap_enter(current_process->pmap, virt, zero_phys_from_virt(page_virt), prot, 0) < 0) {
-            pmm_free_block(page_virt);
-
-            for (uint32_t cleanup_virt = start; cleanup_virt < virt; cleanup_virt += 4096) {
-                uint32_t phys = pmap_extract(current_process->pmap, cleanup_virt);
-                if (phys) {
-                    pmm_free_block(zero_virt_from_phys(phys));
-                    pmap_remove(current_process->pmap, cleanup_virt);
-                }
-            }
-            return (void *)-1;
-        }
-    }
-
-    return addr;
+    /* The same mapping asked for anonymously, so the address is chosen and
+     * recorded by the map like any other and the pages come on demand. */
+    return sys_mmap(addr, length, prot, flags | MAP_ANONYMOUS, -1, 0);
 }
 
 /*
