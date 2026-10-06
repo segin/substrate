@@ -86,7 +86,6 @@ __attribute__((weak)) void vm_commit_uncharge(size_t npages) { (void)npages; }
  */
 __attribute__((weak)) void aout_init_handler(void) { }
 __attribute__((weak)) void xout_init_handler(void) { }
-__attribute__((weak)) void xout286_init_handler(void) { }
 __attribute__((weak)) int kern_open_exec(const char *path) { (void)path; return -1; }
 __attribute__((weak)) int vfs_check_permissions_groups(fs_node_t *node, uint32_t uid,
         uint32_t gid, const uint32_t *groups, int ngroups, int mode)

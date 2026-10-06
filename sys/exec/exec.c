@@ -13,7 +13,6 @@
 #include <exec/formats/elks_aout.h>
 #include <exec/formats/script.h>
 #include <exec/formats/xout.h>
-#include <exec/formats/xout286.h>
 #include <kern/console.h>
 #include <kern/sched.h>
 #include <sys/errno.h>
@@ -34,7 +33,6 @@ static struct exec_binary_handler *exec_handlers = NULL;
 void exec_init(void) {
     elks_init_handler();
     xout_init_handler();
-    xout286_init_handler();
     aout_init_handler();
     script_init_handler();
 }
@@ -203,7 +201,7 @@ int exec_dispatch(const char *path, char *const argv[], char *const envp[]) {
     if (!path) return -ENOENT;
 
     /* kern_open_exec, not kern_open: the personality prefix still applies (a
-     * Xenix /bin/sh under /perso/xenix286s wins over the native one), but a
+     * Xenix /bin/sh under /perso/xenix wins over the native one), but a
      * foreign process may exec a substrate-native binary -- exec replaces the
      * image and its personality, so nothing foreign survives to be confused
      * by native syscall numbers. */

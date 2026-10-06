@@ -278,7 +278,7 @@ static int vfs_node_is_substrate_object(fs_node_t *node) {
  * That hazard is specific to loading something into an address space that
  * stays foreign.  It does NOT apply to execve(2), which replaces the image
  * outright: the loader that claims the new file also sets the personality
- * (elf.c from the OSABI, xout286.c to PERS_SCO_X286, ...), so a Xenix or
+ * (elf.c from the OSABI, xout.c to PERS_XENIX, ...), so a Xenix or
  * FreeBSD program that execs a substrate binary ends up as a native process
  * running native syscalls, with the old LDT freed.  Refusing it there just
  * made execve("/bin/sh") fail with ENOENT for no reason, so exec lookups pass

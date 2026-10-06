@@ -17,7 +17,7 @@ and its arguments via the shell's
 .BR exec .
 .I program
 is a path in the Substrate file system, such as
-.IR /perso/xenix286s/usr/bin/word .
+.IR /perso/xenix/usr/bin/word .
 .PP
 Its main job is choosing
 .BR TERM .
@@ -76,7 +76,7 @@ for a failed
 .TP
 .B XENIX_ROOT
 Root of the Xenix/286 file tree; default
-.IR /perso/xenix286s .
+.IR /perso/xenix .
 .TP
 .B XENIX_TERM
 If set, used as
@@ -87,11 +87,11 @@ unconditionally.
 Kept if the termdesc file describes it, otherwise replaced as above.
 .SH FILES
 .TP
-.I /perso/xenix286s/usr/lib/MSTOOLS/termdesc
+.I /perso/xenix/usr/lib/MSTOOLS/termdesc
 MSTOOLS terminal descriptions (under
 .BR XENIX_ROOT ).
 .TP
-.I /perso/xenix286s/usr/tmp
+.I /perso/xenix/usr/tmp
 Scratch directory created on demand.
 .SH NOTES
 The
@@ -109,10 +109,10 @@ it is a maintenance script for the Xenix disk image and is not
 installed.
 .SH EXAMPLES
 .EX
-$ xenix /perso/xenix286s/usr/bin/word letter.doc
-$ XENIX_TERM=wyse50 xenix /perso/xenix286s/usr/bin/word
+$ xenix /perso/xenix/usr/bin/word letter.doc
+$ XENIX_TERM=wyse50 xenix /perso/xenix/usr/bin/word
 .EE
 .SH SEE ALSO
 .BR sh (1),
-.BR sco_x286 (4),
+.BR xenix (4),
 .BR xout286 (4)

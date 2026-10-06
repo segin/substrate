@@ -3,7 +3,7 @@ include ../../../Makefile.inc
 CFLAGS := $(KERNEL_CFLAGS) -I. -I../../arch/$(ARCH) -I../../kern
 LDFLAGS := $(FREESTANDING_LDFLAGS)
 
-SRCS = elf.c pe.c coff.c aout.c elks_aout.c xout.c xout286.c script.c ../exec.c
+SRCS = elf.c pe.c coff.c aout.c elks_aout.c xout.c script.c ../exec.c
 OBJS = $(addprefix $(O),$(SRCS:.c=.o))
 
 all: $(O)exec.o

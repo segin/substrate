@@ -16,21 +16,32 @@ The following execution personalities are planned or implemented for Substrate:
 
 ## Xenix
 
-Xenix is not one target.  The `x.out` executable format spans three
-processors under a single magic number, and the 8086/80286 images are 16-bit
-segmented programs that trap through `int $5` with register arguments, while
-the 80386 ones are 32-bit and use the System V `lcall $7,$0` gate.  The
-Microsoft-branded releases predate SCO's and differ again.  Each pairing is
-therefore its own personality:
+Xenix is one personality: `Xenix`, id 131 (`PERS_XENIX`), rooted at
+`/perso/xenix`, implemented by `exec/formats/xout.c` and
+`exec/perso/perso_xenix.c`.
 
-| Personality  | id  | Status      | Loader / personality                              |
-|--------------|-----|-------------|---------------------------------------------------|
-| `SCO-X/386`  | 131 | Active      | `exec/formats/xout.c`, `exec/perso/perso_xenix.c` |
-| `SCO-X/286`  | 132 | Active      | `exec/formats/xout286.c`, `exec/perso/perso_sco_x286.c` |
-| `SCO-X/86`   | 133 | Reserved    | —                                                 |
-| `MS-X/86`    | 134 | Reserved    | —                                                 |
-| `MS-X/286`   | 135 | Reserved    | —                                                 |
-| `MS-X/386`   | 136 | Reserved    | —                                                 |
+The `x.out` executable format spans three processors under a single magic
+number, and there are two system call interfaces behind it: 8086 and 80286
+images are 16-bit segmented programs that trap through `int $5` with
+register arguments, while 80386 ones are 32-bit and use the System V
+`lcall $7,$0` gate.  The personality has a half for each, chosen by the
+process's word size, and the loader has a loader for each, chosen by the
+header's `x_cpu`.
 
-`SCO-X/286` is documented in `usr.man/man4/sco_x286.4`; its executable format
-is documented in `usr.man/man4/xout286.4`.
+It used to be six ids -- `SCO-X/386` (131), `SCO-X/286` (132), and four
+reserved for the 8086 and the Microsoft-branded releases (133-136) -- on
+the theory that each vendor/processor pairing would need its own ABI.  It
+did not turn out that way.  Every 8086 and 80286 binary tried, from SCO
+Xenix 86 2.1.3, SCO Xenix 286 2.3.2 and IBM PC Xenix 1.00, runs under the
+same 16-bit half; and a Xenix/386 installation is one tree holding all
+three kinds of binary (2.2.3 ships 248 8086 programs, 5 80286 and 14 80386),
+in which a program of one kind execs another.  Separate personalities meant
+separate roots, which that tree cannot be split across.
+
+| Half   | Programs       | Entry                | State                         |
+|--------|----------------|----------------------|-------------------------------|
+| 16-bit | 8086, 80286    | `int $5`             | Working                       |
+| 32-bit | 80386          | `lcall $7,$0`        | Loads; most programs fail yet |
+
+The personality is documented in `usr.man/man4/xenix.4`; the 16-bit
+executable format in `usr.man/man4/xout286.4`.

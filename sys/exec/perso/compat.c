@@ -370,7 +370,7 @@ int sys_utime(const char *path, void *times) {
  * gotcha with this call.  RLIM_INFINITY has no representation in a long, so
  * "unlimited" is reported as LONG_MAX, which is what callers test against.
  *
- * Reached natively and by the SCO-X/286 personality, where it is call 63.
+ * Reached natively and by the 16-bit half of the Xenix personality, where it is call 63.
  */
 #define UL_GETFSIZE 1   /* get file size limit, in 512-byte blocks */
 #define UL_SETFSIZE 2   /* set it */

@@ -154,7 +154,7 @@ int coredump(process_t *p) {
         /*
          * The data segment selectors.  A flat-model crash never needs these --
          * they are the same three constants every time -- but a segmented
-         * personality (SCO-X/286, ELKS) cannot be debugged without them: the
+         * personality (16-bit Xenix, ELKS) cannot be debugged without them: the
          * faulting instruction is typically an ordinary memory reference whose
          * selector is the whole story.  Diagnosing the Xenix/286 crashers came
          * down to seeing es=0x0000 on a far strlen, which the dump could not

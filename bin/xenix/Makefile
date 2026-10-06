@@ -2,7 +2,7 @@
 #
 # A shell script, not a compiled program: all it does is fix up the
 # environment (chiefly TERM) before exec'ing the Xenix binary, which the
-# PERS_SCO_X286 personality then runs natively.  See xenix.sh for why that
+# Xenix personality (PERS_XENIX) then runs natively.  See xenix.sh for why that
 # is needed at all.
 
 include ../../Makefile.inc

@@ -1,23 +1,33 @@
-.TH SCO_X286 4 "2026-09-04" "Substrate" "Kernel Interfaces"
+.TH XENIX 4 "2026-10-05" "Substrate" "Kernel Interfaces"
 .SH NAME
-sco_x286 \- SCO Xenix/286 execution personality
+xenix \- Xenix execution personality
 .SH DESCRIPTION
-.B SCO-X/286
-.RB ( PERS_SCO_X286 )
-runs SCO Xenix/286 binaries \(em 16-bit protected-mode System V.2 programs in
-the segmented
+The
+.B Xenix
+personality
+.RB ( PERS_XENIX )
+runs Xenix programs: every executable in the segmented
 .B x.out
 format described in
-.BR xout286 (4).
+.BR xout286 (4),
+whichever processor it was built for.
 .PP
-The x.out world is not one personality.  Each vendor/processor pairing is a
-distinct ABI: the 8086 and 80286 images are 16-bit segmented and trap through
-.BR "int $5" ,
-while the 80386 ones are 32-bit and use the System V
+Xenix has two system call interfaces.  8086 and 80286 images are 16-bit
+segmented programs and trap through
+.BR "int $5" ;
+80386 images are 32-bit and use the System V
 .B "lcall $7,$0"
-gate, and the Microsoft-branded releases predate SCO's and differ again.
-Substrate reserves a separate personality id for each; this page covers the
-SCO 80286 one.
+gate.  They are one personality all the same, in two halves, because they
+are one system: a Xenix/386 installation keeps all three kinds of binary in
+a single tree, and a program of one kind runs another without knowing which
+it is.  The x.out header selects the loader, and the process's word size
+selects the half of the personality that handles its traps and signals.
+(Until October 2026 the 16-bit half was a personality of its own,
+.BR SCO-X/286 ,
+rooted at
+.IR /perso/xenix286s .)
+.PP
+The rest of this page describes the 16-bit half.
 .SH SYSTEM CALL INTERFACE
 A Xenix/286 program traps with
 .BR "int $5" .
@@ -164,10 +174,10 @@ everything else is understood to be clobbered.  The disposition reverts to
 as the handler is entered, and the handler re-arms it.
 .SH FILESYSTEM NAMESPACE
 The personality's path prefix is
-.IR /perso/xenix286s .
+.IR /perso/xenix .
 An absolute path is resolved there first and then against the root
 filesystem, so a Xenix
-.I /perso/xenix286s/bin/sh
+.I /perso/xenix/bin/sh
 wins over the native one.
 .PP
 For everything except
@@ -278,14 +288,15 @@ carrying the same LDT selectors as an 80286 one, and the 8086 instruction
 set is a strict subset.
 .SH FILES
 .TP
-.I sys/exec/perso/perso_sco_x286.c
-The personality.
+.I sys/exec/perso/perso_xenix.c
+The personality, both halves.
 .TP
-.I sys/exec/perso/sco_x286/sco_x286_syscalls.h
+.I sys/exec/perso/xenix/xenix286_syscalls.h
 Call numbers and call-40 sub-functions, read out of the SCO Xenix 286
 Development System's own libc.
 .SH SEE ALSO
 .BR xout286 (4),
+.BR xenix (1),
 .BR elks_compat (4),
 .BR execve (2)
 .SH HISTORY

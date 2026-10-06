@@ -178,15 +178,18 @@ personality from the ELF OSABI byte, an a.out header's machine ID, or an
 `x.out` header's CPU field, and each personality supplies the system-call
 table and process setup for its ABI. Foreign binaries see their own
 system's files through `/perso/<name>/` trees. The segmented 16-bit
-personalities — ELKS (`elks_aout.c`) and SCO Xenix/286 (`xout286.c`) — run
+personalities — ELKS (`elks_aout.c`) and 16-bit Xenix (`xout.c`) — run
 in real LDT segments rather than a flattened address space, so the
 selectors a 1980s linker baked into a binary resolve as they did on
 hardware. `x.out` covers 8086, 80286 and 80386 Xenix under one magic
-number; 80286 programs go to `xout286.c` (16-bit, `int $5` system calls)
-and 80386 programs to `xout.c` (32-bit, `lcall $7,$0`). State of each
+number, and `xout.c` loads all three: 8086 and 80286 programs as 16-bit
+(`int $5` system calls), 80386 programs as 32-bit (`lcall $7,$0`). All of
+them run under the one Xenix personality (`perso_xenix.c`, rooted at
+`/perso/xenix`), whose two halves are chosen by the process's word size:
+a Xenix/386 system holds all three kinds of binary in one tree. State of each
 personality: `README.md`; specifications:
 `docs/specs/personality_targets.md`, `docs/specs/personality_elks.md`,
-`usr.man/man4/sco_x286.4`, `usr.man/man4/xout286.4`.
+`usr.man/man4/xenix.4`, `usr.man/man4/xout286.4`.
 
 **x86-64.** `sys/arch/x86_64` is the 64-bit port, an addition alongside
 i386, not a replacement: the personality and the bitness of a process are

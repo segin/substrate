@@ -1,12 +1,17 @@
 # Xenix host tools
 
-Host-side tools for the SCO Xenix/286 personality (`PERS_SCO_X286`). Both run
-on the Linux build host, not on substrate.
+Host-side tools for the Xenix personality (`PERS_XENIX`). All run on the
+Linux build host, not on substrate.
 
 | tool | what it does |
 | --- | --- |
 | `xenixfs.py` | read SCO Xenix / System V filesystem images (list, cat, extract), with MBR partition support |
-| `build-image.sh` | build the populated `/perso/xenix286s` ext2 image from distribution media |
+| `build-image.sh` | build a populated `/perso/xenix` ext2 image from the Xenix/286 distribution media |
+| `build-image386.sh` | the same from a set of SCO Xenix/386 distribution floppies |
+
+**Both image builders need media that is not in this repository**, and
+say at the top what to obtain and how to pass it in.  Neither is part of
+any build or test.
 
 ## Why `xenixfs.py` exists
 
@@ -75,9 +80,9 @@ sticky, restores mtimes, and skips device nodes with a count.
 
 ## `build-image.sh`
 
-Builds the ext2 image substrate mounts at `/perso/xenix286s`. The image is
+Builds the ext2 image substrate mounts at `/perso/xenix`. The image is
 ext2 on purpose: substrate reads it through its own VFS and runs the x.out
-binaries under `PERS_SCO_X286`, so the container is substrate's business and
+binaries under `PERS_XENIX`, so the container is substrate's business and
 only the file contents are Xenix's.
 
     ./build-image.sh [-m MEDIA_DIR] [-o OUTPUT] [-s SIZE_MB] [--minimal]
@@ -143,7 +148,7 @@ activation key, both of which are printed in the media's own `readme.txt`.
 `custom` and `fixperm`) to `/etc`. It is a Xenix binary, so run it under the
 personality, once per file:
 
-    xenix /perso/xenix286s/etc/brand <serial> <activationkey> /lib/p2
+    xenix /perso/xenix/etc/brand <serial> <activationkey> /lib/p2
 
 Paths are relative to the personality root. Afterwards each file is a normal
 x.out and `cc` works end to end, in its default mode:
@@ -155,7 +160,7 @@ That default is an *impure* (combined I&D) image — `x_renv` with `XE_SEP`
 clear, no text segment at all, and `xe_eseg` naming a selector that appears
 nowhere in the segment table. Every stock Xenix binary is separate I&D
 instead, so nothing exercised that shape until the compiler could run;
-xout286.c aliases a code descriptor onto DGROUP for it. `cc -i` asks for
+xout.c aliases a code descriptor onto DGROUP for it. `cc -i` asks for
 separate I&D and also works.
 
 Note that Xenix libraries are model-prefixed: there is no `crt0.o`, only
@@ -166,7 +171,7 @@ in the personality were found — see the commit for `x286_xsys_chsize`.
 
 ## What actually runs
 
-A 37-command sample under `PERS_SCO_X286`: **all 37 run, none crash, none
+A 37-command sample under the 16-bit half of `PERS_XENIX`: **all 37 run, none crash, none
 fail to load.**
 
 Getting there took three fixes, each a case of the loader or the personality
@@ -174,7 +179,7 @@ knowing only one of the shapes these binaries come in.
 
 **8086 images.** The media is 207 i286 binaries and 97 8086 — the whole
 Development System is the latter, since SCO shipped it as the *x86* Development
-System. `xout286.c` claimed only `x_cpu` 0x09 and rejected the rest outright.
+System. The 16-bit loader claimed only `x_cpu` 0x09 and rejected the rest outright.
 A real Xenix/286 ran Xenix/86 binaries and so does this now: an 8086 x.out is
 not a real-mode image, it carries the same protected-mode LDT selectors and
 segment table as a 286 one, and the 8086 instruction set is a strict subset.

@@ -2,7 +2,7 @@
 #
 # xenix - run a SCO Xenix/286 program with an environment MSTOOLS understands.
 #
-# Xenix binaries run natively under the PERS_SCO_X286 personality, so this is
+# Xenix binaries run natively under the Xenix personality (PERS_XENIX), so this is
 # not an emulator wrapper -- it exists purely to fix up the environment, and
 # TERM is the whole reason.
 #
@@ -25,10 +25,10 @@
 # XENIX_TERM overrides the choice outright, for a program with different needs
 # or to test a specific description.
 #
-# Usage:  xenix /perso/xenix286s/usr/bin/word [args...]
-#         XENIX_TERM=wyse50 xenix /perso/xenix286s/usr/bin/word
+# Usage:  xenix /perso/xenix/usr/bin/word [args...]
+#         XENIX_TERM=wyse50 xenix /perso/xenix/usr/bin/word
 
-XENIX_ROOT=${XENIX_ROOT:-/perso/xenix286s}
+XENIX_ROOT=${XENIX_ROOT:-/perso/xenix}
 TERMDESC=$XENIX_ROOT/usr/lib/MSTOOLS/termdesc
 
 if [ $# -lt 1 ]; then

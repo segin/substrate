@@ -1,5 +1,5 @@
 /*
- * sco_x286_syscalls.h - SCO Xenix/286 system call numbers.
+ * xenix286_syscalls.h - Xenix system call numbers, 16-bit (8086/80286) half.
  *
  * Xenix/286 numbers its system calls exactly like System V Release 2, and
  * hangs everything Xenix added off a single multiplexed entry -- call 40,
@@ -11,8 +11,8 @@
  *
  * so the archive member name gives the call and the immediate gives N.
  */
-#ifndef _SCO_X286_SYSCALLS_H
-#define _SCO_X286_SYSCALLS_H
+#ifndef _EXEC_PERSO_XENIX286_SYSCALLS_H
+#define _EXEC_PERSO_XENIX286_SYSCALLS_H
 
 #define X286_SYS_exit        1
 #define X286_SYS_fork        2
@@ -115,4 +115,4 @@
 #define X286_BR_FREESEG      004   /* free the segment named by ptr */
 #define X286_BR_HUGE         0100  /* modifier: huge context */
 
-#endif /* _SCO_X286_SYSCALLS_H */
+#endif /* _EXEC_PERSO_XENIX286_SYSCALLS_H */

@@ -1,10 +1,10 @@
 #!/bin/sh
 #
-# build-image.sh - build the /perso/xenix286s disk image from SCO Xenix media.
+# build-image.sh - build the /perso/xenix disk image from SCO Xenix media.
 #
 # Produces an ext2 image holding a populated Xenix/286 userland.  The image is
 # ext2 rather than a Xenix filesystem on purpose: substrate reads it through
-# its own VFS and runs the x.out binaries under PERS_SCO_X286, so the
+# its own VFS and runs the x.out binaries under PERS_XENIX, so the
 # container format is substrate's business and only the file contents are
 # Xenix's.  (To read a genuine Xenix filesystem, see xenixfs.py beside this.)
 #

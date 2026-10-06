@@ -6,12 +6,12 @@ xout286 \- Microsoft x.out 80286 segmented executable format (SCO Xenix/286)
 is the executable format of Microsoft Xenix and SCO Xenix.  One magic number
 covers three unrelated targets \(em 8086, 80286 and 80386 \(em so the
 processor field, not the magic, decides which loader claims a file.  This
-page describes the 80286 flavour, loaded by
-.I sys/exec/formats/xout286.c
+page describes the 80286 flavour, loaded by the 16-bit loader in
+.I sys/exec/formats/xout.c
 and executed under the
-.B PERS_SCO_X286
+.B PERS_XENIX
 personality (see
-.BR sco_x286 (4)).
+.BR xenix (4)).
 .PP
 An 80286 x.out image is a
 .I 16-bit protected mode
@@ -129,25 +129,25 @@ Overlays
 .RB ( XE_OVER )
 are not handled.
 .IP \(bu
-8086 and 80386 x.out images are rejected by this loader; the 386 ones are
-claimed by
-.IR sys/exec/formats/xout.c ,
-and the 8086 ones by nothing yet.
+8086 images are loaded exactly as 80286 ones are.  80386 images go to the
+32-bit loader in the same file.
 .SH FILES
 .TP
-.I sys/exec/formats/xout286.c
-The loader.
+.I sys/exec/formats/xout.c
+Both loaders, behind one handler that picks between them from
+.IR x_cpu .
 .TP
 .I sys/exec/formats/xout.h
 On-disk structures and the
 .BR x_cpu / x_renv
 constants.
 .SH SEE ALSO
-.BR sco_x286 (4),
+.BR xenix (4),
 .BR elks_aout (4),
 .BR execve (2)
 .SH HISTORY
 Support for 80286 x.out images was added to Substrate in August 2026,
-together with the
-.B SCO-X/286
+as a loader and a personality
+.RB ( SCO-X/286 )
+of their own; in October 2026 both were folded into the Xenix loader and
 personality.
