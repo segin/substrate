@@ -579,8 +579,15 @@ IFS=$OLDIFS
 # device, which the guest's virtio-blk driver registers as
 # /dev/storage/virtio0. The AHCI controller is created either way so --drive
 # keeps working.
+#
+# The root image's -drive is id=drive0 -- except under --virtio, where it is
+# vdrive0.  With the root disk off AHCI the --drive images start at port 0,
+# and the first of them is "drive0" by its port number: two drives of one id,
+# which qemu refuses.
+ROOT_DRIVE_ID=drive0
 if [ "$VIRTIO" -eq 1 ]; then
-    ROOT_DEV_ARGS="-device virtio-blk-pci,drive=drive0,id=vblk0"
+    ROOT_DRIVE_ID=vdrive0
+    ROOT_DEV_ARGS="-device virtio-blk-pci,drive=$ROOT_DRIVE_ID,id=vblk0"
     echo "run-networking.sh: $IMG on virtio-blk"
 elif [ "$IDE" -eq 1 ]; then
     # The machine's own IDE controller (piix3-ide on 'pc'), bus ide.0 unit 0 --
@@ -1069,7 +1076,7 @@ esac
   -machine "$QEMU_MACHINE" \
   $SNAPSHOT_ARG \
   "$@" \
-  -drive "file=$IMG,format=raw,if=none,id=drive0" \
+  -drive "file=$IMG,format=raw,if=none,id=$ROOT_DRIVE_ID" \
   -device ich9-ahci,id=sata0$BOOT_AHCI_ADDR \
   $ROOT_DEV_ARGS \
   $EXTRA_DRIVE_ARGS \
