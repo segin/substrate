@@ -15,6 +15,7 @@
 #include <vm/phys_mem.h>
 #include <exec/perso/personality.h>
 #include <exec/perso/linux/linux_exec.h>
+#include <exec/perso/svr4/svr4.h>
 #include <sys/exec.h>
 #include <sys/random.h>
 #include <sys/signal.h> // For copyin/copyout
@@ -1781,6 +1782,31 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
          * dynamic = 0 + p_vaddr (e.g. 0x1c1d0), and faults. */
         at_base = main_load_base;
     }
+
+    /*
+     * UNIX System V Release 4.  Its binaries carry nothing that names
+     * them: EI_OSABI is 0 and there is no note.  What marks a dynamic one
+     * is its interpreter -- Release 4.0's libc is its own dynamic linker --
+     * and a static one can only be told by where it is: under the
+     * personality's root, or run by a process that is already SVR4.
+     */
+    int is_svr4 = 0;
+    if (current_process && image &&
+        current_process->perso_id == PERS_NATIVE &&
+        image->ehdr.e_ident[EI_CLASS] != ELFCLASS64 &&
+        image->ehdr.e_ident[EI_OSABI] == 0) {
+        if (interp_len > 0) {
+            is_svr4 = strcmp(interp_path, SVR4_INTERP_PATH) == 0;
+        } else {
+            is_svr4 = old_perso_id == PERS_SVR4 ||
+                      (path && strncmp(path, SVR4_ROOT_PREFIX,
+                                       sizeof(SVR4_ROOT_PREFIX) - 1) == 0);
+        }
+        if (is_svr4) {
+            current_process->perso_id = PERS_SVR4;
+        }
+    }
+
     if (interp_len > 0) {
         if (elf_debug_enabled() || cmdline_debug_enabled("perso:linux")) {
             kprint("execve: Loading interpreter: ");
@@ -1835,6 +1861,10 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
         if (is_linux_ldso_path(interp_path) && current_process) {
             // Re-assert Linux personality after interpreter load branding.
             current_process->perso_id = PERS_LINUX;
+        }
+        if (is_svr4 && current_process) {
+            /* Likewise: libc.so.1 is as unbranded as the program. */
+            current_process->perso_id = PERS_SVR4;
         }
     }
 

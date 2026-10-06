@@ -186,10 +186,15 @@ number, and `xout.c` loads all three: 8086 and 80286 programs as 16-bit
 (`int $5` system calls), 80386 programs as 32-bit (`lcall $7,$0`). All of
 them run under the one Xenix personality (`perso_xenix.c`, rooted at
 `/perso/xenix`), whose two halves are chosen by the process's word size:
-a Xenix/386 system holds all three kinds of binary in one tree. State of each
+a Xenix/386 system holds all three kinds of binary in one tree. UNIX
+System V Release 4 enters the kernel the same way as Xenix/386, so its
+personality (`perso_svr4.c`, `svr4/svr4_calls.c`, rooted at `/perso/svr4`)
+shares that entry code and the classic calls through
+`exec/perso/xenix/sysv386.h`; its programs are ELF, recognised by their
+`/usr/lib/libc.so.1` interpreter. State of each
 personality: `README.md`; specifications:
 `docs/specs/personality_targets.md`, `docs/specs/personality_elks.md`,
-`usr.man/man4/xenix.4`, `usr.man/man4/xout286.4`.
+`usr.man/man4/xenix.4`, `usr.man/man4/xout286.4`, `usr.man/man4/svr4.4`.
 
 **x86-64.** `sys/arch/x86_64` is the 64-bit port, an addition alongside
 i386, not a replacement: the personality and the bitness of a process are

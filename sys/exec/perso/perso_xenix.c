@@ -32,6 +32,7 @@
 #include <exec/formats/xout.h>
 #include <exec/perso/personality.h>
 #include <exec/perso/svr3/svr3_syscalls.h>
+#include <exec/perso/xenix/sysv386.h>
 #include <exec/perso/xenix/xenix286_syscalls.h>
 #include <kern/cmdline.h>
 #include <kern/console.h>
@@ -164,11 +165,16 @@ static int xenix_seg_to_linear(uint16_t selector, uint32_t offset,
     const gdt_entry_t *entry;
     unsigned int index;
 
-    if (!current_process || !current_process->ldt || !linear_out) {
+    if (!current_process || !linear_out) {
         return -EINVAL;
     }
     if ((selector & 0x4U) == 0) {
-        return -EINVAL;   /* not an LDT selector */
+        /* A GDT selector: the flat user segments of an ELF program. */
+        *linear_out = (uintptr_t)offset;
+        return 0;
+    }
+    if (!current_process->ldt) {
+        return -EINVAL;
     }
     index = (unsigned int)(selector >> 3);
     if (index >= (unsigned int)current_process->ldt_entry_count) {
@@ -186,8 +192,9 @@ static int xenix_seg_to_linear(uint16_t selector, uint32_t offset,
     return 0;
 }
 
-/* Decode the faulting instruction; return 1 if it is `lcall $0x0007,$0`. */
-static int xenix_is_syscall_lcall(registers_t *regs) {
+/* Decode the faulting instruction: a system call, a signal return, or
+ * neither. */
+int sysv386_lcall_kind(registers_t *regs) {
     uintptr_t linear_ip;
     uint8_t insn[XENIX_LCALL_LEN];
 
@@ -216,7 +223,6 @@ static int xenix_is_syscall_lcall(registers_t *regs) {
 }
 
 static int x386_syscall(registers_t *regs);
-static int x386_sigreturn(registers_t *regs);
 
 static int xenix386_handle_trap(void *regs_ptr) {
     registers_t *regs = (registers_t *)regs_ptr;
@@ -230,11 +236,11 @@ static int xenix386_handle_trap(void *regs_ptr) {
     if (regs->int_no != 11 && regs->int_no != 13) {
         return 0;
     }
-    switch (xenix_is_syscall_lcall(regs)) {
-    case 1:
+    switch (sysv386_lcall_kind(regs)) {
+    case SYSV386_SYSCALL:
         return x386_syscall(regs);
-    case 2:
-        return x386_sigreturn(regs);
+    case SYSV386_SIGRETURN:
+        return sysv386_sigreturn(regs, 0);
     default:
         return 0;
     }
@@ -2372,13 +2378,6 @@ static void x286_sendsig(void *handler, int sig, uint32_t mask, uint32_t flags,
  * the compiler's natural alignment, which changes only struct stat.
  * ===================================================================== */
 
-struct x386_frame {
-    registers_t *regs;
-    uint32_t nr;     /* AL */
-    uint32_t sub;    /* AH */
-    uint32_t a[6];
-};
-
 /* struct stat: seven 16-bit fields, two bytes of padding, four longs. */
 struct x386_stat {
     int16_t  st_dev;
@@ -2411,14 +2410,18 @@ struct x386_stat {
 #define X386_SIG_HOLDVAL   2U         /* SIG_HOLD, as a disposition */
 
 /* The whole of [addr, addr+len) is below the top of user space. */
-static int x386_span(uint32_t addr, uint32_t len) {
+int x386_span(uint32_t addr, uint32_t len) {
     if (addr >= USER32_VA_END || len > USER32_VA_END - addr) {
         return -EFAULT;
     }
     return 0;
 }
 
-static int x386_string(uint32_t addr, char **out) {
+void x386_free_string(char *s) {
+    x286_free_string(s);
+}
+
+int x386_string(uint32_t addr, char **out) {
     size_t len = 0;
     char *copy;
 
@@ -2688,7 +2691,7 @@ static int64_t x386_sys_lseek(struct x386_frame *f) {
 }
 
 /* Two results: the first in EAX, the second in EDX. */
-static int64_t x386_pair(uint32_t first, uint32_t second) {
+int64_t x386_pair(uint32_t first, uint32_t second) {
     return (int64_t)((uint64_t)first | ((uint64_t)second << 32));
 }
 
@@ -3173,10 +3176,22 @@ static const x386_callfn x386_calls[X286_CALL_MAX] = {
     [X286_SYS_ulimit]  = x386_sys_ulimit,
 };
 
+int64_t xenix386_call(struct x386_frame *f, int *known) {
+    x386_callfn fn = (f->nr < X286_CALL_MAX) ? x386_calls[f->nr] : NULL;
+
+    *known = fn != NULL;
+    return fn ? fn(f) : -EINVAL;
+}
+
 static int x386_syscall(registers_t *regs) {
+    return sysv386_syscall(regs, xenix386_call, "XENIX", xenix_trace_enabled());
+}
+
+int sysv386_syscall(registers_t *regs, sysv386_callfn call, const char *tag,
+                    int trace) {
     struct x386_frame f;
     uintptr_t linear_sp;
-    x386_callfn fn;
+    int known = 1;
     void *saved_syscall_regs;
     int64_t ret;
 
@@ -3214,14 +3229,13 @@ static int x386_syscall(registers_t *regs) {
         current_thread->syscall_regs = regs;
     }
 
-    fn = (f.nr < X286_CALL_MAX) ? x386_calls[f.nr] : NULL;
-    ret = fn ? fn(&f) : -EINVAL;
+    ret = call(&f, &known);
 
     if (current_thread) {
         current_thread->syscall_regs = saved_syscall_regs;
     }
 
-    if (xenix_trace_enabled()) {
+    if (trace) {
         char buf[160];
         const char *name = x286_call_name((uint16_t)f.nr);
         int pid = current_process ? (int)current_process->pid : -1;
@@ -3230,16 +3244,17 @@ static int x386_syscall(registers_t *regs) {
             const char *sub = x286_xenix_name((uint16_t)f.sub);
 
             snprintf(buf, sizeof(buf),
-                     "XENIX: [%d] xenix.%s/%u(%#x, %#x, %#x) = %lld%s\n", pid,
-                     sub ? sub : "?", f.sub, f.a[0], f.a[1], f.a[2],
+                     "%s: [%d] xenix.%s/%u(%#x, %#x, %#x) = %lld%s\n", tag,
+                     pid, sub ? sub : "?", f.sub, f.a[0], f.a[1], f.a[2],
                      (long long)(ret < 0 ? ret : (int64_t)(uint32_t)ret),
-                     fn ? "" : " [unimplemented]");
+                     known ? "" : " [unimplemented]");
         } else {
             snprintf(buf, sizeof(buf),
-                     "XENIX: [%d] %s/%u(%#x, %#x, %#x) = %lld%s\n", pid,
-                     name ? name : "sys", f.nr, f.a[0], f.a[1], f.a[2],
+                     "%s: [%d] %s/%u(%#x, %#x, %#x, %#x) = %lld%s\n", tag,
+                     pid, name ? name : "sys", f.nr, f.a[0], f.a[1], f.a[2],
+                     f.a[3],
                      (long long)(ret < 0 ? ret : (int64_t)(uint32_t)ret),
-                     fn ? "" : " [unimplemented]");
+                     known ? "" : " [unimplemented]");
         }
         kprint(buf);
     }
@@ -3279,26 +3294,39 @@ struct x386_sigcontext {
 /* The flags a program may set for itself: CF PF AF ZF SF TF DF OF. */
 #define X386_EFLAGS_USER   0x00000DD5U
 
+/* The most argument words a handler is entered with: System V Release 4's
+ * (signo, siginfo, ucontext). */
+#define X386_SIG_MAXARGS 3U
+
 struct x386_sigframe {
     uint32_t ret;
-    uint32_t signo;
+    uint32_t arg[X386_SIG_MAXARGS];
     struct x386_sigcontext ctx;
 };
 
 static void x386_sendsig(void *handler, int sig, uint32_t mask, uint32_t flags,
                          void *regs_ptr) {
-    registers_t *regs = (registers_t *)regs_ptr;
-    struct x386_sigframe frame;
     uint32_t tramp = 0;
-    uint32_t sp;
 
     (void)flags;
-    if (!regs || !current_process) {
+    if (!regs_ptr || !current_process) {
         return;
     }
     if (sig >= 1 && sig <= NSIG) {
         tramp = (uint32_t)(uintptr_t)
                 current_process->linux_sig_restorer[sig - 1];
+    }
+    sysv386_sendsig(handler, (uint32_t)x286_native_to_xenix_sig(sig), mask,
+                    (registers_t *)regs_ptr, tramp, 1);
+}
+
+void sysv386_sendsig(void *handler, uint32_t signo, uint32_t mask,
+                     registers_t *regs, uint32_t tramp, unsigned int nargs) {
+    struct x386_sigframe frame;
+    uint32_t size, sp;
+
+    if (!regs || !current_process || nargs < 1U || nargs > X386_SIG_MAXARGS) {
+        return;
     }
     /* No trampoline means no way back out of the handler. */
     if (tramp == 0) {
@@ -3306,9 +3334,11 @@ static void x386_sendsig(void *handler, int sig, uint32_t mask, uint32_t flags,
         return;
     }
 
+    /* The frame is laid out for the most arguments; with fewer, the
+     * context moves up to follow the last of them. */
     memset(&frame, 0, sizeof(frame));
     frame.ret = tramp;
-    frame.signo = (uint32_t)x286_native_to_xenix_sig(sig);
+    frame.arg[0] = signo;
     frame.ctx.magic = X386_SIGCTX_MAGIC;
     frame.ctx.eip = regs->eip;
     frame.ctx.eflags = regs->eflags;
@@ -3322,9 +3352,15 @@ static void x386_sendsig(void *handler, int sig, uint32_t mask, uint32_t flags,
     frame.ctx.edi = regs->edi;
     frame.ctx.mask = mask;
 
-    sp = (regs->useresp - (uint32_t)sizeof(frame)) & ~3U;
-    if (x386_span(sp, sizeof(frame)) != 0 ||
-        copyout(&frame, (void *)(uintptr_t)sp, sizeof(frame)) != 0) {
+    size = (1U + nargs) * (uint32_t)sizeof(uint32_t) +
+           (uint32_t)sizeof(frame.ctx);
+    sp = (regs->useresp - size) & ~3U;
+    if (x386_span(sp, size) != 0 ||
+        copyout(&frame, (void *)(uintptr_t)sp,
+                (1U + nargs) * sizeof(uint32_t)) != 0 ||
+        copyout(&frame.ctx,
+                (void *)(uintptr_t)(sp + (1U + nargs) * sizeof(uint32_t)),
+                sizeof(frame.ctx)) != 0) {
         sigexit(current_process, SIGSEGV);
         return;
     }
@@ -3334,12 +3370,12 @@ static void x386_sendsig(void *handler, int sig, uint32_t mask, uint32_t flags,
     regs->eflags &= ~0x00000400U;   /* DF clear on entry to C */
 }
 
-static int x386_sigreturn(registers_t *regs) {
+int sysv386_sigreturn(registers_t *regs, unsigned int skip) {
     struct x386_sigcontext ctx;
+    uint32_t at = regs->useresp + skip * (uint32_t)sizeof(uint32_t);
 
-    if (x386_span(regs->useresp, sizeof(ctx)) != 0 ||
-        copyin((const void *)(uintptr_t)regs->useresp, &ctx,
-               sizeof(ctx)) != 0 ||
+    if (x386_span(at, sizeof(ctx)) != 0 ||
+        copyin((const void *)(uintptr_t)at, &ctx, sizeof(ctx)) != 0 ||
         ctx.magic != X386_SIGCTX_MAGIC) {
         sigexit(current_process, SIGSEGV);
         return 1;

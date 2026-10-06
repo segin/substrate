@@ -30,10 +30,11 @@ or Xenix `x.out` header):
 | Native | Complete. |
 | ELKS (16-bit Linux-like a.out) | Done: 16-bit protected mode through a per-process LDT; upstream ELKS `ps`/`meminfo` run. |
 | SCO Xenix/286 (`x.out`) | Done: the shipped `cc` compiles and links, a 37-command sample of the SCO media runs clean, Microsoft Word 3.0 reaches its editing screen. |
-| Xenix/386 | Active. |
+| Xenix/386 | Active: the Bourne shell and basic utilities of SCO Xenix 386 2.2.3 and 2.3.4 run. |
 | FreeBSD, NetBSD | Their dynamic linkers and libc come up; dynamically linked binaries run. |
 | Linux | Active development. |
-| OpenBSD, SunOS 4.x, SVR3/SVR4 | Early stage. |
+| System V Release 4 (i386 ELF) | Active: the vendor's shells and basic utilities run, static and dynamically linked against its own `libc.so.1`. |
+| OpenBSD, SunOS 4.x, SVR3 | Early stage. |
 
 ## The 64-bit port
 

@@ -1,171 +1,33 @@
 /*
- * perso_svr4.c - AT&T UNIX System V Release 4 Personality
+ * perso_svr4.c - AT&T UNIX System V Release 4 personality (i386).
+ *
+ * Runs ELF programs built for UNIX System V/386 Release 4: the AT&T
+ * reference port and the releases made from it (Intel's, Dell's,
+ * UnixWare).  The ELF loader gives a program this personality when it
+ * names /usr/lib/libc.so.1 as its interpreter -- Release 4.0's libc is its
+ * own dynamic linker -- or is an unbranded static executable under
+ * /perso/svr4.
+ *
+ * Such a program enters the kernel with `lcall $7,$0`, as Xenix/386 does
+ * and with the same conventions (exec/perso/xenix/sysv386.h).  There is no
+ * call gate behind selector 7, so the call faults and reaches the
+ * handle_trap hook; the calls themselves are in svr4/svr4_calls.c.  No
+ * Release 4 program issues `int $0x80`, so there is no syscall table.
  */
 
 #include <stddef.h>
 
-#include <machine/syscall.h>
-#include <exec/perso/compat.h>
 #include <exec/perso/personality.h>
-#include <exec/perso/svr4/svr4_syscalls.h>
-#include <sys/syscall_impl.h>
-
-static void *svr4_syscalls[MAX_SYSCALLS] = {
-    [SVR4_SYS_exit]        = &sys_exit,
-    [SVR4_SYS_fork]        = &sys_fork,
-    [SVR4_SYS_read]        = &sys_read,
-    [SVR4_SYS_write]       = &sys_write,
-    [SVR4_SYS_open]        = &sys_open,
-    [SVR4_SYS_close]       = &sys_close,
-    [SVR4_SYS_wait]        = &sys_waitpid,
-    [SVR4_SYS_creat]       = &sys_creat,
-    [SVR4_SYS_link]        = &sys_link,
-    [SVR4_SYS_unlink]      = &sys_unlink,
-    [SVR4_SYS_exec]        = &sys_execve,
-    [SVR4_SYS_chdir]       = &sys_chdir,
-    [SVR4_SYS_time]        = &sys_time,
-    [SVR4_SYS_mknod]       = &sys_mknod,
-    [SVR4_SYS_chmod]       = &sys_chmod,
-    [SVR4_SYS_chown]       = &sys_lchown,
-    [SVR4_SYS_stat]        = &sys_stat,
-    [SVR4_SYS_lseek]       = &sys_lseek,
-    [SVR4_SYS_getpid]      = &sys_getpid,
-    [SVR4_SYS_mount]       = &sys_mount,
-    [SVR4_SYS_umount]      = &sys_umount,
-    [SVR4_SYS_setuid]      = &sys_setuid,
-    [SVR4_SYS_getuid]      = &sys_getuid,
-    [SVR4_SYS_access]      = &sys_access,
-    [SVR4_SYS_nice]        = &sys_nice,
-    [SVR4_SYS_sync]        = &sys_sync,
-    [SVR4_SYS_kill]        = &sys_kill,
-    [SVR4_SYS_dup]         = &sys_dup,
-    [SVR4_SYS_pipe]        = &sys_pipe,
-    [SVR4_SYS_setgid]      = &sys_setgid,
-    [SVR4_SYS_getgid]      = &sys_getgid,
-    [SVR4_SYS_acct]        = &sys_acct,
-    [SVR4_SYS_ioctl]       = &sys_ioctl,
-    [SVR4_SYS_execve]      = &sys_execve,
-    [SVR4_SYS_chroot]      = &sys_chroot,
-    [SVR4_SYS_fcntl]       = &sys_fcntl,
-    [SVR4_SYS_ulimit]      = &sys_ulimit,
-    [SVR4_SYS_rmdir]       = &sys_rmdir,
-    [SVR4_SYS_mkdir]       = &sys_mkdir,
-    [SVR4_SYS_getdents]    = &sys_getdents,
-    [SVR4_SYS_mmap]        = &sys_mmap_off32,
-    [SVR4_SYS_munmap]      = &sys_munmap,
-    [SVR4_SYS_mprotect]    = &sys_mprotect,
-    [SVR4_SYS_sigaction]   = &sys_sigaction,
-    [SVR4_SYS_sigpending]  = &sys_sigpending,
-    [SVR4_SYS_sigprocmask] = &sys_sigprocmask,
-    [SVR4_SYS_sigsuspend]  = &sys_sigsuspend,
-    [SVR4_SYS_sigret]      = &sys_sigret,
-    [SVR4_SYS_getcwd]      = &sys_getcwd,
-};
-
-static const char *svr4_names[MAX_SYSCALLS] = {
-    [SVR4_SYS_exit]        = "exit",
-    [SVR4_SYS_fork]        = "fork",
-    [SVR4_SYS_read]        = "read",
-    [SVR4_SYS_write]       = "write",
-    [SVR4_SYS_open]        = "open",
-    [SVR4_SYS_close]       = "close",
-    [SVR4_SYS_wait]        = "wait",
-    [SVR4_SYS_creat]       = "creat",
-    [SVR4_SYS_link]        = "link",
-    [SVR4_SYS_unlink]      = "unlink",
-    [SVR4_SYS_exec]        = "exec",
-    [SVR4_SYS_chdir]       = "chdir",
-    [SVR4_SYS_time]        = "time",
-    [SVR4_SYS_mknod]       = "mknod",
-    [SVR4_SYS_chmod]       = "chmod",
-    [SVR4_SYS_chown]       = "chown",
-    [SVR4_SYS_stat]        = "stat",
-    [SVR4_SYS_lseek]       = "lseek",
-    [SVR4_SYS_getpid]      = "getpid",
-    [SVR4_SYS_mount]       = "mount",
-    [SVR4_SYS_umount]      = "umount",
-    [SVR4_SYS_setuid]      = "setuid",
-    [SVR4_SYS_getuid]      = "getuid",
-    [SVR4_SYS_access]      = "access",
-    [SVR4_SYS_nice]        = "nice",
-    [SVR4_SYS_sync]        = "sync",
-    [SVR4_SYS_kill]        = "kill",
-    [SVR4_SYS_dup]         = "dup",
-    [SVR4_SYS_pipe]        = "pipe",
-    [SVR4_SYS_setgid]      = "setgid",
-    [SVR4_SYS_getgid]      = "getgid",
-    [SVR4_SYS_acct]        = "acct",
-    [SVR4_SYS_ioctl]       = "ioctl",
-    [SVR4_SYS_execve]      = "execve",
-    [SVR4_SYS_chroot]      = "chroot",
-    [SVR4_SYS_fcntl]       = "fcntl",
-    [SVR4_SYS_ulimit]      = "ulimit",
-    [SVR4_SYS_rmdir]       = "rmdir",
-    [SVR4_SYS_mkdir]       = "mkdir",
-    [SVR4_SYS_getdents]    = "getdents",
-    [SVR4_SYS_mmap]        = "mmap",
-    [SVR4_SYS_munmap]      = "munmap",
-    [SVR4_SYS_mprotect]    = "mprotect",
-    [SVR4_SYS_sigaction]   = "sigaction",
-    [SVR4_SYS_sigpending]  = "sigpending",
-    [SVR4_SYS_sigprocmask] = "sigprocmask",
-    [SVR4_SYS_sigsuspend]  = "sigsuspend",
-    [SVR4_SYS_sigret]      = "sigret",
-    [SVR4_SYS_getcwd]      = "getcwd",
-};
-
-static struct syscall_fmt svr4_fmts[MAX_SYSCALLS] = {
-    [SVR4_SYS_exit]        = { 1, { ARG_INT } },
-    [SVR4_SYS_read]        = { 3, { ARG_INT, ARG_PTR, ARG_INT } },
-    [SVR4_SYS_write]       = { 3, { ARG_INT, ARG_STR, ARG_INT } },
-    [SVR4_SYS_open]        = { 3, { ARG_STR, ARG_HEX, ARG_HEX } },
-    [SVR4_SYS_close]       = { 1, { ARG_INT } },
-    [SVR4_SYS_wait]        = { 0, { 0 } },
-    [SVR4_SYS_creat]       = { 2, { ARG_STR, ARG_HEX } },
-    [SVR4_SYS_link]        = { 2, { ARG_STR, ARG_STR } },
-    [SVR4_SYS_unlink]      = { 1, { ARG_STR } },
-    [SVR4_SYS_exec]        = { 3, { ARG_STR, ARG_PTR, ARG_PTR } },
-    [SVR4_SYS_chdir]       = { 1, { ARG_STR } },
-    [SVR4_SYS_time]        = { 1, { ARG_PTR } },
-    [SVR4_SYS_mknod]       = { 3, { ARG_STR, ARG_HEX, ARG_HEX } },
-    [SVR4_SYS_chmod]       = { 2, { ARG_STR, ARG_HEX } },
-    [SVR4_SYS_chown]       = { 3, { ARG_STR, ARG_INT, ARG_INT } },
-    [SVR4_SYS_stat]        = { 2, { ARG_STR, ARG_PTR } },
-    [SVR4_SYS_lseek]       = { 3, { ARG_INT, ARG_INT, ARG_INT } },
-    [SVR4_SYS_mount]       = { 5, { ARG_STR, ARG_STR, ARG_STR, ARG_HEX, ARG_PTR } },
-    [SVR4_SYS_umount]      = { 1, { ARG_STR } },
-    [SVR4_SYS_setuid]      = { 1, { ARG_INT } },
-    [SVR4_SYS_access]      = { 2, { ARG_STR, ARG_HEX } },
-    [SVR4_SYS_nice]        = { 1, { ARG_INT } },
-    [SVR4_SYS_kill]        = { 2, { ARG_INT, ARG_INT } },
-    [SVR4_SYS_dup]         = { 1, { ARG_INT } },
-    [SVR4_SYS_pipe]        = { 1, { ARG_PTR } },
-    [SVR4_SYS_setgid]      = { 1, { ARG_INT } },
-    [SVR4_SYS_acct]        = { 1, { ARG_STR } },
-    [SVR4_SYS_ioctl]       = { 3, { ARG_INT, ARG_HEX, ARG_HEX } },
-    [SVR4_SYS_execve]      = { 3, { ARG_STR, ARG_PTR, ARG_PTR } },
-    [SVR4_SYS_chroot]      = { 1, { ARG_STR } },
-    [SVR4_SYS_fcntl]       = { 3, { ARG_INT, ARG_INT, ARG_INT } },
-    [SVR4_SYS_ulimit]      = { 2, { ARG_INT, ARG_INT } },
-    [SVR4_SYS_rmdir]       = { 1, { ARG_STR } },
-    [SVR4_SYS_mkdir]       = { 2, { ARG_STR, ARG_HEX } },
-    [SVR4_SYS_getdents]    = { 3, { ARG_INT, ARG_PTR, ARG_INT } },
-    [SVR4_SYS_mmap]        = { 6, { ARG_PTR, ARG_INT, ARG_HEX, ARG_HEX, ARG_INT, ARG_HEX } },
-    [SVR4_SYS_munmap]      = { 2, { ARG_PTR, ARG_INT } },
-    [SVR4_SYS_mprotect]    = { 3, { ARG_PTR, ARG_INT, ARG_HEX } },
-    [SVR4_SYS_sigaction]   = { 3, { ARG_INT, ARG_PTR, ARG_PTR } },
-    [SVR4_SYS_sigpending]  = { 2, { ARG_INT, ARG_PTR } },
-    [SVR4_SYS_sigprocmask] = { 3, { ARG_INT, ARG_PTR, ARG_PTR } },
-    [SVR4_SYS_sigsuspend]  = { 1, { ARG_PTR } },
-    [SVR4_SYS_sigret]      = { 0, { 0 } },
-    [SVR4_SYS_getcwd]      = { 2, { ARG_PTR, ARG_INT } },
-};
+#include <exec/perso/svr4/svr4.h>
 
 struct personality personality_svr4 = {
     .name = "AT&T UNIX SVR4",
-    .syscall_table = svr4_syscalls,
-    .syscall_names = svr4_names,
-    .syscall_fmts = svr4_fmts,
-    .syscall_count = MAX_SYSCALLS,
-    .path_prefix = "/perso/svr4"
+    .id = PERS_SVR4,
+    .syscall_table = NULL,
+    .syscall_names = NULL,
+    .syscall_fmts = NULL,
+    .syscall_count = 0,
+    .path_prefix = "/perso/svr4",
+    .sendsig = svr4_sendsig,
+    .handle_trap = svr4_handle_trap,
 };

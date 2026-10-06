@@ -1,0 +1,197 @@
+.TH SVR4 4 "2026-10-05" "Substrate" "Kernel Interfaces"
+.SH NAME
+svr4 \- UNIX System V Release 4 execution personality
+.SH DESCRIPTION
+The
+.B SVR4
+personality
+.RB ( PERS_SVR4 )
+runs i386 ELF programs built for UNIX System V/386 Release 4: AT&T's
+reference port and the releases made from it.  It is rooted at
+.IR /perso/svr4 ,
+which is where a program's absolute paths, its interpreter and its
+libraries are looked for first.
+.SS Recognition
+A Release 4 binary carries nothing that names it: its ELF OS/ABI byte is 0
+and it has no note.  The ELF loader gives a 32-bit program this personality
+when
+.IP \(bu 2
+its interpreter is
+.IR /usr/lib/libc.so.1 ,
+Release 4.0's libc being its own dynamic linker; or
+.IP \(bu
+it is statically linked and unbranded, and either lies under
+.I /perso/svr4
+or is run by a process that is already SVR4.
+.PP
+The dynamic linker inside
+.I libc.so.1
+is the vendor's and runs as shipped.  It is started the System V way, from
+the auxiliary vector, and gets its memory by mapping
+.BR zero (4).
+.SS System call interface
+A system call is
+.B "lcall $7,$0"
+with the number in
+.B EAX
+and the arguments on the stack above the stub's return address.  Carry
+reports failure with the errno in
+.BR EAX ;
+a second result is returned in
+.BR EDX .
+This is the interface of the 32-bit half of
+.BR xenix (4),
+with which the entry code and the calls numbered below 64 are shared.
+There is no call gate behind selector 7, so the call faults and is
+emulated from the fault.  No Release 4 program issues
+.BR "int $0x80" ,
+and the personality has no table for it.
+.PP
+Beyond the shared calls, these are implemented:
+.BR sysi86 " (" SI86FPHW ),
+.BR fsync ,
+.BR rmdir ,
+.BR mkdir ,
+.BR getdents ,
+.BR symlink ,
+.BR readlink ,
+.BR fchmod ,
+.BR fchown ,
+.BR sigprocmask ,
+.BR sigsuspend ,
+.BR sigaction ,
+.BR sigpending ,
+.BR waitsys ,
+.BR mmap ,
+.BR mprotect ,
+.BR munmap ,
+.BR vfork ,
+.BR fchdir ,
+.BR xstat ,
+.BR lxstat ,
+.BR fxstat ,
+.BR setrlimit ,
+.BR getrlimit ,
+.BR lchown ,
+.BR rename ,
+.BR uname ,
+.BR setegid ,
+.BR seteuid ,
+.BR sysconfig ,
+.BR systeminfo ,
+and
+.BR pgrpsys .
+A call that is not implemented fails with
+.BR ENOSYS .
+.SS Translation
+Signal numbers, signal sets, the
+.B sigaction
+flags,
+.B open
+flags, the expanded
+.B "struct stat"
+of
+.BR xstat ,
+.BR "struct termios" ,
+the
+.B siginfo
+of
+.BR waitid ,
+resource numbers and the error numbers that differ are translated.
+.B ioctl
+requests are never passed through as they are, because Release 4's numbers
+collide with substrate's: the
+.B termio
+and
+.B termios
+requests, the window size and the terminal's process group are translated,
+and anything else fails with
+.BR ENOTTY .
+.SS Signals
+A handler is entered as
+.IR handler ( signo ", " siginfo ", " ucontext )
+with libc's trampoline as its return address;
+.B sigaction
+is handed the trampoline in
+.BR EDX .
+The trampoline returns through
+.BR "lcall $0xf,$0" .
+.I siginfo
+and
+.I ucontext
+are null pointers.
+.SH DEBUGGING
+.B debug=perso:svr4:syscall
+on the kernel command line traces every call with its arguments and
+result, marking the ones not implemented.
+.SH FILES
+.TP
+.I /perso/svr4
+The personality's root.
+.I tools/svr4/build-image.sh
+builds an image of it from a set of distribution floppies, which are not
+part of substrate.
+.TP
+.I sys/exec/perso/perso_svr4.c
+The personality.
+.TP
+.I sys/exec/perso/svr4/svr4_calls.c
+Its system calls.
+.TP
+.I sys/exec/perso/xenix/sysv386.h
+The entry convention shared with Xenix/386.
+.SH KNOWN LIMITATIONS
+.IP \(bu 2
+.BR context " (" getcontext ", " setcontext ),
+.BR sigaltstack ,
+.BR poll ,
+the STREAMS calls, System V IPC,
+.BR mount ,
+.BR statvfs ,
+.BR memcntl
+and
+.B priocntl
+are not implemented.
+.IP \(bu
+A handler installed with
+.B SA_SIGINFO
+is given null
+.I siginfo
+and
+.I ucontext
+pointers.
+.IP \(bu
+.B ps
+reports that it cannot find a controlling terminal.
+.IP \(bu
+Only ELF programs are recognised.  Release 4 also runs Release 3 COFF
+binaries, which the
+.B SVR3
+personality claims instead.
+.SH VERIFIED
+Against Intel's UNIX System V/386 Release 4.0 Version 2: the statically
+linked
+.I /sbin/sh
+and the dynamically linked
+.BR ksh ,
+.BR ls ,
+.BR cat ,
+.BR date ,
+.BR id ,
+.BR uname ,
+.BR sort ,
+.BR wc ,
+.BR grep ,
+.BR sed ,
+.BR expr
+and
+.BR head ,
+with pipes, command substitution, redirection, traps and exit statuses, on
+the i386 and x86_64 kernels.
+.SH SEE ALSO
+.BR xenix (4),
+.BR zero (4),
+.BR execve (2)
+.SH HISTORY
+The personality was a table of native calls that nothing selected until
+October 2026, when it was wired to the ELF loader and given its own calls.
