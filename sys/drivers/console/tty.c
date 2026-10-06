@@ -801,10 +801,33 @@ void tty_flip_buffer_push(struct tty *tty, char c) {
 }
 
 // Job Control Checks
+/*
+ * Is `tty` the calling process's controlling terminal?
+ *
+ * Job control is about that and nothing else: a background process group
+ * is stopped for reading from, or (with TOSTOP) writing to, ITS controlling
+ * terminal (POSIX.1 11.1.4).  A process that merely holds a descriptor for
+ * some other session's terminal reads and writes it freely -- which is
+ * what a terminal multiplexer's server does with the tty its client hands
+ * it, and what script(1), a serial console logger or `echo > /dev/pts/3`
+ * do too.  Without this test every such read was answered EINTR and a
+ * SIGTTIN: tmux took the first one for a dead terminal and dropped the
+ * client it had just attached.
+ */
+static int tty_is_controlling(const struct tty *tty) {
+    if (!current_process || !current_process->p_pgrp ||
+        !current_process->p_pgrp->pg_session) {
+        return 0;
+    }
+    return tty->session != 0 &&
+           tty->session == current_process->p_pgrp->pg_session->s_sid;
+}
+
 static int tty_check_read(struct tty *tty) {
     if (!tty) return -1;
     if (tty->pgrp <= 0) return 0; // No foreground group
-    
+    if (!tty_is_controlling(tty)) return 0;
+
     // Check if current process is in background
     int cur_pgrp = (current_process->p_pgrp) ? current_process->p_pgrp->pg_id : 0;
     if (cur_pgrp != tty->pgrp) {
@@ -825,7 +848,8 @@ int tty_check_change(struct tty *tty) {
     
     // TOSTOP flag check
     if (!(tty->termios.c_lflag & TOSTOP)) return 0;
-    
+    if (!tty_is_controlling(tty)) return 0;
+
     int cur_pgrp = (current_process->p_pgrp) ? current_process->p_pgrp->pg_id : 0;
     if (cur_pgrp != tty->pgrp) {
         if (tty->pgrp > 0 && cur_pgrp > 0)

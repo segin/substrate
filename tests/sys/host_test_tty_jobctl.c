@@ -786,6 +786,16 @@ static void test_tty_check_change_signals_background_writes(void) {
     tty.termios.c_lflag = TOSTOP;
     tty.pgrp = fg_pgrp.pg_id;
 
+    /* Job control is for the controlling terminal only.  This tty belongs
+     * to another session: the process merely holds a descriptor for it, as
+     * a terminal multiplexer's server does for its client's, and it writes
+     * unhindered. */
+    tty.session = sess.s_sid + 1;
+    assert(tty_check_change(&tty) == 0);
+    assert(signal_count == 0);
+
+    /* Its own controlling terminal: a background write is stopped. */
+    tty.session = sess.s_sid;
     assert(tty_check_change(&tty) == 1);
     assert(signal_count == 1);
     assert(signal_pgrp[0] == bg_pgrp.pg_id);
