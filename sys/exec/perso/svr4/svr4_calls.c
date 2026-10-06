@@ -18,6 +18,7 @@
 #include <machine/vmparam.h>
 #include <exec/perso/personality.h>
 #include <exec/perso/svr4/svr4.h>
+#include <exec/perso/svr4/svr4_streams.h>
 #include <exec/perso/svr4/svr4_syscalls.h>
 #include <exec/perso/sysv386.h>
 #include <kern/cmdline.h>
@@ -34,6 +35,7 @@
 #include <sys/stat.h>
 #include <sys/syscall_impl.h>
 #include <sys/termios.h>
+#include <sys/time.h>
 #include <sys/utsname.h>
 #include <sys/wait.h>
 #include <vm/vm_kmem.h>
@@ -307,6 +309,13 @@ static int64_t svr4_put_xstat(const struct stat *native, uint32_t dst) {
     out.st_dev     = (uint32_t)native->st_dev;
     out.st_ino     = (uint32_t)native->st_ino;
     out.st_mode    = (uint32_t)native->st_mode;
+    /* The file a local socket is bound to is a FIFO with no permission
+     * bits here: Release 4's bind() makes one with mknod(path, S_IFIFO),
+     * and its connect() refuses a path whose mode is anything but that
+     * (ENOTSOCK). */
+    if (S_ISSOCK(native->st_mode)) {
+        out.st_mode = S_IFIFO;
+    }
     out.st_nlink   = (uint32_t)native->st_nlink;
     out.st_uid     = (uint32_t)native->st_uid;
     out.st_gid     = (uint32_t)native->st_gid;
@@ -526,9 +535,13 @@ static int64_t svr4_sys_ioctl(struct sysv386_frame *f, int *known) {
     struct termios native;
     struct svr4_termios user;
     struct winsize ws;
+    int64_t result;
     int32_t pgrp;
     int rc;
 
+    if (svr4_streams_ioctl(f, &result)) {
+        return result;
+    }
     if (f->a[1] >= SYSV_TCGETA && f->a[1] <= SYSV_TCFLSH) {
         *known = 0;                       /* the shared handler's */
         return 0;
@@ -826,8 +839,79 @@ static int64_t svr4_errno(int64_t ret) {
     case ENOTEMPTY:    return -SVR4_ENOTEMPTY;
     case EOPNOTSUPP:   return -SVR4_EOPNOTSUPP;
     case ETIMEDOUT:    return -SVR4_ETIMEDOUT;
-    default:           return ret;
+    default:
+        /* The network's, which a stream may return. */
+        return ret < 0 && ret > -4096 ? -(int64_t)svr4_net_errno((int)-ret)
+                                      : ret;
     }
+}
+
+/*
+ * hrtsys(2), the high-resolution timer call, as far as the time of day:
+ * hrtcntl(HRT_TOFD, CLK_STD, NULL, &t).  It is how Release 4's libc
+ * implements gettimeofday(), so anything that computes a timeout needs
+ * it.  The caller sets t.hrt_res to the units a second is to be divided
+ * into and gets the time back as seconds and a remainder in those.
+ */
+struct svr4_hrtime {
+    uint32_t hrt_secs;
+    int32_t  hrt_rem;
+    uint32_t hrt_res;
+};
+
+static int64_t svr4_sys_hrtsys(struct sysv386_frame *f) {
+    struct svr4_hrtime t;
+    struct timeval tv;
+    int rc;
+
+    if (f->a[0] != SVR4_HRT_CNTL) {
+        return -ENOSYS;
+    }
+    switch (f->a[1]) {
+    case SVR4_HRT_GETRES:
+        return 1000000;
+    case SVR4_HRT_TOFD:
+        if (f->a[2] != SVR4_CLK_STD) {
+            return -EINVAL;
+        }
+        rc = svr4_get(f->a[4], &t, sizeof(t));
+        if (rc != 0) {
+            return rc;
+        }
+        if (t.hrt_res == 0 || t.hrt_res > 1000000000U) {
+            return -EINVAL;
+        }
+        rc = kern_gettimeofday(&tv, NULL);
+        if (rc != 0) {
+            return rc;
+        }
+        t.hrt_secs = (uint32_t)tv.tv_sec;
+        t.hrt_rem = (int32_t)((uint64_t)tv.tv_usec * t.hrt_res / 1000000U);
+        return svr4_put(f->a[4], &t, sizeof(t));
+    default:
+        return -EINVAL;
+    }
+}
+
+/*
+ * open(2): a transport provider or one of the other stream devices is
+ * opened here; a file is left for the shared call.
+ */
+static int64_t svr4_sys_open(struct sysv386_frame *f, int *known) {
+    int64_t result = 0;
+    char *path;
+    int rc, handled;
+
+    rc = sysv386_string(f->a[0], &path);
+    if (rc != 0) {
+        return rc;
+    }
+    handled = svr4_streams_open(path, svr4_open_flags(f->a[1]), &result);
+    sysv386_free_string(path);
+    if (!handled) {
+        *known = 0;
+    }
+    return result;
 }
 
 /*
@@ -837,6 +921,8 @@ static int64_t svr4_errno(int64_t ret) {
 static int64_t svr4_call(struct sysv386_frame *f, int *known) {
     /* The whole of EAX is the number.  (The shared entry takes AL, for the
      * sake of Xenix's multiplexed call 40, which is not provided here.) */
+    int64_t result = 0;
+
     f->nr = f->regs->eax;
     f->sub = 0;
 
@@ -873,6 +959,22 @@ static int64_t svr4_call(struct sysv386_frame *f, int *known) {
         *known = 0;
         return 0;
     case SVR4_SYS_fchdir:      return sys_fchdir((int)f->a[0]);
+    case SYSV_SYS_open:        return svr4_sys_open(f, known);
+    case SYSV_SYS_close:
+        svr4_streams_close((int)f->a[0]);
+        *known = 0;                       /* and then it is closed */
+        return 0;
+    case SYSV_SYS_read:
+        if (!svr4_streams_read((int)f->a[0], f->a[1], f->a[2], &result)) {
+            *known = 0;
+        }
+        return result;
+    case SVR4_SYS_hrtsys:      return svr4_sys_hrtsys(f);
+    case SVR4_SYS_getmsg:      return svr4_sys_getmsg(f);
+    case SVR4_SYS_putmsg:      return svr4_sys_putmsg(f);
+    case SVR4_SYS_poll:        return svr4_sys_poll(f);
+    case SVR4_SYS_readv:       return svr4_sys_readv(f);
+    case SVR4_SYS_writev:      return svr4_sys_writev(f);
     case SVR4_SYS_xstat:
     case SVR4_SYS_lxstat:      return svr4_sys_xstat(f);
     case SVR4_SYS_fxstat:      return svr4_sys_fxstat(f);

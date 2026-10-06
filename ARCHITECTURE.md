@@ -195,7 +195,13 @@ signal and open-flag numbering and its own calls. SVR4 programs are ELF,
 recognised by their `/usr/lib/libc.so.1` interpreter. System V Release 3
 (`perso_svr3.c`, rooted at `/perso/svr3`) is a third client, served by the
 Release 4 calls; its programs are COFF, loaded by `formats/coff.c` together
-with the static shared libraries (`/shlib/libc_s`) they name. State of each
+with the static shared libraries (`/shlib/libc_s`) they name. System V has
+no socket calls -- its programs open STREAMS transport providers and
+exchange messages with them -- so `svr4/svr4_streams.c` provides those
+devices (`/dev/tcp`, `/dev/ticotsord`, the X transports `/dev/spx` and
+`/dev/X/server.N`) over substrate's sockets for both releases, which is
+what lets their X clients reach the X server
+(`docs/specs/sysv_streams_transport.md`). State of each
 personality: `README.md`; specifications:
 `docs/specs/personality_targets.md`, `docs/specs/personality_elks.md`,
 `usr.man/man4/xenix.4`, `usr.man/man4/xout286.4`, `usr.man/man4/svr4.4`,

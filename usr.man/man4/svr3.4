@@ -111,13 +111,24 @@ them.
 .BR ps
 reports that it cannot find a controlling terminal.
 .IP \(bu
-The STREAMS calls, System V IPC,
+System V IPC,
 .BR mount ,
-.BR statfs ,
-.BR poll
+.B statfs
 and
 .B ptrace
 are not implemented.
+.IP \(bu
+Networking is the client's half of the STREAMS transport interface, as
+.BR svr4 (4)
+describes: a program can connect through
+.I /dev/tcp
+or, to the X server, through
+.IR /dev/spx ,
+and cannot listen.
+INTERACTIVE UNIX's X clients reach a local display
+.RB ( :0 )
+and not a remote one, which they look up through a name server of their
+own.
 .SH VERIFIED
 Against AT&T UNIX System V/386 Release 3.2.3 and INTERACTIVE UNIX 3.0, on
 the i386 and x86_64 kernels: the statically linked

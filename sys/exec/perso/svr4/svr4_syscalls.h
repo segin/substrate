@@ -21,6 +21,8 @@
 #define SVR4_SYS_rmdir        79
 #define SVR4_SYS_mkdir        80
 #define SVR4_SYS_getdents     81
+#define SVR4_SYS_getmsg       85
+#define SVR4_SYS_putmsg       86
 #define SVR4_SYS_poll         87
 #define SVR4_SYS_lstat        88
 #define SVR4_SYS_symlink      89
@@ -36,11 +38,14 @@
 #define SVR4_SYS_sigpending   99
 #define SVR4_SYS_context      100
 #define SVR4_SYS_waitsys      107
+#define SVR4_SYS_hrtsys       109
 #define SVR4_SYS_mmap         115
 #define SVR4_SYS_mprotect     116
 #define SVR4_SYS_munmap       117
 #define SVR4_SYS_vfork        119
 #define SVR4_SYS_fchdir       120
+#define SVR4_SYS_readv        121
+#define SVR4_SYS_writev       122
 #define SVR4_SYS_xstat        123
 #define SVR4_SYS_lxstat       124
 #define SVR4_SYS_fxstat       125
@@ -61,6 +66,12 @@
 #define SVR4_FP_387           3
 
 /* pgrpsys(2) */
+/* hrtsys(2): the function, hrtcntl()'s commands, and the standard clock. */
+#define SVR4_HRT_CNTL         0
+#define SVR4_HRT_GETRES       0
+#define SVR4_HRT_TOFD         1
+#define SVR4_CLK_STD          1
+
 #define SVR4_PGRP_getpgrp     0
 #define SVR4_PGRP_setpgrp     1
 #define SVR4_PGRP_getsid      2

@@ -108,6 +108,55 @@ and
 requests, the window size and the terminal's process group are translated,
 and anything else fails with
 .BR ENOTTY .
+.SS Networking
+Release 4 has no socket system calls: a program opens a STREAMS transport
+provider and exchanges Transport Provider Interface messages with it, and
+.BR socket (),
+.BR connect ()
+and
+.BR t_connect ()
+are library functions written on that.
+The personality provides the providers
+.IR /dev/tcp ,
+.IR /dev/udp ,
+.IR /dev/ticots ,
+.I /dev/ticotsord
+and
+.I /dev/ticlts
+over substrate's sockets, with the
+.BR sockmod ,
+.B timod
+and
+.B tirdwr
+modules, the
+.B I_
+and
+.B TI_
+.B ioctl
+requests,
+.BR getmsg ,
+.BR putmsg ,
+.BR poll ,
+.B readv
+and
+.BR writev .
+A program can connect, exchange data and close; it cannot listen.
+The file a local socket is bound to is reported by
+.B stat
+as a FIFO with no permission bits, which is what Release 4's
+.BR connect ()
+requires of it.
+.PP
+The local transports of the X Window System are provided as well:
+.IR /dev/X/server. N,
+and the Release 3 stream pipe
+.I /dev/spx
+with
+.IR /dev/X N R .
+Each is a connection to substrate's X server at
+.IR /tmp/.X11-unix/X N.
+.I docs/specs/sysv_streams_transport.md
+describes all of it.
 .SS Signals
 A handler is entered as
 .IR handler ( signo ", " siginfo ", " ucontext )
@@ -125,6 +174,8 @@ are null pointers.
 .B debug=perso:svr4:syscall
 on the kernel command line traces every call with its arguments and
 result, marking the ones not implemented.
+.B debug=perso:svr4:streams
+adds the transport messages, in hexadecimal.
 .SH FILES
 .TP
 .I /perso/svr4
@@ -139,6 +190,9 @@ The personality.
 .I sys/exec/perso/svr4/svr4_calls.c
 Its system calls.
 .TP
+.I sys/exec/perso/svr4/svr4_streams.c
+The STREAMS transport providers and the X transports.
+.TP
 .I sys/exec/perso/perso_sysv386.c
 The entry convention, signal frame and calls it has in common with
 Xenix/386.
@@ -146,8 +200,7 @@ Xenix/386.
 .IP \(bu 2
 .BR context " (" getcontext ", " setcontext ),
 .BR sigaltstack ,
-.BR poll ,
-the STREAMS calls, System V IPC,
+System V IPC,
 .BR mount ,
 .BR statvfs ,
 .BR memcntl

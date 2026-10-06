@@ -26,6 +26,7 @@ OBJS = $(SRCS:.c=.o)
 # Exec / binary loaders
 HOST_TESTS  = host_test_aout
 HOST_TESTS += host_test_coff_aouthdr
+HOST_TESTS += host_test_svr4_streams
 HOST_TESTS += host_test_elf_execve_toctou
 HOST_TESTS += host_test_exec_init
 HOST_TESTS += host_test_access
@@ -310,6 +311,10 @@ host_test_driver_register_attach: host_test_driver_register_attach.c
 
 host_test_isa: host_test_isa.c
 	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_isa.c -o $@
+
+# -m32: the shim takes user addresses as 32-bit numbers.
+host_test_svr4_streams: host_test_svr4_streams.c ../../sys/exec/perso/svr4/svr4_streams.c
+	$(CC) -m32 -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I../../sys/arch/i386 -I. host_test_svr4_streams.c ../../sys/exec/perso/svr4/svr4_streams.c -o $@
 
 host_test_tty_jobctl: host_test_tty_jobctl.c
 	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I../../sys/arch/i386 -I. host_test_tty_jobctl.c -o $@

@@ -81,6 +81,12 @@ State: against AT&T Release 3.2.3 and INTERACTIVE UNIX 3.0, the shells and
 utilities run and each system's C compiler compiles and links a program
 that runs.  Documented in `usr.man/man4/svr3.4`.
 
+Neither release has socket calls; both reach the network, and the X
+server, through STREAMS devices.  `exec/perso/svr4/svr4_streams.c`
+provides the client's half of that over substrate's sockets, and with it
+Dell UNIX's X11R5 clients and INTERACTIVE UNIX's X11R4 clients run against
+substrate's X server.  See `sysv_streams_transport.md`.
+
 State of Release 4: the vendor's static `/sbin/sh`, and `ksh` and the basic utilities
 dynamically linked against the vendor's own `libc.so.1`, run -- Intel's
 Release 4.0 Version 2 and Dell UNIX SVR4 Issue 2.2 alike (`tools/svr4`

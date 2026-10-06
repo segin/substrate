@@ -33,9 +33,35 @@ or Xenix `x.out` header):
 | Xenix/386 | Active: the Bourne shell and basic utilities of SCO Xenix 386 2.2.3 and 2.3.4 run. |
 | FreeBSD, NetBSD | Their dynamic linkers and libc come up; dynamically linked binaries run. |
 | Linux | Active development. |
-| System V Release 4 (i386 ELF) | Active: the vendor's shells and basic utilities run, static and dynamically linked against its own `libc.so.1`. |
-| System V Release 3 (i386 COFF) | Active: AT&T Release 3.2.3 and INTERACTIVE UNIX 3.0 shells and utilities run, with `/shlib/libc_s`; each system's `cc` compiles and links a program that runs. |
+| System V Release 4 (i386 ELF) | Active: the vendor's shells and basic utilities run, static and dynamically linked against its own `libc.so.1` (Intel's Release 4.0 and Dell UNIX 2.2); Dell's X11R5 clients draw on substrate's X server. |
+| System V Release 3 (i386 COFF) | Active: AT&T Release 3.2.3 and INTERACTIVE UNIX 3.0 shells and utilities run, with `/shlib/libc_s`; each system's `cc` compiles and links a program that runs; INTERACTIVE's X11R4 clients draw on substrate's X server. |
 | OpenBSD, SunOS 4.x | Early stage. |
+
+### X clients from System V
+
+An X program built for System V in 1990 speaks the same X protocol the X
+server speaks now, but it does not open its connection with sockets: System
+V had no socket system calls. It opens a STREAMS device and talks to a
+*transport provider* in messages, or, for a local connection, passes one
+end of a stream pipe to the server. The System V personalities therefore
+carry a shim (`sys/exec/perso/svr4/svr4_streams.c`) that provides those
+devices on top of substrate's sockets, so that such a program reaches the X
+server at `/tmp/.X11-unix/XN` or over TCP:
+
+| The program opens | Which is | And gets |
+|---|---|---|
+| `/dev/tcp`, `/dev/ticotsord` (and `ticots`, `ticlts`, `udp`) | Release 4's and Release 3's transport providers, used through `libsocket`'s `socket()`/`connect()` or `libnsl`'s `t_open()`/`t_connect()` | a TCP or local socket, connected when the program asks the provider to connect |
+| `/dev/X/server.N` | Release 4's local X transport, a named stream | a connection to display N |
+| `/dev/spx` with `/dev/XNR` or `/tmp/.X11-unix/XN` | Release 3's local X transport (SCO's and INTERACTIVE's), a stream pipe handed to the server | a connection to display N |
+
+With an X server running, `DISPLAY=:0`, `unix:0` and `host:0` all work for
+Dell UNIX's clients, and `:0` and `unix:0` for INTERACTIVE UNIX's
+(`xclock`, `xeyes`, `xlogo`, `xcalc`, `xload`, `xdpyinfo`, `xlsclients`,
+`xwininfo`). It is the client's half only -- nothing can listen -- and two
+things do not work yet: INTERACTIVE's clients over TCP, which first ask a
+name-server daemon of their own for the address, and `xterm`, which needs
+System V pseudo-terminals. `docs/specs/sysv_streams_transport.md` has the
+detail.
 
 ## The 64-bit port
 
