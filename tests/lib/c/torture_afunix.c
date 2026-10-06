@@ -314,6 +314,13 @@ TEST(scm_rights_fd_passing)
     MUST(recvmsg(sv[1], &rmh, 0) == 1, "recvmsg with SCM_RIGHTS");
     struct cmsghdr *rc = CMSG_FIRSTHDR(&rmh);
     MUST(rc && rc->cmsg_type == SCM_RIGHTS, "received SCM_RIGHTS cmsg");
+    /* One descriptor was sent, and a receiver counts them from cmsg_len:
+     * what lies between CMSG_DATA and the end of the message.  With the
+     * data four bytes nearer the header than CMSG_LEN allows for, a 64-bit
+     * receiver counted two and closed whatever the second one named. */
+    MUST(rc->cmsg_len == CMSG_LEN(sizeof(int)), "cmsg_len is CMSG_LEN(one fd)");
+    MUST((size_t)((char *)rc + rc->cmsg_len - (char *)CMSG_DATA(rc)) ==
+         sizeof(int), "cmsg_len past CMSG_DATA is one fd");
     memcpy(&passed, CMSG_DATA(rc), sizeof(int));
     MUST(passed >= 0, "received fd is valid");
 

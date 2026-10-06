@@ -36,9 +36,11 @@ reattaching, a pane split from inside tmux, `kill-server`.
   process in a pane.  Automatic window names stay at the command the
   window was started with, and `#{pane_current_path}` is empty.
 - No utf8proc; tmux uses its own width tables.
-- **The native 64-bit build is not reliable.**  It builds and starts, and
-  a session often works, but panes die shortly after they are created
-  often enough that it cannot be depended on.  The 32-bit binary on the
-  64-bit kernel does not have the problem, so it is in the native 64-bit
-  userland path and not in the kernel changes above; it has not been run
-  down.
+- The native 64-bit build works as the 32-bit one does.  It used to lose
+  panes and sessions about half the time: `CMSG_DATA` in `<sys/socket.h>`
+  put a control message's data 12 bytes in, while `CMSG_LEN` counted a
+  16-byte header for a 64-bit process.  tmux's imsg code counts received
+  descriptors as what lies between `CMSG_DATA` and the end of the message,
+  got two for the one the client sent, and closed whatever number was in
+  the four bytes after it -- a descriptor of the server's own.  Fixed in
+  the header and in the kernel's side of the layout.

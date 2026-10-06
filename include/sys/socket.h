@@ -57,7 +57,11 @@ struct cmsghdr {
 #define CMSG_ALIGN(n)     (((n) + sizeof(size_t) - 1) & ~(sizeof(size_t) - 1))
 #define CMSG_SPACE(len)   (CMSG_ALIGN(sizeof(struct cmsghdr)) + CMSG_ALIGN(len))
 #define CMSG_LEN(len)     (CMSG_ALIGN(sizeof(struct cmsghdr)) + (len))
-#define CMSG_DATA(cmsg)   ((unsigned char *)((struct cmsghdr *)(cmsg) + 1))
+/* The data follows the header as CMSG_LEN() counts it -- rounded up, which is
+ * 16 bytes where size_t is 8 -- so that cmsg_len - CMSG_LEN(0) is the length
+ * of the data.  Programs work the number of descriptors out that way. */
+#define CMSG_DATA(cmsg) \
+    ((unsigned char *)(cmsg) + CMSG_ALIGN(sizeof(struct cmsghdr)))
 #define CMSG_FIRSTHDR(mhdr) \
     ((mhdr)->msg_controllen >= sizeof(struct cmsghdr) \
         ? (struct cmsghdr *)(mhdr)->msg_control : (struct cmsghdr *)0)

@@ -281,8 +281,9 @@ bits.
 
 `struct cmsghdr` is 12 bytes (`socklen_t cmsg_len`, two `int`s) and
 `CMSG_ALIGN` rounds to 8, so `cmsg_len` is 16 plus the length of the data
-(`CMSG_LEN`), the data starts 12 bytes into the record (`CMSG_DATA`), and
-the next record starts at `cmsg_len` rounded up to 8.
+(`CMSG_LEN`), the data starts 16 bytes into the record (`CMSG_DATA`) after
+four bytes of padding, and the next record starts at `cmsg_len` rounded up
+to 8.
 
 `struct ifreq` is 40 bytes (the union widens with `struct ifmap`), so the
 array `SIOCGIFCONF` fills has 40-byte elements and `struct ifconf` is 16

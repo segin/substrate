@@ -336,8 +336,8 @@ a statically linked 64-bit program:
   Three things follow the process without a structure of their own.
   Control messages (`sys/net/af_unix.c`): the process's `CMSG_ALIGN`
   rounds to its `size_t`, so for a 64-bit process `cmsg_len` counts a
-  16-byte header and records advance in steps of 8, while the data still
-  starts 12 bytes in, where its `CMSG_DATA` looks.  Robust futex lists
+  16-byte header, the data starts 16 bytes in, where its `CMSG_DATA`
+  looks, and records advance in steps of 8.  Robust futex lists
   (`kern/futex.c`): the head is 24 bytes with 64-bit links, and the
   length registered by `set_robust_list` selects the walk.  Device
   records: `SIOCGIFCONF`, `FBIOGET_FSCREENINFO`, `FBIOGET_VIDEO_MODES`,

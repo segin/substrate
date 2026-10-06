@@ -2141,9 +2141,10 @@ struct kcmsghdr {
 /*
  * The process's CMSG_* macros (<sys/socket.h>) align to its size_t, so the
  * geometry of a control message follows the process: CMSG_ALIGN rounds to
- * 4 bytes, or to 8 for a native 64-bit process.  The data always starts
- * right after the 12-byte header (CMSG_DATA), but cmsg_len counts the
- * header rounded up (CMSG_LEN) -- 12 bytes, or 16 for a 64-bit process.
+ * 4 bytes, or to 8 for a native 64-bit process.  The header is 12 bytes;
+ * the data starts at the header rounded up (CMSG_DATA), which is also what
+ * cmsg_len counts for it (CMSG_LEN) -- 12 bytes, or 16 for a 64-bit
+ * process.
  */
 static size_t kcmsg_align_to(void) {
     return proc_abi_is_amd64() ? sizeof(uint64_t) : sizeof(uint32_t);
@@ -2340,7 +2341,7 @@ static ssize_t sendmsg_kiov(int fd, struct msghdr *msg, struct iovec *kiov,
                 size_t datalen = c->cmsg_len - KCMSG_HDRLEN;
                 if (datalen % sizeof(int) != 0) { cmsg_err = -EINVAL; goto cmsg_done; }
                 int nfds = (int)(datalen / sizeof(int));
-                const int *fds = (const int *)(cmsgbuf + off + sizeof(*c));
+                const int *fds = (const int *)(cmsgbuf + off + KCMSG_HDRLEN);
                 /* Look up each fd in the sender's table.  Queue them
                  * on the peer's rx_fdq.  All-or-nothing: if any fd is
                  * invalid or the queue would overflow, undo previous
@@ -2571,20 +2572,26 @@ static ssize_t recvmsg_kiov(int fd, struct msghdr *umsg, struct msghdr *msg,
      * a request came to, and could not answer from it (RFC 1122 4.1.3.5).
      */
     if (!s && rx.valid && afinet_pktinfo_on(fd) && msg->msg_control) {
-        struct { struct kcmsghdr h; uint32_t ifindex, spec_dst, addr; } pc;
+        struct kcmsghdr h;
+        uint32_t info[3];
+        /* Header, the padding a 64-bit process has after it, three words. */
+        unsigned char pc[sizeof(h) + sizeof(uint32_t) + sizeof(info)];
         /* cmsg_len as the process's CMSG_LEN() computes it for the three
          * words of data. */
-        size_t pclen = KCMSG_HDRLEN + sizeof(pc) - sizeof(pc.h);
+        size_t pclen = KCMSG_HDRLEN + sizeof(info);
         if ((size_t)msg->msg_controllen < pclen) {
             msg->msg_flags |= MSG_CTRUNC;
         } else {
-            pc.h.cmsg_len = (uint32_t)pclen;
-            pc.h.cmsg_level = 0;            /* IPPROTO_IP */
-            pc.h.cmsg_type = 8;             /* IP_PKTINFO */
-            pc.ifindex = rx.ifindex;
-            pc.spec_dst = rx.spec_dst;
-            pc.addr = rx.addr;
-            if (copyout(&pc, msg->msg_control, sizeof(pc)) != 0) return -EFAULT;
+            h.cmsg_len = (uint32_t)pclen;
+            h.cmsg_level = 0;               /* IPPROTO_IP */
+            h.cmsg_type = 8;                /* IP_PKTINFO */
+            info[0] = rx.ifindex;
+            info[1] = rx.spec_dst;
+            info[2] = rx.addr;
+            memset(pc, 0, sizeof(pc));
+            memcpy(pc, &h, sizeof(h));
+            memcpy(pc + KCMSG_HDRLEN, info, sizeof(info));
+            if (copyout(pc, msg->msg_control, pclen) != 0) return -EFAULT;
             out_controllen = (uint32_t)pclen;
         }
     }
@@ -2636,13 +2643,13 @@ static ssize_t recvmsg_kiov(int fd, struct msghdr *umsg, struct msghdr *msg,
             c->cmsg_len   = (uint32_t)(KCMSG_HDRLEN + (size_t)got * sizeof(int));
             c->cmsg_level = SOL_SOCKET;
             c->cmsg_type  = SCM_RIGHTS;
-            int *outfds = (int *)(cmsgbuf + sizeof(*c));
+            /* A 64-bit process has four bytes of padding between the
+             * header and the descriptors; they go out as zeroes. */
+            memset(cmsgbuf + sizeof(*c), 0, KCMSG_HDRLEN - sizeof(*c));
+            int *outfds = (int *)(cmsgbuf + KCMSG_HDRLEN);
             for (int i = 0; i < got; i++) outfds[i] = allocated[i];
             out_controllen = c->cmsg_len;
-            /* The bytes written are the header and the descriptors; a
-             * 64-bit process's cmsg_len also counts the header's padding,
-             * which lies past them. */
-            size_t cmsg_bytes = sizeof(*c) + (size_t)got * sizeof(int);
+            size_t cmsg_bytes = c->cmsg_len;
             /* Shift remaining unqueued fds down. */
             for (int i = got; i < s->rx_fdq_count; i++) {
                 s->rx_fdq[i - got] = s->rx_fdq[i];
