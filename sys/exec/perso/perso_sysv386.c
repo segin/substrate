@@ -333,40 +333,23 @@ static int64_t sysv386_sys_time(struct sysv386_frame *f) {
     return (int64_t)(uint32_t)kern_time(NULL);
 }
 
+/*
+ * mknod, chmod and chown: substrate's take the path as the user gave it
+ * and copy it in themselves.  Handed a kernel copy of it instead, they
+ * refused the address and every one of the three failed with EFAULT.
+ */
 static int64_t sysv386_sys_mknod(struct sysv386_frame *f) {
-    char *path = NULL;
-    int rc = sysv386_string(f->a[0], &path);
-
-    if (rc != 0) {
-        return rc;
-    }
-    rc = sys_mknod(path, (int)f->a[1], (int)f->a[2]);
-    sysv386_free_string(path);
-    return rc;
+    return sys_mknod((const char *)(uintptr_t)f->a[0], (int)f->a[1],
+                     (int)f->a[2]);
 }
 
 static int64_t sysv386_sys_chmod(struct sysv386_frame *f) {
-    char *path = NULL;
-    int rc = sysv386_string(f->a[0], &path);
-
-    if (rc != 0) {
-        return rc;
-    }
-    rc = sys_chmod(path, (int)f->a[1]);
-    sysv386_free_string(path);
-    return rc;
+    return sys_chmod((const char *)(uintptr_t)f->a[0], (int)f->a[1]);
 }
 
 static int64_t sysv386_sys_chown(struct sysv386_frame *f) {
-    char *path = NULL;
-    int rc = sysv386_string(f->a[0], &path);
-
-    if (rc != 0) {
-        return rc;
-    }
-    rc = sys_chown(path, (int)f->a[1], (int)f->a[2]);
-    sysv386_free_string(path);
-    return rc;
+    return sys_chown((const char *)(uintptr_t)f->a[0], (int)f->a[1],
+                     (int)f->a[2]);
 }
 
 static int64_t sysv386_sys_access(struct sysv386_frame *f) {
@@ -426,6 +409,27 @@ static int64_t sysv386_put_stat(const struct stat *native, uint32_t dst) {
     return sysv386_put(dst, &out, sizeof(out));
 }
 
+/*
+ * /dev/fd/N is a character device in System V, whatever descriptor N is
+ * open on; substrate's is a link to the file.  A program that walks /dev
+ * for the names of terminals -- ps(1) does -- holds /dev open while it
+ * does, finds its own descriptor there as a directory, and descends into
+ * /dev/fd/N/fd/N/... without end.
+ */
+void sysv386_stat_dev_fd(const char *path, struct stat *st) {
+    const char *p = path;
+
+    if (strncmp(p, "/dev/fd/", 8) != 0 || p[8] == '\0') {
+        return;
+    }
+    for (p += 8; *p; p++) {
+        if (*p < '0' || *p > '9') {
+            return;
+        }
+    }
+    st->st_mode = S_IFCHR | 0666;
+}
+
 static int64_t sysv386_sys_stat(struct sysv386_frame *f) {
     char *path = NULL;
     struct stat native;
@@ -435,6 +439,9 @@ static int64_t sysv386_sys_stat(struct sysv386_frame *f) {
         return rc;
     }
     rc = kern_stat(path, &native);
+    if (rc == 0) {
+        sysv386_stat_dev_fd(path, &native);
+    }
     sysv386_free_string(path);
     return rc != 0 ? rc : sysv386_put_stat(&native, f->a[1]);
 }

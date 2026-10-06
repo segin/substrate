@@ -167,6 +167,10 @@ int sysv386_span(uint32_t addr, uint32_t len);
 /* A kernel copy of the string at `addr`; free with sysv386_free_string(). */
 int sysv386_string(uint32_t addr, char **out);
 void sysv386_free_string(char *s);
+/* stat(2)'s answer for `path` made System V's where it is /dev/fd/N: a
+ * character device, not what the descriptor is open on. */
+struct stat;
+void sysv386_stat_dev_fd(const char *path, struct stat *st);
 /* Two results: `first` for EAX, `second` for EDX. */
 int64_t sysv386_pair(uint32_t first, uint32_t second);
 
