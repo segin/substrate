@@ -2,10 +2,10 @@
  * xout.h - Microsoft x.out segmented executable format (Xenix/386)
  *
  * The x.out format is the native executable format of SCO Xenix and early
- * System V.3 on the i386.  It describes a 386 *segmented* program: text and
- * data live in distinct LDT segments selected by fixed selectors baked into
- * the binary, and system calls are made through the SysV/386 `lcall $7,$0`
- * call gate rather than a software interrupt.
+ * System V.3 on the i386.  A 386 program has its text and data under
+ * distinct LDT selectors baked into the binary, though both name the same
+ * flat address space, and makes system calls through the SysV/386
+ * `lcall $7,$0` call gate rather than a software interrupt.
  *
  * Layout on disk:
  *   struct xexec   (32 bytes) at offset 0    -- the a.out-style header
@@ -104,7 +104,9 @@ struct xseg {
     int32_t  xs_filpos;  /* file offset of the segment image */
     int32_t  xs_psize;   /* physical (on-disk) size */
     int32_t  xs_vsize;   /* initialized virtual size (data + explicit bss) */
-    int32_t  xs_msize;   /* total in-memory reservation (bss/heap; >= xs_vsize) */
+    int32_t  xs_rbase;   /* address of the segment's first byte WITHIN the
+                          * segment: 0 for text, and for a 386 program's
+                          * data 0x1880000.  (0 throughout a 16-bit image.) */
 };
 
 #define XOUT_SEG_STRIDE 32U      /* on-disk stride between xseg entries */

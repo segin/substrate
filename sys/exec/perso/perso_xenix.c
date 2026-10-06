@@ -7,25 +7,17 @@
  * struct personality, whose trap and signal hooks hand each process to the
  * half its bitness names.
  *
- * The 32-bit half:
- *
- * Xenix 386 is a System V.3 derivative.  Its executables are x.out segmented
- * images (see exec/formats/xout.c) and make system calls through the SysV/386
- * call gate:
+ * The 32-bit half's entry is here: a program makes a system call through
+ * the SysV/386 call gate,
  *
  *     mov  $nr, %eax
  *     lcall $0x0007, $0          ; 9A 00 00 00 00 07 00
  *
- * Substrate installs no ring-0 call gate at LDT selector 0x0007, so the lcall
- * faults (#NP/#GP).  We trap that fault in handle_trap, decode the lcall, and
- * emulate the syscall: the number is in %eax and the arguments are the cdecl
- * words the C stub's caller pushed, i.e. on the user stack just past the stub
- * return address (SS:ESP+4) -- the same stack ABI the BSD personalities use.
- *
- * The SysV/386 error convention is: on return, carry-flag clear means %eax is
- * the result; carry-flag set means %eax is the (positive) errno.
- *
- * Syscall numbering matches System V.3 (shared with perso_svr3.c).
+ * and returns from a signal handler through the one at selector 0x000f.
+ * Substrate installs neither gate, so the lcall faults (#NP/#GP); the fault
+ * is trapped, the lcall decoded, and the call emulated.  The handlers
+ * themselves follow the 16-bit half, whose structures and translations
+ * they share.
  */
 
 #include <stddef.h>
@@ -73,6 +65,7 @@
 #define XENIX_EFLAGS_CF   0x00000001U   /* carry flag */
 #define XENIX_LCALL_LEN   7U            /* 9A off32 sel16 */
 #define XENIX_GATE_SEL    0x0007U       /* SysV/386 syscall gate selector */
+#define XENIX_SIGRET_SEL  0x000FU       /* ... and the signal-return gate */
 
 static void *xenix_syscalls[MAX_SYSCALLS] = {
     [SVR3_SYS_exit]     = &sys_exit,
@@ -201,15 +194,20 @@ static int xenix_is_syscall_lcall(registers_t *regs) {
     if (xenix_seg_to_linear((uint16_t)regs->cs, regs->eip, &linear_ip) != 0) {
         return 0;
     }
-    if (linear_ip >= USER32_VA_END) {
+    if (linear_ip >= USER32_VA_END - sizeof(insn)) {
         return 0;
     }
-    if (copyin((const void *)linear_ip, insn, sizeof(insn)) != 0) {
-        return 0;
-    }
-    /* 0x9A = far CALL ptr16:32; trailing selector word must be the gate. */
+    /* Read directly: the instruction has just been fetched, so it is
+     * mapped, and copyin() refuses the first page of the address space --
+     * which is where a small program's stubs are, text starting at 0. */
+    memcpy(insn, (const void *)linear_ip, sizeof(insn));
+    /* 0x9A = far CALL ptr16:32; the trailing selector word names the gate:
+     * 7 for a system call, 0xf for the return from a signal handler. */
     if (insn[0] != 0x9AU) {
         return 0;
+    }
+    if (((uint16_t)insn[5] | ((uint16_t)insn[6] << 8)) == XENIX_SIGRET_SEL) {
+        return 2;
     }
     if (((uint16_t)insn[5] | ((uint16_t)insn[6] << 8)) != XENIX_GATE_SEL) {
         return 0;
@@ -217,12 +215,11 @@ static int xenix_is_syscall_lcall(registers_t *regs) {
     return 1;
 }
 
+static int x386_syscall(registers_t *regs);
+static int x386_sigreturn(registers_t *regs);
+
 static int xenix386_handle_trap(void *regs_ptr) {
     registers_t *regs = (registers_t *)regs_ptr;
-    uint32_t nr;
-    uint32_t args[8];
-    uintptr_t linear_sp;
-    int64_t ret;
 
     if (!regs || !current_process ||
         current_process->perso_id != PERS_XENIX ||
@@ -233,68 +230,14 @@ static int xenix386_handle_trap(void *regs_ptr) {
     if (regs->int_no != 11 && regs->int_no != 13) {
         return 0;
     }
-    if (!xenix_is_syscall_lcall(regs)) {
+    switch (xenix_is_syscall_lcall(regs)) {
+    case 1:
+        return x386_syscall(regs);
+    case 2:
+        return x386_sigreturn(regs);
+    default:
         return 0;
     }
-
-    nr = regs->eax;
-    if (current_thread && current_thread->proc == current_process) {
-        current_thread->syscall_num = nr;
-    }
-
-    /* Arguments: the cdecl words past the stub return address at SS:ESP+4. */
-    memset(args, 0, sizeof(args));
-    if (xenix_seg_to_linear((uint16_t)regs->ss, regs->useresp, &linear_sp) == 0) {
-        const void *ap = (const void *)(linear_sp + sizeof(uint32_t));
-        if (copyin(ap, args, sizeof(args)) != 0) {
-            for (int i = 0; i < 8; i++) {
-                if (copyin((const char *)ap + (size_t)i * sizeof(uint32_t),
-                           &args[i], sizeof(uint32_t)) != 0) {
-                    break;
-                }
-            }
-        }
-    }
-
-    /* Dispatch. */
-    if (nr < MAX_SYSCALLS && xenix_syscalls[nr]) {
-        typedef int64_t (*sys_func_t)(uint32_t, uint32_t, uint32_t, uint32_t,
-                                      uint32_t, uint32_t, uint32_t, uint32_t);
-        sys_func_t fn = (sys_func_t)xenix_syscalls[nr];
-        ret = fn(args[0], args[1], args[2], args[3],
-                 args[4], args[5], args[6], args[7]);
-    } else {
-        ret = -ENOSYS;
-    }
-
-    if (xenix_trace_enabled()) {
-        char buf[128];
-        const char *name = (nr < MAX_SYSCALLS && xenix_names[nr]) ?
-                           xenix_names[nr] : NULL;
-        if (name) {
-            snprintf(buf, sizeof(buf),
-                     "XENIX: %s(0x%x, 0x%x, 0x%x) = %lld\n",
-                     name, args[0], args[1], args[2], (long long)ret);
-        } else {
-            snprintf(buf, sizeof(buf),
-                     "XENIX: sys%u(0x%x, 0x%x, 0x%x) = %lld\n",
-                     nr, args[0], args[1], args[2], (long long)ret);
-        }
-        kprint(buf);
-    }
-
-    /* SysV/386 return convention: CF set + %eax=errno on error. */
-    if (ret < 0) {
-        regs->eax = (uint32_t)(-ret);
-        regs->eflags |= XENIX_EFLAGS_CF;
-    } else {
-        regs->eax = (uint32_t)ret;
-        regs->eflags &= ~XENIX_EFLAGS_CF;
-    }
-
-    /* Step past the faulting lcall. */
-    regs->eip += XENIX_LCALL_LEN;
-    return 1;
 }
 
 /* =====================================================================
@@ -2404,6 +2347,1019 @@ static void x286_sendsig(void *handler, int sig, uint32_t mask, uint32_t flags,
 
 
 /* =====================================================================
+ * The 32-bit half: 80386 programs.
+ *
+ * Same system, same call numbers, same structures -- but a different way
+ * in and a flat address space (see exec/formats/xout.c).  A libc stub is
+ *
+ *     _open:  mov   $5,%eax
+ *             lcall $7,$0
+ *             jb    cerror
+ *             ret
+ *
+ * so the number is in EAX (with the cxenix sub-function in AH, as in the
+ * 16-bit half) and the arguments are the caller's cdecl words, still on the
+ * stack above the stub's return address.  Carry reports failure with the
+ * errno in EAX.  A second result comes back in EDX: the parent's pid from
+ * getpid, the effective id from getuid/getgid, the status from wait, the
+ * write end from pipe -- and from fork, zero in the parent and non-zero in
+ * the child, which is the opposite of what the 16-bit stub tests for.
+ *
+ * Substrate has no call gate at LDT selector 7, so the lcall faults and
+ * arrives here by way of the #GP/#NP handler.
+ *
+ * Pointers are plain addresses.  The structures are the 16-bit half's with
+ * the compiler's natural alignment, which changes only struct stat.
+ * ===================================================================== */
+
+struct x386_frame {
+    registers_t *regs;
+    uint32_t nr;     /* AL */
+    uint32_t sub;    /* AH */
+    uint32_t a[6];
+};
+
+/* struct stat: seven 16-bit fields, two bytes of padding, four longs. */
+struct x386_stat {
+    int16_t  st_dev;
+    uint16_t st_ino;
+    uint16_t st_mode;
+    int16_t  st_nlink;
+    uint16_t st_uid;
+    uint16_t st_gid;
+    int16_t  st_rdev;
+    uint16_t pad;
+    int32_t  st_size;
+    int32_t  st_atime;
+    int32_t  st_mtime;
+    int32_t  st_ctime;
+};
+
+/* kern_sigprocmask's `how`. */
+#define X386_MASK_BLOCK    1
+#define X386_MASK_UNBLOCK  2
+#define X386_MASK_SET      3
+
+/* signal(2)'s first argument carries the System V.3 variants in its
+ * second byte: signal, sigset, sighold, sigrelse, sigignore, sigpause. */
+#define X386_SIGNO_MASK    0x00FFU
+#define X386_SIG_SET       0x0100U
+#define X386_SIG_HOLD      0x0200U
+#define X386_SIG_RELSE     0x0400U
+#define X386_SIG_IGNORE    0x0800U
+#define X386_SIG_PAUSE     0x1000U
+#define X386_SIG_HOLDVAL   2U         /* SIG_HOLD, as a disposition */
+
+/* The whole of [addr, addr+len) is below the top of user space. */
+static int x386_span(uint32_t addr, uint32_t len) {
+    if (addr >= USER32_VA_END || len > USER32_VA_END - addr) {
+        return -EFAULT;
+    }
+    return 0;
+}
+
+static int x386_string(uint32_t addr, char **out) {
+    size_t len = 0;
+    char *copy;
+
+    *out = NULL;
+    if (addr == 0 || x386_span(addr, 1) != 0) {
+        return -EFAULT;
+    }
+    if (copyinstr((const void *)(uintptr_t)addr, NULL, X286_PATH_MAX,
+                  &len) != 0 || len == 0) {
+        return -ENAMETOOLONG;
+    }
+    copy = kmalloc(len);
+    if (!copy) {
+        return -ENOMEM;
+    }
+    if (copyin((const void *)(uintptr_t)addr, copy, len) != 0) {
+        kfree(copy, len);
+        return -EFAULT;
+    }
+    copy[len - 1U] = '\0';
+    *out = copy;
+    return 0;
+}
+
+/* Call `fn` on the path at `addr`. */
+static int64_t x386_path1(uint32_t addr, int (*fn)(const char *)) {
+    char *path = NULL;
+    int rc = x386_string(addr, &path);
+
+    if (rc == 0) {
+        rc = fn(path);
+        x286_free_string(path);
+    }
+    return rc;
+}
+
+static int64_t x386_sys_exit(struct x386_frame *f) {
+    return sys_exit((int)f->a[0]);
+}
+
+static int64_t x386_sys_fork(struct x386_frame *f) {
+    registers_t *regs = f->regs;
+    uint32_t saved_edx = regs->edx;
+    uint32_t saved_eflags = regs->eflags;
+    int pid;
+
+    /* The child resumes from a copy of this frame with only EAX forced to
+     * zero, so what tells it that it is the child has to be in the frame
+     * before the fork: EDX non-zero, carry clear. */
+    regs->edx = 1;
+    regs->eflags &= ~XENIX_EFLAGS_CF;
+    pid = sys_fork();
+    regs->edx = saved_edx;
+    regs->eflags = saved_eflags;
+
+    if (pid < 0) {
+        return pid;
+    }
+    return (int64_t)(uint32_t)pid;   /* EDX = 0: the parent */
+}
+
+static int64_t x386_sys_read(struct x386_frame *f) {
+    int fd = (int)f->a[0];
+    fs_node_t *node;
+    int64_t rv;
+
+    if (x386_span(f->a[1], f->a[2]) != 0) {
+        return -EFAULT;
+    }
+    node = x286_fd_vnode(fd);
+    if (node && (node->flags & 0x7) == FS_DIRECTORY) {
+        return x286_read_directory(fd, (uintptr_t)f->a[1], f->a[2]);
+    }
+    rv = kern_read(fd, (char *)(uintptr_t)f->a[1], (size_t)f->a[2]);
+    /* O_NDELAY reports "nothing yet" as a zero-length read. */
+    return rv == -EAGAIN ? 0 : rv;
+}
+
+static int64_t x386_sys_write(struct x386_frame *f) {
+    if (x386_span(f->a[1], f->a[2]) != 0) {
+        return -EFAULT;
+    }
+    return kern_write((int)f->a[0], (const char *)(uintptr_t)f->a[1],
+                      (size_t)f->a[2]);
+}
+
+static int64_t x386_sys_open(struct x386_frame *f) {
+    char *path = NULL;
+    int rc = x386_string(f->a[0], &path);
+
+    if (rc != 0) {
+        return rc;
+    }
+    rc = kern_open(path, x286_open_flags((uint16_t)f->a[1]), (int)f->a[2]);
+    x286_free_string(path);
+    return rc;
+}
+
+static int64_t x386_sys_close(struct x386_frame *f) {
+    return kern_close((int)f->a[0]);
+}
+
+static int64_t x386_sys_wait(struct x386_frame *f) {
+    int status = 0;
+    int pid;
+
+    (void)f;
+    pid = kern_waitpid(-1, &status, 0);
+    if (pid < 0) {
+        return pid;
+    }
+    return (int64_t)((uint64_t)(uint32_t)pid |
+                     ((uint64_t)(uint32_t)(status & 0xFFFF) << 32));
+}
+
+static int64_t x386_sys_creat(struct x386_frame *f) {
+    char *path = NULL;
+    int rc = x386_string(f->a[0], &path);
+
+    if (rc != 0) {
+        return rc;
+    }
+    rc = kern_open(path, O_WRONLY | O_CREAT | O_TRUNC, (int)f->a[1]);
+    x286_free_string(path);
+    return rc;
+}
+
+static int64_t x386_sys_link(struct x386_frame *f) {
+    char *oldp = NULL, *newp = NULL;
+    int rc = x386_string(f->a[0], &oldp);
+
+    if (rc == 0) {
+        rc = x386_string(f->a[1], &newp);
+    }
+    if (rc == 0) {
+        rc = kern_link(oldp, newp);
+    }
+    x286_free_string(oldp);
+    x286_free_string(newp);
+    return rc;
+}
+
+static int64_t x386_sys_unlink(struct x386_frame *f) {
+    return x386_path1(f->a[0], kern_unlink);
+}
+
+static int64_t x386_sys_chdir(struct x386_frame *f) {
+    return x386_path1(f->a[0], kern_chdir);
+}
+
+static int64_t x386_sys_chroot(struct x386_frame *f) {
+    return x386_path1(f->a[0], kern_chroot);
+}
+
+static int64_t x386_sys_time(struct x386_frame *f) {
+    (void)f;
+    return (int64_t)(uint32_t)kern_time(NULL);
+}
+
+static int64_t x386_sys_mknod(struct x386_frame *f) {
+    char *path = NULL;
+    int rc = x386_string(f->a[0], &path);
+
+    if (rc != 0) {
+        return rc;
+    }
+    rc = sys_mknod(path, (int)f->a[1], (int)f->a[2]);
+    x286_free_string(path);
+    return rc;
+}
+
+static int64_t x386_sys_chmod(struct x386_frame *f) {
+    char *path = NULL;
+    int rc = x386_string(f->a[0], &path);
+
+    if (rc != 0) {
+        return rc;
+    }
+    rc = sys_chmod(path, (int)f->a[1]);
+    x286_free_string(path);
+    return rc;
+}
+
+static int64_t x386_sys_chown(struct x386_frame *f) {
+    char *path = NULL;
+    int rc = x386_string(f->a[0], &path);
+
+    if (rc != 0) {
+        return rc;
+    }
+    rc = sys_chown(path, (int)f->a[1], (int)f->a[2]);
+    x286_free_string(path);
+    return rc;
+}
+
+static int64_t x386_sys_access(struct x386_frame *f) {
+    char *path = NULL;
+    int rc = x386_string(f->a[0], &path);
+
+    if (rc != 0) {
+        return rc;
+    }
+    rc = kern_access(path, (int)f->a[1]);
+    x286_free_string(path);
+    return rc;
+}
+
+/*
+ * brk(2) takes the new break as an address and returns 0.  sys_brk reports
+ * failure the native way, by leaving the break where it was.
+ */
+static int64_t x386_sys_brk(struct x386_frame *f) {
+    uint32_t want = f->a[0];
+    uint32_t got = (uint32_t)(uintptr_t)sys_brk((void *)(uintptr_t)want);
+
+    return got == want ? 0 : -ENOMEM;
+}
+
+static int64_t x386_put_stat(const struct stat *native, uint32_t dst) {
+    struct x386_stat out;
+
+    memset(&out, 0, sizeof(out));
+    out.st_dev   = (int16_t)native->st_dev;
+    out.st_ino   = (uint16_t)native->st_ino;
+    out.st_mode  = (uint16_t)native->st_mode;
+    out.st_nlink = (int16_t)native->st_nlink;
+    out.st_uid   = (uint16_t)native->st_uid;
+    out.st_gid   = (uint16_t)native->st_gid;
+    out.st_rdev  = (int16_t)native->st_rdev;
+    out.st_size  = (int32_t)native->st_size;
+    out.st_atime = (int32_t)native->st_atime;
+    out.st_mtime = (int32_t)native->st_mtime;
+    out.st_ctime = (int32_t)native->st_ctime;
+    if (x386_span(dst, sizeof(out)) != 0 ||
+        copyout(&out, (void *)(uintptr_t)dst, sizeof(out)) != 0) {
+        return -EFAULT;
+    }
+    return 0;
+}
+
+static int64_t x386_sys_stat(struct x386_frame *f) {
+    char *path = NULL;
+    struct stat native;
+    int rc = x386_string(f->a[0], &path);
+
+    if (rc != 0) {
+        return rc;
+    }
+    rc = kern_stat(path, &native);
+    x286_free_string(path);
+    return rc != 0 ? rc : x386_put_stat(&native, f->a[1]);
+}
+
+static int64_t x386_sys_fstat(struct x386_frame *f) {
+    struct stat native;
+    int rc = kern_fstat((int)f->a[0], &native);
+
+    return rc != 0 ? rc : x386_put_stat(&native, f->a[1]);
+}
+
+static int64_t x386_sys_lseek(struct x386_frame *f) {
+    int64_t off = (int64_t)(int32_t)f->a[1];   /* off_t is a signed long */
+    int64_t rc = sys_lseek((int)f->a[0], (uint32_t)off,
+                           (uint32_t)((uint64_t)off >> 32), (int)f->a[2]);
+
+    return rc < 0 ? rc : (int64_t)(uint32_t)rc;
+}
+
+/* Two results: the first in EAX, the second in EDX. */
+static int64_t x386_pair(uint32_t first, uint32_t second) {
+    return (int64_t)((uint64_t)first | ((uint64_t)second << 32));
+}
+
+static int64_t x386_sys_getpid(struct x386_frame *f) {
+    (void)f;
+    return x386_pair((uint32_t)sys_getpid(), (uint32_t)sys_getppid());
+}
+
+static int64_t x386_sys_getuid(struct x386_frame *f) {
+    (void)f;
+    return x386_pair((uint32_t)sys_getuid() & 0xFFFFU,
+                     (uint32_t)sys_geteuid() & 0xFFFFU);
+}
+
+static int64_t x386_sys_getgid(struct x386_frame *f) {
+    (void)f;
+    return x386_pair((uint32_t)sys_getgid() & 0xFFFFU,
+                     (uint32_t)sys_getegid() & 0xFFFFU);
+}
+
+static int64_t x386_sys_setuid(struct x386_frame *f) {
+    return sys_setuid((int)f->a[0]);
+}
+
+static int64_t x386_sys_setgid(struct x386_frame *f) {
+    return sys_setgid((int)f->a[0]);
+}
+
+static int64_t x386_sys_alarm(struct x386_frame *f) {
+    return (int64_t)(uint32_t)sys_alarm((unsigned int)f->a[0]);
+}
+
+static int64_t x386_sys_pause(struct x386_frame *f) {
+    (void)f;
+    return sys_pause();
+}
+
+static int64_t x386_sys_nice(struct x386_frame *f) {
+    return sys_nice((int)f->a[0]);
+}
+
+static int64_t x386_sys_sync(struct x386_frame *f) {
+    (void)f;
+    return sys_sync();
+}
+
+static int64_t x386_sys_kill(struct x386_frame *f) {
+    int sig = 0;
+
+    if (f->a[1] != 0) {
+        sig = x286_signo((uint16_t)f->a[1]);
+        if (sig < 0) {
+            return sig;
+        }
+    }
+    return sys_kill((int)f->a[0], sig);
+}
+
+static int64_t x386_sys_setpgrp(struct x386_frame *f) {
+    /* setpgrp(flag): non-zero makes the caller a group leader; either way
+     * the result is the process group. */
+    if (f->a[0] != 0) {
+        (void)sys_setpgid(0, 0);
+    }
+    return sys_getpgrp();
+}
+
+static int64_t x386_sys_dup(struct x386_frame *f) {
+    return sys_dup((int)f->a[0]);
+}
+
+static int64_t x386_sys_pipe(struct x386_frame *f) {
+    int fds[2] = { -1, -1 };
+    int rc;
+
+    (void)f;
+    rc = kern_pipe(fds);
+    if (rc < 0) {
+        return rc;
+    }
+    return x386_pair((uint32_t)fds[0], (uint32_t)fds[1]);
+}
+
+static int64_t x386_sys_times(struct x386_frame *f) {
+    struct tms native;
+    struct x286_tms out;
+    clock_t rc;
+
+    memset(&native, 0, sizeof(native));
+    rc = kern_times(&native);
+    if ((int32_t)rc < 0) {
+        return (int64_t)(int32_t)rc;
+    }
+    out.tms_utime  = (int32_t)native.tms_utime;
+    out.tms_stime  = (int32_t)native.tms_stime;
+    out.tms_cutime = (int32_t)native.tms_cutime;
+    out.tms_cstime = (int32_t)native.tms_cstime;
+    if (x386_span(f->a[0], sizeof(out)) != 0 ||
+        copyout(&out, (void *)(uintptr_t)f->a[0], sizeof(out)) != 0) {
+        return -EFAULT;
+    }
+    return (int64_t)(uint32_t)rc;
+}
+
+static int64_t x386_sys_umask(struct x386_frame *f) {
+    return sys_umask((int)f->a[0]);
+}
+
+static int64_t x386_sys_ulimit(struct x386_frame *f) {
+    int rc = sys_ulimit((int)f->a[0], (long)(int32_t)f->a[1]);
+
+    return rc < 0 ? rc : (int64_t)(uint32_t)rc;
+}
+
+static int64_t x386_sys_fcntl(struct x386_frame *f) {
+    int fd = (int)f->a[0];
+    int rc;
+
+    switch (f->a[1]) {
+    case F_DUPFD:
+    case F_GETFD:
+    case F_SETFD:
+        return sys_fcntl(fd, (int)f->a[1], (int)f->a[2]);
+    case F_GETFL:
+        rc = sys_fcntl(fd, F_GETFL, 0);
+        return rc < 0 ? rc : (int64_t)x286_from_open_flags(rc);
+    case F_SETFL:
+        return sys_fcntl(fd, F_SETFL, x286_open_flags((uint16_t)f->a[2]));
+    default:
+        return -EINVAL;
+    }
+}
+
+static int64_t x386_sys_ioctl(struct x386_frame *f) {
+    int fd = (int)f->a[0];
+    uint32_t cmd = f->a[1];
+    uint32_t arg = f->a[2];
+    struct termios native;
+    struct x286_termio user;
+    int rc;
+
+    switch (cmd) {
+    case X286_TCGETA:
+        rc = kern_ioctl(fd, TCGETS, &native);
+        if (rc != 0) {
+            return rc;
+        }
+        x286_termios_to_termio(&user, &native);
+        if (x386_span(arg, sizeof(user)) != 0 ||
+            copyout(&user, (void *)(uintptr_t)arg, sizeof(user)) != 0) {
+            return -EFAULT;
+        }
+        return 0;
+    case X286_TCSETA:
+    case X286_TCSETAW:
+    case X286_TCSETAF:
+        /* termio cannot express everything termios holds: start from what
+         * the terminal has. */
+        rc = kern_ioctl(fd, TCGETS, &native);
+        if (rc != 0) {
+            return rc;
+        }
+        if (x386_span(arg, sizeof(user)) != 0 ||
+            copyin((const void *)(uintptr_t)arg, &user, sizeof(user)) != 0) {
+            return -EFAULT;
+        }
+        x286_termio_to_termios(&native, &user);
+        return kern_ioctl(fd, cmd == X286_TCSETA ? TCSETS :
+                              cmd == X286_TCSETAW ? TCSETSW : TCSETSF,
+                          &native);
+    case X286_TCSBRK:
+        return kern_ioctl(fd, TCSBRK, (void *)(uintptr_t)arg);
+    case X286_TCXONC:
+        return kern_ioctl(fd, TCXONC, (void *)(uintptr_t)arg);
+    case X286_TCFLSH:
+        return kern_ioctl(fd, TCFLSH, (void *)(uintptr_t)arg);
+    default:
+        /* Let the driver decide; an unknown request comes back ENOTTY,
+         * which is what a program probing for a capability expects. */
+        if (arg >= USER32_VA_END) {
+            arg = 0;
+        }
+        return kern_ioctl(fd, cmd, (void *)(uintptr_t)arg);
+    }
+}
+
+/* utssys(buf, mv, type): type 0 is uname. */
+static int64_t x386_sys_utssys(struct x386_frame *f) {
+    struct utsname native;
+    struct x286_utsname out;
+    int rc;
+
+    if (f->a[2] != 0) {
+        return -EINVAL;   /* ustat / fusers */
+    }
+    memset(&native, 0, sizeof(native));
+    rc = kern_uname(&native);
+    if (rc != 0) {
+        return rc;
+    }
+    memset(&out, 0, sizeof(out));
+    strlcpy(out.sysname, "Xenix", sizeof(out.sysname));
+    strlcpy(out.nodename, native.nodename, sizeof(out.nodename));
+    strlcpy(out.release, "2.3", sizeof(out.release));
+    strlcpy(out.version, "2", sizeof(out.version));
+    strlcpy(out.machine, "i386", sizeof(out.machine));
+    if (x386_span(f->a[0], sizeof(out)) != 0 ||
+        copyout(&out, (void *)(uintptr_t)f->a[0], sizeof(out)) != 0) {
+        return -EFAULT;
+    }
+    return 0;
+}
+
+/* A NULL-terminated array of 32-bit pointers to strings. */
+static int x386_copy_vector(uint32_t addr, char ***out, size_t *slots_out) {
+    char **vec;
+    size_t n = 0, i;
+
+    *out = NULL;
+    *slots_out = 0;
+    if (addr == 0) {
+        return 0;
+    }
+    for (;;) {
+        uint32_t p;
+
+        if (n >= X286_MAX_VEC) {
+            return -E2BIG;
+        }
+        if (x386_span(addr + (uint32_t)n * 4U, 4) != 0 ||
+            copyin((const void *)(uintptr_t)(addr + (uint32_t)n * 4U), &p,
+                   sizeof(p)) != 0) {
+            return -EFAULT;
+        }
+        if (p == 0) {
+            break;
+        }
+        n++;
+    }
+    vec = kmalloc((n + 1U) * sizeof(char *));
+    if (!vec) {
+        return -ENOMEM;
+    }
+    memset(vec, 0, (n + 1U) * sizeof(char *));
+    for (i = 0; i < n; i++) {
+        uint32_t p = 0;
+        int rc = copyin((const void *)(uintptr_t)(addr + (uint32_t)i * 4U),
+                        &p, sizeof(p)) != 0 ? -EFAULT
+                                            : x386_string(p, &vec[i]);
+
+        if (rc != 0) {
+            x286_free_vector(vec, n + 1U);
+            return rc;
+        }
+    }
+    *out = vec;
+    *slots_out = n + 1U;
+    return 0;
+}
+
+static int64_t x386_sys_execve(struct x386_frame *f) {
+    char *path = NULL;
+    char **argv = NULL, **envp = NULL;
+    size_t argv_slots = 0, envp_slots = 0;
+    int rc = x386_string(f->a[0], &path);
+
+    if (rc != 0) {
+        return rc;
+    }
+    rc = x386_copy_vector(f->a[1], &argv, &argv_slots);
+    if (rc == 0) {
+        rc = x386_copy_vector(f->a[2], &envp, &envp_slots);
+    }
+    if (rc == 0) {
+        rc = kern_execve(path, argv, envp);
+    }
+    x286_free_vector(argv, argv_slots);
+    x286_free_vector(envp, envp_slots);
+    x286_free_string(path);
+    return rc;
+}
+
+static int64_t x386_sys_exec(struct x386_frame *f) {
+    /* exec(path, argv), from before there was an environment to pass. */
+    struct x386_frame local = *f;
+
+    local.a[2] = 0;
+    return x386_sys_execve(&local);
+}
+
+/*
+ * signal(2), and the System V.3 calls that share its number.
+ *
+ * The stub hands over more than its arguments: EDX holds the address of
+ * libc's return trampoline,
+ *
+ *     add   $4,%esp          ; drop the signal number
+ *     lcall $0xf,$0          ; and return from the signal
+ *
+ * which is where a handler has to return to.  It is kept per signal, in the
+ * slot the Linux personality uses for the same purpose (sa_restorer).
+ */
+static uint32_t x386_native_handler(uint32_t h, int *flags) {
+    *flags = 0;
+    if (h == X286_SIG_DFL) {
+        return (uint32_t)(uintptr_t)SIG_DFL;
+    }
+    if (h == X286_SIG_IGN) {
+        return (uint32_t)(uintptr_t)SIG_IGN;
+    }
+    return h;
+}
+
+static int64_t x386_sys_signal(struct x386_frame *f) {
+    uint32_t variant = f->a[0] & ~X386_SIGNO_MASK;
+    int sig = x286_signo((uint16_t)(f->a[0] & X386_SIGNO_MASK));
+    struct sigaction act, old;
+    uint32_t bit, handler;
+    int flags, rc;
+
+    if (sig < 0) {
+        return sig;
+    }
+    bit = 1U << (sig - 1);
+
+    switch (variant) {
+    case X386_SIG_HOLD:
+        return kern_sigprocmask(X386_MASK_BLOCK, &bit, NULL);
+    case X386_SIG_RELSE:
+        return kern_sigprocmask(X386_MASK_UNBLOCK, &bit, NULL);
+    case X386_SIG_PAUSE: {
+        uint32_t mask = 0;
+
+        (void)kern_sigprocmask(X386_MASK_BLOCK, NULL, &mask);
+        mask &= ~bit;
+        return kern_sigsuspend(&mask);
+    }
+    case X386_SIG_IGNORE:
+        memset(&act, 0, sizeof(act));
+        act.sa_handler = (void *)SIG_IGN;
+        return kern_sigaction(sig, &act, NULL);
+    case 0:
+    case X386_SIG_SET:
+        break;
+    default:
+        return -EINVAL;
+    }
+
+    memset(&act, 0, sizeof(act));
+    memset(&old, 0, sizeof(old));
+    if (variant == X386_SIG_SET && f->a[1] == X386_SIG_HOLDVAL) {
+        /* sigset(sig, SIG_HOLD): block it, leave the disposition. */
+        rc = kern_sigaction(sig, NULL, &old);
+        if (rc == 0) {
+            rc = kern_sigprocmask(X386_MASK_BLOCK, &bit, NULL);
+        }
+    } else {
+        act.sa_handler = (void *)(uintptr_t)x386_native_handler(f->a[1],
+                                                                &flags);
+        /* signal(): the disposition reverts as the handler is entered.
+         * sigset(): it stays, and the signal is held while it runs. */
+        if (variant == 0 && f->a[1] > X286_SIG_IGN) {
+            act.sa_flags = SA_RESETHAND | SA_NODEFER;
+        }
+        rc = kern_sigaction(sig, &act, &old);
+        if (rc == 0 && current_process) {
+            current_process->linux_sig_restorer[sig - 1] =
+                (void *)(uintptr_t)f->regs->edx;
+        }
+    }
+    if (rc != 0) {
+        return rc;
+    }
+
+    handler = (uint32_t)(uintptr_t)old.sa_handler;
+    if (handler == (uint32_t)(uintptr_t)SIG_DFL) {
+        return X286_SIG_DFL;
+    }
+    if (handler == (uint32_t)(uintptr_t)SIG_IGN) {
+        return X286_SIG_IGN;
+    }
+    return (int64_t)handler;
+}
+
+/* ---- call 40, the Xenix multiplexer ---------------------------------- */
+
+static int64_t x386_xsys_rdchk(struct x386_frame *f) {
+    struct pollfd pfd;
+    int rc;
+
+    memset(&pfd, 0, sizeof(pfd));
+    pfd.fd = (int)f->a[0];
+    pfd.events = POLLIN;
+    rc = kern_poll(&pfd, 1, 0);
+    if (rc < 0) {
+        return rc;
+    }
+    return (rc > 0 && (pfd.revents & (POLLIN | POLLHUP))) ? 1 : 0;
+}
+
+static int64_t x386_xsys_chsize(struct x386_frame *f) {
+    return sys_ftruncate((int)f->a[0], f->a[1], 0);
+}
+
+static int64_t x386_xsys_ftime(struct x386_frame *f) {
+    struct x286_timeb out;
+    struct timeval tv;
+    int rc = kern_gettimeofday(&tv, NULL);
+
+    if (rc != 0) {
+        return rc;
+    }
+    memset(&out, 0, sizeof(out));
+    out.time = (int32_t)tv.tv_sec;
+    out.millitm = (uint16_t)(tv.tv_usec / 1000);
+    if (x386_span(f->a[0], sizeof(out)) != 0 ||
+        copyout(&out, (void *)(uintptr_t)f->a[0], sizeof(out)) != 0) {
+        return -EFAULT;
+    }
+    return 0;
+}
+
+static int64_t x386_sys_xenix(struct x386_frame *f) {
+    switch (f->sub) {
+    case X286_XSYS_rdchk:
+        return x386_xsys_rdchk(f);
+    case X286_XSYS_chsize:
+        return x386_xsys_chsize(f);
+    case X286_XSYS_ftime:
+        return x386_xsys_ftime(f);
+    default:
+        return -EINVAL;
+    }
+}
+
+typedef int64_t (*x386_callfn)(struct x386_frame *);
+
+static const x386_callfn x386_calls[X286_CALL_MAX] = {
+    [X286_SYS_exit]    = x386_sys_exit,
+    [X286_SYS_fork]    = x386_sys_fork,
+    [X286_SYS_read]    = x386_sys_read,
+    [X286_SYS_write]   = x386_sys_write,
+    [X286_SYS_open]    = x386_sys_open,
+    [X286_SYS_close]   = x386_sys_close,
+    [X286_SYS_wait]    = x386_sys_wait,
+    [X286_SYS_creat]   = x386_sys_creat,
+    [X286_SYS_link]    = x386_sys_link,
+    [X286_SYS_unlink]  = x386_sys_unlink,
+    [X286_SYS_exec]    = x386_sys_exec,
+    [X286_SYS_chdir]   = x386_sys_chdir,
+    [X286_SYS_time]    = x386_sys_time,
+    [X286_SYS_mknod]   = x386_sys_mknod,
+    [X286_SYS_chmod]   = x386_sys_chmod,
+    [X286_SYS_chown]   = x386_sys_chown,
+    [X286_SYS_brk]     = x386_sys_brk,
+    [X286_SYS_stat]    = x386_sys_stat,
+    [X286_SYS_lseek]   = x386_sys_lseek,
+    [X286_SYS_getpid]  = x386_sys_getpid,
+    [X286_SYS_setuid]  = x386_sys_setuid,
+    [X286_SYS_getuid]  = x386_sys_getuid,
+    [X286_SYS_alarm]   = x386_sys_alarm,
+    [X286_SYS_fstat]   = x386_sys_fstat,
+    [X286_SYS_pause]   = x386_sys_pause,
+    [X286_SYS_access]  = x386_sys_access,
+    [X286_SYS_nice]    = x386_sys_nice,
+    [X286_SYS_sync]    = x386_sys_sync,
+    [X286_SYS_kill]    = x386_sys_kill,
+    [X286_SYS_setpgrp] = x386_sys_setpgrp,
+    [X286_SYS_xenix]   = x386_sys_xenix,
+    [X286_SYS_dup]     = x386_sys_dup,
+    [X286_SYS_pipe]    = x386_sys_pipe,
+    [X286_SYS_times]   = x386_sys_times,
+    [X286_SYS_setgid]  = x386_sys_setgid,
+    [X286_SYS_getgid]  = x386_sys_getgid,
+    [X286_SYS_signal]  = x386_sys_signal,
+    [X286_SYS_ioctl]   = x386_sys_ioctl,
+    [X286_SYS_utssys]  = x386_sys_utssys,
+    [X286_SYS_execve]  = x386_sys_execve,
+    [X286_SYS_umask]   = x386_sys_umask,
+    [X286_SYS_chroot]  = x386_sys_chroot,
+    [X286_SYS_fcntl]   = x386_sys_fcntl,
+    [X286_SYS_ulimit]  = x386_sys_ulimit,
+};
+
+static int x386_syscall(registers_t *regs) {
+    struct x386_frame f;
+    uintptr_t linear_sp;
+    x386_callfn fn;
+    void *saved_syscall_regs;
+    int64_t ret;
+
+    memset(&f, 0, sizeof(f));
+    f.regs = regs;
+    f.nr   = regs->eax & 0xFFU;
+    f.sub  = (regs->eax >> 8) & 0xFFU;
+
+    /* The arguments are the caller's, above the stub's return address. */
+    if (xenix_seg_to_linear((uint16_t)regs->ss, regs->useresp,
+                            &linear_sp) == 0 &&
+        linear_sp < USER32_VA_END - sizeof(uint32_t) * 7U) {
+        unsigned int i;
+
+        for (i = 0; i < 6U; i++) {
+            if (copyin((const void *)(linear_sp + (i + 1U) * sizeof(uint32_t)),
+                       &f.a[i], sizeof(uint32_t)) != 0) {
+                break;
+            }
+        }
+    }
+
+    if (current_thread && current_thread->proc == current_process) {
+        current_thread->syscall_num = f.nr;
+    }
+
+    /* Step past the lcall before dispatching: fork copies this frame into
+     * the child, and execve does not come back to fix it up. */
+    regs->eip += XENIX_LCALL_LEN;
+
+    /* fork finds the frame to clone through syscall_regs, which only the
+     * native entry path sets. */
+    saved_syscall_regs = current_thread ? current_thread->syscall_regs : NULL;
+    if (current_thread) {
+        current_thread->syscall_regs = regs;
+    }
+
+    fn = (f.nr < X286_CALL_MAX) ? x386_calls[f.nr] : NULL;
+    ret = fn ? fn(&f) : -EINVAL;
+
+    if (current_thread) {
+        current_thread->syscall_regs = saved_syscall_regs;
+    }
+
+    if (xenix_trace_enabled()) {
+        char buf[160];
+        const char *name = x286_call_name((uint16_t)f.nr);
+        int pid = current_process ? (int)current_process->pid : -1;
+
+        if (f.nr == X286_SYS_xenix) {
+            const char *sub = x286_xenix_name((uint16_t)f.sub);
+
+            snprintf(buf, sizeof(buf),
+                     "XENIX: [%d] xenix.%s/%u(%#x, %#x, %#x) = %lld%s\n", pid,
+                     sub ? sub : "?", f.sub, f.a[0], f.a[1], f.a[2],
+                     (long long)(ret < 0 ? ret : (int64_t)(uint32_t)ret),
+                     fn ? "" : " [unimplemented]");
+        } else {
+            snprintf(buf, sizeof(buf),
+                     "XENIX: [%d] %s/%u(%#x, %#x, %#x) = %lld%s\n", pid,
+                     name ? name : "sys", f.nr, f.a[0], f.a[1], f.a[2],
+                     (long long)(ret < 0 ? ret : (int64_t)(uint32_t)ret),
+                     fn ? "" : " [unimplemented]");
+        }
+        kprint(buf);
+    }
+
+    /* Carry and an errno, or the result in EAX with its second half, if it
+     * has one, in EDX. */
+    if (ret < 0) {
+        regs->eax = (uint32_t)(-ret);
+        regs->eflags |= XENIX_EFLAGS_CF;
+    } else {
+        regs->eax = (uint32_t)ret;
+        regs->edx = (uint32_t)((uint64_t)ret >> 32);
+        regs->eflags &= ~XENIX_EFLAGS_CF;
+    }
+    return 1;
+}
+
+/*
+ * Signal delivery.  The handler is entered as handler(signo) with libc's
+ * trampoline for a return address, and below that -- where the trampoline's
+ * `lcall $0xf,$0` finds it at the top of the stack -- what x386_sigreturn
+ * needs to put the interrupted program back:
+ *
+ *      ESP+0   trampoline
+ *      ESP+4   signo
+ *      ESP+8   struct x386_sigcontext
+ *
+ * The context is this kernel's own business: libc never looks inside it.
+ */
+struct x386_sigcontext {
+    uint32_t magic;
+    uint32_t eip, eflags, esp;
+    uint32_t eax, ecx, edx, ebx, ebp, esi, edi;
+    uint32_t mask;
+};
+#define X386_SIGCTX_MAGIC  0x58334753U   /* "SG3X" */
+/* The flags a program may set for itself: CF PF AF ZF SF TF DF OF. */
+#define X386_EFLAGS_USER   0x00000DD5U
+
+struct x386_sigframe {
+    uint32_t ret;
+    uint32_t signo;
+    struct x386_sigcontext ctx;
+};
+
+static void x386_sendsig(void *handler, int sig, uint32_t mask, uint32_t flags,
+                         void *regs_ptr) {
+    registers_t *regs = (registers_t *)regs_ptr;
+    struct x386_sigframe frame;
+    uint32_t tramp = 0;
+    uint32_t sp;
+
+    (void)flags;
+    if (!regs || !current_process) {
+        return;
+    }
+    if (sig >= 1 && sig <= NSIG) {
+        tramp = (uint32_t)(uintptr_t)
+                current_process->linux_sig_restorer[sig - 1];
+    }
+    /* No trampoline means no way back out of the handler. */
+    if (tramp == 0) {
+        sigexit(current_process, SIGILL);
+        return;
+    }
+
+    memset(&frame, 0, sizeof(frame));
+    frame.ret = tramp;
+    frame.signo = (uint32_t)x286_native_to_xenix_sig(sig);
+    frame.ctx.magic = X386_SIGCTX_MAGIC;
+    frame.ctx.eip = regs->eip;
+    frame.ctx.eflags = regs->eflags;
+    frame.ctx.esp = regs->useresp;
+    frame.ctx.eax = regs->eax;
+    frame.ctx.ecx = regs->ecx;
+    frame.ctx.edx = regs->edx;
+    frame.ctx.ebx = regs->ebx;
+    frame.ctx.ebp = regs->ebp;
+    frame.ctx.esi = regs->esi;
+    frame.ctx.edi = regs->edi;
+    frame.ctx.mask = mask;
+
+    sp = (regs->useresp - (uint32_t)sizeof(frame)) & ~3U;
+    if (x386_span(sp, sizeof(frame)) != 0 ||
+        copyout(&frame, (void *)(uintptr_t)sp, sizeof(frame)) != 0) {
+        sigexit(current_process, SIGSEGV);
+        return;
+    }
+
+    regs->useresp = sp;
+    regs->eip = (uint32_t)(uintptr_t)handler;
+    regs->eflags &= ~0x00000400U;   /* DF clear on entry to C */
+}
+
+static int x386_sigreturn(registers_t *regs) {
+    struct x386_sigcontext ctx;
+
+    if (x386_span(regs->useresp, sizeof(ctx)) != 0 ||
+        copyin((const void *)(uintptr_t)regs->useresp, &ctx,
+               sizeof(ctx)) != 0 ||
+        ctx.magic != X386_SIGCTX_MAGIC) {
+        sigexit(current_process, SIGSEGV);
+        return 1;
+    }
+    regs->eip = ctx.eip;
+    regs->useresp = ctx.esp;
+    regs->eflags = (regs->eflags & ~X386_EFLAGS_USER) |
+                   (ctx.eflags & X386_EFLAGS_USER);
+    regs->eax = ctx.eax;
+    regs->ecx = ctx.ecx;
+    regs->edx = ctx.edx;
+    regs->ebx = ctx.ebx;
+    regs->ebp = ctx.ebp;
+    regs->esi = ctx.esi;
+    regs->edi = ctx.edi;
+    (void)kern_sigprocmask(X386_MASK_SET, &ctx.mask, NULL);
+    return 1;
+}
+
+/* =====================================================================
  * One personality.
  *
  * Named "Xenix" and rooted at /perso/xenix.  A Xenix/386 installation is a
@@ -2412,8 +3368,10 @@ static void x286_sendsig(void *handler, int sig, uint32_t mask, uint32_t flags,
  * the loader, the loader sets the process's bitness, and the hooks below
  * send a trap or a signal to the half that understands the process.
  *
- * syscall_table is the 386 half's.  The 16-bit half has no table: its calls
- * arrive as `int $5` faults and x286_handle_trap decodes them itself.
+ * Neither half is driven by syscall_table: Xenix calls arrive as faults
+ * (`lcall $7,$0`, `int $5`) and each half decodes its own.  The table is
+ * what an `int $0x80` from a Xenix process would be dispatched through,
+ * which no Xenix program issues.
  */
 static int xenix_is_16bit(void) {
     return current_process && current_process->bitness == BITNESS_16;
@@ -2426,16 +3384,13 @@ static int xenix_handle_trap(void *regs_ptr) {
     return xenix386_handle_trap(regs_ptr);
 }
 
-/* The 16-bit half builds its own frame, on a 16-bit stack.  A 386 program
- * takes the native i386 frame, as it did when the personality set no
- * sendsig hook at all. */
 static void xenix_sendsig(void *handler, int sig, uint32_t mask,
                           uint32_t flags, void *regs) {
     if (xenix_is_16bit()) {
         x286_sendsig(handler, sig, mask, flags, regs);
         return;
     }
-    sendsig(handler, sig, mask, flags, regs);
+    x386_sendsig(handler, sig, mask, flags, regs);
 }
 
 struct personality personality_xenix = {

@@ -582,7 +582,7 @@ int elks_load(int fd, const char *path, char *const argv[], char *const envp[]) 
     exec_cleanup_drain();
 
     jump_to_elks(hdr.entry, user_sp ? user_sp : 0xFFFE, layout.cs_sel, layout.ds_sel,
-                 layout.ss_sel, layout.es_sel, elks_stack_size);
+                 layout.ss_sel, layout.es_sel, elks_stack_size, 0);
     
     panic("jump_to_elks returned!");
     return 0;

@@ -7,16 +7,12 @@
  *
  * The 386 flavour:
  *
- * Loads a 386 segmented x.out image: each text/data segment is placed at its
- * own linear base and described by an LDT descriptor whose selector matches
- * the one baked into the binary (e.g. code selector 0x3f -> LDT entry 7).
- * Execution begins in 32-bit segmented mode at the entry segment; system
- * calls are trapped and emulated by the Xenix personality (perso_xenix.c),
- * which decodes the SysV/386 `lcall $7,$0` gate.
- *
- * Modeled on the ELKS a.out loader (elks_aout.c), which proves the segmented
- * LDT execution path; the difference here is 32-bit descriptors and a
- * data-driven segment table rather than a fixed 16-bit layout.
+ * Loads a 386 x.out image: every text and data segment goes at the address
+ * its segment table entry gives, and each gets an LDT descriptor under the
+ * selector the binary has baked in (code 0x3f -> LDT entry 7, data 0x47),
+ * all of them spanning the one flat address space.  System calls are
+ * trapped and emulated by the Xenix personality (perso_xenix.c), which
+ * decodes the SysV/386 `lcall $7,$0` gate.
  */
 
 #include <stdio.h>
@@ -49,12 +45,27 @@
 /* Linear placement of the loaded segments.  Distinct, page-aligned windows
  * inside the user vm_map; the segment descriptor base is set to these so the
  * binary's own segment-relative (0-based) offsets resolve correctly. */
-#define XOUT_TEXT_BASE   0x08000000U   /* 128 MiB */
-#define XOUT_DATA_BASE   0x10000000U   /* 256 MiB */
-
-/* Headroom appended to the data segment above bss for the initial stack and
- * early heap (brk grows the descriptor limit from here later). */
-#define XOUT_STACK_SIZE  0x00100000U   /* 1 MiB */
+/*
+ * A 386 x.out is linked for one flat address space.  Its code and data
+ * selectors are different LDT entries but both have base 0: the segment
+ * table gives each segment an address (xs_rbase), and the code refers to
+ * its data by that address, absolutely.  Every program on SCO's 2.2 and 2.3
+ * media has text at 0 and data at 0x01880000, with the stack growing down
+ * from the start of the data toward the text:
+ *
+ *     0x00000000   text
+ *         ...      (the stack grows down into this gap)
+ *     0x01880000   data, bss, then the break, growing up
+ *
+ * So the image is loaded exactly there, and a pointer the program hands
+ * the kernel is a real address.  (This loader used to give each segment a
+ * window of its own somewhere convenient and put its image at offset 0 of
+ * the window, reading xs_rbase as a size.  Text ran until its first
+ * reference to data, which found zeroes 24 MiB away from where it looked.)
+ */
+#define XOUT_STACK_SIZE  0x00100000U   /* 1 MiB, below the data */
+/* Where the stack goes if the data segment leaves no room below itself. */
+#define XOUT_STACK_FALLBACK_TOP 0x7FFF0000U
 
 #define XOUT_PAGE        0x1000U
 #define XOUT_PAGE_MASK   (XOUT_PAGE - 1U)
@@ -168,10 +179,12 @@ static void xout_fill_descriptor(gdt_entry_t *entry, uint32_t base,
  *   argv[argc-1] .. argv[0]
  *   argc                    <- initial ESP (segment-relative offset)
  *
- * Pointers are segment-relative offsets into DS (== SS).  Returns the initial
- * ESP as an offset within the data segment.
+ * `data_seg` is the stack region, `seg_size` bytes of it, and `va` the
+ * address the program sees its first byte at; the pointers stored, and the
+ * initial ESP returned, are addresses in the program's terms.
  */
 static uint32_t xout_build_stack(uint8_t *data_seg, uint32_t seg_size,
+                                 uint32_t va,
                                  char *const argv[], char *const envp[]) {
     int argc = 0, envc = 0;
     int i;
@@ -179,14 +192,12 @@ static uint32_t xout_build_stack(uint8_t *data_seg, uint32_t seg_size,
     uint32_t argv_off[64];
     uint32_t envp_off[64];
 
-    /* The vectors hold the caller's pointers; fetch them at its width. */
-    char *argp[64], *envpp[64];
+    /* Both vectors are the kernel's copies (see xout_any_load). */
+    char *const *argp = argv, *const *envpp = envp;
 
-    for (argc = 0; argc < 63 && argv; argc++) {
-        if (exec_vec_ptr(argv, argc, &argp[argc]) != 0 || !argp[argc]) break;
+    for (argc = 0; argc < 63 && argv && argv[argc]; argc++) {
     }
-    for (envc = 0; envc < 63 && envp; envc++) {
-        if (exec_vec_ptr(envp, envc, &envpp[envc]) != 0 || !envpp[envc]) break;
+    for (envc = 0; envc < 63 && envp && envp[envc]; envc++) {
     }
 
     /* Copy strings into the top of the segment, recording their offsets. */
@@ -194,13 +205,13 @@ static uint32_t xout_build_stack(uint8_t *data_seg, uint32_t seg_size,
         uint32_t len = (uint32_t)strlen(argp[i]) + 1U;
         strtop -= len;
         memcpy(data_seg + strtop, argp[i], len);
-        argv_off[i] = strtop;
+        argv_off[i] = va + strtop;
     }
     for (i = envc - 1; i >= 0; i--) {
         uint32_t len = (uint32_t)strlen(envpp[i]) + 1U;
         strtop -= len;
         memcpy(data_seg + strtop, envpp[i], len);
-        envp_off[i] = strtop;
+        envp_off[i] = va + strtop;
     }
 
     /* Align the vector area to 4 bytes below the strings. */
@@ -222,7 +233,7 @@ static uint32_t xout_build_stack(uint8_t *data_seg, uint32_t seg_size,
     }
     vec[w++] = 0;
 
-    return vec_off;
+    return va + vec_off;
 }
 
 static int xout_check_file(const char *path, const char *header, size_t len) {
@@ -246,6 +257,12 @@ static int xout_check_file(const char *path, const char *header, size_t len) {
     return 0;
 }
 
+static void x286_free_vector(char **vec);
+
+/*
+ * Load a 386 image.  `argv` and `envp` are kernel copies, which this frees
+ * if it succeeds -- in which case it does not return.
+ */
 static int xout_load(int fd, const char *path, char *const argv[],
                      char *const envp[]) {
     struct xexec hdr;
@@ -257,7 +274,7 @@ static int xout_load(int fd, const char *path, char *const argv[],
     pmap_t pmap;
     vm_map_t *map;
     uint16_t cs_sel = (uint16_t)0, ds_sel = 0;
-    uint32_t data_base = 0, data_total = 0;
+    uint32_t data_base = 0, data_end = 0, image_end = 0, stack_top = 0;
     uint32_t entry_off = 0, user_sp = 0;
     int rc;
     unsigned int s;
@@ -327,7 +344,8 @@ static int xout_load(int fd, const char *path, char *const argv[],
     }
     current_process->pmap = (struct pmap *)pmap;
     pmap_activate(pmap);
-    map = vm_map_create(pmap, 0x10000, USER32_VA_END);
+    /* Text is linked at address 0, so the map starts there. */
+    map = vm_map_create(pmap, 0, USER32_VA_END);
     if (!map) {
         return xout_fail(fd, -ENOMEM, "xout: vm_map_create failed");
     }
@@ -340,31 +358,42 @@ static int xout_load(int fd, const char *path, char *const argv[],
         unsigned int idx = XOUT_SEL_INDEX(seg->xs_seg);
         uint32_t vsize = (uint32_t)seg->xs_vsize;
         uint32_t psize = (uint32_t)seg->xs_psize;
-        uint32_t msize = (uint32_t)seg->xs_msize;
-        uint32_t base, total;
+        uint32_t base = (uint32_t)seg->xs_rbase;
+        uint32_t total;
         uint8_t prot;
         vm_object_t *obj = NULL;
         int is_code;
 
-        if (seg->xs_type == XS_TEXT) {
-            is_code = 1;
-            base = XOUT_TEXT_BASE;
-            total = XOUT_ROUND_UP(vsize > psize ? vsize : psize);
-            prot = VM_PROT_READ | VM_PROT_EXEC | VM_PROT_WRITE;
-        } else if (seg->xs_type == XS_DATA) {
-            uint32_t reserve = msize > vsize ? msize : vsize;
-            is_code = 0;
-            base = XOUT_DATA_BASE;
-            /* The data segment spans data + bss + a large heap reservation
-             * (xs_msize), plus stack headroom on top (SS == DS in the Xenix
-             * small model). */
-            total = XOUT_ROUND_UP(reserve) + XOUT_STACK_SIZE;
-            data_base = base;
-            data_total = total;
-            ds_sel = seg->xs_seg;
-            prot = VM_PROT_READ | VM_PROT_WRITE;
-        } else {
+        if (seg->xs_type != XS_TEXT && seg->xs_type != XS_DATA) {
             continue;   /* symbol / relocation segments: ignored for exec */
+        }
+        is_code = (seg->xs_type == XS_TEXT);
+        if (psize > vsize) {
+            vsize = psize;
+        }
+        total = XOUT_ROUND_UP(vsize);
+        if ((base & XOUT_PAGE_MASK) != 0 || total == 0 ||
+            base >= USER32_VA_END || total > USER32_VA_END - base) {
+            return xout_fail(fd, -ENOEXEC, "xout: segment address out of range");
+        }
+        if (is_code) {
+            if (base + total > image_end) {
+                image_end = base + total;
+            }
+            prot = VM_PROT_READ | VM_PROT_EXEC | VM_PROT_WRITE;
+        } else {
+            /* The first data segment is the one the stack sits under and
+             * the last is the one the break grows from. */
+            if (ds_sel == 0) {
+                ds_sel = seg->xs_seg;
+                data_base = base;
+            }
+            /* Not rounded: libc works the break out from its own `end`
+             * and asks for addresses just above it. */
+            if (base + vsize > data_end) {
+                data_end = base + vsize;
+            }
+            prot = VM_PROT_READ | VM_PROT_WRITE;
         }
 
         rc = xout_insert_region(map, base, total, prot, &obj);
@@ -373,27 +402,40 @@ static int xout_load(int fd, const char *path, char *const argv[],
         }
 
         /* Eagerly back the on-disk image so kern_read writes to present pages;
-         * the rest (bss / heap) demand-zeros. */
+         * the rest (bss) demand-zeros. */
         if (psize > 0) {
             rc = xout_populate(map, pmap, obj, base, 0, psize, prot);
             if (rc != 0) {
                 return xout_fail(fd, rc, "xout: failed to back segment image");
             }
         }
-        /* Eagerly back the stack tail so the startup stack image can be built
-         * through the user VA. */
-        if (!is_code && total > XOUT_STACK_SIZE) {
-            uint32_t tail = 0x10000U;   /* 64 KiB */
-            rc = xout_populate(map, pmap, obj, base, total - tail, tail, prot);
-            if (rc != 0) {
-                return xout_fail(fd, rc, "xout: failed to back stack tail");
-            }
-        }
 
         if (psize > 0 && seg->xs_filpos > 0) {
-            int got;
+            int got = 0;
+            uint32_t head = 0;
+
             kern_lseek(fd, seg->xs_filpos, 0);
-            got = kern_read(fd, (void *)(uintptr_t)base, (int)psize);
+            /* A segment at address 0 cannot be read straight in: the
+             * read path takes a null buffer for a missing one.  Its first
+             * page goes by way of a kernel buffer. */
+            if (base == 0) {
+                char *bounce = kmalloc(XOUT_PAGE);
+
+                if (!bounce) {
+                    return xout_fail(fd, -ENOMEM, "xout: out of memory");
+                }
+                head = psize < XOUT_PAGE ? psize : XOUT_PAGE;
+                got = kern_read(fd, bounce, (int)head);
+                if (got > 0) {
+                    memcpy((void *)(uintptr_t)base, bounce, (size_t)got);
+                }
+                kfree(bounce, XOUT_PAGE);
+            }
+            if (got >= 0 && (uint32_t)got == head && psize > head) {
+                int more = kern_read(fd, (void *)(uintptr_t)(base + head),
+                                     (int)(psize - head));
+                got = more < 0 ? more : got + more;
+            }
             if (got < 0) {
                 return xout_fail(fd, -EIO, "xout: read error on segment image");
             }
@@ -409,7 +451,9 @@ static int xout_load(int fd, const char *path, char *const argv[],
             }
         }
 
-        xout_fill_descriptor(&entries[idx], base, total, is_code);
+        /* Every segment's descriptor spans the whole address space from 0:
+         * the selectors differ, the addresses behind them do not. */
+        xout_fill_descriptor(&entries[idx], 0, USER32_VA_END, is_code);
 
         if (seg->xs_seg == ext.xe_eseg) {
             cs_sel = seg->xs_seg;
@@ -421,6 +465,30 @@ static int xout_load(int fd, const char *path, char *const argv[],
         return xout_fail(fd, -ENOEXEC, "xout: missing entry or data segment");
     }
 
+    /* --- the stack: below the data, or high up if there is no room --- */
+    if (data_base >= XOUT_STACK_SIZE &&
+        data_base - XOUT_STACK_SIZE >= image_end) {
+        stack_top = data_base;
+    } else {
+        stack_top = XOUT_STACK_FALLBACK_TOP;
+    }
+    {
+        vm_object_t *sobj = NULL;
+        uint32_t sbase = stack_top - XOUT_STACK_SIZE;
+        uint32_t tail = 0x10000U;   /* 64 KiB, enough for argv and envp */
+
+        rc = xout_insert_region(map, sbase, XOUT_STACK_SIZE,
+                                VM_PROT_READ | VM_PROT_WRITE, &sobj);
+        if (rc == 0) {
+            /* Backed now so the startup image can be written through it. */
+            rc = xout_populate(map, pmap, sobj, sbase, XOUT_STACK_SIZE - tail,
+                               tail, VM_PROT_READ | VM_PROT_WRITE);
+        }
+        if (rc != 0) {
+            return xout_fail(fd, rc, "xout: failed to map the stack");
+        }
+    }
+
     /* --- install the LDT --- */
     if (ldt_replace_process(current_process, entries, max_ldt_index + 1U) != 0) {
         return xout_fail(fd, -ENOMEM, "xout: ldt_replace_process failed");
@@ -430,8 +498,9 @@ static int xout_load(int fd, const char *path, char *const argv[],
     /* --- process state --- */
     current_process->perso_id = PERS_XENIX;
     current_process->bitness = BITNESS_32;
-    current_process->brk_start = XOUT_ROUND_UP((uint32_t)hdr.x_data +
-                                               (uint32_t)hdr.x_bss);
+    current_process->brk_start = data_end;
+    /* Caught signals revert to their defaults across exec. */
+    proc_exec_reset_signals();
     current_process->brk = current_process->brk_start;
     {
         const char *name = path ? path : "";
@@ -459,25 +528,19 @@ static int xout_load(int fd, const char *path, char *const argv[],
     arch_set_kernel_stack((uintptr_t)current_thread->kstack_top);
 
     /* What ps and /proc/<pid>/cmdline report: the new argv, not the argv
-     * snapshot and argv-region bounds inherited from the parent at fork.
-     * The vector still holds the caller's pointers, as xout_build_stack
-     * reads them below. */
-    {
-        char *cmd_argv[64];
-        int n;
-
-        for (n = 0; n < 63 && argv; n++) {
-            if (exec_vec_ptr(argv, n, &cmd_argv[n]) != 0 || !cmd_argv[n]) break;
-        }
-        cmd_argv[n] = NULL;
-        current_process->arg_start = 0;
-        current_process->arg_end = 0;
-        proc_capture_cmdline(current_process, cmd_argv);
-    }
+     * snapshot and argv-region bounds inherited from the parent at fork. */
+    current_process->arg_start = 0;
+    current_process->arg_end = 0;
+    proc_capture_cmdline(current_process, (char **)argv);
 
     /* --- initial stack (built directly in the data segment) --- */
-    user_sp = xout_build_stack((uint8_t *)(uintptr_t)data_base, data_total,
-                               argv, envp);
+    user_sp = xout_build_stack(
+        (uint8_t *)(uintptr_t)(stack_top - XOUT_STACK_SIZE), XOUT_STACK_SIZE,
+        stack_top - XOUT_STACK_SIZE, argv, envp);
+
+    /* Nothing below can fail, and control does not come back here. */
+    x286_free_vector((char **)argv);
+    x286_free_vector((char **)envp);
 
     proc_close_cloexec(current_process);
     kern_close(fd);
@@ -494,7 +557,10 @@ static int xout_load(int fd, const char *path, char *const argv[],
     pmap_activate((pmap_t)(uintptr_t)current_process->pmap);
     ldt_activate(current_process);
 
-    jump_to_elks(entry_off, user_sp, cs_sel, ds_sel, ds_sel, ds_sel, 0);
+    /* The program is told where its break is in EAX: crt0's first
+     * instruction stores it, and sbrk(2) counts up from there. */
+    jump_to_elks(entry_off, user_sp, cs_sel, ds_sel, ds_sel, ds_sel, 0,
+                 data_end);
 
     return 0;   /* not reached */
 }
@@ -1231,7 +1297,7 @@ static int x286_load(int fd, const char *path, char *const argv[],
     ldt_activate(current_process);
 
     jump_to_elks((uint32_t)hdr.x_entry, (uint32_t)user_sp, cs_sel, ds_sel,
-                 ds_sel, ds_sel, 0);
+                 ds_sel, ds_sel, 0, 0);
 
     return 0;   /* not reached */
 }
@@ -1264,7 +1330,27 @@ static int xout_any_load(int fd, const char *path, char *const argv[],
     if (x286_cpu_supported(hdr.x_cpu)) {
         return x286_load(fd, path, argv, envp);
     }
-    return xout_load(fd, path, argv, envp);
+
+    /*
+     * argv and envp point into the address space the loader is about to
+     * replace, so it works from copies.  It returns only on failure.
+     */
+    {
+        char **kargv = NULL, **kenvp = NULL;
+        int rc = x286_dup_vector(argv, &kargv);
+
+        if (rc == 0) {
+            rc = x286_dup_vector(envp, &kenvp);
+        }
+        if (rc != 0) {
+            x286_free_vector(kargv);
+            return xout_fail(fd, rc, "xout: cannot copy argv/envp");
+        }
+        rc = xout_load(fd, path, kargv, kenvp);
+        x286_free_vector(kargv);
+        x286_free_vector(kenvp);
+        return rc;
+    }
 }
 
 static struct exec_binary_handler xout_handler = {

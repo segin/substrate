@@ -359,11 +359,13 @@ jump_to_userspace:
 
 /*
  * void jump_to_elks(uint32_t entry, uint32_t stack, uint32_t cs,
- *                   uint32_t ds, uint32_t ss, uint32_t es, uint32_t dx_value)
+ *                   uint32_t ds, uint32_t ss, uint32_t es, uint32_t dx_value,
+ *                   uint32_t ax_value)
  *
  * The same for segmented programs, on the selectors given (LDT segments;
  * compatibility mode runs 16- and 32-bit code segments alike).
- * Arguments: %edi %esi %edx %ecx %r8d %r9d, dx_value on the stack.
+ * Arguments: %edi %esi %edx %ecx %r8d %r9d, then dx_value and ax_value on
+ * the stack.
  */
 .global jump_to_elks
 jump_to_elks:
@@ -386,7 +388,7 @@ jump_to_elks:
     movl %edi, %edi
     pushq %rdi                  /* EIP */
     movl %r11d, %edx            /* ELKS expects the stack size in DX */
-    xorl %eax, %eax
+    movl 56(%rsp), %eax         /* ax_value, above the five words pushed */
     xorl %ebx, %ebx
     xorl %ecx, %ecx
     xorl %esi, %esi

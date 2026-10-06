@@ -74,8 +74,10 @@ void jump_to_userspace(uint32_t entry, uint32_t stack, uint32_t ebx);
 /* Segmented (LDT) userspace entry: load the given CS/DS/SS/ES selectors and
  * IRET to CS:entry with SS:stack.  Used by the ELKS (16-bit) and x.out/Xenix
  * (32-bit) loaders, whose code/data live in per-process LDT segments rather
- * than the flat native selectors.  `dx_value` is left in %edx at entry. */
+ * than the flat native selectors.  `dx_value` and `ax_value` are left in
+ * %edx and %eax at entry; the other registers are zero. */
 void jump_to_elks(uint32_t entry, uint32_t stack, uint32_t cs, uint32_t ds,
-                  uint32_t ss, uint32_t es, uint32_t dx_value);
+                  uint32_t ss, uint32_t es, uint32_t dx_value,
+                  uint32_t ax_value);
 
 #endif

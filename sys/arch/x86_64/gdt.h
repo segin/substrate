@@ -111,8 +111,9 @@ void syscall_entry64(void);
 void syscall_msr_init(void);
 
 /* The same with the given selectors, for segmented programs; %edx =
- * dx_value at entry. */
+ * dx_value and %eax = ax_value at entry. */
 void jump_to_elks(uint32_t entry, uint32_t stack, uint32_t cs, uint32_t ds,
-                  uint32_t ss, uint32_t es, uint32_t dx_value);
+                  uint32_t ss, uint32_t es, uint32_t dx_value,
+                  uint32_t ax_value);
 
 #endif /* _ARCH_X86_64_GDT_H */

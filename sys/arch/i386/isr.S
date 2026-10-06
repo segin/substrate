@@ -332,7 +332,8 @@ jump_to_userspace:
     iret
 
 # void jump_to_elks(uint32_t entry_point, uint32_t user_stack, uint32_t cs,
-#                   uint32_t ds, uint32_t ss, uint32_t es, uint32_t stack_size)
+#                   uint32_t ds, uint32_t ss, uint32_t es, uint32_t stack_size,
+#                   uint32_t ax_value)
 .global jump_to_elks
 jump_to_elks:
     # [esp+4] = entry_point
@@ -369,8 +370,10 @@ jump_to_elks:
     push %eax           # User CS
     push %ecx           # User EIP
     
-    # Clear registers for ELKS entry convention?
-    xor %eax, %eax
+    # Registers at entry: %edx = stack_size, %eax = ax_value (the eighth
+    # argument, 20 bytes further up now that the frame is pushed), the
+    # rest zero.
+    mov 52(%esp), %eax
     xor %ebx, %ebx
     xor %ecx, %ecx
     mov %ebp, %edx

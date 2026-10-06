@@ -644,6 +644,10 @@ static int proc_fork_common(process_t *parent, void *stack, int is_vfork) {
     
     // Copy Signal Actions (POSIX: inherited on fork)
     memcpy(child_proc->sig_actions, parent->sig_actions, sizeof(parent->sig_actions));
+    /* The handlers' return trampolines go with them: without its own, an
+     * inherited handler has nowhere to return to. */
+    memcpy(child_proc->linux_sig_restorer, parent->linux_sig_restorer,
+           sizeof(parent->linux_sig_restorer));
     child_proc->sig_catch = parent->sig_catch;
     child_proc->sig_ignore = parent->sig_ignore;
     /* Resource limits are inherited across fork() -- every resource, since

@@ -41,7 +41,7 @@ separate roots, which that tree cannot be split across.
 | Half   | Programs       | Entry                | State                         |
 |--------|----------------|----------------------|-------------------------------|
 | 16-bit | 8086, 80286    | `int $5`             | Working                       |
-| 32-bit | 80386          | `lcall $7,$0`        | Loads; most programs fail yet |
+| 32-bit | 80386          | `lcall $7,$0`        | The shell and basic utilities |
 
 The personality is documented in `usr.man/man4/xenix.4`; the 16-bit
 executable format in `usr.man/man4/xout286.4`.

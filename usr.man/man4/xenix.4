@@ -26,6 +26,59 @@ selects the half of the personality that handles its traps and signals.
 .BR SCO-X/286 ,
 rooted at
 .IR /perso/xenix286s .)
+.SH THE 32-BIT HALF
+A Xenix/386 program is linked for one flat address space: text at address
+0, data at 0x01880000, and the stack growing down from the start of the
+data.  Its code and data selectors (0x3f and 0x47) are separate LDT entries
+with the same base, and the loader puts each segment at the address its
+segment table entry gives.  The program is told where its break is in
+.B EAX
+at entry.
+.PP
+A system call is
+.B "lcall $7,$0"
+with the number in
+.B EAX
+(the
+.B cxenix
+sub-function in
+.BR AH )
+and the arguments on the stack above the stub's return address.  Carry
+reports failure with the errno in
+.BR EAX .
+A second result is returned in
+.BR EDX :
+the parent's pid from
+.BR getpid ,
+the effective id from
+.BR getuid " and " getgid ,
+the status from
+.BR wait ,
+the write end from
+.BR pipe ,
+and from
+.B fork
+zero in the parent and non-zero in the child.
+.PP
+.B signal
+is given the address of libc's return trampoline in
+.BR EDX ,
+and a handler returns through it with
+.BR "lcall $0xf,$0" .
+The System V.3 variants that share the call number
+.RB ( sigset ", " sighold ", " sigrelse ", " sigignore ", " sigpause )
+are implemented.
+.PP
+The calls implemented are those of the 16-bit half less
+.BR mount ", " umount ", " stime ", " utime ", " acct
+and the Xenix
+.BR nap ", " locking
+and semaphore and shared-data calls; an unimplemented call fails with
+.BR EINVAL .
+The Bourne shell from both SCO Xenix 386 2.2.3 and 2.3.4 runs, with pipes,
+command substitution, redirection, traps, and children of either word
+size, as do
+.BR ls ", " id " and " uname .
 .PP
 The rest of this page describes the 16-bit half.
 .SH SYSTEM CALL INTERFACE
