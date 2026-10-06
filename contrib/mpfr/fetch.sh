@@ -21,13 +21,10 @@ cd "${BUILD_DIR}"
 
 if [ ! -f "${TARBALL}" ]; then
     [ "${1:-}" = "--no-network" ] && { echo "fetch.sh: tarball missing" >&2; exit 1; }
+    . "${HERE}/../substrate-fetch.sh"
     for u in "${URL}" "${URL_FALLBACK}"; do
         echo "==> Fetching ${u}"
-        if command -v curl >/dev/null 2>&1; then
-            curl -fSL --retry 3 --retry-delay 3 --retry-all-errors -o "${TARBALL}" "${u}" && break
-        else
-            wget -O "${TARBALL}" "${u}" && break
-        fi
+        substrate_fetch "${u}" "${TARBALL}" && break
     done
 fi
 [ -f "${TARBALL}" ] || { echo "fetch.sh: could not download ${TARBALL}" >&2; exit 1; }

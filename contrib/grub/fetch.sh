@@ -30,8 +30,9 @@ cd "${BUILD_DIR}"
 if [ ! -f "${TARBALL}" ]; then
     [ "${1:-}" = "--no-network" ] && { echo "fetch.sh: tarball missing" >&2; exit 1; }
     echo "==> Fetching ${URL}"
-    curl -sSLO --retry 3 --retry-delay 3 --retry-all-errors "${URL}"
-    curl -sSLO --retry 3 --retry-delay 3 --retry-all-errors "${SIG_URL}" || echo "fetch.sh: warning: signature not fetched" >&2
+    . "${HERE}/../substrate-fetch.sh"
+    substrate_fetch "${URL}" "${TARBALL}"
+    substrate_fetch "${SIG_URL}" "${TARBALL}.sig" || echo "fetch.sh: warning: signature not fetched" >&2
 fi
 
 echo "==> Verifying ${TARBALL}"

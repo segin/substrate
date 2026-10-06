@@ -26,13 +26,10 @@ fi
 
 if [ ! -f "${TARBALL}" ]; then
     [ "${1:-}" = "--no-network" ] && { echo "fetch.sh: tarball missing" >&2; exit 1; }
+    . "${HERE}/../substrate-fetch.sh"
     for u in "${URL}" "${URL_FALLBACK}"; do
         echo "==> Fetching ${u}"
-        if command -v curl >/dev/null 2>&1; then
-            curl -fSL --retry 3 --retry-delay 3 --retry-all-errors -o "${TARBALL}" "${u}" || continue
-        else
-            wget -O "${TARBALL}" "${u}" || continue
-        fi
+        substrate_fetch "${u}" "${TARBALL}" || continue
         # Accept the first source that actually serves the archive.
         echo "${SHA256}  ${TARBALL}" | sha256sum -c --status - && break
         echo "    (wrong content from ${u}, trying the next source)"
