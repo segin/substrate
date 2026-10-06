@@ -5,6 +5,7 @@
 #include <sys/stat.h>
 #include <sys/signal.h>
 #include <sys/utsname.h>
+#include <sys/socket.h>
 
 /* Forward declarations */
 struct thr_param;
@@ -55,6 +56,9 @@ int kern_mkdirat(int dirfd, const char *p, int m);
 int kern_stat(const char *path, struct stat *buf);
 int kern_lstat(const char *path, struct stat *buf);
 int kern_poll(struct pollfd *fds, unsigned int nfds, int timeout);
+/* Socket calls taking kernel buffers (net/af_unix.c). */
+int kern_connect(int fd, const struct sockaddr *addr, socklen_t addrlen);
+int kern_sockname(int fd, int peer, void *kaddr, socklen_t *len);
 int kern_fstat(int fd, struct stat *buf);
 int kern_ioctl(int fd, uint32_t request, void *arg);
 int kern_unlink(const char *path);

@@ -59,6 +59,7 @@
 #include <sys/poll.h>
 #include <sys/proc.h>
 #include <sys/ioctl.h>
+#include <sys/kern_syscalls.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/sysinfo.h>
@@ -1505,7 +1506,16 @@ int sys_connect(int fd, const struct sockaddr *uaddr, socklen_t addrlen) {
                          ? (socklen_t)sizeof(kbuf) : addrlen;
     memset(kbuf, 0, sizeof(kbuf));
     if (copyin(uaddr, kbuf, clen) != 0) return -EFAULT;
-    const struct sockaddr *addr = (const struct sockaddr *)kbuf;
+    return kern_connect(fd, (const struct sockaddr *)kbuf, addrlen);
+}
+
+/*
+ * connect(2) for a caller inside the kernel: `addr` is a kernel copy of
+ * the address, of at least min(addrlen, 128) bytes.
+ */
+int kern_connect(int fd, const struct sockaddr *addr, socklen_t addrlen) {
+    if (sock_fd_invalid(fd)) return -EBADF;
+    if (!addr || addrlen < 2) return -EINVAL;
     XFD("sys_connect ENTER pid=%d fd=%d family=%d",
         current_process ? (int)current_process->pid : -1,
         fd, addr->sa_family);
@@ -2796,6 +2806,40 @@ int sys_getpeername(int fd, struct sockaddr *uaddr, socklen_t *uaddrlen) {
     if (cpy > 0 && copyout(kaddr, uaddr, cpy) != 0) return -EFAULT;
     if (copyout(&outlen, uaddrlen, sizeof(outlen)) != 0) return -EFAULT;
     return 0;
+}
+
+/*
+ * getsockname(2) and getpeername(2) (`peer` non-zero) for a caller inside
+ * the kernel: `kaddr` is a kernel buffer of *len bytes, and *len comes back
+ * as the length of the address, which may be more than was room for.
+ */
+int kern_sockname(int fd, int peer, void *kaddr, socklen_t *len) {
+    if (sock_fd_invalid(fd)) return -EBADF;
+    if (!kaddr || !len) return -EINVAL;
+    socklen_t cap = *len;
+    socklen_t outlen = cap;
+
+    memset(kaddr, 0, cap);
+    int rc = peer ? afinet_getpeername(fd, kaddr, &outlen)
+                  : afinet_getsockname(fd, kaddr, &outlen);
+    if (rc == -ENOTSOCK) {
+        afunix_sock_t *s = afunix_from_fd(fd);
+        if (!s) return -ENOTSOCK;
+        if (peer && !s->peer) return -ENOTCONN;
+        const afunix_sock_t *named = peer ? s->peer : s;
+        int plen = named->pathlen;
+        if (plen > (int)cap - 2) plen = (int)cap - 2;
+        if (plen < 0) plen = 0;
+        if (cap >= 2) {
+            struct sockaddr_un *un = (struct sockaddr_un *)kaddr;
+            un->sun_family = AF_UNIX;
+            if (plen > 0) memcpy(un->sun_path, named->path, plen);
+        }
+        outlen = 2 + plen;
+        rc = 0;
+    }
+    if (rc == 0) *len = outlen;
+    return rc;
 }
 
 int sys_setsockopt(int fd, int level, int optname,
