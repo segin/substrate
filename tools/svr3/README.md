@@ -10,6 +10,7 @@ or test.
 | tool | what it does |
 | --- | --- |
 | `build-image.sh` | build a populated `/perso/svr3` ext2 image from AT&T UNIX System V/386 Release 3 floppies and tapes |
+| `build-image-isc.sh` | the same from the floppies of INTERACTIVE UNIX System V/386 (Release 3.2 with a great deal added) |
 | `imd2raw.py` | turn an ImageDisk (`.IMD`) floppy image into a raw sector image |
 
 `build-image.sh` also uses `../svr4/s5fs.py` for the boot floppies, which
@@ -45,3 +46,18 @@ A package carries `Name`, `Files`, `Install` and `Remove` for
 The binaries are i386 COFF.  The system ones are linked against the static
 shared library `/shlib/libc_s`; `/bin/sh` is not, and makes its system
 calls itself with `lcall $7,$0`.
+
+## INTERACTIVE UNIX
+
+`build-image-isc.sh` was written against INTERACTIVE UNIX 3.0 as the Tenox
+archive has it (`interactive-unix30.tar.lz`, 49 raw 1.2 MB floppy images).
+Every floppy is an `s5` filesystem.  The Install floppy is a small root
+with the shell and `/shlib/libc_s`; the others hold subsets, each a
+directory with `new/` -- its files at the paths they install to, every one
+`compress`ed as `NAME.Z` -- and `install/link`, a script of renames
+(restoring names too long for the floppy) and hard links.  The files are
+expanded and placed and those `mv` and `ln` lines carried out; no other
+install script is run, and the archive's serial number is not used.
+
+    bsdtar xf interactive-unix30.tar.lz
+    tools/svr3/build-image-isc.sh -m interactive-unix-30 -o iu30.img
