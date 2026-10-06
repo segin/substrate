@@ -2158,8 +2158,11 @@ static size_t kcmsg_align_to(void) {
  * rounded up.  A controllen larger than this is rejected rather than
  * touched, which is fine — substrate has no other cmsg types. */
 #define AFUNIX_CMSG_MAX  256
-/* Cap on iov entries pulled into the kernel per sendmsg/recvmsg. */
-#define AFUNIX_IOV_MAX   64
+/* Cap on iov entries pulled into the kernel per sendmsg/recvmsg: IOV_MAX,
+ * as <limits.h> gives it to programs.  It was 64, and a program that
+ * believed the header -- tmux hands sendmsg every message it has queued,
+ * up to IOV_MAX of them -- had the call refused with EMSGSIZE. */
+#define AFUNIX_IOV_MAX   1024
 
 /* sendmsg with SCM_RIGHTS support — parse the cmsghdr area for any
  * SCM_RIGHTS records, bump file_t refcount for each fd, queue the
@@ -2227,21 +2230,56 @@ ssize_t sock_dgram_sendv(int fd, const struct iovec *kiov, int iovcnt,
     return r;
 }
 
+/*
+ * The kernel's copy of a message's iovec array: *kiov_out, to be released
+ * with msg_iov_free().  The array is on the heap because it can be IOV_MAX
+ * entries long, which is more than a kernel stack should hold.
+ */
+static int msg_iov_copyin(const struct msghdr *msg, struct iovec **kiov_out) {
+    struct iovec *kiov;
+    size_t n = msg->msg_iovlen > 0 ? (size_t)msg->msg_iovlen : 1U;
+
+    *kiov_out = NULL;
+    if (msg->msg_iovlen < 0 || msg->msg_iovlen > AFUNIX_IOV_MAX)
+        return -EMSGSIZE;
+    if (msg->msg_iovlen > 0 && !msg->msg_iov)
+        return -EFAULT;
+    kiov = kmalloc(n * sizeof(*kiov));
+    if (!kiov)
+        return -ENOMEM;
+    if (msg->msg_iovlen > 0 &&
+        iovec_copyin(msg->msg_iov, kiov, msg->msg_iovlen) != 0) {
+        kfree(kiov, n * sizeof(*kiov));
+        return -EFAULT;
+    }
+    *kiov_out = kiov;
+    return 0;
+}
+
+static void msg_iov_free(const struct msghdr *msg, struct iovec *kiov) {
+    size_t n = msg->msg_iovlen > 0 ? (size_t)msg->msg_iovlen : 1U;
+
+    if (kiov)
+        kfree(kiov, n * sizeof(*kiov));
+}
+
+static ssize_t sendmsg_kiov(int fd, struct msghdr *msg, struct iovec *kiov,
+                            int flags);
+
 ssize_t sys_sendmsg(int fd, const struct msghdr *umsg, int flags) {
     if (!umsg) return -EFAULT;
     struct msghdr kmsg;
     if (msghdr_copyin(umsg, &kmsg) != 0) return -EFAULT;
-    struct msghdr *msg = &kmsg;
+    struct iovec *kiov;
+    int rc = msg_iov_copyin(&kmsg, &kiov);
+    if (rc != 0) return rc;
+    ssize_t r = sendmsg_kiov(fd, &kmsg, kiov, flags);
+    msg_iov_free(&kmsg, kiov);
+    return r;
+}
 
-    if (msg->msg_iovlen < 0 || msg->msg_iovlen > AFUNIX_IOV_MAX)
-        return -EMSGSIZE;
-    struct iovec kiov[AFUNIX_IOV_MAX];
-    if (msg->msg_iovlen > 0) {
-        if (!msg->msg_iov) return -EFAULT;
-        if (iovec_copyin(msg->msg_iov, kiov, msg->msg_iovlen) != 0)
-            return -EFAULT;
-    }
-
+static ssize_t sendmsg_kiov(int fd, struct msghdr *msg, struct iovec *kiov,
+                            int flags) {
     afunix_sock_t *s = afunix_from_fd(fd);
 
     /*
@@ -2394,6 +2432,9 @@ cmsg_done:
  * if the AF_UNIX socket has pending fds in rx_fdq, install them into
  * the calling process's fd table and emit a SCM_RIGHTS cmsg into
  * msg_control. */
+static ssize_t recvmsg_kiov(int fd, struct msghdr *umsg, struct msghdr *msg,
+                            struct iovec *kiov, int flags);
+
 ssize_t sys_recvmsg(int fd, struct msghdr *umsg, int flags) {
     if (!umsg) return -EFAULT;
     /* Pull the msghdr into the kernel before touching any of its fields.
@@ -2401,20 +2442,21 @@ ssize_t sys_recvmsg(int fd, struct msghdr *umsg, int flags) {
      * helpers they are handed (sys_recvfrom, copyout) validate them. */
     struct msghdr kmsg;
     if (msghdr_copyin(umsg, &kmsg) != 0) return -EFAULT;
-    struct msghdr *msg = &kmsg;
+    struct iovec *kiov;
+    int rc = msg_iov_copyin(&kmsg, &kiov);
+    if (rc != 0) return rc;
+    ssize_t r = recvmsg_kiov(fd, umsg, &kmsg, kiov, flags);
+    msg_iov_free(&kmsg, kiov);
+    return r;
+}
+
+static ssize_t recvmsg_kiov(int fd, struct msghdr *umsg, struct msghdr *msg,
+                            struct iovec *kiov, int flags) {
     /* The results go back into the process's msghdr: address its fields in
      * the layout the process uses (<sys/compat32.h>). */
     struct msghdr_out uout;
     msghdr_out_fields(umsg, &uout);
 
-    if (msg->msg_iovlen < 0 || msg->msg_iovlen > AFUNIX_IOV_MAX)
-        return -EMSGSIZE;
-    struct iovec kiov[AFUNIX_IOV_MAX];
-    if (msg->msg_iovlen > 0) {
-        if (!msg->msg_iov) return -EFAULT;
-        if (iovec_copyin(msg->msg_iov, kiov, msg->msg_iovlen) != 0)
-            return -EFAULT;
-    }
     msg->msg_flags = 0;
 
     ssize_t total = 0;
