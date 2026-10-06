@@ -30,9 +30,21 @@
 # the container is substrate's business, only the file contents are
 # System V's.  Mount it at /perso/svr4.
 #
-# WHAT THE MEDIA LOOKS LIKE
-#   Three kinds of floppy, told apart by content, not by name:
+#   Or                 the factory tape of Dell UNIX SVR4 Issue 2.2, the
+#                      DellSVR4/Factory directory of DellSVR4v22.tar.lz
+#                      from tenox.pdp-11.net/os/dellunix/ (see README.md):
 #
+#                          bsdtar xf DellSVR4v22.tar.lz
+#                          tools/svr4/build-image.sh -m DellSVR4/Factory \
+#                              -o dellunix.img -s 640 -l dellunix
+#
+# WHAT THE MEDIA LOOKS LIKE
+#   Every regular file in MEDIA_DIR is a volume.  Three kinds of floppy,
+#   told apart by content, not by name, and a fourth that a tape has:
+#
+#   base system archive   a cpio archive, from byte 0, of a whole root
+#                         (Dell's file1).  Laid down after the Foundation
+#                         Set and before the packages.
 #   s5 filesystems        the boot floppies.  Several first boot floppies
 #                         ship, one per disk controller, differing only in
 #                         drivers; the first is used.  With the second boot
@@ -93,8 +105,8 @@ if [ -z "$MEDIA" ] || [ -z "$OUT" ]; then
     echo "repository; run it with --help for what to obtain." >&2
     exit 2
 fi
-if [ ! -d "$MEDIA" ] || ! ls "$MEDIA"/*.img >/dev/null 2>&1; then
-    echo "build-image.sh: no *.img floppy images in '$MEDIA'." >&2
+if [ ! -d "$MEDIA" ] || [ -z "$(find "$MEDIA" -maxdepth 1 -type f -print -quit)" ]; then
+    echo "build-image.sh: no media files in '$MEDIA'." >&2
     echo "Run with --help for what to provide." >&2
     exit 1
 fi
@@ -115,15 +127,21 @@ magic() {
     dd if="$1" bs=1 skip="$2" count="$3" 2>/dev/null | tr -d '\0'
 }
 
-# Sort the floppies into the three kinds.
-s5=() fnd=() pkg=()
-for f in "$MEDIA"/*.img; do
+# Sort the volumes into their kinds.
+s5=() fnd=() pkg=() base=()
+for f in "$MEDIA"/*; do
+    [ -f "$f" ] || continue
     if [ "$(magic "$f" 0 20)" = "# PaCkAgE DaTaStReAm" ]; then
         pkg+=("$f")
     elif [ "$(magic "$f" 15360 6)" = "070701" ]; then
         fnd+=("$f")
     elif [ "$(magic "$f" 0 6)" = "070701" ]; then
-        pkg+=("$f")                     # a package's second or later floppy
+        # A package's second or later floppy, or a whole root.
+        case $(python3 "$HERE/svr4cpio.py" list "$f" | sed -n '1s/.* //p') in
+            reloc*|root*|pkginfo|pkgmap|install*) pkg+=("$f") ;;
+            .|dev|dev/*|etc|etc/*|sbin|sbin/*|usr|usr/*|.[a-z]*) base+=("$f") ;;
+            *) echo "    (skipping $(basename "$f"): a cpio archive that is not a root or a package)" ;;
+        esac
     elif python3 "$HERE/s5fs.py" ls "$f" / >/dev/null 2>&1; then
         s5+=("$f")
     else
@@ -155,19 +173,30 @@ for f in "${fnd[@]}"; do
     python3 "$HERE/svr4cpio.py" extract "$f" "$ROOT"
 done
 
+if [ ${#base[@]} -gt 0 ]; then
+    echo "==> base system archives (${#base[@]})"
+    for f in "${base[@]}"; do
+        printf '    %-58s ' "$(basename "$f" | cut -c1-58)"
+        python3 "$HERE/svr4cpio.py" extract "$f" "$ROOT"
+    done
+fi
+
 if [ "$BASE_ONLY" = 0 ]; then
-    echo "==> packages (${#pkg[@]} floppies)"
+    echo "==> packages (${#pkg[@]} volumes)"
     for f in "${pkg[@]}"; do
         P=$STAGE/pkg
         rm -rf "$P"
         python3 "$HERE/svr4cpio.py" extract "$f" "$P" >/dev/null
         n=0
-        # pkgmap's links: "part l class path=target", s for symbolic.
-        if [ -f "$P/pkgmap" ]; then
+        # pkgmap's links: "part l class path=target", s for symbolic.  A
+        # datastream of several packages has a copy of each one's pkgmap
+        # under the package's name.
+        for map in "$P/pkgmap" "$P"/*/pkgmap; do
+            [ -f "$map" ] || continue
             awk '($2 == "l" || $2 == "s") && $4 ~ /=/ && $4 !~ /\$/ {
                      split($4, a, "="); print $2, a[1], a[2] }' \
-                "$P/pkgmap" >> "$LINKS"
-        fi
+                "$map" >> "$LINKS"
+        done
         # reloc/, root/, reloc.N/ and root.N/ hold the files; a path
         # component that is a $PARAMETER is one pkgadd would have asked
         # about, and those files are left out.
@@ -220,6 +249,15 @@ while read -r kind path target; do
     made=$((made + 1))
 done < "$LINKS"
 echo "    $made link(s)"
+
+# A symbolic link to an absolute path would name substrate's own file, not
+# the one under /perso/svr4.
+while IFS= read -r -d '' l; do
+    t=$(readlink "$l")
+    case $t in
+        /*) ln -sfn "$(realpath -m --relative-to="$(dirname "$l")" "$ROOT$t")" "$l" ;;
+    esac
+done < <(find "$ROOT" -type l -print0)
 
 echo "==> expanding compress(1)ed files"
 z=0

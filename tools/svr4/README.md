@@ -48,3 +48,30 @@ ownership are not applied.
         -m "Intel Unix System V R4.0 V2.0 (1990) (5.25-1.2mb)" -o svr4.img
 
 About 4900 files in a 256 MB image.  `--base-only` leaves the packages out.
+
+## Dell UNIX System V Release 4
+
+`build-image.sh` also takes the factory tape of Dell UNIX SVR4 Issue 2.2
+(1992), as archived by Tenox (`tenox.pdp-11.net/os/dellunix/`,
+`DellSVR4v22.tar.lz`), which is the same kinds of volume in tape-sized
+files rather than on floppies:
+
+- `file1`: one `newc` cpio archive of the whole installed root, starting at
+  byte 0 -- a fourth kind, a *base system archive*, told from a package's
+  later floppy by its first member not being a package's.  A file with
+  several links has its data on the last of its names only; `svr4cpio.py`
+  links the others to it.
+- `file2`, `file5`: package datastreams holding several packages each (TeX,
+  emacs, the GNU tools, mail, manual pages, X11; FrameMaker).  Each
+  package's `pkgmap` is also in the stream under the package's name.
+- `boot.img`, `system.img`, `file3`: s5 filesystems, the installation's own
+  tools; laid down first and replaced by the base system.
+- `file4`: `compress`ed cpio of source code; not a root, skipped.
+
+      bsdtar xf DellSVR4v22.tar.lz
+      tools/svr4/build-image.sh -m DellSVR4/Factory -o dellunix.img -s 640 -l dellunix
+
+About 15100 files in a 640 MB image.  The binaries are ELF with
+`/usr/lib/libc.so.1` as interpreter and run under the SVR4 personality as
+Intel's do.  FrameMaker is not installed: its files go to a directory the
+package asks for (`$INSTALL`), and such paths are left out.
