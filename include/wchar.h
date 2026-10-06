@@ -49,6 +49,15 @@ typedef struct FILE FILE;
 
 #define WEOF ((wint_t)-1)
 
+/* The limits of wchar_t, which C puts here as well as in <stdint.h>.  The
+ * compiler knows them, whichever way it was told to make wchar_t. */
+#ifndef WCHAR_MAX
+#define WCHAR_MAX __WCHAR_MAX__
+#endif
+#ifndef WCHAR_MIN
+#define WCHAR_MIN __WCHAR_MIN__
+#endif
+
 /* struct tm forward decl — we only take a pointer, no need to pull in
  * <time.h> just for that.  */
 struct tm;

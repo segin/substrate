@@ -122,6 +122,17 @@ typedef uint64_t uint_fast64_t;
 #define SIG_ATOMIC_MIN INT32_MIN
 #define SIG_ATOMIC_MAX INT32_MAX
 
+/* Limits of wchar_t and wint_t, as the compiler makes them.  <wchar.h>
+ * defines the first pair too. */
+#ifndef WCHAR_MAX
+#define WCHAR_MAX __WCHAR_MAX__
+#endif
+#ifndef WCHAR_MIN
+#define WCHAR_MIN __WCHAR_MIN__
+#endif
+#define WINT_MIN __WINT_MIN__
+#define WINT_MAX __WINT_MAX__
+
 /* Constants for minimum-width integer constant expressions */
 /*
  * C11 7.20.4: each expansion must be usable in #if, so no casts -- a cast is
