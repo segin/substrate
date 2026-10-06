@@ -307,13 +307,27 @@ static int vfs_path_is_substrate_ld_config(const char *path) {
     return 0;
 }
 
+/*
+ * The prefix to try first for the absolute `path` under personality `p`,
+ * or NULL for none: the personality has no tree of its own, or the path is
+ * in /dev and the personality's devices are the kernel's (native_dev).
+ */
+static const char *perso_prefix_for(const struct personality *p,
+                                    const char *path) {
+    if (!p || !p->path_prefix || !p->path_prefix[0]) return NULL;
+    if (p->native_dev && strncmp(path, "/dev", 4) == 0 &&
+        (path[4] == '\0' || path[4] == '/'))
+        return NULL;
+    return p->path_prefix;
+}
+
 static fs_node_t *vfs_perso_lookup_flags(fs_node_t *root, fs_node_t *cwd,
                                          const char *path, int lookup_flags) {
     if (!path) return NULL;
 
     if (path[0] == '/' && current_process) {
         struct personality *p = perso_lookup(current_process->perso_id);
-        int foreign = (p && p->path_prefix && p->path_prefix[0]);
+        int foreign = perso_prefix_for(p, path) != NULL;
         if (foreign) {
             char prefixed[320];
             snprintf(prefixed, sizeof(prefixed), "%s%s", p->path_prefix, path);
@@ -2222,7 +2236,7 @@ int kern_lstat(const char *path, struct stat *buf) {
     fs_node_t *node = NULL;
     if (path[0] == '/' && current_process) {
         struct personality *pp = perso_lookup(current_process->perso_id);
-        if (pp && pp->path_prefix && pp->path_prefix[0]) {
+        if (perso_prefix_for(pp, path)) {
             char prefixed[320];
             snprintf(prefixed, sizeof(prefixed), "%s%s", pp->path_prefix, path);
             node = vfs_lookup_lstat_ref(root, prefixed);
@@ -3147,7 +3161,7 @@ int kern_readlinkat(int dirfd, const char *pathname, char *buf, size_t bufsiz) {
     node = NULL;
     if (pathname[0] == '/' && current_process) {
         struct personality *pp = perso_lookup(current_process->perso_id);
-        if (pp && pp->path_prefix && pp->path_prefix[0]) {
+        if (perso_prefix_for(pp, pathname)) {
             char prefixed[320];
             snprintf(prefixed, sizeof(prefixed), "%s%s", pp->path_prefix, pathname);
             node = vfs_lookup_lstat(root, prefixed);

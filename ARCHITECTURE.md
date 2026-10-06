@@ -201,7 +201,11 @@ exchange messages with them -- so `svr4/svr4_streams.c` provides those
 devices (`/dev/tcp`, `/dev/ticotsord`, the X transports `/dev/spx` and
 `/dev/X/server.N`) over substrate's sockets for both releases, which is
 what lets their X clients reach the X server
-(`docs/specs/sysv_streams_transport.md`). State of each
+(`docs/specs/sysv_streams_transport.md`). `svr4/svr4_tty.c` answers System
+V's way of taking a pseudo-terminal (`/dev/ptmx`, `ptsname`, the `ptem` and
+`ldterm` modules) and the 4.3BSD terminal requests from substrate's own
+ptys, and both personalities see the kernel's `/dev` rather than their
+tree's (`docs/specs/sysv_pseudo_terminals.md`). State of each
 personality: `README.md`; specifications:
 `docs/specs/personality_targets.md`, `docs/specs/personality_elks.md`,
 `usr.man/man4/xenix.4`, `usr.man/man4/xout286.4`, `usr.man/man4/svr4.4`,

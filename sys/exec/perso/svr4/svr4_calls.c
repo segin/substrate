@@ -20,6 +20,7 @@
 #include <exec/perso/svr4/svr4.h>
 #include <exec/perso/svr4/svr4_streams.h>
 #include <exec/perso/svr4/svr4_syscalls.h>
+#include <exec/perso/svr4/svr4_tty.h>
 #include <exec/perso/sysv386.h>
 #include <kern/cmdline.h>
 #include <pm/pm.h>
@@ -341,15 +342,28 @@ static int64_t svr4_sys_xstat(struct sysv386_frame *f) {
     }
     rc = f->nr == SVR4_SYS_lxstat ? kern_lstat(path, &native)
                                   : kern_stat(path, &native);
+    if (rc == 0) {
+        sysv386_stat_dev_fd(path, &native);
+    }
     sysv386_free_string(path);
     return rc != 0 ? rc : svr4_put_xstat(&native, f->a[2]);
 }
 
 static int64_t svr4_sys_fxstat(struct sysv386_frame *f) {
     struct stat native;
+    uint32_t rdev;
     int rc = kern_fstat((int)f->a[1], &native);
 
-    return rc != 0 ? rc : svr4_put_xstat(&native, f->a[2]);
+    if (rc != 0) {
+        return rc;
+    }
+    /* A pseudo-terminal's master is known by its minor number: ptsname()
+     * names the slave /dev/pts/N from it. */
+    if (svr4_pty_rdev((int)f->a[1], &rdev)) {
+        native.st_rdev = rdev;
+        native.st_mode = (native.st_mode & ~(mode_t)S_IFMT) | S_IFCHR;
+    }
+    return svr4_put_xstat(&native, f->a[2]);
 }
 
 /* A path and an integer. */
@@ -539,7 +553,7 @@ static int64_t svr4_sys_ioctl(struct sysv386_frame *f, int *known) {
     int32_t pgrp;
     int rc;
 
-    if (svr4_streams_ioctl(f, &result)) {
+    if (svr4_streams_ioctl(f, &result) || svr4_tty_ioctl(f, &result)) {
         return result;
     }
     if (f->a[1] >= SYSV_TCGETA && f->a[1] <= SYSV_TCFLSH) {

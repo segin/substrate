@@ -129,6 +129,16 @@ INTERACTIVE UNIX's X clients reach a local display
 .RB ( :0 )
 and not a remote one, which they look up through a name server of their
 own.
+.IP \(bu
+.I /dev
+is substrate's own, and the 4.3BSD terminal requests
+.RB ( TIOCGETP
+and the rest) are carried out on any terminal, as
+.BR svr4 (4)
+describes;
+.B xterm
+runs a shell on a pseudo-terminal it finds as
+.IR /dev/ptyp0 .
 .SH VERIFIED
 Against AT&T UNIX System V/386 Release 3.2.3 and INTERACTIVE UNIX 3.0, on
 the i386 and x86_64 kernels: the statically linked

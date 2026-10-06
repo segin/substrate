@@ -57,11 +57,19 @@ server at `/tmp/.X11-unix/XN` or over TCP:
 With an X server running, `DISPLAY=:0`, `unix:0` and `host:0` all work for
 Dell UNIX's clients, and `:0` and `unix:0` for INTERACTIVE UNIX's
 (`xclock`, `xeyes`, `xlogo`, `xcalc`, `xload`, `xdpyinfo`, `xlsclients`,
-`xwininfo`). It is the client's half only -- nothing can listen -- and two
-things do not work yet: INTERACTIVE's clients over TCP, which first ask a
-name-server daemon of their own for the address, and `xterm`, which needs
-System V pseudo-terminals. `docs/specs/sysv_streams_transport.md` has the
-detail.
+`xwininfo`, and `xterm` with a shell in it). It is the client's half only
+-- nothing can listen -- and one thing does not work yet: INTERACTIVE's
+clients over TCP, which first ask a name-server daemon of their own for
+the address. `docs/specs/sysv_streams_transport.md` has the detail.
+
+`xterm` needs a pseudo-terminal, and System V has its own kind: the master
+is `/dev/ptmx`, the slave's name comes from `ptsname()`, `grantpt()` and
+`unlockpt()` prepare it, and it becomes a terminal when the `ptem` and
+`ldterm` STREAMS modules are pushed onto it. Substrate's pseudo-terminals
+already have those names, so the personalities answer the System V
+requests from them (`sys/exec/perso/svr4/svr4_tty.c`), along with the
+4.3BSD terminal requests (`sgttyb` and its relatives) that programs of the
+period still make. `docs/specs/sysv_pseudo_terminals.md` has the detail.
 
 ## The 64-bit port
 

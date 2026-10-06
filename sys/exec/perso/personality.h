@@ -61,6 +61,12 @@ struct personality {
      * The ELF loader prepends this to PT_INTERP paths and library lookups.
      * NULL means use the root filesystem directly (native personality). */
     const char *path_prefix;
+    /* Non-zero if /dev is the kernel's for this personality whatever its
+     * tree holds there: the prefix is not tried for /dev or anything
+     * below it.  A tree built from distribution media has a /dev of empty
+     * directories, which would otherwise be what a program lists when it
+     * looks for its terminal's name. */
+    int native_dev;
 
     /* Signal hooks */
     void (*sendsig)(void *handler, int sig, uint32_t mask, uint32_t flags, void *regs);

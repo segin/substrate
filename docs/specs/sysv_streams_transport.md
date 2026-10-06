@@ -195,7 +195,8 @@ Against substrate's `Xfbdev`, on both the i386 and the x86-64 kernel:
 
 `xdpyinfo`, `xlsclients`, `xwininfo`, `xclock`, `xeyes`, `xlogo`, `xcalc`
 and (INTERACTIVE) `xload` were run; several at once draw and update
-correctly.
+correctly.  `xterm` runs a shell on both; what it needs besides a
+connection is in `sysv_pseudo_terminals.md`.
 
 ## What does not
 
@@ -207,9 +208,6 @@ correctly.
   that turns a host name into a transport address, and speaks a protocol
   of its own to it.  That daemon is not emulated.  (TLI on `/dev/tcp` is:
   a program that calls `t_connect()` with an address it has is served.)
-- **`xterm`.**  It needs System V pseudo-terminals -- `/dev/ptmx`, with
-  the `ptem` and `ldterm` modules pushed -- which the personalities do not
-  have.  It fails before it reaches the X server.
 - **Datagrams.**  `/dev/udp` and `/dev/ticlts` open, but `T_UNITDATA_REQ`
   is refused.
 - **Explicit binds.**  A `T_BIND_REQ` is acknowledged with the address it

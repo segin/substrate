@@ -29,6 +29,7 @@ bool test_svr3_personality_table(void) {
     if (personality_svr3.handle_trap != svr3_handle_trap) return false;
     if (personality_svr3.sendsig != svr3_sendsig) return false;
     if (strcmp(personality_svr3.path_prefix, "/perso/svr3") != 0) return false;
+    if (!personality_svr3.native_dev) return false;
     return true;
 }
 
@@ -52,5 +53,7 @@ bool test_svr4_personality_table(void) {
     if (personality_svr4.handle_trap != svr4_handle_trap) return false;
     if (personality_svr4.sendsig != svr4_sendsig) return false;
     if (strcmp(personality_svr4.path_prefix, "/perso/svr4") != 0) return false;
+    /* Its /dev is the kernel's: a vendor's tree has none worth listing. */
+    if (!personality_svr4.native_dev) return false;
     return true;
 }

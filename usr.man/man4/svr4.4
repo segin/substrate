@@ -157,6 +157,50 @@ Each is a connection to substrate's X server at
 .IR /tmp/.X11-unix/X N.
 .I docs/specs/sysv_streams_transport.md
 describes all of it.
+.SS Terminals
+.I /dev
+is substrate's own for this personality, whatever the tree under
+.I /perso/svr4
+has there, so a program that lists it to find its terminal's name sees the
+terminals there are.
+.PP
+A pseudo-terminal is taken the System V way: the master is
+.IR /dev/ptmx ,
+.BR ptsname ()
+asks it
+.RB ( I_STR ,
+.BR ISPTM )
+and names the slave
+.IR /dev/pts/ N
+from the minor number
+.B fstat
+reports,
+.BR grantpt ()
+runs the system's own
+.IR /usr/lib/pt_chmod ,
+and
+.BR unlockpt ()
+is
+.BR I_STR ,
+.BR UNLKPT .
+The slave is a terminal already; pushing
+.BR ptem ,
+.B ldterm
+or
+.B ttcompat
+onto it succeeds and changes nothing.
+The requests of
+.B ttcompat
+\(em
+.BR TIOCGETP ,
+.BR TIOCSETP ,
+.BR TIOCGETC ,
+.BR TIOCGLTC ,
+.B TIOCLGET
+and the rest of the 4.3BSD terminal interface \(em are carried out on any
+terminal.
+.I docs/specs/sysv_pseudo_terminals.md
+describes all of it.
 .SS Signals
 A handler is entered as
 .IR handler ( signo ", " siginfo ", " ucontext )
@@ -192,6 +236,9 @@ Its system calls.
 .TP
 .I sys/exec/perso/svr4/svr4_streams.c
 The STREAMS transport providers and the X transports.
+.TP
+.I sys/exec/perso/svr4/svr4_tty.c
+Pseudo-terminals and the terminal modules.
 .TP
 .I sys/exec/perso/perso_sysv386.c
 The entry convention, signal frame and calls it has in common with
