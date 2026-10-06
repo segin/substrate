@@ -215,6 +215,15 @@ if [ "$BASE_ONLY" = 0 ]; then
             grep " $t/" "$P/.modes" 2>/dev/null | grep -v '\$' |
                 sed "s# $t/# #" >> "$ROOT/.modes" || true
         done
+        # pkgmap has the mode a file is installed with, which the archive
+        # need not: "part f|d class path mode owner group ...".  It comes
+        # after the archive's, so it is the one applied.
+        for map in "$P/pkgmap" "$P"/*/pkgmap; do
+            [ -f "$map" ] || continue
+            awk '($2 == "f" || $2 == "d" || $2 == "e" || $2 == "v" || $2 == "x") &&
+                 $5 ~ /^[0-7]+$/ && $4 !~ /\$/ {
+                     sub(/^\//, "", $4); print $5, $4 }' "$map" >> "$ROOT/.modes"
+        done
         printf '    %-58s %d file(s)\n' "$(basename "$f" | cut -c1-58)" "$n"
     done
 fi
