@@ -230,7 +230,11 @@ esac
 if [ -n "$nested" ]; then
     LAYER_SED="$HERE/.bin64/layer-$PKG.sed"
     {
-        echo 's#/\(build\|fetch\)\.sh#/.\164.sh#g'
+        # One rule per name, with no back-reference: "\1" followed by "64"
+        # is "\164", and where sh is dash its echo prints that as the
+        # octal escape it is -- "t" -- so the rule wrote ".t.sh".
+        echo 's#/build\.sh#/.build64.sh#g'
+        echo 's#/fetch\.sh#/.fetch64.sh#g'
         for s in $nested; do
             b=$(basename "$s" .sh)
             case "$b" in build|fetch) continue ;; esac
