@@ -82,6 +82,37 @@ utilities run and each system's C compiler compiles and links a program
 that runs.  Documented in `usr.man/man4/svr3.4`.
 
 State of Release 4: the vendor's static `/sbin/sh`, and `ksh` and the basic utilities
-dynamically linked against the vendor's own `libc.so.1`, run.  Documented
+dynamically linked against the vendor's own `libc.so.1`, run -- Intel's
+Release 4.0 Version 2 and Dell UNIX SVR4 Issue 2.2 alike (`tools/svr4`
+builds an image from either).  Documented
 in `usr.man/man4/svr4.4`.  Solaris x86 is the same family with a different
 interpreter (`/usr/lib/ld.so.1`) and is not wired up.
+
+## SunOS 4 (Sun386i)
+
+`SunOS`, id 129 (`PERS_SUNOS`), rooted at `/perso/sunos`.  Not running
+yet; this is what it has to be, from the SunOS 4.0.1 distribution
+(`tools/sunos` builds a root from the floppies).
+
+SunOS 4 is 4.3BSD with Sun's additions, and the personality is a BSD one:
+its own call table, `sigvec` signals, BSD `stat`, `getdirentries` and
+`getdents`, `mmap`.  It shares nothing with the AT&T personalities but a
+file format.  A Sun386i program is an i386 COFF file, not the a.out the
+other Suns use -- `aout.c`'s check for a Sun386 machine id never matches
+anything the system ships -- so `exec/formats/coff.c` has to tell a
+Sun386i program from a Release 3 one and hand it to this personality, and
+never to `SVR3`:
+
+- **Layout.**  Optional-header magic 0413, text at 0x10d0 for file offset
+  0xd0, data on the next page boundary -- not Release 3's 4 MiB gap, and
+  no `.lib` section.
+- **Dynamic linking** is SunOS's.  The kernel loads the program alone;
+  the program's startup code opens `/lib/ld.so` and maps it, and `ld.so`
+  maps `/usr/lib/libc.so.2.0`.  Such a program has 0x800 set in `f_flags`.
+  So the loader needs no interpreter support, and `open`, `read`, `mmap`
+  (of a file, at a fixed address, private) and `close` have to be right
+  before anything prints.
+- **System calls** are `int $0xff`: the call number in `%eax`, the
+  arguments on the stack as for a C call, carry set and `errno` in `%eax`
+  on failure.  `perso_sunos.c` today is a table for a register-argument
+  entry that no Sun386i program uses.
