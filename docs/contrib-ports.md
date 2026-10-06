@@ -162,6 +162,14 @@ on the 64-bit kernel at all.
 - **less 692** (`contrib/less/`) — system `$PAGER` (also wired as
   `more`).  Configured with `--with-regex=posix` against libregex;
   tinfo/pcre auto-detection is suppressed via `ac_cv_lib_*=no`.
+- **libevent 2.1.13** (`contrib/libevent/`) — the event loop library.  No
+  patches; the `poll(2)` backend.
+- **tmux 3.7c** (`contrib/tmux/`) — the terminal multiplexer, on libevent
+  and ncurses.  No patches: it needed `WCHAR_MAX` in the headers,
+  `sendmsg`/`recvmsg` to take the `IOV_MAX` iovecs `<limits.h>` promises,
+  and terminal job control to leave alone a terminal that is not the
+  caller's controlling one (the server reads its client's).  Works on the
+  32-bit userland; the native 64-bit build is not yet reliable.
 - **sudo 1.9.17p2** (`contrib/sudo/`) — `sudo`, `sudoedit`, `visudo`,
   `sudoreplay`, `cvtsudoers`.  No patches.  Authenticates against
   `/etc/shadow` (no PAM); the sudoers policy is built into the binary
