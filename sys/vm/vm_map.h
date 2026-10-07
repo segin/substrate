@@ -66,6 +66,9 @@ typedef struct vm_map {
 // API
 void vm_map_init(vm_map_t *map, pmap_t pmap, uintptr_t min, uintptr_t max);
 vm_map_t *vm_map_create(pmap_t pmap, uintptr_t min, uintptr_t max);
+/* Add [start, end), below the map's lowest address, to what can be mapped
+ * with vm_map_insert(); 0 or -1. */
+int vm_map_add_low_range(vm_map_t *map, uintptr_t start, uintptr_t end);
 void vm_map_lock(vm_map_t *map);
 void vm_map_unlock(vm_map_t *map);
 void vm_map_lock_read(vm_map_t *map);

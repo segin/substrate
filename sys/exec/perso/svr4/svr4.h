@@ -12,6 +12,10 @@
 #define SVR4_INTERP_PATH  "/usr/lib/libc.so.1"
 #define SVR4_ROOT_PREFIX  "/perso/svr4/"
 
+/* How much of the bottom of the address space a Release 4 process can
+ * read, as zeroes: one page (see the ELF loader). */
+#define SVR4_PAGE_ZERO_SIZE 4096U
+
 /* Emulate the `lcall` a #GP/#NP was raised by; 0 if it was not one. */
 int svr4_handle_trap(void *regs);
 

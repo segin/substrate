@@ -675,6 +675,32 @@ void vm_map_init(vm_map_t *map, pmap_t pmap, uintptr_t min, uintptr_t max) {
     }
 }
 
+/*
+ * Make [start, end), which lies wholly below the map's lowest address,
+ * part of the map, so that something can be mapped there with
+ * vm_map_insert().  Only that range becomes free: the addresses between
+ * it and the old bottom stay outside the map, and nothing is ever placed
+ * there by a search for free space.  0, or -1 if the range is not below
+ * the map or there is no memory for the bookkeeping.
+ */
+int vm_map_add_low_range(vm_map_t *map, uintptr_t start, uintptr_t end) {
+    int rc;
+
+    if (!map || start >= end || end > map->min_offset) {
+        return -1;
+    }
+    vm_map_lock(map);
+    rc = hole_insert(map, start, end);
+    if (rc == 0) {
+        map->min_offset = start;
+        if (map->header) {
+            map->header->start = map->header->end = start;
+        }
+    }
+    vm_map_unlock(map);
+    return rc == 0 ? 0 : -1;
+}
+
 vm_map_t *vm_map_create(pmap_t pmap, uintptr_t min, uintptr_t max) {
     vm_map_t *map = kmalloc(sizeof(vm_map_t));
     if (!map) return NULL;

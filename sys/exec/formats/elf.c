@@ -13,6 +13,7 @@
 #include <vm/vm_page.h>
 #include <vm/vm_commit.h>
 #include <vm/phys_mem.h>
+#include <exec/formats/aout.h>
 #include <exec/perso/personality.h>
 #include <exec/perso/linux/linux_exec.h>
 #include <exec/perso/svr4/svr4.h>
@@ -1804,6 +1805,23 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
         }
         if (is_svr4) {
             current_process->perso_id = PERS_SVR4;
+            /*
+             * Address 0 can be read, and reads as zeroes.  Release 4 on
+             * the 386 lets a program look through a null pointer, and
+             * programs do: the C compiler's code generator and the
+             * assembler shipped with it both test a field of a structure
+             * they may have no pointer to, and go on when it is not what
+             * they were looking for.  (Linux's emulation of Release 4 maps
+             * the page for the same reason -- MMAP_PAGE_ZERO.)  It cannot
+             * be written.
+             */
+            if ((vm_map_add_low_range(new_vm_map, 0, SVR4_PAGE_ZERO_SIZE) != 0 ||
+                 aout_map_region(new_pmap, new_vm_map, 0, 0,
+                                 SVR4_PAGE_ZERO_SIZE, VM_PROT_READ, -1,
+                                 0) != 0) &&
+                elf_debug_enabled()) {
+                kprint("execve: SVR4: could not map page zero\n");
+            }
         }
     }
 
