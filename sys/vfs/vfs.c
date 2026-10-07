@@ -1189,9 +1189,18 @@ fs_node_t *vfs_lookup_lstat(fs_node_t *root, const char *path) {
 
         if (component[0] == '.' && component[1] == '.' && component[2] == '\0') {
             /* Same process-root containment as vfs_lookup(); lstat must not
-             * be a way around the jail either. */
-            if (root && current &&
-                current->inode == root->inode && current->mp == root->mp) {
+             * be a way around the jail either.  And the same boundary: the
+             * process root, not `root`, which for a relative path is only
+             * where the lookup started.  Pinned there, ".." was ".", so
+             * lstat("../x") looked for x in the current directory -- `ls
+             * ../x` failed from anywhere, and a program finding its own
+             * path by walking ".." saw every directory as its own parent. */
+            fs_node_t *proc_root = (current_process && current_process->root_node)
+                                 ? (fs_node_t *)current_process->root_node
+                                 : fs_root;
+            if (proc_root && current &&
+                current->inode == proc_root->inode &&
+                current->mp == proc_root->mp) {
                 if (*p == '/') p++;
                 continue;
             }
