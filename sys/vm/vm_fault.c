@@ -167,6 +167,30 @@ static void page_zero(uintptr_t pa) {
     pmap_zero_page(pa);
 }
 
+int vm_map_write_permitted(vm_map_t *map, uintptr_t va) {
+    vm_map_entry_t *cur;
+    int ok = 1;
+
+    if (!map || !map->header) {
+        return 1;
+    }
+    /* A walk of the entry list, as vm_fault() does it: vm_map_lookup()
+     * splays the tree, which changes it, and this holds the lock only for
+     * reading. */
+    vm_map_lock_read(map);
+    for (cur = map->header->next; cur != map->header; cur = cur->next) {
+        if (va < cur->start) {
+            break;
+        }
+        if (va < cur->end) {
+            ok = (cur->protection & VM_PROT_WRITE) != 0;
+            break;
+        }
+    }
+    vm_map_unlock_read(map);
+    return ok;
+}
+
 int vm_fault(vm_map_t *map, uintptr_t va, uint8_t prot) {
     int vf_cpu = vm_fault_cpu();
     uint32_t vf_pc = vm_fault_pending_pc[vf_cpu];
@@ -236,26 +260,22 @@ int vm_fault(vm_map_t *map, uintptr_t va, uint8_t prot) {
     if ((entry->max_protection & prot) != prot) {
         goto out;
     }
+    /*
+     * And by the CURRENT protection.  A write to a mapping that does not
+     * allow writing is a fault, private or not: that is what
+     * mprotect(PROT_READ) is for, and what a read-only mapping is.
+     *
+     * This used to let a write to a private mapping through whenever the
+     * maximum protection allowed one, copying the page, because the dynamic
+     * linker relocated read-only segments that way and every dynamic binary
+     * died in it otherwise.  ld.so has since been made to mprotect(2) a
+     * segment before it writes to it and back afterwards (ld_load.c), as a
+     * dynamic linker must anywhere else, so nothing needs the exception --
+     * and with it, read-only memory was read-only only until somebody
+     * wrote to it.
+     */
     if ((entry->protection & prot) != prot) {
-        /*
-         * The CURRENT protection does not grant this access.  For a read (or a
-         * write to a SHARED mapping) that is a hard fault.  But a WRITE to a
-         * PRIVATE mapping whose current protection lacks WRITE — while its
-         * max_protection permits it (checked above) — is a legitimate
-         * copy-on-write: this is exactly how the dynamic linker applies
-         * relocations to a read-only file-backed ELF segment (text relocations
-         * / GOT fixups against a segment mapped PF_R only).  Fall through so it
-         * COWs a private writable copy instead of SIGSEGV.
-         *
-         * NB: an earlier audit change made this an unconditional fault to close
-         * the mprotect(PROT_READ)+write "protection bypass" — but that path is
-         * load-bearing for ld.so relocation of read-only segments and every
-         * dynamic binary SIGSEGV'd in the loader.  A read-only-mapping write
-         * that COWs (the program's own memory) is the far lesser evil.
-         */
-        if ((prot & VM_PROT_WRITE) == 0 || entry->inheritance == VM_INHERIT_SHARE) {
-            goto out;
-        }
+        goto out;
     }
 
     // 3. Resolve page against the object chain

@@ -82,10 +82,7 @@ void _start(void) {
 
     put("treetest: page zero, and the personality's tree\n");
 
-    /* Writing there is a fault: the child dies of SIGSEGV (11).  This
-     * comes before anything reads the page.  (Once a private read-only
-     * page has been read, substrate's copy-on-write path lets a write to
-     * it through -- for any such page, not this one in particular.) */
+    /* Writing there is a fault: the child dies of SIGSEGV (11). */
     pid = sc(SYS_fork);
     if (pid >= 0 && sys_edx) {
         null[0] = 1;
@@ -99,6 +96,18 @@ void _start(void) {
         sum += null[i];
     }
     check("the 4096 bytes at address 0, summed", (long)sum, sum == 0);
+
+    /* And still a fault once the page has been read and is in the page
+     * table: read-only because the mapping says so, not because it is
+     * waiting to be copied. */
+    pid = sc(SYS_fork);
+    if (pid >= 0 && sys_edx) {
+        null[0] = 1;
+        sc(SYS_exit, 0);
+    }
+    n = sc(SYS_wait);
+    check("a write after the read ends in signal", sys_edx & 0x7f,
+          n == pid && (sys_edx & 0x7f) == 11);
 
     /* /tmp is this program's own directory under /perso/svr4, so a
      * directory made in it is made there, and can be entered. */

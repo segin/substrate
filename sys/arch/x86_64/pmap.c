@@ -29,6 +29,7 @@
 #include <sys/param.h>
 #include <sys/proc.h>
 #include <sys/smp.h>
+#include <vm/vm_fault.h>
 #include <vm/vm_kmem.h>
 #include <vm/vm_object.h>
 #include <vm/vm_page.h>
@@ -1110,6 +1111,10 @@ int pmap_fault(uint32_t err_code, uintptr_t cr2) {
     uintptr_t phys_old = *pte & PTE_FRAME;
     vm_page_t *page_old = pmm_get_page(phys_old);
     if (!page_old) return 0;
+
+    /* As in the i386 pmap_fault(): a page that is read-only because its
+     * mapping forbids writing is not one waiting to be copied. */
+    if (!vm_map_write_permitted(current_process->vm_map, cr2)) return 0;
 
     int single_mapper_safe = (page_old->ref_count <= 2) &&
         (page_old->object == NULL ||

@@ -33,6 +33,17 @@
 // Resolves a page fault at 'va' in the given 'map' with requested 'prot'.
 int vm_fault(vm_map_t *map, uintptr_t va, uint8_t prot);
 
+/*
+ * May `va` in `map` be written?  For the pmap, before it takes a write to
+ * a present read-only page for copy-on-write: a page is read-only in the
+ * page table both when it is waiting to be copied and when its mapping
+ * simply does not allow writing, and only the map can tell which.  1 if
+ * the mapping there allows it, or if the map has nothing recorded for the
+ * address (a page the pmap was given directly, which is the pmap's to
+ * answer for); 0 if the mapping forbids it.
+ */
+int vm_map_write_permitted(vm_map_t *map, uintptr_t va);
+
 /* Hand the faulting eip to vm_fault's in-flight record so the re-entrancy
  * report can name it.  Optional: skipping the call only blanks that field. */
 void vm_fault_note_pc(uint32_t pc);

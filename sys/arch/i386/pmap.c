@@ -19,6 +19,7 @@
 #include <sys/proc.h>
 #include <sys/smp.h>
 #include <vm/phys_mem.h>
+#include <vm/vm_fault.h>
 #include <vm/vm_kmem.h>
 #include <vm/vm_object.h>
 #include <vm/vm_page.h>
@@ -2362,6 +2363,12 @@ int pmap_fault(uint32_t err_code, uint32_t cr2) {
             pmap = current_process->pmap;
         }
         if (!pmap) return 0;
+
+        /* Read-only because it is waiting to be copied, or because the
+         * mapping does not allow writing?  The page table says the same
+         * for both, and taking the second for the first made every
+         * read-only page of a process writable once it had been read. */
+        if (!vm_map_write_permitted(current_process->vm_map, cr2)) return 0;
 
         // Perform COW copy
         // 1. Allocate new page (returns virtual address)
