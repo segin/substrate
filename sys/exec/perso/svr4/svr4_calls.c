@@ -390,10 +390,13 @@ static int64_t svr4_path(uint32_t addr, int (*fn)(const char *)) {
     return rc;
 }
 
-static int64_t svr4_path2(uint32_t a, uint32_t b,
+/* `a_is_text`: the first is not a path to be found but text to be kept as
+ * it is -- what a symbolic link says. */
+static int64_t svr4_path2(uint32_t a, uint32_t b, int a_is_text,
                           int (*fn)(const char *, const char *)) {
     char *pa = NULL, *pb = NULL;
-    int rc = sysv386_string(a, &pa);
+    int rc = a_is_text ? sysv386_copy_string(a, &pa)
+                       : sysv386_string(a, &pa);
 
     if (rc == 0) {
         rc = sysv386_string(b, &pb);
@@ -920,7 +923,9 @@ static int64_t svr4_sys_open(struct sysv386_frame *f, int *known) {
     if (rc != 0) {
         return rc;
     }
-    handled = svr4_streams_open(path, svr4_open_flags(f->a[1]), &result);
+    /* A device is known by the name the program used. */
+    handled = svr4_streams_open(sysv386_given_path(path),
+                                svr4_open_flags(f->a[1]), &result);
     sysv386_free_string(path);
     if (!handled) {
         *known = 0;
@@ -950,7 +955,7 @@ static int64_t svr4_call(struct sysv386_frame *f, int *known) {
     case SVR4_SYS_mkdir:       return svr4_path_int(f->a[0], (int)f->a[1],
                                                     kern_mkdir);
     case SVR4_SYS_getdents:    return svr4_sys_getdents(f);
-    case SVR4_SYS_symlink:     return svr4_path2(f->a[0], f->a[1],
+    case SVR4_SYS_symlink:     return svr4_path2(f->a[0], f->a[1], 1,
                                                  kern_symlink);
     case SVR4_SYS_readlink:    return svr4_sys_readlink(f);
     case SVR4_SYS_fchmod:      return sys_fchmod((int)f->a[0], (int)f->a[1]);
@@ -995,7 +1000,7 @@ static int64_t svr4_call(struct sysv386_frame *f, int *known) {
     case SVR4_SYS_setrlimit:
     case SVR4_SYS_getrlimit:   return svr4_sys_rlimit(f);
     case SVR4_SYS_lchown:      return svr4_sys_lchown(f);
-    case SVR4_SYS_rename:      return svr4_path2(f->a[0], f->a[1],
+    case SVR4_SYS_rename:      return svr4_path2(f->a[0], f->a[1], 0,
                                                  kern_rename);
     case SVR4_SYS_uname:       return svr4_sys_uname(f);
     case SVR4_SYS_setegid:     return sys_setegid((int)f->a[0]);

@@ -17,6 +17,17 @@ run from under `/perso/svr4`, which is all the installation there is:
 
 Not part of `make -C tests`: they have to run on substrate.
 
+## treetest
+
+Two things a Release 4 program takes for granted
+(`docs/specs/personality_targets.md`).  Address 0 reads as a page of
+zeroes, and a write to it is a fault -- the C compiler and assembler of
+the period look through null pointers.  And the program works in its own
+tree: a directory made as `/tmp/treetest.d` is made under `/perso/svr4`,
+`chdir` goes into it, and a file created there by a relative name is found
+by the absolute one, by `../treetest.d/f`, and under `/perso/svr4`.  11
+checks.
+
 ## ptytest
 
 A pseudo-terminal taken the System V way (`docs/specs/sysv_pseudo_terminals.md`):

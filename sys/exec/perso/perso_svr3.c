@@ -27,6 +27,7 @@ struct personality personality_svr3 = {
     .syscall_count = 0,
     .path_prefix = "/perso/svr3",
     .native_dev = 1,
+    .works_in_tree = 1,
     .sendsig = svr3_sendsig,
     .handle_trap = svr3_handle_trap,
 };

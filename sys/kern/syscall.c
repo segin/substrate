@@ -3632,13 +3632,19 @@ int sys_fchown(int fd, int uid, int gid) {
 
 int sys_fchownat(int dirfd, const char *path, int uid, int gid, int flag) {
     char kpath[256];
+
+    COPYIN_STR(path, kpath);
+    return kern_fchownat(dirfd, kpath, uid, gid, flag);
+}
+
+/* fchownat(2) for a caller inside the kernel: `kpath` is a kernel string. */
+int kern_fchownat(int dirfd, const char *kpath, int uid, int gid, int flag) {
     char name[128];
     fs_node_t *parent;
     int ret;
 
+    if (!kpath) return -EFAULT;
     if (uid < -1 || gid < -1) return -EINVAL;
-
-    COPYIN_STR(path, kpath);
 
     /* If flag has AT_SYMLINK_NOFOLLOW, resolve the path as a whole and don't
        follow the last component (lchown semantics). Otherwise, follow it. */
@@ -3828,6 +3834,12 @@ int kern_execve(const char *f, char *const a[], char *const e[]) {
 int sys_mknod(const char *p, int m, int d) {
     char kpath[256];
     COPYIN_STR(p, kpath);
+    return kern_mknod(kpath, m, d);
+}
+
+/* mknod(2) for a caller inside the kernel: `kpath` is a kernel string. */
+int kern_mknod(const char *kpath, int m, int d) {
+    if (!kpath) return -EFAULT;
     if (!current_process) return -EPERM;
     if ((m & S_IFMT) != S_IFIFO && current_process->euid != 0) return -EPERM;
     /* POSIX: the permission bits of a mknod()/mkfifo() node are modified by

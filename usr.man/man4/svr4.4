@@ -157,6 +157,22 @@ Each is a connection to substrate's X server at
 .IR /tmp/.X11-unix/X N.
 .I docs/specs/sysv_streams_transport.md
 describes all of it.
+.SS Files and memory
+A program works in the personality's tree.
+An absolute path it gives a system call means the file under
+.I /perso/svr4
+if that file is there, or if the directory it would be created in is; only
+otherwise does it mean substrate's.
+So a file can be created, removed, renamed or given a new mode wherever it
+can be read, and
+.B chdir
+goes into the tree.
+A program that asks where it is is told
+.IR /perso/svr4/ ...
+.PP
+Address 0 can be read, as one page of zeroes, and cannot be written.
+Release 4 on the 386 lets a program look through a null pointer, and its C
+compiler and assembler do.
 .SS Terminals
 .I /dev
 is substrate's own for this personality, whatever the tree under
@@ -290,6 +306,15 @@ and
 .BR head ,
 with pipes, command substitution, redirection, traps and exit statuses, on
 the i386 and x86_64 kernels.
+Against Dell UNIX System V Release 4 Issue 2.2: the same, and
+.B cc
+and
+.B "cc \-O"
+(the AT&T compiler, assembler and link editor) and
+.B gcc
+2.1 each compiling, linking and running a program that uses stdio,
+.B malloc
+and floating point.
 .SH SEE ALSO
 .BR xenix (4),
 .BR zero (4),

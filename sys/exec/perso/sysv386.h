@@ -164,8 +164,18 @@ void sysv386_sendsig(const struct sysv386_abi *abi, void *handler, int sig,
 
 /* [addr, addr+len) lies below the top of user space: 0, or -EFAULT. */
 int sysv386_span(uint32_t addr, uint32_t len);
-/* A kernel copy of the string at `addr`; free with sysv386_free_string(). */
+/*
+ * A kernel copy of the path at `addr`; free with sysv386_free_string().
+ * For a personality that works in its own tree (struct personality.
+ * works_in_tree) an absolute path comes back as the name under the tree,
+ * if the file is there or the directory it would be made in is.
+ */
 int sysv386_string(uint32_t addr, char **out);
+/* A kernel copy of the string at `addr` exactly as it is: an argument, an
+ * environment string, what a symbolic link is to say.  Freed the same. */
+int sysv386_copy_string(uint32_t addr, char **out);
+/* Such a path as the program gave it, without the tree's prefix. */
+const char *sysv386_given_path(const char *path);
 void sysv386_free_string(char *s);
 /* stat(2)'s answer for `path` made System V's where it is /dev/fd/N: a
  * character device, not what the descriptor is open on. */

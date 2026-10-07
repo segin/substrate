@@ -81,6 +81,33 @@ State: against AT&T Release 3.2.3 and INTERACTIVE UNIX 3.0, the shells and
 utilities run and each system's C compiler compiles and links a program
 that runs.  Documented in `usr.man/man4/svr3.4`.
 
+Three things about where these programs live, which the vendors' own C
+compilers were the first to need:
+
+- **They work in their tree.**  Substrate looks an existing file up under
+  a personality's root first and falls back to its own; that is all the
+  generic lookup does, so a name that did not exist yet was created in
+  substrate's root, and `mkdir`, `unlink`, `rename`, `chmod`, `chown` and
+  `chdir` never looked under the tree at all.  A program could read
+  `/export/x` and not write `/export/y`.  For these two personalities
+  (`works_in_tree`) every path a system call is given is translated on the
+  way in (`sysv386_string()`): if the file is under the tree, or the
+  directory it would be made in is, the name under the tree is what is
+  used.  Arguments and what a symbolic link says are not paths and are
+  left as they are.  `pwd` therefore shows where a program really is,
+  `/perso/svr4/...`.
+- **`/dev` is substrate's** (`native_dev`), whatever the tree has there.
+- **Address 0 can be read** in a Release 4 process, as one page of zeroes.
+  Release 4 on the 386 allows it and programs depend on it: the code
+  generator of the C compiler and the assembler both test a field through
+  a pointer that may be null.  Without the page `cc` could compile a
+  declaration and not an expression.  The ELF loader maps it read-only
+  (`SVR4_PAGE_ZERO_SIZE`); Release 3 programs have their text there.
+
+Checked by `tests/perso/svr4/treetest.c`.  With them, Dell UNIX's `cc` and
+`cc -O` (AT&T's compiler, assembler and link editor) and its GCC 2.1 each
+compile, link and run a program using stdio, `malloc` and floating point.
+
 Neither release has socket calls; both reach the network, and the X
 server, through STREAMS devices.  `exec/perso/svr4/svr4_streams.c`
 provides the client's half of that over substrate's sockets, and with it

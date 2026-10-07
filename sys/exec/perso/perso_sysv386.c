@@ -34,6 +34,7 @@
 #include <machine/gdt.h>
 #include <machine/idt.h>
 #include <machine/vmparam.h>
+#include <exec/perso/personality.h>
 #include <exec/perso/sysv386.h>
 #include <kern/console.h>
 #include <kern/sched.h>
@@ -43,6 +44,7 @@
 #include <sys/fcntl.h>
 #include <sys/kern_syscalls.h>
 #include <sys/ldt.h>
+#include <sys/namei.h>
 #include <sys/proc.h>
 #include <sys/signal.h>
 #include <sys/stat.h>
@@ -111,7 +113,102 @@ void sysv386_free_string(char *s) {
     }
 }
 
+/*
+ * Where a personality that works in its own tree (struct personality.
+ * works_in_tree) means by the absolute `path`: the name under the tree, if
+ * the file is there or the directory it would be made in is; otherwise the
+ * name as given, which is substrate's.
+ *
+ * Substrate looks a file that exists up under the tree first, and that is
+ * all it does.  A name that does not exist yet fell through to substrate's
+ * own root -- so a program could read /export/x, where /export is the
+ * tree's alone, and not create /export/y beside it -- and mkdir, rmdir,
+ * unlink, link, rename, chmod, chown and chdir never looked under the tree
+ * at all.  Every path a System V call is given comes through here instead,
+ * so they all mean the same file by the same name.
+ *
+ * /dev is left alone where the personality's devices are the kernel's, and
+ * so is a name that is under the tree already.  Takes `path`, allocated as
+ * sysv386_string() allocates, and returns it or its replacement.
+ */
+static char *sysv386_tree_path(char *path) {
+    struct personality *p = current_process
+        ? perso_lookup(current_process->perso_id) : NULL;
+    struct stat st;
+    size_t plen, len;
+    char *full, *slash;
+    int in_tree;
+
+    if (!p || !p->works_in_tree || !p->path_prefix || !p->path_prefix[0] ||
+        path[0] != '/') {
+        return path;
+    }
+    plen = strlen(p->path_prefix);
+    len = strlen(path);
+    if (strncmp(path, p->path_prefix, plen) == 0 &&
+        (path[plen] == '/' || path[plen] == '\0')) {
+        return path;
+    }
+    if (p->native_dev && strncmp(path, "/dev", 4) == 0 &&
+        (path[4] == '/' || path[4] == '\0')) {
+        return path;
+    }
+    full = kmalloc(plen + len + 1U);
+    if (!full) {
+        return path;
+    }
+    memcpy(full, p->path_prefix, plen);
+    memcpy(full + plen, path, len + 1U);
+
+    in_tree = kern_lstat(full, &st) == 0;
+    if (!in_tree) {
+        /* Not there: is the directory it would go in? */
+        slash = strrchr(full + plen, '/');
+        if (slash && slash > full + plen) {
+            *slash = '\0';
+            in_tree = kern_stat(full, &st) == 0 && S_ISDIR(st.st_mode);
+            *slash = '/';
+        } else {
+            in_tree = 1;                /* directly under the tree's root */
+        }
+    }
+    if (!in_tree) {
+        kfree(full, plen + len + 1U);
+        return path;
+    }
+    kfree(path, len + 1U);
+    return full;
+}
+
+/* `path` as the program gave it: without the tree's prefix, if
+ * sysv386_string() put one on.  For matching a name that is not a file's,
+ * such as a device the personality provides itself. */
+const char *sysv386_given_path(const char *path) {
+    struct personality *p = current_process
+        ? perso_lookup(current_process->perso_id) : NULL;
+    size_t plen;
+
+    if (!p || !p->works_in_tree || !p->path_prefix) {
+        return path;
+    }
+    plen = strlen(p->path_prefix);
+    if (plen && strncmp(path, p->path_prefix, plen) == 0 &&
+        path[plen] == '/') {
+        return path + plen;
+    }
+    return path;
+}
+
 int sysv386_string(uint32_t addr, char **out) {
+    int rc = sysv386_copy_string(addr, out);
+
+    if (rc == 0) {
+        *out = sysv386_tree_path(*out);
+    }
+    return rc;
+}
+
+int sysv386_copy_string(uint32_t addr, char **out) {
     size_t len = 0;
     char *copy;
 
@@ -334,22 +431,44 @@ static int64_t sysv386_sys_time(struct sysv386_frame *f) {
 }
 
 /*
- * mknod, chmod and chown: substrate's take the path as the user gave it
- * and copy it in themselves.  Handed a kernel copy of it instead, they
- * refused the address and every one of the three failed with EFAULT.
+ * mknod, chmod and chown, by the calls that take a kernel string.  (The
+ * sys_ ones copy the path in from the user themselves; handed a kernel
+ * copy they refused the address, and all three failed with EFAULT.)
  */
 static int64_t sysv386_sys_mknod(struct sysv386_frame *f) {
-    return sys_mknod((const char *)(uintptr_t)f->a[0], (int)f->a[1],
-                     (int)f->a[2]);
+    char *path = NULL;
+    int rc = sysv386_string(f->a[0], &path);
+
+    if (rc != 0) {
+        return rc;
+    }
+    rc = kern_mknod(path, (int)f->a[1], (int)f->a[2]);
+    sysv386_free_string(path);
+    return rc;
 }
 
 static int64_t sysv386_sys_chmod(struct sysv386_frame *f) {
-    return sys_chmod((const char *)(uintptr_t)f->a[0], (int)f->a[1]);
+    char *path = NULL;
+    int rc = sysv386_string(f->a[0], &path);
+
+    if (rc != 0) {
+        return rc;
+    }
+    rc = kern_chmodat(AT_FDCWD, path, (int)f->a[1], 0);
+    sysv386_free_string(path);
+    return rc;
 }
 
 static int64_t sysv386_sys_chown(struct sysv386_frame *f) {
-    return sys_chown((const char *)(uintptr_t)f->a[0], (int)f->a[1],
-                     (int)f->a[2]);
+    char *path = NULL;
+    int rc = sysv386_string(f->a[0], &path);
+
+    if (rc != 0) {
+        return rc;
+    }
+    rc = kern_fchownat(AT_FDCWD, path, (int)f->a[1], (int)f->a[2], 0);
+    sysv386_free_string(path);
+    return rc;
 }
 
 static int64_t sysv386_sys_access(struct sysv386_frame *f) {
@@ -755,7 +874,8 @@ static int sysv386_copy_vector(uint32_t addr, char ***out, size_t *slots_out) {
         int rc = sysv386_get(addr + (uint32_t)i * 4U, &p, sizeof(p));
 
         if (rc == 0) {
-            rc = sysv386_string(p, &vec[i]);
+            /* An argument is the program's, whatever it looks like. */
+            rc = sysv386_copy_string(p, &vec[i]);
         }
         if (rc != 0) {
             sysv386_free_vector(vec, n + 1U);

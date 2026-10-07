@@ -69,6 +69,9 @@ int kern_rmdir(const char *path);
 int kern_symlink(const char *target, const char *linkpath);
 int kern_symlinkat(const char *target, int newdirfd, const char *linkpath);
 int kern_chmodat(int dirfd, const char *path, int mode, int flags);
+/* fchownat(2) and mknod(2) on a kernel string. */
+int kern_fchownat(int dirfd, const char *kpath, int uid, int gid, int flag);
+int kern_mknod(const char *kpath, int m, int d);
 int kern_readlink(const char *pathname, char *buf, size_t bufsiz);
 int kern_readlinkat(int dirfd, const char *pathname, char *buf, size_t bufsiz);
 int kern_access(const char *path, int mode);

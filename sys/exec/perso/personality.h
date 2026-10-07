@@ -67,6 +67,14 @@ struct personality {
      * directories, which would otherwise be what a program lists when it
      * looks for its terminal's name. */
     int native_dev;
+    /* Non-zero if the tree under path_prefix is where this personality's
+     * programs work, not only where their files are found: chdir(2) to an
+     * absolute path goes into the tree if the directory is there, and so
+     * does the directory part of a name being created, removed, linked or
+     * renamed.  Without it only a file that already exists is found under
+     * the prefix, so a program can read from a directory the tree alone
+     * has and not write to it. */
+    int works_in_tree;
 
     /* Signal hooks */
     void (*sendsig)(void *handler, int sig, uint32_t mask, uint32_t flags, void *regs);
