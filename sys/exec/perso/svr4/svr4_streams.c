@@ -47,7 +47,6 @@
 #include <sys/socket.h>
 #include <sys/syscall_impl.h>
 #include <sys/termios.h>
-#include <sys/un.h>
 #include <vm/vm_kmem.h>
 
 #define STREAMS_MAX     64      /* streams open at once, system-wide */

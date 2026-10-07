@@ -27,7 +27,6 @@
 #include <sys/proc.h>
 #include <sys/socket.h>
 #include <sys/syscall_impl.h>
-#include <sys/un.h>
 #include <vm/vm_kmem.h>
 
 /* ---- the kernel underneath ------------------------------------------- */
