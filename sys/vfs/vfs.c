@@ -51,6 +51,25 @@ struct vnode *rootvnode = NULL;
  */
 static spinlock_t vfs_mount_lock = SPINLOCK_INIT("vfs_mount");
 
+/*
+ * Device numbers for mounts.  stat(2) reports the mount's as st_dev for
+ * every file in it, which is what makes (st_dev, st_ino) name one file and
+ * no other: inode numbers are a filesystem's own, and two mounts both
+ * have an inode 2.  They are handed out in order from 1 and never reused,
+ * so a number seen before an unmount does not come to mean another
+ * filesystem.  0 is left to mean "no filesystem" -- a pipe, a socket.
+ */
+static uint32_t vfs_next_mount_dev = 1;
+
+uint32_t vfs_mount_dev_alloc(void) {
+    uint32_t dev;
+
+    spinlock_acquire(&vfs_mount_lock);
+    dev = vfs_next_mount_dev++;
+    spinlock_release(&vfs_mount_lock);
+    return dev;
+}
+
 static filesystem_t *filesystems = NULL;
 
 static char *vfs_strrchr(const char *s, int c);
@@ -497,6 +516,7 @@ int vfs_mount_legacy(const char *device, const char *path, const char *type, uin
         mp->mnt_node_root = root;
         mp->mnt_node_covered = mountpoint;
         mp->mnt_vfs_caps = fs->caps;
+        mp->mnt_dev = vfs_mount_dev_alloc();
 
         /* Snapshot the covered node's identity for mount crossing.
          * We cannot dereference mnt_node_covered later because

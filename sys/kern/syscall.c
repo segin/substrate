@@ -1761,6 +1761,11 @@ static void fill_stat(struct stat *buf, fs_node_t *node) {
     mode_t perms = (mode_t)(node->mask & 07777);
 
     buf->st_ino = node->inode;
+    /* The filesystem the file is in.  It used to be left 0 for everything,
+     * so two files with the same inode number on different mounts were, by
+     * st_dev and st_ino, the same file -- to cp, to tar's link detection,
+     * to anything walking ".." to find where it is. */
+    buf->st_dev = node->mp ? node->mp->mnt_dev : 0;
     buf->st_size = (off_t)node->length;
     buf->st_uid = node->uid;
     buf->st_gid = node->gid;

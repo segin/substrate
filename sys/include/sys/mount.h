@@ -131,7 +131,13 @@ struct mount {
     uint64_t            mnt_covered_ino;    /* inode of covered directory (snapshot) */
     struct mount        *mnt_covered_mp;    /* mount of covered directory (snapshot) */
     uint32_t            mnt_vfs_caps;       /* VFS_CAP_* of the filesystem type */
+    uint32_t            mnt_dev;            /* what stat(2) reports as st_dev for
+                                             * every file of this mount: unique
+                                             * among mounts, never 0 */
 };
+
+/* A device number for a new mount (mnt_dev). */
+uint32_t vfs_mount_dev_alloc(void);
 
 /*
  * Filesystem type switch table.

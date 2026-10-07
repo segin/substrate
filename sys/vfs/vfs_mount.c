@@ -96,6 +96,10 @@ vfs_mount(struct mount *mp, const char *path, void *data, struct nameidata *ndp,
          }
      }
 
+    if (mp->mnt_dev == 0) {
+        mp->mnt_dev = vfs_mount_dev_alloc();
+    }
+
     /* Add to global mount list */
     TAILQ_INSERT_TAIL(&mountlist, mp, mnt_list);
 
