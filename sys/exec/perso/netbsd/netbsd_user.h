@@ -218,6 +218,42 @@ int netbsd_sys_fstat50(int fd, struct netbsd_stat50 *buf);
  * on its very first syscall after exec to point %gs:0 at the TCB. */
 int netbsd_sys_lwp_setprivate(uintptr_t tcb);
 
+/*
+ * sysarch(2) on i386 (<x86/sysarch.h>): the requests, and the argument of
+ * the two that concern the local descriptor table.
+ */
+#define NBSD_X86_GET_LDT        0
+#define NBSD_X86_SET_LDT        1
+#define NBSD_X86_GET_GSBASE     14
+#define NBSD_X86_GET_FSBASE     15
+#define NBSD_X86_SET_GSBASE     16
+#define NBSD_X86_SET_FSBASE     17
+
+struct netbsd_ldt_args {
+    int32_t  start;             /* first slot */
+    uint32_t desc;              /* union descriptor *, 8 bytes each */
+    int32_t  num;
+};
+
+/* <i386/segments.h>, <x86/gdt.h>: the slots below NLDT are the system's,
+ * and a table holds MAX_USERLDT_SLOTS. */
+#define NBSD_NLDT               17
+#define NBSD_MAX_USERLDT_SLOTS  8192
+#define NBSD_SEL_UPL            3
+
+/* A segment descriptor's access byte (the sixth): type with the S bit,
+ * privilege level, present.  Types from SDT_MEMRO up are memory segments;
+ * from SDT_MEMEC up, executable and conforming. */
+#define NBSD_SD_ACCESS          5
+#define NBSD_SD_TYPE_MASK       0x1f
+#define NBSD_SD_DPL_SHIFT       5
+#define NBSD_SD_PRESENT         0x80
+#define NBSD_SDT_SYSNULL        0
+#define NBSD_SDT_MEMRO          16
+#define NBSD_SDT_MEMEC          28
+
+int netbsd_sys_sysarch(int op, void *parms);
+
 /* NetBSD __sysctl(2).  Handles a small set of MIB queries that libc
  * startup makes; returns -ENOENT for everything else (which NetBSD
  * libc treats as "no such variable" rather than fatal ENOSYS). */

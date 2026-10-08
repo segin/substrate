@@ -562,3 +562,63 @@ int sys_modify_ldt(int func, void *ptr, unsigned long bytecount) {
         spinlock_release(&current_process->ldt_lock);
     }
 }
+
+/*
+ * Descriptors as the processor has them, eight bytes each, in and out of a
+ * process's table: for a personality whose programs supply them whole
+ * (NetBSD's i386_set_ldt()) where modify_ldt(2) above takes a description
+ * of one.  The caller has checked what the descriptors grant.
+ *
+ * ldt_write_raw() puts `count` descriptors at `start`, making the table if
+ * there is none, and loads the result.  ldt_read_raw() copies up to
+ * `count` out from `start` and returns how many there were to copy -- none
+ * if the process has no table.
+ */
+int ldt_write_raw(process_t *proc, unsigned int start, const void *entries,
+                  unsigned int count) {
+    int rc;
+
+    if (!proc || !entries || start > LDT_ENTRIES ||
+        count > LDT_ENTRIES - start) {
+        return -EINVAL;
+    }
+    rc = ldt_ensure_process(proc, LDT_ENTRIES);
+    if (rc != 0) {
+        return rc;
+    }
+    spinlock_acquire(&proc->ldt_lock);
+    if (!proc->ldt || proc->ldt_entry_count < (int)(start + count)) {
+        spinlock_release(&proc->ldt_lock);
+        return -ENOMEM;
+    }
+    memcpy((uint8_t *)proc->ldt + (size_t)start * LDT_ENTRY_SIZE, entries,
+           (size_t)count * LDT_ENTRY_SIZE);
+    if (proc == current_process) {
+        ldt_activate_locked(proc);
+    }
+    spinlock_release(&proc->ldt_lock);
+    return 0;
+}
+
+int ldt_read_raw(process_t *proc, unsigned int start, void *entries,
+                 unsigned int count) {
+    unsigned int have;
+
+    if (!proc || !entries) {
+        return -EINVAL;
+    }
+    spinlock_acquire(&proc->ldt_lock);
+    have = (proc->ldt && proc->ldt_entry_count > 0)
+        ? (unsigned int)proc->ldt_entry_count : 0;
+    if (start >= have) {
+        count = 0;
+    } else if (count > have - start) {
+        count = have - start;
+    }
+    if (count) {
+        memcpy(entries, (const uint8_t *)proc->ldt +
+               (size_t)start * LDT_ENTRY_SIZE, (size_t)count * LDT_ENTRY_SIZE);
+    }
+    spinlock_release(&proc->ldt_lock);
+    return (int)count;
+}

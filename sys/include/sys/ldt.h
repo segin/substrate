@@ -45,6 +45,12 @@ int ldt_replace_process(struct process *proc, const void *entries, unsigned int 
 void ldt_free_process(struct process *proc);
 int ldt_clone_process(struct process *dst, const struct process *src);
 void ldt_activate(struct process *proc);
+/* Whole descriptors, LDT_ENTRY_SIZE bytes each, into and out of a
+ * process's table (ldt.c): 0 or -errno, and the number read. */
+int ldt_write_raw(struct process *proc, unsigned int start,
+                  const void *entries, unsigned int count);
+int ldt_read_raw(struct process *proc, unsigned int start, void *entries,
+                 unsigned int count);
 int sys_modify_ldt(int func, void *ptr, unsigned long bytecount);
 void fill_ldt_entry(void *entry, struct user_desc *info);
 void ldt_get_diag_snapshot(struct ldt_diag_snapshot *out);

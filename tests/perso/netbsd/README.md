@@ -75,6 +75,37 @@ that has had a waiter (T4's timedwait, T6's threaded wait) returns `EBUSY` from
 a lingering reference; substrate does not reproduce that refcount lifetime, so
 T5 destroys a *separate* fresh sem instead of the ones the other cases touch.
 
+## ldttest
+
+Pins `sysarch(2)`'s `I386_SET_LDT` / `I386_GET_LDT` — what `i386_set_ldt(3)`
+and `i386_get_ldt(3)` are.  A program installs segment descriptors of its own
+in its local descriptor table and addresses memory through a selector naming
+one; Wine keeps every Windows thread's block behind `%fs` this way and exits at
+startup without it (`i386_set_ldt: Function not implemented`).
+
+| case | expected |
+|---|---|
+| a slot below `NLDT` (17) | `EINVAL` — those are the system's |
+| a present ring-3 data segment | the first slot set is returned |
+| `%fs:0` through its selector | reads the memory at the descriptor's base |
+| `i386_get_ldt` of that slot | 1, and the descriptor that was set |
+| a present ring-0 segment | `EACCES` |
+| a call gate | `EACCES` |
+| an empty descriptor marked present | taken, stored not present |
+| after `fork()` | the child has the table |
+
+The reference run needs the feature switched on.  A stock NetBSD kernel
+refuses the call with `EPERM` until root says otherwise, and the test stops at
+its second check there:
+
+    sysctl -w machdep.user_ldt=1      # as root; 0 puts it back
+
+Substrate has no such switch: the personality behaves as NetBSD does with it
+set, since the programs that make the call cannot run otherwise.
+
+    cc -o ldttest ldttest.c
+    ./ldttest            # must be ALL ok — the reference
+
 ### Build + run
 
 On a NetBSD 10.1/i386 host:

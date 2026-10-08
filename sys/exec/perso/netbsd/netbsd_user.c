@@ -18,7 +18,9 @@
 #include <sys/syscall_impl.h>
 #include <machine/pmm.h>
 #include <vm/phys_mem.h>
+#include <vm/vm_kmem.h>
 #include <vm/vm_map.h>
+#include <sys/ldt.h>
 #include <exec/perso/netbsd/netbsd_syscalls.h>
 #include <exec/perso/netbsd/netbsd_user.h>
 
@@ -499,6 +501,129 @@ long netbsd_sys_ksem_timedwait(int id, const struct timespec *abstime) {
  * cpu_lwp_setprivate() path in NetBSD's machine-dependent code. */
 int netbsd_sys_lwp_setprivate(uintptr_t tcb) {
     return i386_set_gsbase((uint32_t)tcb);
+}
+
+/* ===================================================================
+ * sysarch(2): the machine-dependent calls of NetBSD/i386.
+ *
+ * The local descriptor table is what a program asks for here that it can
+ * get nowhere else.  i386_set_ldt(3) installs descriptors of the
+ * program's own making; a selector naming one, loaded into a segment
+ * register, addresses memory from that descriptor's base.  Wine keeps
+ * each Windows thread's block at the base of one and loads %fs with it,
+ * and stops at its first thread if the call fails -- "i386_set_ldt:
+ * Function not implemented.  Did you reconfigure the kernel with options
+ * USER_LDT?"
+ *
+ * What is allowed is what sys/arch/x86/x86/sys_machdep.c allows
+ * (x86_set_ldt1, x86_get_ldt1): the slots from NLDT up, which are the
+ * program's, the system's own being below; memory segments only, no
+ * gates; and a present descriptor must be a ring-3 one, so that nothing a
+ * program puts there reaches further than the program does.  The table
+ * itself is the one substrate keeps for a process (arch/i386/ldt.c), which
+ * a context switch loads and fork copies.
+ * =================================================================== */
+
+/* Is the descriptor at `d` one a program may install?  Clears the present
+ * bit of an empty one, as NetBSD does. */
+static int netbsd_ldt_descriptor_ok(uint8_t *d) {
+    uint8_t access = d[NBSD_SD_ACCESS];
+    unsigned type = access & NBSD_SD_TYPE_MASK;
+    int present = (access & NBSD_SD_PRESENT) != 0;
+    unsigned dpl = (access >> NBSD_SD_DPL_SHIFT) & 3;
+
+    if (type == NBSD_SDT_SYSNULL) {
+        d[NBSD_SD_ACCESS] = (uint8_t)(access & ~NBSD_SD_PRESENT);
+        return 1;
+    }
+    if (type < NBSD_SDT_MEMRO) {
+        return 0;                       /* a gate, a TSS, an LDT */
+    }
+    /* Executable and conforming: it must be present. */
+    if (type >= NBSD_SDT_MEMEC && !present) {
+        return 0;
+    }
+    return !present || dpl == NBSD_SEL_UPL;
+}
+
+static int netbsd_ldt_range_ok(int start, int num) {
+    return start >= NBSD_NLDT && num >= 0 &&
+           start <= NBSD_MAX_USERLDT_SLOTS &&
+           num <= NBSD_MAX_USERLDT_SLOTS &&
+           start + num <= NBSD_MAX_USERLDT_SLOTS;
+}
+
+/* i386_set_ldt(start, desc, num): "returns the first slot". */
+static int netbsd_set_ldt(const void *uargs) {
+    struct netbsd_ldt_args ua;
+    uint8_t *descv;
+    size_t bytes;
+    int i, rc;
+
+    if (copyin(uargs, &ua, sizeof(ua)) != 0) return -EFAULT;
+    if (!netbsd_ldt_range_ok(ua.start, ua.num)) return -EINVAL;
+    if (ua.num == 0) return ua.start;
+
+    bytes = (size_t)ua.num * LDT_ENTRY_SIZE;
+    descv = kmalloc(bytes);
+    if (!descv) return -ENOMEM;
+    rc = copyin((const void *)(uintptr_t)ua.desc, descv, bytes) != 0
+        ? -EFAULT : 0;
+    for (i = 0; rc == 0 && i < ua.num; i++) {
+        if (!netbsd_ldt_descriptor_ok(descv + (size_t)i * LDT_ENTRY_SIZE))
+            rc = -EACCES;
+    }
+    if (rc == 0) {
+        rc = ldt_write_raw(current_process, (unsigned)ua.start, descv,
+                           (unsigned)ua.num);
+    }
+    kfree(descv, bytes);
+    return rc != 0 ? rc : ua.start;
+}
+
+/* i386_get_ldt(start, desc, num): "returns the number of descriptors". */
+static int netbsd_get_ldt(const void *uargs) {
+    struct netbsd_ldt_args ua;
+    uint8_t *descv;
+    size_t bytes;
+    int n;
+
+    if (copyin(uargs, &ua, sizeof(ua)) != 0) return -EFAULT;
+    if (!netbsd_ldt_range_ok(ua.start, ua.num)) return -EINVAL;
+    if (ua.num == 0) return 0;
+
+    bytes = (size_t)ua.num * LDT_ENTRY_SIZE;
+    descv = kmalloc(bytes);
+    if (!descv) return -ENOMEM;
+    n = ldt_read_raw(current_process, (unsigned)ua.start, descv,
+                     (unsigned)ua.num);
+    if (n > 0 && copyout(descv, (void *)(uintptr_t)ua.desc,
+                         (size_t)n * LDT_ENTRY_SIZE) != 0) {
+        n = -EFAULT;
+    }
+    kfree(descv, bytes);
+    return n;
+}
+
+int netbsd_sys_sysarch(int op, void *parms) {
+    switch (op) {
+    case NBSD_X86_GET_LDT:
+        return netbsd_get_ldt(parms);
+    case NBSD_X86_SET_LDT:
+        return netbsd_set_ldt(parms);
+    /* The segment bases are substrate's own calls under other numbers. */
+    case NBSD_X86_GET_GSBASE:
+        return sys_sysarch(I386_GET_GSBASE, parms);
+    case NBSD_X86_SET_GSBASE:
+        return sys_sysarch(I386_SET_GSBASE, parms);
+    case NBSD_X86_GET_FSBASE:
+        return sys_sysarch(I386_GET_FSBASE, parms);
+    case NBSD_X86_SET_FSBASE:
+        return sys_sysarch(I386_SET_FSBASE, parms);
+    default:
+        /* I/O privilege, MTRRs, vm86: not a program's to have here. */
+        return -EINVAL;
+    }
 }
 
 /* ===================================================================
