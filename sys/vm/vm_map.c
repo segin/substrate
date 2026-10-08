@@ -188,14 +188,25 @@ static vm_map_entry_t *vm_map_try_merge_entry(vm_map_t *map, vm_map_entry_t *ent
     }
 
     vm_map_entry_t *prev = entry->prev;
+    /*
+     * The entry going away comes out of the tree BEFORE the one that
+     * absorbs it is made to cover its range.  The tree is searched by
+     * range: once `prev` reaches to entry->end, the search for
+     * entry->start ends at `prev`, vm_map_tree_remove() takes that for
+     * "not in the tree" and returns, and the entry is freed while still
+     * linked there.  Every later lookup that passed through the dead node
+     * could come back with the wrong neighbour, and vm_map_insert() then
+     * put a mapping out of order in the list, where the fault handler --
+     * which stops at the first entry beyond the address -- never found it.
+     */
     if (prev != header && vm_map_entries_mergeable(prev, entry)) {
+        vm_map_tree_remove(map, entry);
         prev->end = entry->end;
         prev->next = entry->next;
         entry->next->prev = prev;
         if (map->hint == entry) {
             map->hint = prev;
         }
-        vm_map_tree_remove(map, entry);
         map->nentries--;
         if (entry->object) {
             vm_object_deallocate(entry->object);
@@ -206,13 +217,13 @@ static vm_map_entry_t *vm_map_try_merge_entry(vm_map_t *map, vm_map_entry_t *ent
 
     vm_map_entry_t *next = entry->next;
     if (next != header && vm_map_entries_mergeable(entry, next)) {
+        vm_map_tree_remove(map, next);
         entry->end = next->end;
         entry->next = next->next;
         next->next->prev = entry;
         if (map->hint == next) {
             map->hint = entry;
         }
-        vm_map_tree_remove(map, next);
         map->nentries--;
         if (next->object) {
             vm_object_deallocate(next->object);
