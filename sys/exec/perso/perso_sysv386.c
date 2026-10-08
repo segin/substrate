@@ -134,48 +134,25 @@ void sysv386_free_string(char *s) {
 static char *sysv386_tree_path(char *path) {
     struct personality *p = current_process
         ? perso_lookup(current_process->perso_id) : NULL;
-    struct stat st;
     size_t plen, len;
-    char *full, *slash;
-    int in_tree;
+    char *full;
 
-    if (!p || !p->works_in_tree || !p->path_prefix || !p->path_prefix[0] ||
-        path[0] != '/') {
+    if (!p || !p->works_in_tree || !p->path_prefix || path[0] != '/') {
         return path;
     }
     plen = strlen(p->path_prefix);
     len = strlen(path);
-    if (strncmp(path, p->path_prefix, plen) == 0 &&
-        (path[plen] == '/' || path[plen] == '\0')) {
-        return path;
-    }
-    if (p->native_dev && strncmp(path, "/dev", 4) == 0 &&
-        (path[4] == '/' || path[4] == '\0')) {
-        return path;
-    }
     full = kmalloc(plen + len + 1U);
     if (!full) {
         return path;
     }
-    memcpy(full, p->path_prefix, plen);
-    memcpy(full + plen, path, len + 1U);
-
-    in_tree = kern_lstat(full, &st) == 0;
-    if (!in_tree) {
-        /* Not there: is the directory it would go in? */
-        slash = strrchr(full + plen, '/');
-        if (slash && slash > full + plen) {
-            *slash = '\0';
-            in_tree = kern_stat(full, &st) == 0 && S_ISDIR(st.st_mode);
-            *slash = '/';
-        } else {
-            in_tree = 1;                /* directly under the tree's root */
-        }
-    }
-    if (!in_tree) {
+    /* The rule itself is the personality layer's (perso_tree_path). */
+    if (!perso_tree_path(path, full, plen + len + 1U)) {
         kfree(full, plen + len + 1U);
         return path;
     }
+    /* A string here is freed by its length (sysv386_free_string), and the
+     * name under the tree fills the room made for it exactly. */
     kfree(path, len + 1U);
     return full;
 }

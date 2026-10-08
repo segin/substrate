@@ -101,5 +101,9 @@ void elks_personality_init(void);
 
 struct personality *perso_lookup(int id);
 const char *perso_name(int id);
+/* The name the current process's personality means by the absolute
+ * `path`, if it works in its own tree and the name belongs there: 1 with
+ * it in `out`, or 0 to use `path` as given (personality.c). */
+int perso_tree_path(const char *path, char *out, size_t size);
 
 #endif
