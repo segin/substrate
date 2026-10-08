@@ -205,11 +205,23 @@ what lets their X clients reach the X server
 V's way of taking a pseudo-terminal (`/dev/ptmx`, `ptsname`, the `ptem` and
 `ldterm` modules) and the 4.3BSD terminal requests from substrate's own
 ptys, and both personalities see the kernel's `/dev` rather than their
-tree's (`docs/specs/sysv_pseudo_terminals.md`). State of each
+tree's (`docs/specs/sysv_pseudo_terminals.md`). SunOS 4 for the Sun386i
+(`perso_sunos.c`, `sunos/`, rooted at `/perso/sunos`) also stores its
+programs as COFF and is otherwise no relation: `formats/coff.c` knows one
+by its text starting in the second page and gives it this personality,
+which is a BSD one. Its programs call with `int $0xff`, a vector that is
+the kernel's, so the instruction faults and the personality's trap hook
+passes the frame to the dispatcher `int $0x80` reaches, with the stack
+arguments and carry-flag errors of the other BSDs. The kernel loads only
+the program; its startup code maps `/lib/ld.so`, and that the C library,
+with `mmap`. The three personalities that work in their own tree --
+System V Release 3 and 4 and SunOS -- share the rule for which tree an
+absolute path belongs to (`perso_tree_path()` in `personality.c`). State
+of each
 personality: `README.md`; specifications:
 `docs/specs/personality_targets.md`, `docs/specs/personality_elks.md`,
 `usr.man/man4/xenix.4`, `usr.man/man4/xout286.4`, `usr.man/man4/svr4.4`,
-`usr.man/man4/svr3.4`.
+`usr.man/man4/svr3.4`, `usr.man/man4/sunos.4`.
 
 **x86-64.** `sys/arch/x86_64` is the 64-bit port, an addition alongside
 i386, not a replacement: the personality and the bitness of a process are

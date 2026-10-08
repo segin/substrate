@@ -426,3 +426,12 @@ int svr4_tty_ioctl(struct sysv386_frame *f, int64_t *result) {
         return is_tty ? ttcompat_ioctl(fd, request, arg, &t, result) : 0;
     }
 }
+
+int svr4_ttcompat(int fd, uint32_t request, uint32_t arg, int64_t *result) {
+    struct termios t;
+
+    if (kern_ioctl(fd, TCGETS, &t) != 0) {
+        return 0;
+    }
+    return ttcompat_ioctl(fd, request, arg, &t, result);
+}

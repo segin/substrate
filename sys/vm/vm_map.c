@@ -917,6 +917,39 @@ fail_shadow:
     return -1;
 }
 
+/* The lowest hole with `length` free at or above `base`.  The tree is
+ * ordered by address, so the left subtree matters only while this node's
+ * hole starts above `base`. */
+static vm_map_hole_t *hole_find_space_from(vm_map_hole_t *node,
+                                           uintptr_t base, size_t length) {
+    vm_map_hole_t *res;
+    uintptr_t from;
+
+    if (!node || node->max_gap < length) return NULL;
+
+    if (node->start > base) {
+        res = hole_find_space_from(node->left, base, length);
+        if (res) return res;
+    }
+    from = node->start > base ? node->start : base;
+    if (from < node->end && node->end - from >= length) return node;
+
+    return hole_find_space_from(node->right, base, length);
+}
+
+int vm_map_find_space_from(vm_map_t *map, uintptr_t base, uintptr_t *addr,
+                           size_t length) {
+    vm_map_hole_t *hole;
+
+    vm_map_lock_read(map);
+    hole = hole_find_space_from(map->holes_root, base, length);
+    if (hole) {
+        *addr = hole->start > base ? hole->start : base;
+    }
+    vm_map_unlock_read(map);
+    return hole ? 0 : -1;
+}
+
 int vm_map_find_space(vm_map_t *map, uintptr_t *addr, size_t length) {
     // Use the holes tree to find the first fit in O(log M)
     vm_map_lock_read(map);

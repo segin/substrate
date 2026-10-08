@@ -331,6 +331,34 @@ static int coff_read_libs(int fd, const struct coff_image *img,
     return 0;
 }
 
+/*
+ * Is `img` a Sun386i program (see COFF_SUN386_TEXT_PAGE)?  If so, widen
+ * its text section to the start of its page, so that the file's first
+ * page is mapped whole as SunOS maps it: the headers are part of the
+ * image there.
+ */
+static int coff_sun386_image(struct coff_image *img) {
+    int i;
+
+    if (((uint32_t)img->opt.text_start & ~(COFF_PAGE_SIZE - 1U)) !=
+        COFF_SUN386_TEXT_PAGE) {
+        return 0;
+    }
+    for (i = 0; i < img->fh.f_nscns; i++) {
+        coff_scnhdr_t *s = &img->scn[i];
+        uint32_t lead = (uint32_t)s->s_vaddr & (COFF_PAGE_SIZE - 1U);
+
+        if ((s->s_flags & STYP_TEXT) && lead != 0 &&
+            lead == ((uint32_t)s->s_scnptr & (COFF_PAGE_SIZE - 1U)) &&
+            (uint32_t)s->s_scnptr >= lead) {
+            s->s_vaddr -= (int32_t)lead;
+            s->s_scnptr -= (int32_t)lead;
+            s->s_size += (int32_t)lead;
+        }
+    }
+    return 1;
+}
+
 static int coff_check_file(const char *path, const char *header, size_t len) {
     const coff_filehdr_t *fh = (const coff_filehdr_t *)(const void *)header;
     const coff_aouthdr_t *opt;
@@ -352,7 +380,7 @@ static int coff_load(int fd, const char *path, char *const argv[],
     struct coff_image *img;
     char (*libs)[COFF_LIB_PATH_MAX];
     char **kargv = NULL, **kenvp = NULL;
-    int argc = 0, envc = 0, nlibs = 0;
+    int argc = 0, envc = 0, nlibs = 0, sun386 = 0;
     uint32_t brk = 0, sp = 0, entry;
     pmap_t pmap;
     vm_map_t *map;
@@ -375,6 +403,7 @@ static int coff_load(int fd, const char *path, char *const argv[],
         goto fail;
     }
     entry = (uint32_t)img->opt.entry;
+    sun386 = coff_sun386_image(img);
 
     /* argv and envp point into the address space about to be replaced. */
     rc = aout_dup_vector(argv, &kargv, &argc);
@@ -405,8 +434,10 @@ static int coff_load(int fd, const char *path, char *const argv[],
     }
 
     /* The process is SVR3 from here, so that the libraries are looked for
-     * under the personality's root. */
-    current_process->perso_id = PERS_SVR3;
+     * under the personality's root -- or it is a Sun386i program, which
+     * is SunOS's and not System V's at all, and has no libraries the
+     * kernel loads: its own startup code maps /lib/ld.so. */
+    current_process->perso_id = sun386 ? PERS_SUNOS : PERS_SVR3;
     current_process->bitness = BITNESS_32;
     for (i = 0; i < nlibs; i++) {
         int lfd = kern_open(libs[i], O_RDONLY, 0);

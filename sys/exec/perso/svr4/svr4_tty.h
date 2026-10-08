@@ -94,6 +94,10 @@ struct svr4_ltchars {
 /* ioctl(2): 1 with *result set if the request is one of these on a
  * terminal or a pseudo-terminal's master. */
 int svr4_tty_ioctl(struct sysv386_frame *f, int64_t *result);
+/* ttcompat's requests alone, on the terminal `fd`: 1 with *result set, 0
+ * if `fd` is not a terminal or the request not one of them.  They are
+ * 4.3BSD's, numbered as there, and SunOS 4 programs issue them too. */
+int svr4_ttcompat(int fd, uint32_t request, uint32_t arg, int64_t *result);
 /* If `fd` is a pseudo-terminal's master, the st_rdev fstat(2) reports for
  * it in *rdev, and 1. */
 int svr4_pty_rdev(int fd, uint32_t *rdev);

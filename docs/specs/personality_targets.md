@@ -123,29 +123,70 @@ interpreter (`/usr/lib/ld.so.1`) and is not wired up.
 
 ## SunOS 4 (Sun386i)
 
-`SunOS`, id 129 (`PERS_SUNOS`), rooted at `/perso/sunos`.  Not running
-yet; this is what it has to be, from the SunOS 4.0.1 distribution
-(`tools/sunos` builds a root from the floppies).
+`SunOS`, id 129 (`PERS_SUNOS`), rooted at `/perso/sunos`, implemented by
+`exec/perso/perso_sunos.c` and `exec/perso/sunos/`.  It runs the programs
+of SunOS 4.0.1 for the Sun386i (`tools/sunos` builds a root from the
+floppies): the Bourne and C shells, scripts and interactive sessions with
+job control, the usual utilities, `ed`, `vi` and `more`, and the system's
+C compiler, whose output -- dynamically or statically linked -- runs too.
+Documented in `usr.man/man4/sunos.4`; checked by `tests/perso/sunos`.
 
 SunOS 4 is 4.3BSD with Sun's additions, and the personality is a BSD one:
-its own call table, `sigvec` signals, BSD `stat`, `getdirentries` and
-`getdents`, `mmap`.  It shares nothing with the AT&T personalities but a
-file format.  A Sun386i program is an i386 COFF file, not the a.out the
-other Suns use -- `aout.c`'s check for a Sun386 machine id never matches
-anything the system ships -- so `exec/formats/coff.c` has to tell a
-Sun386i program from a Release 3 one and hand it to this personality, and
-never to `SVR3`:
+its own call table, `sigvec` signals, BSD `stat` and `getdents`, `mmap`,
+errors by the carry flag.  It shares nothing with the AT&T personalities
+but a file format.  A Sun386i program is an i386 COFF file, not the a.out
+the other Suns use -- `aout.c`'s check for a Sun386 machine id never
+matches anything the system ships -- so `exec/formats/coff.c` tells a
+Sun386i program from a Release 3 one and hands it to this personality,
+never to `SVR3`.
 
-- **Layout.**  Optional-header magic 0413, text at 0x10d0 for file offset
-  0xd0, data on the next page boundary -- not Release 3's 4 MiB gap, and
-  no `.lib` section.
+Everything below was read from the distribution: the layout and the call
+conventions from its binaries (libc.so.2.0 keeps its symbol table, so each
+call's number is the one in the stub of that name), and the structures,
+flags and numbers from the headers of its Developer's Toolkit and the
+section 2 manual pages of its Applications Supplement.
+
+- **Layout.**  Optional-header magic 0413.  The file's first page is
+  mapped at 0x1000, headers included, so the text is at 0x10d0 for file
+  offset 0xd0; data is on the next page boundary -- not Release 3's 4 MiB
+  gap -- and there is no `.lib` section.  The loader knows a Sun386i
+  program by its text starting in the second page.  Page 0 is unmapped.
 - **Dynamic linking** is SunOS's.  The kernel loads the program alone;
   the program's startup code opens `/lib/ld.so` and maps it, and `ld.so`
-  maps `/usr/lib/libc.so.2.0`.  Such a program has 0x800 set in `f_flags`.
-  So the loader needs no interpreter support, and `open`, `read`, `mmap`
-  (of a file, at a fixed address, private) and `close` have to be right
-  before anything prints.
+  finds `/usr/lib/libc.so.2.0` by reading the directory with `getdents`
+  and maps that; zero-filled memory is a mapping of `/dev/zero`.  So the
+  loader has no interpreter support at all.  A mapping whose address is
+  left to the kernel is placed from 0x40000000 up: the lowest free
+  address, which is what the map gives by default, is page 0 or the
+  heap's way.
 - **System calls** are `int $0xff`: the call number in `%eax`, the
   arguments on the stack as for a C call, carry set and `errno` in `%eax`
-  on failure.  `perso_sunos.c` today is a table for a register-argument
-  entry that no Sun386i program uses.
+  on failure.  Vector 0xff is the local APIC's spurious-interrupt vector
+  and not a program's to use, so the instruction faults with an error
+  code naming it and the personality's trap hook takes the call from
+  there, into the dispatcher `int $0x80` reaches.  `getpid`, `getuid` and
+  `getgid` return `getppid`, `geteuid` and `getegid` in `%edx`; `pipe`
+  returns its second descriptor there; `fork` and `vfork` put 1 there in
+  the child.
+- **Signals.**  libc's `sigvec()` gives the kernel its own `_sigtramp` as
+  the handler for every caught signal.  It is entered with `sig`, `code`,
+  `scp` and `addr` on the stack and no return address, and returns with
+  call 139 (`sigcleanup`) with the stack pointer at `scp`.  The Sun386i's
+  `struct sigcontext` adds `sc_eax` and `sc_edx` to the usual five words:
+  `_sigtramp` saves `%eax` and `%ecx` itself and the C calling convention
+  covers the rest, which leaves `%edx` for the kernel to put back.
+- **Old habits.**  The Bourne shell makes `dup2` as `dup` with 0100 set in
+  the descriptor.  `wait4` with a process ID of 0 means any child.  `brk`
+  returns 0, and `mmap` returns the address only when called with
+  `_MAP_NEW`, which libc's `mmap()` sets.  `ed` asks `statfs` about the
+  file it has just written and divides by the block size it is told.
+- **Its own tree.**  Like the System V personalities it works in its tree
+  (`works_in_tree`): a file made as `/tmp/x` is made in
+  `/perso/sunos/tmp`.  The rule is the personality layer's
+  (`perso_tree_path()`), shared with them.
+
+Not provided: `ptrace`, the NFS and System V IPC calls, `getmsg`/`putmsg`,
+record locks, `mount`.  `ps` and its like read kernel memory through
+`/dev/kmem` and `/dev/drum` and cannot work.  `ttyname()` looks for a
+pseudo-terminal in `/dev` and substrate's are in `/dev/pts`.  SunOS 4.1
+programs have not been tried.

@@ -91,6 +91,13 @@ struct sigaction {
 #define SA_NODEFER   0x00000020
 #define SA_RESETHAND 0x00000040
 
+/* sigprocmask(2)'s `how`, as kern_sigprocmask() takes it. */
+#ifndef SIG_BLOCK
+#define SIG_BLOCK    1
+#define SIG_UNBLOCK  2
+#define SIG_SETMASK  3
+#endif
+
 #ifndef __sigval_t_defined
 #define __sigval_t_defined 1
 union sigval {

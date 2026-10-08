@@ -1,0 +1,297 @@
+.TH SUNOS 4 "2026-10-08" "Substrate" "Kernel Interfaces"
+.SH NAME
+sunos \- SunOS 4 (Sun386i) execution personality
+.SH DESCRIPTION
+The
+.B SunOS
+personality
+.RB ( PERS_SUNOS )
+runs the programs of SunOS 4.0 for the Sun386i, Sun's 80386 workstation.
+It is rooted at
+.IR /perso/sunos ,
+which is where a program's absolute paths are looked for first and where
+the files it makes are made.
+.PP
+SunOS 4 is 4.3BSD with Sun's additions, and this is a BSD personality:
+BSD's system calls and their numbers, BSD's signals and
+.BR sigvec (2),
+BSD's
+.B struct stat
+and error numbers.  It shares one thing with the System V personalities
+.RB ( svr3 (4),
+.BR svr4 (4)),
+the file format its programs are stored in, and nothing else.
+.SS Executable format
+Where every other Sun's programs are
+.BR a.out ,
+the Sun386i's are i386 COFF:
+.B f_magic
+0x14c, an optional header with magic 0413.  The COFF loader tells one from
+a System V Release 3 program by where its text is.  Sun's linker leaves
+the first page of the address space empty and puts the file's first page,
+headers and all, at 0x1000, so the text starts at 0x10d0; a Release 3
+program's starts in the first page.  A program whose text starts in the
+second page is given this personality and is never run as a System V one.
+.PP
+The file is mapped as it lies:
+.B .text
+from 0x1000,
+.B .data
+on the page boundary after it,
+.B .bss
+after that, where the break starts.  Address 0 is not mapped, and a
+program that uses a null pointer is sent
+.BR SIGSEGV .
+The stack is at the top of user space and starts with
+.IR argc ,
+.IR argv[] ,
+a null pointer,
+.IR envp[] ,
+and a null pointer.
+.SS Shared libraries
+Nearly every program is dynamically linked, and the kernel has no part in
+it.  The kernel loads the program alone.  The program's own startup code
+opens
+.I /lib/ld.so
+and maps it with
+.BR mmap (2);
+.B ld.so
+finds
+.I /usr/lib/libc.so.2.0
+by reading the directory, and maps that.  Memory that is to start as
+zeroes is a mapping of
+.IR /dev/zero .
+A program linked with
+.B "cc \-Bstatic"
+does none of this and runs the same.
+.SS System call interface
+A system call is
+.BR "int $0xff" :
+the call's number in
+.BR EAX ,
+the arguments on the stack as for a C function, above the return address
+of the library stub that made the call.  The result is in
+.BR EAX .
+On failure the carry flag is set and
+.B EAX
+holds the error number.  Some calls give a second result in
+.BR EDX :
+.BR getpid (2)
+the parent's process ID,
+.BR getuid (2)
+and
+.BR getgid (2)
+the effective IDs,
+.BR pipe (2)
+the second descriptor, and
+.BR fork (2)
+and
+.BR vfork (2)
+1 in the child and 0 in the parent.
+.PP
+Vector 0xff is the kernel's own, so the instruction faults, and the
+personality's trap hook recognises it and dispatches the call.
+.PP
+The numbers are those of SunOS 4.0's
+.IR <sys/syscall.h> .
+What differs from substrate's own calls is translated:
+.TP
+.BR open (2), " fcntl" (2)
+the flag bits
+.RB ( FNDELAY ,
+.BR FAPPEND ,
+.BR FCREAT ,
+.BR FTRUNC ,
+.BR FEXCL ,
+.BR FNBIO ,
+.BR FSYNC ).
+.TP
+.BR dup (2)
+with 0100 set in the descriptor is
+.BR dup2 (2),
+which is how the Bourne shell calls it.
+.TP
+.BR stat (2), " lstat" (2), " fstat" (2)
+4.3BSD's 64-byte
+.BR "struct stat" .
+.TP
+.BR getdents (2)
+.B struct dirent
+with
+.BR d_off ,
+.BR d_fileno ,
+.B d_reclen
+and
+.BR d_namlen .
+.TP
+.BR statfs (2), " fstatfs" (2)
+SunOS's
+.BR "struct statfs" .
+A file that is not a directory is answered for by its directory.
+.TP
+.BR mmap (2)
+returns the address when the caller sets
+.B _MAP_NEW
+(as libc's
+.B mmap()
+does) and 0 otherwise.  A mapping whose address is left to the system is
+placed from 0x40000000 up, clear of the program and its heap.
+.TP
+.BR brk (2)
+returns 0.
+.TP
+.BR wait4 (2)
+a process ID of 0 means any child.
+.TP
+.BR getrlimit (2), " setrlimit" (2)
+the six resources of 4.3BSD;
+.B RLIM_INFINITY
+is 0x7fffffff.
+.TP
+.BR ioctl (2)
+the terminal requests of
+.I <sys/termios.h>
+and
+.I <sys/termio.h>
+.RB ( TCGETS ,
+.BR TCSETS ,
+.BR TCGETA
+and the rest), those of the old terminal driver
+.RB ( TIOCGETP ,
+.BR TIOCSETP ,
+.BR TIOCGETC ,
+.BR TIOCGLTC ,
+.B TIOCLGET
+and the rest), the window size and process group of a terminal, and
+.BR FIONREAD ,
+.BR FIONBIO ,
+.BR FIOCLEX
+and
+.BR FIONCLEX .
+A terminal's speed is reported as 9600 baud.
+.SS Signals
+The signals are numbered as 4.3BSD numbered them.
+.BR sigvec (2),
+.BR sigblock (2),
+.BR sigsetmask (2),
+.BR sigpause (2)
+and
+.BR sigstack (2)
+are provided.  A system call interrupted by a caught signal is restarted
+unless the handler was installed with
+.BR SV_INTERRUPT .
+.PP
+A handler is entered with the signal's number, a code, the address of a
+.B struct sigcontext
+and a fault address on the stack, and no return address.  The handler the
+kernel is given is libc's
+.BR _sigtramp ,
+which calls the program's and returns through the
+.B sigcleanup
+call (139) with the stack pointer at the address of the
+.BR sigcontext .
+The context holds what
+.I <sys/signal.h>
+defines for the Sun386i:
+.BR sc_onstack ,
+.BR sc_mask ,
+.BR sc_sp ,
+.BR sc_pc ,
+.BR sc_ps ,
+.B sc_eax
+and
+.BR sc_edx .
+.SS Files and devices
+The personality works in its own tree.  An absolute path names the file
+under
+.I /perso/sunos
+if it is there, or if the directory it would be made in is there;
+otherwise it names substrate's.  So a file a program makes as
+.I /tmp/x
+is in
+.IR /perso/sunos/tmp ,
+and is the file it then finds by that name.  The arguments of a program
+being started and the text of a symbolic link are passed as given.
+.PP
+.I /dev
+is the kernel's, whatever the tree holds there.
+.SH FILES
+.TP
+.I /perso/sunos
+The root of a SunOS installation.
+.TP
+.I /perso/sunos/lib/ld.so
+The dynamic linker a program maps for itself.
+.TP
+.I /perso/sunos/usr/lib/libc.so.2.0
+The C library it maps.
+.SH NOTES
+.I tools/sunos/build\-image.sh
+builds an image for
+.I /perso/sunos
+from the distribution's floppies, which are not part of substrate.
+.PP
+With that image, the system's Bourne and C shells run scripts and
+interactive sessions with job control;
+.BR ls ,
+.BR cat ,
+.BR sed ,
+.BR awk ,
+.BR sort ,
+.BR find ,
+.BR ed ,
+.BR vi
+and
+.BR more
+work; and its C compiler compiles and links programs, dynamically and
+statically, that then run.
+.SH BUGS
+A system call SunOS 4.0 has and this personality does not fails with
+.BR EINVAL ;
+SunOS has no
+.BR ENOSYS .
+These are not provided:
+.BR ptrace (2),
+.BR profil (2)
+beyond substrate's own,
+.BR mount (2)
+and
+.BR unmount (2),
+.BR reboot (2),
+.BR swapon (2),
+.BR settimeofday (2)
+and
+.BR adjtime (2),
+.BR mincore (2),
+.BR quotactl (2),
+the NFS calls,
+.BR getmsg (2)
+and
+.BR putmsg (2),
+the System V IPC calls, and record locking through
+.BR fcntl (2).
+.BR flock (2)
+succeeds without locking.
+.PP
+.BR ps (1)
+and the other programs that read kernel memory through
+.I /dev/kmem
+and
+.I /dev/drum
+do not work.
+.PP
+.BR ttyname (3)
+finds no name for a pseudo-terminal, which SunOS expects in
+.I /dev
+and substrate has in
+.IR /dev/pts ,
+so
+.BR tty (1)
+prints "not a tty".
+.PP
+The SunOS 4.0.2 upgrade is not applied to the image, and programs of
+SunOS 4.1 have not been tried.
+.SH SEE ALSO
+.BR svr3 (4),
+.BR svr4 (4),
+.BR xenix (4)

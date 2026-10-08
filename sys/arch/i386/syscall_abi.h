@@ -21,7 +21,7 @@ static inline void i386_extract_syscall_args(const struct personality *p,
 
     if (p && (p->id == PERS_FREEBSD || p->id == PERS_NETBSD ||
               p->id == PERS_OPENBSD || p->id == PERS_NATIVE ||
-              p->id == PERS_SVR4)) {
+              p->id == PERS_SVR4 || p->id == PERS_SUNOS)) {
         /* NetBSD and OpenBSD use the same stack-based int $0x80 ABI as
          * FreeBSD: caller pushes args, libc stubs do `mov $nr, %eax;
          * int $0x80` with no register marshalling.  Without this branch

@@ -16,6 +16,7 @@
 #include <arch/i386/syscall_abi.h>
 #include <drivers/console/uart/uart.h>
 #include <exec/perso/personality.h>
+#include <exec/perso/sunos/sunos_syscalls.h>
 #include <kern/console.h>
 #include <kern/main.h>
 #include <kern/panic.h>
@@ -63,6 +64,33 @@ static uint32_t bsd_errno_xlate(uint32_t e, int perso) {
      * EOWNERDEAD/ENOTRECOVERABLE) differs per-OS, so those are dispatched on
      * `perso`.  Values verified against ~/freebsd and ~/netbsd sys/sys/errno.h.
      */
+    /*
+     * SunOS 4.0 (<sys/errno.h> of its Developer's Toolkit) is 4.3BSD up to
+     * EDQUOT and ESTALE, then goes its own way: EREMOTE and the STREAMS
+     * and System V errors where the later BSDs put theirs.  It has no
+     * ENOSYS -- a call it does not have raises SIGSYS there -- so a
+     * program is told the nearest thing it can be, EINVAL.
+     */
+    if (perso == PERS_SUNOS) {
+        switch (e) {
+        case EDEADLK:         return 78;
+        case ENOLCK:          return 79;
+        case ENOMSG:          return 75;
+        case EIDRM:           return 77;
+        case EBADMSG:         return 76;
+        case ENOLINK:         return 82;
+        case EPROTO:          return 86;
+        case EMULTIHOP:       return 87;
+        case ENOSYS:
+        case EOVERFLOW:
+        case EILSEQ:
+        case ECANCELED:
+        case EOWNERDEAD:
+        case ENOTRECOVERABLE: return EINVAL;
+        default:              break;      /* the 4.3BSD part, below */
+        }
+    }
+
     switch (e) {
     /* --- shared by all BSD personalities --- */
     case EAGAIN:          return 35;  /* substrate EAGAIN=11 -> BSD 35 (==EWOULDBLOCK) */
@@ -330,7 +358,7 @@ static void syscall_emit_enosys(registers_t *regs, struct personality *p) {
     }
 #endif
     if (p && (p->id == PERS_FREEBSD || p->id == PERS_NETBSD ||
-              p->id == PERS_OPENBSD)) {
+              p->id == PERS_OPENBSD || p->id == PERS_SUNOS)) {
         regs->eax = bsd_errno_xlate(38, p->id);   /* native ENOSYS -> BSD ENOSYS (78) */
         regs->eflags |= 1;                 /* CF = error */
     } else {
@@ -679,7 +707,8 @@ void syscall_handler(registers_t *regs) {
 
     if (p->id == PERS_ELKS) {
         regs->eax = (uint16_t)ret;
-    } else if (p->id == PERS_FREEBSD || p->id == PERS_NETBSD || p->id == PERS_OPENBSD) {
+    } else if (p->id == PERS_FREEBSD || p->id == PERS_NETBSD ||
+               p->id == PERS_OPENBSD || p->id == PERS_SUNOS) {
         /*
          * BSD int $0x80 ABI: CF=1 means error (EAX = positive errno value);
          * CF=0 means success (EAX = return value).  Our internal functions
@@ -738,7 +767,16 @@ void syscall_handler(registers_t *regs) {
             (p->id == PERS_NATIVE  && syscall_num == SYS_LSEEK) ||  /* native lseek */
             (p->id == PERS_NETBSD  && syscall_num == 199) ||        /* NetBSD lseek */
             (p->id == PERS_FREEBSD && syscall_num == 478) ||        /* FreeBSD lseek */
-            (p->id == PERS_OPENBSD && syscall_num == 199);          /* OpenBSD lseek */
+            (p->id == PERS_OPENBSD && syscall_num == 199) ||        /* OpenBSD lseek */
+            /* SunOS: getppid, geteuid and getegid are the second result
+             * of getpid, getuid and getgid, and fork's says which process
+             * this is. */
+            (p->id == PERS_SUNOS &&
+             (syscall_num == SUNOS_SYS_getpid ||
+              syscall_num == SUNOS_SYS_getuid ||
+              syscall_num == SUNOS_SYS_getgid ||
+              syscall_num == SUNOS_SYS_fork ||
+              syscall_num == SUNOS_SYS_vfork));
         regs->edx = edx_is_retval1
             ? (uint32_t)((ret >> 32) & 0xFFFFFFFF)
             : 0;

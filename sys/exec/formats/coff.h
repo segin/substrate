@@ -96,6 +96,16 @@ typedef struct {
 /* f_flags: the file is executable (no unresolved references). */
 #define COFF_F_EXEC 0x0002
 
+/*
+ * A Sun386i program.  SunOS 4 on the Sun386i took COFF for its file
+ * format and nothing else from System V: the program is a BSD one.  Its
+ * linker leaves the first page of the address space empty and puts the
+ * image -- file header and all -- in the pages from the second on, so the
+ * text starts in the second page where a System V/386 program's starts
+ * in the first.
+ */
+#define COFF_SUN386_TEXT_PAGE 0x1000U
+
 /* s_flags: a .lib section, the list of shared libraries the image needs.
  * Each entry is two longs -- the entry's size and the offset of the path
  * within it, both counted in longs -- and then the path. */

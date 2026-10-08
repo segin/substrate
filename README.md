@@ -35,7 +35,8 @@ or Xenix `x.out` header):
 | Linux | Active development. |
 | System V Release 4 (i386 ELF) | Active: the vendor's shells and basic utilities run, static and dynamically linked against its own `libc.so.1` (Intel's Release 4.0 and Dell UNIX 2.2); Dell's X11R5 clients draw on substrate's X server. |
 | System V Release 3 (i386 COFF) | Active: AT&T Release 3.2.3 and INTERACTIVE UNIX 3.0 shells and utilities run, with `/shlib/libc_s`; each system's `cc` compiles and links a program that runs; INTERACTIVE's X11R4 clients draw on substrate's X server. |
-| OpenBSD, SunOS 4.x | Early stage. |
+| SunOS 4 (Sun386i, i386 COFF) | Active: the shells of SunOS 4.0.1 run scripts and interactive sessions with job control; the utilities, `ed`, `vi` and `more` work; its `cc` compiles and links programs, dynamically against its own `ld.so` and `libc.so` or statically, that run. |
+| OpenBSD | Early stage. |
 
 ### X clients from System V
 

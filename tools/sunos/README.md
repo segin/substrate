@@ -67,3 +67,27 @@ System calls are `int $0xff` with the SunOS 4 call number in `%eax` and the
 arguments on the stack as for a C call; the carry flag reports an error,
 with `errno` in `%eax`.  The numbers and the semantics are 4.3BSD's with
 Sun's additions (`mmap`, `getdents`, `sigvec`, NFS).
+
+## Using the image
+
+Mount it at `/perso/sunos` and run its programs by their paths there; the
+kernel knows them by their format (`sunos(4)`,
+`docs/specs/personality_targets.md`):
+
+    mount /dev/storage/virtio1 /perso/sunos ext2
+    /perso/sunos/sbin/sh
+
+Inside, paths are SunOS's: `/bin/ls`, `/usr/ucb/vi`, `cc -o hello hello.c`.
+
+## Where the interface is written down
+
+The image is also the reference the personality was written from.  The
+Developer's Toolkit has the system's headers, at
+`/files/cluster/sun386.sunos4.0.1/devel/base_devel/include` (`/usr/include`
+through the cluster links) -- `sys/syscall.h`, `sys/signal.h` with the
+Sun386i's `struct sigcontext`, `sys/errno.h`, `sys/fcntlcom.h`,
+`sys/mman.h`, `sys/dirent.h`, `sys/vfs.h`, `sys/termios.h`, `sys/ttycom.h`
+-- and the Applications Supplement has the manual, as `nroff -man` source,
+at `/files/cluster/sun386.sunos4.0.1/appl/man_pages/share/man`.  Section 2
+is the system calls.  Either comes out of the image with `debugfs -R
+"rdump <dir> <to>" sun386i.img`.

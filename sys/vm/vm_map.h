@@ -76,6 +76,10 @@ void vm_map_unlock_read(vm_map_t *map);
 int vm_map_insert(vm_map_t *map, struct vm_object *obj, uint64_t offset, uintptr_t start, uintptr_t end, uint8_t prot, uint8_t max_prot, uint8_t inheritance);
 int vm_map_remove(vm_map_t *map, uintptr_t start, uintptr_t end);
 int vm_map_find_space(vm_map_t *map, uintptr_t *addr, size_t length);
+/* As vm_map_find_space(), but the lowest free `length` at or above `base`:
+ * for an address space whose low end is the program's and its heap's. */
+int vm_map_find_space_from(vm_map_t *map, uintptr_t base, uintptr_t *addr,
+                           size_t length);
 vm_map_entry_t *vm_map_lookup(vm_map_t *map, uintptr_t va);
 void vm_map_destroy(vm_map_t *map);
 int vm_map_protect(vm_map_t *map, uintptr_t start, uintptr_t end, uint8_t prot);
