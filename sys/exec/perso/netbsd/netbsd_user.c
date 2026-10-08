@@ -18,6 +18,7 @@
 #include <sys/syscall_impl.h>
 #include <machine/pmm.h>
 #include <vm/phys_mem.h>
+#include <vm/vm_map.h>
 #include <exec/perso/netbsd/netbsd_syscalls.h>
 #include <exec/perso/netbsd/netbsd_user.h>
 
@@ -273,6 +274,8 @@ int netbsd_sys_fchownat(int dirfd, const char *path, int uid, int gid, int flag)
 #define NETBSD_MAP_ANON     0x1000
 #define NETBSD_MAP_STACK    0x2000
 #define KERN_MAP_ANONYMOUS  0x020
+#define KERN_MAP_NORESERVE  0x040   /* not charged to the commit limit */
+#define NETBSD_PROT_ACCESS  0x7     /* PROT_READ | PROT_WRITE | PROT_EXEC */
 #define KERN_MAP_FIXED      0x010
 #define KERN_MAP_PRIVATE    0x002
 #define KERN_MAP_SHARED     0x001
@@ -299,6 +302,34 @@ void *netbsd_sys_mmap(void *addr, size_t len, int prot, int flags,
      */
     if ((kflags & (KERN_MAP_SHARED | KERN_MAP_PRIVATE)) == 0)
         kflags |= KERN_MAP_PRIVATE;
+
+    /*
+     * An address given without MAP_FIXED is a hint, and NetBSD takes it:
+     * mmap(2), "the system will use the hint if the range is free" -- the
+     * mapping is placed at addr when nothing is there, and elsewhere only
+     * when something is.  A program can therefore ask whether a range is
+     * free by asking for it and looking at where it was put.  Wine does,
+     * thousands of times, to keep the low address space for Windows
+     * programs; substrate placed every one at its lowest free address, so
+     * none came back where it was asked for and Wine gave up.
+     */
+    if (addr != NULL && !(kflags & KERN_MAP_FIXED) && len != 0 &&
+        current_process && current_process->vm_map) {
+        uintptr_t start = (uintptr_t)addr & ~(uintptr_t)(PAGE_SIZE - 1);
+        uintptr_t end = start +
+            ((len + PAGE_SIZE - 1) & ~(size_t)(PAGE_SIZE - 1));
+
+        if (end > start && end <= (uintptr_t)USER32_VA_END &&
+            vm_map_range_is_free(current_process->vm_map, start, end)) {
+            addr = (void *)start;
+            kflags |= KERN_MAP_FIXED;
+        }
+    }
+    /* A mapping nothing may touch is address space, not memory, and is
+     * not counted against what there is to commit (see the FreeBSD mmap in
+     * compat.c: the same reservations, the same reason). */
+    if ((prot & NETBSD_PROT_ACCESS) == 0 && (kflags & KERN_MAP_ANONYMOUS))
+        kflags |= KERN_MAP_NORESERVE;
     return sys_mmap(addr, len, prot, kflags, fd, pos);
 }
 
