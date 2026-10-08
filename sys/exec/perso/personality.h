@@ -106,4 +106,19 @@ const char *perso_name(int id);
  * it in `out`, or 0 to use `path` as given (personality.c). */
 int perso_tree_path(const char *path, char *out, size_t size);
 
+/*
+ * A socket address between the current process's form and the kernel's
+ * (personality.c): `_in` on one copied in from the process, `_out` on one
+ * about to be copied out to it, of `len` bytes.  Nothing is done for a
+ * personality whose struct sockaddr is the kernel's.
+ */
+void perso_sockaddr_in(uint8_t *addr, size_t len);
+void perso_sockaddr_out(uint8_t *addr, size_t len);
+/* The level of a socket option or control message, likewise: the process's
+ * to the kernel's, or the kernel's to the process's when `to_user`. */
+int perso_socket_level(int level, int to_user);
+/* 4.4BSD's numbers where they are not substrate's. */
+#define PERSO_BSD_SOL_SOCKET 0xffff
+#define PERSO_BSD_AF_INET6   28
+
 #endif

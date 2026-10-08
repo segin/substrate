@@ -4,6 +4,7 @@
 #include <exec/perso/personality.h>
 #include <sys/kern_syscalls.h>
 #include <sys/proc.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
 
 static struct personality *personalities[PERS_MAX] = {
@@ -31,6 +32,57 @@ struct personality *perso_lookup(int id) {
 const char *perso_name(int id) {
     struct personality *p = perso_lookup(id);
     return p ? p->name : "unknown";
+}
+
+/*
+ * Socket addresses, for the personalities descended from 4.4BSD.
+ *
+ * Their struct sockaddr starts with the address's length in a byte and
+ * the family in the next (<sys/socket.h>: sa_len, sa_family); substrate's
+ * starts with the family in two bytes.  Everything after is where it is
+ * for both -- a path at offset 2, a port and an address at 2 and 4 -- so
+ * an address is converted by rewriting its first two bytes.  Passed as
+ * they came, every address was misread: the family of an AF_UNIX address
+ * 20 bytes long was taken for 0x0114, and bind(2) refused it.
+ *
+ * SunOS 4 is 4.3BSD, which had no sa_len, and its addresses are as
+ * substrate's.
+ */
+static int perso_sa_len_first(void) {
+    int id = current_process ? current_process->perso_id : PERS_NATIVE;
+
+    return id == PERS_FREEBSD || id == PERS_NETBSD || id == PERS_OPENBSD;
+}
+
+int perso_socket_level(int level, int to_user) {
+    if (!perso_sa_len_first()) {
+        return level;
+    }
+    if (to_user) {
+        return level == SOL_SOCKET ? PERSO_BSD_SOL_SOCKET : level;
+    }
+    return level == PERSO_BSD_SOL_SOCKET ? SOL_SOCKET : level;
+}
+
+void perso_sockaddr_in(uint8_t *addr, size_t len) {
+    uint16_t family;
+
+    if (!perso_sa_len_first() || !addr || len < 2) {
+        return;
+    }
+    family = addr[1] == PERSO_BSD_AF_INET6 ? AF_INET6 : addr[1];
+    memcpy(addr, &family, sizeof(family));
+}
+
+void perso_sockaddr_out(uint8_t *addr, size_t len) {
+    uint16_t family;
+
+    if (!perso_sa_len_first() || !addr || len < 2) {
+        return;
+    }
+    memcpy(&family, addr, sizeof(family));
+    addr[0] = len > 255 ? 255 : (uint8_t)len;
+    addr[1] = family == AF_INET6 ? PERSO_BSD_AF_INET6 : (uint8_t)family;
 }
 
 /*

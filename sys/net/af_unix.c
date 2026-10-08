@@ -66,6 +66,7 @@
 #include <sys/termios.h>
 #include <vfs/vfs.h>
 #include <vm/vm_kmem.h>
+#include <exec/perso/personality.h>
 
 /* X-server fd-lifecycle trace, gated behind the `xfd` kernel cmdline
  * flag (or `debug=xfd`).  Logs accept/connect/read/write/close on
@@ -1284,6 +1285,7 @@ int sys_bind(int fd, const struct sockaddr *uaddr, socklen_t addrlen) {
                          ? (socklen_t)sizeof(kbuf) : addrlen;
     memset(kbuf, 0, sizeof(kbuf));
     if (copyin(uaddr, kbuf, clen) != 0) return -EFAULT;
+    perso_sockaddr_in(kbuf, clen);
     const struct sockaddr *addr = (const struct sockaddr *)kbuf;
 
     if (addr->sa_family == AF_UNIX) {
@@ -1506,6 +1508,7 @@ int sys_connect(int fd, const struct sockaddr *uaddr, socklen_t addrlen) {
                          ? (socklen_t)sizeof(kbuf) : addrlen;
     memset(kbuf, 0, sizeof(kbuf));
     if (copyin(uaddr, kbuf, clen) != 0) return -EFAULT;
+    perso_sockaddr_in(kbuf, clen);
     return kern_connect(fd, (const struct sockaddr *)kbuf, addrlen);
 }
 
@@ -1835,8 +1838,16 @@ static ssize_t recv_into_kbuf(int fd, void *kbuf, size_t len, int flags,
 static int copyout_sockaddr(const uint8_t *kaddr, size_t kcap,
                             socklen_t kaddrlen, void *uaddr,
                             socklen_t user_cap, socklen_t *ulen) {
+    uint8_t shaped[128];
+
     if (kaddrlen > kcap)
         kaddrlen = (socklen_t)kcap;
+    /* In the process's form, if that is not the kernel's. */
+    if (kaddrlen >= 2 && kaddrlen <= sizeof(shaped)) {
+        memcpy(shaped, kaddr, kaddrlen);
+        perso_sockaddr_out(shaped, kaddrlen);
+        kaddr = shaped;
+    }
     socklen_t out = kaddrlen < user_cap ? kaddrlen : user_cap;
     if (out > 0 && copyout(kaddr, uaddr, out) != 0)
         return -EFAULT;
@@ -2005,6 +2016,7 @@ static ssize_t sys_sendto_impl(int fd, const void *buf, size_t len, int flags,
                        ? (socklen_t)sizeof(kaddrbuf) : addrlen;
         memset(kaddrbuf, 0, sizeof(kaddrbuf));
         if (copyin(addr, kaddrbuf, kaddrlen) != 0) return -EFAULT;
+        perso_sockaddr_in((uint8_t *)kaddrbuf, kaddrlen);
         kaddr = (const struct sockaddr *)kaddrbuf;
     }
 
@@ -2347,7 +2359,8 @@ static ssize_t sendmsg_kiov(int fd, struct msghdr *msg, struct iovec *kiov,
             if (advance == 0) {
                 cmsg_err = -EINVAL; goto cmsg_done;
             }
-            if (c->cmsg_level == SOL_SOCKET && c->cmsg_type == SCM_RIGHTS) {
+            if (perso_socket_level(c->cmsg_level, 0) == SOL_SOCKET &&
+                c->cmsg_type == SCM_RIGHTS) {
                 size_t datalen = c->cmsg_len - KCMSG_HDRLEN;
                 if (datalen % sizeof(int) != 0) { cmsg_err = -EINVAL; goto cmsg_done; }
                 int nfds = (int)(datalen / sizeof(int));
@@ -2651,7 +2664,7 @@ static ssize_t recvmsg_kiov(int fd, struct msghdr *umsg, struct msghdr *msg,
             /* Build the cmsg in the kernel bounce buffer. */
             struct kcmsghdr *c = (struct kcmsghdr *)cmsgbuf;
             c->cmsg_len   = (uint32_t)(KCMSG_HDRLEN + (size_t)got * sizeof(int));
-            c->cmsg_level = SOL_SOCKET;
+            c->cmsg_level = perso_socket_level(SOL_SOCKET, 1);
             c->cmsg_type  = SCM_RIGHTS;
             /* A 64-bit process has four bytes of padding between the
              * header and the descriptors; they go out as zeroes. */
@@ -2768,6 +2781,7 @@ int sys_getsockname(int fd, struct sockaddr *uaddr, socklen_t *uaddrlen) {
     }
     if (rc != 0) return rc;
 
+    perso_sockaddr_out(kaddr, outlen < sizeof(kaddr) ? outlen : sizeof(kaddr));
     socklen_t cpy = outlen < cap ? outlen : cap;
     if (cpy > 0 && copyout(kaddr, uaddr, cpy) != 0) return -EFAULT;
     if (copyout(&outlen, uaddrlen, sizeof(outlen)) != 0) return -EFAULT;
@@ -2802,6 +2816,7 @@ int sys_getpeername(int fd, struct sockaddr *uaddr, socklen_t *uaddrlen) {
     }
     if (rc != 0) return rc;
 
+    perso_sockaddr_out(kaddr, outlen < sizeof(kaddr) ? outlen : sizeof(kaddr));
     socklen_t cpy = outlen < cap ? outlen : cap;
     if (cpy > 0 && copyout(kaddr, uaddr, cpy) != 0) return -EFAULT;
     if (copyout(&outlen, uaddrlen, sizeof(outlen)) != 0) return -EFAULT;
