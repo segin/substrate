@@ -22,7 +22,8 @@ void vm_map_init(vm_map_t *map, pmap_t pmap, uintptr_t min, uintptr_t max) {
     map->max_offset = max;
     map->nentries = 0;
     map->size = 0;
-    
+    map->refs = 1;
+
     // Fix: Allocate unique sentinel
     vm_map_entry_t *sentinel = alloc_entry();
     memset(sentinel, 0, sizeof(vm_map_entry_t));
@@ -45,8 +46,23 @@ vm_map_t *vm_map_create(pmap_t pmap, uintptr_t min, uintptr_t max) {
     return map;
 }
 
+void vm_map_reference(vm_map_t *map) {
+    if (map) map->refs++;
+}
+
+int vm_map_range_is_free(vm_map_t *map, uintptr_t start, uintptr_t end) {
+    vm_map_entry_t *cur;
+
+    if (!map || start >= end) return 0;
+    for (cur = map->header->next; cur != map->header; cur = cur->next) {
+        if (cur->start < end && start < cur->end) return 0;
+    }
+    return start >= map->min_offset && end <= map->max_offset;
+}
+
 void vm_map_destroy(vm_map_t *map) {
     if (!map) return;
+    if (--map->refs != 0) return;
 
     vm_map_entry_t *header = map->header;
     if (header) {

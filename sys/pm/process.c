@@ -543,8 +543,24 @@ static int proc_fork_common(process_t *parent, void *stack, int is_vfork) {
     strncpy(child_proc->comm, parent->comm, AC_COMM_LEN);
     child_proc->comm[AC_COMM_LEN - 1] = '\0';
     
-    // Clone parent's address space with COW
-    if (parent->pmap) {
+    /*
+     * The address space: the parent's own, or a copy-on-write clone of it.
+     *
+     * A child that shares runs in the parent's map and page tables, and the
+     * map counts it (vm_map_reference).  Every way the child has of leaving
+     * -- a loader replacing the image, exit, a failure below -- ends in
+     * vm_map_destroy() on what it holds, which for a shared map only stops
+     * counting it.  The parent sleeps until then (vfork_waiter), so the
+     * child has the address space to itself.
+     */
+    int shares = is_vfork == PROC_FORK_SHARE && parent->pmap &&
+                 parent->vm_map;
+
+    if (shares) {
+        vm_map_reference(parent->vm_map);
+        child_proc->pmap = parent->pmap;
+        child_proc->vm_map = parent->vm_map;
+    } else if (parent->pmap) {
         child_proc->pmap = pmap_fork(parent->pmap);
         if (!child_proc->pmap) {
             proc_destroy(child_proc);
@@ -554,7 +570,7 @@ static int proc_fork_common(process_t *parent, void *stack, int is_vfork) {
         child_proc->pmap = NULL; // Kernel process (shouldn't fork)
     }
 
-    if (parent->vm_map && child_proc->pmap) {
+    if (!shares && parent->vm_map && child_proc->pmap) {
         child_proc->vm_map = vm_map_fork(parent->vm_map, child_proc->pmap);
         if (!child_proc->vm_map) {
             pmap_release(child_proc->pmap);
@@ -697,6 +713,10 @@ static int proc_fork_common(process_t *parent, void *stack, int is_vfork) {
 
         ldt_free_process(child_proc);
 
+        if (shares) {
+            /* The page tables are the parent's: only the count goes. */
+            child_proc->pmap = NULL;
+        }
         if (child_proc->vm_map) {
             vm_map_destroy(child_proc->vm_map);
             child_proc->vm_map = NULL;
@@ -742,7 +762,11 @@ int proc_fork(process_t *parent, void *stack) {
 }
 
 int proc_vfork(process_t *parent, void *stack) {
-    return proc_fork_common(parent, stack, 1);
+    return proc_fork_common(parent, stack, PROC_FORK_WAIT);
+}
+
+int proc_vfork_shared(process_t *parent, void *stack) {
+    return proc_fork_common(parent, stack, PROC_FORK_SHARE);
 }
 
 void proc_add_child(process_t *parent, process_t *child) {

@@ -88,6 +88,9 @@ __attribute__((weak)) void aout_init_handler(void) { }
 __attribute__((weak)) void coff_init_handler(void) { }
 __attribute__((weak)) void xout_init_handler(void) { }
 __attribute__((weak)) int kern_open_exec(const char *path) { (void)path; return -1; }
+/* sys/vm/vm_map.h: a child that shares its parent's address space. */
+struct vm_map;
+__attribute__((weak)) void vm_map_reference(struct vm_map *map) { (void)map; }
 __attribute__((weak)) int vfs_check_permissions_groups(fs_node_t *node, uint32_t uid,
         uint32_t gid, const uint32_t *groups, int ngroups, int mode)
 { (void)node; (void)uid; (void)gid; (void)groups; (void)ngroups; (void)mode; return 0; }

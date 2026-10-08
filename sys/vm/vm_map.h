@@ -61,6 +61,8 @@ typedef struct vm_map {
     uintptr_t min_offset;   // Lower bound of map
     uintptr_t max_offset;   // Upper bound of map
     rwlock_t lock;          // Synchronize readers/writers of the map
+    uint32_t refs;          // Processes using this map: more than one only
+                            // while a vfork child runs in its parent's
 } vm_map_t;
 
 // API
@@ -75,7 +77,13 @@ void vm_map_lock_read(vm_map_t *map);
 void vm_map_unlock_read(vm_map_t *map);
 int vm_map_insert(vm_map_t *map, struct vm_object *obj, uint64_t offset, uintptr_t start, uintptr_t end, uint8_t prot, uint8_t max_prot, uint8_t inheritance);
 int vm_map_remove(vm_map_t *map, uintptr_t start, uintptr_t end);
+/* Another process is to run in `map` (a child that shares its parent's
+ * address space until it execs or exits).  Each vm_map_destroy() then
+ * undoes one of these, and the last one destroys the map. */
+void vm_map_reference(vm_map_t *map);
 int vm_map_find_space(vm_map_t *map, uintptr_t *addr, size_t length);
+/* Nonzero if nothing is mapped anywhere in [start, end). */
+int vm_map_range_is_free(vm_map_t *map, uintptr_t start, uintptr_t end);
 /* As vm_map_find_space(), but the lowest free `length` at or above `base`:
  * for an address space whose low end is the program's and its heap's. */
 int vm_map_find_space_from(vm_map_t *map, uintptr_t base, uintptr_t *addr,

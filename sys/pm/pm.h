@@ -30,6 +30,18 @@ void pm_init(void);
 process_t *proc_create(int perso_id);
 int proc_fork(process_t *parent, void *stack);
 int proc_vfork(process_t *parent, void *stack);
+/*
+ * How a forked child stands to its parent (proc_fork_common):
+ *   PROC_FORK_WAIT   a copy-on-write address space of its own, and the
+ *                    parent waits until it execs or exits;
+ *   PROC_FORK_SHARE  the parent's address space itself, and the parent
+ *                    waits -- vfork(2) as it was specified, in which what
+ *                    the child stores the parent finds.  posix_spawn(3)
+ *                    reports a failed exec that way.
+ */
+#define PROC_FORK_WAIT   1
+#define PROC_FORK_SHARE  2
+int proc_vfork_shared(process_t *parent, void *stack);
 void proc_remove_child(process_t *parent, process_t *child);
 int proc_begin_vfork(process_t *child);
 void proc_vfork_done(process_t *child);

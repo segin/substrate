@@ -646,6 +646,7 @@ void vm_map_init(vm_map_t *map, pmap_t pmap, uintptr_t min, uintptr_t max) {
     map->max_offset = max;
     map->nentries = 0;
     map->size = 0;
+    map->refs = 1;
     rwlock_init(&map->lock, "vm_map");
     
     // Setup sentinel header
@@ -950,6 +951,16 @@ int vm_map_find_space_from(vm_map_t *map, uintptr_t base, uintptr_t *addr,
     return hole ? 0 : -1;
 }
 
+int vm_map_range_is_free(vm_map_t *map, uintptr_t start, uintptr_t end) {
+    int is_free;
+
+    if (!map || start >= end) return 0;
+    vm_map_lock_read(map);
+    is_free = hole_find_containing(map, start, end) != NULL;
+    vm_map_unlock_read(map);
+    return is_free;
+}
+
 int vm_map_find_space(vm_map_t *map, uintptr_t *addr, size_t length) {
     // Use the holes tree to find the first fit in O(log M)
     vm_map_lock_read(map);
@@ -1092,8 +1103,17 @@ static void free_holes_tree(vm_map_hole_t *node) {
 unsigned long vm_map_destroy_count = 0;
 unsigned long vm_map_destroy_entries = 0;
 
+void vm_map_reference(vm_map_t *map) {
+    if (map) {
+        __sync_fetch_and_add(&map->refs, 1);
+    }
+}
+
 void vm_map_destroy(vm_map_t *map) {
     if (!map) return;
+    /* Still someone's: a vfork child leaving its parent's address space,
+     * by exec or by exit, or the parent exiting first. */
+    if (__sync_sub_and_fetch(&map->refs, 1) != 0) return;
     vm_map_audit(map, "vm_map_destroy");
     __sync_fetch_and_add(&vm_map_destroy_count, 1);
 

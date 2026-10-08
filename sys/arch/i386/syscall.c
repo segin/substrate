@@ -871,23 +871,39 @@ int sys_vfork(void) {
  * implemented".  Map the process-creating flag combinations onto fork/vfork:
  *
  *   RFSPAWN (posix_spawn) or RFMEM|RFPROC (shared address space)
- *        -> vfork semantics: the child shares the parent's VM and the parent
- *           blocks until the child execs or _exits (which is exactly what a
- *           spawn wants -- the child immediately execve()s the target).
+ *        -> the child runs in the parent's address space and the parent
+ *           blocks until the child execs or _exits.  The sharing is not an
+ *           economy here but the interface: posix_spawn's child stores the
+ *           errno of a failed execve() where the parent will read it, and
+ *           a child with a copy stored it where nobody would -- so the
+ *           parent took every spawn for a success, and a program that
+ *           tries several paths in turn (Wine, looking for its server)
+ *           stopped at the first.
  *   RFPROC without RFMEM -> fork: a new process with a private address space.
  *
  * Variants that do not create a separate process (thread-style rfork with
  * RFPROC clear) are not supported and return -EINVAL.
  */
+static int rfork_shared(void) {
+    int child_pid = proc_vfork_shared(current_process,
+        current_thread ? current_thread->syscall_regs : NULL);
+
+    if (child_pid < 0) {
+        return child_pid;
+    }
+    proc_begin_vfork(proc_find(child_pid));
+    return child_pid;
+}
+
 int sys_rfork(int flags) {
     uint32_t f = (uint32_t)flags;
 
     if (f & RF_SPAWN)
-        return sys_vfork();
+        return rfork_shared();
     if (!(f & RF_PROC))
         return -EINVAL;
     if (f & RF_MEM)
-        return sys_vfork();
+        return rfork_shared();
     return sys_fork();
 }
 
