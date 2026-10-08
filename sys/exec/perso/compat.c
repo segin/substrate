@@ -272,6 +272,8 @@ int sys_mprotect(void *addr, size_t len, int prot) {
 
     /* VM_PROT_* values match PROT_* values by design */
     uint32_t vm_prot = (uint32_t)prot & 0x7;
+    /* As in mmap(2): on x86, what can be written can be read. */
+    if (vm_prot & VM_PROT_WRITE) vm_prot |= VM_PROT_READ;
 
     if (!current_process->vm_map)
         return -ENOMEM;

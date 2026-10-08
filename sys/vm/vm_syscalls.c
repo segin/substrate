@@ -389,7 +389,11 @@ void *sys_mmap(void *addr, size_t length, int prot, int flags, int fd, uint64_t 
     // Translate prot to VM_PROT_* flags
     uint32_t vm_prot = 0;
     if (prot & PROT_READ)  vm_prot |= VM_PROT_READ;
-    if (prot & PROT_WRITE) vm_prot |= VM_PROT_WRITE;
+    /* On x86 a page that can be written can be read: there is no
+     * write-only page table entry, and programs written for it ask for
+     * PROT_WRITE alone and then read (wineserver, of the page it shares
+     * with its clients).  The map says what the hardware will do. */
+    if (prot & PROT_WRITE) vm_prot |= VM_PROT_WRITE | VM_PROT_READ;
     if (prot & PROT_EXEC)  vm_prot |= VM_PROT_EXEC;
 
     /* `file` (and the EBADF / ENODEV validation on it) is resolved above,
