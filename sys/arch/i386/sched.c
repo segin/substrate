@@ -113,8 +113,11 @@ int sched_fork_thread(process_t *proc, void *parent_regs) {
      * TLS slot by arch_switch_to) lives in thread_t.gs_base — a fresh child
      * thread has 0, so without this its first %gs-relative TLS access faults.
      * This is what broke any forked, threaded child (e.g. rpcbind's daemon). */
-    if (current_thread)
+    if (current_thread) {
         t->gs_base = current_thread->gs_base;
+        t->fs_base = current_thread->fs_base;
+        t->fs_base_set = current_thread->fs_base_set;
+    }
 
 
     /* Allocate 4 pages = 16 KiB contiguous kernel stack.  8 KiB

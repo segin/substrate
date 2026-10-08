@@ -352,6 +352,13 @@ typedef struct thread {
      * (manifesting as SEGV in libc's TLS-relative loads — e.g. jemalloc
      * __free reads %gs:0 which becomes 0 when the slot is empty). */
     uint32_t  gs_base;
+    /* A second per-thread segment base, for a 32-bit program that keeps
+     * something of its own in %fs beside the C library's thread pointer in
+     * %gs (sysarch(I386_SET_FSBASE): Wine, whose Windows programs find
+     * their thread block there).  Loaded into GDT_FS_SLOT as gs_base is
+     * into GDT_TLS_START; fs_base_set says the thread has asked for one. */
+    uint32_t  fs_base;
+    uint8_t   fs_base_set;
 
     /* The thread's x87/SSE/AVX register state while it does not own the
      * CPU's live registers (arch/x86-common/fpu.c).  The registers belong

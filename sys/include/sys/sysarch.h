@@ -9,6 +9,12 @@
 #define I386_GET_GSBASE 9
 #define I386_SET_GSBASE 10
 
+/* Where a thread's %fs base (thread_t.fs_base, I386_SET_FSBASE) is kept:
+ * the last of the GDT's three TLS descriptors, the first of which holds
+ * its %gs base.  And the selector that names it from ring 3. */
+#define GDT_FS_SLOT     8
+#define GDT_FS_SELECTOR ((GDT_FS_SLOT << 3) | 3)
+
 /* Native 64-bit processes (docs/specs/abi-amd64.md, section 8): the
  * argument is a pointer to the 64-bit base.  The thread pointer is %fs. */
 #define AMD64_GET_FSBASE 128

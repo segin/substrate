@@ -47,6 +47,14 @@
 #define FREEBSD_TCB_SELF_OFFSET    0
 #define FREEBSD_TCB_DTV_OFFSET     4
 #define FREEBSD_TCB_THREAD_OFFSET  8
+/* GSEL(GUFS_SEL, SEL_UPL): the selector FreeBSD/i386 gives a thread's
+ * %fs base (freebsd_sig.c). */
+#define FREEBSD_GUFS_SELECTOR      0x13
+/* Bytes of an instruction read to decode it: prefixes, opcode, ModRM, SIB
+ * and a 32-bit displacement. */
+#define FREEBSD_INSN_MAX           12
+uint32_t freebsd_fs_selector(uint32_t sel);
+int freebsd_handle_trap(void *regs);
 #define FREEBSD_TCB_SIZE          12   /* sizeof(struct tcb), 3 pointers */
 
 /*
@@ -583,6 +591,7 @@ struct freebsd_sigaction {
 /* FreeBSD signal translation functions */
 void freebsd_sendsig(void *handler, int sig, uint32_t mask, uint32_t flags, void *regs);
 int  freebsd_sys_sigreturn(void *regs);
+int  freebsd_sys_sigreturn_uc(const void *uc);
 int  freebsd_sys_sigaction(int sig, const void *act, void *oact);
 
 /* FreeBSD <-> substrate-native signal number / mask translation. */
@@ -597,6 +606,36 @@ int freebsd_sys_thr_kill(abi_long_t tid, int sig);
 int freebsd_sys_sigprocmask(int how, const void *set, void *oset);
 int freebsd_sys_sigsuspend(const void *mask);
 int freebsd_sys_sigpending(void *set);
+/* <machine/trap.h>: the kinds of trap, as mc_trapno reports them. */
+#define FBSD_T_PRIVINFLT   1
+#define FBSD_T_BPTFLT      3
+#define FBSD_T_ARITHTRAP   6
+#define FBSD_T_PROTFLT     9
+#define FBSD_T_TRCTRAP     10
+#define FBSD_T_PAGEFLT     12
+#define FBSD_T_ALIGNFLT    14
+#define FBSD_T_DIVIDE      18
+#define FBSD_T_NMI         19
+#define FBSD_T_OFLOW       20
+#define FBSD_T_BOUND       21
+#define FBSD_T_DNA         22
+#define FBSD_T_DOUBLEFLT   23
+#define FBSD_T_FPOPFLT     24
+#define FBSD_T_TSSFLT      25
+#define FBSD_T_SEGNPFLT    26
+#define FBSD_T_STKFLT      27
+#define FBSD_T_MCHK        28
+#define FBSD_T_XMMFLT      29
+
+/* <sys/signal.h>: stack_t, and its flags. */
+struct freebsd_stack {
+    uint32_t ss_sp;
+    uint32_t ss_size;
+    int32_t  ss_flags;
+};
+#define FBSD_SS_ONSTACK 0x0001
+#define FBSD_SS_DISABLE 0x0004
+int freebsd_sys_sigaltstack(const void *ss, void *oss);
 
 /* Additional FreeBSD syscall wrappers (freebsd_user.c). */
 int     freebsd_sys_zero(void);

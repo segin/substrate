@@ -8,6 +8,7 @@
 #include <sys/kern_syscalls.h>
 #include <sys/proc.h>
 #include <sys/signal.h>
+#include <sys/sysarch.h>
 #include <sys/syscall_impl.h>
 
 /*
@@ -119,6 +120,31 @@ uint32_t native_to_freebsd_sigmask(uint32_t m) {
  * FreeBSD sigreturn trampoline (0xFE000030) which loads EBX = &sf_uc and
  * issues sigreturn (syscall 119 -> .sigreturn hook -> freebsd_sys_sigreturn).
  */
+/*
+ * mc_trapno: what kind of trap, by FreeBSD's numbers (<machine/trap.h>)
+ * and not the processor's vector.  They are different lists, and where
+ * they overlap they disagree: the processor's 14 is a page fault and
+ * FreeBSD's 14 an alignment fault, so a handler that looks -- Wine's
+ * turns each kind into a Windows exception -- was told every bad access
+ * was a misaligned one.
+ */
+static uint32_t freebsd_trapno(uint32_t vector) {
+    static const uint8_t trapno[] = {
+        [0]  = FBSD_T_DIVIDE,     [1]  = FBSD_T_TRCTRAP,
+        [2]  = FBSD_T_NMI,        [3]  = FBSD_T_BPTFLT,
+        [4]  = FBSD_T_OFLOW,      [5]  = FBSD_T_BOUND,
+        [6]  = FBSD_T_PRIVINFLT,  [7]  = FBSD_T_DNA,
+        [8]  = FBSD_T_DOUBLEFLT,  [9]  = FBSD_T_FPOPFLT,
+        [10] = FBSD_T_TSSFLT,     [11] = FBSD_T_SEGNPFLT,
+        [12] = FBSD_T_STKFLT,     [13] = FBSD_T_PROTFLT,
+        [14] = FBSD_T_PAGEFLT,    [16] = FBSD_T_ARITHTRAP,
+        [17] = FBSD_T_ALIGNFLT,   [18] = FBSD_T_MCHK,
+        [19] = FBSD_T_XMMFLT,
+    };
+
+    return vector < sizeof(trapno) ? trapno[vector] : 0;
+}
+
 void freebsd_sendsig(void *handler, int sig, uint32_t mask, uint32_t flags, void *regs_ptr) {
     registers_t *regs = (registers_t *)regs_ptr;
     uint32_t esp = regs->useresp;
@@ -202,7 +228,7 @@ void freebsd_sendsig(void *handler, int sig, uint32_t mask, uint32_t flags, void
     mc->mc_edx       = regs->edx;
     mc->mc_ecx       = regs->ecx;
     mc->mc_eax       = regs->eax;
-    mc->mc_trapno    = regs->int_no;
+    mc->mc_trapno    = freebsd_trapno(regs->int_no);
     mc->mc_err       = regs->err_code;
     mc->mc_eip       = regs->eip;
     mc->mc_cs        = regs->cs;
@@ -233,11 +259,183 @@ void freebsd_sendsig(void *handler, int sig, uint32_t mask, uint32_t flags, void
     regs->eflags &= ~(1 << 10);   /* clear DF per the i386 calling convention */
 }
 
+/*
+ * %fs, as a FreeBSD program names it.
+ *
+ * FreeBSD/i386 has one descriptor for a thread's %fs base and its selector
+ * is a constant of the system, GSEL(GUFS_SEL, SEL_UPL) (<machine/
+ * segments.h>): 0x13.  A program that has called i386_set_fsbase() loads
+ * that number into %fs itself -- Wine does on every entry from Windows
+ * code and in every signal handler -- and writes it into the contexts it
+ * hands back to the kernel.  Substrate's descriptor for the same thing is
+ * elsewhere in its GDT (GDT_FS_SELECTOR), and descriptor 2 there is the
+ * kernel's, so the load faults.
+ */
+uint32_t freebsd_fs_selector(uint32_t sel) {
+    if ((sel & 0xffffU) == FREEBSD_GUFS_SELECTOR && current_thread &&
+        current_thread->fs_base_set) {
+        return GDT_FS_SELECTOR;
+    }
+    return sel;
+}
+
+/*
+ * The operand of an instruction whose ModRM byte is at op[0], 32-bit
+ * addressing: the register it names in *reg (0 to 7) when it is one, or
+ * the address in *addr.  Returns the number of bytes the ModRM, SIB and
+ * displacement take, or 0 if they run past `avail`.
+ */
+static uint32_t freebsd_modrm(const registers_t *regs, const uint8_t *op,
+                              uint32_t avail, int *reg, uint32_t *addr) {
+    const uint32_t r[8] = {
+        regs->eax, regs->ecx, regs->edx, regs->ebx,
+        regs->useresp, regs->ebp, regs->esi, regs->edi,
+    };
+    uint32_t mod, rm, len = 1, ea = 0;
+    int32_t disp = 0;
+
+    if (avail < 1) return 0;
+    mod = op[0] >> 6;
+    rm = op[0] & 7;
+    *reg = -1;
+    if (mod == 3) {
+        *reg = (int)rm;
+        return 1;
+    }
+    if (rm == 4) {                      /* a SIB byte follows */
+        uint32_t scale, index, base;
+
+        if (avail < 2) return 0;
+        scale = op[1] >> 6;
+        index = (op[1] >> 3) & 7;
+        base = op[1] & 7;
+        len = 2;
+        if (index != 4) ea = r[index] << scale;
+        if (base == 5 && mod == 0) {
+            mod = 2;                    /* disp32, no base */
+        } else {
+            ea += r[base];
+        }
+    } else if (rm == 5 && mod == 0) {
+        mod = 2;                        /* disp32 alone */
+    } else {
+        ea = r[rm];
+    }
+    if (mod == 1) {
+        if (avail < len + 1) return 0;
+        disp = (int8_t)op[len];
+        len += 1;
+    } else if (mod == 2) {
+        if (avail < len + 4) return 0;
+        memcpy(&disp, op + len, 4);
+        len += 4;
+    }
+    *addr = ea + (uint32_t)disp;
+    return len;
+}
+
+/*
+ * A general-protection fault from a FreeBSD program: if it is a load of
+ * FreeBSD's %fs selector -- `mov r/m16, %fs` or `pop %fs` -- do what the
+ * instruction meant, with substrate's selector for the thread's %fs base.
+ * Returns nonzero when that was it and the program can go on.
+ */
+int freebsd_handle_trap(void *regs_ptr) {
+    registers_t *regs = (registers_t *)regs_ptr;
+    uint8_t op[FREEBSD_INSN_MAX];
+    uint32_t value = 0, len = 0, got;
+    int is_pop = 0, wide = 1;
+
+    if (!regs || regs->int_no != 13 || !current_thread ||
+        !current_thread->fs_base_set) {
+        return 0;
+    }
+    memset(op, 0, sizeof(op));
+    for (got = sizeof(op); got > 0; got--) {    /* as much as is mapped */
+        if (copyin((const void *)(uintptr_t)regs->eip, op, got) == 0) break;
+    }
+    /* Prefixes: operand size, and a segment override, which changes
+     * where the operand is read from only for %fs and %gs. */
+    while (len < got && (op[len] == 0x66 || op[len] == 0x26 ||
+                         op[len] == 0x2e || op[len] == 0x36 ||
+                         op[len] == 0x3e)) {
+        if (op[len] == 0x66) wide = 0;
+        len++;
+    }
+    if (len + 1 < got && op[len] == 0x8e && ((op[len + 1] >> 3) & 7) == 4) {
+        uint32_t addr = 0, n;                       /* mov r/m16, %fs */
+        int reg;
+
+        n = freebsd_modrm(regs, op + len + 1, got - len - 1, &reg, &addr);
+        if (n == 0) return 0;
+        if (reg >= 0) {
+            const uint32_t r[8] = {
+                regs->eax, regs->ecx, regs->edx, regs->ebx,
+                regs->useresp, regs->ebp, regs->esi, regs->edi,
+            };
+            value = r[reg];
+        } else {
+            uint16_t sel;
+
+            if (copyin((const void *)(uintptr_t)addr, &sel,
+                       sizeof(sel)) != 0) {
+                return 0;
+            }
+            value = sel;
+        }
+        len += 1 + n;
+    } else if (len + 1 < got && op[len] == 0x0f && op[len + 1] == 0xa1) {
+        if (copyin((const void *)(uintptr_t)regs->useresp, &value,
+                   sizeof(uint16_t)) != 0) {
+            return 0;
+        }
+        is_pop = 1;                                 /* pop %fs */
+        len += 2;
+    } else {
+        return 0;
+    }
+    if ((value & 0xffffU) != FREEBSD_GUFS_SELECTOR) {
+        return 0;
+    }
+    regs->fs = GDT_FS_SELECTOR;
+    regs->eip += len;
+    if (is_pop) {
+        regs->useresp += wide ? 4 : 2;
+    }
+    return 1;
+}
+
+static int freebsd_sigreturn_from(registers_t *regs,
+                                  const struct freebsd_ucontext *uc_user);
+
+/* The way back from a handler through the kernel's trampoline, which
+ * issues the old call number (119) with the context's address in EBX. */
 int freebsd_sys_sigreturn(void *regs_ptr) {
     registers_t *regs = (registers_t *)regs_ptr;
-    /* The trampoline loaded EBX with &sf_uc (the ucontext pointer). */
-    struct freebsd_ucontext *uc_user = (struct freebsd_ucontext *)(uintptr_t)regs->ebx;
 
+    return freebsd_sigreturn_from(regs,
+        (const struct freebsd_ucontext *)(uintptr_t)regs->ebx);
+}
+
+/*
+ * sigreturn(2) called as itself: "sigreturn(const ucontext_t *scp)".  A
+ * program that leaves a handler some other way than by returning from it
+ * calls this with a context of its own making -- Wine does, to resume a
+ * Windows thread where the exception dispatcher decided.  The table sent
+ * that call to the function above, which took the context's address for
+ * the kernel's register frame.
+ */
+int freebsd_sys_sigreturn_uc(const void *uc_user) {
+    registers_t *regs = current_thread
+        ? (registers_t *)current_thread->syscall_regs : NULL;
+
+    if (!regs) return -EINVAL;
+    return freebsd_sigreturn_from(regs,
+        (const struct freebsd_ucontext *)uc_user);
+}
+
+static int freebsd_sigreturn_from(registers_t *regs,
+                                  const struct freebsd_ucontext *uc_user) {
     struct freebsd_ucontext uc;
     if (copyin(uc_user, &uc, sizeof(uc)) != 0) return -EFAULT;
 
@@ -260,7 +458,7 @@ int freebsd_sys_sigreturn(void *regs_ptr) {
     regs->ss = mc->mc_ss | 3;
     regs->ds = mc->mc_ds | 3;
     regs->es = mc->mc_es | 3;
-    regs->fs = mc->mc_fs | 3;
+    regs->fs = freebsd_fs_selector(mc->mc_fs) | 3;
     regs->gs = mc->mc_gs | 3;
 
     /* uc_sigmask is a FreeBSD-numbered set; the kernel mask is native. */
@@ -383,6 +581,47 @@ int freebsd_sys_sigsuspend(const void *mask) {
     if (mask && copyin(mask, &fmask, sizeof(fmask)) != 0) return -EFAULT;
     uint32_t kmask = freebsd_to_native_sigmask(fmask);
     return kern_sigsuspend(&kmask);
+}
+
+/*
+ * sigaltstack(2).  FreeBSD's stack_t is { ss_sp, ss_size, ss_flags } and
+ * substrate's { ss_sp, ss_flags, ss_size }, and SS_DISABLE is 4 there and
+ * 2 here.  Passed through as it came, a stack's size was read as its
+ * flags and the call refused -- so no FreeBSD program ever had its
+ * signal stack.  Wine finds its thread's data from where a handler's
+ * stack is, and with handlers on the wrong one found garbage.
+ */
+static int freebsd_ss_flags_out(int native) {
+    int f = 0;
+
+    if (native & SS_ONSTACK) f |= FBSD_SS_ONSTACK;
+    if (native & SS_DISABLE) f |= FBSD_SS_DISABLE;
+    return f;
+}
+
+int freebsd_sys_sigaltstack(const void *uss, void *uoss) {
+    struct freebsd_stack fss;
+    stack_t ss, oss;
+    int rc;
+
+    if (uss) {
+        if (copyin(uss, &fss, sizeof(fss)) != 0) return -EFAULT;
+        if (fss.ss_flags & ~(FBSD_SS_ONSTACK | FBSD_SS_DISABLE))
+            return -EINVAL;
+        memset(&ss, 0, sizeof(ss));
+        ss.ss_sp = (void *)(uintptr_t)fss.ss_sp;
+        ss.ss_size = fss.ss_size;
+        if (fss.ss_flags & FBSD_SS_DISABLE) ss.ss_flags |= SS_DISABLE;
+    }
+    rc = kern_sigaltstack(uss ? &ss : NULL, uoss ? &oss : NULL);
+    if (rc != 0) return rc;
+    if (uoss) {
+        fss.ss_sp = (uint32_t)(uintptr_t)oss.ss_sp;
+        fss.ss_size = (uint32_t)oss.ss_size;
+        fss.ss_flags = freebsd_ss_flags_out(oss.ss_flags);
+        if (copyout(&fss, uoss, sizeof(fss)) != 0) return -EFAULT;
+    }
+    return 0;
 }
 
 /* sigpending(2): the returned set is FreeBSD-numbered. */

@@ -34,7 +34,10 @@ static void i386_load_gs_slot(thread_t *t) {
      * unconditionally rewriting the slot to 0 on every context switch
      * gains nothing and risks confusing whatever userspace thread held
      * the slot's contents previously. */
-    if (!t || t->gs_base == 0) return;
+    if (!t) return;
+    if (t->fs_base_set)
+        gdt_set_gate(GDT_FS_SLOT, t->fs_base, 0xFFFFF, 0xF2, 0xC0);
+    if (t->gs_base == 0) return;
     gdt_set_gate(GDT_TLS_START, t->gs_base, 0xFFFFF, 0xF2, 0xC0);
 }
 
@@ -88,6 +91,25 @@ static int set_gsbase(uint32_t base) {
             ((registers_t *)current_thread->syscall_regs)->gs = selector;
     }
 
+    return 0;
+}
+
+/*
+ * sysarch(I386_SET_FSBASE): give the thread an %fs base.  FreeBSD keeps
+ * one descriptor for it, loads %fs with that descriptor's selector and
+ * leaves it loaded; the program may load the selector again itself (see
+ * freebsd_handle_trap for the number it uses).
+ */
+static int set_fsbase(uint32_t base) {
+    if (!current_thread) return -EINVAL;
+#ifdef SUBSTRATE_ARCH_X86_64
+    if (thread_is_amd64(current_thread)) return -EINVAL;
+#endif
+    current_thread->fs_base = base;
+    current_thread->fs_base_set = 1;
+    gdt_set_gate(GDT_FS_SLOT, base, 0xFFFFF, 0xF2, 0xC0);
+    if (current_thread->syscall_regs)
+        ((registers_t *)current_thread->syscall_regs)->fs = GDT_FS_SELECTOR;
     return 0;
 }
 
@@ -170,12 +192,17 @@ int sys_sysarch(int op, void *parms) {
         case I386_GET_GSBASE:
             return get_gsbase(parms);
 
-        case I386_SET_FSBASE:
-            /* FS TLS not needed for FreeBSD i386 nologin; ignore silently */
-            return 0;
+        case I386_SET_FSBASE: {
+            uint32_t base;
+            if (copyin(parms, &base, sizeof(base)) != 0)
+                return -EFAULT;
+            return set_fsbase(base);
+        }
 
-        case I386_GET_FSBASE:
-            return -EINVAL;
+        case I386_GET_FSBASE: {
+            uint32_t base = current_thread ? current_thread->fs_base : 0;
+            return copyout(&base, parms, sizeof(base)) != 0 ? -EFAULT : 0;
+        }
 
 #ifdef SUBSTRATE_ARCH_X86_64
         case AMD64_SET_FSBASE: {

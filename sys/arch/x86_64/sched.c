@@ -166,8 +166,11 @@ int sched_fork_thread(process_t *proc, void *parent_regs) {
     if (!t) return -1;
 
     /* The child keeps the parent thread's TLS base (see arch/i386). */
-    if (current_thread)
+    if (current_thread) {
         t->gs_base = current_thread->gs_base;
+        t->fs_base = current_thread->fs_base;
+        t->fs_base_set = current_thread->fs_base_set;
+    }
 
     if (!sched_alloc_kstack(t)) {
         return -1;
