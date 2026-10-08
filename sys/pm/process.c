@@ -1102,16 +1102,6 @@ struct advlock {
 };
 #define ADVLOCK_EOF ((off_t)0x7fffffffffffffffLL)
 
-/* Mirrors the userspace <fcntl.h> struct flock (i386 layout: int64 off_t
- * is 4-byte aligned, so the struct is 24 bytes with no trailing pad). */
-struct kflock {
-    int16_t l_type;
-    int16_t l_whence;
-    int64_t l_start;
-    int64_t l_len;
-    int32_t l_pid;
-};
-
 static spinlock_t advlock_lock = SPINLOCK_INIT("fcntl_advlock");
 
 static int advlock_overlap(off_t s1, off_t e1, off_t s2, off_t e2) {
@@ -1272,11 +1262,50 @@ void advlock_release_by_owner(file_t *f, int owner) {
 
 /* fcntl F_GETLK: report a conflicting lock owned by another process, or
  * F_UNLCK if the requested region is grantable. */
+static int advlock_getlk_k(process_t *p, file_t *f, struct kflock *flp);
+static int advlock_setlk_k(process_t *p, file_t *f, const struct kflock *flp);
+
 static int advlock_getlk(process_t *p, file_t *f, int arg) {
     struct kflock fl;
+    int r;
+
     if (!arg) return -EFAULT;
     if (copyin((void *)(uintptr_t)(unsigned)arg, &fl, sizeof(fl)) != 0)
         return -EFAULT;
+    r = advlock_getlk_k(p, f, &fl);
+    if (r) return r;
+    if (copyout(&fl, (void *)(uintptr_t)(unsigned)arg, sizeof(fl)) != 0)
+        return -EFAULT;
+    return 0;
+}
+
+/* fcntl F_SETLK / F_SETLKW. */
+static int advlock_setlk(process_t *p, file_t *f, int arg) {
+    struct kflock fl;
+
+    if (!arg) return -EFAULT;
+    if (copyin((void *)(uintptr_t)(unsigned)arg, &fl, sizeof(fl)) != 0)
+        return -EFAULT;
+    return advlock_setlk_k(p, f, &fl);
+}
+
+/*
+ * A record lock asked for with a struct flock that is already the
+ * kernel's: for a personality whose own struct flock is laid out or
+ * numbered otherwise.  `cmd` is F_GETLK, F_SETLK or F_SETLKW.
+ */
+int proc_advlock(process_t *p, int fd, int cmd, struct kflock *fl) {
+    file_t *f;
+
+    if (!p || !fl || fd < 0 || fd >= MAX_FD) return -EBADF;
+    f = p->fds[fd];
+    if (!f) return -EBADF;
+    return cmd == F_GETLK ? advlock_getlk_k(p, f, fl)
+                          : advlock_setlk_k(p, f, fl);
+}
+
+static int advlock_getlk_k(process_t *p, file_t *f, struct kflock *flp) {
+    struct kflock fl = *flp;
     if (fl.l_type != F_RDLCK && fl.l_type != F_WRLCK) return -EINVAL;
     off_t s, e;
     int r = advlock_range(f, &fl, &s, &e);
@@ -1303,17 +1332,12 @@ static int advlock_getlk(process_t *p, file_t *f, int arg) {
     }
     spinlock_release(&advlock_lock);
 
-    if (copyout(&fl, (void *)(uintptr_t)(unsigned)arg, sizeof(fl)) != 0)
-        return -EFAULT;
+    *flp = fl;
     return 0;
 }
 
-/* fcntl F_SETLK / F_SETLKW. */
-static int advlock_setlk(process_t *p, file_t *f, int arg) {
-    struct kflock fl;
-    if (!arg) return -EFAULT;
-    if (copyin((void *)(uintptr_t)(unsigned)arg, &fl, sizeof(fl)) != 0)
-        return -EFAULT;
+static int advlock_setlk_k(process_t *p, file_t *f, const struct kflock *flp) {
+    struct kflock fl = *flp;
     if (fl.l_type != F_RDLCK && fl.l_type != F_WRLCK && fl.l_type != F_UNLCK)
         return -EINVAL;
     off_t s, e;

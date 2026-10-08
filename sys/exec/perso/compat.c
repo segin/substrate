@@ -274,7 +274,67 @@ int sys_mprotect(void *addr, size_t len, int prot) {
 #define FBSD_F_DUP2FD_CLOEXEC 18
 #define FBSD_F_DUP2FD          10
 #define FD_CLOEXEC             1
+
+/*
+ * Record locks (fcntl(2)): F_GETLK, F_SETLK and F_SETLKW are numbered 11
+ * to 13, the lock types are F_RDLCK 1, F_UNLCK 2 and F_WRLCK 3, and
+ * struct flock begins with the range and ends with a system ID
+ * (<sys/fcntl.h>).  Passed through as substrate's own they were refused
+ * outright: 12 is no request of substrate's.  wineserver takes a write
+ * lock on a file in its directory to be the only server there, and exits
+ * if it cannot.
+ */
+#define FBSD_F_GETLK           11
+#define FBSD_F_SETLK           12
+#define FBSD_F_SETLKW          13
+#define FBSD_F_RDLCK           1
+#define FBSD_F_UNLCK           2
+#define FBSD_F_WRLCK           3
+
+struct freebsd_flock {
+    int64_t l_start;
+    int64_t l_len;
+    int32_t l_pid;
+    int16_t l_type;
+    int16_t l_whence;
+    int32_t l_sysid;
+} __attribute__((packed));
+
+static int freebsd_record_lock(int fd, int cmd, void *uarg) {
+    struct freebsd_flock ff;
+    struct kflock kf;
+    int rc;
+
+    if (copyin(uarg, &ff, sizeof(ff)) != 0)
+        return -EFAULT;
+    kf.l_start = ff.l_start;
+    kf.l_len = ff.l_len;
+    kf.l_pid = ff.l_pid;
+    kf.l_whence = ff.l_whence;
+    switch (ff.l_type) {
+    case FBSD_F_RDLCK: kf.l_type = F_RDLCK; break;
+    case FBSD_F_WRLCK: kf.l_type = F_WRLCK; break;
+    case FBSD_F_UNLCK: kf.l_type = F_UNLCK; break;
+    default:           return -EINVAL;
+    }
+    rc = proc_advlock(current_process, fd,
+                      cmd == FBSD_F_GETLK ? F_GETLK :
+                      cmd == FBSD_F_SETLK ? F_SETLK : F_SETLKW, &kf);
+    if (rc != 0 || cmd != FBSD_F_GETLK)
+        return rc;
+    ff.l_start = kf.l_start;
+    ff.l_len = kf.l_len;
+    ff.l_pid = kf.l_pid;
+    ff.l_whence = kf.l_whence;
+    ff.l_type = kf.l_type == F_RDLCK ? FBSD_F_RDLCK :
+                kf.l_type == F_WRLCK ? FBSD_F_WRLCK : FBSD_F_UNLCK;
+    ff.l_sysid = 0;
+    return copyout(&ff, uarg, sizeof(ff)) != 0 ? -EFAULT : 0;
+}
+
 int freebsd_sys_fcntl(int fd, int cmd, int arg) {
+    if (cmd == FBSD_F_GETLK || cmd == FBSD_F_SETLK || cmd == FBSD_F_SETLKW)
+        return freebsd_record_lock(fd, cmd, (void *)(uintptr_t)(unsigned)arg);
     if (cmd == FBSD_F_DUPFD_CLOEXEC) {
         int newfd = proc_fcntl(current_process, fd, 0 /*F_DUPFD*/, arg);
         if (newfd < 0) return newfd;

@@ -43,6 +43,17 @@ int proc_vfork(process_t *parent, void *stack);
 #define PROC_FORK_SHARE  2
 int proc_vfork_shared(process_t *parent, void *stack);
 void proc_remove_child(process_t *parent, process_t *child);
+/* Mirrors the userspace <fcntl.h> struct flock (i386 layout: int64 off_t
+ * is 4-byte aligned, so the struct is 24 bytes with no trailing pad). */
+struct kflock {
+    int16_t l_type;
+    int16_t l_whence;
+    int64_t l_start;
+    int64_t l_len;
+    int32_t l_pid;
+};
+/* fcntl(2) record locks from a kernel struct flock (process.c). */
+int proc_advlock(process_t *p, int fd, int cmd, struct kflock *fl);
 int proc_begin_vfork(process_t *child);
 void proc_vfork_done(process_t *child);
 
