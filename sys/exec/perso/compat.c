@@ -79,10 +79,13 @@ int64_t freebsd_sys_lseek13(int fd, uint32_t off_lo, uint32_t off_hi, int whence
 #define FREEBSD_MAP_ANON    0x1000
 #define FREEBSD_MAP_GUARD   0x2000   /* PROT_NONE reservation; rtld uses since
                                       * osreldate 1200035 (FreeBSD 12.0) */
+#define FREEBSD_MAP_EXCL    0x4000   /* with MAP_FIXED: fail, do not replace */
+#define FREEBSD_PROT_ACCESS 0x7      /* PROT_READ | PROT_WRITE | PROT_EXEC */
 #define KERN_MAP_SHARED     0x001
 #define KERN_MAP_PRIVATE    0x002
 #define KERN_MAP_FIXED      0x010
 #define KERN_MAP_ANONYMOUS  0x020
+#define KERN_MAP_NORESERVE  0x040   /* not charged to the commit limit */
 
 /*
  * mmap_freebsd13 (syscall 477): pad-less mmap ABI introduced in FreeBSD 13+.
@@ -119,6 +122,38 @@ void *freebsd_sys_mmap(void *addr, size_t len, int prot, int flags, int fd, uint
      */
     if ((kflags & (KERN_MAP_SHARED | KERN_MAP_PRIVATE)) == 0)
         kflags |= KERN_MAP_PRIVATE;
+
+    /*
+     * A mapping nothing may touch is address space and not memory, and is
+     * not counted against the memory there is to commit: FreeBSD charges
+     * swap for what can be written.  Wine stakes out most of the address
+     * space this way before it starts -- gigabytes, on a machine with far
+     * less -- and counted, those requests were refused for want of memory,
+     * and the ones granted left none for the next program.  (Memory such
+     * a range is later given with mprotect(2) is not counted either.)
+     */
+    if ((prot & FREEBSD_PROT_ACCESS) == 0 &&
+        (kflags & KERN_MAP_ANONYMOUS))
+        kflags |= KERN_MAP_NORESERVE;
+
+    /*
+     * MAP_EXCL, with MAP_FIXED: "this flag ... causes mmap() to fail with
+     * EINVAL if the requested range is already mapped" (mmap(2)) -- where
+     * MAP_FIXED alone replaces what is there.  A program uses it to ask
+     * whether a range is free and take it if so.  Wine does at startup,
+     * for most of the address space below its own code: with the flag
+     * dropped that request succeeded, by unmapping the program that made
+     * it.
+     */
+    if ((flags & FREEBSD_MAP_FIXED) && (flags & FREEBSD_MAP_EXCL)) {
+        uintptr_t start = (uintptr_t)addr;
+        uintptr_t end = start + ((len + PAGE_SIZE - 1) & ~(size_t)(PAGE_SIZE - 1));
+
+        if (len == 0 || (start & (PAGE_SIZE - 1)) || end <= start ||
+            !current_process || !current_process->vm_map ||
+            !vm_map_range_is_free(current_process->vm_map, start, end))
+            return (void *)(intptr_t)(-EINVAL);
+    }
 
     /*
      * MAP_ALIGNED(n): the result must be aligned to a 2^n boundary.  libthr's
