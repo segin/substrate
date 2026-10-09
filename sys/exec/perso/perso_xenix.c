@@ -3344,33 +3344,21 @@ static int64_t venix_sys_lock(struct x286_frame *f) {
  * else waits.  The size arrives in DX and CX and the mode in SI.
  */
 /*
- * The locks are kept here and not as fcntl(2) record locks: those belong
- * to an open file and do not contend between two opens of it, and these
- * are on the file, between processes, which is the whole use of them.
- * The table is the size of Venix's (NFLOCKS in its <sys/param.h>).  A
- * lock goes when it is unlocked or its process is gone; Venix also drops
- * a process's locks on a file when it closes it, which this does not see.
+ * They are fcntl(2)'s record locks, exclusive ones: on the file, between
+ * processes, waited for by a mode that waits, and gone when the process
+ * unlocks, closes the file or exits -- which is Venix's rule too.  They
+ * were once a table of this personality's own, when the kernel's record
+ * locks belonged to an open file and two opens of one did not contend;
+ * that table could not see a close, and kept a lock until its process
+ * ended.  Venix has room for thirty locks in the system (NFLOCKS); here
+ * there is no such limit to run into.
  */
-#define VENIX_NFLOCKS   30
-#define VENIX_LOCK_EOF  0x7fffffffU
-
-static struct venix_flock {
-    struct mount *mp;
-    uint32_t ino;
-    uint32_t start, end;                /* [start, end) */
-    int pid;                            /* 0: free */
-} venix_flocks[VENIX_NFLOCKS];
-static spinlock_t venix_flock_lock;
-static int venix_flock_lock_ready;
-
 static int64_t venix_sys_locking(struct x286_frame *f) {
     int fd = (int)(int16_t)f->bx;
     uint32_t size = (uint32_t)f->cx | ((uint32_t)f->si << 16);
     fs_node_t *node = x286_fd_vnode(fd);
-    struct venix_flock *l, *spare;
-    uint32_t start, end;
-    int64_t pos;
-    int busy;
+    struct kflock kf;
+    int rc;
 
     if (!node) {
         return -EBADF;
@@ -3378,81 +3366,15 @@ static int64_t venix_sys_locking(struct x286_frame *f) {
     if ((node->flags & 0x7) == FS_DIRECTORY) {
         return -EACCES;
     }
-    pos = sys_lseek(fd, 0, 0, 1);
-    if (pos < 0) {
-        return pos;
-    }
-    start = (uint32_t)pos;
-    end = (size == 0 || size > VENIX_LOCK_EOF - start) ? VENIX_LOCK_EOF
-                                                         : start + size;
-    if (!venix_flock_lock_ready) {
-        spinlock_init(&venix_flock_lock, "venix_flock");
-        venix_flock_lock_ready = 1;
-    }
-
-    for (;;) {
-        busy = 0;
-        spare = NULL;
-        spinlock_acquire(&venix_flock_lock);
-        for (l = venix_flocks; l < venix_flocks + VENIX_NFLOCKS; l++) {
-            if (l->pid != 0 && l->pid != (int)current_process->pid &&
-                !proc_find(l->pid)) {
-                l->pid = 0;             /* its process is gone */
-            }
-            if (l->pid == 0) {
-                if (!spare) spare = l;
-                continue;
-            }
-            if (l->mp != node->mp || l->ino != node->inode ||
-                l->start >= end || start >= l->end) {
-                continue;
-            }
-            if (l->pid != (int)current_process->pid) {
-                busy = 1;
-            } else if (f->di == 0) {
-                /* Unlock: what of this process's lock is in the range
-                 * goes.  A range out of the middle of one leaves the
-                 * part before it. */
-                if (l->start >= start && l->end <= end) {
-                    l->pid = 0;
-                    if (!spare) spare = l;
-                } else if (l->start < start) {
-                    l->end = start;
-                } else {
-                    l->start = end;
-                }
-            }
-        }
-        if (f->di == 0) {
-            spinlock_release(&venix_flock_lock);
-            sched_wakeup(venix_flocks);
-            return 0;
-        }
-        if (!busy) {
-            if (spare) {
-                spare->mp = node->mp;
-                spare->ino = node->inode;
-                spare->start = start;
-                spare->end = end;
-                spare->pid = (int)current_process->pid;
-            }
-            spinlock_release(&venix_flock_lock);
-            return spare ? 0 : -ENOSPC;
-        }
-        spinlock_release(&venix_flock_lock);
-        if (f->di == 1) {
-            return -EACCES;
-        }
-        if (current_thread) current_thread->flags |= THREAD_F_INTERRUPTIBLE;
-        (void)sched_sleep_until(venix_flocks,
-                                get_ticks() + (uint64_t)HZ / 20 + 1);
-        if (current_thread) {
-            current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
-            if (current_thread->sig_pending & ~current_thread->sig_mask) {
-                return -EINTR;
-            }
-        }
-    }
+    memset(&kf, 0, sizeof(kf));
+    kf.l_type = f->di == 0 ? F_UNLCK : F_WRLCK;
+    kf.l_whence = 1;                    /* from where the descriptor is */
+    kf.l_start = 0;
+    kf.l_len = size > 0x7fffffffU ? 0 : (int32_t)size;     /* 0: to the end */
+    rc = proc_advlock(current_process, fd,
+                      f->di <= 1 ? F_SETLK : F_SETLKW, &kf);
+    /* Another process has some of it: Venix says EACCES. */
+    return rc == -EAGAIN ? -EACCES : rc;
 }
 
 /*

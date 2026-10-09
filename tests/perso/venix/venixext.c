@@ -238,6 +238,24 @@ main()
 	    status == (7 << 8));
 	lseek(fd, 100L, 0);
 	locking(fd, 0, 50L);
+
+	/* A process's locks on a file go when it closes the file. */
+	{
+		int h = open("venixext.tmp", 2);
+
+		locking(h, 1, 0L);
+		close(h);
+	}
+	pid = fork();
+	if (pid == 0) {
+		int g = open("venixext.tmp", 2);
+
+		_exit(locking(g, 1, 0L) == 0 ? 7 : 8);
+	}
+	wait(&status);
+	check("a lock is gone when its file is closed", (long)status,
+	    status == (7 << 8));
+
 	n = aiowait(fd, 0);
 	check("aiowait: nothing outstanding", (long)n, n == 0);
 	close(fd);

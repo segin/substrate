@@ -1,4 +1,4 @@
-.TH VENIX 4 "2026-10-08" "Substrate" "Kernel Interfaces"
+.TH VENIX 4 "2026-10-09" "Substrate" "Kernel Interfaces"
 .SH NAME
 venix \- Venix/86 (Version 7 UNIX for the IBM PC) execution personality
 .SH DESCRIPTION
@@ -148,11 +148,10 @@ is 0.
 Mode 0 unlocks, 1 locks or fails with
 .B EACCES
 if another process holds any of the range, 2 waits for it.
-The locks are between processes on the file, thirty in the system as in
-Venix, and are apart from
-.BR fcntl (2)
-record locks.
-A process's locks go when it exits, not when it closes the file.
+The locks are between processes on the file, and are
+.BR fcntl (2)'s
+exclusive record locks: a process's go when it unlocks, closes the file
+or exits.  Venix's limit of thirty in the system is not kept.
 .TP
 .BR aiowait "(fd, flag)"
 Returns 0: no asynchronous transfer is ever outstanding.

@@ -19,7 +19,7 @@ With the image mounted at `/perso/venix` and `venixtest.c` copied into its
 Every line reads `ok`, and the last is `venixtest: PASS`.
 
 `venixext.c` is run the same way, as the superuser, and checks the calls
-Venix added to Version 7 (36 checks):
+Venix added to Version 7 (37 checks):
 
     /perso/venix/bin/sh -c 'cd /tmp && cc -o venixext venixext.c && ./venixext'
 
@@ -30,7 +30,7 @@ Venix added to Version 7 (36 checks):
 - `suspend` stopping and restarting a child (watched through the shared
   data it is counting in);
 - `locking`: refused to a second process, granted after the unlock, waited
-  for in mode 2, and by byte range;
+  for in mode 2, by byte range, and gone when the file is closed;
 - `phys` at the display adapter and refused below it; `lock`; `aiowait`.
 
 `sdata` and `phys` work through the ES register, which C cannot name, so
