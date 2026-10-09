@@ -1057,3 +1057,111 @@ int freebsd11_sys_kevent(int kq, const struct freebsd11_kevent *changes,
     return freebsd_kevent_common(kq, changes, nchanges, events, nevents,
                                  timeout, sizeof(struct freebsd11_kevent));
 }
+
+/*
+ * copy_file_range(2), FreeBSD 13 and later: up to `len` bytes from one
+ * regular file to another, in the kernel.  Each offset is the file's own
+ * position where its pointer is null, and otherwise is read from there
+ * and written back advanced, the file's position left alone.
+ *
+ * cat(1) and cp(1) try this first and do the work themselves if told
+ * EINVAL, which is what FreeBSD says when either end is not a regular
+ * file -- a pipe, a terminal.  With no such call here they were told
+ * ENOSYS, which they do not expect, and `cat file | anything` failed
+ * with "stdout: Function not implemented".
+ */
+#define FREEBSD_COPY_CHUNK 65536U
+
+abi_long_t freebsd_sys_copy_file_range(int infd, int64_t *inoffp, int outfd, int64_t *outoffp,
+                                       abi_ulong_t len, unsigned int flags) {
+    struct stat st;
+    int64_t inoff = 0, outoff = 0;
+    int in_saved = 0, out_saved = 0;
+    size_t done = 0;
+    char *kbuf;
+    int rc = 0;
+
+    if (flags != 0) {
+        return -EINVAL;
+    }
+    if ((rc = kern_fstat(infd, &st)) != 0) {
+        return rc;
+    }
+    if (!S_ISREG(st.st_mode)) {
+        return -EINVAL;
+    }
+    if ((rc = kern_fstat(outfd, &st)) != 0) {
+        return rc;
+    }
+    if (!S_ISREG(st.st_mode)) {
+        return -EINVAL;
+    }
+    if (inoffp != NULL && copyin(inoffp, &inoff, sizeof(inoff)) != 0) {
+        return -EFAULT;
+    }
+    if (outoffp != NULL && copyin(outoffp, &outoff, sizeof(outoff)) != 0) {
+        return -EFAULT;
+    }
+    if (inoff < 0 || outoff < 0) {
+        return -EINVAL;
+    }
+    kbuf = kmalloc(FREEBSD_COPY_CHUNK);
+    if (kbuf == NULL) {
+        return -ENOMEM;
+    }
+    /* With an offset given, the file is read or written there and its
+     * position put back afterwards. */
+    if (inoffp != NULL) {
+        in_saved = kern_lseek(infd, 0, SEEK_CUR);
+        rc = in_saved < 0 ? in_saved : kern_lseek(infd, (off_t)inoff, SEEK_SET);
+    }
+    if (rc >= 0 && outoffp != NULL) {
+        out_saved = kern_lseek(outfd, 0, SEEK_CUR);
+        rc = out_saved < 0 ? out_saved : kern_lseek(outfd, (off_t)outoff, SEEK_SET);
+    }
+    if (rc > 0) {
+        rc = 0;
+    }
+    /* A call may copy less than it was asked to, and one that copies a
+     * megabyte and comes back lets a signal in. */
+    while (rc == 0 && done < (size_t)len && done < 16U * FREEBSD_COPY_CHUNK) {
+        size_t want = (size_t)len - done;
+        ssize_t got, put;
+
+        if (want > FREEBSD_COPY_CHUNK) {
+            want = FREEBSD_COPY_CHUNK;
+        }
+        got = kern_read(infd, kbuf, want);
+        if (got <= 0) {
+            rc = (int)got;
+            break;
+        }
+        put = kern_write(outfd, kbuf, (size_t)got);
+        if (put < 0) {
+            rc = (int)put;
+            break;
+        }
+        done += (size_t)put;
+        if (put < got) {
+            break;
+        }
+    }
+    kfree(kbuf, FREEBSD_COPY_CHUNK);
+
+    if (inoffp != NULL) {
+        (void)kern_lseek(infd, (off_t)in_saved, SEEK_SET);
+        inoff += (int64_t)done;
+        if (copyout(&inoff, inoffp, sizeof(inoff)) != 0 && rc == 0) {
+            rc = -EFAULT;
+        }
+    }
+    if (outoffp != NULL) {
+        (void)kern_lseek(outfd, (off_t)out_saved, SEEK_SET);
+        outoff += (int64_t)done;
+        if (copyout(&outoff, outoffp, sizeof(outoff)) != 0 && rc == 0) {
+            rc = -EFAULT;
+        }
+    }
+    /* What was copied is reported even if the copying then stopped. */
+    return done != 0 ? (abi_long_t)done : rc;
+}

@@ -174,6 +174,7 @@ static void *freebsd_syscalls[MAX_SYSCALLS] = {
      */
     [FREEBSD_SYS_fstat_freebsd13] = (void *)&freebsd_sys_fstat_v13,
     [FREEBSD_SYS_getrandom] = &sys_getrandom,
+    [FREEBSD_SYS_copy_file_range] = (void *)&freebsd_sys_copy_file_range,
     [FREEBSD_SYS_sysctlbyname] = &sys_sysctlbyname,
     [FREEBSD_SYS_fstatat]   = (void *)&freebsd_sys_fstatat_v11,  /* 493: COMPAT11 freebsd11_stat */
     /* Syscall 552 is the modern fstatat — same st_size-shift bug as 551. */

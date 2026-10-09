@@ -760,5 +760,7 @@ int freebsd11_sys_kevent(int kq, const struct freebsd11_kevent *changes,
 int freebsd_sys_statfs(const char *path, struct freebsd_statfs *buf);
 int freebsd_sys_fstatfs(int fd, struct freebsd_statfs *buf);
 int freebsd_sys_getfsstat(struct freebsd_statfs *buf, abi_long_t bufsize, int mode);
+abi_long_t freebsd_sys_copy_file_range(int infd, int64_t *inoffp, int outfd, int64_t *outoffp,
+                                       abi_ulong_t len, unsigned int flags);
 
 #endif /* _FREEBSD_USER_H */

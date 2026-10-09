@@ -269,6 +269,7 @@ struct freebsd13_stat;
 #define FREEBSD_SYS_cpuset_getdomain 561
 #define FREEBSD_SYS_cpuset_setdomain 562
 #define FREEBSD_SYS_getrandom  563
+#define FREEBSD_SYS_copy_file_range 569
 #define FREEBSD_SYS_sysctlbyname 570
 #define FREEBSD_SYS_sysctl     202
 #define FREEBSD_SYS_close_range 575
