@@ -81,7 +81,7 @@ short writes and close errors checked.
   Evidence: `ld.c:5478-5540` with `7352`; `4437, 5331-5341`; `4816, 5233-5243`; attribution to the first shared object (`5544-5548`) and skipping an earlier unversioned definition (`5212-5214`) are suspected.  Basis: traced.  Task #79.
 - [x] **LD-DYN-003** While no `-m` mode was given, the linker shall fix the link mode from the first input and shall not change it when probing later shared objects.
   Evidence: `ld.c:4884, 4936, 5013, 5168` call `maybe_autoswitch_mode` with a count of 0.  Basis: traced.  Task #78.
-- [ ] **LD-DYN-004** The linker shall brand shared objects and position-independent executables with the Substrate OSABI as it does executables, in host and target builds alike.
+- [x] **LD-DYN-004** The linker shall brand shared objects and position-independent executables with the Substrate OSABI as it does executables, in host and target builds alike.
   Evidence: `ld.c:10652-10660`.  Basis: suspected (run-time consequences not traced).  Task #102.
 
 ## 4. Output layout and segments
@@ -105,7 +105,7 @@ short writes and close errors checked.
 
 - [x] **LD-OPT-001** If a `-z` keyword is not recognised, then the linker shall warn and continue; where `-z now` is given it shall set `DT_BIND_NOW`.
   Evidence: `ld.c:631-660` accepts six keywords; `11554-11562` exits 2.  Basis: verified.  Task #64.
-- [ ] **LD-OPT-002** The linker shall treat `-pie` as an executable link (entry required, undefined symbols diagnosed, branded, mode 0755) and shall not let `-static` change the output type.
+- [x] **LD-OPT-002** The linker shall treat `-pie` as an executable link (entry required, undefined symbols diagnosed, branded, mode 0755) and shall not let `-static` change the output type.
   Evidence: `ld.c:11096-11101, 11103-11104`.  Basis: verified.  Task #98.
 - [x] **LD-OPT-003** The linker shall recognise `-Ttext`, `-Tdata` and `-Tbss` as distinct from `-T`, joined `-oFILE`, and the options its specification lists (`-soname`, `-rpath`, `--emit-relocs`, `--strip-debug`, `-s`, `--build-id`), without depending on the order of prefix tests.
   Evidence: `ld.c:11514, 11032, 11565, 11569`; `10916`.  Basis: traced.  Task #103.

@@ -231,6 +231,7 @@ typedef enum {
 #define DF_BIND_NOW 0x8         /* in DT_FLAGS: no lazy binding */
 #define DT_FLAGS_1 0x6ffffffb
 #define DF_1_NOW 0x1            /* in DT_FLAGS_1: the same */
+#define DF_1_PIE 0x08000000     /* in DT_FLAGS_1: a program, not a library */
 #define DT_PREINIT_ARRAY 32
 #define DT_PREINIT_ARRAYSZ 33
 #define DT_GNU_HASH 0x6ffffef5

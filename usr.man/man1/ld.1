@@ -98,12 +98,28 @@ Select output architecture mode.
 Produce relocatable
 .Dv ET_REL
 output.
-.It Fl shared , Fl pie
-Produce
+.It Fl shared
+Produce a shared object: no entry is needed, what it leaves undefined is
+for the program that loads it to supply, and it is not made executable.
+.It Fl pie
+Produce a position-independent executable.
+It is
 .Dv ET_DYN
-output.
+as a shared object is, and a program in every other way: it begins at
+its entry, an undefined symbol is an error, it is made executable, and
+.Dv DF_1_PIE
+marks it.
+.Fl no-pie
+undoes it.
 .It Fl static
-Prefer static archive resolution.
+Use archives for the libraries that follow.
+It does not change what is produced:
+.Fl static Fl pie
+is a PIE.
+.Pp
+Executables and shared objects are branded for Substrate
+.Pq Dv ELFOSABI_SUBSTRATE ,
+whichever system the linker itself runs on; relocatable output is not.
 .It Fl e Ar symbol
 Where an executable begins.
 A symbol named here, or by

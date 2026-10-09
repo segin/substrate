@@ -160,6 +160,7 @@ typedef struct {
     const char *soname;         /* -soname, -h: the output's DT_SONAME */
     uint64_t image_base;        /* -Ttext-segment, when have_image_base */
     int have_image_base;
+    int pie;                    /* -pie: ET_DYN, and a program */
     int strip_debug;            /* -S, -s: no debugging information */
     int emit_relocs;            /* -q: the output keeps its relocations */
     strvec_t rpaths;            /* -rpath: the output's DT_RUNPATH */
@@ -8544,10 +8545,14 @@ static int plan_dynamic_needed(ld_ctx_t *ctx, elfobj_t *out) {
      */
     textrel = text_relocation_section(ctx, out) != NULL;
     if ((ctx->z_now &&
-         (dynamic_append_entry(&dynamic_buf, &dynamic_len, &dynamic_cap,
-                               elf_class(out), elf_endian(out), DT_BIND_NOW, 0) != 0 ||
-          dynamic_append_entry(&dynamic_buf, &dynamic_len, &dynamic_cap,
-                               elf_class(out), elf_endian(out), DT_FLAGS_1, DF_1_NOW) != 0)) ||
+         dynamic_append_entry(&dynamic_buf, &dynamic_len, &dynamic_cap,
+                              elf_class(out), elf_endian(out), DT_BIND_NOW, 0) != 0) ||
+        /* DF_1_PIE is how a PIE is told from a shared object, both being
+         * ET_DYN. */
+        ((ctx->z_now || ctx->pie) &&
+         dynamic_append_entry(&dynamic_buf, &dynamic_len, &dynamic_cap,
+                              elf_class(out), elf_endian(out), DT_FLAGS_1,
+                              (ctx->z_now ? DF_1_NOW : 0) | (ctx->pie ? DF_1_PIE : 0)) != 0) ||
         (textrel &&
          dynamic_append_entry(&dynamic_buf, &dynamic_len, &dynamic_cap,
                               elf_class(out), elf_endian(out), DT_TEXTREL, 0) != 0) ||
@@ -12579,6 +12584,7 @@ static int run_internal_link(ld_ctx_t *ctx) {
     elf_err_t err;
     uint16_t out_type;
     int allow_undef_runtime;
+    int is_program;             /* an executable or a PIE: not a library */
     uint64_t base_vaddr;
 
     memset(&inputs, 0, sizeof(inputs));
@@ -12650,8 +12656,9 @@ static int run_internal_link(ld_ctx_t *ctx) {
     }
 
     out_type = ctx->expect_type == 0 ? ET_EXEC : ctx->expect_type;
+    is_program = out_type == ET_EXEC || (out_type == ET_DYN && ctx->pie);
     allow_undef_runtime = ctx->allow_undefined;
-    if (out_type == ET_DYN && !ctx->explicit_unresolved_policy) {
+    if (!is_program && out_type == ET_DYN && !ctx->explicit_unresolved_policy) {
         allow_undef_runtime = 1;
     }
     if (elf_set_type(out, out_type) != ELF_OK) {
@@ -12661,15 +12668,19 @@ static int run_internal_link(ld_ctx_t *ctx) {
         elf_close(out);
         return -1;
     }
-#ifdef LD_SUBSTRATE_BUILD
-    if (out_type == ET_EXEC && elf_set_osabi(out, ELFOSABI_SUBSTRATE) != ELF_OK) {
+    /*
+     * What this linker makes is for substrate, and says so, whichever
+     * system the linker itself was built to run on: the brand is what
+     * the kernel picks the personality by, and the system's own shared
+     * objects carry it as its programs do.
+     */
+    if ((out_type == ET_EXEC || out_type == ET_DYN) && elf_set_osabi(out, ELFOSABI_SUBSTRATE) != ELF_OK) {
         fprintf(stderr, "ld: failed to set Substrate ELF OSABI\n");
         symref_map_free(&undef_refs);
         objvec_free(&inputs);
         elf_close(out);
         return -1;
     }
-#endif
     if (ctx->strip_debug) {
         size_t si;
 
@@ -12758,7 +12769,7 @@ static int run_internal_link(ld_ctx_t *ctx) {
         return 0;
     }
 
-    if (out_type == ET_EXEC && ensure_substrate_ld_note(out) != 0) {
+    if (is_program && ensure_substrate_ld_note(out) != 0) {
         fprintf(stderr, "ld: failed to emit .note.substrate_ld metadata\n");
         symref_map_free(&undef_refs);
         objvec_free(&inputs);
@@ -12909,7 +12920,7 @@ static int run_internal_link(ld_ctx_t *ctx) {
     }
 
     if (set_entry_symbol(ctx, out, ctx->entry_symbol != NULL ? ctx->entry_symbol : "_start",
-                         out_type == ET_EXEC, ctx->entry_symbol != NULL) != 0) {
+                         is_program, ctx->entry_symbol != NULL) != 0) {
         symref_map_free(&undef_refs);
         objvec_free(&inputs);
         elf_close(out);
@@ -12943,7 +12954,7 @@ static int run_internal_link(ld_ctx_t *ctx) {
         elf_close(out);
         return -1;
     }
-    if (set_output_mode(ctx->out_path, out_type == ET_EXEC) != 0) {
+    if (set_output_mode(ctx->out_path, is_program) != 0) {
         if (ld_warn(ctx, "failed to set output mode on %s: %s",
                     ctx->out_path, strerror(errno)) != 0) {
             symref_map_free(&undef_refs);
@@ -13167,15 +13178,28 @@ int main(int argc, char **argv) {
             ctx.expect_type = ET_REL;
             continue;
         }
-        if (strcmp(a, "-shared") == 0 || strcmp(a, "-pie") == 0) {
+        if (strcmp(a, "-shared") == 0 || strcmp(a, "-pie") == 0 || strcmp(a, "--pie") == 0 ||
+            strcmp(a, "-Bshareable") == 0) {
+            /* Both are ET_DYN.  A PIE is a program all the same: it has
+             * an entry, what it leaves undefined is an error, and it is
+             * made executable. */
             ctx.expect_type = ET_DYN;
+            ctx.pie = a[1] == 'p' || a[2] == 'p';
             if (!ctx.explicit_lib_mode) {
                 ctx.current_lib_mode = LD_LIBMODE_DYNAMIC;
             }
             continue;
         }
+        if (strcmp(a, "-no-pie") == 0 || strcmp(a, "--no-pie") == 0) {
+            if (ctx.pie) {
+                ctx.pie = 0;
+                ctx.expect_type = ET_EXEC;
+            }
+            continue;
+        }
         if (strcmp(a, "-static") == 0) {
-            ctx.expect_type = ET_EXEC;
+            /* Which libraries to use, not what to make: -static -pie is a
+             * PIE, and -shared -static a shared object of archives. */
             ctx.current_lib_mode = LD_LIBMODE_STATIC;
             ctx.explicit_lib_mode = 1;
             continue;

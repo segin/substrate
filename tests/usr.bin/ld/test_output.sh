@@ -72,5 +72,29 @@ is "-S leaves it out"                 "$(readelf -SW nodebug | grep -c '\.debug'
 is "no relocation sections in a program" "$(readelf -SW withdebug | grep -c ' \.rel\.')" 0
 is "-q keeps them"                    "$(readelf -SW withrel | grep -c ' \.rel\.text')" 1
 
+# A PIE is a program that happens to be ET_DYN; a shared object is a
+# library; -static says which libraries to use and not which to make.
+# Everything made is branded for substrate.
+printf 'int missing(void);\nvoid _start(void) { missing(); for (;;) { } }\n' > u.c
+${CC:-cc} -m32 -c -ffreestanding -fPIE -fno-asynchronous-unwind-tables -o spie.o s.c
+${CC:-cc} -m32 -c -ffreestanding -fPIE -fno-asynchronous-unwind-tables -o u.o u.c
+./ld -m elf_i386 -pie -o pie spie.o; ./ld -m elf_i386 -shared -o lib.so spie.o
+is "a PIE is ET_DYN"                  "$(readelf -h pie | sed -n 's/.*Type: *\([A-Z]*\).*/\1/p')" DYN
+is "marked as a program"              "$(readelf -d pie | grep -c 'PIE')" 1
+is "executable"                       "$(stat -c %a pie)" 755
+is "with an entry"                    "$(readelf -h pie | sed -n 's/.*Entry point address: *//p' | grep -c -v '^0x0$')" 1
+is "a shared object is not executable" "$(stat -c %a lib.so)" 644
+is "nor marked as a program"          "$(readelf -d lib.so | grep -c 'PIE')" 0
+if ./ld -m elf_i386 -pie -o upie u.o 2> err; then echo "FAIL a PIE with something undefined: linked"; fail=1
+else is "a PIE with something undefined is an error" "$(grep -c 'undefined reference to .missing' err)" 1; fi
+./ld -m elf_i386 -shared -o ulib.so u.o
+is "a shared object with something undefined is not" "$?" 0
+./ld -m elf_i386 -static -shared -o slib.so spie.o
+is "-static -shared is still a shared object" "$(readelf -h slib.so | sed -n 's/.*Type: *\([A-Z]*\).*/\1/p')" DYN
+for f in p022 pie lib.so; do
+    is "$f is branded for substrate" "$(od -An -tu1 -j7 -N1 "$f" | tr -d ' ')" 64
+done
+is "a relocatable file is not branded" "$(od -An -tu1 -j7 -N1 r022.o | tr -d ' ')" 0
+
 [ "$fail" -eq 0 ] && echo "PASS" || echo "FAILED"
 exit "$fail"
