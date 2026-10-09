@@ -1,6 +1,7 @@
 #ifndef SUBSTRATE_AS_PARSER_H
 #define SUBSTRATE_AS_PARSER_H
 
+#include "as_expr.h"
 #include "as_lexer.h"
 
 #include <stddef.h>
@@ -19,52 +20,6 @@ typedef struct {
     int intel_syntax;
     as_parser_arch_t arch;
 } as_parser_cfg_t;
-
-typedef enum {
-    AS_EXPR_CONST = 0,
-    AS_EXPR_SYMBOL,
-    AS_EXPR_LOCAL_REF,
-    AS_EXPR_UNARY,
-    AS_EXPR_BINARY,
-} as_expr_kind_t;
-
-typedef enum {
-    AS_EXPR_OP_NONE = 0,
-    AS_EXPR_OP_ADD,
-    AS_EXPR_OP_SUB,
-    AS_EXPR_OP_MUL,
-    AS_EXPR_OP_DIV,
-    AS_EXPR_OP_MOD,
-    AS_EXPR_OP_OR,
-    AS_EXPR_OP_AND,
-    AS_EXPR_OP_XOR,
-    AS_EXPR_OP_SHL,
-    AS_EXPR_OP_SHR,
-    AS_EXPR_OP_EQ,
-    AS_EXPR_OP_NE,
-    AS_EXPR_OP_LT,
-    AS_EXPR_OP_LE,
-    AS_EXPR_OP_GT,
-    AS_EXPR_OP_GE,
-    AS_EXPR_OP_NEG,
-    AS_EXPR_OP_BNOT,
-} as_expr_op_t;
-
-typedef struct as_expr as_expr_t;
-struct as_expr {
-    as_expr_kind_t kind;
-    as_expr_op_t op;
-    long long value;
-    char *symbol;
-    int local_digit;
-    int local_forward;
-    int local_resolved;
-    unsigned local_target_line;
-    unsigned src_line;
-    char *src_file;
-    as_expr_t *lhs;
-    as_expr_t *rhs;
-};
 
 typedef enum {
     AS_OPERAND_INVALID = 0,
@@ -186,9 +141,6 @@ typedef struct {
 
 void as_parse_result_init(as_parse_result_t *r);
 void as_parse_result_free(as_parse_result_t *r);
-void as_expr_free(as_expr_t *e);
-
-as_expr_t *as_parse_expr_string(const char *s, const char *file, unsigned line);
 
 int as_parse_tokens(const as_token_vec_t *tokens, const as_parser_cfg_t *cfg,
                     as_parse_result_t *out, char *errbuf, size_t errbuf_sz);

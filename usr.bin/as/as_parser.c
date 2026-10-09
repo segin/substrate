@@ -39,40 +39,6 @@ typedef struct {
     int rounding_mode;
 } x86_operand_decorators_t;
 
-typedef enum {
-    EXPR_TOK_EOF = 0,
-    EXPR_TOK_NUMBER,
-    EXPR_TOK_SYMBOL,
-    EXPR_TOK_LOCAL,
-    EXPR_TOK_LPAREN,
-    EXPR_TOK_RPAREN,
-    EXPR_TOK_OP,
-} expr_tok_kind_t;
-
-typedef struct {
-    expr_tok_kind_t kind;
-    as_expr_op_t op;
-    long long number;
-    char *symbol;
-    int local_digit;
-    int local_forward;
-} expr_tok_t;
-
-typedef struct {
-    const char *s;
-    size_t i;
-    expr_tok_t cur;
-    const as_token_t *src;
-    /* Recursion guard for the precedence-climbing parser.  The grammar
-     * lets parse_expr_primary call parse_expr_bp (via parens) which
-     * calls parse_expr_primary again, etc.  Cap at 256 levels so a
-     * malicious .s with `((((...))))` thousands deep can't blow the
-     * stack. */
-    int depth;
-} expr_lex_t;
-
-#define EXPR_MAX_DEPTH 256
-
 static void set_err(parse_ctx_t *ctx, const char *fmt, ...) {
     va_list ap;
 
@@ -159,21 +125,6 @@ void as_parse_result_init(as_parse_result_t *r) {
     r->cap = 0;
 }
 
-static void free_expr(as_expr_t *e) {
-    if (e == NULL) {
-        return;
-    }
-    free_expr(e->lhs);
-    free_expr(e->rhs);
-    free(e->symbol);
-    free(e->src_file);
-    free(e);
-}
-
-void as_expr_free(as_expr_t *e) {
-    free_expr(e);
-}
-
 static void free_operand(as_operand_t *op) {
     size_t i;
 
@@ -187,18 +138,18 @@ static void free_operand(as_operand_t *op) {
         break;
     case AS_OPERAND_IMMEDIATE:
     case AS_OPERAND_LABEL_REF:
-        free_expr(op->u.expr);
+        as_expr_free(op->u.expr);
         break;
     case AS_OPERAND_MEMORY:
         free(op->u.mem.base_reg);
         free(op->u.mem.index_reg);
         free(op->u.mem.segment_reg);
-        free_expr(op->u.mem.disp);
+        as_expr_free(op->u.mem.disp);
         break;
     case AS_OPERAND_SHIFTED_REGISTER:
         free(op->u.shifted.reg);
         free(op->u.shifted.amount_reg);
-        free_expr(op->u.shifted.amount_expr);
+        as_expr_free(op->u.shifted.amount_expr);
         break;
     case AS_OPERAND_REGISTER_LIST:
         for (i = 0; i < op->u.reg_list.count; ++i) {
@@ -705,471 +656,18 @@ static as_expr_t *new_expr(as_expr_kind_t kind, const as_token_t *src) {
     return e;
 }
 
-static void expr_lex_free_cur(expr_lex_t *lx) {
-    free(lx->cur.symbol);
-    lx->cur.symbol = NULL;
-}
-
-static int expr_parse_number(const char *s, size_t *inout_i, long long *out) {
-    size_t i = *inout_i;
-    int base = 10;
-    uint64_t v = 0;
-    int saw = 0;
-
-    if (s[i] == '0' && (s[i + 1] == 'x' || s[i + 1] == 'X')) {
-        base = 16;
-        i += 2;
-    } else if (s[i] == '0' && (s[i + 1] == 'b' || s[i + 1] == 'B')) {
-        base = 2;
-        i += 2;
-    } else if (s[i] == '0' && isdigit((unsigned char)s[i + 1])) {
-        base = 8;
-        i += 1;
-    }
-
-    while (s[i] != '\0') {
-        int d = -1;
-        if (s[i] >= '0' && s[i] <= '9') {
-            d = s[i] - '0';
-        } else if (base == 16 && s[i] >= 'a' && s[i] <= 'f') {
-            d = 10 + s[i] - 'a';
-        } else if (base == 16 && s[i] >= 'A' && s[i] <= 'F') {
-            d = 10 + s[i] - 'A';
-        }
-        if (d < 0 || d >= base) {
-            break;
-        }
-        saw = 1;
-        if (v > (UINT64_MAX - (uint64_t)d) / (uint64_t)base) {
-            return -1;
-        }
-        v = v * (uint64_t)base + (uint64_t)d;
-        i++;
-    }
-    if (!saw) {
-        return -1;
-    }
-    *out = (long long)(int64_t)v;
-    *inout_i = i;
-    return 0;
-}
-
-static int expr_lex_next(expr_lex_t *lx) {
-    const char *s = lx->s;
-    size_t i;
-
-    expr_lex_free_cur(lx);
-    memset(&lx->cur, 0, sizeof(lx->cur));
-
-    i = lx->i;
-    while (s[i] != '\0' && isspace((unsigned char)s[i])) {
-        i++;
-    }
-
-    if (s[i] == '\0') {
-        lx->cur.kind = EXPR_TOK_EOF;
-        lx->i = i;
-        return 0;
-    }
-
-    if (s[i] == '(') {
-        lx->cur.kind = EXPR_TOK_LPAREN;
-        lx->i = i + 1;
-        return 0;
-    }
-    if (s[i] == ')') {
-        lx->cur.kind = EXPR_TOK_RPAREN;
-        lx->i = i + 1;
-        return 0;
-    }
-
-    if (s[i] == '<' && s[i + 1] == '<') {
-        lx->cur.kind = EXPR_TOK_OP;
-        lx->cur.op = AS_EXPR_OP_SHL;
-        lx->i = i + 2;
-        return 0;
-    }
-    if (s[i] == '>' && s[i + 1] == '>') {
-        lx->cur.kind = EXPR_TOK_OP;
-        lx->cur.op = AS_EXPR_OP_SHR;
-        lx->i = i + 2;
-        return 0;
-    }
-    if (s[i] == '=' && s[i + 1] == '=') {
-        lx->cur.kind = EXPR_TOK_OP;
-        lx->cur.op = AS_EXPR_OP_EQ;
-        lx->i = i + 2;
-        return 0;
-    }
-    if (s[i] == '!' && s[i + 1] == '=') {
-        lx->cur.kind = EXPR_TOK_OP;
-        lx->cur.op = AS_EXPR_OP_NE;
-        lx->i = i + 2;
-        return 0;
-    }
-    if (s[i] == '<' && s[i + 1] == '=') {
-        lx->cur.kind = EXPR_TOK_OP;
-        lx->cur.op = AS_EXPR_OP_LE;
-        lx->i = i + 2;
-        return 0;
-    }
-    if (s[i] == '>' && s[i + 1] == '=') {
-        lx->cur.kind = EXPR_TOK_OP;
-        lx->cur.op = AS_EXPR_OP_GE;
-        lx->i = i + 2;
-        return 0;
-    }
-    if (s[i] == '<' || s[i] == '>') {
-        lx->cur.kind = EXPR_TOK_OP;
-        lx->cur.op = (s[i] == '<') ? AS_EXPR_OP_LT : AS_EXPR_OP_GT;
-        lx->i = i + 1;
-        return 0;
-    }
-
-    if (s[i] == '+' || s[i] == '-' || s[i] == '*' || s[i] == '/' || s[i] == '%' || s[i] == '|' || s[i] == '&' ||
-        s[i] == '^' || s[i] == '~') {
-        lx->cur.kind = EXPR_TOK_OP;
-        switch (s[i]) {
-        case '+':
-            lx->cur.op = AS_EXPR_OP_ADD;
-            break;
-        case '-':
-            lx->cur.op = AS_EXPR_OP_SUB;
-            break;
-        case '*':
-            lx->cur.op = AS_EXPR_OP_MUL;
-            break;
-        case '/':
-            lx->cur.op = AS_EXPR_OP_DIV;
-            break;
-        case '%':
-            lx->cur.op = AS_EXPR_OP_MOD;
-            break;
-        case '|':
-            lx->cur.op = AS_EXPR_OP_OR;
-            break;
-        case '&':
-            lx->cur.op = AS_EXPR_OP_AND;
-            break;
-        case '^':
-            lx->cur.op = AS_EXPR_OP_XOR;
-            break;
-        case '~':
-            lx->cur.op = AS_EXPR_OP_BNOT;
-            break;
-        default:
-            break;
-        }
-        lx->i = i + 1;
-        return 0;
-    }
-
-    if (isdigit((unsigned char)s[i])) {
-        long long v = 0;
-        size_t begin = i;
-        size_t end = i;
-
-        while (isdigit((unsigned char)s[end])) {
-            end++;
-        }
-        if (end > begin && s[end] != '\0' && (s[end] == 'f' || s[end] == 'b') &&
-            !isalnum((unsigned char)s[end + 1]) && s[end + 1] != '_') {
-            long long local_id = 0;
-            size_t j;
-            for (j = begin; j < end; ++j) {
-                if (local_id > (long long)(INT_MAX / 10)) {
-                    return -1;
-                }
-                local_id = local_id * 10 + (long long)(s[j] - '0');
-                if (local_id > INT_MAX) {
-                    return -1;
-                }
-            }
-            lx->cur.kind = EXPR_TOK_LOCAL;
-            lx->cur.local_digit = (int)local_id;
-            lx->cur.local_forward = (s[end] == 'f');
-            lx->i = end + 1;
-            return 0;
-        }
-
-        if (expr_parse_number(s, &i, &v) != 0) {
-            return -1;
-        }
-        if (isalnum((unsigned char)s[i]) || s[i] == '_') {
-            i = begin;
-        } else {
-            lx->cur.kind = EXPR_TOK_NUMBER;
-            lx->cur.number = v;
-            lx->i = i;
-            return 0;
-        }
-    }
-
-    if (isalpha((unsigned char)s[i]) || s[i] == '_' || s[i] == '.' || s[i] == '$') {
-        size_t begin = i;
-        size_t len;
-
-        i++;
-        while (isalnum((unsigned char)s[i]) || s[i] == '_' || s[i] == '.' || s[i] == '$' || s[i] == '@') {
-            i++;
-        }
-        len = i - begin;
-        lx->cur.symbol = (char *)malloc(len + 1);
-        if (lx->cur.symbol == NULL) {
-            return -1;
-        }
-        memcpy(lx->cur.symbol, s + begin, len);
-        lx->cur.symbol[len] = '\0';
-        lx->cur.kind = EXPR_TOK_SYMBOL;
-        lx->i = i;
-        return 0;
-    }
-
-    return -1;
-}
-
-static int expr_precedence(as_expr_op_t op) {
-    switch (op) {
-    case AS_EXPR_OP_EQ:
-    case AS_EXPR_OP_NE:
-    case AS_EXPR_OP_LT:
-    case AS_EXPR_OP_LE:
-    case AS_EXPR_OP_GT:
-    case AS_EXPR_OP_GE:
-        return 1;
-    case AS_EXPR_OP_OR:
-        return 2;
-    case AS_EXPR_OP_XOR:
-        return 3;
-    case AS_EXPR_OP_AND:
-        return 4;
-    case AS_EXPR_OP_SHL:
-    case AS_EXPR_OP_SHR:
-        return 5;
-    case AS_EXPR_OP_ADD:
-    case AS_EXPR_OP_SUB:
-        return 6;
-    case AS_EXPR_OP_MUL:
-    case AS_EXPR_OP_DIV:
-    case AS_EXPR_OP_MOD:
-        return 7;
-    default:
-        return -1;
-    }
-}
-
-static as_expr_t *parse_expr_bp(expr_lex_t *lx, int min_bp, parse_ctx_t *ctx);
-
-static as_expr_t *parse_expr_primary_inner(expr_lex_t *lx, parse_ctx_t *ctx);
-
-static as_expr_t *parse_expr_primary(expr_lex_t *lx, parse_ctx_t *ctx) {
-    as_expr_t *e;
-
-    if (lx->depth >= EXPR_MAX_DEPTH) {
-        return NULL;
-    }
-    lx->depth++;
-    e = parse_expr_primary_inner(lx, ctx);
-    lx->depth--;
-    return e;
-}
-
-static as_expr_t *parse_expr_primary_inner(expr_lex_t *lx, parse_ctx_t *ctx) {
-    as_expr_t *e;
-
-    if (lx->cur.kind == EXPR_TOK_NUMBER) {
-        e = new_expr(AS_EXPR_CONST, lx->src);
-        if (e == NULL) {
-            return NULL;
-        }
-        e->value = lx->cur.number;
-        if (expr_lex_next(lx) != 0) {
-            free_expr(e);
-            return NULL;
-        }
-        return e;
-    }
-
-    if (lx->cur.kind == EXPR_TOK_SYMBOL) {
-        e = new_expr(AS_EXPR_SYMBOL, lx->src);
-        if (e == NULL) {
-            return NULL;
-        }
-        e->symbol = xstrdup(lx->cur.symbol);
-        if (e->symbol == NULL) {
-            free_expr(e);
-            return NULL;
-        }
-        if (expr_lex_next(lx) != 0) {
-            free_expr(e);
-            return NULL;
-        }
-        return e;
-    }
-
-    if (lx->cur.kind == EXPR_TOK_LOCAL) {
-        e = new_expr(AS_EXPR_LOCAL_REF, lx->src);
-        if (e == NULL) {
-            return NULL;
-        }
-        e->local_digit = lx->cur.local_digit;
-        e->local_forward = lx->cur.local_forward;
-        if (expr_lex_next(lx) != 0) {
-            free_expr(e);
-            return NULL;
-        }
-        return e;
-    }
-
-    if (lx->cur.kind == EXPR_TOK_OP && (lx->cur.op == AS_EXPR_OP_SUB || lx->cur.op == AS_EXPR_OP_BNOT || lx->cur.op == AS_EXPR_OP_ADD)) {
-        as_expr_op_t uop = lx->cur.op;
-        as_expr_t *rhs;
-
-        if (expr_lex_next(lx) != 0) {
-            return NULL;
-        }
-        rhs = parse_expr_primary(lx, ctx);
-        if (rhs == NULL) {
-            return NULL;
-        }
-        if (uop == AS_EXPR_OP_ADD) {
-            return rhs;
-        }
-
-        e = new_expr(AS_EXPR_UNARY, lx->src);
-        if (e == NULL) {
-            free_expr(rhs);
-            return NULL;
-        }
-        e->op = (uop == AS_EXPR_OP_SUB) ? AS_EXPR_OP_NEG : AS_EXPR_OP_BNOT;
-        e->lhs = rhs;
-        return e;
-    }
-
-    if (lx->cur.kind == EXPR_TOK_LPAREN) {
-        if (expr_lex_next(lx) != 0) {
-            return NULL;
-        }
-        e = parse_expr_bp(lx, 0, ctx);
-        if (e == NULL) {
-            return NULL;
-        }
-        if (lx->cur.kind != EXPR_TOK_RPAREN) {
-            free_expr(e);
-            return NULL;
-        }
-        if (expr_lex_next(lx) != 0) {
-            free_expr(e);
-            return NULL;
-        }
-        return e;
-    }
-
-    (void)ctx;
-    return NULL;
-}
-
-static as_expr_t *parse_expr_bp(expr_lex_t *lx, int min_bp, parse_ctx_t *ctx) {
-    as_expr_t *lhs;
-
-    lhs = parse_expr_primary(lx, ctx);
-    if (lhs == NULL) {
-        return NULL;
-    }
-
-    while (lx->cur.kind == EXPR_TOK_OP) {
-        as_expr_op_t op = lx->cur.op;
-        int prec = expr_precedence(op);
-        as_expr_t *rhs;
-        as_expr_t *node;
-
-        if (prec < min_bp) {
-            break;
-        }
-        if (expr_lex_next(lx) != 0) {
-            free_expr(lhs);
-            return NULL;
-        }
-        rhs = parse_expr_bp(lx, prec + 1, ctx);
-        if (rhs == NULL) {
-            free_expr(lhs);
-            return NULL;
-        }
-
-        node = new_expr(AS_EXPR_BINARY, lx->src);
-        if (node == NULL) {
-            free_expr(lhs);
-            free_expr(rhs);
-            return NULL;
-        }
-        node->op = op;
-        node->lhs = lhs;
-        node->rhs = rhs;
-        lhs = node;
-    }
-
-    return lhs;
-}
-
+/* The tokens of an operand, as text, to the expression parser. */
 static as_expr_t *parse_expression_from_tokens(parse_ctx_t *ctx, const as_token_t *tokv, size_t n) {
     char *expr_s;
-    expr_lex_t lx;
     as_expr_t *e;
 
+    (void)ctx;
     expr_s = join_tokens(tokv, n, 1);
     if (expr_s == NULL) {
         return NULL;
     }
-
-    memset(&lx, 0, sizeof(lx));
-    lx.s = expr_s;
-    lx.i = 0;
-    lx.src = n > 0 ? &tokv[0] : NULL;
-    if (expr_lex_next(&lx) != 0) {
-        free(expr_s);
-        return NULL;
-    }
-
-    e = parse_expr_bp(&lx, 0, ctx);
-    if (e == NULL || lx.cur.kind != EXPR_TOK_EOF) {
-        free_expr(e);
-        expr_lex_free_cur(&lx);
-        free(expr_s);
-        return NULL;
-    }
-
-    expr_lex_free_cur(&lx);
+    e = as_parse_expr_string(expr_s, n > 0 ? tokv[0].file : NULL, n > 0 ? tokv[0].line : 0);
     free(expr_s);
-    return e;
-}
-
-as_expr_t *as_parse_expr_string(const char *s, const char *file, unsigned line) {
-    as_token_t tok;
-    expr_lex_t lx;
-    as_expr_t *e;
-
-    if (s == NULL) {
-        return NULL;
-    }
-    memset(&tok, 0, sizeof(tok));
-    tok.kind = AS_TOK_IDENTIFIER;
-    tok.text = (char *)s;
-    tok.file = (char *)file;
-    tok.line = line;
-
-    memset(&lx, 0, sizeof(lx));
-    lx.s = s;
-    lx.src = &tok;
-    if (expr_lex_next(&lx) != 0) {
-        return NULL;
-    }
-    e = parse_expr_bp(&lx, 0, NULL);
-    if (e == NULL || lx.cur.kind != EXPR_TOK_EOF) {
-        free_expr(e);
-        expr_lex_free_cur(&lx);
-        return NULL;
-    }
-    expr_lex_free_cur(&lx);
     return e;
 }
 
@@ -1380,15 +878,15 @@ static int parse_att_memory(parse_ctx_t *ctx, const as_token_t *tokv, size_t n, 
     if (comp_count >= 3 && comp_ends[2] > comp_starts[2]) {
         as_expr_t *sc = parse_expression_from_tokens(ctx, tokv + comp_starts[2], (size_t)(comp_ends[2] - comp_starts[2]));
         if (sc == NULL || sc->kind != AS_EXPR_CONST) {
-            free_expr(sc);
+            as_expr_free(sc);
             free(mem.base_reg);
             free(mem.index_reg);
             free(mem.segment_reg);
-            free_expr(mem.disp);
+            as_expr_free(mem.disp);
             return -1;
         }
         mem.scale = (int)sc->value;
-        free_expr(sc);
+        as_expr_free(sc);
     }
 
     out_op->kind = AS_OPERAND_MEMORY;
@@ -1434,12 +932,12 @@ static int parse_intel_index_scale_token(parse_ctx_t *ctx, const as_token_t *tok
     fake.col = tok->col;
     sc = parse_expression_from_tokens(ctx, &fake, 1);
     if (sc == NULL || sc->kind != AS_EXPR_CONST) {
-        free_expr(sc);
+        as_expr_free(sc);
         free(left);
         return -1;
     }
     if (sc->value != 1 && sc->value != 2 && sc->value != 4 && sc->value != 8) {
-        free_expr(sc);
+        as_expr_free(sc);
         free(left);
         return -1;
     }
@@ -1450,7 +948,7 @@ static int parse_intel_index_scale_token(parse_ctx_t *ctx, const as_token_t *tok
     } else {
         *index_reg_out = strip_register_prefix(left);
     }
-    free_expr(sc);
+    as_expr_free(sc);
     free(left);
     return 0;
 }
@@ -1548,7 +1046,7 @@ static int parse_intel_memory(parse_ctx_t *ctx, const as_token_t *tokv, size_t n
                 free(mem.base_reg);
                 free(mem.index_reg);
                 free(mem.segment_reg);
-                free_expr(mem.disp);
+                as_expr_free(mem.disp);
                 return -1;
             }
             if (parsed > 0) {
@@ -1574,7 +1072,7 @@ static int parse_intel_memory(parse_ctx_t *ctx, const as_token_t *tokv, size_t n
                 if (sc != NULL && sc->kind == AS_EXPR_CONST) {
                     mem.scale = (int)sc->value;
                 }
-                free_expr(sc);
+                as_expr_free(sc);
             }
             i += 2;
             continue;
@@ -1719,7 +1217,7 @@ bad:
     free(mem.base_reg);
     free(mem.index_reg);
     free(mem.segment_reg);
-    free_expr(mem.disp);
+    as_expr_free(mem.disp);
     return -1;
 }
 
@@ -1771,7 +1269,7 @@ static int append_intel_mem_disp_term(parse_ctx_t *ctx, const as_token_t *tok, a
     }
     node = new_expr(AS_EXPR_BINARY, tok);
     if (node == NULL) {
-        free_expr(term);
+        as_expr_free(term);
         return -1;
     }
     node->op = AS_EXPR_OP_ADD;
@@ -2414,8 +1912,8 @@ static int parse_x86_far_immediate_pair(parse_ctx_t *ctx, const as_token_t *tokv
         rhs = parse_expression_from_tokens(ctx, tokv + colon + 1, n - colon - 1);
     }
     if (lhs == NULL || rhs == NULL) {
-        free_expr(lhs);
-        free_expr(rhs);
+        as_expr_free(lhs);
+        as_expr_free(rhs);
         return -1;
     }
     memset(offset_op, 0, sizeof(*offset_op));
