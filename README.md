@@ -31,6 +31,7 @@ or Xenix `x.out` header):
 | ELKS (16-bit Linux-like a.out) | Done: 16-bit protected mode through a per-process LDT; upstream ELKS `ps`/`meminfo` run. |
 | SCO Xenix/286 (`x.out`) | Done: the shipped `cc` compiles and links, a 37-command sample of the SCO media runs clean, Microsoft Word 3.0 reaches its editing screen. |
 | IBM PC/IX 1.0 (System III, 8088 a.out) | Active: the shell runs scripts, pipelines and traps; the utilities work; its `cc` compiles and links a program that runs. Shares the Xenix/286 system calls. |
+| Venix/86 2.1 (Version 7, 8086 a.out) | Active: the shell runs scripts, pipelines and traps; the utilities work; its `cc` compiles and links a program that runs, floating point included. Shares the Xenix/286 system calls. |
 | Xenix/386 | Active: the Bourne shell and basic utilities of SCO Xenix 386 2.2.3 and 2.3.4 run. |
 | FreeBSD, NetBSD | Their dynamic linkers and libc come up; dynamically linked binaries run. |
 | Linux | Active development. |

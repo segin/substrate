@@ -6,6 +6,7 @@
  */
 
 #include <exec/formats/aout.h>
+#include <exec/formats/elks_aout.h>
 
 #ifndef HOST_TEST
 #include <kern/console.h>
@@ -149,8 +150,12 @@ int aout_validate_header(const struct aout_exec *hdr, uint32_t file_size) {
  */
 
 static int aout_check(const char *path, const char *header_buf, size_t len) {
-    (void)path;
     if (len < AOUT_HEADER_SIZE) return -1;
+    /* V7's OMAGIC is this format's too.  A Venix/86 program (16-bit, the
+     * second word of its header the size of its stack) is the 16-bit
+     * a.out loader's, which knows one by where it is run from. */
+    if (venix_header_recognized(header_buf, len, elks_in_venix(path)))
+        return -1;
     /* Avoid any alignment surprises: the on-disk header is little-endian
      * 32-bit and the host is i386 little-endian, so a memcpy is safe. */
     struct aout_exec hdr;

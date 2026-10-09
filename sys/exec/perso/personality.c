@@ -20,6 +20,7 @@ static struct personality *personalities[PERS_MAX] = {
     [PERS_ELKS]    = &personality_elks,
     [PERS_XENIX]   = &personality_xenix,
     [PERS_PCIX]    = &personality_pcix,
+    [PERS_VENIX]   = &personality_venix,
 };
 
 struct personality *perso_lookup(int id) {

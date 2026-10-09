@@ -89,7 +89,116 @@ struct elks_load_plan {
     uint16_t stack_top;
     uint8_t combined;
     uint8_t pcix;           /* a PC/IX program: see ELKS_PCIX_SPLITID */
+    uint8_t venix;          /* a Venix/86 program: see struct venix_exec */
+    uint16_t data_offset;   /* what lies under the image in the segment
+                             * its data is in: Venix's stack */
 };
+
+/*
+ * Venix/86, VenturCom's Version 7 for the IBM PC, has an a.out of its own
+ * (<a.out.h> on its media): V7's magic numbers in a 32-byte header whose
+ * second word is the size of the stack.
+ *
+ *     0407 OMAGIC   text and data in one segment
+ *     0411 NMAGIC   a segment each
+ *
+ * The stack is not at the top of the data segment but at the bottom,
+ * under everything: a_stack bytes, then the data (in a combined image the
+ * text and then the data, a_entry being a_stack there).  It grows down
+ * from a_stack towards 0 -- so a runaway stack runs off the bottom of the
+ * segment instead of into the heap -- and the break is free to rise to
+ * 64K.  a_stack of 0 is the ordinary arrangement, stack at the top.
+ *
+ * No other system's programs have magic 0411.  0407 is every other
+ * a.out's OMAGIC too, so such a file is Venix's only when a Venix process
+ * runs it or it is named in the Venix tree.
+ */
+struct __attribute__((packed)) venix_exec {
+    uint16_t a_magic;
+    uint16_t a_stack;
+    uint32_t a_text;
+    uint32_t a_data;
+    uint32_t a_bss;
+    uint32_t a_syms;
+    uint32_t a_entry;
+    uint32_t a_trsize;
+    uint32_t a_drsize;
+};
+
+#define VENIX_OMAGIC    0x0107U
+#define VENIX_NMAGIC    0x0109U
+#define VENIX_TREE      "/perso/venix/"
+
+/* Is this a Venix/86 program?  `in_venix`: the question comes from a
+ * Venix process or about a file in the Venix tree. */
+static inline int venix_header_recognized(const void *header, size_t len,
+                                          int in_venix) {
+    const struct venix_exec *h = (const struct venix_exec *)header;
+    uint32_t low;
+
+    if (!header || len < sizeof(*h)) {
+        return 0;
+    }
+    if (h->a_magic != VENIX_NMAGIC &&
+        !(h->a_magic == VENIX_OMAGIC && in_venix)) {
+        return 0;
+    }
+    if (h->a_text == 0 || h->a_text > 0xFFF0U || h->a_data > 0xFFF0U ||
+        h->a_bss > 0xFFF0U) {
+        return 0;
+    }
+    low = (uint32_t)h->a_stack + h->a_data + h->a_bss;
+    if (h->a_magic == VENIX_OMAGIC) {
+        /* One segment: the stack, then the text, then the data, and the
+         * entry point is an address in that. */
+        low += h->a_text;
+        if (h->a_entry < h->a_stack ||
+            h->a_entry - h->a_stack >= h->a_text) {
+            return 0;
+        }
+    } else if (h->a_entry >= h->a_text) {
+        return 0;
+    }
+    return low <= 0xFFF0U;
+}
+
+static inline int venix_build_load_plan(const struct venix_exec *h,
+                                        uint16_t argv_envp_bytes,
+                                        struct elks_load_plan *plan) {
+    uint32_t below;         /* what lies under the data in its segment */
+
+    if (!h || !plan || !venix_header_recognized(h, sizeof(*h), 1)) {
+        return 0;
+    }
+    memset(plan, 0, sizeof(*plan));
+    plan->venix = 1;
+    plan->combined = (uint8_t)(h->a_magic == VENIX_OMAGIC);
+    plan->text_base = ELKS_TEXT_BASE;
+    plan->fartext_base = ELKS_FARTEXT_BASE;
+    plan->data_base = plan->combined ? ELKS_TEXT_BASE : ELKS_DATA_BASE;
+    plan->text_file_offset = sizeof(*h);
+    plan->data_file_offset = (uint32_t)sizeof(*h) + h->a_text;
+    plan->text_size = (uint16_t)h->a_text;
+    plan->data_size = (uint16_t)h->a_data;
+    plan->bss_size = (uint16_t)h->a_bss;
+    plan->data_limit = 0xFFF0U;
+    plan->text_limit = plan->combined ? plan->data_limit : plan->text_size;
+    plan->data_offset = h->a_stack;
+    below = (plan->combined ? h->a_text : 0U) + h->a_stack;
+    plan->brk_offset = (uint16_t)(below + h->a_data + h->a_bss);
+    plan->stack_top = h->a_stack ? (uint16_t)(h->a_stack & ~1U)
+                                 : (uint16_t)(plan->data_limit & ~1U);
+    /* The arguments go on the stack, which has to hold them and leave
+     * the program something. */
+    if (h->a_stack && (uint32_t)argv_envp_bytes + 256U > h->a_stack) {
+        return 0;
+    }
+    if (!h->a_stack &&
+        (uint32_t)plan->brk_offset + argv_envp_bytes + 256U > plan->data_limit) {
+        return 0;
+    }
+    return 1;
+}
 
 #define ELKS_LDT_CS_INDEX  0U
 #define ELKS_LDT_DS_INDEX  1U
@@ -222,7 +331,8 @@ static inline void elks_apply_exec_state(process_t *proc,
         return;
     }
 
-    proc->perso_id = plan->pcix ? PERS_PCIX : PERS_ELKS;
+    proc->perso_id = plan->venix ? PERS_VENIX
+                   : plan->pcix ? PERS_PCIX : PERS_ELKS;
     proc->bitness = BITNESS_16;
     proc->brk_start = plan->data_base + plan->brk_offset;
     proc->brk = proc->brk_start;
@@ -478,7 +588,7 @@ static inline void elks_build_segment_layout(const struct elks_load_plan *plan,
      * The pages are there (the data area is mapped in whole pages); let
      * the segment reach them.
      */
-    if (plan->pcix) {
+    if (plan->pcix || plan->venix) {
         layout->ds.limit = 0xFFFFU;
         layout->ss.limit = 0xFFFFU;
         layout->es.limit = 0xFFFFU;
@@ -497,6 +607,7 @@ static inline void elks_build_segment_layout(const struct elks_load_plan *plan,
 struct exec_binary_handler;
 void elks_init_handler(void);
 int elks_check_file(const char *path, const char *header, size_t len);
+int elks_in_venix(const char *path);
 int elks_load(int fd, const char *path, char *const argv[], char *const envp[]);
 void jump_to_elks(uint32_t entry, uint32_t stack, uint32_t cs,
                   uint32_t ds, uint32_t ss, uint32_t es,

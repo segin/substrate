@@ -49,6 +49,9 @@ enum personality_type {
     /* PC/IX: System III for the IBM PC, in perso_xenix.c beside the
      * 16-bit Xenix it shares its calls with. */
     PERS_PCIX      = 132,
+    /* Venix/86: Version 7 for the IBM PC, in the same file for the same
+     * reason. */
+    PERS_VENIX     = 133,
     PERS_MAX     = 256
 };
 
@@ -100,6 +103,7 @@ extern struct personality personality_sunos;
 extern struct personality personality_elks;
 extern struct personality personality_xenix;
 extern struct personality personality_pcix;
+extern struct personality personality_venix;
 
 void elks_personality_init(void);
 

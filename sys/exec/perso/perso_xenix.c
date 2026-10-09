@@ -2718,6 +2718,384 @@ static void pcix_sendsig(void *handler, int sig, uint32_t mask,
     regs->eip = (uint32_t)(uintptr_t)handler & 0xFFFFU;
 }
 
+/* =====================================================================
+ * Venix/86: VenturCom's Version 7 for the IBM PC (2.1, 1985).
+ *
+ * The other end of the same line: System III's and so Xenix's call
+ * numbers are V7's with more added, and stat, the directory entry and tms
+ * have not changed since.  What follows was read out of the C library on
+ * the distribution (/lib/libc.a; every stub is a dozen instructions):
+ *
+ *   - One vector for all calls, `int 0xf1`, with the number in BX and the
+ *     arguments in AX, DX, CX, SI.  Those are a struct x286_frame's four
+ *     in that order.
+ *   - The result is in AX, a second or the high half in DX, and the error
+ *     number in CX: 0 for none, and every stub tests it with jcxz.  The
+ *     carry flag says nothing.
+ *   - fork returns 0 in the child; wait the status in DX; getuid the
+ *     effective id in DX.
+ *   - brk is the kernel's.  A program's stack is under its data (struct
+ *     venix_exec, exec/formats/elks_aout.h), so the break may be anything
+ *     from the end of the bss up to the end of the segment.
+ *   - A terminal is V7's: ioctl with TIOCGETP and its fellows, struct
+ *     sgttyb, no termio.
+ *   - A signal handler is entered with the flags and the interrupted IP
+ *     pushed, flags on top, and returns with popf and ret.  The library
+ *     gives the kernel a stub of its own for each signal, so no number is
+ *     passed.
+ *
+ * Three more vectors are instructions to the kernel, not calls:
+ *
+ *     int 0xf4   in front of every 8087 instruction, for a machine with
+ *                no 8087 to emulate it by.  There is one here; the two
+ *                bytes are made no-ops and the instruction runs.
+ *     int 0xf2   the stack check a function begins with found no room.
+ *     int 0xf3   abort().
+ * ===================================================================== */
+
+#define VENIX_SYSCALL_VEC   0xF1U
+#define VENIX_STKOVF_VEC    0xF2U
+#define VENIX_ABORT_VEC     0xF3U
+#define VENIX_FPU_VEC       0xF4U
+#define VENIX_INT_LEN       2U
+#define VENIX_SYS_ftime     35
+#define VENIX_SYS_ioctl     54
+#define VENIX_STACK_SLOP    0x100U      /* kept between break and stack */
+
+static int venix_trace_enabled(void) {
+    return cmdline_debug_enabled("perso:venix:syscall");
+}
+
+/* The vector of the `int` at CS:IP, or -1; *linear is where it is. */
+static int venix_int_at(registers_t *regs, uintptr_t *linear) {
+    uint8_t insn[VENIX_INT_LEN];
+
+    if (x286_seg_span((uint16_t)regs->cs, regs->eip, sizeof(insn),
+                      linear) != 0 ||
+        *linear >= USER32_VA_END ||
+        copyin((const void *)*linear, insn, sizeof(insn)) != 0 ||
+        insn[0] != 0xCDU) {
+        return -1;
+    }
+    return insn[1];
+}
+
+/*
+ * brk(addr).  The data segment is all there from the start; what the
+ * call decides is whether the program may have the address, which it may
+ * if it is above what it was loaded with and -- for a program whose
+ * stack is at the top -- short of the stack.
+ */
+static int64_t venix_sys_brk(struct x286_frame *f) {
+    uint32_t base = (uint32_t)(current_process->brk_start & 0xFFFFU);
+    uint32_t sp = f->regs->useresp & 0xFFFFU;
+    uint32_t top = 0xFFF0U;
+
+    /* brk_start is a linear address; the low word is the offset in the
+     * data segment, whose base is a multiple of 64K. */
+    if (sp > base && sp - VENIX_STACK_SLOP < top) {
+        top = sp - VENIX_STACK_SLOP;
+    }
+    if (f->bx < base || f->bx > top) {
+        return -ENOMEM;
+    }
+    return 0;
+}
+
+/*
+ * ioctl(2): the terminal as V7 has it, <sgtty.h>.  TIOCGETP and TIOCSETP
+ * (and TIOCSETN, which does not flush) move a struct sgttyb, and it is six
+ * bytes here -- sg_flags is an int, and an int is a word.  isatty(3) is a
+ * TIOCGETP into six bytes of its stack with its caller's registers saved
+ * just above them.
+ */
+struct venix_sgttyb {
+    uint8_t  sg_ispeed, sg_ospeed, sg_erase, sg_kill;
+    uint16_t sg_flags;
+} __attribute__((packed));
+
+#define VENIX_TIOCGETP  0x7408U
+#define VENIX_TIOCSETP  0x7409U
+#define VENIX_TIOCSETN  0x740AU
+#define VENIX_B9600     13
+#define VENIX_CBREAK    0002U
+#define VENIX_ECHO      0010U
+#define VENIX_CRMOD     0020U
+#define VENIX_RAW       0040U
+
+static int64_t venix_sys_ioctl(struct x286_frame *f) {
+    int fd = (int)(int16_t)f->bx;
+    struct venix_sgttyb sg;
+    struct termios t;
+    uintptr_t arg;
+    int rc;
+
+    if (f->cx != VENIX_TIOCGETP && f->cx != VENIX_TIOCSETP &&
+        f->cx != VENIX_TIOCSETN) {
+        return x286_fd_vnode(fd) ? -ENOTTY : -EBADF;
+    }
+    memset(&t, 0, sizeof(t));
+    rc = kern_ioctl(fd, TCGETS, &t);
+    if (rc != 0) {
+        return rc;
+    }
+    if (x286_ds_span(f, f->si, sizeof(sg), &arg) != 0) {
+        return -EFAULT;
+    }
+    if (f->cx == VENIX_TIOCGETP) {
+        memset(&sg, 0, sizeof(sg));
+        sg.sg_ispeed = sg.sg_ospeed = VENIX_B9600;
+        sg.sg_erase = t.c_cc[VERASE];
+        sg.sg_kill = t.c_cc[VKILL];
+        if (t.c_lflag & ECHO) sg.sg_flags |= VENIX_ECHO;
+        if (t.c_iflag & ICRNL) sg.sg_flags |= VENIX_CRMOD;
+        if (!(t.c_lflag & ICANON)) {
+            sg.sg_flags |= (t.c_lflag & ISIG) ? VENIX_CBREAK : VENIX_RAW;
+        }
+        memcpy((void *)arg, &sg, sizeof(sg));
+        return 0;
+    }
+    memcpy(&sg, (const void *)arg, sizeof(sg));
+    t.c_cc[VERASE] = sg.sg_erase;
+    t.c_cc[VKILL] = sg.sg_kill;
+    t.c_lflag &= ~(tcflag_t)(ECHO | ICANON | ISIG);
+    t.c_iflag &= ~(tcflag_t)ICRNL;
+    t.c_oflag &= ~(tcflag_t)(OPOST | ONLCR);
+    if (sg.sg_flags & VENIX_ECHO) t.c_lflag |= ECHO;
+    if (!(sg.sg_flags & VENIX_RAW)) {
+        t.c_lflag |= ISIG;
+        t.c_oflag |= OPOST;
+        if (!(sg.sg_flags & VENIX_CBREAK)) t.c_lflag |= ICANON;
+        if (sg.sg_flags & VENIX_CRMOD) {
+            t.c_iflag |= ICRNL;
+            t.c_oflag |= ONLCR;
+        }
+    }
+    if (!(t.c_lflag & ICANON)) {
+        t.c_cc[VMIN] = 1;
+        t.c_cc[VTIME] = 0;
+    }
+    return kern_ioctl(fd, f->cx == VENIX_TIOCSETP ? TCSETSW : TCSETS, &t);
+}
+
+/*
+ * stat(2) and fstat(2).  The structure is V7's and so Xenix's, but the
+ * file type in st_mode is still the Sixth Edition's (<sys/stat.h>): the
+ * top bit says the inode is in use, and the next two what it is.
+ *
+ *     0100000  a file          0140000  a directory
+ *     0120000  a character     0160000  a block special file
+ *
+ * where everything later has 0100000, 0040000, 0020000 and 0060000.
+ */
+#define VENIX_STAT_MODE     4U          /* offset of st_mode */
+#define VENIX_IFMT          0170000U
+#define VENIX_IALLOC        0100000U
+
+static int64_t venix_sys_stat(struct x286_frame *f) {
+    int64_t rc = x286_calls[f->nr](f);
+    uintptr_t at;
+    uint16_t mode, type;
+
+    if (rc != 0 ||
+        x286_ds_span(f, f->cx + VENIX_STAT_MODE, sizeof(mode), &at) != 0) {
+        return rc;
+    }
+    memcpy(&mode, (const void *)at, sizeof(mode));
+    type = mode & VENIX_IFMT;
+    mode = (uint16_t)((mode & ~VENIX_IFMT) | VENIX_IALLOC);
+    if (type == S_IFDIR || type == S_IFCHR || type == S_IFBLK) {
+        mode |= type;
+    }
+    memcpy((void *)at, &mode, sizeof(mode));
+    return 0;
+}
+
+static int64_t venix_call(struct x286_frame *f) {
+    registers_t *regs = f->regs;
+    int pid;
+
+    switch (f->nr) {
+    case X286_SYS_stat:
+    case X286_SYS_fstat:
+        return venix_sys_stat(f);
+    case X286_SYS_fork:
+        /* The child's frame is this one with AX made 0: its CX has to
+         * say "no error" already. */
+        regs->ecx &= 0xFFFF0000U;
+        pid = sys_fork();
+        return pid < 0 ? pid : (pid & 0xFFFF);
+    case X286_SYS_brk:
+        return venix_sys_brk(f);
+    case VENIX_SYS_ftime:
+        return x286_xsys_ftime(f);
+    case VENIX_SYS_ioctl:
+        return venix_sys_ioctl(f);
+    case X286_SYS_signal:
+        f->si = 0;                  /* a near handler: no selector */
+        return x286_sys_signal(f);
+    case X286_SYS_stty:
+    case X286_SYS_gtty:             /* ioctl here */
+    case X286_SYS_fstatfs:
+    case X286_SYS_setpgrp:
+    case X286_SYS_xenix:
+    case X286_SYS_plock:            /* semaphores, sdata, suspend, phys, */
+    case X286_SYS_msgsys:           /* lock: Venix's own, at System V's  */
+    case X286_SYS_sysi86:           /* numbers                           */
+    case X286_SYS_shmsys:
+    case X286_SYS_semsys:
+    case X286_SYS_uadmin:
+    case X286_SYS_utssys:
+    case X286_SYS_fcntl:
+    case X286_SYS_ulimit:
+        return -EINVAL;
+    default:
+        break;
+    }
+    return (f->nr < X286_CALL_MAX && x286_calls[f->nr])
+        ? x286_calls[f->nr](f) : -EINVAL;
+}
+
+static int venix_handle_trap(void *regs_ptr) {
+    registers_t *regs = (registers_t *)regs_ptr;
+    struct x286_frame f;
+    void *saved_syscall_regs;
+    uintptr_t linear = 0;
+    int64_t ret;
+    int vec;
+
+    if (!regs || !current_process ||
+        current_process->perso_id != PERS_VENIX || !current_process->ldt) {
+        return 0;
+    }
+    if (regs->int_no != 13 && regs->int_no != 11) {
+        return 0;
+    }
+    vec = venix_int_at(regs, &linear);
+    switch (vec) {
+    case VENIX_SYSCALL_VEC:
+        break;
+    case VENIX_FPU_VEC: {
+        /* Out of the way for good where the text can be written (it is
+         * the process's own copy); stepped over this once if not. */
+        static const uint8_t nops[VENIX_INT_LEN] = { 0x90, 0x90 };
+
+        if (copyout(nops, (void *)linear, sizeof(nops)) != 0) {
+            regs->eip += VENIX_INT_LEN;
+        }
+        return 1;
+    }
+    case VENIX_STKOVF_VEC:
+        sigexit(current_process, SIGSEGV);
+        return 1;
+    case VENIX_ABORT_VEC:
+        sigexit(current_process, SIGABRT);
+        return 1;
+    default:
+        return 0;
+    }
+
+    memset(&f, 0, sizeof(f));
+    f.regs = regs;
+    f.nr = (uint16_t)(regs->ebx & 0xFFFFU);
+    f.bx = (uint16_t)(regs->eax & 0xFFFFU);
+    f.cx = (uint16_t)(regs->edx & 0xFFFFU);
+    f.si = (uint16_t)(regs->ecx & 0xFFFFU);
+    f.di = (uint16_t)(regs->esi & 0xFFFFU);
+    f.ds = (uint16_t)regs->ds;
+    f.es = (uint16_t)regs->es;
+    f.ss = (uint16_t)regs->ss;
+
+    if (current_thread && current_thread->proc == current_process) {
+        current_thread->syscall_num = f.nr;
+    }
+    regs->eip += VENIX_INT_LEN;
+    saved_syscall_regs = current_thread ? current_thread->syscall_regs : NULL;
+    if (current_thread) {
+        current_thread->syscall_regs = regs;
+    }
+
+    ret = venix_call(&f);
+
+    if (current_thread) {
+        current_thread->syscall_regs = saved_syscall_regs;
+    }
+    if (venix_trace_enabled()) {
+        char buf[160];
+        const char *name = x286_call_name(f.nr);
+
+        snprintf(buf, sizeof(buf),
+                 "VENIX: [%d] %s/%u(%#x, %#x, %#x, %#x) = %lld\n",
+                 (int)current_process->pid, name ? name : "sys", f.nr,
+                 f.bx, f.cx, f.si, f.di, (long long)ret);
+        kprint(buf);
+    }
+
+    if (ret < 0) {
+        regs->eax = (regs->eax & 0xFFFF0000U) | 0xFFFFU;
+        regs->ecx = (regs->ecx & 0xFFFF0000U) | ((uint32_t)(-ret) & 0xFFFFU);
+    } else {
+        regs->eax = (regs->eax & 0xFFFF0000U) | ((uint32_t)ret & 0xFFFFU);
+        regs->edx = (regs->edx & 0xFFFF0000U) |
+                    (((uint32_t)ret >> 16) & 0xFFFFU);
+        regs->ecx &= 0xFFFF0000U;
+    }
+    return 1;
+}
+
+static void venix_sendsig(void *handler, int sig, uint32_t mask,
+                          uint32_t flags, void *regs_ptr) {
+    registers_t *regs = (registers_t *)regs_ptr;
+    uint16_t frame[2];
+    uintptr_t linear;
+    uint16_t sp;
+
+    (void)flags;
+    if (!regs || !current_process) {
+        return;
+    }
+    /* As for PC/IX: the handler never returns to the kernel, so nothing
+     * may be left blocked on its account. */
+    if (current_thread) {
+        current_thread->sig_mask = mask;
+    }
+    sp = (uint16_t)(regs->useresp & 0xFFFFU);
+    if (sp < sizeof(frame)) {
+        sigexit(current_process, SIGSEGV);
+        return;
+    }
+    sp = (uint16_t)(sp - sizeof(frame));
+    frame[0] = (uint16_t)regs->eflags;
+    frame[1] = (uint16_t)regs->eip;
+    if (x286_seg_span((uint16_t)regs->ss, sp, sizeof(frame), &linear) != 0) {
+        sigexit(current_process, SIGSEGV);
+        return;
+    }
+    memcpy((void *)linear, frame, sizeof(frame));
+    if (venix_trace_enabled()) {
+        char buf[96];
+
+        snprintf(buf, sizeof(buf), "VENIX: [%d] signal %d -> %04x (from %04x)\n",
+                 (int)current_process->pid, sig,
+                 (unsigned int)(uintptr_t)handler & 0xFFFFU, frame[1]);
+        kprint(buf);
+    }
+    regs->useresp = (regs->useresp & 0xFFFF0000U) | sp;
+    regs->eip = (uint32_t)(uintptr_t)handler & 0xFFFFU;
+}
+
+struct personality personality_venix = {
+    .name = "Venix",
+    .id = PERS_VENIX,
+    .syscall_table = xenix_syscalls,
+    .syscall_names = xenix_names,
+    .syscall_fmts = NULL,
+    .syscall_count = MAX_SYSCALLS,
+    .path_prefix = "/perso/venix",
+    .sendsig = venix_sendsig,
+    .handle_trap = venix_handle_trap,
+};
+
 struct personality personality_pcix = {
     .name = "PCIX",
     .id = PERS_PCIX,

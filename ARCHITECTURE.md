@@ -223,12 +223,17 @@ uses: the numbers and structures are the same a release apart, and what
 is PC/IX's own is the trap -- `int 0x80+N`, a vector for each call, with
 the arguments on the stack -- and a handful of calls. Its programs are in
 the a.out format MINIX and ELKS inherited from it, and
-`formats/elks_aout.c` loads them. State
+`formats/elks_aout.c` loads them. Venix/86, VenturCom's Version 7 for the
+same machine (`PERS_VENIX`, `/perso/venix`), is the third system in that
+file on the same terms: its calls come by `int 0xf1` with the number in
+BX, the arguments in registers and the error number back in CX, and its
+a.out -- V7's magic numbers, the stack at the bottom of the data segment
+-- is a second header the same loader reads. State
 of each
 personality: `README.md`; specifications:
 `docs/specs/personality_targets.md`, `docs/specs/personality_elks.md`,
 `usr.man/man4/xenix.4`, `usr.man/man4/xout286.4`, `usr.man/man4/svr4.4`,
-`usr.man/man4/svr3.4`, `usr.man/man4/sunos.4`, `usr.man/man4/pcix.4`.
+`usr.man/man4/svr3.4`, `usr.man/man4/sunos.4`, `usr.man/man4/pcix.4`, `usr.man/man4/venix.4`.
 
 **x86-64.** `sys/arch/x86_64` is the 64-bit port, an addition alongside
 i386, not a replacement: the personality and the bitness of a process are

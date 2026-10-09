@@ -304,9 +304,18 @@ static int elks_dup_exec_vectors(char *const argv[], char *const envp[],
     return 0;
 }
 
+/* Is `path` being executed by a Venix process, or a file of the Venix
+ * tree?  What makes a file with V7's OMAGIC a Venix/86 program. */
+int elks_in_venix(const char *path) {
+    return (current_process && current_process->perso_id == PERS_VENIX) ||
+           (path && strncmp(path, VENIX_TREE, sizeof(VENIX_TREE) - 1) == 0);
+}
+
 int SUB_NODISCARD SUB_NONNULL(2)
 elks_check_file(const char *path, const char *header, size_t len) {
-    (void)path;
+    if (venix_header_recognized(header, len, elks_in_venix(path))) {
+        return 0;
+    }
     return elks_header_recognized(header, len) ? 0 : -ENOEXEC;
 }
 
@@ -336,6 +345,7 @@ int elks_load(int fd, const char *path, char *const argv[], char *const envp[]) 
     char **kargv = NULL;
     char **kenvp = NULL;
     size_t argv_envp_bytes;
+    int venix;
     int ret;
     
     if (elks_aout_debug_enabled()) {
@@ -375,13 +385,17 @@ int elks_load(int fd, const char *path, char *const argv[], char *const envp[]) 
     /* The length is that of the file's header, of which only the fixed
      * part has been read so far: a header with the supplement after it
      * (every PC/IX program's) is longer than struct elks_exec. */
-    if (!elks_header_recognized(&hdr, hdr.hlen > sizeof(hdr)
+    /* A Venix/86 program has a header of the same size and another
+     * shape (struct venix_exec); the rest of the load is the same. */
+    venix = venix_header_recognized(&hdr, sizeof(hdr), elks_in_venix(path));
+    if (!venix &&
+        !elks_header_recognized(&hdr, hdr.hlen > sizeof(hdr)
                                           ? hdr.hlen : sizeof(hdr))) {
         elks_free_kernel_vector(kargv);
         elks_free_kernel_vector(kenvp);
         return elks_fail(fd, -ENOEXEC, "ELKS: header not recognized");
     }
-    if (hdr.hlen > sizeof(hdr)) {
+    if (!venix && hdr.hlen > sizeof(hdr)) {
         size_t extra = (size_t)hdr.hlen - sizeof(hdr);
 
         if (extra > sizeof(suph)) {
@@ -411,7 +425,11 @@ int elks_load(int fd, const char *path, char *const argv[], char *const envp[]) 
         (path && strncmp(path, ELKS_PCIX_TREE, sizeof(ELKS_PCIX_TREE) - 1) == 0)) {
         plan.pcix = 1;
     }
-    if (!elks_build_load_plan(&hdr, &suph, (uint16_t)argv_envp_bytes, &plan)) {
+    if (venix
+            ? !venix_build_load_plan((const struct venix_exec *)(const void *)&hdr,
+                                     (uint16_t)argv_envp_bytes, &plan)
+            : !elks_build_load_plan(&hdr, &suph, (uint16_t)argv_envp_bytes,
+                                    &plan)) {
         elks_free_kernel_vector(kargv);
         elks_free_kernel_vector(kenvp);
         return elks_fail(fd, -ENOEXEC, "ELKS: invalid load plan");
@@ -489,7 +507,11 @@ int elks_load(int fd, const char *path, char *const argv[], char *const envp[]) 
     if (plan.text_size > 0) {
         kern_lseek(fd, (off_t)plan.text_file_offset, 0);
         {
-            int rc = kern_read(fd, (void *)(uintptr_t)plan.text_base, plan.text_size);
+            /* In a combined image what lies under the data lies under
+             * the text too. */
+            int rc = kern_read(fd, (void *)(uintptr_t)(plan.text_base +
+                                   (plan.combined ? plan.data_offset : 0U)),
+                               plan.text_size);
             int status = elks_read_exact_status(rc, plan.text_size);
 
             if (status != 0) {
@@ -517,7 +539,8 @@ int elks_load(int fd, const char *path, char *const argv[], char *const envp[]) 
     }
 
     if (plan.data_size > 0) {
-        uint32_t data_load_base = plan.combined ? (plan.text_base + plan.text_size) : plan.data_base;
+        uint32_t data_load_base = (plan.combined ? (plan.text_base + plan.text_size) : plan.data_base)
+                                + plan.data_offset;
 
         kern_lseek(fd, (off_t)plan.data_file_offset, 0);
         {

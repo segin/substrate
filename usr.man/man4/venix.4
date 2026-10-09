@@ -1,0 +1,126 @@
+.TH VENIX 4 "2026-10-08" "Substrate" "Kernel Interfaces"
+.SH NAME
+venix \- Venix/86 (Version 7 UNIX for the IBM PC) execution personality
+.SH DESCRIPTION
+The
+.B Venix
+personality
+.RB ( PERS_VENIX )
+runs the programs of VenturCom Venix/86 2.1, a port of Version 7 UNIX to
+the 8086 and 8088.
+It is rooted at
+.IR /perso/venix ,
+where a program's absolute paths are looked for first.
+.PP
+System III numbered its system calls as Version 7 did and added to them,
+and Xenix/286 inherited the result; the structures the calls fill in did
+not change on the way.
+A Venix call is therefore run by the Xenix/286 implementation of it, as
+a PC/IX call is
+.RB ( pcix (4)).
+What follows was read from the C library on the distribution.
+.SS Executable format
+.B struct exec
+of Venix's
+.IR <a.out.h> ,
+32 bytes: the magic number, the size of the stack, then the sizes of
+text, data, bss and symbols, the entry point and the relocation sizes.
+.TP
+.B 0407
+Text and data in one segment.
+.TP
+.B 0411
+A segment each.
+.PP
+The stack is at the bottom of the data segment and not the top:
+.B a_stack
+bytes, growing down towards 0, with the data (in an 0407 file the text
+and then the data) above it.
+The break may rise to the end of the segment.
+An
+.B a_stack
+of 0 puts the stack at the top instead.
+On entry the stack pointer addresses
+.IR argc ,
+followed by the argument pointers, a null, the environment pointers and
+a null.
+.PP
+Magic 0411 is no other system's.
+0407 is every a.out's, and such a file is taken for a Venix program when
+a Venix process executes it or it is named under
+.IR /perso/venix .
+.SS System calls
+Every call is the instruction
+.BR "int 0xf1" ,
+with its number in BX and its arguments in AX, DX, CX and SI.
+The result is in AX and a second result, or the high half of a long, in
+DX.
+CX is the error number, 0 if there was none; the carry flag means
+nothing.
+.PP
+The calls are Version 7's by number.
+.B fork
+returns 0 in the child.
+.B brk
+succeeds for an address between the end of the program and the end of
+its segment (or the stack, when that is at the top).
+.B stat
+and
+.B fstat
+report the type of a file in
+.B st_mode
+as the Sixth Edition did, which Venix kept: 0100000 for a file, 0140000
+a directory, 0120000 and 0160000 the special files.
+.B ioctl
+has the terminal requests
+.BR TIOCGETP ,
+.B TIOCSETP
+and
+.B TIOCSETN
+on a six-byte
+.BR "struct sgttyb" .
+Venix's own additions \- semaphores, shared data, locking,
+.B suspend
+and
+.B phys
+\- fail with
+.BR EINVAL .
+.SS Other traps
+.TP
+.B int 0xf4
+Precedes each 8087 instruction, for a kernel without a coprocessor to
+emulate it by.
+The two bytes are overwritten with no-ops the first time each is
+reached and the instruction runs on the processor.
+.TP
+.B int 0xf2
+The stack check at the start of a function failed; the process gets
+.BR SIGSEGV .
+.TP
+.B int 0xf3
+.BR abort (3);
+the process gets
+.BR SIGABRT .
+.SS Signals
+A handler is entered with the flags and the interrupted instruction
+pointer pushed, the flags on top, and every register as it was.
+It returns with
+.B popf
+and a near
+.BR ret .
+The disposition is reset to the default first and nothing is blocked.
+The signal number is not passed: the C library registers a stub of its
+own for each signal.
+.SH FILES
+.TP
+.I /perso/venix
+The Venix tree.
+.I tools/venix/build-image.sh
+builds an image of it from floppy images.
+.SH NOTES
+Enable tracing of the calls with
+.B debug=perso:venix:syscall
+on the kernel command line.
+.SH SEE ALSO
+.BR pcix (4),
+.BR svr3 (4)
