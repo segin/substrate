@@ -72,6 +72,26 @@ is "-S leaves it out"                 "$(readelf -SW nodebug | grep -c '\.debug'
 is "no relocation sections in a program" "$(readelf -SW withdebug | grep -c ' \.rel\.')" 0
 is "-q keeps them"                    "$(readelf -SW withrel | grep -c ' \.rel\.text')" 1
 
+# --eh-frame-hdr: a table of every function that has an unwinding record,
+# in order of address, and a program header that points to it.
+printf 'int a(int x) { return x + 1; }\nint b(int x) { return a(x) * 2; }\nint c(int x) { return b(x) - 3; }\nvoid _start(void) { c(1); for (;;) { } }\n' > e.c
+${CC:-cc} -m32 -c -ffreestanding -fno-pic -fno-pie -fasynchronous-unwind-tables -o e.o e.c
+./ld -m elf_i386 --eh-frame-hdr -o eh e.o
+./ld -m elf_i386 -o noeh e.o
+is "PT_GNU_EH_FRAME"                  "$(readelf -lW eh | grep -c GNU_EH_FRAME)" 1
+is "not without the option"           "$(readelf -lW noeh | grep -c GNU_EH_FRAME)" 0
+hoff=0x$(readelf -SW eh | sed -n 's/.* \.eh_frame_hdr  *PROGBITS  *[0-9a-f]* \([0-9a-f]*\) .*/\1/p')
+hadr=0x$(readelf -SW eh | sed -n 's/.* \.eh_frame_hdr  *PROGBITS  *\([0-9a-f]*\) .*/\1/p')
+set -- $(od -An -v -tu4 -j"$(( hoff ))" -N44 eh)
+is "version 1, addresses relative, a table" "$(od -An -v -tx1 -j"$(( hoff ))" -N4 eh | tr -d ' ')" 011b033b
+is "one entry for each function"      "$3" 4
+is "the same as the unwinding records there are" "$3" "$(readelf -wf eh 2>/dev/null | grep -c ' FDE ')"
+first=$(( (hadr + $4) & 0xffffffff )); second=$(( (hadr + $6) & 0xffffffff ))
+third=$(( (hadr + $8) & 0xffffffff )); fourth=$(( (hadr + ${10}) & 0xffffffff ))
+is "in order of address"              "$(( first < second && second < third && third < fourth ))" 1
+is "the first is the first function"  "$(printf '%08x' "$first")" "$(nm eh | awk '$3 == "a" { print $1 }')"
+is "the last is the last"             "$(printf '%08x' "$fourth")" "$(nm eh | awk '$3 == "_start" { print $1 }')"
+
 # A PIE is a program that happens to be ET_DYN; a shared object is a
 # library; -static says which libraries to use and not which to make.
 # Everything made is branded for substrate.

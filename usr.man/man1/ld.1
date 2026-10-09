@@ -102,6 +102,20 @@ each also under the name the Substrate GCC gives it,
 .Cm elf_i386_substrate
 and
 .Cm elf_x86_64_substrate .
+.It Fl -eh-frame-hdr
+Make
+.Pa .eh_frame_hdr ,
+the sorted table of functions and their unwinding records that an
+unwinder searches, and the
+.Dv PT_GNU_EH_FRAME
+header that points to it.
+A C++ program that is dynamically linked cannot catch an exception
+without it.
+Records for functions that were left out of the output have no entry;
+if the records are in a form the linker does not read, the section is
+made with no table, which sends the unwinder to
+.Pa .eh_frame
+itself.
 .It Fl -sysroot Ns = Ns Ar dir
 Accepted; the libraries are found through the
 .Fl L

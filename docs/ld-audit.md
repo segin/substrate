@@ -88,7 +88,8 @@ short writes and close errors checked.
 
 - [x] **LD-OUT-001** Where `-z relro` is in force, the linker shall place only read-only-after-relocation sections in `PT_GNU_RELRO` and shall end the segment on a page boundary.
   Evidence: `ld.c:9917-9935, 9437-9445, 10092-10102` (ordinary writable sections share the rank and fall inside the span); `10095` leaves `p_memsz` unpadded while `sbin/ld.so/ld_load.c:708-710` rounds the end down, so nothing is protected.  Basis: second part verified, first traced.  Task #95.
-- [ ] **LD-OUT-002** The linker shall generate `.eh_frame_hdr` and `PT_GNU_EH_FRAME` when the output contains `.eh_frame`.
+- [x] **LD-OUT-002** The linker shall generate `.eh_frame_hdr` and `PT_GNU_EH_FRAME` when the output contains `.eh_frame`.
+  Met, when `--eh-frame-hdr` is given, which is when other linkers do it and what the substrate GCC always passes: `plan_eh_frame_hdr` and `fill_eh_frame_hdr`.  Shown on the target by a C++ program, linked through `g++ -B`, that catches what it throws.
   Evidence: `ld.c:10070` only passes through an input section of that name; `--eh-frame-hdr` is ignored (`11577`).  Basis: verified absent.  Task #99.
 - [ ] **LD-OUT-003** The linker shall not emit a loadable segment for sections that are all empty, and shall honour each section's alignment in its address.
   Evidence: `ld.c:10038-10047` with `elf_write.c:1412, 1458-1467`; `9453-9470` align the file offset.  Basis: traced.  Task #100.
