@@ -342,6 +342,13 @@ Sections that are not loaded, the debugging information among them, are
 relocated like the rest, and an executable or shared object carries no
 relocation sections of the linker's own.
 .It
+A call from code that is not position-independent to a function in a
+shared object goes through the PLT.
+A reference of that kind to data in a shared object needs a copy
+relocation, which is not made: on x86-64 it is an error that names the
+symbol and says to compile with
+.Fl fPIC .
+.It
 GNU plugin shared-object API is not loaded directly;
 .Fl -plugin
 expects an executable materializer interface.

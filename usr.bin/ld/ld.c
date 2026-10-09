@@ -6485,7 +6485,38 @@ static size_t count_runtime_data_import_relocs_i386(elfobj_t *out) {
     return n;
 }
 
-static int collect_dynamic_imports_x64(elfobj_t *out, dyn_import_vec_t *imports) {
+/*
+ * What the shared objects of the link define `name` as (STT_FUNC,
+ * STT_OBJECT, ...); STT_NOTYPE if none defines it or none says.
+ */
+static int dso_import_type(const ld_ctx_t *ctx, const char *name) {
+    size_t d, i;
+
+    for (d = 0; ctx != NULL && name != NULL && d < ctx->dso_inputs.count; ++d) {
+        elfobj_t *obj = NULL;
+        int found = -1;
+
+        if (elf_open(ctx->dso_inputs.items[d], &obj) != ELF_OK) {
+            continue;
+        }
+        for (i = 0; found < 0 && i < elf_symbol_count(obj); ++i) {
+            const elf_symbol_t *sym = elf_symbol_at(obj, i);
+            const char *sname = sym != NULL ? elf_symbol_name(sym) : NULL;
+
+            if (sname != NULL && elf_symbol_shndx(sym) != SHN_UNDEF && strcmp(sname, name) == 0 &&
+                (elf_symbol_bind(sym) == STB_GLOBAL || elf_symbol_bind(sym) == STB_WEAK)) {
+                found = elf_symbol_type(sym);
+            }
+        }
+        elf_close(obj);
+        if (found >= 0) {
+            return found;
+        }
+    }
+    return STT_NOTYPE;
+}
+
+static int collect_dynamic_imports_x64(const ld_ctx_t *ctx, elfobj_t *out, dyn_import_vec_t *imports) {
     size_t i;
 
     if (out == NULL || imports == NULL) {
@@ -6518,6 +6549,26 @@ static int collect_dynamic_imports_x64(elfobj_t *out, dyn_import_vec_t *imports)
             plt_ref = reloc_is_x64_plt_ref(type);
             if (!plt_ref && type == R_X86_64_PC32 &&
                 (elf_symbol_type(sym) == STT_FUNC || elf_symbol_type(sym) == STT_NOTYPE)) {
+                /*
+                 * A pc-relative reference to something in a shared
+                 * object.  A reference does not say what it refers to
+                 * (the symbol is undefined, of no type), and on x86-64
+                 * data is addressed this way as much as functions are
+                 * called this way; the shared object says which.  A call
+                 * goes through the PLT.  Data would need a copy of it in
+                 * the executable, which is not made here, and to send
+                 * it through the PLT is to read the PLT's instructions
+                 * as the variable.
+                 */
+                int what = elf_symbol_type(sym) == STT_FUNC ? STT_FUNC : dso_import_type(ctx, elf_symbol_name(sym));
+
+                if (what == STT_OBJECT || what == STT_TLS) {
+                    fprintf(stderr,
+                            "ld: %s is data in a shared object and is referred to pc-relatively from %s: "
+                            "that needs a copy relocation, which is not supported; compile with -fPIC\n",
+                            elf_symbol_name(sym), elf_section_name(sec) != NULL ? elf_section_name(sec) : "?");
+                    return -1;
+                }
                 plt_ref = 1;
             }
             if (!plt_ref && !reloc_is_x64_got_ref(type) &&
@@ -6821,7 +6872,7 @@ static int plan_dynamic_imports(ld_ctx_t *ctx, elfobj_t *out) {
     }
     dyn_import_vec_free(&ctx->dyn_imports);
     if (ctx->mode == 64) {
-        if (collect_dynamic_imports_x64(out, &ctx->dyn_imports) != 0) {
+        if (collect_dynamic_imports_x64(ctx, out, &ctx->dyn_imports) != 0) {
             return -1;
         }
         extra_dyn_relocs = count_runtime_data_import_relocs_x64(out);
