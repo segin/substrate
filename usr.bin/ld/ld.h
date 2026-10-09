@@ -587,6 +587,9 @@ typedef struct {
 } lds_walk_t;
 
 /* ld_util.c */
+int ld_vec_room(void *itemsp, size_t *cap, size_t count, size_t size);
+uint32_t dynsym_name_off_at(const uint8_t *dynsym, size_t dynsym_len, size_t entsz,
+                            elfobj_endian_t endian, size_t index);
 char *xstrdup(const char *s);
 int strvec_push(strvec_t *v, const char *s);
 void strvec_free(strvec_t *v);

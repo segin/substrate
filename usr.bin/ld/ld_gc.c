@@ -103,15 +103,9 @@ static int gc_mark(gc_state_t *st, size_t obj, size_t sec_index) {
         return 0;
     }
     st->live[obj][sec_index] = 1;
-    if (st->work_count + 2 > st->work_cap) {
-        size_t ncap = st->work_cap ? st->work_cap * 2 : 256;
-        size_t *n = (size_t *)realloc(st->work, ncap * sizeof(n[0]));
-
-        if (n == NULL) {
-            return -1;
-        }
-        st->work = n;
-        st->work_cap = ncap;
+    /* Two are pushed: room for one more than one more. */
+    if (ld_vec_room(&st->work, &st->work_cap, st->work_count + 1, sizeof(st->work[0])) != 0) {
+        return -1;
     }
     st->work[st->work_count++] = obj;
     st->work[st->work_count++] = sec_index;

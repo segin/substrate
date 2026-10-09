@@ -424,15 +424,8 @@ static int tls_got_add(ld_ctx_t *ctx, const elf_symbol_t *sym, int kind) {
     if (tls_got_find(ctx, sym, kind) != NULL) {
         return 0;
     }
-    if (ctx->tls_got_count == ctx->tls_got_cap) {
-        size_t ncap = ctx->tls_got_cap ? ctx->tls_got_cap * 2 : 8;
-        ld_tls_got_t *n = (ld_tls_got_t *)realloc(ctx->tls_got, ncap * sizeof(n[0]));
-
-        if (n == NULL) {
-            return -1;
-        }
-        ctx->tls_got = n;
-        ctx->tls_got_cap = ncap;
+    if (ld_vec_room(&ctx->tls_got, &ctx->tls_got_cap, ctx->tls_got_count, sizeof(ctx->tls_got[0])) != 0) {
+        return -1;
     }
     ctx->tls_got[ctx->tls_got_count].sym = kind == LD_TLS_LD ? NULL : sym;
     ctx->tls_got[ctx->tls_got_count].kind = kind;
@@ -500,16 +493,8 @@ int collect_local_got(ld_ctx_t *ctx, elfobj_t *out) {
             }
             if (sym != NULL && elf_symbol_shndx(sym) != SHN_UNDEF && elf_symbol_type(sym) == STT_GNU_IFUNC &&
                 !symbol_is_preemptible(sym) && ifunc_index(sym) < 0) {
-                if (ctx->ifunc_count == ctx->ifunc_cap) {
-                    size_t ncap = ctx->ifunc_cap ? ctx->ifunc_cap * 2 : 8;
-                    const elf_symbol_t **n = (const elf_symbol_t **)
-                        realloc((void *)ctx->ifuncs, ncap * sizeof(n[0]));
-
-                    if (n == NULL) {
-                        return -1;
-                    }
-                    ctx->ifuncs = n;
-                    ctx->ifunc_cap = ncap;
+                if (ld_vec_room(&ctx->ifuncs, &ctx->ifunc_cap, ctx->ifunc_count, sizeof(ctx->ifuncs[0])) != 0) {
+                    return -1;
                 }
                 ctx->ifuncs[ctx->ifunc_count++] = sym;
             }
@@ -536,16 +521,9 @@ int collect_local_got(ld_ctx_t *ctx, elfobj_t *out) {
                 shndx < 0xff00) {
                 ctx->local_got_relative++;
             }
-            if (ctx->local_got_count == ctx->local_got_cap) {
-                size_t ncap = ctx->local_got_cap ? ctx->local_got_cap * 2 : 16;
-                const elf_symbol_t **n = (const elf_symbol_t **)
-                    realloc((void *)ctx->local_got, ncap * sizeof(n[0]));
-
-                if (n == NULL) {
-                    return -1;
-                }
-                ctx->local_got = n;
-                ctx->local_got_cap = ncap;
+            if (ld_vec_room(&ctx->local_got, &ctx->local_got_cap, ctx->local_got_count,
+                            sizeof(ctx->local_got[0])) != 0) {
+                return -1;
             }
             ctx->local_got[ctx->local_got_count++] = sym;
         }

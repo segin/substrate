@@ -34,7 +34,6 @@ static void verdef_table_free(verdef_table_t *tab) {
 }
 
 static int verdef_table_add(verdef_table_t *tab, uint16_t index, const char *name) {
-    verdef_name_t *next;
     size_t i;
 
     if (tab == NULL || name == NULL || name[0] == '\0') {
@@ -45,14 +44,8 @@ static int verdef_table_add(verdef_table_t *tab, uint16_t index, const char *nam
             return 0;
         }
     }
-    if (tab->count == tab->cap) {
-        size_t ncap = tab->cap == 0 ? 8 : tab->cap * 2;
-        next = (verdef_name_t *)realloc(tab->items, ncap * sizeof(*next));
-        if (next == NULL) {
-            return -1;
-        }
-        tab->items = next;
-        tab->cap = ncap;
+    if (ld_vec_room(&tab->items, &tab->cap, tab->count, sizeof(tab->items[0])) != 0) {
+        return -1;
     }
     tab->items[tab->count].index = index;
     tab->items[tab->count].name = xstrdup(name);
@@ -115,7 +108,6 @@ static int dyn_ver_plan_alloc_index(dyn_ver_plan_t *plan, uint16_t *out) {
 }
 
 static int dyn_ver_plan_get_or_add_def(dyn_ver_plan_t *plan, const char *name, uint16_t *out_index) {
-    dyn_verdef_t *next;
     uint16_t idx;
     size_t i;
 
@@ -131,14 +123,8 @@ static int dyn_ver_plan_get_or_add_def(dyn_ver_plan_t *plan, const char *name, u
     if (dyn_ver_plan_alloc_index(plan, &idx) != 0) {
         return -1;
     }
-    if (plan->def_count == plan->def_cap) {
-        size_t ncap = plan->def_cap == 0 ? 8 : plan->def_cap * 2;
-        next = (dyn_verdef_t *)realloc(plan->defs, ncap * sizeof(*next));
-        if (next == NULL) {
-            return -1;
-        }
-        plan->defs = next;
-        plan->def_cap = ncap;
+    if (ld_vec_room(&plan->defs, &plan->def_cap, plan->def_count, sizeof(plan->defs[0])) != 0) {
+        return -1;
     }
     plan->defs[plan->def_count].name = xstrdup(name);
     if (plan->defs[plan->def_count].name == NULL) {
@@ -152,7 +138,6 @@ static int dyn_ver_plan_get_or_add_def(dyn_ver_plan_t *plan, const char *name, u
 }
 
 static int dyn_ver_plan_get_or_add_need(dyn_ver_plan_t *plan, const char *file, const char *name, uint16_t *out_index) {
-    dyn_verneed_t *next;
     uint16_t idx;
     size_t i;
 
@@ -168,14 +153,8 @@ static int dyn_ver_plan_get_or_add_need(dyn_ver_plan_t *plan, const char *file, 
     if (dyn_ver_plan_alloc_index(plan, &idx) != 0) {
         return -1;
     }
-    if (plan->need_count == plan->need_cap) {
-        size_t ncap = plan->need_cap == 0 ? 8 : plan->need_cap * 2;
-        next = (dyn_verneed_t *)realloc(plan->needs, ncap * sizeof(*next));
-        if (next == NULL) {
-            return -1;
-        }
-        plan->needs = next;
-        plan->need_cap = ncap;
+    if (ld_vec_room(&plan->needs, &plan->need_cap, plan->need_count, sizeof(plan->needs[0])) != 0) {
+        return -1;
     }
     plan->needs[plan->need_count].file = xstrdup(file);
     plan->needs[plan->need_count].name = xstrdup(name);
@@ -193,7 +172,6 @@ static int dyn_ver_plan_get_or_add_need(dyn_ver_plan_t *plan, const char *file, 
 }
 
 static int dyn_ver_plan_ensure_def_index(dyn_ver_plan_t *plan, const char *name, uint16_t index) {
-    dyn_verdef_t *next;
     size_t i;
 
     if (plan == NULL || name == NULL || name[0] == '\0' || index <= VER_NDX_GLOBAL || index >= VER_NDX_HIDDEN) {
@@ -204,14 +182,8 @@ static int dyn_ver_plan_ensure_def_index(dyn_ver_plan_t *plan, const char *name,
             return plan->defs[i].index == index ? 0 : -1;
         }
     }
-    if (plan->def_count == plan->def_cap) {
-        size_t ncap = plan->def_cap == 0 ? 8 : plan->def_cap * 2;
-        next = (dyn_verdef_t *)realloc(plan->defs, ncap * sizeof(*next));
-        if (next == NULL) {
-            return -1;
-        }
-        plan->defs = next;
-        plan->def_cap = ncap;
+    if (ld_vec_room(&plan->defs, &plan->def_cap, plan->def_count, sizeof(plan->defs[0])) != 0) {
+        return -1;
     }
     plan->defs[plan->def_count].name = xstrdup(name);
     if (plan->defs[plan->def_count].name == NULL) {
@@ -227,7 +199,6 @@ static int dyn_ver_plan_ensure_def_index(dyn_ver_plan_t *plan, const char *name,
 }
 
 static int dyn_ver_plan_ensure_need_index(dyn_ver_plan_t *plan, const char *file, const char *name, uint16_t index) {
-    dyn_verneed_t *next;
     size_t i;
 
     if (plan == NULL || file == NULL || name == NULL || file[0] == '\0' || name[0] == '\0' ||
@@ -239,14 +210,8 @@ static int dyn_ver_plan_ensure_need_index(dyn_ver_plan_t *plan, const char *file
             return plan->needs[i].index == index ? 0 : -1;
         }
     }
-    if (plan->need_count == plan->need_cap) {
-        size_t ncap = plan->need_cap == 0 ? 8 : plan->need_cap * 2;
-        next = (dyn_verneed_t *)realloc(plan->needs, ncap * sizeof(*next));
-        if (next == NULL) {
-            return -1;
-        }
-        plan->needs = next;
-        plan->need_cap = ncap;
+    if (ld_vec_room(&plan->needs, &plan->need_cap, plan->need_count, sizeof(plan->needs[0])) != 0) {
+        return -1;
     }
     plan->needs[plan->need_count].file = xstrdup(file);
     plan->needs[plan->need_count].name = xstrdup(name);
@@ -761,15 +726,6 @@ int unresolved_symbol_has_dso_provider(const ld_ctx_t *ctx, const char *name, in
     return 0;
 }
 
-static uint32_t dynsym_name_off_raw(const uint8_t *dynsym, size_t dynsym_len, size_t entsz,
-                                    elfobj_endian_t endian, size_t index) {
-    size_t off = index * entsz;
-
-    if (dynsym == NULL || entsz == 0 || off > dynsym_len || dynsym_len - off < entsz) {
-        return 0;
-    }
-    return read_u32_endian(dynsym + off, endian);
-}
 
 static int dynsym_shndx_raw(const uint8_t *dynsym, size_t dynsym_len, size_t entsz, elfobj_class_t cls,
                             elfobj_endian_t endian, size_t index, uint16_t *out_shndx) {
@@ -1152,15 +1108,9 @@ static int build_gnu_verneed_data(const dyn_ver_plan_t *plan, elfobj_endian_t en
         if (found) {
             continue;
         }
-        if (file_count == file_cap) {
-            size_t ncap = file_cap == 0 ? 4 : file_cap * 2;
-            need_file_t *next = (need_file_t *)realloc(files, ncap * sizeof(*next));
-            if (next == NULL) {
-                free(files);
-                return -1;
-            }
-            files = next;
-            file_cap = ncap;
+        if (ld_vec_room(&files, &file_cap, file_count, sizeof(files[0])) != 0) {
+            free(files);
+            return -1;
         }
         files[file_count].file = plan->needs[i].file;
         files[file_count].file_off = plan->needs[i].file_off;
@@ -1249,7 +1199,7 @@ int plan_symbol_version_sections(ld_ctx_t *ctx, elfobj_t *out, uint8_t **dynstr_
     dyn_ver_plan_init(&plan);
     endian = elf_endian(out);
     for (i = 1; i < nsyms; ++i) {
-        uint32_t noff = dynsym_name_off_raw(dynsym_buf, dynsym_len, entsz, endian, i);
+        uint32_t noff = dynsym_name_off_at(dynsym_buf, dynsym_len, entsz, endian, i);
         const char *name = safe_strtab_name(*dynstr_buf, *dynstr_len, noff);
         const char *base;
         size_t base_len;

@@ -124,8 +124,6 @@ int symset_contains(const symset_t *set, const char *sym) {
 }
 
 int symset_add(symset_t *set, const char *sym) {
-    char **next;
-
     if (sym == NULL || sym[0] == '\0' || symset_contains(set, sym)) {
         return 0;
     }
@@ -133,14 +131,8 @@ int symset_add(symset_t *set, const char *sym) {
         fprintf(stderr, "ld: symbol tracking limit exceeded (%u)\n", (unsigned)LD_MAX_TRACKED_SYMBOLS);
         return -1;
     }
-    if (set->count == set->cap) {
-        size_t ncap = set->cap == 0 ? 32 : set->cap * 2;
-        next = (char **)realloc(set->items, ncap * sizeof(*next));
-        if (next == NULL) {
-            return -1;
-        }
-        set->items = next;
-        set->cap = ncap;
+    if (ld_vec_room(&set->items, &set->cap, set->count, sizeof(set->items[0])) != 0) {
+        return -1;
     }
     set->items[set->count] = xstrdup(sym);
     if (set->items[set->count] == NULL) {
@@ -213,15 +205,8 @@ static ld_sym_t *symtab_get(ld_symtab_t *t, const char *name) {
     if (i >= 0) {
         return &t->syms[i];
     }
-    if (t->count == t->cap) {
-        size_t ncap = t->cap == 0 ? 256 : t->cap * 2;
-        ld_sym_t *next = (ld_sym_t *)realloc(t->syms, ncap * sizeof(*next));
-
-        if (next == NULL) {
-            return NULL;
-        }
-        t->syms = next;
-        t->cap = ncap;
+    if (ld_vec_room(&t->syms, &t->cap, t->count, sizeof(t->syms[0])) != 0) {
+        return NULL;
     }
     memset(&t->syms[t->count], 0, sizeof(t->syms[t->count]));
     t->syms[t->count].name = xstrdup(name);

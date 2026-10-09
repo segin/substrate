@@ -4,6 +4,33 @@
 
 #include "ld.h"
 
+/*
+ * Room for one more in a growable array: `itemsp` is the address of the
+ * pointer to its elements, each `size` bytes, of which `count` are in
+ * use and *cap allocated.  0, or -1 if there is no memory or no such
+ * size, with the array as it was.
+ */
+int ld_vec_room(void *itemsp, size_t *cap, size_t count, size_t size) {
+    void *items;
+    size_t ncap;
+
+    if (count < *cap) {
+        return 0;
+    }
+    ncap = *cap == 0 ? 16 : *cap * 2;
+    if (ncap <= count || size == 0 || ncap > ((size_t)-1) / size) {
+        return -1;
+    }
+    memcpy(&items, itemsp, sizeof(items));
+    items = realloc(items, ncap * size);
+    if (items == NULL) {
+        return -1;
+    }
+    memcpy(itemsp, &items, sizeof(items));
+    *cap = ncap;
+    return 0;
+}
+
 char *xstrdup(const char *s) {
     size_t n;
     char *p;
@@ -20,16 +47,8 @@ char *xstrdup(const char *s) {
 }
 
 int strvec_push(strvec_t *v, const char *s) {
-    char **next;
-
-    if (v->count == v->cap) {
-        size_t ncap = v->cap == 0 ? 8 : v->cap * 2;
-        next = (char **)realloc(v->items, ncap * sizeof(*next));
-        if (next == NULL) {
-            return -1;
-        }
-        v->items = next;
-        v->cap = ncap;
+    if (ld_vec_room(&v->items, &v->cap, v->count, sizeof(v->items[0])) != 0) {
+        return -1;
     }
 
     v->items[v->count] = xstrdup(s);
@@ -62,19 +81,11 @@ void strvec_pop(strvec_t *v) {
 }
 
 int defsymvec_push(defsymvec_t *v, const char *name, uint64_t value) {
-    defsym_t *next;
-
     if (name == NULL || name[0] == '\0') {
         return -1;
     }
-    if (v->count == v->cap) {
-        size_t ncap = v->cap == 0 ? 8 : v->cap * 2;
-        next = (defsym_t *)realloc(v->items, ncap * sizeof(*next));
-        if (next == NULL) {
-            return -1;
-        }
-        v->items = next;
-        v->cap = ncap;
+    if (ld_vec_room(&v->items, &v->cap, v->count, sizeof(v->items[0])) != 0) {
+        return -1;
     }
     v->items[v->count].name = xstrdup(name);
     if (v->items[v->count].name == NULL) {
@@ -141,16 +152,8 @@ void defsymvec_free(defsymvec_t *v) {
 
 int inputvec_push(inputvec_t *v, ld_input_kind_t kind, ld_lib_mode_t lib_mode, int whole_archive,
                          int as_needed, const char *text) {
-    ld_input_t *next;
-
-    if (v->count == v->cap) {
-        size_t ncap = v->cap == 0 ? 8 : v->cap * 2;
-        next = (ld_input_t *)realloc(v->items, ncap * sizeof(*next));
-        if (next == NULL) {
-            return -1;
-        }
-        v->items = next;
-        v->cap = ncap;
+    if (ld_vec_room(&v->items, &v->cap, v->count, sizeof(v->items[0])) != 0) {
+        return -1;
     }
 
     v->items[v->count].kind = kind;
@@ -196,20 +199,13 @@ int dyn_import_find(const dyn_import_vec_t *v, const char *name) {
 }
 
 static int dyn_import_push(dyn_import_vec_t *v, const char *name, size_t *out_idx) {
-    dyn_import_t *next;
     char *dup;
 
     if (v == NULL || name == NULL || name[0] == '\0') {
         return -1;
     }
-    if (v->count == v->cap) {
-        size_t ncap = v->cap == 0 ? 16 : v->cap * 2;
-        next = (dyn_import_t *)realloc(v->items, ncap * sizeof(*next));
-        if (next == NULL) {
-            return -1;
-        }
-        v->items = next;
-        v->cap = ncap;
+    if (ld_vec_room(&v->items, &v->cap, v->count, sizeof(v->items[0])) != 0) {
+        return -1;
     }
     dup = xstrdup(name);
     if (dup == NULL) {
@@ -258,28 +254,20 @@ void dyn_import_vec_free(dyn_import_vec_t *v) {
 }
 
 int objvec_push(objvec_t *v, elfobj_t *obj, const char *name) {
-    elfobj_t **new_objs;
-    char **new_names;
+    size_t names_cap;
     char *dup;
 
     if (v->count >= LD_MAX_INPUT_OBJECTS) {
         fprintf(stderr, "ld: input object limit exceeded (%u)\n", (unsigned)LD_MAX_INPUT_OBJECTS);
         return -1;
     }
-    if (v->count == v->cap) {
-        size_t ncap = v->cap == 0 ? 16 : v->cap * 2;
-        new_objs = (elfobj_t **)realloc(v->objs, ncap * sizeof(*new_objs));
-        if (new_objs == NULL) {
-            return -1;
-        }
-        new_names = (char **)realloc(v->names, ncap * sizeof(*new_names));
-        if (new_names == NULL) {
-            v->objs = new_objs;
-            return -1;
-        }
-        v->objs = new_objs;
-        v->names = new_names;
-        v->cap = ncap;
+    /* Two arrays and one capacity, which is the second's: if the first
+     * grows and the second cannot, the first is merely larger than it
+     * says. */
+    names_cap = v->cap;
+    if (ld_vec_room(&v->names, &names_cap, v->count, sizeof(v->names[0])) != 0 ||
+        ld_vec_room(&v->objs, &v->cap, v->count, sizeof(v->objs[0])) != 0) {
+        return -1;
     }
 
     dup = xstrdup(name != NULL ? name : "<input>");

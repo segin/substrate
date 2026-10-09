@@ -114,9 +114,12 @@ static int dynamic_append_entry(uint8_t **buf, size_t *len, size_t *cap, elfobj_
     return dynbuf_append(buf, len, cap, entry, entsz);
 }
 
-static uint32_t dynsym_name_off_at(const uint8_t *dynsym, size_t dynsym_len, size_t entsz,
-                                   elfobj_endian_t endian, size_t index) {
+/* st_name of entry `index` of a .dynsym image, which is first in an entry
+ * of either class; 0 if there is no such entry. */
+uint32_t dynsym_name_off_at(const uint8_t *dynsym, size_t dynsym_len, size_t entsz,
+                            elfobj_endian_t endian, size_t index) {
     size_t off = index * entsz;
+
     if (dynsym == NULL || entsz == 0 || off > dynsym_len || dynsym_len - off < entsz) {
         return 0;
     }
@@ -509,15 +512,8 @@ int reloc_is_direct_ref(uint16_t machine, uint32_t type, int data) {
 }
 
 static int symvec_push(elf_symbol_t ***items, size_t *count, size_t *cap, elf_symbol_t *sym) {
-    if (*count == *cap) {
-        size_t ncap = *cap ? *cap * 2 : 8;
-        elf_symbol_t **n = (elf_symbol_t **)realloc(*items, ncap * sizeof(*n));
-
-        if (n == NULL) {
-            return -1;
-        }
-        *items = n;
-        *cap = ncap;
+    if (ld_vec_room(items, cap, *count, sizeof((*items)[0])) != 0) {
+        return -1;
     }
     (*items)[(*count)++] = sym;
     return 0;
@@ -2042,6 +2038,7 @@ int plan_dynamic_needed(ld_ctx_t *ctx, elfobj_t *out) {
 }
 
 int patch_dynamic_tag_values(elfobj_t *out) {
+    int is64 = elf_class(out) == ELFOBJ_CLASS_64;
     elf_section_t *dynamic;
     elf_section_t *dynstr;
     elf_section_t *dynsym;
@@ -2180,157 +2177,43 @@ int patch_dynamic_tag_values(elfobj_t *out) {
     memcpy(buf, dyn_data, dyn_sz);
 
     for (i = 0; i < dyn_sz; i += entsz) {
+        /* The entries whose values are addresses and sizes, known now. */
+        const struct {
+            int64_t tag;
+            uint64_t value;
+        } vals[] = {
+            { DT_STRTAB, dynstr_addr },         { DT_STRSZ, dynstr_size },
+            { DT_SYMTAB, dynsym_addr },         { DT_SYMENT, dynsym_entsz },
+            { DT_HASH, hash_addr },             { DT_GNU_HASH, gnu_hash_addr },
+            { DT_INIT, init_addr },             { DT_FINI, fini_addr },
+            { DT_INIT_ARRAY, init_array_addr }, { DT_INIT_ARRAYSZ, init_array_size },
+            { DT_FINI_ARRAY, fini_array_addr }, { DT_FINI_ARRAYSZ, fini_array_size },
+            { DT_PLTGOT, gotplt_addr },
+            { DT_VERSYM, versym_addr },         { DT_VERDEF, verdef_addr },
+            { DT_VERNEED, verneed_addr },
+            { DT_JMPREL, jmprel_addr },         { DT_PLTRELSZ, jmprel_size },
+            { DT_RELA, rela_addr },             { DT_RELASZ, rela_size },
+            { DT_RELAENT, is64 ? 24u : 12u },
+            { DT_REL, rel_addr },               { DT_RELSZ, rel_size },
+            { DT_RELENT, is64 ? 16u : 8u },
+        };
         int64_t tag;
         uint8_t *p = buf + i;
+        size_t k;
 
         if (elf_class(out) == ELFOBJ_CLASS_64) {
             tag = (int64_t)read_u64_endian(p + 0, elf_endian(out));
         } else {
             tag = (int64_t)(int32_t)read_u32_endian(p + 0, elf_endian(out));
         }
-        if (tag == DT_STRTAB) {
-            if (elf_class(out) == ELFOBJ_CLASS_64) {
-                write_u64_endian(p + 8, elf_endian(out), dynstr_addr);
-            } else {
-                write_u32_endian(p + 4, elf_endian(out), (uint32_t)dynstr_addr);
-            }
-        } else if (tag == DT_HASH) {
-            if (elf_class(out) == ELFOBJ_CLASS_64) {
-                write_u64_endian(p + 8, elf_endian(out), hash_addr);
-            } else {
-                write_u32_endian(p + 4, elf_endian(out), (uint32_t)hash_addr);
-            }
-        } else if (tag == DT_GNU_HASH) {
-            if (elf_class(out) == ELFOBJ_CLASS_64) {
-                write_u64_endian(p + 8, elf_endian(out), gnu_hash_addr);
-            } else {
-                write_u32_endian(p + 4, elf_endian(out), (uint32_t)gnu_hash_addr);
-            }
-        } else if (tag == DT_INIT) {
-            if (elf_class(out) == ELFOBJ_CLASS_64) {
-                write_u64_endian(p + 8, elf_endian(out), init_addr);
-            } else {
-                write_u32_endian(p + 4, elf_endian(out), (uint32_t)init_addr);
-            }
-        } else if (tag == DT_FINI) {
-            if (elf_class(out) == ELFOBJ_CLASS_64) {
-                write_u64_endian(p + 8, elf_endian(out), fini_addr);
-            } else {
-                write_u32_endian(p + 4, elf_endian(out), (uint32_t)fini_addr);
-            }
-        } else if (tag == DT_INIT_ARRAY) {
-            if (elf_class(out) == ELFOBJ_CLASS_64) {
-                write_u64_endian(p + 8, elf_endian(out), init_array_addr);
-            } else {
-                write_u32_endian(p + 4, elf_endian(out), (uint32_t)init_array_addr);
-            }
-        } else if (tag == DT_INIT_ARRAYSZ) {
-            if (elf_class(out) == ELFOBJ_CLASS_64) {
-                write_u64_endian(p + 8, elf_endian(out), init_array_size);
-            } else {
-                write_u32_endian(p + 4, elf_endian(out), (uint32_t)init_array_size);
-            }
-        } else if (tag == DT_FINI_ARRAY) {
-            if (elf_class(out) == ELFOBJ_CLASS_64) {
-                write_u64_endian(p + 8, elf_endian(out), fini_array_addr);
-            } else {
-                write_u32_endian(p + 4, elf_endian(out), (uint32_t)fini_array_addr);
-            }
-        } else if (tag == DT_FINI_ARRAYSZ) {
-            if (elf_class(out) == ELFOBJ_CLASS_64) {
-                write_u64_endian(p + 8, elf_endian(out), fini_array_size);
-            } else {
-                write_u32_endian(p + 4, elf_endian(out), (uint32_t)fini_array_size);
-            }
-        } else if (tag == DT_SYMTAB) {
-            if (elf_class(out) == ELFOBJ_CLASS_64) {
-                write_u64_endian(p + 8, elf_endian(out), dynsym_addr);
-            } else {
-                write_u32_endian(p + 4, elf_endian(out), (uint32_t)dynsym_addr);
-            }
-        } else if (tag == DT_STRSZ) {
-            if (elf_class(out) == ELFOBJ_CLASS_64) {
-                write_u64_endian(p + 8, elf_endian(out), dynstr_size);
-            } else {
-                write_u32_endian(p + 4, elf_endian(out), (uint32_t)dynstr_size);
-            }
-        } else if (tag == DT_SYMENT) {
-            if (elf_class(out) == ELFOBJ_CLASS_64) {
-                write_u64_endian(p + 8, elf_endian(out), dynsym_entsz);
-            } else {
-                write_u32_endian(p + 4, elf_endian(out), (uint32_t)dynsym_entsz);
-            }
-        } else if (tag == DT_PLTGOT) {
-            if (elf_class(out) == ELFOBJ_CLASS_64) {
-                write_u64_endian(p + 8, elf_endian(out), gotplt_addr);
-            } else {
-                write_u32_endian(p + 4, elf_endian(out), (uint32_t)gotplt_addr);
-            }
-        } else if (tag == DT_VERSYM) {
-            if (elf_class(out) == ELFOBJ_CLASS_64) {
-                write_u64_endian(p + 8, elf_endian(out), versym_addr);
-            } else {
-                write_u32_endian(p + 4, elf_endian(out), (uint32_t)versym_addr);
-            }
-        } else if (tag == DT_VERDEF) {
-            if (elf_class(out) == ELFOBJ_CLASS_64) {
-                write_u64_endian(p + 8, elf_endian(out), verdef_addr);
-            } else {
-                write_u32_endian(p + 4, elf_endian(out), (uint32_t)verdef_addr);
-            }
-        } else if (tag == DT_VERNEED) {
-            if (elf_class(out) == ELFOBJ_CLASS_64) {
-                write_u64_endian(p + 8, elf_endian(out), verneed_addr);
-            } else {
-                write_u32_endian(p + 4, elf_endian(out), (uint32_t)verneed_addr);
-            }
-        } else if (tag == DT_JMPREL) {
-            if (elf_class(out) == ELFOBJ_CLASS_64) {
-                write_u64_endian(p + 8, elf_endian(out), jmprel_addr);
-            } else {
-                write_u32_endian(p + 4, elf_endian(out), (uint32_t)jmprel_addr);
-            }
-        } else if (tag == DT_PLTRELSZ) {
-            if (elf_class(out) == ELFOBJ_CLASS_64) {
-                write_u64_endian(p + 8, elf_endian(out), jmprel_size);
-            } else {
-                write_u32_endian(p + 4, elf_endian(out), (uint32_t)jmprel_size);
-            }
-        } else if (tag == DT_RELA) {
-            if (elf_class(out) == ELFOBJ_CLASS_64) {
-                write_u64_endian(p + 8, elf_endian(out), rela_addr);
-            } else {
-                write_u32_endian(p + 4, elf_endian(out), (uint32_t)rela_addr);
-            }
-        } else if (tag == DT_RELASZ) {
-            if (elf_class(out) == ELFOBJ_CLASS_64) {
-                write_u64_endian(p + 8, elf_endian(out), rela_size);
-            } else {
-                write_u32_endian(p + 4, elf_endian(out), (uint32_t)rela_size);
-            }
-        } else if (tag == DT_RELAENT) {
-            if (elf_class(out) == ELFOBJ_CLASS_64) {
-                write_u64_endian(p + 8, elf_endian(out), elf_class(out) == ELFOBJ_CLASS_64 ? 24u : 12u);
-            } else {
-                write_u32_endian(p + 4, elf_endian(out), elf_class(out) == ELFOBJ_CLASS_64 ? 24u : 12u);
-            }
-        } else if (tag == DT_REL) {
-            if (elf_class(out) == ELFOBJ_CLASS_64) {
-                write_u64_endian(p + 8, elf_endian(out), rel_addr);
-            } else {
-                write_u32_endian(p + 4, elf_endian(out), (uint32_t)rel_addr);
-            }
-        } else if (tag == DT_RELSZ) {
-            if (elf_class(out) == ELFOBJ_CLASS_64) {
-                write_u64_endian(p + 8, elf_endian(out), rel_size);
-            } else {
-                write_u32_endian(p + 4, elf_endian(out), (uint32_t)rel_size);
-            }
-        } else if (tag == DT_RELENT) {
-            if (elf_class(out) == ELFOBJ_CLASS_64) {
-                write_u64_endian(p + 8, elf_endian(out), elf_class(out) == ELFOBJ_CLASS_64 ? 16u : 8u);
-            } else {
-                write_u32_endian(p + 4, elf_endian(out), elf_class(out) == ELFOBJ_CLASS_64 ? 16u : 8u);
+        for (k = 0; k < sizeof(vals) / sizeof(vals[0]); ++k) {
+            if (vals[k].tag == tag) {
+                if (is64) {
+                    write_u64_endian(p + 8, elf_endian(out), vals[k].value);
+                } else {
+                    write_u32_endian(p + 4, elf_endian(out), (uint32_t)vals[k].value);
+                }
+                break;
             }
         }
     }

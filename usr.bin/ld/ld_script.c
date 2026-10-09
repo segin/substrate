@@ -53,19 +53,11 @@ static void lds_tokvec_free(lds_tokvec_t *v) {
 }
 
 static int lds_tokvec_push(lds_tokvec_t *v, const lds_tok_t *tok) {
-    lds_tok_t *next;
-
     if (v == NULL || tok == NULL) {
         return -1;
     }
-    if (v->count == v->cap) {
-        size_t ncap = v->cap == 0 ? 16 : v->cap * 2;
-        next = (lds_tok_t *)realloc(v->items, ncap * sizeof(*next));
-        if (next == NULL) {
-            return -1;
-        }
-        v->items = next;
-        v->cap = ncap;
+    if (ld_vec_room(&v->items, &v->cap, v->count, sizeof(v->items[0])) != 0) {
+        return -1;
     }
     if (lds_tok_dup(&v->items[v->count], tok) != 0) {
         return -1;
@@ -90,19 +82,11 @@ static void lds_phdr_vec_free(lds_phdr_vec_t *v) {
 }
 
 static int lds_phdr_vec_push(lds_phdr_vec_t *v, const char *name, uint32_t type, uint32_t flags, uint64_t align) {
-    lds_phdr_entry_t *next;
-
     if (v == NULL || name == NULL || name[0] == '\0') {
         return -1;
     }
-    if (v->count == v->cap) {
-        size_t ncap = v->cap == 0 ? 8 : v->cap * 2;
-        next = (lds_phdr_entry_t *)realloc(v->items, ncap * sizeof(*next));
-        if (next == NULL) {
-            return -1;
-        }
-        v->items = next;
-        v->cap = ncap;
+    if (ld_vec_room(&v->items, &v->cap, v->count, sizeof(v->items[0])) != 0) {
+        return -1;
     }
     v->items[v->count].name = xstrdup(name);
     if (v->items[v->count].name == NULL) {
@@ -1394,15 +1378,8 @@ void lds_script_free(lds_script_t *sc) {
 static lds_stmt_t *lds_stmt_new(lds_stmtvec_t *v, lds_stmt_kind_t kind, lds_where_t where, const lds_tok_t *at) {
     lds_stmt_t *st;
 
-    if (v->count == v->cap) {
-        size_t ncap = v->cap ? v->cap * 2 : 16;
-        lds_stmt_t *n = (lds_stmt_t *)realloc(v->items, ncap * sizeof(*n));
-
-        if (n == NULL) {
-            return NULL;
-        }
-        v->items = n;
-        v->cap = ncap;
+    if (ld_vec_room(&v->items, &v->cap, v->count, sizeof(v->items[0])) != 0) {
+        return NULL;
     }
     st = &v->items[v->count];
     memset(st, 0, sizeof(*st));
@@ -2279,15 +2256,9 @@ static int lp_memory(lds_parser_t *p) {
                                                     : "expected the name of a memory region");
             return -1;
         }
-        if (p->sc->region_count == p->sc->region_cap) {
-            size_t ncap = p->sc->region_cap ? p->sc->region_cap * 2 : 4;
-            lds_region_t *n = (lds_region_t *)realloc(p->sc->regions, ncap * sizeof(*n));
-
-            if (n == NULL) {
-                return -1;
-            }
-            p->sc->regions = n;
-            p->sc->region_cap = ncap;
+        if (ld_vec_room(&p->sc->regions, &p->sc->region_cap, p->sc->region_count,
+                        sizeof(p->sc->regions[0])) != 0) {
+            return -1;
         }
         r = &p->sc->regions[p->sc->region_count];
         memset(r, 0, sizeof(*r));
