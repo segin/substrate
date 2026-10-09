@@ -91,6 +91,7 @@ HOST_TESTS += host_test_uma_coloring
 HOST_TESTS += host_test_uma_depot
 HOST_TESTS += host_test_uma_poison
 HOST_TESTS += host_test_uma_reclaim
+HOST_TESTS += host_test_uma_single_item_slab
 HOST_TESTS += host_test_uma_redzone
 HOST_TESTS += host_test_vm_kmem
 HOST_TESTS += host_test_vm_swap
@@ -550,6 +551,9 @@ host_test_uma_depot: test_uma_depot.c
 
 host_test_uma_reclaim: test_uma_reclaim.c
 	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. test_uma_reclaim.c -o $@
+
+host_test_uma_single_item_slab: test_uma_single_item_slab.c ../../sys/vm/uma_core.c
+	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. test_uma_single_item_slab.c -o $@
 
 host_test_fat_inode_identity: host_test_fat_inode_identity.c
 	$(CC) -m32 -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_fat_inode_identity.c -o $@

@@ -1099,6 +1099,27 @@ static void uma_slab_unlink(uma_slab_t **list, uma_slab_t *slab) {
 }
 
 /*
+ * A slab on the partly-used list that has just given its last item goes
+ * to the full list.
+ *
+ * This has to follow every allocation from a slab, not only one from a
+ * slab that was already partly used: a slab that holds a single item --
+ * every slab of a zone of items larger than half a page -- is full the
+ * moment its one item is taken, whether it was just made or came off the
+ * free list.  Left on the partly-used list with nothing free, it was
+ * taken by uma_zfree_slab_locked() for a slab on the full list: not found
+ * there, linked to itself as the head of the partly-used list, and its
+ * header freed with the zone still pointing at it.
+ */
+static void uma_slab_full_check(uma_zone_t *zone, uma_slab_t *slab) {
+    if (slab->us_freecount == 0) {
+        uma_slab_unlink(&zone->uz_part_slabs, slab);
+        slab->us_next = zone->uz_full_slabs;
+        zone->uz_full_slabs = slab;
+    }
+}
+
+/*
  * Allocate from zone (slow path - slab layer)
  */
 static void *uma_zalloc_slab_locked(uma_zone_t *zone, int flags) {
@@ -1110,15 +1131,9 @@ static void *uma_zalloc_slab_locked(uma_zone_t *zone, int flags) {
     if (zone->uz_part_slabs) {
         slab = zone->uz_part_slabs;
         item = uma_slab_alloc_item(zone, slab);
-        
-        /* Move to full list if exhausted */
-        if (slab->us_freecount == 0) {
-            uma_slab_unlink(&zone->uz_part_slabs, slab);
-            slab->us_next = zone->uz_full_slabs;
-            zone->uz_full_slabs = slab;
-        }
+        uma_slab_full_check(zone, slab);
     }
-    
+
     /* Try free slabs */
     if (!item && zone->uz_free_slabs) {
         slab = zone->uz_free_slabs;
@@ -1126,18 +1141,20 @@ static void *uma_zalloc_slab_locked(uma_zone_t *zone, int flags) {
         slab->us_next = zone->uz_part_slabs;
         zone->uz_part_slabs = slab;
         item = uma_slab_alloc_item(zone, slab);
+        uma_slab_full_check(zone, slab);
     }
-    
+
     /* Allocate new slab */
     if (!item) {
-        /* M_NOWAIT means "don't sleep", not "don't allocate" 
+        /* M_NOWAIT means "don't sleep", not "don't allocate"
          * We still try to allocate, but pmm_alloc won't block */
         slab = uma_slab_alloc(zone);
         if (!slab) return NULL;
-        
+
         slab->us_next = zone->uz_part_slabs;
         zone->uz_part_slabs = slab;
         item = uma_slab_alloc_item(zone, slab);
+        uma_slab_full_check(zone, slab);
     }
 
     return item;
