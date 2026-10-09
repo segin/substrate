@@ -54,6 +54,18 @@
 #   Nothing is serialized: the serial number an archive may carry is not
 #   used.
 #
+# VENIX/386
+#   VenturCom's Venix/386 3.2.4 (the WinWorld archive "Venix-386 3.2.4
+#   (1991) (5.25-1.2mb)", nineteen raw *.img floppies) is the same Release
+#   3.2 packaged half this way: its optional sets (file1, fs1, kernel1-4,
+#   net1-2, streams1, terminal1) are subset floppies as above, and its
+#   base system (core1-6) is one cpio archive, old ASCII headers, running
+#   over six floppies behind a one-cylinder label on each -- which is how
+#   AT&T's own floppies are, see build-image.sh.  This script reads both:
+#
+#       tools/svr3/build-image-isc.sh \
+#           -m 'Venix-386 3.2.4 (1991) (5.25-1.2mb)' -o venix386.img -l venix386
+#
 # Usage: build-image-isc.sh -m MEDIA_DIR -o OUTPUT [-s SIZE_MB] [-l LABEL]
 
 set -eu
@@ -117,8 +129,47 @@ for f in "$MEDIA"/*.img; do
     fi
 done
 
+# Floppies that are a cpio archive behind a one-cylinder label: Venix/386's
+# Core set.  The archive starts on the floppy whose data begins with a
+# header and runs on over the ones after it, which are neither that nor a
+# filesystem.  It is the base system and goes down before anything else.
+cyl_of() { echo $(( $(stat -c %s "$1") / 80 )); }
+starts_cpio() {
+    [ "$(dd if="$1" bs=1 skip="$(cyl_of "$1")" count=6 2>/dev/null | tr -d '\0')" = 070707 ]
+}
+is_s5() { python3 "$S5FS" ls "$1" / >/dev/null 2>&1; }
+vols=() cpio_floppies=" "
+flush_cpio() {
+    [ ${#vols[@]} -gt 0 ] || return 0
+    local v AR=$STAGE/ar
+    rm -rf "$AR"; mkdir -p "$AR"
+    for v in "${vols[@]}"; do
+        dd if="$v" bs=512 skip=$(( $(cyl_of "$v") / 512 )) 2>/dev/null
+    done | (cd "$AR" && cpio -idmu --quiet --no-preserve-owner 2>/dev/null) || true
+    (cd "$AR" && find . -mindepth 1 ! -type l -printf '%m %P\n') >> "$MODES"
+    chmod -R u+rwX "$AR"
+    printf '    %-28s %d file(s), cpio over %d floppies\n' \
+        "$(basename "${vols[0]}" .img)" \
+        "$(find "$AR" -type f | wc -l)" ${#vols[@]}
+    cp -a "$AR/." "$ROOT/"
+    rm -rf "$AR"
+    vols=()
+}
+for f in "$MEDIA"/*.img; do
+    if starts_cpio "$f"; then
+        flush_cpio
+        vols=("$f"); cpio_floppies="$cpio_floppies$f "
+    elif [ ${#vols[@]} -gt 0 ] && ! is_s5 "$f"; then
+        vols+=("$f"); cpio_floppies="$cpio_floppies$f "
+    else
+        flush_cpio
+    fi
+done
+flush_cpio
+
 subsets=0
 for f in "${first[@]}" "${rest[@]}"; do
+    case $cpio_floppies in *" $f "*) continue ;; esac
     FS=$STAGE/fs
     rm -rf "$FS"
     if ! python3 "$S5FS" extract "$f" "$FS" >/dev/null 2>&1; then

@@ -10,7 +10,7 @@ or test.
 | tool | what it does |
 | --- | --- |
 | `build-image.sh` | build a populated `/perso/svr3` ext2 image from AT&T UNIX System V/386 Release 3 floppies and tapes |
-| `build-image-isc.sh` | the same from the floppies of INTERACTIVE UNIX System V/386 (Release 3.2 with a great deal added) |
+| `build-image-isc.sh` | the same from the floppies of INTERACTIVE UNIX System V/386 (Release 3.2 with a great deal added), or of VenturCom Venix/386 3.2.4, which packages its optional sets the same way and its base system as cpio floppies |
 | `imd2raw.py` | turn an ImageDisk (`.IMD`) floppy image into a raw sector image |
 
 `build-image.sh` also uses `../svr4/s5fs.py` for the boot floppies, which
