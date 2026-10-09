@@ -50,7 +50,9 @@ bytes ".rept"               .data '\t.data\n\t.rept 1+2<<3\n\t.byte 7\n\t.endr' 
                                   0707070707070707070707070707070707
 bytes ".if, true"           .data '\t.data\n\t.if 1+2<<3 == 17\n\t.byte 1\n\t.else\n\t.byte 2\n\t.endif' 01
 bytes ".if, false"          .data '\t.data\n\t.if 1+2<<3 == 24\n\t.byte 1\n\t.else\n\t.byte 2\n\t.endif' 02
-bytes ".fill count"         .data '\t.data\n\t.fill 1+2<<1, 1, 0x66'         6666666666
+bytes ".ifeq"               .data '\t.data\n\t.ifeq 1-1\n\t.byte 1\n\t.else\n\t.byte 2\n\t.endif' 01
+bytes ".iflt"               .data '\t.data\n\t.iflt 0-1\n\t.byte 1\n\t.else\n\t.byte 2\n\t.endif' 01
+bytes ".fill count"        .data '\t.data\n\t.fill 1+2<<1, 1, 0x66'         6666666666
 bytes ".balign"             .data '\t.data\n\t.byte 1\n\t.balign 2+1<<1\n\t.byte 2' 0100000002
 
 # The rest of the grammar, through a directive.

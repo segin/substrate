@@ -1993,11 +1993,9 @@ static int filter_gas_conditionals(const char *in_path, char **out_path) {
             if (depth >= sizeof(stack) / sizeof(stack[0])) {
                 goto out;
             }
-            {
-                char *endp;
-                while (*args == ' ' || *args == '\t') args++;
-                v = strtoll(args, &endp, 0);
-                (void)endp;
+            /* What is not an expression of numbers counts as 0. */
+            if (as_expr_eval_string(args, NULL, NULL, &v) != AS_EXPR_EVAL_OK) {
+                v = 0;
             }
             if (line_starts_with_directive(d, ".ifeq")) truth = (v == 0);
             else if (line_starts_with_directive(d, ".ifne")) truth = (v != 0);
