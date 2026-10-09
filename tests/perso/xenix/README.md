@@ -41,7 +41,11 @@ return never reaches the kernel to unblock it.
 
 ## What it does not check
 
-The large text model.  `cc -Ml` builds, and the kernel's side of a
-large-model delivery is written from that library's code, but programs
-of that model built by this `cc` do not start under substrate (they
-loop in `stkgrow` and exit 100 before `main`), signals or no signals.
+The large model.  `cc -Ml` builds, and the kernel's side of a
+large-model delivery is written from that library's code, but a program
+built that way does not start under substrate, signals or no signals:
+it is large in data as well as text (`x_renv` has `XE_LDATA`), and such
+a program passes a system call's arguments in a block on its stack with
+a pointer to it in BX, every pointer among them far.  The personality
+reads arguments from the registers, which is the convention of the
+small-data models -- `ex` and Word are large in text only, and run.
