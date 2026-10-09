@@ -581,423 +581,44 @@ static int x86_mnemonic_keeps_trailing_size_letter(const char *mnemonic) {
     return 0;
 }
 
+/*
+ * Expressions are as_expr.c's.  These give its three answers the 0 or -1
+ * the rest of this file tests for.
+ */
+
+/* One integer literal. */
 static int parse_int64(const char *s, long long *out) {
-    char *end;
-    long long v;
-
-    if (s == NULL || out == NULL) {
-        return -1;
-    }
-    v = strtoll(s, &end, 0);
-    if (end == s || *end != '\0') {
-        return -1;
-    }
-    *out = v;
-    return 0;
+    return as_expr_parse_number(s, out);
 }
 
-typedef struct {
-    const char *s;
-    size_t i;
-} const_expr_parser_t;
-
-static void const_expr_skip_ws(const_expr_parser_t *p) {
-    while (p != NULL && p->s[p->i] != '\0' && isspace((unsigned char)p->s[p->i])) {
-        ++p->i;
-    }
-}
-
-static int const_expr_parse_or(const_expr_parser_t *p, long long *out);
-
-static int const_expr_parse_number(const_expr_parser_t *p, long long *out) {
-    const char *start;
-    char *end;
-    long long v;
-
-    if (p == NULL || out == NULL) {
-        return -1;
-    }
-    const_expr_skip_ws(p);
-    start = p->s + p->i;
-    if (*start == '\0') {
-        return -1;
-    }
-    v = strtoll(start, &end, 0);
-    if (end == start) {
-        return -1;
-    }
-    p->i += (size_t)(end - start);
-    *out = v;
-    return 0;
-}
-
-static int const_expr_parse_primary(const_expr_parser_t *p, long long *out) {
-    long long v;
-
-    if (p == NULL || out == NULL) {
-        return -1;
-    }
-    const_expr_skip_ws(p);
-    if (p->s[p->i] == '(') {
-        ++p->i;
-        if (const_expr_parse_or(p, &v) != 0) {
-            return -1;
-        }
-        const_expr_skip_ws(p);
-        if (p->s[p->i] != ')') {
-            return -1;
-        }
-        ++p->i;
-        *out = v;
-        return 0;
-    }
-    return const_expr_parse_number(p, out);
-}
-
-static int const_expr_parse_unary(const_expr_parser_t *p, long long *out) {
-    if (p == NULL || out == NULL) {
-        return -1;
-    }
-    const_expr_skip_ws(p);
-    if (p->s[p->i] == '+') {
-        ++p->i;
-        return const_expr_parse_unary(p, out);
-    }
-    if (p->s[p->i] == '-') {
-        ++p->i;
-        if (const_expr_parse_unary(p, out) != 0) {
-            return -1;
-        }
-        *out = -*out;
-        return 0;
-    }
-    if (p->s[p->i] == '~') {
-        ++p->i;
-        if (const_expr_parse_unary(p, out) != 0) {
-            return -1;
-        }
-        *out = ~*out;
-        return 0;
-    }
-    return const_expr_parse_primary(p, out);
-}
-
-static int const_expr_parse_mul(const_expr_parser_t *p, long long *out) {
-    long long lhs;
-
-    if (const_expr_parse_unary(p, &lhs) != 0) {
-        return -1;
-    }
-    for (;;) {
-        long long rhs;
-        const_expr_skip_ws(p);
-        if (p->s[p->i] == '*') {
-            ++p->i;
-            if (const_expr_parse_unary(p, &rhs) != 0) {
-                return -1;
-            }
-            lhs *= rhs;
-            continue;
-        }
-        if (p->s[p->i] == '/') {
-            ++p->i;
-            if (const_expr_parse_unary(p, &rhs) != 0 || rhs == 0) {
-                return -1;
-            }
-            lhs /= rhs;
-            continue;
-        }
-        if (p->s[p->i] == '%') {
-            ++p->i;
-            if (const_expr_parse_unary(p, &rhs) != 0 || rhs == 0) {
-                return -1;
-            }
-            lhs %= rhs;
-            continue;
-        }
-        break;
-    }
-    *out = lhs;
-    return 0;
-}
-
-static int const_expr_parse_add(const_expr_parser_t *p, long long *out) {
-    long long lhs;
-
-    if (const_expr_parse_mul(p, &lhs) != 0) {
-        return -1;
-    }
-    for (;;) {
-        long long rhs;
-        const_expr_skip_ws(p);
-        if (p->s[p->i] == '+') {
-            ++p->i;
-            if (const_expr_parse_mul(p, &rhs) != 0) {
-                return -1;
-            }
-            lhs += rhs;
-            continue;
-        }
-        if (p->s[p->i] == '-') {
-            ++p->i;
-            if (const_expr_parse_mul(p, &rhs) != 0) {
-                return -1;
-            }
-            lhs -= rhs;
-            continue;
-        }
-        break;
-    }
-    *out = lhs;
-    return 0;
-}
-
-static int const_expr_parse_shift(const_expr_parser_t *p, long long *out) {
-    long long lhs;
-
-    if (const_expr_parse_add(p, &lhs) != 0) {
-        return -1;
-    }
-    for (;;) {
-        long long rhs;
-        const_expr_skip_ws(p);
-        if (p->s[p->i] == '<' && p->s[p->i + 1] == '<') {
-            p->i += 2;
-            if (const_expr_parse_add(p, &rhs) != 0) {
-                return -1;
-            }
-            lhs <<= (rhs & 63);
-            continue;
-        }
-        if (p->s[p->i] == '>' && p->s[p->i + 1] == '>') {
-            p->i += 2;
-            if (const_expr_parse_add(p, &rhs) != 0) {
-                return -1;
-            }
-            lhs >>= (rhs & 63);
-            continue;
-        }
-        break;
-    }
-    *out = lhs;
-    return 0;
-}
-
-static int const_expr_parse_and(const_expr_parser_t *p, long long *out) {
-    long long lhs;
-
-    if (const_expr_parse_shift(p, &lhs) != 0) {
-        return -1;
-    }
-    while (p->s[p->i] == '&' && p->s[p->i + 1] != '&') {
-        long long rhs;
-        ++p->i;
-        if (const_expr_parse_shift(p, &rhs) != 0) {
-            return -1;
-        }
-        lhs &= rhs;
-        const_expr_skip_ws(p);
-    }
-    *out = lhs;
-    return 0;
-}
-
-static int const_expr_parse_xor(const_expr_parser_t *p, long long *out) {
-    long long lhs;
-
-    if (const_expr_parse_and(p, &lhs) != 0) {
-        return -1;
-    }
-    while (p->s[p->i] == '^') {
-        long long rhs;
-        ++p->i;
-        if (const_expr_parse_and(p, &rhs) != 0) {
-            return -1;
-        }
-        lhs ^= rhs;
-        const_expr_skip_ws(p);
-    }
-    *out = lhs;
-    return 0;
-}
-
-static int const_expr_parse_or(const_expr_parser_t *p, long long *out) {
-    long long lhs;
-
-    if (const_expr_parse_xor(p, &lhs) != 0) {
-        return -1;
-    }
-    while (p->s[p->i] == '|' && p->s[p->i + 1] != '|') {
-        long long rhs;
-        ++p->i;
-        if (const_expr_parse_xor(p, &rhs) != 0) {
-            return -1;
-        }
-        lhs |= rhs;
-        const_expr_skip_ws(p);
-    }
-    *out = lhs;
-    return 0;
-}
-
+/* Text that is an expression of numbers alone. */
 static int parse_const_expr_string(const char *s, long long *out) {
-    const_expr_parser_t p;
-
     if (s == NULL || out == NULL) {
         return -1;
     }
-    p.s = s;
-    p.i = 0;
-    if (const_expr_parse_or(&p, out) != 0) {
-        return -1;
-    }
-    const_expr_skip_ws(&p);
-    return p.s[p.i] == '\0' ? 0 : -1;
+    return as_expr_eval_string(s, NULL, NULL, out) == AS_EXPR_EVAL_OK ? 0 : -1;
 }
 
+/* An expression of numbers alone. */
 static int eval_expr_const(const as_expr_t *e, long long *out) {
-    long long l;
-    long long r;
-
-    if (e == NULL || out == NULL) {
-        return -1;
-    }
-    switch (e->kind) {
-    case AS_EXPR_CONST:
-        *out = e->value;
-        return 0;
-    case AS_EXPR_UNARY:
-        if (eval_expr_const(e->lhs, &l) != 0) {
-            return -1;
-        }
-        if (e->op == AS_EXPR_OP_NEG) {
-            *out = -l;
-            return 0;
-        }
-        if (e->op == AS_EXPR_OP_BNOT) {
-            *out = ~l;
-            return 0;
-        }
-        return -1;
-    case AS_EXPR_BINARY:
-        if (eval_expr_const(e->lhs, &l) != 0 || eval_expr_const(e->rhs, &r) != 0) {
-            return -1;
-        }
-        switch (e->op) {
-        case AS_EXPR_OP_ADD:
-            *out = l + r;
-            return 0;
-        case AS_EXPR_OP_SUB:
-            *out = l - r;
-            return 0;
-        case AS_EXPR_OP_MUL:
-            *out = l * r;
-            return 0;
-        case AS_EXPR_OP_DIV:
-            if (r == 0) return -1;
-            *out = l / r;
-            return 0;
-        case AS_EXPR_OP_MOD:
-            if (r == 0) return -1;
-            *out = l % r;
-            return 0;
-        case AS_EXPR_OP_OR:
-            *out = l | r;
-            return 0;
-        case AS_EXPR_OP_AND:
-            *out = l & r;
-            return 0;
-        case AS_EXPR_OP_XOR:
-            *out = l ^ r;
-            return 0;
-        case AS_EXPR_OP_SHL:
-            *out = l << (r & 63);
-            return 0;
-        case AS_EXPR_OP_SHR:
-            *out = l >> (r & 63);
-            return 0;
-        case AS_EXPR_OP_EQ:
-            *out = (l == r) ? -1 : 0;
-            return 0;
-        case AS_EXPR_OP_NE:
-            *out = (l != r) ? -1 : 0;
-            return 0;
-        case AS_EXPR_OP_LT:
-            *out = (l < r) ? -1 : 0;
-            return 0;
-        case AS_EXPR_OP_LE:
-            *out = (l <= r) ? -1 : 0;
-            return 0;
-        case AS_EXPR_OP_GT:
-            *out = (l > r) ? -1 : 0;
-            return 0;
-        case AS_EXPR_OP_GE:
-            *out = (l >= r) ? -1 : 0;
-            return 0;
-        default:
-            return -1;
-        }
-    default:
-        return -1;
-    }
+    return as_expr_eval(e, NULL, NULL, out) == AS_EXPR_EVAL_OK ? 0 : -1;
 }
 
-static int eval_expr_asm_vars(emit_ctx_t *ctx, const as_expr_t *e, long long *out) {
-    long long l;
-    long long r;
-
-    if (ctx == NULL || e == NULL || out == NULL) {
-        return -1;
-    }
-    switch (e->kind) {
-    case AS_EXPR_CONST:
-        *out = e->value;
+/* What .set and = have given a value to; the location counter is not
+ * among them. */
+static int asm_var_expr_lookup(void *cookie, const char *name, long long *out) {
+    if (strcmp(name, ".") == 0) {
         return 0;
-    case AS_EXPR_SYMBOL:
-        if (e->symbol == NULL || strcmp(e->symbol, ".") == 0) {
-            return -1;
-        }
-        return asm_var_lookup(ctx, e->symbol, out);
-    case AS_EXPR_UNARY:
-        if (eval_expr_asm_vars(ctx, e->lhs, &l) != 0) {
-            return -1;
-        }
-        if (e->op == AS_EXPR_OP_NEG) {
-            *out = -l;
-            return 0;
-        }
-        if (e->op == AS_EXPR_OP_BNOT) {
-            *out = ~l;
-            return 0;
-        }
-        return -1;
-    case AS_EXPR_BINARY:
-        if (eval_expr_asm_vars(ctx, e->lhs, &l) != 0 ||
-            eval_expr_asm_vars(ctx, e->rhs, &r) != 0) {
-            return -1;
-        }
-        switch (e->op) {
-        case AS_EXPR_OP_ADD: *out = l + r; return 0;
-        case AS_EXPR_OP_SUB: *out = l - r; return 0;
-        case AS_EXPR_OP_MUL: *out = l * r; return 0;
-        case AS_EXPR_OP_DIV: if (r == 0) return -1; *out = l / r; return 0;
-        case AS_EXPR_OP_MOD: if (r == 0) return -1; *out = l % r; return 0;
-        case AS_EXPR_OP_OR: *out = l | r; return 0;
-        case AS_EXPR_OP_AND: *out = l & r; return 0;
-        case AS_EXPR_OP_XOR: *out = l ^ r; return 0;
-        case AS_EXPR_OP_SHL: *out = l << (r & 63); return 0;
-        case AS_EXPR_OP_SHR: *out = l >> (r & 63); return 0;
-        case AS_EXPR_OP_EQ: *out = (l == r) ? -1 : 0; return 0;
-        case AS_EXPR_OP_NE: *out = (l != r) ? -1 : 0; return 0;
-        case AS_EXPR_OP_LT: *out = (l < r) ? -1 : 0; return 0;
-        case AS_EXPR_OP_LE: *out = (l <= r) ? -1 : 0; return 0;
-        case AS_EXPR_OP_GT: *out = (l > r) ? -1 : 0; return 0;
-        case AS_EXPR_OP_GE: *out = (l >= r) ? -1 : 0; return 0;
-        default: return -1;
-        }
-    default:
+    }
+    return asm_var_lookup((const emit_ctx_t *)cookie, name, out) == 0;
+}
+
+/* An expression of numbers and assembly-time variables. */
+static int eval_expr_asm_vars(emit_ctx_t *ctx, const as_expr_t *e, long long *out) {
+    if (ctx == NULL) {
         return -1;
     }
+    return as_expr_eval(e, asm_var_expr_lookup, ctx, out) == AS_EXPR_EVAL_OK ? 0 : -1;
 }
 
 static int eval_arg_asm_vars(emit_ctx_t *ctx, const as_stmt_t *st, const char *arg, long long *out) {
