@@ -340,6 +340,27 @@ install_etc_to_dist() {
     fi
 }
 
+# Substrate's own cc, as and ld into $DIST: see the note where
+# install_to_dist calls this.  They are the 32-bit builds in both images;
+# the 64-bit image has the 32-bit libraries and runs them.
+install_substrate_cc() {
+    local scc_dir="$DIST/usr/libexec/substrate-cc"
+
+    if [ ! -f "$TOP/usr.bin/cc/cc" ] || [ ! -f "$TOP/usr.bin/as/as" ] || [ ! -f "$TOP/usr.bin/ld/ld" ]; then
+        echo "WARNING: usr.bin/cc, as and ld are not all built; /usr/bin/cc is left out" >&2
+        return 0
+    fi
+    mkdir -p "$scc_dir" "$DIST/usr/bin"
+    cp "$TOP/usr.bin/cc/cc" "$TOP/usr.bin/as/as" "$TOP/usr.bin/ld/ld" "$scc_dir/"
+    if [ -d "$TOP/usr.bin/cc/resource" ]; then
+        mkdir -p "$scc_dir/resource"
+        cp -r "$TOP/usr.bin/cc/resource/." "$scc_dir/resource/"
+    fi
+    rm -f "$DIST/usr/bin/cc"
+    printf '#!/bin/sh\nexec /usr/libexec/substrate-cc/cc "$@"\n' > "$DIST/usr/bin/cc"
+    chmod 755 "$DIST/usr/bin/cc"
+}
+
 install_to_dist() {
     echo "Installing kernel to dist/boot and dist/vmunix..."
     cp "$TOP/sys/kernel.bin" "$DIST/boot/"
@@ -586,12 +607,21 @@ install_to_dist() {
 
     echo "Installing toolchain to dist/usr/bin..."
     mkdir -p "$DIST/usr/bin"
-    # cc, as, ld, and the rest of the C toolchain are provided by the
-    # stage-2 binutils + GCC overlay (dist-toolchain/, dist-gcc/).
-    # Substrate's earlier hand-rolled usr.bin/cc, usr.bin/as, usr.bin/ld
-    # have been retired in favour of the GNU toolchain.
+    # gcc, as, ld and the rest of the GNU toolchain come from the stage-2
+    # binutils + GCC overlay (dist-toolchain/, dist-gcc/), and keep the
+    # names /usr/bin/as and /usr/bin/ld: configure scripts, libtool and
+    # hand links on the target run those from PATH.
+    #
+    # Substrate's own compiler, assembler and linker (usr.bin/cc, as, ld)
+    # go together in a directory of their own, since two of the three
+    # names are taken: /usr/libexec/substrate-cc/{cc,as,ld}, with the
+    # compiler's headers beside it.  cc finds its assembler and linker
+    # next to itself, by the path it was run as -- so /usr/bin/cc is a
+    # script that runs it by that path, not a link to it, through which
+    # it would look beside /usr/bin/cc and find the GNU ones.
+    install_substrate_cc
     # Archive / binary utilities that still live under usr.bin/ — these
-    # are stand-alone tools, not part of the dropped cc/as/ld set.
+    # are stand-alone tools, not part of the cc/as/ld set above.
     for tool in ar nm size addr2line elfedit readelf; do
         if [ -f "$TOP/usr.bin/$tool/$tool" ]; then
             cp "$TOP/usr.bin/$tool/$tool" "$DIST/usr/bin/"
@@ -603,6 +633,7 @@ install_to_dist() {
     for dir in "$TOP/usr.bin"/*/ ; do
         if [ -d "$dir" ]; then
             name=$(basename "$dir")
+            case "$name" in cc|as|ld) continue ;; esac     # placed above
             if [ -f "$dir/$name" ] && [ ! -f "$DIST/usr/bin/$name" ]; then
                 cp "$dir/$name" "$DIST/usr/bin/"
             fi
@@ -1308,6 +1339,13 @@ build_components64() {
     make -C "$TOP/sbin" ARCH=x86_64 -j4
     make -C "$TOP/usr.bin" ARCH=x86_64 -j4
     make -C "$TOP/usr.sbin" ARCH=x86_64 -j4
+
+    # Substrate's own cc, as and ld: 32-bit programs in this image too
+    # (install_substrate_cc), which the 32-bit libraries above run.
+    echo "Building substrate's cc, as and ld (32-bit)..."
+    for dir in cc as ld; do
+        make -C "$TOP/usr.bin/$dir" -j4
+    done
 }
 
 # Copy every 64-bit program of one source directory ($1: bin, sbin, ...)
@@ -1317,6 +1355,9 @@ install_programs64() {
     mkdir -p "$dest"
     for dir in "$srcdir"/*/; do
         name=$(basename "$dir")
+        # Substrate's own cc, as and ld go where install_substrate_cc puts
+        # them, not under the names the GNU ones have.
+        case "$1/$name" in usr.bin/cc|usr.bin/as|usr.bin/ld) continue ;; esac
         [ -f "${dir}obj-x86_64/$name" ] || continue
         # Remove first: $DIST survives from the last bake, where /bin/sh
         # may be a symlink to /usr/bin/zsh -- an absolute path, which cp
@@ -1363,6 +1404,7 @@ install_to_dist64() {
     install_programs64 sbin sbin
     install_programs64 usr.bin usr/bin
     install_programs64 usr.sbin usr/sbin
+    install_substrate_cc
     # egrep/fgrep are shebang wrappers, the same on either architecture.
     if [ -f "$DIST/bin/grep" ]; then
         make -C "$TOP/bin/grep" install-grep-links DESTDIR="$DIST" >/dev/null 2>&1 || true

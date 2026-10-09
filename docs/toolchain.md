@@ -26,7 +26,29 @@ and are reapplied by each port's `fetch.sh`; nothing in
   - `/usr/libexec/gcc/i386-unknown-substrate/16.1.0/{cc1,cc1plus,lto1,lto-dump,collect2,lto-wrapper}`
   - `/usr/lib/gcc/i386-unknown-substrate/16.1.0/{libgcc.a,libgcov.a,crtbegin*.o,crtend*.o}`
 
-  On the image, `cc` is a symlink to `gcc`.
+  On the image, `cc` is not `gcc`: it is substrate's own compiler
+  (`usr.bin/cc`), below.
+
+## Substrate's own cc, as and ld
+
+The in-tree compiler, assembler and linker (`usr.bin/cc`, `usr.bin/as`,
+`usr.bin/ld`) are installed together, in a directory of their own, since
+the GNU assembler and linker have the names `/usr/bin/as` and
+`/usr/bin/ld` and everything that runs those from `PATH` -- `gcc`,
+configure scripts, libtool -- means the GNU ones:
+
+- `/usr/libexec/substrate-cc/{cc,as,ld}`
+- `/usr/libexec/substrate-cc/resource/include/` (the compiler's own headers)
+- `/usr/bin/cc`, a two-line script that runs `/usr/libexec/substrate-cc/cc`
+
+`cc` looks for its assembler and linker beside itself, by the path it
+was run as, which is why `/usr/bin/cc` is a script and not a link: run
+through a link it would look beside `/usr/bin/cc` and drive the GNU
+ones.  `AS` and `LD` in the environment override both.
+
+`build-rootfs.sh` (`install_substrate_cc`) puts them in both images.
+They are 32-bit programs in `rootfs64.img` as well, where they are the
+only toolchain: that image has no GNU one.
 
 ## The 64-bit cross toolchain
 
