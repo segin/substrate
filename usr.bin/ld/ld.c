@@ -7105,7 +7105,11 @@ static int finalize_dynamic_imports_x64(elfobj_t *out, const dyn_import_vec_t *i
         const dyn_import_t *imp = &imports->items[i];
         uint32_t dynidx = 0;
         if (dynsym_index_by_name(out, imp->name, &dynidx) != 0) {
-            continue;
+            /* Its PLT entry and GOT slot would be left zero, to be
+             * jumped through at run time. */
+            fprintf(stderr, "ld: %s is imported and has no entry in the dynamic symbol table\n",
+                    imp->name != NULL ? imp->name : "?");
+            goto fail_import;
         }
         if (imp->need_plt) {
             size_t ent = imp->plt_slot;
@@ -7271,6 +7275,14 @@ static int finalize_dynamic_imports_x64(elfobj_t *out, const dyn_import_vec_t *i
     free(rela_plt_buf);
     free(rela_dyn_buf);
     return 0;
+
+fail_import:
+    free(plt_buf);
+    free(gotplt_buf);
+    free(got_buf);
+    free(rela_plt_buf);
+    free(rela_dyn_buf);
+    return -1;
 }
 
 static int finalize_dynamic_imports_i386(elfobj_t *out, const dyn_import_vec_t *imports) {
@@ -7429,7 +7441,11 @@ static int finalize_dynamic_imports_i386(elfobj_t *out, const dyn_import_vec_t *
         const dyn_import_t *imp = &imports->items[i];
         uint32_t dynidx = 0;
         if (dynsym_index_by_name(out, imp->name, &dynidx) != 0) {
-            continue;
+            /* Its PLT entry and GOT slot would be left zero, to be
+             * jumped through at run time. */
+            fprintf(stderr, "ld: %s is imported and has no entry in the dynamic symbol table\n",
+                    imp->name != NULL ? imp->name : "?");
+            goto fail_import;
         }
         if (imp->need_plt) {
             size_t ent = imp->plt_slot;
@@ -7449,8 +7465,11 @@ static int finalize_dynamic_imports_i386(elfobj_t *out, const dyn_import_vec_t *
                     plt_buf[poff + 1] = 0x25;
                     write_u32_endian(plt_buf + poff + 2, e, (uint32_t)slot_addr);
                 }
+                /* What is pushed for the resolver is where this entry's
+                 * relocation is in .rel.plt, in bytes (the i386 psABI),
+                 * not which entry it is. */
                 plt_buf[poff + 6] = 0x68;
-                write_u32_endian(plt_buf + poff + 7, e, (uint32_t)ent);
+                write_u32_endian(plt_buf + poff + 7, e, (uint32_t)roff);
                 plt_buf[poff + 11] = 0xe9;
                 rel = (int32_t)((int64_t)plt_addr - (int64_t)(ent_addr + 16));
                 write_u32_endian(plt_buf + poff + 12, e, (uint32_t)rel);
@@ -7576,6 +7595,14 @@ static int finalize_dynamic_imports_i386(elfobj_t *out, const dyn_import_vec_t *
     free(rel_plt_buf);
     free(rel_dyn_buf);
     return 0;
+
+fail_import:
+    free(plt_buf);
+    free(gotplt_buf);
+    free(got_buf);
+    free(rel_plt_buf);
+    free(rel_dyn_buf);
+    return -1;
 }
 
 static int plan_dynamic_needed(ld_ctx_t *ctx, elfobj_t *out) {

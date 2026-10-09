@@ -51,7 +51,7 @@ short writes and close errors checked.
   Evidence: `ld.c:10456` passes only type, place, symbol value and addend; `elf_reloc.c:159-167, 177-184` compute `R_386_GOT32`, `GOT32X` and `GOTOFF` as `S+A`; `SIZE32/SIZE64` likewise (`158, 329, 355`).  Basis: verified (`177`).  Tasks #55, #93.
 - [ ] **LD-REL-002** When a GOT-relative relocation refers to a symbol defined in the output, the linker shall give the symbol a GOT entry or relax the instruction to a direct reference, for every instruction form the relocation may appear in.
   Evidence: `.got` is sized from imports only (`6218-6226, 6308-6316`); the one relaxation is x86-64 `mov`→`lea` keyed on a single opcode byte (`10464-10477`); `call *f@GOTPCREL(%rip)` and the i386 forms are left wrong.  Basis: traced.  Task #87.
-- [ ] **LD-REL-003** When an i386 PLT entry is built, the linker shall push the byte offset of its relocation in `.rel.plt`.
+- [x] **LD-REL-003** When an i386 PLT entry is built, the linker shall push the byte offset of its relocation in `.rel.plt`.
   Evidence: `ld.c:6982` pushes the entry index; `sbin/ld.so/ld_reloc.c:128` divides the argument by the relocation size, so lazy binding resolves the wrong import.  Basis: verified.  Task #84.
 - [x] **LD-REL-004** When code refers to a function in a shared object through a PC-relative relocation, the linker shall route the reference through a PLT entry; when it refers to a data object that way, it shall not.
   Evidence: i386 `R_386_PC32` to an import gets no PLT (`6158-6162`, `9263`); x86-64 treats every `PC32` to an undefined `NOTYPE` symbol as a call (`6099-6102`, `9216-9226`), so data imports read PLT bytes.  Basis: traced.  Task #85.
@@ -61,7 +61,7 @@ short writes and close errors checked.
   Evidence: no `R_*_COPY` or `DT_TEXTREL` anywhere; a dynamic `R_386_32` lands in `.text` (`6058-6060, 7061-7084`); `has_text_relocation` (`10158-10183`) rejects any executable section with any static relocation.  Basis: traced; absence verified.  Task #88.
 - [ ] **LD-REL-007** The linker shall accept i386 PC-relative results modulo 2^32, 64-bit absolute results over the whole address space on every host, and 8- and 16-bit absolute results in either signedness.
   Evidence: `elf_reloc.c:168-176` range-checks in wide arithmetic; `10-14, 331-334` fail above 2^63 where `__int128` is unavailable (the native i386 build); `198-204, 212-218` with `ld.c:9081-9100`.  Basis: traced.  Task #89.
-- [ ] **LD-REL-008** If an import has no entry in `.dynsym`, then the linker shall fail the link naming the symbol.
+- [x] **LD-REL-008** If an import has no entry in `.dynsym`, then the linker shall fail the link naming the symbol.
   Evidence: `ld.c:6636-6638, 6754-6761, 6960-6962, 7062-7064` skip it, leaving a zero PLT stub and GOT slot.  Basis: traced; trigger suspected (versioned imports).  Task #90.
 - [ ] **LD-REL-009** When building an executable, the linker shall export the symbols its shared-object inputs refer to; when building a shared object, it shall use symbolic relocations for symbols that may be preempted.
   Evidence: `ld.c:5703-5709`; `5961-5972, 6758, 7066` use `RELATIVE` for every defined symbol.  Basis: traced.  Task #91.
