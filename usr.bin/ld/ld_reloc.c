@@ -103,6 +103,45 @@ static void write_uint_bytes(uint8_t *p, int sz, elfobj_endian_t e, uint64_t v) 
     }
 }
 
+/*
+ * Indirect functions (STT_GNU_IFUNC).
+ *
+ * Such a symbol is not the function: it is a resolver, to be called once
+ * when the program starts, and what that returns is the function.  Linked
+ * as an ordinary function, every call of it called the resolver.
+ *
+ * One that another module may supply -- a shared object's exported one --
+ * is found by name through the dynamic linker, which knows to call the
+ * resolver.  One bound in the output gets, here: an entry in the GOT that
+ * the dynamic linker fills with what the resolver returns (an IRELATIVE
+ * relocation, which names no symbol and carries the resolver's address),
+ * and a stub in .iplt that jumps through that entry.  The stub is the
+ * symbol's address for every purpose -- calls, pointers, comparisons --
+ * so all of them agree; the symbol table goes on saying where the
+ * resolver is, which is what its type means.
+ *
+ * The context is kept here so that resolve_symbol_addr(), which is
+ * handed symbols from everywhere, gives the stub.
+ */
+static const ld_ctx_t *ifunc_ctx;
+
+static long ifunc_index(const elf_symbol_t *sym) {
+    size_t i;
+
+    for (i = 0; ifunc_ctx != NULL && i < ifunc_ctx->ifunc_count; ++i) {
+        if (ifunc_ctx->ifuncs[i] == sym) {
+            return (long)i;
+        }
+    }
+    return -1;
+}
+
+/* A stub: position-independent on i386 only where it has to be, since
+ * that one costs more. */
+static size_t ifunc_stub_size(const elfobj_t *obj) {
+    return elf_class(obj) != ELFOBJ_CLASS_64 && elf_type(obj) == ET_DYN ? 24 : 8;
+}
+
 int resolve_symbol_addr(elfobj_t *obj, const elf_symbol_t *sym, int allow_undef,
                                uint64_t *out_addr, const char **undef_name) {
     uint16_t shndx;
@@ -111,6 +150,15 @@ int resolve_symbol_addr(elfobj_t *obj, const elf_symbol_t *sym, int allow_undef,
 
     if (sym == NULL) {
         *out_addr = 0;
+        return 0;
+    }
+    if (ifunc_index(sym) >= 0) {
+        elf_section_t *iplt = elf_find_section(obj, ".iplt");
+
+        if (iplt == NULL) {
+            return -1;
+        }
+        *out_addr = elf_section_addr(iplt) + (uint64_t)ifunc_index(sym) * ifunc_stub_size(obj);
         return 0;
     }
 
@@ -491,6 +539,8 @@ int collect_local_got(ld_ctx_t *ctx, elfobj_t *out) {
     shared = elf_type(out) == ET_DYN && !ctx->pie;
     ctx->tls_got_count = 0;
     ctx->tls_got_words = 0;
+    ctx->ifunc_count = 0;
+    ifunc_ctx = ctx;
     for (si = 0; si < elf_section_count(out); ++si) {
         elf_section_t *sec = elf_section_get(out, si);
         const uint8_t *data;
@@ -508,6 +558,21 @@ int collect_local_got(ld_ctx_t *ctx, elfobj_t *out) {
 
             if (machine == EM_386 && reloc_is_i386_got_relative(type)) {
                 ctx->local_got_need_base = 1;
+            }
+            if (sym != NULL && elf_symbol_shndx(sym) != SHN_UNDEF && elf_symbol_type(sym) == STT_GNU_IFUNC &&
+                !symbol_is_preemptible(sym) && ifunc_index(sym) < 0) {
+                if (ctx->ifunc_count == ctx->ifunc_cap) {
+                    size_t ncap = ctx->ifunc_cap ? ctx->ifunc_cap * 2 : 8;
+                    const elf_symbol_t **n = (const elf_symbol_t **)
+                        realloc((void *)ctx->ifuncs, ncap * sizeof(n[0]));
+
+                    if (n == NULL) {
+                        return -1;
+                    }
+                    ctx->ifuncs = n;
+                    ctx->ifunc_cap = ncap;
+                }
+                ctx->ifuncs[ctx->ifunc_count++] = sym;
             }
             if (shared && reloc_tls_got_kind(machine, type) >= 0) {
                 int kind = reloc_tls_got_kind(machine, type);
@@ -544,6 +609,23 @@ int collect_local_got(ld_ctx_t *ctx, elfobj_t *out) {
                 ctx->local_got_cap = ncap;
             }
             ctx->local_got[ctx->local_got_count++] = sym;
+        }
+    }
+    if (ctx->ifunc_count != 0) {
+        elf_section_t *iplt = elf_find_section(out, ".iplt");
+
+        /* It is the dynamic linker that calls the resolvers. */
+        if (nothing_imported) {
+            fprintf(stderr, "ld: %s is an indirect function, which a statically linked program cannot have\n",
+                    elf_symbol_name(ctx->ifuncs[0]));
+            return -1;
+        }
+        if (iplt == NULL) {
+            iplt = elf_add_section(out, ".iplt", SHT_PROGBITS, SHF_ALLOC | SHF_EXECINSTR);
+        }
+        if (iplt == NULL || elf_section_set_align(iplt, 8) != ELF_OK ||
+            set_section_zero_data(iplt, ifunc_stub_size(out) * ctx->ifunc_count) != 0) {
+            return -1;
         }
     }
     return 0;
@@ -595,16 +677,18 @@ int fill_local_got(const ld_ctx_t *ctx, elfobj_t *out) {
     const uint8_t *src;
     uint8_t *buf, *relbuf = NULL;
     size_t i, sz = 0, rel_total = 0, next_rel = 0;
-    size_t tail = ctx != NULL ? ctx->local_got_relative + ctx->tls_got_count : 0;
+    size_t tail = ctx != NULL ? ctx->local_got_relative + ctx->tls_got_count + ctx->ifunc_count : 0;
     uint64_t tls_start = 0;
     int rc = -1;
 
-    if (ctx == NULL || !ctx->local_got_owned || (ctx->local_got_count == 0 && ctx->tls_got_count == 0)) {
+    if (ctx == NULL || !ctx->local_got_owned ||
+        (ctx->local_got_count == 0 && ctx->tls_got_count == 0 && ctx->ifunc_count == 0)) {
         return 0;
     }
     got = elf_find_section(out, ".got");
     src = got != NULL ? (const uint8_t *)elf_section_data(got, &sz) : NULL;
-    if (src == NULL || sz < entsz * (ctx->local_got_base + ctx->local_got_count + ctx->tls_got_words)) {
+    if (src == NULL ||
+        sz < entsz * (ctx->local_got_base + ctx->local_got_count + ctx->tls_got_words + ctx->ifunc_count)) {
         return -1;
     }
     buf = (uint8_t *)malloc(sz);
@@ -691,6 +775,68 @@ int fill_local_got(const ld_ctx_t *ctx, elfobj_t *out) {
                 write_uint_bytes(r + 4, 4, e, R_386_TLS_DTPMOD32);
             }
             write_uint_bytes(buf + entsz * (word + 1), (int)entsz, e, dtpoff);
+        }
+    }
+    /* The indirect functions: an entry for what each resolver returns,
+     * and the stub that jumps through it. */
+    if (ctx->ifunc_count != 0) {
+        elf_section_t *iplt = elf_find_section(out, ".iplt");
+        size_t stub = ifunc_stub_size(out);
+        size_t isz = stub * ctx->ifunc_count;
+        uint8_t *code = iplt != NULL ? (uint8_t *)malloc(isz) : NULL;
+        elf_err_t err;
+
+        if (code == NULL) {
+            goto out;
+        }
+        memset(code, 0x90, isz);
+        for (i = 0; i < ctx->ifunc_count; ++i) {
+            const elf_symbol_t *sym = ctx->ifuncs[i];
+            uint16_t shndx = elf_symbol_shndx(sym);
+            size_t word = ctx->local_got_base + ctx->local_got_count + ctx->tls_got_words + i;
+            uint64_t slot = elf_section_addr(got) + entsz * word;
+            uint64_t at = elf_section_addr(iplt) + stub * i;
+            uint64_t resolver;
+            uint8_t *c = code + stub * i;
+            uint8_t *r;
+
+            if (shndx == 0 || shndx >= 0xff00 || (size_t)(shndx - 1) >= elf_section_count(out) ||
+                relbuf == NULL || next_rel >= rel_total) {
+                free(code);
+                goto out;
+            }
+            /* Where the resolver is: the symbol's own place, and not
+             * the stub that stands for it everywhere else. */
+            resolver = elf_section_addr(elf_section_get(out, (size_t)(shndx - 1))) + elf_symbol_value(sym);
+            r = relbuf + relsz * next_rel++;
+            write_uint_bytes(r, (int)entsz, e, slot);
+            if (is64) {
+                write_uint_bytes(r + 8, 8, e, R_X86_64_IRELATIVE);
+                write_uint_bytes(r + 16, 8, e, resolver);
+                c[0] = 0xff; c[1] = 0x25;               /* jmp *slot(%rip) */
+                write_uint_bytes(c + 2, 4, e, (slot - (at + 6)) & 0xffffffffULL);
+            } else {
+                write_uint_bytes(r + 4, 4, e, R_386_IRELATIVE);
+                write_uint_bytes(buf + entsz * word, 4, e, resolver);
+                if (elf_type(out) != ET_DYN) {
+                    c[0] = 0xff; c[1] = 0x25;           /* jmp *slot */
+                    write_uint_bytes(c + 2, 4, e, slot);
+                } else {
+                    /* Loaded anywhere, called from anywhere, with any
+                     * register holding an argument:
+                     *   push %eax; call 1f; 1: pop %eax
+                     *   mov slot-1b(%eax),%eax
+                     *   xchg %eax,(%esp); ret */
+                    memcpy(c, "\x50\xe8\x00\x00\x00\x00\x58\x8b\x80", 9);
+                    write_uint_bytes(c + 9, 4, e, (slot - (at + 6)) & 0xffffffffULL);
+                    memcpy(c + 13, "\x87\x04\x24\xc3", 4);
+                }
+            }
+        }
+        err = elf_section_set_data(iplt, code, isz);
+        free(code);
+        if (err != ELF_OK) {
+            goto out;
         }
     }
     if (elf_section_set_data(got, buf, sz) == ELF_OK &&

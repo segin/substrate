@@ -1184,19 +1184,20 @@ int plan_dynamic_imports(ld_ctx_t *ctx, elfobj_t *out) {
     /* The output's own slots come after the imports', and their
      * relocations after every other in .rel[a].dyn. */
     ctx->local_got_base = got_slot;
-    extra_dyn_relocs += ctx->local_got_relative + ctx->tls_got_count;
+    extra_dyn_relocs += ctx->local_got_relative + ctx->tls_got_count + ctx->ifunc_count;
     if (ctx->mode == 64) {
         if (ensure_dynamic_import_sections_x64(out, &ctx->dyn_imports, extra_dyn_relocs,
-                                               ctx->local_got_count + ctx->tls_got_words) != 0) {
+                                               ctx->local_got_count + ctx->tls_got_words + ctx->ifunc_count) != 0) {
             return -1;
         }
     } else {
         if (ensure_dynamic_import_sections_i386(out, &ctx->dyn_imports, extra_dyn_relocs,
-                                                ctx->local_got_count + ctx->tls_got_words) != 0) {
+                                                ctx->local_got_count + ctx->tls_got_words +
+                                                ctx->ifunc_count) != 0) {
             return -1;
         }
     }
-    ctx->local_got_owned = ctx->local_got_count != 0 || ctx->tls_got_count != 0;
+    ctx->local_got_owned = ctx->local_got_count != 0 || ctx->tls_got_count != 0 || ctx->ifunc_count != 0;
     return 0;
 }
 

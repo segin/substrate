@@ -333,6 +333,22 @@ relocation that permits rewriting
 those become the address computed in place.
 A program that imports nothing still gets the table if its code is
 position-independent.
+.Sh INDIRECT FUNCTIONS
+A symbol of type
+.Dv STT_GNU_IFUNC
+is a resolver: it is called once when the program starts, and what it
+returns is the function.
+One bound in the output is given a stub in
+.Pa .iplt
+that jumps through an entry in
+.Pa .got ,
+which the dynamic linker fills with the resolver's result
+.Pq Dv R_386_IRELATIVE , R_X86_64_IRELATIVE ;
+the stub is the function's address for calls, pointers and comparisons
+alike, and the symbol table goes on giving the resolver's.
+One that a shared object exports is reached by name, as any symbol that
+may be preempted is.
+A statically linked program cannot have one and is refused.
 .Sh THREAD-LOCAL STORAGE
 The sections flagged
 .Dv SHF_TLS ,

@@ -224,6 +224,11 @@ typedef struct {
     size_t tls_got_count;
     size_t tls_got_cap;
     size_t tls_got_words;       /* what they come to, in GOT entries */
+    /* The indirect functions bound in this output, each with a stub in
+     * .iplt and a GOT entry after those: see collect_local_got(). */
+    const elf_symbol_t **ifuncs;
+    size_t ifunc_count;
+    size_t ifunc_cap;
     inputvec_t inputs;
 } ld_ctx_t;
 

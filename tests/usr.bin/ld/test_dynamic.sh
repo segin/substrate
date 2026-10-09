@@ -185,6 +185,38 @@ if ./ld -m elf_i386 -shared -o x.so lib.o -soname > err 2>&1; then echo "FAIL -s
 elif grep -q "needs a value" err; then echo "ok   -soname with nothing after it"
 else echo "FAIL -soname with nothing after it: $(head -1 err)"; fail=1; fi
 
+# An indirect function is a resolver, and what it returns is the function.
+# One bound in the output is called through a stub in .iplt and a GOT entry
+# that an IRELATIVE relocation has the dynamic linker fill in, and the stub
+# is its address everywhere; a statically linked program has nobody to
+# call the resolver.
+cat > ifn.c <<'EOF'
+static int impl(int x) { return x + 2; }
+void *chosen_resolver(void) { return impl; }
+__asm__(".globl chosen\n.type chosen, @gnu_indirect_function\n.set chosen, chosen_resolver");
+EOF
+printf 'int chosen(int), one(int);\nint (*keep)(int) = chosen;\nvoid _start(void) { chosen(1); one(1); for (;;) { } }\n' > ifnmain.c
+$cc32 -fno-pic -fno-pie -o ifn.o ifn.c && $cc32 -fno-pic -fno-pie -o ifnmain.o ifnmain.c
+if ./ld -m elf_i386 --dynamic-linker=/sbin/ld.so -o ifnprog ifnmain.o ifn.o libnum.so 2> err; then
+    iplt=$(readelf -SW ifnprog | sed -n 's/.* \.iplt  *PROGBITS  *0*\([0-9a-f]*\) .*/\1/p')
+    is "an indirect function: one IRELATIVE relocation" "$(readelf -rW ifnprog | grep -c 'R_386_IRELATIVE')" 1
+    is "its call goes to the stub"        "$(objdump -d ifnprog | grep -c "call  *$iplt ")" 1
+    is "and so does a pointer to it"      "$(od -An -tx4 -j"$(( 0x$(readelf -SW ifnprog | sed -n 's/.* \.data  *PROGBITS  *[0-9a-f]* \([0-9a-f]*\) .*/\1/p') ))" -N4 ifnprog | tr -d ' ' | sed 's/^0*//')" "$iplt"
+    is "the symbol still says where the resolver is" \
+       "$(readelf -sW ifnprog | awk '$NF == "chosen" { print $2; exit }')" \
+       "$(readelf -sW ifnprog | awk '$NF == "chosen_resolver" { print $2; exit }')"
+else
+    echo "FAIL an indirect function: does not link: $(head -1 err)"; fail=1
+fi
+printf 'int chosen(int);\nvoid _start(void) { chosen(1); for (;;) { } }\n' > ifnstatic.c
+$cc32 -fno-pic -fno-pie -o ifnstatic.o ifnstatic.c
+if ./ld -m elf_i386 -o ifnstatic ifnstatic.o ifn.o 2> err; then
+    echo "FAIL an indirect function in a static program: linked"; fail=1
+else
+    is "an indirect function in a static program is an error that says so" \
+       "$(grep -c 'chosen is an indirect function' err)" 1
+fi
+
 # Symbol versions.  The dynamic symbol table has the name and .gnu.version
 # the number; the first version defined is the base, named for the object;
 # a plain reference binds to the default version, to an unversioned
