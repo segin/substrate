@@ -4644,7 +4644,7 @@ static char *resolve_library_path_suffix_ex(const ld_ctx_t *ctx, const char *nam
                 continue;
             }
             cand = path_join(prefixed, leaf);
-            if (cand != NULL && access(cand, R_OK) == 0) {
+            if (cand != NULL && lib_candidate_suits(ctx, cand)) {
                 return cand;
             }
             free(cand);
@@ -4654,7 +4654,7 @@ static char *resolve_library_path_suffix_ex(const ld_ctx_t *ctx, const char *nam
 #endif
     for (i = 0; i < sizeof(default_dirs) / sizeof(default_dirs[0]); ++i) {
         char *cand = path_join(default_dirs[i], leaf);
-        if (cand != NULL && access(cand, R_OK) == 0) {
+        if (cand != NULL && lib_candidate_suits(ctx, cand)) {
             return cand;
         }
         free(cand);
@@ -4680,7 +4680,7 @@ static char *resolve_library_path_exact(const ld_ctx_t *ctx, const char *leaf) {
     }
     for (i = 0; i < ctx->lib_paths.count; ++i) {
         char *cand = path_join(ctx->lib_paths.items[i], leaf);
-        if (cand != NULL && access(cand, R_OK) == 0) {
+        if (cand != NULL && lib_candidate_suits(ctx, cand)) {
             return cand;
         }
         free(cand);
@@ -4695,7 +4695,7 @@ static char *resolve_library_path_exact(const ld_ctx_t *ctx, const char *leaf) {
                 continue;
             }
             cand = path_join(prefixed, leaf);
-            if (cand != NULL && access(cand, R_OK) == 0) {
+            if (cand != NULL && lib_candidate_suits(ctx, cand)) {
                 return cand;
             }
             free(cand);
@@ -4705,7 +4705,7 @@ static char *resolve_library_path_exact(const ld_ctx_t *ctx, const char *leaf) {
 #endif
     for (i = 0; i < sizeof(default_dirs) / sizeof(default_dirs[0]); ++i) {
         char *cand = path_join(default_dirs[i], leaf);
-        if (cand != NULL && access(cand, R_OK) == 0) {
+        if (cand != NULL && lib_candidate_suits(ctx, cand)) {
             return cand;
         }
         free(cand);
