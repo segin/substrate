@@ -10,6 +10,7 @@
 .Nm elf_reloc_type ,
 .Nm elf_reloc_addend ,
 .Nm elf_reloc_has_addend ,
+.Nm elf_reloc_retarget ,
 .Nm elf_reloc_symbol ,
 .Nm elf_reloc_section ,
 .Nm elf_set_reloc_hooks ,
@@ -38,6 +39,8 @@
 .Fn elf_reloc_addend "const elf_reloc_t *reloc"
 .Ft int
 .Fn elf_reloc_has_addend "const elf_reloc_t *reloc"
+.Ft elf_err_t
+.Fn elf_reloc_retarget "elf_reloc_t *reloc" "uint64_t offset" "uint32_t type" "int64_t addend"
 .Ft elf_symbol_t *
 .Fn elf_reloc_symbol "const elf_reloc_t *reloc"
 .Ft elf_section_t *
@@ -66,6 +69,14 @@ evaluates the exact relocation record.
 evaluates from explicit relocation parameters without an
 .Vt elf_reloc_t
 handle.
+.Pp
+.Fn elf_reloc_retarget
+changes where a relocation applies and of what type it is, keeping its
+symbol; it is for a linker that rewrites the instruction a relocation is
+in.
+.Fa addend
+replaces the addend of a relocation that carries one and is ignored for
+one whose addend is in the section.
 .Pp
 Hook callbacks installed via
 .Fn elf_set_reloc_hooks

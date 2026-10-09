@@ -1733,7 +1733,10 @@ int finalize_dynamic_imports_i386(elfobj_t *out, const dyn_import_vec_t *imports
 
             if (rel_dyn_buf != NULL && roff + 8 <= rel_dyn_sz) {
                 write_u32_endian(rel_dyn_buf + roff + 0, e, (uint32_t)slot_addr);
-                write_u32_endian(rel_dyn_buf + roff + 4, e, (dynidx << 8) | R_386_TLS_TPOFF32);
+                /* The distance to add to the thread pointer, negative
+                 * (TPOFF32 is the one to subtract, for code that says
+                 * @gottpoff, which this slot is not for). */
+                write_u32_endian(rel_dyn_buf + roff + 4, e, (dynidx << 8) | R_386_TLS_TPOFF);
             }
         }
         if (imp->need_tls_gd && got != NULL) {

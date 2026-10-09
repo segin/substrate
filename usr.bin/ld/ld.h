@@ -620,6 +620,7 @@ const dyn_import_t *find_planned_import(const ld_ctx_t *ctx, const char *name);
 int plan_local_got_i386(ld_ctx_t *ctx, elfobj_t *out);
 int fill_local_got_i386(const ld_ctx_t *ctx, elfobj_t *out);
 int apply_all_relocations(elfobj_t *obj, const ld_ctx_t *ctx, int allow_undefined);
+int relax_tls_dynamic_in_program(elfobj_t *out);
 
 /* ld_layout.c */
 int alloc_section_class(uint64_t flags);

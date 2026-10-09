@@ -1374,6 +1374,9 @@ elf_reloc_t *elf_reloc_at(elfobj_t *obj, size_t index);
 uint64_t elf_reloc_offset(const elf_reloc_t *reloc);
 uint32_t elf_reloc_type(const elf_reloc_t *reloc);
 int64_t elf_reloc_addend(const elf_reloc_t *reloc);
+/* Change where a relocation applies and what kind it is; the addend only
+ * where the relocation carries one. */
+elf_err_t elf_reloc_retarget(elf_reloc_t *reloc, uint64_t offset, uint32_t type, int64_t addend);
 int elf_reloc_has_addend(const elf_reloc_t *reloc);
 elf_symbol_t *elf_reloc_symbol(const elf_reloc_t *reloc);
 elf_section_t *elf_reloc_section(const elf_reloc_t *reloc);

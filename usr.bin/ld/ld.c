@@ -488,6 +488,12 @@ static int run_internal_link(ld_ctx_t *ctx) {
         return -1;
     }
 
+    if (is_program && relax_tls_dynamic_in_program(out) != 0) {
+        symref_map_free(&undef_refs);
+        objvec_free(&inputs);
+        elf_close(out);
+        return -1;
+    }
     if (note_dso_names(ctx) != 0 || settle_undefined_weak(ctx, out) != 0 || plan_dynamic_imports(ctx, out) != 0) {
         fprintf(stderr, "ld: failed to plan GOT/PLT dynamic imports\n");
         symref_map_free(&undef_refs);

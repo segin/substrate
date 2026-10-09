@@ -320,14 +320,20 @@ program header, aligned as the strictest of their contents;
 .Pa .tbss
 takes up no room in the image, and a thread-local symbol's value is its
 offset in the copy.
-In a program, references to its own thread-local variables compiled as
-local-exec or initial-exec
-.Pq Fl ftls-model
-are resolved to the constant offset from the thread pointer, an
-initial-exec load from the GOT being rewritten as a load of the constant.
-General-dynamic and local-dynamic references to them, and thread-local
-variables defined in a shared object being made, are not supported and
-are reported as errors.
+In a program every reference to a thread-local variable, however it was
+compiled
+.Pq Fl ftls-model ,
+comes to an offset from the thread pointer: a constant in the
+instruction for a variable the program defines, and the contents of a GOT
+slot, filled in by the dynamic linker
+.Pq Dv R_386_TLS_TPOFF , R_X86_64_TPOFF64 ,
+for one from a shared object.
+The general-dynamic and local-dynamic sequences, which call
+.Fn __tls_get_addr ,
+are rewritten in place into those forms and the call removed, so a
+program does not need that function.
+Thread-local variables defined in a shared object being made are not
+supported and are reported as an error.
 .Sh SYMBOL VERSIONS
 A symbol an input object names
 .Li sym@VER

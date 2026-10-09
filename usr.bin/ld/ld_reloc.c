@@ -460,6 +460,199 @@ int fill_local_got_i386(const ld_ctx_t *ctx, elfobj_t *out) {
 }
 
 /*
+ * The general ways of reaching a thread-local variable, in a program.
+ *
+ * Code compiled to go anywhere (-fPIC) finds a thread-local variable by
+ * calling __tls_get_addr with the module the variable is in and its
+ * offset there, both read from GOT slots the dynamic linker fills in:
+ * general-dynamic for one variable, local-dynamic for the module's own
+ * storage and offsets from it.  That is what a library loaded at any
+ * time needs.  A program's own storage, and that of the libraries it
+ * starts with, is at a distance from the thread pointer fixed before
+ * anything runs, so in a program the call is not needed -- and substrate's
+ * dynamic linker has no __tls_get_addr to call.
+ *
+ * So each such sequence is rewritten, as the psABI's TLS supplement lays
+ * out, into the same number of bytes that take the thread pointer and add
+ * the distance: the constant, for a variable the program defines (which
+ * is the local-exec form), or the contents of one GOT slot, for one from
+ * a shared object (the initial-exec form).  The relocation is retargeted
+ * to say which, and the one on the call is made R_*_NONE.  This is done
+ * before anything is counted or laid out, so that the rest of the link
+ * sees only the two forms it has to do something about, and no reference
+ * to __tls_get_addr; the symbol, if nothing else wanted it, is made weak
+ * so as not to be reported missing.
+ */
+static int tls_call_follows(elf_section_t *sec, size_t ri, uint64_t at) {
+    const elf_reloc_t *next = ri + 1 < elf_section_reloc_count(sec) ? elf_section_reloc_at(sec, ri + 1) : NULL;
+    const elf_symbol_t *callee = next != NULL ? elf_reloc_symbol(next) : NULL;
+    const char *name = callee != NULL ? elf_symbol_name(callee) : NULL;
+
+    return next != NULL && elf_reloc_offset(next) == at && name != NULL &&
+           (strcmp(name, "___tls_get_addr") == 0 || strcmp(name, "__tls_get_addr") == 0);
+}
+
+int relax_tls_dynamic_in_program(elfobj_t *out) {
+    uint16_t machine = elf_machine(out);
+    size_t i;
+
+    if (machine != EM_386 && machine != EM_X86_64) {
+        return 0;
+    }
+    for (i = 0; i < elf_section_count(out); ++i) {
+        elf_section_t *sec = elf_section_get(out, i);
+        const uint8_t *src;
+        uint8_t *buf = NULL;
+        size_t sz = 0;
+        size_t rc, ri;
+        const char *why = NULL;
+        uint64_t off = 0;
+
+        if (sec == NULL || (elf_section_flags(sec) & SHF_ALLOC) == 0 || elf_section_type(sec) == SHT_NOBITS) {
+            continue;
+        }
+        rc = elf_section_reloc_count(sec);
+        src = (const uint8_t *)elf_section_data(sec, &sz);
+        for (ri = 0; ri < rc && why == NULL; ++ri) {
+            elf_reloc_t *rel = elf_section_reloc_at(sec, ri);
+            const elf_symbol_t *sym = rel != NULL ? elf_reloc_symbol(rel) : NULL;
+            uint32_t type = rel != NULL ? elf_reloc_type(rel) : 0;
+            int defined = sym != NULL && elf_symbol_shndx(sym) != SHN_UNDEF;
+            int gd, ld, dtpoff;
+            uint64_t start;
+
+            gd = (machine == EM_386 && type == R_386_TLS_GD) || (machine == EM_X86_64 && type == R_X86_64_TLSGD);
+            ld = (machine == EM_386 && type == R_386_TLS_LDM) || (machine == EM_X86_64 && type == R_X86_64_TLSLD);
+            dtpoff = (machine == EM_386 && type == R_386_TLS_LDO_32) ||
+                     (machine == EM_X86_64 && type == R_X86_64_DTPOFF32);
+            if (!gd && !ld && !dtpoff) {
+                continue;
+            }
+            off = elf_reloc_offset(rel);
+            if (dtpoff) {
+                /* An offset in the module's storage, to be added to what
+                 * the local-dynamic call returned; that is now the thread
+                 * pointer, so it becomes the distance from that. */
+                (void)elf_reloc_retarget(rel, off, machine == EM_386 ? R_386_TLS_LE : R_X86_64_TPOFF32,
+                                         elf_reloc_addend(rel));
+                continue;
+            }
+            if (src == NULL || off < 4 || off + (machine == EM_386 ? 10 : 12) > sz) {
+                why = "a call for thread-local storage at the edge of its section";
+                break;
+            }
+            if (buf == NULL) {
+                buf = (uint8_t *)malloc(sz);
+                if (buf == NULL) {
+                    return -1;
+                }
+                memcpy(buf, src, sz);
+            }
+            if (machine == EM_386 && gd) {
+                /* leal x@tlsgd(,%ebx,1),%eax; call ___tls_get_addr@plt
+                 * or leal x@tlsgd(%ebx),%eax; call ...; nop */
+                if (buf[off - 3] == 0x8d && buf[off - 2] == 0x04 && buf[off - 1] == 0x1d) {
+                    start = off - 3;
+                } else if (buf[off - 2] == 0x8d && buf[off - 1] == 0x83 && buf[off + 9] == 0x90) {
+                    start = off - 2;
+                } else {
+                    why = "a general-dynamic reference that is not the sequence the ABI gives";
+                    break;
+                }
+                if (buf[off + 4] != 0xe8 || !tls_call_follows(sec, ri, off + 5)) {
+                    why = "a general-dynamic reference with no call to ___tls_get_addr after it";
+                    break;
+                }
+                /* movl %gs:0,%eax; then subl $x@tpoff,%eax
+                 * or addl x@gotntpoff(%ebx),%eax */
+                memcpy(buf + start, "\x65\xa1\x00\x00\x00\x00", 6);
+                memcpy(buf + start + 6, defined ? "\x81\xe8" : "\x03\x83", 2);
+                memset(buf + start + 8, 0, 4);
+                (void)elf_reloc_retarget(rel, start + 8, defined ? R_386_TLS_LE_32 : R_386_TLS_GOTIE, 0);
+            } else if (machine == EM_386) {
+                /* leal x@tlsldm(%ebx),%eax; call ___tls_get_addr@plt */
+                if (buf[off - 2] != 0x8d || buf[off - 1] != 0x83 || buf[off + 4] != 0xe8 ||
+                    !tls_call_follows(sec, ri, off + 5)) {
+                    why = "a local-dynamic reference that is not the sequence the ABI gives";
+                    break;
+                }
+                /* movl %gs:0,%eax; nop; leal 0(%esi,1),%esi */
+                memcpy(buf + off - 2, "\x65\xa1\x00\x00\x00\x00\x90\x8d\x74\x26\x00", 11);
+                (void)elf_reloc_retarget(rel, off, R_386_NONE, 0);
+            } else if (gd) {
+                /* .byte 0x66; leaq x@tlsgd(%rip),%rdi;
+                 * .word 0x6666; rex64; call __tls_get_addr@plt
+                 * (or the call through the GOT, with one prefix fewer) */
+                if (memcmp(buf + off - 4, "\x66\x48\x8d\x3d", 4) != 0 ||
+                    (memcmp(buf + off + 4, "\x66\x66\x48\xe8", 4) != 0 &&
+                     memcmp(buf + off + 4, "\x66\x48\xff\x15", 4) != 0)) {
+                    why = "a general-dynamic reference that is not the sequence the ABI gives";
+                    break;
+                }
+                if (!tls_call_follows(sec, ri, off + 8)) {
+                    why = "a general-dynamic reference with no call to __tls_get_addr after it";
+                    break;
+                }
+                /* movq %fs:0,%rax; then leaq x@tpoff(%rax),%rax
+                 * or addq x@gottpoff(%rip),%rax */
+                memcpy(buf + off - 4, "\x64\x48\x8b\x04\x25\x00\x00\x00\x00", 9);
+                memcpy(buf + off + 5, defined ? "\x48\x8d\x80" : "\x48\x03\x05", 3);
+                memset(buf + off + 8, 0, 4);
+                (void)elf_reloc_retarget(rel, off + 8, defined ? R_X86_64_TPOFF32 : R_X86_64_GOTTPOFF,
+                                         defined ? 0 : -4);
+            } else {
+                /* leaq x@tlsld(%rip),%rdi; call __tls_get_addr@plt
+                 * (or through the GOT, a byte longer) */
+                int through_got;
+
+                if (memcmp(buf + off - 3, "\x48\x8d\x3d", 3) != 0 ||
+                    (buf[off + 4] != 0xe8 && memcmp(buf + off + 4, "\xff\x15", 2) != 0)) {
+                    why = "a local-dynamic reference that is not the sequence the ABI gives";
+                    break;
+                }
+                through_got = buf[off + 4] != 0xe8;
+                if (!tls_call_follows(sec, ri, off + 5 + (uint64_t)through_got)) {
+                    why = "a local-dynamic reference with no call to __tls_get_addr after it";
+                    break;
+                }
+                /* prefixes to fill, then movq %fs:0,%rax */
+                memset(buf + off - 3, 0x66, 3 + (size_t)through_got);
+                memcpy(buf + off + through_got, "\x64\x48\x8b\x04\x25\x00\x00\x00\x00", 9);
+                (void)elf_reloc_retarget(rel, off, R_X86_64_NONE, 0);
+            }
+            /* The call is gone. */
+            {
+                elf_reloc_t *call = elf_section_reloc_at(sec, ri + 1);
+                elf_symbol_t *callee = elf_reloc_symbol(call);
+
+                (void)elf_reloc_retarget(call, elf_reloc_offset(call),
+                                         machine == EM_386 ? R_386_NONE : R_X86_64_NONE, 0);
+                if (elf_symbol_shndx(callee) == SHN_UNDEF && elf_symbol_bind(callee) == STB_GLOBAL) {
+                    (void)elf_symbol_set_binding(callee, STB_WEAK);
+                }
+                ++ri;
+            }
+        }
+        if (why != NULL) {
+            free(buf);
+            fprintf(stderr, "ld: section=%s offset=0x%llx: %s\n",
+                    elf_section_name(sec) != NULL ? elf_section_name(sec) : "<unnamed>",
+                    (unsigned long long)off, why);
+            return -1;
+        }
+        if (buf != NULL) {
+            elf_err_t err = elf_section_set_data(sec, buf, sz);
+
+            free(buf);
+            if (err != ELF_OK) {
+                return -1;
+            }
+        }
+    }
+    return 0;
+}
+
+/*
  * A reference to a thread-local variable that the program itself defines.
  *
  * The program's thread-local storage is the first there is, at a distance
@@ -639,6 +832,9 @@ int apply_all_relocations(elfobj_t *obj, const ld_ctx_t *ctx, int allow_undefine
             }
             off = elf_reloc_offset(rel);
             type = elf_reloc_type(rel);
+            if (type == 0) {
+                continue;       /* R_*_NONE: nothing, by name */
+            }
             width = elf_reloc_size_for_machine(elf_machine(obj), type);
             if (width <= 0 || width > 8) {
                 free(buf);
@@ -737,6 +933,18 @@ int apply_all_relocations(elfobj_t *obj, const ld_ctx_t *ctx, int allow_undefine
                     return -1;
                 }
                 write_uint_bytes(buf + off, width, endian, outv & 0xffffffffULL);
+                continue;
+            }
+            if (sym != NULL && elf_symbol_shndx(sym) == SHN_UNDEF && (flags & SHF_ALLOC) != 0 &&
+                ((machine == EM_X86_64 && type == R_X86_64_GOTTPOFF) ||
+                 (machine == EM_386 && type == R_386_TLS_GOTIE))) {
+                /* A thread-local variable of a shared object: S is the
+                 * GOT slot its distance from the thread pointer will be
+                 * in, and the instruction reaches the slot from where it
+                 * is (x86-64) or from the GOT (i386). */
+                outv = machine == EM_X86_64 ? S + (uint64_t)addend - P
+                                            : S + (uint64_t)addend - i386_got_base(obj);
+                write_uint_bytes(buf + off, 4, endian, outv & 0xffffffffULL);
                 continue;
             }
             if (elf_reloc_is_tls_for_machine(machine, type) && sym != NULL &&

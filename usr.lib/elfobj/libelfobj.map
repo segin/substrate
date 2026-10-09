@@ -54,6 +54,7 @@ ELFOBJ_1.0 {
 		elf_reloc_count;
 		elf_reloc_has_addend;
 		elf_reloc_is_pc_relative_for_machine;
+		elf_reloc_retarget;
 		elf_reloc_is_tls_for_machine;
 		elf_reloc_offset;
 		elf_reloc_section;

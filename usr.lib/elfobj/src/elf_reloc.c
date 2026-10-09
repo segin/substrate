@@ -241,6 +241,7 @@ static int x64_reloc_size(uint32_t type) {
         case R_X86_64_32:
         case R_X86_64_32S:
         case R_X86_64_TLSGD:
+        case R_X86_64_TLSLD:
         case R_X86_64_GOTTPOFF:
         case R_X86_64_TPOFF32:
         case R_X86_64_COPY:
@@ -2904,6 +2905,24 @@ uint32_t elf_reloc_type(const elf_reloc_t *reloc) {
 
 int64_t elf_reloc_addend(const elf_reloc_t *reloc) {
     return reloc == NULL ? 0 : reloc->addend;
+}
+
+/*
+ * Make a relocation a different one of the same symbol: for a linker that
+ * rewrites the instruction a relocation is in, and with it what is to be
+ * put there and where.  The addend is kept only by a relocation that has
+ * one (RELA); for the others it is in the section, where the caller put it.
+ */
+elf_err_t elf_reloc_retarget(elf_reloc_t *reloc, uint64_t offset, uint32_t type, int64_t addend) {
+    if (reloc == NULL) {
+        return ELF_ERR_STATE;
+    }
+    reloc->offset = offset;
+    reloc->type = type;
+    if (reloc->has_addend) {
+        reloc->addend = addend;
+    }
+    return ELF_OK;
 }
 
 int elf_reloc_has_addend(const elf_reloc_t *reloc) {

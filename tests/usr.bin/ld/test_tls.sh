@@ -32,6 +32,11 @@ ${CC:-cc} -m32 $base -fno-pic -fno-pie -o le32.o t.c || { echo "SKIP: no 32-bit 
 ${CC:-cc} -m32 $base -fPIC -ftls-model=initial-exec -o ie32.o t.c
 ${CC:-cc} -m64 $base -fno-pic -fno-pie -o le64.o t.c
 ${CC:-cc} -m64 $base -fPIC -ftls-model=initial-exec -o ie64.o t.c
+# The two that call __tls_get_addr, which in a program are rewritten not to.
+for a in 32 64; do
+    ${CC:-cc} -m$a $base -fPIC -fplt -ftls-model=global-dynamic -o gd$a.o t.c
+    ${CC:-cc} -m$a $base -fPIC -fplt -ftls-model=local-dynamic -o ld$a.o t.c
+done
 
 is() {    # WHAT GOT WANT
     if [ "$2" = "$3" ]; then echo "ok   $1"; else echo "FAIL $1: got '$2', want '$3'"; fail=1; fi
@@ -43,7 +48,7 @@ symval() { readelf -sW "$1" | awk -v s="$2" '$8 == s { print "0x" $2; exit }'; }
 
 for arch in 32 64; do
     m=elf_i386; [ $arch = 64 ] && m=elf_x86_64
-    for model in le ie; do
+    for model in le ie gd ld; do
         out=$model$arch
         if ! ./ld -m $m -o $out $out.o 2> err; then
             echo "FAIL $out: does not link: $(head -1 err)"; fail=1; continue
@@ -66,9 +71,13 @@ for arch in 32 64; do
         # the distances the code has are those back from there.
         blk=$(( ($3 + 31) / 32 * 32 ))
         v=$(( (1 << 32) - blk + $(symval $out first) ))
+        # (general-dynamic on i386 becomes a subtraction of the distance)
+        [ $out = gd32 ] && v=$(( blk - $(symval $out first) ))
         bytes=$(printf '%02x %02x %02x %02x' $(( v & 255 )) $(( (v >> 8) & 255 )) $(( (v >> 16) & 255 )) $(( v >> 24 )))
         is "$out: the code has 'first' at -$blk from the thread pointer" \
            "$(( $(objdump -d --insn-width=16 -j .text $out | grep -c "$bytes") > 0 ))" 1
+        is "$out: nothing calls __tls_get_addr" "$(objdump -d -j .text $out | grep 'call' | grep -c -v 'get_pc_thunk')" 0
+        is "$out: which is not left undefined" "$(readelf -sW $out | grep -c 'GLOBAL.*UND .*tls_get_addr')" 0
         is "$out: no dynamic relocations"       "$(readelf -rW $out | grep -c 'R_')" 0
     done
 done
