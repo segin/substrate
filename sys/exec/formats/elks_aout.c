@@ -372,7 +372,11 @@ int elks_load(int fd, const char *path, char *const argv[], char *const envp[]) 
         elks_free_kernel_vector(kenvp);
         return elks_fail(fd, -E2BIG, "ELKS: argv/envp image exceeds 16-bit segment");
     }
-    if (!elks_header_recognized(&hdr, sizeof(hdr))) {
+    /* The length is that of the file's header, of which only the fixed
+     * part has been read so far: a header with the supplement after it
+     * (every PC/IX program's) is longer than struct elks_exec. */
+    if (!elks_header_recognized(&hdr, hdr.hlen > sizeof(hdr)
+                                          ? hdr.hlen : sizeof(hdr))) {
         elks_free_kernel_vector(kargv);
         elks_free_kernel_vector(kenvp);
         return elks_fail(fd, -ENOEXEC, "ELKS: header not recognized");
@@ -529,6 +533,11 @@ int elks_load(int fd, const char *path, char *const argv[], char *const envp[]) 
     ldt_activate(current_process);
     
     elks_apply_exec_state(current_process, &plan, path);
+    /* Caught signals revert to their defaults across exec: a handler is
+     * an address in the image that has just been replaced.  Without this
+     * a program started from a shell that catches SIGCHLD was entered at
+     * that shell's handler address when its own first child exited. */
+    proc_exec_reset_signals();
     proc_capture_cmdline(current_process, kargv);
     /* The new image starts with the FPU in its initial state. */
     fpu_thread_reset(current_thread);
