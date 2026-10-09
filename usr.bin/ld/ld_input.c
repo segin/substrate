@@ -375,6 +375,107 @@ static char *resolve_thin_member_path(const char *archive_path, const char *memb
     return member_real;
 }
 
+/*
+ * An archive's own index, the member called "/": for each global symbol
+ * a member defines, the symbol's name and where that member's header is.
+ * With it a member that defines nothing the link wants is passed over
+ * unread; without it every member not yet taken was parsed whole on
+ * every pass over the archive, to be asked what it defined.
+ */
+typedef struct {
+    uint32_t hdr_off;
+    const char *name;           /* in the archive's image */
+} ar_sym_t;
+
+typedef struct {
+    ar_sym_t *syms;             /* by hdr_off */
+    size_t count;
+} ar_index_t;
+
+static int ar_sym_cmp(const void *a, const void *b) {
+    const ar_sym_t *x = (const ar_sym_t *)a;
+    const ar_sym_t *y = (const ar_sym_t *)b;
+
+    if (x->hdr_off != y->hdr_off) {
+        return x->hdr_off < y->hdr_off ? -1 : 1;
+    }
+    return x->name < y->name ? -1 : x->name > y->name;
+}
+
+/* Read the index out of the member's body: a count, that many offsets,
+ * that many names, the numbers big-endian.  One that is not as it should
+ * be is left unused, and the archive read as if it had none. */
+static void ar_index_read(const unsigned char *body, size_t body_sz, ar_index_t *ix) {
+    size_t n, i, at;
+
+    ix->syms = NULL;
+    ix->count = 0;
+    if (body == NULL || body_sz < 4) {
+        return;
+    }
+    n = (size_t)read_u32_endian(body, ELFOBJ_ENDIAN_BE);
+    if (n == 0 || n > (body_sz - 4) / 5) {     /* an offset and a name of one byte, at least */
+        return;
+    }
+    ix->syms = (ar_sym_t *)calloc(n, sizeof(ix->syms[0]));
+    if (ix->syms == NULL) {
+        return;
+    }
+    at = 4 + 4 * n;
+    for (i = 0; i < n; ++i) {
+        const unsigned char *end = at < body_sz ? memchr(body + at, '\0', body_sz - at) : NULL;
+
+        if (end == NULL) {
+            free(ix->syms);
+            ix->syms = NULL;
+            return;
+        }
+        ix->syms[i].hdr_off = read_u32_endian(body + 4 + 4 * i, ELFOBJ_ENDIAN_BE);
+        ix->syms[i].name = (const char *)body + at;
+        at = (size_t)(end - body) + 1;
+    }
+    ix->count = n;
+    qsort(ix->syms, ix->count, sizeof(ix->syms[0]), ar_sym_cmp);
+}
+
+/*
+ * What the index says of the member whose header is at `hdr_off`: 1 if
+ * it defines a name the link still wants, 0 if it defines names and none
+ * is wanted, -1 if the index does not mention it -- it defines nothing
+ * global, or the index is not of this archive as it is -- and it must be
+ * looked at to know.
+ */
+static int ar_index_wants(const ar_index_t *ix, size_t hdr_off, const symstate_t *state) {
+    size_t lo = 0, hi = ix->count;
+
+    while (lo < hi) {
+        size_t mid = lo + (hi - lo) / 2;
+
+        if (ix->syms[mid].hdr_off < hdr_off) {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+    if (lo == ix->count || ix->syms[lo].hdr_off != hdr_off) {
+        return -1;
+    }
+    for (; lo < ix->count && ix->syms[lo].hdr_off == hdr_off; ++lo) {
+        if (symset_contains(&state->unresolved, ix->syms[lo].name)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* What a reading of an archive holds besides the archive. */
+static void ar_scan_done(symset_t *seen, ar_index_t *ix) {
+    symset_free(seen);
+    free(ix->syms);
+    ix->syms = NULL;
+    ix->count = 0;
+}
+
 static int load_archive_members(const char *path, ld_ctx_t *ctx, objvec_t *objs, symstate_t *state,
                                 int whole_archive) {
     unsigned char *buf = NULL;
@@ -384,11 +485,14 @@ static int load_archive_members(const char *path, ld_ctx_t *ctx, objvec_t *objs,
     size_t strtab_sz = 0;
     int thin = 0;
     symset_t seen_members;
+    ar_index_t index;
+    int index_read = 0;
     int pass_progress;
     int pass_count = 0;
     const char *bad = NULL;
 
     memset(&seen_members, 0, sizeof(seen_members));
+    memset(&index, 0, sizeof(index));
     if (parse_archive_header(path, &buf, &sz, &thin) != 0) {
         return -1;
     }
@@ -398,7 +502,7 @@ static int load_archive_members(const char *path, ld_ctx_t *ctx, objvec_t *objs,
         if (pass_count > LD_MAX_ARCHIVE_SCAN_PASSES) {
             fprintf(stderr, "ld: archive resolution pass limit exceeded (%d) for %s\n",
                     LD_MAX_ARCHIVE_SCAN_PASSES, path);
-            symset_free(&seen_members);
+            ar_scan_done(&seen_members, &index);
             free(buf);
             return -1;
         }
@@ -406,6 +510,7 @@ static int load_archive_members(const char *path, ld_ctx_t *ctx, objvec_t *objs,
         off = 8;
         while (off + 60 <= sz) {
             const unsigned char *hdr = buf + off;
+            size_t hdr_off = off;
             uint64_t msize = 0;
             const unsigned char *mdata = NULL;
             const unsigned char *body = NULL;
@@ -415,6 +520,7 @@ static int load_archive_members(const char *path, ld_ctx_t *ctx, objvec_t *objs,
             char member_key[32];
             int is_special = 0;
             int has_member_payload = 0;
+            int unwanted;
 
             /*
              * An archive is input like any other, and one that is not as
@@ -461,6 +567,16 @@ static int load_archive_members(const char *path, ld_ctx_t *ctx, objvec_t *objs,
                 body = mdata + name_extra;
             }
 
+            if (strcmp(mname, "/") == 0 && !index_read) {
+                index_read = 1;
+                ar_index_read(body, body_sz, &index);
+            }
+            /* What the index says defines nothing wanted is not read.  The
+             * question is put as each member is come to, since a member
+             * taken earlier in this pass may have made this one wanted. */
+            unwanted = !whole_archive && state != NULL && index.count != 0 &&
+                       ar_index_wants(&index, hdr_off, state) == 0;
+
             if (strcmp(mname, "//") == 0) {
                 strtab = (const char *)body;
                 strtab_sz = body_sz;
@@ -470,7 +586,8 @@ static int load_archive_members(const char *path, ld_ctx_t *ctx, objvec_t *objs,
                 /* Where it is in this archive is what it is: the set is this
                  * archive's alone. */
                 snprintf(member_key, sizeof(member_key), "%zu", off);
-                if (!symset_contains(&seen_members, member_key) && elf_open_memory(body, body_sz, &obj) == ELF_OK) {
+                if (!unwanted && !symset_contains(&seen_members, member_key) &&
+                    elf_open_memory(body, body_sz, &obj) == ELF_OK) {
                     maybe_autoswitch_mode(ctx, obj, objs != NULL ? objs->count : 0, path);
                     if (elf_type(obj) == ET_REL && obj_matches_mode(obj, ctx->mode) &&
                         (whole_archive || obj_defines_unresolved(state, obj))) {
@@ -478,7 +595,7 @@ static int load_archive_members(const char *path, ld_ctx_t *ctx, objvec_t *objs,
                         if (symset_add(&seen_members, member_key) != 0) {
                             elf_close(obj);
                             free(mname);
-                            symset_free(&seen_members);
+                            ar_scan_done(&seen_members, &index);
                             free(buf);
                             return -1;
                         }
@@ -486,21 +603,21 @@ static int load_archive_members(const char *path, ld_ctx_t *ctx, objvec_t *objs,
                         if (validate_relocatable_input(obj, member_name) != 0) {
                             elf_close(obj);
                             free(mname);
-                            symset_free(&seen_members);
+                            ar_scan_done(&seen_members, &index);
                             free(buf);
                             return -1;
                         }
                         if (objvec_push(objs, obj, member_name) != 0) {
                             elf_close(obj);
                             free(mname);
-                            symset_free(&seen_members);
+                            ar_scan_done(&seen_members, &index);
                             free(buf);
                             return -1;
                         }
                         /* The list has it now, and will close it. */
                         if (symstate_note_object(state, obj) != 0) {
                             free(mname);
-                            symset_free(&seen_members);
+                            ar_scan_done(&seen_members, &index);
                             free(buf);
                             return -1;
                         }
@@ -515,11 +632,11 @@ static int load_archive_members(const char *path, ld_ctx_t *ctx, objvec_t *objs,
                 if (thin_member_path == NULL) {
                     fprintf(stderr, "ld: invalid thin archive member path '%s' in %s\n", mname, path);
                     free(mname);
-                    symset_free(&seen_members);
+                    ar_scan_done(&seen_members, &index);
                     free(buf);
                     return -1;
                 }
-                if (!symset_contains(&seen_members, thin_member_path)) {
+                if (!unwanted && !symset_contains(&seen_members, thin_member_path)) {
                     int should_load = 0;
                     if (elf_open(thin_member_path, &obj) == ELF_OK) {
                         maybe_autoswitch_mode(ctx, obj, objs != NULL ? objs->count : 0, thin_member_path);
@@ -531,14 +648,14 @@ static int load_archive_members(const char *path, ld_ctx_t *ctx, objvec_t *objs,
                         if (symset_add(&seen_members, thin_member_path) != 0) {
                             free(thin_member_path);
                             free(mname);
-                            symset_free(&seen_members);
+                            ar_scan_done(&seen_members, &index);
                             free(buf);
                             return -1;
                         }
                         if (load_object_input(thin_member_path, ctx, objs, state, 1) != 0) {
                             free(thin_member_path);
                             free(mname);
-                            symset_free(&seen_members);
+                            ar_scan_done(&seen_members, &index);
                             free(buf);
                             return -1;
                         }
@@ -561,13 +678,13 @@ static int load_archive_members(const char *path, ld_ctx_t *ctx, objvec_t *objs,
         }
     } while (!whole_archive && pass_progress);
 
-    symset_free(&seen_members);
+    ar_scan_done(&seen_members, &index);
     free(buf);
     return 0;
 
 malformed:
     fprintf(stderr, "ld: %s: malformed archive: %s (at offset %zu)\n", path, bad, off);
-    symset_free(&seen_members);
+    ar_scan_done(&seen_members, &index);
     free(buf);
     return -1;
 }

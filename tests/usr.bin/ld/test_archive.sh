@@ -61,5 +61,31 @@ bad "a size past four gigabytes"       wrap.a    "longer than what is left of th
 { printf '!<arch>\n'; head -c 100 /dev/zero | tr '\0' x; } > garbage.a
 bad "no member header"                 garbage.a "does not end as one does"
 
+# The archive's index says which members define what, and a member that
+# defines nothing wanted is not read.  What is linked is the same with
+# the index, without one, and with one that cannot be believed.
+printf 'int unused(int x) { return x - 1; }\n' > u.c
+printf 'int deeper(void) { return 7; }\n' > d.c
+printf 'int deeper(void); int helper(int x) { return x + deeper(); }\n' > h2.c
+if ${CC:-cc} -m32 -c -ffreestanding -fno-pic -fno-pie -o u.o u.c &&
+   ${CC:-cc} -m32 -c -ffreestanding -fno-pic -fno-pie -o d.o d.c &&
+   ${CC:-cc} -m32 -c -ffreestanding -fno-pic -fno-pie -o h2.o h2.c &&
+   ar rcs indexed.a d.o u.o h2.o 2>/dev/null && ar rcS plain.a d.o u.o h2.o 2>/dev/null; then
+    ok "an archive with an index" indexed.a && cp out out.indexed
+    if nm out | grep -q ' T helper' && nm out | grep -q ' T deeper' && ! nm out | grep -q unused; then
+        echo "ok   the members wanted are taken, one needed by another among them, and no other"
+    else echo "FAIL the index took the wrong members: $(nm out | tr '\n' ' ')"; fail=1; fi
+    ok "an archive with no index" plain.a
+    if cmp -s out out.indexed; then echo "ok   the index changes nothing that is linked"
+    else echo "FAIL the output differs with and without the index"; fail=1; fi
+    cp indexed.a lying.a
+    printf '\377\377\377\377' | dd of=lying.a bs=1 seek=68 conv=notrunc 2>/dev/null
+    ok "an index whose count is nonsense" lying.a
+    if cmp -s out out.indexed; then echo "ok   and it is not believed"
+    else echo "FAIL the output differs with a bad index"; fail=1; fi
+else
+    echo "SKIP: no ar to make archives with"
+fi
+
 [ "$fail" -eq 0 ] && echo "PASS" || echo "FAILED"
 exit "$fail"
