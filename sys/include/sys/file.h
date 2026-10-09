@@ -17,6 +17,7 @@ struct stat;
 #define DTYPE_SOCKET    2       /* socket */
 #define DTYPE_PIPE      3       /* pipe */
 #define DTYPE_KQUEUE    4       /* kqueue */
+#define DTYPE_PROCDESC  5       /* a process, by pdfork(2) */
 
 /*
  * File flags (f_flag)

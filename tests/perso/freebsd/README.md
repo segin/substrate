@@ -29,3 +29,25 @@ Then put the binary where the personality can run it (`freebsd.img` is a
 local experiment image) and run it under substrate with the image mounted
 at `/perso/freebsd`.  The output must be the same but for the measured
 times.
+
+## pdtest
+
+Process descriptors (`sys/exec/perso/compat.c`): `pdfork(2)` giving the
+parent a descriptor that is the child, `pdgetpid(2)` and `pdkill(2)` on
+it, the last close of it killing a child that is still running -- and
+not one made with `PD_DAEMON` -- and the child having no such descriptor
+itself.  libcasper starts its helper with `pdfork`, so `wc`, `head` and
+the rest of the base utilities that sandbox themselves depend on it.
+
+    cc -O1 -Wall -Wextra -o pdtest pdtest.c
+    ./pdtest             # every line "ok", then "pdtest: PASS"
+
+12 checks, passing on FreeBSD 14.4 and under substrate.  One difference
+is allowed for: FreeBSD hands a process whose descriptor was closed to
+init, and substrate leaves it its parent's child, to be waited for or to
+go when the parent does.  The test accepts either.
+
+Build it on a FreeBSD host, as the method above says.  Building it under
+substrate with the `cc` of a FreeBSD tree compiles, and then links a
+file that is not an ELF file: something in how `ld.lld` writes its
+output is not yet right under the personality.

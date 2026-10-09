@@ -343,6 +343,8 @@ int sys_shutdown(int s, int how);
 int sys_socketpair(int domain, int type, int protocol, int *sv);
 int sys_msync(void *addr, size_t len, int flags);
 int sys_pdfork(int *fdp, int flags);
+int sys_pdkill(int fd, int sig);
+int sys_pdgetpid(int fd, int *pidp);
 int sys_getpriority(int which, int who);
 int freebsd_sys_sysctl(int *name, unsigned int namelen, void *oldp, abi_size_t *oldlenp, void *newp, size_t newlen);
 

@@ -30,6 +30,7 @@
 #include <sys/sysinfo.h>
 #include <sys/time.h>
 #include <sys/tty.h>
+#include <sys/wait.h>
 #include <sys/umtx.h>
 #include <sys/vt.h>
 #include <termios.h>
@@ -1294,43 +1295,145 @@ int sys_fdatasync(int fd) {
  * real AF_UNIX implementation. */
 
 /*
- * pdfork(int *fdp, int flags): fork, and give the parent a descriptor for
- * the child.  libcasper starts its helper process this way, and every
- * FreeBSD base utility that sandboxes itself goes through libcasper: wc(1)
- * with more than one file said "Unable to initialize casper" and counted
- * nothing.
+ * Process descriptors: pdfork(2), pdgetpid(2), pdkill(2).
  *
- * The child is real.  The descriptor is a stand-in: it is open, it can be
- * closed, and it is the child's only in name -- closing it does not kill
- * the child (as if PD_DAEMON were always given), and pdkill(2) and
- * pdgetpid(2) do not know it.  Casper's child lives by its socket and
- * exits when the parent's end closes, which is all its users need.
+ * pdfork forks and gives the parent a descriptor that IS the child, as far
+ * as a descriptor can be: its last close kills the child with SIGKILL --
+ * unless PD_DAEMON was given -- and collects it if it has already died;
+ * pdgetpid says which process it is and pdkill signals it.  libcasper
+ * starts its helper this way, and every FreeBSD base utility that
+ * sandboxes itself goes through libcasper: wc(1) with more than one file
+ * said "Unable to initialize casper" while pdfork was a stub.
+ *
+ * The descriptor is a file of its own type over a node of its own, as a
+ * kqueue is.  The process is remembered by its number and by when it
+ * started, so that a number given to another process since is not taken
+ * for it.
  */
 #define FBSD_PD_DAEMON  0x00000001
 #define FBSD_PD_CLOEXEC 0x00000002
 
+struct procdesc {
+    int      pid;
+    uint32_t start_time;        /* the process's, with pid: which one */
+    int      flags;             /* FBSD_PD_DAEMON */
+};
+
+/* The process a descriptor is of, or NULL if it is gone or collected. */
+static process_t *procdesc_proc(const struct procdesc *pd) {
+    process_t *p = pd ? proc_find(pd->pid) : NULL;
+
+    return (p && p->start_time == pd->start_time) ? p : NULL;
+}
+
+/* The last close: called by close_fs() with the file's node. */
+static void procdesc_close(fs_node_t *node) {
+    struct procdesc *pd = (struct procdesc *)(uintptr_t)node->impl;
+    int status;
+
+    node->impl = 0;
+    kfree(node, sizeof(*node));
+    if (!pd) return;
+    if (procdesc_proc(pd)) {
+        /* Dead already and ours: collect it, and that is all.  Otherwise
+         * it is running, or is someone else's child by now. */
+        if (kern_waitpid(pd->pid, &status, WNOHANG) != pd->pid &&
+            !(pd->flags & FBSD_PD_DAEMON)) {
+            (void)sys_kill(pd->pid, SIGKILL);
+        }
+    }
+    kfree(pd, sizeof(*pd));
+}
+
+static struct procdesc *procdesc_of_fd(int fd) {
+    file_t *f;
+
+    if (fd < 0 || fd >= MAX_FD) return NULL;
+    f = current_process->fds[fd];
+    if (!f || f->f_type != DTYPE_PROCDESC || !f->f_data) return NULL;
+    return (struct procdesc *)(uintptr_t)((fs_node_t *)f->f_data)->impl;
+}
+
 int sys_pdfork(int *fdp, int flags) {
+    struct procdesc *pd;
+    fs_node_t *node;
+    process_t *child;
+    file_t *f;
     int pid, fd;
 
     if (flags & ~(FBSD_PD_DAEMON | FBSD_PD_CLOEXEC)) {
         return -EINVAL;
     }
+    /* The memory is had before the fork, so that the commonest failure
+     * leaves no child to undo.  The descriptor's number is taken after it:
+     * the child is to have no trace of the descriptor in its own table. */
+    pd = kmalloc(sizeof(*pd));
+    node = kmalloc(sizeof(*node));
+    f = (pd && node) ? file_alloc() : NULL;
+    if (!f) {
+        if (pd) kfree(pd, sizeof(*pd));
+        if (node) kfree(node, sizeof(*node));
+        return -ENOMEM;
+    }
+
     pid = sys_fork();
-    if (pid <= 0) {
-        return pid;                     /* failed; or this is the child */
+    if (pid == 0) {
+        return 0;                       /* the child, which has none of it */
     }
-    fd = kern_open("/dev/null", O_RDONLY, 0);
-    if (fd >= 0) {
-        if (flags & FBSD_PD_CLOEXEC) {
-            fdset_set(current_process->fd_cloexec, fd);
+    child = pid > 0 ? proc_find(pid) : NULL;
+    fd = child ? proc_alloc_fd(current_process) : -1;
+    if (fd < 0) {
+        file_free(f);
+        kfree(pd, sizeof(*pd));
+        kfree(node, sizeof(*node));
+        if (pid <= 0) {
+            return pid;                 /* there was no fork */
         }
-        if (copyout(&fd, fdp, sizeof(fd)) != 0) {
-            kern_close(fd);
+        if (child) {
+            /* A child, and no descriptor to hold it by: it does not stay. */
+            (void)sys_kill(pid, SIGKILL);
+            return -EMFILE;
         }
+        return pid;
     }
-    /* A parent that cannot be given the descriptor still has the child:
-     * it is there, and the call says so. */
+    pd->pid = pid;
+    pd->start_time = child->start_time;
+    pd->flags = flags & FBSD_PD_DAEMON;
+
+    memset(node, 0, sizeof(*node));
+    strlcpy(node->name, "procdesc", sizeof(node->name));
+    node->flags = FS_CHARDEVICE;
+    node->close = &procdesc_close;
+    node->impl = (uintptr_t)pd;
+    f->f_data = node;
+    f->f_flag = FREAD | FWRITE;
+    f->f_type = DTYPE_PROCDESC;
+    proc_set_fd(current_process, fd, f);
+    if (flags & FBSD_PD_CLOEXEC) {
+        fdset_set(current_process->fd_cloexec, fd);
+    }
+    if (copyout(&fd, fdp, sizeof(fd)) != 0) {
+        /* Nowhere to put the descriptor: without it the child is one
+         * nobody can hold, so it goes too, by the close. */
+        kern_close(fd);
+        return -EFAULT;
+    }
     return pid;
+}
+
+int sys_pdgetpid(int fd, int *pidp) {
+    const struct procdesc *pd = procdesc_of_fd(fd);
+
+    if (!pd) return -EBADF;
+    return copyout(&pd->pid, pidp, sizeof(pd->pid)) != 0 ? -EFAULT : 0;
+}
+
+int sys_pdkill(int fd, int sig) {
+    const struct procdesc *pd = procdesc_of_fd(fd);
+
+    if (!pd) return -EBADF;
+    if (!procdesc_proc(pd)) return -ESRCH;
+    return sys_kill(pd->pid, sig);
 }
 
 int sys_accept4(int s, void *name, int *namelen, int flags) {
