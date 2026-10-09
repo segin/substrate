@@ -1,0 +1,143 @@
+.TH PCIX 4 "2026-10-08" "Substrate" "Kernel Interfaces"
+.SH NAME
+pcix \- IBM PC/IX (System III for the IBM PC) execution personality
+.SH DESCRIPTION
+The
+.B PC/IX
+personality
+.RB ( PERS_PCIX )
+runs the programs of IBM Personal Computer Interactive Executive 1.0, the
+UNIX System III that INTERACTIVE Systems made for the IBM PC XT in 1984.
+It is rooted at
+.IR /perso/pcix ,
+where a program's absolute paths are looked for first.
+.PP
+PC/IX is the system one release before the one the 16-bit half of the
+Xenix personality runs: Xenix/286 numbers its system calls as System V
+does, System V as System III did, and the structures the calls fill in
+are the same.
+A PC/IX call is therefore run by the Xenix/286 implementation of it.
+What this personality has of its own is how a call arrives and what a
+few calls do with their arguments, all of which the distribution
+documents in
+.IR /usr/include/sys.s .
+.SS Executable format
+.B struct exec
+of PC/IX's
+.IR <a.out.h> :
+magic bytes 01 03, then
+.BR a_flags ,
+.B a_cpu
+(0x04, the 8086) and the length of the header.
+MINIX took this format from PC/IX and ELKS has it from MINIX, and the
+ELKS loader loads all three.
+A file is a PC/IX program if its flags are 0x70 (executable, separate
+I&D, pure text), which is how PC/IX's linker marks everything it ships
+and no ELKS program is marked; or, for a program linked without
+.BR \-n ,
+if a PC/IX process executes it or it is named under
+.IR /perso/pcix .
+.PP
+A program has one text segment and one data segment, or one segment for
+both, reached through the process's local descriptor table.
+The data segment is the full 64K whatever
+.B a_misc
+asks for, with the arguments at the top of it:
+on entry the stack pointer addresses
+.IR argc ,
+followed by the argument pointers, a null, the environment pointers and
+a null.
+There is no
+.BR brk (2);
+the C library divides the segment between heap and stack itself.
+.SS System calls
+Call
+.I N
+is the instruction
+.BR "int 0x80+N" ,
+a vector for each call and no number in a register.
+The arguments are on the stack as for a C function, below a word where
+its return address would be.
+The result is in AX, or DX:AX for a long; the carry flag set means AX
+holds an error number.
+No other register changes.
+.PP
+The calls are System III's, by their numbers there.
+Those that differ from the Xenix/286 call of the same number:
+.TP
+.B fork
+The child continues at the instruction after the
+.BR int ,
+the parent two bytes further on.
+.TP
+.B wait
+Takes the address at which to store the status, and a second address
+(for the dead child's unused memory, which is not recorded).
+.TP
+.BR getpid ", " getuid ", " getgid ", " pipe
+The second value (parent, effective id, write end) is returned in DX.
+.TP
+.BR time ", " stime
+.B time
+takes no argument and
+.B stime
+takes the time itself, not its address.
+.TP
+.B setpgrp
+One call for
+.BR getpgrp (2)
+and
+.BR setpgrp (2),
+its argument 0 or 1.
+.TP
+.B utssys
+The function is the third argument; 0 is
+.BR uname (2),
+which reports
+.B PC/IX
+release 1.0 on an
+.BR ibmpc .
+.PP
+The Xenix extensions, the System V IPC calls,
+.BR brk ,
+.BR ustat ,
+.B halt
+and
+.B inuinfo
+fail with
+.BR EINVAL .
+.SS Signals
+A handler is entered with the signal number, the flags and the
+interrupted instruction pointer pushed, the number on top, and every
+register as it was; it returns with
+.B popf
+and a near
+.BR ret ,
+which is what the C library's own stub around a handler does.
+As in System III the disposition is reset to the default before the
+handler runs and no signal is blocked while it does.
+.SH FILES
+.TP
+.I /perso/pcix
+The PC/IX tree.
+.I tools/pcix/build-image.sh
+builds an image of it from the distribution floppies.
+.SH NOTES
+Enable tracing of the calls with
+.B debug=perso:pcix:syscall
+on the kernel command line.
+.PP
+.BR ps (1)
+and
+.BR df (1)
+of PC/IX read kernel memory and the raw disk, and report errors.
+.PP
+A shell script is run as System III runs one:
+.BR exece (2)
+fails with
+.B ENOEXEC
+and the shell reads the file itself.
+.SH SEE ALSO
+.BR svr3 (4),
+.BR svr4 (4),
+.BR sunos (4)

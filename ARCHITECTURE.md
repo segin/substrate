@@ -216,12 +216,19 @@ arguments and carry-flag errors of the other BSDs. The kernel loads only
 the program; its startup code maps `/lib/ld.so`, and that the C library,
 with `mmap`. The three personalities that work in their own tree --
 System V Release 3 and 4 and SunOS -- share the rule for which tree an
-absolute path belongs to (`perso_tree_path()` in `personality.c`). State
+absolute path belongs to (`perso_tree_path()` in `personality.c`). IBM
+PC/IX, System III for the 8088 (`PERS_PCIX`, rooted at `/perso/pcix`), is
+in `perso_xenix.c` beside the 16-bit Xenix whose call implementations it
+uses: the numbers and structures are the same a release apart, and what
+is PC/IX's own is the trap -- `int 0x80+N`, a vector for each call, with
+the arguments on the stack -- and a handful of calls. Its programs are in
+the a.out format MINIX and ELKS inherited from it, and
+`formats/elks_aout.c` loads them. State
 of each
 personality: `README.md`; specifications:
 `docs/specs/personality_targets.md`, `docs/specs/personality_elks.md`,
 `usr.man/man4/xenix.4`, `usr.man/man4/xout286.4`, `usr.man/man4/svr4.4`,
-`usr.man/man4/svr3.4`, `usr.man/man4/sunos.4`.
+`usr.man/man4/svr3.4`, `usr.man/man4/sunos.4`, `usr.man/man4/pcix.4`.
 
 **x86-64.** `sys/arch/x86_64` is the 64-bit port, an addition alongside
 i386, not a replacement: the personality and the bitness of a process are

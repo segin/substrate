@@ -46,6 +46,9 @@ enum personality_type {
      * (132-136 were the ids that split it; they are free.)
      */
     PERS_XENIX     = 131,
+    /* PC/IX: System III for the IBM PC, in perso_xenix.c beside the
+     * 16-bit Xenix it shares its calls with. */
+    PERS_PCIX      = 132,
     PERS_MAX     = 256
 };
 
@@ -96,6 +99,7 @@ extern struct personality personality_solaris;
 extern struct personality personality_sunos;
 extern struct personality personality_elks;
 extern struct personality personality_xenix;
+extern struct personality personality_pcix;
 
 void elks_personality_init(void);
 

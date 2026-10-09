@@ -52,6 +52,19 @@ struct __attribute__((packed)) elks_supl_hdr {
 #define ELKS_COMBID               0x04100301UL
 #define ELKS_SPLITID              0x04200301UL
 #define ELKS_SPLITID_AHISTORICAL  0x04300301UL
+/*
+ * The format is PC/IX's, which MINIX took and ELKS has from MINIX
+ * (<a.out.h> on the PC/IX media: magic 01 03, a_flags, a_cpu).  PC/IX's own
+ * linker marks an ordinary program executable, separate I&D and pure text
+ * -- flags 0x70, where no ELKS program has the last -- and by that a
+ * PC/IX program is known: it is loaded the same way and given the PC/IX
+ * personality (exec/perso/perso_xenix.c) instead.  a_misc, the size the
+ * data segment is to have, is where ELKS keeps chmem; a PC/IX process gets
+ * the whole 64K, its C library finding the top of the heap from the stack
+ * pointer.
+ */
+#define ELKS_PCIX_SPLITID         0x04700301UL
+#define ELKS_PCIX_TREE            "/perso/pcix/"
 
 #define ELKS_INIT_HEAP           4096U
 #define ELKS_INIT_STACK          4096U
@@ -75,6 +88,7 @@ struct elks_load_plan {
     uint16_t brk_offset;
     uint16_t stack_top;
     uint8_t combined;
+    uint8_t pcix;           /* a PC/IX program: see ELKS_PCIX_SPLITID */
 };
 
 #define ELKS_LDT_CS_INDEX  0U
@@ -208,7 +222,7 @@ static inline void elks_apply_exec_state(process_t *proc,
         return;
     }
 
-    proc->perso_id = PERS_ELKS;
+    proc->perso_id = plan->pcix ? PERS_PCIX : PERS_ELKS;
     proc->bitness = BITNESS_16;
     proc->brk_start = plan->data_base + plan->brk_offset;
     proc->brk = proc->brk_start;
@@ -232,7 +246,8 @@ static inline void elks_apply_exec_state(process_t *proc,
 static inline int elks_header_type_valid(uint32_t type) {
     return type == ELKS_COMBID ||
            type == ELKS_SPLITID ||
-           type == ELKS_SPLITID_AHISTORICAL;
+           type == ELKS_SPLITID_AHISTORICAL ||
+           type == ELKS_PCIX_SPLITID;
 }
 
 static inline int elks_header_hlen_valid(uint8_t hlen) {
@@ -322,7 +337,10 @@ static inline int elks_build_load_plan(const struct elks_exec *hdr,
         zero_suph.esh_reserved3 = 0;
         suph = &zero_suph;
     }
-    if (!elks_supl_header_valid(suph)) {
+    /* PC/IX's linker records where the data starts (a_dbase: after the
+     * text, in a combined image), which is where it is put anyway. */
+    if (!(hdr->type == ELKS_PCIX_SPLITID || plan->pcix) &&
+        !elks_supl_header_valid(suph)) {
         return 0;
     }
 
@@ -331,7 +349,16 @@ static inline int elks_build_load_plan(const struct elks_exec *hdr,
         return 0;
     }
 
-    switch (hdr->version) {
+    if (hdr->type == ELKS_PCIX_SPLITID || plan->pcix) {
+        /* A PC/IX program by its header, or because the caller knows it
+         * for one (plan->pcix set on the way in): the whole segment
+         * (clamped below), whatever a_misc says. */
+        if (min_len + argv_envp_bytes > 0xFFF0U) {
+            return 0;
+        }
+        len = 0xFFF0U;
+        plan->pcix = 1;
+    } else switch (hdr->version) {
     case 0:
         stack = ELKS_INIT_STACK;
         len = hdr->chmem;
@@ -441,6 +468,24 @@ static inline void elks_build_segment_layout(const struct elks_load_plan *plan,
     elks_init_data_segment_desc(&layout->es, ELKS_LDT_ES_INDEX,
                                 plan->data_base, plan->data_limit);
     layout->es.limit = elks_data_segment_limit(plan);
+
+    /*
+     * On the 8088 PC/IX ran on a segment is 64K whatever a program was
+     * given, and a stray reference near the top of it reads and writes
+     * memory rather than faulting.  Its shell makes one -- a word at
+     * 0xFFFE, when exec says a file is not a program and it turns to
+     * running it as a script, which is how every shell script starts.
+     * The pages are there (the data area is mapped in whole pages); let
+     * the segment reach them.
+     */
+    if (plan->pcix) {
+        layout->ds.limit = 0xFFFFU;
+        layout->ss.limit = 0xFFFFU;
+        layout->es.limit = 0xFFFFU;
+        if (plan->combined) {
+            layout->cs.limit = 0xFFFFU;
+        }
+    }
 
     layout->cs_sel = (uint16_t)((ELKS_LDT_CS_INDEX << 3) | 4U | 3U);
     layout->ds_sel = (uint16_t)((ELKS_LDT_DS_INDEX << 3) | 4U | 3U);

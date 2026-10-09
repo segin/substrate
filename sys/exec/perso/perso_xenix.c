@@ -2424,6 +2424,312 @@ static void xenix_sendsig(void *handler, int sig, uint32_t mask,
     sysv386_sendsig(&xenix386_abi, handler, sig, mask, (registers_t *)regs);
 }
 
+/* =====================================================================
+ * PC/IX: IBM's and INTERACTIVE's System III for the 8088 (1984).
+ *
+ * It is here because it is the same system one release back.  Xenix/286
+ * numbers its calls as System V does and System V numbers them as System
+ * III did; the structures a call fills in -- stat, the 16-byte directory
+ * entry read(2) returns, termio, tms, utsname -- are the ones above; and a
+ * program is one text and one data segment of at most 64K each, addressed
+ * through the process's local descriptor table.  So a PC/IX call is run by
+ * the Xenix/286 implementation of it, and what is PC/IX's own is how a call
+ * gets here and what a few of them do with their arguments.  All of that is
+ * written down on the distribution media, in /usr/include/sys.s:
+ *
+ *   - Call N is `int 0x80+N`: a vector each, no number in a register.
+ *     Vectors above 0x80 have DPL 0 gates, so the instruction raises #GP
+ *     and is decoded here (CD 8N), as Xenix's `int $5` is.
+ *   - The arguments are on the stack as for a C call, the caller having
+ *     pushed a word where a return address would be: argument 0 is at
+ *     SS:SP+2.  Xenix's stub loads the first four such words into BX, CX,
+ *     SI and DI, so those four words are a struct x286_frame as they stand.
+ *   - The result is in AX, a long in DX:AX; carry set means AX is an errno.
+ *     Nothing else changes -- signal(2)'s stub keeps a value in BX across
+ *     the trap -- so the second result goes to DX where Xenix has it in BX.
+ *   - fork: the child continues after the `int`, the parent two bytes on.
+ *   - wait takes where to put the status (and where to put the dead
+ *     child's "slop", which is not kept here).  time takes no argument and
+ *     stime a value.  getpgrp and setpgrp are one call with a flag.
+ *     utssys has its function as the third argument.
+ *   - There is no brk: a process has the data segment its header asks for,
+ *     and the C library divides it.
+ *
+ * A signal handler is entered with the signal number, the flags and the
+ * interrupted IP pushed, in that order from the top, and every register as
+ * it was; the library's own stub saves what it must, calls the C function
+ * and returns with `popf; ret`.  The disposition is reset first, as in V7.
+ *
+ * The programs are the a.out files MINIX and ELKS later took the format of
+ * (magic 01 03), and exec/formats/elks_aout.c loads them.
+ * ===================================================================== */
+
+#define PCIX_SYSENT         0x80U       /* int 0x80|N */
+#define PCIX_INT_LEN        2U
+#define PCIX_FORK_SKIP      2U          /* the parent's return, past the child's */
+#define PCIX_UTS_UNAME      0U
+#define PCIX_UTSNAME_SIZE   (5U * X286_NMLN)
+
+static int pcix_trace_enabled(void) {
+    return cmdline_debug_enabled("perso:pcix:syscall");
+}
+
+/* The system call at CS:IP, or -1 if the instruction is not one. */
+static int pcix_syscall_at(registers_t *regs) {
+    uintptr_t linear_ip;
+    uint8_t insn[PCIX_INT_LEN];
+
+    if (x286_seg_span((uint16_t)regs->cs, regs->eip, sizeof(insn),
+                      &linear_ip) != 0 ||
+        linear_ip >= USER32_VA_END ||
+        copyin((const void *)linear_ip, insn, sizeof(insn)) != 0) {
+        return -1;
+    }
+    if (insn[0] != 0xCDU || insn[1] <= PCIX_SYSENT) {
+        return -1;
+    }
+    return insn[1] & 0x7FU;
+}
+
+/* getpgrp() and setpgrp(): one entry, the argument saying which. */
+static int64_t pcix_sys_setpgrp(struct x286_frame *f) {
+    if (f->bx != 0) {
+        (void)sys_setpgid(0, 0);
+    }
+    return sys_getpgrp();
+}
+
+/* wait(statusp, slopp): the status goes where the caller says. */
+static int64_t pcix_sys_wait(struct x286_frame *f) {
+    int status = 0;
+    int pid = kern_waitpid(-1, &status, 0);
+    uintptr_t dst;
+    uint16_t word;
+
+    if (pid < 0) {
+        return pid;
+    }
+    if (f->bx != 0) {
+        if (x286_ds_span(f, f->bx, sizeof(word), &dst) != 0) {
+            return -EFAULT;
+        }
+        word = (uint16_t)status;
+        memcpy((void *)dst, &word, sizeof(word));
+    }
+    return pid & 0xFFFF;
+}
+
+static int64_t pcix_sys_utssys(struct x286_frame *f) {
+    struct utsname native;
+    struct x286_utsname out;
+    uintptr_t dst;
+    int rc;
+
+    if (f->si != PCIX_UTS_UNAME) {
+        return -EINVAL;             /* ustat */
+    }
+    rc = x286_ds_span(f, f->bx, sizeof(out), &dst);
+    if (rc != 0) {
+        return rc;
+    }
+    memset(&native, 0, sizeof(native));
+    rc = kern_uname(&native);
+    if (rc != 0) {
+        return rc;
+    }
+    memset(&out, 0, sizeof(out));
+    strlcpy(out.sysname, "PC/IX", sizeof(out.sysname));
+    strlcpy(out.nodename, native.nodename, sizeof(out.nodename));
+    strlcpy(out.release, "1.0", sizeof(out.release));
+    strlcpy(out.version, "3", sizeof(out.version));
+    strlcpy(out.machine, "ibmpc", sizeof(out.machine));
+    /* <sys/utsname.h> ends with machine: the five names and no more. */
+    memcpy((void *)dst, &out, PCIX_UTSNAME_SIZE);
+    return 0;
+}
+
+static int64_t pcix_call(struct x286_frame *f) {
+    registers_t *regs = f->regs;
+    int pid;
+
+    switch (f->nr) {
+    case X286_SYS_fork:
+        /* Both come back from here with eip after the `int`, which is
+         * where the child goes on; the parent is moved past that. */
+        regs->eflags &= ~X286_EFLAGS_CF;
+        pid = sys_fork();
+        regs->eip += PCIX_FORK_SKIP;
+        return pid < 0 ? pid : (pid & 0xFFFF);
+    case X286_SYS_wait:
+        return pcix_sys_wait(f);
+    case X286_SYS_setpgrp:
+        return pcix_sys_setpgrp(f);
+    case X286_SYS_utssys:
+        return pcix_sys_utssys(f);
+    case X286_SYS_signal:
+        f->si = 0;                  /* a near handler: no selector */
+        return x286_sys_signal(f);
+    case X286_SYS_brk:              /* the library's, not the kernel's */
+    case X286_SYS_exec:             /* only exece */
+    case X286_SYS_xenix:
+    case X286_SYS_stty:
+    case X286_SYS_gtty:
+    case X286_SYS_statfs:
+    case X286_SYS_fstatfs:
+    case X286_SYS_msgsys:
+    case X286_SYS_sysi86:           /* halt and inuinfo here */
+    case X286_SYS_shmsys:
+    case X286_SYS_semsys:
+    case X286_SYS_uadmin:
+        return -EINVAL;
+    default:
+        break;
+    }
+    return (f->nr < X286_CALL_MAX && x286_calls[f->nr])
+        ? x286_calls[f->nr](f) : -EINVAL;
+}
+
+static int pcix_handle_trap(void *regs_ptr) {
+    registers_t *regs = (registers_t *)regs_ptr;
+    struct x286_frame f;
+    void *saved_syscall_regs;
+    uintptr_t args;
+    uint16_t w[4];
+    int64_t ret;
+    int nr;
+
+    if (!regs || !current_process ||
+        current_process->perso_id != PERS_PCIX || !current_process->ldt) {
+        return 0;
+    }
+    if (regs->int_no != 13 && regs->int_no != 11) {
+        return 0;
+    }
+    nr = pcix_syscall_at(regs);
+    if (nr < 0) {
+        return 0;
+    }
+
+    /* Four words of arguments, above the word where a return address
+     * would be.  A call that takes fewer may be near the top of the
+     * stack segment; what cannot be read is not an argument. */
+    memset(w, 0, sizeof(w));
+    for (unsigned int i = 0; i < 4; i++) {
+        if (x286_seg_span((uint16_t)regs->ss,
+                          ((regs->useresp & 0xFFFFU) + 2U + 2U * i) & 0xFFFFU,
+                          sizeof(w[0]), &args) != 0) {
+            break;
+        }
+        memcpy(&w[i], (const void *)args, sizeof(w[0]));
+    }
+
+    memset(&f, 0, sizeof(f));
+    f.regs = regs;
+    f.nr = (uint16_t)nr;
+    f.bx = w[0];
+    f.cx = w[1];
+    f.si = w[2];
+    f.di = w[3];
+    f.ds = (uint16_t)regs->ds;
+    f.es = (uint16_t)regs->es;
+    f.ss = (uint16_t)regs->ss;
+
+    if (current_thread && current_thread->proc == current_process) {
+        current_thread->syscall_num = f.nr;
+    }
+    /* Past the trap before the call: fork copies this frame, and exece
+     * does not come back. */
+    regs->eip += PCIX_INT_LEN;
+    saved_syscall_regs = current_thread ? current_thread->syscall_regs : NULL;
+    if (current_thread) {
+        current_thread->syscall_regs = regs;
+    }
+
+    ret = pcix_call(&f);
+
+    if (current_thread) {
+        current_thread->syscall_regs = saved_syscall_regs;
+    }
+    if (pcix_trace_enabled()) {
+        char buf[160];
+        const char *name = x286_call_name(f.nr);
+
+        snprintf(buf, sizeof(buf),
+                 "PCIX: [%d] %s/%u(%#x, %#x, %#x, %#x) = %lld\n",
+                 (int)current_process->pid, name ? name : "sys", f.nr,
+                 w[0], w[1], w[2], w[3], (long long)ret);
+        kprint(buf);
+    }
+
+    if (ret < 0) {
+        regs->eax = (regs->eax & 0xFFFF0000U) | ((uint32_t)(-ret) & 0xFFFFU);
+        regs->eflags |= X286_EFLAGS_CF;
+    } else {
+        regs->eax = (regs->eax & 0xFFFF0000U) | ((uint32_t)ret & 0xFFFFU);
+        regs->edx = (regs->edx & 0xFFFF0000U) |
+                    (((uint32_t)ret >> 16) & 0xFFFFU);
+        regs->eflags &= ~X286_EFLAGS_CF;
+    }
+    return 1;
+}
+
+static void pcix_sendsig(void *handler, int sig, uint32_t mask,
+                         uint32_t flags, void *regs_ptr) {
+    registers_t *regs = (registers_t *)regs_ptr;
+    uint16_t frame[3];
+    uintptr_t linear;
+    uint16_t sp;
+
+    (void)flags;
+    if (!regs || !current_process) {
+        return;
+    }
+    /* The handler returns with a `ret`, to the kernel never: there is
+     * nothing to undo the blocking of the signal while its handler runs,
+     * which System III does not do in any case -- it resets the
+     * disposition instead.  Left blocked, a signal was delivered once
+     * per process: the second sleep(3) never woke. */
+    if (current_thread) {
+        current_thread->sig_mask = mask;
+    }
+    sp = (uint16_t)(regs->useresp & 0xFFFFU);
+    if (sp < sizeof(frame)) {
+        sigexit(current_process, SIGSEGV);
+        return;
+    }
+    sp = (uint16_t)(sp - sizeof(frame));
+    frame[0] = (uint16_t)x286_native_to_xenix_sig(sig);
+    frame[1] = (uint16_t)regs->eflags;
+    frame[2] = (uint16_t)regs->eip;
+    if (x286_seg_span((uint16_t)regs->ss, sp, sizeof(frame), &linear) != 0) {
+        sigexit(current_process, SIGSEGV);
+        return;
+    }
+    memcpy((void *)linear, frame, sizeof(frame));
+    if (pcix_trace_enabled()) {
+        char buf[96];
+
+        snprintf(buf, sizeof(buf), "PCIX: [%d] signal %u -> %04x (from %04x)\n",
+                 (int)current_process->pid, frame[0],
+                 (unsigned int)(uintptr_t)handler & 0xFFFFU, frame[2]);
+        kprint(buf);
+    }
+    regs->useresp = (regs->useresp & 0xFFFF0000U) | sp;
+    regs->eip = (uint32_t)(uintptr_t)handler & 0xFFFFU;
+}
+
+struct personality personality_pcix = {
+    .name = "PCIX",
+    .id = PERS_PCIX,
+    .syscall_table = xenix_syscalls,
+    .syscall_names = xenix_names,
+    .syscall_fmts = NULL,
+    .syscall_count = MAX_SYSCALLS,
+    .path_prefix = "/perso/pcix",
+    .sendsig = pcix_sendsig,
+    .handle_trap = pcix_handle_trap,
+};
+
 struct personality personality_xenix = {
     .name = "Xenix",
     .id = PERS_XENIX,

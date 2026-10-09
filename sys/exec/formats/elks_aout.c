@@ -401,6 +401,16 @@ int elks_load(int fd, const char *path, char *const argv[], char *const envp[]) 
             }
         }
     }
+    /*
+     * PC/IX's linker sets the pure-text flag only when asked (cc -n); a
+     * program linked without it, combined or separate, has the header an
+     * ELKS one has.  Such a file is PC/IX's when a PC/IX process runs it or
+     * it is named in the PC/IX tree.
+     */
+    if ((current_process && current_process->perso_id == PERS_PCIX) ||
+        (path && strncmp(path, ELKS_PCIX_TREE, sizeof(ELKS_PCIX_TREE) - 1) == 0)) {
+        plan.pcix = 1;
+    }
     if (!elks_build_load_plan(&hdr, &suph, (uint16_t)argv_envp_bytes, &plan)) {
         elks_free_kernel_vector(kargv);
         elks_free_kernel_vector(kenvp);
