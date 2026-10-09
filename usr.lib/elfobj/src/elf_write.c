@@ -1465,6 +1465,39 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
                 out_vaddr = lo_addr;
                 out_filesz = hi_off >= lo_off ? (hi_off - lo_off) : 0;
                 out_memsz = hi_addr >= lo_addr ? (hi_addr - lo_addr) : 0;
+                if (seg->type == PT_GNU_RELRO && out_memsz != 0) {
+                    /*
+                     * What is made read-only after relocation is whole
+                     * pages, and a dynamic linker that is careful rounds
+                     * the end of this segment down, so as not to take in
+                     * writable data that shares its last page.  The
+                     * segment is therefore said to run to the end of
+                     * that page -- where nothing else is in it, which a
+                     * layout that puts such sections on pages of their
+                     * own sees to.  Otherwise the last page, often the
+                     * only one, was never protected.
+                     */
+                    uint64_t page_end = (hi_addr + 0xfffu) & ~(uint64_t)0xfffu;
+                    int shared = page_end < hi_addr;
+                    size_t k;
+
+                    for (k = 1; !shared && k < sec_count; ++k) {
+                        size_t m;
+                        int member = 0;
+
+                        if ((secs[k].flags & SHF_ALLOC) == 0 || secs[k].size == 0 ||
+                            secs[k].addr < hi_addr || secs[k].addr >= page_end) {
+                            continue;
+                        }
+                        for (m = 0; m < seg->section_count; ++m) {
+                            member |= seg->section_indices[m] + 1 == k;
+                        }
+                        shared = !member;
+                    }
+                    if (!shared) {
+                        out_memsz = page_end - lo_addr;
+                    }
+                }
                 if (seg->type == PT_LOAD && (seg->flags & 0x1u) != 0 && out_off != 0) {
                     uint64_t delta = out_off;
                     if (out_vaddr < delta) {

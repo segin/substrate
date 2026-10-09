@@ -212,6 +212,21 @@ GNU-style unresolved symbol policy alias.
 Trace input loading and symbol usage.
 .It Fl -z Ar option
 Set text-relocation, stack-execute, and RELRO policy.
+With
+.Cm relro ,
+the default, what only the dynamic linker writes
+.Po
+.Pa .data.rel.ro ,
+the constructor tables,
+.Pa .dynamic ,
+.Pa .got
+.Pc
+is laid out together on pages of its own, ahead of the data the program
+writes, and
+.Dv PT_GNU_RELRO
+covers those pages whole.
+Substrate's dynamic linker makes them read-only in the libraries it
+loads, not in the program the kernel loaded.
 .Cm now
 marks the output for the dynamic linker to bind every symbol when it is
 loaded

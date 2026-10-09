@@ -11442,22 +11442,29 @@ static int section_order_rank(const elf_section_t *sec) {
         (strcmp(name, ".symtab") == 0 || strcmp(name, ".strtab") == 0 || strcmp(name, ".shstrtab") == 0)) {
         return 200;
     }
-    if (name != NULL) {
-        if (strcmp(name, ".tm_clone_table") == 0) {
-            return 31;
-        }
-        if (strcmp(name, ".fini_array") == 0 || strcmp(name, ".init_array") == 0 ||
-            strcmp(name, ".preinit_array") == 0) {
-            return 32;
-        }
-        if (strcmp(name, ".got") == 0) {
-            return 33;
-        }
+    /*
+     * Among what is writable, what is written only by the dynamic linker
+     * comes first and together, so that it can be made read-only once it
+     * has been (PT_GNU_RELRO) without anything the program writes lying
+     * in the same range: a .data between .data.rel.ro and .got was in
+     * the range, and read-only when the program came to write it.
+     */
+    if (name != NULL && (flags & (SHF_ALLOC | SHF_WRITE)) == (SHF_ALLOC | SHF_WRITE) &&
+        type != SHT_NOBITS && is_relro_candidate_name(name)) {
         if (strcmp(name, ".dynamic") == 0) {
-            return 34;
+            return 28;
         }
+        if (strncmp(name, ".got", 4) == 0) {
+            return 29;
+        }
+        return strncmp(name, ".data.rel.ro", 12) == 0 ? 27 : 26;
+    }
+    if (name != NULL) {
         if (strcmp(name, ".got.plt") == 0) {
-            return 35;
+            return 30;
+        }
+        if (strcmp(name, ".tm_clone_table") == 0) {
+            return 32;
         }
     }
     if (type == SHT_REL || type == SHT_RELA) {
@@ -11476,7 +11483,7 @@ static int section_order_rank(const elf_section_t *sec) {
         if (type == SHT_NOBITS) {
             return 40;
         }
-        return 30;
+        return 31;
     }
     return 100;
 }

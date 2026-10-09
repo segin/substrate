@@ -116,6 +116,28 @@ run "a program that it calls back into" ./ld -m elf_i386 --dynamic-linker=/sbin/
 is  "the hook is exported, defined" "$(readelf -W --dyn-syms prog3 | awk '$8 == "program_hook" { print ($7 != "UND") }')" 1
 is  "what nothing asks for is not"  "$(readelf -W --dyn-syms prog3 | grep -c ' program_private$')" 0
 
+# What only the dynamic linker writes is together on pages of its own and
+# PT_GNU_RELRO covers those pages whole; what the program writes comes
+# after.  And a library's reference to its own variable through the GOT
+# is a direct one: the table has no slot to hold an address not yet known.
+cat > lib4.c <<'EOF'
+static const char *const names[] = { "a", "b" };
+int lib_counter = 1;
+const char *lib_name(int i) { return names[i]; }
+int lib_bump(void) { return ++lib_counter; }
+EOF
+$cc32 -fPIC -o lib4.o lib4.c
+run "a library with data that is read-only once relocated" ./ld -m elf_i386 -shared -o lib4.so lib4.o
+start=$(readelf -lW lib4.so | awk '$1 == "GNU_RELRO" { print $3 }')
+size=$(readelf -lW lib4.so | awk '$1 == "GNU_RELRO" { print $6 }')
+data=0x$(readelf -SW lib4.so | sed -n 's/.* \.data  *PROGBITS  *\([0-9a-f]*\) .*/\1/p')
+ro=0x$(readelf -SW lib4.so | sed -n 's/.* \.data\.rel\.ro[^ ]*  *PROGBITS  *\([0-9a-f]*\) .*/\1/p' | head -1)
+is  "PT_GNU_RELRO begins and ends on a page" "$(( start % 4096 )) $(( size % 4096 )) $(( size > 0 ))" "0 0 1"
+is  ".data.rel.ro is inside it"       "$(( ro >= start && ro < start + size ))" 1
+is  ".data is after it"               "$(( data >= start + size ))" 1
+is  "the library reaches its own variable directly" \
+    "$(objdump -d lib4.so | sed -n '/<lib_bump>:/,/ret/p' | grep -c 'mov  *0x0(%e[a-z]x),')" 0
+
 # -l: the directories in order, each for the shared library and then the
 # archive, and a library for another machine is passed over.  The first
 # input says which machine the link is for, and looking into a library
