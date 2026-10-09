@@ -372,12 +372,25 @@ not under the name it was found by.
 In an executable, a weak reference that neither an input nor a shared
 object of the link defines is zero at link time.
 .It
-A call from code that is not position-independent to a function in a
-shared object goes through the PLT.
-A reference of that kind to data in a shared object needs a copy
-relocation, which is not made: on x86-64 it is an error that names the
-symbol and says to compile with
-.Fl fPIC .
+In an executable made of code that is not position-independent, a call
+to a function in a shared object goes through the PLT; a function whose
+address is taken has its PLT entry for an address, the same in every
+module; and a variable of a shared object gets a copy in the executable
+.Pq Pa .dynbss , Dv R_*_COPY ,
+under every name the shared object has for it.
+A thread-local variable referred to that way is an error.
+.It
+.Fl z Cm text
+refuses an output in which the dynamic linker would have to apply a
+relocation to read-only memory, which is what a shared object made of
+code that is not position-independent comes to.
+Without it such an output is marked
+.Dv DT_TEXTREL
+and a warning says so;
+.Fl z Cm notext
+silences the warning.
+Substrate's dynamic linker does not apply relocations to read-only
+memory.
 .It
 GNU plugin shared-object API is not loaded directly;
 .Fl -plugin

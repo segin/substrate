@@ -78,12 +78,23 @@ typedef struct {
     size_t got_slot;
     size_t tls_gd_slot;
     size_t tls_ie_slot;
+    int canonical;              /* its PLT entry is its address: see
+                                 * plan_copy_relocs() */
 } dyn_import_t;
 
 typedef struct {
     dyn_import_t *items;
     size_t count;
     size_t cap;
+    /* The data of shared objects that the executable has a copy of
+     * (R_*_COPY): each symbol the copy is of.  Its aliases, defined at
+     * the same place, are in copy_aliases. */
+    elf_symbol_t **copies;
+    size_t copy_count;
+    size_t copy_cap;
+    elf_symbol_t **copy_aliases;
+    size_t alias_count;
+    size_t alias_cap;
 } dyn_import_vec_t;
 
 typedef struct {
@@ -174,6 +185,10 @@ typedef struct {
 static int dynstr_append_cstr(uint8_t **buf, size_t *len, size_t *cap, const char *name, uint32_t *out_off);
 static char *dso_soname(const char *path);
 static int dynsym_should_export(const ld_ctx_t *ctx, const elfobj_t *out, const elf_symbol_t *sym);
+static int symbol_is_copied(const dyn_import_vec_t *imports, const elf_symbol_t *sym);
+static const dyn_import_t *find_planned_import(const ld_ctx_t *ctx, const char *name);
+static int reloc_is_direct_ref(uint16_t machine, uint32_t type, int data);
+static int set_section_zero_data(elf_section_t *sec, size_t sz);
 static int resolve_symbol_addr(elfobj_t *obj, const elf_symbol_t *sym, int allow_undef,
                                uint64_t *out_addr, const char **undef_name);
 static int register_dso_provider(ld_ctx_t *ctx, const char *path, symstate_t *state);
@@ -446,9 +461,9 @@ static void dyn_import_vec_free(dyn_import_vec_t *v) {
         free(v->items[i].name);
     }
     free(v->items);
-    v->items = NULL;
-    v->count = 0;
-    v->cap = 0;
+    free(v->copies);
+    free(v->copy_aliases);
+    memset(v, 0, sizeof(*v));
 }
 
 static int objvec_push(objvec_t *v, elfobj_t *obj, const char *name) {
@@ -6146,6 +6161,11 @@ static int dynsym_should_export(const ld_ctx_t *ctx, const elfobj_t *out, const 
     if (shndx == SHN_UNDEF) {
         return 1;
     }
+    /* The executable's copy of a shared object's variable is the variable,
+     * and the shared object has to be able to find it. */
+    if (symbol_is_copied(&ctx->dyn_imports, sym)) {
+        return 1;
+    }
     return ctx->export_dynamic ? 1 : 0;
 }
 
@@ -6444,7 +6464,14 @@ static int resolve_runtime_relative_addend(elfobj_t *obj, const elf_symbol_t *sy
     return 0;
 }
 
-static size_t count_runtime_data_import_relocs_x64(elfobj_t *out) {
+/* Whether an import is one whose address is its PLT entry. */
+static int import_is_canonical(const dyn_import_vec_t *imports, const elf_symbol_t *sym) {
+    int idx = sym != NULL ? dyn_import_find(imports, elf_symbol_name(sym)) : -1;
+
+    return idx >= 0 && imports->items[idx].canonical;
+}
+
+static size_t count_runtime_data_import_relocs_x64(elfobj_t *out, const dyn_import_vec_t *imports) {
     size_t i;
     size_t n = 0;
 
@@ -6469,7 +6496,7 @@ static size_t count_runtime_data_import_relocs_x64(elfobj_t *out) {
             }
             sym = elf_reloc_symbol(rel);
             if (reloc_is_x64_runtime_data_ref(elf_reloc_type(rel)) &&
-                (is_runtime_import_symbol(sym) ||
+                ((is_runtime_import_symbol(sym) && !import_is_canonical(imports, sym)) ||
                  (elf_type(out) == ET_DYN && symbol_needs_runtime_relative_reloc(sym)))) {
                 n++;
             }
@@ -6478,7 +6505,7 @@ static size_t count_runtime_data_import_relocs_x64(elfobj_t *out) {
     return n;
 }
 
-static size_t count_runtime_data_import_relocs_i386(elfobj_t *out) {
+static size_t count_runtime_data_import_relocs_i386(elfobj_t *out, const dyn_import_vec_t *imports) {
     size_t i;
     size_t n = 0;
 
@@ -6503,7 +6530,7 @@ static size_t count_runtime_data_import_relocs_i386(elfobj_t *out) {
             }
             sym = elf_reloc_symbol(rel);
             if (reloc_is_i386_runtime_data_ref(elf_reloc_type(rel)) &&
-                (is_runtime_import_symbol(sym) ||
+                ((is_runtime_import_symbol(sym) && !import_is_canonical(imports, sym)) ||
                  (elf_type(out) == ET_DYN && symbol_needs_runtime_relative_reloc(sym)))) {
                 n++;
             }
@@ -6512,35 +6539,228 @@ static size_t count_runtime_data_import_relocs_i386(elfobj_t *out) {
     return n;
 }
 
-/*
- * What the shared objects of the link define `name` as (STT_FUNC,
- * STT_OBJECT, ...); -1 if none of them defines it.
- */
-static int dso_definition_type(const ld_ctx_t *ctx, const char *name) {
+/* How a shared object of the link defines a symbol. */
+typedef struct {
+    int type;                   /* STT_* */
+    uint64_t size;
+    uint64_t value;
+    uint16_t shndx;
+    size_t dso;                 /* which of ctx->dso_inputs */
+} dso_def_t;
+
+/* The definition of `name` among the shared objects of the link, the first
+ * there is.  0, or -1 if none defines it. */
+static int dso_find_definition(const ld_ctx_t *ctx, const char *name, dso_def_t *def) {
     size_t d, i;
 
     for (d = 0; ctx != NULL && name != NULL && d < ctx->dso_inputs.count; ++d) {
         elfobj_t *obj = NULL;
-        int found = -1;
+        int found = 0;
 
         if (elf_open(ctx->dso_inputs.items[d], &obj) != ELF_OK) {
             continue;
         }
-        for (i = 0; found < 0 && i < elf_symbol_count(obj); ++i) {
+        for (i = 0; !found && i < elf_symbol_count(obj); ++i) {
             const elf_symbol_t *sym = elf_symbol_at(obj, i);
             const char *sname = sym != NULL ? elf_symbol_name(sym) : NULL;
 
             if (sname != NULL && elf_symbol_shndx(sym) != SHN_UNDEF && strcmp(sname, name) == 0 &&
                 (elf_symbol_bind(sym) == STB_GLOBAL || elf_symbol_bind(sym) == STB_WEAK)) {
-                found = elf_symbol_type(sym);
+                def->type = elf_symbol_type(sym);
+                def->size = elf_symbol_size(sym);
+                def->value = elf_symbol_value(sym);
+                def->shndx = elf_symbol_shndx(sym);
+                def->dso = d;
+                found = 1;
             }
         }
         elf_close(obj);
-        if (found >= 0) {
-            return found;
+        if (found) {
+            return 0;
         }
     }
     return -1;
+}
+
+/*
+ * What the shared objects of the link define `name` as (STT_FUNC,
+ * STT_OBJECT, ...); -1 if none of them defines it.
+ */
+static int dso_definition_type(const ld_ctx_t *ctx, const char *name) {
+    dso_def_t def;
+
+    return dso_find_definition(ctx, name, &def) == 0 ? def.type : -1;
+}
+
+/*
+ * What a program that is not position-independent does about the things
+ * of shared objects it refers to directly.
+ *
+ * Such code has the address of what it names built into its instructions,
+ * and its instructions cannot be changed when it is loaded.  So what it
+ * names has to be somewhere the linker knows now:
+ *
+ *   - a variable gets a copy in the executable (.dynbss), which becomes
+ *     the variable for everyone: the executable defines the symbol, and
+ *     an R_*_COPY relocation has the dynamic linker fill the copy from
+ *     the shared object's initial value before anything runs.  The other
+ *     names the shared object has for the same variable (environ and
+ *     __environ) are defined at the copy too, or the library would go on
+ *     using its own.  This is done here, before imports are collected:
+ *     once defined, the symbol is not an import.
+ *
+ *   - a function whose address is taken has its PLT entry for an
+ *     address.  The symbol stays undefined, with the PLT entry as its
+ *     value, which tells the dynamic linker to give that same address to
+ *     every other module that asks.  The import is marked `canonical`
+ *     when imports are collected.
+ *
+ * A shared object, and position-independent code anywhere, needs neither:
+ * it reaches everything through the GOT.
+ */
+static int reloc_is_direct_ref(uint16_t machine, uint32_t type, int data) {
+    if (machine == EM_386) {
+        return type == R_386_32;
+    }
+    if (machine == EM_X86_64) {
+        return type == R_X86_64_64 || type == R_X86_64_32 || type == R_X86_64_32S ||
+               (data && type == R_X86_64_PC32);
+    }
+    return 0;
+}
+
+static int symvec_push(elf_symbol_t ***items, size_t *count, size_t *cap, elf_symbol_t *sym) {
+    if (*count == *cap) {
+        size_t ncap = *cap ? *cap * 2 : 8;
+        elf_symbol_t **n = (elf_symbol_t **)realloc(*items, ncap * sizeof(*n));
+
+        if (n == NULL) {
+            return -1;
+        }
+        *items = n;
+        *cap = ncap;
+    }
+    (*items)[(*count)++] = sym;
+    return 0;
+}
+
+static int plan_copy_relocs(const ld_ctx_t *ctx, elfobj_t *out, dyn_import_vec_t *imports) {
+    uint16_t machine = elf_machine(out);
+    size_t si, ri, k;
+
+    if (elf_type(out) != ET_EXEC || ctx->dso_inputs.count == 0) {
+        return 0;
+    }
+    for (si = 0; si < elf_section_count(out); ++si) {
+        elf_section_t *sec = elf_section_get(out, si);
+
+        if (sec == NULL || (elf_section_flags(sec) & SHF_ALLOC) == 0) {
+            continue;
+        }
+        for (ri = 0; ri < elf_section_reloc_count(sec); ++ri) {
+            const elf_reloc_t *rel = elf_section_reloc_at(sec, ri);
+            elf_symbol_t *sym = rel != NULL ? (elf_symbol_t *)elf_reloc_symbol(rel) : NULL;
+            elf_section_t *dynbss;
+            elfobj_t *dso = NULL;
+            uint64_t align, off;
+            dso_def_t def;
+
+            if (sym == NULL || !is_runtime_import_symbol(sym) ||
+                !reloc_is_direct_ref(machine, elf_reloc_type(rel), 1) ||
+                dso_find_definition(ctx, elf_symbol_name(sym), &def) != 0) {
+                continue;
+            }
+            if (def.type == STT_TLS) {
+                fprintf(stderr, "ld: %s is thread-local in a shared object and is referred to directly: "
+                                "not supported; compile with -fPIC\n", elf_symbol_name(sym));
+                return -1;
+            }
+            if (def.type != STT_OBJECT) {
+                continue;
+            }
+            dynbss = elf_find_section(out, ".dynbss");
+            if (dynbss == NULL) {
+                dynbss = elf_add_section(out, ".dynbss", SHT_NOBITS, SHF_ALLOC | SHF_WRITE);
+                if (dynbss == NULL) {
+                    return -1;
+                }
+            }
+            /* As aligned as anything of its size can need to be. */
+            for (align = 1; align < 16 && align * 2 <= def.size; align *= 2) {
+            }
+            off = (elf_section_size(dynbss) + align - 1) & ~(align - 1);
+            if (elf_section_align(dynbss) < align && elf_section_set_align(dynbss, align) != ELF_OK) {
+                return -1;
+            }
+            if (set_section_zero_data(dynbss, (size_t)(off + (def.size != 0 ? def.size : 1))) != 0 ||
+                elf_symbol_define(sym, dynbss, off) != ELF_OK || elf_symbol_set_type(sym, STT_OBJECT) != ELF_OK ||
+                elf_symbol_set_size(sym, def.size) != ELF_OK ||
+                symvec_push(&imports->copies, &imports->copy_count, &imports->copy_cap, sym) != 0) {
+                return -1;
+            }
+            /* Its other names. */
+            if (elf_open(ctx->dso_inputs.items[def.dso], &dso) != ELF_OK) {
+                continue;
+            }
+            for (k = 0; k < elf_symbol_count(dso); ++k) {
+                const elf_symbol_t *other = elf_symbol_at(dso, k);
+                const char *oname = other != NULL ? elf_symbol_name(other) : NULL;
+                elf_symbol_t *alias;
+
+                if (oname == NULL || oname[0] == '\0' || strcmp(oname, elf_symbol_name(sym)) == 0 ||
+                    elf_symbol_shndx(other) != def.shndx || elf_symbol_value(other) != def.value ||
+                    elf_symbol_type(other) != STT_OBJECT ||
+                    (elf_symbol_bind(other) != STB_GLOBAL && elf_symbol_bind(other) != STB_WEAK)) {
+                    continue;
+                }
+                alias = elf_find_symbol(out, oname);
+                if (alias != NULL && elf_symbol_shndx(alias) != SHN_UNDEF) {
+                    continue;   /* the program has one of its own by that name */
+                }
+                if (alias == NULL) {
+                    alias = elf_add_symbol(out, oname, 0, 0, elf_symbol_bind(other), STT_OBJECT);
+                }
+                if (alias == NULL || elf_symbol_define(alias, dynbss, off) != ELF_OK ||
+                    elf_symbol_set_type(alias, STT_OBJECT) != ELF_OK || elf_symbol_set_size(alias, def.size) != ELF_OK ||
+                    symvec_push(&imports->copy_aliases, &imports->alias_count, &imports->alias_cap, alias) != 0) {
+                    elf_close(dso);
+                    return -1;
+                }
+            }
+            elf_close(dso);
+        }
+    }
+    return 0;
+}
+
+/* Whether this reference, from an executable, takes the address of a
+ * function that is in a shared object: the address is its PLT entry. */
+static int import_address_is_plt(const ld_ctx_t *ctx, const elfobj_t *out, uint32_t type, const elf_symbol_t *sym) {
+    int what;
+
+    if (elf_type(out) != ET_EXEC || !reloc_is_direct_ref(elf_machine(out), type, 0) ||
+        !is_runtime_import_symbol(sym)) {
+        return 0;
+    }
+    what = dso_definition_type(ctx, elf_symbol_name(sym));
+    return what == STT_FUNC || what == STT_GNU_IFUNC;
+}
+
+/* Whether the executable has a copy of this symbol's data. */
+static int symbol_is_copied(const dyn_import_vec_t *imports, const elf_symbol_t *sym) {
+    size_t i;
+
+    for (i = 0; i < imports->copy_count; ++i) {
+        if (imports->copies[i] == sym) {
+            return 1;
+        }
+    }
+    for (i = 0; i < imports->alias_count; ++i) {
+        if (imports->copy_aliases[i] == sym) {
+            return 1;
+        }
+    }
+    return 0;
 }
 
 /* The same, where a symbol nothing defines is one of no type. */
@@ -6599,6 +6819,7 @@ static int collect_dynamic_imports_x64(const ld_ctx_t *ctx, elfobj_t *out, dyn_i
             dyn_import_t *imp;
             uint32_t type;
             int plt_ref;
+            int canonical;
 
             if (rel == NULL) {
                 continue;
@@ -6633,6 +6854,8 @@ static int collect_dynamic_imports_x64(const ld_ctx_t *ctx, elfobj_t *out, dyn_i
                 }
                 plt_ref = 1;
             }
+            canonical = !plt_ref && import_address_is_plt(ctx, out, type, sym);
+            plt_ref |= canonical;
             if (!plt_ref && !reloc_is_x64_got_ref(type) &&
                 !reloc_is_x64_tls_gd_ref(type) && !reloc_is_x64_tls_ie_ref(type) &&
                 !reloc_is_x64_runtime_data_ref(type)) {
@@ -6644,6 +6867,9 @@ static int collect_dynamic_imports_x64(const ld_ctx_t *ctx, elfobj_t *out, dyn_i
             }
             if (plt_ref) {
                 imp->need_plt = 1;
+            }
+            if (canonical) {
+                imp->canonical = 1;
             }
             if (reloc_is_x64_got_ref(type)) {
                 imp->need_got = 1;
@@ -6659,7 +6885,7 @@ static int collect_dynamic_imports_x64(const ld_ctx_t *ctx, elfobj_t *out, dyn_i
     return 0;
 }
 
-static int collect_dynamic_imports_i386(elfobj_t *out, dyn_import_vec_t *imports) {
+static int collect_dynamic_imports_i386(const ld_ctx_t *ctx, elfobj_t *out, dyn_import_vec_t *imports) {
     size_t i;
 
     if (out == NULL || imports == NULL) {
@@ -6699,6 +6925,10 @@ static int collect_dynamic_imports_i386(elfobj_t *out, dyn_import_vec_t *imports
             }
             if (reloc_is_i386_plt_ref(type)) {
                 imp->need_plt = 1;
+            }
+            if (import_address_is_plt(ctx, out, type, sym)) {
+                imp->need_plt = 1;
+                imp->canonical = 1;
             }
             if (reloc_is_i386_got_ref(type)) {
                 imp->need_got = 1;
@@ -6933,17 +7163,21 @@ static int plan_dynamic_imports(ld_ctx_t *ctx, elfobj_t *out) {
         return 0;
     }
     dyn_import_vec_free(&ctx->dyn_imports);
+    if (plan_copy_relocs(ctx, out, &ctx->dyn_imports) != 0) {
+        return -1;
+    }
     if (ctx->mode == 64) {
         if (collect_dynamic_imports_x64(ctx, out, &ctx->dyn_imports) != 0) {
             return -1;
         }
-        extra_dyn_relocs = count_runtime_data_import_relocs_x64(out);
+        extra_dyn_relocs = count_runtime_data_import_relocs_x64(out, &ctx->dyn_imports);
     } else {
-        if (collect_dynamic_imports_i386(out, &ctx->dyn_imports) != 0) {
+        if (collect_dynamic_imports_i386(ctx, out, &ctx->dyn_imports) != 0) {
             return -1;
         }
-        extra_dyn_relocs = count_runtime_data_import_relocs_i386(out);
+        extra_dyn_relocs = count_runtime_data_import_relocs_i386(out, &ctx->dyn_imports);
     }
+    extra_dyn_relocs += ctx->dyn_imports.copy_count;
     for (i = 0; i < ctx->dyn_imports.count; ++i) {
         if (ctx->dyn_imports.items[i].need_plt) {
             ctx->dyn_imports.items[i].plt_slot = plt_slot++;
@@ -7069,7 +7303,7 @@ static int finalize_dynamic_imports_x64(elfobj_t *out, const dyn_import_vec_t *i
             rela_dyn_base_count += 2;
         }
     }
-    runtime_extra_count = count_runtime_data_import_relocs_x64(out);
+    runtime_extra_count = count_runtime_data_import_relocs_x64(out, imports) + imports->copy_count;
     required_rela_dyn_sz = (rela_dyn_base_count + runtime_extra_count) * 24;
     plt = elf_find_section(out, ".plt");
     gotplt = elf_find_section(out, ".got.plt");
@@ -7287,6 +7521,9 @@ static int finalize_dynamic_imports_x64(elfobj_t *out, const dyn_import_vec_t *i
                     }
                     addend = (int64_t)read_u64_endian(sbuf + off, e);
                 }
+                if (is_runtime_import_symbol(sym) && import_is_canonical(imports, sym)) {
+                    continue;
+                }
                 if (is_runtime_import_symbol(sym)) {
                     if (dynsym_index_by_name(out, elf_symbol_name(sym), &dynidx) != 0) {
                         continue;
@@ -7315,6 +7552,22 @@ static int finalize_dynamic_imports_x64(elfobj_t *out, const dyn_import_vec_t *i
                 }
                 write_u64_endian(rela_dyn_buf + roff + 16, e, relative ? relative_addend : (uint64_t)addend);
             }
+        }
+        /* And the copies: "fill this from the shared object's own". */
+        for (si = 0; si < imports->copy_count; ++si) {
+            const elf_symbol_t *sym = imports->copies[si];
+            size_t roff = (rela_dyn_base_count + extra_idx++) * 24;
+            uint64_t addr = 0;
+            uint32_t dynidx = 0;
+
+            if (rela_dyn_buf == NULL || roff + 24 > rela_dyn_sz || resolve_symbol_addr(out, sym, 0, &addr, NULL) != 0 ||
+                dynsym_index_by_name(out, elf_symbol_name(sym), &dynidx) != 0) {
+                fprintf(stderr, "ld: cannot make the copy relocation for %s\n", elf_symbol_name(sym));
+                goto fail_import;
+            }
+            write_u64_endian(rela_dyn_buf + roff + 0, e, addr);
+            write_u64_endian(rela_dyn_buf + roff + 8, e, (((uint64_t)dynidx) << 32) | R_X86_64_COPY);
+            write_u64_endian(rela_dyn_buf + roff + 16, e, 0);
         }
     }
 
@@ -7393,7 +7646,7 @@ static int finalize_dynamic_imports_i386(elfobj_t *out, const dyn_import_vec_t *
             rel_dyn_base_count += 2;
         }
     }
-    runtime_extra_count = count_runtime_data_import_relocs_i386(out);
+    runtime_extra_count = count_runtime_data_import_relocs_i386(out, imports) + imports->copy_count;
     required_rel_dyn_sz = (rel_dyn_base_count + runtime_extra_count) * 8;
     plt = elf_find_section(out, ".plt");
     gotplt = elf_find_section(out, ".got.plt");
@@ -7610,6 +7863,9 @@ static int finalize_dynamic_imports_i386(elfobj_t *out, const dyn_import_vec_t *
                 if (!reloc_is_i386_runtime_data_ref(type)) {
                     continue;
                 }
+                if (is_runtime_import_symbol(sym) && import_is_canonical(imports, sym)) {
+                    continue;
+                }
                 if (is_runtime_import_symbol(sym)) {
                     if (dynsym_index_by_name(out, elf_symbol_name(sym), &dynidx) != 0) {
                         continue;
@@ -7635,6 +7891,21 @@ static int finalize_dynamic_imports_i386(elfobj_t *out, const dyn_import_vec_t *
                     write_u32_endian(rel_dyn_buf + roff + 4, e, (dynidx << 8) | R_386_32);
                 }
             }
+        }
+        /* And the copies: "fill this from the shared object's own". */
+        for (si = 0; si < imports->copy_count; ++si) {
+            const elf_symbol_t *sym = imports->copies[si];
+            size_t roff = (rel_dyn_base_count + extra_idx++) * 8;
+            uint64_t addr = 0;
+            uint32_t dynidx = 0;
+
+            if (rel_dyn_buf == NULL || roff + 8 > rel_dyn_sz || resolve_symbol_addr(out, sym, 0, &addr, NULL) != 0 ||
+                dynsym_index_by_name(out, elf_symbol_name(sym), &dynidx) != 0) {
+                fprintf(stderr, "ld: cannot make the copy relocation for %s\n", elf_symbol_name(sym));
+                goto fail_import;
+            }
+            write_u32_endian(rel_dyn_buf + roff + 0, e, (uint32_t)addr);
+            write_u32_endian(rel_dyn_buf + roff + 4, e, (dynidx << 8) | R_386_COPY);
         }
     }
 
@@ -7665,6 +7936,47 @@ fail_import:
     free(rel_plt_buf);
     free(rel_dyn_buf);
     return -1;
+}
+
+/*
+ * A text relocation is one the dynamic linker is left to apply to memory
+ * that is mapped read-only.  Every object file has relocations in its
+ * text, and nearly all are settled here; the ones that are not are the
+ * direct references to what is only known at run time: something in a
+ * shared object that has neither a copy nor a PLT entry for an address,
+ * and, in a shared object or PIE, the address of anything at all.  The
+ * name of the first read-only section that has one, or NULL.  It asks
+ * what the import plan decided, so it is for use after that is made.
+ */
+static const char *text_relocation_section(const ld_ctx_t *ctx, elfobj_t *out) {
+    uint16_t machine = elf_machine(out);
+    size_t si, ri;
+
+    if (elf_type(out) != ET_DYN && ctx->dso_inputs.count == 0) {
+        return NULL;
+    }
+    for (si = 0; si < elf_section_count(out); ++si) {
+        elf_section_t *sec = elf_section_get(out, si);
+
+        if (sec == NULL || (elf_section_flags(sec) & (SHF_ALLOC | SHF_WRITE)) != SHF_ALLOC) {
+            continue;
+        }
+        for (ri = 0; ri < elf_section_reloc_count(sec); ++ri) {
+            const elf_reloc_t *rel = elf_section_reloc_at(sec, ri);
+            const elf_symbol_t *sym = rel != NULL ? elf_reloc_symbol(rel) : NULL;
+            uint32_t type = rel != NULL ? elf_reloc_type(rel) : 0;
+
+            if (rel == NULL ||
+                !(machine == EM_X86_64 ? reloc_is_x64_runtime_data_ref(type) : reloc_is_i386_runtime_data_ref(type))) {
+                continue;
+            }
+            if ((is_runtime_import_symbol(sym) && !import_is_canonical(&ctx->dyn_imports, sym)) ||
+                (elf_type(out) == ET_DYN && symbol_needs_runtime_relative_reloc(sym))) {
+                return elf_section_name(sec) != NULL ? elf_section_name(sec) : "?";
+            }
+        }
+    }
+    return NULL;
 }
 
 /* The DT_SONAME of the shared object at `path`, to be freed; NULL if it
@@ -7734,6 +8046,7 @@ static int plan_dynamic_needed(ld_ctx_t *ctx, elfobj_t *out) {
     size_t i;
     size_t entsz;
     int need_dyn;
+    int textrel;
     elf_section_t *gotplt_sec = NULL;
     elf_section_t *rela_plt_sec = NULL;
     elf_section_t *rel_plt_sec = NULL;
@@ -8134,14 +8447,24 @@ static int plan_dynamic_needed(ld_ctx_t *ctx, elfobj_t *out) {
         free(gnu_hash_buf);
         return -1;
     }
-    /* -z now, said the three ways dynamic linkers look for it. */
-    if (ctx->z_now &&
-        (dynamic_append_entry(&dynamic_buf, &dynamic_len, &dynamic_cap,
-                              elf_class(out), elf_endian(out), DT_BIND_NOW, 0) != 0 ||
+    /*
+     * -z now, said the three ways dynamic linkers look for it; and that
+     * the dynamic linker will have to write on what is mapped read-only,
+     * said the two ways, where the output has such relocations.
+     */
+    textrel = text_relocation_section(ctx, out) != NULL;
+    if ((ctx->z_now &&
+         (dynamic_append_entry(&dynamic_buf, &dynamic_len, &dynamic_cap,
+                               elf_class(out), elf_endian(out), DT_BIND_NOW, 0) != 0 ||
+          dynamic_append_entry(&dynamic_buf, &dynamic_len, &dynamic_cap,
+                               elf_class(out), elf_endian(out), DT_FLAGS_1, DF_1_NOW) != 0)) ||
+        (textrel &&
          dynamic_append_entry(&dynamic_buf, &dynamic_len, &dynamic_cap,
-                              elf_class(out), elf_endian(out), DT_FLAGS, DF_BIND_NOW) != 0 ||
+                              elf_class(out), elf_endian(out), DT_TEXTREL, 0) != 0) ||
+        ((ctx->z_now || textrel) &&
          dynamic_append_entry(&dynamic_buf, &dynamic_len, &dynamic_cap,
-                              elf_class(out), elf_endian(out), DT_FLAGS_1, DF_1_NOW) != 0)) {
+                              elf_class(out), elf_endian(out), DT_FLAGS,
+                              (ctx->z_now ? DF_BIND_NOW : 0) | (textrel ? DF_TEXTREL : 0)) != 0)) {
         free(dynstr_buf);
         free(dynsym_buf);
         free(dynamic_buf);
@@ -8683,6 +9006,18 @@ static int patch_dynsym_symbol_values(const ld_ctx_t *ctx, elfobj_t *out) {
             return -1;
         }
         value = elf_symbol_value(sym);
+        if (elf_symbol_shndx(sym) == SHN_UNDEF && import_is_canonical(&ctx->dyn_imports, sym)) {
+            /* Undefined, with a value: its PLT entry here is its address
+             * for every module. */
+            const dyn_import_t *imp = find_planned_import(ctx, elf_symbol_name(sym));
+            const elf_section_t *plt = elf_find_section(out, ".plt");
+
+            if (imp == NULL || plt == NULL) {
+                free(buf);
+                return -1;
+            }
+            value = elf_section_addr(plt) + 16 + (imp->plt_slot * 16);
+        }
         off = slot * entsz;
         if (elf_class(out) == ELFOBJ_CLASS_64) {
             write_u64_endian(buf + off + 8, elf_endian(out), value);
@@ -9872,6 +10207,7 @@ static int resolve_symbol_addr_for_reloc(elfobj_t *obj, const ld_ctx_t *ctx, con
             (elf_symbol_type(sym) == STT_FUNC || elf_symbol_type(sym) == STT_NOTYPE)) {
             plt_ref = 1;
         }
+        plt_ref |= imp->canonical && reloc_is_direct_ref(EM_X86_64, type, 0);
         if (plt_ref && imp->need_plt) {
             sec = elf_find_section(obj, ".plt");
             if (sec == NULL) {
@@ -9915,7 +10251,8 @@ static int resolve_symbol_addr_for_reloc(elfobj_t *obj, const ld_ctx_t *ctx, con
             return 0;
         }
     } else if (ctx != NULL && ctx->mode == 32) {
-        if (reloc_is_i386_plt_ref(type) && imp->need_plt) {
+        if ((reloc_is_i386_plt_ref(type) || (imp->canonical && reloc_is_direct_ref(EM_386, type, 0))) &&
+            imp->need_plt) {
             sec = elf_find_section(obj, ".plt");
             if (sec == NULL) {
                 return -1;
@@ -9987,7 +10324,7 @@ static int can_defer_runtime_reloc(const ld_ctx_t *ctx, uint16_t machine, uint32
         return 0;
     }
     imp = find_planned_import(ctx, elf_symbol_name(sym));
-    return imp != NULL;
+    return imp != NULL && !imp->canonical;
 }
 
 static int alloc_section_class(uint64_t flags) {
@@ -11673,33 +12010,6 @@ static int strip_group_sections_for_final(elfobj_t *obj) {
     return 0;
 }
 
-static int has_text_relocation(const elfobj_t *obj, const char **out_sec_name) {
-    size_t i;
-
-    if (obj == NULL) {
-        return 0;
-    }
-    for (i = 0; i < elf_section_count(obj); ++i) {
-        const elf_section_t *sec = elf_section_get(obj, i);
-        const char *name;
-        if (sec == NULL) {
-            continue;
-        }
-        if ((elf_section_flags(sec) & (SHF_ALLOC | SHF_EXECINSTR)) != (SHF_ALLOC | SHF_EXECINSTR)) {
-            continue;
-        }
-        if (elf_section_reloc_count(sec) == 0) {
-            continue;
-        }
-        name = elf_section_name(sec);
-        if (out_sec_name != NULL) {
-            *out_sec_name = name;
-        }
-        return 1;
-    }
-    return 0;
-}
-
 static int enforce_wx_policy(const elfobj_t *obj) {
     size_t i;
 
@@ -12440,22 +12750,24 @@ static int run_internal_link(ld_ctx_t *ctx) {
         return -1;
     }
     {
-        const char *textrel_sec = NULL;
-        if (has_text_relocation(out, &textrel_sec)) {
-            if (ctx->z_text_mode == 1) {
-                fprintf(stderr,
-                        "ld: -z text rejects text relocations (section %s has pending relocations)\n",
-                        textrel_sec != NULL ? textrel_sec : "<unknown>");
-                symref_map_free(&undef_refs);
-                objvec_free(&inputs);
-                elf_close(out);
-                return -1;
-            }
-            if (ctx->z_text_mode == 2) {
-                fprintf(stderr,
-                        "ld: -z notext: allowing text relocations in section %s\n",
-                        textrel_sec != NULL ? textrel_sec : "<unknown>");
-            }
+        const char *textrel_sec = text_relocation_section(ctx, out);
+
+        if (textrel_sec != NULL && ctx->z_text_mode == 1) {
+            fprintf(stderr,
+                    "ld: -z text: section %s is read-only and has relocations the dynamic linker would apply\n",
+                    textrel_sec);
+            symref_map_free(&undef_refs);
+            objvec_free(&inputs);
+            elf_close(out);
+            return -1;
+        }
+        if (textrel_sec != NULL && ctx->z_text_mode != 2 &&
+            ld_warn(ctx, "section %s is read-only and has relocations for the dynamic linker (DT_TEXTREL); "
+                         "was it compiled without -fPIC?", textrel_sec) != 0) {
+            symref_map_free(&undef_refs);
+            objvec_free(&inputs);
+            elf_close(out);
+            return -1;
         }
     }
 

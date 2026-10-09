@@ -59,6 +59,44 @@ is  "what the entries push" "$(objdump -d -j .plt prog | sed -n 's/.*push  *\$\(
 is  "no relocation left for the dynamic linker in the text" "$(readelf -rW prog | grep -c 'R_386_32 ')" 0
 is  "absent is not asked of the dynamic linker" "$(readelf -W --dyn-syms prog | grep -c ' absent$')" 0
 
+# What code that is not position-independent refers to directly has to be
+# somewhere the linker knows: a variable of the library gets a copy in the
+# program, under all the library's names for it, and a function whose
+# address is taken has its PLT entry for an address.
+cat > lib2.c <<'EOF'
+int shared_var = 7;
+extern int shared_alias __attribute__((alias("shared_var")));
+int shared_fn(int x) { return x + shared_var; }
+EOF
+cat > main2.c <<'EOF'
+extern int shared_var;
+int shared_fn(int);
+int (*pointer)(int) = shared_fn;
+void _start(void) { shared_var = pointer(shared_var) + (shared_fn == pointer); for (;;) { } }
+EOF
+$cc32 -fPIC -o lib2.o lib2.c && $cc32 -fno-pic -fno-pie -o main2.o main2.c
+run "a library with a variable" ./ld -m elf_i386 -shared -soname lib2.so.1 -o lib2.so lib2.o
+run "a program that uses it directly" ./ld -m elf_i386 -z text --dynamic-linker=/sbin/ld.so -o prog2 main2.o lib2.so
+is  "a copy relocation for the variable" "$(readelf -rW prog2 | grep -c 'R_386_COPY .* shared_var')" 1
+is  "the program defines the variable"   "$(readelf -W --dyn-syms prog2 | awk '$8 == "shared_var" { print $4, ($7 != "UND") }')" "OBJECT 1"
+is  "and its other name, at the same place" \
+    "$(readelf -W --dyn-syms prog2 | awk '$8 == "shared_var" || $8 == "shared_alias" { print $2 }' | sort -u | wc -l)" 1
+is  "the function's address is its PLT entry" \
+    "$(readelf -W --dyn-syms prog2 | awk '$8 == "shared_fn" { print ($2 != "00000000"), $7 }')" "1 UND"
+is  "nothing for the dynamic linker to write in the text" "$(readelf -d prog2 | grep -c TEXTREL)" 0
+
+# -z text is about what the dynamic linker would have to write on, not
+# about there being relocations: an ordinary link passes, a shared object
+# made of code that is not position-independent does not, and without -z
+# text it is marked.
+$cc32 -fno-pic -o lib2np.o lib2.c
+run "-z text and position-independent code" ./ld -m elf_i386 -shared -z text -o pic.so lib.o
+if ./ld -m elf_i386 -shared -z text -o np.so lib2np.o > err 2>&1; then echo "FAIL -z text and code that is not: linked"; fail=1
+elif grep -q "read-only and has relocations" err; then echo "ok   -z text and code that is not"
+else echo "FAIL -z text and code that is not: $(head -1 err)"; fail=1; fi
+run "the same without -z text" ./ld -m elf_i386 -shared -z notext -o np.so lib2np.o
+is  "DT_TEXTREL" "$(readelf -d np.so | grep -c '(TEXTREL)')" 1
+
 # An option that needs a value says so.
 if ./ld -m elf_i386 -shared -o x.so lib.o -soname > err 2>&1; then echo "FAIL -soname with nothing after it: linked"; fail=1
 elif grep -q "needs a value" err; then echo "ok   -soname with nothing after it"

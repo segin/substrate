@@ -219,6 +219,18 @@ uint16_t elf_symbol_version(const elf_symbol_t *symbol) {
     return symbol == NULL ? 0 : symbol->ver_index;
 }
 
+elf_err_t elf_symbol_set_size(elf_symbol_t *symbol, uint64_t size) {
+    if (symbol == NULL || symbol->obj == NULL) {
+        return ELF_ERR_STATE;
+    }
+    if (!is_mutable_obj(symbol->obj)) {
+        return ELF_ERR_STATE;
+    }
+    symbol->size = size;
+    symbol->obj->dirty = 1;
+    return ELF_OK;
+}
+
 elf_err_t elf_symbol_set_value(elf_symbol_t *symbol, uint64_t value) {
     if (symbol == NULL || symbol->obj == NULL) {
         return ELF_ERR_STATE;

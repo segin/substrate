@@ -227,6 +227,7 @@ typedef enum {
 #define DT_FINI_ARRAYSZ 28
 #define DT_RUNPATH 29
 #define DT_FLAGS 30
+#define DF_TEXTREL 0x4          /* in DT_FLAGS: relocations in read-only memory */
 #define DF_BIND_NOW 0x8         /* in DT_FLAGS: no lazy binding */
 #define DT_FLAGS_1 0x6ffffffb
 #define DF_1_NOW 0x1            /* in DT_FLAGS_1: the same */
@@ -260,6 +261,9 @@ typedef enum {
 #define STT_SECTION 3
 #define STT_FILE 4
 #define STT_TLS 6
+#ifndef STT_GNU_IFUNC
+#define STT_GNU_IFUNC 10
+#endif
 #endif
 
 #ifndef SHN_UNDEF
@@ -1336,6 +1340,7 @@ elf_err_t elf_symbol_set_version(elf_symbol_t *symbol, uint16_t version_index);
 elf_err_t elf_symbol_set_version_name(elf_symbol_t *symbol, const char *version, int is_default);
 uint16_t elf_symbol_version(const elf_symbol_t *symbol);
 elf_err_t elf_symbol_set_value(elf_symbol_t *symbol, uint64_t value);
+elf_err_t elf_symbol_set_size(elf_symbol_t *symbol, uint64_t size);
 elf_err_t elf_symbol_set_shndx(elf_symbol_t *symbol, uint16_t shndx);
 int elf_symbol_is_duplicate_global(const elfobj_t *obj, const char *name, uint8_t bind);
 elf_err_t elf_symbols_sort_deterministic(elfobj_t *obj, size_t *first_global_out);
