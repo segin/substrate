@@ -123,6 +123,21 @@ is "a shared object keeps what it exports" "$(has gc.so unused_one)$(has gc.so u
 ./ld -m elf_i386 -r --gc-sections -o gcrel.o gc.o
 is "a relocatable output keeps everything" "$(has gcrel.o unused_one)" 1
 
+# The map and the --reproduce bundle are for later: a map that could not
+# be written is an error, and the bundle's script makes the same output.
+${CC:-cc} -m32 -c -ffreestanding -fPIE -fno-asynchronous-unwind-tables -o spie_early.o s.c
+./ld -m elf_i386 -e second -Map s.map --reproduce bundle -o mapped s.o
+is "a map file is written"            "$(grep -c '^Symbols:' s.map)" 1
+if [ -c /dev/full ]; then
+    if ./ld -m elf_i386 -Map /dev/full -o nomap s.o 2> err; then echo "FAIL a map that cannot be written: linked"; fail=1
+    else is "a map that cannot be written is an error" "$(grep -c 'failed to write the map file /dev/full' err)" 1; fi
+fi
+is "the bundle's script quotes what it was given" "$(grep -c -- "-e 'second' " bundle/repro.sh)" 1
+(LD_TOOL="$work/ld" sh bundle/repro.sh) > /dev/null 2>&1
+is "and run, it makes the same output" "$(cmp -s bundle/repro.out mapped && echo same)" same
+./ld -m elf_i386 -pie -e second --reproduce bundlepie -o mappedpie spie_early.o 2> /dev/null
+is "a PIE is reproduced as a PIE"     "$(grep -c -- ' -pie ' bundlepie/repro.sh)" 1
+
 # sym@SIZE is how big the thing is, and not where it is.
 cat > size.s <<'EOF'
         .data

@@ -322,8 +322,28 @@ bytecode is an error.
 Pass plugin-specific options.
 .It Fl -Map Ar file
 Write a link map including inputs, sections, program headers, and symbol provenance.
+A map that cannot be written in full is an error.
 .It Fl -reproduce Ar dir
-Write a reproducible link bundle containing object snapshots, manifest, and replay script.
+Write into
+.Ar dir ,
+made if it is not there, what is needed to do the link again: a copy of
+each object linked
+.Pq Pa input_NNN.o ,
+of the linker script if there was one, a
+.Pa manifest.txt
+of what they were, and a script
+.Pa repro.sh
+that links the copies into
+.Pa repro.out
+beside them.
+The script runs the linker named by
+.Ev LD_TOOL ,
+or
+.Nm ,
+and passes on its own arguments.
+Shared objects are not copied; the script names them where they were.
+A bundle that cannot be written in full, or whose paths would not fit,
+is an error.
 .It Fl -compat Ns = Ns Ar gnu|lld
 Set unsupported-option policy for compatibility behavior.
 .El

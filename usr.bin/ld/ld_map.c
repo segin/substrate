@@ -1,5 +1,10 @@
 /*
  * ld_map.c -- the link map and the --reproduce bundle.
+ *
+ * Both are files written for someone to read or run later, when the link
+ * that made them is gone: so a write that did not happen is an error and
+ * not a shorter file, a path that does not fit is refused and not cut
+ * short, and what goes into the shell script is quoted for the shell.
  */
 
 #include "ld.h"
@@ -26,6 +31,29 @@ static int ensure_dir_exists(const char *path) {
     return 0;
 }
 
+/* Everything written got there: nothing failed along the way, and the
+ * close, which is when a full disk is often heard of, did not either. */
+static int finish_file(FILE *fp, const char *path, const char *what) {
+    int failed = ferror(fp);
+
+    if (fclose(fp) != 0 || failed) {
+        fprintf(stderr, "ld: failed to write %s %s: %s\n", what, path, strerror(errno ? errno : EIO));
+        return -1;
+    }
+    return 0;
+}
+
+/* DIR/LEAF, whole or not at all. */
+static int bundle_path(char *buf, size_t size, const char *dir, const char *leaf) {
+    int n = snprintf(buf, size, "%s/%s", dir, leaf);
+
+    if (n < 0 || (size_t)n >= size) {
+        fprintf(stderr, "ld: --reproduce: the path %s/%s is too long\n", dir, leaf);
+        return -1;
+    }
+    return 0;
+}
+
 static int copy_file_bytes(const char *src, const char *dst) {
     unsigned char *buf = NULL;
     size_t sz = 0;
@@ -35,21 +63,49 @@ static int copy_file_bytes(const char *src, const char *dst) {
         return -1;
     }
     if (read_file(src, &buf, &sz) != 0) {
+        fprintf(stderr, "ld: --reproduce: cannot read %s\n", src);
         return -1;
     }
     fp = fopen(dst, "wb");
     if (fp == NULL) {
+        fprintf(stderr, "ld: failed to write %s: %s\n", dst, strerror(errno));
         free(buf);
         return -1;
     }
-    if (sz != 0 && fwrite(buf, 1, sz, fp) != sz) {
-        fclose(fp);
-        free(buf);
-        return -1;
+    if (sz != 0) {
+        (void)fwrite(buf, 1, sz, fp);
     }
-    fclose(fp);
     free(buf);
-    return 0;
+    return finish_file(fp, dst, "the copy");
+}
+
+/* A word for sh: in single quotes, where only a single quote means
+ * anything, and that one written as '\''. */
+static void put_shell_word(FILE *fp, const char *s) {
+    fputc('\'', fp);
+    for (; *s != '\0'; ++s) {
+        if (*s == '\'') {
+            fputs("'\\''", fp);
+        } else {
+            fputc(*s, fp);
+        }
+    }
+    fputs("' ", fp);
+}
+
+/* A value for a "key=value" line: the line ends where the value does,
+ * so a newline in it, and the backslash that says so, are spelt out. */
+static void put_manifest_value(FILE *fp, const char *s) {
+    for (; *s != '\0'; ++s) {
+        if (*s == '\n') {
+            fputs("\\n", fp);
+        } else if (*s == '\\') {
+            fputs("\\\\", fp);
+        } else {
+            fputc(*s, fp);
+        }
+    }
+    fputc('\n', fp);
 }
 
 int write_reproduce_bundle(const ld_ctx_t *ctx, const objvec_t *inputs) {
@@ -67,8 +123,10 @@ int write_reproduce_bundle(const ld_ctx_t *ctx, const objvec_t *inputs) {
         fprintf(stderr, "ld: failed to create --reproduce directory %s: %s\n", ctx->reproduce_path, strerror(errno));
         return -1;
     }
-    snprintf(manifest_path, sizeof(manifest_path), "%s/manifest.txt", ctx->reproduce_path);
-    snprintf(script_path, sizeof(script_path), "%s/repro.sh", ctx->reproduce_path);
+    if (bundle_path(manifest_path, sizeof(manifest_path), ctx->reproduce_path, "manifest.txt") != 0 ||
+        bundle_path(script_path, sizeof(script_path), ctx->reproduce_path, "repro.sh") != 0) {
+        return -1;
+    }
     mf = fopen(manifest_path, "w");
     if (mf == NULL) {
         fprintf(stderr, "ld: failed to write --reproduce manifest %s: %s\n", manifest_path, strerror(errno));
@@ -77,30 +135,45 @@ int write_reproduce_bundle(const ld_ctx_t *ctx, const objvec_t *inputs) {
     fprintf(mf, "mode=%s\n", ctx->mode == 64 ? "x86_64" : "i386");
     fprintf(mf, "type=%u\n", (unsigned)ctx->expect_type);
     if (ctx->entry_symbol != NULL) {
-        fprintf(mf, "entry=%s\n", ctx->entry_symbol);
+        fputs("entry=", mf);
+        put_manifest_value(mf, ctx->entry_symbol);
     }
     if (ctx->script_path != NULL) {
-        fprintf(mf, "script=%s\n", ctx->script_path);
+        fputs("script=", mf);
+        put_manifest_value(mf, ctx->script_path);
     }
     if (ctx->plugin_path != NULL) {
-        fprintf(mf, "plugin=%s\n", ctx->plugin_path);
+        fputs("plugin=", mf);
+        put_manifest_value(mf, ctx->plugin_path);
     }
     for (i = 0; i < inputs->count; ++i) {
-        fprintf(mf, "input[%zu]=%s\n", i, inputs->names[i] != NULL ? inputs->names[i] : "<unknown>");
+        fprintf(mf, "input[%zu]=", i);
+        put_manifest_value(mf, inputs->names[i] != NULL ? inputs->names[i] : "<unknown>");
     }
-    fclose(mf);
+    for (i = 0; i < ctx->dso_inputs.count; ++i) {
+        fprintf(mf, "shared[%zu]=", i);
+        put_manifest_value(mf, ctx->dso_inputs.items[i] != NULL ? ctx->dso_inputs.items[i] : "<unknown>");
+    }
+    if (finish_file(mf, manifest_path, "the --reproduce manifest") != 0) {
+        return -1;
+    }
 
     for (i = 0; i < inputs->count; ++i) {
         char obj_path[1024];
-        snprintf(obj_path, sizeof(obj_path), "%s/input_%03zu.o", ctx->reproduce_path, i);
+        char leaf[32];
+
+        snprintf(leaf, sizeof(leaf), "input_%03zu.o", i);
+        if (bundle_path(obj_path, sizeof(obj_path), ctx->reproduce_path, leaf) != 0) {
+            return -1;
+        }
         if (elf_write_file(inputs->objs[i], obj_path) != ELF_OK) {
             fprintf(stderr, "ld: failed to write --reproduce object %s\n", obj_path);
             return -1;
         }
     }
     if (ctx->script_path != NULL && ctx->script_path[0] != '\0') {
-        snprintf(script_copy, sizeof(script_copy), "%s/linker_script.ld", ctx->reproduce_path);
-        if (copy_file_bytes(ctx->script_path, script_copy) != 0) {
+        if (bundle_path(script_copy, sizeof(script_copy), ctx->reproduce_path, "linker_script.ld") != 0 ||
+            copy_file_bytes(ctx->script_path, script_copy) != 0) {
             fprintf(stderr, "ld: failed to copy linker script into --reproduce bundle\n");
             return -1;
         }
@@ -118,27 +191,39 @@ int write_reproduce_bundle(const ld_ctx_t *ctx, const objvec_t *inputs) {
     if (ctx->expect_type == ET_REL) {
         fprintf(sf, "-r ");
     } else if (ctx->expect_type == ET_DYN) {
-        fprintf(sf, "-shared ");
+        fprintf(sf, ctx->pie ? "-pie " : "-shared ");
     }
     if (ctx->entry_symbol != NULL && ctx->entry_symbol[0] != '\0') {
-        fprintf(sf, "-e '%s' ", ctx->entry_symbol);
+        fputs("-e ", sf);
+        put_shell_word(sf, ctx->entry_symbol);
     }
     if (ctx->script_path != NULL && ctx->script_path[0] != '\0') {
         fprintf(sf, "-T \"$DIR/linker_script.ld\" ");
     }
     if (ctx->plugin_path != NULL && ctx->plugin_path[0] != '\0') {
         size_t pi;
-        fprintf(sf, "-plugin '%s' ", ctx->plugin_path);
+
+        fputs("-plugin ", sf);
+        put_shell_word(sf, ctx->plugin_path);
         for (pi = 0; pi < ctx->plugin_opt_count; ++pi) {
-            fprintf(sf, "-plugin-opt '%s' ", ctx->plugin_opts[pi]);
+            fputs("-plugin-opt ", sf);
+            put_shell_word(sf, ctx->plugin_opts[pi]);
         }
     }
     fprintf(sf, "-o \"$DIR/repro.out\" ");
     for (i = 0; i < inputs->count; ++i) {
         fprintf(sf, "\"$DIR/input_%03zu.o\" ", i);
     }
+    /* The shared objects are not copied: they are named, where they were. */
+    for (i = 0; i < ctx->dso_inputs.count; ++i) {
+        if (ctx->dso_inputs.items[i] != NULL) {
+            put_shell_word(sf, ctx->dso_inputs.items[i]);
+        }
+    }
     fprintf(sf, "\"$@\"\n");
-    fclose(sf);
+    if (finish_file(sf, script_path, "the --reproduce script") != 0) {
+        return -1;
+    }
     if (chmod(script_path, 0755) != 0) {
         fprintf(stderr, "ld: failed to mark --reproduce script executable: %s\n", strerror(errno));
         return -1;
@@ -159,17 +244,17 @@ int write_map_file(const ld_ctx_t *ctx, const objvec_t *inputs, elfobj_t *out) {
         return -1;
     }
 
-    fprintf(fp, "Output: %s\n", ctx->out_path);
+    fprintf(fp, "Output: %s\n", ctx->out_path != NULL ? ctx->out_path : "<none>");
     fprintf(fp, "Type: %u\n", (unsigned)elf_type(out));
     fprintf(fp, "Class: %s\n", elf_class(out) == ELFOBJ_CLASS_64 ? "ELF64" : "ELF32");
     fprintf(fp, "\nInputs:\n");
     for (i = 0; i < inputs->count; ++i) {
-        fprintf(fp, "  %s\n", inputs->names[i]);
+        fprintf(fp, "  %s\n", inputs->names[i] != NULL ? inputs->names[i] : "<unknown>");
     }
     if (ctx->dso_inputs.count > 0) {
         fprintf(fp, "\nDSO Inputs:\n");
         for (i = 0; i < ctx->dso_inputs.count; ++i) {
-            fprintf(fp, "  %s\n", ctx->dso_inputs.items[i]);
+            fprintf(fp, "  %s\n", ctx->dso_inputs.items[i] != NULL ? ctx->dso_inputs.items[i] : "<unknown>");
         }
     }
 
@@ -224,6 +309,5 @@ int write_map_file(const ld_ctx_t *ctx, const objvec_t *inputs, elfobj_t *out) {
                 src != NULL ? src : "<synthetic>");
     }
 
-    fclose(fp);
-    return 0;
+    return finish_file(fp, ctx->map_path, "the map file");
 }
