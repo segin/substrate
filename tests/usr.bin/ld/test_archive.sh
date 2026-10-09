@@ -15,7 +15,7 @@ export ASAN_OPTIONS=detect_leaks=0
 build() {
     ${CC:-cc} -O0 -w "$@" -o "$work/ld" \
         -idirafter "$top/include" -idirafter "$top/sys" -idirafter "$top/sys/include" \
-        -I"$top/usr.lib/elfobj/src" "$top/usr.bin/ld/ld.c" "$top"/usr.lib/elfobj/src/*.c 2>/dev/null
+        -I"$top/usr.lib/elfobj/src" "$top"/usr.bin/ld/*.c "$top"/usr.lib/elfobj/src/*.c 2>/dev/null
 }
 build -fsanitize=address || build || { echo "FAIL: the linker does not build for the host"; exit 1; }
 

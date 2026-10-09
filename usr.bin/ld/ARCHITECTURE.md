@@ -7,7 +7,20 @@ It explains how the linker consumes ELF objects and scripts, how it composes the
 
 ```text
 usr.bin/ld/
-├── ld.c                     # CLI parsing, input loading, symbol resolution, layout, emit
+├── ld.h                     # Shared types, and the functions one file has and another uses
+├── ld.c                     # The driver: options, the order of a link, the output file
+├── ld_util.c                # Vectors, sets, numbers, bytes, diagnostics
+├── ld_input.c               # Objects, archives, libraries and where they are found
+├── ld_dso.c                 # Shared objects as inputs: what they define, symbol versions
+├── ld_resolve.c             # Symbols across inputs: precedence, tracing, who refers to what
+├── ld_script.c              # Linker scripts: lexer, expressions, parser, application
+├── ld_layout.c              # Section order, addresses, segments
+├── ld_dynamic.c             # .dynsym, imports, PLT and GOT, .dynamic
+├── ld_ehframe.c             # .eh_frame_hdr
+├── ld_reloc.c               # Addresses of symbols, the i386 GOT, applying relocations
+├── ld_gc.c                  # --gc-sections and identical code folding
+├── ld_map.c                 # The link map and the --reproduce bundle
+├── ld_plugin.c              # LTO plugins that are programs
 ├── SPEC.md                  # Feature and parity requirements
 ├── TASKLIST_LINKER.md       # Remaining compatibility and parity backlog
 ├── Makefile                 # Build wiring, alias links, libelfobj dependency
@@ -42,7 +55,7 @@ cc
 
 ### 3.1. Driver And Input Loading
 
-Name: `ld.c` command parser and input collection path
+Name: `ld.c` command parser and `ld_input.c` input collection path
 
 Description: The linker entry point parses CLI policy into a single link context, then loads regular objects, archives, thin archives, DSOs, and script wrappers. This is the layer that decides target mode, unresolved-symbol behavior, and whether dynamic or relocatable output is being built.
 
@@ -58,7 +71,7 @@ Description: The linker tracks global symbol ownership, resolves weak/strong pre
 
 Technologies: C, bounded symbol/object tracking, section reachability analysis, COMDAT handling
 
-Deployment: Internal pass pipeline inside `ld.c`
+Deployment: Internal pass pipeline driven by `run_internal_link()` in `ld.c`
 
 ### 3.3. Script, Layout, And Segment Planning
 
@@ -94,7 +107,7 @@ Purpose: Provide the link graph, policies, and metadata that shape the final out
 
 Name: Link context, resolved symbol tables, section graph, layout plan, dynamic metadata
 
-Type: Process-local C structures inside `ld.c`
+Type: Process-local C structures declared in `ld.h`
 
 Purpose: Hold the evolving link result while symbol resolution, graph passes, layout, and relocation are still running.
 
@@ -124,7 +137,7 @@ Target mode: The default build produces the Substrate-target linker for inclusio
 
 Alias links: The Makefile installs `ld.i386`, `ld.x86_64`, `ld.x86`, and `ld.x64` symlinks for architecture-specific invocation surfaces.
 
-Single-binary design: The linker currently lives in one large translation unit (`ld.c`), so architectural boundaries are enforced by function families and internal state partitions rather than separate compilation units.
+Single-binary design: The linker is one program in thirteen translation units that share one header, `ld.h`, and one link context, `ld_ctx_t`. The files were cut from a single `ld.c` along its function families without changing a function; what is `static` is private to its file, and `ld.h` declares the rest.
 
 ## 7. Security Considerations
 
@@ -150,7 +163,7 @@ Integration role: The linker is exercised directly by its own suite and indirect
 
 Parity backlog: `TASKLIST_LINKER.md` continues to track GNU-compatible features and remaining edge-case work.
 
-Modularity pressure: The current single-file design keeps state centralized, but future growth may warrant extraction of script, relocation, or loader subsystems into dedicated translation units without changing the pipeline contract.
+Modularity pressure: The split is by file only. Every type is still in `ld.h` and every pass still takes the whole `ld_ctx_t`; narrowing what each file can see (its own header, its own part of the context) is the next step, and can be taken a file at a time.
 
 Dynamic-link coverage: Continued work centers on deeper relocation models, versioning edge cases, and script compatibility breadth.
 

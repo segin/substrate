@@ -165,11 +165,11 @@ short writes and close errors checked.
   Evidence: four implementations that have diverged — `symstate_t` (`ld.c:490-543, 3717, 3757`), `check_symbol_precedence` (`8615`), `merge_symbols` (`elf_link.c:722-847`), `check_undefined_symbols` (`10295`) — and seven linear name lookups (`260, 356, 490, 1064, 4418, 8578, 8718`).  Basis: traced.  Task #106.
 - [ ] **LD-STR-002** The linker shall describe each target architecture in a table and share the code that uses it.
   Evidence: six i386/x86-64 pairs (`6000-6066`, `6068-6182`, `6204-6382`, `6494-7108`, `9214-9304`, `5906-5959`); 31 class tests in `patch_dynamic_tag_values` (`7797`).  Basis: measured.  Task #107.
-- [ ] **LD-STR-003** The linker's source shall be divided into translation units by function: utilities, diagnostics, script, plugin, input, shared objects, dynamic sections, layout, garbage collection, relocation, resolution, driver.
+- [x] **LD-STR-003** The linker's source shall be divided into translation units by function: utilities, diagnostics, script, plugin, input, shared objects, dynamic sections, layout, garbage collection, relocation, resolution, driver.
   Evidence: one file; the ranges for each unit are in the task.  Basis: measured.  Task #108.
 - [ ] **LD-STR-004** The linker shall parse options from a table, keep options apart from link state, run its phases from an explicit list whose ordering constraints are checked, and release resources on one path per function.
   Evidence: `main` 753 lines and 55 returns (`10928-11680`); `ld_ctx_t` (`114-157`) with `const` cast away at `5116, 5168, 10319`; implicit ordering around `finalize_symbol_values_for_output` (`7961`, `10872`); 1,255 returns and drifted cleanup (`7230-7240, 6770-6772, 7076-7078`).  Basis: measured.  Task #109.
-- [ ] **LD-STR-005** The linker shall read a script once into a syntax tree and apply it in a separate pass.
+- [x] **LD-STR-005** The linker shall read a script once into a syntax tree and apply it in a separate pass.
   Evidence: three readers (`ld.c:2456, 2880, 8060`); `lds_ast_t` is written and never read.  Basis: traced.  Task #110.
 - [ ] **LD-STR-006** The linker shall use one growable-array helper and shall not duplicate helpers the object library provides.
   Evidence: eleven hand-written vectors; duplicates listed in the task.  Basis: measured.  Task #111.

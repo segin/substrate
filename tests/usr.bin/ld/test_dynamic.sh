@@ -14,7 +14,7 @@ fail=0
 
 ${CC:-cc} -O0 -w -o "$work/ld" \
     -idirafter "$top/include" -idirafter "$top/sys" -idirafter "$top/sys/include" \
-    -I"$top/usr.lib/elfobj/src" "$top/usr.bin/ld/ld.c" "$top"/usr.lib/elfobj/src/*.c || {
+    -I"$top/usr.lib/elfobj/src" "$top"/usr.bin/ld/*.c "$top"/usr.lib/elfobj/src/*.c || {
     echo "FAIL: the linker does not build for the host"; exit 1; }
 
 cd "$work" || exit 1
