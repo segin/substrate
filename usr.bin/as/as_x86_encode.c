@@ -3212,6 +3212,27 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
         if (a->u.reg >= 8) {
             rex_b = 1;
         }
+        /*
+         * To a 64-bit register, B8+r with REX.W is the form that carries
+         * all eight bytes of the value.  Written with four, as this did,
+         * the processor takes the next four bytes of the program for the
+         * rest of the number and goes on from the middle of the
+         * instruction after: nothing the in-tree compiler made for
+         * x86-64 ran.  A value that fits in 32 bits signed goes as
+         * C7 /0, which is extended to 64; one that does not goes whole.
+         */
+        if (width == 64u) {
+            if (b->u.imm >= (int64_t)INT32_MIN && b->u.imm <= (int64_t)INT32_MAX) {
+                if (emit8(&ctx, 0xc7) != 0 || emit8(&ctx, (uint8_t)(0xc0u | (a->u.reg & 7u))) != 0 ||
+                    emit_i386_imm_or_rel(&ctx, (uint32_t)b->u.imm, 32u) != 0) {
+                    return -1;
+                }
+            } else if (emit8(&ctx, (uint8_t)(op + (a->u.reg & 7u))) != 0 ||
+                       emit64(&ctx, (uint64_t)b->u.imm) != 0) {
+                return -1;
+            }
+            goto finish;
+        }
         if (emit8(&ctx, (uint8_t)(op + (a->u.reg & 7u))) != 0 ||
             emit_i386_imm_or_rel(&ctx, (uint32_t)b->u.imm, imm_width * 8u) != 0) {
             return -1;
