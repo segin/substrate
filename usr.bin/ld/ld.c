@@ -153,6 +153,12 @@ typedef struct {
     defsymvec_t defsyms;
     strvec_t dso_inputs;
     dyn_import_vec_t dyn_imports;
+    /* i386: the symbols defined in the output that have a slot in a .got
+     * this link made for them (plan_local_got_i386), in slot order. */
+    const elf_symbol_t **local_got;
+    size_t local_got_count;
+    size_t local_got_cap;
+    int local_got_owned;        /* .got is ours: the slots exist */
     inputvec_t inputs;
 } ld_ctx_t;
 
@@ -9209,6 +9215,18 @@ static int resolve_symbol_addr_for_reloc(elfobj_t *obj, const ld_ctx_t *ctx, con
     name = elf_symbol_name(sym);
     imp = find_planned_import(ctx, name);
     if (imp == NULL) {
+        /* The table's own name is nobody's import and no input defines
+         * it: it is where the table is, when there is one. */
+        if (name != NULL && strcmp(name, "_GLOBAL_OFFSET_TABLE_") == 0 &&
+            (elf_find_section(obj, ".got.plt") != NULL ||
+             elf_find_section(obj, ".got") != NULL)) {
+            sec = elf_find_section(obj, ".got.plt");
+            if (sec == NULL) {
+                sec = elf_find_section(obj, ".got");
+            }
+            *out_addr = elf_section_addr(sec);
+            return 0;
+        }
         return resolve_symbol_addr(obj, sym, allow_undef, out_addr, undef_name);
     }
     if (ctx != NULL && ctx->mode == 64) {
@@ -9346,6 +9364,150 @@ static int alloc_section_class(uint64_t flags) {
         return 2; /* RW */
     }
     return 1; /* RO */
+}
+
+/*
+ * The global offset table of an i386 link, for what is defined in it.
+ *
+ * Position-independent i386 code finds its data through %ebx, which it
+ * loads with the address of the GOT (R_386_GOTPC), and then either adds an
+ * offset from there (R_386_GOTOFF) or loads an address out of a slot of
+ * the table (R_386_GOT32, R_386_GOT32X).  A dynamic link has had a .got
+ * since there were imports to put in it.  A static link had none, and a
+ * symbol defined in the output never had a slot in either: the C startup
+ * file is position-independent, so that was every link.
+ *
+ * plan_local_got_i386() runs before addresses are assigned.  If anything
+ * is GOT-relative and there is no table, it makes a .got, with a slot for
+ * each defined symbol a GOT32-class relocation names; fill_local_got_i386()
+ * stores the addresses once they are known.  Where the table is the
+ * imports' own, sized by other code, a reference to a defined symbol is
+ * instead turned into a direct one when it is applied (the `mov` of a
+ * GOT32X becomes a `lea`), which is what the X in GOT32X permits.
+ */
+static int reloc_is_i386_got_slot(uint32_t type) {
+    return type == R_386_GOT32 || type == R_386_GOT32X;
+}
+
+static int reloc_is_i386_got_relative(uint32_t type) {
+    return type == R_386_GOTPC || type == R_386_GOTOFF ||
+           reloc_is_i386_got_slot(type);
+}
+
+static uint64_t i386_got_base(elfobj_t *obj) {
+    elf_section_t *sec = elf_find_section(obj, ".got.plt");
+
+    if (sec == NULL) {
+        sec = elf_find_section(obj, ".got");
+    }
+    return sec != NULL ? elf_section_addr(sec) : 0;
+}
+
+static long local_got_slot_lookup(const ld_ctx_t *ctx, const elf_symbol_t *sym) {
+    size_t i;
+
+    for (i = 0; i < ctx->local_got_count; ++i) {
+        if (ctx->local_got[i] == sym) {
+            return (long)i;
+        }
+    }
+    return -1;
+}
+
+/* The slot of `sym` in the table this link made, or -1. */
+static long local_got_slot(const ld_ctx_t *ctx, const elf_symbol_t *sym) {
+    if (ctx == NULL || !ctx->local_got_owned) {
+        return -1;
+    }
+    return local_got_slot_lookup(ctx, sym);
+}
+
+static int plan_local_got_i386(ld_ctx_t *ctx, elfobj_t *out) {
+    size_t si, ri;
+    int need_base = 0;
+    elf_section_t *got;
+
+    if (ctx == NULL || out == NULL || elf_machine(out) != EM_386) {
+        return 0;
+    }
+    ctx->local_got_count = 0;
+    ctx->local_got_owned = 0;
+    for (si = 0; si < elf_section_count(out); ++si) {
+        elf_section_t *sec = elf_section_get(out, si);
+
+        if (sec == NULL || (elf_section_flags(sec) & SHF_ALLOC) == 0) {
+            continue;
+        }
+        for (ri = 0; ri < elf_section_reloc_count(sec); ++ri) {
+            const elf_reloc_t *rel = elf_section_reloc_at(sec, ri);
+            const elf_symbol_t *sym = elf_reloc_symbol(rel);
+            uint32_t type = elf_reloc_type(rel);
+
+            if (!reloc_is_i386_got_relative(type)) {
+                continue;
+            }
+            need_base = 1;
+            if (!reloc_is_i386_got_slot(type) || sym == NULL ||
+                elf_symbol_shndx(sym) == SHN_UNDEF ||
+                local_got_slot_lookup(ctx, sym) >= 0) {
+                continue;
+            }
+            if (ctx->local_got_count == ctx->local_got_cap) {
+                size_t ncap = ctx->local_got_cap ? ctx->local_got_cap * 2 : 16;
+                const elf_symbol_t **n = (const elf_symbol_t **)
+                    realloc((void *)ctx->local_got, ncap * sizeof(n[0]));
+
+                if (n == NULL) {
+                    return -1;
+                }
+                ctx->local_got = n;
+                ctx->local_got_cap = ncap;
+            }
+            ctx->local_got[ctx->local_got_count++] = sym;
+        }
+    }
+    if (!need_base || elf_find_section(out, ".got") != NULL ||
+        elf_find_section(out, ".got.plt") != NULL) {
+        return 0;               /* nothing to do, or the imports' table */
+    }
+    got = elf_add_section(out, ".got", SHT_PROGBITS, SHF_ALLOC | SHF_WRITE);
+    if (got == NULL || elf_section_set_align(got, 4) != ELF_OK ||
+        set_section_zero_data(got, 4 * (ctx->local_got_count ? ctx->local_got_count : 1)) != 0) {
+        return -1;
+    }
+    ctx->local_got_owned = 1;
+    return 0;
+}
+
+static int fill_local_got_i386(const ld_ctx_t *ctx, elfobj_t *out) {
+    elf_section_t *got;
+    uint8_t *buf;
+    size_t i, sz;
+    int rc;
+
+    if (ctx == NULL || !ctx->local_got_owned || ctx->local_got_count == 0) {
+        return 0;
+    }
+    got = elf_find_section(out, ".got");
+    sz = 4 * ctx->local_got_count;
+    buf = (uint8_t *)calloc(1, sz);
+    if (got == NULL || buf == NULL) {
+        free(buf);
+        return -1;
+    }
+    for (i = 0; i < ctx->local_got_count; ++i) {
+        uint64_t addr = 0;
+        const char *undef = NULL;
+
+        if (resolve_symbol_addr(out, ctx->local_got[i], 0, &addr, &undef) != 0) {
+            free(buf);
+            return -1;
+        }
+        write_uint_bytes(buf + 4 * i, 4, elf_endian(out), addr);
+    }
+    rc = elf_section_set_data(got, buf, sz) == ELF_OK ? 0 : -1;
+    free(buf);
+    return rc;
 }
 
 static int assign_section_addresses(elfobj_t *obj, uint64_t base_vaddr) {
@@ -10453,6 +10615,53 @@ static int apply_all_relocations(elfobj_t *obj, const ld_ctx_t *ctx, int allow_u
                 return -1;
             }
             P = elf_section_addr(sec) + off;
+            if (machine == EM_386 && reloc_is_i386_got_relative(type)) {
+                /*
+                 * The i386 relocations that are relative to the table
+                 * (psABI: GOTPC = GOT + A - P, GOTOFF = S + A - GOT,
+                 * GOT32 and GOT32X = G + A - GOT, G the address of the
+                 * symbol's slot).  The library's arithmetic has S, A and
+                 * P to work with and made each of them S + A.
+                 */
+                uint64_t got = i386_got_base(obj);
+                int defined = sym != NULL && elf_symbol_shndx(sym) != SHN_UNDEF;
+                long slot = defined ? local_got_slot(ctx, sym) : -1;
+                const char *why = NULL;
+
+                if (type == R_386_GOTPC) {
+                    outv = got + (uint64_t)addend - P;
+                } else if (type == R_386_GOTOFF) {
+                    outv = S + (uint64_t)addend - got;
+                } else if (!defined) {
+                    /* An import: S is its slot already. */
+                    outv = S + (uint64_t)addend - got;
+                } else if (slot >= 0) {
+                    elf_section_t *gs = elf_find_section(obj, ".got");
+
+                    outv = elf_section_addr(gs) + 4U * (uint64_t)slot +
+                           (uint64_t)addend - got;
+                } else if (type == R_386_GOT32X && off >= 2 &&
+                           buf[off - 2] == 0x8b && (buf[off - 1] & 0xc0) == 0x80) {
+                    /* mov sym@GOT(%reg), %reg -> lea sym@GOTOFF(%reg), %reg */
+                    buf[off - 2] = 0x8d;
+                    outv = S + (uint64_t)addend - got;
+                } else {
+                    why = "a reference through the GOT to a symbol with no slot in it";
+                }
+                if (got == 0 && why == NULL) {
+                    why = "GOT-relative relocation and no GOT";
+                }
+                if (why != NULL) {
+                    free(buf);
+                    fprintf(stderr,
+                            "ld: relocation error: section=%s offset=0x%llx type=%s symbol=%s: %s\n",
+                            sec_name, (unsigned long long)off,
+                            elf_reloc_name_for_machine(machine, type), sym_name, why);
+                    return -1;
+                }
+                write_uint_bytes(buf + off, width, endian, outv & 0xffffffffULL);
+                continue;
+            }
             err = elf_apply_relocation_value(obj, type, P, S, addend, &outv);
             if (err != ELF_OK) {
                 free(buf);
@@ -10774,6 +10983,13 @@ static int run_internal_link(ld_ctx_t *ctx) {
         elf_close(out);
         return -1;
     }
+    if (plan_local_got_i386(ctx, out) != 0) {
+        fprintf(stderr, "ld: failed to make the global offset table\n");
+        symref_map_free(&undef_refs);
+        objvec_free(&inputs);
+        elf_close(out);
+        return -1;
+    }
 
     if (plan_dynamic_needed(ctx, out) != 0) {
         fprintf(stderr, "ld: failed to plan dynamic DT_NEEDED entries\n");
@@ -10875,7 +11091,8 @@ static int run_internal_link(ld_ctx_t *ctx) {
         return -1;
     }
 
-    if (apply_all_relocations(out, ctx, allow_undef_runtime) != 0) {
+    if (fill_local_got_i386(ctx, out) != 0 ||
+        apply_all_relocations(out, ctx, allow_undef_runtime) != 0) {
         symref_map_free(&undef_refs);
         objvec_free(&inputs);
         elf_close(out);
