@@ -104,6 +104,16 @@ Produce
 output.
 .It Fl static
 Prefer static archive resolution.
+.It Fl e Ar symbol
+Where an executable begins.
+A symbol named here, or by
+.Ic ENTRY
+in a script, that is not defined is an error.
+Without either the program begins at
+.Li _start ,
+and if there is none at the start of
+.Pa .text ,
+with a warning that says so.
 .It Fl -dynamic-linker Ar path
 The program interpreter of the output
 .Pq Dv PT_INTERP ;
