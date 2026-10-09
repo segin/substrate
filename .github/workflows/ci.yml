@@ -119,6 +119,11 @@ jobs:
       - name: Linker tests
         run: make -C tests/usr.bin/ld
 
+      # The in-tree assembler, built for the host by the script: jumps
+      # that measure their distance across other jumps.
+      - name: Assembler tests
+        run: make -C tests/usr.bin/as
+
   userland:
     name: userland libs and utils
     runs-on: ubuntu-latest

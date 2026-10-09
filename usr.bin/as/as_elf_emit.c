@@ -93,6 +93,10 @@ typedef struct {
     size_t *stmt_size_cache;
     unsigned char *stmt_size_cached;
     size_t stmt_size_cache_count;
+    /* Whether each branch to a compiler's local label is the short form:
+     * 0 not yet decided, 1 short, 2 not.  See local_temp_branch_is_short(). */
+    unsigned char *branch_short;
+    size_t branch_short_count;
     /* Per-section prefix-sum table for O(1) range-size queries during
      * branch sizing. range_layout[s].prefix[i] is the sum of all
      * conservative stmt sizes in section `name` for stmts j < i. The
@@ -157,6 +161,8 @@ static int stmt_declared_label_section(emit_ctx_t *ctx, const as_stmt_t *target_
 static int eval_direct_local_branch_target(emit_ctx_t *ctx, const char *section_name, const as_stmt_t *base_st,
                                            uint64_t base_off, unsigned x86_code_bits, const as_expr_t *rel_expr,
                                            size_t branch_len, long long *abs_target_out);
+static int x86_branch_may_be_short(emit_ctx_t *ctx, const char *section_name, const as_stmt_t *st,
+                                   const as_expr_t *e, unsigned x86_code_bits);
 static int parse_x86_reg(const char *name, as_x86_reg_t *out);
 static int build_stmt_section_at(emit_ctx_t *ctx);
 static const uint64_t *get_section_prefix_sums(emit_ctx_t *ctx, const char *section_name,
@@ -10741,12 +10747,6 @@ static int emit_resolved_x86_branch_ex(const as_elf_cfg_t *cfg, const as_stmt_t 
     return -1;
 }
 
-static int emit_resolved_x86_branch(const as_elf_cfg_t *cfg, const as_stmt_t *st, uint64_t sec_off,
-                                    long long abs_target, unsigned char *code, size_t code_cap,
-                                    size_t *code_len, char *encerr, size_t encerr_sz) {
-    return emit_resolved_x86_branch_ex(cfg, st, sec_off, abs_target, 1, code, code_cap, code_len, encerr, encerr_sz);
-}
-
 static int parsed_stmt_index(emit_ctx_t *ctx, const as_stmt_t *needle, size_t *idx_out) {
     if (ctx == NULL || needle == NULL || idx_out == NULL || ctx->parsed == NULL ||
         ctx->parsed->items == NULL) {
@@ -10837,6 +10837,7 @@ static int stmt_virtual_size_in_section(emit_ctx_t *ctx, const char *section_nam
                 e != NULL && e->kind == AS_EXPR_SYMBOL && expr_is_local_temp_symbol(e)) {
                 as_elf_cfg_t local_cfg = *ctx->cfg;
                 long long abs_target;
+                int may_short = x86_branch_may_be_short(ctx, section_name, st, e, x86_code_bits);
                 unsigned char code[32];
                 size_t code_len = 0;
                 char encerr[128];
@@ -10844,12 +10845,12 @@ static int stmt_virtual_size_in_section(emit_ctx_t *ctx, const char *section_nam
                 local_cfg.x86_code_bits = x86_code_bits;
                 if (eval_direct_local_branch_target(ctx, section_name, st, sec_off, x86_code_bits, e,
                                                     2, &abs_target) == 0 &&
-                    emit_resolved_x86_branch(&local_cfg, st, sec_off, abs_target, code, sizeof(code),
+                    emit_resolved_x86_branch_ex(&local_cfg, st, sec_off, abs_target, may_short, code, sizeof(code),
                                              &code_len, encerr, sizeof(encerr)) == 0) {
                     if (code_len != 2 &&
                         eval_direct_local_branch_target(ctx, section_name, st, sec_off, x86_code_bits, e,
                                                         code_len, &abs_target) == 0 &&
-                        emit_resolved_x86_branch(&local_cfg, st, sec_off, abs_target, code, sizeof(code),
+                        emit_resolved_x86_branch_ex(&local_cfg, st, sec_off, abs_target, may_short, code, sizeof(code),
                                                  &code_len, encerr, sizeof(encerr)) != 0) {
                         return -1;
                     }
@@ -11326,7 +11327,113 @@ static int eval_direct_local_branch_target(emit_ctx_t *ctx, const char *section_
     return 0;
 }
 
-static unsigned stmt_local_rel_virtual_len(emit_ctx_t *ctx, const char *section_name, const as_stmt_t *st) {
+/*
+ * Whether the branch `st` to the compiler's local label `e` takes the
+ * short form, two bytes with a displacement of one.
+ *
+ * This is asked in two places that must be given the same answer: where
+ * the branch is encoded, and where it is one of the statements another
+ * branch measures its own distance across.  They used to be answered
+ * differently.  Measured across, a branch within 64 statements of its
+ * label was counted as short; encoded, it was short only if the distance
+ * came to no more than 127 bytes, which 64 statements easily exceed.  A
+ * loop compiled by the system's own cc has a jump back to its top of
+ * about 170 bytes and a jump forward over that one to its end: the
+ * forward jump counted the backward one as two bytes, it was written as
+ * five, and the forward jump landed three bytes short of its label, in
+ * the middle of the other.  Every program with a loop died of an illegal
+ * instruction.
+ *
+ * So it is decided once, here, and from bytes.  The distance is summed
+ * with every branch that lies between counted at its longest, so that
+ * the answer for one branch does not depend on the answer for another
+ * (two branches can each lie between the other and its label).  That
+ * sum is at least the true distance: a branch said to be short does fit.
+ * Some that would have fitted are written long.
+ */
+static int local_temp_branch_is_short(emit_ctx_t *ctx, const char *section_name, const as_stmt_t *st,
+                                      const as_expr_t *e, unsigned x86_code_bits) {
+    size_t base_idx, target_idx = (size_t)-1, lo, hi, i;
+    uint64_t dist = 0;
+    int is_short = 0;
+
+    if (ctx == NULL || ctx->parsed == NULL || st == NULL || e == NULL || e->symbol == NULL ||
+        parsed_stmt_index(ctx, st, &base_idx) != 0) {
+        return 0;
+    }
+    if (base_idx < ctx->branch_short_count && ctx->branch_short[base_idx] != 0) {
+        return ctx->branch_short[base_idx] == 1;
+    }
+    if (ctx->branch_short_count < ctx->parsed->count) {
+        unsigned char *next = (unsigned char *)realloc(ctx->branch_short, ctx->parsed->count);
+
+        if (next == NULL) {
+            return 0;
+        }
+        memset(next + ctx->branch_short_count, 0, ctx->parsed->count - ctx->branch_short_count);
+        ctx->branch_short = next;
+        ctx->branch_short_count = ctx->parsed->count;
+    }
+    for (i = 0; target_idx == (size_t)-1 && i < ctx->parsed->count; ++i) {
+        const as_stmt_t *t = &ctx->parsed->items[i];
+        size_t j;
+
+        for (j = 0; j < t->label_count; ++j) {
+            if (t->labels[j].name != NULL && strcmp(t->labels[j].name, e->symbol) == 0) {
+                target_idx = i;
+                break;
+            }
+        }
+    }
+    if (target_idx == (size_t)-1 || target_idx == base_idx) {
+        goto done;
+    }
+    /* Forward, what lies between is after the branch; backward, it is the
+     * target and what follows it, and the branch's own two bytes. */
+    lo = target_idx > base_idx ? base_idx + 1 : target_idx;
+    hi = target_idx > base_idx ? target_idx : base_idx;
+    if (hi - lo > 64) {
+        goto done;
+    }
+    ctx->virtual_scanning++;
+    for (i = lo; i < hi; ++i) {
+        const as_stmt_t *t = &ctx->parsed->items[i];
+        size_t n = 0;
+
+        if (t->kind == AS_STMT_INSTRUCTION && t->u.instr.operand_count == 1 &&
+            is_rel_mnemonic(t->u.instr.mnemonic)) {
+            n = is_fixed_short_rel_mnemonic(t->u.instr.mnemonic) ? 2
+                : (is_call_mnemonic(t->u.instr.mnemonic) ? 5 : 6);
+        } else if (stmt_virtual_size_in_section(ctx, section_name, t, dist, x86_code_bits, &n) != 0) {
+            ctx->virtual_scanning--;
+            goto done;
+        }
+        dist += n;
+    }
+    ctx->virtual_scanning--;
+    is_short = target_idx > base_idx ? dist <= 127 : dist + 2 <= 128;
+
+done:
+    ctx->branch_short[base_idx] = is_short ? 1 : 2;
+    return is_short;
+}
+
+/*
+ * Whether a branch may be encoded short if its displacement fits.  For
+ * one to a compiler's local label that is the decision above; for the
+ * others it is as it was.  So is 16-bit code, where the long forms are
+ * shorter and the sizes assumed elsewhere are not these.
+ */
+static int x86_branch_may_be_short(emit_ctx_t *ctx, const char *section_name, const as_stmt_t *st,
+                                   const as_expr_t *e, unsigned x86_code_bits) {
+    if (e == NULL || e->kind != AS_EXPR_SYMBOL || !expr_is_local_temp_symbol(e) || x86_code_bits == 16u) {
+        return 1;
+    }
+    return local_temp_branch_is_short(ctx, section_name, st, e, x86_code_bits);
+}
+
+static unsigned stmt_local_rel_virtual_len(emit_ctx_t *ctx, const char *section_name, const as_stmt_t *st,
+                                           unsigned x86_code_bits) {
     const as_operand_t *op;
     const as_expr_t *e;
     char mnbuf[32];
@@ -11348,7 +11455,9 @@ static unsigned stmt_local_rel_virtual_len(emit_ctx_t *ctx, const char *section_
     is_local = ((e != NULL && expr_has_local_ref(e)) ||
                 (section_name != NULL && strcmp(section_name, ".altinstr_replacement") != 0 &&
                  e != NULL && expr_is_local_temp_symbol(e) &&
-                 local_temp_branch_target_within(ctx, st, e, 64)) ||
+                 (x86_code_bits == 16u ? local_temp_branch_target_within(ctx, st, e, 64)
+                                       : (e->kind == AS_EXPR_SYMBOL &&
+                                          local_temp_branch_is_short(ctx, section_name, st, e, x86_code_bits)))) ||
                 raw_is_numeric_local_ref(op->raw));
     if (is_call_mnemonic(st->u.instr.mnemonic)) {
         return 5u;
@@ -11389,16 +11498,17 @@ static int append_virtual_instruction_bytes(emit_ctx_t *ctx, bytebuf_t *buf, con
             e != NULL && e->kind == AS_EXPR_SYMBOL && expr_is_local_temp_symbol(e)) {
             as_elf_cfg_t local_cfg = *ctx->cfg;
             long long abs_target;
+            int may_short = x86_branch_may_be_short(ctx, section_name, st, e, x86_code_bits);
 
             local_cfg.x86_code_bits = x86_code_bits;
             if (eval_direct_local_branch_target(ctx, section_name, st, (uint64_t)buf->len, x86_code_bits, e,
                                                 2, &abs_target) == 0 &&
-                emit_resolved_x86_branch(&local_cfg, st, (uint64_t)buf->len, abs_target, code, sizeof(code),
+                emit_resolved_x86_branch_ex(&local_cfg, st, (uint64_t)buf->len, abs_target, may_short, code, sizeof(code),
                                          &code_len, encerr, sizeof(encerr)) == 0) {
                 if (code_len != 2 &&
                     eval_direct_local_branch_target(ctx, section_name, st, (uint64_t)buf->len, x86_code_bits, e,
                                                     code_len, &abs_target) == 0 &&
-                    emit_resolved_x86_branch(&local_cfg, st, (uint64_t)buf->len, abs_target, code, sizeof(code),
+                    emit_resolved_x86_branch_ex(&local_cfg, st, (uint64_t)buf->len, abs_target, may_short, code, sizeof(code),
                                              &code_len, encerr, sizeof(encerr)) != 0) {
                     return -1;
                 }
@@ -11407,7 +11517,7 @@ static int append_virtual_instruction_bytes(emit_ctx_t *ctx, bytebuf_t *buf, con
         }
     }
     {
-        unsigned local_rel_len = stmt_local_rel_virtual_len(ctx, section_name, st);
+        unsigned local_rel_len = stmt_local_rel_virtual_len(ctx, section_name, st, x86_code_bits);
         if (local_rel_len != 0) {
             return bytebuf_append_zeros(buf, local_rel_len);
         }
@@ -11749,13 +11859,14 @@ static int encode_x86_stmt_for_layout(emit_ctx_t *ctx, const char *section_name,
             as_expr_t texpr;
             as_elf_cfg_t local_cfg = stmt_cfg;
             long long abs_target;
+            int may_short = x86_branch_may_be_short(ctx, section_name, st, rel_expr, x86_code_bits);
             virtual_addr_value_t target;
 
             if ((rel_expr->kind == AS_EXPR_LOCAL_REF || expr_is_local_temp_symbol(rel_expr)) &&
                 eval_direct_local_branch_target(ctx, section_name, st, sec_off, x86_code_bits, rel_expr,
                                                 2, &abs_target) == 0) {
                 size_t tmp_len = 0;
-                if (emit_resolved_x86_branch(&local_cfg, st, sec_off, abs_target, code, code_cap,
+                if (emit_resolved_x86_branch_ex(&local_cfg, st, sec_off, abs_target, may_short, code, code_cap,
                                              &tmp_len, encerr, encerr_sz) != 0) {
                     as_expr_free(raw_local_expr);
                     return -1;
@@ -11790,7 +11901,7 @@ static int encode_x86_stmt_for_layout(emit_ctx_t *ctx, const char *section_name,
             local_cfg.have_current_text_offset = 1u;
             local_cfg.current_text_offset = sec_off;
             {
-                int rc = emit_resolved_x86_branch(&local_cfg, &tmp, sec_off, abs_target, code, code_cap,
+                int rc = emit_resolved_x86_branch_ex(&local_cfg, &tmp, sec_off, abs_target, may_short, code, code_cap,
                                                   code_len, encerr, encerr_sz);
                 as_expr_free(raw_local_expr);
                 return rc;
@@ -14938,6 +15049,7 @@ int as_elf_emit_file(const as_parse_result_t *parsed,
     virtual_label_cache_free(&ctx);
     free(ctx.stmt_size_cache);
     free(ctx.stmt_size_cached);
+    free(ctx.branch_short);
     {
         size_t _i;
         for (_i = 0; _i < ctx.section_prefix_count; ++_i) {
@@ -14963,6 +15075,7 @@ fail:
     virtual_label_cache_free(&ctx);
     free(ctx.stmt_size_cache);
     free(ctx.stmt_size_cached);
+    free(ctx.branch_short);
     {
         size_t _i;
         for (_i = 0; _i < ctx.section_prefix_count; ++_i) {
