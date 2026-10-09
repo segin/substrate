@@ -501,7 +501,7 @@ static int run_internal_link(ld_ctx_t *ctx) {
         elf_close(out);
         return -1;
     }
-    if (plan_local_got_i386(ctx, out) != 0) {
+    if (plan_local_got(ctx, out) != 0) {
         fprintf(stderr, "ld: failed to make the global offset table\n");
         symref_map_free(&undef_refs);
         objvec_free(&inputs);
@@ -620,7 +620,7 @@ static int run_internal_link(ld_ctx_t *ctx) {
         return -1;
     }
 
-    if (fill_local_got_i386(ctx, out) != 0 ||
+    if (fill_local_got(ctx, out) != 0 ||
         apply_all_relocations(out, ctx, allow_undef_runtime) != 0) {
         symref_map_free(&undef_refs);
         objvec_free(&inputs);

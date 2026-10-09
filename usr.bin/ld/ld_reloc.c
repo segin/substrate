@@ -363,43 +363,99 @@ static long local_got_slot(const ld_ctx_t *ctx, const elf_symbol_t *sym) {
     return local_got_slot_lookup(ctx, sym);
 }
 
-int plan_local_got_i386(ld_ctx_t *ctx, elfobj_t *out) {
-    size_t si, ri;
-    int need_base = 0;
-    elf_section_t *got;
+static int reloc_is_got_slot(uint16_t machine, uint32_t type) {
+    if (machine == EM_386) {
+        return reloc_is_i386_got_slot(type);
+    }
+    return machine == EM_X86_64 &&
+           (type == R_X86_64_GOTPCREL || type == R_X86_64_GOTPCRELX || type == R_X86_64_REX_GOTPCRELX);
+}
 
-    if (ctx == NULL || out == NULL || elf_machine(out) != EM_386) {
+/*
+ * Whether a load of a symbol's address from its GOT slot can be made into
+ * the address worked out in place, with no slot: it can where the
+ * relocation says the instruction is one of those the ABI lets a linker
+ * rewrite (the X kinds) and it is a mov, which becomes a lea of the same
+ * length.  Not for a symbol with no place in the image -- an absolute one,
+ * a weak one nothing defined -- since a lea is relative to something.
+ */
+static int got_ref_relaxes(uint16_t machine, uint32_t type, const elf_symbol_t *sym, const uint8_t *buf,
+                           size_t sz, uint64_t off) {
+    uint16_t shndx = sym != NULL ? elf_symbol_shndx(sym) : SHN_UNDEF;
+
+    if (shndx == SHN_UNDEF || shndx >= 0xff00 || buf == NULL || off < 2 || off + 4 > sz) {
         return 0;
     }
+    if (machine == EM_386) {
+        return type == R_386_GOT32X && buf[off - 2] == 0x8b && (buf[off - 1] & 0xc0) == 0x80;
+    }
+    return (type == R_X86_64_GOTPCRELX || type == R_X86_64_REX_GOTPCRELX) && buf[off - 2] == 0x8b;
+}
+
+/*
+ * The symbols of the output that need a GOT slot of their own: those
+ * reached through the table that are not imports -- the imports' slots
+ * are another matter (plan_dynamic_imports) -- and whose reference cannot
+ * be rewritten to do without.  Code compiled to go anywhere reaches
+ * everything this way, and when the thing turns out to be in the same
+ * output the slot still has to exist and hold its address: a call through
+ * it, a comparison with it, a push of it are not instructions that can be
+ * turned into something else of the same length.
+ *
+ * Run before the table is sized.  The slots follow the imports' in .got
+ * (local_got_base, set where that is known), or are the whole of a .got
+ * made for them when nothing is imported (plan_local_got).  In a shared
+ * object or a PIE each slot has a RELATIVE relocation, an address there
+ * not being known until it is loaded; local_got_relative counts those.
+ */
+int collect_local_got(ld_ctx_t *ctx, elfobj_t *out) {
+    uint16_t machine;
+    size_t si, ri;
+    int nothing_imported;
+
+    if (ctx == NULL || out == NULL) {
+        return 0;
+    }
+    machine = elf_machine(out);
     ctx->local_got_count = 0;
     ctx->local_got_owned = 0;
+    ctx->local_got_base = 0;
+    ctx->local_got_relative = 0;
+    ctx->local_got_need_base = 0;
+    if (machine != EM_386 && machine != EM_X86_64) {
+        return 0;
+    }
+    nothing_imported = elf_type(out) != ET_DYN && ctx->dso_inputs.count == 0;
     for (si = 0; si < elf_section_count(out); ++si) {
         elf_section_t *sec = elf_section_get(out, si);
+        const uint8_t *data;
+        size_t data_sz = 0;
 
         if (sec == NULL || (elf_section_flags(sec) & SHF_ALLOC) == 0) {
             continue;
         }
+        data = elf_section_type(sec) != SHT_NOBITS ? (const uint8_t *)elf_section_data(sec, &data_sz) : NULL;
         for (ri = 0; ri < elf_section_reloc_count(sec); ++ri) {
             const elf_reloc_t *rel = elf_section_reloc_at(sec, ri);
             const elf_symbol_t *sym = elf_reloc_symbol(rel);
             uint32_t type = elf_reloc_type(rel);
+            uint16_t shndx;
 
-            if (!reloc_is_i386_got_relative(type)) {
-                continue;
+            if (machine == EM_386 && reloc_is_i386_got_relative(type)) {
+                ctx->local_got_need_base = 1;
             }
-            need_base = 1;
-            /*
-             * A slot holds an address, and in a shared object or a PIE an
-             * address is not known until it is loaded: a slot there would
-             * need a relocation of its own for the dynamic linker, which
-             * is not made.  Such an output gets the table for a base and
-             * no slots, and its references to what it defines are turned
-             * into direct ones as they are applied.
-             */
-            if (elf_type(out) == ET_DYN || !reloc_is_i386_got_slot(type) || sym == NULL ||
-                elf_symbol_shndx(sym) == SHN_UNDEF ||
+            /* What is undefined is an import and has a slot of that kind
+             * -- except where nothing is imported, when it can only be a
+             * weak reference nothing defined, whose slot says 0. */
+            shndx = sym != NULL ? elf_symbol_shndx(sym) : SHN_UNDEF;
+            if (!reloc_is_got_slot(machine, type) || sym == NULL || (shndx == SHN_UNDEF && !nothing_imported) ||
+                got_ref_relaxes(machine, type, sym, data, data_sz, elf_reloc_offset(rel)) ||
                 local_got_slot_lookup(ctx, sym) >= 0) {
                 continue;
+            }
+            if (elf_type(out) == ET_DYN && shndx != SHN_UNDEF && shndx != SHN_ABS && shndx != SHN_COMMON &&
+                shndx < 0xff00) {
+                ctx->local_got_relative++;
             }
             if (ctx->local_got_count == ctx->local_got_cap) {
                 size_t ncap = ctx->local_got_cap ? ctx->local_got_cap * 2 : 16;
@@ -415,47 +471,115 @@ int plan_local_got_i386(ld_ctx_t *ctx, elfobj_t *out) {
             ctx->local_got[ctx->local_got_count++] = sym;
         }
     }
-    if (!need_base || elf_find_section(out, ".got") != NULL ||
-        elf_find_section(out, ".got.plt") != NULL) {
-        return 0;               /* nothing to do, or the imports' table */
-    }
-    got = elf_add_section(out, ".got", SHT_PROGBITS, SHF_ALLOC | SHF_WRITE);
-    if (got == NULL || elf_section_set_align(got, 4) != ELF_OK ||
-        set_section_zero_data(got, 4 * (ctx->local_got_count ? ctx->local_got_count : 1)) != 0) {
-        return -1;
-    }
-    ctx->local_got_owned = 1;
     return 0;
 }
 
-int fill_local_got_i386(const ld_ctx_t *ctx, elfobj_t *out) {
+/*
+ * Where nothing is imported there is no table yet: make one, for the
+ * slots collected, or on i386 for a base alone where code refers to
+ * things by their distance from the table and none of it through a slot.
+ */
+int plan_local_got(ld_ctx_t *ctx, elfobj_t *out) {
+    size_t entsz = elf_class(out) == ELFOBJ_CLASS_64 ? 8 : 4;
     elf_section_t *got;
-    uint8_t *buf;
-    size_t i, sz;
-    int rc;
+
+    if (ctx == NULL || out == NULL || ctx->local_got_owned ||
+        (ctx->local_got_count == 0 && !ctx->local_got_need_base) ||
+        elf_find_section(out, ".got") != NULL || elf_find_section(out, ".got.plt") != NULL) {
+        return 0;               /* nothing to do, or sized with the imports' */
+    }
+    got = elf_add_section(out, ".got", SHT_PROGBITS, SHF_ALLOC | SHF_WRITE);
+    if (got == NULL || elf_section_set_align(got, entsz) != ELF_OK ||
+        set_section_zero_data(got, entsz * (ctx->local_got_count ? ctx->local_got_count : 1)) != 0) {
+        return -1;
+    }
+    ctx->local_got_owned = 1;
+    ctx->local_got_base = 0;
+    return 0;
+}
+
+/* The address of local slot `slot`. */
+static uint64_t local_got_slot_addr(const ld_ctx_t *ctx, elfobj_t *out, long slot) {
+    elf_section_t *got = elf_find_section(out, ".got");
+    uint64_t entsz = elf_class(out) == ELFOBJ_CLASS_64 ? 8 : 4;
+
+    return got != NULL ? elf_section_addr(got) + entsz * (ctx->local_got_base + (uint64_t)slot) : 0;
+}
+
+/*
+ * Once addresses are known: each slot gets its symbol's, and in a shared
+ * object or a PIE the relocation that says to add where it was loaded.
+ * Those relocations are the last in .rel[a].dyn, which was sized for them.
+ */
+int fill_local_got(const ld_ctx_t *ctx, elfobj_t *out) {
+    int is64 = elf_class(out) == ELFOBJ_CLASS_64;
+    size_t entsz = is64 ? 8 : 4;
+    size_t relsz = is64 ? 24 : 8;
+    elfobj_endian_t e = elf_endian(out);
+    elf_section_t *got, *rel = NULL;
+    const uint8_t *src;
+    uint8_t *buf, *relbuf = NULL;
+    size_t i, sz = 0, rel_total = 0, next_rel = 0;
+    int rc = -1;
 
     if (ctx == NULL || !ctx->local_got_owned || ctx->local_got_count == 0) {
         return 0;
     }
     got = elf_find_section(out, ".got");
-    sz = 4 * ctx->local_got_count;
-    buf = (uint8_t *)calloc(1, sz);
-    if (got == NULL || buf == NULL) {
-        free(buf);
+    src = got != NULL ? (const uint8_t *)elf_section_data(got, &sz) : NULL;
+    if (src == NULL || sz < entsz * (ctx->local_got_base + ctx->local_got_count)) {
         return -1;
     }
+    buf = (uint8_t *)malloc(sz);
+    if (buf == NULL) {
+        return -1;
+    }
+    memcpy(buf, src, sz);
+    if (ctx->local_got_relative != 0) {
+        const uint8_t *rsrc;
+        size_t rsz = 0;
+
+        rel = elf_find_section(out, is64 ? ".rela.dyn" : ".rel.dyn");
+        rsrc = rel != NULL ? (const uint8_t *)elf_section_data(rel, &rsz) : NULL;
+        rel_total = rsz / relsz;
+        if (rsrc == NULL || rel_total < ctx->local_got_relative || (relbuf = (uint8_t *)malloc(rsz)) == NULL) {
+            goto out;
+        }
+        memcpy(relbuf, rsrc, rsz);
+        next_rel = rel_total - ctx->local_got_relative;
+    }
     for (i = 0; i < ctx->local_got_count; ++i) {
+        const elf_symbol_t *sym = ctx->local_got[i];
+        uint16_t shndx = elf_symbol_shndx(sym);
         uint64_t addr = 0;
         const char *undef = NULL;
 
-        if (resolve_symbol_addr(out, ctx->local_got[i], 0, &addr, &undef) != 0) {
-            free(buf);
-            return -1;
+        if (resolve_symbol_addr(out, sym, 0, &addr, &undef) != 0) {
+            goto out;
         }
-        write_uint_bytes(buf + 4 * i, 4, elf_endian(out), addr);
+        write_uint_bytes(buf + entsz * (ctx->local_got_base + i), (int)entsz, e, addr);
+        if (relbuf != NULL && shndx != SHN_UNDEF && shndx != SHN_ABS && shndx != SHN_COMMON && shndx < 0xff00 &&
+            next_rel < rel_total) {
+            uint8_t *r = relbuf + relsz * next_rel++;
+            uint64_t where = local_got_slot_addr(ctx, out, (long)i);
+
+            if (is64) {
+                write_uint_bytes(r, 8, e, where);
+                write_uint_bytes(r + 8, 8, e, R_X86_64_RELATIVE);
+                write_uint_bytes(r + 16, 8, e, addr);
+            } else {
+                write_uint_bytes(r, 4, e, where);
+                write_uint_bytes(r + 4, 4, e, R_386_RELATIVE);
+            }
+        }
     }
-    rc = elf_section_set_data(got, buf, sz) == ELF_OK ? 0 : -1;
+    if (elf_section_set_data(got, buf, sz) == ELF_OK &&
+        (relbuf == NULL || elf_section_set_data(rel, relbuf, elf_section_size(rel)) == ELF_OK)) {
+        rc = 0;
+    }
+out:
     free(buf);
+    free(relbuf);
     return rc;
 }
 
@@ -469,8 +593,7 @@ int fill_local_got_i386(const ld_ctx_t *ctx, elfobj_t *out) {
  * storage and offsets from it.  That is what a library loaded at any
  * time needs.  A program's own storage, and that of the libraries it
  * starts with, is at a distance from the thread pointer fixed before
- * anything runs, so in a program the call is not needed -- and substrate's
- * dynamic linker has no __tls_get_addr to call.
+ * anything runs, so in a program the call is not needed.
  *
  * So each such sequence is rewritten, as the psABI's TLS supplement lays
  * out, into the same number of bytes that take the thread pointer and add
@@ -898,21 +1021,18 @@ int apply_all_relocations(elfobj_t *obj, const ld_ctx_t *ctx, int allow_undefine
                  */
                 uint64_t got = i386_got_base(obj);
                 int defined = sym != NULL && elf_symbol_shndx(sym) != SHN_UNDEF;
-                long slot = defined ? local_got_slot(ctx, sym) : -1;
+                long slot = sym != NULL ? local_got_slot(ctx, sym) : -1;
                 const char *why = NULL;
 
                 if (type == R_386_GOTPC) {
                     outv = got + (uint64_t)addend - P;
                 } else if (type == R_386_GOTOFF) {
                     outv = S + (uint64_t)addend - got;
+                } else if (slot >= 0) {
+                    outv = local_got_slot_addr(ctx, obj, slot) + (uint64_t)addend - got;
                 } else if (!defined) {
                     /* An import: S is its slot already. */
                     outv = S + (uint64_t)addend - got;
-                } else if (slot >= 0) {
-                    elf_section_t *gs = elf_find_section(obj, ".got");
-
-                    outv = elf_section_addr(gs) + 4U * (uint64_t)slot +
-                           (uint64_t)addend - got;
                 } else if (type == R_386_GOT32X && off >= 2 &&
                            buf[off - 2] == 0x8b && (buf[off - 1] & 0xc0) == 0x80) {
                     /* mov sym@GOT(%reg), %reg -> lea sym@GOTOFF(%reg), %reg */
@@ -933,6 +1053,14 @@ int apply_all_relocations(elfobj_t *obj, const ld_ctx_t *ctx, int allow_undefine
                     return -1;
                 }
                 write_uint_bytes(buf + off, width, endian, outv & 0xffffffffULL);
+                continue;
+            }
+            if (machine == EM_X86_64 && reloc_is_got_slot(machine, type) && sym != NULL &&
+                local_got_slot(ctx, sym) >= 0) {
+                /* Something of the output's own, reached through its
+                 * slot: the instruction has the slot's distance. */
+                outv = local_got_slot_addr(ctx, obj, local_got_slot(ctx, sym)) + (uint64_t)addend - P;
+                write_uint_bytes(buf + off, 4, endian, outv & 0xffffffffULL);
                 continue;
             }
             if (sym != NULL && elf_symbol_shndx(sym) == SHN_UNDEF && (flags & SHF_ALLOC) != 0 &&

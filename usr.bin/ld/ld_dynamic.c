@@ -883,7 +883,8 @@ int set_section_zero_data(elf_section_t *sec, size_t sz) {
     return rc;
 }
 
-static int ensure_dynamic_import_sections_x64(elfobj_t *out, const dyn_import_vec_t *imports, size_t extra_dyn_count) {
+static int ensure_dynamic_import_sections_x64(elfobj_t *out, const dyn_import_vec_t *imports, size_t extra_dyn_count,
+                                              size_t extra_got) {
     size_t i;
     size_t plt_count = 0;
     size_t got_count = 0;
@@ -908,6 +909,7 @@ static int ensure_dynamic_import_sections_x64(elfobj_t *out, const dyn_import_ve
         }
     }
     dyn_count = got_count + extra_dyn_count;
+    got_count += extra_got;     /* the output's own slots, after the imports' */
 
     if (plt_count != 0) {
         sec = elf_find_section(out, ".plt");
@@ -973,7 +975,8 @@ static int ensure_dynamic_import_sections_x64(elfobj_t *out, const dyn_import_ve
     return 0;
 }
 
-static int ensure_dynamic_import_sections_i386(elfobj_t *out, const dyn_import_vec_t *imports, size_t extra_dyn_count) {
+static int ensure_dynamic_import_sections_i386(elfobj_t *out, const dyn_import_vec_t *imports, size_t extra_dyn_count,
+                                               size_t extra_got) {
     size_t i;
     size_t plt_count = 0;
     size_t got_count = 0;
@@ -998,6 +1001,7 @@ static int ensure_dynamic_import_sections_i386(elfobj_t *out, const dyn_import_v
         }
     }
     dyn_count = got_count + extra_dyn_count;
+    got_count += extra_got;     /* the output's own slots, after the imports' */
 
     if (plt_count != 0) {
         sec = elf_find_section(out, ".plt");
@@ -1079,10 +1083,10 @@ int plan_dynamic_imports(ld_ctx_t *ctx, elfobj_t *out) {
         return -1;
     }
     if ((ctx->mode != 64 && ctx->mode != 32) || (elf_type(out) != ET_DYN && ctx->dso_inputs.count == 0)) {
-        return 0;
+        return collect_local_got(ctx, out);
     }
     dyn_import_vec_free(&ctx->dyn_imports);
-    if (plan_copy_relocs(ctx, out, &ctx->dyn_imports) != 0) {
+    if (plan_copy_relocs(ctx, out, &ctx->dyn_imports) != 0 || collect_local_got(ctx, out) != 0) {
         return -1;
     }
     if (ctx->mode == 64) {
@@ -1124,15 +1128,20 @@ int plan_dynamic_imports(ld_ctx_t *ctx, elfobj_t *out) {
                     imp->plt_slot, imp->got_slot, imp->tls_gd_slot, imp->tls_ie_slot);
         }
     }
+    /* The output's own slots come after the imports', and their
+     * relocations after every other in .rel[a].dyn. */
+    ctx->local_got_base = got_slot;
+    extra_dyn_relocs += ctx->local_got_relative;
     if (ctx->mode == 64) {
-        if (ensure_dynamic_import_sections_x64(out, &ctx->dyn_imports, extra_dyn_relocs) != 0) {
+        if (ensure_dynamic_import_sections_x64(out, &ctx->dyn_imports, extra_dyn_relocs, ctx->local_got_count) != 0) {
             return -1;
         }
     } else {
-        if (ensure_dynamic_import_sections_i386(out, &ctx->dyn_imports, extra_dyn_relocs) != 0) {
+        if (ensure_dynamic_import_sections_i386(out, &ctx->dyn_imports, extra_dyn_relocs, ctx->local_got_count) != 0) {
             return -1;
         }
     }
+    ctx->local_got_owned = ctx->local_got_count != 0;
     return 0;
 }
 

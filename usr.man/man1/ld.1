@@ -307,6 +307,21 @@ nothing is.
 Where sections of strings or constants
 .Pq Dv SHF_MERGE
 are gathered with others the result is not marked as such.
+.Sh THE GLOBAL OFFSET TABLE
+.Pa .got
+has a slot for each symbol that code reaches through the table: first
+those imported from shared objects, which the dynamic linker fills in,
+then those the output defines itself, which hold their addresses and in a
+shared object or a position-independent executable have a
+.Dv RELATIVE
+relocation each.
+A weak reference that nothing defines has a slot holding 0.
+A slot is not made where the only references are loads under a
+relocation that permits rewriting
+.Pq Dv R_386_GOT32X , R_X86_64_GOTPCRELX , R_X86_64_REX_GOTPCRELX ;
+those become the address computed in place.
+A program that imports nothing still gets the table if its code is
+position-independent.
 .Sh THREAD-LOCAL STORAGE
 The sections flagged
 .Dv SHF_TLS ,

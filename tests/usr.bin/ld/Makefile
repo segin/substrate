@@ -9,5 +9,6 @@ run:
 	./test_dynamic.sh
 	./test_output.sh
 	./test_tls.sh
+	./test_got.sh
 
 clean:

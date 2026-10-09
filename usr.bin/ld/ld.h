@@ -191,12 +191,15 @@ typedef struct {
                                  * failing that the name it was found by */
     symset_t dso_wants;         /* the symbols they refer to and do not define */
     dyn_import_vec_t dyn_imports;
-    /* i386: the symbols defined in the output that have a slot in a .got
-     * this link made for them (plan_local_got_i386), in slot order. */
+    /* The symbols of the output itself that have a slot in .got
+     * (collect_local_got), in slot order. */
     const elf_symbol_t **local_got;
     size_t local_got_count;
     size_t local_got_cap;
-    int local_got_owned;        /* .got is ours: the slots exist */
+    int local_got_owned;        /* the slots exist */
+    size_t local_got_base;      /* the first of them: after the imports' */
+    size_t local_got_relative;  /* how many have a RELATIVE relocation */
+    int local_got_need_base;    /* i386: something is GOT-relative */
     inputvec_t inputs;
 } ld_ctx_t;
 
@@ -617,8 +620,9 @@ int apply_defsyms(ld_ctx_t *ctx, elfobj_t *out);
 int resolve_symbol_addr(elfobj_t *obj, const elf_symbol_t *sym, int allow_undef,
                                uint64_t *out_addr, const char **undef_name);
 const dyn_import_t *find_planned_import(const ld_ctx_t *ctx, const char *name);
-int plan_local_got_i386(ld_ctx_t *ctx, elfobj_t *out);
-int fill_local_got_i386(const ld_ctx_t *ctx, elfobj_t *out);
+int collect_local_got(ld_ctx_t *ctx, elfobj_t *out);
+int plan_local_got(ld_ctx_t *ctx, elfobj_t *out);
+int fill_local_got(const ld_ctx_t *ctx, elfobj_t *out);
 int apply_all_relocations(elfobj_t *obj, const ld_ctx_t *ctx, int allow_undefined);
 int relax_tls_dynamic_in_program(elfobj_t *out);
 
