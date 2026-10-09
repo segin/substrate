@@ -82,5 +82,36 @@ for arch in 32 64; do
     done
 done
 
+# A shared object does not know which module it will be or how far its
+# storage is from the thread pointer: the dynamic linker says, in GOT
+# entries the code reads, and each of those has a relocation.
+for arch in 32 64; do
+    m=elf_i386; mod=R_386_TLS_DTPMOD32; tp=R_386_TLS_TPOFF
+    [ $arch = 64 ] && { m=elf_x86_64; mod=R_X86_64_DTPMOD64; tp=R_X86_64_TPOFF64; }
+    for model in gd ld ie; do
+        out=lib$model$arch.so
+        if ! ./ld -m $m -shared -o $out $model$arch.o 2> err; then
+            echo "FAIL $out: does not link: $(head -1 err)"; fail=1; continue
+        fi
+        nmod=$(readelf -rW $out | grep -c "$mod")
+        ntp=$(readelf -rW $out | grep -c "$tp")
+        case $model in
+        gd) is "$out: a module entry for each variable" "$nmod $ntp" "4 0" ;;
+        ld) is "$out: one module entry for them all"    "$nmod $ntp" "1 0" ;;
+        ie) is "$out: a distance for each variable"     "$nmod $ntp" "0 4"
+            is "$out: marked as needing its storage laid out at the start" \
+               "$(readelf -d $out | grep -c 'STATIC_TLS')" 1 ;;
+        esac
+        is "$out: PT_TLS"                       "$(readelf -lW $out | grep -c '^ *TLS ')" 1
+        is "$out: a symbol's value is its place in the copy" "$(( $(symval $out first) ))" 0
+    done
+    if ./ld -m $m -shared -o bad$arch.so le$arch.o 2> err; then
+        echo "FAIL local-exec code in a shared object: linked"; fail=1
+    else
+        is "local-exec code in a shared object ($arch) is an error that says so" \
+           "$(grep -c 'cannot be used in a shared object' err)" 1
+    fi
+done
+
 [ "$fail" -eq 0 ] && echo "PASS" || echo "FAILED"
 exit "$fail"

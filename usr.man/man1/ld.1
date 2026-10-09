@@ -347,8 +347,21 @@ The general-dynamic and local-dynamic sequences, which call
 .Fn __tls_get_addr ,
 are rewritten in place into those forms and the call removed, so a
 program does not need that function.
-Thread-local variables defined in a shared object being made are not
-supported and are reported as an error.
+.Pp
+A shared object cannot know which module it will be or how far its
+storage will be from the thread pointer, so its references to its own
+thread-local variables go through entries in
+.Pa .got ,
+after the ordinary slots, for the dynamic linker to fill in: a pair,
+module and offset, for a general-dynamic reference
+.Pq Dv R_386_TLS_DTPMOD32 , R_X86_64_DTPMOD64 ;
+one such pair for all local-dynamic references; and one entry holding the
+distance from the thread pointer for an initial-exec reference
+.Pq Dv R_386_TLS_TPOFF , R_X86_64_TPOFF64 ,
+which also marks the object
+.Dv DF_STATIC_TLS .
+Local-exec code, which has the distance built in, cannot go into a
+shared object and is reported as an error.
 .Sh SYMBOL VERSIONS
 A symbol an input object names
 .Li sym@VER

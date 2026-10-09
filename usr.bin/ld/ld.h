@@ -104,6 +104,22 @@ typedef struct {
     size_t alias_cap;
 } dyn_import_vec_t;
 
+/*
+ * What a shared object keeps in its GOT for one of its own thread-local
+ * variables, by how the code asks for it.
+ */
+enum {
+    LD_TLS_GD,          /* module and offset, for __tls_get_addr: two entries */
+    LD_TLS_LD,          /* the module alone (offset 0): two entries, one for all */
+    LD_TLS_IE           /* distance from the thread pointer: one entry */
+};
+
+typedef struct {
+    const elf_symbol_t *sym;    /* NULL for LD_TLS_LD */
+    int kind;
+    size_t word;                /* first entry, counted from the first of these */
+} ld_tls_got_t;
+
 typedef struct {
     elfobj_t **objs;
     char **names;
@@ -200,6 +216,12 @@ typedef struct {
     size_t local_got_base;      /* the first of them: after the imports' */
     size_t local_got_relative;  /* how many have a RELATIVE relocation */
     int local_got_need_base;    /* i386: something is GOT-relative */
+    /* A shared object's slots for its own thread-local variables, after
+     * those: see collect_local_got(). */
+    ld_tls_got_t *tls_got;
+    size_t tls_got_count;
+    size_t tls_got_cap;
+    size_t tls_got_words;       /* what they come to, in GOT entries */
     inputvec_t inputs;
 } ld_ctx_t;
 

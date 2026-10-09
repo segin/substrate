@@ -1131,17 +1131,19 @@ int plan_dynamic_imports(ld_ctx_t *ctx, elfobj_t *out) {
     /* The output's own slots come after the imports', and their
      * relocations after every other in .rel[a].dyn. */
     ctx->local_got_base = got_slot;
-    extra_dyn_relocs += ctx->local_got_relative;
+    extra_dyn_relocs += ctx->local_got_relative + ctx->tls_got_count;
     if (ctx->mode == 64) {
-        if (ensure_dynamic_import_sections_x64(out, &ctx->dyn_imports, extra_dyn_relocs, ctx->local_got_count) != 0) {
+        if (ensure_dynamic_import_sections_x64(out, &ctx->dyn_imports, extra_dyn_relocs,
+                                               ctx->local_got_count + ctx->tls_got_words) != 0) {
             return -1;
         }
     } else {
-        if (ensure_dynamic_import_sections_i386(out, &ctx->dyn_imports, extra_dyn_relocs, ctx->local_got_count) != 0) {
+        if (ensure_dynamic_import_sections_i386(out, &ctx->dyn_imports, extra_dyn_relocs,
+                                                ctx->local_got_count + ctx->tls_got_words) != 0) {
             return -1;
         }
     }
-    ctx->local_got_owned = ctx->local_got_count != 0;
+    ctx->local_got_owned = ctx->local_got_count != 0 || ctx->tls_got_count != 0;
     return 0;
 }
 
@@ -1992,6 +1994,7 @@ int plan_dynamic_needed(ld_ctx_t *ctx, elfobj_t *out) {
     size_t entsz;
     int need_dyn;
     int textrel;
+    int static_tls;
     elf_section_t *gotplt_sec = NULL;
     elf_section_t *rela_plt_sec = NULL;
     elf_section_t *rel_plt_sec = NULL;
@@ -2421,6 +2424,17 @@ int plan_dynamic_needed(ld_ctx_t *ctx, elfobj_t *out) {
      * said the two ways, where the output has such relocations.
      */
     textrel = text_relocation_section(ctx, out) != NULL;
+    static_tls = 0;
+    if (elf_type(out) == ET_DYN && !ctx->pie) {
+        size_t k;
+
+        for (k = 0; k < ctx->tls_got_count; ++k) {
+            static_tls |= ctx->tls_got[k].kind == LD_TLS_IE;
+        }
+        for (k = 0; k < ctx->dyn_imports.count; ++k) {
+            static_tls |= ctx->dyn_imports.items[k].need_tls_ie;
+        }
+    }
     if ((ctx->z_now &&
          dynamic_append_entry(&dynamic_buf, &dynamic_len, &dynamic_cap,
                               elf_class(out), elf_endian(out), DT_BIND_NOW, 0) != 0) ||
@@ -2433,10 +2447,15 @@ int plan_dynamic_needed(ld_ctx_t *ctx, elfobj_t *out) {
         (textrel &&
          dynamic_append_entry(&dynamic_buf, &dynamic_len, &dynamic_cap,
                               elf_class(out), elf_endian(out), DT_TEXTREL, 0) != 0) ||
-        ((ctx->z_now || textrel) &&
+        /* DF_STATIC_TLS: this object has the distance of thread-local
+         * storage from the thread pointer built into what it reads, so
+         * its storage has to be laid out before any thread runs -- it
+         * cannot be brought in later by dlopen. */
+        ((ctx->z_now || textrel || static_tls) &&
          dynamic_append_entry(&dynamic_buf, &dynamic_len, &dynamic_cap,
                               elf_class(out), elf_endian(out), DT_FLAGS,
-                              (ctx->z_now ? DF_BIND_NOW : 0) | (textrel ? DF_TEXTREL : 0)) != 0)) {
+                              (ctx->z_now ? DF_BIND_NOW : 0) | (textrel ? DF_TEXTREL : 0) |
+                              (static_tls ? DF_STATIC_TLS : 0)) != 0)) {
         free(dynstr_buf);
         free(dynsym_buf);
         free(dynamic_buf);

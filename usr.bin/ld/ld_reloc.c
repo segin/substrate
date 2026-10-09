@@ -408,10 +408,74 @@ static int got_ref_relaxes(uint16_t machine, uint32_t type, const elf_symbol_t *
  * object or a PIE each slot has a RELATIVE relocation, an address there
  * not being known until it is loaded; local_got_relative counts those.
  */
+/*
+ * How a relocation asks for a thread-local variable through the GOT:
+ * one of LD_TLS_*, or -1 if it does not.
+ */
+static int reloc_tls_got_kind(uint16_t machine, uint32_t type) {
+    if (machine == EM_386) {
+        return type == R_386_TLS_GD ? LD_TLS_GD : type == R_386_TLS_LDM ? LD_TLS_LD :
+               type == R_386_TLS_GOTIE ? LD_TLS_IE : -1;
+    }
+    if (machine == EM_X86_64) {
+        return type == R_X86_64_TLSGD ? LD_TLS_GD : type == R_X86_64_TLSLD ? LD_TLS_LD :
+               type == R_X86_64_GOTTPOFF ? LD_TLS_IE : -1;
+    }
+    return -1;
+}
+
+static const ld_tls_got_t *tls_got_find(const ld_ctx_t *ctx, const elf_symbol_t *sym, int kind) {
+    size_t i;
+
+    for (i = 0; i < ctx->tls_got_count; ++i) {
+        if (ctx->tls_got[i].kind == kind && (kind == LD_TLS_LD || ctx->tls_got[i].sym == sym)) {
+            return &ctx->tls_got[i];
+        }
+    }
+    return NULL;
+}
+
+static int tls_got_add(ld_ctx_t *ctx, const elf_symbol_t *sym, int kind) {
+    if (tls_got_find(ctx, sym, kind) != NULL) {
+        return 0;
+    }
+    if (ctx->tls_got_count == ctx->tls_got_cap) {
+        size_t ncap = ctx->tls_got_cap ? ctx->tls_got_cap * 2 : 8;
+        ld_tls_got_t *n = (ld_tls_got_t *)realloc(ctx->tls_got, ncap * sizeof(n[0]));
+
+        if (n == NULL) {
+            return -1;
+        }
+        ctx->tls_got = n;
+        ctx->tls_got_cap = ncap;
+    }
+    ctx->tls_got[ctx->tls_got_count].sym = kind == LD_TLS_LD ? NULL : sym;
+    ctx->tls_got[ctx->tls_got_count].kind = kind;
+    ctx->tls_got[ctx->tls_got_count].word = ctx->tls_got_words;
+    ctx->tls_got_count++;
+    ctx->tls_got_words += kind == LD_TLS_IE ? 1 : 2;
+    return 0;
+}
+
+/*
+ * ... and, in a shared object, the thread-local variables it defines.
+ * A program knows where its thread-local storage is and has none of this
+ * (relax_tls_dynamic_in_program, apply_tls_in_program).  A shared object
+ * does not: which module it will be, and how far its storage is from the
+ * thread pointer, are the dynamic linker's to say, in GOT entries that
+ * the code reads -- a pair, module and offset, to hand to __tls_get_addr
+ * (general-dynamic; local-dynamic has one pair for the module, offset 0,
+ * and adds each variable's offset itself), or one entry holding the
+ * distance from the thread pointer (initial-exec).  The offset in the
+ * module is known now and goes in as it is; the module, and the distance,
+ * get a relocation each.  These entries follow the ordinary slots, and
+ * their relocations the RELATIVE ones.
+ */
 int collect_local_got(ld_ctx_t *ctx, elfobj_t *out) {
     uint16_t machine;
     size_t si, ri;
     int nothing_imported;
+    int shared;
 
     if (ctx == NULL || out == NULL) {
         return 0;
@@ -426,6 +490,9 @@ int collect_local_got(ld_ctx_t *ctx, elfobj_t *out) {
         return 0;
     }
     nothing_imported = elf_type(out) != ET_DYN && ctx->dso_inputs.count == 0;
+    shared = elf_type(out) == ET_DYN && !ctx->pie;
+    ctx->tls_got_count = 0;
+    ctx->tls_got_words = 0;
     for (si = 0; si < elf_section_count(out); ++si) {
         elf_section_t *sec = elf_section_get(out, si);
         const uint8_t *data;
@@ -443,6 +510,15 @@ int collect_local_got(ld_ctx_t *ctx, elfobj_t *out) {
 
             if (machine == EM_386 && reloc_is_i386_got_relative(type)) {
                 ctx->local_got_need_base = 1;
+            }
+            if (shared && reloc_tls_got_kind(machine, type) >= 0) {
+                int kind = reloc_tls_got_kind(machine, type);
+
+                if ((kind == LD_TLS_LD || (sym != NULL && elf_symbol_shndx(sym) != SHN_UNDEF)) &&
+                    tls_got_add(ctx, sym, kind) != 0) {
+                    return -1;
+                }
+                continue;
             }
             /* What is undefined is an import and has a slot of that kind
              * -- except where nothing is imported, when it can only be a
@@ -520,14 +596,16 @@ int fill_local_got(const ld_ctx_t *ctx, elfobj_t *out) {
     const uint8_t *src;
     uint8_t *buf, *relbuf = NULL;
     size_t i, sz = 0, rel_total = 0, next_rel = 0;
+    size_t tail = ctx != NULL ? ctx->local_got_relative + ctx->tls_got_count : 0;
+    uint64_t tls_start = 0;
     int rc = -1;
 
-    if (ctx == NULL || !ctx->local_got_owned || ctx->local_got_count == 0) {
+    if (ctx == NULL || !ctx->local_got_owned || (ctx->local_got_count == 0 && ctx->tls_got_count == 0)) {
         return 0;
     }
     got = elf_find_section(out, ".got");
     src = got != NULL ? (const uint8_t *)elf_section_data(got, &sz) : NULL;
-    if (src == NULL || sz < entsz * (ctx->local_got_base + ctx->local_got_count)) {
+    if (src == NULL || sz < entsz * (ctx->local_got_base + ctx->local_got_count + ctx->tls_got_words)) {
         return -1;
     }
     buf = (uint8_t *)malloc(sz);
@@ -535,19 +613,20 @@ int fill_local_got(const ld_ctx_t *ctx, elfobj_t *out) {
         return -1;
     }
     memcpy(buf, src, sz);
-    if (ctx->local_got_relative != 0) {
+    if (tail != 0) {
         const uint8_t *rsrc;
         size_t rsz = 0;
 
         rel = elf_find_section(out, is64 ? ".rela.dyn" : ".rel.dyn");
         rsrc = rel != NULL ? (const uint8_t *)elf_section_data(rel, &rsz) : NULL;
         rel_total = rsz / relsz;
-        if (rsrc == NULL || rel_total < ctx->local_got_relative || (relbuf = (uint8_t *)malloc(rsz)) == NULL) {
+        if (rsrc == NULL || rel_total < tail || (relbuf = (uint8_t *)malloc(rsz)) == NULL) {
             goto out;
         }
         memcpy(relbuf, rsrc, rsz);
-        next_rel = rel_total - ctx->local_got_relative;
+        next_rel = rel_total - tail;
     }
+    (void)tls_extent(out, &tls_start, NULL, NULL, NULL);
     for (i = 0; i < ctx->local_got_count; ++i) {
         const elf_symbol_t *sym = ctx->local_got[i];
         uint16_t shndx = elf_symbol_shndx(sym);
@@ -573,6 +652,48 @@ int fill_local_got(const ld_ctx_t *ctx, elfobj_t *out) {
             }
         }
     }
+    /* The thread-local entries.  "The module" is this one, which a
+     * relocation naming no symbol means; the offset in it, and for
+     * initial-exec the addend the distance is worked out from, is the
+     * variable's place in the thread-local storage. */
+    for (i = 0; i < ctx->tls_got_count; ++i) {
+        const ld_tls_got_t *t = &ctx->tls_got[i];
+        size_t word = ctx->local_got_base + ctx->local_got_count + t->word;
+        uint64_t where = elf_section_addr(got) + entsz * word;
+        uint64_t dtpoff = 0;
+        uint8_t *r;
+
+        if (t->sym != NULL) {
+            uint64_t addr = 0;
+
+            if (resolve_symbol_addr(out, t->sym, 0, &addr, NULL) != 0) {
+                goto out;
+            }
+            dtpoff = addr - tls_start;
+        }
+        if (relbuf == NULL || next_rel >= rel_total) {
+            goto out;
+        }
+        r = relbuf + relsz * next_rel++;
+        write_uint_bytes(r, (int)entsz, e, where);
+        if (t->kind == LD_TLS_IE) {
+            if (is64) {
+                write_uint_bytes(r + 8, 8, e, R_X86_64_TPOFF64);
+                write_uint_bytes(r + 16, 8, e, dtpoff);
+            } else {
+                write_uint_bytes(r + 4, 4, e, R_386_TLS_TPOFF);
+                write_uint_bytes(buf + entsz * word, 4, e, dtpoff);
+            }
+        } else {
+            if (is64) {
+                write_uint_bytes(r + 8, 8, e, R_X86_64_DTPMOD64);
+                write_uint_bytes(r + 16, 8, e, 0);
+            } else {
+                write_uint_bytes(r + 4, 4, e, R_386_TLS_DTPMOD32);
+            }
+            write_uint_bytes(buf + entsz * (word + 1), (int)entsz, e, dtpoff);
+        }
+    }
     if (elf_section_set_data(got, buf, sz) == ELF_OK &&
         (relbuf == NULL || elf_section_set_data(rel, relbuf, elf_section_size(rel)) == ELF_OK)) {
         rc = 0;
@@ -581,6 +702,49 @@ out:
     free(buf);
     free(relbuf);
     return rc;
+}
+
+/*
+ * A reference to a thread-local variable from a shared object that
+ * defines it: the instruction gets where its GOT entries are, from the
+ * instruction itself (x86-64) or from the table (i386), and what adds a
+ * variable's offset to the module's storage gets the offset.  The local-
+ * exec forms have the distance from the thread pointer built in, which a
+ * shared object cannot know.
+ */
+static int apply_tls_in_shared(const ld_ctx_t *ctx, elfobj_t *obj, uint16_t machine, uint32_t type, uint8_t *buf,
+                               uint64_t off, uint64_t S, int64_t addend, uint64_t P, const elf_symbol_t *sym,
+                               const char **why) {
+    elfobj_endian_t e = elf_endian(obj);
+    int kind = reloc_tls_got_kind(machine, type);
+    uint64_t tls_start = 0;
+
+    (void)tls_extent(obj, &tls_start, NULL, NULL, NULL);
+    if (kind >= 0) {
+        const ld_tls_got_t *t = tls_got_find(ctx, sym, kind);
+        elf_section_t *got = elf_find_section(obj, ".got");
+        uint64_t where;
+
+        if (t == NULL || got == NULL) {
+            *why = "a thread-local variable with no entry in the GOT";
+            return -1;
+        }
+        where = elf_section_addr(got) + (elf_class(obj) == ELFOBJ_CLASS_64 ? 8 : 4) *
+                                        (uint64_t)(ctx->local_got_base + ctx->local_got_count + t->word);
+        write_uint_bytes(buf + off, 4, e,
+                         (where + (uint64_t)addend - (machine == EM_386 ? i386_got_base(obj) : P)) & 0xffffffffULL);
+        return 0;
+    }
+    if ((machine == EM_386 && type == R_386_TLS_LDO_32) || (machine == EM_X86_64 && type == R_X86_64_DTPOFF32)) {
+        write_uint_bytes(buf + off, 4, e, (S + (uint64_t)addend - tls_start) & 0xffffffffULL);
+        return 0;
+    }
+    if (machine == EM_X86_64 && type == R_X86_64_DTPOFF64) {
+        write_uint_bytes(buf + off, 8, e, S + (uint64_t)addend - tls_start);
+        return 0;
+    }
+    *why = "this way of reaching thread-local storage cannot be used in a shared object (compile with -fPIC)";
+    return -1;
 }
 
 /*
@@ -1064,19 +1228,19 @@ int apply_all_relocations(elfobj_t *obj, const ld_ctx_t *ctx, int allow_undefine
                 continue;
             }
             if (sym != NULL && elf_symbol_shndx(sym) == SHN_UNDEF && (flags & SHF_ALLOC) != 0 &&
-                ((machine == EM_X86_64 && type == R_X86_64_GOTTPOFF) ||
-                 (machine == EM_386 && type == R_386_TLS_GOTIE))) {
-                /* A thread-local variable of a shared object: S is the
-                 * GOT slot its distance from the thread pointer will be
-                 * in, and the instruction reaches the slot from where it
-                 * is (x86-64) or from the GOT (i386). */
+                (reloc_tls_got_kind(machine, type) == LD_TLS_IE || reloc_tls_got_kind(machine, type) == LD_TLS_GD)) {
+                /* A thread-local variable of another shared object: S is
+                 * the GOT entry (or pair) the dynamic linker fills in for
+                 * it, and the instruction reaches that from where it is
+                 * (x86-64) or from the GOT (i386). */
                 outv = machine == EM_X86_64 ? S + (uint64_t)addend - P
                                             : S + (uint64_t)addend - i386_got_base(obj);
                 write_uint_bytes(buf + off, 4, endian, outv & 0xffffffffULL);
                 continue;
             }
-            if (elf_reloc_is_tls_for_machine(machine, type) && sym != NULL &&
-                elf_symbol_shndx(sym) != SHN_UNDEF) {
+            if (elf_reloc_is_tls_for_machine(machine, type) &&
+                ((sym != NULL && elf_symbol_shndx(sym) != SHN_UNDEF) ||
+                 reloc_tls_got_kind(machine, type) == LD_TLS_LD)) {
                 const char *why = NULL;
                 int done;
 
@@ -1090,8 +1254,7 @@ int apply_all_relocations(elfobj_t *obj, const ld_ctx_t *ctx, int allow_undefine
                     continue;
                 }
                 if (elf_type(obj) == ET_DYN && !ctx->pie) {
-                    why = "thread-local storage defined in a shared object is not supported";
-                    done = -1;
+                    done = apply_tls_in_shared(ctx, obj, machine, type, buf, off, S, addend, P, sym, &why);
                 } else {
                     done = apply_tls_in_program(obj, machine, type, buf, sec_sz, off, S, addend, &why);
                 }
