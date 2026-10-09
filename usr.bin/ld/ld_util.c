@@ -215,15 +215,9 @@ static int dyn_import_push(dyn_import_vec_t *v, const char *name, size_t *out_id
     if (dup == NULL) {
         return -1;
     }
+    /* All of it: realloc's memory is whatever was there before. */
+    memset(&v->items[v->count], 0, sizeof(v->items[v->count]));
     v->items[v->count].name = dup;
-    v->items[v->count].need_plt = 0;
-    v->items[v->count].need_got = 0;
-    v->items[v->count].need_tls_gd = 0;
-    v->items[v->count].need_tls_ie = 0;
-    v->items[v->count].plt_slot = 0;
-    v->items[v->count].got_slot = 0;
-    v->items[v->count].tls_gd_slot = 0;
-    v->items[v->count].tls_ie_slot = 0;
     if (out_idx != NULL) {
         *out_idx = v->count;
     }
