@@ -369,9 +369,47 @@ static int freebsd_record_lock(int fd, int cmd, void *uarg) {
     return copyout(&ff, uarg, sizeof(ff)) != 0 ? -EFAULT : 0;
 }
 
+/*
+ * The file status flags of F_GETFL and F_SETFL, which FreeBSD numbers its
+ * own way (<fcntl.h>: O_NONBLOCK 0x4, O_APPEND 0x8, O_SYNC 0x80) and
+ * substrate as Linux does.  They went through as they were: a FreeBSD
+ * program's fcntl(fd, F_SETFL, O_NONBLOCK) set no flag the kernel knows,
+ * the descriptor stayed blocking, and a server that reads a socket until
+ * it would block -- Wine's -- stopped in the first read with nothing
+ * there.  F_GETFL answered in substrate's numbers likewise.
+ */
+#define FBSD_O_NONBLOCK     0x0004
+#define FBSD_O_APPEND       0x0008
+#define FBSD_O_SYNC         0x0080
+
+static int freebsd_fl_in(int f) {
+    int k = f & O_ACCMODE;
+
+    if (f & FBSD_O_NONBLOCK) k |= O_NONBLOCK;
+    if (f & FBSD_O_APPEND)   k |= O_APPEND;
+    if (f & FBSD_O_SYNC)     k |= O_SYNC;
+    return k;
+}
+
+static int freebsd_fl_out(int k) {
+    int f = k & O_ACCMODE;
+
+    if (k & O_NONBLOCK) f |= FBSD_O_NONBLOCK;
+    if (k & O_APPEND)   f |= FBSD_O_APPEND;
+    if (k & O_SYNC)     f |= FBSD_O_SYNC;
+    return f;
+}
+
 int freebsd_sys_fcntl(int fd, int cmd, int arg) {
     if (cmd == FBSD_F_GETLK || cmd == FBSD_F_SETLK || cmd == FBSD_F_SETLKW)
         return freebsd_record_lock(fd, cmd, (void *)(uintptr_t)(unsigned)arg);
+    if (cmd == F_SETFL)
+        return proc_fcntl(current_process, fd, F_SETFL, freebsd_fl_in(arg));
+    if (cmd == F_GETFL) {
+        int fl = proc_fcntl(current_process, fd, F_GETFL, 0);
+
+        return fl < 0 ? fl : freebsd_fl_out(fl);
+    }
     if (cmd == FBSD_F_DUPFD_CLOEXEC) {
         int newfd = proc_fcntl(current_process, fd, 0 /*F_DUPFD*/, arg);
         if (newfd < 0) return newfd;
