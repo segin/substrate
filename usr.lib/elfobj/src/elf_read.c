@@ -128,6 +128,69 @@ static void parse_section_compression_hint(elfobj_t *obj, struct elf_section *se
     sec->compression_addralign = elf__rd32(p + 8, obj->endian);
 }
 
+static int section_file_order(const void *a, const void *b) {
+    const struct elf_section *x = *(const struct elf_section *const *)a;
+    const struct elf_section *y = *(const struct elf_section *const *)b;
+
+    if (x->offset != y->offset) {
+        return x->offset < y->offset ? -1 : 1;
+    }
+    return x->index < y->index ? -1 : x->index > y->index;
+}
+
+/*
+ * No two sections may share bytes of the file.  They are put in the
+ * order they lie in and each compared with where those before it end;
+ * each was compared with every other as it was read, and an object with
+ * a section to a function has thousands of them, which made that a
+ * quarter of the time taken to link such objects.
+ *
+ * Every section here has passed the bounds check, so offset + size is
+ * exact.
+ */
+static elf_err_t check_sections_disjoint_in_file(elfobj_t *obj) {
+    struct elf_section **by_off;
+    const struct elf_section *furthest = NULL;
+    elf_err_t err = ELF_OK;
+    size_t i, n = 0;
+
+    if (obj->section_count < 2) {
+        return ELF_OK;
+    }
+    by_off = (struct elf_section **)elf__calloc(obj->section_count, sizeof(by_off[0]));
+    if (by_off == NULL) {
+        return ELF_ERR_OOM;
+    }
+    for (i = 0; i < obj->section_count; ++i) {
+        struct elf_section *sec = obj->sections[i];
+
+        if (sec != NULL && sec->type != SHT_NOBITS && sec->size > 0) {
+            by_off[n++] = sec;
+        }
+    }
+    qsort(by_off, n, sizeof(by_off[0]), section_file_order);
+    for (i = 0; i < n; ++i) {
+        const struct elf_section *sec = by_off[i];
+
+        if (furthest != NULL && sec->offset < furthest->offset + furthest->size) {
+            if (debug_open_enabled()) {
+                fprintf(stderr,
+                        "elfobj: file-overlap idx=%zu prev=%zu off=0x%llx size=0x%llx prev_off=0x%llx prev_size=0x%llx\n",
+                        sec->index, furthest->index, (unsigned long long)sec->offset,
+                        (unsigned long long)sec->size, (unsigned long long)furthest->offset,
+                        (unsigned long long)furthest->size);
+            }
+            err = ELF_ERR_FORMAT;
+            break;
+        }
+        if (furthest == NULL || sec->offset + sec->size > furthest->offset + furthest->size) {
+            furthest = sec;
+        }
+    }
+    free(by_off);
+    return err;
+}
+
 static elf_err_t parse_sections(elfobj_t *obj, uint64_t shoff, uint16_t entsize, uint16_t shnum) {
     size_t i;
     uint64_t table_size;
@@ -187,7 +250,6 @@ static elf_err_t parse_sections(elfobj_t *obj, uint64_t shoff, uint16_t entsize,
         }
 
         if (sec->type != SHT_NOBITS && sec->size > 0) {
-            size_t j;
             /* Compare the 64-bit offset/size against image_size without
              * truncating to size_t first; on the 32-bit target a section
              * whose true span is out of file but whose low 32 bits are in
@@ -203,23 +265,8 @@ static elf_err_t parse_sections(elfobj_t *obj, uint64_t shoff, uint16_t entsize,
                 free(sec);
                 return ELF_ERR_BOUNDS;
             }
-            for (j = 0; j < obj->section_count; ++j) {
-                struct elf_section *prev = obj->sections[j];
-                if (prev == NULL || prev->type == SHT_NOBITS || prev->size == 0) {
-                    continue;
-                }
-                if (ranges_overlap_u64(prev->offset, prev->size, sec->offset, sec->size)) {
-                    if (debug_open_enabled()) {
-                        fprintf(stderr,
-                                "elfobj: file-overlap idx=%zu prev=%zu off=0x%llx size=0x%llx prev_off=0x%llx prev_size=0x%llx\n",
-                                i, j, (unsigned long long)sec->offset, (unsigned long long)sec->size,
-                                (unsigned long long)prev->offset, (unsigned long long)prev->size);
-                    }
-                    free(sec->name);
-                    free(sec);
-                    return ELF_ERR_FORMAT;
-                }
-            }
+            /* That it shares no bytes of the file with another section is
+             * checked of all of them together, below. */
             sec->data = obj->image + sec->offset;
             sec->data_cap = 0;
             sec->data_size = (size_t)sec->size;
@@ -274,7 +321,7 @@ static elf_err_t parse_sections(elfobj_t *obj, uint64_t shoff, uint16_t entsize,
         }
     }
 
-    return ELF_OK;
+    return check_sections_disjoint_in_file(obj);
 }
 
 static elf_err_t parse_program_headers(elfobj_t *obj, uint64_t phoff, uint16_t entsize, uint16_t phnum) {
