@@ -1206,6 +1206,7 @@ int tty_ioctl_kern(struct tty *tty, uint32_t cmd, uintptr_t arg) {
     if (!tty_valid(tty)) return -EIO;
     int ret = TTY_IOCTL_UNHANDLED;
     int do_hangup = 0;
+    int winch_pgrp = 0;
 
     TTY_LOCK(tty);
 
@@ -1230,7 +1231,7 @@ int tty_ioctl_kern(struct tty *tty, uint32_t cmd, uintptr_t arg) {
             break;
         case TIOCSWINSZ:
             if (arg) tty->winsize = *(struct winsize*)arg;
-            if (tty->pgrp > 0) signal_send_group(tty->pgrp, SIGWINCH);
+            winch_pgrp = tty->pgrp;     /* signalled below, unlocked */
             ret = 0;
             break;
         case TIOCSPGRP:
@@ -1342,6 +1343,11 @@ int tty_ioctl_kern(struct tty *tty, uint32_t cmd, uintptr_t arg) {
 
     if (ret == 0 && do_hangup) {
         tty_hangup(tty);
+    }
+    /* The window changed size: tell the foreground group, with the lock
+     * let go of (see tty_hangup()). */
+    if (winch_pgrp > 0) {
+        signal_send_group(winch_pgrp, SIGWINCH);
     }
 
     /* Nothing (core or driver) handled it: report the POSIX errno for an
@@ -1602,21 +1608,29 @@ void tty_close(struct tty *tty) {
 void tty_hangup(struct tty *tty) {
     if (!tty_valid(tty)) return;
     
+    /*
+     * Take the terminal from its session under the lock, and signal the
+     * foreground group after letting go of it, as tty_hangup_session()
+     * and TIOCNOTTY do.  Signalling is not the terminal's business: it
+     * takes the process and group locks, wakes threads, and can run a
+     * process's exit -- which comes back here for the same terminal.  With
+     * the lock held across it, a session leader's exit has panicked with
+     * "spinlock 'tty_lock' already held by CPU".
+     */
     TTY_LOCK(tty);
-
-    /* Send SIGHUP to foreground process group */
-    if (tty->pgrp > 0) {
-        signal_send_group(tty->pgrp, SIGHUP);
-        /* Also send SIGCONT to wake any stopped processes so they can
-         * receive SIGHUP (stopped jobs won't process signals until continued) */
-        signal_send_group(tty->pgrp, SIGCONT);
-    }
+    int pgrp = tty->pgrp;
 
     /* Disassociate terminal from session */
     tty->session = 0;
     tty->pgrp = 0;
-
     TTY_UNLOCK(tty);
+
+    /* SIGHUP to the foreground process group, and SIGCONT so that a
+     * stopped job runs to receive it. */
+    if (pgrp > 0) {
+        signal_send_group(pgrp, SIGHUP);
+        signal_send_group(pgrp, SIGCONT);
+    }
 }
 
 /*
