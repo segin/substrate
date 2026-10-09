@@ -41,6 +41,7 @@
 #include <sys/fcntl.h>
 #include <sys/file.h>
 #include <sys/kern_syscalls.h>
+#include <sys/mount.h>
 #include <sys/ldt.h>
 #include <sys/namei.h>
 #include <sys/param.h>
@@ -2750,6 +2751,9 @@ static void xenix_sendsig(void *handler, int sig, uint32_t mask,
 
 #define PCIX_SYSENT         0x80U       /* int 0x80|N */
 #define PCIX_INT_LEN        2U
+#define PCIX_ESC_FIRST      0xD8U       /* the 8087's eight opcodes ... */
+#define PCIX_ESC_LAST       0xDFU       /* ... as vectors: see pcix_syscall_at */
+#define PCIX_ESC_FIXED      0x100       /* not a call: run it again as patched */
 #define PCIX_FORK_SKIP      2U          /* the parent's return, past the child's */
 #define PCIX_UTS_UNAME      0U
 #define PCIX_UTSNAME_SIZE   (5U * X286_NMLN)
@@ -2771,6 +2775,25 @@ static int pcix_syscall_at(registers_t *regs) {
     }
     if (insn[0] != 0xCDU || insn[1] <= PCIX_SYSENT) {
         return -1;
+    }
+    /*
+     * An 8087 instruction.  PC/IX runs on machines with the coprocessor
+     * and without, so its compiler writes each one with INT (CD) where
+     * the WAIT prefix (9B) belongs: `CD D9 E0` for `9B D9 E0`, fchs.  The
+     * second byte is then the instruction's own first, D8 to DF, which is
+     * a vector; with no 8087 the kernel emulates the instruction from
+     * there, and with one it puts the WAIT back and runs it.  There is one
+     * here.  Read as a system call this was call 88 to 95, there is no
+     * such call, and the compiler -- which does its constant arithmetic
+     * this way -- died on the first floating-point number in a source.
+     */
+    if (insn[1] >= PCIX_ESC_FIRST && insn[1] <= PCIX_ESC_LAST) {
+        static const uint8_t wait_prefix = 0x9BU;
+
+        /* The text is the process's own copy.  Where it cannot be
+         * written there is nothing to run, and the trap is not ours. */
+        return copyout(&wait_prefix, (void *)linear_ip, 1) == 0
+            ? PCIX_ESC_FIXED : -1;
     }
     return insn[1] & 0x7FU;
 }
@@ -2803,14 +2826,99 @@ static int64_t pcix_sys_wait(struct x286_frame *f) {
     return pid & 0xFFFF;
 }
 
+/*
+ * ustat(dev, buf): how much is free on the filesystem whose device number
+ * -- the st_dev that stat(2) reports -- is `dev`.  It comes as utssys with
+ * 2 for its third argument, the buffer first and the device second: the
+ * order the C library pushes them in, which is not the order the comment
+ * in PC/IX's <sys.s> gives.
+ */
+struct pcix_ustat {
+    int32_t  f_tfree;               /* free blocks, of 512 bytes */
+    uint16_t f_tinode;              /* free inodes */
+    char     f_fname[6];            /* the filesystem's name */
+    char     f_fpack[6];            /* and its pack's */
+} __attribute__((packed));
+
+static int64_t pcix_sys_ustat(struct x286_frame *f) {
+    struct pcix_ustat out;
+    struct statfs ns;
+    struct mount *mp;
+    const char *name;
+    uint64_t blocks;
+    uintptr_t dst;
+    size_t len;
+    int rc = x286_ds_span(f, f->bx, sizeof(out), &dst);
+
+    if (rc != 0) {
+        return rc;
+    }
+    TAILQ_FOREACH(mp, &mountlist, mnt_list) {
+        /* The number a PC/IX program was given by stat: 16 bits of it. */
+        if ((uint16_t)mp->mnt_dev == (uint16_t)f->cx && mp->mnt_node_root) {
+            break;
+        }
+    }
+    if (mp == NULL) {
+        return -EINVAL;
+    }
+    memset(&ns, 0, sizeof(ns));
+    rc = statfs_fs(mp->mnt_node_root, &ns);
+    if (rc != 0) {
+        return rc;
+    }
+    memset(&out, 0, sizeof(out));
+    blocks = (uint64_t)ns.f_bfree * (ns.f_bsize ? (uint64_t)ns.f_bsize : 512U) / 512U;
+    out.f_tfree = blocks > 0x7fffffffU ? 0x7fffffff : (int32_t)blocks;
+    out.f_tinode = ns.f_ffree > 0xffffU ? 0xffffU : (uint16_t)ns.f_ffree;
+    name = strrchr(mp->mnt_stat.f_mntonname, '/');
+    name = (name && name[1]) ? name + 1 : "root";
+    len = strlen(name);             /* six bytes, not terminated at six */
+    memcpy(out.f_fname, name, len < sizeof(out.f_fname) ? len : sizeof(out.f_fname));
+    memcpy((void *)dst, &out, sizeof(out));
+    return 0;
+}
+
+/*
+ * lockf(fd, mode, size): System III's record lock, on `size` bytes from
+ * where the descriptor is, 0 for to the end.  F_ULOCK (0) unlocks, F_LOCK
+ * (1) waits for the bytes and F_TLOCK (2) fails with EACCES if another
+ * process has any of them.  They are the kernel's exclusive record locks.
+ */
+#define PCIX_F_ULOCK 0
+#define PCIX_F_LOCK  1
+#define PCIX_F_TLOCK 2
+
+static int64_t pcix_sys_lockf(struct x286_frame *f) {
+    int fd = (int)(int16_t)f->bx;
+    int32_t size = (int32_t)((uint32_t)f->si | ((uint32_t)f->di << 16));
+    struct kflock kf;
+    int rc;
+
+    if (f->cx > PCIX_F_TLOCK) {
+        return -EINVAL;
+    }
+    memset(&kf, 0, sizeof(kf));
+    kf.l_type = f->cx == PCIX_F_ULOCK ? F_UNLCK : F_WRLCK;
+    kf.l_whence = 1;                /* from where the descriptor is */
+    kf.l_start = 0;
+    kf.l_len = size;                /* negative: the bytes before it */
+    rc = proc_advlock(current_process, fd,
+                      f->cx == PCIX_F_LOCK ? F_SETLKW : F_SETLK, &kf);
+    return rc == -EAGAIN ? -EACCES : rc;
+}
+
 static int64_t pcix_sys_utssys(struct x286_frame *f) {
     struct utsname native;
     struct x286_utsname out;
     uintptr_t dst;
     int rc;
 
+    if (f->si == 2) {
+        return pcix_sys_ustat(f);
+    }
     if (f->si != PCIX_UTS_UNAME) {
-        return -EINVAL;             /* ustat */
+        return -EINVAL;
     }
     rc = x286_ds_span(f, f->bx, sizeof(out), &dst);
     if (rc != 0) {
@@ -2853,6 +2961,12 @@ static int64_t pcix_call(struct x286_frame *f) {
     case X286_SYS_signal:
         f->si = 0;                  /* a near handler: no selector */
         return x286_sys_signal(f);
+    case X286_SYS_plock:            /* 45 is lockf here */
+        return pcix_sys_lockf(f);
+    case X286_SYS_profil:
+        /* Taken, and no samples are: a program built to be profiled runs,
+         * and writes a mon.out of zeros. */
+        return 0;
     case X286_SYS_brk:              /* the library's, not the kernel's */
     case X286_SYS_exec:             /* only exece */
     case X286_SYS_xenix:
@@ -2892,6 +3006,9 @@ static int pcix_handle_trap(void *regs_ptr) {
     nr = pcix_syscall_at(regs);
     if (nr < 0) {
         return 0;
+    }
+    if (nr == PCIX_ESC_FIXED) {
+        return 1;                   /* back to the same eip, now a WAIT */
     }
 
     /* Four words of arguments, above the word where a return address

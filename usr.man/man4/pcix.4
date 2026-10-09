@@ -97,15 +97,55 @@ which reports
 .B PC/IX
 release 1.0 on an
 .BR ibmpc .
+Function 2 is
+.BR ustat (2):
+the free blocks and inodes of the filesystem whose device number is the
+.I st_dev
+that
+.BR stat (2)
+reported.
+.TP
+.B lockf
+System III's record lock on bytes of a file from the descriptor's
+position:
+.B F_ULOCK
+unlocks,
+.B F_LOCK
+waits and
+.B F_TLOCK
+fails with
+.B EACCES
+if another process holds any of them.  They are
+.BR fcntl (2)'s
+exclusive record locks, and go when the file is closed.
+.TP
+.B profil
+Accepted; no samples are taken, so a program built for profiling runs and
+writes a
+.I mon.out
+of zeros.
 .PP
 The Xenix extensions, the System V IPC calls,
 .BR brk ,
-.BR ustat ,
+.BR ptrace ,
 .B halt
 and
 .B inuinfo
 fail with
 .BR EINVAL .
+.SS Floating point
+PC/IX's compiler writes every 8087 instruction with
+.B INT
+where its
+.B WAIT
+prefix belongs
+.RB ( "CD D9 E0"
+for
+.BR "9B D9 E0" ),
+so that a kernel on a machine without the coprocessor can emulate it from
+the trap and one with it can put the prefix back.  The personality puts
+it back, in the process's own copy of its text, and the instruction runs
+on the processor's floating-point unit.
 .SS Signals
 A handler is entered with the signal number, the flags and the
 interrupted instruction pointer pushed, the number on top, and every

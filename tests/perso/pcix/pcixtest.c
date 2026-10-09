@@ -22,6 +22,8 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/utsname.h>
+#include <ustat.h>
+#include <sys/lockf.h>
 
 extern int errno;
 extern long lseek();
@@ -54,6 +56,8 @@ char **argv, **envp;
 {
 	struct stat st;
 	struct utsname un;
+	struct ustat us;
+	double x, y;
 	char buf[64];
 	long t, off;
 	int fd, pid, status, p[2], n, (*old)();
@@ -208,6 +212,59 @@ char **argv, **envp;
 	wait(&status);
 	check("a killed child's status is the signal", (long)status,
 	    status == SIGTERM);
+
+	/* --- ustat, lockf, floating point --------------------------------- */
+	stat("/tmp", &st);
+	us.f_tfree = -1L;
+	n = ustat(st.st_dev, &us);
+	check("ustat of the device /tmp is on", (long)n, n == 0);
+	check("  free blocks", (long)us.f_tfree, us.f_tfree > 0L);
+	check("  free inodes", (long)us.f_tinode, us.f_tinode > 0);
+	n = ustat(0x7abc, &us);
+	check("ustat of no such device fails", (long)n, n == -1);
+
+	fd = creat("pcixtest.lck", 0644);
+	write(fd, "0123456789", 10);
+	close(fd);
+	fd = open("pcixtest.lck", 2);
+	n = lockf(fd, F_TLOCK, 0L);
+	check("lockf(fd, F_TLOCK, 0): the whole file", (long)n, n == 0);
+	pid = fork();
+	if (pid == 0) {
+		int g = open("pcixtest.lck", 2);
+
+		errno = 0;
+		n = lockf(g, F_TLOCK, 0L);
+		_exit(n == -1 && errno == EACCES ? 7 : 8);
+	}
+	wait(&status);
+	check("another process is refused with EACCES", (long)status,
+	    status == (7 << 8));
+	pipe(p);
+	pid = fork();
+	if (pid == 0) {
+		int g = open("pcixtest.lck", 2);
+
+		n = lockf(g, F_LOCK, 0L);
+		write(p[1], n == 0 ? "c" : "x", 1);
+		_exit(0);
+	}
+	sleep(1);
+	write(p[1], "p", 1);
+	lockf(fd, F_ULOCK, 0L);
+	wait(&status);
+	n = read(p[0], buf, 2);
+	check("F_LOCK waited for the unlock", (long)n,
+	    n == 2 && buf[0] == 'p' && buf[1] == 'c');
+	close(fd);
+	unlink("pcixtest.lck");
+
+	x = 1.5;
+	y = 2.25;
+	check("floating point: 1.5 * 2.25 * 100", (long)(x * y * 100.0),
+	    (long)(x * y * 100.0) == 337L);
+	check("  and 10.0 / 4.0 * 10", (long)(10.0 / 4.0 * 10.0),
+	    (long)(10.0 / 4.0 * 10.0) == 25L);
 
 	printf("pcixtest: %s\n", fails ? "FAIL" : "PASS");
 	exit(fails != 0);

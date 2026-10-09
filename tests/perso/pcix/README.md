@@ -21,7 +21,7 @@ Every line reads `ok`, and the last is `pcixtest: PASS`.
 
 ## What it checks
 
-43 checks against what `/usr/include/sys.s` on the media says the system
+52 checks against what `/usr/include/sys.s` on the media says the system
 calls do, with the weight on where PC/IX differs from the Xenix/286 calls
 that implement it:
 
@@ -40,4 +40,11 @@ that implement it:
   the signal number and returning to the interrupted code with its
   registers, the disposition reset on delivery, an ignored signal, `alarm`
   and `pause`, **the same signal delivered a second time**, and the status
-  of a child killed by a signal.
+  of a child killed by a signal;
+- `ustat` of the device a file is on, and of none;
+- `lockf`: the whole file, refused to another process, and waited for;
+- floating point.  This one is a check of the compiler as much as of the
+  test: PC/IX writes an 8087 instruction with `INT` in place of its `WAIT`
+  prefix, the compiler does its constant arithmetic that way, and until
+  the personality knew to put the prefix back **a source with a
+  floating-point number in it did not compile**.
