@@ -60,6 +60,14 @@ boot flags.
 .B elf
 Enable verbose ELF loader and exec handoff tracing.
 .TP
+.B exec
+Say on the console when
+.BR execve (2)
+is given a file that is a program of no format the kernel knows, which
+it otherwise answers with
+.B ENOEXEC
+and nothing more.
+.TP
 .B trap
 Log user trap-to-signal translations before normal signal delivery.
 .TP

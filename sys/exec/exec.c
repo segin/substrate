@@ -14,6 +14,7 @@
 #include <exec/formats/elks_aout.h>
 #include <exec/formats/script.h>
 #include <exec/formats/xout.h>
+#include <kern/cmdline.h>
 #include <kern/console.h>
 #include <kern/sched.h>
 #include <sys/errno.h>
@@ -264,7 +265,14 @@ int exec_dispatch(const char *path, char *const argv[], char *const envp[]) {
         return elf_execve(fd, path, argv, envp);
     }
 
-    {
+    /*
+     * Not a program of any format known here.  That is an ordinary answer
+     * and the caller's to act on: a shell of Version 7 or System III runs
+     * a script by trying to exec it, getting ENOEXEC and reading it
+     * itself, and saying so on the console put a line there for every
+     * script such a system started.  `debug=exec` asks for the line.
+     */
+    if (cmdline_debug_enabled("exec")) {
         char buf[96];
         snprintf(buf, sizeof(buf), "exec: no handler matched %s\n", path);
         kprint(buf);
