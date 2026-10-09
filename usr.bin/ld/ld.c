@@ -240,6 +240,37 @@ static int ensure_substrate_ld_note(elfobj_t *out) {
     return 0;
 }
 
+/*
+ * Where an input section goes when no script says: into the section whose
+ * name its own begins with.  A compiler asked to (-ffunction-sections), and
+ * a C++ compiler unasked, gives each function and each inline function's
+ * tables a section of their own, .text.NAME and .gcc_except_table.NAME, so
+ * that a linker can leave out or share them one by one; they are parts of
+ * .text and .gcc_except_table all the same, and a program is not better
+ * for a hundred sections where it had seven.
+ *
+ * The constructor tables are not gathered: .init_array.00100 comes before
+ * .init_array.65535 by its number, which appending in input order would
+ * not respect.  Nor is a relocatable output's anything, which the next
+ * link is to see as this one did.
+ */
+static const char *default_output_name(const char *section, const char *file, void *user) {
+    static const char *const gathered[] = { ".text", ".rodata", ".data.rel.ro", ".data", ".bss",
+                                            ".tdata", ".tbss", ".gcc_except_table", NULL };
+    size_t i;
+
+    (void)file;
+    (void)user;
+    for (i = 0; gathered[i] != NULL; ++i) {
+        size_t n = strlen(gathered[i]);
+
+        if (strncmp(section, gathered[i], n) == 0 && section[n] == '.') {
+            return gathered[i];
+        }
+    }
+    return section;
+}
+
 static int run_internal_link(ld_ctx_t *ctx) {
     objvec_t inputs;
     symref_map_t undef_refs;
@@ -297,6 +328,8 @@ static int run_internal_link(ld_ctx_t *ctx) {
         }
         if (err == ELF_OK && ctx->script != NULL && ctx->script->has_sections) {
             err = elf_link_plan_set_section_name_hook(plan, script_output_name, ctx->script);
+        } else if (err == ELF_OK && ctx->expect_type != ET_REL) {
+            err = elf_link_plan_set_section_name_hook(plan, default_output_name, NULL);
         }
         if (err == ELF_OK) {
             err = elf_link_plan_link(plan, &out);

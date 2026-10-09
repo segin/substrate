@@ -93,6 +93,9 @@ short writes and close errors checked.
   Evidence: `ld.c:10070` only passes through an input section of that name; `--eh-frame-hdr` is ignored (`11577`).  Basis: verified absent.  Task #99.
 - [x] **LD-OUT-003** The linker shall not emit a loadable segment for sections that are all empty, and shall honour each section's alignment in its address.
   Evidence: `ld.c:10038-10047` with `elf_write.c:1412, 1458-1467`; `9453-9470` align the file offset.  Basis: traced.  Task #100.
+- [x] **LD-OUT-007** Where no linker script places sections, the linker shall gather `.text.*`, `.rodata.*`, `.data.rel.ro.*`, `.data.*`, `.bss.*`, `.tdata.*`, `.tbss.*` and `.gcc_except_table.*` into the section named by the prefix, except in a relocatable output.
+  Evidence: found after the audit, linking a C++ program through `g++ -B`: 97 output sections.  Basis: observed.  Task #120.
+  Met: `default_output_name` through the section-name hook; elfobj no longer treats differing `SHF_MERGE`/entry size as an error when sections are gathered.  The same program has 41 sections and still catches its exception on the target.
 - [x] **LD-OUT-004** If no entry symbol is defined, then the linker shall warn and shall not substitute an arbitrary symbol.
   Evidence: `ld.c:10217-10242, 10258`.  Basis: traced.  Task #101.
 - [x] **LD-OUT-005** When writing its output, the linker shall write through an existing non-regular file or symbolic link rather than replace it, shall honour the umask, and shall remove the output if the link fails after it was written.

@@ -518,6 +518,11 @@ int strip_group_sections_for_final(elfobj_t *obj) {
         }
         name = elf_section_name(sec);
         if (name == NULL || strcmp(name, ".group") != 0) {
+            /* With the groups gone nothing is a member of one. */
+            if ((elf_section_flags(sec) & SHF_GROUP) != 0 &&
+                elf_section_set_flags(sec, elf_section_flags(sec) & ~(uint64_t)SHF_GROUP) != ELF_OK) {
+                return -1;
+            }
             i++;
             continue;
         }

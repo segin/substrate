@@ -285,6 +285,28 @@ Write a reproducible link bundle containing object snapshots, manifest, and repl
 .It Fl -compat Ns = Ns Ar gnu|lld
 Set unsupported-option policy for compatibility behavior.
 .El
+.Sh SECTIONS
+With no linker script an input section goes to the output section of its
+own name, except that a section named
+.Pa .text.NAME ,
+.Pa .rodata.NAME ,
+.Pa .data.rel.ro.NAME ,
+.Pa .data.NAME ,
+.Pa .bss.NAME ,
+.Pa .tdata.NAME ,
+.Pa .tbss.NAME
+or
+.Pa .gcc_except_table.NAME
+goes to the section named without the
+.Pa .NAME .
+The constructor tables
+.Pq Pa .init_array.N
+are not gathered, and with
+.Fl r
+nothing is.
+Where sections of strings or constants
+.Pq Dv SHF_MERGE
+are gathered with others the result is not marked as such.
 .Sh LINKER SCRIPTS
 The script named by
 .Fl T

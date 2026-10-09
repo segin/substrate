@@ -72,6 +72,20 @@ is "-S leaves it out"                 "$(readelf -SW nodebug | grep -c '\.debug'
 is "no relocation sections in a program" "$(readelf -SW withdebug | grep -c ' \.rel\.')" 0
 is "-q keeps them"                    "$(readelf -SW withrel | grep -c ' \.rel\.text')" 1
 
+# With no script, a function's own section is part of .text, and the same
+# for the data, the constants and the exception tables; strings and
+# constants gathered into .rodata with other things make plain bytes.  A
+# relocatable output keeps every section as it came.
+printf 'const char *s(void) { return "a string"; }\ndouble d(void) { return 2.5; }\nint v = 3; static int z;\nint f(void) { return v + z; }\nvoid _start(void) { f(); s(); d(); for (;;) { } }\n' > fold.c
+$cc32 -O1 -ffunction-sections -fdata-sections -o fold.o fold.c
+./ld -m elf_i386 -o folded fold.o; ./ld -m elf_i386 -r -o unfolded.o fold.o
+is "no .text.NAME left"               "$(readelf -SW folded | grep -c ' \.text\.')" 0
+is "nor .rodata.NAME, .data.NAME, .bss.NAME" "$(readelf -SW folded | grep -c -E ' \.(rodata|data|bss)\.')" 0
+is "the functions are in .text"       "$(nm folded | awk '$3 == "f" || $3 == "s" || $3 == "d" { print $2 }' | sort -u)" T
+is ".rodata is plain bytes"           "$(readelf -SW folded | sed -n 's/.* \.rodata  *PROGBITS  *[0-9a-f]* [0-9a-f]* [0-9a-f]* \([0-9a-f]*\)  *\([A-Z]*\) .*/\1 \2/p')" "00 A"
+is "no section is in a group"         "$(readelf -SW folded | grep -c -E ' [WAXMSILOTCE]*G[WAXMSILOTCE]* +[0-9]+ +[0-9]+ +[0-9]+$')" 0
+is "-r keeps them apart"              "$(( $(readelf -SW unfolded.o | grep -c ' \.text\.') > 0 ))" 1
+
 # Nothing to load is no segment; and a section aligned to more than a page
 # is at an address so aligned and at the place in the file that its
 # segment maps there.

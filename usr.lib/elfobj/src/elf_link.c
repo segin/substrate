@@ -727,15 +727,24 @@ static elf_err_t merge_sections(elf_link_plan_t *plan, elfobj_t *out,
             if (src_align > dst->addralign) {
                 dst->addralign = src_align;
             }
-            dst->flags |= src_flags;
-            if (src->entsize != 0) {
+            /*
+             * SHF_MERGE and an entry size say that a section is a table
+             * of equal entries, or of strings, that may be searched for
+             * duplicates.  Two inputs that say it alike make a section
+             * that says it too.  Where they differ -- strings going in
+             * with constants, either with plain data, as when .rodata.*
+             * is gathered into .rodata -- the result is plain bytes, and
+             * says nothing; it is not an error.
+             */
+            if (((dst->flags ^ src_flags) & (SHF_MERGE | SHF_STRINGS)) != 0 ||
+                (dst->entsize != src->entsize && dst->entsize != 0 && src->entsize != 0) ||
+                ((dst->flags & SHF_MERGE) != 0 && dst->entsize != src->entsize)) {
+                dst->flags = (dst->flags | src_flags) & ~(uint64_t)(SHF_MERGE | SHF_STRINGS);
+                dst->entsize = 0;
+            } else {
+                dst->flags |= src_flags;
                 if (dst->entsize == 0) {
                     dst->entsize = src->entsize;
-                } else if (dst->entsize != src->entsize) {
-                    elf__set_err(out, ELF_ERR_FORMAT, "section entsize mismatch during merge");
-                    (void)elf__append_diag(out, src->name);
-                    free(sec_discard);
-                    return ELF_ERR_FORMAT;
                 }
             }
         }
