@@ -1173,6 +1173,23 @@ int apply_all_relocations(elfobj_t *obj, const ld_ctx_t *ctx, int allow_undefine
                         sec_name, (unsigned long long)off, type, undef_name != NULL ? undef_name : sym_name);
                 return -1;
             }
+            if ((machine == EM_386 && type == R_386_SIZE32) ||
+                (machine == EM_X86_64 && (type == R_X86_64_SIZE32 || type == R_X86_64_SIZE64))) {
+                /* sym@SIZE: how big the thing is, not where. */
+                if (sym == NULL || elf_symbol_shndx(sym) == SHN_UNDEF) {
+                    if ((flags & SHF_ALLOC) == 0) {
+                        continue;
+                    }
+                    free(buf);
+                    fprintf(stderr,
+                            "ld: relocation error: section=%s offset=0x%llx type=%s symbol=%s: "
+                            "the size of a symbol that is not defined in the output is not known\n",
+                            sec_name, (unsigned long long)off, elf_reloc_name_for_machine(machine, type), sym_name);
+                    return -1;
+                }
+                write_uint_bytes(buf + off, width, endian, elf_symbol_size(sym) + (uint64_t)addend);
+                continue;
+            }
             /* The address of something that may be preempted is the
              * dynamic linker's to put here, by the relocation made for
              * it; what is here stays the addend. */

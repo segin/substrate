@@ -86,6 +86,23 @@ is ".rodata is plain bytes"           "$(readelf -SW folded | sed -n 's/.* \.rod
 is "no section is in a group"         "$(readelf -SW folded | grep -c -E ' [WAXMSILOTCE]*G[WAXMSILOTCE]* +[0-9]+ +[0-9]+ +[0-9]+$')" 0
 is "-r keeps them apart"              "$(( $(readelf -SW unfolded.o | grep -c ' \.text\.') > 0 ))" 1
 
+# sym@SIZE is how big the thing is, and not where it is.
+cat > size.s <<'EOF'
+        .data
+        .globl table, table_size
+table:  .long 1, 2, 3, 4, 5
+        .size table, .-table
+table_size:
+        .long table@SIZE
+        .long table@SIZE-4
+        .text
+        .globl _start
+_start: jmp _start
+EOF
+${CC:-cc} -m32 -c -o size.o size.s && ./ld -m elf_i386 -o sized size.o
+soff=$(( 0x$(readelf -SW sized | sed -n 's/.* \.data  *PROGBITS  *[0-9a-f]* \([0-9a-f]*\) .*/\1/p') + 20 ))
+is "sym@SIZE is the symbol's size"    "$(od -An -tu4 -j"$soff" -N8 sized | tr -s ' ' | sed 's/^ //')" "20 16"
+
 # Nothing to load is no segment; and a section aligned to more than a page
 # is at an address so aligned and at the place in the file that its
 # segment maps there.
