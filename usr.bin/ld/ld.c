@@ -10516,7 +10516,15 @@ static int plan_local_got_i386(ld_ctx_t *ctx, elfobj_t *out) {
                 continue;
             }
             need_base = 1;
-            if (!reloc_is_i386_got_slot(type) || sym == NULL ||
+            /*
+             * A slot holds an address, and in a shared object or a PIE an
+             * address is not known until it is loaded: a slot there would
+             * need a relocation of its own for the dynamic linker, which
+             * is not made.  Such an output gets the table for a base and
+             * no slots, and its references to what it defines are turned
+             * into direct ones as they are applied.
+             */
+            if (elf_type(out) == ET_DYN || !reloc_is_i386_got_slot(type) || sym == NULL ||
                 elf_symbol_shndx(sym) == SHN_UNDEF ||
                 local_got_slot_lookup(ctx, sym) >= 0) {
                 continue;
