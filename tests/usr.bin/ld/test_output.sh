@@ -86,6 +86,43 @@ is ".rodata is plain bytes"           "$(readelf -SW folded | sed -n 's/.* \.rod
 is "no section is in a group"         "$(readelf -SW folded | grep -c -E ' [WAXMSILOTCE]*G[WAXMSILOTCE]* +[0-9]+ +[0-9]+ +[0-9]+$')" 0
 is "-r keeps them apart"              "$(( $(readelf -SW unfolded.o | grep -c ' \.text\.') > 0 ))" 1
 
+# --gc-sections leaves out what nothing uses: decided of the inputs'
+# sections, from the entry, what is exported, what runs unasked and what a
+# script says to keep.
+cat > gc.c <<'EOF'
+int used_value = 3;
+int unused_value = 99;
+static int __attribute__((noinline)) helper(int x) { return x * 2; }
+int __attribute__((noinline)) used(int x) { return helper(x) + used_value; }
+int unused_one(int x) { return x + unused_value; }
+int unused_two(int x) { return unused_one(x) + 1; }
+static void at_start(void) __attribute__((constructor, used));
+static void at_start(void) { used_value++; }
+int walked __attribute__((section("walked_set"))) = 1;
+int kept_by_script __attribute__((section(".keepme"))) = 2;
+volatile int sink;
+void _start(void) { sink = used(1); for (;;) { } }
+EOF
+$cc32 -O1 -ffunction-sections -fdata-sections -o gc.o gc.c
+./ld -m elf_i386 -o nogc gc.o
+./ld -m elf_i386 --gc-sections --print-gc-sections -o gced gc.o 2> gc.err
+has() { nm "$1" | awk -v s="$2" '$3 == s { n = 1 } END { print n + 0 }'; }
+is "--gc-sections: what is called stays"   "$(has gced used)$(has gced helper)$(has gced used_value)" 111
+is "what nothing uses goes"                "$(has gced unused_one)$(has gced unused_two)$(has gced unused_value)" 000
+is "it was there without the option"       "$(has nogc unused_one)$(has nogc unused_value)" 11
+is "a constructor stays"                   "$(has gced at_start)" 1
+is "a section that can be walked by name stays" "$(has gced walked)" 1
+is "nothing asked for .keepme"             "$(has gced kept_by_script)" 0
+is "--print-gc-sections names what went"   "$(grep -c 'removing \.text\.unused_one in gc\.o' gc.err)" 1
+printf 'SECTIONS { .text : { *(.text .text.*) } .data : { *(.data .data.*) KEEP(*(.keepme)) *(walked_set) } }\n' > gc.lds
+./ld -m elf_i386 --gc-sections -T gc.lds -o gcscript gc.o
+is "a script's KEEP keeps"                 "$(has gcscript kept_by_script)$(has gcscript unused_one)" 10
+$cc32 -fPIC -O1 -ffunction-sections -fdata-sections -o gcpic.o gc.c
+./ld -m elf_i386 -shared --gc-sections -o gc.so gcpic.o
+is "a shared object keeps what it exports" "$(has gc.so unused_one)$(has gc.so unused_value)" 11
+./ld -m elf_i386 -r --gc-sections -o gcrel.o gc.o
+is "a relocatable output keeps everything" "$(has gcrel.o unused_one)" 1
+
 # sym@SIZE is how big the thing is, and not where it is.
 cat > size.s <<'EOF'
         .data

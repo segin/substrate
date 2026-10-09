@@ -236,10 +236,41 @@ Keep the relocation sections in an executable or shared object.
 .It Fl -build-id
 Accepted, in either form; no build ID is made.
 .It Fl -gc-sections
-Enable section garbage collection.
+Leave out the input sections that nothing uses.
+A section is used if it holds the entry or a symbol named by
+.Fl -undefined ,
+if it holds what the output exports
+.Po
+every global symbol of a shared object, or of anything linked with
+.Fl -export-dynamic ;
+in a program, what the shared objects of the link refer to
+.Pc ,
+if it runs without being called
+.Po
+.Pa .init ,
+.Pa .fini ,
+the constructor and destructor arrays
+.Pc ,
+if it is a note, is flagged
+.Dv SHF_GNU_RETAIN ,
+has a name that is a C identifier, or is named in a linker script's
+.Ic KEEP ,
+or if a section that is used refers to it.
+.Pa .eh_frame
+is kept, and a function's exception table with the function.
+Sections that are not loaded are kept.
+The decision is made of the inputs' sections before they are gathered,
+so it is of use with objects compiled
+.Fl ffunction-sections
+and
+.Fl fdata-sections ;
+with
+.Fl r
+it does nothing.
 .It Fl -print-gc-sections
-Print removed sections while doing
-.Fl -gc-sections .
+Name each section left out by
+.Fl -gc-sections ,
+and the input it was in.
 .It Fl -icf Ns = Ns Ar mode
 Enable identical code/data folding in
 .Ar safe

@@ -29,153 +29,451 @@ static int is_gc_candidate_section(const elf_section_t *sec) {
     return 1;
 }
 
-static int mark_live_section(uint8_t *live, size_t count, uint16_t shndx, int *changed) {
-    size_t idx;
+/*
+ * --gc-sections: leaving out what nothing uses.
+ *
+ * What can be left out is a section, and the sections worth asking about
+ * are the inputs' -- a compiler given -ffunction-sections and
+ * -fdata-sections puts each function and variable in one of its own for
+ * exactly this.  Once the inputs are merged there is one .text, and it is
+ * either used or not; so this runs before the merge, on the input objects,
+ * and hands the result to the merge as a list of sections not to take.
+ *
+ * A section is live if it is a root, or a live section refers to it: the
+ * symbol a relocation names is in some section, of this object or, for a
+ * global, of whichever object the link takes its definition from.  The
+ * roots are what is reached from outside the code that can be seen:
+ *
+ *   - the section the entry is in, and each symbol named by -u;
+ *   - what the output exports: in a shared object, or with
+ *     --export-dynamic, every global of default visibility; in a program,
+ *     what the shared objects of the link refer to;
+ *   - what the startup code runs without being called by name: .init and
+ *     .fini, the constructor and destructor arrays and tables;
+ *   - notes, and sections flagged SHF_GNU_RETAIN;
+ *   - sections whose name is a C identifier, since code may walk one from
+ *     __start_NAME to __stop_NAME without naming anything in it;
+ *   - what a linker script says to KEEP.
+ *
+ * Two kinds of section point at code without using it.  .eh_frame has a
+ * record for every function, and following those would keep every
+ * function: it is kept whole and only its references to global symbols
+ * are followed (the personality routine).  A function's exception table,
+ * .gcc_except_table.NAME, is referred to from .eh_frame alone, so it is
+ * found from there once the function is known to be live
+ * (gc_mark_exception_tables).  What .eh_frame says about a function that
+ * is gone is left as it was, pointing nowhere that is code.
+ *
+ * Sections that are not loaded (debugging information) are neither
+ * roots nor candidates: they stay, and are not followed.
+ */
+typedef struct {
+    const elf_symbol_t *sym;
+    size_t obj;
+} gc_def_t;
 
-    if (live == NULL || changed == NULL) {
-        return -1;
+typedef struct {
+    const ld_ctx_t *ctx;
+    const objvec_t *inputs;
+    uint8_t **live;             /* live[i][s]: section s of input i */
+    gc_def_t *defs;             /* global definitions, by name; of one name
+                                 * the one the link will take comes first */
+    size_t def_count;
+    size_t *work;               /* pairs: input, section */
+    size_t work_count;
+    size_t work_cap;
+} gc_state_t;
+
+static int gc_def_cmp(const void *a, const void *b) {
+    const gc_def_t *x = (const gc_def_t *)a;
+    const gc_def_t *y = (const gc_def_t *)b;
+    int c = strcmp(elf_symbol_name(x->sym), elf_symbol_name(y->sym));
+    int xw = elf_symbol_bind(x->sym) == STB_WEAK;
+    int yw = elf_symbol_bind(y->sym) == STB_WEAK;
+
+    if (c != 0) {
+        return c;
     }
-    if (shndx == SHN_UNDEF || shndx == SHN_ABS || shndx == SHN_COMMON || shndx >= 0xff00) {
+    if (xw != yw) {
+        return xw - yw;         /* a strong definition before a weak one */
+    }
+    return x->obj < y->obj ? -1 : x->obj > y->obj;
+}
+
+static const gc_def_t *gc_find_def(const gc_state_t *st, const char *name) {
+    size_t lo = 0, hi = st->def_count;
+
+    while (lo < hi) {
+        size_t mid = lo + (hi - lo) / 2;
+
+        if (strcmp(elf_symbol_name(st->defs[mid].sym), name) < 0) {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+    return lo < st->def_count && strcmp(elf_symbol_name(st->defs[lo].sym), name) == 0 ? &st->defs[lo] : NULL;
+}
+
+static int gc_symbol_is_defined(const elf_symbol_t *sym) {
+    uint16_t shndx = elf_symbol_shndx(sym);
+
+    return shndx != SHN_UNDEF && shndx != SHN_ABS && shndx != SHN_COMMON && shndx < 0xff00;
+}
+
+/*
+ * Which of an object's sections a section number means.  An object read
+ * from a file has the null section the format begins with as its first,
+ * so the numbers are the positions; one built in memory does not, and
+ * they are one more.
+ */
+static size_t gc_section_of(const elfobj_t *o, uint32_t shndx) {
+    const elf_section_t *first = elf_section_count(o) != 0 ? elf_section_get(o, 0) : NULL;
+
+    return first != NULL && elf_section_type(first) == SHT_NULL ? (size_t)shndx : (size_t)shndx - 1;
+}
+
+static int gc_mark(gc_state_t *st, size_t obj, size_t sec_index) {
+    elfobj_t *o = st->inputs->objs[obj];
+
+    if (sec_index >= elf_section_count(o) || st->live[obj][sec_index] ||
+        !is_gc_candidate_section(elf_section_get(o, sec_index))) {
         return 0;
     }
-    if (shndx == 0 || (size_t)(shndx - 1) >= count) {
-        return -1;
+    st->live[obj][sec_index] = 1;
+    if (st->work_count + 2 > st->work_cap) {
+        size_t ncap = st->work_cap ? st->work_cap * 2 : 256;
+        size_t *n = (size_t *)realloc(st->work, ncap * sizeof(n[0]));
+
+        if (n == NULL) {
+            return -1;
+        }
+        st->work = n;
+        st->work_cap = ncap;
     }
-    idx = (size_t)(shndx - 1);
-    if (!live[idx]) {
-        live[idx] = 1;
-        *changed = 1;
+    st->work[st->work_count++] = obj;
+    st->work[st->work_count++] = sec_index;
+    return 0;
+}
+
+/* The section a symbol met in input `obj` is in, as the link will bind it. */
+static int gc_mark_symbol(gc_state_t *st, size_t obj, const elf_symbol_t *sym) {
+    const char *name = sym != NULL ? elf_symbol_name(sym) : NULL;
+
+    if (sym == NULL) {
+        return 0;
+    }
+    if (elf_symbol_bind(sym) != STB_LOCAL && name != NULL && name[0] != '\0') {
+        const gc_def_t *def = gc_find_def(st, name);
+
+        if (def != NULL) {
+            return gc_mark(st, def->obj, gc_section_of(st->inputs->objs[def->obj], elf_symbol_shndx(def->sym)));
+        }
+    }
+    return gc_symbol_is_defined(sym)
+               ? gc_mark(st, obj, gc_section_of(st->inputs->objs[obj], elf_symbol_shndx(sym))) : 0;
+}
+
+/* A section group stands or falls together. */
+static int gc_mark_group_of(gc_state_t *st, size_t obj, size_t sec_index) {
+    elfobj_t *o = st->inputs->objs[obj];
+    size_t g;
+
+    for (g = 0; g < elf_section_count(o); ++g) {
+        const elf_section_t *grp = elf_section_get(o, g);
+        const uint8_t *words;
+        size_t sz = 0, w;
+        int member = 0;
+
+        if (grp == NULL || elf_section_type(grp) != SHT_GROUP) {
+            continue;
+        }
+        words = (const uint8_t *)elf_section_data(grp, &sz);
+        for (w = 1; words != NULL && (w + 1) * 4 <= sz; ++w) {
+            uint32_t idx = read_u32_endian(words + w * 4, elf_endian(o));
+
+            member |= idx != 0 && gc_section_of(o, idx) == sec_index;
+        }
+        for (w = 1; member && (w + 1) * 4 <= sz; ++w) {
+            uint32_t idx = read_u32_endian(words + w * 4, elf_endian(o));
+
+            if (idx != 0 && gc_mark(st, obj, gc_section_of(o, idx)) != 0) {
+                return -1;
+            }
+        }
     }
     return 0;
 }
 
-static void mark_group_peers_live(elfobj_t *obj, uint8_t *live, size_t count, int *changed) {
+static int gc_name_is(const char *name, const char *prefix) {
+    size_t n = strlen(prefix);
+
+    return name != NULL && strncmp(name, prefix, n) == 0 && (name[n] == '\0' || name[n] == '.');
+}
+
+static int gc_name_is_c_identifier(const char *name) {
     size_t i;
 
-    for (i = 0; i < count; ++i) {
-        const elf_section_t *sec = elf_section_get(obj, i);
-        if (sec == NULL || !live[i]) {
+    if (name == NULL || !(isalpha((unsigned char)name[0]) || name[0] == '_')) {
+        return 0;
+    }
+    for (i = 1; name[i] != '\0'; ++i) {
+        if (!(isalnum((unsigned char)name[i]) || name[i] == '_')) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static int gc_section_is_root(const gc_state_t *st, size_t obj, const elf_section_t *sec) {
+    const char *name = elf_section_name(sec);
+    uint32_t type = elf_section_type(sec);
+
+    return type == SHT_INIT_ARRAY || type == SHT_FINI_ARRAY || type == SHT_PREINIT_ARRAY || type == SHT_NOTE ||
+           (elf_section_flags(sec) & SHF_GNU_RETAIN) != 0 ||
+           gc_name_is(name, ".init") || gc_name_is(name, ".fini") || gc_name_is(name, ".ctors") ||
+           gc_name_is(name, ".dtors") || gc_name_is(name, ".init_array") || gc_name_is(name, ".fini_array") ||
+           gc_name_is(name, ".preinit_array") || gc_name_is(name, ".eh_frame") || gc_name_is(name, ".jcr") ||
+           gc_name_is_c_identifier(name) ||
+           (st->ctx->script != NULL && st->ctx->script->has_sections &&
+            script_keeps_input(st->ctx->script, name, st->inputs->names[obj]));
+}
+
+/* Follow everything on the list, which marking adds to. */
+static int gc_drain(gc_state_t *st) {
+    while (st->work_count != 0) {
+        size_t sec_index = st->work[--st->work_count];
+        size_t obj = st->work[--st->work_count];
+        elf_section_t *sec = elf_section_get(st->inputs->objs[obj], sec_index);
+        int unwind = gc_name_is(elf_section_name(sec), ".eh_frame");
+        size_t ri;
+
+        for (ri = 0; ri < elf_section_reloc_count(sec); ++ri) {
+            const elf_reloc_t *rel = elf_section_reloc_at(sec, ri);
+            const elf_symbol_t *sym = rel != NULL ? elf_reloc_symbol(rel) : NULL;
+
+            if (sym == NULL || (unwind && elf_symbol_bind(sym) == STB_LOCAL)) {
+                continue;
+            }
+            if (gc_mark_symbol(st, obj, sym) != 0) {
+                return -1;
+            }
+        }
+        if ((elf_section_flags(sec) & SHF_GROUP) != 0 && gc_mark_group_of(st, obj, sec_index) != 0) {
+            return -1;
+        }
+    }
+    return 0;
+}
+
+/*
+ * The exception tables of the functions that are live.  Nothing but
+ * .eh_frame says which table is whose: a function's record there has the
+ * function's address and then, among what follows, its table's.  So the
+ * record's relocations are read in order -- one against code names the
+ * function, and one against an exception table after it, before the next
+ * against code, names that function's table.  Returns 1 if a table was
+ * marked, 0 if none, -1 on failure.
+ */
+static int gc_mark_exception_tables(gc_state_t *st, size_t obj, elf_section_t *eh) {
+    elfobj_t *o = st->inputs->objs[obj];
+    size_t function = (size_t)-1;
+    int marked = 0;
+    size_t ri;
+
+    for (ri = 0; ri < elf_section_reloc_count(eh); ++ri) {
+        const elf_reloc_t *rel = elf_section_reloc_at(eh, ri);
+        const elf_symbol_t *sym = rel != NULL ? elf_reloc_symbol(rel) : NULL;
+        const elf_section_t *target;
+        size_t t;
+
+        if (sym == NULL || !gc_symbol_is_defined(sym)) {
             continue;
         }
-        if ((elf_section_flags(sec) & SHF_GROUP) == 0) {
+        t = gc_section_of(o, elf_symbol_shndx(sym));
+        target = t < elf_section_count(o) ? elf_section_get(o, t) : NULL;
+        if (target == NULL) {
             continue;
         }
-        {
-            size_t j;
-            for (j = 0; j < count; ++j) {
-                const elf_section_t *peer = elf_section_get(obj, j);
-                if (peer == NULL || live[j] || !is_gc_candidate_section(peer)) {
-                    continue;
-                }
-                if ((elf_section_flags(peer) & SHF_GROUP) != 0) {
-                    live[j] = 1;
-                    *changed = 1;
-                }
+        if ((elf_section_flags(target) & SHF_EXECINSTR) != 0) {
+            function = t;
+        } else if (gc_name_is(elf_section_name(target), ".gcc_except_table") && function != (size_t)-1 &&
+                   st->live[obj][function] && !st->live[obj][t]) {
+            if (gc_mark(st, obj, t) != 0) {
+                return -1;
+            }
+            marked = 1;
+        }
+    }
+    return marked;
+}
+
+static int gc_section_ptr_cmp(const void *a, const void *b) {
+    const elf_section_t *x = *(const elf_section_t *const *)a;
+    const elf_section_t *y = *(const elf_section_t *const *)b;
+
+    return x < y ? -1 : x > y;
+}
+
+/* The elfobj hook: whether this input section goes into the output. */
+int gc_keep_input_section(const elf_section_t *section, void *user) {
+    const ld_ctx_t *ctx = (const ld_ctx_t *)user;
+    size_t lo = 0, hi = ctx->gc_dead_count;
+
+    while (lo < hi) {
+        size_t mid = lo + (hi - lo) / 2;
+
+        if (ctx->gc_dead[mid] < section) {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+    return !(lo < ctx->gc_dead_count && ctx->gc_dead[lo] == section);
+}
+
+int gc_collect_input_sections(ld_ctx_t *ctx, const objvec_t *inputs) {
+    gc_state_t st;
+    size_t i, s, total = 0, ndefs = 0;
+    int export_all = (ctx->expect_type == ET_DYN && !ctx->pie) || ctx->export_dynamic;
+    const char *entry = ctx->entry_symbol != NULL && ctx->entry_symbol[0] != '\0' ? ctx->entry_symbol : "_start";
+    int progress;
+    int rc = -1;
+
+    memset(&st, 0, sizeof(st));
+    st.ctx = ctx;
+    st.inputs = inputs;
+    ctx->gc_dead_count = 0;
+    st.live = (uint8_t **)calloc(inputs->count ? inputs->count : 1, sizeof(st.live[0]));
+    if (st.live == NULL) {
+        return -1;
+    }
+    for (i = 0; i < inputs->count; ++i) {
+        size_t k;
+
+        total += elf_section_count(inputs->objs[i]);
+        st.live[i] = (uint8_t *)calloc(elf_section_count(inputs->objs[i]) + 1, 1);
+        if (st.live[i] == NULL) {
+            goto out;
+        }
+        for (k = 0; k < elf_symbol_count(inputs->objs[i]); ++k) {
+            const elf_symbol_t *sym = elf_symbol_at(inputs->objs[i], k);
+
+            ndefs += sym != NULL && elf_symbol_bind(sym) != STB_LOCAL && gc_symbol_is_defined(sym) &&
+                     elf_symbol_name(sym) != NULL && elf_symbol_name(sym)[0] != '\0';
+        }
+    }
+    st.defs = (gc_def_t *)calloc(ndefs ? ndefs : 1, sizeof(st.defs[0]));
+    if (st.defs == NULL) {
+        goto out;
+    }
+    for (i = 0; i < inputs->count; ++i) {
+        size_t k;
+
+        for (k = 0; k < elf_symbol_count(inputs->objs[i]); ++k) {
+            const elf_symbol_t *sym = elf_symbol_at(inputs->objs[i], k);
+
+            if (sym != NULL && elf_symbol_bind(sym) != STB_LOCAL && gc_symbol_is_defined(sym) &&
+                elf_symbol_name(sym) != NULL && elf_symbol_name(sym)[0] != '\0') {
+                st.defs[st.def_count].sym = sym;
+                st.defs[st.def_count].obj = i;
+                st.def_count++;
             }
         }
     }
-}
+    qsort(st.defs, st.def_count, sizeof(st.defs[0]), gc_def_cmp);
 
-int gc_sections_by_reachability(elfobj_t *obj, const ld_ctx_t *ctx) {
-    uint8_t *live;
-    size_t count;
-    int changed;
-    size_t i;
+    /* The roots. */
+    {
+        const gc_def_t *def = gc_find_def(&st, entry);
 
-    if (obj == NULL || ctx == NULL) {
-        return -1;
-    }
-    count = elf_section_count(obj);
-    live = (uint8_t *)calloc(count, sizeof(*live));
-    if (live == NULL && count != 0) {
-        return -1;
-    }
-
-    changed = 0;
-    if (ctx->entry_symbol != NULL && ctx->entry_symbol[0] != '\0') {
-        const elf_symbol_t *entry = elf_find_symbol(obj, ctx->entry_symbol);
-        if (entry != NULL && mark_live_section(live, count, elf_symbol_shndx(entry), &changed) != 0) {
-            free(live);
-            return -1;
-        }
-    } else {
-        const elf_symbol_t *entry = elf_find_symbol(obj, "_start");
-        if (entry != NULL && mark_live_section(live, count, elf_symbol_shndx(entry), &changed) != 0) {
-            free(live);
-            return -1;
+        if (def != NULL && gc_mark_symbol(&st, def->obj, def->sym) != 0) {
+            goto out;
         }
     }
     for (i = 0; i < ctx->force_undefined.count; ++i) {
-        const elf_symbol_t *root = elf_find_symbol(obj, ctx->force_undefined.items[i]);
-        if (root != NULL && mark_live_section(live, count, elf_symbol_shndx(root), &changed) != 0) {
-            free(live);
-            return -1;
+        const gc_def_t *def = gc_find_def(&st, ctx->force_undefined.items[i]);
+
+        if (def != NULL && gc_mark_symbol(&st, def->obj, def->sym) != 0) {
+            goto out;
         }
     }
-    for (i = 0; i < count; ++i) {
-        const elf_section_t *sec = elf_section_get(obj, i);
-        uint32_t type = sec != NULL ? elf_section_type(sec) : SHT_NULL;
-        if (type == SHT_INIT_ARRAY || type == SHT_FINI_ARRAY || type == SHT_PREINIT_ARRAY) {
-            live[i] = 1;
-            changed = 1;
-            continue;
+    for (i = 0; i < st.def_count; ++i) {
+        const elf_symbol_t *sym = st.defs[i].sym;
+        uint8_t vis = elf_symbol_visibility(sym);
+
+        if ((vis == STV_DEFAULT || vis == STV_PROTECTED) &&
+            (export_all || symset_contains(&ctx->dso_wants, elf_symbol_name(sym))) &&
+            gc_mark_symbol(&st, st.defs[i].obj, sym) != 0) {
+            goto out;
         }
-        if (sec != NULL && (elf_section_flags(sec) & SHF_GNU_RETAIN) != 0) {
-            live[i] = 1;
-            changed = 1;
+    }
+    for (i = 0; i < inputs->count; ++i) {
+        for (s = 0; s < elf_section_count(inputs->objs[i]); ++s) {
+            const elf_section_t *sec = elf_section_get(inputs->objs[i], s);
+
+            if (sec != NULL && is_gc_candidate_section(sec) && gc_section_is_root(&st, i, sec) &&
+                gc_mark(&st, i, s) != 0) {
+                goto out;
+            }
         }
     }
 
+    /* Everything they reach; then the exception tables of what was
+     * reached, and whatever those reach; until nothing is added. */
     do {
-        changed = 0;
-        for (i = 0; i < count; ++i) {
-            elf_section_t *sec;
-            size_t rc;
-            size_t ri;
-            if (!live[i]) {
-                continue;
-            }
-            sec = elf_section_get(obj, i);
-            if (sec == NULL) {
-                continue;
-            }
-            rc = elf_section_reloc_count(sec);
-            for (ri = 0; ri < rc; ++ri) {
-                const elf_reloc_t *rel = elf_section_reloc_at(sec, ri);
-                const elf_symbol_t *sym;
-                if (rel == NULL) {
-                    continue;
-                }
-                sym = elf_reloc_symbol(rel);
-                if (sym == NULL) {
-                    continue;
-                }
-                if (mark_live_section(live, count, elf_symbol_shndx(sym), &changed) != 0) {
-                    free(live);
-                    return -1;
-                }
-            }
+        progress = 0;
+        if (gc_drain(&st) != 0) {
+            goto out;
         }
-        mark_group_peers_live(obj, live, count, &changed);
-    } while (changed);
+        for (i = 0; i < inputs->count; ++i) {
+            for (s = 0; s < elf_section_count(inputs->objs[i]); ++s) {
+                elf_section_t *sec = elf_section_get(inputs->objs[i], s);
+                int marked;
 
-    for (i = count; i > 0; --i) {
-        size_t idx = i - 1;
-        elf_section_t *sec = elf_section_get(obj, idx);
-        if (sec == NULL || !is_gc_candidate_section(sec) || live[idx]) {
-            continue;
+                if (sec == NULL || !gc_name_is(elf_section_name(sec), ".eh_frame")) {
+                    continue;
+                }
+                marked = gc_mark_exception_tables(&st, i, sec);
+                if (marked < 0) {
+                    goto out;
+                }
+                progress |= marked;
+            }
         }
-        if (ctx->gc_print_sections) {
-            const char *name = elf_section_name(sec);
-            fprintf(stderr, "ld: gc-sections: removing %s\n", name != NULL ? name : "<unnamed>");
-        }
-        if (elf_remove_section(obj, sec) != ELF_OK) {
-            free(live);
-            return -1;
+    } while (progress);
+
+    /* What is left is what the merge is to pass over. */
+    free((void *)ctx->gc_dead);
+    ctx->gc_dead = (const elf_section_t **)calloc(total ? total : 1, sizeof(ctx->gc_dead[0]));
+    if (ctx->gc_dead == NULL) {
+        goto out;
+    }
+    for (i = 0; i < inputs->count; ++i) {
+        for (s = 0; s < elf_section_count(inputs->objs[i]); ++s) {
+            const elf_section_t *sec = elf_section_get(inputs->objs[i], s);
+
+            if (sec == NULL || st.live[i][s] || !is_gc_candidate_section(sec)) {
+                continue;
+            }
+            ctx->gc_dead[ctx->gc_dead_count++] = sec;
+            if (ctx->gc_print_sections) {
+                fprintf(stderr, "ld: gc-sections: removing %s in %s\n",
+                        elf_section_name(sec) != NULL ? elf_section_name(sec) : "<unnamed>",
+                        inputs->names[i] != NULL ? inputs->names[i] : "?");
+            }
         }
     }
-    free(live);
-    return 0;
+    qsort((void *)ctx->gc_dead, ctx->gc_dead_count, sizeof(ctx->gc_dead[0]), gc_section_ptr_cmp);
+    rc = 0;
+out:
+    for (i = 0; i < inputs->count; ++i) {
+        free(st.live[i]);
+    }
+    free(st.live);
+    free(st.defs);
+    free(st.work);
+    return rc;
 }
 
 static int is_icf_special_name(const char *name) {

@@ -331,6 +331,16 @@ static int run_internal_link(ld_ctx_t *ctx) {
         } else if (err == ELF_OK && ctx->expect_type != ET_REL) {
             err = elf_link_plan_set_section_name_hook(plan, default_output_name, NULL);
         }
+        /* --gc-sections: what nothing uses is decided now, of the
+         * inputs' sections, and the merge passes over it.  (Not for a
+         * relocatable output, whose user is the next link.) */
+        if (err == ELF_OK && ctx->gc_sections && ctx->expect_type != ET_REL) {
+            if (note_dso_names(ctx) != 0 || gc_collect_input_sections(ctx, &inputs) != 0) {
+                err = ELF_ERR_OOM;
+            } else {
+                err = elf_link_plan_set_gc_hook(plan, gc_keep_input_section, ctx);
+            }
+        }
         if (err == ELF_OK) {
             err = elf_link_plan_link(plan, &out);
         }
@@ -423,13 +433,6 @@ static int run_internal_link(ld_ctx_t *ctx) {
         return -1;
     }
     if (script_apply_sections(ctx, out) != 0) {
-        symref_map_free(&undef_refs);
-        objvec_free(&inputs);
-        elf_close(out);
-        return -1;
-    }
-    if (ctx->gc_sections && gc_sections_by_reachability(out, ctx) != 0) {
-        fprintf(stderr, "ld: --gc-sections failed during reachability sweep\n");
         symref_map_free(&undef_refs);
         objvec_free(&inputs);
         elf_close(out);

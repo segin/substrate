@@ -2561,6 +2561,27 @@ const char *script_output_name(const char *section, const char *file, void *user
     return section;
 }
 
+/* Whether the script says KEEP of this input section: the statement that
+ * places it is the one that decides, as above. */
+int script_keeps_input(const lds_script_t *sc, const char *section, const char *file) {
+    size_t i, k;
+
+    for (i = 0; sc != NULL && i < sc->stmts.count; ++i) {
+        const lds_stmt_t *os = &sc->stmts.items[i];
+
+        if (os->kind != LDS_ST_OUTSEC) {
+            continue;
+        }
+        for (k = 0; k < os->body.count; ++k) {
+            if (os->body.items[k].kind == LDS_ST_INPUT &&
+                script_input_matches(&os->body.items[k], section, file)) {
+                return os->body.items[k].keep;
+            }
+        }
+    }
+    return 0;
+}
+
 static int script_declare_in(ld_ctx_t *ctx, elfobj_t *out, lds_stmtvec_t *v) {
     size_t i;
 

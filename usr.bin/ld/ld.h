@@ -224,6 +224,10 @@ typedef struct {
     size_t tls_got_count;
     size_t tls_got_cap;
     size_t tls_got_words;       /* what they come to, in GOT entries */
+    /* --gc-sections: the input sections the merge is to pass over, in
+     * order of address (gc_collect_input_sections). */
+    const elf_section_t **gc_dead;
+    size_t gc_dead_count;
     /* The indirect functions bound in this output, each with a stub in
      * .iplt and a GOT entry after those: see collect_local_got(). */
     const elf_symbol_t **ifuncs;
@@ -571,6 +575,7 @@ int add_script_segments(elfobj_t *obj, const ld_ctx_t *ctx);
 void lds_script_free(lds_script_t *sc);
 lds_script_t *lds_script_parse(const char *path, const ld_ctx_t *ctx);
 const char *script_output_name(const char *section, const char *file, void *user);
+int script_keeps_input(const lds_script_t *sc, const char *section, const char *file);
 int script_declare_symbols(ld_ctx_t *ctx, elfobj_t *out);
 int script_apply_sections(ld_ctx_t *ctx, elfobj_t *out);
 int script_assign_addresses(ld_ctx_t *ctx, elfobj_t *out);
@@ -670,7 +675,8 @@ int strip_group_sections_for_final(elfobj_t *obj);
 int enforce_wx_policy(const elfobj_t *obj);
 
 /* ld_gc.c */
-int gc_sections_by_reachability(elfobj_t *obj, const ld_ctx_t *ctx);
+int gc_collect_input_sections(ld_ctx_t *ctx, const objvec_t *inputs);
+int gc_keep_input_section(const elf_section_t *section, void *user);
 int apply_identical_code_folding(elfobj_t *obj, const ld_ctx_t *ctx);
 
 #endif /* LD_H */
