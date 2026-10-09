@@ -113,6 +113,12 @@ jobs:
       - name: Build and run host tests
         run: make -C tests
 
+      # The in-tree linker, built for the host by each script: linker
+      # scripts, archives read as input, and dynamic links.  They compile
+      # 32-bit objects, hence gcc-multilib above.
+      - name: Linker tests
+        run: make -C tests/usr.bin/ld
+
   userland:
     name: userland libs and utils
     runs-on: ubuntu-latest
