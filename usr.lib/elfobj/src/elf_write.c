@@ -722,6 +722,9 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
     size_t symtab_entsz = 0;
     uint64_t shoff;
     uint64_t off;
+    uint64_t prev_alloc_addr = 0;   /* where the last loaded section ended, */
+    uint64_t prev_alloc_off = 0;    /* in memory and in the file */
+    int have_prev_alloc = 0;
     uint64_t phoff = 0;
     uint8_t *img = NULL;
     size_t ehsize;
@@ -1284,11 +1287,27 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
             continue;
         }
         if ((secs[i].flags & SHF_ALLOC) != 0 && secs[i].addr != 0) {
-            if (!align_up_checked(off, secs[i].addralign ? secs[i].addralign : 1, &off)) {
-                err = ELF_ERR_BOUNDS;
-                goto done;
+            /*
+             * A loaded section has its address already, and where it goes
+             * in the file follows from that: as far past the section
+             * before it as its address is, so that the two can be mapped
+             * as one piece.  Its alignment is the address's, and aligning
+             * the offset as well put a section aligned to more than a
+             * page somewhere its segment did not map.  Only where the
+             * address jumps a long way, which is a new segment, does the
+             * file not follow, and then the offset need only fall at the
+             * same place in its page as the address does.
+             */
+            if (have_prev_alloc && secs[i].addr >= prev_alloc_addr &&
+                secs[i].addr - prev_alloc_addr < 0x100000u &&
+                prev_alloc_off + (secs[i].addr - prev_alloc_addr) >= off) {
+                off = prev_alloc_off + (secs[i].addr - prev_alloc_addr);
+            } else {
+                off = align_with_page_mod(off, 1, secs[i].addr);
             }
-            off = align_with_page_mod(off, secs[i].addralign ? secs[i].addralign : 1, secs[i].addr);
+            have_prev_alloc = 1;
+            prev_alloc_addr = secs[i].addr + secs[i].size;
+            prev_alloc_off = off + secs[i].size;
         } else {
             if (!align_up_checked(off, secs[i].addralign ? secs[i].addralign : 1, &off)) {
                 err = ELF_ERR_BOUNDS;
@@ -1455,6 +1474,13 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
                     }
                 }
 
+                if (seg->type == PT_LOAD && lo_addr == UINT64_MAX) {
+                    /* Nothing in it has any size: there is nothing to
+                     * load, and a PT_LOAD of no bytes at address 0 is
+                     * not a way to say so.  The slot is left unused. */
+                    memset(p, 0, obj->cls == ELFOBJ_CLASS_32 ? 32u : 56u);
+                    continue;
+                }
                 if (lo_off == UINT64_MAX) {
                     lo_off = 0;
                 }

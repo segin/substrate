@@ -91,7 +91,7 @@ short writes and close errors checked.
 - [x] **LD-OUT-002** The linker shall generate `.eh_frame_hdr` and `PT_GNU_EH_FRAME` when the output contains `.eh_frame`.
   Met, when `--eh-frame-hdr` is given, which is when other linkers do it and what the substrate GCC always passes: `plan_eh_frame_hdr` and `fill_eh_frame_hdr`.  Shown on the target by a C++ program, linked through `g++ -B`, that catches what it throws.
   Evidence: `ld.c:10070` only passes through an input section of that name; `--eh-frame-hdr` is ignored (`11577`).  Basis: verified absent.  Task #99.
-- [ ] **LD-OUT-003** The linker shall not emit a loadable segment for sections that are all empty, and shall honour each section's alignment in its address.
+- [x] **LD-OUT-003** The linker shall not emit a loadable segment for sections that are all empty, and shall honour each section's alignment in its address.
   Evidence: `ld.c:10038-10047` with `elf_write.c:1412, 1458-1467`; `9453-9470` align the file offset.  Basis: traced.  Task #100.
 - [x] **LD-OUT-004** If no entry symbol is defined, then the linker shall warn and shall not substitute an arbitrary symbol.
   Evidence: `ld.c:10217-10242, 10258`.  Basis: traced.  Task #101.

@@ -11035,7 +11035,17 @@ static int assign_section_addresses(elfobj_t *obj, uint64_t base_vaddr) {
         }
 
         if (elf_section_type(sec) != SHT_NOBITS) {
-            if (!align_up_u64_checked(off, align, &off)) {
+            /* It is the address that a section's alignment is of.  The
+             * two agree while the image begins on a multiple of it, which
+             * a page-aligned base is for anything up to a page. */
+            if ((flags & SHF_ALLOC) != 0) {
+                uint64_t a;
+
+                if (!add_u64_checked(base_vaddr, off, &a) || !align_up_u64_checked(a, align, &a)) {
+                    return -1;
+                }
+                off = a - base_vaddr;
+            } else if (!align_up_u64_checked(off, align, &off)) {
                 return -1;
             }
             file_off = off;

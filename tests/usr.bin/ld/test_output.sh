@@ -72,6 +72,21 @@ is "-S leaves it out"                 "$(readelf -SW nodebug | grep -c '\.debug'
 is "no relocation sections in a program" "$(readelf -SW withdebug | grep -c ' \.rel\.')" 0
 is "-q keeps them"                    "$(readelf -SW withrel | grep -c ' \.rel\.text')" 1
 
+# Nothing to load is no segment; and a section aligned to more than a page
+# is at an address so aligned and at the place in the file that its
+# segment maps there.
+printf 'void _start(void) { for (;;) { } }\n' > nodata.c
+printf 'int wide __attribute__((aligned(65536))) = 7;\nchar narrow = 1;\nvoid _start(void) { wide += narrow; for (;;) { } }\n' > wide.c
+$cc32 -o nodata.o nodata.c && $cc32 -o wide.o wide.c
+./ld -m elf_i386 -o nodata nodata.o; ./ld -m elf_i386 -o wideout wide.o
+is "no PT_LOAD of nothing"            "$(readelf -lW nodata | awk '$1 == "LOAD" && $5 == "0x00000" && $6 == "0x00000"' | wc -l)" 0
+wa=0x$(nm wideout | awk '$3 == "wide" { print $1 }')
+is "aligned to 64K, as asked"         "$(( wa % 65536 ))" 0
+set -- $(readelf -lW wideout | awk -v a="$wa" '$1 == "LOAD" { print $2, $3, $5 }' | while read o v f; do
+    [ $(( wa >= v && wa < v + f )) -eq 1 ] && echo "$o $v"; done)
+is "and its initial value is where its segment maps it" \
+   "$(od -An -tu4 -j"$(( $1 + wa - $2 ))" -N4 wideout | tr -d ' ')" 7
+
 # --eh-frame-hdr: a table of every function that has an unwinding record,
 # in order of address, and a program header that points to it.
 printf 'int a(int x) { return x + 1; }\nint b(int x) { return a(x) * 2; }\nint c(int x) { return b(x) - 3; }\nvoid _start(void) { c(1); for (;;) { } }\n' > e.c
