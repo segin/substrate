@@ -9,6 +9,7 @@
  * block on the stack with every pointer far.  Both must say the same.
  *
  *	cc -o calltest calltest.c && ./calltest
+ *	cc -Mm -o calltest calltest.c && ./calltest
  *	cc -Ml -o calltest calltest.c && ./calltest
  *
  * Run with an argument it is its own child: see the exec check.
@@ -16,6 +17,7 @@
 #include <stdio.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <fcntl.h>
 
 extern char *malloc();
 extern long lseek();
@@ -41,8 +43,10 @@ char **argv, **envp;
 {
 	static char path[] = "/tmp/calltest.tmp";
 	static char moved[] = "/tmp/calltest.two";
+	static char locked[] = "/tmp/calltest.lck";
 	char on_stack[64];
 	struct stat st;
+	struct flock lk;	/* on the stack */
 	char *heap, *args[4];
 	long now, then;
 	int fd, p[2], pid, status, i, n;
@@ -108,6 +112,56 @@ char **argv, **envp;
 
 	then = time((long *)0);
 	check(time(&now) >= then && now >= then && now > 500000000L, "time");
+
+	/* A record lock: its structure is reached through fcntl's third
+	 * argument, which is declared an int and is a pointer here. */
+	fd = open(locked, O_RDWR | O_CREAT, 0644);
+	write(fd, "0123456789abcdef", 16);
+	lk.l_type = F_WRLCK;
+	lk.l_whence = 0;
+	lk.l_start = 4L;
+	lk.l_len = 8L;
+	check(fcntl(fd, F_SETLK, &lk) == 0, "fcntl sets a write lock");
+	pid = fork();
+	if (pid == 0) {
+		static struct flock probe;	/* in the data segment */
+		int cfd = fd;
+
+		probe.l_type = F_WRLCK;
+		probe.l_whence = 0;
+		probe.l_start = 0L;
+		probe.l_len = 0L;
+		if (fcntl(cfd, F_GETLK, &probe) != 0)
+			exit(10);
+		if (probe.l_type != F_WRLCK || probe.l_start != 4L ||
+		    probe.l_len != 8L || probe.l_pid != getppid())
+			exit(11);
+		probe.l_type = F_WRLCK;
+		probe.l_start = 6L;
+		probe.l_len = 1L;
+		if (fcntl(cfd, F_SETLK, &probe) == 0)
+			exit(12);
+		probe.l_type = F_RDLCK;
+		probe.l_start = 0L;
+		probe.l_len = 4L;
+		if (fcntl(cfd, F_SETLK, &probe) != 0)
+			exit(13);
+		exit(8);
+	}
+	status = 0;
+	check(wait(&status) == pid && status == (8 << 8),
+	      "another process finds the lock, and is refused it");
+	if (status != (8 << 8))
+		printf("      the child said %d\n", status >> 8);
+	lk.l_type = F_UNLCK;
+	check(fcntl(fd, F_SETLK, &lk) == 0, "fcntl takes the lock off");
+	lk.l_type = F_WRLCK;
+	lk.l_start = 0L;
+	lk.l_len = 0L;
+	check(fcntl(fd, F_GETLK, &lk) == 0 && lk.l_type == F_UNLCK,
+	      "and then there is none");
+	close(fd);
+	unlink(locked);
 
 	check(pipe(p) == 0, "pipe");
 	pid = fork();

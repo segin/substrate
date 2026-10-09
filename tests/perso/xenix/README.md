@@ -19,23 +19,25 @@ With the image mounted at `/perso/xenix` and the sources copied into its
     /perso/xenix/bin/sh -c 'PATH=/bin:/usr/bin; export PATH; cd /tmp && cc -o sigtest sigtest.c && ./sigtest'
 
 Every line reads `ok`, and the last is `sigtest: PASS`; `calltest`
-likewise.  **Build each both ways**, with no flags and with `-Ml`: the
-first is a small-model program and the second a large-model one, and
-the two reach the kernel by different conventions (below).
+likewise.  **Build each three ways**, with no flags, with `-Mm` and
+with `-Ml`: small, middle and large model, which are all the models
+Xenix/286 has.  The first two reach the kernel by one convention and
+the third by another (below).
 
 ## The two conventions
 
 A small-data program (small and middle model) passes a system call's
 arguments in BX, CX, SI and DI, a word each, a pointer being an offset
-in DS.  A large-data one (compact and large model: `x_renv` has
+in DS.  A large-data one (the large model: `x_renv` has
 `XE_LDATA`) pushes them as for any C function and traps with BX
 pointing at the first, and a pointer among them is two words, offset
 then selector.  The personality reads the second into the form of the
 first, knowing from a table which arguments are pointers.
 
 `calltest.c` is the test of that table: files, `stat`, `link`,
-`chmod`, `time`, a pipe, `wait`, and an `execve` whose child checks its
-arguments and environment -- with the buffers in the data segment, on
+`chmod`, `time`, a pipe, `wait`, a record lock set with `fcntl` and
+found by a child, and an `execve` whose child checks its arguments and
+environment -- with the buffers in the data segment, on
 the stack and on the heap, which in the large model are three segments.
 
 Before 2026-10-09 a `cc -Ml` program did not start: its first call was
@@ -65,8 +67,12 @@ return never reaches the kernel to unblock it.
 
 ## What is not checked
 
-`fcntl` with a lock structure, whose third argument the personality
-reads as an integer in either model, and `ioctl` beyond what the shell
-and `stty` do.  The compact model (`-Mc`, large data and small text)
-uses the same convention as the large and is expected to work, but
-nothing here builds one.
+`ioctl` beyond what the shell and `stty` do, and a record lock as seen
+by a process that opened the file for itself: substrate keeps record
+locks on the open file, so `calltest`'s second process is a child using
+the descriptor it inherited.
+
+There is no compact model to check.  Xenix/286's `cc` takes `-Ms`,
+`-Mm` and `-Ml` and says of `-Mc` that it is an unknown substring, and
+`/lib` has the three runtimes `Scrt0.o`, `Mcrt0.o` and `Lcrt0.o` and no
+fourth.

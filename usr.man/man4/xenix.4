@@ -119,9 +119,14 @@ consecutive slots, low half first.  A pointer is an offset in
 This is the convention of the small-data models (small and middle).
 .TP
 .BR BX " (large-data models)"
-A program of the large-data models (compact and large:
-.BR XE_LDATA ,
-.BR "cc \-Ml" )
+A program of the large model
+.RB ( XE_LDATA ,
+.BR "cc \-Ml" ;
+Xenix/286 has no compact model, its compiler taking only
+.BR \-Ms ,
+.B \-Mm
+and
+.BR \-Ml )
 pushes the arguments as for any C function and traps with
 .B BX
 pointing at the first of them, in the stack segment.  They are words in
@@ -290,14 +295,26 @@ and System V IPC sub-functions of call 40 return
 .BR ENOSYS .
 .IP \(bu
 .BR fcntl (2)
-record locking
+record locks
 .RB ( F_GETLK ,
 .BR F_SETLK ,
 .BR F_SETLKW )
-returns
-.BR EINVAL ;
+work, with two things to know.  The C library does not send them by the
+.B fcntl
+call but as modes 5, 6 and 7 of the Xenix
+.B locking
+call, with a far pointer to the
 .B struct flock
-is not translated.
+whatever the program's model; that is where the personality takes them,
+translating the structure and Xenix's own
+.I l_type
+values.  And substrate keeps record locks on the open file, not on the
+file: a lock is seen by the processes that share the descriptor it was
+set through (a child, after
+.BR fork (2)),
+and not by one that opened the file itself.  The modes of
+.BR locking (S)
+proper, 0 to 4, are accepted and lock nothing.
 .IP \(bu
 .BR ptrace (2),
 .BR profil (2)
@@ -323,10 +340,7 @@ and
 .I envp
 arrays of
 .BR execve (2).
-The argument of
-.BR fcntl (2)
-is read as an integer, so a lock request's structure is not found, and the
-System V IPC calls are not implemented in either model.
+The System V IPC calls are not implemented in any model.
 .SH VERIFIED
 SCO Xenix/286
 .BR echo ,

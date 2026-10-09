@@ -1521,6 +1521,71 @@ static int64_t x286_sys_chroot(struct x286_frame *f) {
     return rc;
 }
 
+/*
+ * Record locks: fcntl(fd, F_GETLK / F_SETLK / F_SETLKW, struct flock *).
+ *
+ * They do not come by the fcntl call.  Xenix's C library sends them to the
+ * Xenix locking call, whose own modes are 0 to 4, as modes 5, 6 and 7 --
+ * numbered as the fcntl commands are, and as substrate's -- with a FAR
+ * pointer to the structure whatever the program's model: offset in the
+ * third argument and selector in the fourth, which is also where a
+ * large-data program's two words of it are read to.
+ *
+ * The structure is Xenix/286's, and its l_type values Xenix's own.
+ */
+#define X286_F_UNLCK 0
+#define X286_F_WRLCK 1
+#define X286_F_RDLCK 3
+
+struct x286_flock {
+    int16_t l_type;
+    int16_t l_whence;
+    int32_t l_start;
+    int32_t l_len;
+    int16_t l_pid;
+    int16_t l_sysid;
+} __attribute__((packed));
+
+static int64_t x286_record_lock(struct x286_frame *f, int fd, int cmd) {
+    uint32_t ptr = X286_FAR(f->di, f->si);
+    struct x286_flock xf;
+    struct kflock kf;
+    uintptr_t user;
+    int rc = x286_ds_span(f, ptr, sizeof(xf), &user);
+
+    if (rc != 0) {
+        return rc;
+    }
+    memcpy(&xf, (const void *)user, sizeof(xf));
+    memset(&kf, 0, sizeof(kf));
+    kf.l_whence = xf.l_whence;
+    kf.l_start = xf.l_start;
+    kf.l_len = xf.l_len;
+    kf.l_pid = xf.l_pid;
+    switch (xf.l_type) {
+    case X286_F_RDLCK: kf.l_type = F_RDLCK; break;
+    case X286_F_WRLCK: kf.l_type = F_WRLCK; break;
+    case X286_F_UNLCK: kf.l_type = F_UNLCK; break;
+    default:           return -EINVAL;
+    }
+    rc = proc_advlock(current_process, fd, cmd, &kf);
+    if (rc != 0 || cmd != F_GETLK) {
+        return rc;
+    }
+    switch (kf.l_type) {
+    case F_RDLCK: xf.l_type = X286_F_RDLCK; break;
+    case F_WRLCK: xf.l_type = X286_F_WRLCK; break;
+    default:      xf.l_type = X286_F_UNLCK; break;
+    }
+    xf.l_whence = kf.l_whence;
+    xf.l_start = (int32_t)kf.l_start;
+    xf.l_len = (int32_t)kf.l_len;
+    xf.l_pid = (int16_t)kf.l_pid;
+    xf.l_sysid = 0;
+    memcpy((void *)user, &xf, sizeof(xf));
+    return 0;
+}
+
 static int64_t x286_sys_fcntl(struct x286_frame *f) {
     int fd = (int)(int16_t)f->bx;
     int rc;
@@ -1529,8 +1594,8 @@ static int64_t x286_sys_fcntl(struct x286_frame *f) {
      * *open flags*, and Xenix's are the System V values -- O_NDELAY is 0004
      * there and 0x800 here.  Passing them through untranslated silently
      * dropped O_NDELAY, which turned a program's polling read of the
-     * keyboard into a blocking one.  The record-locking commands need a
-     * struct flock translation no caller has needed yet. */
+     * keyboard into a blocking one.  The record-locking commands do not
+     * arrive here: see x286_record_lock(). */
     switch (f->cx) {
     case F_DUPFD:
     case F_GETFD:
@@ -1916,7 +1981,13 @@ static int64_t x286_sys_xenix(struct x286_frame *f) {
     case X286_XSYS_nap:     return x286_xsys_nap(f);
     case X286_XSYS_rdchk:   return x286_xsys_rdchk(f);
     case X286_XSYS_chsize:  return x286_xsys_chsize(f);
-    case X286_XSYS_locking: return 0;   /* advisory; we do not lock */
+    case X286_XSYS_locking:
+        /* fcntl's record locks, by this door; locking(S)'s own modes are
+         * advisory, and we do not lock for them. */
+        if (f->cx == F_GETLK || f->cx == F_SETLK || f->cx == F_SETLKW) {
+            return x286_record_lock(f, (int)(int16_t)f->bx, (int)f->cx);
+        }
+        return 0;
     default:                return -ENOSYS;
     }
 }
