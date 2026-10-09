@@ -4266,11 +4266,11 @@ static int load_archive_members(const char *path, ld_ctx_t *ctx, objvec_t *objs,
     size_t off = 8;
     const char *strtab = NULL;
     size_t strtab_sz = 0;
-    int changed_any = 0;
     int thin = 0;
     symset_t seen_members;
     int pass_progress;
     int pass_count = 0;
+    const char *bad = NULL;
 
     memset(&seen_members, 0, sizeof(seen_members));
     if (parse_archive_header(path, &buf, &sz, &thin) != 0) {
@@ -4296,37 +4296,49 @@ static int load_archive_members(const char *path, ld_ctx_t *ctx, objvec_t *objs,
             char *mname;
             size_t name_extra = 0;
             size_t body_sz = 0;
-            char member_key[96];
+            char member_key[32];
             int is_special = 0;
             int has_member_payload = 0;
 
+            /*
+             * An archive is input like any other, and one that is not as
+             * an archive should be is said to be so: to stop reading at
+             * the first thing that does not fit, as this did, is to link
+             * without the members after it and blame their symbols.
+             */
             if (hdr[58] != '`' || hdr[59] != '\n') {
-                break;
+                bad = "a member header does not end as one does";
+                goto malformed;
             }
             if (parse_u64_dec((const char *)hdr + 48, 10, &msize) != 0) {
-                break;
+                bad = "a member's size is not a number";
+                goto malformed;
             }
             off += 60;
-            if (off > sz) {
-                break;
-            }
             mdata = buf + off;
-            mname = decode_ar_name((const char *)hdr, mdata, msize, strtab, strtab_sz, &name_extra);
+            /* A name kept in the member's data is read out of it: no
+             * further than the file goes, whatever size the header claims. */
+            mname = decode_ar_name((const char *)hdr, mdata, msize < (uint64_t)(sz - off) ? msize : (uint64_t)(sz - off),
+                                   strtab, strtab_sz, &name_extra);
             if (mname == NULL) {
-                break;
+                bad = "a member's name cannot be read";
+                goto malformed;
             }
             is_special = strcmp(mname, "/") == 0 ||
                          strcmp(mname, "//") == 0 ||
                          strcmp(mname, "__.SYMDEF") == 0 ||
                          strcmp(mname, "__.SYMDEF SORTED") == 0;
             has_member_payload = !thin || is_special;
-            if (has_member_payload && off + (size_t)msize > sz) {
+            /* In the member's own width: a size_t may be narrower. */
+            if (has_member_payload && msize > (uint64_t)(sz - off)) {
                 free(mname);
-                break;
+                bad = "a member is longer than what is left of the file";
+                goto malformed;
             }
-            if (has_member_payload && name_extra > (size_t)msize) {
+            if (has_member_payload && (uint64_t)name_extra > msize) {
                 free(mname);
-                break;
+                bad = "a member's name is longer than the member";
+                goto malformed;
             }
             if (has_member_payload) {
                 body_sz = (size_t)msize - name_extra;
@@ -4339,7 +4351,9 @@ static int load_archive_members(const char *path, ld_ctx_t *ctx, objvec_t *objs,
             } else if (!is_special && has_member_payload &&
                        body_sz >= 4 && body[0] == 0x7f && body[1] == 'E' && body[2] == 'L' && body[3] == 'F') {
                 elfobj_t *obj = NULL;
-                snprintf(member_key, sizeof(member_key), "%s@%zu", path, off);
+                /* Where it is in this archive is what it is: the set is this
+                 * archive's alone. */
+                snprintf(member_key, sizeof(member_key), "%zu", off);
                 if (!symset_contains(&seen_members, member_key) && elf_open_memory(body, body_sz, &obj) == ELF_OK) {
                     maybe_autoswitch_mode(ctx, obj, objs != NULL ? objs->count : 0, path);
                     if (elf_type(obj) == ET_REL && obj_matches_mode(obj, ctx->mode) &&
@@ -4360,15 +4374,21 @@ static int load_archive_members(const char *path, ld_ctx_t *ctx, objvec_t *objs,
                             free(buf);
                             return -1;
                         }
-                        if (objvec_push(objs, obj, member_name) != 0 || symstate_note_object(state, obj) != 0) {
+                        if (objvec_push(objs, obj, member_name) != 0) {
                             elf_close(obj);
                             free(mname);
                             symset_free(&seen_members);
                             free(buf);
                             return -1;
                         }
+                        /* The list has it now, and will close it. */
+                        if (symstate_note_object(state, obj) != 0) {
+                            free(mname);
+                            symset_free(&seen_members);
+                            free(buf);
+                            return -1;
+                        }
                         pass_progress = 1;
-                        changed_any = 1;
                     } else {
                         elf_close(obj);
                     }
@@ -4407,7 +4427,6 @@ static int load_archive_members(const char *path, ld_ctx_t *ctx, objvec_t *objs,
                             return -1;
                         }
                         pass_progress = 1;
-                        changed_any = 1;
                     }
                 }
                 free(thin_member_path);
@@ -4420,14 +4439,21 @@ static int load_archive_members(const char *path, ld_ctx_t *ctx, objvec_t *objs,
                 }
             }
         }
+        if (off < sz) {
+            bad = "it ends in the middle of a member header";
+            goto malformed;
+        }
     } while (!whole_archive && pass_progress);
 
     symset_free(&seen_members);
     free(buf);
-    if (!whole_archive && !changed_any && state != NULL) {
-        return 0;
-    }
     return 0;
+
+malformed:
+    fprintf(stderr, "ld: %s: malformed archive: %s (at offset %zu)\n", path, bad, off);
+    symset_free(&seen_members);
+    free(buf);
+    return -1;
 }
 
 static int object_has_lto_sections(const elfobj_t *obj) {
@@ -4499,11 +4525,12 @@ static int load_object_input(const char *path, ld_ctx_t *ctx, objvec_t *objs, sy
         elf_close(obj);
         return -1;
     }
-    if (objvec_push(objs, obj, path) != 0 || symstate_note_object(state, obj) != 0) {
+    if (objvec_push(objs, obj, path) != 0) {
         elf_close(obj);
         return -1;
     }
-    return 0;
+    /* The list has it now, and will close it. */
+    return symstate_note_object(state, obj) != 0 ? -1 : 0;
 }
 
 static char *resolve_library_path_suffix_ex(const ld_ctx_t *ctx, const char *name, const char *suffix,
@@ -4616,9 +4643,23 @@ static char *resolve_library_path_suffix_explicit(const ld_ctx_t *ctx, const cha
     return resolve_library_path_suffix_ex(ctx, name, suffix, 0);
 }
 
+/* Whether the file begins as an archive does, whatever it is called. */
+static int file_is_archive(const char *path) {
+    char magic[8];
+    FILE *f = fopen(path, "rb");
+    int is = 0;
+
+    if (f != NULL) {
+        is = fread(magic, 1, sizeof(magic), f) == sizeof(magic) &&
+             (memcmp(magic, "!<arch>\n", 8) == 0 || memcmp(magic, "!<thin>\n", 8) == 0);
+        fclose(f);
+    }
+    return is;
+}
+
 static int load_path_input(const char *path, ld_ctx_t *ctx, objvec_t *objs, symstate_t *state,
                            int whole_archive, int quiet) {
-    if (has_suffix(path, ".a")) {
+    if (file_is_archive(path)) {
         return load_archive_members(path, ctx, objs, state, whole_archive);
     }
     return load_object_input(path, ctx, objs, state, quiet);

@@ -111,13 +111,13 @@ short writes and close errors checked.
 
 ## 6. Inputs: archives and libraries
 
-- [ ] **LD-IN-001** If an archive member's recorded size or name length exceeds the file, then the linker shall reject the archive without reading or copying beyond it, on 32-bit hosts as on 64-bit.
+- [x] **LD-IN-001** If an archive member's recorded size or name length exceeds the file, then the linker shall reject the archive without reading or copying beyond it, on 32-bit hosts as on 64-bit.
   Evidence: `ld.c:3557-3564` copies a `#1/len` name before `3951` checks the member; `3951, 3960, 3965-3966, 4045` add a truncated size without overflow checks.  Basis: verified (first), traced.  Tasks #73, #74.
-- [ ] **LD-IN-002** The linker shall identify an archive member by a key that is unique for any path length.
+- [x] **LD-IN-002** The linker shall identify an archive member by a key that is unique for any path length.
   Evidence: `char member_key[96]` at `ld.c:3927, 3970`; with a path of 95 characters or more all members after the first are skipped.  Basis: verified.  Task #76.
-- [ ] **LD-IN-003** If registering an input's symbols fails, then the linker shall release the input exactly once.
+- [x] **LD-IN-003** If registering an input's symbols fails, then the linker shall release the input exactly once.
   Evidence: `ld.c:3991-3992, 4130-4131` against `473`.  Basis: traced.  Task #75.
-- [ ] **LD-IN-004** If an archive is truncated or malformed, then the linker shall report it and fail; it shall recognise archives by content.
+- [x] **LD-IN-004** If an archive is truncated or malformed, then the linker shall report it and fail; it shall recognise archives by content.
   Evidence: bare `break` and `return 0` at `ld.c:3931-3957, 4058`; suffix test at `4249`.  Basis: traced.  Task #81.
 - [ ] **LD-IN-005** When resolving `-lNAME`, the linker shall try the shared then the static form in each search directory in order, and shall pass over candidates of the wrong architecture.
   Evidence: `ld.c:4150-4159`; `4152, 4170, 4180, 4206`.  Basis: traced.  Task #82.

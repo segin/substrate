@@ -71,6 +71,11 @@ and
 Both regular ELF libraries and GNU ld script wrappers
 .Pq Dv INPUT / Dv GROUP
 are supported.
+.Pp
+An input is an archive if it begins as one does, whatever it is called;
+ordinary and thin archives are read.
+An archive that is truncated or whose member headers do not make sense is
+an error that says what is wrong and at what offset, and ends the link.
 .Sh OPTIONS
 .Bl -tag -width "--unresolved-symbols=report-all"
 .It Fl m32 , Fl m64 , Fl m Ar emulation

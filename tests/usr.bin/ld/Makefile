@@ -2,8 +2,9 @@
 
 all: run
 
-# The script builds the linker for the host in a directory of its own.
+# The scripts build the linker for the host in directories of their own.
 run:
 	./test_script.sh
+	./test_archive.sh
 
 clean:
