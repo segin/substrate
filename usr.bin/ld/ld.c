@@ -709,6 +709,7 @@ static void ctx_free(ld_ctx_t *ctx) {
     strvec_free(&ctx->dso_names);
     symset_free(&ctx->dso_wants);
     dyn_import_vec_free(&ctx->dyn_imports);
+    ld_dso_cache_free(ctx->dso_cache);
     free((void *)ctx->local_got);
     free(ctx->tls_got);
     free((void *)ctx->gc_dead);
@@ -735,7 +736,8 @@ int main(int argc, char **argv) {
     opt->z_relro = 1;
     opt->hash_style = LD_HASH_BOTH;
 
-    rc = ld_parse_options(&ctx, argc, argv);
+    ctx.dso_cache = ld_dso_cache_new();
+    rc = ctx.dso_cache != NULL ? ld_parse_options(&ctx, argc, argv) : 1;
     if (rc == 0 && opt->query_version && opt->inputs.count == 0) {
         printf("GNU ld (Substrate) 2.42.0\n");
         rc = LD_OPT_DONE;

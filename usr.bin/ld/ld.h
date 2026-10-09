@@ -227,6 +227,7 @@ typedef struct {
     struct lds_script *script;  /* opt.script_path, parsed */
     int plugin_checked;
     int plugin_unusable;        /* one was named that cannot be run */
+    struct ld_dso_cache *dso_cache;     /* the shared objects, each opened once */
     strvec_t dso_inputs;
     strvec_t dso_names;         /* what each is needed as: its DT_SONAME, or
                                  * failing that the name it was found by */
@@ -670,6 +671,10 @@ void split_symbol_version(const char *name, const char **base, size_t *base_len,
                                  int *is_default);
 int shared_object_matches_unresolved(const char *path, ld_ctx_t *ctx, const symstate_t *state,
                                             int *out_match);
+struct ld_dso_cache *ld_dso_cache_new(void);
+void ld_dso_cache_free(struct ld_dso_cache *c);
+elf_err_t ld_dso_open(const ld_ctx_t *ctx, const char *path, elfobj_t **out);
+void ld_dso_close(elfobj_t *obj);
 int register_dso_provider(ld_ctx_t *ctx, const char *path, symstate_t *state);
 int unresolved_symbol_has_dso_provider(const ld_ctx_t *ctx, const char *name, int *out_has_provider);
 const char *dso_needed_name(const ld_ctx_t *ctx, size_t i);

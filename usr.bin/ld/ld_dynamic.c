@@ -439,7 +439,7 @@ static int dso_find_definition(const ld_ctx_t *ctx, const char *name, dso_def_t 
         elfobj_t *obj = NULL;
         int found = 0;
 
-        if (elf_open(ctx->dso_inputs.items[d], &obj) != ELF_OK) {
+        if (ld_dso_open(ctx, ctx->dso_inputs.items[d], &obj) != ELF_OK) {
             continue;
         }
         for (i = 0; !found && i < elf_symbol_count(obj); ++i) {
@@ -456,7 +456,7 @@ static int dso_find_definition(const ld_ctx_t *ctx, const char *name, dso_def_t 
                 found = 1;
             }
         }
-        elf_close(obj);
+        ld_dso_close(obj);
         if (found) {
             return 0;
         }
@@ -574,7 +574,7 @@ static int plan_copy_relocs(const ld_ctx_t *ctx, elfobj_t *out, dyn_import_vec_t
                 return -1;
             }
             /* Its other names. */
-            if (elf_open(ctx->dso_inputs.items[def.dso], &dso) != ELF_OK) {
+            if (ld_dso_open(ctx, ctx->dso_inputs.items[def.dso], &dso) != ELF_OK) {
                 continue;
             }
             for (k = 0; k < elf_symbol_count(dso); ++k) {
@@ -598,11 +598,11 @@ static int plan_copy_relocs(const ld_ctx_t *ctx, elfobj_t *out, dyn_import_vec_t
                 if (alias == NULL || elf_symbol_define(alias, dynbss, off) != ELF_OK ||
                     elf_symbol_set_type(alias, STT_OBJECT) != ELF_OK || elf_symbol_set_size(alias, def.size) != ELF_OK ||
                     symvec_push(&imports->copy_aliases, &imports->alias_count, &imports->alias_cap, alias) != 0) {
-                    elf_close(dso);
+                    ld_dso_close(dso);
                     return -1;
                 }
             }
-            elf_close(dso);
+            ld_dso_close(dso);
         }
     }
     return 0;

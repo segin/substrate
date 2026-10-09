@@ -4,6 +4,79 @@
 
 #include "ld.h"
 
+/*
+ * The shared objects of a link, each opened once.  A shared object is
+ * asked about for every symbol the link imports -- whether it defines
+ * the name, under which version, what kind of thing it is -- and each
+ * question opened the file and read its symbol table again, which was
+ * nine tenths of a link against a large library.  They are read-only to
+ * the link, so one reading serves every question; ld_dso_close() is
+ * where a reader says it is done, and does nothing, since the link keeps
+ * them until it ends.
+ */
+struct ld_dso_cache {
+    char **paths;
+    elfobj_t **objs;
+    size_t count;
+    size_t cap;
+};
+
+struct ld_dso_cache *ld_dso_cache_new(void) {
+    return (struct ld_dso_cache *)calloc(1, sizeof(struct ld_dso_cache));
+}
+
+void ld_dso_cache_free(struct ld_dso_cache *c) {
+    size_t i;
+
+    if (c == NULL) {
+        return;
+    }
+    for (i = 0; i < c->count; ++i) {
+        free(c->paths[i]);
+        elf_close(c->objs[i]);
+    }
+    free(c->paths);
+    free(c->objs);
+    free(c);
+}
+
+elf_err_t ld_dso_open(const ld_ctx_t *ctx, const char *path, elfobj_t **out) {
+    struct ld_dso_cache *c = ctx->dso_cache;
+    elfobj_t *obj = NULL;
+    size_t paths_cap;
+    elf_err_t err;
+    char *dup;
+    size_t i;
+
+    *out = NULL;
+    for (i = 0; i < c->count; ++i) {
+        if (strcmp(c->paths[i], path) == 0) {
+            *out = c->objs[i];
+            return ELF_OK;
+        }
+    }
+    err = elf_open(path, &obj);
+    if (err != ELF_OK) {
+        return err;
+    }
+    paths_cap = c->cap;
+    dup = xstrdup(path);
+    if (dup == NULL || ld_vec_room(&c->paths, &paths_cap, c->count, sizeof(c->paths[0])) != 0 ||
+        ld_vec_room(&c->objs, &c->cap, c->count, sizeof(c->objs[0])) != 0) {
+        free(dup);
+        elf_close(obj);
+        return ELF_ERR_OOM;
+    }
+    c->paths[c->count] = dup;
+    c->objs[c->count++] = obj;
+    *out = obj;
+    return ELF_OK;
+}
+
+void ld_dso_close(elfobj_t *obj) {
+    (void)obj;
+}
+
 static const char *safe_strtab_name(const uint8_t *strtab, size_t strtab_sz, uint32_t off) {
     size_t i;
 
@@ -509,18 +582,18 @@ static int dso_defines_unresolved(const char *path, const ld_ctx_t *ctx, ld_ctx_
     if (state == NULL || state->unresolved.count == 0) {
         return 0;
     }
-    if (elf_open(path, &obj) != ELF_OK) {
+    if (ld_dso_open(ctx, path, &obj) != ELF_OK) {
         return -1;
     }
     if (settle != NULL) {
         maybe_autoswitch_mode(settle, obj, 0, path);
     }
     if (!obj_matches_mode(obj, ctx->mode) || elf_type(obj) != ET_DYN) {
-        elf_close(obj);
+        ld_dso_close(obj);
         return 0;
     }
     if (load_dso_verdef_table(obj, &defs) != 0) {
-        elf_close(obj);
+        ld_dso_close(obj);
         return -1;
     }
     for (i = 0; i < elf_symbol_count(obj); ++i) {
@@ -554,7 +627,7 @@ static int dso_defines_unresolved(const char *path, const ld_ctx_t *ctx, ld_ctx_
         }
     }
     verdef_table_free(&defs);
-    elf_close(obj);
+    ld_dso_close(obj);
     return 0;
 }
 
@@ -568,16 +641,16 @@ int register_dso_provider(ld_ctx_t *ctx, const char *path, symstate_t *state) {
     verdef_table_t defs;
     size_t i;
 
-    if (elf_open(path, &obj) != ELF_OK) {
+    if (ld_dso_open(ctx, path, &obj) != ELF_OK) {
         return -1;
     }
     maybe_autoswitch_mode(ctx, obj, 0, path);
     if (!obj_matches_mode(obj, ctx->mode) || elf_type(obj) != ET_DYN) {
-        elf_close(obj);
+        ld_dso_close(obj);
         return -1;
     }
     if (load_dso_verdef_table(obj, &defs) != 0) {
-        elf_close(obj);
+        ld_dso_close(obj);
         return -1;
     }
     for (i = 0; i < elf_symbol_count(obj); ++i) {
@@ -604,7 +677,7 @@ int register_dso_provider(ld_ctx_t *ctx, const char *path, symstate_t *state) {
             ver = elf_symbol_version(sym);
             if (symstate_note_dso_symbol(state, name, ver, &defs) != 0) {
                 verdef_table_free(&defs);
-                elf_close(obj);
+                ld_dso_close(obj);
                 return -1;
             }
         }
@@ -612,18 +685,18 @@ int register_dso_provider(ld_ctx_t *ctx, const char *path, symstate_t *state) {
     verdef_table_free(&defs);
     for (i = 0; i < ctx->dso_inputs.count; ++i) {
         if (strcmp(ctx->dso_inputs.items[i], path) == 0) {
-            elf_close(obj);
+            ld_dso_close(obj);
             return 0;
         }
     }
     if (strvec_push(&ctx->dso_inputs, path) != 0) {
-        elf_close(obj);
+        ld_dso_close(obj);
         return -1;
     }
     if (ctx->opt.trace_inputs) {
         fprintf(stderr, "ld: trace: dso %s\n", path);
     }
-    elf_close(obj);
+    ld_dso_close(obj);
     /*
      * --copy-dt-needed-entries: what this library needs may supply what
      * the program refers to, as if it had been named too.  A C++ program
@@ -679,11 +752,11 @@ int unresolved_symbol_has_dso_provider(const ld_ctx_t *ctx, const char *name, in
         uint8_t vis;
         uint16_t shndx;
 
-        if (elf_open(ctx->dso_inputs.items[i], &obj) != ELF_OK) {
+        if (ld_dso_open(ctx, ctx->dso_inputs.items[i], &obj) != ELF_OK) {
             continue;
         }
         if (!obj_matches_mode(obj, ctx->mode) || elf_type(obj) != ET_DYN) {
-            elf_close(obj);
+            ld_dso_close(obj);
             continue;
         }
         sym = elf_find_symbol(obj, name);
@@ -698,11 +771,11 @@ int unresolved_symbol_has_dso_provider(const ld_ctx_t *ctx, const char *name, in
                 (vis == STV_DEFAULT || vis == STV_PROTECTED) &&
                 shndx != SHN_UNDEF && (elf_symbol_version(sym) & VER_NDX_HIDDEN) == 0) {
                 *out_has_provider = 1;
-                elf_close(obj);
+                ld_dso_close(obj);
                 return 0;
             }
         }
-        elf_close(obj);
+        ld_dso_close(obj);
     }
 
     memset(&probe, 0, sizeof(probe));
@@ -820,7 +893,7 @@ int note_dso_names(ld_ctx_t *ctx) {
         if (rc != 0) {
             return -1;
         }
-        if (elf_open(ctx->dso_inputs.items[i], &obj) != ELF_OK) {
+        if (ld_dso_open(ctx, ctx->dso_inputs.items[i], &obj) != ELF_OK) {
             continue;
         }
         for (k = 0; k < elf_symbol_count(obj); ++k) {
@@ -834,11 +907,11 @@ int note_dso_names(ld_ctx_t *ctx) {
                 (elf_symbol_shndx(sym) == SHN_UNDEF || elf_symbol_visibility(sym) == STV_DEFAULT) &&
                 (elf_symbol_bind(sym) == STB_GLOBAL || elf_symbol_bind(sym) == STB_WEAK) &&
                 !symset_contains(&ctx->dso_wants, name) && symset_add(&ctx->dso_wants, name) != 0) {
-                elf_close(obj);
+                ld_dso_close(obj);
                 return -1;
             }
         }
-        elf_close(obj);
+        ld_dso_close(obj);
     }
     return 0;
 }
@@ -885,15 +958,15 @@ static int dso_find_default_version_export(const ld_ctx_t *ctx, const char *path
     if (ctx == NULL || path == NULL || base == NULL || base_len == 0) {
         return 0;
     }
-    if (elf_open(path, &obj) != ELF_OK) {
+    if (ld_dso_open(ctx, path, &obj) != ELF_OK) {
         return 0;
     }
     if (!obj_matches_mode(obj, ctx->mode) || elf_type(obj) != ET_DYN) {
-        elf_close(obj);
+        ld_dso_close(obj);
         return 0;
     }
     if (load_dso_verdef_table(obj, &defs) != 0) {
-        elf_close(obj);
+        ld_dso_close(obj);
         return -1;
     }
     for (i = 0; i < elf_symbol_count(obj); ++i) {
@@ -946,7 +1019,7 @@ static int dso_find_default_version_export(const ld_ctx_t *ctx, const char *path
         dup = xstrdup(ver_name);
         if (dup == NULL) {
             verdef_table_free(&defs);
-            elf_close(obj);
+            ld_dso_close(obj);
             return -1;
         }
         *out_ver_name = dup;
@@ -954,7 +1027,7 @@ static int dso_find_default_version_export(const ld_ctx_t *ctx, const char *path
         break;
     }
     verdef_table_free(&defs);
-    elf_close(obj);
+    ld_dso_close(obj);
     return found ? 1 : plain ? 2 : 0;
 }
 
