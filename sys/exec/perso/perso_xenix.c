@@ -1163,13 +1163,31 @@ static int64_t x286_sys_getgid(struct x286_frame *f) {
 }
 
 /*
- * signal(2).  Xenix passes the handler as a far pointer: CX is the offset
- * and SI the selector (both zero for SIG_DFL, CX == 1 for SIG_IGN).  We
- * stash the far pointer in the native disposition so it survives here, and
- * hand delivery to x286_sendsig below.
+ * signal(2).  CX is the offset of what is to be entered, 0 for SIG_DFL
+ * and 1 for SIG_IGN.  What a program passes is never its C function but
+ * an entry in a table of trampolines in its C library, one for each
+ * signal, which is how the library's code finds out which signal it was;
+ * the function itself the library keeps.
+ *
+ * A program of the large text model says which segment the offset is in,
+ * in SI.  One of the small model says nothing: it has one text segment,
+ * its library's signal() leaves SI as it found it, and what is in SI is
+ * whatever the caller was keeping there.  So SI is believed only when it
+ * names a code segment of the program, and otherwise the segment is the
+ * one the call was made from.  (In a small-model program a code segment
+ * SI names by accident is the one segment there is.)
+ *
+ * The far pointer is kept as the native disposition, and x286_sendsig
+ * below enters it.
  */
 #define X286_SIG_DFL  0U
 #define X286_SIG_IGN  1U
+
+static int x286_is_code_selector(uint16_t sel) {
+    const gdt_entry_t *e = x286_ldt_entry(sel);
+
+    return e != NULL && (e->access & 0x08U) != 0U;      /* executable */
+}
 
 static int64_t x286_sys_signal(struct x286_frame *f) {
     struct sigaction act, old;
@@ -1183,12 +1201,14 @@ static int64_t x286_sys_signal(struct x286_frame *f) {
     memset(&act, 0, sizeof(act));
     memset(&old, 0, sizeof(old));
 
-    if (f->si == 0 && f->cx == X286_SIG_DFL) {
+    if (f->cx == X286_SIG_DFL) {
         act.sa_handler = (void *)SIG_DFL;
-    } else if (f->si == 0 && f->cx == X286_SIG_IGN) {
+    } else if (f->cx == X286_SIG_IGN) {
         act.sa_handler = (void *)SIG_IGN;
     } else {
-        act.sa_handler = (void *)(uintptr_t)(((uint32_t)f->si << 16) |
+        uint16_t sel = x286_is_code_selector(f->si) ? f->si : (uint16_t)f->regs->cs;
+
+        act.sa_handler = (void *)(uintptr_t)(((uint32_t)sel << 16) |
                                              (uint32_t)f->cx);
         /* V7 semantics, which Xenix keeps: the disposition reverts to
          * SIG_DFL as the handler is entered, and the handler re-arms it. */
@@ -2210,21 +2230,35 @@ static int x286_handle_trap(void *regs_ptr) {
 }
 
 /*
- * Signal delivery, V7 style -- which is what Xenix/286 is.
+ * Signal delivery.
  *
- * x286_sys_signal parks the handler's far pointer in the native disposition,
- * so it arrives here as (selector << 16) | offset.  Entering it means pushing
- * a 16-bit far-call frame onto the program's own stack:
+ * x286_sys_signal keeps what is to be entered as (selector << 16) | offset.
+ * It is entered as an interrupt is, with this on the program's own stack:
  *
- *      SP+4  signo          (the handler's int argument)
- *      SP+2  interrupted CS \  the "return address" -- the handler's lret
- *      SP+0  interrupted IP /  resumes the interrupted instruction directly
+ *      SP+4  FLAGS
+ *      SP+2  interrupted CS
+ *      SP+0  interrupted IP
  *
- * There is no trampoline and no saved register block, because V7 had none:
- * the handler is an ordinary C function, so it preserves what the ABI says
- * it must, and everything else is understood to be clobbered.  The Xenix
- * libc always registers a far thunk (its signal(2) stub passes %cs as the
- * selector even in small model), so a far frame is right for both models.
+ * and nothing else: no signal number, and no block of saved registers.
+ * What is entered is the C library's trampoline for the signal -- a
+ * `call` to code the library has in common for all of them -- and that
+ * code tells the signal from which trampoline called it, saves the
+ * registers itself, calls the program's function, puts the registers
+ * back, and returns over this frame: with `iret` in a large-model
+ * library, and in a small-model one by popping the three words and
+ * jumping to the first, which comes to the same in a program with one
+ * text segment.  This is read out of the two libraries (libc's signal.o
+ * as linked by the system's own cc, with and without -Ml); a frame of
+ * return address and signal number, which this used to push, sent the
+ * large-model code back to the right place with the signal number for
+ * its flags and one word too many on the stack, and the small-model
+ * code nowhere at all.
+ *
+ * Neither return passes through the kernel, so nothing here can be
+ * undone on the way back.  The signal is therefore not left blocked for
+ * the length of its handler: it would stay blocked for good, and be
+ * delivered once in the life of the process.  Xenix does not block it in
+ * any case; it resets the disposition, which the handler sets again.
  */
 static int x286_native_to_xenix_sig(int sig) {
     int i;
@@ -2247,13 +2281,16 @@ static void x286_sendsig(void *handler, int sig, uint32_t mask, uint32_t flags,
     uintptr_t linear;
     uint16_t frame[3];
 
-    (void)mask; (void)flags;
+    (void)flags;
 
     if (!regs || !current_process) {
         return;
     }
-    /* A handler with no selector is not something we can far-call into. */
-    if (sel == 0 || !x286_ldt_entry(sel)) {
+    if (current_thread) {
+        current_thread->sig_mask = mask;
+    }
+    /* What is not a code segment of the program cannot be entered. */
+    if (!x286_is_code_selector(sel)) {
         sigexit(current_process, SIGILL);
         return;
     }
@@ -2265,9 +2302,9 @@ static void x286_sendsig(void *handler, int sig, uint32_t mask, uint32_t flags,
     }
     sp = (uint16_t)(sp - sizeof(frame));
 
-    frame[0] = (uint16_t)regs->eip;             /* return offset */
-    frame[1] = (uint16_t)regs->cs;              /* return selector */
-    frame[2] = (uint16_t)x286_native_to_xenix_sig(sig);
+    frame[0] = (uint16_t)regs->eip;
+    frame[1] = (uint16_t)regs->cs;
+    frame[2] = (uint16_t)regs->eflags;
 
     if (x286_seg_span((uint16_t)regs->ss, sp, sizeof(frame), &linear) != 0) {
         sigexit(current_process, SIGSEGV);
@@ -2280,7 +2317,7 @@ static void x286_sendsig(void *handler, int sig, uint32_t mask, uint32_t flags,
 
         snprintf(buf, sizeof(buf),
                  "X286: [%d] deliver sig %d -> %04x:%04x (resume %04x:%04x)\n",
-                 (int)current_process->pid, frame[2], sel, off,
+                 (int)current_process->pid, x286_native_to_xenix_sig(sig), sel, off,
                  (unsigned int)regs->cs, (unsigned int)regs->eip);
         kprint(buf);
     }
