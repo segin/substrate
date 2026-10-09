@@ -133,11 +133,11 @@ short writes and close errors checked.
 - [x] **LD-SCR-003** The script lexer shall treat `+`, `-` and `/` as operators.
   Met: the lexer reads a word as a name or as part of an expression according to what the parser expects there (`lds_lexer_t.names`).
   Evidence: `ld.c:1750, 1753-1754`.  Basis: verified.  Task #59.
-- [ ] **LD-SCR-004** If an expression names a symbol that is not defined, then the linker shall report an error.
+- [x] **LD-SCR-004** If an expression names a symbol that is not defined, then the linker shall report an error.
   Evidence: `ld.c:1167-1168` returns 0.  Basis: verified.  Task #60.
-- [ ] **LD-SCR-005** When `PROVIDE` names a symbol an input defines, the linker shall leave the input's definition in place; `DEFINED` shall be true for such a symbol; `ALIGN(n)` shall align the location counter.
+- [x] **LD-SCR-005** When `PROVIDE` names a symbol an input defines, the linker shall leave the input's definition in place; `DEFINED` shall be true for such a symbol; `ALIGN(n)` shall align the location counter.
   Evidence: `ld.c:2095` with `9055-9064`; `1331`; `1282-1283`.  Basis: traced.  Tasks #61, #62, #63.
-  Partly met: `PROVIDE` now defines only what is referenced and undefined (`script_declare_in`).  `DEFINED` and one-argument `ALIGN` are still open.
+  Met: `PROVIDE` defines only what is referenced and undefined (`script_declare_in`); `DEFINED` asks `script_symbol_defined`, which knows the inputs' symbols; `ALIGN(n)` rounds the counter.  All three in `tests/usr.bin/ld/test_script.sh`.
 - [x] **LD-SCR-006** The linker shall evaluate a script once against the final layout.
   Met: read once in `main`; its statements take effect in `script_assign_addresses`, after the layout, which they are part of.
   Evidence: applied twice (`ld.c:10661-10688`), parsed a third time (`11620`).  Basis: traced; layout consequence suspected.  Task #65.

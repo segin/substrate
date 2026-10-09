@@ -930,6 +930,7 @@ typedef struct {
     unsigned depth;             /* nesting, bounded by LD_MAX_SCRIPT_EXPR_DEPTH */
     int have_dot;               /* inside SECTIONS: "." has a value */
     uint64_t dot;
+    char err_buf[160];          /* for an err_msg that names something */
 } lds_eval_ctx_t;
 
 typedef struct {
@@ -1015,6 +1016,8 @@ typedef struct lds_script {
     size_t region_cap;
     char *entry;                /* ENTRY(sym) */
     int has_sections;
+    defsymvec_t locals;         /* what PROVIDE names and nothing refers to:
+                                 * no symbol, but the script may use it */
     strvec_t files;             /* the script and what it INCLUDEs: tokens
                                  * point at these names */
 } lds_script_t;
@@ -1171,18 +1174,36 @@ static int script_lookup_symbol_value(const lds_eval_ctx_t *ec, const char *name
     if (ec == NULL || ec->ctx == NULL || name == NULL || out == NULL) {
         return -1;
     }
-    if (defsymvec_get(&ec->ctx->defsyms, name, out) == 0) {
+    if (defsymvec_get(&ec->ctx->defsyms, name, out) == 0 ||
+        (ec->ctx->script != NULL && defsymvec_get(&ec->ctx->script->locals, name, out) == 0)) {
         return 0;
     }
     if (ec->obj != NULL) {
+        /* A symbol of the program: its address, the layout being done by
+         * the time a script's expressions are evaluated. */
         const elf_symbol_t *sym = elf_find_symbol((elfobj_t *)ec->obj, name);
-        if (sym != NULL) {
-            *out = elf_symbol_value(sym);
+        const char *undef = NULL;
+
+        if (sym != NULL && elf_symbol_shndx(sym) != SHN_UNDEF &&
+            resolve_symbol_addr((elfobj_t *)ec->obj, sym, 0, out, &undef) == 0) {
             return 0;
         }
     }
-    *out = 0;
-    return 0;
+    return -1;
+}
+
+/* Whether a symbol has a definition: the script's, or an input's. */
+static int script_symbol_defined(const lds_eval_ctx_t *ec, const char *name) {
+    const elf_symbol_t *sym;
+
+    if (ec == NULL || ec->ctx == NULL || name == NULL) {
+        return 0;
+    }
+    if (defsymvec_find(&ec->ctx->defsyms, name) >= 0) {
+        return 1;
+    }
+    sym = ec->obj != NULL ? elf_find_symbol((elfobj_t *)ec->obj, name) : NULL;
+    return sym != NULL && elf_symbol_shndx(sym) != SHN_UNDEF;
 }
 
 static int script_lookup_section_metric(const lds_eval_ctx_t *ec, const char *name, int metric, uint64_t *out) {
@@ -1245,6 +1266,7 @@ static int lds_eval_builtin_call(lds_eval_ctx_t *ec, const lds_tok_t *name_tok, 
     size_t arg_count = 0;
     size_t i;
     int depth = 0;
+    int takes_name;
     uint64_t vals[8];
 
     if (ec == NULL || name_tok == NULL || name_tok->text == NULL || items == NULL || out == NULL || begin >= end) {
@@ -1289,7 +1311,11 @@ static int lds_eval_builtin_call(lds_eval_ctx_t *ec, const lds_tok_t *name_tok, 
         }
     }
 
-    for (i = 0; i < arg_count; ++i) {
+    /* The argument of these is a name, of a section or a symbol, and not
+     * something that has a value. */
+    takes_name = strcmp(name, "ADDR") == 0 || strcmp(name, "LOADADDR") == 0 || strcmp(name, "SIZEOF") == 0 ||
+                 strcmp(name, "DEFINED") == 0 || strcmp(name, "defined") == 0;
+    for (i = 0; !takes_name && i < arg_count; ++i) {
         if (lds_eval_expr_slice(ec, items, arg_starts[i], arg_ends[i], &vals[i]) != 0) {
             return -1;
         }
@@ -1341,7 +1367,6 @@ static int lds_eval_builtin_call(lds_eval_ctx_t *ec, const lds_tok_t *name_tok, 
             return -1;
         }
     } else if (strcmp(name, "DEFINED") == 0 || strcmp(name, "defined") == 0) {
-        uint64_t tmp = 0;
         const char *sym = NULL;
         if (arg_count != 1 || arg_starts[0] >= arg_ends[0]) {
             ec->err_tok = name_tok;
@@ -1351,11 +1376,7 @@ static int lds_eval_builtin_call(lds_eval_ctx_t *ec, const lds_tok_t *name_tok, 
         if (items[arg_starts[0]].kind == LDS_TOK_IDENT || items[arg_starts[0]].kind == LDS_TOK_STRING) {
             sym = items[arg_starts[0]].text;
         }
-        if (sym != NULL && script_lookup_symbol_value(ec, sym, &tmp) == 0 && defsymvec_find(&ec->ctx->defsyms, sym) >= 0) {
-            *out = 1;
-        } else {
-            *out = 0;
-        }
+        *out = sym != NULL && script_symbol_defined(ec, sym) ? 1 : 0;
     } else {
         ec->err_tok = name_tok;
         ec->err_msg = "unsupported linker-script builtin";
@@ -1439,8 +1460,9 @@ static int lds_eval_primary(lds_eval_ctx_t *ec, const lds_tok_t *items, size_t *
             return 0;
         }
         if (script_lookup_symbol_value(ec, tok->text, out) != 0) {
+            snprintf(ec->err_buf, sizeof(ec->err_buf), "undefined symbol '%s' in expression", tok->text);
             ec->err_tok = tok;
-            ec->err_msg = "failed to resolve symbol in expression";
+            ec->err_msg = ec->err_buf;
             return -1;
         }
         (*idx)++;
@@ -2313,6 +2335,7 @@ static void lds_script_free(lds_script_t *sc) {
         lds_tokvec_free(&sc->regions[i].length);
     }
     free(sc->regions);
+    defsymvec_free(&sc->locals);
     free(sc->entry);
     strvec_free(&sc->files);
     free(sc);
@@ -9974,6 +9997,11 @@ static int script_declare_in(ld_ctx_t *ctx, elfobj_t *out, lds_stmtvec_t *v) {
             defsymvec_set(&ctx->defsyms, st->at.text, 0) != 0) {
             return -1;
         }
+        if (!st->active && elf_find_symbol(out, st->at.text) == NULL &&
+            defsymvec_find(&ctx->defsyms, st->at.text) < 0 &&
+            defsymvec_set(&ctx->script->locals, st->at.text, 0) != 0) {
+            return -1;
+        }
     }
     return 0;
 }
@@ -10163,7 +10191,13 @@ static int lw_assign(lds_walk_t *w, const lds_stmt_t *st, int have_dot, uint64_t
     uint64_t cur = 0;
 
     if (!is_dot && !st->active) {
-        return 0;
+        /* A PROVIDE that provides nothing still has a value the rest of
+         * the script may use, if nothing else defines the name. */
+        if (st->op != '=' || defsymvec_find(&w->sc->locals, st->at.text) < 0) {
+            return 0;
+        }
+        return lw_eval(w, &st->expr, have_dot, *dot, &st->at, &v) != 0 ? -1
+             : defsymvec_set(&w->sc->locals, st->at.text, v);
     }
     if (lw_eval(w, &st->expr, have_dot, *dot, &st->at, &v) != 0) {
         return -1;

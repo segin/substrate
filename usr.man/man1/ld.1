@@ -239,6 +239,13 @@ with two the first rounded up to a multiple of the second
 .Ic SIZEOF
 and
 .Ic DEFINED .
+A name in an expression is a symbol the script defines or one of the
+program's, whose value is its address; a name that is neither is an
+error.
+.Ic DEFINED
+is true of both kinds.
+A statement may use a symbol that a later statement of the script
+defines.
 .Pp
 Read and not acted on:
 .Ic OUTPUT_FORMAT ,
