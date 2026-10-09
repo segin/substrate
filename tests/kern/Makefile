@@ -44,7 +44,7 @@ else
   BRAND   = printf '\100' | dd of=$@ bs=1 seek=7 conv=notrunc status=none
 endif
 
-all: soak_reap trapsig
+all: soak_reap trapsig advlock
 
 soak_reap: soak_reap.c
 	$(CC) $(CFLAGS) $< $(LIBS) -o $@
@@ -54,7 +54,13 @@ trapsig: trapsig.c
 	$(CC) $(CFLAGS) $< $(LIBS) -o $@
 	$(if $(BRAND),$(BRAND),)
 
+# advlock: fcntl(2) record locks are on the file and are a process's own;
+# F_SETLKW waits.  Runs on the host too, where it must also pass.
+advlock: advlock.c
+	$(CC) $(CFLAGS) $< $(LIBS) -o $@
+	$(if $(BRAND),$(BRAND),)
+
 clean:
-	rm -f soak_reap trapsig
+	rm -f soak_reap trapsig advlock
 
 .PHONY: all clean

@@ -67,10 +67,7 @@ return never reaches the kernel to unblock it.
 
 ## What is not checked
 
-`ioctl` beyond what the shell and `stty` do, and a record lock as seen
-by a process that opened the file for itself: substrate keeps record
-locks on the open file, so `calltest`'s second process is a child using
-the descriptor it inherited.
+`ioctl` beyond what the shell and `stty` do.
 
 There is no compact model to check.  Xenix/286's `cc` takes `-Ms`,
 `-Mm` and `-Ml` and says of `-Mc` that it is an unknown substring, and

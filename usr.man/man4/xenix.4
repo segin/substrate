@@ -299,7 +299,7 @@ record locks
 .RB ( F_GETLK ,
 .BR F_SETLK ,
 .BR F_SETLKW )
-work, with two things to know.  The C library does not send them by the
+work.  The C library does not send them by the
 .B fcntl
 call but as modes 5, 6 and 7 of the Xenix
 .B locking
@@ -308,11 +308,7 @@ call, with a far pointer to the
 whatever the program's model; that is where the personality takes them,
 translating the structure and Xenix's own
 .I l_type
-values.  And substrate keeps record locks on the open file, not on the
-file: a lock is seen by the processes that share the descriptor it was
-set through (a child, after
-.BR fork (2)),
-and not by one that opened the file itself.  The modes of
+values.  The modes of
 .BR locking (S)
 proper, 0 to 4, are accepted and lock nothing.
 .IP \(bu

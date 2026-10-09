@@ -1079,31 +1079,115 @@ void proc_clear_fd(process_t *p, int fd) {
 /* ------------------------------------------------------------------
  * POSIX advisory record locks (fcntl F_GETLK / F_SETLK / F_SETLKW).
  *
- * Locks hang off the open file description (struct file.f_advlock), so
- * they are shared by dup() and fork() (which share the file_t) yet remain
- * owned by a specific pid.  A forked child therefore sees the parent's
- * lock as belonging to ANOTHER owner: locks are NOT inherited across
- * fork() even though the mapping/fd is (OPTS fork/11-1).  The list is
- * freed with the last reference to the description (file_free() ->
- * advlock_release_file()).  Enforcement is scoped to a single shared
- * description, so two independent open()s of the same file keep separate
- * lists and never contend — preserving substrate's historical
- * single-writer no-op behaviour for pwdb/sqlite/... that never share a
- * locked fd across processes.
+ * A lock is on a FILE and belongs to a PROCESS, as POSIX has it: two
+ * processes that each opened the file contend for it, however they came by
+ * their descriptors, and a forked child sees its parent's lock as another
+ * owner's (locks are not inherited: OPTS fork/11-1).  The file is the mount
+ * and inode number of a regular file.  Whatever has no such identity -- a
+ * device, or a file of a filesystem that numbers nothing -- is known by its
+ * open file description instead, which is all that can be said of it: such
+ * locks are seen only by the processes sharing that description.
+ *
+ * The locks are in one table, hashed by that identity.  A process's locks
+ * on a file go when it closes ANY descriptor for the file, or exits
+ * (advlock_release_by_owner(), from the close path), and a
+ * description-keyed lock goes with its description (advlock_release_file()).
+ *
+ * F_SETLKW waits, and can be interrupted; whoever takes a lock off wakes
+ * the waiters, which look again.  A wait that would close a ring of
+ * processes each waiting for the next is refused with EDEADLK.
  *
  * kmalloc()/kfree() must not run under the spinlock, so nodes are
  * allocated before it is taken and freed after it is released.
  * ------------------------------------------------------------------ */
+struct advkey {
+    struct mount *mp;          /* the file: its mount ... */
+    uint64_t      ino;         /* ... and inode number; or, both 0, */
+    file_t       *desc;        /* the open file description */
+};
+
 struct advlock {
     off_t          start;
     off_t          end;        /* exclusive; ADVLOCK_EOF == to end of file */
     short          type;       /* F_RDLCK / F_WRLCK */
     int            owner;      /* owning pid */
-    struct advlock *next;
+    struct advkey  key;
+    struct advlock *next;      /* in the bucket */
 };
 #define ADVLOCK_EOF ((off_t)0x7fffffffffffffffLL)
+#define ADVLOCK_BUCKETS 64U
+#define ADVLOCK_WAITERS 32U
+/* How long a waiter sleeps before looking again unprompted. */
+#define ADVLOCK_POLL    (HZ / 16)
 
 static spinlock_t advlock_lock = SPINLOCK_INIT("fcntl_advlock");
+static struct advlock *advlock_tab[ADVLOCK_BUCKETS];
+
+/* Who is waiting in F_SETLKW, and for whose lock: for advlock_would_deadlock. */
+static struct { int pid; int on; } advlock_waiters[ADVLOCK_WAITERS];
+
+static void advlock_key(file_t *f, struct advkey *k) {
+    fs_node_t *n = NULL;
+
+    if (f->f_type != DTYPE_PIPE && f->f_type != DTYPE_SOCKET &&
+        f->f_type != DTYPE_KQUEUE) {
+        n = (fs_node_t *)f->f_data;
+    }
+    if (n && (n->flags & 0x07) == FS_FILE && n->mp && n->inode != 0) {
+        k->mp = n->mp;
+        k->ino = n->inode;
+        k->desc = NULL;
+    } else {
+        k->mp = NULL;
+        k->ino = 0;
+        k->desc = f;
+    }
+}
+
+static int advlock_key_eq(const struct advkey *a, const struct advkey *b) {
+    return a->mp == b->mp && a->ino == b->ino && a->desc == b->desc;
+}
+
+static struct advlock **advlock_bucket(const struct advkey *k) {
+    uintptr_t h = (uintptr_t)k->mp ^ (uintptr_t)k->ino ^
+                  ((uintptr_t)k->desc >> 4);
+
+    return &advlock_tab[(h ^ (h >> 7)) % ADVLOCK_BUCKETS];
+}
+
+/*
+ * Would `pid` waiting for `owner` close a ring?  Follow who `owner` is
+ * waiting for, and who that one is, to see whether it comes back to `pid`.
+ * Called with advlock_lock held.
+ */
+static int advlock_would_deadlock(int pid, int owner) {
+    for (unsigned int hops = 0; hops < ADVLOCK_WAITERS; hops++) {
+        unsigned int i;
+
+        if (owner == pid) return 1;
+        for (i = 0; i < ADVLOCK_WAITERS; i++) {
+            if (advlock_waiters[i].pid == owner) break;
+        }
+        if (i == ADVLOCK_WAITERS) return 0;
+        owner = advlock_waiters[i].on;
+    }
+    return 0;
+}
+
+static void advlock_waiter_set(int pid, int on) {
+    unsigned int i, free_slot = ADVLOCK_WAITERS;
+
+    for (i = 0; i < ADVLOCK_WAITERS; i++) {
+        if (advlock_waiters[i].pid == pid) break;
+        if (advlock_waiters[i].pid == 0 && free_slot == ADVLOCK_WAITERS) {
+            free_slot = i;
+        }
+    }
+    if (i == ADVLOCK_WAITERS) i = free_slot;
+    if (i == ADVLOCK_WAITERS) return;   /* full: this wait goes unrecorded */
+    advlock_waiters[i].pid = on ? pid : 0;
+    advlock_waiters[i].on = on;
+}
 
 static int advlock_overlap(off_t s1, off_t e1, off_t s2, off_t e2) {
     return s1 < e2 && s2 < e1;
@@ -1162,14 +1246,16 @@ static int advlock_range(file_t *f, const struct kflock *fl,
  * replaces only part of a bigger lock — preserve the surrounding regions
  * instead of destroying the whole overlapping lock wholesale.
  */
-static struct advlock *advlock_clip_owner_range(file_t *f, int owner,
+static struct advlock *advlock_clip_owner_range(const struct advkey *key,
+                                                int owner,
                                                 off_t start, off_t end,
                                                 struct advlock **spare) {
     struct advlock *removed = NULL;
-    struct advlock **pp = (struct advlock **)&f->f_advlock;
+    struct advlock **pp = advlock_bucket(key);
     while (*pp) {
         struct advlock *l = *pp;
-        if (l->owner != owner || !advlock_overlap(l->start, l->end, start, end)) {
+        if (l->owner != owner || !advlock_key_eq(&l->key, key) ||
+            !advlock_overlap(l->start, l->end, start, end)) {
             pp = &l->next;
             continue;
         }
@@ -1185,6 +1271,7 @@ static struct advlock *advlock_clip_owner_range(file_t *f, int owner,
                 t->end   = l->end;
                 t->type  = l->type;
                 t->owner = owner;
+                t->key   = *key;
                 t->next  = l->next;
                 l->next  = t;
                 l->end   = start;
@@ -1219,37 +1306,17 @@ static void advlock_free_chain(struct advlock *l) {
     }
 }
 
-/* Called from file_free() when the last reference to an open file
- * description is dropped: release every record lock it carries. */
-void advlock_release_file(file_t *f) {
-    if (!f) return;
-    spinlock_acquire(&advlock_lock);
-    struct advlock *l = (struct advlock *)f->f_advlock;
-    f->f_advlock = NULL;
-    spinlock_release(&advlock_lock);
-    advlock_free_chain(l);
-}
-
 /*
- * Release just `owner`'s record locks on this open file description, leaving
- * any held by other owners intact.  POSIX requires a process's locks on a
- * file to be dropped when it closes a descriptor for that file OR when it
- * exits — NOT deferred to the last close of a description that fork()/dup()
- * left shared.  advlock_release_file() only fires at the final f_count==0
- * drop, so without this a process that closes its fd (or exits) while a
- * fork-shared referrer still holds the description would leave its locks
- * lingering under its (soon-reused) pid, wrongly blocking other lockers.
- * Called from the close path (even when f_count > 0) and, via fd_close_all,
- * for every descriptor an exiting process still holds open.
+ * Take off every lock under `key` that is `owner`'s -- or anyone's, for
+ * owner 0 -- and wake whoever waits for one.
  */
-void advlock_release_by_owner(file_t *f, int owner) {
-    if (!f) return;
+static void advlock_release_key(const struct advkey *key, int owner) {
     struct advlock *removed = NULL;
     spinlock_acquire(&advlock_lock);
-    struct advlock **pp = (struct advlock **)&f->f_advlock;
+    struct advlock **pp = advlock_bucket(key);
     while (*pp) {
         struct advlock *l = *pp;
-        if (l->owner == owner) {
+        if (advlock_key_eq(&l->key, key) && (owner == 0 || l->owner == owner)) {
             *pp = l->next;
             l->next = removed;
             removed = l;
@@ -1258,13 +1325,43 @@ void advlock_release_by_owner(file_t *f, int owner) {
         }
     }
     spinlock_release(&advlock_lock);
-    advlock_free_chain(removed);
+    if (removed) {
+        advlock_free_chain(removed);
+        sched_wakeup(advlock_tab);
+    }
+}
+
+/* Called from file_free() when the last reference to an open file
+ * description is dropped.  The locks known by that description go with it;
+ * those on a file are their owners', who gave them up on closing. */
+void advlock_release_file(file_t *f) {
+    struct advkey key = { NULL, 0, f };
+
+    if (!f) return;
+    advlock_release_key(&key, 0);
+}
+
+/*
+ * Release `owner`'s record locks on the file `f` is open on, leaving any
+ * held by other owners intact.  POSIX requires a process's locks on a file
+ * to be dropped when it closes ANY descriptor for that file, or exits — not
+ * deferred to the last close of a description that fork()/dup() left
+ * shared.  Called from the close path (even when f_count > 0) and, via
+ * fd_close_all, for every descriptor an exiting process still holds open.
+ */
+void advlock_release_by_owner(file_t *f, int owner) {
+    struct advkey key;
+
+    if (!f || owner == 0) return;
+    advlock_key(f, &key);
+    advlock_release_key(&key, owner);
 }
 
 /* fcntl F_GETLK: report a conflicting lock owned by another process, or
  * F_UNLCK if the requested region is grantable. */
 static int advlock_getlk_k(process_t *p, file_t *f, struct kflock *flp);
-static int advlock_setlk_k(process_t *p, file_t *f, const struct kflock *flp);
+static int advlock_setlk_k(process_t *p, file_t *f, const struct kflock *flp,
+                           int wait);
 
 static int advlock_getlk(process_t *p, file_t *f, int arg) {
     struct kflock fl;
@@ -1281,13 +1378,13 @@ static int advlock_getlk(process_t *p, file_t *f, int arg) {
 }
 
 /* fcntl F_SETLK / F_SETLKW. */
-static int advlock_setlk(process_t *p, file_t *f, int arg) {
+static int advlock_setlk(process_t *p, file_t *f, int arg, int wait) {
     struct kflock fl;
 
     if (!arg) return -EFAULT;
     if (copyin((void *)(uintptr_t)(unsigned)arg, &fl, sizeof(fl)) != 0)
         return -EFAULT;
-    return advlock_setlk_k(p, f, &fl);
+    return advlock_setlk_k(p, f, &fl, wait);
 }
 
 /*
@@ -1302,7 +1399,7 @@ int proc_advlock(process_t *p, int fd, int cmd, struct kflock *fl) {
     f = p->fds[fd];
     if (!f) return -EBADF;
     return cmd == F_GETLK ? advlock_getlk_k(p, f, fl)
-                          : advlock_setlk_k(p, f, fl);
+                          : advlock_setlk_k(p, f, fl, cmd == F_SETLKW);
 }
 
 static int advlock_getlk_k(process_t *p, file_t *f, struct kflock *flp) {
@@ -1312,10 +1409,13 @@ static int advlock_getlk_k(process_t *p, file_t *f, struct kflock *flp) {
     int r = advlock_range(f, &fl, &s, &e);
     if (r) return r;
 
+    struct advkey key;
+    advlock_key(f, &key);
+
     spinlock_acquire(&advlock_lock);
     struct advlock *hit = NULL;
-    for (struct advlock *l = (struct advlock *)f->f_advlock; l; l = l->next) {
-        if (l->owner != p->pid &&
+    for (struct advlock *l = *advlock_bucket(&key); l; l = l->next) {
+        if (l->owner != p->pid && advlock_key_eq(&l->key, &key) &&
             advlock_overlap(l->start, l->end, s, e) &&
             advlock_conflict(fl.l_type, l->type)) {
             hit = l;
@@ -1337,7 +1437,8 @@ static int advlock_getlk_k(process_t *p, file_t *f, struct kflock *flp) {
     return 0;
 }
 
-static int advlock_setlk_k(process_t *p, file_t *f, const struct kflock *flp) {
+static int advlock_setlk_k(process_t *p, file_t *f, const struct kflock *flp,
+                           int wait) {
     struct kflock fl = *flp;
     if (fl.l_type != F_RDLCK && fl.l_type != F_WRLCK && fl.l_type != F_UNLCK)
         return -EINVAL;
@@ -1361,37 +1462,77 @@ static int advlock_setlk_k(process_t *p, file_t *f, const struct kflock *flp) {
         return -ENOMEM;
     }
 
-    spinlock_acquire(&advlock_lock);
-    if (fl.l_type != F_UNLCK) {
-        for (struct advlock *l = (struct advlock *)f->f_advlock; l; l = l->next) {
-            if (l->owner != p->pid &&
-                advlock_overlap(l->start, l->end, s, e) &&
-                advlock_conflict(fl.l_type, l->type)) {
-                spinlock_release(&advlock_lock);
-                kfree(nl, sizeof(*nl));
-                kfree(split, sizeof(*split));
-                /* F_SETLKW blocking is not implemented; a conflict is only
-                 * reachable when processes share the SAME open file
-                 * description (fork/dup) — reported as EAGAIN either way. */
-                return -EAGAIN;
+    struct advkey key;
+    advlock_key(f, &key);
+
+    /* Leave this loop with the spinlock held and nothing in the way. */
+    for (;;) {
+        int blocker = 0;
+        int err = 0;
+
+        spinlock_acquire(&advlock_lock);
+        if (fl.l_type != F_UNLCK) {
+            for (struct advlock *l = *advlock_bucket(&key); l; l = l->next) {
+                if (l->owner != p->pid && advlock_key_eq(&l->key, &key) &&
+                    advlock_overlap(l->start, l->end, s, e) &&
+                    advlock_conflict(fl.l_type, l->type)) {
+                    blocker = l->owner;
+                    break;
+                }
             }
+        }
+        if (blocker == 0) {
+            break;
+        }
+        if (!wait) {
+            err = -EAGAIN;
+        } else if (advlock_would_deadlock(p->pid, blocker)) {
+            err = -EDEADLK;
+        } else {
+            advlock_waiter_set(p->pid, blocker);
+        }
+        spinlock_release(&advlock_lock);
+
+        if (err == 0) {
+            /* A lock taken off between the release above and the sleep
+             * wakes nobody; the sleep is short for that, and looks again. */
+            current_thread->flags |= THREAD_F_INTERRUPTIBLE;
+            sched_sleep_until(advlock_tab, get_ticks() + ADVLOCK_POLL);
+            current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
+            spinlock_acquire(&advlock_lock);
+            advlock_waiter_set(p->pid, 0);
+            spinlock_release(&advlock_lock);
+            if (current_thread->sig_pending & ~current_thread->sig_mask) {
+                err = -EINTR;
+            }
+        }
+        if (err != 0) {
+            kfree(nl, sizeof(*nl));
+            kfree(split, sizeof(*split));
+            return err;
         }
     }
     /* Clip this owner's coverage of [s,e): partial overlaps are trimmed/split
      * (surrounding fragments preserved), fully-covered locks are returned for
      * freeing outside the lock.  For F_UNLCK this is the whole operation. */
-    struct advlock *removed = advlock_clip_owner_range(f, p->pid, s, e, &split);
+    struct advlock *removed = advlock_clip_owner_range(&key, p->pid, s, e, &split);
     if (nl) {
+        struct advlock **head = advlock_bucket(&key);
+
         nl->start = s;
         nl->end   = e;
         nl->type  = fl.l_type;
         nl->owner = p->pid;
-        nl->next  = (struct advlock *)f->f_advlock;
-        f->f_advlock = nl;
+        nl->key   = key;
+        nl->next  = *head;
+        *head = nl;
     }
     spinlock_release(&advlock_lock);
     advlock_free_chain(removed);
     if (split) kfree(split, sizeof(*split));   /* spare fragment unused */
+    /* What was unlocked, or changed from a write lock to a read one, may be
+     * what someone is waiting for. */
+    sched_wakeup(advlock_tab);
     return 0;
 }
 
@@ -1442,7 +1583,7 @@ int proc_fcntl(process_t *p, int fd, int cmd, int arg) {
         return advlock_getlk(p, f, arg);
     case F_SETLK:
     case F_SETLKW:
-        return advlock_setlk(p, f, arg);
+        return advlock_setlk(p, f, arg, cmd == F_SETLKW);
     case F_SETOWN:
         /*
          * Set the pid/pgrp that receives SIGIO/SIGURG for this fd.

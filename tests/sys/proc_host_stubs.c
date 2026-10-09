@@ -60,6 +60,7 @@ __attribute__((weak)) void preempt_disable(void) { }   /* sys/include/sys/preemp
 __attribute__((weak)) void preempt_enable_noresched(void) { }   /* sys/include/sys/preempt.h */
 __attribute__((weak)) void procfs_release_pid_nodes(int pid) { (void)pid; }   /* sys/fs/procfs.h */
 __attribute__((weak)) int pty_set_nonblock(struct fs_node *node, int on) { (void)node; (void)on; return 0; }   /* sys/drivers/console/pty.h */
+__attribute__((weak)) int sched_sleep_until(void *chan, uint64_t deadline_tick) { (void)chan; (void)deadline_tick; return 0; }   /* sys/kern/sched.h */
 __attribute__((weak)) int sched_thread_running_remote(thread_t *t) { (void)t; return 0; }   /* sys/kern/sched.h */
 __attribute__((weak)) void sem_proc_cleanup(int pid) { (void)pid; }   /* sys/include/sys/sem.h */
 __attribute__((weak)) void shm_proc_cleanup(int pid) { (void)pid; }   /* sys/include/sys/shm.h */

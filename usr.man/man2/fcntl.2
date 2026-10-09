@@ -1,4 +1,4 @@
-.TH FCNTL 2 "2026-03-11" "Substrate" "System Calls"
+.TH FCNTL 2 "2026-10-09" "Substrate" "System Calls"
 .SH NAME
 fcntl \- manipulate file descriptor flags and status flags
 .SH LIBRARY
@@ -62,6 +62,61 @@ Descriptors marked with
 are closed on successful
 .BR execve (2)
 for native, Linux, and ELKS execution paths.
+.SS Record locks
+.BR F_SETLK ,
+.B F_SETLKW
+and
+.B F_GETLK
+take a pointer to a
+.BR "struct flock" ,
+which names a range of bytes by
+.IR l_whence ,
+.I l_start
+and
+.I l_len
+(0 for "to the end of the file, however it grows") and a kind of lock in
+.IR l_type :
+.BR F_RDLCK ,
+which any number of processes may hold on a byte at once,
+.BR F_WRLCK ,
+which one may and only while none reads, or
+.B F_UNLCK
+to take a lock off.  The locks are advisory: they keep out other lockers,
+not readers and writers.
+.TP
+.B F_SETLK
+Set or take off the lock, failing with
+.B EAGAIN
+if another process's lock is in the way.
+.TP
+.B F_SETLKW
+The same, but wait for the way to be clear.  A signal that is caught ends
+the wait with
+.BR EINTR .
+.TP
+.B F_GETLK
+Say whether the lock described could be set.  If so
+.I l_type
+comes back
+.BR F_UNLCK ;
+if not, the structure comes back describing one lock that prevents it, with
+its owner in
+.IR l_pid .
+.P
+A lock is on the
+.I file
+and belongs to the
+.IR process .
+Processes contend for a file whichever way each opened it; a process's own
+locks are never in its own way, and setting a lock over part of one it
+holds replaces that part.  A child does not inherit its parent's locks.
+All of a process's locks on a file are given up when it closes
+.I any
+descriptor for that file, and when it exits.
+.P
+A file is known by its filesystem and inode number.  A lock on something
+with no such identity (a device) is seen only by the processes that share
+the open file description it was set through.
 .SH RETURN VALUE
 On success,
 .BR fcntl ()
@@ -87,13 +142,24 @@ is unsupported, or the argument is invalid for that command.
 .B EMFILE
 No free descriptor was available for
 .BR F_DUPFD .
-.SH NOTES
-Record locking commands such as
-.BR F_GETLK ,
-.BR F_SETLK ,
-and
-.BR F_SETLKW
-are not implemented yet.
+.TP
+.B EAGAIN
+.BR F_SETLK :
+another process holds a lock that conflicts.
+.TP
+.B EDEADLK
+.BR F_SETLKW :
+the process whose lock is in the way is itself waiting, directly or through
+others, for a lock this process holds.
+.TP
+.B EINTR
+.BR F_SETLKW :
+a signal was caught during the wait.
+.TP
+.B EFAULT
+The
+.B struct flock
+is not in the caller's address space.
 .SH SEE ALSO
 .BR dup (2),
 .BR dup2 (2),

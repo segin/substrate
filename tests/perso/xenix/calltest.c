@@ -125,7 +125,7 @@ char **argv, **envp;
 	pid = fork();
 	if (pid == 0) {
 		static struct flock probe;	/* in the data segment */
-		int cfd = fd;
+		int cfd = open(locked, O_RDWR);	/* its own, not the parent's */
 
 		probe.l_type = F_WRLCK;
 		probe.l_whence = 0;
