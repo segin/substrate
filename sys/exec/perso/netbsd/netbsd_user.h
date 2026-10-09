@@ -323,5 +323,6 @@ int netbsd_sys_linkat(int fd1, const char *name1, int fd2, const char *name2, in
 int netbsd_sys_clock_nanosleep(int clock_id, int flags, const void *rqtp, void *rmtp);
 int netbsd_sys_statvfs1(const char *path, void *buf, int flags);
 int netbsd_sys_fstatvfs1(int fd, void *buf, int flags);
+int netbsd_sys_getvfsstat(void *buf, abi_size_t bufsize, int flags);
 
 #endif /* _NETBSD_USER_H */

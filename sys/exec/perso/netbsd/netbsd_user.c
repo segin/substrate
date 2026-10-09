@@ -4,7 +4,9 @@
 #include <sys/copy.h>
 #include <sys/errno.h>
 #include <sys/fcntl.h>
+#include <sys/file.h>
 #include <sys/kern_syscalls.h>
+#include <sys/mount.h>
 #include <sys/namei.h>
 #include <sys/posix_sem.h>
 #include <sys/preempt.h>
@@ -18,6 +20,7 @@
 #include <sys/sysarch.h>
 #include <sys/syscall_impl.h>
 #include <machine/pmm.h>
+#include <vfs/vfs.h>
 #include <vm/phys_mem.h>
 #include <vm/vm_kmem.h>
 #include <vm/vm_map.h>
@@ -817,7 +820,26 @@ struct netbsd_statvfs90 {
 } __attribute__((packed));
 ABI32_ASSERT_SIZE(struct netbsd_statvfs90, 3268);
 
-static int netbsd_statvfs_out(const struct statvfs *k, void *ubuf) {
+/* The three names, which are the mount's and not the filesystem's. */
+static void netbsd_statvfs_names(struct netbsd_statvfs90 *n,
+                                 const struct mount *mp) {
+    const char *ty = "ffs", *on = "/", *from = "/dev/root";
+
+    if (mp != NULL) {
+        if (mp->mnt_stat.f_fstypename[0]) ty = mp->mnt_stat.f_fstypename;
+        if (mp->mnt_stat.f_mntonname[0]) on = mp->mnt_stat.f_mntonname;
+        if (mp->mnt_stat.f_mntfromname[0]) from = mp->mnt_stat.f_mntfromname;
+    }
+    if (strcmp(ty, "ext2") == 0) {
+        ty = "ext2fs";                  /* NetBSD's name for it */
+    }
+    strlcpy(n->f_fstypename, ty, sizeof(n->f_fstypename));
+    strlcpy(n->f_mntonname, on, sizeof(n->f_mntonname));
+    strlcpy(n->f_mntfromname, from, sizeof(n->f_mntfromname));
+}
+
+static int netbsd_statvfs_out(const struct statvfs *k, const struct mount *mp,
+                              void *ubuf) {
     struct netbsd_statvfs90 *n = kmalloc(sizeof(*n));
     size_t len;
     int rc;
@@ -841,8 +863,12 @@ static int netbsd_statvfs_out(const struct statvfs *k, void *ubuf) {
     n->f_fsidx[0] = (int32_t)k->f_fsid;
     n->f_fsid = (uint32_t)k->f_fsid;
     n->f_namemax = (uint32_t)k->f_namemax;
-    len = strnlen(k->f_fstypename, sizeof(k->f_fstypename));
-    memcpy(n->f_fstypename, k->f_fstypename, len);
+    if (mp != NULL) {
+        netbsd_statvfs_names(n, mp);
+    } else {
+        len = strnlen(k->f_fstypename, sizeof(k->f_fstypename));
+        memcpy(n->f_fstypename, k->f_fstypename, len);
+    }
     rc = copyout(n, ubuf, sizeof(*n)) != 0 ? -EFAULT : 0;
     kfree(n, sizeof(*n));
     return rc;
@@ -851,21 +877,97 @@ static int netbsd_statvfs_out(const struct statvfs *k, void *ubuf) {
 int netbsd_sys_statvfs1(const char *path, void *buf, int flags) {
     struct statvfs k;
     char kpath[256];
+    fs_node_t *root, *node;
     int rc;
 
     (void)flags;                        /* ST_WAIT or ST_NOWAIT: nothing to wait for */
     COPYIN_STR(path, kpath);
     rc = kern_statvfs(kpath, &k);
-    return rc != 0 ? rc : netbsd_statvfs_out(&k, buf);
+    if (rc != 0) {
+        return rc;
+    }
+    /* The same file again, for the mount it is on: df(1) with a path
+     * prints the names from here and nothing in their place. */
+    root = current_process->root_node ? current_process->root_node : fs_root;
+    node = vfs_lookup(kpath[0] == '/' || !current_process->cwd_node
+                          ? root : current_process->cwd_node, kpath);
+    return netbsd_statvfs_out(&k, node ? node->mp : NULL, buf);
 }
 
 int netbsd_sys_fstatvfs1(int fd, void *buf, int flags) {
     struct statvfs k;
+    file_t *f;
     int rc;
 
     (void)flags;
     rc = kern_fstatvfs(fd, &k);
-    return rc != 0 ? rc : netbsd_statvfs_out(&k, buf);
+    if (rc != 0) {
+        return rc;
+    }
+    f = current_process->fds[fd];       /* kern_fstatvfs took it: it is one */
+    return netbsd_statvfs_out(&k, f && f->f_data
+                                      ? ((fs_node_t *)f->f_data)->mp : NULL, buf);
+}
+
+/*
+ * getvfsstat(buf, bufsize, flags): every mounted filesystem, as many as
+ * fit, or with no buffer how many there are.  getmntinfo(3) is this, and
+ * df(1) is getmntinfo.  Here the names are known -- they are the mount's,
+ * not the filesystem's -- and df prints nothing without them.
+ */
+int netbsd_sys_getvfsstat(void *buf, abi_size_t bufsize, int flags) {
+    struct netbsd_statvfs90 *n = NULL;
+    struct mount *mp;
+    size_t maxent = buf ? bufsize / sizeof(*n) : 0;
+    size_t count = 0;
+    int rc = 0;
+
+    (void)flags;                        /* ST_WAIT or ST_NOWAIT */
+    if (buf != NULL) {
+        n = kmalloc(sizeof(*n));
+        if (n == NULL) {
+            return -ENOMEM;
+        }
+    }
+    TAILQ_FOREACH(mp, &mountlist, mnt_list) {
+        struct statfs ns;
+
+        if (buf == NULL) {
+            count++;
+            continue;
+        }
+        if (count >= maxent) {
+            break;
+        }
+        memset(&ns, 0, sizeof(ns));
+        if (mp->mnt_node_root) {
+            statfs_fs(mp->mnt_node_root, &ns);
+        }
+        memset(n, 0, sizeof(*n));
+        n->f_bsize = ns.f_bsize ? (uint32_t)ns.f_bsize : 4096U;
+        n->f_frsize = n->f_bsize;
+        n->f_iosize = n->f_bsize;
+        n->f_blocks = ns.f_blocks;
+        n->f_bfree = ns.f_bfree;
+        n->f_bavail = ns.f_bavail;
+        n->f_bresvd = ns.f_bfree >= ns.f_bavail ? ns.f_bfree - ns.f_bavail : 0;
+        n->f_files = ns.f_files;
+        n->f_ffree = ns.f_ffree;
+        n->f_favail = ns.f_ffree;
+        n->f_fsidx[0] = (int32_t)ns.f_fsid;
+        n->f_fsid = (uint32_t)ns.f_fsid;
+        n->f_namemax = 255;
+        netbsd_statvfs_names(n, mp);
+        if (copyout(n, (char *)buf + count * sizeof(*n), sizeof(*n)) != 0) {
+            rc = -EFAULT;
+            break;
+        }
+        count++;
+    }
+    if (n != NULL) {
+        kfree(n, sizeof(*n));
+    }
+    return rc != 0 ? rc : (int)count;
 }
 
 /* _lwp_ctl(int features, struct lwpctl **address) — hand back a per-LWP

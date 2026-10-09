@@ -288,6 +288,7 @@
 /* What ln(1), sleep(1) and ls -l call, by NetBSD 10's syscalls.master. */
 #define NETBSD_SYS_linkat          457
 #define NETBSD_SYS_clock_nanosleep 477
+#define NETBSD_SYS___getvfsstat90  483
 #define NETBSD_SYS___statvfs190    484
 #define NETBSD_SYS___fstatvfs190   485
 #define NETBSD_SYS_lpathconf       499
