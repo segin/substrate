@@ -307,6 +307,27 @@ nothing is.
 Where sections of strings or constants
 .Pq Dv SHF_MERGE
 are gathered with others the result is not marked as such.
+.Sh THREAD-LOCAL STORAGE
+The sections flagged
+.Dv SHF_TLS ,
+.Pa .tdata
+and then
+.Pa .tbss ,
+are what each thread has a copy of.
+They are described by a
+.Dv PT_TLS
+program header, aligned as the strictest of their contents;
+.Pa .tbss
+takes up no room in the image, and a thread-local symbol's value is its
+offset in the copy.
+In a program, references to its own thread-local variables compiled as
+local-exec or initial-exec
+.Pq Fl ftls-model
+are resolved to the constant offset from the thread pointer, an
+initial-exec load from the GOT being rewritten as a load of the constant.
+General-dynamic and local-dynamic references to them, and thread-local
+variables defined in a shared object being made, are not supported and
+are reported as errors.
 .Sh SYMBOL VERSIONS
 A symbol an input object names
 .Li sym@VER

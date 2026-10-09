@@ -8,5 +8,6 @@ run:
 	./test_archive.sh
 	./test_dynamic.sh
 	./test_output.sh
+	./test_tls.sh
 
 clean:

@@ -1,0 +1,77 @@
+#!/bin/sh
+# Thread-local storage in a program: the extent a thread gets a copy of,
+# what the symbols in it are worth, and how far from the thread pointer
+# the code is told each variable is.  The linker is built for the host out
+# of the tree and links freestanding objects; that a thread then finds its
+# variables is checked on the target, not here.
+set -u
+
+here=$(cd "$(dirname "$0")" && pwd)
+top=$(cd "$here/../../.." && pwd)
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+fail=0
+
+${CC:-cc} -O0 -w -o "$work/ld" \
+    -idirafter "$top/include" -idirafter "$top/sys" -idirafter "$top/sys/include" \
+    -I"$top/usr.lib/elfobj/src" "$top"/usr.bin/ld/*.c "$top"/usr.lib/elfobj/src/*.c || {
+    echo "FAIL: the linker does not build for the host"; exit 1; }
+
+cd "$work" || exit 1
+cat > t.c <<'EOF'
+__thread int first = 5;
+__thread char pad = 1;
+__thread long long wide __attribute__((aligned(32))) = 7;
+__thread int zeroed;
+int plain = 3;
+int big[64];
+void _start(void) { zeroed = first + (int)wide + plain + big[1] + pad; for (;;) { } }
+EOF
+base="-c -ffreestanding -fno-asynchronous-unwind-tables -fno-stack-protector"
+${CC:-cc} -m32 $base -fno-pic -fno-pie -o le32.o t.c || { echo "SKIP: no 32-bit compiler"; exit 0; }
+${CC:-cc} -m32 $base -fPIC -ftls-model=initial-exec -o ie32.o t.c
+${CC:-cc} -m64 $base -fno-pic -fno-pie -o le64.o t.c
+${CC:-cc} -m64 $base -fPIC -ftls-model=initial-exec -o ie64.o t.c
+
+is() {    # WHAT GOT WANT
+    if [ "$2" = "$3" ]; then echo "ok   $1"; else echo "FAIL $1: got '$2', want '$3'"; fail=1; fi
+}
+sec() {   # FILE SECTION FIELD(addr|size)
+    readelf -SW "$1" | sed 's/^ *\[ *[0-9]*\] *//' | awk -v s="$2" -v f="$3" '$1 == s { print "0x" (f == "addr" ? $3 : $5) }'
+}
+symval() { readelf -sW "$1" | awk -v s="$2" '$8 == s { print "0x" $2; exit }'; }
+
+for arch in 32 64; do
+    m=elf_i386; [ $arch = 64 ] && m=elf_x86_64
+    for model in le ie; do
+        out=$model$arch
+        if ! ./ld -m $m -o $out $out.o 2> err; then
+            echo "FAIL $out: does not link: $(head -1 err)"; fail=1; continue
+        fi
+        td=$(sec $out .tdata addr); tds=$(sec $out .tdata size)
+        tb=$(sec $out .tbss addr); tbs=$(sec $out .tbss size)
+        set -- $(readelf -lW $out | awk '$1 == "TLS" { print $3, $5, $6, $NF }')
+        is "$out: PT_TLS begins at .tdata"      "$(( $1 ))" "$(( td ))"
+        is "$out: has .tdata for initial values" "$(( $2 ))" "$(( tds ))"
+        is "$out: and ends where .tbss does"    "$(( $1 + $3 ))" "$(( tb + tbs ))"
+        is "$out: .tbss directly after .tdata"  "$(( tb >= td + tds && tb < td + tds + 32 ))" 1
+        is "$out: aligned as its strictest member" "$(( $4 ))" 32
+        is "$out: and begins on that alignment" "$(( td % 32 ))" 0
+        is "$out: .tbss takes no room in the image" \
+           "$(( $(sec $out .data addr) < tb + tbs || $(sec $out .bss addr) < tb + 4096 ))" 1
+        is "$out: a symbol's value is its place in the copy" "$(( $(symval $out first) ))" 0
+        is "$out: the aligned one on its alignment" "$(( $(symval $out wide) % 32 ))" 0
+        is "$out: the zeroed one after the initial values" "$(( $(symval $out zeroed) >= tds ))" 1
+        # The copy ends at the thread pointer, rounded up to the alignment:
+        # the distances the code has are those back from there.
+        blk=$(( ($3 + 31) / 32 * 32 ))
+        v=$(( (1 << 32) - blk + $(symval $out first) ))
+        bytes=$(printf '%02x %02x %02x %02x' $(( v & 255 )) $(( (v >> 8) & 255 )) $(( (v >> 16) & 255 )) $(( v >> 24 )))
+        is "$out: the code has 'first' at -$blk from the thread pointer" \
+           "$(( $(objdump -d --insn-width=16 -j .text $out | grep -c "$bytes") > 0 ))" 1
+        is "$out: no dynamic relocations"       "$(readelf -rW $out | grep -c 'R_')" 0
+    done
+done
+
+[ "$fail" -eq 0 ] && echo "PASS" || echo "FAILED"
+exit "$fail"

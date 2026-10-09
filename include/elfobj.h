@@ -311,7 +311,8 @@ typedef enum {
 #define R_386_8 22
 #define R_386_PC8 23
 #define R_386_TLS_LDO_32 32
-#define R_386_TLS_LE_32 33
+#define R_386_TLS_IE_32 33
+#define R_386_TLS_LE_32 34
 #define R_386_TLS_DTPMOD32 35
 #define R_386_TLS_DTPOFF32 36
 #define R_386_TLS_TPOFF32 37

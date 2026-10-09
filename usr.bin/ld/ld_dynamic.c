@@ -2885,6 +2885,7 @@ int patch_dynamic_tag_values(elfobj_t *out) {
 }
 
 int finalize_symbol_values_for_output(elfobj_t *out) {
+    uint64_t tls_start = 0;
     size_t i;
 
     if (out == NULL) {
@@ -2913,6 +2914,11 @@ int finalize_symbol_values_for_output(elfobj_t *out) {
         sec_addr = elf_section_addr(elf_section_get(out, (size_t)(shndx - 1)));
         if (value > UINT64_MAX - sec_addr) {
             return -1;
+        }
+        /* A thread-local symbol's value is where it is in a thread's
+         * copy, there being no one address it is at. */
+        if (elf_symbol_type(sym) == STT_TLS && tls_extent(out, &tls_start, NULL, NULL, NULL)) {
+            sec_addr -= tls_start;
         }
         if (elf_symbol_set_value(sym, value + sec_addr) != ELF_OK) {
             return -1;

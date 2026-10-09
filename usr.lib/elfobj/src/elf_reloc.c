@@ -88,6 +88,7 @@ static int i386_reloc_size(uint32_t type) {
         case R_386_JMP_SLOT:
         case R_386_TLS_DTPMOD32:
         case R_386_TLS_DTPOFF32:
+        case R_386_TLS_IE_32:
         case R_386_TLS_LE_32:
         case R_386_TLS_TPOFF32:
         case R_386_SIZE32:
@@ -129,6 +130,7 @@ static int i386_is_tls(uint32_t type) {
         case R_386_TLS_LDO_32:
         case R_386_TLS_DTPMOD32:
         case R_386_TLS_DTPOFF32:
+        case R_386_TLS_IE_32:
         case R_386_TLS_LE_32:
         case R_386_TLS_TPOFF32:
             return 1;
@@ -160,6 +162,7 @@ static int i386_apply(const elfobj_reloc_ctx_t *ctx,
         case R_386_IRELATIVE:
         case R_386_TLS_DTPMOD32:
         case R_386_TLS_DTPOFF32:
+        case R_386_TLS_IE_32:
         case R_386_TLS_LE_32:
         case R_386_TLS_TPOFF32:
             v = (elf_swide_t)sym_value + (elf_swide_t)addend;
@@ -3012,6 +3015,7 @@ const char *elf_reloc_name_for_machine(uint16_t machine, uint32_t type) {
                 case R_386_TLS_GD: return "R_386_TLS_GD";
                 case R_386_TLS_LDM: return "R_386_TLS_LDM";
                 case R_386_TLS_LDO_32: return "R_386_TLS_LDO_32";
+                case R_386_TLS_IE_32: return "R_386_TLS_IE_32";
                 case R_386_TLS_LE_32: return "R_386_TLS_LE_32";
                 case R_386_TLS_DTPMOD32: return "R_386_TLS_DTPMOD32";
                 case R_386_TLS_DTPOFF32: return "R_386_TLS_DTPOFF32";

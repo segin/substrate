@@ -17,8 +17,76 @@ int alloc_section_class(uint64_t flags) {
     return 1; /* RO */
 }
 
+/*
+ * The thread-local storage of the output: what each thread gets a copy
+ * of.  It is .tdata, the part with initial values, and .tbss directly
+ * after it, the part that starts as zeros; `start` is the address of the
+ * first, `memsz` the extent of both, `filesz` how much of that has
+ * initial values in the file, and `align` the strictest alignment of
+ * anything in it.  Returns 0 if there is none.
+ *
+ * Addresses within it mean nothing at run time -- no thread's copy is
+ * there -- and are used only as offsets from `start`.
+ */
+int tls_extent(const elfobj_t *obj, uint64_t *start, uint64_t *memsz, uint64_t *filesz, uint64_t *align) {
+    uint64_t lo = UINT64_MAX, hi = 0, file_hi = 0, al = 1;
+    size_t i;
+
+    for (i = 0; i < elf_section_count(obj); ++i) {
+        const elf_section_t *sec = elf_section_get((elfobj_t *)obj, i);
+        uint64_t a, e;
+
+        if (sec == NULL || (elf_section_flags(sec) & (SHF_ALLOC | SHF_TLS)) != (SHF_ALLOC | SHF_TLS)) {
+            continue;
+        }
+        a = elf_section_addr(sec);
+        e = a + elf_section_size(sec);
+        lo = a < lo ? a : lo;
+        hi = e > hi ? e : hi;
+        if (elf_section_type(sec) != SHT_NOBITS && e > file_hi) {
+            file_hi = e;
+        }
+        if (elf_section_align(sec) > al) {
+            al = elf_section_align(sec);
+        }
+    }
+    if (lo == UINT64_MAX) {
+        return 0;
+    }
+    if (start != NULL) {
+        *start = lo;
+    }
+    if (memsz != NULL) {
+        *memsz = hi - lo;
+    }
+    if (filesz != NULL) {
+        *filesz = file_hi > lo ? file_hi - lo : 0;
+    }
+    if (align != NULL) {
+        *align = al;
+    }
+    return 1;
+}
+
+/*
+ * Where a thread-local variable is from the thread pointer, which on x86
+ * (both sizes) points just past the thread's copy: the copy is the
+ * extent rounded up to its alignment, so that it ends where the pointer
+ * is, and the variable is that far back less its place in the copy.
+ * Always negative.
+ */
+int64_t tls_tpoff(const elfobj_t *obj, uint64_t addr) {
+    uint64_t start = 0, memsz = 0, align = 1;
+
+    if (!tls_extent(obj, &start, &memsz, NULL, &align)) {
+        return 0;
+    }
+    return (int64_t)(addr - start) - (int64_t)((memsz + align - 1) & ~(align - 1));
+}
+
 int assign_section_addresses(elfobj_t *obj, uint64_t base_vaddr) {
     uint64_t off;
+    uint64_t tls_align = 1;
     uint64_t mem_end;
     uint64_t ehsize;
     uint64_t phentsz;
@@ -75,6 +143,7 @@ int assign_section_addresses(elfobj_t *obj, uint64_t base_vaddr) {
             return -1;
         }
     }
+    (void)tls_extent(obj, NULL, NULL, NULL, &tls_align);
     for (i = 0; i < elf_section_count(obj); ++i) {
         elf_section_t *sec = elf_section_get(obj, i);
         uint64_t align;
@@ -94,6 +163,16 @@ int assign_section_addresses(elfobj_t *obj, uint64_t base_vaddr) {
         size = elf_section_size(sec);
         flags = elf_section_flags(sec);
         name = elf_section_name(sec);
+        /* The first thing in the thread-local storage is aligned as
+         * strictly as anything in it: a thread's copy is placed by that
+         * alignment, and what is in the copy by its distance from the
+         * start, which is only right if the start is as well aligned. */
+        if ((flags & (SHF_ALLOC | SHF_TLS)) == (SHF_ALLOC | SHF_TLS)) {
+            if (tls_align > align) {
+                align = tls_align;
+            }
+            tls_align = 1;
+        }
 
         if ((flags & SHF_ALLOC) != 0) {
             int curr_alloc_class = alloc_section_class(flags);
@@ -204,12 +283,21 @@ static int section_order_rank(const elf_section_t *sec) {
         }
         return strncmp(name, ".data.rel.ro", 12) == 0 ? 27 : 26;
     }
+    /*
+     * Thread-local storage is one extent, the initialised part and then
+     * the zeroed part with nothing between, since a thread's copy is made
+     * as one piece.  The zeroed part takes up no room in the image -- no
+     * thread's copy is there -- and what follows it is placed over it.
+     */
+    if ((flags & (SHF_ALLOC | SHF_TLS)) == (SHF_ALLOC | SHF_TLS)) {
+        return type == SHT_NOBITS ? 31 : 30;
+    }
     if (name != NULL) {
         if (strcmp(name, ".got.plt") == 0) {
-            return 30;
+            return 32;
         }
         if (strcmp(name, ".tm_clone_table") == 0) {
-            return 32;
+            return 34;
         }
     }
     if (type == SHT_REL || type == SHT_RELA) {
@@ -228,7 +316,7 @@ static int section_order_rank(const elf_section_t *sec) {
         if (type == SHT_NOBITS) {
             return 40;
         }
-        return 31;
+        return 33;
     }
     return 100;
 }
@@ -476,7 +564,10 @@ int add_default_segments(elfobj_t *obj, const ld_ctx_t *ctx) {
         }
         if (is_alloc && (flags & SHF_TLS) != 0) {
             if (tls_seg == NULL) {
-                tls_seg = elf_add_tls_segment(obj, 8);
+                uint64_t tls_align = 1;
+
+                (void)tls_extent(obj, NULL, NULL, NULL, &tls_align);
+                tls_seg = elf_add_tls_segment(obj, tls_align);
                 if (tls_seg == NULL) {
                     return -1;
                 }

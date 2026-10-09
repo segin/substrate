@@ -624,6 +624,8 @@ int apply_all_relocations(elfobj_t *obj, const ld_ctx_t *ctx, int allow_undefine
 /* ld_layout.c */
 int alloc_section_class(uint64_t flags);
 int assign_section_addresses(elfobj_t *obj, uint64_t base_vaddr);
+int tls_extent(const elfobj_t *obj, uint64_t *start, uint64_t *memsz, uint64_t *filesz, uint64_t *align);
+int64_t tls_tpoff(const elfobj_t *obj, uint64_t addr);
 int reorder_sections_default_policy(elfobj_t *obj);
 int is_relro_candidate_name(const char *name);
 int add_default_segments(elfobj_t *obj, const ld_ctx_t *ctx);

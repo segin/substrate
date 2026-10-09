@@ -459,6 +459,118 @@ int fill_local_got_i386(const ld_ctx_t *ctx, elfobj_t *out) {
     return rc;
 }
 
+/*
+ * A reference to a thread-local variable that the program itself defines.
+ *
+ * The program's thread-local storage is the first there is, at a distance
+ * from the thread pointer that is known now (tls_tpoff), so however the
+ * compiler was told to reach the variable -- by the distance directly
+ * (local-exec), or by a distance to be read from a GOT slot that the
+ * dynamic linker would fill in (initial-exec) -- it comes to the distance,
+ * as a constant in the instruction.  For initial-exec that means making
+ * the instruction that loads from the slot into one that loads a constant,
+ * as the psABI's TLS supplement lays out; the instruction is the same
+ * length and the register the same.
+ *
+ * Returns 0 when done, -1 with *why set.
+ */
+static int apply_tls_in_program(const elfobj_t *obj, uint16_t machine, uint32_t type, uint8_t *buf, size_t sec_sz,
+                                uint64_t off, uint64_t S, int64_t addend, const char **why) {
+    elfobj_endian_t e = elf_endian(obj);
+
+    (void)sec_sz;
+    if (machine == EM_386) {
+        uint32_t tpoff = (uint32_t)tls_tpoff(obj, S + (uint64_t)addend);
+        uint8_t modrm = off >= 1 ? buf[off - 1] : 0;
+        uint8_t reg = (uint8_t)((modrm >> 3) & 7);
+
+        switch (type) {
+            case R_386_TLS_LE:              /* sym@ntpoff: added to %gs:0 */
+                break;
+            case R_386_TLS_LE_32:           /* sym@tpoff: subtracted from it */
+                tpoff = 0U - tpoff;
+                break;
+            case R_386_TLS_IE:              /* sym@indntpoff: the slot, by address */
+                if (off >= 1 && buf[off - 1] == 0xa1) {
+                    buf[off - 1] = 0xb8;                        /* mov $x,%eax */
+                } else if (off >= 2 && buf[off - 2] == 0x8b && (modrm & 0xc7) == 0x05) {
+                    buf[off - 2] = 0xc7;                        /* mov $x,%reg */
+                    buf[off - 1] = (uint8_t)(0xc0 | reg);
+                } else if (off >= 2 && buf[off - 2] == 0x03 && (modrm & 0xc7) == 0x05) {
+                    buf[off - 2] = 0x81;                        /* add $x,%reg */
+                    buf[off - 1] = (uint8_t)(0xc0 | reg);
+                } else {
+                    *why = "an initial-exec reference in an instruction that is neither mov nor add";
+                    return -1;
+                }
+                break;
+            case R_386_TLS_GOTIE:           /* sym@gotntpoff(%reg): the slot, from the GOT */
+                if (off >= 2 && buf[off - 2] == 0x8b && (modrm & 0xc0) == 0x80) {
+                    buf[off - 2] = 0xc7;                        /* mov $x,%reg */
+                    buf[off - 1] = (uint8_t)(0xc0 | reg);
+                } else if (off >= 2 && buf[off - 2] == 0x03 && (modrm & 0xc0) == 0x80) {
+                    buf[off - 2] = 0x8d;                        /* lea x(%reg),%reg */
+                    buf[off - 1] = (uint8_t)(0x80 | (reg << 3) | reg);
+                } else {
+                    *why = "an initial-exec reference in an instruction that is neither mov nor add";
+                    return -1;
+                }
+                break;
+            default:
+                *why = "this way of reaching thread-local storage is not supported in a program";
+                return -1;
+        }
+        write_uint_bytes(buf + off, 4, e, tpoff);
+        return 0;
+    }
+    if (machine == EM_X86_64) {
+        switch (type) {
+            case R_X86_64_TPOFF32:
+                write_uint_bytes(buf + off, 4, e, (uint32_t)tls_tpoff(obj, S + (uint64_t)addend));
+                return 0;
+            case R_X86_64_TPOFF64:
+                write_uint_bytes(buf + off, 8, e, (uint64_t)tls_tpoff(obj, S + (uint64_t)addend));
+                return 0;
+            case R_X86_64_GOTTPOFF: {       /* sym@gottpoff(%rip); the addend is the -4 of %rip */
+                uint8_t rex, op, modrm, reg;
+
+                if (off < 3 || (buf[off - 1] & 0xc7) != 0x05 || (buf[off - 3] != 0x48 && buf[off - 3] != 0x4c)) {
+                    *why = "an initial-exec reference in an instruction that is neither mov nor add";
+                    return -1;
+                }
+                rex = buf[off - 3];
+                op = buf[off - 2];
+                modrm = buf[off - 1];
+                reg = (uint8_t)((modrm >> 3) & 7);
+                /* REX.R named the register as the destination of a load;
+                 * as the operand of an immediate it is REX.B that does. */
+                if (op == 0x8b) {
+                    buf[off - 3] = rex == 0x4c ? 0x49 : 0x48;   /* mov $x,%reg */
+                    buf[off - 2] = 0xc7;
+                    buf[off - 1] = (uint8_t)(0xc0 | reg);
+                } else if (op == 0x03 && reg == 4) {
+                    buf[off - 3] = rex == 0x4c ? 0x49 : 0x48;   /* add $x,%rsp or %r12 */
+                    buf[off - 2] = 0x81;
+                    buf[off - 1] = (uint8_t)(0xc0 | reg);
+                } else if (op == 0x03) {
+                    buf[off - 3] = rex == 0x4c ? 0x4d : 0x48;   /* lea x(%reg),%reg */
+                    buf[off - 2] = 0x8d;
+                    buf[off - 1] = (uint8_t)(0x80 | (reg << 3) | reg);
+                } else {
+                    *why = "an initial-exec reference in an instruction that is neither mov nor add";
+                    return -1;
+                }
+                write_uint_bytes(buf + off, 4, e, (uint32_t)tls_tpoff(obj, S + (uint64_t)addend + 4));
+                return 0;
+            }
+            default:
+                break;
+        }
+    }
+    *why = "this way of reaching thread-local storage is not supported in a program";
+    return -1;
+}
+
 int apply_all_relocations(elfobj_t *obj, const ld_ctx_t *ctx, int allow_undefined) {
     size_t i;
     static int trace_reloc_env = -1;
@@ -625,6 +737,36 @@ int apply_all_relocations(elfobj_t *obj, const ld_ctx_t *ctx, int allow_undefine
                     return -1;
                 }
                 write_uint_bytes(buf + off, width, endian, outv & 0xffffffffULL);
+                continue;
+            }
+            if (elf_reloc_is_tls_for_machine(machine, type) && sym != NULL &&
+                elf_symbol_shndx(sym) != SHN_UNDEF) {
+                const char *why = NULL;
+                int done;
+
+                if ((flags & SHF_ALLOC) == 0) {
+                    /* A description of the program says where in a
+                     * thread's copy the variable is. */
+                    uint64_t start = 0;
+
+                    (void)tls_extent(obj, &start, NULL, NULL, NULL);
+                    write_uint_bytes(buf + off, width, endian, S + (uint64_t)addend - start);
+                    continue;
+                }
+                if (elf_type(obj) == ET_DYN && !ctx->pie) {
+                    why = "thread-local storage defined in a shared object is not supported";
+                    done = -1;
+                } else {
+                    done = apply_tls_in_program(obj, machine, type, buf, sec_sz, off, S, addend, &why);
+                }
+                if (done < 0) {
+                    free(buf);
+                    fprintf(stderr,
+                            "ld: relocation error: section=%s offset=0x%llx type=%s symbol=%s: %s\n",
+                            sec_name, (unsigned long long)off,
+                            elf_reloc_name_for_machine(machine, type), sym_name, why);
+                    return -1;
+                }
                 continue;
             }
             err = elf_apply_relocation_value(obj, type, P, S, addend, &outv);
