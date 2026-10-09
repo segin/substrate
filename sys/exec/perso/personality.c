@@ -93,14 +93,19 @@ void perso_sockaddr_out(uint8_t *addr, size_t len) {
  * the file is there or the directory it would be made in is; otherwise the
  * name as given, which is substrate's.
  *
- * Substrate looks a file that exists up under the tree first, and that is
- * all it does on its own.  A name that does not exist yet falls through to
- * substrate's root -- so a program could read /export/x, where /export is
- * the tree's alone, and not create /export/y beside it; could create
- * /tmp/x and then not find it in the /tmp it lists -- and mkdir, rmdir,
- * unlink, link, rename, chmod, chown and chdir never looked under the
- * tree at all.  A personality that passes every path it is given through
- * here means the same file by the same name in all of them.
+ * Substrate's own lookup (vfs_perso_lookup, kern/syscall.c) tries a name
+ * under the tree first and the name as given after.  That finds a file
+ * that exists, and it finds the directory a new name is to be made in:
+ * the directory is looked up the same way, so a file created in a
+ * directory the tree has is created in the tree.  tests/perso/treerule.sh
+ * measures that for the personalities that rely on it and nothing else.
+ *
+ * This is for a personality that does not leave it to each call: one
+ * that passes every path it is given through here means the same file
+ * by the same name in open, mkdir, rmdir, unlink, link, rename, chmod,
+ * chown and chdir alike, whichever of them substrate would have looked
+ * up how.  (This comment used to say that a name not yet existing fell
+ * through to substrate's root.  Measured on 2026-10-08, it does not.)
  *
  * /dev is left alone where the personality's devices are the kernel's, and
  * so is a name that is under the tree already.  Returns 1 with the name to
