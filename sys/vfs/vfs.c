@@ -1008,6 +1008,71 @@ static fs_node_t *vfs_perso_shadow(const char *path,
     return NULL;
 }
 
+/*
+ * A component in the middle of a path, looked up for a process with a
+ * personality tree.  Returns the node to carry on from with *done == 0, or
+ * the answer to the whole lookup (which may be NULL) with *done == 1.
+ *
+ * The second is for a symbolic link to an absolute name with more of the
+ * path to come.  Followed by itself, the link's target is found under the
+ * tree if it is there at all -- "/" always is -- and what remains is then
+ * walked from that directory, in the tree and nowhere else: the rule that a
+ * name missing from the tree is substrate's was applied to half the name.
+ * So with z: -> /, which is how Wine reaches the files of the system it
+ * runs on, /usr/local/share/x resolved through z: and /tmp/x, /tmp being
+ * substrate's, did not, though the process could name /tmp/x directly.
+ * The target and the remainder are one absolute name and are looked up as
+ * one, by `lookup`, the same way as if the process had written it out.
+ */
+static fs_node_t *vfs_perso_component(fs_node_t *dir, char *component,
+                                      const char *rest,
+                                      fs_node_t *(*lookup)(fs_node_t *,
+                                                           const char *),
+                                      int *done) {
+    fs_node_t *n;
+    char *full;
+    int len;
+
+    *done = 0;
+    n = finddir_fs_internal(dir, component, 0, 0);
+    if (!n || (n->flags & 0x7) != FS_SYMLINK || !n->readlink) {
+        return n;                   /* nothing to follow */
+    }
+    full = kmalloc(512);
+    if (!full) {
+        return finddir_fs_internal(dir, component, 0, 1);
+    }
+    len = n->readlink(n, full, 255);
+    if (len <= 0 || len >= 256 || full[0] != '/' ||
+        (size_t)len + 1U + strlen(rest) >= 512U) {
+        kfree(full, 512);
+        return finddir_fs_internal(dir, component, 0, 1);
+    }
+    full[len] = '/';
+    memcpy(full + len + 1, rest, strlen(rest) + 1U);
+
+    *done = 1;
+    if (current_thread &&
+        current_thread->vfs_symlink_depth >= MAX_SYMLINK_DEPTH) {
+        current_thread->vfs_symlink_eloop = 1;
+        kfree(full, 512);
+        return NULL;
+    }
+    if (current_thread) current_thread->vfs_symlink_depth++;
+    n = lookup(fs_root, full);
+    if (current_thread) current_thread->vfs_symlink_depth--;
+    kfree(full, 512);
+    return n;
+}
+
+/* Is there more of the path after the component that ends at `p`, and is
+ * the process one whose absolute names are tried under a tree first? */
+static const char *vfs_perso_rest(const char *p) {
+    if (!current_process || current_process->perso_id == 0) return NULL;
+    while (*p == '/') p++;
+    return *p ? p : NULL;
+}
+
 // Lookup a path from a root node
 fs_node_t *vfs_lookup(fs_node_t *root, const char *path) {
     if (!path || !root) return NULL;
@@ -1106,7 +1171,19 @@ fs_node_t *vfs_lookup(fs_node_t *root, const char *path) {
         }
         
         // Lookup this component
-        current = finddir_fs(current, component);
+        {
+            const char *rest = vfs_perso_rest(p);
+
+            if (rest) {
+                int done;
+
+                current = vfs_perso_component(current, component, rest,
+                                              vfs_lookup, &done);
+                if (done) return current;
+            } else {
+                current = finddir_fs(current, component);
+            }
+        }
         if (!current) return NULL;
 
         /*
@@ -1238,7 +1315,19 @@ fs_node_t *vfs_lookup_lstat(fs_node_t *root, const char *path) {
         
         // Lookup this component
         // If last, DO NOT follow symlinks
-        current = finddir_fs_internal(current, component, 0, !is_last);
+        {
+            const char *rest = is_last ? NULL : vfs_perso_rest(p);
+
+            if (rest) {
+                int done;
+
+                current = vfs_perso_component(current, component, rest,
+                                              vfs_lookup_lstat, &done);
+                if (done) return current;
+            } else {
+                current = finddir_fs_internal(current, component, 0, !is_last);
+            }
+        }
         if (!current) return NULL;
 
         /* Mount crossing by node identity (see vfs_lookup comment) */
