@@ -166,6 +166,10 @@ typedef struct process {
      * copyin/copyinstr must not reject sub-USER_STACK_MIN pointers up front
      * (an unmapped low access is still caught by the on_fault path). */
     uint8_t  low_va_valid;
+    /* Set by the x.out loader for a Xenix/286 program of the large-data
+     * models (XE_LDATA), which passes a system call's arguments in a
+     * block on its stack and every pointer among them far. */
+    uint8_t  x286_ldata;
     /*
      * Dead space where the resource limits used to live: rlimits[1] (the
      * core-dump limit) plus the separate rlim_memlock_* / rlim_as_* pairs,

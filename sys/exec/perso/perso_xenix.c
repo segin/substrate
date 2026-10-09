@@ -238,18 +238,29 @@ static const char *x286_xenix_name(unsigned int sub);
 /* The decoded trap frame handed to each call implementation           */
 /* ------------------------------------------------------------------ */
 
+/*
+ * The four argument slots are named for the registers a small-data program
+ * passes them in.  Each holds one 16-bit word of the argument list -- a long
+ * takes two -- except that a pointer is always ONE slot, whichever way it
+ * came: a near pointer is its offset, with nothing above, and a far one (a
+ * large-data program's) is X286_FAR(selector, offset).  x286_ptr_sel() gives
+ * the segment of either, so a call's code does not ask which it has.
+ */
 struct x286_frame {
     registers_t *regs;
     uint16_t nr;    /* AL: the System V call number */
     uint16_t sub;   /* AH: sub-function, for the multiplexed calls */
-    uint16_t bx;    /* arg1 */
-    uint16_t cx;    /* arg2 */
-    uint16_t si;    /* arg3 */
-    uint16_t di;    /* arg4 */
+    uint32_t bx;    /* arg1 */
+    uint32_t cx;    /* arg2 */
+    uint32_t si;    /* arg3 */
+    uint32_t di;    /* arg4 */
     uint16_t ds;
     uint16_t es;
     uint16_t ss;
+    uint8_t ldata;  /* a large-data program: see x286_unpack_block() */
 };
+
+#define X286_FAR(sel, off) (((uint32_t)(uint16_t)(sel) << 16) | (uint16_t)(off))
 
 /* ------------------------------------------------------------------ */
 /* Segment plumbing                                                    */
@@ -304,10 +315,21 @@ static int x286_seg_span(uint16_t selector, uint32_t offset, size_t size,
     return 0;
 }
 
-/* Near pointer: an offset in the program's current DS. */
+/*
+ * The segment a pointer argument is in: its own if it is far, the program's
+ * current DS if it is near.  No selector of a process's is 0, so 0 above the
+ * offset is what says near.
+ */
+static uint16_t x286_ptr_sel(const struct x286_frame *f, uint32_t ptr) {
+    uint16_t sel = (uint16_t)(ptr >> 16);
+
+    return sel != 0 ? sel : f->ds;
+}
+
+/* A pointer argument, near or far, and the bytes it points at. */
 static int x286_ds_span(const struct x286_frame *f, uint32_t offset,
                         size_t size, uintptr_t *linear_out) {
-    return x286_seg_span(f->ds, offset, size, linear_out);
+    return x286_seg_span(x286_ptr_sel(f, offset), offset, size, linear_out);
 }
 
 /*
@@ -318,7 +340,7 @@ static int x286_ds_span(const struct x286_frame *f, uint32_t offset,
  */
 static int x286_ds_string(const struct x286_frame *f, uint32_t offset,
                           char **out) {
-    const gdt_entry_t *entry = x286_ldt_entry(f->ds);
+    const gdt_entry_t *entry = x286_ldt_entry(x286_ptr_sel(f, offset));
     uintptr_t base;
     uint32_t limit, avail;
     const char *src;
@@ -1376,11 +1398,17 @@ static void x286_free_vector(char **vec, size_t slots) {
     kfree(vec, slots * sizeof(char *));
 }
 
-/* Pull a NULL-terminated array of 16-bit near pointers out of DS. */
+/*
+ * Pull a NULL-terminated array of pointers to strings out of the program:
+ * 16-bit offsets in a small-data program, and offset then selector, four
+ * bytes each, in a large-data one.
+ */
 #define X286_MAX_VEC 256
 
 static int x286_copy_vector(struct x286_frame *f, uint32_t off, char ***out,
                             size_t *slots_out) {
+    const size_t words = f->ldata ? 2U : 1U;
+    const uint16_t sel = x286_ptr_sel(f, off);
     uintptr_t linear;
     const uint16_t *src;
     char **vec;
@@ -1393,17 +1421,21 @@ static int x286_copy_vector(struct x286_frame *f, uint32_t off, char ***out,
     if (off == 0) {
         return 0;
     }
-    rc = x286_ds_span(f, off, sizeof(uint16_t), &linear);
+    off &= 0xFFFFU;
+    rc = x286_seg_span(sel, off, words * sizeof(uint16_t), &linear);
     if (rc != 0) {
         return rc;
     }
     src = (const uint16_t *)linear;
     while (count < X286_MAX_VEC) {
-        if (x286_ds_span(f, off + (uint32_t)(count * 2U), sizeof(uint16_t),
-                         NULL) != 0) {
+        uint32_t at = off + (uint32_t)(count * words * sizeof(uint16_t));
+
+        if (at > 0xFFFFU ||
+            x286_seg_span(sel, at, words * sizeof(uint16_t), NULL) != 0) {
             return -EFAULT;
         }
-        if (src[count] == 0) {
+        if (src[count * words] == 0 &&
+            (words == 1U || src[count * words + 1U] == 0)) {
             break;
         }
         count++;
@@ -1418,7 +1450,9 @@ static int x286_copy_vector(struct x286_frame *f, uint32_t off, char ***out,
     }
     memset(vec, 0, (count + 1U) * sizeof(char *));
     for (i = 0; i < count; i++) {
-        rc = x286_ds_string(f, src[i], &vec[i]);
+        rc = x286_ds_string(f, words == 1U ? src[i]
+                                : X286_FAR(src[i * 2U + 1U], src[i * 2U]),
+                            &vec[i]);
         if (rc != 0) {
             x286_free_vector(vec, count + 1U);
             return rc;
@@ -1714,7 +1748,10 @@ static int64_t x286_xsys_brkctl(struct x286_frame *f) {
     int32_t increment = (int32_t)((uint32_t)f->cx | ((uint32_t)f->si << 16));
     uint16_t cmd = f->bx & (uint16_t)~X286_BR_HUGE;
     uint16_t dgroup = x286_dgroup_sel(f);
-    uint16_t sel = f->di;
+    /* The fourth argument is a far pointer, of which only the segment is
+     * wanted.  A small-data program's stub leaves the selector alone in
+     * the slot; a large-data one's has it above the offset. */
+    uint16_t sel = f->ldata ? (uint16_t)(f->di >> 16) : (uint16_t)f->di;
 
     if (cmd == X286_BR_IMPSEG) {
         sel = x286_last_data_sel(dgroup);
@@ -1994,6 +2031,86 @@ static const char *const x286_xenix_names[] = {
     [X286_XSYS_proctl] = "proctl",     [X286_XSYS_execseg] = "execseg",
 };
 
+/*
+ * Which of a call's argument slots are pointers: bit N for slot N.  Only a
+ * large-data program needs telling -- there a pointer is two words of the
+ * argument block and everything else one -- and x286_unpack_block() is the
+ * one reader.  A call not here has no pointers among its arguments.
+ *
+ * signal is not here, though its second argument is a far pointer: its
+ * code takes the offset and the segment as two slots, in either model.
+ */
+#define X286_P0 0x01U
+#define X286_P1 0x02U
+#define X286_P2 0x04U
+#define X286_P3 0x08U
+
+static const uint8_t x286_ptr_args[X286_CALL_MAX] = {
+    [X286_SYS_read]   = X286_P1,            [X286_SYS_write]  = X286_P1,
+    [X286_SYS_open]   = X286_P0,            [X286_SYS_creat]  = X286_P0,
+    [X286_SYS_link]   = X286_P0 | X286_P1,  [X286_SYS_unlink] = X286_P0,
+    [X286_SYS_exec]   = X286_P0 | X286_P1,  [X286_SYS_chdir]  = X286_P0,
+    [X286_SYS_mknod]  = X286_P0,            [X286_SYS_chmod]  = X286_P0,
+    [X286_SYS_chown]  = X286_P0,
+    [X286_SYS_stat]   = X286_P0 | X286_P1,
+    [X286_SYS_mount]  = X286_P0 | X286_P1,  [X286_SYS_umount] = X286_P0,
+    [X286_SYS_fstat]  = X286_P1,
+    [X286_SYS_utime]  = X286_P0 | X286_P1,  [X286_SYS_access] = X286_P0,
+    [X286_SYS_times]  = X286_P0,            [X286_SYS_acct]   = X286_P0,
+    [X286_SYS_ioctl]  = X286_P2,            [X286_SYS_utssys] = X286_P0,
+    [X286_SYS_execve] = X286_P0 | X286_P1 | X286_P2,
+    [X286_SYS_chroot] = X286_P0,
+};
+
+static const uint8_t x286_xenix_ptr_args[] = {
+    [X286_XSYS_creatsem] = X286_P0,   [X286_XSYS_opensem] = X286_P0,
+    [X286_XSYS_ftime]    = X286_P0,   [X286_XSYS_sdget]   = X286_P0,
+    [X286_XSYS_brkctl]   = X286_P3,
+};
+
+/*
+ * A large-data program's arguments.  Its C library pushes them as for any
+ * call of a C function -- the first lowest, a pointer as offset then
+ * selector, a long as its low word then its high -- and traps with BX
+ * pointing at the first, in the stack segment.  A small-data program's has
+ * them in BX, CX, SI and DI, a word each, which is what the frame was
+ * filled from and what every call's code reads; so the block is read into
+ * the same four slots, a pointer taking one of them whole.
+ *
+ * Words the stack segment ends before are read as 0: a call with one
+ * argument, made from the top of the stack, has nothing above it.
+ */
+static void x286_unpack_block(struct x286_frame *f) {
+    uint32_t *const slot[4] = { &f->bx, &f->cx, &f->si, &f->di };
+    uint32_t at = f->bx & 0xFFFFU;
+    unsigned int ptrs = 0;
+    unsigned int i;
+
+    if (f->nr == X286_SYS_xenix) {
+        if (f->sub < sizeof(x286_xenix_ptr_args)) {
+            ptrs = x286_xenix_ptr_args[f->sub];
+        }
+    } else if (f->nr < X286_CALL_MAX) {
+        ptrs = x286_ptr_args[f->nr];
+    }
+
+    for (i = 0; i < 4U; i++) {
+        uint16_t word[2] = { 0, 0 };
+        unsigned int n = (ptrs & (1U << i)) ? 2U : 1U;
+        unsigned int w;
+
+        for (w = 0; w < n; w++, at += sizeof(uint16_t)) {
+            uintptr_t src;
+
+            if (at <= 0xFFFFU &&
+                x286_seg_span(f->ss, at, sizeof(uint16_t), &src) == 0) {
+                memcpy(&word[w], (const void *)src, sizeof(uint16_t));
+            }
+        }
+        *slot[i] = (n == 2U) ? X286_FAR(word[1], word[0]) : word[0];
+    }
+}
+
 static const char *x286_call_name(unsigned int nr) {
     if (nr < X286_CALL_MAX && x286_names[nr]) {
         return x286_names[nr];
@@ -2155,6 +2272,10 @@ static int x286_handle_trap(void *regs_ptr) {
     f.ds   = (uint16_t)regs->ds;
     f.es   = (uint16_t)regs->es;
     f.ss   = (uint16_t)regs->ss;
+    f.ldata = current_process->x286_ldata;
+    if (f.ldata) {
+        x286_unpack_block(&f);
+    }
 
     if (current_thread && current_thread->proc == current_process) {
         current_thread->syscall_num = f.nr;

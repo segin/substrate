@@ -498,6 +498,7 @@ static int xout_load(int fd, const char *path, char *const argv[],
     /* --- process state --- */
     current_process->perso_id = PERS_XENIX;
     current_process->bitness = BITNESS_32;
+    current_process->x286_ldata = 0;
     current_process->brk_start = data_end;
     /* Caught signals revert to their defaults across exec. */
     proc_exec_reset_signals();
@@ -1223,6 +1224,7 @@ static int x286_load(int fd, const char *path, char *const argv[],
     /* --- process state --- */
     current_process->perso_id = PERS_XENIX;
     current_process->bitness = BITNESS_16;
+    current_process->x286_ldata = (hdr.x_renv & XE_LDATA) ? 1 : 0;
     current_process->brk_start = dgroup_break;
     current_process->brk = dgroup_break;
     /* POSIX: exec resets caught signals to SIG_DFL.  Without this the image

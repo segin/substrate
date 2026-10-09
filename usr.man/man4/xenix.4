@@ -1,4 +1,4 @@
-.TH XENIX 4 "2026-10-05" "Substrate" "Kernel Interfaces"
+.TH XENIX 4 "2026-10-09" "Substrate" "Kernel Interfaces"
 .SH NAME
 xenix \- Xenix execution personality
 .SH DESCRIPTION
@@ -114,7 +114,21 @@ the shared-data and IPC calls) and by call 57
 .TP
 .BR BX ", " CX ", " SI ", " DI
 Arguments one through four, one word each.  A long is split across two
-consecutive slots, low half first.
+consecutive slots, low half first.  A pointer is an offset in
+.BR DS .
+This is the convention of the small-data models (small and middle).
+.TP
+.BR BX " (large-data models)"
+A program of the large-data models (compact and large:
+.BR XE_LDATA ,
+.BR "cc \-Ml" )
+pushes the arguments as for any C function and traps with
+.B BX
+pointing at the first of them, in the stack segment.  They are words in
+the same order, except that a pointer is two: its offset, then its
+selector.  The personality reads the block into the same four arguments,
+so that a call is implemented once; a table of which arguments of which
+call are pointers tells it where the two-word ones are.
 .TP
 .B AX
 On return, the result \(em or, when the carry flag is set, the positive
@@ -298,19 +312,21 @@ implements only
 returns
 .BR ENOSYS .
 .IP \(bu
-System-call pointer arguments are always resolved as near offsets in the
-trapping
-.BR DS .
-Large-data images
+In a large-data program
 .RB ( XE_LDATA )
-themselves load and run \(em they are handed
+the pointers
+.I inside
+what an argument points at are far only where the personality has been
+taught so: the
 .I argv
 and
 .I envp
-as arrays of far pointers rather than near offsets \(em but a program that
-passes a far pointer to a call such as
-.BR read (2)
-would have only the offset half read.
+arrays of
+.BR execve (2).
+The argument of
+.BR fcntl (2)
+is read as an integer, so a lock request's structure is not found, and the
+System V IPC calls are not implemented in either model.
 .SH VERIFIED
 SCO Xenix/286
 .BR echo ,

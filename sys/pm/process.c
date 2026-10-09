@@ -628,6 +628,7 @@ static int proc_fork_common(process_t *parent, void *stack, int is_vfork) {
     // Copy parent resources (FDs)
     child_proc->tty = parent->tty;
     child_proc->bitness = parent->bitness;
+    child_proc->x286_ldata = parent->x286_ldata;
     child_proc->vfork_waiter = is_vfork ? current_thread : NULL;
 
     memcpy(child_proc->fd_bitmap, parent->fd_bitmap, sizeof(child_proc->fd_bitmap));
