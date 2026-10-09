@@ -154,6 +154,9 @@ is  "the library's own exported variable is found by name" "$(readelf -rW lib5.s
 is  "its exported function is called through the PLT" "$(readelf -rW lib5.so | grep -c 'JUMP_SLOT.* shared_step')" 1
 is  "a pointer to it is filled in by name" "$(readelf -rW lib5.so | grep -c 'R_386_32 .* shared_step')" 1
 is  "nothing private is"              "$(readelf -rW lib5.so | grep -c 'private_')" 0
+is  "the dynamic symbol table says which section each is in, as the full one does" \
+    "$(readelf -W --dyn-syms lib5.so | awk '$7 != "UND" && $8 ~ /^(shared_|lib_)/ { print $8 "=" $7 }' | sort | tr '\n' ' ')" \
+    "$(readelf -W -s lib5.so | sed -n '/\.symtab/,$p' | awk '$5 == "GLOBAL" && $8 ~ /^(shared_|lib_)/ { print $8 "=" $7 }' | sort | tr '\n' ' ')"
 is  "-Bsymbolic: nothing is found by name" "$(readelf -rW lib5s.so | grep -c -E 'GLOB_DAT|JUMP_SLOT|R_386_32 ')" 0
 is  "-Bsymbolic: the pointer is relative" "$(( $(readelf -rW lib5s.so | grep -c 'R_386_RELATIVE') >= 1 ))" 1
 

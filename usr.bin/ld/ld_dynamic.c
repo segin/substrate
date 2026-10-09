@@ -1313,7 +1313,17 @@ int finalize_dynamic_imports_x64(elfobj_t *out, const dyn_import_vec_t *imports)
     got_sz = got != NULL ? elf_section_size(got) : 0;
     rela_plt_sz = rela_plt != NULL ? elf_section_size(rela_plt) : 0;
     rela_dyn_sz = rela_dyn != NULL ? elf_section_size(rela_dyn) : 0;
+    /* The section was sized before addresses were given out; to make it
+     * larger now would be to write over whatever was placed after it. */
     if (rela_dyn_sz < required_rela_dyn_sz) {
+        if (dynamic != NULL) {
+            fprintf(stderr, "ld: internal error: .rela.dyn needs %zu bytes and was laid out with %zu\n",
+                    required_rela_dyn_sz, rela_dyn_sz);
+            return -1;
+        }
+        /* Nothing dynamic about the output: there is no such section,
+         * and what is counted here is the weak references nothing
+         * defined, which are zero and need nobody's help. */
         rela_dyn_sz = required_rela_dyn_sz;
     }
 
@@ -1657,7 +1667,17 @@ int finalize_dynamic_imports_i386(elfobj_t *out, const dyn_import_vec_t *imports
     got_sz = got != NULL ? elf_section_size(got) : 0;
     rel_plt_sz = rel_plt != NULL ? elf_section_size(rel_plt) : 0;
     rel_dyn_sz = rel_dyn != NULL ? elf_section_size(rel_dyn) : 0;
+    /* The section was sized before addresses were given out; to make it
+     * larger now would be to write over whatever was placed after it. */
     if (rel_dyn_sz < required_rel_dyn_sz) {
+        if (dynamic != NULL) {
+            fprintf(stderr, "ld: internal error: .rel.dyn needs %zu bytes and was laid out with %zu\n",
+                    required_rel_dyn_sz, rel_dyn_sz);
+            return -1;
+        }
+        /* Nothing dynamic about the output: there is no such section,
+         * and what is counted here is the weak references nothing
+         * defined, which are zero and need nobody's help. */
         rel_dyn_sz = required_rel_dyn_sz;
     }
 
@@ -3068,11 +3088,16 @@ int patch_dynsym_symbol_values(const ld_ctx_t *ctx, elfobj_t *out) {
             }
             value = elf_section_addr(plt) + 16 + (imp->plt_slot * 16);
         }
+        /* And which section it is in: the entry was made before the
+         * sections were put in their final order, and had the number the
+         * section went by then. */
         off = slot * entsz;
         if (elf_class(out) == ELFOBJ_CLASS_64) {
+            write_u16_endian(buf + off + 6, elf_endian(out), elf_symbol_shndx(sym));
             write_u64_endian(buf + off + 8, elf_endian(out), value);
         } else {
             write_u32_endian(buf + off + 4, elf_endian(out), (uint32_t)value);
+            write_u16_endian(buf + off + 14, elf_endian(out), elf_symbol_shndx(sym));
         }
         slot++;
     }
