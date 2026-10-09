@@ -1374,6 +1374,10 @@ elf_err_t elf_link_plan_consider_archive_member(elf_link_plan_t *plan, const cha
                                                  const char *member_name, int *should_extract_out);
 elf_err_t elf_link_plan_note_incremental(elf_link_plan_t *plan, const char *key,
                                          const char *value);
+/* On success *output is the linked object.  On a failure while merging an
+ * input, *output is the unfinished object, which says what went wrong and
+ * in which input (elf_last_diagnostics) and is the caller's to close; on
+ * any other failure it is left as it was.  elf_link() likewise. */
 elf_err_t elf_link_plan_link(elf_link_plan_t *plan, elfobj_t **output);
 size_t elf_link_plan_map_count(const elf_link_plan_t *plan);
 int elf_link_plan_map_entry(const elf_link_plan_t *plan, size_t index,

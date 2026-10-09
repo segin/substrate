@@ -1042,8 +1042,28 @@ static elf_err_t merge_relocations(elf_link_plan_t *plan, elfobj_t *out,
                 return ELF_ERR_RELOC;
             }
         }
-        if (elf_add_relocation(dst_sec, off, dst_sym, r->type, r->addend) != ELF_OK) {
-            return ELF_ERR_RELOC;
+        {
+            elf_err_t aerr = elf_add_relocation(dst_sec, off, dst_sym, r->type,
+                                                r->addend);
+
+            if (aerr != ELF_OK) {
+                /* Say which one, and keep the reason: this used to be
+                 * reported as "relocation error" and nothing else. */
+                const char *tname = elf_reloc_name_for_machine(out->machine,
+                                                               r->type);
+                char where[192];
+
+                (void)snprintf(where, sizeof(where),
+                               "relocation %s at %s+0x%llx against %s",
+                               tname != NULL ? tname : "?",
+                               dst_sec->name != NULL ? dst_sec->name : "?",
+                               (unsigned long long)off,
+                               r->symbol != NULL && r->symbol->name != NULL &&
+                               r->symbol->name[0] != '\0' ? r->symbol->name
+                                                          : "(section)");
+                (void)elf__append_diag(out, where);
+                return aerr;
+            }
         }
     }
 
@@ -1219,8 +1239,13 @@ elf_err_t elf_link_plan_link(elf_link_plan_t *plan, elfobj_t **output) {
         free(sec_included);
         free(sym_map);
         if (err != ELF_OK) {
+            /* The unfinished object goes back to the caller, who closes
+             * it: it is where the account of what went wrong is kept
+             * (elf_last_diagnostics), and closing it here left the caller
+             * the bare error code to print. */
             comdat_set_free(&comdat_seen);
-            elf_close(out);
+            (void)elf__append_diag(out, in->name != NULL ? in->name : "");
+            *output = out;
             return err;
         }
         (void)elf_link_plan_note_incremental(plan, "merged-input",

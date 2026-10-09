@@ -10626,9 +10626,29 @@ static int run_internal_link(ld_ctx_t *ctx) {
         return -1;
     }
 
-    err = elf_link(inputs.objs, inputs.count, &out);
+    /* The inputs go in under their own names, so that a failure in one of
+     * them can be reported as that one's. */
+    {
+        elf_link_plan_t *plan = elf_link_plan_create();
+        size_t pi;
+
+        err = plan != NULL ? ELF_OK : ELF_ERR_OOM;
+        for (pi = 0; err == ELF_OK && pi < inputs.count; ++pi) {
+            err = elf_link_plan_add_input(plan, inputs.objs[pi],
+                                          inputs.names[pi] != NULL ? inputs.names[pi] : "?");
+        }
+        if (err == ELF_OK) {
+            err = elf_link_plan_link(plan, &out);
+        }
+        if (plan != NULL) {
+            elf_link_plan_destroy(plan);
+        }
+    }
     if (err != ELF_OK || out == NULL) {
-        fprintf(stderr, "ld: link merge failed: %s\n", out != NULL ? elf_last_diagnostics(out) : elf_errstr(err));
+        const char *why = out != NULL ? elf_last_diagnostics(out) : "";
+
+        fprintf(stderr, "ld: link merge failed: %s%s%s\n", elf_errstr(err),
+                why[0] != '\0' ? ": " : "", why);
         symref_map_free(&undef_refs);
         objvec_free(&inputs);
         if (out != NULL) {
