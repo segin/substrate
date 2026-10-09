@@ -169,14 +169,14 @@ write_group_with_supp(FILE *out, void *arg)
 
 /*
  * Spawn `groupadd [-r] <name>` for the per-user group case.  Uses
- * fork+exec instead of duplicating groupadd's logic; the lock file
- * is closed-on-exec via O_CLOEXEC… well, flock(LOCK_EX) won't be
- * inherited across the fork+exec (flock is open-file-description
- * scoped), so the child re-locks cleanly.  Wait, flock IS inherited
- * across fork — both parent and child reference the same OFD.  But
- * the lock is owned by the OFD, so the child's groupadd will see
- * "already locked" and block.  To avoid that, we release the lock
- * around the spawn and re-acquire after.
+ * fork+exec instead of duplicating groupadd's logic.  The lock is a
+ * record lock and so this process's own: groupadd, another process,
+ * would wait for it for ever.  It is given up around the spawn and
+ * taken again after.
+ *
+ * WHILE IT IS GIVEN UP ANOTHER useradd MAY RUN, START TO FINISH.  The
+ * caller must take nothing it read before this call as still true: see
+ * where main() looks again.
  */
 static int
 spawn_groupadd(const char *name, int system_flag, int *outlock)
@@ -308,21 +308,13 @@ main(int argc, char *argv[])
         return 9;
     }
 
-    /* UID resolution. */
-    if (uid_arg >= 0) {
-        if (!non_unique && getpwuid((uid_t)uid_arg) != NULL) {
-            pwdb_unlock(lock);
-            fprintf(stderr, "useradd: UID %ld already in use\n", uid_arg);
-            return 4;
-        }
-    } else {
-        long min = system ? SYSTEM_ID_MIN : USER_ID_MIN;
-        long max = system ? SYSTEM_ID_MAX : USER_ID_MAX;
-        uid_arg = pwdb_next_free_id(0, min, max);
-        if (uid_arg < 0) {
-            pwdb_unlock(lock);
-            pwdb_die(PROGNAME, "no free UID in range %ld..%ld", min, max);
-        }
+    /* A UID asked for by number that is taken: say so now, before a
+     * group is made for a user who will not be.  The UID is not CHOSEN
+     * here -- that waits until the lock can no longer be given up. */
+    if (uid_arg >= 0 && !non_unique && getpwuid((uid_t)uid_arg) != NULL) {
+        pwdb_unlock(lock);
+        fprintf(stderr, "useradd: UID %ld already in use\n", uid_arg);
+        return 4;
     }
 
     /* Primary group resolution. */
@@ -364,6 +356,37 @@ main(int argc, char *argv[])
                 "groupadd '%s' succeeded but lookup failed", name);
         }
         primary_gid = gr->gr_gid;
+
+        /* The lock was given up while groupadd ran, and another useradd
+         * may have been and gone: the name may be taken now. */
+        if (getpwnam(name) != NULL) {
+            pwdb_unlock(lock);
+            fprintf(stderr, "useradd: user '%s' already exists\n", name);
+            return 9;
+        }
+    }
+
+    /*
+     * UID resolution, here and not sooner: the lock is held from this
+     * point to the rewrite of the password file, so the UID found free is
+     * still free when it is written.  Chosen before the group was made,
+     * it was chosen with the lock about to be dropped, and as many users
+     * as were being added at once were all given the same one.
+     */
+    if (uid_arg >= 0) {
+        if (!non_unique && getpwuid((uid_t)uid_arg) != NULL) {
+            pwdb_unlock(lock);
+            fprintf(stderr, "useradd: UID %ld already in use\n", uid_arg);
+            return 4;
+        }
+    } else {
+        long min = system ? SYSTEM_ID_MIN : USER_ID_MIN;
+        long max = system ? SYSTEM_ID_MAX : USER_ID_MAX;
+        uid_arg = pwdb_next_free_id(0, min, max);
+        if (uid_arg < 0) {
+            pwdb_unlock(lock);
+            pwdb_die(PROGNAME, "no free UID in range %ld..%ld", min, max);
+        }
     }
 
     /* Validate supplementary groups before touching anything. */
