@@ -270,164 +270,90 @@ static int is_local_temp_symbol_name(const char *name) {
 }
 
 static int parse_u64_arg(const char *s, unsigned long long *out) {
-    char *tmp;
-    char *end;
-    unsigned long long v;
-
-    tmp = trim_copy(s);
-    if (tmp == NULL) {
-        return -1;
-    }
-
-    if (tmp[0] == '\0') {
-        free(tmp);
-        return -1;
-    }
-
-    end = NULL;
-    v = strtoull(tmp, &end, 0);
-    if (end == tmp || *end != '\0') {
-        free(tmp);
-        return -1;
-    }
-
-    free(tmp);
-    *out = v;
-    return 0;
-}
-
-static int parse_i64_arg(const char *s, long long *out) {
-    char *tmp;
-    char *end;
     long long v;
 
-    tmp = trim_copy(s);
-    if (tmp == NULL) {
+    /* An expression of numbers alone. */
+    if (s == NULL || out == NULL ||
+        as_expr_eval_string(s, NULL, NULL, &v) != AS_EXPR_EVAL_OK) {
         return -1;
     }
-    if (tmp[0] == '\0') {
-        free(tmp);
-        return -1;
-    }
-    end = NULL;
-    v = strtoll(tmp, &end, 0);
-    if (end == tmp || *end != '\0') {
-        free(tmp);
-        return -1;
-    }
-    free(tmp);
-    *out = v;
+    *out = (unsigned long long)v;
     return 0;
 }
 
-static int parse_set_rhs_symbol(const char *expr, char **out_name, long long *out_addend) {
-    char *tmp;
-    char *op = NULL;
-    char sign = '+';
-    size_t i;
-    char *name;
-    long long addend = 0;
+/* A symbol's name out of an expression, without its @modifier. */
+static char *expr_symbol_copy(const char *name) {
+    char *copy = xstrdup(name);
 
-    if (expr == NULL || out_name == NULL || out_addend == NULL) {
-        return -1;
-    }
-
-    tmp = trim_copy(expr);
-    if (tmp == NULL) {
-        return -1;
-    }
-    if (tmp[0] == '\0') {
-        free(tmp);
-        return -1;
-    }
-
-    for (i = 1; tmp[i] != '\0'; ++i) {
-        if (tmp[i] == '+' || tmp[i] == '-') {
-            op = tmp + i;
-            sign = tmp[i];
-            break;
+    if (copy != NULL) {
+        strip_reloc_modifier(copy);
+        if (copy[0] == '\0') {
+            free(copy);
+            return NULL;
         }
     }
-
-    if (op != NULL) {
-        *op = '\0';
-        if (parse_i64_arg(op + 1, &addend) != 0) {
-            free(tmp);
-            return -1;
-        }
-        if (sign == '-') {
-            addend = -addend;
-        }
-    }
-
-    name = trim_copy(tmp);
-    free(tmp);
-    if (name == NULL) {
-        return -1;
-    }
-    strip_reloc_modifier(name);
-    if (name[0] == '\0') {
-        free(name);
-        return -1;
-    }
-
-    *out_name = name;
-    *out_addend = addend;
-    return 0;
+    return copy;
 }
 
-static int parse_set_rhs_dot_minus_symbol(const char *expr, char **out_name) {
-    char *tmp;
-    char *s;
-    char *name;
+/*
+ * The argument of .set, .size and the like as as_expr.c reduces it:
+ * value + add - sub.  The tree is given back for the caller to free,
+ * the names in `lin` being its.  A local label is not a name here.
+ */
+static as_expr_t *parse_linear_arg(const char *text, as_expr_linear_t *lin) {
+    as_expr_t *e = as_parse_expr_string(text, NULL, 0);
 
-    if (expr == NULL || out_name == NULL) {
+    if (e == NULL) {
+        return NULL;
+    }
+    if (as_expr_eval_linear(e, NULL, NULL, lin) != AS_EXPR_EVAL_OK ||
+        lin->add_local != NULL || lin->sub_local != NULL) {
+        as_expr_free(e);
+        return NULL;
+    }
+    return e;
+}
+
+/*
+ * What .set gives a symbol: a number, another symbol and an addend, or
+ * the distance from a symbol to here (`. - sym`).
+ */
+static int parse_set_rhs(const char *text, as_symbol_t *sym) {
+    as_expr_linear_t lin;
+    as_expr_t *e;
+    int rc = -1;
+
+    if (text == NULL || sym == NULL) {
         return -1;
     }
-    tmp = trim_copy(expr);
-    if (tmp == NULL) {
+    e = parse_linear_arg(text, &lin);
+    if (e == NULL) {
         return -1;
     }
-    s = tmp;
-    if (*s != '.') {
-        free(tmp);
-        return -1;
+    if (lin.add_symbol == NULL && lin.sub_symbol == NULL) {
+        sym->is_absolute = 1;
+        sym->absolute_value = (unsigned long long)lin.value;
+        rc = 0;
+    } else if (lin.add_symbol != NULL && lin.sub_symbol == NULL) {
+        sym->alias_target = expr_symbol_copy(lin.add_symbol);
+        sym->alias_addend = lin.value;
+        rc = sym->alias_target != NULL ? 0 : -1;
+    } else if (lin.add_symbol != NULL && strcmp(lin.add_symbol, ".") == 0 &&
+               strcmp(lin.sub_symbol, ".") != 0 && lin.value == 0) {
+        sym->alias_target = expr_symbol_copy(lin.sub_symbol);
+        sym->alias_from_dot = 1;
+        sym->alias_addend = 0;
+        rc = sym->alias_target != NULL ? 0 : -1;
     }
-    s++;
-    while (*s != '\0' && isspace((unsigned char)*s)) {
-        s++;
-    }
-    if (*s != '-') {
-        free(tmp);
-        return -1;
-    }
-    s++;
-    while (*s != '\0' && isspace((unsigned char)*s)) {
-        s++;
-    }
-    if (*s == '\0') {
-        free(tmp);
-        return -1;
-    }
-    name = trim_copy(s);
-    free(tmp);
-    if (name == NULL) {
-        return -1;
-    }
-    strip_reloc_modifier(name);
-    if (name[0] == '\0' || strcmp(name, ".") == 0) {
-        free(name);
-        return -1;
-    }
-    *out_name = name;
-    return 0;
+    as_expr_free(e);
+    return rc;
 }
 
 static int parse_size_arg(const char *expr, const char *sym_name, as_symbol_t *sym,
                           const char *file, unsigned line) {
-    char *tmp;
-    char *dash;
-    unsigned long long out = 0;
+    as_expr_linear_t lin;
+    as_expr_t *e;
+    int rc = -1;
 
     if (expr == NULL || sym == NULL) {
         return -1;
@@ -441,83 +367,47 @@ static int parse_size_arg(const char *expr, const char *sym_name, as_symbol_t *s
     sym->size_base_from_dot = 0;
     sym->size_anchor_file = NULL;
     sym->size_anchor_line = 0;
+    sym->size_addend = 0;
 
-    if (parse_u64_arg(expr, &out) == 0) {
-        sym->size = out;
-        return 0;
-    }
-
-    tmp = trim_copy(expr);
-    if (tmp == NULL) {
+    e = parse_linear_arg(expr, &lin);
+    if (e == NULL) {
         return -1;
     }
-
-    if (sym_name != NULL) {
-        if (strncmp(tmp, ".-", 2) == 0 && strcmp(tmp + 2, sym_name) == 0) {
-            sym->size = 0;
-            sym->size_target_symbol = xstrdup(sym_name);
-            sym->size_base_from_dot = 1;
-            sym->size_anchor_file = xstrdup(file);
-            sym->size_anchor_line = line;
-            if (sym->size_target_symbol == NULL || sym->size_anchor_file == NULL) {
-                free(tmp);
-                return -1;
-            }
-            free(tmp);
-            return 0;
-        }
-        dash = strrchr(tmp, '-');
-        if (dash != NULL) {
-            char *lhs;
-            char *rhs;
-
-            *dash = '\0';
-            lhs = trim_copy(tmp);
-            rhs = trim_copy(dash + 1);
-            if (lhs == NULL || rhs == NULL) {
-                free(lhs);
-                free(rhs);
-                free(tmp);
-                return -1;
-            }
-            if (strcmp(lhs, ".") == 0) {
-                sym->size = 0;
-                sym->size_target_symbol = rhs;
-                sym->size_base_from_dot = 1;
-                sym->size_anchor_file = xstrdup(file);
-                sym->size_anchor_line = line;
-                free(lhs);
-                free(tmp);
-                if (sym->size_anchor_file == NULL) {
-                    return -1;
-                }
-                return 0;
-            }
-            if (strcmp(rhs, sym_name) == 0) {
-                sym->size = 0;
-                sym->size_base_symbol = lhs;
-                sym->size_target_symbol = rhs;
-                free(tmp);
-                return 0;
-            }
-            free(lhs);
-            free(rhs);
-        }
-        if (tmp[0] != '\0' && strcmp(tmp, ".") != 0 && strchr(tmp, ' ') == NULL && strchr(tmp, '\t') == NULL) {
-            sym->size = 0;
-            sym->size_base_symbol = xstrdup(tmp);
-            sym->size_target_symbol = xstrdup(sym_name);
-            if (sym->size_base_symbol == NULL || sym->size_target_symbol == NULL) {
-                free(tmp);
-                return -1;
-            }
-            free(tmp);
-            return 0;
-        }
+    if (lin.add_symbol != NULL || lin.sub_symbol != NULL) {
+        sym->size_addend = lin.value;
     }
 
-    free(tmp);
-    return -1;
+    if (lin.add_symbol == NULL && lin.sub_symbol == NULL) {
+        /* A number. */
+        sym->size = (unsigned long long)lin.value;
+        rc = 0;
+    } else if (sym_name == NULL || lin.add_symbol == NULL ||
+               (lin.sub_symbol != NULL && strcmp(lin.sub_symbol, ".") == 0)) {
+        rc = -1;
+    } else if (lin.sub_symbol != NULL && strcmp(lin.add_symbol, ".") == 0) {
+        /* `. - sym`: from sym to here. */
+        sym->size = 0;
+        sym->size_target_symbol = xstrdup(lin.sub_symbol);
+        sym->size_base_from_dot = 1;
+        sym->size_anchor_file = xstrdup(file);
+        sym->size_anchor_line = line;
+        rc = (sym->size_target_symbol != NULL && sym->size_anchor_file != NULL) ? 0 : -1;
+    } else if (lin.sub_symbol != NULL && strcmp(lin.sub_symbol, sym_name) == 0) {
+        /* `end - sym`. */
+        sym->size = 0;
+        sym->size_base_symbol = xstrdup(lin.add_symbol);
+        sym->size_target_symbol = xstrdup(lin.sub_symbol);
+        rc = (sym->size_base_symbol != NULL && sym->size_target_symbol != NULL) ? 0 : -1;
+    } else if (lin.sub_symbol == NULL && strcmp(lin.add_symbol, ".") != 0) {
+        /* A lone symbol is taken for the end, as it has been. */
+        sym->size = 0;
+        sym->size_base_symbol = xstrdup(lin.add_symbol);
+        sym->size_target_symbol = xstrdup(sym_name);
+        rc = (sym->size_base_symbol != NULL && sym->size_target_symbol != NULL) ? 0 : -1;
+    }
+
+    as_expr_free(e);
+    return rc;
 }
 
 static int symbol_set_definition(as_symbol_t *sym, const char *file, unsigned line) {
@@ -770,9 +660,6 @@ static int handle_directive(sym_ctx_t *ctx, const as_stmt_t *st) {
     if (strcmp(d->name, ".set") == 0 || strcmp(d->name, ".equ") == 0) {
         char *name;
         as_symbol_t *sym;
-        unsigned long long abs_value = 0;
-        char *target = NULL;
-        long long addend = 0;
         int rc;
 
         if (d->arg_count < 2) {
@@ -809,24 +696,7 @@ static int handle_directive(sym_ctx_t *ctx, const as_stmt_t *st) {
             sym->defined = 1;
         }
 
-        if (parse_u64_arg(d->args[1], &abs_value) == 0) {
-            sym->is_absolute = 1;
-            sym->absolute_value = abs_value;
-            return 0;
-        }
-        if (parse_set_rhs_dot_minus_symbol(d->args[1], &target) == 0) {
-            sym->alias_target = target;
-            sym->alias_from_dot = 1;
-            sym->alias_addend = 0;
-            return 0;
-        }
-
-        if (parse_set_rhs_symbol(d->args[1], &target, &addend) != 0) {
-            return -1;
-        }
-        sym->alias_target = target;
-        sym->alias_addend = addend;
-        return 0;
+        return parse_set_rhs(d->args[1], sym);
     }
 
     if (strcmp(d->name, ".hidden") == 0) {

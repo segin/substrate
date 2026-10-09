@@ -50,6 +50,7 @@ typedef struct {
     char *size_base_symbol;
     char *size_target_symbol;
     int size_base_from_dot;
+    long long size_addend;      /* the 4 of `.size f, end - f + 4` */
     char *size_anchor_file;
     unsigned size_anchor_line;
     char *version;

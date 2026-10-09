@@ -1,6 +1,7 @@
 #include "as_sections.h"
 
 #include <ctype.h>
+#include <limits.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -252,102 +253,14 @@ static int ensure_builtins(as_section_state_t *s) {
 }
 
 static int parse_u32_arg(const char *raw, unsigned *out) {
-    char *tmp;
-    char *end;
-    char *op;
-    unsigned long v;
+    long long v;
 
-    tmp = trim_copy(raw);
-    if (tmp == NULL) {
+    /* An expression of numbers alone, whose value fits 32 bits unsigned. */
+    if (raw == NULL || out == NULL ||
+        as_expr_eval_string(raw, NULL, NULL, &v) != AS_EXPR_EVAL_OK ||
+        v < 0 || v > (long long)UINT_MAX) {
         return -1;
     }
-    while (tmp[0] == '(') {
-        size_t n = strlen(tmp);
-        if (n < 2 || tmp[n - 1] != ')') {
-            break;
-        }
-        tmp[n - 1] = '\0';
-        memmove(tmp, tmp + 1, n - 1);
-        {
-            char *trimmed = trim_copy(tmp);
-            if (trimmed == NULL) {
-                free(tmp);
-                return -1;
-            }
-            free(tmp);
-            tmp = trimmed;
-        }
-    }
-    op = strstr(tmp, "<<");
-    if (op != NULL) {
-        unsigned lhs;
-        unsigned rhs;
-        *op = '\0';
-        if (parse_u32_arg(tmp, &lhs) != 0 || parse_u32_arg(op + 2, &rhs) != 0 || rhs >= 32) {
-            free(tmp);
-            return -1;
-        }
-        *out = lhs << rhs;
-        free(tmp);
-        return 0;
-    }
-    {
-        int depth = 0;
-        char *split = NULL;
-        char split_op = '\0';
-        size_t i;
-        for (i = strlen(tmp); i > 0; --i) {
-            char ch = tmp[i - 1];
-            if (ch == ')') {
-                depth++;
-            } else if (ch == '(' && depth > 0) {
-                depth--;
-            } else if (depth == 0 && i > 1 && (ch == '+' || ch == '-')) {
-                split = tmp + i - 1;
-                split_op = ch;
-                break;
-            }
-        }
-        if (split == NULL) {
-            depth = 0;
-            for (i = strlen(tmp); i > 0; --i) {
-                char ch = tmp[i - 1];
-                if (ch == ')') {
-                    depth++;
-                } else if (ch == '(' && depth > 0) {
-                    depth--;
-                } else if (depth == 0 && ch == '*') {
-                    split = tmp + i - 1;
-                    split_op = ch;
-                    break;
-                }
-            }
-        }
-        if (split != NULL) {
-            unsigned lhs;
-            unsigned rhs;
-            *split = '\0';
-            if (parse_u32_arg(tmp, &lhs) != 0 || parse_u32_arg(split + 1, &rhs) != 0) {
-                free(tmp);
-                return -1;
-            }
-            if (split_op == '+') {
-                *out = lhs + rhs;
-            } else if (split_op == '-') {
-                *out = lhs - rhs;
-            } else {
-                *out = lhs * rhs;
-            }
-            free(tmp);
-            return 0;
-        }
-    }
-    v = strtoul(tmp, &end, 0);
-    if (end == tmp || *end != '\0') {
-        free(tmp);
-        return -1;
-    }
-    free(tmp);
     *out = (unsigned)v;
     return 0;
 }

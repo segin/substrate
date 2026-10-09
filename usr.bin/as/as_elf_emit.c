@@ -12522,7 +12522,8 @@ static int emit_symbols(emit_ctx_t *ctx, const as_symtab_t *symtab) {
                 free_name_index(&loc_index);
                 return -1;
             }
-            sym_size = (unsigned long long)(base_off - target_loc->off);
+            sym_size = (unsigned long long)(base_off - target_loc->off) +
+                       (unsigned long long)s->size_addend;
         }
 
         esym = elf_add_symbol(ctx->obj, s->name, 0, sym_size, map_bind(s->bind), map_type(s->type));

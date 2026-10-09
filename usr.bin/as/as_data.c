@@ -186,165 +186,23 @@ static char *trim_copy(const char *s) {
     return out;
 }
 
+/* An argument that is an expression of numbers alone: as_expr.c's value
+ * of it. */
 static int parse_s64(const char *raw, long long *out) {
-    char *tmp;
-    char *end;
-    char *op;
-    long long v;
-    long long a, b, c;
-    int used = 0;
-
-    tmp = trim_copy(raw);
-    if (tmp == NULL || tmp[0] == '\0') {
-        free(tmp);
+    if (raw == NULL || out == NULL) {
         return -1;
     }
-
-    if (tmp[0] == '0' && (tmp[1] == 'b' || tmp[1] == 'B')) {
-        unsigned long long u = 0;
-        const char *p = tmp + 2;
-        if (*p == '\0') {
-            free(tmp);
-            return -1;
-        }
-        while (*p == '0' || *p == '1') {
-            u = (u << 1) | (unsigned long long)(*p - '0');
-            ++p;
-        }
-        if (*p == '\0') {
-            *out = (long long)u;
-            free(tmp);
-            return 0;
-        }
-    }
-
-    while (tmp[0] == '(') {
-        size_t n = strlen(tmp);
-        char *inner;
-        if (n < 2 || tmp[n - 1] != ')') {
-            break;
-        }
-        tmp[n - 1] = '\0';
-        inner = trim_copy(tmp + 1);
-        free(tmp);
-        if (inner == NULL) {
-            return -1;
-        }
-        tmp = inner;
-    }
-    op = strstr(tmp, "<<");
-    if (op != NULL) {
-        long long lhs;
-        long long rhs;
-        *op = '\0';
-        if (parse_s64(tmp, &lhs) != 0 || parse_s64(op + 2, &rhs) != 0 || rhs < 0 || rhs >= 63) {
-            free(tmp);
-            return -1;
-        }
-        *out = lhs << rhs;
-        free(tmp);
-        return 0;
-    }
-    {
-        int depth = 0;
-        char *split = NULL;
-        char split_op = '\0';
-        size_t i;
-        for (i = strlen(tmp); i > 0; --i) {
-            char ch = tmp[i - 1];
-            if (ch == ')') {
-                depth++;
-            } else if (ch == '(' && depth > 0) {
-                depth--;
-            } else if (depth == 0 && i > 1 && (ch == '+' || ch == '-')) {
-                split = tmp + i - 1;
-                split_op = ch;
-                break;
-            }
-        }
-        if (split == NULL) {
-            depth = 0;
-            for (i = strlen(tmp); i > 0; --i) {
-                char ch = tmp[i - 1];
-                if (ch == ')') {
-                    depth++;
-                } else if (ch == '(' && depth > 0) {
-                    depth--;
-                } else if (depth == 0 && ch == '*') {
-                    split = tmp + i - 1;
-                    split_op = ch;
-                    break;
-                }
-            }
-        }
-        if (split != NULL) {
-            long long lhs;
-            long long rhs;
-            *split = '\0';
-            if (parse_s64(tmp, &lhs) != 0 || parse_s64(split + 1, &rhs) != 0) {
-                free(tmp);
-                return -1;
-            }
-            if (split_op == '+') {
-                *out = lhs + rhs;
-            } else if (split_op == '-') {
-                *out = lhs - rhs;
-            } else {
-                *out = lhs * rhs;
-            }
-            free(tmp);
-            return 0;
-        }
-    }
-
-    v = strtoll(tmp, &end, 0);
-    if (end != tmp && *end == '\0') {
-        *out = v;
-        free(tmp);
-        return 0;
-    }
-
-    if (sscanf(tmp, " ( %lld + %lld * %lld ) %n", &a, &b, &c, &used) == 3 && tmp[used] == '\0') {
-        *out = a + (b * c);
-        free(tmp);
-        return 0;
-    }
-    if (sscanf(tmp, " %lld + %lld * %lld %n", &a, &b, &c, &used) == 3 && tmp[used] == '\0') {
-        *out = a + (b * c);
-        free(tmp);
-        return 0;
-    }
-
-    free(tmp);
-    return -1;
+    return as_expr_eval_string(raw, NULL, NULL, out) == AS_EXPR_EVAL_OK ? 0 : -1;
 }
 
+/* The same, where the 64 bits are a size or a count. */
 static int parse_u64(const char *raw, unsigned long long *out) {
-    char *tmp;
-    char *end;
-    unsigned long long v;
-    long long sv;
+    long long v;
 
-    tmp = trim_copy(raw);
-    if (tmp == NULL || tmp[0] == '\0') {
-        free(tmp);
+    if (out == NULL || parse_s64(raw, &v) != 0) {
         return -1;
     }
-
-    if (parse_s64(tmp, &sv) == 0 && sv >= 0) {
-        *out = (unsigned long long)sv;
-        free(tmp);
-        return 0;
-    }
-
-    v = strtoull(tmp, &end, 0);
-    if (end == tmp || *end != '\0') {
-        free(tmp);
-        return -1;
-    }
-
-    free(tmp);
-    *out = v;
+    *out = (unsigned long long)v;
     return 0;
 }
 
