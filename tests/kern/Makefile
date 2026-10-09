@@ -44,7 +44,7 @@ else
   BRAND   = printf '\100' | dd of=$@ bs=1 seek=7 conv=notrunc status=none
 endif
 
-all: soak_reap trapsig advlock
+all: soak_reap trapsig advlock opencreat
 
 soak_reap: soak_reap.c
 	$(CC) $(CFLAGS) $< $(LIBS) -o $@
@@ -60,7 +60,13 @@ advlock: advlock.c
 	$(CC) $(CFLAGS) $< $(LIBS) -o $@
 	$(if $(BRAND),$(BRAND),)
 
+# opencreat: open(O_CREAT) of a file several processes create at once fails
+# for none of them; with O_EXCL, for all but one.  Runs on the host too.
+opencreat: opencreat.c
+	$(CC) $(CFLAGS) $< $(LIBS) -o $@
+	$(if $(BRAND),$(BRAND),)
+
 clean:
-	rm -f soak_reap trapsig advlock
+	rm -f soak_reap trapsig advlock opencreat
 
 .PHONY: all clean

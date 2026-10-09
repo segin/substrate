@@ -765,6 +765,16 @@ static int kern_open_from(const char *path, int flags, int mode, fs_node_t *root
 
         error = mknod_fs(parent, create_name,
                          (uint16_t)(S_IFREG | ((mode & 0777) & ~current_process->umask)), 0);
+        /* The lookup above and this are two steps, and another process
+         * may create the file between them.  That is EEXIST only to an
+         * open that asked to be the one to create it; to any other the
+         * file is there, which is what O_CREAT was to see to, and it is
+         * opened by the lookup below.  Without this, of several programs
+         * that each opened a lock file with O_CREAT as it first came into
+         * being, all but one were told "File exists". */
+        if (error == -EEXIST && !(flags & O_EXCL)) {
+            error = 0;
+        }
         if (error != 0) {
             proc_clear_fd(current_process, fd);
             return error;
