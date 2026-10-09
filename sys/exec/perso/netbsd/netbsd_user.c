@@ -14,6 +14,7 @@
 #include <kern/osversion.h>
 #include <kern/sched.h>
 #include <sys/stat.h>
+#include <sys/statvfs.h>
 #include <sys/sysarch.h>
 #include <sys/syscall_impl.h>
 #include <machine/pmm.h>
@@ -699,6 +700,172 @@ long netbsd_sys_lwp_park(int clock_id, int flags,
         rel.tv_nsec = want.tv_nsec;
     }
     return thr_park_kernel(&rel);
+}
+
+/*
+ * clock_nanosleep(clock_id, flags, rqtp, rmtp), which is how sleep(1) and
+ * sleep(3) sleep: until the time `rqtp` on that clock with TIMER_ABSTIME,
+ * and otherwise for that long.  Substrate sleeps for a length of time, so
+ * a time to sleep until is turned into one against the clock named, as
+ * _lwp_park's is above.
+ *
+ * As POSIX has it and unlike every call around it, this one's result is
+ * its error: the number itself, returned as a call that succeeded
+ * returns its value, with errno left alone.
+ */
+int netbsd_sys_clock_nanosleep(int clock_id, int flags, const void *rqtp, void *rmtp) {
+    struct netbsd_timespec50 want, left;
+    struct timespec rel, rem = {0, 0};
+    int absolute = (flags & NETBSD_TIMER_ABSTIME) != 0;
+    int rc;
+
+    if (rqtp == NULL || copyin(rqtp, &want, sizeof(want)) != 0) {
+        return EFAULT;
+    }
+    if (want.tv_nsec < 0 || want.tv_nsec >= 1000000000L) {
+        return EINVAL;
+    }
+    if (absolute) {
+        struct timespec now = {0, 0};
+
+        rc = kern_clock_gettime(clock_id, &now);
+        if (rc != 0) {
+            return -rc;
+        }
+        rel.tv_sec  = (long)(want.tv_sec - now.tv_sec);
+        rel.tv_nsec = (long)(want.tv_nsec - now.tv_nsec);
+        if (rel.tv_nsec < 0) { rel.tv_nsec += 1000000000L; rel.tv_sec -= 1; }
+        if (rel.tv_sec < 0) {
+            return 0;                   /* that time has passed */
+        }
+    } else {
+        if (want.tv_sec < 0) {
+            return EINVAL;
+        }
+        rel.tv_sec  = (long)want.tv_sec;
+        rel.tv_nsec = want.tv_nsec;
+    }
+    rc = kern_nanosleep(&rel, &rem);
+    /* What is left of a sleep that was interrupted, for one that was for
+     * a length of time; one until a time is simply asked for again. */
+    if (rc == -EINTR && rmtp != NULL && !absolute) {
+        left.tv_sec = rem.tv_sec;
+        left.tv_nsec = rem.tv_nsec;
+        if (copyout(&left, rmtp, sizeof(left)) != 0) {
+            return EFAULT;
+        }
+    }
+    return rc < 0 ? -rc : 0;
+}
+
+/*
+ * linkat(fd1, name1, fd2, name2, flags), which is what ln(1) calls.  A
+ * name that is absolute, or relative to the current directory
+ * (AT_FDCWD), is link(2)'s; one relative to another directory is not
+ * done here.
+ */
+int netbsd_sys_linkat(int fd1, const char *name1, int fd2, const char *name2, int flags) {
+    char kold[256], knew[256];
+
+    COPYIN_STR(name1, kold);
+    COPYIN_STR(name2, knew);
+    (void)flags;                        /* AT_SYMLINK_FOLLOW: link(2) follows */
+    if ((fd1 != AT_FDCWD && kold[0] != '/') || (fd2 != AT_FDCWD && knew[0] != '/')) {
+        return -ENOSYS;
+    }
+    return kern_link(kold, knew);
+}
+
+/*
+ * __statvfs190(path, buf, flags) and __fstatvfs190(fd, buf, flags):
+ * NetBSD's struct statvfs as of 9.0, laid out as an i386 program has it
+ * (netbsd/sys/sys/statvfs.h; a 64-bit number is aligned to four bytes
+ * there).  opendir(3) asks this of every directory it opens, to learn
+ * the filesystem's flags, and a directory could not be listed by
+ * anything that went through it: Python stopped at its own library.
+ *
+ * Substrate keeps less than NetBSD reports.  What it has is passed on;
+ * the counts of reads and writes, the owner and the label are zero, and
+ * the names of the mount point and of what is mounted are left empty.
+ */
+struct netbsd_statvfs90 {
+    uint32_t f_flag;
+    uint32_t f_bsize;
+    uint32_t f_frsize;
+    uint32_t f_iosize;
+    uint64_t f_blocks;
+    uint64_t f_bfree;
+    uint64_t f_bavail;
+    uint64_t f_bresvd;
+    uint64_t f_files;
+    uint64_t f_ffree;
+    uint64_t f_favail;
+    uint64_t f_fresvd;
+    uint64_t f_syncreads;
+    uint64_t f_syncwrites;
+    uint64_t f_asyncreads;
+    uint64_t f_asyncwrites;
+    int32_t  f_fsidx[2];
+    uint32_t f_fsid;
+    uint32_t f_namemax;
+    uint32_t f_owner;
+    uint64_t f_spare[4];
+    char     f_fstypename[32];
+    char     f_mntonname[1024];
+    char     f_mntfromname[1024];
+    char     f_mntfromlabel[1024];
+} __attribute__((packed));
+ABI32_ASSERT_SIZE(struct netbsd_statvfs90, 3268);
+
+static int netbsd_statvfs_out(const struct statvfs *k, void *ubuf) {
+    struct netbsd_statvfs90 *n = kmalloc(sizeof(*n));
+    size_t len;
+    int rc;
+
+    if (n == NULL) {
+        return -ENOMEM;
+    }
+    memset(n, 0, sizeof(*n));
+    n->f_flag = (uint32_t)k->f_flag;
+    n->f_bsize = (uint32_t)k->f_bsize;
+    n->f_frsize = (uint32_t)k->f_frsize;
+    n->f_iosize = (uint32_t)k->f_bsize;
+    n->f_blocks = k->f_blocks;
+    n->f_bfree = k->f_bfree;
+    n->f_bavail = k->f_bavail;
+    n->f_bresvd = k->f_bfree >= k->f_bavail ? k->f_bfree - k->f_bavail : 0;
+    n->f_files = k->f_files;
+    n->f_ffree = k->f_ffree;
+    n->f_favail = k->f_favail;
+    n->f_fresvd = k->f_ffree >= k->f_favail ? k->f_ffree - k->f_favail : 0;
+    n->f_fsidx[0] = (int32_t)k->f_fsid;
+    n->f_fsid = (uint32_t)k->f_fsid;
+    n->f_namemax = (uint32_t)k->f_namemax;
+    len = strnlen(k->f_fstypename, sizeof(k->f_fstypename));
+    memcpy(n->f_fstypename, k->f_fstypename, len);
+    rc = copyout(n, ubuf, sizeof(*n)) != 0 ? -EFAULT : 0;
+    kfree(n, sizeof(*n));
+    return rc;
+}
+
+int netbsd_sys_statvfs1(const char *path, void *buf, int flags) {
+    struct statvfs k;
+    char kpath[256];
+    int rc;
+
+    (void)flags;                        /* ST_WAIT or ST_NOWAIT: nothing to wait for */
+    COPYIN_STR(path, kpath);
+    rc = kern_statvfs(kpath, &k);
+    return rc != 0 ? rc : netbsd_statvfs_out(&k, buf);
+}
+
+int netbsd_sys_fstatvfs1(int fd, void *buf, int flags) {
+    struct statvfs k;
+    int rc;
+
+    (void)flags;
+    rc = kern_fstatvfs(fd, &k);
+    return rc != 0 ? rc : netbsd_statvfs_out(&k, buf);
 }
 
 /* _lwp_ctl(int features, struct lwpctl **address) — hand back a per-LWP

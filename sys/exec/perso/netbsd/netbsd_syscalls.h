@@ -285,6 +285,13 @@
 #define NETBSD_SYS_fchmodat       463
 #define NETBSD_SYS_fchownat       464
 
+/* What ln(1), sleep(1) and ls -l call, by NetBSD 10's syscalls.master. */
+#define NETBSD_SYS_linkat          457
+#define NETBSD_SYS_clock_nanosleep 477
+#define NETBSD_SYS___statvfs190    484
+#define NETBSD_SYS___fstatvfs190   485
+#define NETBSD_SYS_lpathconf       499
+
 /* 4.4BSD socket-family numbers not covered above. */
 #define NETBSD_SYS_sendto         133
 #define NETBSD_SYS_shutdown       134

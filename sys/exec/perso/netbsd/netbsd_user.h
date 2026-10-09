@@ -319,5 +319,9 @@ long netbsd_sys_ksem_wait(int id);
 long netbsd_sys_ksem_trywait(int id);
 long netbsd_sys_ksem_getvalue(int id, unsigned int *value);
 long netbsd_sys_ksem_timedwait(int id, const struct timespec *abstime);
+int netbsd_sys_linkat(int fd1, const char *name1, int fd2, const char *name2, int flags);
+int netbsd_sys_clock_nanosleep(int clock_id, int flags, const void *rqtp, void *rmtp);
+int netbsd_sys_statvfs1(const char *path, void *buf, int flags);
+int netbsd_sys_fstatvfs1(int fd, void *buf, int flags);
 
 #endif /* _NETBSD_USER_H */

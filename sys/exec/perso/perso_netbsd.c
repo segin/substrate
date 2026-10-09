@@ -543,6 +543,11 @@ static void *netbsd_syscalls[MAX_SYSCALLS] = {
     [NETBSD_SYS_posix_fchown]   = (void *)&sys_fchown,                /* 284 */
     [NETBSD_SYS_posix_lchown]   = (void *)&sys_lchown,                /* 285 */
     [NETBSD_SYS_fchmodat]       = (void *)&netbsd_sys_fchmodat,       /* 463 */
+    [NETBSD_SYS_linkat]         = (void *)&netbsd_sys_linkat,
+    [NETBSD_SYS_clock_nanosleep] = (void *)&netbsd_sys_clock_nanosleep,
+    [NETBSD_SYS_lpathconf]      = (void *)&sys_pathconf,
+    [NETBSD_SYS___statvfs190]   = (void *)&netbsd_sys_statvfs1,
+    [NETBSD_SYS___fstatvfs190]  = (void *)&netbsd_sys_fstatvfs1,
     [NETBSD_SYS_fchownat]       = (void *)&netbsd_sys_fchownat,       /* 464 */
 
     /* AF_UNIX socket-family additions not present in the original
@@ -769,6 +774,11 @@ static const char *netbsd_names[MAX_SYSCALLS] = {
     [NETBSD_SYS_posix_fchown]   = "__posix_fchown",
     [NETBSD_SYS_posix_lchown]   = "__posix_lchown",
     [NETBSD_SYS_fchmodat]       = "fchmodat",
+    [NETBSD_SYS_linkat]         = "linkat",
+    [NETBSD_SYS_clock_nanosleep] = "clock_nanosleep",
+    [NETBSD_SYS_lpathconf]      = "lpathconf",
+    [NETBSD_SYS___statvfs190]   = "__statvfs190",
+    [NETBSD_SYS___fstatvfs190]  = "__fstatvfs190",
     [NETBSD_SYS_fchownat]       = "fchownat",
     [NETBSD_SYS_sendto]         = "sendto",
     [NETBSD_SYS_shutdown]       = "shutdown",
@@ -904,6 +914,11 @@ static struct syscall_fmt netbsd_fmts[MAX_SYSCALLS] = {
     [NETBSD_SYS_posix_fchown]   = { 3, { ARG_INT, ARG_INT, ARG_INT } },
     [NETBSD_SYS_posix_lchown]   = { 3, { ARG_STR, ARG_INT, ARG_INT } },
     [NETBSD_SYS_fchmodat]       = { 4, { ARG_INT, ARG_STR, ARG_HEX, ARG_HEX } },
+    [NETBSD_SYS_linkat]         = { 5, { ARG_INT, ARG_STR, ARG_INT, ARG_STR, ARG_HEX } },
+    [NETBSD_SYS_clock_nanosleep] = { 4, { ARG_INT, ARG_HEX, ARG_PTR, ARG_PTR } },
+    [NETBSD_SYS_lpathconf]      = { 2, { ARG_STR, ARG_INT } },
+    [NETBSD_SYS___statvfs190]   = { 3, { ARG_STR, ARG_PTR, ARG_HEX } },
+    [NETBSD_SYS___fstatvfs190]  = { 3, { ARG_INT, ARG_PTR, ARG_HEX } },
     [NETBSD_SYS_fchownat]       = { 5, { ARG_INT, ARG_STR, ARG_INT, ARG_INT, ARG_HEX } },
 };
 
