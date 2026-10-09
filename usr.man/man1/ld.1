@@ -94,6 +94,29 @@ an error that says what is wrong and at what offset, and ends the link.
 .Bl -tag -width "--unresolved-symbols=report-all"
 .It Fl m32 , Fl m64 , Fl m Ar emulation
 Select output architecture mode.
+The emulations are
+.Cm elf_i386
+and
+.Cm elf_x86_64 ,
+each also under the name the Substrate GCC gives it,
+.Cm elf_i386_substrate
+and
+.Cm elf_x86_64_substrate .
+.It Fl -sysroot Ns = Ns Ar dir
+Accepted; the libraries are found through the
+.Fl L
+directories the compiler driver gives.
+.It Fl -copy-dt-needed-entries , Fl -no-copy-dt-needed-entries
+With the first, a shared library that a named shared library needs is
+looked for as
+.Fl l : Ns Ar name
+would be and, if it defines something the link still wants, is used and
+recorded as needed too, and so on through what it needs.
+This is how a C++ program linked with
+.Pa libstdc++
+finds the unwinder in
+.Pa libgcc_s .
+The default is not to.
 .It Fl r
 Produce relocatable
 .Dv ET_REL
@@ -236,6 +259,9 @@ undoes it.
 Any other keyword is a warning and is ignored.
 .It Fl -plugin Ar path
 Set plugin executable used for LTO materialization.
+A plugin that is a shared object, which is what GCC names on every link,
+cannot be run and is set aside; an input that then turns out to hold LTO
+bytecode is an error.
 .It Fl -plugin-opt Ar option
 Pass plugin-specific options.
 .It Fl -Map Ar file

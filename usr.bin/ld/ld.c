@@ -155,6 +155,10 @@ typedef struct {
     const char *plugin_opts[32];
     size_t plugin_opt_count;
     int plugin_checked;
+    int plugin_unusable;        /* one was named that cannot be run */
+    int eh_frame_hdr;           /* --eh-frame-hdr */
+    int copy_dt_needed;         /* --copy-dt-needed-entries */
+    const char *sysroot;        /* --sysroot */
     const char *entry_symbol;
     const char *interp_path;
     const char *soname;         /* -soname, -h: the output's DT_SONAME */
@@ -191,6 +195,7 @@ typedef struct {
 
 static int dynstr_append_cstr(uint8_t **buf, size_t *len, size_t *cap, const char *name, uint32_t *out_off);
 static char *dso_soname(const char *path);
+static int dso_dynamic_strings(const char *path, uint64_t want, strvec_t *out);
 static int dynsym_should_export(const ld_ctx_t *ctx, const elfobj_t *out, const elf_symbol_t *sym);
 static int symbol_is_copied(const dyn_import_vec_t *imports, const elf_symbol_t *sym);
 static const dyn_import_t *find_planned_import(const ld_ctx_t *ctx, const char *name);
@@ -630,11 +635,14 @@ static int parse_mode_token(const char *tok) {
     if (tok == NULL) {
         return 0;
     }
+    /* The _substrate names are what the substrate GCC asks for. */
     if (strcmp(tok, "elf_x86_64") == 0 || strcmp(tok, "elf64-x86-64") == 0 ||
+        strcmp(tok, "elf_x86_64_substrate") == 0 ||
         strcmp(tok, "x86_64") == 0 || strcmp(tok, "amd64") == 0 || strcmp(tok, "64") == 0) {
         return 64;
     }
     if (strcmp(tok, "elf_i386") == 0 || strcmp(tok, "elf32-i386") == 0 ||
+        strcmp(tok, "elf_i386_substrate") == 0 ||
         strcmp(tok, "i386") == 0 || strcmp(tok, "x86") == 0 || strcmp(tok, "32") == 0) {
         return 32;
     }
@@ -3758,6 +3766,19 @@ static int plugin_discover_and_handshake(ld_ctx_t *ctx) {
     if (ctx == NULL || ctx->plugin_checked) {
         return 0;
     }
+    /*
+     * A compiler driver names its LTO plugin on every link, and the
+     * plugin GCC has is a shared object for a linker to load, which this
+     * one does not: its plugins are programs it runs.  Such a plugin is
+     * set aside.  It is only wanted if an input turns out to hold
+     * bytecode in place of code, and that input is refused when met.
+     */
+    if (ctx->plugin_path != NULL && strstr(ctx->plugin_path, ".so") != NULL) {
+        ctx->plugin_path = NULL;
+        ctx->plugin_unusable = 1;
+        ctx->plugin_checked = 1;
+        return 0;
+    }
     if (ctx->plugin_path == NULL || ctx->plugin_path[0] == '\0') {
         if (ctx->plugin_opt_count != 0) {
             if (discover_default_plugin(ctx) != 0) {
@@ -4522,6 +4543,12 @@ static int load_object_input(const char *path, ld_ctx_t *ctx, objvec_t *objs, sy
         return -1;
     }
     maybe_autoswitch_mode(ctx, obj, objs != NULL ? objs->count : 0, path);
+    if (object_has_lto_sections(obj) && ctx != NULL && ctx->plugin_unusable) {
+        fprintf(stderr, "ld: %s holds LTO bytecode, and the plugin to compile it is a shared object, "
+                        "which this linker cannot load: compile without -flto\n", path);
+        elf_close(obj);
+        return -1;
+    }
     if (object_has_lto_sections(obj) && ctx != NULL && ctx->plugin_path != NULL && ctx->plugin_path[0] != '\0') {
         mat_rc = plugin_materialize_object(ctx, path, mat_path, sizeof(mat_path));
         if (mat_rc < 0) {
@@ -5483,6 +5510,40 @@ static int register_dso_provider(ld_ctx_t *ctx, const char *path, symstate_t *st
         fprintf(stderr, "ld: trace: dso %s\n", path);
     }
     elf_close(obj);
+    /*
+     * --copy-dt-needed-entries: what this library needs may supply what
+     * the program refers to, as if it had been named too.  A C++ program
+     * is linked with libstdc++ and gets _Unwind_Resume from the libgcc_s
+     * that libstdc++ needs.  Each is looked for as -l:NAME would be, and
+     * taken, with what it needs in turn, if it defines something still
+     * wanted.
+     */
+    if (ctx->copy_dt_needed) {
+        strvec_t needed;
+        int rc = 0;
+
+        memset(&needed, 0, sizeof(needed));
+        if (dso_dynamic_strings(path, DT_NEEDED, &needed) == 0) {
+            for (i = 0; rc == 0 && i < needed.count; ++i) {
+                char *dep = resolve_library_path_exact(ctx, needed.items[i]);
+                int wanted = 0;
+                size_t k;
+
+                for (k = 0; dep != NULL && k < ctx->dso_inputs.count; ++k) {
+                    if (strcmp(ctx->dso_inputs.items[k], dep) == 0) {
+                        free(dep);
+                        dep = NULL;
+                    }
+                }
+                if (dep != NULL && shared_object_matches_unresolved(dep, ctx, state, &wanted) == 0 && wanted) {
+                    rc = register_dso_provider(ctx, dep, state);
+                }
+                free(dep);
+            }
+        }
+        strvec_free(&needed);
+        return rc;
+    }
     return 0;
 }
 
@@ -8073,14 +8134,27 @@ static const char *text_relocation_section(const ld_ctx_t *ctx, elfobj_t *out) {
 /* The DT_SONAME of the shared object at `path`, to be freed; NULL if it
  * has none or cannot be read. */
 static char *dso_soname(const char *path) {
+    strvec_t names;
+    char *name;
+
+    memset(&names, 0, sizeof(names));
+    name = dso_dynamic_strings(path, DT_SONAME, &names) == 0 && names.count != 0 ? xstrdup(names.items[0]) : NULL;
+    strvec_free(&names);
+    return name;
+}
+
+/* The strings the dynamic section of the shared object at `path` gives
+ * under `tag` (DT_SONAME, DT_NEEDED), added to `out`.  -1 if the object
+ * cannot be read. */
+static int dso_dynamic_strings(const char *path, uint64_t want, strvec_t *out) {
     elfobj_t *obj = NULL;
     const elf_section_t *dynamic, *dynstr;
     const uint8_t *d, *s;
     size_t dsz = 0, ssz = 0, entsz, i;
-    char *name = NULL;
+    int rc = 0;
 
     if (elf_open(path, &obj) != ELF_OK) {
-        return NULL;
+        return -1;
     }
     dynamic = elf_find_section(obj, ".dynamic");
     dynstr = elf_find_section(obj, ".dynstr");
@@ -8095,13 +8169,14 @@ static char *dso_soname(const char *path) {
         if (tag == DT_NULL) {
             break;
         }
-        if (tag == DT_SONAME && val < ssz && memchr(s + val, '\0', ssz - (size_t)val) != NULL && s[val] != '\0') {
-            name = xstrdup((const char *)s + val);
+        if (tag == want && val < ssz && memchr(s + val, '\0', ssz - (size_t)val) != NULL && s[val] != '\0' &&
+            strvec_push(out, (const char *)s + val) != 0) {
+            rc = -1;
             break;
         }
     }
     elf_close(obj);
-    return name;
+    return rc;
 }
 
 static int plan_dynamic_needed(ld_ctx_t *ctx, elfobj_t *out) {
@@ -13756,6 +13831,19 @@ int main(int argc, char **argv) {
         }
         if (strcmp(a, "--build-id") == 0 || strncmp(a, "--build-id=", 11) == 0) {
             continue;           /* no build ID is made */
+        }
+        if (strcmp(a, "--eh-frame-hdr") == 0 || strcmp(a, "--no-eh-frame-hdr") == 0) {
+            ctx.eh_frame_hdr = a[2] == 'e';
+            continue;
+        }
+        if (strncmp(a, "--sysroot=", 10) == 0) {
+            ctx.sysroot = a + 10;
+            continue;
+        }
+        if (strcmp(a, "--copy-dt-needed-entries") == 0 || strcmp(a, "--no-copy-dt-needed-entries") == 0 ||
+            strcmp(a, "--add-needed") == 0 || strcmp(a, "--no-add-needed") == 0) {
+            ctx.copy_dt_needed = strncmp(a, "--no-", 5) != 0;
+            continue;
         }
         if (a[0] == '-' && a[1] == 'o' && a[2] != '\0') {
             ctx.out_path = a + 2;       /* -oFILE */
