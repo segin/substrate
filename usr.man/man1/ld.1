@@ -71,6 +71,17 @@ paths first, then host defaults
 .Pa /usr/lib
 and
 .Pa /usr/local/lib .
+The
+.Fl L
+directories are searched in the order given, and each for
+.Pa libNAME.so
+and then
+.Pa libNAME.a ;
+a library that is for another machine than the link is passed over.
+The machine is the one
+.Fl m
+names, or else that of the first input that is of one; looking into
+libraries later does not change it.
 Both regular ELF libraries and GNU ld script wrappers
 .Pq Dv INPUT / Dv GROUP
 are supported.

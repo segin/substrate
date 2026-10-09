@@ -78,7 +78,7 @@ short writes and close errors checked.
   Evidence: no soname handling in the file; the link-time basename is used (`7226-7237`, `5144-5145, 5278-5279, 5546-5547`); `-h` prints help (`10953`); `-soname`, `-rpath` and `--dynamic-linker` are unknown and their values become input files (`11569-11606`).  Basis: verified.  Task #83.
 - [ ] **LD-DYN-002** Where symbol versioning is used, the linker shall store unversioned names in `.dynsym`, emit a base version definition at index 1, and bind an unversioned reference only to a default or unversioned definition.
   Evidence: `ld.c:5478-5540` with `7352`; `4437, 5331-5341`; `4816, 5233-5243`; attribution to the first shared object (`5544-5548`) and skipping an earlier unversioned definition (`5212-5214`) are suspected.  Basis: traced.  Task #79.
-- [ ] **LD-DYN-003** While no `-m` mode was given, the linker shall fix the link mode from the first input and shall not change it when probing later shared objects.
+- [x] **LD-DYN-003** While no `-m` mode was given, the linker shall fix the link mode from the first input and shall not change it when probing later shared objects.
   Evidence: `ld.c:4884, 4936, 5013, 5168` call `maybe_autoswitch_mode` with a count of 0.  Basis: traced.  Task #78.
 - [ ] **LD-DYN-004** The linker shall brand shared objects and position-independent executables with the Substrate OSABI as it does executables, in host and target builds alike.
   Evidence: `ld.c:10652-10660`.  Basis: suspected (run-time consequences not traced).  Task #102.
@@ -119,7 +119,7 @@ short writes and close errors checked.
   Evidence: `ld.c:3991-3992, 4130-4131` against `473`.  Basis: traced.  Task #75.
 - [x] **LD-IN-004** If an archive is truncated or malformed, then the linker shall report it and fail; it shall recognise archives by content.
   Evidence: bare `break` and `return 0` at `ld.c:3931-3957, 4058`; suffix test at `4249`.  Basis: traced.  Task #81.
-- [ ] **LD-IN-005** When resolving `-lNAME`, the linker shall try the shared then the static form in each search directory in order, and shall pass over candidates of the wrong architecture.
+- [x] **LD-IN-005** When resolving `-lNAME`, the linker shall try the shared then the static form in each search directory in order, and shall pass over candidates of the wrong architecture.
   Evidence: `ld.c:4150-4159`; `4152, 4170, 4180, 4206`.  Basis: traced.  Task #82.
 
 ## 7. Linker scripts

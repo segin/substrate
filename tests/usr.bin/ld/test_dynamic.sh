@@ -97,6 +97,26 @@ else echo "FAIL -z text and code that is not: $(head -1 err)"; fail=1; fi
 run "the same without -z text" ./ld -m elf_i386 -shared -z notext -o np.so lib2np.o
 is  "DT_TEXTREL" "$(readelf -d np.so | grep -c '(TEXTREL)')" 1
 
+# -l: the directories in order, each for the shared library and then the
+# archive, and a library for another machine is passed over.  The first
+# input says which machine the link is for, and looking into a library
+# does not change it.
+${CC:-cc} -m64 -c -fPIC -ffreestanding -o lib64.o lib.c
+mkdir -p d64 d32 darch
+if ./ld -m elf_x86_64 -shared -o d64/libnum.so lib64.o 2> err; then
+    cp libnum.so d32/libnum.so
+    ar rc darch/libnum.a lib.o
+    run "a library for another machine earlier in the path" ./ld -o p_mix main.o -Ld64 -Ld32 -lnum
+    is  "the link is still for the first input's machine" "$(readelf -h p_mix | sed -n 's/.*Class: *//p')" ELF32
+    is  "and uses the library that suits it" "$(readelf -d p_mix | grep -c 'libnum.so.3')" 1
+    run "an archive in an earlier directory" ./ld -o p_arch main.o -Ldarch -Ld32 -lnum
+    is  "is found before a shared library in a later one" "$(readelf -d p_arch 2>/dev/null | grep -c NEEDED)" 0
+    run "a shared library in an earlier directory" ./ld -o p_so main.o -Ld32 -Ldarch -lnum
+    is  "is found before an archive in a later one" "$(readelf -d p_so | grep -c NEEDED)" 1
+else
+    echo "FAIL a 64-bit shared object: $(head -1 err)"; fail=1
+fi
+
 # An option that needs a value says so.
 if ./ld -m elf_i386 -shared -o x.so lib.o -soname > err 2>&1; then echo "FAIL -soname with nothing after it: linked"; fail=1
 elif grep -q "needs a value" err; then echo "ok   -soname with nothing after it"

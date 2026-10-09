@@ -129,6 +129,7 @@ typedef struct {
 typedef struct {
     int mode; /* 32 or 64 */
     int explicit_mode;
+    int mode_settled;           /* an input has said which machine */
     int explicit_unresolved_policy;
     uint16_t expect_type;
     int allow_undefined;
@@ -4024,11 +4025,18 @@ static int detect_object_mode(const elfobj_t *obj) {
 static void maybe_autoswitch_mode(ld_ctx_t *ctx, const elfobj_t *obj, size_t loaded_count, const char *path) {
     int detected;
 
-    if (ctx == NULL || ctx->explicit_mode || loaded_count != 0) {
+    /* The first input that is of a machine says which machine the link is
+     * for, and that is the end of it: the shared objects looked into later
+     * are asked whether they suit the link, not what it should be. */
+    if (ctx == NULL || ctx->explicit_mode || ctx->mode_settled || loaded_count != 0) {
         return;
     }
     detected = detect_object_mode(obj);
-    if (detected == 0 || detected == ctx->mode) {
+    if (detected == 0) {
+        return;
+    }
+    ctx->mode_settled = 1;
+    if (detected == ctx->mode) {
         return;
     }
     ctx->mode = detected;
@@ -4553,6 +4561,41 @@ static int load_object_input(const char *path, ld_ctx_t *ctx, objvec_t *objs, sy
     return symstate_note_object(state, obj) != 0 ? -1 : 0;
 }
 
+/*
+ * Whether the file at `path` can be the library a -l asks for: it can be
+ * read, and if it is an ELF file it is for the machine the link is for,
+ * once that is known.  A library for another machine in an earlier
+ * directory is passed over, not an error: a search path that names both
+ * /lib64 and /lib is an ordinary one.  What is not an ELF file is an
+ * archive or a script, and is looked into later.
+ */
+static int lib_candidate_suits(const ld_ctx_t *ctx, const char *path) {
+    unsigned char h[20];
+    FILE *f;
+    size_t n;
+    int mode;
+
+    if (access(path, R_OK) != 0) {
+        return 0;
+    }
+    if (!ctx->explicit_mode && !ctx->mode_settled) {
+        return 1;
+    }
+    f = fopen(path, "rb");
+    if (f == NULL) {
+        return 0;
+    }
+    n = fread(h, 1, sizeof(h), f);
+    fclose(f);
+    if (n < sizeof(h) || memcmp(h, "\177ELF", 4) != 0) {
+        return 1;
+    }
+    /* e_ident[EI_CLASS], and e_machine at 18, little-endian. */
+    mode = h[4] == 2 && h[18] == (EM_X86_64 & 0xff) && h[19] == 0 ? 64
+         : h[4] == 1 && h[18] == EM_386 && h[19] == 0 ? 32 : 0;
+    return mode == ctx->mode;
+}
+
 static char *resolve_library_path_suffix_ex(const ld_ctx_t *ctx, const char *name, const char *suffix,
                                             int include_default_dirs) {
     static const char *default_dirs[] = {
@@ -4568,10 +4611,25 @@ static char *resolve_library_path_suffix_ex(const ld_ctx_t *ctx, const char *nam
     snprintf(leaf, sizeof(leaf), "lib%s%s", name, suffix != NULL ? suffix : "");
     for (i = 0; i < ctx->lib_paths.count; ++i) {
         char *cand = path_join(ctx->lib_paths.items[i], leaf);
-        if (cand != NULL && access(cand, R_OK) == 0) {
+        if (cand != NULL && lib_candidate_suits(ctx, cand)) {
             return cand;
         }
         free(cand);
+        /* The directories are searched in order, and each for the shared
+         * library and then the archive: an archive in an earlier
+         * directory is found before a shared library in a later one. */
+        if (suffix != NULL && strcmp(suffix, ".so") == 0) {
+            char aleaf[512];
+            int earlier;
+
+            snprintf(aleaf, sizeof(aleaf), "lib%s.a", name);
+            cand = path_join(ctx->lib_paths.items[i], aleaf);
+            earlier = cand != NULL && lib_candidate_suits(ctx, cand);
+            free(cand);
+            if (earlier) {
+                return NULL;
+            }
+        }
     }
     if (!include_default_dirs) {
         return NULL;
