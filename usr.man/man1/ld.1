@@ -229,7 +229,11 @@ belongs to the section its address falls in; one defined outside is
 absolute.
 Expressions have the operators of C, parentheses nested no more than 256
 deep, and the functions
-.Ic ALIGN ,
+.Ic ALIGN
+.Po
+with one argument the location counter rounded up to a multiple of it,
+with two the first rounded up to a multiple of the second
+.Pc ,
 .Ic ADDR ,
 .Ic LOADADDR ,
 .Ic SIZEOF

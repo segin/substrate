@@ -56,6 +56,8 @@ ok  compound   "$std x = 1; x += 4; x <<= 1; x-=2; ASSERT(x == 8, \"compound\");
 ok  nosemi     "$std ASSERT(1 == 1, \"fine\") x = 1;"
 bad assert     "$std ASSERT(1 == 2, \"one is not two\")" "one is not two"
 bad dot_top    "$std x = .;" "no value outside SECTIONS"
+bad align_top  "$std x = ALIGN(16);" "no value outside SECTIONS"
+ok  align_two  "$std x = ALIGN(17, 16); ASSERT(x == 32, \"align\")"
 
 # What cannot be read is said to be so, with the place.
 bad comment    "$std /* never closed" "comment is not closed"
@@ -79,7 +81,8 @@ SECTIONS
     .text : { *(.text .text.*) }
     PROVIDE(etext = .);
     PROVIDE(helper = 0x1234);
-    . = ALIGN(., 0x1000);
+    . = ALIGN(0x1000);
+    rodata_begin = .;
     .rodata : { *(.rodata .rodata.*) }
     . = 0x00500000;
     .data : { data_begin = .; *(.data .data.*) data_finish = .; }
@@ -93,6 +96,7 @@ size = end - image;'
 is "image"            "$(sym layout image)" 401000
 is "text begins it"   "$(readelf -SW "$work/layout.out" | sed -n 's/.* \.text  *PROGBITS  *\([0-9a-f]*\) .*/\1/p')" 00401000
 is "function sections folded into .text" "$(readelf -SW "$work/layout.out" | grep -c ' \.text\.')" 0
+is "ALIGN(n) aligns the counter" "$(sym layout rodata_begin)" 402000
 is "data where told"  "$(sym layout data_begin)" 500000
 is "data's extent"    "$(sym layout data_finish)" 500004
 is "bss padded"       "$(sym layout bss_finish)" 500400

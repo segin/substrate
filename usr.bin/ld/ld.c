@@ -1297,7 +1297,13 @@ static int lds_eval_builtin_call(lds_eval_ctx_t *ec, const lds_tok_t *name_tok, 
 
     if (strcmp(name, "ALIGN") == 0) {
         if (arg_count == 1) {
-            if (align_u64(0, vals[0], out) != 0) {
+            /* ALIGN(n) is the location counter, aligned. */
+            if (!ec->have_dot) {
+                ec->err_tok = name_tok;
+                ec->err_msg = "ALIGN(n) aligns the location counter, which has no value outside SECTIONS";
+                return -1;
+            }
+            if (align_u64(ec->dot, vals[0], out) != 0) {
                 ec->err_tok = name_tok;
                 ec->err_msg = "ALIGN argument must be non-zero";
                 return -1;
