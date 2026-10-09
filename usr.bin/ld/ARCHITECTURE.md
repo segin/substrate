@@ -15,6 +15,8 @@ usr.bin/ld/
 ├── ld_input.c               # Objects, archives, libraries and where they are found
 ├── ld_dso.c                 # Shared objects as inputs: what they define, symbol versions
 ├── ld_resolve.c             # What is said about symbols when asked: --trace, --warn-common
+├── ld_arch.c                # What differs between i386 and x86-64 where the dynamic
+│                            #   sections are made: sizes, relocation numbers, PLT bytes
 ├── ld_script.c              # Linker scripts: lexer, expressions, parser, application
 ├── ld_layout.c              # Section order, addresses, segments
 ├── ld_dynamic.c             # .dynsym, imports, PLT and GOT, .dynamic
@@ -107,7 +109,7 @@ Deployment: Internal to `ld`; no external script interpreter dependency
 
 Name: Relocation application, dynamic metadata generation, and final file emission
 
-Description: Before layout the linker plans what the dynamic linker will need (`ld_dynamic.c`, `ld_dso.c`): the imports and their PLT entries and GOT slots, `.dynsym`, `.dynstr`, the hash and version tables, `.dynamic`. A symbol is reached through the dynamic linker if it is undefined, or defined in a shared object and preemptible. The output's own GOT slots, a shared object's thread-local entries and the entries and `.iplt` stubs of indirect functions are collected at the same time (`collect_local_got` in `ld_reloc.c`) and sized into `.got` and `.rel[a].dyn` after the imports'. Once addresses are fixed these are filled in and the relocations applied; most are computed by `libelfobj`, and those that need the GOT, the thread-local extent or an instruction rewritten are computed in `apply_all_relocations`. The i386 and x86-64 paths are parallel code, not one path over a description of the architecture. The final ELF is written by `libelfobj`. The map and the reproduce bundle are `ld_map.c`.
+Description: Before layout the linker plans what the dynamic linker will need (`ld_dynamic.c`, `ld_dso.c`): the imports and their PLT entries and GOT slots, `.dynsym`, `.dynstr`, the hash and version tables, `.dynamic`. A symbol is reached through the dynamic linker if it is undefined, or defined in a shared object and preemptible. The output's own GOT slots, a shared object's thread-local entries and the entries and `.iplt` stubs of indirect functions are collected at the same time (`collect_local_got` in `ld_reloc.c`) and sized into `.got` and `.rel[a].dyn` after the imports'. Once addresses are fixed these are filled in and the relocations applied; most are computed by `libelfobj`, and those that need the GOT, the thread-local extent or an instruction rewritten are computed in `apply_all_relocations`. What differs between i386 and x86-64 in this -- the width of a word, whether a record carries its addend, the relocations' numbers, which references are calls, the bytes of the PLT -- is in one description of each machine (`ld_arch_t`, `ld_arch.c`), and the code that collects imports, sizes the tables and fills them in is written once against it. What is still told apart by machine is the rewriting of instructions when relocations are applied (GOT relaxation, the thread-local sequences, the indirect-function stub), where the two machines' instructions have nothing in common to share. The final ELF is written by `libelfobj`. The map and the reproduce bundle are `ld_map.c`.
 
 Technologies: C, `libelfobj` relocation backends, deterministic symbol ordering, map/reproduce emitters
 
@@ -157,7 +159,7 @@ Target mode: The default build produces the Substrate-target linker for inclusio
 
 Alias links: The Makefile installs `ld.i386`, `ld.x86_64`, `ld.x86`, and `ld.x64` symlinks for architecture-specific invocation surfaces.
 
-Single-binary design: The linker is one program in fourteen translation units that share one header, `ld.h`, and one link context, `ld_ctx_t`. The files were cut from a single `ld.c` along its function families without changing a function; what is `static` is private to its file, and `ld.h` declares the rest.
+Single-binary design: The linker is one program in fifteen translation units that share one header, `ld.h`, and one link context, `ld_ctx_t`. The files were cut from a single `ld.c` along its function families without changing a function; what is `static` is private to its file, and `ld.h` declares the rest.
 
 ## 7. Security Considerations
 
@@ -185,7 +187,7 @@ What is open: `docs/ld-audit.md` is the checked record of what the linker does a
 
 Modularity pressure: The split is by file only. Every type is still in `ld.h` and every pass still takes the whole `ld_ctx_t`; narrowing what each file can see (its own header, its own part of the context) is the next step, and can be taken a file at a time.
 
-Structure still to come: a description table for the two architectures in place of the parallel code; an option table and a phase list in place of the chain of comparisons and the long `run_internal_link`.
+Structure still to come: an option table and a phase list in place of the chain of comparisons and the long `run_internal_link`.
 
 Speed: shared objects are re-read for each question asked of them, archives are searched by reading every member, and `.gnu.hash` is written with one bucket.
 

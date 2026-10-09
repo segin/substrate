@@ -202,6 +202,7 @@ const dyn_import_t *find_planned_import(const ld_ctx_t *ctx, const char *name) {
 static int resolve_symbol_addr_for_reloc(elfobj_t *obj, const ld_ctx_t *ctx, const elf_symbol_t *sym,
                                          int allow_undef, uint32_t type, uint64_t *out_addr,
                                          const char **undef_name) {
+    const ld_arch_t *arch = ctx != NULL ? ld_arch_of_mode(ctx->mode) : NULL;
     const dyn_import_t *imp;
     const char *name;
     elf_section_t *sec;
@@ -231,98 +232,42 @@ static int resolve_symbol_addr_for_reloc(elfobj_t *obj, const ld_ctx_t *ctx, con
         }
         return resolve_symbol_addr(obj, sym, allow_undef, out_addr, undef_name);
     }
-    if (ctx != NULL && ctx->mode == 64) {
-        int plt_ref = reloc_is_x64_plt_ref(type);
-        if (!plt_ref && type == R_X86_64_PC32 && pc_relative_ref_is_call(sym) &&
-            (elf_symbol_type(sym) == STT_FUNC || elf_symbol_type(sym) == STT_NOTYPE)) {
-            plt_ref = 1;
-        }
-        plt_ref |= imp->canonical && reloc_is_direct_ref(EM_X86_64, type, 0);
-        if (plt_ref && imp->need_plt) {
-            sec = elf_find_section(obj, ".plt");
-            if (sec == NULL) {
-                return -1;
-            }
-            *out_addr = elf_section_addr(sec) + 16 + (imp->plt_slot * 16);
-            return 0;
-        }
-        if (reloc_is_x64_got_ref(type)) {
-            if (imp->need_got) {
-                sec = elf_find_section(obj, ".got");
-                if (sec == NULL) {
-                    return -1;
-                }
-                *out_addr = elf_section_addr(sec) + (imp->got_slot * 8);
-                return 0;
-            }
-            if (imp->need_plt) {
-                sec = elf_find_section(obj, ".got.plt");
-                if (sec == NULL) {
-                    return -1;
-                }
-                *out_addr = elf_section_addr(sec) + 24 + (imp->plt_slot * 8);
-                return 0;
-            }
-        }
-        if (reloc_is_x64_tls_gd_ref(type) && imp->need_tls_gd) {
-            sec = elf_find_section(obj, ".got");
-            if (sec == NULL) {
-                return -1;
-            }
-            *out_addr = elf_section_addr(sec) + (imp->tls_gd_slot * 8);
-            return 0;
-        }
-        if (reloc_is_x64_tls_ie_ref(type) && imp->need_tls_ie) {
-            sec = elf_find_section(obj, ".got");
-            if (sec == NULL) {
-                return -1;
-            }
-            *out_addr = elf_section_addr(sec) + (imp->tls_ie_slot * 8);
-            return 0;
-        }
-    } else if (ctx != NULL && ctx->mode == 32) {
-        if (((reloc_is_i386_plt_ref(type) && (type != R_386_PC32 || pc_relative_ref_is_call(sym))) ||
-             (imp->canonical && reloc_is_direct_ref(EM_386, type, 0))) &&
+    /* What the reference is to: the symbol's PLT entry, if it is a call
+     * or the entry is the function's address for everyone; its GOT slot,
+     * or failing one its slot in the PLT's GOT; its thread-local
+     * entries. */
+    if (arch != NULL) {
+        size_t slot = 0;
+        const char *table = NULL;
+
+        if ((arch->is_call_ref(type, sym) || (imp->canonical && reloc_is_direct_ref(arch->machine, type, 0))) &&
             imp->need_plt) {
             sec = elf_find_section(obj, ".plt");
             if (sec == NULL) {
                 return -1;
             }
-            *out_addr = elf_section_addr(sec) + 16 + (imp->plt_slot * 16);
+            *out_addr = elf_section_addr(sec) + LD_PLT_ENTRY_SIZE * (1 + imp->plt_slot);
             return 0;
         }
-        if (reloc_is_i386_got_ref(type)) {
-            if (imp->need_got) {
-                sec = elf_find_section(obj, ".got");
-                if (sec == NULL) {
-                    return -1;
-                }
-                *out_addr = elf_section_addr(sec) + (imp->got_slot * 4);
-                return 0;
-            }
-            if (imp->need_plt) {
-                sec = elf_find_section(obj, ".got.plt");
-                if (sec == NULL) {
-                    return -1;
-                }
-                *out_addr = elf_section_addr(sec) + 12 + (imp->plt_slot * 4);
-                return 0;
-            }
+        if (arch->is_got_ref(type) && imp->need_got) {
+            table = ".got";
+            slot = imp->got_slot;
+        } else if (arch->is_got_ref(type) && imp->need_plt) {
+            table = ".got.plt";
+            slot = LD_GOTPLT_RESERVED + imp->plt_slot;
+        } else if (arch->is_tls_gd_ref(type) && imp->need_tls_gd) {
+            table = ".got";
+            slot = imp->tls_gd_slot;
+        } else if (arch->is_tls_ie_ref(type) && imp->need_tls_ie) {
+            table = ".got";
+            slot = imp->tls_ie_slot;
         }
-        if (reloc_is_i386_tls_gd_ref(type) && imp->need_tls_gd) {
-            sec = elf_find_section(obj, ".got");
+        if (table != NULL) {
+            sec = elf_find_section(obj, table);
             if (sec == NULL) {
                 return -1;
             }
-            *out_addr = elf_section_addr(sec) + (imp->tls_gd_slot * 4);
-            return 0;
-        }
-        if (reloc_is_i386_tls_ie_ref(type) && imp->need_tls_ie) {
-            sec = elf_find_section(obj, ".got");
-            if (sec == NULL) {
-                return -1;
-            }
-            *out_addr = elf_section_addr(sec) + (imp->tls_ie_slot * 4);
+            *out_addr = elf_section_addr(sec) + slot * arch->word;
             return 0;
         }
     }
@@ -345,13 +290,7 @@ static int can_defer_runtime_reloc(const ld_ctx_t *ctx, uint16_t machine, uint32
     if (ctx == NULL || sym == NULL || !is_runtime_import_symbol(sym)) {
         return 0;
     }
-    if (machine == EM_X86_64 && !reloc_is_x64_runtime_data_ref(type)) {
-        return 0;
-    }
-    if (machine == EM_386 && !reloc_is_i386_runtime_data_ref(type)) {
-        return 0;
-    }
-    if (machine != EM_X86_64 && machine != EM_386) {
+    if (ld_arch_of_machine(machine) == NULL || type != ld_arch_of_machine(machine)->r_abs) {
         return 0;
     }
     imp = find_planned_import(ctx, elf_symbol_name(sym));
@@ -669,9 +608,10 @@ static uint64_t local_got_slot_addr(const ld_ctx_t *ctx, elfobj_t *out, long slo
  * Those relocations are the last in .rel[a].dyn, which was sized for them.
  */
 int fill_local_got(const ld_ctx_t *ctx, elfobj_t *out) {
+    const ld_arch_t *arch = ld_arch_of_machine(elf_machine(out));
     int is64 = elf_class(out) == ELFOBJ_CLASS_64;
     size_t entsz = is64 ? 8 : 4;
-    size_t relsz = is64 ? 24 : 8;
+    size_t relsz = arch != NULL ? arch->rel_size : 0;
     elfobj_endian_t e = elf_endian(out);
     elf_section_t *got, *rel = NULL;
     const uint8_t *src;
@@ -700,7 +640,10 @@ int fill_local_got(const ld_ctx_t *ctx, elfobj_t *out) {
         const uint8_t *rsrc;
         size_t rsz = 0;
 
-        rel = elf_find_section(out, is64 ? ".rela.dyn" : ".rel.dyn");
+        if (arch == NULL) {
+            goto out;
+        }
+        rel = elf_find_section(out, arch->rel_dyn);
         rsrc = rel != NULL ? (const uint8_t *)elf_section_data(rel, &rsz) : NULL;
         rel_total = rsz / relsz;
         if (rsrc == NULL || rel_total < tail || (relbuf = (uint8_t *)malloc(rsz)) == NULL) {
@@ -725,14 +668,7 @@ int fill_local_got(const ld_ctx_t *ctx, elfobj_t *out) {
             uint8_t *r = relbuf + relsz * next_rel++;
             uint64_t where = local_got_slot_addr(ctx, out, (long)i);
 
-            if (is64) {
-                write_uint_bytes(r, 8, e, where);
-                write_uint_bytes(r + 8, 8, e, R_X86_64_RELATIVE);
-                write_uint_bytes(r + 16, 8, e, addr);
-            } else {
-                write_uint_bytes(r, 4, e, where);
-                write_uint_bytes(r + 4, 4, e, R_386_RELATIVE);
-            }
+            ld_arch_put_rel(arch, r, e, where, arch->r_relative, 0, addr);
         }
     }
     /* The thread-local entries.  "The module" is this one, which a
@@ -758,22 +694,15 @@ int fill_local_got(const ld_ctx_t *ctx, elfobj_t *out) {
             goto out;
         }
         r = relbuf + relsz * next_rel++;
-        write_uint_bytes(r, (int)entsz, e, where);
         if (t->kind == LD_TLS_IE) {
-            if (is64) {
-                write_uint_bytes(r + 8, 8, e, R_X86_64_TPOFF64);
-                write_uint_bytes(r + 16, 8, e, dtpoff);
-            } else {
-                write_uint_bytes(r + 4, 4, e, R_386_TLS_TPOFF);
-                write_uint_bytes(buf + entsz * word, 4, e, dtpoff);
+            /* The addend the distance is worked out from: in the record,
+             * or where the machine's records have none in the entry. */
+            ld_arch_put_rel(arch, r, e, where, arch->r_tpoff, 0, dtpoff);
+            if (!arch->rela) {
+                write_uint_bytes(buf + entsz * word, (int)entsz, e, dtpoff);
             }
         } else {
-            if (is64) {
-                write_uint_bytes(r + 8, 8, e, R_X86_64_DTPMOD64);
-                write_uint_bytes(r + 16, 8, e, 0);
-            } else {
-                write_uint_bytes(r + 4, 4, e, R_386_TLS_DTPMOD32);
-            }
+            ld_arch_put_rel(arch, r, e, where, arch->r_dtpmod, 0, 0);
             write_uint_bytes(buf + entsz * (word + 1), (int)entsz, e, dtpoff);
         }
     }
@@ -809,15 +738,14 @@ int fill_local_got(const ld_ctx_t *ctx, elfobj_t *out) {
              * the stub that stands for it everywhere else. */
             resolver = elf_section_addr(elf_section_get(out, (size_t)(shndx - 1))) + elf_symbol_value(sym);
             r = relbuf + relsz * next_rel++;
-            write_uint_bytes(r, (int)entsz, e, slot);
+            ld_arch_put_rel(arch, r, e, slot, arch->r_irelative, 0, resolver);
+            if (!arch->rela) {
+                write_uint_bytes(buf + entsz * word, (int)entsz, e, resolver);
+            }
             if (is64) {
-                write_uint_bytes(r + 8, 8, e, R_X86_64_IRELATIVE);
-                write_uint_bytes(r + 16, 8, e, resolver);
                 c[0] = 0xff; c[1] = 0x25;               /* jmp *slot(%rip) */
                 write_uint_bytes(c + 2, 4, e, (slot - (at + 6)) & 0xffffffffULL);
             } else {
-                write_uint_bytes(r + 4, 4, e, R_386_IRELATIVE);
-                write_uint_bytes(buf + entsz * word, 4, e, resolver);
                 if (elf_type(out) != ET_DYN) {
                     c[0] = 0xff; c[1] = 0x25;           /* jmp *slot */
                     write_uint_bytes(c + 2, 4, e, slot);

@@ -494,6 +494,47 @@ typedef struct {
 } eh_entry_t;
 
 /*
+ * What differs between the machines linked for, where the dynamic
+ * sections are planned and filled in: see ld_arch.c.
+ */
+typedef struct ld_arch {
+    int mode;                   /* 32 or 64 */
+    uint16_t machine;
+    size_t word;                /* a GOT entry, in bytes */
+    int rela;                   /* the records carry their addends */
+    size_t rel_size;            /* one record, in bytes */
+    uint32_t rel_shtype;        /* SHT_REL or SHT_RELA */
+    const char *rel_dyn;        /* the names of the two sections of them */
+    const char *rel_plt;
+    uint32_t r_abs;             /* a whole address stored somewhere */
+    uint32_t r_pc32;
+    uint32_t r_relative;
+    uint32_t r_glob_dat;
+    uint32_t r_jump_slot;
+    uint32_t r_copy;
+    uint32_t r_tpoff;
+    uint32_t r_dtpmod;
+    uint32_t r_dtpoff;
+    uint32_t r_irelative;
+    int pc32_may_be_data;       /* a pc-relative reference to something
+                                 * undefined may be to a variable */
+    int (*is_call_ref)(uint32_t type, const elf_symbol_t *sym);
+    int (*is_got_ref)(uint32_t type);
+    int (*is_tls_gd_ref)(uint32_t type);
+    int (*is_tls_ie_ref)(uint32_t type);
+    /* The first PLT entry, and one of the others: 16 bytes each.  `pic`:
+     * the output can be loaded anywhere.  An entry is `ent`th, at
+     * `ent_addr`; its GOT slot is at `slot_addr`, `slot_off` into
+     * .got.plt; its record is `rel_off` into the PLT's records. */
+    void (*write_plt0)(uint8_t *p, elfobj_endian_t e, uint64_t plt_addr, uint64_t gotplt_addr, int pic);
+    void (*write_plt_entry)(uint8_t *p, elfobj_endian_t e, uint64_t ent_addr, uint64_t slot_addr,
+                            uint64_t plt_addr, size_t ent, size_t slot_off, size_t rel_off, int pic);
+} ld_arch_t;
+
+#define LD_PLT_ENTRY_SIZE 16u   /* of PLT0 and of each entry, both machines */
+#define LD_GOTPLT_RESERVED 3u   /* words at the head of .got.plt */
+
+/*
  * One global name, as the link knows it: see ld_symtab.c.  The sources
  * are the names of inputs.
  */
@@ -615,22 +656,16 @@ int is_runtime_import_symbol(const elf_symbol_t *sym);
 void set_definitions_preemptible(int on);
 int symbol_is_preemptible(const elf_symbol_t *sym);
 int pc_relative_ref_is_call(const elf_symbol_t *sym);
-int reloc_is_x64_plt_ref(uint32_t type);
-int reloc_is_x64_got_ref(uint32_t type);
-int reloc_is_x64_tls_gd_ref(uint32_t type);
-int reloc_is_x64_tls_ie_ref(uint32_t type);
-int reloc_is_x64_runtime_data_ref(uint32_t type);
-int reloc_is_i386_plt_ref(uint32_t type);
-int reloc_is_i386_got_ref(uint32_t type);
-int reloc_is_i386_tls_gd_ref(uint32_t type);
-int reloc_is_i386_tls_ie_ref(uint32_t type);
-int reloc_is_i386_runtime_data_ref(uint32_t type);
+const ld_arch_t *ld_arch_of_mode(int mode);
+const ld_arch_t *ld_arch_of_machine(uint16_t machine);
+void ld_arch_put_word(const ld_arch_t *a, uint8_t *p, elfobj_endian_t e, uint64_t v);
+void ld_arch_put_rel(const ld_arch_t *a, uint8_t *p, elfobj_endian_t e, uint64_t where, uint32_t type,
+                     uint32_t sym, uint64_t addend);
 int reloc_is_direct_ref(uint16_t machine, uint32_t type, int data);
 int settle_undefined_weak(const ld_ctx_t *ctx, elfobj_t *out);
 int set_section_zero_data(elf_section_t *sec, size_t sz);
 int plan_dynamic_imports(ld_ctx_t *ctx, elfobj_t *out);
-int finalize_dynamic_imports_x64(elfobj_t *out, const dyn_import_vec_t *imports);
-int finalize_dynamic_imports_i386(elfobj_t *out, const dyn_import_vec_t *imports);
+int finalize_dynamic_imports(const ld_arch_t *a, elfobj_t *out, const dyn_import_vec_t *imports);
 const char *text_relocation_section(const ld_ctx_t *ctx, elfobj_t *out);
 char *dso_soname(const char *path);
 int dso_dynamic_strings(const char *path, uint64_t want, strvec_t *out);

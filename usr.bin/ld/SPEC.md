@@ -44,10 +44,10 @@ should be built on the assumption that they are.
 | An indirect function in a static program | Refused: nothing would call the resolver. |
 
 The structure the specification asks for in §3.2 is only partly there:
-the source is divided by function and the linker asks about symbols in
-one table (`ld_symtab.c`), but the two architectures are handled by
-parallel code and not a description table, and options are parsed by a
-chain of comparisons.  Those are tracked in `docs/ld-audit.md` under
+the source is divided by function, the linker asks about symbols in one
+table (`ld_symtab.c`) and the two architectures are described in one
+(`ld_arch.c`), but options are parsed by a chain of comparisons and the
+order of a link is one long function.  Those are tracked in `docs/ld-audit.md` under
 "Structure".
 
 ---

@@ -566,22 +566,13 @@ static int run_internal_link(ld_ctx_t *ctx) {
         elf_close(out);
         return -1;
     }
-    if (ctx->mode == 64) {
-        if (finalize_dynamic_imports_x64(out, &ctx->dyn_imports) != 0) {
-            fprintf(stderr, "ld: failed to finalize x86_64 GOT/PLT dynamic data\n");
-            ld_symtab_free(&symtab);
-            objvec_free(&inputs);
-            elf_close(out);
-            return -1;
-        }
-    } else if (ctx->mode == 32) {
-        if (finalize_dynamic_imports_i386(out, &ctx->dyn_imports) != 0) {
-            fprintf(stderr, "ld: failed to finalize i386 GOT/PLT dynamic data\n");
-            ld_symtab_free(&symtab);
-            objvec_free(&inputs);
-            elf_close(out);
-            return -1;
-        }
+    if (ld_arch_of_mode(ctx->mode) != NULL &&
+        finalize_dynamic_imports(ld_arch_of_mode(ctx->mode), out, &ctx->dyn_imports) != 0) {
+        fprintf(stderr, "ld: failed to finalize %s GOT/PLT dynamic data\n", canonical_mode_name(ctx->mode));
+        ld_symtab_free(&symtab);
+        objvec_free(&inputs);
+        elf_close(out);
+        return -1;
     }
     if (patch_dynamic_tag_values(out) != 0) {
         fprintf(stderr, "ld: failed to finalize .dynamic tag values\n");

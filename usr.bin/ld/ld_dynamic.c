@@ -342,68 +342,6 @@ int is_runtime_import_symbol(const elf_symbol_t *sym) {
     return 1;
 }
 
-int reloc_is_x64_plt_ref(uint32_t type) {
-    return type == R_X86_64_PLT32;
-}
-
-int reloc_is_x64_got_ref(uint32_t type) {
-    switch (type) {
-    case R_X86_64_GOT32:
-    case R_X86_64_GOTPCREL:
-    case R_X86_64_GOTPC32:
-    case R_X86_64_GOTPCRELX:
-    case R_X86_64_REX_GOTPCRELX:
-        return 1;
-    default:
-        return 0;
-    }
-}
-
-int reloc_is_x64_tls_gd_ref(uint32_t type) {
-    return type == R_X86_64_TLSGD;
-}
-
-int reloc_is_x64_tls_ie_ref(uint32_t type) {
-    return type == R_X86_64_GOTTPOFF;
-}
-
-int reloc_is_x64_runtime_data_ref(uint32_t type) {
-    return type == R_X86_64_64;
-}
-
-/*
- * A reference that is a call, and so can be sent through the PLT when
- * what it names turns out to be in a shared object.  R_386_PLT32 says so
- * outright.  R_386_PC32 is what a compiler not told to make
- * position-independent code writes for every call; on i386 nothing but a
- * branch is pc-relative, so against an import it is one too.
- */
-int reloc_is_i386_plt_ref(uint32_t type) {
-    return type == R_386_PLT32 || type == R_386_PC32;
-}
-
-int reloc_is_i386_got_ref(uint32_t type) {
-    switch (type) {
-    case R_386_GOT32:
-    case R_386_GOT32X:
-        return 1;
-    default:
-        return 0;
-    }
-}
-
-int reloc_is_i386_tls_gd_ref(uint32_t type) {
-    return type == R_386_TLS_GD;
-}
-
-int reloc_is_i386_tls_ie_ref(uint32_t type) {
-    return type == R_386_TLS_IE || type == R_386_TLS_GOTIE;
-}
-
-int reloc_is_i386_runtime_data_ref(uint32_t type) {
-    return type == R_386_32;
-}
-
 static int symbol_needs_runtime_relative_reloc(const elf_symbol_t *sym) {
     uint16_t shndx;
 
@@ -450,7 +388,12 @@ static int import_is_canonical(const dyn_import_vec_t *imports, const elf_symbol
     return idx >= 0 && imports->items[idx].canonical;
 }
 
-static size_t count_runtime_data_import_relocs_x64(elfobj_t *out, const dyn_import_vec_t *imports) {
+/*
+ * How many whole addresses stored in the output the dynamic linker will
+ * have to supply or correct: those of imports, by name, and in an output
+ * that can be loaded anywhere those of its own things, by RELATIVE.
+ */
+static size_t count_runtime_data_import_relocs(const ld_arch_t *a, elfobj_t *out, const dyn_import_vec_t *imports) {
     size_t i;
     size_t n = 0;
 
@@ -474,41 +417,7 @@ static size_t count_runtime_data_import_relocs_x64(elfobj_t *out, const dyn_impo
                 continue;
             }
             sym = elf_reloc_symbol(rel);
-            if (reloc_is_x64_runtime_data_ref(elf_reloc_type(rel)) &&
-                ((is_runtime_import_symbol(sym) && !import_is_canonical(imports, sym)) ||
-                 (elf_type(out) == ET_DYN && symbol_needs_runtime_relative_reloc(sym)))) {
-                n++;
-            }
-        }
-    }
-    return n;
-}
-
-static size_t count_runtime_data_import_relocs_i386(elfobj_t *out, const dyn_import_vec_t *imports) {
-    size_t i;
-    size_t n = 0;
-
-    if (out == NULL) {
-        return 0;
-    }
-    for (i = 0; i < elf_section_count(out); ++i) {
-        elf_section_t *sec = elf_section_get(out, i);
-        size_t ri;
-        size_t rc;
-
-        if (sec == NULL || (elf_section_flags(sec) & SHF_ALLOC) == 0) {
-            continue;
-        }
-        rc = elf_section_reloc_count(sec);
-        for (ri = 0; ri < rc; ++ri) {
-            const elf_reloc_t *rel = elf_section_reloc_at(sec, ri);
-            const elf_symbol_t *sym;
-
-            if (rel == NULL) {
-                continue;
-            }
-            sym = elf_reloc_symbol(rel);
-            if (reloc_is_i386_runtime_data_ref(elf_reloc_type(rel)) &&
+            if (elf_reloc_type(rel) == a->r_abs &&
                 ((is_runtime_import_symbol(sym) && !import_is_canonical(imports, sym)) ||
                  (elf_type(out) == ET_DYN && symbol_needs_runtime_relative_reloc(sym)))) {
                 n++;
@@ -768,7 +677,13 @@ int settle_undefined_weak(const ld_ctx_t *ctx, elfobj_t *out) {
     return 0;
 }
 
-static int collect_dynamic_imports_x64(const ld_ctx_t *ctx, elfobj_t *out, dyn_import_vec_t *imports) {
+/*
+ * What the output needs from the dynamic linker, read off its
+ * relocations: for each symbol reached through it, whether a PLT entry,
+ * a GOT slot, thread-local entries.
+ */
+static int collect_dynamic_imports(const ld_arch_t *a, const ld_ctx_t *ctx, elfobj_t *out,
+                                   dyn_import_vec_t *imports) {
     size_t i;
 
     if (out == NULL || imports == NULL) {
@@ -799,9 +714,8 @@ static int collect_dynamic_imports_x64(const ld_ctx_t *ctx, elfobj_t *out, dyn_i
                 continue;
             }
             type = elf_reloc_type(rel);
-            plt_ref = reloc_is_x64_plt_ref(type);
-            if (!plt_ref && type == R_X86_64_PC32 && pc_relative_ref_is_call(sym) &&
-                (elf_symbol_type(sym) == STT_FUNC || elf_symbol_type(sym) == STT_NOTYPE)) {
+            plt_ref = a->is_call_ref(type, sym);
+            if (plt_ref && a->pc32_may_be_data && type == a->r_pc32) {
                 /*
                  * A pc-relative reference to something in a shared
                  * object.  A reference does not say what it refers to
@@ -822,13 +736,11 @@ static int collect_dynamic_imports_x64(const ld_ctx_t *ctx, elfobj_t *out, dyn_i
                             elf_symbol_name(sym), elf_section_name(sec) != NULL ? elf_section_name(sec) : "?");
                     return -1;
                 }
-                plt_ref = 1;
             }
             canonical = !plt_ref && import_address_is_plt(ctx, out, type, sym);
             plt_ref |= canonical;
-            if (!plt_ref && !reloc_is_x64_got_ref(type) &&
-                !reloc_is_x64_tls_gd_ref(type) && !reloc_is_x64_tls_ie_ref(type) &&
-                !reloc_is_x64_runtime_data_ref(type)) {
+            if (!plt_ref && !a->is_got_ref(type) && !a->is_tls_gd_ref(type) && !a->is_tls_ie_ref(type) &&
+                type != a->r_abs) {
                 continue;
             }
             imp = dyn_import_get_or_add(imports, elf_symbol_name(sym));
@@ -841,74 +753,13 @@ static int collect_dynamic_imports_x64(const ld_ctx_t *ctx, elfobj_t *out, dyn_i
             if (canonical) {
                 imp->canonical = 1;
             }
-            if (reloc_is_x64_got_ref(type)) {
+            if (a->is_got_ref(type)) {
                 imp->need_got = 1;
             }
-            if (reloc_is_x64_tls_gd_ref(type)) {
+            if (a->is_tls_gd_ref(type)) {
                 imp->need_tls_gd = 1;
             }
-            if (reloc_is_x64_tls_ie_ref(type)) {
-                imp->need_tls_ie = 1;
-            }
-        }
-    }
-    return 0;
-}
-
-static int collect_dynamic_imports_i386(const ld_ctx_t *ctx, elfobj_t *out, dyn_import_vec_t *imports) {
-    size_t i;
-
-    if (out == NULL || imports == NULL) {
-        return -1;
-    }
-    for (i = 0; i < elf_section_count(out); ++i) {
-        elf_section_t *sec = elf_section_get(out, i);
-        size_t ri;
-        size_t rc;
-
-        if (sec == NULL) {
-            continue;
-        }
-        rc = elf_section_reloc_count(sec);
-        for (ri = 0; ri < rc; ++ri) {
-            const elf_reloc_t *rel = elf_section_reloc_at(sec, ri);
-            const elf_symbol_t *sym;
-            dyn_import_t *imp;
-            uint32_t type;
-            int plt_ref;
-
-            if (rel == NULL) {
-                continue;
-            }
-            sym = elf_reloc_symbol(rel);
-            if (!is_runtime_import_symbol(sym)) {
-                continue;
-            }
-            type = elf_reloc_type(rel);
-            plt_ref = reloc_is_i386_plt_ref(type) && (type != R_386_PC32 || pc_relative_ref_is_call(sym));
-            if (!plt_ref && !reloc_is_i386_got_ref(type) &&
-                !reloc_is_i386_tls_gd_ref(type) && !reloc_is_i386_tls_ie_ref(type) &&
-                !reloc_is_i386_runtime_data_ref(type)) {
-                continue;
-            }
-            imp = dyn_import_get_or_add(imports, elf_symbol_name(sym));
-            if (imp == NULL) {
-                return -1;
-            }
-            if (plt_ref) {
-                imp->need_plt = 1;
-            }
-            if (import_address_is_plt(ctx, out, type, sym)) {
-                imp->need_plt = 1;
-                imp->canonical = 1;
-            }
-            if (reloc_is_i386_got_ref(type)) {
-                imp->need_got = 1;
-            }
-            if (reloc_is_i386_tls_gd_ref(type)) {
-                imp->need_tls_gd = 1;
-            }
-            if (reloc_is_i386_tls_ie_ref(type)) {
+            if (a->is_tls_ie_ref(type)) {
                 imp->need_tls_ie = 1;
             }
         }
@@ -936,105 +787,30 @@ int set_section_zero_data(elf_section_t *sec, size_t sz) {
     return rc;
 }
 
-static int ensure_dynamic_import_sections_x64(elfobj_t *out, const dyn_import_vec_t *imports, size_t extra_dyn_count,
-                                              size_t extra_got) {
-    size_t i;
-    size_t plt_count = 0;
-    size_t got_count = 0;
-    size_t dyn_count = 0;
-    elf_section_t *sec;
+/* A section of the dynamic linker's tables, made if it is not there, of
+ * this alignment and this many bytes of zeros to be filled in later. */
+static int ensure_table_section(elfobj_t *out, const char *name, uint32_t type, uint64_t flags, uint64_t align,
+                                size_t size) {
+    elf_section_t *sec = elf_find_section(out, name);
 
-    if (out == NULL || imports == NULL) {
-        return -1;
+    if (sec == NULL) {
+        sec = elf_add_section(out, name, type, flags);
     }
-    for (i = 0; i < imports->count; ++i) {
-        if (imports->items[i].need_plt) {
-            plt_count++;
-        }
-        if (imports->items[i].need_got) {
-            got_count++;
-        }
-        if (imports->items[i].need_tls_ie) {
-            got_count++;
-        }
-        if (imports->items[i].need_tls_gd) {
-            got_count += 2;
-        }
-    }
-    dyn_count = got_count + extra_dyn_count;
-    got_count += extra_got;     /* the output's own slots, after the imports' */
-
-    if (plt_count != 0) {
-        sec = elf_find_section(out, ".plt");
-        if (sec == NULL) {
-            sec = elf_add_section(out, ".plt", SHT_PROGBITS, SHF_ALLOC | SHF_EXECINSTR);
-            if (sec == NULL) {
-                return -1;
-            }
-        }
-        if (elf_section_set_align(sec, 16) != ELF_OK || set_section_zero_data(sec, 16 * (1 + plt_count)) != 0) {
-            return -1;
-        }
-
-        sec = elf_find_section(out, ".got.plt");
-        if (sec == NULL) {
-            sec = elf_add_section(out, ".got.plt", SHT_PROGBITS, SHF_ALLOC | SHF_WRITE);
-            if (sec == NULL) {
-                return -1;
-            }
-        }
-        if (elf_section_set_align(sec, 8) != ELF_OK || set_section_zero_data(sec, 8 * (3 + plt_count)) != 0) {
-            return -1;
-        }
-
-        sec = elf_find_section(out, ".rela.plt");
-        if (sec == NULL) {
-            sec = elf_add_section(out, ".rela.plt", SHT_RELA, SHF_ALLOC);
-            if (sec == NULL) {
-                return -1;
-            }
-        }
-        if (elf_section_set_align(sec, 8) != ELF_OK || set_section_zero_data(sec, 24 * plt_count) != 0) {
-            return -1;
-        }
-    }
-
-    if (got_count != 0) {
-        sec = elf_find_section(out, ".got");
-        if (sec == NULL) {
-            sec = elf_add_section(out, ".got", SHT_PROGBITS, SHF_ALLOC | SHF_WRITE);
-            if (sec == NULL) {
-                return -1;
-            }
-        }
-        if (elf_section_set_align(sec, 8) != ELF_OK || set_section_zero_data(sec, 8 * got_count) != 0) {
-            return -1;
-        }
-
-    }
-
-    if (dyn_count != 0) {
-        sec = elf_find_section(out, ".rela.dyn");
-        if (sec == NULL) {
-            sec = elf_add_section(out, ".rela.dyn", SHT_RELA, SHF_ALLOC);
-            if (sec == NULL) {
-                return -1;
-            }
-        }
-        if (elf_section_set_align(sec, 8) != ELF_OK || set_section_zero_data(sec, 24 * dyn_count) != 0) {
-            return -1;
-        }
-    }
-    return 0;
+    return sec != NULL && elf_section_set_align(sec, align) == ELF_OK && set_section_zero_data(sec, size) == 0 ? 0 : -1;
 }
 
-static int ensure_dynamic_import_sections_i386(elfobj_t *out, const dyn_import_vec_t *imports, size_t extra_dyn_count,
-                                               size_t extra_got) {
+/*
+ * Make room for what was collected, before anything has an address: the
+ * PLT, its GOT and its records; the GOT -- the imports' slots, and after
+ * them `extra_got` more for the output's own; the records for all of it,
+ * and `extra_dyn_count` more.
+ */
+static int ensure_dynamic_import_sections(const ld_arch_t *a, elfobj_t *out, const dyn_import_vec_t *imports,
+                                          size_t extra_dyn_count, size_t extra_got) {
     size_t i;
     size_t plt_count = 0;
     size_t got_count = 0;
     size_t dyn_count = 0;
-    elf_section_t *sec;
 
     if (out == NULL || imports == NULL) {
         return -1;
@@ -1056,71 +832,27 @@ static int ensure_dynamic_import_sections_i386(elfobj_t *out, const dyn_import_v
     dyn_count = got_count + extra_dyn_count;
     got_count += extra_got;     /* the output's own slots, after the imports' */
 
-    if (plt_count != 0) {
-        sec = elf_find_section(out, ".plt");
-        if (sec == NULL) {
-            sec = elf_add_section(out, ".plt", SHT_PROGBITS, SHF_ALLOC | SHF_EXECINSTR);
-            if (sec == NULL) {
-                return -1;
-            }
-        }
-        if (elf_section_set_align(sec, 16) != ELF_OK || set_section_zero_data(sec, 16 * (1 + plt_count)) != 0) {
-            return -1;
-        }
-
-        sec = elf_find_section(out, ".got.plt");
-        if (sec == NULL) {
-            sec = elf_add_section(out, ".got.plt", SHT_PROGBITS, SHF_ALLOC | SHF_WRITE);
-            if (sec == NULL) {
-                return -1;
-            }
-        }
-        if (elf_section_set_align(sec, 4) != ELF_OK || set_section_zero_data(sec, 4 * (3 + plt_count)) != 0) {
-            return -1;
-        }
-
-        sec = elf_find_section(out, ".rel.plt");
-        if (sec == NULL) {
-            sec = elf_add_section(out, ".rel.plt", SHT_REL, SHF_ALLOC);
-            if (sec == NULL) {
-                return -1;
-            }
-        }
-        if (elf_section_set_align(sec, 4) != ELF_OK || set_section_zero_data(sec, 8 * plt_count) != 0) {
-            return -1;
-        }
+    if (plt_count != 0 &&
+        (ensure_table_section(out, ".plt", SHT_PROGBITS, SHF_ALLOC | SHF_EXECINSTR, 16,
+                              LD_PLT_ENTRY_SIZE * (1 + plt_count)) != 0 ||
+         ensure_table_section(out, ".got.plt", SHT_PROGBITS, SHF_ALLOC | SHF_WRITE, a->word,
+                              a->word * (LD_GOTPLT_RESERVED + plt_count)) != 0 ||
+         ensure_table_section(out, a->rel_plt, a->rel_shtype, SHF_ALLOC, a->word, a->rel_size * plt_count) != 0)) {
+        return -1;
     }
-
-    if (got_count != 0) {
-        sec = elf_find_section(out, ".got");
-        if (sec == NULL) {
-            sec = elf_add_section(out, ".got", SHT_PROGBITS, SHF_ALLOC | SHF_WRITE);
-            if (sec == NULL) {
-                return -1;
-            }
-        }
-        if (elf_section_set_align(sec, 4) != ELF_OK || set_section_zero_data(sec, 4 * got_count) != 0) {
-            return -1;
-        }
-
+    if (got_count != 0 &&
+        ensure_table_section(out, ".got", SHT_PROGBITS, SHF_ALLOC | SHF_WRITE, a->word, a->word * got_count) != 0) {
+        return -1;
     }
-
-    if (dyn_count != 0) {
-        sec = elf_find_section(out, ".rel.dyn");
-        if (sec == NULL) {
-            sec = elf_add_section(out, ".rel.dyn", SHT_REL, SHF_ALLOC);
-            if (sec == NULL) {
-                return -1;
-            }
-        }
-        if (elf_section_set_align(sec, 4) != ELF_OK || set_section_zero_data(sec, 8 * dyn_count) != 0) {
-            return -1;
-        }
+    if (dyn_count != 0 &&
+        ensure_table_section(out, a->rel_dyn, a->rel_shtype, SHF_ALLOC, a->word, a->rel_size * dyn_count) != 0) {
+        return -1;
     }
     return 0;
 }
 
 int plan_dynamic_imports(ld_ctx_t *ctx, elfobj_t *out) {
+    const ld_arch_t *arch = ctx != NULL ? ld_arch_of_mode(ctx->mode) : NULL;
     size_t i;
     size_t plt_slot = 0;
     size_t got_slot = 0;
@@ -1142,17 +874,10 @@ int plan_dynamic_imports(ld_ctx_t *ctx, elfobj_t *out) {
     if (plan_copy_relocs(ctx, out, &ctx->dyn_imports) != 0 || collect_local_got(ctx, out) != 0) {
         return -1;
     }
-    if (ctx->mode == 64) {
-        if (collect_dynamic_imports_x64(ctx, out, &ctx->dyn_imports) != 0) {
-            return -1;
-        }
-        extra_dyn_relocs = count_runtime_data_import_relocs_x64(out, &ctx->dyn_imports);
-    } else {
-        if (collect_dynamic_imports_i386(ctx, out, &ctx->dyn_imports) != 0) {
-            return -1;
-        }
-        extra_dyn_relocs = count_runtime_data_import_relocs_i386(out, &ctx->dyn_imports);
+    if (collect_dynamic_imports(arch, ctx, out, &ctx->dyn_imports) != 0) {
+        return -1;
     }
+    extra_dyn_relocs = count_runtime_data_import_relocs(arch, out, &ctx->dyn_imports);
     extra_dyn_relocs += ctx->dyn_imports.copy_count;
     for (i = 0; i < ctx->dyn_imports.count; ++i) {
         if (ctx->dyn_imports.items[i].need_plt) {
@@ -1185,17 +910,9 @@ int plan_dynamic_imports(ld_ctx_t *ctx, elfobj_t *out) {
      * relocations after every other in .rel[a].dyn. */
     ctx->local_got_base = got_slot;
     extra_dyn_relocs += ctx->local_got_relative + ctx->tls_got_count + ctx->ifunc_count;
-    if (ctx->mode == 64) {
-        if (ensure_dynamic_import_sections_x64(out, &ctx->dyn_imports, extra_dyn_relocs,
-                                               ctx->local_got_count + ctx->tls_got_words + ctx->ifunc_count) != 0) {
-            return -1;
-        }
-    } else {
-        if (ensure_dynamic_import_sections_i386(out, &ctx->dyn_imports, extra_dyn_relocs,
-                                                ctx->local_got_count + ctx->tls_got_words +
-                                                ctx->ifunc_count) != 0) {
-            return -1;
-        }
+    if (ensure_dynamic_import_sections(arch, out, &ctx->dyn_imports, extra_dyn_relocs,
+                                       ctx->local_got_count + ctx->tls_got_words + ctx->ifunc_count) != 0) {
+        return -1;
     }
     ctx->local_got_owned = ctx->local_got_count != 0 || ctx->tls_got_count != 0 || ctx->ifunc_count != 0;
     return 0;
@@ -1242,367 +959,15 @@ static int dynsym_index_by_name(const elfobj_t *out, const char *name, uint32_t 
     return -1;
 }
 
-int finalize_dynamic_imports_x64(elfobj_t *out, const dyn_import_vec_t *imports) {
-    elf_section_t *plt;
-    elf_section_t *gotplt;
-    elf_section_t *got;
-    elf_section_t *rela_plt;
-    elf_section_t *rela_dyn;
-    const elf_section_t *dynamic;
-    uint8_t *plt_buf = NULL;
-    uint8_t *gotplt_buf = NULL;
-    uint8_t *got_buf = NULL;
-    uint8_t *rela_plt_buf = NULL;
-    uint8_t *rela_dyn_buf = NULL;
-    size_t plt_sz = 0;
-    size_t gotplt_sz = 0;
-    size_t got_sz = 0;
-    size_t rela_plt_sz = 0;
-    size_t rela_dyn_sz = 0;
-    size_t rela_dyn_base_count = 0;
-    size_t runtime_extra_count = 0;
-    size_t required_rela_dyn_sz = 0;
-    size_t need_plt_count = 0;
-    size_t i;
-    uint64_t plt_addr;
-    uint64_t gotplt_addr;
-    uint64_t got_addr = 0;
-    uint64_t dynamic_addr = 0;
-    elfobj_endian_t e;
-
-    if (out == NULL || imports == NULL) {
-        return 0;
-    }
-    for (i = 0; i < imports->count; ++i) {
-        if (imports->items[i].need_plt) {
-            need_plt_count++;
-        }
-        if (imports->items[i].need_got) {
-            rela_dyn_base_count++;
-        }
-        if (imports->items[i].need_tls_ie) {
-            rela_dyn_base_count++;
-        }
-        if (imports->items[i].need_tls_gd) {
-            rela_dyn_base_count += 2;
-        }
-    }
-    runtime_extra_count = count_runtime_data_import_relocs_x64(out, imports) + imports->copy_count;
-    required_rela_dyn_sz = (rela_dyn_base_count + runtime_extra_count) * 24;
-    plt = elf_find_section(out, ".plt");
-    gotplt = elf_find_section(out, ".got.plt");
-    got = elf_find_section(out, ".got");
-    rela_plt = elf_find_section(out, ".rela.plt");
-    rela_dyn = elf_find_section(out, ".rela.dyn");
-    dynamic = elf_find_section(out, ".dynamic");
-    if (need_plt_count != 0 && (plt == NULL || gotplt == NULL)) {
-        fprintf(stderr, "ld: internal error: %zu imported functions need the PLT and there is no %s\n",
-                need_plt_count, plt == NULL ? ".plt" : ".got.plt");
-        return -1;
-    }
-
-    plt_addr = plt != NULL ? elf_section_addr(plt) : 0;
-    gotplt_addr = gotplt != NULL ? elf_section_addr(gotplt) : 0;
-    if (got != NULL) {
-        got_addr = elf_section_addr(got);
-    }
-    if (dynamic != NULL) {
-        dynamic_addr = elf_section_addr(dynamic);
-    }
-    e = elf_endian(out);
-
-    plt_sz = plt != NULL ? elf_section_size(plt) : 0;
-    gotplt_sz = gotplt != NULL ? elf_section_size(gotplt) : 0;
-    got_sz = got != NULL ? elf_section_size(got) : 0;
-    rela_plt_sz = rela_plt != NULL ? elf_section_size(rela_plt) : 0;
-    rela_dyn_sz = rela_dyn != NULL ? elf_section_size(rela_dyn) : 0;
-    /* The section was sized before addresses were given out; to make it
-     * larger now would be to write over whatever was placed after it. */
-    if (rela_dyn_sz < required_rela_dyn_sz) {
-        if (dynamic != NULL) {
-            fprintf(stderr, "ld: internal error: .rela.dyn needs %zu bytes and was laid out with %zu\n",
-                    required_rela_dyn_sz, rela_dyn_sz);
-            return -1;
-        }
-        /* Nothing dynamic about the output: there is no such section,
-         * and what is counted here is the weak references nothing
-         * defined, which are zero and need nobody's help. */
-        rela_dyn_sz = required_rela_dyn_sz;
-    }
-
-    if (plt_sz != 0) {
-        plt_buf = (uint8_t *)calloc(1, plt_sz);
-        if (plt_buf == NULL) {
-            return -1;
-        }
-    }
-    if (gotplt_sz != 0) {
-        gotplt_buf = (uint8_t *)calloc(1, gotplt_sz);
-        if (gotplt_buf == NULL) {
-            free(plt_buf);
-            return -1;
-        }
-    }
-    if (got_sz != 0) {
-        got_buf = (uint8_t *)calloc(1, got_sz);
-        if (got_buf == NULL) {
-            free(plt_buf);
-            free(gotplt_buf);
-            return -1;
-        }
-    }
-    if (rela_plt_sz != 0) {
-        rela_plt_buf = (uint8_t *)calloc(1, rela_plt_sz);
-        if (rela_plt_buf == NULL) {
-            free(plt_buf);
-            free(gotplt_buf);
-            free(got_buf);
-            return -1;
-        }
-    }
-    if (rela_dyn_sz != 0) {
-        rela_dyn_buf = (uint8_t *)calloc(1, rela_dyn_sz);
-        if (rela_dyn_buf == NULL) {
-            free(plt_buf);
-            free(gotplt_buf);
-            free(got_buf);
-            free(rela_plt_buf);
-            return -1;
-        }
-    }
-
-    if (plt_buf != NULL && plt_sz >= 16) {
-        int32_t disp;
-        /* PLT0: pushq GOT+8(%rip); jmp *GOT+16(%rip); nopl 0(%rax) */
-        plt_buf[0] = 0xff;
-        plt_buf[1] = 0x35;
-        disp = (int32_t)((int64_t)(gotplt_addr + 8) - (int64_t)(plt_addr + 6));
-        write_u32_endian(plt_buf + 2, e, (uint32_t)disp);
-        plt_buf[6] = 0xff;
-        plt_buf[7] = 0x25;
-        disp = (int32_t)((int64_t)(gotplt_addr + 16) - (int64_t)(plt_addr + 12));
-        write_u32_endian(plt_buf + 8, e, (uint32_t)disp);
-        plt_buf[12] = 0x0f;
-        plt_buf[13] = 0x1f;
-        plt_buf[14] = 0x40;
-        plt_buf[15] = 0x00;
-    }
-    if (gotplt_buf != NULL && gotplt_sz >= 24) {
-        write_u64_endian(gotplt_buf + 0, e, dynamic_addr);
-        write_u64_endian(gotplt_buf + 8, e, 0);
-        write_u64_endian(gotplt_buf + 16, e, 0);
-    }
-
-    for (i = 0; i < imports->count; ++i) {
-        const dyn_import_t *imp = &imports->items[i];
-        uint32_t dynidx = 0;
-        if (dynsym_index_by_name(out, imp->name, &dynidx) != 0) {
-            /* Its PLT entry and GOT slot would be left zero, to be
-             * jumped through at run time. */
-            fprintf(stderr, "ld: %s is imported and has no entry in the dynamic symbol table\n",
-                    imp->name != NULL ? imp->name : "?");
-            goto fail_import;
-        }
-        if (imp->need_plt) {
-            size_t ent = imp->plt_slot;
-            uint64_t ent_addr = plt_addr + 16 + (ent * 16);
-            uint64_t slot_addr = gotplt_addr + 24 + (ent * 8);
-            size_t poff = 16 + (ent * 16);
-            size_t roff = ent * 24;
-            int32_t disp;
-
-            if (poff + 16 <= plt_sz) {
-                plt_buf[poff + 0] = 0xff;
-                plt_buf[poff + 1] = 0x25;
-                disp = (int32_t)((int64_t)slot_addr - (int64_t)(ent_addr + 6));
-                write_u32_endian(plt_buf + poff + 2, e, (uint32_t)disp);
-                plt_buf[poff + 6] = 0x68;
-                write_u32_endian(plt_buf + poff + 7, e, (uint32_t)ent);
-                plt_buf[poff + 11] = 0xe9;
-                disp = (int32_t)((int64_t)plt_addr - (int64_t)(ent_addr + 16));
-                write_u32_endian(plt_buf + poff + 12, e, (uint32_t)disp);
-            }
-            if ((24 + ((ent + 1) * 8)) <= gotplt_sz) {
-                write_u64_endian(gotplt_buf + 24 + (ent * 8), e, ent_addr + 6);
-            }
-            if (rela_plt_buf != NULL && roff + 24 <= rela_plt_sz) {
-                write_u64_endian(rela_plt_buf + roff + 0, e, slot_addr);
-                write_u64_endian(rela_plt_buf + roff + 8, e, (((uint64_t)dynidx) << 32) | R_X86_64_JUMP_SLOT);
-                write_u64_endian(rela_plt_buf + roff + 16, e, 0);
-            }
-        }
-        if (imp->need_got && got != NULL) {
-            size_t ent = imp->got_slot;
-            size_t roff = ent * 24;
-            uint64_t slot_addr = got_addr + (ent * 8);
-
-            if (rela_dyn_buf != NULL && roff + 24 <= rela_dyn_sz) {
-                write_u64_endian(rela_dyn_buf + roff + 0, e, slot_addr);
-                write_u64_endian(rela_dyn_buf + roff + 8, e, (((uint64_t)dynidx) << 32) | R_X86_64_GLOB_DAT);
-                write_u64_endian(rela_dyn_buf + roff + 16, e, 0);
-            }
-        }
-        if (imp->need_tls_ie && got != NULL) {
-            size_t ent = imp->tls_ie_slot;
-            size_t roff = ent * 24;
-            uint64_t slot_addr = got_addr + (ent * 8);
-
-            if (rela_dyn_buf != NULL && roff + 24 <= rela_dyn_sz) {
-                write_u64_endian(rela_dyn_buf + roff + 0, e, slot_addr);
-                write_u64_endian(rela_dyn_buf + roff + 8, e, (((uint64_t)dynidx) << 32) | R_X86_64_TPOFF64);
-                write_u64_endian(rela_dyn_buf + roff + 16, e, 0);
-            }
-        }
-        if (imp->need_tls_gd && got != NULL) {
-            size_t ent = imp->tls_gd_slot;
-            size_t roff0 = ent * 24;
-            size_t roff1 = (ent + 1) * 24;
-            uint64_t slot0 = got_addr + (ent * 8);
-            uint64_t slot1 = got_addr + ((ent + 1) * 8);
-
-            if (rela_dyn_buf != NULL && roff0 + 24 <= rela_dyn_sz) {
-                write_u64_endian(rela_dyn_buf + roff0 + 0, e, slot0);
-                write_u64_endian(rela_dyn_buf + roff0 + 8, e, (((uint64_t)dynidx) << 32) | R_X86_64_DTPMOD64);
-                write_u64_endian(rela_dyn_buf + roff0 + 16, e, 0);
-            }
-            if (rela_dyn_buf != NULL && roff1 + 24 <= rela_dyn_sz) {
-                write_u64_endian(rela_dyn_buf + roff1 + 0, e, slot1);
-                write_u64_endian(rela_dyn_buf + roff1 + 8, e, (((uint64_t)dynidx) << 32) | R_X86_64_DTPOFF64);
-                write_u64_endian(rela_dyn_buf + roff1 + 16, e, 0);
-            }
-        }
-    }
-    {
-        size_t si;
-        size_t extra_idx = 0;
-        for (si = 0; si < elf_section_count(out); ++si) {
-            elf_section_t *sec = elf_section_get(out, si);
-            size_t rc;
-            size_t ri;
-            if (sec == NULL || (elf_section_flags(sec) & SHF_ALLOC) == 0) {
-                continue;
-            }
-            rc = elf_section_reloc_count(sec);
-            for (ri = 0; ri < rc; ++ri) {
-                const elf_reloc_t *rel = elf_section_reloc_at(sec, ri);
-                const elf_symbol_t *sym;
-                uint32_t type;
-                uint32_t dynidx = 0;
-                uint64_t slot_addr;
-                int64_t addend = 0;
-                size_t roff;
-                uint64_t off;
-                int emit = 0;
-                int relative = 0;
-                uint64_t relative_addend = 0;
-
-                if (rel == NULL) {
-                    continue;
-                }
-                sym = elf_reloc_symbol(rel);
-                type = elf_reloc_type(rel);
-                if (!reloc_is_x64_runtime_data_ref(type)) {
-                    continue;
-                }
-                off = elf_reloc_offset(rel);
-                slot_addr = elf_section_addr(sec) + off;
-                if (elf_reloc_has_addend(rel)) {
-                    addend = elf_reloc_addend(rel);
-                } else {
-                    const uint8_t *sbuf;
-                    size_t ssz = 0;
-                    sbuf = (const uint8_t *)elf_section_data(sec, &ssz);
-                    if (sbuf == NULL || off + 8 > ssz) {
-                        continue;
-                    }
-                    addend = (int64_t)read_u64_endian(sbuf + off, e);
-                }
-                if (is_runtime_import_symbol(sym) && import_is_canonical(imports, sym)) {
-                    continue;
-                }
-                if (is_runtime_import_symbol(sym)) {
-                    if (dynsym_index_by_name(out, elf_symbol_name(sym), &dynidx) != 0) {
-                        continue;
-                    }
-                    emit = 1;
-                } else if (elf_type(out) == ET_DYN && symbol_needs_runtime_relative_reloc(sym)) {
-                    if (resolve_runtime_relative_addend(out, sym, addend, &relative_addend) != 0) {
-                        continue;
-                    }
-                    relative = 1;
-                    emit = 1;
-                }
-                if (!emit) {
-                    continue;
-                }
-                roff = (rela_dyn_base_count + extra_idx) * 24;
-                extra_idx++;
-                if (rela_dyn_buf == NULL || roff + 24 > rela_dyn_sz) {
-                    fprintf(stderr,
-                            "ld: internal error: no room in .rela.dyn for the %s relocation of %s at %s+0x%llx\n",
-                            elf_reloc_name_for_machine(EM_X86_64, type),
-                            sym != NULL && elf_symbol_name(sym) != NULL ? elf_symbol_name(sym) : "?",
-                            elf_section_name(sec) != NULL ? elf_section_name(sec) : "?",
-                            (unsigned long long)off);
-                    return -1;
-                }
-                write_u64_endian(rela_dyn_buf + roff + 0, e, slot_addr);
-                if (relative) {
-                    write_u64_endian(rela_dyn_buf + roff + 8, e, R_X86_64_RELATIVE);
-                } else {
-                    write_u64_endian(rela_dyn_buf + roff + 8, e, (((uint64_t)dynidx) << 32) | R_X86_64_64);
-                }
-                write_u64_endian(rela_dyn_buf + roff + 16, e, relative ? relative_addend : (uint64_t)addend);
-            }
-        }
-        /* And the copies: "fill this from the shared object's own". */
-        for (si = 0; si < imports->copy_count; ++si) {
-            const elf_symbol_t *sym = imports->copies[si];
-            size_t roff = (rela_dyn_base_count + extra_idx++) * 24;
-            uint64_t addr = 0;
-            uint32_t dynidx = 0;
-
-            if (rela_dyn_buf == NULL || roff + 24 > rela_dyn_sz || resolve_symbol_addr(out, sym, 0, &addr, NULL) != 0 ||
-                dynsym_index_by_name(out, elf_symbol_name(sym), &dynidx) != 0) {
-                fprintf(stderr, "ld: cannot make the copy relocation for %s\n", elf_symbol_name(sym));
-                goto fail_import;
-            }
-            write_u64_endian(rela_dyn_buf + roff + 0, e, addr);
-            write_u64_endian(rela_dyn_buf + roff + 8, e, (((uint64_t)dynidx) << 32) | R_X86_64_COPY);
-            write_u64_endian(rela_dyn_buf + roff + 16, e, 0);
-        }
-    }
-
-    if ((plt != NULL && elf_section_set_data(plt, plt_buf, plt_sz) != ELF_OK) ||
-        (gotplt != NULL && elf_section_set_data(gotplt, gotplt_buf, gotplt_sz) != ELF_OK) ||
-        (got != NULL && elf_section_set_data(got, got_buf, got_sz) != ELF_OK) ||
-        (rela_plt != NULL && elf_section_set_data(rela_plt, rela_plt_buf, rela_plt_sz) != ELF_OK) ||
-        (rela_dyn != NULL && elf_section_set_data(rela_dyn, rela_dyn_buf, rela_dyn_sz) != ELF_OK)) {
-        free(plt_buf);
-        free(gotplt_buf);
-        free(got_buf);
-        free(rela_plt_buf);
-        free(rela_dyn_buf);
-        return -1;
-    }
-
-    free(plt_buf);
-    free(gotplt_buf);
-    free(got_buf);
-    free(rela_plt_buf);
-    free(rela_dyn_buf);
-    return 0;
-
-fail_import:
-    free(plt_buf);
-    free(gotplt_buf);
-    free(got_buf);
-    free(rela_plt_buf);
-    free(rela_dyn_buf);
-    return -1;
-}
-
-int finalize_dynamic_imports_i386(elfobj_t *out, const dyn_import_vec_t *imports) {
+/*
+ * Once everything has an address: write the PLT, the head of its GOT and
+ * each entry's slot, and the records that tell the dynamic linker what to
+ * put where -- a slot for each imported function and address, the
+ * thread-local entries, each whole address stored in the output that it
+ * has to supply or correct, and the copies.  What is machine-dependent in
+ * that comes from `a`.
+ */
+int finalize_dynamic_imports(const ld_arch_t *a, elfobj_t *out, const dyn_import_vec_t *imports) {
     elf_section_t *plt;
     elf_section_t *gotplt;
     elf_section_t *got;
@@ -1648,13 +1013,13 @@ int finalize_dynamic_imports_i386(elfobj_t *out, const dyn_import_vec_t *imports
             rel_dyn_base_count += 2;
         }
     }
-    runtime_extra_count = count_runtime_data_import_relocs_i386(out, imports) + imports->copy_count;
-    required_rel_dyn_sz = (rel_dyn_base_count + runtime_extra_count) * 8;
+    runtime_extra_count = count_runtime_data_import_relocs(a, out, imports) + imports->copy_count;
+    required_rel_dyn_sz = (rel_dyn_base_count + runtime_extra_count) * a->rel_size;
     plt = elf_find_section(out, ".plt");
     gotplt = elf_find_section(out, ".got.plt");
     got = elf_find_section(out, ".got");
-    rel_plt = elf_find_section(out, ".rel.plt");
-    rel_dyn = elf_find_section(out, ".rel.dyn");
+    rel_plt = elf_find_section(out, a->rel_plt);
+    rel_dyn = elf_find_section(out, a->rel_dyn);
     dynamic = elf_find_section(out, ".dynamic");
     if (need_plt_count != 0 && (plt == NULL || gotplt == NULL)) {
         fprintf(stderr, "ld: internal error: %zu imported functions need the PLT and there is no %s\n",
@@ -1682,8 +1047,8 @@ int finalize_dynamic_imports_i386(elfobj_t *out, const dyn_import_vec_t *imports
      * larger now would be to write over whatever was placed after it. */
     if (rel_dyn_sz < required_rel_dyn_sz) {
         if (dynamic != NULL) {
-            fprintf(stderr, "ld: internal error: .rel.dyn needs %zu bytes and was laid out with %zu\n",
-                    required_rel_dyn_sz, rel_dyn_sz);
+            fprintf(stderr, "ld: internal error: %s needs %zu bytes and was laid out with %zu\n",
+                    a->rel_dyn, required_rel_dyn_sz, rel_dyn_sz);
             return -1;
         }
         /* Nothing dynamic about the output: there is no such section,
@@ -1733,37 +1098,13 @@ int finalize_dynamic_imports_i386(elfobj_t *out, const dyn_import_vec_t *imports
         }
     }
 
-    if (plt_buf != NULL && plt_sz >= 16) {
-        if (plt_pic_mode) {
-            /* PIC PLT0: pushl 4(%ebx); jmp *8(%ebx); nop*4 */
-            plt_buf[0] = 0xff;
-            plt_buf[1] = 0xb3;
-            write_u32_endian(plt_buf + 2, e, 4);
-            plt_buf[6] = 0xff;
-            plt_buf[7] = 0xa3;
-            write_u32_endian(plt_buf + 8, e, 8);
-            plt_buf[12] = 0x90;
-            plt_buf[13] = 0x90;
-            plt_buf[14] = 0x90;
-            plt_buf[15] = 0x90;
-        } else {
-            /* Non-PIC PLT0: pushl *GOT+4; jmp *GOT+8; nop*4 */
-            plt_buf[0] = 0xff;
-            plt_buf[1] = 0x35;
-            write_u32_endian(plt_buf + 2, e, (uint32_t)(gotplt_addr + 4));
-            plt_buf[6] = 0xff;
-            plt_buf[7] = 0x25;
-            write_u32_endian(plt_buf + 8, e, (uint32_t)(gotplt_addr + 8));
-            plt_buf[12] = 0x90;
-            plt_buf[13] = 0x90;
-            plt_buf[14] = 0x90;
-            plt_buf[15] = 0x90;
-        }
+    if (plt_buf != NULL && plt_sz >= LD_PLT_ENTRY_SIZE) {
+        a->write_plt0(plt_buf, e, plt_addr, gotplt_addr, plt_pic_mode);
     }
-    if (gotplt_buf != NULL && gotplt_sz >= 12) {
-        write_u32_endian(gotplt_buf + 0, e, (uint32_t)dynamic_addr);
-        write_u32_endian(gotplt_buf + 4, e, 0);
-        write_u32_endian(gotplt_buf + 8, e, 0);
+    /* The head of the PLT's GOT: where .dynamic is, and two words the
+     * dynamic linker fills in for itself. */
+    if (gotplt_buf != NULL && gotplt_sz >= LD_GOTPLT_RESERVED * a->word) {
+        ld_arch_put_word(a, gotplt_buf, e, dynamic_addr);
     }
 
     for (i = 0; i < imports->count; ++i) {
@@ -1778,76 +1119,54 @@ int finalize_dynamic_imports_i386(elfobj_t *out, const dyn_import_vec_t *imports
         }
         if (imp->need_plt) {
             size_t ent = imp->plt_slot;
-            size_t poff = 16 + (ent * 16);
-            size_t roff = ent * 8;
-            uint64_t ent_addr = plt_addr + 16 + (ent * 16);
-            uint64_t slot_addr = gotplt_addr + 12 + (ent * 4);
-            int32_t rel;
+            size_t poff = LD_PLT_ENTRY_SIZE * (1 + ent);
+            size_t roff = ent * a->rel_size;
+            size_t slot_off = (LD_GOTPLT_RESERVED + ent) * a->word;
+            uint64_t ent_addr = plt_addr + poff;
+            uint64_t slot_addr = gotplt_addr + slot_off;
 
-            if (poff + 16 <= plt_sz) {
-                if (plt_pic_mode) {
-                    plt_buf[poff + 0] = 0xff;
-                    plt_buf[poff + 1] = 0xa3;
-                    write_u32_endian(plt_buf + poff + 2, e, (uint32_t)(12 + (ent * 4)));
-                } else {
-                    plt_buf[poff + 0] = 0xff;
-                    plt_buf[poff + 1] = 0x25;
-                    write_u32_endian(plt_buf + poff + 2, e, (uint32_t)slot_addr);
-                }
-                /* What is pushed for the resolver is where this entry's
-                 * relocation is in .rel.plt, in bytes (the i386 psABI),
-                 * not which entry it is. */
-                plt_buf[poff + 6] = 0x68;
-                write_u32_endian(plt_buf + poff + 7, e, (uint32_t)roff);
-                plt_buf[poff + 11] = 0xe9;
-                rel = (int32_t)((int64_t)plt_addr - (int64_t)(ent_addr + 16));
-                write_u32_endian(plt_buf + poff + 12, e, (uint32_t)rel);
+            if (poff + LD_PLT_ENTRY_SIZE <= plt_sz) {
+                a->write_plt_entry(plt_buf + poff, e, ent_addr, slot_addr, plt_addr, ent, slot_off, roff,
+                                   plt_pic_mode);
             }
-            if ((12 + ((ent + 1) * 4)) <= gotplt_sz) {
-                write_u32_endian(gotplt_buf + 12 + (ent * 4), e, (uint32_t)(ent_addr + 6));
+            /* Until the function is first called its slot leads back
+             * into its own entry, past the jump, to the part that asks
+             * the dynamic linker to find it. */
+            if (slot_off + a->word <= gotplt_sz) {
+                ld_arch_put_word(a, gotplt_buf + slot_off, e, ent_addr + 6);
             }
-            if (rel_plt_buf != NULL && roff + 8 <= rel_plt_sz) {
-                write_u32_endian(rel_plt_buf + roff + 0, e, (uint32_t)slot_addr);
-                write_u32_endian(rel_plt_buf + roff + 4, e, (dynidx << 8) | R_386_JMP_SLOT);
+            if (rel_plt_buf != NULL && roff + a->rel_size <= rel_plt_sz) {
+                ld_arch_put_rel(a, rel_plt_buf + roff, e, slot_addr, a->r_jump_slot, dynidx, 0);
             }
         }
         if (imp->need_got && got != NULL) {
-            size_t ent = imp->got_slot;
-            size_t roff = ent * 8;
-            uint64_t slot_addr = got_addr + (ent * 4);
+            size_t roff = imp->got_slot * a->rel_size;
 
-            if (rel_dyn_buf != NULL && roff + 8 <= rel_dyn_sz) {
-                write_u32_endian(rel_dyn_buf + roff + 0, e, (uint32_t)slot_addr);
-                write_u32_endian(rel_dyn_buf + roff + 4, e, (dynidx << 8) | R_386_GLOB_DAT);
+            if (rel_dyn_buf != NULL && roff + a->rel_size <= rel_dyn_sz) {
+                ld_arch_put_rel(a, rel_dyn_buf + roff, e, got_addr + imp->got_slot * a->word, a->r_glob_dat,
+                                dynidx, 0);
             }
         }
         if (imp->need_tls_ie && got != NULL) {
-            size_t ent = imp->tls_ie_slot;
-            size_t roff = ent * 8;
-            uint64_t slot_addr = got_addr + (ent * 4);
+            size_t roff = imp->tls_ie_slot * a->rel_size;
 
-            if (rel_dyn_buf != NULL && roff + 8 <= rel_dyn_sz) {
-                write_u32_endian(rel_dyn_buf + roff + 0, e, (uint32_t)slot_addr);
-                /* The distance to add to the thread pointer, negative
-                 * (TPOFF32 is the one to subtract, for code that says
-                 * @gottpoff, which this slot is not for). */
-                write_u32_endian(rel_dyn_buf + roff + 4, e, (dynidx << 8) | R_386_TLS_TPOFF);
+            /* The distance to add to the thread pointer, negative. */
+            if (rel_dyn_buf != NULL && roff + a->rel_size <= rel_dyn_sz) {
+                ld_arch_put_rel(a, rel_dyn_buf + roff, e, got_addr + imp->tls_ie_slot * a->word, a->r_tpoff,
+                                dynidx, 0);
             }
         }
         if (imp->need_tls_gd && got != NULL) {
             size_t ent = imp->tls_gd_slot;
-            size_t roff0 = ent * 8;
-            size_t roff1 = (ent + 1) * 8;
-            uint64_t slot0 = got_addr + (ent * 4);
-            uint64_t slot1 = got_addr + ((ent + 1) * 4);
+            size_t roff0 = ent * a->rel_size;
+            size_t roff1 = (ent + 1) * a->rel_size;
 
-            if (rel_dyn_buf != NULL && roff0 + 8 <= rel_dyn_sz) {
-                write_u32_endian(rel_dyn_buf + roff0 + 0, e, (uint32_t)slot0);
-                write_u32_endian(rel_dyn_buf + roff0 + 4, e, (dynidx << 8) | R_386_TLS_DTPMOD32);
+            /* The module the variable is in, and where in it. */
+            if (rel_dyn_buf != NULL && roff0 + a->rel_size <= rel_dyn_sz) {
+                ld_arch_put_rel(a, rel_dyn_buf + roff0, e, got_addr + ent * a->word, a->r_dtpmod, dynidx, 0);
             }
-            if (rel_dyn_buf != NULL && roff1 + 8 <= rel_dyn_sz) {
-                write_u32_endian(rel_dyn_buf + roff1 + 0, e, (uint32_t)slot1);
-                write_u32_endian(rel_dyn_buf + roff1 + 4, e, (dynidx << 8) | R_386_TLS_DTPOFF32);
+            if (rel_dyn_buf != NULL && roff1 + a->rel_size <= rel_dyn_sz) {
+                ld_arch_put_rel(a, rel_dyn_buf + roff1, e, got_addr + (ent + 1) * a->word, a->r_dtpoff, dynidx, 0);
             }
         }
     }
@@ -1868,6 +1187,9 @@ int finalize_dynamic_imports_i386(elfobj_t *out, const dyn_import_vec_t *imports
                 uint32_t type;
                 uint32_t dynidx = 0;
                 uint64_t slot_addr;
+                uint64_t off;
+                int64_t addend = 0;
+                uint64_t relative_addend = 0;
                 size_t roff;
                 int emit = 0;
                 int relative = 0;
@@ -1877,8 +1199,27 @@ int finalize_dynamic_imports_i386(elfobj_t *out, const dyn_import_vec_t *imports
                 }
                 sym = elf_reloc_symbol(rel);
                 type = elf_reloc_type(rel);
-                if (!reloc_is_i386_runtime_data_ref(type)) {
+                if (type != a->r_abs) {
                     continue;
+                }
+                off = elf_reloc_offset(rel);
+                slot_addr = elf_section_addr(sec) + off;
+                /* Where the record carries the addend it has to be
+                 * found; where it does not, it is in the place already
+                 * and stays there. */
+                if (a->rela) {
+                    if (elf_reloc_has_addend(rel)) {
+                        addend = elf_reloc_addend(rel);
+                    } else {
+                        const uint8_t *sbuf;
+                        size_t ssz = 0;
+
+                        sbuf = (const uint8_t *)elf_section_data(sec, &ssz);
+                        if (sbuf == NULL || off + 8 > ssz) {
+                            continue;
+                        }
+                        addend = (int64_t)read_u64_endian(sbuf + off, e);
+                    }
                 }
                 if (is_runtime_import_symbol(sym) && import_is_canonical(imports, sym)) {
                     continue;
@@ -1889,46 +1230,44 @@ int finalize_dynamic_imports_i386(elfobj_t *out, const dyn_import_vec_t *imports
                     }
                     emit = 1;
                 } else if (elf_type(out) == ET_DYN && symbol_needs_runtime_relative_reloc(sym)) {
+                    if (a->rela && resolve_runtime_relative_addend(out, sym, addend, &relative_addend) != 0) {
+                        continue;
+                    }
                     relative = 1;
                     emit = 1;
                 }
                 if (!emit) {
                     continue;
                 }
-                slot_addr = elf_section_addr(sec) + elf_reloc_offset(rel);
-                roff = (rel_dyn_base_count + extra_idx) * 8;
+                roff = (rel_dyn_base_count + extra_idx) * a->rel_size;
                 extra_idx++;
-                if (rel_dyn_buf == NULL || roff + 8 > rel_dyn_sz) {
+                if (rel_dyn_buf == NULL || roff + a->rel_size > rel_dyn_sz) {
                     fprintf(stderr,
-                            "ld: internal error: no room in .rel.dyn for the %s relocation of %s at %s+0x%llx\n",
-                            elf_reloc_name_for_machine(EM_386, type),
+                            "ld: internal error: no room in %s for the %s relocation of %s at %s+0x%llx\n",
+                            a->rel_dyn, elf_reloc_name_for_machine(a->machine, type),
                             sym != NULL && elf_symbol_name(sym) != NULL ? elf_symbol_name(sym) : "?",
                             elf_section_name(sec) != NULL ? elf_section_name(sec) : "?",
-                            (unsigned long long)elf_reloc_offset(rel));
+                            (unsigned long long)off);
                     return -1;
                 }
-                write_u32_endian(rel_dyn_buf + roff + 0, e, (uint32_t)slot_addr);
-                if (relative) {
-                    write_u32_endian(rel_dyn_buf + roff + 4, e, R_386_RELATIVE);
-                } else {
-                    write_u32_endian(rel_dyn_buf + roff + 4, e, (dynidx << 8) | R_386_32);
-                }
+                ld_arch_put_rel(a, rel_dyn_buf + roff, e, slot_addr, relative ? a->r_relative : a->r_abs,
+                                relative ? 0 : dynidx, relative ? relative_addend : (uint64_t)addend);
             }
         }
         /* And the copies: "fill this from the shared object's own". */
         for (si = 0; si < imports->copy_count; ++si) {
             const elf_symbol_t *sym = imports->copies[si];
-            size_t roff = (rel_dyn_base_count + extra_idx++) * 8;
+            size_t roff = (rel_dyn_base_count + extra_idx++) * a->rel_size;
             uint64_t addr = 0;
             uint32_t dynidx = 0;
 
-            if (rel_dyn_buf == NULL || roff + 8 > rel_dyn_sz || resolve_symbol_addr(out, sym, 0, &addr, NULL) != 0 ||
+            if (rel_dyn_buf == NULL || roff + a->rel_size > rel_dyn_sz ||
+                resolve_symbol_addr(out, sym, 0, &addr, NULL) != 0 ||
                 dynsym_index_by_name(out, elf_symbol_name(sym), &dynidx) != 0) {
                 fprintf(stderr, "ld: cannot make the copy relocation for %s\n", elf_symbol_name(sym));
                 goto fail_import;
             }
-            write_u32_endian(rel_dyn_buf + roff + 0, e, (uint32_t)addr);
-            write_u32_endian(rel_dyn_buf + roff + 4, e, (dynidx << 8) | R_386_COPY);
+            ld_arch_put_rel(a, rel_dyn_buf + roff, e, addr, a->r_copy, dynidx, 0);
         }
     }
 
@@ -1972,7 +1311,7 @@ fail_import:
  * what the import plan decided, so it is for use after that is made.
  */
 const char *text_relocation_section(const ld_ctx_t *ctx, elfobj_t *out) {
-    uint16_t machine = elf_machine(out);
+    const ld_arch_t *arch = ld_arch_of_machine(elf_machine(out));
     size_t si, ri;
 
     if (elf_type(out) != ET_DYN && ctx->dso_inputs.count == 0) {
@@ -1989,8 +1328,7 @@ const char *text_relocation_section(const ld_ctx_t *ctx, elfobj_t *out) {
             const elf_symbol_t *sym = rel != NULL ? elf_reloc_symbol(rel) : NULL;
             uint32_t type = rel != NULL ? elf_reloc_type(rel) : 0;
 
-            if (rel == NULL ||
-                !(machine == EM_X86_64 ? reloc_is_x64_runtime_data_ref(type) : reloc_is_i386_runtime_data_ref(type))) {
+            if (rel == NULL || arch == NULL || type != arch->r_abs) {
                 continue;
             }
             if ((is_runtime_import_symbol(sym) && !import_is_canonical(&ctx->dyn_imports, sym)) ||
