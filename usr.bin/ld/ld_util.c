@@ -386,31 +386,31 @@ int parse_z_option(ld_ctx_t *ctx, const char *val) {
         return -1;
     }
     if (strcmp(val, "text") == 0) {
-        ctx->z_text_mode = 1;
+        ctx->opt.z_text_mode = 1;
         return 0;
     }
     if (strcmp(val, "notext") == 0) {
-        ctx->z_text_mode = 2;
+        ctx->opt.z_text_mode = 2;
         return 0;
     }
     if (strcmp(val, "execstack") == 0) {
-        ctx->z_execstack = 1;
+        ctx->opt.z_execstack = 1;
         return 0;
     }
     if (strcmp(val, "noexecstack") == 0) {
-        ctx->z_execstack = 0;
+        ctx->opt.z_execstack = 0;
         return 0;
     }
     if (strcmp(val, "relro") == 0) {
-        ctx->z_relro = 1;
+        ctx->opt.z_relro = 1;
         return 0;
     }
     if (strcmp(val, "norelro") == 0) {
-        ctx->z_relro = 0;
+        ctx->opt.z_relro = 0;
         return 0;
     }
     if (strcmp(val, "now") == 0 || strcmp(val, "lazy") == 0) {
-        ctx->z_now = val[0] == 'n';
+        ctx->opt.z_now = val[0] == 'n';
         return 0;
     }
     return -1;
@@ -462,7 +462,7 @@ int ld_warn(ld_ctx_t *ctx, const char *fmt, ...) {
     vfprintf(stderr, fmt, ap);
     va_end(ap);
     fputc('\n', stderr);
-    if (ctx->fatal_warnings) {
+    if (ctx->opt.fatal_warnings) {
         fprintf(stderr, "ld: error: warnings treated as errors (--fatal-warnings)\n");
         return -1;
     }

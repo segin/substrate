@@ -324,7 +324,7 @@ int ld_symtab_build(ld_ctx_t *ctx, const objvec_t *inputs, ld_symtab_t *t) {
                 ld_symtab_free(t);
                 return -1;
             }
-            if (e->common_src != NULL && ctx->warn_common &&
+            if (e->common_src != NULL && ctx->opt.warn_common &&
                 ld_warn(ctx, "common symbol `%s` overridden by strong definition in %s (common from %s)",
                         name, inputs->names[i], e->common_src) != 0) {
                 ld_symtab_free(t);

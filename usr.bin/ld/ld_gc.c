@@ -300,8 +300,8 @@ int gc_keep_input_section(const elf_section_t *section, void *user) {
 int gc_collect_input_sections(ld_ctx_t *ctx, const objvec_t *inputs, const ld_symtab_t *symtab) {
     gc_state_t st;
     size_t i, s, total = 0;
-    int export_all = (ctx->expect_type == ET_DYN && !ctx->pie) || ctx->export_dynamic;
-    const char *entry = ctx->entry_symbol != NULL && ctx->entry_symbol[0] != '\0' ? ctx->entry_symbol : "_start";
+    int export_all = (ctx->opt.expect_type == ET_DYN && !ctx->opt.pie) || ctx->opt.export_dynamic;
+    const char *entry = ctx->opt.entry_symbol != NULL && ctx->opt.entry_symbol[0] != '\0' ? ctx->opt.entry_symbol : "_start";
     int progress;
     int rc = -1;
 
@@ -330,8 +330,8 @@ int gc_collect_input_sections(ld_ctx_t *ctx, const objvec_t *inputs, const ld_sy
             goto out;
         }
     }
-    for (i = 0; i < ctx->force_undefined.count; ++i) {
-        const ld_sym_t *known = ld_symtab_find(symtab, ctx->force_undefined.items[i]);
+    for (i = 0; i < ctx->opt.force_undefined.count; ++i) {
+        const ld_sym_t *known = ld_symtab_find(symtab, ctx->opt.force_undefined.items[i]);
 
         if (known != NULL && known->def != NULL && gc_mark_symbol(&st, known->def_input, known->def) != 0) {
             goto out;
@@ -396,7 +396,7 @@ int gc_collect_input_sections(ld_ctx_t *ctx, const objvec_t *inputs, const ld_sy
                 continue;
             }
             ctx->gc_dead[ctx->gc_dead_count++] = sec;
-            if (ctx->gc_print_sections) {
+            if (ctx->opt.gc_print_sections) {
                 fprintf(stderr, "ld: gc-sections: removing %s in %s\n",
                         elf_section_name(sec) != NULL ? elf_section_name(sec) : "<unnamed>",
                         inputs->names[i] != NULL ? inputs->names[i] : "?");
@@ -553,19 +553,19 @@ static int icf_fold_section(elfobj_t *obj, size_t leader_idx, size_t dupe_idx) {
 int apply_identical_code_folding(elfobj_t *obj, const ld_ctx_t *ctx) {
     size_t i;
 
-    if (obj == NULL || ctx == NULL || ctx->icf_mode == 0) {
+    if (obj == NULL || ctx == NULL || ctx->opt.icf_mode == 0) {
         return 0;
     }
     for (i = 0; i < elf_section_count(obj); ++i) {
         elf_section_t *leader = elf_section_get(obj, i);
         size_t j;
 
-        if (!is_icf_candidate_section(leader, ctx->icf_mode)) {
+        if (!is_icf_candidate_section(leader, ctx->opt.icf_mode)) {
             continue;
         }
         for (j = i + 1; j < elf_section_count(obj);) {
             elf_section_t *dupe = elf_section_get(obj, j);
-            if (!is_icf_candidate_section(dupe, ctx->icf_mode) || !sections_icf_equal(leader, dupe)) {
+            if (!is_icf_candidate_section(dupe, ctx->opt.icf_mode) || !sections_icf_equal(leader, dupe)) {
                 j++;
                 continue;
             }

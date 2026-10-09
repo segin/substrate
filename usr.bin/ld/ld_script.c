@@ -163,7 +163,7 @@ static int script_lookup_symbol_value(const lds_eval_ctx_t *ec, const char *name
     if (ec == NULL || ec->ctx == NULL || name == NULL || out == NULL) {
         return -1;
     }
-    if (defsymvec_get(&ec->ctx->defsyms, name, out) == 0 ||
+    if (defsymvec_get(&ec->ctx->opt.defsyms, name, out) == 0 ||
         (ec->ctx->script != NULL && defsymvec_get(&ec->ctx->script->locals, name, out) == 0)) {
         return 0;
     }
@@ -188,7 +188,7 @@ static int script_symbol_defined(const lds_eval_ctx_t *ec, const char *name) {
     if (ec == NULL || ec->ctx == NULL || name == NULL) {
         return 0;
     }
-    if (defsymvec_find(&ec->ctx->defsyms, name) >= 0) {
+    if (defsymvec_find(&ec->ctx->opt.defsyms, name) >= 0) {
         return 1;
     }
     sym = ec->obj != NULL ? elf_find_symbol((elfobj_t *)ec->obj, name) : NULL;
@@ -1293,15 +1293,15 @@ int add_script_segments(elfobj_t *obj, const ld_ctx_t *ctx) {
             if (!have_phdr && elf_add_segment(obj, PT_PHDR, LD_PF_R, 8) == NULL) {
                 goto done;
             }
-            if (!have_interp && ctx->interp_path != NULL && ctx->interp_path[0] != '\0' &&
-                elf_add_interp_segment(obj, ctx->interp_path) == NULL) {
+            if (!have_interp && ctx->opt.interp_path != NULL && ctx->opt.interp_path[0] != '\0' &&
+                elf_add_interp_segment(obj, ctx->opt.interp_path) == NULL) {
                 goto done;
             }
             for (k = 0; k < phdrs->count; ++k) {
                 const lds_phdr_entry_t *ph = &phdrs->items[k];
 
-                if (ph->type == PT_INTERP && ctx->interp_path != NULL && ctx->interp_path[0] != '\0') {
-                    segs[k] = elf_add_interp_segment(obj, ctx->interp_path);
+                if (ph->type == PT_INTERP && ctx->opt.interp_path != NULL && ctx->opt.interp_path[0] != '\0') {
+                    segs[k] = elf_add_interp_segment(obj, ctx->opt.interp_path);
                 } else {
                     segs[k] = elf_add_segment(obj, ph->type,
                                               ph->has_flags || ph->type != PT_LOAD ? ph->flags : (flags[k] | LD_PF_R),
@@ -1734,14 +1734,14 @@ static int lp_include(lds_parser_t *p, lds_where_t where, lds_stmtvec_t *v) {
     if (path != NULL && access(path, R_OK) != 0) {
         free(path);
         path = access(t->text, R_OK) == 0 ? xstrdup(t->text) : NULL;
-        for (i = 0; path == NULL && p->ctx != NULL && i < p->ctx->lib_paths.count; ++i) {
-            size_t n = strlen(p->ctx->lib_paths.items[i]) + strlen(t->text) + 2;
+        for (i = 0; path == NULL && p->ctx != NULL && i < p->ctx->opt.lib_paths.count; ++i) {
+            size_t n = strlen(p->ctx->opt.lib_paths.items[i]) + strlen(t->text) + 2;
             char *cand = (char *)malloc(n);
 
             if (cand == NULL) {
                 return -1;
             }
-            snprintf(cand, n, "%s/%s", p->ctx->lib_paths.items[i], t->text);
+            snprintf(cand, n, "%s/%s", p->ctx->opt.lib_paths.items[i], t->text);
             if (access(cand, R_OK) == 0) {
                 path = cand;
             } else {
@@ -2603,14 +2603,14 @@ static int script_declare_in(ld_ctx_t *ctx, elfobj_t *out, lds_stmtvec_t *v) {
             const elf_symbol_t *sym = elf_find_symbol(out, st->at.text);
 
             st->active = sym != NULL && elf_symbol_shndx(sym) == SHN_UNDEF &&
-                         defsymvec_find(&ctx->defsyms, st->at.text) < 0;
+                         defsymvec_find(&ctx->opt.defsyms, st->at.text) < 0;
         }
-        if (st->active && defsymvec_find(&ctx->defsyms, st->at.text) < 0 &&
-            defsymvec_set(&ctx->defsyms, st->at.text, 0) != 0) {
+        if (st->active && defsymvec_find(&ctx->opt.defsyms, st->at.text) < 0 &&
+            defsymvec_set(&ctx->opt.defsyms, st->at.text, 0) != 0) {
             return -1;
         }
         if (!st->active && elf_find_symbol(out, st->at.text) == NULL &&
-            defsymvec_find(&ctx->defsyms, st->at.text) < 0 &&
+            defsymvec_find(&ctx->opt.defsyms, st->at.text) < 0 &&
             defsymvec_set(&ctx->script->locals, st->at.text, 0) != 0) {
             return -1;
         }
@@ -2807,7 +2807,7 @@ static int lw_assign(lds_walk_t *w, const lds_stmt_t *st, int have_dot, uint64_t
     if (st->op != '=') {
         if (is_dot) {
             cur = *dot;
-        } else if (defsymvec_get(&w->ctx->defsyms, st->at.text, &cur) != 0) {
+        } else if (defsymvec_get(&w->ctx->opt.defsyms, st->at.text, &cur) != 0) {
             lds_report_error(NULL, &st->at, "the symbol has no value to change");
             return -1;
         }
@@ -2838,7 +2838,7 @@ static int lw_assign(lds_walk_t *w, const lds_stmt_t *st, int have_dot, uint64_t
         *dot = v;
         return 0;
     }
-    if (defsymvec_set(&w->ctx->defsyms, st->at.text, v) != 0) {
+    if (defsymvec_set(&w->ctx->opt.defsyms, st->at.text, v) != 0) {
         return -1;
     }
     return w->final ? lw_define(w, st, v, hint, hint_end) : 0;

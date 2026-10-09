@@ -86,17 +86,17 @@ static int discover_default_plugin(ld_ctx_t *ctx) {
     const char *envp;
     int rc;
 
-    if (ctx == NULL || (ctx->plugin_path != NULL && ctx->plugin_path[0] != '\0')) {
+    if (ctx == NULL || (ctx->opt.plugin_path != NULL && ctx->opt.plugin_path[0] != '\0')) {
         return 0;
     }
     envp = getenv("SUBSTRATE_LD_PLUGIN");
     if (envp != NULL && envp[0] != '\0' && access(envp, R_OK | X_OK) == 0) {
-        ctx->plugin_path = envp;
+        ctx->opt.plugin_path = envp;
         return 0;
     }
     envp = getenv("LD_PLUGIN");
     if (envp != NULL && envp[0] != '\0' && access(envp, R_OK | X_OK) == 0) {
-        ctx->plugin_path = envp;
+        ctx->opt.plugin_path = envp;
         return 0;
     }
 
@@ -104,7 +104,7 @@ static int discover_default_plugin(ld_ctx_t *ctx) {
         char *gcc_args[] = {"gcc", "-print-file-name=liblto_plugin.so", NULL};
         rc = run_cmd_first_line(gcc_args, discovered, sizeof(discovered));
         if (rc == 0 && discovered[0] == '/' && access(discovered, R_OK | X_OK) == 0) {
-            ctx->plugin_path = discovered;
+            ctx->opt.plugin_path = discovered;
             return 0;
         }
     }
@@ -113,7 +113,7 @@ static int discover_default_plugin(ld_ctx_t *ctx) {
         char *clang_args[] = {"clang", "-print-file-name=LLVMgold.so", NULL};
         rc = run_cmd_first_line(clang_args, discovered, sizeof(discovered));
         if (rc == 0 && discovered[0] == '/' && access(discovered, R_OK | X_OK) == 0) {
-            ctx->plugin_path = discovered;
+            ctx->opt.plugin_path = discovered;
             return 0;
         }
     }
@@ -136,18 +136,18 @@ int plugin_discover_and_handshake(ld_ctx_t *ctx) {
      * set aside.  It is only wanted if an input turns out to hold
      * bytecode in place of code, and that input is refused when met.
      */
-    if (ctx->plugin_path != NULL && strstr(ctx->plugin_path, ".so") != NULL) {
-        ctx->plugin_path = NULL;
+    if (ctx->opt.plugin_path != NULL && strstr(ctx->opt.plugin_path, ".so") != NULL) {
+        ctx->opt.plugin_path = NULL;
         ctx->plugin_unusable = 1;
         ctx->plugin_checked = 1;
         return 0;
     }
-    if (ctx->plugin_path == NULL || ctx->plugin_path[0] == '\0') {
-        if (ctx->plugin_opt_count != 0) {
+    if (ctx->opt.plugin_path == NULL || ctx->opt.plugin_path[0] == '\0') {
+        if (ctx->opt.plugin_opt_count != 0) {
             if (discover_default_plugin(ctx) != 0) {
                 return -1;
             }
-            if (ctx->plugin_path == NULL || ctx->plugin_path[0] == '\0') {
+            if (ctx->opt.plugin_path == NULL || ctx->opt.plugin_path[0] == '\0') {
                 fprintf(stderr, "ld: -plugin-opt requires -plugin or a discoverable plugin\n");
                 return -1;
             }
@@ -155,8 +155,8 @@ int plugin_discover_and_handshake(ld_ctx_t *ctx) {
             return 0;
         }
     }
-    if (access(ctx->plugin_path, R_OK | X_OK) != 0) {
-        fprintf(stderr, "ld: plugin not executable: %s\n", ctx->plugin_path);
+    if (access(ctx->opt.plugin_path, R_OK | X_OK) != 0) {
+        fprintf(stderr, "ld: plugin not executable: %s\n", ctx->opt.plugin_path);
         return -1;
     }
 
@@ -173,8 +173,8 @@ int plugin_discover_and_handshake(ld_ctx_t *ctx) {
             close(devnull);
         }
 
-        char *args[] = {(char *)ctx->plugin_path, "--version", NULL};
-        execv(ctx->plugin_path, args);
+        char *args[] = {(char *)ctx->opt.plugin_path, "--version", NULL};
+        execv(ctx->opt.plugin_path, args);
         _exit(127);
     }
 
@@ -187,7 +187,7 @@ int plugin_discover_and_handshake(ld_ctx_t *ctx) {
     rc = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
 
     if (rc != 0) {
-        fprintf(stderr, "ld: plugin handshake failed for %s\n", ctx->plugin_path);
+        fprintf(stderr, "ld: plugin handshake failed for %s\n", ctx->opt.plugin_path);
         return -1;
     }
 
@@ -209,26 +209,26 @@ int plugin_materialize_object(const ld_ctx_t *ctx, const char *in_path, char *ou
         return -1;
     }
     out_path[0] = '\0';
-    if (ctx == NULL || ctx->plugin_path == NULL || ctx->plugin_path[0] == '\0' || in_path == NULL) {
+    if (ctx == NULL || ctx->opt.plugin_path == NULL || ctx->opt.plugin_path[0] == '\0' || in_path == NULL) {
         return 0;
     }
 
     memset(plugin_opt_args, 0, sizeof(plugin_opt_args));
     argc = 0;
-    argv[argc++] = (char *)ctx->plugin_path;
+    argv[argc++] = (char *)ctx->opt.plugin_path;
     argv[argc++] = "--materialize";
     argv[argc++] = (char *)in_path;
 
-    for (i = 0; i < ctx->plugin_opt_count; ++i) {
+    for (i = 0; i < ctx->opt.plugin_opt_count; ++i) {
         if (argc + 1 >= sizeof(argv) / sizeof(argv[0])) {
             goto fail;
         }
-        size_t len = strlen("--plugin-opt=") + strlen(ctx->plugin_opts[i]) + 1;
+        size_t len = strlen("--plugin-opt=") + strlen(ctx->opt.plugin_opts[i]) + 1;
         plugin_opt_args[i] = (char *)malloc(len);
         if (plugin_opt_args[i] == NULL) {
             goto fail;
         }
-        snprintf(plugin_opt_args[i], len, "--plugin-opt=%s", ctx->plugin_opts[i]);
+        snprintf(plugin_opt_args[i], len, "--plugin-opt=%s", ctx->opt.plugin_opts[i]);
         argv[argc++] = plugin_opt_args[i];
     }
     argv[argc] = NULL;
@@ -259,7 +259,7 @@ int plugin_materialize_object(const ld_ctx_t *ctx, const char *in_path, char *ou
             }
         }
 
-        execv(ctx->plugin_path, argv);
+        execv(ctx->opt.plugin_path, argv);
         _exit(127);
     }
 
@@ -287,7 +287,7 @@ int plugin_materialize_object(const ld_ctx_t *ctx, const char *in_path, char *ou
         }
     }
 
-    for (i = 0; i < ctx->plugin_opt_count; ++i) {
+    for (i = 0; i < ctx->opt.plugin_opt_count; ++i) {
         free(plugin_opt_args[i]);
     }
 
@@ -299,7 +299,7 @@ int plugin_materialize_object(const ld_ctx_t *ctx, const char *in_path, char *ou
     return out_path[0] != '\0' ? 1 : 0;
 
 fail:
-    for (i = 0; i < ctx->plugin_opt_count; ++i) {
+    for (i = 0; i < ctx->opt.plugin_opt_count; ++i) {
         free(plugin_opt_args[i]);
     }
     out_path[0] = '\0';

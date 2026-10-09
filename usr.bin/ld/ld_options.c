@@ -80,14 +80,14 @@ static int opt_help(ld_ctx_t *ctx, const ld_opt_t *o, const char *as, const char
     (void)o;
     (void)as;
     (void)val;
-    ld_usage(ctx->prog);
+    ld_usage(ctx->opt.prog);
     return LD_OPT_DONE;
 }
 
 static int opt_compat(ld_ctx_t *ctx, const ld_opt_t *o, const char *as, const char *val) {
     (void)o;
     (void)as;
-    if (parse_compat_mode(val, &ctx->compat_mode) != 0) {
+    if (parse_compat_mode(val, &ctx->opt.compat_mode) != 0) {
         fprintf(stderr, "ld: unsupported compatibility mode '%s' (expected gnu or lld)\n", val);
         return LD_OPT_USAGE;
     }
@@ -112,12 +112,12 @@ static int opt_mode(ld_ctx_t *ctx, const ld_opt_t *o, const char *as, const char
 static int opt_plugin_opt(ld_ctx_t *ctx, const ld_opt_t *o, const char *as, const char *val) {
     (void)o;
     (void)as;
-    if (ctx->plugin_opt_count >= sizeof(ctx->plugin_opts) / sizeof(ctx->plugin_opts[0])) {
+    if (ctx->opt.plugin_opt_count >= sizeof(ctx->opt.plugin_opts) / sizeof(ctx->opt.plugin_opts[0])) {
         fprintf(stderr, "ld: too many -plugin-opt arguments (max %zu)\n",
-                sizeof(ctx->plugin_opts) / sizeof(ctx->plugin_opts[0]));
+                sizeof(ctx->opt.plugin_opts) / sizeof(ctx->opt.plugin_opts[0]));
         return LD_OPT_USAGE;
     }
-    ctx->plugin_opts[ctx->plugin_opt_count++] = val;
+    ctx->opt.plugin_opts[ctx->opt.plugin_opt_count++] = val;
     return 0;
 }
 
@@ -125,7 +125,7 @@ static int opt_relocatable(ld_ctx_t *ctx, const ld_opt_t *o, const char *as, con
     (void)o;
     (void)as;
     (void)val;
-    ctx->expect_type = ET_REL;
+    ctx->opt.expect_type = ET_REL;
     return 0;
 }
 
@@ -135,10 +135,10 @@ static int opt_relocatable(ld_ctx_t *ctx, const ld_opt_t *o, const char *as, con
 static int opt_shared(ld_ctx_t *ctx, const ld_opt_t *o, const char *as, const char *val) {
     (void)as;
     (void)val;
-    ctx->expect_type = ET_DYN;
-    ctx->pie = o->n;
-    if (!ctx->explicit_lib_mode) {
-        ctx->current_lib_mode = LD_LIBMODE_DYNAMIC;
+    ctx->opt.expect_type = ET_DYN;
+    ctx->opt.pie = o->n;
+    if (!ctx->opt.explicit_lib_mode) {
+        ctx->opt.current_lib_mode = LD_LIBMODE_DYNAMIC;
     }
     return 0;
 }
@@ -147,9 +147,9 @@ static int opt_no_pie(ld_ctx_t *ctx, const ld_opt_t *o, const char *as, const ch
     (void)o;
     (void)as;
     (void)val;
-    if (ctx->pie) {
-        ctx->pie = 0;
-        ctx->expect_type = ET_EXEC;
+    if (ctx->opt.pie) {
+        ctx->opt.pie = 0;
+        ctx->opt.expect_type = ET_EXEC;
     }
     return 0;
 }
@@ -160,8 +160,8 @@ static int opt_no_pie(ld_ctx_t *ctx, const ld_opt_t *o, const char *as, const ch
 static int opt_lib_mode(ld_ctx_t *ctx, const ld_opt_t *o, const char *as, const char *val) {
     (void)as;
     (void)val;
-    ctx->current_lib_mode = (ld_lib_mode_t)o->n;
-    ctx->explicit_lib_mode = 1;
+    ctx->opt.current_lib_mode = (ld_lib_mode_t)o->n;
+    ctx->opt.explicit_lib_mode = 1;
     return 0;
 }
 
@@ -169,11 +169,11 @@ static int opt_icf(ld_ctx_t *ctx, const ld_opt_t *o, const char *as, const char 
     (void)o;
     (void)as;
     if (strcmp(val, "safe") == 0) {
-        ctx->icf_mode = 1;
+        ctx->opt.icf_mode = 1;
     } else if (strcmp(val, "all") == 0) {
-        ctx->icf_mode = 2;
+        ctx->opt.icf_mode = 2;
     } else if (strcmp(val, "none") == 0) {
-        ctx->icf_mode = 0;
+        ctx->opt.icf_mode = 0;
     } else {
         fprintf(stderr, "ld: unsupported --icf mode '%s' (supported: safe, all, none)\n", val);
         return LD_OPT_USAGE;
@@ -185,16 +185,16 @@ static int opt_icf(ld_ctx_t *ctx, const ld_opt_t *o, const char *as, const char 
  * which), with the modes that are in force where it stands. */
 static int opt_input(ld_ctx_t *ctx, const ld_opt_t *o, const char *as, const char *val) {
     (void)as;
-    return inputvec_push(&ctx->inputs, (ld_input_kind_t)o->n, ctx->current_lib_mode,
-                         ctx->current_whole_archive, ctx->current_as_needed, val) != 0 ? 1 : 0;
+    return inputvec_push(&ctx->opt.inputs, (ld_input_kind_t)o->n, ctx->opt.current_lib_mode,
+                         ctx->opt.current_whole_archive, ctx->opt.current_as_needed, val) != 0 ? 1 : 0;
 }
 
 /* --allow-undefined, --no-undefined (n). */
 static int opt_undefined_policy(ld_ctx_t *ctx, const ld_opt_t *o, const char *as, const char *val) {
     (void)as;
     (void)val;
-    ctx->allow_undefined = o->n;
-    ctx->explicit_unresolved_policy = 1;
+    ctx->opt.allow_undefined = o->n;
+    ctx->opt.explicit_unresolved_policy = 1;
     return 0;
 }
 
@@ -202,9 +202,9 @@ static int opt_unresolved_symbols(ld_ctx_t *ctx, const ld_opt_t *o, const char *
     (void)o;
     (void)as;
     if (strcmp(val, "ignore-all") == 0) {
-        ctx->allow_undefined = 1;
+        ctx->opt.allow_undefined = 1;
     } else if (strcmp(val, "report-all") == 0) {
-        ctx->allow_undefined = 0;
+        ctx->opt.allow_undefined = 0;
     } else {
         fprintf(stderr,
                 "ld: unsupported --unresolved-symbols policy '%s' "
@@ -212,7 +212,7 @@ static int opt_unresolved_symbols(ld_ctx_t *ctx, const ld_opt_t *o, const char *
                 val);
         return LD_OPT_USAGE;
     }
-    ctx->explicit_unresolved_policy = 1;
+    ctx->opt.explicit_unresolved_policy = 1;
     return 0;
 }
 
@@ -235,7 +235,7 @@ static int opt_defsym(ld_ctx_t *ctx, const ld_opt_t *o, const char *as, const ch
     } else {
         *eq++ = '\0';
         if (name[0] == '\0' || parse_u64_auto(eq, &value) != 0 ||
-            defsymvec_push(&ctx->defsyms, name, value) != 0) {
+            defsymvec_push(&ctx->opt.defsyms, name, value) != 0) {
             fprintf(stderr, "ld: invalid --defsym `%s`\n", val);
             rc = LD_OPT_USAGE;
         }
@@ -247,7 +247,7 @@ static int opt_defsym(ld_ctx_t *ctx, const ld_opt_t *o, const char *as, const ch
 static int opt_hash_style(ld_ctx_t *ctx, const ld_opt_t *o, const char *as, const char *val) {
     (void)o;
     (void)as;
-    if (parse_hash_style_option(val, &ctx->hash_style) != 0) {
+    if (parse_hash_style_option(val, &ctx->opt.hash_style) != 0) {
         fprintf(stderr, "ld: unsupported --hash-style value '%s' (expected sysv|gnu|both)\n", val);
         return LD_OPT_USAGE;
     }
@@ -257,12 +257,12 @@ static int opt_hash_style(ld_ctx_t *ctx, const ld_opt_t *o, const char *as, cons
 static int opt_image_base(ld_ctx_t *ctx, const ld_opt_t *o, const char *as, const char *val) {
     (void)o;
     (void)as;
-    if (parse_u64_auto(val, &ctx->image_base) != 0 || (ctx->image_base & 0xfffu) != 0) {
+    if (parse_u64_auto(val, &ctx->opt.image_base) != 0 || (ctx->opt.image_base & 0xfffu) != 0) {
         fprintf(stderr, "ld: -Ttext-segment needs an address that is a multiple of the page size, not '%s'\n",
                 val);
         return LD_OPT_USAGE;
     }
-    ctx->have_image_base = 1;
+    ctx->opt.have_image_base = 1;
     return 0;
 }
 
@@ -289,7 +289,7 @@ static int opt_script(ld_ctx_t *ctx, const ld_opt_t *o, const char *as, const ch
         fprintf(stderr, "ld: %s needs a value\n", as);
         return LD_OPT_USAGE;
     }
-    ctx->script_path = val;
+    ctx->opt.script_path = val;
     return 0;
 }
 
@@ -315,7 +315,7 @@ static int opt_z(ld_ctx_t *ctx, const ld_opt_t *o, const char *as, const char *v
     return 0;
 }
 
-#define F(member) offsetof(ld_ctx_t, member)
+#define F(member) offsetof(ld_ctx_t, opt.member)
 
 /*
  * The options.  A word is matched whole, so the order of the rows does
@@ -480,7 +480,7 @@ int ld_parse_options(ld_ctx_t *ctx, int argc, char **argv) {
         }
 
         if (a[0] == '-') {
-            if (ctx->compat_mode == LD_COMPAT_LLD) {
+            if (ctx->opt.compat_mode == LD_COMPAT_LLD) {
                 fprintf(stderr, "ld: error: unsupported option in lld mode: %s\n", a);
                 return LD_OPT_USAGE;
             }
@@ -500,8 +500,8 @@ int ld_parse_options(ld_ctx_t *ctx, int argc, char **argv) {
             (void)ld_warn(ctx, "ignoring empty/bare-slash input argv slot (probable upstream cc bug)");
             continue;
         }
-        if (inputvec_push(&ctx->inputs, LD_INPUT_FILE, ctx->current_lib_mode,
-                          ctx->current_whole_archive, ctx->current_as_needed, a) != 0) {
+        if (inputvec_push(&ctx->opt.inputs, LD_INPUT_FILE, ctx->opt.current_lib_mode,
+                          ctx->opt.current_whole_archive, ctx->opt.current_as_needed, a) != 0) {
             return 1;
         }
     }

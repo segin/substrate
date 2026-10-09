@@ -528,8 +528,14 @@ static int symstate_note_dso_symbol(symstate_t *state, const char *sym_name, uin
     return 0;
 }
 
-int shared_object_matches_unresolved(const char *path, ld_ctx_t *ctx, const symstate_t *state,
-                                            int *out_match) {
+/*
+ * Whether the shared object at `path` defines any of the names `state`
+ * still wants.  `settle` is the link itself while its inputs are being
+ * chosen, when the first input of a machine says which machine the link
+ * is for; afterwards it is NULL, and the link is only read.
+ */
+static int dso_defines_unresolved(const char *path, const ld_ctx_t *ctx, ld_ctx_t *settle,
+                                  const symstate_t *state, int *out_match) {
     elfobj_t *obj = NULL;
     verdef_table_t defs;
     size_t i;
@@ -541,7 +547,9 @@ int shared_object_matches_unresolved(const char *path, ld_ctx_t *ctx, const syms
     if (elf_open(path, &obj) != ELF_OK) {
         return -1;
     }
-    maybe_autoswitch_mode(ctx, obj, 0, path);
+    if (settle != NULL) {
+        maybe_autoswitch_mode(settle, obj, 0, path);
+    }
     if (!obj_matches_mode(obj, ctx->mode) || elf_type(obj) != ET_DYN) {
         elf_close(obj);
         return 0;
@@ -583,6 +591,11 @@ int shared_object_matches_unresolved(const char *path, ld_ctx_t *ctx, const syms
     verdef_table_free(&defs);
     elf_close(obj);
     return 0;
+}
+
+int shared_object_matches_unresolved(const char *path, ld_ctx_t *ctx, const symstate_t *state,
+                                     int *out_match) {
+    return dso_defines_unresolved(path, ctx, ctx, state, out_match);
 }
 
 int register_dso_provider(ld_ctx_t *ctx, const char *path, symstate_t *state) {
@@ -642,7 +655,7 @@ int register_dso_provider(ld_ctx_t *ctx, const char *path, symstate_t *state) {
         elf_close(obj);
         return -1;
     }
-    if (ctx->trace_inputs) {
+    if (ctx->opt.trace_inputs) {
         fprintf(stderr, "ld: trace: dso %s\n", path);
     }
     elf_close(obj);
@@ -654,7 +667,7 @@ int register_dso_provider(ld_ctx_t *ctx, const char *path, symstate_t *state) {
      * taken, with what it needs in turn, if it defines something still
      * wanted.
      */
-    if (ctx->copy_dt_needed) {
+    if (ctx->opt.copy_dt_needed) {
         strvec_t needed;
         int rc = 0;
 
@@ -683,7 +696,7 @@ int register_dso_provider(ld_ctx_t *ctx, const char *path, symstate_t *state) {
     return 0;
 }
 
-int unresolved_symbol_has_dso_provider(ld_ctx_t *ctx, const char *name, int *out_has_provider) {
+int unresolved_symbol_has_dso_provider(const ld_ctx_t *ctx, const char *name, int *out_has_provider) {
     symstate_t probe;
     size_t i;
 
@@ -704,7 +717,6 @@ int unresolved_symbol_has_dso_provider(ld_ctx_t *ctx, const char *name, int *out
         if (elf_open(ctx->dso_inputs.items[i], &obj) != ELF_OK) {
             continue;
         }
-        maybe_autoswitch_mode(ctx, obj, 0, ctx->dso_inputs.items[i]);
         if (!obj_matches_mode(obj, ctx->mode) || elf_type(obj) != ET_DYN) {
             elf_close(obj);
             continue;
@@ -736,7 +748,7 @@ int unresolved_symbol_has_dso_provider(ld_ctx_t *ctx, const char *name, int *out
     for (i = 0; i < ctx->dso_inputs.count; ++i) {
         int matched = 0;
 
-        if (shared_object_matches_unresolved(ctx->dso_inputs.items[i], ctx, &probe, &matched) != 0) {
+        if (dso_defines_unresolved(ctx->dso_inputs.items[i], ctx, NULL, &probe, &matched) != 0) {
             symstate_free(&probe);
             return -1;
         }
@@ -810,7 +822,7 @@ static int dso_has_versioned_export(const ld_ctx_t *ctx, const char *path, const
     atat_name = make_versioned_symbol(base, base_len, "@@", ver_name);
     if (at_name == NULL || atat_name == NULL ||
         symset_add(&state.unresolved, at_name) != 0 || symset_add(&state.unresolved, atat_name) != 0 ||
-        shared_object_matches_unresolved(path, (ld_ctx_t *)ctx, &state, &matched) != 0) {
+        dso_defines_unresolved(path, ctx, NULL, &state, &matched) != 0) {
         free(at_name);
         free(atat_name);
         symstate_free(&state);
@@ -920,7 +932,6 @@ static int dso_find_default_version_export(const ld_ctx_t *ctx, const char *path
     if (elf_open(path, &obj) != ELF_OK) {
         return 0;
     }
-    maybe_autoswitch_mode((ld_ctx_t *)ctx, obj, 0, path);
     if (!obj_matches_mode(obj, ctx->mode) || elf_type(obj) != ET_DYN) {
         elf_close(obj);
         return 0;
@@ -1340,9 +1351,9 @@ int plan_symbol_version_sections(ld_ctx_t *ctx, elfobj_t *out, uint8_t **dynstr_
     }
     if (plan.def_count != 0) {
         elf_section_t *sec = elf_find_section(out, ".gnu.version_d");
-        const char *slash = ctx->out_path != NULL ? strrchr(ctx->out_path, '/') : NULL;
-        const char *base_name = ctx->soname != NULL ? ctx->soname
-                              : slash != NULL ? slash + 1 : ctx->out_path != NULL ? ctx->out_path : "";
+        const char *slash = ctx->opt.out_path != NULL ? strrchr(ctx->opt.out_path, '/') : NULL;
+        const char *base_name = ctx->opt.soname != NULL ? ctx->opt.soname
+                              : slash != NULL ? slash + 1 : ctx->opt.out_path != NULL ? ctx->opt.out_path : "";
         uint32_t base_off = 0;
 
         if (dynstr_append_cstr(dynstr_buf, dynstr_len, dynstr_cap, base_name, &base_off) != 0 ||

@@ -130,7 +130,7 @@ void maybe_autoswitch_mode(ld_ctx_t *ctx, const elfobj_t *obj, size_t loaded_cou
         return;
     }
     ctx->mode = detected;
-    if (ctx->trace_inputs) {
+    if (ctx->opt.trace_inputs) {
         fprintf(stderr, "ld: trace: auto-selected mode %s from %s\n",
                 canonical_mode_name(ctx->mode), path != NULL ? path : "<input>");
     }
@@ -625,7 +625,7 @@ static int load_object_input(const char *path, ld_ctx_t *ctx, objvec_t *objs, sy
         elf_close(obj);
         return -1;
     }
-    if (object_has_lto_sections(obj) && ctx != NULL && ctx->plugin_path != NULL && ctx->plugin_path[0] != '\0') {
+    if (object_has_lto_sections(obj) && ctx != NULL && ctx->opt.plugin_path != NULL && ctx->opt.plugin_path[0] != '\0') {
         mat_rc = plugin_materialize_object(ctx, path, mat_path, sizeof(mat_path));
         if (mat_rc < 0) {
             if (!quiet) {
@@ -658,7 +658,7 @@ static int load_object_input(const char *path, ld_ctx_t *ctx, objvec_t *objs, sy
     }
     if (elf_type(obj) != ET_REL) {
         if (elf_type(obj) == ET_DYN && ctx != NULL &&
-            (ctx->expect_type == ET_EXEC || ctx->expect_type == ET_DYN)) {
+            (ctx->opt.expect_type == ET_EXEC || ctx->opt.expect_type == ET_DYN)) {
             elf_close(obj);
             return register_dso_provider(ctx, path, state);
         }
@@ -747,8 +747,8 @@ static char *resolve_library_path_suffix_ex(const ld_ctx_t *ctx, const char *nam
     size_t i;
 
     snprintf(leaf, sizeof(leaf), "lib%s%s", name, suffix != NULL ? suffix : "");
-    for (i = 0; i < ctx->lib_paths.count; ++i) {
-        char *cand = path_join(ctx->lib_paths.items[i], leaf);
+    for (i = 0; i < ctx->opt.lib_paths.count; ++i) {
+        char *cand = path_join(ctx->opt.lib_paths.items[i], leaf);
         if (cand != NULL && lib_candidate_suits(ctx, cand)) {
             return cand;
         }
@@ -761,7 +761,7 @@ static char *resolve_library_path_suffix_ex(const ld_ctx_t *ctx, const char *nam
             int earlier;
 
             snprintf(aleaf, sizeof(aleaf), "lib%s.a", name);
-            cand = path_join(ctx->lib_paths.items[i], aleaf);
+            cand = path_join(ctx->opt.lib_paths.items[i], aleaf);
             earlier = cand != NULL && lib_candidate_suits(ctx, cand);
             free(cand);
             if (earlier) {
@@ -816,8 +816,8 @@ char *resolve_library_path_exact(const ld_ctx_t *ctx, const char *leaf) {
     if (strchr(leaf, '/') != NULL) {
         return access(leaf, R_OK) == 0 ? xstrdup(leaf) : NULL;
     }
-    for (i = 0; i < ctx->lib_paths.count; ++i) {
-        char *cand = path_join(ctx->lib_paths.items[i], leaf);
+    for (i = 0; i < ctx->opt.lib_paths.count; ++i) {
+        char *cand = path_join(ctx->opt.lib_paths.items[i], leaf);
         if (cand != NULL && lib_candidate_suits(ctx, cand)) {
             return cand;
         }
@@ -1067,7 +1067,7 @@ static int load_library_input(ld_ctx_t *ctx, const ld_input_t *in, objvec_t *obj
             free(path_exact);
             return 0;
         }
-        if (has_suffix(path_exact, ".so") && (ctx->expect_type == ET_DYN || ctx->expect_type == ET_EXEC)) {
+        if (has_suffix(path_exact, ".so") && (ctx->opt.expect_type == ET_DYN || ctx->opt.expect_type == ET_EXEC)) {
             if (in->as_needed &&
                 shared_object_matches_unresolved(path_exact, ctx, state, &shared_matches) == 0 &&
                 !shared_matches) {
@@ -1120,7 +1120,7 @@ static int load_library_input(ld_ctx_t *ctx, const ld_input_t *in, objvec_t *obj
         free(path_so);
         return 0;
     }
-    if (path_so != NULL && (ctx->expect_type == ET_DYN || ctx->expect_type == ET_EXEC)) {
+    if (path_so != NULL && (ctx->opt.expect_type == ET_DYN || ctx->opt.expect_type == ET_EXEC)) {
         if (in->as_needed) {
             if (shared_object_matches_unresolved(path_so, ctx, state, &shared_matches) == 0) {
                 have_shared_match = 1;
@@ -1202,7 +1202,7 @@ static int load_group_inputs(ld_ctx_t *ctx, objvec_t *objs, symstate_t *state,
         size_t i;
 
         for (i = begin; i < end; ++i) {
-            const ld_input_t *in = &ctx->inputs.items[i];
+            const ld_input_t *in = &ctx->opt.inputs.items[i];
             if (in->kind == LD_INPUT_GROUP_START || in->kind == LD_INPUT_GROUP_END) {
                 continue;
             }
@@ -1221,22 +1221,22 @@ int load_all_inputs(ld_ctx_t *ctx, objvec_t *objs) {
     size_t i;
 
     memset(&state, 0, sizeof(state));
-    for (i = 0; i < ctx->force_undefined.count; ++i) {
-        if (symset_add(&state.unresolved, ctx->force_undefined.items[i]) != 0) {
+    for (i = 0; i < ctx->opt.force_undefined.count; ++i) {
+        if (symset_add(&state.unresolved, ctx->opt.force_undefined.items[i]) != 0) {
             symstate_free(&state);
             return -1;
         }
     }
-    for (i = 0; i < ctx->inputs.count; ++i) {
-        const ld_input_t *in = &ctx->inputs.items[i];
+    for (i = 0; i < ctx->opt.inputs.count; ++i) {
+        const ld_input_t *in = &ctx->opt.inputs.items[i];
         if (in->kind == LD_INPUT_GROUP_START) {
             size_t j;
             int depth = 1;
 
-            for (j = i + 1; j < ctx->inputs.count; ++j) {
-                if (ctx->inputs.items[j].kind == LD_INPUT_GROUP_START) {
+            for (j = i + 1; j < ctx->opt.inputs.count; ++j) {
+                if (ctx->opt.inputs.items[j].kind == LD_INPUT_GROUP_START) {
                     depth++;
-                } else if (ctx->inputs.items[j].kind == LD_INPUT_GROUP_END) {
+                } else if (ctx->opt.inputs.items[j].kind == LD_INPUT_GROUP_END) {
                     depth--;
                     if (depth == 0) {
                         break;

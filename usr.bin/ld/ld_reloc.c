@@ -7,9 +7,9 @@
 int apply_defsyms(ld_ctx_t *ctx, elfobj_t *out) {
     size_t i;
 
-    for (i = 0; i < ctx->defsyms.count; ++i) {
-        const char *name = ctx->defsyms.items[i].name;
-        uint64_t value = ctx->defsyms.items[i].value;
+    for (i = 0; i < ctx->opt.defsyms.count; ++i) {
+        const char *name = ctx->opt.defsyms.items[i].name;
+        uint64_t value = ctx->opt.defsyms.items[i].value;
         elf_symbol_t *sym = elf_find_symbol(out, name);
 
         if (sym == NULL) {
@@ -475,7 +475,7 @@ int collect_local_got(ld_ctx_t *ctx, elfobj_t *out) {
         return 0;
     }
     nothing_imported = elf_type(out) != ET_DYN && ctx->dso_inputs.count == 0;
-    shared = elf_type(out) == ET_DYN && !ctx->pie;
+    shared = elf_type(out) == ET_DYN && !ctx->opt.pie;
     ctx->tls_got_count = 0;
     ctx->tls_got_words = 0;
     ctx->ifunc_count = 0;
@@ -1357,7 +1357,7 @@ int apply_all_relocations(elfobj_t *obj, const ld_ctx_t *ctx, int allow_undefine
                     write_uint_bytes(buf + off, width, endian, S + (uint64_t)addend - start);
                     continue;
                 }
-                if (elf_type(obj) == ET_DYN && !ctx->pie) {
+                if (elf_type(obj) == ET_DYN && !ctx->opt.pie) {
                     done = apply_tls_in_shared(ctx, obj, machine, type, buf, off, S, addend, P, sym, &why);
                 } else {
                     done = apply_tls_in_program(obj, machine, type, buf, sec_sz, off, S, addend, &why);
@@ -1418,7 +1418,7 @@ int apply_all_relocations(elfobj_t *obj, const ld_ctx_t *ctx, int allow_undefine
         /* Applied, and what the dynamic linker has to do has its own
          * records by now; an executable or shared object does not carry
          * the linker's. */
-        if (elf_type(obj) != ET_REL && !ctx->emit_relocs &&
+        if (elf_type(obj) != ET_REL && !ctx->opt.emit_relocs &&
             elf_section_clear_relocations(sec) != ELF_OK) {
             return -1;
         }

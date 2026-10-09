@@ -116,15 +116,15 @@ int write_reproduce_bundle(const ld_ctx_t *ctx, const objvec_t *inputs) {
     FILE *sf = NULL;
     size_t i;
 
-    if (ctx == NULL || inputs == NULL || ctx->reproduce_path == NULL || ctx->reproduce_path[0] == '\0') {
+    if (ctx == NULL || inputs == NULL || ctx->opt.reproduce_path == NULL || ctx->opt.reproduce_path[0] == '\0') {
         return 0;
     }
-    if (ensure_dir_exists(ctx->reproduce_path) != 0) {
-        fprintf(stderr, "ld: failed to create --reproduce directory %s: %s\n", ctx->reproduce_path, strerror(errno));
+    if (ensure_dir_exists(ctx->opt.reproduce_path) != 0) {
+        fprintf(stderr, "ld: failed to create --reproduce directory %s: %s\n", ctx->opt.reproduce_path, strerror(errno));
         return -1;
     }
-    if (bundle_path(manifest_path, sizeof(manifest_path), ctx->reproduce_path, "manifest.txt") != 0 ||
-        bundle_path(script_path, sizeof(script_path), ctx->reproduce_path, "repro.sh") != 0) {
+    if (bundle_path(manifest_path, sizeof(manifest_path), ctx->opt.reproduce_path, "manifest.txt") != 0 ||
+        bundle_path(script_path, sizeof(script_path), ctx->opt.reproduce_path, "repro.sh") != 0) {
         return -1;
     }
     mf = fopen(manifest_path, "w");
@@ -133,18 +133,18 @@ int write_reproduce_bundle(const ld_ctx_t *ctx, const objvec_t *inputs) {
         return -1;
     }
     fprintf(mf, "mode=%s\n", ctx->mode == 64 ? "x86_64" : "i386");
-    fprintf(mf, "type=%u\n", (unsigned)ctx->expect_type);
-    if (ctx->entry_symbol != NULL) {
+    fprintf(mf, "type=%u\n", (unsigned)ctx->opt.expect_type);
+    if (ctx->opt.entry_symbol != NULL) {
         fputs("entry=", mf);
-        put_manifest_value(mf, ctx->entry_symbol);
+        put_manifest_value(mf, ctx->opt.entry_symbol);
     }
-    if (ctx->script_path != NULL) {
+    if (ctx->opt.script_path != NULL) {
         fputs("script=", mf);
-        put_manifest_value(mf, ctx->script_path);
+        put_manifest_value(mf, ctx->opt.script_path);
     }
-    if (ctx->plugin_path != NULL) {
+    if (ctx->opt.plugin_path != NULL) {
         fputs("plugin=", mf);
-        put_manifest_value(mf, ctx->plugin_path);
+        put_manifest_value(mf, ctx->opt.plugin_path);
     }
     for (i = 0; i < inputs->count; ++i) {
         fprintf(mf, "input[%zu]=", i);
@@ -163,7 +163,7 @@ int write_reproduce_bundle(const ld_ctx_t *ctx, const objvec_t *inputs) {
         char leaf[32];
 
         snprintf(leaf, sizeof(leaf), "input_%03zu.o", i);
-        if (bundle_path(obj_path, sizeof(obj_path), ctx->reproduce_path, leaf) != 0) {
+        if (bundle_path(obj_path, sizeof(obj_path), ctx->opt.reproduce_path, leaf) != 0) {
             return -1;
         }
         if (elf_write_file(inputs->objs[i], obj_path) != ELF_OK) {
@@ -171,9 +171,9 @@ int write_reproduce_bundle(const ld_ctx_t *ctx, const objvec_t *inputs) {
             return -1;
         }
     }
-    if (ctx->script_path != NULL && ctx->script_path[0] != '\0') {
-        if (bundle_path(script_copy, sizeof(script_copy), ctx->reproduce_path, "linker_script.ld") != 0 ||
-            copy_file_bytes(ctx->script_path, script_copy) != 0) {
+    if (ctx->opt.script_path != NULL && ctx->opt.script_path[0] != '\0') {
+        if (bundle_path(script_copy, sizeof(script_copy), ctx->opt.reproduce_path, "linker_script.ld") != 0 ||
+            copy_file_bytes(ctx->opt.script_path, script_copy) != 0) {
             fprintf(stderr, "ld: failed to copy linker script into --reproduce bundle\n");
             return -1;
         }
@@ -188,26 +188,26 @@ int write_reproduce_bundle(const ld_ctx_t *ctx, const objvec_t *inputs) {
     fprintf(sf, "DIR=$(CDPATH= cd -- \"$(dirname -- \"$0\")\" && pwd)\n");
     fprintf(sf, "LD_TOOL=${LD_TOOL:-ld}\n");
     fprintf(sf, "exec \"$LD_TOOL\" -m%s ", ctx->mode == 64 ? "64" : "32");
-    if (ctx->expect_type == ET_REL) {
+    if (ctx->opt.expect_type == ET_REL) {
         fprintf(sf, "-r ");
-    } else if (ctx->expect_type == ET_DYN) {
-        fprintf(sf, ctx->pie ? "-pie " : "-shared ");
+    } else if (ctx->opt.expect_type == ET_DYN) {
+        fprintf(sf, ctx->opt.pie ? "-pie " : "-shared ");
     }
-    if (ctx->entry_symbol != NULL && ctx->entry_symbol[0] != '\0') {
+    if (ctx->opt.entry_symbol != NULL && ctx->opt.entry_symbol[0] != '\0') {
         fputs("-e ", sf);
-        put_shell_word(sf, ctx->entry_symbol);
+        put_shell_word(sf, ctx->opt.entry_symbol);
     }
-    if (ctx->script_path != NULL && ctx->script_path[0] != '\0') {
+    if (ctx->opt.script_path != NULL && ctx->opt.script_path[0] != '\0') {
         fprintf(sf, "-T \"$DIR/linker_script.ld\" ");
     }
-    if (ctx->plugin_path != NULL && ctx->plugin_path[0] != '\0') {
+    if (ctx->opt.plugin_path != NULL && ctx->opt.plugin_path[0] != '\0') {
         size_t pi;
 
         fputs("-plugin ", sf);
-        put_shell_word(sf, ctx->plugin_path);
-        for (pi = 0; pi < ctx->plugin_opt_count; ++pi) {
+        put_shell_word(sf, ctx->opt.plugin_path);
+        for (pi = 0; pi < ctx->opt.plugin_opt_count; ++pi) {
             fputs("-plugin-opt ", sf);
-            put_shell_word(sf, ctx->plugin_opts[pi]);
+            put_shell_word(sf, ctx->opt.plugin_opts[pi]);
         }
     }
     fprintf(sf, "-o \"$DIR/repro.out\" ");
@@ -235,16 +235,16 @@ int write_map_file(const ld_ctx_t *ctx, const objvec_t *inputs, const ld_symtab_
     FILE *fp;
     size_t i;
 
-    if (ctx->map_path == NULL || ctx->map_path[0] == '\0') {
+    if (ctx->opt.map_path == NULL || ctx->opt.map_path[0] == '\0') {
         return 0;
     }
-    fp = fopen(ctx->map_path, "w");
+    fp = fopen(ctx->opt.map_path, "w");
     if (fp == NULL) {
-        fprintf(stderr, "ld: failed to open map file %s: %s\n", ctx->map_path, strerror(errno));
+        fprintf(stderr, "ld: failed to open map file %s: %s\n", ctx->opt.map_path, strerror(errno));
         return -1;
     }
 
-    fprintf(fp, "Output: %s\n", ctx->out_path != NULL ? ctx->out_path : "<none>");
+    fprintf(fp, "Output: %s\n", ctx->opt.out_path != NULL ? ctx->opt.out_path : "<none>");
     fprintf(fp, "Type: %u\n", (unsigned)elf_type(out));
     fprintf(fp, "Class: %s\n", elf_class(out) == ELFOBJ_CLASS_64 ? "ELF64" : "ELF32");
     fprintf(fp, "\nInputs:\n");
@@ -311,5 +311,5 @@ int write_map_file(const ld_ctx_t *ctx, const objvec_t *inputs, const ld_symtab_
                 src != NULL ? src : "<synthetic>");
     }
 
-    return finish_file(fp, ctx->map_path, "the map file");
+    return finish_file(fp, ctx->opt.map_path, "the map file");
 }

@@ -94,7 +94,7 @@ static int dynsym_should_export(const ld_ctx_t *ctx, const elfobj_t *out, const 
     if (symset_contains(&ctx->dso_wants, elf_symbol_name(sym))) {
         return 1;
     }
-    return ctx->export_dynamic ? 1 : 0;
+    return ctx->opt.export_dynamic ? 1 : 0;
 }
 
 static int dynamic_append_entry(uint8_t **buf, size_t *len, size_t *cap, elfobj_class_t cls,
@@ -1432,7 +1432,7 @@ int plan_dynamic_needed(ld_ctx_t *ctx, elfobj_t *out) {
     if (ctx == NULL || out == NULL) {
         return -1;
     }
-    need_dyn = (elf_type(out) == ET_DYN) || (ctx->dso_inputs.count != 0) || ctx->export_dynamic;
+    need_dyn = (elf_type(out) == ET_DYN) || (ctx->dso_inputs.count != 0) || ctx->opt.export_dynamic;
     if (!need_dyn) {
         return 0;
     }
@@ -1457,7 +1457,7 @@ int plan_dynamic_needed(ld_ctx_t *ctx, elfobj_t *out) {
     if (elf_section_set_align(dynsym, elf_class(out) == ELFOBJ_CLASS_64 ? 8 : 4) != ELF_OK) {
         return -1;
     }
-    if (ctx->hash_style == LD_HASH_SYSV || ctx->hash_style == LD_HASH_BOTH) {
+    if (ctx->opt.hash_style == LD_HASH_SYSV || ctx->opt.hash_style == LD_HASH_BOTH) {
         hash_sec = elf_find_section(out, ".hash");
         if (hash_sec == NULL) {
             hash_sec = elf_add_section(out, ".hash", SHT_HASH, SHF_ALLOC);
@@ -1469,7 +1469,7 @@ int plan_dynamic_needed(ld_ctx_t *ctx, elfobj_t *out) {
             return -1;
         }
     }
-    if (ctx->hash_style == LD_HASH_GNU || ctx->hash_style == LD_HASH_BOTH) {
+    if (ctx->opt.hash_style == LD_HASH_GNU || ctx->opt.hash_style == LD_HASH_BOTH) {
         gnu_hash_sec = elf_find_section(out, ".gnu.hash");
         if (gnu_hash_sec == NULL) {
             gnu_hash_sec = elf_add_section(out, ".gnu.hash", SHT_GNU_HASH, SHF_ALLOC);
@@ -1522,26 +1522,26 @@ int plan_dynamic_needed(ld_ctx_t *ctx, elfobj_t *out) {
             return -1;
         }
     }
-    if (ctx->soname != NULL || ctx->rpaths.count != 0) {
+    if (ctx->opt.soname != NULL || ctx->opt.rpaths.count != 0) {
         char *runpath = NULL;
         size_t len = 0;
         uint32_t off = 0;
         int bad = 0;
 
-        for (i = 0; i < ctx->rpaths.count; ++i) {
-            len += strlen(ctx->rpaths.items[i]) + 1;
+        for (i = 0; i < ctx->opt.rpaths.count; ++i) {
+            len += strlen(ctx->opt.rpaths.items[i]) + 1;
         }
         if (len != 0) {
             runpath = (char *)calloc(1, len);
             bad = runpath == NULL;
-            for (i = 0; !bad && i < ctx->rpaths.count; ++i) {
+            for (i = 0; !bad && i < ctx->opt.rpaths.count; ++i) {
                 snprintf(runpath + strlen(runpath), len - strlen(runpath), "%s%s", i != 0 ? ":" : "",
-                         ctx->rpaths.items[i]);
+                         ctx->opt.rpaths.items[i]);
             }
         }
         bad = bad ||
-              (ctx->soname != NULL &&
-               (dynstr_append_cstr(&dynstr_buf, &dynstr_len, &dynstr_cap, ctx->soname, &off) != 0 ||
+              (ctx->opt.soname != NULL &&
+               (dynstr_append_cstr(&dynstr_buf, &dynstr_len, &dynstr_cap, ctx->opt.soname, &off) != 0 ||
                 dynamic_append_entry(&dynamic_buf, &dynamic_len, &dynamic_cap,
                                      elf_class(out), elf_endian(out), DT_SONAME, off) != 0)) ||
               (runpath != NULL &&
@@ -1853,7 +1853,7 @@ int plan_dynamic_needed(ld_ctx_t *ctx, elfobj_t *out) {
      */
     textrel = text_relocation_section(ctx, out) != NULL;
     static_tls = 0;
-    if (elf_type(out) == ET_DYN && !ctx->pie) {
+    if (elf_type(out) == ET_DYN && !ctx->opt.pie) {
         size_t k;
 
         for (k = 0; k < ctx->tls_got_count; ++k) {
@@ -1863,15 +1863,15 @@ int plan_dynamic_needed(ld_ctx_t *ctx, elfobj_t *out) {
             static_tls |= ctx->dyn_imports.items[k].need_tls_ie;
         }
     }
-    if ((ctx->z_now &&
+    if ((ctx->opt.z_now &&
          dynamic_append_entry(&dynamic_buf, &dynamic_len, &dynamic_cap,
                               elf_class(out), elf_endian(out), DT_BIND_NOW, 0) != 0) ||
         /* DF_1_PIE is how a PIE is told from a shared object, both being
          * ET_DYN. */
-        ((ctx->z_now || ctx->pie) &&
+        ((ctx->opt.z_now || ctx->opt.pie) &&
          dynamic_append_entry(&dynamic_buf, &dynamic_len, &dynamic_cap,
                               elf_class(out), elf_endian(out), DT_FLAGS_1,
-                              (ctx->z_now ? DF_1_NOW : 0) | (ctx->pie ? DF_1_PIE : 0)) != 0) ||
+                              (ctx->opt.z_now ? DF_1_NOW : 0) | (ctx->opt.pie ? DF_1_PIE : 0)) != 0) ||
         (textrel &&
          dynamic_append_entry(&dynamic_buf, &dynamic_len, &dynamic_cap,
                               elf_class(out), elf_endian(out), DT_TEXTREL, 0) != 0) ||
@@ -1879,10 +1879,10 @@ int plan_dynamic_needed(ld_ctx_t *ctx, elfobj_t *out) {
          * storage from the thread pointer built into what it reads, so
          * its storage has to be laid out before any thread runs -- it
          * cannot be brought in later by dlopen. */
-        ((ctx->z_now || textrel || static_tls) &&
+        ((ctx->opt.z_now || textrel || static_tls) &&
          dynamic_append_entry(&dynamic_buf, &dynamic_len, &dynamic_cap,
                               elf_class(out), elf_endian(out), DT_FLAGS,
-                              (ctx->z_now ? DF_BIND_NOW : 0) | (textrel ? DF_TEXTREL : 0) |
+                              (ctx->opt.z_now ? DF_BIND_NOW : 0) | (textrel ? DF_TEXTREL : 0) |
                               (static_tls ? DF_STATIC_TLS : 0)) != 0)) {
         free(dynstr_buf);
         free(dynsym_buf);

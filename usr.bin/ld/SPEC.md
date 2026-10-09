@@ -47,8 +47,9 @@ The structure the specification asks for in §3.2 is only partly there:
 the source is divided by function, the linker asks about symbols in one
 table (`ld_symtab.c`) and the two architectures are described in one
 (`ld_arch.c`), the order of a link is a table whose constraints are
-checked, and the options are a table (`ld_options.c`); but every pass
-is still handed the whole link context, options and state together.  Those are tracked in `docs/ld-audit.md` under
+checked, and the options are a table (`ld_options.c`) kept in a type
+of their own; but every pass is still handed the whole link context
+and may write any of it.  Those are tracked in `docs/ld-audit.md` under
 "Structure".
 
 ---

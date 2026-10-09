@@ -132,7 +132,7 @@ Purpose: Provide the link graph, policies, and metadata that shape the final out
 
 Name: Link context, resolved symbol tables, section graph, layout plan, dynamic metadata
 
-Type: Process-local C structures declared in `ld.h`
+Type: Process-local C structures declared in `ld.h`: `ld_options_t` is what the command line and the script asked for, and the link does not change it; `ld_ctx_t` holds that as `opt` and, beside it, what the link has found out and decided (the machine, the shared objects, the imports, the GOT's contents); `ld_link_t`, in `ld.c`, is one run of the phases (the inputs read, the symbol table, the output)
 
 Purpose: Hold the evolving link result while symbol resolution, graph passes, layout, and relocation are still running.
 
@@ -188,7 +188,7 @@ Integration role: The linker is exercised directly by its own suite and indirect
 
 What is open: `docs/ld-audit.md` is the checked record of what the linker does and does not do, with evidence; `SPEC.md` §0 lists what is specified and absent. `TASKLIST_LINKER.md` is the older backlog and its ticks were not all verified.
 
-Modularity pressure: The split is by file only. Every type is still in `ld.h` and every pass still takes the whole `ld_ctx_t`; narrowing what each file can see (its own header, its own part of the context) is the next step, and can be taken a file at a time.
+Modularity pressure: Every type is still in `ld.h` and every pass still takes the whole `ld_ctx_t`. What was asked for is apart from what the link finds out (`ld_options_t`, the context's `opt`), but a pass can still write either; narrowing what each file can see (its own header, its own part of the context, the options `const`) is the next step, and can be taken a file at a time.
 
 Speed: shared objects are re-read for each question asked of them, archives are searched by reading every member, and `.gnu.hash` is written with one bucket.
 

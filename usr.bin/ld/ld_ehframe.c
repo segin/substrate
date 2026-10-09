@@ -34,7 +34,7 @@ int plan_eh_frame_hdr(const ld_ctx_t *ctx, elfobj_t *out) {
     size_t size = 0;
     long n;
 
-    if (!ctx->eh_frame_hdr || frame == NULL || elf_type(out) == ET_REL ||
+    if (!ctx->opt.eh_frame_hdr || frame == NULL || elf_type(out) == ET_REL ||
         elf_find_section(out, ".eh_frame_hdr") != NULL) {
         return 0;
     }

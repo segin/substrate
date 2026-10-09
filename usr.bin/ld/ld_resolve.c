@@ -9,11 +9,11 @@
 static int trace_symbol_requested(const ld_ctx_t *ctx, const char *name) {
     size_t i;
 
-    if (ctx->trace_symbols.count == 0 || name == NULL || name[0] == '\0') {
+    if (ctx->opt.trace_symbols.count == 0 || name == NULL || name[0] == '\0') {
         return 0;
     }
-    for (i = 0; i < ctx->trace_symbols.count; ++i) {
-        if (strcmp(ctx->trace_symbols.items[i], name) == 0) {
+    for (i = 0; i < ctx->opt.trace_symbols.count; ++i) {
+        if (strcmp(ctx->opt.trace_symbols.items[i], name) == 0) {
             return 1;
         }
     }
@@ -23,7 +23,7 @@ static int trace_symbol_requested(const ld_ctx_t *ctx, const char *name) {
 void emit_trace_inputs(const ld_ctx_t *ctx, const objvec_t *inputs) {
     size_t i;
 
-    if (!ctx->trace_inputs) {
+    if (!ctx->opt.trace_inputs) {
         return;
     }
     for (i = 0; i < inputs->count; ++i) {
@@ -34,7 +34,7 @@ void emit_trace_inputs(const ld_ctx_t *ctx, const objvec_t *inputs) {
 void emit_trace_symbols(const ld_ctx_t *ctx, const objvec_t *inputs) {
     size_t i;
 
-    if (ctx->trace_symbols.count == 0) {
+    if (ctx->opt.trace_symbols.count == 0) {
         return;
     }
     for (i = 0; i < inputs->count; ++i) {
@@ -64,7 +64,7 @@ void emit_trace_symbols(const ld_ctx_t *ctx, const objvec_t *inputs) {
 int emit_common_symbol_warnings(ld_ctx_t *ctx, const objvec_t *inputs) {
     size_t i;
 
-    if (!ctx->warn_common) {
+    if (!ctx->opt.warn_common) {
         return 0;
     }
     for (i = 0; i < inputs->count; ++i) {

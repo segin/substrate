@@ -455,8 +455,8 @@ int add_default_segments(elfobj_t *obj, const ld_ctx_t *ctx) {
     if (elf_add_segment(obj, PT_PHDR, LD_PF_R, 8) == NULL) {
         return -1;
     }
-    if (ctx->interp_path != NULL && ctx->interp_path[0] != '\0') {
-        if (elf_add_interp_segment(obj, ctx->interp_path) == NULL) {
+    if (ctx->opt.interp_path != NULL && ctx->opt.interp_path[0] != '\0') {
+        if (elf_add_interp_segment(obj, ctx->opt.interp_path) == NULL) {
             return -1;
         }
     }
@@ -550,7 +550,7 @@ int add_default_segments(elfobj_t *obj, const ld_ctx_t *ctx) {
                 return -1;
             }
         }
-        if (ctx->z_relro && is_alloc && (flags & SHF_WRITE) != 0 &&
+        if (ctx->opt.z_relro && is_alloc && (flags & SHF_WRITE) != 0 &&
             is_relro_candidate_name(name)) {
             if (relro_seg == NULL) {
                 relro_seg = elf_add_segment(obj, PT_GNU_RELRO, LD_PF_R, 1);
@@ -586,7 +586,7 @@ int add_default_segments(elfobj_t *obj, const ld_ctx_t *ctx) {
         }
     }
 
-    execstack_mode = ctx->z_execstack;
+    execstack_mode = ctx->opt.z_execstack;
     if (execstack_mode < 0) {
         execstack_mode = has_execstack_note(obj) ? 1 : 0;
     }

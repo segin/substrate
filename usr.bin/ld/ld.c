@@ -115,7 +115,7 @@ static int check_undefined_symbols(elfobj_t *obj, const ld_ctx_t *ctx, int allow
                 }
                 {
                     int has_provider = 0;
-                    if (unresolved_symbol_has_dso_provider((ld_ctx_t *)ctx, name, &has_provider) != 0) {
+                    if (unresolved_symbol_has_dso_provider(ctx, name, &has_provider) != 0) {
                         fprintf(stderr, "ld: failed while validating unresolved symbol providers\n");
                         return -1;
                     }
@@ -149,14 +149,14 @@ static int validate_output(const ld_ctx_t *ctx) {
 
     /* Only what can be read back: an output that went to a pipe or a
      * device is gone, and opening a pipe to look would wait for ever. */
-    if (stat(ctx->out_path, &st) != 0 || !S_ISREG(st.st_mode)) {
+    if (stat(ctx->opt.out_path, &st) != 0 || !S_ISREG(st.st_mode)) {
         return 0;
     }
-    if (elf_open(ctx->out_path, &obj) != ELF_OK) {
-        fprintf(stderr, "ld: failed to open output %s\n", ctx->out_path);
+    if (elf_open(ctx->opt.out_path, &obj) != ELF_OK) {
+        fprintf(stderr, "ld: failed to open output %s\n", ctx->opt.out_path);
         return -1;
     }
-    if (ctx->expect_type != 0 && elf_type(obj) != ctx->expect_type) {
+    if (ctx->opt.expect_type != 0 && elf_type(obj) != ctx->opt.expect_type) {
         fprintf(stderr, "ld: wrong output ELF type\n");
         elf_close(obj);
         return -1;
@@ -359,13 +359,13 @@ static int phase_merge(ld_link_t *l) {
     }
     if (err == ELF_OK && ctx->script != NULL && ctx->script->has_sections) {
         err = elf_link_plan_set_section_name_hook(plan, script_output_name, ctx->script);
-    } else if (err == ELF_OK && ctx->expect_type != ET_REL) {
+    } else if (err == ELF_OK && ctx->opt.expect_type != ET_REL) {
         err = elf_link_plan_set_section_name_hook(plan, default_output_name, NULL);
     }
     /* --gc-sections: what nothing uses is decided now, of the inputs'
      * sections, and the merge passes over it.  (Not for a relocatable
      * output, whose user is the next link.) */
-    if (err == ELF_OK && ctx->gc_sections && ctx->expect_type != ET_REL) {
+    if (err == ELF_OK && ctx->opt.gc_sections && ctx->opt.expect_type != ET_REL) {
         if (note_dso_names(ctx) != 0 || gc_collect_input_sections(ctx, &l->inputs, &l->symtab) != 0) {
             err = ELF_ERR_OOM;
         } else {
@@ -409,7 +409,7 @@ static int phase_brand(ld_link_t *l) {
 static int phase_strip_debug(ld_link_t *l) {
     size_t si;
 
-    if (!l->ctx->strip_debug) {
+    if (!l->ctx->opt.strip_debug) {
         return 0;
     }
     for (si = elf_section_count(l->out); si > 0; --si) {
@@ -447,7 +447,7 @@ static int phase_script_sections(ld_link_t *l) {
 }
 
 static int phase_icf(ld_link_t *l) {
-    return l->ctx->icf_mode != 0 ? apply_identical_code_folding(l->out, l->ctx) : 0;
+    return l->ctx->opt.icf_mode != 0 ? apply_identical_code_folding(l->out, l->ctx) : 0;
 }
 
 static int phase_ld_note(ld_link_t *l) {
@@ -462,7 +462,7 @@ static int phase_strip_groups(ld_link_t *l) {
  * at run time, which everything after asks; and, in a program, the
  * thread-local sequences that need not go through the dynamic linker. */
 static int phase_relax_tls(ld_link_t *l) {
-    set_definitions_preemptible(l->out_type == ET_DYN && !l->ctx->pie && !l->ctx->bsymbolic);
+    set_definitions_preemptible(l->out_type == ET_DYN && !l->ctx->opt.pie && !l->ctx->opt.bsymbolic);
     return l->is_program ? relax_tls_dynamic_in_program(l->out) : 0;
 }
 
@@ -486,8 +486,8 @@ static int phase_segments(ld_link_t *l) {
 static int phase_assign_addresses(ld_link_t *l) {
     uint64_t base_vaddr;
 
-    if (l->ctx->have_image_base) {
-        base_vaddr = l->ctx->image_base;
+    if (l->ctx->opt.have_image_base) {
+        base_vaddr = l->ctx->opt.image_base;
     } else if (l->out_type == ET_DYN) {
         base_vaddr = 0;
     } else {
@@ -524,13 +524,13 @@ static int phase_text_relocations(ld_link_t *l) {
     if (textrel_sec == NULL) {
         return 0;
     }
-    if (l->ctx->z_text_mode == 1) {
+    if (l->ctx->opt.z_text_mode == 1) {
         fprintf(stderr,
                 "ld: -z text: section %s is read-only and has relocations the dynamic linker would apply\n",
                 textrel_sec);
         return -1;
     }
-    if (l->ctx->z_text_mode != 2 &&
+    if (l->ctx->opt.z_text_mode != 2 &&
         ld_warn(l->ctx, "section %s is read-only and has relocations for the dynamic linker (DT_TEXTREL); "
                         "was it compiled without -fPIC?", textrel_sec) != 0) {
         return -1;
@@ -554,7 +554,7 @@ static int phase_fill_eh_frame_hdr(ld_link_t *l) {
 }
 
 static int phase_entry(ld_link_t *l) {
-    const char *entry = l->ctx->entry_symbol;
+    const char *entry = l->ctx->opt.entry_symbol;
 
     return set_entry_symbol(l->ctx, l->out, entry != NULL ? entry : "_start", l->is_program, entry != NULL);
 }
@@ -572,7 +572,7 @@ static int phase_map(ld_link_t *l) {
 }
 
 static int phase_write(ld_link_t *l) {
-    const char *path = l->ctx->out_path;
+    const char *path = l->ctx->opt.out_path;
 
     if (elf_write_file(l->out, path) != ELF_OK) {
         fprintf(stderr, "ld: failed to write output %s\n", path);
@@ -661,10 +661,10 @@ static int run_internal_link(ld_ctx_t *ctx) {
 
     memset(&l, 0, sizeof(l));
     l.ctx = ctx;
-    l.out_type = ctx->expect_type == 0 ? ET_EXEC : ctx->expect_type;
-    l.is_program = l.out_type == ET_EXEC || (l.out_type == ET_DYN && ctx->pie);
-    l.allow_undef = ctx->allow_undefined ||
-                    (!l.is_program && l.out_type == ET_DYN && !ctx->explicit_unresolved_policy);
+    l.out_type = ctx->opt.expect_type == 0 ? ET_EXEC : ctx->opt.expect_type;
+    l.is_program = l.out_type == ET_EXEC || (l.out_type == ET_DYN && ctx->opt.pie);
+    l.allow_undef = ctx->opt.allow_undefined ||
+                    (!l.is_program && l.out_type == ET_DYN && !ctx->opt.explicit_unresolved_policy);
 
     for (i = 0; rc == 0 && i < sizeof(link_phases) / sizeof(link_phases[0]); ++i) {
         const ld_phase_t *p = &link_phases[i];
@@ -699,12 +699,12 @@ static int run_internal_link(ld_ctx_t *ctx) {
 
 /* Everything the link context owns. */
 static void ctx_free(ld_ctx_t *ctx) {
-    inputvec_free(&ctx->inputs);
-    strvec_free(&ctx->lib_paths);
-    strvec_free(&ctx->rpaths);
-    strvec_free(&ctx->trace_symbols);
-    strvec_free(&ctx->force_undefined);
-    defsymvec_free(&ctx->defsyms);
+    inputvec_free(&ctx->opt.inputs);
+    strvec_free(&ctx->opt.lib_paths);
+    strvec_free(&ctx->opt.rpaths);
+    strvec_free(&ctx->opt.trace_symbols);
+    strvec_free(&ctx->opt.force_undefined);
+    defsymvec_free(&ctx->opt.defsyms);
     strvec_free(&ctx->dso_inputs);
     strvec_free(&ctx->dso_names);
     symset_free(&ctx->dso_wants);
@@ -718,50 +718,52 @@ static void ctx_free(ld_ctx_t *ctx) {
 
 int main(int argc, char **argv) {
     ld_ctx_t ctx;
+    ld_options_t *opt;
     int rc;
 
     memset(&ctx, 0, sizeof(ctx));
-    ctx.prog = argv[0];
-    ctx.out_path = "a.out";
-    ctx.compat_mode = LD_COMPAT_GNU;
+    opt = &ctx.opt;
+    opt->prog = argv[0];
+    opt->out_path = "a.out";
+    opt->compat_mode = LD_COMPAT_GNU;
 #ifdef LD_SUBSTRATE_BUILD
-    ctx.current_lib_mode = LD_LIBMODE_STATIC;
+    opt->current_lib_mode = LD_LIBMODE_STATIC;
 #else
-    ctx.current_lib_mode = LD_LIBMODE_DYNAMIC;
+    opt->current_lib_mode = LD_LIBMODE_DYNAMIC;
 #endif
-    ctx.z_execstack = -1;
-    ctx.z_relro = 1;
-    ctx.hash_style = LD_HASH_BOTH;
+    opt->z_execstack = -1;
+    opt->z_relro = 1;
+    opt->hash_style = LD_HASH_BOTH;
 
     rc = ld_parse_options(&ctx, argc, argv);
-    if (rc == 0 && ctx.query_version && ctx.inputs.count == 0) {
+    if (rc == 0 && opt->query_version && opt->inputs.count == 0) {
         printf("GNU ld (Substrate) 2.42.0\n");
         rc = LD_OPT_DONE;
     }
-    if (rc == 0 && ctx.script_path != NULL) {
+    if (rc == 0 && opt->script_path != NULL) {
         /* The script is read here, once; the link consults what it says. */
-        ctx.script = lds_script_parse(ctx.script_path, &ctx);
+        ctx.script = lds_script_parse(opt->script_path, &ctx);
         if (ctx.script == NULL) {
             rc = LD_OPT_USAGE;
-        } else if (ctx.script->entry != NULL && ctx.entry_symbol == NULL) {
-            ctx.entry_symbol = ctx.script->entry;
+        } else if (ctx.script->entry != NULL && opt->entry_symbol == NULL) {
+            opt->entry_symbol = ctx.script->entry;
         }
     }
-    if (rc == 0 && ctx.inputs.count == 0) {
-        ld_usage(ctx.prog);
+    if (rc == 0 && opt->inputs.count == 0) {
+        ld_usage(opt->prog);
         rc = LD_OPT_USAGE;
     }
     if (rc == 0) {
         if (ctx.mode == 0) {
             ctx.mode = default_mode();
         }
-        if (ctx.expect_type == 0) {
-            ctx.expect_type = ET_EXEC;
+        if (opt->expect_type == 0) {
+            opt->expect_type = ET_EXEC;
         }
         if (run_internal_link(&ctx) != 0) {
             rc = 1;
         } else if (validate_output(&ctx) != 0) {
-            remove_output(ctx.out_path);
+            remove_output(opt->out_path);
             rc = 1;
         }
     }

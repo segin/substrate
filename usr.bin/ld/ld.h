@@ -156,11 +156,13 @@ typedef struct {
     symset_t unresolved;
 } symstate_t;
 
+/*
+ * What was asked for: the command line, read (ld_options.c), and what a
+ * script adds to it before the link begins (an entry, an interpreter,
+ * places to search).  Nothing here is changed by the link itself.
+ */
 typedef struct {
     const char *prog;           /* argv[0] */
-    int mode; /* 32 or 64 */
-    int explicit_mode;
-    int mode_settled;           /* an input has said which machine */
     int explicit_unresolved_policy;
     uint16_t expect_type;
     int allow_undefined;
@@ -181,12 +183,9 @@ typedef struct {
     ld_hash_style_t hash_style;
     const char *out_path;
     const char *script_path;
-    struct lds_script *script;  /* script_path, parsed */
     const char *plugin_path;
     const char *plugin_opts[32];
     size_t plugin_opt_count;
-    int plugin_checked;
-    int plugin_unusable;        /* one was named that cannot be run */
     int eh_frame_hdr;           /* --eh-frame-hdr */
     int copy_dt_needed;         /* --copy-dt-needed-entries */
     const char *sysroot;        /* --sysroot */
@@ -202,14 +201,32 @@ typedef struct {
     const char *map_path;
     const char *reproduce_path;
     ld_compat_mode_t compat_mode;
-    ld_lib_mode_t current_lib_mode;
-    int explicit_lib_mode;
-    int current_whole_archive;
-    int current_as_needed;
     strvec_t lib_paths;
     strvec_t trace_symbols;
     strvec_t force_undefined;
     defsymvec_t defsyms;
+    inputvec_t inputs;          /* the inputs named, in order, each with the
+                                 * modes in force where it stood */
+    /* While the command line is being read: what the next input named
+     * will be given. */
+    ld_lib_mode_t current_lib_mode;
+    int explicit_lib_mode;
+    int current_whole_archive;
+    int current_as_needed;
+} ld_options_t;
+
+/*
+ * A link: what was asked for, and what has been found out and decided
+ * so far.
+ */
+typedef struct {
+    ld_options_t opt;
+    int mode; /* 32 or 64: asked for, or what the first input is */
+    int explicit_mode;
+    int mode_settled;           /* an input has said which machine */
+    struct lds_script *script;  /* opt.script_path, parsed */
+    int plugin_checked;
+    int plugin_unusable;        /* one was named that cannot be run */
     strvec_t dso_inputs;
     strvec_t dso_names;         /* what each is needed as: its DT_SONAME, or
                                  * failing that the name it was found by */
@@ -239,7 +256,6 @@ typedef struct {
     const elf_symbol_t **ifuncs;
     size_t ifunc_count;
     size_t ifunc_cap;
-    inputvec_t inputs;
 } ld_ctx_t;
 
 typedef enum {
@@ -650,7 +666,7 @@ void split_symbol_version(const char *name, const char **base, size_t *base_len,
 int shared_object_matches_unresolved(const char *path, ld_ctx_t *ctx, const symstate_t *state,
                                             int *out_match);
 int register_dso_provider(ld_ctx_t *ctx, const char *path, symstate_t *state);
-int unresolved_symbol_has_dso_provider(ld_ctx_t *ctx, const char *name, int *out_has_provider);
+int unresolved_symbol_has_dso_provider(const ld_ctx_t *ctx, const char *name, int *out_has_provider);
 const char *dso_needed_name(const ld_ctx_t *ctx, size_t i);
 int note_dso_names(ld_ctx_t *ctx);
 int plan_symbol_version_sections(ld_ctx_t *ctx, elfobj_t *out, uint8_t **dynstr_buf, size_t *dynstr_len,
