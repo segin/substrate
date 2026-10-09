@@ -264,6 +264,8 @@ struct freebsd13_stat;
 #define FREEBSD_SYS_getfsstat_freebsd13  557
 #define FREEBSD_SYS_fhstatfs_freebsd13   558
 #define FREEBSD_SYS_unknown_560          560
+#define FREEBSD_SYS_kevent_modern        560  /* FreeBSD 12+: 64-bit data, ext[] */
+#define FREEBSD_SYS_kqueuex              583
 #define FREEBSD_SYS_cpuset_getdomain 561
 #define FREEBSD_SYS_cpuset_setdomain 562
 #define FREEBSD_SYS_getrandom  563

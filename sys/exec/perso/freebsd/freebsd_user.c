@@ -7,6 +7,7 @@
 #include <sys/fcntl.h>
 #include <sys/file.h>
 #include <sys/kern_syscalls.h>
+#include <sys/kqueue.h>
 #include <sys/mount.h>
 #include <sys/namei.h>
 #include <sys/proc.h>
@@ -909,4 +910,150 @@ int freebsd_sys_getfsstat(struct freebsd_statfs *buf, abi_long_t bufsize, int mo
         count++;
     }
     return count;
+}
+
+/* ===================================================================
+ * kqueue(2), kevent(2): the queue is the kernel's (kern/kqueue.c); what
+ * is FreeBSD's here is the layout of struct kevent, of which there are
+ * two, and of the timeout.
+ * =================================================================== */
+
+int freebsd_sys_kqueue(void) {
+    return kern_kqueue();
+}
+
+int freebsd_sys_kqueuex(unsigned int flags) {
+    int fd;
+
+    if (flags & ~FBSD_KQUEUE_CLOEXEC) return -EINVAL;
+    fd = kern_kqueue();
+    if (fd >= 0 && (flags & FBSD_KQUEUE_CLOEXEC))
+        fdset_set(current_process->fd_cloexec, fd);
+    return fd;
+}
+
+/* The timeout in milliseconds, rounded up; -1 for none. */
+static int freebsd_kevent_timeout(const struct freebsd_timespec *uts,
+                                  int *ms) {
+    struct freebsd_timespec ts;
+    int64_t t;
+
+    *ms = -1;
+    if (!uts) return 0;
+    if (copyin(uts, &ts, sizeof(ts)) != 0) return -EFAULT;
+    if (ts.tv_sec < 0 || ts.tv_nsec < 0 || ts.tv_nsec >= 1000000000)
+        return -EINVAL;
+    t = (int64_t)ts.tv_sec * 1000 + (ts.tv_nsec + 999999) / 1000000;
+    *ms = t > 0x7fffffff ? 0x7fffffff : (int)t;
+    return 0;
+}
+
+/*
+ * Both kevent calls: `size` is that of the caller's struct kevent, which
+ * is the modern one or FreeBSD 11's.  The two agree up to fflags.
+ */
+static int freebsd_kevent_common(int kq, const void *uchanges, int nchanges,
+                                 void *uevents, int nevents,
+                                 const struct freebsd_timespec *uts,
+                                 size_t size) {
+    struct kq_event *kch = NULL, *kev = NULL;
+    uint8_t *raw = NULL;
+    size_t raw_size;
+    int n = nchanges > nevents ? nchanges : nevents;
+    int ms, rc, i;
+
+    if (nchanges < 0 || nevents < 0 || nchanges > FBSD_KEVENT_MAX)
+        return -EINVAL;
+    if (nevents > FBSD_KEVENT_MAX) nevents = FBSD_KEVENT_MAX;
+    if (n > FBSD_KEVENT_MAX) n = FBSD_KEVENT_MAX;
+    rc = freebsd_kevent_timeout(uts, &ms);
+    if (rc != 0) return rc;
+    if (n == 0) return kern_kevent(kq, NULL, 0, NULL, 0, ms);
+
+    raw_size = (size_t)n * size;
+    raw = kmalloc(raw_size);
+    kch = kmalloc((size_t)n * sizeof(*kch));
+    kev = kmalloc((size_t)n * sizeof(*kev));
+    if (!raw || !kch || !kev) {
+        rc = -ENOMEM;
+        goto out;
+    }
+    if (nchanges > 0 &&
+        copyin(uchanges, raw, (size_t)nchanges * size) != 0) {
+        rc = -EFAULT;
+        goto out;
+    }
+    for (i = 0; i < nchanges; i++) {
+        if (size == sizeof(struct freebsd_kevent)) {
+            struct freebsd_kevent e;
+
+            memcpy(&e, raw + (size_t)i * size, sizeof(e));
+            kch[i].ident = e.ident;
+            kch[i].filter = e.filter;
+            kch[i].flags = e.flags;
+            kch[i].fflags = e.fflags;
+            kch[i].data = e.data;
+            kch[i].udata = e.udata;
+        } else {
+            struct freebsd11_kevent e;
+
+            memcpy(&e, raw + (size_t)i * size, sizeof(e));
+            kch[i].ident = e.ident;
+            kch[i].filter = e.filter;
+            kch[i].flags = e.flags;
+            kch[i].fflags = e.fflags;
+            kch[i].data = e.data;
+            kch[i].udata = e.udata;
+        }
+    }
+
+    rc = kern_kevent(kq, kch, nchanges, kev, nevents, ms);
+    if (rc <= 0) goto out;
+
+    memset(raw, 0, (size_t)rc * size);
+    for (i = 0; i < rc; i++) {
+        if (size == sizeof(struct freebsd_kevent)) {
+            struct freebsd_kevent e;
+
+            memset(&e, 0, sizeof(e));
+            e.ident = (uint32_t)kev[i].ident;
+            e.filter = kev[i].filter;
+            e.flags = kev[i].flags;
+            e.fflags = kev[i].fflags;
+            e.data = kev[i].data;
+            e.udata = (uint32_t)kev[i].udata;
+            memcpy(raw + (size_t)i * size, &e, sizeof(e));
+        } else {
+            struct freebsd11_kevent e;
+
+            e.ident = (uint32_t)kev[i].ident;
+            e.filter = kev[i].filter;
+            e.flags = kev[i].flags;
+            e.fflags = kev[i].fflags;
+            e.data = (int32_t)kev[i].data;
+            e.udata = (uint32_t)kev[i].udata;
+            memcpy(raw + (size_t)i * size, &e, sizeof(e));
+        }
+    }
+    if (copyout(raw, uevents, (size_t)rc * size) != 0) rc = -EFAULT;
+
+out:
+    if (raw) kfree(raw, raw_size);
+    if (kch) kfree(kch, (size_t)n * sizeof(*kch));
+    if (kev) kfree(kev, (size_t)n * sizeof(*kev));
+    return rc;
+}
+
+int freebsd_sys_kevent(int kq, const struct freebsd_kevent *changes,
+                       int nchanges, struct freebsd_kevent *events,
+                       int nevents, const struct freebsd_timespec *timeout) {
+    return freebsd_kevent_common(kq, changes, nchanges, events, nevents,
+                                 timeout, sizeof(struct freebsd_kevent));
+}
+
+int freebsd11_sys_kevent(int kq, const struct freebsd11_kevent *changes,
+                         int nchanges, struct freebsd11_kevent *events,
+                         int nevents, const struct freebsd_timespec *timeout) {
+    return freebsd_kevent_common(kq, changes, nchanges, events, nevents,
+                                 timeout, sizeof(struct freebsd11_kevent));
 }

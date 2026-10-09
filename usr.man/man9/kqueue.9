@@ -1,0 +1,178 @@
+.\" Copyright (c) 2026 Kirn Gill II <segin2005@gmail.com>
+.\" All rights reserved.
+.\"
+.Dd October 8, 2026
+.Dt KQUEUE 9
+.Os Substrate
+.Sh NAME
+.Nm kern_kqueue ,
+.Nm kern_kevent
+.Nd kernel event queues for the BSD personalities
+.Sh SYNOPSIS
+.In sys/kqueue.h
+.Ft int
+.Fn kern_kqueue "void"
+.Ft int
+.Fo kern_kevent
+.Fa "int kq"
+.Fa "const struct kq_event *changes"
+.Fa "int nchanges"
+.Fa "struct kq_event *events"
+.Fa "int nevents"
+.Fa "int timeout_ms"
+.Fc
+.Sh DESCRIPTION
+These implement
+.Xr kqueue 2
+and
+.Xr kevent 2
+as the BSDs have them.
+Substrate's own programs do not call them; a personality whose programs
+do converts its layout of
+.Vt struct kevent
+to and from
+.Vt struct kq_event
+and calls these.
+The FreeBSD personality does, for system calls 362, 363, 560 and 583.
+.Pp
+.Fn kern_kqueue
+makes an empty queue and returns a descriptor for it in the calling
+process.
+.Pp
+.Fn kern_kevent
+applies
+.Fa nchanges
+changes to the queue, then collects up to
+.Fa nevents
+events into
+.Fa events ,
+waiting
+.Fa timeout_ms
+milliseconds for the first:
+\-1 waits until there is one, 0 does not wait.
+Both arrays are the kernel's.
+.Pp
+A registration is named by its
+.Va ident
+and
+.Va filter .
+The filters are:
+.Bl -tag -width "KQ_EVFILT_WRITE"
+.It Dv KQ_EVFILT_READ
+.Va ident
+is a descriptor; reported when
+.Xr poll 2
+would report it readable, hung up or in error.
+.It Dv KQ_EVFILT_WRITE
+The same for writing.
+.It Dv KQ_EVFILT_USER
+.Va ident
+is the program's own.
+Reported after a change carrying
+.Dv KQ_NOTE_TRIGGER ;
+the low 24 bits of
+.Va fflags
+are combined as
+.Dv KQ_NOTE_FFAND ,
+.Dv KQ_NOTE_FFOR
+or
+.Dv KQ_NOTE_FFCOPY
+say.
+.It Dv KQ_EVFILT_TIMER
+.Va ident
+is the program's own.
+Reported every
+.Va data
+milliseconds, or seconds, microseconds or nanoseconds with the
+.Dv KQ_NOTE_*
+unit flags;
+.Va data
+of the event is the number of periods since the last report.
+.El
+.Pp
+.Dv KQ_EV_ADD
+makes a registration,
+.Dv KQ_EV_DELETE
+removes one,
+.Dv KQ_EV_ENABLE
+and
+.Dv KQ_EV_DISABLE
+turn its reporting on and off.
+.Dv KQ_EV_ONESHOT ,
+.Dv KQ_EV_DISPATCH
+and
+.Dv KQ_EV_CLEAR
+say what becomes of it once reported (removed, disabled, reset) and are
+fixed when it is made: adding it again does not change them.
+Every change replaces the registration's
+.Va udata
+unless it carries
+.Dv KQ_EV_KEEPUDATA .
+.Pp
+A change that fails, or that carries
+.Dv KQ_EV_RECEIPT ,
+is answered with an event whose
+.Va flags
+are
+.Dv KQ_EV_ERROR
+and whose
+.Va data
+is the error number, 0 for a receipt.
+If any such events were produced the call returns them without waiting.
+A failure when
+.Fa events
+has no room for it ends the call with that error.
+.Pp
+A registration for a descriptor goes when the descriptor is closed.
+.Sh RETURN VALUES
+.Fn kern_kqueue
+returns the new descriptor.
+.Fn kern_kevent
+returns the number of events placed in
+.Fa events ,
+which is 0 when the time ran out.
+Both return a negated error number on failure.
+.Sh ERRORS
+.Bl -tag -width Er
+.It Bq Er EBADF
+.Fa kq
+is not a queue, has been closed, or belongs to another process; or a
+change names a descriptor that is not open.
+.It Bq Er EINVAL
+A count is negative, the filter is not one of the four, or a timer's
+period is negative or absolute.
+.It Bq Er ENOENT
+A change other than an add names a registration that does not exist.
+.It Bq Er ENOMEM
+No memory, or the queue already holds 4096 registrations.
+.It Bq Er EMFILE
+The process has no descriptor free.
+.It Bq Er EINTR
+A signal arrived during the wait.
+.El
+.Sh IMPLEMENTATION NOTES
+Readiness of descriptors is taken from the per-file poll hooks through
+.Fn kern_poll .
+A thread with nothing to collect waits there on the registered
+descriptors and on the queue's own, which is readable when a user event
+has fired; that is how a trigger from another thread wakes it.
+.Sh SEE ALSO
+.Xr poll 2
+.Sh BUGS
+.Dv KQ_EV_CLEAR
+on a descriptor reports once each time it goes from not ready to ready,
+not each time more arrives while it is ready.
+.Pp
+.Va data
+of a read or write event is 1 when the descriptor is ready and 0 when it
+has only hung up, not a byte count.
+.Pp
+A forked child inherits the descriptor and gets
+.Er EBADF
+from it; on a BSD the child does not have it at all.
+.Pp
+.Dv EVFILT_VNODE ,
+.Dv EVFILT_PROC
+and
+.Dv EVFILT_SIGNAL
+are not implemented.

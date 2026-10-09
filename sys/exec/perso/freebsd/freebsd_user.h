@@ -720,6 +720,43 @@ struct freebsd_statfs {
     char     f_mntonname[FREEBSD_MNAMELEN];
 };
 
+/*
+ * kqueue(2) and kevent(2), <sys/event.h>.  struct kevent as FreeBSD 12 and
+ * later have it on i386 (56 bytes; data is 64 bits at offset 12, the
+ * alignment of a 64-bit integer being 4 there), and as FreeBSD 11 had it
+ * (20 bytes), which syscall 363 still takes.
+ */
+struct freebsd_kevent {
+    uint32_t ident;
+    int16_t  filter;
+    uint16_t flags;
+    uint32_t fflags;
+    int64_t  data;
+    uint32_t udata;
+    uint64_t ext[4];
+} __attribute__((packed));
+
+struct freebsd11_kevent {
+    uint32_t ident;
+    int16_t  filter;
+    uint16_t flags;
+    uint32_t fflags;
+    int32_t  data;
+    uint32_t udata;
+};
+
+#define FBSD_KQUEUE_CLOEXEC     0x00000001  /* kqueuex(2) */
+#define FBSD_KEVENT_MAX         1024        /* changes or events per call */
+
+int freebsd_sys_kqueue(void);
+int freebsd_sys_kqueuex(unsigned int flags);
+int freebsd_sys_kevent(int kq, const struct freebsd_kevent *changes,
+                       int nchanges, struct freebsd_kevent *events,
+                       int nevents, const struct freebsd_timespec *timeout);
+int freebsd11_sys_kevent(int kq, const struct freebsd11_kevent *changes,
+                         int nchanges, struct freebsd11_kevent *events,
+                         int nevents, const struct freebsd_timespec *timeout);
+
 int freebsd_sys_statfs(const char *path, struct freebsd_statfs *buf);
 int freebsd_sys_fstatfs(int fd, struct freebsd_statfs *buf);
 int freebsd_sys_getfsstat(struct freebsd_statfs *buf, abi_long_t bufsize, int mode);
