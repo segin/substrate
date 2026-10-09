@@ -1587,6 +1587,50 @@ static int64_t x286_record_lock(struct x286_frame *f, int fd, int cmd) {
     return 0;
 }
 
+/*
+ * locking(fd, mode, size): Xenix's own lock, on `size` bytes of the file
+ * from where the descriptor is -- 0 for to the end, a negative size for
+ * the bytes before it.  LK_UNLCK unlocks; LK_LOCK and LK_RLCK wait for an
+ * exclusive or a shared lock, LK_NBLCK and LK_NBRLCK fail with EACCES
+ * rather than wait.  The numbers are those of <sys/locking.h> for the 286;
+ * the 386's LK_NBLCK is 20.
+ *
+ * They are the same record locks fcntl's are, as they were on Xenix, where
+ * the two calls share a lock list.  The call used to say yes to every
+ * mode and lock nothing.
+ */
+#define X286_LK_UNLCK   0
+#define X286_LK_LOCK    1
+#define X286_LK_NBLCK   2
+#define X286_LK_RLCK    3
+#define X286_LK_NBRLCK  4
+
+static int64_t x286_xsys_locking(struct x286_frame *f) {
+    int fd = (int)(int16_t)f->bx;
+    int32_t size = (int32_t)((uint32_t)(uint16_t)f->si |
+                             ((uint32_t)(uint16_t)f->di << 16));
+    struct kflock kf;
+    int rc;
+
+    memset(&kf, 0, sizeof(kf));
+    kf.l_whence = 1;                    /* from where the descriptor is */
+    kf.l_start = 0;
+    kf.l_len = size;
+    switch (f->cx) {
+    case X286_LK_UNLCK:  kf.l_type = F_UNLCK; break;
+    case X286_LK_LOCK:
+    case X286_LK_NBLCK:  kf.l_type = F_WRLCK; break;
+    case X286_LK_RLCK:
+    case X286_LK_NBRLCK: kf.l_type = F_RDLCK; break;
+    default:             return -EINVAL;
+    }
+    rc = proc_advlock(current_process, fd,
+                      (f->cx == X286_LK_LOCK || f->cx == X286_LK_RLCK)
+                          ? F_SETLKW : F_SETLK, &kf);
+    /* Another process has some of it: Xenix says EACCES. */
+    return rc == -EAGAIN ? -EACCES : rc;
+}
+
 static int64_t x286_sys_fcntl(struct x286_frame *f) {
     int fd = (int)(int16_t)f->bx;
     int rc;
@@ -1983,12 +2027,11 @@ static int64_t x286_sys_xenix(struct x286_frame *f) {
     case X286_XSYS_rdchk:   return x286_xsys_rdchk(f);
     case X286_XSYS_chsize:  return x286_xsys_chsize(f);
     case X286_XSYS_locking:
-        /* fcntl's record locks, by this door; locking(S)'s own modes are
-         * advisory, and we do not lock for them. */
+        /* fcntl's record locks come by this door too, as modes 5 to 7. */
         if (f->cx == F_GETLK || f->cx == F_SETLK || f->cx == F_SETLKW) {
             return x286_record_lock(f, (int)(int16_t)f->bx, (int)f->cx);
         }
-        return 0;
+        return x286_xsys_locking(f);
     default:                return -ENOSYS;
     }
 }

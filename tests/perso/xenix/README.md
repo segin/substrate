@@ -19,7 +19,8 @@ With the image mounted at `/perso/xenix` and the sources copied into its
     /perso/xenix/bin/sh -c 'PATH=/bin:/usr/bin; export PATH; cd /tmp && cc -o sigtest sigtest.c && ./sigtest'
 
 Every line reads `ok`, and the last is `sigtest: PASS`; `calltest`
-likewise.  **Build each three ways**, with no flags, with `-Mm` and
+likewise, built with `-lx` after the source's name (the library that
+has `locking`).  **Build each three ways**, with no flags, with `-Mm` and
 with `-Ml`: small, middle and large model, which are all the models
 Xenix/286 has.  The first two reach the kernel by one convention and
 the third by another (below).
@@ -36,7 +37,9 @@ first, knowing from a table which arguments are pointers.
 
 `calltest.c` is the test of that table: files, `stat`, `link`,
 `chmod`, `time`, a pipe, `wait`, a record lock set with `fcntl` and
-found by a child, and an `execve` whose child checks its arguments and
+found by a child, the same by `locking` in each of its modes -- refused,
+waited for, shared between readers, and seen by `fcntl` -- and an
+`execve` whose child checks its arguments and
 environment -- with the buffers in the data segment, on
 the stack and on the heap, which in the large model are three segments.
 

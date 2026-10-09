@@ -308,9 +308,22 @@ call, with a far pointer to the
 whatever the program's model; that is where the personality takes them,
 translating the structure and Xenix's own
 .I l_type
-values.  The modes of
-.BR locking (S)
-proper, 0 to 4, are accepted and lock nothing.
+values.
+.BR locking (S)'s
+own modes are the same locks, on bytes from the descriptor's position:
+.B LK_UNLCK
+(0) unlocks,
+.B LK_LOCK
+(1) and
+.B LK_RLCK
+(3) wait for an exclusive or a shared lock, and
+.B LK_NBLCK
+(2) and
+.B LK_NBRLCK
+(4) fail with
+.B EACCES
+instead of waiting.  A lock set by either call is seen by the other, and
+goes when the file is closed.
 .IP \(bu
 .BR ptrace (2),
 .BR profil (2)

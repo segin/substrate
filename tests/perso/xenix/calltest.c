@@ -8,9 +8,11 @@
  * built with -Ml it is a large-model one, whose calls have them in a
  * block on the stack with every pointer far.  Both must say the same.
  *
- *	cc -o calltest calltest.c && ./calltest
- *	cc -Mm -o calltest calltest.c && ./calltest
- *	cc -Ml -o calltest calltest.c && ./calltest
+ *	cc -o calltest calltest.c -lx && ./calltest
+ *	cc -Mm -o calltest calltest.c -lx && ./calltest
+ *	cc -Ml -o calltest calltest.c -lx && ./calltest
+ *
+ * -lx is the library of Xenix's own calls, where locking(S) is.
  *
  * Run with an argument it is its own child: see the exec check.
  */
@@ -18,7 +20,10 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <errno.h>
+#include <sys/locking.h>
 
+extern int errno;
 extern char *malloc();
 extern long lseek();
 extern long time();
@@ -160,6 +165,74 @@ char **argv, **envp;
 	lk.l_len = 0L;
 	check(fcntl(fd, F_GETLK, &lk) == 0 && lk.l_type == F_UNLCK,
 	      "and then there is none");
+
+	/* locking(S), Xenix's own call for it: the same locks. */
+	lseek(fd, 4L, 0);
+	check(locking(fd, LK_NBLCK, 8L) == 0, "locking(LK_NBLCK): bytes 4 to 11");
+	pid = fork();
+	if (pid == 0) {
+		static struct flock probe;
+		int cfd = open(locked, O_RDWR);
+
+		lseek(cfd, 6L, 0);
+		errno = 0;
+		if (locking(cfd, LK_NBLCK, 2L) == 0)
+			exit(10);
+		if (errno != EACCES)
+			exit(11);
+		lseek(cfd, 0L, 0);
+		if (locking(cfd, LK_NBLCK, 4L) != 0)
+			exit(12);
+		probe.l_type = F_WRLCK;
+		probe.l_whence = 0;
+		probe.l_start = 4L;
+		probe.l_len = 8L;
+		if (fcntl(cfd, F_GETLK, &probe) != 0 || probe.l_type != F_WRLCK)
+			exit(13);
+		exit(8);
+	}
+	status = 0;
+	check(wait(&status) == pid && status == (8 << 8),
+	      "another process is refused them with EACCES, and fcntl sees the lock");
+	if (status != (8 << 8))
+		printf("      the child said %d\n", status >> 8);
+
+	/* LK_LOCK waits for what LK_NBLCK would be refused. */
+	pipe(p);
+	pid = fork();
+	if (pid == 0) {
+		int cfd = open(locked, O_RDWR);
+
+		lseek(cfd, 4L, 0);
+		n = locking(cfd, LK_LOCK, 8L);
+		write(p[1], n == 0 ? "c" : "x", 1);
+		exit(0);
+	}
+	sleep(1);
+	write(p[1], "p", 1);
+	lseek(fd, 4L, 0);
+	check(locking(fd, LK_UNLCK, 8L) == 0, "locking(LK_UNLCK)");
+	wait(&status);
+	n = read(p[0], on_stack, 2);
+	check(n == 2 && on_stack[0] == 'p' && on_stack[1] == 'c',
+	      "locking(LK_LOCK) waited for the unlock");
+	close(p[0]);
+	close(p[1]);
+
+	/* Read locks are shared, and keep a writer out. */
+	lseek(fd, 0L, 0);
+	check(locking(fd, LK_NBRLCK, 0L) == 0, "locking(LK_NBRLCK): the whole file");
+	pid = fork();
+	if (pid == 0) {
+		int cfd = open(locked, O_RDWR);
+
+		if (locking(cfd, LK_NBRLCK, 0L) != 0)
+			exit(10);
+		exit(locking(cfd, LK_NBLCK, 0L) == 0 ? 11 : 8);
+	}
+	status = 0;
+	check(wait(&status) == pid && status == (8 << 8),
+	      "another process reads beside it and may not write");
 	close(fd);
 	unlink(locked);
 
