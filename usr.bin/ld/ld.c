@@ -103,7 +103,8 @@ static int set_entry_symbol(ld_ctx_t *ctx, elfobj_t *obj, const char *entry_symb
     return 0;
 }
 
-static int check_undefined_symbols(elfobj_t *obj, const ld_ctx_t *ctx, int allow_undefined, const symref_map_t *refs) {
+static int check_undefined_symbols(elfobj_t *obj, const ld_ctx_t *ctx, int allow_undefined,
+                                   const ld_symtab_t *symtab) {
     size_t i;
     if (allow_undefined) {
         return 0;
@@ -135,7 +136,8 @@ static int check_undefined_symbols(elfobj_t *obj, const ld_ctx_t *ctx, int allow
                         continue;
                     }
                 }
-                const char *src = refs != NULL ? symref_map_get(refs, name) : NULL;
+                const ld_sym_t *known = ld_symtab_find(symtab, name);
+                const char *src = known != NULL ? known->ref_src : NULL;
                 if (src != NULL) {
                     fprintf(stderr, "ld: undefined reference to `%s` (referenced by %s)\n", name, src);
                     ld_diag_note("unresolved-symbol", src, "add defining object/library before this reference");
@@ -273,7 +275,7 @@ static const char *default_output_name(const char *section, const char *file, vo
 
 static int run_internal_link(ld_ctx_t *ctx) {
     objvec_t inputs;
-    symref_map_t undef_refs;
+    ld_symtab_t symtab;
     elfobj_t *out = NULL;
     elf_err_t err;
     uint16_t out_type;
@@ -282,7 +284,7 @@ static int run_internal_link(ld_ctx_t *ctx) {
     uint64_t base_vaddr;
 
     memset(&inputs, 0, sizeof(inputs));
-    memset(&undef_refs, 0, sizeof(undef_refs));
+    memset(&symtab, 0, sizeof(symtab));
     if (plugin_discover_and_handshake(ctx) != 0) {
         return -1;
     }
@@ -300,17 +302,16 @@ static int run_internal_link(ld_ctx_t *ctx) {
         objvec_free(&inputs);
         return -1;
     }
-    if (check_symbol_precedence(ctx, &inputs) != 0) {
-        objvec_free(&inputs);
-        return -1;
-    }
-    if (collect_undefined_refs(&inputs, &undef_refs) != 0) {
+    /* Every global name of the inputs, once: which definition the link
+     * takes, who else defines it (two strong definitions end here), and
+     * who refers to it. */
+    if (ld_symtab_build(ctx, &inputs, &symtab) != 0) {
         objvec_free(&inputs);
         return -1;
     }
     if (inputs.count == 0) {
         fprintf(stderr, "ld: no compatible relocatable input objects found\n");
-        symref_map_free(&undef_refs);
+        ld_symtab_free(&symtab);
         objvec_free(&inputs);
         return -1;
     }
@@ -335,7 +336,7 @@ static int run_internal_link(ld_ctx_t *ctx) {
          * inputs' sections, and the merge passes over it.  (Not for a
          * relocatable output, whose user is the next link.) */
         if (err == ELF_OK && ctx->gc_sections && ctx->expect_type != ET_REL) {
-            if (note_dso_names(ctx) != 0 || gc_collect_input_sections(ctx, &inputs) != 0) {
+            if (note_dso_names(ctx) != 0 || gc_collect_input_sections(ctx, &inputs, &symtab) != 0) {
                 err = ELF_ERR_OOM;
             } else {
                 err = elf_link_plan_set_gc_hook(plan, gc_keep_input_section, ctx);
@@ -353,7 +354,7 @@ static int run_internal_link(ld_ctx_t *ctx) {
 
         fprintf(stderr, "ld: link merge failed: %s%s%s\n", elf_errstr(err),
                 why[0] != '\0' ? ": " : "", why);
-        symref_map_free(&undef_refs);
+        ld_symtab_free(&symtab);
         objvec_free(&inputs);
         if (out != NULL) {
             elf_close(out);
@@ -369,7 +370,7 @@ static int run_internal_link(ld_ctx_t *ctx) {
     }
     if (elf_set_type(out, out_type) != ELF_OK) {
         fprintf(stderr, "ld: failed to set output type\n");
-        symref_map_free(&undef_refs);
+        ld_symtab_free(&symtab);
         objvec_free(&inputs);
         elf_close(out);
         return -1;
@@ -382,7 +383,7 @@ static int run_internal_link(ld_ctx_t *ctx) {
      */
     if ((out_type == ET_EXEC || out_type == ET_DYN) && elf_set_osabi(out, ELFOSABI_SUBSTRATE) != ELF_OK) {
         fprintf(stderr, "ld: failed to set Substrate ELF OSABI\n");
-        symref_map_free(&undef_refs);
+        ld_symtab_free(&symtab);
         objvec_free(&inputs);
         elf_close(out);
         return -1;
@@ -399,7 +400,7 @@ static int run_internal_link(ld_ctx_t *ctx) {
                  strncmp(name, ".stab", 5) == 0 || strncmp(name, ".gnu.debuglto_", 14) == 0) &&
                 elf_remove_section(out, sec) != ELF_OK) {
                 fprintf(stderr, "ld: failed to leave out section %s\n", name);
-                symref_map_free(&undef_refs);
+                ld_symtab_free(&symtab);
                 objvec_free(&inputs);
                 elf_close(out);
                 return -1;
@@ -408,54 +409,54 @@ static int run_internal_link(ld_ctx_t *ctx) {
     }
     if (plan_eh_frame_hdr(ctx, out) != 0) {
         fprintf(stderr, "ld: failed to make .eh_frame_hdr\n");
-        symref_map_free(&undef_refs);
+        ld_symtab_free(&symtab);
         objvec_free(&inputs);
         elf_close(out);
         return -1;
     }
     if (script_declare_symbols(ctx, out) != 0) {
-        symref_map_free(&undef_refs);
+        ld_symtab_free(&symtab);
         objvec_free(&inputs);
         elf_close(out);
         return -1;
     }
     if (apply_defsyms(ctx, out) != 0) {
-        symref_map_free(&undef_refs);
+        ld_symtab_free(&symtab);
         objvec_free(&inputs);
         elf_close(out);
         return -1;
     }
     if (reorder_sections_default_policy(out) != 0) {
         fprintf(stderr, "ld: failed to apply default section placement policy\n");
-        symref_map_free(&undef_refs);
+        ld_symtab_free(&symtab);
         objvec_free(&inputs);
         elf_close(out);
         return -1;
     }
     if (script_apply_sections(ctx, out) != 0) {
-        symref_map_free(&undef_refs);
+        ld_symtab_free(&symtab);
         objvec_free(&inputs);
         elf_close(out);
         return -1;
     }
     if (ctx->icf_mode != 0 && apply_identical_code_folding(out, ctx) != 0) {
         fprintf(stderr, "ld: --icf fold pass failed\n");
-        symref_map_free(&undef_refs);
+        ld_symtab_free(&symtab);
         objvec_free(&inputs);
         elf_close(out);
         return -1;
     }
 
     if (out_type == ET_REL) {
-        if (write_map_file(ctx, &inputs, out) != 0) {
-            symref_map_free(&undef_refs);
+        if (write_map_file(ctx, &inputs, &symtab, out) != 0) {
+            ld_symtab_free(&symtab);
             objvec_free(&inputs);
             elf_close(out);
             return -1;
         }
         if (elf_write_file(out, ctx->out_path) != ELF_OK) {
             fprintf(stderr, "ld: failed to write output %s\n", ctx->out_path);
-            symref_map_free(&undef_refs);
+            ld_symtab_free(&symtab);
             objvec_free(&inputs);
             elf_close(out);
             return -1;
@@ -463,13 +464,13 @@ static int run_internal_link(ld_ctx_t *ctx) {
         if (set_output_mode(ctx->out_path, 0) != 0) {
             if (ld_warn(ctx, "failed to set output mode on %s: %s",
                         ctx->out_path, strerror(errno)) != 0) {
-                symref_map_free(&undef_refs);
+                ld_symtab_free(&symtab);
                 objvec_free(&inputs);
                 elf_close(out);
                 return -1;
             }
         }
-        symref_map_free(&undef_refs);
+        ld_symtab_free(&symtab);
         objvec_free(&inputs);
         elf_close(out);
         return 0;
@@ -477,7 +478,7 @@ static int run_internal_link(ld_ctx_t *ctx) {
 
     if (is_program && ensure_substrate_ld_note(out) != 0) {
         fprintf(stderr, "ld: failed to emit .note.substrate_ld metadata\n");
-        symref_map_free(&undef_refs);
+        ld_symtab_free(&symtab);
         objvec_free(&inputs);
         elf_close(out);
         return -1;
@@ -485,7 +486,7 @@ static int run_internal_link(ld_ctx_t *ctx) {
 
     if (strip_group_sections_for_final(out) != 0) {
         fprintf(stderr, "ld: failed to strip SHT_GROUP sections for final output\n");
-        symref_map_free(&undef_refs);
+        ld_symtab_free(&symtab);
         objvec_free(&inputs);
         elf_close(out);
         return -1;
@@ -493,21 +494,21 @@ static int run_internal_link(ld_ctx_t *ctx) {
 
     set_definitions_preemptible(out_type == ET_DYN && !ctx->pie && !ctx->bsymbolic);
     if (is_program && relax_tls_dynamic_in_program(out) != 0) {
-        symref_map_free(&undef_refs);
+        ld_symtab_free(&symtab);
         objvec_free(&inputs);
         elf_close(out);
         return -1;
     }
     if (note_dso_names(ctx) != 0 || settle_undefined_weak(ctx, out) != 0 || plan_dynamic_imports(ctx, out) != 0) {
         fprintf(stderr, "ld: failed to plan GOT/PLT dynamic imports\n");
-        symref_map_free(&undef_refs);
+        ld_symtab_free(&symtab);
         objvec_free(&inputs);
         elf_close(out);
         return -1;
     }
     if (plan_local_got(ctx, out) != 0) {
         fprintf(stderr, "ld: failed to make the global offset table\n");
-        symref_map_free(&undef_refs);
+        ld_symtab_free(&symtab);
         objvec_free(&inputs);
         elf_close(out);
         return -1;
@@ -515,14 +516,14 @@ static int run_internal_link(ld_ctx_t *ctx) {
 
     if (plan_dynamic_needed(ctx, out) != 0) {
         fprintf(stderr, "ld: failed to plan dynamic DT_NEEDED entries\n");
-        symref_map_free(&undef_refs);
+        ld_symtab_free(&symtab);
         objvec_free(&inputs);
         elf_close(out);
         return -1;
     }
     if (reorder_sections_default_policy(out) != 0) {
         fprintf(stderr, "ld: failed to reorder sections after dynamic planning\n");
-        symref_map_free(&undef_refs);
+        ld_symtab_free(&symtab);
         objvec_free(&inputs);
         elf_close(out);
         return -1;
@@ -530,14 +531,14 @@ static int run_internal_link(ld_ctx_t *ctx) {
 
     if (add_default_segments(out, ctx) != 0) {
         fprintf(stderr, "ld: failed to add output program segments\n");
-        symref_map_free(&undef_refs);
+        ld_symtab_free(&symtab);
         objvec_free(&inputs);
         elf_close(out);
         return -1;
     }
     if (reorder_sections_default_policy(out) != 0) {
         fprintf(stderr, "ld: failed to reorder sections after segment planning\n");
-        symref_map_free(&undef_refs);
+        ld_symtab_free(&symtab);
         objvec_free(&inputs);
         elf_close(out);
         return -1;
@@ -554,13 +555,13 @@ static int run_internal_link(ld_ctx_t *ctx) {
 
     if (assign_section_addresses(out, base_vaddr) != 0) {
         fprintf(stderr, "ld: failed to assign section virtual addresses\n");
-        symref_map_free(&undef_refs);
+        ld_symtab_free(&symtab);
         objvec_free(&inputs);
         elf_close(out);
         return -1;
     }
     if (script_assign_addresses(ctx, out) != 0) {
-        symref_map_free(&undef_refs);
+        ld_symtab_free(&symtab);
         objvec_free(&inputs);
         elf_close(out);
         return -1;
@@ -568,7 +569,7 @@ static int run_internal_link(ld_ctx_t *ctx) {
     if (ctx->mode == 64) {
         if (finalize_dynamic_imports_x64(out, &ctx->dyn_imports) != 0) {
             fprintf(stderr, "ld: failed to finalize x86_64 GOT/PLT dynamic data\n");
-            symref_map_free(&undef_refs);
+            ld_symtab_free(&symtab);
             objvec_free(&inputs);
             elf_close(out);
             return -1;
@@ -576,7 +577,7 @@ static int run_internal_link(ld_ctx_t *ctx) {
     } else if (ctx->mode == 32) {
         if (finalize_dynamic_imports_i386(out, &ctx->dyn_imports) != 0) {
             fprintf(stderr, "ld: failed to finalize i386 GOT/PLT dynamic data\n");
-            symref_map_free(&undef_refs);
+            ld_symtab_free(&symtab);
             objvec_free(&inputs);
             elf_close(out);
             return -1;
@@ -584,13 +585,13 @@ static int run_internal_link(ld_ctx_t *ctx) {
     }
     if (patch_dynamic_tag_values(out) != 0) {
         fprintf(stderr, "ld: failed to finalize .dynamic tag values\n");
-        symref_map_free(&undef_refs);
+        ld_symtab_free(&symtab);
         objvec_free(&inputs);
         elf_close(out);
         return -1;
     }
     if (enforce_wx_policy(out) != 0) {
-        symref_map_free(&undef_refs);
+        ld_symtab_free(&symtab);
         objvec_free(&inputs);
         elf_close(out);
         return -1;
@@ -602,7 +603,7 @@ static int run_internal_link(ld_ctx_t *ctx) {
             fprintf(stderr,
                     "ld: -z text: section %s is read-only and has relocations the dynamic linker would apply\n",
                     textrel_sec);
-            symref_map_free(&undef_refs);
+            ld_symtab_free(&symtab);
             objvec_free(&inputs);
             elf_close(out);
             return -1;
@@ -610,15 +611,15 @@ static int run_internal_link(ld_ctx_t *ctx) {
         if (textrel_sec != NULL && ctx->z_text_mode != 2 &&
             ld_warn(ctx, "section %s is read-only and has relocations for the dynamic linker (DT_TEXTREL); "
                          "was it compiled without -fPIC?", textrel_sec) != 0) {
-            symref_map_free(&undef_refs);
+            ld_symtab_free(&symtab);
             objvec_free(&inputs);
             elf_close(out);
             return -1;
         }
     }
 
-    if (check_undefined_symbols(out, ctx, allow_undef_runtime, &undef_refs) != 0) {
-        symref_map_free(&undef_refs);
+    if (check_undefined_symbols(out, ctx, allow_undef_runtime, &symtab) != 0) {
+        ld_symtab_free(&symtab);
         objvec_free(&inputs);
         elf_close(out);
         return -1;
@@ -626,14 +627,14 @@ static int run_internal_link(ld_ctx_t *ctx) {
 
     if (fill_local_got(ctx, out) != 0 ||
         apply_all_relocations(out, ctx, allow_undef_runtime) != 0) {
-        symref_map_free(&undef_refs);
+        ld_symtab_free(&symtab);
         objvec_free(&inputs);
         elf_close(out);
         return -1;
     }
     if (fill_eh_frame_hdr(out) != 0) {
         fprintf(stderr, "ld: failed to fill .eh_frame_hdr\n");
-        symref_map_free(&undef_refs);
+        ld_symtab_free(&symtab);
         objvec_free(&inputs);
         elf_close(out);
         return -1;
@@ -641,27 +642,27 @@ static int run_internal_link(ld_ctx_t *ctx) {
 
     if (set_entry_symbol(ctx, out, ctx->entry_symbol != NULL ? ctx->entry_symbol : "_start",
                          is_program, ctx->entry_symbol != NULL) != 0) {
-        symref_map_free(&undef_refs);
+        ld_symtab_free(&symtab);
         objvec_free(&inputs);
         elf_close(out);
         return -1;
     }
     if (finalize_symbol_values_for_output(out) != 0) {
         fprintf(stderr, "ld: failed to finalize output symbol value addresses\n");
-        symref_map_free(&undef_refs);
+        ld_symtab_free(&symtab);
         objvec_free(&inputs);
         elf_close(out);
         return -1;
     }
     if (patch_dynsym_symbol_values(ctx, out) != 0) {
         fprintf(stderr, "ld: failed to patch .dynsym symbol value addresses\n");
-        symref_map_free(&undef_refs);
+        ld_symtab_free(&symtab);
         objvec_free(&inputs);
         elf_close(out);
         return -1;
     }
-    if (write_map_file(ctx, &inputs, out) != 0) {
-        symref_map_free(&undef_refs);
+    if (write_map_file(ctx, &inputs, &symtab, out) != 0) {
+        ld_symtab_free(&symtab);
         objvec_free(&inputs);
         elf_close(out);
         return -1;
@@ -669,7 +670,7 @@ static int run_internal_link(ld_ctx_t *ctx) {
 
     if (elf_write_file(out, ctx->out_path) != ELF_OK) {
         fprintf(stderr, "ld: failed to write output %s\n", ctx->out_path);
-        symref_map_free(&undef_refs);
+        ld_symtab_free(&symtab);
         objvec_free(&inputs);
         elf_close(out);
         return -1;
@@ -677,14 +678,14 @@ static int run_internal_link(ld_ctx_t *ctx) {
     if (set_output_mode(ctx->out_path, is_program) != 0) {
         if (ld_warn(ctx, "failed to set output mode on %s: %s",
                     ctx->out_path, strerror(errno)) != 0) {
-            symref_map_free(&undef_refs);
+            ld_symtab_free(&symtab);
             objvec_free(&inputs);
             elf_close(out);
             return -1;
         }
     }
 
-    symref_map_free(&undef_refs);
+    ld_symtab_free(&symtab);
     objvec_free(&inputs);
     elf_close(out);
     return 0;

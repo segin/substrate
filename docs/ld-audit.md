@@ -171,7 +171,8 @@ short writes and close errors checked.
 
 ## 8. Structure
 
-- [ ] **LD-STR-001** The linker shall resolve symbols through one table.
+- [x] **LD-STR-001** The linker shall resolve symbols through one table.
+  Met in the linker: `ld_symtab.c` reads the inputs' global symbols once into `ld_symtab_t`, which is where two strong definitions are found, and what the undefined-reference message, the map and `--gc-sections` ask; `check_symbol_precedence`, the undefined-reference map, `find_symbol_source_input` and the collector's private table are gone, and the name sets used while inputs are chosen are hashed on the same index instead of searched from the front.  The object library's merge still applies the rule in its own code, since it is what writes the output's symbols; it had diverged from the linker's in one case -- a strong *reference* displaced an earlier weak *definition*, so a weak function called from a later object was "undefined" -- which is fixed, and the tests link every ordering of weak definition, strong definition and reference.  Fifteen links of the test programs come out byte for byte as before.
   Evidence: four implementations that have diverged — `symstate_t` (`ld.c:490-543, 3717, 3757`), `check_symbol_precedence` (`8615`), `merge_symbols` (`elf_link.c:722-847`), `check_undefined_symbols` (`10295`) — and seven linear name lookups (`260, 356, 490, 1064, 4418, 8578, 8718`).  Basis: traced.  Task #106.
 - [ ] **LD-STR-002** The linker shall describe each target architecture in a table and share the code that uses it.
   Evidence: six i386/x86-64 pairs (`6000-6066`, `6068-6182`, `6204-6382`, `6494-7108`, `9214-9304`, `5906-5959`); 31 class tests in `patch_dynamic_tag_values` (`7797`).  Basis: measured.  Task #107.

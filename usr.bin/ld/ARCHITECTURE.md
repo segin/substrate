@@ -9,10 +9,12 @@ It explains how the linker consumes ELF objects and scripts, how it composes the
 usr.bin/ld/
 ├── ld.h                     # Shared types, and the functions one file has and another uses
 ├── ld.c                     # The driver: options, the order of a link, the output file
-├── ld_util.c                # Vectors, sets, numbers, bytes, diagnostics
+├── ld_util.c                # Vectors, numbers, bytes, diagnostics
+├── ld_symtab.c              # Names: the index, sets of them, and the table of the
+│                            #   link's global symbols (who defines, who refers)
 ├── ld_input.c               # Objects, archives, libraries and where they are found
 ├── ld_dso.c                 # Shared objects as inputs: what they define, symbol versions
-├── ld_resolve.c             # Symbols across inputs: precedence, tracing, who refers to what
+├── ld_resolve.c             # What is said about symbols when asked: --trace, --warn-common
 ├── ld_script.c              # Linker scripts: lexer, expressions, parser, application
 ├── ld_layout.c              # Section order, addresses, segments
 ├── ld_dynamic.c             # .dynsym, imports, PLT and GOT, .dynamic
@@ -85,7 +87,7 @@ Name: Global symbol state, archive extraction, GC, and ICF
 
 Description: The linker tracks global symbol ownership, resolves weak/strong precedence, and determines when additional archive members must be materialized. Garbage collection (`ld_gc.c`) is decided on the input objects' sections before they are merged: from the entry, what the output exports, what runs unasked and what a script keeps, it follows relocations to the sections they name, and the merge is told which sections to pass over. Identical code folding works on the merged output.
 
-Symbols are not yet resolved through one table: archive selection, precedence checking, the shared-object probes and the merge each have their own view (`symstate_t` and its name sets in `ld_input.c`/`ld_dso.c`, the checks in `ld_resolve.c`, and `libelfobj`'s merge).
+Once the inputs are chosen their global symbols are read into one table (`ld_symtab_t`, `ld_symtab.c`): for each name, the definition the link takes (the first strong one, else the first weak), who else defines it, and who first refers to it. Two strong definitions are reported there; the undefined-reference message, the map's "source", and the collector's question "where is this defined" are all answered from it. While inputs are still being chosen the questions are of sets of names (defined so far, still wanted), which are `symset_t` on the same index of names. `libelfobj`'s merge decides what goes into the output by the same rule, in its own code; the tests link each ordering of weak, strong and reference to check that the two agree.
 
 Technologies: C, bounded symbol/object tracking, section reachability analysis, COMDAT handling
 
@@ -155,7 +157,7 @@ Target mode: The default build produces the Substrate-target linker for inclusio
 
 Alias links: The Makefile installs `ld.i386`, `ld.x86_64`, `ld.x86`, and `ld.x64` symlinks for architecture-specific invocation surfaces.
 
-Single-binary design: The linker is one program in thirteen translation units that share one header, `ld.h`, and one link context, `ld_ctx_t`. The files were cut from a single `ld.c` along its function families without changing a function; what is `static` is private to its file, and `ld.h` declares the rest.
+Single-binary design: The linker is one program in fourteen translation units that share one header, `ld.h`, and one link context, `ld_ctx_t`. The files were cut from a single `ld.c` along its function families without changing a function; what is `static` is private to its file, and `ld.h` declares the rest.
 
 ## 7. Security Considerations
 
@@ -183,7 +185,7 @@ What is open: `docs/ld-audit.md` is the checked record of what the linker does a
 
 Modularity pressure: The split is by file only. Every type is still in `ld.h` and every pass still takes the whole `ld_ctx_t`; narrowing what each file can see (its own header, its own part of the context) is the next step, and can be taken a file at a time.
 
-Structure still to come: one symbol table in place of the several resolvers; a description table for the two architectures in place of the parallel code; an option table and a phase list in place of the chain of comparisons and the long `run_internal_link`.
+Structure still to come: a description table for the two architectures in place of the parallel code; an option table and a phase list in place of the chain of comparisons and the long `run_internal_link`.
 
 Speed: shared objects are re-read for each question asked of them, archives are searched by reading every member, and `.gnu.hash` is written with one bucket.
 

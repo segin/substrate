@@ -231,7 +231,7 @@ int write_reproduce_bundle(const ld_ctx_t *ctx, const objvec_t *inputs) {
     return 0;
 }
 
-int write_map_file(const ld_ctx_t *ctx, const objvec_t *inputs, elfobj_t *out) {
+int write_map_file(const ld_ctx_t *ctx, const objvec_t *inputs, const ld_symtab_t *symtab, elfobj_t *out) {
     FILE *fp;
     size_t i;
 
@@ -285,6 +285,7 @@ int write_map_file(const ld_ctx_t *ctx, const objvec_t *inputs, elfobj_t *out) {
     fprintf(fp, "\nSymbols:\n");
     for (i = 0; i < elf_symbol_count(out); ++i) {
         const elf_symbol_t *sym = elf_symbol_at(out, i);
+        const ld_sym_t *known;
         const char *name;
         const char *src;
 
@@ -298,7 +299,8 @@ int write_map_file(const ld_ctx_t *ctx, const objvec_t *inputs, elfobj_t *out) {
         if (name == NULL || name[0] == '\0') {
             continue;
         }
-        src = find_symbol_source_input(inputs, name);
+        known = ld_symtab_find(symtab, name);
+        src = known != NULL ? known->first_def_src : NULL;
         fprintf(fp, "  %-28s value=0x%llx size=%llu bind=%u type=%u shndx=%u source=%s\n",
                 name,
                 (unsigned long long)elf_symbol_value(sym),

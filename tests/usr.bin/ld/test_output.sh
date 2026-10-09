@@ -123,6 +123,33 @@ is "a shared object keeps what it exports" "$(has gc.so unused_one)$(has gc.so u
 ./ld -m elf_i386 -r --gc-sections -o gcrel.o gc.o
 is "a relocatable output keeps everything" "$(has gcrel.o unused_one)" 1
 
+# Which definition a name gets does not depend on the order things are
+# met in, beyond first-come among equals: a weak definition serves a
+# reference in a later object as well as in an earlier one, a strong one
+# displaces a weak one whichever comes first, and two strong ones in
+# different objects are an error that names both.
+printf '__attribute__((weak)) int pick(void) { return 1; }\n' > weakdef.c
+printf 'int pick(void) { return 2; }\n' > strongdef.c
+printf 'int pick(void);\nvolatile int sunk;\nvoid _start(void) { sunk = pick(); for (;;) { } }\n' > caller.c
+$cc32 -o weakdef.o weakdef.c && $cc32 -o strongdef.o strongdef.c && $cc32 -o caller.o caller.c
+retval() {    # the constant the linked pick() returns: b8 NN 00 00 00
+    objdump -d "$1" | sed -n '/<pick>:/,/ret/p' | sed -n 's/.*mov  *\$0x\([0-9a-f]*\),%eax.*/\1/p' | head -1
+}
+./ld -m elf_i386 -o wd1 weakdef.o caller.o 2> err
+is "a weak definition before the reference to it" "$? $(retval wd1)" "0 1"
+./ld -m elf_i386 -o wd2 caller.o weakdef.o 2> err
+is "and after it"                     "$? $(retval wd2)" "0 1"
+./ld -m elf_i386 -o wd3 weakdef.o caller.o strongdef.o 2> err
+is "a strong definition after a weak one wins" "$? $(retval wd3)" "0 2"
+./ld -m elf_i386 -o wd4 strongdef.o caller.o weakdef.o 2> err
+is "and before it"                    "$? $(retval wd4)" "0 2"
+cp strongdef.o strongdef2.o
+if ./ld -m elf_i386 -o wd5 strongdef.o caller.o strongdef2.o 2> err; then echo "FAIL two strong definitions: linked"; fail=1
+else is "two strong definitions are an error naming both" \
+        "$(grep -c 'duplicate strong definition of .pick.: strongdef.o and strongdef2.o' err)" 1; fi
+if ./ld -m elf_i386 -o wd6 caller.o 2> err; then echo "FAIL no definition: linked"; fail=1
+else is "no definition names who wanted it" "$(grep -c 'undefined reference to .pick. (referenced by caller.o)' err)" 1; fi
+
 # The map and the --reproduce bundle are for later: a map that could not
 # be written is an error, and the bundle's script makes the same output.
 ${CC:-cc} -m32 -c -ffreestanding -fPIE -fno-asynchronous-unwind-tables -o spie_early.o s.c

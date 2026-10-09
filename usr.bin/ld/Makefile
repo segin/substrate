@@ -3,7 +3,7 @@ DYNAMIC = 1
 include ../../Makefile.inc
 
 PROG = ld
-SRCS = ld.c ld_util.c ld_script.c ld_plugin.c ld_input.c ld_dso.c ld_dynamic.c ld_ehframe.c ld_resolve.c ld_map.c ld_reloc.c ld_layout.c ld_gc.c
+SRCS = ld.c ld_util.c ld_symtab.c ld_script.c ld_plugin.c ld_input.c ld_dso.c ld_dynamic.c ld_ehframe.c ld_resolve.c ld_map.c ld_reloc.c ld_layout.c ld_gc.c
 ELFOBJ_DIR = ../../usr.lib/elfobj
 ELFOBJ_AR    = $(ELFOBJ_DIR)/libelfobj.a
 ELFOBJ_SHLIB = $(ELFOBJ_DIR)/libelfobj.so.0

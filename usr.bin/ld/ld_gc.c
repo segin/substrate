@@ -68,52 +68,14 @@ static int is_gc_candidate_section(const elf_section_t *sec) {
  * roots nor candidates: they stay, and are not followed.
  */
 typedef struct {
-    const elf_symbol_t *sym;
-    size_t obj;
-} gc_def_t;
-
-typedef struct {
     const ld_ctx_t *ctx;
     const objvec_t *inputs;
+    const ld_symtab_t *symtab;  /* which definition of a name the link takes */
     uint8_t **live;             /* live[i][s]: section s of input i */
-    gc_def_t *defs;             /* global definitions, by name; of one name
-                                 * the one the link will take comes first */
-    size_t def_count;
     size_t *work;               /* pairs: input, section */
     size_t work_count;
     size_t work_cap;
 } gc_state_t;
-
-static int gc_def_cmp(const void *a, const void *b) {
-    const gc_def_t *x = (const gc_def_t *)a;
-    const gc_def_t *y = (const gc_def_t *)b;
-    int c = strcmp(elf_symbol_name(x->sym), elf_symbol_name(y->sym));
-    int xw = elf_symbol_bind(x->sym) == STB_WEAK;
-    int yw = elf_symbol_bind(y->sym) == STB_WEAK;
-
-    if (c != 0) {
-        return c;
-    }
-    if (xw != yw) {
-        return xw - yw;         /* a strong definition before a weak one */
-    }
-    return x->obj < y->obj ? -1 : x->obj > y->obj;
-}
-
-static const gc_def_t *gc_find_def(const gc_state_t *st, const char *name) {
-    size_t lo = 0, hi = st->def_count;
-
-    while (lo < hi) {
-        size_t mid = lo + (hi - lo) / 2;
-
-        if (strcmp(elf_symbol_name(st->defs[mid].sym), name) < 0) {
-            lo = mid + 1;
-        } else {
-            hi = mid;
-        }
-    }
-    return lo < st->def_count && strcmp(elf_symbol_name(st->defs[lo].sym), name) == 0 ? &st->defs[lo] : NULL;
-}
 
 static int gc_symbol_is_defined(const elf_symbol_t *sym) {
     uint16_t shndx = elf_symbol_shndx(sym);
@@ -164,10 +126,13 @@ static int gc_mark_symbol(gc_state_t *st, size_t obj, const elf_symbol_t *sym) {
         return 0;
     }
     if (elf_symbol_bind(sym) != STB_LOCAL && name != NULL && name[0] != '\0') {
-        const gc_def_t *def = gc_find_def(st, name);
+        const ld_sym_t *known = ld_symtab_find(st->symtab, name);
 
-        if (def != NULL) {
-            return gc_mark(st, def->obj, gc_section_of(st->inputs->objs[def->obj], elf_symbol_shndx(def->sym)));
+        if (known != NULL && known->def != NULL) {
+            return gc_symbol_is_defined(known->def)
+                       ? gc_mark(st, known->def_input,
+                                 gc_section_of(st->inputs->objs[known->def_input], elf_symbol_shndx(known->def)))
+                       : 0;
         }
     }
     return gc_symbol_is_defined(sym)
@@ -332,9 +297,9 @@ int gc_keep_input_section(const elf_section_t *section, void *user) {
     return !(lo < ctx->gc_dead_count && ctx->gc_dead[lo] == section);
 }
 
-int gc_collect_input_sections(ld_ctx_t *ctx, const objvec_t *inputs) {
+int gc_collect_input_sections(ld_ctx_t *ctx, const objvec_t *inputs, const ld_symtab_t *symtab) {
     gc_state_t st;
-    size_t i, s, total = 0, ndefs = 0;
+    size_t i, s, total = 0;
     int export_all = (ctx->expect_type == ET_DYN && !ctx->pie) || ctx->export_dynamic;
     const char *entry = ctx->entry_symbol != NULL && ctx->entry_symbol[0] != '\0' ? ctx->entry_symbol : "_start";
     int progress;
@@ -343,68 +308,42 @@ int gc_collect_input_sections(ld_ctx_t *ctx, const objvec_t *inputs) {
     memset(&st, 0, sizeof(st));
     st.ctx = ctx;
     st.inputs = inputs;
+    st.symtab = symtab;
     ctx->gc_dead_count = 0;
     st.live = (uint8_t **)calloc(inputs->count ? inputs->count : 1, sizeof(st.live[0]));
     if (st.live == NULL) {
         return -1;
     }
     for (i = 0; i < inputs->count; ++i) {
-        size_t k;
-
         total += elf_section_count(inputs->objs[i]);
         st.live[i] = (uint8_t *)calloc(elf_section_count(inputs->objs[i]) + 1, 1);
         if (st.live[i] == NULL) {
             goto out;
         }
-        for (k = 0; k < elf_symbol_count(inputs->objs[i]); ++k) {
-            const elf_symbol_t *sym = elf_symbol_at(inputs->objs[i], k);
-
-            ndefs += sym != NULL && elf_symbol_bind(sym) != STB_LOCAL && gc_symbol_is_defined(sym) &&
-                     elf_symbol_name(sym) != NULL && elf_symbol_name(sym)[0] != '\0';
-        }
     }
-    st.defs = (gc_def_t *)calloc(ndefs ? ndefs : 1, sizeof(st.defs[0]));
-    if (st.defs == NULL) {
-        goto out;
-    }
-    for (i = 0; i < inputs->count; ++i) {
-        size_t k;
-
-        for (k = 0; k < elf_symbol_count(inputs->objs[i]); ++k) {
-            const elf_symbol_t *sym = elf_symbol_at(inputs->objs[i], k);
-
-            if (sym != NULL && elf_symbol_bind(sym) != STB_LOCAL && gc_symbol_is_defined(sym) &&
-                elf_symbol_name(sym) != NULL && elf_symbol_name(sym)[0] != '\0') {
-                st.defs[st.def_count].sym = sym;
-                st.defs[st.def_count].obj = i;
-                st.def_count++;
-            }
-        }
-    }
-    qsort(st.defs, st.def_count, sizeof(st.defs[0]), gc_def_cmp);
 
     /* The roots. */
     {
-        const gc_def_t *def = gc_find_def(&st, entry);
+        const ld_sym_t *known = ld_symtab_find(symtab, entry);
 
-        if (def != NULL && gc_mark_symbol(&st, def->obj, def->sym) != 0) {
+        if (known != NULL && known->def != NULL && gc_mark_symbol(&st, known->def_input, known->def) != 0) {
             goto out;
         }
     }
     for (i = 0; i < ctx->force_undefined.count; ++i) {
-        const gc_def_t *def = gc_find_def(&st, ctx->force_undefined.items[i]);
+        const ld_sym_t *known = ld_symtab_find(symtab, ctx->force_undefined.items[i]);
 
-        if (def != NULL && gc_mark_symbol(&st, def->obj, def->sym) != 0) {
+        if (known != NULL && known->def != NULL && gc_mark_symbol(&st, known->def_input, known->def) != 0) {
             goto out;
         }
     }
-    for (i = 0; i < st.def_count; ++i) {
-        const elf_symbol_t *sym = st.defs[i].sym;
-        uint8_t vis = elf_symbol_visibility(sym);
+    for (i = 0; i < symtab->count; ++i) {
+        const ld_sym_t *known = &symtab->syms[i];
+        uint8_t vis = known->def != NULL ? elf_symbol_visibility(known->def) : STV_HIDDEN;
 
         if ((vis == STV_DEFAULT || vis == STV_PROTECTED) &&
-            (export_all || symset_contains(&ctx->dso_wants, elf_symbol_name(sym))) &&
-            gc_mark_symbol(&st, st.defs[i].obj, sym) != 0) {
+            (export_all || symset_contains(&ctx->dso_wants, known->name)) &&
+            gc_mark_symbol(&st, known->def_input, known->def) != 0) {
             goto out;
         }
     }
@@ -471,7 +410,6 @@ out:
         free(st.live[i]);
     }
     free(st.live);
-    free(st.defs);
     free(st.work);
     return rc;
 }

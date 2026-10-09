@@ -138,10 +138,17 @@ typedef struct {
     size_t cap;
 } defsymvec_t;
 
+/* Where in some array the entry of a given name is: see ld_symtab.c. */
+typedef struct {
+    size_t *slots;              /* an entry's number plus one, or 0 */
+    size_t cap;                 /* a power of two, or 0 */
+} ld_nameidx_t;
+
 typedef struct {
     char **items;
     size_t count;
     size_t cap;
+    ld_nameidx_t index;
 } symset_t;
 
 typedef struct {
@@ -486,30 +493,30 @@ typedef struct {
     int64_t fde;                /* of its FDE, from the table */
 } eh_entry_t;
 
+/*
+ * One global name, as the link knows it: see ld_symtab.c.  The sources
+ * are the names of inputs.
+ */
 typedef struct {
     char *name;
+    const elf_symbol_t *def;    /* the definition the link takes: the first
+                                 * strong one, else the first weak; NULL if
+                                 * there is none, or only a common one */
+    size_t def_input;           /* the input it is in */
+    const char *first_def_src;  /* the first input to define it at all */
     const char *strong_src;
     const char *weak_src;
     const char *common_src;
     uint64_t common_size;
-} symrule_entry_t;
+    const char *ref_src;        /* the first input to refer to it undefined */
+} ld_sym_t;
 
 typedef struct {
-    symrule_entry_t *items;
+    ld_sym_t *syms;             /* in the order first met */
     size_t count;
     size_t cap;
-} symrule_vec_t;
-
-typedef struct {
-    char *name;
-    const char *source;
-} symref_entry_t;
-
-typedef struct {
-    symref_entry_t *items;
-    size_t count;
-    size_t cap;
-} symref_map_t;
+    ld_nameidx_t index;
+} ld_symtab_t;
 
 typedef struct {
     ld_ctx_t *ctx;
@@ -640,15 +647,13 @@ int fill_eh_frame_hdr(elfobj_t *out);
 void emit_trace_inputs(const ld_ctx_t *ctx, const objvec_t *inputs);
 void emit_trace_symbols(const ld_ctx_t *ctx, const objvec_t *inputs);
 int emit_common_symbol_warnings(ld_ctx_t *ctx, const objvec_t *inputs);
-int check_symbol_precedence(ld_ctx_t *ctx, const objvec_t *inputs);
-void symref_map_free(symref_map_t *m);
-const char *symref_map_get(const symref_map_t *m, const char *name);
-int collect_undefined_refs(const objvec_t *inputs, symref_map_t *out);
-const char *find_symbol_source_input(const objvec_t *inputs, const char *sym_name);
+int ld_symtab_build(ld_ctx_t *ctx, const objvec_t *inputs, ld_symtab_t *t);
+const ld_sym_t *ld_symtab_find(const ld_symtab_t *t, const char *name);
+void ld_symtab_free(ld_symtab_t *t);
 
 /* ld_map.c */
 int write_reproduce_bundle(const ld_ctx_t *ctx, const objvec_t *inputs);
-int write_map_file(const ld_ctx_t *ctx, const objvec_t *inputs, elfobj_t *out);
+int write_map_file(const ld_ctx_t *ctx, const objvec_t *inputs, const ld_symtab_t *symtab, elfobj_t *out);
 
 /* ld_reloc.c */
 int apply_defsyms(ld_ctx_t *ctx, elfobj_t *out);
@@ -673,7 +678,7 @@ int strip_group_sections_for_final(elfobj_t *obj);
 int enforce_wx_policy(const elfobj_t *obj);
 
 /* ld_gc.c */
-int gc_collect_input_sections(ld_ctx_t *ctx, const objvec_t *inputs);
+int gc_collect_input_sections(ld_ctx_t *ctx, const objvec_t *inputs, const ld_symtab_t *symtab);
 int gc_keep_input_section(const elf_section_t *section, void *user);
 int apply_identical_code_folding(elfobj_t *obj, const ld_ctx_t *ctx);
 
