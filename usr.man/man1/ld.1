@@ -92,6 +92,26 @@ ordinary and thin archives are read.
 An archive that is truncated or whose member headers do not make sense is
 an error that says what is wrong and at what offset, and ends the link.
 .Sh OPTIONS
+An option that is a word and takes a value may be written with the value
+as the next argument or joined to it with
+.Ql = :
+.Fl -hash-style Ar gnu
+and
+.Fl -hash-style Ns = Ns Ar gnu
+are the same.
+The options that are one letter and take a value
+.Pq Fl L , l , m , o , T , u , z
+take it as the next argument or joined on with nothing between:
+.Fl o Ar file
+and
+.Fl o Ns Ar file .
+A word is recognised before a letter is, so
+.Fl Ttext-segment
+is not
+.Fl T
+and a script named
+.Pa text-segment .
+An option that needs a value and has none is an error, and exit status 2.
 .Bl -tag -width "--unresolved-symbols=report-all"
 .It Fl m32 , Fl m64 , Fl m Ar emulation
 Select output architecture mode.

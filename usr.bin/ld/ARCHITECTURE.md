@@ -8,7 +8,8 @@ It explains how the linker consumes ELF objects and scripts, how it composes the
 ```text
 usr.bin/ld/
 ├── ld.h                     # Shared types, and the functions one file has and another uses
-├── ld.c                     # The driver: options, the order of a link, the output file
+├── ld.c                     # The driver: the order of a link, the output file
+├── ld_options.c             # The command line: the table of options and its reader
 ├── ld_util.c                # Vectors, numbers, bytes, diagnostics
 ├── ld_symtab.c              # Names: the index, sets of them, and the table of the
 │                            #   link's global symbols (who defines, who refers)
@@ -77,7 +78,7 @@ cc
 
 Name: `ld.c` command parser and `ld_input.c` input collection path
 
-Description: The linker entry point parses CLI policy into a single link context, then loads regular objects, archives, thin archives, DSOs, and script wrappers. This is the layer that decides target mode, unresolved-symbol behavior, and whether dynamic or relocatable output is being built.
+Description: The options are a table (`options` in `ld_options.c`): each row has an option's spellings, its form (a word alone, a word with a value, a letter with a value joined on) and what sets it -- for most, one member of the context and the value to give it. One reader matches an argument against the table, fetches the value and reports one that is missing, so no option does that for itself. `main` reads the command line, runs the link, and releases what the context owns in one place whichever way it ends. The linker entry point parses CLI policy into a single link context, then loads regular objects, archives, thin archives, DSOs, and script wrappers. This is the layer that decides target mode, unresolved-symbol behavior, and whether dynamic or relocatable output is being built.
 
 Technologies: C, ELF parsing via `libelfobj`, archive scanning, linker-script front-end logic
 
@@ -161,7 +162,7 @@ Target mode: The default build produces the Substrate-target linker for inclusio
 
 Alias links: The Makefile installs `ld.i386`, `ld.x86_64`, `ld.x86`, and `ld.x64` symlinks for architecture-specific invocation surfaces.
 
-Single-binary design: The linker is one program in fifteen translation units that share one header, `ld.h`, and one link context, `ld_ctx_t`. The files were cut from a single `ld.c` along its function families without changing a function; what is `static` is private to its file, and `ld.h` declares the rest.
+Single-binary design: The linker is one program in sixteen translation units that share one header, `ld.h`, and one link context, `ld_ctx_t`. The files were cut from a single `ld.c` along its function families without changing a function; what is `static` is private to its file, and `ld.h` declares the rest.
 
 ## 7. Security Considerations
 
@@ -188,8 +189,6 @@ Integration role: The linker is exercised directly by its own suite and indirect
 What is open: `docs/ld-audit.md` is the checked record of what the linker does and does not do, with evidence; `SPEC.md` §0 lists what is specified and absent. `TASKLIST_LINKER.md` is the older backlog and its ticks were not all verified.
 
 Modularity pressure: The split is by file only. Every type is still in `ld.h` and every pass still takes the whole `ld_ctx_t`; narrowing what each file can see (its own header, its own part of the context) is the next step, and can be taken a file at a time.
-
-Structure still to come: an option table in place of the chain of comparisons in `main`.
 
 Speed: shared objects are re-read for each question asked of them, archives are searched by reading every member, and `.gnu.hash` is written with one bucket.
 

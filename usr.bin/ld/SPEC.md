@@ -46,8 +46,9 @@ should be built on the assumption that they are.
 The structure the specification asks for in §3.2 is only partly there:
 the source is divided by function, the linker asks about symbols in one
 table (`ld_symtab.c`) and the two architectures are described in one
-(`ld_arch.c`), and the order of a link is a table whose constraints are
-checked, but options are parsed by a chain of comparisons.  Those are tracked in `docs/ld-audit.md` under
+(`ld_arch.c`), the order of a link is a table whose constraints are
+checked, and the options are a table (`ld_options.c`); but every pass
+is still handed the whole link context, options and state together.  Those are tracked in `docs/ld-audit.md` under
 "Structure".
 
 ---

@@ -157,6 +157,7 @@ typedef struct {
 } symstate_t;
 
 typedef struct {
+    const char *prog;           /* argv[0] */
     int mode; /* 32 or 64 */
     int explicit_mode;
     int mode_settled;           /* an input has said which machine */
@@ -601,6 +602,13 @@ int parse_z_option(ld_ctx_t *ctx, const char *val);
 int parse_hash_style_option(const char *val, ld_hash_style_t *out_style);
 void ld_diag_note(const char *category, const char *source, const char *hint);
 int ld_warn(ld_ctx_t *ctx, const char *fmt, ...);
+
+/* ld_options.c: the command line.  ld_parse_options() gives 0, or what
+ * ld is to exit with. */
+#define LD_OPT_USAGE 2          /* a mistake on the command line, and said */
+#define LD_OPT_DONE (-1)        /* nothing more to do, and nothing wrong */
+void ld_usage(const char *prog);
+int ld_parse_options(ld_ctx_t *ctx, int argc, char **argv);
 int set_explicit_mode(ld_ctx_t *ctx, int mode, const char *opt_text);
 int align_up_u64_checked(uint64_t v, uint64_t a, uint64_t *out);
 int add_u64_checked(uint64_t a, uint64_t b, uint64_t *out);
