@@ -18,6 +18,9 @@
 #include <fcntl.h>
 
 #define LD_MAX_SCRIPT_INCLUDE_DEPTH 16
+/* How deeply a script expression may nest: parentheses, unary operators
+ * and the arguments of builtins each count one. */
+#define LD_MAX_SCRIPT_EXPR_DEPTH 256
 #define LD_MAX_TRACKED_SYMBOLS 262144U
 #define LD_MAX_INPUT_OBJECTS 131072U
 #define LD_MAX_ARCHIVE_SCAN_PASSES 1024
@@ -937,6 +940,7 @@ typedef struct {
     const elfobj_t *obj;
     const lds_tok_t *err_tok;
     const char *err_msg;
+    unsigned depth;             /* nesting, bounded by LD_MAX_SCRIPT_EXPR_DEPTH */
 } lds_eval_ctx_t;
 
 typedef struct {
@@ -1429,7 +1433,29 @@ static int lds_eval_primary(lds_eval_ctx_t *ec, const lds_tok_t *items, size_t *
     return -1;
 }
 
+static int lds_eval_unary_nested(lds_eval_ctx_t *ec, const lds_tok_t *items, size_t *idx, size_t end, uint64_t *out);
+
+/*
+ * Every level of nesting an expression can have -- a parenthesis, a unary
+ * operator, an argument of a builtin -- comes through here, so this is
+ * where the depth is counted.  The evaluator recurses on the C stack and a
+ * script is input: a megabyte of '(' must be a syntax error.
+ */
 static int lds_eval_unary(lds_eval_ctx_t *ec, const lds_tok_t *items, size_t *idx, size_t end, uint64_t *out) {
+    int rc;
+
+    if (ec->depth >= LD_MAX_SCRIPT_EXPR_DEPTH) {
+        ec->err_tok = *idx < end ? &items[*idx] : NULL;
+        ec->err_msg = "expression nested too deeply";
+        return -1;
+    }
+    ec->depth++;
+    rc = lds_eval_unary_nested(ec, items, idx, end, out);
+    ec->depth--;
+    return rc;
+}
+
+static int lds_eval_unary_nested(lds_eval_ctx_t *ec, const lds_tok_t *items, size_t *idx, size_t end, uint64_t *out) {
     if (*idx < end && lds_tok_is(&items[*idx], LDS_TOK_OTHER, "+")) {
         (*idx)++;
         return lds_eval_unary(ec, items, idx, end, out);

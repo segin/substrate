@@ -124,7 +124,8 @@ short writes and close errors checked.
 
 ## 7. Linker scripts
 
-- [ ] **LD-SCR-001** If an expression is nested more deeply than a fixed limit, then the linker shall reject the script.
+- [x] **LD-SCR-001** If an expression is nested more deeply than a fixed limit, then the linker shall reject the script.
+  Met: `lds_eval_unary` counts every level (parenthesis, unary operator, builtin argument) against `LD_MAX_SCRIPT_EXPR_DEPTH` (256).  Shown: 200000 nested `(`, `~` or `ALIGN(` give `s.lds:1:263: linker script parse error: expression nested too deeply`, where the linker died of SIGSEGV; 100 levels still evaluate.
   Evidence: unbounded recursion at `ld.c:1357-1459`.  Basis: traced.  Task #57.
 - [ ] **LD-SCR-002** The linker shall maintain a location counter and shall evaluate assignments, `PROVIDE` and `ASSERT` wherever the script grammar allows them, including inside `SECTIONS`.
   Evidence: `ld.c:2608-2609` acts only at brace depth 0; top-level `. =` becomes a symbol named `.` (`2098`).  Basis: traced.  Task #58.
