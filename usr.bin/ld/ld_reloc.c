@@ -1267,19 +1267,27 @@ int apply_all_relocations(elfobj_t *obj, const ld_ctx_t *ctx, int allow_undefine
             if (type == 0) {
                 continue;       /* R_*_NONE: nothing, by name */
             }
+            /* Who it is about, before anything can go wrong with it. */
+            sym = elf_reloc_symbol(rel);
+            if (sym != NULL && elf_symbol_name(sym) != NULL && elf_symbol_name(sym)[0] != '\0') {
+                sym_name = elf_symbol_name(sym);
+            }
             width = elf_reloc_size_for_machine(elf_machine(obj), type);
             if (width <= 0 || width > 8) {
                 free(buf);
                 fprintf(stderr,
-                        "ld: relocation error: section=%s offset=0x%llx type=%u symbol=%s: unsupported relocation width\n",
-                        sec_name, (unsigned long long)off, type, sym_name);
+                        "ld: relocation error: section=%s offset=0x%llx type=%s symbol=%s: "
+                        "a relocation of this type is not supported\n",
+                        sec_name, (unsigned long long)off, elf_reloc_name_for_machine(machine, type), sym_name);
                 return -1;
             }
             if (off + (uint64_t)width > sec_sz) {
                 free(buf);
                 fprintf(stderr,
-                        "ld: relocation error: section=%s offset=0x%llx type=%u symbol=%s: relocation out of range\n",
-                        sec_name, (unsigned long long)off, type, sym_name);
+                        "ld: relocation error: section=%s offset=0x%llx type=%s symbol=%s: "
+                        "the place to be relocated is past the end of the section (%llu bytes)\n",
+                        sec_name, (unsigned long long)off, elf_reloc_name_for_machine(machine, type), sym_name,
+                        (unsigned long long)sec_sz);
                 return -1;
             }
             if (elf_reloc_has_addend(rel)) {
@@ -1293,10 +1301,6 @@ int apply_all_relocations(elfobj_t *obj, const ld_ctx_t *ctx, int allow_undefine
                 }
             }
 
-            sym = elf_reloc_symbol(rel);
-            if (sym != NULL && elf_symbol_name(sym) != NULL && elf_symbol_name(sym)[0] != '\0') {
-                sym_name = elf_symbol_name(sym);
-            }
             if (resolve_symbol_addr_for_reloc(obj, ctx, sym, allow_undefined, type, &S, &undef_name) != 0) {
                 if ((flags & SHF_ALLOC) == 0) {
                     /* What a description of the program refers to may
@@ -1315,8 +1319,10 @@ int apply_all_relocations(elfobj_t *obj, const ld_ctx_t *ctx, int allow_undefine
                 }
                 free(buf);
                 fprintf(stderr,
-                        "ld: relocation error: section=%s offset=0x%llx type=%u symbol=%s: unresolved relocation symbol\n",
-                        sec_name, (unsigned long long)off, type, undef_name != NULL ? undef_name : sym_name);
+                        "ld: relocation error: section=%s offset=0x%llx type=%s symbol=%s: "
+                        "the symbol is not defined, and this kind of reference cannot be left to the dynamic linker\n",
+                        sec_name, (unsigned long long)off, elf_reloc_name_for_machine(machine, type),
+                        undef_name != NULL ? undef_name : sym_name);
                 return -1;
             }
             if ((machine == EM_386 && type == R_386_SIZE32) ||
@@ -1442,8 +1448,9 @@ int apply_all_relocations(elfobj_t *obj, const ld_ctx_t *ctx, int allow_undefine
             if (err != ELF_OK) {
                 free(buf);
                 fprintf(stderr,
-                        "ld: relocation error: section=%s offset=0x%llx type=%u symbol=%s: %s\n",
-                        sec_name, (unsigned long long)off, type, sym_name, elf_errstr(err));
+                        "ld: relocation error: section=%s offset=0x%llx type=%s symbol=%s: %s\n",
+                        sec_name, (unsigned long long)off, elf_reloc_name_for_machine(machine, type), sym_name,
+                        elf_errstr(err));
                 return -1;
             }
             if (machine == EM_X86_64 &&

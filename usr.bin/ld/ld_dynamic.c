@@ -1296,6 +1296,8 @@ int finalize_dynamic_imports_x64(elfobj_t *out, const dyn_import_vec_t *imports)
     rela_dyn = elf_find_section(out, ".rela.dyn");
     dynamic = elf_find_section(out, ".dynamic");
     if (need_plt_count != 0 && (plt == NULL || gotplt == NULL)) {
+        fprintf(stderr, "ld: internal error: %zu imported functions need the PLT and there is no %s\n",
+                need_plt_count, plt == NULL ? ".plt" : ".got.plt");
         return -1;
     }
 
@@ -1536,6 +1538,12 @@ int finalize_dynamic_imports_x64(elfobj_t *out, const dyn_import_vec_t *imports)
                 roff = (rela_dyn_base_count + extra_idx) * 24;
                 extra_idx++;
                 if (rela_dyn_buf == NULL || roff + 24 > rela_dyn_sz) {
+                    fprintf(stderr,
+                            "ld: internal error: no room in .rela.dyn for the %s relocation of %s at %s+0x%llx\n",
+                            elf_reloc_name_for_machine(EM_X86_64, type),
+                            sym != NULL && elf_symbol_name(sym) != NULL ? elf_symbol_name(sym) : "?",
+                            elf_section_name(sec) != NULL ? elf_section_name(sec) : "?",
+                            (unsigned long long)off);
                     return -1;
                 }
                 write_u64_endian(rela_dyn_buf + roff + 0, e, slot_addr);
@@ -1649,6 +1657,8 @@ int finalize_dynamic_imports_i386(elfobj_t *out, const dyn_import_vec_t *imports
     rel_dyn = elf_find_section(out, ".rel.dyn");
     dynamic = elf_find_section(out, ".dynamic");
     if (need_plt_count != 0 && (plt == NULL || gotplt == NULL)) {
+        fprintf(stderr, "ld: internal error: %zu imported functions need the PLT and there is no %s\n",
+                need_plt_count, plt == NULL ? ".plt" : ".got.plt");
         return -1;
     }
 
@@ -1889,6 +1899,12 @@ int finalize_dynamic_imports_i386(elfobj_t *out, const dyn_import_vec_t *imports
                 roff = (rel_dyn_base_count + extra_idx) * 8;
                 extra_idx++;
                 if (rel_dyn_buf == NULL || roff + 8 > rel_dyn_sz) {
+                    fprintf(stderr,
+                            "ld: internal error: no room in .rel.dyn for the %s relocation of %s at %s+0x%llx\n",
+                            elf_reloc_name_for_machine(EM_386, type),
+                            sym != NULL && elf_symbol_name(sym) != NULL ? elf_symbol_name(sym) : "?",
+                            elf_section_name(sec) != NULL ? elf_section_name(sec) : "?",
+                            (unsigned long long)elf_reloc_offset(rel));
                     return -1;
                 }
                 write_u32_endian(rel_dyn_buf + roff + 0, e, (uint32_t)slot_addr);

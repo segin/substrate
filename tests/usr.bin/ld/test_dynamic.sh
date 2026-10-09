@@ -185,6 +185,27 @@ if ./ld -m elf_i386 -shared -o x.so lib.o -soname > err 2>&1; then echo "FAIL -s
 elif grep -q "needs a value" err; then echo "ok   -soname with nothing after it"
 else echo "FAIL -soname with nothing after it: $(head -1 err)"; fail=1; fi
 
+# What cannot be used is said for what it is: a file that is not there,
+# one that is not an object, one for another machine, and a -l that found
+# only the last kind.
+printf 'not an object at all' > junk.so
+head -c 40 d64/libnum.so > cut.so
+says() {    # WHAT PATTERN COMMAND...
+    what=$1; pat=$2; shift 2
+    if "$@" > /dev/null 2> err; then echo "FAIL $what: linked"; fail=1
+    elif grep -q "$pat" err; then echo "ok   $what"
+    else echo "FAIL $what: $(head -1 err)"; fail=1; fi
+}
+says "a file that is not there"       "cannot open nowhere.so: No such file" ./ld -m elf_i386 -o no main.o nowhere.so
+says "a file that is not an object"   "junk.so is not an object, archive or shared object" ./ld -m elf_i386 -o no main.o junk.so
+says "a shared object cut short"      "cut.so is not an object, archive or shared object" ./ld -m elf_i386 -o no main.o cut.so
+says "a shared object for another machine" "d64/libnum.so is for x86-64 and this link is for i386" ./ld -m elf_i386 -o no main.o d64/libnum.so
+says "a -l that finds only another machine's" "d64/libnum.so is for another machine" ./ld -m elf_i386 -o no main.o -Ld64 -lnum
+# A relocation the output cannot have is named, with its symbol.
+printf '__thread int t;\nint get(void) { return t; }\n' > lexec.c
+$cc32 -fno-pic -fno-pie -o lexec.o lexec.c
+says "a relocation error names the type and the symbol" "type=R_386_TLS_LE symbol=t:" ./ld -m elf_i386 -shared -o no.so lexec.o
+
 # An indirect function is a resolver, and what it returns is the function.
 # One bound in the output is called through a stub in .iplt and a GOT entry
 # that an IRELATIVE relocation has the dynamic linker fill in, and the stub

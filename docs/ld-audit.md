@@ -74,7 +74,8 @@ short writes and close errors checked.
 - [x] **LD-REL-011** Where an input defines an indirect function, the linker shall emit `IRELATIVE` relocations and PLT entries for it.
   Met: an indirect function bound in the output gets a stub in `.iplt` and a GOT entry with an `IRELATIVE` relocation (`collect_local_got`, `fill_local_got`), and the stub is its address for every reference (`resolve_symbol_addr`); one a shared object exports is found by name like any preemptible symbol.  A statically linked program is refused, there being nothing to call the resolver.  Shown on the target, both architectures: in a program, in a PIE, hidden in a shared object and exported from one.  (The target's compiler has no `ifunc` attribute; the tests declare the type in assembly.)
   Evidence: no `STT_GNU_IFUNC` or `IRELATIVE` handling in `ld.c`.  Basis: verified absent.  Task #93.
-- [ ] **LD-REL-012** If planning or finalising dynamic data fails, then the linker shall name the symbol, section and relocation type concerned, and shall distinguish an unreadable or wrong-architecture shared object from an unsupported feature.
+- [x] **LD-REL-012** If planning or finalising dynamic data fails, then the linker shall name the symbol, section and relocation type concerned, and shall distinguish an unreadable or wrong-architecture shared object from an unsupported feature.
+  Met: a relocation error gives the type by name and the symbol, which is found before anything can fail; an input that cannot be used is reported as missing, unreadable, not an object, or for another machine (naming both machines), and a `-l` that found only another machine's library says which file it passed over; the places in the PLT/GOT finalising code that returned failure with nothing said now say what they wanted.
   Evidence: `ld.c:10751, 10803, 10811`; `10412-10421` print `<none>`; types printed as numbers; `8351-8353`.  Basis: traced.  Task #94.
 
 ## 3. Dynamic linking metadata

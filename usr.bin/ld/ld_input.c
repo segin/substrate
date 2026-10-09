@@ -594,12 +594,27 @@ static int object_has_lto_sections(const elfobj_t *obj) {
 
 static int load_object_input(const char *path, ld_ctx_t *ctx, objvec_t *objs, symstate_t *state, int quiet) {
     elfobj_t *obj = NULL;
+    elf_err_t open_err;
     char mat_path[1024];
     int mat_rc;
 
-    if (elf_open(path, &obj) != ELF_OK) {
+    open_err = elf_open(path, &obj);
+    if (open_err != ELF_OK) {
+        /* A file that is not there, one that cannot be read and one that
+         * is not an object are three different things to be told. */
         if (!quiet) {
-            fprintf(stderr, "ld: failed to open input %s\n", path);
+            struct stat st;
+            FILE *probe;
+
+            if (stat(path, &st) != 0) {
+                fprintf(stderr, "ld: cannot open %s: %s\n", path, strerror(errno));
+            } else if ((probe = fopen(path, "rb")) == NULL) {
+                fprintf(stderr, "ld: cannot read %s: %s\n", path, strerror(errno));
+            } else {
+                fclose(probe);
+                fprintf(stderr, "ld: %s is not an object, archive or shared object this linker can read: %s\n",
+                        path, elf_errstr(open_err));
+            }
         }
         return -1;
     }
@@ -626,7 +641,17 @@ static int load_object_input(const char *path, ld_ctx_t *ctx, objvec_t *objs, sy
     }
     if (!obj_matches_mode(obj, ctx->mode)) {
         if (!quiet) {
-            fprintf(stderr, "ld: input %s has mismatched class/machine/endianness\n", path);
+            int its = elf_class(obj) == ELFOBJ_CLASS_64 && elf_machine(obj) == EM_X86_64 ? 64
+                    : elf_class(obj) == ELFOBJ_CLASS_32 && elf_machine(obj) == EM_386 ? 32 : 0;
+
+            if (its != 0) {
+                fprintf(stderr, "ld: %s is for %s and this link is for %s\n", path, canonical_mode_name(its),
+                        canonical_mode_name(ctx->mode));
+            } else {
+                fprintf(stderr, "ld: %s is for a machine this linker does not link for (e_machine %u); "
+                                "this link is for %s\n",
+                        path, (unsigned)elf_machine(obj), canonical_mode_name(ctx->mode));
+            }
         }
         elf_close(obj);
         return -1;
@@ -663,6 +688,22 @@ static int load_object_input(const char *path, ld_ctx_t *ctx, objvec_t *objs, sy
  * /lib64 and /lib is an ordinary one.  What is not an ELF file is an
  * archive or a script, and is looked into later.
  */
+static char lib_passed_over[512];       /* the last one that was for another machine */
+
+/* "cannot find -lNAME", and why if a library of that name was seen. */
+static void report_library_not_found(const char *name) {
+    const char *leaf = strrchr(lib_passed_over, '/');
+    const char *shown = name[0] == ':' ? name + 1 : name;
+    size_t n = strlen(shown);
+
+    fprintf(stderr, "ld: cannot find -l%s\n", name);
+    leaf = leaf != NULL ? leaf + 1 : lib_passed_over;
+    if ((name[0] == ':' && strcmp(leaf, shown) == 0) ||
+        (name[0] != ':' && strncmp(leaf, "lib", 3) == 0 && strncmp(leaf + 3, shown, n) == 0 && leaf[3 + n] == '.')) {
+        fprintf(stderr, "ld: note: %s is for another machine than this link and was passed over\n", lib_passed_over);
+    }
+}
+
 static int lib_candidate_suits(const ld_ctx_t *ctx, const char *path) {
     unsigned char h[20];
     FILE *f;
@@ -687,6 +728,9 @@ static int lib_candidate_suits(const ld_ctx_t *ctx, const char *path) {
     /* e_ident[EI_CLASS], and e_machine at 18, little-endian. */
     mode = h[4] == 2 && h[18] == (EM_X86_64 & 0xff) && h[19] == 0 ? 64
          : h[4] == 1 && h[18] == EM_386 && h[19] == 0 ? 32 : 0;
+    if (mode != ctx->mode) {
+        snprintf(lib_passed_over, sizeof(lib_passed_over), "%s", path);
+    }
     return mode == ctx->mode;
 }
 
@@ -1014,7 +1058,7 @@ static int load_library_input(ld_ctx_t *ctx, const ld_input_t *in, objvec_t *obj
     if (in->text != NULL && in->text[0] == ':') {
         char *path_exact = resolve_library_path_exact(ctx, in->text + 1);
         if (path_exact == NULL) {
-            fprintf(stderr, "ld: cannot find -l%s\n", in->text);
+            report_library_not_found(in->text);
             return -1;
         }
         if (has_suffix(path_exact, ".so") &&
@@ -1046,7 +1090,7 @@ static int load_library_input(ld_ctx_t *ctx, const ld_input_t *in, objvec_t *obj
     if (in->lib_mode == LD_LIBMODE_STATIC) {
         path_a = resolve_library_path_suffix(ctx, in->text, ".a");
         if (path_a == NULL) {
-            fprintf(stderr, "ld: cannot find -l%s\n", in->text);
+            report_library_not_found(in->text);
             return -1;
         }
         if (load_path_input(path_a, ctx, objs, state, in->whole_archive, 0) != 0) {
@@ -1135,7 +1179,7 @@ static int load_library_input(ld_ctx_t *ctx, const ld_input_t *in, objvec_t *obj
         return -1;
     }
 
-    fprintf(stderr, "ld: cannot find -l%s\n", in->text);
+    report_library_not_found(in->text);
     return -1;
 }
 
