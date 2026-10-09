@@ -896,78 +896,16 @@ out:
 }
 
 static int eval_rept_count(const char *s, long *out) {
-    char *tmp;
-    char *p;
-    long acc = 0;
-    long cur = 0;
-    int have = 0;
-    int sign = 1;
+    long long v;
 
-    if (s == NULL || out == NULL) {
+    /* An expression of numbers alone -- no symbol has a value while the
+     * source is still being expanded -- and not negative. */
+    if (s == NULL || out == NULL ||
+        as_expr_eval_string(s, NULL, NULL, &v) != AS_EXPR_EVAL_OK ||
+        v < 0 || v > (long long)LONG_MAX) {
         return -1;
     }
-    tmp = xstrdup(s);
-    if (tmp == NULL) {
-        return -1;
-    }
-    for (p = tmp; *p != '\0'; ++p) {
-        if (*p == '(' || *p == ')') {
-            *p = ' ';
-        }
-    }
-    p = trim_in_place(tmp);
-    while (*p != '\0') {
-        char *endp;
-        long v;
-        while (isspace((unsigned char)*p)) {
-            p++;
-        }
-        if (*p == '+') {
-            sign = 1;
-            p++;
-            continue;
-        }
-        if (*p == '-') {
-            sign = -1;
-            p++;
-            continue;
-        }
-        v = strtol(p, &endp, 0);
-        if (endp == p) {
-            free(tmp);
-            return -1;
-        }
-        cur = sign * v;
-        p = endp;
-        while (isspace((unsigned char)*p)) {
-            p++;
-        }
-        while (*p == '*') {
-            long rhs;
-            p++;
-            while (isspace((unsigned char)*p)) {
-                p++;
-            }
-            rhs = strtol(p, &endp, 0);
-            if (endp == p) {
-                free(tmp);
-                return -1;
-            }
-            cur *= rhs;
-            p = endp;
-            while (isspace((unsigned char)*p)) {
-                p++;
-            }
-        }
-        acc += cur;
-        have = 1;
-        sign = 1;
-    }
-    free(tmp);
-    if (!have || acc < 0) {
-        return -1;
-    }
-    *out = acc;
+    *out = (long)v;
     return 0;
 }
 
@@ -1827,7 +1765,6 @@ typedef struct {
 static int parse_cond_operand(const char *s, long long *num, char *buf, size_t bufsz) {
     char *tmp;
     char *p;
-    char *endp;
 
     if (s == NULL || num == NULL || buf == NULL || bufsz == 0) {
         return -1;
@@ -1840,8 +1777,7 @@ static int parse_cond_operand(const char *s, long long *num, char *buf, size_t b
     if (*p == '$') {
         p++;
     }
-    *num = strtoll(p, &endp, 0);
-    if (endp != p && *trim_in_place(endp) == '\0') {
+    if (as_expr_eval_string(p, NULL, NULL, num) == AS_EXPR_EVAL_OK) {
         free(tmp);
         buf[0] = '\0';
         return 1;
@@ -1868,6 +1804,18 @@ static int eval_gas_cond_expr(const char *expr) {
     if (expr == NULL) {
         return 0;
     }
+    /* An expression of numbers is as_expr.c's, whole: `.if 1+1 == 2`,
+     * `.if (3 > 2) && 1`. */
+    if (as_expr_eval_string(expr, NULL, NULL, &ln) == AS_EXPR_EVAL_OK) {
+        return ln != 0;
+    }
+    /*
+     * What is left has a name in it.  No symbol has a value yet -- this
+     * runs while the source is still text -- so the two sides of a
+     * comparison are compared as text, which is what a macro's
+     * `.if \reg == eax` wants; a side that is a number is still read as
+     * one.
+     */
     tmp = xstrdup(expr);
     if (tmp == NULL) {
         return 0;
