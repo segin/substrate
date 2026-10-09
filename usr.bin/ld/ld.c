@@ -133,6 +133,7 @@ typedef struct {
     int z_text_mode; /* 0=default, 1=text, 2=notext */
     int z_execstack; /* -1=auto, 0=noexecstack, 1=execstack */
     int z_relro; /* 0=norelro, 1=relro */
+    int z_now;   /* -z now: the dynamic linker binds everything at once */
     ld_hash_style_t hash_style;
     const char *out_path;
     const char *self_path;
@@ -664,6 +665,10 @@ static int parse_z_option(ld_ctx_t *ctx, const char *val) {
     }
     if (strcmp(val, "norelro") == 0) {
         ctx->z_relro = 0;
+        return 0;
+    }
+    if (strcmp(val, "now") == 0 || strcmp(val, "lazy") == 0) {
+        ctx->z_now = val[0] == 'n';
         return 0;
     }
     return -1;
@@ -7874,6 +7879,22 @@ static int plan_dynamic_needed(ld_ctx_t *ctx, elfobj_t *out) {
         free(gnu_hash_buf);
         return -1;
     }
+    /* -z now, said the three ways dynamic linkers look for it. */
+    if (ctx->z_now &&
+        (dynamic_append_entry(&dynamic_buf, &dynamic_len, &dynamic_cap,
+                              elf_class(out), elf_endian(out), DT_BIND_NOW, 0) != 0 ||
+         dynamic_append_entry(&dynamic_buf, &dynamic_len, &dynamic_cap,
+                              elf_class(out), elf_endian(out), DT_FLAGS, DF_BIND_NOW) != 0 ||
+         dynamic_append_entry(&dynamic_buf, &dynamic_len, &dynamic_cap,
+                              elf_class(out), elf_endian(out), DT_FLAGS_1, DF_1_NOW) != 0)) {
+        free(dynstr_buf);
+        free(dynsym_buf);
+        free(dynamic_buf);
+        free(versym_buf);
+        free(hash_buf);
+        free(gnu_hash_buf);
+        return -1;
+    }
     if (dynamic_append_entry(&dynamic_buf, &dynamic_len, &dynamic_cap,
                              elf_class(out), elf_endian(out), DT_DEBUG, 0) != 0) {
         free(dynstr_buf);
@@ -12887,16 +12908,24 @@ int main(int argc, char **argv) {
                     zval++;
                 }
             }
-            if (parse_z_option(&ctx, zval) != 0) {
-                fprintf(stderr,
-                        "ld: unsupported -z option '%s' (supported: text, notext, execstack, noexecstack, relro, norelro)\n",
-                        zval != NULL ? zval : "");
-                inputvec_free(&ctx.inputs);
-                strvec_free(&ctx.lib_paths);
-                strvec_free(&ctx.trace_symbols);
-                return 2;
+            /*
+             * A keyword this linker does nothing about is said to be so
+             * and the link goes on: build systems pass -z defs, -z
+             * max-page-size=..., -z separate-code and -z nodelete as a
+             * matter of course, and a link is not wrong for lacking one.
+             */
+            if (zval != NULL && zval[0] != '\0' &&
+                (parse_z_option(&ctx, zval) == 0 ||
+                 ld_warn(&ctx, "-z %s is not supported and is ignored", zval) == 0)) {
+                continue;
             }
-            continue;
+            if (zval == NULL || zval[0] == '\0') {
+                fprintf(stderr, "ld: -z needs a keyword\n");
+            }
+            inputvec_free(&ctx.inputs);
+            strvec_free(&ctx.lib_paths);
+            strvec_free(&ctx.trace_symbols);
+            return 2;
         }
         if (strcmp(a, "--strip-all") == 0 || strcmp(a, "--build-id") == 0 || strcmp(a, "-s") == 0) {
             continue;

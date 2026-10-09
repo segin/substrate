@@ -29,7 +29,7 @@
 .Op Fl -trace-symbol Ns = Ns Ar symbol
 .Op Fl -warn-common
 .Op Fl -fatal-warnings
-.Op Fl -z Ar text|notext|execstack|noexecstack|relro|norelro
+.Op Fl -z Ar text|notext|execstack|noexecstack|relro|norelro|now|lazy
 .Op Fl -plugin Ar path
 .Op Fl -plugin-opt Ar option
 .Op Fl -Map Ar file
@@ -127,6 +127,13 @@ GNU-style unresolved symbol policy alias.
 Trace input loading and symbol usage.
 .It Fl -z Ar option
 Set text-relocation, stack-execute, and RELRO policy.
+.Cm now
+marks the output for the dynamic linker to bind every symbol when it is
+loaded
+.Pq Dv DT_BIND_NOW , DF_BIND_NOW , DF_1_NOW ;
+.Cm lazy
+undoes it.
+Any other keyword is a warning and is ignored.
 .It Fl -plugin Ar path
 Set plugin executable used for LTO materialization.
 .It Fl -plugin-opt Ar option

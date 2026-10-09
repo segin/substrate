@@ -102,7 +102,7 @@ short writes and close errors checked.
 
 ## 5. Command line
 
-- [ ] **LD-OPT-001** If a `-z` keyword is not recognised, then the linker shall warn and continue; where `-z now` is given it shall set `DT_BIND_NOW`.
+- [x] **LD-OPT-001** If a `-z` keyword is not recognised, then the linker shall warn and continue; where `-z now` is given it shall set `DT_BIND_NOW`.
   Evidence: `ld.c:631-660` accepts six keywords; `11554-11562` exits 2.  Basis: verified.  Task #64.
 - [ ] **LD-OPT-002** The linker shall treat `-pie` as an executable link (entry required, undefined symbols diagnosed, branded, mode 0755) and shall not let `-static` change the output type.
   Evidence: `ld.c:11096-11101, 11103-11104`.  Basis: verified.  Task #98.
