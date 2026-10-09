@@ -361,6 +361,15 @@ Refused:
 .Ic LONG
 and
 .Ic QUAD .
+.Sh OUTPUT
+The output is written beside its name and moved into place when it is
+whole, so that an existing file of that name is replaced at once or not
+at all.
+A name that is not a plain file is written into instead: a link is
+followed, and a device or a pipe receives the output and stays what it
+was.
+A file the linker makes has the mode a new file has, less the umask, and
+is executable if it is a program.
 .Sh EXIT STATUS
 .Ex -std
 .Sh DIAGNOSTICS

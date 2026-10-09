@@ -94,7 +94,7 @@ short writes and close errors checked.
   Evidence: `ld.c:10038-10047` with `elf_write.c:1412, 1458-1467`; `9453-9470` align the file offset.  Basis: traced.  Task #100.
 - [x] **LD-OUT-004** If no entry symbol is defined, then the linker shall warn and shall not substitute an arbitrary symbol.
   Evidence: `ld.c:10217-10242, 10258`.  Basis: traced.  Task #101.
-- [ ] **LD-OUT-005** When writing its output, the linker shall write through an existing non-regular file or symbolic link rather than replace it, shall honour the umask, and shall remove the output if the link fails after it was written.
+- [x] **LD-OUT-005** When writing its output, the linker shall write through an existing non-regular file or symbolic link rather than replace it, shall honour the umask, and shall remove the output if the link fails after it was written.
   Evidence: rename in `elf_util.c:366-388` (`ld -o /dev/null` as root replaces the device); `ld.c:10719, 10900` chmod to fixed modes; `10900-10907, 11661-11669`.  Basis: traced.  Task #96.
 - [ ] **LD-OUT-006** Where `--gc-sections` is given, the linker shall treat as roots the entry, exported and `-u` symbols, init/fini code and arrays, exception tables and notes, and shall collect before sections are merged.
   Evidence: `ld.c:9580-9603, 9688-9700, 9745`; removed sections' symbols become undefined globals (`elf_sections.c:359-360`).  Basis: traced.  Task #97.

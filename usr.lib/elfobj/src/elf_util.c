@@ -5,6 +5,7 @@
 
 #include <elf_private.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
 
 #define ELFOBJ_MAX_ALLOC_BYTES (256u * 1024u * 1024u)
 #define ELFOBJ_MAX_DIAG_BYTES (1u * 1024u * 1024u)
@@ -344,8 +345,31 @@ elf_err_t elf__write_file_atomic(const char *path, const void *buf, size_t size)
     int saved_errno;
     const uint8_t *bytes = (const uint8_t *)buf;
 
+    struct stat st;
+
     if (path == NULL || (buf == NULL && size != 0)) {
         return ELF_ERR_STATE;
+    }
+
+    /*
+     * A new file is written beside the old and moved into its place, so
+     * that no reader sees half of one.  What is there and is not a plain
+     * file -- a device, a pipe, a link to somewhere -- is written into
+     * instead: moving a file over /dev/null does not write to the null
+     * device, it leaves the system without one.
+     */
+    if (lstat(path, &st) == 0 && !S_ISREG(st.st_mode)) {
+        fd = open(path, O_WRONLY | O_TRUNC);
+        if (fd < 0) {
+            return ELF_ERR_IO;
+        }
+        if (size != 0 && write_full(fd, bytes, size) != 0) {
+            saved_errno = errno;
+            close(fd);
+            errno = saved_errno;
+            return ELF_ERR_IO;
+        }
+        return close(fd) != 0 ? ELF_ERR_IO : ELF_OK;
     }
 
     slash = strrchr(path, '/');

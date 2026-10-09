@@ -7,5 +7,6 @@ run:
 	./test_script.sh
 	./test_archive.sh
 	./test_dynamic.sh
+	./test_output.sh
 
 clean:

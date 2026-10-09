@@ -12128,6 +12128,34 @@ static int symbol_is_defined(const elf_symbol_t *sym) {
     return sym != NULL && elf_symbol_shndx(sym) != SHN_UNDEF;
 }
 
+/*
+ * The mode of the output: what creat() would have given it, readable and
+ * writable by all and executable if it is a program, less what the umask
+ * takes away.  The file was made private, by mkstemp(), and was then set
+ * to 0755 or 0644 whatever the umask said.  A device or a pipe that was
+ * written into keeps the mode it has.
+ */
+static int set_output_mode(const char *path, int executable) {
+    struct stat st;
+    mode_t mask;
+
+    if (stat(path, &st) != 0 || !S_ISREG(st.st_mode)) {
+        return 0;
+    }
+    mask = umask(0);
+    (void)umask(mask);
+    return chmod(path, (executable ? 0777 : 0666) & ~mask);
+}
+
+/* Take away an output that turned out wrong, if it is a file of ours. */
+static void remove_output(const char *path) {
+    struct stat st;
+
+    if (path != NULL && lstat(path, &st) == 0 && S_ISREG(st.st_mode)) {
+        (void)unlink(path);
+    }
+}
+
 static int set_entry_symbol(ld_ctx_t *ctx, elfobj_t *obj, const char *entry_symbol, int require_entry,
                             int entry_explicit) {
     const elf_symbol_t *sym;
@@ -12456,7 +12484,13 @@ static int validate_output(const ld_ctx_t *ctx) {
     return 0;
 #else
     elfobj_t *obj = NULL;
+    struct stat st;
 
+    /* Only what can be read back: an output that went to a pipe or a
+     * device is gone, and opening a pipe to look would wait for ever. */
+    if (stat(ctx->out_path, &st) != 0 || !S_ISREG(st.st_mode)) {
+        return 0;
+    }
     if (elf_open(ctx->out_path, &obj) != ELF_OK) {
         fprintf(stderr, "ld: failed to open output %s\n", ctx->out_path);
         return -1;
@@ -12686,7 +12720,7 @@ static int run_internal_link(ld_ctx_t *ctx) {
             elf_close(out);
             return -1;
         }
-        if (chmod(ctx->out_path, 0644) != 0) {
+        if (set_output_mode(ctx->out_path, 0) != 0) {
             if (ld_warn(ctx, "failed to set output mode on %s: %s",
                         ctx->out_path, strerror(errno)) != 0) {
                 symref_map_free(&undef_refs);
@@ -12883,7 +12917,7 @@ static int run_internal_link(ld_ctx_t *ctx) {
         elf_close(out);
         return -1;
     }
-    if (chmod(ctx->out_path, out_type == ET_EXEC ? 0755 : 0644) != 0) {
+    if (set_output_mode(ctx->out_path, out_type == ET_EXEC) != 0) {
         if (ld_warn(ctx, "failed to set output mode on %s: %s",
                     ctx->out_path, strerror(errno)) != 0) {
             symref_map_free(&undef_refs);
@@ -13706,6 +13740,7 @@ int main(int argc, char **argv) {
         return 1;
     }
     if (validate_output(&ctx) != 0) {
+        remove_output(ctx.out_path);
         inputvec_free(&ctx.inputs);
         strvec_free(&ctx.lib_paths);
         strvec_free(&ctx.trace_symbols);
