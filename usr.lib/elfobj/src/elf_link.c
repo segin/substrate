@@ -601,6 +601,29 @@ static elf_err_t inflate_input_section(elfobj_t *out,
     return ELF_OK;
 }
 
+/*
+ * The name of the output section an input section goes to: its own, unless
+ * the caller has said otherwise (a linker script's SECTIONS does).  NULL:
+ * it is left out of the output.
+ */
+static const char *output_section_name(const elf_link_plan_t *plan,
+                                       const struct elf_link_input *input,
+                                       const struct elf_section *src) {
+    if (plan->section_name_hook == NULL) {
+        return src->name;
+    }
+    return plan->section_name_hook(src->name, input->name, plan->section_name_user);
+}
+
+/* The output section an input section was merged into, if it was. */
+static struct elf_section *output_section_of(const elf_link_plan_t *plan, elfobj_t *out,
+                                             const struct elf_link_input *input,
+                                             const struct elf_section *src) {
+    const char *name = output_section_name(plan, input, src);
+
+    return name != NULL ? elf_find_section(out, name) : NULL;
+}
+
 static elf_err_t merge_sections(elf_link_plan_t *plan, elfobj_t *out,
                                 const struct elf_link_input *input,
                                 uint64_t *sec_bases, uint8_t *sec_included,
@@ -625,6 +648,7 @@ static elf_err_t merge_sections(elf_link_plan_t *plan, elfobj_t *out,
         elf_link_merge_action_t action = ELF_LINK_MERGE_APPEND;
         elf_err_t err;
         uint8_t *inflated = NULL;       /* src's contents, if it is compressed */
+        const char *out_name;
         const uint8_t *src_data;
         size_t src_size;
         uint64_t src_align, src_flags;
@@ -642,9 +666,13 @@ static elf_err_t merge_sections(elf_link_plan_t *plan, elfobj_t *out,
             continue;
         }
 
-        dst = elf_find_section(out, src->name);
+        out_name = output_section_name(plan, input, src);
+        if (out_name == NULL) {
+            continue;
+        }
+        dst = elf_find_section(out, out_name);
         if (dst != NULL && plan->section_merge_hook != NULL) {
-            action = plan->section_merge_hook(src->name, dst, src, plan->section_merge_user);
+            action = plan->section_merge_hook(out_name, dst, src, plan->section_merge_user);
         }
         if (action == ELF_LINK_MERGE_SKIP) {
             continue;
@@ -675,7 +703,7 @@ static elf_err_t merge_sections(elf_link_plan_t *plan, elfobj_t *out,
         }
 
         if (dst == NULL) {
-            dst = elf_add_section(out, src->name, src->type, src_flags);
+            dst = elf_add_section(out, out_name, src->type, src_flags);
             if (dst == NULL) {
                 free(inflated);
                 free(sec_discard);
@@ -837,7 +865,7 @@ static elf_err_t merge_symbols(elf_link_plan_t *plan, elfobj_t *out,
                 if (!sec_included[src_sec_index]) {
                     continue;
                 }
-                dst_sec = elf_find_section(out, src_sec->name);
+                dst_sec = output_section_of(plan, out, input, src_sec);
                 if (dst_sec == NULL) {
                     continue;
                 }
@@ -946,7 +974,7 @@ static elf_err_t merge_relocations(elf_link_plan_t *plan, elfobj_t *out,
         if (src_sec_index >= input->obj->section_count || !sec_included[src_sec_index]) {
             continue;
         }
-        dst_sec = elf_find_section(out, r->section->name);
+        dst_sec = output_section_of(plan, out, input, r->section);
         if (dst_sec == NULL) {
             continue;
         }
@@ -980,7 +1008,7 @@ static elf_err_t merge_relocations(elf_link_plan_t *plan, elfobj_t *out,
                 if (src_sym_sec == NULL || !sec_included[sym_src_sec]) {
                     continue;
                 }
-                dst_sym_sec = elf_find_section(out, src_sym_sec->name);
+                dst_sym_sec = output_section_of(plan, out, input, src_sym_sec);
                 if (dst_sym_sec == NULL) {
                     continue;
                 }
@@ -1015,7 +1043,7 @@ static elf_err_t merge_relocations(elf_link_plan_t *plan, elfobj_t *out,
                 if (src_sym_sec == NULL || !sec_included[sym_src_sec]) {
                     continue;
                 }
-                dst_sym_sec = elf_find_section(out, src_sym_sec->name);
+                dst_sym_sec = output_section_of(plan, out, input, src_sym_sec);
                 if (dst_sym_sec == NULL) {
                     continue;
                 }
@@ -1097,6 +1125,17 @@ elf_err_t elf_link_plan_add_input(elf_link_plan_t *plan, elfobj_t *obj, const ch
 
 size_t elf_link_plan_input_count(const elf_link_plan_t *plan) {
     return plan == NULL ? 0 : plan->input_count;
+}
+
+elf_err_t elf_link_plan_set_section_name_hook(elf_link_plan_t *plan,
+                                              elf_link_section_name_hook_t hook,
+                                              void *user) {
+    if (plan == NULL) {
+        return ELF_ERR_STATE;
+    }
+    plan->section_name_hook = hook;
+    plan->section_name_user = user;
+    return ELF_OK;
 }
 
 elf_err_t elf_link_plan_set_section_merge_hook(elf_link_plan_t *plan,

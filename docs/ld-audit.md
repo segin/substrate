@@ -127,27 +127,34 @@ short writes and close errors checked.
 - [x] **LD-SCR-001** If an expression is nested more deeply than a fixed limit, then the linker shall reject the script.
   Met: `lds_eval_unary` counts every level (parenthesis, unary operator, builtin argument) against `LD_MAX_SCRIPT_EXPR_DEPTH` (256).  Shown: 200000 nested `(`, `~` or `ALIGN(` give `s.lds:1:263: linker script parse error: expression nested too deeply`, where the linker died of SIGSEGV; 100 levels still evaluate.
   Evidence: unbounded recursion at `ld.c:1357-1459`.  Basis: traced.  Task #57.
-- [ ] **LD-SCR-002** The linker shall maintain a location counter and shall evaluate assignments, `PROVIDE` and `ASSERT` wherever the script grammar allows them, including inside `SECTIONS`.
+- [x] **LD-SCR-002** The linker shall maintain a location counter and shall evaluate assignments, `PROVIDE` and `ASSERT` wherever the script grammar allows them, including inside `SECTIONS`.
+  Met: the script is parsed into statements (`lds_script_parse`) and `script_assign_addresses` walks them with the counter; a statement between two input section descriptions is refused, the boundary not being kept.  Shown by `tests/usr.bin/ld/test_script.sh` and by programs linked through scripts that run on the target.
   Evidence: `ld.c:2608-2609` acts only at brace depth 0; top-level `. =` becomes a symbol named `.` (`2098`).  Basis: traced.  Task #58.
-- [ ] **LD-SCR-003** The script lexer shall treat `+`, `-` and `/` as operators.
+- [x] **LD-SCR-003** The script lexer shall treat `+`, `-` and `/` as operators.
+  Met: the lexer reads a word as a name or as part of an expression according to what the parser expects there (`lds_lexer_t.names`).
   Evidence: `ld.c:1750, 1753-1754`.  Basis: verified.  Task #59.
 - [ ] **LD-SCR-004** If an expression names a symbol that is not defined, then the linker shall report an error.
   Evidence: `ld.c:1167-1168` returns 0.  Basis: verified.  Task #60.
 - [ ] **LD-SCR-005** When `PROVIDE` names a symbol an input defines, the linker shall leave the input's definition in place; `DEFINED` shall be true for such a symbol; `ALIGN(n)` shall align the location counter.
   Evidence: `ld.c:2095` with `9055-9064`; `1331`; `1282-1283`.  Basis: traced.  Tasks #61, #62, #63.
-- [ ] **LD-SCR-006** The linker shall evaluate a script once against the final layout.
+  Partly met: `PROVIDE` now defines only what is referenced and undefined (`script_declare_in`).  `DEFINED` and one-argument `ALIGN` are still open.
+- [x] **LD-SCR-006** The linker shall evaluate a script once against the final layout.
+  Met: read once in `main`; its statements take effect in `script_assign_addresses`, after the layout, which they are part of.
   Evidence: applied twice (`ld.c:10661-10688`), parsed a third time (`11620`).  Basis: traced; layout consequence suspected.  Task #65.
 - [ ] **LD-SCR-007** The linker shall accept `PROVIDE_HIDDEN`, `HIDDEN`, compound assignment, `ASSERT` without a semicolon, `K`/`M` suffixes, and the functions `MAX`, `MIN`, `ABSOLUTE`, `CONSTANT`, `ORIGIN`, `LENGTH` and `?:`, or reject each with a diagnostic naming it.
   Evidence: `ld.c:2684-2687, 2766-2770, 2160-2164, 1844-1850, 1375-1379`.  Basis: traced.  Tasks #66, #67, #69.
-- [ ] **LD-SCR-008** When a script includes another, the linker shall continue in the including context, search the `-L` directories, and bound the total work.
+  Partly met: `PROVIDE_HIDDEN`, `HIDDEN`, compound assignment and `ASSERT` without a semicolon are accepted and acted on.  The suffixes, the functions and `?:` are still open (#69).
+- [x] **LD-SCR-008** When a script includes another, the linker shall continue in the including context, search the `-L` directories, and bound the total work.
   Evidence: `ld.c:2529-2555, 1951-1968`.  Basis: traced.  Task #68.
-- [ ] **LD-SCR-009** If the script cannot be tokenised, then the linker shall report the file and line.
+- [x] **LD-SCR-009** If the script cannot be tokenised, then the linker shall report the file and line.
   Evidence: silent `return -1` at `ld.c:2511-2516, 1737-1743`.  Basis: traced.  Task #70.
-- [ ] **LD-SCR-010** The linker shall match input-section patterns as shell globs.
+- [x] **LD-SCR-010** The linker shall match input-section patterns as shell globs.
+  Met: `lds_glob`; and the patterns now decide which output section an input section is merged into (`script_output_name`, through elfobj's new section-name hook), which they did not before.
   Evidence: `ld.c:1970-1984, 2338, 2389`.  Basis: traced.  Task #71.
-- [ ] **LD-SCR-011** When a script orders sections, the linker shall keep the null section first.
+- [x] **LD-SCR-011** When a script orders sections, the linker shall keep the null section first.
+  Met, and the suspicion was unfounded as stated: the object model has no null section (index 0 is the first real one).  What was wrong was that scripted sections were moved to the front of everything; they now change places only among themselves (`script_apply_sections`).
   Evidence: `ld.c:2822, 2063-2067`.  Basis: suspected.  Task #72.
-- [ ] **LD-SCR-012** Where a script has a `PHDRS` command, the linker shall terminate on malformed input, derive `PT_LOAD` flags from the sections placed in it, honour every `:phdr` on a section and inherit the previous one, emit each header once, and report a `PHDRS` it cannot parse.
+- [x] **LD-SCR-012** Where a script has a `PHDRS` command, the linker shall terminate on malformed input, derive `PT_LOAD` flags from the sections placed in it, honour every `:phdr` on a section and inherit the previous one, emit each header once, and report a `PHDRS` it cannot parse.
   Evidence: `ld.c:2979-3062, 3006-3052` (hang, unbounded growth); `2871-2873, 2976`; `3089-3104`; `3154-3167`; `2967-2974` with `9986`.  Basis: traced.  Tasks #77, #80.
 
 ## 8. Structure

@@ -241,6 +241,8 @@ struct elf_link_plan {
 
     elf_link_section_merge_hook_t section_merge_hook;
     void *section_merge_user;
+    elf_link_section_name_hook_t section_name_hook;
+    void *section_name_user;
     elf_link_archive_hook_t archive_hook;
     void *archive_user;
     elf_link_gc_hook_t gc_hook;

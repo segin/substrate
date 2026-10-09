@@ -1,4 +1,4 @@
-.Dd April 22, 2026
+.Dd October 8, 2026
 .Dt LD 1
 .Os Substrate
 .Sh NAME
@@ -100,7 +100,8 @@ or archive inputs.
 .It Fl -as-needed , Fl -no-as-needed
 Control whether DSOs without currently unresolved symbol matches are ignored.
 .It Fl T Ar script
-Use a linker script.
+Use a linker script; see
+.Sx LINKER SCRIPTS .
 .It Fl -gc-sections
 Enable section garbage collection.
 .It Fl -print-gc-sections
@@ -137,6 +138,130 @@ Write a reproducible link bundle containing object snapshots, manifest, and repl
 .It Fl -compat Ns = Ns Ar gnu|lld
 Set unsupported-option policy for compatibility behavior.
 .El
+.Sh LINKER SCRIPTS
+The script named by
+.Fl T
+is read once, before anything is linked, and a script that cannot be read
+is reported with its file, line and column and ends the link.
+The commands are those of GNU ld.
+Understood and acted on:
+.Bl -tag -width "INCLUDE file"
+.It Ic SECTIONS
+Output section descriptions, each
+.Dq name [address] : [ALIGN(n)] { ... } [>region] [:phdr ...] ,
+and between them assignments,
+.Ic PROVIDE ,
+.Ic ASSERT
+and
+.Ic INCLUDE .
+An input section goes to the first output section whose body asks for it
+by file and section pattern, with the wildcards
+.Ql * ,
+.Ql \&?
+and
+.Ql [...] ;
+.Ic EXCLUDE_FILE
+is honoured,
+.Ic KEEP
+protects the section from
+.Fl -gc-sections ,
+and
+.Ic /DISCARD/
+leaves what it names out.
+An input section nothing asks for keeps its own name, and is placed where
+the default layout would have put it among the sections the script names.
+.It Ic PHDRS
+The program headers of the output.
+A section goes in the headers named after its output section, and one
+that names none goes where the one before it went.
+A
+.Dv PT_LOAD
+without
+.Ic FLAGS
+has the permissions of the sections in it.
+.It Ic MEMORY
+Regions that
+.Dq >region
+places sections in; a section that does not fit is an error.
+.It Ic ENTRY
+The entry symbol, unless
+.Fl e
+names one.
+.It Ic INCLUDE
+Another script, read where the command stands as if its text stood there.
+The file is looked for beside the including script, then as named, then
+in the
+.Fl L
+directories.
+.It Ic ASSERT
+An error with the given message when its expression is zero.
+The semicolon after it is optional.
+.El
+.Pp
+Inside
+.Ic SECTIONS
+the location counter
+.Ql \&.
+is the address the next thing is placed at.
+It begins where the default layout begins the image and may only move
+forwards.
+Assigned between output sections it places what follows; in a body it may
+stand before the first input section description, where it is the
+section's start, or after the last, where moving it makes the section
+longer.
+A statement between two input section descriptions is refused: where the
+pieces of an output section meet is not kept.
+.Pp
+A symbol is defined by
+.Dq name = expression ;
+or changed by
+.Dq name += expression ;
+and the other compound operators.
+.Ic PROVIDE
+defines its symbol only if an input refers to it and none defines it;
+.Ic HIDDEN
+and
+.Ic PROVIDE_HIDDEN
+make the symbol hidden.
+A symbol defined inside
+.Ic SECTIONS
+belongs to the section its address falls in; one defined outside is
+absolute.
+Expressions have the operators of C, parentheses nested no more than 256
+deep, and the functions
+.Ic ALIGN ,
+.Ic ADDR ,
+.Ic LOADADDR ,
+.Ic SIZEOF
+and
+.Ic DEFINED .
+.Pp
+Read and not acted on:
+.Ic OUTPUT_FORMAT ,
+.Ic OUTPUT_ARCH ,
+.Ic OUTPUT ,
+.Ic TARGET ,
+.Ic SEARCH_DIR ,
+.Ic INPUT ,
+.Ic GROUP ,
+.Ic STARTUP ,
+.Ic EXTERN ,
+.Ic VERSION ,
+.Ic INSERT ,
+.Ic NOCROSSREFS ,
+.Ic REGION_ALIAS ,
+the load address
+.Pq Ic AT ,
+.Ic SUBALIGN ,
+.Ic FILL
+and the fill value of an output section, and the sorting of
+.Ic SORT .
+Refused:
+.Ic BYTE ,
+.Ic SHORT ,
+.Ic LONG
+and
+.Ic QUAD .
 .Sh EXIT STATUS
 .Ex -std
 .Sh DIAGNOSTICS
@@ -151,7 +276,16 @@ adds structured notes with category/source/hint metadata.
 .Bl -bullet
 .It
 .Nm
-implements GNU-compatible options for the supported feature set but is not a full GNU ld script superset.
+implements GNU-compatible options for the supported feature set but is not a full GNU ld script superset;
+.Sx LINKER SCRIPTS
+says what of a script is acted on.
+.It
+Input sections stored compressed
+.Pq Dv SHF_COMPRESSED , zlib
+are linked as what they hold and written uncompressed.
+Sections that are not loaded, the debugging information among them, are
+relocated like the rest, and an executable or shared object carries no
+relocation sections of the linker's own.
 .It
 GNU plugin shared-object API is not loaded directly;
 .Fl -plugin

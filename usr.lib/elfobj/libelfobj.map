@@ -41,6 +41,7 @@ ELFOBJ_1.0 {
 		elf_link_plan_set_gc_hook;
 		elf_link_plan_set_incremental_hook;
 		elf_link_plan_set_section_merge_hook;
+		elf_link_plan_set_section_name_hook;
 		elf_link_plan_set_version_hook;
 		elf_link_resolve_symbol;
 		elf_link_unload_objects;

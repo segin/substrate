@@ -1254,6 +1254,10 @@ typedef enum {
 
 typedef elf_link_merge_action_t (*elf_link_section_merge_hook_t)(
     const char *section_name, const elf_section_t *existing, const elf_section_t *incoming, void *user);
+/* The name of the output section an input section is merged into, given
+ * its own name and its input's; NULL leaves the section out. */
+typedef const char *(*elf_link_section_name_hook_t)(
+    const char *section_name, const char *input_name, void *user);
 typedef int (*elf_link_archive_hook_t)(const char *archive_path, const char *member_name, void *user);
 typedef int (*elf_link_gc_hook_t)(const elf_section_t *section, void *user);
 typedef void (*elf_link_incremental_hook_t)(const char *key, const char *value, void *user);
@@ -1365,6 +1369,9 @@ size_t elf_link_plan_input_count(const elf_link_plan_t *plan);
 elf_err_t elf_link_plan_set_section_merge_hook(elf_link_plan_t *plan,
                                                elf_link_section_merge_hook_t hook,
                                                void *user);
+elf_err_t elf_link_plan_set_section_name_hook(elf_link_plan_t *plan,
+                                              elf_link_section_name_hook_t hook,
+                                              void *user);
 elf_err_t elf_link_plan_set_archive_hook(elf_link_plan_t *plan, elf_link_archive_hook_t hook,
                                          void *user);
 elf_err_t elf_link_plan_set_gc_hook(elf_link_plan_t *plan, elf_link_gc_hook_t hook, void *user);
