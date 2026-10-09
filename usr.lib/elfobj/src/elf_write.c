@@ -642,8 +642,18 @@ static uint8_t *build_relocs_for_section(const elfobj_t *obj, const struct elf_s
         p = buf + (n * entsz);
         n++;
 
+        /* A symbol's number in the table written is its place among the
+         * object's symbols, after the null symbol the table begins with.
+         * An object read from a file has that null symbol as its first,
+         * so there the place is the number already: adding one to it
+         * made every relocation of an object read and written back name
+         * the symbol after the one it meant. */
         if (r->symbol != NULL) {
-            sym_index = r->symbol->index + 1;
+            int has_null = obj->symbol_count > 0 && obj->symbols[0] != NULL &&
+                           (obj->symbols[0]->name == NULL || obj->symbols[0]->name[0] == '\0') &&
+                           obj->symbols[0]->value == 0 && obj->symbols[0]->size == 0;
+
+            sym_index = r->symbol->index + (has_null ? 0 : 1);
         }
 
         if (obj->cls == ELFOBJ_CLASS_32) {
