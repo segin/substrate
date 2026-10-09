@@ -158,7 +158,6 @@ typedef struct {
     int allow_undefined;
     int warn_common;
     int fatal_warnings;
-    int warning_count;
     int query_version;
     int trace_inputs;
     int export_dynamic;
@@ -173,7 +172,6 @@ typedef struct {
     int z_now;   /* -z now: the dynamic linker binds everything at once */
     ld_hash_style_t hash_style;
     const char *out_path;
-    const char *self_path;
     const char *script_path;
     struct lds_script *script;  /* script_path, parsed */
     const char *plugin_path;

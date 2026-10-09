@@ -183,7 +183,8 @@ short writes and close errors checked.
   Evidence: three readers (`ld.c:2456, 2880, 8060`); `lds_ast_t` is written and never read.  Basis: traced.  Task #110.
 - [ ] **LD-STR-006** The linker shall use one growable-array helper and shall not duplicate helpers the object library provides.
   Evidence: eleven hand-written vectors; duplicates listed in the task.  Basis: measured.  Task #111.
-- [ ] **LD-STR-007** The linker's specification and architecture documents shall describe what the code does.
+- [x] **LD-STR-007** The linker's specification and architecture documents shall describe what the code does.
+  Met: `SPEC.md` now says first that it is a statement of intent, and lists in §0 what it specifies that is not implemented; `ARCHITECTURE.md` describes the order of a link, the tests there are and what each file holds as they are; `TASKLIST_LINKER.md` carries a warning about its ticks.  The two fields nothing read (`self_path`, `warning_count`) are gone; `lds_ast_t` went with the script rewrite.  The one-bucket `.gnu.hash` is valid and is listed as a limitation.
   Evidence: armap, plugin protocol, thunks, parallel parsing and several options are specified and absent; `lds_ast_t`, `self_path`, `warning_count` unused; one-bucket GNU hash (`5825`).  Basis: traced.  Task #105.
 
 ## 9. Performance

@@ -1,5 +1,13 @@
 # `usr.bin/ld` Full Parity Tasklist (lld/gold Replacement)
 
+> **Read this first.**  This list predates the audit of October 2026, and
+> a tick here was not always earned: several ticked items name tests and
+> files that do not exist (`tests/usr.bin/ld/README.md`, `run_all.sh`), and
+> the audit found ticked features that did not work.  The checked record,
+> with evidence for each item, is `docs/ld-audit.md`; what is specified and
+> not implemented is listed in `SPEC.md` §0.  Use this file for the shape
+> of the remaining ambition, not as a statement of what is done.
+
 Source of truth requirements: `usr.bin/ld/SPEC.md`  
 Execution rule: complete one checkbox at a time; each completed item must include tests and requirement linkage.
 

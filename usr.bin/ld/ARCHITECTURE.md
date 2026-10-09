@@ -17,8 +17,9 @@ usr.bin/ld/
 ├── ld_layout.c              # Section order, addresses, segments
 ├── ld_dynamic.c             # .dynsym, imports, PLT and GOT, .dynamic
 ├── ld_ehframe.c             # .eh_frame_hdr
-├── ld_reloc.c               # Addresses of symbols, the i386 GOT, applying relocations
-├── ld_gc.c                  # --gc-sections and identical code folding
+├── ld_reloc.c               # Addresses of symbols, the output's own GOT slots, thread-local
+│                            #   storage, indirect functions, applying relocations
+├── ld_gc.c                  # --gc-sections (of the inputs' sections) and identical code folding
 ├── ld_map.c                 # The link map and the --reproduce bundle
 ├── ld_plugin.c              # LTO plugins that are programs
 ├── SPEC.md                  # Feature and parity requirements
@@ -29,11 +30,21 @@ usr.bin/ld/
 └── COMMIT_TEMPLATE.md       # Linker-specific commit hygiene aid
 
 tests/usr.bin/ld/
-├── README.md                # Test taxonomy and requirement mapping
-├── run_all.sh               # Dashboard-style execution wrapper
-├── test_*.sh                # Feature, hardening, runtime, and compatibility tests
-└── corpus/                  # Linker-script and malformed-input corpora
+├── Makefile                 # Runs each script; a failure in one stops the run
+├── test_script.sh           # Linker scripts: lexing, expressions, SECTIONS, PHDRS
+├── test_archive.sh          # Archives: malformed ones, long names, member selection
+├── test_dynamic.sh          # Shared objects: needed names, PLT and GOT, versions,
+│                            #   preemption, indirect functions, error messages
+├── test_output.sh           # The output file: modes, entry, options, RELRO, PIE,
+│                            #   --gc-sections, the map and the --reproduce bundle
+├── test_tls.sh              # Thread-local storage, each model, programs and libraries
+└── test_got.sh              # GOT slots for the output's own symbols
 ```
+
+Each script builds the linker for the host out of the tree, links small
+freestanding objects with it, and reads the results with the host's
+`readelf` and `objdump`.  They show that an output is put together as it
+should be; that it runs is checked on a Substrate guest, by hand.
 
 ## 2. High-Level System Diagram
 
@@ -41,9 +52,14 @@ tests/usr.bin/ld/
 ELF Objects / Archives / DSOs / Linker Scripts
 	-> input loaders and parsers
 	-> global symbol resolution
-	-> section policy (merge, GC, ICF, script placement)
-	-> segment and virtual address layout
-	-> relocation + dynamic metadata generation
+	-> --gc-sections: which input sections are used (before the merge)
+	-> merge by libelfobj: input sections into output sections, by name
+	   or by the script, passing over what was collected
+	-> rewriting of thread-local sequences (programs), ICF
+	-> planning: imports, PLT, GOT slots (imports, then the output's own,
+	   then thread-local entries and indirect functions), .dynsym, .dynamic
+	-> section order, segments, addresses
+	-> filling in what needed addresses, then applying relocations
 	-> libelfobj writer
 	-> executable / PIE / shared object / relocatable output
 
@@ -67,7 +83,9 @@ Deployment: Installed as `usr/bin/ld` with architecture alias symlinks
 
 Name: Global symbol state, archive extraction, GC, and ICF
 
-Description: The linker tracks global symbol ownership, resolves weak/strong precedence, determines when additional archive members must be materialized, and applies section-graph passes such as garbage collection and identical code folding.
+Description: The linker tracks global symbol ownership, resolves weak/strong precedence, and determines when additional archive members must be materialized. Garbage collection (`ld_gc.c`) is decided on the input objects' sections before they are merged: from the entry, what the output exports, what runs unasked and what a script keeps, it follows relocations to the sections they name, and the merge is told which sections to pass over. Identical code folding works on the merged output.
+
+Symbols are not yet resolved through one table: archive selection, precedence checking, the shared-object probes and the merge each have their own view (`symstate_t` and its name sets in `ld_input.c`/`ld_dso.c`, the checks in `ld_resolve.c`, and `libelfobj`'s merge).
 
 Technologies: C, bounded symbol/object tracking, section reachability analysis, COMDAT handling
 
@@ -87,7 +105,7 @@ Deployment: Internal to `ld`; no external script interpreter dependency
 
 Name: Relocation application, dynamic metadata generation, and final file emission
 
-Description: Once layout is fixed, the linker applies architecture-specific relocation backends, builds dynamic sections such as `.dynsym`, `.dynstr`, `.dynamic`, hash/version tables, GOT/PLT/TLS artifacts, and emits the final ELF through `libelfobj`. Optional map and reproduce outputs also live here.
+Description: Before layout the linker plans what the dynamic linker will need (`ld_dynamic.c`, `ld_dso.c`): the imports and their PLT entries and GOT slots, `.dynsym`, `.dynstr`, the hash and version tables, `.dynamic`. A symbol is reached through the dynamic linker if it is undefined, or defined in a shared object and preemptible. The output's own GOT slots, a shared object's thread-local entries and the entries and `.iplt` stubs of indirect functions are collected at the same time (`collect_local_got` in `ld_reloc.c`) and sized into `.got` and `.rel[a].dyn` after the imports'. Once addresses are fixed these are filled in and the relocations applied; most are computed by `libelfobj`, and those that need the GOT, the thread-local extent or an instruction rewritten are computed in `apply_all_relocations`. The i386 and x86-64 paths are parallel code, not one path over a description of the architecture. The final ELF is written by `libelfobj`. The map and the reproduce bundle are `ld_map.c`.
 
 Technologies: C, `libelfobj` relocation backends, deterministic symbol ordering, map/reproduce emitters
 
@@ -153,19 +171,21 @@ Determinism: Archive scanning, symbol ordering, and reproduce/map outputs are de
 
 Local build: `make -C usr.bin/ld NATIVE_BUILD=1`
 
-Primary regression surface: `tests/usr.bin/ld/` covers archive parsing, unresolved-symbol policies, dynamic tags, relocations, script frontends, GC/ICF, host dual-arch behavior, hardening inputs, and deterministic reproduce flows.
+Primary regression surface: `tests/usr.bin/ld/`, six shell scripts run by `make -C tests/usr.bin/ld` and by the `host-tests` job of the `ci` workflow. What each covers is listed in section 1.
 
-Test orchestration: `tests/usr.bin/ld/run_all.sh` provides a dashboard-style wrapper over the granular shell tests.
+What they do not cover: that the outputs run. That is checked by linking programs with a host build of the linker and running them on Substrate guests of both architectures.
 
 Integration role: The linker is exercised directly by its own suite and indirectly through compiler-driven and external package builds.
 
 ## 9. Future Considerations / Roadmap
 
-Parity backlog: `TASKLIST_LINKER.md` continues to track GNU-compatible features and remaining edge-case work.
+What is open: `docs/ld-audit.md` is the checked record of what the linker does and does not do, with evidence; `SPEC.md` §0 lists what is specified and absent. `TASKLIST_LINKER.md` is the older backlog and its ticks were not all verified.
 
 Modularity pressure: The split is by file only. Every type is still in `ld.h` and every pass still takes the whole `ld_ctx_t`; narrowing what each file can see (its own header, its own part of the context) is the next step, and can be taken a file at a time.
 
-Dynamic-link coverage: Continued work centers on deeper relocation models, versioning edge cases, and script compatibility breadth.
+Structure still to come: one symbol table in place of the several resolvers; a description table for the two architectures in place of the parallel code; an option table and a phase list in place of the chain of comparisons and the long `run_internal_link`.
+
+Speed: shared objects are re-read for each question asked of them, archives are searched by reading every member, and `.gnu.hash` is written with one bucket.
 
 ## 10. Project Identification
 
@@ -175,7 +195,7 @@ Repository Path: `usr.bin/ld/`
 
 Primary Consumers: Direct user invocation, `usr.bin/cc`, native toolchain/package validation
 
-Date of Last Update: 2026-04-22
+Date of Last Update: 2026-10-09
 
 ## 11. Glossary / Acronyms
 

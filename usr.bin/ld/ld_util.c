@@ -534,7 +534,6 @@ int ld_warn(ld_ctx_t *ctx, const char *fmt, ...) {
     vfprintf(stderr, fmt, ap);
     va_end(ap);
     fputc('\n', stderr);
-    ctx->warning_count++;
     if (ctx->fatal_warnings) {
         fprintf(stderr, "ld: error: warnings treated as errors (--fatal-warnings)\n");
         return -1;

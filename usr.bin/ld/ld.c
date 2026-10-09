@@ -736,7 +736,6 @@ int main(int argc, char **argv) {
 
     memset(&ctx, 0, sizeof(ctx));
     ctx.out_path = "a.out";
-    ctx.self_path = argv[0];
     ctx.compat_mode = LD_COMPAT_GNU;
 #ifdef LD_SUBSTRATE_BUILD
     ctx.current_lib_mode = LD_LIBMODE_STATIC;

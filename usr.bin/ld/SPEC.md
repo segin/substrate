@@ -1,10 +1,54 @@
 # `usr.bin/ld` Full ELF Linker Specification
 
 Version: 2.0  
-Status: Draft for implementation  
+Status: Specification of intent; see §0 for what is implemented  
 Primary target: x86-64 SysV ELF  
 Secondary target: i386 SysV ELF  
 Stretch targets: AArch64, ARMv7 ELF
+
+---
+
+## 0. What this document is, and where the implementation stands
+
+This is the specification the linker is being built to: what it is meant to
+become.  It is not a description of what the code does today, and reading
+it as one has misled people.  What the code does is described in
+`ARCHITECTURE.md`, in the manual page `usr.man/man1/ld.1`, and, item by
+item with evidence, in `docs/ld-audit.md`.
+
+As of 2026-10-09 the linker links i386 and x86-64 programs, PIEs, shared
+objects and relocatable outputs that run on Substrate, including ones
+driven by `gcc` and `g++`: static and dynamic, lazy and bind-now, with
+COPY relocations and canonical PLT addresses for code that is not
+position-independent, thread-local storage in all four models, indirect
+functions, symbol versions, preemptible definitions in shared objects,
+`PT_GNU_RELRO`, `.eh_frame_hdr`, `--gc-sections`, linker scripts, and the
+map and `--reproduce` outputs.
+
+The following are specified below and are **not** implemented.  Nothing
+should be built on the assumption that they are.
+
+| Specified | State |
+|-----------|-------|
+| Symbol-index-driven archive extraction (§4.3) | Members are found by reading each member; the archive's symbol index is recognised and skipped. Correct, and slower than it need be. |
+| GNU plugin protocol for LTO (§4.12) | A plugin that is a shared object cannot be loaded; an object holding LTO bytecode is refused with a message that says so. Only plugins that are programs are run (`ld_plugin.c`). |
+| Range-extension thunks (§4.7) | None. Neither target needs them. |
+| Parallel parsing, incremental caches (§4.15) | None. The linker is single-threaded. |
+| `--build-id` (§4.1) | Accepted; no build ID is made. |
+| `--version-script`, dynamic lists (§4.6) | Not accepted. Versions come from `.symver` in the objects. |
+| `SORT_*` in scripts (§4.5) | Accepted and change nothing: input sections stay in input order. |
+| `.plt.got`, `.plt.sec` (§4.9) | Not made. |
+| `.gnu.hash` (§4.9) | Made with one bucket: valid, and every lookup walks the whole chain. |
+| Reproducible-timestamp control (§4.14) | There is nothing to control: the output carries no timestamp. |
+| AArch64, ARMv7 (stretch) | Nothing. |
+| An indirect function in a static program | Refused: nothing would call the resolver. |
+
+The structure the specification asks for in §3.2 is only partly there:
+the source is divided by function, but symbols are still resolved by
+several mechanisms and not one table, the two architectures are handled
+by parallel code and not a description table, and options are parsed by
+a chain of comparisons.  Those are tracked in `docs/ld-audit.md` under
+"Structure".
 
 ---
 
@@ -364,7 +408,7 @@ Requirement IDs are normative.
 ## 10. Deliverables
 
 - Standalone `usr.bin/ld/ld` binary.
-- Updated manual page (`man/man1/ld.1`).
+- Updated manual page (`usr.man/man1/ld.1`).
 - Regression/fuzz/perf test suites.
 - Compatibility report against GNU ld/lld/gold behaviors.
 - Removed host-linker forwarding paths.
