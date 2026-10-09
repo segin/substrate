@@ -2831,6 +2831,35 @@ elf_err_t elf_register_reloc_backend(const struct elf_reloc_backend *backend) {
     return ELF_OK;
 }
 
+/*
+ * Forget every relocation against `section`: for a linker that has applied
+ * them and is writing an executable, which has no use for them.  The
+ * writer makes a .rel section for whatever relocations an object still
+ * holds.
+ */
+elf_err_t elf_section_clear_relocations(elf_section_t *section) {
+    struct elfobj *obj;
+    size_t i, kept = 0;
+
+    if (section == NULL || section->obj == NULL) {
+        return ELF_ERR_STATE;
+    }
+    obj = section->obj;
+    (void)elf__ensure_symbols_relocs(obj);
+    for (i = 0; i < obj->reloc_count; ++i) {
+        struct elf_reloc *r = obj->relocs[i];
+
+        if (r != NULL && r->section == section) {
+            free(r);
+        } else {
+            obj->relocs[kept++] = r;
+        }
+    }
+    obj->reloc_count = kept;
+    section->reloc_count = 0;
+    return ELF_OK;
+}
+
 size_t elf_section_reloc_count(const elf_section_t *section) {
     if (section == NULL) {
         return 0;

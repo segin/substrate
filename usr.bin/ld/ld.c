@@ -10524,9 +10524,10 @@ static int apply_all_relocations(elfobj_t *obj, const ld_ctx_t *ctx, int allow_u
         if (sec == NULL) {
             continue;
         }
-        if ((flags & SHF_ALLOC) == 0) {
-            continue;
-        }
+        /* Sections that are not loaded are relocated like the rest: the
+         * debugging information is all addresses of the program, and it
+         * was left pointing at nothing, with its relocations copied into
+         * the executable beside it. */
         rc = elf_section_reloc_count(sec);
         if (rc == 0) {
             continue;
@@ -10599,6 +10600,12 @@ static int apply_all_relocations(elfobj_t *obj, const ld_ctx_t *ctx, int allow_u
                 sym_name = elf_symbol_name(sym);
             }
             if (resolve_symbol_addr_for_reloc(obj, ctx, sym, allow_undefined, type, &S, &undef_name) != 0) {
+                if ((flags & SHF_ALLOC) == 0) {
+                    /* What a description of the program refers to may
+                     * have been left out of it; the description then
+                     * says 0, and nothing that runs depends on it. */
+                    continue;
+                }
                 if (can_defer_runtime_reloc(ctx, machine, type, sym)) {
                     if (trace_reloc_env) {
                         fprintf(stderr,
@@ -10704,6 +10711,13 @@ static int apply_all_relocations(elfobj_t *obj, const ld_ctx_t *ctx, int allow_u
             return -1;
         }
         free(buf);
+        /* Applied, and what the dynamic linker has to do has its own
+         * records by now; an executable or shared object does not carry
+         * the linker's. */
+        if (elf_type(obj) != ET_REL &&
+            elf_section_clear_relocations(sec) != ELF_OK) {
+            return -1;
+        }
     }
     return 0;
 }

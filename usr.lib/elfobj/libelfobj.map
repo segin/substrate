@@ -67,6 +67,7 @@ ELFOBJ_1.0 {
 		elf_section_flags;
 		elf_section_get;
 		elf_section_name;
+		elf_section_clear_relocations;
 		elf_section_reloc_at;
 		elf_section_reloc_count;
 		elf_section_set_align;

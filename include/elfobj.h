@@ -1339,6 +1339,8 @@ elf_err_t elf_add_relocation(elf_section_t *section, uint64_t offset, elf_symbol
                              uint32_t type, int64_t addend);
 size_t elf_section_reloc_count(const elf_section_t *section);
 elf_reloc_t *elf_section_reloc_at(elf_section_t *section, size_t index);
+/* Drop every relocation against the section (after applying them). */
+elf_err_t elf_section_clear_relocations(elf_section_t *section);
 elf_reloc_t *elf_reloc_at(elfobj_t *obj, size_t index);
 uint64_t elf_reloc_offset(const elf_reloc_t *reloc);
 uint32_t elf_reloc_type(const elf_reloc_t *reloc);
