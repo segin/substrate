@@ -198,7 +198,8 @@ Timings are from a host build on synthetic inputs: 4,000 global symbols
 100 / 400 / 1,600 imports from a 5,000-export shared object 0.89 / 1.99 /
 7.87 s.
 
-- [ ] **LD-PRF-001** The object library shall look symbols up by name in constant expected time, sort the symbol table in O(n log n), and grow section buffers geometrically.
+- [x] **LD-PRF-001** The object library shall look symbols up by name in constant expected time, sort the symbol table in O(n log n), and grow section buffers geometrically.
+  Met: `elf_find_symbol` and the duplicate check of `elf_add_symbol` go through a hash of the symbols' names, chained through the symbols, made on first use, added to as symbols are appended and dropped when symbols are taken away (`elf_symbols.c`); the first symbol of a name in table order is still the one found.  `elf_symbols_sort_deterministic` is `qsort` over the same total order.  A merged section's data doubles (`merged_data_room`, `elf_link.c`).  Measured, optimised host build, 40 objects of 500 functions and 500 variables each: 54.0 s before, 0.24 s after (0.29 s with `-Map`, which was 51.9 s); the output is the same file.
   Evidence: `elf_symbols.c:99-113, 31-49`; `elf_link.c:804, 960`; insertion sort at `elf_symbols.c:283`; `elf_link.c:375, 430`.  About 70 % of the 20,000-symbol link.  Basis: measured.  Task #112.
 - [ ] **LD-PRF-002** The linker shall open and parse each shared object once per link.
   Evidence: re-opened per undefined symbol at `ld.c:5010, 5165, 5116→4881`; about 90 % of a dynamic link.  Basis: measured.  Task #113.

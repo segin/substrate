@@ -340,6 +340,33 @@ static elf_err_t merge_arch_metadata(elfobj_t *out, const elfobj_t *in) {
     return ELF_OK;
 }
 
+/*
+ * Room in a merged section's data for `newsz` bytes in all: the buffer,
+ * or NULL.  It is grown by doubling, since a section is appended to once
+ * for each input that has a part of it, and growing it to fit each time
+ * copied what was there each time.
+ */
+static uint8_t *merged_data_room(struct elf_section *dst, size_t newsz) {
+    size_t cap;
+    uint8_t *buf;
+
+    if (dst->owns_data && dst->data != NULL && dst->data_cap >= newsz) {
+        return dst->data;
+    }
+    cap = dst->data_cap > SIZE_MAX / 2 ? newsz : dst->data_cap * 2;
+    if (cap < newsz) {
+        cap = newsz;
+    }
+    buf = (uint8_t *)realloc(dst->data, cap);
+    if (buf == NULL) {
+        return NULL;
+    }
+    dst->data = buf;
+    dst->owns_data = 1;
+    dst->data_cap = cap;
+    return buf;
+}
+
 static elf_err_t append_section_data(struct elf_section *dst, const uint8_t *src, size_t src_sz,
                                      uint64_t *base_out) {
     uint8_t *buf;
@@ -372,7 +399,7 @@ static elf_err_t append_section_data(struct elf_section *dst, const uint8_t *src
         if (!elf__u64_add(dst->data_size, src_sz, &newsz) || newsz > (uint64_t)SIZE_MAX) {
             return ELF_ERR_BOUNDS;
         }
-        buf = (uint8_t *)realloc(dst->data, (size_t)newsz);
+        buf = merged_data_room(dst, (size_t)newsz);
     }
     if (buf == NULL) {
         return ELF_ERR_OOM;
@@ -427,7 +454,7 @@ static elf_err_t align_merged_section(struct elf_section *dst, uint64_t align, u
         if (!elf__u64_add(dst->data_size, pad, &newsz) || newsz > (uint64_t)SIZE_MAX) {
             return ELF_ERR_BOUNDS;
         }
-        buf = (uint8_t *)realloc(dst->data, (size_t)newsz);
+        buf = merged_data_room(dst, (size_t)newsz);
         if (buf == NULL) {
             return ELF_ERR_OOM;
         }
@@ -455,6 +482,7 @@ static elf_err_t replace_section_data(struct elf_section *dst, const struct elf_
     }
     dst->data = NULL;
     dst->data_size = 0;
+    dst->data_cap = 0;
     dst->owns_data = 0;
     dst->size = 0;
 
@@ -478,6 +506,7 @@ static elf_err_t replace_section_data(struct elf_section *dst, const struct elf_
     }
     memcpy(copy, src->data, src->data_size);
     dst->data = copy;
+    dst->data_cap = 0;
     dst->data_size = src->data_size;
     dst->size = src->data_size;
     dst->owns_data = 1;

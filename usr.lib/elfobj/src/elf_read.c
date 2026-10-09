@@ -221,6 +221,7 @@ static elf_err_t parse_sections(elfobj_t *obj, uint64_t shoff, uint16_t entsize,
                 }
             }
             sec->data = obj->image + sec->offset;
+            sec->data_cap = 0;
             sec->data_size = (size_t)sec->size;
             sec->owns_data = 0;
             parse_section_compression_hint(obj, sec);
@@ -409,6 +410,9 @@ static void free_symtab_maps(symtab_index_t *maps, size_t count) {
 static void rollback_symbols(elfobj_t *obj, size_t base_count) {
     if (obj == NULL) {
         return;
+    }
+    if (obj->symbol_count > base_count) {
+        elf__symbol_index_drop(obj);
     }
     while (obj->symbol_count > base_count) {
         struct elf_symbol *sym;

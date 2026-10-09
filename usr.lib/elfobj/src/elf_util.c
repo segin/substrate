@@ -457,6 +457,7 @@ static void elf_free_symbols(elfobj_t *obj) {
         free(sym->version_name);
         free(sym);
     }
+    elf__symbol_index_drop(obj);
     free(obj->symbols);
 }
 

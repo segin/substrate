@@ -93,6 +93,7 @@ elf_err_t elf_section_set_data(elf_section_t *section, const void *data, size_t 
         section->owns_data = 0;
         section->size = 0;
         section->data_size = 0;
+        section->data_cap = 0;
         section->obj->dirty = 1;
         return ELF_OK;
     }
@@ -110,6 +111,7 @@ elf_err_t elf_section_set_data(elf_section_t *section, const void *data, size_t 
     section->data = copy;
     section->owns_data = 1;
     section->data_size = size;
+    section->data_cap = 0;
     section->size = size;
     section->obj->dirty = 1;
     return ELF_OK;

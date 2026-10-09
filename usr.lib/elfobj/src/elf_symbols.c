@@ -11,6 +11,93 @@ static int is_mutable_obj(elfobj_t *obj) {
     return 1;
 }
 
+/*
+ * The symbols by name.  A link asks for a symbol by its name once for
+ * each symbol it merges and once for each it adds, and looking through
+ * all of them each time made a link of twenty thousand symbols four
+ * hundred million comparisons of strings.
+ *
+ * The index is a hash table of the symbols, chained through the symbols
+ * themselves.  It is made the first time a name is asked for, kept up as
+ * symbols are appended, and dropped when symbols are taken away; sorting
+ * the table changes no symbol's name and leaves it alone.  A symbol's
+ * name does not change once it is in the table.
+ */
+static uint32_t name_hash_of(const char *s) {
+    uint32_t h = 2166136261u;           /* FNV-1a */
+
+    for (; *s != '\0'; ++s) {
+        h = (h ^ (uint8_t)*s) * 16777619u;
+    }
+    return h;
+}
+
+void elf__symbol_index_drop(elfobj_t *obj) {
+    free(obj->name_buckets);
+    obj->name_buckets = NULL;
+    obj->name_nbuckets = 0;
+    obj->name_indexed = 0;
+}
+
+static void name_index_put(elfobj_t *obj, struct elf_symbol *sym) {
+    struct elf_symbol **head;
+
+    if (sym == NULL || sym->name == NULL) {
+        return;
+    }
+    sym->name_hash = name_hash_of(sym->name);
+    head = &obj->name_buckets[sym->name_hash & (obj->name_nbuckets - 1)];
+    sym->name_next = *head;
+    *head = sym;
+}
+
+/* Bring the index up to the symbols there are.  0 if there is no memory
+ * for it, and then the caller looks through the table as before. */
+static int name_index_ready(elfobj_t *obj) {
+    size_t i;
+
+    if (obj->name_buckets != NULL && obj->name_indexed == obj->symbol_count &&
+        obj->symbol_count <= obj->name_nbuckets) {
+        return 1;
+    }
+    if (obj->name_buckets == NULL || obj->symbol_count > obj->name_nbuckets ||
+        obj->name_indexed > obj->symbol_count) {
+        size_t n = 64;
+
+        while (n < obj->symbol_count * 2) {
+            if (n > ((size_t)-1) / (2 * sizeof(obj->name_buckets[0]))) {
+                return 0;
+            }
+            n *= 2;
+        }
+        elf__symbol_index_drop(obj);
+        obj->name_buckets = (struct elf_symbol **)elf__calloc(n, sizeof(obj->name_buckets[0]));
+        if (obj->name_buckets == NULL) {
+            return 0;
+        }
+        obj->name_nbuckets = n;
+    }
+    for (i = obj->name_indexed; i < obj->symbol_count; ++i) {
+        name_index_put(obj, obj->symbols[i]);
+    }
+    obj->name_indexed = obj->symbol_count;
+    return 1;
+}
+
+/*
+ * The next symbol called `name` in its bucket, starting at `sym`.  They
+ * come in no order: a caller that wants the first in the table compares
+ * their indexes.
+ */
+static struct elf_symbol *name_index_next(struct elf_symbol *sym, const char *name, uint32_t hash) {
+    for (; sym != NULL; sym = sym->name_next) {
+        if (sym->name_hash == hash && strcmp(sym->name, name) == 0) {
+            return sym;
+        }
+    }
+    return NULL;
+}
+
 elf_err_t elf__push_symbol(elfobj_t *obj, struct elf_symbol *sym) {
     void *next;
 
@@ -25,6 +112,13 @@ elf_err_t elf__push_symbol(elfobj_t *obj, struct elf_symbol *sym) {
     }
     sym->index = obj->symbol_count;
     obj->symbols[obj->symbol_count++] = sym;
+    /* If the index was whole and has room it stays whole; otherwise it
+     * is brought up to date when next asked. */
+    if (obj->name_buckets != NULL && obj->name_indexed + 1 == obj->symbol_count &&
+        obj->symbol_count <= obj->name_nbuckets) {
+        name_index_put(obj, sym);
+        obj->name_indexed = obj->symbol_count;
+    }
     return ELF_OK;
 }
 
@@ -32,6 +126,20 @@ int elf_symbol_is_duplicate_global(const elfobj_t *obj, const char *name, uint8_
     size_t i;
 
     if (obj == NULL || name == NULL || bind == STB_LOCAL) {
+        return 0;
+    }
+    /* The index belongs to the object as a cache does: making it changes
+     * nothing a caller can see. */
+    if (name_index_ready((elfobj_t *)obj)) {
+        uint32_t hash = name_hash_of(name);
+        const struct elf_symbol *s = obj->name_buckets[hash & (obj->name_nbuckets - 1)];
+
+        while ((s = name_index_next((struct elf_symbol *)s, name, hash)) != NULL) {
+            if (s->bind == STB_GLOBAL || s->bind == STB_WEAK || bind == STB_GLOBAL) {
+                return 1;
+            }
+            s = s->name_next;
+        }
         return 0;
     }
     for (i = 0; i < obj->symbol_count; ++i) {
@@ -104,6 +212,20 @@ elf_symbol_t *elf_find_symbol(elfobj_t *obj, const char *name) {
     }
     (void)elf__ensure_symbols_relocs(obj);
 
+    /* The first of that name in the table, as it always was. */
+    if (name_index_ready(obj)) {
+        uint32_t hash = name_hash_of(name);
+        struct elf_symbol *sym = obj->name_buckets[hash & (obj->name_nbuckets - 1)];
+        struct elf_symbol *first = NULL;
+
+        while ((sym = name_index_next(sym, name, hash)) != NULL) {
+            if (first == NULL || sym->index < first->index) {
+                first = sym;
+            }
+            sym = sym->name_next;
+        }
+        return first;
+    }
     for (i = 0; i < obj->symbol_count; ++i) {
         struct elf_symbol *sym = obj->symbols[i];
         if (sym != NULL && sym->name != NULL && strcmp(sym->name, name) == 0) {
@@ -292,10 +414,16 @@ static int sym_order_before(const sym_ord_t *a, const sym_ord_t *b) {
     return a->old_index < b->old_index;
 }
 
+static int sym_order_cmp(const void *a, const void *b) {
+    if (sym_order_before((const sym_ord_t *)a, (const sym_ord_t *)b)) {
+        return -1;
+    }
+    return sym_order_before((const sym_ord_t *)b, (const sym_ord_t *)a) ? 1 : 0;
+}
+
 elf_err_t elf_symbols_sort_deterministic(elfobj_t *obj, size_t *first_global_out) {
     sym_ord_t *ord;
     size_t i;
-    size_t j;
 
     if (obj == NULL) {
         return ELF_ERR_STATE;
@@ -318,15 +446,9 @@ elf_err_t elf_symbols_sort_deterministic(elfobj_t *obj, size_t *first_global_out
         ord[i].sym = obj->symbols[i];
         ord[i].old_index = i;
     }
-    for (i = 1; i < obj->symbol_count; ++i) {
-        sym_ord_t key = ord[i];
-        j = i;
-        while (j > 0 && !sym_order_before(&ord[j - 1], &key)) {
-            ord[j] = ord[j - 1];
-            j--;
-        }
-        ord[j] = key;
-    }
+    /* The order is total -- two entries that compare equal otherwise are
+     * told apart by where they were -- so any sort gives the one result. */
+    qsort(ord, obj->symbol_count, sizeof(ord[0]), sym_order_cmp);
     for (i = 0; i < obj->symbol_count; ++i) {
         obj->symbols[i] = ord[i].sym;
         if (obj->symbols[i] == NULL) {

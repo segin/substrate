@@ -118,6 +118,8 @@ struct elf_section {
     char *note_name;
     uint8_t *data;
     size_t data_size;
+    size_t data_cap;            /* allocated, where data was grown by the
+                                 * merge; 0 where it is exactly data_size */
     uint8_t owns_data;
     uint8_t has_compression_hint;
     uint32_t compression_type;
@@ -153,6 +155,8 @@ struct elf_symbol {
     char *version_name;
     uint8_t version_default;
     size_t index;
+    struct elf_symbol *name_next;       /* the next in its bucket of the name index */
+    uint32_t name_hash;
 };
 
 struct elfobj {
@@ -182,6 +186,12 @@ struct elfobj {
     struct elf_symbol **symbols;
     size_t symbol_count;
     size_t symbol_cap;
+    /* The symbols by name: made when a name is first looked up, added to
+     * as symbols are, and dropped when symbols are taken away.  It holds
+     * symbols[0 .. name_indexed). */
+    struct elf_symbol **name_buckets;
+    size_t name_nbuckets;               /* a power of two, or 0 for none */
+    size_t name_indexed;
 
     struct elf_reloc **relocs;
     size_t reloc_count;
@@ -285,6 +295,7 @@ void elf__wr64(uint8_t *p, elfobj_endian_t e, uint64_t v);
 
 elf_err_t elf__push_section(elfobj_t *obj, struct elf_section *sec);
 elf_err_t elf__push_symbol(elfobj_t *obj, struct elf_symbol *sym);
+void elf__symbol_index_drop(elfobj_t *obj);
 elf_err_t elf__push_reloc(elfobj_t *obj, struct elf_reloc *rel);
 elf_err_t elf__section_push_reloc(struct elf_section *section, struct elf_reloc *rel);
 elf_err_t elf__push_phdr(elfobj_t *obj, const struct elf_phdr *phdr);
