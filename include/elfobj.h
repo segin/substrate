@@ -227,11 +227,26 @@ typedef enum {
 #define DT_FINI_ARRAYSZ 28
 #define DT_RUNPATH 29
 #define DT_FLAGS 30
-#define DF_TEXTREL 0x4          /* in DT_FLAGS: relocations in read-only memory */
-#define DF_BIND_NOW 0x8         /* in DT_FLAGS: no lazy binding */
+/* The bits of DT_FLAGS, all of them: programs that include this header
+ * and would otherwise define the set for themselves test for the first. */
+#define DF_ORIGIN 0x00000001u
+#define DF_SYMBOLIC 0x00000002u
+#define DF_TEXTREL 0x00000004u      /* relocations in read-only memory */
+#define DF_BIND_NOW 0x00000008u     /* no lazy binding */
+#define DF_STATIC_TLS 0x00000010u
 #define DT_FLAGS_1 0x6ffffffb
-#define DF_1_NOW 0x1            /* in DT_FLAGS_1: the same */
-#define DF_1_PIE 0x08000000     /* in DT_FLAGS_1: a program, not a library */
+/* And of DT_FLAGS_1. */
+#define DF_1_NOW 0x00000001u        /* no lazy binding */
+#define DF_1_GLOBAL 0x00000002u
+#define DF_1_NODELETE 0x00000008u
+#define DF_1_LOADFLTR 0x00000010u
+#define DF_1_INITFIRST 0x00000020u
+#define DF_1_NOOPEN 0x00000040u
+#define DF_1_ORIGIN 0x00000080u
+#define DF_1_INTERPOSE 0x00000400u
+#define DF_1_NODEFLIB 0x00000800u
+#define DF_1_NODUMP 0x00001000u
+#define DF_1_PIE 0x08000000u        /* a program, not a library */
 #define DT_PREINIT_ARRAY 32
 #define DT_PREINIT_ARRAYSZ 33
 #define DT_GNU_HASH 0x6ffffef5
