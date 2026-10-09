@@ -162,6 +162,8 @@ typedef struct {
     int query_version;
     int trace_inputs;
     int export_dynamic;
+    int bsymbolic;              /* -Bsymbolic: a shared object's references to
+                                 * its own definitions are bound when it is made */
     int gc_sections;
     int gc_print_sections;
     int icf_mode; /* 0=off, 1=safe, 2=all */
@@ -595,6 +597,9 @@ int plan_symbol_version_sections(ld_ctx_t *ctx, elfobj_t *out, uint8_t **dynstr_
 /* ld_dynamic.c */
 int dynstr_append_cstr(uint8_t **buf, size_t *len, size_t *cap, const char *name, uint32_t *out_off);
 int is_runtime_import_symbol(const elf_symbol_t *sym);
+void set_definitions_preemptible(int on);
+int symbol_is_preemptible(const elf_symbol_t *sym);
+int pc_relative_ref_is_call(const elf_symbol_t *sym);
 int reloc_is_x64_plt_ref(uint32_t type);
 int reloc_is_x64_got_ref(uint32_t type);
 int reloc_is_x64_tls_gd_ref(uint32_t type);

@@ -135,8 +135,27 @@ ro=0x$(readelf -SW lib4.so | sed -n 's/.* \.data\.rel\.ro[^ ]*  *PROGBITS  *\([0
 is  "PT_GNU_RELRO begins and ends on a page" "$(( start % 4096 )) $(( size % 4096 )) $(( size > 0 ))" "0 0 1"
 is  ".data.rel.ro is inside it"       "$(( ro >= start && ro < start + size ))" 1
 is  ".data is after it"               "$(( data >= start + size ))" 1
-is  "the library reaches its own variable directly" \
-    "$(objdump -d lib4.so | sed -n '/<lib_bump>:/,/ret/p' | grep -c 'mov  *0x0(%e[a-z]x),')" 0
+# What a shared object exports is only its offer: the program's definition
+# of the same name, if it has one, is everybody's.  So the library reaches
+# its own exported variable and function through the table, by relocations
+# that name them, and what is not exported directly.  -Bsymbolic binds
+# them when the library is made, as nothing else may.
+cat > lib5.c <<'EOF'
+int shared_counter = 1;
+static int private_counter = 1;
+int shared_step(void) { return 1; }
+static int private_step(void) { return 2; }
+int lib_run(void) { return (shared_counter += shared_step()) + (private_counter += private_step()); }
+int (*lib_hook)(void) = shared_step;
+EOF
+$cc32 -fPIC -O1 -fno-inline -o lib5.o lib5.c
+./ld -m elf_i386 -shared -o lib5.so lib5.o; ./ld -m elf_i386 -shared -Bsymbolic -o lib5s.so lib5.o
+is  "the library's own exported variable is found by name" "$(readelf -rW lib5.so | grep -c 'GLOB_DAT.* shared_counter')" 1
+is  "its exported function is called through the PLT" "$(readelf -rW lib5.so | grep -c 'JUMP_SLOT.* shared_step')" 1
+is  "a pointer to it is filled in by name" "$(readelf -rW lib5.so | grep -c 'R_386_32 .* shared_step')" 1
+is  "nothing private is"              "$(readelf -rW lib5.so | grep -c 'private_')" 0
+is  "-Bsymbolic: nothing is found by name" "$(readelf -rW lib5s.so | grep -c -E 'GLOB_DAT|JUMP_SLOT|R_386_32 ')" 0
+is  "-Bsymbolic: the pointer is relative" "$(( $(readelf -rW lib5s.so | grep -c 'R_386_RELATIVE') >= 1 ))" 1
 
 # -l: the directories in order, each for the shared library and then the
 # archive, and a library for another machine is passed over.  The first

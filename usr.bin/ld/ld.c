@@ -488,6 +488,7 @@ static int run_internal_link(ld_ctx_t *ctx) {
         return -1;
     }
 
+    set_definitions_preemptible(out_type == ET_DYN && !ctx->pie && !ctx->bsymbolic);
     if (is_program && relax_tls_dynamic_in_program(out) != 0) {
         symref_map_free(&undef_refs);
         objvec_free(&inputs);
@@ -1141,6 +1142,10 @@ int main(int argc, char **argv) {
         }
         if (strcmp(a, "--export-dynamic") == 0) {
             ctx.export_dynamic = 1;
+            continue;
+        }
+        if (strcmp(a, "-Bsymbolic") == 0 || strcmp(a, "-Bsymbolic-functions") == 0) {
+            ctx.bsymbolic = 1;
             continue;
         }
         if (strcmp(a, "-rdynamic") == 0 || strcmp(a, "-E") == 0) {

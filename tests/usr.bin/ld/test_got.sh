@@ -65,9 +65,12 @@ for arch in 32 64; do
     fi
 
     # A shared object and a PIE: the slots, and a relocation for each.
+    # (A shared object's exported symbols are bound when it is loaded, not
+    # here, unless it is made -Bsymbolic: that case is in test_dynamic.sh.)
     for kind in shared pie; do
         out=$kind$arch
-        if ! ./ld -m $m -$kind -o $out g$arch.o 2> err; then
+        how=-$kind; [ $kind = shared ] && how="-shared -Bsymbolic"
+        if ! ./ld -m $m $how -o $out g$arch.o 2> err; then
             echo "FAIL $kind $arch: does not link: $(head -1 err)"; fail=1; continue
         fi
         got=$(sec $out .got addr); gsize=$(sec $out .got size)

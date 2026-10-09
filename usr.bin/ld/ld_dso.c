@@ -859,7 +859,11 @@ int note_dso_names(ld_ctx_t *ctx) {
             const elf_symbol_t *sym = elf_symbol_at(obj, k);
             const char *name = sym != NULL ? elf_symbol_name(sym) : NULL;
 
-            if (name != NULL && name[0] != '\0' && elf_symbol_shndx(sym) == SHN_UNDEF &&
+            /* ...and what it defines for all to see: the program's
+             * definition of the same name is the one the library is to
+             * use too, and it can only be found if it is exported. */
+            if (name != NULL && name[0] != '\0' &&
+                (elf_symbol_shndx(sym) == SHN_UNDEF || elf_symbol_visibility(sym) == STV_DEFAULT) &&
                 (elf_symbol_bind(sym) == STB_GLOBAL || elf_symbol_bind(sym) == STB_WEAK) &&
                 !symset_contains(&ctx->dso_wants, name) && symset_add(&ctx->dso_wants, name) != 0) {
                 elf_close(obj);

@@ -270,6 +270,57 @@ static uint8_t *build_gnu_hash_section(const uint8_t *dynsym, size_t dynsym_len,
     return buf;
 }
 
+/*
+ * Whether the output's own exported definitions can be replaced when it
+ * is loaded: true of a shared object, unless made with -Bsymbolic.  Set
+ * once the kind of output is known.
+ */
+static int definitions_are_preemptible;
+
+void set_definitions_preemptible(int on) {
+    definitions_are_preemptible = on;
+}
+
+/*
+ * Whether `sym` is defined here and may yet be someone else's at run
+ * time.  A shared object's global symbols of default visibility are only
+ * its offer: if the program, or a library before it, defines the same
+ * name, that definition is the one everybody uses, this object included.
+ * So it reaches such a symbol as it would another object's -- through the
+ * GOT and the PLT, by relocations that name the symbol -- and what
+ * was bound here at link time was a private copy the rest of the process
+ * did not share: the library's own `environ` after the program had been
+ * given the copy, a function the program had replaced.
+ *
+ * Not thread-local variables, which stay bound here.
+ */
+int symbol_is_preemptible(const elf_symbol_t *sym) {
+    uint16_t shndx;
+
+    if (!definitions_are_preemptible || sym == NULL || elf_symbol_name(sym) == NULL ||
+        elf_symbol_name(sym)[0] == '\0') {
+        return 0;
+    }
+    shndx = elf_symbol_shndx(sym);
+    return shndx != SHN_UNDEF && shndx != SHN_ABS && shndx < 0xff00 &&
+           (elf_symbol_bind(sym) == STB_GLOBAL || elf_symbol_bind(sym) == STB_WEAK) &&
+           elf_symbol_visibility(sym) == STV_DEFAULT && elf_symbol_type(sym) != STT_TLS;
+}
+
+/*
+ * Whether a pc-relative reference to `sym` is to be taken for a call and
+ * sent through the PLT.  To something undefined it is; to a definition
+ * that may be preempted, only if that is a function -- a table of
+ * distances to data is not a table of calls.
+ */
+int pc_relative_ref_is_call(const elf_symbol_t *sym) {
+    return sym != NULL && (elf_symbol_shndx(sym) == SHN_UNDEF || elf_symbol_type(sym) == STT_FUNC);
+}
+
+/*
+ * Whether `sym` is reached at run time through the dynamic linker: it is
+ * undefined here, or defined here and preemptible.
+ */
 int is_runtime_import_symbol(const elf_symbol_t *sym) {
     uint8_t bind;
     uint8_t vis;
@@ -278,7 +329,7 @@ int is_runtime_import_symbol(const elf_symbol_t *sym) {
         return 0;
     }
     if (elf_symbol_shndx(sym) != SHN_UNDEF) {
-        return 0;
+        return symbol_is_preemptible(sym);
     }
     bind = elf_symbol_bind(sym);
     if (bind != STB_GLOBAL && bind != STB_WEAK) {
@@ -749,7 +800,7 @@ static int collect_dynamic_imports_x64(const ld_ctx_t *ctx, elfobj_t *out, dyn_i
             }
             type = elf_reloc_type(rel);
             plt_ref = reloc_is_x64_plt_ref(type);
-            if (!plt_ref && type == R_X86_64_PC32 &&
+            if (!plt_ref && type == R_X86_64_PC32 && pc_relative_ref_is_call(sym) &&
                 (elf_symbol_type(sym) == STT_FUNC || elf_symbol_type(sym) == STT_NOTYPE)) {
                 /*
                  * A pc-relative reference to something in a shared
@@ -824,6 +875,7 @@ static int collect_dynamic_imports_i386(const ld_ctx_t *ctx, elfobj_t *out, dyn_
             const elf_symbol_t *sym;
             dyn_import_t *imp;
             uint32_t type;
+            int plt_ref;
 
             if (rel == NULL) {
                 continue;
@@ -833,7 +885,8 @@ static int collect_dynamic_imports_i386(const ld_ctx_t *ctx, elfobj_t *out, dyn_
                 continue;
             }
             type = elf_reloc_type(rel);
-            if (!reloc_is_i386_plt_ref(type) && !reloc_is_i386_got_ref(type) &&
+            plt_ref = reloc_is_i386_plt_ref(type) && (type != R_386_PC32 || pc_relative_ref_is_call(sym));
+            if (!plt_ref && !reloc_is_i386_got_ref(type) &&
                 !reloc_is_i386_tls_gd_ref(type) && !reloc_is_i386_tls_ie_ref(type) &&
                 !reloc_is_i386_runtime_data_ref(type)) {
                 continue;
@@ -842,7 +895,7 @@ static int collect_dynamic_imports_i386(const ld_ctx_t *ctx, elfobj_t *out, dyn_
             if (imp == NULL) {
                 return -1;
             }
-            if (reloc_is_i386_plt_ref(type)) {
+            if (plt_ref) {
                 imp->need_plt = 1;
             }
             if (import_address_is_plt(ctx, out, type, sym)) {

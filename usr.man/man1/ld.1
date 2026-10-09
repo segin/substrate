@@ -20,6 +20,7 @@
 .Op Fl -whole-archive | Fl -no-whole-archive
 .Op Fl -as-needed | Fl -no-as-needed
 .Op Fl T Ar script
+.Op Fl Bsymbolic
 .Op Fl -gc-sections
 .Op Fl -print-gc-sections
 .Op Fl -icf Ns = Ns Ar safe|all|none
@@ -138,6 +139,16 @@ output.
 .It Fl shared
 Produce a shared object: no entry is needed, what it leaves undefined is
 for the program that loads it to supply, and it is not made executable.
+Its global symbols of default visibility may be preempted: if the
+program, or a library loaded before it, defines the same name, that
+definition is used by everything, this object included.
+So the object reaches its own such symbols as it would another's,
+through the GOT and the PLT, by relocations that name them.
+Symbols of hidden or protected visibility, and local ones, are bound when
+the object is made.
+.It Fl Bsymbolic , Fl Bsymbolic-functions
+In a shared object, bind references to its own global symbols when it is
+made; nothing can then take their place.
 .It Fl pie
 Produce a position-independent executable.
 It is
@@ -596,15 +607,14 @@ In an executable, a weak reference that neither an input nor a shared
 object of the link defines is zero at link time.
 .It
 An executable's dynamic symbol table has what it imports, what the
-shared objects of the link refer to and it defines, its copies of their
-variables, and with
+shared objects of the link refer to or define and it defines too, its
+copies of their variables, and with
 .Fl -export-dynamic
 everything global.
 .It
-A shared object binds references to its own global symbols when it is
-linked, as GNU ld does under
-.Fl Bsymbolic :
-a definition of the same name in the program does not take their place.
+A shared object's references to its own thread-local variables are bound
+when it is linked; a definition of the same name elsewhere does not take
+their place.
 .It
 In an executable made of code that is not position-independent, a call
 to a function in a shared object goes through the PLT; a function whose

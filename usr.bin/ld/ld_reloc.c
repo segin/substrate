@@ -161,7 +161,9 @@ static int resolve_symbol_addr_for_reloc(elfobj_t *obj, const ld_ctx_t *ctx, con
     if (sym == NULL || out_addr == NULL) {
         return resolve_symbol_addr(obj, sym, allow_undef, out_addr, undef_name);
     }
-    if (elf_symbol_shndx(sym) != SHN_UNDEF) {
+    /* Defined here and not to be reached through the dynamic linker: its
+     * address.  One that may be preempted goes the way an import does. */
+    if (elf_symbol_shndx(sym) != SHN_UNDEF && !symbol_is_preemptible(sym)) {
         return resolve_symbol_addr(obj, sym, allow_undef, out_addr, undef_name);
     }
     name = elf_symbol_name(sym);
@@ -183,7 +185,7 @@ static int resolve_symbol_addr_for_reloc(elfobj_t *obj, const ld_ctx_t *ctx, con
     }
     if (ctx != NULL && ctx->mode == 64) {
         int plt_ref = reloc_is_x64_plt_ref(type);
-        if (!plt_ref && type == R_X86_64_PC32 &&
+        if (!plt_ref && type == R_X86_64_PC32 && pc_relative_ref_is_call(sym) &&
             (elf_symbol_type(sym) == STT_FUNC || elf_symbol_type(sym) == STT_NOTYPE)) {
             plt_ref = 1;
         }
@@ -231,7 +233,8 @@ static int resolve_symbol_addr_for_reloc(elfobj_t *obj, const ld_ctx_t *ctx, con
             return 0;
         }
     } else if (ctx != NULL && ctx->mode == 32) {
-        if ((reloc_is_i386_plt_ref(type) || (imp->canonical && reloc_is_direct_ref(EM_386, type, 0))) &&
+        if (((reloc_is_i386_plt_ref(type) && (type != R_386_PC32 || pc_relative_ref_is_call(sym))) ||
+             (imp->canonical && reloc_is_direct_ref(EM_386, type, 0))) &&
             imp->need_plt) {
             sec = elf_find_section(obj, ".plt");
             if (sec == NULL) {
@@ -318,13 +321,8 @@ static int can_defer_runtime_reloc(const ld_ctx_t *ctx, uint16_t machine, uint32
  * symbol defined in the output never had a slot in either: the C startup
  * file is position-independent, so that was every link.
  *
- * plan_local_got_i386() runs before addresses are assigned.  If anything
- * is GOT-relative and there is no table, it makes a .got, with a slot for
- * each defined symbol a GOT32-class relocation names; fill_local_got_i386()
- * stores the addresses once they are known.  Where the table is the
- * imports' own, sized by other code, a reference to a defined symbol is
- * instead turned into a direct one when it is applied (the `mov` of a
- * GOT32X becomes a `lea`), which is what the X in GOT32X permits.
+ * What is done about it is below, for both architectures:
+ * collect_local_got(), plan_local_got() and fill_local_got().
  */
 static int reloc_is_i386_got_slot(uint32_t type) {
     return type == R_386_GOT32 || type == R_386_GOT32X;
@@ -525,6 +523,7 @@ int collect_local_got(ld_ctx_t *ctx, elfobj_t *out) {
              * weak reference nothing defined, whose slot says 0. */
             shndx = sym != NULL ? elf_symbol_shndx(sym) : SHN_UNDEF;
             if (!reloc_is_got_slot(machine, type) || sym == NULL || (shndx == SHN_UNDEF && !nothing_imported) ||
+                symbol_is_preemptible(sym) ||
                 got_ref_relaxes(machine, type, sym, data, data_sz, elf_reloc_offset(rel)) ||
                 local_got_slot_lookup(ctx, sym) >= 0) {
                 continue;
@@ -1174,6 +1173,13 @@ int apply_all_relocations(elfobj_t *obj, const ld_ctx_t *ctx, int allow_undefine
                         sec_name, (unsigned long long)off, type, undef_name != NULL ? undef_name : sym_name);
                 return -1;
             }
+            /* The address of something that may be preempted is the
+             * dynamic linker's to put here, by the relocation made for
+             * it; what is here stays the addend. */
+            if ((flags & SHF_ALLOC) != 0 && symbol_is_preemptible(sym) &&
+                can_defer_runtime_reloc(ctx, machine, type, sym)) {
+                continue;
+            }
             P = elf_section_addr(sec) + off;
             if (machine == EM_386 && reloc_is_i386_got_relative(type)) {
                 /*
@@ -1184,7 +1190,8 @@ int apply_all_relocations(elfobj_t *obj, const ld_ctx_t *ctx, int allow_undefine
                  * P to work with and made each of them S + A.
                  */
                 uint64_t got = i386_got_base(obj);
-                int defined = sym != NULL && elf_symbol_shndx(sym) != SHN_UNDEF;
+                int defined = sym != NULL && elf_symbol_shndx(sym) != SHN_UNDEF &&
+                              (!symbol_is_preemptible(sym) || !reloc_is_i386_got_slot(type));
                 long slot = sym != NULL ? local_got_slot(ctx, sym) : -1;
                 const char *why = NULL;
 
@@ -1280,7 +1287,7 @@ int apply_all_relocations(elfobj_t *obj, const ld_ctx_t *ctx, int allow_undefine
                 (type == R_X86_64_GOTPCREL ||
                  type == R_X86_64_GOTPCRELX ||
                  type == R_X86_64_REX_GOTPCRELX) &&
-                sym != NULL && elf_symbol_shndx(sym) != SHN_UNDEF &&
+                sym != NULL && elf_symbol_shndx(sym) != SHN_UNDEF && !symbol_is_preemptible(sym) &&
                 off >= 2 && buf[off - 2] == 0x8b) {
                 /*
                  * We currently materialize GOTPCREL-family relocations with
