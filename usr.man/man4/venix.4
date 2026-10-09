@@ -79,12 +79,92 @@ and
 .B TIOCSETN
 on a six-byte
 .BR "struct sgttyb" .
-Venix's own additions \- semaphores, shared data, locking,
-.B suspend
-and
+.SS Venix's own calls
+The distribution documents these only as argument lists in its lint
+library; what they do was read from its kernel.
+.TP
+.BR semset "(n, pri), " semclear "(n), " semtest "(n), " semtset "(n, pri)"
+Semaphores, each one bit.
+.B semset
+waits until
+.I n
+is clear and sets it;
+.B semtset
+sets it if it is clear and returns 1 if it was already set;
+.B semtest
+returns whether it is set;
+.B semclear
+clears it and wakes the waiters.
+A negative
+.I n
+names one of sixteen semaphores the whole system shares, \-1 the first;
+0 to 15 name sixteen shared by the processes running the same program.
+A semaphore left set by a process that exits stays set.
+.TP
+.BR sdata "(path, r, 0)"
+Attaches the file
+.I path
+as a segment of data shared with every process that attaches it, and
+points the ES register at it.
+What is stored there is stored in the file.
+.BR sdata "(1, r, n)"
+makes
+.IR n *512
+bytes of shared data with no name, for the process and the children it
+then has;
+.BR sdata "(0, r, n)"
+moves ES
+.IR n *512
+bytes into what is attached;
+.BR sdata "(2, r, 0)"
+detaches it, and ES is the data segment again.
+A segment is at most 64K.
+.TP
+.BR phys "(r, s, a)"
+Points ES at physical address
+.IR a *512.
+Only the adapter and ROM area, 0xA0000 up to 1 MB, may be asked for
+.RB ( EPERM
+otherwise, and while shared data is attached); Venix allowed its
+superuser all of memory, which here is not a PC's.
+.TP
+.BR suspend "(pid, flag)"
+Stops the process, or lets it run again if
+.I flag
+is 0.
+.TP
+.BR lock "(flag)"
+Keeps the process in memory.
+It always is; the call succeeds, for the superuser only when
+.I flag
+is not 0.
+.TP
+.BR locking "(fd, mode, size)"
+Locks
+.I size
+bytes of the file from the descriptor's position, or to its end if
+.I size
+is 0.
+Mode 0 unlocks, 1 locks or fails with
+.B EACCES
+if another process holds any of the range, 2 waits for it.
+The locks are between processes on the file, thirty in the system as in
+Venix, and are apart from
+.BR fcntl (2)
+record locks.
+A process's locks go when it exits, not when it closes the file.
+.TP
+.BR aiowait "(fd, flag)"
+Returns 0: no asynchronous transfer is ever outstanding.
+.PP
+A program reaches the segment ES is pointed at with an ES: prefix; the
+C compiler has no notation for that.
+After
+.BR fork (2)
+the child's ES points where the parent's does, at the same shared data;
+a mapping made by
 .B phys
-\- fail with
-.BR EINVAL .
+is not inherited.
 .SS Other traps
 .TP
 .B int 0xf4

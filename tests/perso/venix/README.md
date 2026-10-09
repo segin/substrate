@@ -18,7 +18,25 @@ With the image mounted at `/perso/venix` and `venixtest.c` copied into its
 
 Every line reads `ok`, and the last is `venixtest: PASS`.
 
-## What it checks
+`venixext.c` is run the same way, as the superuser, and checks the calls
+Venix added to Version 7 (36 checks):
+
+    /perso/venix/bin/sh -c 'cd /tmp && cc -o venixext venixext.c && ./venixext'
+
+- semaphores: test, test-and-set, clear, the per-program and the
+  system-wide ones, and `semset` waiting for another process's `semclear`;
+- `sdata`: anonymous shared data seen by a forked child, a file attached
+  and stored into, ES moved within it and given back;
+- `suspend` stopping and restarting a child (watched through the shared
+  data it is counting in);
+- `locking`: refused to a second process, granted after the unlock, waited
+  for in mode 2, and by byte range;
+- `phys` at the display adapter and refused below it; `lock`; `aiowait`.
+
+`sdata` and `phys` work through the ES register, which C cannot name, so
+the test calls two short routines it carries as machine code.
+
+## What venixtest checks
 
 46 checks.  The ones PC/IX's test makes -- arguments and environment, the
 second result of a call, files and `stat`, a directory read as 16-byte

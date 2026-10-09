@@ -204,6 +204,7 @@ static inline int venix_build_load_plan(const struct venix_exec *h,
 #define ELKS_LDT_DS_INDEX  1U
 #define ELKS_LDT_SS_INDEX  2U
 #define ELKS_LDT_ES_INDEX  3U
+#define ELKS_LDT_VENIX_ENTRIES 8U
 
 struct elks_segment_layout {
     struct user_desc cs;

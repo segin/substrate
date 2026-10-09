@@ -22,6 +22,7 @@
 #include <machine/idt.h>
 #include <machine/pmap.h>
 #include <machine/vmparam.h>
+#include <exec/formats/elks_aout.h>
 #include <exec/formats/xout.h>
 #include <exec/perso/personality.h>
 #include <exec/perso/svr3/svr3_syscalls.h>
@@ -42,6 +43,7 @@
 #include <sys/kern_syscalls.h>
 #include <sys/ldt.h>
 #include <sys/namei.h>
+#include <sys/param.h>
 #include <sys/proc.h>
 #include <sys/poll.h>
 #include <sys/signal.h>
@@ -2817,6 +2819,7 @@ struct venix_sgttyb {
 #define VENIX_TIOCGETP  0x7408U
 #define VENIX_TIOCSETP  0x7409U
 #define VENIX_TIOCSETN  0x740AU
+#define VENIX_AIOCWAIT  0x6100U         /* ('a'<<8)|0 */
 #define VENIX_B9600     13
 #define VENIX_CBREAK    0002U
 #define VENIX_ECHO      0010U
@@ -2830,6 +2833,10 @@ static int64_t venix_sys_ioctl(struct x286_frame *f) {
     uintptr_t arg;
     int rc;
 
+    /* aiowait(3): nothing here is ever outstanding to wait for. */
+    if (f->cx == VENIX_AIOCWAIT) {
+        return x286_fd_vnode(fd) ? 0 : -EBADF;
+    }
     if (f->cx != VENIX_TIOCGETP && f->cx != VENIX_TIOCSETP &&
         f->cx != VENIX_TIOCSETN) {
         return x286_fd_vnode(fd) ? -ENOTTY : -EBADF;
@@ -2911,11 +2918,463 @@ static int64_t venix_sys_stat(struct x286_frame *f) {
     return 0;
 }
 
+/* ---------------------------------------------------------------------
+ * The calls Venix added to Version 7.
+ *
+ * Nothing on the distribution documents them but the lint library's
+ * argument lists, so what they do was read from the kernel itself
+ * (/venix, which still has its symbol table): _syssema, _sysdata,
+ * _sysphys, _suspend, _syslock, _locking.
+ * --------------------------------------------------------------------- */
+
+#define VENIX_SYS_sem       45
+#define VENIX_SYS_sdata     49
+#define VENIX_SYS_suspend   50
+#define VENIX_SYS_phys      52
+#define VENIX_SYS_lock      53
+#define VENIX_SYS_locking   64
+
+/*
+ * Semaphores: 45, the function in AX and the semaphore in DX.
+ *
+ *     0 semset(n, pri)   wait until n is clear, then set it
+ *     1 semclear(n)      clear it and wake whoever waits
+ *     2 semtest(n)       1 if it is set
+ *     3 semtset(n, pri)  set it if it is clear; 1 if it was set already
+ *
+ * A semaphore is a bit.  A negative number names one of sixteen the whole
+ * system shares (-1 the first); 0 to 15, one of sixteen shared by the
+ * processes running the same program, which Venix keeps with the
+ * program's text.  One set by a process that then exits stays set.
+ */
+#define VENIX_NSEM          16
+#define VENIX_SEM_PROGRAMS  32
+#define VENIX_SEM_NAME      64
+
+static struct venix_sem_set {
+    char     program[VENIX_SEM_NAME];   /* "" for the system's */
+    uint16_t bits;
+} venix_sems[1 + VENIX_SEM_PROGRAMS];
+static spinlock_t venix_sem_lock;
+static int venix_sem_lock_ready;
+
+/* The word semaphore `n` is a bit of; NULL if every slot is in use. */
+static struct venix_sem_set *venix_sem_set_for(int n) {
+    struct venix_sem_set *spare = NULL;
+
+    if (n < 0) {
+        return &venix_sems[0];
+    }
+    for (int i = 1; i <= VENIX_SEM_PROGRAMS; i++) {
+        struct venix_sem_set *s = &venix_sems[i];
+
+        if (s->program[0] == '\0' || s->bits == 0) {
+            if (!spare) spare = s;      /* nothing held: may be reused */
+            if (s->program[0] == '\0') continue;
+        }
+        if (strncmp(s->program, current_process->exec_path,
+                    sizeof(s->program) - 1) == 0) {
+            return s;
+        }
+    }
+    if (spare) {
+        strlcpy(spare->program, current_process->exec_path,
+                sizeof(spare->program));
+        spare->bits = 0;
+    }
+    return spare;
+}
+
+static int64_t venix_sys_sem(struct x286_frame *f) {
+    int n = (int)(int16_t)f->cx;
+    unsigned int bit_no = n < 0 ? (unsigned int)(-1 - n) : (unsigned int)n;
+    struct venix_sem_set *s;
+    uint16_t bit;
+    int64_t ret = 0;
+
+    if (f->bx > 3 || bit_no >= VENIX_NSEM) {
+        return -EINVAL;
+    }
+    if (!venix_sem_lock_ready) {
+        spinlock_init(&venix_sem_lock, "venix_sem");
+        venix_sem_lock_ready = 1;
+    }
+    bit = (uint16_t)(1U << bit_no);
+
+    for (;;) {
+        spinlock_acquire(&venix_sem_lock);
+        s = venix_sem_set_for(n);
+        if (!s) {
+            spinlock_release(&venix_sem_lock);
+            return -ENOSPC;
+        }
+        switch (f->bx) {
+        case 1:                         /* semclear */
+            s->bits &= (uint16_t)~bit;
+            spinlock_release(&venix_sem_lock);
+            sched_wakeup(venix_sems);
+            return 0;
+        case 2:                         /* semtest */
+            ret = (s->bits & bit) != 0;
+            spinlock_release(&venix_sem_lock);
+            return ret;
+        default:                        /* semset, semtset */
+            if (!(s->bits & bit)) {
+                s->bits |= bit;
+                spinlock_release(&venix_sem_lock);
+                return 0;
+            }
+            spinlock_release(&venix_sem_lock);
+            if (f->bx == 3) {
+                return 1;
+            }
+            break;
+        }
+        /* Set, and semset waits.  Everything sleeps on the one channel
+         * and looks again; a short deadline covers a wakeup that came
+         * between the look and the sleep. */
+        if (current_thread) current_thread->flags |= THREAD_F_INTERRUPTIBLE;
+        (void)sched_sleep_until(venix_sems, get_ticks() + (uint64_t)HZ / 20 + 1);
+        if (current_thread) {
+            current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
+            if (current_thread->sig_pending & ~current_thread->sig_mask) {
+                return -EINTR;
+            }
+        }
+    }
+}
+
+/* suspend(pid, flag): stop the process, or with flag 0 let it run. */
+static int64_t venix_sys_suspend(struct x286_frame *f) {
+    return sys_kill((int)(int16_t)f->bx, f->cx ? SIGSTOP : SIGCONT);
+}
+
+/* lock(flag): keep the process in memory, the superuser's to ask.  It
+ * is never swapped here, so the asking is all there is. */
+static int64_t venix_sys_lock(struct x286_frame *f) {
+    return (f->bx != 0 && current_process->euid != 0) ? -EPERM : 0;
+}
+
+/*
+ * locking(fd, mode, size): lock `size` bytes of the file from where the
+ * descriptor is positioned, 0 meaning to the end.  Mode 0 unlocks, 1
+ * locks or fails with EACCES if another process has any of it, anything
+ * else waits.  The size arrives in DX and CX and the mode in SI.
+ */
+/*
+ * The locks are kept here and not as fcntl(2) record locks: those belong
+ * to an open file and do not contend between two opens of it, and these
+ * are on the file, between processes, which is the whole use of them.
+ * The table is the size of Venix's (NFLOCKS in its <sys/param.h>).  A
+ * lock goes when it is unlocked or its process is gone; Venix also drops
+ * a process's locks on a file when it closes it, which this does not see.
+ */
+#define VENIX_NFLOCKS   30
+#define VENIX_LOCK_EOF  0x7fffffffU
+
+static struct venix_flock {
+    struct mount *mp;
+    uint32_t ino;
+    uint32_t start, end;                /* [start, end) */
+    int pid;                            /* 0: free */
+} venix_flocks[VENIX_NFLOCKS];
+static spinlock_t venix_flock_lock;
+static int venix_flock_lock_ready;
+
+static int64_t venix_sys_locking(struct x286_frame *f) {
+    int fd = (int)(int16_t)f->bx;
+    uint32_t size = (uint32_t)f->cx | ((uint32_t)f->si << 16);
+    fs_node_t *node = x286_fd_vnode(fd);
+    struct venix_flock *l, *spare;
+    uint32_t start, end;
+    int64_t pos;
+    int busy;
+
+    if (!node) {
+        return -EBADF;
+    }
+    if ((node->flags & 0x7) == FS_DIRECTORY) {
+        return -EACCES;
+    }
+    pos = sys_lseek(fd, 0, 0, 1);
+    if (pos < 0) {
+        return pos;
+    }
+    start = (uint32_t)pos;
+    end = (size == 0 || size > VENIX_LOCK_EOF - start) ? VENIX_LOCK_EOF
+                                                         : start + size;
+    if (!venix_flock_lock_ready) {
+        spinlock_init(&venix_flock_lock, "venix_flock");
+        venix_flock_lock_ready = 1;
+    }
+
+    for (;;) {
+        busy = 0;
+        spare = NULL;
+        spinlock_acquire(&venix_flock_lock);
+        for (l = venix_flocks; l < venix_flocks + VENIX_NFLOCKS; l++) {
+            if (l->pid != 0 && l->pid != (int)current_process->pid &&
+                !proc_find(l->pid)) {
+                l->pid = 0;             /* its process is gone */
+            }
+            if (l->pid == 0) {
+                if (!spare) spare = l;
+                continue;
+            }
+            if (l->mp != node->mp || l->ino != node->inode ||
+                l->start >= end || start >= l->end) {
+                continue;
+            }
+            if (l->pid != (int)current_process->pid) {
+                busy = 1;
+            } else if (f->di == 0) {
+                /* Unlock: what of this process's lock is in the range
+                 * goes.  A range out of the middle of one leaves the
+                 * part before it. */
+                if (l->start >= start && l->end <= end) {
+                    l->pid = 0;
+                    if (!spare) spare = l;
+                } else if (l->start < start) {
+                    l->end = start;
+                } else {
+                    l->start = end;
+                }
+            }
+        }
+        if (f->di == 0) {
+            spinlock_release(&venix_flock_lock);
+            sched_wakeup(venix_flocks);
+            return 0;
+        }
+        if (!busy) {
+            if (spare) {
+                spare->mp = node->mp;
+                spare->ino = node->inode;
+                spare->start = start;
+                spare->end = end;
+                spare->pid = (int)current_process->pid;
+            }
+            spinlock_release(&venix_flock_lock);
+            return spare ? 0 : -ENOSPC;
+        }
+        spinlock_release(&venix_flock_lock);
+        if (f->di == 1) {
+            return -EACCES;
+        }
+        if (current_thread) current_thread->flags |= THREAD_F_INTERRUPTIBLE;
+        (void)sched_sleep_until(venix_flocks,
+                                get_ticks() + (uint64_t)HZ / 20 + 1);
+        if (current_thread) {
+            current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
+            if (current_thread->sig_pending & ~current_thread->sig_mask) {
+                return -EINTR;
+            }
+        }
+    }
+}
+
+/*
+ * sdata and phys: the extra segment.
+ *
+ * A Venix program has one more segment register than it needs, ES, and
+ * these two calls point it somewhere: sdata at a segment of data shared
+ * with other processes, phys at the machine's memory.  The program then
+ * reaches it with an ES: override.
+ *
+ *     sdata(path, r, 0)   attach the file `path` as shared data
+ *     sdata(1, r, n)      make n*512 bytes of shared data of no name,
+ *                         for the children the process goes on to have
+ *     sdata(0, r, n)      point ES n*512 bytes into what is attached
+ *     sdata(2, ...)       detach it; ES is the data segment again
+ *
+ *     phys(r, s, a)       point ES at physical address a*512
+ *
+ * The first argument of sdata is a function or a pathname; Venix's
+ * kernel tells them apart as this does, by whether it is more than 3.
+ * phys is refused while shared data is attached.  Venix let anyone at
+ * the display adapters (segment 0xB000 up) and the superuser anywhere;
+ * here it is the adapter and ROM area, 0xA0000 to 1 MB, and nothing else
+ * for anyone -- what is below that is substrate's own memory, not a PC's.
+ *
+ * The segment is a mapping in the process and descriptor 3 of its table,
+ * which is what ES already selects.  Two more descriptors, never loaded,
+ * keep what there is to undo: 4 the whole of the shared data, 5 the
+ * physical mapping.
+ */
+#define VENIX_LDT_ES        ELKS_LDT_ES_INDEX
+#define VENIX_LDT_SDATA     4U
+#define VENIX_LDT_PHYS      5U
+#define VENIX_CLICK         512U
+#define VENIX_SEG_MAX       0x10000U
+#define VENIX_PHYS_LOW      0xA0000U
+#define VENIX_PHYS_HIGH     0x100000U
+#define VENIX_MAP_SHARED    0x001
+#define VENIX_MAP_ANON      0x020
+#define VENIX_PROT_RW       0x3
+#define VENIX_MS_SYNC       2
+
+static gdt_entry_t *venix_ldt_slot(unsigned int index) {
+    return x286_ldt_entry((uint16_t)((index << 3) | 4U | 3U));
+}
+
+static int venix_ldt_set(unsigned int index, uint32_t base, uint32_t size) {
+    struct user_desc d;
+    gdt_entry_t e;
+
+    memset(&d, 0, sizeof(d));
+    memset(&e, 0, sizeof(e));
+    d.entry_number = index;
+    d.base_addr = base;
+    d.limit = size ? size - 1U : 0U;
+    d.useable = 1;
+    d.seg_not_present = size == 0;
+    if (size != 0) {
+        fill_ldt_entry(&e, &d);
+    }
+    return ldt_write_raw(current_process, index, &e, 1);
+}
+
+/* ES back to the data segment. */
+static int venix_es_reset(void) {
+    gdt_entry_t *ds = venix_ldt_slot(ELKS_LDT_DS_INDEX);
+
+    return ds ? venix_ldt_set(VENIX_LDT_ES, ldt_entry_base(ds),
+                              ldt_entry_limit(ds) + 1U)
+              : -EINVAL;
+}
+
+/* Forget the mapping descriptor `index` records, if it records one. */
+static void venix_unmap_slot(unsigned int index) {
+    gdt_entry_t *e = venix_ldt_slot(index);
+
+    if (e) {
+        uint32_t base = ldt_entry_base(e) & ~0xFFFU;
+        uint32_t len = (ldt_entry_limit(e) + 1U + 0xFFFU) & ~0xFFFU;
+
+        /* What was stored in a file's shared data is the file's. */
+        (void)sys_msync((void *)(uintptr_t)base, len, VENIX_MS_SYNC);
+        (void)sys_munmap((void *)(uintptr_t)base, len);
+        (void)venix_ldt_set(index, 0, 0);
+    }
+}
+
+static int64_t venix_sys_sdata(struct x286_frame *f) {
+    gdt_entry_t *seg = venix_ldt_slot(VENIX_LDT_SDATA);
+    uint32_t size, off, prot = VENIX_PROT_RW;
+    struct stat st;
+    char *path = NULL;
+    void *va;
+    int fd, rc;
+
+    if (f->bx == 0) {                   /* move ES within it */
+        if (!seg) return -EINVAL;
+        off = (uint32_t)f->si * VENIX_CLICK;
+        size = ldt_entry_limit(seg) + 1U;
+        if (off >= size) return -EINVAL;
+        return venix_ldt_set(VENIX_LDT_ES, ldt_entry_base(seg) + off,
+                             size - off);
+    }
+    if (f->bx == 2 || f->bx == 3) {     /* detach */
+        if (!seg) return -EINVAL;
+        rc = venix_es_reset();
+        venix_unmap_slot(VENIX_LDT_SDATA);
+        return rc;
+    }
+    if (seg) return -EINVAL;
+    if (f->bx == 1) {                   /* new, of no name */
+        size = (uint32_t)f->si * VENIX_CLICK;
+        if (size == 0 || size > VENIX_SEG_MAX) return -EINVAL;
+        va = sys_mmap(NULL, size, (int)prot,
+                      VENIX_MAP_SHARED | VENIX_MAP_ANON, -1, 0);
+    } else {                            /* a file */
+        rc = x286_ds_string(f, f->bx, &path);
+        if (rc != 0) return rc;
+        fd = kern_open(path, O_RDWR, 0);
+        if (fd == -EACCES || fd == -EROFS) {
+            fd = kern_open(path, O_RDONLY, 0);
+            prot = 0x1;
+        }
+        x286_free_string(path);
+        if (fd < 0) return fd;
+        rc = kern_fstat(fd, &st);
+        if (rc == 0 && !S_ISREG(st.st_mode)) rc = -EISDIR;
+        if (rc != 0) {
+            kern_close(fd);
+            return rc;
+        }
+        size = ((uint32_t)st.st_size + VENIX_CLICK - 1U) & ~(VENIX_CLICK - 1U);
+        if (size == 0 || size > VENIX_SEG_MAX) {
+            kern_close(fd);
+            return -ENOMEM;
+        }
+        va = sys_mmap(NULL, size, (int)prot, VENIX_MAP_SHARED, fd, 0);
+        kern_close(fd);
+    }
+    if ((uintptr_t)va >= USER32_VA_END) {
+        return -ENOMEM;
+    }
+    venix_unmap_slot(VENIX_LDT_PHYS);
+    rc = venix_ldt_set(VENIX_LDT_SDATA, (uint32_t)(uintptr_t)va, size);
+    if (rc == 0) {
+        rc = venix_ldt_set(VENIX_LDT_ES, (uint32_t)(uintptr_t)va, size);
+    }
+    if (rc != 0) {
+        (void)sys_munmap(va, (size + 0xFFFU) & ~0xFFFU);
+    }
+    return rc;
+}
+
+static int64_t venix_sys_phys(struct x286_frame *f) {
+    uint32_t addr = (uint32_t)f->si * VENIX_CLICK;
+    uint32_t page = addr & ~0xFFFU;
+    uint32_t len;
+    void *va;
+    int fd, rc;
+
+    if (venix_ldt_slot(VENIX_LDT_SDATA) || f->si == 0xFFFFU ||
+        addr < VENIX_PHYS_LOW || addr >= VENIX_PHYS_HIGH) {
+        return -EPERM;
+    }
+    len = VENIX_PHYS_HIGH - page;
+    if (len > VENIX_SEG_MAX + 0x1000U) len = VENIX_SEG_MAX + 0x1000U;
+    fd = kern_open("/dev/mem", O_RDWR, 0);
+    if (fd < 0) {
+        return fd == -ENOENT ? -EPERM : fd;
+    }
+    va = sys_mmap(NULL, len, VENIX_PROT_RW, VENIX_MAP_SHARED, fd, page);
+    kern_close(fd);
+    if ((uintptr_t)va >= USER32_VA_END) {
+        return -EPERM;
+    }
+    venix_unmap_slot(VENIX_LDT_PHYS);
+    rc = venix_ldt_set(VENIX_LDT_PHYS, (uint32_t)(uintptr_t)va, len);
+    if (rc == 0) {
+        uint32_t skip = addr - page;
+
+        rc = venix_ldt_set(VENIX_LDT_ES, (uint32_t)(uintptr_t)va + skip,
+                           len - skip > VENIX_SEG_MAX ? VENIX_SEG_MAX
+                                                      : len - skip);
+    }
+    return rc;
+}
+
 static int64_t venix_call(struct x286_frame *f) {
     registers_t *regs = f->regs;
     int pid;
 
     switch (f->nr) {
+    case VENIX_SYS_sem:
+        return venix_sys_sem(f);
+    case VENIX_SYS_sdata:
+        return venix_sys_sdata(f);
+    case VENIX_SYS_suspend:
+        return venix_sys_suspend(f);
+    case VENIX_SYS_phys:
+        return venix_sys_phys(f);
+    case VENIX_SYS_lock:
+        return venix_sys_lock(f);
+    case VENIX_SYS_locking:
+        return venix_sys_locking(f);
     case X286_SYS_stat:
     case X286_SYS_fstat:
         return venix_sys_stat(f);
@@ -2939,11 +3398,6 @@ static int64_t venix_call(struct x286_frame *f) {
     case X286_SYS_fstatfs:
     case X286_SYS_setpgrp:
     case X286_SYS_xenix:
-    case X286_SYS_plock:            /* semaphores, sdata, suspend, phys, */
-    case X286_SYS_msgsys:           /* lock: Venix's own, at System V's  */
-    case X286_SYS_sysi86:           /* numbers                           */
-    case X286_SYS_shmsys:
-    case X286_SYS_semsys:
     case X286_SYS_uadmin:
     case X286_SYS_utssys:
     case X286_SYS_fcntl:
@@ -3092,6 +3546,9 @@ struct personality personality_venix = {
     .syscall_fmts = NULL,
     .syscall_count = MAX_SYSCALLS,
     .path_prefix = "/perso/venix",
+    /* /dev is the kernel's: the tree's, where it has one, is whatever a
+     * backup left there, and phys(2) wants the real /dev/mem. */
+    .native_dev = 1,
     .sendsig = venix_sendsig,
     .handle_trap = venix_handle_trap,
 };

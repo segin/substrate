@@ -582,9 +582,16 @@ int ldt_write_raw(process_t *proc, unsigned int start, const void *entries,
         count > LDT_ENTRIES - start) {
         return -EINVAL;
     }
-    rc = ldt_ensure_process(proc, LDT_ENTRIES);
-    if (rc != 0) {
-        return rc;
+    /* A table that already reaches the slots is written as it is; one
+     * that does not is made the full size, 64K, once. */
+    spinlock_acquire(&proc->ldt_lock);
+    rc = proc->ldt && proc->ldt_entry_count >= (int)(start + count);
+    spinlock_release(&proc->ldt_lock);
+    if (!rc) {
+        rc = ldt_ensure_process(proc, LDT_ENTRIES);
+        if (rc != 0) {
+            return rc;
+        }
     }
     spinlock_acquire(&proc->ldt_lock);
     if (!proc->ldt || proc->ldt_entry_count < (int)(start + count)) {

@@ -322,8 +322,12 @@ elks_check_file(const char *path, const char *header, size_t len) {
 static int SUB_NODISCARD SUB_NONNULL(1, 2)
 elks_setup_segments(process_t *proc, const struct elks_load_plan *plan) {
     struct elks_segment_layout layout;
-    gdt_entry_t entries[ELKS_LDT_ES_INDEX + 1U];
-    unsigned int entry_count = ELKS_LDT_ES_INDEX + 1U;
+    /* A Venix program's table has room after the four for the two
+     * descriptors sdata(2) and phys(2) keep (perso_xenix.c), empty until
+     * then. */
+    gdt_entry_t entries[ELKS_LDT_VENIX_ENTRIES];
+    unsigned int entry_count = plan->venix ? ELKS_LDT_VENIX_ENTRIES
+                                           : ELKS_LDT_ES_INDEX + 1U;
 
     memset(&layout, 0, sizeof(layout));
     memset(entries, 0, sizeof(entries));
