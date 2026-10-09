@@ -12822,103 +12822,6 @@ static const char *first_symbol_in_expr(const as_expr_t *e) {
     return NULL;
 }
 
-static int expr_symbol_addend(const as_expr_t *e, const char **sym_out, int64_t *add_out, int sign) {
-    if (e == NULL || sym_out == NULL || add_out == NULL) {
-        return -1;
-    }
-    switch (e->kind) {
-    case AS_EXPR_CONST:
-        *add_out += (int64_t)(sign * e->value);
-        return 0;
-    case AS_EXPR_SYMBOL:
-        if (e->symbol == NULL) {
-            return -1;
-        }
-        if (*sym_out == NULL) {
-            *sym_out = e->symbol;
-            return 0;
-        }
-        return strcmp(*sym_out, e->symbol) == 0 ? 0 : -1;
-    case AS_EXPR_BINARY:
-        if (e->op == AS_EXPR_OP_ADD) {
-            return expr_symbol_addend(e->lhs, sym_out, add_out, sign) == 0 &&
-                           expr_symbol_addend(e->rhs, sym_out, add_out, sign) == 0
-                       ? 0
-                       : -1;
-        }
-        if (e->op == AS_EXPR_OP_SUB) {
-            return expr_symbol_addend(e->lhs, sym_out, add_out, sign) == 0 &&
-                           expr_symbol_addend(e->rhs, sym_out, add_out, -sign) == 0
-                       ? 0
-                       : -1;
-        }
-        return -1;
-    case AS_EXPR_UNARY:
-        if (e->op == AS_EXPR_OP_NEG) {
-            return expr_symbol_addend(e->lhs, sym_out, add_out, -sign);
-        }
-        return -1;
-    default:
-        return -1;
-    }
-}
-
-static int expr_symbol_addend_with_local(emit_ctx_t *ctx, const char *section_name, const as_stmt_t *base_st,
-                                         unsigned x86_code_bits, const as_expr_t *e, const char **sym_out,
-                                         int64_t *add_out, int sign) {
-    long long v;
-
-    if (e == NULL || sym_out == NULL || add_out == NULL) {
-        return -1;
-    }
-    switch (e->kind) {
-    case AS_EXPR_CONST:
-        *add_out += (int64_t)(sign * e->value);
-        return 0;
-    case AS_EXPR_LOCAL_REF:
-        if (eval_local_rel_expr_virtual(ctx, section_name, base_st, 0, x86_code_bits, e, &v) != 0) {
-            return -1;
-        }
-        *add_out += (int64_t)(sign * v);
-        return 0;
-    case AS_EXPR_SYMBOL:
-        if (e->symbol == NULL || strcmp(e->symbol, ".") == 0) {
-            return -1;
-        }
-        if (*sym_out == NULL) {
-            *sym_out = e->symbol;
-            return 0;
-        }
-        return strcmp(*sym_out, e->symbol) == 0 ? 0 : -1;
-    case AS_EXPR_BINARY:
-        if (e->op == AS_EXPR_OP_ADD) {
-            return expr_symbol_addend_with_local(ctx, section_name, base_st, x86_code_bits, e->lhs,
-                                                 sym_out, add_out, sign) == 0 &&
-                           expr_symbol_addend_with_local(ctx, section_name, base_st, x86_code_bits, e->rhs,
-                                                         sym_out, add_out, sign) == 0
-                       ? 0
-                       : -1;
-        }
-        if (e->op == AS_EXPR_OP_SUB) {
-            return expr_symbol_addend_with_local(ctx, section_name, base_st, x86_code_bits, e->lhs,
-                                                 sym_out, add_out, sign) == 0 &&
-                           expr_symbol_addend_with_local(ctx, section_name, base_st, x86_code_bits, e->rhs,
-                                                         sym_out, add_out, -sign) == 0
-                       ? 0
-                       : -1;
-        }
-        return -1;
-    case AS_EXPR_UNARY:
-        if (e->op == AS_EXPR_OP_NEG) {
-            return expr_symbol_addend_with_local(ctx, section_name, base_st, x86_code_bits, e->lhs,
-                                                 sym_out, add_out, -sign);
-        }
-        return -1;
-    default:
-        return -1;
-    }
-}
-
 static char *trim_copy_arg(const char *s) {
     const char *p;
     const char *q;
@@ -14331,13 +14234,19 @@ static int emit_relocations(emit_ctx_t *ctx) {
                     continue;
                 }
                 {
-                    const char *expr_sym = NULL;
-                    int64_t expr_addend = 0;
-                    if ((expr_symbol_addend(e, &expr_sym, &expr_addend, 1) == 0 ||
-                         expr_symbol_addend_with_local(ctx, track.current, st, track.x86_code_bits, e,
-                                                       &expr_sym, &expr_addend, 1) == 0) &&
-                        expr_sym != NULL && strcmp(expr_sym, sym) == 0) {
-                        addend = expr_addend;
+                    /* The addend, where the expression is this symbol and
+                     * a number; a local label taken from it is a number
+                     * too, once laid out. */
+                    as_expr_linear_t lin;
+                    long long local_off = 0;
+
+                    if (as_expr_eval_linear(e, NULL, NULL, &lin) == AS_EXPR_EVAL_OK &&
+                        lin.add_symbol != NULL && strcmp(lin.add_symbol, sym) == 0 &&
+                        lin.sub_symbol == NULL &&
+                        (lin.sub_local == NULL ||
+                         eval_local_rel_expr_virtual(ctx, track.current, st, 0, track.x86_code_bits,
+                                                     lin.sub_local, &local_off) == 0)) {
+                        addend = (int64_t)(lin.value - local_off);
                     }
                 }
                 t = default_text_reloc_type(machine, &st->u.instr, op);
