@@ -5155,8 +5155,27 @@ static int ext2_free_inode_blocks(ext2_fs_t *fs, ext2_inode_t *inode,
                                   int freeing_inode) {
     if (!fs || !inode) return -EINVAL;
 
+    /*
+     * A symbolic link whose target is short enough is kept in i_block[]
+     * itself, as text, and owns no blocks.  Freeing "the blocks" of one
+     * read the text as twelve block numbers and three indirect ones and
+     * freed whatever they named: a target of one to three characters is
+     * a small number, the number of a block that is some other file's.
+     * (Removing a link to "p" was caught only because block 112 happened
+     * to be in the inode table.)  Asked before the attribute block goes,
+     * which is counted in what tells a short link from a long one.
+     */
+    int fast_symlink = (inode->i_mode & 0xF000) == EXT2_S_IFLNK &&
+                       ext2_symlink_is_fast(fs, inode);
+
     if (freeing_inode)
         ext2_release_xattr_block(fs, inode);
+
+    if (fast_symlink) {
+        memset(inode->i_block, 0, sizeof(inode->i_block));
+        ext2_inode_set_size(inode, 0);
+        return 0;
+    }
 
     /*
      * For an ext4 extent inode, i_block[] is NOT an array of block pointers:
