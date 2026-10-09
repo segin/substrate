@@ -74,7 +74,7 @@ short writes and close errors checked.
 
 ## 3. Dynamic linking metadata
 
-- [ ] **LD-DYN-001** The linker shall record a shared object's `DT_SONAME` in `DT_NEEDED` and in version requirements, shall write `DT_SONAME` when `-soname`/`-h` is given, and shall write `DT_RPATH`/`DT_RUNPATH` when `-rpath` is given.
+- [x] **LD-DYN-001** The linker shall record a shared object's `DT_SONAME` in `DT_NEEDED` and in version requirements, shall write `DT_SONAME` when `-soname`/`-h` is given, and shall write `DT_RPATH`/`DT_RUNPATH` when `-rpath` is given.
   Evidence: no soname handling in the file; the link-time basename is used (`7226-7237`, `5144-5145, 5278-5279, 5546-5547`); `-h` prints help (`10953`); `-soname`, `-rpath` and `--dynamic-linker` are unknown and their values become input files (`11569-11606`).  Basis: verified.  Task #83.
 - [ ] **LD-DYN-002** Where symbol versioning is used, the linker shall store unversioned names in `.dynsym`, emit a base version definition at index 1, and bind an unversioned reference only to a default or unversioned definition.
   Evidence: `ld.c:5478-5540` with `7352`; `4437, 5331-5341`; `4816, 5233-5243`; attribution to the first shared object (`5544-5548`) and skipping an earlier unversioned definition (`5212-5214`) are suspected.  Basis: traced.  Task #79.

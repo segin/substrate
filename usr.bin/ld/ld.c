@@ -145,6 +145,8 @@ typedef struct {
     int plugin_checked;
     const char *entry_symbol;
     const char *interp_path;
+    const char *soname;         /* -soname, -h: the output's DT_SONAME */
+    strvec_t rpaths;            /* -rpath: the output's DT_RUNPATH */
     const char *map_path;
     const char *reproduce_path;
     ld_compat_mode_t compat_mode;
@@ -157,6 +159,8 @@ typedef struct {
     strvec_t force_undefined;
     defsymvec_t defsyms;
     strvec_t dso_inputs;
+    strvec_t dso_names;         /* what each is needed as: its DT_SONAME, or
+                                 * failing that the name it was found by */
     dyn_import_vec_t dyn_imports;
     /* i386: the symbols defined in the output that have a slot in a .got
      * this link made for them (plan_local_got_i386), in slot order. */
@@ -168,6 +172,7 @@ typedef struct {
 } ld_ctx_t;
 
 static int dynstr_append_cstr(uint8_t **buf, size_t *len, size_t *cap, const char *name, uint32_t *out_off);
+static char *dso_soname(const char *path);
 static int dynsym_should_export(const ld_ctx_t *ctx, const elfobj_t *out, const elf_symbol_t *sym);
 static int resolve_symbol_addr(elfobj_t *obj, const elf_symbol_t *sym, int allow_undef,
                                uint64_t *out_addr, const char **undef_name);
@@ -5538,6 +5543,32 @@ static int dso_has_versioned_export(const ld_ctx_t *ctx, const char *path, const
     return matched != 0;
 }
 
+/* The name the i'th shared object of the link is asked for by at run time. */
+static const char *dso_needed_name(const ld_ctx_t *ctx, size_t i) {
+    const char *path = ctx->dso_inputs.items[i];
+    const char *leaf = strrchr(path, '/');
+
+    if (i < ctx->dso_names.count) {
+        return ctx->dso_names.items[i];
+    }
+    return leaf != NULL ? leaf + 1 : path;
+}
+
+/* Learn those names, once the shared objects of the link are known. */
+static int note_dso_names(ld_ctx_t *ctx) {
+    while (ctx->dso_names.count < ctx->dso_inputs.count) {
+        size_t i = ctx->dso_names.count;
+        char *soname = dso_soname(ctx->dso_inputs.items[i]);
+        int rc = strvec_push(&ctx->dso_names, soname != NULL ? soname : dso_needed_name(ctx, i));
+
+        free(soname);
+        if (rc != 0) {
+            return -1;
+        }
+    }
+    return 0;
+}
+
 static const char *resolve_version_need_provider(const ld_ctx_t *ctx, const char *base, size_t base_len,
                                                  const char *ver_name) {
     size_t i;
@@ -5547,15 +5578,13 @@ static const char *resolve_version_need_provider(const ld_ctx_t *ctx, const char
     }
     for (i = 0; i < ctx->dso_inputs.count; ++i) {
         const char *path = ctx->dso_inputs.items[i];
-        const char *leaf;
         if (path == NULL || path[0] == '\0') {
             continue;
         }
         if (!dso_has_versioned_export(ctx, path, base, base_len, ver_name)) {
             continue;
         }
-        leaf = strrchr(path, '/');
-        return leaf != NULL ? leaf + 1 : path;
+        return dso_needed_name(ctx, i);
     }
     return NULL;
 }
@@ -5674,7 +5703,6 @@ static int resolve_default_version_need(const ld_ctx_t *ctx, const char *base, s
     }
     for (i = 0; i < ctx->dso_inputs.count; ++i) {
         const char *path = ctx->dso_inputs.items[i];
-        const char *leaf;
         char *ver_name = NULL;
         int rc;
 
@@ -5688,8 +5716,7 @@ static int resolve_default_version_need(const ld_ctx_t *ctx, const char *base, s
         if (rc == 0) {
             continue;
         }
-        leaf = strrchr(path, '/');
-        *out_provider = leaf != NULL ? leaf + 1 : path;
+        *out_provider = dso_needed_name(ctx, i);
         *out_ver_name = ver_name;
         return 1;
     }
@@ -6487,9 +6514,9 @@ static size_t count_runtime_data_import_relocs_i386(elfobj_t *out) {
 
 /*
  * What the shared objects of the link define `name` as (STT_FUNC,
- * STT_OBJECT, ...); STT_NOTYPE if none defines it or none says.
+ * STT_OBJECT, ...); -1 if none of them defines it.
  */
-static int dso_import_type(const ld_ctx_t *ctx, const char *name) {
+static int dso_definition_type(const ld_ctx_t *ctx, const char *name) {
     size_t d, i;
 
     for (d = 0; ctx != NULL && name != NULL && d < ctx->dso_inputs.count; ++d) {
@@ -6513,7 +6540,42 @@ static int dso_import_type(const ld_ctx_t *ctx, const char *name) {
             return found;
         }
     }
-    return STT_NOTYPE;
+    return -1;
+}
+
+/* The same, where a symbol nothing defines is one of no type. */
+static int dso_import_type(const ld_ctx_t *ctx, const char *name) {
+    int type = dso_definition_type(ctx, name);
+
+    return type >= 0 ? type : STT_NOTYPE;
+}
+
+/*
+ * A weak reference that nothing in the link defines, neither an input nor
+ * a shared object, is zero, and in an executable it is zero now: the
+ * program asks "is this here?" and the answer does not wait for run time.
+ * Left as an import it became a relocation for the dynamic linker to
+ * apply to the instruction that asks, in memory that cannot be written.
+ */
+static int settle_undefined_weak(const ld_ctx_t *ctx, elfobj_t *out) {
+    size_t i;
+
+    if (elf_type(out) != ET_EXEC || ctx->dso_inputs.count == 0) {
+        return 0;
+    }
+    for (i = 0; i < elf_symbol_count(out); ++i) {
+        elf_symbol_t *sym = elf_symbol_at(out, i);
+        const char *name = sym != NULL ? elf_symbol_name(sym) : NULL;
+
+        if (name == NULL || name[0] == '\0' || elf_symbol_shndx(sym) != SHN_UNDEF ||
+            elf_symbol_bind(sym) != STB_WEAK || dso_definition_type(ctx, name) >= 0) {
+            continue;
+        }
+        if (elf_symbol_set_value(sym, 0) != ELF_OK || elf_symbol_set_shndx(sym, SHN_ABS) != ELF_OK) {
+            return -1;
+        }
+    }
+    return 0;
 }
 
 static int collect_dynamic_imports_x64(const ld_ctx_t *ctx, elfobj_t *out, dyn_import_vec_t *imports) {
@@ -7605,6 +7667,40 @@ fail_import:
     return -1;
 }
 
+/* The DT_SONAME of the shared object at `path`, to be freed; NULL if it
+ * has none or cannot be read. */
+static char *dso_soname(const char *path) {
+    elfobj_t *obj = NULL;
+    const elf_section_t *dynamic, *dynstr;
+    const uint8_t *d, *s;
+    size_t dsz = 0, ssz = 0, entsz, i;
+    char *name = NULL;
+
+    if (elf_open(path, &obj) != ELF_OK) {
+        return NULL;
+    }
+    dynamic = elf_find_section(obj, ".dynamic");
+    dynstr = elf_find_section(obj, ".dynstr");
+    d = dynamic != NULL ? (const uint8_t *)elf_section_data(dynamic, &dsz) : NULL;
+    s = dynstr != NULL ? (const uint8_t *)elf_section_data(dynstr, &ssz) : NULL;
+    entsz = elf_class(obj) == ELFOBJ_CLASS_64 ? 16 : 8;
+    for (i = 0; d != NULL && s != NULL && i + entsz <= dsz; i += entsz) {
+        uint64_t tag = entsz == 16 ? read_u64_endian(d + i, elf_endian(obj)) : read_u32_endian(d + i, elf_endian(obj));
+        uint64_t val = entsz == 16 ? read_u64_endian(d + i + 8, elf_endian(obj))
+                                   : read_u32_endian(d + i + 4, elf_endian(obj));
+
+        if (tag == DT_NULL) {
+            break;
+        }
+        if (tag == DT_SONAME && val < ssz && memchr(s + val, '\0', ssz - (size_t)val) != NULL && s[val] != '\0') {
+            name = xstrdup((const char *)s + val);
+            break;
+        }
+    }
+    elf_close(obj);
+    return name;
+}
+
 static int plan_dynamic_needed(ld_ctx_t *ctx, elfobj_t *out) {
     elf_section_t *dynstr;
     elf_section_t *dynsym;
@@ -7722,18 +7818,51 @@ static int plan_dynamic_needed(ld_ctx_t *ctx, elfobj_t *out) {
     }
 
     for (i = 0; i < ctx->dso_inputs.count; ++i) {
-        const char *p = strrchr(ctx->dso_inputs.items[i], '/');
-        const char *name = p != NULL ? p + 1 : ctx->dso_inputs.items[i];
+        /* A library is needed by the name it gives itself: what it was
+         * found as at link time (libc.so) is a link to it, and need not
+         * exist where the program runs. */
         uint32_t off = 0;
-        if (dynstr_append_cstr(&dynstr_buf, &dynstr_len, &dynstr_cap, name, &off) != 0) {
+
+        if (dynstr_append_cstr(&dynstr_buf, &dynstr_len, &dynstr_cap, dso_needed_name(ctx, i), &off) != 0 ||
+            dynamic_append_entry(&dynamic_buf, &dynamic_len, &dynamic_cap,
+                                 elf_class(out), elf_endian(out), DT_NEEDED, off) != 0) {
             free(dynstr_buf);
+            free(dynamic_buf);
             free(hash_buf);
             free(gnu_hash_buf);
             return -1;
         }
-        if (dynamic_append_entry(&dynamic_buf, &dynamic_len, &dynamic_cap,
-                                 elf_class(out), elf_endian(out), DT_NEEDED, off) != 0) {
+    }
+    if (ctx->soname != NULL || ctx->rpaths.count != 0) {
+        char *runpath = NULL;
+        size_t len = 0;
+        uint32_t off = 0;
+        int bad = 0;
+
+        for (i = 0; i < ctx->rpaths.count; ++i) {
+            len += strlen(ctx->rpaths.items[i]) + 1;
+        }
+        if (len != 0) {
+            runpath = (char *)calloc(1, len);
+            bad = runpath == NULL;
+            for (i = 0; !bad && i < ctx->rpaths.count; ++i) {
+                snprintf(runpath + strlen(runpath), len - strlen(runpath), "%s%s", i != 0 ? ":" : "",
+                         ctx->rpaths.items[i]);
+            }
+        }
+        bad = bad ||
+              (ctx->soname != NULL &&
+               (dynstr_append_cstr(&dynstr_buf, &dynstr_len, &dynstr_cap, ctx->soname, &off) != 0 ||
+                dynamic_append_entry(&dynamic_buf, &dynamic_len, &dynamic_cap,
+                                     elf_class(out), elf_endian(out), DT_SONAME, off) != 0)) ||
+              (runpath != NULL &&
+               (dynstr_append_cstr(&dynstr_buf, &dynstr_len, &dynstr_cap, runpath, &off) != 0 ||
+                dynamic_append_entry(&dynamic_buf, &dynamic_len, &dynamic_cap,
+                                     elf_class(out), elf_endian(out), DT_RUNPATH, off) != 0));
+        free(runpath);
+        if (bad) {
             free(dynstr_buf);
+            free(dynamic_buf);
             free(hash_buf);
             free(gnu_hash_buf);
             return -1;
@@ -12216,7 +12345,7 @@ static int run_internal_link(ld_ctx_t *ctx) {
         return -1;
     }
 
-    if (plan_dynamic_imports(ctx, out) != 0) {
+    if (note_dso_names(ctx) != 0 || settle_undefined_weak(ctx, out) != 0 || plan_dynamic_imports(ctx, out) != 0) {
         fprintf(stderr, "ld: failed to plan GOT/PLT dynamic imports\n");
         symref_map_free(&undef_refs);
         objvec_free(&inputs);
@@ -12408,6 +12537,34 @@ static int parse_arg_value(const char *arg, const char *opt, const char **out_va
     return 2;
 }
 
+/*
+ * An option that is a word and takes a value: -word VALUE, --word VALUE,
+ * -word=VALUE, --word=VALUE.  1, with *val the value and *i on the last
+ * argument used; 0 if argv[*i] is not this option; -1 if it is and has no
+ * value.
+ */
+static int long_opt_value(int argc, char **argv, int *i, const char *word, const char **val) {
+    const char *a = argv[*i];
+    size_t n = strlen(word);
+
+    if (a[0] != '-') {
+        return 0;
+    }
+    a += a[1] == '-' ? 2 : 1;
+    if (strncmp(a, word, n) != 0 || (a[n] != '\0' && a[n] != '=')) {
+        return 0;
+    }
+    if (a[n] == '=') {
+        *val = a + n + 1;
+        return 1;
+    }
+    if (*i + 1 >= argc) {
+        return -1;
+    }
+    *val = argv[++*i];
+    return 1;
+}
+
 int main(int argc, char **argv) {
     ld_ctx_t ctx;
     int i;
@@ -12433,7 +12590,7 @@ int main(int argc, char **argv) {
         const char *val = NULL;
         int p;
 
-        if (strcmp(a, "--help") == 0 || strcmp(a, "-h") == 0) {
+        if (strcmp(a, "--help") == 0) {
             usage(argv[0]);
             inputvec_free(&ctx.inputs);
             strvec_free(&ctx.lib_paths);
@@ -12851,15 +13008,35 @@ int main(int argc, char **argv) {
             ctx.entry_symbol = val;
             continue;
         }
-        if (strcmp(a, "-dynamic-linker") == 0) {
-            if (i + 1 >= argc) {
-                usage(argv[0]);
+        {
+            /* -name VALUE, --name VALUE, -name=VALUE, --name=VALUE */
+            const char *lval = NULL;
+            int got;
+
+            if ((got = long_opt_value(argc, argv, &i, "dynamic-linker", &lval)) > 0) {
+                ctx.interp_path = lval;
+            } else if (got == 0 && ((got = long_opt_value(argc, argv, &i, "soname", &lval)) > 0 ||
+                                    (got == 0 && strcmp(a, "-h") == 0 && i + 1 < argc && (lval = argv[++i]) != NULL &&
+                                     (got = 1) != 0))) {
+                ctx.soname = lval;
+            } else if (got == 0 && (got = long_opt_value(argc, argv, &i, "rpath", &lval)) > 0) {
+                if (strvec_push(&ctx.rpaths, lval) != 0) {
+                    got = -1;
+                }
+            } else if (got == 0) {
+                /* Where to look for the libraries of libraries at link
+                 * time, which this linker does not go looking for. */
+                got = long_opt_value(argc, argv, &i, "rpath-link", &lval);
+            }
+            if (got < 0) {
+                fprintf(stderr, "ld: %s needs a value\n", a);
                 inputvec_free(&ctx.inputs);
                 strvec_free(&ctx.lib_paths);
                 return 2;
             }
-            ctx.interp_path = argv[++i];
-            continue;
+            if (got > 0) {
+                continue;
+            }
         }
         if ((p = parse_arg_value(a, "-L", &val)) != 0) {
             if (p == 1) {

@@ -10,6 +10,9 @@
 .Op Fl r | Fl shared | Fl pie | Fl static
 .Op Fl o Ar output
 .Op Fl e Ar symbol
+.Op Fl -dynamic-linker Ar path
+.Op Fl soname Ar name
+.Op Fl rpath Ar dir
 .Op Fl L Ar dir
 .Op Fl l Ar name
 .Op Fl Bstatic | Fl Bdynamic
@@ -90,6 +93,26 @@ Produce
 output.
 .It Fl static
 Prefer static archive resolution.
+.It Fl -dynamic-linker Ar path
+The program interpreter of the output
+.Pq Dv PT_INTERP ;
+on Substrate
+.Pa /sbin/ld.so .
+.It Fl soname Ar name , Fl h Ar name
+The name a shared object gives itself
+.Pq Dv DT_SONAME ,
+which is the name programs linked against it will ask for.
+.It Fl rpath Ar dir
+A directory for the dynamic linker to search, recorded in
+.Dv DT_RUNPATH ;
+repeated, the directories are joined with colons.
+Substrate's dynamic linker does not consult it.
+.Fl rpath-link
+is accepted and has no effect.
+.Pp
+These three may be written with one dash or two, and with their value as
+the next argument or after
+.Ql = .
 .It Fl L Ar dir , Fl l Ar name
 Add a library search directory and request a library.
 .It Fl Bstatic , Fl Bdynamic
@@ -341,6 +364,13 @@ are linked as what they hold and written uncompressed.
 Sections that are not loaded, the debugging information among them, are
 relocated like the rest, and an executable or shared object carries no
 relocation sections of the linker's own.
+.It
+A shared library is recorded as needed under its own
+.Dv DT_SONAME ,
+not under the name it was found by.
+.It
+In an executable, a weak reference that neither an input nor a shared
+object of the link defines is zero at link time.
 .It
 A call from code that is not position-independent to a function in a
 shared object goes through the PLT.
