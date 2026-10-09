@@ -65,6 +65,7 @@ short writes and close errors checked.
   Evidence: `ld.c:6636-6638, 6754-6761, 6960-6962, 7062-7064` skip it, leaving a zero PLT stub and GOT slot.  Basis: traced; trigger suspected (versioned imports).  Task #90.
 - [ ] **LD-REL-009** When building an executable, the linker shall export the symbols its shared-object inputs refer to; when building a shared object, it shall use symbolic relocations for symbols that may be preempted.
   Evidence: `ld.c:5703-5709`; `5961-5972, 6758, 7066` use `RELATIVE` for every defined symbol.  Basis: traced.  Task #91.
+  Partly met: an executable exports what its shared-object inputs refer to (`ctx->dso_wants`, filled by `note_dso_names`, asked by `dynsym_should_export`).  Still open: a shared object binds references to its own exported symbols at link time, as if `-Bsymbolic` were given, so a definition in the program does not preempt them.
 - [ ] **LD-REL-010** The linker shall not change the size of a section after addresses are assigned, and shall record section indexes in `.dynsym` after the last reordering.
   Evidence: `ld.c:6566-6568, 6879-6881`; `7385, 7393, 7402`.  Basis: suspected.  Task #92.
 - [ ] **LD-REL-011** Where an input defines an indirect function, the linker shall emit `IRELATIVE` relocations and PLT entries for it.

@@ -173,6 +173,7 @@ typedef struct {
     strvec_t dso_inputs;
     strvec_t dso_names;         /* what each is needed as: its DT_SONAME, or
                                  * failing that the name it was found by */
+    symset_t dso_wants;         /* the symbols they refer to and do not define */
     dyn_import_vec_t dyn_imports;
     /* i386: the symbols defined in the output that have a slot in a .got
      * this link made for them (plan_local_got_i386), in slot order. */
@@ -5627,17 +5628,40 @@ static const char *dso_needed_name(const ld_ctx_t *ctx, size_t i) {
     return leaf != NULL ? leaf + 1 : path;
 }
 
-/* Learn those names, once the shared objects of the link are known. */
+/*
+ * Learn those names, once the shared objects of the link are known, and
+ * what each refers to without defining.  The second is for the dynamic
+ * symbol table of an executable: a library that calls back into the
+ * program, or that needs a function the program has from an archive, can
+ * only find it there.
+ */
 static int note_dso_names(ld_ctx_t *ctx) {
     while (ctx->dso_names.count < ctx->dso_inputs.count) {
         size_t i = ctx->dso_names.count;
         char *soname = dso_soname(ctx->dso_inputs.items[i]);
         int rc = strvec_push(&ctx->dso_names, soname != NULL ? soname : dso_needed_name(ctx, i));
+        elfobj_t *obj = NULL;
+        size_t k;
 
         free(soname);
         if (rc != 0) {
             return -1;
         }
+        if (elf_open(ctx->dso_inputs.items[i], &obj) != ELF_OK) {
+            continue;
+        }
+        for (k = 0; k < elf_symbol_count(obj); ++k) {
+            const elf_symbol_t *sym = elf_symbol_at(obj, k);
+            const char *name = sym != NULL ? elf_symbol_name(sym) : NULL;
+
+            if (name != NULL && name[0] != '\0' && elf_symbol_shndx(sym) == SHN_UNDEF &&
+                (elf_symbol_bind(sym) == STB_GLOBAL || elf_symbol_bind(sym) == STB_WEAK) &&
+                !symset_contains(&ctx->dso_wants, name) && symset_add(&ctx->dso_wants, name) != 0) {
+                elf_close(obj);
+                return -1;
+            }
+        }
+        elf_close(obj);
     }
     return 0;
 }
@@ -6222,6 +6246,10 @@ static int dynsym_should_export(const ld_ctx_t *ctx, const elfobj_t *out, const 
     /* The executable's copy of a shared object's variable is the variable,
      * and the shared object has to be able to find it. */
     if (symbol_is_copied(&ctx->dyn_imports, sym)) {
+        return 1;
+    }
+    /* What a shared object of the link refers to and the program has. */
+    if (symset_contains(&ctx->dso_wants, elf_symbol_name(sym))) {
         return 1;
     }
     return ctx->export_dynamic ? 1 : 0;

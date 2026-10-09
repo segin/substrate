@@ -97,6 +97,25 @@ else echo "FAIL -z text and code that is not: $(head -1 err)"; fail=1; fi
 run "the same without -z text" ./ld -m elf_i386 -shared -z notext -o np.so lib2np.o
 is  "DT_TEXTREL" "$(readelf -d np.so | grep -c '(TEXTREL)')" 1
 
+# What a library refers to and the program defines is in the program's
+# dynamic symbol table, where the library can find it; what nothing asks
+# for is not.
+cat > lib3.c <<'EOF'
+int program_hook(int);
+int through(int x) { return program_hook(x); }
+EOF
+cat > main3.c <<'EOF'
+int through(int);
+int program_hook(int x) { return x + 1; }
+int program_private(int x) { return x + 2; }
+void _start(void) { through(program_private(1)); for (;;) { } }
+EOF
+$cc32 -fPIC -o lib3.o lib3.c && $cc32 -fno-pic -fno-pie -o main3.o main3.c
+run "a library that calls back" ./ld -m elf_i386 -shared -o lib3.so lib3.o
+run "a program that it calls back into" ./ld -m elf_i386 --dynamic-linker=/sbin/ld.so -o prog3 main3.o lib3.so
+is  "the hook is exported, defined" "$(readelf -W --dyn-syms prog3 | awk '$8 == "program_hook" { print ($7 != "UND") }')" 1
+is  "what nothing asks for is not"  "$(readelf -W --dyn-syms prog3 | grep -c ' program_private$')" 0
+
 # -l: the directories in order, each for the shared library and then the
 # archive, and a library for another machine is passed over.  The first
 # input says which machine the link is for, and looking into a library

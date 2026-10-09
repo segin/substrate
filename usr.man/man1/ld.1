@@ -383,6 +383,17 @@ not under the name it was found by.
 In an executable, a weak reference that neither an input nor a shared
 object of the link defines is zero at link time.
 .It
+An executable's dynamic symbol table has what it imports, what the
+shared objects of the link refer to and it defines, its copies of their
+variables, and with
+.Fl -export-dynamic
+everything global.
+.It
+A shared object binds references to its own global symbols when it is
+linked, as GNU ld does under
+.Fl Bsymbolic :
+a definition of the same name in the program does not take their place.
+.It
 In an executable made of code that is not position-independent, a call
 to a function in a shared object goes through the PLT; a function whose
 address is taken has its PLT entry for an address, the same in every
