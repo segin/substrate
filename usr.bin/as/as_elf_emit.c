@@ -12987,6 +12987,40 @@ static int emit_symbols(emit_ctx_t *ctx, const as_symtab_t *symtab) {
     return 0;
 }
 
+/*
+ * What add_reloc_for_symbol_ex() below will add to the addend of a
+ * relocation against `name`: a local label is rewritten to its section's
+ * symbol plus the label's offset in the section, and that offset is part
+ * of the addend.
+ *
+ * Where the addend is kept in the relocation record that is the end of it.
+ * Where it is kept in the bytes being relocated (i386: SHT_REL) it has to
+ * be in what is written there, and it was not -- the bytes were written
+ * first, with the addend as it stood, and the offset then went into a
+ * record field nothing reads.  Every reference to a local label came out
+ * as a reference to the start of its section: a program's first string
+ * constant was whatever its .rodata began with.
+ */
+static int64_t local_label_addend(emit_ctx_t *ctx, const char *name) {
+    char target_section[128];
+    uint64_t target_off = 0;
+    char *sym_name = xstrdup(name);
+    int64_t off = 0;
+
+    if (sym_name == NULL) {
+        return 0;
+    }
+    strip_reloc_modifier(sym_name);
+    if (sym_name[0] != '\0' && is_local_temp_symbol_name(sym_name) &&
+        find_label_virtual_location(ctx, NULL, NULL, 0, 0, sym_name,
+                                    target_section, sizeof(target_section),
+                                    &target_off) == 0) {
+        off = (int64_t)target_off;
+    }
+    free(sym_name);
+    return off;
+}
+
 static int add_reloc_for_symbol_ex(emit_ctx_t *ctx, elf_section_t *sec, const char *name,
                                    uint64_t offset, uint32_t fallback_type, int64_t addend) {
     char *sym_name;
@@ -14484,7 +14518,8 @@ static int emit_relocations(emit_ctx_t *ctx) {
                         reloc_off = cur_off + (uint64_t)(j * width);
                         if (machine_relocation_addend_is_in_place(machine) &&
                             reloc_off + width <= (uint64_t)sb->buf.len) {
-                            write_u64_le_at(sb->buf.data + reloc_off, (uint64_t)addend, width);
+                            write_u64_le_at(sb->buf.data + reloc_off,
+                                            (uint64_t)(addend + local_label_addend(ctx, sym)), width);
                         }
                         if (add_reloc_for_symbol_ex(ctx, cur_sec, sym, reloc_off, t, addend) != 0) {
                             free(sym);
@@ -14551,7 +14586,8 @@ static int emit_relocations(emit_ctx_t *ctx) {
                                 reloc_off = cur_off + (uint64_t)(j * width);
                                 if (machine_relocation_addend_is_in_place(machine) &&
                                     reloc_off + width <= (uint64_t)sb->buf.len) {
-                                    write_u64_le_at(sb->buf.data + reloc_off, (uint64_t)addend, width);
+                                    write_u64_le_at(sb->buf.data + reloc_off,
+                                                    (uint64_t)(addend + local_label_addend(ctx, target_name)), width);
                                 }
                                 if (add_reloc_for_symbol_ex(ctx, cur_sec, target_name, reloc_off, t, addend) != 0) {
                                     free(target_name);
@@ -14705,7 +14741,8 @@ static int emit_relocations(emit_ctx_t *ctx) {
                 if (machine_relocation_addend_is_in_place(machine)) {
                     uint64_t code_rel_off = reloc_off - cur_off;
                     if (code_rel_off + reloc_width <= (uint64_t)code_len) {
-                        write_u64_le_at(code + code_rel_off, (uint64_t)addend, (unsigned)reloc_width);
+                        write_u64_le_at(code + code_rel_off,
+                                        (uint64_t)(addend + local_label_addend(ctx, sym)), (unsigned)reloc_width);
                     }
                 } else {
                     uint64_t code_rel_off = reloc_off - cur_off;

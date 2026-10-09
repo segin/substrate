@@ -36,7 +36,8 @@ short writes and close errors checked.
   Evidence: `ld.c:9306-9315` resolves the symbol only if a GOT already exists; on i386 the special case is unreachable past `9210-9213`; `6158-6162` never treats `R_386_GOTPC` as needing one.  Today's `crt0.o` is PIC, so a static link fails on `_GLOBAL_OFFSET_TABLE_`.  On x86-64 `R_X86_64_GOTPC32` instead becomes an import with its own slot (`5914`, `9234`).  Basis: traced; reproduced on a host build.  Task #54.
 - [ ] **LD-CUR-004** The linker shall apply or remove the relocations of sections that are not loaded, and shall not copy relocation sections into an executable or shared object unless asked to.
   Evidence: `ld.c:10365` skips non-`ALLOC` sections; relocations stay attached and `elf_write.c:812-873` emits `.rel<section>` for each.  Basis: traced.  Task #56.
-- [ ] **AS-CUR-001** When the assembler (`usr.bin/as`) emits an in-place (REL) relocation against a local label, it shall store the label's offset within its section as the addend.
+- [x] **AS-CUR-001** When the assembler (`usr.bin/as`) emits an in-place (REL) relocation against a local label, it shall store the label's offset within its section as the addend.
+  Met: `local_label_addend()` supplies the offset to all three in-place writes.  Shown on the target: a program compiled by the old `cc`, assembled by the old `as` and linked by GNU `ld` prints its own strings, from code and from a pointer table in `.data` (addends 0, 5, 9 in `.rel.data`).
   Evidence: `as_elf_emit.c:14705-14709` writes the addend before `13004-13019` converts the label to section symbol plus offset, so the offset is lost; every `.L` reference on i386 resolves to the start of its section (a program printed the compiler's stamp string instead of its own).  Same ordering at `14485-14489`.  Basis: verified; reproduced.  Task #51.
 
 ## 2. Relocation processing
