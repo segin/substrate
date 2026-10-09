@@ -1293,7 +1293,45 @@ int sys_fdatasync(int fd) {
  * getpeername/getsockopt/setsockopt) moved to sys/net/af_unix.c as the
  * real AF_UNIX implementation. */
 
-int sys_pdfork(int *fdp, int flags) { (void)fdp; (void)flags; return -ENOSYS; }
+/*
+ * pdfork(int *fdp, int flags): fork, and give the parent a descriptor for
+ * the child.  libcasper starts its helper process this way, and every
+ * FreeBSD base utility that sandboxes itself goes through libcasper: wc(1)
+ * with more than one file said "Unable to initialize casper" and counted
+ * nothing.
+ *
+ * The child is real.  The descriptor is a stand-in: it is open, it can be
+ * closed, and it is the child's only in name -- closing it does not kill
+ * the child (as if PD_DAEMON were always given), and pdkill(2) and
+ * pdgetpid(2) do not know it.  Casper's child lives by its socket and
+ * exits when the parent's end closes, which is all its users need.
+ */
+#define FBSD_PD_DAEMON  0x00000001
+#define FBSD_PD_CLOEXEC 0x00000002
+
+int sys_pdfork(int *fdp, int flags) {
+    int pid, fd;
+
+    if (flags & ~(FBSD_PD_DAEMON | FBSD_PD_CLOEXEC)) {
+        return -EINVAL;
+    }
+    pid = sys_fork();
+    if (pid <= 0) {
+        return pid;                     /* failed; or this is the child */
+    }
+    fd = kern_open("/dev/null", O_RDONLY, 0);
+    if (fd >= 0) {
+        if (flags & FBSD_PD_CLOEXEC) {
+            fdset_set(current_process->fd_cloexec, fd);
+        }
+        if (copyout(&fd, fdp, sizeof(fd)) != 0) {
+            kern_close(fd);
+        }
+    }
+    /* A parent that cannot be given the descriptor still has the child:
+     * it is there, and the call says so. */
+    return pid;
+}
 
 int sys_accept4(int s, void *name, int *namelen, int flags) {
     (void)flags;
@@ -1660,6 +1698,11 @@ struct freebsd_termios {
 #define FBSD_FIONREAD           0x4004667fU  /* _IOR('f', 127, int) */
 #define FBSD_FIONBIO            0x8004667eU  /* _IOW('f', 126, int) */
 #define FBSD_FIOASYNC           0x8004667dU  /* _IOW('f', 125, int) */
+#define FBSD_FIODTYPE           0x4004667aU  /* _IOR('f', 122, int) */
+/* What FIODTYPE answers: the d_flags type bits of <sys/conf.h>. */
+#define FBSD_D_DISK             0x0002
+#define FBSD_D_TTY              0x0004
+#define FBSD_D_MEM              0x0008
 #define FBSD_TIOCFLUSH          0x80047410U  /* _IOW('t', 16, int) */
 #define FBSD_TIOCGETD           0x4004741aU  /* _IOR('t', 26, int) line discipline */
 #define FBSD_TIOCSETD           0x8004741bU  /* _IOW('t', 27, int) */
@@ -1900,12 +1943,41 @@ int perso_tty_ioctl(struct tty *tp, uint32_t request, void *arg, int *handled) {
     }
 }
 
+/*
+ * FIODTYPE: what kind of device this is.  dd(1) asks it of every character
+ * and block device it is given, to know whether it may seek and whether it
+ * is a tape, and gives up on the file if it is not told: `dd if=/dev/zero`
+ * died of "Inappropriate ioctl for device".  Not a device, not a type.
+ */
+static int freebsd_fiodtype(int fd, void *arg) {
+    struct stat st;
+    int type;
+    int rc = kern_fstat(fd, &st);
+
+    if (rc != 0) {
+        return rc;
+    }
+    if (S_ISBLK(st.st_mode)) {
+        type = FBSD_D_DISK;
+    } else if (!S_ISCHR(st.st_mode)) {
+        return -ENOTTY;
+    } else if (kern_ioctl(fd, 0x540F /* TIOCGPGRP */, arg) != -ENOTTY) {
+        /* It knows what a foreground process group is: a terminal.  The
+         * answer went where the type is about to go. */
+        type = FBSD_D_TTY;
+    } else {
+        type = FBSD_D_MEM;      /* null, zero, random and their like */
+    }
+    return copyout(&type, arg, sizeof(type)) != 0 ? -EFAULT : 0;
+}
+
 int freebsd_sys_ioctl(int fd, uint32_t request, void *arg) {
     switch (request) {
     /* Generic file-layer ioctls (same meaning on every fd) stay central. */
     case FBSD_FIONREAD: return kern_ioctl(fd, 0x541B, arg);
     case FBSD_FIONBIO:  return kern_ioctl(fd, 0x5421, arg);
     case FBSD_FIOASYNC: return kern_ioctl(fd, 0x5452, arg);
+    case FBSD_FIODTYPE: return freebsd_fiodtype(fd, arg);
     default:
         /* Device-specific ioctls (tty termios, syscons VT, ...) are
          * translated by the target device node itself — pass the BSD
