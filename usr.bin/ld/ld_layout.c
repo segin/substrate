@@ -352,21 +352,22 @@ int reorder_sections_default_policy(elfobj_t *obj) {
 }
 
 int is_relro_candidate_name(const char *name) {
-    if (name == NULL) {
+    /* By how their names begin; .got.plt, which begins as .got does, is
+     * written by the program's own lazy binding and is not one. */
+    static const char *const begins[] = { ".got",        ".data.rel.ro",   ".init_array", ".fini_array",
+                                          ".preinit_array", ".ctors",      ".dtors" };
+    size_t i;
+
+    if (name == NULL || strncmp(name, ".got.plt", 8) == 0) {
         return 0;
     }
-    if (strncmp(name, ".got.plt", 8) == 0) {
-        return 0;
-    }
-    if (strncmp(name, ".got", 4) == 0 ||
-        strncmp(name, ".data.rel.ro", 12) == 0 ||
-        strcmp(name, ".dynamic") == 0 ||
-        strncmp(name, ".init_array", 11) == 0 ||
-        strncmp(name, ".fini_array", 11) == 0 ||
-        strncmp(name, ".preinit_array", 14) == 0 ||
-        strncmp(name, ".ctors", 6) == 0 ||
-        strncmp(name, ".dtors", 6) == 0) {
+    if (strcmp(name, ".dynamic") == 0) {
         return 1;
+    }
+    for (i = 0; i < sizeof(begins) / sizeof(begins[0]); ++i) {
+        if (strncmp(name, begins[i], strlen(begins[i])) == 0) {
+            return 1;
+        }
     }
     return 0;
 }

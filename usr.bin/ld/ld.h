@@ -636,6 +636,8 @@ int has_suffix(const char *s, const char *suffix);
 int read_file(const char *path, unsigned char **out, size_t *out_sz);
 int parse_u64_dec(const char *s, size_t n, uint64_t *out);
 int parse_u64_auto(const char *s, uint64_t *out);
+uint64_t read_uint_bytes(const uint8_t *p, int sz, elfobj_endian_t e);
+void write_uint_bytes(uint8_t *p, int sz, elfobj_endian_t e, uint64_t v);
 uint16_t read_u16_endian(const uint8_t *p, elfobj_endian_t endian);
 uint32_t read_u32_endian(const uint8_t *p, elfobj_endian_t endian);
 uint64_t read_u64_endian(const uint8_t *p, elfobj_endian_t endian);

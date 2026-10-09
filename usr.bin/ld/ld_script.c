@@ -1200,33 +1200,28 @@ static int apply_script_discard_pattern(elfobj_t *obj, const char *pattern) {
 }
 
 static int phdr_type_from_token(const char *tok, uint32_t *out_type) {
+    static const struct {
+        const char *name;
+        uint32_t type;
+    } types[] = {
+        { "PT_LOAD", PT_LOAD },                 { "PT_DYNAMIC", PT_DYNAMIC },
+        { "PT_NOTE", PT_NOTE },                 { "PT_TLS", PT_TLS },
+        { "PT_GNU_EH_FRAME", PT_GNU_EH_FRAME }, { "PT_GNU_RELRO", PT_GNU_RELRO },
+        { "PT_GNU_STACK", PT_GNU_STACK },       { "PT_GNU_PROPERTY", PT_GNU_PROPERTY },
+        { "PT_INTERP", PT_INTERP },             { "PT_PHDR", PT_PHDR },
+    };
+    size_t i;
+
     if (tok == NULL || out_type == NULL) {
         return -1;
     }
-    if (strcmp(tok, "PT_LOAD") == 0) {
-        *out_type = PT_LOAD;
-    } else if (strcmp(tok, "PT_DYNAMIC") == 0) {
-        *out_type = PT_DYNAMIC;
-    } else if (strcmp(tok, "PT_NOTE") == 0) {
-        *out_type = PT_NOTE;
-    } else if (strcmp(tok, "PT_TLS") == 0) {
-        *out_type = PT_TLS;
-    } else if (strcmp(tok, "PT_GNU_EH_FRAME") == 0) {
-        *out_type = PT_GNU_EH_FRAME;
-    } else if (strcmp(tok, "PT_GNU_RELRO") == 0) {
-        *out_type = PT_GNU_RELRO;
-    } else if (strcmp(tok, "PT_GNU_STACK") == 0) {
-        *out_type = PT_GNU_STACK;
-    } else if (strcmp(tok, "PT_GNU_PROPERTY") == 0) {
-        *out_type = PT_GNU_PROPERTY;
-    } else if (strcmp(tok, "PT_INTERP") == 0) {
-        *out_type = PT_INTERP;
-    } else if (strcmp(tok, "PT_PHDR") == 0) {
-        *out_type = PT_PHDR;
-    } else {
-        return -1;
+    for (i = 0; i < sizeof(types) / sizeof(types[0]); ++i) {
+        if (strcmp(tok, types[i].name) == 0) {
+            *out_type = types[i].type;
+            return 0;
+        }
     }
-    return 0;
+    return -1;
 }
 
 static uint32_t phdr_default_flags(uint32_t type) {

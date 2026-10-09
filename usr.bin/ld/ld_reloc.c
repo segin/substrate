@@ -73,36 +73,6 @@ static int reloc_addend_is_signed(uint16_t machine, uint32_t type) {
     }
 }
 
-static uint64_t read_uint_bytes(const uint8_t *p, int sz, elfobj_endian_t e) {
-    uint64_t v = 0;
-    int i;
-    if (e == ELFOBJ_ENDIAN_BE) {
-        for (i = 0; i < sz; ++i) {
-            v = (v << 8) | (uint64_t)p[i];
-        }
-    } else {
-        for (i = sz - 1; i >= 0; --i) {
-            v = (v << 8) | (uint64_t)p[i];
-        }
-    }
-    return v;
-}
-
-static void write_uint_bytes(uint8_t *p, int sz, elfobj_endian_t e, uint64_t v) {
-    int i;
-    if (e == ELFOBJ_ENDIAN_BE) {
-        for (i = sz - 1; i >= 0; --i) {
-            p[i] = (uint8_t)(v & 0xffu);
-            v >>= 8;
-        }
-    } else {
-        for (i = 0; i < sz; ++i) {
-            p[i] = (uint8_t)(v & 0xffu);
-            v >>= 8;
-        }
-    }
-}
-
 /*
  * Indirect functions (STT_GNU_IFUNC).
  *

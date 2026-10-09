@@ -370,36 +370,30 @@ const char *canonical_mode_name(int mode) {
 }
 
 int parse_z_option(ld_ctx_t *ctx, const char *val) {
+    static const struct {
+        const char *word;
+        size_t field;           /* of ld_options_t */
+        int n;
+    } words[] = {
+        { "text", offsetof(ld_options_t, z_text_mode), 1 },
+        { "notext", offsetof(ld_options_t, z_text_mode), 2 },
+        { "execstack", offsetof(ld_options_t, z_execstack), 1 },
+        { "noexecstack", offsetof(ld_options_t, z_execstack), 0 },
+        { "relro", offsetof(ld_options_t, z_relro), 1 },
+        { "norelro", offsetof(ld_options_t, z_relro), 0 },
+        { "now", offsetof(ld_options_t, z_now), 1 },
+        { "lazy", offsetof(ld_options_t, z_now), 0 },
+    };
+    size_t i;
+
     if (ctx == NULL || val == NULL || val[0] == '\0') {
         return -1;
     }
-    if (strcmp(val, "text") == 0) {
-        ctx->opt.z_text_mode = 1;
-        return 0;
-    }
-    if (strcmp(val, "notext") == 0) {
-        ctx->opt.z_text_mode = 2;
-        return 0;
-    }
-    if (strcmp(val, "execstack") == 0) {
-        ctx->opt.z_execstack = 1;
-        return 0;
-    }
-    if (strcmp(val, "noexecstack") == 0) {
-        ctx->opt.z_execstack = 0;
-        return 0;
-    }
-    if (strcmp(val, "relro") == 0) {
-        ctx->opt.z_relro = 1;
-        return 0;
-    }
-    if (strcmp(val, "norelro") == 0) {
-        ctx->opt.z_relro = 0;
-        return 0;
-    }
-    if (strcmp(val, "now") == 0 || strcmp(val, "lazy") == 0) {
-        ctx->opt.z_now = val[0] == 'n';
-        return 0;
+    for (i = 0; i < sizeof(words) / sizeof(words[0]); ++i) {
+        if (strcmp(val, words[i].word) == 0) {
+            *(int *)((char *)&ctx->opt + words[i].field) = words[i].n;
+            return 0;
+        }
     }
     return -1;
 }
@@ -654,71 +648,60 @@ int parse_u64_auto(const char *s, uint64_t *out) {
     return 0;
 }
 
-uint16_t read_u16_endian(const uint8_t *p, elfobj_endian_t endian) {
-    if (endian == ELFOBJ_ENDIAN_BE) {
-        return (uint16_t)(((uint16_t)p[0] << 8) | (uint16_t)p[1]);
+/* A number of `sz` bytes at p, in the file's byte order; and the widths
+ * that have names. */
+uint64_t read_uint_bytes(const uint8_t *p, int sz, elfobj_endian_t e) {
+    uint64_t v = 0;
+    int i;
+
+    if (e == ELFOBJ_ENDIAN_BE) {
+        for (i = 0; i < sz; ++i) {
+            v = (v << 8) | (uint64_t)p[i];
+        }
+    } else {
+        for (i = sz - 1; i >= 0; --i) {
+            v = (v << 8) | (uint64_t)p[i];
+        }
     }
-    return (uint16_t)(((uint16_t)p[1] << 8) | (uint16_t)p[0]);
+    return v;
+}
+
+void write_uint_bytes(uint8_t *p, int sz, elfobj_endian_t e, uint64_t v) {
+    int i;
+
+    if (e == ELFOBJ_ENDIAN_BE) {
+        for (i = sz - 1; i >= 0; --i) {
+            p[i] = (uint8_t)(v & 0xffu);
+            v >>= 8;
+        }
+    } else {
+        for (i = 0; i < sz; ++i) {
+            p[i] = (uint8_t)(v & 0xffu);
+            v >>= 8;
+        }
+    }
+}
+
+uint16_t read_u16_endian(const uint8_t *p, elfobj_endian_t endian) {
+    return (uint16_t)read_uint_bytes(p, 2, endian);
 }
 
 uint32_t read_u32_endian(const uint8_t *p, elfobj_endian_t endian) {
-    if (endian == ELFOBJ_ENDIAN_BE) {
-        return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) | ((uint32_t)p[2] << 8) | (uint32_t)p[3];
-    }
-    return ((uint32_t)p[3] << 24) | ((uint32_t)p[2] << 16) | ((uint32_t)p[1] << 8) | (uint32_t)p[0];
+    return (uint32_t)read_uint_bytes(p, 4, endian);
 }
 
 uint64_t read_u64_endian(const uint8_t *p, elfobj_endian_t endian) {
-    if (endian == ELFOBJ_ENDIAN_BE) {
-        return ((uint64_t)p[0] << 56) | ((uint64_t)p[1] << 48) | ((uint64_t)p[2] << 40) | ((uint64_t)p[3] << 32) |
-               ((uint64_t)p[4] << 24) | ((uint64_t)p[5] << 16) | ((uint64_t)p[6] << 8) | (uint64_t)p[7];
-    }
-    return ((uint64_t)p[7] << 56) | ((uint64_t)p[6] << 48) | ((uint64_t)p[5] << 40) | ((uint64_t)p[4] << 32) |
-           ((uint64_t)p[3] << 24) | ((uint64_t)p[2] << 16) | ((uint64_t)p[1] << 8) | (uint64_t)p[0];
+    return read_uint_bytes(p, 8, endian);
 }
 
 void write_u16_endian(uint8_t *p, elfobj_endian_t endian, uint16_t v) {
-    if (endian == ELFOBJ_ENDIAN_BE) {
-        p[0] = (uint8_t)((v >> 8) & 0xffu);
-        p[1] = (uint8_t)(v & 0xffu);
-        return;
-    }
-    p[0] = (uint8_t)(v & 0xffu);
-    p[1] = (uint8_t)((v >> 8) & 0xffu);
+    write_uint_bytes(p, 2, endian, v);
 }
 
 void write_u32_endian(uint8_t *p, elfobj_endian_t endian, uint32_t v) {
-    if (endian == ELFOBJ_ENDIAN_BE) {
-        p[0] = (uint8_t)((v >> 24) & 0xffu);
-        p[1] = (uint8_t)((v >> 16) & 0xffu);
-        p[2] = (uint8_t)((v >> 8) & 0xffu);
-        p[3] = (uint8_t)(v & 0xffu);
-        return;
-    }
-    p[0] = (uint8_t)(v & 0xffu);
-    p[1] = (uint8_t)((v >> 8) & 0xffu);
-    p[2] = (uint8_t)((v >> 16) & 0xffu);
-    p[3] = (uint8_t)((v >> 24) & 0xffu);
+    write_uint_bytes(p, 4, endian, v);
 }
 
 void write_u64_endian(uint8_t *p, elfobj_endian_t endian, uint64_t v) {
-    if (endian == ELFOBJ_ENDIAN_BE) {
-        p[0] = (uint8_t)((v >> 56) & 0xffu);
-        p[1] = (uint8_t)((v >> 48) & 0xffu);
-        p[2] = (uint8_t)((v >> 40) & 0xffu);
-        p[3] = (uint8_t)((v >> 32) & 0xffu);
-        p[4] = (uint8_t)((v >> 24) & 0xffu);
-        p[5] = (uint8_t)((v >> 16) & 0xffu);
-        p[6] = (uint8_t)((v >> 8) & 0xffu);
-        p[7] = (uint8_t)(v & 0xffu);
-        return;
-    }
-    p[0] = (uint8_t)(v & 0xffu);
-    p[1] = (uint8_t)((v >> 8) & 0xffu);
-    p[2] = (uint8_t)((v >> 16) & 0xffu);
-    p[3] = (uint8_t)((v >> 24) & 0xffu);
-    p[4] = (uint8_t)((v >> 32) & 0xffu);
-    p[5] = (uint8_t)((v >> 40) & 0xffu);
-    p[6] = (uint8_t)((v >> 48) & 0xffu);
-    p[7] = (uint8_t)((v >> 56) & 0xffu);
+    write_uint_bytes(p, 8, endian, v);
 }
