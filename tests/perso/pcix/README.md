@@ -19,6 +19,11 @@ With the image mounted at `/perso/pcix` and `pcixtest.c` copied into its
 
 Every line reads `ok`, and the last is `pcixtest: PASS`.
 
+The test is built and run inside the tree on purpose.  A PC/IX program
+outside `/perso/pcix` is run as an ELKS program and fails, unless a PC/IX
+process is what runs it: see "PC/IX programs must be under `/perso/pcix`"
+in `tools/pcix/README.md`.
+
 ## What it checks
 
 52 checks against what `/usr/include/sys.s` on the media says the system
