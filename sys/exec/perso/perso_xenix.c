@@ -41,6 +41,7 @@
 #include <sys/file.h>
 #include <sys/kern_syscalls.h>
 #include <sys/ldt.h>
+#include <sys/namei.h>
 #include <sys/proc.h>
 #include <sys/poll.h>
 #include <sys/signal.h>
@@ -750,7 +751,9 @@ static int64_t x286_sys_mknod(struct x286_frame *f) {
     if (rc != 0) {
         return rc;
     }
-    rc = sys_mknod(path, (int)f->cx, (int)(int16_t)f->si);
+    /* `path` is the kernel's copy; the sys_ form would copy it in again
+     * as a user string and fail.  The same for chmod, chown and utime. */
+    rc = kern_mknod(path, (int)f->cx, (int)(int16_t)f->si);
     x286_free_string(path);
     return rc;
 }
@@ -762,7 +765,7 @@ static int64_t x286_sys_chmod(struct x286_frame *f) {
     if (rc != 0) {
         return rc;
     }
-    rc = sys_chmod(path, (int)f->cx);
+    rc = kern_chmodat(AT_FDCWD, path, (int)f->cx, 0);
     x286_free_string(path);
     return rc;
 }
@@ -774,7 +777,8 @@ static int64_t x286_sys_chown(struct x286_frame *f) {
     if (rc != 0) {
         return rc;
     }
-    rc = sys_chown(path, (int)(int16_t)f->cx, (int)(int16_t)f->si);
+    rc = kern_fchownat(AT_FDCWD, path, (int)(int16_t)f->cx,
+                       (int)(int16_t)f->si, 0);
     x286_free_string(path);
     return rc;
 }
@@ -978,8 +982,28 @@ static int64_t x286_sys_utime(struct x286_frame *f) {
             return rc;
         }
     }
-    rc = sys_utime(path, (void *)times);
-    x286_free_string(path);
+    /* struct utimbuf is two 32-bit times here; none means now.  The
+     * kernel sets times by path only for a user's string, so the file is
+     * opened and they are set through the descriptor. */
+    {
+        struct timespec ts[2];
+        int fd = kern_open(path, O_RDONLY, 0);
+
+        x286_free_string(path);
+        if (fd < 0) {
+            return fd;
+        }
+        if (times != 0) {
+            int32_t t[2];
+
+            memcpy(t, (const void *)times, sizeof(t));
+            memset(ts, 0, sizeof(ts));
+            ts[0].tv_sec = t[0];
+            ts[1].tv_sec = t[1];
+        }
+        rc = kern_utimensat(fd, NULL, times != 0 ? ts : NULL, 0);
+        kern_close(fd);
+    }
     return rc;
 }
 
