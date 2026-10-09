@@ -959,6 +959,20 @@ static fs_node_t *vfs_perso_shadow(const char *path,
     if (!(current_process && current_process->perso_id != 0 && path[0] == '/' &&
           strncmp(path, "/perso/", 7) != 0))
         return NULL;
+    /*
+     * /dev is the kernel's for a personality that says so (native_dev):
+     * the device nodes in its tree carry that system's major and minor
+     * numbers, which mean something else here or nothing.  The callers
+     * above this one have always left such a path alone; this one did not
+     * know to, and looked it up in the tree all the same, so the flag
+     * held only for a personality whose name does not spell its prefix.
+     */
+    if (strncmp(path, "/dev", 4) == 0 && (path[4] == '/' || path[4] == '\0')) {
+        const struct personality *p = perso_lookup(current_process->perso_id);
+
+        if (p && p->native_dev)
+            return NULL;
+    }
     {
         const char *pname = perso_name(current_process->perso_id);
         if (pname) {

@@ -1,4 +1,4 @@
-.TH PCIX 4 "2026-10-08" "Substrate" "Kernel Interfaces"
+.TH PCIX 4 "2026-10-09" "Substrate" "Kernel Interfaces"
 .SH NAME
 pcix \- IBM PC/IX (System III for the IBM PC) execution personality
 .SH DESCRIPTION
@@ -122,6 +122,17 @@ handler runs and no signal is blocked while it does.
 The PC/IX tree.
 .I tools/pcix/build-image.sh
 builds an image of it from the distribution floppies.
+.TP
+.I /dev
+The kernel's, not the tree's.  The nodes in
+.I /perso/pcix/dev
+are PC/IX's own, numbered for its drivers
+.RI ( /dev/null
+is 4,2), and are never opened: a PC/IX program that names
+.I /dev/null
+or
+.I /dev/tty
+gets substrate's.
 .SH NOTES
 Enable tracing of the calls with
 .B debug=perso:pcix:syscall

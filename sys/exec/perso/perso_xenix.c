@@ -3843,6 +3843,10 @@ struct personality personality_pcix = {
     .syscall_fmts = NULL,
     .syscall_count = MAX_SYSCALLS,
     .path_prefix = "/perso/pcix",
+    /* /dev is the kernel's: the tree's nodes are PC/IX's own, numbered for
+     * its drivers -- its /dev/null is (4,2) -- and open here as whatever
+     * has that number, if anything has. */
+    .native_dev = 1,
     .sendsig = pcix_sendsig,
     .handle_trap = pcix_handle_trap,
 };
