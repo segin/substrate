@@ -948,7 +948,16 @@ static elf_err_t merge_symbols(elf_link_plan_t *plan, elfobj_t *out,
             continue;
         }
 
-        if (existing->bind == STB_WEAK && sym->bind == STB_GLOBAL) {
+        /*
+         * A strong definition takes the place of a weak one, and a strong
+         * reference makes a weak reference a strong one.  A strong
+         * reference does not take the place of a weak definition: that
+         * is the definition it refers to.  (It did, and an object that
+         * called a weak function defined in an earlier object was told
+         * the function was undefined.)
+         */
+        if (existing->bind == STB_WEAK && sym->bind == STB_GLOBAL &&
+            (shndx != SHN_UNDEF || existing->shndx == SHN_UNDEF)) {
             existing->bind = sym->bind;
             existing->type = sym->type;
             existing->value = value;
