@@ -12947,129 +12947,47 @@ static char *trim_copy_arg(const char *s) {
 }
 
 static int parse_symbol_addend_arg(const char *arg, char **sym_out, int64_t *add_out) {
-    char *tmp;
-    char *compact;
-    size_t i;
-    size_t n;
-    char *sep = NULL;
-    long long v = 0;
+    as_expr_t *e;
+    as_expr_linear_t lin;
+    int rc = -1;
 
+    /*
+     * A data directive's argument as as_expr.c reduces it.  One symbol
+     * and a number give the symbol's name and the addend; a number alone
+     * gives no name, and the caller has the number another way; a
+     * difference of symbols is not this function's.
+     */
     if (sym_out == NULL || add_out == NULL) {
         return -1;
     }
     *sym_out = NULL;
     *add_out = 0;
-    tmp = trim_copy_arg(arg);
-    if (tmp == NULL) {
+    e = as_parse_expr_string(arg, NULL, 0);
+    if (e == NULL) {
         return -1;
     }
-    if (tmp[0] == '\0') {
-        free(tmp);
-        return -1;
-    }
-    if (parse_int64(tmp, &v) == 0) {
-        free(tmp);
-        return 0;
-    }
+    if (as_expr_eval_linear(e, NULL, NULL, &lin) == AS_EXPR_EVAL_OK &&
+        lin.sub_symbol == NULL && lin.sub_local == NULL) {
+        if (lin.add_symbol != NULL) {
+            *sym_out = xstrdup(lin.add_symbol);
+            rc = *sym_out != NULL ? 0 : -1;
+        } else if (lin.add_local != NULL) {
+            /* 1f and 1b by those names, which is how they are looked up. */
+            char name[16];
 
-    n = strlen(tmp);
-    compact = (char *)malloc(n + 1);
-    if (compact == NULL) {
-        free(tmp);
-        return -1;
-    }
-    n = 0;
-    for (i = 0; tmp[i] != '\0'; ++i) {
-        if (!isspace((unsigned char)tmp[i])) {
-            compact[n++] = tmp[i];
+            snprintf(name, sizeof(name), "%d%c", lin.add_local->local_digit,
+                     lin.add_local->local_forward ? 'f' : 'b');
+            *sym_out = xstrdup(name);
+            rc = *sym_out != NULL ? 0 : -1;
+        } else {
+            rc = 0;
+        }
+        if (rc == 0 && *sym_out != NULL) {
+            *add_out = (int64_t)lin.value;
         }
     }
-    compact[n] = '\0';
-    free(tmp);
-    while (n >= 2 && compact[0] == '(' && compact[n - 1] == ')') {
-        int depth = 0;
-        int wraps = 1;
-        for (i = 0; i < n; ++i) {
-            if (compact[i] == '(') {
-                depth++;
-            } else if (compact[i] == ')') {
-                depth--;
-                if (depth == 0 && i + 1 < n) {
-                    wraps = 0;
-                    break;
-                }
-            }
-            if (depth < 0) {
-                wraps = 0;
-                break;
-            }
-        }
-        if (!wraps || depth != 0) {
-            break;
-        }
-        memmove(compact, compact + 1, n - 2);
-        n -= 2;
-        compact[n] = '\0';
-    }
-
-    for (i = 1; compact[i] != '\0'; ++i) {
-        if (compact[i] == '+' || compact[i] == '-') {
-            sep = &compact[i];
-            break;
-        }
-    }
-    if (sep != NULL) {
-        char *terms;
-        char *p;
-        int sign;
-
-        terms = xstrdup(sep);
-        if (terms == NULL) {
-            free(compact);
-            return -1;
-        }
-        *sep = '\0';
-        p = terms;
-        while (*p != '\0') {
-            char *term_start;
-            char *term_end;
-            char saved;
-            long long addv;
-
-            sign = 1;
-            if (*p == '+' || *p == '-') {
-                sign = *p == '-' ? -1 : 1;
-                ++p;
-            }
-            term_start = p;
-            while (*p != '\0' && *p != '+' && *p != '-') {
-                ++p;
-            }
-            term_end = p;
-            if (term_end == term_start) {
-                free(terms);
-                free(compact);
-                return -1;
-            }
-            saved = *term_end;
-            *term_end = '\0';
-            if (parse_int64(term_start, &addv) != 0) {
-                *term_end = saved;
-                free(terms);
-                free(compact);
-                return -1;
-            }
-            *term_end = saved;
-            *add_out += (int64_t)(sign > 0 ? addv : -addv);
-        }
-        free(terms);
-    }
-    if (compact[0] == '\0') {
-        free(compact);
-        return -1;
-    }
-    *sym_out = compact;
-    return 0;
+    as_expr_free(e);
+    return rc;
 }
 
 typedef struct {
