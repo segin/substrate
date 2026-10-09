@@ -267,8 +267,12 @@ static void pmap_release_page(pmap_t pmap, uintptr_t va, uintptr_t pa) {
     }
     pv_remove(page, pmap, va);
     vm_page_unhold(page);
+    /* PG_PMM_ALLOC: only a frame the allocator handed out is this map's to
+     * free.  One mapped from /dev/mem can pass the other tests without
+     * ever having been allocated (see the i386 pmap_destroy). */
     if (page->pv_list == NULL && page->ref_count == 1 &&
-        page->wire_count == 0 && page->object == NULL) {
+        page->wire_count == 0 && page->object == NULL &&
+        (page->flags & PG_PMM_ALLOC)) {
         vm_page_free(page);
         pmap_destroy_anon_freed++;
     } else {

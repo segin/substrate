@@ -622,10 +622,19 @@ void pmap_destroy(pmap_t pmap) {
                              * refers to it (busybox ash crashing at a
                              * deterministic eip after the second exec).
                              */
+                            /*
+                             * And only a frame the allocator handed out.
+                             * One mapped from /dev/mem -- the display at
+                             * 0xB8000, say -- has a vm_page and can pass
+                             * every test above without ever having been
+                             * allocated; freeing it is a panic in the
+                             * allocator, and it was never this map's.
+                             */
                             if (page->pv_list == NULL &&
                                 page->ref_count == 1 &&
                                 page->wire_count == 0 &&
-                                page->object == NULL) {
+                                page->object == NULL &&
+                                (page->flags & PG_PMM_ALLOC)) {
                                 vm_page_free(page);
                                 pmap_destroy_anon_freed++;
                             } else {
