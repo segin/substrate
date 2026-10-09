@@ -273,413 +273,441 @@ static const char *default_output_name(const char *section, const char *file, vo
     return section;
 }
 
-static int run_internal_link(ld_ctx_t *ctx) {
+/*
+ * A link, as its phases see it: the options and the plan (ctx), the
+ * inputs, what is known of their symbols, and the output being made.
+ */
+typedef struct {
+    ld_ctx_t *ctx;
     objvec_t inputs;
     ld_symtab_t symtab;
-    elfobj_t *out = NULL;
-    elf_err_t err;
-    uint16_t out_type;
-    int allow_undef_runtime;
+    elfobj_t *out;
+    uint16_t out_type;          /* ET_REL, ET_EXEC or ET_DYN */
     int is_program;             /* an executable or a PIE: not a library */
-    uint64_t base_vaddr;
+    int allow_undef;            /* what is left undefined is not an error */
+    unsigned done;              /* LD_DID_*: how far the link has got */
+} ld_link_t;
 
-    memset(&inputs, 0, sizeof(inputs));
-    memset(&symtab, 0, sizeof(symtab));
-    if (plugin_discover_and_handshake(ctx) != 0) {
+/*
+ * The points a link passes that other phases depend on.  The order of the
+ * phases is the order of the table below; these say what about that
+ * order is not free, and the driver checks it, so that a phase moved to
+ * where it cannot work fails at once and not in the output.
+ */
+enum {
+    LD_DID_INPUTS = 1u << 0,    /* the inputs are chosen and read */
+    LD_DID_SYMTAB = 1u << 1,    /* their symbols are in the table */
+    LD_DID_MERGE = 1u << 2,     /* there is an output, with their sections */
+    LD_DID_PLAN = 1u << 3,      /* the dynamic tables exist and are sized */
+    LD_DID_LAYOUT = 1u << 4,    /* sections have addresses: no section may
+                                 * be added, removed, reordered or resized */
+    LD_DID_RELOC = 1u << 5,     /* relocations are applied */
+    LD_DID_SYMVALUES = 1u << 6  /* symbol values are addresses, no longer
+                                 * offsets in their sections */
+};
+
+/* Which outputs a phase is for. */
+enum {
+    LD_FOR_REL = 1u << 0,       /* -r */
+    LD_FOR_FINAL = 1u << 1,     /* a program or a shared object */
+    LD_FOR_PROGRAM = 1u << 2,   /* a program only */
+    LD_FOR_ANY = LD_FOR_REL | LD_FOR_FINAL
+};
+
+typedef struct {
+    const char *name;           /* for the order check's own message */
+    int (*run)(ld_link_t *l);
+    unsigned kinds;             /* LD_FOR_* */
+    unsigned needs;             /* LD_DID_* that must have happened */
+    unsigned before;            /* LD_DID_* that must not have happened yet */
+    unsigned gives;             /* LD_DID_* this phase establishes */
+    const char *failed;         /* said if it fails; NULL where the phase
+                                 * says what went wrong itself */
+} ld_phase_t;
+
+static int phase_plugin(ld_link_t *l) {
+    return plugin_discover_and_handshake(l->ctx);
+}
+
+static int phase_load_inputs(ld_link_t *l) {
+    return load_all_inputs(l->ctx, &l->inputs);
+}
+
+static int phase_reproduce(ld_link_t *l) {
+    return write_reproduce_bundle(l->ctx, &l->inputs);
+}
+
+static int phase_trace(ld_link_t *l) {
+    emit_trace_inputs(l->ctx, &l->inputs);
+    emit_trace_symbols(l->ctx, &l->inputs);
+    return emit_common_symbol_warnings(l->ctx, &l->inputs);
+}
+
+/* Every global name of the inputs, once: which definition the link takes,
+ * who else defines it (two strong definitions end here), and who refers
+ * to it. */
+static int phase_symtab(ld_link_t *l) {
+    if (ld_symtab_build(l->ctx, &l->inputs, &l->symtab) != 0) {
         return -1;
     }
-    if (load_all_inputs(ctx, &inputs) != 0) {
-        objvec_free(&inputs);
-        return -1;
-    }
-    if (write_reproduce_bundle(ctx, &inputs) != 0) {
-        objvec_free(&inputs);
-        return -1;
-    }
-    emit_trace_inputs(ctx, &inputs);
-    emit_trace_symbols(ctx, &inputs);
-    if (emit_common_symbol_warnings(ctx, &inputs) != 0) {
-        objvec_free(&inputs);
-        return -1;
-    }
-    /* Every global name of the inputs, once: which definition the link
-     * takes, who else defines it (two strong definitions end here), and
-     * who refers to it. */
-    if (ld_symtab_build(ctx, &inputs, &symtab) != 0) {
-        objvec_free(&inputs);
-        return -1;
-    }
-    if (inputs.count == 0) {
+    if (l->inputs.count == 0) {
         fprintf(stderr, "ld: no compatible relocatable input objects found\n");
-        ld_symtab_free(&symtab);
-        objvec_free(&inputs);
         return -1;
     }
+    return 0;
+}
 
-    /* The inputs go in under their own names, so that a failure in one of
-     * them can be reported as that one's. */
-    {
-        elf_link_plan_t *plan = elf_link_plan_create();
-        size_t pi;
+/* The inputs' sections into the output's.  The inputs go in under their
+ * own names, so that a failure in one of them can be reported as that
+ * one's. */
+static int phase_merge(ld_link_t *l) {
+    ld_ctx_t *ctx = l->ctx;
+    elf_link_plan_t *plan = elf_link_plan_create();
+    elf_err_t err = plan != NULL ? ELF_OK : ELF_ERR_OOM;
+    size_t pi;
 
-        err = plan != NULL ? ELF_OK : ELF_ERR_OOM;
-        for (pi = 0; err == ELF_OK && pi < inputs.count; ++pi) {
-            err = elf_link_plan_add_input(plan, inputs.objs[pi],
-                                          inputs.names[pi] != NULL ? inputs.names[pi] : "?");
-        }
-        if (err == ELF_OK && ctx->script != NULL && ctx->script->has_sections) {
-            err = elf_link_plan_set_section_name_hook(plan, script_output_name, ctx->script);
-        } else if (err == ELF_OK && ctx->expect_type != ET_REL) {
-            err = elf_link_plan_set_section_name_hook(plan, default_output_name, NULL);
-        }
-        /* --gc-sections: what nothing uses is decided now, of the
-         * inputs' sections, and the merge passes over it.  (Not for a
-         * relocatable output, whose user is the next link.) */
-        if (err == ELF_OK && ctx->gc_sections && ctx->expect_type != ET_REL) {
-            if (note_dso_names(ctx) != 0 || gc_collect_input_sections(ctx, &inputs, &symtab) != 0) {
-                err = ELF_ERR_OOM;
-            } else {
-                err = elf_link_plan_set_gc_hook(plan, gc_keep_input_section, ctx);
-            }
-        }
-        if (err == ELF_OK) {
-            err = elf_link_plan_link(plan, &out);
-        }
-        if (plan != NULL) {
-            elf_link_plan_destroy(plan);
+    for (pi = 0; err == ELF_OK && pi < l->inputs.count; ++pi) {
+        err = elf_link_plan_add_input(plan, l->inputs.objs[pi],
+                                      l->inputs.names[pi] != NULL ? l->inputs.names[pi] : "?");
+    }
+    if (err == ELF_OK && ctx->script != NULL && ctx->script->has_sections) {
+        err = elf_link_plan_set_section_name_hook(plan, script_output_name, ctx->script);
+    } else if (err == ELF_OK && ctx->expect_type != ET_REL) {
+        err = elf_link_plan_set_section_name_hook(plan, default_output_name, NULL);
+    }
+    /* --gc-sections: what nothing uses is decided now, of the inputs'
+     * sections, and the merge passes over it.  (Not for a relocatable
+     * output, whose user is the next link.) */
+    if (err == ELF_OK && ctx->gc_sections && ctx->expect_type != ET_REL) {
+        if (note_dso_names(ctx) != 0 || gc_collect_input_sections(ctx, &l->inputs, &l->symtab) != 0) {
+            err = ELF_ERR_OOM;
+        } else {
+            err = elf_link_plan_set_gc_hook(plan, gc_keep_input_section, ctx);
         }
     }
-    if (err != ELF_OK || out == NULL) {
-        const char *why = out != NULL ? elf_last_diagnostics(out) : "";
+    if (err == ELF_OK) {
+        err = elf_link_plan_link(plan, &l->out);
+    }
+    if (plan != NULL) {
+        elf_link_plan_destroy(plan);
+    }
+    if (err != ELF_OK || l->out == NULL) {
+        const char *why = l->out != NULL ? elf_last_diagnostics(l->out) : "";
 
         fprintf(stderr, "ld: link merge failed: %s%s%s\n", elf_errstr(err),
                 why[0] != '\0' ? ": " : "", why);
-        ld_symtab_free(&symtab);
-        objvec_free(&inputs);
-        if (out != NULL) {
-            elf_close(out);
-        }
         return -1;
     }
+    return 0;
+}
 
-    out_type = ctx->expect_type == 0 ? ET_EXEC : ctx->expect_type;
-    is_program = out_type == ET_EXEC || (out_type == ET_DYN && ctx->pie);
-    allow_undef_runtime = ctx->allow_undefined;
-    if (!is_program && out_type == ET_DYN && !ctx->explicit_unresolved_policy) {
-        allow_undef_runtime = 1;
-    }
-    if (elf_set_type(out, out_type) != ELF_OK) {
+/*
+ * What this linker makes is for substrate, and says so, whichever system
+ * the linker itself was built to run on: the brand is what the kernel
+ * picks the personality by, and the system's own shared objects carry it
+ * as its programs do.
+ */
+static int phase_brand(ld_link_t *l) {
+    if (elf_set_type(l->out, l->out_type) != ELF_OK) {
         fprintf(stderr, "ld: failed to set output type\n");
-        ld_symtab_free(&symtab);
-        objvec_free(&inputs);
-        elf_close(out);
         return -1;
     }
-    /*
-     * What this linker makes is for substrate, and says so, whichever
-     * system the linker itself was built to run on: the brand is what
-     * the kernel picks the personality by, and the system's own shared
-     * objects carry it as its programs do.
-     */
-    if ((out_type == ET_EXEC || out_type == ET_DYN) && elf_set_osabi(out, ELFOSABI_SUBSTRATE) != ELF_OK) {
+    if (l->out_type != ET_REL && elf_set_osabi(l->out, ELFOSABI_SUBSTRATE) != ELF_OK) {
         fprintf(stderr, "ld: failed to set Substrate ELF OSABI\n");
-        ld_symtab_free(&symtab);
-        objvec_free(&inputs);
-        elf_close(out);
         return -1;
     }
-    if (ctx->strip_debug) {
-        size_t si;
+    return 0;
+}
 
-        for (si = elf_section_count(out); si > 0; --si) {
-            elf_section_t *sec = elf_section_get(out, si - 1);
-            const char *name = sec != NULL ? elf_section_name(sec) : NULL;
+static int phase_strip_debug(ld_link_t *l) {
+    size_t si;
 
-            if (name != NULL && (elf_section_flags(sec) & SHF_ALLOC) == 0 &&
-                (strncmp(name, ".debug", 6) == 0 || strncmp(name, ".zdebug", 7) == 0 ||
-                 strncmp(name, ".stab", 5) == 0 || strncmp(name, ".gnu.debuglto_", 14) == 0) &&
-                elf_remove_section(out, sec) != ELF_OK) {
-                fprintf(stderr, "ld: failed to leave out section %s\n", name);
-                ld_symtab_free(&symtab);
-                objvec_free(&inputs);
-                elf_close(out);
-                return -1;
-            }
-        }
-    }
-    if (plan_eh_frame_hdr(ctx, out) != 0) {
-        fprintf(stderr, "ld: failed to make .eh_frame_hdr\n");
-        ld_symtab_free(&symtab);
-        objvec_free(&inputs);
-        elf_close(out);
-        return -1;
-    }
-    if (script_declare_symbols(ctx, out) != 0) {
-        ld_symtab_free(&symtab);
-        objvec_free(&inputs);
-        elf_close(out);
-        return -1;
-    }
-    if (apply_defsyms(ctx, out) != 0) {
-        ld_symtab_free(&symtab);
-        objvec_free(&inputs);
-        elf_close(out);
-        return -1;
-    }
-    if (reorder_sections_default_policy(out) != 0) {
-        fprintf(stderr, "ld: failed to apply default section placement policy\n");
-        ld_symtab_free(&symtab);
-        objvec_free(&inputs);
-        elf_close(out);
-        return -1;
-    }
-    if (script_apply_sections(ctx, out) != 0) {
-        ld_symtab_free(&symtab);
-        objvec_free(&inputs);
-        elf_close(out);
-        return -1;
-    }
-    if (ctx->icf_mode != 0 && apply_identical_code_folding(out, ctx) != 0) {
-        fprintf(stderr, "ld: --icf fold pass failed\n");
-        ld_symtab_free(&symtab);
-        objvec_free(&inputs);
-        elf_close(out);
-        return -1;
-    }
-
-    if (out_type == ET_REL) {
-        if (write_map_file(ctx, &inputs, &symtab, out) != 0) {
-            ld_symtab_free(&symtab);
-            objvec_free(&inputs);
-            elf_close(out);
-            return -1;
-        }
-        if (elf_write_file(out, ctx->out_path) != ELF_OK) {
-            fprintf(stderr, "ld: failed to write output %s\n", ctx->out_path);
-            ld_symtab_free(&symtab);
-            objvec_free(&inputs);
-            elf_close(out);
-            return -1;
-        }
-        if (set_output_mode(ctx->out_path, 0) != 0) {
-            if (ld_warn(ctx, "failed to set output mode on %s: %s",
-                        ctx->out_path, strerror(errno)) != 0) {
-                ld_symtab_free(&symtab);
-                objvec_free(&inputs);
-                elf_close(out);
-                return -1;
-            }
-        }
-        ld_symtab_free(&symtab);
-        objvec_free(&inputs);
-        elf_close(out);
+    if (!l->ctx->strip_debug) {
         return 0;
     }
+    for (si = elf_section_count(l->out); si > 0; --si) {
+        elf_section_t *sec = elf_section_get(l->out, si - 1);
+        const char *name = sec != NULL ? elf_section_name(sec) : NULL;
 
-    if (is_program && ensure_substrate_ld_note(out) != 0) {
-        fprintf(stderr, "ld: failed to emit .note.substrate_ld metadata\n");
-        ld_symtab_free(&symtab);
-        objvec_free(&inputs);
-        elf_close(out);
-        return -1;
-    }
-
-    if (strip_group_sections_for_final(out) != 0) {
-        fprintf(stderr, "ld: failed to strip SHT_GROUP sections for final output\n");
-        ld_symtab_free(&symtab);
-        objvec_free(&inputs);
-        elf_close(out);
-        return -1;
-    }
-
-    set_definitions_preemptible(out_type == ET_DYN && !ctx->pie && !ctx->bsymbolic);
-    if (is_program && relax_tls_dynamic_in_program(out) != 0) {
-        ld_symtab_free(&symtab);
-        objvec_free(&inputs);
-        elf_close(out);
-        return -1;
-    }
-    if (note_dso_names(ctx) != 0 || settle_undefined_weak(ctx, out) != 0 || plan_dynamic_imports(ctx, out) != 0) {
-        fprintf(stderr, "ld: failed to plan GOT/PLT dynamic imports\n");
-        ld_symtab_free(&symtab);
-        objvec_free(&inputs);
-        elf_close(out);
-        return -1;
-    }
-    if (plan_local_got(ctx, out) != 0) {
-        fprintf(stderr, "ld: failed to make the global offset table\n");
-        ld_symtab_free(&symtab);
-        objvec_free(&inputs);
-        elf_close(out);
-        return -1;
-    }
-
-    if (plan_dynamic_needed(ctx, out) != 0) {
-        fprintf(stderr, "ld: failed to plan dynamic DT_NEEDED entries\n");
-        ld_symtab_free(&symtab);
-        objvec_free(&inputs);
-        elf_close(out);
-        return -1;
-    }
-    if (reorder_sections_default_policy(out) != 0) {
-        fprintf(stderr, "ld: failed to reorder sections after dynamic planning\n");
-        ld_symtab_free(&symtab);
-        objvec_free(&inputs);
-        elf_close(out);
-        return -1;
-    }
-
-    if (add_default_segments(out, ctx) != 0) {
-        fprintf(stderr, "ld: failed to add output program segments\n");
-        ld_symtab_free(&symtab);
-        objvec_free(&inputs);
-        elf_close(out);
-        return -1;
-    }
-    if (reorder_sections_default_policy(out) != 0) {
-        fprintf(stderr, "ld: failed to reorder sections after segment planning\n");
-        ld_symtab_free(&symtab);
-        objvec_free(&inputs);
-        elf_close(out);
-        return -1;
-    }
-
-    if (ctx->mode == 64) {
-        base_vaddr = (out_type == ET_DYN) ? 0x0ULL : 0x400000ULL;
-    } else {
-        base_vaddr = (out_type == ET_DYN) ? 0x0ULL : 0x08048000ULL;
-    }
-    if (ctx->have_image_base) {
-        base_vaddr = ctx->image_base;
-    }
-
-    if (assign_section_addresses(out, base_vaddr) != 0) {
-        fprintf(stderr, "ld: failed to assign section virtual addresses\n");
-        ld_symtab_free(&symtab);
-        objvec_free(&inputs);
-        elf_close(out);
-        return -1;
-    }
-    if (script_assign_addresses(ctx, out) != 0) {
-        ld_symtab_free(&symtab);
-        objvec_free(&inputs);
-        elf_close(out);
-        return -1;
-    }
-    if (ld_arch_of_mode(ctx->mode) != NULL &&
-        finalize_dynamic_imports(ld_arch_of_mode(ctx->mode), out, &ctx->dyn_imports) != 0) {
-        fprintf(stderr, "ld: failed to finalize %s GOT/PLT dynamic data\n", canonical_mode_name(ctx->mode));
-        ld_symtab_free(&symtab);
-        objvec_free(&inputs);
-        elf_close(out);
-        return -1;
-    }
-    if (patch_dynamic_tag_values(out) != 0) {
-        fprintf(stderr, "ld: failed to finalize .dynamic tag values\n");
-        ld_symtab_free(&symtab);
-        objvec_free(&inputs);
-        elf_close(out);
-        return -1;
-    }
-    if (enforce_wx_policy(out) != 0) {
-        ld_symtab_free(&symtab);
-        objvec_free(&inputs);
-        elf_close(out);
-        return -1;
-    }
-    {
-        const char *textrel_sec = text_relocation_section(ctx, out);
-
-        if (textrel_sec != NULL && ctx->z_text_mode == 1) {
-            fprintf(stderr,
-                    "ld: -z text: section %s is read-only and has relocations the dynamic linker would apply\n",
-                    textrel_sec);
-            ld_symtab_free(&symtab);
-            objvec_free(&inputs);
-            elf_close(out);
-            return -1;
-        }
-        if (textrel_sec != NULL && ctx->z_text_mode != 2 &&
-            ld_warn(ctx, "section %s is read-only and has relocations for the dynamic linker (DT_TEXTREL); "
-                         "was it compiled without -fPIC?", textrel_sec) != 0) {
-            ld_symtab_free(&symtab);
-            objvec_free(&inputs);
-            elf_close(out);
+        if (name != NULL && (elf_section_flags(sec) & SHF_ALLOC) == 0 &&
+            (strncmp(name, ".debug", 6) == 0 || strncmp(name, ".zdebug", 7) == 0 ||
+             strncmp(name, ".stab", 5) == 0 || strncmp(name, ".gnu.debuglto_", 14) == 0) &&
+            elf_remove_section(l->out, sec) != ELF_OK) {
+            fprintf(stderr, "ld: failed to leave out section %s\n", name);
             return -1;
         }
     }
-
-    if (check_undefined_symbols(out, ctx, allow_undef_runtime, &symtab) != 0) {
-        ld_symtab_free(&symtab);
-        objvec_free(&inputs);
-        elf_close(out);
-        return -1;
-    }
-
-    if (fill_local_got(ctx, out) != 0 ||
-        apply_all_relocations(out, ctx, allow_undef_runtime) != 0) {
-        ld_symtab_free(&symtab);
-        objvec_free(&inputs);
-        elf_close(out);
-        return -1;
-    }
-    if (fill_eh_frame_hdr(out) != 0) {
-        fprintf(stderr, "ld: failed to fill .eh_frame_hdr\n");
-        ld_symtab_free(&symtab);
-        objvec_free(&inputs);
-        elf_close(out);
-        return -1;
-    }
-
-    if (set_entry_symbol(ctx, out, ctx->entry_symbol != NULL ? ctx->entry_symbol : "_start",
-                         is_program, ctx->entry_symbol != NULL) != 0) {
-        ld_symtab_free(&symtab);
-        objvec_free(&inputs);
-        elf_close(out);
-        return -1;
-    }
-    if (finalize_symbol_values_for_output(out) != 0) {
-        fprintf(stderr, "ld: failed to finalize output symbol value addresses\n");
-        ld_symtab_free(&symtab);
-        objvec_free(&inputs);
-        elf_close(out);
-        return -1;
-    }
-    if (patch_dynsym_symbol_values(ctx, out) != 0) {
-        fprintf(stderr, "ld: failed to patch .dynsym symbol value addresses\n");
-        ld_symtab_free(&symtab);
-        objvec_free(&inputs);
-        elf_close(out);
-        return -1;
-    }
-    if (write_map_file(ctx, &inputs, &symtab, out) != 0) {
-        ld_symtab_free(&symtab);
-        objvec_free(&inputs);
-        elf_close(out);
-        return -1;
-    }
-
-    if (elf_write_file(out, ctx->out_path) != ELF_OK) {
-        fprintf(stderr, "ld: failed to write output %s\n", ctx->out_path);
-        ld_symtab_free(&symtab);
-        objvec_free(&inputs);
-        elf_close(out);
-        return -1;
-    }
-    if (set_output_mode(ctx->out_path, is_program) != 0) {
-        if (ld_warn(ctx, "failed to set output mode on %s: %s",
-                    ctx->out_path, strerror(errno)) != 0) {
-            ld_symtab_free(&symtab);
-            objvec_free(&inputs);
-            elf_close(out);
-            return -1;
-        }
-    }
-
-    ld_symtab_free(&symtab);
-    objvec_free(&inputs);
-    elf_close(out);
     return 0;
+}
+
+static int phase_plan_eh_frame_hdr(ld_link_t *l) {
+    return plan_eh_frame_hdr(l->ctx, l->out);
+}
+
+static int phase_script_symbols(ld_link_t *l) {
+    if (script_declare_symbols(l->ctx, l->out) != 0) {
+        return -1;
+    }
+    return apply_defsyms(l->ctx, l->out);
+}
+
+static int phase_order_sections(ld_link_t *l) {
+    return reorder_sections_default_policy(l->out);
+}
+
+static int phase_script_sections(ld_link_t *l) {
+    return script_apply_sections(l->ctx, l->out);
+}
+
+static int phase_icf(ld_link_t *l) {
+    return l->ctx->icf_mode != 0 ? apply_identical_code_folding(l->out, l->ctx) : 0;
+}
+
+static int phase_ld_note(ld_link_t *l) {
+    return ensure_substrate_ld_note(l->out);
+}
+
+static int phase_strip_groups(ld_link_t *l) {
+    return strip_group_sections_for_final(l->out);
+}
+
+/* Whether this output's own definitions can be taken over by another's
+ * at run time, which everything after asks; and, in a program, the
+ * thread-local sequences that need not go through the dynamic linker. */
+static int phase_relax_tls(ld_link_t *l) {
+    set_definitions_preemptible(l->out_type == ET_DYN && !l->ctx->pie && !l->ctx->bsymbolic);
+    return l->is_program ? relax_tls_dynamic_in_program(l->out) : 0;
+}
+
+static int phase_plan_imports(ld_link_t *l) {
+    return note_dso_names(l->ctx) != 0 || settle_undefined_weak(l->ctx, l->out) != 0 ||
+           plan_dynamic_imports(l->ctx, l->out) != 0 ? -1 : 0;
+}
+
+static int phase_plan_local_got(ld_link_t *l) {
+    return plan_local_got(l->ctx, l->out);
+}
+
+static int phase_plan_needed(ld_link_t *l) {
+    return plan_dynamic_needed(l->ctx, l->out);
+}
+
+static int phase_segments(ld_link_t *l) {
+    return add_default_segments(l->out, l->ctx);
+}
+
+static int phase_assign_addresses(ld_link_t *l) {
+    uint64_t base_vaddr;
+
+    if (l->ctx->have_image_base) {
+        base_vaddr = l->ctx->image_base;
+    } else if (l->out_type == ET_DYN) {
+        base_vaddr = 0;
+    } else {
+        base_vaddr = l->ctx->mode == 64 ? 0x400000ULL : 0x08048000ULL;
+    }
+    return assign_section_addresses(l->out, base_vaddr);
+}
+
+static int phase_script_addresses(ld_link_t *l) {
+    return script_assign_addresses(l->ctx, l->out);
+}
+
+static int phase_fill_imports(ld_link_t *l) {
+    const ld_arch_t *arch = ld_arch_of_mode(l->ctx->mode);
+
+    if (arch != NULL && finalize_dynamic_imports(arch, l->out, &l->ctx->dyn_imports) != 0) {
+        fprintf(stderr, "ld: failed to finalize %s GOT/PLT dynamic data\n", canonical_mode_name(l->ctx->mode));
+        return -1;
+    }
+    return 0;
+}
+
+static int phase_dynamic_tags(ld_link_t *l) {
+    return patch_dynamic_tag_values(l->out);
+}
+
+static int phase_wx_policy(ld_link_t *l) {
+    return enforce_wx_policy(l->out);
+}
+
+static int phase_text_relocations(ld_link_t *l) {
+    const char *textrel_sec = text_relocation_section(l->ctx, l->out);
+
+    if (textrel_sec == NULL) {
+        return 0;
+    }
+    if (l->ctx->z_text_mode == 1) {
+        fprintf(stderr,
+                "ld: -z text: section %s is read-only and has relocations the dynamic linker would apply\n",
+                textrel_sec);
+        return -1;
+    }
+    if (l->ctx->z_text_mode != 2 &&
+        ld_warn(l->ctx, "section %s is read-only and has relocations for the dynamic linker (DT_TEXTREL); "
+                        "was it compiled without -fPIC?", textrel_sec) != 0) {
+        return -1;
+    }
+    return 0;
+}
+
+static int phase_undefined(ld_link_t *l) {
+    return check_undefined_symbols(l->out, l->ctx, l->allow_undef, &l->symtab);
+}
+
+static int phase_relocate(ld_link_t *l) {
+    if (fill_local_got(l->ctx, l->out) != 0) {
+        return -1;
+    }
+    return apply_all_relocations(l->out, l->ctx, l->allow_undef);
+}
+
+static int phase_fill_eh_frame_hdr(ld_link_t *l) {
+    return fill_eh_frame_hdr(l->out);
+}
+
+static int phase_entry(ld_link_t *l) {
+    const char *entry = l->ctx->entry_symbol;
+
+    return set_entry_symbol(l->ctx, l->out, entry != NULL ? entry : "_start", l->is_program, entry != NULL);
+}
+
+static int phase_symbol_values(ld_link_t *l) {
+    return finalize_symbol_values_for_output(l->out);
+}
+
+static int phase_dynsym_values(ld_link_t *l) {
+    return patch_dynsym_symbol_values(l->ctx, l->out);
+}
+
+static int phase_map(ld_link_t *l) {
+    return write_map_file(l->ctx, &l->inputs, &l->symtab, l->out);
+}
+
+static int phase_write(ld_link_t *l) {
+    const char *path = l->ctx->out_path;
+
+    if (elf_write_file(l->out, path) != ELF_OK) {
+        fprintf(stderr, "ld: failed to write output %s\n", path);
+        return -1;
+    }
+    if (set_output_mode(path, l->is_program) != 0 &&
+        ld_warn(l->ctx, "failed to set output mode on %s: %s", path, strerror(errno)) != 0) {
+        return -1;
+    }
+    return 0;
+}
+
+#define DID(x) LD_DID_##x
+
+/*
+ * A link, in order.  Three things about the order are not obvious from
+ * reading it and are what the needs/before columns hold: everything that
+ * adds, removes, reorders or resizes a section comes before addresses
+ * are assigned; what is filled in from addresses comes after; and symbol
+ * values turn from offsets into addresses only once nothing more reads
+ * them as offsets.
+ */
+static const ld_phase_t link_phases[] = {
+    /* name, function, for, needs, before, gives, said on failure */
+    { "plugin", phase_plugin, LD_FOR_ANY, 0, DID(INPUTS), 0, NULL },
+    { "load-inputs", phase_load_inputs, LD_FOR_ANY, 0, DID(INPUTS), DID(INPUTS), NULL },
+    { "reproduce", phase_reproduce, LD_FOR_ANY, DID(INPUTS), 0, 0, NULL },
+    { "trace", phase_trace, LD_FOR_ANY, DID(INPUTS), 0, 0, NULL },
+    { "symtab", phase_symtab, LD_FOR_ANY, DID(INPUTS), DID(MERGE), DID(SYMTAB), NULL },
+    { "merge", phase_merge, LD_FOR_ANY, DID(SYMTAB), DID(MERGE), DID(MERGE), NULL },
+    { "brand", phase_brand, LD_FOR_ANY, DID(MERGE), 0, 0, NULL },
+    { "strip-debug", phase_strip_debug, LD_FOR_ANY, DID(MERGE), DID(LAYOUT), 0, NULL },
+    { "plan-eh-frame-hdr", phase_plan_eh_frame_hdr, LD_FOR_ANY, DID(MERGE), DID(LAYOUT), 0,
+      "failed to make .eh_frame_hdr" },
+    { "script-symbols", phase_script_symbols, LD_FOR_ANY, DID(MERGE), DID(SYMVALUES), 0, NULL },
+    { "order-sections", phase_order_sections, LD_FOR_ANY, DID(MERGE), DID(LAYOUT), 0,
+      "failed to apply default section placement policy" },
+    { "script-sections", phase_script_sections, LD_FOR_ANY, DID(MERGE), DID(LAYOUT), 0, NULL },
+    { "icf", phase_icf, LD_FOR_ANY, DID(MERGE), DID(LAYOUT), 0, "--icf fold pass failed" },
+
+    { "ld-note", phase_ld_note, LD_FOR_PROGRAM, DID(MERGE), DID(LAYOUT), 0,
+      "failed to emit .note.substrate_ld metadata" },
+    { "strip-groups", phase_strip_groups, LD_FOR_FINAL, DID(MERGE), DID(LAYOUT), 0,
+      "failed to strip SHT_GROUP sections for final output" },
+    { "relax-tls", phase_relax_tls, LD_FOR_FINAL, DID(MERGE), DID(PLAN), 0, NULL },
+    { "plan-imports", phase_plan_imports, LD_FOR_FINAL, DID(MERGE), DID(PLAN) | DID(LAYOUT), DID(PLAN),
+      "failed to plan GOT/PLT dynamic imports" },
+    { "plan-local-got", phase_plan_local_got, LD_FOR_FINAL, DID(PLAN), DID(LAYOUT), 0,
+      "failed to make the global offset table" },
+    { "plan-needed", phase_plan_needed, LD_FOR_FINAL, DID(PLAN), DID(LAYOUT), 0,
+      "failed to plan dynamic DT_NEEDED entries" },
+    { "order-sections", phase_order_sections, LD_FOR_FINAL, DID(PLAN), DID(LAYOUT), 0,
+      "failed to reorder sections after dynamic planning" },
+    { "segments", phase_segments, LD_FOR_FINAL, DID(PLAN), DID(LAYOUT), 0,
+      "failed to add output program segments" },
+    { "order-sections", phase_order_sections, LD_FOR_FINAL, DID(PLAN), DID(LAYOUT), 0,
+      "failed to reorder sections after segment planning" },
+    { "assign-addresses", phase_assign_addresses, LD_FOR_FINAL, DID(PLAN), DID(LAYOUT), DID(LAYOUT),
+      "failed to assign section virtual addresses" },
+    { "script-addresses", phase_script_addresses, LD_FOR_FINAL, DID(LAYOUT), DID(RELOC), 0, NULL },
+    { "fill-imports", phase_fill_imports, LD_FOR_FINAL, DID(LAYOUT), DID(RELOC), 0, NULL },
+    { "dynamic-tags", phase_dynamic_tags, LD_FOR_FINAL, DID(LAYOUT), 0, 0,
+      "failed to finalize .dynamic tag values" },
+    { "wx-policy", phase_wx_policy, LD_FOR_FINAL, DID(LAYOUT), 0, 0, NULL },
+    { "text-relocations", phase_text_relocations, LD_FOR_FINAL, DID(LAYOUT), DID(RELOC), 0, NULL },
+    { "undefined", phase_undefined, LD_FOR_FINAL, DID(LAYOUT), DID(RELOC), 0, NULL },
+    { "relocate", phase_relocate, LD_FOR_FINAL, DID(LAYOUT), DID(RELOC) | DID(SYMVALUES), DID(RELOC), NULL },
+    { "fill-eh-frame-hdr", phase_fill_eh_frame_hdr, LD_FOR_FINAL, DID(RELOC), 0, 0,
+      "failed to fill .eh_frame_hdr" },
+    { "entry", phase_entry, LD_FOR_FINAL, DID(LAYOUT), DID(SYMVALUES), 0, NULL },
+    { "symbol-values", phase_symbol_values, LD_FOR_FINAL, DID(RELOC), DID(SYMVALUES), DID(SYMVALUES),
+      "failed to finalize output symbol value addresses" },
+    { "dynsym-values", phase_dynsym_values, LD_FOR_FINAL, DID(SYMVALUES), 0, 0,
+      "failed to patch .dynsym symbol value addresses" },
+
+    { "map", phase_map, LD_FOR_ANY, DID(MERGE), 0, 0, NULL },
+    { "write", phase_write, LD_FOR_ANY, DID(MERGE), 0, 0, NULL },
+};
+
+#undef DID
+
+static int run_internal_link(ld_ctx_t *ctx) {
+    ld_link_t l;
+    size_t i;
+    int rc = 0;
+
+    memset(&l, 0, sizeof(l));
+    l.ctx = ctx;
+    l.out_type = ctx->expect_type == 0 ? ET_EXEC : ctx->expect_type;
+    l.is_program = l.out_type == ET_EXEC || (l.out_type == ET_DYN && ctx->pie);
+    l.allow_undef = ctx->allow_undefined ||
+                    (!l.is_program && l.out_type == ET_DYN && !ctx->explicit_unresolved_policy);
+
+    for (i = 0; rc == 0 && i < sizeof(link_phases) / sizeof(link_phases[0]); ++i) {
+        const ld_phase_t *p = &link_phases[i];
+        unsigned kind = l.out_type == ET_REL ? LD_FOR_REL : LD_FOR_FINAL;
+
+        if (l.is_program) {
+            kind |= LD_FOR_PROGRAM;
+        }
+        if ((p->kinds & kind) == 0) {
+            continue;
+        }
+        if ((l.done & p->needs) != p->needs || (l.done & p->before) != 0) {
+            fprintf(stderr, "ld: internal error: link phase %s is out of order\n", p->name);
+            rc = -1;
+        } else if (p->run(&l) != 0) {
+            if (p->failed != NULL) {
+                fprintf(stderr, "ld: %s\n", p->failed);
+            }
+            rc = -1;
+        } else {
+            l.done |= p->gives;
+        }
+    }
+
+    ld_symtab_free(&l.symtab);
+    objvec_free(&l.inputs);
+    if (l.out != NULL) {
+        elf_close(l.out);
+    }
+    return rc;
 }
 
 static int parse_arg_value(const char *arg, const char *opt, const char **out_val) {

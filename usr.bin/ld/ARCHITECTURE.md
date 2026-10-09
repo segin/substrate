@@ -95,6 +95,8 @@ Technologies: C, bounded symbol/object tracking, section reachability analysis, 
 
 Deployment: Internal pass pipeline driven by `run_internal_link()` in `ld.c`
 
+The order of a link is a table, `link_phases` in `ld.c`: one row for each step, with the function that does it, which outputs it is for (`-r`, final, programs only), and what it depends on. The dependencies are a few named points -- the inputs are read, their symbols are in the table, there is an output, the dynamic tables are sized, sections have addresses, relocations are applied, symbol values are addresses -- and each row says which it needs behind it and which must still be ahead. The driver checks that before running a step, so a step moved to where it cannot work stops the link with its name instead of producing a wrong file; and it is the one place the link's inputs, symbol table and output are released.
+
 ### 3.3. Script, Layout, And Segment Planning
 
 Name: Linker-script engine and output layout planning
@@ -187,7 +189,7 @@ What is open: `docs/ld-audit.md` is the checked record of what the linker does a
 
 Modularity pressure: The split is by file only. Every type is still in `ld.h` and every pass still takes the whole `ld_ctx_t`; narrowing what each file can see (its own header, its own part of the context) is the next step, and can be taken a file at a time.
 
-Structure still to come: an option table and a phase list in place of the chain of comparisons and the long `run_internal_link`.
+Structure still to come: an option table in place of the chain of comparisons in `main`.
 
 Speed: shared objects are re-read for each question asked of them, archives are searched by reading every member, and `.gnu.hash` is written with one bucket.
 
