@@ -108,7 +108,7 @@ unbounded recursion on long expressions (AS-FE-021) and a division trap
    temporary files before any symbol exists, and a lexer that splits on
    white space only.
 6. **At least six expression evaluators** with different grammars
-   (AS-DES-005).
+   (AS-DES-005).  This one is done: they are `as_expr.c` now.
 
 And the test suite it was written against — 147 files — was deleted with
 it and not brought back (AS-TST-001).
@@ -195,6 +195,7 @@ assembled with `--32` unless it says otherwise.
   Evidence: `as_parser.c:2017-2054` removes the star and returns the operand as it would be without one.  `call *foo` is `e8 rel32`, a direct call of `foo`, where it is `ff 15 abs32`, a call through the pointer at `foo`; `jmp *foo` likewise; the same in 64-bit mode.
   Basis: reproduced (re-run by hand).
 - [ ] **AS-FE-006** Expressions shall be evaluated with the assembler's precedence, and with all its operators.
+  In part: the parser is `as_expr.c`, with GNU `as`'s four ranks and `!`, `<>`, `&&`, `||`; `.long 1+2<<3, 1|1+1` is 0x11 and 2 wherever it is written; `.quad 0xffffffffffffffff` is itself; `.long 1 2`, `(4`, `12abc`, `09` are errors.  Still open, in the emitter's use of the result and not in the parsing: `.long x+y`, `2*x` assemble; `.long x - .` is 0 with a relocation that lacks its addend; `.long .+4` makes an undefined symbol `.`; an operand `$x-y` is a relocation against `x`.
   Evidence: `expr_precedence` (`as_parser.c:931-959`) is C's.  In GNU `as`, `* / % << >>` bind tightest, then `| & ^ !`, then `+ -` and the comparisons.  `.long 1+2<<3, 1|1+1` gives 0x18 and 3; GNU gives 0x11 and 2.  Unary `!`, `<>`, `&&`, `||` are "invalid operand".  Downstream of the parser: `movl $x-y+4` is a relocation against `x` with addend 0; `$x+y`, `$2*x`, `$-x` are accepted; `.long x - .` is 0 and `.long .+4` makes an undefined symbol named `.`; `.quad 0xffffffffffffffff` is `0x7fffffffffffffff`; `.long 1 2`, `(4`, `12abc`, `09` become undefined symbols of those names.
   Basis: reproduced (the precedence re-run by hand).
 - [ ] **AS-FE-007** `.ifdef`, `.ifndef` and `.if` shall be decided by the symbol table and by arithmetic.
@@ -227,7 +228,8 @@ assembled with `--32` unless it says otherwise.
 - [ ] **AS-FE-020** The lexer shall not read past the end of a line.
   Evidence: `as_lexer.c:735-742`: `strncmp(line+i, "{vex}", 6)` matches only when the terminator follows, and `i += 6` then steps over it.  A file holding the line `{vex}`: AddressSanitizer, heap-buffer-overflow in `tokenize_line` (`:725`).  For the same reason the prefix never matches where it was meant to, before an instruction.
   Basis: reproduced (re-run by hand).
-- [ ] **AS-FE-021** Expression depth shall be bounded however the expression is nested.
+- [x] **AS-FE-021** Expression depth shall be bounded however the expression is nested.
+  Met: `as_expr.c` is the one parser of expressions, and bounds a tree at `AS_EXPR_MAX_NODES` (4096) besides its 256 levels of nesting, so every recursive walk is bounded with it; the recursive splitters in `as_data.c`, `as_sections.c` and `as_elf_emit.c` are gone.  A sum of 200,000 terms as an operand, of 400,000 in `.long`, and 100,000 nested parentheses are each "malformed", exit 1 (`tests/usr.bin/as/test_expr.c`, `test_exprsites.sh`).
   Evidence: `EXPR_MAX_DEPTH` (`as_parser.c:74`) counts parentheses and unary operators.  A left-leaning chain is unbounded, and `resolve_local_in_expr` (`:2936`) and `free_expr` (`:166`) walk it recursively: `movl $1+1+…` with 200,000 terms is a segmentation fault.  The same family elsewhere: `.long` of 100,000 terms faults in `as_data.c:180`, of 400,000 reached 25 GB resident before it was killed, and 20,000 nested parentheses fault in `as_elf_emit.c:805` (`const_expr_parse_xor`, no guard).
   Basis: reproduced.
 - [ ] **AS-FE-022** Expansion shall be bounded.
@@ -445,7 +447,8 @@ in 64-bit rather than line by line.
 - [ ] **AS-SEL-012** A mnemonic shall be accepted with the suffixes it takes.
   Evidence: `normalize_x86_mnemonic` and `is_size_suffixable_base` (`:3319-3349`) do not know `sal` with a suffix (`sall $1, %eax` is "unsupported mnemonic"), `shldl`/`shrdl`, `larl`/`lsll`, `movntil`, `boundl`, `lssl` and its fellows, `iretl`, `lretl`, `movbew`/`movbel`, `adcxl`; nor `shld %eax,%ebx` with none.
   Basis: reproduced (re-run by hand).
-- [ ] **AS-SEL-013** Constant arithmetic shall not kill the assembler.
+- [x] **AS-SEL-013** Constant arithmetic shall not kill the assembler.
+  Met: the three evaluators named are one, `as_expr_eval`, whose arithmetic is done unsigned on 64 bits: `INT64_MIN / -1` is its dividend, a shift by 64 or more or by a negative count is 0, a division by zero is an error returned.  `test_expr.c` holds each; nothing is reported by the sanitizer build over it.
   Evidence: `eval_expr_const` (`:874`, `894`, `898`, `902`), the same in `eval_expr_asm_vars` (`:983-984`) and `const_expr_parse_*` (`:671`, `699`, `707`, `715`).  `movl $-9223372036854775808/-1, %eax` ends the assembler with SIGFPE; UBSan flags the negation and the multiplication.
   Basis: reproduced (re-run by hand).
 - [ ] **AS-SEL-014** Port I/O and a few one-byte forms shall be the size written.
@@ -557,6 +560,7 @@ code in sections not marked executable (AS-OBJ-009), `2^63` and above
 ### 6.5 Robustness and time
 
 - [ ] **AS-ROB-001** The splitters shall not recurse once for each operator.
+  In part: the splitters are gone (AS-DES-005), and with them the negation at `as_symtab.c:359`.  Still open: the count before the allocation check in `as_symtab.c` and the unchecked multiplication in `as_sections.c`.
   Evidence: `parse_s64` (`as_data.c:189-320`) recurses for each `+` or `-` and copies the remainder at each level: stack linear, time quadratic.  `as_sections.c:254-353` has the same shape.  (The crashes are under AS-FE-021.)  `as_symtab.c:243-250` counts an entry before checking the allocation of its name; `as_sections.c:213` multiplies without an overflow check; `as_symtab.c:359` negates `LLONG_MIN`.
   Basis: reproduced; the last three traced.
 - [ ] **AS-PERF-003** Assembly time shall not be cubic.
@@ -566,6 +570,7 @@ code in sections not marked executable (AS-OBJ-009), `2^63` and above
 ### 6.6 Design
 
 - [ ] **AS-DES-005** There shall be one expression evaluator, and no module whose result is unused.
+  In part: there is one.  `as_expr.c` has the lexer, the parser, `as_expr_eval` (a value, given a callback for what symbols are worth) and `as_expr_eval_linear` (a number plus one symbol minus another).  Gone in its favour: the parser in `as_parser.c`; `const_expr_parse_*`, the bodies of `eval_expr_const` and `eval_expr_asm_vars`, `parse_symbol_addend_arg`'s splitter and `expr_symbol_addend`/`_with_local` in `as_elf_emit.c`; `parse_s64`/`parse_u64` in `as_data.c`; `parse_u32_arg` in `as_sections.c`; `parse_i64_arg`, `parse_set_rhs_symbol`, `parse_set_rhs_dot_minus_symbol` and the body of `parse_size_arg` in `as_symtab.c`; `eval_rept_count` and the number-reading of `.if` and `.ifeq` in `as.c`.  A case table of 296 directive and operand expressions matched GNU's bytes in 223 before and 259 after, none worse; the audit's 29,778 instruction lines and the old suite's sources assemble to the same objects.  What remains of this requirement is not evaluation: `eval_local_rel_expr_virtual` and its five fellows (`as_elf_emit.c`) walk the tree to place symbols by a predicted layout, and go with AS-DES-002; `.if` compares as text a condition with a name in it, there being no symbols in that pass (AS-FE-050); the copied helpers, the two section state machines, `as_relax.c` and `as_data.c`'s unused program are as they were.
   Evidence: four evaluators with four grammars: `as_symtab.c:272-521`, `as_sections.c:254-353`, `as_data.c:189-349`, `as_elf_emit.c:584/843` — besides the parser's (AS-FE-006) and the three in the emitter's first half (AS-DES-004).  `trim_copy`, `xstrdup` and `set_err` are copied into each file, and `as_sections.c:10-60` defines the ELF constants again.  Two section state machines (`as_sections.c` and `section_track_*`, `as_elf_emit.c:7994`) must agree for an alignment to land on the right section.  `handle_directive` is `as_symtab.c:591-869`.  `as_relax.c` and the program `as_data.c` builds should be deleted or made the one source of truth.
   Basis: traced.
 

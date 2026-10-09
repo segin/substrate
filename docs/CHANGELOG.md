@@ -345,6 +345,19 @@ Detailed record of major implementation milestones. For current system status, s
   lifecycle), and `repro_acceptloop.c` (fork-per-connection regression).
 
 ## Dynamic Linking & Toolchain
+- **In-tree assembler: one expression parser and evaluator** (`usr.bin/as/as_expr.c`):
+  an expression was read by a different piece of code in each place it could
+  stand — operands, data directives, `.set`, `.size`, `.comm`, section
+  arguments, `.rept`, `.if` — with different grammars, so `1+2<<3` was 17, 24
+  or an undefined symbol by where it was written.  All of them are
+  `as_expr.c` now: GNU `as`'s precedence and operators (`<>`, `&&`, `||`, `!`),
+  64-bit arithmetic that wraps and never traps, a bound on an expression's
+  size, `as_expr_eval` for a value and `as_expr_eval_linear` for the
+  symbol-and-addend form.  `.set K, 3*4` is absolute 12 where it made an
+  undefined symbol named `3*4`; `.long 4+a` and `.long a+2*2` are a relocation
+  with addend 4 where they were four zero bytes and none; `.size f, e-f+4` keeps
+  its 4.  Tests `tests/usr.bin/as/test_expr.sh`, `test_exprsites.sh`; the audit
+  this came out of is `docs/as-audit.md`.
 - **Cross toolchain emitted no `PT_GNU_EH_FRAME` (all C++ exceptions aborted):**
   every binary the cross g++ produced had an `.eh_frame` section but no
   `.eh_frame_hdr` / `PT_GNU_EH_FRAME` segment, so libgcc's `dl_iterate_phdr`
