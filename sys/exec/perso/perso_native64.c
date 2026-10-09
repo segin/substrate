@@ -24,6 +24,7 @@
 #include <machine/syscall.h>
 #include <kern/file.h>
 #include <kern/time.h>
+#include <pm/pm.h>
 #include <sys/amd64_abi.h>
 #include <sys/copy.h>
 #include <sys/dirent.h>
@@ -585,6 +586,37 @@ static int amd64_sys_shmctl(int shmid, int cmd, void *buf) {
     return copyout(&u, buf, sizeof(u)) != 0 ? -EFAULT : 0;
 }
 
+/*
+ * fcntl(2): only the record-lock commands carry a structure, and its two
+ * 64-bit fields sit 4 bytes further on in a 64-bit process's than in the
+ * kernel's.
+ */
+static int amd64_sys_fcntl(int fd, int cmd, uintptr_t arg) {
+    struct amd64_flock u;
+    struct kflock k;
+    int rc;
+
+    if (cmd != F_GETLK && cmd != F_SETLK && cmd != F_SETLKW)
+        return sys_fcntl(fd, cmd, (int)arg);
+    if (copyin((const void *)arg, &u, sizeof(u)) != 0)
+        return -EFAULT;
+    memset(&k, 0, sizeof(k));
+    k.l_type   = u.l_type;
+    k.l_whence = u.l_whence;
+    k.l_start  = u.l_start;
+    k.l_len    = u.l_len;
+    k.l_pid    = u.l_pid;
+    rc = proc_advlock(current_process, fd, cmd, &k);
+    if (rc != 0 || cmd != F_GETLK)
+        return rc;
+    u.l_type   = k.l_type;
+    u.l_whence = k.l_whence;
+    u.l_start  = k.l_start;
+    u.l_len    = k.l_len;
+    u.l_pid    = k.l_pid;
+    return copyout(&u, (void *)arg, sizeof(u)) != 0 ? -EFAULT : 0;
+}
+
 static int amd64_sys_semctl(int semid, int semnum, int cmd, uintptr_t arg) {
     struct semid_ds k;
     struct amd64_semid_ds u;
@@ -629,6 +661,7 @@ static void *native_amd64_syscalls[MAX_SYSCALLS] = {
     [SYS_STAT]          = (void *)&amd64_sys_stat,
     [SYS_LSTAT]         = (void *)&amd64_sys_lstat,
     [SYS_FSTAT]         = (void *)&amd64_sys_fstat,
+    [SYS_FCNTL]         = (void *)&amd64_sys_fcntl,
     [SYS_FSTATAT]       = (void *)&amd64_sys_fstatat,
     [SYS_STATFS]        = (void *)&amd64_sys_statfs,
     [SYS_FSTATFS]       = (void *)&amd64_sys_fstatfs,

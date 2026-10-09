@@ -3,6 +3,7 @@
 
 #include <sys/proc.h>
 
+#include <sys/abi32.h>
 #include <sys/lock.h>
 
 /*
@@ -43,15 +44,20 @@ int proc_vfork(process_t *parent, void *stack);
 #define PROC_FORK_SHARE  2
 int proc_vfork_shared(process_t *parent, void *stack);
 void proc_remove_child(process_t *parent, process_t *child);
-/* Mirrors the userspace <fcntl.h> struct flock (i386 layout: int64 off_t
- * is 4-byte aligned, so the struct is 24 bytes with no trailing pad). */
+/* Mirrors the userspace <fcntl.h> struct flock of a 32-bit process, which
+ * fcntl(2) copies it in and out as: the i386 layout, where a 64-bit off_t
+ * is 4-byte aligned and the struct is 24 bytes with no trailing pad.  On
+ * the x86_64 kernel plain int64_t fields would sit 4 bytes further on and
+ * every 32-bit program's l_start, l_len and l_pid be misread.  A 64-bit
+ * process's struct flock is struct amd64_flock (<sys/amd64_abi.h>). */
 struct kflock {
-    int16_t l_type;
-    int16_t l_whence;
-    int64_t l_start;
-    int64_t l_len;
-    int32_t l_pid;
+    int16_t     l_type;
+    int16_t     l_whence;
+    abi_int64_t l_start;
+    abi_int64_t l_len;
+    int32_t     l_pid;
 };
+ABI32_ASSERT_SIZE(struct kflock, 24);
 /* fcntl(2) record locks from a kernel struct flock (process.c). */
 int proc_advlock(process_t *p, int fd, int cmd, struct kflock *fl);
 int proc_begin_vfork(process_t *child);

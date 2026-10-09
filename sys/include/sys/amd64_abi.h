@@ -34,6 +34,20 @@ struct amd64_timespec {
 };
 ABI64_ASSERT_SIZE(struct amd64_timespec, 16);
 
+/* struct flock, for fcntl(2)'s record locks: the kernel's is struct kflock
+ * (<pm/pm.h>), 24 bytes with its off_t fields at 4 and 12. */
+struct amd64_flock {
+    int16_t l_type;
+    int16_t l_whence;
+    int32_t __pad0;     /* where LP64 aligns l_start; spelled out, as the
+                           i386 kernel compiles this header too */
+    int64_t l_start;
+    int64_t l_len;
+    int32_t l_pid;
+    int32_t __pad1;
+};
+ABI64_ASSERT_SIZE(struct amd64_flock, 32);
+
 struct amd64_timeval {
     int64_t tv_sec;
     int64_t tv_usec;

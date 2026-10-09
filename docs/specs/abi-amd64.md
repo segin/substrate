@@ -269,6 +269,7 @@ differs from i386:
 | `struct sched_param` | `<sched.h>` | 48 | `sched_getparam`, `sched_setparam`, `sched_setscheduler` |
 | `struct shmid_ds` | `<sys/shm.h>` | 80 | `shmctl` |
 | `struct semid_ds` | `<sys/sem.h>` | 56 | `semctl` |
+| `struct flock` | `<fcntl.h>` | 32 | `fcntl` (`F_GETLK`, `F_SETLK`, `F_SETLKW`) |
 | `struct sigevent` | `<signal.h>` | 32 | `timer_create`, `mq_notify` |
 | `struct msghdr` | `<sys/socket.h>` | 48 | `sendmsg`, `recvmsg` |
 | `struct robust_list_head` | `<sys/futex.h>` | 24 | `set_robust_list`, `get_robust_list` |
