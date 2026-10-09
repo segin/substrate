@@ -6345,8 +6345,15 @@ static int reloc_is_x64_runtime_data_ref(uint32_t type) {
     return type == R_X86_64_64;
 }
 
+/*
+ * A reference that is a call, and so can be sent through the PLT when
+ * what it names turns out to be in a shared object.  R_386_PLT32 says so
+ * outright.  R_386_PC32 is what a compiler not told to make
+ * position-independent code writes for every call; on i386 nothing but a
+ * branch is pc-relative, so against an import it is one too.
+ */
 static int reloc_is_i386_plt_ref(uint32_t type) {
-    return type == R_386_PLT32;
+    return type == R_386_PLT32 || type == R_386_PC32;
 }
 
 static int reloc_is_i386_got_ref(uint32_t type) {
