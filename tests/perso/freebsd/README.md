@@ -47,7 +47,11 @@ is allowed for: FreeBSD hands a process whose descriptor was closed to
 init, and substrate leaves it its parent's child, to be waited for or to
 go when the parent does.  The test accepts either.
 
-Build it on a FreeBSD host, as the method above says.  Building it under
-substrate with the `cc` of a FreeBSD tree compiles, and then links a
-file that is not an ELF file: something in how `ld.lld` writes its
-output is not yet right under the personality.
+Build it on a FreeBSD host, as the method above says, for the reference
+run.  It can also be built under substrate with the `cc` of a FreeBSD
+tree (put the source in `/perso/freebsd/var/tmp`; a tree unpacked
+without `<sys/procdesc.h>` is allowed for).  Until 2026-10-09 that
+linked a file of the right length and all zeros: `ld.lld` writes its
+output through a shared mapping and nothing else, and what was stored
+through one was not written to the file when it was unmapped
+(`tests/kern/mmapshared.c`).

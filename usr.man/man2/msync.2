@@ -1,7 +1,7 @@
 .\" Process this file with
 .\" groff -man -Tascii msync.2
 .\"
-.TH MSYNC 2 "2026-02-28" "Substrate Kernel" "System Calls Manual"
+.TH MSYNC 2 "2026-10-09" "Substrate Kernel" "System Calls Manual"
 .SH NAME
 msync \- synchronize a file with a memory map
 .SH LIBRARY
@@ -72,6 +72,18 @@ int main(void) {
     return 0;
 }
 .fi
+.SH NOTES
+.BR msync ()
+decides
+.I when
+a change reaches the file, not whether.  What a process stores through a
+.B MAP_SHARED
+mapping of a file is also written to it when the mapping is removed, by
+.BR munmap (2)
+or by mapping something else over it, and when the process exits with the
+file still mapped.  A
+.B MAP_PRIVATE
+mapping's stores are the process's own and are never written.
 .SH SEE ALSO
 .BR mmap (2),
 .BR sysconf (3)

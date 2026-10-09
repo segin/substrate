@@ -44,7 +44,7 @@ else
   BRAND   = printf '\100' | dd of=$@ bs=1 seek=7 conv=notrunc status=none
 endif
 
-all: soak_reap trapsig advlock opencreat
+all: soak_reap trapsig advlock opencreat mmapshared
 
 soak_reap: soak_reap.c
 	$(CC) $(CFLAGS) $< $(LIBS) -o $@
@@ -66,7 +66,13 @@ opencreat: opencreat.c
 	$(CC) $(CFLAGS) $< $(LIBS) -o $@
 	$(if $(BRAND),$(BRAND),)
 
+# mmapshared: what is stored through a MAP_SHARED mapping of a file is in
+# the file, however the mapping is let go of.  Runs on the host too.
+mmapshared: mmapshared.c
+	$(CC) $(CFLAGS) $< $(LIBS) -o $@
+	$(if $(BRAND),$(BRAND),)
+
 clean:
-	rm -f soak_reap trapsig advlock opencreat
+	rm -f soak_reap trapsig advlock opencreat mmapshared
 
 .PHONY: all clean

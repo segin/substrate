@@ -8,6 +8,8 @@
 #include <vm/vm_kmem.h>
 #include <vm/vm_map.h>
 #include <vm/vm_object.h>
+#include <vm/vm_page.h>
+#include <vm/vm_pager.h>
 
 /*
  * Release the strict-commit reservation a map entry holds over the
@@ -106,11 +108,57 @@ static void free_entry(vm_map_entry_t *entry) {
     kfree(entry, sizeof(vm_map_entry_t));
 }
 
-static void vm_map_pmap_remove_range(vm_map_t *map, uintptr_t start, uintptr_t end) {
+/*
+ * Write to its file what was stored through [start, end) of a shared
+ * mapping of one, while the map still has the pages to say so.
+ *
+ * A store through a MAP_SHARED mapping sets the hardware's dirty bit on
+ * the mapping and nothing else, and the bit goes with the mapping.  msync
+ * collects it, and was the only thing that did: unmapping the file, or
+ * exiting with it mapped, dropped the mapping and with it all knowledge
+ * that the page had changed, so what a program stored and did not msync
+ * never reached the file.  A linker that builds its output in a mapping
+ * and unmaps it -- LLVM's does -- left a file of the right size and all
+ * zeros.  This is called wherever a mapping is taken away.
+ *
+ * Only a mapping straight onto a file's own object is written: a private
+ * mapping has a shadow object between, which has no pager, and its stores
+ * are the process's alone.  The map is locked by the caller.
+ */
+static void vm_map_entry_writeback(vm_map_t *map, vm_map_entry_t *entry,
+                                   uintptr_t start, uintptr_t end) {
+    vm_object_t *obj = entry ? entry->object : NULL;
+
+    if (!map || !map->pmap || !obj || !obj->pager ||
+        obj->pager->ops != &vnode_pager_ops) {
+        return;
+    }
+    if (start < entry->start) start = entry->start;
+    if (end > entry->end) end = entry->end;
+    start &= ~((uintptr_t)0xFFF);
+    end = (end + 0xFFF) & ~((uintptr_t)0xFFF);
+    for (uintptr_t va = start; va < end; va += 0x1000) {
+        uint64_t pindex = (va - entry->start + entry->offset) / 4096;
+        vm_page_t *m = vm_object_lookup_page(obj, pindex);
+
+        if (m && ((m->flags & PG_DIRTY) ||
+                  pmap_is_modified((pmap_t)map->pmap, va))) {
+            vm_page_t *pages[1] = { m };
+
+            vm_pager_put_pages(obj->pager, pages, 1, true);
+            m->flags &= ~PG_DIRTY;
+            pmap_clear_modify((pmap_t)map->pmap, va);
+        }
+    }
+}
+
+static void vm_map_pmap_remove_range(vm_map_t *map, vm_map_entry_t *entry,
+                                     uintptr_t start, uintptr_t end) {
     if (!map || !map->pmap || start >= end) {
         return;
     }
 
+    vm_map_entry_writeback(map, entry, start, end);
     start &= ~((uintptr_t)0xFFF);
     end = (end + 0xFFF) & ~((uintptr_t)0xFFF);
     for (uintptr_t va = start; va < end; va += 0x1000) {
@@ -996,7 +1044,7 @@ int vm_map_remove(vm_map_t *map, uintptr_t start, uintptr_t end) {
         if (cur->start >= start && cur->end <= end) {
             // Entirely within range, remove it
             vm_map_entry_uncommit_range(cur, cur->start, cur->end);
-            vm_map_pmap_remove_range(map, cur->start, cur->end);
+            vm_map_pmap_remove_range(map, cur, cur->start, cur->end);
             if (map->hint == cur) map->hint = cur->prev;
             cur->prev->next = cur->next;
             cur->next->prev = cur->prev;
@@ -1023,7 +1071,7 @@ int vm_map_remove(vm_map_t *map, uintptr_t start, uintptr_t end) {
             // left (cur) and right (new_entry) halves keep VME_COMMITTED
             // (copied below), so uncharge exactly the removed middle.
             vm_map_entry_uncommit_range(cur, start, end);
-            vm_map_pmap_remove_range(map, start, end);
+            vm_map_pmap_remove_range(map, cur, start, end);
 
             // Initialize new entry (right part)
             new_entry->start = end;
@@ -1069,7 +1117,7 @@ int vm_map_remove(vm_map_t *map, uintptr_t start, uintptr_t end) {
                 // Trimming right side of entry
                 uintptr_t old_end = cur->end;
                 vm_map_entry_uncommit_range(cur, start, old_end);
-                vm_map_pmap_remove_range(map, start, old_end);
+                vm_map_pmap_remove_range(map, cur, start, old_end);
                 map->size -= (old_end - start);
                 cur->end = start;
                 hole_insert(map, start, old_end);
@@ -1077,7 +1125,7 @@ int vm_map_remove(vm_map_t *map, uintptr_t start, uintptr_t end) {
                 // Trimming left side of entry
                 uintptr_t old_start = cur->start;
                 vm_map_entry_uncommit_range(cur, old_start, end);
-                vm_map_pmap_remove_range(map, old_start, end);
+                vm_map_pmap_remove_range(map, cur, old_start, end);
                 map->size -= (end - old_start);
                 cur->offset += (end - old_start);
                 cur->start = end;
@@ -1136,6 +1184,14 @@ void vm_map_destroy(vm_map_t *map) {
      */
     if (map->pmap) {
         pmap_t pmap = map->pmap;
+
+        /* What was stored through a shared mapping of a file and is still
+         * mapped goes to the file first: the mappings are about to be the
+         * only record of it, and gone. */
+        for (vm_map_entry_t *e = map->header->next; e != map->header;
+             e = e->next) {
+            vm_map_entry_writeback(map, e, e->start, e->end);
+        }
         map->pmap = NULL;
         pmap_destroy(pmap);
     }

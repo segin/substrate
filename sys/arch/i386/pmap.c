@@ -2041,12 +2041,35 @@ static int pmap_lookup_active_pte(pmap_t pmap, uint32_t va, uint32_t **pt_out, u
     }
 
     uint32_t cr3 = pmap_hal_read_cr3();
-    if (pmap->pdir_phys != cr3) {
-        return 0;
-    }
-
     uint32_t pdi = PD_INDEX(va);
     uint32_t pti = PT_INDEX(va);
+
+    if (pmap->pdir_phys != cr3) {
+        /*
+         * Not the address space the processor is in, so not reachable
+         * through the recursive mapping -- but its tables are ordinary
+         * pages, and those are all mapped at the kernel's base, which is
+         * how pmap_destroy() walks them.  This used to answer "no page"
+         * for every address of every pmap but the running one: the
+         * dirty bits of a process being torn down by its parent could not
+         * be read, and what it had stored through a shared mapping of a
+         * file was taken for unchanged and thrown away.
+         */
+        const uint32_t *pd = (const uint32_t *)(pmap->pdir_phys + 0xC0000000U);
+        uint32_t *ipt;
+
+        if (!(pd[pdi] & PTE_P) || (pd[pdi] & PTE_PS)) {
+            return 0;
+        }
+        ipt = (uint32_t *)((pd[pdi] & ~0xFFFU) + 0xC0000000U);
+        if (!(ipt[pti] & PTE_P)) {
+            return 0;
+        }
+        *pt_out = ipt;
+        *pti_out = pti;
+        return 1;
+    }
+
     if (!(V_PD[pdi] & PTE_P)) {
         return 0;
     }
