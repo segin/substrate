@@ -695,6 +695,42 @@ static int64_t x286_sys_creat(struct x286_frame *f) {
     return rc;
 }
 
+/*
+ * Directories, before there was mkdir(2).
+ *
+ * Version 7, System III and Xenix/286 have no call that makes or removes
+ * a directory.  mkdir(1), a set-uid program, makes the node with mknod(2)
+ * and then its two entries with link(2):
+ *
+ *     mknod("d", S_IFDIR | mode, 0);  link("d", "d/.");  link(parent, "d/..");
+ *
+ * and rmdir(1) takes it apart the same way, unlink("d/.."), unlink("d/.")
+ * and unlink("d").  A directory here comes with both entries and loses
+ * them with itself, so the node is made by mkdir, the links and unlinks
+ * of "." and ".." succeed when the directory is there and do nothing, and
+ * unlink of a directory removes it.
+ */
+
+/* Is the last component of `path` "." or ".."? */
+static int x286_names_dot_entry(const char *path) {
+    const char *leaf = strrchr(path, '/');
+
+    leaf = leaf ? leaf + 1 : path;
+    return leaf[0] == '.' &&
+           (leaf[1] == '\0' || (leaf[1] == '.' && leaf[2] == '\0'));
+}
+
+/* 0 if `path`, ending in "." or "..", names a directory. */
+static int x286_dot_entry_exists(const char *path) {
+    struct stat st;
+    int rc = kern_stat(path, &st);
+
+    if (rc != 0) {
+        return rc;
+    }
+    return S_ISDIR(st.st_mode) ? 0 : -ENOTDIR;
+}
+
 static int64_t x286_sys_link(struct x286_frame *f) {
     char *oldp = NULL, *newp = NULL;
     int rc = x286_ds_string(f, f->bx, &oldp);
@@ -704,7 +740,10 @@ static int64_t x286_sys_link(struct x286_frame *f) {
     }
     rc = x286_ds_string(f, f->cx, &newp);
     if (rc == 0) {
-        rc = kern_link(oldp, newp);
+        /* mkdir(1) finishes a directory with link(dir, "dir/.") and
+         * link(parent, "dir/.."); x286_sys_mknod has made both. */
+        rc = x286_names_dot_entry(newp) ? x286_dot_entry_exists(newp)
+                                        : kern_link(oldp, newp);
         x286_free_string(newp);
     }
     x286_free_string(oldp);
@@ -718,7 +757,14 @@ static int64_t x286_sys_unlink(struct x286_frame *f) {
     if (rc != 0) {
         return rc;
     }
-    rc = kern_unlink(path);
+    if (x286_names_dot_entry(path)) {
+        rc = x286_dot_entry_exists(path);       /* rmdir(1): see above */
+    } else {
+        struct stat st;
+
+        rc = (kern_lstat(path, &st) == 0 && S_ISDIR(st.st_mode))
+            ? kern_rmdir(path) : kern_unlink(path);
+    }
     x286_free_string(path);
     return rc;
 }
@@ -755,7 +801,14 @@ static int64_t x286_sys_mknod(struct x286_frame *f) {
     }
     /* `path` is the kernel's copy; the sys_ form would copy it in again
      * as a user string and fail.  The same for chmod, chown and utime. */
-    rc = kern_mknod(path, (int)f->cx, (int)(int16_t)f->si);
+    /* A directory is asked for as S_IFDIR here, and by Venix with the
+     * Sixth Edition's 0140000; either way the bit below is set and the
+     * character-device bit is not. */
+    if ((f->cx & 0060000U) == 0040000U) {
+        rc = kern_mkdir(path, (int)(f->cx & 07777U));
+    } else {
+        rc = kern_mknod(path, (int)f->cx, (int)(int16_t)f->si);
+    }
     x286_free_string(path);
     return rc;
 }
