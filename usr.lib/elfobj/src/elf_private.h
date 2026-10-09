@@ -265,6 +265,10 @@ void elf__set_err(elfobj_t *obj, elf_err_t err, const char *msg);
 void *elf__calloc(size_t n, size_t sz);
 void *elf__reallocarray(void *ptr, size_t n, size_t sz);
 char *elf__strdup(const char *s);
+/* elf_inflate.c: a zlib stream into exactly out_len bytes; 0 or -1. */
+int elf__zlib_inflate(const uint8_t *in, size_t in_len, uint8_t *out,
+                      size_t out_len);
+#define ELF__COMPRESS_ZLIB  1U          /* Elf_Chdr.ch_type */
 int elf__bounds_ok(size_t off, size_t len, size_t total);
 int elf__bounds_ok_u64(uint64_t off, uint64_t len, size_t total);
 int elf__u64_add(uint64_t a, uint64_t b, uint64_t *out);

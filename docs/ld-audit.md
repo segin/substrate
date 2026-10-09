@@ -28,7 +28,8 @@ short writes and close errors checked.
 
 ## 1. Linking today's objects
 
-- [ ] **LD-CUR-001** When an input section is compressed (`SHF_COMPRESSED`), the linker shall either decompress it before merging or discard it together with its relocations.
+- [x] **LD-CUR-001** When an input section is compressed (`SHF_COMPRESSED`), the linker shall either decompress it before merging or discard it together with its relocations.
+  Met: `elf_link.c` merges a compressed section as its contents, inflated by `elf_inflate.c` (zlib only; another method is reported as unsupported).  Shown on a host build: the link against `libc.a` and `libsys.a` no longer fails in the merge; the inflate was checked against 30 streams (stored, fixed and dynamic blocks; empty to 200 KB) and rejects wrong lengths and truncation.
   Evidence: `elf_link.c:653` appends the compressed bytes; `.rel.debug_*` offsets then exceed the merged section (`elf_reloc.c:2751-2766`); there is no inflate in `elfobj`.  `libc.a` and `libsys.a` carry zlib-compressed `.debug_*` (the libraries are built by the host `cc -m32`, whose assembler compresses by default), so every link against them fails with "link merge failed: relocation error".  Basis: verified.  Task #52.
 - [ ] **LD-CUR-002** If merging an input relocation fails, then the linker shall report the input object, section, offset, relocation type by name, symbol and the underlying cause.
   Evidence: `elf_link.c:885-886, 962-964, 967-968` turn every failure into `ELF_ERR_RELOC`; the output object is closed on error (`1143-1146`) so `ld.c:10629-10631` prints only the generic string.  Basis: traced.  Task #53.

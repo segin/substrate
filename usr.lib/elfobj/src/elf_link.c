@@ -555,6 +555,52 @@ static elf_err_t plan_push_map_entry(elf_link_plan_t *plan, const char *symbol_n
     return ELF_OK;
 }
 
+/*
+ * The contents of the compressed section `src`, in a buffer the caller
+ * frees, with their size and alignment.  The section's data is an Elf_Chdr
+ * (ch_type, ch_size, ch_addralign: twelve bytes in a 32-bit file, 24 with
+ * four of padding in a 64-bit one) followed by the stream.
+ */
+static elf_err_t inflate_input_section(elfobj_t *out,
+                                       const struct elf_section *src,
+                                       uint8_t **data_out, size_t *size_out,
+                                       uint64_t *align_out) {
+    size_t chdr = src->obj != NULL && src->obj->cls == ELFOBJ_CLASS_64 ? 24 : 12;
+    uint8_t *buf;
+
+    if (!src->has_compression_hint || src->data == NULL ||
+        src->data_size < chdr) {
+        elf__set_err(out, ELF_ERR_FORMAT, "compressed section has no header");
+        (void)elf__append_diag(out, src->name);
+        return ELF_ERR_FORMAT;
+    }
+    if (src->compression_type != ELF__COMPRESS_ZLIB) {
+        elf__set_err(out, ELF_ERR_UNSUPPORTED,
+                     "section compressed by a method other than zlib");
+        (void)elf__append_diag(out, src->name);
+        return ELF_ERR_UNSUPPORTED;
+    }
+    if (src->compression_size > (uint64_t)SIZE_MAX - 1U) {
+        return ELF_ERR_BOUNDS;
+    }
+    buf = (uint8_t *)malloc((size_t)src->compression_size + 1U);
+    if (buf == NULL) {
+        return ELF_ERR_OOM;
+    }
+    if (elf__zlib_inflate(src->data + chdr, src->data_size - chdr, buf,
+                          (size_t)src->compression_size) != 0) {
+        free(buf);
+        elf__set_err(out, ELF_ERR_FORMAT,
+                     "compressed section does not decompress");
+        (void)elf__append_diag(out, src->name);
+        return ELF_ERR_FORMAT;
+    }
+    *data_out = buf;
+    *size_out = (size_t)src->compression_size;
+    *align_out = src->compression_addralign ? src->compression_addralign : 1;
+    return ELF_OK;
+}
+
 static elf_err_t merge_sections(elf_link_plan_t *plan, elfobj_t *out,
                                 const struct elf_link_input *input,
                                 uint64_t *sec_bases, uint8_t *sec_included,
@@ -578,6 +624,10 @@ static elf_err_t merge_sections(elf_link_plan_t *plan, elfobj_t *out,
         struct elf_section *dst;
         elf_link_merge_action_t action = ELF_LINK_MERGE_APPEND;
         elf_err_t err;
+        uint8_t *inflated = NULL;       /* src's contents, if it is compressed */
+        const uint8_t *src_data;
+        size_t src_size;
+        uint64_t src_align, src_flags;
 
         if (src == NULL || src->name == NULL || src->name[0] == '\0') {
             continue;
@@ -600,13 +650,38 @@ static elf_err_t merge_sections(elf_link_plan_t *plan, elfobj_t *out,
             continue;
         }
 
+        /*
+         * A section stored compressed is merged as what it holds.  The
+         * relocations against it address the uncompressed bytes, and two
+         * compressed streams laid end to end are not a stream; appended as
+         * they came, every relocation past the first input's compressed
+         * length was out of the section, and that was every link against a
+         * library whose assembler compresses .debug_* by default.
+         */
+        if ((src->flags & SHF_COMPRESSED) != 0 && src->type != SHT_NOBITS) {
+            err = inflate_input_section(out, src, &inflated, &src_size,
+                                        &src_align);
+            if (err != ELF_OK) {
+                free(sec_discard);
+                return err;
+            }
+            src_data = inflated;
+            src_flags = src->flags & ~(uint64_t)SHF_COMPRESSED;
+        } else {
+            src_data = src->data;
+            src_size = src->data_size;
+            src_align = src->addralign;
+            src_flags = src->flags;
+        }
+
         if (dst == NULL) {
-            dst = elf_add_section(out, src->name, src->type, src->flags);
+            dst = elf_add_section(out, src->name, src->type, src_flags);
             if (dst == NULL) {
+                free(inflated);
                 free(sec_discard);
                 return out->last_err == ELF_OK ? ELF_ERR_OOM : out->last_err;
             }
-            dst->addralign = src->addralign;
+            dst->addralign = src_align;
         } else if (strcmp(src->name, ".ARM.attributes") == 0 && src->data_size != 0 &&
                    dst->data_size != 0 &&
                    (src->data_size != dst->data_size ||
@@ -621,10 +696,10 @@ static elf_err_t merge_sections(elf_link_plan_t *plan, elfobj_t *out,
                 free(sec_discard);
                 return ELF_ERR_FORMAT;
             }
-            if (src->addralign > dst->addralign) {
-                dst->addralign = src->addralign;
+            if (src_align > dst->addralign) {
+                dst->addralign = src_align;
             }
-            dst->flags |= src->flags;
+            dst->flags |= src_flags;
             if (src->entsize != 0) {
                 if (dst->entsize == 0) {
                     dst->entsize = src->entsize;
@@ -645,13 +720,15 @@ static elf_err_t merge_sections(elf_link_plan_t *plan, elfobj_t *out,
             }
             sec_bases[j] = 0;
         } else {
-            err = align_merged_section(dst, src->addralign, &sec_bases[j]);
+            err = align_merged_section(dst, src_align, &sec_bases[j]);
             if (err != ELF_OK) {
+                free(inflated);
                 free(sec_discard);
                 return err;
             }
-            err = append_section_data(dst, src->data, src->data_size, NULL);
+            err = append_section_data(dst, src_data, src_size, NULL);
             if (err != ELF_OK) {
+                free(inflated);
                 free(sec_discard);
                 return err;
             }
@@ -659,6 +736,7 @@ static elf_err_t merge_sections(elf_link_plan_t *plan, elfobj_t *out,
                 dst->size += src->size;
             }
         }
+        free(inflated);
         sec_included[j] = 1;
     }
 

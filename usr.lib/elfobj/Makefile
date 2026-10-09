@@ -16,7 +16,7 @@ SHLIB   = libelfobj.so.0
 SRCS = src/elf_read.c src/elf_write.c src/elf_sections.c src/elf_symbols.c \
        src/elf_reloc.c src/elf_link.c src/elf_strtab.c src/elf_hash.c \
        src/elf_gnu_ext.c src/elf_dwarf.c src/elf_dwarf_line.c src/elf_validate.c src/elf_layout.c \
-       src/elf_util.c
+       src/elf_util.c src/elf_inflate.c
 OBJS     = $(SRCS:%.c=$(O)%.o)
 PIC_OBJS = $(SRCS:%.c=$(O)%.pic.o)
 BUILD_MODE := $(if $(NATIVE_BUILD),native,target)
