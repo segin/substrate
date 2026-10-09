@@ -143,6 +143,19 @@ is "data is RW"  "$(readelf -lW "$work/phdrs.out" | awk '$1 == "LOAD" && $3 == "
 is "bss follows data into its header" \
    "$(readelf -lW "$work/phdrs.out" | sed -n '/Section to Segment/,$p' | grep -c '\.data \.bss')" 1
 
+# A 32-bit address space wraps: a call across more than half of it is in
+# range, being the same call the other way round.
+printf 'int helper(int);\nvoid far(void) { helper(1); }\n' > "$work/far.c"
+${CC:-cc} -m32 -c -ffreestanding -fno-pic -fno-pie -fno-asynchronous-unwind-tables -o "$work/far.o" "$work/far.c"
+printf '%s SECTIONS { . = 0x08048000 + SIZEOF_HEADERS; .text : { t.o(.text*) } . = 0xc0100000; .hi : { far.o(.text*) } }\n' \
+    "$std" > "$work/wrap.lds"
+if (cd "$work" && ./ld -m elf_i386 -T wrap.lds -o wrap.out t.o far.o) > "$work/err" 2>&1; then
+    is "a call from the top of the address space to the bottom" \
+       "$(objdump -d "$work/wrap.out" | sed -n '/<far>:/,/ret/p' | grep -c 'call .*<helper>')" 1
+else
+    echo "FAIL a call across the address space: $(head -1 "$work/err")"; fail=1
+fi
+
 # INCLUDE: where a statement may stand, its statements standing there.
 mkdir -p "$work/inc"
 echo '*(.text .text.*)' > "$work/inc/body.lds"

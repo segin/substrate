@@ -165,23 +165,21 @@ static int i386_apply(const elfobj_reloc_ctx_t *ctx,
             v = (elf_swide_t)sym_value + (elf_swide_t)addend;
             *out_value = swide_to_width(v, 32);
             return 0;
+        /*
+         * The 32-bit fields of a 32-bit machine cannot overflow: the
+         * address space is 2^32 and arithmetic in it wraps.  A call from
+         * 0x08048000 to a kernel at 0xc0100000 is a displacement of
+         * 0xb80b8000, which is -0x47f48000, which is where it goes.
+         * Checked in wider arithmetic it was "out of range".
+         */
         case R_386_PC32:
         case R_386_PLT32:
         case R_386_GOTPC:
             v = (elf_swide_t)sym_value + (elf_swide_t)addend - (elf_swide_t)place;
-            if (!swide_in_signed_bits(v, 32)) {
-                return -2;
-            }
             *out_value = swide_to_width(v, 32);
             return 0;
         case R_386_GOT32:
         case R_386_GOTOFF:
-            v = (elf_swide_t)sym_value + (elf_swide_t)addend;
-            if (!swide_in_signed_bits(v, 32)) {
-                return -2;
-            }
-            *out_value = swide_to_width(v, 32);
-            return 0;
         case R_386_TLS_TPOFF:
         case R_386_TLS_IE:
         case R_386_TLS_GOTIE:
@@ -190,14 +188,13 @@ static int i386_apply(const elfobj_reloc_ctx_t *ctx,
         case R_386_TLS_LDM:
         case R_386_TLS_LDO_32:
             v = (elf_swide_t)sym_value + (elf_swide_t)addend;
-            if (!swide_in_signed_bits(v, 32)) {
-                return -2;
-            }
             *out_value = swide_to_width(v, 32);
             return 0;
+        /* A narrow absolute field holds a value of either sign: 0xff and
+         * -1 are both what an 8-bit field can say. */
         case R_386_16:
             v = (elf_swide_t)sym_value + (elf_swide_t)addend;
-            if (!swide_in_unsigned_bits(v, 16)) {
+            if (!swide_in_unsigned_bits(v, 16) && !swide_in_signed_bits(v, 16)) {
                 return -2;
             }
             *out_value = swide_to_width(v, 16);
@@ -211,7 +208,7 @@ static int i386_apply(const elfobj_reloc_ctx_t *ctx,
             return 0;
         case R_386_8:
             v = (elf_swide_t)sym_value + (elf_swide_t)addend;
-            if (!swide_in_unsigned_bits(v, 8)) {
+            if (!swide_in_unsigned_bits(v, 8) && !swide_in_signed_bits(v, 8)) {
                 return -2;
             }
             *out_value = swide_to_width(v, 8);
@@ -328,11 +325,11 @@ static int x64_apply(const elfobj_reloc_ctx_t *ctx,
         case R_X86_64_GOTOFF64:
         case R_X86_64_SIZE64:
         case R_X86_64_IRELATIVE:
-            v = (elf_swide_t)sym_value + (elf_swide_t)addend;
-            if (!swide_in_unsigned_bits(v, 64)) {
-                return -2;
-            }
-            *out_value = swide_to_width(v, 64);
+            /* A 64-bit field holds any 64-bit sum.  In a signed type no
+             * wider than that, which is all a 32-bit host has, an address
+             * in the upper half -- a kernel's -- was a negative number
+             * and refused. */
+            *out_value = sym_value + (uint64_t)addend;
             return 0;
         case R_X86_64_PC32:
         case R_X86_64_PLT32:
@@ -380,7 +377,7 @@ static int x64_apply(const elfobj_reloc_ctx_t *ctx,
             return 0;
         case R_X86_64_16:
             v = (elf_swide_t)sym_value + (elf_swide_t)addend;
-            if (!swide_in_unsigned_bits(v, 16)) {
+            if (!swide_in_unsigned_bits(v, 16) && !swide_in_signed_bits(v, 16)) {
                 return -2;
             }
             *out_value = swide_to_width(v, 16);
@@ -394,7 +391,7 @@ static int x64_apply(const elfobj_reloc_ctx_t *ctx,
             return 0;
         case R_X86_64_8:
             v = (elf_swide_t)sym_value + (elf_swide_t)addend;
-            if (!swide_in_unsigned_bits(v, 8)) {
+            if (!swide_in_unsigned_bits(v, 8) && !swide_in_signed_bits(v, 8)) {
                 return -2;
             }
             *out_value = swide_to_width(v, 8);
