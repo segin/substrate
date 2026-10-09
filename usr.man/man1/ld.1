@@ -236,9 +236,41 @@ with two the first rounded up to a multiple of the second
 .Pc ,
 .Ic ADDR ,
 .Ic LOADADDR ,
-.Ic SIZEOF
+.Ic SIZEOF ,
+.Ic ALIGNOF ,
+.Ic DEFINED ,
+.Ic MAX ,
+.Ic MIN ,
+.Ic ABSOLUTE ,
+.Ic ORIGIN
 and
-.Ic DEFINED .
+.Ic LENGTH
+of a memory region,
+.Ic CONSTANT
+of
+.Dv MAXPAGESIZE
+or
+.Dv COMMONPAGESIZE
+.Pq both 4096 ,
+.Ic SIZEOF_HEADERS ,
+.Ic DATA_SEGMENT_ALIGN ,
+.Ic DATA_SEGMENT_END ,
+.Ic DATA_SEGMENT_RELRO_END
+and
+.Ic SEGMENT_START
+.Pq always its default .
+Any other function is an error that names it.
+A number may end in
+.Ql K
+or
+.Ql M .
+Of
+.Dq c \&? a : b
+only the arm that is taken is evaluated, so that
+.Dq DEFINED(x) \&? x : 0
+is not an error when
+.Ar x
+is undefined.
 A name in an expression is a symbol the script defines or one of the
 program's, whose value is its address; a name that is neither is an
 error.

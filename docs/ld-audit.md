@@ -141,9 +141,9 @@ short writes and close errors checked.
 - [x] **LD-SCR-006** The linker shall evaluate a script once against the final layout.
   Met: read once in `main`; its statements take effect in `script_assign_addresses`, after the layout, which they are part of.
   Evidence: applied twice (`ld.c:10661-10688`), parsed a third time (`11620`).  Basis: traced; layout consequence suspected.  Task #65.
-- [ ] **LD-SCR-007** The linker shall accept `PROVIDE_HIDDEN`, `HIDDEN`, compound assignment, `ASSERT` without a semicolon, `K`/`M` suffixes, and the functions `MAX`, `MIN`, `ABSOLUTE`, `CONSTANT`, `ORIGIN`, `LENGTH` and `?:`, or reject each with a diagnostic naming it.
+- [x] **LD-SCR-007** The linker shall accept `PROVIDE_HIDDEN`, `HIDDEN`, compound assignment, `ASSERT` without a semicolon, `K`/`M` suffixes, and the functions `MAX`, `MIN`, `ABSOLUTE`, `CONSTANT`, `ORIGIN`, `LENGTH` and `?:`, or reject each with a diagnostic naming it.
   Evidence: `ld.c:2684-2687, 2766-2770, 2160-2164, 1844-1850, 1375-1379`.  Basis: traced.  Tasks #66, #67, #69.
-  Partly met: `PROVIDE_HIDDEN`, `HIDDEN`, compound assignment and `ASSERT` without a semicolon are accepted and acted on.  The suffixes, the functions and `?:` are still open (#69).
+  Met: all of them accepted and acted on, `?:` evaluating only the arm taken; also `ALIGNOF`, `SIZEOF_HEADERS`, the `DATA_SEGMENT_*` family and `SEGMENT_START`.  A function the linker does not have is an error naming it.  In `tests/usr.bin/ld/test_script.sh`.
 - [x] **LD-SCR-008** When a script includes another, the linker shall continue in the including context, search the `-L` directories, and bound the total work.
   Evidence: `ld.c:2529-2555, 1951-1968`.  Basis: traced.  Task #68.
 - [x] **LD-SCR-009** If the script cannot be tokenised, then the linker shall report the file and line.

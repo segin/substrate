@@ -931,6 +931,8 @@ typedef struct {
     int have_dot;               /* inside SECTIONS: "." has a value */
     uint64_t dot;
     char err_buf[160];          /* for an err_msg that names something */
+    unsigned skip;              /* in the arm of a ?: that is not taken:
+                                 * read, and nothing in it is an error */
 } lds_eval_ctx_t;
 
 typedef struct {
@@ -1267,6 +1269,7 @@ static int lds_eval_builtin_call(lds_eval_ctx_t *ec, const lds_tok_t *name_tok, 
     size_t i;
     int depth = 0;
     int takes_name;
+    const char *word;           /* the argument, of a function that takes a name */
     uint64_t vals[8];
 
     if (ec == NULL || name_tok == NULL || name_tok->text == NULL || items == NULL || out == NULL || begin >= end) {
@@ -1314,7 +1317,11 @@ static int lds_eval_builtin_call(lds_eval_ctx_t *ec, const lds_tok_t *name_tok, 
     /* The argument of these is a name, of a section or a symbol, and not
      * something that has a value. */
     takes_name = strcmp(name, "ADDR") == 0 || strcmp(name, "LOADADDR") == 0 || strcmp(name, "SIZEOF") == 0 ||
-                 strcmp(name, "DEFINED") == 0 || strcmp(name, "defined") == 0;
+                 strcmp(name, "ALIGNOF") == 0 || strcmp(name, "CONSTANT") == 0 || strcmp(name, "ORIGIN") == 0 ||
+                 strcmp(name, "LENGTH") == 0 || strcmp(name, "DEFINED") == 0 || strcmp(name, "defined") == 0;
+    word = takes_name && arg_count == 1 && arg_starts[0] + 1 == arg_ends[0] &&
+           (items[arg_starts[0]].kind == LDS_TOK_IDENT || items[arg_starts[0]].kind == LDS_TOK_STRING)
+               ? items[arg_starts[0]].text : NULL;
     for (i = 0; !takes_name && i < arg_count; ++i) {
         if (lds_eval_expr_slice(ec, items, arg_starts[i], arg_ends[i], &vals[i]) != 0) {
             return -1;
@@ -1377,9 +1384,49 @@ static int lds_eval_builtin_call(lds_eval_ctx_t *ec, const lds_tok_t *name_tok, 
             sym = items[arg_starts[0]].text;
         }
         *out = sym != NULL && script_symbol_defined(ec, sym) ? 1 : 0;
+    } else if ((strcmp(name, "MAX") == 0 || strcmp(name, "MIN") == 0) && arg_count == 2) {
+        *out = (name[1] == 'A') == (vals[0] > vals[1]) ? vals[0] : vals[1];
+    } else if ((strcmp(name, "ABSOLUTE") == 0 || strcmp(name, "DATA_SEGMENT_END") == 0) && arg_count == 1) {
+        *out = vals[0];
+    } else if ((strcmp(name, "SEGMENT_START") == 0 || strcmp(name, "DATA_SEGMENT_RELRO_END") == 0) &&
+               arg_count == 2) {
+        /* No -T<segment> option overrides the default; no gap is left
+         * after the read-only part of the data. */
+        *out = vals[1];
+    } else if (strcmp(name, "DATA_SEGMENT_ALIGN") == 0 && arg_count == 2 && vals[0] != 0 && ec->have_dot) {
+        /* The next page, at the same place within it: the data begins
+         * where the text ended in the file, a page further on in memory. */
+        if (align_u64(ec->dot, vals[0], out) != 0) {
+            ec->err_tok = name_tok;
+            ec->err_msg = "invalid DATA_SEGMENT_ALIGN arguments";
+            return -1;
+        }
+        *out += ec->dot & (vals[0] - 1);
+    } else if (strcmp(name, "CONSTANT") == 0 && word != NULL &&
+               (strcmp(word, "MAXPAGESIZE") == 0 || strcmp(word, "COMMONPAGESIZE") == 0)) {
+        *out = 0x1000u;
+    } else if (strcmp(name, "ALIGNOF") == 0 && word != NULL) {
+        elf_section_t *sec = ec->obj != NULL ? elf_find_section((elfobj_t *)ec->obj, word) : NULL;
+
+        *out = sec != NULL ? elf_section_align(sec) : 0;
+    } else if ((strcmp(name, "ORIGIN") == 0 || strcmp(name, "LENGTH") == 0) && word != NULL) {
+        const lds_script_t *sc = ec->ctx != NULL ? ec->ctx->script : NULL;
+        size_t r;
+
+        for (r = 0; sc != NULL && r < sc->region_count && strcmp(sc->regions[r].name, word) != 0; ++r) {
+        }
+        if (sc == NULL || r == sc->region_count) {
+            snprintf(ec->err_buf, sizeof(ec->err_buf), "%s of '%s', which MEMORY does not define", name, word);
+            ec->err_tok = name_tok;
+            ec->err_msg = ec->err_buf;
+            return -1;
+        }
+        *out = name[0] == 'O' ? sc->regions[r].org : sc->regions[r].len;
     } else {
+        snprintf(ec->err_buf, sizeof(ec->err_buf), "%s(): not a function of this linker, or not with these arguments",
+                 name);
         ec->err_tok = name_tok;
-        ec->err_msg = "unsupported linker-script builtin";
+        ec->err_msg = ec->err_buf;
         return -1;
     }
     return (int)(close_idx + 1);
@@ -1397,6 +1444,7 @@ static int lds_eval_bxor(lds_eval_ctx_t *ec, const lds_tok_t *items, size_t *idx
 static int lds_eval_bor(lds_eval_ctx_t *ec, const lds_tok_t *items, size_t *idx, size_t end, uint64_t *out);
 static int lds_eval_land(lds_eval_ctx_t *ec, const lds_tok_t *items, size_t *idx, size_t end, uint64_t *out);
 static int lds_eval_lor(lds_eval_ctx_t *ec, const lds_tok_t *items, size_t *idx, size_t end, uint64_t *out);
+static int lds_eval_cond(lds_eval_ctx_t *ec, const lds_tok_t *items, size_t *idx, size_t end, uint64_t *out);
 
 static int lds_eval_primary(lds_eval_ctx_t *ec, const lds_tok_t *items, size_t *idx, size_t end, uint64_t *out) {
     const lds_tok_t *tok;
@@ -1417,6 +1465,16 @@ static int lds_eval_primary(lds_eval_ctx_t *ec, const lds_tok_t *items, size_t *
     if (tok->kind == LDS_TOK_NUMBER && tok->text != NULL) {
         errno = 0;
         parsed = strtoull(tok->text, &num_end, 0);
+        /* 64K, 2M: kilobytes and megabytes. */
+        if (errno == 0 && num_end != tok->text && num_end[0] != '\0' && num_end[1] == '\0') {
+            unsigned shift = (num_end[0] == 'K' || num_end[0] == 'k') ? 10
+                           : (num_end[0] == 'M' || num_end[0] == 'm') ? 20 : 0;
+
+            if (shift != 0 && parsed <= (~0ULL >> shift)) {
+                parsed <<= shift;
+                num_end++;
+            }
+        }
         if (errno != 0 || num_end == tok->text || *num_end != '\0') {
             ec->err_tok = tok;
             ec->err_msg = "invalid integer literal";
@@ -1428,7 +1486,7 @@ static int lds_eval_primary(lds_eval_ctx_t *ec, const lds_tok_t *items, size_t *
     }
     if (tok->kind == LDS_TOK_LPAREN) {
         (*idx)++;
-        if (lds_eval_lor(ec, items, idx, end, &inner) != 0) {
+        if (lds_eval_cond(ec, items, idx, end, &inner) != 0) {
             return -1;
         }
         if (*idx >= end || items[*idx].kind != LDS_TOK_RPAREN) {
@@ -1457,6 +1515,21 @@ static int lds_eval_primary(lds_eval_ctx_t *ec, const lds_tok_t *items, size_t *
                 return -1;
             }
             *idx = (size_t)consumed;
+            return 0;
+        }
+        if (strcmp(tok->text, "SIZEOF_HEADERS") == 0 || strcmp(tok->text, "sizeof_headers") == 0) {
+            /* The ELF header and the program headers, which begin the file. */
+            int wide = ec->obj != NULL && elf_class(ec->obj) == ELFOBJ_CLASS_64;
+
+            *out = (wide ? 64u : 52u) +
+                   (uint64_t)(ec->obj != NULL ? elf_segment_count(ec->obj) : 0) * (wide ? 56u : 32u);
+            (*idx)++;
+            return 0;
+        }
+        if (script_lookup_symbol_value(ec, tok->text, out) != 0 && ec->skip != 0) {
+            /* In the arm of a conditional that is not taken. */
+            *out = 0;
+            (*idx)++;
             return 0;
         }
         if (script_lookup_symbol_value(ec, tok->text, out) != 0) {
@@ -1553,19 +1626,19 @@ static int lds_eval_mul(lds_eval_ctx_t *ec, const lds_tok_t *items, size_t *idx,
         if (lds_tok_is(op, LDS_TOK_OTHER, "*")) {
             *out = (*out) * rhs;
         } else if (lds_tok_is(op, LDS_TOK_OTHER, "/")) {
-            if (rhs == 0) {
+            if (rhs == 0 && ec->skip == 0) {
                 ec->err_tok = op;
                 ec->err_msg = "division by zero";
                 return -1;
             }
-            *out = (*out) / rhs;
+            *out = rhs != 0 ? (*out) / rhs : 0;
         } else {
-            if (rhs == 0) {
+            if (rhs == 0 && ec->skip == 0) {
                 ec->err_tok = op;
                 ec->err_msg = "modulo by zero";
                 return -1;
             }
-            *out = (*out) % rhs;
+            *out = rhs != 0 ? (*out) % rhs : 0;
         }
     }
     return 0;
@@ -1744,6 +1817,48 @@ static int lds_eval_lor(lds_eval_ctx_t *ec, const lds_tok_t *items, size_t *idx,
     return 0;
 }
 
+/*
+ * cond ? a : b.  The arm not taken is read, to find where it ends, with
+ * its errors off: "DEFINED(x) ? x : 0" is what the operator is for.
+ */
+static int lds_eval_cond(lds_eval_ctx_t *ec, const lds_tok_t *items, size_t *idx, size_t end, uint64_t *out) {
+    uint64_t a = 0, b = 0;
+    int rc;
+
+    if (lds_eval_lor(ec, items, idx, end, out) != 0) {
+        return -1;
+    }
+    if (*idx >= end || !lds_tok_is(&items[*idx], LDS_TOK_OTHER, "?")) {
+        return 0;
+    }
+    if (ec->depth >= LD_MAX_SCRIPT_EXPR_DEPTH) {
+        ec->err_tok = &items[*idx];
+        ec->err_msg = "expression nested too deeply";
+        return -1;
+    }
+    (*idx)++;
+    ec->depth++;
+    ec->skip += *out == 0;
+    rc = lds_eval_cond(ec, items, idx, end, &a);
+    ec->skip -= *out == 0;
+    if (rc == 0 && (*idx >= end || items[*idx].kind != LDS_TOK_COLON)) {
+        ec->err_tok = *idx < end ? &items[*idx] : &items[end - 1];
+        ec->err_msg = "expected ':' of the conditional";
+        rc = -1;
+    }
+    if (rc == 0) {
+        (*idx)++;
+        ec->skip += *out != 0;
+        rc = lds_eval_cond(ec, items, idx, end, &b);
+        ec->skip -= *out != 0;
+    }
+    ec->depth--;
+    if (rc == 0) {
+        *out = *out != 0 ? a : b;
+    }
+    return rc;
+}
+
 static int lds_eval_expr_slice(lds_eval_ctx_t *ec, const lds_tok_t *items, size_t begin, size_t end, uint64_t *out) {
     size_t idx = begin;
 
@@ -1755,7 +1870,7 @@ static int lds_eval_expr_slice(lds_eval_ctx_t *ec, const lds_tok_t *items, size_
         ec->err_msg = "empty expression";
         return -1;
     }
-    if (lds_eval_lor(ec, items, &idx, end, out) != 0) {
+    if (lds_eval_cond(ec, items, &idx, end, out) != 0) {
         return -1;
     }
     if (idx != end) {

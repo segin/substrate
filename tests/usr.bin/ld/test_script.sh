@@ -61,6 +61,16 @@ ok  unprovided "$std PROVIDE(lo = 0x10); PROVIDE(hi = 0x30); span = hi - lo; ASS
 ok  program    "$std ASSERT(_start != 0 && helper != _start && counter != 0, \"addresses\")"
 ok  sections   "$std ASSERT(SIZEOF(.data) == 4 && ADDR(.data) > 0 && SIZEOF(.nothing) == 0, \"sections\")"
 ok  defined    "$std mine = 1; ASSERT(DEFINED(helper) && DEFINED(mine) && !DEFINED(nowhere), \"defined\")"
+ok  suffixes   "$std ASSERT(64K == 0x10000 && 2M == 0x200000 && 1k == 1024, \"suffixes\")"
+ok  cond       "$std x = 1 ? 10 : 20; y = 0 ? 10 : 1 ? 30 : 40; ASSERT(x == 10 && y == 30, \"conditional\")"
+ok  cond_lazy  "$std x = DEFINED(nowhere) ? nowhere : 7; y = 1 ? 5 : 1 / 0; ASSERT(x == 7 && y == 5, \"lazy\")"
+bad cond_colon "$std x = 1 ? 2;" "expected ':'"
+ok  functions  "$std ASSERT(MAX(3, 9) == 9 && MIN(3, 9) == 3 && ABSOLUTE(5) == 5 && CONSTANT(MAXPAGESIZE) == 4096 &&
+                            SIZEOF_HEADERS > 52 && ALIGNOF(.data) == 4, \"functions\")"
+ok  regions    "$std MEMORY { rom : ORIGIN = 0x800000, LENGTH = 256K ram : org = ORIGIN(rom) + LENGTH(rom), len = 64K }
+                ASSERT(ORIGIN(ram) == 0x840000 && LENGTH(ram) == 0x10000, \"regions\")"
+bad no_region  "$std x = ORIGIN(nowhere);" "which MEMORY does not define"
+bad no_func    "$std x = FROBNICATE(1);" "FROBNICATE(): not a function"
 bad dot_top    "$std x = .;" "no value outside SECTIONS"
 bad align_top  "$std x = ALIGN(16);" "no value outside SECTIONS"
 ok  align_two  "$std x = ALIGN(17, 16); ASSERT(x == 32, \"align\")"
