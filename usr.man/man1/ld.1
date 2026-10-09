@@ -151,6 +151,26 @@ Control whether DSOs without currently unresolved symbol matches are ignored.
 .It Fl T Ar script
 Use a linker script; see
 .Sx LINKER SCRIPTS .
+.It Fl Ttext-segment Ar address
+Where the image begins: the address of the first loaded segment, a
+multiple of the page size.
+The default is 0x08048000 for i386 and 0x400000 for x86-64, and 0 for a
+shared object.
+.Fl Ttext ,
+.Fl Tdata
+and
+.Fl Tbss
+are refused; a linker script says where a section goes.
+.It Fl S , Fl -strip-debug , Fl s , Fl -strip-all
+Leave the debugging information out of the output.
+.Fl s
+does no more than
+.Fl S :
+the symbol table is kept.
+.It Fl q , Fl -emit-relocs
+Keep the relocation sections in an executable or shared object.
+.It Fl -build-id
+Accepted, in either form; no build ID is made.
 .It Fl -gc-sections
 Enable section garbage collection.
 .It Fl -print-gc-sections

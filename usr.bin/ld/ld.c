@@ -158,6 +158,10 @@ typedef struct {
     const char *entry_symbol;
     const char *interp_path;
     const char *soname;         /* -soname, -h: the output's DT_SONAME */
+    uint64_t image_base;        /* -Ttext-segment, when have_image_base */
+    int have_image_base;
+    int strip_debug;            /* -S, -s: no debugging information */
+    int emit_relocs;            /* -q: the output keeps its relocations */
     strvec_t rpaths;            /* -rpath: the output's DT_RUNPATH */
     const char *map_path;
     const char *reproduce_path;
@@ -12470,7 +12474,7 @@ static int apply_all_relocations(elfobj_t *obj, const ld_ctx_t *ctx, int allow_u
         /* Applied, and what the dynamic linker has to do has its own
          * records by now; an executable or shared object does not carry
          * the linker's. */
-        if (elf_type(obj) != ET_REL &&
+        if (elf_type(obj) != ET_REL && !ctx->emit_relocs &&
             elf_section_clear_relocations(sec) != ELF_OK) {
             return -1;
         }
@@ -12666,6 +12670,25 @@ static int run_internal_link(ld_ctx_t *ctx) {
         return -1;
     }
 #endif
+    if (ctx->strip_debug) {
+        size_t si;
+
+        for (si = elf_section_count(out); si > 0; --si) {
+            elf_section_t *sec = elf_section_get(out, si - 1);
+            const char *name = sec != NULL ? elf_section_name(sec) : NULL;
+
+            if (name != NULL && (elf_section_flags(sec) & SHF_ALLOC) == 0 &&
+                (strncmp(name, ".debug", 6) == 0 || strncmp(name, ".zdebug", 7) == 0 ||
+                 strncmp(name, ".stab", 5) == 0 || strncmp(name, ".gnu.debuglto_", 14) == 0) &&
+                elf_remove_section(out, sec) != ELF_OK) {
+                fprintf(stderr, "ld: failed to leave out section %s\n", name);
+                symref_map_free(&undef_refs);
+                objvec_free(&inputs);
+                elf_close(out);
+                return -1;
+            }
+        }
+    }
     if (script_declare_symbols(ctx, out) != 0) {
         symref_map_free(&undef_refs);
         objvec_free(&inputs);
@@ -12800,6 +12823,9 @@ static int run_internal_link(ld_ctx_t *ctx) {
         base_vaddr = (out_type == ET_DYN) ? 0x0ULL : 0x400000ULL;
     } else {
         base_vaddr = (out_type == ET_DYN) ? 0x0ULL : 0x08048000ULL;
+    }
+    if (ctx->have_image_base) {
+        base_vaddr = ctx->image_base;
     }
 
     if (assign_section_addresses(out, base_vaddr) != 0) {
@@ -13579,6 +13605,46 @@ int main(int argc, char **argv) {
             continue;
         }
 
+        {
+            /* -Ttext and its kin are words of their own, not -T and a
+             * script called "text". */
+            static const char *const unsupported[] = { "Ttext", "Tdata", "Tbss", "Trodata-segment",
+                                                       "Tldata-segment", NULL };
+            const char *lval = NULL;
+            size_t u;
+            int got;
+
+            if ((got = long_opt_value(argc, argv, &i, "Ttext-segment", &lval)) > 0) {
+                if (parse_u64_auto(lval, &ctx.image_base) != 0 || (ctx.image_base & 0xfffu) != 0) {
+                    fprintf(stderr, "ld: -Ttext-segment needs an address that is a multiple of the page size, not '%s'\n",
+                            lval);
+                    got = -2;
+                } else {
+                    ctx.have_image_base = 1;
+                }
+            }
+            for (u = 0; got == 0 && unsupported[u] != NULL; ++u) {
+                if (long_opt_value(argc, argv, &i, unsupported[u], &lval) != 0) {
+                    fprintf(stderr,
+                            "ld: -%s is not supported: say where a section goes in a linker script (-T), "
+                            "as in SECTIONS { .text ADDRESS : { *(.text) } }, or where the image begins with "
+                            "-Ttext-segment\n", unsupported[u]);
+                    got = -2;
+                }
+            }
+            if (got < 0) {
+                if (got == -1) {
+                    fprintf(stderr, "ld: %s needs a value\n", a);
+                }
+                inputvec_free(&ctx.inputs);
+                strvec_free(&ctx.lib_paths);
+                strvec_free(&ctx.trace_symbols);
+                return 2;
+            }
+            if (got > 0) {
+                continue;
+            }
+        }
         if ((p = parse_arg_value(a, "-T", &val)) != 0 || (p = parse_arg_value(a, "--script", &val)) != 0) {
             if (p == 1) {
                 if (i + 1 >= argc) {
@@ -13638,7 +13704,22 @@ int main(int argc, char **argv) {
             strvec_free(&ctx.trace_symbols);
             return 2;
         }
-        if (strcmp(a, "--strip-all") == 0 || strcmp(a, "--build-id") == 0 || strcmp(a, "-s") == 0) {
+        if (strcmp(a, "--strip-all") == 0 || strcmp(a, "-s") == 0 || strcmp(a, "--strip-debug") == 0 ||
+            strcmp(a, "-S") == 0) {
+            /* The debugging information is left out.  -s would leave the
+             * symbol table out as well, which is not done. */
+            ctx.strip_debug = 1;
+            continue;
+        }
+        if (strcmp(a, "--emit-relocs") == 0 || strcmp(a, "-q") == 0) {
+            ctx.emit_relocs = 1;
+            continue;
+        }
+        if (strcmp(a, "--build-id") == 0 || strncmp(a, "--build-id=", 11) == 0) {
+            continue;           /* no build ID is made */
+        }
+        if (a[0] == '-' && a[1] == 'o' && a[2] != '\0') {
+            ctx.out_path = a + 2;       /* -oFILE */
             continue;
         }
 

@@ -107,7 +107,7 @@ short writes and close errors checked.
   Evidence: `ld.c:631-660` accepts six keywords; `11554-11562` exits 2.  Basis: verified.  Task #64.
 - [ ] **LD-OPT-002** The linker shall treat `-pie` as an executable link (entry required, undefined symbols diagnosed, branded, mode 0755) and shall not let `-static` change the output type.
   Evidence: `ld.c:11096-11101, 11103-11104`.  Basis: verified.  Task #98.
-- [ ] **LD-OPT-003** The linker shall recognise `-Ttext`, `-Tdata` and `-Tbss` as distinct from `-T`, joined `-oFILE`, and the options its specification lists (`-soname`, `-rpath`, `--emit-relocs`, `--strip-debug`, `-s`, `--build-id`), without depending on the order of prefix tests.
+- [x] **LD-OPT-003** The linker shall recognise `-Ttext`, `-Tdata` and `-Tbss` as distinct from `-T`, joined `-oFILE`, and the options its specification lists (`-soname`, `-rpath`, `--emit-relocs`, `--strip-debug`, `-s`, `--build-id`), without depending on the order of prefix tests.
   Evidence: `ld.c:11514, 11032, 11565, 11569`; `10916`.  Basis: traced.  Task #103.
 
 ## 6. Inputs: archives and libraries

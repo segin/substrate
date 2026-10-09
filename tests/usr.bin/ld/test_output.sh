@@ -58,5 +58,19 @@ is "and the entry is the start of .text" \
 if ./ld -m elf_i386 -e nowhere -o bad n.o 2> err; then echo "FAIL an entry that is not defined: linked"; fail=1
 else is "an entry that is not defined is an error" "$(grep -c "entry symbol 'nowhere' not found" err)" 1; fi
 
+# Options that are words of their own, or joined to their value.
+./ld -m elf_i386 -ojoined s.o
+is "-oFILE"                           "$(cmp -s joined p022 && echo same)" same
+./ld -m elf_i386 -Ttext-segment=0x400000 -o based s.o
+is "-Ttext-segment is where the image begins" "$(readelf -lW based | awk '$1 == "LOAD" { print $3; exit }')" 0x00400000
+if ./ld -m elf_i386 -Ttext 0x100000 -o no s.o 2> err; then echo "FAIL -Ttext: linked"; fail=1
+else is "-Ttext is not -T and a script called text" "$(grep -c -- '-Ttext is not supported' err)" 1; fi
+$cc32 -g -o g.o s.c
+./ld -m elf_i386 -o withdebug g.o; ./ld -m elf_i386 -S -o nodebug g.o; ./ld -m elf_i386 -q -o withrel g.o
+is "debugging information by default" "$(readelf -SW withdebug | grep -c '\.debug_info')" 1
+is "-S leaves it out"                 "$(readelf -SW nodebug | grep -c '\.debug')" 0
+is "no relocation sections in a program" "$(readelf -SW withdebug | grep -c ' \.rel\.')" 0
+is "-q keeps them"                    "$(readelf -SW withrel | grep -c ' \.rel\.text')" 1
+
 [ "$fail" -eq 0 ] && echo "PASS" || echo "FAILED"
 exit "$fail"
