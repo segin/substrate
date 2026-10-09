@@ -163,5 +163,38 @@ if ./ld -m elf_i386 -shared -o x.so lib.o -soname > err 2>&1; then echo "FAIL -s
 elif grep -q "needs a value" err; then echo "ok   -soname with nothing after it"
 else echo "FAIL -soname with nothing after it: $(head -1 err)"; fail=1; fi
 
+# Symbol versions.  The dynamic symbol table has the name and .gnu.version
+# the number; the first version defined is the base, named for the object;
+# a plain reference binds to the default version, to an unversioned
+# definition in an earlier shared object before a versioned one in a later,
+# and not at all to a version that is not the default.
+cat > ver.c <<'EOF'
+int old_impl(int x) { return x + 1; }
+int new_impl(int x) { return x + 2; }
+__asm__(".symver old_impl, thing@VERS_1");
+__asm__(".symver new_impl, thing@@VERS_2");
+int only_old(int x) { return x; }
+__asm__(".symver only_old, gone@VERS_1");
+EOF
+printf 'int thing(int x) { return x; }\n' > plainthing.c
+printf 'int thing(int);\nvoid _start(void) { thing(1); for (;;) { } }\n' > usething.c
+printf 'int gone(int);\nvoid _start(void) { gone(1); for (;;) { } }\n' > usegone.c
+$cc32 -fPIC -o ver.o ver.c && $cc32 -fPIC -o plainthing.o plainthing.c
+$cc32 -fno-pic -fno-pie -o usething.o usething.c && $cc32 -fno-pic -fno-pie -o usegone.o usegone.c
+./ld -m elf_i386 -shared -soname libver.so.1 -o libver.so ver.o
+./ld -m elf_i386 -shared -soname libplain.so.1 -o libplain.so plainthing.o
+is "no '@' in a dynamic symbol's name" "$(readelf -p .dynstr libver.so | grep -c '[a-z]@')" 0
+is "the base version comes first, named for the object" \
+   "$(readelf -V libver.so | sed -n 's/.*Flags: BASE  *Index: 1 .*Name: //p')" libver.so.1
+is "then the versions defined"        "$(readelf -V libver.so | grep -c 'Index: [23] .*Name: VERS_[12]')" 2
+is "one default and two not"          "$(readelf -V libver.so | grep -o '[0-9]h\{0,1\} *(VERS_[12])' | tr -d ' ' | sort | tr '\n' ' ')" "2h(VERS_1) 2h(VERS_1) 3(VERS_2) "
+./ld -m elf_i386 --dynamic-linker=/sbin/ld.so -o usever usething.o libver.so
+is "a plain reference takes the default version" "$(readelf -V usever | sed -n 's/.*Name: \(VERS_[0-9]\) .*/\1/p')" VERS_2
+./ld -m elf_i386 --dynamic-linker=/sbin/ld.so -o useplain usething.o libplain.so libver.so
+is "or no version, from a shared object before" "$(readelf -V useplain | grep -c 'Name: VERS')" 0
+if ./ld -m elf_i386 --dynamic-linker=/sbin/ld.so -o usegone usegone.o libver.so 2> err; then
+    echo "FAIL a version that is not the default: linked"; fail=1
+else is "a version that is not the default is not a definition" "$(grep -c 'undefined reference to .gone' err)" 1; fi
+
 [ "$fail" -eq 0 ] && echo "PASS" || echo "FAILED"
 exit "$fail"

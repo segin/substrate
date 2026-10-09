@@ -307,6 +307,31 @@ nothing is.
 Where sections of strings or constants
 .Pq Dv SHF_MERGE
 are gathered with others the result is not marked as such.
+.Sh SYMBOL VERSIONS
+A symbol an input object names
+.Li sym@VER
+or
+.Li sym@@VER
+.Pq the assembler's Li .symver
+is exported from a shared object as
+.Li sym
+of version
+.Li VER ,
+the second form making it the default version.
+The versions are listed in
+.Pa .gnu.version_d
+after a base version named for the object, and each dynamic symbol's
+version is in
+.Pa .gnu.version .
+A reference to plain
+.Li sym
+binds to the first shared object that defines it, to its default version
+if it has versions, and records that version as needed
+.Pq Pa .gnu.version_r ;
+a version that is not the default satisfies only a reference that names
+it.
+There are no version scripts
+.Pq Fl -version-script .
 .Sh LINKER SCRIPTS
 The script named by
 .Fl T

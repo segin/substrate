@@ -414,7 +414,9 @@ static int dso_symbol_match_unresolved(const symstate_t *state, const char *sym_
     int hidden;
 
     split_symbol_version(sym_name, &base, &base_len, &ver_name, &is_default_name);
-    hidden = (sym_ver & VER_NDX_HIDDEN) != 0;
+    /* Not the default version: by the bit beside a dynamic symbol, or by
+     * the single '@' in the name of one read from a full symbol table. */
+    hidden = (sym_ver & VER_NDX_HIDDEN) != 0 || (ver_name != NULL && !is_default_name);
     sym_ver = (uint16_t)(sym_ver & (uint16_t)~VER_NDX_HIDDEN);
     if (ver_name == NULL && sym_ver > VER_NDX_GLOBAL) {
         ver_name = verdef_lookup(defs, sym_ver);
@@ -448,6 +450,12 @@ static int dso_symbol_match_unresolved(const symstate_t *state, const char *sym_
             if (matched) {
                 return 1;
             }
+        } else {
+            /* A version that is not the default is for those who ask for
+             * it by name, "sym@VER": a plain reference to sym is not
+             * one, and where there is no default version sym is not
+             * defined for it at all. */
+            return 0;
         }
     }
     return symset_contains(&state->unresolved, sym_name);
@@ -461,17 +469,21 @@ static int symstate_note_dso_symbol(symstate_t *state, const char *sym_name, uin
     int is_default_name;
     int hidden;
 
-    if (symstate_define_name(state, sym_name) != 0) {
-        return -1;
-    }
     split_symbol_version(sym_name, &base, &base_len, &ver_name, &is_default_name);
-    if (base == NULL || base_len == 0) {
-        return 0;
-    }
-    hidden = (sym_ver & VER_NDX_HIDDEN) != 0;
+    /* Not the default version: by the bit beside a dynamic symbol, or by
+     * the single '@' in the name of one read from a full symbol table. */
+    hidden = (sym_ver & VER_NDX_HIDDEN) != 0 || (ver_name != NULL && !is_default_name);
     sym_ver = (uint16_t)(sym_ver & (uint16_t)~VER_NDX_HIDDEN);
     if (ver_name == NULL && sym_ver > VER_NDX_GLOBAL) {
         ver_name = verdef_lookup(defs, sym_ver);
+    }
+    /* The name as it stands is defined -- unless this is a version that
+     * is not the default, which defines "sym@VER" below and not "sym". */
+    if (!(hidden && ver_name != NULL && !is_default_name) && symstate_define_name(state, sym_name) != 0) {
+        return -1;
+    }
+    if (base == NULL || base_len == 0) {
+        return 0;
     }
     if (ver_name != NULL) {
         char *at_name = make_versioned_symbol(base, base_len, "@", ver_name);
@@ -702,9 +714,12 @@ int unresolved_symbol_has_dso_provider(ld_ctx_t *ctx, const char *name, int *out
             bind = elf_symbol_bind(sym);
             vis = elf_symbol_visibility(sym);
             shndx = elf_symbol_shndx(sym);
+            /* One found by its bare name and marked hidden is a version
+             * that is not the default; whether there is a default one as
+             * well is for the search below, which knows about versions. */
             if ((bind == STB_GLOBAL || bind == STB_WEAK) &&
                 (vis == STV_DEFAULT || vis == STV_PROTECTED) &&
-                shndx != SHN_UNDEF) {
+                shndx != SHN_UNDEF && (elf_symbol_version(sym) & VER_NDX_HIDDEN) == 0) {
                 *out_has_provider = 1;
                 elf_close(obj);
                 return 0;
@@ -876,13 +891,20 @@ static const char *resolve_version_need_provider(const ld_ctx_t *ctx, const char
     return NULL;
 }
 
+/*
+ * What a reference to plain `base` binds to in this shared object: 1 and
+ * the name of the version, if it has a default version of it; 2 if it
+ * defines it with no version; 0 if it does not define it, which is also
+ * the answer where every definition it has is of a version that is not
+ * the default -- those are for references that name the version.
+ */
 static int dso_find_default_version_export(const ld_ctx_t *ctx, const char *path, const char *base, size_t base_len,
                                            char **out_ver_name) {
     elfobj_t *obj = NULL;
     verdef_table_t defs;
-    char *fallback = NULL;
     size_t i;
     int found = 0;
+    int plain = 0;
 
     if (out_ver_name == NULL) {
         return -1;
@@ -939,41 +961,30 @@ static int dso_find_default_version_export(const ld_ctx_t *ctx, const char *path
         hidden = (sym_ver & VER_NDX_HIDDEN) != 0;
         sym_ver = (uint16_t)(sym_ver & (uint16_t)~VER_NDX_HIDDEN);
         if (sym_ver <= VER_NDX_GLOBAL) {
+            /* "sym@VER" in the full symbol table is the versioned symbol
+             * over again, spelt out; the dynamic one has the number. */
+            if (!hidden && sym_base_len == strlen(name)) {
+                plain = 1;
+            }
             continue;
         }
         ver_name = verdef_lookup(&defs, sym_ver);
-        if (ver_name == NULL || ver_name[0] == '\0') {
+        if (hidden || ver_name == NULL || ver_name[0] == '\0') {
             continue;
         }
         dup = xstrdup(ver_name);
         if (dup == NULL) {
-            free(fallback);
             verdef_table_free(&defs);
             elf_close(obj);
             return -1;
         }
-        if (!hidden) {
-            free(fallback);
-            fallback = NULL;
-            *out_ver_name = dup;
-            found = 1;
-            break;
-        }
-        if (fallback == NULL) {
-            fallback = dup;
-        } else {
-            free(dup);
-        }
-    }
-    if (!found && fallback != NULL) {
-        *out_ver_name = fallback;
-        fallback = NULL;
+        *out_ver_name = dup;
         found = 1;
+        break;
     }
-    free(fallback);
     verdef_table_free(&defs);
     elf_close(obj);
-    return found;
+    return found ? 1 : plain ? 2 : 0;
 }
 
 static int resolve_default_version_need(const ld_ctx_t *ctx, const char *base, size_t base_len,
@@ -1002,6 +1013,12 @@ static int resolve_default_version_need(const ld_ctx_t *ctx, const char *base, s
         }
         if (rc == 0) {
             continue;
+        }
+        if (rc == 2) {
+            /* The first shared object to define it is the one bound to,
+             * and this one defines it with no version: a later one's
+             * version of the same name is not what was found. */
+            return 0;
         }
         *out_provider = dso_needed_name(ctx, i);
         *out_ver_name = ver_name;
@@ -1038,7 +1055,14 @@ static int dyn_ver_plan_assign_dynstr_offsets(dyn_ver_plan_t *plan, uint8_t **dy
     return 0;
 }
 
-static int build_gnu_verdef_data(const dyn_ver_plan_t *plan, elfobj_endian_t endian, uint8_t **out_buf, size_t *out_sz) {
+/*
+ * .gnu.version_d: the versions this object defines.  The first is the
+ * base, index 1, flagged VER_FLG_BASE and named for the object itself: it
+ * is what the unversioned symbols belong to, and a reader of the section
+ * takes the first entry for it whether it is or not.
+ */
+static int build_gnu_verdef_data(const dyn_ver_plan_t *plan, elfobj_endian_t endian, const char *base_name,
+                                 uint32_t base_name_off, uint8_t **out_buf, size_t *out_sz) {
     uint8_t *buf;
     size_t i;
     size_t off;
@@ -1046,15 +1070,24 @@ static int build_gnu_verdef_data(const dyn_ver_plan_t *plan, elfobj_endian_t end
     if (out_buf == NULL || out_sz == NULL || plan == NULL || plan->def_count == 0) {
         return -1;
     }
-    if (plan->def_count > SIZE_MAX / 28) {
+    if (plan->def_count > SIZE_MAX / 28 - 1) {
         return -1;
     }
-    *out_sz = plan->def_count * 28;
+    *out_sz = (plan->def_count + 1) * 28;
     buf = (uint8_t *)calloc(1, *out_sz);
     if (buf == NULL) {
         return -1;
     }
-    off = 0;
+    write_u16_endian(buf + 0, endian, 1);               /* vd_version */
+    write_u16_endian(buf + 2, endian, 1);               /* VER_FLG_BASE */
+    write_u16_endian(buf + 4, endian, 1);               /* vd_ndx */
+    write_u16_endian(buf + 6, endian, 1);               /* vd_cnt */
+    write_u32_endian(buf + 8, endian, elf_hash_sysv(base_name));
+    write_u32_endian(buf + 12, endian, 20);             /* vd_aux */
+    write_u32_endian(buf + 16, endian, 28);             /* vd_next */
+    write_u32_endian(buf + 20, endian, base_name_off);
+    write_u32_endian(buf + 24, endian, 0);
+    off = 28;
     for (i = 0; i < plan->def_count; ++i) {
         size_t next = i + 1 < plan->def_count ? 28 : 0;
         write_u16_endian(buf + off + 0, endian, 1);
@@ -1268,11 +1301,9 @@ int plan_symbol_version_sections(ld_ctx_t *ctx, elfobj_t *out, uint8_t **dynstr_
         }
         {
             const char *provider = resolve_version_need_provider(ctx, base, base_len, ver_name);
-            if (provider == NULL && ctx->dso_inputs.count != 0) {
-                const char *path = ctx->dso_inputs.items[0];
-                const char *leaf = path != NULL ? strrchr(path, '/') : NULL;
-                provider = leaf != NULL ? leaf + 1 : path;
-            }
+            /* No shared object of the link has that version of it: the
+             * reference goes out with no version, rather than with one
+             * said to come from whichever shared object was named first. */
             if (provider == NULL) {
                 continue;
             }
@@ -1305,7 +1336,13 @@ int plan_symbol_version_sections(ld_ctx_t *ctx, elfobj_t *out, uint8_t **dynstr_
     }
     if (plan.def_count != 0) {
         elf_section_t *sec = elf_find_section(out, ".gnu.version_d");
-        if (build_gnu_verdef_data(&plan, endian, &verdef_data, &verdef_sz) != 0) {
+        const char *slash = ctx->out_path != NULL ? strrchr(ctx->out_path, '/') : NULL;
+        const char *base_name = ctx->soname != NULL ? ctx->soname
+                              : slash != NULL ? slash + 1 : ctx->out_path != NULL ? ctx->out_path : "";
+        uint32_t base_off = 0;
+
+        if (dynstr_append_cstr(dynstr_buf, dynstr_len, dynstr_cap, base_name, &base_off) != 0 ||
+            build_gnu_verdef_data(&plan, endian, base_name, base_off, &verdef_data, &verdef_sz) != 0) {
             dyn_ver_plan_free(&plan);
             return -1;
         }
@@ -1322,7 +1359,7 @@ int plan_symbol_version_sections(ld_ctx_t *ctx, elfobj_t *out, uint8_t **dynstr_
             dyn_ver_plan_free(&plan);
             return -1;
         }
-        *out_verdef_count = plan.def_count;
+        *out_verdef_count = plan.def_count + 1;
     }
     if (plan.need_count != 0) {
         elf_section_t *sec = elf_find_section(out, ".gnu.version_r");

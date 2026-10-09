@@ -2313,6 +2313,29 @@ int plan_dynamic_needed(ld_ctx_t *ctx, elfobj_t *out) {
         free(gnu_hash_buf);
         return -1;
     }
+    /*
+     * "name@VERSION" is how an object file spells a versioned symbol, and
+     * how the names went into the string table, for the version numbers
+     * to be given out from.  They have been: the dynamic symbol table has
+     * the name alone, the version being the number beside it in
+     * .gnu.version, and the hash tables made next are of names alone.
+     * A symbol left as "thing@VERS_1" was one no reference to "thing"
+     * could find.
+     */
+    {
+        size_t k;
+
+        for (k = 1; k * entsz + 4 <= dynsym_len; ++k) {
+            uint32_t noff = read_u32_endian(dynsym_buf + k * entsz, elf_endian(out));
+            uint8_t *at = noff < dynstr_len
+                              ? (uint8_t *)memchr(dynstr_buf + noff, '@', strnlen((const char *)dynstr_buf + noff, dynstr_len - noff))
+                              : NULL;
+
+            if (at != NULL) {
+                *at = '\0';
+            }
+        }
+    }
     emit_versym = dynsym_len > entsz || verdef_count != 0 || verneed_count != 0;
     if (emit_versym) {
         versym_sec = elf_find_section(out, ".gnu.version");
