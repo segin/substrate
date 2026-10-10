@@ -113,8 +113,9 @@ status 0.
   Done: `test_align_max_skip.sh`; one function for the three copies of the alignment code.  The padding of gcc's `-O2` output is now the right length.  A branch **over** an alignment is still mis-aimed where the alignment pads (`jmp 1f` / `nop` / `.p2align 3` / `1:`): that is 222, and is the next thing between this assembler and compiler output.
 - [ ] **AS-T-087** When a data directive is written with an empty argument, the assembler shall emit zero for it and warn.
   Trace: AS-FE-002.  Verify: T — `.byte 1,,2` is `01 00 02`, `.long ,5` is zero then 5, each with a warning on standard error: GNU.  After: 064.
-- [ ] **AS-T-027** If a local label reference has no definition in the direction it names, then the assembler shall fail and name the reference and its line.
+- [x] **AS-T-027** If a local label reference has no definition in the direction it names, then the assembler shall fail and name the reference and its line.
   Trace: AS-FE-003.  Verify: T — `jmp 1f` with no `1:`; `call 2b` before any `2:`.
+  Done: `test_local_label_undefined.sh`.  A jump to a local label that **is** defined, but in another section, is still left out of the object without a word: 136.
 - [ ] **AS-T-028** When `*` precedes an operand of `call` or `jmp` that is not a register, the assembler shall encode an indirect branch through that memory operand.
   Trace: AS-FE-005.  Verify: T — `call *foo`, `jmp *foo`, `call *foo(%ebx)`, and under `--64` `call *foo(%rip)`, `jmp *foo`: GNU.
 - [x] **AS-T-029** When `nopw` or `nopl` is written with a memory operand, the assembler shall encode opcode `0F 1F /0`.

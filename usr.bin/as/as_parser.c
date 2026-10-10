@@ -28,6 +28,7 @@ typedef struct {
     char *errbuf;
     size_t errbuf_sz;
     local_label_vec_t local_defs;
+    int unresolved_local;       /* a 1f or 1b with no label to go to */
 } parse_ctx_t;
 
 typedef struct {
@@ -2441,6 +2442,18 @@ static void resolve_local_in_expr(parse_ctx_t *ctx, as_expr_t *e) {
         }
         e->local_resolved = found;
         e->local_target_line = best_line;
+        /*
+         * No such label in that direction.  Nothing read this as an
+         * error: `jmp 1f` with no 1: after it was left out of the object
+         * altogether, and a call went to the start of the section.  The
+         * first one is reported.
+         */
+        if (!found && !ctx->unresolved_local) {
+            ctx->unresolved_local = 1;
+            set_err(ctx, "%s:%u: local label %d%c is not defined",
+                    e->src_file != NULL ? e->src_file : "<input>", e->src_line,
+                    e->local_digit, e->local_forward ? 'f' : 'b');
+        }
     }
 
     resolve_local_in_expr(ctx, e->lhs);
@@ -2537,5 +2550,5 @@ int as_parse_tokens(const as_token_vec_t *tokens, const as_parser_cfg_t *cfg,
 
     resolve_locals(&ctx);
     free_local_defs(&ctx.local_defs);
-    return 0;
+    return ctx.unresolved_local ? -1 : 0;
 }
