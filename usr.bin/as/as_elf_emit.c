@@ -14096,6 +14096,76 @@ static int find_seen_local_label(const local_emit_label_t *labels, size_t count,
 }
 
 static int find_seen_temp_label(const local_emit_label_t *labels, size_t count,
+                                const char *name, const local_emit_label_t **out);
+
+/*
+ * `x - label` in a data directive, where label is in the section the
+ * directive is in and x is not: the entries of a position-independent
+ * jump table, `.long .L17 - .L19`, are these.  The value is x's address
+ * less the label's, which is x's address less the field's own plus the
+ * distance from the label to the field: a PC-relative relocation against
+ * x with that distance for its addend.  Such a directive was assembled
+ * as zeros with no relocation, and every switch gcc compiled this way
+ * jumped to the table.
+ *
+ * On success *minuend_out is x as a symbol node (its name is the
+ * expression's, and lives as long) and *extra_out the addend to add.
+ */
+static int label_difference_as_pcrel(emit_ctx_t *ctx, const as_stmt_t *st, const as_expr_t *expr,
+                                     const char *cur_section, uint64_t field_off,
+                                     const local_emit_label_t *labels, size_t label_count,
+                                     as_expr_t *minuend_out, int64_t *extra_out) {
+    as_expr_linear_t lin;
+    const local_emit_label_t *seen = NULL;
+    char section[128];
+    uint64_t off = 0;
+
+    if (ctx == NULL || expr == NULL || cur_section == NULL || minuend_out == NULL || extra_out == NULL) {
+        return -1;
+    }
+    if (as_expr_eval_linear(expr, NULL, NULL, &lin) != AS_EXPR_EVAL_OK ||
+        lin.add_symbol == NULL || lin.sub_symbol == NULL ||
+        strcmp(lin.add_symbol, ".") == 0 || strcmp(lin.sub_symbol, ".") == 0) {
+        return -1;
+    }
+
+    /* Where the subtracted label is: it must be here. */
+    if (find_seen_temp_label(labels, label_count, lin.sub_symbol, &seen) == 0) {
+        if (strcmp(seen->section, cur_section) != 0) {
+            return -1;
+        }
+        off = seen->off;
+    } else if (find_label_virtual_location(ctx, st, NULL, 0, 0, lin.sub_symbol,
+                                           section, sizeof(section), &off) != 0 ||
+               strcmp(section, cur_section) != 0) {
+        return -1;
+    }
+
+    /* And x must not be: two labels of one section differ by a number,
+     * which the directive has already been given. */
+    seen = NULL;
+    if (find_seen_temp_label(labels, label_count, lin.add_symbol, &seen) == 0) {
+        if (strcmp(seen->section, cur_section) == 0) {
+            return -1;
+        }
+    } else {
+        uint64_t add_off = 0;
+
+        if (find_label_virtual_location(ctx, st, NULL, 0, 0, lin.add_symbol,
+                                        section, sizeof(section), &add_off) == 0 &&
+            strcmp(section, cur_section) == 0) {
+            return -1;
+        }
+    }
+
+    memset(minuend_out, 0, sizeof(*minuend_out));
+    minuend_out->kind = AS_EXPR_SYMBOL;
+    minuend_out->symbol = (char *)lin.add_symbol;
+    *extra_out = (int64_t)field_off - (int64_t)off + (int64_t)lin.value;
+    return 0;
+}
+
+static int find_seen_temp_label(const local_emit_label_t *labels, size_t count,
                                 const char *name, const local_emit_label_t **out) {
     size_t i;
 
@@ -14231,44 +14301,59 @@ static int emit_relocations(emit_ctx_t *ctx) {
                     }
                     {
                         as_expr_t *expr = as_parse_expr_string(d->args[j], st->file, st->line);
-                        if (expr != NULL && width == 4 &&
-                            expr->kind == AS_EXPR_BINARY &&
-                            expr->op == AS_EXPR_OP_SUB &&
-                            expr->lhs != NULL &&
-                            expr->rhs != NULL &&
-                            expr->rhs->kind == AS_EXPR_SYMBOL &&
-                            expr->rhs->symbol != NULL &&
-                            strcmp(expr->rhs->symbol, ".") == 0) {
+                        as_expr_t minuend_node;
+                        const as_expr_t *minuend = NULL;
+                        int64_t pcrel_extra = 0;
+
+                        /* `x - .`, or `x - label` with the label in this
+                         * section: a PC-relative relocation against x. */
+                        if (expr != NULL && width == 4) {
+                            if (expr->kind == AS_EXPR_BINARY &&
+                                expr->op == AS_EXPR_OP_SUB &&
+                                expr->lhs != NULL &&
+                                expr->rhs != NULL &&
+                                expr->rhs->kind == AS_EXPR_SYMBOL &&
+                                expr->rhs->symbol != NULL &&
+                                strcmp(expr->rhs->symbol, ".") == 0) {
+                                minuend = expr->lhs;
+                            } else if (label_difference_as_pcrel(ctx, st, expr, track.current,
+                                                                 cur_off + (uint64_t)(j * width),
+                                                                 local_labels, local_label_count,
+                                                                 &minuend_node, &pcrel_extra) == 0) {
+                                minuend = &minuend_node;
+                            }
+                        }
+                        if (minuend != NULL) {
                             uint32_t t = (machine == EM_X86_64) ? R_X86_64_PC32 : R_386_PC32;
                             char *target_name = NULL;
                             int handled = 0;
 
-                            if (expr->lhs->kind == AS_EXPR_LOCAL_REF) {
+                            if (minuend->kind == AS_EXPR_LOCAL_REF) {
                                 const local_emit_label_t *seen = NULL;
                                 virtual_addr_value_t target;
-                                if (find_seen_local_label(local_labels, local_label_count, expr->lhs, &seen) == 0) {
+                                if (find_seen_local_label(local_labels, local_label_count, minuend, &seen) == 0) {
                                     target_name = xstrdup(seen->section);
                                     addend = (int64_t)seen->off;
                                     handled = (target_name != NULL);
-                                } else if (local_ref_virtual_location(ctx, st, expr->lhs, &target) == 0 &&
+                                } else if (local_ref_virtual_location(ctx, st, minuend, &target) == 0 &&
                                            target.has_section) {
                                     target_name = xstrdup(target.section);
                                     addend = (int64_t)target.value;
                                     handled = (target_name != NULL);
                                 }
-                            } else if (expr->lhs->kind == AS_EXPR_SYMBOL &&
-                                       expr->lhs->symbol != NULL &&
-                                       strcmp(expr->lhs->symbol, ".") != 0) {
+                            } else if (minuend->kind == AS_EXPR_SYMBOL &&
+                                       minuend->symbol != NULL &&
+                                       strcmp(minuend->symbol, ".") != 0) {
                                 char target_section[128];
                                 uint64_t target_off = 0;
-                                if (is_local_temp_symbol_name(expr->lhs->symbol)) {
+                                if (is_local_temp_symbol_name(minuend->symbol)) {
                                     const local_emit_label_t *seen = NULL;
-                                    if (find_seen_temp_label(local_labels, local_label_count, expr->lhs->symbol,
+                                    if (find_seen_temp_label(local_labels, local_label_count, minuend->symbol,
                                                              &seen) == 0) {
                                         target_name = xstrdup(seen->section);
                                         addend = (int64_t)seen->off;
                                         handled = (target_name != NULL);
-                                    } else if (find_label_virtual_location(ctx, st, NULL, 0, 0, expr->lhs->symbol,
+                                    } else if (find_label_virtual_location(ctx, st, NULL, 0, 0, minuend->symbol,
                                                                            target_section, sizeof(target_section),
                                                                            &target_off) == 0) {
                                         target_name = xstrdup(target_section);
@@ -14276,12 +14361,13 @@ static int emit_relocations(emit_ctx_t *ctx) {
                                         handled = (target_name != NULL);
                                     }
                                 } else {
-                                    target_name = xstrdup(expr->lhs->symbol);
+                                    target_name = xstrdup(minuend->symbol);
                                     addend = 0;
                                     handled = (target_name != NULL);
                                 }
                             }
                             if (handled) {
+                                addend += pcrel_extra;
                                 reloc_off = cur_off + (uint64_t)(j * width);
                                 if (machine_relocation_addend_is_in_place(machine) &&
                                     reloc_off + width <= (uint64_t)sb->buf.len) {

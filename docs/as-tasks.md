@@ -538,6 +538,9 @@ one table of templates; there is one ModRM/SIB/prefix emitter.
   Trace: AS-OBJ-007, AS-FE-006.  Verify: T — `.long ext - .`, `.long ext+4 - .`, `.quad ext - .`, `.long x - .` for local x: GNU.
 - [ ] **AS-T-212** When a data directive holds the difference of two symbols of one section, the assembler shall emit the constant.
   Trace: AS-OBJ-007, AS-FE-006.  Verify: T — `.long b-a`, `.long x-y+4`, `.quad b-a`, in the same and in another section: GNU.  After: 220.
+- [x] **AS-T-217** When a data directive holds `symbol - label` and the label is in the directive's own section, the assembler shall emit a PC-relative relocation against the symbol whose addend is the distance from the label to the field.
+  Trace: AS-OBJ-007.  Verify: T — `test_data_label_difference.sh`: the entries of a position-independent jump table, `.long .L1 - .Lt`, in both modes, against GNU's relocations.
+  Found by `test_compiler_output.sh`: this is what gcc writes for a `switch` in 64-bit code, and it was assembled as zeros with no relocation.
 - [ ] **AS-T-213** If an expression in a data directive or an operand cannot be expressed as a constant or as one relocation, then the assembler shall fail and say why.
   Trace: AS-OBJ-007, AS-FE-006.  Verify: T — `.long x+y`, `.long 2*x`, `.long ext - h` (h in another section), `movl $x+y,%eax`, `movl $2*x,%eax`: exit 1.  After: 191.
 - [ ] **AS-T-214** When `.` is used in an expression, the assembler shall give the address of the start of the statement, or for a data directive of the element.
@@ -891,7 +894,7 @@ is not to be done, 370 is ticked with "removed" and the rest struck.
 | AS-OBJ-004 | 215 |
 | AS-OBJ-005 | 274, 275 |
 | AS-OBJ-006 | 210 |
-| AS-OBJ-007 | 211–213, 249, 250 |
+| AS-OBJ-007 | 211–213, 217, 249, 250 |
 | AS-OBJ-008 | 067–074 |
 | AS-OBJ-009 | 078–080 |
 | AS-OBJ-010 | 290–295 |
