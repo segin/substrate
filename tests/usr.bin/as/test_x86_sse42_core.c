@@ -47,77 +47,25 @@ static void expect_bytes(const char *name, const uint8_t *got, size_t got_len,
     }
 }
 
-static void run_crc32_case(unsigned width_bits, as_x86_operand_t dst, as_x86_operand_t src,
-                           const uint8_t *exp, size_t exp_len) {
-    as_x86_sse42_insn_t in;
-    uint8_t out[32];
-    size_t out_len = 0;
-    char err[128];
-
-    memset(&in, 0, sizeof(in));
-    in.mnemonic = "crc32";
-    in.op_count = 2;
-    in.dst = dst;
-    in.src = src;
-    in.width_bits = width_bits;
-
-    if (as_x86_encode_sse42(&in, out, sizeof(out), &out_len, err, sizeof(err)) != 0) {
-        fprintf(stderr, "crc32 encode error: %s\n", err);
-        fail("crc32 encode failed");
-    }
-
-    expect_bytes("crc32", out, out_len, exp, exp_len);
-}
-
 int main(void) {
-    {
-        const uint8_t exp[] = {0xf2, 0x0f, 0x38, 0xf0, 0xca};
-        run_crc32_case(8, reg_op(AS_X86_REG_RCX), reg_op(AS_X86_REG_RDX), exp, sizeof(exp));
-    }
-
-    {
-        const uint8_t exp[] = {0x66, 0xf2, 0x0f, 0x38, 0xf1, 0xca};
-        run_crc32_case(16, reg_op(AS_X86_REG_RCX), reg_op(AS_X86_REG_RDX), exp, sizeof(exp));
-    }
-
-    {
-        const uint8_t exp[] = {0xf2, 0x0f, 0x38, 0xf1, 0xca};
-        run_crc32_case(32, reg_op(AS_X86_REG_RCX), reg_op(AS_X86_REG_RDX), exp, sizeof(exp));
-    }
-
-    {
-        const uint8_t exp[] = {0xf2, 0x48, 0x0f, 0x38, 0xf1, 0xca};
-        run_crc32_case(64, reg_op(AS_X86_REG_RCX), reg_op(AS_X86_REG_RDX), exp, sizeof(exp));
-    }
-
-    {
-        const uint8_t exp[] = {0xf2, 0x45, 0x0f, 0x38, 0xf0, 0xc1};
-        run_crc32_case(8, reg_op(AS_X86_REG_R8), reg_op(AS_X86_REG_R9), exp, sizeof(exp));
-    }
-
+    /*
+     * crc32 is not this encoder's.  Its source's width, its prefixes and
+     * the mode are the main encoders' to know, and they have it:
+     * test_insn_forms.sh holds it to GNU's bytes.
+     */
     {
         as_x86_sse42_insn_t in;
         uint8_t out[32];
         size_t out_len = 0;
         char err[128];
-        const uint8_t exp_m[] = {0xf2, 0x0f, 0x38, 0xf1, 0x48, 0x10};
 
         memset(&in, 0, sizeof(in));
         in.mnemonic = "crc32";
         in.op_count = 2;
         in.dst = reg_op(AS_X86_REG_RCX);
         in.src = mem_op(AS_X86_REG_RAX, 0x10, 1);
-        in.width_bits = 32;
-
-        if (as_x86_encode_sse42(&in, out, sizeof(out), &out_len, err, sizeof(err)) != 0) {
-            fprintf(stderr, "crc32 mem encode error: %s\n", err);
-            fail("crc32 mem encode failed");
-        }
-        expect_bytes("crc32(mem)", out, out_len, exp_m, sizeof(exp_m));
-
-        in.width_bits = 7;
         if (as_x86_encode_sse42(&in, out, sizeof(out), &out_len, err, sizeof(err)) == 0) {
-            fail("crc32 accepted invalid width");
+            fail("crc32 was encoded by the SSE4.2 module");
         }
     }
 
