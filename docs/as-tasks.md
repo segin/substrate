@@ -142,6 +142,8 @@ status 0.
 - [x] **AS-T-396** When the displacement of a memory operand has a symbol in it and a base register, and the instruction is one an extension encoder writes (as in 395), the assembler shall encode a 32-bit displacement and put the relocation on it.
   Trace: found while doing 395; AS-OBJ (relocation placement).  Verify: T — `pshufb sym(%ebx),%xmm0` (`66 0F 38 00 83` and four bytes, the relocation at 5), `popcnt sym(%rbx),%eax`, `vaddps sym(%rbx),%ymm0,%ymm1`, `andn`, `cmpxchg16b`, `pextrd`, in both modes: GNU.  Today the first is `66 0F 00 00 00 00`: one byte is kept for the displacement, and the four of the relocation are written over the opcode.
   Done: each of the nine extension encoders has its own copy of the ModRM code, and none read the mark that says a displacement is a symbol's.  Every instruction they write was wrong with `sym(%reg)`, in both modes -- a table indexed in non-PIC code with AVX, `popcnt` of a global through a register.  Each now keeps four bytes.  `test_ext_symbol_disp.sh`, 46 cases, bytes and relocation.  Left: `pshufb sym,%xmm0` in 32-bit code is right but a byte longer than GNU's, by the SIB form.
+- [ ] **AS-T-397** When an absolute address is the memory operand of an instruction that one of the extension encoders writes, in 32-bit code, the assembler shall encode it as ModRM `mod=00 rm=101` and four bytes, without a SIB byte.
+  Trace: found while doing 396 and 310; no audit entry.  Verify: T — `pshufb sym,%xmm0` (`66 0F 38 00 05` and four bytes), `vaddps 0x90909090,%xmm1,%xmm0` (`C5 F0 58 05 …`), `popcnt sym,%eax`: GNU.  Today the SIB form that 64-bit code needs is written in 32-bit code too: right, and a byte longer.  Some 300 `v` lines of the 32-bit corpus differ from GNU's this way.
 - [ ] **AS-T-031** When a `rep`, `repe`, `repne` or segment prefix is written before an instruction encoded by the emitter's own tables, the assembler shall emit it.
   Trace: AS-SEL-001.  Verify: T — the callers of the prefixed-`0F` emitter with each prefix: GNU.
 - [ ] **AS-T-032** If `lock` is written before an instruction or operand form the processor does not allow it on, then the assembler shall refuse it.
@@ -785,8 +787,9 @@ After section D these are table rows; each is checked by the extension
 corpus (`aud/ext/`), whose "wrong" and "accepts-invalid" classes must be
 empty for the family named.
 
-- [ ] **AS-T-310** When an AVX, AVX2, FMA, F16C or BMI instruction is written with XMM or YMM registers 0–15 and no mask, broadcast or rounding decorator, the assembler shall emit the VEX encoding.
+- [x] **AS-T-310** When an AVX, AVX2, FMA, F16C or BMI instruction is written with XMM or YMM registers 0–15 and no mask, broadcast or rounding decorator, the assembler shall emit the VEX encoding.
   Trace: AS-EXT-002, AS-OBJ-014.  Verify: T — the 1,844 (32-bit) and 3,050 (v4) "EVEX where GNU uses VEX" lines are identical to GNU.  After: 161.
+  Done ahead of 161, for the harm of it: the EVEX form of a 128- or 256-bit instruction is AVX-512VL and faults on a processor with AVX alone.  The EVEX encoders were tried before the VEX ones; the order is reversed, but for a statement with a decorator, which only EVEX can say, and for the six instructions GNU writes as EVEX unless told otherwise (`vpdpbusd`, `vpdpbusds`, `vpdpwssd`, `vpdpwssds`, `vpmadd52huq`, `vpmadd52luq`).  Over the `v` lines of the corpora no line is now EVEX where GNU's is VEX, in 32-bit code or at v4: 1,320 more v4 lines and 294 more 32-bit lines are GNU's bytes.  `test_vex_preferred.sh`.  Two things keep the rest of the 32-bit lines from being identical, and neither is the encoding chosen: an absolute address is a byte longer than GNU's (397), and an instruction the VEX encoders have no row for (`vsqrtps`, `vcvtdq2ps`, `vpsllq` by an immediate, and the rest of 332's list) is still written by the EVEX encoder where that has one.
 - [ ] **AS-T-311** When a VEX compare is written with a vector destination, the assembler shall encode the vector destination.
   Trace: AS-EXT-002.  Verify: T — `vpcmpeq{b,w,d,q}`, `vpcmpgt{b,w,d,q}`, `vcmp{ps,pd,ss,sd}` with XMM and YMM destinations: GNU.  After: 310.
 - [ ] **AS-T-312** While no `-march` is given, the assembler shall accept every x86 instruction set it implements.
@@ -821,6 +824,7 @@ empty for the family named.
   Trace: AS-EXT-008.  Verify: T — `vblendvps`, `vblendvpd`, `vpblendvb` with registers 0–15 in the fourth position; the twenty FMA4 mnemonics.
 - [ ] **AS-T-327** When `vpermilps` or `vpermilpd` is written, the assembler shall encode the variable form in map `0F38` and the immediate form in map `0F3A`.
   Trace: AS-EXT-008.  Verify: T — both forms, XMM and YMM.
+  Since 310 the variable form is the VEX encoder's, and wrong there as it was in the EVEX one: `vpermilps %xmm0,%xmm1,%xmm0` is `C4 E3 71 0C C0` for GNU's `C4 E2 71 0C C0`.
 - [ ] **AS-T-328** When a VEX instruction's template gives `W = 1`, the assembler shall set it.
   Trace: AS-EXT-008.  Verify: T — `vpinsrq`, `vpextrq`, `vmovq` with general registers, `vpmadd52luq`, `vpmadd52huq`, `vgf2p8affineqb`, `vgf2p8affineinvqb`.  (`vcvtsi2sdq` is in 066.)
 - [ ] **AS-T-329** When `vprol`, `vpror`, `vprolv` or `vprorv` (`d` and `q`) is written, the assembler shall place the destination in `vvvv` and the opcode extension in ModRM.reg for the immediate forms.
@@ -830,6 +834,7 @@ empty for the family named.
 - [ ] **AS-T-331** When `vpbroadcast{b,w,d,q}` is written with a general register source, the assembler shall encode the EVEX general-register form; with a ZMM destination and memory source, the EVEX form.
   Trace: AS-EXT-008.  Verify: T — `vpbroadcastb %eax,%ymm1`, `vpbroadcastq %rax,%zmm1`, `vpbroadcastd (%rax),%zmm2`.
 - [ ] **AS-T-332** When any of these AVX instructions is written, the assembler shall encode it: `vmovaps`, `vmovups`, `vmovapd`, `vmovupd`, `vmovdqa`, `vmovdqu`, `vmovd`, `vmovq`, `vmovss`, `vmovsd`, `vmovlps`, `vmovhps`, `vmovlpd`, `vmovhpd` (register, load and store forms), `vmovnt*`, `vmovmskp*`, `vpmovmskb`, `vmaskmovdqu` (from 049), `vsqrtp[sd]`, `vrcpps`, `vrsqrtps`, the `vcvt*` family, `vcomis*`, `vucomis*`, `vpshufd`, `vpshufhw`, `vpshuflw`, `vpabs*`, `vpmovsx*`, `vpmovzx*`, `vptest`, `vpextr*`, `vextractps`, `vroundp[sd]`, `vrounds[sd]`, `vlddqu`, `vldmxcsr`, `vstmxcsr`, `vpcmp[ei]str*`, `vphminposuw`, the `vcmpeqps`-style predicate aliases, `vpslldq`, `vpsrldq`.
+  Until this is done, those of them that the EVEX encoders have are written as EVEX in 32-bit code and at v4, where GNU's are VEX (see 310): `vsqrtps %ymm0,%ymm1` is `62 F1 7C 28 51 C8`.
   Trace: AS-EXT-009.  Verify: T — the 88 mnemonics with no row: the `avx` family of the corpus shows no "refused".  After: 161.
 - [ ] **AS-T-333** When `vextractf128`, `vextracti128`, `vpermq`, `vpermpd` (immediate) or `rorx` is written, the assembler shall encode it.
   Trace: AS-EXT-009.  Verify: T — each, register and memory.
@@ -1051,5 +1056,5 @@ is not to be done, 370 is ticked with "removed" and the rest struck.
 | AS-EXT-009 | 185, 325, 332–337 |
 | AS-EXT-010 | 040, 171, 338, 339 (339 closes all of AS-EXT) |
 
-347 tasks: 68 done, 279 open.  Numbers run to 396, with gaps left between
+348 tasks: 69 done, 279 open.  Numbers run to 397, with gaps left between
 sections for tasks found along the way.

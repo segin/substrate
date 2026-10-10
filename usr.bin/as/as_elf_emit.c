@@ -4587,6 +4587,28 @@ static int emit_x86_padlock_waitpkg(const char *mn, const as_instruction_t *insn
 }
 
 /*
+ * The instructions that were AVX-512 first and were given a VEX form
+ * later (AVX-VNNI, AVX-IFMA): GNU as writes the EVEX form of these
+ * unless `{vex}` asks for the other, the reverse of every other
+ * instruction that has both.
+ */
+static int x86_mnemonic_is_evex_first(const char *mn) {
+    return strcmp(mn, "vpdpbusd") == 0 || strcmp(mn, "vpdpbusds") == 0 ||
+           strcmp(mn, "vpdpwssd") == 0 || strcmp(mn, "vpdpwssds") == 0 ||
+           strcmp(mn, "vpmadd52huq") == 0 || strcmp(mn, "vpmadd52luq") == 0;
+}
+
+/*
+ * Whether the statement has a decorator -- a mask `{%k1}`, zeroing `{z}`, a
+ * broadcast `{1to8}`, a rounding mode.  Only EVEX has a place for one,
+ * and the VEX encoders do not look: they would write the instruction
+ * without it.
+ */
+static int x86_stmt_has_decorator(const as_instruction_t *insn) {
+    return insn->opmask != 0 || insn->zeroing || insn->broadcast || insn->sae || insn->rounding_mode >= 0;
+}
+
+/*
  * The segment override of an instruction that one of the VEX or EVEX
  * encoders wrote.  They are given the operands and not the prefix, and
  * `vmovdqa %fs:(%rbx), %ymm0` read from %ds.  The override goes before
@@ -9884,6 +9906,29 @@ static int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_st
             return 0;
         }
     }
+    /*
+     * VEX before EVEX.  An instruction that both can encode is VEX: the
+     * EVEX form of a 128- or 256-bit instruction is AVX-512VL, and a
+     * processor with AVX and no AVX-512 faults on it.  The EVEX encoders
+     * were tried first, so in 32-bit code, and in 64-bit code at
+     * x86-64-v4, `vaddps %ymm0, %ymm1, %ymm2` was the AVX-512 one.
+     */
+    if ((!cfg->is_64 || cfg->x86_64_isa_level >= 3) &&
+        !((!cfg->is_64 || cfg->x86_64_isa_level >= 4) &&
+          (x86_mnemonic_is_evex_first(mnbuf) || x86_stmt_has_decorator(&st->u.instr)))) {
+        if ((try_encode_x86_avx_stmt(&st->u.instr, intel_syntax, cfg->is_64, code, code_cap, code_len, encerr, encerr_sz) == 0 &&
+             *code_len > 0) ||
+            (try_encode_x86_avx2_stmt(&st->u.instr, intel_syntax, cfg->is_64, code, code_cap, code_len, encerr, encerr_sz) == 0 &&
+             *code_len > 0) ||
+            (try_encode_x86_fma_stmt(&st->u.instr, intel_syntax, cfg->is_64, code, code_cap, code_len, encerr, encerr_sz) == 0 &&
+             *code_len > 0) ||
+            (try_encode_x86_bmi1_stmt(&st->u.instr, intel_syntax, cfg->is_64, code, code_cap, code_len, encerr, encerr_sz) == 0 &&
+             *code_len > 0) ||
+            (try_encode_x86_bmi2_stmt(&st->u.instr, intel_syntax, cfg->is_64, code, code_cap, code_len, encerr, encerr_sz) == 0 &&
+             *code_len > 0)) {
+            return x86_prepend_segment(&st->u.instr, code, code_cap, code_len);
+        }
+    }
     if (!cfg->is_64 || cfg->x86_64_isa_level >= 4) {
         if ((try_encode_x86_avx512f_stmt(&st->u.instr, intel_syntax, code, code_cap, code_len, encerr, encerr_sz) == 0 &&
              *code_len > 0) ||
@@ -9903,20 +9948,7 @@ static int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_st
         set_x86_isa_requirement(encerr, encerr_sz, mnbuf, 4);
         return -1;
     }
-    if (!cfg->is_64 || cfg->x86_64_isa_level >= 3) {
-        if ((try_encode_x86_avx_stmt(&st->u.instr, intel_syntax, cfg->is_64, code, code_cap, code_len, encerr, encerr_sz) == 0 &&
-             *code_len > 0) ||
-            (try_encode_x86_avx2_stmt(&st->u.instr, intel_syntax, cfg->is_64, code, code_cap, code_len, encerr, encerr_sz) == 0 &&
-             *code_len > 0) ||
-            (try_encode_x86_fma_stmt(&st->u.instr, intel_syntax, cfg->is_64, code, code_cap, code_len, encerr, encerr_sz) == 0 &&
-             *code_len > 0) ||
-            (try_encode_x86_bmi1_stmt(&st->u.instr, intel_syntax, cfg->is_64, code, code_cap, code_len, encerr, encerr_sz) == 0 &&
-             *code_len > 0) ||
-            (try_encode_x86_bmi2_stmt(&st->u.instr, intel_syntax, cfg->is_64, code, code_cap, code_len, encerr, encerr_sz) == 0 &&
-             *code_len > 0)) {
-            return x86_prepend_segment(&st->u.instr, code, code_cap, code_len);
-        }
-    } else if (cfg->is_64 && x86_stmt_requires_v3(&st->u.instr, intel_syntax, cfg->is_64)) {
+    if (cfg->is_64 && cfg->x86_64_isa_level < 3 && x86_stmt_requires_v3(&st->u.instr, intel_syntax, cfg->is_64)) {
         set_x86_isa_requirement(encerr, encerr_sz, mnbuf, 3);
         return -1;
     }
