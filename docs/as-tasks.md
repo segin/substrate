@@ -164,8 +164,9 @@ status 0.
   Done: `test_ret.sh`.  `retq` in 32-bit mode and `retl` in 64-bit are still accepted: 349 and 350.
 - [ ] **AS-T-040** If an instruction is written with more operands than any of its forms takes, then the assembler shall refuse it.
   Trace: AS-OBJ-013, AS-EXT-010.  Verify: T — `ret $4, $5`, `nop %eax,%ebx,%ecx,%edx`, `lahf -0x100(%rbx),%ebx,%ecx`, `haddps $1,%xmm1,%zmm2,%zmm3`: exit 1.
-- [ ] **AS-T-041** When `enter` is written, the assembler shall encode the frame size as the 16-bit immediate and the nesting level as the 8-bit one.
+- [x] **AS-T-041** When `enter` is written, the assembler shall encode the frame size as the 16-bit immediate and the nesting level as the 8-bit one.
   Trace: AS-X86-023, AS-SEL-014.  Verify: T — `enter $8,$0`, `enter $8,$1`, `enter $0x100,$3`, both modes: GNU.
+  Done: the encoder had them right and was handed them exchanged, `enter` being turned about with every other two-operand AT&T instruction; it has no destination and is left as written.  Also `enterq` had a `REX.W` it does not take, and a size or level that does not fit its field is refused.  `test_insn_forms.sh`.
 - [ ] **AS-T-042** When `xchgb` is written, the assembler shall encode the 8-bit exchange.
   Trace: AS-X86-023, AS-SEL-014.  Verify: T — `xchgb %al,%bl`, `xchgb %al,(%eax)`, `xchgl (%ebx),%ebx`: GNU.
 - [ ] **AS-T-043** When `movsx` or `movzx` is written with or without size suffixes, the assembler shall take the source width from the suffix or the source register and the destination width from the destination register.
@@ -1028,5 +1029,5 @@ is not to be done, 370 is ticked with "removed" and the rest struck.
 | AS-EXT-009 | 185, 325, 332–337 |
 | AS-EXT-010 | 040, 171, 338, 339 (339 closes all of AS-EXT) |
 
-344 tasks: 54 done, 290 open.  Numbers run to 393, with gaps left between
+344 tasks: 55 done, 289 open.  Numbers run to 393, with gaps left between
 sections for tasks found along the way.

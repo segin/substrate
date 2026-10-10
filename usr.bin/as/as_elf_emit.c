@@ -9501,7 +9501,8 @@ static int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_st
         in.operand_size_override = (in.default_bits != 16u);
     } else if (suffix == 'l') {
         in.operand_size_override = (in.default_bits == 16u);
-    } else if (suffix == 'q') {
+    } else if (suffix == 'q' && !streq_ci(mnbuf, "enter")) {
+        /* (enter's frame is 64-bit in 64-bit code with no prefix to say so.) */
         in.rex_w = 1;
     }
 
@@ -9520,7 +9521,12 @@ static int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_st
         }
     }
 
-    if (!intel_syntax && in.op_count == 2) {
+    /*
+     * AT&T writes the destination last and the encoder wants it first.
+     * `enter` has no destination: its operands are the frame's size and
+     * then the nesting level in both syntaxes, and stay as written.
+     */
+    if (!intel_syntax && in.op_count == 2 && !streq_ci(mnbuf, "enter")) {
         op_index[0] = 1;
         op_index[1] = 0;
     } else if (!intel_syntax && in.op_count == 3 &&

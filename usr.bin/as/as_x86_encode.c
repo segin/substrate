@@ -2004,6 +2004,13 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
         }
     } else if (streq_ci(insn->mnemonic, "enter")) {
         if (insn->op_count == 2 && a->kind == AS_X86_OP_IMM && b->kind == AS_X86_OP_IMM) {
+            /* The frame's size is sixteen bits and the nesting level
+             * eight: a number that is neither, signed or unsigned, does
+             * not fit. */
+            if (a->u.imm < -0x8000 || a->u.imm > 0xffff || b->u.imm < -0x80 || b->u.imm > 0xff) {
+                set_err(&ctx, "enter takes a size of sixteen bits and a level of eight");
+                return -1;
+            }
             if (emit8(&ctx, 0xc8) != 0 || emit8(&ctx, (uint8_t)(a->u.imm & 0xff)) != 0 ||
                 emit8(&ctx, (uint8_t)((a->u.imm >> 8) & 0xff)) != 0 || emit8(&ctx, (uint8_t)(b->u.imm & 0xff)) != 0) {
                 return -1;
@@ -6370,6 +6377,13 @@ more_mnemonics:
         }
     } else if (streq_ci(insn->mnemonic, "enter")) {
         if (insn->op_count == 2 && a->kind == AS_X86_OP_IMM && b->kind == AS_X86_OP_IMM) {
+            /* The frame's size is sixteen bits and the nesting level
+             * eight: a number that is neither, signed or unsigned, does
+             * not fit. */
+            if (a->u.imm < -0x8000 || a->u.imm > 0xffff || b->u.imm < -0x80 || b->u.imm > 0xff) {
+                set_err(&ctx, "enter takes a size of sixteen bits and a level of eight");
+                return -1;
+            }
             if (emit8(&ctx, 0xc8) != 0 || emit8(&ctx, (uint8_t)(a->u.imm & 0xff)) != 0 ||
                 emit8(&ctx, (uint8_t)((a->u.imm >> 8) & 0xff)) != 0 || emit8(&ctx, (uint8_t)(b->u.imm & 0xff)) != 0) {
                 return -1;
