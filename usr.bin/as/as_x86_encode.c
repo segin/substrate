@@ -519,6 +519,17 @@ int as_x86_encode_ext(as_x86_ext_encode_fn fn, const as_x86_insn_t *insn, uint8_
     if (fn == NULL || insn == NULL || out == NULL) {
         return -1;
     }
+    /* These encoders have the 32- and 64-bit ModRM table and not the
+     * 16-bit one: an address through %bx or %si is not theirs. */
+    if (insn->default_bits != 64u) {
+        size_t i;
+
+        for (i = 0; i < insn->op_count; ++i) {
+            if (insn->ops[i].kind == AS_X86_OP_MEM && insn->ops[i].u.mem.addr_bits == 16u) {
+                return -1;
+            }
+        }
+    }
     n = as_x86_outer_prefixes(insn, prefixes);
     if (n >= out_cap) {
         return -1;
