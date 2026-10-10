@@ -2794,21 +2794,6 @@ static int lookup_i386_extrq_insertq_prefix(const char *mnemonic, unsigned char 
     return -1;
 }
 
-static int select_x86_srcdst_operands(const as_instruction_t *insn, int intel_syntax,
-                                      const as_operand_t **src_op, const as_operand_t **dst_op) {
-    if (insn == NULL || src_op == NULL || dst_op == NULL || insn->operand_count != 2) {
-        return -1;
-    }
-    if (intel_syntax) {
-        *dst_op = &insn->operands[0];
-        *src_op = &insn->operands[1];
-    } else {
-        *src_op = &insn->operands[0];
-        *dst_op = &insn->operands[1];
-    }
-    return 0;
-}
-
 static int select_x86_dstsrc_tail_operand(const as_instruction_t *insn, int intel_syntax,
                                           const as_operand_t **dst_op, const as_operand_t **src_op,
                                           const as_operand_t **tail_op) {
