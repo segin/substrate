@@ -1,4 +1,5 @@
 #include "as_symtab.h"
+#include "as_reloc_op.h"
 
 #include <ctype.h>
 #include <stdint.h>
@@ -73,23 +74,6 @@ static int symtab_index_ensure(as_symtab_t *tab) {
     return symtab_index_rehash(tab, cap);
 }
 
-static int ascii_eq_ci(const char *a, const char *b) {
-    unsigned char ca;
-    unsigned char cb;
-
-    if (a == NULL || b == NULL) {
-        return 0;
-    }
-    while (*a != '\0' && *b != '\0') {
-        ca = (unsigned char)*a++;
-        cb = (unsigned char)*b++;
-        if (tolower(ca) != tolower(cb)) {
-            return 0;
-        }
-    }
-    return (*a == '\0' && *b == '\0') ? 1 : 0;
-}
-
 static void set_err(sym_ctx_t *ctx, const char *fmt, ...) {
     va_list ap;
 
@@ -146,20 +130,7 @@ static char *trim_copy(const char *s) {
 }
 
 static void strip_reloc_modifier(char *name) {
-    char *at;
-
-    if (name == NULL) {
-        return;
-    }
-    at = strchr(name, '@');
-    if (at == NULL || at[1] == '\0') {
-        return;
-    }
-    if (ascii_eq_ci(at + 1, "PLT") ||
-        ascii_eq_ci(at + 1, "GOTPCREL") ||
-        ascii_eq_ci(at + 1, "GOTTPOFF")) {
-        *at = '\0';
-    }
+    (void)as_reloc_op_strip(name);
 }
 
 void as_symtab_init(as_symtab_t *tab) {

@@ -1,5 +1,6 @@
 #include "as_elf_emit.h"
 #include "as_x86_encode.h"
+#include "as_reloc_op.h"
 #include "as_x86_avx.h"
 #include "as_x86_avx2.h"
 #include "as_x86_bmi1.h"
@@ -12155,42 +12156,28 @@ static uint32_t reloc_type_for_symbol(unsigned machine, const char *name, uint32
     if (name == NULL) {
         return fallback;
     }
-    if (machine == EM_386) {
-        if (strstr(name, "@PLT") != NULL) {
-            return R_386_PLT32;
+    if (machine == EM_386 || machine == EM_X86_64) {
+        uint32_t t;
+
+        /*
+         * The operator on the symbol, if it has one, names the
+         * relocation.  Only @PLT was known for i386, so sym@GOTOFF and
+         * sym@GOT -- how position-independent code reaches everything --
+         * were an R_386_32 against a symbol whose name ended in @GOTOFF.
+         */
+        if (as_reloc_op_type(machine, name, &t) == 1) {
+            return t;
         }
-        return fallback;
-    }
-    if (machine == EM_X86_64) {
-        if (strstr(name, "@PLT") != NULL) {
-            return R_X86_64_PLT32;
+        /* The table itself, by name, in i386 code: relative to here. */
+        if (machine == EM_386 && strcmp(name, "_GLOBAL_OFFSET_TABLE_") == 0 && fallback == R_386_32) {
+            return R_386_GOTPC;
         }
-        if (strstr(name, "@GOTPCREL") != NULL) {
-            return R_X86_64_GOTPCREL;
-        }
-        if (strstr(name, "@GOTTPOFF") != NULL) {
-            return R_X86_64_GOTTPOFF;
-        }
-        return fallback;
     }
     return fallback;
 }
 
 static void strip_reloc_modifier(char *name) {
-    char *at;
-
-    if (name == NULL) {
-        return;
-    }
-    at = strchr(name, '@');
-    if (at == NULL || at[1] == '\0') {
-        return;
-    }
-    if (streq_ci(at + 1, "PLT") ||
-        streq_ci(at + 1, "GOTPCREL") ||
-        streq_ci(at + 1, "GOTTPOFF")) {
-        *at = '\0';
-    }
+    (void)as_reloc_op_strip(name);
 }
 
 static elf_symbol_t *find_emit_symbol(emit_ctx_t *ctx, const char *name) {
@@ -14817,6 +14804,18 @@ static int emit_relocations(emit_ctx_t *ctx) {
                            op->u.mem.base_reg != NULL &&
                            streq_ci(op->u.mem.base_reg, "rip")) {
                     addend += -4;
+                }
+                /*
+                 * `addl $_GLOBAL_OFFSET_TABLE_, %ebx` is R_386_GOTPC: the
+                 * table's address less the field's own.  But %ebx holds
+                 * the address of the instruction, the thunk before it
+                 * having put it there, so what must be added is the table
+                 * less the instruction -- more by the field's place in
+                 * the instruction, which is the addend GNU as gives it.
+                 */
+                if (machine == EM_386 && t == R_386_32 && strcmp(sym, "_GLOBAL_OFFSET_TABLE_") == 0 &&
+                    code_len >= reloc_width) {
+                    addend += (int64_t)(code_len - reloc_width);
                 }
                 if (rel_count > 0) {
                     set_err(ctx, "%s:%u: multiple symbolic relocations in one x86 instruction are not yet supported",

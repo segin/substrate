@@ -526,10 +526,13 @@ one table of templates; there is one ModRM/SIB/prefix emitter.
   Trace: AS-OBJ-003, AS-DES-003.  Verify: I — no `strstr` on symbol names for `@`; T — no symbol with `@` in its name reaches a symbol table but `.symver`'s.  After: 094.
 - [ ] **AS-T-201** If a relocation operator is unknown, or not valid for the target or the field it is used in, then the assembler shall fail.
   Trace: AS-OBJ-003.  Verify: T — `foo@BOGUS`, `foo@GOTPCREL` under `--32`, `foo@GOTOFF` in a branch.  After: 200.
+- [ ] **AS-T-289** *(note on 200–204)* In part, 2026-10-10: one table of operators (`as_reloc_op.c`) is used both to take the operator off the symbol's name and to choose the relocation, for i386 and x86-64: `@PLT`, `@GOT`, `@GOTOFF`, `@GOTPCREL`, `@TLSGD`, `@TLSLDM`, `@TLSLD`, `@DTPOFF`, `@GOTTPOFF`, `@GOTNTPOFF`, `@INDNTPOFF`, `@NTPOFF`, `@TPOFF`, `@SIZE`.  `test_i386_pic.sh`.  With it gcc's 32-bit position-independent output links, and its `-O0` build of `compiler/prog.c` runs.  Still open under these tasks: the operator is found by its `@` in the symbol's text, not parsed; an unknown operator is not refused; `@GOT` is `R_386_GOT32`, not the relaxable `GOT32X`; `@TLSDESC`, `@TLSCALL`, `@PLTOFF`; the demonstrations (a PIC shared object, each TLS model).
+  Trace: AS-OBJ-003.  Verify: I — this entry is removed when 200 to 204 are each ticked.
 - [ ] **AS-T-202** When assembling for i386, the assembler shall emit for `@GOT`, `@GOTOFF`, `@PLT`, `@TLSGD`, `@TLSLDM`, `@DTPOFF`, `@GOTTPOFF`, `@GOTNTPOFF`, `@INDNTPOFF`, `@NTPOFF`, `@TPOFF`, `@TLSDESC` and `@TLSCALL` the relocation type the i386 psABI names.
   Trace: AS-OBJ-003.  Verify: T — one instruction and one data directive for each, against GNU; D — a PIC shared object and a program using each TLS model, built with `gcc -m32 -fPIC -S` and this assembler, link and run.  After: 200.
 - [ ] **AS-T-203** When assembling for i386 and `_GLOBAL_OFFSET_TABLE_` is an operand, the assembler shall emit `R_386_GOTPC`.
   Trace: AS-OBJ-003.  Verify: T — `addl $_GLOBAL_OFFSET_TABLE_,%ebx` and the `+[.-.L1]` form.  After: 200.
+  In part: the plain form, with the addend GNU gives it (`test_i386_pic.sh`).  The `+[.-.L1]` form is not tried.
 - [ ] **AS-T-204** When assembling for x86-64, the assembler shall emit for `@GOT`, `@GOTOFF`, `@GOTPCREL`, `@PLT`, `@TLSGD`, `@TLSLD`, `@DTPOFF`, `@GOTTPOFF`, `@TPOFF`, `@TLSDESC`, `@TLSCALL`, `@SIZE` and `@PLTOFF` the relocation type the x86-64 psABI names.
   Trace: AS-OBJ-003.  Verify: T and D as 202, with `-m64`.  After: 200.
 - [ ] **AS-T-205** When a `mov`, `test`, `binop`, `call` or `jmp` uses `@GOTPCREL`, the assembler shall emit `R_X86_64_GOTPCRELX` or `R_X86_64_REX_GOTPCRELX` as the psABI gives.

@@ -29,8 +29,9 @@ wsym:
 fsym:
 SRC
 
-cc -Wall -Wextra -Werror -D_GNU_SOURCE -I"$ROOT/usr.bin/as" \
+cc -Wall -Wextra -Werror -D_GNU_SOURCE -I"$ROOT/usr.bin/as" -iquote "$ROOT/include" \
    "$ROOT/usr.bin/as/as_expr.c" "$ROOT/usr.bin/as/as_lexer.c" "$ROOT/usr.bin/as/as_parser.c" "$ROOT/usr.bin/as/as_symtab.c" \
+   "$ROOT/usr.bin/as/as_reloc_op.c" \
    "$ROOT/tests/usr.bin/as/test_symtab_core.c" \
    -o "$TMP/test_symtab_core"
 
