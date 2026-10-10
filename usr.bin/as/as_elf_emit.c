@@ -4731,6 +4731,29 @@ static int x86_prepend_addr32(const as_instruction_t *insn, unsigned char *code,
     return 0;
 }
 
+/*
+ * The instructions whose operand is 64 bits in 64-bit code with no
+ * REX.W to say so: those of the stack and of control transfer.
+ */
+static int x86_mnemonic_is_64bit_by_default(const char *mn) {
+    static const char *const names[] = {
+        "push", "pop", "call", "jmp", "lcall", "ljmp", "ret", "lret", "enter", "leave",
+        "pushf", "popf", "lgdt", "lidt", "sgdt", "sidt", "lldt", "ltr", "lmsw",
+        /* And those where a 64-bit register is written and the
+         * instruction is not of 64 bits for it, or sees to it itself. */
+        "sldt", "str", "lsl", "lar", "movmskps", "movmskpd", "pmovmskb", "pextrw",
+        "rdfsbase", "rdgsbase", "wrfsbase", "wrgsbase",
+    };
+    size_t i;
+
+    for (i = 0; i < sizeof(names) / sizeof(names[0]); ++i) {
+        if (strcmp(mn, names[i]) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 /* Whether a statement of 32-bit code addresses through 16-bit registers
  * (the port of in and out, `(%dx)`, is no address). */
 static int x86_stmt_addr16_in_32(const as_elf_cfg_t *cfg, const as_instruction_t *insn) {
@@ -10151,6 +10174,10 @@ static int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_st
             in.byte_op = 1;
         } else if (bits == 16 && in.default_bits != 16u) {
             in.operand_size_override = 1;
+        } else if (bits == 64 && cfg->is_64 && !x86_mnemonic_is_64bit_by_default(mnbuf)) {
+            /* And of 64 bits where they are: `mov %rsp, %rbp` was
+             * `mov %esp, %ebp`. */
+            in.rex_w = 1;
         }
     }
     if (intel_syntax && suffix == '\0' && (streq_ci(mnbuf, "in") || streq_ci(mnbuf, "out")) && in.op_count == 2) {
