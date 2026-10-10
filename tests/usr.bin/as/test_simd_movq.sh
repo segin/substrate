@@ -35,6 +35,11 @@ enc 32 'movq 8(%esp), %xmm1'    f30f7e4c2408
 enc 32 'movq %xmm3, 16(%eax)'   660fd65810
 enc 32 'movq sym, %xmm0'        f30f7e0500000000
 enc 32 'movq %xmm0, sym'        660fd60500000000
+# An address that is a number.
+enc 32 'movq 0x90909090, %mm0'  0f6f0590909090
+enc 32 'movq %mm0, 0x90909090'  0f7f0590909090
+enc 32 'movq 0x90909090, %xmm1' f30f7e0d90909090
+enc 32 'movq %xmm1, 0x1000'     660fd60d00100000
 enc 32 'movq %mm1, %mm2'        0f6fd1
 enc 32 'movq (%eax), %mm2'      0f6f10
 enc 32 'movq %mm2, (%eax)'      0f7f10

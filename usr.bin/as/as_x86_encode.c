@@ -713,6 +713,18 @@ static int default_string_op_bits(const as_x86_insn_t *insn) {
     return insn->operand_size_override ? 16 : 32;
 }
 
+/*
+ * The operand-size prefix of a 16-bit string instruction in 32-bit code.
+ * Nothing when the suffix has had it written already (`movsw`): written
+ * here as well it was there twice, `66 66 a5`.
+ */
+static int string_op_size_prefix(enc_ctx_t *ctx, const as_x86_insn_t *insn) {
+    if (insn->operand_size_override || insn->default_bits == 16u) {
+        return 0;
+    }
+    return emit8(ctx, 0x66);
+}
+
 static int resolved_string_op_bits(const as_x86_insn_t *insn, const as_x86_operand_t *a, const as_x86_operand_t *b) {
     int bits = merge_string_op_bits(a, b);
 
@@ -860,21 +872,43 @@ static int mnemonic_rep_compatible(const char *mn) {
            streq_ci(mn, "outsl");
 }
 
+/*
+ * The prefixes, in the order GNU as writes them: segment, address size,
+ * operand size, rep, lock.  A processor takes them in any order, but an
+ * object is compared with GNU's byte for byte, by tests and by people,
+ * and `rep movsw` is `66 f3 a5` there.  (They were written lock, rep,
+ * 66, 67, segment.)
+ */
 static int emit_prefixes(enc_ctx_t *ctx, const as_x86_insn_t *insn) {
-    if (insn->lock_prefix) {
-        if (!mnemonic_lock_compatible(insn->mnemonic)) {
-            set_err(ctx, "lock prefix not allowed on '%s'",
-                    insn->mnemonic ? insn->mnemonic : "(null)");
-            return -1;
-        }
-        if (emit8(ctx, 0xf0) != 0) return -1;
+    uint8_t seg = 0;
+
+    if (insn->lock_prefix && !mnemonic_lock_compatible(insn->mnemonic)) {
+        set_err(ctx, "lock prefix not allowed on '%s'",
+                insn->mnemonic ? insn->mnemonic : "(null)");
+        return -1;
     }
-    if (insn->rep_prefix != 0) {
-        if (!mnemonic_rep_compatible(insn->mnemonic)) {
-            set_err(ctx, "rep/repne prefix not allowed on '%s'",
-                    insn->mnemonic ? insn->mnemonic : "(null)");
-            return -1;
-        }
+    if (insn->rep_prefix != 0 && !mnemonic_rep_compatible(insn->mnemonic)) {
+        set_err(ctx, "rep/repne prefix not allowed on '%s'",
+                insn->mnemonic ? insn->mnemonic : "(null)");
+        return -1;
+    }
+    switch (insn->seg_override) {
+    case AS_X86_SEG_CS: seg = 0x2e; break;
+    case AS_X86_SEG_DS: seg = 0x3e; break;
+    case AS_X86_SEG_ES: seg = 0x26; break;
+    case AS_X86_SEG_FS: seg = 0x64; break;
+    case AS_X86_SEG_GS: seg = 0x65; break;
+    case AS_X86_SEG_SS: seg = 0x36; break;
+    default: break;
+    }
+    if (seg != 0 && emit8(ctx, seg) != 0) {
+        return -1;
+    }
+    if (insn->address_size_override && emit8(ctx, 0x67) != 0) {
+        return -1;
+    }
+    if (insn->operand_size_override && emit8(ctx, 0x66) != 0) {
+        return -1;
     }
     if (insn->rep_prefix == 1 && emit8(ctx, 0xf3) != 0) {
         return -1;
@@ -882,28 +916,10 @@ static int emit_prefixes(enc_ctx_t *ctx, const as_x86_insn_t *insn) {
     if (insn->rep_prefix == 2 && emit8(ctx, 0xf2) != 0) {
         return -1;
     }
-    if (insn->operand_size_override && emit8(ctx, 0x66) != 0) {
+    if (insn->lock_prefix && emit8(ctx, 0xf0) != 0) {
         return -1;
     }
-    if (insn->address_size_override && emit8(ctx, 0x67) != 0) {
-        return -1;
-    }
-    switch (insn->seg_override) {
-    case AS_X86_SEG_CS:
-        return emit8(ctx, 0x2e);
-    case AS_X86_SEG_DS:
-        return emit8(ctx, 0x3e);
-    case AS_X86_SEG_ES:
-        return emit8(ctx, 0x26);
-    case AS_X86_SEG_FS:
-        return emit8(ctx, 0x64);
-    case AS_X86_SEG_GS:
-        return emit8(ctx, 0x65);
-    case AS_X86_SEG_SS:
-        return emit8(ctx, 0x36);
-    default:
-        return 0;
-    }
+    return 0;
 }
 
 static int modrm_sib_disp(enc_ctx_t *ctx, uint8_t reg_field, const as_x86_operand_t *rm_op) {
@@ -1359,6 +1375,14 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
     ctx.errbuf = errbuf;
     ctx.errbuf_sz = errbuf_sz;
 
+    /* A q suffix asks for 64-bit operands, and this is not 64-bit code:
+     * `stosq` was assembled here as stosl. */
+    if (insn->rex_w) {
+        set_err(&ctx, "'%s' with a 64-bit operand size is only for 64-bit code",
+                insn->mnemonic != NULL ? insn->mnemonic : "?");
+        return -1;
+    }
+
     if (emit_prefixes(&ctx, insn) != 0) {
         return -1;
     }
@@ -1629,17 +1653,20 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
     } else if (streq_ci(insn->mnemonic, "movs")) {
         int bits;
 
-        if (insn->op_count != 2 ||
-            !mem_is_single_base_reg(a, AS_X86_REG_EDI) ||
-            !mem_is_single_base_reg(b, AS_X86_REG_ESI)) {
+        /* With no operands, as it is nearly always written, the suffix
+         * says the size; with both, they say it or the suffix does. */
+        if (insn->op_count != 0 &&
+            (insn->op_count != 2 ||
+             !mem_is_single_base_reg(a, AS_X86_REG_EDI) ||
+             !mem_is_single_base_reg(b, AS_X86_REG_ESI))) {
             set_unsupported_form_named(&ctx, "movs");
             return -1;
         }
-        bits = resolved_string_op_bits(insn, a, b);
+        bits = insn->op_count == 0 ? default_string_op_bits(insn) : resolved_string_op_bits(insn, a, b);
         if (bits == 8) {
             if (emit8(&ctx, 0xa4) != 0) return -1;
         } else if (bits == 16) {
-            if (emit8(&ctx, 0x66) != 0 || emit8(&ctx, 0xa5) != 0) return -1;
+            if (string_op_size_prefix(&ctx, insn) != 0 || emit8(&ctx, 0xa5) != 0) return -1;
         } else if (bits == 32) {
             if (emit8(&ctx, 0xa5) != 0) return -1;
         } else {
@@ -1687,7 +1714,7 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
             if (bits == 8) {
                 if (emit8(&ctx, 0xa6) != 0) return -1;
             } else if (bits == 16) {
-                if (emit8(&ctx, 0x66) != 0 || emit8(&ctx, 0xa7) != 0) return -1;
+                if (string_op_size_prefix(&ctx, insn) != 0 || emit8(&ctx, 0xa7) != 0) return -1;
             } else if (bits == 32) {
                 if (emit8(&ctx, 0xa7) != 0) return -1;
             } else {
@@ -1721,7 +1748,7 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
             if (bits == 8) {
                 if (emit8(&ctx, 0xac) != 0) return -1;
             } else if (bits == 16) {
-                if (emit8(&ctx, 0x66) != 0 || emit8(&ctx, 0xad) != 0) return -1;
+                if (string_op_size_prefix(&ctx, insn) != 0 || emit8(&ctx, 0xad) != 0) return -1;
             } else if (bits == 32) {
                 if (emit8(&ctx, 0xad) != 0) return -1;
             } else {
@@ -1755,7 +1782,7 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
             if (bits == 8) {
                 if (emit8(&ctx, 0xae) != 0) return -1;
             } else if (bits == 16) {
-                if (emit8(&ctx, 0x66) != 0 || emit8(&ctx, 0xaf) != 0) return -1;
+                if (string_op_size_prefix(&ctx, insn) != 0 || emit8(&ctx, 0xaf) != 0) return -1;
             } else if (bits == 32) {
                 if (emit8(&ctx, 0xaf) != 0) return -1;
             } else {
@@ -1768,19 +1795,23 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
     } else if (streq_ci(insn->mnemonic, "ins")) {
         int bits = insn->byte_op ? 8 : 0;
 
-        if (insn->op_count != 2 ||
-            !mem_is_single_base_reg(a, AS_X86_REG_EDI) ||
-            !is_dx_port_operand(b)) {
+        if (insn->op_count != 0 &&
+            (insn->op_count != 2 ||
+             !mem_is_single_base_reg(a, AS_X86_REG_EDI) ||
+             !is_dx_port_operand(b))) {
             set_unsupported_form_named(&ctx, "ins");
             return -1;
         }
-        if (bits == 0) {
+        if (bits == 0 && insn->op_count == 2) {
             bits = (int)a->u.mem.size_bits;
+        }
+        if (bits == 0) {
+            bits = default_string_op_bits(insn);
         }
         if (bits == 8) {
             if (emit8(&ctx, 0x6c) != 0) return -1;
         } else if (bits == 16) {
-            if (emit8(&ctx, 0x66) != 0 || emit8(&ctx, 0x6d) != 0) return -1;
+            if (string_op_size_prefix(&ctx, insn) != 0 || emit8(&ctx, 0x6d) != 0) return -1;
         } else if (bits == 32) {
             if (emit8(&ctx, 0x6d) != 0) return -1;
         } else {
@@ -1823,19 +1854,23 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
     } else if (streq_ci(insn->mnemonic, "outs")) {
         int bits = insn->byte_op ? 8 : 0;
 
-        if (insn->op_count != 2 ||
-            !is_dx_port_operand(a) ||
-            !mem_is_single_base_reg(b, AS_X86_REG_ESI)) {
+        if (insn->op_count != 0 &&
+            (insn->op_count != 2 ||
+             !is_dx_port_operand(a) ||
+             !mem_is_single_base_reg(b, AS_X86_REG_ESI))) {
             set_unsupported_form_named(&ctx, "outs");
             return -1;
         }
-        if (bits == 0) {
+        if (bits == 0 && insn->op_count == 2) {
             bits = (int)b->u.mem.size_bits;
+        }
+        if (bits == 0) {
+            bits = default_string_op_bits(insn);
         }
         if (bits == 8) {
             if (emit8(&ctx, 0x6e) != 0) return -1;
         } else if (bits == 16) {
-            if (emit8(&ctx, 0x66) != 0 || emit8(&ctx, 0x6f) != 0) return -1;
+            if (string_op_size_prefix(&ctx, insn) != 0 || emit8(&ctx, 0x6f) != 0) return -1;
         } else if (bits == 32) {
             if (emit8(&ctx, 0x6f) != 0) return -1;
         } else {
@@ -5186,7 +5221,7 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
         if (bits == 8) {
             if (emit8(&ctx, 0xa4) != 0) return -1;
         } else if (bits == 16) {
-            if (emit8(&ctx, 0x66) != 0 || emit8(&ctx, 0xa5) != 0) return -1;
+            if (string_op_size_prefix(&ctx, insn) != 0 || emit8(&ctx, 0xa5) != 0) return -1;
         } else if (bits == 32) {
             if (emit8(&ctx, 0xa5) != 0) return -1;
         } else if (bits == 64) {
@@ -5238,7 +5273,7 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
             if (bits == 8) {
                 if (emit8(&ctx, 0xaa) != 0) return -1;
             } else if (bits == 16) {
-                if (emit8(&ctx, 0x66) != 0 || emit8(&ctx, 0xab) != 0) return -1;
+                if (string_op_size_prefix(&ctx, insn) != 0 || emit8(&ctx, 0xab) != 0) return -1;
             } else if (bits == 32) {
                 if (emit8(&ctx, 0xab) != 0) return -1;
             } else if (bits == 64) {
@@ -5277,7 +5312,7 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
             if (bits == 8) {
                 if (emit8(&ctx, 0xa6) != 0) return -1;
             } else if (bits == 16) {
-                if (emit8(&ctx, 0x66) != 0 || emit8(&ctx, 0xa7) != 0) return -1;
+                if (string_op_size_prefix(&ctx, insn) != 0 || emit8(&ctx, 0xa7) != 0) return -1;
             } else if (bits == 32) {
                 if (emit8(&ctx, 0xa7) != 0) return -1;
             } else if (bits == 64) {
@@ -5319,7 +5354,7 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
             if (bits == 8) {
                 if (emit8(&ctx, 0xac) != 0) return -1;
             } else if (bits == 16) {
-                if (emit8(&ctx, 0x66) != 0 || emit8(&ctx, 0xad) != 0) return -1;
+                if (string_op_size_prefix(&ctx, insn) != 0 || emit8(&ctx, 0xad) != 0) return -1;
             } else if (bits == 32) {
                 if (emit8(&ctx, 0xad) != 0) return -1;
             } else if (bits == 64) {
@@ -5361,7 +5396,7 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
             if (bits == 8) {
                 if (emit8(&ctx, 0xae) != 0) return -1;
             } else if (bits == 16) {
-                if (emit8(&ctx, 0x66) != 0 || emit8(&ctx, 0xaf) != 0) return -1;
+                if (string_op_size_prefix(&ctx, insn) != 0 || emit8(&ctx, 0xaf) != 0) return -1;
             } else if (bits == 32) {
                 if (emit8(&ctx, 0xaf) != 0) return -1;
             } else if (bits == 64) {
@@ -5386,10 +5421,14 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
         if (bits == 0) {
             bits = (int)a->u.mem.size_bits;
         }
+        if (bits == 0) {
+            /* `insl (%dx), %es:(%rdi)`: the suffix says it. */
+            bits = default_string_op_bits(insn);
+        }
         if (bits == 8) {
             if (emit8(&ctx, 0x6c) != 0) return -1;
         } else if (bits == 16) {
-            if (emit8(&ctx, 0x66) != 0 || emit8(&ctx, 0x6d) != 0) return -1;
+            if (string_op_size_prefix(&ctx, insn) != 0 || emit8(&ctx, 0x6d) != 0) return -1;
         } else if (bits == 32) {
             if (emit8(&ctx, 0x6d) != 0) return -1;
         } else {
@@ -5441,10 +5480,13 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
         if (bits == 0) {
             bits = (int)b->u.mem.size_bits;
         }
+        if (bits == 0) {
+            bits = default_string_op_bits(insn);
+        }
         if (bits == 8) {
             if (emit8(&ctx, 0x6e) != 0) return -1;
         } else if (bits == 16) {
-            if (emit8(&ctx, 0x66) != 0 || emit8(&ctx, 0x6f) != 0) return -1;
+            if (string_op_size_prefix(&ctx, insn) != 0 || emit8(&ctx, 0x6f) != 0) return -1;
         } else if (bits == 32) {
             if (emit8(&ctx, 0x6f) != 0) return -1;
         } else {

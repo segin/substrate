@@ -186,9 +186,10 @@ status 0.
   Trace: AS-SEL-009, AS-EXT-008.  Verify: T — `crc32b mem,%ebx` (`F0`), `crc32 %al,%ebx`, `crc32 %ax,%ebx` (with `66`), `crc32w (%r12),%ebx`, `crc32 %sil,%ebx` (with `REX`), `crc32q`: GNU.
 - [ ] **AS-T-053** When `montmul`, `xstore-rng`, `umonitor %cx`, `pshufd $-1` or `tpause %ecx` is written, the assembler shall encode it as GNU does.
   Trace: AS-SEL-009.  Verify: T — each.
-- [ ] **AS-T-054** When a string instruction is written with no operands, the assembler shall encode it with no segment override.
+- [x] **AS-T-054** When a string instruction is written with no operands, the assembler shall encode it with no segment override.
   Trace: AS-SEL-014, AS-X86-041.  Verify: T — bare `movsb`, `movsw`, `movsl`, `movsq`, `stos*`, `lods*`, `scas*`, `cmps*`, `ins*`, `outs*`, with `rep`/`repe`/`repne`, both modes: GNU.
-- [ ] **AS-T-055** When a string instruction is written with operands, the assembler shall emit a segment override for the source operand's segment only where it differs from the default, and none for the `%es` destination.
+  Met: `test_string_insn.sh`.  With it the prefixes are written in GNU's order (segment, address size, operand size, rep, lock), and a `q` suffix in 32-bit code is refused where it reaches the general encoder.
+- [x] **AS-T-055** When a string instruction is written with operands, the assembler shall emit a segment override for the source operand's segment only where it differs from the default, and none for the `%es` destination.
   Trace: AS-X86-025.  Verify: T — `movsl (%esi),%es:(%edi)` (`A5`), `movsw %cs:(%esi),%es:(%edi)` (`2E 66 A5`), `lodsb %fs:(%esi)`: GNU.
 - [ ] **AS-T-056** If a string instruction's destination is written with a segment other than `%es`, then the assembler shall refuse it.
   Trace: AS-X86-025.  Verify: T — `stosl %eax,%ds:(%edi)`: exit 1.

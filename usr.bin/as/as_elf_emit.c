@@ -2959,6 +2959,42 @@ static as_x86_seg_t map_seg(const char *s) {
     return AS_X86_SEG_NONE;
 }
 
+/* movs, cmps, lods, stos, scas, ins and outs, with a size suffix or not. */
+static int is_string_instruction(const char *mn) {
+    static const char *const stems[] = { "movs", "cmps", "lods", "stos", "scas", "ins", "outs" };
+    size_t i;
+
+    if (mn == NULL) {
+        return 0;
+    }
+    for (i = 0; i < sizeof(stems) / sizeof(stems[0]); ++i) {
+        size_t n = strlen(stems[i]);
+
+        if (strncasecmp(mn, stems[i], n) == 0 &&
+            (mn[n] == '\0' || (mn[n + 1] == '\0' && strchr("bwlqdBWLQD", mn[n]) != NULL))) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* 's' for %si, %esi or %rsi, 'd' for %di, %edi or %rdi, 0 for another. */
+static char string_index_register(const char *reg) {
+    if (reg == NULL) {
+        return 0;
+    }
+    if (reg[0] == '%') {
+        reg++;
+    }
+    if (strcasecmp(reg, "si") == 0 || strcasecmp(reg, "esi") == 0 || strcasecmp(reg, "rsi") == 0) {
+        return 's';
+    }
+    if (strcasecmp(reg, "di") == 0 || strcasecmp(reg, "edi") == 0 || strcasecmp(reg, "rdi") == 0) {
+        return 'd';
+    }
+    return 0;
+}
+
 static int emit_seg_override_byte(unsigned char *out, size_t out_cap, size_t *pos_io, const char *segment_reg) {
     as_x86_seg_t seg;
 
@@ -4225,6 +4261,15 @@ static int emit_x87_forms(const as_instruction_t *insn, int intel_syntax, int is
 static int emit_x86_64_mmx_memop(unsigned char opcode, unsigned dst_mmx, const as_mem_operand_t *mem,
                                  unsigned char *out, size_t out_cap, size_t *out_len);
 
+/* An address written bare: a symbol, or a number with no `$` (which the
+ * parser gives the kind of an immediate, there being no other). */
+static int operand_is_bare_address(const as_operand_t *op) {
+    if (op->kind == AS_OPERAND_LABEL_REF) {
+        return 1;
+    }
+    return op->kind == AS_OPERAND_IMMEDIATE && op->raw != NULL && op->raw[0] != '$';
+}
+
 static int emit_simd_movq(const as_instruction_t *insn, int intel_syntax, int is_64,
                           unsigned char *out, size_t out_cap, size_t *out_len) {
     const as_operand_t *src;
@@ -4248,8 +4293,8 @@ static int emit_simd_movq(const as_instruction_t *insn, int intel_syntax, int is
     dst_mm = dst->kind == AS_OPERAND_REGISTER && parse_mmx_reg(dst->u.reg, &dm) == 0;
     /* A bare symbol is memory too; the 64-bit emitters of ModRM do not
      * take one, and it is left to what was there. */
-    src_mem = src->kind == AS_OPERAND_MEMORY || (!is_64 && src->kind == AS_OPERAND_LABEL_REF);
-    dst_mem = dst->kind == AS_OPERAND_MEMORY || (!is_64 && dst->kind == AS_OPERAND_LABEL_REF);
+    src_mem = src->kind == AS_OPERAND_MEMORY || (!is_64 && operand_is_bare_address(src));
+    dst_mem = dst->kind == AS_OPERAND_MEMORY || (!is_64 && operand_is_bare_address(dst));
     if (!is_64 && (sx > 7u || dx > 7u)) {
         return -1;
     }
@@ -9575,9 +9620,28 @@ static int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_st
         }
     }
     if (in.seg_override == AS_X86_SEG_NONE) {
+        int string_insn = is_string_instruction(in.mnemonic);
+
         for (j = 0; j < in.op_count; ++j) {
             const as_operand_t *op = &st->u.instr.operands[op_index[j]];
             if (op->kind == AS_OPERAND_MEMORY && op->u.mem.segment_reg != NULL) {
+                /*
+                 * A string instruction has two addresses and one prefix,
+                 * which is the source's.  The destination is through
+                 * %es whatever is written, and its %es: is no prefix;
+                 * nor is a %ds: on the source, which is where it reads
+                 * anyway.  (The first segment written was taken, and
+                 * `movsb %fs:(%esi), %es:(%edi)` got Intel's order's
+                 * first, an %es prefix, and read from the wrong place.)
+                 */
+                if (string_insn) {
+                    as_x86_seg_t seg = map_seg(op->u.mem.segment_reg);
+                    char family = string_index_register(op->u.mem.base_reg);
+
+                    if (family == 'd' || (family == 's' && seg == AS_X86_SEG_DS)) {
+                        continue;
+                    }
+                }
                 in.seg_override = map_seg(op->u.mem.segment_reg);
                 break;
             }

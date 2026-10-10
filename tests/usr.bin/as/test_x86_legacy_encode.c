@@ -146,7 +146,8 @@ int main(void) {
     insn.ops[0] = reg_op(AS_X86_REG_EAX);
     insn.ops[1] = mem_disp32(0x12345678);
     {
-        const uint8_t exp[] = {0x66, 0x67, 0x64, 0x8b, 0x05, 0x78, 0x56, 0x34, 0x12};
+        /* GNU as's order: segment, address size, operand size. */
+        const uint8_t exp[] = {0x64, 0x67, 0x66, 0x8b, 0x05, 0x78, 0x56, 0x34, 0x12};
         check_encode(&insn, exp, sizeof(exp));
     }
 
