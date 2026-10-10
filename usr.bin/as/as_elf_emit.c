@@ -581,6 +581,30 @@ static int x86_mnemonic_keeps_trailing_size_letter(const char *mnemonic) {
     return 0;
 }
 
+/* Whether a directive has an argument at this place that is not empty
+ * (`.p2align 4,,10` has an empty second). */
+static int directive_has_arg(const as_directive_t *d, size_t i) {
+    return d != NULL && i < d->arg_count && d->args[i] != NULL && d->args[i][0] != '\0';
+}
+
+/*
+ * The third argument of .align, .balign and .p2align: the most padding
+ * that is wanted.  If reaching the alignment takes more, there is to be
+ * none.  Returns 1 if `need` bytes are too many, 0 if not or if there is
+ * no limit, -1 if the limit is not a number.
+ */
+static int align_exceeds_max_skip(const as_directive_t *d, size_t need) {
+    long long max_skip;
+
+    if (!directive_has_arg(d, 2)) {
+        return 0;
+    }
+    if (as_expr_eval_string(d->args[2], NULL, NULL, &max_skip) != AS_EXPR_EVAL_OK || max_skip < 0) {
+        return -1;
+    }
+    return (unsigned long long)need > (unsigned long long)max_skip ? 1 : 0;
+}
+
 /*
  * Expressions are as_expr.c's.  These give its three answers the 0 or -1
  * the rest of this file tests for.
@@ -7402,7 +7426,7 @@ static int append_directive_data(bytebuf_t *buf, const as_directive_t *d) {
             v < 0) {
             return -1;
         }
-        if (d->arg_count >= 2 &&
+        if (directive_has_arg(d, 1) &&
             (parse_int64(d->args[1], &fill) != 0 && parse_const_expr_string(d->args[1], &fill) != 0)) {
             return -1;
         }
@@ -7418,6 +7442,11 @@ static int append_directive_data(bytebuf_t *buf, const as_directive_t *d) {
             return -1;
         }
         need = (align - (buf->len & (align - 1))) & (align - 1);
+        switch (align_exceeds_max_skip(d, need)) {
+        case 1: need = 0; break;
+        case 0: break;
+        default: return -1;
+        }
         while (need-- > 0) {
             if (bytebuf_append_u64_le(buf, (uint64_t)fill, 1) != 0) {
                 return -1;
@@ -11237,6 +11266,11 @@ static int append_directive_data_ctx(emit_ctx_t *ctx, bytebuf_t *buf, const char
             return -1;
         }
         need = (align - (buf->len & (align - 1))) & (align - 1);
+        switch (align_exceeds_max_skip(d, need)) {
+        case 1: need = 0; break;
+        case 0: break;
+        default: return -1;
+        }
         while (need-- > 0) {
             if (bytebuf_append_u64_le(buf, (uint64_t)fill, 1) != 0) {
                 return -1;
@@ -13349,7 +13383,7 @@ static int append_data_directive_binary(emit_ctx_t *ctx, const as_stmt_t *st, bi
         if (d->arg_count < 1 || parse_nonneg_u64_or_reloc(ctx, st, d->args[0], d->name, &raw) != 0) {
             return -1;
         }
-        if (d->arg_count >= 2 && parse_nonneg_u64_or_reloc(ctx, st, d->args[1], ".align fill", &fill) != 0) {
+        if (directive_has_arg(d, 1) && parse_nonneg_u64_or_reloc(ctx, st, d->args[1], ".align fill", &fill) != 0) {
             return -1;
         }
         if (strcmp(d->name, ".p2align") == 0) {
@@ -13366,6 +13400,14 @@ static int append_data_directive_binary(emit_ctx_t *ctx, const as_stmt_t *st, bi
             return -1;
         }
         need = (align - (sec->buf.len & (align - 1))) & (align - 1);
+        switch (align_exceeds_max_skip(d, need)) {
+        case 1: need = 0; break;
+        case 0: break;
+        default:
+            set_err(ctx, "%s:%u: %s: the maximum to skip is not a number",
+                    st->file != NULL ? st->file : "<input>", st->line, d->name);
+            return -1;
+        }
         while (need-- > 0) {
             if (bytebuf_append_u64_le(&sec->buf, fill, 1) != 0) {
                 set_err(ctx, "%s:%u: out of memory", st->file != NULL ? st->file : "<input>", st->line);

@@ -105,10 +105,14 @@ status 0.
 - [ ] **AS-T-024** When `.pushsection` is given a number as its second argument, the assembler shall select that subsection and shall leave the section's flags as they were.
   Trace: AS-SEC-001.  Verify: T — `.text` / `nop` / `.pushsection .text, 1` / `ret` / `.popsection` / `nop`: `.text` is `AX` and holds `90 90 c3`.
   In part: the number is no longer read as flags, so the section keeps them and its code (`test_subsection.sh`).  Subsection 0 is entered; **any other is refused**, by `.pushsection`, `.subsection`, `.text n` and `.data n` alike, with "subsections other than 0 are not supported".  Before this they were silently ignored and the contents assembled in source order, which puts out-of-line code in line; 240 is what gathers them, and ticks this.
-- [ ] **AS-T-025** When a directive is written with an empty argument, the assembler shall keep the argument's position.
+- [x] **AS-T-025** When a directive is written with an empty argument, the assembler shall keep the argument's position.
   Trace: AS-FE-002.  Verify: T — `.byte 1,,2` is refused as GNU refuses it; `.p2align 4,,10` reaches the directive with three arguments.
-- [ ] **AS-T-026** When an alignment directive names a maximum skip and the padding needed exceeds it, the assembler shall emit no padding.
+  Done: `test_align_max_skip.sh`.  The verification above was wrong about GNU: it takes an empty argument of a data directive for zero and warns (`.byte 1,,2` is `01 00 02`).  Here it is refused, which is 087.
+- [x] **AS-T-026** When an alignment directive names a maximum skip and the padding needed exceeds it, the assembler shall emit no padding.
   Trace: AS-FE-002.  Verify: T — `nop` / `.p2align 4,,10` / `nop` is `90 90`; `.p2align 4,,15` pads; `.balign 8,,3` likewise.  After: 025.
+  Done: `test_align_max_skip.sh`; one function for the three copies of the alignment code.  The padding of gcc's `-O2` output is now the right length.  A branch **over** an alignment is still mis-aimed where the alignment pads (`jmp 1f` / `nop` / `.p2align 3` / `1:`): that is 222, and is the next thing between this assembler and compiler output.
+- [ ] **AS-T-087** When a data directive is written with an empty argument, the assembler shall emit zero for it and warn.
+  Trace: AS-FE-002.  Verify: T — `.byte 1,,2` is `01 00 02`, `.long ,5` is zero then 5, each with a warning on standard error: GNU.  After: 064.
 - [ ] **AS-T-027** If a local label reference has no definition in the direction it names, then the assembler shall fail and name the reference and its line.
   Trace: AS-FE-003.  Verify: T — `jmp 1f` with no `1:`; `call 2b` before any `2:`.
 - [ ] **AS-T-028** When `*` precedes an operand of `call` or `jmp` that is not a register, the assembler shall encode an indirect branch through that memory operand.
@@ -850,7 +854,7 @@ is not to be done, 370 is ticked with "removed" and the rest struck.
 | AS-ARM-007 | 383–386 |
 | AS-ARM-008 | 166, 374 |
 | AS-FE-001 | 123–128 |
-| AS-FE-002 | 025, 026 |
+| AS-FE-002 | 025, 026, 087 |
 | AS-FE-003 | 027 |
 | AS-FE-004 | 134, 135 |
 | AS-FE-005 | 028 |

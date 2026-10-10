@@ -1761,6 +1761,18 @@ static int parse_directive(const as_token_t *tokv, size_t n, as_stmt_t *st) {
                     return -1;
                 }
                 free(arg);
+            } else if (i < n || start > 1) {
+                /*
+                 * Nothing between two commas, or before the first or
+                 * after the last: an argument all the same, an empty one,
+                 * so that those after it keep their places.  Dropped, as
+                 * it was, `.p2align 4,,10` became `.p2align 4,10` -- pad
+                 * with the byte 10 -- where the 10 is the most padding
+                 * wanted.
+                 */
+                if (add_directive_arg(&st->u.directive, "") != 0) {
+                    return -1;
+                }
             }
             start = i + 1;
         }
