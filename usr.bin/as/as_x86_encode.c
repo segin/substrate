@@ -5054,7 +5054,9 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
         }
     } else if (streq_ci(insn->mnemonic, "nop") && insn->op_count == 1 &&
                (a->kind == AS_X86_OP_REG || a->kind == AS_X86_OP_MEM)) {
-        if (emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x18) != 0 ||
+        /* 0F 1F /0, the long NOP; 0F 18 /0, which this had, is
+         * prefetchnta. */
+        if (emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x1f) != 0 ||
             modrm_sib_disp64(&ctx, AS_X86_REG_RAX, a, &rex_r, &rex_x, &rex_b) != 0) {
             return -1;
         }

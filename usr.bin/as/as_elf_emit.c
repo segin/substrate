@@ -6442,7 +6442,10 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         if (insn->operand_count != 1 || a == NULL) {
             return -1;
         }
-        return emit_i386_prefixed_0f_rm(0x66, 0x1d, 0u, a, out, out_cap, out_len);
+        /* The long NOP is 0F 1F /0.  This and nopl below had 0F 1D, which
+         * is another instruction (a prefetch hint on AMD, reserved on
+         * Intel), in the padding every compiler writes. */
+        return emit_i386_prefixed_0f_rm(0x66, 0x1f, 0u, a, out, out_cap, out_len);
     }
     {
         unsigned char prefix;
@@ -6583,7 +6586,7 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         if (insn->operand_count != 1 || a == NULL || a->kind == AS_OPERAND_REGISTER || a->kind == AS_OPERAND_COPROCESSOR) {
             return -1;
         }
-        return emit_i386_prefixed_0f_rm(0x00, 0x1d, 0u, a, out, out_cap, out_len);
+        return emit_i386_prefixed_0f_rm(0x00, 0x1f, 0u, a, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "bndldx") == 0) {
         if (insn->operand_count != 2) {
