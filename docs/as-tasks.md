@@ -126,8 +126,9 @@ status 0.
 
 ### B.2 Prefixes
 
-- [ ] **AS-T-030** When a `lock` prefix is written before an instruction whose destination is memory, the assembler shall emit `F0` before the instruction.
+- [x] **AS-T-030** When a `lock` prefix is written before an instruction whose destination is memory, the assembler shall emit `F0` before the instruction.
   Trace: AS-SEL-001.  Verify: T — `lock` with `cmpxchg`, `cmpxchg8b`, `cmpxchg16b`, `xadd`, `bts`, `btr`, `btc`, `inc`, `dec`, `add`, `or`, `adc`, `sbb`, `and`, `sub`, `xor`, `neg`, `not`, `xchg`, each width, both modes: GNU.
+  Done: `test_lock.sh`.  Not every width: the 16-bit forms of `cmpxchg` and `bt*` have their `lock` and still lack their `66` in 32-bit mode (174), and `lock addl $1,(%eax)` is the long form (186).
 - [ ] **AS-T-031** When a `rep`, `repe`, `repne` or segment prefix is written before an instruction encoded by the emitter's own tables, the assembler shall emit it.
   Trace: AS-SEL-001.  Verify: T — the callers of the prefixed-`0F` emitter with each prefix: GNU.
 - [ ] **AS-T-032** If `lock` is written before an instruction or operand form the processor does not allow it on, then the assembler shall refuse it.

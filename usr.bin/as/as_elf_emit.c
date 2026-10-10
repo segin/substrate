@@ -3875,6 +3875,37 @@ static int lookup_x86_64_x87_mem16_32_64(const char *mnemonic, unsigned char *op
     return -1;
 }
 
+/*
+ * Put F0 before an encoded instruction unless it is already among its
+ * legacy prefixes -- the bytes before the opcode that are segment
+ * overrides, 66, 67, F2 or F3.
+ */
+static int x86_prepend_lock_if_absent(unsigned char *code, size_t code_cap, size_t *code_len) {
+    size_t i;
+
+    if (code == NULL || code_len == NULL) {
+        return -1;
+    }
+    for (i = 0; i < *code_len; ++i) {
+        unsigned char c = code[i];
+
+        if (c == 0xf0) {
+            return 0;
+        }
+        if (c != 0x26 && c != 0x2e && c != 0x36 && c != 0x3e && c != 0x64 && c != 0x65 &&
+            c != 0x66 && c != 0x67 && c != 0xf2 && c != 0xf3) {
+            break;
+        }
+    }
+    if (*code_len >= code_cap) {
+        return -1;
+    }
+    memmove(code + 1, code, *code_len);
+    code[0] = 0xf0;
+    (*code_len)++;
+    return 0;
+}
+
 static int emit_i386_stmt_prefixes(const as_instruction_t *insn, unsigned char *out, size_t out_cap, size_t *out_len) {
     size_t pos = 0;
 
@@ -8971,6 +9002,17 @@ static int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_st
 
     if (!cfg->is_64 && emit_i386_special(&st->u.instr, intel_syntax, code, code_cap, code_len) == 0) {
         if (*code_len > 0) {
+            /*
+             * Most of that function's branches are not handed the
+             * instruction's prefixes and do not write them: `lock
+             * cmpxchgl %ebx, (%eax)` came out as 0f b1 18, an exchange
+             * that is not atomic.  If lock was written and is not among
+             * the prefixes of what was encoded, it goes in front.
+             */
+            if ((st->u.instr.prefixes & AS_PREFIX_LOCK) != 0 &&
+                x86_prepend_lock_if_absent(code, code_cap, code_len) != 0) {
+                return -1;
+            }
             return 0;
         }
     }
