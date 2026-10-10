@@ -575,5 +575,43 @@ t "32"    660f6eee       'movd %esi, %xmm5'
 t "32"    d9cd           'fxch %st(5)'
 t "32"    0f20e6         'movl %cr4, %esi'
 
+# A displacement written as the number 0 is no displacement: `0(%eax)`
+# is `(%eax)`.  It was kept as a byte of zero.  And (%ebp), (%rbp) and
+# (%r13), which cannot be without one, have one byte of zero and had
+# four.  The padding a disassembler prints, `nopw 0x0(%rax,%rax,1)`, is
+# among these.
+t "32"    8b08           'movl 0x0(%eax), %ecx'
+t "32"    8b08           'movl 1-1(%eax), %ecx'
+t "32"    8b0424         'movl 0(%esp), %eax'
+t "64"    8b0424         'movl 0(%rsp), %eax'
+t "64"    418b0424       'movl 0(%r12), %eax'
+t "32"    8d36           'leal 0(%esi), %esi'
+t "32"    dd00           'fldl 0(%eax)'
+t "32"    0f2808         'movaps 0(%eax), %xmm1'
+t "32"    660f380000     'pshufb 0(%eax), %xmm0'
+t "32"    660f1f0400     'nopw 0(%eax,%eax,1)'
+t "64"    660f1f0400     'nopw 0(%rax,%rax,1)'
+t "64"    0f1f00         'nopl 0(%rax)'
+t "32"    8b4500         'movl (%ebp), %eax'
+t "32"    8b4500         'movl 0(%ebp), %eax'
+t "64"    8b4500         'movl (%rbp), %eax'
+t "64"    418b4500       'movl (%r13), %eax'
+t "32"    8b4c4500       'movl (%ebp,%eax,2), %ecx'
+t "64"    8b4c4500       'movl 0(%rbp,%rax,2), %ecx'
+t "64"    418b4c0500     'movl (%r13,%rax), %ecx'
+t "64"    418b440500     'movl 0(%r13,%rax), %eax'
+t "32"    dd4500         'fldl (%ebp)'
+t "32"    0f284d00       'movaps 0(%ebp), %xmm1'
+t "64"    f30fb84500     'popcnt 0(%rbp), %eax'
+t "64"    660f38004500   'pshufb 0(%rbp), %xmm0'
+t "64"    66410f38004500 'pshufb (%r13), %xmm0'
+t "32"    660f38004500   'pshufb (%ebp), %xmm0'
+t "32"    67668b07       'movw 0(%bx), %ax'
+t "32"    67668b4600     'movw (%bp), %ax'
+t "32"    67668b4600     'movw 0(%bp), %ax'
+t "32"    67668b02       'movw (%bp,%si), %ax'
+t "32"    67668b02       'movw 0(%bp,%si), %ax'
+t "32"    8b1c8500000000 'movl 0(,%eax,4), %ebx'
+
 [ "$fail" -eq 0 ] && echo "ok: instruction forms ($cases cases)"
 exit "$fail"

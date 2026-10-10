@@ -1422,10 +1422,18 @@ static int emit_i386_modrm_rm_operand(unsigned reg_field, const as_operand_t *rm
              * then written over the instruction, or refused: `flds
              * sym(%ebx)` failed, `movaps sym(%ebx), %xmm0` assembled to
              * four zero bytes.
+             *
+             * A displacement that is the number 0 is none, but under
+             * %ebp, whose code without one means an absolute address:
+             * there it is one byte of zero.
              */
-            if (!has_disp && base_reg != 5u) {
-                mod = 0;
-            } else if (has_disp && !expr_has_symbol(mem->disp) && disp >= -128 && disp <= 127) {
+            int symbolic = has_disp && expr_has_symbol(mem->disp);
+
+            if (!symbolic && (!has_disp || disp == 0)) {
+                mod = (base_reg != 5u) ? 0 : 1;
+                disp = 0;
+                has_disp = (mod == 1);
+            } else if (!symbolic && disp >= -128 && disp <= 127) {
                 mod = 1;
             } else {
                 mod = 2;
@@ -8132,6 +8140,28 @@ static int convert_operand_x86(const as_operand_t *op, const char *mnemonic, as_
             } else {
                 snprintf(errbuf, errbuf_sz, "unsupported memory displacement expression");
                 return -1;
+            }
+        }
+        /*
+         * A displacement written as the number 0 is no displacement:
+         * `0(%eax)` is `(%eax)`, one byte shorter, as GNU as has it.
+         * And the reverse for the one base that cannot be without: the
+         * code of (%ebp) with no displacement means something else, so
+         * it has a displacement of zero, of one byte and not of four.
+         * (16-bit addressing has its own table, where (%bp,%si) needs
+         * none.)
+         */
+        if (dst->u.mem.has_base && !dst->u.mem.force_disp32) {
+            int is_bp = ((unsigned)dst->u.mem.base & 7u) == 5u && dst->u.mem.base < AS_X86_REG_AH;
+
+            if (dst->u.mem.addr_bits == 16u && dst->u.mem.has_index) {
+                is_bp = 0;
+            }
+            if (dst->u.mem.has_disp && dst->u.mem.disp == 0 && !is_bp) {
+                dst->u.mem.has_disp = 0;
+            } else if (!dst->u.mem.has_disp && is_bp && dst->u.mem.addr_bits != 16u) {
+                dst->u.mem.has_disp = 1;
+                dst->u.mem.disp = 0;
             }
         }
         if (!dst->u.mem.has_base && !dst->u.mem.has_index) {

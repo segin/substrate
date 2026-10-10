@@ -527,8 +527,9 @@ one table of templates; there is one ModRM/SIB/prefix emitter.
   Trace: AS-SEL-010.  Verify: T — `movaps (%bx),%xmm0` in 32-bit mode (16-bit ModRM with `67`), `fldl (%eax)` in 64-bit mode (`67 dd 00`), `movl (%rax),%ebx` in 32-bit mode refused.  After: 162.
 - [ ] **AS-T-177** If the base and index of a memory operand are of different widths, then the assembler shall refuse the operand, but for a vector index.
   Trace: AS-SEL-010, AS-EXT-009.  Verify: T — `(%eax,%rbx)` refused; `(%rax,%xmm2,4)` accepted for a gather.  After: 162.
-- [ ] **AS-T-394** When the displacement of a memory operand is written and is the constant zero, the assembler shall encode the operand with no displacement, where the base register allows it.
+- [x] **AS-T-394** When the displacement of a memory operand is written and is the constant zero, the assembler shall encode the operand with no displacement, where the base register allows it.
   Trace: found while doing 048; no audit entry.  Verify: T — `movl 0(%eax),%ecx` (`8B 08`), `nopw 0(%rax,%rax,1)` (`66 0F 1F 04 00`), `movl 0(%ebp),%ecx` (`8B 4D 00`), `movl sym(%eax),%ecx` with `sym = 0` (four bytes still): GNU.
+  Done where an operand is converted for the encoders, so for all of them at once, and in the emitter's own ModRM code.  With it, the other way about: `(%ebp)`, `(%rbp)` and `(%r13)`, which must have a displacement, had four bytes of zero and have one.  442 more lines of the corpora are GNU's bytes.  `test_insn_forms.sh`, 32 cases.
 
 ### D.3 Forms that are missing
 
@@ -1059,5 +1060,5 @@ is not to be done, 370 is ticked with "removed" and the rest struck.
 | AS-EXT-009 | 185, 325, 332–337 |
 | AS-EXT-010 | 040, 171, 338, 339 (339 closes all of AS-EXT) |
 
-348 tasks: 72 done, 276 open.  Numbers run to 397, with gaps left between
+348 tasks: 73 done, 275 open.  Numbers run to 397, with gaps left between
 sections for tasks found along the way.
