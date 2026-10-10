@@ -405,6 +405,9 @@ with a symbol table.
   Trace: AS-FE-014.  Verify: I — the man page and the option table agree; T — one case each.
 - [ ] **AS-T-146** When no `-o` is given, the assembler shall write `a.out`.
   Trace: AS-FE-032.  Verify: T.
+- [x] **AS-T-390** When `-msyntax=intel` is given and the source has an `.att_syntax`, the assembler shall read what follows the directive as AT&T.
+  Trace: AS-FE-014.  Verify: T — `mov eax, 1` / `.att_syntax` / `mov $2, %eax` / `mov (%ebx), %ecx` under `-msyntax=intel`: GNU.
+  Done: the encoder took the option for the syntax of any statement the parser had marked AT&T, so the option outlasted the directive; it takes the statement's own.  `test_intel_dual_syntax.sh`, `test_cli_extended.sh`.  Found in rewriting the test of the options, which had never given `-msyntax=intel` a source with a directive in it.
 
 ### C.6 Messages and temporary files
 

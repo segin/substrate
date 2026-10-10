@@ -511,4 +511,17 @@ if "$AS" -32 -o "$TMP/malformed_qual.o" "$TMP/malformed_qual.s" >"$TMP/mq.out" 2
 fi
 grep -Eqi "malformed Intel size qualifier" "$TMP/mq.err"
 
+# -msyntax=intel is where the source starts, not what it is throughout:
+# an .att_syntax in the source is AT&T from there on.
+cat > "$TMP/option_then_att.s" <<'SRC'
+.text
+mov eax, 1
+.att_syntax
+mov $2, %eax
+mov (%ebx), %ecx
+SRC
+"$AS" -32 -msyntax=intel -o "$TMP/option_then_att.o" "$TMP/option_then_att.s"
+objcopy -O binary --only-section=.text "$TMP/option_then_att.o" "$TMP/option_then_att.bin"
+[ "$(od -An -v -tx1 "$TMP/option_then_att.bin" | tr -d ' \n')" = "b801000000b8020000008b0b" ]
+
 echo "ok: intel dual-syntax and memory-addressing compatibility"

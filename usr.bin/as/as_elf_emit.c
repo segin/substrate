@@ -9344,7 +9344,12 @@ static int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_st
     }
     *code_len = 0;
 
-    intel_syntax = (st->u.instr.syntax_intel != 0) ? 1 : (cfg->intel_syntax != 0);
+    /*
+     * The statement's own syntax, which the parser set from the option
+     * and then from each .intel_syntax and .att_syntax it met: not the
+     * option again, or -msyntax=intel would outlast an .att_syntax.
+     */
+    intel_syntax = (st->u.instr.syntax_intel != 0);
     memset(&in, 0, sizeof(in));
     if (normalize_x86_mnemonic(st->u.instr.mnemonic, mnbuf, sizeof(mnbuf), &suffix) != 0) {
         snprintf(encerr, encerr_sz, "unsupported mnemonic length");
