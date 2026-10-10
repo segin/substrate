@@ -408,12 +408,18 @@ with a symbol table.
 - [x] **AS-T-390** When `-msyntax=intel` is given and the source has an `.att_syntax`, the assembler shall read what follows the directive as AT&T.
   Trace: AS-FE-014.  Verify: T — `mov eax, 1` / `.att_syntax` / `mov $2, %eax` / `mov (%ebx), %ecx` under `-msyntax=intel`: GNU.
   Done: the encoder took the option for the syntax of any statement the parser had marked AT&T, so the option outlasted the directive; it takes the statement's own.  `test_intel_dual_syntax.sh`, `test_cli_extended.sh`.  Found in rewriting the test of the options, which had never given `-msyntax=intel` a source with a directive in it.
+- [ ] **AS-T-391** When `-al` is given, the listing shall give each line's address and the bytes assembled from it, as GNU `as` does.
+  Trace: AS-FE-014.  Verify: T — `mov $1, %eax` / `ret` lists `0000 B8010000` and `0005 C3` beside their lines.
+  (Added with the rewritten `test_cli_extended.sh`: today the listing is the source with its lines numbered, which that test holds it to and no more.)
 
 ### C.6 Messages and temporary files
 
 - [ ] **AS-T-388** If a source has more than one statement in error, then the assembler shall report each of them, and shall write no object.
   Trace: AS-FE-030.  Verify: T — `fooop %eax,%ebx` / `mov %badreg,%eax` / `barrr`: three messages, as GNU gives; `test_source_model_32_64.sh` passes.  After: 147.
   (Added when the expected failures were checked against GNU as: this is what that test fails on now that `.include` works.  Today the first error ends the run.)
+- [ ] **AS-T-392** A warning shall be written once.
+  Trace: AS-FE-030, AS-DES-002.  Verify: T — `movb $0x1234, %al`: one line on the standard error; `test_cli_warnings.sh`.  After: 220.
+  (Added with `test_cli_warnings.sh`: the line is written four times, once for each pass that encodes the statement.)
 - [ ] **AS-T-147** Every error message shall have the form `file:line: Error: text`, with text that is not empty.
   Trace: AS-FE-030, AS-FE-032.  Verify: T — a test that greps every failing case of the suite for the form; `loop 1b` to an undefined label has text.
 - [ ] **AS-T-148** When a failure is found while expanding a macro or repeat, the message shall name the user's line and the macro being expanded.
@@ -1006,5 +1012,5 @@ is not to be done, 370 is ticked with "removed" and the rest struck.
 | AS-EXT-009 | 185, 325, 332–337 |
 | AS-EXT-010 | 040, 171, 338, 339 (339 closes all of AS-EXT) |
 
-332 tasks: 9 done, 323 open.  Numbers run to 387, with gaps left between
+343 tasks: 42 done, 301 open.  Numbers run to 392, with gaps left between
 sections for tasks found along the way.
