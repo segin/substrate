@@ -6714,13 +6714,13 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         if (insn->operand_count != 2) {
             return -1;
         }
-        return emit_i386_maskmov(0x00, 0, &insn->operands[0], &insn->operands[1], out, out_cap, out_len);
+        return emit_i386_maskmov(0x00, 0, dst, src, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "maskmovdqu") == 0) {
         if (insn->operand_count != 2) {
             return -1;
         }
-        return emit_i386_maskmov(0x66, 1, &insn->operands[0], &insn->operands[1], out, out_cap, out_len);
+        return emit_i386_maskmov(0x66, 1, dst, src, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "ud0") == 0) {
         const as_operand_t *rm_op;

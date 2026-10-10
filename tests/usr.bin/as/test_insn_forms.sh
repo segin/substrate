@@ -36,6 +36,25 @@ t() {
     done
 }
 
+# ti MODES WANT SOURCE: the same, the source being in Intel syntax.
+ti() {
+    for mode in $1; do
+        cases=$((cases + 1))
+        printf '\t.text\n\t.intel_syntax noprefix\n\t%s\n' "$3" > t.s
+        rm -f t.o
+        if "$AS" "-$mode" -o t.o t.s > out 2>&1; then
+            objcopy -O binary --only-section=.text t.o text.bin 2>/dev/null
+            got=$(od -An -v -tx1 text.bin | tr -d ' \n')
+        else
+            got=refused
+        fi
+        if [ "$got" != "$2" ]; then
+            echo "FAIL $mode Intel [$3]: $got, and GNU as: $2"
+            fail=1
+        fi
+    done
+}
+
 # enter: the frame's size and then the nesting level, in that order in
 # both syntaxes -- it has no destination to be written last.  The two
 # had been exchanged, so `enter $16, $0` made a frame of no bytes at
@@ -296,6 +315,22 @@ t "32 64" refused        'nopb %al'
 t "32 64" refused        'nop %al'
 t "32 64" refused        'nop $1'
 t "32 64" refused        'nop %eax, %ebx'
+
+# maskmovq and maskmovdqu: the mask is ModRM.rm and the register stored
+# is ModRM.reg.  In 32-bit AT&T source the two had been exchanged, so
+# the mask was stored under the data.
+t "32 64" 0ff7d1         'maskmovq %mm1, %mm2'
+t "32 64" 0ff7c7         'maskmovq %mm7, %mm0'
+t "32 64" 660ff7d1       'maskmovdqu %xmm1, %xmm2'
+t "32 64" 660ff7c7       'maskmovdqu %xmm7, %xmm0'
+t "64"    66410ff7d1     'maskmovdqu %xmm9, %xmm2'
+t "64"    66440ff7d1     'maskmovdqu %xmm1, %xmm10'
+ti "32 64" 0ff7d1        'maskmovq mm2, mm1'
+ti "32 64" 660ff7d1      'maskmovdqu xmm2, xmm1'
+t "32 64" refused        'maskmovq (%eax), %mm2'
+t "32 64" refused        'maskmovq %mm1, %xmm2'
+t "32 64" refused        'maskmovdqu %mm1, %xmm2'
+t "32 64" refused        'maskmovq %mm1'
 
 [ "$fail" -eq 0 ] && echo "ok: instruction forms ($cases cases)"
 exit "$fail"

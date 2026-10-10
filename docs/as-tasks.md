@@ -188,8 +188,9 @@ status 0.
 - [x] **AS-T-048** When `nop` is given a memory or register operand, the assembler shall encode the long NOP of that operand.
   Trace: AS-SEL-014.  Verify: T — `nop (%eax)`, `nopw %ax`, `nopl %eax`: GNU.
   Done: in 32-bit code `nop` with an operand was `90`; `nopl` and `nopw` of a register were refused in both modes, `nop %rax` and `nopq` had no `REX.W`, and `nop %al`, `nop $1` and `nop %eax,%ebx` were assembled.  `nop` now takes a suffix as other instructions do and is encoded in one place for each mode.  `test_insn_forms.sh`.  The padding as a disassembler prints it, `nopw 0x0(%rax,%rax,1)`, is a byte longer than GNU's: 394.
-- [ ] **AS-T-049** When `maskmovq` or `maskmovdqu` is written, the assembler shall place the mask register in ModRM.rm and the source in ModRM.reg.
+- [x] **AS-T-049** When `maskmovq` or `maskmovdqu` is written, the assembler shall place the mask register in ModRM.rm and the source in ModRM.reg.
   Trace: AS-SEL-009.  Verify: T — both, and `vmaskmovdqu`: GNU.
+  Done for the two: the 32-bit AT&T path took the operands in the order written, which is Intel's.  `test_insn_forms.sh`, both syntaxes.  `vmaskmovdqu` is not a mnemonic here; it is added to 332's list.
 - [ ] **AS-T-050** When `extrq` or `insertq` is written with two immediates, the assembler shall emit them in the order the manual gives.
   Trace: AS-SEL-009.  Verify: T — both: GNU.
 - [ ] **AS-T-051** When `aesencwide256kl` is written, the assembler shall encode opcode extension `/2`.
@@ -817,7 +818,7 @@ empty for the family named.
   Trace: AS-EXT-008.  Verify: T — `vcvtqq2ps (%rax),%ymm2`, `vcvtps2qq %ymm1,%zmm2`, `vcvtpd2ps`, `vcvtps2pd`, `vinsertf32x8`, `vinserti32x8`, `vinsertf64x4`, `vinserti64x4`, `vextract*`, with the `x`/`y`/`z` suffixes for memory sources.
 - [ ] **AS-T-331** When `vpbroadcast{b,w,d,q}` is written with a general register source, the assembler shall encode the EVEX general-register form; with a ZMM destination and memory source, the EVEX form.
   Trace: AS-EXT-008.  Verify: T — `vpbroadcastb %eax,%ymm1`, `vpbroadcastq %rax,%zmm1`, `vpbroadcastd (%rax),%zmm2`.
-- [ ] **AS-T-332** When any of these AVX instructions is written, the assembler shall encode it: `vmovaps`, `vmovups`, `vmovapd`, `vmovupd`, `vmovdqa`, `vmovdqu`, `vmovd`, `vmovq`, `vmovss`, `vmovsd`, `vmovlps`, `vmovhps`, `vmovlpd`, `vmovhpd` (register, load and store forms), `vmovnt*`, `vmovmskp*`, `vpmovmskb`, `vsqrtp[sd]`, `vrcpps`, `vrsqrtps`, the `vcvt*` family, `vcomis*`, `vucomis*`, `vpshufd`, `vpshufhw`, `vpshuflw`, `vpabs*`, `vpmovsx*`, `vpmovzx*`, `vptest`, `vpextr*`, `vextractps`, `vroundp[sd]`, `vrounds[sd]`, `vlddqu`, `vldmxcsr`, `vstmxcsr`, `vpcmp[ei]str*`, `vphminposuw`, the `vcmpeqps`-style predicate aliases, `vpslldq`, `vpsrldq`.
+- [ ] **AS-T-332** When any of these AVX instructions is written, the assembler shall encode it: `vmovaps`, `vmovups`, `vmovapd`, `vmovupd`, `vmovdqa`, `vmovdqu`, `vmovd`, `vmovq`, `vmovss`, `vmovsd`, `vmovlps`, `vmovhps`, `vmovlpd`, `vmovhpd` (register, load and store forms), `vmovnt*`, `vmovmskp*`, `vpmovmskb`, `vmaskmovdqu` (from 049), `vsqrtp[sd]`, `vrcpps`, `vrsqrtps`, the `vcvt*` family, `vcomis*`, `vucomis*`, `vpshufd`, `vpshufhw`, `vpshuflw`, `vpabs*`, `vpmovsx*`, `vpmovzx*`, `vptest`, `vpextr*`, `vextractps`, `vroundp[sd]`, `vrounds[sd]`, `vlddqu`, `vldmxcsr`, `vstmxcsr`, `vpcmp[ei]str*`, `vphminposuw`, the `vcmpeqps`-style predicate aliases, `vpslldq`, `vpsrldq`.
   Trace: AS-EXT-009.  Verify: T — the 88 mnemonics with no row: the `avx` family of the corpus shows no "refused".  After: 161.
 - [ ] **AS-T-333** When `vextractf128`, `vextracti128`, `vpermq`, `vpermpd` (immediate) or `rorx` is written, the assembler shall encode it.
   Trace: AS-EXT-009.  Verify: T — each, register and memory.
@@ -1039,5 +1040,5 @@ is not to be done, 370 is ticked with "removed" and the rest struck.
 | AS-EXT-009 | 185, 325, 332–337 |
 | AS-EXT-010 | 040, 171, 338, 339 (339 closes all of AS-EXT) |
 
-345 tasks: 62 done, 283 open.  Numbers run to 394, with gaps left between
+345 tasks: 63 done, 282 open.  Numbers run to 394, with gaps left between
 sections for tasks found along the way.
