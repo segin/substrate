@@ -148,8 +148,12 @@ status 0.
   Trace: AS-X86-011.  Verify: T — every `w`-suffixed line of the 64-bit corpus has exactly one `66`; `movabs %ax,sym` has one.
 - [ ] **AS-T-036** When `cbw`, `cbtw`, `cwd`, `cwtd`, `iretw`, `lretw`, `pushaw`, `popaw`, `pushfw`, `popfw`, `jmpw *r16`, `callw *r16`, `cmovccw`, `leaw` or `xaddw` is written, the assembler shall emit the `66` prefix in 32- and 64-bit modes.
   Trace: AS-X86-011, AS-SEL-014.  Verify: T — each: GNU.
-- [ ] **AS-T-037** When `jcxz` is assembled in 32-bit mode, or `jecxz` in 64-bit mode, the assembler shall emit the `67` prefix.
+- [x] **AS-T-037** When `jcxz` is assembled in 32-bit mode, or `jecxz` in 64-bit mode, the assembler shall emit the `67` prefix.
   Trace: AS-X86-023.  Verify: T — `jcxz 1f`, `jecxz 1f`, `jrcxz 1f` in each mode: GNU.
+  Done: none of the three reached the encoder when its target was a label -- the code that resolves a branch to a label knew `jmp`, `call` and the conditional jumps, and returned failure with no message for anything else.  It now has the one-byte-displacement branches: the counter is the mnemonic's, the prefix is written where the counter is not the mode's, the instruction is counted as three bytes where it has the prefix, and one the mode has not got (`jrcxz` in 32-bit code, `jcxz` in 64-bit) is refused by name.  `test_loop_jcxz.sh`; `test_x86_64_encoding.sh` passes.
+- [x] **AS-T-393** When `rep`, `repe` or `repne` is written before `nop`, `ret`, `bsf` or `bsr`, the assembler shall emit the prefix, as GNU `as` does.
+  Trace: AS-X86-026.  Verify: T — `rep nop` is `f3 90`, `rep ret` `f3 c3`, `repz ret $8`, `rep bsf %eax,%ebx` `f3 0f bc d8`; `rep add` and `rep nopl (%rax)` are still refused.
+  (Added and done with 037 and 057.)  The prefix was allowed on the string instructions only.  `rep nop` is how pause is written by compilers and kernels, `rep ret` is emitted for processors that mispredict a bare `ret`, and `rep bsf` is tzcnt.  `test_loop_jcxz.sh` for `nop`; the 64-bit corpus, which stopped at `rep nop`, now runs to a line GNU refuses too.
 
 ### B.3 Wrong instruction
 
@@ -193,8 +197,9 @@ status 0.
   Trace: AS-X86-025.  Verify: T — `movsl (%esi),%es:(%edi)` (`A5`), `movsw %cs:(%esi),%es:(%edi)` (`2E 66 A5`), `lodsb %fs:(%esi)`: GNU.
 - [ ] **AS-T-056** If a string instruction's destination is written with a segment other than `%es`, then the assembler shall refuse it.
   Trace: AS-X86-025.  Verify: T — `stosl %eax,%ds:(%edi)`: exit 1.
-- [ ] **AS-T-057** When `xlat`, `aam`, `aad`, `loop`, `loope`, `loopne` or `jecxz` is written in a form GNU accepts, the assembler shall encode it.
+- [x] **AS-T-057** When `xlat`, `aam`, `aad`, `loop`, `loope`, `loopne` or `jecxz` is written in a form GNU accepts, the assembler shall encode it.
   Trace: AS-X86-041, AS-FE-032.  Verify: T — bare `xlat`, `aam`, `aad`, `aam $10`, `loop 1b`, `jecxz 1b`: GNU.
+  Done: `xlat` and `xlatb` with no operand are `d7`; `aam` and `aad` with none take base ten; `loop`, `loope`, `loopz`, `loopne`, `loopnz` -- with a `w`, `l` or `q` for the counter, which they had not -- and `jecxz` reach a label, by the change of 037.  A target out of a byte's reach is refused, with the distance.  `test_loop_jcxz.sh`, 63 cases in the two modes, GNU's bytes and GNU's refusals.
 
 ### B.4 Byte registers and immediates
 
@@ -1023,5 +1028,5 @@ is not to be done, 370 is ticked with "removed" and the rest struck.
 | AS-EXT-009 | 185, 325, 332–337 |
 | AS-EXT-010 | 040, 171, 338, 339 (339 closes all of AS-EXT) |
 
-343 tasks: 51 done, 292 open.  Numbers run to 392, with gaps left between
+344 tasks: 54 done, 290 open.  Numbers run to 393, with gaps left between
 sections for tasks found along the way.

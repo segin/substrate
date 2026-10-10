@@ -3058,13 +3058,86 @@ static int seg_reg_field(as_x86_seg_t seg, unsigned *out) {
     }
 }
 
+/*
+ * The branches that have only a one-byte displacement: loop, loope
+ * (loopz), loopne (loopnz), each with an optional w, l or q for the
+ * width of the counter, and jcxz, jecxz, jrcxz, whose name is the
+ * counter's.  The opcode, and whether the counter is not the one the
+ * code's address size gives -- cx in 32-bit code, ecx in 16- or 64-bit
+ * -- so that the address-size prefix 67 is wanted.
+ *
+ * 0 for one of them that the mode has; -1 for a mnemonic that is not
+ * one; -2 for one the mode has not: a 64-bit counter outside 64-bit
+ * code, a 16-bit one inside it.
+ */
+static int x86_fixed_short_branch(const char *mn, unsigned code_bits, int *need67, unsigned char *opcode) {
+    static const struct {
+        const char *name;
+        unsigned char opcode;
+    } loops[] = {
+        { "loopne", 0xe0 }, { "loopnz", 0xe0 }, { "loope", 0xe1 }, { "loopz", 0xe1 }, { "loop", 0xe2 },
+    };
+    unsigned counter = 0;
+    unsigned char op = 0;
+    size_t i;
+
+    if (mn == NULL) {
+        return -1;
+    }
+    if (streq_ci(mn, "jcxz")) {
+        counter = 16u;
+        op = 0xe3;
+    } else if (streq_ci(mn, "jecxz")) {
+        counter = 32u;
+        op = 0xe3;
+    } else if (streq_ci(mn, "jrcxz")) {
+        counter = 64u;
+        op = 0xe3;
+    } else {
+        for (i = 0; i < sizeof(loops) / sizeof(loops[0]); ++i) {
+            size_t n = strlen(loops[i].name);
+
+            if (strncasecmp(mn, loops[i].name, n) != 0) {
+                continue;
+            }
+            if (mn[n] == '\0') {
+                counter = code_bits;
+            } else if (mn[n + 1] != '\0') {
+                continue;
+            } else if (mn[n] == 'w' || mn[n] == 'W') {
+                counter = 16u;
+            } else if (mn[n] == 'l' || mn[n] == 'L') {
+                counter = 32u;
+            } else if (mn[n] == 'q' || mn[n] == 'Q') {
+                counter = 64u;
+            } else {
+                continue;
+            }
+            op = loops[i].opcode;
+            break;
+        }
+        if (op == 0) {
+            return -1;
+        }
+    }
+    if ((counter == 64u && code_bits != 64u) || (counter == 16u && code_bits == 64u)) {
+        return -2;
+    }
+    if (need67 != NULL) {
+        *need67 = counter != code_bits;
+    }
+    if (opcode != NULL) {
+        *opcode = op;
+    }
+    return 0;
+}
+
 static int is_rel_mnemonic(const char *mn) {
     if (mn == NULL || mn[0] == '\0') {
         return 0;
     }
     if (streq_ci(mn, "call") || streq_ci(mn, "jmp") || streq_ci(mn, "xbegin") ||
-        streq_ci(mn, "loop") || streq_ci(mn, "loope") || streq_ci(mn, "loopz") ||
-        streq_ci(mn, "loopne") || streq_ci(mn, "loopnz")) {
+        x86_fixed_short_branch(mn, 32u, NULL, NULL) != -1) {
         return 1;
     }
     if ((mn[0] == 'j' || mn[0] == 'J') && mn[1] != '\0') {
@@ -3081,14 +3154,14 @@ static int is_fixed_short_rel_mnemonic(const char *mn) {
     if (mn == NULL || mn[0] == '\0') {
         return 0;
     }
-    return streq_ci(mn, "jcxz") ||
-           streq_ci(mn, "jecxz") ||
-           streq_ci(mn, "jrcxz") ||
-           streq_ci(mn, "loop") ||
-           streq_ci(mn, "loope") ||
-           streq_ci(mn, "loopz") ||
-           streq_ci(mn, "loopne") ||
-           streq_ci(mn, "loopnz");
+    return x86_fixed_short_branch(mn, 32u, NULL, NULL) != -1;
+}
+
+/* How long one is: two bytes, and the prefix where the mode wants it. */
+static size_t fixed_short_rel_size(const char *mn, unsigned code_bits) {
+    int need67 = 0;
+
+    return x86_fixed_short_branch(mn, code_bits, &need67, NULL) == 0 && need67 ? 3u : 2u;
 }
 
 static int is_size_suffixable_base(const char *mn) {
@@ -11006,6 +11079,39 @@ static int emit_resolved_x86_branch_ex(const as_elf_cfg_t *cfg, const as_stmt_t 
             return 0;
         }
     }
+    {
+        int need67 = 0;
+        unsigned char opcode = 0;
+        int kind = x86_fixed_short_branch(st->u.instr.mnemonic, cfg->is_64 ? 64u : cfg->x86_code_bits, &need67,
+                                          &opcode);
+
+        if (kind == -2) {
+            snprintf(encerr, encerr_sz, "'%s' is not an instruction of %u-bit code", st->u.instr.mnemonic,
+                     cfg->is_64 ? 64u : cfg->x86_code_bits);
+            return -1;
+        }
+        if (kind == 0) {
+            size_t len = need67 ? 3u : 2u;
+
+            disp8 = abs_target - ((long long)sec_off + (long long)len);
+            if (disp8 < -128 || disp8 > 127) {
+                snprintf(encerr, encerr_sz, "'%s' has only a one-byte displacement, and its target is %lld bytes away",
+                         st->u.instr.mnemonic, disp8);
+                return -1;
+            }
+            if (code_cap < len) {
+                return -1;
+            }
+            if (need67) {
+                code[0] = 0x67;
+            }
+            code[len - 2] = opcode;
+            code[len - 1] = (unsigned char)(signed char)disp8;
+            *code_len = len;
+            return 0;
+        }
+    }
+    snprintf(encerr, encerr_sz, "'%s' is not a branch this assembler can resolve", st->u.instr.mnemonic);
     return -1;
 }
 
@@ -11715,8 +11821,9 @@ static int local_temp_branch_is_short(emit_ctx_t *ctx, const char *section_name,
 
         if (t->kind == AS_STMT_INSTRUCTION && t->u.instr.operand_count == 1 &&
             is_rel_mnemonic(t->u.instr.mnemonic)) {
-            n = is_fixed_short_rel_mnemonic(t->u.instr.mnemonic) ? 2
-                : (is_call_mnemonic(t->u.instr.mnemonic) ? 5 : 6);
+            n = is_fixed_short_rel_mnemonic(t->u.instr.mnemonic)
+                    ? fixed_short_rel_size(t->u.instr.mnemonic, x86_code_bits)
+                    : (is_call_mnemonic(t->u.instr.mnemonic) ? 5 : 6);
         } else if (stmt_virtual_size_in_section(ctx, section_name, t, dist, x86_code_bits, &n) != 0) {
             ctx->virtual_scanning--;
             goto done;
@@ -11775,7 +11882,10 @@ static unsigned stmt_local_rel_virtual_len(emit_ctx_t *ctx, const char *section_
     if (is_call_mnemonic(st->u.instr.mnemonic)) {
         return 5u;
     }
-    if (is_local || is_fixed_short_rel_mnemonic(st->u.instr.mnemonic)) {
+    if (is_fixed_short_rel_mnemonic(st->u.instr.mnemonic)) {
+        return fixed_short_rel_size(st->u.instr.mnemonic, x86_code_bits);
+    }
+    if (is_local) {
         return 2u;
     }
     if (streq_ci(mnbuf, "jmp")) {

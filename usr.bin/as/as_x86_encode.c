@@ -878,6 +878,28 @@ static int mnemonic_rep_compatible(const char *mn) {
 }
 
 /*
+ * The instructions that are not string instructions and that rep is
+ * written before all the same, as GNU as allows: `rep nop`, which is
+ * how pause was written before it had a name and is how compilers and
+ * kernels still write it; `rep ret`, which compilers emit for a
+ * processor that mispredicts a ret that is a branch's target; and
+ * `rep bsf` and `rep bsr`, which are tzcnt and lzcnt to a processor
+ * that has them and the plain instruction to one that has not.
+ */
+static int rep_is_idiom(const as_x86_insn_t *insn) {
+    const char *mn = insn->mnemonic;
+
+    if (mn == NULL) {
+        return 0;
+    }
+    if (streq_ci(mn, "nop")) {
+        return insn->op_count == 0;
+    }
+    return streq_ci(mn, "ret") || streq_ci(mn, "retl") || streq_ci(mn, "retq") || streq_ci(mn, "retw") ||
+           streq_ci(mn, "bsf") || streq_ci(mn, "bsr");
+}
+
+/*
  * The prefixes, in the order GNU as writes them: segment, address size,
  * operand size, rep, lock.  A processor takes them in any order, but an
  * object is compared with GNU's byte for byte, by tests and by people,
@@ -892,7 +914,7 @@ static int emit_prefixes(enc_ctx_t *ctx, const as_x86_insn_t *insn) {
                 insn->mnemonic ? insn->mnemonic : "(null)");
         return -1;
     }
-    if (insn->rep_prefix != 0 && !mnemonic_rep_compatible(insn->mnemonic)) {
+    if (insn->rep_prefix != 0 && !mnemonic_rep_compatible(insn->mnemonic) && !rep_is_idiom(insn)) {
         set_err(ctx, "rep/repne prefix not allowed on '%s'",
                 insn->mnemonic ? insn->mnemonic : "(null)");
         return -1;
@@ -2034,14 +2056,17 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
         if (insn->op_count != 0 || emit8(&ctx, 0x3f) != 0) {
             return -1;
         }
-    } else if (streq_ci(insn->mnemonic, "aam")) {
-        if (insn->op_count != 1 || a->kind != AS_X86_OP_IMM || emit8(&ctx, 0xd4) != 0 ||
-            emit8(&ctx, (uint8_t)a->u.imm) != 0) {
+    } else if (streq_ci(insn->mnemonic, "aam") || streq_ci(insn->mnemonic, "aad")) {
+        /* The base to adjust by; ten when it is not written. */
+        uint8_t base = 10;
+
+        if (insn->op_count == 1 && a->kind == AS_X86_OP_IMM) {
+            base = (uint8_t)a->u.imm;
+        } else if (insn->op_count != 0) {
+            set_unsupported_form_named(&ctx, insn->mnemonic);
             return -1;
         }
-    } else if (streq_ci(insn->mnemonic, "aad")) {
-        if (insn->op_count != 1 || a->kind != AS_X86_OP_IMM || emit8(&ctx, 0xd5) != 0 ||
-            emit8(&ctx, (uint8_t)a->u.imm) != 0) {
+        if (emit8(&ctx, streq_ci(insn->mnemonic, "aam") ? 0xd4 : 0xd5) != 0 || emit8(&ctx, base) != 0) {
             return -1;
         }
     } else if (streq_ci(insn->mnemonic, "syscall")) {
@@ -2290,7 +2315,12 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
             return -1;
         }
     } else if (streq_ci(insn->mnemonic, "xlat") || streq_ci(insn->mnemonic, "xlatb")) {
-        if (insn->op_count != 1 || emit8(&ctx, 0xd7) != 0) {
+        /* Bare, or with the table's address written out: the same byte. */
+        if (insn->op_count > 1) {
+            set_unsupported_form_named(&ctx, insn->mnemonic);
+            return -1;
+        }
+        if (emit8(&ctx, 0xd7) != 0) {
             return -1;
         }
     } else if (streq_ci(insn->mnemonic, "lret") || streq_ci(insn->mnemonic, "retf") || streq_ci(insn->mnemonic, "lretw")) {
@@ -6488,7 +6518,12 @@ more_mnemonics:
             return -1;
         }
     } else if (streq_ci(insn->mnemonic, "xlat") || streq_ci(insn->mnemonic, "xlatb")) {
-        if (insn->op_count != 1 || emit8(&ctx, 0xd7) != 0) {
+        /* Bare, or with the table's address written out: the same byte. */
+        if (insn->op_count > 1) {
+            set_unsupported_form_named(&ctx, insn->mnemonic);
+            return -1;
+        }
+        if (emit8(&ctx, 0xd7) != 0) {
             return -1;
         }
     } else if (streq_ci(insn->mnemonic, "cbtw") || streq_ci(insn->mnemonic, "cbw") ||

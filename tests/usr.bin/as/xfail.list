@@ -43,7 +43,6 @@ test_source_model_32_64.sh	the first error ends the run: a source with three bad
 test_testing_fuzz_perf.sh	runs test_relocations_elf_32_64.sh
 test_unit_matrix.sh	runs test_i8086_corpus.sh
 test_x86_32_corpus_intel_roundtrip.sh	the corpus is not one GNU as passes, and this assembler stops where GNU first does: line 1809, `bnd callw` (GNU: "bnd is not supported on i386"); GNU refuses line 2817 as well, wrgsbase in 32-bit code.  The corpus wants mending before the test says anything of the assembler
-test_x86_64_corpus_intel_roundtrip.sh	`rep nop`, which is pause, is refused (AS-T-031).  Past that the test is not yet one GNU as passes: GNU refuses lines of the Intel source it generates (a suffix on jg)
-test_x86_64_encoding.sh	jrcxz to a label is refused with the message "?" (AS-T-037)
+test_x86_64_corpus_intel_roundtrip.sh	the test is not yet one GNU as passes: the Intel source it generates has lines GNU refuses, and this assembler stops at one of them, `lock nop` (line 4754 of the generated source), as GNU does; GNU's first is a suffix on jg
 test_x86_avx512f_core.sh	EVEX vaddpd is encoded with W = 0 (AS-T-339)
 test_x86_avx_core.sh	vpermilps is not encoded (AS-T-327)
