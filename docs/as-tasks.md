@@ -507,6 +507,7 @@ one table of templates; there is one ModRM/SIB/prefix emitter.
   Trace: AS-OBJ-001.  Verify: T — `movl $5,sym(%rip)` (−8), `cmpb $1,sym(%rip)` (−5), `cmpw $0x1234,sym(%rip)` (−6): GNU.  After: 191.
 - [ ] **AS-T-194** When a memory operand has a symbolic displacement, the assembler shall encode a 32-bit displacement field (16-bit in 16-bit addressing).
   Trace: AS-SEL-002, AS-OBJ-002, AS-EXT-004 (note 6).  Verify: T — `movaps sym(%ebx),%xmm0`, `movdqa sym(%ebp),%xmm1`, `flds sym(%ebx)`, `fnstcw sym(%ebx)`, `haddps foo(%rdx),%xmm2`, `vmulsd foo+4(%rdx),%xmm2,%xmm3`, `andn foo+4(%rdx),%ebx,%ecx`: GNU.  After: 190.
+  In part, ahead of 190: the ModRM emitter of the 32-bit instruction-selection code keeps 32 bits for a displacement with a symbol in it, which covers the SIMD, x87, `cmpxchg` and prefetch forms in 32-bit mode (`test_symbolic_disp.sh`).  Still open: the nine copies in the extension files (`haddps`, `vmulsd`, `andn` above) and the 64-bit selection code.
 - [ ] **AS-T-195** When an immediate is symbolic, the assembler shall encode an immediate field of the operand's full width.
   Trace: AS-OBJ-002.  Verify: T — `movq $sym,8(%rsp)` (`imm32`, `R_X86_64_32S`), `cmpq $gtab+64,%rax`, `addl $sym,%eax` (not the `imm8` form), `pushl $sym`: GNU.  After: 190.
 - [ ] **AS-T-196** If a relocation would not fit within the field its fixup names, then the assembler shall fail.

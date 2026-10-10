@@ -1239,9 +1239,18 @@ static int emit_i386_modrm_rm_operand(unsigned reg_field, const as_operand_t *rm
             }
             has_disp = 1;
         } else {
+            /*
+             * A displacement with a symbol in it is 32 bits wide: its
+             * value is the linker's to give, and the relocation is four
+             * bytes.  It was sized by the 0 that stands for a symbol
+             * here, so one byte was kept for it -- and the relocation
+             * then written over the instruction, or refused: `flds
+             * sym(%ebx)` failed, `movaps sym(%ebx), %xmm0` assembled to
+             * four zero bytes.
+             */
             if (!has_disp && base_reg != 5u) {
                 mod = 0;
-            } else if (has_disp && disp >= -128 && disp <= 127) {
+            } else if (has_disp && !expr_has_symbol(mem->disp) && disp >= -128 && disp <= 127) {
                 mod = 1;
             } else {
                 mod = 2;
