@@ -86,7 +86,12 @@ emits flat raw bytes with section-layout policy
 .Pq .text , .rodata , .data , then .bss .
 Binary mode rejects unresolved relocations and ELF-only metadata directives.
 .It Fl msyntax Ns = Ns Ar att|intel
-Select x86 syntax mode.
+Select the x86 syntax the source begins in.
+An
+.Ic .intel_syntax
+or
+.Ic .att_syntax
+directive in the source changes it from that line on.
 .It Fl W , Fl -warn
 Enable warnings.
 .It Fl -no-warn
