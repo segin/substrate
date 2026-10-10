@@ -66,6 +66,40 @@ else
     echo "skip cross-compiled C++ program (not installed)"
 fi
 
+# Substrate's own compiler, assembler and linker (usr.bin/cc, as, ld) are
+# native 64-bit programs here, and cc builds for the machine it runs on
+# unless told otherwise.  The image keeps the 32-bit runtime beside the
+# 64-bit one, so `cc -m32` must still produce something that runs.  No
+# header is included: the image does not ship /usr/include.
+S=/usr/libexec/substrate-cc
+cat > /tmp/smoke64.c <<'EOF'
+int puts(const char *);
+int add(int a, int b) { return a + b; }
+int main(void) { puts("cc: OK"); return add(3, 4); }
+EOF
+cat > /tmp/smoke32.c <<'EOF'
+int main(void) { return 7; }
+EOF
+cat > /tmp/smoke.s <<'EOF'
+	.data
+	.set K, 3*4
+	.long 1+2<<3, K
+EOF
+check "cc is a 64-bit program"   "ldd $S/cc 2>&1 | grep -q ld64.so"
+check "as is a 64-bit program"   "ldd $S/as 2>&1 | grep -q ld64.so"
+check "ld is a 64-bit program"   "ldd $S/ld 2>&1 | grep -q ld64.so"
+check "as assembles"             "$S/as --64 -o /tmp/smoke.o /tmp/smoke.s && [ -s /tmp/smoke.o ]"
+check "cc builds and links a program" \
+      'cd /tmp && cc -o smoke64 smoke64.c && ./smoke64 | grep -q "cc: OK"'
+check "what cc builds returns its status" \
+      'cd /tmp; ./smoke64 > /dev/null; [ $? = 7 ]'
+check "what cc builds is a 64-bit program" \
+      'ldd /tmp/smoke64 2>&1 | grep -q /lib64/libc.so.0'
+check "cc -m32 builds a 32-bit program that runs" \
+      'cd /tmp && cc -m32 -o smoke32 smoke32.c; ./smoke32; [ $? = 7 ]'
+check "the 32-bit program uses the 32-bit runtime" \
+      'ldd /tmp/smoke32 2>&1 | grep -q "/lib/libc.so.0"'
+
 # Contrib ports built for the 64-bit target (contrib/port64.sh), where the
 # image has them.  Each of these is a different slice of the port set:
 # zsh is the login shell and pulls in ncurses and libiconv, openssl and

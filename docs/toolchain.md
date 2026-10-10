@@ -46,9 +46,20 @@ was run as, which is why `/usr/bin/cc` is a script and not a link: run
 through a link it would look beside `/usr/bin/cc` and drive the GNU
 ones.  `AS` and `LD` in the environment override both.
 
-`build-rootfs.sh` (`install_substrate_cc`) puts them in both images.
-They are 32-bit programs in `rootfs64.img` as well, where they are the
-only toolchain: that image has no GNU one.
+`build-rootfs.sh` (`install_substrate_cc`) puts them in both images: the
+32-bit programs in `rootfs.img`, and in `rootfs64.img` -- where they are
+the only toolchain, that image having no GNU one -- native 64-bit builds
+(`make -C usr.bin/{cc,as,ld} ARCH=x86_64`, which leaves each program in
+its `obj-x86_64/`).
+
+`cc` builds for the machine it was itself built for unless `-m32` or
+`-m64` says otherwise, and takes the runtime of the target: `crt0.o` from
+`/usr/lib` or `/usr/lib64`, `libc.so.0` from `/lib` or `/lib64`, and
+`/sbin/ld.so` or `/sbin/ld64.so` as the program's interpreter.
+`rootfs64.img` keeps the 32-bit runtime beside the 64-bit one, so both
+work there; `tests/rootfs64/smoke.sh` holds the image to it (three 64-bit
+tools, a 64-bit program built and run, a `-m32` one built and run), and
+the `bootstrap64` workflow runs that on every push.
 
 ## The 64-bit cross toolchain
 

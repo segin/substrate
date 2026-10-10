@@ -341,17 +341,19 @@ install_etc_to_dist() {
 }
 
 # Substrate's own cc, as and ld into $DIST: see the note where
-# install_to_dist calls this.  They are the 32-bit builds in both images;
-# the 64-bit image has the 32-bit libraries and runs them.
+# install_to_dist calls this.  $1 is where each was built under its source
+# directory: nothing for the 32-bit programs, obj-x86_64/ for the native
+# 64-bit ones the 64-bit image carries.  (That image keeps the 32-bit
+# libraries too, and its cc builds for either with -m32 and -m64.)
 install_substrate_cc() {
-    local scc_dir="$DIST/usr/libexec/substrate-cc"
+    local scc_dir="$DIST/usr/libexec/substrate-cc" o="${1:-}"
 
-    if [ ! -f "$TOP/usr.bin/cc/cc" ] || [ ! -f "$TOP/usr.bin/as/as" ] || [ ! -f "$TOP/usr.bin/ld/ld" ]; then
+    if [ ! -f "$TOP/usr.bin/cc/${o}cc" ] || [ ! -f "$TOP/usr.bin/as/${o}as" ] || [ ! -f "$TOP/usr.bin/ld/${o}ld" ]; then
         echo "WARNING: usr.bin/cc, as and ld are not all built; /usr/bin/cc is left out" >&2
         return 0
     fi
     mkdir -p "$scc_dir" "$DIST/usr/bin"
-    cp "$TOP/usr.bin/cc/cc" "$TOP/usr.bin/as/as" "$TOP/usr.bin/ld/ld" "$scc_dir/"
+    cp "$TOP/usr.bin/cc/${o}cc" "$TOP/usr.bin/as/${o}as" "$TOP/usr.bin/ld/${o}ld" "$scc_dir/"
     if [ -d "$TOP/usr.bin/cc/resource" ]; then
         mkdir -p "$scc_dir/resource"
         cp -r "$TOP/usr.bin/cc/resource/." "$scc_dir/resource/"
@@ -1340,11 +1342,11 @@ build_components64() {
     make -C "$TOP/usr.bin" ARCH=x86_64 -j4
     make -C "$TOP/usr.sbin" ARCH=x86_64 -j4
 
-    # Substrate's own cc, as and ld: 32-bit programs in this image too
-    # (install_substrate_cc), which the 32-bit libraries above run.
-    echo "Building substrate's cc, as and ld (32-bit)..."
+    # Substrate's own cc, as and ld, as native 64-bit programs
+    # (install_substrate_cc).  They are not in usr.bin's list.
+    echo "Building substrate's cc, as and ld (64-bit)..."
     for dir in cc as ld; do
-        make -C "$TOP/usr.bin/$dir" -j4
+        make -C "$TOP/usr.bin/$dir" ARCH=x86_64 -j4
     done
 }
 
@@ -1404,7 +1406,7 @@ install_to_dist64() {
     install_programs64 sbin sbin
     install_programs64 usr.bin usr/bin
     install_programs64 usr.sbin usr/sbin
-    install_substrate_cc
+    install_substrate_cc obj-x86_64/
     # egrep/fgrep are shebang wrappers, the same on either architecture.
     if [ -f "$DIST/bin/grep" ]; then
         make -C "$TOP/bin/grep" install-grep-links DESTDIR="$DIST" >/dev/null 2>&1 || true
