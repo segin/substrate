@@ -577,6 +577,61 @@ static int operand_bits(const as_x86_operand_t *op) {
 }
 
 /*
+ * The x87 instructions that take no operand: constants, the functions of
+ * the top of the stack, and control.  A compiler loads 0.0 with fldz and
+ * 1.0 with fld1, and neither was here; nor were the rest.  The same bytes
+ * in every mode.
+ */
+static const struct {
+    const char *mnemonic;
+    uint8_t len;
+    uint8_t bytes[3];
+} x87_no_operand[] = {
+    { "fld1",    2, { 0xd9, 0xe8 } }, { "fldl2t",  2, { 0xd9, 0xe9 } },
+    { "fldl2e",  2, { 0xd9, 0xea } }, { "fldpi",   2, { 0xd9, 0xeb } },
+    { "fldlg2",  2, { 0xd9, 0xec } }, { "fldln2",  2, { 0xd9, 0xed } },
+    { "fldz",    2, { 0xd9, 0xee } },
+    { "fchs",    2, { 0xd9, 0xe0 } }, { "fabs",    2, { 0xd9, 0xe1 } },
+    { "ftst",    2, { 0xd9, 0xe4 } }, { "fxam",    2, { 0xd9, 0xe5 } },
+    { "f2xm1",   2, { 0xd9, 0xf0 } }, { "fyl2x",   2, { 0xd9, 0xf1 } },
+    { "fptan",   2, { 0xd9, 0xf2 } }, { "fpatan",  2, { 0xd9, 0xf3 } },
+    { "fxtract", 2, { 0xd9, 0xf4 } }, { "fprem1",  2, { 0xd9, 0xf5 } },
+    { "fdecstp", 2, { 0xd9, 0xf6 } }, { "fincstp", 2, { 0xd9, 0xf7 } },
+    { "fprem",   2, { 0xd9, 0xf8 } }, { "fyl2xp1", 2, { 0xd9, 0xf9 } },
+    { "fsqrt",   2, { 0xd9, 0xfa } }, { "fsincos", 2, { 0xd9, 0xfb } },
+    { "frndint", 2, { 0xd9, 0xfc } }, { "fscale",  2, { 0xd9, 0xfd } },
+    { "fsin",    2, { 0xd9, 0xfe } }, { "fcos",    2, { 0xd9, 0xff } },
+    { "fnop",    2, { 0xd9, 0xd0 } },
+    { "fcompp",  2, { 0xde, 0xd9 } }, { "fucompp", 2, { 0xda, 0xe9 } },
+    { "fnclex",  2, { 0xdb, 0xe2 } }, { "fninit",  2, { 0xdb, 0xe3 } },
+    { "fclex",   3, { 0x9b, 0xdb, 0xe2 } }, { "finit", 3, { 0x9b, 0xdb, 0xe3 } },
+    { "fwait",   1, { 0x9b } },       { "wait",    1, { 0x9b } },
+};
+
+/* 1 if `insn` is one of those and was emitted, 0 if it is not one, -1 on
+ * a full buffer. */
+static int emit_x87_no_operand(enc_ctx_t *ctx, const as_x86_insn_t *insn) {
+    size_t i;
+    uint8_t j;
+
+    if (insn->mnemonic == NULL || insn->op_count != 0) {
+        return 0;
+    }
+    for (i = 0; i < sizeof(x87_no_operand) / sizeof(x87_no_operand[0]); ++i) {
+        if (!streq_ci(insn->mnemonic, x87_no_operand[i].mnemonic)) {
+            continue;
+        }
+        for (j = 0; j < x87_no_operand[i].len; ++j) {
+            if (emit8(ctx, x87_no_operand[i].bytes[j]) != 0) {
+                return -1;
+            }
+        }
+        return 1;
+    }
+    return 0;
+}
+
+/*
  * An operand that is not there.  The encoders name their operands a, b
  * and c and many a branch reads a->kind, or a register out of a, before
  * it has counted them: `inc` alone on a line dereferenced a null pointer.
@@ -1283,6 +1338,7 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
     const as_x86_operand_t *a;
     const as_x86_operand_t *b;
     const as_x86_operand_t *c;
+    int x87_rc;
 
     if (out_len != NULL) {
         *out_len = 0;
@@ -2628,6 +2684,10 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
             emit8(&ctx, streq_ci(insn->mnemonic, "endbr32") ? 0xfb : 0xfa) != 0) {
             return -1;
         }
+    } else if ((x87_rc = emit_x87_no_operand(&ctx, insn)) != 0) {
+        if (x87_rc < 0) {
+            return -1;
+        }
     } else {
         set_err(&ctx, "unsupported mnemonic: %s", insn->mnemonic != NULL ? insn->mnemonic : "<null>");
         return -1;
@@ -2645,6 +2705,7 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
     const as_x86_operand_t *a;
     const as_x86_operand_t *b;
     const as_x86_operand_t *c;
+    int x87_rc;
     size_t rex_pos;
     uint8_t rex_w = 0;
     uint8_t rex_r = 0;
@@ -6504,6 +6565,10 @@ more_mnemonics:
             ((rex != 0x40 || a->size_bits == 64) && emit8(&ctx, rex) != 0) ||
             emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0xae) != 0 ||
             emit8(&ctx, (uint8_t)(0xc0 | (subop << 3) | (a->u.reg & 7))) != 0) {
+            return -1;
+        }
+    } else if ((x87_rc = emit_x87_no_operand(&ctx, insn)) != 0) {
+        if (x87_rc < 0) {
             return -1;
         }
     } else {
