@@ -23,6 +23,9 @@ typedef struct {
     const as_x86_insn_t *insn;
     unsigned default_bits;
     unsigned addr_bits;
+    /* Set by emit_prefixes(): whether it wrote 66, and where it ended. */
+    int opsize_written;
+    size_t prefix_end;
     char *errbuf;
     size_t errbuf_sz;
 } enc_ctx_t;
@@ -484,6 +487,17 @@ static int try_encode_x86_fma_insn(const as_x86_insn_t *insn, uint8_t *out, size
 }
 
 static int emit8(enc_ctx_t *ctx, uint8_t v) {
+    /*
+     * The operand-size prefix is one prefix however many parts of the
+     * encoder ask for it.  emit_prefixes() writes it for the statement
+     * -- a `w` suffix, a 16-bit register -- and many of the instruction
+     * cases below write one of their own on finding a 16-bit operand;
+     * a 66 that would stand directly after the prefixes, when they
+     * have it already, is that same prefix and is not written again.
+     */
+    if (v == 0x66 && ctx->opsize_written && ctx->at == ctx->prefix_end) {
+        return 0;
+    }
     if (ctx->at >= ctx->out_cap) {
         set_err(ctx, "encoding overflow");
         return -1;
@@ -946,6 +960,8 @@ static int emit_prefixes(enc_ctx_t *ctx, const as_x86_insn_t *insn) {
     if (insn->lock_prefix && emit8(ctx, 0xf0) != 0) {
         return -1;
     }
+    ctx->opsize_written = insn->operand_size_override != 0;
+    ctx->prefix_end = ctx->at;
     return 0;
 }
 
@@ -1470,7 +1486,19 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
         }
     } else if (streq_ci(insn->mnemonic, "xchg")) {
         if (insn->op_count == 2 && is_reg_or_mem(a) && b->kind == AS_X86_OP_REG) {
-            if (encode_reg_rm_pair(&ctx, 0x87, a, b, 1) != 0) {
+            /* 86 exchanges bytes and 87 words: by the suffix, or by a
+             * register that is a byte. */
+            int byte = insn->byte_op || operand_bits(a) == 8 || operand_bits(b) == 8;
+
+            if (encode_reg_rm_pair(&ctx, byte ? 0x86 : 0x87, a, b, 1) != 0) {
+                return -1;
+            }
+        } else if (insn->op_count == 2 && a->kind == AS_X86_OP_REG && b->kind == AS_X86_OP_MEM) {
+            /* An exchange is the same either way about: the memory
+             * operand written first is still the r/m. */
+            int byte = insn->byte_op || operand_bits(a) == 8;
+
+            if (encode_reg_rm_pair(&ctx, byte ? 0x86 : 0x87, b, a, 1) != 0) {
                 return -1;
             }
         } else {
@@ -2838,6 +2866,9 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
     if (emit8(&ctx, 0x40) != 0) {
         return -1;
     }
+    /* A 66 written next is still directly after the prefixes: the byte
+     * between is the place kept for REX, which goes after them all. */
+    ctx.prefix_end = ctx.at;
 
     a = insn->op_count > 0 ? &insn->ops[0] : &no_operand;
     b = insn->op_count > 1 ? &insn->ops[1] : &no_operand;
@@ -4136,7 +4167,17 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
     } else if (streq_ci(insn->mnemonic, "xchg")) {
         rex_w = x64_wants_rex_w(insn, b, a);
         if (insn->op_count == 2 && (a->kind == AS_X86_OP_REG || a->kind == AS_X86_OP_MEM) && b->kind == AS_X86_OP_REG) {
-            if (emit8(&ctx, 0x87) != 0 || modrm_sib_disp64(&ctx, b->u.reg, a, &rex_r, &rex_x, &rex_b) != 0) {
+            int byte = insn->byte_op || operand_bits(a) == 8 || operand_bits(b) == 8;
+
+            if (emit8(&ctx, byte ? 0x86 : 0x87) != 0 ||
+                modrm_sib_disp64(&ctx, b->u.reg, a, &rex_r, &rex_x, &rex_b) != 0) {
+                return -1;
+            }
+        } else if (insn->op_count == 2 && a->kind == AS_X86_OP_REG && b->kind == AS_X86_OP_MEM) {
+            int byte = insn->byte_op || operand_bits(a) == 8;
+
+            if (emit8(&ctx, byte ? 0x86 : 0x87) != 0 ||
+                modrm_sib_disp64(&ctx, a->u.reg, b, &rex_r, &rex_x, &rex_b) != 0) {
                 return -1;
             }
         } else {

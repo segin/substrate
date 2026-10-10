@@ -167,19 +167,22 @@ status 0.
 - [x] **AS-T-041** When `enter` is written, the assembler shall encode the frame size as the 16-bit immediate and the nesting level as the 8-bit one.
   Trace: AS-X86-023, AS-SEL-014.  Verify: T — `enter $8,$0`, `enter $8,$1`, `enter $0x100,$3`, both modes: GNU.
   Done: the encoder had them right and was handed them exchanged, `enter` being turned about with every other two-operand AT&T instruction; it has no destination and is left as written.  Also `enterq` had a `REX.W` it does not take, and a size or level that does not fit its field is refused.  `test_insn_forms.sh`.
-- [ ] **AS-T-042** When `xchgb` is written, the assembler shall encode the 8-bit exchange.
+- [x] **AS-T-042** When `xchgb` is written, the assembler shall encode the 8-bit exchange.
   Trace: AS-X86-023, AS-SEL-014.  Verify: T — `xchgb %al,%bl`, `xchgb %al,(%eax)`, `xchgl (%ebx),%ebx`: GNU.
+  Done: both encoders wrote `87` whatever was exchanged.  It is `86` for the suffix `b` and for a byte register, and an exchange with its memory operand written first, which was refused, is encoded.  `test_insn_forms.sh`.  (`xchg %eax,%ebx` is `87 c3` and GNU's is the one-byte `93`: the accumulator's short forms are not chosen, here or elsewhere.)
 - [ ] **AS-T-043** When `movsx` or `movzx` is written with or without size suffixes, the assembler shall take the source width from the suffix or the source register and the destination width from the destination register.
   Trace: AS-X86-023, AS-SEL-009.  Verify: T — `movsxw %ax,%ebx`, `movsx %al,%bx`, `movzx %ax,%eax`, `movsbw`, `movzwl`, `--64` `movsxl %eax,%rbx`, `movslq`: GNU.
 - [x] **AS-T-044** When `ud2b` is written, the assembler shall encode `0F B9`.
   Trace: AS-X86-026.  Verify: T.
   Done: it was taken for another name of `ud2` and written `0F 0B`.  `test_insn_forms.sh`.
-- [ ] **AS-T-045** When a rotate or shift is written with `%cl` as its count, the assembler shall encode the by-`CL` form.
+- [x] **AS-T-045** When a rotate or shift is written with `%cl` as its count, the assembler shall encode the by-`CL` form.
   Trace: AS-X86-026.  Verify: T — `rolw %cl,%ax`, `rol %cl,%eax`, `shrb %cl,(%eax)`, each of the eight operations: GNU.
+  Done with 168: the by-`CL` opcode was chosen, and at the wrong width where there was no suffix -- `rol %cl,%al` was `rol %cl,%eax`.  The count is not taken for what is shifted.  `test_insn_forms.sh`, the eight operations at four widths.
 - [ ] **AS-T-046** If both operands of `test` are immediates, then the assembler shall refuse the instruction.
   Trace: AS-X86-026.  Verify: T — `testb $1,$2`: exit 1.
-- [ ] **AS-T-047** When `in` or `out` is written with `%al`, `%ax` or `%eax`, the assembler shall encode the form of that width.
+- [x] **AS-T-047** When `in` or `out` is written with `%al`, `%ax` or `%eax`, the assembler shall encode the form of that width.
   Trace: AS-SEL-014, AS-X86-010.  Verify: T — `in %dx,%al` (`EC`), `out %al,%dx` (`EE`), `in $0x60,%al` (`E4 60`), the `%ax` forms with `66`, both modes: GNU.
+  Done with 168: every one was the `%eax` form.  The port `%dx` is not taken for the width.  `test_insn_forms.sh`.  Not done, and not this task's: `inb %dx`, `outw $1` and the other forms with the accumulator left out are refused.
 - [ ] **AS-T-048** When `nop` is given a memory or register operand, the assembler shall encode the long NOP of that operand.
   Trace: AS-SEL-014.  Verify: T — `nop (%eax)`, `nopw %ax`, `nopl %eax`: GNU.
 - [ ] **AS-T-049** When `maskmovq` or `maskmovdqu` is written, the assembler shall place the mask register in ModRM.rm and the source in ModRM.reg.
@@ -481,6 +484,7 @@ one table of templates; there is one ModRM/SIB/prefix emitter.
 
 - [ ] **AS-T-168** When an instruction is written without a size suffix and has a register operand, the assembler shall take the operand size from the register.
   Trace: AS-X86-010.  Verify: T — `mov %al,%cl`, `mov %ax,%bx`, `add %cl,(%eax)`, `inc %al`, `shl $1,%cl`, and `neg`, `not`, `mul`, `div`, `push`, `pop`, `xchg`, `bt`, `bsf`, `cmov`, `imul` with 8- and 16-bit registers, both modes: GNU.  After: 160.
+  In part, ahead of 160, because it was silent and everywhere: in AT&T syntax an instruction with no suffix was the 32-bit one whatever its registers -- `add %ax,%bx` was `add %eax,%ebx`, `mov %al,%cl` was `mov %eax,%ecx`, `neg %al` was `neg %eax`.  The statement is now given the size of its registers before it is encoded (the destination's, or the source's where the destination is memory; not a shift's count, a port, a segment register moved to, or the register of an instruction that is not of its width), and the prefix `66`, which many cases of the encoder also write for themselves, is written once.  1,308 more lines of the instruction corpora match GNU, and none fewer; `test_insn_forms.sh` has 90 of the forms.  Open: `mov %al,%cl` and the like are right but are the other of the two encodings (`8a c8` for GNU's `88 c1`); the instructions the emitter encodes from its own tables take no prefix in 32-bit code (`bt %ax,%bx`, `bsf`, `cmpxchg`, `shld`, `popcnt`: 174); `shl $1,%cl` in 32-bit code is not the by-one form.
 - [ ] **AS-T-169** If an instruction has no suffix, no register operand and more than one possible size, then the assembler shall refuse it as ambiguous, or take GNU's default where GNU has one.
   Trace: AS-X86-010, AS-SEL-007.  Verify: T — `mov $1,(%eax)` refused; `push $1`, `fisttp (%eax)` (16-bit, AS-SEL-007) take GNU's default.  After: 168.
 - [ ] **AS-T-170** If the suffix of an instruction disagrees with the width of a register operand, then the assembler shall refuse it.
@@ -1030,5 +1034,5 @@ is not to be done, 370 is ticked with "removed" and the rest struck.
 | AS-EXT-009 | 185, 325, 332–337 |
 | AS-EXT-010 | 040, 171, 338, 339 (339 closes all of AS-EXT) |
 
-344 tasks: 56 done, 288 open.  Numbers run to 393, with gaps left between
+344 tasks: 59 done, 285 open.  Numbers run to 393, with gaps left between
 sections for tasks found along the way.

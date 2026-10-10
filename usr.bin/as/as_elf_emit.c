@@ -1158,6 +1158,96 @@ static int operand_is_x86_dx_port_reg(const as_operand_t *op) {
            streq_ci(op->u.reg, "edx") || streq_ci(op->u.reg, "%edx");
 }
 
+/* The width of a general register, 8 to 64; 0 for a register of any
+ * other kind, and for what is not a register. */
+static int x86_gpr_operand_width_bits(const as_operand_t *op) {
+    const char *p;
+
+    if (op == NULL || op->kind != AS_OPERAND_REGISTER || op->u.reg == NULL || operand_is_x86_seg_reg(op)) {
+        return 0;
+    }
+    p = op->u.reg;
+    while (*p == '%' || isspace((unsigned char)*p)) {
+        ++p;
+    }
+    /* %mm0 is 64 bits wide and is not a general register. */
+    if ((p[0] == 'm' || p[0] == 'M') && (p[1] == 'm' || p[1] == 'M')) {
+        return 0;
+    }
+    switch (x86_reg_width_bits(p)) {
+    case 8:
+        return 8;
+    case 16:
+        return 16;
+    case 32:
+        return 32;
+    case 64:
+        return 64;
+    default:
+        return 0;
+    }
+}
+
+/*
+ * The operand size an AT&T instruction with no suffix has from the
+ * general registers among its operands: 8, 16, 32 or 64, or 0 if they
+ * do not say.  The register that says is the destination, which is
+ * written last, or failing a register there the one before it:
+ * `mov %ax, (%ebx)` is a 16-bit store, `movzx %al, %eax` a 32-bit
+ * instruction.  Not every register is an operand of the instruction's
+ * size: the port of in and out is %dx whatever is moved, a move to a
+ * segment register is 16 bits with nothing to say so, and the
+ * instructions listed take a register of one width and are not
+ * instructions of that width -- setcc and its byte, the system
+ * instructions and their 16-bit selectors, crc32 whose width is its
+ * source's and is settled where it is encoded.
+ */
+static int att_register_operand_size(const as_instruction_t *insn, const char *mn) {
+    static const char *const fixed[] = {
+        "fnstsw", "fstsw", "arpl", "lldt", "ltr", "lmsw", "verr", "verw", "enter", "ret", "lret", "crc32",
+    };
+    static const char *const shifts[] = {
+        "sal", "shl", "shr", "sar", "rol", "ror", "rcl", "rcr", "shld", "shrd",
+    };
+    int is_port_io = streq_ci(mn, "in") || streq_ci(mn, "out");
+    int is_shift = 0;
+    size_t i;
+
+    for (i = 0; i < sizeof(fixed) / sizeof(fixed[0]); ++i) {
+        if (streq_ci(mn, fixed[i])) {
+            return 0;
+        }
+    }
+    if (strncasecmp(mn, "set", 3) == 0) {
+        return 0;
+    }
+    for (i = 0; i < sizeof(shifts) / sizeof(shifts[0]); ++i) {
+        if (streq_ci(mn, shifts[i])) {
+            is_shift = 1;
+        }
+    }
+    if (insn->operand_count > 0 && operand_is_x86_seg_reg(&insn->operands[insn->operand_count - 1])) {
+        return 0;
+    }
+    for (i = insn->operand_count; i > 0; --i) {
+        const as_operand_t *op = &insn->operands[i - 1];
+        int bits;
+
+        if (is_port_io && operand_is_x86_dx_port_reg(op)) {
+            continue;
+        }
+        /* The count of a shift is %cl whatever is shifted. */
+        if (is_shift && i == 1 && insn->operand_count > 1) {
+            continue;
+        }
+        bits = x86_gpr_operand_width_bits(op);
+        if (bits != 0) {
+            return bits;
+        }
+    }
+    return 0;
+}
+
 static int infer_explicit_string_width_bits(const as_instruction_t *insn, const char *mnemonic) {
     size_t i;
     int bits = 0;
@@ -9560,6 +9650,20 @@ static int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_st
                 return -1;
             }
             in.rex_w = 1;
+        }
+    }
+    /*
+     * AT&T with no suffix: the registers say what size the instruction
+     * is.  Without this `add %ax, %bx` was `add %eax, %ebx`, and
+     * `mov %al, %cl` was `mov %eax, %ecx`.
+     */
+    if (!intel_syntax && suffix == '\0' && !in.operand_size_override && !in.byte_op && !in.rex_w) {
+        int bits = att_register_operand_size(&st->u.instr, mnbuf);
+
+        if (bits == 8) {
+            in.byte_op = 1;
+        } else if (bits == 16 && in.default_bits != 16u) {
+            in.operand_size_override = 1;
         }
     }
     if (intel_syntax && suffix == '\0' && (streq_ci(mnbuf, "in") || streq_ci(mnbuf, "out")) && in.op_count == 2) {
