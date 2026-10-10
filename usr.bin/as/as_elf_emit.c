@@ -3893,6 +3893,229 @@ static int lookup_x86_64_x87_mem16_32_64(const char *mnemonic, unsigned char *op
 }
 
 /*
+ * The x87 instructions on the register stack, in AT&T syntax, and the
+ * memory forms that had no entry anywhere.
+ *
+ * What was here took the arithmetic instructions only as `op %st(i),
+ * %st`.  A compiler writes `faddp %st, %st(1)`; a person writes `faddp`,
+ * `fxch`, `fadd %st(2)`.  None of those assembled, so no 32-bit code
+ * doing arithmetic on doubles did.  The encodings are GNU as's, which
+ * for the register forms of fsub, fsubr, fdiv and fdivr are the ones
+ * AT&T syntax has always had.
+ *
+ * Returns 0 with the instruction in `out`, or -1 if it is not one of
+ * these, for the encoders after this to try.
+ */
+static int operand_st_index(const as_operand_t *op, unsigned *out);
+
+static int emit_x87_forms(const as_instruction_t *insn, int intel_syntax, int is_64,
+                          unsigned char *out, size_t out_cap, size_t *out_len) {
+    /* fadd, fmul, ...: D8 base+i to %st, DC base+i from %st, DE base+1
+     * with no operand; and with p, DE base+i. */
+    static const struct { const char *name; unsigned char base; } arith[] = {
+        { "fadd", 0xc0 }, { "fmul", 0xc8 }, { "fsub", 0xe0 },
+        { "fsubr", 0xe8 }, { "fdiv", 0xf0 }, { "fdivr", 0xf8 },
+    };
+    /* One register, and for the first five %st(1) if none is written. */
+    static const struct { const char *name; unsigned char op, base; int may_omit; } single[] = {
+        { "fxch", 0xd9, 0xc8, 1 }, { "fcom", 0xd8, 0xd0, 1 }, { "fcomp", 0xd8, 0xd8, 1 },
+        { "fucom", 0xdd, 0xe0, 1 }, { "fucomp", 0xdd, 0xe8, 1 },
+        { "ffree", 0xdd, 0xc0, 0 }, { "fld", 0xd9, 0xc0, 0 },
+        { "fst", 0xdd, 0xd0, 0 }, { "fstp", 0xdd, 0xd8, 0 },
+    };
+    /* `op %st(i), %st`. */
+    static const struct { const char *name; unsigned char op, base; int one_operand; } to_top[] = {
+        { "fcomi", 0xdb, 0xf0, 1 }, { "fcomip", 0xdf, 0xf0, 1 },
+        { "fucomi", 0xdb, 0xe8, 1 }, { "fucomip", 0xdf, 0xe8, 1 },
+        { "fcmovb", 0xda, 0xc0, 0 }, { "fcmove", 0xda, 0xc8, 0 },
+        { "fcmovbe", 0xda, 0xd0, 0 }, { "fcmovu", 0xda, 0xd8, 0 },
+        { "fcmovnb", 0xdb, 0xc0, 0 }, { "fcmovne", 0xdb, 0xc8, 0 },
+        { "fcmovnbe", 0xdb, 0xd0, 0 }, { "fcmovnu", 0xdb, 0xd8, 0 },
+    };
+    /*
+     * Memory operands: the opcode and its /digit, and whether a wait goes
+     * first.  s is 32 bits for a float and 16 for an integer, l is 64
+     * for a float and 32 for an integer, q and ll are a 64-bit integer,
+     * t is ten bytes; an integer instruction with no suffix is 16 bits,
+     * as GNU as takes it.
+     */
+    static const struct { const char *name; unsigned char wait, op, digit; } memory[] = {
+        { "fadds", 0, 0xd8, 0 }, { "faddl", 0, 0xdc, 0 }, { "fmuls", 0, 0xd8, 1 }, { "fmull", 0, 0xdc, 1 },
+        { "fcoms", 0, 0xd8, 2 }, { "fcoml", 0, 0xdc, 2 }, { "fcomps", 0, 0xd8, 3 }, { "fcompl", 0, 0xdc, 3 },
+        { "fsubs", 0, 0xd8, 4 }, { "fsubl", 0, 0xdc, 4 }, { "fsubrs", 0, 0xd8, 5 }, { "fsubrl", 0, 0xdc, 5 },
+        { "fdivs", 0, 0xd8, 6 }, { "fdivl", 0, 0xdc, 6 }, { "fdivrs", 0, 0xd8, 7 }, { "fdivrl", 0, 0xdc, 7 },
+        { "fiaddl", 0, 0xda, 0 }, { "fiadds", 0, 0xde, 0 }, { "fiadd", 0, 0xde, 0 },
+        { "fimull", 0, 0xda, 1 }, { "fimuls", 0, 0xde, 1 }, { "fimul", 0, 0xde, 1 },
+        { "ficoml", 0, 0xda, 2 }, { "ficoms", 0, 0xde, 2 }, { "ficom", 0, 0xde, 2 },
+        { "ficompl", 0, 0xda, 3 }, { "ficomps", 0, 0xde, 3 }, { "ficomp", 0, 0xde, 3 },
+        { "fisubl", 0, 0xda, 4 }, { "fisubs", 0, 0xde, 4 }, { "fisub", 0, 0xde, 4 },
+        { "fisubrl", 0, 0xda, 5 }, { "fisubrs", 0, 0xde, 5 }, { "fisubr", 0, 0xde, 5 },
+        { "fidivl", 0, 0xda, 6 }, { "fidivs", 0, 0xde, 6 }, { "fidiv", 0, 0xde, 6 },
+        { "fidivrl", 0, 0xda, 7 }, { "fidivrs", 0, 0xde, 7 }, { "fidivr", 0, 0xde, 7 },
+        { "flds", 0, 0xd9, 0 }, { "fldl", 0, 0xdd, 0 }, { "fldt", 0, 0xdb, 5 },
+        { "fsts", 0, 0xd9, 2 }, { "fstl", 0, 0xdd, 2 },
+        { "fstps", 0, 0xd9, 3 }, { "fstpl", 0, 0xdd, 3 }, { "fstpt", 0, 0xdb, 7 },
+        { "filds", 0, 0xdf, 0 }, { "fildl", 0, 0xdb, 0 }, { "fild", 0, 0xdf, 0 },
+        { "fildq", 0, 0xdf, 5 }, { "fildll", 0, 0xdf, 5 },
+        { "fists", 0, 0xdf, 2 }, { "fistl", 0, 0xdb, 2 }, { "fist", 0, 0xdf, 2 },
+        { "fistps", 0, 0xdf, 3 }, { "fistpl", 0, 0xdb, 3 }, { "fistp", 0, 0xdf, 3 },
+        { "fistpq", 0, 0xdf, 7 }, { "fistpll", 0, 0xdf, 7 },
+        { "fisttps", 0, 0xdf, 1 }, { "fisttpl", 0, 0xdb, 1 }, { "fisttp", 0, 0xdf, 1 },
+        { "fisttpq", 0, 0xdd, 1 }, { "fisttpll", 0, 0xdd, 1 },
+        { "fldcw", 0, 0xd9, 5 }, { "fnstcw", 0, 0xd9, 7 }, { "fstcw", 1, 0xd9, 7 },
+        { "fnstsw", 0, 0xdd, 7 }, { "fstsw", 1, 0xdd, 7 },
+        { "fldenv", 0, 0xd9, 4 }, { "fnstenv", 0, 0xd9, 6 }, { "fstenv", 1, 0xd9, 6 },
+        { "fnsave", 0, 0xdd, 6 }, { "fsave", 1, 0xdd, 6 }, { "frstor", 0, 0xdd, 4 },
+        { "fbld", 0, 0xdf, 4 }, { "fbstp", 0, 0xdf, 6 },
+    };
+    const as_operand_t *a;
+    const as_operand_t *b;
+    const char *mn;
+    unsigned ia = 0;
+    unsigned ib = 0;
+    int a_is_st;
+    int b_is_st;
+    size_t i;
+    size_t n;
+
+    if (insn == NULL || insn->mnemonic == NULL || out == NULL || out_len == NULL || out_cap < 8 ||
+        intel_syntax || insn->operand_count > 2 ||
+        (insn->mnemonic[0] != 'f' && insn->mnemonic[0] != 'F')) {
+        return -1;
+    }
+    mn = insn->mnemonic;
+    a = insn->operand_count > 0 ? &insn->operands[0] : NULL;
+    b = insn->operand_count > 1 ? &insn->operands[1] : NULL;
+    a_is_st = a != NULL && operand_st_index(a, &ia) == 0 && ia <= 7u;
+    b_is_st = b != NULL && operand_st_index(b, &ib) == 0 && ib <= 7u;
+
+    /* fnstsw and fstsw to %ax, written or understood. */
+    if ((streq_ci(mn, "fnstsw") || streq_ci(mn, "fstsw")) &&
+        (insn->operand_count == 0 ||
+         (insn->operand_count == 1 && a->kind == AS_OPERAND_REGISTER && a->u.reg != NULL &&
+          (streq_ci(a->u.reg, "ax") || streq_ci(a->u.reg, "%ax"))))) {
+        n = 0;
+        if (streq_ci(mn, "fstsw")) {
+            out[n++] = 0x9b;
+        }
+        out[n++] = 0xdf;
+        out[n++] = 0xe0;
+        *out_len = n;
+        return 0;
+    }
+
+    /* The register forms: every operand that is written is of the stack. */
+    if ((a == NULL || a_is_st) && (b == NULL || b_is_st)) {
+        for (i = 0; i < sizeof(arith) / sizeof(arith[0]); ++i) {
+            size_t len = strlen(arith[i].name);
+            int pop;
+
+            if (strncasecmp(mn, arith[i].name, len) != 0) {
+                continue;
+            }
+            if (mn[len] == '\0') {
+                pop = 0;
+            } else if ((mn[len] == 'p' || mn[len] == 'P') && mn[len + 1] == '\0') {
+                pop = 1;
+            } else {
+                continue;
+            }
+            if (insn->operand_count == 0) {
+                out[0] = 0xde;
+                out[1] = (unsigned char)(arith[i].base + 1u);
+            } else if (insn->operand_count == 1) {
+                out[0] = pop ? 0xde : 0xd8;
+                out[1] = (unsigned char)(arith[i].base + ia);
+            } else if (!pop && ib == 0u) {
+                /* op %st(i), %st */
+                out[0] = 0xd8;
+                out[1] = (unsigned char)(arith[i].base + ia);
+            } else if (ia == 0u) {
+                /* op %st, %st(i), and opp %st, %st(i) */
+                out[0] = pop ? 0xde : 0xdc;
+                out[1] = (unsigned char)(arith[i].base + ib);
+            } else if (pop && ib == 0u && (i == 0 || i == 1)) {
+                /* faddp and fmulp, which commute, are taken either way. */
+                out[0] = 0xde;
+                out[1] = (unsigned char)(arith[i].base + ia);
+            } else {
+                return -1;
+            }
+            *out_len = 2;
+            return 0;
+        }
+        for (i = 0; i < sizeof(single) / sizeof(single[0]); ++i) {
+            if (!streq_ci(mn, single[i].name)) {
+                continue;
+            }
+            if (insn->operand_count == 1) {
+                out[1] = (unsigned char)(single[i].base + ia);
+            } else if (insn->operand_count == 0 && single[i].may_omit) {
+                out[1] = (unsigned char)(single[i].base + 1u);
+            } else {
+                return -1;
+            }
+            out[0] = single[i].op;
+            *out_len = 2;
+            return 0;
+        }
+        for (i = 0; i < sizeof(to_top) / sizeof(to_top[0]); ++i) {
+            if (!streq_ci(mn, to_top[i].name)) {
+                continue;
+            }
+            if (insn->operand_count == 2 && ib == 0u) {
+                out[1] = (unsigned char)(to_top[i].base + ia);
+            } else if (insn->operand_count == 1 && to_top[i].one_operand) {
+                out[1] = (unsigned char)(to_top[i].base + ia);
+            } else {
+                return -1;
+            }
+            out[0] = to_top[i].op;
+            *out_len = 2;
+            return 0;
+        }
+        return -1;
+    }
+
+    /* One memory operand. */
+    if (insn->operand_count == 1 &&
+        (a->kind == AS_OPERAND_MEMORY || (!is_64 && a->kind == AS_OPERAND_LABEL_REF))) {
+        for (i = 0; i < sizeof(memory) / sizeof(memory[0]); ++i) {
+            if (!streq_ci(mn, memory[i].name)) {
+                continue;
+            }
+            n = 0;
+            if (memory[i].wait) {
+                out[n++] = 0x9b;
+            }
+            if (is_64) {
+                /* The 64-bit emitter of ModRM writes the segment override
+                 * and REX itself, and starts at the byte it is given. */
+                size_t len = 0;
+
+                if (emit_x86_64_1byte_regfield_memop(memory[i].op, memory[i].digit, &a->u.mem,
+                                                     out + n, out_cap - n, &len) != 0) {
+                    return -1;
+                }
+                *out_len = n + len;
+                return 0;
+            }
+            if (a->kind == AS_OPERAND_MEMORY && a->u.mem.segment_reg != NULL &&
+                emit_seg_override_byte(out, out_cap, &n, a->u.mem.segment_reg) != 0) {
+                return -1;
+            }
+            out[n++] = memory[i].op;
+            if (emit_i386_modrm_rm_operand(memory[i].digit, a, out, out_cap, &n) != 0) {
+                return -1;
+            }
+            *out_len = n;
+            return 0;
+        }
+    }
+    return -1;
+}
+
+/*
  * Put F0 before an encoded instruction unless it is already among its
  * legacy prefixes -- the bytes before the opcode that are segment
  * overrides, 66, 67, F2 or F3.
@@ -9035,6 +9258,10 @@ static int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_st
         }
     }
 
+    if (emit_x87_forms(&st->u.instr, intel_syntax, cfg->is_64, code, code_cap, code_len) == 0 &&
+        *code_len > 0) {
+        return 0;
+    }
     if (!cfg->is_64 && emit_i386_special(&st->u.instr, intel_syntax, code, code_cap, code_len) == 0) {
         if (*code_len > 0) {
             /*

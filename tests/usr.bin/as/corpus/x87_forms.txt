@@ -1,0 +1,656 @@
+# mode|instruction|bytes -- x87 instructions and the bytes GNU as 2.47 gives them.
+# Read by test_x87_forms.sh.  Made by assembling each line with GNU as; a line is
+# here only if this assembler gives the same.
+32|fadd %st(1), %st|d8c1
+32|fadd %st, %st(1)|dcc1
+32|fadd %st(3), %st|d8c3
+32|fadd %st, %st(3)|dcc3
+32|fadd %st(2)|d8c2
+32|fadd|dec1
+32|fadd %st(0), %st|d8c0
+32|fadd %st, %st|d8c0
+32|faddp %st, %st(1)|dec1
+32|faddp %st, %st(3)|dec3
+32|faddp %st(2)|dec2
+32|faddp|dec1
+32|faddp %st(1), %st|dec1
+32|fadds (%eax)|d800
+32|faddl (%eax)|dc00
+32|fadds 8(%ebp)|d84508
+32|faddl -16(%ebp)|dc45f0
+32|fiaddl (%eax)|da00
+32|fiadds (%eax)|de00
+32|fiadd (%eax)|de00
+32|fsub %st(1), %st|d8e1
+32|fsub %st, %st(1)|dce1
+32|fsub %st(3), %st|d8e3
+32|fsub %st, %st(3)|dce3
+32|fsub %st(2)|d8e2
+32|fsub|dee1
+32|fsub %st(0), %st|d8e0
+32|fsub %st, %st|d8e0
+32|fsubp %st, %st(1)|dee1
+32|fsubp %st, %st(3)|dee3
+32|fsubp %st(2)|dee2
+32|fsubp|dee1
+32|fsubs (%eax)|d820
+32|fsubl (%eax)|dc20
+32|fsubs 8(%ebp)|d86508
+32|fsubl -16(%ebp)|dc65f0
+32|fisubl (%eax)|da20
+32|fisubs (%eax)|de20
+32|fisub (%eax)|de20
+32|fsubr %st(1), %st|d8e9
+32|fsubr %st, %st(1)|dce9
+32|fsubr %st(3), %st|d8eb
+32|fsubr %st, %st(3)|dceb
+32|fsubr %st(2)|d8ea
+32|fsubr|dee9
+32|fsubr %st(0), %st|d8e8
+32|fsubr %st, %st|d8e8
+32|fsubrp %st, %st(1)|dee9
+32|fsubrp %st, %st(3)|deeb
+32|fsubrp %st(2)|deea
+32|fsubrp|dee9
+32|fsubrs (%eax)|d828
+32|fsubrl (%eax)|dc28
+32|fsubrs 8(%ebp)|d86d08
+32|fsubrl -16(%ebp)|dc6df0
+32|fisubrl (%eax)|da28
+32|fisubrs (%eax)|de28
+32|fisubr (%eax)|de28
+32|fmul %st(1), %st|d8c9
+32|fmul %st, %st(1)|dcc9
+32|fmul %st(3), %st|d8cb
+32|fmul %st, %st(3)|dccb
+32|fmul %st(2)|d8ca
+32|fmul|dec9
+32|fmul %st(0), %st|d8c8
+32|fmul %st, %st|d8c8
+32|fmulp %st, %st(1)|dec9
+32|fmulp %st, %st(3)|decb
+32|fmulp %st(2)|deca
+32|fmulp|dec9
+32|fmulp %st(1), %st|dec9
+32|fmuls (%eax)|d808
+32|fmull (%eax)|dc08
+32|fmuls 8(%ebp)|d84d08
+32|fmull -16(%ebp)|dc4df0
+32|fimull (%eax)|da08
+32|fimuls (%eax)|de08
+32|fimul (%eax)|de08
+32|fdiv %st(1), %st|d8f1
+32|fdiv %st, %st(1)|dcf1
+32|fdiv %st(3), %st|d8f3
+32|fdiv %st, %st(3)|dcf3
+32|fdiv %st(2)|d8f2
+32|fdiv|def1
+32|fdiv %st(0), %st|d8f0
+32|fdiv %st, %st|d8f0
+32|fdivp %st, %st(1)|def1
+32|fdivp %st, %st(3)|def3
+32|fdivp %st(2)|def2
+32|fdivp|def1
+32|fdivs (%eax)|d830
+32|fdivl (%eax)|dc30
+32|fdivs 8(%ebp)|d87508
+32|fdivl -16(%ebp)|dc75f0
+32|fidivl (%eax)|da30
+32|fidivs (%eax)|de30
+32|fidiv (%eax)|de30
+32|fdivr %st(1), %st|d8f9
+32|fdivr %st, %st(1)|dcf9
+32|fdivr %st(3), %st|d8fb
+32|fdivr %st, %st(3)|dcfb
+32|fdivr %st(2)|d8fa
+32|fdivr|def9
+32|fdivr %st(0), %st|d8f8
+32|fdivr %st, %st|d8f8
+32|fdivrp %st, %st(1)|def9
+32|fdivrp %st, %st(3)|defb
+32|fdivrp %st(2)|defa
+32|fdivrp|def9
+32|fdivrs (%eax)|d838
+32|fdivrl (%eax)|dc38
+32|fdivrs 8(%ebp)|d87d08
+32|fdivrl -16(%ebp)|dc7df0
+32|fidivrl (%eax)|da38
+32|fidivrs (%eax)|de38
+32|fidivr (%eax)|de38
+32|fxch %st(1)|d9c9
+32|fxch %st(3)|d9cb
+32|fxch %st(0)|d9c8
+32|fxch %st|d9c8
+32|fxch|d9c9
+32|fcom %st(1)|d8d1
+32|fcom %st(3)|d8d3
+32|fcom %st(0)|d8d0
+32|fcom %st|d8d0
+32|fcom|d8d1
+32|fcomp %st(1)|d8d9
+32|fcomp %st(3)|d8db
+32|fcomp %st(0)|d8d8
+32|fcomp %st|d8d8
+32|fcomp|d8d9
+32|fucom %st(1)|dde1
+32|fucom %st(3)|dde3
+32|fucom %st(0)|dde0
+32|fucom %st|dde0
+32|fucom|dde1
+32|fucomp %st(1)|dde9
+32|fucomp %st(3)|ddeb
+32|fucomp %st(0)|dde8
+32|fucomp %st|dde8
+32|fucomp|dde9
+32|ffree %st(1)|ddc1
+32|ffree %st(3)|ddc3
+32|ffree %st(0)|ddc0
+32|ffree %st|ddc0
+32|fld %st(1)|d9c1
+32|fld %st(3)|d9c3
+32|fld %st(0)|d9c0
+32|fld %st|d9c0
+32|fst %st(1)|ddd1
+32|fst %st(3)|ddd3
+32|fst %st(0)|ddd0
+32|fst %st|ddd0
+32|fstp %st(1)|ddd9
+32|fstp %st(3)|dddb
+32|fstp %st(0)|ddd8
+32|fstp %st|ddd8
+32|fcomi %st(1), %st|dbf1
+32|fcomi %st(3), %st|dbf3
+32|fcomi %st(2)|dbf2
+32|fcomip %st(1), %st|dff1
+32|fcomip %st(3), %st|dff3
+32|fcomip %st(2)|dff2
+32|fucomi %st(1), %st|dbe9
+32|fucomi %st(3), %st|dbeb
+32|fucomi %st(2)|dbea
+32|fucomip %st(1), %st|dfe9
+32|fucomip %st(3), %st|dfeb
+32|fucomip %st(2)|dfea
+32|fcmovb %st(1), %st|dac1
+32|fcmovb %st(3), %st|dac3
+32|fcmove %st(1), %st|dac9
+32|fcmove %st(3), %st|dacb
+32|fcmovbe %st(1), %st|dad1
+32|fcmovbe %st(3), %st|dad3
+32|fcmovu %st(1), %st|dad9
+32|fcmovu %st(3), %st|dadb
+32|fcmovnb %st(1), %st|dbc1
+32|fcmovnb %st(3), %st|dbc3
+32|fcmovne %st(1), %st|dbc9
+32|fcmovne %st(3), %st|dbcb
+32|fcmovnbe %st(1), %st|dbd1
+32|fcmovnbe %st(3), %st|dbd3
+32|fcmovnu %st(1), %st|dbd9
+32|fcmovnu %st(3), %st|dbdb
+32|flds (%eax)|d900
+32|flds 8(%ebp)|d94508
+32|flds -4(%ebp,%ecx,4)|d9448dfc
+32|fldl (%eax)|dd00
+32|fldl 8(%ebp)|dd4508
+32|fldl -4(%ebp,%ecx,4)|dd448dfc
+32|fldt (%eax)|db28
+32|fldt 8(%ebp)|db6d08
+32|fldt -4(%ebp,%ecx,4)|db6c8dfc
+32|fsts (%eax)|d910
+32|fsts 8(%ebp)|d95508
+32|fsts -4(%ebp,%ecx,4)|d9548dfc
+32|fstl (%eax)|dd10
+32|fstl 8(%ebp)|dd5508
+32|fstl -4(%ebp,%ecx,4)|dd548dfc
+32|fstps (%eax)|d918
+32|fstps 8(%ebp)|d95d08
+32|fstps -4(%ebp,%ecx,4)|d95c8dfc
+32|fstpl (%eax)|dd18
+32|fstpl 8(%ebp)|dd5d08
+32|fstpl -4(%ebp,%ecx,4)|dd5c8dfc
+32|fstpt (%eax)|db38
+32|fstpt 8(%ebp)|db7d08
+32|fstpt -4(%ebp,%ecx,4)|db7c8dfc
+32|filds (%eax)|df00
+32|filds 8(%ebp)|df4508
+32|filds -4(%ebp,%ecx,4)|df448dfc
+32|fildl (%eax)|db00
+32|fildl 8(%ebp)|db4508
+32|fildl -4(%ebp,%ecx,4)|db448dfc
+32|fildq (%eax)|df28
+32|fildq 8(%ebp)|df6d08
+32|fildq -4(%ebp,%ecx,4)|df6c8dfc
+32|fildll (%eax)|df28
+32|fildll 8(%ebp)|df6d08
+32|fildll -4(%ebp,%ecx,4)|df6c8dfc
+32|fists (%eax)|df10
+32|fists 8(%ebp)|df5508
+32|fists -4(%ebp,%ecx,4)|df548dfc
+32|fistl (%eax)|db10
+32|fistl 8(%ebp)|db5508
+32|fistl -4(%ebp,%ecx,4)|db548dfc
+32|fistps (%eax)|df18
+32|fistps 8(%ebp)|df5d08
+32|fistps -4(%ebp,%ecx,4)|df5c8dfc
+32|fistpl (%eax)|db18
+32|fistpl 8(%ebp)|db5d08
+32|fistpl -4(%ebp,%ecx,4)|db5c8dfc
+32|fistpq (%eax)|df38
+32|fistpq 8(%ebp)|df7d08
+32|fistpq -4(%ebp,%ecx,4)|df7c8dfc
+32|fistpll (%eax)|df38
+32|fistpll 8(%ebp)|df7d08
+32|fistpll -4(%ebp,%ecx,4)|df7c8dfc
+32|fisttps (%eax)|df08
+32|fisttps 8(%ebp)|df4d08
+32|fisttps -4(%ebp,%ecx,4)|df4c8dfc
+32|fisttpl (%eax)|db08
+32|fisttpl 8(%ebp)|db4d08
+32|fisttpl -4(%ebp,%ecx,4)|db4c8dfc
+32|fisttpll (%eax)|dd08
+32|fisttpll 8(%ebp)|dd4d08
+32|fisttpll -4(%ebp,%ecx,4)|dd4c8dfc
+32|fisttp (%eax)|df08
+32|fisttp 8(%ebp)|df4d08
+32|fisttp -4(%ebp,%ecx,4)|df4c8dfc
+32|fild (%eax)|df00
+32|fild 8(%ebp)|df4508
+32|fild -4(%ebp,%ecx,4)|df448dfc
+32|fist (%eax)|df10
+32|fist 8(%ebp)|df5508
+32|fist -4(%ebp,%ecx,4)|df548dfc
+32|fistp (%eax)|df18
+32|fistp 8(%ebp)|df5d08
+32|fistp -4(%ebp,%ecx,4)|df5c8dfc
+32|fcoms (%eax)|d810
+32|fcoms 8(%ebp)|d85508
+32|fcoms -4(%ebp,%ecx,4)|d8548dfc
+32|fcoml (%eax)|dc10
+32|fcoml 8(%ebp)|dc5508
+32|fcoml -4(%ebp,%ecx,4)|dc548dfc
+32|fcomps (%eax)|d818
+32|fcomps 8(%ebp)|d85d08
+32|fcomps -4(%ebp,%ecx,4)|d85c8dfc
+32|fcompl (%eax)|dc18
+32|fcompl 8(%ebp)|dc5d08
+32|fcompl -4(%ebp,%ecx,4)|dc5c8dfc
+32|ficoms (%eax)|de10
+32|ficoms 8(%ebp)|de5508
+32|ficoms -4(%ebp,%ecx,4)|de548dfc
+32|ficoml (%eax)|da10
+32|ficoml 8(%ebp)|da5508
+32|ficoml -4(%ebp,%ecx,4)|da548dfc
+32|ficomps (%eax)|de18
+32|ficomps 8(%ebp)|de5d08
+32|ficomps -4(%ebp,%ecx,4)|de5c8dfc
+32|ficompl (%eax)|da18
+32|ficompl 8(%ebp)|da5d08
+32|ficompl -4(%ebp,%ecx,4)|da5c8dfc
+32|fldcw (%eax)|d928
+32|fldcw 8(%ebp)|d96d08
+32|fldcw -4(%ebp,%ecx,4)|d96c8dfc
+32|fnstcw (%eax)|d938
+32|fnstcw 8(%ebp)|d97d08
+32|fnstcw -4(%ebp,%ecx,4)|d97c8dfc
+32|fstcw (%eax)|9bd938
+32|fstcw 8(%ebp)|9bd97d08
+32|fstcw -4(%ebp,%ecx,4)|9bd97c8dfc
+32|fnstsw (%eax)|dd38
+32|fnstsw 8(%ebp)|dd7d08
+32|fnstsw -4(%ebp,%ecx,4)|dd7c8dfc
+32|fstsw (%eax)|9bdd38
+32|fstsw 8(%ebp)|9bdd7d08
+32|fstsw -4(%ebp,%ecx,4)|9bdd7c8dfc
+32|fnstenv (%eax)|d930
+32|fnstenv 8(%ebp)|d97508
+32|fnstenv -4(%ebp,%ecx,4)|d9748dfc
+32|fstenv (%eax)|9bd930
+32|fstenv 8(%ebp)|9bd97508
+32|fstenv -4(%ebp,%ecx,4)|9bd9748dfc
+32|fldenv (%eax)|d920
+32|fldenv 8(%ebp)|d96508
+32|fldenv -4(%ebp,%ecx,4)|d9648dfc
+32|fnsave (%eax)|dd30
+32|fnsave 8(%ebp)|dd7508
+32|fnsave -4(%ebp,%ecx,4)|dd748dfc
+32|fsave (%eax)|9bdd30
+32|fsave 8(%ebp)|9bdd7508
+32|fsave -4(%ebp,%ecx,4)|9bdd748dfc
+32|frstor (%eax)|dd20
+32|frstor 8(%ebp)|dd6508
+32|frstor -4(%ebp,%ecx,4)|dd648dfc
+32|fxsave (%eax)|0fae00
+32|fxsave 8(%ebp)|0fae4508
+32|fxsave -4(%ebp,%ecx,4)|0fae448dfc
+32|fxrstor (%eax)|0fae08
+32|fxrstor 8(%ebp)|0fae4d08
+32|fxrstor -4(%ebp,%ecx,4)|0fae4c8dfc
+32|fbld (%eax)|df20
+32|fbld 8(%ebp)|df6508
+32|fbld -4(%ebp,%ecx,4)|df648dfc
+32|fbstp (%eax)|df30
+32|fbstp 8(%ebp)|df7508
+32|fbstp -4(%ebp,%ecx,4)|df748dfc
+32|fnstsw %ax|dfe0
+32|fstsw %ax|9bdfe0
+32|fnstsw|dfe0
+32|fstsw|9bdfe0
+64|fadd %st(1), %st|d8c1
+64|fadd %st, %st(1)|dcc1
+64|fadd %st(3), %st|d8c3
+64|fadd %st, %st(3)|dcc3
+64|fadd %st(2)|d8c2
+64|fadd|dec1
+64|fadd %st(0), %st|d8c0
+64|fadd %st, %st|d8c0
+64|faddp %st, %st(1)|dec1
+64|faddp %st, %st(3)|dec3
+64|faddp %st(2)|dec2
+64|faddp|dec1
+64|faddp %st(1), %st|dec1
+64|fadds (%rax)|d800
+64|faddl (%rax)|dc00
+64|fadds 8(%rbp)|d84508
+64|faddl -16(%rbp)|dc45f0
+64|fiaddl (%rax)|da00
+64|fiadds (%rax)|de00
+64|fiadd (%rax)|de00
+64|fsub %st(1), %st|d8e1
+64|fsub %st, %st(1)|dce1
+64|fsub %st(3), %st|d8e3
+64|fsub %st, %st(3)|dce3
+64|fsub %st(2)|d8e2
+64|fsub|dee1
+64|fsub %st(0), %st|d8e0
+64|fsub %st, %st|d8e0
+64|fsubp %st, %st(1)|dee1
+64|fsubp %st, %st(3)|dee3
+64|fsubp %st(2)|dee2
+64|fsubp|dee1
+64|fsubs (%rax)|d820
+64|fsubl (%rax)|dc20
+64|fsubs 8(%rbp)|d86508
+64|fsubl -16(%rbp)|dc65f0
+64|fisubl (%rax)|da20
+64|fisubs (%rax)|de20
+64|fisub (%rax)|de20
+64|fsubr %st(1), %st|d8e9
+64|fsubr %st, %st(1)|dce9
+64|fsubr %st(3), %st|d8eb
+64|fsubr %st, %st(3)|dceb
+64|fsubr %st(2)|d8ea
+64|fsubr|dee9
+64|fsubr %st(0), %st|d8e8
+64|fsubr %st, %st|d8e8
+64|fsubrp %st, %st(1)|dee9
+64|fsubrp %st, %st(3)|deeb
+64|fsubrp %st(2)|deea
+64|fsubrp|dee9
+64|fsubrs (%rax)|d828
+64|fsubrl (%rax)|dc28
+64|fsubrs 8(%rbp)|d86d08
+64|fsubrl -16(%rbp)|dc6df0
+64|fisubrl (%rax)|da28
+64|fisubrs (%rax)|de28
+64|fisubr (%rax)|de28
+64|fmul %st(1), %st|d8c9
+64|fmul %st, %st(1)|dcc9
+64|fmul %st(3), %st|d8cb
+64|fmul %st, %st(3)|dccb
+64|fmul %st(2)|d8ca
+64|fmul|dec9
+64|fmul %st(0), %st|d8c8
+64|fmul %st, %st|d8c8
+64|fmulp %st, %st(1)|dec9
+64|fmulp %st, %st(3)|decb
+64|fmulp %st(2)|deca
+64|fmulp|dec9
+64|fmulp %st(1), %st|dec9
+64|fmuls (%rax)|d808
+64|fmull (%rax)|dc08
+64|fmuls 8(%rbp)|d84d08
+64|fmull -16(%rbp)|dc4df0
+64|fimull (%rax)|da08
+64|fimuls (%rax)|de08
+64|fimul (%rax)|de08
+64|fdiv %st(1), %st|d8f1
+64|fdiv %st, %st(1)|dcf1
+64|fdiv %st(3), %st|d8f3
+64|fdiv %st, %st(3)|dcf3
+64|fdiv %st(2)|d8f2
+64|fdiv|def1
+64|fdiv %st(0), %st|d8f0
+64|fdiv %st, %st|d8f0
+64|fdivp %st, %st(1)|def1
+64|fdivp %st, %st(3)|def3
+64|fdivp %st(2)|def2
+64|fdivp|def1
+64|fdivs (%rax)|d830
+64|fdivl (%rax)|dc30
+64|fdivs 8(%rbp)|d87508
+64|fdivl -16(%rbp)|dc75f0
+64|fidivl (%rax)|da30
+64|fidivs (%rax)|de30
+64|fidiv (%rax)|de30
+64|fdivr %st(1), %st|d8f9
+64|fdivr %st, %st(1)|dcf9
+64|fdivr %st(3), %st|d8fb
+64|fdivr %st, %st(3)|dcfb
+64|fdivr %st(2)|d8fa
+64|fdivr|def9
+64|fdivr %st(0), %st|d8f8
+64|fdivr %st, %st|d8f8
+64|fdivrp %st, %st(1)|def9
+64|fdivrp %st, %st(3)|defb
+64|fdivrp %st(2)|defa
+64|fdivrp|def9
+64|fdivrs (%rax)|d838
+64|fdivrl (%rax)|dc38
+64|fdivrs 8(%rbp)|d87d08
+64|fdivrl -16(%rbp)|dc7df0
+64|fidivrl (%rax)|da38
+64|fidivrs (%rax)|de38
+64|fidivr (%rax)|de38
+64|fxch %st(1)|d9c9
+64|fxch %st(3)|d9cb
+64|fxch %st(0)|d9c8
+64|fxch %st|d9c8
+64|fxch|d9c9
+64|fcom %st(1)|d8d1
+64|fcom %st(3)|d8d3
+64|fcom %st(0)|d8d0
+64|fcom %st|d8d0
+64|fcom|d8d1
+64|fcomp %st(1)|d8d9
+64|fcomp %st(3)|d8db
+64|fcomp %st(0)|d8d8
+64|fcomp %st|d8d8
+64|fcomp|d8d9
+64|fucom %st(1)|dde1
+64|fucom %st(3)|dde3
+64|fucom %st(0)|dde0
+64|fucom %st|dde0
+64|fucom|dde1
+64|fucomp %st(1)|dde9
+64|fucomp %st(3)|ddeb
+64|fucomp %st(0)|dde8
+64|fucomp %st|dde8
+64|fucomp|dde9
+64|ffree %st(1)|ddc1
+64|ffree %st(3)|ddc3
+64|ffree %st(0)|ddc0
+64|ffree %st|ddc0
+64|fld %st(1)|d9c1
+64|fld %st(3)|d9c3
+64|fld %st(0)|d9c0
+64|fld %st|d9c0
+64|fst %st(1)|ddd1
+64|fst %st(3)|ddd3
+64|fst %st(0)|ddd0
+64|fst %st|ddd0
+64|fstp %st(1)|ddd9
+64|fstp %st(3)|dddb
+64|fstp %st(0)|ddd8
+64|fstp %st|ddd8
+64|fcomi %st(1), %st|dbf1
+64|fcomi %st(3), %st|dbf3
+64|fcomi %st(2)|dbf2
+64|fcomip %st(1), %st|dff1
+64|fcomip %st(3), %st|dff3
+64|fcomip %st(2)|dff2
+64|fucomi %st(1), %st|dbe9
+64|fucomi %st(3), %st|dbeb
+64|fucomi %st(2)|dbea
+64|fucomip %st(1), %st|dfe9
+64|fucomip %st(3), %st|dfeb
+64|fucomip %st(2)|dfea
+64|fcmovb %st(1), %st|dac1
+64|fcmovb %st(3), %st|dac3
+64|fcmove %st(1), %st|dac9
+64|fcmove %st(3), %st|dacb
+64|fcmovbe %st(1), %st|dad1
+64|fcmovbe %st(3), %st|dad3
+64|fcmovu %st(1), %st|dad9
+64|fcmovu %st(3), %st|dadb
+64|fcmovnb %st(1), %st|dbc1
+64|fcmovnb %st(3), %st|dbc3
+64|fcmovne %st(1), %st|dbc9
+64|fcmovne %st(3), %st|dbcb
+64|fcmovnbe %st(1), %st|dbd1
+64|fcmovnbe %st(3), %st|dbd3
+64|fcmovnu %st(1), %st|dbd9
+64|fcmovnu %st(3), %st|dbdb
+64|flds (%rax)|d900
+64|flds 8(%rbp)|d94508
+64|flds -4(%rbp,%rcx,4)|d9448dfc
+64|fldl (%rax)|dd00
+64|fldl 8(%rbp)|dd4508
+64|fldl -4(%rbp,%rcx,4)|dd448dfc
+64|fldt (%rax)|db28
+64|fldt 8(%rbp)|db6d08
+64|fldt -4(%rbp,%rcx,4)|db6c8dfc
+64|fsts (%rax)|d910
+64|fsts 8(%rbp)|d95508
+64|fsts -4(%rbp,%rcx,4)|d9548dfc
+64|fstl (%rax)|dd10
+64|fstl 8(%rbp)|dd5508
+64|fstl -4(%rbp,%rcx,4)|dd548dfc
+64|fstps (%rax)|d918
+64|fstps 8(%rbp)|d95d08
+64|fstps -4(%rbp,%rcx,4)|d95c8dfc
+64|fstpl (%rax)|dd18
+64|fstpl 8(%rbp)|dd5d08
+64|fstpl -4(%rbp,%rcx,4)|dd5c8dfc
+64|fstpt (%rax)|db38
+64|fstpt 8(%rbp)|db7d08
+64|fstpt -4(%rbp,%rcx,4)|db7c8dfc
+64|filds (%rax)|df00
+64|filds 8(%rbp)|df4508
+64|filds -4(%rbp,%rcx,4)|df448dfc
+64|fildl (%rax)|db00
+64|fildl 8(%rbp)|db4508
+64|fildl -4(%rbp,%rcx,4)|db448dfc
+64|fildq (%rax)|df28
+64|fildq 8(%rbp)|df6d08
+64|fildll (%rax)|df28
+64|fildll 8(%rbp)|df6d08
+64|fildll -4(%rbp,%rcx,4)|df6c8dfc
+64|fists (%rax)|df10
+64|fists 8(%rbp)|df5508
+64|fists -4(%rbp,%rcx,4)|df548dfc
+64|fistl (%rax)|db10
+64|fistl 8(%rbp)|db5508
+64|fistl -4(%rbp,%rcx,4)|db548dfc
+64|fistps (%rax)|df18
+64|fistps 8(%rbp)|df5d08
+64|fistps -4(%rbp,%rcx,4)|df5c8dfc
+64|fistpl (%rax)|db18
+64|fistpl 8(%rbp)|db5d08
+64|fistpl -4(%rbp,%rcx,4)|db5c8dfc
+64|fistpq (%rax)|df38
+64|fistpq 8(%rbp)|df7d08
+64|fistpll (%rax)|df38
+64|fistpll 8(%rbp)|df7d08
+64|fistpll -4(%rbp,%rcx,4)|df7c8dfc
+64|fisttps (%rax)|df08
+64|fisttps 8(%rbp)|df4d08
+64|fisttpl (%rax)|db08
+64|fisttpl 8(%rbp)|db4d08
+64|fisttpll (%rax)|dd08
+64|fisttpll 8(%rbp)|dd4d08
+64|fisttp (%rax)|df08
+64|fisttp 8(%rbp)|df4d08
+64|fild (%rax)|df00
+64|fild 8(%rbp)|df4508
+64|fist (%rax)|df10
+64|fist 8(%rbp)|df5508
+64|fistp (%rax)|df18
+64|fistp 8(%rbp)|df5d08
+64|fcoms (%rax)|d810
+64|fcoms 8(%rbp)|d85508
+64|fcoms -4(%rbp,%rcx,4)|d8548dfc
+64|fcoml (%rax)|dc10
+64|fcoml 8(%rbp)|dc5508
+64|fcoml -4(%rbp,%rcx,4)|dc548dfc
+64|fcomps (%rax)|d818
+64|fcomps 8(%rbp)|d85d08
+64|fcomps -4(%rbp,%rcx,4)|d85c8dfc
+64|fcompl (%rax)|dc18
+64|fcompl 8(%rbp)|dc5d08
+64|fcompl -4(%rbp,%rcx,4)|dc5c8dfc
+64|ficoms (%rax)|de10
+64|ficoms 8(%rbp)|de5508
+64|ficoms -4(%rbp,%rcx,4)|de548dfc
+64|ficoml (%rax)|da10
+64|ficoml 8(%rbp)|da5508
+64|ficoml -4(%rbp,%rcx,4)|da548dfc
+64|ficomps (%rax)|de18
+64|ficomps 8(%rbp)|de5d08
+64|ficomps -4(%rbp,%rcx,4)|de5c8dfc
+64|ficompl (%rax)|da18
+64|ficompl 8(%rbp)|da5d08
+64|ficompl -4(%rbp,%rcx,4)|da5c8dfc
+64|fldcw (%rax)|d928
+64|fldcw 8(%rbp)|d96d08
+64|fldcw -4(%rbp,%rcx,4)|d96c8dfc
+64|fnstcw (%rax)|d938
+64|fnstcw 8(%rbp)|d97d08
+64|fnstcw -4(%rbp,%rcx,4)|d97c8dfc
+64|fstcw (%rax)|9bd938
+64|fstcw 8(%rbp)|9bd97d08
+64|fnstsw (%rax)|dd38
+64|fnstsw 8(%rbp)|dd7d08
+64|fnstsw -4(%rbp,%rcx,4)|dd7c8dfc
+64|fstsw (%rax)|9bdd38
+64|fstsw 8(%rbp)|9bdd7d08
+64|fnstenv (%rax)|d930
+64|fnstenv 8(%rbp)|d97508
+64|fnstenv -4(%rbp,%rcx,4)|d9748dfc
+64|fstenv (%rax)|9bd930
+64|fstenv 8(%rbp)|9bd97508
+64|fldenv (%rax)|d920
+64|fldenv 8(%rbp)|d96508
+64|fldenv -4(%rbp,%rcx,4)|d9648dfc
+64|fnsave (%rax)|dd30
+64|fnsave 8(%rbp)|dd7508
+64|fnsave -4(%rbp,%rcx,4)|dd748dfc
+64|fsave (%rax)|9bdd30
+64|fsave 8(%rbp)|9bdd7508
+64|frstor (%rax)|dd20
+64|frstor 8(%rbp)|dd6508
+64|frstor -4(%rbp,%rcx,4)|dd648dfc
+64|fxsave (%rax)|0fae00
+64|fxsave 8(%rbp)|0fae4508
+64|fxsave -4(%rbp,%rcx,4)|0fae448dfc
+64|fxrstor (%rax)|0fae08
+64|fxrstor 8(%rbp)|0fae4d08
+64|fxrstor -4(%rbp,%rcx,4)|0fae4c8dfc
+64|fbld (%rax)|df20
+64|fbld 8(%rbp)|df6508
+64|fbld -4(%rbp,%rcx,4)|df648dfc
+64|fbstp (%rax)|df30
+64|fbstp 8(%rbp)|df7508
+64|fbstp -4(%rbp,%rcx,4)|df748dfc
+64|fnstsw %ax|dfe0
+64|fstsw %ax|9bdfe0
+64|fnstsw|dfe0
+64|fstsw|9bdfe0
