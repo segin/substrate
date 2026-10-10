@@ -135,6 +135,12 @@ status 0.
 - [x] **AS-T-030** When a `lock` prefix is written before an instruction whose destination is memory, the assembler shall emit `F0` before the instruction.
   Trace: AS-SEL-001.  Verify: T — `lock` with `cmpxchg`, `cmpxchg8b`, `cmpxchg16b`, `xadd`, `bts`, `btr`, `btc`, `inc`, `dec`, `add`, `or`, `adc`, `sbb`, `and`, `sub`, `xor`, `neg`, `not`, `xchg`, each width, both modes: GNU.
   Done: `test_lock.sh`.  Not every width: the 16-bit forms of `cmpxchg` and `bt*` have their `lock` and still lack their `66` in 32-bit mode (174), and `lock addl $1,(%eax)` is the long form (186).
+  Corrected since: `lock cmpxchg16b`, which the test did not have, was assembled with no `lock`: 395.
+- [x] **AS-T-395** When a segment override or `lock` is written on an instruction that one of the extension encoders writes (SSE3, SSSE3, SSE4.1, SSE4.2, `popcnt`, `lzcnt`, `tzcnt`, `movbe`, `cmpxchg16b`, BMI, AVX, AVX2, FMA, AVX-512), the assembler shall emit it.
+  Trace: found while doing 052; AS-SEL-001.  Verify: T — `lock cmpxchg16b (%rbx)`, `popcnt %fs:(%rbx),%eax`, `pshufb %fs:(%ebx),%xmm0`, `vaddps %gs:(%rbx),%ymm0,%ymm1`, `andn %fs:(%ebx),%eax,%ecx`, and the relocation of `popcnt %fs:sym(%rip),%eax`: GNU.
+  Done: those encoders write from the mandatory prefix on, and each caller gave them the start of the buffer.  In 64-bit code every one of them lost a segment override, and `cmpxchg16b` its `lock`; in 32-bit code the SSE3 to SSE4.2 ones and BMI lost the segment.  The prefixes are now written before what the encoder writes.  `test_ext_prefixes.sh`, 50 cases.
+- [ ] **AS-T-396** When the displacement of a memory operand has a symbol in it and a base register, and the instruction is one an extension encoder writes (as in 395), the assembler shall encode a 32-bit displacement and put the relocation on it.
+  Trace: found while doing 395; AS-OBJ (relocation placement).  Verify: T — `pshufb sym(%ebx),%xmm0` (`66 0F 38 00 83` and four bytes, the relocation at 5), `popcnt sym(%rbx),%eax`, `vaddps sym(%rbx),%ymm0,%ymm1`, `andn`, `cmpxchg16b`, `pextrd`, in both modes: GNU.  Today the first is `66 0F 00 00 00 00`: one byte is kept for the displacement, and the four of the relocation are written over the opcode.
 - [ ] **AS-T-031** When a `rep`, `repe`, `repne` or segment prefix is written before an instruction encoded by the emitter's own tables, the assembler shall emit it.
   Trace: AS-SEL-001.  Verify: T — the callers of the prefixed-`0F` emitter with each prefix: GNU.
 - [ ] **AS-T-032** If `lock` is written before an instruction or operand form the processor does not allow it on, then the assembler shall refuse it.
@@ -1042,5 +1048,5 @@ is not to be done, 370 is ticked with "removed" and the rest struck.
 | AS-EXT-009 | 185, 325, 332–337 |
 | AS-EXT-010 | 040, 171, 338, 339 (339 closes all of AS-EXT) |
 
-345 tasks: 65 done, 280 open.  Numbers run to 394, with gaps left between
+347 tasks: 66 done, 281 open.  Numbers run to 396, with gaps left between
 sections for tasks found along the way.

@@ -117,6 +117,24 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
 int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
                          size_t *out_len, char *errbuf, size_t errbuf_sz);
 
+/*
+ * One of the encoders of an instruction-set extension, behind a wrapper
+ * that takes the whole instruction: it writes from the mandatory prefix
+ * on, and knows nothing of the segment, the address size or lock.
+ */
+typedef int (*as_x86_ext_encode_fn)(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
+                                    size_t *out_len, char *errbuf, size_t errbuf_sz);
+
+/* The most as_x86_outer_prefixes() writes. */
+#define AS_X86_OUTER_PREFIX_MAX 3
+
+/* The prefixes such an encoder leaves out, in GNU's order; their number. */
+size_t as_x86_outer_prefixes(const as_x86_insn_t *insn, uint8_t out[AS_X86_OUTER_PREFIX_MAX]);
+
+/* Run one, with those prefixes before what it writes. */
+int as_x86_encode_ext(as_x86_ext_encode_fn fn, const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
+                      size_t *out_len, char *errbuf, size_t errbuf_sz);
+
 #ifdef __cplusplus
 }
 #endif

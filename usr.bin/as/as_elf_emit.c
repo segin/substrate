@@ -4476,6 +4476,48 @@ static int emit_simd_movq(const as_instruction_t *insn, int intel_syntax, int is
  * legacy prefixes -- the bytes before the opcode that are segment
  * overrides, 66, 67, F2 or F3.
  */
+/*
+ * The segment override of an instruction that one of the VEX or EVEX
+ * encoders wrote.  They are given the operands and not the prefix, and
+ * `vmovdqa %fs:(%rbx), %ymm0` read from %ds.  The override goes before
+ * the VEX prefix, which is where the encoding begins.
+ */
+static int x86_prepend_segment(const as_instruction_t *insn, unsigned char *code, size_t code_cap,
+                               size_t *code_len) {
+    const char *name;
+    unsigned char seg = 0;
+    size_t i;
+
+    if (insn == NULL || code == NULL || code_len == NULL) {
+        return -1;
+    }
+    name = insn->segment_override;
+    for (i = 0; name == NULL && i < insn->operand_count; ++i) {
+        if (insn->operands[i].kind == AS_OPERAND_MEMORY) {
+            name = insn->operands[i].u.mem.segment_reg;
+        }
+    }
+    if (name == NULL) {
+        return 0;
+    }
+    switch (map_seg(name)) {
+    case AS_X86_SEG_CS: seg = 0x2e; break;
+    case AS_X86_SEG_DS: seg = 0x3e; break;
+    case AS_X86_SEG_ES: seg = 0x26; break;
+    case AS_X86_SEG_FS: seg = 0x64; break;
+    case AS_X86_SEG_GS: seg = 0x65; break;
+    case AS_X86_SEG_SS: seg = 0x36; break;
+    default: return 0;
+    }
+    if (*code_len >= code_cap) {
+        return -1;
+    }
+    memmove(code + 1, code, *code_len);
+    code[0] = seg;
+    (*code_len)++;
+    return 0;
+}
+
 static int x86_prepend_lock_if_absent(unsigned char *code, size_t code_cap, size_t *code_len) {
     size_t i;
 
@@ -9709,54 +9751,36 @@ static int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_st
         }
     }
     if (!cfg->is_64 || cfg->x86_64_isa_level >= 4) {
-        if (try_encode_x86_avx512f_stmt(&st->u.instr, intel_syntax, code, code_cap, code_len, encerr, encerr_sz) == 0 &&
-            *code_len > 0) {
-            return 0;
-        }
-        if (try_encode_x86_avx512bw_stmt(&st->u.instr, intel_syntax, code, code_cap, code_len, encerr, encerr_sz) == 0 &&
-            *code_len > 0) {
-            return 0;
-        }
-        if (try_encode_x86_avx512bw_generic_stmt(&st->u.instr, intel_syntax, code, code_cap, code_len, encerr, encerr_sz) == 0 &&
-            *code_len > 0) {
-            return 0;
-        }
-        if (try_encode_x86_avx512dq_stmt(&st->u.instr, intel_syntax, code, code_cap, code_len, encerr, encerr_sz) == 0 &&
-            *code_len > 0) {
-            return 0;
-        }
-        if (try_encode_x86_avx512f_generic_stmt(&st->u.instr, intel_syntax, code, code_cap, code_len, encerr, encerr_sz) == 0 &&
-            *code_len > 0) {
-            return 0;
-        }
-        if (try_encode_x86_avx512dq_generic_stmt(&st->u.instr, intel_syntax, code, code_cap, code_len, encerr, encerr_sz) == 0 &&
-            *code_len > 0) {
-            return 0;
+        if ((try_encode_x86_avx512f_stmt(&st->u.instr, intel_syntax, code, code_cap, code_len, encerr, encerr_sz) == 0 &&
+             *code_len > 0) ||
+            (try_encode_x86_avx512bw_stmt(&st->u.instr, intel_syntax, code, code_cap, code_len, encerr, encerr_sz) == 0 &&
+             *code_len > 0) ||
+            (try_encode_x86_avx512bw_generic_stmt(&st->u.instr, intel_syntax, code, code_cap, code_len, encerr, encerr_sz) == 0 &&
+             *code_len > 0) ||
+            (try_encode_x86_avx512dq_stmt(&st->u.instr, intel_syntax, code, code_cap, code_len, encerr, encerr_sz) == 0 &&
+             *code_len > 0) ||
+            (try_encode_x86_avx512f_generic_stmt(&st->u.instr, intel_syntax, code, code_cap, code_len, encerr, encerr_sz) == 0 &&
+             *code_len > 0) ||
+            (try_encode_x86_avx512dq_generic_stmt(&st->u.instr, intel_syntax, code, code_cap, code_len, encerr, encerr_sz) == 0 &&
+             *code_len > 0)) {
+            return x86_prepend_segment(&st->u.instr, code, code_cap, code_len);
         }
     } else if (cfg->is_64 && x86_stmt_requires_v4(&st->u.instr, intel_syntax)) {
         set_x86_isa_requirement(encerr, encerr_sz, mnbuf, 4);
         return -1;
     }
     if (!cfg->is_64 || cfg->x86_64_isa_level >= 3) {
-        if (try_encode_x86_avx_stmt(&st->u.instr, intel_syntax, cfg->is_64, code, code_cap, code_len, encerr, encerr_sz) == 0 &&
-            *code_len > 0) {
-            return 0;
-        }
-        if (try_encode_x86_avx2_stmt(&st->u.instr, intel_syntax, cfg->is_64, code, code_cap, code_len, encerr, encerr_sz) == 0 &&
-            *code_len > 0) {
-            return 0;
-        }
-        if (try_encode_x86_fma_stmt(&st->u.instr, intel_syntax, cfg->is_64, code, code_cap, code_len, encerr, encerr_sz) == 0 &&
-            *code_len > 0) {
-            return 0;
-        }
-        if (try_encode_x86_bmi1_stmt(&st->u.instr, intel_syntax, cfg->is_64, code, code_cap, code_len, encerr, encerr_sz) == 0 &&
-            *code_len > 0) {
-            return 0;
-        }
-        if (try_encode_x86_bmi2_stmt(&st->u.instr, intel_syntax, cfg->is_64, code, code_cap, code_len, encerr, encerr_sz) == 0 &&
-            *code_len > 0) {
-            return 0;
+        if ((try_encode_x86_avx_stmt(&st->u.instr, intel_syntax, cfg->is_64, code, code_cap, code_len, encerr, encerr_sz) == 0 &&
+             *code_len > 0) ||
+            (try_encode_x86_avx2_stmt(&st->u.instr, intel_syntax, cfg->is_64, code, code_cap, code_len, encerr, encerr_sz) == 0 &&
+             *code_len > 0) ||
+            (try_encode_x86_fma_stmt(&st->u.instr, intel_syntax, cfg->is_64, code, code_cap, code_len, encerr, encerr_sz) == 0 &&
+             *code_len > 0) ||
+            (try_encode_x86_bmi1_stmt(&st->u.instr, intel_syntax, cfg->is_64, code, code_cap, code_len, encerr, encerr_sz) == 0 &&
+             *code_len > 0) ||
+            (try_encode_x86_bmi2_stmt(&st->u.instr, intel_syntax, cfg->is_64, code, code_cap, code_len, encerr, encerr_sz) == 0 &&
+             *code_len > 0)) {
+            return x86_prepend_segment(&st->u.instr, code, code_cap, code_len);
         }
     } else if (cfg->is_64 && x86_stmt_requires_v3(&st->u.instr, intel_syntax, cfg->is_64)) {
         set_x86_isa_requirement(encerr, encerr_sz, mnbuf, 3);
@@ -9869,19 +9893,19 @@ static int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_st
             return -1;
         }
     } else {
-        if (try_encode_x86_sse3(&in, code, code_cap, code_len, encerr, encerr_sz) == 0 &&
+        if (as_x86_encode_ext(try_encode_x86_sse3, &in, code, code_cap, code_len, encerr, encerr_sz) == 0 &&
             *code_len > 0) {
             return 0;
         }
-        if (try_encode_x86_ssse3(&in, code, code_cap, code_len, encerr, encerr_sz) == 0 &&
+        if (as_x86_encode_ext(try_encode_x86_ssse3, &in, code, code_cap, code_len, encerr, encerr_sz) == 0 &&
             *code_len > 0) {
             return 0;
         }
-        if (try_encode_x86_sse41(&in, code, code_cap, code_len, encerr, encerr_sz) == 0 &&
+        if (as_x86_encode_ext(try_encode_x86_sse41, &in, code, code_cap, code_len, encerr, encerr_sz) == 0 &&
             *code_len > 0) {
             return 0;
         }
-        if (try_encode_x86_sse42(&in, code, code_cap, code_len, encerr, encerr_sz) == 0 &&
+        if (as_x86_encode_ext(try_encode_x86_sse42, &in, code, code_cap, code_len, encerr, encerr_sz) == 0 &&
             *code_len > 0) {
             return 0;
         }
