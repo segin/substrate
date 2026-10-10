@@ -12,3 +12,5 @@
 -m64 -O2 -fPIC
 -m64 -O2 -fno-pie -fno-asynchronous-unwind-tables
 -m64 -O2 -fno-pie -msse2 -mfpmath=sse
+-m64 -O2 -fcf-protection=full
+-m64 -O2 -fcf-protection=none

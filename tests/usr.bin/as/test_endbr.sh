@@ -25,6 +25,23 @@ for mode in --32 --64; do
     done
 done
 
+# notrack, the other thing such a compiler writes: the byte 3E before an
+# indirect jmp or call, which says the target need not be an endbr.  It
+# goes before the jump through every jump table.
+for pair in '32:notrack jmp *%eax:3effe0' '32:notrack call *%eax:3effd0' \
+            '32:notrack jmp *tab(,%eax,4):3eff248500000000' \
+            '64:notrack jmp *%rax:3effe0' '64:notrack call *%rax:3effd0' \
+            '64:notrack jmp *(%rax):3eff20' '64:jmp *%rax:ffe0'; do
+    mode=${pair%%:*}; rest=${pair#*:}; insn=${rest%%:*}; want=${rest##*:}
+    printf '\t.text\n\t%s\n' "$insn" > t.s
+    if ! "$AS" "--$mode" -o t.o t.s 2> err; then
+        echo "FAIL --$mode $insn: $(head -1 err | sed 's/.*: //')"; fail=1; continue
+    fi
+    objcopy -O binary -j .text t.o t.bin
+    got=$(od -An -v -tx1 t.bin | tr -d ' \n')
+    [ "$got" = "$want" ] || { echo "FAIL --$mode $insn: $got, not $want"; fail=1; }
+done
+
 # With an operand it is not an instruction.
 printf '\tendbr64 %%eax\n' > t.s
 if "$AS" --64 -o t.o t.s 2> /dev/null; then echo "FAIL: endbr64 %eax assembled"; fail=1; fi

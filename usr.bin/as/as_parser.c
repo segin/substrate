@@ -1988,6 +1988,19 @@ static int prefix_flag_for(const char *s, char **segment_override) {
     if (streq_ci(s, "addr16") || streq_ci(s, "addr32")) {
         return AS_PREFIX_ADDR16;
     }
+    /*
+     * notrack: the byte 3E before an indirect jmp or call, which tells a
+     * processor enforcing indirect-branch tracking that the target need
+     * not be an endbr.  It is the %ds override by another name, and a
+     * compiler built with -fcf-protection writes it before the jump
+     * through every jump table.
+     */
+    if (streq_ci(s, "notrack")) {
+        if (segment_override != NULL && *segment_override == NULL) {
+            *segment_override = strip_register_prefix("ds");
+        }
+        return AS_PREFIX_SEG_OVERRIDE;
+    }
 
     if (streq_ci(s, "cs") || streq_ci(s, "%cs") || streq_ci(s, "ds") || streq_ci(s, "%ds") || streq_ci(s, "es") ||
         streq_ci(s, "%es") || streq_ci(s, "fs") || streq_ci(s, "%fs") || streq_ci(s, "gs") || streq_ci(s, "%gs") ||

@@ -126,6 +126,10 @@ status 0.
   Trace: AS-X86-041.  Verify: T — `test_endbr.sh`: both in both modes, and the output of `gcc -fcf-protection=full`.
   Added while working section A: the compilers of Ubuntu and Fedora write one at the head of every function, so on the CI host two of the restored tests could assemble nothing.
 
+- [x] **AS-T-088** When `notrack` precedes an indirect `jmp` or `call`, the assembler shall emit `3E` before the instruction.
+  Trace: AS-X86-041.  Verify: T — `test_endbr.sh`; and `-fcf-protection=full` among the settings of `test_compiler_output.sh`.
+  Found by the CI host, whose gcc writes it before the jump through every jump table.  (`notrack` before anything else is still accepted: 171.)
+
 ### B.2 Prefixes
 
 - [x] **AS-T-030** When a `lock` prefix is written before an instruction whose destination is memory, the assembler shall emit `F0` before the instruction.
@@ -481,7 +485,7 @@ one table of templates; there is one ModRM/SIB/prefix emitter.
   Trace: AS-SEL-004.  Verify: T — `flds $3`, `clflush $3`, `fxsave $3`, `prefetcht0 $3`, `minpd $0xab,%xmm1,%xmm2`: exit 1.  After: 171.
 - [ ] **AS-T-183** When `cmpsd` is written with XMM operands and an immediate, the assembler shall encode the SSE2 compare.
   Trace: AS-SEL-011.  Verify: T — `cmpsd $1,%xmm1,%xmm2`, and the `cmpeqsd`-style aliases.
-- [ ] **AS-T-184** When an instruction of the following is written in a form GNU accepts, the assembler shall encode it: `testl (%ebx),%eax`, `imul $imm,%reg`, `iretl`, moves to and from `%cr8`, `notrack`, `xacquire`, `xrelease`, `vmcall`, `xsetbv`, `repz ret`, `mov sym,%es` in 64-bit mode.
+- [ ] **AS-T-184** When an instruction of the following is written in a form GNU accepts, the assembler shall encode it: `testl (%ebx),%eax`, `imul $imm,%reg`, `iretl`, moves to and from `%cr8`, `xacquire`, `xrelease`, `vmcall`, `xsetbv`, `repz ret`, `mov sym,%es` in 64-bit mode.
   Trace: AS-X86-041.  Verify: T — each.  After: 161.
 - [ ] **AS-T-185** When the opmask instructions are written, the assembler shall encode them as the manual gives them, and shall refuse names that are not instructions.
   Trace: AS-SEL-008, AS-EXT-008, AS-EXT-009.  Verify: T — `kmov{b,w,d,q}` with `k`, general-register and memory operands in each direction; `kunpck{bw,wd,dq}`; `knot*`, `kortest*`, `ktest*`, `kshiftl*`, `kshiftr*`; `kand`, `kandfoo`, `kaddz` refused.  After: 161.
@@ -967,7 +971,7 @@ is not to be done, 370 is ticked with "removed" and the rest struck.
 | AS-X86-026 | 032, 044–046, 137 |
 | AS-X86-030 | 345–350 |
 | AS-X86-040 | 022 |
-| AS-X86-041 | 033, 054, 057, 085, 172, 184 |
+| AS-X86-041 | 033, 054, 057, 085, 088, 172, 184 |
 | AS-X86-042 | 186 |
 | AS-EXT-001 | 020, 021 |
 | AS-EXT-002 | 310, 311 |

@@ -12,6 +12,12 @@
 #   WRONG  the program ran and did not print what it should, or died
 #   RUNS   the same output
 #
+# The last two settings are there because distributions differ in whether
+# their gcc protects indirect branches by default -- Ubuntu's and Fedora's
+# do, writing endbr64 at the head of every function and `notrack` before a
+# jump through a table -- so that either kind of host tries both kinds of
+# output.
+#
 # compiler/expect-runs lists the combinations that must RUN; one that does
 # not fails the test.  The rest are reported and do not fail it: what a
 # compiler writes depends on the compiler, and this runs on whichever gcc
@@ -39,7 +45,8 @@ for m in 32 64; do
 
     for opts in "-O0" "-O1" "-O2" "-Os" "-O2 -fPIC" \
                 "-O2 -fno-pie -fno-asynchronous-unwind-tables" \
-                "-O2 -fno-pie -msse2 -mfpmath=sse"; do
+                "-O2 -fno-pie -msse2 -mfpmath=sse" \
+                "-O2 -fcf-protection=full" "-O2 -fcf-protection=none"; do
         name="-m$m $opts"
         total=$((total + 1))
         verdict=
