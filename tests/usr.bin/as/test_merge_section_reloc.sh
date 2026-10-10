@@ -47,6 +47,31 @@ else
     done
 fi
 
+# i386 keeps the addend in the field.  With the relocation against the
+# label, the field holds only what was written beside it: 0 here, and not
+# the label's offset besides -- which made each string named the one that
+# far beyond it.
+cat > t.s <<'EOF'
+	.section .rodata.str1.1,"aMS",@progbits,1
+.LC0:	.string "alpha"
+.LC1:	.string "beta"
+	.text
+	leal .LC1@GOTOFF(%ebx), %eax
+	pushl $.LC1
+	leal .LC1@GOTOFF+2(%ebx), %ecx
+EOF
+if ! "$AS" --32 -o t.o t.s 2> err; then
+    echo "FAIL i386: $(head -1 err)"; fail=1
+else
+    objcopy -O binary -j .text t.o t.bin
+    got=$(od -An -v -tx1 t.bin | tr -d ' \n')
+    [ "$got" = 8d830000000068000000008d8b02000000 ] ||
+        { echo "FAIL i386: $got: the fields are not 0, 0 and 2"; fail=1; }
+    rel=$(readelf -rW t.o | awk '/ R_/ { print $3, $5 }' | tr '\n' ';')
+    [ "$rel" = 'R_386_GOTOFF .LC1;R_386_32 .LC1;R_386_GOTOFF .LC1;' ] ||
+        { echo "FAIL i386: relocations '$rel'"; fail=1; }
+fi
+
 # A label in a section that is not merged is still its section and an
 # offset, and is not in the symbol table.
 cat > t.s <<'EOF'

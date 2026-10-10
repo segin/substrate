@@ -51,5 +51,24 @@ enc 'movaps (%ebx), %xmm0'          0f2803
 enc 'flds 8(%ebp)'                  d94508
 enc 'movaps 0x100(%ebx), %xmm0'     0f288300010000
 
+# The 64-bit mode has emitters of its own for these, with the same fault.
+enc64() {
+    printf '\t.text\n\t%s\n' "$1" > t.s
+    if ! "$AS" --64 -o t.o t.s 2> err; then
+        echo "FAIL --64 $1: $(head -1 err | sed 's/.*: //')"; fail=1; return
+    fi
+    objcopy -O binary -j .text t.o t.bin
+    got=$(od -An -v -tx1 t.bin | tr -d ' \n')
+    [ "$got" = "$2" ] || { echo "FAIL --64 $1: $got, not $2"; fail=1; }
+    rel=$(readelf -rW t.o | awk '/ R_/ { print $1, $3, $5 }' | sed 's/^0*//' | tr '\n' ';')
+    [ "$rel" = "$3 R_X86_64_32S sym;" ] || { echo "FAIL --64 $1: relocation '$rel'"; fail=1; }
+}
+enc64 'movaps sym(%rbx), %xmm0'     0f288300000000      3
+enc64 'addsd sym(%rax), %xmm1'      f20f588800000000    4
+enc64 'movq sym(%rax), %xmm1'       f30f7e8800000000    4
+enc64 'cvttsd2si sym(%rbx), %eax'   f20f2c8300000000    4
+enc64 'fldl sym(%rbx)'              dd8300000000        2
+enc64 'flds sym(%rax)'              d98000000000        2
+
 [ "$fail" -eq 0 ] && echo "ok: symbolic displacements"
 exit "$fail"

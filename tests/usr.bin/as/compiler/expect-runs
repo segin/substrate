@@ -3,8 +3,16 @@
 # its combination runs both here and on the CI host, and is never taken
 # out to make the test pass.
 #
-# All of 64 bits, and of 32 bits what is not optimised.
+# All eighteen.
 -m32 -O0
+-m32 -O1
+-m32 -O2
+-m32 -Os
+-m32 -O2 -fPIC
+-m32 -O2 -fno-pie -fno-asynchronous-unwind-tables
+-m32 -O2 -fno-pie -msse2 -mfpmath=sse
+-m32 -O2 -fcf-protection=full
+-m32 -O2 -fcf-protection=none
 -m64 -O0
 -m64 -O1
 -m64 -O2

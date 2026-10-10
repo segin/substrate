@@ -3518,7 +3518,8 @@ static int emit_x86_64_xmm_memop(unsigned char prefix, unsigned char opcode, uns
         has_disp = 1;
     } else if (!has_disp) {
         mod = 0;
-    } else if (disp >= -128 && disp <= 127) {
+    } else if (!expr_has_symbol(mem->disp) && disp >= -128 && disp <= 127) {
+        /* (A symbol's displacement is 32 bits: see the 32-bit emitter.) */
         mod = 1;
     } else {
         mod = 2;
@@ -3608,7 +3609,8 @@ static int emit_x86_64_regfield_memop(unsigned char prefix, unsigned char opcode
         has_disp = 1;
     } else if (!has_disp) {
         mod = 0;
-    } else if (disp >= -128 && disp <= 127) {
+    } else if (!expr_has_symbol(mem->disp) && disp >= -128 && disp <= 127) {
+        /* (A symbol's displacement is 32 bits: see the 32-bit emitter.) */
         mod = 1;
     } else {
         mod = 2;
@@ -3698,7 +3700,8 @@ static int emit_x86_64_1byte_regfield_memop(unsigned char opcode, unsigned reg_f
         has_disp = 1;
     } else if (!has_disp) {
         mod = 0;
-    } else if (disp >= -128 && disp <= 127) {
+    } else if (!expr_has_symbol(mem->disp) && disp >= -128 && disp <= 127) {
+        /* (A symbol's displacement is 32 bits: see the 32-bit emitter.) */
         mod = 1;
     } else {
         mod = 2;
@@ -4112,6 +4115,107 @@ static int emit_x87_forms(const as_instruction_t *insn, int intel_syntax, int is
             *out_len = n;
             return 0;
         }
+    }
+    return -1;
+}
+
+/*
+ * movq with an MMX or XMM register.
+ *
+ * The q of movq was taken for a size suffix and the instruction for mov,
+ * and the SIMD register's number for a general register's: in 32-bit
+ * code `movq %xmm0, (%esp)` -- how a compiler stores a 64-bit integer it
+ * has in an XMM register -- was `movl %eax, (%esp)`.  In 64-bit code the
+ * register forms named a general register for the vector one.
+ *
+ *      xmm/m64 to xmm      F3 0F 7E /r
+ *      xmm to m64          66 0F D6 /r
+ *      mm/m64 to mm           0F 6F /r
+ *      mm to m64              0F 7F /r
+ *      r64 to mm, mm to r64   REX.W 0F 6E /r, REX.W 0F 7E /r
+ *
+ * (Between a 64-bit general register and an XMM register the 64-bit
+ * encoder has it right and is left to it.)  0 with the instruction in
+ * `out`; -1 if this is not one of those forms.
+ */
+static int emit_x86_64_mmx_memop(unsigned char opcode, unsigned dst_mmx, const as_mem_operand_t *mem,
+                                 unsigned char *out, size_t out_cap, size_t *out_len);
+
+static int emit_simd_movq(const as_instruction_t *insn, int intel_syntax, int is_64,
+                          unsigned char *out, size_t out_cap, size_t *out_len) {
+    const as_operand_t *src;
+    const as_operand_t *dst;
+    unsigned sx = 0, dx = 0, sm = 0, dm = 0;
+    int src_xmm, dst_xmm, src_mm, dst_mm;
+    int src_mem, dst_mem;
+    as_x86_reg_t gr;
+    size_t n = 0;
+
+    if (insn == NULL || insn->mnemonic == NULL || out == NULL || out_len == NULL || out_cap < 8 ||
+        intel_syntax || insn->operand_count != 2 || !streq_ci(insn->mnemonic, "movq")) {
+        return -1;
+    }
+    src = &insn->operands[0];
+    dst = &insn->operands[1];
+    src_xmm = src->kind == AS_OPERAND_REGISTER && parse_xmm_reg(src->u.reg, &sx) == 0;
+    dst_xmm = dst->kind == AS_OPERAND_REGISTER && parse_xmm_reg(dst->u.reg, &dx) == 0;
+    src_mm = src->kind == AS_OPERAND_REGISTER && parse_mmx_reg(src->u.reg, &sm) == 0;
+    dst_mm = dst->kind == AS_OPERAND_REGISTER && parse_mmx_reg(dst->u.reg, &dm) == 0;
+    /* A bare symbol is memory too; the 64-bit emitters of ModRM do not
+     * take one, and it is left to what was there. */
+    src_mem = src->kind == AS_OPERAND_MEMORY || (!is_64 && src->kind == AS_OPERAND_LABEL_REF);
+    dst_mem = dst->kind == AS_OPERAND_MEMORY || (!is_64 && dst->kind == AS_OPERAND_LABEL_REF);
+    if (!is_64 && (sx > 7u || dx > 7u)) {
+        return -1;
+    }
+
+    if (src_xmm && dst_xmm) {
+        out[n++] = 0xf3;
+        if (sx > 7u || dx > 7u) {
+            out[n++] = (unsigned char)(0x40u | (dx > 7u ? 0x04u : 0u) | (sx > 7u ? 0x01u : 0u));
+        }
+        out[n++] = 0x0f;
+        out[n++] = 0x7e;
+        out[n++] = (unsigned char)(0xc0u | ((dx & 7u) << 3) | (sx & 7u));
+        *out_len = n;
+        return 0;
+    }
+    if (src_mem && dst_xmm) {
+        return is_64 ? emit_x86_64_xmm_memop(0xf3, 0x7e, dx, &src->u.mem, out, out_cap, out_len)
+                     : emit_i386_prefixed_0f_rm(0xf3, 0x7e, dx, src, out, out_cap, out_len);
+    }
+    if (src_xmm && dst_mem) {
+        return is_64 ? emit_x86_64_xmm_memop(0x66, 0xd6, sx, &dst->u.mem, out, out_cap, out_len)
+                     : emit_i386_prefixed_0f_rm(0x66, 0xd6, sx, dst, out, out_cap, out_len);
+    }
+    if (src_mm && dst_mm) {
+        out[n++] = 0x0f;
+        out[n++] = 0x6f;
+        out[n++] = (unsigned char)(0xc0u | ((dm & 7u) << 3) | (sm & 7u));
+        *out_len = n;
+        return 0;
+    }
+    if (src_mem && dst_mm) {
+        return is_64 ? emit_x86_64_mmx_memop(0x6f, dm, &src->u.mem, out, out_cap, out_len)
+                     : emit_i386_prefixed_0f_rm(0x00, 0x6f, dm, src, out, out_cap, out_len);
+    }
+    if (src_mm && dst_mem) {
+        return is_64 ? emit_x86_64_mmx_memop(0x7f, sm, &dst->u.mem, out, out_cap, out_len)
+                     : emit_i386_prefixed_0f_rm(0x00, 0x7f, sm, dst, out, out_cap, out_len);
+    }
+    if (is_64 && ((src_mm && dst->kind == AS_OPERAND_REGISTER) || (dst_mm && src->kind == AS_OPERAND_REGISTER))) {
+        const as_operand_t *gp = src_mm ? dst : src;
+        unsigned mm = src_mm ? sm : dm;
+
+        if (parse_x86_reg(gp->u.reg, &gr) != 0 || x86_reg_width_bits(gp->u.reg) != 64) {
+            return -1;
+        }
+        out[n++] = (unsigned char)(0x48u | ((((unsigned)gr) & 8u) ? 0x01u : 0u));
+        out[n++] = 0x0f;
+        out[n++] = src_mm ? 0x7e : 0x6e;
+        out[n++] = (unsigned char)(0xc0u | ((mm & 7u) << 3) | (((unsigned)gr) & 7u));
+        *out_len = n;
+        return 0;
     }
     return -1;
 }
@@ -9263,6 +9367,10 @@ static int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_st
         *code_len > 0) {
         return 0;
     }
+    if (emit_simd_movq(&st->u.instr, intel_syntax, cfg->is_64, code, code_cap, code_len) == 0 &&
+        *code_len > 0) {
+        return 0;
+    }
     if (!cfg->is_64 && emit_i386_special(&st->u.instr, intel_syntax, code, code_cap, code_len) == 0) {
         if (*code_len > 0) {
             /*
@@ -13131,7 +13239,19 @@ static int64_t local_label_addend(emit_ctx_t *ctx, const char *name) {
         find_label_virtual_location(ctx, NULL, NULL, 0, 0, sym_name,
                                     target_section, sizeof(target_section),
                                     &target_off) == 0) {
-        off = (int64_t)target_off;
+        elf_section_t *target_sec = section_for_name(ctx, target_section);
+
+        /*
+         * This is what is written into the field where the addend lives
+         * there (i386): the label's offset, for a relocation that is
+         * against the label's section.  A label in a merged section keeps
+         * its own symbol (add_reloc_for_symbol_ex), which already stands
+         * for that offset; added here as well it was counted twice, and
+         * each string a program named was the one that far beyond it.
+         */
+        if (target_sec == NULL || (elf_section_flags(target_sec) & SHF_MERGE) == 0) {
+            off = (int64_t)target_off;
+        }
     }
     free(sym_name);
     return off;
