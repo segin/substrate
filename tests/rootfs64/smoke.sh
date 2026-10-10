@@ -69,13 +69,26 @@ fi
 # Substrate's own compiler, assembler and linker (usr.bin/cc, as, ld) are
 # native 64-bit programs here, and cc builds for the machine it runs on
 # unless told otherwise.  The image keeps the 32-bit runtime beside the
-# 64-bit one, so `cc -m32` must still produce something that runs.  No
-# header is included: the image does not ship /usr/include.
+# 64-bit one, so `cc -m32` must still produce something that runs.  The
+# program includes the system's headers, which the image must have.
+# It prints with puts and not printf: a call of a variadic function sets
+# %al first, and the assembler writes `movb $0, %al` five bytes long in
+# 64-bit mode (docs/as-tasks.md, AS-T-061), so the program runs into the
+# three it should not have.  Make this printf when that is mended.
 S=/usr/libexec/substrate-cc
 cat > /tmp/smoke64.c <<'EOF'
-int puts(const char *);
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 int add(int a, int b) { return a + b; }
-int main(void) { puts("cc: OK"); return add(3, 4); }
+int main(void) {
+    char *p = malloc(8);
+    if (p == NULL) return 1;
+    memcpy(p, "cc: OK", 7);
+    puts(p);
+    free(p);
+    return add(3, 4);
+}
 EOF
 cat > /tmp/smoke32.c <<'EOF'
 int main(void) { return 7; }
@@ -85,7 +98,9 @@ cat > /tmp/smoke.s <<'EOF'
 	.set K, 3*4
 	.long 1+2<<3, K
 EOF
-check "cc is a 64-bit program"   "ldd $S/cc 2>&1 | grep -q ld64.so"
+check "/usr/include has the system headers" \
+      '[ -f /usr/include/stdio.h ] && [ -f /usr/include/sys/types.h ] && [ -f /usr/include/unistd.h ]'
+check "cc is a 64-bit program"  "ldd $S/cc 2>&1 | grep -q ld64.so"
 check "as is a 64-bit program"   "ldd $S/as 2>&1 | grep -q ld64.so"
 check "ld is a 64-bit program"   "ldd $S/ld 2>&1 | grep -q ld64.so"
 check "as assembles"             "$S/as --64 -o /tmp/smoke.o /tmp/smoke.s && [ -s /tmp/smoke.o ]"

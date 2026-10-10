@@ -1377,6 +1377,14 @@ install_to_dist64() {
     echo "Installing the 64-bit kernel as $DIST/vmunix64..."
     cp "$TOP/sys/kernel-x86_64.elf" "$DIST/vmunix64"
 
+    # The system's headers, which are the same for both architectures.
+    # This image went without them: /usr/include held what the contrib
+    # ports put there and no <stdio.h>, so nothing could be compiled on it.
+    # (--remove-destination for the reason given in install_to_dist.)
+    echo "Installing the system headers..."
+    mkdir -p "$DIST/usr/include"
+    cp -r --remove-destination "$TOP/include/"* "$DIST/usr/include/"
+
     echo "Installing runtime libraries (both architectures)..."
     make -C "$TOP/lib" install-both DESTDIR="$DIST" >/dev/null
     make -C "$TOP/usr.lib" install-both DESTDIR="$DIST" >/dev/null

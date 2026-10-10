@@ -143,6 +143,7 @@ jobs:
           for f in /vmunix64 /sbin/init /sbin/ld64.so /sbin/ld.so /bin/sh \
                    /bin/ls /bin/ps /lib64/libc.so.0 /lib/libc.so.0 \
                    /usr/lib64/libc.a /usr/bin/ldd \
+                   /usr/include/stdio.h /usr/include/sys/types.h \
                    /usr/bin/cc /usr/libexec/substrate-cc/cc \
                    /usr/libexec/substrate-cc/as /usr/libexec/substrate-cc/ld \
                    /lib64/libelfobj.so.0 /usr/lib64/crt0.o /usr/lib/crt0.o \
