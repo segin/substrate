@@ -9,6 +9,9 @@ instruction selection), `as_x86_encode.c` (6,466) with eighteen x86
 extension files, and seventeen ARM and AArch64 files.  It writes ELF
 through `usr.lib/elfobj`.  Line numbers are those of that commit.
 
+The work this calls for is listed for execution, one singular requirement
+a task, in `docs/as-tasks.md`.
+
 Every finding is written as the requirement the code does not meet, in
 EARS form: **ubiquitous** ("The assembler shall …"), **event-driven**
 ("When …"), **state-driven** ("While …"), **unwanted behaviour** ("If …,
