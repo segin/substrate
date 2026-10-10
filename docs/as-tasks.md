@@ -526,7 +526,8 @@ one table of templates; there is one ModRM/SIB/prefix emitter.
   In part: `sal` with and without each suffix, which is what stopped gcc's 64-bit `-O0` output (`test_sal.sh`).  The others are open.
 - [ ] **AS-T-173** When `shld` or `shrd` is written with two operands, the assembler shall encode the by-`CL` form.
   Trace: AS-SEL-012.  Verify: T.
-- [ ] **AS-T-174** When a 16-bit operand is used with an instruction encoded from the SIMD-era tables, the assembler shall emit the `66` prefix.
+- [x] **AS-T-174** When a 16-bit operand is used with an instruction encoded from the SIMD-era tables, the assembler shall emit the `66` prefix.
+  Done.  In 32-bit code the emitter of these wrote no operand-size prefix, and every one was the 32-bit instruction: `bsf`, `bsr`, the `bt` family, `shld`, `shrd`, `cmpxchg`, `popcnt`, `lzcnt`, `tzcnt`, `movbe`, `rdrand`, `rdseed`, `str`, `sldt`.  The prefix now goes before what that emitter writes, when the statement has been found to be a 16-bit one.  Not for a move with a segment register, nor for a selector in memory, which GNU leaves bare.  `test_insn_forms.sh`, 42 cases; 65 more lines of the 32-bit corpus.  Left to others: `shldw`, `shrdw` and `movbew` are not mnemonics (172); in 64-bit code `tzcnt %ax,%bx`, `rdrand` and `rdseed` are refused.
   Trace: AS-SEL-005, AS-EXT-008.  Verify: T — `bsfw`, `bsrw`, `popcnt %ax,%bx`, `lzcnt`, `tzcnt`, `btw`, `cmpxchg %bx,(%eax)`, `shld $4,%ax,%bx`, `movbe (%eax),%bx`, `sldtw`, `smsw %ax`, `rdrand %ax`, `pushw %fs`, `movw %cs,%ax`: GNU.  After: 168.
 - [ ] **AS-T-175** When `cmpxchg` is written with `%ah`, `%bh`, `%ch` or `%dh`, the assembler shall encode the 8-bit form.
   Trace: AS-SEL-005.  Verify: T.  After: 168.
@@ -1074,5 +1075,5 @@ is not to be done, 370 is ticked with "removed" and the rest struck.
 | AS-EXT-009 | 185, 325, 332–337 |
 | AS-EXT-010 | 040, 171, 338, 339 (339 closes all of AS-EXT) |
 
-350 tasks: 79 done, 271 open.  Numbers run to 399, with gaps left between
+350 tasks: 80 done, 270 open.  Numbers run to 399, with gaps left between
 sections for tasks found along the way.

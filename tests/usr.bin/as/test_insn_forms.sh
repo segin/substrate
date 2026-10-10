@@ -816,6 +816,56 @@ t "64"    660f3a150007   'pextrw $7, %xmm0, (%rax)'
 t "32 64" 660fc4c001     'pinsrw $1, %eax, %xmm0'
 t "32"    660fc40001     'pinsrw $1, (%eax), %xmm0'
 
+# 16-bit operands of the instructions in the 0F map.  In 32-bit code
+# the emitter that writes them wrote no operand-size prefix, so each
+# was the 32-bit instruction: `bsf %ax, %bx` scanned %eax, `cmpxchg
+# %ax, (%ebx)` exchanged four bytes, `shld $4, %ax, %bx` shifted %ebx.
+t "32 64" 660fa4c304     'shld $4,%ax,%bx'
+t "32 64" 660facc304     'shrd $4,%ax,%bx'
+t "32 64" 660fa5c3       'shld %cl,%ax,%bx'
+t "32 64" 660fa3c3       'btw %ax,%bx'
+t "32 64" 660fa3c3       'bt %ax,%bx'
+t "32 64" 660fbae303     'bt $3,%bx'
+t "32 64" 660fabc3       'btsw %ax,%bx'
+t "32 64" 660fbaeb03     'bts $3,%bx'
+t "32 64" 660fb3c3       'btrw %ax,%bx'
+t "32 64" 660fbafb03     'btcw $3,%bx'
+t "32"    66f00fab03     'lock btsw %ax,(%ebx)'
+t "32 64" 660fbcd8       'bsfw %ax,%bx'
+t "32 64" 660fbcd8       'bsf %ax,%bx'
+t "32 64" 660fbdd8       'bsrw %ax,%bx'
+t "32 64" 660fbdd8       'bsr %ax,%bx'
+t "32 64" 660fb1c3       'cmpxchgw %ax,%bx'
+t "32 64" 660fb1c3       'cmpxchg %ax,%bx'
+t "32"    660fb103       'cmpxchgw %ax,(%ebx)'
+t "32 64" 660fc1c3       'xadd %ax,%bx'
+t "32 64" 66f30fb8d8     'popcntw %ax,%bx'
+t "32 64" 66f30fb8d8     'popcnt %ax,%bx'
+t "32 64" 66f30fbdd8     'lzcnt %ax,%bx'
+t "32"    66f30fbcd8     'tzcnt %ax,%bx'
+t "32"    660f38f003     'movbe (%ebx),%ax'
+t "32 64" 660f44d8       'cmove %ax,%bx'
+t "32 64" 660fafd8       'imul %ax,%bx'
+t "32 64" 666bd803       'imul $3,%ax,%bx'
+t "32 64" 660fb6d8       'movzbw %al,%bx'
+t "32 64" 660fbed8       'movsbw %al,%bx'
+t "32 64" 660f02d8       'lar %ax,%bx'
+t "32 64" 660f03d8       'lsl %ax,%bx'
+t "32"    660fc7f0       'rdrand %ax'
+t "32"    660fc7fb       'rdseed %bx'
+t "32 64" 0fa4c304       'shld $4,%eax,%ebx'
+t "32 64" 0fa3c3         'bt %eax,%ebx'
+# The instructions on a selector take the prefix for a register and not
+# for memory, where they are 16 bits whatever is written; and a move to
+# or from a segment register in memory takes none.
+t "32 64" 660f00c8       'str %ax'
+t "32 64" 660f00c0       'sldt %ax'
+t "32"    660f00c0       'sldtw %ax'
+t "32 64" 660f01e0       'smsw %ax'
+t "32"    0f0000         'sldt (%eax)'
+t "32"    0f0010         'lldtw (%eax)'
+t "32"    0f00db         'ltr %bx'
+
 # A displacement written as the number 0 is no displacement: `0(%eax)`
 # is `(%eax)`.  It was kept as a byte of zero.  And (%ebp), (%rbp) and
 # (%r13), which cannot be without one, have one byte of zero and had

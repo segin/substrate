@@ -4780,15 +4780,49 @@ static int x86_stmt_addr16_in_32(const as_elf_cfg_t *cfg, const as_instruction_t
     return 0;
 }
 
+/*
+ * Whether a 16-bit statement that the emitter of special forms wrote is
+ * to have the operand-size prefix.  Not a move, whose forms with a
+ * segment, control or debug register are judged by themselves; and not
+ * the instructions on a 16-bit selector in memory -- `sldtw (%eax)`,
+ * `ltrw sym` -- which are 16 bits by nature and take the prefix only
+ * for a register.
+ */
+static int x86_special_takes_opsize(const as_instruction_t *insn, const char *mn) {
+    static const char *const selector[] = {"sldt", "str", "lldt", "ltr", "lmsw", "smsw", "verr", "verw"};
+    size_t i;
+
+    if (strcmp(mn, "mov") == 0) {
+        return 0;
+    }
+    for (i = 0; i < sizeof(selector) / sizeof(selector[0]); ++i) {
+        if (strcmp(mn, selector[i]) == 0) {
+            return insn->operand_count == 1 && insn->operands[0].kind == AS_OPERAND_REGISTER;
+        }
+    }
+    return 1;
+}
+
 static int x86_prepend_opsize(unsigned char *code, size_t code_cap, size_t *code_len) {
+    size_t at = 0;
+    size_t i;
+
     if (code == NULL || code_len == NULL || *code_len >= code_cap) {
         return -1;
     }
-    if (*code_len > 0 && code[0] == 0x66) {
-        return 0;
+    /* After a segment override and 67, before lock and rep, which is
+     * GNU's order; and not a second one. */
+    while (at < *code_len && (code[at] == 0x26 || code[at] == 0x2e || code[at] == 0x36 || code[at] == 0x3e ||
+                              code[at] == 0x64 || code[at] == 0x65 || code[at] == 0x67)) {
+        ++at;
     }
-    memmove(code + 1, code, *code_len);
-    code[0] = 0x66;
+    for (i = at; i < *code_len && (code[i] == 0x66 || code[i] == 0xf0 || code[i] == 0xf2 || code[i] == 0xf3); ++i) {
+        if (code[i] == 0x66) {
+            return 0;
+        }
+    }
+    memmove(code + at + 1, code + at, *code_len - at);
+    code[at] = 0x66;
     (*code_len)++;
     return 0;
 }
@@ -10286,7 +10320,16 @@ static int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_st
                 x86_prepend_lock_if_absent(code, code_cap, code_len) != 0) {
                 return -1;
             }
-            if (cfg->x86_code_bits != 16u && x86_segment_form_is_16bit(&st->u.instr, mnbuf, suffix, intel_syntax) &&
+            /*
+             * Nor the operand-size prefix: `bsf %ax, %bx`, `btw`,
+             * `shld $4, %ax, %bx`, `cmpxchg %ax, (%ebx)` and `popcnt
+             * %ax, %bx` were each the 32-bit instruction.  Whatever
+             * made the statement a 16-bit one -- a w, or its registers
+             * -- has been settled above.
+             */
+            if (cfg->x86_code_bits != 16u &&
+                ((in.operand_size_override && x86_special_takes_opsize(&st->u.instr, mnbuf)) ||
+                 x86_segment_form_is_16bit(&st->u.instr, mnbuf, suffix, intel_syntax)) &&
                 x86_prepend_opsize(code, code_cap, code_len) != 0) {
                 return -1;
             }
