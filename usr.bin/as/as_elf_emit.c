@@ -1847,7 +1847,6 @@ static int lookup_i386_f3_0fae_group(const char *mnemonic, unsigned *reg_field) 
         {"wrgsbase", 3u},
         {"ptwrite", 4u},
         {"incsspd", 5u},
-        {"umonitor", 6u},
         {"clrssbsy", 6u},
     };
     size_t i;
@@ -2041,8 +2040,6 @@ static int lookup_i386_fixed_0f_opcode(const char *mnemonic, unsigned char *opco
         unsigned char opcode2;
     } map[] = {
         {"cpuid", 0xa2},
-        {"montmul", 0xa6},
-        {"xstore-rng", 0xa7},
         {"rsm", 0xaa},
     };
     size_t i;
@@ -4462,6 +4459,134 @@ static int emit_simd_movq(const as_instruction_t *insn, int intel_syntax, int is
  * overrides, 66, 67, F2 or F3.
  */
 /*
+ * VIA's PadLock instructions and the user-mode wait instructions: an
+ * opcode in the 0F map and a ModRM byte that is fixed, for PadLock, or
+ * has one register in ModRM.rm.
+ *
+ * PadLock's take no operand.  Each but xstore is defined with a rep
+ * prefix, which GNU as writes whether it is in the source or not, and
+ * once.  (montmul and xstore-rng were the two bytes 0F A6 and 0F A7 in
+ * 32-bit code, with neither prefix nor ModRM, and unknown in 64-bit;
+ * the rest were unknown in both.)
+ *
+ * tpause and umwait take a 32-bit register, and may have %edx and %eax
+ * written after it.  umonitor takes an address in a register, whose
+ * width is the address size: 67 where that is not the mode's.
+ *
+ * 0 if it wrote the instruction, 1 if the mnemonic is none of these,
+ * -1 if it is one and its operands are not.
+ */
+static int emit_x86_padlock_waitpkg(const char *mn, const as_instruction_t *insn, int intel_syntax, int is_64,
+                                    unsigned char *out, size_t out_cap, size_t *out_len) {
+    static const struct {
+        const char *mnemonic;
+        unsigned char prefix;
+        unsigned char opcode2;
+        unsigned char modrm;
+    } padlock[] = {
+        {"xstore", 0x00, 0xa7, 0xc0},     {"xstore-rng", 0x00, 0xa7, 0xc0}, {"xstorerng", 0x00, 0xa7, 0xc0},
+        {"xcrypt-ecb", 0xf3, 0xa7, 0xc8}, {"xcryptecb", 0xf3, 0xa7, 0xc8},
+        {"xcrypt-cbc", 0xf3, 0xa7, 0xd0}, {"xcryptcbc", 0xf3, 0xa7, 0xd0},
+        {"xcrypt-ctr", 0xf3, 0xa7, 0xd8}, {"xcryptctr", 0xf3, 0xa7, 0xd8},
+        {"xcrypt-cfb", 0xf3, 0xa7, 0xe0}, {"xcryptcfb", 0xf3, 0xa7, 0xe0},
+        {"xcrypt-ofb", 0xf3, 0xa7, 0xe8}, {"xcryptofb", 0xf3, 0xa7, 0xe8},
+        {"montmul", 0xf3, 0xa6, 0xc0},    {"xsha1", 0xf3, 0xa6, 0xc8},      {"xsha256", 0xf3, 0xa6, 0xd0},
+    };
+    const unsigned rep_prefixes = AS_PREFIX_REP | AS_PREFIX_REPE;
+    const as_operand_t *op;
+    unsigned char prefix;
+    as_x86_reg_t reg;
+    int width;
+    int need67 = 0;
+    size_t pos = 0;
+    size_t i;
+
+    if (mn == NULL || insn == NULL || out == NULL || out_len == NULL) {
+        return -1;
+    }
+    for (i = 0; i < sizeof(padlock) / sizeof(padlock[0]); ++i) {
+        if (strcmp(mn, padlock[i].mnemonic) != 0) {
+            continue;
+        }
+        if (insn->operand_count != 0 || (insn->prefixes & ~rep_prefixes) != 0 || out_cap < 4) {
+            return -1;
+        }
+        if (padlock[i].prefix != 0 || (insn->prefixes & rep_prefixes) != 0) {
+            out[pos++] = 0xf3;
+        }
+        out[pos++] = 0x0f;
+        out[pos++] = padlock[i].opcode2;
+        out[pos++] = padlock[i].modrm;
+        *out_len = pos;
+        return 0;
+    }
+
+    if (strcmp(mn, "tpause") == 0) {
+        prefix = 0x66;
+    } else if (strcmp(mn, "umwait") == 0) {
+        prefix = 0xf2;
+    } else if (strcmp(mn, "umonitor") == 0) {
+        prefix = 0xf3;
+    } else {
+        return 1;
+    }
+    if (insn->prefixes != 0 || insn->segment_override != NULL || out_cap < 6) {
+        return -1;
+    }
+    if (prefix == 0xf3) {
+        if (insn->operand_count != 1) {
+            return -1;
+        }
+        op = &insn->operands[0];
+    } else if (insn->operand_count == 1) {
+        op = &insn->operands[0];
+    } else if (insn->operand_count == 3) {
+        /* The register, then %edx and %eax, which are where the time is
+         * and are not encoded; Intel's order is the reverse. */
+        const as_operand_t *dx = &insn->operands[1];
+        const as_operand_t *ax = &insn->operands[intel_syntax ? 0 : 2];
+
+        op = &insn->operands[intel_syntax ? 2 : 0];
+        if (dx->kind != AS_OPERAND_REGISTER || ax->kind != AS_OPERAND_REGISTER ||
+            x86_reg_width_bits(dx->u.reg) != 32 || x86_reg_width_bits(ax->u.reg) != 32 ||
+            parse_x86_reg(dx->u.reg, &reg) != 0 || reg != AS_X86_REG_EDX ||
+            parse_x86_reg(ax->u.reg, &reg) != 0 || reg != AS_X86_REG_EAX) {
+            return -1;
+        }
+    } else {
+        return -1;
+    }
+    if (op->kind != AS_OPERAND_REGISTER || parse_x86_reg(op->u.reg, &reg) != 0) {
+        return -1;
+    }
+    width = x86_reg_width_bits(op->u.reg);
+    if (reg >= AS_X86_REG_AH || (!is_64 && reg >= AS_X86_REG_R8)) {
+        return -1;
+    }
+    if (prefix == 0xf3) {
+        if (width == (is_64 ? 32 : 16)) {
+            need67 = 1;
+        } else if (width != (is_64 ? 64 : 32)) {
+            return -1;
+        }
+    } else if (width != 32) {
+        return -1;
+    }
+    if (need67) {
+        out[pos++] = 0x67;
+    }
+    out[pos++] = prefix;
+    if (reg >= AS_X86_REG_R8) {
+        out[pos++] = 0x41;
+    }
+    out[pos++] = 0x0f;
+    out[pos++] = 0xae;
+    out[pos++] = (unsigned char)(0xf0u | ((unsigned)reg & 7u));
+    *out_len = pos;
+    return 0;
+}
+
+/*
  * The segment override of an instruction that one of the VEX or EVEX
  * encoders wrote.  They are given the operands and not the prefix, and
  * `vmovdqa %fs:(%rbx), %ymm0` read from %ds.  The override goes before
@@ -5457,6 +5582,19 @@ static int emit_i386_xmm_shiftdq_imm8_family(const char *mnemonic, const as_inst
     return emit_i386_legacy_simd_rm_imm8(0x66, 0x73, reg_field, dst_op, (unsigned char)immv, out, out_cap, out_len);
 }
 
+/*
+ * The byte of a shuffle is a pattern of bits, and GNU as takes it written
+ * as a negative number: `pshufd $-1` is `pshufd $0xff`.  Of the SSE
+ * instructions with an immediate byte it does so for the shuffles alone.
+ */
+static int x86_shuffle_imm8_fits(long long v) {
+    return v >= -128 && v <= 255;
+}
+
+static int x86_is_shuffle_mnemonic(const char *mn) {
+    return strcmp(mn, "pshufd") == 0 || strcmp(mn, "shufps") == 0 || strcmp(mn, "shufpd") == 0;
+}
+
 static int emit_i386_xmm_shuffle_tail_family(const char *mnemonic, const as_instruction_t *insn, int intel_syntax,
                                              unsigned char *out, size_t out_cap, size_t *out_len) {
     unsigned char prefix;
@@ -5473,7 +5611,7 @@ static int emit_i386_xmm_shuffle_tail_family(const char *mnemonic, const as_inst
     }
     if (select_x86_dstsrc_tail_operand(insn, intel_syntax, &dst_op, &src_op, &imm_op) != 0 ||
         (imm_op->kind != AS_OPERAND_IMMEDIATE && imm_op->kind != AS_OPERAND_LABEL_REF) ||
-        eval_expr_const(imm_op->u.expr, &immv) != 0 || immv < 0 || immv > 255 ||
+        eval_expr_const(imm_op->u.expr, &immv) != 0 || !x86_shuffle_imm8_fits(immv) ||
         dst_op->kind != AS_OPERAND_REGISTER || parse_xmm_reg(dst_op->u.reg, &xr) != 0) {
         return -1;
     }
@@ -6334,7 +6472,7 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
             return -1;
         }
         if ((imm_op->kind != AS_OPERAND_IMMEDIATE && imm_op->kind != AS_OPERAND_LABEL_REF) ||
-            eval_expr_const(imm_op->u.expr, &immv) != 0 || immv < 0 || immv > 255) {
+            eval_expr_const(imm_op->u.expr, &immv) != 0 || !x86_shuffle_imm8_fits(immv)) {
             return -1;
         }
         return emit_i386_legacy_simd_rm_imm8(0x00, 0x70, xr, rm_op, (unsigned char)immv, out, out_cap, out_len);
@@ -6353,8 +6491,7 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         return emit_i386_prefixed_0f_rm(0x00, strcmp(mnbuf, "vmread") == 0 ? 0x78 : 0x79,
                                         (unsigned)gr & 7u, rm_op, out, out_cap, out_len);
     }
-    if (strcmp(mnbuf, "cpuid") == 0 || strcmp(mnbuf, "montmul") == 0 || strcmp(mnbuf, "xstore-rng") == 0 ||
-        strcmp(mnbuf, "rsm") == 0) {
+    if (strcmp(mnbuf, "cpuid") == 0 || strcmp(mnbuf, "rsm") == 0) {
         unsigned char opcode2;
 
         if (insn->operand_count != 0 || out == NULL || out_len == NULL || out_cap < 2) {
@@ -6450,7 +6587,7 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
     }
     if (strcmp(mnbuf, "rdfsbase") == 0 || strcmp(mnbuf, "rdgsbase") == 0 || strcmp(mnbuf, "wrfsbase") == 0 ||
         strcmp(mnbuf, "wrgsbase") == 0 || strcmp(mnbuf, "ptwrite") == 0 || strcmp(mnbuf, "incsspd") == 0 ||
-        strcmp(mnbuf, "umonitor") == 0 || strcmp(mnbuf, "clrssbsy") == 0) {
+        strcmp(mnbuf, "clrssbsy") == 0) {
         unsigned reg_field;
 
         if (insn->operand_count != 1 || a == NULL) {
@@ -6598,7 +6735,8 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
             return -1;
         }
         if ((imm_op->kind != AS_OPERAND_IMMEDIATE && imm_op->kind != AS_OPERAND_LABEL_REF) ||
-            eval_expr_const(imm_op->u.expr, &immv) != 0 || immv < 0 || immv > 255) {
+            eval_expr_const(imm_op->u.expr, &immv) != 0 || immv > 255 ||
+            immv < (x86_is_shuffle_mnemonic(mnbuf) ? -128 : 0)) {
             return -1;
         }
         if (strcmp(mnbuf, "cmpps") == 0 || strcmp(mnbuf, "cmppd") == 0 || strcmp(mnbuf, "cmpss") == 0 ||
@@ -9718,6 +9856,17 @@ static int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_st
     if (emit_simd_movq(&st->u.instr, intel_syntax, cfg->is_64, code, code_cap, code_len) == 0 &&
         *code_len > 0) {
         return 0;
+    }
+    {
+        int rc = emit_x86_padlock_waitpkg(mnbuf, &st->u.instr, intel_syntax, cfg->is_64, code, code_cap, code_len);
+
+        if (rc == 0) {
+            return 0;
+        }
+        if (rc < 0) {
+            snprintf(encerr, encerr_sz, "unsupported operand form for '%s'", mnbuf);
+            return -1;
+        }
     }
     if (!cfg->is_64 && emit_i386_special(&st->u.instr, intel_syntax, code, code_cap, code_len) == 0) {
         if (*code_len > 0) {

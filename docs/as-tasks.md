@@ -206,8 +206,9 @@ status 0.
 - [x] **AS-T-052** When `crc32` is written, the assembler shall take the source width from the suffix or the source register.
   Done: `crc32` is encoded by the two main encoders, not by the SSE4.2 module, which knew neither the mode nor the prefixes.  Wrong before, by mode: in 32-bit code every source register was taken for 32 bits, and `crc32q` got a `REX` byte, which is `dec %eax` there; in 64-bit code a suffix on a memory source was ignored, `%ah` was `%al`, `%sil` had no `REX` and so was `%dh`, and a 64-bit destination with a byte source had no `REX.W`; in both a segment override was dropped, and a destination of 16 bits, a suffix at odds with the source register, and an `%xmm` operand were assembled.  `test_insn_forms.sh`, both syntaxes.  Left: `(%eax)` in 64-bit code wants `67` (176); Intel's `crc32 eax, [ebx]`, with no size, is taken for 32 bits where GNU refuses it.
   Trace: AS-SEL-009, AS-EXT-008.  Verify: T — `crc32b mem,%ebx` (`F0`), `crc32 %al,%ebx`, `crc32 %ax,%ebx` (with `66`), `crc32w (%r12),%ebx`, `crc32 %sil,%ebx` (with `REX`), `crc32q`: GNU.
-- [ ] **AS-T-053** When `montmul`, `xstore-rng`, `umonitor %cx`, `pshufd $-1` or `tpause %ecx` is written, the assembler shall encode it as GNU does.
+- [x] **AS-T-053** When `montmul`, `xstore-rng`, `umonitor %cx`, `pshufd $-1` or `tpause %ecx` is written, the assembler shall encode it as GNU does.
   Trace: AS-SEL-009.  Verify: T — each.
+  Done, each with its family.  PadLock: `montmul` and `xstore-rng` were `0F A6` and `0F A7` alone in 32-bit code, two bytes short; all sixteen spellings (`xstore`, `xcrypt-*`, `xsha1`, `xsha256`, `montmul`) are now encoded in both modes.  The wait instructions: `umonitor %cx` had no `67`; `tpause`, `umwait` and `umonitor` are now in both modes with the registers and widths GNU takes.  The shuffles: `pshufd`, `pshufhw`, `pshuflw`, `pshufw`, `shufps` and `shufpd` take a negative byte in 32-bit code as they did in 64-bit.  `test_insn_forms.sh`, 75 cases.  Left to 063: 64-bit code takes `pshufd $256` and `$-129`, and both modes take a negative byte on instructions GNU refuses one on.
 - [x] **AS-T-054** When a string instruction is written with no operands, the assembler shall encode it with no segment override.
   Trace: AS-SEL-014, AS-X86-041.  Verify: T — bare `movsb`, `movsw`, `movsl`, `movsq`, `stos*`, `lods*`, `scas*`, `cmps*`, `ins*`, `outs*`, with `rep`/`repe`/`repne`, both modes: GNU.
   Met: `test_string_insn.sh`.  With it the prefixes are written in GNU's order (segment, address size, operand size, rep, lock), and a `q` suffix in 32-bit code is refused where it reaches the general encoder.
@@ -235,6 +236,7 @@ status 0.
   Done: `test_imm_width.sh`, with `testw` and `imulw` besides.  `movw $1,%ax` has its 16-bit immediate and, in 64-bit mode, two `66` prefixes: that is 035.
 - [ ] **AS-T-063** If an immediate does not fit the field its instruction gives it, then the assembler shall refuse it.
   Trace: AS-X86-013.  Verify: T — `addq $0xffffffff,%rax`, `addq $0x80000000,%rbx`, `pushq $0x80000000`, `movq $0x123456789,(%rax)`, `int $256`, `enter $0x10000,$0`, `shl $-1,%eax`, `movb $256,%al`: exit 1, as GNU.
+  Seen while doing 053, all assembled and all refused by GNU: a negative byte on `cmpps`, `pinsrw`, `pextrw`, `psrldq`, `palignr`, `roundps`, `pinsrb`, `pextrd`, `pcmpistri`, `insertps`, `shld`, `bt`, `int`, and as `enter`'s level; `pshufd $256` and `mpsadbw $-129` in 64-bit code.  Two are worse than a truncation: `psllw $-1,%xmm1` in 32-bit code takes the immediate for an address (`66 0F F1 0D FF FF FF FF`), and `cmpsd $-2,%xmm1,%xmm2` is assembled as the string instruction, `A7`.
 - [ ] **AS-T-064** When a value is written to `.byte`, `.word` or `.long` that does not fit, the assembler shall warn and emit the truncated value.
   Trace: AS-DAT-003.  Verify: T — `.byte 256`, `.word 65536`, `.long 0x100000000`: a warning on standard error, exit 0, GNU's bytes.
 
@@ -1049,5 +1051,5 @@ is not to be done, 370 is ticked with "removed" and the rest struck.
 | AS-EXT-009 | 185, 325, 332–337 |
 | AS-EXT-010 | 040, 171, 338, 339 (339 closes all of AS-EXT) |
 
-347 tasks: 67 done, 280 open.  Numbers run to 396, with gaps left between
+347 tasks: 68 done, 279 open.  Numbers run to 396, with gaps left between
 sections for tasks found along the way.

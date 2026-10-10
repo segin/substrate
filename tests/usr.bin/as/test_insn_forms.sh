@@ -420,5 +420,77 @@ t "32 64" refused        'crc32 %xmm0, %eax'
 t "32 64" refused        'crc32 %eax, %xmm0'
 t "32"    refused        'crc32 %es, %eax'
 
+# VIA's PadLock: no operand, a fixed ModRM byte, and a rep prefix that
+# is part of each but xstore.  montmul and xstore-rng were two bytes in
+# 32-bit code -- 0F A6 and 0F A7, neither the prefix nor the ModRM --
+# and unknown in 64-bit; the others were unknown in both.
+t "32 64" f30fa6c0       'montmul'
+t "32 64" f30fa6c8       'xsha1'
+t "32 64" f30fa6d0       'xsha256'
+t "32 64" 0fa7c0         'xstore'
+t "32 64" 0fa7c0         'xstore-rng'
+t "32 64" 0fa7c0         'xstorerng'
+t "32 64" f30fa7c8       'xcrypt-ecb'
+t "32 64" f30fa7c8       'xcryptecb'
+t "32 64" f30fa7d0       'xcrypt-cbc'
+t "32 64" f30fa7d0       'xcryptcbc'
+t "32 64" f30fa7d8       'xcrypt-ctr'
+t "32 64" f30fa7d8       'xcryptctr'
+t "32 64" f30fa7e0       'xcrypt-cfb'
+t "32 64" f30fa7e0       'xcryptcfb'
+t "32 64" f30fa7e8       'xcrypt-ofb'
+t "32 64" f30fa7e8       'xcryptofb'
+t "32 64" f30fa6c0       'rep montmul'
+t "32 64" f30fa7c0       'rep xstore'
+t "32 64" f30fa6c8       'repz xsha1'
+t "32 64" refused        'montmul %eax'
+
+# The user-mode wait instructions.  tpause and umwait take a 32-bit
+# register, and %edx and %eax may be written after it; umonitor takes
+# an address in a register, with 67 where its width is not the mode's.
+# `umonitor %cx` had no 67 in 32-bit code, so it was `umonitor %ecx`;
+# 64-bit code had none of the three, and 32-bit code no umwait and
+# tpause of %eax alone.
+t "32 64" 660faef1       'tpause %ecx'
+t "32 64" 660faef0       'tpause %eax'
+t "32 64" 660faef7       'tpause %edi'
+t "32 64" 660faef1       'tpause %ecx, %edx, %eax'
+t "64"    66410faef1     'tpause %r9d'
+t "32 64" f20faef1       'umwait %ecx'
+t "32 64" f20faef3       'umwait %ebx'
+t "32 64" f20faef1       'umwait %ecx, %edx, %eax'
+t "64"    f2410faef2     'umwait %r10d'
+t "32"    67f30faef1     'umonitor %cx'
+t "32"    f30faef1       'umonitor %ecx'
+t "32"    f30faef0       'umonitor %eax'
+t "64"    67f30faef1     'umonitor %ecx'
+t "64"    67f30faef0     'umonitor %eax'
+t "64"    f30faef1       'umonitor %rcx'
+t "64"    f3410faef1     'umonitor %r9'
+t "64"    67f3410faef1   'umonitor %r9d'
+t "32 64" refused        'tpause'
+t "32 64" refused        'tpause %cx'
+t "64"    refused        'tpause %rcx'
+t "32 64" refused        'tpause %ecx, %eax, %edx'
+t "64"    refused        'umonitor %cx'
+t "32"    refused        'umonitor %rcx'
+t "32 64" refused        'umonitor %cl'
+t "32 64" refused        'umonitor (%eax)'
+
+# The byte of a shuffle may be written as a negative number, which GNU
+# takes for these and for no other SSE immediate.  32-bit code refused
+# it, with "unsupported mnemonic".
+t "32 64" 660f70d1ff     'pshufd $-1, %xmm1, %xmm2'
+t "32 64" 660f70d180     'pshufd $-128, %xmm1, %xmm2'
+t "32 64" 660f70d1ff     'pshufd $255, %xmm1, %xmm2'
+t "32 64" f30f70d1ff     'pshufhw $-1, %xmm1, %xmm2'
+t "32 64" f20f70d1ff     'pshuflw $-1, %xmm1, %xmm2'
+t "32 64" 0f70d1ff       'pshufw $-1, %mm1, %mm2'
+t "32 64" 0fc6d1ff       'shufps $-1, %xmm1, %xmm2'
+t "32 64" 660fc6d1ff     'shufpd $-1, %xmm1, %xmm2'
+t "32"    refused        'pshufd $256, %xmm1, %xmm2'
+t "32"    refused        'pshufd $-129, %xmm1, %xmm2'
+t "32"    refused        'cmpps $-1, %xmm1, %xmm2'
+
 [ "$fail" -eq 0 ] && echo "ok: instruction forms ($cases cases)"
 exit "$fail"
