@@ -22,10 +22,11 @@ if ! ${CC:-cc} -O1 -g -w -fsanitize=address,undefined -fno-sanitize-recover=unde
         -idirafter "$top/include" -idirafter "$top/sys" -idirafter "$top/sys/include" \
         -I"$top/usr.lib/elfobj/src" "$top"/usr.bin/as/*.c "$top"/usr.lib/elfobj/src/*.c \
         2> "$work/build.err"; then
-    # A compiler without the sanitizers' runtime is not a failure of the
-    # assembler.
-    echo "skip: no sanitizer build ($(head -1 "$work/build.err"))"
-    exit 0
+    # A failure, whatever the cause: a host without the sanitizers'
+    # runtime has not shown the assembler to be clean, and this used to
+    # say "skip" and pass for a compile error too.
+    echo "FAIL: no sanitizer build ($(head -1 "$work/build.err"))"
+    exit 1
 fi
 
 cd "$work" || exit 1

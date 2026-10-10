@@ -39,7 +39,7 @@ loop() {
 run() {
     loop "$4" "$5" > t.s
     if ! ./as "$2" -o t.o t.s 2> err; then echo "FAIL $1: $(head -1 err)"; fail=1; return; fi
-    if ! ${CC:-cc} $3 -w -o t t.o 2> /dev/null; then echo "SKIP $1: cannot link for the host"; return; fi
+    if ! ${CC:-cc} $3 -w -o t t.o 2> lerr; then echo "FAIL $1: does not link: $(head -1 lerr)"; fail=1; return; fi
     ./t; rc=$?
     if [ "$rc" -eq 3 ]; then echo "ok   $1"; else echo "FAIL $1: the loop gave $rc, not 3"; fail=1; fi
 }

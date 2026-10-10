@@ -24,6 +24,11 @@
 # the host has.  When a combination comes to run here and on the CI host,
 # its line is added to the file, and from then on it is held.
 #
+# A held combination that could not be tried -- no gcc, no 32-bit
+# libraries, an option this gcc does not have -- fails the test too.
+# Nothing was shown about it, and a test that passes having tried nothing
+# is worse than one that fails.
+#
 # Run by run-suite.sh, which sets $AS.
 set -u
 
@@ -33,21 +38,33 @@ work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 cd "$work" || exit 1
 
-command -v gcc > /dev/null || { echo "skip: no gcc"; exit 0; }
-
 fail=0
 runs=0
 total=0
+
+# untried NAME WHY: a combination that could not be compiled at all.
+untried() {
+    if grep -qxF -- "$1" "$here/compiler/expect-runs" 2> /dev/null; then
+        echo "FAIL  $1: not tried, $2"; fail=1
+    else
+        echo "skip  $1: $2"
+    fi
+}
+
 for m in 32 64; do
-    # A host that cannot build for this width at all is not a failure.
     printf 'int main(void){return 0;}\n' > probe.c
-    gcc -m$m -o probe probe.c 2> /dev/null || { echo "skip  -m$m: the host cannot build it"; continue; }
+    can_build=1
+    gcc -m$m -o probe probe.c 2> /dev/null || can_build=0
 
     for opts in "-O0" "-O1" "-O2" "-Os" "-O2 -fPIC" \
                 "-O2 -fno-pie -fno-asynchronous-unwind-tables" \
                 "-O2 -fno-pie -msse2 -mfpmath=sse" \
                 "-O2 -fcf-protection=full" "-O2 -fcf-protection=none"; do
         name="-m$m $opts"
+        if [ "$can_build" -eq 0 ]; then
+            untried "$name" "the host's gcc cannot build a -m$m program"
+            continue
+        fi
         total=$((total + 1))
         verdict=
         # Code that is not position-independent is linked as a program
@@ -58,7 +75,7 @@ for m in 32 64; do
         # shellcheck disable=SC2086
         if ! gcc -m$m $opts -S -o t.s "$here/compiler/prog.c" 2> /dev/null ||
            ! gcc -m$m $opts $pie -o ref "$here/compiler/prog.c" 2> /dev/null; then
-            echo "skip  $name: the host's gcc does not take these options"
+            untried "$name" "the host's gcc does not take these options"
             total=$((total - 1))
             continue
         fi

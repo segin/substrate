@@ -22,7 +22,7 @@ ${CC:-cc} -O0 -w -o "$work/as" \
     { echo "FAIL: the assembler does not build for the host"; exit 1; }
 
 cd "$work" || exit 1
-command -v objcopy > /dev/null || { echo "SKIP: no objcopy to take the bytes out with"; exit 0; }
+command -v objcopy > /dev/null || { echo "FAIL: no objcopy to take the bytes out with"; exit 1; }
 
 # enc WHAT INSTRUCTION BYTES
 enc() {

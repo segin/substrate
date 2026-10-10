@@ -26,6 +26,10 @@ check_obj() {
     obj="$1"
     readelf -S "$obj" | grep -q "\\.text"
     readelf -r "$obj" | grep -q "There are no relocations in this file."
+    # And each branch goes to the label it names: the bytes are GNU as's.
+    # (That there are no relocations says only that each went somewhere.)
+    got=$(objcopy -O binary -j .text "$obj" /dev/stdout | od -An -v -tx1 | tr -d ' \n')
+    [ "$got" = "eb0390ebfd75019090ebfa90ebfd" ] || { echo "FAIL $obj: $got"; exit 1; }
 }
 
 "$AS" -32 -o "$TMP/labels32.o" "$TMP/local_labels.s"
