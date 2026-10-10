@@ -3,7 +3,7 @@ name: substrate-toolchain
 # Substrate's own C toolchain for i386 -- the compiler, assembler and
 # linker under usr.bin/cc, usr.bin/as and usr.bin/ld -- built and tested,
 # and nothing else.  (The GNU toolchain is bootstrap.yml's and
-# toolchain64.yml's; the rest of the system is ci.yml's.)
+# gnu-toolchain64.yml's; the rest of the system is ci.yml's.)
 #
 # Two things are done with the sources:
 #

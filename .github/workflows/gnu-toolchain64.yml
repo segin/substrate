@@ -1,4 +1,4 @@
-name: toolchain64
+name: gnu-toolchain64
 
 # The 64-bit cross toolchain, x86_64-unknown-substrate: binutils and GCC
 # (C and C++) that run on the runner and produce native 64-bit substrate
@@ -28,11 +28,11 @@ on:
       - 'usr.lib/**'
       - 'include/**'
       - 'Makefile.inc'
-      - '.github/workflows/toolchain64.yml'
+      - '.github/workflows/gnu-toolchain64.yml'
   workflow_dispatch:
 
 concurrency:
-  group: toolchain64-${{ github.ref }}
+  group: gnu-toolchain64-${{ github.ref }}
   cancel-in-progress: false
 
 defaults:
@@ -40,7 +40,7 @@ defaults:
     shell: bash
 
 jobs:
-  toolchain64:
+  gnu-toolchain64:
     name: x86_64-unknown-substrate binutils + gcc
     runs-on: ubuntu-latest
     timeout-minutes: 150
@@ -144,7 +144,7 @@ jobs:
       - uses: actions/upload-artifact@v7
         if: always()
         with:
-          name: toolchain64-test-programs
+          name: gnu-toolchain64-test-programs
           path: tests/toolchain64/out/
           if-no-files-found: warn
           retention-days: 7

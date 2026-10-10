@@ -37,7 +37,7 @@ jobs:
       - uses: actions/checkout@v7
 
       # texinfo/bison/flex build binutils and gcc.  gcc-multilib is needed
-      # here, unlike in toolchain64.yml: the image is biarch at the library
+      # here, unlike in gnu-toolchain64.yml: the image is biarch at the library
       # level, so lib/ and usr.lib/ are also built 32-bit (-m32).  The rest
       # is what build-rootfs.sh's image bake uses, plus qemu for the boot
       # test.  Everything from libfl-dev on is for the ports and their
@@ -66,7 +66,7 @@ jobs:
         run: |
           sudo install -d -o "$(id -un)" -g "$(id -gn)" /opt/substrate
 
-      # The same cache toolchain64.yml writes: same key, same contents.
+      # The same cache gnu-toolchain64.yml writes: same key, same contents.
       # Whichever workflow builds the compiler first saves it for both.
       - name: Restore the toolchain cache
         id: tc

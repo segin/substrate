@@ -92,7 +92,7 @@ The script's order is the 32-bit bootstrap's, in one place:
    class, interpreter, `DT_NEEDED` and page alignment.
 
 `SKIP_BUILD=1` skips 2 and 4 and reuses an installed toolchain.  The
-`toolchain64` GitHub workflow runs the script and caches `/opt/substrate`.
+`gnu-toolchain64` GitHub workflow runs the script and caches `/opt/substrate`.
 
 Three things to know when using it:
 
