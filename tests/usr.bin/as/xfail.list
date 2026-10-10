@@ -27,7 +27,6 @@ test_integration_matrix.sh	SKIP builds with NATIVE_BUILD=1 in usr.bin/as (AS-T-0
 test_integration_rollout.sh	SKIP runs make clean in usr.bin/as and builds there twice (AS-T-013)
 test_branch_relax_exact.sh	a branch is made long up to three bytes before it need be, where instructions lie between it and its label or another branch does (AS-T-221)
 test_branch_relax_label.sh	a branch to an ordinary label of its own section is always long, and left to the linker with a relocation (AS-T-187)
-test_cli_warnings.sh	--no-warn and -W silence nothing and --fatal-warnings fails nothing (AS-T-142, AS-T-145); a warning is written four times (AS-T-392)
 test_complex_control_32_64.sh	a ; inside a comment begins a statement: gcc -fverbose-asm writes "# for (i = 0; i < 32; i++)" (AS-T-093)
 test_diagnostics_determinism.sh	a message names the temporary file and its line, not the user's (AS-T-090, AS-T-147)
 test_fuzz_matrix.sh	runs test_testing_fuzz_perf.sh

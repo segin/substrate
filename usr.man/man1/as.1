@@ -15,7 +15,8 @@
 .Op Fl mtune Ar cpu
 .Op Fl O Ar elf|binary
 .Op Fl msyntax Ns = Ns Ar att|intel
-.Op Fl W | Fl -warn | Fl -no-warn | Fl -fatal-warnings
+.Op Fl -warn | Fl W | Fl -no-warn
+.Op Fl -fatal-warnings
 .Op Fl al Ns Op = Ns Ar file
 .Op Fl -defsym Ar sym=val
 .Op Fl -statistics
@@ -92,12 +93,17 @@ An
 or
 .Ic .att_syntax
 directive in the source changes it from that line on.
-.It Fl W , Fl -warn
-Enable warnings.
-.It Fl -no-warn
-Disable warnings.
+.It Fl -warn
+Write warnings to the standard error, each once.
+This is the default.
+.It Fl W , Fl -no-warn
+Write no warnings.
 .It Fl -fatal-warnings
-Treat warnings as errors.
+If a warning is written, fail after it: the exit status is 1 and no
+output file is left.
+A warning that
+.Fl -no-warn
+has silenced does not count.
 .It Fl al Ns Op = Ns Ar file
 Emit listing output.
 If

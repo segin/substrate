@@ -9327,6 +9327,51 @@ static int x86_stmt_requires_v3(const as_instruction_t *insn, int intel_syntax, 
                                      sizeof(probe_err)) == 0;
 }
 
+void as_elf_warnings_free(as_elf_warnings_t *w) {
+    if (w == NULL) {
+        return;
+    }
+    free(w->seen);
+    w->seen = NULL;
+    w->seen_count = 0;
+    w->seen_cap = 0;
+}
+
+/*
+ * Warn about a statement: once, however many times it is encoded, and
+ * not at all where warnings are suppressed.
+ */
+static void warn_stmt(const as_elf_cfg_t *cfg, const as_stmt_t *st, const char *text) {
+    as_elf_warnings_t *w = cfg->warnings;
+
+    if (w != NULL) {
+        size_t i;
+
+        if (w->suppress) {
+            return;
+        }
+        for (i = 0; i < w->seen_count; ++i) {
+            if (w->seen[i] == (const void *)st) {
+                return;
+            }
+        }
+        if (w->seen_count == w->seen_cap) {
+            size_t ncap = w->seen_cap == 0 ? 16 : w->seen_cap * 2;
+            const void **next = (const void **)realloc(w->seen, ncap * sizeof(*next));
+
+            if (next != NULL) {
+                w->seen = next;
+                w->seen_cap = ncap;
+            }
+        }
+        if (w->seen_count < w->seen_cap) {
+            w->seen[w->seen_count++] = st;
+        }
+        w->count++;
+    }
+    fprintf(stderr, "as: warning: %s:%u: %s\n", st->file != NULL ? st->file : "<input>", st->line, text);
+}
+
 static int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_stmt_t *st, unsigned char *code, size_t code_cap,
                            size_t *code_len, char *encerr, size_t encerr_sz) {
     as_x86_insn_t in;
@@ -9494,8 +9539,7 @@ static int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_st
             src_raw->raw != NULL && (src_raw->raw[0] == '$' || src_raw->raw[0] == '#') &&
             is_x86_low8_reg(dst_raw->u.reg) && eval_expr_const(src_raw->u.expr, &immv) == 0 &&
             (immv < -128 || immv > 255)) {
-            fprintf(stderr, "as: warning: %s:%u: immediate truncated to 8 bits\n",
-                    st->file != NULL ? st->file : "<input>", st->line);
+            warn_stmt(cfg, st, "immediate truncated to 8 bits");
         }
     }
 

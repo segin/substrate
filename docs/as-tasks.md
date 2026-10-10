@@ -396,14 +396,16 @@ with a symbol table.
   Trace: AS-FE-014, AS-FE-040.  Verify: T — `gcc -pipe -c` with this assembler as `as`.
 - [ ] **AS-T-141** When more than one input file is given, the assembler shall assemble them as one, in order.
   Trace: AS-FE-040.  Verify: T.
-- [ ] **AS-T-142** When `--fatal-warnings` is given and a warning is issued, the assembler shall fail.
+- [x] **AS-T-142** When `--fatal-warnings` is given and a warning is issued, the assembler shall fail.
   Trace: AS-FE-014.  Verify: T — with the warning of 064.
+  Done: the emitter counts the warnings it writes, and the driver, given the option and a count that is not 0, says how many, removes the object and exits 1.  `test_cli_warnings.sh`, with the one warning there is today (a number too wide for a byte register).
 - [ ] **AS-T-143** When `-march=` names an x86 processor GNU `as` knows, the assembler shall accept it and enable that processor's instruction sets.
   Trace: AS-FE-014.  Verify: T — `-march=haswell`, `i686`, `x86-64-v2`, `znver3`; an unknown name is refused.
 - [ ] **AS-T-144** When `--version` is given, the assembler shall name itself as the Substrate assembler and shall not claim to be GNU Binutils.
   Trace: AS-FE-014.  Verify: T; D — a GCC `configure` run with it as `as` detects only the features it has.
 - [ ] **AS-T-145** Each of `-g`, `--gdwarf-N`, `-D`, `--warn`, `--no-warn`, `-W`, `--from-cc` shall take the effect `as(1)` gives it, or be removed from the options accepted.
   Trace: AS-FE-014.  Verify: I — the man page and the option table agree; T — one case each.
+  In part, with 142: `--warn` writes warnings, `--no-warn` writes none, and `-W` is `--no-warn` as it is to GNU (it had been `--warn`); `as(1)` says so and `test_cli_warnings.sh` has a case for each.  `-g`, `--gdwarf-N`, `-D` for a `.s` and `--from-cc` are as they were.
 - [ ] **AS-T-146** When no `-o` is given, the assembler shall write `a.out`.
   Trace: AS-FE-032.  Verify: T.
 - [x] **AS-T-390** When `-msyntax=intel` is given and the source has an `.att_syntax`, the assembler shall read what follows the directive as AT&T.
@@ -418,9 +420,10 @@ with a symbol table.
 - [ ] **AS-T-388** If a source has more than one statement in error, then the assembler shall report each of them, and shall write no object.
   Trace: AS-FE-030.  Verify: T — `fooop %eax,%ebx` / `mov %badreg,%eax` / `barrr`: three messages, as GNU gives; `test_source_model_32_64.sh` passes.  After: 147.
   (Added when the expected failures were checked against GNU as: this is what that test fails on now that `.include` works.  Today the first error ends the run.)
-- [ ] **AS-T-392** A warning shall be written once.
+- [x] **AS-T-392** A warning shall be written once.
   Trace: AS-FE-030, AS-DES-002.  Verify: T — `movb $0x1234, %al`: one line on the standard error; `test_cli_warnings.sh`.  After: 220.
   (Added with `test_cli_warnings.sh`: the line is written four times, once for each pass that encodes the statement.)
+  Done, ahead of 220: the emitter keeps the statements it has warned about, and warns about each once however many passes encode it.  When there is one pass the list can go.
 - [ ] **AS-T-147** Every error message shall have the form `file:line: Error: text`, with text that is not empty.
   Trace: AS-FE-030, AS-FE-032.  Verify: T — a test that greps every failing case of the suite for the form; `loop 1b` to an undefined label has text.
 - [ ] **AS-T-148** When a failure is found while expanding a macro or repeat, the message shall name the user's line and the macro being expanded.
@@ -1013,5 +1016,5 @@ is not to be done, 370 is ticked with "removed" and the rest struck.
 | AS-EXT-009 | 185, 325, 332–337 |
 | AS-EXT-010 | 040, 171, 338, 339 (339 closes all of AS-EXT) |
 
-343 tasks: 43 done, 300 open.  Numbers run to 392, with gaps left between
+343 tasks: 45 done, 298 open.  Numbers run to 392, with gaps left between
 sections for tasks found along the way.

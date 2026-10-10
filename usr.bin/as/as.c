@@ -191,7 +191,7 @@ static void usage(const char *prog) {
     fprintf(stderr,
             "usage: %s [-32|-64] [-c] [-g] [-I dir] [-D name[=value]] [-march cpu] [-mtune cpu] "
             "[-O elf|binary] "
-            "[-msyntax=att|intel] [-W|--warn|--no-warn|--fatal-warnings] "
+            "[-msyntax=att|intel] [--warn|-W|--no-warn] [--fatal-warnings] "
             "[--from-cc] "
             "[-al[=file]] [--defsym sym=val] [--statistics] [--target-help] "
             "[-Wa opts] [--max-input-bytes N] [--max-line-bytes N] [--max-token-length N] "
@@ -2229,8 +2229,11 @@ static int run_native_backend(const as_ctx_t *ctx) {
     char *temp_cond = NULL;
     char *temp_defs = NULL;
     const char *src_path = NULL;
+    as_elf_warnings_t warnings;
     int rc = -1;
 
+    memset(&warnings, 0, sizeof(warnings));
+    warnings.suppress = !ctx->warn_enabled;
     memset(&lcfg, 0, sizeof(lcfg));
     memset(&pcfg, 0, sizeof(pcfg));
     memset(&ecfg, 0, sizeof(ecfg));
@@ -2297,6 +2300,7 @@ static int run_native_backend(const as_ctx_t *ctx) {
     ecfg.use_rela = ctx->mode == AS_MODE_64 ? 1u : 0u;
     ecfg.x86_64_isa_level = (unsigned)x64_isa_level_from_march(ctx->march);
     ecfg.intel_syntax = (unsigned)(ctx->syntax_intel ? 1 : 0);
+    ecfg.warnings = &warnings;
 
     if (write_defsym_file(ctx, &temp_defs) != 0) {
         as_diag(AS_E_INTERNAL, "failed to write the --defsym definitions");
@@ -2371,9 +2375,19 @@ static int run_native_backend(const as_ctx_t *ctx) {
         AS_PHASE_END(ctx, "emit-elf");
     }
 
+    /* The object is written by now: with --fatal-warnings a warning
+     * takes it away again. */
+    if (ctx->fatal_warnings && warnings.count > 0) {
+        as_diag(AS_E_BACKEND, "%u warning%s, treating warnings as errors", warnings.count,
+                warnings.count == 1 ? "" : "s");
+        unlink(ctx->out_path);
+        goto out;
+    }
+
     rc = 0;
 
 out:
+    as_elf_warnings_free(&warnings);
     if (temp_pp != NULL && getenv("AS_KEEP_TEMPS") == NULL) {
         unlink(temp_pp);
     }
@@ -2669,11 +2683,12 @@ int main(int argc, char **argv) {
             }
             continue;
         }
-        if (strcmp(arg, "-W") == 0 || strcmp(arg, "--warn") == 0) {
+        if (strcmp(arg, "--warn") == 0) {
             ctx.warn_enabled = 1;
             continue;
         }
-        if (strcmp(arg, "--no-warn") == 0) {
+        /* -W is --no-warn, as it is to GNU as. */
+        if (strcmp(arg, "-W") == 0 || strcmp(arg, "--no-warn") == 0) {
             ctx.warn_enabled = 0;
             continue;
         }
