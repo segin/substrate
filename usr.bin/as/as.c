@@ -2850,7 +2850,7 @@ static int as_run(int argc, char **argv, strvec_t *inputs, char **spool_path) {
 
     memset(&ctx, 0, sizeof(ctx));
     ctx.mode = AS_MODE_AUTO;
-    ctx.out_path = "a.out.o";
+    ctx.out_path = "a.out";
     ctx.output = AS_OUTPUT_ELF;
     ctx.self_path = argv[0];
     ctx.warn_enabled = 1;

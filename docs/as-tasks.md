@@ -411,8 +411,9 @@ with a symbol table.
 - [ ] **AS-T-145** Each of `-g`, `--gdwarf-N`, `-D`, `--warn`, `--no-warn`, `-W`, `--from-cc` shall take the effect `as(1)` gives it, or be removed from the options accepted.
   Trace: AS-FE-014.  Verify: I — the man page and the option table agree; T — one case each.
   In part, with 142: `--warn` writes warnings, `--no-warn` writes none, and `-W` is `--no-warn` as it is to GNU (it had been `--warn`); `as(1)` says so and `test_cli_warnings.sh` has a case for each.  `-g`, `--gdwarf-N`, `-D` for a `.s` and `--from-cc` are as they were.
-- [ ] **AS-T-146** When no `-o` is given, the assembler shall write `a.out`.
+- [x] **AS-T-146** When no `-o` is given, the assembler shall write `a.out`.
   Trace: AS-FE-032.  Verify: T.
+  Done: it wrote `a.out.o`.  `test_cli_inputs.sh` assembles in an empty directory and looks for `a.out` and nothing else; `as(1)` now has an entry for `-o`, which it lacked.
 - [x] **AS-T-390** When `-msyntax=intel` is given and the source has an `.att_syntax`, the assembler shall read what follows the directive as AT&T.
   Trace: AS-FE-014.  Verify: T — `mov eax, 1` / `.att_syntax` / `mov $2, %eax` / `mov (%ebx), %ecx` under `-msyntax=intel`: GNU.
   Done: the encoder took the option for the syntax of any statement the parser had marked AT&T, so the option outlasted the directive; it takes the statement's own.  `test_intel_dual_syntax.sh`, `test_cli_extended.sh`.  Found in rewriting the test of the options, which had never given `-msyntax=intel` a source with a directive in it.
@@ -1021,5 +1022,5 @@ is not to be done, 370 is ticked with "removed" and the rest struck.
 | AS-EXT-009 | 185, 325, 332–337 |
 | AS-EXT-010 | 040, 171, 338, 339 (339 closes all of AS-EXT) |
 
-343 tasks: 50 done, 293 open.  Numbers run to 392, with gaps left between
+343 tasks: 51 done, 292 open.  Numbers run to 392, with gaps left between
 sections for tasks found along the way.

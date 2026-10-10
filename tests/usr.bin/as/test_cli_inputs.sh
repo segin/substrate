@@ -64,6 +64,14 @@ printf '\t.byte 9\n' | "$AS" -32 -o mixed.o one.s - three.s > out 2>&1 || bad "f
 grep -q 'no-such-file\.s' out || bad "a second file that is not there: not named: $(head -1 out)"
 [ -e missing.o ] && bad "a second file that is not there: an object was written"
 
+# Where the object goes when no -o says: a.out, here, and nothing else.
+mkdir bare && (
+    cd bare &&
+    "$AS" -32 ../one.s > out 2>&1 &&
+    [ "$(ls | grep -v '^out$' | tr '\n' ' ')" = "a.out " ] &&
+    cmp -s a.out ../named.o
+) || bad "with no -o the object is not a.out, alone: $(ls bare | tr '\n' ' ')"
+
 # A compiler with -pipe: the assembly comes down a pipe to this
 # assembler, and the object runs.
 if command -v gcc > /dev/null 2>&1; then
