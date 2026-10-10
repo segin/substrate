@@ -2770,7 +2770,11 @@ static void print_statistics(unsigned long long start_us, unsigned long long end
             (long)ru.ru_stime.tv_sec * 1000000L + (long)ru.ru_stime.tv_usec);
 }
 
-int main(int argc, char **argv) {
+/*
+ * The assembler, given its arguments with each -Wa taken apart: what is
+ * in a -Wa is an option like any other, and is read where they are.
+ */
+static int as_run(int argc, char **argv) {
     as_ctx_t ctx;
     int i;
     int query_version = 0;
@@ -3048,30 +3052,6 @@ int main(int argc, char **argv) {
             }
             continue;
         }
-        if (strcmp(arg, "-Wa") == 0) {
-            if (i + 1 >= argc) {
-                usage(argv[0]);
-                strvec_free(&ctx.gcc_opts);
-                strvec_free(&ctx.as_opts);
-                return 2;
-            }
-            if (strvec_push_csv(&ctx.as_opts, argv[++i]) != 0) {
-                as_diag(AS_E_USAGE, "invalid -Wa argument");
-                strvec_free(&ctx.gcc_opts);
-                strvec_free(&ctx.as_opts);
-                return 2;
-            }
-            continue;
-        }
-        if (strncmp(arg, "-Wa,", 4) == 0) {
-            if (strvec_push_csv(&ctx.as_opts, arg + 4) != 0) {
-                as_diag(AS_E_USAGE, "invalid -Wa argument");
-                strvec_free(&ctx.gcc_opts);
-                strvec_free(&ctx.as_opts);
-                return 2;
-            }
-            continue;
-        }
         if (strncmp(arg, "-march=", 7) == 0) {
             ctx.march = arg + 7;
             if (strvec_push(&ctx.gcc_opts, arg) != 0) {
@@ -3098,13 +3078,22 @@ int main(int argc, char **argv) {
             continue;
         }
 
-        if (arg[0] == '-') {
-            if (strvec_push(&ctx.as_opts, arg) != 0) {
-                strvec_free(&ctx.gcc_opts);
-                strvec_free(&ctx.as_opts);
-                return 1;
-            }
+        /*
+         * What a compiler's driver passes and this assembler has no use
+         * for: taken, and nothing done.  --gdwarf-N asks for line
+         * numbers in a form the .loc directives of the source do not
+         * depend on; --noexecstack is what an object here is already.
+         */
+        if (strncmp(arg, "--gdwarf", 8) == 0 || strcmp(arg, "--noexecstack") == 0) {
             continue;
+        }
+
+        /* Any other option is one there is not. */
+        if (arg[0] == '-' && arg[1] != '\0') {
+            as_diag(AS_E_USAGE, "unrecognized option '%s'", arg);
+            strvec_free(&ctx.gcc_opts);
+            strvec_free(&ctx.as_opts);
+            return 1;
         }
 
         if (ctx.in_path != NULL) {
@@ -3226,4 +3215,38 @@ int main(int argc, char **argv) {
     strvec_free(&ctx.as_opts);
     free(owned_listing_path);
     return 0;
+}
+
+int main(int argc, char **argv) {
+    strvec_t args;
+    int i;
+    int rc;
+
+    /* `-Wa,a,b` and `-Wa a,b` are the arguments a and b. */
+    memset(&args, 0, sizeof(args));
+    for (i = 0; i < argc; ++i) {
+        const char *list = NULL;
+        int failed;
+
+        if (i > 0 && strcmp(argv[i], "-Wa") == 0) {
+            if (i + 1 >= argc) {
+                usage(argv[0]);
+                strvec_free(&args);
+                return 2;
+            }
+            list = argv[++i];
+        } else if (i > 0 && strncmp(argv[i], "-Wa,", 4) == 0) {
+            list = argv[i] + 4;
+        }
+        failed = list != NULL ? strvec_push_csv(&args, list) : strvec_push(&args, argv[i]);
+        if (failed != 0) {
+            as_diag(AS_E_USAGE, list != NULL ? "invalid -Wa argument" : "out of memory");
+            strvec_free(&args);
+            return 2;
+        }
+    }
+
+    rc = as_run((int)args.count, args.items);
+    strvec_free(&args);
+    return rc;
 }

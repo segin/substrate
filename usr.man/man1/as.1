@@ -134,10 +134,17 @@ Print wall-clock/resource usage statistics.
 .It Fl -target-help
 Print target summary and exit.
 .It Fl Wa Ar opts
-Accept GNU-compatible assembler option payloads.
-Unsupported backend-only flags are ignored unless they conflict with explicit
-.Nm
-behavior.
+The options in
+.Ar opts ,
+which are parted by commas, as if each had been given by itself:
+.Fl Wa,--defsym,X=1
+is
+.Fl -defsym Cm X=1 .
+A compiler's driver passes its own
+.Fl Wa
+through, so this is what such an option arrives as.
+.It Fl -gdwarf- Ns Ar N , Fl -noexecstack
+Accepted, with no effect: compilers' drivers pass them.
 .It Fl -max-input-bytes Ar n
 Reject source larger than
 .Ar n
@@ -157,6 +164,9 @@ Reject macro nesting deeper than
 Reject include nesting deeper than
 .Ar n .
 .El
+.Pp
+An option that is none of these is an error: the assembler names it,
+assembles nothing, and exits with status 1.
 .Sh DIRECTIVES
 .Nm
 tracks GNU-style directive families used by Substrate userland and
@@ -264,7 +274,8 @@ Per-architecture instruction-family appendix.
 .It 0
 Successful assembly and validation.
 .It 1
-Backend execution, validation, or internal frontend failure.
+Backend execution, validation, or internal frontend failure; an option
+there is not.
 .It 2
 Usage/argument error.
 .El

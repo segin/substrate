@@ -389,8 +389,9 @@ with a symbol table.
 
 ### C.5 Command line
 
-- [ ] **AS-T-138** If an option is not one the assembler implements, then the assembler shall fail and name it.
+- [x] **AS-T-138** If an option is not one the assembler implements, then the assembler shall fail and name it.
   Trace: AS-FE-014.  Verify: T — `--bogus-option`: exit 1.
+  Done: anything that began with a dash was kept and nothing done with it.  It is now `unrecognized option`, exit 1, no object.  The contents of a `-Wa`, which were kept without being read, are parted at the commas before any option is looked at and are options like the rest -- so `-Wa,--defsym,X=1` defines X, and `-Wa,--bogus` is refused.  `--gdwarf-N` and `--noexecstack` are taken and do nothing, being what compilers' drivers pass (145 has `--gdwarf-N`).  `test_cli_unknown_option.sh`.
 - [x] **AS-T-139** When `--defsym NAME=VALUE` is given, the assembler shall define NAME absolute with that value before assembly.
   Trace: AS-FE-014.  Verify: T — `.long X`, `.if X`, `.ifdef X`.
   Done: the option was stored and never read.  Each is now a `.set` in a file of its own whose tokens are read before the source's, so no line of the source has its number moved; and the conditionals, which are decided while the source is still text, are given the names and values.  An option with no `=`, no name, or a value that is not a number is refused.  `test_cli_defsym.sh`, which GNU as passes.- [ ] **AS-T-140** When the input file is `-` or none is given, the assembler shall read standard input.
@@ -1017,5 +1018,5 @@ is not to be done, 370 is ticked with "removed" and the rest struck.
 | AS-EXT-009 | 185, 325, 332–337 |
 | AS-EXT-010 | 040, 171, 338, 339 (339 closes all of AS-EXT) |
 
-343 tasks: 47 done, 296 open.  Numbers run to 392, with gaps left between
+343 tasks: 48 done, 295 open.  Numbers run to 392, with gaps left between
 sections for tasks found along the way.
