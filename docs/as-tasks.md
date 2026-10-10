@@ -547,8 +547,9 @@ one table of templates; there is one ModRM/SIB/prefix emitter.
   Trace: AS-OBJ-007, AS-FE-006.  Verify: T — `.long x+y`, `.long 2*x`, `.long ext - h` (h in another section), `movl $x+y,%eax`, `movl $2*x,%eax`: exit 1.  After: 191.
 - [ ] **AS-T-214** When `.` is used in an expression, the assembler shall give the address of the start of the statement, or for a data directive of the element.
   Trace: AS-FE-006.  Verify: T — `.long .+4`, `.long ., .`, `jmp .`, `jmp .+2`, `movl $., %eax`: GNU; no symbol named `.` reaches the symbol table.  After: 220.
-- [ ] **AS-T-215** When a reference to a local label lies in a mergeable section (`SHF_MERGE`), the assembler shall emit the relocation against the label's own symbol and not against the section.
+- [x] **AS-T-215** When a reference to a local label lies in a mergeable section (`SHF_MERGE`), the assembler shall emit the relocation against the label's own symbol and not against the section.
   Trace: AS-OBJ-004.  Verify: T — three strings in `.rodata.str1.1,"aMS"` reached by `leaq .LCn(%rip)`: GNU's relocations; D — linked with GNU `ld`, the program prints `alpha|beta|gamma`.
+  Done: `test_merge_section_reloc.sh`, which links and runs it.  With this, 217, 034, 066, 061 and 222, **six of the fourteen combinations of `test_compiler_output.sh` run** — all of 64 bits but `-O0` — and `compiler/expect-runs` holds them.
 - [ ] **AS-T-216** `as_x86_reloc.c` shall be the one place a relocation type is chosen, or shall be removed.
   Trace: AS-X86-002.  Verify: I.  After: 200.
 

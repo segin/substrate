@@ -12927,7 +12927,45 @@ static int add_reloc_for_symbol_ex(emit_ctx_t *ctx, elf_section_t *sec, const ch
 
         if (find_label_virtual_location(ctx, NULL, NULL, 0, 0, sym_name,
                                         target_section, sizeof(target_section), &target_off) == 0) {
-            char *section_name = xstrdup(target_section);
+            elf_section_t *target_sec = section_for_name(ctx, target_section);
+            char *section_name;
+
+            /*
+             * A label in a section the linker merges -- string constants
+             * are kept so -- stays a symbol.  The linker moves each string
+             * of such a section where it will; a relocation against the
+             * section with an offset, which is what a .L label otherwise
+             * becomes, means "this far into the section" and is taken
+             * for a place in whichever string that falls in.  With the
+             * -4 of a PC-relative field the first string's fell before
+             * the section altogether: ld warned of an access beyond the
+             * end of a merged section and the program printed the wrong
+             * strings.
+             */
+            if (target_sec != NULL && (elf_section_flags(target_sec) & SHF_MERGE) != 0) {
+                sym = find_emit_symbol(ctx, sym_name);
+                if (sym == NULL) {
+                    sym = elf_add_symbol(ctx->obj, sym_name, 0, 0, STB_LOCAL, STT_NOTYPE);
+                    if (sym == NULL || elf_symbol_define(sym, target_sec, target_off) != ELF_OK ||
+                        append_emit_symbol(ctx, sym_name, sym) != 0) {
+                        free(sym_name);
+                        return -1;
+                    }
+                }
+                if (sec == NULL) {
+                    free(sym_name);
+                    return 0;
+                }
+                rtype = reloc_type_for_symbol(ctx->cfg != NULL ? ctx->cfg->machine : EM_386, name,
+                                              fallback_type);
+                if (elf_add_relocation(sec, offset, sym, rtype, addend) != ELF_OK) {
+                    free(sym_name);
+                    return -1;
+                }
+                free(sym_name);
+                return 0;
+            }
+            section_name = xstrdup(target_section);
             if (section_name == NULL) {
                 free(sym_name);
                 return -1;

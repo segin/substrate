@@ -1,4 +1,13 @@
 # The combinations of test_compiler_output.sh that must run: one to a
 # line, written as the test prints it ("-m64 -O2").  A line is added when
 # its combination runs both here and on the CI host, and is never taken
-# out to make the test pass.  None does yet.
+# out to make the test pass.
+#
+# All of 64 bits but -O0, which stops at salq (AS-T-172).  Nothing of 32
+# bits yet: the x87 instructions are missing (AS-T-179).
+-m64 -O1
+-m64 -O2
+-m64 -Os
+-m64 -O2 -fPIC
+-m64 -O2 -fno-pie -fno-asynchronous-unwind-tables
+-m64 -O2 -fno-pie -msse2 -mfpmath=sse
