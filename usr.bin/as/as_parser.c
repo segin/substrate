@@ -1543,6 +1543,23 @@ static int parse_operand_slice(parse_ctx_t *ctx, const as_token_t *tokv, size_t 
             return -1;
         }
         free(tmp);
+        /*
+         * `*foo`: what is at foo, not foo.  The inner operand parses as a
+         * label, which to call and jmp means a direct branch -- so the
+         * star was simply lost, and `call *foo` called foo where it
+         * should have called through the pointer kept there.  It becomes
+         * a memory operand with foo for its address.
+         */
+        if (inner.kind == AS_OPERAND_LABEL_REF ||
+            (inner.kind == AS_OPERAND_IMMEDIATE && inner.raw != NULL && inner.raw[0] != '$')) {
+            /* (`*foo+4` and `*0x1000` parse as expressions, which without
+             * a $ are addresses too.) */
+            as_expr_t *addr = inner.u.expr;
+
+            memset(&inner.u, 0, sizeof(inner.u));
+            inner.kind = AS_OPERAND_MEMORY;
+            inner.u.mem.disp = addr;
+        }
         free(op->raw);
         *op = inner;
         op->raw = join_tokens(tokv, n, 0);

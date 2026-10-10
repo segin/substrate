@@ -116,7 +116,7 @@ status 0.
 - [x] **AS-T-027** If a local label reference has no definition in the direction it names, then the assembler shall fail and name the reference and its line.
   Trace: AS-FE-003.  Verify: T — `jmp 1f` with no `1:`; `call 2b` before any `2:`.
   Done: `test_local_label_undefined.sh`.  A jump to a local label that **is** defined, but in another section, is still left out of the object without a word: 136.
-- [ ] **AS-T-028** When `*` precedes an operand of `call` or `jmp` that is not a register, the assembler shall encode an indirect branch through that memory operand.
+- [x] **AS-T-028** When `*` precedes an operand of `call` or `jmp` that is not a register, the assembler shall encode an indirect branch through that memory operand.
   Trace: AS-FE-005.  Verify: T — `call *foo`, `jmp *foo`, `call *foo(%ebx)`, and under `--64` `call *foo(%rip)`, `jmp *foo`: GNU.
 - [x] **AS-T-029** When `nopw` or `nopl` is written with a memory operand, the assembler shall encode opcode `0F 1F /0`.
   Trace: AS-SEL-009.  Verify: T — the eleven multi-byte NOP forms gcc and GNU `as` pad with, both modes.
