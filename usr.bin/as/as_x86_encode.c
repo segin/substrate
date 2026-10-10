@@ -900,6 +900,24 @@ static int mnemonic_rep_compatible(const char *mn) {
  * `rep bsf` and `rep bsr`, which are tzcnt and lzcnt to a processor
  * that has them and the plain instruction to one that has not.
  */
+/*
+ * Whether nop has the one operand of the long NOP, 0F 1F /0: memory, or
+ * a register of 16 bits or more.  There is none of a byte.
+ */
+static int nop_has_long_operand(const as_x86_insn_t *insn) {
+    const as_x86_operand_t *a = &insn->ops[0];
+    int bits;
+
+    if (insn->op_count != 1 || insn->byte_op) {
+        return 0;
+    }
+    if (a->kind == AS_X86_OP_MEM) {
+        return 1;
+    }
+    bits = operand_bits(a);
+    return a->kind == AS_X86_OP_REG && (bits == 16 || bits == 32 || bits == 64);
+}
+
 static int rep_is_idiom(const as_x86_insn_t *insn) {
     const char *mn = insn->mnemonic;
 
@@ -2666,7 +2684,14 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
             return -1;
         }
     } else if (streq_ci(insn->mnemonic, "nop")) {
-        if (emit8(&ctx, 0x90) != 0) {
+        if (insn->op_count == 0) {
+            if (emit8(&ctx, 0x90) != 0) {
+                return -1;
+            }
+        } else if (!nop_has_long_operand(insn)) {
+            set_unsupported_form(&ctx, insn);
+            return -1;
+        } else if (emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x1f) != 0 || modrm_sib_disp(&ctx, 0, a) != 0) {
             return -1;
         }
     } else if (streq_ci(insn->mnemonic, "pause")) {
@@ -5258,10 +5283,14 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
             modrm_sib_disp64(&ctx, a->u.reg, b, &rex_r, &rex_x, &rex_b) != 0) {
             return -1;
         }
-    } else if (streq_ci(insn->mnemonic, "nop") && insn->op_count == 1 &&
-               (a->kind == AS_X86_OP_REG || a->kind == AS_X86_OP_MEM)) {
+    } else if (streq_ci(insn->mnemonic, "nop") && insn->op_count != 0) {
         /* 0F 1F /0, the long NOP; 0F 18 /0, which this had, is
          * prefetchnta. */
+        if (!nop_has_long_operand(insn)) {
+            set_unsupported_form(&ctx, insn);
+            return -1;
+        }
+        rex_w = (insn->rex_w || (a->kind == AS_X86_OP_REG && operand_bits(a) == 64)) ? 1 : 0;
         if (emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x1f) != 0 ||
             modrm_sib_disp64(&ctx, AS_X86_REG_RAX, a, &rex_r, &rex_x, &rex_b) != 0) {
             return -1;
@@ -5296,19 +5325,6 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
         else ext = 2;
         if (emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x0d) != 0 ||
             modrm_sib_disp64(&ctx, (as_x86_reg_t)ext, a, &rex_r, &rex_x, &rex_b) != 0) {
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "nopl") || streq_ci(insn->mnemonic, "nopq") ||
-               streq_ci(insn->mnemonic, "nopw")) {
-        if (insn->op_count != 1 || a->kind != AS_X86_OP_MEM) {
-            set_unsupported_form(&ctx, insn);
-            return -1;
-        }
-        if (streq_ci(insn->mnemonic, "nopw") && emit8(&ctx, 0x66) != 0) {
-            return -1;
-        }
-        if (emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x1f) != 0 ||
-            modrm_sib_disp64(&ctx, AS_X86_REG_RAX, a, &rex_r, &rex_x, &rex_b) != 0) {
             return -1;
         }
     } else if (streq_ci(insn->mnemonic, "movs")) {

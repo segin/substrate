@@ -264,5 +264,38 @@ t "32"    f60301     'testb $1, (%ebx)'
 t "64"    f60301     'testb $1, (%rbx)'
 t "32 64" f7c102000000 'testl $2, %ecx'
 
+# nop with an operand is the long NOP, 0F 1F /0, of the operand's size.
+# `nop (%eax)` and `nop %eax` were the one byte 90 in 32-bit code, and
+# nopl and nopw of a register were refused.
+t "32 64" 90             'nop'
+t "32 64" 0f1fc0         'nop %eax'
+t "32 64" 660f1fc0       'nop %ax'
+t "32 64" 0f1fc1         'nop %ecx'
+t "64"    480f1fc0       'nop %rax'
+t "64"    490f1fc1       'nop %r9'
+t "64"    410f1fc1       'nop %r9d'
+t "32 64" 660f1fc0       'nopw %ax'
+t "32 64" 0f1fc0         'nopl %eax'
+t "32 64" 660f1fc1       'nopw %cx'
+t "32 64" 0f1fc2         'nopl %edx'
+t "64"    480f1fc0       'nopq %rax'
+t "32"    0f1f00         'nop (%eax)'
+t "64"    0f1f00         'nop (%rax)'
+t "32"    0f1f00         'nopl (%eax)'
+t "32"    660f1f00       'nopw (%eax)'
+t "64"    0f1f00         'nopl (%rax)'
+t "64"    660f1f00       'nopw (%rax)'
+t "64"    480f1f00       'nopq (%rax)'
+t "32"    0f1f8078563412 'nopl 0x12345678(%eax)'
+t "32"    0f1f445808     'nopl 8(%eax,%ebx,2)'
+t "64"    0f1f8078563412 'nopl 0x12345678(%rax)'
+t "64"    430f1f444808   'nopl 8(%r8,%r9,2)'
+t "32"    0f1f4304       'nop 4(%ebx)'
+t "64"    0f1f4304       'nop 4(%rbx)'
+t "32 64" refused        'nopb %al'
+t "32 64" refused        'nop %al'
+t "32 64" refused        'nop $1'
+t "32 64" refused        'nop %eax, %ebx'
+
 [ "$fail" -eq 0 ] && echo "ok: instruction forms ($cases cases)"
 exit "$fail"

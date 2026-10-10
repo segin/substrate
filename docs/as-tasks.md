@@ -185,8 +185,9 @@ status 0.
 - [x] **AS-T-047** When `in` or `out` is written with `%al`, `%ax` or `%eax`, the assembler shall encode the form of that width.
   Trace: AS-SEL-014, AS-X86-010.  Verify: T — `in %dx,%al` (`EC`), `out %al,%dx` (`EE`), `in $0x60,%al` (`E4 60`), the `%ax` forms with `66`, both modes: GNU.
   Done with 168: every one was the `%eax` form.  The port `%dx` is not taken for the width.  `test_insn_forms.sh`.  Not done, and not this task's: `inb %dx`, `outw $1` and the other forms with the accumulator left out are refused.
-- [ ] **AS-T-048** When `nop` is given a memory or register operand, the assembler shall encode the long NOP of that operand.
+- [x] **AS-T-048** When `nop` is given a memory or register operand, the assembler shall encode the long NOP of that operand.
   Trace: AS-SEL-014.  Verify: T — `nop (%eax)`, `nopw %ax`, `nopl %eax`: GNU.
+  Done: in 32-bit code `nop` with an operand was `90`; `nopl` and `nopw` of a register were refused in both modes, `nop %rax` and `nopq` had no `REX.W`, and `nop %al`, `nop $1` and `nop %eax,%ebx` were assembled.  `nop` now takes a suffix as other instructions do and is encoded in one place for each mode.  `test_insn_forms.sh`.  The padding as a disassembler prints it, `nopw 0x0(%rax,%rax,1)`, is a byte longer than GNU's: 394.
 - [ ] **AS-T-049** When `maskmovq` or `maskmovdqu` is written, the assembler shall place the mask register in ModRM.rm and the source in ModRM.reg.
   Trace: AS-SEL-009.  Verify: T — both, and `vmaskmovdqu`: GNU.
 - [ ] **AS-T-050** When `extrq` or `insertq` is written with two immediates, the assembler shall emit them in the order the manual gives.
@@ -509,6 +510,8 @@ one table of templates; there is one ModRM/SIB/prefix emitter.
   Trace: AS-SEL-010.  Verify: T — `movaps (%bx),%xmm0` in 32-bit mode (16-bit ModRM with `67`), `fldl (%eax)` in 64-bit mode (`67 dd 00`), `movl (%rax),%ebx` in 32-bit mode refused.  After: 162.
 - [ ] **AS-T-177** If the base and index of a memory operand are of different widths, then the assembler shall refuse the operand, but for a vector index.
   Trace: AS-SEL-010, AS-EXT-009.  Verify: T — `(%eax,%rbx)` refused; `(%rax,%xmm2,4)` accepted for a gather.  After: 162.
+- [ ] **AS-T-394** When the displacement of a memory operand is written and is the constant zero, the assembler shall encode the operand with no displacement, where the base register allows it.
+  Trace: found while doing 048; no audit entry.  Verify: T — `movl 0(%eax),%ecx` (`8B 08`), `nopw 0(%rax,%rax,1)` (`66 0F 1F 04 00`), `movl 0(%ebp),%ecx` (`8B 4D 00`), `movl sym(%eax),%ecx` with `sym = 0` (four bytes still): GNU.
 
 ### D.3 Forms that are missing
 
@@ -1036,5 +1039,5 @@ is not to be done, 370 is ticked with "removed" and the rest struck.
 | AS-EXT-009 | 185, 325, 332–337 |
 | AS-EXT-010 | 040, 171, 338, 339 (339 closes all of AS-EXT) |
 
-344 tasks: 61 done, 283 open.  Numbers run to 393, with gaps left between
+345 tasks: 62 done, 283 open.  Numbers run to 394, with gaps left between
 sections for tasks found along the way.
