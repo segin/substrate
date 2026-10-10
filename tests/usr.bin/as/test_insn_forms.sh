@@ -62,5 +62,10 @@ for mode in 32 64; do
     [ "$got" = c8100000c8341203 ] || { echo "FAIL $mode Intel enter: $got"; fail=1; }
 done
 
+# ud2b is not ud2: it is the other undefined opcode, 0F B9.
+t "32 64" 0f0b  'ud2'
+t "32 64" 0f0b  'ud2a'
+t "32 64" 0fb9  'ud2b'
+
 [ "$fail" -eq 0 ] && echo "ok: instruction forms ($cases cases)"
 exit "$fail"

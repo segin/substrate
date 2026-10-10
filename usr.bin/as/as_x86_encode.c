@@ -2728,8 +2728,10 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
         }
     } else if (streq_ci(insn->mnemonic, "ud2") || streq_ci(insn->mnemonic, "ud2a") ||
                streq_ci(insn->mnemonic, "ud2b")) {
-        /* ud2a/ud2b are GAS-historical aliases for ud2 (encoded the same). */
-        if (insn->op_count != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x0b) != 0) {
+        /* ud2a is ud2 by its old name.  ud2b is another opcode, 0F B9,
+         * which is ud1 without the operands it has since been given. */
+        if (insn->op_count != 0 || emit8(&ctx, 0x0f) != 0 ||
+            emit8(&ctx, streq_ci(insn->mnemonic, "ud2b") ? 0xb9 : 0x0b) != 0) {
             return -1;
         }
     } else if (streq_ci(insn->mnemonic, "hlt")) {
@@ -6606,8 +6608,10 @@ more_mnemonics:
         }
     } else if (streq_ci(insn->mnemonic, "ud2") || streq_ci(insn->mnemonic, "ud2a") ||
                streq_ci(insn->mnemonic, "ud2b")) {
-        /* ud2a/ud2b are GAS-historical aliases for ud2 (encoded the same). */
-        if (insn->op_count != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x0b) != 0) {
+        /* ud2a is ud2 by its old name.  ud2b is another opcode, 0F B9,
+         * which is ud1 without the operands it has since been given. */
+        if (insn->op_count != 0 || emit8(&ctx, 0x0f) != 0 ||
+            emit8(&ctx, streq_ci(insn->mnemonic, "ud2b") ? 0xb9 : 0x0b) != 0) {
             return -1;
         }
     } else if (streq_ci(insn->mnemonic, "cmpxchg16b")) {
