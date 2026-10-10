@@ -1762,7 +1762,113 @@ typedef struct {
     int else_seen;
 } gas_cond_frame_t;
 
-static int parse_cond_operand(const char *s, long long *num, char *buf, size_t bufsz) {
+#define DEFSYM_OPT "--defsym="
+
+/*
+ * A --defsym's NAME=VALUE, taken apart: where the name is, how long, and
+ * the value.  No value is 0, as GNU as has it.  -1 if there is no `=`,
+ * no name, or a value that is not a number.
+ */
+static int defsym_split(const char *spec, size_t *name_len, long long *value) {
+    const char *eq = spec != NULL ? strchr(spec, '=') : NULL;
+
+    if (eq == NULL || eq == spec) {
+        return -1;
+    }
+    *name_len = (size_t)(eq - spec);
+    *value = 0;
+    if (eq[1] == '\0') {
+        return 0;
+    }
+    return as_expr_eval_string(eq + 1, NULL, NULL, value) == AS_EXPR_EVAL_OK ? 0 : -1;
+}
+
+/*
+ * The value --defsym gave a name, for the expressions of conditionals:
+ * an as_expr_lookup_fn, whose cookie is the driver's context.  The last
+ * of two definitions of a name is the one that stands.
+ */
+static int defsym_lookup(void *cookie, const char *name, long long *value_out) {
+    const as_ctx_t *ctx = (const as_ctx_t *)cookie;
+    size_t i;
+
+    if (ctx == NULL || name == NULL) {
+        return 0;
+    }
+    for (i = ctx->as_opts.count; i > 0; --i) {
+        const char *opt = ctx->as_opts.items[i - 1];
+        size_t name_len;
+        long long value;
+
+        if (strncmp(opt, DEFSYM_OPT, sizeof(DEFSYM_OPT) - 1) != 0) {
+            continue;
+        }
+        opt += sizeof(DEFSYM_OPT) - 1;
+        if (defsym_split(opt, &name_len, &value) == 0 && strlen(name) == name_len &&
+            strncmp(opt, name, name_len) == 0) {
+            if (value_out != NULL) {
+                *value_out = value;
+            }
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/*
+ * The --defsym symbols, as a source would define them: a file with a
+ * `.set` for each, to be read before the source.  It is a file of its
+ * own, and not lines put before the source's, so that no line of the
+ * source has its number moved.  *out_path is NULL if there are none.
+ */
+static int write_defsym_file(const as_ctx_t *ctx, char **out_path) {
+    char tmp_template[] = "/tmp/asdef_XXXXXX";
+    FILE *out = NULL;
+    size_t i;
+
+    *out_path = NULL;
+    for (i = 0; i < ctx->as_opts.count; ++i) {
+        const char *opt = ctx->as_opts.items[i];
+        size_t name_len;
+        long long value;
+
+        if (strncmp(opt, DEFSYM_OPT, sizeof(DEFSYM_OPT) - 1) != 0) {
+            continue;
+        }
+        opt += sizeof(DEFSYM_OPT) - 1;
+        if (defsym_split(opt, &name_len, &value) != 0) {
+            continue;
+        }
+        if (out == NULL) {
+            int fd = mkstemp(tmp_template);
+
+            if (fd < 0) {
+                return -1;
+            }
+            out = fdopen(fd, "wb");
+            if (out == NULL) {
+                close(fd);
+                unlink(tmp_template);
+                return -1;
+            }
+        }
+        if (fprintf(out, ".set %.*s, %lld\n", (int)name_len, opt, value) < 0) {
+            fclose(out);
+            unlink(tmp_template);
+            return -1;
+        }
+    }
+    if (out == NULL) {
+        return 0;
+    }
+    if (fclose(out) != 0 || (*out_path = xstrdup(tmp_template)) == NULL) {
+        unlink(tmp_template);
+        return -1;
+    }
+    return 0;
+}
+
+static int parse_cond_operand(const as_ctx_t *ctx, const char *s, long long *num, char *buf, size_t bufsz) {
     char *tmp;
     char *p;
 
@@ -1777,7 +1883,7 @@ static int parse_cond_operand(const char *s, long long *num, char *buf, size_t b
     if (*p == '$') {
         p++;
     }
-    if (as_expr_eval_string(p, NULL, NULL, num) == AS_EXPR_EVAL_OK) {
+    if (as_expr_eval_string(p, defsym_lookup, (void *)ctx, num) == AS_EXPR_EVAL_OK) {
         free(tmp);
         buf[0] = '\0';
         return 1;
@@ -1787,7 +1893,7 @@ static int parse_cond_operand(const char *s, long long *num, char *buf, size_t b
     return 0;
 }
 
-static int eval_gas_cond_expr(const char *expr) {
+static int eval_gas_cond_expr(const as_ctx_t *ctx, const char *expr) {
     char *tmp;
     char *p;
     char *op;
@@ -1804,17 +1910,18 @@ static int eval_gas_cond_expr(const char *expr) {
     if (expr == NULL) {
         return 0;
     }
-    /* An expression of numbers is as_expr.c's, whole: `.if 1+1 == 2`,
-     * `.if (3 > 2) && 1`. */
-    if (as_expr_eval_string(expr, NULL, NULL, &ln) == AS_EXPR_EVAL_OK) {
+    /* An expression of numbers, and of the names --defsym gave numbers
+     * to, is as_expr.c's, whole: `.if 1+1 == 2`, `.if (3 > 2) && 1`,
+     * `.if DEBUG`. */
+    if (as_expr_eval_string(expr, defsym_lookup, (void *)ctx, &ln) == AS_EXPR_EVAL_OK) {
         return ln != 0;
     }
     /*
-     * What is left has a name in it.  No symbol has a value yet -- this
-     * runs while the source is still text -- so the two sides of a
-     * comparison are compared as text, which is what a macro's
-     * `.if \reg == eax` wants; a side that is a number is still read as
-     * one.
+     * What is left has another name in it.  No symbol of the source has
+     * a value yet -- this runs while the source is still text -- so the
+     * two sides of a comparison are compared as text, which is what a
+     * macro's `.if \reg == eax` wants; a side that is a number is still
+     * read as one.
      */
     tmp = xstrdup(expr);
     if (tmp == NULL) {
@@ -1840,8 +1947,8 @@ static int eval_gas_cond_expr(const char *expr) {
     }
     if (op != NULL) {
         *op = '\0';
-        lt = parse_cond_operand(p, &ln, lb, sizeof(lb));
-        rt = parse_cond_operand(op + op_len, &rn, rb, sizeof(rb));
+        lt = parse_cond_operand(ctx, p, &ln, lb, sizeof(lb));
+        rt = parse_cond_operand(ctx, op + op_len, &rn, rb, sizeof(rb));
         if (lt == 1 && rt == 1) {
             switch (op_kind) {
             case 0: result = (ln == rn); break;
@@ -1867,7 +1974,7 @@ static int eval_gas_cond_expr(const char *expr) {
         free(tmp);
         return result;
     }
-    lt = parse_cond_operand(p, &ln, lb, sizeof(lb));
+    lt = parse_cond_operand(ctx, p, &ln, lb, sizeof(lb));
     free(tmp);
     if (lt == 1) {
         return ln != 0;
@@ -1875,7 +1982,7 @@ static int eval_gas_cond_expr(const char *expr) {
     return lb[0] != '\0';
 }
 
-static int filter_gas_conditionals(const char *in_path, char **out_path) {
+static int filter_gas_conditionals(const as_ctx_t *ctx, const char *in_path, char **out_path) {
     FILE *in = NULL;
     FILE *out = NULL;
     char tmp_template[] = "/tmp/ascond_XXXXXX";
@@ -1913,12 +2020,18 @@ static int filter_gas_conditionals(const char *in_path, char **out_path) {
         if (line_starts_with_directive(d, ".ifdef") || line_starts_with_directive(d, ".ifndef")) {
             gas_cond_frame_t *f;
             int is_ifndef = line_starts_with_directive(d, ".ifndef");
-            if (depth >= sizeof(stack) / sizeof(stack[0])) {
+            char *tmp = xstrdup(d + (is_ifndef ? 7 : 6));
+            int defined;
+            if (tmp == NULL || depth >= sizeof(stack) / sizeof(stack[0])) {
+                free(tmp);
                 goto out;
             }
+            /* The names known this early are those --defsym gave. */
+            defined = defsym_lookup((void *)ctx, trim_in_place(tmp), NULL);
+            free(tmp);
             f = &stack[depth++];
             f->parent_active = active;
-            f->branch_taken = f->parent_active && is_ifndef;
+            f->branch_taken = f->parent_active && (is_ifndef ? !defined : defined);
             f->active = f->branch_taken;
             f->else_seen = 0;
             active = f->active;
@@ -1994,7 +2107,7 @@ static int filter_gas_conditionals(const char *in_path, char **out_path) {
                 goto out;
             }
             /* What is not an expression of numbers counts as 0. */
-            if (as_expr_eval_string(args, NULL, NULL, &v) != AS_EXPR_EVAL_OK) {
+            if (as_expr_eval_string(args, defsym_lookup, (void *)ctx, &v) != AS_EXPR_EVAL_OK) {
                 v = 0;
             }
             if (line_starts_with_directive(d, ".ifeq")) truth = (v == 0);
@@ -2019,7 +2132,7 @@ static int filter_gas_conditionals(const char *in_path, char **out_path) {
             }
             f = &stack[depth++];
             f->parent_active = active;
-            f->branch_taken = f->parent_active && eval_gas_cond_expr(d + 3);
+            f->branch_taken = f->parent_active && eval_gas_cond_expr(ctx, d + 3);
             f->active = f->branch_taken;
             f->else_seen = 0;
             active = f->active;
@@ -2035,7 +2148,7 @@ static int filter_gas_conditionals(const char *in_path, char **out_path) {
             if (f->else_seen || f->branch_taken || !f->parent_active) {
                 f->active = 0;
             } else {
-                f->active = eval_gas_cond_expr(d + 7);
+                f->active = eval_gas_cond_expr(ctx, d + 7);
                 if (f->active) {
                     f->branch_taken = 1;
                 }
@@ -2114,6 +2227,7 @@ static int run_native_backend(const as_ctx_t *ctx) {
     char *temp_expanded = NULL;
     char *temp_rept = NULL;
     char *temp_cond = NULL;
+    char *temp_defs = NULL;
     const char *src_path = NULL;
     int rc = -1;
 
@@ -2158,7 +2272,7 @@ static int run_native_backend(const as_ctx_t *ctx) {
         goto out;
     }
     src_path = temp_rept;
-    if (filter_gas_conditionals(src_path, &temp_cond) != 0) {
+    if (filter_gas_conditionals(ctx, src_path, &temp_cond) != 0) {
         as_diag(AS_E_BACKEND, "conditional assembly stage failed");
         goto out;
     }
@@ -2184,8 +2298,17 @@ static int run_native_backend(const as_ctx_t *ctx) {
     ecfg.x86_64_isa_level = (unsigned)x64_isa_level_from_march(ctx->march);
     ecfg.intel_syntax = (unsigned)(ctx->syntax_intel ? 1 : 0);
 
+    if (write_defsym_file(ctx, &temp_defs) != 0) {
+        as_diag(AS_E_INTERNAL, "failed to write the --defsym definitions");
+        goto out;
+    }
     {
         AS_PHASE_BEGIN();
+        /* The --defsym symbols first: their tokens go before the source's. */
+        if (temp_defs != NULL && as_lex_file(temp_defs, &lcfg, &toks, errbuf, sizeof(errbuf)) != 0) {
+            as_diag(AS_E_BACKEND, "%s", errbuf);
+            goto out;
+        }
         if (as_lex_file(src_path, &lcfg, &toks, errbuf, sizeof(errbuf)) != 0) {
             as_diag(AS_E_BACKEND, "%s", errbuf);
             goto out;
@@ -2263,10 +2386,14 @@ out:
     if (temp_cond != NULL && getenv("AS_KEEP_TEMPS") == NULL) {
         unlink(temp_cond);
     }
+    if (temp_defs != NULL && getenv("AS_KEEP_TEMPS") == NULL) {
+        unlink(temp_defs);
+    }
     free(temp_pp);
     free(temp_expanded);
     free(temp_rept);
     free(temp_cond);
+    free(temp_defs);
     free(include_dirs);
     as_data_program_free(&data);
     as_section_state_free(&secs);
@@ -2563,17 +2690,19 @@ int main(int argc, char **argv) {
             ctx.listing_path = arg + 4;
             continue;
         }
-        if (strcmp(arg, "--defsym") == 0) {
-            if (i + 1 >= argc || push_opt_with_value(&ctx.as_opts, "--defsym=", argv[++i]) != 0) {
-                usage(argv[0]);
+        if (strcmp(arg, "--defsym") == 0 || strncmp(arg, DEFSYM_OPT, sizeof(DEFSYM_OPT) - 1) == 0) {
+            const char *spec = arg[8] == '=' ? arg + 9 : (i + 1 < argc ? argv[++i] : NULL);
+            size_t name_len;
+            long long value;
+
+            if (spec == NULL || defsym_split(spec, &name_len, &value) != 0) {
+                as_diag(AS_E_USAGE, "bad --defsym%s%s: the form is --defsym name=value", spec != NULL ? " " : "",
+                        spec != NULL ? spec : "");
                 strvec_free(&ctx.gcc_opts);
                 strvec_free(&ctx.as_opts);
                 return 2;
             }
-            continue;
-        }
-        if (strncmp(arg, "--defsym=", 9) == 0) {
-            if (strvec_push(&ctx.as_opts, arg) != 0) {
+            if (push_opt_with_value(&ctx.as_opts, DEFSYM_OPT, spec) != 0) {
                 strvec_free(&ctx.gcc_opts);
                 strvec_free(&ctx.as_opts);
                 return 1;

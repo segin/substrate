@@ -108,7 +108,21 @@ with
 .Pa .lst
 suffix.
 .It Fl -defsym Ar sym=val
-Define absolute assembler symbol.
+Define
+.Ar sym
+as an absolute symbol with the value
+.Ar val ,
+a number or an expression of numbers, before the first line of the source.
+It may be used wherever a symbol made by
+.Ic .set
+may, and
+.Ic .if ,
+.Ic .ifdef
+and
+.Ic .ifndef
+see it.
+With no value it is 0.
+An option that is not of this form is an error.
 .It Fl -statistics
 Print wall-clock/resource usage statistics.
 .It Fl -target-help
