@@ -1076,6 +1076,15 @@ static int modrm_sib_disp(enc_ctx_t *ctx, uint8_t reg_field, const as_x86_operan
     uint8_t rm;
     uint8_t modrm;
 
+    /*
+     * The register's code, once, for every form below.  %ah to %bh are
+     * numbered past the sixteen registers and their codes are 4 to 7;
+     * the forms with an absolute or an index-only address took the low
+     * three bits of the number, which are those of %al to %bl, so
+     * `movb %ah, 0x1234` stored %al.
+     */
+    reg_field = reg_code3((as_x86_reg_t)reg_field);
+
     if (rm_op->kind == AS_X86_OP_REG) {
         modrm = (uint8_t)(0xc0u | (reg_code3((as_x86_reg_t)reg_field) << 3) | reg_code3(rm_op->u.reg));
         return emit8(ctx, modrm);
@@ -1530,6 +1539,31 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
         set_err(&ctx, "'%s' with a 64-bit operand size is only for 64-bit code",
                 insn->mnemonic != NULL ? insn->mnemonic : "?");
         return -1;
+    }
+
+    /*
+     * Nor has it the registers that need REX: %r8 to %r15 at any width,
+     * and %spl, %bpl, %sil and %dil.  There is no bit to write them
+     * with, and they were written as the registers their low three bits
+     * name -- `movb %sil, %al` as `movb %dh, %al`.
+     */
+    {
+        size_t i;
+
+        for (i = 0; i < insn->op_count; ++i) {
+            const as_x86_operand_t *op = &insn->ops[i];
+            unsigned bits = op->size_bits;
+
+            if (op->kind != AS_X86_OP_REG || is_high8_reg(op->u.reg) ||
+                (bits != 8 && bits != 16 && bits != 32 && bits != 64)) {
+                continue;
+            }
+            if (op->u.reg >= AS_X86_REG_R8 || (bits == 8 && op->u.reg >= AS_X86_REG_ESP)) {
+                set_err(&ctx, "a register of '%s' is only for 64-bit code",
+                        insn->mnemonic != NULL ? insn->mnemonic : "?");
+                return -1;
+            }
+        }
     }
 
     if (emit_prefixes(&ctx, insn) != 0) {
@@ -6874,6 +6908,34 @@ more_mnemonics:
     }
 
 finish:
+    /*
+     * The byte registers.  With no REX, codes 4 to 7 are %ah, %ch, %dh
+     * and %bh; with one they are %spl, %bpl, %sil and %dil.  So the
+     * second four need a REX though it has no bit set -- without it
+     * `movb %sil, %al` is `movb %dh, %al` -- and the first four cannot
+     * be used in an instruction that has one for any other reason.
+     */
+    {
+        int high8 = 0;
+        size_t i;
+
+        for (i = 0; i < insn->op_count; ++i) {
+            const as_x86_operand_t *op = &insn->ops[i];
+
+            if (op->kind != AS_X86_OP_REG || op->size_bits != 8) {
+                continue;
+            }
+            if (is_high8_reg(op->u.reg)) {
+                high8 = 1;
+            } else if (needs_rex_low8(op->u.reg)) {
+                force_rex = 1;
+            }
+        }
+        if (high8 && (rex_w || rex_r || rex_x || rex_b || force_rex)) {
+            set_err(&ctx, "%%ah, %%ch, %%dh and %%bh cannot be used in an instruction that needs REX");
+            return -1;
+        }
+    }
     rex = (uint8_t)(0x40 | (rex_w ? 0x08 : 0) | (rex_r ? 0x04 : 0) | (rex_x ? 0x02 : 0) | (rex_b ? 0x01 : 0));
     if (rex == 0x40 && !force_rex) {
         size_t i;

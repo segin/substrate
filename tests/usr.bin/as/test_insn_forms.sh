@@ -492,5 +492,88 @@ t "32"    refused        'pshufd $256, %xmm1, %xmm2'
 t "32"    refused        'pshufd $-129, %xmm1, %xmm2'
 t "32"    refused        'cmpps $-1, %xmm1, %xmm2'
 
+# %ah, %ch, %dh and %bh with an absolute or an index-only address were
+# encoded as %al, %cl, %dl and %bl in 32-bit code: `movb %ah, 0x1234`
+# stored %al.
+t "32"    882534120000   'movb %ah, 0x1234'
+t "32"    8a2d34120000   'movb 0x1234, %ch'
+t "32"    88348500000000 'movb %dh, (,%eax,4)'
+t "32"    003c5d10000000 'addb %bh, 0x10(,%ebx,2)'
+t "32"    882500000000   'movb %ah, sym'
+t "32"    382c4d00000000 'cmpb %ch, sym(,%ecx,2)'
+t "32"    863d34120000   'xchgb %bh, 0x1234'
+t "32"    843534120000   'testb %dh, 0x1234'
+t "32"    8820           'movb %ah, (%eax)'
+t "32"    88644b04       'movb %ah, 4(%ebx,%ecx,2)'
+t "32"    881c8500000000 'movb %bl, (,%eax,4)'
+t "32"    00ee           'addb %ch, %dh'
+t "64"    88242534120000 'movb %ah, 0x1234'
+t "64"    88348500000000 'movb %dh, (,%rax,4)'
+t "64"    8820           'movb %ah, (%rax)'
+t "64"    0038           'addb %bh, (%rax)'
+t "64"    0fb6c4         'movzbl %ah, %eax'
+
+# %spl, %bpl, %sil and %dil are the codes of %ah to %bh with a REX
+# prefix, which they must have though no bit of it is set.  Most
+# instructions had none: `movb $1, %sil` was `movb $1, %dh`.
+t "64"    408820         'movb %spl, (%rax)'
+t "64"    408a28         'movb (%rax), %bpl'
+t "64"    40287308       'subb %sil, 8(%rbx)'
+t "64"    40b601         'movb $1, %sil'
+t "64"    40f6c701       'testb $1, %dil'
+t "64"    4080fc03       'cmpb $3, %spl'
+t "64"    400fb6c6       'movzbl %sil, %eax'
+t "64"    400fbecf       'movsbl %dil, %ecx'
+t "64"    66400fb6c5     'movzbw %bpl, %ax'
+t "64"    480fbec6       'movsbq %sil, %rax'
+t "64"    400f95c6       'setne %sil'
+t "64"    400f94c7       'sete %dil'
+t "64"    4086f0         'xchg %sil, %al'
+t "64"    408638         'xchgb %dil, (%rax)'
+t "64"    40fec7         'incb %dil'
+t "64"    40fece         'decb %sil'
+t "64"    40f6dc         'negb %spl'
+t "64"    40f6d5         'notb %bpl'
+t "64"    40f6e6         'mulb %sil'
+t "64"    40f6f7         'divb %dil'
+t "64"    40d0e6         'shlb $1, %sil'
+t "64"    40d2ef         'shrb %cl, %dil'
+t "64"    40c0fd03       'sarb $3, %bpl'
+t "64"    4080ce01       'orb $1, %sil'
+t "64"    4080d400       'adcb $0, %spl'
+t "64"    4018eb         'sbbb %bpl, %bl'
+t "64"    4084f6         'testb %sil, %sil'
+t "64"    400fb030       'cmpxchgb %sil, (%rax)'
+t "64"    400fc0f8       'xaddb %dil, %al'
+t "64"    8808           'movb %cl, (%rax)'
+
+# And %ah to %bh cannot be in an instruction that has a REX for any
+# reason: there they would be the other four.  These were assembled.
+t "64"    refused        'movb %ah, %sil'
+t "64"    refused        'movb %sil, %ah'
+t "64"    refused        'movb %ah, %r8b'
+t "64"    refused        'movb %r8b, %ch'
+t "64"    refused        'addb %ch, (%r8)'
+t "64"    refused        'movb %bh, (%rax,%r9)'
+t "64"    refused        'movzbl %ah, %r8d'
+t "64"    refused        'movzbq %ah, %rax'
+t "64"    refused        'cmpb %dh, %r10b'
+t "64"    refused        'testb %bh, %sil'
+
+# 32-bit code has no REX, and so none of the registers that need one.
+# They were written as the registers their low three bits name.
+t "32"    refused        'movb %sil, %al'
+t "32"    refused        'movb %bpl, (%eax)'
+t "32"    refused        'setne %dil'
+t "32"    refused        'movb %r8b, %al'
+t "32"    refused        'movl %r8d, %eax'
+t "32"    refused        'addw %r9w, %ax'
+t "32"    refused        'movq %rax, %rbx'
+t "32"    54             'pushl %esp'
+t "32"    0f6fec         'movq %mm4, %mm5'
+t "32"    660f6eee       'movd %esi, %xmm5'
+t "32"    d9cd           'fxch %st(5)'
+t "32"    0f20e6         'movl %cr4, %esi'
+
 [ "$fail" -eq 0 ] && echo "ok: instruction forms ($cases cases)"
 exit "$fail"

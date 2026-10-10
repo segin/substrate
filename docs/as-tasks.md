@@ -224,12 +224,15 @@ status 0.
 
 ### B.4 Byte registers and immediates
 
-- [ ] **AS-T-058** When `%ah`, `%ch`, `%dh` or `%bh` is the register operand of an instruction whose other operand is an absolute or index-only memory operand, the assembler shall encode that register.
+- [x] **AS-T-058** When `%ah`, `%ch`, `%dh` or `%bh` is the register operand of an instruction whose other operand is an absolute or index-only memory operand, the assembler shall encode that register.
   Trace: AS-X86-022.  Verify: T — `addb %bh,sym`, `movb %ch,(,%eax,4)`, each of the four with each ModRM path: GNU.
-- [ ] **AS-T-059** When `%spl`, `%bpl`, `%sil` or `%dil` is an operand, the assembler shall emit a `REX` prefix.
+  Done: five of the 32-bit ModRM paths took the low three bits of the register's number, which for these four are the codes of `%al` to `%bl`; the code is now taken once for all paths.  `test_insn_forms.sh`.
+- [x] **AS-T-059** When `%spl`, `%bpl`, `%sil` or `%dil` is an operand, the assembler shall emit a `REX` prefix.
   Trace: AS-X86-022, AS-EXT-008.  Verify: T — `movb %sil,%dil`, `movb %al,%sil`, `cmpb %dil,%sil`, `incb %dil`, `testb`, `setcc %sil`: GNU.
-- [ ] **AS-T-060** If `%ah`, `%ch`, `%dh` or `%bh` is used in an instruction that needs a `REX` prefix, then the assembler shall refuse it.
+  Done, in one place for the 64-bit encoder: where it settles the `REX` byte, any byte-register operand of these four forces one.  A few instructions had asked for it themselves; most had not, and `movb $1,%sil` was `movb $1,%dh`.  `test_insn_forms.sh`, 30 cases.  The register-to-register forms have their `REX` and are right, but are the other of the two encodings GNU could write (`40 8A F8` for its `40 88 C7`), as every such move here is.  With it: 32-bit code, which has no `REX`, assembled these four and `%r8`–`%r15` as the registers their low bits name; it refuses them.
+- [x] **AS-T-060** If `%ah`, `%ch`, `%dh` or `%bh` is used in an instruction that needs a `REX` prefix, then the assembler shall refuse it.
   Trace: AS-X86-022.  Verify: T — `movb %ah,%r8b`, `movb %ah,%sil`, `addb %bh,(%r9)`: exit 1.
+  Done in the same place as 059.  `test_insn_forms.sh`, 10 cases.  Seen and left: `movl (%r8),%eax` is assembled in 32-bit code (176), and `movw %ds,%si` has no `66` there.
 - [x] **AS-T-061** When an instruction has an 8-bit operand and an immediate, the assembler shall emit an 8-bit immediate.
   Trace: AS-X86-012.  Verify: T — `--64` `movb $1,%al` is two bytes; `movb $1,(%rax)`; the ALU group with `b`: GNU.
   Done: `test_imm_width.sh`.  With it a variadic call from substrate's `cc` works in 64-bit code (`printf` in `tests/rootfs64/smoke.sh`).
@@ -1056,5 +1059,5 @@ is not to be done, 370 is ticked with "removed" and the rest struck.
 | AS-EXT-009 | 185, 325, 332–337 |
 | AS-EXT-010 | 040, 171, 338, 339 (339 closes all of AS-EXT) |
 
-348 tasks: 69 done, 279 open.  Numbers run to 397, with gaps left between
+348 tasks: 72 done, 276 open.  Numbers run to 397, with gaps left between
 sections for tasks found along the way.
