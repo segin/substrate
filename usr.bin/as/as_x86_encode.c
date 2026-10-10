@@ -757,7 +757,8 @@ static int operand_is_xmm_reg(const as_x86_operand_t *op) {
 }
 
 static int operand_is_mmx_reg(const as_x86_operand_t *op) {
-    return op != NULL && op->kind == AS_X86_OP_REG && op->size_bits == 64 && op->u.reg <= AS_X86_REG_RDI;
+    return op != NULL && op->kind == AS_X86_OP_REG && op->is_mmx && op->size_bits == 64 &&
+           op->u.reg <= AS_X86_REG_RDI;
 }
 
 static int merge_string_op_bits(const as_x86_operand_t *a, const as_x86_operand_t *b) {
@@ -3815,6 +3816,24 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
         }
         if (emit8(&ctx, 0x66) != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x70) != 0 ||
             modrm_sib_disp64(&ctx, a->u.reg, b, &rex_r, &rex_x, &rex_b) != 0 ||
+            emit8(&ctx, (uint8_t)c->u.imm) != 0) {
+            return -1;
+        }
+        goto finish;
+    }
+
+    /*
+     * pextrw into a general register is the SSE2 instruction, 0F C5,
+     * from %xmm or from %mm.  The SSE4.1 one, 0F 3A 15, is for a
+     * destination in memory; it was written for a register too, which
+     * from %xmm is another encoding of the same and from %mm is not
+     * the instruction at all.
+     */
+    if (streq_ci(insn->mnemonic, "pextrw") && insn->op_count == 3 && a->kind == AS_X86_OP_REG &&
+        !a->is_mmx && (a->size_bits == 32 || a->size_bits == 64) && c->kind == AS_X86_OP_IMM &&
+        (operand_is_xmm_reg(b) || operand_is_mmx_reg(b))) {
+        if ((operand_is_xmm_reg(b) && emit8(&ctx, 0x66) != 0) || emit8(&ctx, 0x0f) != 0 ||
+            emit8(&ctx, 0xc5) != 0 || modrm_sib_disp64(&ctx, a->u.reg, b, &rex_r, &rex_x, &rex_b) != 0 ||
             emit8(&ctx, (uint8_t)c->u.imm) != 0) {
             return -1;
         }

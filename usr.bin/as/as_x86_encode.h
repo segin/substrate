@@ -89,6 +89,12 @@ typedef struct {
      * or the relocation is written over the opcode.
      */
     int imm_symbolic;
+    /*
+     * The register is %mm0 to %mm7.  They are 64 bits wide and numbered
+     * 0 to 7, as %rax to %rdi are, and nothing else told the two apart:
+     * `movd %xmm0, %rax` was read as a move into %mm0.
+     */
+    int is_mmx;
     union {
         as_x86_reg_t reg;
         int64_t imm;

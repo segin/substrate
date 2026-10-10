@@ -770,6 +770,52 @@ t "64"    8d18           'lea (%rax),%ebx'
 t "64"    89c3           'mov %eax,%ebx'
 t "64"    6601c3         'add %ax,%bx'
 
+# movd and movq between a general register, %mm, %xmm and memory.  The
+# %mm registers and %rax to %rdi are both 64 bits wide and numbered 0 to
+# 7, and nothing told them apart: `movd %xmm0, %rax` was taken for a
+# move into %mm0 and came out as 48 0f 6e c0, which is `movq %rax,
+# %mm0`.  pextrw into a register was written in its SSE4.1 form, which
+# from %mm is not the instruction.
+t "32 64" 660f6ec0       'movd %eax, %xmm0'
+t "32 64" 660f7ec0       'movd %xmm0, %eax'
+t "32 64" 0f6ec0         'movd %eax, %mm0'
+t "32 64" 0f7ec0         'movd %mm0, %eax'
+t "32"    660f6e08       'movd (%eax), %xmm1'
+t "32"    660f7e08       'movd %xmm1, (%eax)'
+t "32"    0f6e08         'movd (%eax), %mm1'
+t "32"    0f7e08         'movd %mm1, (%eax)'
+t "64"    66480f6ec0     'movd %rax, %xmm0'
+t "64"    66480f7ec0     'movd %xmm0, %rax'
+t "64"    480f6ec0       'movd %rax, %mm0'
+t "64"    480f7ec0       'movd %mm0, %rax'
+t "64"    66450f6ec8     'movd %r8d, %xmm9'
+t "64"    66450f7ec8     'movd %xmm9, %r8d'
+t "64"    66480f6ec0     'movq %rax, %xmm0'
+t "64"    66480f7ec0     'movq %xmm0, %rax'
+t "64"    480f6ec0       'movq %rax, %mm0'
+t "64"    480f7ec0       'movq %mm0, %rax'
+t "64"    664d0f6ed1     'movq %r9, %xmm10'
+t "64"    664d0f7ed1     'movq %xmm10, %r9'
+t "32 64" f30f7ed1       'movq %xmm1, %xmm2'
+t "32 64" 0f6fd1         'movq %mm1, %mm2'
+t "32"    f30f7e08       'movq (%eax), %xmm1'
+t "32"    660fd608       'movq %xmm1, (%eax)'
+t "32"    0f6f08         'movq (%eax), %mm1'
+t "32"    0f7f08         'movq %mm1, (%eax)'
+t "64"    f3440f7e08     'movq (%rax), %xmm9'
+t "64"    66440fd608     'movq %xmm9, (%rax)'
+t "32 64" f20fd6d1       'movdq2q %xmm1, %mm2'
+t "32 64" f30fd6d1       'movq2dq %mm1, %xmm2'
+t "32 64" 660fc5c001     'pextrw $1, %xmm0, %eax'
+t "32 64" 0fc5c001       'pextrw $1, %mm0, %eax'
+t "64"    660fc5c001     'pextrw $1, %xmm0, %rax'
+t "64"    66450fc5d101   'pextrw $1, %xmm9, %r10d'
+t "64"    0fc5cd03       'pextrw $3, %mm5, %ecx'
+t "32"    660f3a150001   'pextrw $1, %xmm0, (%eax)'
+t "64"    660f3a150007   'pextrw $7, %xmm0, (%rax)'
+t "32 64" 660fc4c001     'pinsrw $1, %eax, %xmm0'
+t "32"    660fc40001     'pinsrw $1, (%eax), %xmm0'
+
 # A displacement written as the number 0 is no displacement: `0(%eax)`
 # is `(%eax)`.  It was kept as a byte of zero.  And (%ebp), (%rbp) and
 # (%r13), which cannot be without one, have one byte of zero and had

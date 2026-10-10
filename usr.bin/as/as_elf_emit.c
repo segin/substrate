@@ -8127,7 +8127,10 @@ static int convert_operand_x86(const as_operand_t *op, const char *mnemonic, as_
     case AS_OPERAND_REGISTER:
         dst->kind = AS_X86_OP_REG;
         if (parse_x86_reg(op->u.reg, &dst->u.reg) == 0) {
+            unsigned mm;
+
             dst->size_bits = parse_x86_reg_bits(op->u.reg);
+            dst->is_mmx = parse_mmx_reg(op->u.reg, &mm) == 0;
             return 0;
         }
         {
@@ -8146,6 +8149,7 @@ static int convert_operand_x86(const as_operand_t *op, const char *mnemonic, as_
             if (parse_mmx_reg(op->u.reg, &vr) == 0) {
                 dst->u.reg = (as_x86_reg_t)vr;
                 dst->size_bits = 64;
+                dst->is_mmx = 1;
                 return 0;
             }
         }
