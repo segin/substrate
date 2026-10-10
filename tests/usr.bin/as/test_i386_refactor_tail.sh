@@ -41,7 +41,7 @@ SRC
 objcopy -O binary --only-section=.text "$TMP/i386_tail.o" "$TMP/i386_tail.bin"
 
 actual=$(od -An -tx1 -v "$TMP/i386_tail.bin" | tr -s ' \n' ' ' | sed 's/^ //; s/ $//')
-expected="0f 0d 15 44 33 22 11 0f 1c 05 44 33 22 11 0f 50 c0 66 0f 50 c0 0f d7 c0 66 0f d7 c0 0f e7 05 44 33 22 11 66 0f e7 05 44 33 22 11 0f 2b 05 44 33 22 11 66 0f 2b 05 44 33 22 11 66 0f 2e c8 66 0f 2f c8 66 0f 73 d8 90 66 0f 73 f8 90 f2 0f 70 c8 90 f3 0f 70 c8 90 66 0f 78 c0 90 91 f2 0f 78 c8 90 91 f2 0f d6 c8 f3 0f d6 c8 f3 0f e6 c8 c3"
+expected="0f 0d 15 44 33 22 11 0f 1c 05 44 33 22 11 0f 50 c0 66 0f 50 c0 0f d7 c0 66 0f d7 c0 0f e7 05 44 33 22 11 66 0f e7 05 44 33 22 11 0f 2b 05 44 33 22 11 66 0f 2b 05 44 33 22 11 66 0f 2e c8 66 0f 2f c8 66 0f 73 d8 90 66 0f 73 f8 90 f2 0f 70 c8 90 f3 0f 70 c8 90 66 0f 78 c0 91 90 f2 0f 78 c8 91 90 f2 0f d6 c8 f3 0f d6 c8 f3 0f e6 c8 c3"
 
 test "$actual" = "$expected"
 
