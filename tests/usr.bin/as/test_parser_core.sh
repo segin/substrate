@@ -38,7 +38,7 @@ label: nop
 SRC
 
 cc -Wall -Wextra -Werror -D_GNU_SOURCE -I"$ROOT/usr.bin/as" \
-   "$ROOT/usr.bin/as/as_lexer.c" "$ROOT/usr.bin/as/as_parser.c" \
+   "$ROOT/usr.bin/as/as_expr.c" "$ROOT/usr.bin/as/as_lexer.c" "$ROOT/usr.bin/as/as_parser.c" \
    "$ROOT/tests/usr.bin/as/test_parser_core.c" \
    -o "$TMP/test_parser_core"
 

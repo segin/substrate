@@ -2,7 +2,7 @@
 set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)
-AS="$ROOT/usr.bin/as/as"
+AS=${AS:-"$ROOT/usr.bin/as/as"}
 CORPUS_DIR="$ROOT/tests/usr.bin/as/corpus"
 TMP=${TMPDIR:-/tmp}/as-i8086-corpus-$$
 mkdir -p "$TMP"

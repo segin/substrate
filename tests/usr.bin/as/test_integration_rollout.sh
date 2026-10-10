@@ -2,7 +2,7 @@
 set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)
-AS="$ROOT/usr.bin/as/as"
+AS=${AS:-"$ROOT/usr.bin/as/as"}
 CC="$ROOT/usr.bin/cc/cc"
 LD="$ROOT/usr.bin/ld/ld"
 TMP=${TMPDIR:-/tmp}/as-rollout-$$

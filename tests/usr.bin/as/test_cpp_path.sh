@@ -2,7 +2,7 @@
 set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)
-AS="$ROOT/usr.bin/as/as"
+AS=${AS:-"$ROOT/usr.bin/as/as"}
 TMP=${TMPDIR:-/tmp}/as-cpp-path-$$
 mkdir -p "$TMP/bin"
 trap 'rm -rf "$TMP"' EXIT INT TERM

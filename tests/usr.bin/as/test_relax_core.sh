@@ -30,7 +30,7 @@ mkdir -p "$TMP"
 } > "$TMP/arm.s"
 
 cc -Wall -Wextra -Werror -D_GNU_SOURCE -I"$ROOT/usr.bin/as" \
-   "$ROOT/usr.bin/as/as_lexer.c" "$ROOT/usr.bin/as/as_parser.c" "$ROOT/usr.bin/as/as_relax.c" \
+   "$ROOT/usr.bin/as/as_expr.c" "$ROOT/usr.bin/as/as_lexer.c" "$ROOT/usr.bin/as/as_parser.c" "$ROOT/usr.bin/as/as_relax.c" \
    "$ROOT/tests/usr.bin/as/test_relax_core.c" \
    -o "$TMP/test_relax_core"
 

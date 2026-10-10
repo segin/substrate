@@ -59,8 +59,9 @@ placed where it belongs.
 
 - [x] **AS-T-010** The repository shall hold, under `tests/usr.bin/as/`, the 147 files of the assembler's test suite as they were at `f2e3fe0d4^`.
   Trace: AS-TST-001.  Verify: I — `git diff --stat f2e3fe0d4^ HEAD -- tests/usr.bin/as` shows no file of the old suite missing.
-- [ ] **AS-T-011** When `make -C tests/usr.bin/as` is run on a host with no cross toolchain, every test of the restored suite shall build and run.
+- [x] **AS-T-011** When `make -C tests/usr.bin/as` is run on a host with no cross toolchain, every test of the restored suite shall build and run.
   Trace: AS-TST-001.  Verify: D — the command completes and prints a verdict for each test.  After: 010.
+  Done: `run-suite.sh` builds the assembler for the host once and runs every `test_*.sh` against it (`$AS`); 60 pass, 25 fail and are listed in `xfail.list`, 3 are not run because they build in, and clean, the source tree.
 - [ ] **AS-T-012** `tests/usr.bin/as/STATUS.md` shall record, for each restored test that fails, whether the cause is a defect (and the task here that mends it) or a stale expectation.
   Trace: AS-TST-002.  Verify: I — no failing test is without an entry.  After: 011.
 - [ ] **AS-T-013** If a restored test fails because its expectation is stale, then the expectation shall be corrected against GNU `as`.

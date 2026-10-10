@@ -30,7 +30,7 @@ cat > "$TMP/data.s" <<'SRC'
 SRC
 
 cc -Wall -Wextra -Werror -D_GNU_SOURCE -I"$ROOT/usr.bin/as" \
-   "$ROOT/usr.bin/as/as_lexer.c" "$ROOT/usr.bin/as/as_parser.c" "$ROOT/usr.bin/as/as_data.c" \
+   "$ROOT/usr.bin/as/as_expr.c" "$ROOT/usr.bin/as/as_lexer.c" "$ROOT/usr.bin/as/as_parser.c" "$ROOT/usr.bin/as/as_data.c" \
    "$ROOT/tests/usr.bin/as/test_data_core.c" \
    -o "$TMP/test_data_core"
 

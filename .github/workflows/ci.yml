@@ -119,8 +119,10 @@ jobs:
       - name: Linker tests
         run: make -C tests/usr.bin/ld
 
-      # The in-tree assembler, built for the host by the script: jumps
-      # that measure their distance across other jumps.
+      # The in-tree assembler, built for the host by run-suite.sh: every
+      # test under tests/usr.bin/as.  Those known not to pass are listed
+      # with their reasons in xfail.list; one that fails outside that
+      # list, or passes inside it, fails the step.
       - name: Assembler tests
         run: make -C tests/usr.bin/as
 
