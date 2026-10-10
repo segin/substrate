@@ -577,6 +577,15 @@ static int operand_bits(const as_x86_operand_t *op) {
 }
 
 /*
+ * An operand that is not there.  The encoders name their operands a, b
+ * and c and many a branch reads a->kind, or a register out of a, before
+ * it has counted them: `inc` alone on a line dereferenced a null pointer.
+ * An absent operand is this one, of no kind, which every test of kind
+ * refuses.
+ */
+static const as_x86_operand_t no_operand;
+
+/*
  * Whether a 64-bit instruction with these operands wants REX.W: a 64-bit
  * register among them, or the q suffix (insn->rex_w) where there is none.
  * Several branches of the 64-bit encoder set REX.W for anything that was
@@ -1298,10 +1307,9 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
         return -1;
     }
 
-    a = insn->op_count > 0 ? &insn->ops[0] : NULL;
-    b = insn->op_count > 1 ? &insn->ops[1] : NULL;
-    c = insn->op_count > 2 ? &insn->ops[2] : NULL;
-    c = insn->op_count > 2 ? &insn->ops[2] : NULL;
+    a = insn->op_count > 0 ? &insn->ops[0] : &no_operand;
+    b = insn->op_count > 1 ? &insn->ops[1] : &no_operand;
+    c = insn->op_count > 2 ? &insn->ops[2] : &no_operand;
 
     if (streq_ci(insn->mnemonic, "mov")) {
         if (insn->byte_op) {
@@ -2696,9 +2704,9 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
         return -1;
     }
 
-    a = insn->op_count > 0 ? &insn->ops[0] : NULL;
-    b = insn->op_count > 1 ? &insn->ops[1] : NULL;
-    c = insn->op_count > 2 ? &insn->ops[2] : NULL;
+    a = insn->op_count > 0 ? &insn->ops[0] : &no_operand;
+    b = insn->op_count > 1 ? &insn->ops[1] : &no_operand;
+    c = insn->op_count > 2 ? &insn->ops[2] : &no_operand;
 
     if (insn->op_count == 0 && mnemonic_rep_compatible(insn->mnemonic)) {
         uint8_t opcode;

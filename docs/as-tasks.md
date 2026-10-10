@@ -93,8 +93,9 @@ status 0.
   Done: `test_x86_64_first_chain.sh`.  Of the 18,072 lines of the 64-bit corpus, 2,977 that were refused are assembled; identical to GNU rose from 6,947 to 8,879 and no line that assembled before changed.  The shifts, rotates, `xchg` and `xadd` set `REX.W` for every size but a byte, which the refusal had hidden; that is mended with it.  **Of the newly assembled lines 859 differ from GNU and 185 are ones GNU refuses**: they are the defects of 038, 061–063, 168–171, 186 and 192, now reached in 64-bit mode as they always were in 32-bit.
 - [ ] **AS-T-021** The 51 SSE and 45 SSE2 mnemonics refused in 64-bit mode shall each assemble to GNU's bytes for register and constant-memory operands.
   Trace: AS-EXT-001.  Verify: T — the `sse` and `sse2` families of the extension corpus under `--64` show no "refused".  After: 020.
-- [ ] **AS-T-022** If an instruction that takes an operand is written with none, then the assembler shall report an error.
+- [x] **AS-T-022** If an instruction that takes an operand is written with none, then the assembler shall report an error.
   Trace: AS-X86-040.  Verify: T — `inc`, `dec`, `push`, `pop`, `neg`, `not`, `mul`, `div`, `call`, `jmp` bare: exit 1, a message, nothing from the sanitizer build.
+  Done: an absent operand is an empty operand, not a null pointer, in both encoders.  `test_sanitizer_sweep.sh` gives each of the encoder's 595 mnemonics four operand shapes in both modes under ASan and UBSan.
 - [ ] **AS-T-023** The lexer shall not read a byte beyond the terminator of the line it is given.
   Trace: AS-FE-020.  Verify: T — a file whose only line is `{vex}`, and the same for `{evex}`, `{disp8}`, `{disp32}`, under the sanitizer build.
 - [ ] **AS-T-024** When `.pushsection` is given a number as its second argument, the assembler shall select that subsection and shall leave the section's flags as they were.
