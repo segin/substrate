@@ -104,6 +104,7 @@ status 0.
   Found while doing 023.
 - [ ] **AS-T-024** When `.pushsection` is given a number as its second argument, the assembler shall select that subsection and shall leave the section's flags as they were.
   Trace: AS-SEC-001.  Verify: T — `.text` / `nop` / `.pushsection .text, 1` / `ret` / `.popsection` / `nop`: `.text` is `AX` and holds `90 90 c3`.
+  In part: the number is no longer read as flags, so the section keeps them and its code (`test_subsection.sh`).  Subsection 0 is entered; **any other is refused**, by `.pushsection`, `.subsection`, `.text n` and `.data n` alike, with "subsections other than 0 are not supported".  Before this they were silently ignored and the contents assembled in source order, which puts out-of-line code in line; 240 is what gathers them, and ticks this.
 - [ ] **AS-T-025** When a directive is written with an empty argument, the assembler shall keep the argument's position.
   Trace: AS-FE-002.  Verify: T — `.byte 1,,2` is refused as GNU refuses it; `.p2align 4,,10` reaches the directive with three arguments.
 - [ ] **AS-T-026** When an alignment directive names a maximum skip and the padding needed exceeds it, the assembler shall emit no padding.

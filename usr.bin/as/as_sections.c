@@ -405,6 +405,16 @@ static int stack_push(as_section_state_t *s, size_t idx) {
     return 0;
 }
 
+/*
+ * What a directive handler returns for a subsection other than 0.  The
+ * contents of subsection n of a section belong after those of every lower
+ * one, wherever in the source they were written, and nothing here gathers
+ * them: `.text 1` was ignored and `.subsection 1` made a second, empty
+ * .text, so code meant to be out of line was assembled in line, in the
+ * path of what came before it.  Until they are gathered, it is refused.
+ */
+#define SEC_NO_SUBSECTIONS (-2)
+
 static int process_section_like(sec_ctx_t *ctx, const as_stmt_t *st, int do_push) {
     const as_directive_t *d = &st->u.directive;
     as_section_state_t *s = ctx->out;
@@ -413,6 +423,7 @@ static int process_section_like(sec_ctx_t *ctx, const as_stmt_t *st, int do_push
     unsigned flags;
     unsigned type;
     ssize_t existing = -1;
+    long long subsection_number;
 
     if (d->arg_count < 1) {
         return -1;
@@ -428,6 +439,33 @@ static int process_section_like(sec_ctx_t *ctx, const as_stmt_t *st, int do_push
     }
 
     existing = find_section_index(s, name, 0);
+    /*
+     * `.pushsection name, 1`: a number after the name is a subsection, not
+     * a string of flags.  Read as flags it was no flags at all, and was
+     * then written over those of the section: .text lost its "ax" and
+     * every instruction in it with them.  Subsection 0 is the section,
+     * entered with what it had; another is refused (SEC_NO_SUBSECTIONS).
+     */
+    if (do_push && d->arg_count == 2 && d->args[1] != NULL &&
+        strchr(d->args[1], '"') == NULL &&
+        as_expr_eval_string(d->args[1], NULL, NULL, &subsection_number) == AS_EXPR_EVAL_OK) {
+        if (subsection_number != 0) {
+            free(name);
+            return SEC_NO_SUBSECTIONS;
+        }
+        if (existing >= 0) {
+            flags = s->items[existing].flags;
+            type = s->items[existing].type;
+        } else {
+            infer_section_defaults(name, &flags, &type);
+        }
+        if (switch_section(ctx, name, 0, flags, type, existing < 0) != 0) {
+            free(name);
+            return -1;
+        }
+        free(name);
+        return 0;
+    }
     if (d->arg_count >= 2) {
         flags = parse_flags_string(d->args[1]);
     } else if (existing >= 0) {
@@ -494,6 +532,17 @@ static int process_directive(sec_ctx_t *ctx, const as_stmt_t *st) {
 
     if (strcmp(d->name, ".text") == 0 || strcmp(d->name, ".data") == 0 || strcmp(d->name, ".bss") == 0 ||
         strcmp(d->name, ".rodata") == 0) {
+        unsigned sub = 0;
+
+        /* `.text 1`: a subsection. */
+        if (d->arg_count >= 1 && d->args[0] != NULL && d->args[0][0] != '\0') {
+            if (parse_u32_arg(d->args[0], &sub) != 0) {
+                return -1;
+            }
+            if (sub != 0) {
+                return SEC_NO_SUBSECTIONS;
+            }
+        }
         if (switch_section(ctx, d->name, 0, 0, 0, 0) != 0) {
             return -1;
         }
@@ -531,6 +580,9 @@ static int process_directive(sec_ctx_t *ctx, const as_stmt_t *st) {
         as_section_t *cur;
         if (d->arg_count < 1 || parse_u32_arg(d->args[0], &sub) != 0) {
             return -1;
+        }
+        if (sub != 0) {
+            return SEC_NO_SUBSECTIONS;
         }
         cur = &s->items[s->current_index];
         if (switch_section(ctx, cur->name, sub, cur->flags, cur->type, 1) != 0) {
@@ -614,7 +666,14 @@ int as_sections_build(const as_parse_result_t *parsed, as_section_state_t *out,
         if (st->kind != AS_STMT_DIRECTIVE) {
             continue;
         }
-        if (process_directive(&ctx, st) != 0) {
+        switch (process_directive(&ctx, st)) {
+        case 0:
+            break;
+        case SEC_NO_SUBSECTIONS:
+            set_err(&ctx, "%s:%u: %s: subsections other than 0 are not supported",
+                    st->file, st->line, st->u.directive.name);
+            return -1;
+        default:
             set_err(&ctx, "%s:%u: malformed section directive %s", st->file, st->line, st->u.directive.name);
             return -1;
         }

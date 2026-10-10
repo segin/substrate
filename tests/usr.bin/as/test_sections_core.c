@@ -70,9 +70,13 @@ int main(int argc, char **argv) {
         fail("missing built-in .text");
     }
 
+    /* The source says `.subsection 0`.  It said 1, and the section table
+     * recorded a second .text for it that the object writer made into an
+     * empty section of that name; a subsection other than 0 is refused
+     * now (test_subsection.sh) until its contents are gathered. */
     s = as_sections_find(&secs, ".text", 1);
-    if (s == NULL || s->subsection != 1) {
-        fail("subsection .text,1 missing");
+    if (s != NULL) {
+        fail("a .text subsection 1 that the source does not have");
     }
 
     s = as_sections_find(&secs, ".foo", 0);

@@ -8,7 +8,7 @@ mkdir -p "$TMP"
 
 cat > "$TMP/sections.s" <<'SRC'
 .text
-.subsection 1
+.subsection 0
 push_label:
 .pushsection .foo, "ax", @progbits
 .balign 32
