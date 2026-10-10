@@ -15339,6 +15339,24 @@ static int x86_imm_field_width(const unsigned char *code, size_t len, int is_64,
  * `cmpl $0, var` had the relocation on the immediate, which was lost,
  * and nothing on the address.
  */
+/*
+ * Whether the bytes are a far jump or call with its target written out
+ * -- EA or 9A, an offset of two bytes or of four, and a segment of two
+ * -- and where the offset begins.
+ */
+static int x86_far_pointer_offset(const unsigned char *code, size_t len, size_t *off_out) {
+    size_t p = 0;
+
+    while (p < len && (code[p] == 0x66 || code[p] == 0x67)) {
+        ++p;
+    }
+    if (p >= len || (code[p] != 0xea && code[p] != 0x9a) || (len - p != 5 && len - p != 7)) {
+        return 0;
+    }
+    *off_out = p + 1;
+    return 1;
+}
+
 static int x86_disp32_offset(const unsigned char *code, size_t len, int is_64, size_t *off_out) {
     size_t i = 0;
     unsigned char modrm;
@@ -15966,6 +15984,17 @@ static int emit_relocations(emit_ctx_t *ctx) {
                     if (machine == EM_X86_64 && t == R_X86_64_64) {
                         t = R_X86_64_32S;
                     }
+                } else if (machine == EM_386 && st->u.instr.operand_count == 2 && op->kind != AS_OPERAND_MEMORY &&
+                           op == &st->u.instr.operands[1] && x86_far_pointer_offset(code, code_len, &disp_field_off)) {
+                    /*
+                     * A far jump or call to `$segment, $symbol`: the
+                     * offset, of two bytes or four, is followed by the
+                     * two of the segment.  The relocation was put on the
+                     * last four bytes, over the segment, which was lost.
+                     */
+                    reloc_width = code_len - 2 - disp_field_off;
+                    t = reloc_width == 2 ? R_386_16 : R_386_32;
+                    have_disp_field = 1;
                 }
                 if (code_len < reloc_width) {
                     /* cc-emitted dead-code from skipped __always_inline

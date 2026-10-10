@@ -252,6 +252,9 @@ status 0.
 - [x] **AS-T-398** When both operands of `mov`, `add`, `or`, `adc`, `sbb`, `and`, `sub`, `xor` or `cmp` are registers, the assembler shall write the encoding whose destination is ModRM.rm, as GNU `as` does.
   Trace: found by sorting what still differs from GNU; AS-OBJ (byte identity).  Verify: T — `movl %eax,%ebx` (`89 C3`), `movb %al,%cl` (`88 C1`), `addq %rax,%rax` (`48 01 C0`), each at each width: GNU.
   Done: the other of the two encodings was written, for every move and, in 64-bit code, for the eight arithmetic instructions.  The same instruction either way, so nothing ran wrong; but 1,102 lines of the corpora were not GNU's bytes for this alone and are now.  `test_insn_forms.sh`, 29 cases.
+- [x] **AS-T-399** When a far jump or call is written as `$segment, $symbol`, the assembler shall put the relocation on the offset and keep the segment.
+  Trace: found by sorting what still differs from GNU; AS-OBJ (relocation placement).  Verify: T — `ljmp $0x10,$sym` (`EA`, four bytes relocated at 1, `10 00`), `lcall`, `ljmpw` (`R_386_16` at 2): GNU.
+  Done: the relocation went on the last four bytes of the instruction, which are half the offset and the segment; the segment was written as zero.  `test_far_pointer.sh`.  Left: `ljmp $sym2,$sym`, with the segment a symbol too, is refused -- one relocation to an instruction is all there is yet (E).
 - [x] **AS-T-065** When `%r12` is written as an index register, the assembler shall encode it.
   Trace: AS-X86-024.  Verify: T — `movl %eax,(%rax,%r12)`, `(%rbx,%r12,8)`, `(,%r12,4)`; `%rsp` as index still refused.
   Done: the test for `%rsp` was of the low three bits.  339 more lines of the 64-bit corpus are GNU's bytes.  With it: the extension encoders had no such test at all and wrote `(%rax,%rsp)` as `(%rax)`; the stack pointer is now refused as an index where the operand is converted, for every encoder.  `test_insn_forms.sh`, 23 cases.
@@ -1067,5 +1070,5 @@ is not to be done, 370 is ticked with "removed" and the rest struck.
 | AS-EXT-009 | 185, 325, 332–337 |
 | AS-EXT-010 | 040, 171, 338, 339 (339 closes all of AS-EXT) |
 
-349 tasks: 77 done, 272 open.  Numbers run to 398, with gaps left between
+350 tasks: 78 done, 272 open.  Numbers run to 399, with gaps left between
 sections for tasks found along the way.
