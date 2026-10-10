@@ -509,14 +509,19 @@ one table of templates; there is one ModRM/SIB/prefix emitter.
   Trace: AS-DES-001.  Verify: I; T — a unit test over forms with a displacement, an immediate, and both.  After: 162.
 - [ ] **AS-T-191** The assembler shall make each instruction relocation from a fixup record and from nothing else.
   Trace: AS-DES-001.  Verify: I — the code that derives a relocation's place from the instruction's length and mnemonic is gone.  After: 190.
-- [ ] **AS-T-192** When an instruction has a symbolic displacement followed by an immediate, the assembler shall place the relocation on the displacement and keep the immediate.
+- [ ] **AS-T-389** When an instruction has a symbolic address and a symbolic immediate, the assembler shall emit a relocation for each.
+  Trace: AS-OBJ-001.  Verify: T — `movl $sym2, sym(%rip)`: `R_X86_64_PC32 sym-8` at 2 and `R_X86_64_32 sym2` at 6, as GNU.  After: 191.
+  (Added with 192: today it is refused, "multiple symbolic relocations in one x86 instruction are not yet supported".)
+- [x] **AS-T-192** When an instruction has a symbolic displacement followed by an immediate, the assembler shall place the relocation on the displacement and keep the immediate.
+  Met ahead of 191, in place: the displacement is found by reading the encoded instruction's own ModRM and SIB (`x86_disp32_offset`), not assumed to be last.  `test_reloc_field.sh`; and `compiler/prog.c` now has such instructions, which it had none of — with them the assembler before this ran 2 of the 18 builds.
   Trace: AS-OBJ-001, AS-EXT-004 (note 8).  Verify: T — `movl $5,sym`, `cmpl $0,sym`, `movb $1,sym`, `shll $2,sym`, `testl $1,sym+4`, `pinsrb $3,foo(%rip),%xmm2`: GNU.  After: 191.
-- [ ] **AS-T-193** When a PC-relative field is followed by n more bytes of its instruction, the assembler shall give the relocation an addend of −(field width + n).
+- [x] **AS-T-193** When a PC-relative field is followed by n more bytes of its instruction, the assembler shall give the relocation an addend of −(field width + n).
   Trace: AS-OBJ-001.  Verify: T — `movl $5,sym(%rip)` (−8), `cmpb $1,sym(%rip)` (−5), `cmpw $0x1234,sym(%rip)` (−6): GNU.  After: 191.
 - [ ] **AS-T-194** When a memory operand has a symbolic displacement, the assembler shall encode a 32-bit displacement field (16-bit in 16-bit addressing).
   Trace: AS-SEL-002, AS-OBJ-002, AS-EXT-004 (note 6).  Verify: T — `movaps sym(%ebx),%xmm0`, `movdqa sym(%ebp),%xmm1`, `flds sym(%ebx)`, `fnstcw sym(%ebx)`, `haddps foo(%rdx),%xmm2`, `vmulsd foo+4(%rdx),%xmm2,%xmm3`, `andn foo+4(%rdx),%ebx,%ecx`: GNU.  After: 190.
   In part, ahead of 190: the ModRM emitter of the 32-bit instruction-selection code keeps 32 bits for a displacement with a symbol in it, which covers the SIMD, x87, `cmpxchg` and prefetch forms in 32-bit mode (`test_symbolic_disp.sh`).  Still open: the nine copies in the extension files (`haddps`, `vmulsd`, `andn` above) and the 64-bit selection code.
-- [ ] **AS-T-195** When an immediate is symbolic, the assembler shall encode an immediate field of the operand's full width.
+- [x] **AS-T-195** When an immediate is symbolic, the assembler shall encode an immediate field of the operand's full width.
+  Met ahead of 190, in place: the operand carries `imm_symbolic` and no encoder takes the one-byte form for it; the relocation's width is read from the encoded opcode (`x86_imm_field_width`).  `test_reloc_field.sh`.  Not GNU's bytes, though right: the accumulator's short forms (`05`, `a9`) are not used, and `mov $sym, %rbx` is the 32-bit move with `R_X86_64_32`.
   Trace: AS-OBJ-002.  Verify: T — `movq $sym,8(%rsp)` (`imm32`, `R_X86_64_32S`), `cmpq $gtab+64,%rax`, `addl $sym,%eax` (not the `imm8` form), `pushl $sym`: GNU.  After: 190.
 - [ ] **AS-T-196** If a relocation would not fit within the field its fixup names, then the assembler shall fail.
   Trace: AS-OBJ-002.  Verify: I — no code clamps a relocation's width to the instruction's length; T — no input of the suite writes a relocation over an opcode byte.  After: 191.
@@ -548,7 +553,7 @@ one table of templates; there is one ModRM/SIB/prefix emitter.
   Trace: AS-OBJ-015.  Verify: T — global, local and undefined targets: GNU.  After: 191.
 - [ ] **AS-T-207** When an x86-64 `call`, `jmp` or `jcc` names a global or undefined symbol, the assembler shall emit `R_X86_64_PLT32`.
   Trace: AS-OBJ-015.  Verify: T: GNU.  After: 191.
-- [ ] **AS-T-208** When a 32-bit immediate of a 32-bit operation holds a symbol in 64-bit mode, the assembler shall emit `R_X86_64_32`, and `R_X86_64_32S` where the processor sign-extends the field.
+- [x] **AS-T-208** When a 32-bit immediate of a 32-bit operation holds a symbol in 64-bit mode, the assembler shall emit `R_X86_64_32`, and `R_X86_64_32S` where the processor sign-extends the field.
   Trace: AS-OBJ-015.  Verify: T — `movl $sym,%eax` (32), `movq $sym,%rax` (32S), `addq $sym,%rax` (32S): GNU.  After: 191.
 - [ ] **AS-T-209** When a conditional branch names an undefined symbol, the assembler shall encode the near form with a 32-bit relocation.
   Trace: AS-OBJ-015.  Verify: T — `je .Lundefined`, `je extern_sym`: GNU.  After: 191.

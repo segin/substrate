@@ -63,6 +63,48 @@ static void sieve(int n) {
     free(composite);
 }
 
+/*
+ * Variables addressed by name, with constants stored to them and compared
+ * with them: `movl $5, counter(%rip)`, `cmpl $0, flag`, `addl $3,
+ * counter`, `movw $0x1234, narrow` -- instructions where an immediate
+ * follows the address.  (This program ran in every build while each of
+ * those was assembled wrong, because it had none.)  They are global and
+ * the functions are not inlined, so that the stores and the comparisons
+ * are each an instruction on memory.
+ */
+int counter;
+int flag;
+short narrow;
+char tiny;
+long long wide;
+
+__attribute__((noinline)) void globals_set(void) {
+    counter = 5;
+    flag = 0;
+    narrow = 0x1234;
+    tiny = 1;
+    wide = 1000;
+}
+
+__attribute__((noinline)) void globals_step(void) {
+    counter += 3;
+    if (flag == 0) {
+        flag = 7;
+    } else {
+        flag -= 1;
+    }
+    if (narrow != 0x1234) {
+        counter += 100000;
+    }
+    if (tiny == 1) {
+        wide += 100000;
+    }
+    tiny ^= 1;
+    if (counter > 20) {
+        narrow = 0x1235;
+    }
+}
+
 int main(int argc, char **argv) {
     struct item v[16];
     unsigned x = 12345;
@@ -74,6 +116,11 @@ int main(int argc, char **argv) {
         v[i].key = (int)(x >> 16) % 1000;
         snprintf(v[i].name, sizeof v[i].name, "n%d", i);
     }
+    globals_set();
+    for (i = 0; i < 9; i++) {
+        globals_step();
+    }
+    printf("globals %d %d %d %d %lld\n", counter, flag, (int)narrow, (int)tiny, wide);
     qsort(v, 16, sizeof v[0], cmp);
     for (i = 0; i < 16; i++) {
         printf("%d:%s ", v[i].key, v[i].name);

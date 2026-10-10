@@ -763,6 +763,11 @@ static int is_disp8(int32_t v) {
     return v >= -128 && v <= 127;
 }
 
+/* May this immediate have the sign-extended one-byte form? */
+static int imm_is_s8(const as_x86_operand_t *op) {
+    return !op->imm_symbolic && op->u.imm >= -128 && op->u.imm <= 127;
+}
+
 static unsigned effective_i386_operand_bits(const as_x86_insn_t *insn) {
     unsigned defbits;
 
@@ -1533,7 +1538,7 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
         }
     } else if (streq_ci(insn->mnemonic, "imul") || streq_ci(insn->mnemonic, "imulb") || streq_ci(insn->mnemonic, "imull") || streq_ci(insn->mnemonic, "imulq")) {
         if (insn->op_count == 3 && a->kind == AS_X86_OP_REG && is_reg_or_mem(b) && c->kind == AS_X86_OP_IMM) {
-            if ((int8_t)c->u.imm == c->u.imm) {
+            if (!c->imm_symbolic && (int8_t)c->u.imm == c->u.imm) {
                 if (emit8(&ctx, 0x6b) != 0 || modrm_sib_disp(&ctx, (uint8_t)(a->u.reg & 7), b) != 0 ||
                     emit8(&ctx, (uint8_t)c->u.imm) != 0) {
                     return -1;
@@ -2923,7 +2928,7 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
                 emit8(&ctx, (uint8_t)b->u.imm) != 0) {
                 return -1;
             }
-        } else if (b->u.imm >= -128 && b->u.imm <= 127) {
+        } else if (imm_is_s8(b)) {
             if (emit8(&ctx, 0x83) != 0 || modrm_sib_disp64(&ctx, (as_x86_reg_t)ext, a, &rex_r, &rex_x, &rex_b) != 0 ||
                 emit8(&ctx, (uint8_t)(int8_t)b->u.imm) != 0) {
                 return -1;
@@ -3181,7 +3186,7 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
             goto finish;
         }
         if (a->kind == AS_X86_OP_IMM) {
-            if (a->u.imm >= -128 && a->u.imm <= 127) {
+            if (imm_is_s8(a)) {
                 if (emit8(&ctx, 0x6a) != 0 || emit8(&ctx, (uint8_t)a->u.imm) != 0) {
                     return -1;
                 }
@@ -3445,6 +3450,11 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
     if (streq_ci(insn->mnemonic, "lea") && insn->op_count == 2 && a->kind == AS_X86_OP_REG && b->kind == AS_X86_OP_MEM) {
         unsigned width = insn->rex_w ? 64u : (insn->operand_size_override ? 16u : 32u);
 
+        /* With no suffix the register says the size: `lea x, %rdi` was
+         * the 32-bit lea into %edi, and the address lost its top half. */
+        if (!insn->rex_w && !insn->operand_size_override && operand_bits(a) == 64) {
+            width = 64u;
+        }
         if (width == 16u && emit8(&ctx, 0x66) != 0) {
             return -1;
         }
@@ -4008,7 +4018,7 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
     } else if (streq_ci(insn->mnemonic, "imul") || streq_ci(insn->mnemonic, "imulb") || streq_ci(insn->mnemonic, "imull") || streq_ci(insn->mnemonic, "imulq")) {
         if (insn->op_count == 3 && a->kind == AS_X86_OP_REG &&
             (b->kind == AS_X86_OP_REG || b->kind == AS_X86_OP_MEM) && c->kind == AS_X86_OP_IMM) {
-            if ((int8_t)c->u.imm == c->u.imm) {
+            if (!c->imm_symbolic && (int8_t)c->u.imm == c->u.imm) {
                 if (emit8(&ctx, 0x6b) != 0 || modrm_sib_disp64(&ctx, a->u.reg, b, &rex_r, &rex_x, &rex_b) != 0 ||
                     emit8(&ctx, (uint8_t)c->u.imm) != 0) {
                     return -1;
@@ -4196,7 +4206,7 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
                     emit8(&ctx, (uint8_t)b->u.imm) != 0) {
                     return -1;
                 }
-            } else if (b->u.imm >= -128 && b->u.imm <= 127) {
+            } else if (imm_is_s8(b)) {
                 if (emit8(&ctx, 0x83) != 0 ||
                     modrm_sib_disp64(&ctx, (as_x86_reg_t)ext, a, &rex_r, &rex_x, &rex_b) != 0 ||
                     emit8(&ctx, (uint8_t)(int8_t)b->u.imm) != 0) {
@@ -5710,7 +5720,7 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
                 return -1;
             }
         } else if (insn->op_count == 1 && a->kind == AS_X86_OP_IMM) {
-            if (a->u.imm >= -128 && a->u.imm <= 127) {
+            if (imm_is_s8(a)) {
                 if (emit8(&ctx, 0x6a) != 0 || emit8(&ctx, (uint8_t)(int8_t)a->u.imm) != 0) {
                     return -1;
                 }

@@ -76,6 +76,13 @@ typedef struct {
 typedef struct {
     as_x86_operand_kind_t kind;
     unsigned size_bits;
+    /*
+     * The immediate is a symbol's value, not known here: imm is 0 and a
+     * relocation fills the field.  The field must then be the full
+     * width of the operation and never the one-byte form that 0 fits,
+     * or the relocation is written over the opcode.
+     */
+    int imm_symbolic;
     union {
         as_x86_reg_t reg;
         int64_t imm;

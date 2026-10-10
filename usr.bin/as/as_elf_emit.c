@@ -7754,7 +7754,8 @@ static int convert_operand_x86(const as_operand_t *op, const char *mnemonic, as_
             return 0;
         }
         if (expr_has_symbol(op->u.expr)) {
-            dst->u.imm = streq_ci(mnemonic, "push") ? 0x100 : 0;
+            dst->u.imm = 0;
+            dst->imm_symbolic = 1;
             return 0;
         }
         snprintf(errbuf, errbuf_sz, "non-constant immediate in %s", mnemonic != NULL ? mnemonic : "<insn>");
@@ -14551,6 +14552,148 @@ static uint32_t default_text_reloc_type(unsigned machine, const as_instruction_t
     return reloc_type_for_machine(machine);
 }
 
+/*
+ * How wide the immediate at the end of this encoded instruction is, and
+ * whether the operation is a 64-bit one (REX.W) that sign-extends it.
+ * -1 for an instruction this does not know the immediate of.
+ *
+ * A symbolic immediate's relocation goes on that field and is that wide.
+ * The width was guessed from the operand as written -- four bytes, or
+ * eight when anything about the instruction was 64 bits and the code was
+ * long enough to hold eight -- so `addq $sym, 8(%rsp)` had eight bytes of
+ * relocation written over all of it but the REX, and `addw $sym, %ax`
+ * four over its opcode.
+ */
+static int x86_imm_field_width(const unsigned char *code, size_t len, int is_64,
+                               unsigned *width_out, int *rex_w_out, unsigned char *opcode_out) {
+    size_t i = 0;
+    int has_66 = 0;
+    int rex_w = 0;
+    unsigned char op;
+    unsigned width;
+
+    while (i < len && (code[i] == 0x66 || code[i] == 0x67 || code[i] == 0xf0 || code[i] == 0xf2 ||
+                       code[i] == 0xf3 || code[i] == 0x2e || code[i] == 0x36 || code[i] == 0x3e ||
+                       code[i] == 0x26 || code[i] == 0x64 || code[i] == 0x65)) {
+        if (code[i] == 0x66) {
+            has_66 = 1;
+        }
+        i++;
+    }
+    if (is_64 && i < len && (code[i] & 0xf0u) == 0x40u) {
+        rex_w = (code[i] & 0x08u) != 0;
+        i++;
+    }
+    if (i >= len) {
+        return -1;
+    }
+    op = code[i];
+    if (op == 0x80 || op == 0xc6 || op == 0xf6 || op == 0xa8 || (op >= 0xb0 && op <= 0xb7) ||
+        (op & 0xc7u) == 0x04u) {
+        width = 1;
+    } else if (op >= 0xb8 && op <= 0xbf) {
+        width = rex_w ? 8u : (has_66 ? 2u : 4u);
+    } else if (op == 0x81 || op == 0xc7 || op == 0xf7 || op == 0xa9 || op == 0x68 || op == 0x69 ||
+               (op & 0xc7u) == 0x05u) {
+        width = has_66 ? 2u : 4u;
+    } else {
+        return -1;
+    }
+    if (len - i <= width) {
+        return -1;
+    }
+    *width_out = width;
+    *rex_w_out = rex_w;
+    *opcode_out = op;
+    return 0;
+}
+
+/*
+ * Where the four-byte displacement of this encoded instruction is: read
+ * from its own prefixes, opcode, ModRM and SIB.  -1 if it has none.
+ *
+ * The relocation of a symbolic address goes there.  It was put on the
+ * last four bytes of the instruction, which is where the displacement
+ * is unless an immediate follows it: `movl $5, var(%rip)` and
+ * `cmpl $0, var` had the relocation on the immediate, which was lost,
+ * and nothing on the address.
+ */
+static int x86_disp32_offset(const unsigned char *code, size_t len, int is_64, size_t *off_out) {
+    size_t i = 0;
+    unsigned char modrm;
+    unsigned mod;
+    unsigned rm;
+
+    while (i < len && (code[i] == 0x66 || code[i] == 0x67 || code[i] == 0xf0 || code[i] == 0xf2 ||
+                       code[i] == 0xf3 || code[i] == 0x2e || code[i] == 0x36 || code[i] == 0x3e ||
+                       code[i] == 0x26 || code[i] == 0x64 || code[i] == 0x65)) {
+        if (code[i] == 0x67) {
+            return -1;      /* addresses of another size */
+        }
+        i++;
+    }
+    if (i + 1 >= len) {
+        return -1;
+    }
+    /* VEX and EVEX: in 32-bit code the same bytes are les, lds and bound
+     * unless the next has its two top bits set. */
+    if (code[i] == 0xc5 && (is_64 || (code[i + 1] & 0xc0u) == 0xc0u)) {
+        i += 3;
+    } else if (code[i] == 0xc4 && (is_64 || (code[i + 1] & 0xc0u) == 0xc0u)) {
+        i += 4;
+    } else if (code[i] == 0x62 && (is_64 || (code[i + 1] & 0xc0u) == 0xc0u)) {
+        i += 5;
+    } else {
+        if (is_64 && (code[i] & 0xf0u) == 0x40u) {
+            i++;
+        }
+        if (i < len && code[i] == 0x0f) {
+            i++;
+            if (i < len && (code[i] == 0x38 || code[i] == 0x3a)) {
+                i++;
+            }
+        } else if (i < len && code[i] >= 0xa0 && code[i] <= 0xa3) {
+            /* mov between the accumulator and an address with no ModRM. */
+            if (is_64 || i + 5 > len) {
+                return -1;
+            }
+            *off_out = i + 1;
+            return 0;
+        }
+        i++;
+    }
+    if (i >= len) {
+        return -1;
+    }
+    modrm = code[i++];
+    mod = modrm >> 6;
+    rm = modrm & 7u;
+    if (mod == 3u) {
+        return -1;
+    }
+    if (rm == 4u) {
+        unsigned char sib;
+
+        if (i >= len) {
+            return -1;
+        }
+        sib = code[i++];
+        if (mod == 0u && (sib & 7u) != 5u) {
+            return -1;
+        }
+        if (mod == 1u) {
+            return -1;
+        }
+    } else if (!((mod == 0u && rm == 5u) || mod == 2u)) {
+        return -1;
+    }
+    if (i + 4 > len) {
+        return -1;
+    }
+    *off_out = i;
+    return 0;
+}
+
 static void adjust_x86_rel_reloc_to_encoding(unsigned machine, const as_instruction_t *in,
                                              const as_operand_t *op, const unsigned char *code,
                                              size_t code_len, uint32_t *type, uint64_t *width) {
@@ -14985,6 +15128,8 @@ static int emit_relocations(emit_ctx_t *ctx) {
                 uint64_t reloc_off;
                 uint64_t reloc_width = 4;
                 int64_t addend = 0;
+                int have_disp_field = 0;
+                size_t disp_field_off = 0;
 
                 if (asm_reg_alias_for_operand(ctx, op) != NULL) {
                     continue;
@@ -15055,6 +15200,52 @@ static int emit_relocations(emit_ctx_t *ctx) {
                     }
                 }
                 adjust_x86_rel_reloc_to_encoding(machine, &st->u.instr, op, code, code_len, &t, &reloc_width);
+                /*
+                 * An immediate that is a symbol: the relocation is the
+                 * field's width and kind.  In 64-bit code a four-byte
+                 * field is sign-extended by a 64-bit operation and by a
+                 * push (R_X86_64_32S) and not by a 32-bit one
+                 * (R_X86_64_32).
+                 */
+                if (op->kind == AS_OPERAND_IMMEDIATE && op->raw != NULL && op->raw[0] == '$' &&
+                    strchr(sym, '@') == NULL &&
+                    (t == R_386_32 || t == R_X86_64_64 || t == R_X86_64_32S || t == R_X86_64_32)) {
+                    unsigned imm_width;
+                    int imm_rex_w;
+                    unsigned char imm_opcode;
+
+                    if (x86_imm_field_width(code, code_len, machine == EM_X86_64, &imm_width, &imm_rex_w,
+                                            &imm_opcode) == 0) {
+                        reloc_width = imm_width;
+                        if (machine == EM_386) {
+                            t = imm_width == 1 ? R_386_8 : (imm_width == 2 ? R_386_16 : R_386_32);
+                        } else if (imm_width == 1) {
+                            t = R_X86_64_8;
+                        } else if (imm_width == 2) {
+                            t = R_X86_64_16;
+                        } else if (imm_width == 8) {
+                            t = R_X86_64_64;
+                        } else {
+                            t = (imm_rex_w || imm_opcode == 0x68) ? R_X86_64_32S : R_X86_64_32;
+                        }
+                    }
+                }
+                /*
+                 * An address that is a symbol: the relocation goes on the
+                 * displacement, wherever in the instruction that is, and
+                 * in 64-bit code a displacement is four bytes sign-
+                 * extended whatever the operation's size.
+                 */
+                if ((op->kind == AS_OPERAND_MEMORY ||
+                     (operand_is_bare_address(op) && !is_rel_mnemonic(st->u.instr.mnemonic))) &&
+                    reloc_width != 1 && reloc_width != 2 &&
+                    x86_disp32_offset(code, code_len, machine == EM_X86_64, &disp_field_off) == 0) {
+                    have_disp_field = 1;
+                    reloc_width = 4;
+                    if (machine == EM_X86_64 && t == R_X86_64_64) {
+                        t = R_X86_64_32S;
+                    }
+                }
                 if (code_len < reloc_width) {
                     /* cc-emitted dead-code from skipped __always_inline
                      * helpers can produce a byte-immediate instruction
@@ -15077,6 +15268,11 @@ static int emit_relocations(emit_ctx_t *ctx) {
                            op->u.mem.base_reg != NULL &&
                            streq_ci(op->u.mem.base_reg, "rip")) {
                     addend += -4;
+                    /* Less what follows the field as well: the address
+                     * is counted from the end of the instruction. */
+                    if (have_disp_field) {
+                        addend -= (int64_t)(code_len - (disp_field_off + 4));
+                    }
                 }
                 /*
                  * `addl $_GLOBAL_OFFSET_TABLE_, %ebx` is R_386_GOTPC: the
@@ -15097,7 +15293,8 @@ static int emit_relocations(emit_ctx_t *ctx) {
                     sec_buf_vec_free(&secbufs);
                     return -1;
                 }
-                reloc_off = cur_off + (uint64_t)code_len - reloc_width;
+                reloc_off = have_disp_field ? cur_off + (uint64_t)disp_field_off
+                                            : cur_off + (uint64_t)code_len - reloc_width;
                 if (machine_relocation_addend_is_in_place(machine)) {
                     uint64_t code_rel_off = reloc_off - cur_off;
                     if (code_rel_off + reloc_width <= (uint64_t)code_len) {
