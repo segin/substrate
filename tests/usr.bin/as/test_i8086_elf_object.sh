@@ -37,7 +37,9 @@ objdump -dr -mi8086 "$TMP/code16_obj.o" > "$TMP/code16_obj.dump"
 grep -Eq 'ljmp[[:space:]]+\$0x1234,\$0x5678' "$TMP/code16_obj.dump"
 grep -Eq 'lcall[[:space:]]+\$0x4321,\$0x1111' "$TMP/code16_obj.dump"
 grep -Eq 'mov[[:space:]]+%es:0x4\(%bx,%si\),%ax' "$TMP/code16_obj.dump"
-grep -Eq 'mov[[:space:]]+%ax,%ss:0x6\(%bp,%di\)' "$TMP/code16_obj.dump"
+# No %ss: here: it is the segment an address through %bp has, and GNU as
+# writes no prefix for it.
+grep -Eq 'mov[[:space:]]+%ax,0x6\(%bp,%di\)' "$TMP/code16_obj.dump"
 grep -Eq 'jne|jnz' "$TMP/code16_obj.dump"
 grep -Eq 'jcxz' "$TMP/code16_obj.dump"
 grep -Eq 'loop' "$TMP/code16_obj.dump"

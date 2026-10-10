@@ -97,7 +97,10 @@ int main(int argc, char **argv) {
         as_token_vec_free(&toks);
         return 1;
     }
-    if (!has_token(&toks, AS_TOK_DIRECTIVE, ".include") ||
+    /* The file's lines stand in the directive's place: its tokens are
+     * there and the directive is not.  (This asked for the directive to
+     * be there, which was all that ever was.) */
+    if (has_token(&toks, AS_TOK_DIRECTIVE, ".include") ||
         !has_token(&toks, AS_TOK_LABEL, "inc_label") ||
         !has_token(&toks, AS_TOK_MNEMONIC, "add") ||
         !has_token(&toks, AS_TOK_LABEL, "main_label")) {

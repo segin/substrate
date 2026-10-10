@@ -60,5 +60,31 @@ enc 64 'movq %xmm0, %rax'       66480f7ec0
 enc 64 'movq $1, %rax'          48c7c001000000
 enc 64 'movq %rax, (%rbx)'      488903
 
+# In Intel syntax, where the destination is first: these were all
+# `mov eax, [ebx]` and its like.
+ienc() {
+    printf '.intel_syntax noprefix\n\t.text\n\t%s\n' "$2" > t.s
+    if ! "$AS" "--$1" -o t.o t.s 2> err; then
+        echo "FAIL --$1 intel $2: $(head -1 err | sed 's/.*: //')"; fail=1; return
+    fi
+    objcopy -O binary -j .text t.o t.bin
+    got=$(od -An -v -tx1 t.bin | tr -d ' \n')
+    [ "$got" = "$3" ] || { echo "FAIL --$1 intel $2: $got, not $3"; fail=1; }
+}
+ienc 32 'movq mm0, mmword ptr [ebx]'    0f6f03
+ienc 32 'movq mm0, qword ptr [ebx]'     0f6f03
+ienc 32 'movq qword ptr [ebx], mm1'     0f7f0b
+ienc 32 'movq mm1, mm2'                 0f6fca
+ienc 32 'movq xmm1, xmm2'               f30f7eca
+ienc 32 'movq xmm1, qword ptr [ebx]'    f30f7e0b
+ienc 32 'movq qword ptr [ebx+8], xmm3'  660fd65b08
+ienc 64 'movq xmm1, qword ptr [rbx]'    f30f7e0b
+ienc 64 'movq qword ptr [rbx+8], xmm3'  660fd65b08
+ienc 64 'movq xmm9, xmm10'              f3450f7eca
+ienc 64 'movq rax, xmm0'                66480f7ec0
+ienc 64 'movq xmm0, rax'                66480f6ec0
+ienc 64 'movq mm1, rax'                 480f6ec8
+ienc 64 'movq rax, mm1'                 480f7ec8
+
 [ "$fail" -eq 0 ] && echo "ok: SIMD movq"
 exit "$fail"

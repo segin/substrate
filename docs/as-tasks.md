@@ -407,6 +407,9 @@ with a symbol table.
 
 ### C.6 Messages and temporary files
 
+- [ ] **AS-T-388** If a source has more than one statement in error, then the assembler shall report each of them, and shall write no object.
+  Trace: AS-FE-030.  Verify: T — `fooop %eax,%ebx` / `mov %badreg,%eax` / `barrr`: three messages, as GNU gives; `test_source_model_32_64.sh` passes.  After: 147.
+  (Added when the expected failures were checked against GNU as: this is what that test fails on now that `.include` works.  Today the first error ends the run.)
 - [ ] **AS-T-147** Every error message shall have the form `file:line: Error: text`, with text that is not empty.
   Trace: AS-FE-030, AS-FE-032.  Verify: T — a test that greps every failing case of the suite for the form; `loop 1b` to an undefined label has text.
 - [ ] **AS-T-148** When a failure is found while expanding a macro or repeat, the message shall name the user's line and the macro being expanded.

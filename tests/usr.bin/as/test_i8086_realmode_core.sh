@@ -38,7 +38,10 @@ EOF
 objcopy -O binary --only-section=.text "$OBJ" "$BIN"
 
 hex=$(od -An -tx1 -v "$BIN" | tr -d ' \n')
-expect="ea785634129a11112143268b400436894306750190e302e2009000000000000090"
+# GNU as's bytes.  The %ss of `%ss:6(%bp,%di)` is the segment an address
+# through %bp has anyway, and GNU writes no prefix for it; this had the
+# prefix (36), which no assembler to compare with gives.
+expect="ea785634129a11112143268b4004894306750190e302e200900000000000000090"
 
 if [ "$hex" != "$expect" ]; then
     echo "unexpected .code16 text bytes" >&2

@@ -4236,11 +4236,12 @@ static int emit_simd_movq(const as_instruction_t *insn, int intel_syntax, int is
     size_t n = 0;
 
     if (insn == NULL || insn->mnemonic == NULL || out == NULL || out_len == NULL || out_cap < 8 ||
-        intel_syntax || insn->operand_count != 2 || !streq_ci(insn->mnemonic, "movq")) {
+        insn->operand_count != 2 || !streq_ci(insn->mnemonic, "movq")) {
         return -1;
     }
-    src = &insn->operands[0];
-    dst = &insn->operands[1];
+    /* Intel's order is the destination first. */
+    src = &insn->operands[intel_syntax ? 1 : 0];
+    dst = &insn->operands[intel_syntax ? 0 : 1];
     src_xmm = src->kind == AS_OPERAND_REGISTER && parse_xmm_reg(src->u.reg, &sx) == 0;
     dst_xmm = dst->kind == AS_OPERAND_REGISTER && parse_xmm_reg(dst->u.reg, &dx) == 0;
     src_mm = src->kind == AS_OPERAND_REGISTER && parse_mmx_reg(src->u.reg, &sm) == 0;

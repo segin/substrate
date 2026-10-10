@@ -7,6 +7,14 @@
 # it.  A reason beginning SKIP means the test is not run: these build
 # inside the source tree and `make clean` it.
 #
+# Each line was checked by running the test with GNU as in this
+# assembler's place: a test GNU passes fails here for a fault of this
+# assembler's.  Where GNU failed too, its failure was read.  Three tests
+# asked for what GNU does not do and were corrected (an %ss: prefix GNU
+# omits, in the two i8086 tests; Intel's lodsd and stosd in AT&T source,
+# in test_intel_dual_syntax); the rest fail with GNU only where they ask
+# for this assembler's own messages and options, past the fault listed.
+#
 # Tests whose expectation was stale -- the assembler having since changed
 # on purpose -- were corrected rather than listed: test_directive_surface
 # (.if and .macro exist), test_x86_64_short_local_temp_branch and
@@ -25,16 +33,15 @@ test_i8086_corpus.sh	16-bit code: refused at a line with an empty message (AS-T-
 test_i8086_elf_object.sh	16-bit code, as above (AS-T-347)
 test_i8086_realmode_core.sh	16-bit code, as above (AS-T-347)
 test_intel_dual_syntax.sh	string instructions with no operands are refused (AS-T-054)
-test_isa_heavy_64.sh	salq is not a mnemonic (AS-T-172)
-test_lexer_core.sh	.include does nothing: "Include path expansion failed" (AS-T-123, AS-T-125)
+test_isa_heavy_64.sh	vmovdqu is not a mnemonic (AS-T-332)
 test_output_binary.sh	code is padded with one-byte NOPs, not GNU's sequences (AS-T-251)
 test_relocations_elf_32_64.sh	a forced short jump out of range is assembled and should be refused (AS-T-221)
 test_sections_symbols_expr_32_64.sh	--64: "failed to emit relocations" for a data relocation narrower than 64 bits (AS-T-210)
-test_source_model_32_64.sh	.include does nothing, so an include cycle is not an error (AS-T-123, AS-T-126)
+test_source_model_32_64.sh	the first error ends the run: a source with three bad lines gets one message, where GNU gives three (AS-T-388)
 test_testing_fuzz_perf.sh	runs test_relocations_elf_32_64.sh
 test_unit_matrix.sh	runs test_i8086_corpus.sh
-test_x86_32_corpus_intel_roundtrip.sh	ins with operands is refused (AS-T-054)
-test_x86_64_corpus_intel_roundtrip.sh	ins with operands is refused (AS-T-054)
+test_x86_32_corpus_intel_roundtrip.sh	ins with operands is refused (AS-T-054).  Past that the test is not yet one GNU as passes: GNU refuses the corpus's line 2817, wrgsbase in 32-bit code
+test_x86_64_corpus_intel_roundtrip.sh	ins with operands is refused (AS-T-054).  Past that the test is not yet one GNU as passes: GNU refuses lines of the Intel source it generates (a suffix on jg)
 test_x86_64_encoding.sh	jrcxz to a label is refused with the message "?" (AS-T-037)
 test_x86_avx512f_core.sh	EVEX vaddpd is encoded with W = 0 (AS-T-339)
 test_x86_avx_core.sh	vpermilps is not encoded (AS-T-327)

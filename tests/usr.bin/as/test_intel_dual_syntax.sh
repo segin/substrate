@@ -417,15 +417,17 @@ cat > "$TMP/str_att.s" <<'SRC'
 .type forms32,@function
 forms32:
     movsb
-    movsd
+    movsl
     lodsb
-    lodsd
+    lodsl
     stosb
-    stosd
+    stosl
     ret
 .size forms32, .-forms32
 SRC
 
+# (The AT&T names: `lodsd` and `stosd` are Intel's, and GNU as refuses
+# them here.  This file had them, and held the assembler to taking them.)
 cat > "$TMP/str_intel.s" <<'SRC'
 .intel_syntax noprefix
 .text
