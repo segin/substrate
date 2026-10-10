@@ -10491,6 +10491,20 @@ static int local_temp_branch_target_within(emit_ctx_t *ctx, const as_stmt_t *bas
     return base_idx - target_idx <= max_stmt_distance;
 }
 
+/* An alignment or an .org is as long as it takes to get from where it is
+ * to where it leads: its size is not the statement's alone and must not
+ * be remembered as if it were. */
+static int stmt_size_depends_on_offset(const as_stmt_t *st) {
+    const char *name;
+
+    if (st == NULL || st->kind != AS_STMT_DIRECTIVE || st->u.directive.name == NULL) {
+        return 0;
+    }
+    name = st->u.directive.name;
+    return strcmp(name, ".align") == 0 || strcmp(name, ".balign") == 0 ||
+           strcmp(name, ".p2align") == 0 || strcmp(name, ".org") == 0;
+}
+
 static int stmt_virtual_size_in_section(emit_ctx_t *ctx, const char *section_name, const as_stmt_t *st,
                                         uint64_t sec_off, unsigned x86_code_bits, size_t *size_out) {
     bytebuf_t tmp;
@@ -10505,7 +10519,8 @@ static int stmt_virtual_size_in_section(emit_ctx_t *ctx, const char *section_nam
     /* Cache hit path: when called below the top-level scan (virtual_scanning > 0),
      * branches degrade to a conservative size that does not depend on `sec_off`,
      * so the value is fully determined by the statement. Memoise. */
-    if (ctx->virtual_scanning > 0 && ctx->parsed != NULL && parsed_stmt_index(ctx, st, &cache_idx) == 0) {
+    if (ctx->virtual_scanning > 0 && ctx->parsed != NULL && parsed_stmt_index(ctx, st, &cache_idx) == 0 &&
+        !stmt_size_depends_on_offset(st)) {
         cache_eligible = 1;
         if (cache_idx < ctx->stmt_size_cache_count && ctx->stmt_size_cached != NULL &&
             ctx->stmt_size_cached[cache_idx]) {
@@ -11310,7 +11325,14 @@ static int append_directive_data_ctx(emit_ctx_t *ctx, bytebuf_t *buf, const char
         if (align == 0 || (align & (align - 1)) != 0) {
             return -1;
         }
-        need = (align - (buf->len & (align - 1))) & (align - 1);
+        /*
+         * From where the directive is in its section, which is sec_off,
+         * and not from the length of the buffer written to: when a
+         * statement is being measured that buffer is a scratch one and
+         * empty, so every alignment measured 0 bytes, and a branch across
+         * one was aimed short by its padding -- into the padding.
+         */
+        need = (align - ((size_t)sec_off & (align - 1))) & (align - 1);
         switch (align_exceeds_max_skip(d, need)) {
         case 1: need = 0; break;
         case 0: break;

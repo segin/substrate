@@ -552,8 +552,9 @@ one table of templates; there is one ModRM/SIB/prefix emitter.
   Trace: AS-DES-002.  Verify: I — the five passes that re-encode, and the "virtual layout" machinery, are gone.  After: 190.
 - [ ] **AS-T-221** The assembler shall size branches by relaxation over that table until no size changes.
   Trace: AS-DES-002, AS-LAY-002.  Verify: T — the boundary cases at 126–129 bytes forward and 125–128 back, with alignment and `.org` between.  After: 220.
-- [ ] **AS-T-222** When the distance between two places is computed, the assembler shall include the alignment padding between them.
+- [x] **AS-T-222** When the distance between two places is computed, the assembler shall include the alignment padding between them.
   Trace: AS-LAY-001.  Verify: T — `jmp 1f` / `.skip 120,0x90` / `.p2align 4,0xcc` / `1: ret` is `eb 7e`; the backward case; `--64`; `a: .byte 1` / `.p2align 4` / `b: .byte 2` then `.long b-a` elsewhere is 16.  After: 220.
+  Done, ahead of 220 and within the layout prediction as it stands, because it stood between the assembler and anything compiled at `-O2`: the alignment's padding is computed from its offset in the section, not from the scratch buffer it is measured into, and its size is not cached.  `test_align_branch.sh`.
 - [ ] **AS-T-223** When a branch crosses `.org`, the assembler shall reach the branch's label.
   Trace: AS-LAY-002.  Verify: T — `jmp 1f` / `.skip 60` / `.org 0x90` / `1: ret`.  After: 221.
 - [ ] **AS-T-224** When a difference of labels spans a branch, the assembler shall use the branch's final size.
