@@ -1,0 +1,141 @@
+#include "as_a64_reloc.h"
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#ifndef R_AARCH64_MOVW_UABS_G3_NC
+#define R_AARCH64_MOVW_UABS_G3_NC R_AARCH64_MOVW_UABS_G3
+#endif
+
+static void fail(const char *msg) {
+    fprintf(stderr, "FAIL: %s\n", msg);
+    exit(1);
+}
+
+static void check_map(as_a64_reloc_kind_t kind, uint32_t expected) {
+    uint32_t t = 0;
+    if (as_a64_reloc_type(EM_AARCH64, kind, &t) != 0 || t != expected) {
+        fail("AArch64 reloc map mismatch");
+    }
+}
+
+static void emit_all_a64(void) {
+    elfobj_t *o;
+    elf_section_t *text;
+    elf_symbol_t *sym;
+    unsigned char data[512];
+    size_t i;
+    as_a64_reloc_kind_t kinds[] = {
+        AS_A64_RELOC_R_AARCH64_ABS64,
+        AS_A64_RELOC_R_AARCH64_ABS32,
+        AS_A64_RELOC_R_AARCH64_ABS16,
+        AS_A64_RELOC_R_AARCH64_PREL64,
+        AS_A64_RELOC_R_AARCH64_PREL32,
+        AS_A64_RELOC_R_AARCH64_PREL16,
+        AS_A64_RELOC_R_AARCH64_ADR_PREL_PG_HI21,
+        AS_A64_RELOC_R_AARCH64_ADR_PREL_LO21,
+        AS_A64_RELOC_R_AARCH64_ADD_ABS_LO12_NC,
+        AS_A64_RELOC_R_AARCH64_LDST8_ABS_LO12_NC,
+        AS_A64_RELOC_R_AARCH64_LDST16_ABS_LO12_NC,
+        AS_A64_RELOC_R_AARCH64_LDST32_ABS_LO12_NC,
+        AS_A64_RELOC_R_AARCH64_LDST64_ABS_LO12_NC,
+        AS_A64_RELOC_R_AARCH64_LDST128_ABS_LO12_NC,
+        AS_A64_RELOC_R_AARCH64_MOVW_UABS_G0,
+        AS_A64_RELOC_R_AARCH64_MOVW_UABS_G0_NC,
+        AS_A64_RELOC_R_AARCH64_MOVW_UABS_G1,
+        AS_A64_RELOC_R_AARCH64_MOVW_UABS_G1_NC,
+        AS_A64_RELOC_R_AARCH64_MOVW_UABS_G2,
+        AS_A64_RELOC_R_AARCH64_MOVW_UABS_G2_NC,
+        AS_A64_RELOC_R_AARCH64_MOVW_UABS_G3,
+        AS_A64_RELOC_R_AARCH64_MOVW_UABS_G3_NC,
+        AS_A64_RELOC_R_AARCH64_JUMP26,
+        AS_A64_RELOC_R_AARCH64_CALL26,
+        AS_A64_RELOC_R_AARCH64_CONDBR19,
+        AS_A64_RELOC_R_AARCH64_TSTBR14,
+        AS_A64_RELOC_R_AARCH64_GOT_LD_PREL19,
+        AS_A64_RELOC_R_AARCH64_ADR_GOT_PAGE,
+        AS_A64_RELOC_R_AARCH64_LD64_GOT_LO12_NC,
+        AS_A64_RELOC_R_AARCH64_TLSGD_ADR_PAGE21,
+        AS_A64_RELOC_R_AARCH64_TLSGD_ADD_LO12_NC,
+        AS_A64_RELOC_R_AARCH64_TLSLE_ADD_TPREL_HI12,
+        AS_A64_RELOC_R_AARCH64_TLSLE_ADD_TPREL_LO12,
+        AS_A64_RELOC_R_AARCH64_TLSLE_ADD_TPREL_LO12_NC,
+        AS_A64_RELOC_R_AARCH64_TLSIE_ADR_GOTTPREL_PAGE21,
+        AS_A64_RELOC_R_AARCH64_TLSIE_LD64_GOTTPREL_LO12_NC,
+        AS_A64_RELOC_R_AARCH64_TLSLD_ADR_PAGE21,
+        AS_A64_RELOC_R_AARCH64_TLSLD_ADD_LO12_NC,
+    };
+
+    memset(data, 0, sizeof(data));
+    o = elf_create(ET_REL, EM_AARCH64, ELFOBJ_CLASS_64, ELFOBJ_ENDIAN_LE);
+    if (o == NULL) {
+        fail("elf_create a64 failed");
+    }
+    text = elf_add_section(o, ".text", SHT_PROGBITS, SHF_ALLOC | SHF_EXECINSTR);
+    if (text == NULL || elf_section_set_data(text, data, sizeof(data)) != ELF_OK) {
+        fail("a64 text section setup failed");
+    }
+    sym = elf_add_symbol(o, "sym", 0, 0, STB_GLOBAL, STT_FUNC);
+    if (sym == NULL || elf_symbol_define(sym, text, 0) != ELF_OK) {
+        fail("a64 symbol setup failed");
+    }
+
+    for (i = 0; i < sizeof(kinds) / sizeof(kinds[0]); ++i) {
+        if (as_a64_emit_reloc(text, EM_AARCH64, kinds[i], i * 4, sym, (int64_t)i) != 0) {
+            fail("a64 relocation emission failed");
+        }
+    }
+
+    if (elf_reloc_count(o) != sizeof(kinds) / sizeof(kinds[0])) {
+        fail("a64 relocation count mismatch");
+    }
+
+    elf_close(o);
+}
+
+int main(void) {
+    check_map(AS_A64_RELOC_R_AARCH64_ABS64, R_AARCH64_ABS64);
+    check_map(AS_A64_RELOC_R_AARCH64_ABS32, R_AARCH64_ABS32);
+    check_map(AS_A64_RELOC_R_AARCH64_ABS16, R_AARCH64_ABS16);
+    check_map(AS_A64_RELOC_R_AARCH64_PREL64, R_AARCH64_PREL64);
+    check_map(AS_A64_RELOC_R_AARCH64_PREL32, R_AARCH64_PREL32);
+    check_map(AS_A64_RELOC_R_AARCH64_PREL16, R_AARCH64_PREL16);
+    check_map(AS_A64_RELOC_R_AARCH64_ADR_PREL_PG_HI21, R_AARCH64_ADR_PREL_PG_HI21);
+    check_map(AS_A64_RELOC_R_AARCH64_ADR_PREL_LO21, R_AARCH64_ADR_PREL_LO21);
+    check_map(AS_A64_RELOC_R_AARCH64_ADD_ABS_LO12_NC, R_AARCH64_ADD_ABS_LO12_NC);
+    check_map(AS_A64_RELOC_R_AARCH64_LDST8_ABS_LO12_NC, R_AARCH64_LDST8_ABS_LO12_NC);
+    check_map(AS_A64_RELOC_R_AARCH64_LDST16_ABS_LO12_NC, R_AARCH64_LDST16_ABS_LO12_NC);
+    check_map(AS_A64_RELOC_R_AARCH64_LDST32_ABS_LO12_NC, R_AARCH64_LDST32_ABS_LO12_NC);
+    check_map(AS_A64_RELOC_R_AARCH64_LDST64_ABS_LO12_NC, R_AARCH64_LDST64_ABS_LO12_NC);
+    check_map(AS_A64_RELOC_R_AARCH64_LDST128_ABS_LO12_NC, R_AARCH64_LDST128_ABS_LO12_NC);
+    check_map(AS_A64_RELOC_R_AARCH64_MOVW_UABS_G0, R_AARCH64_MOVW_UABS_G0);
+    check_map(AS_A64_RELOC_R_AARCH64_MOVW_UABS_G0_NC, R_AARCH64_MOVW_UABS_G0_NC);
+    check_map(AS_A64_RELOC_R_AARCH64_MOVW_UABS_G1, R_AARCH64_MOVW_UABS_G1);
+    check_map(AS_A64_RELOC_R_AARCH64_MOVW_UABS_G1_NC, R_AARCH64_MOVW_UABS_G1_NC);
+    check_map(AS_A64_RELOC_R_AARCH64_MOVW_UABS_G2, R_AARCH64_MOVW_UABS_G2);
+    check_map(AS_A64_RELOC_R_AARCH64_MOVW_UABS_G2_NC, R_AARCH64_MOVW_UABS_G2_NC);
+    check_map(AS_A64_RELOC_R_AARCH64_MOVW_UABS_G3, R_AARCH64_MOVW_UABS_G3);
+    check_map(AS_A64_RELOC_R_AARCH64_MOVW_UABS_G3_NC, R_AARCH64_MOVW_UABS_G3_NC);
+    check_map(AS_A64_RELOC_R_AARCH64_JUMP26, R_AARCH64_JUMP26);
+    check_map(AS_A64_RELOC_R_AARCH64_CALL26, R_AARCH64_CALL26);
+    check_map(AS_A64_RELOC_R_AARCH64_CONDBR19, R_AARCH64_CONDBR19);
+    check_map(AS_A64_RELOC_R_AARCH64_TSTBR14, R_AARCH64_TSTBR14);
+    check_map(AS_A64_RELOC_R_AARCH64_GOT_LD_PREL19, R_AARCH64_GOT_LD_PREL19);
+    check_map(AS_A64_RELOC_R_AARCH64_ADR_GOT_PAGE, R_AARCH64_ADR_GOT_PAGE);
+    check_map(AS_A64_RELOC_R_AARCH64_LD64_GOT_LO12_NC, R_AARCH64_LD64_GOT_LO12_NC);
+    check_map(AS_A64_RELOC_R_AARCH64_TLSGD_ADR_PAGE21, R_AARCH64_TLSGD_ADR_PAGE21);
+    check_map(AS_A64_RELOC_R_AARCH64_TLSGD_ADD_LO12_NC, R_AARCH64_TLSGD_ADD_LO12_NC);
+    check_map(AS_A64_RELOC_R_AARCH64_TLSLE_ADD_TPREL_HI12, R_AARCH64_TLSLE_ADD_TPREL_HI12);
+    check_map(AS_A64_RELOC_R_AARCH64_TLSLE_ADD_TPREL_LO12, R_AARCH64_TLSLE_ADD_TPREL_LO12);
+    check_map(AS_A64_RELOC_R_AARCH64_TLSLE_ADD_TPREL_LO12_NC, R_AARCH64_TLSLE_ADD_TPREL_LO12_NC);
+    check_map(AS_A64_RELOC_R_AARCH64_TLSIE_ADR_GOTTPREL_PAGE21, R_AARCH64_TLSIE_ADR_GOTTPREL_PAGE21);
+    check_map(AS_A64_RELOC_R_AARCH64_TLSIE_LD64_GOTTPREL_LO12_NC, R_AARCH64_TLSIE_LD64_GOTTPREL_LO12_NC);
+    check_map(AS_A64_RELOC_R_AARCH64_TLSLD_ADR_PAGE21, R_AARCH64_TLSLD_ADR_PAGE21);
+    check_map(AS_A64_RELOC_R_AARCH64_TLSLD_ADD_LO12_NC, R_AARCH64_TLSLD_ADD_LO12_NC);
+
+    emit_all_a64();
+
+    puts("ok");
+    return 0;
+}

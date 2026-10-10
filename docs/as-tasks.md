@@ -57,7 +57,7 @@ placed where it belongs.
 
 ## A. Make the work checkable
 
-- [ ] **AS-T-010** The repository shall hold, under `tests/usr.bin/as/`, the 147 files of the assembler's test suite as they were at `f2e3fe0d4^`.
+- [x] **AS-T-010** The repository shall hold, under `tests/usr.bin/as/`, the 147 files of the assembler's test suite as they were at `f2e3fe0d4^`.
   Trace: AS-TST-001.  Verify: I — `git diff --stat f2e3fe0d4^ HEAD -- tests/usr.bin/as` shows no file of the old suite missing.
 - [ ] **AS-T-011** When `make -C tests/usr.bin/as` is run on a host with no cross toolchain, every test of the restored suite shall build and run.
   Trace: AS-TST-001.  Verify: D — the command completes and prints a verdict for each test.  After: 010.
