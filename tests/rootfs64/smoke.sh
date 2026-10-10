@@ -70,11 +70,10 @@ fi
 # native 64-bit programs here, and cc builds for the machine it runs on
 # unless told otherwise.  The image keeps the 32-bit runtime beside the
 # 64-bit one, so `cc -m32` must still produce something that runs.  The
-# program includes the system's headers, which the image must have.
-# It prints with puts and not printf: a call of a variadic function sets
-# %al first, and the assembler writes `movb $0, %al` five bytes long in
-# 64-bit mode (docs/as-tasks.md, AS-T-061), so the program runs into the
-# three it should not have.  Make this printf when that is mended.
+# program includes the system's headers, which the image must have, and
+# prints with printf: a call of a variadic function, which sets %al
+# first, and did not work until the assembler wrote `movb $0, %al` in two
+# bytes (docs/as-tasks.md, AS-T-061).
 S=/usr/libexec/substrate-cc
 cat > /tmp/smoke64.c <<'EOF'
 #include <stdio.h>
@@ -84,8 +83,8 @@ int add(int a, int b) { return a + b; }
 int main(void) {
     char *p = malloc(8);
     if (p == NULL) return 1;
-    memcpy(p, "cc: OK", 7);
-    puts(p);
+    memcpy(p, "OK", 3);
+    printf("cc: %s %d\n", p, add(40, 2));
     free(p);
     return add(3, 4);
 }
@@ -105,7 +104,7 @@ check "as is a 64-bit program"   "ldd $S/as 2>&1 | grep -q ld64.so"
 check "ld is a 64-bit program"   "ldd $S/ld 2>&1 | grep -q ld64.so"
 check "as assembles"             "$S/as --64 -o /tmp/smoke.o /tmp/smoke.s && [ -s /tmp/smoke.o ]"
 check "cc builds and links a program" \
-      'cd /tmp && cc -o smoke64 smoke64.c && ./smoke64 | grep -q "cc: OK"'
+      'cd /tmp && cc -o smoke64 smoke64.c && ./smoke64 | grep -q "cc: OK 42"'
 check "what cc builds returns its status" \
       'cd /tmp; ./smoke64 > /dev/null; [ $? = 7 ]'
 check "what cc builds is a 64-bit program" \
