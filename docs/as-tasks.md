@@ -156,8 +156,9 @@ status 0.
   Done: where the 64-bit encoder keeps `REX`, it is moved past any `66`, `F2` or `F3` written after its place, once, for every branch.  `test_rex_prefix.sh`.  (`movq %xmm1,%xmm2` is still the wrong instruction: 180.)
 - [ ] **AS-T-035** When a 16-bit instruction is assembled in 64-bit mode, the assembler shall emit one `66` prefix.
   Trace: AS-X86-011.  Verify: T — every `w`-suffixed line of the 64-bit corpus has exactly one `66`; `movabs %ax,sym` has one.
-- [ ] **AS-T-036** When `cbw`, `cbtw`, `cwd`, `cwtd`, `iretw`, `lretw`, `pushaw`, `popaw`, `pushfw`, `popfw`, `jmpw *r16`, `callw *r16`, `cmovccw`, `leaw` or `xaddw` is written, the assembler shall emit the `66` prefix in 32- and 64-bit modes.
+- [x] **AS-T-036** When `cbw`, `cbtw`, `cwd`, `cwtd`, `iretw`, `lretw`, `pushaw`, `popaw`, `pushfw`, `popfw`, `jmpw *r16`, `callw *r16`, `cmovccw`, `leaw` or `xaddw` is written, the assembler shall emit the `66` prefix in 32- and 64-bit modes.
   Trace: AS-X86-011, AS-SEL-014.  Verify: T — each: GNU.
+  Done.  `cbtw`/`cbw` and `cwtd`/`cwd` shared a branch with `cwtl` and `cltd` and were those instructions, in both modes; `pushaw`, `popaw`, `iretw` and `lretw` likewise in 32-bit code.  The rest of the list was right already.  Found with it and mended: `movw %ds,%si` had no `66` and so cleared the top of `%esi`, and `pushw`/`popw` of a segment register pushed and popped four bytes.  `test_insn_forms.sh`, 55 cases.  Left: `iretl` and `lretl` are not mnemonics; `pushfq` and `pushq`/`popq` of memory carry a `REX.W` that GNU omits, which changes nothing.
 - [x] **AS-T-037** When `jcxz` is assembled in 32-bit mode, or `jecxz` in 64-bit mode, the assembler shall emit the `67` prefix.
   Trace: AS-X86-023.  Verify: T — `jcxz 1f`, `jecxz 1f`, `jrcxz 1f` in each mode: GNU.
   Done: none of the three reached the encoder when its target was a label -- the code that resolves a branch to a label knew `jmp`, `call` and the conditional jumps, and returned failure with no message for anything else.  It now has the one-byte-displacement branches: the counter is the mnemonic's, the prefix is written where the counter is not the mode's, the instruction is counted as three bytes where it has the prefix, and one the mode has not got (`jrcxz` in 32-bit code, `jcxz` in 64-bit) is refused by name.  `test_loop_jcxz.sh`; `test_x86_64_encoding.sh` passes.
@@ -1066,5 +1067,5 @@ is not to be done, 370 is ticked with "removed" and the rest struck.
 | AS-EXT-009 | 185, 325, 332–337 |
 | AS-EXT-010 | 040, 171, 338, 339 (339 closes all of AS-EXT) |
 
-349 tasks: 76 done, 273 open.  Numbers run to 398, with gaps left between
+349 tasks: 77 done, 272 open.  Numbers run to 398, with gaps left between
 sections for tasks found along the way.

@@ -4659,6 +4659,44 @@ static int x86_prepend_segment(const as_instruction_t *insn, unsigned char *code
     return 0;
 }
 
+/*
+ * The instructions with a segment register that are of 16 bits: a move
+ * from one to a 16-bit register, and pushw and popw of one.  The
+ * emitters of those write no operand-size prefix, so `movw %ds, %si`
+ * was `movl %ds, %esi`, which clears the top of %esi, and `pushw %fs`
+ * pushed four bytes for two.
+ */
+static int x86_segment_form_is_16bit(const as_instruction_t *insn, const char *mn, char suffix, int intel_syntax) {
+    as_x86_seg_t seg;
+
+    if (strcmp(mn, "mov") == 0 && insn->operand_count == 2) {
+        const as_operand_t *src = &insn->operands[intel_syntax ? 1 : 0];
+        const as_operand_t *dst = &insn->operands[intel_syntax ? 0 : 1];
+
+        return src->kind == AS_OPERAND_REGISTER && dst->kind == AS_OPERAND_REGISTER &&
+               parse_seg_reg_text(src->u.reg, &seg) == 0 && x86_reg_width_bits(dst->u.reg) == 16 &&
+               parse_seg_reg_text(dst->u.reg, &seg) != 0;
+    }
+    if ((strcmp(mn, "push") == 0 || strcmp(mn, "pop") == 0) && insn->operand_count == 1 && suffix == 'w') {
+        return insn->operands[0].kind == AS_OPERAND_REGISTER &&
+               parse_seg_reg_text(insn->operands[0].u.reg, &seg) == 0;
+    }
+    return 0;
+}
+
+static int x86_prepend_opsize(unsigned char *code, size_t code_cap, size_t *code_len) {
+    if (code == NULL || code_len == NULL || *code_len >= code_cap) {
+        return -1;
+    }
+    if (*code_len > 0 && code[0] == 0x66) {
+        return 0;
+    }
+    memmove(code + 1, code, *code_len);
+    code[0] = 0x66;
+    (*code_len)++;
+    return 0;
+}
+
 static int x86_prepend_lock_if_absent(unsigned char *code, size_t code_cap, size_t *code_len) {
     size_t i;
 
@@ -10134,6 +10172,10 @@ static int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_st
                 x86_prepend_lock_if_absent(code, code_cap, code_len) != 0) {
                 return -1;
             }
+            if (cfg->x86_code_bits != 16u && x86_segment_form_is_16bit(&st->u.instr, mnbuf, suffix, intel_syntax) &&
+                x86_prepend_opsize(code, code_cap, code_len) != 0) {
+                return -1;
+            }
             return 0;
         }
     }
@@ -10189,6 +10231,10 @@ static int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_st
         int s64 = emit_x86_64_special(&st->u.instr, intel_syntax, cfg->x86_64_isa_level, code, code_cap, code_len);
         if (s64 == 0) {
             if (*code_len > 0) {
+                if (x86_segment_form_is_16bit(&st->u.instr, mnbuf, suffix, intel_syntax) &&
+                    x86_prepend_opsize(code, code_cap, code_len) != 0) {
+                    return -1;
+                }
                 return 0;
             }
         }

@@ -952,6 +952,19 @@ static int mnemonic_rep_compatible(const char *mn) {
  * that has them and the plain instruction to one that has not.
  */
 /*
+ * The operand-size prefix of an instruction whose name says its size --
+ * cbtw and cwtl are one opcode, as are cwtd and cltd, pushaw and
+ * pushal: 66 where the size named is not the mode's own.  Without it
+ * the name was ignored, and `cbtw` extended %ax into %eax where it is
+ * to extend %al into %ax.
+ */
+static int emit_named_opsize(enc_ctx_t *ctx, const as_x86_insn_t *insn, unsigned bits) {
+    unsigned mode_bits = insn->default_bits == 16u ? 16u : 32u;
+
+    return bits != mode_bits ? emit8(ctx, 0x66) : 0;
+}
+
+/*
  * Whether nop has the one operand of the long NOP, 0F 1F /0: memory, or
  * a register of 16 bits or more.  There is none of a byte.
  */
@@ -2335,11 +2348,17 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
             return -1;
         }
     } else if (streq_ci(insn->mnemonic, "pusha") || streq_ci(insn->mnemonic, "pushal") || streq_ci(insn->mnemonic, "pushaw")) {
-        if (insn->op_count != 0 || emit8(&ctx, 0x60) != 0) {
+        if (insn->op_count != 0 ||
+            (streq_ci(insn->mnemonic, "pushaw") && emit_named_opsize(&ctx, insn, 16) != 0) ||
+            (streq_ci(insn->mnemonic, "pushal") && emit_named_opsize(&ctx, insn, 32) != 0) ||
+            emit8(&ctx, 0x60) != 0) {
             return -1;
         }
     } else if (streq_ci(insn->mnemonic, "popa") || streq_ci(insn->mnemonic, "popal") || streq_ci(insn->mnemonic, "popaw")) {
-        if (insn->op_count != 0 || emit8(&ctx, 0x61) != 0) {
+        if (insn->op_count != 0 ||
+            (streq_ci(insn->mnemonic, "popaw") && emit_named_opsize(&ctx, insn, 16) != 0) ||
+            (streq_ci(insn->mnemonic, "popal") && emit_named_opsize(&ctx, insn, 32) != 0) ||
+            emit8(&ctx, 0x61) != 0) {
             return -1;
         }
     } else if (streq_ci(insn->mnemonic, "bound")) {
@@ -2407,12 +2426,16 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
         }
     } else if (streq_ci(insn->mnemonic, "cbtw") || streq_ci(insn->mnemonic, "cbw") || streq_ci(insn->mnemonic, "cwtl") ||
                streq_ci(insn->mnemonic, "cwde")) {
-        if (insn->op_count != 0 || emit8(&ctx, 0x98) != 0) {
+        unsigned bits = (streq_ci(insn->mnemonic, "cbtw") || streq_ci(insn->mnemonic, "cbw")) ? 16u : 32u;
+
+        if (insn->op_count != 0 || emit_named_opsize(&ctx, insn, bits) != 0 || emit8(&ctx, 0x98) != 0) {
             return -1;
         }
     } else if (streq_ci(insn->mnemonic, "cwtd") || streq_ci(insn->mnemonic, "cwd") || streq_ci(insn->mnemonic, "cltd") ||
                streq_ci(insn->mnemonic, "cdq")) {
-        if (insn->op_count != 0 || emit8(&ctx, 0x99) != 0) {
+        unsigned bits = (streq_ci(insn->mnemonic, "cwtd") || streq_ci(insn->mnemonic, "cwd")) ? 16u : 32u;
+
+        if (insn->op_count != 0 || emit_named_opsize(&ctx, insn, bits) != 0 || emit8(&ctx, 0x99) != 0) {
             return -1;
         }
     } else if (streq_ci(insn->mnemonic, "lcall")) {
@@ -2488,7 +2511,9 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
             return -1;
         }
     } else if (streq_ci(insn->mnemonic, "iret") || streq_ci(insn->mnemonic, "iretw")) {
-        if (insn->op_count != 0 || emit8(&ctx, 0xcf) != 0) {
+        if (insn->op_count != 0 ||
+            (streq_ci(insn->mnemonic, "iretw") && emit_named_opsize(&ctx, insn, 16) != 0) ||
+            emit8(&ctx, 0xcf) != 0) {
             return -1;
         }
     } else if (streq_ci(insn->mnemonic, "xlat") || streq_ci(insn->mnemonic, "xlatb")) {
@@ -2501,6 +2526,9 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
             return -1;
         }
     } else if (streq_ci(insn->mnemonic, "lret") || streq_ci(insn->mnemonic, "retf") || streq_ci(insn->mnemonic, "lretw")) {
+        if (streq_ci(insn->mnemonic, "lretw") && emit_named_opsize(&ctx, insn, 16) != 0) {
+            return -1;
+        }
         if (insn->op_count == 0) {
             if (emit8(&ctx, 0xcb) != 0) {
                 return -1;
@@ -6778,7 +6806,9 @@ more_mnemonics:
         }
     } else if (streq_ci(insn->mnemonic, "cbtw") || streq_ci(insn->mnemonic, "cbw") ||
                streq_ci(insn->mnemonic, "cwtl") || streq_ci(insn->mnemonic, "cwde")) {
-        if (insn->op_count != 0 || emit8(&ctx, 0x98) != 0) {
+        unsigned bits = (streq_ci(insn->mnemonic, "cbtw") || streq_ci(insn->mnemonic, "cbw")) ? 16u : 32u;
+
+        if (insn->op_count != 0 || emit_named_opsize(&ctx, insn, bits) != 0 || emit8(&ctx, 0x98) != 0) {
             return -1;
         }
     } else if (streq_ci(insn->mnemonic, "cltq") || streq_ci(insn->mnemonic, "cdqe")) {
@@ -6788,7 +6818,9 @@ more_mnemonics:
         }
     } else if (streq_ci(insn->mnemonic, "cwtd") || streq_ci(insn->mnemonic, "cwd") ||
                streq_ci(insn->mnemonic, "cltd") || streq_ci(insn->mnemonic, "cdq")) {
-        if (insn->op_count != 0 || emit8(&ctx, 0x99) != 0) {
+        unsigned bits = (streq_ci(insn->mnemonic, "cwtd") || streq_ci(insn->mnemonic, "cwd")) ? 16u : 32u;
+
+        if (insn->op_count != 0 || emit_named_opsize(&ctx, insn, bits) != 0 || emit8(&ctx, 0x99) != 0) {
             return -1;
         }
     } else if (streq_ci(insn->mnemonic, "cqto") || streq_ci(insn->mnemonic, "cqo")) {
