@@ -105,5 +105,28 @@ s 64 660f38008300100000     -              'pshufb 0x1000(%rbx), %xmm0'
 s 32 660f38004308           -              'pshufb 8(%ebx), %xmm0'
 s 64 c5fc580d00000000       4:R_X86_64_PC32 'vaddps sym(%rip), %ymm0, %ymm1'
 
+# An absolute address.  32-bit code writes it with ModRM alone; 64-bit
+# code gives that form to %rip-relative addressing and needs a SIB byte.
+# These encoders wrote the SIB form in both: right in 32-bit code too,
+# and a byte longer than GNU's.
+s 32 660f38000500000000     5:R_386_32     'pshufb sym, %xmm0'
+s 32 660f38000534120000     -              'pshufb 0x1234, %xmm0'
+s 32 64660f38000500000000   6:R_386_32     'pshufb %fs:sym, %xmm0'
+s 32 f20f7c0504000000       4:R_386_32     'haddps sym+4, %xmm0'
+s 32 660f38370500000000     5:R_386_32     'pcmpgtq sym, %xmm0'
+s 32 660f3a16050000000001   5:R_386_32     'pextrd $1, %xmm0, sym'
+s 32 660f3a08050000000001   5:R_386_32     'roundps $1, sym, %xmm0'
+s 32 f30fb80500000000       4:R_386_32     'popcnt sym, %eax'
+s 32 f30fbd0500000000       4:R_386_32     'lzcnt sym, %eax'
+s 32 f20f38f00500000000     5:R_386_32     'crc32b sym, %eax'
+s 32 c4e278f20d00000000     5:R_386_32     'andn sym, %eax, %ecx'
+s 32 c5f0580500000000       4:R_386_32     'vaddps sym, %xmm1, %xmm0'
+s 32 c5f4580590909090       -              'vaddps 0x90909090, %ymm1, %ymm0'
+s 32 c4e27db80d00000000     5:R_386_32     'vfmadd231ps sym, %ymm0, %ymm1'
+s 32 62f17448580500000000   6:R_386_32     'vaddps sym, %zmm1, %zmm0'
+s 64 660f3800042500000000   6:R_X86_64_32S 'pshufb sym, %xmm0'
+s 64 c5f458042500000000     5:R_X86_64_32S 'vaddps sym, %ymm1, %ymm0'
+s 64 f30fb8042500000000     5:R_X86_64_32S 'popcnt sym, %eax'
+
 [ "$fail" -eq 0 ] && echo "ok: a symbol's displacement in the extension encoders ($cases cases)"
 exit "$fail"

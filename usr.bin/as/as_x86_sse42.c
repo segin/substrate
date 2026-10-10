@@ -127,6 +127,14 @@ static int modrm_sib_disp64(s42_ctx_t *ctx, as_x86_reg_t reg_field, const as_x86
             return 0;
         }
 
+        if (m->disp_only && m->abs_modrm) {
+            /* 32-bit code: an absolute address has no SIB byte. */
+            modrm = (uint8_t)((reg_low3(reg_field) << 3) | 5);
+            if (emit8(ctx, modrm) != 0 || emit32(ctx, (uint32_t)m->disp) != 0) {
+                return -1;
+            }
+            return 0;
+        }
         if (m->disp_only) {
             modrm = (uint8_t)((reg_low3(reg_field) << 3) | 4);
             if (emit8(ctx, modrm) != 0 || emit8(ctx, 0x25) != 0 || emit32(ctx, (uint32_t)m->disp) != 0) {

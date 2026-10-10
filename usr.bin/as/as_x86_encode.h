@@ -71,6 +71,12 @@ typedef struct {
     int force_disp32;
     int32_t disp;
     int disp_only;
+    /*
+     * With disp_only, in 32-bit code: the address is ModRM mod=00 rm=101
+     * and four bytes.  64-bit code gives that form to %rip-relative
+     * addressing and must write an absolute address with a SIB byte.
+     */
+    int abs_modrm;
 } as_x86_mem_t;
 
 typedef struct {

@@ -142,8 +142,9 @@ status 0.
 - [x] **AS-T-396** When the displacement of a memory operand has a symbol in it and a base register, and the instruction is one an extension encoder writes (as in 395), the assembler shall encode a 32-bit displacement and put the relocation on it.
   Trace: found while doing 395; AS-OBJ (relocation placement).  Verify: T — `pshufb sym(%ebx),%xmm0` (`66 0F 38 00 83` and four bytes, the relocation at 5), `popcnt sym(%rbx),%eax`, `vaddps sym(%rbx),%ymm0,%ymm1`, `andn`, `cmpxchg16b`, `pextrd`, in both modes: GNU.  Today the first is `66 0F 00 00 00 00`: one byte is kept for the displacement, and the four of the relocation are written over the opcode.
   Done: each of the nine extension encoders has its own copy of the ModRM code, and none read the mark that says a displacement is a symbol's.  Every instruction they write was wrong with `sym(%reg)`, in both modes -- a table indexed in non-PIC code with AVX, `popcnt` of a global through a register.  Each now keeps four bytes.  `test_ext_symbol_disp.sh`, 46 cases, bytes and relocation.  Left: `pshufb sym,%xmm0` in 32-bit code is right but a byte longer than GNU's, by the SIB form.
-- [ ] **AS-T-397** When an absolute address is the memory operand of an instruction that one of the extension encoders writes, in 32-bit code, the assembler shall encode it as ModRM `mod=00 rm=101` and four bytes, without a SIB byte.
+- [x] **AS-T-397** When an absolute address is the memory operand of an instruction that one of the extension encoders writes, in 32-bit code, the assembler shall encode it as ModRM `mod=00 rm=101` and four bytes, without a SIB byte.
   Trace: found while doing 396 and 310; no audit entry.  Verify: T — `pshufb sym,%xmm0` (`66 0F 38 00 05` and four bytes), `vaddps 0x90909090,%xmm1,%xmm0` (`C5 F0 58 05 …`), `popcnt sym,%eax`: GNU.  Today the SIB form that 64-bit code needs is written in 32-bit code too: right, and a byte longer.  Some 300 `v` lines of the 32-bit corpus differ from GNU's this way.
+  Done: the operand says whether it is an absolute address of 32-bit code, and each of the nine encoders writes that without the SIB byte.  It was far more than 300 lines: 958 more `v` lines of the 32-bit corpus are GNU's bytes, 1,914 of 2,112 now.  `test_ext_symbol_disp.sh`, 18 more cases, bytes and relocation.
 - [ ] **AS-T-031** When a `rep`, `repe`, `repne` or segment prefix is written before an instruction encoded by the emitter's own tables, the assembler shall emit it.
   Trace: AS-SEL-001.  Verify: T — the callers of the prefixed-`0F` emitter with each prefix: GNU.
 - [ ] **AS-T-032** If `lock` is written before an instruction or operand form the processor does not allow it on, then the assembler shall refuse it.
@@ -1061,5 +1062,5 @@ is not to be done, 370 is ticked with "removed" and the rest struck.
 | AS-EXT-009 | 185, 325, 332–337 |
 | AS-EXT-010 | 040, 171, 338, 339 (339 closes all of AS-EXT) |
 
-348 tasks: 73 done, 275 open.  Numbers run to 397, with gaps left between
+348 tasks: 74 done, 274 open.  Numbers run to 397, with gaps left between
 sections for tasks found along the way.

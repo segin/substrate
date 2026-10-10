@@ -8043,6 +8043,7 @@ static int convert_operand_x86(const as_operand_t *op, const char *mnemonic, as_
             memset(&dst->u.mem, 0, sizeof(dst->u.mem));
             dst->u.mem.scale = 1;
             dst->u.mem.disp_only = 1;
+            dst->u.mem.abs_modrm = !is64;
             dst->u.mem.has_disp = 1;
             if (eval_expr_const(op->u.expr, &v) == 0) {
                 dst->u.mem.disp = (int32_t)v;
@@ -8081,6 +8082,7 @@ static int convert_operand_x86(const as_operand_t *op, const char *mnemonic, as_
         memset(&dst->u.mem, 0, sizeof(dst->u.mem));
         dst->u.mem.scale = 1;
         dst->u.mem.disp_only = 1;
+        dst->u.mem.abs_modrm = !is64;
         dst->u.mem.has_disp = 1;
         dst->u.mem.disp = 0;
         return 0;
@@ -8167,6 +8169,7 @@ static int convert_operand_x86(const as_operand_t *op, const char *mnemonic, as_
         }
         if (!dst->u.mem.has_base && !dst->u.mem.has_index) {
             dst->u.mem.disp_only = 1;
+            dst->u.mem.abs_modrm = !is64 && !dst->u.mem.rip_relative;
             if (!dst->u.mem.has_disp) {
                 dst->u.mem.has_disp = 1;
                 dst->u.mem.disp = 0;
