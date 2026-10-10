@@ -2229,7 +2229,19 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
             return -1;
         }
     } else if (streq_ci(insn->mnemonic, "ret")) {
-        if (emit8(&ctx, 0xc3) != 0) {
+        /* `ret $n` is C2 and the count: a function that pops its own
+         * arguments returns with it.  This wrote C3 whatever followed. */
+        if (insn->op_count == 0) {
+            if (emit8(&ctx, 0xc3) != 0) {
+                return -1;
+            }
+        } else if (insn->op_count == 1 && a->kind == AS_X86_OP_IMM &&
+                   a->u.imm >= -0x8000 && a->u.imm <= 0xffff) {
+            if (emit8(&ctx, 0xc2) != 0 || emit16(&ctx, (uint16_t)a->u.imm) != 0) {
+                return -1;
+            }
+        } else {
+            set_unsupported_form_named(&ctx, "ret");
             return -1;
         }
     } else if (streq_ci(insn->mnemonic, "loop") || streq_ci(insn->mnemonic, "loope") ||
@@ -6305,11 +6317,15 @@ more_mnemonics:
             return -1;
         }
     } else if (streq_ci(insn->mnemonic, "ret")) {
+        /* A near return is 64 bits wide here without REX.W, which `retq`
+         * would otherwise bring. */
+        rex_w = 0;
         if (insn->op_count == 0) {
             if (emit8(&ctx, 0xc3) != 0) {
                 return -1;
             }
-        } else if (insn->op_count == 1 && a->kind == AS_X86_OP_IMM) {
+        } else if (insn->op_count == 1 && a->kind == AS_X86_OP_IMM &&
+                   a->u.imm >= -0x8000 && a->u.imm <= 0xffff) {
             if (emit8(&ctx, 0xc2) != 0 || emit16(&ctx, (uint16_t)a->u.imm) != 0) {
                 return -1;
             }

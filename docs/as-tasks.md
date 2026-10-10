@@ -147,8 +147,9 @@ status 0.
 
 - [ ] **AS-T-038** When `adcb` or `sbbb` is written, the assembler shall encode `adc` or `sbb`.
   Trace: AS-X86-020.  Verify: T — register, memory and immediate forms, with and without `lock`: GNU.
-- [ ] **AS-T-039** When `ret`, `retw`, `retl` or `retq` is given an immediate, the assembler shall encode `C2` followed by the 16-bit count.
+- [x] **AS-T-039** When `ret`, `retw`, `retl` or `retq` is given an immediate, the assembler shall encode `C2` followed by the 16-bit count.
   Trace: AS-X86-021, AS-OBJ-013.  Verify: T — `ret $4`, `ret $0`, `retw $8`, `--64` `ret $16`, `retq $8`: GNU.
+  Done: `test_ret.sh`.  `retq` in 32-bit mode and `retl` in 64-bit are still accepted: 349 and 350.
 - [ ] **AS-T-040** If an instruction is written with more operands than any of its forms takes, then the assembler shall refuse it.
   Trace: AS-OBJ-013, AS-EXT-010.  Verify: T — `ret $4, $5`, `nop %eax,%ebx,%ecx,%edx`, `lahf -0x100(%rbx),%ebx,%ecx`, `haddps $1,%xmm1,%zmm2,%zmm3`: exit 1.
 - [ ] **AS-T-041** When `enter` is written, the assembler shall encode the frame size as the 16-bit immediate and the nesting level as the 8-bit one.
