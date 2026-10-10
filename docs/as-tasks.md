@@ -248,8 +248,9 @@ status 0.
 
 ### B.5 x86-64 addressing
 
-- [ ] **AS-T-065** When `%r12` is written as an index register, the assembler shall encode it.
+- [x] **AS-T-065** When `%r12` is written as an index register, the assembler shall encode it.
   Trace: AS-X86-024.  Verify: T — `movl %eax,(%rax,%r12)`, `(%rbx,%r12,8)`, `(,%r12,4)`; `%rsp` as index still refused.
+  Done: the test for `%rsp` was of the low three bits.  339 more lines of the 64-bit corpus are GNU's bytes.  With it: the extension encoders had no such test at all and wrote `(%rax,%rsp)` as `(%rax)`; the stack pointer is now refused as an index where the operand is converted, for every encoder.  `test_insn_forms.sh`, 23 cases.
 - [ ] **AS-T-066** When `cvtsi2sd`, `cvtsi2ss` or their VEX forms are written with a 32-bit source, the assembler shall not set `REX.W` or `VEX.W`.
   Trace: AS-SEL-006, AS-X86-024, AS-EXT-008.  Verify: T — `cvtsi2sd %eax,%xmm0`, `cvtsi2sdl (%rax),%xmm0`, `cvtsi2sdq %rax,%xmm0`, `vcvtsi2sdq %rax,%xmm1,%xmm2`, `vcvtusi2sdl`: GNU.
   In part: `cvtsi2sd` and `cvtsi2ss` take `REX.W` from the width of the integer, and `cvtsd2si`/`cvtss2si` to a 64-bit register have it (`test_rex_prefix.sh`).  Still open: `vcvtsi2sdq %rax,…` lacks `VEX.W` and `vcvtusi2sdl %eax,…` has `EVEX.W`.
@@ -1062,5 +1063,5 @@ is not to be done, 370 is ticked with "removed" and the rest struck.
 | AS-EXT-009 | 185, 325, 332–337 |
 | AS-EXT-010 | 040, 171, 338, 339 (339 closes all of AS-EXT) |
 
-348 tasks: 74 done, 274 open.  Numbers run to 397, with gaps left between
+348 tasks: 75 done, 273 open.  Numbers run to 397, with gaps left between
 sections for tasks found along the way.

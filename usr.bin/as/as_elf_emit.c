@@ -8124,6 +8124,17 @@ static int convert_operand_x86(const as_operand_t *op, const char *mnemonic, as_
             }
         }
         if (op->u.mem.index_reg != NULL) {
+            const char *iname = op->u.mem.index_reg;
+
+            while (*iname == '%') {
+                ++iname;
+            }
+            /* The stack pointer is no index: its code there means that
+             * there is none, and the address would be without it. */
+            if (streq_ci(iname, "rsp") || streq_ci(iname, "esp") || streq_ci(iname, "sp")) {
+                snprintf(errbuf, errbuf_sz, "%%%s cannot be an index register", iname);
+                return -1;
+            }
             if (parse_x86_reg(op->u.mem.index_reg, &dst->u.mem.index) == 0) {
                 dst->u.mem.has_index = 1;
             } else {

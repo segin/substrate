@@ -1345,7 +1345,9 @@ static int modrm_sib_disp64(enc_ctx_t *ctx, as_x86_reg_t reg_field, const as_x86
             set_err(ctx, "invalid scale %u", m->scale);
             return -1;
         }
-        if (m->has_index && (m->index & 7) == AS_X86_REG_RSP) {
+        /* %rsp alone: %r12 has its low three bits and a REX.X to tell it
+         * apart, and is an index like any other.  It was refused. */
+        if (m->has_index && m->index == AS_X86_REG_RSP) {
             set_err(ctx, "RSP cannot be used as SIB index");
             return -1;
         }

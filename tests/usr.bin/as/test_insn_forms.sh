@@ -575,6 +575,34 @@ t "32"    660f6eee       'movd %esi, %xmm5'
 t "32"    d9cd           'fxch %st(5)'
 t "32"    0f20e6         'movl %cr4, %esi'
 
+# %r12 is an index register like any other: it has %rsp's low three
+# bits and a REX.X to tell it apart.  It was refused, as %rsp.  And the
+# stack pointer, which is no index, was refused by the main encoders
+# and silently left out of the address by the others.
+t "64"    42890420       'movl %eax,(%rax,%r12)'
+t "64"    428b0c20       'movl (%rax,%r12),%ecx'
+t "64"    428b0c60       'movl (%rax,%r12,2),%ecx'
+t "64"    4a8b44e708     'movq 8(%rdi,%r12,8),%rax'
+t "64"    4a8d0423       'leaq (%rbx,%r12),%rax'
+t "64"    428b04a500000000 'movl (,%r12,4),%eax'
+t "64"    43884c2500     'movb %cl, (%r13,%r12)'
+t "64"    4a0104e500000000 'addq %rax, sym(,%r12,8)'
+t "64"    f2430f1004e4   'movsd (%r12,%r12,8), %xmm0'
+t "64"    66420f38000420 'pshufb (%rax,%r12), %xmm0'
+t "64"    f3420fb804a0   'popcnt (%rax,%r12,4), %eax'
+t "64"    42ff442404     'incl 4(%rsp,%r12)'
+t "64"    418b0c04       'movl (%r12,%rax),%ecx'
+t "64"    428b0c28       'movl (%rax,%r13),%ecx'
+t "32"    8d0c04         'leal (%esp,%eax), %ecx'
+t "64"    8b442408       'movl 8(%rsp), %eax'
+t "64"    refused        'movl (%rax,%rsp),%ecx'
+t "64"    refused        'movl (,%rsp,2),%ecx'
+t "64"    refused        'pshufb (%rax,%rsp), %xmm0'
+t "64"    refused        'popcnt (%rax,%rsp), %eax'
+t "32"    refused        'movl (%eax,%esp),%ecx'
+t "32"    refused        'pshufb (%eax,%esp), %xmm0'
+t "32"    refused        'movw (%bx,%sp), %ax'
+
 # A displacement written as the number 0 is no displacement: `0(%eax)`
 # is `(%eax)`.  It was kept as a byte of zero.  And (%ebp), (%rbp) and
 # (%r13), which cannot be without one, have one byte of zero and had
