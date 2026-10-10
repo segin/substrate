@@ -1868,7 +1868,188 @@ static int write_defsym_file(const as_ctx_t *ctx, char **out_path) {
     return 0;
 }
 
-static int parse_cond_operand(const as_ctx_t *ctx, const char *s, long long *num, char *buf, size_t bufsz) {
+/*
+ * What the conditionals know of the source's symbols.  They are decided
+ * while the source is still text, a line at a time, so this is kept as
+ * the lines go by: a name is here from the line that defines it, with a
+ * value if `.set`, `.equ`, `.equiv` or `=` gave it one that is a number,
+ * and without if it is a label or its value is not known this early.
+ */
+typedef struct {
+    char *name;
+    int has_value;
+    long long value;
+} cond_sym_t;
+
+typedef struct {
+    const as_ctx_t *ctx;
+    cond_sym_t *items;
+    size_t count;
+    size_t cap;
+} cond_syms_t;
+
+static void cond_syms_free(cond_syms_t *syms) {
+    size_t i;
+
+    for (i = 0; i < syms->count; ++i) {
+        free(syms->items[i].name);
+    }
+    free(syms->items);
+    syms->items = NULL;
+    syms->count = 0;
+    syms->cap = 0;
+}
+
+static cond_sym_t *cond_sym_find(const cond_syms_t *syms, const char *name, size_t name_len) {
+    size_t i;
+
+    for (i = 0; i < syms->count; ++i) {
+        if (strlen(syms->items[i].name) == name_len && strncmp(syms->items[i].name, name, name_len) == 0) {
+            return &syms->items[i];
+        }
+    }
+    return NULL;
+}
+
+/* Is the name defined, here or by --defsym, with a value or without? */
+static int cond_sym_defined(const cond_syms_t *syms, const char *name) {
+    return cond_sym_find(syms, name, strlen(name)) != NULL || defsym_lookup((void *)syms->ctx, name, NULL);
+}
+
+/*
+ * A name's value, for the expressions of conditionals: an
+ * as_expr_lookup_fn, whose cookie is the cond_syms_t.  The source's own
+ * definition stands before --defsym's, which it may have replaced.
+ */
+static int cond_sym_lookup(void *cookie, const char *name, long long *value_out) {
+    const cond_syms_t *syms = (const cond_syms_t *)cookie;
+    const cond_sym_t *sym;
+
+    if (syms == NULL || name == NULL) {
+        return 0;
+    }
+    sym = cond_sym_find(syms, name, strlen(name));
+    if (sym != NULL) {
+        if (sym->has_value && value_out != NULL) {
+            *value_out = sym->value;
+        }
+        return sym->has_value;
+    }
+    return defsym_lookup((void *)syms->ctx, name, value_out);
+}
+
+static int cond_sym_define(cond_syms_t *syms, const char *name, size_t name_len, int has_value, long long value) {
+    cond_sym_t *sym = cond_sym_find(syms, name, name_len);
+
+    if (sym == NULL) {
+        if (syms->count == syms->cap) {
+            size_t ncap = syms->cap == 0 ? 32 : syms->cap * 2;
+            cond_sym_t *next = (cond_sym_t *)realloc(syms->items, ncap * sizeof(*next));
+
+            if (next == NULL) {
+                return -1;
+            }
+            syms->items = next;
+            syms->cap = ncap;
+        }
+        sym = &syms->items[syms->count];
+        sym->name = (char *)malloc(name_len + 1);
+        if (sym->name == NULL) {
+            return -1;
+        }
+        memcpy(sym->name, name, name_len);
+        sym->name[name_len] = '\0';
+        syms->count++;
+    }
+    sym->has_value = has_value;
+    sym->value = value;
+    return 0;
+}
+
+static int is_symbol_char(int c) {
+    return isalnum((unsigned char)c) || c == '_' || c == '.' || c == '$';
+}
+
+/*
+ * A line that is being assembled: note the symbols it defines.  Its
+ * labels, and then `.set NAME, EXPR` (or .equ, or .equiv) or
+ * `NAME = EXPR`.  An expression that is not a number yet -- it names a
+ * label, say -- leaves the name defined and without a value.
+ */
+static int cond_syms_note_line(cond_syms_t *syms, const char *line) {
+    const char *p = line;
+    const char *name;
+    const char *expr = NULL;
+    size_t name_len;
+    char *copy;
+    char *hash;
+    long long value = 0;
+    int has_value;
+    int rc;
+
+    for (;;) {
+        while (*p == ' ' || *p == '\t') {
+            p++;
+        }
+        name = p;
+        while (is_symbol_char(*p)) {
+            p++;
+        }
+        name_len = (size_t)(p - name);
+        if (name_len == 0) {
+            return 0;
+        }
+        if (*p != ':') {
+            break;
+        }
+        if (cond_sym_define(syms, name, name_len, 0, 0) != 0) {
+            return -1;
+        }
+        p++;
+    }
+
+    if ((name_len == 4 && (strncmp(name, ".set", 4) == 0 || strncmp(name, ".equ", 4) == 0)) ||
+        (name_len == 6 && strncmp(name, ".equiv", 6) == 0)) {
+        while (*p == ' ' || *p == '\t') {
+            p++;
+        }
+        name = p;
+        while (is_symbol_char(*p)) {
+            p++;
+        }
+        name_len = (size_t)(p - name);
+        while (*p == ' ' || *p == '\t') {
+            p++;
+        }
+        if (name_len == 0 || *p != ',') {
+            return 0;
+        }
+        expr = p + 1;
+    } else {
+        while (*p == ' ' || *p == '\t') {
+            p++;
+        }
+        if (name[0] == '.' || p[0] != '=' || p[1] == '=') {
+            return 0;
+        }
+        expr = p + 1;
+    }
+
+    copy = xstrdup(expr);
+    if (copy == NULL) {
+        return -1;
+    }
+    hash = strchr(copy, '#');
+    if (hash != NULL) {
+        *hash = '\0';
+    }
+    has_value = as_expr_eval_string(trim_in_place(copy), cond_sym_lookup, syms, &value) == AS_EXPR_EVAL_OK;
+    free(copy);
+    rc = cond_sym_define(syms, name, name_len, has_value, value);
+    return rc;
+}
+
+static int parse_cond_operand(cond_syms_t *syms, const char *s, long long *num, char *buf, size_t bufsz) {
     char *tmp;
     char *p;
 
@@ -1883,7 +2064,7 @@ static int parse_cond_operand(const as_ctx_t *ctx, const char *s, long long *num
     if (*p == '$') {
         p++;
     }
-    if (as_expr_eval_string(p, defsym_lookup, (void *)ctx, num) == AS_EXPR_EVAL_OK) {
+    if (as_expr_eval_string(p, cond_sym_lookup, syms, num) == AS_EXPR_EVAL_OK) {
         free(tmp);
         buf[0] = '\0';
         return 1;
@@ -1893,7 +2074,7 @@ static int parse_cond_operand(const as_ctx_t *ctx, const char *s, long long *num
     return 0;
 }
 
-static int eval_gas_cond_expr(const as_ctx_t *ctx, const char *expr) {
+static int eval_gas_cond_expr(cond_syms_t *syms, const char *expr) {
     char *tmp;
     char *p;
     char *op;
@@ -1910,18 +2091,17 @@ static int eval_gas_cond_expr(const as_ctx_t *ctx, const char *expr) {
     if (expr == NULL) {
         return 0;
     }
-    /* An expression of numbers, and of the names --defsym gave numbers
-     * to, is as_expr.c's, whole: `.if 1+1 == 2`, `.if (3 > 2) && 1`,
-     * `.if DEBUG`. */
-    if (as_expr_eval_string(expr, defsym_lookup, (void *)ctx, &ln) == AS_EXPR_EVAL_OK) {
+    /* An expression of numbers, and of the names that have been given
+     * numbers by now, is as_expr.c's, whole: `.if 1+1 == 2`,
+     * `.if (3 > 2) && 1`, `.if DEBUG`, `.if K*2 > 3`. */
+    if (as_expr_eval_string(expr, cond_sym_lookup, syms, &ln) == AS_EXPR_EVAL_OK) {
         return ln != 0;
     }
     /*
-     * What is left has another name in it.  No symbol of the source has
-     * a value yet -- this runs while the source is still text -- so the
-     * two sides of a comparison are compared as text, which is what a
-     * macro's `.if \reg == eax` wants; a side that is a number is still
-     * read as one.
+     * What is left has a name in it that has no number: the two sides
+     * of a comparison are compared as text, which is what a macro's
+     * `.if \reg == eax` wants; a side that is a number is still read as
+     * one.
      */
     tmp = xstrdup(expr);
     if (tmp == NULL) {
@@ -1947,8 +2127,8 @@ static int eval_gas_cond_expr(const as_ctx_t *ctx, const char *expr) {
     }
     if (op != NULL) {
         *op = '\0';
-        lt = parse_cond_operand(ctx, p, &ln, lb, sizeof(lb));
-        rt = parse_cond_operand(ctx, op + op_len, &rn, rb, sizeof(rb));
+        lt = parse_cond_operand(syms, p, &ln, lb, sizeof(lb));
+        rt = parse_cond_operand(syms, op + op_len, &rn, rb, sizeof(rb));
         if (lt == 1 && rt == 1) {
             switch (op_kind) {
             case 0: result = (ln == rn); break;
@@ -1974,7 +2154,7 @@ static int eval_gas_cond_expr(const as_ctx_t *ctx, const char *expr) {
         free(tmp);
         return result;
     }
-    lt = parse_cond_operand(ctx, p, &ln, lb, sizeof(lb));
+    lt = parse_cond_operand(syms, p, &ln, lb, sizeof(lb));
     free(tmp);
     if (lt == 1) {
         return ln != 0;
@@ -1990,6 +2170,7 @@ static int filter_gas_conditionals(const as_ctx_t *ctx, const char *in_path, cha
     size_t cap = 0;
     int fd = -1;
     gas_cond_frame_t stack[1024];
+    cond_syms_t known = { ctx, NULL, 0, 0 };
     size_t depth = 0;
     int active = 1;
     int rc = -1;
@@ -2026,8 +2207,7 @@ static int filter_gas_conditionals(const as_ctx_t *ctx, const char *in_path, cha
                 free(tmp);
                 goto out;
             }
-            /* The names known this early are those --defsym gave. */
-            defined = defsym_lookup((void *)ctx, trim_in_place(tmp), NULL);
+            defined = cond_sym_defined(&known, trim_in_place(tmp));
             free(tmp);
             f = &stack[depth++];
             f->parent_active = active;
@@ -2107,7 +2287,7 @@ static int filter_gas_conditionals(const as_ctx_t *ctx, const char *in_path, cha
                 goto out;
             }
             /* What is not an expression of numbers counts as 0. */
-            if (as_expr_eval_string(args, defsym_lookup, (void *)ctx, &v) != AS_EXPR_EVAL_OK) {
+            if (as_expr_eval_string(args, cond_sym_lookup, &known, &v) != AS_EXPR_EVAL_OK) {
                 v = 0;
             }
             if (line_starts_with_directive(d, ".ifeq")) truth = (v == 0);
@@ -2132,7 +2312,7 @@ static int filter_gas_conditionals(const as_ctx_t *ctx, const char *in_path, cha
             }
             f = &stack[depth++];
             f->parent_active = active;
-            f->branch_taken = f->parent_active && eval_gas_cond_expr(ctx, d + 3);
+            f->branch_taken = f->parent_active && eval_gas_cond_expr(&known, d + 3);
             f->active = f->branch_taken;
             f->else_seen = 0;
             active = f->active;
@@ -2148,7 +2328,7 @@ static int filter_gas_conditionals(const as_ctx_t *ctx, const char *in_path, cha
             if (f->else_seen || f->branch_taken || !f->parent_active) {
                 f->active = 0;
             } else {
-                f->active = eval_gas_cond_expr(ctx, d + 7);
+                f->active = eval_gas_cond_expr(&known, d + 7);
                 if (f->active) {
                     f->branch_taken = 1;
                 }
@@ -2180,6 +2360,9 @@ static int filter_gas_conditionals(const as_ctx_t *ctx, const char *in_path, cha
             continue;
         }
         if (active) {
+            if (cond_syms_note_line(&known, line) != 0) {
+                goto out;
+            }
             fputs(line, out);
         } else {
             fputc('\n', out);
@@ -2208,6 +2391,7 @@ out:
     if (rc != 0) {
         unlink(tmp_template);
     }
+    cond_syms_free(&known);
     return rc;
 }
 

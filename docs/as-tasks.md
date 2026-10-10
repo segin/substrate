@@ -303,10 +303,12 @@ with a symbol table.
 
 ### C.1 Conditionals and symbols
 
-- [ ] **AS-T-103** When `.ifdef` or `.ifndef` names a symbol, the assembler shall decide by whether the symbol is defined at that point.
+- [x] **AS-T-103** When `.ifdef` or `.ifndef` names a symbol, the assembler shall decide by whether the symbol is defined at that point.
   Trace: AS-FE-007.  Verify: T — after `.set X,1`; after a label; for an undefined name; for a `--defsym`.  After: 090.
-- [ ] **AS-T-104** When the expression of `.if`, `.ifeq`, `.ifne`, `.ifgt`, `.ifge`, `.iflt`, `.ifle` or `.elseif` names symbols with absolute values, the assembler shall decide by the expression's value.
+  Done, ahead of 090 and within the stage that decides conditionals while the source is text: `.ifdef` was false and `.ifndef` true whatever the name.  The stage now notes, as each assembled line goes by, the labels it defines and the names `.set`, `.equ`, `.equiv` and `=` define; a name is defined from its line on, and not by a line in a part left out.  `test_conditional_symbols.sh`, `test_cli_defsym.sh`.
+- [x] **AS-T-104** When the expression of `.if`, `.ifeq`, `.ifne`, `.ifgt`, `.ifge`, `.iflt`, `.ifle` or `.elseif` names symbols with absolute values, the assembler shall decide by the expression's value.
   Trace: AS-FE-007.  Verify: T — `.set X,0` / `.if X` false; `.if X==0` true; `.if K*2 > 3`.  After: 090.
+  Done with 103, by the same note of the source's symbols: a name given a number has it in a conditional's expression, the number it has at that line.  `.if X` with X set to 0 had been true, a name being text and text being not empty.  `test_conditional_symbols.sh`, 21 cases, GNU's bytes.  Not covered, and 105's: a value that is a distance between labels (`.set L, b - a` / `.if L == 3`), which GNU knows and this stage, before any layout, cannot.
 - [ ] **AS-T-105** If the expression of a conditional has no absolute value, then the assembler shall fail and say so.
   Trace: AS-FE-007.  Verify: T — `.if undefined_symbol`, `.if label_in_text`.  After: 104.
 - [ ] **AS-T-106** When `.ifc`, `.ifnc`, `.ifb`, `.ifnb`, `.ifeqs` or `.ifnes` is written, the assembler shall compare its operands as text.
@@ -391,8 +393,7 @@ with a symbol table.
   Trace: AS-FE-014.  Verify: T — `--bogus-option`: exit 1.
 - [x] **AS-T-139** When `--defsym NAME=VALUE` is given, the assembler shall define NAME absolute with that value before assembly.
   Trace: AS-FE-014.  Verify: T — `.long X`, `.if X`, `.ifdef X`.
-  Done: the option was stored and never read.  Each is now a `.set` in a file of its own whose tokens are read before the source's, so no line of the source has its number moved; and the conditionals, which are decided while the source is still text, are given the names and values.  An option with no `=`, no name, or a value that is not a number is refused.  `test_cli_defsym.sh`, which GNU as passes.  (`.if` and `.ifdef` still do not see a symbol the *source* defines: 103, 104.)
-- [ ] **AS-T-140** When the input file is `-` or none is given, the assembler shall read standard input.
+  Done: the option was stored and never read.  Each is now a `.set` in a file of its own whose tokens are read before the source's, so no line of the source has its number moved; and the conditionals, which are decided while the source is still text, are given the names and values.  An option with no `=`, no name, or a value that is not a number is refused.  `test_cli_defsym.sh`, which GNU as passes.- [ ] **AS-T-140** When the input file is `-` or none is given, the assembler shall read standard input.
   Trace: AS-FE-014, AS-FE-040.  Verify: T — `gcc -pipe -c` with this assembler as `as`.
 - [ ] **AS-T-141** When more than one input file is given, the assembler shall assemble them as one, in order.
   Trace: AS-FE-040.  Verify: T.
@@ -1016,5 +1017,5 @@ is not to be done, 370 is ticked with "removed" and the rest struck.
 | AS-EXT-009 | 185, 325, 332–337 |
 | AS-EXT-010 | 040, 171, 338, 339 (339 closes all of AS-EXT) |
 
-343 tasks: 45 done, 298 open.  Numbers run to 392, with gaps left between
+343 tasks: 47 done, 296 open.  Numbers run to 392, with gaps left between
 sections for tasks found along the way.
