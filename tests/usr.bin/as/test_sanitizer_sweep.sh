@@ -52,5 +52,22 @@ for mode in --32 --64; do
     done < mnemonics
 done
 
+# A pseudo-prefix that ends its line (AS-T-023).  The lexer compared the
+# text with "{vex}" for six characters -- the terminator among them, so
+# it matched only here -- and then stepped six on, past the end of the
+# line.  With and without a final newline.
+for text in '{vex}' '{evex}' '{disp8}' '{disp32}' 'nop {vex}' '{' '{vex' '}'; do
+    for nl in '\n' ''; do
+        printf "%s$nl" "$text" > t.s
+        ASAN_OPTIONS=detect_leaks=0 ./as --64 -o t.o t.s > out 2>&1
+        rc=$?
+        runs=$((runs + 1))
+        if [ "$rc" -gt 1 ] || grep -q 'AddressSanitizer\|runtime error' out; then
+            echo "FAIL '$text': exit $rc: $(grep -m1 'runtime error\|ERROR: AddressSanitizer' out)"
+            fail=1
+        fi
+    done
+done
+
 [ "$fail" -eq 0 ] && echo "ok: sanitizer sweep ($runs lines)"
 exit "$fail"

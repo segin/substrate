@@ -732,14 +732,14 @@ static int tokenize_line(const char *file, unsigned line_no, const char *line, i
         if (line[i] == '\0') {
             break;
         }
-        if (strncmp(line + i, "{vex}", 6) == 0) {
-            i += 6;
-            continue;
-        }
-        if (strncmp(line + i, "{evex}", 7) == 0) {
-            i += 7;
-            continue;
-        }
+        /*
+         * {vex} and {evex} are not skipped here.  They were, by a
+         * comparison that counted the terminator -- so it matched only
+         * where the prefix ended the line, and then stepped over the
+         * terminator and read on.  Dropping a request for an encoding
+         * would be wrong in any case; they go on as tokens and the
+         * statement is refused until the encoders honour them.
+         */
         if (is_punct_delim((unsigned char)line[i])) {
             char punct[2];
 

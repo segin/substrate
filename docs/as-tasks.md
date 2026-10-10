@@ -96,8 +96,12 @@ status 0.
 - [x] **AS-T-022** If an instruction that takes an operand is written with none, then the assembler shall report an error.
   Trace: AS-X86-040.  Verify: T — `inc`, `dec`, `push`, `pop`, `neg`, `not`, `mul`, `div`, `call`, `jmp` bare: exit 1, a message, nothing from the sanitizer build.
   Done: an absent operand is an empty operand, not a null pointer, in both encoders.  `test_sanitizer_sweep.sh` gives each of the encoder's 595 mnemonics four operand shapes in both modes under ASan and UBSan.
-- [ ] **AS-T-023** The lexer shall not read a byte beyond the terminator of the line it is given.
+- [x] **AS-T-023** The lexer shall not read a byte beyond the terminator of the line it is given.
   Trace: AS-FE-020.  Verify: T — a file whose only line is `{vex}`, and the same for `{evex}`, `{disp8}`, `{disp32}`, under the sanitizer build.
+  Done: the comparison that counted the terminator is gone; `test_sanitizer_sweep.sh` has the lines, with and without a final newline.
+- [ ] **AS-T-086** When `{vex}`, `{vex2}`, `{vex3}`, `{evex}`, `{disp8}`, `{disp32}`, `{load}`, `{store}` or `{rex}` precedes an instruction, the assembler shall encode the instruction as the prefix asks, or refuse the statement.
+  Trace: AS-FE-020, AS-FE-052.  Verify: T — `{evex} vaddps %xmm1,%xmm2,%xmm3` is EVEX, `{vex} vaddps …` VEX, `{disp32} movl (%eax),%ebx` has a 32-bit displacement: GNU; an unknown `{name}` is refused.  Today five places in the lexer and parser remove `{vex}` and `{evex}` and the instruction is encoded as if they were not written.  After: 161.
+  Found while doing 023.
 - [ ] **AS-T-024** When `.pushsection` is given a number as its second argument, the assembler shall select that subsection and shall leave the section's flags as they were.
   Trace: AS-SEC-001.  Verify: T — `.text` / `nop` / `.pushsection .text, 1` / `ret` / `.popsection` / `nop`: `.text` is `AX` and holds `90 90 c3`.
 - [ ] **AS-T-025** When a directive is written with an empty argument, the assembler shall keep the argument's position.
@@ -858,7 +862,7 @@ is not to be done, 370 is ticked with "removed" and the rest struck.
 | AS-FE-012 | 006, 112–117, 119 |
 | AS-FE-013 | 099 |
 | AS-FE-014 | 138–140, 142–145 |
-| AS-FE-020 | 023 |
+| AS-FE-020 | 023, 086 |
 | AS-FE-021 | 002 |
 | AS-FE-022 | 120 |
 | AS-FE-023 | 121, 122 |
