@@ -96,7 +96,7 @@ status 0.
   Trace: AS-EXT-001.  Verify: T — the `sse` and `sse2` families of the extension corpus under `--64` show no "refused".  After: 020.
 - [x] **AS-T-022** If an instruction that takes an operand is written with none, then the assembler shall report an error.
   Trace: AS-X86-040.  Verify: T — `inc`, `dec`, `push`, `pop`, `neg`, `not`, `mul`, `div`, `call`, `jmp` bare: exit 1, a message, nothing from the sanitizer build.
-  Done: an absent operand is an empty operand, not a null pointer, in both encoders.  `test_sanitizer_sweep.sh` gives each of the encoder's 595 mnemonics four operand shapes in both modes under ASan and UBSan.
+  Done: an absent operand is an empty operand, not a null pointer, in both encoders.  `test_sanitizer_sweep.sh` gives each of the encoder's 595 mnemonics fifteen sets of operands under ASan and UBSan, names the ten of this task and holds each to exit 1 and a message, and holds the plain build to the sanitizer build's result for every line.
 - [x] **AS-T-023** The lexer shall not read a byte beyond the terminator of the line it is given.
   Trace: AS-FE-020.  Verify: T — a file whose only line is `{vex}`, and the same for `{evex}`, `{disp8}`, `{disp32}`, under the sanitizer build.
   Done: the comparison that counted the terminator is gone; `test_sanitizer_sweep.sh` has the lines, with and without a final newline.
