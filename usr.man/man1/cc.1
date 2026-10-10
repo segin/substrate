@@ -64,6 +64,22 @@ Language mode.
 Optimization level.
 .It Fl m32 , Fl m64
 Target i386 or x86_64 ABI.
+The default is the ABI
+.Nm
+was itself built for: x86_64 on a 64-bit system, i386 on a 32-bit one.
+The target's runtime is used: startup code from
+.Pa /usr/lib
+or
+.Pa /usr/lib64 ,
+the C library from
+.Pa /lib
+or
+.Pa /lib64 ,
+and
+.Pa /sbin/ld.so
+or
+.Pa /sbin/ld64.so
+as the program's interpreter.
 .It Fl g
 Emit debug information.
 .It Fl Wall , Fl Werror

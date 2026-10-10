@@ -20,8 +20,23 @@
 #endif
 
 #ifdef CC_SUBSTRATE_BUILD
-#define CC_SUBSTRATE_LIBDIR  "/usr/lib"   /* static .a + crt0.o */
-#define CC_SUBSTRATE_SHLIBDIR "/lib"      /* dynamic .so.0 */
+/*
+ * The system keeps a runtime for each of its two ABIs: i386 under /usr/lib
+ * and /lib with /sbin/ld.so, x86-64 under /usr/lib64 and /lib64 with
+ * /sbin/ld64.so.  The target chooses between them; the default target is
+ * the one this program was itself built for.
+ */
+#define CC_SUBSTRATE_LIBDIR32   "/usr/lib"     /* static .a + crt0.o */
+#define CC_SUBSTRATE_SHLIBDIR32 "/lib"         /* dynamic .so.0 */
+#define CC_SUBSTRATE_LDSO32     "/sbin/ld.so"
+#define CC_SUBSTRATE_LIBDIR64   "/usr/lib64"
+#define CC_SUBSTRATE_SHLIBDIR64 "/lib64"
+#define CC_SUBSTRATE_LDSO64     "/sbin/ld64.so"
+#ifdef __x86_64__
+#define CC_DEFAULT_TARGET CC_TARGET_X86_64
+#else
+#define CC_DEFAULT_TARGET CC_TARGET_I386
+#endif
 #define CC_SUBSTRATE_INCDIR  "/usr/include"
 #define CC_SUBSTRATE_LOCAL_INCDIR "/usr/local/include"
 #endif
@@ -419,8 +434,13 @@ static int substrate_join_root(char out[PATH_MAX], const char *root,
   return snprintf(out, PATH_MAX, "%s", suffix) >= PATH_MAX ? -1 : 0;
 }
 
-static int substrate_print_runtime_file(const char *name, char out[PATH_MAX]) {
+static int substrate_print_runtime_file(const char *name, cc_target_t target,
+                                        char out[PATH_MAX]) {
   const char *root = substrate_sysroot();
+  const char *libdir = target == CC_TARGET_I386 ? CC_SUBSTRATE_LIBDIR32
+                                                : CC_SUBSTRATE_LIBDIR64;
+  const char *shlibdir = target == CC_TARGET_I386 ? CC_SUBSTRATE_SHLIBDIR32
+                                                  : CC_SUBSTRATE_SHLIBDIR64;
   if (name == NULL || out == NULL) {
     return -1;
   }
@@ -430,11 +450,11 @@ static int substrate_print_runtime_file(const char *name, char out[PATH_MAX]) {
   if (strcmp(name, "crt0.o") == 0 || strcmp(name, "libc.a") == 0 ||
       strcmp(name, "libm.a") == 0 || strcmp(name, "libgcc.a") == 0) {
     if (root != NULL) {
-      if (snprintf(out, PATH_MAX, "%s%s/%s", root, CC_SUBSTRATE_LIBDIR, name) >=
+      if (snprintf(out, PATH_MAX, "%s%s/%s", root, libdir, name) >=
           PATH_MAX) {
         return -1;
       }
-    } else if (snprintf(out, PATH_MAX, "%s/%s", CC_SUBSTRATE_LIBDIR, name) >=
+    } else if (snprintf(out, PATH_MAX, "%s/%s", libdir, name) >=
                PATH_MAX) {
       return -1;
     }
@@ -444,11 +464,11 @@ static int substrate_print_runtime_file(const char *name, char out[PATH_MAX]) {
    * policy in the per-component Makefiles under lib/ and usr.lib/. */
   if (strcmp(name, "libc.so.0") == 0 || strcmp(name, "libm.so.0") == 0) {
     if (root != NULL) {
-      if (snprintf(out, PATH_MAX, "%s%s/%s", root, CC_SUBSTRATE_SHLIBDIR,
+      if (snprintf(out, PATH_MAX, "%s%s/%s", root, shlibdir,
                    name) >= PATH_MAX) {
         return -1;
       }
-    } else if (snprintf(out, PATH_MAX, "%s/%s", CC_SUBSTRATE_SHLIBDIR, name) >=
+    } else if (snprintf(out, PATH_MAX, "%s/%s", shlibdir, name) >=
                PATH_MAX) {
       return -1;
     }
@@ -489,8 +509,7 @@ static int gcc_print_runtime_file(const char *name, cc_target_t target,
   char raw[PATH_MAX];
 
 #ifdef CC_SUBSTRATE_BUILD
-  (void)target;
-  if (substrate_print_runtime_file(name, raw) != 0) {
+  if (substrate_print_runtime_file(name, target, raw) != 0) {
     return -1;
   }
   return canonicalize_path(raw, out);
@@ -504,8 +523,7 @@ static int gcc_print_runtime_file(const char *name, cc_target_t target,
 
 static int gcc_print_libgcc(cc_target_t target, char out[PATH_MAX]) {
 #ifdef CC_SUBSTRATE_BUILD
-  (void)target;
-  if (substrate_print_runtime_file("libgcc.a", out) != 0) {
+  if (substrate_print_runtime_file("libgcc.a", target, out) != 0) {
     return -1;
   }
   return canonicalize_path(out, out);
@@ -1945,7 +1963,8 @@ static int run_ld(const cc_opts_t *o, const strvec_t *objs, const char *out) {
     (void)gcc_print_libgcc(o->target, libgcc);
     argv[at++] = "-pie";
     argv[at++] = "-dynamic-linker";
-    argv[at++] = "/sbin/ld.so";
+    argv[at++] = o->target == CC_TARGET_I386 ? CC_SUBSTRATE_LDSO32
+                                             : CC_SUBSTRATE_LDSO64;
     argv[at++] = crt0;
 #else
     if (gcc_print_runtime_file("crt1.o", o->target, crt1) != 0 ||
@@ -2071,7 +2090,7 @@ static int derive_out(const char *in, const char *ext, char out[PATH_MAX]) {
 static int maybe_print_info_and_exit(int argc, char **argv) {
   int i;
 #ifdef CC_SUBSTRATE_BUILD
-  cc_target_t target = CC_TARGET_I386;
+  cc_target_t target = CC_DEFAULT_TARGET;
 #else
   cc_target_t target = CC_TARGET_X86_64;
 #endif
@@ -2139,7 +2158,7 @@ int cc_main(int argc, char **argv) {
   o.i386_fp_math_mode = I386_FPMATH_AUTO;
   o.implicit_funcdecl_override = -1;
 #ifdef CC_SUBSTRATE_BUILD
-  o.target = CC_TARGET_I386;
+  o.target = CC_DEFAULT_TARGET;
 #else
   o.target = CC_TARGET_X86_64;
 #endif
