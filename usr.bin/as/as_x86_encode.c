@@ -1421,31 +1421,14 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
         }
 
         if (insn->byte_op) {
-            if (streq_ci(insn->mnemonic, "add")) {
-                op_rm_reg = 0x00;
-                op_reg_rm = 0x02;
-                ext = 0;
-            } else if (streq_ci(insn->mnemonic, "or")) {
-                op_rm_reg = 0x08;
-                op_reg_rm = 0x0a;
-                ext = 1;
-            } else if (streq_ci(insn->mnemonic, "and")) {
-                op_rm_reg = 0x20;
-                op_reg_rm = 0x22;
-                ext = 4;
-            } else if (streq_ci(insn->mnemonic, "sub")) {
-                op_rm_reg = 0x28;
-                op_reg_rm = 0x2a;
-                ext = 5;
-            } else if (streq_ci(insn->mnemonic, "xor")) {
-                op_rm_reg = 0x30;
-                op_reg_rm = 0x32;
-                ext = 6;
-            } else {
-                op_rm_reg = 0x38;
-                op_reg_rm = 0x3a;
-                ext = 7;
-            }
+            /*
+             * The byte form of each of the eight is the opcode below its
+             * word form, and the same /digit.  This was a second ladder
+             * of names that had no arm for adc or sbb and ended in cmp's:
+             * `adcb %al, %al` was assembled as `cmpb %al, %al`.
+             */
+            op_rm_reg = (uint8_t)(op_rm_reg - 1u);
+            op_reg_rm = (uint8_t)(op_reg_rm - 1u);
         }
         if (insn->op_count == 2 && is_reg_or_mem(a) && b->kind == AS_X86_OP_REG) {
             if (encode_reg_rm_pair(&ctx, op_rm_reg, a, b, 1) != 0) {
@@ -4084,31 +4067,11 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
         }
         rex_w = bits == 64 ? 1 : 0;
         if (insn->byte_op) {
-            if (streq_ci(insn->mnemonic, "add")) {
-                op_rm_reg = 0x00;
-                op_reg_rm = 0x02;
-                ext = 0;
-            } else if (streq_ci(insn->mnemonic, "or")) {
-                op_rm_reg = 0x08;
-                op_reg_rm = 0x0a;
-                ext = 1;
-            } else if (streq_ci(insn->mnemonic, "and")) {
-                op_rm_reg = 0x20;
-                op_reg_rm = 0x22;
-                ext = 4;
-            } else if (streq_ci(insn->mnemonic, "sub")) {
-                op_rm_reg = 0x28;
-                op_reg_rm = 0x2a;
-                ext = 5;
-            } else if (streq_ci(insn->mnemonic, "xor")) {
-                op_rm_reg = 0x30;
-                op_reg_rm = 0x32;
-                ext = 6;
-            } else {
-                op_rm_reg = 0x38;
-                op_reg_rm = 0x3a;
-                ext = 7;
-            }
+            /* The byte form is the opcode below the word form; see the
+             * 32-bit encoder, which had the same ladder without adc and
+             * sbb in it. */
+            op_rm_reg = (uint8_t)(op_rm_reg - 1u);
+            op_reg_rm = (uint8_t)(op_reg_rm - 1u);
         }
 
         if (insn->op_count == 2 && (a->kind == AS_X86_OP_REG || a->kind == AS_X86_OP_MEM) && b->kind == AS_X86_OP_REG) {

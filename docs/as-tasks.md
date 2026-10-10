@@ -145,7 +145,7 @@ status 0.
 
 ### B.3 Wrong instruction
 
-- [ ] **AS-T-038** When `adcb` or `sbbb` is written, the assembler shall encode `adc` or `sbb`.
+- [x] **AS-T-038** When `adcb` or `sbbb` is written, the assembler shall encode `adc` or `sbb`.
   Trace: AS-X86-020.  Verify: T — register, memory and immediate forms, with and without `lock`: GNU.
 - [x] **AS-T-039** When `ret`, `retw`, `retl` or `retq` is given an immediate, the assembler shall encode `C2` followed by the 16-bit count.
   Trace: AS-X86-021, AS-OBJ-013.  Verify: T — `ret $4`, `ret $0`, `retw $8`, `--64` `ret $16`, `retq $8`: GNU.
