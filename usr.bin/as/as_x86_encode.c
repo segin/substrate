@@ -2610,6 +2610,15 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
          * The prefix byte was already emitted via emit_prefixes since
          * AS_PREFIX_SEG_OVERRIDE is set on the instruction; nothing
          * more to do here. */
+    } else if (streq_ci(insn->mnemonic, "endbr32") || streq_ci(insn->mnemonic, "endbr64")) {
+        /* F3 0F 1E FB and FA: the landing pads gcc writes at the head of
+         * every function where the distribution builds it with
+         * -fcf-protection.  Either assembles in either mode. */
+        if (insn->op_count != 0 || emit8(&ctx, 0xf3) != 0 || emit8(&ctx, 0x0f) != 0 ||
+            emit8(&ctx, 0x1e) != 0 ||
+            emit8(&ctx, streq_ci(insn->mnemonic, "endbr32") ? 0xfb : 0xfa) != 0) {
+            return -1;
+        }
     } else {
         set_err(&ctx, "unsupported mnemonic: %s", insn->mnemonic != NULL ? insn->mnemonic : "<null>");
         return -1;
@@ -5664,6 +5673,12 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
         }
     } else if (streq_ci(insn->mnemonic, "cpuid")) {
         if (insn->op_count != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0xa2) != 0) {
+            return -1;
+        }
+    } else if (streq_ci(insn->mnemonic, "endbr32") || streq_ci(insn->mnemonic, "endbr64")) {
+        if (insn->op_count != 0 || emit8(&ctx, 0xf3) != 0 || emit8(&ctx, 0x0f) != 0 ||
+            emit8(&ctx, 0x1e) != 0 ||
+            emit8(&ctx, streq_ci(insn->mnemonic, "endbr32") ? 0xfb : 0xfa) != 0) {
             return -1;
         }
     } else if (streq_ci(insn->mnemonic, "rsm")) {
