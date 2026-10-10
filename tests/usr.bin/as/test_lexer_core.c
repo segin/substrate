@@ -58,7 +58,10 @@ int main(int argc, char **argv) {
         !has_token(&toks, AS_TOK_IMMEDIATE, "$0x10") ||
         !has_token(&toks, AS_TOK_REGISTER, "%eax") ||
         !has_token(&toks, AS_TOK_DIRECTIVE, ".ascii") ||
-        !has_token(&toks, AS_TOK_STRING, "A\nBC")) {
+        /* A string token is the text between the quotes as written; the
+         * escapes are decoded where the string is used
+         * (as_decode_string_literal). */
+        !has_token(&toks, AS_TOK_STRING, "A\\nB\\x43")) {
         fail("AT&T tokenization failed", &toks);
         as_token_vec_free(&toks);
         return 1;

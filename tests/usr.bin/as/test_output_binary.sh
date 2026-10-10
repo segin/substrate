@@ -25,7 +25,9 @@ cat > "$TMP/layout.s" <<'SRC'
 SRC
 
 "$AS" -64 -O binary -o "$TMP/layout.bin" "$TMP/layout.s"
-[ "$(hex_of "$TMP/layout.bin")" = "90000000cc0000004142000044332211000000" ]
+# Padding in a section of code is NOPs, as GNU as writes it: three bytes
+# in 64-bit mode are 90 66 90 from GNU as 2.47.  (This test wanted zeros.)
+[ "$(hex_of "$TMP/layout.bin")" = "90906690cc0000004142000044332211000000" ]
 
 cat > "$TMP/org.s" <<'SRC'
 .text

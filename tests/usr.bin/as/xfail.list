@@ -2,35 +2,39 @@
 # this: a test named here is expected to fail, and the suite fails if it
 # passes, so the line goes in the commit that mends the cause.
 #
-# name <white space> reason.  AS-T-nnn is the task in docs/as-tasks.md that
-# mends it.  "untriaged" means the cause has not been run down yet
-# (AS-T-012).  A reason beginning SKIP means the test is not run: these
-# build inside the source tree and `make clean` it.
+# name <white space> reason.  Every one is a defect of the assembler but
+# those marked SKIP; AS-T-nnn is the task in docs/as-tasks.md that mends
+# it.  A reason beginning SKIP means the test is not run: these build
+# inside the source tree and `make clean` it.
+#
+# Tests whose expectation was stale -- the assembler having since changed
+# on purpose -- were corrected rather than listed: test_directive_surface
+# (.if and .macro exist), test_x86_64_short_local_temp_branch and
+# test_x86_local_temp_branch_runtime (a branch within a section is
+# resolved, not relocated), test_lexer_core (string tokens are raw),
+# test_output_binary (code is padded with NOPs), test_testing_fuzz_perf
+# (the object is the assembler's own, not GNU's byte for byte).
 test_build_matrix.sh	SKIP builds with NATIVE_BUILD=1 in usr.bin/as and asserts the Makefile's text of April; to be rewritten (AS-T-013)
 test_integration_matrix.sh	SKIP builds with NATIVE_BUILD=1 in usr.bin/as (AS-T-013)
 test_integration_rollout.sh	SKIP runs make clean in usr.bin/as and builds there twice (AS-T-013)
-test_complex_control_32_64.sh	gcc -O2 -fPIC output is refused: "invalid operand '< 32'"; untriaged (AS-T-019)
+test_complex_control_32_64.sh	a ; inside a comment begins a statement: gcc -fverbose-asm writes "# for (i = 0; i < 32; i++)" (AS-T-093)
 test_diagnostics_determinism.sh	a message names the temporary file and its line, not the user's (AS-T-090, AS-T-147)
-test_directive_surface_32_64.sh	wants an .if it calls unsupported to fail; untriaged, perhaps stale
 test_fuzz_matrix.sh	runs test_testing_fuzz_perf.sh
-test_gnu_compat_surface.sh	runs usr.bin/ld/ld, the program built for the target, on the host (AS-T-013)
 test_i386_encoding.sh	string instructions with no operands are refused (AS-T-054)
 test_i8086_corpus.sh	16-bit code: refused at a line with an empty message (AS-T-347, AS-T-147)
 test_i8086_elf_object.sh	16-bit code, as above (AS-T-347)
 test_i8086_realmode_core.sh	16-bit code, as above (AS-T-347)
 test_intel_dual_syntax.sh	string instructions with no operands are refused (AS-T-054)
 test_isa_heavy_64.sh	salq is not a mnemonic (AS-T-172)
-test_lexer_core.sh	a token is not what the test expects; untriaged
-test_output_binary.sh	wants zero bytes where code is padded and gets 90; untriaged, perhaps stale
+test_lexer_core.sh	.include does nothing: "Include path expansion failed" (AS-T-123, AS-T-125)
+test_output_binary.sh	code is padded with one-byte NOPs, not GNU's sequences (AS-T-251)
 test_relocations_elf_32_64.sh	a forced short jump out of range is assembled and should be refused (AS-T-221)
 test_sections_symbols_expr_32_64.sh	--64: "failed to emit relocations" for a data relocation narrower than 64 bits (AS-T-210)
 test_source_model_32_64.sh	.include does nothing, so an include cycle is not an error (AS-T-123, AS-T-126)
-test_testing_fuzz_perf.sh	compares the whole object file with gcc's byte for byte; untriaged
+test_testing_fuzz_perf.sh	runs test_relocations_elf_32_64.sh
 test_unit_matrix.sh	runs test_i8086_corpus.sh
 test_x86_32_corpus_intel_roundtrip.sh	ins with operands is refused (AS-T-054)
-test_x86_64_corpus_intel_roundtrip.sh	xadd is refused in 64-bit mode (AS-T-020)
-test_x86_64_encoding.sh	a line is refused with the message "?"; untriaged
-test_x86_64_short_local_temp_branch.sh	wants an R_X86_64_PC8 relocation that is not made; untriaged
-test_x86_avx512f_core.sh	vaddpd: bytes differ from the test's; untriaged (section I)
+test_x86_64_corpus_intel_roundtrip.sh	ins with operands is refused (AS-T-054)
+test_x86_64_encoding.sh	jrcxz to a label is refused with the message "?" (AS-T-037)
+test_x86_avx512f_core.sh	EVEX vaddpd is encoded with W = 0 (AS-T-339)
 test_x86_avx_core.sh	vpermilps is not encoded (AS-T-327)
-test_x86_local_temp_branch_runtime.sh	wants an R_X86_64_PC32 relocation that is not made; untriaged

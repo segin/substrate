@@ -39,7 +39,7 @@ cc -Wall -Wextra -Werror -D_GNU_SOURCE -I"$ROOT/usr.bin/as" -iquote "$ROOT/inclu
    "$ROOT/usr.bin/as/as_x86_reloc.c" \
    "$ROOT/usr.bin/as/as_expr.c" "$ROOT/usr.bin/as/as_lexer.c" "$ROOT/usr.bin/as/as_parser.c" "$ROOT/usr.bin/as/as_symtab.c" \
    "$ROOT/usr.bin/as/as_sections.c" "$ROOT/usr.bin/as/as_data.c" "$ROOT/usr.bin/as/as_elf_emit.c" \
-   "$ROOT/tests/usr.bin/as/test_symver_elf.c" "$ROOT/usr.lib/elfobj/libelfobj.a" \
+   "$ROOT/tests/usr.bin/as/test_symver_elf.c" "${ELFOBJ_A:-$ROOT/usr.lib/elfobj/libelfobj.a}" \
    -o "$TMP/test_symver_elf"
 
 "$TMP/test_symver_elf" "$TMP/symver.s" "$TMP/out.o"

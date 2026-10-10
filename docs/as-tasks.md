@@ -86,8 +86,9 @@ status 0.
 
 ### B.1 One-line causes with wide effect
 
-- [ ] **AS-T-020** When a branch of the 64-bit encoder's first mnemonic chain has encoded an instruction, the encoder shall return that encoding.
+- [x] **AS-T-020** When a branch of the 64-bit encoder's first mnemonic chain has encoded an instruction, the encoder shall return that encoding.
   Trace: AS-X86-001, AS-EXT-001.  Verify: T — under `--64`, `testl %eax,%ebx`, `xchg`, `cmpxchg`, `cpuid`, `rdtsc`, `rol`, `neg`, `not`, three-operand `imul`, `bsf`, `xorps %xmm0,%xmm0`, `addpd`, `movd`, `sqrtsd`, `fnstsw` match GNU.
+  Done: `test_x86_64_first_chain.sh`.  Of the 18,072 lines of the 64-bit corpus, 2,977 that were refused are assembled; identical to GNU rose from 6,947 to 8,879 and no line that assembled before changed.  The shifts, rotates, `xchg` and `xadd` set `REX.W` for every size but a byte, which the refusal had hidden; that is mended with it.  **Of the newly assembled lines 859 differ from GNU and 185 are ones GNU refuses**: they are the defects of 038, 061–063, 168–171, 186 and 192, now reached in 64-bit mode as they always were in 32-bit.
 - [ ] **AS-T-021** The 51 SSE and 45 SSE2 mnemonics refused in 64-bit mode shall each assemble to GNU's bytes for register and constant-memory operands.
   Trace: AS-EXT-001.  Verify: T — the `sse` and `sse2` families of the extension corpus under `--64` show no "refused".  After: 020.
 - [ ] **AS-T-022** If an instruction that takes an operand is written with none, then the assembler shall report an error.

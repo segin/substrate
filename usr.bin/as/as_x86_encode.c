@@ -576,6 +576,34 @@ static int operand_bits(const as_x86_operand_t *op) {
     return (int)op->size_bits;
 }
 
+/*
+ * Whether a 64-bit instruction with these operands wants REX.W: a 64-bit
+ * register among them, or the q suffix (insn->rex_w) where there is none.
+ * Several branches of the 64-bit encoder set REX.W for anything that was
+ * not a byte operation, so `roll $3, %eax` rotated %rax.
+ */
+static int x64_wants_rex_w(const as_x86_insn_t *insn, const as_x86_operand_t *a,
+                           const as_x86_operand_t *b) {
+    int bits = 0;
+
+    if (insn->byte_op) {
+        return 0;
+    }
+    if (a != NULL && a->kind == AS_X86_OP_REG) {
+        bits = operand_bits(a);
+    }
+    if (bits == 0 && b != NULL && b->kind == AS_X86_OP_REG) {
+        bits = operand_bits(b);
+    }
+    if (bits == 0 && a != NULL) {
+        bits = operand_bits(a);
+    }
+    if (bits != 0) {
+        return bits == 64;
+    }
+    return insn->rex_w ? 1 : 0;
+}
+
 static int operand_fpu_index(const as_x86_operand_t *op, unsigned *out) {
     if (op == NULL || out == NULL || op->kind != AS_X86_OP_FPU || op->u.fpu > 7u) {
         return -1;
@@ -3938,7 +3966,7 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
             return -1;
         }
     } else if (streq_ci(insn->mnemonic, "xchg")) {
-        rex_w = 1;
+        rex_w = x64_wants_rex_w(insn, b, a);
         if (insn->op_count == 2 && (a->kind == AS_X86_OP_REG || a->kind == AS_X86_OP_MEM) && b->kind == AS_X86_OP_REG) {
             if (emit8(&ctx, 0x87) != 0 || modrm_sib_disp64(&ctx, b->u.reg, a, &rex_r, &rex_x, &rex_b) != 0) {
                 return -1;
@@ -3948,7 +3976,7 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
             return -1;
         }
     } else if (streq_ci(insn->mnemonic, "xadd")) {
-        rex_w = insn->byte_op ? 0 : 1;
+        rex_w = x64_wants_rex_w(insn, b, a);
         if (insn->op_count == 2 && (a->kind == AS_X86_OP_REG || a->kind == AS_X86_OP_MEM) && b->kind == AS_X86_OP_REG) {
             if (emit8(&ctx, 0x0f) != 0 || emit8(&ctx, insn->byte_op ? 0xc0 : 0xc1) != 0 ||
                 modrm_sib_disp64(&ctx, b->u.reg, a, &rex_r, &rex_x, &rex_b) != 0) {
@@ -4188,7 +4216,8 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
                streq_ci(insn->mnemonic, "rol") || streq_ci(insn->mnemonic, "ror") ||
                streq_ci(insn->mnemonic, "rcl") || streq_ci(insn->mnemonic, "rcr")) {
         uint8_t ext;
-        rex_w = insn->byte_op ? 0 : 1;
+        /* The count, where it is %cl, says nothing of the size. */
+        rex_w = x64_wants_rex_w(insn, a, NULL);
         if (streq_ci(insn->mnemonic, "rol")) {
             ext = 0;
         } else if (streq_ci(insn->mnemonic, "rcl")) {
@@ -5952,8 +5981,20 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
             }
             goto finish;
         }
-        /* Fall through to the register/memory vector shift forms below. */
+        /* The register and memory forms of these shifts are below. */
+        goto more_mnemonics;
+    } else {
+        /* Not one of the mnemonics above. */
+        goto more_mnemonics;
     }
+    /*
+     * A branch above has encoded the instruction.  Without this, every
+     * one of them went on into the chain below, matched nothing there, and
+     * was refused by its final else as an unsupported mnemonic.
+     */
+    goto finish;
+
+more_mnemonics:
     if (streq_ci(insn->mnemonic, "psrlw") || streq_ci(insn->mnemonic, "psrld") ||
                streq_ci(insn->mnemonic, "psrlq") || streq_ci(insn->mnemonic, "paddq") ||
                streq_ci(insn->mnemonic, "pmullw")) {

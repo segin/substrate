@@ -3,7 +3,7 @@ set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)
 AS=${AS:-"$ROOT/usr.bin/as/as"}
-LD="$ROOT/usr.bin/ld/ld"
+LD=${LD:-"$ROOT/usr.bin/ld/ld"}
 TMP=${TMPDIR:-/tmp}/asld-main-$$
 mkdir -p "$TMP"
 trap 'rm -rf "$TMP"' EXIT INT TERM

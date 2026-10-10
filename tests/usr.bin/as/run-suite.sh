@@ -33,6 +33,25 @@ ${CC:-cc} -O1 -w -o "$work/as" \
 AS="$work/as"
 export AS
 
+# Some of the tests link what they assemble, with substrate's linker.
+${CC:-cc} -O1 -w -o "$work/ld" \
+    -idirafter "$top/include" -idirafter "$top/sys" -idirafter "$top/sys/include" \
+    -I"$top/usr.lib/elfobj/src" "$top"/usr.bin/ld/*.c "$top"/usr.lib/elfobj/src/*.c 2> "$work/build.err" ||
+    { echo "FAIL: the linker does not build for the host"; head -20 "$work/build.err"; exit 1; }
+LD="$work/ld"
+export LD
+
+# And some unit tests link the object library itself.
+mkdir "$work/elfobj" && (
+    cd "$work/elfobj" &&
+    ${CC:-cc} -O1 -w -c -idirafter "$top/include" -idirafter "$top/sys" -idirafter "$top/sys/include" \
+        -I"$top/usr.lib/elfobj/src" "$top"/usr.lib/elfobj/src/*.c &&
+    ar rcs "$work/libelfobj.a" ./*.o
+) 2> "$work/build.err" ||
+    { echo "FAIL: libelfobj does not build for the host"; head -20 "$work/build.err"; exit 1; }
+ELFOBJ_A="$work/libelfobj.a"
+export ELFOBJ_A
+
 cd "$here" || exit 1
 if [ $# -gt 0 ]; then tests="$*"; else tests=$(ls test_*.sh | sort); fi
 

@@ -98,8 +98,9 @@ check_obj() {
     objdump -s -j .data "$obj" | grep -Eiq "41414142"
 
     # type/size metadata for functions
-    readelf --wide -s "$obj" | awk '$8 == "dir_fn" && $4 == "FUNC" && strtonum("0x"$3) > 0 { ok = 1 } END { exit ok ? 0 : 1 }'
-    readelf --wide -s "$obj" | awk '$8 == "comdat_fn" && $4 == "FUNC" && strtonum("0x"$3) > 0 { ok = 1 } END { exit ok ? 0 : 1 }'
+    # (A size that is not all zeros: strtonum is gawk's alone.)
+    readelf --wide -s "$obj" | awk '$8 == "dir_fn" && $4 == "FUNC" && $3 !~ /^0+$/ { ok = 1 } END { exit ok ? 0 : 1 }'
+    readelf --wide -s "$obj" | awk '$8 == "comdat_fn" && $4 == "FUNC" && $3 !~ /^0+$/ { ok = 1 } END { exit ok ? 0 : 1 }'
     readelf --section-groups "$obj" | grep -q "comdat_fn"
     readelf --section-groups "$obj" | grep -q "\\.text.comdat_fn"
 
@@ -107,8 +108,8 @@ check_obj() {
     a_hex=$(sym_hex "$obj" org_a)
     b_hex=$(sym_hex "$obj" org_b)
     [ -n "$a_hex" ] && [ -n "$b_hex" ]
-    a=$((16#$a_hex))
-    b=$((16#$b_hex))
+    a=$((0x$a_hex))
+    b=$((0x$b_hex))
     [ $((b - a)) -eq 16 ]
 }
 

@@ -3,7 +3,7 @@ set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)
 AS=${AS:-"$ROOT/usr.bin/as/as"}
-LD="$ROOT/usr.bin/ld/ld"
+LD=${LD:-"$ROOT/usr.bin/ld/ld"}
 TMP=${TMPDIR:-/tmp}/as-testperf-$$
 mkdir -p "$TMP/corpus"
 trap 'rm -rf "$TMP"' EXIT INT TERM
@@ -42,6 +42,18 @@ unit_directive:
 .size unit_directive, .-unit_directive
 SRC
 
+# The same code and data as GNU as makes of the source.  (This test
+# compared the two object files whole, which held while the assembler
+# handed its work to GNU as; it writes its own objects now, and their
+# section and symbol tables are laid out differently.)
+same_contents() {
+    for sec in .text .data .rodata; do
+        objcopy -O binary -j "$sec" "$1" "$TMP/ours.bin"
+        objcopy -O binary -j "$sec" "$2" "$TMP/ref.bin"
+        cmp "$TMP/ours.bin" "$TMP/ref.bin"
+    done
+}
+
 # Unit-like and golden/differential checks vs backend GNU as.
 for mode in 32 64; do
     mflag="-m$mode"
@@ -52,14 +64,14 @@ for mode in 32 64; do
         ref="$TMP/${base}_${mode}.ref.o"
         "$AS" "$aflag" -o "$out" "$src"
         gcc -c -x assembler-with-cpp "$mflag" -o "$ref" "$src"
-        cmp "$out" "$ref"
+        same_contents "$out" "$ref"
         readelf -a "$out" >/dev/null
         objdump -dr "$out" >/dev/null
     done
 done
 
 # Relocation unit/edge-overflow checks.
-tests/usr.bin/as/test_relocations_elf_32_64.sh
+"$ROOT/tests/usr.bin/as/test_relocations_elf_32_64.sh"
 
 # Integration with cc-generated assembly.
 cat > "$TMP/integration.c" <<'SRC'
@@ -97,7 +109,7 @@ diff_$i:
 SRC
     "$AS" -64 -o "$TMP/diff_$i.o" "$TMP/corpus/diff_$i.s"
     gcc -c -x assembler-with-cpp -m64 -o "$TMP/diff_$i.ref.o" "$TMP/corpus/diff_$i.s"
-    cmp "$TMP/diff_$i.o" "$TMP/diff_$i.ref.o"
+    same_contents "$TMP/diff_$i.o" "$TMP/diff_$i.ref.o"
 done
 
 # Fuzzing harness smoke for parser/directive handling (no crashes).

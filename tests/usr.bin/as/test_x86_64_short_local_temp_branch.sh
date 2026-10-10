@@ -21,8 +21,20 @@ short_local_temp_rel64:
 SRC
 
 "$AS" -64 -o "$TMP/short_local_temp_rel64.o" "$TMP/short_local_temp_rel64.s"
+# A branch to a label of its own section is resolved by the assembler: the
+# short form, its distance in place, and no relocation.  (This test once
+# wanted an R_X86_64_PC8 against .Ltarget, which is what the assembler
+# wrote before it sized such branches itself.)
 readelf --wide -r "$TMP/short_local_temp_rel64.o" > "$TMP/short_local_temp_rel64.relocs"
-grep -q 'R_X86_64_PC8' "$TMP/short_local_temp_rel64.relocs"
-grep -q '.Ltarget - 1' "$TMP/short_local_temp_rel64.relocs"
+if grep -q 'R_X86_64_' "$TMP/short_local_temp_rel64.relocs"; then
+    echo "a relocation for a branch within the section"
+    exit 1
+fi
+objcopy -O binary -j .text "$TMP/short_local_temp_rel64.o" "$TMP/short_local_temp_rel64.bin"
+# cmpq (4 bytes), then 75 03: over the three bytes of the xorq, to the ret.
+case "$(od -An -tx1 "$TMP/short_local_temp_rel64.bin" | tr -d ' \n')" in
+4883f8007503??????c3) ;;
+*) echo "the branch is not the short form over three bytes"; exit 1 ;;
+esac
 
 echo "ok: x86_64 short local temp branch"

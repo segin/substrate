@@ -87,10 +87,10 @@ check_obj() {
 
     [ -n "$org0_hex" ] && [ -n "$org1_hex" ] && [ -n "$al1_hex" ] && [ -n "$al2_hex" ]
 
-    org0=$((16#$org0_hex))
-    org1=$((16#$org1_hex))
-    al1=$((16#$al1_hex))
-    al2=$((16#$al2_hex))
+    org0=$((0x$org0_hex))
+    org1=$((0x$org1_hex))
+    al1=$((0x$al1_hex))
+    al2=$((0x$al2_hex))
 
     [ $((org1 - org0)) -eq 16 ]
     [ $((al1 % 16)) -eq 0 ]
@@ -109,11 +109,11 @@ x:
     nop
 .endif
 SRC
-if "$AS" -32 -o "$TMP/if_bad.o" "$TMP/if_bad.s" >"$TMP/if_bad.out" 2>"$TMP/if_bad.err"; then
-    echo "expected unsupported .if directive failure"
-    exit 1
-fi
-grep -q "unsupported directive .if" "$TMP/if_bad.err"
+# .if and .macro were refused when this test was written; they are
+# implemented now, and what they produce is checked.
+"$AS" -32 -o "$TMP/if_bad.o" "$TMP/if_bad.s"
+objcopy -O binary -j .text "$TMP/if_bad.o" "$TMP/if_bad.bin"
+[ "$(od -An -tx1 "$TMP/if_bad.bin" | tr -d ' \n')" = "90" ]
 
 cat > "$TMP/macro_bad.s" <<'SRC'
 .macro M
@@ -122,10 +122,8 @@ cat > "$TMP/macro_bad.s" <<'SRC'
 x:
     nop
 SRC
-if "$AS" -32 -o "$TMP/macro_bad.o" "$TMP/macro_bad.s" >"$TMP/macro_bad.out" 2>"$TMP/macro_bad.err"; then
-    echo "expected unsupported .macro directive failure"
-    exit 1
-fi
-grep -q "unsupported directive .macro" "$TMP/macro_bad.err"
+"$AS" -32 -o "$TMP/macro_bad.o" "$TMP/macro_bad.s"
+objcopy -O binary -j .text "$TMP/macro_bad.o" "$TMP/macro_bad.bin"
+[ "$(od -An -tx1 "$TMP/macro_bad.bin" | tr -d ' \n')" = "90" ]
 
 echo "ok: directive surface 32/64"

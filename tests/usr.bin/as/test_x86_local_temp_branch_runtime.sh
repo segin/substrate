@@ -3,7 +3,7 @@ set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)
 AS=${AS:-"$ROOT/usr.bin/as/as"}
-LD="$ROOT/usr.bin/ld/ld"
+LD=${LD:-"$ROOT/usr.bin/ld/ld"}
 TMP=${TMPDIR:-/tmp}/as-local-temp-branch-$$
 mkdir -p "$TMP"
 trap 'rm -rf "$TMP"' EXIT INT TERM
@@ -34,14 +34,18 @@ tail:
 SRC
 
 "$AS" -64 -o "$TMP/local_temp_rel64.o" "$TMP/local_temp_rel64.s"
+# The branch is within its section: the assembler resolves it and writes
+# no relocation.  (This test once wanted an R_X86_64_PC32 against
+# .Ltarget.)  What matters is that the program, linked, takes the jump.
 readelf --wide -r "$TMP/local_temp_rel64.o" > "$TMP/local_temp_rel64.relocs"
-grep -q 'R_X86_64_PC32' "$TMP/local_temp_rel64.relocs"
-grep -q '.Ltarget - 4' "$TMP/local_temp_rel64.relocs"
+if grep -q 'R_X86_64_' "$TMP/local_temp_rel64.relocs"; then
+    echo "a relocation for a branch within the section"
+    exit 1
+fi
 
 "$LD" -m elf_x86_64 -o "$TMP/local_temp_rel64" "$TMP/local_temp_rel64.o"
 objdump -d "$TMP/local_temp_rel64" > "$TMP/local_temp_rel64.dis"
 grep -q 'jmp' "$TMP/local_temp_rel64.dis"
-grep -q '<.Ltarget>' "$TMP/local_temp_rel64.dis"
 
 set +e
 "$TMP/local_temp_rel64"
