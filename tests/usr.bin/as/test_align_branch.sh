@@ -66,5 +66,41 @@ objcopy -O binary -j .data t.o t.bin
 [ "$(od -An -v -tx1 t.bin | tr -d ' \n')" = 10000000 ] ||
     { echo "FAIL label difference: $(od -An -v -tx1 t.bin | tr -d ' \n'), not 16"; fail=1; }
 
+# A jump table.  Measuring a statement must not need the value of what it
+# holds: `.long .L1` is four bytes wherever .L1 is.  Measured by being
+# assembled, it asked where .L1 was, which measured the branch before the
+# table, which measured the table -- and the assembler died of a stack
+# overflow on what gcc writes for any switch.
+cat > t.s <<'EOF'
+	.text
+	cmpl $1, %eax
+	ja .L1
+	jmp *.L3(,%eax,4)
+	.section .rodata
+	.align 4
+.L3:
+	.long .L1
+	.long .L2
+	.text
+.L2:	nop
+.L1:	ret
+EOF
+if ! "$AS" --32 -o t.o t.s 2> err; then
+    echo "FAIL jump table: exit $? $(head -1 err)"; fail=1
+else
+    objcopy -O binary -j .text t.o text.bin
+    objcopy -O binary -j .rodata t.o table.bin
+    # Each entry is the offset in .text of its label: .L1 is the ret, .L2
+    # the nop before it.
+    first=$(od -An -v -tu4 -N4 table.bin | tr -d ' ')
+    second=$(od -An -v -tu4 -j4 -N4 table.bin | tr -d ' ')
+    [ "$(od -An -v -tx1 -j"$first" -N1 text.bin | tr -d ' ')" = c3 ] ||
+        { echo "FAIL jump table: the first entry, $first, is not the ret"; fail=1; }
+    [ "$(od -An -v -tx1 -j"$second" -N1 text.bin | tr -d ' ')" = 90 ] ||
+        { echo "FAIL jump table: the second entry, $second, is not the nop"; fail=1; }
+    [ "$(readelf -rW t.o | grep -c ' R_386_32 ')" = 3 ] ||
+        { echo "FAIL jump table: not three R_386_32 relocations"; fail=1; }
+fi
+
 [ "$fail" -eq 0 ] && echo "ok: branches across alignments"
 exit "$fail"

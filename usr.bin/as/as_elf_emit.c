@@ -10491,6 +10491,28 @@ static int local_temp_branch_target_within(emit_ctx_t *ctx, const as_stmt_t *bas
     return base_idx - target_idx <= max_stmt_distance;
 }
 
+/* The width in bytes of each value a data directive lays down, or 0 if
+ * the directive is not one of those. */
+static unsigned data_directive_width(const char *name) {
+    if (name == NULL) {
+        return 0;
+    }
+    if (strcmp(name, ".byte") == 0) {
+        return 1;
+    }
+    if (strcmp(name, ".word") == 0 || strcmp(name, ".short") == 0 ||
+        strcmp(name, ".hword") == 0 || strcmp(name, ".2byte") == 0) {
+        return 2;
+    }
+    if (strcmp(name, ".long") == 0 || strcmp(name, ".4byte") == 0) {
+        return 4;
+    }
+    if (strcmp(name, ".quad") == 0 || strcmp(name, ".8byte") == 0) {
+        return 8;
+    }
+    return 0;
+}
+
 /* An alignment or an .org is as long as it takes to get from where it is
  * to where it leads: its size is not the statement's alone and must not
  * be remembered as if it were. */
@@ -10603,6 +10625,20 @@ static int stmt_virtual_size_in_section(emit_ctx_t *ctx, const char *section_nam
     if (st->kind == AS_STMT_DIRECTIVE) {
         section_track_t track;
         int trc;
+        unsigned data_width = data_directive_width(st->u.directive.name);
+
+        /*
+         * A directive that lays down values of a fixed width is that
+         * width times their number, whatever the values are.  Measuring
+         * it by assembling it evaluated them: a jump table's
+         * `.long .L15` asked where .L15 is, which measured the branches
+         * before it, which measured what lay between each and its label
+         * -- this directive among it -- without end.
+         */
+        if (data_width != 0) {
+            *size_out = (size_t)data_width * st->u.directive.arg_count;
+            return 0;
+        }
 
         if (section_track_init(&track, x86_code_bits) != 0) {
             return -1;
