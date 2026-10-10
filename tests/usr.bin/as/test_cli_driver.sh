@@ -7,6 +7,12 @@ TMP=${TMPDIR:-/tmp}/as-cli-$$
 mkdir -p "$TMP"
 trap 'rm -rf "$TMP"' EXIT INT TERM
 
+# text_is OBJECT BYTES: the object's .text is these bytes.
+text_is() {
+    got=$(objcopy -O binary -j .text "$1" /dev/stdout | od -An -v -tx1 | tr -d ' \n')
+    [ "$got" = "$2" ] || { echo "FAIL $(basename "$1"): .text is $got, not $2"; exit 1; }
+}
+
 cat > "$TMP/simple.s" <<'SRC'
 .text
 .globl simple_fn
@@ -60,6 +66,8 @@ include_fn:
 .size include_fn, .-include_fn
 SRC
 "$AS" -32 -I "$TMP/inc" -o "$TMP/include.o" "$TMP/include.s"
+# That it assembled says the file was found; the bytes, that it was read.
+text_is "$TMP/include.o" b807000000c3
 
 # 6) -D predefine handling (cpp path requires .S)
 cat > "$TMP/define.S" <<'SRC'
@@ -75,6 +83,7 @@ define_fn:
 .size define_fn, .-define_fn
 SRC
 "$AS" -32 -DVALUE=11 -o "$TMP/define.o" "$TMP/define.S"
+text_is "$TMP/define.o" b80b000000c3
 
 # 6b) .s is treated as already-preprocessed input (no cpp pass)
 cat > "$TMP/nocpp.s" <<'SRC'
@@ -88,6 +97,7 @@ nocpp_fn:
 .size nocpp_fn, .-nocpp_fn
 SRC
 "$AS" -32 -o "$TMP/nocpp.o" "$TMP/nocpp.s"
+text_is "$TMP/nocpp.o" b800000000c3
 
 # 7) -Wa passthrough
 "$AS" -64 -Wa,--gdwarf-2 -o "$TMP/wa.o" "$TMP/debug.s"

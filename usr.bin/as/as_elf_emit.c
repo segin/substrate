@@ -688,6 +688,90 @@ static int apply_asm_var_directive(emit_ctx_t *ctx, const as_stmt_t *st, const a
     return asm_var_set(ctx, d->args[0], value);
 }
 
+/* Every symbol in `e` that is an absolute one becomes its value. */
+static void fold_absolute_symbols(const emit_ctx_t *ctx, as_expr_t *e) {
+    long long value;
+
+    if (e == NULL) {
+        return;
+    }
+    if (e->kind == AS_EXPR_SYMBOL && e->symbol != NULL && asm_var_lookup(ctx, e->symbol, &value) == 0) {
+        free(e->symbol);
+        e->symbol = NULL;
+        e->kind = AS_EXPR_CONST;
+        e->value = value;
+        return;
+    }
+    fold_absolute_symbols(ctx, e->lhs);
+    fold_absolute_symbols(ctx, e->rhs);
+}
+
+/* Is the operand of this instruction where it goes to, not what it reads? */
+static int mnemonic_takes_a_target(const char *mn) {
+    if (mn == NULL) {
+        return 0;
+    }
+    return mn[0] == 'j' || mn[0] == 'J' || strncasecmp(mn, "call", 4) == 0 || strncasecmp(mn, "loop", 4) == 0 ||
+           strncasecmp(mn, "xbegin", 6) == 0;
+}
+
+/*
+ * A symbol that `.set` or `.equ` gave a number is that number where an
+ * instruction names it: `mov $K, %eax` is the move of 7, with no
+ * relocation, and `add $K, %ebx` has the one-byte immediate 7 fits in.
+ *
+ * Done once, before anything is measured, and in the order of the source
+ * -- a symbol may be set again, and an instruction has the value of the
+ * `.set` above it.  Were it done as each instruction is encoded, one
+ * measured ahead of its `.set`, as those a branch jumps over are, would
+ * be one size then and another when written.
+ *
+ * (An instruction above the only `.set` of its symbol is not folded, and
+ * keeps a relocation against the absolute symbol.  The linker makes the
+ * same number of it, in a field as wide as could be needed.)
+ */
+static int fold_absolute_operands(emit_ctx_t *ctx) {
+    size_t i;
+    size_t j;
+
+    if (ctx == NULL || ctx->parsed == NULL) {
+        return -1;
+    }
+    asm_var_reset(ctx);
+    for (i = 0; i < ctx->parsed->count; ++i) {
+        const as_stmt_t *st = &ctx->parsed->items[i];
+
+        if (st->kind == AS_STMT_DIRECTIVE) {
+            if (apply_asm_var_directive(ctx, st, &st->u.directive) != 0) {
+                return -1;
+            }
+            continue;
+        }
+        if (st->kind != AS_STMT_INSTRUCTION) {
+            continue;
+        }
+        for (j = 0; j < st->u.instr.operand_count; ++j) {
+            as_operand_t *op = &st->u.instr.operands[j];
+
+            if (op->kind == AS_OPERAND_IMMEDIATE) {
+                fold_absolute_symbols(ctx, op->u.expr);
+            } else if (op->kind == AS_OPERAND_MEMORY) {
+                fold_absolute_symbols(ctx, op->u.mem.disp);
+            } else if (op->kind == AS_OPERAND_LABEL_REF && !mnemonic_takes_a_target(st->u.instr.mnemonic)) {
+                /* `mov K, %eax`: the address K.  A branch to K is left
+                 * to the linker, which knows where the branch is. */
+                fold_absolute_symbols(ctx, op->u.expr);
+                if (op->u.expr != NULL && op->u.expr->kind == AS_EXPR_CONST) {
+                    /* What the parser makes of a bare number. */
+                    op->kind = AS_OPERAND_IMMEDIATE;
+                }
+            }
+        }
+    }
+    asm_var_reset(ctx);
+    return 0;
+}
+
 static int expr_has_symbol(const as_expr_t *e) {
     if (e == NULL) {
         return 0;
@@ -14276,6 +14360,10 @@ int as_elf_emit_binary_file(const as_parse_result_t *parsed,
     if (errbuf != NULL && errbuf_sz > 0) {
         errbuf[0] = '\0';
     }
+    if (fold_absolute_operands(&ctx) != 0) {
+        set_err(&ctx, "out of memory");
+        return -1;
+    }
     if (bin_sections_init(&sv, sections) != 0) {
         set_err(&ctx, "failed to initialize section layout");
         return -1;
@@ -15019,6 +15107,10 @@ int as_elf_emit_file(const as_parse_result_t *parsed,
     ctx.errbuf_sz = errbuf_sz;
     if (errbuf != NULL && errbuf_sz > 0) {
         errbuf[0] = '\0';
+    }
+    if (fold_absolute_operands(&ctx) != 0) {
+        set_err(&ctx, "out of memory");
+        return -1;
     }
 
     cls = cfg->is_64 ? ELFOBJ_CLASS_64 : ELFOBJ_CLASS_32;

@@ -348,12 +348,14 @@ with a symbol table.
 
 ### C.3 Includes
 
-- [ ] **AS-T-123** When `.include "f"` is assembled, the assembler shall assemble the contents of f in its place.
+- [x] **AS-T-123** When `.include "f"` is assembled, the assembler shall assemble the contents of f in its place.
   Trace: AS-FE-001.  Verify: T — `.include "inc2.s"` then `cli`, with `nop; hlt` in the file: `90 f4 fa`.  After: 090.
 - [ ] **AS-T-124** If the file of an `.include` cannot be opened, then the assembler shall fail and name the file and the including line.
   Trace: AS-FE-001.  Verify: T.  After: 123.
-- [ ] **AS-T-125** When `.include` names a relative path, the assembler shall look in the including file's directory and then in each `-I` directory in order.
+  In part: it fails and names the file (`test_include.sh`).  The including line is right inside an included file and wrong for the source itself, which is named as the driver's temporary copy (`/tmp/ascond_…:2`); that is the line-marker work of 127.  Also open: an `.include` after a label on its line is not seen.
+- [x] **AS-T-125** When `.include` names a relative path, the assembler shall look in each `-I` directory in order and then in the current directory.
   Trace: AS-FE-001.  Verify: T — a file found each way; the temporary directory is never searched.  After: 123.
+  Met, and reworded: this said "the including file's directory and then each `-I`".  GNU as does not look beside the including file, and here that directory is the temporary one for the source itself.  The search is GNU's.
 - [ ] **AS-T-126** If inclusion nests deeper than `--max-include-depth`, then the assembler shall fail and name the chain.
   Trace: AS-FE-001.  Verify: T — a file that includes itself.  After: 123.
 - [ ] **AS-T-127** The assembler shall expand macros, repeats and conditionals in included text as in the including file, with macros defined in either visible in both.
@@ -642,6 +644,7 @@ one table of templates; there is one ModRM/SIB/prefix emitter.
 
 - [ ] **AS-T-260** When an absolute symbol is used as an immediate or displacement, the assembler shall encode its value with no relocation.
   Trace: AS-SYM-001.  Verify: T — `.set g1,2*8` / `movl $g1,%eax` is `b8 10 00 00 00`; `movl g1(%ebx),%eax`; a forward reference to a later `.set`.  After: 220.
+  In part, ahead of 220: a symbol set above the instruction is folded before layout, as immediate, displacement and bare address (`test_absolute_symbol.sh`).  Still open: the forward reference, which keeps a relocation against the absolute symbol (right once linked, and in the long form).  Found by giving `test_cli_driver.sh` bytes to check: its `-I` and `-D` cases had passed on exit status with the immediate 0.
 - [ ] **AS-T-261** When `.set` is given `symbol ± constant`, the assembler shall define the symbol in the target's section at the target's value plus the constant.
   Trace: AS-SYM-001, AS-SYM-002.  Verify: T — `.set f1,4+c1` / `.long f1`: a relocation with addend 4 (today the 4 is lost).  After: 220.
 - [ ] **AS-T-262** When `.set` is given the difference of two symbols of one section, the assembler shall define the symbol absolute with that difference.

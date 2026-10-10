@@ -182,7 +182,8 @@ assembled with `--32` unless it says otherwise.
 
 ### 3.1 Wrong output, accepted
 
-- [ ] **AS-FE-001** When a source has `.include "f"`, the assembler shall assemble the contents of f, or fail.
+- [x] **AS-FE-001** When a source has `.include "f"`, the assembler shall assemble the contents of f, or fail.
+  Met: `test_include.sh` (AS-T-123, AS-T-125; AS-T-124 in part).
   Evidence: `as_lexer.c:966-989`.  The loop moves each token out with `as_token_vec_push_take`, which clears the one it took from (`:158`); the test for `.include` that follows reads the cleared token's kind, 0, and is never true.  The directive is skipped and the exit status is 0, for a file that exists and for one that does not.  `-I`, `--max-include-depth` and the cycle check cannot be reached.  `.include "inc2.s"` then `cli`, with `nop; hlt` in the file: `fa`, where it is `90 f4 fa`.  Behind it, when it is mended: includes would be looked for beside the `/tmp/ascond_*` file (`as.c:2243`), would skip the macro, repeat and conditional passes, and would have their local labels matched per file (`as_parser.c:2917`).
   Basis: reproduced (re-run by hand).
 - [ ] **AS-FE-002** When a directive has an empty argument, the arguments after it shall keep their positions.

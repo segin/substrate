@@ -64,7 +64,13 @@ Accepted for compatibility; output remains an object file.
 .It Fl g
 Enable debug-oriented handling for compatible directives.
 .It Fl I Ar dir
-Add include search path.
+Add
+.Ar dir
+to the directories searched for the file of an
+.Ic .include .
+The directories are tried in the order given, and then the name as
+written, from the current directory.
+A name that begins with a slash is not searched for.
 .It Fl D Ar macro Ns Op = Ns Ar value
 Define preprocessor symbol.
 .It Fl march Ar cpu

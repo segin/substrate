@@ -529,31 +529,6 @@ static int append_path(char ***items, size_t *count, size_t *cap, const char *pa
     return 0;
 }
 
-static char *path_dirname_dup(const char *path) {
-    const char *s;
-    size_t n;
-    char *out;
-
-    if (path == NULL) {
-        return strdup(".");
-    }
-    s = strrchr(path, '/');
-    if (s == NULL) {
-        return strdup(".");
-    }
-    n = (size_t)(s - path);
-    if (n == 0) {
-        return strdup("/");
-    }
-    out = (char *)malloc(n + 1);
-    if (out == NULL) {
-        return NULL;
-    }
-    memcpy(out, path, n);
-    out[n] = '\0';
-    return out;
-}
-
 static char *path_join2(const char *a, const char *b) {
     size_t alen;
     size_t blen;
@@ -591,26 +566,25 @@ static int file_readable(const char *path) {
     return 1;
 }
 
-static char *resolve_include_path(const as_lexer_cfg_t *cfg, const char *curr_file, const char *include_name) {
+/*
+ * Where an .include's file is: the -I directories in the order given,
+ * then the name as written, which is to say from the directory the
+ * assembler was run in.  That is GNU as's search.
+ *
+ * Not the directory of the file that has the .include.  For the source
+ * itself that is not where the user's file is -- what is lexed is a copy
+ * the driver made in the temporary directory -- so it found nothing that
+ * was meant, and would have found whatever someone else had left there.
+ */
+static char *resolve_include_path(const as_lexer_cfg_t *cfg, const char *include_name) {
     size_t i;
-    char *curr_dir;
     char *cand;
 
     if (include_name == NULL) {
         return NULL;
     }
-    if (include_name[0] == '/' && file_readable(include_name)) {
-        return strdup(include_name);
-    }
-
-    curr_dir = path_dirname_dup(curr_file);
-    if (curr_dir != NULL) {
-        cand = path_join2(curr_dir, include_name);
-        free(curr_dir);
-        if (cand != NULL && file_readable(cand)) {
-            return cand;
-        }
-        free(cand);
+    if (include_name[0] == '/') {
+        return file_readable(include_name) ? strdup(include_name) : NULL;
     }
 
     if (cfg != NULL) {
@@ -622,7 +596,7 @@ static char *resolve_include_path(const as_lexer_cfg_t *cfg, const char *curr_fi
             free(cand);
         }
     }
-    return NULL;
+    return file_readable(include_name) ? strdup(include_name) : NULL;
 }
 
 static char *read_file_all(const char *path, size_t *len_out, lex_ctx_t *ctx) {
@@ -937,6 +911,7 @@ static int lex_file_internal(lex_ctx_t *ctx, const char *path, unsigned depth) {
         char *line = file_buf + pos;
         size_t end = pos;
         size_t i;
+        int is_include;
         char saved;
 
         while (end < file_len && file_buf[end] != '\n') {
@@ -963,7 +938,19 @@ static int lex_file_internal(lex_ctx_t *ctx, const char *path, unsigned depth) {
         }
         free(sanitized);
 
-        for (i = 0; i < line_tokens.count; ++i) {
+        /*
+         * Is the line an .include?  Asked now: the loop below moves the
+         * line's tokens to the output and leaves none here to look at.
+         * (Asked after it, as it was, the answer was always no, and the
+         * file named was never read.)  The directive itself is not passed
+         * on: the file's lines stand in its place.
+         */
+        is_include = line_tokens.count >= 2 &&
+                     line_tokens.items[0].kind == AS_TOK_DIRECTIVE &&
+                     strcmp(line_tokens.items[0].text, ".include") == 0 &&
+                     line_tokens.items[1].kind == AS_TOK_STRING;
+
+        for (i = 0; !is_include && i < line_tokens.count; ++i) {
             as_token_t *t = &line_tokens.items[i];
             if (i + 2 < line_tokens.count &&
                 line_tokens.items[i].kind == AS_TOK_PUNCT &&
@@ -983,10 +970,7 @@ static int lex_file_internal(lex_ctx_t *ctx, const char *path, unsigned depth) {
             }
         }
 
-        if (line_tokens.count >= 2 &&
-            line_tokens.items[0].kind == AS_TOK_DIRECTIVE &&
-            strcmp(line_tokens.items[0].text, ".include") == 0 &&
-            line_tokens.items[1].kind == AS_TOK_STRING) {
+        if (is_include) {
             char *inc_path = unescape_string(line_tokens.items[1].text);
             char *inc;
             if (inc_path == NULL) {
@@ -995,7 +979,7 @@ static int lex_file_internal(lex_ctx_t *ctx, const char *path, unsigned depth) {
                 free(file_buf);
                 return -1;
             }
-            inc = resolve_include_path(ctx->cfg, path, inc_path);
+            inc = resolve_include_path(ctx->cfg, inc_path);
             if (inc == NULL) {
                 set_err(ctx, "%s:%u: include file not found: %s", path, line_no, inc_path);
                 free(inc_path);
