@@ -92,7 +92,8 @@ jobs:
           for tool in cc as ld; do
             f=usr.bin/$tool/obj-x86_64/$tool
             file -b "$f"
-            file -b "$f" | grep -q 'ELF 64-bit.*x86-64' \
+            readelf -h "$f" | grep -q 'Class: *ELF64' \
+              && readelf -h "$f" | grep -q 'Machine: *Advanced Micro Devices X86-64' \
               || { echo "::error::$f is not a 64-bit x86-64 program"; exit 1; }
             readelf -l "$f" | grep -q 'interpreter: /sbin/ld64.so\]' \
               || { echo "::error::$f is not loaded by /sbin/ld64.so"; exit 1; }

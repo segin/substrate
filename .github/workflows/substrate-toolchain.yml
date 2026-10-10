@@ -97,7 +97,10 @@ jobs:
           for tool in cc as ld; do
             f=usr.bin/$tool/$tool
             file -b "$f"
-            file -b "$f" | grep -q 'ELF 32-bit.*Intel i386' \
+            # readelf, not file(1): one file says "Intel i386" and another
+            # "Intel 80386".
+            readelf -h "$f" | grep -q 'Class: *ELF32' \
+              && readelf -h "$f" | grep -q 'Machine: *Intel 80386' \
               || { echo "::error::$f is not a 32-bit i386 program"; exit 1; }
             readelf -l "$f" | grep -q 'interpreter: /sbin/ld.so\]' \
               || { echo "::error::$f is not loaded by /sbin/ld.so"; exit 1; }
