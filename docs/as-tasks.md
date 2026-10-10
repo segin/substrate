@@ -179,8 +179,9 @@ status 0.
 - [x] **AS-T-045** When a rotate or shift is written with `%cl` as its count, the assembler shall encode the by-`CL` form.
   Trace: AS-X86-026.  Verify: T — `rolw %cl,%ax`, `rol %cl,%eax`, `shrb %cl,(%eax)`, each of the eight operations: GNU.
   Done with 168: the by-`CL` opcode was chosen, and at the wrong width where there was no suffix -- `rol %cl,%al` was `rol %cl,%eax`.  The count is not taken for what is shifted.  `test_insn_forms.sh`, the eight operations at four widths.
-- [ ] **AS-T-046** If both operands of `test` are immediates, then the assembler shall refuse the instruction.
+- [x] **AS-T-046** If both operands of `test` are immediates, then the assembler shall refuse the instruction.
   Trace: AS-X86-026.  Verify: T — `testb $1,$2`: exit 1.
+  Done: the 32-bit encoder assembled it as a test of the accumulator, on purpose, for a line of Linux's that has a memory operand there and not an immediate.  `test_insn_forms.sh`.
 - [x] **AS-T-047** When `in` or `out` is written with `%al`, `%ax` or `%eax`, the assembler shall encode the form of that width.
   Trace: AS-SEL-014, AS-X86-010.  Verify: T — `in %dx,%al` (`EC`), `out %al,%dx` (`EE`), `in $0x60,%al` (`E4 60`), the `%ax` forms with `66`, both modes: GNU.
   Done with 168: every one was the `%eax` form.  The port `%dx` is not taken for the width.  `test_insn_forms.sh`.  Not done, and not this task's: `inb %dx`, `outw $1` and the other forms with the accumulator left out are refused.
@@ -1035,5 +1036,5 @@ is not to be done, 370 is ticked with "removed" and the rest struck.
 | AS-EXT-009 | 185, 325, 332–337 |
 | AS-EXT-010 | 040, 171, 338, 339 (339 closes all of AS-EXT) |
 
-344 tasks: 60 done, 284 open.  Numbers run to 393, with gaps left between
+344 tasks: 61 done, 283 open.  Numbers run to 393, with gaps left between
 sections for tasks found along the way.

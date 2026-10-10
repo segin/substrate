@@ -253,5 +253,16 @@ t "32 64" 0f0b  'ud2'
 t "32 64" 0f0b  'ud2a'
 t "32 64" 0fb9  'ud2b'
 
+# test has no form with two immediates.
+t "32 64" refused    'test $1, $2'
+t "32 64" refused    'testb $1, $2'
+t "32 64" refused    'testb $0, $0'
+t "32 64" refused    'testw $1, $2'
+t "32 64" refused    'testl $1, $2'
+t "32 64" f6c101     'testb $1, %cl'
+t "32"    f60301     'testb $1, (%ebx)'
+t "64"    f60301     'testb $1, (%rbx)'
+t "32 64" f7c102000000 'testl $2, %ecx'
+
 [ "$fail" -eq 0 ] && echo "ok: instruction forms ($cases cases)"
 exit "$fail"
