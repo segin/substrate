@@ -9284,7 +9284,6 @@ static int try_encode_x86_sse41(const as_x86_insn_t *in, unsigned char *code, si
 static int try_encode_x86_sse42(const as_x86_insn_t *in, unsigned char *code, size_t code_cap,
                                 size_t *code_len, char *encerr, size_t encerr_sz) {
     as_x86_sse42_insn_t s42;
-    int width_bits = 0;
     int immediate_3op;
 
     if (in == NULL || code == NULL || code_len == NULL) {
@@ -9319,16 +9318,6 @@ static int try_encode_x86_sse42(const as_x86_insn_t *in, unsigned char *code, si
             s42.imm8 = (uint8_t)in->ops[2].u.imm;
         }
     }
-    if (in->byte_op) {
-        width_bits = 8;
-    } else if (in->operand_size_override) {
-        width_bits = 16;
-    } else if (in->rex_w) {
-        width_bits = 64;
-    } else {
-        width_bits = 32;
-    }
-    s42.width_bits = (unsigned)width_bits;
     return as_x86_encode_sse42(&s42, code, code_cap, code_len, encerr, encerr_sz);
 }
 
@@ -9847,6 +9836,31 @@ static int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_st
                 in.seg_override = map_seg(op->u.mem.segment_reg);
                 break;
             }
+        }
+    }
+
+    /*
+     * crc32's suffix is the width of its source, which the encoder reads
+     * from the operand: the destination is 32 bits, or 64, whatever the
+     * source is.
+     */
+    if (suffix != '\0' && in.op_count == 2 && streq_ci(mnbuf, "crc32")) {
+        unsigned bits = 64u;
+
+        if (suffix == 'b') {
+            bits = 8u;
+        } else if (suffix == 'w') {
+            bits = 16u;
+        } else if (suffix == 'l') {
+            bits = 32u;
+        }
+        if (in.ops[1].kind == AS_X86_OP_REG && in.ops[1].size_bits != bits) {
+            snprintf(encerr, encerr_sz, "crc32%c: the source register is not of the suffix's width", suffix);
+            return -1;
+        }
+        if (in.ops[1].kind == AS_X86_OP_MEM) {
+            in.ops[1].size_bits = bits;
+            in.ops[1].u.mem.size_bits = bits;
         }
     }
 

@@ -196,7 +196,8 @@ status 0.
   Done: AT&T's order of the two was taken for Intel's.  Found with it and mended: `extrq`'s ModRM.reg held the register where the form is `/0`; a memory operand, and `extrq $4,%xmm1`, were assembled; `%xmm9` was taken in 32-bit code; and 64-bit code had neither instruction.  One function now serves both modes.  `test_insn_forms.sh`, both syntaxes.
 - [ ] **AS-T-051** When `aesencwide256kl` is written, the assembler shall encode opcode extension `/2`.
   Trace: AS-SEL-009.  Verify: T — the four wide Key Locker instructions: GNU.
-- [ ] **AS-T-052** When `crc32` is written, the assembler shall take the source width from the suffix or the source register.
+- [x] **AS-T-052** When `crc32` is written, the assembler shall take the source width from the suffix or the source register.
+  Done: `crc32` is encoded by the two main encoders, not by the SSE4.2 module, which knew neither the mode nor the prefixes.  Wrong before, by mode: in 32-bit code every source register was taken for 32 bits, and `crc32q` got a `REX` byte, which is `dec %eax` there; in 64-bit code a suffix on a memory source was ignored, `%ah` was `%al`, `%sil` had no `REX` and so was `%dh`, and a 64-bit destination with a byte source had no `REX.W`; in both a segment override was dropped, and a destination of 16 bits, a suffix at odds with the source register, and an `%xmm` operand were assembled.  `test_insn_forms.sh`, both syntaxes.  Left: `(%eax)` in 64-bit code wants `67` (176); Intel's `crc32 eax, [ebx]`, with no size, is taken for 32 bits where GNU refuses it.
   Trace: AS-SEL-009, AS-EXT-008.  Verify: T — `crc32b mem,%ebx` (`F0`), `crc32 %al,%ebx`, `crc32 %ax,%ebx` (with `66`), `crc32w (%r12),%ebx`, `crc32 %sil,%ebx` (with `REX`), `crc32q`: GNU.
 - [ ] **AS-T-053** When `montmul`, `xstore-rng`, `umonitor %cx`, `pshufd $-1` or `tpause %ecx` is written, the assembler shall encode it as GNU does.
   Trace: AS-SEL-009.  Verify: T — each.
@@ -1041,5 +1042,5 @@ is not to be done, 370 is ticked with "removed" and the rest struck.
 | AS-EXT-009 | 185, 325, 332–337 |
 | AS-EXT-010 | 040, 171, 338, 339 (339 closes all of AS-EXT) |
 
-345 tasks: 64 done, 281 open.  Numbers run to 394, with gaps left between
+345 tasks: 65 done, 280 open.  Numbers run to 394, with gaps left between
 sections for tasks found along the way.

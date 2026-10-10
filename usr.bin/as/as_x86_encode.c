@@ -118,7 +118,7 @@ static int is_x86_sse41_mnemonic(const char *mnemonic) {
 }
 
 static int is_x86_sse42_mnemonic(const char *mnemonic) {
-    return streq_ci(mnemonic, "crc32") || streq_ci(mnemonic, "pcmpgtq") ||
+    return streq_ci(mnemonic, "pcmpgtq") ||
            streq_ci(mnemonic, "pcmpestrm") || streq_ci(mnemonic, "pcmpestrmq") ||
            streq_ci(mnemonic, "pcmpestri") || streq_ci(mnemonic, "pcmpestriq") ||
            streq_ci(mnemonic, "pcmpistrm") || streq_ci(mnemonic, "pcmpistri");
@@ -244,18 +244,7 @@ static int try_encode_x86_sse42_insn(const as_x86_insn_t *insn, uint8_t *out, si
         s42.has_imm8 = 1;
         s42.imm8 = (uint8_t)insn->ops[2].u.imm;
     }
-    if (streq_ci(insn->mnemonic, "crc32")) {
-        if (insn->op_count >= 2) {
-            if (insn->ops[1].kind == AS_X86_OP_REG) {
-                s42.width_bits = insn->ops[1].size_bits;
-            } else if (insn->ops[1].kind == AS_X86_OP_MEM) {
-                s42.width_bits = insn->ops[1].u.mem.size_bits;
-            }
-        }
-        if (s42.width_bits == 0 && insn->op_count >= 1) {
-            s42.width_bits = insn->ops[0].size_bits;
-        }
-    } else if (streq_ci(insn->mnemonic, "pcmpestrmq")) {
+    if (streq_ci(insn->mnemonic, "pcmpestrmq")) {
         s42.mnemonic = "pcmpestrm";
         s42.rex_w = 1;
     } else if (streq_ci(insn->mnemonic, "pcmpestriq")) {
@@ -916,6 +905,43 @@ static int nop_has_long_operand(const as_x86_insn_t *insn) {
     }
     bits = operand_bits(a);
     return a->kind == AS_X86_OP_REG && (bits == 16 || bits == 32 || bits == 64);
+}
+
+/*
+ * The width of crc32's source, or 0 where the operands are not crc32's.
+ * It accumulates into a 32-bit register from a source of 8, 16 or 32
+ * bits, or into a 64-bit one from 8 or 64.  The source's width is its
+ * register's, or the one a suffix or `byte ptr` gave its memory; with
+ * neither it is the destination's.
+ */
+static int crc32_source_bits(const as_x86_insn_t *insn, int is_64) {
+    const as_x86_operand_t *dst = &insn->ops[0];
+    const as_x86_operand_t *src = &insn->ops[1];
+    int dbits;
+    int sbits;
+
+    if (insn->op_count != 2 || dst->kind != AS_X86_OP_REG ||
+        (src->kind != AS_X86_OP_REG && src->kind != AS_X86_OP_MEM)) {
+        return 0;
+    }
+    dbits = operand_bits(dst);
+    if (dbits != 32 && !(dbits == 64 && is_64)) {
+        return 0;
+    }
+    sbits = operand_bits(src);
+    if (sbits == 0 && src->kind == AS_X86_OP_MEM) {
+        sbits = dbits;
+    }
+    if (sbits == 8) {
+        return 8;
+    }
+    if (sbits == 64) {
+        return dbits == 64 ? 64 : 0;
+    }
+    if (sbits == 16 || sbits == 32) {
+        return dbits == 32 ? sbits : 0;
+    }
+    return 0;
 }
 
 static int rep_is_idiom(const as_x86_insn_t *insn) {
@@ -2681,6 +2707,18 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
         }
     } else if (streq_ci(insn->mnemonic, "femms")) {
         if (insn->op_count != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x0e) != 0) {
+            return -1;
+        }
+    } else if (streq_ci(insn->mnemonic, "crc32")) {
+        int sbits = crc32_source_bits(insn, 0);
+
+        if (sbits == 0) {
+            set_unsupported_form(&ctx, insn);
+            return -1;
+        }
+        if ((sbits == 16 && emit8(&ctx, 0x66) != 0) || emit8(&ctx, 0xf2) != 0 || emit8(&ctx, 0x0f) != 0 ||
+            emit8(&ctx, 0x38) != 0 || emit8(&ctx, sbits == 8 ? 0xf0 : 0xf1) != 0 ||
+            modrm_sib_disp(&ctx, (uint8_t)a->u.reg, b) != 0) {
             return -1;
         }
     } else if (streq_ci(insn->mnemonic, "nop")) {
@@ -5281,6 +5319,28 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
         }
         if (emit8(&ctx, 0x0f) != 0 || emit8(&ctx, op2) != 0 ||
             modrm_sib_disp64(&ctx, a->u.reg, b, &rex_r, &rex_x, &rex_b) != 0) {
+            return -1;
+        }
+    } else if (streq_ci(insn->mnemonic, "crc32")) {
+        int sbits = crc32_source_bits(insn, 1);
+
+        if (sbits == 0) {
+            set_unsupported_form(&ctx, insn);
+            return -1;
+        }
+        rex_w = operand_bits(a) == 64 ? 1 : 0;
+        if (sbits == 8 && b->kind == AS_X86_OP_REG && needs_rex_low8(b->u.reg)) {
+            force_rex = 1;
+        }
+        if ((sbits == 16 && emit8(&ctx, 0x66) != 0) || emit8(&ctx, 0xf2) != 0 || emit8(&ctx, 0x0f) != 0 ||
+            emit8(&ctx, 0x38) != 0 || emit8(&ctx, sbits == 8 ? 0xf0 : 0xf1) != 0 ||
+            modrm_sib_disp64(&ctx, a->u.reg, b, &rex_r, &rex_x, &rex_b) != 0) {
+            return -1;
+        }
+        /* %ah and its like are the codes that mean %spl and its like
+         * once there is a REX. */
+        if (b->kind == AS_X86_OP_REG && is_high8_reg(b->u.reg) && (rex_w || rex_r || rex_x || rex_b || force_rex)) {
+            set_err(&ctx, "crc32: a high byte register cannot be encoded with REX");
             return -1;
         }
     } else if (streq_ci(insn->mnemonic, "nop") && insn->op_count != 0) {

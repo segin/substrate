@@ -243,44 +243,6 @@ static int encode_prefixed_map(s42_ctx_t *ctx, const as_x86_sse42_insn_t *insn, 
     return 0;
 }
 
-static int encode_crc32(s42_ctx_t *ctx, const as_x86_sse42_insn_t *insn) {
-    uint8_t opcode;
-    int force_rex_w = 0;
-
-    if (insn->op_count != 2 || insn->dst.kind != AS_X86_OP_REG || insn->has_imm8) {
-        return -1;
-    }
-
-    if (insn->width_bits == 8) {
-        opcode = 0xf0;
-    } else if (insn->width_bits == 16 || insn->width_bits == 32 || insn->width_bits == 64) {
-        opcode = 0xf1;
-    } else {
-        return -1;
-    }
-
-    if (insn->width_bits == 16) {
-        if (emit8(ctx, 0x66) != 0) {
-            return -1;
-        }
-    }
-
-    if (insn->dst.u.reg >= AS_X86_REG_R8) {
-        /* High register destination works for both 32- and 64-bit forms. */
-    }
-
-    if (insn->width_bits == 64 || insn->dst.u.reg >= AS_X86_REG_R8) {
-        /* width=64 requires REX.W; high regs require REX regardless. */
-        force_rex_w = (insn->width_bits == 64);
-    }
-
-    if (encode_prefixed_map(ctx, insn, 0xf2, 0x38, opcode, force_rex_w, 0) != 0) {
-        return -1;
-    }
-
-    return 0;
-}
-
 static const s42_desc_t *lookup_pcmp_desc(const char *mnemonic) {
     static const s42_desc_t table[] = {
         {"pcmpestrm", 0x3a, 0x60},
@@ -320,11 +282,7 @@ int as_x86_encode_sse42(const as_x86_sse42_insn_t *insn, uint8_t *out, size_t ou
     ctx.errbuf = errbuf;
     ctx.errbuf_sz = errbuf_sz;
 
-    if (streq_ci(insn->mnemonic, "crc32")) {
-        if (encode_crc32(&ctx, insn) != 0) {
-            return -1;
-        }
-    } else if (streq_ci(insn->mnemonic, "pcmpgtq")) {
+    if (streq_ci(insn->mnemonic, "pcmpgtq")) {
         if (encode_prefixed_map(&ctx, insn, 0x66, 0x38, 0x37, 0, 0) != 0) {
             return -1;
         }
