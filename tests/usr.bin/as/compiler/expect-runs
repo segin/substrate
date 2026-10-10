@@ -1,0 +1,4 @@
+# The combinations of test_compiler_output.sh that must run: one to a
+# line, written as the test prints it ("-m64 -O2").  A line is added when
+# its combination runs both here and on the CI host, and is never taken
+# out to make the test pass.  None does yet.

@@ -78,8 +78,9 @@ placed where it belongs.
 - [x] **AS-T-018** The `ci` workflow shall run the whole of `tests/usr.bin/as` on every push.
   Trace: AS-TST-001.  Verify: I — `gh run view` shows the restored tests in the job log.  After: 011.
   Done: the "Assembler tests" step of the `host-tests` job; green at `5e3157d0c` on the Ubuntu runner (dash, mawk, a gcc that writes `endbr64`).
-- [ ] **AS-T-019** The test suite shall compile a fixed set of C programs with `gcc -S` at `-O0` and `-O2`, for `-m32` and `-m64`, assemble the output with this assembler, link it and run it.
+- [x] **AS-T-019** The test suite shall compile a fixed set of C programs with `gcc -S` at `-O0` and `-O2`, for `-m32` and `-m64`, assemble the output with this assembler, link it and run it.
   Trace: AS-TST-001, summary ("does not assemble what a compiler writes").  Verify: D — the fifteen combinations of the audit are listed with a verdict each; the test is expected-fail per combination until it passes.
+  Done: `test_compiler_output.sh` with `compiler/prog.c`, fourteen combinations (32 and 64 bits; `-O0`, `-O1`, `-O2`, `-Os`, `-fPIC`, without unwind tables, SSE arithmetic), each ending AS, LINK, WRONG or RUNS; `compiler/expect-runs` lists those that must run.  **Today none of the fourteen runs.**  32-bit: the assembler refuses `fldz` (179) in six, and the seventh, with SSE arithmetic, assembles, links and prints wrong numbers.  64-bit: `-O0` is refused at `salq` (172); the other six assemble and link and the program dies.  This is the measure the rest of the list is working against.
 
 ## B. Mend in place: silent wrong output and crashes
 
