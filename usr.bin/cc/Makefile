@@ -48,7 +48,38 @@ endif
 
 .PHONY: all clean install FORCE
 
+# ARCH=x86_64 builds the compiler driver alone, as a native 64-bit program,
+# into $(O) (obj-x86_64/) beside the 32-bit build, the way Makefile.bin.inc
+# does for the programs that use it: a PIE loaded by /sbin/ld64.so against
+# the 64-bit libc.  The ir-* tools are development aids and stay 32-bit.
+ifeq ($(ARCH)$(NATIVE_BUILD),x86_64)
+CC64_OBJS = $(CC_SRCS:%.c=$(O)%.o)
+CC64_CRT0 = $(TOP)/lib/c/$(O)crt0.o
+CC64_LIBC = $(TOP)/lib/c/$(O)libc.so.0
+CC64_LDFLAGS = -m64 -nostdlib -pie -fPIE \
+               -Wl,--dynamic-linker=/sbin/ld64.so \
+               -Wl,--unresolved-symbols=ignore-in-shared-libs \
+               -Wl,-z,max-page-size=0x1000
+CC64_LIBS = -L$(TOP)/lib/c/$(O) -l:libc.so.0 \
+            -L$(TOP)/lib/sys/$(O) -l:libsys.so.0 $(LIBGCC)
+
+all: $(O)cc
+
+$(CC64_CRT0) $(CC64_LIBC): FORCE
+	$(MAKE) -C $(TOP)/lib/c
+
+$(O)cc: $(CC64_OBJS) $(CC64_LIBC) $(CC64_CRT0)
+	$(CC) $(TOOL_CFLAGS) $(CC64_LDFLAGS) -o $@ $(CC64_OBJS) $(CC64_CRT0) $(CC64_LIBS)
+	$(call BRAND_SUBSTRATE,$@)
+
+$(CC64_OBJS): $(CC_HEADERS)
+
+$(O)%.o: %.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TOOL_CFLAGS) $(TOOL_CPPFLAGS) -c $< -o $@
+else
 all: $(PROGS)
+endif
 
 $(ALL_OBJS): $(MODE_STAMP)
 
@@ -97,6 +128,7 @@ ir-verifier.o ir-normalize.o ir-diff.o: ir.h
 
 clean:
 	rm -f $(PROGS) $(ALL_OBJS) $(MODE_STAMP)
+	rm -rf obj-x86_64
 
 install: $(PROGS)
 	install -D cc $(DESTDIR)/usr/bin/cc

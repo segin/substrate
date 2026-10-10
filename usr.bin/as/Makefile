@@ -22,13 +22,18 @@ $(PROG): force_native_elfobj
 force_native_elfobj:
 	$(MAKE) -C ../../usr.lib/elfobj NATIVE_BUILD=1
 else
-$(PROG): ../../usr.lib/elfobj/libelfobj.so.0
+# $(O) is obj-x86_64/ for the ARCH=x86_64 build and empty otherwise.
+$(O)$(PROG): ../../usr.lib/elfobj/$(O)libelfobj.so.0
 endif
 
-../../usr.lib/elfobj/libelfobj.so.0:
+../../usr.lib/elfobj/$(O)libelfobj.so.0:
 	$(MAKE) -C ../../usr.lib/elfobj $(if $(NATIVE_BUILD),NATIVE_BUILD=1)
 
+# The as.* names are made beside the 32-bit program only; the 64-bit one
+# is installed by build-rootfs.sh under one name.
+ifneq ($(ARCH),x86_64)
 all: alias_links
+endif
 
 install: install_aliases
 
