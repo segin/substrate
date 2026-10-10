@@ -394,10 +394,13 @@ with a symbol table.
   Done: anything that began with a dash was kept and nothing done with it.  It is now `unrecognized option`, exit 1, no object.  The contents of a `-Wa`, which were kept without being read, are parted at the commas before any option is looked at and are options like the rest -- so `-Wa,--defsym,X=1` defines X, and `-Wa,--bogus` is refused.  `--gdwarf-N` and `--noexecstack` are taken and do nothing, being what compilers' drivers pass (145 has `--gdwarf-N`).  `test_cli_unknown_option.sh`.
 - [x] **AS-T-139** When `--defsym NAME=VALUE` is given, the assembler shall define NAME absolute with that value before assembly.
   Trace: AS-FE-014.  Verify: T — `.long X`, `.if X`, `.ifdef X`.
-  Done: the option was stored and never read.  Each is now a `.set` in a file of its own whose tokens are read before the source's, so no line of the source has its number moved; and the conditionals, which are decided while the source is still text, are given the names and values.  An option with no `=`, no name, or a value that is not a number is refused.  `test_cli_defsym.sh`, which GNU as passes.- [ ] **AS-T-140** When the input file is `-` or none is given, the assembler shall read standard input.
+  Done: the option was stored and never read.  Each is now a `.set` in a file of its own whose tokens are read before the source's, so no line of the source has its number moved; and the conditionals, which are decided while the source is still text, are given the names and values.  An option with no `=`, no name, or a value that is not a number is refused.  `test_cli_defsym.sh`, which GNU as passes.
+- [x] **AS-T-140** When the input file is `-` or none is given, the assembler shall read standard input.
   Trace: AS-FE-014, AS-FE-040.  Verify: T — `gcc -pipe -c` with this assembler as `as`.
-- [ ] **AS-T-141** When more than one input file is given, the assembler shall assemble them as one, in order.
+  Done: `-` was taken for a file of that name, and no file for a misuse.  The stages that follow each open their source by name, some twice, so the standard input is first copied to a file.  With nothing named and a terminal for standard input the usage is printed, not waited for.  `test_cli_inputs.sh`, which compiles with `gcc -pipe` through this assembler and runs the result.
+- [x] **AS-T-141** When more than one input file is given, the assembler shall assemble them as one, in order.
   Trace: AS-FE-040.  Verify: T.
+  Done with 140, by the same copy: the files, and the standard input where a `-` stands among them, one after another, each begun on a line of its own.  The section carries from one file to the next and a label of one is a label in the next, as with GNU as given `-mx86-used-note=no` (without it GNU starts each later file in the note section).  `test_cli_inputs.sh`.  Not done: a message about a later file gives a line counted from the first's (127), and a `.S` among several is not preprocessed.
 - [x] **AS-T-142** When `--fatal-warnings` is given and a warning is issued, the assembler shall fail.
   Trace: AS-FE-014.  Verify: T — with the warning of 064.
   Done: the emitter counts the warnings it writes, and the driver, given the option and a count that is not 0, says how many, removes the object and exits 1.  `test_cli_warnings.sh`, with the one warning there is today (a number too wide for a byte register).
@@ -1018,5 +1021,5 @@ is not to be done, 370 is ticked with "removed" and the rest struck.
 | AS-EXT-009 | 185, 325, 332–337 |
 | AS-EXT-010 | 040, 171, 338, 339 (339 closes all of AS-EXT) |
 
-343 tasks: 48 done, 295 open.  Numbers run to 392, with gaps left between
+343 tasks: 50 done, 293 open.  Numbers run to 392, with gaps left between
 sections for tasks found along the way.

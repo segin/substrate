@@ -195,7 +195,7 @@ static void usage(const char *prog) {
             "[--from-cc] "
             "[-al[=file]] [--defsym sym=val] [--statistics] [--target-help] "
             "[-Wa opts] [--max-input-bytes N] [--max-line-bytes N] [--max-token-length N] "
-            "[--max-macro-depth N] [--max-include-depth N] [-o output] input.s|input.S\n",
+            "[--max-macro-depth N] [--max-include-depth N] [-o output] [file ...]\n",
             prog);
 }
 
@@ -2771,10 +2771,76 @@ static void print_statistics(unsigned long long start_us, unsigned long long end
 }
 
 /*
+ * The sources named, or the standard input if none is, copied one after
+ * another into a file of their own, whose name is left in *out_path for
+ * the caller to remove.  A source that does not end its last line has
+ * it ended, so that the next begins on a line of its own.
+ */
+static int gather_sources(const strvec_t *inputs, char **out_path) {
+    char tmp_template[] = "/tmp/asin_XXXXXX";
+    char buf[65536];
+    FILE *out;
+    size_t i;
+    size_t count = inputs->count == 0 ? 1 : inputs->count;
+    int fd = mkstemp(tmp_template);
+
+    if (fd < 0 || (out = fdopen(fd, "wb")) == NULL) {
+        if (fd >= 0) {
+            close(fd);
+            unlink(tmp_template);
+        }
+        as_diag(AS_E_INTERNAL, "failed to make a file to gather the sources in");
+        return -1;
+    }
+    *out_path = xstrdup(tmp_template);
+    if (*out_path == NULL) {
+        fclose(out);
+        unlink(tmp_template);
+        return -1;
+    }
+
+    for (i = 0; i < count; ++i) {
+        const char *name = inputs->count == 0 ? "-" : inputs->items[i];
+        FILE *in = strcmp(name, "-") == 0 ? stdin : fopen(name, "rb");
+        size_t n;
+        int last = '\n';
+
+        if (in == NULL) {
+            as_diag(AS_E_USAGE, "failed to open input %s: %s", name, strerror(errno));
+            fclose(out);
+            return -1;
+        }
+        while ((n = fread(buf, 1, sizeof(buf), in)) > 0) {
+            last = buf[n - 1];
+            if (fwrite(buf, 1, n, out) != n) {
+                break;
+            }
+        }
+        if (ferror(in) || ferror(out) || (last != '\n' && fputc('\n', out) == EOF)) {
+            as_diag(AS_E_INTERNAL, "failed to read %s", strcmp(name, "-") == 0 ? "the standard input" : name);
+            if (in != stdin) {
+                fclose(in);
+            }
+            fclose(out);
+            return -1;
+        }
+        if (in != stdin) {
+            fclose(in);
+        }
+    }
+    if (fclose(out) != 0) {
+        as_diag(AS_E_INTERNAL, "failed to gather the sources");
+        return -1;
+    }
+    return 0;
+}
+
+/*
  * The assembler, given its arguments with each -Wa taken apart: what is
  * in a -Wa is an option like any other, and is read where they are.
+ * `inputs` and `*spool_path` are the caller's, to free and to remove.
  */
-static int as_run(int argc, char **argv) {
+static int as_run(int argc, char **argv, strvec_t *inputs, char **spool_path) {
     as_ctx_t ctx;
     int i;
     int query_version = 0;
@@ -3096,13 +3162,36 @@ static int as_run(int argc, char **argv) {
             return 1;
         }
 
-        if (ctx.in_path != NULL) {
-            as_diag(AS_E_USAGE, "multiple input files are not supported");
+        /* A source; `-` alone is the standard input. */
+        if (strvec_push(inputs, arg) != 0) {
+            strvec_free(&ctx.gcc_opts);
+            strvec_free(&ctx.as_opts);
+            return 1;
+        }
+    }
+
+    /*
+     * One file is read where it is.  The standard input -- named by `-`,
+     * or by naming nothing -- and more than one source are first copied,
+     * in order, to one file: the stages that follow each open their
+     * source by name, and some open it twice.
+     */
+    if (!query_version && !ctx.target_help) {
+        if (inputs->count == 1 && strcmp(inputs->items[0], "-") != 0) {
+            ctx.in_path = inputs->items[0];
+        } else if (inputs->count == 0 && isatty(STDIN_FILENO)) {
+            /* Nothing named and nothing piped: said, not waited for. */
+            usage(argv[0]);
             strvec_free(&ctx.gcc_opts);
             strvec_free(&ctx.as_opts);
             return 2;
+        } else if (gather_sources(inputs, spool_path) != 0) {
+            strvec_free(&ctx.gcc_opts);
+            strvec_free(&ctx.as_opts);
+            return 1;
+        } else {
+            ctx.in_path = *spool_path;
         }
-        ctx.in_path = arg;
     }
 
     if (query_version) {
@@ -3219,6 +3308,8 @@ static int as_run(int argc, char **argv) {
 
 int main(int argc, char **argv) {
     strvec_t args;
+    strvec_t inputs;
+    char *spool_path = NULL;
     int i;
     int rc;
 
@@ -3246,7 +3337,15 @@ int main(int argc, char **argv) {
         }
     }
 
-    rc = as_run((int)args.count, args.items);
+    memset(&inputs, 0, sizeof(inputs));
+    rc = as_run((int)args.count, args.items, &inputs, &spool_path);
+    if (spool_path != NULL) {
+        if (getenv("AS_KEEP_TEMPS") == NULL) {
+            unlink(spool_path);
+        }
+        free(spool_path);
+    }
+    strvec_free(&inputs);
     strvec_free(&args);
     return rc;
 }

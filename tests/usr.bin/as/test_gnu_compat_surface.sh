@@ -124,11 +124,9 @@ fi
 grep -qi "error" "$TMP/march_bad.err"
 "$AS" -64 -march=x86-64-v3 -o "$TMP/avx2_ok.o" "$TMP/avx2_only.s"
 
-# Intentional incompatibility: multiple input files are rejected.
-if "$AS" -64 -o "$TMP/multi.o" "$TMP/multi_a.s" "$TMP/multi_b.s" >"$TMP/multi.out" 2>"$TMP/multi.err"; then
-    echo "expected multi-input invocation to fail"
-    exit 1
-fi
-grep -q "multiple input files are not supported" "$TMP/multi.err"
+# Several input files are one source, as they are to GNU as: both
+# functions are in the object, the second after the first.
+"$AS" -64 -o "$TMP/multi.o" "$TMP/multi_a.s" "$TMP/multi_b.s"
+[ "$(readelf -sW "$TMP/multi.o" | awk '$8 == "a" || $8 == "b" { printf "%s:%s ", $8, $2 }')" = "a:0000000000000000 b:0000000000000001 " ]
 
 echo "ok: GNU/toolchain compatibility surface"

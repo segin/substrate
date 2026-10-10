@@ -28,10 +28,27 @@
 .Op Fl -max-macro-depth Ar n
 .Op Fl -max-include-depth Ar n
 .Op Fl o Ar output
-.Ar input.s
+.Op Ar file ...
 .Sh DESCRIPTION
 .Nm
 is the Substrate assembler command-line frontend.
+.Pp
+Each
+.Ar file
+is a source, and several are assembled as one, in the order given: a
+section chosen in one is still the section in the next, and a label of
+one may be used in another.
+A
+.Ar file
+of
+.Sq -
+is the standard input, which is also what is assembled when no
+.Ar file
+is named and the standard input is not a terminal.
+A file whose name ends in
+.Pa .S
+is first given to the C preprocessor, if it is the only one.
+.Pp
 It provides GNU-compatible assembler option handling, source preflight limits,
 native in-tree parsing/encoding, and ELF post-validation through
 Li elfobj(3) .
