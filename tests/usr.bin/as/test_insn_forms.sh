@@ -184,6 +184,70 @@ for op in rol:0 ror:1 rcl:2 rcr:3 shl:4 sal:4 shr:5 sar:7; do
     t "32"    "d3$(printf '%02x' $((ext * 8)))"          "${name}l %cl, (%eax)"
 done
 
+# movsx and movzx: the source's width is its register's, or the suffix's
+# -- which for these two names the source and not the instruction -- and
+# the instruction's size is the destination's.  A 16-bit source was
+# taken for a byte (`movzx %ax, %eax` was `movzx %al, %eax`), and a
+# suffix was taken for the instruction's size.
+t "32 64" 0fbec0     'movsx %al, %eax'
+t "32 64" 0fbfc0     'movsx %ax, %eax'
+t "32 64" 660fbec0   'movsx %al, %ax'
+t "32 64" 0fb6c0     'movzx %al, %eax'
+t "32 64" 0fb7c0     'movzx %ax, %eax'
+t "32 64" 660fb6c0   'movzx %al, %ax'
+t "32 64" 660fb7c0   'movzx %ax, %ax'
+t "32"    0fb608     'movzx (%eax), %ecx'
+t "32"    660fbe08   'movsx (%eax), %cx'
+t "32 64" 0fbfd8     'movsxw %ax, %ebx'
+t "32 64" 0fbed8     'movsxb %al, %ebx'
+t "32 64" 0fb7d8     'movzxw %ax, %ebx'
+t "32 64" 660fb6d8   'movzxb %al, %bx'
+t "32"    0fb608     'movzxb (%eax), %ecx'
+t "32"    0fb708     'movzxw (%eax), %ecx'
+t "32"    0fbf18     'movsxw (%eax), %ebx'
+t "32"    0fbe18     'movsxb (%eax), %ebx'
+t "32"    660fbe18   'movsxb (%eax), %bx'
+# The AT&T names, which were right and stay so.
+t "32 64" 0fbec0     'movsbl %al, %eax'
+t "32 64" 660fbec0   'movsbw %al, %ax'
+t "32 64" 0fbfc0     'movswl %ax, %eax'
+t "32 64" 0fb6c0     'movzbl %al, %eax'
+t "32 64" 660fb6c0   'movzbw %al, %ax'
+t "32 64" 0fb7c0     'movzwl %ax, %eax'
+t "32"    0fb608     'movzbl (%eax), %ecx'
+t "32"    0fb708     'movzwl (%eax), %ecx'
+t "32"    0fbe08     'movsbl (%eax), %ecx'
+t "32"    0fbf08     'movswl (%eax), %ecx'
+t "32"    660fb608   'movzbw (%eax), %cx'
+t "32"    660fbe08   'movsbw (%eax), %cx'
+# To 64 bits; and from 32, which is movsxd and has no zero-extending
+# twin.
+t "64"    480fbec0   'movsx %al, %rax'
+t "64"    480fbfc0   'movsx %ax, %rax'
+t "64"    480fb6c0   'movzx %al, %rax'
+t "64"    480fb7c0   'movzx %ax, %rax'
+t "64"    400fbec6   'movsx %sil, %eax'
+t "64"    400fb6cf   'movzx %dil, %ecx'
+t "64"    480fbec0   'movsbq %al, %rax'
+t "64"    480fbfc0   'movswq %ax, %rax'
+t "64"    480fb6c0   'movzbq %al, %rax'
+t "64"    480fb7c0   'movzwq %ax, %rax'
+t "64"    480fbe07   'movsbq (%rdi), %rax'
+t "64"    480fb70f   'movzwq (%rdi), %rcx'
+t "64"    480fbfd8   'movsxw %ax, %rbx'
+t "64"    480fbed8   'movsxb %al, %rbx'
+t "64"    480fb618   'movzxb (%rax), %rbx'
+t "64"    4863c0     'movslq %eax, %rax'
+t "64"    4863c0     'movsxd %eax, %rax'
+t "64"    4863d8     'movsxl %eax, %rbx'
+t "64"    486318     'movsxl (%rax), %rbx'
+t "64"    4863d8     'movsx %eax, %rbx'
+t "64"    4963c0     'movsx %r8d, %rax'
+t "64"    63c0       'movsx %eax, %eax'
+t "32"    refused    'movsx %eax, %eax'
+t "32 64" refused    'movzx %eax, %eax'
+t "64"    refused    'movzx %eax, %rax'
+
 # ud2b is not ud2: it is the other undefined opcode, 0F B9.
 t "32 64" 0f0b  'ud2'
 t "32 64" 0f0b  'ud2a'

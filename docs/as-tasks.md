@@ -170,8 +170,9 @@ status 0.
 - [x] **AS-T-042** When `xchgb` is written, the assembler shall encode the 8-bit exchange.
   Trace: AS-X86-023, AS-SEL-014.  Verify: T — `xchgb %al,%bl`, `xchgb %al,(%eax)`, `xchgl (%ebx),%ebx`: GNU.
   Done: both encoders wrote `87` whatever was exchanged.  It is `86` for the suffix `b` and for a byte register, and an exchange with its memory operand written first, which was refused, is encoded.  `test_insn_forms.sh`.  (`xchg %eax,%ebx` is `87 c3` and GNU's is the one-byte `93`: the accumulator's short forms are not chosen, here or elsewhere.)
-- [ ] **AS-T-043** When `movsx` or `movzx` is written with or without size suffixes, the assembler shall take the source width from the suffix or the source register and the destination width from the destination register.
+- [x] **AS-T-043** When `movsx` or `movzx` is written with or without size suffixes, the assembler shall take the source width from the suffix or the source register and the destination width from the destination register.
   Trace: AS-X86-023, AS-SEL-009.  Verify: T — `movsxw %ax,%ebx`, `movsx %al,%bx`, `movzx %ax,%eax`, `movsbw`, `movzwl`, `--64` `movsxl %eax,%rbx`, `movslq`: GNU.
+  Done: with no suffix the source was a byte whatever its register (`movzx %ax,%eax` was `movzx %al,%eax`) in 32-bit code; and a suffix was taken for the instruction's size where for these two it is the source's width, so `movsxw %ax,%ebx` had a prefix it should not and `movzxb %al,%bx` lacked the one it should.  A 32-bit source is `movsxd` in 64-bit code and is refused elsewhere and for `movzx`.  `test_insn_forms.sh`, 56 forms.
 - [x] **AS-T-044** When `ud2b` is written, the assembler shall encode `0F B9`.
   Trace: AS-X86-026.  Verify: T.
   Done: it was taken for another name of `ud2` and written `0F 0B`.  `test_insn_forms.sh`.
@@ -1034,5 +1035,5 @@ is not to be done, 370 is ticked with "removed" and the rest struck.
 | AS-EXT-009 | 185, 325, 332–337 |
 | AS-EXT-010 | 040, 171, 338, 339 (339 closes all of AS-EXT) |
 
-344 tasks: 59 done, 285 open.  Numbers run to 393, with gaps left between
+344 tasks: 60 done, 284 open.  Numbers run to 393, with gaps left between
 sections for tasks found along the way.

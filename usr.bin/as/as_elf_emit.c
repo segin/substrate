@@ -9563,6 +9563,27 @@ static int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_st
         snprintf(encerr, encerr_sz, "unsupported mnemonic length");
         return -1;
     }
+    /*
+     * The suffix of movsx and movzx is the width of the source and not
+     * of the instruction, whose size is the destination register's:
+     * `movsxw %ax, %ebx` extends a word to 32 bits and has no prefix,
+     * `movzxb %al, %bx` extends a byte to 16 and has one.  The encoders
+     * know the source's width by these names.
+     */
+    if (!st->u.instr.syntax_intel && (strcmp(mnbuf, "movsx") == 0 || strcmp(mnbuf, "movzx") == 0)) {
+        int is_sign = mnbuf[3] == 's';
+
+        if (suffix == 'b') {
+            memcpy(mnbuf, is_sign ? "movsxb" : "movzxb", sizeof("movsxb"));
+            suffix = '\0';
+        } else if (suffix == 'w') {
+            memcpy(mnbuf, is_sign ? "movsxw" : "movzxw", sizeof("movsxw"));
+            suffix = '\0';
+        } else if (suffix == 'l' && is_sign) {
+            memcpy(mnbuf, "movsxd", sizeof("movsxd"));
+            suffix = '\0';
+        }
+    }
     in.mnemonic = mnbuf;
     in.default_bits = cfg->is_64 ? 64u : (cfg->x86_code_bits == 16u ? 16u : 32u);
     in.rel_is_disp = (cfg->x86_rel_is_disp != 0);
