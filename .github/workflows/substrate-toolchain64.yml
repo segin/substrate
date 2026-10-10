@@ -1,0 +1,110 @@
+name: substrate-toolchain64
+
+# Substrate's own C toolchain for x86-64 -- the compiler, assembler and
+# linker under usr.bin/cc, usr.bin/as and usr.bin/ld -- built and tested,
+# and nothing else.  The 32-bit one is substrate-toolchain.yml, which says
+# more about what these two are for.
+#
+#   - The three are built as substrate builds them for the 64-bit image
+#     (ARCH=x86_64): x86-64 programs for /sbin/ld64.so, against the tree's
+#     64-bit libc.  That they link, and are what they should be, is
+#     checked; they are not run.
+#
+#   - They are built for the runner, as the 64-bit programs they are on a
+#     64-bit substrate, and their test suites run.
+#
+# The suites are the same as the 32-bit workflow's and cover both targets'
+# output either way; what differs between the two workflows is the width
+# of the tools themselves.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'usr.bin/cc/**'
+      - 'usr.bin/as/**'
+      - 'usr.bin/ld/**'
+      - 'usr.lib/elfobj/**'
+      - 'tests/usr.bin/as/**'
+      - 'tests/usr.bin/ld/**'
+      - 'tests/usr.lib/elfobj/**'
+      - 'lib/**'
+      - 'include/**'
+      - 'Makefile.inc'
+      - 'Makefile.bin.inc'
+      - '.github/workflows/substrate-toolchain64.yml'
+  pull_request:
+    paths:
+      - 'usr.bin/cc/**'
+      - 'usr.bin/as/**'
+      - 'usr.bin/ld/**'
+      - 'usr.lib/elfobj/**'
+      - 'tests/usr.bin/as/**'
+      - 'tests/usr.bin/ld/**'
+      - 'tests/usr.lib/elfobj/**'
+      - 'lib/**'
+      - 'include/**'
+      - 'Makefile.inc'
+      - 'Makefile.bin.inc'
+      - '.github/workflows/substrate-toolchain64.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: substrate-toolchain64-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  toolchain64:
+    name: cc, as and ld for x86-64
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      # gcc-multilib because the suites assemble and link 32-bit code as
+      # well, whatever the width of the tools; binutils for the readelf,
+      # objcopy and objdump the tests read objects with.
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential gcc-multilib binutils python3 file
+
+      - name: Build the libraries they need
+        run: |
+          make -C lib ARCH=x86_64 -j"$(nproc)"
+          make -C usr.lib/elfobj ARCH=x86_64
+
+      # Each lands in its obj-x86_64/, beside where the 32-bit one goes.
+      - name: Build cc, as and ld for the target
+        run: |
+          set -euo pipefail
+          for tool in cc as ld; do
+            make -C usr.bin/$tool ARCH=x86_64
+          done
+
+      - name: Are they x86-64 programs for /sbin/ld64.so?
+        run: |
+          set -euo pipefail
+          for tool in cc as ld; do
+            f=usr.bin/$tool/obj-x86_64/$tool
+            file -b "$f"
+            file -b "$f" | grep -q 'ELF 64-bit.*x86-64' \
+              || { echo "::error::$f is not a 64-bit x86-64 program"; exit 1; }
+            readelf -l "$f" | grep -q 'interpreter: /sbin/ld64.so\]' \
+              || { echo "::error::$f is not loaded by /sbin/ld64.so"; exit 1; }
+          done
+
+      - name: Assembler tests
+        run: make -C tests/usr.bin/as
+
+      - name: Linker tests
+        run: make -C tests/usr.bin/ld
+
+      # See substrate-toolchain.yml for why this one does not fail the job.
+      - name: Object library tests (reported, not required)
+        continue-on-error: true
+        run: make -C tests/usr.lib/elfobj
