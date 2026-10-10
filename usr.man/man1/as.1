@@ -21,6 +21,7 @@
 .Op Fl -defsym Ar sym=val
 .Op Fl -statistics
 .Op Fl -target-help
+.Op Fl -version
 .Op Fl Wa Ar opts
 .Op Fl -max-input-bytes Ar n
 .Op Fl -max-line-bytes Ar n
@@ -154,6 +155,11 @@ With no value it is 0.
 An option that is not of this form is an error.
 .It Fl -statistics
 Print wall-clock/resource usage statistics.
+.It Fl -version , Fl v
+Print what this assembler is, and exit.
+It names itself the Substrate assembler: it is not GNU
+.Nm ,
+and a script that asks should not be told it is.
 .It Fl -target-help
 Print target summary and exit.
 .It Fl Wa Ar opts

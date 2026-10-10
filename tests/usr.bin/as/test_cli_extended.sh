@@ -166,6 +166,22 @@ done
 [ -e t.o ] && bad "--target-help with a source: assembles it"
 cmp -s help.out help2.out || bad "--target-help with a source: prints something else"
 
+# --- --version ----------------------------------------------------------
+# Prints and stops, like --target-help.  It says what it is -- and does
+# not say it is GNU's, which a configure script would take for a promise
+# of everything that assembler does.
+for opt in --version -v; do
+    rm -f t.o
+    "$AS" "$opt" > ver.out 2> ver.err
+    [ $? -eq 0 ] || bad "$opt: does not exit 0"
+    [ -s ver.err ] && bad "$opt: writes to the standard error"
+    grep -q 'Substrate assembler' ver.out || bad "$opt: does not say it is the Substrate assembler: $(head -1 ver.out)"
+    grep -qi 'GNU\|Binutils' ver.out && bad "$opt: claims to be GNU's: $(grep -i 'GNU\|Binutils' ver.out | head -1)"
+    "$AS" "$opt" -32 -o t.o att.s > ver2.out 2>&1
+    [ -e t.o ] && bad "$opt with a source: assembles it"
+    cmp -s ver.out ver2.out || bad "$opt with a source: prints something else"
+done
+
 # --- -c -----------------------------------------------------------------
 # A compiler driver's option, accepted so that the assembler can stand in
 # for one; it changes nothing.
@@ -174,5 +190,5 @@ rm -f t.o
 same "-c" t.o
 [ -s out ] && bad "-c: says something: $(head -1 out)"
 
-[ "$fail" -eq 0 ] && echo "ok: -msyntax, -al, --statistics, --target-help, -c"
+[ "$fail" -eq 0 ] && echo "ok: -msyntax, -al, --statistics, --target-help, --version, -c"
 exit "$fail"

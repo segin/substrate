@@ -408,6 +408,7 @@ with a symbol table.
   Trace: AS-FE-014.  Verify: T — `-march=haswell`, `i686`, `x86-64-v2`, `znver3`; an unknown name is refused.
 - [ ] **AS-T-144** When `--version` is given, the assembler shall name itself as the Substrate assembler and shall not claim to be GNU Binutils.
   Trace: AS-FE-014.  Verify: T; D — a GCC `configure` run with it as `as` detects only the features it has.
+  In part: `--version` and `-v` print `as (Substrate assembler)` and what it assembles for, and neither "GNU" nor "Binutils" (`test_cli_extended.sh`; `as(1)` has the option, which it lacked).  The demonstration has not been made: no GCC `configure` has been run against it, so what such a script now concludes is not known.
 - [ ] **AS-T-145** Each of `-g`, `--gdwarf-N`, `-D`, `--warn`, `--no-warn`, `-W`, `--from-cc` shall take the effect `as(1)` gives it, or be removed from the options accepted.
   Trace: AS-FE-014.  Verify: I — the man page and the option table agree; T — one case each.
   In part, with 142: `--warn` writes warnings, `--no-warn` writes none, and `-W` is `--no-warn` as it is to GNU (it had been `--warn`); `as(1)` says so and `test_cli_warnings.sh` has a case for each.  `-g`, `--gdwarf-N`, `-D` for a `.s` and `--from-cc` are as they were.

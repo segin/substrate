@@ -3195,7 +3195,13 @@ static int as_run(int argc, char **argv, strvec_t *inputs, char **spool_path) {
     }
 
     if (query_version) {
-        printf("GNU assembler (GNU Binutils) 2.40\n");
+        /*
+         * Its own name, and no one else's: a configure script that reads
+         * "GNU assembler" here takes it for one with every feature of
+         * that version, and does not try them.
+         */
+        printf("as (Substrate assembler)\n");
+        printf("Assembles for i386 and x86-64, to ELF or to a flat binary.\n");
         strvec_free(&ctx.gcc_opts);
         strvec_free(&ctx.as_opts);
         return 0;
