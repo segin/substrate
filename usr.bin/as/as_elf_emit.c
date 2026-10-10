@@ -1,6 +1,7 @@
 #include "as_elf_emit.h"
 #include "as_x86_encode.h"
 #include "as_reloc_op.h"
+#include "as_x86_vex.h"
 #include "as_x86_avx.h"
 #include "as_x86_avx2.h"
 #include "as_x86_bmi1.h"
@@ -8579,6 +8580,192 @@ static int operand_is_stmt_immediate(const as_operand_t *op, int intel_syntax) {
     return op->raw != NULL && (op->raw[0] == '$' || op->raw[0] == '#');
 }
 
+/*
+ * VEX instructions that the tables of the AVX encoders have no row for,
+ * and that the EVEX encoders do: with those tried second, these alone
+ * still came out as AVX-512 where GNU as writes AVX -- or, for the
+ * AVX-VNNI-INT16, SM3 and SM4 ones, where there is no EVEX form to
+ * write.  Three shapes:
+ *
+ *   two operands     dst <- src                  vvvv unused
+ *   shift by a byte  dst <- src shifted          ModRM.reg an opcode
+ *                                                extension, vvvv the dst
+ *   three operands   dst <- src1 op src2
+ *
+ * Registers %xmm0-15 and %ymm0-15, and memory where the VEX form takes
+ * it.  Returns 0 with the bytes, or nonzero with none where the
+ * statement is not one of these: the EVEX encoders are tried next, and
+ * `vpsllq $3, (%eax), %xmm1`, which only they can say, is theirs.
+ */
+static int try_encode_x86_vex_extra_stmt(const as_instruction_t *in, int intel_syntax, int is64,
+                                         unsigned char *code, size_t code_cap, size_t *code_len,
+                                         char *encerr, size_t encerr_sz) {
+    enum { TWO, TWO_NARROW, SHIFT, THREE, THREE_XMM };
+    static const struct {
+        const char *mnemonic;
+        int shape;
+        as_vex_pp_t pp;
+        as_vex_map_t map;
+        uint8_t opcode;
+        uint8_t ext;
+    } rows[] = {
+        {"vsqrtps", TWO, AS_VEX_PP_NONE, AS_VEX_MAP_0F, 0x51, 0},
+        {"vsqrtpd", TWO, AS_VEX_PP_66, AS_VEX_MAP_0F, 0x51, 0},
+        {"vcvtdq2ps", TWO, AS_VEX_PP_NONE, AS_VEX_MAP_0F, 0x5b, 0},
+        {"vcvtps2dq", TWO, AS_VEX_PP_66, AS_VEX_MAP_0F, 0x5b, 0},
+        {"vcvtpd2dq", TWO_NARROW, AS_VEX_PP_F2, AS_VEX_MAP_0F, 0xe6, 0},
+        {"vcvtpd2dqx", TWO_NARROW, AS_VEX_PP_F2, AS_VEX_MAP_0F, 0xe6, 0},
+        {"vcvtpd2dqy", TWO_NARROW, AS_VEX_PP_F2, AS_VEX_MAP_0F, 0xe6, 0},
+        {"vpsrlq", SHIFT, AS_VEX_PP_66, AS_VEX_MAP_0F, 0x73, 2},
+        {"vpsrldq", SHIFT, AS_VEX_PP_66, AS_VEX_MAP_0F, 0x73, 3},
+        {"vpsllq", SHIFT, AS_VEX_PP_66, AS_VEX_MAP_0F, 0x73, 6},
+        {"vpslldq", SHIFT, AS_VEX_PP_66, AS_VEX_MAP_0F, 0x73, 7},
+        {"vpdpwsud", THREE, AS_VEX_PP_F3, AS_VEX_MAP_0F38, 0xd2, 0},
+        {"vpdpwsuds", THREE, AS_VEX_PP_F3, AS_VEX_MAP_0F38, 0xd3, 0},
+        {"vpdpwusd", THREE, AS_VEX_PP_66, AS_VEX_MAP_0F38, 0xd2, 0},
+        {"vpdpwusds", THREE, AS_VEX_PP_66, AS_VEX_MAP_0F38, 0xd3, 0},
+        {"vpdpwuud", THREE, AS_VEX_PP_NONE, AS_VEX_MAP_0F38, 0xd2, 0},
+        {"vpdpwuuds", THREE, AS_VEX_PP_NONE, AS_VEX_MAP_0F38, 0xd3, 0},
+        {"vsm3msg1", THREE_XMM, AS_VEX_PP_NONE, AS_VEX_MAP_0F38, 0xda, 0},
+        {"vsm3msg2", THREE_XMM, AS_VEX_PP_66, AS_VEX_MAP_0F38, 0xda, 0},
+        {"vsm4key4", THREE, AS_VEX_PP_F3, AS_VEX_MAP_0F38, 0xda, 0},
+        {"vsm4rnds4", THREE, AS_VEX_PP_F2, AS_VEX_MAP_0F38, 0xda, 0},
+    };
+    as_x86_vex_insn_t vex;
+    as_x86_operand_t op[3];
+    char mnbuf[32];
+    char scratch[64];
+    long long immv = 0;
+    size_t n = in != NULL ? in->operand_count : 0;
+    size_t nreg;
+    size_t row;
+    size_t i;
+    size_t len = 0;
+    unsigned bits;
+
+    (void)encerr;
+    (void)encerr_sz;
+    if (code_len != NULL) {
+        *code_len = 0;
+    }
+    if (in == NULL || code == NULL || code_len == NULL || in->mnemonic == NULL || strlen(in->mnemonic) >= sizeof(mnbuf)) {
+        return -1;
+    }
+    for (i = 0; in->mnemonic[i] != '\0'; ++i) {
+        mnbuf[i] = (char)tolower((unsigned char)in->mnemonic[i]);
+    }
+    mnbuf[i] = '\0';
+    for (row = 0; row < sizeof(rows) / sizeof(rows[0]); ++row) {
+        if (strcmp(mnbuf, rows[row].mnemonic) == 0) {
+            break;
+        }
+    }
+    if (row == sizeof(rows) / sizeof(rows[0])) {
+        return -1;
+    }
+    nreg = (rows[row].shape == THREE || rows[row].shape == THREE_XMM) ? 3u : 2u;
+    if (n != nreg + (rows[row].shape == SHIFT ? 1u : 0u)) {
+        return -1;
+    }
+    /* The operands in Intel's order: destination first, a count last. */
+    for (i = 0; i < nreg; ++i) {
+        const as_operand_t *src = &in->operands[intel_syntax ? i : n - 1 - i];
+
+        if (convert_operand_x86(src, mnbuf, &op[i], is64, intel_syntax, scratch, sizeof(scratch)) != 0) {
+            return -1;
+        }
+        if (op[i].kind == AS_X86_OP_REG) {
+            if ((op[i].size_bits != 128 && op[i].size_bits != 256) || op[i].u.reg > AS_X86_REG_R15) {
+                return -1;
+            }
+        } else if (op[i].kind != AS_X86_OP_MEM || i != nreg - 1 || rows[row].shape == SHIFT) {
+            /* Memory is the last operand only, and the shift's VEX form
+             * has none. */
+            return -1;
+        }
+    }
+    if (rows[row].shape == SHIFT) {
+        const as_operand_t *count = &in->operands[intel_syntax ? n - 1 : 0];
+
+        if ((count->kind != AS_OPERAND_IMMEDIATE && count->kind != AS_OPERAND_LABEL_REF) ||
+            eval_expr_const(count->u.expr, &immv) != 0 || immv < 0 || immv > 255) {
+            return -1;
+        }
+    }
+    bits = op[0].size_bits;
+
+    memset(&vex, 0, sizeof(vex));
+    vex.opcode = rows[row].opcode;
+    vex.map = rows[row].map;
+    vex.pp = rows[row].pp;
+    switch (rows[row].shape) {
+    case TWO:
+        if (op[1].kind == AS_X86_OP_REG && op[1].size_bits != bits) {
+            return -1;
+        }
+        vex.vex_l = bits == 256;
+        vex.dst = op[0].u.reg;
+        vex.src2 = op[1];
+        break;
+    case TWO_NARROW: {
+        /* 128 bits out of 128 or of 256: the source says which, and a
+         * source in memory says it with the mnemonic's x or y. */
+        size_t mlen = strlen(mnbuf);
+        char sfx = mnbuf[mlen - 1];
+        unsigned sbits = op[1].kind == AS_X86_OP_REG ? op[1].size_bits : 0;
+
+        if (bits != 128) {
+            return -1;
+        }
+        if (sfx == 'x' || sfx == 'y') {
+            unsigned want = sfx == 'y' ? 256u : 128u;
+
+            if (sbits != 0 && sbits != want) {
+                return -1;
+            }
+            sbits = want;
+        }
+        if (sbits == 0) {
+            return -1;
+        }
+        vex.vex_l = sbits == 256;
+        vex.dst = op[0].u.reg;
+        vex.src2 = op[1];
+        break;
+    }
+    case SHIFT:
+        if (op[1].size_bits != bits) {
+            return -1;
+        }
+        vex.vex_l = bits == 256;
+        vex.dst = (as_x86_reg_t)rows[row].ext;
+        vex.src1 = op[0].u.reg;
+        vex.src2 = op[1];
+        break;
+    default:
+        if (op[1].size_bits != bits || (op[2].kind == AS_X86_OP_REG && op[2].size_bits != bits) ||
+            (rows[row].shape == THREE_XMM && bits != 128)) {
+            return -1;
+        }
+        vex.vex_l = bits == 256;
+        vex.dst = op[0].u.reg;
+        vex.src1 = op[1].u.reg;
+        vex.src2 = op[2];
+        break;
+    }
+    if (as_x86_encode_vex_3op(&vex, code, code_cap, &len, scratch, sizeof(scratch)) != 0) {
+        return -1;
+    }
+    if (rows[row].shape == SHIFT) {
+        if (len >= code_cap) {
+            return -1;
+        }
+        code[len++] = (unsigned char)immv;
+    }
+    *code_len = len;
+    return 0;
+}
+
 static int try_encode_x86_avx_stmt(const as_instruction_t *in, int intel_syntax, int is64, unsigned char *code, size_t code_cap,
                                    size_t *code_len, char *encerr, size_t encerr_sz) {
     as_x86_avx_insn_t avx;
@@ -9946,7 +10133,9 @@ static int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_st
     if ((!cfg->is_64 || cfg->x86_64_isa_level >= 3) &&
         !((!cfg->is_64 || cfg->x86_64_isa_level >= 4) &&
           (x86_mnemonic_is_evex_first(mnbuf) || x86_stmt_has_decorator(&st->u.instr)))) {
-        if ((try_encode_x86_avx_stmt(&st->u.instr, intel_syntax, cfg->is_64, code, code_cap, code_len, encerr, encerr_sz) == 0 &&
+        if ((try_encode_x86_vex_extra_stmt(&st->u.instr, intel_syntax, cfg->is_64, code, code_cap, code_len, encerr, encerr_sz) == 0 &&
+             *code_len > 0) ||
+            (try_encode_x86_avx_stmt(&st->u.instr, intel_syntax, cfg->is_64, code, code_cap, code_len, encerr, encerr_sz) == 0 &&
              *code_len > 0) ||
             (try_encode_x86_avx2_stmt(&st->u.instr, intel_syntax, cfg->is_64, code, code_cap, code_len, encerr, encerr_sz) == 0 &&
              *code_len > 0) ||

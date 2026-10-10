@@ -205,6 +205,14 @@ int as_x86_encode_avx2(const as_x86_avx2_insn_t *insn, uint8_t *out, size_t out_
             vector_bits_to_l(insn->vector_bits, &vex_l) != 0) {
             return -1;
         }
+        /* The source is an %xmm register or memory.  From a general
+         * register it is another instruction, which only EVEX has, and
+         * %eax here was encoded as %xmm0. */
+        if (insn->op2.kind == AS_X86_OP_REG &&
+            (insn->op2.size_bits == 8 || insn->op2.size_bits == 16 || insn->op2.size_bits == 32 ||
+             insn->op2.size_bits == 64)) {
+            return -1;
+        }
 
         if (streq_ci(insn->mnemonic, "vpbroadcastb")) {
             opcode = 0x78;
