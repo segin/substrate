@@ -62,8 +62,9 @@ placed where it belongs.
 - [x] **AS-T-011** When `make -C tests/usr.bin/as` is run on a host with no cross toolchain, every test of the restored suite shall build and run.
   Trace: AS-TST-001.  Verify: D — the command completes and prints a verdict for each test.  After: 010.
   Done: `run-suite.sh` builds the assembler for the host once and runs every `test_*.sh` against it (`$AS`); 60 pass, 25 fail and are listed in `xfail.list`, 3 are not run because they build in, and clean, the source tree.
-- [ ] **AS-T-012** `tests/usr.bin/as/STATUS.md` shall record, for each restored test that fails, whether the cause is a defect (and the task here that mends it) or a stale expectation.
+- [x] **AS-T-012** `tests/usr.bin/as/STATUS.md` shall record, for each restored test that fails, whether the cause is a defect (and the task here that mends it) or a stale expectation.
   Trace: AS-TST-002.  Verify: I — no failing test is without an entry.  After: 011.
+  Done, in `xfail.list` and not a file of its own, since that is the file `run-suite.sh` enforces: each of the 21 failing tests has its cause and task there, and the header names the six whose expectations were stale.
 - [ ] **AS-T-013** If a restored test fails because its expectation is stale, then the expectation shall be corrected against GNU `as`.
   Trace: AS-TST-002.  Verify: T — the test passes; the commit names the GNU version used.  After: 012.
 - [ ] **AS-T-014** The test suite shall hold a differential harness that assembles each line of a corpus with this assembler and with GNU `as` and reports every difference in section bytes or relocations.
@@ -74,8 +75,9 @@ placed where it belongs.
   Trace: AS-TST-001.  Verify: T — a deliberately broken encoder makes it fail; a mended line is removed from the baseline by the commit that mends it.  After: 014.
 - [ ] **AS-T-017** The test suite shall run its corpora through a build of the assembler made with AddressSanitizer and UndefinedBehaviorSanitizer.
   Trace: AS-TST-001.  Verify: D — the run reports the null dereference of AS-X86-040 until 022 is done.
-- [ ] **AS-T-018** The `ci` workflow shall run the whole of `tests/usr.bin/as` on every push.
+- [x] **AS-T-018** The `ci` workflow shall run the whole of `tests/usr.bin/as` on every push.
   Trace: AS-TST-001.  Verify: I — `gh run view` shows the restored tests in the job log.  After: 011.
+  Done: the "Assembler tests" step of the `host-tests` job; green at `5e3157d0c` on the Ubuntu runner (dash, mawk, a gcc that writes `endbr64`).
 - [ ] **AS-T-019** The test suite shall compile a fixed set of C programs with `gcc -S` at `-O0` and `-O2`, for `-m32` and `-m64`, assemble the output with this assembler, link it and run it.
   Trace: AS-TST-001, summary ("does not assemble what a compiler writes").  Verify: D — the fifteen combinations of the audit are listed with a verdict each; the test is expected-fail per combination until it passes.
 
@@ -182,10 +184,12 @@ status 0.
   Trace: AS-X86-022, AS-EXT-008.  Verify: T — `movb %sil,%dil`, `movb %al,%sil`, `cmpb %dil,%sil`, `incb %dil`, `testb`, `setcc %sil`: GNU.
 - [ ] **AS-T-060** If `%ah`, `%ch`, `%dh` or `%bh` is used in an instruction that needs a `REX` prefix, then the assembler shall refuse it.
   Trace: AS-X86-022.  Verify: T — `movb %ah,%r8b`, `movb %ah,%sil`, `addb %bh,(%r9)`: exit 1.
-- [ ] **AS-T-061** When an instruction has an 8-bit operand and an immediate, the assembler shall emit an 8-bit immediate.
+- [x] **AS-T-061** When an instruction has an 8-bit operand and an immediate, the assembler shall emit an 8-bit immediate.
   Trace: AS-X86-012.  Verify: T — `--64` `movb $1,%al` is two bytes; `movb $1,(%rax)`; the ALU group with `b`: GNU.
-- [ ] **AS-T-062** When an instruction has a 16-bit operand and an immediate, the assembler shall emit a 16-bit immediate, or the sign-extended 8-bit form.
+  Done: `test_imm_width.sh`.  With it a variadic call from substrate's `cc` works in 64-bit code (`printf` in `tests/rootfs64/smoke.sh`).
+- [x] **AS-T-062** When an instruction has a 16-bit operand and an immediate, the assembler shall emit a 16-bit immediate, or the sign-extended 8-bit form.
   Trace: AS-X86-012.  Verify: T — `addw $0x1000,%bx`, `cmpw $0x1234,(%rax)`, `andw`, `pushw $0x1234`, `movw $1,%ax`, both modes: GNU.
+  Done: `test_imm_width.sh`, with `testw` and `imulw` besides.  `movw $1,%ax` has its 16-bit immediate and, in 64-bit mode, two `66` prefixes: that is 035.
 - [ ] **AS-T-063** If an immediate does not fit the field its instruction gives it, then the assembler shall refuse it.
   Trace: AS-X86-013.  Verify: T — `addq $0xffffffff,%rax`, `addq $0x80000000,%rbx`, `pushq $0x80000000`, `movq $0x123456789,(%rax)`, `int $256`, `enter $0x10000,$0`, `shl $-1,%eax`, `movb $256,%al`: exit 1, as GNU.
 - [ ] **AS-T-064** When a value is written to `.byte`, `.word` or `.long` that does not fit, the assembler shall warn and emit the truncated value.

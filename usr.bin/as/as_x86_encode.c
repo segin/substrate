@@ -721,6 +721,12 @@ static unsigned effective_i386_addr_bits(const as_x86_insn_t *insn) {
 }
 
 static int emit_i386_imm_or_rel(enc_ctx_t *ctx, uint32_t v, unsigned bits) {
+    /* Eight bits are eight bits: asked for one byte this wrote four, and
+     * `movb $0, %al` in 64-bit code was followed by three bytes of zeros
+     * that the processor then ran. */
+    if (bits == 8u) {
+        return emit8(ctx, (uint8_t)v);
+    }
     if (bits == 16u) {
         return emit16(ctx, (uint16_t)v);
     }
@@ -2824,7 +2830,9 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
                 return -1;
             }
         } else if (emit8(&ctx, 0x81) != 0 || modrm_sib_disp64(&ctx, (as_x86_reg_t)ext, a, &rex_r, &rex_x, &rex_b) != 0 ||
-                   emit32(&ctx, (uint32_t)b->u.imm) != 0) {
+                   /* A 16-bit operation takes a 16-bit immediate. */
+                   emit_i386_imm_or_rel(&ctx, (uint32_t)b->u.imm,
+                                        (bits == 16 || insn->operand_size_override) ? 16u : 32u) != 0) {
             return -1;
         }
         goto finish;
@@ -3078,7 +3086,9 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
                 if (emit8(&ctx, 0x6a) != 0 || emit8(&ctx, (uint8_t)a->u.imm) != 0) {
                     return -1;
                 }
-            } else if (emit8(&ctx, 0x68) != 0 || emit_i386_imm_or_rel(&ctx, (uint32_t)a->u.imm, 32) != 0) {
+            } else if (emit8(&ctx, 0x68) != 0 ||
+                       emit_i386_imm_or_rel(&ctx, (uint32_t)a->u.imm,
+                                            insn->operand_size_override ? 16u : 32u) != 0) {
                 return -1;
             }
             goto finish;
@@ -3906,7 +3916,8 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
                 }
             } else {
                 if (emit8(&ctx, 0x69) != 0 || modrm_sib_disp64(&ctx, a->u.reg, b, &rex_r, &rex_x, &rex_b) != 0 ||
-                    emit32(&ctx, (uint32_t)c->u.imm) != 0) {
+                    emit_i386_imm_or_rel(&ctx, (uint32_t)c->u.imm,
+                                         (a->size_bits == 16 || insn->operand_size_override) ? 16u : 32u) != 0) {
                     return -1;
                 }
             }
@@ -4163,7 +4174,8 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
                     return -1;
                 }
             } else if (emit8(&ctx, 0xf7) != 0 || modrm_sib_disp64(&ctx, AS_X86_REG_RAX, a, &rex_r, &rex_x, &rex_b) != 0 ||
-                       emit32(&ctx, (uint32_t)b->u.imm) != 0) {
+                       emit_i386_imm_or_rel(&ctx, (uint32_t)b->u.imm,
+                                            (bits == 16 || insn->operand_size_override) ? 16u : 32u) != 0) {
                 return -1;
             }
         } else {
