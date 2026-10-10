@@ -603,6 +603,41 @@ t "32"    refused        'movl (%eax,%esp),%ecx'
 t "32"    refused        'pshufb (%eax,%esp), %xmm0'
 t "32"    refused        'movw (%bx,%sp), %ax'
 
+# Between two registers a move, and each of the eight arithmetic
+# instructions, has two encodings: the destination in ModRM.rm or in
+# ModRM.reg.  GNU as writes the first.  The second was written here --
+# for every move, and in 64-bit code for the arithmetic too: the same
+# instruction, and not the bytes an object is compared with GNU's by.
+t "32 64" 89c3           'movl %eax, %ebx'
+t "32 64" 88c1           'movb %al, %cl'
+t "32 64" 88e3           'movb %ah, %bl'
+t "32 64" 6689e0         'movw %sp, %ax'
+t "32 64" 89f7           'movl %esi, %edi'
+t "64"    4889d7         'movq %rdx, %rdi'
+t "64"    4589e7         'movl %r12d, %r15d'
+t "64"    4088f0         'movb %sil, %al'
+t "64"    4088c7         'movb %al, %dil'
+t "64"    664189dd       'movw %bx, %r13w'
+t "32 64" 01c3           'addl %eax, %ebx'
+t "32 64" 00c0           'addb %al, %al'
+t "32 64" 6629ca         'subw %cx, %dx'
+t "32 64" 31c0           'xorl %eax, %eax'
+t "32 64" 39ca           'cmpl %ecx, %edx'
+t "32 64" 08df           'orb %bl, %bh'
+t "32 64" 21fe           'andl %edi, %esi'
+t "32 64" 11c3           'adcl %eax, %ebx'
+t "32 64" 19c3           'sbbl %eax, %ebx'
+t "64"    4801c0         'addq %rax, %rax'
+t "64"    4d31c1         'xorq %r8, %r9'
+t "64"    4038f7         'cmpb %sil, %dil'
+t "64"    00ee           'addb %ch, %dh'
+t "32 64" 85c3           'testl %eax, %ebx'
+t "32 64" 87d9           'xchgl %ebx, %ecx'
+t "32"    8b18           'movl (%eax), %ebx'
+t "32"    8918           'movl %ebx, (%eax)'
+t "64"    480318         'addq (%rax), %rbx'
+t "64"    480118         'addq %rbx, (%rax)'
+
 # A displacement written as the number 0 is no displacement: `0(%eax)`
 # is `(%eax)`.  It was kept as a byte of zero.  And (%ebp), (%rbp) and
 # (%r13), which cannot be without one, have one byte of zero and had

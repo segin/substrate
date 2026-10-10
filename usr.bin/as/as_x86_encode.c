@@ -1582,7 +1582,10 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
                 if (emit8(&ctx, (uint8_t)(0xb0 | (a->u.reg & 7))) != 0 || emit8(&ctx, (uint8_t)b->u.imm) != 0) {
                     return -1;
                 }
-            } else if (insn->op_count == 2 && a->kind == AS_X86_OP_REG && is_reg_or_mem(b)) {
+            /* From memory only.  Between two registers there are two
+             * encodings, and GNU as writes the other one, 88 and 89: an
+             * object is compared with GNU's byte for byte. */
+            } else if (insn->op_count == 2 && a->kind == AS_X86_OP_REG && b->kind == AS_X86_OP_MEM) {
                 if (encode_reg_rm_pair(&ctx, 0x8a, a, b, 0) != 0) {
                     return -1;
                 }
@@ -1603,7 +1606,7 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
                 emit_i386_imm_or_rel(&ctx, (uint32_t)b->u.imm, effective_i386_operand_bits(insn)) != 0) {
                 return -1;
             }
-        } else if (insn->op_count == 2 && a->kind == AS_X86_OP_REG && is_reg_or_mem(b)) {
+        } else if (insn->op_count == 2 && a->kind == AS_X86_OP_REG && b->kind == AS_X86_OP_MEM) {
             if (encode_reg_rm_pair(&ctx, 0x8b, a, b, 0) != 0) {
                 return -1;
             }
@@ -3559,7 +3562,9 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
         if (width == 64u) {
             rex_w = 1;
         }
-        if (a->kind == AS_X86_OP_REG) {
+        /* Between two registers, the form whose destination is ModRM.rm:
+         * it is the one GNU as writes. */
+        if (a->kind == AS_X86_OP_REG && b->kind == AS_X86_OP_MEM) {
             if (emit8(&ctx, reg_dst_op) != 0 || modrm_sib_disp64(&ctx, a->u.reg, b, &rex_r, &rex_x, &rex_b) != 0) {
                 return -1;
             }
@@ -3659,7 +3664,8 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
         goto finish;
     }
 
-    if (streq_ci(insn->mnemonic, "mov") && insn->op_count == 2 && a->kind == AS_X86_OP_REG && is_reg_or_mem(b)) {
+    if (streq_ci(insn->mnemonic, "mov") && insn->op_count == 2 && a->kind == AS_X86_OP_REG &&
+        b->kind == AS_X86_OP_MEM) {
         unsigned width = insn->byte_op ? 8u : (insn->rex_w ? 64u : (insn->operand_size_override ? 16u : 32u));
 
         if (width == 16u && emit8(&ctx, 0x66) != 0) {

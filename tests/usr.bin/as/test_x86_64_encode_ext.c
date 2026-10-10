@@ -117,7 +117,9 @@ int main(void) {
     insn.ops[0] = reg_op(AS_X86_REG_R9);
     insn.ops[1] = reg_op(AS_X86_REG_RAX);
     {
-        const uint8_t exp[] = {0x4c, 0x8b, 0xc8};
+        /* mov %rax, %r9, as GNU as writes it: the destination in
+         * ModRM.rm.  (This had the other encoding, 4c 8b c8.) */
+        const uint8_t exp[] = {0x49, 0x89, 0xc1};
         check_encode64(&insn, exp, sizeof(exp));
     }
 
