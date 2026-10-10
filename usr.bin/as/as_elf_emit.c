@@ -3040,6 +3040,14 @@ static int normalize_x86_mnemonic(const char *src, char *dst, size_t dst_sz, cha
     }
     dst[n] = '\0';
 
+    /* sal is shl by its other name: the same instruction, and the name a
+     * compiler writes for a signed operand.  The suffix, if there is one,
+     * is taken off below as shl's is. */
+    if (strncmp(dst, "sal", 3) == 0 &&
+        (n == 3 || (n == 4 && (dst[3] == 'b' || dst[3] == 'w' || dst[3] == 'l' || dst[3] == 'q')))) {
+        dst[1] = 'h';
+    }
+
     if (strcmp(dst, "movslq") == 0) {
         if (dst_sz < sizeof("movsxd")) {
             return -1;

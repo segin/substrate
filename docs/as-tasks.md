@@ -452,6 +452,7 @@ one table of templates; there is one ModRM/SIB/prefix emitter.
   Trace: AS-X86-010, AS-SEL-011, AS-EXT-010.  Verify: T — the 1,752 acceptances of the selection sweep and the 427 + 943 "GNU refuses, ours accepts" lines of the core corpus are refused; named cases: `mov %al,%ebx`, `seta %ax`, `lea (%eax),%al`, `bswap %ax`, `jmp *%al`, `pushb %al`, `lgdt %eax`, `hlt %eax`, `nop $1`, `mov $1,%es`, `bsf %xmm1,%xmm2`, `movd %xmm1,%xmm2`, `sgdt %eax`, `movsd %xmm1,%mm2`.  After: 161.
 - [ ] **AS-T-172** When a mnemonic is written with a size suffix its instruction takes, the assembler shall accept it.
   Trace: AS-SEL-012, AS-X86-041.  Verify: T — `sall`, `salw`, `salb`, `salq`, `shldl`, `shrdw`, `larl`, `lsll`, `movntil`, `boundl`, `lssl`, `lfsl`, `lgsl`, `iretl`, `lretl`, `movbew`, `movbel`, `adcxl`, `adoxq`, `andnl`, `bzhiq`, `tzcntw`: GNU.  After: 161.
+  In part: `sal` with and without each suffix, which is what stopped gcc's 64-bit `-O0` output (`test_sal.sh`).  The others are open.
 - [ ] **AS-T-173** When `shld` or `shrd` is written with two operands, the assembler shall encode the by-`CL` form.
   Trace: AS-SEL-012.  Verify: T.
 - [ ] **AS-T-174** When a 16-bit operand is used with an instruction encoded from the SIMD-era tables, the assembler shall emit the `66` prefix.

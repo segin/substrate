@@ -3,8 +3,9 @@
 # its combination runs both here and on the CI host, and is never taken
 # out to make the test pass.
 #
-# All of 64 bits but -O0, which stops at salq (AS-T-172).  Nothing of 32
-# bits yet: the x87 instructions are missing (AS-T-179).
+# All of 64 bits.  Nothing of 32 bits yet: the x87 instructions are
+# missing (AS-T-179).
+-m64 -O0
 -m64 -O1
 -m64 -O2
 -m64 -Os
