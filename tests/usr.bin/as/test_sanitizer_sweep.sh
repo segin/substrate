@@ -66,15 +66,18 @@ fi
 # --- the build that is swept --------------------------------------------
 # The assembler's main() is as_main() here, and the sweeping program's is
 # the program's.
-others=$(ls "$top"/usr.bin/as/*.c | grep -v '/as\.c$')
-# shellcheck disable=SC2086
-if ! ${CC:-cc} $SAN -c -Dmain=as_main -o as_main.o \
-        -idirafter "$top/include" -idirafter "$top/sys" -idirafter "$top/sys/include" \
-        -I"$top/usr.lib/elfobj/src" "$top/usr.bin/as/as.c" 2> build.err ||
-   ! ${CC:-cc} $SAN -o sweep -I"$here" \
-        -idirafter "$top/include" -idirafter "$top/sys" -idirafter "$top/sys/include" \
-        -I"$top/usr.lib/elfobj/src" "$here/sanitizer_sweep.c" as_main.o $others \
-        "$top"/usr.lib/elfobj/src/*.c 2> build.err; then
+#
+# One compiler for each source file, as many at a time as there are
+# processors: instrumented, the assembler is most of this test's time.
+INC="-I$here -idirafter $top/include -idirafter $top/sys -idirafter $top/sys/include -I$top/usr.lib/elfobj/src"
+export SAN INC
+mkdir obj
+ncpu=$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)
+# shellcheck disable=SC2086,SC2016
+if ! ${CC:-cc} $SAN $INC -c -Dmain=as_main -o as_main.o "$top/usr.bin/as/as.c" 2> build.err ||
+   ! ls "$top"/usr.bin/as/*.c "$top"/usr.lib/elfobj/src/*.c "$here/sanitizer_sweep.c" | grep -v '/as/as\.c$' |
+        xargs -P "$ncpu" -n 1 sh -c '${CC:-cc} $SAN $INC -c -o "obj/$(basename "$0" .c).o" "$0"' 2>> build.err ||
+   ! ${CC:-cc} $SAN -o sweep as_main.o obj/*.o 2>> build.err; then
     echo "FAIL: the assembler does not build with the sanitizers ($(head -1 build.err))"
     exit 1
 fi
