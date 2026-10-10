@@ -4479,19 +4479,34 @@ static int emit_x86_64_gp_to_xmm_cvtsi(unsigned char prefix, const as_operand_t 
     as_x86_reg_t gr;
     unsigned xr;
     unsigned char rex;
+    int src_bits;
+    size_t pos = 0;
 
     if (src == NULL || dst == NULL || out == NULL || out_len == NULL || out_cap < 5 ||
         src->kind != AS_OPERAND_REGISTER || dst->kind != AS_OPERAND_REGISTER ||
         parse_x86_reg(src->u.reg, &gr) != 0 || parse_xmm_reg(dst->u.reg, &xr) != 0) {
         return -1;
     }
-    rex = (unsigned char)(0x48u | ((xr & 8u) ? 0x04u : 0u) | ((((unsigned)gr) & 8u) ? 0x01u : 0u));
-    out[0] = prefix;
-    out[1] = rex;
-    out[2] = 0x0f;
-    out[3] = 0x2a;
-    out[4] = (unsigned char)(0xc0u | ((xr & 7u) << 3) | (((unsigned)gr) & 7u));
-    *out_len = 5;
+    /*
+     * REX.W says the integer is 64 bits wide, and belongs only where the
+     * register is.  It was set always: `cvtsi2sd %eax, %xmm0`, which is
+     * how a compiler turns an int into a double, converted all of %rax,
+     * whose upper half is whatever was left there.
+     */
+    src_bits = x86_reg_width_bits(src->u.reg);
+    if (src_bits != 32 && src_bits != 64) {
+        return -1;
+    }
+    rex = (unsigned char)(0x40u | (src_bits == 64 ? 0x08u : 0u) | ((xr & 8u) ? 0x04u : 0u) |
+                          ((((unsigned)gr) & 8u) ? 0x01u : 0u));
+    out[pos++] = prefix;
+    if (rex != 0x40u) {
+        out[pos++] = rex;
+    }
+    out[pos++] = 0x0f;
+    out[pos++] = 0x2a;
+    out[pos++] = (unsigned char)(0xc0u | ((xr & 7u) << 3) | (((unsigned)gr) & 7u));
+    *out_len = pos;
     return 0;
 }
 

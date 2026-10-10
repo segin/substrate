@@ -137,8 +137,9 @@ status 0.
   Trace: AS-X86-026.  Verify: T — `lock addl %eax,%ebx`, `lock movl (%eax),%ebx`, `lock nop`: exit 1.
 - [ ] **AS-T-033** When a prefix mnemonic is written as a statement of its own, the assembler shall apply it to the next instruction.
   Trace: AS-FE-040, AS-X86-041.  Verify: T — `lock; cmpxchgl %ebx,(%eax)`, `rep; nop`, `lock` on a line then `incl (%eax)` on the next: GNU.
-- [ ] **AS-T-034** When a legacy prefix and a `REX` prefix both apply, the assembler shall emit the legacy prefix first.
+- [x] **AS-T-034** When a legacy prefix and a `REX` prefix both apply, the assembler shall emit the legacy prefix first.
   Trace: AS-SEL-006, AS-X86-024, AS-EXT-005.  Verify: T — `paddb %xmm1,%xmm10`, `pxor %xmm8,%xmm8`, the 43 SSE2-integer mnemonics with `%xmm8`–`15` and `%r8`–`15`, `push %r9w`, `movq %rax,%xmm0`, `movq %xmm0,%rax`: GNU.
+  Done: where the 64-bit encoder keeps `REX`, it is moved past any `66`, `F2` or `F3` written after its place, once, for every branch.  `test_rex_prefix.sh`.  (`movq %xmm1,%xmm2` is still the wrong instruction: 180.)
 - [ ] **AS-T-035** When a 16-bit instruction is assembled in 64-bit mode, the assembler shall emit one `66` prefix.
   Trace: AS-X86-011.  Verify: T — every `w`-suffixed line of the 64-bit corpus has exactly one `66`; `movabs %ax,sym` has one.
 - [ ] **AS-T-036** When `cbw`, `cbtw`, `cwd`, `cwtd`, `iretw`, `lretw`, `pushaw`, `popaw`, `pushfw`, `popfw`, `jmpw *r16`, `callw *r16`, `cmovccw`, `leaw` or `xaddw` is written, the assembler shall emit the `66` prefix in 32- and 64-bit modes.
@@ -215,6 +216,7 @@ status 0.
   Trace: AS-X86-024.  Verify: T — `movl %eax,(%rax,%r12)`, `(%rbx,%r12,8)`, `(,%r12,4)`; `%rsp` as index still refused.
 - [ ] **AS-T-066** When `cvtsi2sd`, `cvtsi2ss` or their VEX forms are written with a 32-bit source, the assembler shall not set `REX.W` or `VEX.W`.
   Trace: AS-SEL-006, AS-X86-024, AS-EXT-008.  Verify: T — `cvtsi2sd %eax,%xmm0`, `cvtsi2sdl (%rax),%xmm0`, `cvtsi2sdq %rax,%xmm0`, `vcvtsi2sdq %rax,%xmm1,%xmm2`, `vcvtusi2sdl`: GNU.
+  In part: `cvtsi2sd` and `cvtsi2ss` take `REX.W` from the width of the integer, and `cvtsd2si`/`cvtss2si` to a 64-bit register have it (`test_rex_prefix.sh`).  Still open: `vcvtsi2sdq %rax,…` lacks `VEX.W` and `vcvtusi2sdl %eax,…` has `EVEX.W`.
 
 ### B.6 Directives that do nothing
 

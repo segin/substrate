@@ -4634,6 +4634,10 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
             set_unsupported_form(&ctx, insn);
             return -1;
         }
+        /* To a 64-bit register the result is 64 bits. */
+        if (a->size_bits == 64) {
+            rex_w = 1;
+        }
         if (emit8(&ctx, 0xf2) != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, op2) != 0 ||
             modrm_sib_disp64(&ctx, a->u.reg, b, &rex_r, &rex_x, &rex_b) != 0) {
             return -1;
@@ -4707,6 +4711,9 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
             (!operand_is_xmm_reg(b) && b->kind != AS_X86_OP_MEM)) {
             set_unsupported_form(&ctx, insn);
             return -1;
+        }
+        if (a->size_bits == 64) {
+            rex_w = 1;
         }
         if (emit8(&ctx, 0xf3) != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, op2) != 0 ||
             modrm_sib_disp64(&ctx, a->u.reg, b, &rex_r, &rex_x, &rex_b) != 0) {
@@ -6513,6 +6520,21 @@ finish:
         }
         ctx.at--;
     } else {
+        /*
+         * REX is the last prefix: the processor heeds it only when the
+         * opcode follows it directly.  The place for it was kept before
+         * the branches above ran, and many of them then write 66, F2 or
+         * F3 -- so `pxor %xmm8, %xmm8` came out 45 66 0f ef c0, its REX
+         * ignored, which is `pxor %xmm0, %xmm0`.  None of those three is
+         * ever an opcode, so any that follow the place are prefixes, and
+         * it moves down past them.
+         */
+        while (rex_pos + 1 < ctx.at &&
+               (ctx.out[rex_pos + 1] == 0x66 || ctx.out[rex_pos + 1] == 0xf2 ||
+                ctx.out[rex_pos + 1] == 0xf3)) {
+            ctx.out[rex_pos] = ctx.out[rex_pos + 1];
+            rex_pos++;
+        }
         ctx.out[rex_pos] = rex;
     }
 
