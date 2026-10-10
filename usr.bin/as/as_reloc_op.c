@@ -9,10 +9,11 @@
  * The operators and what each names, by the two psABIs.  0 (which is
  * R_*_NONE) where a machine has no such operator.
  */
+/* (Not `i386`: a compiler for that machine defines the word.) */
 static const struct {
     const char *name;
-    uint32_t i386;
-    uint32_t x86_64;
+    uint32_t type_i386;
+    uint32_t type_x86_64;
 } reloc_operators[] = {
     { "PLT",       R_386_PLT32,      R_X86_64_PLT32 },
     { "GOT",       R_386_GOT32,      R_X86_64_GOT32 },
@@ -65,7 +66,7 @@ int as_reloc_op_type(unsigned machine, const char *name, uint32_t *type_out) {
     if (i < 0) {
         return strstr(name, "@@") != NULL ? 0 : -1;
     }
-    t = machine == EM_X86_64 ? reloc_operators[i].x86_64 : reloc_operators[i].i386;
+    t = machine == EM_X86_64 ? reloc_operators[i].type_x86_64 : reloc_operators[i].type_i386;
     if (t == 0) {
         return -1;
     }

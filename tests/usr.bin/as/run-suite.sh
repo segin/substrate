@@ -41,10 +41,12 @@ ${CC:-cc} -O1 -w -o "$work/ld" \
 LD="$work/ld"
 export LD
 
-# And some unit tests link the object library itself.
+# And some unit tests link the object library itself.  They compile with
+# plain `cc`, whatever $CC is, so the library is built with it too: $CC
+# may be `gcc -m32`, to try the assembler and linker as 32-bit programs.
 mkdir "$work/elfobj" && (
     cd "$work/elfobj" &&
-    ${CC:-cc} -O1 -w -c -idirafter "$top/include" -idirafter "$top/sys" -idirafter "$top/sys/include" \
+    cc -O1 -w -c -idirafter "$top/include" -idirafter "$top/sys" -idirafter "$top/sys/include" \
         -I"$top/usr.lib/elfobj/src" "$top"/usr.lib/elfobj/src/*.c &&
     ar rcs "$work/libelfobj.a" ./*.o
 ) 2> "$work/build.err" ||
