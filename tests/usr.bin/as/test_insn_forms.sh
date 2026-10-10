@@ -332,5 +332,34 @@ t "32 64" refused        'maskmovq %mm1, %xmm2'
 t "32 64" refused        'maskmovdqu %mm1, %xmm2'
 t "32 64" refused        'maskmovq %mm1'
 
+# extrq and insertq: the length is the first immediate byte and the
+# index the second, and AT&T writes the index first.  The bytes had been
+# in the order written, extrq's ModRM.reg held the register where it is
+# /0, a memory operand was assembled where there is no such form, and
+# 64-bit code had neither instruction.
+t "32 64" 660f78c10804   'extrq $4, $8, %xmm1'
+t "32 64" 660f78c74000   'extrq $0, $64, %xmm7'
+t "32 64" 660f78c000ff   'extrq $255, $0, %xmm0'
+t "32 64" 660f79d1       'extrq %xmm1, %xmm2'
+t "64"    66410f78c10804 'extrq $4, $8, %xmm9'
+t "64"    66410f79d1     'extrq %xmm9, %xmm2'
+t "64"    66440f79d1     'extrq %xmm1, %xmm10'
+t "32 64" f20f78d10804   'insertq $4, $8, %xmm1, %xmm2'
+t "32 64" f20f78c7013f   'insertq $63, $1, %xmm7, %xmm0'
+t "32 64" f20f79d1       'insertq %xmm1, %xmm2'
+t "64"    f2410f78d10804 'insertq $4, $8, %xmm9, %xmm2'
+t "64"    f2440f78d10804 'insertq $4, $8, %xmm1, %xmm10'
+t "64"    f2450f79d1     'insertq %xmm9, %xmm10'
+ti "32 64" 660f78c10804  'extrq xmm1, 8, 4'
+ti "32 64" f20f78d10804  'insertq xmm2, xmm1, 8, 4'
+ti "32 64" 660f79d1      'extrq xmm2, xmm1'
+t "32 64" refused        'extrq $256, $0, %xmm0'
+t "32 64" refused        'extrq $-1, $0, %xmm0'
+t "32 64" refused        'extrq (%eax), %xmm2'
+t "32 64" refused        'extrq $4, %xmm1'
+t "32"    refused        'extrq $4, $8, %xmm9'
+t "32 64" refused        'insertq $4, $8, (%eax), %xmm2'
+t "32 64" refused        'insertq $4, %xmm1, %xmm2'
+
 [ "$fail" -eq 0 ] && echo "ok: instruction forms ($cases cases)"
 exit "$fail"

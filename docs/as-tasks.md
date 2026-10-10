@@ -191,8 +191,9 @@ status 0.
 - [x] **AS-T-049** When `maskmovq` or `maskmovdqu` is written, the assembler shall place the mask register in ModRM.rm and the source in ModRM.reg.
   Trace: AS-SEL-009.  Verify: T — both, and `vmaskmovdqu`: GNU.
   Done for the two: the 32-bit AT&T path took the operands in the order written, which is Intel's.  `test_insn_forms.sh`, both syntaxes.  `vmaskmovdqu` is not a mnemonic here; it is added to 332's list.
-- [ ] **AS-T-050** When `extrq` or `insertq` is written with two immediates, the assembler shall emit them in the order the manual gives.
+- [x] **AS-T-050** When `extrq` or `insertq` is written with two immediates, the assembler shall emit them in the order the manual gives.
   Trace: AS-SEL-009.  Verify: T — both: GNU.
+  Done: AT&T's order of the two was taken for Intel's.  Found with it and mended: `extrq`'s ModRM.reg held the register where the form is `/0`; a memory operand, and `extrq $4,%xmm1`, were assembled; `%xmm9` was taken in 32-bit code; and 64-bit code had neither instruction.  One function now serves both modes.  `test_insn_forms.sh`, both syntaxes.
 - [ ] **AS-T-051** When `aesencwide256kl` is written, the assembler shall encode opcode extension `/2`.
   Trace: AS-SEL-009.  Verify: T — the four wide Key Locker instructions: GNU.
 - [ ] **AS-T-052** When `crc32` is written, the assembler shall take the source width from the suffix or the source register.
@@ -1040,5 +1041,5 @@ is not to be done, 370 is ticked with "removed" and the rest struck.
 | AS-EXT-009 | 185, 325, 332–337 |
 | AS-EXT-010 | 040, 171, 338, 339 (339 closes all of AS-EXT) |
 
-345 tasks: 63 done, 282 open.  Numbers run to 394, with gaps left between
+345 tasks: 64 done, 281 open.  Numbers run to 394, with gaps left between
 sections for tasks found along the way.
