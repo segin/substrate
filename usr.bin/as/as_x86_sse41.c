@@ -158,7 +158,10 @@ static int modrm_sib_disp64(s41_ctx_t *ctx, as_x86_reg_t reg_field, const as_x86
             return 0;
         }
 
-        if (!m->has_disp && reg_low3(m->base) != AS_X86_REG_RBP) {
+        if (m->force_disp32) {
+            /* A symbol's displacement is four bytes, for its relocation. */
+            mod = 2;
+        } else if (!m->has_disp && reg_low3(m->base) != AS_X86_REG_RBP) {
             mod = 0;
         } else if (m->has_disp && is_disp8(m->disp)) {
             mod = 1;
