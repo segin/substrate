@@ -1182,6 +1182,15 @@ static int emit_i386_modrm_rm_operand(unsigned reg_field, const as_operand_t *rm
     if (rm_op == NULL || out == NULL || pos_io == NULL || reg_field > 7u) {
         return -1;
     }
+    /*
+     * A number written with its `$` is a number and not the address of
+     * anything.  It was read as the address: `pxor $3, %mm1`, `addps
+     * $1, %xmm0` and `bsfl $1, %eax` were assembled, each with what was
+     * in memory at that address for its operand.
+     */
+    if (rm_op->kind == AS_OPERAND_IMMEDIATE && rm_op->raw != NULL && rm_op->raw[0] == '$') {
+        return -1;
+    }
     pos = *pos_io;
     if (pos >= out_cap) {
         return -1;
@@ -3138,7 +3147,26 @@ static int has_x86_size_suffix(const char *mn, char *suffix_out) {
     memcpy(tmp, mn, n - 1);
     tmp[n - 1] = '\0';
     if (!is_size_suffixable_base(tmp)) {
-        return 0;
+        /* Instructions that take some of the suffixes and not all:
+         * none of them has a form of a byte. */
+        static const struct {
+            const char *base;
+            const char *suffixes;
+        } some[] = {
+            {"shld", "wlq"},  {"shrd", "wlq"}, {"lar", "wl"},     {"lsl", "wl"},   {"movnti", "lq"}, {"bound", "wl"},
+            {"lss", "wl"},    {"lfs", "wl"},   {"lgs", "wl"},     {"lds", "wl"},   {"les", "wl"},    {"iret", "wlq"},
+            {"lret", "wlq"},  {"movbe", "wlq"}, {"adcx", "lq"},   {"adox", "lq"},
+        };
+        size_t i;
+
+        for (i = 0; i < sizeof(some) / sizeof(some[0]); ++i) {
+            if (strcmp(tmp, some[i].base) == 0 && strchr(some[i].suffixes, c) != NULL) {
+                break;
+            }
+        }
+        if (i == sizeof(some) / sizeof(some[0])) {
+            return 0;
+        }
     }
     if (suffix_out != NULL) {
         *suffix_out = c;
@@ -6460,6 +6488,49 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
             } else {
                 return -1;
             }
+            /*
+             * A count that is a number: the shifts have a form for it,
+             * 0F 71, 72 or 73 with the register in the r/m field, and
+             * nothing else here takes a number at all.  The number was
+             * taken for an address, and `psllw $1, %mm0` shifted by what
+             * was in memory at address 1.
+             */
+            if (src->kind == AS_OPERAND_IMMEDIATE || src->kind == AS_OPERAND_LABEL_REF) {
+                static const struct {
+                    const char *name;
+                    unsigned char opcode;
+                    unsigned char digit;
+                } by_number[] = {
+                    {"psrlw", 0x71, 2}, {"psraw", 0x71, 4}, {"psllw", 0x71, 6}, {"psrld", 0x72, 2},
+                    {"psrad", 0x72, 4}, {"pslld", 0x72, 6}, {"psrlq", 0x73, 2}, {"psllq", 0x73, 6},
+                };
+                long long count = 0;
+                size_t k;
+                size_t at = 0;
+
+                if (src->raw == NULL || src->raw[0] != '$') {
+                    /* (A bare number or name is an address, as written.) */
+                    return emit_i386_legacy_simd_rm(prefix, opcode2, xr, src, out, out_cap, out_len);
+                }
+                for (k = 0; k < sizeof(by_number) / sizeof(by_number[0]); ++k) {
+                    if (strcmp(mnbuf, by_number[k].name) == 0) {
+                        break;
+                    }
+                }
+                if (k == sizeof(by_number) / sizeof(by_number[0]) || eval_expr_const(src->u.expr, &count) != 0 ||
+                    count < 0 || count > 255 || out_cap < 5) {
+                    return -1;
+                }
+                if (prefix != 0x00) {
+                    out[at++] = prefix;
+                }
+                out[at++] = 0x0f;
+                out[at++] = by_number[k].opcode;
+                out[at++] = (unsigned char)(0xc0u | (by_number[k].digit << 3) | (xr & 7u));
+                out[at++] = (unsigned char)count;
+                *out_len = at;
+                return 0;
+            }
             return emit_i386_legacy_simd_rm(prefix, opcode2, xr, src, out, out_cap, out_len);
         }
     }
@@ -8664,6 +8735,12 @@ static int try_encode_x86_vex_extra_stmt(const as_instruction_t *in, int intel_s
         {"vcvtpd2dq", TWO_NARROW, AS_VEX_PP_F2, AS_VEX_MAP_0F, 0xe6, 0},
         {"vcvtpd2dqx", TWO_NARROW, AS_VEX_PP_F2, AS_VEX_MAP_0F, 0xe6, 0},
         {"vcvtpd2dqy", TWO_NARROW, AS_VEX_PP_F2, AS_VEX_MAP_0F, 0xe6, 0},
+        {"vpsrlw", SHIFT, AS_VEX_PP_66, AS_VEX_MAP_0F, 0x71, 2},
+        {"vpsraw", SHIFT, AS_VEX_PP_66, AS_VEX_MAP_0F, 0x71, 4},
+        {"vpsllw", SHIFT, AS_VEX_PP_66, AS_VEX_MAP_0F, 0x71, 6},
+        {"vpsrld", SHIFT, AS_VEX_PP_66, AS_VEX_MAP_0F, 0x72, 2},
+        {"vpsrad", SHIFT, AS_VEX_PP_66, AS_VEX_MAP_0F, 0x72, 4},
+        {"vpslld", SHIFT, AS_VEX_PP_66, AS_VEX_MAP_0F, 0x72, 6},
         {"vpsrlq", SHIFT, AS_VEX_PP_66, AS_VEX_MAP_0F, 0x73, 2},
         {"vpsrldq", SHIFT, AS_VEX_PP_66, AS_VEX_MAP_0F, 0x73, 3},
         {"vpsllq", SHIFT, AS_VEX_PP_66, AS_VEX_MAP_0F, 0x73, 6},
@@ -9472,6 +9549,23 @@ static int try_encode_x86_bmi1_stmt(const as_instruction_t *in, int intel_syntax
     if (in == NULL || code == NULL || code_len == NULL || encerr == NULL || encerr_sz == 0 || in->mnemonic == NULL) {
         return -1;
     }
+    /* blsi, blsr, blsmsk: what is read, and where the result goes. */
+    if (streq_ci(in->mnemonic, "blsi") || streq_ci(in->mnemonic, "blsr") || streq_ci(in->mnemonic, "blsmsk")) {
+        if (in->operand_count != 2) {
+            return -1;
+        }
+        memset(&bmi1, 0, sizeof(bmi1));
+        bmi1.mnemonic = in->mnemonic;
+        bmi1.op_count = 2;
+        if (convert_operand_x86(&in->operands[intel_syntax ? 0u : 1u], in->mnemonic, &bmi1.op1, is64, intel_syntax,
+                                encerr, encerr_sz) != 0 ||
+            convert_operand_x86(&in->operands[intel_syntax ? 1u : 0u], in->mnemonic, &bmi1.op2, is64, intel_syntax,
+                                encerr, encerr_sz) != 0) {
+            return -1;
+        }
+        bmi1.width_bits = bmi1.op1.size_bits;
+        return as_x86_encode_bmi1(&bmi1, code, code_cap, code_len, encerr, encerr_sz);
+    }
     if (!streq_ci(in->mnemonic, "andn") && !streq_ci(in->mnemonic, "bextr")) {
         return -1;
     }
@@ -9509,8 +9603,34 @@ static int try_encode_x86_bmi2_stmt(const as_instruction_t *in, int intel_syntax
                                     size_t *code_len, char *encerr, size_t encerr_sz) {
     as_x86_bmi2_insn_t bmi2;
 
-    if (in == NULL || code == NULL || code_len == NULL || encerr == NULL || encerr_sz == 0 || in->mnemonic == NULL ||
-        (!streq_ci(in->mnemonic, "bzhi") && !streq_ci(in->mnemonic, "mulx") &&
+    if (in == NULL || code == NULL || code_len == NULL || encerr == NULL || encerr_sz == 0 || in->mnemonic == NULL) {
+        return -1;
+    }
+    /* rorx: a count, what is rotated, and where the result goes.  The
+     * encoder had it and nothing sent it there. */
+    if (streq_ci(in->mnemonic, "rorx")) {
+        const as_operand_t *count = &in->operands[intel_syntax ? 2u : 0u];
+        long long immv = 0;
+
+        if (in->operand_count != 3 || count->kind != AS_OPERAND_IMMEDIATE ||
+            eval_expr_const(count->u.expr, &immv) != 0 || immv < 0 || immv > 255) {
+            return -1;
+        }
+        memset(&bmi2, 0, sizeof(bmi2));
+        bmi2.mnemonic = in->mnemonic;
+        bmi2.op_count = 2;
+        bmi2.has_imm8 = 1;
+        bmi2.imm8 = (uint8_t)immv;
+        if (convert_operand_x86(&in->operands[intel_syntax ? 0u : 2u], in->mnemonic, &bmi2.op1, is64, intel_syntax,
+                                encerr, encerr_sz) != 0 ||
+            convert_operand_x86(&in->operands[1], in->mnemonic, &bmi2.op2, is64, intel_syntax, encerr, encerr_sz) !=
+                0) {
+            return -1;
+        }
+        bmi2.width_bits = bmi2.op1.size_bits;
+        return as_x86_encode_bmi2(&bmi2, code, code_cap, code_len, encerr, encerr_sz);
+    }
+    if ((!streq_ci(in->mnemonic, "bzhi") && !streq_ci(in->mnemonic, "mulx") &&
          !streq_ci(in->mnemonic, "pdep") && !streq_ci(in->mnemonic, "pext") &&
          !streq_ci(in->mnemonic, "sarx") && !streq_ci(in->mnemonic, "shlx") &&
          !streq_ci(in->mnemonic, "shrx"))) {
@@ -10955,10 +11075,194 @@ static int encode_x86_stmt_body(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const 
  * which shortened an immediate.  Before an instruction that has the
  * prefix already it is the prefix twice, and refused.
  */
+/*
+ * Whether an instruction's suffix says one size and a general register
+ * among its operands is of another: `movl %ax, %ebx`, `addw %al, %bx`,
+ * `incl %ax`, `pushw %eax`.  They were assembled, the suffix or the
+ * register winning as it fell out.
+ *
+ * Asked of the instructions whose general registers are all of the
+ * operand's size, and of no other: not of one with a segment, control
+ * or debug register, a shift's count or a port.
+ */
+static int x86_suffix_denied_by_register(const as_instruction_t *insn, const char *base, char suffix, int intel_syntax,
+                                         char *encerr, size_t encerr_sz) {
+    static const char *const same_size[] = {
+        "add", "adc", "sbb", "sub", "and", "or",  "xor", "cmp",  "mov",  "test", "xchg", "xadd", "cmpxchg",
+        "inc", "dec", "not", "neg", "mul", "div", "idiv", "imul", "push", "pop",  "bt",   "bts",  "btr",
+        "btc", "bsf", "bsr",
+    };
+    static const char *const shifts[] = {"shl", "shr", "sar", "sal", "rol", "ror", "rcl", "rcr"};
+    unsigned want = suffix == 'b' ? 8u : (suffix == 'w' ? 16u : (suffix == 'l' ? 32u : 64u));
+    int is_shift = 0;
+    int known = strncmp(base, "cmov", 4) == 0;
+    size_t i;
+
+    for (i = 0; !known && i < sizeof(same_size) / sizeof(same_size[0]); ++i) {
+        known = strcmp(base, same_size[i]) == 0;
+    }
+    for (i = 0; !known && i < sizeof(shifts) / sizeof(shifts[0]); ++i) {
+        known = is_shift = strcmp(base, shifts[i]) == 0;
+    }
+    if (!known) {
+        return 0;
+    }
+    for (i = 0; i < insn->operand_count; ++i) {
+        const as_operand_t *op = &insn->operands[i];
+        const as_x86_reg_info_t *r;
+
+        if (op->kind != AS_OPERAND_REGISTER) {
+            continue;
+        }
+        r = as_x86_reg_find(op->u.reg);
+        if (r == NULL || r->cls != AS_X86_REGCLASS_GENERAL) {
+            /* A segment register, or one of the system's: the
+             * instruction is another kind of move. */
+            return 0;
+        }
+    }
+    for (i = 0; i < insn->operand_count; ++i) {
+        const as_operand_t *op = &insn->operands[i];
+        const as_x86_reg_info_t *r;
+
+        /* A shift's count is %cl whatever is shifted. */
+        if (op->kind != AS_OPERAND_REGISTER ||
+            (is_shift && insn->operand_count == 2 && i == (intel_syntax ? 1u : 0u))) {
+            continue;
+        }
+        r = as_x86_reg_find(op->u.reg);
+        if (r->width != want) {
+            snprintf(encerr, encerr_sz, "'%s%c' is of %u bits and %%%s is of %u", base, suffix, want, r->name,
+                     (unsigned)r->width);
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_stmt_t *st, unsigned char *code,
                            size_t code_cap, size_t *code_len, char *encerr, size_t encerr_sz) {
     as_stmt_t bare;
     size_t i;
+
+    /*
+     * `andnl`, `bzhiq`, `shlxl`: the instructions of BMI are found by
+     * their names, which have no suffix, and their size is their
+     * registers'.  The suffix is checked against the register the
+     * result goes to and taken off.
+     */
+    if (st != NULL && st->kind == AS_STMT_INSTRUCTION && st->u.instr.mnemonic != NULL &&
+        st->u.instr.operand_count >= 2) {
+        static const char *const bases[] = {"andn", "bzhi", "blsi", "blsr", "blsmsk", "bextr", "pdep",
+                                            "pext", "mulx", "rorx", "sarx", "shlx",   "shrx"};
+        const char *mn = st->u.instr.mnemonic;
+        size_t n = strlen(mn);
+        char base[16];
+
+        if (n >= 2 && n <= sizeof(base) && (mn[n - 1] == 'l' || mn[n - 1] == 'q' || mn[n - 1] == 'L' || mn[n - 1] == 'Q')) {
+            size_t k;
+
+            for (k = 0; k < n - 1; ++k) {
+                base[k] = (char)tolower((unsigned char)mn[k]);
+            }
+            base[n - 1] = '\0';
+            for (k = 0; k < sizeof(bases) / sizeof(bases[0]); ++k) {
+                if (strcmp(base, bases[k]) == 0) {
+                    const as_operand_t *dst = &st->u.instr.operands[cfg != NULL && cfg->intel_syntax
+                                                                        ? 0
+                                                                        : st->u.instr.operand_count - 1];
+                    unsigned want = (mn[n - 1] == 'l' || mn[n - 1] == 'L') ? 32u : 64u;
+
+                    if (dst->kind != AS_OPERAND_REGISTER || parse_x86_reg_bits(dst->u.reg) != want) {
+                        snprintf(encerr, encerr_sz, "'%s' is of %u bits, and the register it is given is not", mn,
+                                 want);
+                        return -1;
+                    }
+                    bare = *st;
+                    bare.u.instr.mnemonic = base;
+                    return encode_x86_stmt(ctx, cfg, &bare, code, code_cap, code_len, encerr, encerr_sz);
+                }
+            }
+        }
+    }
+
+    if (st != NULL && st->kind == AS_STMT_INSTRUCTION && st->u.instr.mnemonic != NULL) {
+        char base[32];
+        char suffix = '\0';
+
+        if (normalize_x86_mnemonic(st->u.instr.mnemonic, base, sizeof(base), &suffix) != 0) {
+            base[0] = '\0';
+        }
+        /* `shld %eax, %ebx`: the count that is not written is %cl. */
+        if (st->u.instr.operand_count == 2 && (strcmp(base, "shld") == 0 || strcmp(base, "shrd") == 0)) {
+            as_operand_t ops[3];
+            as_operand_t count;
+            char cl[] = "cl";
+            char cl_raw[] = "%cl";
+            int intel = cfg != NULL && cfg->intel_syntax;
+
+            memset(&count, 0, sizeof(count));
+            count.kind = AS_OPERAND_REGISTER;
+            count.raw = cl_raw;
+            count.u.reg = cl;
+            ops[intel ? 0 : 1] = st->u.instr.operands[0];
+            ops[intel ? 1 : 2] = st->u.instr.operands[1];
+            ops[intel ? 2 : 0] = count;
+            bare = *st;
+            bare.u.instr.operands = ops;
+            bare.u.instr.operand_count = 3;
+            return encode_x86_stmt(ctx, cfg, &bare, code, code_cap, code_len, encerr, encerr_sz);
+        }
+        /* `imul $2, %eax`: the register is multiplied and is where the
+         * product goes. */
+        if (st->u.instr.operand_count == 2 && strcmp(base, "imul") == 0) {
+            int intel = cfg != NULL && cfg->intel_syntax;
+            const as_operand_t *imm = &st->u.instr.operands[intel ? 1 : 0];
+            const as_operand_t *reg = &st->u.instr.operands[intel ? 0 : 1];
+
+            if (imm->kind == AS_OPERAND_IMMEDIATE && imm->raw != NULL && (intel || imm->raw[0] == '$') &&
+                reg->kind == AS_OPERAND_REGISTER) {
+                as_operand_t ops[3];
+
+                ops[intel ? 2 : 0] = *imm;
+                ops[1] = *reg;
+                ops[intel ? 0 : 2] = *reg;
+                bare = *st;
+                bare.u.instr.operands = ops;
+                bare.u.instr.operand_count = 3;
+                return encode_x86_stmt(ctx, cfg, &bare, code, code_cap, code_len, encerr, encerr_sz);
+            }
+        }
+        if (suffix != '\0' && x86_suffix_denied_by_register(&st->u.instr, base, suffix, cfg != NULL && cfg->intel_syntax,
+                                                            encerr, encerr_sz)) {
+            return -1;
+        }
+        /* `movsbl %ax, %ebx`: the two letters are the sizes of what is
+         * extended and of what it is extended to. */
+        {
+            const char *mn = st->u.instr.mnemonic;
+
+            if (strlen(mn) == 6 && strncasecmp(mn, "mov", 3) == 0 && strchr("szSZ", mn[3]) != NULL &&
+                strchr("bwlBWL", mn[4]) != NULL && strchr("wlqWLQ", mn[5]) != NULL &&
+                st->u.instr.operand_count == 2 && (cfg == NULL || !cfg->intel_syntax)) {
+                unsigned sizes[2];
+                int k;
+
+                sizes[0] = tolower((unsigned char)mn[4]) == 'b' ? 8u : (tolower((unsigned char)mn[4]) == 'w' ? 16u : 32u);
+                sizes[1] = tolower((unsigned char)mn[5]) == 'w' ? 16u : (tolower((unsigned char)mn[5]) == 'l' ? 32u : 64u);
+                for (k = 0; k < 2; ++k) {
+                    const as_operand_t *op = &st->u.instr.operands[k];
+                    const as_x86_reg_info_t *r = op->kind == AS_OPERAND_REGISTER ? as_x86_reg_find(op->u.reg) : NULL;
+
+                    if (r != NULL && r->cls == AS_X86_REGCLASS_GENERAL && r->width != sizes[k]) {
+                        snprintf(encerr, encerr_sz, "'%s' takes a register of %u bits there, and %%%s is of %u", mn,
+                                 sizes[k], r->name, (unsigned)r->width);
+                        return -1;
+                    }
+                }
+            }
+        }
+    }
 
     if (st == NULL || st->kind != AS_STMT_INSTRUCTION || (st->u.instr.prefixes & AS_PREFIX_DATA16) == 0) {
         return encode_x86_stmt_body(ctx, cfg, st, code, code_cap, code_len, encerr, encerr_sz);

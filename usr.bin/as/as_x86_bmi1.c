@@ -226,7 +226,7 @@ static int encode_tzcnt(const as_x86_bmi1_insn_t *insn, uint8_t *out, size_t out
     uint8_t rex_b = 0;
 
     if (insn->op_count != 2 || insn->op1.kind != AS_X86_OP_REG ||
-        (insn->width_bits != 32 && insn->width_bits != 64)) {
+        (insn->width_bits != 16 && insn->width_bits != 32 && insn->width_bits != 64)) {
         return -1;
     }
 
@@ -236,6 +236,10 @@ static int encode_tzcnt(const as_x86_bmi1_insn_t *insn, uint8_t *out, size_t out
     ctx.errbuf = errbuf;
     ctx.errbuf_sz = errbuf_sz;
 
+    /* Of 16 bits it has the operand-size prefix, before its own. */
+    if (insn->width_bits == 16 && emit8(&ctx, 0x66) != 0) {
+        return -1;
+    }
     if (emit8(&ctx, 0xf3) != 0) {
         return -1;
     }
@@ -281,8 +285,15 @@ int as_x86_encode_bmi1(const as_x86_bmi1_insn_t *insn, uint8_t *out, size_t out_
         errbuf[0] = '\0';
     }
 
-    if (insn == NULL || insn->mnemonic == NULL || out == NULL ||
-        (insn->width_bits != 32 && insn->width_bits != 64)) {
+    if (insn == NULL || insn->mnemonic == NULL || out == NULL) {
+        return -1;
+    }
+    /* tzcnt alone of these has a form of 16 bits: the others are VEX
+     * instructions, of 32 bits and 64. */
+    if (insn->width_bits == 16 && streq_ci(insn->mnemonic, "tzcnt")) {
+        return encode_tzcnt(insn, out, out_cap, out_len, errbuf, errbuf_sz);
+    }
+    if (insn->width_bits != 32 && insn->width_bits != 64) {
         return -1;
     }
 

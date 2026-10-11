@@ -203,7 +203,8 @@ int main(void) {
     insn.ops[0] = reg_op(AS_X86_REG_EAX);
     insn.ops[1] = imm_op(1);
     {
-        const uint8_t exp[] = {0xc1, 0xf8, 0x01};
+        /* By one, the form with no count in it: what GNU as writes. */
+        const uint8_t exp[] = {0xd1, 0xf8};
         check_encode(&insn, exp, sizeof(exp));
     }
 

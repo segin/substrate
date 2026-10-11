@@ -341,6 +341,31 @@ int as_x86_encode_v3_misc(const as_x86_v3_misc_insn_t *insn, uint8_t *out, size_
         if (encode_lzcnt(insn, &ctx) != 0) {
             return -1;
         }
+    } else if (streq_ci(insn->mnemonic, "adcx") || streq_ci(insn->mnemonic, "adox")) {
+        /* 66 (adcx) or F3 (adox), 0F 38 F6 /r: a register, and a
+         * register or memory added to it, of 32 or 64 bits. */
+        size_t rex_pos;
+        uint8_t rex = 0x40;
+        uint8_t rex_x = 0;
+        uint8_t rex_b = 0;
+
+        if (insn->op_count != 2 || insn->op1.kind != AS_X86_OP_REG || insn->op2.kind == AS_X86_OP_NONE ||
+            (insn->width_bits != 32 && insn->width_bits != 64)) {
+            return -1;
+        }
+        if (emit8(&ctx, streq_ci(insn->mnemonic, "adcx") ? 0x66 : 0xf3) != 0) {
+            return -1;
+        }
+        rex_pos = ctx.at;
+        if (emit8(&ctx, rex) != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x38) != 0 || emit8(&ctx, 0xf6) != 0 ||
+            modrm_sib_disp64(&ctx, insn->op1.u.reg, &insn->op2, &rex_x, &rex_b) != 0) {
+            return -1;
+        }
+        rex |= (uint8_t)(((insn->width_bits == 64) ? 0x08 : 0) | (reg_ext(insn->op1.u.reg) ? 0x04 : 0) |
+                         (rex_x ? 0x02 : 0) | (rex_b ? 0x01 : 0));
+        if (finalize_rex(&ctx, rex_pos, rex) != 0) {
+            return -1;
+        }
     } else if (streq_ci(insn->mnemonic, "movbe")) {
         if (encode_movbe(insn, &ctx) != 0) {
             return -1;

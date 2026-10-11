@@ -131,6 +131,7 @@ static int is_x86_v2_mnemonic(const char *mnemonic) {
 
 static int is_x86_v3_misc_mnemonic(const char *mnemonic) {
     return streq_ci(mnemonic, "lzcnt") || streq_ci(mnemonic, "movbe") ||
+           streq_ci(mnemonic, "adcx") || streq_ci(mnemonic, "adox") ||
            streq_ci(mnemonic, "xsave") || streq_ci(mnemonic, "xrstor") ||
            streq_ci(mnemonic, "xsaveopt") || streq_ci(mnemonic, "xsavec") ||
            streq_ci(mnemonic, "xsaves") || streq_ci(mnemonic, "xsave64") ||
@@ -1679,7 +1680,14 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
             return -1;
         }
     } else if (streq_ci(insn->mnemonic, "xchg")) {
-        if (insn->op_count == 2 && is_reg_or_mem(a) && b->kind == AS_X86_OP_REG) {
+        /* With the accumulator there is a form of one byte: 90 and the
+         * other register's number. */
+        if (insn->op_count == 2 && a->kind == AS_X86_OP_REG && b->kind == AS_X86_OP_REG && !insn->byte_op &&
+            operand_bits(a) != 8 && operand_bits(b) != 8 && (a->u.reg == AS_X86_REG_EAX || b->u.reg == AS_X86_REG_EAX)) {
+            if (emit8(&ctx, (uint8_t)(0x90 | ((a->u.reg == AS_X86_REG_EAX ? b->u.reg : a->u.reg) & 7))) != 0) {
+                return -1;
+            }
+        } else if (insn->op_count == 2 && is_reg_or_mem(a) && b->kind == AS_X86_OP_REG) {
             /* 86 exchanges bytes and 87 words: by the suffix, or by a
              * register that is a byte. */
             int byte = insn->byte_op || operand_bits(a) == 8 || operand_bits(b) == 8;
@@ -1769,8 +1777,28 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
                 return -1;
             }
         } else if (insn->op_count == 2 && is_reg_or_mem(a) && b->kind == AS_X86_OP_IMM) {
+            /* The shortest of the forms there are: with %al or the
+             * accumulator one that names no register, and for a number
+             * a signed byte holds one with a byte of immediate. */
+            int acc = a->kind == AS_X86_OP_REG && a->u.reg == AS_X86_REG_EAX && !b->imm_symbolic;
+
             if (insn->byte_op) {
-                if (emit8(&ctx, 0x80) != 0 || modrm_sib_disp(&ctx, ext, a) != 0 || emit8(&ctx, (uint8_t)b->u.imm) != 0) {
+                if (acc) {
+                    if (emit8(&ctx, (uint8_t)(ext * 8u + 4u)) != 0 || emit8(&ctx, (uint8_t)b->u.imm) != 0) {
+                        return -1;
+                    }
+                } else if (emit8(&ctx, 0x80) != 0 || modrm_sib_disp(&ctx, ext, a) != 0 ||
+                           emit8(&ctx, (uint8_t)b->u.imm) != 0) {
+                    return -1;
+                }
+            } else if (imm_is_s8(b)) {
+                if (emit8(&ctx, 0x83) != 0 || modrm_sib_disp(&ctx, ext, a) != 0 ||
+                    emit8(&ctx, (uint8_t)(int8_t)b->u.imm) != 0) {
+                    return -1;
+                }
+            } else if (acc) {
+                if (emit8(&ctx, (uint8_t)(ext * 8u + 5u)) != 0 ||
+                    emit_i386_imm_or_rel(&ctx, (uint32_t)b->u.imm, effective_i386_operand_bits(insn)) != 0) {
                     return -1;
                 }
             } else if (emit8(&ctx, 0x81) != 0 || modrm_sib_disp(&ctx, ext, a) != 0 ||
@@ -1897,8 +1925,13 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
                 return -1;
             }
         } else if (insn->op_count == 2 && is_reg_or_mem(a) && b->kind == AS_X86_OP_IMM) {
-            if (emit8(&ctx, insn->byte_op ? 0xc0 : 0xc1) != 0 || modrm_sib_disp(&ctx, ext, a) != 0 ||
-                emit8(&ctx, (uint8_t)b->u.imm) != 0) {
+            /* By one, there is a form with no count in it. */
+            if (!b->imm_symbolic && b->u.imm == 1) {
+                if (emit8(&ctx, insn->byte_op ? 0xd0 : 0xd1) != 0 || modrm_sib_disp(&ctx, ext, a) != 0) {
+                    return -1;
+                }
+            } else if (emit8(&ctx, insn->byte_op ? 0xc0 : 0xc1) != 0 || modrm_sib_disp(&ctx, ext, a) != 0 ||
+                       emit8(&ctx, (uint8_t)b->u.imm) != 0) {
                 return -1;
             }
         } else if (insn->op_count == 2 && is_reg_or_mem(a) && b->kind == AS_X86_OP_REG &&
@@ -2448,6 +2481,24 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
             if (emit8(&ctx, insn->byte_op ? 0x84 : 0x85) != 0 || modrm_sib_disp(&ctx, b->u.reg, a) != 0) {
                 return -1;
             }
+        } else if (insn->op_count == 2 && a->kind == AS_X86_OP_REG && b->kind == AS_X86_OP_MEM) {
+            /* A test is the same either way about: `test (%ebx), %eax`
+             * is `test %eax, (%ebx)`. */
+            if (emit8(&ctx, insn->byte_op ? 0x84 : 0x85) != 0 || modrm_sib_disp(&ctx, a->u.reg, b) != 0) {
+                return -1;
+            }
+        } else if (insn->op_count == 2 && a->kind == AS_X86_OP_REG && a->u.reg == AS_X86_REG_EAX &&
+                   b->kind == AS_X86_OP_IMM && !b->imm_symbolic) {
+            /* With %al or the accumulator, the form that names no
+             * register. */
+            if (insn->byte_op) {
+                if (emit8(&ctx, 0xa8) != 0 || emit8(&ctx, (uint8_t)b->u.imm) != 0) {
+                    return -1;
+                }
+            } else if (emit8(&ctx, 0xa9) != 0 ||
+                       emit_i386_imm_or_rel(&ctx, (uint32_t)b->u.imm, effective_i386_operand_bits(insn)) != 0) {
+                return -1;
+            }
         } else if (insn->op_count == 2 && (a->kind == AS_X86_OP_REG || a->kind == AS_X86_OP_MEM) && b->kind == AS_X86_OP_IMM) {
             if (insn->byte_op) {
                 if (emit8(&ctx, 0xf6) != 0 || modrm_sib_disp(&ctx, 0, a) != 0 || emit8(&ctx, (uint8_t)b->u.imm) != 0) {
@@ -2671,8 +2722,13 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
                 return -1;
             }
         } else if (insn->op_count == 1 && a->kind == AS_X86_OP_IMM) {
-            if (emit8(&ctx, 0x68) != 0 ||
-                emit_i386_imm_or_rel(&ctx, (uint32_t)a->u.imm, effective_i386_operand_bits(insn)) != 0) {
+            /* A number that a signed byte holds is pushed from one. */
+            if (imm_is_s8(a)) {
+                if (emit8(&ctx, 0x6a) != 0 || emit8(&ctx, (uint8_t)a->u.imm) != 0) {
+                    return -1;
+                }
+            } else if (emit8(&ctx, 0x68) != 0 ||
+                       emit_i386_imm_or_rel(&ctx, (uint32_t)a->u.imm, effective_i386_operand_bits(insn)) != 0) {
                 return -1;
             }
         } else {
@@ -3229,13 +3285,26 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
             force_rex = 1;
         }
         if (bits == 8) {
-            if (emit8(&ctx, 0x80) != 0 || modrm_sib_disp64(&ctx, (as_x86_reg_t)ext, a, &rex_r, &rex_x, &rex_b) != 0 ||
-                emit8(&ctx, (uint8_t)b->u.imm) != 0) {
+            /* With %al, the form that names no register. */
+            if (a->kind == AS_X86_OP_REG && a->u.reg == AS_X86_REG_RAX && !b->imm_symbolic) {
+                if (emit8(&ctx, (uint8_t)(ext * 8u + 4u)) != 0 || emit8(&ctx, (uint8_t)b->u.imm) != 0) {
+                    return -1;
+                }
+            } else if (emit8(&ctx, 0x80) != 0 ||
+                       modrm_sib_disp64(&ctx, (as_x86_reg_t)ext, a, &rex_r, &rex_x, &rex_b) != 0 ||
+                       emit8(&ctx, (uint8_t)b->u.imm) != 0) {
                 return -1;
             }
         } else if (imm_is_s8(b)) {
             if (emit8(&ctx, 0x83) != 0 || modrm_sib_disp64(&ctx, (as_x86_reg_t)ext, a, &rex_r, &rex_x, &rex_b) != 0 ||
                 emit8(&ctx, (uint8_t)(int8_t)b->u.imm) != 0) {
+                return -1;
+            }
+        } else if (a->kind == AS_X86_OP_REG && a->u.reg == AS_X86_REG_RAX && !b->imm_symbolic) {
+            /* With the accumulator, likewise. */
+            if (emit8(&ctx, (uint8_t)(ext * 8u + 5u)) != 0 ||
+                emit_i386_imm_or_rel(&ctx, (uint32_t)b->u.imm,
+                                     (bits == 16 || insn->operand_size_override) ? 16u : 32u) != 0) {
                 return -1;
             }
         } else if (emit8(&ctx, 0x81) != 0 || modrm_sib_disp64(&ctx, (as_x86_reg_t)ext, a, &rex_r, &rex_x, &rex_b) != 0 ||
@@ -3488,6 +3557,9 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
     }
 
     if (streq_ci(insn->mnemonic, "push") && insn->op_count == 1) {
+        /* A push is of 64 bits with no prefix: `pushq %rbp` is 55 and
+         * not REX.W and 55.  (A `rex.W` that is written is written.) */
+        rex_w = (insn->rex_bits & 0x08u) != 0;
         if (a->kind == AS_X86_OP_REG) {
             if (a->size_bits == 16 && emit8(&ctx, 0x66) != 0) {
                 return -1;
@@ -3523,6 +3595,9 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
     }
 
     if (streq_ci(insn->mnemonic, "pop") && insn->op_count == 1) {
+        /* Of 64 bits with no prefix to say so, as a push is; one that
+         * is written, `rex.W`, is written. */
+        rex_w = (insn->rex_bits & 0x08u) != 0;
         if (a->kind == AS_X86_OP_REG) {
             if (a->size_bits == 16 && emit8(&ctx, 0x66) != 0) {
                 return -1;
@@ -4441,7 +4516,25 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
         }
     } else if (streq_ci(insn->mnemonic, "xchg")) {
         rex_w = x64_wants_rex_w(insn, b, a);
-        if (insn->op_count == 2 && (a->kind == AS_X86_OP_REG || a->kind == AS_X86_OP_MEM) && b->kind == AS_X86_OP_REG) {
+        /* With the accumulator there is a form of one byte -- but not
+         * of %eax with itself, which is 90, and 90 does nothing where
+         * `xchg %eax, %eax` clears the top of %rax. */
+        if (insn->op_count == 2 && a->kind == AS_X86_OP_REG && b->kind == AS_X86_OP_REG && !insn->byte_op &&
+            operand_bits(a) != 8 && operand_bits(b) != 8 && (a->u.reg == AS_X86_REG_RAX || b->u.reg == AS_X86_REG_RAX) &&
+            !(a->u.reg == b->u.reg && operand_bits(a) == 32)) {
+            as_x86_reg_t other = a->u.reg == AS_X86_REG_RAX ? b->u.reg : a->u.reg;
+
+            if (other >= 8) {
+                rex_b = 1;
+            }
+            /* (%rax with itself is 90 and no more.) */
+            if (a->u.reg == b->u.reg) {
+                rex_w = 0;
+            }
+            if (emit8(&ctx, (uint8_t)(0x90u + (other & 7u))) != 0) {
+                return -1;
+            }
+        } else if (insn->op_count == 2 && (a->kind == AS_X86_OP_REG || a->kind == AS_X86_OP_MEM) && b->kind == AS_X86_OP_REG) {
             int byte = insn->byte_op || operand_bits(a) == 8 || operand_bits(b) == 8;
 
             if (emit8(&ctx, byte ? 0x86 : 0x87) != 0 ||
@@ -4611,6 +4704,29 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
                 modrm_sib_disp64(&ctx, b->u.reg, a, &rex_r, &rex_x, &rex_b) != 0) {
                 return -1;
             }
+        } else if (insn->op_count == 2 && a->kind == AS_X86_OP_REG && b->kind == AS_X86_OP_MEM) {
+            /* A test is the same either way about: `test (%rbx), %eax`
+             * is `test %eax, (%rbx)`. */
+            if (bits == 8 && needs_rex_low8(a->u.reg)) {
+                force_rex = 1;
+            }
+            if (emit8(&ctx, bits == 8 ? 0x84 : 0x85) != 0 ||
+                modrm_sib_disp64(&ctx, a->u.reg, b, &rex_r, &rex_x, &rex_b) != 0) {
+                return -1;
+            }
+        } else if (insn->op_count == 2 && a->kind == AS_X86_OP_REG && a->u.reg == AS_X86_REG_RAX &&
+                   b->kind == AS_X86_OP_IMM && !b->imm_symbolic) {
+            /* With %al or the accumulator, the form that names no
+             * register. */
+            if (bits == 8) {
+                if (emit8(&ctx, 0xa8) != 0 || emit8(&ctx, (uint8_t)b->u.imm) != 0) {
+                    return -1;
+                }
+            } else if (emit8(&ctx, 0xa9) != 0 ||
+                       emit_i386_imm_or_rel(&ctx, (uint32_t)b->u.imm,
+                                            (bits == 16 || insn->operand_size_override) ? 16u : 32u) != 0) {
+                return -1;
+            }
         } else if (insn->op_count == 2 && (a->kind == AS_X86_OP_REG || a->kind == AS_X86_OP_MEM) && b->kind == AS_X86_OP_IMM) {
             if (bits == 8) {
                 if (emit8(&ctx, 0xf6) != 0 || modrm_sib_disp64(&ctx, AS_X86_REG_RAX, a, &rex_r, &rex_x, &rex_b) != 0 ||
@@ -4710,9 +4826,15 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
             if (insn->byte_op && a->kind == AS_X86_OP_REG && needs_rex_low8(a->u.reg)) {
                 force_rex = 1;
             }
-            if (emit8(&ctx, insn->byte_op ? 0xc0 : 0xc1) != 0 ||
-                modrm_sib_disp64(&ctx, (as_x86_reg_t)ext, a, &rex_r, &rex_x, &rex_b) != 0 ||
-                emit8(&ctx, (uint8_t)b->u.imm) != 0) {
+            /* By one, there is a form with no count in it. */
+            if (!b->imm_symbolic && b->u.imm == 1) {
+                if (emit8(&ctx, insn->byte_op ? 0xd0 : 0xd1) != 0 ||
+                    modrm_sib_disp64(&ctx, (as_x86_reg_t)ext, a, &rex_r, &rex_x, &rex_b) != 0) {
+                    return -1;
+                }
+            } else if (emit8(&ctx, insn->byte_op ? 0xc0 : 0xc1) != 0 ||
+                       modrm_sib_disp64(&ctx, (as_x86_reg_t)ext, a, &rex_r, &rex_x, &rex_b) != 0 ||
+                       emit8(&ctx, (uint8_t)b->u.imm) != 0) {
                 return -1;
             }
         } else if (insn->op_count == 2 && (a->kind == AS_X86_OP_REG || a->kind == AS_X86_OP_MEM) && b->kind == AS_X86_OP_REG &&
