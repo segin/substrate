@@ -112,10 +112,12 @@ int as_decode_string_literal(const char *src, char **bytes_out, size_t *len_out)
         }
 
         ch = (unsigned char)src[i++];
+        /* The escapes are GNU as's: there is none for a bell (`\a` is
+         * an a), and `\X` is `\x`. */
+        if (ch == 'X') {
+            ch = 'x';
+        }
         switch (ch) {
-        case 'a':
-            out[j++] = '\a';
-            break;
         case 'b':
             out[j++] = '\b';
             break;
@@ -164,16 +166,20 @@ int as_decode_string_literal(const char *src, char **bytes_out, size_t *len_out)
                 ++i;
                 seen = 1;
             }
-            out[j++] = (char)(seen ? (value & 0xffu) : 'x');
+            /* (With no digit it is the byte of nothing.) */
+            (void)seen;
+            out[j++] = (char)(value & 0xffu);
             break;
         }
         default:
-            if (ch >= '0' && ch <= '7') {
+            /* (Up to three digits, each times eight -- and 8 and 9
+             * are digits here, as GNU as has it: `\18` is 16.) */
+            if (ch >= '0' && ch <= '9') {
                 unsigned value = (unsigned)(ch - '0');
                 int digits = 1;
 
-                while (digits < 3 && i < n && src[i] >= '0' && src[i] <= '7') {
-                    value = (value << 3) | (unsigned)(src[i] - '0');
+                while (digits < 3 && i < n && src[i] >= '0' && src[i] <= '9') {
+                    value = value * 8u + (unsigned)(src[i] - '0');
                     ++i;
                     ++digits;
                 }

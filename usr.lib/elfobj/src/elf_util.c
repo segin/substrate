@@ -355,6 +355,7 @@ elf_err_t elf__write_file_atomic(const char *path, const void *buf, size_t size)
     char *tmp_path;
     int fd;
     int saved_errno;
+    int have_old;
     const uint8_t *bytes = (const uint8_t *)buf;
 
     struct stat st;
@@ -368,10 +369,12 @@ elf_err_t elf__write_file_atomic(const char *path, const void *buf, size_t size)
      * that no reader sees half of one.  What is there and is not a plain
      * file -- a device, a pipe, a link to somewhere -- is written into
      * instead: moving a file over /dev/null does not write to the null
-     * device, it leaves the system without one.
+     * device, it leaves the system without one.  (A link may be to a
+     * file that is not there yet, which is made.)
      */
-    if (lstat(path, &st) == 0 && !S_ISREG(st.st_mode)) {
-        fd = open(path, O_WRONLY | O_TRUNC);
+    have_old = lstat(path, &st) == 0;
+    if (have_old && !S_ISREG(st.st_mode)) {
+        fd = open(path, O_WRONLY | O_TRUNC | O_CREAT, 0666);
         if (fd < 0) {
             return ELF_ERR_IO;
         }
@@ -418,6 +421,17 @@ elf_err_t elf__write_file_atomic(const char *path, const void *buf, size_t size)
         free(tmp_path);
         errno = saved_errno;
         return ELF_ERR_IO;
+    }
+    /*
+     * The file is a new one, and its permissions what the process's
+     * mask leaves of read and write for all: the temporary file is made
+     * for its owner alone, and so was every file written.
+     */
+    {
+        mode_t mask = umask(0);
+
+        (void)umask(mask);
+        (void)fchmod(fd, 0666 & ~mask);
     }
     if (close(fd) != 0) {
         saved_errno = errno;

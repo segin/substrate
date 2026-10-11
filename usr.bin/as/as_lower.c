@@ -556,6 +556,171 @@ static int repeat_count(const char *arg, unsigned long *out) {
  * 0 if the directive was rewritten or is none of these; -1 for no
  * memory; 1 for a directive of these that cannot be done, with why.
  */
+/*
+ * The bits of a `.float` or a `.double`, as GNU as 2.46 reads the
+ * number:
+ *
+ *   - a decimal number, with or without a fraction and an exponent, and
+ *     an `e` with nothing after it is no exponent;
+ *   - `0` and a letter before it are passed over -- `0f1.5`, `0d2.5`,
+ *     `0e1.5` are what C would write 1.5 and 2.5, and so is `0x10` ten;
+ *   - `0x:` and hexadecimal digits are the bits themselves;
+ *   - `inf` and `infinity`, `nan` and `qnan`, `snan`, with a sign;
+ *   - a number too large is refused, not made infinity -- but one that
+ *     only rounds up to it is infinity; one too small is nothing, or a
+ *     denormal.
+ *
+ * 0, or -1 with *why said.
+ */
+static int float_bits(const char *text, int is_double, uint64_t *bits, const char **why) {
+    static const double float_limit = 340282366920938463463374607431768211456.0; /* 2^128 */
+    const char *s = text;
+    const char *digits;
+    char *end = NULL;
+    int negative = 0;
+    int signed_before = 0;
+    double value;
+    size_t n;
+
+    *why = "not a floating-point number";
+    while (isspace((unsigned char)*s)) {
+        s++;
+    }
+    n = strlen(s);
+    while (n > 0 && isspace((unsigned char)s[n - 1])) {
+        n--;
+    }
+    if (*s == '+' || *s == '-') {
+        negative = *s == '-';
+        signed_before = 1;
+        s++;
+        n--;
+    }
+    if (n >= 2 && s[0] == '0' && isalpha((unsigned char)s[1])) {
+        int hex = s[1] == 'x' || s[1] == 'X';
+
+        if (signed_before) {
+            return -1;
+        }
+        s += 2;
+        n -= 2;
+        if (hex && n > 1 && s[0] == ':') {
+            uint64_t v = 0;
+            size_t i;
+
+            if (n - 1 > (is_double ? 16u : 8u)) {
+                return -1;
+            }
+            for (i = 1; i < n; ++i) {
+                if (!isxdigit((unsigned char)s[i])) {
+                    return -1;
+                }
+                v = (v << 4) | (uint64_t)(isdigit((unsigned char)s[i]) ? s[i] - '0'
+                                                                        : tolower((unsigned char)s[i]) - 'a' + 10);
+            }
+            *bits = v;
+            return 0;
+        }
+        if (n > 0 && (*s == '+' || *s == '-')) {
+            negative = *s == '-';
+            s++;
+            n--;
+        }
+    }
+    {
+        static const struct {
+            const char *word;
+            uint32_t single;
+            uint64_t wide;
+        } words[] = {
+            {"inf", 0x7f800000u, 0x7ff0000000000000ull},      {"infinity", 0x7f800000u, 0x7ff0000000000000ull},
+            {"nan", 0x7fffffffu, 0x7fffffffffffffffull},      {"qnan", 0x7fffffffu, 0x7fffffffffffffffull},
+            {"snan", 0x7fbfffffu, 0x7ff7ffffffffffffull},
+        };
+        size_t i;
+
+        for (i = 0; i < sizeof(words) / sizeof(words[0]); ++i) {
+            if (strlen(words[i].word) == n && strncasecmp(s, words[i].word, n) == 0) {
+                *bits = is_double ? words[i].wide | ((uint64_t)negative << 63)
+                                  : (uint64_t)(words[i].single | ((uint32_t)negative << 31));
+                return 0;
+            }
+        }
+    }
+    /* Digits, a point and an exponent, and nothing strtod() would
+     * take besides: no 0x, no nan(), no infinity spelt out. */
+    for (digits = s; digits < s + n; ++digits) {
+        if (!isdigit((unsigned char)*digits) && *digits != '.' && *digits != 'e' && *digits != 'E' &&
+            *digits != '+' && *digits != '-') {
+            return -1;
+        }
+    }
+    {
+        char *copy = (char *)malloc(n + 1);
+
+        if (copy == NULL) {
+            *why = "out of memory";
+            return -1;
+        }
+        memcpy(copy, s, n);
+        copy[n] = '\0';
+        if (n > 0 && (copy[n - 1] == 'e' || copy[n - 1] == 'E')) {
+            copy[n - 1] = '\0';
+        }
+        value = copy[0] != '\0' ? strtod(copy, &end) : 0.0;
+        if (copy[0] != '\0' && (end == copy || *end != '\0')) {
+            free(copy);
+            return -1;
+        }
+        free(copy);
+    }
+    if (value != value || value > 1.7976931348623157e308 || (!is_double && value >= float_limit)) {
+        *why = "cannot create floating-point number";
+        return -1;
+    }
+    if (negative) {
+        value = -value;
+    }
+    if (is_double) {
+        memcpy(bits, &value, sizeof(*bits));
+    } else {
+        float narrow = (float)value;
+        uint32_t b;
+
+        memcpy(&b, &narrow, sizeof(b));
+        *bits = b;
+    }
+    return 0;
+}
+
+/* `.float` and `.double` become the `.long` and `.quad` of their bits:
+ * the number was read in three places, and is read in this one. */
+static int lower_floats(as_directive_t *d, const char **why) {
+    int is_double = strcmp(d->name, ".double") == 0;
+    arg_vec_t v;
+    size_t i;
+
+    if (!is_double && strcmp(d->name, ".float") != 0) {
+        return 0;
+    }
+    memset(&v, 0, sizeof(v));
+    for (i = 0; i < d->arg_count; ++i) {
+        uint64_t bits = 0;
+
+        /* (An argument left out is nothing, as it is of `.long`.) */
+        if (!arg_is_empty(d, i) && float_bits(arg_text(d, i), is_double, &bits, why) != 0) {
+            vec_free(&v);
+            return strcmp(*why, "out of memory") == 0 ? -1 : 1;
+        }
+        if (vec_push_num(&v, bits) != 0) {
+            vec_free(&v);
+            return -1;
+        }
+    }
+    set_args(d, &v);
+    return set_name(d, is_double ? ".quad" : ".long");
+}
+
 static int lower_one(as_directive_t *d, unsigned address_bytes, const char **why) {
     arg_vec_t v;
     const lower_unit_t *unit;
@@ -2328,6 +2493,9 @@ int as_directives_lower(as_parse_result_t *parsed, unsigned address_bytes, char 
             }
         }
         rc = lower_one(&st->u.directive, address_bytes, &why);
+        if (rc == 0) {
+            rc = lower_floats(&st->u.directive, &why);
+        }
         if (rc == 0) {
             continue;
         }

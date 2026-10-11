@@ -85,6 +85,13 @@ Write the object to
 Without it the object is written to
 .Pa a.out
 in the current directory.
+The file is a new one, with what the process's mask leaves of read and
+write for all.
+.Ar output
+may be a device or a pipe, or a link: a link to a file that is not there
+yet has the file made, and one to a file that is there is replaced by
+the object.
+It may not be one of the sources, by any name.
 .It Fl c
 Accepted for compatibility; output remains an object file.
 .It Fl g
@@ -283,6 +290,25 @@ toolchain flows, including:
 .Cm .uleb128 , .sleb128 , .string8/.string16/.string32/.string64 ,
 .Cm .dc , .dc.b/.w/.l/.a/.s/.d/.x , .ds , .ds.b/.w/.l/.s/.d/.x/.p ,
 .Cm .dcb , .dcb.b/.w/.l/.s/.d/.x .
+A floating-point number is a decimal one, which may have
+.Li 0
+and a letter before it
+.Pq Li 0f1.5 , 0d2.5 ;
+or
+.Li inf , nan , qnan
+or
+.Li snan ;
+or its bits, as
+.Li 0x:3fc00000 .
+One too large for the width is an error.
+In a string
+.Li \eb , \ef , \en , \er , \et , \e\e
+and
+.Li \e\(dq
+are what they are in C,
+.Li \ex
+and up to three octal digits give a byte, and any other character after
+a backslash is itself.
 An argument of
 .Cm .uleb128
 or

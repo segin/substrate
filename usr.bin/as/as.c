@@ -3835,6 +3835,15 @@ static int validate_output_file(const as_ctx_t *ctx) {
     if (ctx->output == AS_OUTPUT_BINARY) {
         return 0;
     }
+    /* What was written to something that is no file -- /dev/null, a
+     * pipe -- is not there to be read back. */
+    {
+        struct stat sb;
+
+        if (stat(ctx->out_path, &sb) == 0 && !S_ISREG(sb.st_mode)) {
+            return 0;
+        }
+    }
 
     err = elf_open(ctx->out_path, &check);
     if (err != ELF_OK) {
@@ -4501,6 +4510,33 @@ static int as_run_with(as_ctx_t *ctx, int argc, char **argv, strvec_t *inputs) {
      * in order, to one file: the stages that follow each open their
      * source by name, and some open it twice.
      */
+    /*
+     * The output may not be one of the sources: it is made before the
+     * source is done with, and the source was gone -- `as -o x.s x.s`
+     * left an object where the source had been.  Said before anything
+     * is read, as GNU as says it.
+     */
+    if (!query_version && !ctx->target_help && ctx->out_path != NULL) {
+        struct stat out_sb;
+        size_t k;
+
+        if (stat(ctx->out_path, &out_sb) == 0 && S_ISREG(out_sb.st_mode)) {
+            for (k = 0; k < inputs->count; ++k) {
+                struct stat in_sb;
+
+                if (strcmp(inputs->items[k], "-") != 0 && stat(inputs->items[k], &in_sb) == 0 &&
+                    in_sb.st_dev == out_sb.st_dev && in_sb.st_ino == out_sb.st_ino) {
+                    /* (Not AS_E_USAGE's way out, which takes the
+                     * output away: it is the source.) */
+                    fprintf(stderr, "as: error: the input '%s' and output '%s' files are the same\n", inputs->items[k],
+                            ctx->out_path);
+                    ctx->out_path = NULL;
+                    return 1;
+                }
+            }
+        }
+    }
+
     if (!query_version && !ctx->target_help) {
         if (inputs->count == 1 && strcmp(inputs->items[0], "-") != 0) {
             ctx->in_path = inputs->items[0];

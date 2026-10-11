@@ -954,12 +954,15 @@ one table of templates; there is one ModRM/SIB/prefix emitter.
 
 ### G.3 Data
 
-- [ ] **AS-T-281** When `.float` or `.double` is given a value out of range, the assembler shall emit what GNU emits and warn.
+- [x] **AS-T-281** When `.float` or `.double` is given a value out of range, the assembler shall emit what GNU emits and warn.
   Trace: AS-OBJ-016.  Verify: T — `.float 1e39`, a denormal, `inf`, `nan`.
-- [ ] **AS-T-282** When a floating-point directive is given an integer in hexadecimal, the assembler shall take it as the bit pattern, as GNU does; when given `0f…`, `0d…` or `0e…`, as a decimal float.
+  Done, with 282, as GNU as 2.46 has it, which is not what this says: a number too large for the width is refused ("cannot create floating-point number") and not made infinity with a warning; one that only rounds up to infinity is infinity; a denormal and nothing are what they are; `nan` is `7fffffff`, where it had been `7fc00000`.  The number was read in three places by the C library's `strtod`; it is read in one (`float_bits` in `as_lower.c`), and a `.float` or `.double` is the `.long` or `.quad` of its bits before anything else sees it.  `test_data_literals.sh`, 120 cases that GNU passes.  Not GNU's: a number between two the width holds is rounded to the nearer, where GNU rounds some up (`.float 16777217`).
+- [x] **AS-T-282** When a floating-point directive is given an integer in hexadecimal, the assembler shall take it as the bit pattern, as GNU does; when given `0f…`, `0d…` or `0e…`, as a decimal float.
   Trace: AS-DAT-003.  Verify: T — `.float 0x3fc00000`, `.float 0f1.5`, `.double 0d2.5`.
-- [ ] **AS-T-283** The string escapes of `.ascii`, `.asciz` and `.string` shall be GNU `as`'s.
+  Done (see 281), by what GNU as 2.46 does: `0` and a letter before a number are passed over, so `0f1.5`, `0d2.5` and `0e1.5` are the numbers -- they had been refused -- and so is `0x10` ten; the bits themselves are written `0x:3fc00000`; `0x3fc00000` is refused by GNU for the `f` in it, and here.  A hexadecimal float as C writes one (`0x1p3`) had been taken and is not.
+- [x] **AS-T-283** The string escapes of `.ascii`, `.asciz` and `.string` shall be GNU `as`'s.
   Trace: AS-DAT-003.  Verify: T — `\a`, `\xg`, `\8`, `\x41`, `\101`, `\"`, `\\`, a trailing backslash.
+  Done: there is no escape for a bell (`\a` is an a, and had been 7); `\x` with no digit is a zero byte and `\X` is `\x`; 8 and 9 are digits of an octal escape (`\18` is 16).  A string that ends in an escaped backslash is that.  `test_data_literals.sh`.  One thing is left as it was, and is not GNU's: a string with no closing quote on its line is an error here, where GNU as warns and takes the lines that follow into the string.
 
 ## H. The object file
 
@@ -978,18 +981,24 @@ one table of templates; there is one ModRM/SIB/prefix emitter.
   Trace: AS-OBJ-010.  Verify: T — the output of `gcc -O2 -g -S`, whose location lists hold `.uleb128 .LVU23`: GNU's bytes.  Found when `.uleb128` stopped being passed over (070): before that every such line was dropped and the list was short of its views.  It is where `test_complex_control_32_64.sh` now stops.  After: 294.
 - [ ] **AS-T-295** Where `-g` is given for an assembly source with no debug directives, the assembler shall emit line information for the source itself, or shall refuse the option.
   Trace: AS-OBJ-010, AS-FE-014.  Verify: T — `readelf --debug-dump=info` reports no corruption.
-- [ ] **AS-T-296** The assembler shall write the output with the permissions `0666` less the umask.
+- [x] **AS-T-296** The assembler shall write the output with the permissions `0666` less the umask.
   Trace: AS-OBJ-020, AS-FE-032.  Verify: T — umask 022 gives 0644.
-- [ ] **AS-T-297** When the output path is `/dev/null` or another file that is not regular, the assembler shall write to it and succeed.
+  Done, with 297 to 301: `test_output_file.sh`, which GNU passes but for the pipe.  The file was made for its owner alone whatever the mask, being moved into place from a temporary one; the object library gives a new file what the mask leaves of 0666 (`elf__write_file_atomic`).
+- [x] **AS-T-297** When the output path is `/dev/null` or another file that is not regular, the assembler shall write to it and succeed.
   Trace: AS-OBJ-020.  Verify: T — `-o /dev/null`; a FIFO.
-- [ ] **AS-T-298** If the output path names the same file as an input, then the assembler shall fail before reading.
+  Done: the object had been written to the null device and then looked for in it ("failed to open output /dev/null: invalid ELF format"); what is no plain file is not read back.  A pipe has the object, which GNU as cannot write to one.
+- [x] **AS-T-298** If the output path names the same file as an input, then the assembler shall fail before reading.
   Trace: AS-OBJ-020.  Verify: T — by path and by hard link.
-- [ ] **AS-T-299** When the output path is a symbolic link, the assembler shall write to the link's target, as GNU does.
+  Done: `as -o x.s x.s` had left an object where the source was.  It is refused before anything is read, for the path, for another name of the file, and for any of several sources, and the source is as it was.
+- [x] **AS-T-299** When the output path is a symbolic link, the assembler shall write to the link's target, as GNU does.
   Trace: AS-OBJ-020.  Verify: T — a dangling link and a live one.
-- [ ] **AS-T-300** If the output cannot be written, then the message shall name the path and give the system's reason.
+  Done, as GNU as does, which is two things: a link to a file that is not there yet has the file made (it could not be written at all); a link to a file that is there is replaced by the object and the file left as it was, GNU as removing what the name leads to if that is a plain file and then opening the name.  The second is done here in the assembler; the library still writes through such a link, which is what the linker's tests ask of it.
+- [x] **AS-T-300** If the output cannot be written, then the message shall name the path and give the system's reason.
   Trace: AS-OBJ-020.  Verify: T — a read-only directory; a full device (`/dev/full`).
-- [ ] **AS-T-301** The clean-up of `as_elf_emit_file` shall be written once.
+  Done: "elf_write_file failed: PATH" is "can't create PATH:" and the system's reason -- no such directory, permission denied, is a directory, no space left on device.
+- [x] **AS-T-301** The clean-up of `as_elf_emit_file` shall be written once.
   Trace: AS-DES-003.  Verify: I.
+  Done: the two copies of what `as_elf_emit_file` frees, one for each way out, are one, reached by both.
 
 ## I. The x86 extensions
 
@@ -1269,5 +1278,5 @@ is not to be done, 370 is ticked with "removed" and the rest struck.
 | AS-EXT-009 | 185, 325, 332–337 |
 | AS-EXT-010 | 040, 171, 338, 339 (339 closes all of AS-EXT) |
 
-351 tasks: 252 done, 99 open.  Numbers run to 400, with gaps left between
+351 tasks: 261 done, 90 open.  Numbers run to 400, with gaps left between
 sections for tasks found along the way.

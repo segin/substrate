@@ -21,6 +21,7 @@
 #include "elfobj.h"
 
 #include <ctype.h>
+#include <errno.h>
 #include <limits.h>
 #include <stdarg.h>
 #include <stdint.h>
@@ -28,6 +29,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 #ifndef STV_DEFAULT
 #define STV_DEFAULT 0
@@ -18475,7 +18478,7 @@ static int write_binary_file(emit_ctx_t *ctx, const bin_section_vec_t *v, const 
     fp = fopen(out_path, "wb");
     if (fp == NULL) {
         free(out.data);
-        set_err(ctx, "failed to open output file: %s", out_path);
+        set_err(ctx, "can't create %s: %s", out_path, strerror(errno));
         return -1;
     }
     if (out.len > 0 && fwrite(out.data, 1, out.len, fp) != out.len) {
@@ -20770,6 +20773,7 @@ int as_elf_emit_file(const as_parse_result_t *parsed,
     int has_file_loc = 0;
     int has_cfi = 0;
     int trace_emit_phase = getenv("AS_DEBUG_EMIT_PHASE") != NULL;
+    int emitted = -1; /* what is returned: 0 once the object is written */
 
     if (parsed == NULL || sections == NULL || symtab == NULL || data == NULL || cfg == NULL || out_path == NULL) {
         return -1;
@@ -20921,50 +20925,31 @@ int as_elf_emit_file(const as_parse_result_t *parsed,
         set_err(&ctx, "elf_finalize failed");
         goto fail;
     }
+    /*
+     * As GNU as: what the name leads to is removed if it is a plain
+     * file, and the name then written.  So a link to a file that is
+     * there is replaced by the object -- the file left as it was -- and
+     * one to a file that is not there yet has the file made.
+     */
+    {
+        struct stat sb;
+
+        if (stat(out_path, &sb) == 0 && S_ISREG(sb.st_mode)) {
+            (void)unlink(out_path);
+        }
+    }
+    errno = 0;
     if (elf_write_file(ctx.obj, out_path) != ELF_OK) {
-        set_err(&ctx, "elf_write_file failed: %s", out_path);
+        /* The path, and what the system said of it. */
+        set_err(&ctx, "can't create %s: %s", out_path, errno != 0 ? strerror(errno) : "the object could not be written");
         goto fail;
     }
 
-    for (i = 0; i < ctx.sym_count; ++i) {
-        free(ctx.sym_map[i].name);
-    }
-    free(ctx.sym_map);
-    free(ctx.sym_index);
-    asm_var_reset(&ctx);
-    virtual_label_cache_free(&ctx);
-    free(ctx.list_sec);
-    free(ctx.list_off);
-    free(ctx.label_index);
-    free(ctx.stmt_size_cache);
-    free(ctx.stmt_size_cached);
-    free(ctx.branch_short);
-    free(ctx.emit_labels);
-    free_leb128_sizes(&ctx);
-    {
-        size_t _i;
-        for (_i = 0; _i < ctx.kept_name_count; ++_i) {
-            free(ctx.kept_names[_i]);
-        }
-        free(ctx.kept_names);
-        as_strmap_free(&ctx.kept_by_name);
-        as_strmap_free(&ctx.sec_by_name);
-        free(ctx.sec_found);
-        as_strmap_free(&ctx.symtab_by_name);
-        for (_i = 0; _i < ctx.section_prefix_count; ++_i) {
-            free(ctx.section_prefixes[_i].name);
-            free(ctx.section_prefixes[_i].prefix);
-        }
-        free(ctx.section_prefixes);
-        for (_i = 0; _i < ctx.stmt_section_at_count; ++_i) {
-            free(ctx.stmt_section_at[_i]);
-        }
-        free(ctx.stmt_section_at);
-    }
-    elf_close(ctx.obj);
-    return 0;
+    emitted = 0;
 
 fail:
+    /* What the context holds is given back here, whichever way the
+     * function ends. */
     for (i = 0; i < ctx.sym_count; ++i) {
         free(ctx.sym_map[i].name);
     }
@@ -21001,5 +20986,5 @@ fail:
         free(ctx.stmt_section_at);
     }
     elf_close(ctx.obj);
-    return -1;
+    return emitted;
 }
