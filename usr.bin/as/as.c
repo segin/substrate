@@ -409,11 +409,14 @@ static int run_message_directives(as_parse_result_t *parsed, as_elf_warnings_t *
                 as_diag(AS_E_BACKEND, "%s:%u: %s", file, st->line, said);
                 errors++;
             } else if (!warnings->suppress) {
-                const char *shown_file = file;
-                unsigned shown_line = st->line;
+                /* Where the user wrote it, and the macro it is of the
+                 * expansion of. */
+                char written[1024];
+                char shown[1024];
 
-                (void)as_source_position(file, st->line, &shown_file, &shown_line);
-                fprintf(stderr, "%s:%u: Warning: %s\n", shown_file, shown_line, said);
+                snprintf(written, sizeof(written), "%s:%u: Warning: %s\n", file, st->line, said);
+                as_source_positions_in_text(written, shown, sizeof(shown));
+                fputs(shown, stderr);
                 warnings->count++;
             }
         }
@@ -1128,6 +1131,9 @@ typedef struct as_text {
     char *out_file;
     unsigned out_line;
     int mid_line;
+    /* The macro whose expansion is being written, or NULL: its name
+     * goes in the marks of the lines of it (AS_LEX_MACRO_SEP). */
+    const char *macro;
 } as_text_t;
 
 /* The expansion of macros and repeats says what is wrong here, for
@@ -1204,19 +1210,30 @@ static void text_put_raw(as_text_t *t, const char *s, size_t n) {
 static void text_begin_line(as_text_t *t) {
     const as_text_t *from = t->origin;
     char mark[32];
+    char with_macro[PATH_MAX + 160];
+    const char *file;
 
     if (from == NULL || from->file == NULL || from->line == 0) {
         return;
     }
-    if (t->out_file != NULL && strcmp(t->out_file, from->file) == 0 && t->out_line + 1 == from->line) {
+    /* The file as the mark has it: with the macro being expanded after
+     * it, unless what is read says one already -- a later pass, which
+     * is copying an expansion and making none. */
+    file = from->file;
+    if (t->macro != NULL && strchr(from->file, AS_LEX_MACRO_SEP) == NULL &&
+        snprintf(with_macro, sizeof(with_macro), "%s%c%s", from->file, AS_LEX_MACRO_SEP, t->macro) <
+            (int)sizeof(with_macro)) {
+        file = with_macro;
+    }
+    if (t->out_file != NULL && strcmp(t->out_file, file) == 0 && t->out_line + 1 == from->line) {
         return;
     }
     snprintf(mark, sizeof(mark), "%c%u ", AS_LEX_MARK, from->line);
     text_put_raw(t, mark, strlen(mark));
-    text_put_raw(t, from->file, strlen(from->file));
+    text_put_raw(t, file, strlen(file));
     text_put_raw(t, "\n", 1);
-    if (t->out_file == NULL || strcmp(t->out_file, from->file) != 0) {
-        if (text_set_file(&t->out_file, from->file) != 0) {
+    if (t->out_file == NULL || strcmp(t->out_file, file) != 0) {
+        if (text_set_file(&t->out_file, file) != 0) {
             t->failed = 1;
         }
     }
@@ -2454,12 +2471,17 @@ static int expand_gas_macro_statement(as_text_t *out, gas_macro_vec_t *macros, c
 
         for (i = 0; i < m->body.count; ++i) {
             char *expanded = expand_gas_macro_line_text(m->body.items[i], m, values, macro_serial);
+            /* The lines written are of this macro's expansion, and of
+             * the one that called it again when it is done. */
+            const char *outer = out->macro;
             int step;
 
             if (expanded == NULL) {
                 goto out;
             }
+            out->macro = m->name;
             step = expand_gas_macro_statement(out, macros, expanded, depth + 1);
+            out->macro = outer;
             free(expanded);
             if (step == MACRO_EXIT) {
                 /* .exitm: the rest of the body is not expanded, and the

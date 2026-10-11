@@ -121,6 +121,13 @@ int as_scan_step(as_scan_t *st, const char *s, size_t i, size_t *more);
 #define AS_LEX_MARK '\001'
 
 /*
+ * In a mark, after the file's name: this byte and the name of the macro
+ * the next line is of the expansion of.  A message about that line says
+ * which macro, the line it gives being the one the macro was called on.
+ */
+#define AS_LEX_MACRO_SEP '\003'
+
+/*
  * The file name of a token of a marked text begins with this: its line
  * is a line of the text and not of a file, and as_source_position()
  * says which line of which file it was written at.

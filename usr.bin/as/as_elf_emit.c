@@ -10284,12 +10284,14 @@ static void warn_stmt(const as_elf_cfg_t *cfg, const as_stmt_t *st, const char *
     }
     {
         /* Where the user wrote it, not where it stands in the expanded
-         * source. */
-        const char *file = st->file != NULL ? st->file : "<input>";
-        unsigned line = st->line;
+         * source; and the macro it is of the expansion of. */
+        char written[1024];
+        char shown[1024];
 
-        (void)as_source_position(file, st->line, &file, &line);
-        fprintf(stderr, "%s:%u: Warning: %s\n", file, line, text);
+        snprintf(written, sizeof(written), "%s:%u: Warning: %s\n", st->file != NULL ? st->file : "<input>", st->line,
+                 text);
+        as_source_positions_in_text(written, shown, sizeof(shown));
+        fputs(shown, stderr);
     }
 }
 
@@ -15526,6 +15528,77 @@ static int emit_data_program(emit_ctx_t *ctx, const as_data_program_t *data) {
     return 0;
 }
 
+/*
+ * `.file N "name"`: a number names one file.  Given to a second it was
+ * taken without a word -- which a compiler's configure script tries,
+ * to learn whether the assembler keeps the numbers it is given, and
+ * concluded that this one does not.
+ */
+static int check_file_numbers(emit_ctx_t *ctx, const as_parse_result_t *parsed) {
+    struct numbered {
+        unsigned long number;
+        const char *name;
+    } *seen = NULL;
+    size_t count = 0;
+    size_t cap = 0;
+    size_t i;
+    size_t k;
+    int rc = 0;
+
+    for (i = 0; i < parsed->count && rc == 0; ++i) {
+        const as_stmt_t *st = &parsed->items[i];
+        const char *arg;
+        char *end = NULL;
+        unsigned long number;
+
+        if (st->kind != AS_STMT_DIRECTIVE || strcmp(st->u.directive.name, ".file") != 0 ||
+            st->u.directive.arg_count == 0 || st->u.directive.args[0] == NULL) {
+            continue;
+        }
+        arg = st->u.directive.args[0];
+        while (isspace((unsigned char)*arg)) {
+            arg++;
+        }
+        if (!isdigit((unsigned char)*arg)) {
+            continue;
+        }
+        number = strtoul(arg, &end, 10);
+        while (isspace((unsigned char)*end)) {
+            end++;
+        }
+        for (k = 0; k < count; ++k) {
+            if (seen[k].number == number) {
+                break;
+            }
+        }
+        if (k < count) {
+            if (strcmp(seen[k].name, end) != 0) {
+                set_err(ctx, "%s:%u: file number %lu is %s already, and cannot be %s",
+                        st->file != NULL ? st->file : "<input>", st->line, number, seen[k].name, end);
+                rc = -1;
+            }
+            continue;
+        }
+        if (count == cap) {
+            size_t ncap = cap != 0 ? cap * 2 : 16;
+            struct numbered *next = (struct numbered *)realloc(seen, ncap * sizeof(*next));
+
+            if (next == NULL) {
+                set_err(ctx, "out of memory");
+                rc = -1;
+                break;
+            }
+            seen = next;
+            cap = ncap;
+        }
+        seen[count].number = number;
+        seen[count].name = end;
+        count++;
+    }
+    free(seen);
+    return rc;
+}
+
 static int collect_directive_presence(const as_parse_result_t *parsed, int *has_file_loc, int *has_cfi) {
     size_t i;
 
@@ -19242,11 +19315,15 @@ int as_elf_emit_file(const as_parse_result_t *parsed,
     }
 
     collect_directive_presence(parsed, &has_file_loc, &has_cfi);
-    if (has_file_loc) {
-        if (ensure_section_exists(&ctx, ".debug_line", SHT_PROGBITS, 0, 1, NULL, 0) != 0) {
-            set_err(&ctx, "failed to emit .debug_line");
-            goto fail;
-        }
+    /*
+     * `.file N` and `.loc` are taken and no line table is made of
+     * them.  A `.debug_line` with nothing in it was made instead, and
+     * by it a compiler's configure script, which looks for the section,
+     * took this for an assembler that makes line tables and left its
+     * own unwritten.  There is none, and the compiler writes its own.
+     */
+    if (has_file_loc && check_file_numbers(&ctx, parsed) != 0) {
+        goto fail;
     }
     if (has_cfi) {
         if (ensure_section_exists(&ctx, ".eh_frame", SHT_PROGBITS, SHF_ALLOC, 4, NULL, 0) != 0 ||

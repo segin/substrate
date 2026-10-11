@@ -867,6 +867,8 @@ static int lex_file_internal(lex_ctx_t *ctx, const char *path, unsigned depth);
  */
 typedef struct {
     const char *file;
+    /* The macro the line is of the expansion of, or NULL. */
+    const char *macro;
     unsigned line;
 } source_pos_t;
 
@@ -890,30 +892,40 @@ static int source_map_begin(const char *internal_name) {
     return 0;
 }
 
-static int source_map_add(unsigned line_no, const char *user_file, unsigned user_line) {
-    const char *file = NULL;
+/* A name the table keeps: the one it has already, or a copy. */
+static const char *source_map_name_of(const char *name, size_t len) {
+    char **files;
+    char *copy;
     size_t i;
 
-    for (i = source_map_file_count; i > 0 && file == NULL; --i) {
-        if (strcmp(source_map_files[i - 1], user_file) == 0) {
-            file = source_map_files[i - 1];
+    for (i = source_map_file_count; i > 0; --i) {
+        if (strlen(source_map_files[i - 1]) == len && memcmp(source_map_files[i - 1], name, len) == 0) {
+            return source_map_files[i - 1];
         }
     }
-    if (file == NULL) {
-        char **files = (char **)realloc(source_map_files, (source_map_file_count + 1) * sizeof(*files));
-        char *copy;
+    files = (char **)realloc(source_map_files, (source_map_file_count + 1) * sizeof(*files));
+    if (files == NULL) {
+        return NULL;
+    }
+    source_map_files = files;
+    copy = (char *)malloc(len + 1);
+    if (copy == NULL) {
+        return NULL;
+    }
+    memcpy(copy, name, len);
+    copy[len] = '\0';
+    source_map_files[source_map_file_count++] = copy;
+    return copy;
+}
 
-        if (files == NULL) {
-            return -1;
-        }
-        source_map_files = files;
-        copy = (char *)malloc(strlen(user_file) + 1);
-        if (copy == NULL) {
-            return -1;
-        }
-        memcpy(copy, user_file, strlen(user_file) + 1);
-        source_map_files[source_map_file_count++] = copy;
-        file = copy;
+static int source_map_add(unsigned line_no, const char *user_file, unsigned user_line) {
+    /* The file, and after AS_LEX_MACRO_SEP the macro the line is of. */
+    const char *sep = strchr(user_file, AS_LEX_MACRO_SEP);
+    const char *file = source_map_name_of(user_file, sep != NULL ? (size_t)(sep - user_file) : strlen(user_file));
+    const char *macro = sep != NULL ? source_map_name_of(sep + 1, strlen(sep + 1)) : NULL;
+
+    if (file == NULL || (sep != NULL && macro == NULL)) {
+        return -1;
     }
     if ((size_t)line_no >= source_map_cap) {
         size_t ncap = source_map_cap == 0 ? 1024 : source_map_cap;
@@ -931,6 +943,7 @@ static int source_map_add(unsigned line_no, const char *user_file, unsigned user
         source_map_cap = ncap;
     }
     source_map[line_no].file = file;
+    source_map[line_no].macro = macro;
     source_map[line_no].line = user_line;
     if ((size_t)line_no >= source_map_count) {
         source_map_count = (size_t)line_no + 1;
@@ -951,10 +964,14 @@ int as_source_position(const char *file, unsigned line, const char **file_out, u
 void as_source_positions_in_text(const char *in, char *out, size_t out_sz) {
     size_t n = 0;
     size_t name_len = source_map_name != NULL ? strlen(source_map_name) : 0;
+    /* The macro the first position in the message is of the expansion
+     * of, if it is of one: said at the message's end. */
+    char macro[128];
 
     if (out == NULL || out_sz == 0) {
         return;
     }
+    macro[0] = '\0';
     while (in != NULL && *in != '\0' && n + 1 < out_sz) {
         const char *digits;
         const char *file;
@@ -970,6 +987,22 @@ void as_source_positions_in_text(const char *in, char *out, size_t out_sz) {
                 in++;
                 continue;
             }
+            /* A file's name as a mark had it, from before there were
+             * tokens: the macro's is after it, to the colon. */
+            if (in[0] == AS_LEX_MACRO_SEP) {
+                size_t k = 0;
+
+                for (in++; *in != '\0' && *in != ':' && *in != '\n'; ++in) {
+                    if (macro[0] == '\0' && k + 1 < sizeof(macro)) {
+                        macro[k++] = *in;
+                        macro[k] = '\0';
+                    }
+                }
+                if (k < sizeof(macro)) {
+                    macro[k] = '\0';
+                }
+                continue;
+            }
             out[n++] = *in++;
             continue;
         }
@@ -980,6 +1013,9 @@ void as_source_positions_in_text(const char *in, char *out, size_t out_sz) {
             in++;
             continue;
         }
+        if (macro[0] == '\0' && source_map[line].macro != NULL) {
+            snprintf(macro, sizeof(macro), "%s", source_map[line].macro);
+        }
         wrote = snprintf(out + n, out_sz - n, "%s:%u", file, user_line);
         if (wrote < 0 || (size_t)wrote >= out_sz - n) {
             break;
@@ -988,6 +1024,23 @@ void as_source_positions_in_text(const char *in, char *out, size_t out_sz) {
         in = digits;
     }
     out[n] = '\0';
+    /*
+     * The line given is the one the macro was called on, and what is
+     * wrong is in its body: which macro, then, there being several a
+     * line may call and each calling others.
+     */
+    if (macro[0] != '\0') {
+        size_t tail = n;
+
+        while (tail > 0 && out[tail - 1] == '\n') {
+            tail--;
+        }
+        if (tail + strlen(macro) + sizeof(" (in the expansion of macro '')\n") < out_sz) {
+            int had_newline = tail < n;
+
+            snprintf(out + tail, out_sz - tail, " (in the expansion of macro '%s')%s", macro, had_newline ? "\n" : "");
+        }
+    }
 }
 
 /*

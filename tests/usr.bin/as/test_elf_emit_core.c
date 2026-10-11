@@ -89,8 +89,14 @@ int main(int argc, char **argv) {
         fail("missing GNU note section");
     }
 
-    if (elf_find_section(obj, ".debug_custom") == NULL || elf_find_section(obj, ".debug_line") == NULL) {
+    if (elf_find_section(obj, ".debug_custom") == NULL) {
         fail("missing debug sections");
+    }
+    /* `.file 1` and `.loc` are in the source, and no line table is made
+     * of them: so no section that says one was.  (This asked for the
+     * section, which was there with nothing in it.) */
+    if (elf_find_section(obj, ".debug_line") != NULL) {
+        fail("a .debug_line section with no line table in it");
     }
 
     if (elf_find_section(obj, ".eh_frame") == NULL || elf_find_section(obj, ".eh_frame_hdr") == NULL) {

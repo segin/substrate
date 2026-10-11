@@ -322,6 +322,18 @@ A directive that is not known is an error.
 .Cm .if/.ifdef/.ifndef/.else/.endif , .macro/.endm , .rept/.endr , .irp/.irpc
 .It Debug/CFI
 .Cm .file , .loc , .cfi_*
+.Pp
+These are taken and nothing is made of them: there is no line table
+for
+.Cm .loc ,
+and no
+.Ql .debug_line
+section, and no unwinding information for
+.Cm .cfi_* .
+A compiler that is to have either writes it as data.
+A file number that
+.Cm .file
+has given to one file is refused for another.
 .El
 .Sh ARCHITECTURE SYNTAX
 .Bl -tag -width "ARM and AArch64"
@@ -443,6 +455,11 @@ where the file and line are those the line was written at, whatever
 macros, repeats, conditionals and included files it came through; the
 standard input is
 .Ql {standard input} .
+For a line of a macro's expansion the line given is the one the macro
+was called on, and the message ends with which macro it was:
+.Pp
+.Dl file:line: Error: text (in the expansion of macro 'name')
+.Pp
 Every statement in error is reported, not the first alone.
 What is wrong with the run itself, such as an option that is not one,
 begins with the program's name and the word
