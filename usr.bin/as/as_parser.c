@@ -282,6 +282,19 @@ static int push_label(as_stmt_t *st, const char *name, const char *file, unsigne
     return 0;
 }
 
+/*
+ * What a name written without `%` may be.  In AT&T syntax a register is
+ * written with `%` and a name without one is a symbol: `call sp` calls
+ * the function sp, `movl r12, %eax` reads the variable r12.  They were
+ * taken for the registers of those names -- and x1, s1, lr and their
+ * like for ARM's, which this is not an assembler of -- so that a C
+ * program with a variable called s1 did not assemble.  Set for each
+ * statement by as_parse_tokens().
+ */
+static int parse_bare_x86_registers = 1;
+static int parse_arm_registers = 1;
+static int parse_is_x86;
+
 static int is_x86_register_text(const char *s) {
     const char *p;
 
@@ -290,6 +303,8 @@ static int is_x86_register_text(const char *s) {
     }
     if (s[0] == '%') {
         s++;
+    } else if (!parse_bare_x86_registers) {
+        return 0;
     }
     if (strncmp(s, "xmm", 3) == 0 || strncmp(s, "ymm", 3) == 0 || strncmp(s, "zmm", 3) == 0) {
         if (!isdigit((unsigned char)s[3])) {
@@ -349,6 +364,7 @@ static int is_x86_register_text(const char *s) {
         streq_ci(s, "eax") || streq_ci(s, "ebx") || streq_ci(s, "ecx") || streq_ci(s, "edx") ||
         streq_ci(s, "esi") || streq_ci(s, "edi") || streq_ci(s, "esp") || streq_ci(s, "ebp") ||
         streq_ci(s, "ax") || streq_ci(s, "bx") || streq_ci(s, "cx") || streq_ci(s, "dx") ||
+        streq_ci(s, "si") || streq_ci(s, "di") || streq_ci(s, "sp") || streq_ci(s, "bp") ||
         streq_ci(s, "al") || streq_ci(s, "ah") || streq_ci(s, "bl") || streq_ci(s, "bh") ||
         streq_ci(s, "cl") || streq_ci(s, "ch") || streq_ci(s, "dl") || streq_ci(s, "dh") ||
         streq_ci(s, "sil") || streq_ci(s, "dil") || streq_ci(s, "spl") || streq_ci(s, "bpl") ||
@@ -551,7 +567,7 @@ static int intel_mem_size_bits(const char *s) {
 static int is_arm_register_text(const char *s) {
     const char *p;
 
-    if (s == NULL || s[0] == '\0') {
+    if (s == NULL || s[0] == '\0' || !parse_arm_registers) {
         return 0;
     }
     if (streq_ci(s, "sp") || streq_ci(s, "lr") || streq_ci(s, "pc") || streq_ci(s, "cpsr") || streq_ci(s, "spsr") ||
@@ -2531,6 +2547,7 @@ static int parse_line_tokens(parse_ctx_t *ctx, const as_token_t *tokv, size_t n,
             } else if (streq_ci(st->u.directive.name, ".att_syntax")) {
                 ctx->syntax_intel = 0;
             }
+            parse_bare_x86_registers = ctx->syntax_intel || !parse_is_x86;
         }
         return 0;
     }
@@ -2631,6 +2648,9 @@ int as_parse_tokens(const as_token_vec_t *tokens, const as_parser_cfg_t *cfg,
     memset(&ctx, 0, sizeof(ctx));
     ctx.cfg = cfg;
     ctx.syntax_intel = (cfg != NULL && cfg->intel_syntax) ? 1 : 0;
+    parse_is_x86 = cfg != NULL && cfg->arch == AS_PARSER_ARCH_X86;
+    parse_arm_registers = !parse_is_x86;
+    parse_bare_x86_registers = ctx.syntax_intel || !parse_is_x86;
     ctx.out = out;
     ctx.errbuf = errbuf;
     ctx.errbuf_sz = errbuf_sz;

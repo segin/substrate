@@ -3036,6 +3036,21 @@ static int as_run(int argc, char **argv, strvec_t *inputs, char **spool_path) {
     ctx.max_macro_depth = limit_from_env("AS_MAX_MACRO_DEPTH");
     ctx.max_include_depth = limit_from_env("AS_MAX_INCLUDE_DEPTH");
     g_emit_error_codes = getenv("AS_ERROR_CODES") != NULL ? 1 : 0;
+    /*
+     * Run by the name of an assembler for another machine it is asked
+     * for that machine's code, which it cannot write.  It wrote x86: as
+     * aarch64-as, `ret` became the byte C3 in an x86-64 object, and the
+     * exit status was 0.
+     */
+    {
+        const char *base = argv[0] != NULL ? strrchr(argv[0], '/') : NULL;
+
+        base = base != NULL ? base + 1 : (argv[0] != NULL ? argv[0] : "");
+        if (strncmp(base, "arm", 3) == 0 || strncmp(base, "aarch64", 7) == 0 || strncmp(base, "thumb", 5) == 0) {
+            as_diag(AS_E_USAGE, "run as %s: this assembler assembles for x86 and x86-64 only", base);
+            return 1;
+        }
+    }
     t_start_us = wallclock_us();
     if (toolchain_guard_enter("as") != 0) {
         return 1;

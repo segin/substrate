@@ -285,6 +285,9 @@ static int token_looks_like_segment_prefix(const char *tok) {
     return is_x86_segment_selector_name(tmp);
 }
 
+/* as_lexer_cfg_t.arm_registers of the file being read. */
+static int lex_arm_registers;
+
 static int is_arm_like_register_name(const char *s) {
     const char *p;
 
@@ -679,7 +682,7 @@ static as_token_kind_t classify_token(const char *tok, int intel_syntax) {
     if (tok[0] == '%' && is_x86_register_name(tok + 1)) {
         return AS_TOK_REGISTER;
     }
-    if ((intel_syntax && is_x86_register_name(tok)) || is_arm_like_register_name(tok)) {
+    if ((intel_syntax && is_x86_register_name(tok)) || (lex_arm_registers && is_arm_like_register_name(tok))) {
         return AS_TOK_REGISTER;
     }
     if (looks_numeric(s)) {
@@ -1027,6 +1030,7 @@ int as_lex_file(const char *path, const as_lexer_cfg_t *cfg, as_token_vec_t *out
     if (errbuf != NULL && errbuf_sz > 0) {
         errbuf[0] = '\0';
     }
+    lex_arm_registers = cfg != NULL && cfg->arm_registers;
 
     rc = lex_file_internal(&ctx, path, 0);
 

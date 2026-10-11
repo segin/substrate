@@ -243,8 +243,6 @@ sbin/*/*
 /sbin/mkfs/mkfs
 /usr.bin/addr2line/addr2line
 /usr.bin/ar/ar
-/usr.bin/as/aarch64-as
-/usr.bin/as/arm-as
 /usr.bin/as/as
 /usr.bin/as/as.x64
 /usr.bin/as/as.x86

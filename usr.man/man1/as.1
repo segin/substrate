@@ -249,26 +249,33 @@ A directive that is not known is an error.
 .Cm .file , .loc , .cfi_*
 .El
 .Sh ARCHITECTURE SYNTAX
-.Bl -tag -width "AArch64 (ARMv8.0-v8.1)"
+.Bl -tag -width "ARM and AArch64"
 .It x86 / x86-64
 AT&T syntax is default.
 Intel syntax is available with
 .Fl msyntax=intel .
+In AT&T syntax a register is written with
+.Sq % ,
+and a name without one is a symbol, whatever it spells:
+.Ql call sp
+calls the function
+.Va sp .
 Intel memory qualifiers
 .Cm byte|word|dword|qword|xmmword|ymmword|zmmword ptr
 are recognized on x86 memory operands.
 ISA-level gating is controlled by
 .Fl march
 .Pq x86-64-v1/v2/v3/v4 .
-.It ARMv7 (AArch32)
-Staged support includes
-.Cm .arm/.thumb/.thumb_func ,
-condition codes, IT blocks, register lists,
-VFP/NEON forms, and ARM relocation mappings.
-.It AArch64 (ARMv8.0-v8.1)
-Staged support includes A64 data-processing/branch/load-store/system,
-SIMD/FP, ARMv8.1 LSE/RDMA/LOR/system-register patterns,
-and AArch64 relocation mappings.
+.It ARM and AArch64
+Not assembled for.
+The source holds encoders for both that nothing calls.
+.Nm
+is not installed as
+.Nm arm-as
+or
+.Nm aarch64-as ,
+and run under such a name, or given an option that names such a
+target, it fails and writes no object.
 .El
 .Pp
 See

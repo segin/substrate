@@ -335,12 +335,15 @@ status 0.
 
 ### B.8 The other targets' names
 
-- [ ] **AS-T-082** While assembling for x86, the assembler shall treat `sp`, `lr`, `pc`, `cpsr`, `spsr`, `xzr`, `wzr` and names of the form `r`/`w`/`x`/`q`/`d`/`s`/`v` followed by digits as symbols.
+- [x] **AS-T-082** While assembling for x86, the assembler shall treat `sp`, `lr`, `pc`, `cpsr`, `spsr`, `xzr`, `wzr` and names of the form `r`/`w`/`x`/`q`/`d`/`s`/`v` followed by digits as symbols.
   Trace: AS-ARM-003.  Verify: T — `call sp` (a relocation against `sp`), `movl sp,%eax`, `jmp x1`, `movl s1,%eax`, `call r12` under `--64`: GNU; `int s1; int x1(void){return s1;}` from `gcc -m32 -fno-pie -S` assembles.
-- [ ] **AS-T-083** The build shall not install the assembler under the names `arm-as` and `aarch64-as` while it cannot assemble for those targets.
+  Done, and for more than ARM's names: in AT&T syntax a register is written with `%`, and a name without one is a symbol whatever it spells.  x86's own were taken bare too -- `call sp` was `call *%sp`, `call r12` in 64-bit code `call *%r12` -- and wrongly assembled where ARM's were refused.  The lexer no longer makes registers of ARM's names unless told to, and the parser takes a bare name for a register only in Intel syntax, and then only x86's.  With it, Intel `mov bx, si`, `di` and `bp` are the registers: they were not in the parser's list and were assembled as a load from a symbol of that name.  `test_bare_names.sh`, 39 cases, which GNU as passes.  `movl sym,%eax` is still the long form where GNU writes `A1` (a matter of encoding choice, not of names).
+- [x] **AS-T-083** The build shall not install the assembler under the names `arm-as` and `aarch64-as` while it cannot assemble for those targets.
   Trace: AS-ARM-001.  Verify: I — `Makefile` and `build-rootfs.sh` install neither; the images hold neither.  (Undone by section L if that is taken up.)
-- [ ] **AS-T-084** If the assembler is asked for a target it cannot assemble for, by name or by option, then it shall fail and write no object.
+  Done: the two links are out of the Makefile's `alias_links` and `install_aliases`; `build-rootfs.sh` never named them, and neither image nor `dist/` held one.  `test_build_matrix.sh` checks that they are not made.  as(1) says ARM is not assembled for, where it described staged support.
+- [x] **AS-T-084** If the assembler is asked for a target it cannot assemble for, by name or by option, then it shall fail and write no object.
   Trace: AS-ARM-002.  Verify: T — `--target=aarch64`, `-marm`, `-mthumb`, `-mcpu=cortex-a53`, and `argv[0]` of `arm-as`: exit 1.
+  Done.  The options were refused already, as options not recognised.  Run as `arm-as` or `aarch64-as` it assembled x86 and exited 0; it now says what it was run as and that it assembles for x86 only, exits 1 and writes nothing.  `test_build_matrix.sh`.
 
 ## C. Read the source once (front-end structure)
 
@@ -1112,5 +1115,5 @@ is not to be done, 370 is ticked with "removed" and the rest struck.
 | AS-EXT-009 | 185, 325, 332–337 |
 | AS-EXT-010 | 040, 171, 338, 339 (339 closes all of AS-EXT) |
 
-350 tasks: 116 done, 234 open.  Numbers run to 399, with gaps left between
+350 tasks: 119 done, 231 open.  Numbers run to 399, with gaps left between
 sections for tasks found along the way.
