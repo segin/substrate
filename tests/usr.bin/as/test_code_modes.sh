@@ -72,5 +72,21 @@ t 32 6685c06683f801668d4704678d4304 '.code16|test %eax,%eax|cmp $1,%eax|lea 4(%b
 t 32 740190ebfe '.code16|je 1f|nop|1:|jmp 1b'
 t 32 e200e3fe67e3fb '.code16|loop 1f|1:|jcxz 1b|jecxz 1b'
 
+# .code16gcc (AS-T-348), which was "unknown directive": 16-bit code in
+# which a call, a return and the instructions of the stack are of 32
+# bits where nothing says otherwise.
+t 32 66e80000000066c3 '.code16gcc|call f|f: ret'
+t 32 66c3 '.code16gcc|ret'
+t 32 66c2040066cbcf '.code16gcc|ret $4|lret|iret'
+t 32 6650665b '.code16gcc|push %eax|pop %ebx'
+t 32 50 '.code16gcc|push %ax'
+t 32 666a01666a016a01 '.code16gcc|push $1|pushl $1|pushw $1'
+t 32 66c808000066c9 '.code16gcc|enter $8,$0|leave'
+t 32 669c669d66606661 '.code16gcc|pushf|popf|pusha|popa'
+t 32 66ffd066ffe0 '.code16gcc|call *%eax|jmp *%eax'
+t 32 6689c389c3 '.code16gcc|mov %eax,%ebx|mov %ax,%bx'
+t 32 e200e3fe '.code16gcc|loop 1f|1:|jcxz 1b'
+t 32 e80000c3 '.code16gcc|.code16|call f|f: ret'
+
 [ "$fail" = 0 ] && echo "ok ($cases cases)"
 exit "$fail"

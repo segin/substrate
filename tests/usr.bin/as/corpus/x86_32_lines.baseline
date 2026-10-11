@@ -107,11 +107,6 @@ fnstenvl (%eax)
 .code16 | jmpl sym
 .code16 | data32 jmp sym
 .code16 | movw 0xffff(%bx),%ax
-.code16gcc | pushl %eax
-.code16gcc | call sym
-.code16gcc | ret
-.code16gcc | push $1
-.code16gcc | leave
 addr16 movl sym,%eax
 addr16 movl %eax,sym
 addr16 loop 1f | 1:

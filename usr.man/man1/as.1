@@ -459,6 +459,15 @@ calls the function
 Intel memory qualifiers
 .Cm byte|word|dword|qword|xmmword|ymmword|zmmword ptr
 are recognized on x86 memory operands.
+.Cm .code16 , .code32
+and
+.Cm .code64
+set the mode what follows is encoded for, whatever the options said
+and whatever the object is.
+.Cm .code16gcc
+is 16-bit code in which a call, a return and the instructions of the
+stack are of 32 bits where nothing says otherwise, as a compiler for
+32-bit code writes them.
 With no
 .Fl march
 every instruction set is assembled.

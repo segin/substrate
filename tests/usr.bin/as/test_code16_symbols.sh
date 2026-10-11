@@ -150,6 +150,12 @@ t 'popcnt sym,%ax' f30fb8060000 '4:16'
 t 'movbe sym,%ax' 0f38f0060000 '4:16'
 t 'crc32b sym,%eax' f20f38f0060000 '5:16'
 
+# The same under .code16gcc, where a call is of 32 bits (AS-T-348).
+t '.code16gcc|call sym' 66e8fcffffff '2:PC32'
+t '.code16gcc|jmp sym|je sym' e9feff0f84feff '1:PC16,5:PC16'
+t '.code16gcc|mov sym,%eax|mov $sym,%eax' 66a1000066b800000000 '2:16,6:32'
+t '.code16gcc|call *(%eax)|jmp *sym' 6766ff10ff260000 '6:16'
+
 # A boot sector, and a trampoline from real mode to long mode.
 cat > boot.s << 'EOF'
 	.code16

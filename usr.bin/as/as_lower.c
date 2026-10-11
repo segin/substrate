@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 /* The most copies one .dcb or .ds may be written out as. */
 #define LOWER_REPEAT_MAX (1u << 20)
@@ -2454,8 +2455,51 @@ done:
     return rc;
 }
 
+/*
+ * `.code16gcc`: 16-bit code as a compiler for 32-bit code writes it.
+ * The instructions of the stack and the calls are of 32 bits where the
+ * source does not say: a `call` pushes four bytes, and `ret` pops
+ * them.  Each such instruction is given the `l` it was written
+ * without -- unless a register says its size -- and the rest is
+ * `.code16`.
+ */
+static int code16gcc_widen(as_instruction_t *in) {
+    static const char *const names[] = {"call", "ret", "lret", "push", "pop", "enter",
+                                        "leave", "pushf", "popf", "pusha", "popa"};
+    size_t i;
+    size_t n;
+    char *wide;
+
+    if (in->mnemonic == NULL) {
+        return 0;
+    }
+    for (i = 0; i < sizeof(names) / sizeof(names[0]); ++i) {
+        if (strcasecmp(in->mnemonic, names[i]) == 0) {
+            break;
+        }
+    }
+    if (i == sizeof(names) / sizeof(names[0])) {
+        return 0;
+    }
+    for (i = 0; i < in->operand_count; ++i) {
+        if (in->operands[i].kind == AS_OPERAND_REGISTER) {
+            return 0;
+        }
+    }
+    n = strlen(in->mnemonic);
+    wide = (char *)realloc(in->mnemonic, n + 2);
+    if (wide == NULL) {
+        return -1;
+    }
+    wide[n] = 'l';
+    wide[n + 1] = '\0';
+    in->mnemonic = wide;
+    return 0;
+}
+
 int as_directives_lower(as_parse_result_t *parsed, unsigned address_bytes, char *errbuf, size_t errbuf_sz) {
     size_t pushed = 0;
+    int gcc16 = 0;
     size_t i;
 
     if (parsed == NULL) {
@@ -2466,8 +2510,26 @@ int as_directives_lower(as_parse_result_t *parsed, unsigned address_bytes, char 
         const char *why = "";
         int rc;
 
+        if (st->kind == AS_STMT_INSTRUCTION && gcc16 && code16gcc_widen(&st->u.instr) != 0) {
+            if (errbuf != NULL && errbuf_sz != 0) {
+                snprintf(errbuf, errbuf_sz, "out of memory");
+            }
+            return -1;
+        }
         if (st->kind != AS_STMT_DIRECTIVE || st->u.directive.name == NULL) {
             continue;
+        }
+        if (strcmp(st->u.directive.name, ".code16gcc") == 0) {
+            gcc16 = 1;
+            if (set_name(&st->u.directive, ".code16") != 0) {
+                if (errbuf != NULL && errbuf_sz != 0) {
+                    snprintf(errbuf, errbuf_sz, "out of memory");
+                }
+                return -1;
+            }
+        } else if (strcmp(st->u.directive.name, ".code16") == 0 || strcmp(st->u.directive.name, ".code32") == 0 ||
+                   strcmp(st->u.directive.name, ".code64") == 0) {
+            gcc16 = 0;
         }
         /* A .popsection with nothing pushed is said and passed over,
          * as GNU as has it. */
