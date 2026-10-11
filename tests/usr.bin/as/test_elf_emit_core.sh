@@ -23,6 +23,8 @@ SRC
 
 cc -Wall -Wextra -Werror -D_GNU_SOURCE -I"$ROOT/usr.bin/as" -iquote "$ROOT/include" \
    "$ROOT/usr.bin/as/as_x86_encode.c" \
+   "$ROOT/usr.bin/as/as_x86_vec.c" \
+   "$ROOT/usr.bin/as/as_x86_vec_table.c" \
    "$ROOT/usr.bin/as/as_x86_vex.c" \
    "$ROOT/usr.bin/as/as_x86_evex.c" \
    "$ROOT/usr.bin/as/as_x86_avx.c" \

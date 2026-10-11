@@ -889,8 +889,11 @@ static int source_needs_cpp(const char *path) {
 }
 
 static int x64_isa_level_from_march(const char *march) {
+    /* With no -march nothing is refused for the processor it needs:
+     * what a compiler given -mavx2 writes is assembled with no option,
+     * as GNU as assembles it. */
     if (march == NULL || march[0] == '\0') {
-        return 1;
+        return 4;
     }
     if (strcmp(march, "x86-64-v4") == 0) {
         return 4;

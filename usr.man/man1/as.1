@@ -459,9 +459,27 @@ calls the function
 Intel memory qualifiers
 .Cm byte|word|dword|qword|xmmword|ymmword|zmmword ptr
 are recognized on x86 memory operands.
-ISA-level gating is controlled by
+With no
 .Fl march
-.Pq x86-64-v1/v2/v3/v4 .
+every instruction set is assembled.
+.Fl march=x86-64-v1 , v2
+and
+.Cm v3
+refuse what a later level adds, and say which: AVX, AVX2, FMA and BMI
+want
+.Cm x86-64-v3 ,
+and AVX-512 \(em a
+.Li %zmm
+register, one past the fifteenth, a mask, a broadcast or a way of
+rounding \(em wants
+.Cm x86-64-v4 .
+An instruction that both AVX and AVX-512 can say is AVX's unless
+.Li {evex}
+is written before it or its operands are AVX-512's;
+.Li {vex}
+and
+.Li {vex3}
+ask for the other.
 .It ARM and AArch64
 Not assembled for.
 The source holds encoders for both that nothing calls.

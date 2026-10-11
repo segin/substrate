@@ -64,6 +64,9 @@ typedef struct {
     as_x86_reg_t base;
     int has_index;
     as_x86_reg_t index;
+    /* The index is a vector register, of this as_x86_reg_class_t: the
+     * address of a gather or a scatter.  0 for a general register. */
+    unsigned char index_class;
     unsigned addr_bits;
     unsigned scale;
     unsigned size_bits;

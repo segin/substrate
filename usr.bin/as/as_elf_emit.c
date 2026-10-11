@@ -2,6 +2,7 @@
 #include "as_x86_encode.h"
 #include "as_x86_regs.h"
 #include "as_reloc_op.h"
+#include "as_x86_vec.h"
 #include "as_x86_vex.h"
 #include "as_x86_avx.h"
 #include "as_x86_avx2.h"
@@ -4753,7 +4754,8 @@ static int x86_mnemonic_is_evex_first(const char *mn) {
  * without it.
  */
 static int x86_stmt_has_decorator(const as_instruction_t *insn) {
-    return insn->opmask != 0 || insn->zeroing || insn->broadcast || insn->sae || insn->rounding_mode >= 0;
+    return insn->have_opmask || insn->opmask != 0 || insn->zeroing || insn->broadcast || insn->sae ||
+           insn->rounding_mode >= 0;
 }
 
 /*
@@ -11683,6 +11685,14 @@ static int encode_x86_stmt_body(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const 
         set_x86_isa_requirement(encerr, encerr_sz, mnbuf, 4);
         return -1;
     }
+    /* A mask, a broadcast or a way of rounding is of an EVEX prefix,
+     * and what is left has none: `addss (%rax){1to8}, %xmm2` and
+     * `psllw (%rax), %xmm2{%k1}` were assembled as if nothing were in
+     * the braces. */
+    if (x86_stmt_has_decorator(&st->u.instr)) {
+        snprintf(encerr, encerr_sz, "'%s' takes no mask, broadcast or rounding", mnbuf);
+        return -1;
+    }
     if (cfg->is_64 && cfg->x86_64_isa_level < 3 && x86_stmt_requires_v3(&st->u.instr, intel_syntax, cfg->is_64)) {
         set_x86_isa_requirement(encerr, encerr_sz, mnbuf, 3);
         return -1;
@@ -11868,6 +11878,93 @@ static int encode_x86_stmt_body(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const 
  * which shortened an immediate.  Before an instruction that has the
  * prefix already it is the prefix twice, and refused.
  */
+/*
+ * An instruction with a VEX or an EVEX prefix: the statement's
+ * operands made what the table of them is written in, and the table's
+ * encoder asked (as_x86_vec.h).
+ *
+ * 1 if the statement is one and is encoded, 0 if its name is none of
+ * them, -1 with the reason if it is one and is refused.
+ */
+static int encode_x86_vec(const as_elf_cfg_t *cfg, const as_instruction_t *insn, unsigned char *code, size_t code_cap,
+                          size_t *code_len, char *encerr, size_t encerr_sz) {
+    as_x86_operand_t ops[5];
+    as_x86_vec_req_t rq;
+    char mn[32];
+    size_t n = insn->operand_count;
+    /* (The statement's own syntax: a source may change it as it goes.) */
+    int intel = insn->syntax_intel != 0;
+    size_t i;
+
+    if (insn->mnemonic == NULL || strlen(insn->mnemonic) >= sizeof(mn)) {
+        return 0;
+    }
+    for (i = 0; insn->mnemonic[i] != '\0'; ++i) {
+        mn[i] = (char)tolower((unsigned char)insn->mnemonic[i]);
+    }
+    mn[i] = '\0';
+    if (!as_x86_vec_knows(mn)) {
+        return 0;
+    }
+    if (n > sizeof(ops) / sizeof(ops[0])) {
+        snprintf(encerr, encerr_sz, "'%s' does not take these operands", mn);
+        return -1;
+    }
+    for (i = 0; i < n; ++i) {
+        /* In AT&T's order, which Intel's is the reverse of. */
+        const as_operand_t *src = &insn->operands[intel ? n - 1 - i : i];
+        const as_x86_reg_info_t *index = NULL;
+
+        if (src->kind == AS_OPERAND_REGISTER) {
+            if (as_x86_reg_operand(src->u.reg, &ops[i]) != 0 || ops[i].kind != AS_X86_OP_REG) {
+                snprintf(encerr, encerr_sz, "'%s' does not take the register %s", mn,
+                         src->u.reg != NULL ? src->u.reg : "");
+                return -1;
+            }
+            continue;
+        }
+        if (src->kind == AS_OPERAND_MEMORY && src->u.mem.index_reg != NULL) {
+            index = as_x86_reg_find(src->u.mem.index_reg);
+        }
+        if (index != NULL && (index->cls == AS_X86_REGCLASS_XMM || index->cls == AS_X86_REGCLASS_YMM ||
+                              index->cls == AS_X86_REGCLASS_ZMM)) {
+            /* A vector for the index: the rest of the address is
+             * read as any other is, and the index put to it. */
+            as_operand_t plain = *src;
+
+            plain.u.mem.index_reg = NULL;
+            if (convert_operand_x86(&plain, mn, &ops[i], cfg->is_64, intel, encerr, encerr_sz) != 0) {
+                return -1;
+            }
+            ops[i].u.mem.has_index = 1;
+            ops[i].u.mem.index = (as_x86_reg_t)index->number;
+            ops[i].u.mem.index_class = index->cls;
+            ops[i].u.mem.disp_only = 0;
+            if (ops[i].u.mem.addr_bits == 0) {
+                ops[i].u.mem.addr_bits = cfg->is_64 ? 64u : 32u;
+            }
+            continue;
+        }
+        if (convert_operand_x86(src, mn, &ops[i], cfg->is_64, intel, encerr, encerr_sz) != 0) {
+            return -1;
+        }
+    }
+    memset(&rq, 0, sizeof(rq));
+    rq.mnemonic = mn;
+    rq.ops = ops;
+    rq.op_count = n;
+    rq.opmask = insn->opmask;
+    rq.have_opmask = insn->have_opmask;
+    rq.zeroing = insn->zeroing;
+    rq.broadcast = insn->broadcast > 0 ? (unsigned)insn->broadcast : 0u;
+    rq.sae = insn->sae;
+    rq.rounding = insn->rounding_mode;
+    rq.pseudo = insn->pseudo;
+    rq.mode = cfg->is_64 ? 64u : cfg->x86_code_bits == 16u ? 16u : 32u;
+    rq.level = cfg->is_64 ? cfg->x86_64_isa_level : 4u;
+    return as_x86_vec_encode(&rq, code, code_cap, code_len, encerr, encerr_sz);
+}
+
 /*
  * The opmask instructions, all of them, from one table.
  *
@@ -12353,7 +12450,7 @@ static int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_st
     /* The opmask instructions are encoded in one place, which is not
      * either of the two that the rest are divided between. */
     if (st != NULL && st->kind == AS_STMT_INSTRUCTION && cfg != NULL) {
-        int opmask = encode_x86_opmask(&st->u.instr, cfg->intel_syntax != 0, cfg->is_64 != 0, code, code_cap,
+        int opmask = encode_x86_opmask(&st->u.instr, st->u.instr.syntax_intel != 0, cfg->is_64 != 0, code, code_cap,
                                        code_len, encerr, encerr_sz);
 
         if (opmask < 0) {
@@ -12365,6 +12462,21 @@ static int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_st
                 set_x86_isa_requirement(encerr, encerr_sz, st->u.instr.mnemonic, 4);
                 return -1;
             }
+            if (x86_stmt_outer_prefixes(cfg, &st->u.instr, code, code_cap, code_len) != 0) {
+                return -1;
+            }
+            return x86_addr16_prefix(cfg, st, code, code_cap, code_len);
+        }
+    }
+
+    /* Nor are those with a VEX or an EVEX prefix, which have a table. */
+    if (st != NULL && st->kind == AS_STMT_INSTRUCTION && cfg != NULL) {
+        int vec = encode_x86_vec(cfg, &st->u.instr, code, code_cap, code_len, encerr, encerr_sz);
+
+        if (vec < 0) {
+            return -1;
+        }
+        if (vec > 0) {
             if (x86_stmt_outer_prefixes(cfg, &st->u.instr, code, code_cap, code_len) != 0) {
                 return -1;
             }

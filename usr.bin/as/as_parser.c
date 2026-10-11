@@ -448,12 +448,19 @@ static int parse_x86_operand_decorators(parse_ctx_t *ctx, const as_token_t *tokv
             }
         }
         if (parse_k_mask_text(inner, &kop) == 0) {
+            if (decor->has_opmask) {
+                set_err(ctx, "%s:%u: two write masks", tokv[open].file != NULL ? tokv[open].file : "<input>",
+                        tokv[open].line);
+                free(inner);
+                return -1;
+            }
             decor->has_opmask = 1;
             decor->opmask = kop;
         } else if (streq_ci(inner, "z")) {
             decor->zeroing = 1;
         } else if (is_broadcast_text(inner)) {
-            decor->broadcast = 1;
+            /* The count written: {1to8} is 8. */
+            decor->broadcast = atoi(inner + 3);
         } else if (streq_ci(inner, "sae")) {
             decor->sae = 1;
         } else if (parse_rounding_text(inner, &rmode, &sae) == 0) {
@@ -1962,12 +1969,12 @@ static int parse_instruction(parse_ctx_t *ctx, const as_token_t *tokv, size_t n,
                     return -1;
                 }
 
-                if (operand_n == 0 && decor.rounding_mode >= 0) {
+                if (operand_n == 0 && (decor.rounding_mode >= 0 || decor.sae)) {
                     /* `vaddps {rn-sae}, %zmm0, %zmm1, %zmm2`: how to
                      * round, written as an operand by itself, is the
                      * instruction's and is no operand.  It was "invalid
-                     * operand ''".  ({sae} alone is still that: the
-                     * encoders have no form for it yet.) */
+                     * operand ''", and {sae} alone was until the
+                     * encoders had a form for it. */
                     in.sae = 1;
                     in.rounding_mode = decor.rounding_mode;
                     rounding_written = 1;
@@ -2003,7 +2010,7 @@ static int parse_instruction(parse_ctx_t *ctx, const as_token_t *tokv, size_t n,
                             free_instruction(&in);
                             return -1;
                         }
-                        if ((decor.has_opmask || decor.zeroing || decor.sae || decor.rounding_mode >= 0) &&
+                        if ((decor.sae || decor.rounding_mode >= 0) &&
                             op.kind != AS_OPERAND_REGISTER) {
                             set_err(ctx, "%s:%u: x86 mask/rounding decorators require register operand",
                                     tokv[start].file != NULL ? tokv[start].file : "<input>",
@@ -2022,12 +2029,13 @@ static int parse_instruction(parse_ctx_t *ctx, const as_token_t *tokv, size_t n,
                         }
                         if (decor.has_opmask) {
                             in.opmask = decor.opmask;
+                            in.have_opmask = 1;
                         }
                         if (decor.zeroing) {
                             in.zeroing = 1;
                         }
                         if (decor.broadcast) {
-                            in.broadcast = 1;
+                            in.broadcast = decor.broadcast;
                         }
                         if (decor.sae) {
                             in.sae = 1;
@@ -2054,7 +2062,7 @@ static int parse_instruction(parse_ctx_t *ctx, const as_token_t *tokv, size_t n,
                         free_instruction(&in);
                         return -1;
                     }
-                    if ((decor.has_opmask || decor.zeroing || decor.sae || decor.rounding_mode >= 0) &&
+                    if ((decor.sae || decor.rounding_mode >= 0) &&
                         op.kind != AS_OPERAND_REGISTER) {
                         set_err(ctx, "%s:%u: x86 mask/rounding decorators require register operand",
                                 tokv[start].file != NULL ? tokv[start].file : "<input>",
@@ -2072,13 +2080,14 @@ static int parse_instruction(parse_ctx_t *ctx, const as_token_t *tokv, size_t n,
                         return -1;
                     }
                     if (decor.has_opmask) {
+                        in.have_opmask = 1;
                         in.opmask = decor.opmask;
                     }
                     if (decor.zeroing) {
                         in.zeroing = 1;
                     }
                     if (decor.broadcast) {
-                        in.broadcast = 1;
+                        in.broadcast = decor.broadcast;
                     }
                     if (decor.sae) {
                         in.sae = 1;
@@ -2099,17 +2108,17 @@ static int parse_instruction(parse_ctx_t *ctx, const as_token_t *tokv, size_t n,
         i++;
     }
 
-    /* Rounding is of registers, and of the widest or of a scalar: with
-     * memory there is nothing to say it with, the bit being the
-     * broadcast's, and of 256 bits there is no such form. */
+    /* Rounding is of registers: with memory there is nothing to say it
+     * with, the bit being the broadcast's.  (Which registers is the
+     * instruction's to say -- a conversion to something narrower
+     * rounds into a %ymm register -- and its table says it.) */
     if (rounding_written) {
         size_t k;
 
         for (k = 0; k < in.operand_count; ++k) {
             const as_operand_t *o = &in.operands[k];
 
-            if (o->kind == AS_OPERAND_MEMORY ||
-                (o->kind == AS_OPERAND_REGISTER && as_x86_reg_find_class(o->u.reg, AS_X86_REGCLASS_YMM, 31) != NULL)) {
+            if (o->kind == AS_OPERAND_MEMORY) {
                 set_err(ctx, "%s:%u: '%s' is given how to round, and has an operand that cannot be rounded so",
                         tokv[0].file != NULL ? tokv[0].file : "<input>", tokv[0].line, in.mnemonic);
                 free_instruction(&in);

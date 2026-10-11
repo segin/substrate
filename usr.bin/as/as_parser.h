@@ -117,6 +117,9 @@ typedef struct {
     unsigned pseudo;
     unsigned rex_bits;
     unsigned opmask;
+    /* A write mask was written, %k0 or another: opmask is 0 for none
+     * and for %k0, which is no write mask and is refused for one. */
+    int have_opmask;
     int zeroing;
     int broadcast;
     int sae;
