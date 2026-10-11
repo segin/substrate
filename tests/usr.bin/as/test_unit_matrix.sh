@@ -25,8 +25,6 @@ ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)
 "$ROOT/tests/usr.bin/as/test_a64_reloc_core.sh"
 "$ROOT/tests/usr.bin/as/test_relocations_elf_32_64.sh"
 
-# 8a.4 Relaxation promotions.
-"$ROOT/tests/usr.bin/as/test_relax_core.sh"
 
 # 8a.5 Expression evaluation and symbol resolution.
 "$ROOT/tests/usr.bin/as/test_parser_core.sh"

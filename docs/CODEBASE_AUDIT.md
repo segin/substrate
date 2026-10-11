@@ -505,7 +505,7 @@ The Substrate toolchain consists of a native C compiler, assembler, and linker b
 
 | Component | Files | Purpose |
 |-----------|-------|---------|
-| Core | as.c, as_lexer.c, as_parser.c, as_elf_emit.c, as_sections.c, as_symtab.c, as_relax.c | Main pipeline |
+| Core | as.c, as_lexer.c, as_parser.c, as_elf_emit.c, as_sections.c, as_symtab.c | Main pipeline |
 | x86 | as_x86_*.c (23 files) | x86/x86_64 encoding |
 | ARM | as_arm_*.c (8 files) | ARM32 encoding |
 | AArch64 | as_a64_*.c (8 files) | ARM64 encoding |

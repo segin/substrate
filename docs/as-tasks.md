@@ -710,8 +710,9 @@ one table of templates; there is one ModRM/SIB/prefix emitter.
   Trace: AS-PERF-001, AS-PERF-003.  Verify: T — a timing test: each of the audit's five shapes (plain instructions, `movl extN`, `.long extN`, branches to `.L` labels, one section per function) and `dN: .long dN - dN-1` at n and 4n takes no more than 5 times as long at 4n; D — each within 5 times GNU's time on the reference host.  After: 220, 227.
 - [ ] **AS-T-229** The assembler shall use no more than 200 bytes of memory for each source statement, on average over a file of 200,000 instructions.
   Trace: AS-PERF-001.  Verify: D — peak resident size under 60 MB for the audit's 200,000-line input (was 184 MB; GNU 12 MB).  After: 220.
-- [ ] **AS-T-230** `as_relax.c` shall be the relaxation pass the assembler uses, or shall be removed.
+- [x] **AS-T-230** `as_relax.c` shall be the relaxation pass the assembler uses, or shall be removed.
   Trace: AS-DES-005, AS-DES-003.  Verify: I; `usr.bin/as/ARCHITECTURE.md` agrees.  After: 221.
+  Removed, with its header and its test, ahead of 221: nothing called it, and it sized every instruction as four bytes and a branch as two, five or six without encoding either, so it could not have been the pass.  The emitter relaxes branches from the encoded sizes.  `usr.bin/as/ARCHITECTURE.md` says so.
 - [ ] **AS-T-231** The program `as_data.c` builds shall be what the emitter emits from, or the module shall be reduced to what is used.
   Trace: AS-DES-005, AS-DES-003.  Verify: I — `emit_data_program` does not begin `(void)data`.  After: 220.
 - [ ] **AS-T-232** The assembler shall have one emitter of each data directive.
@@ -1121,5 +1122,5 @@ is not to be done, 370 is ticked with "removed" and the rest struck.
 | AS-EXT-009 | 185, 325, 332–337 |
 | AS-EXT-010 | 040, 171, 338, 339 (339 closes all of AS-EXT) |
 
-351 tasks: 122 done, 229 open.  Numbers run to 400, with gaps left between
+351 tasks: 123 done, 228 open.  Numbers run to 400, with gaps left between
 sections for tasks found along the way.

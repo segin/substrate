@@ -13,7 +13,6 @@ usr.bin/as/
 ├── as_symtab.c              # Symbol definition, lookup, local/numeric label support
 ├── as_sections.c            # Section creation, switching, alignment, layout state
 ├── as_data.c                # Data directives, literals, fixups, expression materialization
-├── as_relax.c               # Multi-pass branch/jump relaxation
 ├── as_elf_emit.c            # ELF object emission through libelfobj
 ├── as_x86_*.c               # x86 and x86_64 encoders, relocations, ISA extensions
 ├── as_arm_*.c               # ARM encoders, relocations, system/VFP/NEON handling
@@ -80,7 +79,7 @@ Deployment: Statically linked backend modules selected at runtime by target mode
 
 Name: Relaxation pass and object-file emission
 
-Description: `as_relax.c` reruns bounded size/offset adjustment passes until branch sizing converges or the configured pass limit is reached. `as_elf_emit.c` then serializes sections, symbols, and relocations through `libelfobj` into the final ELF relocatable object.
+Description: Branch relaxation is done in `as_elf_emit.c`, which chooses each branch's form from the encoded sizes of the statements between it and its target. (A separate `as_relax.c` existed that nothing called and that sized every instruction as four bytes; it is removed.) `as_elf_emit.c` then serializes sections, symbols, and relocations through `libelfobj` into the final ELF relocatable object.
 
 Technologies: C, bounded relaxation loops, `libelfobj` section/symbol/relocation APIs
 

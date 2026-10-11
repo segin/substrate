@@ -32,7 +32,6 @@ test_i8086_elf_object.sh	16-bit code is assembled to the wrong bytes (AS-T-347).
 test_i8086_realmode_core.sh	16-bit code, as above (AS-T-347)
 test_isa_heavy_64.sh	vmovdqu is not a mnemonic (AS-T-332)
 test_output_binary.sh	code is padded with one-byte NOPs, not GNU's sequences (AS-T-251)
-test_relax_core.sh	as_relax.c, which the assembler does not call, counts every instruction as four bytes and an ARM branch as five: its sizes are not those of any code (AS-T-230)
 test_relocations_elf_32_64.sh	a forced short jump out of range is assembled and should be refused (AS-T-221)
 test_sections_symbols_expr_32_64.sh	--64: "failed to emit relocations" for a data relocation narrower than 64 bits (AS-T-210)
 test_source_model_32_64.sh	the first error ends the run: a source with three bad lines gets one message, where GNU gives three (AS-T-388)
