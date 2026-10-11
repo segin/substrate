@@ -13666,6 +13666,11 @@ static int emit_data_program(emit_ctx_t *ctx, const as_data_program_t *data) {
             sec_buf_vec_free(&secbufs);
             return -1;
         }
+        /* `.byte 1,,2`: the empty argument was made a zero where the
+         * line was parsed, and here it is said. */
+        if (st->u.directive.zero_assumed != 0 && ctx->cfg != NULL) {
+            warn_stmt(ctx->cfg, st, "zero assumed for missing expression");
+        }
     }
 
     for (i = 0; i < secbufs.count; ++i) {

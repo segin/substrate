@@ -139,6 +139,12 @@ typedef struct {
     char **args;
     size_t arg_count;
     size_t arg_cap;
+    /*
+     * Arguments of a data directive that were written empty -- `.byte
+     * 1,,2` -- and are zero: GNU as assumes it and warns, and so does
+     * this.  They are "0" in args.
+     */
+    unsigned zero_assumed;
 } as_directive_t;
 
 typedef struct {

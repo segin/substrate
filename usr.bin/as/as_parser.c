@@ -1786,14 +1786,44 @@ static int add_directive_arg(as_directive_t *d, const char *arg) {
     return 0;
 }
 
+/* The directives whose arguments are numbers to be stored, each of
+ * which may be left empty for zero. */
+static int directive_takes_numbers(const char *name) {
+    static const char *const names[] = {
+        ".byte", ".word", ".short", ".hword", ".2byte", ".long", ".int", ".4byte", ".quad", ".8byte", ".value",
+    };
+    size_t i;
+
+    for (i = 0; i < sizeof(names) / sizeof(names[0]); ++i) {
+        if (strcmp(name, names[i]) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static int parse_directive(const as_token_t *tokv, size_t n, as_stmt_t *st) {
     size_t i;
     size_t start;
 
     st->kind = AS_STMT_DIRECTIVE;
-    st->u.directive.name = xstrdup(tokv[0].text);
+    /*
+     * .int and .value are .long and .short by other names: four bytes
+     * and two, on every target.  Nothing knew them, and a directive
+     * that nothing knows was passed over in silence, so `.int 5` and
+     * `.value 5` -- which is what a compiler writes for a 16-bit datum
+     * -- put nothing in the section.
+     */
+    if (strcmp(tokv[0].text, ".int") == 0) {
+        st->u.directive.name = xstrdup(".long");
+    } else if (strcmp(tokv[0].text, ".value") == 0) {
+        st->u.directive.name = xstrdup(".short");
+    } else {
+        st->u.directive.name = xstrdup(tokv[0].text);
+    }
     st->u.directive.args = NULL;
     st->u.directive.arg_count = 0;
+    st->u.directive.zero_assumed = 0;
     if (st->u.directive.name == NULL) {
         return -1;
     }
@@ -1817,7 +1847,12 @@ static int parse_directive(const as_token_t *tokv, size_t n, as_stmt_t *st) {
                  * with the byte 10 -- where the 10 is the most padding
                  * wanted.
                  */
-                if (add_directive_arg(&st->u.directive, "") != 0) {
+                if (directive_takes_numbers(st->u.directive.name)) {
+                    st->u.directive.zero_assumed++;
+                    if (add_directive_arg(&st->u.directive, "0") != 0) {
+                        return -1;
+                    }
+                } else if (add_directive_arg(&st->u.directive, "") != 0) {
                     return -1;
                 }
             }

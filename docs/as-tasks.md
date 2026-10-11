@@ -119,8 +119,9 @@ status 0.
 - [x] **AS-T-026** When an alignment directive names a maximum skip and the padding needed exceeds it, the assembler shall emit no padding.
   Trace: AS-FE-002.  Verify: T — `nop` / `.p2align 4,,10` / `nop` is `90 90`; `.p2align 4,,15` pads; `.balign 8,,3` likewise.  After: 025.
   Done: `test_align_max_skip.sh`; one function for the three copies of the alignment code.  The padding of gcc's `-O2` output is now the right length.  A branch **over** an alignment is still mis-aimed where the alignment pads (`jmp 1f` / `nop` / `.p2align 3` / `1:`): that is 222, and is the next thing between this assembler and compiler output.
-- [ ] **AS-T-087** When a data directive is written with an empty argument, the assembler shall emit zero for it and warn.
+- [x] **AS-T-087** When a data directive is written with an empty argument, the assembler shall emit zero for it and warn.
   Trace: AS-FE-002.  Verify: T — `.byte 1,,2` is `01 00 02`, `.long ,5` is zero then 5, each with a warning on standard error: GNU.  After: 064.
+  Done: the line was refused.  The parser makes the empty argument of a number directive `0` and counts it, and the emitter warns "zero assumed for missing expression", once for the line, through the same sink as the other warnings (`--fatal-warnings`, `--no-warn`).  `test_data_empty_and_names.sh`.  Left: `.byte` with no argument at all is refused, where GNU stores nothing.
 - [x] **AS-T-027** If a local label reference has no definition in the direction it names, then the assembler shall fail and name the reference and its line.
   Trace: AS-FE-003.  Verify: T — `jmp 1f` with no `1:`; `call 2b` before any `2:`.
   Done: `test_local_label_undefined.sh`.  A jump to a local label that **is** defined, but in another section, is still left out of the object without a word: 136.
@@ -271,8 +272,9 @@ status 0.
 
 ### B.6 Directives that do nothing
 
-- [ ] **AS-T-067** When `.int`, `.value`, `.2byte`, `.4byte` or `.8byte` is written, the assembler shall emit its arguments at 4, 2, 2, 4 and 8 bytes.
+- [x] **AS-T-067** When `.int`, `.value`, `.2byte`, `.4byte` or `.8byte` is written, the assembler shall emit its arguments at 4, 2, 2, 4 and 8 bytes.
   Trace: AS-OBJ-008.  Verify: T — `.byte 0xEE` / `.int 5` / `.byte 0xFF` is `ee 05 00 00 00 ff`; each of the five.
+  Done: `.int` and `.value` put nothing in the section -- a directive nothing knows is passed over in silence (074) -- and what followed was at the wrong address; they are `.long` and `.short` from the parser on.  The other three were right.  `test_data_empty_and_names.sh`.  Seen with it, each still passed over in silence and each its own task below: `.dc.*`, `.ds.*`, `.dcb.*` (068), `.octa` (069), `.uleb128` and `.sleb128` (070), `.single`, `.tfloat`, `.string16` (071), the `w` and `l` alignments (072), `.struct` (073), `.error`, `.err` and `.abort` (075, 076).  And `.int sym` in 64-bit code is refused, as `.long sym` is there (210).
 - [ ] **AS-T-068** When `.dc.b`, `.dc.w`, `.dc.l`, `.dc.q`, `.dc.a`, `.ds.*` or `.dcb.*` is written, the assembler shall emit what GNU `as` emits.
   Trace: AS-OBJ-008.  Verify: T — each.
 - [ ] **AS-T-069** When `.octa` is written, the assembler shall emit 16 bytes for each argument.
@@ -1083,5 +1085,5 @@ is not to be done, 370 is ticked with "removed" and the rest struck.
 | AS-EXT-009 | 185, 325, 332–337 |
 | AS-EXT-010 | 040, 171, 338, 339 (339 closes all of AS-EXT) |
 
-350 tasks: 87 done, 263 open.  Numbers run to 399, with gaps left between
+350 tasks: 89 done, 261 open.  Numbers run to 399, with gaps left between
 sections for tasks found along the way.
