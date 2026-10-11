@@ -6830,7 +6830,9 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         if (reg_op->kind != AS_OPERAND_REGISTER || parse_i386_modrm_reg(reg_op->u.reg, &reg_field) != 0) {
             return -1;
         }
-        opcode2 = is_x86_low8_reg(reg_op->u.reg) ? 0xb0 : 0xb1;
+        /* Any byte register: with %ah to %bh, which the list of the low
+         * ones leaves out, this was the 32-bit instruction. */
+        opcode2 = x86_reg_width_bits(reg_op->u.reg) == 8 ? 0xb0 : 0xb1;
         return emit_i386_prefixed_0f_rm(0x00, opcode2, reg_field, rm_op, out, out_cap, out_len);
     }
     if (strcmp(mnbuf, "sldt") == 0 || strcmp(mnbuf, "str") == 0 || strcmp(mnbuf, "lldt") == 0 ||

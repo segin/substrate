@@ -1604,7 +1604,10 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
     if (streq_ci(insn->mnemonic, "mov")) {
         if (insn->byte_op) {
             if (insn->op_count == 2 && a->kind == AS_X86_OP_REG && b->kind == AS_X86_OP_IMM) {
-                if (emit8(&ctx, (uint8_t)(0xb0 | (a->u.reg & 7))) != 0 || emit8(&ctx, (uint8_t)b->u.imm) != 0) {
+                /* (reg_code3: %ah to %bh are codes 4 to 7, and by the
+                 * low bits of their numbers `mov $1, %ah` was `mov $1,
+                 * %al`.) */
+                if (emit8(&ctx, (uint8_t)(0xb0 | reg_code3(a->u.reg))) != 0 || emit8(&ctx, (uint8_t)b->u.imm) != 0) {
                     return -1;
                 }
             /* From memory only.  Between two registers there are two
@@ -3649,7 +3652,7 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
         if (width == 64u) {
             rex_w = 1;
         }
-        if (a->u.reg >= 8) {
+        if (reg_ext(a->u.reg)) {
             rex_b = 1;
         }
         /*
@@ -3673,7 +3676,9 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
             }
             goto finish;
         }
-        if (emit8(&ctx, (uint8_t)(op + (a->u.reg & 7u))) != 0 ||
+        /* (The register's code, which for %ah to %bh is not the low bits
+         * of its number: `mov $1, %ah` was `mov $1, %r8b`.) */
+        if (emit8(&ctx, (uint8_t)(op + reg_low3(a->u.reg))) != 0 ||
             emit_i386_imm_or_rel(&ctx, (uint32_t)b->u.imm, imm_width * 8u) != 0) {
             return -1;
         }

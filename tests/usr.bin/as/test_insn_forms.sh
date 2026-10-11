@@ -866,6 +866,53 @@ t "32"    0f0000         'sldt (%eax)'
 t "32"    0f0010         'lldtw (%eax)'
 t "32"    0f00db         'ltr %bx'
 
+# %ah, %ch, %dh and %bh through the instructions that take a byte
+# register.  Two were wrong with no message: an immediate moved to one
+# went to %al to %bl in 32-bit code and to %r8b to %r11b in 64-bit
+# (`mov $1, %ah` was b0 01, and 41 b0 01), and cmpxchg with one was the
+# 32-bit instruction.
+t "32 64" b401           'mov $1,%ah'
+t "32 64" b501           'mov $1,%ch'
+t "32 64" b601           'mov $1,%dh'
+t "32 64" b701           'mov $1,%bh'
+t "32 64" b401           'movb $1,%ah'
+t "32 64" 0fb0e3         'cmpxchg %ah,%bl'
+t "32 64" 0fb0fb         'cmpxchg %bh,%bl'
+t "32"    0fb023         'cmpxchg %ah,(%ebx)'
+t "32 64" 80c401         'add $1,%ah'
+t "32 64" 80fc01         'cmp $1,%ah'
+t "32 64" f6c401         'test $1,%ah'
+t "32 64" 80cc80         'or $0x80,%ah'
+t "32 64" fec4           'inc %ah'
+t "32 64" fecc           'dec %ah'
+t "32 64" f6dc           'neg %ah'
+t "32 64" f6d4           'not %ah'
+t "32 64" f6e4           'mul %ah'
+t "32 64" f6f4           'div %ah'
+t "32 64" f6ec           'imul %ah'
+t "32 64" f6fc           'idiv %ah'
+t "32 64" c0e403         'shl $3,%ah'
+t "32 64" d2ec           'shr %cl,%ah'
+t "32 64" d2fc           'sar %cl,%ah'
+t "32 64" 0f95c4         'setne %ah'
+t "32 64" 0f94c7         'sete %bh'
+t "32 64" 86e3           'xchg %ah,%bl'
+t "32 64" 86dc           'xchg %bl,%ah'
+t "32 64" 88e3           'mov %ah,%bl'
+t "32 64" 88dc           'mov %bl,%ah'
+t "32 64" 00e3           'add %ah,%bl'
+t "32 64" 00dc           'add %bl,%ah'
+t "32 64" 84e3           'test %ah,%bl'
+t "32 64" 0fc0e3         'xadd %ah,%bl'
+t "32 64" 0fb6cc         'movzbl %ah,%ecx'
+t "32 64" 660fbecc       'movsbw %ah,%cx'
+t "32 64" f20f38f0cc     'crc32 %ah,%ecx'
+t "32"    8a23           'mov (%ebx),%ah'
+t "32"    8823           'mov %ah,(%ebx)'
+t "32"    0223           'add (%ebx),%ah'
+t "32"    3823           'cmp %ah,(%ebx)'
+t "32"    f08623         'lock xchg %ah,(%ebx)'
+
 # A displacement written as the number 0 is no displacement: `0(%eax)`
 # is `(%eax)`.  It was kept as a byte of zero.  And (%ebp), (%rbp) and
 # (%r13), which cannot be without one, have one byte of zero and had
