@@ -88,7 +88,15 @@ in the current directory.
 .It Fl c
 Accepted for compatibility; output remains an object file.
 .It Fl g
-Enable debug-oriented handling for compatible directives.
+Accepted, with no effect: no debugging information is generated for the
+source.
+What a compiler writes of its own, in
+.Li .debug_*
+sections and with
+.Li .file
+and
+.Li .loc ,
+is assembled as it is written.
 .It Fl I Ar dir
 Add
 .Ar dir
@@ -101,9 +109,45 @@ An included file is expanded in its place: its macros are defined for
 what follows it, and the macros and conditionals of the file that
 includes it apply in it.
 .It Fl D Ar macro Ns Op = Ns Ar value
-Define preprocessor symbol.
-.It Fl march Ar cpu
-Select target machine/ISA level string.
+Define a name for the preprocessor.
+Only a source whose name ends in
+.Pa .S
+is put through the preprocessor; for any other the option has no effect.
+.It Fl march Ar cpu Ns Op + Ns Ar extension ...
+Name the processor the code is for.
+The names are those of GNU as:
+.Cm generic32 , generic64 , i386 , i486 , i586 , pentium , i686 ,
+.Cm pentiumpro , pentiumii , pentiumiii , pentium4 , prescott , nocona ,
+.Cm core , core2 , corei7 , k6 , k6_2 , athlon , opteron , k8 , amdfam10 ,
+.Cm bdver1
+to
+.Cm bdver4 ,
+.Cm znver1
+to
+.Cm znver6 ,
+.Cm btver1
+and
+.Cm btver2 ;
+each may be followed by extensions of GNU as's naming, such as
+.Cm +avx2
+or
+.Cm +nosse4a .
+A name that is none of them is refused, and so is a processor that has
+no 64-bit mode when that is the mode.
+This assembler also takes
+.Cm x86-64 ,
+.Cm x86-64-v1
+to
+.Cm x86-64-v4 ,
+.Cm amd64 ,
+.Cm generic
+and
+.Cm native ,
+which GNU as does not; the levels are 64-bit only, and are recorded in
+the object's
+.Li .note.gnu.property .
+The processor does not limit the instructions that are assembled: every
+instruction this assembler has is taken whatever is named.
 .It Fl mtune Ar cpu
 Select tuning target string.
 .It Fl O Ar elf|binary
@@ -133,14 +177,27 @@ A warning that
 .Fl -no-warn
 has silenced does not count.
 .It Fl al Ns Op = Ns Ar file
-Emit listing output.
+Write a listing: each line of the source with its number and, where it
+put bytes in the object, the offset in its section at which they begin
+and the bytes, four to a line, on at most four lines after the first.
+The layout of a line is GNU as's:
+.Bd -literal -offset indent
+   2 0000 B8010000 	f:	mov $1, %eax
+   2      00
+   3 0005 C3       		ret
+.Ed
+.Pp
+What a macro makes is listed on the line that calls it, and what a
+repeat makes on the lines of its body.
+Lines of an included file are not listed, and there are no tables of
+symbols.
 If
 .Ar file
 is omitted, listing path defaults to
 .Ar output
 with
 .Pa .lst
-suffix.
+suffix; GNU as writes to the standard output.
 .It Fl -defsym Ar sym=val
 Define
 .Ar sym
@@ -176,8 +233,10 @@ is
 A compiler's driver passes its own
 .Fl Wa
 through, so this is what such an option arrives as.
-.It Fl -gdwarf- Ns Ar N , Fl -noexecstack
-Accepted, with no effect: compilers' drivers pass them.
+.It Fl -gdwarf- Ns Ar N , Fl -noexecstack , Fl -from-cc
+Accepted, with no effect: compilers' drivers pass them,
+.Xr cc 1
+the last.
 .It Fl -max-input-bytes Ar n
 Refuse a source of more than
 .Ar n
@@ -386,8 +445,8 @@ standard input is
 .Ql {standard input} .
 Every statement in error is reported, not the first alone.
 What is wrong with the run itself, such as an option that is not one,
-begins with the program's name and
-.Ql error: .
+begins with the program's name and the word
+.Ql error .
 .Pp
 When an assembly fails no object is written, and a file of the output's
 name left by an earlier run is removed.

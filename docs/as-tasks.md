@@ -523,23 +523,26 @@ with a symbol table.
 - [x] **AS-T-142** When `--fatal-warnings` is given and a warning is issued, the assembler shall fail.
   Trace: AS-FE-014.  Verify: T — with the warning of 064.
   Done: the emitter counts the warnings it writes, and the driver, given the option and a count that is not 0, says how many, removes the object and exits 1.  `test_cli_warnings.sh`, with the one warning there is today (a number too wide for a byte register).
-- [ ] **AS-T-143** When `-march=` names an x86 processor GNU `as` knows, the assembler shall accept it and enable that processor's instruction sets.
+- [x] **AS-T-143** When `-march=` names an x86 processor GNU `as` knows, the assembler shall accept it and enable that processor's instruction sets.
   Trace: AS-FE-014.  Verify: T — `-march=haswell`, `i686`, `x86-64-v2`, `znver3`; an unknown name is refused.
+  Done.  Eleven names were taken in 32-bit mode and none of GNU's in 64-bit, so `-march=k8`, `core2` and `znver3` were refused.  The names are now GNU as's thirty-four, each with `+extension` and `+noextension` of GNU's naming; a name that is none is refused with GNU's words, and a processor with no 64-bit mode is refused in that mode (`64bit mode not supported on 'i686'`).  `test_march_names.sh`, 86 cases, which GNU as passes.  The Verify line had two names wrong: `haswell` and `x86-64-v2` are gcc's and GNU as refuses both.  `haswell` is refused here too; `x86-64`, `x86-64-v1` to `-v4`, `amd64`, `generic` and `native` are kept as this assembler's own, since the levels are what the property note is written from, and as(1) says they are not GNU's.  Every instruction is assembled whatever processor is named: GNU as refuses those the processor lacks, and that is not done.
 - [ ] **AS-T-144** When `--version` is given, the assembler shall name itself as the Substrate assembler and shall not claim to be GNU Binutils.
   Trace: AS-FE-014.  Verify: T; D — a GCC `configure` run with it as `as` detects only the features it has.
   In part: `--version` and `-v` print `as (Substrate assembler)` and what it assembles for, and neither "GNU" nor "Binutils" (`test_cli_extended.sh`; `as(1)` has the option, which it lacked).  The demonstration has not been made: no GCC `configure` has been run against it, so what such a script now concludes is not known.
-- [ ] **AS-T-145** Each of `-g`, `--gdwarf-N`, `-D`, `--warn`, `--no-warn`, `-W`, `--from-cc` shall take the effect `as(1)` gives it, or be removed from the options accepted.
+- [x] **AS-T-145** Each of `-g`, `--gdwarf-N`, `-D`, `--warn`, `--no-warn`, `-W`, `--from-cc` shall take the effect `as(1)` gives it, or be removed from the options accepted.
   Trace: AS-FE-014.  Verify: I — the man page and the option table agree; T — one case each.
   In part, with 142: `--warn` writes warnings, `--no-warn` writes none, and `-W` is `--no-warn` as it is to GNU (it had been `--warn`); `as(1)` says so and `test_cli_warnings.sh` has a case for each.  `-g`, `--gdwarf-N`, `-D` for a `.s` and `--from-cc` are as they were.
+  The rest, by making as(1) say what they do: `-g`, `--gdwarf-N` and `--from-cc` are taken and do nothing, since compilers' drivers pass them (as(1) had `-g` "enable debug-oriented handling", and no `--from-cc`); `-D` defines a name for the preprocessor, which a `.S` source is put through and a `.s` is not.  `test_cli_unknown_option.sh` has a case for each.  None generates debugging information for the source, as GNU's `-g` does: that is a requirement nobody has written, not this one.
 - [x] **AS-T-146** When no `-o` is given, the assembler shall write `a.out`.
   Trace: AS-FE-032.  Verify: T.
   Done: it wrote `a.out.o`.  `test_cli_inputs.sh` assembles in an empty directory and looks for `a.out` and nothing else; `as(1)` now has an entry for `-o`, which it lacked.
 - [x] **AS-T-390** When `-msyntax=intel` is given and the source has an `.att_syntax`, the assembler shall read what follows the directive as AT&T.
   Trace: AS-FE-014.  Verify: T — `mov eax, 1` / `.att_syntax` / `mov $2, %eax` / `mov (%ebx), %ecx` under `-msyntax=intel`: GNU.
   Done: the encoder took the option for the syntax of any statement the parser had marked AT&T, so the option outlasted the directive; it takes the statement's own.  `test_intel_dual_syntax.sh`, `test_cli_extended.sh`.  Found in rewriting the test of the options, which had never given `-msyntax=intel` a source with a directive in it.
-- [ ] **AS-T-391** When `-al` is given, the listing shall give each line's address and the bytes assembled from it, as GNU `as` does.
+- [x] **AS-T-391** When `-al` is given, the listing shall give each line's address and the bytes assembled from it, as GNU `as` does.
   Trace: AS-FE-014.  Verify: T — `mov $1, %eax` / `ret` lists `0000 B8010000` and `0005 C3` beside their lines.
   (Added with the rewritten `test_cli_extended.sh`: today the listing is the source with its lines numbered, which that test holds it to and no more.)
+  Done.  The emitter tells of each statement, once its bytes are final, where they begin in its section and what they are; the listing puts them beside the line in GNU as's layout, four bytes to a line and at most four lines more.  `test_listing.sh`, 11 cases, which GNU as passes.  What a macro makes is on the line that calls it, as with GNU.  Not as GNU: the listing goes beside the object when no file is named (GNU: the standard output), has no heading and no tables of symbols, lists what a repeat makes on the lines of its body (GNU: on `.endr`), and does not list an included file's lines.
 
 ### C.6 Messages and temporary files
 
@@ -1165,5 +1168,5 @@ is not to be done, 370 is ticked with "removed" and the rest struck.
 | AS-EXT-009 | 185, 325, 332–337 |
 | AS-EXT-010 | 040, 171, 338, 339 (339 closes all of AS-EXT) |
 
-351 tasks: 160 done, 191 open.  Numbers run to 400, with gaps left between
+351 tasks: 163 done, 188 open.  Numbers run to 400, with gaps left between
 sections for tasks found along the way.

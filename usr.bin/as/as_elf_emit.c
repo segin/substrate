@@ -113,6 +113,9 @@ typedef struct {
      * an O(N^2) blow-up that wedged the build for minutes. Sizes
      * computed below the precise (top-level) sizing path are
      * offset-independent, so we memoise them by parsed-stmt index. */
+    /* For a listing, while the bytes are written: freed with the rest. */
+    size_t *list_sec;
+    size_t *list_off;
     size_t *stmt_size_cache;
     unsigned char *stmt_size_cached;
     size_t stmt_size_cache_count;
@@ -16786,6 +16789,8 @@ static int emit_relocations(emit_ctx_t *ctx) {
     section_track_t track;
     local_emit_label_t local_labels[8192];
     size_t local_label_count = 0;
+    size_t *list_sec = NULL;
+    size_t *list_off = NULL;
     static int trace_env = -1;
 
     if (trace_env < 0) {
@@ -16797,6 +16802,20 @@ static int emit_relocations(emit_ctx_t *ctx) {
                                    (ctx->cfg != NULL && ctx->cfg->x86_code_bits == 16u ? 16u : 32u)) != 0) {
         return -1;
     }
+    /* For a listing: where each statement's bytes begin, and in which
+     * section.  Without them the listing is not made; the object is. */
+    if (ctx->cfg != NULL && ctx->cfg->list_stmt != NULL && ctx->parsed->count != 0) {
+        list_sec = (size_t *)calloc(ctx->parsed->count, sizeof(*list_sec));
+        list_off = (size_t *)calloc(ctx->parsed->count, sizeof(*list_off));
+        if (list_sec == NULL || list_off == NULL) {
+            free(list_sec);
+            free(list_off);
+            list_sec = NULL;
+            list_off = NULL;
+        }
+    }
+    ctx->list_sec = list_sec;
+    ctx->list_off = list_off;
 
     for (i = 0; i < ctx->parsed->count; ++i) {
         const as_stmt_t *st = &ctx->parsed->items[i];
@@ -16814,6 +16833,10 @@ static int emit_relocations(emit_ctx_t *ctx) {
         }
         cur_sec = section_for_name(ctx, track.current);
         cur_off = (uint64_t)sb->buf.len;
+        if (list_sec != NULL) {
+            list_sec[i] = (size_t)(sb - secbufs.items);
+            list_off[i] = sb->buf.len;
+        }
 
         for (j = 0; j < st->label_count; ++j) {
             int label_digit = -1;
@@ -17266,6 +17289,39 @@ static int emit_relocations(emit_ctx_t *ctx) {
         }
     }
 
+    /* The listing's lines: a statement's bytes run to where the next
+     * statement of its section begins, or to the section's end. */
+    if (list_sec != NULL) {
+        size_t *next_off = (size_t *)malloc((secbufs.count + 1) * sizeof(*next_off));
+        size_t *list_len = (size_t *)malloc(ctx->parsed->count * sizeof(*list_len));
+
+        if (next_off != NULL && list_len != NULL) {
+            for (i = 0; i < secbufs.count; ++i) {
+                next_off[i] = secbufs.items[i].buf.len;
+            }
+            /* Backwards, for each to find its end; then told forwards. */
+            for (i = ctx->parsed->count; i-- > 0;) {
+                size_t end = next_off[list_sec[i]];
+
+                list_len[i] = end > list_off[i] ? end - list_off[i] : 0;
+                next_off[list_sec[i]] = list_off[i];
+            }
+            for (i = 0; i < ctx->parsed->count; ++i) {
+                const sec_buf_t *b = &secbufs.items[list_sec[i]];
+                const as_stmt_t *st = &ctx->parsed->items[i];
+
+                ctx->cfg->list_stmt(ctx->cfg->list_cookie, st->file, st->line, (uint64_t)list_off[i],
+                                    list_len[i] != 0 ? b->buf.data + list_off[i] : NULL, list_len[i]);
+            }
+        }
+        free(next_off);
+        free(list_len);
+        free(list_sec);
+        free(list_off);
+        ctx->list_sec = NULL;
+        ctx->list_off = NULL;
+    }
+
     for (i = 0; i < secbufs.count; ++i) {
         elf_section_t *sec = section_for_name(ctx, secbufs.items[i].name);
         if (sec == NULL) {
@@ -17633,6 +17689,8 @@ int as_elf_emit_file(const as_parse_result_t *parsed,
     free(ctx.sym_index);
     asm_var_reset(&ctx);
     virtual_label_cache_free(&ctx);
+    free(ctx.list_sec);
+    free(ctx.list_off);
     free(ctx.stmt_size_cache);
     free(ctx.stmt_size_cached);
     free(ctx.branch_short);
@@ -17660,6 +17718,8 @@ fail:
     free(ctx.sym_index);
     asm_var_reset(&ctx);
     virtual_label_cache_free(&ctx);
+    free(ctx.list_sec);
+    free(ctx.list_off);
     free(ctx.stmt_size_cache);
     free(ctx.stmt_size_cached);
     free(ctx.branch_short);

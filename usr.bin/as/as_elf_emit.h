@@ -29,6 +29,10 @@ typedef struct {
 
 void as_elf_warnings_free(as_elf_warnings_t *w);
 
+/* In a listing, the lines of bytes a statement may have after its first:
+ * GNU as's number. */
+#define AS_LISTING_MORE_LINES 4u
+
 typedef struct {
     unsigned machine;
     unsigned is_64;
@@ -49,6 +53,15 @@ typedef struct {
      */
     void (*report_error)(void *cookie, const char *message);
     void *report_cookie;
+    /*
+     * If set, told of every statement once its bytes are final, in the
+     * order of the statements: the offset in its section at which it
+     * begins, and the bytes it put there (none, for a statement that
+     * puts none).  For a listing.
+     */
+    void (*list_stmt)(void *cookie, const char *file, unsigned line, uint64_t offset, const unsigned char *bytes,
+                      size_t len);
+    void *list_cookie;
     /* Only look for those: write no object.  For a source that is known
      * to be in error already and is read on for what else is wrong. */
     unsigned check_only;

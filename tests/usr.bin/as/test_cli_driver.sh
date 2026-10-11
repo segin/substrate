@@ -108,7 +108,7 @@ if "$AS" -32 -march=x86-64-v3 -o "$TMP/badmarch.o" "$TMP/simple.s" >"$TMP/badmar
     echo "expected -march mismatch to fail"
     exit 1
 fi
-grep -q "unsupported -march=x86-64-v3 for 32-bit mode" "$TMP/badmarch.err"
+grep -q "invalid -march= option: \`x86-64-v3'" "$TMP/badmarch.err"
 
 # 9) -mtune acceptance/plumbing
 "$AS" -64 -march=x86-64-v2 -mtune=generic -o "$TMP/tune.o" "$TMP/simple.s"

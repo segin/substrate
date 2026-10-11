@@ -751,60 +751,95 @@ static int infer_mode(const as_ctx_t *ctx) {
 #endif
 }
 
-static int is_march_supported_64(const char *march) {
-    static const char *const allow[] = {
-        "x86-64",
-        "x86-64-v1",
-        "x86-64-v2",
-        "x86-64-v3",
-        "x86-64-v4",
-        "generic",
-        "generic64",
-        "native",
-        "amd64",
-    };
-    size_t i;
+/*
+ * The processors -march= names, which are GNU as's, and whether each
+ * has 64-bit mode; then this assembler's own names for the levels of
+ * the x86-64 psABI, which GNU as has not, and which are 64-bit only.
+ */
+static const struct {
+    const char *name;
+    unsigned char has_32;
+    unsigned char has_64;
+} march_cpus[] = {
+    {"generic32", 1, 0},  {"generic64", 1, 1}, {"i386", 1, 0},       {"i486", 1, 0},     {"i586", 1, 0},
+    {"pentium", 1, 0},    {"i686", 1, 0},      {"pentiumpro", 1, 0}, {"pentiumii", 1, 0}, {"pentiumiii", 1, 0},
+    {"pentium4", 1, 0},   {"prescott", 1, 0},  {"nocona", 1, 1},     {"core", 1, 0},     {"core2", 1, 1},
+    {"corei7", 1, 1},     {"k6", 1, 0},        {"k6_2", 1, 0},       {"athlon", 1, 0},   {"opteron", 1, 1},
+    {"k8", 1, 1},         {"amdfam10", 1, 1},  {"bdver1", 1, 1},     {"bdver2", 1, 1},   {"bdver3", 1, 1},
+    {"bdver4", 1, 1},     {"znver1", 1, 1},    {"znver2", 1, 1},     {"znver3", 1, 1},   {"znver4", 1, 1},
+    {"znver5", 1, 1},     {"znver6", 1, 1},    {"btver1", 1, 1},     {"btver2", 1, 1},
+    {"x86-64", 0, 1},     {"x86-64-v1", 0, 1}, {"x86-64-v2", 0, 1},  {"x86-64-v3", 0, 1}, {"x86-64-v4", 0, 1},
+    {"amd64", 0, 1},      {"generic", 1, 1},   {"native", 1, 1},
+};
 
-    for (i = 0; i < sizeof(allow) / sizeof(allow[0]); ++i) {
-        if (strcmp(march, allow[i]) == 0) {
-            return 1;
-        }
-    }
-    return 0;
-}
+/* The extensions that may follow, each after a `+` and each with `no`
+ * before it or not. */
+static const char *const march_extensions[] = {
+    "8087", "287", "387", "687", "cmov", "fxsr", "mmx", "sse", "sse2", "sse3", "sse4a", "ssse3", "sse4.1",
+    "sse4.2", "sse4", "avx", "avx2", "avx512f", "avx512cd", "avx512er", "avx512pf", "avx512dq", "avx512bw",
+    "avx512vl", "monitor", "vmx", "vmfunc", "smx", "xsave", "xsaveopt", "xsavec", "xsaves", "aes", "pclmul",
+    "fsgsbase", "rdrnd", "f16c", "bmi2", "fma", "fma4", "xop", "lwp", "movbe", "cx16", "lahf_sahf", "ept",
+    "lzcnt", "popcnt", "hle", "rtm", "tsx", "invpcid", "clflush", "nop", "syscall", "rdtscp", "3dnow",
+    "3dnowa", "padlock", "svme", "abm", "bmi", "tbm", "adx", "rdseed", "prfchw", "smap", "mpx", "sha",
+    "clflushopt", "prefetchwt1", "se1", "clwb", "avx512ifma", "avx512vbmi", "avx512_4fmaps", "avx512_4vnniw",
+    "avx512_vpopcntdq", "avx512_vbmi2", "avx512_vnni", "avx512_bitalg", "avx_vnni", "clzero", "mwaitx",
+    "ospke", "rdpid", "ptwrite", "ibt", "shstk", "gfni", "vaes", "vpclmulqdq", "wbnoinvd", "pconfig",
+    "waitpkg", "cldemote", "amx_int8", "amx_bf16", "amx_fp16", "amx_complex", "amx_tile", "movdiri",
+    "movdir64b", "avx512_bf16", "avx512_vp2intersect", "tdx", "enqcmd", "serialize", "rdpru", "mcommit",
+    "sev_es", "tsxldtrk", "kl", "widekl", "uintr", "hreset", "avx512_fp16", "prefetchi", "avx_ifma",
+    "avx_vnni_int8", "cmpccxadd", "wrmsrns", "msrlist", "avx_ne_convert", "rao_int", "rmpquery", "fred",
+    "lkgs", "avx_vnni_int16", "sha512", "sm3", "sm4", "pbndkb", "avx10.1", "user_msr", "apx_f",
+};
 
-static int is_march_supported_32(const char *march) {
-    static const char *const allow[] = {
-        "i386",
-        "i486",
-        "i586",
-        "i686",
-        "pentium",
-        "pentiumpro",
-        "pentium4",
-        "athlon",
-        "generic",
-        "generic32",
-        "native",
-    };
-    size_t i;
-
-    for (i = 0; i < sizeof(allow) / sizeof(allow[0]); ++i) {
-        if (strcmp(march, allow[i]) == 0) {
-            return 1;
-        }
-    }
-    return 0;
-}
-
+/*
+ * 0 if MARCH is a processor there is, with extensions there are, that
+ * has the mode asked for; -1 if it names none, and -2 if the processor
+ * is one without 64-bit mode and that is the mode.
+ */
 static int validate_march(int mode, const char *march) {
-    if (march == NULL || march[0] == '\0') {
+    size_t cpu_len;
+    size_t i;
+    const char *p;
+    int found = 0;
+
+    if (march == NULL) {
         return 0;
     }
-    if (mode == AS_MODE_64) {
-        return is_march_supported_64(march) ? 0 : -1;
+    cpu_len = strcspn(march, "+");
+    for (i = 0; i < sizeof(march_cpus) / sizeof(march_cpus[0]); ++i) {
+        if (strlen(march_cpus[i].name) == cpu_len && strncmp(march, march_cpus[i].name, cpu_len) == 0) {
+            if (mode == AS_MODE_64 ? !march_cpus[i].has_64 : !march_cpus[i].has_32) {
+                return mode == AS_MODE_64 ? -2 : -1;
+            }
+            found = 1;
+            break;
+        }
     }
-    return is_march_supported_32(march) ? 0 : -1;
+    if (!found) {
+        return -1;
+    }
+    for (p = march + cpu_len; *p == '+';) {
+        size_t len;
+
+        p++;
+        len = strcspn(p, "+");
+        if (len > 2 && p[0] == 'n' && p[1] == 'o') {
+            p += 2;
+            len -= 2;
+        }
+        found = 0;
+        for (i = 0; i < sizeof(march_extensions) / sizeof(march_extensions[0]); ++i) {
+            if (strlen(march_extensions[i]) == len && strncmp(p, march_extensions[i], len) == 0) {
+                found = 1;
+                break;
+            }
+        }
+        if (!found) {
+            return -1;
+        }
+        p += len;
+    }
+    return 0;
 }
 
 static const char *march_to_gas(int mode, const char *march) {
@@ -3471,6 +3506,8 @@ out:
     return rc;
 }
 
+static void listing_begin(const char *file, as_elf_cfg_t *ecfg);
+
 /* The emitter's way of saying what is wrong with one instruction. */
 static void report_emit_error(void *cookie, const char *message) {
     (void)cookie;
@@ -3641,6 +3678,9 @@ static int run_native_backend(const as_ctx_t *ctx) {
         AS_PHASE_END(ctx, "parse");
     }
     ecfg.report_error = report_emit_error;
+    if (ctx->emit_listing) {
+        listing_begin(ctx->in_path, &ecfg);
+    }
     ecfg.check_only = (unsigned)source_in_error;
     if (as_directives_lower(&parsed, ecfg.is_64 ? 8u : 4u, errbuf, sizeof(errbuf)) != 0) {
         as_diag(AS_E_BACKEND, "%s", errbuf);
@@ -3833,6 +3873,130 @@ static void print_target_help(const as_ctx_t *ctx) {
     puts("    -O elf (default) or -O binary (flat image: .text/.rodata/.data/.bss)");
 }
 
+/*
+ * What the emitter told of each statement, for the listing: the line of
+ * the source file it was written on, where its bytes begin in its
+ * section, and the bytes.  Several statements of one line -- two on the
+ * line, or a macro's -- are one entry each, in order.
+ */
+typedef struct {
+    unsigned line;
+    uint64_t offset;
+    unsigned char *bytes;
+    size_t len;
+} list_entry_t;
+
+static struct {
+    const char *file;
+    list_entry_t *items;
+    size_t count;
+    size_t cap;
+} listing;
+
+static void listing_note(void *cookie, const char *file, unsigned line, uint64_t offset, const unsigned char *bytes,
+                         size_t len) {
+    const char *user_file = file;
+    unsigned user_line = line;
+    list_entry_t *e;
+
+    (void)cookie;
+    if (len == 0 || bytes == NULL) {
+        return;
+    }
+    (void)as_source_position(file, line, &user_file, &user_line);
+    /* Lines of an included file are not lines of the one listed. */
+    if (listing.file == NULL || user_file == NULL || strcmp(user_file, listing.file) != 0) {
+        return;
+    }
+    if (listing.count == listing.cap) {
+        size_t cap = listing.cap != 0 ? listing.cap * 2 : 256;
+        list_entry_t *items = (list_entry_t *)realloc(listing.items, cap * sizeof(*items));
+
+        if (items == NULL) {
+            return;
+        }
+        listing.items = items;
+        listing.cap = cap;
+    }
+    e = &listing.items[listing.count];
+    e->bytes = (unsigned char *)malloc(len);
+    if (e->bytes == NULL) {
+        return;
+    }
+    memcpy(e->bytes, bytes, len);
+    e->len = len;
+    e->line = user_line;
+    e->offset = offset;
+    listing.count++;
+}
+
+static void listing_free(void) {
+    size_t i;
+
+    for (i = 0; i < listing.count; ++i) {
+        free(listing.items[i].bytes);
+    }
+    free(listing.items);
+    memset(&listing, 0, sizeof(listing));
+}
+
+/* A listing of FILE is wanted: the emitter is to tell of its statements. */
+static void listing_begin(const char *file, as_elf_cfg_t *ecfg) {
+    listing_free();
+    listing.file = file;
+    ecfg->list_stmt = listing_note;
+}
+
+/*
+ * One line of the source in the listing, as GNU as lays it out: the
+ * line's number, the offset its bytes begin at, four of them, and the
+ * text; then the rest of the bytes four to a line, for as many more
+ * lines as AS_LISTING_MORE_LINES.  *AT is the first entry not yet
+ * listed, and entries are in the order of the lines.
+ */
+static int listing_line(FILE *out, unsigned long long line_no, const char *text, size_t *at) {
+    unsigned char bytes[4 * (AS_LISTING_MORE_LINES + 1)];
+    size_t len = 0;
+    uint64_t offset = 0;
+    int have = 0;
+    size_t i;
+    char hex[9];
+
+    while (*at < listing.count && listing.items[*at].line < line_no) {
+        (*at)++;
+    }
+    for (; *at < listing.count && listing.items[*at].line == line_no; ++*at) {
+        const list_entry_t *e = &listing.items[*at];
+        size_t take = e->len < sizeof(bytes) - len ? e->len : sizeof(bytes) - len;
+
+        if (!have) {
+            offset = e->offset;
+            have = 1;
+        }
+        memcpy(bytes + len, e->bytes, take);
+        len += take;
+    }
+    if (!have) {
+        return fprintf(out, "%4llu              \t%s", line_no, text) < 0 ? -1 : 0;
+    }
+    for (i = 0; i < len; i += 4) {
+        size_t k;
+        size_t n = len - i < 4 ? len - i : 4;
+
+        for (k = 0; k < n; ++k) {
+            snprintf(hex + k * 2, 3, "%02X", bytes[i + k]);
+        }
+        if (i == 0) {
+            if (fprintf(out, "%4llu %04llx %-8s \t%s", line_no, (unsigned long long)offset, hex, text) < 0) {
+                return -1;
+            }
+        } else if (fprintf(out, "%4llu      %s%s\n", line_no, hex, n == 4 ? " " : "") < 0) {
+            return -1;
+        }
+    }
+    return 0;
+}
+
 static char *default_listing_path(const as_ctx_t *ctx) {
     size_t n;
     char *p;
@@ -3857,6 +4021,7 @@ static int emit_listing_file(const as_ctx_t *ctx) {
     size_t cap = 0;
     ssize_t nread;
     unsigned long long line_no = 0;
+    size_t listed = 0;
     char *owned_path = NULL;
     const char *path;
 
@@ -3889,7 +4054,18 @@ static int emit_listing_file(const as_ctx_t *ctx) {
 
     while ((nread = getline(&line, &cap, in)) >= 0) {
         line_no++;
-        if (fprintf(out, "%6llu  %s", line_no, line) < 0) {
+        /* A last line with no newline is given one: bytes may follow. */
+        if (nread == 0 || line[nread - 1] != '\n') {
+            char *with = (char *)realloc(line, (size_t)nread + 2);
+
+            if (with != NULL) {
+                line = with;
+                cap = (size_t)nread + 2;
+                line[nread] = '\n';
+                line[nread + 1] = '\0';
+            }
+        }
+        if (listing_line(out, line_no, line, &listed) != 0) {
             as_diag(AS_E_INTERNAL, "failed writing listing output: %s", path);
             free(line);
             fclose(in);
@@ -4394,8 +4570,11 @@ static int as_run(int argc, char **argv, strvec_t *inputs) {
         ctx.mode = infer_mode(&ctx);
     }
     if (validate_march(ctx.mode, ctx.march) != 0) {
-        as_diag(AS_E_USAGE, "unsupported -march=%s for %s mode", ctx.march,
-                ctx.mode == AS_MODE_64 ? "64-bit" : "32-bit");
+        if (validate_march(ctx.mode, ctx.march) == -2) {
+            as_diag(AS_E_USAGE, "64bit mode not supported on `%.*s'", (int)strcspn(ctx.march, "+"), ctx.march);
+        } else {
+            as_diag(AS_E_USAGE, "invalid -march= option: `%s'", ctx.march);
+        }
         strvec_free(&ctx.gcc_opts);
         strvec_free(&ctx.as_opts);
         return 2;
@@ -4468,9 +4647,11 @@ static int as_run(int argc, char **argv, strvec_t *inputs) {
             strvec_free(&ctx.gcc_opts);
             strvec_free(&ctx.as_opts);
             free(owned_listing_path);
+            listing_free();
             return 1;
         }
     }
+    listing_free();
     t_end_us = wallclock_us();
     if (ctx.statistics) {
         print_statistics(t_start_us, t_end_us);

@@ -67,11 +67,25 @@ readelf -h wa3.o 2>/dev/null | grep -q 'ELF64' || bad "-Wa ...,--64: the object 
 
 # What a compiler's driver passes and the assembler has no use for is
 # taken, and changes nothing.
-for opt in --gdwarf-2 --gdwarf-5 --noexecstack --from-cc -Wa,--gdwarf-2; do
+for opt in -g --gdwarf-2 --gdwarf-5 --noexecstack --from-cc -Wa,--gdwarf-2; do
     "$AS" -32 "$opt" -o "ign.o" plain.s > out 2>&1 || bad "$opt: refused: $(head -1 out)"
     cmp -s good.o ign.o || bad "$opt: the object differs from the one made without it"
     [ -s out ] && bad "$opt: says something: $(head -1 out)"
 done
+
+# -D defines a name for the preprocessor, which a .S source is put
+# through and a .s source is not.
+printf '#ifdef WIDTH\n\t.byte WIDTH\n#else\n\t.byte 9\n#endif\n' > d.S
+printf '\t.byte 9\n' > d.s
+"$AS" -32 -D WIDTH=5 -o dS.o d.S > out 2>&1 || bad "-D with a .S source: refused: $(head -1 out)"
+[ "$(objcopy -O binary -j .text dS.o /dev/stdout | od -An -tx1 | tr -d ' \n')" = 05 ] ||
+    bad "-D WIDTH=5: the .S source does not see it"
+"$AS" -32 -o dS.o d.S > out 2>&1 || bad "a .S source without -D: refused: $(head -1 out)"
+[ "$(objcopy -O binary -j .text dS.o /dev/stdout | od -An -tx1 | tr -d ' \n')" = 09 ] ||
+    bad "without -D the .S source sees a definition"
+"$AS" -32 -o plain_d.o d.s > /dev/null 2>&1
+"$AS" -32 -D WIDTH=5 -o with_d.o d.s > out 2>&1 || bad "-D with a .s source: refused: $(head -1 out)"
+cmp -s plain_d.o with_d.o || bad "-D changes the object of a .s source"
 
 [ "$fail" -eq 0 ] && echo "ok: unknown options are refused, and -Wa is read"
 exit "$fail"

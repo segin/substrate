@@ -97,6 +97,10 @@ rm -f t.o
 # A listing has a line for each line of the source, numbered, in order,
 # with the source's text.
 listing_is_of() {
+    # (A line with more than four bytes has lines after it, of the same
+    # number, for the rest: test_listing.sh is about those.)
+    awk '$1 != last { print } { last = $1 }' "$1" > firsts
+    set -- firsts "$2" "$3"
     n=0
     while IFS= read -r src; do
         n=$((n + 1))
