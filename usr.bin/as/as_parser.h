@@ -85,6 +85,9 @@ typedef struct {
 #define AS_PREFIX_REX (1u << 5)
 #define AS_PREFIX_DATA16 (1u << 6)
 #define AS_PREFIX_ADDR16 (1u << 7)
+/* xacquire or xrelease: with AS_PREFIX_REPNE or AS_PREFIX_REP, whose
+ * byte it is, and saying that it is no repeat. */
+#define AS_PREFIX_HLE (1u << 8)
 
 /*
  * The pseudo-prefixes, written in braces before an x86 instruction, that

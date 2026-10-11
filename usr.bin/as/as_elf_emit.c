@@ -3761,6 +3761,28 @@ static int emit_x86_64_1byte_regfield_memop(unsigned char opcode, unsigned reg_f
             return -1;
         }
     }
+    /* An address with no register: in 64-bit code that is a SIB byte
+     * that names none, and four bytes. */
+    if (mem->base_reg == NULL && mem->index_reg == NULL && mem->disp != NULL) {
+        if (eval_expr_const(mem->disp, &disp) != 0) {
+            if (!expr_has_symbol(mem->disp)) {
+                return -1;
+            }
+            disp = 0;
+        }
+        if (pos + 7 > out_cap) {
+            return -1;
+        }
+        out[pos++] = opcode;
+        out[pos++] = (unsigned char)(((reg_field & 7u) << 3) | 4u);
+        out[pos++] = 0x25;
+        out[pos++] = (unsigned char)(disp & 0xff);
+        out[pos++] = (unsigned char)((disp >> 8) & 0xff);
+        out[pos++] = (unsigned char)((disp >> 16) & 0xff);
+        out[pos++] = (unsigned char)((disp >> 24) & 0xff);
+        *out_len = pos;
+        return 0;
+    }
     if (mem->base_reg == NULL) {
         return -1;
     }
@@ -5131,67 +5153,6 @@ static int emit_i386_x87_stack_load_exchange(const as_instruction_t *insn, const
     return -1;
 }
 
-static int emit_i386_vex2_kmovw(const as_operand_t *src, unsigned dst_k, unsigned char *out, size_t out_cap, size_t *out_len) {
-    size_t pos = 0;
-
-    if (src == NULL || out == NULL || out_len == NULL || out_cap < 8 || dst_k > 7u) {
-        return -1;
-    }
-    out[pos++] = 0xc5;
-    out[pos++] = 0xf8;
-    out[pos++] = 0x90;
-    if (emit_i386_modrm_rm_operand(dst_k, src, out, out_cap, &pos) != 0) {
-        return -1;
-    }
-    *out_len = pos;
-    return 0;
-}
-
-static int emit_i386_vex_klogic(const char *mnemonic, unsigned src_rm_k, unsigned src_vvvv_k, unsigned dst_k,
-                                unsigned char *out, size_t out_cap, size_t *out_len) {
-    unsigned char opcode;
-    unsigned char vex_p1;
-    char last;
-    int pp = 0;
-    int use_vex3 = 0;
-
-    if (mnemonic == NULL || out == NULL || out_len == NULL || out_cap < 5 || src_rm_k > 7u || src_vvvv_k > 7u || dst_k > 7u) {
-        return -1;
-    }
-    if (strncmp(mnemonic, "kandn", 5) == 0) opcode = 0x42;
-    else if (strncmp(mnemonic, "kand", 4) == 0) opcode = 0x41;
-    else if (strncmp(mnemonic, "kor", 3) == 0) opcode = 0x45;
-    else if (strncmp(mnemonic, "kxnor", 5) == 0) opcode = 0x46;
-    else if (strncmp(mnemonic, "kxor", 4) == 0) opcode = 0x47;
-    else if (strncmp(mnemonic, "kadd", 4) == 0) opcode = 0x4a;
-    else if (strncmp(mnemonic, "kunpck", 6) == 0) opcode = 0x4b;
-    else return -1;
-
-    last = mnemonic[strlen(mnemonic) - 1];
-    if (last == 'b' || last == 'd') {
-        pp = 1;
-    }
-    if (last == 'q' || last == 'd') {
-        use_vex3 = 1;
-    }
-    vex_p1 = (unsigned char)(0x80u | (((~src_vvvv_k) & 0xfu) << 3) | 0x04u | (unsigned)pp);
-    if (use_vex3) {
-        out[0] = 0xc4;
-        out[1] = 0xe1;
-        out[2] = vex_p1;
-        out[3] = opcode;
-        out[4] = (unsigned char)(0xc0u | ((dst_k & 7u) << 3) | (src_rm_k & 7u));
-        *out_len = 5;
-        return 0;
-    }
-    out[0] = 0xc5;
-    out[1] = vex_p1;
-    out[2] = opcode;
-    out[3] = (unsigned char)(0xc0u | ((dst_k & 7u) << 3) | (src_rm_k & 7u));
-    *out_len = 4;
-    return 0;
-}
-
 static int operand_st_index(const as_operand_t *op, unsigned *out) {
     if (op == NULL || out == NULL) {
         return -1;
@@ -5782,35 +5743,6 @@ static int emit_i386_cachehint_family(const char *mnemonic, const as_operand_t *
     return emit_i386_cachehint(opcode2, regf, op, out, out_cap, out_len);
 }
 
-static int emit_x86_klogic(const as_instruction_t *insn, int intel_syntax, const char *mnemonic,
-                           unsigned char *out, size_t out_cap, size_t *out_len) {
-    const as_operand_t *op_rm;
-    const as_operand_t *op_vvvv;
-    const as_operand_t *op_dst;
-    unsigned krm;
-    unsigned kvvvv;
-    unsigned kdst;
-
-    if (insn == NULL || mnemonic == NULL || out == NULL || insn->operand_count != 3) {
-        return -1;
-    }
-    if (intel_syntax) {
-        op_dst = &insn->operands[0];
-        op_vvvv = &insn->operands[1];
-        op_rm = &insn->operands[2];
-    } else {
-        op_rm = &insn->operands[0];
-        op_vvvv = &insn->operands[1];
-        op_dst = &insn->operands[2];
-    }
-    if (op_rm->kind != AS_OPERAND_REGISTER || op_vvvv->kind != AS_OPERAND_REGISTER ||
-        op_dst->kind != AS_OPERAND_REGISTER || parse_k_reg(op_rm->u.reg, &krm) != 0 ||
-        parse_k_reg(op_vvvv->u.reg, &kvvvv) != 0 || parse_k_reg(op_dst->u.reg, &kdst) != 0) {
-        return -1;
-    }
-    return emit_i386_vex_klogic(mnemonic, krm, kvvvv, kdst, out, out_cap, out_len);
-}
-
 static int emit_x86_seg_pushpop(const char *mnemonic, const as_operand_t *op, int allow_legacy,
                                 unsigned char *out, size_t out_cap, size_t *out_len) {
     as_x86_seg_t seg;
@@ -6021,19 +5953,6 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
             seg_reg_field(seg, &seg_field) == 0) {
             return emit_i386_prefixed_1byte_rm(insn, 0x8e, seg_field, src, out, out_cap, out_len);
         }
-    }
-    if (strcmp(mnbuf, "kmovw") == 0) {
-        unsigned kd;
-
-        if (insn->operand_count != 2 || src == NULL || dst == NULL || dst->kind != AS_OPERAND_REGISTER ||
-            parse_k_reg(dst->u.reg, &kd) != 0) {
-            return -1;
-        }
-        return emit_i386_vex2_kmovw(src, kd, out, out_cap, out_len);
-    }
-    if (strncmp(mnbuf, "kand", 4) == 0 || strncmp(mnbuf, "kor", 3) == 0 || strncmp(mnbuf, "kxor", 4) == 0 ||
-        strncmp(mnbuf, "kxnor", 5) == 0 || strncmp(mnbuf, "kadd", 4) == 0 || strncmp(mnbuf, "kunpck", 6) == 0) {
-        return emit_x86_klogic(insn, intel_syntax, mnbuf, out, out_cap, out_len);
     }
     if ((strcmp(mnbuf, "push") == 0 || strcmp(mnbuf, "pop") == 0) && insn->operand_count == 1 && a != NULL &&
         a->kind == AS_OPERAND_REGISTER) {
@@ -7841,6 +7760,15 @@ static int emit_x86_64_special(const as_instruction_t *insn, int intel_syntax, u
             if (dst->kind == AS_OPERAND_MEMORY) {
                 return emit_x86_64_1byte_regfield_memop(0x8c, seg_field, &dst->u.mem, out, out_cap, out_len);
             }
+            /* `mov %es, sym`: a bare name or number is an address. */
+            if (operand_is_bare_address(dst)) {
+                as_mem_operand_t at;
+
+                memset(&at, 0, sizeof(at));
+                at.scale = 1;
+                at.disp = dst->u.expr;
+                return emit_x86_64_1byte_regfield_memop(0x8c, seg_field, &at, out, out_cap, out_len);
+            }
         }
         if (dst->kind == AS_OPERAND_REGISTER && parse_seg_reg_text(dst->u.reg, &seg) == 0 &&
             seg_reg_field(seg, &seg_field) == 0) {
@@ -7866,20 +7794,15 @@ static int emit_x86_64_special(const as_instruction_t *insn, int intel_syntax, u
             if (src->kind == AS_OPERAND_MEMORY) {
                 return emit_x86_64_1byte_regfield_memop(0x8e, seg_field, &src->u.mem, out, out_cap, out_len);
             }
-        }
-    }
-    if (strcmp(mnbuf, "kmovw") == 0) {
-        unsigned kd;
+            if (operand_is_bare_address(src)) {
+                as_mem_operand_t at;
 
-        if (insn->operand_count != 2 || src == NULL || dst == NULL || dst->kind != AS_OPERAND_REGISTER ||
-            parse_k_reg(dst->u.reg, &kd) != 0) {
-            return -1;
+                memset(&at, 0, sizeof(at));
+                at.scale = 1;
+                at.disp = src->u.expr;
+                return emit_x86_64_1byte_regfield_memop(0x8e, seg_field, &at, out, out_cap, out_len);
+            }
         }
-        return emit_i386_vex2_kmovw(src, kd, out, out_cap, out_len);
-    }
-    if (strncmp(mnbuf, "kand", 4) == 0 || strncmp(mnbuf, "kor", 3) == 0 || strncmp(mnbuf, "kxor", 4) == 0 ||
-        strncmp(mnbuf, "kxnor", 5) == 0 || strncmp(mnbuf, "kadd", 4) == 0 || strncmp(mnbuf, "kunpck", 6) == 0) {
-        return emit_x86_klogic(insn, intel_syntax, mnbuf, out, out_cap, out_len);
     }
     if ((strcmp(mnbuf, "push") == 0 || strcmp(mnbuf, "pop") == 0) && insn->operand_count == 1 && a != NULL &&
         a->kind == AS_OPERAND_REGISTER) {
@@ -10658,6 +10581,7 @@ static int encode_x86_stmt_body(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const 
     in.section_offset = cfg->current_text_offset;
     in.seg_override = map_seg(st->u.instr.segment_override);
     in.lock_prefix = (st->u.instr.prefixes & AS_PREFIX_LOCK) != 0;
+    in.hle_prefix = (st->u.instr.prefixes & AS_PREFIX_HLE) != 0;
     in.explicit_rex = (st->u.instr.prefixes & AS_PREFIX_REX) != 0;
     in.prefer_load = (st->u.instr.pseudo & AS_PSEUDO_LOAD) != 0;
     in.rex_wanted = (st->u.instr.pseudo & AS_PSEUDO_REX) != 0;
@@ -11132,6 +11056,184 @@ static int encode_x86_stmt_body(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const 
  * which shortened an immediate.  Before an instruction that has the
  * prefix already it is the prefix twice, and refused.
  */
+/*
+ * The opmask instructions, all of them, from one table.
+ *
+ * There were two emitters, for `kmovw` into a mask register and for the
+ * binary operations, and they found an instruction by how its name
+ * began.  So `kmovw %eax, %k1` was assembled as `kmovw %k0, %k1`, the
+ * general register's number taken for a mask's; `kunpckbw` had
+ * `kunpckwd`'s prefix and `kunpckwd` `kunpckdq`'s; `kand`, `kandfoo`
+ * and `kaddz`, which are not instructions, were assembled as `kandw`
+ * or `kaddw`; and every other opmask instruction -- a move to memory
+ * or to a general register, `knot`, `kortest`, `ktest`, the shifts,
+ * and `kmov` of any size but 16 bits -- was "unknown register".
+ *
+ * 1 if the statement is an opmask instruction and is encoded, 0 if its
+ * name is none of them, -1 if it is one and its operands are not its.
+ */
+static int encode_x86_opmask(const as_instruction_t *insn, int intel_syntax, int is64, unsigned char *code,
+                             size_t code_cap, size_t *code_len, char *encerr, size_t encerr_sz) {
+    enum { K_MOVE, K_BINARY, K_UNARY, K_SHIFT };
+    /* The prefix and VEX.W of a size, for all but the moves through a
+     * general register: w, b, q, d. */
+    static const struct {
+        char letter;
+        as_vex_pp_t pp;
+        int w;
+    } sizes[] = {{'w', AS_VEX_PP_NONE, 0}, {'b', AS_VEX_PP_66, 0}, {'q', AS_VEX_PP_NONE, 1}, {'d', AS_VEX_PP_66, 1}};
+    static const struct {
+        const char *base;
+        int kind;
+        unsigned char opcode;
+    } rows[] = {
+        {"kmov", K_MOVE, 0x90},    {"kand", K_BINARY, 0x41},   {"kandn", K_BINARY, 0x42}, {"kor", K_BINARY, 0x45},
+        {"kxnor", K_BINARY, 0x46}, {"kxor", K_BINARY, 0x47},   {"kadd", K_BINARY, 0x4a},  {"knot", K_UNARY, 0x44},
+        {"kortest", K_UNARY, 0x98}, {"ktest", K_UNARY, 0x99},  {"kshiftr", K_SHIFT, 0x30}, {"kshiftl", K_SHIFT, 0x32},
+    };
+    const char *mn = insn->mnemonic;
+    as_x86_vex_insn_t v;
+    const as_operand_t *ops[3];
+    size_t n;
+    size_t i;
+    int kind = -1;
+    char size = '\0';
+    long long count = 0;
+    unsigned k[3] = {0, 0, 0};
+    int is_k[3] = {0, 0, 0};
+
+    if (mn == NULL || (mn[0] != 'k' && mn[0] != 'K') || insn->operand_count > 3) {
+        return 0;
+    }
+    n = strlen(mn);
+    memset(&v, 0, sizeof(v));
+    v.mnemonic = mn;
+    v.map = AS_VEX_MAP_0F;
+    if (strcasecmp(mn, "kunpckbw") == 0 || strcasecmp(mn, "kunpckwd") == 0 || strcasecmp(mn, "kunpckdq") == 0) {
+        kind = K_BINARY;
+        v.opcode = 0x4b;
+        size = tolower((unsigned char)mn[6]) == 'b' ? 'b' : (tolower((unsigned char)mn[6]) == 'w' ? 'w' : 'q');
+    } else {
+        for (i = 0; i < sizeof(rows) / sizeof(rows[0]); ++i) {
+            if (n == strlen(rows[i].base) + 1 && strncasecmp(mn, rows[i].base, n - 1) == 0 &&
+                strchr("wbqd", tolower((unsigned char)mn[n - 1])) != NULL) {
+                kind = rows[i].kind;
+                v.opcode = rows[i].opcode;
+                size = (char)tolower((unsigned char)mn[n - 1]);
+                break;
+            }
+        }
+    }
+    if (kind < 0) {
+        return 0;
+    }
+    for (i = 0; i < sizeof(sizes) / sizeof(sizes[0]); ++i) {
+        if (sizes[i].letter == size) {
+            v.pp = sizes[i].pp;
+            v.vex_w = sizes[i].w;
+        }
+    }
+
+    /* The operands, as AT&T writes them: source first. */
+    for (i = 0; i < insn->operand_count; ++i) {
+        ops[i] = &insn->operands[intel_syntax ? insn->operand_count - 1 - i : i];
+        is_k[i] = ops[i]->kind == AS_OPERAND_REGISTER && parse_k_reg(ops[i]->u.reg, &k[i]) == 0;
+    }
+    snprintf(encerr, encerr_sz, "'%s' is not given the operands it takes", mn);
+
+    if (kind == K_BINARY) {
+        /* What is read, what it is combined with, and where it goes. */
+        if (insn->operand_count != 3 || !is_k[0] || !is_k[1] || !is_k[2]) {
+            return -1;
+        }
+        v.vex_l = 1;
+        v.dst = (as_x86_reg_t)k[2];
+        v.src1 = (as_x86_reg_t)k[1];
+        v.src2.kind = AS_X86_OP_REG;
+        v.src2.u.reg = (as_x86_reg_t)k[0];
+    } else if (kind == K_UNARY) {
+        if (insn->operand_count != 2 || !is_k[0] || !is_k[1]) {
+            return -1;
+        }
+        v.dst = (as_x86_reg_t)k[1];
+        v.src2.kind = AS_X86_OP_REG;
+        v.src2.u.reg = (as_x86_reg_t)k[0];
+    } else if (kind == K_SHIFT) {
+        /* A count, what is shifted, and where it goes.  Of bytes and
+         * words the opcode is the lower of two, and W says which. */
+        if (insn->operand_count != 3 || ops[0]->kind != AS_OPERAND_IMMEDIATE ||
+            eval_expr_const(ops[0]->u.expr, &count) != 0 || count < 0 || count > 255 || !is_k[1] || !is_k[2]) {
+            return -1;
+        }
+        v.map = AS_VEX_MAP_0F3A;
+        v.pp = AS_VEX_PP_66;
+        v.vex_w = (size == 'w' || size == 'q') ? 1 : 0;
+        if (size == 'd' || size == 'q') {
+            v.opcode++;
+        }
+        v.dst = (as_x86_reg_t)k[2];
+        v.src2.kind = AS_X86_OP_REG;
+        v.src2.u.reg = (as_x86_reg_t)k[1];
+    } else {
+        /* A move: between masks or from memory (90), to memory (91),
+         * from a general register (92) or to one (93). */
+        const as_x86_reg_info_t *gpr;
+
+        if (insn->operand_count != 2) {
+            return -1;
+        }
+        if (is_k[1] && (is_k[0] || ops[0]->kind == AS_OPERAND_MEMORY || operand_is_bare_address(ops[0]))) {
+            v.opcode = 0x90;
+            v.dst = (as_x86_reg_t)k[1];
+            if (is_k[0]) {
+                v.src2.kind = AS_X86_OP_REG;
+                v.src2.u.reg = (as_x86_reg_t)k[0];
+            } else if (convert_operand_x86(ops[0], mn, &v.src2, is64, intel_syntax, encerr, encerr_sz) != 0) {
+                return -1;
+            }
+        } else if (is_k[0] && (ops[1]->kind == AS_OPERAND_MEMORY || operand_is_bare_address(ops[1]))) {
+            v.opcode = 0x91;
+            v.dst = (as_x86_reg_t)k[0];
+            if (convert_operand_x86(ops[1], mn, &v.src2, is64, intel_syntax, encerr, encerr_sz) != 0) {
+                return -1;
+            }
+        } else if ((is_k[0] && ops[1]->kind == AS_OPERAND_REGISTER) || (is_k[1] && ops[0]->kind == AS_OPERAND_REGISTER)) {
+            int to_mask = is_k[1];
+            unsigned mask = to_mask ? k[1] : k[0];
+
+            /* The register is of 32 bits, or of 64 for a move of 64. */
+            gpr = as_x86_reg_find_class(ops[to_mask ? 0 : 1]->u.reg, AS_X86_REGCLASS_GENERAL, is64 ? 15u : 7u);
+            if (gpr == NULL || gpr->width != (size == 'q' ? 64u : 32u)) {
+                return -1;
+            }
+            v.opcode = to_mask ? 0x92 : 0x93;
+            v.pp = (size == 'w') ? AS_VEX_PP_NONE : (size == 'b' ? AS_VEX_PP_66 : AS_VEX_PP_F2);
+            v.vex_w = size == 'q' ? 1 : 0;
+            /* To a mask the mask is in the register field; from one,
+             * the general register is. */
+            v.dst = to_mask ? (as_x86_reg_t)mask : (as_x86_reg_t)gpr->number;
+            v.src2.kind = AS_X86_OP_REG;
+            v.src2.u.reg = to_mask ? (as_x86_reg_t)gpr->number : (as_x86_reg_t)mask;
+        } else {
+            return -1;
+        }
+    }
+    encerr[0] = '\0';
+    if (as_x86_encode_vex_3op(&v, code, code_cap, code_len, encerr, encerr_sz) != 0) {
+        if (encerr[0] == '\0') {
+            snprintf(encerr, encerr_sz, "'%s' is not given the operands it takes", mn);
+        }
+        return -1;
+    }
+    if (kind == K_SHIFT) {
+        if (*code_len + 1 > code_cap) {
+            return -1;
+        }
+        code[(*code_len)++] = (unsigned char)count;
+    }
+    return 1;
+}
+
 /* Whether an expression is a symbol with the @TLSCALL operator on it. */
 static int expr_is_tlscall(const as_expr_t *e) {
     const char *at;
@@ -11251,6 +11353,25 @@ static int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_st
                     return encode_x86_stmt(ctx, cfg, &bare, code, code_cap, code_len, encerr, encerr_sz);
                 }
             }
+        }
+    }
+
+    /* The opmask instructions are encoded in one place, which is not
+     * either of the two that the rest are divided between. */
+    if (st != NULL && st->kind == AS_STMT_INSTRUCTION && cfg != NULL) {
+        int opmask = encode_x86_opmask(&st->u.instr, cfg->intel_syntax != 0, cfg->is_64 != 0, code, code_cap,
+                                       code_len, encerr, encerr_sz);
+
+        if (opmask < 0) {
+            return -1;
+        }
+        if (opmask > 0) {
+            /* (They are AVX-512's, and held to the level it is.) */
+            if (cfg->is_64 && cfg->x86_64_isa_level < 4) {
+                set_x86_isa_requirement(encerr, encerr_sz, st->u.instr.mnemonic, 4);
+                return -1;
+            }
+            return x86_stmt_outer_prefixes(cfg, &st->u.instr, code, code_cap, code_len);
         }
     }
 
@@ -11399,7 +11520,37 @@ static int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_st
     }
 
     if (st == NULL || st->kind != AS_STMT_INSTRUCTION || (st->u.instr.prefixes & AS_PREFIX_DATA16) == 0) {
-        return encode_x86_stmt_body(ctx, cfg, st, code, code_cap, code_len, encerr, encerr_sz);
+        int rc = encode_x86_stmt_body(ctx, cfg, st, code, code_cap, code_len, encerr, encerr_sz);
+
+        /*
+         * xacquire and xrelease: some of the emitters write a lock and
+         * no repeat prefix, having no instruction that repeats, and the
+         * byte was left out -- `xacquire lock cmpxchg` was `lock
+         * cmpxchg`.  It goes before the lock, where GNU as has it.
+         */
+        if (rc == 0 && st != NULL && st->kind == AS_STMT_INSTRUCTION && (st->u.instr.prefixes & AS_PREFIX_HLE) != 0) {
+            unsigned char want = (st->u.instr.prefixes & AS_PREFIX_REPNE) != 0 ? 0xf2 : 0xf3;
+            size_t at = 0;
+            int have = 0;
+
+            for (i = 0; i < *code_len && (code[i] == 0x26 || code[i] == 0x2e || code[i] == 0x36 || code[i] == 0x3e ||
+                                          code[i] == 0x64 || code[i] == 0x65 || code[i] == 0x66 || code[i] == 0x67 ||
+                                          code[i] == 0xf0 || code[i] == 0xf2 || code[i] == 0xf3); ++i) {
+                have |= code[i] == want;
+                if (code[i] != 0xf0 && code[i] != 0x66) {
+                    at = i + 1;
+                }
+            }
+            if (!have) {
+                if (*code_len + 1 > code_cap) {
+                    return -1;
+                }
+                memmove(code + at + 1, code + at, *code_len - at);
+                code[at] = want;
+                (*code_len)++;
+            }
+        }
+        return rc;
     }
     bare = *st;
     bare.u.instr.prefixes &= ~AS_PREFIX_DATA16;

@@ -1051,6 +1051,23 @@ static int crc32_source_bits(const as_x86_insn_t *insn, int is_64) {
     return 0;
 }
 
+/* The instructions of VMX that take no operand: 0F 01 and this byte; 0
+ * for a name that is none of them. */
+static uint8_t vmx_no_operand_byte(const char *mn) {
+    static const struct {
+        const char *name;
+        uint8_t byte;
+    } rows[] = {{"vmcall", 0xc1}, {"vmlaunch", 0xc2}, {"vmresume", 0xc3}, {"vmxoff", 0xc4}, {"vmfunc", 0xd4}};
+    size_t i;
+
+    for (i = 0; mn != NULL && i < sizeof(rows) / sizeof(rows[0]); ++i) {
+        if (streq_ci(mn, rows[i].name)) {
+            return rows[i].byte;
+        }
+    }
+    return 0;
+}
+
 static int rep_is_idiom(const as_x86_insn_t *insn) {
     const char *mn = insn->mnemonic;
 
@@ -1079,7 +1096,19 @@ static int emit_prefixes(enc_ctx_t *ctx, const as_x86_insn_t *insn) {
                 insn->mnemonic ? insn->mnemonic : "(null)");
         return -1;
     }
-    if (insn->rep_prefix != 0 && !mnemonic_rep_compatible(insn->mnemonic) && !rep_is_idiom(insn)) {
+    /* xacquire and xrelease are the repeat prefixes' bytes on what a
+     * lock is taken or dropped by: an instruction that is locked, an
+     * exchange, and for xrelease a store. */
+    if (insn->hle_prefix) {
+        int store = insn->rep_prefix == 1 && insn->mnemonic != NULL && strncasecmp(insn->mnemonic, "mov", 3) == 0 &&
+                    insn->op_count == 2 && insn->ops[0].kind == AS_X86_OP_MEM;
+
+        if (!(insn->lock_prefix && mnemonic_lock_compatible(insn->mnemonic)) &&
+            !(insn->mnemonic != NULL && strncasecmp(insn->mnemonic, "xchg", 4) == 0) && !store) {
+            set_err(ctx, "xacquire or xrelease on '%s', which takes neither", insn->mnemonic ? insn->mnemonic : "(null)");
+            return -1;
+        }
+    } else if (insn->rep_prefix != 0 && !mnemonic_rep_compatible(insn->mnemonic) && !rep_is_idiom(insn)) {
         set_err(ctx, "rep/repne prefix not allowed on '%s'",
                 insn->mnemonic ? insn->mnemonic : "(null)");
         return -1;
@@ -2367,6 +2396,11 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
             emit8(&ctx, 0xf9) != 0) {
             return -1;
         }
+    } else if (vmx_no_operand_byte(insn->mnemonic) != 0) {
+        if (insn->op_count != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x01) != 0 ||
+            emit8(&ctx, vmx_no_operand_byte(insn->mnemonic)) != 0) {
+            return -1;
+        }
     } else if (streq_ci(insn->mnemonic, "rdmsr")) {
         if (insn->op_count != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x32) != 0) {
             return -1;
@@ -2982,6 +3016,11 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
     } else if (streq_ci(insn->mnemonic, "rdtscp")) {
         if (insn->op_count != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x01) != 0 ||
             emit8(&ctx, 0xf9) != 0) {
+            return -1;
+        }
+    } else if (vmx_no_operand_byte(insn->mnemonic) != 0) {
+        if (insn->op_count != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x01) != 0 ||
+            emit8(&ctx, vmx_no_operand_byte(insn->mnemonic)) != 0) {
             return -1;
         }
     } else if (streq_ci(insn->mnemonic, "rdmsr")) {
@@ -6282,6 +6321,11 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
     } else if (streq_ci(insn->mnemonic, "rdtscp")) {
         if (insn->op_count != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x01) != 0 ||
             emit8(&ctx, 0xf9) != 0) {
+            return -1;
+        }
+    } else if (vmx_no_operand_byte(insn->mnemonic) != 0) {
+        if (insn->op_count != 0 || emit8(&ctx, 0x0f) != 0 || emit8(&ctx, 0x01) != 0 ||
+            emit8(&ctx, vmx_no_operand_byte(insn->mnemonic)) != 0) {
             return -1;
         }
     } else if (streq_ci(insn->mnemonic, "rdmsr")) {

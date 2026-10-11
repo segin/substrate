@@ -114,6 +114,8 @@ typedef struct {
     uint64_t section_offset;
     int lock_prefix;
     int rep_prefix;
+    /* The rep prefix is xacquire's or xrelease's, and is no repeat. */
+    int hle_prefix;
     int explicit_rex;
     /*
      * {load}: between two registers, the encoding whose destination is

@@ -254,38 +254,26 @@ leaq _GLOBAL_OFFSET_TABLE_(%rip),%rax
 .section .rodata | .long 0 | lv: .long 0 | .text | leaq lv+4(%rip),%rax
 .globl gf | gf: nop | jmp gf
 .globl gf | gf: nop | je gf
-mov sym,%es
-mov %es,sym
 movl %es,(%rax)
 movl (%rax),%es
 movb %al,%es
 mov %es,%al
-mov sym,%cs
-mov %cs,sym
 movl %cs,(%rax)
 movl (%rax),%cs
 movb %al,%cs
 mov %cs,%al
-mov sym,%ss
-mov %ss,sym
 movl %ss,(%rax)
 movl (%rax),%ss
 movb %al,%ss
 mov %ss,%al
-mov sym,%ds
-mov %ds,sym
 movl %ds,(%rax)
 movl (%rax),%ds
 movb %al,%ds
 mov %ds,%al
-mov sym,%fs
-mov %fs,sym
 movl %fs,(%rax)
 movl (%rax),%fs
 movb %al,%fs
 mov %fs,%al
-mov sym,%gs
-mov %gs,sym
 movl %gs,(%rax)
 movl (%rax),%gs
 movb %al,%gs
@@ -763,8 +751,6 @@ larq %rax,%rbx
 larq (%rbx),%rbx
 lar %rax,%rbx
 lar sym,%rbx
-xacquire lock addl %eax,(%rbx)
-xrelease movl %eax,(%rbx)
 ds call sym
 es movsb
 addr32 movl %eax,(%rax)
@@ -794,10 +780,6 @@ pushl $0x12345678
 femms
 monitor
 mwait
-vmcall
-vmlaunch
-vmresume
-vmxoff
 rdrand %eax
 rdseed %eax
 bswap %ax

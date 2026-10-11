@@ -1700,10 +1700,10 @@ static int prefix_flag_for(const char *s, char **segment_override) {
         return AS_PREFIX_REPNE;
     }
     if (streq_ci(s, "xacquire")) {
-        return AS_PREFIX_REPNE;
+        return AS_PREFIX_REPNE | AS_PREFIX_HLE;
     }
     if (streq_ci(s, "xrelease")) {
-        return AS_PREFIX_REP;
+        return AS_PREFIX_REP | AS_PREFIX_HLE;
     }
     if (streq_ci(s, "rep")) {
         return AS_PREFIX_REP;

@@ -559,8 +559,6 @@ btcb $1,%al
 divl %ebx,%eax
 idivl (%ebx),%eax
 cmpxchg8b %eax
-xacquire lock addl %eax,(%ebx)
-xrelease movl %eax,(%ebx)
 ds call sym
 addr16 movl %eax,(%eax)
 addr32 nop
@@ -583,10 +581,6 @@ je .+2
 push $0xffffffff
 pushw $0xffff
 xsetbv
-vmcall
-vmlaunch
-vmresume
-vmxoff
 bswap %ax
 bswapw %ax
 lgdt %eax

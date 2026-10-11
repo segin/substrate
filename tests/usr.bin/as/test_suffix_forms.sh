@@ -153,6 +153,23 @@ done <<'EOF'
 32 64	666bdbfd6669c9e80369c000000000	imul $-3,%bx|imulw $1000,%cx|imul $sym,%eax
 32	6b1802	imull $2,(%eax),%ebx
 64	486bc0024d6bc002456bc902	imul $2,%rax|imulq $2,%r8|imul $2,%r9d
+# The rest of AS-T-184: xacquire and xrelease, which were "rep/repne
+# prefix not allowed", the instructions of VMX with no operand, and a
+# segment register moved to and from an address in 64-bit code.
+32	f2f0830001f3f0832801f38903	xacquire lock addl $1,(%eax)|xrelease lock subl $1,(%eax)|xrelease movl %eax,(%ebx)
+32	f2f08703f28703f3f0ff08f2f00fb119	xacquire lock xchg %eax,(%ebx)|xacquire xchg %eax,(%ebx)|xrelease lock decl (%eax)|xacquire lock cmpxchg %ebx,(%ecx)
+32	f2f00fc119f2f00fba2901f3f00fc709	xacquire lock xadd %ebx,(%ecx)|xacquire lock btsl $1,(%ecx)|xrelease lock cmpxchg8b (%ecx)
+32	64f2f083000166f38903	xacquire lock addl $1,%fs:(%eax)|xrelease movw %ax,(%ebx)
+64	67f2f0ff00	xacquire lock incl (%eax)
+32 64	refused	xacquire addl $1,(%eax)
+32 64	refused	xacquire lock addl $1,%eax
+32 64	refused	xrelease movl (%ebx),%eax
+32 64	refused	xacquire nop
+32 64	0f01c10f01c20f01c30f01c40f01d4	vmcall|vmlaunch|vmresume|vmxoff|vmfunc
+64	8e0425000000008c0425000000008e1c25000000008e208c6b088e042500100000	mov sym,%es|mov %es,sym|movw sym,%ds|mov (%rax),%fs|mov %gs,8(%rbx)|mov 0x1000,%es
+64	8e05000000008c1d00000000	mov sym(%rip),%es|mov %ds,sym(%rip)
+64	440f20c0440f22c0	mov %cr8,%rax|mov %rax,%cr8
+32 64	f3c3f3c3	repz ret|rep ret
 # A suffix the instruction does not take, or that its register denies.
 32 64	refused	movntib %al,(%ebx)
 32 64	refused	shldb $1,%al,%bl
