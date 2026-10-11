@@ -407,6 +407,14 @@ static int sym_order_before(const sym_ord_t *a, const sym_ord_t *b) {
     if (a_local != b_local) {
         return a_local > b_local;
     }
+    /* The symbols that name source files come first, in the order they
+     * were made: the local symbols that follow one are that file's. */
+    if ((a->sym->type == STT_FILE) != (b->sym->type == STT_FILE)) {
+        return a->sym->type == STT_FILE;
+    }
+    if (a->sym->type == STT_FILE) {
+        return a->old_index < b->old_index;
+    }
     cmp = strcmp(a->sym->name ? a->sym->name : "", b->sym->name ? b->sym->name : "");
     if (cmp != 0) {
         return cmp < 0;

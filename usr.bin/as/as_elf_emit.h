@@ -12,6 +12,10 @@
 extern "C" {
 #endif
 
+/* The most bytes one .zero, .skip, .space or .fill may ask for: what a
+ * 32-bit object's section can be. */
+#define AS_ELF_FILL_MAX 0x7fffffffll
+
 /*
  * The warnings of one assembly.  A statement is encoded more than once
  * on the way to its final bytes, and is warned about once: `seen` is the

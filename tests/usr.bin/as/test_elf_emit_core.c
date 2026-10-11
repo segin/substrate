@@ -99,8 +99,12 @@ int main(int argc, char **argv) {
         fail("a .debug_line section with no line table in it");
     }
 
-    if (elf_find_section(obj, ".eh_frame") == NULL || elf_find_section(obj, ".eh_frame_hdr") == NULL) {
-        fail("missing CFI sections");
+    if (elf_find_section(obj, ".eh_frame") == NULL) {
+        fail("missing CFI section");
+    }
+    /* .eh_frame_hdr is the linker's, and no object has one. */
+    if (elf_find_section(obj, ".eh_frame_hdr") != NULL) {
+        fail("an .eh_frame_hdr in a relocatable object");
     }
 
     if (elf_reloc_count(obj) == 0) {

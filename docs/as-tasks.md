@@ -890,8 +890,9 @@ one table of templates; there is one ModRM/SIB/prefix emitter.
 - [x] **AS-T-254** The assembler shall accept section, symbol and file names of any length.
   Trace: AS-OBJ-021.  Verify: T — a 301-character and a 5,000-character section name, a relocation into each; no fixed buffer holds a name (I).
   Done.  A section's name went about the emitter in seventeen arrays of 128 bytes and came out of its quotes into one of 256, so a section of 301 characters was "unknown section", and two whose names were alike for 127 would have been one.  A name is kept once, whole (`section_name_keep` in `as_elf_emit.c`), and what is found out about where a label is hands that pointer about.  Symbols and file names were of any length already.  `test_long_names.sh`: sections of 301 and 5,000 characters and two alike for 300, a symbol of 5,000, relocations into each from instructions and data, and the object linked; GNU passes it.
-- [ ] **AS-T-255** When `.zero`, `.space`, `.skip` or `.fill` asks for more than 1 MiB, the assembler shall emit it.
+- [x] **AS-T-255** When `.zero`, `.space`, `.skip` or `.fill` asks for more than 1 MiB, the assembler shall emit it.
   Trace: AS-OBJ-016.  Verify: T — `.zero 0x4000000` in `.data` and in `.bss`.
+  Done: the four were refused past a mebibyte ("unreasonably large"); the most is what a 32-bit object's section can be (`AS_ELF_FILL_MAX`).  64 MiB in `.data` and in `.bss`, and fills of two to four mebibytes with their bytes checked: `test_object_basics.sh`.
 
 ### G.2 Symbols
 
@@ -924,17 +925,20 @@ one table of templates; there is one ModRM/SIB/prefix emitter.
   Trace: AS-SYM-005.  Verify: T — `x = 6` / `.long x` / `x = x + 1` / `.long x` is 6, 7 and `x` is 7 in the symbol table.
 - [ ] **AS-T-273** If a label is defined for a name already assigned by `.set`, or `.equiv` names a symbol already defined, then the assembler shall fail; a `.set` of a name after its label shall fail likewise.
   Trace: AS-SYM-005.  Verify: T — each against GNU's verdict.
-- [ ] **AS-T-274** When `.comm name, size, align` is assembled, the assembler shall emit a common symbol with `st_size` the size and `st_value` the alignment.
+- [x] **AS-T-274** When `.comm name, size, align` is assembled, the assembler shall emit a common symbol with `st_size` the size and `st_value` the alignment.
   Trace: AS-OBJ-005.  Verify: T — `.comm bufa,64,32`; the default alignment; D — two objects with one `.comm` each link to one `.bss` object.
+  Done: the size had been put in `st_value` and nothing in `st_size`, so the linker gave the symbol no room at an alignment of its size.  The value is the alignment written, or the size taken up to a power of two and 16 at the most, which is GNU's rule for each size tried.  Two objects with a `.comm` of one name link to one object of the larger size at the larger alignment.  `test_object_basics.sh`.
 - [x] **AS-T-275** When `.lcomm` is assembled, or `.comm` for a symbol declared `.local`, the assembler shall allocate the symbol in `.bss` as a local with its size and alignment.
   Trace: AS-OBJ-005.  Verify: T — against GNU; D — a linked program has distinct addresses for two such symbols.
   Done.  `.lcomm` was a local symbol of the section COMMON, which no linker places, and `.local x` with `.comm x` was a global common symbol -- which is how a C compiler writes `static int x;`, so two files with a static of one name had one variable.  Both are storage now, made of ordinary statements before anything else sees the source (`lower_local_commons` in `as_lower.c`): a label in subsection 1 of `.bss`, behind what the source puts in `.bss` itself, aligned, with `.zero` of the size, and `.type` and `.size` where the directive stood.  The places are GNU's: a `.lcomm` has the alignment of its size up to 8, a local `.comm` the one it names or none.  A `.local` after the `.comm` leaves the symbol common, a third argument to `.lcomm` is refused, a negative size is warned of and passed over, all as GNU.  `test_local_common.sh`, 43 cases that GNU passes, the last of which links two such objects and runs them.  A section whose only subsection has a number other than 0 was refused, and is taken.  Not GNU's: a reference to such a symbol is relocated against the symbol, where GNU names `.bss` (as for every label that is not a `.L` one).  274 is as it was: a global `.comm` still has its size in `st_value` and no `st_size`.
 - [ ] **AS-T-276** When `.symver` is assembled, the assembler shall emit the versioned symbol in the three forms `name@ver`, `name@@ver` and `name@@@ver`.
   Trace: AS-OBJ-011.  Verify: T — against `readelf -s` of GNU's object; D — a shared library built with a version script exports the versions.
-- [ ] **AS-T-277** When `.file "name"` is assembled, the assembler shall emit an `STT_FILE` symbol of that name first in the symbol table.
+- [x] **AS-T-277** When `.file "name"` is assembled, the assembler shall emit an `STT_FILE` symbol of that name first in the symbol table.
   Trace: AS-OBJ-011.  Verify: T.
-- [ ] **AS-T-278** When `.ident "text"` is assembled, the assembler shall append the text to `.comment`.
+  Done: each `.file` with a name and no number is a local symbol of type FILE in `SHN_ABS`, and the object library puts such symbols before every other, in the order they were made (`sym_order_before` in `elf_symbols.c`).  `test_object_basics.sh`.  Where a source names several, GNU puts each after the first among the local symbols where it stood; here they are together at the front.
+- [x] **AS-T-278** When `.ident "text"` is assembled, the assembler shall append the text to `.comment`.
   Trace: AS-OBJ-011.  Verify: T.
+  Done: `.comment` is a section of strings to merge that begins with an empty one, and each `.ident` is a string in it, its escapes worked out; GNU's bytes.  `test_object_basics.sh`.
 - [ ] **AS-T-279** If a symbol is defined but has no recorded section and offset, then the assembler shall fail as an internal error.
   Trace: AS-OBJ-011.  Verify: I — the fallback to `.text+0` is gone.
 - [ ] **AS-T-280** Every path of the symbol writer shall free what it allocated and check each result it is given.
@@ -955,8 +959,9 @@ one table of templates; there is one ModRM/SIB/prefix emitter.
   Trace: AS-OBJ-010.  Verify: T — `readelf --debug-dump=frames` of our object equals GNU's for the output of `gcc -S` at `-O0` and `-O2`, both modes; D — a C++ program built with this assembler throws through and catches in such code.  After: 070, 220.
 - [ ] **AS-T-291** Each of `.cfi_def_cfa`, `.cfi_def_cfa_register`, `.cfi_def_cfa_offset`, `.cfi_adjust_cfa_offset`, `.cfi_offset`, `.cfi_rel_offset`, `.cfi_register`, `.cfi_restore`, `.cfi_undefined`, `.cfi_same_value`, `.cfi_remember_state`, `.cfi_restore_state`, `.cfi_return_column`, `.cfi_signal_frame`, `.cfi_escape`, `.cfi_personality`, `.cfi_lsda`, `.cfi_sections` and `.cfi_window_save` shall be encoded or refused by name.
   Trace: AS-OBJ-010.  Verify: T — one case each.  After: 290.
-- [ ] **AS-T-292** The assembler shall not emit `.eh_frame_hdr` in a relocatable object.
+- [x] **AS-T-292** The assembler shall not emit `.eh_frame_hdr` in a relocatable object.
   Trace: AS-OBJ-010.  Verify: T.
+  Done: none is made.  `test_object_basics.sh`; `test_elf_emit_core.c` asked for one and asks that there be none.
 - [ ] **AS-T-293** When `.cfi_sections .debug_frame` is given, the assembler shall emit `.debug_frame`.
   Trace: AS-OBJ-010.  Verify: T.  After: 290.
 - [ ] **AS-T-294** When `.file N "name"` and `.loc` directives are assembled, the assembler shall emit a `.debug_line` program that `readelf --debug-dump=decodedline` reads as the same rows GNU's does.
@@ -1256,5 +1261,5 @@ is not to be done, 370 is ticked with "removed" and the rest struck.
 | AS-EXT-009 | 185, 325, 332–337 |
 | AS-EXT-010 | 040, 171, 338, 339 (339 closes all of AS-EXT) |
 
-351 tasks: 231 done, 120 open.  Numbers run to 400, with gaps left between
+351 tasks: 236 done, 115 open.  Numbers run to 400, with gaps left between
 sections for tasks found along the way.

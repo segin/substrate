@@ -15425,7 +15425,7 @@ static int append_directive_data_ctx(emit_ctx_t *ctx, bytebuf_t *buf, const char
             (parse_int64(d->args[2], &value) != 0 && parse_const_expr_string(d->args[2], &value) != 0)) {
             return -1;
         }
-        if (repeat < 0 || repeat > (1 << 20)) {
+        if (repeat < 0 || repeat > AS_ELF_FILL_MAX / size) {
             return -1;
         }
         /* The value is of 32 bits, as GNU as has it, whatever the size
@@ -15556,7 +15556,7 @@ static int append_directive_data_ctx(emit_ctx_t *ctx, bytebuf_t *buf, const char
         if (count < 0) {
             return -1;
         }
-        if (count > (1 << 20)) {
+        if (count > AS_ELF_FILL_MAX) {
             set_err(ctx, "%s:%u: %s count is unreasonably large: %lld",
                     st != NULL && st->file != NULL ? st->file : "<input>",
                     st != NULL ? st->line : 0,
@@ -16424,6 +16424,102 @@ static int ensure_section_exists(emit_ctx_t *ctx, const char *name, uint32_t typ
     return 0;
 }
 
+/* The text of a directive's argument that is a string in quotes: its
+ * bytes, with the escapes worked out.  NULL if it is not one. */
+static char *directive_string(const as_directive_t *d, size_t i, size_t *len_out) {
+    const char *arg = i < d->arg_count ? d->args[i] : NULL;
+    char *bytes = NULL;
+
+    if (arg == NULL) {
+        return NULL;
+    }
+    if (as_decode_string_literal(arg, &bytes, len_out) != 0) {
+        return NULL;
+    }
+    return bytes;
+}
+
+/*
+ * `.file "name"` and `.ident "text"`.
+ *
+ * Each `.file` with a name and no number is a symbol of type FILE, the
+ * first in the symbol table, by which a linker's map and a debugger say
+ * which source a local symbol is of.  Each `.ident` is a string in
+ * .comment, behind the empty one the section begins with.  Both were
+ * taken and nothing made of them.  This is to be called before any
+ * other symbol is made.
+ */
+static int emit_file_symbols_and_comment(emit_ctx_t *ctx) {
+    bytebuf_t comment;
+    size_t i;
+    int rc = -1;
+
+    memset(&comment, 0, sizeof(comment));
+    for (i = 0; i < ctx->parsed->count; ++i) {
+        const as_stmt_t *st = &ctx->parsed->items[i];
+        const as_directive_t *d = &st->u.directive;
+        char *text;
+        size_t len = 0;
+
+        if (st->kind != AS_STMT_DIRECTIVE || d->name == NULL) {
+            continue;
+        }
+        if (strcmp(d->name, ".file") == 0 && d->arg_count == 1) {
+            const char *arg = d->args[0] != NULL ? d->args[0] : "";
+
+            /* (With a number before the name it is a file of the line
+             * table, and no symbol.) */
+            while (isspace((unsigned char)*arg)) {
+                arg++;
+            }
+            if (isdigit((unsigned char)*arg)) {
+                continue;
+            }
+            text = directive_string(d, 0, &len);
+            if (text == NULL) {
+                continue;
+            }
+            /* (A name is what is before the first NUL of it.) */
+            {
+                elf_symbol_t *sym = elf_add_symbol(ctx->obj, text, 0, 0, STB_LOCAL, STT_FILE);
+
+                free(text);
+                if (sym == NULL || elf_symbol_set_shndx(sym, SHN_ABS) != ELF_OK) {
+                    goto out;
+                }
+            }
+        } else if (strcmp(d->name, ".ident") == 0) {
+            text = directive_string(d, 0, &len);
+            if (text == NULL) {
+                set_err(ctx, "%s:%u: .ident: a string in quotes is wanted", st->file != NULL ? st->file : "<input>",
+                        st->line);
+                goto out;
+            }
+            if ((comment.len == 0 && bytebuf_append_zeros(&comment, 1) != 0) ||
+                bytebuf_append(&comment, text, len) != 0 || bytebuf_append_zeros(&comment, 1) != 0) {
+                free(text);
+                goto out;
+            }
+            free(text);
+        }
+    }
+    if (comment.len != 0) {
+        elf_section_t *sec = elf_find_section(ctx->obj, ".comment");
+
+        if (sec == NULL) {
+            sec = elf_add_section(ctx->obj, ".comment", SHT_PROGBITS, 0);
+        }
+        if (sec == NULL || elf_section_set_align(sec, 1) != ELF_OK || elf_section_set_merge(sec, 1, 1) != ELF_OK ||
+            elf_section_set_data(sec, comment.data, comment.len) != ELF_OK) {
+            goto out;
+        }
+    }
+    rc = 0;
+out:
+    free(comment.data);
+    return rc;
+}
+
 typedef struct {
     char *name;
     elf_section_t *sec;
@@ -16977,10 +17073,27 @@ static int emit_symbols(emit_ctx_t *ctx, const as_symtab_t *symtab) {
                 free_name_index(&loc_index);
                 return -1;
             }
-            if (elf_symbol_set_value(esym, s->common_size) != ELF_OK) {
-                free_sym_locs(locs, loc_count);
-                free_name_index(&loc_index);
-                return -1;
+            /*
+             * A common symbol's value is its alignment and its size is
+             * its size: the size was put for the value and nothing for
+             * the size, so the linker gave `.comm buf,64,32` no room
+             * at an alignment of 64.  With no alignment written it is
+             * the size taken up to a power of two, and 16 at the most,
+             * as GNU as has it.
+             */
+            {
+                unsigned long long align = s->common_align;
+
+                if (align == 0) {
+                    for (align = 1; align < s->common_size && align < 16; align <<= 1) {
+                    }
+                }
+                if (elf_symbol_set_value(esym, align) != ELF_OK ||
+                    elf_symbol_set_size(esym, s->common_size) != ELF_OK) {
+                    free_sym_locs(locs, loc_count);
+                    free_name_index(&loc_index);
+                    return -1;
+                }
             }
         } else if (s->is_absolute) {
             if (elf_symbol_set_shndx(esym, SHN_ABS) != ELF_OK ||
@@ -20561,6 +20674,12 @@ int as_elf_emit_file(const as_parse_result_t *parsed,
     }
     if (trace_emit_phase) fprintf(stderr, "as: emit-phase data done\n");
 
+    if (emit_file_symbols_and_comment(&ctx) != 0) {
+        if (ctx.errbuf == NULL || ctx.errbuf[0] == '\0') {
+            set_err(&ctx, "failed to emit the file symbols and .comment");
+        }
+        goto fail;
+    }
     if (emit_symbols(&ctx, symtab) != 0) {
         if (ctx.errbuf == NULL || ctx.errbuf[0] == '\0') {
             set_err(&ctx, "failed to emit symbols");
@@ -20594,9 +20713,10 @@ int as_elf_emit_file(const as_parse_result_t *parsed,
         goto fail;
     }
     if (has_cfi) {
-        if (ensure_section_exists(&ctx, ".eh_frame", SHT_PROGBITS, SHF_ALLOC, 4, NULL, 0) != 0 ||
-            ensure_section_exists(&ctx, ".eh_frame_hdr", SHT_PROGBITS, SHF_ALLOC, 4, NULL, 0) != 0) {
-            set_err(&ctx, "failed to emit .eh_frame/.eh_frame_hdr");
+        /* (No .eh_frame_hdr: that is the linker's to make, of the
+         * frames of every object, and there is none in an object.) */
+        if (ensure_section_exists(&ctx, ".eh_frame", SHT_PROGBITS, SHF_ALLOC, 4, NULL, 0) != 0) {
+            set_err(&ctx, "failed to emit .eh_frame");
             goto fail;
         }
     }
