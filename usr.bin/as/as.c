@@ -2519,6 +2519,10 @@ static int run_native_backend(const as_ctx_t *ctx) {
         }
         AS_PHASE_END(ctx, "validate");
     }
+    if (as_sections_gather_subsections(&parsed, ecfg.x86_code_bits, errbuf, sizeof(errbuf)) != 0) {
+        as_diag(AS_E_BACKEND, "%s", errbuf);
+        goto out;
+    }
     {
         AS_PHASE_BEGIN();
         if (as_symtab_build(&parsed, &syms, errbuf, sizeof(errbuf)) != 0) {

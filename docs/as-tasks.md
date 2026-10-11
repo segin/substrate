@@ -110,9 +110,10 @@ status 0.
   Trace: AS-FE-020, AS-FE-052.  Verify: T — `{evex} vaddps %xmm1,%xmm2,%xmm3` is EVEX, `{vex} vaddps …` VEX, `{disp32} movl (%eax),%ebx` has a 32-bit displacement: GNU; an unknown `{name}` is refused.  Today five places in the lexer and parser remove `{vex}` and `{evex}` and the instruction is encoded as if they were not written.  After: 161.
   Found while doing 023.
   Done ahead of 161.  The lexer and the parser no longer take them out; the parser keeps them with the instruction and the encoders do as each asks: `{vex}` and `{evex}` choose which encoders are tried, `{vex3}` widens a two-byte VEX prefix, `{disp8}` and `{disp32}` set the displacement's width where the operand is converted (so for every encoder), `{load}` picks the other direction between two registers, `{rex}` forces the prefix in 64-bit code.  Where an instruction has no such encoding the statement is refused -- `{vex} nop`, `{evex} vzeroupper`, `{rex}` in 32-bit code -- and so is one whose emitter cannot do what is asked (`{disp8} fldl (%eax)`), where GNU assembles it.  `test_pseudo_prefix.sh`, 81 cases.
-- [ ] **AS-T-024** When `.pushsection` is given a number as its second argument, the assembler shall select that subsection and shall leave the section's flags as they were.
+- [x] **AS-T-024** When `.pushsection` is given a number as its second argument, the assembler shall select that subsection and shall leave the section's flags as they were.
   Trace: AS-SEC-001.  Verify: T — `.text` / `nop` / `.pushsection .text, 1` / `ret` / `.popsection` / `nop`: `.text` is `AX` and holds `90 90 c3`.
   In part: the number is no longer read as flags, so the section keeps them and its code (`test_subsection.sh`).  Subsection 0 is entered; **any other is refused**, by `.pushsection`, `.subsection`, `.text n` and `.data n` alike, with "subsections other than 0 are not supported".  Before this they were silently ignored and the contents assembled in source order, which puts out-of-line code in line; 240 is what gathers them, and ticks this.
+  Done with 240: `.pushsection .text, 1` selects the part, the section is `AX` and holds `90 90 c3`.
 - [x] **AS-T-025** When a directive is written with an empty argument, the assembler shall keep the argument's position.
   Trace: AS-FE-002.  Verify: T — `.byte 1,,2` is refused as GNU refuses it; `.p2align 4,,10` reaches the directive with three arguments.
   Done: `test_align_max_skip.sh`.  The verification above was wrong about GNU: it takes an empty argument of a data directive for zero and warns (`.byte 1,,2` is `01 00 02`).  Here it is refused, which is 087.
@@ -704,8 +705,9 @@ one table of templates; there is one ModRM/SIB/prefix emitter.
 
 ### G.1 Sections
 
-- [ ] **AS-T-240** When a subsection number is given by `.text n`, `.data n`, `.section name` with `.subsection n` or `.pushsection name, n`, the assembler shall place the content in that subsection and emit each section's subsections in ascending order as one section.
+- [x] **AS-T-240** When a subsection number is given by `.text n`, `.data n`, `.section name` with `.subsection n` or `.pushsection name, n`, the assembler shall place the content in that subsection and emit each section's subsections in ascending order as one section.
   Trace: AS-SEC-002.  Verify: T — content in order 0, 1, 2 whatever the source order; one ELF `.text`; an alignment in a subsection applies to the section.  After: 024.
+  Done, once, between the parser and everything else (`as_sections_gather_subsections`): the statements are put in the order they are assembled in.  Those of a section's lowest subsection stay where they are; those of every other are moved to the end of the source, each run behind a `.section` naming its section, the runs in order of section and then of number.  The directives stay, without their numbers.  So nothing downstream knows of subsections, a branch between parts is relaxed like any other, and a source without them is not touched.  As GNU has it: any number, 32 bits of it, ordered as signed (`-1` is before 0); `.previous` and `.popsection` return to the part that was left; a numeric label is the nearest in the source (statements carry their place in it once moved); the mode (`.code16`) is what it was where the statement was written.  `test_subsection.sh`, 55 cases, the bytes GNU's.  Not done: a symbol assigned twice (`x = 1` … `x = 2`) is read by a moved statement at its new place, and `.cfi_` directives in a moved part come after their function's `.cfi_endproc`.
 - [ ] **AS-T-241** When `.popsection` is assembled, the assembler shall restore both the current and the previous section saved by the matching `.pushsection`.
   Trace: AS-SEC-003.  Verify: T — `.previous` after a pop.
 - [ ] **AS-T-242** When `.popsection` is assembled with nothing pushed, the assembler shall warn and continue.
@@ -1095,5 +1097,5 @@ is not to be done, 370 is ticked with "removed" and the rest struck.
 | AS-EXT-009 | 185, 325, 332–337 |
 | AS-EXT-010 | 040, 171, 338, 339 (339 closes all of AS-EXT) |
 
-350 tasks: 99 done, 251 open.  Numbers run to 399, with gaps left between
+350 tasks: 101 done, 249 open.  Numbers run to 399, with gaps left between
 sections for tasks found along the way.

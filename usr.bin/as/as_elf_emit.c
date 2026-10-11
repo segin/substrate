@@ -11673,6 +11673,33 @@ static const as_stmt_t *resolve_local_ref_target_stmt(emit_ctx_t *ctx, const as_
     if (!have_base) {
         return NULL;
     }
+    if (base_st->source_seq != 0) {
+        /* The statements were reordered: nearest in the source, not in
+         * the order they are assembled in. */
+        const as_stmt_t *best = NULL;
+
+        for (i = 0; i < ctx->parsed->count; ++i) {
+            const as_stmt_t *st = &ctx->parsed->items[i];
+            size_t j;
+
+            if (st->source_seq == 0 ||
+                (forward ? st->source_seq <= base_st->source_seq : st->source_seq > base_st->source_seq) ||
+                (best != NULL &&
+                 (forward ? st->source_seq > best->source_seq : st->source_seq < best->source_seq))) {
+                continue;
+            }
+            for (j = 0; j < st->label_count; ++j) {
+                int label_digit = -1;
+
+                if (numeric_local_label_number(st->labels[j].name, &label_digit) == 0 && label_digit == digit &&
+                    st->labels[j].file != NULL && strcmp(st->labels[j].file, file) == 0) {
+                    best = st;
+                    break;
+                }
+            }
+        }
+        return best;
+    }
     if (forward) {
         for (i = base_idx + 1; i < ctx->parsed->count; ++i) {
             const as_stmt_t *st = &ctx->parsed->items[i];

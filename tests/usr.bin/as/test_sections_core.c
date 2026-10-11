@@ -72,8 +72,9 @@ int main(int argc, char **argv) {
 
     /* The source says `.subsection 0`.  It said 1, and the section table
      * recorded a second .text for it that the object writer made into an
-     * empty section of that name; a subsection other than 0 is refused
-     * now (test_subsection.sh) until its contents are gathered. */
+     * empty section of that name.  The numbered parts of a section are
+     * gathered before the table is built (test_subsection.sh), and a
+     * number that reaches the table is refused. */
     s = as_sections_find(&secs, ".text", 1);
     if (s != NULL) {
         fail("a .text subsection 1 that the source does not have");

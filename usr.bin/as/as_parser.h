@@ -154,6 +154,13 @@ typedef struct {
     as_label_def_t *labels;
     size_t label_count;
     size_t label_cap;
+    /*
+     * Where the statement stood in the source, counted from 1, when the
+     * statements are no longer in that order -- numbered subsections are
+     * moved behind the rest of their section -- and 0 when they are.  A
+     * numeric label is found by going back or forward in the source.
+     */
+    size_t source_seq;
     union {
         as_directive_t directive;
         as_instruction_t instr;

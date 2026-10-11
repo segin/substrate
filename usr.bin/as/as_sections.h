@@ -34,6 +34,15 @@ typedef struct {
 void as_section_state_init(as_section_state_t *s);
 void as_section_state_free(as_section_state_t *s);
 
+/*
+ * Put the statements of numbered subsections where they are assembled:
+ * after the rest of their section, in ascending order of number.  To be
+ * run on what the parser gives before anything else reads it.
+ * default_code_bits is the mode the source begins in.
+ */
+int as_sections_gather_subsections(as_parse_result_t *parsed, unsigned default_code_bits,
+                                   char *errbuf, size_t errbuf_sz);
+
 int as_sections_build(const as_parse_result_t *parsed, as_section_state_t *out,
                       char *errbuf, size_t errbuf_sz);
 
