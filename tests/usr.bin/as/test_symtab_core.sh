@@ -16,7 +16,6 @@ cat > "$TMP/symtab.s" <<'SRC'
 .type gsym, @function
 .size gsym, 64
 .comm csym, 16, 4
-.lcomm lcsym, 8, 2
 .symver gsym, gsym@@VERS_1
 
 gsym:

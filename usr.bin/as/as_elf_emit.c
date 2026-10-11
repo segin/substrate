@@ -18098,6 +18098,382 @@ static int find_seen_temp_label(const local_emit_label_t *labels, size_t count,
     return -1;
 }
 
+/*
+ * What an expression in a data directive comes to.
+ *
+ * Each name in it is a number (a symbol that was set to one), or a
+ * place: so far into a section, for a label of this source and for `.`,
+ * or the address of a symbol some other file has.  The whole is then a
+ * number and so many times each section and each such symbol, and an
+ * object file can hold three shapes of that: a number alone -- two
+ * labels of one section, however they are spelt, differ by one; a number
+ * and one place, which is a relocation; and a number, a place, less the
+ * section the directive is in, which is a relocation relative to the
+ * field.  Anything else has no relocation that says it and is refused.
+ */
+#define DATA_TERMS_MAX 6u
+#define DATA_SECTIONS_MAX 6u
+
+typedef struct {
+    const char *base;      /* a section's name, or a symbol's */
+    int is_section;
+    long long k;
+    /* The one label the term is of, while it is of one, and how far
+     * into the section it is. */
+    const char *label;
+    long long label_off;
+} data_term_t;
+
+typedef struct {
+    long long c;
+    data_term_t t[DATA_TERMS_MAX];
+    size_t n;
+} data_value_t;
+
+typedef struct {
+    emit_ctx_t *ctx;
+    const as_stmt_t *st;
+    const char *section;
+    uint64_t off;
+    const local_emit_label_t *labels;
+    size_t label_count;
+    char sections[DATA_SECTIONS_MAX][128];
+    size_t section_count;
+    /* Set where a place was multiplied, divided, shifted or the like. */
+    int not_linear;
+} data_eval_t;
+
+static const char *data_eval_section(data_eval_t *ev, const char *name) {
+    size_t i;
+
+    for (i = 0; i < ev->section_count; ++i) {
+        if (strcmp(ev->sections[i], name) == 0) {
+            return ev->sections[i];
+        }
+    }
+    if (ev->section_count == DATA_SECTIONS_MAX || strlen(name) >= sizeof(ev->sections[0])) {
+        return NULL;
+    }
+    snprintf(ev->sections[ev->section_count], sizeof(ev->sections[0]), "%s", name);
+    return ev->sections[ev->section_count++];
+}
+
+static int data_value_add(data_value_t *v, const data_term_t *term) {
+    size_t i;
+
+    if (term->k == 0) {
+        return 0;
+    }
+    for (i = 0; i < v->n; ++i) {
+        if (v->t[i].is_section == term->is_section && strcmp(v->t[i].base, term->base) == 0) {
+            v->t[i].k += term->k;
+            v->t[i].label = NULL;
+            if (v->t[i].k == 0) {
+                v->t[i] = v->t[--v->n];
+            }
+            return 0;
+        }
+    }
+    if (v->n == DATA_TERMS_MAX) {
+        return -1;
+    }
+    v->t[v->n++] = *term;
+    return 0;
+}
+
+static int data_eval_place(data_eval_t *ev, const char *section, long long off, const char *label,
+                           data_value_t *out) {
+    data_term_t term;
+
+    memset(&term, 0, sizeof(term));
+    term.base = data_eval_section(ev, section);
+    if (term.base == NULL) {
+        return -1;
+    }
+    term.is_section = 1;
+    term.k = 1;
+    term.label = label;
+    term.label_off = off;
+    out->c = off;
+    return data_value_add(out, &term);
+}
+
+static int data_eval(data_eval_t *ev, const as_expr_t *e, data_value_t *out) {
+    data_value_t l;
+    data_value_t r;
+    size_t i;
+
+    memset(out, 0, sizeof(*out));
+    if (e == NULL) {
+        return -1;
+    }
+    switch (e->kind) {
+    case AS_EXPR_CONST:
+        out->c = e->value;
+        return 0;
+    case AS_EXPR_SYMBOL: {
+        const local_emit_label_t *seen = NULL;
+        char section[128];
+        uint64_t off = 0;
+        data_term_t term;
+
+        if (e->symbol == NULL) {
+            return -1;
+        }
+        if (strcmp(e->symbol, ".") == 0) {
+            return data_eval_place(ev, ev->section, (long long)ev->off, NULL, out);
+        }
+        if (asm_var_lookup(ev->ctx, e->symbol, &out->c) == 0) {
+            return 0;
+        }
+        if (strchr(e->symbol, '@') == NULL) {
+            if (is_local_temp_symbol_name(e->symbol) &&
+                find_seen_temp_label(ev->labels, ev->label_count, e->symbol, &seen) == 0) {
+                return data_eval_place(ev, seen->section, (long long)seen->off, e->symbol, out);
+            }
+            if (find_label_virtual_location(ev->ctx, ev->st, NULL, 0, 0, e->symbol, section, sizeof(section),
+                                            &off) == 0) {
+                return data_eval_place(ev, section, (long long)off, e->symbol, out);
+            }
+        }
+        memset(&term, 0, sizeof(term));
+        term.base = e->symbol;
+        term.k = 1;
+        return data_value_add(out, &term);
+    }
+    case AS_EXPR_LOCAL_REF: {
+        const local_emit_label_t *seen = NULL;
+        virtual_addr_value_t target;
+
+        if (find_seen_local_label(ev->labels, ev->label_count, e, &seen) == 0) {
+            return data_eval_place(ev, seen->section, (long long)seen->off, NULL, out);
+        }
+        if (local_ref_virtual_location(ev->ctx, ev->st, e, &target) == 0 && target.has_section) {
+            return data_eval_place(ev, target.section, target.value, NULL, out);
+        }
+        return -1;
+    }
+    case AS_EXPR_UNARY:
+        if (data_eval(ev, e->lhs != NULL ? e->lhs : e->rhs, &l) != 0) {
+            return -1;
+        }
+        if (e->op == AS_EXPR_OP_NEG) {
+            *out = l;
+            out->c = (long long)(0ull - (unsigned long long)l.c);
+            for (i = 0; i < out->n; ++i) {
+                out->t[i].k = -out->t[i].k;
+            }
+            return 0;
+        }
+        if (l.n != 0) {
+            ev->not_linear = 1;
+            return -1;
+        }
+        break;
+    case AS_EXPR_BINARY:
+        if (data_eval(ev, e->lhs, &l) != 0 || data_eval(ev, e->rhs, &r) != 0) {
+            return -1;
+        }
+        if (e->op == AS_EXPR_OP_ADD || e->op == AS_EXPR_OP_SUB) {
+            int sign = e->op == AS_EXPR_OP_ADD ? 1 : -1;
+
+            *out = l;
+            out->c = (long long)((unsigned long long)l.c + (unsigned long long)sign * (unsigned long long)r.c);
+            for (i = 0; i < r.n; ++i) {
+                r.t[i].k *= sign;
+                if (data_value_add(out, &r.t[i]) != 0) {
+                    return -1;
+                }
+            }
+            return 0;
+        }
+        if (e->op == AS_EXPR_OP_MUL && (l.n == 0) != (r.n == 0)) {
+            const data_value_t *places = l.n != 0 ? &l : &r;
+            long long by = l.n != 0 ? r.c : l.c;
+
+            out->c = (long long)((unsigned long long)places->c * (unsigned long long)by);
+            for (i = 0; i < places->n; ++i) {
+                data_term_t term = places->t[i];
+
+                term.k *= by;
+                if (data_value_add(out, &term) != 0) {
+                    return -1;
+                }
+            }
+            return 0;
+        }
+        if (l.n != 0 || r.n != 0) {
+            ev->not_linear = 1;
+            return -1;
+        }
+        break;
+    default:
+        return -1;
+    }
+    /* What is left is an operation on numbers. */
+    {
+        as_expr_t node = *e;
+        as_expr_t ln;
+        as_expr_t rn;
+
+        memset(&ln, 0, sizeof(ln));
+        memset(&rn, 0, sizeof(rn));
+        ln.kind = AS_EXPR_CONST;
+        ln.value = l.c;
+        rn.kind = AS_EXPR_CONST;
+        rn.value = e->kind == AS_EXPR_BINARY ? r.c : l.c;
+        node.lhs = e->lhs != NULL ? &ln : NULL;
+        node.rhs = e->rhs != NULL ? &rn : NULL;
+        return as_expr_eval(&node, NULL, NULL, &out->c) == AS_EXPR_EVAL_OK ? 0 : -1;
+    }
+}
+
+/* The one place of a value that is not a number alone, and whether it is
+ * less the section the statement is in; NULL where the value is not of
+ * either shape. */
+static const data_term_t *data_value_place(const data_eval_t *ev, const data_value_t *v, int *pcrel) {
+    const data_term_t *place = NULL;
+    size_t i;
+
+    *pcrel = 0;
+    for (i = 0; i < v->n; ++i) {
+        if (v->t[i].k == 1 && place == NULL) {
+            place = &v->t[i];
+        } else if (v->t[i].k == -1 && v->t[i].is_section && strcmp(v->t[i].base, ev->section) == 0 && !*pcrel) {
+            *pcrel = 1;
+        } else {
+            return NULL;
+        }
+    }
+    return place;
+}
+
+/*
+ * Whether an expression in an operand is one an instruction can hold: a
+ * number, or one of the two shapes a relocation has.  `x+y` and `2*x`
+ * of two labels had the relocation of the first name in them and the
+ * rest dropped.
+ */
+static int operand_expr_is_expressible(emit_ctx_t *ctx, const as_stmt_t *st, const as_expr_t *e,
+                                       const char *section, uint64_t off, const local_emit_label_t *labels,
+                                       size_t label_count) {
+    data_eval_t ev;
+    data_value_t v;
+    int pcrel;
+
+    memset(&ev, 0, sizeof(ev));
+    ev.ctx = ctx;
+    ev.st = st;
+    ev.section = section != NULL ? section : "";
+    ev.off = off;
+    ev.labels = labels;
+    ev.label_count = label_count;
+    if (data_eval(&ev, e, &v) != 0) {
+        /* What could not be read at all is left to what reads operands. */
+        return !ev.not_linear;
+    }
+    return v.n == 0 || data_value_place(&ev, &v, &pcrel) != NULL;
+}
+
+/* The relocation of a field of `width` bytes, or AS_RELOC_TYPE_BAD where
+ * the object format has none of that width. */
+static uint32_t data_reloc_type(unsigned machine, unsigned width, int pcrel) {
+    if (machine == EM_X86_64) {
+        switch (width) {
+        case 1: return pcrel ? R_X86_64_PC8 : R_X86_64_8;
+        case 2: return pcrel ? R_X86_64_PC16 : R_X86_64_16;
+        case 4: return pcrel ? R_X86_64_PC32 : R_X86_64_32;
+        case 8: return pcrel ? R_X86_64_PC64 : R_X86_64_64;
+        default: return AS_RELOC_TYPE_BAD;
+        }
+    }
+    switch (width) {
+    case 1: return pcrel ? R_386_PC8 : R_386_8;
+    case 2: return pcrel ? R_386_PC16 : R_386_16;
+    case 4: return pcrel ? R_386_PC32 : R_386_32;
+    default: return AS_RELOC_TYPE_BAD;
+    }
+}
+
+/*
+ * One argument of a data directive of x86, which is not a number as it
+ * is written: its value into the field, or its relocation.  -1 with the
+ * reason said where it is neither.
+ */
+static int emit_data_field(emit_ctx_t *ctx, const as_stmt_t *st, const char *arg, const char *section,
+                           elf_section_t *sec, unsigned char *field, uint64_t field_off, unsigned width,
+                           const local_emit_label_t *labels, size_t label_count) {
+    unsigned machine = ctx->cfg != NULL ? ctx->cfg->machine : EM_386;
+    const char *file = st->file != NULL ? st->file : "<input>";
+    as_expr_t *expr = as_parse_expr_string(arg, st->file, st->line);
+    data_eval_t ev;
+    data_value_t v;
+    const data_term_t *place = NULL;
+    const char *name;
+    int64_t addend;
+    uint32_t type;
+    int pcrel = 0;
+    int rc = -1;
+
+    if (expr == NULL) {
+        set_err(ctx, "%s:%u: '%s' is not an expression", file, st->line, arg);
+        return -1;
+    }
+    memset(&ev, 0, sizeof(ev));
+    ev.ctx = ctx;
+    ev.st = st;
+    ev.section = section != NULL ? section : "";
+    ev.off = field_off;
+    ev.labels = labels;
+    ev.label_count = label_count;
+    if (data_eval(&ev, expr, &v) != 0) {
+        set_err(ctx, "%s:%u: '%s' is neither a number nor a place a relocation can name", file, st->line, arg);
+        goto out;
+    }
+    if (v.n == 0) {
+        write_u64_le_at(field, (uint64_t)v.c, width);
+        rc = 0;
+        goto out;
+    }
+    place = data_value_place(&ev, &v, &pcrel);
+    if (place == NULL) {
+        set_err(ctx, "%s:%u: '%s' cannot be a number or one relocation: it is not a place, or one less a place "
+                     "of this section",
+                file, st->line, arg);
+        goto out;
+    }
+    addend = (int64_t)v.c;
+    if (pcrel) {
+        addend += (int64_t)field_off;
+    }
+    name = place->base;
+    if (place->is_section && place->label != NULL) {
+        /* Against the label, as a reference to one in an instruction is. */
+        name = place->label;
+        addend -= (int64_t)place->label_off;
+    }
+    type = strchr(name, '@') != NULL && !pcrel ? reloc_type_for_machine(machine) : data_reloc_type(machine, width, pcrel);
+    if (type == AS_RELOC_TYPE_BAD) {
+        set_err(ctx, "%s:%u: '%s': there is no relocation of %u bytes for this target", file, st->line, arg, width);
+        goto out;
+    }
+    write_u64_le_at(field,
+                    machine_relocation_addend_is_in_place(machine)
+                        ? (uint64_t)(addend + local_label_addend(ctx, name))
+                        : 0,
+                    width);
+    if (add_reloc_for_symbol_ex(ctx, sec, name, field_off, type, addend) != 0) {
+        if (ctx->errbuf == NULL || ctx->errbuf[0] == '\0') {
+            set_err(ctx, "%s:%u: '%s': no relocation could be made", file, st->line, arg);
+        }
+        goto out;
+    }
+    rc = 0;
+out:
+    as_expr_free(expr);
+    return rc;
+}
+
 static int emit_relocations(emit_ctx_t *ctx) {
     size_t i;
     unsigned machine = ctx->cfg != NULL ? ctx->cfg->machine : EM_386;
@@ -18211,6 +18587,20 @@ static int emit_relocations(emit_ctx_t *ctx) {
                     if (parse_int64(d->args[j], &const_value) == 0 ||
                         parse_const_expr_string(d->args[j], &const_value) == 0 ||
                         eval_arg_asm_vars(ctx, st, d->args[j], &const_value) == 0) {
+                        continue;
+                    }
+                    if (machine == EM_386 || machine == EM_X86_64) {
+                        reloc_off = cur_off + (uint64_t)(j * width);
+                        if (eval_linux_alt_len_expr(ctx, st, d->args[j], &const_value) == 0) {
+                            continue;
+                        }
+                        if (reloc_off + width > (uint64_t)sb->buf.len ||
+                            emit_data_field(ctx, st, d->args[j], track.current, cur_sec, sb->buf.data + reloc_off,
+                                            reloc_off, width, local_labels, local_label_count) != 0) {
+                            section_track_free(&track);
+                            sec_buf_vec_free(&secbufs);
+                            return -1;
+                        }
                         continue;
                     }
                     if (parse_symbol_addend_arg(d->args[j], &sym, &addend) == 0 && sym != NULL) {
@@ -18381,6 +18771,15 @@ static int emit_relocations(emit_ctx_t *ctx) {
                     e = op->u.expr;
                 } else if (op->kind == AS_OPERAND_MEMORY) {
                     e = op->u.mem.disp;
+                }
+                if (e != NULL && (machine == EM_386 || machine == EM_X86_64) &&
+                    !operand_expr_is_expressible(ctx, st, e, track.current, cur_off, local_labels,
+                                                 local_label_count)) {
+                    set_err(ctx, "%s:%u: '%s' cannot be a number or one relocation",
+                            st->file != NULL ? st->file : "<input>", st->line, op->raw != NULL ? op->raw : "");
+                    section_track_free(&track);
+                    sec_buf_vec_free(&secbufs);
+                    return -1;
                 }
                 if (e != NULL) {
                     long long resolved_disp;

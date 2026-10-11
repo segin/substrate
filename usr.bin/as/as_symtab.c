@@ -482,7 +482,11 @@ static int handle_directive(sym_ctx_t *ctx, const as_stmt_t *st) {
             if (sym == NULL) {
                 return -1;
             }
-            sym->bind = AS_SYM_BIND_LOCAL;
+            /* A common symbol is the linker's to place, and is not made
+             * local by a .local that comes after its .comm. */
+            if (!sym->is_common) {
+                sym->bind = AS_SYM_BIND_LOCAL;
+            }
         }
         return 0;
     }
@@ -504,7 +508,9 @@ static int handle_directive(sym_ctx_t *ctx, const as_stmt_t *st) {
         return 0;
     }
 
-    if (strcmp(d->name, ".comm") == 0 || strcmp(d->name, ".lcomm") == 0) {
+    /* A .lcomm, and a .comm of a local name, are storage in .bss by now
+     * (as_directives_lower). */
+    if (strcmp(d->name, ".comm") == 0) {
         char *name;
         as_symbol_t *sym;
         unsigned long long nsize = 0;
@@ -534,7 +540,7 @@ static int handle_directive(sym_ctx_t *ctx, const as_stmt_t *st) {
         sym->type = AS_SYM_TYPE_COMMON;
         sym->common_size = nsize;
         sym->common_align = nalign;
-        sym->bind = (strcmp(d->name, ".lcomm") == 0) ? AS_SYM_BIND_LOCAL : AS_SYM_BIND_GLOBAL;
+        sym->bind = AS_SYM_BIND_GLOBAL;
         return 0;
     }
 
@@ -716,7 +722,8 @@ static int visit_expr_ref(sym_ctx_t *ctx, const as_expr_t *e, const char *file, 
         return 0;
     }
 
-    if (e->kind == AS_EXPR_SYMBOL && e->symbol != NULL) {
+    /* `.` is where the statement is, and no symbol. */
+    if (e->kind == AS_EXPR_SYMBOL && e->symbol != NULL && strcmp(e->symbol, ".") != 0) {
         char *name = trim_copy(e->symbol);
         if (name == NULL) {
             return -1;

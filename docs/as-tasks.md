@@ -770,19 +770,24 @@ one table of templates; there is one ModRM/SIB/prefix emitter.
 - [x] **AS-T-209** When a conditional branch names an undefined symbol, the assembler shall encode the near form with a 32-bit relocation.
   Trace: AS-OBJ-015.  Verify: T — `je .Lundefined`, `je extern_sym`: GNU.  After: 191.
   Done.  `je extern_sym` was right; `je .Lundefined` was not: a `.L` label was taken to be near whether the source defined it or not, so the jump was `74` and a byte with an 8-bit relocation, and in 32-bit code a `jmp` to one was left out of the object.  A `.L` label the source does not define is another file's symbol: the near form, and `R_386_PC32` or `R_X86_64_PLT32`.  `test_own_label_branch.sh`.
-- [ ] **AS-T-210** When a data directive holds a symbol, the assembler shall emit a relocation of the directive's width.
+- [x] **AS-T-210** When a data directive holds a symbol, the assembler shall emit a relocation of the directive's width.
   Trace: AS-OBJ-006.  Verify: T — `--64` `.long ext` (`R_X86_64_32`), `.word ext` (16), `.byte ext` (8), `.quad ext` (64); `--32` `.word ext` (`R_386_16`), `.byte ext` (`R_386_8`); the PC-relative forms of each.
-- [ ] **AS-T-211** When a data directive holds `symbol - .` plus a constant, the assembler shall emit a PC-relative relocation with that addend.
+  Done, with 211 to 213, by one evaluator in place of a rule for each spelling (`data_eval` and `emit_data_field` in `as_elf_emit.c`).  Every name in the expression is a number, or so far into a section (a label, `.`), or a symbol of another file; the whole is so many of each; and it is written as a number, or as a relocation of the directive's width against the one place, or as one relative to the field where the section the directive is in is taken away.  `.word ext` and `.byte ext` were refused, and in 64-bit code `.long ext` was ("failed to emit relocations"); a `.quad` in 32-bit code had a 32-bit relocation and is refused, there being none of 64.  `test_data_expressions.sh`, 132 cases, which GNU passes; `test_sections_symbols_expr_32_64.sh` left the list of expected failures.  The flat-binary writer and the ARM targets keep the code they had.
+- [x] **AS-T-211** When a data directive holds `symbol - .` plus a constant, the assembler shall emit a PC-relative relocation with that addend.
   Trace: AS-OBJ-007, AS-FE-006.  Verify: T — `.long ext - .`, `.long ext+4 - .`, `.quad ext - .`, `.long x - .` for local x: GNU.
-- [ ] **AS-T-212** When a data directive holds the difference of two symbols of one section, the assembler shall emit the constant.
+  Done (see 210): `.long ext+4 - .` and `.long ext - . + 8` were zeros with no relocation, as were `.word`, `.byte` and `.quad` of `ext - .`; `x - .` for a label of the section had a relocation and is the number.
+- [x] **AS-T-212** When a data directive holds the difference of two symbols of one section, the assembler shall emit the constant.
   Trace: AS-OBJ-007, AS-FE-006.  Verify: T — `.long b-a`, `.long x-y+4`, `.quad b-a`, in the same and in another section: GNU.  After: 220.
+  Done, ahead of 220 (see 210).  The differences were right; what was not is what stood beside them: `.long x - undefined` was zero and nothing was said, and it is refused, on its line.
 - [x] **AS-T-217** When a data directive holds `symbol - label` and the label is in the directive's own section, the assembler shall emit a PC-relative relocation against the symbol whose addend is the distance from the label to the field.
   Trace: AS-OBJ-007.  Verify: T — `test_data_label_difference.sh`: the entries of a position-independent jump table, `.long .L1 - .Lt`, in both modes, against GNU's relocations.
   Found by `test_compiler_output.sh`: this is what gcc writes for a `switch` in 64-bit code, and it was assembled as zeros with no relocation.
-- [ ] **AS-T-213** If an expression in a data directive or an operand cannot be expressed as a constant or as one relocation, then the assembler shall fail and say why.
+- [x] **AS-T-213** If an expression in a data directive or an operand cannot be expressed as a constant or as one relocation, then the assembler shall fail and say why.
   Trace: AS-OBJ-007, AS-FE-006.  Verify: T — `.long x+y`, `.long 2*x`, `.long ext - h` (h in another section), `movl $x+y,%eax`, `movl $2*x,%eax`: exit 1.  After: 191.
+  Done, ahead of 191 (see 210): each of the five, and `x/2`, `x&1`, `~ext`, `. - ext`, `ext+ext`, `ext1-ext2` and a label less one of another section, are refused on their line.  `.long x+y` had been the sum of two offsets, and `movl $x+y,%eax` the relocation of `x` alone.  An operand is asked the same question by the same evaluator before anything is made of it.  More is taken than GNU takes where the arithmetic is sound (`ext+b-a` with `a` and `b` of one section).
 - [ ] **AS-T-214** When `.` is used in an expression, the assembler shall give the address of the start of the statement, or for a data directive of the element.
   Trace: AS-FE-006.  Verify: T — `.long .+4`, `.long ., .`, `jmp .`, `jmp .+2`, `movl $., %eax`: GNU; no symbol named `.` reaches the symbol table.  After: 220.
+  In part, 2026-10-11 (see 210): in a data directive `.` is the place of the element -- `.long ., .` had been two relocations to a symbol named `.`, and the second element the place of the first -- and no symbol of that name reaches the symbol table from a directive or an instruction (`test_data_expressions.sh`).  Still open: `jmp .` and `jmp .+2` reach the right place in the five-byte form with a relocation against the section, where GNU has `eb fe` and `eb 00`; that is the relaxation of 221.
 - [x] **AS-T-215** When a reference to a local label lies in a mergeable section (`SHF_MERGE`), the assembler shall emit the relocation against the label's own symbol and not against the section.
   Trace: AS-OBJ-004.  Verify: T — three strings in `.rodata.str1.1,"aMS"` reached by `leaq .LCn(%rip)`: GNU's relocations; D — linked with GNU `ld`, the program prints `alpha|beta|gamma`.
   Done: `test_merge_section_reloc.sh`, which links and runs it.  With this, 217, 034, 066, 061 and 222, **six of the fourteen combinations of `test_compiler_output.sh` run** — all of 64 bits but `-O0` — and `compiler/expect-runs` holds them.
@@ -897,8 +902,9 @@ one table of templates; there is one ModRM/SIB/prefix emitter.
   Trace: AS-SYM-005.  Verify: T — each against GNU's verdict.
 - [ ] **AS-T-274** When `.comm name, size, align` is assembled, the assembler shall emit a common symbol with `st_size` the size and `st_value` the alignment.
   Trace: AS-OBJ-005.  Verify: T — `.comm bufa,64,32`; the default alignment; D — two objects with one `.comm` each link to one `.bss` object.
-- [ ] **AS-T-275** When `.lcomm` is assembled, or `.comm` for a symbol declared `.local`, the assembler shall allocate the symbol in `.bss` as a local with its size and alignment.
+- [x] **AS-T-275** When `.lcomm` is assembled, or `.comm` for a symbol declared `.local`, the assembler shall allocate the symbol in `.bss` as a local with its size and alignment.
   Trace: AS-OBJ-005.  Verify: T — against GNU; D — a linked program has distinct addresses for two such symbols.
+  Done.  `.lcomm` was a local symbol of the section COMMON, which no linker places, and `.local x` with `.comm x` was a global common symbol -- which is how a C compiler writes `static int x;`, so two files with a static of one name had one variable.  Both are storage now, made of ordinary statements before anything else sees the source (`lower_local_commons` in `as_lower.c`): a label in subsection 1 of `.bss`, behind what the source puts in `.bss` itself, aligned, with `.zero` of the size, and `.type` and `.size` where the directive stood.  The places are GNU's: a `.lcomm` has the alignment of its size up to 8, a local `.comm` the one it names or none.  A `.local` after the `.comm` leaves the symbol common, a third argument to `.lcomm` is refused, a negative size is warned of and passed over, all as GNU.  `test_local_common.sh`, 43 cases that GNU passes, the last of which links two such objects and runs them.  A section whose only subsection has a number other than 0 was refused, and is taken.  Not GNU's: a reference to such a symbol is relocated against the symbol, where GNU names `.bss` (as for every label that is not a `.L` one).  274 is as it was: a global `.comm` still has its size in `st_value` and no `st_size`.
 - [ ] **AS-T-276** When `.symver` is assembled, the assembler shall emit the versioned symbol in the three forms `name@ver`, `name@@ver` and `name@@@ver`.
   Trace: AS-OBJ-011.  Verify: T — against `readelf -s` of GNU's object; D — a shared library built with a version script exports the versions.
 - [ ] **AS-T-277** When `.file "name"` is assembled, the assembler shall emit an `STT_FILE` symbol of that name first in the symbol table.
@@ -1225,5 +1231,5 @@ is not to be done, 370 is ticked with "removed" and the rest struck.
 | AS-EXT-009 | 185, 325, 332–337 |
 | AS-EXT-010 | 040, 171, 338, 339 (339 closes all of AS-EXT) |
 
-351 tasks: 203 done, 148 open.  Numbers run to 400, with gaps left between
+351 tasks: 208 done, 143 open.  Numbers run to 400, with gaps left between
 sections for tasks found along the way.

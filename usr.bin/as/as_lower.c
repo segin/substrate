@@ -1222,6 +1222,291 @@ done:
     return rc;
 }
 
+/* A directive of up to two arguments, at the place of the statement `at`. */
+static int push_directive(stmt_vec_t *out, const as_stmt_t *at, const char *name, const char *a0, const char *a1) {
+    as_stmt_t made;
+    arg_vec_t args;
+
+    memset(&made, 0, sizeof(made));
+    memset(&args, 0, sizeof(args));
+    made.kind = AS_STMT_DIRECTIVE;
+    made.line = at->line;
+    made.file = at->file != NULL ? lower_strdup(at->file) : NULL;
+    made.u.directive.name = lower_strdup(name);
+    if ((at->file != NULL && made.file == NULL) || made.u.directive.name == NULL ||
+        (a0 != NULL && vec_push_text(&args, a0) != 0) || (a1 != NULL && vec_push_text(&args, a1) != 0)) {
+        goto fail;
+    }
+    set_args(&made.u.directive, &args);
+    if (stmt_vec_push(out, &made) == 0) {
+        return 0;
+    }
+    args.items = made.u.directive.args;
+    args.count = made.u.directive.arg_count;
+    args.cap = made.u.directive.arg_cap;
+fail:
+    vec_free(&args);
+    free(made.u.directive.name);
+    free(made.file);
+    return -1;
+}
+
+/* A label alone, at the place of the statement `at`. */
+static int push_label(stmt_vec_t *out, const as_stmt_t *at, const char *name) {
+    as_stmt_t made;
+
+    memset(&made, 0, sizeof(made));
+    made.kind = AS_STMT_LABEL_ONLY;
+    made.line = at->line;
+    made.file = at->file != NULL ? lower_strdup(at->file) : NULL;
+    made.labels = (as_label_def_t *)calloc(1, sizeof(*made.labels));
+    if (made.labels != NULL) {
+        made.label_cap = 1;
+        made.labels[0].name = lower_strdup(name);
+        made.labels[0].line = at->line;
+        made.labels[0].file = at->file != NULL ? lower_strdup(at->file) : NULL;
+        made.label_count = 1;
+    }
+    if ((at->file != NULL && made.file == NULL) || made.labels == NULL || made.labels[0].name == NULL ||
+        (at->file != NULL && made.labels[0].file == NULL) || stmt_vec_push(out, &made) != 0) {
+        if (made.labels != NULL) {
+            free(made.labels[0].name);
+            free(made.labels[0].file);
+        }
+        free(made.labels);
+        free(made.file);
+        return -1;
+    }
+    return 0;
+}
+
+static char *local_common_name(const as_directive_t *d) {
+    const char *s = arg_text(d, 0);
+    size_t n;
+    char *name;
+
+    while (*s != '\0' && isspace((unsigned char)*s)) {
+        s++;
+    }
+    n = strlen(s);
+    while (n > 0 && isspace((unsigned char)s[n - 1])) {
+        n--;
+    }
+    name = (char *)malloc(n + 1);
+    if (name != NULL) {
+        memcpy(name, s, n);
+        name[n] = '\0';
+    }
+    return name;
+}
+
+/*
+ * A common symbol that is local has no need of the linker to find it a
+ * place, and is given one here: `.lcomm name, size`, and `.comm name,
+ * size[, alignment]` of a name that a `.local` above it names, are
+ * storage in subsection 1 of .bss -- behind what the source puts in
+ * .bss itself -- at a label, with the type of an object and the size.
+ * So two files that each have a `static int x;` have an `x` each.
+ */
+static int lower_local_commons(as_parse_result_t *parsed, char *errbuf, size_t errbuf_sz) {
+    struct_consts_t consts;
+    struct_consts_t locals;
+    stmt_vec_t out;
+    stmt_vec_t tail;
+    const char *why = NULL;
+    int any = 0;
+    int rc = -1;
+    size_t i;
+
+    for (i = 0; i < parsed->count; ++i) {
+        const as_stmt_t *st = &parsed->items[i];
+
+        if (st->kind == AS_STMT_DIRECTIVE && st->u.directive.name != NULL &&
+            (strcmp(st->u.directive.name, ".lcomm") == 0 || strcmp(st->u.directive.name, ".comm") == 0)) {
+            any = 1;
+            break;
+        }
+    }
+    if (!any) {
+        return 0;
+    }
+    memset(&consts, 0, sizeof(consts));
+    memset(&locals, 0, sizeof(locals));
+    memset(&out, 0, sizeof(out));
+    memset(&tail, 0, sizeof(tail));
+    for (i = 0; i < parsed->count; ++i) {
+        as_stmt_t *st = &parsed->items[i];
+        as_directive_t *d = &st->u.directive;
+        char *name;
+        long long size = 0;
+        long long align = 1;
+        char text[32];
+        int is_lcomm;
+        int failed;
+        size_t k;
+
+        if (st->kind != AS_STMT_DIRECTIVE || d->name == NULL) {
+            if (stmt_vec_push(&out, st) != 0) {
+                goto oom;
+            }
+            continue;
+        }
+        if ((strcmp(d->name, ".set") == 0 || strcmp(d->name, ".equ") == 0 || strcmp(d->name, ".equiv") == 0) &&
+            d->arg_count == 2) {
+            name = local_common_name(d);
+            if (name == NULL) {
+                goto oom;
+            }
+            if (as_expr_eval_string(d->args[1], struct_lookup, &consts, &size) == AS_EXPR_EVAL_OK &&
+                struct_define(&consts, name, size) != 0) {
+                free(name);
+                goto oom;
+            }
+            free(name);
+        }
+        if (strcmp(d->name, ".local") == 0) {
+            for (k = 0; k < d->arg_count; ++k) {
+                as_directive_t one = *d;
+
+                one.args = &d->args[k];
+                one.arg_count = 1;
+                name = local_common_name(&one);
+                if (name == NULL || struct_define(&locals, name, 0) != 0) {
+                    free(name);
+                    goto oom;
+                }
+                free(name);
+            }
+        }
+        is_lcomm = strcmp(d->name, ".lcomm") == 0;
+        if (!is_lcomm && strcmp(d->name, ".comm") != 0) {
+            if (stmt_vec_push(&out, st) != 0) {
+                goto oom;
+            }
+            continue;
+        }
+        name = local_common_name(d);
+        if (name == NULL) {
+            goto oom;
+        }
+        if (!is_lcomm && !struct_lookup(&locals, name, &size)) {
+            free(name);
+            if (stmt_vec_push(&out, st) != 0) {
+                goto oom;
+            }
+            continue;
+        }
+        if (name[0] == '\0') {
+            why = "expected symbol name";
+        } else if (d->arg_count < 2 || arg_is_empty(d, 1)) {
+            why = "missing size expression";
+        } else if (as_expr_eval_string(d->args[1], struct_lookup, &consts, &size) != AS_EXPR_EVAL_OK) {
+            why = "the size is not a number";
+        } else if (is_lcomm && d->arg_count > 2) {
+            why = "takes a name and a size";
+        } else if (d->arg_count > 3) {
+            why = "takes a name, a size and an alignment";
+        } else if (d->arg_count == 3 &&
+                   (arg_is_empty(d, 2) ||
+                    as_expr_eval_string(d->args[2], struct_lookup, &consts, &align) != AS_EXPR_EVAL_OK)) {
+            why = "expected alignment after size";
+        } else if (align < 0 || (align & (align - 1)) != 0) {
+            why = "alignment not a power of 2";
+        }
+        if (why != NULL) {
+            if (errbuf != NULL && errbuf_sz != 0) {
+                snprintf(errbuf, errbuf_sz, "%s:%u: %s: %s", st->file != NULL ? st->file : "<input>", st->line,
+                         d->name, why);
+            }
+            free(name);
+            goto fail;
+        }
+        if (size < 0) {
+            /* As GNU as: said, and the directive is no more than that. */
+            char said[80];
+
+            snprintf(said, sizeof(said), "\"size (%lld) out of range, ignored\"", size);
+            failed = push_directive(&out, st, ".warning", said, NULL);
+            free(name);
+            if (failed) {
+                goto oom;
+            }
+            struct_drop(st);
+            continue;
+        }
+        if (is_lcomm) {
+            /* An alignment is implied by the size, up to 8. */
+            align = size >= 8 ? 8 : (size >= 4 ? 4 : (size >= 2 ? 2 : 1));
+        }
+        snprintf(text, sizeof(text), "%lld", size);
+        failed = push_directive(&out, st, ".type", name, "@object") != 0 ||
+                 push_directive(&out, st, ".size", name, text) != 0;
+        if (!failed && tail.count == 0) {
+            failed = push_directive(&tail, st, ".bss", "1", NULL) != 0;
+        }
+        if (!failed && align > 1) {
+            char a[32];
+
+            snprintf(a, sizeof(a), "%lld", align);
+            failed = push_directive(&tail, st, ".balign", a, NULL) != 0;
+        }
+        failed = failed || push_label(&tail, st, name) != 0 || push_directive(&tail, st, ".zero", text, NULL) != 0;
+        free(name);
+        if (failed) {
+            goto oom;
+        }
+        /* The labels of the directive's line stay where they are. */
+        if (st->label_count != 0) {
+            as_stmt_t kept = *st;
+
+            kept.kind = AS_STMT_LABEL_ONLY;
+            memset(&kept.u, 0, sizeof(kept.u));
+            kept.file = st->file != NULL ? lower_strdup(st->file) : NULL;
+            if ((st->file != NULL && kept.file == NULL) || stmt_vec_push(&out, &kept) != 0) {
+                free(kept.file);
+                goto oom;
+            }
+            st->labels = NULL;
+            st->label_count = 0;
+            st->label_cap = 0;
+        }
+        struct_drop(st);
+    }
+    for (i = 0; i < tail.count; ++i) {
+        if (stmt_vec_push(&out, &tail.items[i]) != 0) {
+            goto oom;
+        }
+    }
+    free(parsed->items);
+    parsed->items = out.items;
+    parsed->count = out.count;
+    parsed->cap = out.cap;
+    out.items = NULL;
+    rc = 0;
+    goto done;
+
+oom:
+    if (errbuf != NULL && errbuf_sz != 0) {
+        snprintf(errbuf, errbuf_sz, "out of memory");
+    }
+fail:
+    /* Statements are in two places or in neither by now; the assembler
+     * is about to exit, and is not to free any of them twice. */
+    parsed->count = 0;
+    free(out.items);
+done:
+    free(tail.items);
+    for (i = 0; i < consts.count; ++i) {
+        free(consts.items[i].name);
+    }
+    free(consts.items);
+    for (i = 0; i < locals.count; ++i) {
+        free(locals.items[i].name);
+    }
+    free(locals.items);
+    return rc;
+}
+
 int as_directives_lower(as_parse_result_t *parsed, unsigned address_bytes, char *errbuf, size_t errbuf_sz) {
     size_t i;
 
@@ -1250,5 +1535,8 @@ int as_directives_lower(as_parse_result_t *parsed, unsigned address_bytes, char 
         }
         return -1;
     }
-    return lower_structs(parsed, errbuf, errbuf_sz);
+    if (lower_structs(parsed, errbuf, errbuf_sz) != 0) {
+        return -1;
+    }
+    return lower_local_commons(parsed, errbuf, errbuf_sz);
 }

@@ -84,11 +84,6 @@ int main(int argc, char **argv) {
         fail("csym common symbol mismatch");
     }
 
-    s = find_sym(&tab, "lcsym");
-    if (s == NULL || !s->is_common || s->bind != AS_SYM_BIND_LOCAL || s->common_size != 8 || s->common_align != 2) {
-        fail("lcsym local common symbol mismatch");
-    }
-
     s = find_sym(&tab, "fsym");
     if (s == NULL || !s->defined || s->forward_ref_count == 0 || s->unresolved) {
         fail("forward reference resolution mismatch");

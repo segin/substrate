@@ -1183,7 +1183,9 @@ int as_sections_gather_subsections(as_parse_result_t *parsed, unsigned default_c
         }
     }
     for (i = 0; i < t.count; ++i) {
-        if (t.low[i] < t.high[i]) {
+        /* One subsection alone, with a number, stays where it is and
+         * has its number taken off. */
+        if (t.low[i] < t.high[i] || t.high[i] != 0) {
             any_numbered = 1;
         }
     }
