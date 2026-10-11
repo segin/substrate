@@ -487,6 +487,15 @@ static uint32_t section_group_ordinal(const as_section_state_t *sections, size_t
     if (sections == NULL || index >= sections->count || sections->items[index].group == NULL) {
         return 0;
     }
+    /* A section that is not the first of its group has the number the
+     * first has: it had none, and was left out of the group. */
+    for (i = 0; i < index; ++i) {
+        if (sections->items[i].group != NULL &&
+            strcmp(sections->items[i].group, sections->items[index].group) == 0) {
+            index = i;
+            break;
+        }
+    }
     for (i = 0; i <= index; ++i) {
         const char *group = sections->items[i].group;
         size_t j;
@@ -9812,7 +9821,9 @@ static int section_track_push(section_track_t *st) {
     if (st == NULL || st->current == NULL) {
         return -1;
     }
-    if (st->stack_count == st->stack_cap) {
+    /* Two of each push: the section it was written in, and the one
+     * before that, which a .popsection brings back as well. */
+    if (st->stack_count + 2 > st->stack_cap) {
         size_t ncap = st->stack_cap == 0 ? 8 : st->stack_cap * 2;
         next = (char **)realloc(st->stack, ncap * sizeof(*next));
         if (next == NULL) {
@@ -9825,7 +9836,12 @@ static int section_track_push(section_track_t *st) {
     if (st->stack[st->stack_count] == NULL) {
         return -1;
     }
-    st->stack_count++;
+    st->stack[st->stack_count + 1] = st->previous != NULL ? xstrdup(st->previous) : NULL;
+    if (st->previous != NULL && st->stack[st->stack_count + 1] == NULL) {
+        free(st->stack[st->stack_count]);
+        return -1;
+    }
+    st->stack_count += 2;
     return 0;
 }
 
@@ -9837,21 +9853,23 @@ static int section_track_apply_directive(section_track_t *st, const as_directive
         return 0;
     }
     if (strcmp(d->name, ".previous") == 0) {
+        if (st->previous == NULL) {
+            return 1;
+        }
         tmp = st->current;
         st->current = st->previous;
         st->previous = tmp;
         return 1;
     }
     if (strcmp(d->name, ".popsection") == 0) {
-        if (st->stack_count == 0) {
+        if (st->stack_count < 2) {
             return 1;
         }
-        sec_name = st->stack[--st->stack_count];
-        if (section_track_switch(st, sec_name) != 0) {
-            free((char *)sec_name);
-            return -1;
-        }
-        free((char *)sec_name);
+        st->stack_count -= 2;
+        free(st->current);
+        free(st->previous);
+        st->current = st->stack[st->stack_count];
+        st->previous = st->stack[st->stack_count + 1];
         return 1;
     }
     if (strcmp(d->name, ".code16") == 0) {

@@ -1425,7 +1425,7 @@ static int lower_local_commons(as_parse_result_t *parsed, char *errbuf, size_t e
             /* As GNU as: said, and the directive is no more than that. */
             char said[80];
 
-            snprintf(said, sizeof(said), "\"size (%lld) out of range, ignored\"", size);
+            snprintf(said, sizeof(said), "size (%lld) out of range, ignored", size);
             failed = push_directive(&out, st, ".warning", said, NULL);
             free(name);
             if (failed) {
@@ -1508,6 +1508,7 @@ done:
 }
 
 int as_directives_lower(as_parse_result_t *parsed, unsigned address_bytes, char *errbuf, size_t errbuf_sz) {
+    size_t pushed = 0;
     size_t i;
 
     if (parsed == NULL) {
@@ -1520,6 +1521,29 @@ int as_directives_lower(as_parse_result_t *parsed, unsigned address_bytes, char 
 
         if (st->kind != AS_STMT_DIRECTIVE || st->u.directive.name == NULL) {
             continue;
+        }
+        /* A .popsection with nothing pushed is said and passed over,
+         * as GNU as has it. */
+        if (strcmp(st->u.directive.name, ".pushsection") == 0) {
+            pushed++;
+        } else if (strcmp(st->u.directive.name, ".popsection") == 0) {
+            if (pushed != 0) {
+                pushed--;
+            } else {
+                arg_vec_t said;
+
+                memset(&said, 0, sizeof(said));
+                if (vec_push_text(&said, ".popsection without corresponding .pushsection; ignored") != 0 ||
+                    set_name(&st->u.directive, ".warning") != 0) {
+                    vec_free(&said);
+                    if (errbuf != NULL && errbuf_sz != 0) {
+                        snprintf(errbuf, errbuf_sz, "out of memory");
+                    }
+                    return -1;
+                }
+                set_args(&st->u.directive, &said);
+                continue;
+            }
         }
         rc = lower_one(&st->u.directive, address_bytes, &why);
         if (rc == 0) {

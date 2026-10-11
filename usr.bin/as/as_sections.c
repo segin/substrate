@@ -263,16 +263,18 @@ static ssize_t add_section(as_section_state_t *s, const char *name, unsigned sub
 }
 
 static int ensure_builtins(as_section_state_t *s) {
-    if (add_section(s, ".text", 0, SHF_ALLOC | SHF_EXECINSTR, SHT_PROGBITS, 16) < 0) {
+    /*
+     * The three every object has, each aligned as far as the source
+     * asks and no further: they were 16, 4 and 4 whatever it asked, and
+     * an empty .rodata was a fourth.
+     */
+    if (add_section(s, ".text", 0, SHF_ALLOC | SHF_EXECINSTR, SHT_PROGBITS, 1) < 0) {
         return -1;
     }
-    if (add_section(s, ".data", 0, SHF_ALLOC | SHF_WRITE, SHT_PROGBITS, 4) < 0) {
+    if (add_section(s, ".data", 0, SHF_ALLOC | SHF_WRITE, SHT_PROGBITS, 1) < 0) {
         return -1;
     }
-    if (add_section(s, ".bss", 0, SHF_ALLOC | SHF_WRITE, SHT_NOBITS, 4) < 0) {
-        return -1;
-    }
-    if (add_section(s, ".rodata", 0, SHF_ALLOC, SHT_PROGBITS, 4) < 0) {
+    if (add_section(s, ".bss", 0, SHF_ALLOC | SHF_WRITE, SHT_NOBITS, 1) < 0) {
         return -1;
     }
     s->current_index = 0;
@@ -554,13 +556,16 @@ static int process_section_like(sec_ctx_t *ctx, const as_stmt_t *st, int do_push
     int join_group = 0;
     char *joined_group = NULL;
     int joined_comdat = 0;
+    unsigned entsize = 0;
     size_t next_arg;
 
     if (d->arg_count < 1) {
         return -1;
     }
 
-    if (do_push && stack_push(s, s->current_index) != 0) {
+    /* The section it is written in and the one before: a .popsection
+     * brings both back. */
+    if (do_push && (stack_push(s, s->current_index) != 0 || stack_push(s, s->previous_index) != 0)) {
         return -1;
     }
 
@@ -635,6 +640,13 @@ static int process_section_like(sec_ctx_t *ctx, const as_stmt_t *st, int do_push
 
     if (d->arg_count >= 3 && d->args[2] != NULL && d->args[2][0] != '\0') {
         type = parse_type_string(d->args[2], s->elf64);
+        /* Nor is its type another's the second time. */
+        if (existing >= 0 && s->items[existing].type != type) {
+            set_err(ctx, "%s:%u: %s %s: the section has another type already",
+                    st->file != NULL ? st->file : "<input>", st->line, d->name, name);
+            free(name);
+            return SEC_SAID;
+        }
     } else if (existing >= 0) {
         type = s->items[existing].type;
     } else {
@@ -659,8 +671,14 @@ static int process_section_like(sec_ctx_t *ctx, const as_stmt_t *st, int do_push
     /* After the type: the size of an entry if the section is of them
      * (M), the symbol it is ordered by (o), and its group (G). */
     next_arg = 3;
-    if ((flags & SHF_MERGE) != 0 && d->arg_count > next_arg &&
-        parse_u32_arg(d->args[next_arg], &s->items[s->current_index].entsize) == 0) {
+    if ((flags & SHF_MERGE) != 0 && d->arg_count > next_arg && parse_u32_arg(d->args[next_arg], &entsize) == 0) {
+        if (existing >= 0 && s->items[existing].entsize != 0 && s->items[existing].entsize != entsize) {
+            set_err(ctx, "%s:%u: %s %s: the section's entries have another size already",
+                    st->file != NULL ? st->file : "<input>", st->line, d->name, name);
+            free(name);
+            return SEC_SAID;
+        }
+        s->items[s->current_index].entsize = entsize;
         next_arg++;
     }
     if ((flags & SHF_LINK_ORDER) != 0 && d->arg_count > next_arg) {
@@ -719,6 +737,8 @@ static int process_directive(sec_ctx_t *ctx, const as_stmt_t *st) {
     if (strcmp(d->name, ".text") == 0 || strcmp(d->name, ".data") == 0 || strcmp(d->name, ".bss") == 0 ||
         strcmp(d->name, ".rodata") == 0) {
         unsigned sub = 0;
+        unsigned flags = 0;
+        unsigned type = 0;
 
         /* `.text 1`: a subsection. */
         if (d->arg_count >= 1 && d->args[0] != NULL && d->args[0][0] != '\0') {
@@ -729,7 +749,9 @@ static int process_directive(sec_ctx_t *ctx, const as_stmt_t *st) {
                 return SEC_NO_SUBSECTIONS;
             }
         }
-        if (switch_section(ctx, d->name, 0, 0, 0, 0) != 0) {
+        /* .rodata is there once it is named, and is what its name says. */
+        infer_section_defaults(d->name, &flags, &type);
+        if (switch_section(ctx, d->name, 0, flags, type, 0) != 0) {
             return -1;
         }
         return 0;
@@ -744,13 +766,13 @@ static int process_directive(sec_ctx_t *ctx, const as_stmt_t *st) {
     }
 
     if (strcmp(d->name, ".popsection") == 0) {
-        size_t old;
-        if (s->stack_count == 0) {
-            return -1;
+        /* One with nothing pushed is warned of and taken out before
+         * this (as_directives_lower). */
+        if (s->stack_count < 2) {
+            return 0;
         }
-        old = s->current_index;
+        s->previous_index = s->stack[--s->stack_count];
         s->current_index = s->stack[--s->stack_count];
-        s->previous_index = old;
         return 0;
     }
 

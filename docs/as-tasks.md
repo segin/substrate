@@ -838,20 +838,25 @@ one table of templates; there is one ModRM/SIB/prefix emitter.
 - [x] **AS-T-240** When a subsection number is given by `.text n`, `.data n`, `.section name` with `.subsection n` or `.pushsection name, n`, the assembler shall place the content in that subsection and emit each section's subsections in ascending order as one section.
   Trace: AS-SEC-002.  Verify: T — content in order 0, 1, 2 whatever the source order; one ELF `.text`; an alignment in a subsection applies to the section.  After: 024.
   Done, once, between the parser and everything else (`as_sections_gather_subsections`): the statements are put in the order they are assembled in.  Those of a section's lowest subsection stay where they are; those of every other are moved to the end of the source, each run behind a `.section` naming its section, the runs in order of section and then of number.  The directives stay, without their numbers.  So nothing downstream knows of subsections, a branch between parts is relaxed like any other, and a source without them is not touched.  As GNU has it: any number, 32 bits of it, ordered as signed (`-1` is before 0); `.previous` and `.popsection` return to the part that was left; a numeric label is the nearest in the source (statements carry their place in it once moved); the mode (`.code16`) is what it was where the statement was written.  `test_subsection.sh`, 55 cases, the bytes GNU's.  Not done: a symbol assigned twice (`x = 1` … `x = 2`) is read by a moved statement at its new place, and `.cfi_` directives in a moved part come after their function's `.cfi_endproc`.
-- [ ] **AS-T-241** When `.popsection` is assembled, the assembler shall restore both the current and the previous section saved by the matching `.pushsection`.
+- [x] **AS-T-241** When `.popsection` is assembled, the assembler shall restore both the current and the previous section saved by the matching `.pushsection`.
   Trace: AS-SEC-003.  Verify: T — `.previous` after a pop.
-- [ ] **AS-T-242** When `.popsection` is assembled with nothing pushed, the assembler shall warn and continue.
+  Done.  Two of the three places that follow these directives kept the one section, so `.previous` after a pop went back into the section just popped, and what followed was put with the out-of-line text.  Both keep the pair (`section_track_push` in `as_elf_emit.c`, `process_section_like` in `as_sections.c`); the third, which gathers subsections, did.  `test_section_stack.sh`, 23 cases that GNU passes, with pushes within pushes.  That there are three is 233.
+- [x] **AS-T-242** When `.popsection` is assembled with nothing pushed, the assembler shall warn and continue.
   Trace: AS-SEC-003.  Verify: T — as GNU.
-- [ ] **AS-T-243** When `.section` names a group with the `G` flag, the assembler shall take the group name and linkage from the arguments that follow the entry size where there is one.
+  Done: it was "malformed section directive", and is GNU's warning in GNU's words, the directive being made the warning before anything follows it (`as_directives_lower`).  `test_section_stack.sh`.
+- [x] **AS-T-243** When `.section` names a group with the `G` flag, the assembler shall take the group name and linkage from the arguments that follow the entry size where there is one.
   Trace: AS-SEC-004.  Verify: T — `"aMSG",@progbits,1,grp,comdat`; `"axG",@progbits,grp,comdat`.
-- [ ] **AS-T-244** When two or more sections name one group, the assembler shall emit one group section with each as a member and its signature symbol once.
+  Found done: both have the group and the linkage GNU gives them, and the first its entry size.  Held by `test_section_stack.sh`.  Found beside it and not done: `.section .a,"a",@progbits,unique,3` makes a group named `unique`.
+- [x] **AS-T-244** When two or more sections name one group, the assembler shall emit one group section with each as a member and its signature symbol once.
   Trace: AS-SEC-004.  Verify: T — against `readelf -g` of GNU's object.
+  Done.  Each section of a group but the first was given no group's number (`section_group_ordinal`), so the group held the first alone and the others carried `SHF_GROUP` with nothing to belong to -- a linker that discards a duplicate COMDAT group would have kept them.  Two and three sections, in two groups that interleave: GNU's members, and the signature symbol once.  `test_section_stack.sh`.  The group section is written after its members, where GNU writes it first.
 - [ ] **AS-T-245** If a section flag character or section type is not known, then the assembler shall fail.
   Trace: AS-SEC-005.  Verify: T — `"aq"`, `@bogus`; `@init_array`, `@fini_array`, `@preinit_array`, `@note`, `@nobits`, `@unwind` and a numeric type are accepted with the right type.
 - [ ] **AS-T-246** If a section is declared `M` without an entry size, or `G` without a group name, then the assembler shall fail.
   Trace: AS-SEC-005.  Verify: T.
-- [ ] **AS-T-247** If a section is declared a second time with different flags, type or entry size, then the assembler shall fail, and shall leave the first declaration's attributes.
+- [x] **AS-T-247** If a section is declared a second time with different flags, type or entry size, then the assembler shall fail, and shall leave the first declaration's attributes.
   Trace: AS-SEC-005.  Verify: T — as GNU ("changed section attributes").
+  Done: other flags were refused already; another type was taken (and failed later for a reason of its own, or did not), and another entry size was taken and was the section's from there.  Each is refused on its line; the same again, or the name alone, is taken.  `test_section_stack.sh`.
 - [ ] **AS-T-248** The assembler shall have one validator of alignment arguments, which accepts an alignment of 0 as 1 and any power of two the object format can hold.
   Trace: AS-SEC-006.  Verify: I — the three validators are one; T — `.align 0`, `.p2align 0`, `.balign 1`, the largest value, one more refused.
 - [ ] **AS-T-249** When the argument of an alignment directive, `.zero`, `.skip`, `.space`, `.fill` or `.org` names symbols with absolute values, the assembler shall evaluate it.
@@ -860,10 +865,12 @@ one table of templates; there is one ModRM/SIB/prefix emitter.
   Trace: AS-OBJ-007, AS-DAT-002.  Verify: T — a count naming an undefined symbol; `.skip -1`; the special case for text holding `0b`, `-` and `.` is gone (I).
 - [ ] **AS-T-251** When padding is emitted in a section that holds code and no fill is given, the assembler shall pad with the multi-byte NOP sequences GNU `as` uses for the mode.
   Trace: AS-SEC-006.  Verify: T — pads of 1 to 15 bytes in 32- and 64-bit modes: GNU.  After: 029.
-- [ ] **AS-T-252** The assembler shall give a section the largest alignment asked for within it, and no more.
+- [x] **AS-T-252** The assembler shall give a section the largest alignment asked for within it, and no more.
   Trace: AS-SEC-006.  Verify: T — a `.text` with no alignment directive has alignment 1; `.data` with `.balign 8` has 8: GNU.
-- [ ] **AS-T-253** The assembler shall emit `.text`, `.data` and `.bss` always and any other section only when the source names it.
+  Done: `.text`, `.data` and `.bss` began at 16, 4 and 4 and begin at 1 (`ensure_builtins`).  `test_section_stack.sh`; the programs of `test_compiler_output.sh` link and run as before.
+- [x] **AS-T-253** The assembler shall emit `.text`, `.data` and `.bss` always and any other section only when the source names it.
   Trace: AS-SEC-006.  Verify: T — no empty `.rodata` in the object of an empty source.
+  Done: `.rodata` is made when it is named, by `.section .rodata` or by the `.rodata` directive this assembler has and GNU does not, with the flags its name implies.  `test_section_stack.sh`.
 - [ ] **AS-T-254** The assembler shall accept section, symbol and file names of any length.
   Trace: AS-OBJ-021.  Verify: T — a 301-character and a 5,000-character section name, a relocation into each; no fixed buffer holds a name (I).
 - [ ] **AS-T-255** When `.zero`, `.space`, `.skip` or `.fill` asks for more than 1 MiB, the assembler shall emit it.
@@ -1231,5 +1238,5 @@ is not to be done, 370 is ticked with "removed" and the rest struck.
 | AS-EXT-009 | 185, 325, 332–337 |
 | AS-EXT-010 | 040, 171, 338, 339 (339 closes all of AS-EXT) |
 
-351 tasks: 208 done, 143 open.  Numbers run to 400, with gaps left between
+351 tasks: 215 done, 136 open.  Numbers run to 400, with gaps left between
 sections for tasks found along the way.
