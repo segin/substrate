@@ -199,18 +199,31 @@ static int encode_evex_desc(const avx512f_desc_t *desc, const as_x86_avx512f_ins
             return -1;
         }
         dst = insn->op1.u.reg;
-        if (streq_ci(desc->mnemonic, "vpsrlq")) {
-            src1 = AS_X86_REG_RDX;
-        } else if (streq_ci(desc->mnemonic, "vpsrldq")) {
-            src1 = AS_X86_REG_RBX;
-        } else if (streq_ci(desc->mnemonic, "vpsllq")) {
-            src1 = AS_X86_REG_RSI;
-        } else if (streq_ci(desc->mnemonic, "vpslldq")) {
-            src1 = AS_X86_REG_RDI;
-        } else {
-            src1 = AS_X86_REG_RAX;
-        }
+        src1 = AS_X86_REG_RAX;
         src2 = insn->op2;
+        /*
+         * The shifts by a number are a group: the opcode is 73 for all
+         * four, which one is said by a digit in ModRM's register field,
+         * and the register the result goes to is in vvvv.  The two were
+         * the other way about -- the result's register in ModRM and the
+         * digit in vvvv -- so `vpsllq $1, %zmm2, %zmm1` was no
+         * instruction that there is.  The quadword shifts are EVEX.W1.
+         */
+        {
+            int digit = streq_ci(desc->mnemonic, "vpsrlq")    ? 2
+                        : streq_ci(desc->mnemonic, "vpsrldq") ? 3
+                        : streq_ci(desc->mnemonic, "vpsllq")  ? 6
+                        : streq_ci(desc->mnemonic, "vpslldq") ? 7
+                                                              : -1;
+
+            if (digit >= 0) {
+                src1 = insn->op1.u.reg;
+                dst = (as_x86_reg_t)digit;
+                if (digit == 2 || digit == 6) {
+                    ev.evex_w = 1;
+                }
+            }
+        }
         break;
 
     case AVX512F_FORM_RRRI:

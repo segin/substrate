@@ -643,17 +643,19 @@ one table of templates; there is one ModRM/SIB/prefix emitter.
   Trace: AS-SEL-010.  Verify: T — `movaps (%bx),%xmm0` in 32-bit mode (16-bit ModRM with `67`), `fldl (%eax)` in 64-bit mode (`67 dd 00`), `movl (%rax),%ebx` in 32-bit mode refused.  After: 162.
   Mostly done, ahead of 162, for being silent.  64-bit code had no `67` on anything: `movl (%eax),%ecx` read through `%rax`.  Every encoder and emitter now has it, after a segment override as GNU has it, and a symbol's displacement behind it is found and is `R_X86_64_32`.  A 16-bit address in 64-bit code and a 64-bit one in 32-bit code are refused.  In 32-bit code the main encoder's 16-bit addresses had a symbol's relocation written four bytes wide over the instruction (`movl %eax,sym(%bx)` was `67 00 00 00 00`); it is two bytes and `R_386_16`.  `test_address_size.sh`, 68 cases; 290 more lines of the corpora are GNU's.  With it: `leal sym(%rax),%edx` has GNU's `R_X86_64_32`.
   Left, and why this is not ticked: the x87, SSE and VEX emitters have no 16-bit ModRM table, so `movaps (%bx),%xmm0` and `fldl (%bx)` in 32-bit code -- which they wrote as `(%ebx)` -- are refused where GNU assembles them.  That wants the one emitter of 162.
-- [ ] **AS-T-177** If the base and index of a memory operand are of different widths, then the assembler shall refuse the operand, but for a vector index.
+- [x] **AS-T-177** If the base and index of a memory operand are of different widths, then the assembler shall refuse the operand, but for a vector index.
   Trace: AS-SEL-010, AS-EXT-009.  Verify: T — `(%eax,%rbx)` refused; `(%rax,%xmm2,4)` accepted for a gather.  After: 162.
+  Done, ahead of 162: `(%eax,%rbx)` was refused already, and so was every gather, a vector register being a width that the base's was not.  A vector index makes no width, and is taken for an instruction that gathers or scatters and for no other -- `movl (%rax,%xmm1),%ecx` is refused where, the width check gone, it would have been `(%rax,%rcx)`.  `vgatherdps`, `vpgatherdd`, `vgatherqpd` and the EVEX `vgatherdps` with a mask are GNU's in both modes (`test_addressing_forms.sh`).  Not done: a scatter, whose mask is written on its memory operand and is refused there.
 - [x] **AS-T-394** When the displacement of a memory operand is written and is the constant zero, the assembler shall encode the operand with no displacement, where the base register allows it.
   Trace: found while doing 048; no audit entry.  Verify: T — `movl 0(%eax),%ecx` (`8B 08`), `nopw 0(%rax,%rax,1)` (`66 0F 1F 04 00`), `movl 0(%ebp),%ecx` (`8B 4D 00`), `movl sym(%eax),%ecx` with `sym = 0` (four bytes still): GNU.
   Done where an operand is converted for the encoders, so for all of them at once, and in the emitter's own ModRM code.  With it, the other way about: `(%ebp)`, `(%rbp)` and `(%r13)`, which must have a displacement, had four bytes of zero and have one.  442 more lines of the corpora are GNU's bytes.  `test_insn_forms.sh`, 32 cases.
 
 ### D.3 Forms that are missing
 
-- [ ] **AS-T-178** When an x87 arithmetic-and-pop instruction is written with the operand orders GNU `as` accepts, the assembler shall encode it, and shall refuse the orders GNU refuses.
+- [x] **AS-T-178** When an x87 arithmetic-and-pop instruction is written with the operand orders GNU `as` accepts, the assembler shall encode it, and shall refuse the orders GNU refuses.
   Trace: AS-SEL-007.  Verify: T — `faddp %st,%st(1)`, `faddp`, `fsubp %st,%st(2)`, `fsubrp`, `fmulp`, `fdivp`, `fdivrp`; `fsubp %st(2),%st` refused.  After: 161.
   In part, ahead of 161: every order GNU accepts is encoded, in both modes (`test_x87_forms.sh`).  `fsubp %st(1),%st` and its three fellows, which GNU refuses, are still accepted: the older encoder takes them when this one declines.
+  Done: the four -- `fsubp`, `fsubrp`, `fdivp`, `fdivrp` with `%st(i),%st` -- are refused before either encoder is asked, in 32-bit code where they were assembled.  All 96 combinations of the six mnemonics and eight operand forms end as GNU's do, in both modes (`test_addressing_forms.sh` holds the named ones).
 - [ ] **AS-T-179** When an x87 instruction of the following is written, the assembler shall encode it in 32- and 64-bit modes: `fabs`, `fchs`, `fld1`, `fldz`, `fldpi`, `fldl2e`, `fldl2t`, `fldlg2`, `fldln2`, `fsqrt`, `fsin`, `fcos`, `fsincos`, `fptan`, `fpatan`, `frndint`, `fscale`, `fprem`, `fprem1`, `fxtract`, `f2xm1`, `fyl2x`, `fyl2xp1`, `ftst`, `fxam`, `fcompp`, `fucompp`, `fninit`, `finit`, `fnclex`, `fclex`, `fstsw`, `fnstsw`, `fstcw`, `fnstcw`, `fldcw`, `fsave`, `fnsave`, `frstor`, `fstenv`, `fnstenv`, `fldenv`, `fildq`, `fistpq`, `fisttpq`, `fxch`, `fcom`, `fcomp`, `fucom`, `fucomp`, `fcomi`, `fcomip`, `fucomi`, `fucomip`, `fcmovcc`, `ffree`, `fwait`, `fnop`, `fdecstp`, `fincstp`, and `fld`, `fst`, `fstp`, `fild`, `fist`, `fistp`, `fadd`, `fsub`, `fsubr`, `fmul`, `fdiv`, `fdivr`, `fiadd` and their fellows with `s`, `l`, `t` and register operands.
   Trace: AS-SEL-007, AS-X86-001.  Verify: T — a corpus of every listed mnemonic with each operand form GNU accepts.  After: 161.
   In part: the 36 that take no operand, in both modes (`test_x87_no_operand.sh`), ahead of 161 because `fldz` stopped every 32-bit program a compiler writes; then the register and memory forms (`test_x87_forms.sh`, 653 lines against GNU).  In 32-bit mode all 447 forms of the x87 corpus that GNU accepts are identical to it.  In 64-bit mode 367 of 447 are; the 74 refused are memory operands the 64-bit ModRM emitter cannot do — an index register, a symbol with a base, a bare symbol — which is 162 and 194.
@@ -697,9 +699,10 @@ one table of templates; there is one ModRM/SIB/prefix emitter.
   Trace: AS-OBJ-001, AS-EXT-004 (note 8).  Verify: T — `movl $5,sym`, `cmpl $0,sym`, `movb $1,sym`, `shll $2,sym`, `testl $1,sym+4`, `pinsrb $3,foo(%rip),%xmm2`: GNU.  After: 191.
 - [x] **AS-T-193** When a PC-relative field is followed by n more bytes of its instruction, the assembler shall give the relocation an addend of −(field width + n).
   Trace: AS-OBJ-001.  Verify: T — `movl $5,sym(%rip)` (−8), `cmpb $1,sym(%rip)` (−5), `cmpw $0x1234,sym(%rip)` (−6): GNU.  After: 191.
-- [ ] **AS-T-194** When a memory operand has a symbolic displacement, the assembler shall encode a 32-bit displacement field (16-bit in 16-bit addressing).
+- [x] **AS-T-194** When a memory operand has a symbolic displacement, the assembler shall encode a 32-bit displacement field (16-bit in 16-bit addressing).
   Trace: AS-SEL-002, AS-OBJ-002, AS-EXT-004 (note 6).  Verify: T — `movaps sym(%ebx),%xmm0`, `movdqa sym(%ebp),%xmm1`, `flds sym(%ebx)`, `fnstcw sym(%ebx)`, `haddps foo(%rdx),%xmm2`, `vmulsd foo+4(%rdx),%xmm2,%xmm3`, `andn foo+4(%rdx),%ebx,%ecx`: GNU.  After: 190.
   In part, ahead of 190: the ModRM emitter of the 32-bit instruction-selection code keeps 32 bits for a displacement with a symbol in it, which covers the SIMD, x87, `cmpxchg` and prefetch forms in 32-bit mode (`test_symbolic_disp.sh`).  Still open: the nine copies in the extension files (`haddps`, `vmulsd`, `andn` above) and the 64-bit selection code.
+  Found done when the Verify line was run again: all seven instructions are GNU's bytes and relocations, the three of the extension files among them, each with `R_X86_64_32S` on a four-byte field.  Held by `test_addressing_forms.sh`.
 - [x] **AS-T-195** When an immediate is symbolic, the assembler shall encode an immediate field of the operand's full width.
   Met ahead of 190, in place: the operand carries `imm_symbolic` and no encoder takes the one-byte form for it; the relocation's width is read from the encoded opcode (`x86_imm_field_width`).  `test_reloc_field.sh`.  Not GNU's bytes, though right: the accumulator's short forms (`05`, `a9`) are not used, and `mov $sym, %rbx` is the 32-bit move with `R_X86_64_32`.
   Trace: AS-OBJ-002.  Verify: T — `movq $sym,8(%rsp)` (`imm32`, `R_X86_64_32S`), `cmpq $gtab+64,%rax`, `addl $sym,%eax` (not the `imm8` form), `pushl $sym`: GNU.  After: 190.
@@ -708,10 +711,12 @@ one table of templates; there is one ModRM/SIB/prefix emitter.
 - [x] **AS-T-197** When an instruction holds two symbolic fields, the assembler shall emit a relocation for each.
   Trace: AS-OBJ-015.  Verify: T — `movl $a,b`, `cmpl $a,b(%ebx)`: GNU.  After: 191.
   Done, ahead of 191: both, and `movw`, `movb`, `addl` with a symbol on each side, `movq`, `cmpl`, `addw` and `imull` in 64-bit code, have GNU's two relocations (`test_reloc_operators.sh`); 129 lines left the 64-bit baseline and 51 the 32-bit.  Two things GNU refuses came to light when the refusal went, and are refused for their own reasons now: `sym(%rip,%rax,2)`, the instruction pointer taking no index, and a thread-local operator in an instruction with a second symbol.  The relocations are written in the order of the operands, where GNU writes them in the order of their offsets.
-- [ ] **AS-T-198** When a 64-bit instruction refers to an absolute symbol through a 32-bit displacement, the assembler shall emit `R_X86_64_32S` on that displacement.
+- [x] **AS-T-198** When a 64-bit instruction refers to an absolute symbol through a 32-bit displacement, the assembler shall emit `R_X86_64_32S` on that displacement.
   Trace: AS-EXT-004 (note 7).  Verify: T — `pandn foo,%xmm2`, `popcnt foo,%ebx`, `xsave foo`, `vpunpckldq foo,%ymm2,%ymm3`: GNU.  After: 191.
-- [ ] **AS-T-199** When a memory operand of any x86 instruction is written with a segment override, the assembler shall emit the segment prefix.
+  Found done: the four are GNU's, `R_X86_64_32S` and the SIB form of an absolute address.  Held by `test_addressing_forms.sh`.
+- [x] **AS-T-199** When a memory operand of any x86 instruction is written with a segment override, the assembler shall emit the segment prefix.
   Trace: AS-EXT-004 (note 9).  Verify: T — `pshufb %fs:(%rax),%xmm2`; one instruction of each of SSE3, SSSE3, SSE4.1, SSE4.2, BMI1, BMI2, AVX, AVX2, FMA, AVX-512 with `%fs:` and `%gs:`: GNU.  After: 162.
+  Found done for the prefix: one instruction of each of the ten is GNU's with `%fs:` or `%gs:` (`test_addressing_forms.sh`).  The AVX-512 one is what showed that its displacement was wrong, which is 319.
 
 ### E.1 Relocation operators and types
 
@@ -953,6 +958,7 @@ empty for the family named.
   Trace: AS-EXT-006.  Verify: T — destinations and sources 8–15 and 16–31 for one instruction of each EVEX form.  After: 162.
 - [ ] **AS-T-319** When an EVEX memory operand has a displacement, the assembler shall use the compressed 8-bit displacement where the displacement is a multiple of the instruction's N within range, and a 32-bit one otherwise.
   Trace: AS-EXT-006.  Verify: T — `vandpd 8(%rsp),…` with EVEX forced, `vaddps 64(%rax),%zmm1,%zmm2` (disp8 = 1), `vaddps 8(%rax),%zmm1,%zmm2` (disp32), broadcast, scalar, half- and quarter-vector tuples: GNU.  After: 162.
+  In part, ahead of 162, because it was not long but wrong.  The 8-bit displacement of an EVEX instruction is multiplied by N; it was written as a number of bytes, so `vpaddd 64(%rax),%zmm1,%zmm2` added what is at 4096(%rax), and every AVX-512 instruction with a small displacement read or wrote the wrong memory, with nothing said.  The encoder is given N or told it is not known.  With a broadcast N is the element's size, and the compressed form is GNU's; without, nobody yet says what N is, and the displacement is of 32 bits: the right address, longer than GNU's.  `test_evex_disp.sh` reads the displacement back out of the object with a disassembler, for 17 instructions, and holds the forms that are GNU's to its bytes.  To do: N for each instruction's tuple, from the template of 161.  Found with it: the EVEX shifts by a number (`vpsllq $1,%zmm2,%zmm1`) had the result's register and the group's digit in each other's fields, and were no instruction there is; mended, and in the same test.
 - [ ] **AS-T-320** When registers `%xmm16`–`31`, `%ymm16`–`31` or `%zmm16`–`31` are written in 64-bit mode, the assembler shall accept them and choose EVEX.
   Trace: AS-EXT-006.  Verify: T — `vaddps %zmm17,%zmm18,%zmm19`, `vmovaps %xmm16,%xmm1`.  After: 160.
 - [ ] **AS-T-321** When a compare or test writes an opmask register, the assembler shall take the write mask from the `{%kN}` decorator alone.
@@ -1201,5 +1207,5 @@ is not to be done, 370 is ticked with "removed" and the rest struck.
 | AS-EXT-009 | 185, 325, 332–337 |
 | AS-EXT-010 | 040, 171, 338, 339 (339 closes all of AS-EXT) |
 
-351 tasks: 192 done, 159 open.  Numbers run to 400, with gaps left between
+351 tasks: 197 done, 154 open.  Numbers run to 400, with gaps left between
 sections for tasks found along the way.

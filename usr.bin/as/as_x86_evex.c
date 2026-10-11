@@ -69,8 +69,21 @@ static int is_disp8(int32_t v) {
     return v >= -128 && v <= 127;
 }
 
+/*
+ * An EVEX instruction's 8-bit displacement is not a number of bytes: the
+ * processor multiplies it by N, which is the size of what the
+ * instruction reads -- the vector, or one element of it, or a half or a
+ * quarter, by the instruction.  `disp8_n` is that N where it is known
+ * and 0 where it is not.
+ *
+ * It was written as a number of bytes always.  `vpaddd 64(%rax), %zmm1,
+ * %zmm2` was assembled to add what is at 4096(%rax), and every AVX-512
+ * instruction with a small displacement read or wrote the wrong memory.
+ * Where N is not known the displacement is of 32 bits, which is longer
+ * than it need be and is what was written.
+ */
 static int modrm_sib_disp64(evex_ctx_t *ctx, as_x86_reg_t reg_field, const as_x86_operand_t *rm_op,
-                            uint8_t *x, uint8_t *b) {
+                            uint8_t *x, uint8_t *b, unsigned disp8_n) {
     if (rm_op->kind == AS_X86_OP_REG) {
         *b |= reg_ext3(rm_op->u.reg);
         return emit8(ctx, (uint8_t)(0xc0u | (reg_low3(reg_field) << 3) | reg_low3(rm_op->u.reg)));
@@ -87,6 +100,7 @@ static int modrm_sib_disp64(evex_ctx_t *ctx, as_x86_reg_t reg_field, const as_x8
         uint8_t rm = 0;
         uint8_t modrm;
         uint8_t sib = 0;
+        uint8_t disp8 = 0;
         int needs_sib = 0;
 
         if (m->scale != 0 && m->scale != 1 && m->scale != 2 && m->scale != 4 && m->scale != 8) {
@@ -141,8 +155,13 @@ static int modrm_sib_disp64(evex_ctx_t *ctx, as_x86_reg_t reg_field, const as_x8
             mod = 2;
         } else if (!m->has_disp && reg_low3(m->base) != AS_X86_REG_RBP) {
             mod = 0;
-        } else if (m->has_disp && is_disp8(m->disp)) {
+        } else if (m->has_disp && m->disp == 0) {
+            /* Nothing, times anything. */
             mod = 1;
+        } else if (m->has_disp && disp8_n != 0 && m->disp % (int32_t)disp8_n == 0 &&
+                   is_disp8(m->disp / (int32_t)disp8_n)) {
+            mod = 1;
+            disp8 = (uint8_t)(m->disp / (int32_t)disp8_n);
         } else {
             mod = 2;
         }
@@ -169,7 +188,7 @@ static int modrm_sib_disp64(evex_ctx_t *ctx, as_x86_reg_t reg_field, const as_x8
             return -1;
         }
         if (mod == 1) {
-            return emit8(ctx, (uint8_t)m->disp);
+            return emit8(ctx, disp8);
         }
         if (mod == 2 || (mod == 0 && reg_low3(m->base) == AS_X86_REG_RBP && !m->has_disp)) {
             return emit32(ctx, (uint32_t)(m->has_disp ? m->disp : 0));
@@ -218,7 +237,12 @@ int as_x86_encode_evex_3op(const as_x86_evex_insn_t *insn, uint8_t *out, size_t 
     b = 0;
     v4 = reg_ext4(insn->src1);
 
-    if (emit8(&ctx, insn->opcode) != 0 || modrm_sib_disp64(&ctx, insn->dst, &insn->src2, &x, &b) != 0) {
+    /* With a broadcast, what is read is one element, of 4 bytes or of
+     * 8 by W; without, how much is the instruction's to say, and this
+     * does not know. */
+    if (emit8(&ctx, insn->opcode) != 0 ||
+        modrm_sib_disp64(&ctx, insn->dst, &insn->src2, &x, &b,
+                         insn->broadcast ? (insn->evex_w ? 8u : 4u) : insn->disp8_n) != 0) {
         return -1;
     }
 

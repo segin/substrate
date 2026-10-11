@@ -931,6 +931,18 @@ static unsigned parse_x86_reg_bits(const char *name) {
     return r->width;
 }
 
+/* How wide an address an index register makes: its own width, but for a
+ * vector register, which is the index of a gather and makes none -- the
+ * address is as wide as its base. */
+static unsigned x86_index_addr_bits(const char *name) {
+    const as_x86_reg_info_t *r = as_x86_reg_find(name);
+
+    if (r != NULL && (r->cls == AS_X86_REGCLASS_XMM || r->cls == AS_X86_REGCLASS_YMM || r->cls == AS_X86_REGCLASS_ZMM)) {
+        return 0;
+    }
+    return parse_x86_reg_bits(name);
+}
+
 static unsigned infer_x86_mem_addr_bits(const as_mem_operand_t *mem) {
     unsigned base_bits = 0;
     unsigned index_bits = 0;
@@ -942,7 +954,7 @@ static unsigned infer_x86_mem_addr_bits(const as_mem_operand_t *mem) {
         base_bits = parse_x86_reg_bits(mem->base_reg);
     }
     if (mem->index_reg != NULL) {
-        index_bits = parse_x86_reg_bits(mem->index_reg);
+        index_bits = x86_index_addr_bits(mem->index_reg);
     }
     if (base_bits != 0 && index_bits != 0 && base_bits != index_bits) {
         return 0;
@@ -8231,7 +8243,7 @@ static int convert_operand_x86(const as_operand_t *op, const char *mnemonic, as_
     case AS_OPERAND_MEMORY:
         {
             unsigned base_bits = op->u.mem.base_reg != NULL ? parse_x86_reg_bits(op->u.mem.base_reg) : 0;
-            unsigned index_bits = op->u.mem.index_reg != NULL ? parse_x86_reg_bits(op->u.mem.index_reg) : 0;
+            unsigned index_bits = op->u.mem.index_reg != NULL ? x86_index_addr_bits(op->u.mem.index_reg) : 0;
             unsigned addr_bits = infer_x86_mem_addr_bits(&op->u.mem);
 
             if (base_bits != 0 && index_bits != 0 && base_bits != index_bits) {
@@ -11238,6 +11250,43 @@ static int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_st
                     bare.u.instr.mnemonic = base;
                     return encode_x86_stmt(ctx, cfg, &bare, code, code_cap, code_len, encerr, encerr_sz);
                 }
+            }
+        }
+    }
+
+    /*
+     * `fsubp %st(1), %st`: a subtraction or a division that pops puts
+     * its result where it does not pop from, which is %st(i) and never
+     * the top; GNU as refuses the top for its destination.  (An addition
+     * or a multiplication is the same either way about, and is taken.)
+     */
+    if (st != NULL && st->kind == AS_STMT_INSTRUCTION && st->u.instr.mnemonic != NULL &&
+        st->u.instr.operand_count == 2 && (cfg == NULL || !cfg->intel_syntax)) {
+        const char *mn = st->u.instr.mnemonic;
+        const as_operand_t *src = &st->u.instr.operands[0];
+        const as_operand_t *dst = &st->u.instr.operands[1];
+
+        if ((streq_ci(mn, "fsubp") || streq_ci(mn, "fsubrp") || streq_ci(mn, "fdivp") || streq_ci(mn, "fdivrp")) &&
+            src->kind == AS_OPERAND_COPROCESSOR && dst->kind == AS_OPERAND_COPROCESSOR && src->u.coproc != NULL &&
+            dst->u.coproc != NULL && (streq_ci(dst->u.coproc, "st") || streq_ci(dst->u.coproc, "st(0)")) &&
+            !(streq_ci(src->u.coproc, "st") || streq_ci(src->u.coproc, "st(0)"))) {
+            snprintf(encerr, encerr_sz, "'%s' leaves its result in %%st(i), and is given %%st for it", mn);
+            return -1;
+        }
+    }
+
+    /* A vector register is an index in a gather or a scatter and in
+     * nothing else. */
+    if (st != NULL && st->kind == AS_STMT_INSTRUCTION && st->u.instr.mnemonic != NULL) {
+        for (i = 0; i < st->u.instr.operand_count; ++i) {
+            const as_operand_t *op = &st->u.instr.operands[i];
+
+            if (op->kind == AS_OPERAND_MEMORY && op->u.mem.index_reg != NULL &&
+                x86_index_addr_bits(op->u.mem.index_reg) == 0 && parse_x86_reg_bits(op->u.mem.index_reg) != 0 &&
+                strstr(st->u.instr.mnemonic, "gather") == NULL && strstr(st->u.instr.mnemonic, "scatter") == NULL) {
+                snprintf(encerr, encerr_sz, "'%s' has a vector register for an index, and is no gather or scatter",
+                         st->u.instr.mnemonic);
+                return -1;
             }
         }
     }

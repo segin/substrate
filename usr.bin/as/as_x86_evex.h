@@ -38,6 +38,14 @@ typedef struct {
     int sae;
     int rounding_mode; /* -1 or 0..3 (rn,rd,ru,rz) */
     uint8_t evex_l2;   /* 0..3 for L'L */
+    /*
+     * What an 8-bit displacement of a memory operand is multiplied by,
+     * when the operand is not a broadcast: the bytes the instruction
+     * reads there.  0 if whoever filled this in does not know, and then
+     * a displacement is of 32 bits.  (With a broadcast it is one
+     * element's size, which the encoder knows.)
+     */
+    unsigned disp8_n;
 } as_x86_evex_insn_t;
 
 int as_x86_encode_evex_3op(const as_x86_evex_insn_t *insn, uint8_t *out, size_t out_cap,

@@ -62,7 +62,6 @@ movb %al,sym@GOTTPOFF(%ebx)
 movw sym@GOTTPOFF(%ebx),%bx
 movb %al,sym@GOT
 fldl (%al)
-fldl (%eax,%xmm0)
 fldl (%rax)
 movb $1,(%r8d)
 movw $0x1234,(%r8d)
@@ -624,14 +623,10 @@ fst (%ebx)
 fstp (%ebx)
 fadd (%ebx)
 fsub (%ebx)
-fsubp %st(1),%st
 fsubr (%ebx)
-fsubrp %st(1),%st
 fmul (%ebx)
 fdiv (%ebx)
-fdivp %st(1),%st
 fdivr (%ebx)
-fdivrp %st(1),%st
 fcom (%ebx)
 fcomp (%ebx)
 fucomip

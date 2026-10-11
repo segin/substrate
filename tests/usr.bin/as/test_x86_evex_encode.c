@@ -72,7 +72,11 @@ int main(void) {
     in.evex_l2 = 2;
     in.rounding_mode = -1;
     {
-        const uint8_t exp[] = {0x62, 0xc1, 0x34, 0xdb, 0x58, 0x44, 0x24, 0x20};
+        /* 0x20 from the base, with a broadcast of single precision: the
+         * 8-bit displacement counts elements of four bytes, and is 8.
+         * (This held the encoder to 0x20, which a processor reads as
+         * 0x80: what GNU as writes is 62 c1 34 db 58 44 24 08.) */
+        const uint8_t exp[] = {0x62, 0xc1, 0x34, 0xdb, 0x58, 0x44, 0x24, 0x08};
         check_evex(&in, exp, sizeof(exp));
     }
 
