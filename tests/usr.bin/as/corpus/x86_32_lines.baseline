@@ -612,28 +612,12 @@ inb %dx,%ax
 outb %ax,%dx
 in $sym,%al
 out %al,$sym
-fld (%ebx)
-fst (%ebx)
-fstp (%ebx)
-fadd (%ebx)
-fsub (%ebx)
-fsubr (%ebx)
-fmul (%ebx)
-fdiv (%ebx)
-fdivr (%ebx)
-fcom (%ebx)
-fcomp (%ebx)
 fucomip
 fcomi
 fucomi
 fnstsw %eax
 fldenvs (%eax)
 fnstenvl (%eax)
-fsetpm
-fdisi
-feni
-fneni
-fndisi
 .code16 | push %eax
 .code16 | lgdt sym
 .code16 | lgdtl sym

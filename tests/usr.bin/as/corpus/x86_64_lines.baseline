@@ -823,23 +823,13 @@ inb %dx,%ax
 outb %ax,%dx
 in $sym,%al
 out %al,$sym
-fst (%rbx)
-fstp (%rbx)
-fisttps sym
-fisttpll sym
 fucomip
 fcomi
 fucomi
 fcmovb %st(1)
 fnstsw %eax
-fstcw sym
 fldenvs (%rax)
 fnstenvl (%rax)
-fsetpm
-fdisi
-feni
-fneni
-fndisi
 .code32 | incl %eax
 .code32 | pusha
 .code32 | movl sym,%eax

@@ -3747,13 +3747,17 @@ static int emit_x86_64_1byte_regfield_memop(unsigned char opcode, unsigned reg_f
     long long disp = 0;
     int has_disp = 0;
     int rip_relative = 0;
+    int no_base = 0;
+    int has_index = 0;
+    unsigned ireg = 0;
+    unsigned scale_bits = 0;
     unsigned char rex;
     unsigned char modrm;
     unsigned char mod;
     int need_sib;
     size_t pos = 0;
 
-    if (mem == NULL || out == NULL || out_len == NULL || out_cap < 8) {
+    if (mem == NULL || out == NULL || out_len == NULL || out_cap < 12) {
         return -1;
     }
     if (mem->segment_reg != NULL) {
@@ -3783,17 +3787,46 @@ static int emit_x86_64_1byte_regfield_memop(unsigned char opcode, unsigned reg_f
         *out_len = pos;
         return 0;
     }
-    if (mem->base_reg == NULL) {
+    if (mem->base_reg == NULL && mem->index_reg == NULL) {
         return -1;
     }
-    if (streq_ci(mem->base_reg, "rip") || streq_ci(mem->base_reg, "%rip")) {
+    if (mem->base_reg == NULL) {
+        /* An index and no base: the SIB byte names no base, and the
+         * displacement is of four bytes whatever it is. */
+        no_base = 1;
+        base = AS_X86_REG_RBP;
+    } else if (streq_ci(mem->base_reg, "rip") || streq_ci(mem->base_reg, "%rip")) {
         rip_relative = 1;
         base = AS_X86_REG_RBP;
     } else if (parse_x86_reg(mem->base_reg, &base) != 0) {
         return -1;
     }
+    /*
+     * An index.  There was none: an x87 instruction or a move of a
+     * segment register with `(%rax,%rbx,8)` was "unsupported".
+     */
     if (mem->index_reg != NULL) {
-        return -1;
+        as_x86_reg_t index;
+
+        int iw = x86_reg_width_bits(mem->index_reg);
+
+        if (rip_relative || parse_x86_reg(mem->index_reg, &index) != 0 || ((unsigned)index & 15u) == 4u) {
+            return -1;
+        }
+        /* Of 32 bits or 64, and of the width the base is. */
+        if ((iw != 32 && iw != 64) || (!no_base && x86_reg_width_bits(mem->base_reg) != iw)) {
+            return -1;
+        }
+        switch (mem->scale) {
+        case 0:
+        case 1: scale_bits = 0; break;
+        case 2: scale_bits = 1; break;
+        case 4: scale_bits = 2; break;
+        case 8: scale_bits = 3; break;
+        default: return -1;
+        }
+        ireg = (unsigned)index & 15u;
+        has_index = 1;
     }
     if (mem->disp != NULL) {
         if (eval_expr_const(mem->disp, &disp) != 0) {
@@ -3807,15 +3840,15 @@ static int emit_x86_64_1byte_regfield_memop(unsigned char opcode, unsigned reg_f
     }
 
     breg = (unsigned)base & 15u;
-    if (rip_relative) {
+    if (rip_relative || no_base) {
         breg = 5u;
     }
-    need_sib = ((breg & 7u) == 4u) ? 1 : 0;
+    need_sib = (has_index || (breg & 7u) == 4u) ? 1 : 0;
     if (!has_disp && ((breg & 7u) == 5u)) {
         has_disp = 1;
         disp = 0;
     }
-    if (rip_relative) {
+    if (rip_relative || no_base) {
         mod = 0;
         has_disp = 1;
     } else if (!has_disp) {
@@ -3827,17 +3860,17 @@ static int emit_x86_64_1byte_regfield_memop(unsigned char opcode, unsigned reg_f
         mod = 2;
     }
 
-    rex = (unsigned char)(0x40u | ((breg & 8u) ? 0x01u : 0u));
+    rex = (unsigned char)(0x40u | ((breg & 8u) && !no_base ? 0x01u : 0u) | ((has_index && (ireg & 8u)) ? 0x02u : 0u));
     if (rex != 0x40u) {
         out[pos++] = rex;
     }
     out[pos++] = opcode;
-    modrm = (unsigned char)((mod << 6) | ((reg_field & 7u) << 3) | (breg & 7u));
+    modrm = (unsigned char)((mod << 6) | ((reg_field & 7u) << 3) | (need_sib ? 4u : (breg & 7u)));
     out[pos++] = modrm;
     if (need_sib) {
-        out[pos++] = (unsigned char)(0x20u | (breg & 7u));
+        out[pos++] = (unsigned char)((scale_bits << 6) | ((has_index ? (ireg & 7u) : 4u) << 3) | (breg & 7u));
     }
-    if (rip_relative || mod == 2) {
+    if (rip_relative || no_base || mod == 2) {
         out[pos++] = (unsigned char)(disp & 0xff);
         out[pos++] = (unsigned char)((disp >> 8) & 0xff);
         out[pos++] = (unsigned char)((disp >> 16) & 0xff);
@@ -4016,6 +4049,15 @@ static int lookup_x86_64_x87_mem16_32_64(const char *mnemonic, unsigned char *op
     return -1;
 }
 
+/* An address written bare: a symbol, or a number with no `$` (which the
+ * parser gives the kind of an immediate, there being no other). */
+static int operand_is_bare_address(const as_operand_t *op) {
+    if (op->kind == AS_OPERAND_LABEL_REF) {
+        return 1;
+    }
+    return op->kind == AS_OPERAND_IMMEDIATE && op->raw != NULL && op->raw[0] != '$';
+}
+
 /*
  * The x87 instructions on the register stack, in AT&T syntax, and the
  * memory forms that had no entry anywhere.
@@ -4066,6 +4108,8 @@ static int emit_x87_forms(const as_instruction_t *insn, int intel_syntax, int is
     static const struct { const char *name; unsigned char wait, op, digit; } memory[] = {
         { "fadds", 0, 0xd8, 0 }, { "faddl", 0, 0xdc, 0 }, { "fmuls", 0, 0xd8, 1 }, { "fmull", 0, 0xdc, 1 },
         { "fcoms", 0, 0xd8, 2 }, { "fcoml", 0, 0xdc, 2 }, { "fcomps", 0, 0xd8, 3 }, { "fcompl", 0, 0xdc, 3 },
+        { "fadd", 0, 0xd8, 0 }, { "fmul", 0, 0xd8, 1 }, { "fcom", 0, 0xd8, 2 }, { "fcomp", 0, 0xd8, 3 },
+        { "fsub", 0, 0xd8, 4 }, { "fsubr", 0, 0xd8, 5 }, { "fdiv", 0, 0xd8, 6 }, { "fdivr", 0, 0xd8, 7 },
         { "fsubs", 0, 0xd8, 4 }, { "fsubl", 0, 0xdc, 4 }, { "fsubrs", 0, 0xd8, 5 }, { "fsubrl", 0, 0xdc, 5 },
         { "fdivs", 0, 0xd8, 6 }, { "fdivl", 0, 0xdc, 6 }, { "fdivrs", 0, 0xd8, 7 }, { "fdivrl", 0, 0xdc, 7 },
         { "fiaddl", 0, 0xda, 0 }, { "fiadds", 0, 0xde, 0 }, { "fiadd", 0, 0xde, 0 },
@@ -4076,8 +4120,8 @@ static int emit_x87_forms(const as_instruction_t *insn, int intel_syntax, int is
         { "fisubrl", 0, 0xda, 5 }, { "fisubrs", 0, 0xde, 5 }, { "fisubr", 0, 0xde, 5 },
         { "fidivl", 0, 0xda, 6 }, { "fidivs", 0, 0xde, 6 }, { "fidiv", 0, 0xde, 6 },
         { "fidivrl", 0, 0xda, 7 }, { "fidivrs", 0, 0xde, 7 }, { "fidivr", 0, 0xde, 7 },
-        { "flds", 0, 0xd9, 0 }, { "fldl", 0, 0xdd, 0 }, { "fldt", 0, 0xdb, 5 },
-        { "fsts", 0, 0xd9, 2 }, { "fstl", 0, 0xdd, 2 },
+        { "flds", 0, 0xd9, 0 }, { "fldl", 0, 0xdd, 0 }, { "fldt", 0, 0xdb, 5 }, { "fld", 0, 0xd9, 0 },
+        { "fsts", 0, 0xd9, 2 }, { "fstl", 0, 0xdd, 2 }, { "fst", 0, 0xd9, 2 }, { "fstp", 0, 0xd9, 3 },
         { "fstps", 0, 0xd9, 3 }, { "fstpl", 0, 0xdd, 3 }, { "fstpt", 0, 0xdb, 7 },
         { "filds", 0, 0xdf, 0 }, { "fildl", 0, 0xdb, 0 }, { "fild", 0, 0xdf, 0 },
         { "fildq", 0, 0xdf, 5 }, { "fildll", 0, 0xdf, 5 },
@@ -4201,9 +4245,8 @@ static int emit_x87_forms(const as_instruction_t *insn, int intel_syntax, int is
         return -1;
     }
 
-    /* One memory operand. */
-    if (insn->operand_count == 1 &&
-        (a->kind == AS_OPERAND_MEMORY || (!is_64 && a->kind == AS_OPERAND_LABEL_REF))) {
+    /* One memory operand: an address, or a symbol that is one. */
+    if (insn->operand_count == 1 && (a->kind == AS_OPERAND_MEMORY || operand_is_bare_address(a))) {
         for (i = 0; i < sizeof(memory) / sizeof(memory[0]); ++i) {
             if (!streq_ci(mn, memory[i].name)) {
                 continue;
@@ -4215,9 +4258,16 @@ static int emit_x87_forms(const as_instruction_t *insn, int intel_syntax, int is
             if (is_64) {
                 /* The 64-bit emitter of ModRM writes the segment override
                  * and REX itself, and starts at the byte it is given. */
+                as_mem_operand_t at;
                 size_t len = 0;
 
-                if (emit_x86_64_1byte_regfield_memop(memory[i].op, memory[i].digit, &a->u.mem,
+                if (a->kind == AS_OPERAND_MEMORY) {
+                    at = a->u.mem;
+                } else {
+                    memset(&at, 0, sizeof(at));
+                    at.disp = a->u.expr;
+                }
+                if (emit_x86_64_1byte_regfield_memop(memory[i].op, memory[i].digit, &at,
                                                      out + n, out_cap - n, &len) != 0) {
                     return -1;
                 }
@@ -4261,14 +4311,6 @@ static int emit_x87_forms(const as_instruction_t *insn, int intel_syntax, int is
 static int emit_x86_64_mmx_memop(unsigned char opcode, unsigned dst_mmx, const as_mem_operand_t *mem,
                                  unsigned char *out, size_t out_cap, size_t *out_len);
 
-/* An address written bare: a symbol, or a number with no `$` (which the
- * parser gives the kind of an immediate, there being no other). */
-static int operand_is_bare_address(const as_operand_t *op) {
-    if (op->kind == AS_OPERAND_LABEL_REF) {
-        return 1;
-    }
-    return op->kind == AS_OPERAND_IMMEDIATE && op->raw != NULL && op->raw[0] != '$';
-}
 
 static int emit_simd_movq(const as_instruction_t *insn, int intel_syntax, int is_64,
                           unsigned char *out, size_t out_cap, size_t *out_len) {
@@ -4761,6 +4803,22 @@ static int x86_stmt_has_gpr_of_width(const as_instruction_t *insn, int bits) {
  */
 static int x86_stmt_outer_prefixes(const as_elf_cfg_t *cfg, const as_instruction_t *insn, unsigned char *code,
                                    size_t code_cap, size_t *code_len) {
+    /*
+     * `fsave`, `fstcw` and the others that wait first: the wait is an
+     * instruction of its own, and the prefixes are of the one after it.
+     * `fsave %fs:(%rax)` had the override twice, once on each side of
+     * the wait, and `fsave (%eax)` had the address size before it.
+     */
+    if (*code_len > 1 && code[0] == 0x9b) {
+        size_t len = *code_len - 1;
+
+        if (x86_prepend_segment(insn, code + 1, code_cap - 1, &len) != 0 ||
+            (cfg->is_64 && x86_prepend_addr32(insn, code + 1, code_cap - 1, &len) != 0)) {
+            return -1;
+        }
+        *code_len = len + 1;
+        return 0;
+    }
     if (x86_prepend_segment(insn, code, code_cap, code_len) != 0) {
         return -1;
     }
@@ -16996,6 +17054,10 @@ static int x86_disp32_offset(const unsigned char *code, size_t len, int is_64, s
     unsigned mod;
     unsigned rm;
 
+    /* A wait before an x87 instruction is not part of it. */
+    if (len > 1 && code[0] == 0x9b) {
+        i = 1;
+    }
     while (i < len && (code[i] == 0x66 || code[i] == 0x67 || code[i] == 0xf0 || code[i] == 0xf2 ||
                        code[i] == 0xf3 || code[i] == 0x2e || code[i] == 0x36 || code[i] == 0x3e ||
                        code[i] == 0x26 || code[i] == 0x64 || code[i] == 0x65)) {

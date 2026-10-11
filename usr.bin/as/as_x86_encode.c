@@ -688,6 +688,11 @@ static const struct {
     { "fnclex",  2, { 0xdb, 0xe2 } }, { "fninit",  2, { 0xdb, 0xe3 } },
     { "fclex",   3, { 0x9b, 0xdb, 0xe2 } }, { "finit", 3, { 0x9b, 0xdb, 0xe3 } },
     { "fwait",   1, { 0x9b } },       { "wait",    1, { 0x9b } },
+    /* Of the 8087 and the 80287, and nothing to what came after. */
+    { "fneni",   2, { 0xdb, 0xe0 } }, { "fndisi",  2, { 0xdb, 0xe1 } },
+    { "fnsetpm", 2, { 0xdb, 0xe4 } }, { "frstpm",  2, { 0xdb, 0xe5 } },
+    { "feni",    3, { 0x9b, 0xdb, 0xe0 } }, { "fdisi", 3, { 0x9b, 0xdb, 0xe1 } },
+    { "fsetpm",  3, { 0x9b, 0xdb, 0xe4 } },
 };
 
 /* 1 if `insn` is one of those and was emitted, 0 if it is not one, -1 on
