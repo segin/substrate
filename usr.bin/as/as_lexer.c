@@ -25,6 +25,10 @@ typedef struct {
     char **include_stack;
     size_t include_stack_count;
     size_t include_stack_cap;
+    /* The marked text being read, by its internal name, and the last
+     * of its lines given out: a file it includes goes on from there. */
+    const char *spliced_into;
+    unsigned text_line;
 } lex_ctx_t;
 
 static void set_err(lex_ctx_t *ctx, const char *fmt, ...) {
@@ -1000,6 +1004,9 @@ static int lex_buffer(lex_ctx_t *ctx, const char *name, char *file_buf, size_t f
     unsigned user_line = 0;
     size_t pos = 0;
     unsigned line_no = 0;
+    const char *tok_path = path;
+    unsigned tok_line = 0;
+    int spliced;
     int in_block_comment = 0;
 
     if (ctx == NULL || name == NULL || file_buf == NULL) {
@@ -1012,6 +1019,11 @@ static int lex_buffer(lex_ctx_t *ctx, const char *name, char *file_buf, size_t f
         set_err(ctx, "%s: out of memory", name);
         free(file_buf);
         return -1;
+    }
+    spliced = !marked && ctx->spliced_into != NULL;
+    if (marked) {
+        ctx->spliced_into = path;
+        ctx->text_line = 0;
     }
     if (ctx->cfg != NULL && ctx->cfg->max_include_depth > 0 && depth > ctx->cfg->max_include_depth) {
         set_err(ctx, "%s: include depth exceeded (%u)", path, ctx->cfg->max_include_depth);
@@ -1053,22 +1065,43 @@ static int lex_buffer(lex_ctx_t *ctx, const char *name, char *file_buf, size_t f
         }
         line_no++;
         user_line++;
-        if (marked && source_map_add(line_no, user_file, user_line) != 0) {
-            set_err(ctx, "%s:%u: out of memory", path, line_no);
+        /*
+         * The line a token is of.  In a marked text it is the text's
+         * own, one to a line -- and a file the text includes is given
+         * the lines after the directive's, which the text's next line
+         * follows: read as a file by itself it had its own numbers, and
+         * read twice it had them twice, and of two statements with one
+         * file and line the assembler kept one.  `.include` in a `.rept`
+         * of two was assembled once.
+         */
+        if (marked || spliced) {
+            tok_path = ctx->spliced_into;
+            tok_line = ++ctx->text_line;
+        } else {
+            tok_path = path;
+            tok_line = line_no;
+        }
+        if (spliced && source_map_add(tok_line, name, line_no) != 0) {
+            set_err(ctx, "%s:%u: out of memory", name, line_no);
+            free(file_buf);
+            return -1;
+        }
+        if (marked && source_map_add(tok_line, user_file, user_line) != 0) {
+            set_err(ctx, "%s:%u: out of memory", tok_path, tok_line);
             free(file_buf);
             return -1;
         }
 
         sanitized = strip_comments(line, &in_block_comment);
         if (sanitized == NULL) {
-            set_err(ctx, "%s:%u: out of memory", path, line_no);
+            set_err(ctx, "%s:%u: out of memory", tok_path, tok_line);
             free(file_buf);
             return -1;
         }
         trim_trailing(sanitized);
 
         as_token_vec_init(&line_tokens);
-        if (tokenize_line(path, line_no, sanitized, ctx->cfg != NULL ? ctx->cfg->intel_syntax : 0, &line_tokens, ctx) != 0) {
+        if (tokenize_line(tok_path, tok_line, sanitized, ctx->cfg != NULL ? ctx->cfg->intel_syntax : 0, &line_tokens, ctx) != 0) {
             free(sanitized);
             as_token_vec_free(&line_tokens);
             free(file_buf);
@@ -1091,7 +1124,7 @@ static int lex_buffer(lex_ctx_t *ctx, const char *name, char *file_buf, size_t f
         for (i = 0; !is_include && i < line_tokens.count; ++i) {
             as_token_t *t = &line_tokens.items[i];
             if (as_token_vec_push_take(ctx->out, t) != 0) {
-                set_err(ctx, "%s:%u: out of memory", path, line_no);
+                set_err(ctx, "%s:%u: out of memory", tok_path, tok_line);
                 as_token_vec_free(&line_tokens);
                 free(file_buf);
                 return -1;
@@ -1102,14 +1135,14 @@ static int lex_buffer(lex_ctx_t *ctx, const char *name, char *file_buf, size_t f
             char *inc_path = unescape_string(line_tokens.items[1].text);
             char *inc;
             if (inc_path == NULL) {
-                set_err(ctx, "%s:%u: out of memory", path, line_no);
+                set_err(ctx, "%s:%u: out of memory", tok_path, tok_line);
                 as_token_vec_free(&line_tokens);
                 free(file_buf);
                 return -1;
             }
             inc = resolve_include_path(ctx->cfg, inc_path);
             if (inc == NULL) {
-                set_err(ctx, "%s:%u: include file not found: %s", path, line_no, inc_path);
+                set_err(ctx, "%s:%u: include file not found: %s", tok_path, tok_line, inc_path);
                 free(inc_path);
                 as_token_vec_free(&line_tokens);
                 free(file_buf);
@@ -1119,7 +1152,7 @@ static int lex_buffer(lex_ctx_t *ctx, const char *name, char *file_buf, size_t f
 
             for (i = 0; i < ctx->include_stack_count; ++i) {
                 if (strcmp(ctx->include_stack[i], inc) == 0) {
-                    set_err(ctx, "%s:%u: include cycle detected: %s", path, line_no, inc);
+                    set_err(ctx, "%s:%u: include cycle detected: %s", tok_path, tok_line, inc);
                     free(inc);
                     as_token_vec_free(&line_tokens);
                     free(file_buf);
@@ -1145,6 +1178,9 @@ static int lex_buffer(lex_ctx_t *ctx, const char *name, char *file_buf, size_t f
 
     free(ctx->include_stack[ctx->include_stack_count - 1]);
     ctx->include_stack_count--;
+    if (marked) {
+        ctx->spliced_into = NULL;
+    }
     return 0;
 }
 
@@ -1192,6 +1228,7 @@ int as_lex_text(const char *name, const char *text, size_t len, int marked, cons
     }
     copy[len] = '\0';
     rc = lex_buffer(&ctx, name, copy, len, 0, marked);
+    ctx.spliced_into = NULL;
 
     while (ctx.include_stack_count > 0) {
         free(ctx.include_stack[ctx.include_stack_count - 1]);
