@@ -210,6 +210,28 @@ static void as_diag(as_error_code_t code, const char *fmt, ...) {
     vsnprintf(said, sizeof(said), fmt, ap);
     va_end(ap);
     as_source_positions_in_text(said, shown, sizeof(shown));
+    /*
+     * What is wrong with a line of the source is said as every
+     * assembler and compiler says it, `file:line: Error: text`, which is
+     * what an editor or a build looks for.  What is wrong with the run
+     * -- an option, a file that will not open -- has no line, and is
+     * the program's to say.
+     */
+    {
+        const char *p;
+
+        for (p = shown; (p = strchr(p, ':')) != NULL; ++p) {
+            const char *q = p + 1;
+
+            while (isdigit((unsigned char)*q)) {
+                q++;
+            }
+            if (q > p + 1 && q[0] == ':' && q[1] == ' ' && q[2] != '\0') {
+                fprintf(stderr, "%.*s Error: %s\n", (int)(q + 1 - shown), shown, q + 2);
+                return;
+            }
+        }
+    }
     fprintf(stderr, "as: error: %s\n", shown);
 }
 
@@ -388,7 +410,7 @@ static int run_message_directives(as_parse_result_t *parsed, as_elf_warnings_t *
                 unsigned shown_line = st->line;
 
                 (void)as_source_position(file, st->line, &shown_file, &shown_line);
-                fprintf(stderr, "as: warning: %s:%u: %s\n", shown_file, shown_line, said);
+                fprintf(stderr, "%s:%u: Warning: %s\n", shown_file, shown_line, said);
                 warnings->count++;
             }
         }
@@ -1545,6 +1567,8 @@ static int expand_rept_block(as_text_t *in, as_text_t *out, const char *header) 
     unsigned end_line;
 
     if (eval_rept_count(header, &count) != 0) {
+        snprintf(expand_err, sizeof(expand_err), "%s:%u: .rept: the count is not a number that is known here",
+                 in->file != NULL ? in->file : "<input>", in->line);
         return -1;
     }
     while (text_getline(&line, &cap, in) >= 0) {
@@ -2446,6 +2470,8 @@ static int expand_rept_block_with_macros(as_text_t *in, as_text_t *out, gas_macr
     unsigned end_line;
 
     if (eval_rept_count(header, &count) != 0) {
+        snprintf(expand_err, sizeof(expand_err), "%s:%u: .rept: the count is not a number that is known here",
+                 in->file != NULL ? in->file : "<input>", in->line);
         return -1;
     }
     while (text_getline(&line, &cap, in) >= 0) {
@@ -3445,6 +3471,12 @@ out:
     return rc;
 }
 
+/* The emitter's way of saying what is wrong with one instruction. */
+static void report_emit_error(void *cookie, const char *message) {
+    (void)cookie;
+    as_diag(AS_E_BACKEND, "%s", message);
+}
+
 static int run_native_backend(const as_ctx_t *ctx) {
     as_token_vec_t toks;
     as_parse_result_t parsed;
@@ -3456,7 +3488,8 @@ static int run_native_backend(const as_ctx_t *ctx) {
     as_elf_cfg_t ecfg;
     const char **include_dirs = NULL;
     size_t include_dir_count = 0;
-    char errbuf[512];
+    char errbuf[8192];
+    int source_in_error = 0;
     as_text_t text_source;
     as_text_t text_expanded;
     as_text_t text_rept;
@@ -3588,12 +3621,27 @@ static int run_native_backend(const as_ctx_t *ctx) {
     }
     {
         AS_PHASE_BEGIN();
+        /* Statements that cannot be read are each reported, a line of
+         * the buffer each, and the rest of the source is gone through
+         * for what else is wrong with it; nothing is written. */
         if (as_parse_tokens(&toks, &pcfg, &parsed, errbuf, sizeof(errbuf)) != 0) {
-            as_diag(AS_E_BACKEND, "%s", errbuf);
-            goto out;
+            char *line = errbuf;
+
+            while (line != NULL && *line != '\0') {
+                char *end = strchr(line, '\n');
+
+                if (end != NULL) {
+                    *end = '\0';
+                }
+                as_diag(AS_E_BACKEND, "%s", line);
+                line = end != NULL ? end + 1 : NULL;
+            }
+            source_in_error = 1;
         }
         AS_PHASE_END(ctx, "parse");
     }
+    ecfg.report_error = report_emit_error;
+    ecfg.check_only = (unsigned)source_in_error;
     if (as_directives_lower(&parsed, ecfg.is_64 ? 8u : 4u, errbuf, sizeof(errbuf)) != 0) {
         as_diag(AS_E_BACKEND, "%s", errbuf);
         goto out;
@@ -3631,11 +3679,17 @@ static int run_native_backend(const as_ctx_t *ctx) {
     }
     {
         AS_PHASE_BEGIN();
+        /* A data directive that is wrong is one more thing wrong: the
+         * instructions are still looked at. */
         if (as_data_build(&parsed, &data, errbuf, sizeof(errbuf)) != 0) {
             as_diag(AS_E_BACKEND, "%s", errbuf);
-            goto out;
+            source_in_error = 1;
+            ecfg.check_only = 1;
         }
         AS_PHASE_END(ctx, "data");
+    }
+    if (ctx->output == AS_OUTPUT_BINARY && source_in_error) {
+        goto out;
     }
     if (ctx->output == AS_OUTPUT_BINARY) {
         AS_PHASE_BEGIN();
@@ -3647,10 +3701,17 @@ static int run_native_backend(const as_ctx_t *ctx) {
     } else {
         AS_PHASE_BEGIN();
         if (as_elf_emit_file(&parsed, &secs, &syms, &data, &ecfg, ctx->out_path, errbuf, sizeof(errbuf)) != 0) {
-            as_diag(AS_E_BACKEND, "%s", errbuf);
+            /* Nothing in the buffer: each instruction in error has been
+             * reported already. */
+            if (errbuf[0] != '\0') {
+                as_diag(AS_E_BACKEND, "%s", errbuf);
+            }
             goto out;
         }
         AS_PHASE_END(ctx, "emit-elf");
+    }
+    if (source_in_error) {
+        goto out;
     }
 
     /* The object is written by now: with --fatal-warnings a warning
@@ -3665,6 +3726,19 @@ static int run_native_backend(const as_ctx_t *ctx) {
     rc = 0;
 
 out:
+    /*
+     * A run that fails leaves no object: not a new one, and not the one
+     * that was there from a run before, which a build would go on to
+     * link as if it were this source's.  (A file that is not an ordinary
+     * one -- /dev/null -- is left alone.)
+     */
+    if (rc != 0 && ctx->out_path != NULL) {
+        struct stat sb;
+
+        if (lstat(ctx->out_path, &sb) == 0 && S_ISREG(sb.st_mode)) {
+            unlink(ctx->out_path);
+        }
+    }
     as_elf_warnings_free(&warnings);
     text_free(&text_source);
     text_free(&text_expanded);

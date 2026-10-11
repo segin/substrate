@@ -23,7 +23,7 @@ is() {
     what=$1; want=$2; shift 2
     rm -f t.o
     if ! "$AS" --32 "$@" -o t.o 2> err; then
-        echo "FAIL $what: $(head -1 err | sed 's/^as: error: //')"; fail=1; return
+        echo "FAIL $what: $(head -1 err)"; fail=1; return
     fi
     got=$(text_of t.o)
     [ "$got" = "$want" ] || { echo "FAIL $what: $got, not $want"; fail=1; }

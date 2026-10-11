@@ -371,6 +371,26 @@ there is not.
 .It 2
 Usage/argument error.
 .El
+.Sh DIAGNOSTICS
+What is wrong with a line of the source is written to standard error as
+.Pp
+.Dl file:line: Error: text
+.Pp
+and a warning as
+.Pp
+.Dl file:line: Warning: text
+.Pp
+where the file and line are those the line was written at, whatever
+macros, repeats, conditionals and included files it came through; the
+standard input is
+.Ql {standard input} .
+Every statement in error is reported, not the first alone.
+What is wrong with the run itself, such as an option that is not one,
+begins with the program's name and
+.Ql error: .
+.Pp
+When an assembly fails no object is written, and a file of the output's
+name left by an earlier run is removed.
 .Sh SEE ALSO
 Li cc(1) ,
 Li cpp(1) ,

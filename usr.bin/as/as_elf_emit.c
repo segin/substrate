@@ -10328,7 +10328,7 @@ static void warn_stmt(const as_elf_cfg_t *cfg, const as_stmt_t *st, const char *
         unsigned line = st->line;
 
         (void)as_source_position(file, st->line, &file, &line);
-        fprintf(stderr, "as: warning: %s:%u: %s\n", file, line, text);
+        fprintf(stderr, "%s:%u: Warning: %s\n", file, line, text);
     }
 }
 
@@ -17284,6 +17284,69 @@ static int emit_relocations(emit_ctx_t *ctx) {
     return 0;
 }
 
+/*
+ * Every instruction of the source that cannot be encoded, reported: the
+ * first ended the run, and a source with three mistakes was assembled
+ * three times to find them.  How many there are.
+ */
+static unsigned report_instruction_errors(emit_ctx_t *ctx) {
+    section_track_t track;
+    bytebuf_t scratch;
+    unsigned count = 0;
+    size_t i;
+
+    if (ctx->cfg == NULL || ctx->cfg->report_error == NULL) {
+        return 0;
+    }
+    memset(&scratch, 0, sizeof(scratch));
+    if (section_track_init(&track, ctx->cfg->is_64 ? 64u : (ctx->cfg->x86_code_bits == 16u ? 16u : 32u)) != 0) {
+        return 0;
+    }
+    for (i = 0; i < ctx->parsed->count && count < AS_PARSE_ERRORS_MAX; ++i) {
+        const as_stmt_t *st = &ctx->parsed->items[i];
+
+        if (st->kind == AS_STMT_DIRECTIVE) {
+            (void)section_track_apply_directive(&track, &st->u.directive);
+            continue;
+        }
+        if (st->kind != AS_STMT_INSTRUCTION || track.current == NULL) {
+            continue;
+        }
+        scratch.len = 0;
+        if (ctx->errbuf != NULL && ctx->errbuf_sz != 0) {
+            ctx->errbuf[0] = '\0';
+        }
+        if (append_virtual_instruction_bytes(ctx, &scratch, track.current, st, track.x86_code_bits) != 0) {
+            char generic[384];
+            unsigned char code[32];
+            size_t code_len = 0;
+            char why[256];
+
+            /* Why: the encoder says, asked for the instruction alone. */
+            why[0] = '\0';
+            (void)encode_x86_stmt_for_layout(ctx, track.current, 0, track.x86_code_bits, st, code, sizeof(code),
+                                             &code_len, why, sizeof(why));
+            if (why[0] != '\0') {
+                snprintf(generic, sizeof(generic), "%s:%u: %s", st->file != NULL ? st->file : "<input>", st->line,
+                         why);
+            } else {
+                snprintf(generic, sizeof(generic), "%s:%u: '%s' cannot be assembled",
+                         st->file != NULL ? st->file : "<input>", st->line,
+                         st->u.instr.mnemonic != NULL ? st->u.instr.mnemonic : "?");
+            }
+            ctx->cfg->report_error(ctx->cfg->report_cookie,
+                                   ctx->errbuf != NULL && ctx->errbuf[0] != '\0' ? ctx->errbuf : generic);
+            count++;
+        }
+    }
+    if (ctx->errbuf != NULL && ctx->errbuf_sz != 0) {
+        ctx->errbuf[0] = '\0';
+    }
+    free(scratch.data);
+    section_track_free(&track);
+    return count;
+}
+
 static void free_leb128_sizes(emit_ctx_t *ctx) {
     size_t i;
 
@@ -17494,6 +17557,12 @@ int as_elf_emit_file(const as_parse_result_t *parsed,
 
     if (settle_leb128_sizes(&ctx) != 0) {
         snprintf(errbuf, errbuf_sz, "out of memory");
+        goto fail;
+    }
+    if (report_instruction_errors(&ctx) != 0 || cfg->check_only) {
+        if (errbuf != NULL && errbuf_sz != 0) {
+            errbuf[0] = '\0';
+        }
         goto fail;
     }
     if (emit_text_program(&ctx) != 0) {

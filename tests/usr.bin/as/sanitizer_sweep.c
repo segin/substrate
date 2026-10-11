@@ -220,7 +220,7 @@ static void judge(const char *mode, int status, char *result) {
     } else if (WEXITSTATUS(status) == 1) {
         if (access("t.o", F_OK) == 0) {
             snprintf(result, RESULT_MAX, "FAIL refused, and an object written all the same");
-        } else if (said == NULL || strstr(said, "error") == NULL) {
+        } else if (said == NULL || (strstr(said, "Error: ") == NULL && strstr(said, "error: ") == NULL)) {
             snprintf(result, RESULT_MAX, "FAIL exit 1 with no message");
         } else {
             snprintf(result, RESULT_MAX, "refused");

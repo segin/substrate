@@ -2944,6 +2944,9 @@ int as_parse_tokens(const as_token_vec_t *tokens, const as_parser_cfg_t *cfg,
                     as_parse_result_t *out, char *errbuf, size_t errbuf_sz) {
     parse_ctx_t ctx;
     size_t i;
+    char *errors = NULL;
+    size_t errors_len = 0;
+    unsigned error_count = 0;
 
     if (tokens == NULL || out == NULL) {
         return -1;
@@ -2974,12 +2977,64 @@ int as_parse_tokens(const as_token_vec_t *tokens, const as_parser_cfg_t *cfg,
         }
 
         if (parse_line_tokens(&ctx, tokens->items + start, j - start, &st) != 0) {
+            as_label_def_t *labels = st.labels;
+            size_t label_count = st.label_count;
+            size_t label_cap = st.label_cap;
+            size_t said;
+
             if (ctx.errbuf != NULL && ctx.errbuf_sz > 0 && ctx.errbuf[0] == '\0') {
                 set_err(&ctx, "%s:%u: parse error", tokens->items[start].file, tokens->items[start].line);
             }
+            /*
+             * One statement that cannot be read is not the end of the
+             * source: what is wrong with it is kept, and the next is
+             * read, so that every such statement is reported and not the
+             * first alone.  Its labels stand, as labels of nothing, so
+             * that what refers to them is not a second error.
+             */
+            said = ctx.errbuf != NULL ? strlen(ctx.errbuf) : 0;
+            if (said != 0) {
+                char *next = (char *)realloc(errors, errors_len + said + 2);
+
+                if (next != NULL) {
+                    errors = next;
+                    memcpy(errors + errors_len, ctx.errbuf, said);
+                    errors_len += said;
+                    errors[errors_len++] = '\n';
+                    errors[errors_len] = '\0';
+                }
+                ctx.errbuf[0] = '\0';
+            }
+            error_count++;
+            st.labels = NULL;
+            st.label_count = 0;
+            st.label_cap = 0;
             free_stmt(&st);
-            free_local_defs(&ctx.local_defs);
-            return -1;
+            if (label_count != 0 && error_count < AS_PARSE_ERRORS_MAX) {
+                memset(&st, 0, sizeof(st));
+                st.kind = AS_STMT_LABEL_ONLY;
+                st.file = xstrdup(tokens->items[start].file != NULL ? tokens->items[start].file : "<input>");
+                st.line = tokens->items[start].line;
+                st.labels = labels;
+                st.label_count = label_count;
+                st.label_cap = label_cap;
+                if (st.file == NULL || push_stmt(out, &st) != 0) {
+                    free_stmt(&st);
+                }
+            } else {
+                size_t k;
+
+                for (k = 0; k < label_count; ++k) {
+                    free(labels[k].name);
+                    free(labels[k].file);
+                }
+                free(labels);
+            }
+            if (error_count >= AS_PARSE_ERRORS_MAX) {
+                break;
+            }
+            i = j;
+            continue;
         }
 
         if (push_stmt(out, &st) != 0) {
@@ -2994,5 +3049,19 @@ int as_parse_tokens(const as_token_vec_t *tokens, const as_parser_cfg_t *cfg,
 
     resolve_locals(&ctx);
     free_local_defs(&ctx.local_defs);
-    return ctx.unresolved_local ? -1 : 0;
+    /* Every statement that could not be read, a line each, and after
+     * them a numeric label that is not there, if one is not. */
+    if (error_count != 0 && ctx.errbuf != NULL && ctx.errbuf_sz > 0) {
+        char last[256];
+
+        snprintf(last, sizeof(last), "%s", ctx.errbuf);
+        if (errors != NULL && errors_len != 0) {
+            errors[errors_len - 1] = '\0';
+            snprintf(ctx.errbuf, ctx.errbuf_sz, "%s%s%s", errors, last[0] != '\0' ? "\n" : "", last);
+        } else if (last[0] == '\0') {
+            snprintf(ctx.errbuf, ctx.errbuf_sz, "parse error");
+        }
+    }
+    free(errors);
+    return ctx.unresolved_local || error_count != 0 ? -1 : 0;
 }

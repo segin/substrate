@@ -34,7 +34,6 @@ test_isa_heavy_64.sh	vmovdqu is not a mnemonic (AS-T-332)
 test_output_binary.sh	code is padded with one-byte NOPs, not GNU's sequences (AS-T-251)
 test_relocations_elf_32_64.sh	a forced short jump out of range is assembled and should be refused (AS-T-221)
 test_sections_symbols_expr_32_64.sh	--64: "failed to emit relocations" for a data relocation narrower than 64 bits (AS-T-210)
-test_source_model_32_64.sh	the first error ends the run: a source with three bad lines gets one message, where GNU gives three (AS-T-388)
 test_testing_fuzz_perf.sh	runs test_relocations_elf_32_64.sh
 test_unit_matrix.sh	runs test_i8086_realmode_core.sh
 test_x86_32_corpus_intel_roundtrip.sh	stops at line 251 of the corpus, `fcoms -0x6f70(%bx,%si)`: an x87 instruction with a 16-bit address is refused (AS-T-176).  GNU as 2.46 passes the test: it leaves out the 206 lines of the corpus that GNU refuses, and from the Intel source it makes of objdump's listing what objdump prints and no source says (`repz add`, `lock mov`, `jaw`)

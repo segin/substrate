@@ -41,6 +41,17 @@ typedef struct {
     uint64_t current_text_offset;
     /* Where warnings are counted; NULL to write each as it arises. */
     as_elf_warnings_t *warnings;
+    /*
+     * If set, every instruction that cannot be encoded is told to it,
+     * one call each, before anything is laid out -- and then the
+     * emitter fails with nothing in its error buffer, all having been
+     * said.  If NULL the first such is the error, as it was.
+     */
+    void (*report_error)(void *cookie, const char *message);
+    void *report_cookie;
+    /* Only look for those: write no object.  For a source that is known
+     * to be in error already and is read on for what else is wrong. */
+    unsigned check_only;
 } as_elf_cfg_t;
 
 int as_elf_emit_file(const as_parse_result_t *parsed,

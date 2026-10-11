@@ -504,6 +504,7 @@ with a symbol table.
   In part: `movl $1b, %eax` is right, by 134.  The branches are not, and are worse than the Verify line supposes -- **`jmp 1b` to a label of another section is left out of the object, with exit status 0**; `call 1b`, `jne 1b` and `loop 1b` are assembled as branches to offset 0 of their own section.  With a compiler's label, `jmp .Lx` across sections fails ("failed to emit relocations") and `jne .Lx` is the short form with an 8-bit relocation; only `call .Lx` is right.  The branch code takes a local label to be of its own section in three places (the encoding, the choice of short or long, the relocation).  Making branches use the names of 134 was tried and put back: it changed which `1:` a branch finds across subsections.
 - [ ] **AS-T-137** When a branch names an absolute address, the assembler shall emit a PC-relative relocation against the absolute section.
   Trace: AS-LAY-003, AS-X86-026.  Verify: T — `jmp 0x1234`, `call 0x1000`, `je 0x1000`: GNU.
+  Not done, and what stands in the way: the object library (`elf_add_relocation`) refuses a relocation that names no symbol, which is what one against the absolute section is.  Today `jmp 0x1234` is assembled as the distance from the instruction to 0x1234 as if its section were loaded at 0, with no relocation -- right only there.  To do: let the library write a relocation with symbol 0, then emit `R_386_PC32`/`R_X86_64_PC32` with the target less four.
 
 ### C.5 Command line
 
@@ -542,21 +543,26 @@ with a symbol table.
 
 ### C.6 Messages and temporary files
 
-- [ ] **AS-T-388** If a source has more than one statement in error, then the assembler shall report each of them, and shall write no object.
+- [x] **AS-T-388** If a source has more than one statement in error, then the assembler shall report each of them, and shall write no object.
   Trace: AS-FE-030.  Verify: T — `fooop %eax,%ebx` / `mov %badreg,%eax` / `barrr`: three messages, as GNU gives; `test_source_model_32_64.sh` passes.  After: 147.
   (Added when the expected failures were checked against GNU as: this is what that test fails on now that `.include` works.  Today the first error ends the run.)
+  Done.  The parser keeps what is wrong with a statement and reads the next, a statement in error leaving its labels behind as labels of nothing; a data directive that is wrong is reported and the run goes on; and before anything is laid out the emitter tries every instruction and reports each that cannot be encoded.  Then nothing is written.  `test_source_model_32_64.sh` passes and is off the list of expected failures; `test_error_reports.sh`.  The order is by kind and not by line: statements that cannot be read, then data directives, then instructions.  A hundred of a kind and the rest are not looked at.
 - [x] **AS-T-392** A warning shall be written once.
   Trace: AS-FE-030, AS-DES-002.  Verify: T — `movb $0x1234, %al`: one line on the standard error; `test_cli_warnings.sh`.  After: 220.
   (Added with `test_cli_warnings.sh`: the line is written four times, once for each pass that encodes the statement.)
   Done, ahead of 220: the emitter keeps the statements it has warned about, and warns about each once however many passes encode it.  When there is one pass the list can go.
-- [ ] **AS-T-147** Every error message shall have the form `file:line: Error: text`, with text that is not empty.
+- [x] **AS-T-147** Every error message shall have the form `file:line: Error: text`, with text that is not empty.
   Trace: AS-FE-030, AS-FE-032.  Verify: T — a test that greps every failing case of the suite for the form; `loop 1b` to an undefined label has text.
+  Done at the one place every error is written: a message that begins with a file and line is `file:line: Error: text`, where it was `as: error: file:line: text`, and a warning is `file:line: Warning: text`.  What is wrong with the run and not with a line -- an option, a file that will not open -- keeps `as: error:`.  `test_error_reports.sh` holds nine kinds of failure to the form, `loop 1b` among them; as(1) has a DIAGNOSTICS section.  The test is of those nine and not of every failing case of the suite.
 - [ ] **AS-T-148** When a failure is found while expanding a macro or repeat, the message shall name the user's line and the macro being expanded.
   Trace: AS-FE-031.  Verify: T — a bad `.macro` header; a `.rept` whose count is a symbol; an error inside an expansion.  After: 090.
-- [ ] **AS-T-149** When the assembler fails, it shall remove the output file it was asked to write.
+  In part: each of the three names the user's line -- the header's, the `.rept`'s, and for what is in an expansion the line the macro was called on (the line in the body, for a repeat).  A `.rept` whose count is not a number said "macro/control expansion stage failed" and now says so.  Not done: the macro is not named for an error found after expansion, the expanded line not carrying which macro it came from; and an instruction in error in a repeat is reported once for each time it is repeated.
+- [x] **AS-T-149** When the assembler fails, it shall remove the output file it was asked to write.
   Trace: AS-FE-032.  Verify: T — an old `out.o` is gone after a failed run, as with GNU.
+  Done: the object of an earlier run was left where it was.  An ordinary file of the output's name is removed when the run fails; `/dev/null` and its like are left alone.  `test_error_reports.sh`.
 - [ ] **AS-T-150** When the assembler ends by any path, including a signal it can catch, it shall leave no file it created but the output.
   Trace: AS-FE-024.  Verify: T — `SIGINT`, `SIGTERM` and an error exit, with `TMPDIR` pointing at an empty directory that is empty afterwards.
+  In part: since 091 it creates no file but the output and, beside it for the moment it is written, the output's temporary, which the object library makes and renames.  A run that fails or succeeds leaves `$TMPDIR` and the output's directory as they were (`test_error_reports.sh`).  Not done: no signal is caught, so one that arrives in that moment leaves the temporary; the library that makes it would have to give up its name.
 - [ ] **AS-T-151** Where the assembler needs a temporary file, it shall create it in `$TMPDIR`, or in `/tmp` when that is unset.
   Trace: AS-FE-024.  Verify: T.
 - [ ] **AS-T-152** Every error path of the parser shall free what it allocated.
@@ -1159,5 +1165,5 @@ is not to be done, 370 is ticked with "removed" and the rest struck.
 | AS-EXT-009 | 185, 325, 332–337 |
 | AS-EXT-010 | 040, 171, 338, 339 (339 closes all of AS-EXT) |
 
-351 tasks: 157 done, 194 open.  Numbers run to 400, with gaps left between
+351 tasks: 160 done, 191 open.  Numbers run to 400, with gaps left between
 sections for tasks found along the way.

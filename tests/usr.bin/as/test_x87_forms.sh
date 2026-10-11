@@ -29,8 +29,8 @@ for mode in 32 64; do
     grep "^$mode|" "$here/corpus/x87_forms.txt" > lines
     awk -F'|' '{ printf "L%d:\t%s\n", NR, $2 } END { printf "L%d:\n", NR + 1 }' lines > t.s
     if ! "$AS" --$mode -o t.o t.s 2> err; then
-        n=$(sed -n 's/^as: error: [^:]*:\([0-9]*\): .*/\1/p' err | head -1)
-        echo "FAIL --$mode: $(head -1 err | sed 's/^as: error: [^:]*:[0-9]*: //'): $(sed -n "${n:-1}p" lines | cut -d'|' -f2)"
+        n=$(sed -n 's/^[^:]*:\([0-9]*\): Error: .*/\1/p' err | head -1)
+        echo "FAIL --$mode: $(head -1 err | sed 's/^[^:]*:[0-9]*: Error: //'): $(sed -n "${n:-1}p" lines | cut -d'|' -f2)"
         fail=1
         continue
     fi

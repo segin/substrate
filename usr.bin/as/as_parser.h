@@ -180,6 +180,9 @@ typedef struct {
     size_t cap;
 } as_parse_result_t;
 
+/* After this many statements that cannot be read, the rest are not. */
+#define AS_PARSE_ERRORS_MAX 100u
+
 void as_parse_result_init(as_parse_result_t *r);
 void as_parse_result_free(as_parse_result_t *r);
 

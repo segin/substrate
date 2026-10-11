@@ -82,7 +82,7 @@ for m in 32 64; do
         ./ref > ref.out 2>&1
         rm -f t.o prog
         if ! "$AS" --$m -o t.o t.s 2> err; then
-            verdict="AS    $(head -1 err | sed 's/^as: error: [^:]*:[0-9]*: //' | cut -c1-60)"
+            verdict="AS    $(head -1 err | sed 's/^[^:]*:[0-9]*: Error: //' | cut -c1-60)"
         else
             if ! gcc -m$m $pie -o prog t.o 2> lerr; then
                 verdict="LINK  $(grep -v '^$' lerr | head -1 | cut -c1-60)"

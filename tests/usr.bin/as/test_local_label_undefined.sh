@@ -22,7 +22,7 @@ refused() {
     rm -f t.o
     if "$AS" --32 -o t.o t.s 2> err; then echo "FAIL $1: assembled"; fail=1; return; fi
     grep -q "local label $3 is not defined" err || { echo "FAIL $1: $(head -1 err)"; fail=1; }
-    grep -q ":$4: local label" err || { echo "FAIL $1: not line $4: $(head -1 err)"; fail=1; }
+    grep -q ":$4: Error: local label" err || { echo "FAIL $1: not line $4: $(head -1 err)"; fail=1; }
     [ ! -e t.o ] || { echo "FAIL $1: an object was written"; fail=1; }
 }
 
