@@ -1078,8 +1078,9 @@ empty for the family named.
 
 ## J. Modes
 
-- [ ] **AS-T-345** When `.code16`, `.code32` or `.code64` is assembled, the assembler shall encode what follows for that mode, whatever `--32` or `--64` said.
+- [x] **AS-T-345** When `.code16`, `.code32` or `.code64` is assembled, the assembler shall encode what follows for that mode, whatever `--32` or `--64` said.
   Trace: AS-X86-030.  Verify: T — `--64` with `.code32` then `movl %eax,%ebx`, `.code16` then the same (`66 89 c3`).  After: 161.
+  Done, 2026-10-11: a statement was encoded for the mode of the command line in all but its 16-bit addresses.  Under `--64`, `.code32` and `inc %eax` was the two bytes of 64-bit code and `push %eax` was refused; in an ELF32 object `.code64` and `movq %rax,%rbx` was "a register of 64-bit code".  The mode a statement is encoded for is the directive's; the object's class is asked only for what is the object's.  And in 16-bit code an instruction of 32-bit registers with no suffix had no prefix: `xor %eax,%eax` was `xor %ax,%ax`, `push %eax` pushed two bytes, `call *%eax` called through `%ax`.  `test_code_modes.sh`, 28 cases that GNU passes.  What has a symbol in 16-bit code is 347's and is still wrong there: `movw $sym,%ax` and `push $sym` are refused, `je sym` has a 32-bit offset, `movw sym,%ax` is not the short form, and `fldl sym` has a 32-bit address.
 - [ ] **AS-T-346** If `.code64` is assembled into an ELF32 object, or `.code16`/`.code32` instructions need a relocation the object format lacks, then the assembler shall fail.
   Trace: AS-X86-030.  Verify: T — against GNU's verdict for each.
 - [ ] **AS-T-347** While assembling 16-bit code, the assembler shall emit `66` for 32-bit operands and `67` for 32-bit addressing, and 16-bit displacements, immediates and branch offsets otherwise.
@@ -1282,5 +1283,5 @@ is not to be done, 370 is ticked with "removed" and the rest struck.
 | AS-EXT-009 | 185, 325, 332–337 |
 | AS-EXT-010 | 040, 171, 338, 339 (339 closes all of AS-EXT) |
 
-351 tasks: 290 done, 61 open.  Numbers run to 400, with gaps left between
+351 tasks: 291 done, 60 open.  Numbers run to 400, with gaps left between
 sections for tasks found along the way.

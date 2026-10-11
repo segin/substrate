@@ -11501,6 +11501,10 @@ static int encode_x86_stmt_body(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const 
             in.byte_op = 1;
         } else if (bits == 16 && in.default_bits != 16u) {
             in.operand_size_override = 1;
+        } else if (bits == 32 && in.default_bits == 16u) {
+            /* And of 32 bits in 16-bit code, where it is they that
+             * have the prefix: `xor %eax, %eax` was `xor %ax, %ax`. */
+            in.operand_size_override = 1;
         } else if (bits == 64 && cfg->is_64 && !x86_mnemonic_is_64bit_by_default(mnbuf)) {
             /* And of 64 bits where they are: `mov %rsp, %rbp` was
              * `mov %esp, %ebp`. */
@@ -14272,6 +14276,7 @@ static int stmt_virtual_size_in_section(emit_ctx_t *ctx, const char *section_nam
                 char encerr[128];
 
                 local_cfg.x86_code_bits = x86_code_bits;
+                local_cfg.is_64 = x86_code_bits == 64u;
                 if (eval_direct_local_branch_target(ctx, section_name, st, sec_off, x86_code_bits, e,
                                                     2, &abs_target) == 0 &&
                     emit_resolved_x86_branch_ex(&local_cfg, st, sec_off, abs_target, may_short, code, sizeof(code),
@@ -15293,6 +15298,7 @@ static int append_virtual_instruction_bytes(emit_ctx_t *ctx, bytebuf_t *buf, con
             int may_short = x86_branch_may_be_short(ctx, section_name, st, e, x86_code_bits);
 
             local_cfg.x86_code_bits = x86_code_bits;
+            local_cfg.is_64 = x86_code_bits == 64u;
             if (eval_direct_local_branch_target(ctx, section_name, st, (uint64_t)buf->len, x86_code_bits, e,
                                                 2, &abs_target) == 0 &&
                 emit_resolved_x86_branch_ex(&local_cfg, st, (uint64_t)buf->len, abs_target, may_short, code, sizeof(code),
@@ -15314,8 +15320,12 @@ static int append_virtual_instruction_bytes(emit_ctx_t *ctx, bytebuf_t *buf, con
             return bytebuf_append_zeros(buf, local_rel_len);
         }
     }
+    /* The mode is what .code16, .code32 or .code64 last said, whatever
+     * the object is: is_64 here is the code's, and ctx->cfg's the
+     * object's. */
     stmt_cfg = *ctx->cfg;
     stmt_cfg.x86_code_bits = x86_code_bits;
+    stmt_cfg.is_64 = x86_code_bits == 64u;
     stmt_cfg.have_current_text_offset = 1u;
     stmt_cfg.current_text_offset = (uint64_t)buf->len;
     if (encode_x86_stmt(ctx, &stmt_cfg, st, code, sizeof(code), &code_len, encerr, sizeof(encerr)) != 0) {
@@ -15771,6 +15781,7 @@ static int encode_x86_stmt_for_layout(emit_ctx_t *ctx, const char *section_name,
     }
     stmt_cfg = *ctx->cfg;
     stmt_cfg.x86_code_bits = x86_code_bits;
+    stmt_cfg.is_64 = x86_code_bits == 64u;
     stmt_cfg.have_current_text_offset = 1u;
     stmt_cfg.current_text_offset = sec_off;
 
