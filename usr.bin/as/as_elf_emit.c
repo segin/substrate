@@ -75,6 +75,12 @@ typedef struct {
     char *reg;
 } asm_reg_alias_t;
 
+/* A label's name, which is the parse's, and the statement it is on. */
+typedef struct {
+    const char *name;
+    size_t stmt;
+} label_index_t;
+
 typedef struct {
     const as_elf_cfg_t *cfg;
     const as_parse_result_t *parsed;
@@ -117,6 +123,10 @@ typedef struct {
     /* For a listing, while the bytes are written: freed with the rest. */
     size_t *list_sec;
     size_t *list_off;
+    /* Every label and the statement it is on, by name: label_stmt_index(). */
+    label_index_t *label_index;
+    size_t label_index_count;
+    int label_index_made;
     size_t *stmt_size_cache;
     unsigned char *stmt_size_cached;
     size_t stmt_size_cache_count;
@@ -179,6 +189,7 @@ static int encode_x86_stmt_for_layout(emit_ctx_t *ctx, const char *section_name,
 static int append_virtual_instruction_bytes(emit_ctx_t *ctx, bytebuf_t *buf, const char *section_name,
                                             const as_stmt_t *st, unsigned x86_code_bits);
 static int parsed_stmt_index(emit_ctx_t *ctx, const as_stmt_t *needle, size_t *idx_out);
+static int label_stmt_index(emit_ctx_t *ctx, const char *name, size_t *idx_out);
 static int stmt_range_size_in_section(emit_ctx_t *ctx, const char *section_name, size_t start_idx, size_t end_idx,
                                       uint64_t sec_off, unsigned x86_code_bits, uint64_t *size_out);
 static int linux_alt_original_range_size(emit_ctx_t *ctx, const char *section_name, size_t start_idx, size_t end_idx,
@@ -230,8 +241,42 @@ static int is_local_temp_symbol_name(const char *name) {
     return name[0] == '.' && name[1] == 'L';
 }
 
+/*
+ * The labels of the source that are its own: defined in it, and named
+ * by no .globl, .global or .weak.  A branch to one in the branch's own
+ * section goes a distance that is known here, as a branch to a .L label
+ * does -- `jmp l` / `l: ret` is EB 00 and has no relocation -- where it
+ * had been the long form with a relocation for the linker to work out
+ * what the assembler knew.  Sorted; made by as_elf_mark_far_branches().
+ */
+static char **near_names;
+static size_t near_name_count;
+
+static int near_name_cmp(const void *a, const void *b) {
+    return strcmp(*(const char *const *)a, *(const char *const *)b);
+}
+
+static int name_is_near_label(const char *name) {
+    return name != NULL && near_name_count != 0 &&
+           bsearch(&name, near_names, near_name_count, sizeof(near_names[0]), near_name_cmp) != NULL;
+}
+
+static void near_names_free(void) {
+    size_t i;
+
+    for (i = 0; i < near_name_count; ++i) {
+        free(near_names[i]);
+    }
+    free(near_names);
+    near_names = NULL;
+    near_name_count = 0;
+}
+
+/* Whether what a branch names is a label whose place the assembler
+ * knows: a compiler's .L label, or one of the source's own. */
 static int expr_is_local_temp_symbol(const as_expr_t *e) {
-    return e != NULL && e->kind == AS_EXPR_SYMBOL && is_local_temp_symbol_name(e->symbol);
+    return e != NULL && e->kind == AS_EXPR_SYMBOL &&
+           (is_local_temp_symbol_name(e->symbol) || name_is_near_label(e->symbol));
 }
 
 static void asm_var_reset(emit_ctx_t *ctx) {
@@ -11639,7 +11684,12 @@ static int find_label_virtual_location(emit_ctx_t *ctx, const as_stmt_t *base_st
     if (build_stmt_section_at(ctx) == 0 && ctx->parsed != NULL) {
         const as_stmt_t *target_st = NULL;
         size_t target_idx = 0;
-        for (i = 0; i < ctx->parsed->count; ++i) {
+        /* A name is looked up; a numeric label is found by going
+         * through them. */
+        if (sym_name != NULL && label_stmt_index(ctx, sym_name, &target_idx) == 0) {
+            target_st = &ctx->parsed->items[target_idx];
+        }
+        for (i = 0; sym_name == NULL && i < ctx->parsed->count; ++i) {
             const as_stmt_t *st = &ctx->parsed->items[i];
             size_t j;
             for (j = 0; j < st->label_count; ++j) {
@@ -13196,6 +13246,70 @@ static int stmt_declared_label_section(emit_ctx_t *ctx, const as_stmt_t *target_
     return 0;
 }
 
+static int label_index_cmp(const void *a, const void *b) {
+    const label_index_t *x = (const label_index_t *)a;
+    const label_index_t *y = (const label_index_t *)b;
+    int c = strcmp(x->name, y->name);
+
+    /* The first of a name that is defined twice. */
+    return c != 0 ? c : (x->stmt < y->stmt ? -1 : (x->stmt > y->stmt ? 1 : 0));
+}
+
+/*
+ * The statement a label is on: the first, in the order of the
+ * statements, that has it.  Asked for every branch on every pass, by
+ * going through every label of the source until this kept them sorted.
+ */
+static int label_stmt_index(emit_ctx_t *ctx, const char *name, size_t *idx_out) {
+    size_t lo, hi;
+
+    if (ctx == NULL || ctx->parsed == NULL || name == NULL) {
+        return -1;
+    }
+    if (!ctx->label_index_made) {
+        size_t n = 0;
+        size_t i, j;
+
+        for (i = 0; i < ctx->parsed->count; ++i) {
+            n += ctx->parsed->items[i].label_count;
+        }
+        ctx->label_index = n != 0 ? (label_index_t *)malloc(n * sizeof(*ctx->label_index)) : NULL;
+        ctx->label_index_count = 0;
+        for (i = 0; ctx->label_index != NULL && i < ctx->parsed->count; ++i) {
+            const as_stmt_t *st = &ctx->parsed->items[i];
+
+            for (j = 0; j < st->label_count; ++j) {
+                if (st->labels[j].name != NULL) {
+                    ctx->label_index[ctx->label_index_count].name = st->labels[j].name;
+                    ctx->label_index[ctx->label_index_count].stmt = i;
+                    ctx->label_index_count++;
+                }
+            }
+        }
+        if (ctx->label_index_count != 0) {
+            qsort(ctx->label_index, ctx->label_index_count, sizeof(*ctx->label_index), label_index_cmp);
+        }
+        ctx->label_index_made = 1;
+    }
+    /* The first entry whose name is not less than `name`. */
+    lo = 0;
+    hi = ctx->label_index_count;
+    while (lo < hi) {
+        size_t mid = lo + (hi - lo) / 2;
+
+        if (strcmp(ctx->label_index[mid].name, name) < 0) {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+    if (lo == ctx->label_index_count || strcmp(ctx->label_index[lo].name, name) != 0) {
+        return -1;
+    }
+    *idx_out = ctx->label_index[lo].stmt;
+    return 0;
+}
+
 static int eval_direct_local_branch_target(emit_ctx_t *ctx, const char *section_name, const as_stmt_t *base_st,
                                            uint64_t base_off, unsigned x86_code_bits, const as_expr_t *rel_expr,
                                            size_t branch_len, long long *abs_target_out) {
@@ -13214,20 +13328,7 @@ static int eval_direct_local_branch_target(emit_ctx_t *ctx, const char *section_
         target_st = resolve_local_ref_target_stmt(ctx, base_st, rel_expr->src_file,
                                                   rel_expr->local_digit, rel_expr->local_forward);
     } else if (rel_expr->kind == AS_EXPR_SYMBOL && rel_expr->symbol != NULL) {
-        target_st = NULL;
-        for (i = 0; i < ctx->parsed->count; ++i) {
-            const as_stmt_t *st = &ctx->parsed->items[i];
-            size_t j;
-            for (j = 0; j < st->label_count; ++j) {
-                if (st->labels[j].name != NULL && strcmp(st->labels[j].name, rel_expr->symbol) == 0) {
-                    target_st = st;
-                    break;
-                }
-            }
-            if (target_st != NULL) {
-                break;
-            }
-        }
+        target_st = label_stmt_index(ctx, rel_expr->symbol, &i) == 0 ? &ctx->parsed->items[i] : NULL;
     } else {
         return -1;
     }
@@ -13306,16 +13407,8 @@ static int local_temp_branch_is_short(emit_ctx_t *ctx, const char *section_name,
         ctx->branch_short = next;
         ctx->branch_short_count = ctx->parsed->count;
     }
-    for (i = 0; target_idx == (size_t)-1 && i < ctx->parsed->count; ++i) {
-        const as_stmt_t *t = &ctx->parsed->items[i];
-        size_t j;
-
-        for (j = 0; j < t->label_count; ++j) {
-            if (t->labels[j].name != NULL && strcmp(t->labels[j].name, e->symbol) == 0) {
-                target_idx = i;
-                break;
-            }
-        }
+    if (label_stmt_index(ctx, e->symbol, &target_idx) != 0) {
+        target_idx = (size_t)-1;
     }
     if (target_idx == (size_t)-1 || target_idx == base_idx) {
         goto done;
@@ -16649,12 +16742,24 @@ static void adjust_x86_rel_reloc_to_encoding(unsigned machine, const as_instruct
         (code_len == 6 && code[0] == 0x0f && (code[1] & 0xf0) == 0x80)) {
         /* A call of a local label of another section is of a place in
          * that section, not of a function that may be elsewhere. */
-        int by_plt = streq_ci(in->mnemonic, "call") && !in->target_in_other_section;
-
+        /*
+         * Without an `@PLT` of its own, which is read elsewhere: on
+         * x86-64 a call or a jump, conditional or not, of a symbol
+         * that may be in another object goes by the procedure linkage
+         * table, as GNU as has it; on i386 none does.  (It had been
+         * the call alone, on both.)
+         */
         if (machine == EM_X86_64) {
-            *type = by_plt ? R_X86_64_PLT32 : R_X86_64_PC32;
+            /* (A symbol and something added to it is a place, not a
+             * procedure: `jmp sym+4` is R_X86_64_PC32.) */
+            int bare = in->operand_count == 1 &&
+                       (in->operands[0].kind == AS_OPERAND_LABEL_REF ||
+                        in->operands[0].kind == AS_OPERAND_IMMEDIATE) &&
+                       in->operands[0].u.expr != NULL && in->operands[0].u.expr->kind == AS_EXPR_SYMBOL;
+
+            *type = (in->target_in_other_section == 1 || !bare) ? R_X86_64_PC32 : R_X86_64_PLT32;
         } else {
-            *type = by_plt ? R_386_PLT32 : R_386_PC32;
+            *type = R_386_PC32;
         }
         *width = 4;
         return;
@@ -17118,9 +17223,12 @@ static int emit_relocations(emit_ctx_t *ctx) {
                         streq_ci(op->u.mem.base_reg, "rip")) {
                         skip_local_resolve = 1;
                     }
+                    /* A call of a symbol is the linker's to resolve --
+                     * but not of a label that is the source's own and in
+                     * this section, which is a distance like any other. */
                     if (e->kind == AS_EXPR_SYMBOL &&
                         (op->kind == AS_OPERAND_LABEL_REF || op->kind == AS_OPERAND_IMMEDIATE) &&
-                        is_call_mnemonic(st->u.instr.mnemonic)) {
+                        is_call_mnemonic(st->u.instr.mnemonic) && !expr_is_local_temp_symbol(e)) {
                         skip_local_resolve = 1;
                     }
                     if (can_resolve_without_reloc && !skip_local_resolve &&
@@ -17449,8 +17557,7 @@ static const as_expr_t *far_branch_label(const as_expr_t *e) {
     if (e == NULL) {
         return NULL;
     }
-    if ((e->kind == AS_EXPR_LOCAL_REF && e->local_resolved) ||
-        (e->kind == AS_EXPR_SYMBOL && is_local_temp_symbol_name(e->symbol))) {
+    if ((e->kind == AS_EXPR_LOCAL_REF && e->local_resolved) || expr_is_local_temp_symbol(e)) {
         return e;
     }
     found = far_branch_label(e->lhs);
@@ -17462,10 +17569,13 @@ int as_elf_mark_far_branches(as_parse_result_t *parsed, const as_elf_cfg_t *cfg)
     sec_buf_vec_t names; /* for the sections' numbers only */
     far_label_t *labels = NULL;
     size_t label_count = 0, label_cap = 0;
+    const char **exported = NULL;
+    size_t exported_count = 0, exported_cap = 0;
     size_t *stmt_section = NULL;
     size_t i;
     int rc = -1;
 
+    near_names_free();
     if (parsed == NULL || parsed->count == 0) {
         return 0;
     }
@@ -17493,9 +17603,6 @@ int as_elf_mark_far_branches(as_parse_result_t *parsed, const as_elf_cfg_t *cfg)
             int digit = -1;
             int numeric = numeric_local_label_number(name, &digit) == 0;
 
-            if (!numeric && !is_local_temp_symbol_name(name)) {
-                continue;
-            }
             if (label_count == label_cap) {
                 size_t cap = label_cap != 0 ? label_cap * 2 : 64;
                 far_label_t *grown = (far_label_t *)realloc(labels, cap * sizeof(*grown));
@@ -17513,13 +17620,57 @@ int as_elf_mark_far_branches(as_parse_result_t *parsed, const as_elf_cfg_t *cfg)
             label_count++;
         }
         if (st->kind == AS_STMT_DIRECTIVE) {
-            (void)section_track_apply_directive(&track, &st->u.directive);
+            const as_directive_t *d = &st->u.directive;
+
+            /* What another file may see, or replace, is not the
+             * source's own. */
+            if (strcmp(d->name, ".globl") == 0 || strcmp(d->name, ".global") == 0 || strcmp(d->name, ".weak") == 0) {
+                for (j = 0; j < d->arg_count; ++j) {
+                    if (exported_count == exported_cap) {
+                        size_t cap = exported_cap != 0 ? exported_cap * 2 : 64;
+                        const char **grown = (const char **)realloc(exported, cap * sizeof(*grown));
+
+                        if (grown == NULL) {
+                            goto out;
+                        }
+                        exported = grown;
+                        exported_cap = cap;
+                    }
+                    exported[exported_count++] = d->args[j];
+                }
+            }
+            (void)section_track_apply_directive(&track, d);
         }
     }
     if (label_count != 0) {
         qsort(labels, label_count, sizeof(*labels), far_label_cmp);
     }
-    for (i = 0; label_count != 0 && i < parsed->count; ++i) {
+    /* The source's own labels, by name. */
+    near_names_free();
+    if (exported_count != 0) {
+        qsort(exported, exported_count, sizeof(*exported), near_name_cmp);
+    }
+    near_names = (char **)calloc(label_count != 0 ? label_count : 1, sizeof(*near_names));
+    if (near_names == NULL) {
+        goto out;
+    }
+    for (i = 0; i < label_count; ++i) {
+        const char *name = labels[i].name;
+
+        /* (Sorted by name, so one defined twice is twice together.) */
+        if (name == NULL || is_local_temp_symbol_name(name) ||
+            (near_name_count != 0 && strcmp(near_names[near_name_count - 1], name) == 0) ||
+            (exported_count != 0 &&
+             bsearch(&name, exported, exported_count, sizeof(*exported), near_name_cmp) != NULL)) {
+            continue;
+        }
+        near_names[near_name_count] = xstrdup(name);
+        if (near_names[near_name_count] == NULL) {
+            goto out;
+        }
+        near_name_count++;
+    }
+    for (i = 0; i < parsed->count; ++i) {
         as_stmt_t *st = &parsed->items[i];
         const as_expr_t *e;
         far_label_t key;
@@ -17536,13 +17687,23 @@ int as_elf_mark_far_branches(as_parse_result_t *parsed, const as_elf_cfg_t *cfg)
         if (e->kind == AS_EXPR_LOCAL_REF && e->local_resolved) {
             key.line = e->local_target_line;
             key.digit = e->local_digit;
-        } else if (e->kind == AS_EXPR_SYMBOL && is_local_temp_symbol_name(e->symbol)) {
+        } else if (expr_is_local_temp_symbol(e)) {
             key.name = e->symbol;
         } else {
             continue;
         }
-        found = (const far_label_t *)bsearch(&key, labels, label_count, sizeof(*labels), far_label_cmp);
-        if (found == NULL || found->section == stmt_section[i]) {
+        found = label_count != 0
+                    ? (const far_label_t *)bsearch(&key, labels, label_count, sizeof(*labels), far_label_cmp)
+                    : NULL;
+        if (found == NULL) {
+            /* A .L label that the source does not define: no nearer
+             * than a symbol of another file, which is what it is. */
+            if (key.name != NULL) {
+                st->u.instr.target_in_other_section = AS_TARGET_UNDEFINED;
+            }
+            continue;
+        }
+        if (found->section == stmt_section[i]) {
             continue;
         }
         st->u.instr.target_in_other_section = 1;
@@ -17554,6 +17715,7 @@ int as_elf_mark_far_branches(as_parse_result_t *parsed, const as_elf_cfg_t *cfg)
 
 out:
     free(labels);
+    free(exported);
     free(stmt_section);
     sec_buf_vec_free(&names);
     section_track_free(&track);
@@ -17911,6 +18073,7 @@ int as_elf_emit_file(const as_parse_result_t *parsed,
     virtual_label_cache_free(&ctx);
     free(ctx.list_sec);
     free(ctx.list_off);
+    free(ctx.label_index);
     free(ctx.stmt_size_cache);
     free(ctx.stmt_size_cached);
     free(ctx.branch_short);
@@ -17940,6 +18103,7 @@ fail:
     virtual_label_cache_free(&ctx);
     free(ctx.list_sec);
     free(ctx.list_off);
+    free(ctx.label_index);
     free(ctx.stmt_size_cache);
     free(ctx.stmt_size_cached);
     free(ctx.branch_short);

@@ -674,8 +674,9 @@ one table of templates; there is one ModRM/SIB/prefix emitter.
 - [ ] **AS-T-186** Where an instruction has more than one encoding of the same meaning, the assembler shall choose the shortest.
   Trace: AS-X86-042, AS-EXT-008 (note 19).  Verify: T — sign-extended `imm8` in the ALU group, `6A` push, accumulator short forms, `disp8` for `(%ebp)`, `(%rbp)`, `(%r13)`, `D1` shifts by one, `pushq %rbp` as `55`, no SIB for a bare 32-bit address; the "ours longer" class of both corpora is empty.  After: 162.
   In part, ahead of 162, and the larger part by count: in 32-bit code the ALU group took a four-byte immediate always, and now takes the sign-extended byte where it fits (`83`); `%al` and the accumulator have the forms that name no register (`04`, `05`, `A8`, `A9`) in both modes; a push of a number a byte holds is `6A`; a shift or rotate by one is `D0`/`D1`; an exchange with the accumulator is `90+r` (but not `xchg %eax,%eax` in 64-bit code, which is not a no-op); and `pushq %rbp` is `55`, where a push or pop with a `q` had been given `REX.W`.  1,182 more lines of the 32-bit corpus and 855 of the 64-bit are GNU's for it (9,577 of 11,706; 14,767 of 18,072), and none fewer.  `test_suffix_forms.sh`.  Open: `mov` to and from the accumulator at an absolute address (`A0` to `A3`) in 32-bit code, the short forms with a symbolic immediate (`testl $sym,%eax` is `F7` where GNU has `A9`), and whatever else is left in the "ours longer" class.
-- [ ] **AS-T-187** When a branch names a label in its own section, the assembler shall resolve it with no relocation and choose the short form where it reaches.
+- [x] **AS-T-187** When a branch names a label in its own section, the assembler shall resolve it with no relocation and choose the short form where it reaches.
   Trace: AS-LAY-003.  Verify: T — `jmp l` / `l: ret` is `eb 00 c3` with no relocation.  After: 190.
+  Done, ahead of 190, for a label that is the source's own: defined in it and named by no `.globl`, `.global` or `.weak`.  Only `.L` and numeric labels had been places the assembler knew; a branch to any other, or a call of a static function, was the long form and a relocation.  Such a label is now as near as a `.L` one, for `jmp`, the conditional jumps and `call`.  `test_own_label_branch.sh`, 19 cases, which GNU as passes; three tests that were expected to fail pass and are off the list.  With it, the label of a branch was looked for by going through every label of the source, for every branch on every pass; they are kept sorted, and a 51,000-line compiler output assembles in 3 seconds where it took 12.  Not done: GNU also resolves a `jmp` or conditional jump (not a `call`) to a global label that is not weak, and `jmp l+1`, and a branch to a name that `.set` made another label's; and the two cases at the limit of a short branch's reach are 221.
 
 ## E. Fixups: the encoder says where its relocations are
 
@@ -723,14 +724,17 @@ one table of templates; there is one ModRM/SIB/prefix emitter.
   Trace: AS-OBJ-003.  Verify: T and D as 202, with `-m64`.  After: 200.
 - [ ] **AS-T-205** When a `mov`, `test`, `binop`, `call` or `jmp` uses `@GOTPCREL`, the assembler shall emit `R_X86_64_GOTPCRELX` or `R_X86_64_REX_GOTPCRELX` as the psABI gives.
   Trace: AS-OBJ-015.  Verify: T — each instruction class with and without `REX`.  After: 204.
-- [ ] **AS-T-206** When an i386 `call` or `jmp` names a symbol without `@PLT`, the assembler shall emit `R_386_PC32`.
+- [x] **AS-T-206** When an i386 `call` or `jmp` names a symbol without `@PLT`, the assembler shall emit `R_386_PC32`.
   Trace: AS-OBJ-015.  Verify: T — global, local and undefined targets: GNU.  After: 191.
-- [ ] **AS-T-207** When an x86-64 `call`, `jmp` or `jcc` names a global or undefined symbol, the assembler shall emit `R_X86_64_PLT32`.
+  Done, ahead of 191: a call had `R_386_PLT32`, which is what `call f@PLT` gets, and now has `R_386_PC32` as a jump has.  Global, weak and undefined targets are GNU's (`test_own_label_branch.sh`); a local one of the same section has no relocation (187).  `test_i386_rel_addend.sh` held a call to `R_386_PLT32` and holds it to the other.  Not GNU's yet: a local label of another section that is not a `.L` one is relocated against its symbol, where GNU uses the section's.
+- [x] **AS-T-207** When an x86-64 `call`, `jmp` or `jcc` names a global or undefined symbol, the assembler shall emit `R_X86_64_PLT32`.
   Trace: AS-OBJ-015.  Verify: T: GNU.  After: 191.
+  Done, ahead of 191: a jump and a conditional jump had `R_X86_64_PC32` and have `R_X86_64_PLT32` as a call has, for a bare symbol; with something added to it (`jmp sym+4`) it stays `R_X86_64_PC32`, as with GNU.  `test_own_label_branch.sh`; 34 lines left the 64-bit baseline.
 - [x] **AS-T-208** When a 32-bit immediate of a 32-bit operation holds a symbol in 64-bit mode, the assembler shall emit `R_X86_64_32`, and `R_X86_64_32S` where the processor sign-extends the field.
   Trace: AS-OBJ-015.  Verify: T — `movl $sym,%eax` (32), `movq $sym,%rax` (32S), `addq $sym,%rax` (32S): GNU.  After: 191.
-- [ ] **AS-T-209** When a conditional branch names an undefined symbol, the assembler shall encode the near form with a 32-bit relocation.
+- [x] **AS-T-209** When a conditional branch names an undefined symbol, the assembler shall encode the near form with a 32-bit relocation.
   Trace: AS-OBJ-015.  Verify: T — `je .Lundefined`, `je extern_sym`: GNU.  After: 191.
+  Done.  `je extern_sym` was right; `je .Lundefined` was not: a `.L` label was taken to be near whether the source defined it or not, so the jump was `74` and a byte with an 8-bit relocation, and in 32-bit code a `jmp` to one was left out of the object.  A `.L` label the source does not define is another file's symbol: the near form, and `R_386_PC32` or `R_X86_64_PLT32`.  `test_own_label_branch.sh`.
 - [ ] **AS-T-210** When a data directive holds a symbol, the assembler shall emit a relocation of the directive's width.
   Trace: AS-OBJ-006.  Verify: T — `--64` `.long ext` (`R_X86_64_32`), `.word ext` (16), `.byte ext` (8), `.quad ext` (64); `--32` `.word ext` (`R_386_16`), `.byte ext` (`R_386_8`); the PC-relative forms of each.
 - [ ] **AS-T-211** When a data directive holds `symbol - .` plus a constant, the assembler shall emit a PC-relative relocation with that addend.
@@ -1185,5 +1189,5 @@ is not to be done, 370 is ticked with "removed" and the rest struck.
 | AS-EXT-009 | 185, 325, 332–337 |
 | AS-EXT-010 | 040, 171, 338, 339 (339 closes all of AS-EXT) |
 
-351 tasks: 178 done, 173 open.  Numbers run to 400, with gaps left between
+351 tasks: 182 done, 169 open.  Numbers run to 400, with gaps left between
 sections for tasks found along the way.

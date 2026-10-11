@@ -29,7 +29,12 @@ grep -q "e8 fc ff ff ff" "$TMP/dump.txt"
 grep -q "e9 fc ff ff ff" "$TMP/dump.txt"
 grep -q "b8 04 00 00 00" "$TMP/dump.txt"
 readelf -S "$TMP/call.o" | grep -q "\.rel\.text"
-readelf --wide -r "$TMP/call.o" | grep -q "R_386_PLT32"
+# (A call with no @PLT is R_386_PC32, as GNU as has it: this held it to
+# R_386_PLT32, which is what `call ext@PLT` gets.)
+if readelf --wide -r "$TMP/call.o" | grep -q "R_386_PLT32"; then
+    echo "FAIL: a call with no @PLT has R_386_PLT32"
+    exit 1
+fi
 readelf --wide -r "$TMP/call.o" | grep -q "R_386_PC32"
 readelf --wide -r "$TMP/call.o" | grep -q "R_386_32"
 

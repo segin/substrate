@@ -2254,7 +2254,11 @@ static int instruction_is_direct_branch(const as_instruction_t *in) {
 }
 
 int as_parse_is_direct_branch(const as_stmt_t *st) {
-    return st != NULL && st->kind == AS_STMT_INSTRUCTION && instruction_is_direct_branch(&st->u.instr);
+    /* (Its operand an expression: `call %eax` is a mistake, and what
+     * is in the operand then is a register's name.) */
+    return st != NULL && st->kind == AS_STMT_INSTRUCTION && instruction_is_direct_branch(&st->u.instr) &&
+           (st->u.instr.operands[0].kind == AS_OPERAND_LABEL_REF ||
+            st->u.instr.operands[0].kind == AS_OPERAND_IMMEDIATE);
 }
 
 int as_parse_name_branch_label(as_stmt_t *st) {

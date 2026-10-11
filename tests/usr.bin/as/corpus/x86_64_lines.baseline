@@ -320,9 +320,6 @@ movq $-0x8000000000000000,%mm0
 movq $0xffffffff80000000,%mm0
 movq $0xffffffff7fffffff,%mm0
 movq $0x123456789abcdef0,%mm0
-jmp sym
-call sym-4
-je sym
 call *sym@GOTPCREL(%rip)
 jmp *sym@GOTPCREL(%rip)
 leaq sym@TLSDESC(%rip),%rax
@@ -345,7 +342,6 @@ movabs $sym@PLTOFF,%rax
 .data | .long 0 | lv: .long 0 | .text | movabs $lv,%rax
 .data | .long 0 | lv: .long 0 | .text | call lv
 .section .rodata | .long 0 | lv: .long 0 | .text | leaq lv+4(%rip),%rax
-lf: nop | call lf
 .globl gf | gf: nop | jmp gf
 .globl gf | gf: nop | je gf
 mov sym,%es
@@ -912,35 +908,6 @@ ds; movl %eax,(%rbx)
 fs
 gs
 rex64 movl %eax,%ebx
-jo sym
-jno sym
-jb sym
-jc sym
-jnae sym
-jae sym
-jnb sym
-jnc sym
-jz sym
-jne sym
-jnz sym
-jbe sym
-jna sym
-ja sym
-jnbe sym
-js sym
-jns sym
-jp sym
-jpe sym
-jnp sym
-jpo sym
-jl sym
-jnge sym
-jge sym
-jnl sym
-jle sym
-jng sym
-jg sym
-jnle sym
 seta %ax
 seta %eax
 setab %al
@@ -953,7 +920,6 @@ call .
 call .+5
 je .
 je .+2
-jmp sym | jmp sym
 pushw $0xffff
 pushl $0x12345678
 femms

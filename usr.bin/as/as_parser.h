@@ -74,6 +74,9 @@ typedef struct {
     } u;
 } as_operand_t;
 
+/* as_instruction_t.target_in_other_section, for a label not defined. */
+#define AS_TARGET_UNDEFINED 2u
+
 #define AS_PREFIX_LOCK (1u << 0)
 #define AS_PREFIX_REP (1u << 1)
 #define AS_PREFIX_REPE (1u << 2)
@@ -123,7 +126,9 @@ typedef struct {
      * A branch to a local label -- a numeric one, or a compiler's .L --
      * that is defined in another section than the branch: the distance
      * is not known until the sections are placed, so it is the long form
-     * with a relocation.  Set by as_elf_mark_far_branches().
+     * with a relocation.  Set by as_elf_mark_far_branches(): 1, or
+     * AS_TARGET_UNDEFINED for a .L label the source does not define at
+     * all, which is as far and is another file's symbol besides.
      */
     unsigned target_in_other_section;
 } as_instruction_t;

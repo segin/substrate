@@ -128,8 +128,6 @@ call $0x10,$0x1000
 jcxz sym
 jmp *%al
 jmp *$1
-call sym
-call sym-4
 callw sym
 jmpw sym
 calll sym
@@ -154,9 +152,6 @@ movl $sym2-sym,%eax
 .data | .long 0 | lv: .long 0 | .text | call lv
 .data | .long 0 | lv: .long 0 | .text | leal lv@GOTOFF(%ebx),%eax
 .globl gv | .data | .long 0 | gv: .long 0 | .text | movl gv,%eax
-.weak wk | call wk
-lf: nop | call lf
-.globl gf | gf: nop | call gf
 .globl gf | gf: nop | jmp gf
 .globl gf | gf: nop | je gf
 nop | lf: nop | movl $lf,%eax
