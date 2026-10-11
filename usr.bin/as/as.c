@@ -80,6 +80,8 @@ typedef struct {
     struct as_text *gathered;
     const char *out_path;
     const char *listing_path;
+    /* The listing's path where the assembler made it up, to be freed. */
+    char *owned_listing_path;
     const char *self_path;
     const char *march;
     unsigned long long max_input_bytes;
@@ -4168,26 +4170,23 @@ static int gather_sources(const strvec_t *inputs, as_text_t *out) {
  * in a -Wa is an option like any other, and is read where they are.
  * `inputs` is the caller's, to free.
  */
-static int as_run(int argc, char **argv, strvec_t *inputs) {
+static int as_run_with(as_ctx_t *ctx, int argc, char **argv, strvec_t *inputs) {
     static as_text_t gathered;
-    as_ctx_t ctx;
     int i;
     int query_version = 0;
     unsigned long long t_start_us;
     unsigned long long t_end_us;
-    char *owned_listing_path = NULL;
 
-    memset(&ctx, 0, sizeof(ctx));
-    ctx.mode = AS_MODE_AUTO;
-    ctx.out_path = "a.out";
-    ctx.output = AS_OUTPUT_ELF;
-    ctx.self_path = argv[0];
-    ctx.warn_enabled = 1;
-    ctx.max_input_bytes = limit_from_env("AS_MAX_INPUT_BYTES");
-    ctx.max_line_bytes = limit_from_env("AS_MAX_LINE_BYTES");
-    ctx.max_token_length = limit_from_env("AS_MAX_TOKEN_LENGTH");
-    ctx.max_macro_depth = limit_from_env("AS_MAX_MACRO_DEPTH");
-    ctx.max_include_depth = limit_from_env("AS_MAX_INCLUDE_DEPTH");
+    ctx->mode = AS_MODE_AUTO;
+    ctx->out_path = "a.out";
+    ctx->output = AS_OUTPUT_ELF;
+    ctx->self_path = argv[0];
+    ctx->warn_enabled = 1;
+    ctx->max_input_bytes = limit_from_env("AS_MAX_INPUT_BYTES");
+    ctx->max_line_bytes = limit_from_env("AS_MAX_LINE_BYTES");
+    ctx->max_token_length = limit_from_env("AS_MAX_TOKEN_LENGTH");
+    ctx->max_macro_depth = limit_from_env("AS_MAX_MACRO_DEPTH");
+    ctx->max_include_depth = limit_from_env("AS_MAX_INCLUDE_DEPTH");
     g_emit_error_codes = getenv("AS_ERROR_CODES") != NULL ? 1 : 0;
     /*
      * Run by the name of an assembler for another machine it is asked
@@ -4220,15 +4219,15 @@ static int as_run(int argc, char **argv, strvec_t *inputs) {
             continue;
         }
         if (strcmp(arg, "--target-help") == 0) {
-            ctx.target_help = 1;
+            ctx->target_help = 1;
             continue;
         }
         if (strcmp(arg, "--statistics") == 0) {
-            ctx.statistics = 1;
+            ctx->statistics = 1;
             continue;
         }
         if (strcmp(arg, "--from-cc") == 0) {
-            ctx.invoked_from_cc = 1;
+            ctx->invoked_from_cc = 1;
             continue;
         }
         if (strcmp(arg, "-c") == 0) {
@@ -4238,25 +4237,19 @@ static int as_run(int argc, char **argv, strvec_t *inputs) {
             const char *value;
             if (i + 1 >= argc) {
                 usage(argv[0]);
-                strvec_free(&ctx.gcc_opts);
-                strvec_free(&ctx.as_opts);
                 return 2;
             }
             value = argv[++i];
             if (strcmp(value, "elf") == 0) {
-                ctx.output = AS_OUTPUT_ELF;
+                ctx->output = AS_OUTPUT_ELF;
             } else if (strcmp(value, "binary") == 0 || strcmp(value, "bin") == 0) {
-                ctx.output = AS_OUTPUT_BINARY;
+                ctx->output = AS_OUTPUT_BINARY;
             } else if (isdigit((unsigned char)value[0])) {
-                if (push_opt_with_value(&ctx.as_opts, "-O", value) != 0) {
-                    strvec_free(&ctx.gcc_opts);
-                    strvec_free(&ctx.as_opts);
+                if (push_opt_with_value(&ctx->as_opts, "-O", value) != 0) {
                     return 1;
                 }
             } else {
                 as_diag(AS_E_USAGE, "unsupported output format '%s' for -O (expected elf|binary)", value);
-                strvec_free(&ctx.gcc_opts);
-                strvec_free(&ctx.as_opts);
                 return 2;
             }
             continue;
@@ -4264,43 +4257,39 @@ static int as_run(int argc, char **argv, strvec_t *inputs) {
         if (strncmp(arg, "-O", 2) == 0 && arg[2] != '\0') {
             const char *value = arg + 2;
             if (strcmp(value, "elf") == 0) {
-                ctx.output = AS_OUTPUT_ELF;
+                ctx->output = AS_OUTPUT_ELF;
             } else if (strcmp(value, "binary") == 0 || strcmp(value, "bin") == 0) {
-                ctx.output = AS_OUTPUT_BINARY;
+                ctx->output = AS_OUTPUT_BINARY;
             } else if (isdigit((unsigned char)value[0])) {
-                if (strvec_push(&ctx.as_opts, arg) != 0) {
-                    strvec_free(&ctx.gcc_opts);
-                    strvec_free(&ctx.as_opts);
+                if (strvec_push(&ctx->as_opts, arg) != 0) {
                     return 1;
                 }
             } else {
                 as_diag(AS_E_USAGE, "unsupported output format '%s' for -O (expected elf|binary)", value);
-                strvec_free(&ctx.gcc_opts);
-                strvec_free(&ctx.as_opts);
                 return 2;
             }
             continue;
         }
         if (strcmp(arg, "--warn") == 0) {
-            ctx.warn_enabled = 1;
+            ctx->warn_enabled = 1;
             continue;
         }
         /* -W is --no-warn, as it is to GNU as. */
         if (strcmp(arg, "-W") == 0 || strcmp(arg, "--no-warn") == 0) {
-            ctx.warn_enabled = 0;
+            ctx->warn_enabled = 0;
             continue;
         }
         if (strcmp(arg, "--fatal-warnings") == 0) {
-            ctx.fatal_warnings = 1;
+            ctx->fatal_warnings = 1;
             continue;
         }
         if (strcmp(arg, "-al") == 0) {
-            ctx.emit_listing = 1;
+            ctx->emit_listing = 1;
             continue;
         }
         if (strncmp(arg, "-al=", 4) == 0) {
-            ctx.emit_listing = 1;
-            ctx.listing_path = arg + 4;
+            ctx->emit_listing = 1;
+            ctx->listing_path = arg + 4;
             continue;
         }
         if (strcmp(arg, "--defsym") == 0 || strncmp(arg, DEFSYM_OPT, sizeof(DEFSYM_OPT) - 1) == 0) {
@@ -4311,13 +4300,9 @@ static int as_run(int argc, char **argv, strvec_t *inputs) {
             if (spec == NULL || defsym_split(spec, &name_len, &value) != 0) {
                 as_diag(AS_E_USAGE, "bad --defsym%s%s: the form is --defsym name=value", spec != NULL ? " " : "",
                         spec != NULL ? spec : "");
-                strvec_free(&ctx.gcc_opts);
-                strvec_free(&ctx.as_opts);
                 return 2;
             }
-            if (push_opt_with_value(&ctx.as_opts, DEFSYM_OPT, spec) != 0) {
-                strvec_free(&ctx.gcc_opts);
-                strvec_free(&ctx.as_opts);
+            if (push_opt_with_value(&ctx->as_opts, DEFSYM_OPT, spec) != 0) {
                 return 1;
             }
             continue;
@@ -4327,19 +4312,15 @@ static int as_run(int argc, char **argv, strvec_t *inputs) {
 
             if (i + 1 >= argc) {
                 usage(argv[0]);
-                strvec_free(&ctx.gcc_opts);
-                strvec_free(&ctx.as_opts);
                 return 2;
             }
             value = argv[++i];
             if (strcmp(value, "intel") == 0) {
-                ctx.syntax_intel = 1;
+                ctx->syntax_intel = 1;
             } else if (strcmp(value, "att") == 0) {
-                ctx.syntax_intel = 0;
+                ctx->syntax_intel = 0;
             } else {
                 as_diag(AS_E_USAGE, "unsupported -msyntax=%s (expected att|intel)", value);
-                strvec_free(&ctx.gcc_opts);
-                strvec_free(&ctx.as_opts);
                 return 2;
             }
             continue;
@@ -4348,13 +4329,11 @@ static int as_run(int argc, char **argv, strvec_t *inputs) {
             const char *value = arg + 9;
 
             if (strcmp(value, "intel") == 0) {
-                ctx.syntax_intel = 1;
+                ctx->syntax_intel = 1;
             } else if (strcmp(value, "att") == 0) {
-                ctx.syntax_intel = 0;
+                ctx->syntax_intel = 0;
             } else {
                 as_diag(AS_E_USAGE, "unsupported -msyntax=%s (expected att|intel)", value);
-                strvec_free(&ctx.gcc_opts);
-                strvec_free(&ctx.as_opts);
                 return 2;
             }
             continue;
@@ -4364,8 +4343,6 @@ static int as_run(int argc, char **argv, strvec_t *inputs) {
             strcmp(arg, "--max-include-depth") == 0 || strcmp(arg, "--max-expansion-bytes") == 0) {
             if (i + 1 >= argc) {
                 usage(argv[0]);
-                strvec_free(&ctx.gcc_opts);
-                strvec_free(&ctx.as_opts);
                 return 2;
             }
             val = argv[++i];
@@ -4387,47 +4364,41 @@ static int as_run(int argc, char **argv, strvec_t *inputs) {
              * largest there is, and 0 as no limit at all. */
             if (!isdigit((unsigned char)val[0]) || parse_u64(val, &parsed) != 0 || parsed == 0) {
                 as_diag(AS_E_USAGE, "%s: a limit is a positive number", arg);
-                strvec_free(&ctx.gcc_opts);
-                strvec_free(&ctx.as_opts);
                 return 2;
             }
             if (strncmp(arg, "--max-expansion-bytes", 21) == 0) {
                 text_limit = parsed;
             } else if (strncmp(arg, "--max-input-bytes", 17) == 0) {
-                ctx.max_input_bytes = parsed;
+                ctx->max_input_bytes = parsed;
             } else if (strncmp(arg, "--max-line-bytes", 16) == 0) {
-                ctx.max_line_bytes = parsed;
+                ctx->max_line_bytes = parsed;
             } else if (strncmp(arg, "--max-token-length", 18) == 0) {
-                ctx.max_token_length = parsed;
+                ctx->max_token_length = parsed;
             } else if (strncmp(arg, "--max-macro-depth", 17) == 0) {
-                ctx.max_macro_depth = parsed;
+                ctx->max_macro_depth = parsed;
             } else {
-                ctx.max_include_depth = parsed;
+                ctx->max_include_depth = parsed;
             }
             continue;
         }
         if (strcmp(arg, "-o") == 0) {
             if (i + 1 >= argc) {
                 usage(argv[0]);
-                strvec_free(&ctx.gcc_opts);
-                strvec_free(&ctx.as_opts);
                 return 2;
             }
-            ctx.out_path = argv[++i];
+            ctx->out_path = argv[++i];
             continue;
         }
         if (strcmp(arg, "-32") == 0 || strcmp(arg, "--32") == 0) {
-            ctx.mode = AS_MODE_32;
+            ctx->mode = AS_MODE_32;
             continue;
         }
         if (strcmp(arg, "-64") == 0 || strcmp(arg, "--64") == 0) {
-            ctx.mode = AS_MODE_64;
+            ctx->mode = AS_MODE_64;
             continue;
         }
         if (strcmp(arg, "-g") == 0) {
-            if (strvec_push(&ctx.gcc_opts, arg) != 0 || strvec_push(&ctx.as_opts, arg) != 0) {
-                strvec_free(&ctx.gcc_opts);
-                strvec_free(&ctx.as_opts);
+            if (strvec_push(&ctx->gcc_opts, arg) != 0 || strvec_push(&ctx->as_opts, arg) != 0) {
                 return 1;
             }
             continue;
@@ -4438,57 +4409,43 @@ static int as_run(int argc, char **argv, strvec_t *inputs) {
 
             if (i + 1 >= argc) {
                 usage(argv[0]);
-                strvec_free(&ctx.gcc_opts);
-                strvec_free(&ctx.as_opts);
                 return 2;
             }
             value = argv[++i];
             if (strcmp(arg, "-march") == 0) {
-                ctx.march = value;
-                if (push_opt_with_value(&ctx.gcc_opts, "-march=", value) != 0) {
-                    strvec_free(&ctx.gcc_opts);
-                    strvec_free(&ctx.as_opts);
+                ctx->march = value;
+                if (push_opt_with_value(&ctx->gcc_opts, "-march=", value) != 0) {
                     return 1;
                 }
                 continue;
             }
             if (strcmp(arg, "-mtune") == 0) {
-                if (push_opt_with_value(&ctx.gcc_opts, "-mtune=", value) != 0) {
-                    strvec_free(&ctx.gcc_opts);
-                    strvec_free(&ctx.as_opts);
+                if (push_opt_with_value(&ctx->gcc_opts, "-mtune=", value) != 0) {
                     return 1;
                 }
                 continue;
             }
-            if (push_opt_with_value(&ctx.gcc_opts, strcmp(arg, "-I") == 0 ? "-I" : "-D", value) != 0 ||
-                (strcmp(arg, "-I") == 0 && push_opt_with_value(&ctx.as_opts, "-I", value) != 0)) {
-                strvec_free(&ctx.gcc_opts);
-                strvec_free(&ctx.as_opts);
+            if (push_opt_with_value(&ctx->gcc_opts, strcmp(arg, "-I") == 0 ? "-I" : "-D", value) != 0 ||
+                (strcmp(arg, "-I") == 0 && push_opt_with_value(&ctx->as_opts, "-I", value) != 0)) {
                 return 1;
             }
             continue;
         }
         if (strncmp(arg, "-march=", 7) == 0) {
-            ctx.march = arg + 7;
-            if (strvec_push(&ctx.gcc_opts, arg) != 0) {
-                strvec_free(&ctx.gcc_opts);
-                strvec_free(&ctx.as_opts);
+            ctx->march = arg + 7;
+            if (strvec_push(&ctx->gcc_opts, arg) != 0) {
                 return 1;
             }
             continue;
         }
         if (strncmp(arg, "-mtune=", 7) == 0) {
-            if (strvec_push(&ctx.gcc_opts, arg) != 0) {
-                strvec_free(&ctx.gcc_opts);
-                strvec_free(&ctx.as_opts);
+            if (strvec_push(&ctx->gcc_opts, arg) != 0) {
                 return 1;
             }
             continue;
         }
         if (strncmp(arg, "-I", 2) == 0 || strncmp(arg, "-D", 2) == 0) {
-            if (strvec_push(&ctx.gcc_opts, arg) != 0 || (strncmp(arg, "-I", 2) == 0 && strvec_push(&ctx.as_opts, arg) != 0)) {
-                strvec_free(&ctx.gcc_opts);
-                strvec_free(&ctx.as_opts);
+            if (strvec_push(&ctx->gcc_opts, arg) != 0 || (strncmp(arg, "-I", 2) == 0 && strvec_push(&ctx->as_opts, arg) != 0)) {
                 return 1;
             }
             continue;
@@ -4507,15 +4464,11 @@ static int as_run(int argc, char **argv, strvec_t *inputs) {
         /* Any other option is one there is not. */
         if (arg[0] == '-' && arg[1] != '\0') {
             as_diag(AS_E_USAGE, "unrecognized option '%s'", arg);
-            strvec_free(&ctx.gcc_opts);
-            strvec_free(&ctx.as_opts);
             return 1;
         }
 
         /* A source; `-` alone is the standard input. */
         if (strvec_push(inputs, arg) != 0) {
-            strvec_free(&ctx.gcc_opts);
-            strvec_free(&ctx.as_opts);
             return 1;
         }
     }
@@ -4526,22 +4479,18 @@ static int as_run(int argc, char **argv, strvec_t *inputs) {
      * in order, to one file: the stages that follow each open their
      * source by name, and some open it twice.
      */
-    if (!query_version && !ctx.target_help) {
+    if (!query_version && !ctx->target_help) {
         if (inputs->count == 1 && strcmp(inputs->items[0], "-") != 0) {
-            ctx.in_path = inputs->items[0];
+            ctx->in_path = inputs->items[0];
         } else if (inputs->count == 0 && isatty(STDIN_FILENO)) {
             /* Nothing named and nothing piped: said, not waited for. */
             usage(argv[0]);
-            strvec_free(&ctx.gcc_opts);
-            strvec_free(&ctx.as_opts);
             return 2;
         } else if (gather_sources(inputs, &gathered) != 0) {
-            strvec_free(&ctx.gcc_opts);
-            strvec_free(&ctx.as_opts);
             return 1;
         } else {
-            ctx.gathered = &gathered;
-            ctx.in_path = inputs->count == 0 ? AS_STDIN_NAME : inputs->items[0];
+            ctx->gathered = &gathered;
+            ctx->in_path = inputs->count == 0 ? AS_STDIN_NAME : inputs->items[0];
         }
     }
 
@@ -4553,119 +4502,102 @@ static int as_run(int argc, char **argv, strvec_t *inputs) {
          */
         printf("as (Substrate assembler)\n");
         printf("Assembles for i386 and x86-64, to ELF or to a flat binary.\n");
-        strvec_free(&ctx.gcc_opts);
-        strvec_free(&ctx.as_opts);
         return 0;
     }
 
-    if (ctx.target_help) {
-        print_target_help(&ctx);
-        strvec_free(&ctx.gcc_opts);
-        strvec_free(&ctx.as_opts);
+    if (ctx->target_help) {
+        print_target_help(ctx);
         return 0;
     }
 
-    if (ctx.in_path == NULL) {
+    if (ctx->in_path == NULL) {
         usage(argv[0]);
-        strvec_free(&ctx.gcc_opts);
-        strvec_free(&ctx.as_opts);
         return 2;
     }
-    if (ctx.mode == AS_MODE_AUTO) {
-        ctx.mode = infer_mode(&ctx);
+    if (ctx->mode == AS_MODE_AUTO) {
+        ctx->mode = infer_mode(ctx);
     }
-    if (validate_march(ctx.mode, ctx.march) != 0) {
-        if (validate_march(ctx.mode, ctx.march) == -2) {
-            as_diag(AS_E_USAGE, "64bit mode not supported on `%.*s'", (int)strcspn(ctx.march, "+"), ctx.march);
+    if (validate_march(ctx->mode, ctx->march) != 0) {
+        if (validate_march(ctx->mode, ctx->march) == -2) {
+            as_diag(AS_E_USAGE, "64bit mode not supported on `%.*s'", (int)strcspn(ctx->march, "+"), ctx->march);
         } else {
-            as_diag(AS_E_USAGE, "invalid -march= option: `%s'", ctx.march);
+            as_diag(AS_E_USAGE, "invalid -march= option: `%s'", ctx->march);
         }
-        strvec_free(&ctx.gcc_opts);
-        strvec_free(&ctx.as_opts);
         return 2;
     }
-    if (ctx.march != NULL) {
-        const char *gas_march = march_to_gas(ctx.mode, ctx.march);
-        if (gas_march != NULL && push_opt_with_value(&ctx.as_opts, "-march=", gas_march) != 0) {
-            strvec_free(&ctx.gcc_opts);
-            strvec_free(&ctx.as_opts);
+    if (ctx->march != NULL) {
+        const char *gas_march = march_to_gas(ctx->mode, ctx->march);
+        if (gas_march != NULL && push_opt_with_value(&ctx->as_opts, "-march=", gas_march) != 0) {
             return 1;
         }
     }
-    if (push_opt_with_value(&ctx.as_opts, "-msyntax=", ctx.syntax_intel ? "intel" : "att") != 0) {
-        strvec_free(&ctx.gcc_opts);
-        strvec_free(&ctx.as_opts);
+    if (push_opt_with_value(&ctx->as_opts, "-msyntax=", ctx->syntax_intel ? "intel" : "att") != 0) {
         return 1;
     }
-    if (ctx.warn_enabled) {
-        if (strvec_push(&ctx.as_opts, "--warn") != 0) {
-            strvec_free(&ctx.gcc_opts);
-            strvec_free(&ctx.as_opts);
+    if (ctx->warn_enabled) {
+        if (strvec_push(&ctx->as_opts, "--warn") != 0) {
             return 1;
         }
     } else {
-        if (strvec_push(&ctx.as_opts, "--no-warn") != 0) {
-            strvec_free(&ctx.gcc_opts);
-            strvec_free(&ctx.as_opts);
+        if (strvec_push(&ctx->as_opts, "--no-warn") != 0) {
             return 1;
         }
     }
-    if (ctx.fatal_warnings) {
-        if (strvec_push(&ctx.as_opts, "--fatal-warnings") != 0) {
-            strvec_free(&ctx.gcc_opts);
-            strvec_free(&ctx.as_opts);
+    if (ctx->fatal_warnings) {
+        if (strvec_push(&ctx->as_opts, "--fatal-warnings") != 0) {
             return 1;
         }
     }
-    if (ctx.max_include_depth > 0) {
+    if (ctx->max_include_depth > 0) {
         char lim[32];
-        if (snprintf(lim, sizeof(lim), "%llu", ctx.max_include_depth) >= (int)sizeof(lim) ||
-            push_opt_with_value(&ctx.gcc_opts, "-fmax-include-depth=", lim) != 0) {
-            strvec_free(&ctx.gcc_opts);
-            strvec_free(&ctx.as_opts);
+        if (snprintf(lim, sizeof(lim), "%llu", ctx->max_include_depth) >= (int)sizeof(lim) ||
+            push_opt_with_value(&ctx->gcc_opts, "-fmax-include-depth=", lim) != 0) {
             return 1;
         }
     }
-    if (preflight_source_limits(&ctx) != 0) {
-        strvec_free(&ctx.gcc_opts);
-        strvec_free(&ctx.as_opts);
+    if (preflight_source_limits(ctx) != 0) {
         return 1;
     }
-    if (run_native_backend(&ctx) != 0) {
-        strvec_free(&ctx.gcc_opts);
-        strvec_free(&ctx.as_opts);
+    if (run_native_backend(ctx) != 0) {
         return 1;
     }
-    if (validate_output_file(&ctx) != 0) {
-        strvec_free(&ctx.gcc_opts);
-        strvec_free(&ctx.as_opts);
+    if (validate_output_file(ctx) != 0) {
         return 1;
     }
-    if (ctx.emit_listing) {
-        if (ctx.listing_path != NULL) {
-            owned_listing_path = NULL;
-        } else {
-            owned_listing_path = default_listing_path(&ctx);
-            ctx.listing_path = owned_listing_path;
+    if (ctx->emit_listing) {
+        if (ctx->listing_path == NULL) {
+            ctx->owned_listing_path = default_listing_path(ctx);
+            ctx->listing_path = ctx->owned_listing_path;
         }
-        if (emit_listing_file(&ctx) != 0) {
-            strvec_free(&ctx.gcc_opts);
-            strvec_free(&ctx.as_opts);
-            free(owned_listing_path);
-            listing_free();
+        if (emit_listing_file(ctx) != 0) {
             return 1;
         }
     }
-    listing_free();
     t_end_us = wallclock_us();
-    if (ctx.statistics) {
+    if (ctx->statistics) {
         print_statistics(t_start_us, t_end_us);
     }
-
-    strvec_free(&ctx.gcc_opts);
-    strvec_free(&ctx.as_opts);
-    free(owned_listing_path);
     return 0;
+}
+
+/*
+ * One run of the assembler.  What a run holds -- the options it
+ * gathered, the listing's path if it made one, what the emitter told
+ * for the listing -- is let go here, by whichever of the forty ways the
+ * run ended: each of them had the same two lines before its return, and
+ * some had forgotten one.
+ */
+static int as_run(int argc, char **argv, strvec_t *inputs) {
+    as_ctx_t run;
+    int rc;
+
+    memset(&run, 0, sizeof(run));
+    rc = as_run_with(&run, argc, argv, inputs);
+    strvec_free(&run.gcc_opts);
+    strvec_free(&run.as_opts);
+    free(run.owned_listing_path);
+    listing_free();
+    return rc;
 }
 
 /*

@@ -198,6 +198,25 @@ static void free_operand(as_operand_t *op) {
     memset(op, 0, sizeof(*op));
 }
 
+/*
+ * What an instruction holds, let go: its name and its operands.  For a
+ * statement that is done with, and for an instruction that was being
+ * read when something in it could not be -- where its name was freed in
+ * fifteen places and the operands read before the bad one in none.
+ */
+static void free_instruction(as_instruction_t *in) {
+    size_t i;
+
+    free(in->mnemonic);
+    free(in->arm_condition);
+    free(in->segment_override);
+    for (i = 0; i < in->operand_count; ++i) {
+        free_operand(&in->operands[i]);
+    }
+    free(in->operands);
+    memset(in, 0, sizeof(*in));
+}
+
 static void free_stmt(as_stmt_t *st) {
     size_t i;
 
@@ -217,13 +236,7 @@ static void free_stmt(as_stmt_t *st) {
         free(st->u.directive.args);
         free(st->u.directive.name);
     } else if (st->kind == AS_STMT_INSTRUCTION) {
-        free(st->u.instr.mnemonic);
-        free(st->u.instr.arm_condition);
-        free(st->u.instr.segment_override);
-        for (i = 0; i < st->u.instr.operand_count; ++i) {
-            free_operand(&st->u.instr.operands[i]);
-        }
-        free(st->u.instr.operands);
+        free_instruction(&st->u.instr);
     }
     memset(st, 0, sizeof(*st));
 }
@@ -977,6 +990,17 @@ static int add_intel_mem_term(parse_ctx_t *ctx, const as_token_t *tokv, size_t n
         }
     }
 
+    /* What is left is a number or a symbol, and has no register in it:
+     * `[ebx*3]`, a scale that is none, was the symbol ebx times three. */
+    {
+        size_t k;
+
+        for (k = 0; k < n; ++k) {
+            if (tok_is_intel_register(&tokv[k])) {
+                return -1;
+            }
+        }
+    }
     term = parse_expression_from_tokens(ctx, tokv, n);
     if (term == NULL) {
         return -1;
@@ -1075,12 +1099,10 @@ static int parse_intel_memory(parse_ctx_t *ctx, const as_token_t *tokv, size_t n
         size_t term;
         size_t end;
 
-        if (tok_is(&tokv[i], '+')) {
-            i++;
-            continue;
-        }
-        if (tok_is(&tokv[i], '-')) {
-            negate = 1;
+        /* (A sign with nothing after it, `[ebx+]`, ends at the bracket
+         * and is the empty term refused below.) */
+        if (tok_is(&tokv[i], '+') || tok_is(&tokv[i], '-')) {
+            negate = tok_is(&tokv[i], '-');
             i++;
         }
         term = i;
@@ -1237,7 +1259,23 @@ static int parse_shift_suffix(parse_ctx_t *ctx, as_operand_t *prev, const as_tok
     return 0;
 }
 
+static int parse_operand_tokens(parse_ctx_t *ctx, const as_token_t *tokv, size_t n, as_operand_t *op);
+
+/*
+ * One operand, from its tokens.  If it cannot be read, nothing of what
+ * was begun for it is kept: its text was, on every operand in error --
+ * `movl %nosuch, %eax` lost eleven bytes.
+ */
 static int parse_operand_slice(parse_ctx_t *ctx, const as_token_t *tokv, size_t n, as_operand_t *op) {
+    int rc = parse_operand_tokens(ctx, tokv, n, op);
+
+    if (rc != 0 && n != 0) {
+        free_operand(op);
+    }
+    return rc;
+}
+
+static int parse_operand_tokens(parse_ctx_t *ctx, const as_token_t *tokv, size_t n, as_operand_t *op) {
     int has_lparen;
     int has_lbr;
     int explicit_immediate;
@@ -1768,6 +1806,7 @@ static int parse_instruction(parse_ctx_t *ctx, const as_token_t *tokv, size_t n,
     size_t start;
     size_t first_operand;
     int depth = 0;
+    int rounding_written = 0;
 
     memset(&in, 0, sizeof(in));
     in.syntax_intel = (unsigned)(ctx != NULL && ctx->syntax_intel ? 1 : 0);
@@ -1906,9 +1945,7 @@ static int parse_instruction(parse_ctx_t *ctx, const as_token_t *tokv, size_t n,
                 ctx->cfg->arch == AS_PARSER_ARCH_X86) {
                 set_err(ctx, "%s:%u: '%s' has an empty operand", tokv[0].file != NULL ? tokv[0].file : "<input>",
                         tokv[0].line, in.mnemonic != NULL ? in.mnemonic : "");
-                free(in.mnemonic);
-                free(in.arm_condition);
-                free(in.segment_override);
+                free_instruction(&in);
                 return -1;
             }
             if (i > start) {
@@ -1921,13 +1958,20 @@ static int parse_instruction(parse_ctx_t *ctx, const as_token_t *tokv, size_t n,
 
                 if (ctx->cfg != NULL && ctx->cfg->arch == AS_PARSER_ARCH_X86 &&
                     parse_x86_operand_decorators(ctx, tokv + start, operand_n, &decor, &operand_n) != 0) {
-                    free(in.mnemonic);
-                    free(in.arm_condition);
-                    free(in.segment_override);
+                    free_instruction(&in);
                     return -1;
                 }
 
-                if (ctx->cfg != NULL && ctx->cfg->arch == AS_PARSER_ARCH_ARM && in.operand_count > 0 &&
+                if (operand_n == 0 && decor.rounding_mode >= 0) {
+                    /* `vaddps {rn-sae}, %zmm0, %zmm1, %zmm2`: how to
+                     * round, written as an operand by itself, is the
+                     * instruction's and is no operand.  It was "invalid
+                     * operand ''".  ({sae} alone is still that: the
+                     * encoders have no form for it yet.) */
+                    in.sae = 1;
+                    in.rounding_mode = decor.rounding_mode;
+                    rounding_written = 1;
+                } else if (ctx->cfg != NULL && ctx->cfg->arch == AS_PARSER_ARCH_ARM && in.operand_count > 0 &&
                     is_shift_keyword(tokv[start].text) && parse_shift_suffix(ctx, &in.operands[in.operand_count - 1], tokv + start, operand_n) == 0) {
                     /* Shift suffix consumed by previous operand. */
                 } else if (ctx->cfg != NULL && ctx->cfg->arch == AS_PARSER_ARCH_X86 &&
@@ -1943,9 +1987,7 @@ static int parse_instruction(parse_ctx_t *ctx, const as_token_t *tokv, size_t n,
                             add_operand(&in, &seg_op) != 0) {
                             free_operand(&off_op);
                             free_operand(&seg_op);
-                            free(in.mnemonic);
-                            free(in.arm_condition);
-                            free(in.segment_override);
+                            free_instruction(&in);
                             return -1;
                         }
                     } else {
@@ -1958,9 +2000,7 @@ static int parse_instruction(parse_ctx_t *ctx, const as_token_t *tokv, size_t n,
                                         bad != NULL ? bad : "<unknown>");
                                 free(bad);
                             }
-                            free(in.mnemonic);
-                            free(in.arm_condition);
-                            free(in.segment_override);
+                            free_instruction(&in);
                             return -1;
                         }
                         if ((decor.has_opmask || decor.zeroing || decor.sae || decor.rounding_mode >= 0) &&
@@ -1969,9 +2009,7 @@ static int parse_instruction(parse_ctx_t *ctx, const as_token_t *tokv, size_t n,
                                     tokv[start].file != NULL ? tokv[start].file : "<input>",
                                     tokv[start].line);
                             free_operand(&op);
-                            free(in.mnemonic);
-                            free(in.arm_condition);
-                            free(in.segment_override);
+                            free_instruction(&in);
                             return -1;
                         }
                         if (decor.broadcast && op.kind != AS_OPERAND_MEMORY) {
@@ -1979,9 +2017,7 @@ static int parse_instruction(parse_ctx_t *ctx, const as_token_t *tokv, size_t n,
                                     tokv[start].file != NULL ? tokv[start].file : "<input>",
                                     tokv[start].line);
                             free_operand(&op);
-                            free(in.mnemonic);
-                            free(in.arm_condition);
-                            free(in.segment_override);
+                            free_instruction(&in);
                             return -1;
                         }
                         if (decor.has_opmask) {
@@ -2001,9 +2037,7 @@ static int parse_instruction(parse_ctx_t *ctx, const as_token_t *tokv, size_t n,
                         }
                         if (add_operand(&in, &op) != 0) {
                             free_operand(&op);
-                            free(in.mnemonic);
-                            free(in.arm_condition);
-                            free(in.segment_override);
+                            free_instruction(&in);
                             return -1;
                         }
                     }
@@ -2017,9 +2051,7 @@ static int parse_instruction(parse_ctx_t *ctx, const as_token_t *tokv, size_t n,
                                     bad != NULL ? bad : "<unknown>");
                             free(bad);
                         }
-                        free(in.mnemonic);
-                        free(in.arm_condition);
-                        free(in.segment_override);
+                        free_instruction(&in);
                         return -1;
                     }
                     if ((decor.has_opmask || decor.zeroing || decor.sae || decor.rounding_mode >= 0) &&
@@ -2028,9 +2060,7 @@ static int parse_instruction(parse_ctx_t *ctx, const as_token_t *tokv, size_t n,
                                 tokv[start].file != NULL ? tokv[start].file : "<input>",
                                 tokv[start].line);
                         free_operand(&op);
-                        free(in.mnemonic);
-                        free(in.arm_condition);
-                        free(in.segment_override);
+                        free_instruction(&in);
                         return -1;
                     }
                     if (decor.broadcast && op.kind != AS_OPERAND_MEMORY) {
@@ -2038,9 +2068,7 @@ static int parse_instruction(parse_ctx_t *ctx, const as_token_t *tokv, size_t n,
                                 tokv[start].file != NULL ? tokv[start].file : "<input>",
                                 tokv[start].line);
                         free_operand(&op);
-                        free(in.mnemonic);
-                        free(in.arm_condition);
-                        free(in.segment_override);
+                        free_instruction(&in);
                         return -1;
                     }
                     if (decor.has_opmask) {
@@ -2060,9 +2088,7 @@ static int parse_instruction(parse_ctx_t *ctx, const as_token_t *tokv, size_t n,
                     }
                     if (add_operand(&in, &op) != 0) {
                         free_operand(&op);
-                        free(in.mnemonic);
-                        free(in.arm_condition);
-                        free(in.segment_override);
+                        free_instruction(&in);
                         return -1;
                     }
                 }
@@ -2071,6 +2097,25 @@ static int parse_instruction(parse_ctx_t *ctx, const as_token_t *tokv, size_t n,
             depth = 0;
         }
         i++;
+    }
+
+    /* Rounding is of registers, and of the widest or of a scalar: with
+     * memory there is nothing to say it with, the bit being the
+     * broadcast's, and of 256 bits there is no such form. */
+    if (rounding_written) {
+        size_t k;
+
+        for (k = 0; k < in.operand_count; ++k) {
+            const as_operand_t *o = &in.operands[k];
+
+            if (o->kind == AS_OPERAND_MEMORY ||
+                (o->kind == AS_OPERAND_REGISTER && as_x86_reg_find_class(o->u.reg, AS_X86_REGCLASS_YMM, 31) != NULL)) {
+                set_err(ctx, "%s:%u: '%s' is given how to round, and has an operand that cannot be rounded so",
+                        tokv[0].file != NULL ? tokv[0].file : "<input>", tokv[0].line, in.mnemonic);
+                free_instruction(&in);
+                return -1;
+            }
+        }
     }
 
     st->kind = AS_STMT_INSTRUCTION;

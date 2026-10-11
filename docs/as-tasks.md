@@ -573,14 +573,18 @@ with a symbol table.
   Trace: AS-FE-024.  Verify: T — `SIGINT`, `SIGTERM` and an error exit, with `TMPDIR` pointing at an empty directory that is empty afterwards.
   In part: since 091 it creates no file but the output and, beside it for the moment it is written, the output's temporary, which the object library makes and renames.  A run that fails or succeeds leaves `$TMPDIR` and the output's directory as they were (`test_error_reports.sh`).  Not done: no signal is caught, so one that arrives in that moment leaves the temporary; the library that makes it would have to give up its name.
   Done: the library gives up the name (`elf_write_pending_path`, in elfobj(3), which a signal handler may call), and on `SIGINT`, `SIGTERM` and `SIGHUP` the assembler removes that file and then dies of the signal; one that was ignored when it started stays ignored.  `test_error_reports.sh` ends it with `SIGTERM` and `SIGHUP` while it reads, and finds death by the signal and nothing left.  Not tested: a signal in the moment the temporary exists, which a test cannot time; and `SIGINT`, which a shell ignores in what it runs in the background.
-- [ ] **AS-T-151** Where the assembler needs a temporary file, it shall create it in `$TMPDIR`, or in `/tmp` when that is unset.
+- [x] **AS-T-151** Where the assembler needs a temporary file, it shall create it in `$TMPDIR`, or in `/tmp` when that is unset.
   Trace: AS-FE-024.  Verify: T.
-- [ ] **AS-T-152** Every error path of the parser shall free what it allocated.
+  Done by there being none: since 091 the assembler reads its sources and the preprocessor's output into memory and makes no temporary file of its own.  The one file it makes beside the output is the output's own, written under another name and renamed, which must be in the output's directory to be renamed; a signal that ends the run removes it (150).  `test_error_reports.sh` runs with `TMPDIR` at an empty directory and finds it empty after a run that succeeds, one that fails and one ended by a signal.
+- [x] **AS-T-152** Every error path of the parser shall free what it allocated.
   Trace: AS-FE-025.  Verify: T — the failing cases of the suite under LeakSanitizer report nothing.
-- [ ] **AS-T-153** `main` shall release its resources in one place.
+  Done.  Sixteen of twenty-eight sources in error left something allocated: an operand that could not be read kept its text, and an instruction given up on kept the operands read before the bad one -- its name was freed in fifteen places and its operands in none.  An operand is let go where it is read, and an instruction by one function.  `test_error_path_leaks.sh` builds the assembler with the leak sanitizer and gives it 34 sources each wrong in a different place, in both modes: nothing is reported.  Two of the sources turned out to be assembled where GNU refuses them, and are refused: `[ebx+]` and `[ebx*3]` in Intel syntax, a sign with nothing after it and a scale that is none.
+- [x] **AS-T-153** `main` shall release its resources in one place.
   Trace: AS-FE-052.  Verify: I — the clean-up repeated some forty-five times is one block.
+  Done: the two lines that freed the gathered options stood before each of forty returns of the run, with the listing's path freed before some and forgotten before others.  The run is a function given what it holds, and its caller lets go of it in one place whichever way the run ended.  `as.c` is 68 lines shorter.
 - [ ] **AS-T-154** The front end shall hold no code that cannot run.
   Trace: AS-FE-052.  Verify: I — the list in AS-FE-052 is gone or reachable; A — a coverage run of the suite shows no function of `as.c`, `as_lexer.c`, `as_parser.c` with zero calls.  After: 123.
+  In part: the coverage run was made (148 tests, the three files built with `--coverage`).  Eighteen functions have no calls.  Two were made reachable by mending what kept a statement from them: `parse_rounding_text`, `{rn-sae}` written as an operand by itself being "invalid operand ''" until now (`test_number_operands.sh`), and the lexer's `set_err`.  One runs and cannot be counted, `end_by_signal`.  The rest are of two kinds and are still there.  Eight are the lexer's own reading of files and its own `.include` -- `as_lex_file`, `lex_file_internal`, `read_file_all`, `resolve_include_path`, `path_join2`, `file_readable`, `unescape_string`, `unescape_single` -- a second implementation that only the unit tests reach, the assembler having included files before it makes tokens since 124; to go, with the tests moved to `as_lex_text`.  Five are the parser's ARM forms -- `is_arm_like_register_name`, `is_shift_keyword`, `shift_from_keyword`, `parse_shift_suffix`, `parse_arm_condition` -- unreachable while the program refuses to run as an ARM assembler, and left with the ARM encoders they belong to.  `rewrite_x86_far_imm_mnemonic` is reached only by the Intel form `jmp 0x10:0x1000`, which no test has, and which drops the segment of `call 8:sym`.
 
 ## D. An operand model, and one x86 encoder
 
@@ -1197,5 +1201,5 @@ is not to be done, 370 is ticked with "removed" and the rest struck.
 | AS-EXT-009 | 185, 325, 332–337 |
 | AS-EXT-010 | 040, 171, 338, 339 (339 closes all of AS-EXT) |
 
-351 tasks: 189 done, 162 open.  Numbers run to 400, with gaps left between
+351 tasks: 192 done, 159 open.  Numbers run to 400, with gaps left between
 sections for tasks found along the way.

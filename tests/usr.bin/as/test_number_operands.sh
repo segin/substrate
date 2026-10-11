@@ -57,6 +57,11 @@ done <<'EOF'
 32 64	f20fc2d101f30fc2d1020fc2d103660fc2d104	cmpsd $1,%xmm1,%xmm2|cmpss $2,%xmm1,%xmm2|cmpps $3,%xmm1,%xmm2|cmppd $4,%xmm1,%xmm2
 32 64	f20fc2d100f30fc2d101	cmpeqsd %xmm1,%xmm2|cmpltss %xmm1,%xmm2
 32 64	a7a766a7a6	cmpsd|cmpsl|cmpsw|cmpsb
+# How to round, written as an operand by itself, is the instruction's
+# and no operand: it was "invalid operand ''".
+32	62f1741858d062f1f57858d062f1745858d062f1743858d0	vaddps {rn-sae}, %zmm0, %zmm1, %zmm2|vaddpd {rz-sae}, %zmm0, %zmm1, %zmm2|vaddps {ru-sae}, %zmm0, %zmm1, %zmm2|vaddps {rd-sae}, %zmm0, %zmm1, %zmm2
+32	refused	vaddps {rn-sae}, (%eax), %zmm1, %zmm2
+32	refused	vaddps {rn-sae}, %ymm0, %ymm1, %ymm2
 # What takes none.
 32 64	refused	paddw $1,%mm0
 32 64	refused	pand $1,%xmm0
