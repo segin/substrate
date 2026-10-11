@@ -2142,13 +2142,30 @@ out:
     return rc;
 }
 
-static int expand_gas_source_controls(as_text_t *in, as_text_t *out) {
+/*
+ * Whether what has been written so far leaves the source in a branch of
+ * a conditional that is taken.  The macros are expanded before the
+ * conditionals are taken out, so a `.macro` in a branch not taken was
+ * defined all the same, and could be called.  The conditionals of the
+ * text written are followed here as they will be followed there.
+ */
+struct macro_cond;
+static struct macro_cond *macro_cond_new(const as_ctx_t *ctx);
+static int macro_cond_active(struct macro_cond *mc, const as_text_t *written);
+static void macro_cond_free(struct macro_cond *mc);
+
+static int expand_gas_source_controls(const as_ctx_t *ctx, as_text_t *in, as_text_t *out) {
     char *line = NULL;
     size_t cap = 0;
     gas_macro_vec_t macros = {0};
+    struct macro_cond *conds;
     int rc = -1;
 
     if (in == NULL || out == NULL) {
+        return -1;
+    }
+    conds = macro_cond_new(ctx);
+    if (conds == NULL) {
         return -1;
     }
     out->origin = in;
@@ -2156,6 +2173,15 @@ static int expand_gas_source_controls(as_text_t *in, as_text_t *out) {
     while (text_getline(&line, &cap, in) >= 0) {
         const char *d = line_start_directive(line);
 
+        if (line_starts_with_directive(d, ".macro") && !macro_cond_active(conds, out)) {
+            /* Not defined: passed over to its .endm. */
+            while (text_getline(&line, &cap, in) >= 0) {
+                if (line_starts_with_directive(line_start_directive(line), ".endm")) {
+                    break;
+                }
+            }
+            continue;
+        }
         if (line_starts_with_directive(d, ".macro")) {
             gas_macro_t m;
             if (parse_gas_macro_header(d + 6, &m) != 0) {
@@ -2207,6 +2233,7 @@ static int expand_gas_source_controls(as_text_t *in, as_text_t *out) {
 out:
     free(line);
     gas_macro_vec_free(&macros);
+    macro_cond_free(conds);
     return rc;
 }
 
@@ -2485,44 +2512,11 @@ static int cond_syms_note_line(cond_syms_t *syms, const char *line) {
     return rc;
 }
 
-static int parse_cond_operand(cond_syms_t *syms, const char *s, long long *num, char *buf, size_t bufsz) {
-    char *tmp;
-    char *p;
 
-    if (s == NULL || num == NULL || buf == NULL || bufsz == 0) {
-        return -1;
-    }
-    tmp = xstrdup(s);
-    if (tmp == NULL) {
-        return -1;
-    }
-    p = trim_in_place(tmp);
-    if (*p == '$') {
-        p++;
-    }
-    if (as_expr_eval_string(p, cond_sym_lookup, syms, num) == AS_EXPR_EVAL_OK) {
-        free(tmp);
-        buf[0] = '\0';
-        return 1;
-    }
-    snprintf(buf, bufsz, "%s", p);
-    free(tmp);
-    return 0;
-}
-
+/* Whether the expression of an .if is true: 1 or 0, or -1 if it is not
+ * a number. */
 static int eval_gas_cond_expr(cond_syms_t *syms, const char *expr) {
-    char *tmp;
-    char *p;
-    char *op;
     long long ln = 0;
-    long long rn = 0;
-    char lb[128];
-    char rb[128];
-    int lt;
-    int rt;
-    int result;
-    int op_kind = -1; /* 0:==, 1:!=, 2:<, 3:>, 4:<=, 5:>= */
-    size_t op_len = 0;
 
     if (expr == NULL) {
         return 0;
@@ -2534,85 +2528,59 @@ static int eval_gas_cond_expr(cond_syms_t *syms, const char *expr) {
         return ln != 0;
     }
     /*
-     * What is left has a name in it that has no number: the two sides
-     * of a comparison are compared as text, which is what a macro's
-     * `.if \reg == eax` wants; a side that is a number is still read as
-     * one.
+     * A name in it has no number: a label, or a symbol not defined.  It
+     * was then compared as text, side against side, or counted as true
+     * for being there at all -- `.if undefined_symbol` assembled its
+     * branch.  GNU as refuses it, and text is what .ifc is for.
      */
-    tmp = xstrdup(expr);
-    if (tmp == NULL) {
-        return 0;
-    }
-    p = trim_in_place(tmp);
-    /* Order matters: check 2-char operators before single-char ones so
-     * `<=` is not classified as `<` followed by `=`. */
-    if ((op = strstr(p, "==")) != NULL) {
-        op_kind = 0; op_len = 2;
-    } else if ((op = strstr(p, "!=")) != NULL) {
-        op_kind = 1; op_len = 2;
-    } else if ((op = strstr(p, "<=")) != NULL) {
-        op_kind = 4; op_len = 2;
-    } else if ((op = strstr(p, ">=")) != NULL) {
-        op_kind = 5; op_len = 2;
-    } else if ((op = strchr(p, '<')) != NULL && op[1] != '<') {
-        op_kind = 2; op_len = 1;
-    } else if ((op = strchr(p, '>')) != NULL && op[1] != '>') {
-        op_kind = 3; op_len = 1;
-    } else {
-        op = NULL;
-    }
-    if (op != NULL) {
-        *op = '\0';
-        lt = parse_cond_operand(syms, p, &ln, lb, sizeof(lb));
-        rt = parse_cond_operand(syms, op + op_len, &rn, rb, sizeof(rb));
-        if (lt == 1 && rt == 1) {
-            switch (op_kind) {
-            case 0: result = (ln == rn); break;
-            case 1: result = (ln != rn); break;
-            case 2: result = (ln < rn); break;
-            case 3: result = (ln > rn); break;
-            case 4: result = (ln <= rn); break;
-            case 5: result = (ln >= rn); break;
-            default: result = 0; break;
-            }
-        } else {
-            int cmp = strcmp(trim_in_place(lb), trim_in_place(rb));
-            switch (op_kind) {
-            case 0: result = (cmp == 0); break;
-            case 1: result = (cmp != 0); break;
-            case 2: result = (cmp < 0); break;
-            case 3: result = (cmp > 0); break;
-            case 4: result = (cmp <= 0); break;
-            case 5: result = (cmp >= 0); break;
-            default: result = 0; break;
-            }
-        }
-        free(tmp);
-        return result;
-    }
-    lt = parse_cond_operand(syms, p, &ln, lb, sizeof(lb));
-    free(tmp);
-    if (lt == 1) {
-        return ln != 0;
-    }
-    return lb[0] != '\0';
+    return -1;
 }
 
-static int filter_gas_conditionals(const as_ctx_t *ctx, as_text_t *in, as_text_t *out) {
-    char *line = NULL;
-    size_t cap = 0;
-    gas_cond_frame_t stack[1024];
-    cond_syms_t known = { ctx, NULL, 0, 0 };
-    size_t depth = 0;
-    int active = 1;
+/*
+ * The state of the conditionals of a source as it is read: which are
+ * open and whether what stands now is assembled.  It is kept by what
+ * takes the conditionals out (filter_gas_conditionals), and by what
+ * expands the macros before that, which has to know whether a `.macro`
+ * it meets is in a branch not taken.
+ */
+#define COND_DEPTH_MAX 1024
+
+typedef struct {
+    gas_cond_frame_t stack[COND_DEPTH_MAX];
+    /* Where each open conditional began, and what it was, to be named
+     * if it is never closed. */
+    unsigned start_line[COND_DEPTH_MAX];
+    char start_name[COND_DEPTH_MAX][8];
+    size_t depth;
+    int active;
+    cond_syms_t known;
+    char err[160];
+} cond_state_t;
+
+static void cond_state_init(cond_state_t *cs, const as_ctx_t *ctx) {
+    memset(cs, 0, sizeof(*cs));
+    cs->active = 1;
+    cs->known.ctx = ctx;
+}
+
+/*
+ * Take one line.  1 if it is a directive of conditional assembly, which
+ * is then done and is no part of what is assembled; 0 if it is any other
+ * line, which is assembled if cs->active; -1 for a conditional that is
+ * wrong, with why in cs->err.  `at` is the line's number.
+ */
+static int cond_step(cond_state_t *cs, const char *line, unsigned at) {
+    gas_cond_frame_t *stack = cs->stack;
+    cond_syms_t *known_syms = &cs->known;
+    size_t depth = cs->depth;
+    size_t depth_before = cs->depth;
+    int active = cs->active;
+    int consumed = 0;
+    int once = 0;
     int rc = -1;
 
-    if (in == NULL || out == NULL) {
-        return -1;
-    }
-    out->origin = in;
-
-    while (text_getline(&line, &cap, in) >= 0) {
+    cs->err[0] = '\0';
+    while (!once++) {
         const char *d = line_start_directive(line);
 
         if (line_starts_with_directive(d, ".ifdef") || line_starts_with_directive(d, ".ifndef")) {
@@ -2620,11 +2588,11 @@ static int filter_gas_conditionals(const as_ctx_t *ctx, as_text_t *in, as_text_t
             int is_ifndef = line_starts_with_directive(d, ".ifndef");
             char *tmp = xstrdup(d + (is_ifndef ? 7 : 6));
             int defined;
-            if (tmp == NULL || depth >= sizeof(stack) / sizeof(stack[0])) {
+            if (tmp == NULL || depth >= COND_DEPTH_MAX) {
                 free(tmp);
                 goto out;
             }
-            defined = cond_sym_defined(&known, trim_in_place(tmp));
+            defined = cond_sym_defined(known_syms, trim_in_place(tmp));
             free(tmp);
             f = &stack[depth++];
             f->parent_active = active;
@@ -2632,7 +2600,7 @@ static int filter_gas_conditionals(const as_ctx_t *ctx, as_text_t *in, as_text_t
             f->active = f->branch_taken;
             f->else_seen = 0;
             active = f->active;
-            text_putc('\n', out);
+            consumed = 1;
             continue;
         }
         if (line_starts_with_directive(d, ".ifb") || line_starts_with_directive(d, ".ifnb")) {
@@ -2642,7 +2610,7 @@ static int filter_gas_conditionals(const as_ctx_t *ctx, as_text_t *in, as_text_t
             char *tmp = xstrdup(arg);
             char *trimmed;
             int nonblank;
-            if (tmp == NULL || depth >= sizeof(stack) / sizeof(stack[0])) {
+            if (tmp == NULL || depth >= COND_DEPTH_MAX) {
                 free(tmp);
                 goto out;
             }
@@ -2655,19 +2623,22 @@ static int filter_gas_conditionals(const as_ctx_t *ctx, as_text_t *in, as_text_t
             f->else_seen = 0;
             active = f->active;
             free(tmp);
-            text_putc('\n', out);
+            consumed = 1;
             continue;
         }
-        if (line_starts_with_directive(d, ".ifc") || line_starts_with_directive(d, ".ifnc")) {
-            /* GAS string-equality conditional: .ifc str1, str2 */
-            int is_negated = line_starts_with_directive(d, ".ifnc");
+        if (line_starts_with_directive(d, ".ifc") || line_starts_with_directive(d, ".ifnc") ||
+            line_starts_with_directive(d, ".ifeqs") || line_starts_with_directive(d, ".ifnes")) {
+            /* Two texts compared: .ifc a, b and .ifnc; and .ifeqs "a",
+             * "b" and .ifnes, which are the same of two strings. */
+            int is_strings = line_starts_with_directive(d, ".ifeqs") || line_starts_with_directive(d, ".ifnes");
+            int is_negated = line_starts_with_directive(d, ".ifnc") || line_starts_with_directive(d, ".ifnes");
             gas_cond_frame_t *f;
-            const char *args = d + (is_negated ? 5 : 4);
+            const char *args = d + (is_strings ? 6 : (is_negated ? 5 : 4));
             char *tmp = xstrdup(args);
             char *trimmed;
             char *comma;
             int eq = 0;
-            if (tmp == NULL || depth >= sizeof(stack) / sizeof(stack[0])) {
+            if (tmp == NULL || depth >= COND_DEPTH_MAX) {
                 free(tmp);
                 goto out;
             }
@@ -2688,7 +2659,7 @@ static int filter_gas_conditionals(const as_ctx_t *ctx, as_text_t *in, as_text_t
             f->else_seen = 0;
             active = f->active;
             free(tmp);
-            text_putc('\n', out);
+            consumed = 1;
             continue;
         }
         if (line_starts_with_directive(d, ".ifeq") || line_starts_with_directive(d, ".ifne") ||
@@ -2700,11 +2671,11 @@ static int filter_gas_conditionals(const as_ctx_t *ctx, as_text_t *in, as_text_t
             const char *args = d + 5;
             long long v = 0;
             int truth = 0;
-            if (depth >= sizeof(stack) / sizeof(stack[0])) {
+            if (depth >= COND_DEPTH_MAX) {
                 goto out;
             }
             /* What is not an expression of numbers counts as 0. */
-            if (as_expr_eval_string(args, cond_sym_lookup, &known, &v) != AS_EXPR_EVAL_OK) {
+            if (as_expr_eval_string(args, cond_sym_lookup, known_syms, &v) != AS_EXPR_EVAL_OK) {
                 v = 0;
             }
             if (line_starts_with_directive(d, ".ifeq")) truth = (v == 0);
@@ -2719,67 +2690,195 @@ static int filter_gas_conditionals(const as_ctx_t *ctx, as_text_t *in, as_text_t
             f->active = f->branch_taken;
             f->else_seen = 0;
             active = f->active;
-            text_putc('\n', out);
+            consumed = 1;
             continue;
         }
         if (line_starts_with_directive(d, ".if")) {
             gas_cond_frame_t *f;
-            if (depth >= sizeof(stack) / sizeof(stack[0])) {
+            if (depth >= COND_DEPTH_MAX) {
                 goto out;
             }
             f = &stack[depth++];
             f->parent_active = active;
-            f->branch_taken = f->parent_active && eval_gas_cond_expr(&known, d + 3);
+            f->branch_taken = 0;
+            /* Asked only where it decides something: in a branch not
+             * taken a name need have no value. */
+            if (f->parent_active) {
+                int truth = eval_gas_cond_expr(known_syms, d + 3);
+
+                if (truth < 0) {
+                    snprintf(cs->err, sizeof(cs->err), ".if: the expression is not a number");
+                    goto out;
+                }
+                f->branch_taken = truth;
+            }
             f->active = f->branch_taken;
             f->else_seen = 0;
             active = f->active;
-            text_putc('\n', out);
+            consumed = 1;
             continue;
         }
         if (line_starts_with_directive(d, ".elseif")) {
             gas_cond_frame_t *f;
             if (depth == 0) {
+                snprintf(cs->err, sizeof(cs->err), ".elseif without an .if before it");
                 goto out;
             }
             f = &stack[depth - 1];
-            if (f->else_seen || f->branch_taken || !f->parent_active) {
+            if (f->else_seen) {
+                snprintf(cs->err, sizeof(cs->err), ".elseif after the .else of the %s on line %u",
+                         cs->start_name[depth - 1], cs->start_line[depth - 1]);
+                goto out;
+            }
+            if (f->branch_taken || !f->parent_active) {
                 f->active = 0;
             } else {
-                f->active = eval_gas_cond_expr(&known, d + 7);
+                int truth = eval_gas_cond_expr(known_syms, d + 7);
+
+                if (truth < 0) {
+                    snprintf(cs->err, sizeof(cs->err), ".elseif: the expression is not a number");
+                    goto out;
+                }
+                f->active = truth;
                 if (f->active) {
                     f->branch_taken = 1;
                 }
             }
             active = f->active;
-            text_putc('\n', out);
+            consumed = 1;
             continue;
         }
         if (line_starts_with_directive(d, ".else")) {
             gas_cond_frame_t *f;
             if (depth == 0) {
+                snprintf(cs->err, sizeof(cs->err), ".else without an .if before it");
                 goto out;
             }
             f = &stack[depth - 1];
+            if (f->else_seen) {
+                snprintf(cs->err, sizeof(cs->err), "a second .else for the %s on line %u",
+                         cs->start_name[depth - 1], cs->start_line[depth - 1]);
+                goto out;
+            }
             f->active = f->parent_active && !f->branch_taken && !f->else_seen;
             f->branch_taken = f->branch_taken || f->active;
             f->else_seen = 1;
             active = f->active;
-            text_putc('\n', out);
+            consumed = 1;
             continue;
         }
         if (line_starts_with_directive(d, ".endif")) {
             if (depth == 0) {
+                snprintf(cs->err, sizeof(cs->err), ".endif without an .if before it");
                 goto out;
             }
             depth--;
             active = depth == 0 ? 1 : stack[depth - 1].active;
-            text_putc('\n', out);
+            consumed = 1;
             continue;
         }
-        if (active) {
-            if (cond_syms_note_line(&known, line) != 0) {
-                goto out;
-            }
+        if (active && cond_syms_note_line(known_syms, line) != 0) {
+            snprintf(cs->err, sizeof(cs->err), "out of memory");
+            goto out;
+        }
+    }
+    /* A conditional that this line opened: where, and what it was. */
+    if (depth > depth_before) {
+        const char *d = line_start_directive(line);
+        size_t n = 0;
+
+        while (d[n] != '\0' && !isspace((unsigned char)d[n]) && n + 1 < sizeof(cs->start_name[0])) {
+            cs->start_name[depth - 1][n] = d[n];
+            n++;
+        }
+        cs->start_name[depth - 1][n] = '\0';
+        cs->start_line[depth - 1] = at;
+    }
+    rc = consumed;
+
+out:
+    if (rc < 0 && cs->err[0] == '\0') {
+        snprintf(cs->err, sizeof(cs->err), "a conditional that cannot be read, or too many inside one another");
+    }
+    cs->depth = depth;
+    cs->active = active;
+    return rc;
+}
+
+struct macro_cond {
+    cond_state_t cs;
+    size_t seen; /* how much of the text has been followed */
+};
+
+static struct macro_cond *macro_cond_new(const as_ctx_t *ctx) {
+    struct macro_cond *mc = (struct macro_cond *)malloc(sizeof(*mc));
+
+    if (mc != NULL) {
+        cond_state_init(&mc->cs, ctx);
+        mc->seen = 0;
+    }
+    return mc;
+}
+
+static void macro_cond_free(struct macro_cond *mc) {
+    if (mc != NULL) {
+        cond_syms_free(&mc->cs.known);
+        free(mc);
+    }
+}
+
+static int macro_cond_active(struct macro_cond *mc, const as_text_t *written) {
+    while (mc->seen < written->len) {
+        const char *start = written->data + mc->seen;
+        size_t n = 0;
+        char *line;
+
+        while (mc->seen + n < written->len && start[n] != '\n') {
+            n++;
+        }
+        mc->seen += n + (mc->seen + n < written->len ? 1 : 0);
+        if (n == 0 || start[0] == AS_LEX_MARK) {
+            continue;
+        }
+        line = (char *)malloc(n + 1);
+        if (line == NULL) {
+            break;
+        }
+        memcpy(line, start, n);
+        line[n] = '\0';
+        /* What is wrong with a conditional is said when they are taken
+         * out; here it is only followed as far as it can be. */
+        (void)cond_step(&mc->cs, line, 0);
+        free(line);
+    }
+    return mc->cs.active;
+}
+
+static int filter_gas_conditionals(const as_ctx_t *ctx, as_text_t *in, as_text_t *out) {
+    cond_state_t *cs;
+    char *line = NULL;
+    size_t cap = 0;
+    int rc = -1;
+
+    if (in == NULL || out == NULL) {
+        return -1;
+    }
+    cs = (cond_state_t *)malloc(sizeof(*cs));
+    if (cs == NULL) {
+        as_diag(AS_E_INTERNAL, "out of memory");
+        return -1;
+    }
+    cond_state_init(cs, ctx);
+    out->origin = in;
+
+    while (text_getline(&line, &cap, in) >= 0) {
+        int step = cond_step(cs, line, in->line);
+
+        if (step < 0) {
+            as_diag(AS_E_BACKEND, "%s:%u: %s", in->file != NULL ? in->file : "<input>", in->line, cs->err);
+            goto out;
+        }
+        if (step == 0 && cs->active) {
             text_puts(line, out);
             /* A last line without its newline is a line all the same. */
             if (out->mid_line) {
@@ -2789,14 +2888,21 @@ static int filter_gas_conditionals(const as_ctx_t *ctx, as_text_t *in, as_text_t
             text_putc('\n', out);
         }
     }
-    if (depth != 0 || out->failed) {
+    if (cs->depth != 0) {
+        as_diag(AS_E_BACKEND, "%s:%u: the %s here has no .endif", in->file != NULL ? in->file : "<input>",
+                cs->start_line[cs->depth - 1], cs->start_name[cs->depth - 1]);
+        goto out;
+    }
+    if (out->failed) {
+        as_diag(AS_E_INTERNAL, "out of memory");
         goto out;
     }
     rc = 0;
 
 out:
     free(line);
-    cond_syms_free(&known);
+    cond_syms_free(&cs->known);
+    free(cs);
     return rc;
 }
 
@@ -2853,7 +2959,27 @@ static int run_native_backend(const as_ctx_t *ctx) {
         goto out;
     }
 
-    if (expand_gas_source_controls(source, &text_expanded) != 0) {
+    /*
+     * A NUL in the source ends, for everything that reads a line as a
+     * string, the line it is in -- and ended the source: what followed
+     * it was not assembled, and the exit status was 0.  It is no
+     * character of an assembly source, and is refused.
+     */
+    if (source->data != NULL && memchr(source->data, '\0', source->len) != NULL) {
+        const char *nul = (const char *)memchr(source->data, '\0', source->len);
+        unsigned long at = 1;
+        const char *p;
+
+        for (p = source->data; p < nul; ++p) {
+            if (*p == '\n') {
+                at++;
+            }
+        }
+        as_diag(AS_E_USAGE, "%s:%lu: a NUL byte in the source", ctx->in_path, at);
+        goto out;
+    }
+
+    if (expand_gas_source_controls(ctx, source, &text_expanded) != 0) {
         as_diag(AS_E_BACKEND, "macro/control expansion stage failed");
         goto out;
     }
@@ -2861,8 +2987,8 @@ static int run_native_backend(const as_ctx_t *ctx) {
         as_diag(AS_E_BACKEND, "repeat expansion stage failed");
         goto out;
     }
+    /* It says what is wrong itself. */
     if (filter_gas_conditionals(ctx, &text_rept, &text_cond) != 0) {
-        as_diag(AS_E_BACKEND, "conditional assembly stage failed");
         goto out;
     }
 

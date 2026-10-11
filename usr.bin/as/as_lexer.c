@@ -443,6 +443,26 @@ int as_scan_step(as_scan_t *st, const char *s, size_t i, size_t *more) {
         }
         return AS_SCAN_COMMENT;
     }
+    if (st->quote == '\'') {
+        /*
+         * A character constant: the quote, one character -- or a
+         * backslash and one -- and a closing quote that may be left out.
+         * `escaped` counts the way through it: 0 at the character, 1
+         * after a backslash, 2 at a closing quote that is there.
+         */
+        if (st->escaped == 2) {
+            st->quote = 0;
+            st->escaped = 0;
+        } else if (st->escaped == 0 && c == '\\' && s[i + 1] != '\0') {
+            st->escaped = 1;
+        } else if (s[i + 1] == '\'') {
+            st->escaped = 2;
+        } else {
+            st->quote = 0;
+            st->escaped = 0;
+        }
+        return AS_SCAN_QUOTED;
+    }
     if (st->quote != 0) {
         if (st->escaped) {
             st->escaped = 0;
@@ -452,6 +472,9 @@ int as_scan_step(as_scan_t *st, const char *s, size_t i, size_t *more) {
             st->quote = 0;
         }
         return AS_SCAN_QUOTED;
+    }
+    if (c == '\'' && s[i + 1] == '\0') {
+        return AS_SCAN_TEXT;
     }
     if (c == '"' || c == '\'') {
         st->quote = c;
@@ -700,6 +723,19 @@ static as_token_kind_t classify_token(const char *tok, int intel_syntax) {
     return AS_TOK_IDENTIFIER;
 }
 
+/* Whether the tokens so far, past their labels, begin an instruction
+ * and not a directive. */
+static int statement_is_instruction(const as_token_vec_t *line_tokens) {
+    size_t i;
+
+    for (i = 0; i < line_tokens->count; ++i) {
+        if (line_tokens->items[i].kind != AS_TOK_LABEL) {
+            return line_tokens->items[i].kind != AS_TOK_DIRECTIVE;
+        }
+    }
+    return 0;
+}
+
 static int tokenize_line(const char *file, unsigned line_no, const char *line, int intel_syntax,
                          as_token_vec_t *line_tokens, lex_ctx_t *ctx) {
     size_t i = 0;
@@ -769,6 +805,33 @@ static int tokenize_line(const char *file, unsigned line_no, const char *line, i
             }
             memcpy(raw, line + start + 1, n);
             raw[n] = '\0';
+            /*
+             * A name in quotes: `"x.y":` defines it and `jmp "x.y"`
+             * uses it.  Where a label may stand, a string before a colon
+             * is one; among an instruction's operands a string is a name,
+             * an instruction having no use for a string.
+             */
+            if (!saw_mnemonic && line[i + 1] == ':') {
+                if (as_token_vec_push(line_tokens, AS_TOK_LABEL, raw, file, line_no, col) != 0) {
+                    free(raw);
+                    set_err(ctx, "%s:%u: out of memory", file, line_no);
+                    return -1;
+                }
+                free(raw);
+                i += 2;
+                continue;
+            }
+            if (saw_mnemonic && line_tokens->count != 0 && line_tokens->items[0].kind != AS_TOK_DIRECTIVE &&
+                (line_tokens->items[0].kind != AS_TOK_LABEL || statement_is_instruction(line_tokens))) {
+                if (as_token_vec_push(line_tokens, AS_TOK_IDENTIFIER, raw, file, line_no, col) != 0) {
+                    free(raw);
+                    set_err(ctx, "%s:%u: out of memory", file, line_no);
+                    return -1;
+                }
+                free(raw);
+                i++;
+                continue;
+            }
             if (as_token_vec_push(line_tokens, AS_TOK_STRING, raw, file, line_no, col) != 0) {
                 free(raw);
                 set_err(ctx, "%s:%u: out of memory", file, line_no);
@@ -791,14 +854,11 @@ static int tokenize_line(const char *file, unsigned line_no, const char *line, i
             } else {
                 c = line[i++];
             }
+            /* The quote that closes it may be left out: `'a` is 'a'. */
             if (line[i] == '\'') {
                 i++;
-                done = 1;
             }
-            if (!done) {
-                set_err(ctx, "%s:%u: malformed character literal", file, line_no);
-                return -1;
-            }
+            (void)done;
             snprintf(tmp, sizeof(tmp), "%u", (unsigned char)c);
             if (as_token_vec_push(line_tokens, AS_TOK_IMMEDIATE, tmp, file, line_no, col) != 0) {
                 set_err(ctx, "%s:%u: out of memory", file, line_no);
@@ -834,6 +894,27 @@ static int tokenize_line(const char *file, unsigned line_no, const char *line, i
                         free(tok);
                         set_err(ctx, "%s:%u: out of memory", file, line_no);
                         return -1;
+                    }
+                    /* `q1:q2: .long 4`, `a:b:nop`: each name before a
+                     * colon is a label, however many are run together. */
+                    for (;;) {
+                        char *colon = strchr(rest, ':');
+
+                        if (colon == NULL || colon == rest) {
+                            break;
+                        }
+                        *colon = '\0';
+                        if (as_token_vec_push(line_tokens, AS_TOK_LABEL, rest, file, line_no,
+                                              col + (unsigned)(rest - tok)) != 0) {
+                            free(tok);
+                            set_err(ctx, "%s:%u: out of memory", file, line_no);
+                            return -1;
+                        }
+                        rest = colon + 1;
+                    }
+                    if (*rest == '\0') {
+                        free(tok);
+                        continue;
                     }
                     rest_kind = classify_token(rest, intel_syntax);
                     if (rest_kind == AS_TOK_IDENTIFIER) {

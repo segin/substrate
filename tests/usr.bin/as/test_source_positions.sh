@@ -66,6 +66,18 @@ at "the second of two sources" 'second\.s:2:' first.s second.s
 printf '\t.text\n\t.include "second.s"\n' > inc.s
 at "an included file" 'second\.s:2:' inc.s
 
+# The lines a C preprocessor leaves say where what follows came from.
+printf '\t.text\n\tnop\n# 100 "orig.c"\n\tnop\n\tbadone\n' > marked.s
+at "after a # N \"file\" line" 'orig\.c:101:' marked.s
+
+# And a .S file is put through one: an error after an #include is on the
+# line of the .S file it is on.  (GNU as does not run the preprocessor.)
+if ! "$AS" --version 2>/dev/null | grep -qi 'GNU assembler'; then
+    printf '#define M nop\n\n\n\n' > hh.h
+    printf '#include "hh.h"\n\t.text\n\tM\n\tnop\n\tbadone\n' > pre.S
+    at "a .S file with an #include" 'pre\.S:5:' pre.S
+fi
+
 # The standard input has a name, and not that of a file in /tmp.
 cases=$((cases + 1))
 if printf '\t.text\n\tnop\n\tbadone\n' | "$AS" -32 -o in.o - > out 2> err; then

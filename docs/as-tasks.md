@@ -369,18 +369,24 @@ with a symbol table.
   Trace: AS-FE-051.  Verify: I — `join_tokens` and the `strchr` scans for `:`, `=`, `*` are gone from `as_parser.c`; `as_expr.c` takes tokens.  After: 094.
 - [ ] **AS-T-096** The assembler shall hold the x86 register names in one table that gives each its class, width and number.
   Trace: AS-FE-051, AS-DES-004.  Verify: I — the tables of `as_lexer.c`, `as_parser.c` and the encoders are one.
-- [ ] **AS-T-097** When a `# N "file"` line of the C preprocessor is read, the assembler shall take N and the file as the coordinates of the lines that follow.
+- [x] **AS-T-097** When a `# N "file"` line of the C preprocessor is read, the assembler shall take N and the file as the coordinates of the lines that follow.
   Trace: AS-FE-030.  Verify: T — an error in a `.S` file with an `#include` above it names the `.S` file and the right line.  After: 090.
-- [ ] **AS-T-098** When a line ends in a backslash, the assembler shall join the next line to it.
+  Done with the marks of 090: what reads a line of the source takes `# N "file"` as it takes a mark, in any source and not a `.S` alone, as GNU does.  `test_source_positions.sh`.
+- [x] **AS-T-098** When a line ends in a backslash, the assembler shall join the next line to it.
   Trace: AS-FE-040.  Verify: T.
-- [ ] **AS-T-099** When two or more labels are written on one line, the assembler shall define each.
+  Closed as GNU has it, which is not as this is worded: GNU as 2.46 does not join.  `.byte 1, \` with `2, 3` on the next line is refused there ("junk at end of line") and here; a C preprocessor joins such lines before the assembler sees a `.S`.  `test_front_end_forms.sh` holds the refusal.  One difference is left: inside a string GNU carries on to the next line, storing the backslash and an `n`, where this refuses an unterminated string.
+- [x] **AS-T-099** When two or more labels are written on one line, the assembler shall define each.
   Trace: AS-FE-013.  Verify: T — `q1:q2: .long 4`; `a: b: c: nop`.  After: 094.
+  Done ahead of 094: with spaces between they were taken already; run together, `q1:q2:` and `a:b:nop`, only the first was.  `test_front_end_forms.sh`.
 - [ ] **AS-T-100** When a symbol name is written in double quotes, the assembler shall take the quoted text as the name.
   Trace: AS-FE-040.  Verify: T — `"a b": .long "a b"`.
-- [ ] **AS-T-101** When a character constant is written after `$` or within an expression, with or without its closing quote, the assembler shall take its value.
+  In part: `"x.y":` and `"a b":` define the name, and an instruction's operand in quotes is a name (`jmp "x.y"`).  Not done: a quoted name among a directive's arguments, `.long "a b"`, where the tokens are joined back into text and a name with a space in it is two; it waits on 095.
+- [x] **AS-T-101** When a character constant is written after `$` or within an expression, with or without its closing quote, the assembler shall take its value.
   Trace: AS-FE-040.  Verify: T — `movb $'a',%al`, `movb $'a,%al`, `.byte 'a, 'a+1`, `'\n`.
-- [ ] **AS-T-102** When a line holds a NUL byte, the assembler shall fail and name the line.
+  Done.  The tokenizer wanted the closing quote, and the scanner of 092 took `'` for the start of a string that ran to the next `'`, so `.byte ';, 2` began a statement at its `;`.  A character constant is the quote, one character or a backslash and one, and a closing quote that may be left out.  `test_front_end_forms.sh`.  GNU's `'\0` is the digit 0 and its `'\x41` is 9; here they are NUL and refused.
+- [x] **AS-T-102** When a line holds a NUL byte, the assembler shall fail and name the line.
   Trace: AS-FE-025.  Verify: T.
+  Done: it ended the source where it stood -- what followed was not assembled, and the exit status was 0.  Refused with the file and line.  (GNU as passes over the byte and goes on.)
 
 ### C.1 Conditionals and symbols
 
@@ -390,14 +396,18 @@ with a symbol table.
 - [x] **AS-T-104** When the expression of `.if`, `.ifeq`, `.ifne`, `.ifgt`, `.ifge`, `.iflt`, `.ifle` or `.elseif` names symbols with absolute values, the assembler shall decide by the expression's value.
   Trace: AS-FE-007.  Verify: T — `.set X,0` / `.if X` false; `.if X==0` true; `.if K*2 > 3`.  After: 090.
   Done with 103, by the same note of the source's symbols: a name given a number has it in a conditional's expression, the number it has at that line.  `.if X` with X set to 0 had been true, a name being text and text being not empty.  `test_conditional_symbols.sh`, 21 cases, GNU's bytes.  Not covered, and 105's: a value that is a distance between labels (`.set L, b - a` / `.if L == 3`), which GNU knows and this stage, before any layout, cannot.
-- [ ] **AS-T-105** If the expression of a conditional has no absolute value, then the assembler shall fail and say so.
+- [x] **AS-T-105** If the expression of a conditional has no absolute value, then the assembler shall fail and say so.
   Trace: AS-FE-007.  Verify: T — `.if undefined_symbol`, `.if label_in_text`.  After: 104.
-- [ ] **AS-T-106** When `.ifc`, `.ifnc`, `.ifb`, `.ifnb`, `.ifeqs` or `.ifnes` is written, the assembler shall compare its operands as text.
+  Done: `.if` and `.elseif` of what is not a number are refused, "the expression is not a number", with the line.  They were true for a name being there at all.  In a branch not taken the expression is not asked, as in GNU.  `test_front_end_forms.sh`.
+- [x] **AS-T-106** When `.ifc`, `.ifnc`, `.ifb`, `.ifnb`, `.ifeqs` or `.ifnes` is written, the assembler shall compare its operands as text.
   Trace: AS-FE-007.  Verify: T — each, in and out of a macro; the textual fallback of `.if` (`as.c`, `eval_gas_cond_expr`) is removed with it (I).  After: 104.
-- [ ] **AS-T-107** While a conditional is false, the assembler shall not define the macros, symbols or sections written inside it.
+  Done: `.ifeqs` and `.ifnes` were not known, and are; the other four were right, in and out of a macro.  The textual fallback of `.if` is gone, and `parse_cond_operand` with it: `eval_gas_cond_expr` is a number or a refusal.  Nothing in the suite leaned on it.
+- [x] **AS-T-107** While a conditional is false, the assembler shall not define the macros, symbols or sections written inside it.
   Trace: AS-FE-008.  Verify: T — a `.macro` inside `.if 0` is not defined; a label inside is not defined.  After: 090.
-- [ ] **AS-T-108** If a conditional is unmatched or unclosed, then the assembler shall fail and name the directive and the line where it began.
+  Done.  Labels, symbols and sections were not defined already, the conditionals being taken out before anything defines them.  A `.macro` was, because macros are expanded before that: the pass that expands them now follows the conditionals of what it has written, by the same state machine that takes them out (`cond_step`), and passes over a `.macro` in a branch not taken.
+- [x] **AS-T-108** If a conditional is unmatched or unclosed, then the assembler shall fail and name the directive and the line where it began.
   Trace: AS-FE-031.  Verify: T — `.endif` alone; `.if 1` to end of file; `.else` twice.
+  Done.  All three failed already, with "conditional assembly stage failed" and no line -- but a second `.else` was taken, and assembled nothing.  Each says what it is and where: "`.endif` without an `.if` before it", "a second `.else` for the `.if` on line 3", "the `.if` here has no `.endif`" at the line it began on.
 
 ### C.2 Macros and repeats
 
@@ -1122,5 +1132,5 @@ is not to be done, 370 is ticked with "removed" and the rest struck.
 | AS-EXT-009 | 185, 325, 332–337 |
 | AS-EXT-010 | 040, 171, 338, 339 (339 closes all of AS-EXT) |
 
-351 tasks: 123 done, 228 open.  Numbers run to 400, with gaps left between
+351 tasks: 132 done, 219 open.  Numbers run to 400, with gaps left between
 sections for tasks found along the way.
