@@ -153,17 +153,21 @@ status 0.
 - [x] **AS-T-397** When an absolute address is the memory operand of an instruction that one of the extension encoders writes, in 32-bit code, the assembler shall encode it as ModRM `mod=00 rm=101` and four bytes, without a SIB byte.
   Trace: found while doing 396 and 310; no audit entry.  Verify: T — `pshufb sym,%xmm0` (`66 0F 38 00 05` and four bytes), `vaddps 0x90909090,%xmm1,%xmm0` (`C5 F0 58 05 …`), `popcnt sym,%eax`: GNU.  Today the SIB form that 64-bit code needs is written in 32-bit code too: right, and a byte longer.  Some 300 `v` lines of the 32-bit corpus differ from GNU's this way.
   Done: the operand says whether it is an absolute address of 32-bit code, and each of the nine encoders writes that without the SIB byte.  It was far more than 300 lines: 958 more `v` lines of the 32-bit corpus are GNU's bytes, 1,914 of 2,112 now.  `test_ext_symbol_disp.sh`, 18 more cases, bytes and relocation.
-- [ ] **AS-T-031** When a `rep`, `repe`, `repne` or segment prefix is written before an instruction encoded by the emitter's own tables, the assembler shall emit it.
+- [x] **AS-T-031** When a `rep`, `repe`, `repne` or segment prefix is written before an instruction encoded by the emitter's own tables, the assembler shall emit it.
   Trace: AS-SEL-001.  Verify: T — the callers of the prefixed-`0F` emitter with each prefix: GNU.
-- [ ] **AS-T-032** If `lock` is written before an instruction or operand form the processor does not allow it on, then the assembler shall refuse it.
+  Done for the segment, which was the one being lost: written as a prefix (`fs flds (%eax)`, `gs movaps (%eax),%xmm0`, `fs cmpxchg %ecx,(%eax)`) it was dropped by every emitter handed the statement -- x87, the MMX and SSE moves, the `0F`-map instructions -- in 32-bit code, and by the x87 one in 64-bit.  It is now put before what each writes, unless it is there already.  A rep prefix on these is no instruction and is refused by GNU and here.  `test_prefix_statements.sh`.  Left: two segments on one statement (`es fs movl …`, `fs flds %gs:(%eax)`) are assembled where GNU refuses, and `lock cmpxchg8b %fs:(%ebx)` has `F0 64` for GNU's `64 F0`.
+- [x] **AS-T-032** If `lock` is written before an instruction or operand form the processor does not allow it on, then the assembler shall refuse it.
   Trace: AS-X86-026.  Verify: T — `lock addl %eax,%ebx`, `lock movl (%eax),%ebx`, `lock nop`: exit 1.
-- [ ] **AS-T-033** When a prefix mnemonic is written as a statement of its own, the assembler shall apply it to the next instruction.
+  Done, in one place before any encoder runs: the instruction must be one of the nineteen that take `lock`, and its destination -- either operand, for `xchg` -- must be memory.  Before, the encoders knew the list and not the operands (`lock addl %eax,%ebx` was assembled), and the emitters handed the statement knew neither: `lock addps` was assembled, and `lock fldl (%eax)` was assembled with the prefix left out.  `test_prefix_statements.sh`, 33 cases.
+- [x] **AS-T-033** When a prefix mnemonic is written as a statement of its own, the assembler shall apply it to the next instruction.
   Trace: AS-FE-040, AS-X86-041.  Verify: T — `lock; cmpxchgl %ebx,(%eax)`, `rep; nop`, `lock` on a line then `incl (%eax)` on the next: GNU.
+  Done as GNU does it: the prefix's byte is written where the statement stands, and the processor joins it to what follows.  It was a parse error.  `lock`, `rep`, `repe`/`repz`, `repne`/`repnz`, alone or several; the segment prefixes alone were taken already.  `test_prefix_statements.sh`.
 - [x] **AS-T-034** When a legacy prefix and a `REX` prefix both apply, the assembler shall emit the legacy prefix first.
   Trace: AS-SEL-006, AS-X86-024, AS-EXT-005.  Verify: T — `paddb %xmm1,%xmm10`, `pxor %xmm8,%xmm8`, the 43 SSE2-integer mnemonics with `%xmm8`–`15` and `%r8`–`15`, `push %r9w`, `movq %rax,%xmm0`, `movq %xmm0,%rax`: GNU.
   Done: where the 64-bit encoder keeps `REX`, it is moved past any `66`, `F2` or `F3` written after its place, once, for every branch.  `test_rex_prefix.sh`.  (`movq %xmm1,%xmm2` is still the wrong instruction: 180.)
-- [ ] **AS-T-035** When a 16-bit instruction is assembled in 64-bit mode, the assembler shall emit one `66` prefix.
+- [x] **AS-T-035** When a 16-bit instruction is assembled in 64-bit mode, the assembler shall emit one `66` prefix.
   Trace: AS-X86-011.  Verify: T — every `w`-suffixed line of the 64-bit corpus has exactly one `66`; `movabs %ax,sym` has one.
+  Done.  Earlier work had left one `66` on nearly all; counting the prefix on every line of the 64-bit corpus against GNU's found the rest: `movabs` to or from `%ax` had none (and `movabsb`, `w` and `l` were not mnemonics); `data16` written out was lost under an `l` suffix, and where kept shortened the immediate -- it is now the byte `66` before the instruction as it would otherwise be, which is GNU's meaning; and `sldtw`, `lldtw`, `ltrw`, `strw` of memory had a `66` GNU does not write.  The only lines of that corpus whose count still differs are those under `.code16` (347).  `test_prefix_statements.sh`.
 - [x] **AS-T-036** When `cbw`, `cbtw`, `cwd`, `cwtd`, `iretw`, `lretw`, `pushaw`, `popaw`, `pushfw`, `popfw`, `jmpw *r16`, `callw *r16`, `cmovccw`, `leaw` or `xaddw` is written, the assembler shall emit the `66` prefix in 32- and 64-bit modes.
   Trace: AS-X86-011, AS-SEL-014.  Verify: T — each: GNU.
   Done.  `cbtw`/`cbw` and `cwtd`/`cwd` shared a branch with `cwtl` and `cltd` and were those instructions, in both modes; `pushaw`, `popaw`, `iretw` and `lretw` likewise in 32-bit code.  The rest of the list was right already.  Found with it and mended: `movw %ds,%si` had no `66` and so cleared the top of `%esi`, and `pushw`/`popw` of a segment register pushed and popped four bytes.  `test_insn_forms.sh`, 55 cases.  Left: `iretl` and `lretl` are not mnemonics; `pushfq` and `pushq`/`popq` of memory carry a `REX.W` that GNU omits, which changes nothing.
@@ -181,8 +185,9 @@ status 0.
 - [x] **AS-T-039** When `ret`, `retw`, `retl` or `retq` is given an immediate, the assembler shall encode `C2` followed by the 16-bit count.
   Trace: AS-X86-021, AS-OBJ-013.  Verify: T — `ret $4`, `ret $0`, `retw $8`, `--64` `ret $16`, `retq $8`: GNU.
   Done: `test_ret.sh`.  `retq` in 32-bit mode and `retl` in 64-bit are still accepted: 349 and 350.
-- [ ] **AS-T-040** If an instruction is written with more operands than any of its forms takes, then the assembler shall refuse it.
+- [x] **AS-T-040** If an instruction is written with more operands than any of its forms takes, then the assembler shall refuse it.
   Trace: AS-OBJ-013, AS-EXT-010.  Verify: T — `ret $4, $5`, `nop %eax,%ebx,%ecx,%edx`, `lahf -0x100(%rbx),%ebx,%ecx`, `haddps $1,%xmm1,%zmm2,%zmm3`: exit 1.
+  Done with a table: the most operands any form takes, for each of the 905 mnemonics the encoders know by name outside AVX, as GNU as 2.46 has it -- found by giving GNU each mnemonic with one to five operands of every kind in both modes.  A statement with more is refused before any encoder sees it.  And a statement of four operands that reached the three-operand encoders was cut to three (`shld $1,%eax,%ebx,%ecx`); it is refused.  Of 14,252 lines made of every mnemonic with fourteen sets of operands, 936 differed from GNU before and 465 do now; the rest are operands of the wrong kind, not too many (171).  `test_prefix_statements.sh`.  Not covered: the AVX mnemonics, whose encoders count their own operands.
 - [x] **AS-T-041** When `enter` is written, the assembler shall encode the frame size as the 16-bit immediate and the nesting level as the 8-bit one.
   Trace: AS-X86-023, AS-SEL-014.  Verify: T — `enter $8,$0`, `enter $8,$1`, `enter $0x100,$3`, both modes: GNU.
   Done: the encoder had them right and was handed them exchanged, `enter` being turned about with every other two-operand AT&T instruction; it has no destination and is left as written.  Also `enterq` had a `REX.W` it does not take, and a size or level that does not fit its field is refused.  `test_insn_forms.sh`.
@@ -1085,5 +1090,5 @@ is not to be done, 370 is ticked with "removed" and the rest struck.
 | AS-EXT-009 | 185, 325, 332–337 |
 | AS-EXT-010 | 040, 171, 338, 339 (339 closes all of AS-EXT) |
 
-350 tasks: 89 done, 261 open.  Numbers run to 399, with gaps left between
+350 tasks: 94 done, 256 open.  Numbers run to 399, with gaps left between
 sections for tasks found along the way.

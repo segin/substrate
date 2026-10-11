@@ -2181,6 +2181,46 @@ static int parse_instruction(parse_ctx_t *ctx, const as_token_t *tokv, size_t n,
             st->u.instr = in;
             return 0;
         }
+        /*
+         * lock and the rep prefixes as a statement of their own: `lock;
+         * cmpxchgl %ebx, (%eax)`, `rep; nop`, or the prefix on the line
+         * before its instruction.  GNU as writes the prefix's byte where
+         * it stands, and the processor puts the two together; so does
+         * this.  It was a parse error.
+         */
+        if (n > 0) {
+            size_t k;
+
+            for (k = 0; k < n; ++k) {
+                int pf = prefix_flag_for(tokv[k].text, NULL);
+
+                if (pf != AS_PREFIX_LOCK && pf != AS_PREFIX_REP && pf != AS_PREFIX_REPE && pf != AS_PREFIX_REPNE) {
+                    break;
+                }
+                if (streq_ci(tokv[k].text, "bnd") || streq_ci(tokv[k].text, "xacquire") ||
+                    streq_ci(tokv[k].text, "xrelease")) {
+                    break;
+                }
+            }
+            if (k == n) {
+                free(in.segment_override);
+                st->kind = AS_STMT_DIRECTIVE;
+                memset(&st->u.directive, 0, sizeof(st->u.directive));
+                st->u.directive.name = xstrdup(".byte");
+                if (st->u.directive.name == NULL) {
+                    return -1;
+                }
+                for (k = 0; k < n; ++k) {
+                    int pf = prefix_flag_for(tokv[k].text, NULL);
+                    const char *byte = pf == AS_PREFIX_LOCK ? "0xf0" : (pf == AS_PREFIX_REPNE ? "0xf2" : "0xf3");
+
+                    if (add_directive_arg(&st->u.directive, byte) != 0) {
+                        return -1;
+                    }
+                }
+                return 0;
+            }
+        }
         free(in.segment_override);
         return -1;
     }

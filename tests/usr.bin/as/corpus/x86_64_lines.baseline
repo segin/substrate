@@ -644,10 +644,6 @@ subq $0x123456789abcdef0,%rsp
 orq $0x123456789abcdef0,%r8
 addw $0x123456789abcdef0,%ax
 addb $0x123456789abcdef0,%al
-movabs %ax,sym
-movabsl 0x1122334455667788,%eax
-movabsw %ax,0x1122334455667788
-movabsb 0x10,%al
 pushq $sym
 jmp sym
 call sym-4
@@ -766,8 +762,6 @@ addb $0x10000,%al
 addb $0xffffff80,%al
 addb $sym,%al
 addb $sym,sym
-lock addb (%rbx),%cl
-lock addb %cl,%al
 addw $128,%ax
 addw $-129,%ax
 addw $255,%ax
@@ -803,8 +797,6 @@ addw $0xffffffff,(%rbx)
 addw $0xffffffff,sym
 addw $0xffffffff,-4(%rbp,%rcx,4)
 addw $sym,sym
-lock addw (%rbx),%bx
-lock addw %bx,%ax
 addl $128,%eax
 addl $-129,%eax
 addl $255,%eax
@@ -830,8 +822,6 @@ addl $0xffffffff,(%rbx)
 addl $0xffffffff,sym
 addl $0xffffffff,-4(%rbp,%rcx,4)
 addl $sym,sym
-lock addl (%rbx),%ebx
-lock addl %ebx,%eax
 addq $128,%rax
 addq $-129,%rax
 addq $255,%rax
@@ -866,8 +856,6 @@ addq $0xffffffff,(%rbx)
 addq $0xffffffff,sym
 addq $0xffffffff,-4(%rbp,%rcx,4)
 addq $sym,sym
-lock addq (%rbx),%rbx
-lock addq %rbx,%rax
 orb $0,%al
 orb $1,%al
 orb $-1,%al
@@ -888,8 +876,6 @@ orb $0xffffff80,%al
 orb $0xffffffff,%al
 orb $sym,%al
 orb $sym,sym
-lock orb (%rbx),%cl
-lock orb %cl,%al
 orw $128,%ax
 orw $-129,%ax
 orw $255,%ax
@@ -929,8 +915,6 @@ orw $0xffffffff,(%rbx)
 orw $0xffffffff,sym
 orw $0xffffffff,-4(%rbp,%rcx,4)
 orw $sym,sym
-lock orw (%rbx),%bx
-lock orw %bx,%ax
 orl $128,%eax
 orl $-129,%eax
 orl $255,%eax
@@ -960,8 +944,6 @@ orl $0xffffffff,(%rbx)
 orl $0xffffffff,sym
 orl $0xffffffff,-4(%rbp,%rcx,4)
 orl $sym,sym
-lock orl (%rbx),%ebx
-lock orl %ebx,%eax
 orq $128,%rax
 orq $-129,%rax
 orq $255,%rax
@@ -1001,8 +983,6 @@ orq $0xffffffff,(%rbx)
 orq $0xffffffff,sym
 orq $0xffffffff,-4(%rbp,%rcx,4)
 orq $sym,sym
-lock orq (%rbx),%rbx
-lock orq %rbx,%rax
 adcb $0,%al
 adcb $1,%al
 adcb $-1,%al
@@ -1023,8 +1003,6 @@ adcb $0xffffff80,%al
 adcb $0xffffffff,%al
 adcb $sym,%al
 adcb $sym,sym
-lock adcb (%rbx),%cl
-lock adcb %cl,%al
 adcw $128,%ax
 adcw $-129,%ax
 adcw $255,%ax
@@ -1064,8 +1042,6 @@ adcw $0xffffffff,(%rbx)
 adcw $0xffffffff,sym
 adcw $0xffffffff,-4(%rbp,%rcx,4)
 adcw $sym,sym
-lock adcw (%rbx),%bx
-lock adcw %bx,%ax
 adcl $128,%eax
 adcl $-129,%eax
 adcl $255,%eax
@@ -1095,8 +1071,6 @@ adcl $0xffffffff,(%rbx)
 adcl $0xffffffff,sym
 adcl $0xffffffff,-4(%rbp,%rcx,4)
 adcl $sym,sym
-lock adcl (%rbx),%ebx
-lock adcl %ebx,%eax
 adcq $128,%rax
 adcq $-129,%rax
 adcq $255,%rax
@@ -1136,8 +1110,6 @@ adcq $0xffffffff,(%rbx)
 adcq $0xffffffff,sym
 adcq $0xffffffff,-4(%rbp,%rcx,4)
 adcq $sym,sym
-lock adcq (%rbx),%rbx
-lock adcq %rbx,%rax
 sbbb $0,%al
 sbbb $1,%al
 sbbb $-1,%al
@@ -1158,8 +1130,6 @@ sbbb $0xffffff80,%al
 sbbb $0xffffffff,%al
 sbbb $sym,%al
 sbbb $sym,sym
-lock sbbb (%rbx),%cl
-lock sbbb %cl,%al
 sbbw $128,%ax
 sbbw $-129,%ax
 sbbw $255,%ax
@@ -1199,8 +1169,6 @@ sbbw $0xffffffff,(%rbx)
 sbbw $0xffffffff,sym
 sbbw $0xffffffff,-4(%rbp,%rcx,4)
 sbbw $sym,sym
-lock sbbw (%rbx),%bx
-lock sbbw %bx,%ax
 sbbl $128,%eax
 sbbl $-129,%eax
 sbbl $255,%eax
@@ -1230,8 +1198,6 @@ sbbl $0xffffffff,(%rbx)
 sbbl $0xffffffff,sym
 sbbl $0xffffffff,-4(%rbp,%rcx,4)
 sbbl $sym,sym
-lock sbbl (%rbx),%ebx
-lock sbbl %ebx,%eax
 sbbq $128,%rax
 sbbq $-129,%rax
 sbbq $255,%rax
@@ -1271,8 +1237,6 @@ sbbq $0xffffffff,(%rbx)
 sbbq $0xffffffff,sym
 sbbq $0xffffffff,-4(%rbp,%rcx,4)
 sbbq $sym,sym
-lock sbbq (%rbx),%rbx
-lock sbbq %rbx,%rax
 andb $0,%al
 andb $1,%al
 andb $-1,%al
@@ -1293,8 +1257,6 @@ andb $0xffffff80,%al
 andb $0xffffffff,%al
 andb $sym,%al
 andb $sym,sym
-lock andb (%rbx),%cl
-lock andb %cl,%al
 andw $128,%ax
 andw $-129,%ax
 andw $255,%ax
@@ -1334,8 +1296,6 @@ andw $0xffffffff,(%rbx)
 andw $0xffffffff,sym
 andw $0xffffffff,-4(%rbp,%rcx,4)
 andw $sym,sym
-lock andw (%rbx),%bx
-lock andw %bx,%ax
 andl $128,%eax
 andl $-129,%eax
 andl $255,%eax
@@ -1365,8 +1325,6 @@ andl $0xffffffff,(%rbx)
 andl $0xffffffff,sym
 andl $0xffffffff,-4(%rbp,%rcx,4)
 andl $sym,sym
-lock andl (%rbx),%ebx
-lock andl %ebx,%eax
 andq $128,%rax
 andq $-129,%rax
 andq $255,%rax
@@ -1404,8 +1362,6 @@ andq $0xffffffff,(%rbx)
 andq $0xffffffff,sym
 andq $0xffffffff,-4(%rbp,%rcx,4)
 andq $sym,sym
-lock andq (%rbx),%rbx
-lock andq %rbx,%rax
 subb $0,%al
 subb $1,%al
 subb $-1,%al
@@ -1426,8 +1382,6 @@ subb $0xffffff80,%al
 subb $0xffffffff,%al
 subb $sym,%al
 subb $sym,sym
-lock subb (%rbx),%cl
-lock subb %cl,%al
 subw $128,%ax
 subw $-129,%ax
 subw $255,%ax
@@ -1467,8 +1421,6 @@ subw $0xffffffff,(%rbx)
 subw $0xffffffff,sym
 subw $0xffffffff,-4(%rbp,%rcx,4)
 subw $sym,sym
-lock subw (%rbx),%bx
-lock subw %bx,%ax
 subl $128,%eax
 subl $-129,%eax
 subl $255,%eax
@@ -1498,8 +1450,6 @@ subl $0xffffffff,(%rbx)
 subl $0xffffffff,sym
 subl $0xffffffff,-4(%rbp,%rcx,4)
 subl $sym,sym
-lock subl (%rbx),%ebx
-lock subl %ebx,%eax
 subq $128,%rax
 subq $-129,%rax
 subq $255,%rax
@@ -1537,8 +1487,6 @@ subq $0xffffffff,(%rbx)
 subq $0xffffffff,sym
 subq $0xffffffff,-4(%rbp,%rcx,4)
 subq $sym,sym
-lock subq (%rbx),%rbx
-lock subq %rbx,%rax
 xorb $0,%al
 xorb $1,%al
 xorb $-1,%al
@@ -1559,8 +1507,6 @@ xorb $0xffffff80,%al
 xorb $0xffffffff,%al
 xorb $sym,%al
 xorb $sym,sym
-lock xorb (%rbx),%cl
-lock xorb %cl,%al
 xorw $128,%ax
 xorw $-129,%ax
 xorw $255,%ax
@@ -1600,8 +1546,6 @@ xorw $0xffffffff,(%rbx)
 xorw $0xffffffff,sym
 xorw $0xffffffff,-4(%rbp,%rcx,4)
 xorw $sym,sym
-lock xorw (%rbx),%bx
-lock xorw %bx,%ax
 xorl $128,%eax
 xorl $-129,%eax
 xorl $255,%eax
@@ -1631,8 +1575,6 @@ xorl $0xffffffff,(%rbx)
 xorl $0xffffffff,sym
 xorl $0xffffffff,-4(%rbp,%rcx,4)
 xorl $sym,sym
-lock xorl (%rbx),%ebx
-lock xorl %ebx,%eax
 xorq $128,%rax
 xorq $-129,%rax
 xorq $255,%rax
@@ -1669,8 +1611,6 @@ xorq $0xffffffff,(%rbx)
 xorq $0xffffffff,sym
 xorq $0xffffffff,-4(%rbp,%rcx,4)
 xorq $sym,sym
-lock xorq (%rbx),%rbx
-lock xorq %rbx,%rax
 cmpb $0,%al
 cmpb $1,%al
 cmpb $-1,%al
@@ -2193,8 +2133,6 @@ imulw $0x7fffffff,%bx
 imul $0x7fffffff,%bx
 imulw $0x12345678,%bx
 imul $0x12345678,%bx
-imulb $2,%al,%bl
-imulb %al,%bl
 divw %bx,%ax
 idivw (%rbx),%ax
 imulw %bx,%ax,%bx
@@ -2290,18 +2228,10 @@ xchgq %rax,%rax
 xchg %ax,%bx
 xchg %eax,%ecx
 xchg %ecx,%eax
-lock incl %eax
-lock
-rep
-repne
-lock; incl (%rax)
-rep; nop
-rep; ret
 xacquire lock addl %eax,(%rbx)
 xrelease movl %eax,(%rbx)
 ds call sym
 es movsb
-data16 movl %eax,%ebx
 addr32 movl %eax,(%rax)
 addr16 nop
 data16
@@ -2315,11 +2245,6 @@ fs
 gs
 rex64 movl %eax,%ebx
 rex pushq %rax
-rep; movsb
-repe; cmpsb
-repne; scasb
-lock; cmpxchgl %ecx,(%rbx)
-lock addl %eax,%ebx
 jo sym
 jno sym
 jb sym
@@ -2404,10 +2329,6 @@ lgdtq (%rax)
 sgdtl (%rax)
 sidtw (%rax)
 lgdt %eax
-sldtw (%rax)
-lldtw sym
-ltrw sym
-strw sym
 invlpg %eax
 lmsw %eax
 clflushopt (%rax)
@@ -2453,13 +2374,6 @@ fst (%rbx)
 fstp (%rbx)
 fisttps sym
 fisttpll sym
-fcom %st,%st(1)
-fcom %st(0),%st(3)
-fcom %st,%st
-fcomp %st,%st(1)
-fcomp %st,%st(3)
-fcomp %st(0),%st(3)
-fcomp %st,%st
 fucomip
 fcomi
 fucomi

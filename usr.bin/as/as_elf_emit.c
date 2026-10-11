@@ -3360,6 +3360,20 @@ static int normalize_x86_mnemonic(const char *src, char *dst, size_t dst_sz, cha
         }
         return 0;
     }
+    /* movabs and its four suffixes; with none it is as wide as its
+     * register, which the emitter reads, and q stands for that. */
+    if (strncmp(dst, "movabs", 6) == 0 &&
+        (n == 6 || (n == 7 && (dst[6] == 'b' || dst[6] == 'w' || dst[6] == 'l' || dst[6] == 'q')))) {
+        if (dst_sz < sizeof("movabs")) {
+            return -1;
+        }
+        suffix = (n == 7 && dst[6] != 'q') ? dst[6] : 'q';
+        memcpy(dst, "movabs", sizeof("movabs"));
+        if (suffix_out != NULL) {
+            *suffix_out = suffix;
+        }
+        return 0;
+    }
     if (strcmp(dst, "movabsq") == 0 || strcmp(dst, "movabs") == 0) {
         if (dst_sz < sizeof("movabs")) {
             return -1;
@@ -4659,6 +4673,15 @@ static int x86_prepend_segment(const as_instruction_t *insn, unsigned char *code
     case AS_X86_SEG_SS: seg = 0x36; break;
     default: return 0;
     }
+    /* Some emitters write the override of a memory operand themselves;
+     * not twice. */
+    for (i = 0; i < *code_len && (code[i] == 0x26 || code[i] == 0x2e || code[i] == 0x36 || code[i] == 0x3e ||
+                                  code[i] == 0x64 || code[i] == 0x65 || code[i] == 0x66 || code[i] == 0x67 ||
+                                  code[i] == 0xf0 || code[i] == 0xf2 || code[i] == 0xf3); ++i) {
+        if (code[i] == seg) {
+            return 0;
+        }
+    }
     if (*code_len >= code_cap) {
         return -1;
     }
@@ -4851,6 +4874,32 @@ static int x86_vex_make_3byte(unsigned char *code, size_t code_cap, size_t *code
     code[at + 2] = (unsigned char)(b & 0x7fu);
     (*code_len)++;
     return 0;
+}
+
+static int x86_stmt_has_gpr_of_width(const as_instruction_t *insn, int bits) {
+    size_t i;
+
+    for (i = 0; i < insn->operand_count; ++i) {
+        if (insn->operands[i].kind == AS_OPERAND_REGISTER && x86_reg_width_bits(insn->operands[i].u.reg) == bits) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/*
+ * What goes before the bytes of an emitter that was handed the statement
+ * and writes no prefixes of its own: a segment override -- written as a
+ * prefix, `fs flds (%eax)`, or on the operand -- and then the address
+ * size of 64-bit code.  The first was dropped: `gs movaps (%eax), %xmm0`
+ * and `fs cmpxchg %ecx, (%eax)` read from %ds.
+ */
+static int x86_stmt_outer_prefixes(const as_elf_cfg_t *cfg, const as_instruction_t *insn, unsigned char *code,
+                                   size_t code_cap, size_t *code_len) {
+    if (x86_prepend_segment(insn, code, code_cap, code_len) != 0) {
+        return -1;
+    }
+    return cfg->is_64 ? x86_prepend_addr32(insn, code, code_cap, code_len) : 0;
 }
 
 static int x86_prepend_opsize(unsigned char *code, size_t code_cap, size_t *code_len) {
@@ -10129,6 +10178,157 @@ static void warn_stmt(const as_elf_cfg_t *cfg, const as_stmt_t *st, const char *
 }
 
 /*
+ * The most operands that any form of an instruction takes, for the
+ * mnemonics the encoders know by name (those of AVX apart).  It is what
+ * GNU as 2.46 takes, found by trying each mnemonic with one to five
+ * operands of every kind in 32- and 64-bit code; the forms of APX,
+ * which give some two-operand instructions a third, are counted.
+ *
+ * A statement with more is refused.  Many of the emitters read the
+ * operands they expect and never looked for more: `movaps %xmm0, %xmm1,
+ * %xmm2` was `movaps %xmm0, %xmm1`, `hlt $1` was hlt, and a statement
+ * of four operands was cut to three on its way to the encoders.
+ */
+static const char *const x86_max_operands[] = {
+    /* 0 */
+    " aaa aas cbtw cbw cdq cdqe clac clc cld cli cltd cltq clts cmc cpuid cqo cqto cs cwd cwde"
+    " cwtd cwtl daa das ds emms enclv endbr32 endbr64 es f2xm1 fabs fchs fclex fcompp fcos fdecstp"
+    " femms fincstp finit fld1 fldl2e fldl2t fldlg2 fldln2 fldpi fldz fnclex fninit fnop fpatan"
+    " fprem fprem1 fptan frndint fs fscale fsin fsincos fsqrt ftst fucompp fwait fxam fxtract"
+    " fyl2x fyl2xp1 getsec gs hlt int1 int3 into invd iret iretq iretw lahf leave lfence mfence"
+    " montmul pause popa popal popaw popf pusha pushal pushaw pushf rdpmc rdtsc"
+    " rdtscp rex rsm sahf salc serialize sfence ss stac stc std sti swapgs syscall sysenter"
+    " sysexit sysexitl sysexitq sysret sysretl sysretq ud2 ud2a udb wait wbinvd wbnoinvd wrmsr"
+    " xcryptcbc xcryptcfb xcryptctr xcryptecb xcryptofb xgetbv xsetbv xsha1 xsha256 xstore"
+    " xstorerng ",
+    /* 1 */
+    " aad aam aesencwide128kl aesencwide256kl bswap cldemote clflush clflushopt clrssbsy clwb"
+    " cmpxchg16b cmpxchg8b faddl fadds fbld fbstp fcom fcoml fcomp fcompl fcomps fcoms fdivl"
+    " fdivrl fdivrs fdivs ffree ffreep fiadd fiaddl fiadds ficom ficoml ficomp ficompl ficomps"
+    " ficoms fidiv fidivl fidivr fidivrl fidivrs fidivs fild fildl fildll fildq filds fimul fimull"
+    " fimuls fist fistl fistp fistpl fistpll fistpq fistps fists fisttp fisttpl fisttpll fisttpq"
+    " fisttps fisub fisubl fisubr fisubrl fisubrs fisubs fld fldcw fldenv fldl flds fldt fmull"
+    " fmuls fnsave fnstcw fnstenv fnstsw frstor fsave fst fstcw fstenv fstl fstp fstpl fstps fstpt"
+    " fsts fstsw fsubl fsubrl fsubrs fsubs fucom fucomp fxch fxrstor fxrstor64 fxsave fxsave64"
+    " hreset imulb incsspd int invlpg ja jae jb jbe jc jcxz je jecxz jg jge jl jle jna jnae jnb"
+    " jnbe jnc jne jng jnge jnl jnle jno jnp jns jnz jo jp jpe jpo jrcxz js jz ldmxcsr lgdt lgdtl"
+    " lidt lidtl lldt lmsw loop loope loopne loopnz loopz lret lretq lretw ltr mul mulb mull mulq"
+    " nop pop prefetch prefetchnta prefetcht0 prefetcht1 prefetcht2 prefetchw prefetchwt1 ptwrite"
+    " push rdfsbase rdgsbase rdpid rdrand rdseed ret retf retfq retfw retl retq retw seta setae"
+    " setb setbe setc sete setg setge setl setle setna setnae setnb setnbe setnc setne setng"
+    " setnge setnl setnle setno setnp setns setnz seto setp setpe setpo sets setz sgdt sgdtl sidt"
+    " sidtl sldt smsw stmxcsr str umonitor wrfsbase wrgsbase xabort xbegin xlat"
+    " xlatb xrstor xrstor64 xrstors xsave xsave64 xsavec xsavec64 xsaveopt xsaveopt64 xsaves"
+    " xsaves64 ",
+    /* 2 */
+    " aadd aand addpd addps addsd addss addsubpd addsubps aesdec aesdec128kl aesdec256kl"
+    " aesdeclast aesenc aesenc128kl aesenc256kl aesenclast aesimc andnpd andnps andpd andps aor"
+    " arpl axor blsi blsmsk blsr bound bsf bsr bt btc btr bts call cmp cmps cmpsb cmpsl cmpsq"
+    " cmpsw cmpxchg comisd comiss crc32 cvtdq2pd cvtdq2ps cvtpd2dq cvtpd2pi cvtpd2ps cvtpi2pd"
+    " cvtpi2ps cvtps2dq cvtps2pd cvtps2pi cvtsd2si cvtsd2ss cvtsi2sd cvtsi2ss cvtss2sd cvtss2si"
+    " cvttpd2dq cvttpd2pi cvttps2dq cvttps2pi cvttsd2si cvttss2si dec decb decl div divb divl"
+    " divpd divps divq divsd divss encodekey128 encodekey256 enqcmd enqcmds enter fadd faddp"
+    " fcmovb fcmovbe fcmove fcmovnb fcmovnbe fcmovne fcmovnu fcmovu fcomi fcomip fdiv fdivp fdivr"
+    " fdivrp fmul fmulp fsub fsubp fsubr fsubrp fucomi fucomip gf2p8mulb haddpd haddps hsubpd"
+    " hsubps idiv idivb idivl idivq in inc incb incl ins insb insl insw invept invpcid invvpid jmp"
+    " kmovw lar lcall lddqu lds lea les lfs lgs ljmp loadiwkey lods lodsb lodsl lodsq lodsw lsl"
+    " lss lzcnt maskmovdqu maskmovq maxpd maxps maxsd maxss minpd minps minsd minss mov movabs"
+    " movabsq movapd movaps movb movbe movd movddup movdir64b movdiri movdq2q movdqa movdqu"
+    " movhlps movhpd movhps movlhps movlpd movlps movmskpd movmskps movntdq movntdqa movnti"
+    " movntil movntiq movntpd movntps movntq movntsd movntss movq movq2dq movs movsb movsbl movsbq"
+    " movsbw movsd movshdup movsl movsldup movslq movsq movss movsw movswl movswq movsx movsxb"
+    " movsxd movsxw movupd movups movzbl movzbq movzbw movzwl movzwq movzx movzxb movzxw mulpd"
+    " mulps mulsd mulss neg negb negl not notb notl orpd orps out outs outsb outsl outsw pabsb"
+    " pabsd pabsw packssdw packsswb packusdw packuswb paddb paddd paddq paddsb paddsw paddusb"
+    " paddusw paddw pand pandn pavgb pavgusb pavgw pcmpeqb pcmpeqd pcmpeqq pcmpeqw pcmpgtb pcmpgtd"
+    " pcmpgtq pcmpgtw pf2id pf2iw pfacc pfadd pfcmpeq pfcmpge pfcmpgt pfmax pfmin pfmul pfnacc"
+    " pfpnacc pfrcp pfrcpit1 pfrcpit2 pfrsqit1 pfrsqrt pfsub pfsubr phaddd phaddsw phaddw"
+    " phminposuw phsubd phsubsw phsubw pi2fd pi2fw pmaddubsw pmaddwd pmaxsb pmaxsd pmaxsw pmaxub"
+    " pmaxud pmaxuw pminsb pminsd pminsw pminub pminud pminuw pmovmskb pmovsxbd pmovsxbq pmovsxbw"
+    " pmovsxdq pmovsxwd pmovsxwq pmovzxbd pmovzxbq pmovzxbw pmovzxdq pmovzxwd pmovzxwq pmuldq"
+    " pmulhrsw pmulhrw pmulhuw pmulhw pmulld pmullw pmuludq popcnt por psadbw pshufb psignb psignd"
+    " psignw pslld pslldq psllq psllw psrad psraw psrld psrldq psrlq psrlw psubb psubd psubq"
+    " psubsb psubsw psubusb psubusw psubw pswapd ptest punpckhbw punpckhdq punpckhqdq punpckhwd"
+    " punpcklbw punpckldq punpcklqdq punpcklwd pxor rcpps rcpss rdmsr rsqrtps rsqrtss scas scasb"
+    " scasl scasq scasw sha1msg1 sha1msg2 sha1nexte sha256msg1 sha256msg2 sqrtpd sqrtps sqrtsd"
+    " sqrtss stos stosb stosl stosq stosw subpd subps subsd subss test testb testl tzcnt ucomisd"
+    " ucomiss ud0 ud1 ud2b unpckhpd unpckhps unpcklpd unpcklps wrssd wrussd xadd xchg xorpd xorps"
+    " mwait ",
+    /* 3 */
+    " adc adcx add adox aeskeygenassist and andn bextr blendpd blendps blendvpd blendvps bzhi"
+    " cmova cmovae cmovb cmovbe cmovc cmove cmovg cmovge cmovl cmovle cmovna cmovnae cmovnb"
+    " cmovnbe cmovnc cmovne cmovng cmovnge cmovnl cmovnle cmovno cmovnp cmovns cmovnz cmovo cmovp"
+    " cmovpe cmovpo cmovs cmovz cmppd cmpps cmpsd cmpss dppd dpps extractps extrq gf2p8affineinvqb"
+    " gf2p8affineqb imul imull imulq insertps mpsadbw mulx or palignr pblendvb pblendw pclmulqdq"
+    " pcmpestri pcmpestriq pcmpestrm pcmpestrmq pcmpistri pcmpistrm pdep pext pextrb pextrd pextrq"
+    " pextrw pinsrb pinsrd pinsrq pinsrw pshufd pshufhw pshuflw pshufw rcl rcr rol ror rorx"
+    " roundpd roundps roundsd roundss sal sar sarl sarq sarx sbb sha1rnds4 sha256rnds2 shl shll"
+    " shlq shlx shr shrl shrq shrx shufpd shufps sub xor monitor tpause umwait ",
+    /* 4 */
+    " insertq shld shrd ",
+};
+
+/* The entry of x86_max_operands that has the mnemonic, or -1. */
+static int x86_max_operand_count(const char *mn) {
+    char key[40];
+    size_t n = strlen(mn);
+    size_t i;
+
+    if (n == 0 || n + 3 > sizeof(key)) {
+        return -1;
+    }
+    key[0] = ' ';
+    for (i = 0; i < n; ++i) {
+        key[i + 1] = (char)tolower((unsigned char)mn[i]);
+    }
+    key[n + 1] = ' ';
+    key[n + 2] = '\0';
+    for (i = 0; i < sizeof(x86_max_operands) / sizeof(x86_max_operands[0]); ++i) {
+        if (strstr(x86_max_operands[i], key) != NULL) {
+            return (int)i;
+        }
+    }
+    return -1;
+}
+
+/*
+ * Whether lock may stand before this instruction.  The processor takes
+ * it on a short list of instructions and only where the destination is
+ * in memory, and faults otherwise; GNU as refuses the rest.  They were
+ * assembled -- `lock addl %eax, %ebx`, `lock addps` -- or, by some of
+ * the emitters, assembled without the prefix: `lock fldl (%eax)`.
+ */
+static int x86_lock_is_allowed(const as_instruction_t *insn, const char *mn, int intel_syntax) {
+    static const char *const names[] = {
+        "add", "adc", "and", "btc", "btr", "bts", "cmpxchg", "cmpxchg8b", "cmpxchg16b", "dec",
+        "inc", "neg", "not", "or",  "sbb", "sub", "xor",     "xadd",      "xchg",
+    };
+    const as_operand_t *dst;
+    size_t i;
+    int known = 0;
+
+    for (i = 0; i < sizeof(names) / sizeof(names[0]); ++i) {
+        if (strcmp(mn, names[i]) == 0) {
+            known = 1;
+        }
+    }
+    if (!known || insn->operand_count == 0) {
+        return 0;
+    }
+    /* xchg has no destination: either side. */
+    if (strcmp(mn, "xchg") == 0) {
+        for (i = 0; i < insn->operand_count; ++i) {
+            if (insn->operands[i].kind == AS_OPERAND_MEMORY || operand_is_bare_address(&insn->operands[i])) {
+                return 1;
+            }
+        }
+        return 0;
+    }
+    dst = &insn->operands[intel_syntax ? 0 : insn->operand_count - 1];
+    return dst->kind == AS_OPERAND_MEMORY || operand_is_bare_address(dst);
+}
+
+/*
  * cmp<predicate><ps|pd|ss|sd>: the predicate's number, 0 to 7, and the
  * instruction it is a spelling of in `base`; -1 if the mnemonic is not
  * one of the thirty-two.
@@ -10156,8 +10356,8 @@ static int x86_sse_compare_alias(const char *mn, char *base, size_t base_sz) {
     return -1;
 }
 
-static int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_stmt_t *st, unsigned char *code, size_t code_cap,
-                           size_t *code_len, char *encerr, size_t encerr_sz) {
+static int encode_x86_stmt_body(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_stmt_t *st, unsigned char *code,
+                                size_t code_cap, size_t *code_len, char *encerr, size_t encerr_sz) {
     as_x86_insn_t in;
     size_t j;
     size_t op_index[3] = {0, 1, 2};
@@ -10208,12 +10408,31 @@ static int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_st
             whole.u.instr.mnemonic = base;
             whole.u.instr.operands = operands;
             whole.u.instr.operand_count = 3;
-            return encode_x86_stmt(ctx, cfg, &whole, code, code_cap, code_len, encerr, encerr_sz);
+            return encode_x86_stmt_body(ctx, cfg, &whole, code, code_cap, code_len, encerr, encerr_sz);
         }
     }
     memset(&in, 0, sizeof(in));
     if (normalize_x86_mnemonic(st->u.instr.mnemonic, mnbuf, sizeof(mnbuf), &suffix) != 0) {
         snprintf(encerr, encerr_sz, "unsupported mnemonic length");
+        return -1;
+    }
+    {
+        /* By the name as written, which may be an instruction of its
+         * own (movsd, cmpsl), and failing that by the name less its
+         * suffix. */
+        int most = x86_max_operand_count(st->u.instr.mnemonic);
+
+        if (most < 0) {
+            most = x86_max_operand_count(mnbuf);
+        }
+        if (most >= 0 && st->u.instr.operand_count > (size_t)most) {
+            snprintf(encerr, encerr_sz, "'%s' takes %d operand%s at most, and has %zu", st->u.instr.mnemonic, most,
+                     most == 1 ? "" : "s", st->u.instr.operand_count);
+            return -1;
+        }
+    }
+    if ((st->u.instr.prefixes & AS_PREFIX_LOCK) != 0 && !x86_lock_is_allowed(&st->u.instr, mnbuf, intel_syntax)) {
+        snprintf(encerr, encerr_sz, "lock is not allowed on '%s' with these operands", mnbuf);
         return -1;
     }
     /*
@@ -10274,6 +10493,12 @@ static int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_st
     } else if (suffix == 'q' && !streq_ci(mnbuf, "enter")) {
         /* (enter's frame is 64-bit in 64-bit code with no prefix to say so.) */
         in.rex_w = 1;
+    }
+    /* The instructions on a 16-bit selector in memory are 16 bits with
+     * no prefix; a w on one -- `sldtw (%rax)`, `ltrw sym` -- says only
+     * what is so. */
+    if (in.operand_size_override && strcmp(mnbuf, "mov") != 0 && !x86_special_takes_opsize(&st->u.instr, mnbuf)) {
+        in.operand_size_override = 0;
     }
 
     if (st->u.instr.operand_count == 1 &&
@@ -10420,12 +10645,12 @@ static int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_st
     if (!x86_stmt_is_the_encoders(cfg, &st->u.instr, X86_PSEUDO_FORMS) &&
         emit_x87_forms(&st->u.instr, intel_syntax, cfg->is_64, code, code_cap, code_len) == 0 &&
         *code_len > 0) {
-        return cfg->is_64 ? x86_prepend_addr32(&st->u.instr, code, code_cap, code_len) : 0;
+        return x86_stmt_outer_prefixes(cfg, &st->u.instr, code, code_cap, code_len);
     }
     if (!x86_stmt_is_the_encoders(cfg, &st->u.instr, X86_PSEUDO_FORMS) &&
         emit_simd_movq(&st->u.instr, intel_syntax, cfg->is_64, code, code_cap, code_len) == 0 &&
         *code_len > 0) {
-        return cfg->is_64 ? x86_prepend_addr32(&st->u.instr, code, code_cap, code_len) : 0;
+        return x86_stmt_outer_prefixes(cfg, &st->u.instr, code, code_cap, code_len);
     }
     {
         int rc = emit_x86_padlock_waitpkg(mnbuf, &st->u.instr, intel_syntax, cfg->is_64, code, code_cap, code_len);
@@ -10465,7 +10690,7 @@ static int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_st
                 x86_prepend_opsize(code, code_cap, code_len) != 0) {
                 return -1;
             }
-            return 0;
+            return x86_stmt_outer_prefixes(cfg, &st->u.instr, code, code_cap, code_len);
         }
     }
     /*
@@ -10501,7 +10726,7 @@ static int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_st
             if (x86_prepend_segment(&st->u.instr, code, code_cap, code_len) != 0) {
                 return -1;
             }
-            return cfg->is_64 ? x86_prepend_addr32(&st->u.instr, code, code_cap, code_len) : 0;
+            return x86_stmt_outer_prefixes(cfg, &st->u.instr, code, code_cap, code_len);
         }
     }
     if ((!cfg->is_64 || cfg->x86_64_isa_level >= 4) &&
@@ -10522,7 +10747,7 @@ static int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_st
             if (x86_prepend_segment(&st->u.instr, code, code_cap, code_len) != 0) {
                 return -1;
             }
-            return cfg->is_64 ? x86_prepend_addr32(&st->u.instr, code, code_cap, code_len) : 0;
+            return x86_stmt_outer_prefixes(cfg, &st->u.instr, code, code_cap, code_len);
         }
     } else if (cfg->is_64 && x86_stmt_requires_v4(&st->u.instr, intel_syntax)) {
         set_x86_isa_requirement(encerr, encerr_sz, mnbuf, 4);
@@ -10540,11 +10765,14 @@ static int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_st
         int s64 = emit_x86_64_special(&st->u.instr, intel_syntax, cfg->x86_64_isa_level, code, code_cap, code_len);
         if (s64 == 0) {
             if (*code_len > 0) {
-                if (x86_segment_form_is_16bit(&st->u.instr, mnbuf, suffix, intel_syntax) &&
+                /* movabs to or from %ax is a 16-bit move and has the
+                 * prefix; its emitter wrote none. */
+                if ((x86_segment_form_is_16bit(&st->u.instr, mnbuf, suffix, intel_syntax) ||
+                     (strcmp(mnbuf, "movabs") == 0 && x86_stmt_has_gpr_of_width(&st->u.instr, 16))) &&
                     x86_prepend_opsize(code, code_cap, code_len) != 0) {
                     return -1;
                 }
-                return x86_prepend_addr32(&st->u.instr, code, code_cap, code_len);
+                return x86_stmt_outer_prefixes(cfg, &st->u.instr, code, code_cap, code_len);
             }
         }
         if (s64 == -2) {
@@ -10630,6 +10858,16 @@ static int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_st
     }
 
     /*
+     * The encoders below take three operands.  A statement of more that
+     * has come this far is no form they have, and was cut to its first
+     * three: `shld $1, %eax, %ebx, %ecx` was assembled without the last.
+     */
+    if (st->u.instr.operand_count > 3) {
+        snprintf(encerr, encerr_sz, "unsupported operand form for '%s': %zu operands", mnbuf,
+                 st->u.instr.operand_count);
+        return -1;
+    }
+    /*
      * crc32's suffix is the width of its source, which the encoder reads
      * from the operand: the destination is 32 bits, or 64, whatever the
      * source is.
@@ -10680,6 +10918,40 @@ static int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_st
         }
     }
     return 0;
+}
+
+/*
+ * data16 written before an instruction is the byte 66 and nothing more:
+ * the instruction is assembled as it would be without, at the size its
+ * suffix and its registers give it, and the prefix goes in front.
+ * `data16 movl $1, %eax` is 66 b8 01 00 00 00 to GNU as, four bytes of
+ * immediate and all.  It was made the instruction's operand size, which
+ * a suffix then took away again (`data16 movl %eax, %ebx` had no 66) or
+ * which shortened an immediate.  Before an instruction that has the
+ * prefix already it is the prefix twice, and refused.
+ */
+static int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_stmt_t *st, unsigned char *code,
+                           size_t code_cap, size_t *code_len, char *encerr, size_t encerr_sz) {
+    as_stmt_t bare;
+    size_t i;
+
+    if (st == NULL || st->kind != AS_STMT_INSTRUCTION || (st->u.instr.prefixes & AS_PREFIX_DATA16) == 0) {
+        return encode_x86_stmt_body(ctx, cfg, st, code, code_cap, code_len, encerr, encerr_sz);
+    }
+    bare = *st;
+    bare.u.instr.prefixes &= ~AS_PREFIX_DATA16;
+    if (encode_x86_stmt_body(ctx, cfg, &bare, code, code_cap, code_len, encerr, encerr_sz) != 0) {
+        return -1;
+    }
+    for (i = 0; i < *code_len && (code[i] == 0x26 || code[i] == 0x2e || code[i] == 0x36 || code[i] == 0x3e ||
+                                  code[i] == 0x64 || code[i] == 0x65 || code[i] == 0x66 || code[i] == 0x67 ||
+                                  code[i] == 0xf0 || code[i] == 0xf2 || code[i] == 0xf3); ++i) {
+        if (code[i] == 0x66) {
+            snprintf(encerr, encerr_sz, "data16 before '%s', which has the prefix already", st->u.instr.mnemonic);
+            return -1;
+        }
+    }
+    return x86_prepend_opsize(code, code_cap, code_len);
 }
 
 static int eval_local_rel_expr_virtual(emit_ctx_t *ctx, const char *section_name, const as_stmt_t *base_st, uint64_t base_off,
