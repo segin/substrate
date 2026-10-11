@@ -11,11 +11,10 @@ kernel:
 - **C library, dynamic linker and base userland** — `libc`, `libsys`,
   `libm`, `libpthread`, `/sbin/ld.so`, and the commands under `bin/`,
   `sbin/` and `usr.bin/`.
-- **A native GNU toolchain** — binutils 2.46 and GCC 16.1, patched for the
-  `i386-unknown-substrate` target. A cross compiler builds the system on a
-  Linux host; the same toolchain, plus gdb, then runs *on* Substrate. A
-  second cross toolchain targets `x86_64-unknown-substrate` for the 64-bit
-  port.
+- **Toolchains** — GNU binutils 2.46 and GCC 16.1 ported to Substrate: cross
+  compilers on the Linux host for 32 and 64 bits, and the 32-bit one built
+  again to run on Substrate itself, with gdb. Beside them, Substrate's own
+  `cc`, `as` and `ld`. See `docs/toolchain.md`.
 - **227 third-party ports** under `contrib/`, each a patch series against an
   upstream release: zsh, ncurses, OpenSSL, curl, Python, Perl, Tcl/Tk, the
   X11 client stack with the `Xfbdev` framebuffer server, SDL3, GTK 2, TrueType

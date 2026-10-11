@@ -381,20 +381,18 @@ GOT before `_start` runs.
 
 ### 3.5. Toolchain
 
-GNU binutils 2.46.0 (`contrib/binutils`) and GCC 16.1.0 (`contrib/gcc`),
-patched for `i386-unknown-substrate`, built in two stages by
-`contrib/build-toolchain.sh`: stage 1 is a cross toolchain on the Linux
-host, stage 2 a Canadian cross that runs on Substrate and is installed in
-the image as `cc`/`gcc`/`g++`/`as`/`ld`. C defaults to gnu17.
+There are three, all described in `docs/toolchain.md`:
 
-C++ exceptions work across shared-library boundaries: the GCC patches
-enable `PT_GNU_EH_FRAME` lookup and `--eh-frame-hdr`, and build a shared
-`libgcc_s`, so one unwinder finds every module's frame tables at throw time
-through `dl_iterate_phdr`. A throw in a `.so` is caught in the program.
-C++ code using `std::mutex` must link `-lpthread`. `libstdc++.so.6` is
-usable and preferred over the static archive. `gdb` (`contrib/gdb`) runs
-natively on top of `ptrace(2)`. Details: `docs/toolchain.md`,
-`contrib/BUILD-TOOLCHAIN.md`.
+- **GNU, 32-bit.** binutils 2.46.0 and GCC 16.1.0 patched for
+  `i386-unknown-substrate` (`contrib/binutils`, `contrib/gcc`), built by
+  `contrib/build-toolchain.sh` in two stages: a cross toolchain on the
+  Linux host, then one that runs on Substrate and is the image's
+  `gcc`/`g++`/`as`/`ld`. `gdb` (`contrib/gdb`) runs natively.
+- **GNU, 64-bit.** A cross toolchain for `x86_64-unknown-substrate`
+  (`contrib/build-toolchain64.sh`), which builds the 64-bit image.
+- **Substrate's own.** The in-tree compiler, assembler and linker
+  (`usr.bin/cc`, `usr.bin/as`, `usr.bin/ld`), installed under
+  `/usr/libexec/substrate-cc/` and run as `cc`.
 
 ### 3.6. Graphics and desktops
 
