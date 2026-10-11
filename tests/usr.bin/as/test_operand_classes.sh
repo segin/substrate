@@ -220,6 +220,31 @@ done <<'EOF'
 32 64	660f3a16c001660f3a22c001660f3a17c001660f3a14c902660f3a20d203	pextrd $1,%xmm0,%eax|pinsrd $1,%eax,%xmm0|extractps $1,%xmm0,%eax|pextrb $2,%xmm1,%ecx|pinsrb $3,%edx,%xmm2
 32	c4e37122d001c5f32ad0	vpinsrd $1,%eax,%xmm1,%xmm2|vcvtsi2sd %eax,%xmm1,%xmm2
 64	66480f6ec066480f7ec0f2480f2ac066480f3a16c00166480f3a22c001	movq %rax,%xmm0|movq %xmm0,%rax|cvtsi2sdq %rax,%xmm0|pextrq $1,%xmm0,%rax|pinsrq $1,%rax,%xmm0
+# Nor general registers alone, in an instruction of vectors: one named
+# with a v, one of the 61 with no vector register and no address, one of
+# SSE3 to SSE4.1, a comparison by name.
+32 64	refused	vaddps %eax,%ebx,%ecx
+32 64	refused	vpxor %eax,%ebx,%ecx
+32 64	refused	vfmadd231pd %eax,%ebx,%ecx
+32 64	refused	vcvtsi2sd %eax,%ebx,%ecx
+32 64	refused	cvtsi2sd %eax,%ebx
+32 64	refused	pshufb %eax,%ebx
+32 64	refused	haddps %eax,%ebx
+32 64	refused	pmovzxbw %eax,%ebx
+32 64	refused	ptest %eax,%ebx
+32 64	refused	cmpeqsd %eax,%ebx
+32 64	refused	cmpsd %eax,%ebx
+32	660f3800c8f20f7c08660f3817c8f20fc2c800660f3830c8f30f7ec8	pshufb %xmm0,%xmm1|haddps (%eax),%xmm1|ptest %xmm0,%xmm1|cmpeqsd %xmm0,%xmm1|pmovzxbw %xmm0,%xmm1|movq %xmm0,%xmm1
+64	660f3800c867f20f7c08660f3817c8f20fc2c800660f3830c8f30f7ec8	pshufb %xmm0,%xmm1|haddps (%eax),%xmm1|ptest %xmm0,%xmm1|cmpeqsd %xmm0,%xmm1|pmovzxbw %xmm0,%xmm1|movq %xmm0,%xmm1
+32	c5f32a10c5f058d0	vcvtsi2sd (%eax),%xmm1,%xmm2|vaddps %xmm0,%xmm1,%xmm2
+64	4889c348c7c001000000	movq %rax,%rbx|movq $1,%rax
+# What has one operand in memory always; verr and verw, which are named
+# with a v and are of no vector.
+32	refused	movbe %eax,%ebx
+32 64	refused	movnti %eax,%ebx
+32 64	refused	aadd %eax,%ebx
+32	0f00e00f00e80f38f0180f38f1180fc303f20f2a00f20f2c18	verr %ax|verw %ax|movbe (%eax),%ebx|movbe %ebx,(%eax)|movnti %eax,(%ebx)|cvtsi2sd (%eax),%xmm0|cvttsd2si (%eax),%ebx
+64	0f00e00f00e8670f38f018670f38f118670fc30367f20f2a0067f20f2c18	verr %ax|verw %ax|movbe (%eax),%ebx|movbe %ebx,(%eax)|movnti %eax,(%ebx)|cvtsi2sd (%eax),%xmm0|cvttsd2si (%eax),%ebx
 # No operand where there is none, and no number where a register is.
 32 64	refused	hlt %eax
 32 64	refused	nop $1

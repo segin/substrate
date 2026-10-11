@@ -10764,7 +10764,16 @@ static int x86_operand_classes_refused(const as_instruction_t *insn, int intel_s
                 general += reg[i]->cls == AS_X86_REGCLASS_GENERAL;
             }
         }
-        if (general != 0 && mmx + xmm + wide != 0) {
+        /*
+         * And an instruction whose name begins with v -- of AVX, FMA
+         * and AVX-512 -- has a general register for an operand only if
+         * it is one of those, or one of the seven below, which are not
+         * of vectors at all: `vaddps %eax, %ebx, %ecx` was assembled.
+         */
+        if (general != 0 && (mmx + xmm + wide != 0 || mn[0] == 'v')) {
+            int not_of_vectors = strcmp(mn, "verr") == 0 || strcmp(mn, "verw") == 0 || strcmp(mn, "vmload") == 0 ||
+                                 strcmp(mn, "vmread") == 0 || strcmp(mn, "vmrun") == 0 || strcmp(mn, "vmsave") == 0 ||
+                                 strcmp(mn, "vmwrite") == 0;
             int found = 0;
 
             /* (By its name, or its name and the l or q of the integer's
@@ -10772,8 +10781,63 @@ static int x86_operand_classes_refused(const as_instruction_t *insn, int intel_s
             for (i = 0; i < sizeof(of_both) / sizeof(of_both[0]) && !found; ++i) {
                 found = x86_name_is(mn, of_both[i], "lq");
             }
-            if (!found) {
+            if (!found && !not_of_vectors) {
                 return 1;
+            }
+            /* And one of those has a vector register or an address
+             * among its operands -- but for movq, which is a move of
+             * general registers too. */
+            if (found && mmx + xmm + wide == 0 && strcmp(mn, "movq") != 0) {
+                int in_memory = 0;
+
+                for (i = 0; i < insn->operand_count; ++i) {
+                    in_memory |= insn->operands[i].kind == AS_OPERAND_MEMORY || operand_is_bare_address(&insn->operands[i]);
+                }
+                if (!in_memory) {
+                    return 1;
+                }
+            }
+        }
+        /*
+         * The instructions of SSE3, SSSE3 and SSE4.1 that are of
+         * vectors and nothing else, and the comparisons by name: their
+         * encoders took a register's number, so `pshufb %eax, %ebx`
+         * was `pshufb %mm0, %mm3`.
+         */
+        if (general != 0) {
+            static const char *const of_vectors[] = {
+                "addsubpd", "addsubps", "blendvpd",   "blendvps", "haddpd",    "haddps",    "hsubpd",   "hsubps",
+                "lddqu",    "movddup",  "movshdup",   "movsldup", "pabsb",     "pabsd",     "pabsw",    "packusdw",
+                "pblendvb", "pcmpeqq",  "pcmpgtq",    "phaddd",   "phaddsw",   "phaddw",    "phminposuw", "phsubd",
+                "phsubsw",  "phsubw",   "pmaddubsw",  "pmaxsb",   "pmaxsd",    "pmaxud",    "pmaxuw",   "pminsb",
+                "pminsd",   "pminud",   "pminuw",     "pmovsxbd", "pmovsxbq",  "pmovsxbw",  "pmovsxdq", "pmovsxwd",
+                "pmovsxwq", "pmovzxbd", "pmovzxbq",   "pmovzxbw", "pmovzxdq",  "pmovzxwd",  "pmovzxwq", "pmuldq",
+                "pmulhrsw", "pmulld",   "pshufb",     "psignb",   "psignd",    "psignw",    "ptest",
+            };
+            size_t len = strlen(mn);
+
+            for (i = 0; i < sizeof(of_vectors) / sizeof(of_vectors[0]); ++i) {
+                if (strcmp(mn, of_vectors[i]) == 0) {
+                    return 1;
+                }
+            }
+            if (len >= 5 && strncmp(mn, "cmp", 3) == 0 &&
+                (strcmp(mn + len - 2, "sd") == 0 || strcmp(mn + len - 2, "ss") == 0 ||
+                 strcmp(mn + len - 2, "pd") == 0 || strcmp(mn + len - 2, "ps") == 0)) {
+                return 1;
+            }
+        }
+        /* Instructions with one operand in memory, always. */
+        if (insn->operand_count == 2 && rs != NULL && rd != NULL) {
+            static const char *const one_in_memory[] = {
+                "aadd",  "aand",      "aor",     "axor",   "enqcmd", "enqcmds", "invept", "invpcid",
+                "invvpid", "movbe",   "movdir64b", "movdiri", "movnti", "wrssd", "wrussd",
+            };
+
+            for (i = 0; i < sizeof(one_in_memory) / sizeof(one_in_memory[0]); ++i) {
+                if (x86_name_is(mn, one_in_memory[i], "wlq")) {
+                    return 1;
+                }
             }
         }
         if (mmx != 0 && xmm != 0 && strcmp(mn, "movq2dq") != 0 && strcmp(mn, "movdq2q") != 0 &&
