@@ -39,7 +39,7 @@ test_sections_symbols_expr_32_64.sh	--64: "failed to emit relocations" for a dat
 test_source_model_32_64.sh	the first error ends the run: a source with three bad lines gets one message, where GNU gives three (AS-T-388)
 test_testing_fuzz_perf.sh	runs test_relocations_elf_32_64.sh
 test_unit_matrix.sh	runs test_i8086_corpus.sh
-test_x86_32_corpus_intel_roundtrip.sh	stops at line 251 of the corpus, `fcoms -0x6f70(%bx,%si)`: an x87 instruction with a 16-bit address is refused (AS-T-176).  The test now leaves out the 206 lines of the corpus that GNU as 2.46 refuses, and GNU assembles the rest; its second half, the Intel source made from objdump's listing, GNU does not take either (`repz add`), and wants rewriting when the first half passes
-test_x86_64_corpus_intel_roundtrip.sh	stops at line 4750 of the corpus, `jow`: a suffix on a conditional jump is not taken (AS-T-172).  GNU as assembles the corpus; the Intel source the test then makes from objdump's listing it refuses, at the same suffixes (`jow` in Intel syntax), so the second half wants rewriting when the first passes
+test_x86_32_corpus_intel_roundtrip.sh	stops at line 251 of the corpus, `fcoms -0x6f70(%bx,%si)`: an x87 instruction with a 16-bit address is refused (AS-T-176).  GNU as 2.46 passes the test: it leaves out the 206 lines of the corpus that GNU refuses, and from the Intel source it makes of objdump's listing what objdump prints and no source says (`repz add`, `lock mov`, `jaw`)
+test_x86_64_corpus_intel_roundtrip.sh	the v1, v2 and v3 corpora pass, there and back; stops at line 7115 of the v4 corpus, `{evex} vmovhlps %xmm0,%xmm1,%xmm0`: an AVX instruction asked for in its EVEX form that the AVX-512 tables do not have (AS-T-339).  GNU as 2.46 passes the test, which leaves out of the Intel source what objdump prints and no source says (`repz add`, `jaw`)
 test_x86_avx512f_core.sh	EVEX vaddpd is encoded with W = 0 (AS-T-339)
 test_x86_avx_core.sh	vpermilps is not encoded (AS-T-327)

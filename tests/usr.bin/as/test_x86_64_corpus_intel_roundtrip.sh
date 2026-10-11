@@ -102,6 +102,44 @@ def is_skip_64bit_intel_roundtrip(inst):
     # of the reconstructed source.
     return first_mnemonic(inst) in {'jcxz', 'jecxz', 'jrcxz', 'loop', 'loope', 'loopz', 'loopne', 'loopnz'}
 
+REP = {'rep', 'repe', 'repz', 'repne', 'repnz'}
+SEGS = {'cs', 'ds', 'es', 'fs', 'gs', 'ss'}
+PREFIXES = REP | SEGS | {'lock', 'data16', 'addr32', 'bnd', 'notrack', 'xacquire', 'xrelease', '{evex}'}
+STRING = {'movs', 'cmps', 'scas', 'lods', 'stos', 'ins', 'outs', 'ret'}
+LOCKABLE = {'add', 'or', 'adc', 'sbb', 'and', 'sub', 'xor', 'inc', 'dec', 'not', 'neg',
+            'bts', 'btr', 'btc', 'xadd', 'cmpxchg', 'cmpxchg8b', 'cmpxchg16b', 'xchg'}
+JCC_W = re.compile(r'^j[a-z]+w$')
+
+def is_objdump_only(inst):
+    # What objdump prints of bytes that no source says: the corpus of
+    # opcodes is every byte sequence, and a prefix before an instruction
+    # that cannot take it is printed as if it were written.  GNU as 2.46
+    # refuses each of these ("invalid instruction `add' after `repz'",
+    # "expecting lockable instruction after `lock'", "same type of prefix
+    # used twice", "invalid instruction suffix for `jaw'"), so they are
+    # not source.
+    toks = inst.split()
+    pre = []
+    while toks and toks[0].lower() in PREFIXES:
+        pre.append(toks.pop(0).lower())
+    if not toks:
+        return False
+    mnem = toks[0].lower()
+    rest = ' '.join(toks[1:])
+    if JCC_W.match(mnem):
+        return True
+    for kind in (REP, SEGS, {'lock'}, {'data16'}, {'addr32'}):
+        if sum(1 for p in pre if p in kind) > 1:
+            return True
+    if any(p in REP for p in pre) and mnem not in STRING:
+        return True
+    if 'lock' in pre:
+        ops = rest.split(',')
+        dest_is_memory = '[' in ops[0] or (mnem == 'xchg' and '[' in rest)
+        if mnem not in LOCKABLE or not dest_is_memory:
+            return True
+    return False
+
 def rewrite_targets(inst):
     # The remaining filtering here is for disassembler artifacts and label
     # recovery, not assembler syntax gaps.
@@ -116,7 +154,8 @@ def rewrite_targets(inst):
         return '0x' + mm.group(1)
     return branch_target_re.sub(repl, inst), ok
 
-base_keep = {addr: not is_skip_64bit_intel_roundtrip(inst) for addr, inst in entries}
+base_keep = {addr: not is_skip_64bit_intel_roundtrip(inst) and not is_objdump_only(inst)
+             for addr, inst in entries}
 keep = dict(base_keep)
 changed = True
 while changed:
