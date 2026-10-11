@@ -270,7 +270,7 @@ elf_err_t elf_symbol_set_binding(elf_symbol_t *symbol, uint8_t bind) {
     if (!is_mutable_obj(symbol->obj)) {
         return ELF_ERR_STATE;
     }
-    if (bind > STB_WEAK) {
+    if (bind > STB_WEAK && bind != STB_GNU_UNIQUE) {
         return ELF_ERR_FORMAT;
     }
     symbol->bind = bind;

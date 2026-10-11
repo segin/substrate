@@ -87,6 +87,7 @@ typedef struct {
     const as_parse_result_t *parsed;
     /* What each section was declared to be; NULL where it is not known. */
     const as_section_state_t *sections;
+    const as_symtab_t *symtab; /* NULL where no object is written */
     elfobj_t *obj;
     elf_section_t *text_sec;
     elf_section_t *data_sec;
@@ -868,7 +869,7 @@ static int apply_asm_var_directive(emit_ctx_t *ctx, const as_stmt_t *st, const a
     unsigned vr;
 
     if (ctx == NULL || d == NULL || d->name == NULL ||
-        (strcmp(d->name, ".set") != 0 && strcmp(d->name, ".equ") != 0) ||
+        (strcmp(d->name, ".set") != 0 && strcmp(d->name, ".equ") != 0 && strcmp(d->name, ".equiv") != 0) ||
         d->arg_count < 2 || d->args[0] == NULL || d->args[1] == NULL) {
         return 0;
     }
@@ -15917,9 +15918,12 @@ static uint8_t map_type(as_sym_type_t type) {
         return STT_FUNC;
     case AS_SYM_TYPE_OBJECT:
     case AS_SYM_TYPE_COMMON:
+    case AS_SYM_TYPE_UNIQUE_OBJECT:
         return STT_OBJECT;
     case AS_SYM_TYPE_TLS_OBJECT:
         return STT_TLS;
+    case AS_SYM_TYPE_IFUNC:
+        return STT_GNU_IFUNC;
     default:
         return STT_NOTYPE;
     }
@@ -16121,6 +16125,8 @@ static int ensure_emit_symbol_index(emit_ctx_t *ctx) {
     return 0;
 }
 
+static const as_symbol_t *find_as_symbol_const(emit_ctx_t *ctx, const as_symtab_t *symtab, const char *name);
+
 static elf_symbol_t *ensure_emit_symbol(emit_ctx_t *ctx, const char *name) {
     elf_symbol_t *sym;
     elf_section_t *sec;
@@ -16137,7 +16143,13 @@ static elf_symbol_t *ensure_emit_symbol(emit_ctx_t *ctx, const char *name) {
     if (sec != NULL) {
         sym = elf_add_symbol(ctx->obj, name, 0, 0, STB_LOCAL, STT_SECTION);
     } else {
-        sym = elf_add_symbol(ctx->obj, name, 0, 0, STB_GLOBAL, STT_NOTYPE);
+        /* (Weak if the source said so of it, though it was not
+         * written with the source's symbols: see
+         * symbol_is_not_emitted().) */
+        const as_symbol_t *said = find_as_symbol_const(ctx, ctx->symtab, name);
+
+        sym = elf_add_symbol(ctx->obj, name, 0, 0,
+                             said != NULL && said->bind == AS_SYM_BIND_WEAK ? STB_WEAK : STB_GLOBAL, STT_NOTYPE);
     }
     if (sym == NULL) {
         return NULL;
@@ -16173,6 +16185,112 @@ static const as_symbol_t *find_as_symbol_const(emit_ctx_t *ctx, const as_symtab_
 }
 
 /*
+ * `.symver name, name@version`.
+ *
+ * A version of a symbol is a symbol whose name says so, which the
+ * linker reads: `name@version` for a version that is not the one a
+ * plain reference gets, `name@@version` for the one that is.  (This
+ * assembler had made version sections of its own instead, which are the
+ * linker's to make of these names.)  `name@@@version` is the two-at
+ * form of a symbol defined here and the one-at form of one that is not,
+ * and is the only name the symbol then has; a symbol of another file
+ * has its versioned name alone whichever way it is written.
+ *
+ * The one versioned name a symbol is written under in place of its
+ * own, to be freed; NULL if it keeps its own.
+ */
+static int symbol_is_not_emitted(emit_ctx_t *ctx, const as_symtab_t *symtab, const as_symbol_t *s);
+
+static char *symver_spelled(const char *version, size_t len, int defined) {
+    const char *three = NULL;
+    char *out = (char *)malloc(len + 1);
+    size_t i;
+
+    if (out == NULL) {
+        return NULL;
+    }
+    for (i = 0; i + 2 < len; ++i) {
+        if (version[i] == '@' && version[i + 1] == '@' && version[i + 2] == '@') {
+            three = version + i;
+            break;
+        }
+    }
+    if (three == NULL) {
+        memcpy(out, version, len);
+        out[len] = '\0';
+        return out;
+    }
+    i = (size_t)(three - version);
+    memcpy(out, version, i);
+    out[i++] = '@';
+    if (defined) {
+        out[i++] = '@';
+    }
+    memcpy(out + i, three + 3, len - (size_t)(three - version) - 3);
+    out[i + len - (size_t)(three - version) - 3] = '\0';
+    return out;
+}
+
+static char *symver_sole_name(const as_symbol_t *s) {
+    int defined = s->defined || s->is_common;
+
+    if (s->version == NULL || strchr(s->version, '\n') != NULL ||
+        (defined && strstr(s->version, "@@@") == NULL)) {
+        return NULL;
+    }
+    return symver_spelled(s->version, strlen(s->version), defined);
+}
+
+/* The versions of the symbols defined here that keep their own names
+ * too: each a symbol beside the one it is a version of, and like it.
+ * To be called when every symbol has its place. */
+static int emit_symbol_versions(emit_ctx_t *ctx, const as_symtab_t *symtab) {
+    size_t i;
+
+    for (i = 0; i < symtab->count; ++i) {
+        const as_symbol_t *s = &symtab->items[i];
+        const char *v = s->version;
+        elf_symbol_t *base;
+
+        if (v == NULL || symbol_is_not_emitted(ctx, symtab, s)) {
+            continue;
+        }
+        {
+            char *sole = symver_sole_name(s);
+
+            if (sole != NULL) {
+                free(sole);
+                continue;
+            }
+        }
+        base = find_emit_symbol(ctx, s->name);
+        if (base == NULL) {
+            continue;
+        }
+        while (*v != '\0') {
+            const char *end = strchr(v, '\n');
+            size_t len = end != NULL ? (size_t)(end - v) : strlen(v);
+            char *name = symver_spelled(v, len, 1);
+            elf_symbol_t *sym;
+
+            if (name == NULL) {
+                return -1;
+            }
+            sym = elf_add_symbol(ctx->obj, name, elf_symbol_value(base), elf_symbol_size(base), elf_symbol_bind(base),
+                                 elf_symbol_type(base));
+            free(name);
+            if (sym == NULL || elf_symbol_set_shndx(sym, elf_symbol_shndx(base)) != ELF_OK ||
+                elf_symbol_set_value(sym, elf_symbol_value(base)) != ELF_OK ||
+                elf_symbol_set_visibility(sym, elf_symbol_visibility(base)) != ELF_OK) {
+                return -1;
+            }
+            v += len + (end != NULL ? 1 : 0);
+        }
+    }
+    return 0;
+}
+
+/*
  * The symbols of the source that are not symbols of the object: a
  * compiler's .L labels; a name set to itself; and a name for a symbol
  * of another file, which is that symbol wherever it is used and has
@@ -16182,7 +16300,15 @@ static const as_symbol_t *find_as_symbol_const(emit_ctx_t *ctx, const as_symtab_
 static int symbol_is_not_emitted(emit_ctx_t *ctx, const as_symtab_t *symtab, const as_symbol_t *s) {
     const as_symbol_t *target;
 
-    if (is_local_temp_symbol_name(s->name)) {
+    /* (A .L label that is made global or weak is a symbol after all.) */
+    if (is_local_temp_symbol_name(s->name) && s->bind == AS_SYM_BIND_LOCAL) {
+        return 1;
+    }
+    /* A weak symbol that is neither here nor referred to says nothing:
+     * GNU as leaves it out.  (One that is referred to is made when the
+     * reference is.) */
+    if (s->bind == AS_SYM_BIND_WEAK && !s->defined && !s->is_common && s->alias_target == NULL &&
+        s->reference_count == 0) {
         return 1;
     }
     if (s->alias_target == NULL || s->name == NULL) {
@@ -17019,50 +17145,48 @@ static int emit_symbols(emit_ctx_t *ctx, const as_symtab_t *symtab) {
                     base_off = base_loc->off;
                 }
             }
-            if (base_sec != target_loc->sec || base_off < target_loc->off) {
-                set_err(ctx, "invalid symbolic size for %s", s->name);
+            if (base_sec != target_loc->sec) {
+                set_err(ctx, "%s:%u: the size of '%s' is the distance between two labels that are not of one section",
+                        s->def_file != NULL ? s->def_file : "<input>", s->def_line, s->name);
                 free_sym_locs(locs, loc_count);
                 free_dot_locs(dot_locs);
                 free_name_index(&loc_index);
                 return -1;
             }
-            sym_size = (unsigned long long)(base_off - target_loc->off) +
-                       (unsigned long long)s->size_addend;
+            /* (A distance that is backwards is written as it comes, as
+             * GNU as writes it; it was refused.) */
+            sym_size = (unsigned long long)((long long)base_off - (long long)target_loc->off + s->size_addend);
         }
 
-        esym = elf_add_symbol(ctx->obj, s->name, 0, sym_size, map_bind(s->bind), map_type(s->type));
+        {
+            char *versioned = symver_sole_name(s);
+
+            esym = elf_add_symbol(ctx->obj, versioned != NULL ? versioned : s->name, 0, sym_size, map_bind(s->bind),
+                                  map_type(s->type));
+            free(versioned);
+        }
         if (esym == NULL) {
             free_sym_locs(locs, loc_count);
             free_dot_locs(dot_locs);
             free_name_index(&loc_index);
             return -1;
         }
-        if (elf_symbol_set_visibility(esym, map_vis(s->visibility)) != ELF_OK) {
+        /* (An indirect function and a unique object are GNU's, and an
+         * object that has one says it is of that ABI, or a reader does
+         * not know what the numbers mean.) */
+        if ((s->type == AS_SYM_TYPE_UNIQUE_OBJECT || s->type == AS_SYM_TYPE_IFUNC) &&
+            elf_set_osabi(ctx->obj, ELFOSABI_LINUX) != ELF_OK) {
             free_sym_locs(locs, loc_count);
             free_dot_locs(dot_locs);
             free_name_index(&loc_index);
             return -1;
         }
-        if (s->version != NULL) {
-            const char *ver = s->version;
-            const char *at = strrchr(ver, '@');
-            int is_default = 0;
-            const char *ver_name = NULL;
-
-            if (at != NULL && at > ver && at[1] != '\0') {
-                if (at > ver && at[-1] == '@') {
-                    is_default = 1;
-                }
-                ver_name = at + 1;
-            }
-            if (ver_name == NULL ||
-                elf_symbol_set_version_name(esym, ver_name, is_default) != ELF_OK) {
-                set_err(ctx, "invalid .symver mapping for %s", s->name ? s->name : "<anon>");
-                free_sym_locs(locs, loc_count);
-                free_dot_locs(dot_locs);
-                free_name_index(&loc_index);
-                return -1;
-            }
+        if (elf_symbol_set_visibility(esym, map_vis(s->visibility)) != ELF_OK ||
+            (s->type == AS_SYM_TYPE_UNIQUE_OBJECT && elf_symbol_set_binding(esym, STB_GNU_UNIQUE) != ELF_OK)) {
+            free_sym_locs(locs, loc_count);
+            free_dot_locs(dot_locs);
+            free_name_index(&loc_index);
+            return -1;
         }
         if (append_emit_symbol(ctx, s->name, esym) != 0) {
             free_sym_locs(locs, loc_count);
@@ -17144,8 +17268,14 @@ static int emit_symbols(emit_ctx_t *ctx, const as_symtab_t *symtab) {
                 if ((elf_section_flags(loc->sec) & SHF_TLS) != 0) {
                     (void)elf_symbol_set_type(esym, STT_TLS);
                 }
-            } else if (ctx->text_sec != NULL && elf_symbol_define(esym, ctx->text_sec, 0) != ELF_OK) {
+            } else {
+                /* Defined, and nowhere: it was put at the start of
+                 * .text, where it was not.  There is no such symbol
+                 * that this assembler should make. */
+                set_err(ctx, "%s:%u: internal error: the symbol '%s' is defined and has no place",
+                        s->def_file != NULL ? s->def_file : "<input>", s->def_line, s->name != NULL ? s->name : "");
                 free_sym_locs(locs, loc_count);
+                free_dot_locs(dot_locs);
                 free_name_index(&loc_index);
                 return -1;
             }
@@ -17291,7 +17421,7 @@ static int emit_symbols(emit_ctx_t *ctx, const as_symtab_t *symtab) {
     free_sym_locs(locs, loc_count);
     free_dot_locs(dot_locs);
     free_name_index(&loc_index);
-    return 0;
+    return emit_symbol_versions(ctx, symtab);
 }
 
 /*
@@ -20659,6 +20789,7 @@ int as_elf_emit_file(const as_parse_result_t *parsed,
     }
 
     ctx.sections = sections;
+    ctx.symtab = symtab;
     cls = cfg->is_64 ? ELFOBJ_CLASS_64 : ELFOBJ_CLASS_32;
     ctx.obj = elf_create(ET_REL, (uint16_t)cfg->machine, cls, ELFOBJ_ENDIAN_LE);
     if (ctx.obj == NULL) {

@@ -353,6 +353,54 @@ above it names, reserve storage in
 for a local symbol; any other
 .Cm .comm
 is a common symbol for the linker to place.
+.Pp
+A symbol set by
+.Cm .set ,
+.Cm .equ
+or
+.Ql =
+to what is no number is another name for it: another symbol and a
+number, the place of the directive
+.Pq Ql \&. ,
+or the distance between two labels of one section.
+It may be set again; a label may take its name; but a name that is a
+label may not be set, and
+.Cm .equiv
+sets a name once, that nothing has set.
+Names that come round to themselves are an error.
+.Cm .type
+takes
+.Ql @function ,
+.Ql @object ,
+.Ql @tls_object ,
+.Ql @common ,
+.Ql @notype ,
+.Ql @gnu_indirect_function
+and
+.Ql @gnu_unique_object ,
+with
+.Ql %
+for
+.Ql @ ,
+in quotes, or as
+.Ql STT_FUNC
+and its fellows; any other name is an error.
+The size
+.Cm .size
+gives is a number or the distance between two labels.
+A symbol the source names and does not define is global, whatever
+.Cm .local
+says of it.
+.Cm .symver Ar name , Ar name Ns @ Ns Ar version
+makes a symbol of that name beside
+.Ar name
+.Po
+.Ql @@
+for the version a plain reference gets,
+.Ql @@@
+for the only name the symbol is to have
+.Pc ,
+which the linker reads.
 .It Conditionals and macros
 .Cm .if/.ifdef/.ifndef/.else/.endif , .macro/.endm , .rept/.endr , .irp/.irpc
 .It Debug/CFI

@@ -14,6 +14,11 @@ typedef struct {
     size_t errbuf_sz;
 } sym_ctx_t;
 
+/* What handle_directive() returns when it has said what is wrong. */
+#define SYM_SAID (-3)
+
+static void set_err(sym_ctx_t *ctx, const char *fmt, ...);
+
 static size_t hash_name(const char *name) {
     size_t h;
     size_t prime;
@@ -370,17 +375,14 @@ static int parse_size_arg(const char *expr, const char *sym_name, as_symbol_t *s
         sym->size_anchor_file = xstrdup(file);
         sym->size_anchor_line = line;
         rc = (sym->size_target_symbol != NULL && sym->size_anchor_file != NULL) ? 0 : -1;
-    } else if (lin.sub_symbol != NULL && strcmp(lin.sub_symbol, sym_name) == 0) {
-        /* `end - sym`. */
+    } else if (lin.sub_symbol != NULL) {
+        /* `end - start`: the distance between two labels, whichever
+         * they are.  (A symbol alone is no size, and was taken for the
+         * end of what was being sized: `.size f, e` is refused, as GNU
+         * as refuses it.) */
         sym->size = 0;
         sym->size_base_symbol = xstrdup(lin.add_symbol);
         sym->size_target_symbol = xstrdup(lin.sub_symbol);
-        rc = (sym->size_base_symbol != NULL && sym->size_target_symbol != NULL) ? 0 : -1;
-    } else if (lin.sub_symbol == NULL && strcmp(lin.add_symbol, ".") != 0) {
-        /* A lone symbol is taken for the end, as it has been. */
-        sym->size = 0;
-        sym->size_base_symbol = xstrdup(lin.add_symbol);
-        sym->size_target_symbol = xstrdup(sym_name);
         rc = (sym->size_base_symbol != NULL && sym->size_target_symbol != NULL) ? 0 : -1;
     }
 
@@ -426,34 +428,58 @@ static int apply_visibility(sym_ctx_t *ctx, const as_directive_t *d, as_sym_visi
     return 0;
 }
 
-static as_sym_type_t parse_type_name(const char *raw) {
-    char *tmp;
+/*
+ * The type a `.type` names, in the spellings GNU as takes: `@function`,
+ * `%function`, `"function"`, and `STT_FUNC` bare.  0, or -1 for a name
+ * that is none of them -- which was taken for no type at all, and said
+ * nothing.
+ */
+static int parse_type_name(const char *raw, as_sym_type_t *out) {
+    static const struct {
+        const char *word; /* after @ or %, or in quotes */
+        const char *stt;  /* bare */
+        as_sym_type_t type;
+    } types[] = {
+        {"function", "STT_FUNC", AS_SYM_TYPE_FUNCTION},
+        {"object", "STT_OBJECT", AS_SYM_TYPE_OBJECT},
+        {"tls_object", "STT_TLS", AS_SYM_TYPE_TLS_OBJECT},
+        {"common", "STT_COMMON", AS_SYM_TYPE_COMMON},
+        {"notype", "STT_NOTYPE", AS_SYM_TYPE_NOTYPE},
+        {"gnu_indirect_function", "STT_GNU_IFUNC", AS_SYM_TYPE_IFUNC},
+        {"gnu_unique_object", NULL, AS_SYM_TYPE_UNIQUE_OBJECT},
+    };
+    char *tmp = trim_copy(raw);
     char *s;
-    as_sym_type_t t = AS_SYM_TYPE_NOTYPE;
+    size_t n;
+    size_t i;
+    int marked = 0;
+    int rc = -1;
 
-    tmp = trim_copy(raw);
     if (tmp == NULL) {
-        return AS_SYM_TYPE_NOTYPE;
+        return -1;
     }
     s = tmp;
-    while (*s == '@' || *s == '%' || *s == '#') {
+    n = strlen(s);
+    if (*s == '@' || *s == '%') {
         s++;
+        marked = 1;
+    } else if (n >= 2 && s[0] == '"' && s[n - 1] == '"') {
+        s[n - 1] = '\0';
+        s++;
+        marked = 1;
     }
-
-    if (strcmp(s, "function") == 0 || strcmp(s, "func") == 0 || strcmp(s, "STT_FUNC") == 0) {
-        t = AS_SYM_TYPE_FUNCTION;
-    } else if (strcmp(s, "object") == 0 || strcmp(s, "STT_OBJECT") == 0) {
-        t = AS_SYM_TYPE_OBJECT;
-    } else if (strcmp(s, "tls_object") == 0 || strcmp(s, "STT_TLS") == 0) {
-        t = AS_SYM_TYPE_TLS_OBJECT;
-    } else if (strcmp(s, "common") == 0) {
-        t = AS_SYM_TYPE_COMMON;
-    } else if (strcmp(s, "notype") == 0 || strcmp(s, "STT_NOTYPE") == 0) {
-        t = AS_SYM_TYPE_NOTYPE;
+    /* (A word in quotes comes here without them, so a bare word is
+     * taken as one that had them.) */
+    (void)marked;
+    for (i = 0; i < sizeof(types) / sizeof(types[0]); ++i) {
+        if (strcmp(s, types[i].word) == 0 || (types[i].stt != NULL && strcmp(s, types[i].stt) == 0)) {
+            *out = types[i].type;
+            rc = 0;
+            break;
+        }
     }
-
     free(tmp);
-    return t;
+    return rc;
 }
 
 static int handle_directive(sym_ctx_t *ctx, const as_stmt_t *st) {
@@ -589,7 +615,12 @@ static int handle_directive(sym_ctx_t *ctx, const as_stmt_t *st) {
             free(type);
             return -1;
         }
-        sym->type = parse_type_name(type);
+        if (parse_type_name(type, &sym->type) != 0) {
+            set_err(ctx, "%s:%u: .type: '%s' is not a type of symbol", st->file != NULL ? st->file : "<input>",
+                    st->line, type);
+            free(type);
+            return SYM_SAID;
+        }
         free(type);
         return 0;
     }
@@ -641,9 +672,10 @@ static int handle_directive(sym_ctx_t *ctx, const as_stmt_t *st) {
         return 0;
     }
 
-    if (strcmp(d->name, ".set") == 0 || strcmp(d->name, ".equ") == 0) {
+    if (strcmp(d->name, ".set") == 0 || strcmp(d->name, ".equ") == 0 || strcmp(d->name, ".equiv") == 0) {
         char *name;
         as_symbol_t *sym;
+        int is_equiv = strcmp(d->name, ".equiv") == 0;
         int rc;
 
         if (d->arg_count < 2) {
@@ -654,10 +686,26 @@ static int handle_directive(sym_ctx_t *ctx, const as_stmt_t *st) {
             return -1;
         }
         sym = get_or_create_symbol(ctx, name);
-        free(name);
         if (sym == NULL) {
+            free(name);
             return -1;
         }
+        /*
+         * A name may be set again and again; but not one that is a
+         * label, and not one `.equiv` set, which says it is set once --
+         * and `.equiv` itself not for a name that is anything yet.
+         * Each was taken, and whichever came last was what the name
+         * was.
+         */
+        if (sym->defined && (!sym->defined_by_set || sym->defined_by_equiv || is_equiv)) {
+            set_err(ctx, "%s:%u: symbol `%s' is already defined", st->file != NULL ? st->file : "<input>", st->line,
+                    name);
+            free(name);
+            return SYM_SAID;
+        }
+        free(name);
+        sym->defined_by_set = 1;
+        sym->defined_by_equiv = is_equiv;
 
         free(sym->alias_target);
         sym->alias_target = NULL;
@@ -716,7 +764,23 @@ static int handle_directive(sym_ctx_t *ctx, const as_stmt_t *st) {
             free(ver);
             return -1;
         }
-        free(sym->version);
+        /* Each `.symver` of a name is another version of it: they are
+         * kept one to a line. */
+        if (sym->version != NULL) {
+            size_t have = strlen(sym->version);
+            size_t add = strlen(ver);
+            char *all = (char *)realloc(sym->version, have + 1 + add + 1);
+
+            if (all == NULL) {
+                free(ver);
+                return -1;
+            }
+            all[have] = '\n';
+            memcpy(all + have + 1, ver, add + 1);
+            sym->version = all;
+            free(ver);
+            return 0;
+        }
         sym->version = ver;
         return 0;
     }
@@ -837,8 +901,25 @@ int as_symtab_build(const as_parse_result_t *parsed, as_symtab_t *tab,
                 return -1;
             }
             rc = symbol_set_definition(sym, l->file, l->line);
+            if (rc == 1 && sym->defined_by_set && !sym->defined_by_equiv) {
+                /* A label for a name that was set is the label, as
+                 * with GNU as: the name had only been lent a value. */
+                free(sym->alias_target);
+                sym->alias_target = NULL;
+                free(sym->alias_minus);
+                sym->alias_minus = NULL;
+                sym->alias_from_dot = 0;
+                sym->alias_addend = 0;
+                sym->is_absolute = 0;
+                sym->absolute_value = 0;
+                sym->defined_by_set = 0;
+                free(sym->def_file);
+                sym->def_file = xstrdup(l->file);
+                sym->def_line = l->line;
+                rc = sym->def_file != NULL || l->file == NULL ? 0 : -1;
+            }
             if (rc == 1) {
-                set_err(&ctx, "%s:%u: redefinition of symbol %s", l->file, l->line, l->name);
+                set_err(&ctx, "%s:%u: symbol `%s' is already defined", l->file, l->line, l->name);
                 return -1;
             }
             if (rc != 0) {
@@ -848,7 +929,12 @@ int as_symtab_build(const as_parse_result_t *parsed, as_symtab_t *tab,
         }
 
         if (st->kind == AS_STMT_DIRECTIVE) {
-            if (handle_directive(&ctx, st) != 0) {
+            int hrc = handle_directive(&ctx, st);
+
+            if (hrc == SYM_SAID) {
+                return -1;
+            }
+            if (hrc != 0) {
                 set_err(&ctx, "%s:%u: malformed directive %s", st->file, st->line, st->u.directive.name);
                 return -1;
             }
@@ -863,14 +949,41 @@ int as_symtab_build(const as_parse_result_t *parsed, as_symtab_t *tab,
                 set_err(&ctx, "%s:%u: out of memory", st->file, st->line);
                 return -1;
             }
+        } else if (st->kind == AS_STMT_DIRECTIVE && st->u.directive.name != NULL) {
+            /* What a data directive names is referred to as well. */
+            static const char *const data[] = {".byte", ".word", ".short", ".hword", ".2byte", ".long",
+                                               ".int",  ".4byte", ".quad", ".8byte", ".uleb128", ".sleb128"};
+            const as_directive_t *d = &st->u.directive;
+            size_t k;
+            size_t j;
+
+            for (k = 0; k < sizeof(data) / sizeof(data[0]) && strcmp(d->name, data[k]) != 0; ++k) {
+            }
+            for (j = 0; k < sizeof(data) / sizeof(data[0]) && j < d->arg_count; ++j) {
+                as_expr_t *e = d->args[j] != NULL ? as_parse_expr_string(d->args[j], st->file, st->line) : NULL;
+                int rc = e != NULL ? visit_expr_ref(&ctx, e, st->file, st->line) : 0;
+
+                as_expr_free(e);
+                if (rc != 0) {
+                    set_err(&ctx, "%s:%u: out of memory", st->file, st->line);
+                    return -1;
+                }
+            }
         }
     }
 
     for (i = 0; i < tab->count; ++i) {
         as_symbol_t *sym = &tab->items[i];
         sym->unresolved = (!sym->defined && !sym->is_common && sym->reference_count > 0) ? 1 : 0;
-        if (sym->unresolved && sym->bind == AS_SYM_BIND_LOCAL && !is_local_temp_symbol_name(sym->name)) {
-            /* GAS-compatible default: unresolved non-temporary symbols are extern/global. */
+        /*
+         * What this source does not define is another file's, and is
+         * global: referred to, or only named by `.type`, `.size`,
+         * `.hidden` and the like -- and by `.local`, which cannot make
+         * local what is not here.  Such a symbol was written local and
+         * undefined, which no linker has a meaning for.
+         */
+        if (!sym->defined && !sym->is_common && sym->alias_target == NULL && sym->bind == AS_SYM_BIND_LOCAL &&
+            !is_local_temp_symbol_name(sym->name)) {
             sym->bind = AS_SYM_BIND_GLOBAL;
         }
     }

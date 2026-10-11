@@ -268,6 +268,9 @@ typedef enum {
 #define STB_LOCAL 0
 #define STB_GLOBAL 1
 #define STB_WEAK 2
+#ifndef STB_GNU_UNIQUE
+#define STB_GNU_UNIQUE 10
+#endif
 #endif
 
 #ifndef STT_NOTYPE

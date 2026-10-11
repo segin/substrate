@@ -21,6 +21,8 @@ typedef enum {
     AS_SYM_TYPE_OBJECT,
     AS_SYM_TYPE_TLS_OBJECT,
     AS_SYM_TYPE_COMMON,
+    AS_SYM_TYPE_IFUNC,         /* @gnu_indirect_function */
+    AS_SYM_TYPE_UNIQUE_OBJECT, /* @gnu_unique_object: an object, bound STB_GNU_UNIQUE */
 } as_sym_type_t;
 
 typedef enum {
@@ -36,6 +38,10 @@ typedef struct {
     as_sym_type_t type;
     as_sym_visibility_t visibility;
     int defined;
+    /* Defined by `.set`, `.equ`, `=` or `.equiv` and not by a label;
+     * and by `.equiv`, which may not be undone. */
+    int defined_by_set;
+    int defined_by_equiv;
     unsigned def_line;
     char *def_file;
     int is_common;

@@ -918,19 +918,20 @@ one table of templates; there is one ModRM/SIB/prefix emitter.
 - [x] **AS-T-266** When a symbol is made an alias of a function or object by `.set` or `=`, the assembler shall give it the target's type.
   Trace: AS-SYM-002, AS-OBJ-011.  Verify: T — against `readelf -s` of GNU's object.
   Done (see 261): the type, and the size where nothing is added to the target; GNU's symbol tables.
-- [ ] **AS-T-267** If the expression of `.size` is not a constant or a difference of symbols of one section plus a constant, then the assembler shall fail.
+- [x] **AS-T-267** If the expression of `.size` is not a constant or a difference of symbols of one section plus a constant, then the assembler shall fail.
   Trace: AS-SYM-003.  Verify: T — `.size f, e` and `.size f, e-g` with g in another section are refused; `.size f, e-g` in one section is the difference (today 3 for 2); the lone-symbol reading is kept only for a symbol set by `. - f`.  After: 220.
-- [ ] **AS-T-268** When `.type` names `@gnu_indirect_function`, `@gnu_unique_object`, `@tls_object`, `@common`, `@notype`, `@function` or `@object`, in any of the spellings GNU accepts (`@`, `%`, quoted, `STT_*`), the assembler shall give the symbol that type.
+  Done, ahead of 220, with 268 to 273, 276 and 279: `test_symbol_directives.sh`, 57 cases whose symbol tables are GNU's and which GNU passes.  **267**: a size is a number or the distance between two labels of one section, whichever two; a symbol alone is refused, and one set by `. - f` is what it stands for (261).  **268, 269**: `.type` knows the seven types in the four spellings and refuses any other name, which it had taken for no type; an indirect function or a unique object marks the object as of the GNU ABI, as GNU as does, and the object library takes the unique binding.  **270**: what the source names and does not define is global, whatever names it (`.type`, `.size`, `.hidden`, `.local`), where it had been local and undefined; a weak one that nothing refers to is left out, and one that only data refers to is weak (a reference from a data directive is now counted as one).  **271**: `.globl .Lx` and `.weak .Lx` make the symbol.  **272**: a name set again has the value in force at each use and the last in the symbol table.  **273**, by GNU's verdicts: a label may take a name that was set; a name that is a label may not be set, nor one `.equiv` set, nor may `.equiv` set what is anything yet -- each had been taken, and `.equiv` was no symbol at all.  **276**: a version is a symbol named `name@version` or `name@@version` beside the one it is of, `name@@@version` the only name, and a symbol of another file has its versioned name alone; this had made version sections of its own, which are the linker's.  A shared library linked from such an object with a version script has both versions.  `test_symver_elf` held the old sections and is gone.  **279**: a symbol that is defined and has no place is an internal error, where it had been put at the start of `.text`; nothing in the suite or the corpora meets it.
+- [x] **AS-T-268** When `.type` names `@gnu_indirect_function`, `@gnu_unique_object`, `@tls_object`, `@common`, `@notype`, `@function` or `@object`, in any of the spellings GNU accepts (`@`, `%`, quoted, `STT_*`), the assembler shall give the symbol that type.
   Trace: AS-SYM-004, AS-OBJ-011.  Verify: T — each.
-- [ ] **AS-T-269** If `.type` names a type that is not known, then the assembler shall fail.
+- [x] **AS-T-269** If `.type` names a type that is not known, then the assembler shall fail.
   Trace: AS-SYM-004.  Verify: T.
-- [ ] **AS-T-270** When a symbol is named only by `.type`, `.size`, `.hidden`, `.weak` or the like and is never defined, the assembler shall emit it as an undefined global or weak symbol, or not at all where GNU emits none.
+- [x] **AS-T-270** When a symbol is named only by `.type`, `.size`, `.hidden`, `.weak` or the like and is never defined, the assembler shall emit it as an undefined global or weak symbol, or not at all where GNU emits none.
   Trace: AS-SYM-005.  Verify: T — no object of the suite holds a local undefined symbol; each case against GNU.
-- [ ] **AS-T-271** When `.globl` or `.weak` names a symbol whose name begins `.L`, the assembler shall emit the symbol.
+- [x] **AS-T-271** When `.globl` or `.weak` names a symbol whose name begins `.L`, the assembler shall emit the symbol.
   Trace: AS-SYM-005.  Verify: T.
-- [ ] **AS-T-272** When a symbol is assigned by `=` or `.set` more than once, the assembler shall give each use the value in force at that point and emit the last.
+- [x] **AS-T-272** When a symbol is assigned by `=` or `.set` more than once, the assembler shall give each use the value in force at that point and emit the last.
   Trace: AS-SYM-005.  Verify: T — `x = 6` / `.long x` / `x = x + 1` / `.long x` is 6, 7 and `x` is 7 in the symbol table.
-- [ ] **AS-T-273** If a label is defined for a name already assigned by `.set`, or `.equiv` names a symbol already defined, then the assembler shall fail; a `.set` of a name after its label shall fail likewise.
+- [x] **AS-T-273** If a label is defined for a name already assigned by `.set`, or `.equiv` names a symbol already defined, then the assembler shall fail; a `.set` of a name after its label shall fail likewise.
   Trace: AS-SYM-005.  Verify: T — each against GNU's verdict.
 - [x] **AS-T-274** When `.comm name, size, align` is assembled, the assembler shall emit a common symbol with `st_size` the size and `st_value` the alignment.
   Trace: AS-OBJ-005.  Verify: T — `.comm bufa,64,32`; the default alignment; D — two objects with one `.comm` each link to one `.bss` object.
@@ -938,7 +939,7 @@ one table of templates; there is one ModRM/SIB/prefix emitter.
 - [x] **AS-T-275** When `.lcomm` is assembled, or `.comm` for a symbol declared `.local`, the assembler shall allocate the symbol in `.bss` as a local with its size and alignment.
   Trace: AS-OBJ-005.  Verify: T — against GNU; D — a linked program has distinct addresses for two such symbols.
   Done.  `.lcomm` was a local symbol of the section COMMON, which no linker places, and `.local x` with `.comm x` was a global common symbol -- which is how a C compiler writes `static int x;`, so two files with a static of one name had one variable.  Both are storage now, made of ordinary statements before anything else sees the source (`lower_local_commons` in `as_lower.c`): a label in subsection 1 of `.bss`, behind what the source puts in `.bss` itself, aligned, with `.zero` of the size, and `.type` and `.size` where the directive stood.  The places are GNU's: a `.lcomm` has the alignment of its size up to 8, a local `.comm` the one it names or none.  A `.local` after the `.comm` leaves the symbol common, a third argument to `.lcomm` is refused, a negative size is warned of and passed over, all as GNU.  `test_local_common.sh`, 43 cases that GNU passes, the last of which links two such objects and runs them.  A section whose only subsection has a number other than 0 was refused, and is taken.  Not GNU's: a reference to such a symbol is relocated against the symbol, where GNU names `.bss` (as for every label that is not a `.L` one).  274 is as it was: a global `.comm` still has its size in `st_value` and no `st_size`.
-- [ ] **AS-T-276** When `.symver` is assembled, the assembler shall emit the versioned symbol in the three forms `name@ver`, `name@@ver` and `name@@@ver`.
+- [x] **AS-T-276** When `.symver` is assembled, the assembler shall emit the versioned symbol in the three forms `name@ver`, `name@@ver` and `name@@@ver`.
   Trace: AS-OBJ-011.  Verify: T — against `readelf -s` of GNU's object; D — a shared library built with a version script exports the versions.
 - [x] **AS-T-277** When `.file "name"` is assembled, the assembler shall emit an `STT_FILE` symbol of that name first in the symbol table.
   Trace: AS-OBJ-011.  Verify: T.
@@ -946,7 +947,7 @@ one table of templates; there is one ModRM/SIB/prefix emitter.
 - [x] **AS-T-278** When `.ident "text"` is assembled, the assembler shall append the text to `.comment`.
   Trace: AS-OBJ-011.  Verify: T.
   Done: `.comment` is a section of strings to merge that begins with an empty one, and each `.ident` is a string in it, its escapes worked out; GNU's bytes.  `test_object_basics.sh`.
-- [ ] **AS-T-279** If a symbol is defined but has no recorded section and offset, then the assembler shall fail as an internal error.
+- [x] **AS-T-279** If a symbol is defined but has no recorded section and offset, then the assembler shall fail as an internal error.
   Trace: AS-OBJ-011.  Verify: I — the fallback to `.text+0` is gone.
 - [ ] **AS-T-280** Every path of the symbol writer shall free what it allocated and check each result it is given.
   Trace: AS-OBJ-021, AS-ROB-001.  Verify: T — LeakSanitizer over the failing cases; I — the ignored result of `elf_symbol_define`, the count before the allocation check in `as_symtab.c` and the unchecked multiplication in `as_sections.c` are mended.
@@ -1268,5 +1269,5 @@ is not to be done, 370 is ticked with "removed" and the rest struck.
 | AS-EXT-009 | 185, 325, 332–337 |
 | AS-EXT-010 | 040, 171, 338, 339 (339 closes all of AS-EXT) |
 
-351 tasks: 243 done, 108 open.  Numbers run to 400, with gaps left between
+351 tasks: 252 done, 99 open.  Numbers run to 400, with gaps left between
 sections for tasks found along the way.
