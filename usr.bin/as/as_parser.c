@@ -874,6 +874,20 @@ static int parse_att_memory(parse_ctx_t *ctx, const as_token_t *tokv, size_t n, 
         }
     }
 
+    /*
+     * What is in the parentheses is a base, an index and a scale and no
+     * more, and after them nothing but a decoration in braces.  A fourth
+     * part was dropped and what followed the parenthesis was not read:
+     * `movl (%eax)junk, %ebx` and `movl (%eax,%ebx,2,junk), %ecx` were
+     * assembled.
+     */
+    if ((size_t)(rparen + 1) < n && tokv[rparen + 1].text != NULL && tokv[rparen + 1].text[0] != '{') {
+        set_err(ctx, "%s:%u: '%s' after the ) of a memory operand", tokv[0].file != NULL ? tokv[0].file : "<input>",
+                tokv[0].line, tokv[rparen + 1].text);
+        free(mem.segment_reg);
+        as_expr_free(mem.disp);
+        return -1;
+    }
     comp_starts[0] = lparen + 1;
     for (i = lparen + 1; i < rparen; ++i) {
         if (tokv[i].kind == AS_TOK_PUNCT && strcmp(tokv[i].text, ",") == 0) {
@@ -881,6 +895,13 @@ static int parse_att_memory(parse_ctx_t *ctx, const as_token_t *tokv, size_t n, 
                 comp_ends[comp_count] = i;
                 comp_count++;
                 comp_starts[comp_count] = i + 1;
+            }
+            if (comp_count == 3) {
+                set_err(ctx, "%s:%u: a memory operand is a base, an index and a scale, and this has more",
+                        tokv[0].file != NULL ? tokv[0].file : "<input>", tokv[0].line);
+                free(mem.segment_reg);
+                as_expr_free(mem.disp);
+                return -1;
             }
         }
     }
@@ -890,9 +911,7 @@ static int parse_att_memory(parse_ctx_t *ctx, const as_token_t *tokv, size_t n, 
     }
 
     if (comp_count >= 1 && comp_ends[0] > comp_starts[0]) {
-        if (tokv[comp_starts[0]].text != NULL && streq_ci(tokv[comp_starts[0]].text, "bad")) {
-            mem.base_reg = xstrdup("eax");
-        } else if (strcmp(tokv[comp_starts[0]].text, "%") == 0 && comp_starts[0] + 1 < comp_ends[0]) {
+        if (strcmp(tokv[comp_starts[0]].text, "%") == 0 && comp_starts[0] + 1 < comp_ends[0]) {
             mem.base_reg = strip_register_prefix(tokv[comp_starts[0] + 1].text);
         } else if (tokv[comp_starts[0]].kind == AS_TOK_REGISTER ||
                    is_x86_register_text(tokv[comp_starts[0]].text) ||
@@ -911,19 +930,42 @@ static int parse_att_memory(parse_ctx_t *ctx, const as_token_t *tokv, size_t n, 
                 return -1;
             }
         } else {
-            mem.base_reg = strip_register_prefix(tokv[comp_starts[0]].text);
+            /* A name where the base is to be: it was taken for the
+             * register of that name, and one name in particular for
+             * %eax. */
+            set_err(ctx, "%s:%u: the base of a memory operand, '%s', is not a register",
+                    tokv[0].file != NULL ? tokv[0].file : "<input>", tokv[0].line, tokv[comp_starts[0]].text);
+            free(mem.segment_reg);
+            as_expr_free(mem.disp);
+            return -1;
         }
     }
     if (comp_count >= 2 && comp_ends[1] > comp_starts[1]) {
         if (strcmp(tokv[comp_starts[1]].text, "%") == 0 && comp_starts[1] + 1 < comp_ends[1]) {
             mem.index_reg = strip_register_prefix(tokv[comp_starts[1] + 1].text);
-        } else {
+        } else if (tokv[comp_starts[1]].kind == AS_TOK_REGISTER || is_x86_register_text(tokv[comp_starts[1]].text) ||
+                   is_arm_register_text(tokv[comp_starts[1]].text)) {
             mem.index_reg = strip_register_prefix(tokv[comp_starts[1]].text);
+        } else {
+            set_err(ctx, "%s:%u: the index of a memory operand, '%s', is not a register",
+                    tokv[0].file != NULL ? tokv[0].file : "<input>", tokv[0].line, tokv[comp_starts[1]].text);
+            free(mem.base_reg);
+            free(mem.segment_reg);
+            as_expr_free(mem.disp);
+            return -1;
         }
     }
     if (comp_count >= 3 && comp_ends[2] > comp_starts[2]) {
         as_expr_t *sc = parse_expression_from_tokens(ctx, tokv + comp_starts[2], (size_t)(comp_ends[2] - comp_starts[2]));
-        if (sc == NULL || sc->kind != AS_EXPR_CONST) {
+        /* 1, 2, 4 or 8, whatever the instruction: the encoders each
+         * checked, or did not -- `addps (%eax,%ebx,3), %xmm0` was
+         * assembled with a scale of 1. */
+        if (sc == NULL || sc->kind != AS_EXPR_CONST ||
+            (parse_is_x86 && sc->value != 1 && sc->value != 2 && sc->value != 4 && sc->value != 8)) {
+            if (sc != NULL && sc->kind == AS_EXPR_CONST) {
+                set_err(ctx, "%s:%u: a scale is 1, 2, 4 or 8, and this is %lld",
+                        tokv[0].file != NULL ? tokv[0].file : "<input>", tokv[0].line, (long long)sc->value);
+            }
             as_expr_free(sc);
             free(mem.base_reg);
             free(mem.index_reg);
@@ -1676,6 +1718,11 @@ static int parse_operand_slice(parse_ctx_t *ctx, const as_token_t *tokv, size_t 
     if (has_lparen && parse_att_memory(ctx, tokv, n, op) == 0) {
         return 0;
     }
+    /* What it said is wrong with the operand is wrong with it, read
+     * another way or not. */
+    if (has_lparen && ctx != NULL && ctx->errbuf != NULL && ctx->errbuf[0] != '\0') {
+        return -1;
+    }
     if (has_lbr) {
         if (parse_intel_memory(ctx, tokv, n, op) == 0) {
             return 0;
@@ -2170,6 +2217,7 @@ static int parse_instruction(parse_ctx_t *ctx, const as_token_t *tokv, size_t n,
     as_instruction_t in;
     size_t i;
     size_t start;
+    size_t first_operand;
     int depth = 0;
 
     memset(&in, 0, sizeof(in));
@@ -2283,6 +2331,7 @@ static int parse_instruction(parse_ctx_t *ctx, const as_token_t *tokv, size_t n,
     }
 
     start = i;
+    first_operand = i;
     while (i <= n) {
         int at_end = (i == n);
         int at_sep = 0;
@@ -2301,6 +2350,18 @@ static int parse_instruction(parse_ctx_t *ctx, const as_token_t *tokv, size_t n,
         }
 
         if (at_end || at_sep) {
+            /* Nothing where an operand is to be -- between two commas,
+             * before the first or after the last -- was passed over, and
+             * `movl $1,,%eax` assembled as if the comma were not there. */
+            if (i == start && (at_sep || start != first_operand) && ctx->cfg != NULL &&
+                ctx->cfg->arch == AS_PARSER_ARCH_X86) {
+                set_err(ctx, "%s:%u: '%s' has an empty operand", tokv[0].file != NULL ? tokv[0].file : "<input>",
+                        tokv[0].line, in.mnemonic != NULL ? in.mnemonic : "");
+                free(in.mnemonic);
+                free(in.arm_condition);
+                free(in.segment_override);
+                return -1;
+            }
             if (i > start) {
                 as_operand_t op;
                 x86_operand_decorators_t decor;
@@ -2631,32 +2692,249 @@ static void resolve_local_in_expr(parse_ctx_t *ctx, as_expr_t *e) {
     resolve_local_in_expr(ctx, e->rhs);
 }
 
+/*
+ * A numeric label has a name as well.
+ *
+ * `1:` may be written many times, and `1b` and `1f` mean the nearest
+ * before and after.  The branches to them are found by line, which is
+ * how the object writer has always done it.  But a numeric label is
+ * also used as an address -- `pushl $1f`, `movl 1b(%ebx), %eax`, `.long
+ * 1b` -- and there it was nothing: a zero in the instruction and no
+ * relocation, or in a data directive a relocation against a symbol
+ * called "1b" that nothing defines.  So each definition is given a name
+ * of its own beside its number, a compiler's kind of local label, and a
+ * reference that is not the target of a branch is made a reference to
+ * that name, which the rest of the assembler treats as it treats any
+ * such label.
+ */
+static void local_label_name(char *buf, size_t buf_sz, int digit, unsigned line) {
+    snprintf(buf, buf_sz, ".Lnum.%d.%u", digit, line);
+}
+
+static int name_local_refs(as_expr_t *e) {
+    char name[48];
+
+    if (e == NULL) {
+        return 0;
+    }
+    if (e->kind == AS_EXPR_LOCAL_REF && e->local_resolved) {
+        char *copy;
+
+        local_label_name(name, sizeof(name), e->local_digit, e->local_target_line);
+        copy = xstrdup(name);
+        if (copy == NULL) {
+            return -1;
+        }
+        e->kind = AS_EXPR_SYMBOL;
+        e->symbol = copy;
+        return 0;
+    }
+    return name_local_refs(e->lhs) != 0 || name_local_refs(e->rhs) != 0 ? -1 : 0;
+}
+
+/* Whether a statement is a branch whose operand is where it goes: the
+ * one place a numeric label is a distance and not an address. */
+static int instruction_is_direct_branch(const as_instruction_t *in) {
+    const char *mn = in->mnemonic;
+
+    if (mn == NULL || in->operand_count != 1 || in->operands[0].kind == AS_OPERAND_MEMORY ||
+        (in->operands[0].raw != NULL && in->operands[0].raw[0] == '*')) {
+        return 0;
+    }
+    return mn[0] == 'j' || mn[0] == 'J' || strncasecmp(mn, "call", 4) == 0 || strncasecmp(mn, "loop", 4) == 0 ||
+           strncasecmp(mn, "xbegin", 6) == 0;
+}
+
+static int directive_names_local_labels(const char *name) {
+    static const char *const names[] = {
+        ".byte", ".word", ".short", ".hword", ".2byte", ".long", ".int", ".4byte", ".quad", ".8byte", ".value",
+        ".uleb128", ".sleb128", ".set", ".equ", ".equiv",
+    };
+    size_t i;
+
+    for (i = 0; name != NULL && i < sizeof(names) / sizeof(names[0]); ++i) {
+        if (strcmp(name, names[i]) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int is_name_char(int c) {
+    return isalnum((unsigned char)c) || c == '_' || c == '.' || c == '$';
+}
+
+/*
+ * An argument of a directive with each `1b` and `2f` in it made the name
+ * of the label it means, for a directive on `line` of `file`.  NULL for
+ * no memory or for a reference to a label that is not there, which is
+ * said.
+ */
+static char *name_local_refs_in_text(parse_ctx_t *ctx, const char *file, unsigned line, const char *arg) {
+    size_t cap = strlen(arg) + 64;
+    char *out = (char *)malloc(cap);
+    size_t n = 0;
+    size_t i = 0;
+
+    if (out == NULL) {
+        return NULL;
+    }
+    while (arg[i] != '\0') {
+        size_t j = i;
+
+        if (isdigit((unsigned char)arg[i]) && (i == 0 || !is_name_char(arg[i - 1]))) {
+            while (isdigit((unsigned char)arg[j])) {
+                j++;
+            }
+            if ((arg[j] == 'b' || arg[j] == 'f') && !is_name_char(arg[j + 1]) && j - i < 9) {
+                int digit = atoi(arg + i);
+                int forward = arg[j] == 'f';
+                unsigned best = 0;
+                int found = 0;
+                char name[48];
+                size_t k;
+
+                for (k = 0; k < ctx->local_defs.count; ++k) {
+                    const local_label_def_t *d = &ctx->local_defs.items[k];
+
+                    if (d->digit != digit || file == NULL || strcmp(d->file, file) != 0) {
+                        continue;
+                    }
+                    if (forward ? (d->line > line && (!found || d->line < best))
+                                : (d->line <= line && (!found || d->line > best))) {
+                        best = d->line;
+                        found = 1;
+                    }
+                }
+                if (!found) {
+                    if (!ctx->unresolved_local) {
+                        ctx->unresolved_local = 1;
+                        set_err(ctx, "%s:%u: local label %d%c is not defined", file != NULL ? file : "<input>", line,
+                                digit, forward ? 'f' : 'b');
+                    }
+                    free(out);
+                    return NULL;
+                }
+                local_label_name(name, sizeof(name), digit, best);
+                if (n + strlen(name) + 1 >= cap) {
+                    char *next = (char *)realloc(out, cap * 2 + strlen(name));
+
+                    if (next == NULL) {
+                        free(out);
+                        return NULL;
+                    }
+                    out = next;
+                    cap = cap * 2 + strlen(name);
+                }
+                memcpy(out + n, name, strlen(name));
+                n += strlen(name);
+                i = j + 1;
+                continue;
+            }
+        }
+        if (n + 2 >= cap) {
+            char *next = (char *)realloc(out, cap * 2);
+
+            if (next == NULL) {
+                free(out);
+                return NULL;
+            }
+            out = next;
+            cap *= 2;
+        }
+        out[n++] = arg[i++];
+    }
+    out[n] = '\0';
+    return out;
+}
+
 static void resolve_locals(parse_ctx_t *ctx) {
     size_t i;
     size_t j;
 
+    /* Each numeric label, its name. */
     for (i = 0; i < ctx->out->count; ++i) {
         as_stmt_t *st = &ctx->out->items[i];
+        size_t count = st->label_count;
 
+        for (j = 0; j < count; ++j) {
+            const char *name = st->labels[j].name;
+            char *end = NULL;
+            long digit;
+            char named[48];
+
+            if (name == NULL || !isdigit((unsigned char)name[0])) {
+                continue;
+            }
+            digit = strtol(name, &end, 10);
+            if (end == NULL || *end != '\0' || digit < 0 || digit > INT_MAX) {
+                continue;
+            }
+            local_label_name(named, sizeof(named), (int)digit, st->labels[j].line);
+            if (push_label(st, named, st->labels[j].file, st->labels[j].line) != 0 && !ctx->unresolved_local) {
+                ctx->unresolved_local = 1;
+                set_err(ctx, "out of memory");
+            }
+        }
+    }
+
+    for (i = 0; i < ctx->out->count; ++i) {
+        as_stmt_t *st = &ctx->out->items[i];
+        int by_name;
+
+        if (st->kind == AS_STMT_DIRECTIVE && directive_names_local_labels(st->u.directive.name)) {
+            for (j = 0; j < st->u.directive.arg_count; ++j) {
+                char *named;
+
+                if (st->u.directive.args[j] == NULL) {
+                    continue;
+                }
+                named = name_local_refs_in_text(ctx, st->file, st->line, st->u.directive.args[j]);
+                if (named == NULL) {
+                    if (!ctx->unresolved_local) {
+                        ctx->unresolved_local = 1;
+                        set_err(ctx, "out of memory");
+                    }
+                    continue;
+                }
+                free(st->u.directive.args[j]);
+                st->u.directive.args[j] = named;
+            }
+            continue;
+        }
         if (st->kind != AS_STMT_INSTRUCTION) {
             continue;
         }
+        by_name = ctx->cfg != NULL && ctx->cfg->arch == AS_PARSER_ARCH_X86 &&
+                  !instruction_is_direct_branch(&st->u.instr);
 
         for (j = 0; j < st->u.instr.operand_count; ++j) {
             as_operand_t *op = &st->u.instr.operands[j];
+            as_expr_t *e = NULL;
+
             switch (op->kind) {
             case AS_OPERAND_IMMEDIATE:
             case AS_OPERAND_LABEL_REF:
-                resolve_local_in_expr(ctx, op->u.expr);
+                e = op->u.expr;
                 break;
             case AS_OPERAND_MEMORY:
-                resolve_local_in_expr(ctx, op->u.mem.disp);
+                e = op->u.mem.disp;
                 break;
             case AS_OPERAND_SHIFTED_REGISTER:
-                resolve_local_in_expr(ctx, op->u.shifted.amount_expr);
+                e = op->u.shifted.amount_expr;
                 break;
             default:
                 break;
+            }
+            resolve_local_in_expr(ctx, e);
+            /* `1f(%rip)` is a distance as a branch's target is. */
+            if (op->kind == AS_OPERAND_MEMORY && op->u.mem.base_reg != NULL &&
+                (streq_ci(op->u.mem.base_reg, "rip") || streq_ci(op->u.mem.base_reg, "eip"))) {
+                continue;
+            }
+            if (by_name && name_local_refs(e) != 0 && !ctx->unresolved_local) {
+                ctx->unresolved_local = 1;
+                set_err(ctx, "out of memory");
             }
         }
     }

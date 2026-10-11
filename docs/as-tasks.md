@@ -481,20 +481,27 @@ with a symbol table.
 
 ### C.4 Operands as written
 
-- [ ] **AS-T-130** If the base or index of a memory operand is not a register, then the assembler shall refuse the operand.
+- [x] **AS-T-130** If the base or index of a memory operand is not a register, then the assembler shall refuse the operand.
   Trace: AS-FE-011.  Verify: T — `movl (bad),%eax`: exit 1.
-- [ ] **AS-T-131** If text follows the closing parenthesis of a memory operand, or the operand has more than three components, then the assembler shall refuse it.
+  Done, with 131 to 133, where a memory operand is parsed; `test_operand_forms.sh`, 39 cases, which GNU as passes.  Whatever stood where a base or an index is to be was taken for the register of that name -- and the parser held a line that made the name `bad` the register `%eax`, so `movl (bad), %eax` was `movl (%eax), %eax`.  The Verify line is not GNU's, though: `(bad)` alone is the address of a symbol `bad` in parentheses, which GNU assembles and this does now; it is `(%eax,bad)` and `4(bad,%ebx)` that are refused.
+- [x] **AS-T-131** If text follows the closing parenthesis of a memory operand, or the operand has more than three components, then the assembler shall refuse it.
   Trace: AS-FE-011.  Verify: T — `movl (%eax)junk,%ebx`, `movl (%eax,%ebx,2,junk),%ecx`.
-- [ ] **AS-T-132** If an instruction has an empty operand, then the assembler shall refuse it.
+  Done: both were assembled, the fourth part dropped and what followed the parenthesis not read.  A decoration in braces may follow, as before.
+- [x] **AS-T-132** If an instruction has an empty operand, then the assembler shall refuse it.
   Trace: AS-FE-011.  Verify: T — `movl $1,,%eax`, `movl $1,%eax,`.
-- [ ] **AS-T-133** If a scale factor is not 1, 2, 4 or 8, then the assembler shall refuse the operand.
+  Done: both assembled as if the comma were not there.
+- [x] **AS-T-133** If a scale factor is not 1, 2, 4 or 8, then the assembler shall refuse the operand.
   Trace: AS-SEL-010.  Verify: T — `(%eax,%ebx,3)` in every encoder path.
-- [ ] **AS-T-134** When a local label is used as an immediate, an absolute address or a displacement, the assembler shall give the label's address, with a relocation where one is needed.
+  Done in the parser, before any encoder: `movl` and `leal` refused a scale of 3 and `addps` and `fldl` assembled it as 1, and a scale of 0 was taken by all.
+- [x] **AS-T-134** When a local label is used as an immediate, an absolute address or a displacement, the assembler shall give the label's address, with a relocation where one is needed.
   Trace: AS-FE-004, AS-LAY-003.  Verify: T — `pushl $1f`, `movl $1f,%eax`, `leal 1f,%eax`, `movl 1f,%eax`, `movl 1f(%ebx),%eax`, `movq $1f,%rax`: GNU.
-- [ ] **AS-T-135** When a local label is an argument of a data directive, the assembler shall emit a relocation against the label's section with the label's offset.
+  Done, and it was not numeric labels alone.  The address of **any** local label of the section the instruction is in -- `pushl $.L5`, `movl $.L5, %eax`, `leal .L5, %eax`, a compiler's computed goto -- was a zero in the instruction and no relocation: where the relocations are made, a reference to such a label was taken for a distance, as a branch's target is, whatever the operand was.  It is a distance for the target of a branch only.  A numeric label was nothing at all there; each `1:` is given a name of its own beside its number (`.Lnum.1.<line>`, which is no symbol of the object), and a `1b` or `1f` that is not the target of a branch or `%rip`-relative is a reference to it.  The relocation is against the section with the offset in place, as GNU's.
+- [x] **AS-T-135** When a local label is an argument of a data directive, the assembler shall emit a relocation against the label's section with the label's offset.
   Trace: AS-FE-004, AS-LAY-003.  Verify: T — `.long 1b, 2f`, `.quad 1b`: no undefined symbol named `1b`.
+  Done by the same names: `.long 1b` was a relocation against an undefined symbol called `1b`.  In the arguments of the data directives, `.set` and the LEB128 pair.  A `1b` with no `1:` before it is refused, as in GNU.
 - [ ] **AS-T-136** When a local label is defined in a section other than the one that refers to it, the assembler shall resolve the reference with a relocation.
   Trace: AS-LAY-003.  Verify: T — `.data` / `1: .long 0` / `.text` / `jmp 1b` / `call 1b` / `movl $1b,%eax`: GNU.
+  In part: `movl $1b, %eax` is right, by 134.  The branches are not, and are worse than the Verify line supposes -- **`jmp 1b` to a label of another section is left out of the object, with exit status 0**; `call 1b`, `jne 1b` and `loop 1b` are assembled as branches to offset 0 of their own section.  With a compiler's label, `jmp .Lx` across sections fails ("failed to emit relocations") and `jne .Lx` is the short form with an 8-bit relocation; only `call .Lx` is right.  The branch code takes a local label to be of its own section in three places (the encoding, the choice of short or long, the relocation).  Making branches use the names of 134 was tried and put back: it changed which `1:` a branch finds across subsections.
 - [ ] **AS-T-137** When a branch names an absolute address, the assembler shall emit a PC-relative relocation against the absolute section.
   Trace: AS-LAY-003, AS-X86-026.  Verify: T — `jmp 0x1234`, `call 0x1000`, `je 0x1000`: GNU.
 
@@ -1152,5 +1159,5 @@ is not to be done, 370 is ticked with "removed" and the rest struck.
 | AS-EXT-009 | 185, 325, 332–337 |
 | AS-EXT-010 | 040, 171, 338, 339 (339 closes all of AS-EXT) |
 
-351 tasks: 151 done, 200 open.  Numbers run to 400, with gaps left between
+351 tasks: 157 done, 194 open.  Numbers run to 400, with gaps left between
 sections for tasks found along the way.

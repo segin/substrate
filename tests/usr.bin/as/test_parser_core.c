@@ -98,9 +98,12 @@ static void verify_x86(const char *path) {
 
     st = find_instr(&parsed, 6, "mov");
     if (st == NULL || st->u.instr.operand_count < 1 || st->u.instr.operands[0].kind != AS_OPERAND_LABEL_REF ||
-        st->u.instr.operands[0].u.expr == NULL || st->u.instr.operands[0].u.expr->kind != AS_EXPR_LOCAL_REF ||
-        st->u.instr.operands[0].u.expr->local_forward || !st->u.instr.operands[0].u.expr->local_resolved ||
-        st->u.instr.operands[0].u.expr->local_target_line != 5) {
+        st->u.instr.operands[0].u.expr == NULL || st->u.instr.operands[0].u.expr->kind != AS_EXPR_SYMBOL ||
+        st->u.instr.operands[0].u.expr->symbol == NULL ||
+        strcmp(st->u.instr.operands[0].u.expr->symbol, ".Lnum.0.5") != 0) {
+        /* Not the target of a branch, so an address: the reference is
+         * to the name the label `0:` on line 5 was given beside its
+         * number. */
         fail("local backward label resolution failed");
     }
 

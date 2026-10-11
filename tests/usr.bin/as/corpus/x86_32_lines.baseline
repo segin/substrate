@@ -40,12 +40,6 @@ leal sym@TLSGD(%ebx),%edx
 movl %eax,sym@TLSDESC(%ebx)
 movl sym@TLSDESC(%ebx),%ecx
 leal sym@TLSDESC(%ebx),%edx
-movl %eax,(%eax,%eax,0)
-movl (%eax,%eax,0),%ecx
-leal (%eax,%eax,0),%edx
-movl %eax,(%eax,%ebx,4,5)
-movl (%eax,%ebx,4,5),%ecx
-leal (%eax,%ebx,4,5),%edx
 movl %eax,(%r8d)
 movl (%r8d),%ecx
 leal (%r8d),%edx
@@ -155,39 +149,7 @@ pushl sym@GOT
 call *sym@GOT
 movl $sym2,sym@GOT
 movb %al,sym@GOT
-fldl (%eax,%ebx,3)
-fldl (%eax,%ebx,16)
 fldl (%al)
-movb $1,(%eax,%eax,0)
-movw $0x1234,(%eax,%eax,0)
-movl $0x12345678,(%eax,%eax,0)
-addl $4,(%eax,%eax,0)
-cmpb $0,(%eax,%eax,0)
-incl (%eax,%eax,0)
-pushl (%eax,%eax,0)
-call *(%eax,%eax,0)
-movl $sym2,(%eax,%eax,0)
-testl $1,(%eax,%eax,0)
-shll $3,(%eax,%eax,0)
-imull $100,(%eax,%eax,0),%eax
-fldl (%eax,%eax,0)
-movb %al,(%eax,%eax,0)
-movw (%eax,%eax,0),%bx
-movb $1,(%eax,%ebx,4,5)
-movw $0x1234,(%eax,%ebx,4,5)
-movl $0x12345678,(%eax,%ebx,4,5)
-addl $4,(%eax,%ebx,4,5)
-cmpb $0,(%eax,%ebx,4,5)
-incl (%eax,%ebx,4,5)
-pushl (%eax,%ebx,4,5)
-call *(%eax,%ebx,4,5)
-movl $sym2,(%eax,%ebx,4,5)
-testl $1,(%eax,%ebx,4,5)
-shll $3,(%eax,%ebx,4,5)
-imull $100,(%eax,%ebx,4,5),%eax
-fldl (%eax,%ebx,4,5)
-movb %al,(%eax,%ebx,4,5)
-movw (%eax,%ebx,4,5),%bx
 fldl (%eax,%xmm0)
 fldl (%rax)
 movb $1,(%r8d)
@@ -291,8 +253,6 @@ nop | lf: nop | movl $lf,%eax
 nop | lf: nop | pushl $lf
 nop | lf: nop | jmp *lf
 nop | lf: nop | movl lf(,%eax,4),%ecx
-nop | 1: nop | movl $1b,%eax
-movl $1f,%eax | 1:
 movl $1f-.,%eax | 1:
 .section .foo,"ax" | lf: nop | .text | call lf
 .section .foo,"ax" | lf: nop | .text | jmp lf

@@ -17039,9 +17039,21 @@ static int emit_relocations(emit_ctx_t *ctx) {
                 if (e != NULL) {
                     long long resolved_disp;
                     int skip_local_resolve = 0;
+                    /*
+                     * A reference to a label of this section needs no
+                     * relocation where it is a distance: the target of a
+                     * branch.  Where it is the label's address -- an
+                     * immediate, `pushl $1f`; an absolute operand, `movl
+                     * .L5, %eax`; a displacement, `movl 1f(%ebx), %eax`
+                     * -- the address is not known until the section is
+                     * placed, and it was taken for a distance all the
+                     * same: no relocation, and a zero in the instruction.
+                     */
+                    int is_distance = mnemonic_takes_a_target(st->u.instr.mnemonic) &&
+                                      op->kind != AS_OPERAND_MEMORY && !(op->raw != NULL && op->raw[0] == '*');
                     int can_resolve_without_reloc =
-                        (e->kind == AS_EXPR_LOCAL_REF || expr_is_local_temp_symbol(e) ||
-                         is_fixed_short_rel_mnemonic(st->u.instr.mnemonic));
+                        is_distance && (e->kind == AS_EXPR_LOCAL_REF || expr_is_local_temp_symbol(e) ||
+                                        is_fixed_short_rel_mnemonic(st->u.instr.mnemonic));
                     if (machine == EM_X86_64 &&
                         op->kind == AS_OPERAND_MEMORY &&
                         op->u.mem.base_reg != NULL &&
