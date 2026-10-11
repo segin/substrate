@@ -320,14 +320,18 @@ status 0.
 
 ### B.7 Code that vanishes
 
-- [ ] **AS-T-078** When an instruction is written in a section, the assembler shall assemble it into that section whatever the section's flags.
+- [x] **AS-T-078** When an instruction is written in a section, the assembler shall assemble it into that section whatever the section's flags.
   Trace: AS-OBJ-009.  Verify: T — `call f` / `ret` in `.init`, `.fini`, `.section .foo,"a"`, `.data`, `.gnu.linkonce.t.x`: the bytes and the relocation are there.
-- [ ] **AS-T-079** When a section of a well-known name is opened without flags, the assembler shall give it the flags and type GNU `as` gives it.
+  Done.  The object writer assembles a section in one of two ways, as code (instructions encoded, data and labels laid out among them) or as data (instructions passed over), and chose by the `x` flag.  It now takes as code any section an instruction is written in, found once by following the source; only the padding of an alignment still goes by the flag.  `test_section_kinds.sh`, 176 cases, which GNU as passes.  In 32-bit code the relocation of `call f` is `R_386_PLT32` where GNU writes `R_386_PC32`, as it is in `.text`.
+- [x] **AS-T-079** When a section of a well-known name is opened without flags, the assembler shall give it the flags and type GNU `as` gives it.
   Trace: AS-OBJ-009.  Verify: T — `.init`, `.fini` (`AX`); `.tdata` (`WAT`), `.tbss` (`WAT`, `NOBITS`); `.init_array`, `.fini_array`, `.preinit_array` (their types, `WA`); `.debug_*`, `.comment`, `.note.GNU-stack` (not allocated); `.eh_frame` (`A`); `.rodata*`, `.data.rel.ro*`, `.bss.*`, `.text.*`, `.gnu.linkonce.*` by prefix.
-- [ ] **AS-T-080** When a section's flags string holds `e`, `R`, `o`, `T`, `?` or a numeric value, the assembler shall set the flag each names.
+  Done from a table of twenty-four names with what GNU as 2.46 gives each, matched whole, with anything after a dot, or as a prefix.  Any other name is `PROGBITS` with no flags, where it was "a": that is GNU's, and it is GNU's for `.eh_frame`, `.gcc_except_table`, `.ctors`, `.comment` and `.gnu.linkonce.t.*` too, which this task's Verify line had otherwise.  Not in the table: `.stab` (GNU refuses it), `.lbss`, `.rel*`/`.rela*`, `.gnu_object_only`.
+- [x] **AS-T-080** When a section's flags string holds `e`, `R`, `o`, `T`, `?` or a numeric value, the assembler shall set the flag each names.
   Trace: AS-OBJ-009, AS-SEC-005.  Verify: T — each against `readelf -S` of GNU's object.
-- [ ] **AS-T-081** If data other than zero is written into a `NOBITS` section, then the assembler shall fail.
+  Done: `e`, `R`, `o`, `l` (64-bit only) and a number set their bits; `?` puts the section in the group of the one the directive is written in; a letter that is none is refused, where it was passed over.  The types `@init_array`, `@fini_array`, `@preinit_array`, `@unwind` and a number are taken, and a type in quotes.  After the type the arguments are read in GNU's order -- entry size if `M`, the ordering symbol if `o`, the group if `G` -- so the symbol of `"ao"` is no longer taken for a group.  A section's flags may not be changed by a later directive, as GNU refuses it.  Left: `sh_link` of an `o` section is 0, the object library having no way to set it; `R` does not mark the object as GNU's as GNU as does; an unquoted number for the flags is taken, where GNU refuses it.
+- [x] **AS-T-081** If data other than zero is written into a `NOBITS` section, then the assembler shall fail.
   Trace: AS-OBJ-016, AS-SEC-005.  Verify: T — `.bss` / `.long 5`: exit 1; `.bss` / `.zero 8` and `.skip 8`: size 8.
+  Done where a section is given its bytes: one of no bits whose bytes are not all zero is refused, with its name and the offset.  It is stricter than GNU in two things GNU lets pass with the value dropped: an instruction in `.bss`, and `.space n, fill` there.
 
 ### B.8 The other targets' names
 
@@ -1108,5 +1112,5 @@ is not to be done, 370 is ticked with "removed" and the rest struck.
 | AS-EXT-009 | 185, 325, 332–337 |
 | AS-EXT-010 | 040, 171, 338, 339 (339 closes all of AS-EXT) |
 
-350 tasks: 112 done, 238 open.  Numbers run to 399, with gaps left between
+350 tasks: 116 done, 234 open.  Numbers run to 399, with gaps left between
 sections for tasks found along the way.

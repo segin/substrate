@@ -77,6 +77,8 @@ typedef struct {
 typedef struct {
     const as_elf_cfg_t *cfg;
     const as_parse_result_t *parsed;
+    /* What each section was declared to be; NULL where it is not known. */
+    const as_section_state_t *sections;
     elfobj_t *obj;
     elf_section_t *text_sec;
     elf_section_t *data_sec;
@@ -95,6 +97,11 @@ typedef struct {
     size_t asm_reg_alias_count;
     size_t asm_reg_alias_cap;
     int virtual_scanning;
+    /* The sections that are not flagged as code and have instructions
+     * written in them.  See section_name_is_executable(). */
+    char **code_sections;
+    size_t code_section_count;
+    int code_sections_found;
     /* The .uleb128 and .sleb128 statements whose arguments are distances
      * between labels, in the order of the source, and the bytes each
      * argument takes.  See settle_leb128_sizes(). */
@@ -9930,12 +9937,119 @@ static elf_section_t *section_for_name(emit_ctx_t *ctx, const char *name) {
     return elf_find_section(ctx->obj, name);
 }
 
-static int section_name_is_executable(emit_ctx_t *ctx, const char *name) {
+/*
+ * Give a section its bytes.  A section of no bits -- .bss, .tbss, one
+ * declared @nobits -- has a size and no contents, so what is assembled
+ * into it can only be zeros; anything else was dropped, and the object
+ * said the section was that long and nothing more.  `.long 5` in .bss is
+ * refused, as GNU as refuses it.
+ */
+static int set_section_bytes(emit_ctx_t *ctx, elf_section_t *sec, const char *name, const unsigned char *data,
+                             size_t len) {
+    const as_section_t *declared = ctx->sections != NULL && name != NULL ? as_sections_find(ctx->sections, name, 0)
+                                                                         : NULL;
+
+    if (declared != NULL && declared->type == SHT_NOBITS) {
+        size_t i;
+
+        for (i = 0; i < len; ++i) {
+            if (data[i] != 0) {
+                set_err(ctx, "section %s holds no bits, and a value other than zero is stored in it at offset %lu",
+                        name, (unsigned long)i);
+                return -1;
+            }
+        }
+    }
+    return elf_section_set_data(sec, data, len) == ELF_OK ? 0 : -1;
+}
+
+/* Whether the section is flagged as code: it is padded with NOPs. */
+static int section_name_has_exec_flag(emit_ctx_t *ctx, const char *name) {
     elf_section_t *sec = section_for_name(ctx, name);
     if (sec == NULL) {
         return 0;
     }
     return (elf_section_flags(sec) & SHF_EXECINSTR) != 0;
+}
+
+/*
+ * The names of the sections an instruction is written in, whatever their
+ * flags: found once, by following the source.
+ */
+static int find_sections_with_instructions(emit_ctx_t *ctx) {
+    section_track_t track;
+    size_t i;
+
+    ctx->code_sections_found = 1;
+    if (section_track_init(&track, 32u) != 0) {
+        return -1;
+    }
+    for (i = 0; i < ctx->parsed->count; ++i) {
+        const as_stmt_t *st = &ctx->parsed->items[i];
+        size_t k;
+
+        if (st->kind == AS_STMT_DIRECTIVE) {
+            if (section_track_apply_directive(&track, &st->u.directive) < 0) {
+                section_track_free(&track);
+                return -1;
+            }
+            continue;
+        }
+        if (st->kind != AS_STMT_INSTRUCTION || track.current == NULL) {
+            continue;
+        }
+        for (k = 0; k < ctx->code_section_count; ++k) {
+            if (strcmp(ctx->code_sections[k], track.current) == 0) {
+                break;
+            }
+        }
+        if (k == ctx->code_section_count) {
+            char **next = (char **)realloc(ctx->code_sections, (k + 1) * sizeof(*next));
+
+            if (next == NULL) {
+                section_track_free(&track);
+                return -1;
+            }
+            ctx->code_sections = next;
+            ctx->code_sections[k] = xstrdup(track.current);
+            if (ctx->code_sections[k] == NULL) {
+                section_track_free(&track);
+                return -1;
+            }
+            ctx->code_section_count++;
+        }
+    }
+    section_track_free(&track);
+    return 0;
+}
+
+/*
+ * Whether the section's statements are assembled as a section of code
+ * is: its instructions encoded, its data and its labels laid out among
+ * them.  One flagged as code is, and so is any other an instruction is
+ * written in -- .init and .fini opened without flags, a section "a", or
+ * .data.  It went by the flag alone, and an instruction anywhere else
+ * was left out of the object without a word: `call f` in .init was not
+ * there.
+ */
+static int section_name_is_executable(emit_ctx_t *ctx, const char *name) {
+    size_t k;
+
+    if (ctx == NULL || name == NULL) {
+        return 0;
+    }
+    if (section_name_has_exec_flag(ctx, name)) {
+        return 1;
+    }
+    if (!ctx->code_sections_found && ctx->parsed != NULL) {
+        (void)find_sections_with_instructions(ctx);
+    }
+    for (k = 0; k < ctx->code_section_count; ++k) {
+        if (strcmp(ctx->code_sections[k], name) == 0) {
+            return 1;
+        }
+    }
+    return 0;
 }
 
 static int try_encode_x86_ssse3(const as_x86_insn_t *in, unsigned char *code, size_t code_cap,
@@ -13492,7 +13606,7 @@ static int append_directive_data_ctx(emit_ctx_t *ctx, bytebuf_t *buf, const char
     }
     if (strcmp(d->name, ".align") == 0 || strcmp(d->name, ".balign") == 0 || strcmp(d->name, ".p2align") == 0) {
         long long raw = 0;
-        long long fill = section_name_is_executable(ctx, section_name) ? 0x90 : 0;
+        long long fill = section_name_has_exec_flag(ctx, section_name) ? 0x90 : 0;
         size_t align;
         size_t need;
 
@@ -13983,7 +14097,8 @@ static int emit_text_program(emit_ctx_t *ctx) {
         if (sec == NULL) {
             continue;
         }
-        if (elf_section_set_data(sec, secbufs.items[i].buf.data, secbufs.items[i].buf.len) != ELF_OK) {
+        if (set_section_bytes(ctx, sec, secbufs.items[i].name, secbufs.items[i].buf.data,
+                              secbufs.items[i].buf.len) != 0) {
             section_track_free(&track);
             sec_buf_vec_free(&secbufs);
             return -1;
@@ -14302,7 +14417,8 @@ static int emit_data_program(emit_ctx_t *ctx, const as_data_program_t *data) {
         if (sec == NULL) {
             continue;
         }
-        if (elf_section_set_data(sec, secbufs.items[i].buf.data, secbufs.items[i].buf.len) != ELF_OK) {
+        if (set_section_bytes(ctx, sec, secbufs.items[i].name, secbufs.items[i].buf.data,
+                              secbufs.items[i].buf.len) != 0) {
             section_track_free(&track);
             sec_buf_vec_free(&secbufs);
             return -1;
@@ -17122,7 +17238,8 @@ static int emit_relocations(emit_ctx_t *ctx) {
         if (sec == NULL) {
             continue;
         }
-        if (elf_section_set_data(sec, secbufs.items[i].buf.data, secbufs.items[i].buf.len) != ELF_OK) {
+        if (set_section_bytes(ctx, sec, secbufs.items[i].name, secbufs.items[i].buf.data,
+                              secbufs.items[i].buf.len) != 0) {
             section_track_free(&track);
             sec_buf_vec_free(&secbufs);
             return -1;
@@ -17143,6 +17260,12 @@ static void free_leb128_sizes(emit_ctx_t *ctx) {
     free(ctx->leb);
     ctx->leb = NULL;
     ctx->leb_count = 0;
+    for (i = 0; i < ctx->code_section_count; ++i) {
+        free(ctx->code_sections[i]);
+    }
+    free(ctx->code_sections);
+    ctx->code_sections = NULL;
+    ctx->code_section_count = 0;
 }
 
 /*
@@ -17281,6 +17404,7 @@ int as_elf_emit_file(const as_parse_result_t *parsed,
         return -1;
     }
 
+    ctx.sections = sections;
     cls = cfg->is_64 ? ELFOBJ_CLASS_64 : ELFOBJ_CLASS_32;
     ctx.obj = elf_create(ET_REL, (uint16_t)cfg->machine, cls, ELFOBJ_ENDIAN_LE);
     if (ctx.obj == NULL) {

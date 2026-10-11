@@ -29,6 +29,9 @@ typedef struct {
     size_t *stack;
     size_t stack_count;
     size_t stack_cap;
+    /* Set by the caller before as_sections_build(), for an ELF64 object:
+     * a section type may mean another thing there. */
+    int elf64;
 } as_section_state_t;
 
 void as_section_state_init(as_section_state_t *s);

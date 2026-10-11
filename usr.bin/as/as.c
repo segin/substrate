@@ -2644,6 +2644,7 @@ static int run_native_backend(const as_ctx_t *ctx) {
 
     ecfg.machine = ctx->mode == AS_MODE_64 ? EM_X86_64 : EM_386;
     ecfg.is_64 = ctx->mode == AS_MODE_64 ? 1u : 0u;
+    secs.elf64 = ctx->mode == AS_MODE_64;
     ecfg.x86_code_bits = ctx->mode == AS_MODE_64 ? 64u : 32u;
     ecfg.use_rela = ctx->mode == AS_MODE_64 ? 1u : 0u;
     ecfg.x86_64_isa_level = (unsigned)x64_isa_level_from_march(ctx->march);

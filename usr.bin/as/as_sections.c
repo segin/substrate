@@ -59,6 +59,33 @@
 #ifndef SHF_TLS
 #define SHF_TLS 0x400
 #endif
+#ifndef SHF_LINK_ORDER
+#define SHF_LINK_ORDER 0x80
+#endif
+#ifndef SHF_GNU_RETAIN
+#define SHF_GNU_RETAIN 0x200000
+#endif
+#ifndef SHF_X86_64_LARGE
+#define SHF_X86_64_LARGE 0x10000000
+#endif
+#ifndef SHF_EXCLUDE
+#define SHF_EXCLUDE 0x80000000u
+#endif
+#ifndef SHT_DYNSYM
+#define SHT_DYNSYM 11
+#endif
+#ifndef SHT_INIT_ARRAY
+#define SHT_INIT_ARRAY 14
+#endif
+#ifndef SHT_FINI_ARRAY
+#define SHT_FINI_ARRAY 15
+#endif
+#ifndef SHT_PREINIT_ARRAY
+#define SHT_PREINIT_ARRAY 16
+#endif
+#ifndef SHT_X86_64_UNWIND
+#define SHT_X86_64_UNWIND 0x70000001
+#endif
 
 typedef struct {
     as_section_state_t *out;
@@ -163,6 +190,7 @@ void as_section_state_init(as_section_state_t *s) {
     s->stack = NULL;
     s->stack_count = 0;
     s->stack_cap = 0;
+    s->elf64 = 0;
 }
 
 void as_section_state_free(as_section_state_t *s) {
@@ -265,14 +293,24 @@ static int parse_u32_arg(const char *raw, unsigned *out) {
     return 0;
 }
 
-static unsigned parse_flags_string(const char *raw) {
+/*
+ * The flags a .section's string asks for: a letter for each, or a number
+ * for bits that have no letter.  `?` is no flag of the section's own: it
+ * asks to join the group of the section it is written in, and sets
+ * *join_group.  A letter that is none of these was passed over, and the
+ * section made without what it asked for; it is refused (-1), with the
+ * letter in *bad.
+ */
+static int parse_flags_string(const char *raw, unsigned *flags_out, int *join_group, char *bad) {
     char *f;
     size_t i;
     unsigned flags = 0;
 
+    *join_group = 0;
+    *bad = '\0';
     f = unquote_copy(raw);
     if (f == NULL) {
-        return 0;
+        return -1;
     }
     for (i = 0; f[i] != '\0'; ++i) {
         switch (f[i]) {
@@ -291,21 +329,48 @@ static unsigned parse_flags_string(const char *raw) {
         case 'S':
             flags |= SHF_STRINGS;
             break;
+        case 'G':
         case 'g':
             flags |= SHF_GROUP;
             break;
         case 'T':
             flags |= SHF_TLS;
             break;
-        default:
+        case 'o':
+            flags |= SHF_LINK_ORDER;
             break;
+        case 'e':
+            flags |= SHF_EXCLUDE;
+            break;
+        case 'R':
+            flags |= SHF_GNU_RETAIN;
+            break;
+        case 'l':
+            flags |= SHF_X86_64_LARGE;
+            break;
+        case '?':
+            *join_group = 1;
+            break;
+        default:
+            if (f[i] >= '0' && f[i] <= '9') {
+                char *end = NULL;
+                unsigned long bits = strtoul(f + i, &end, 0);
+
+                flags |= (unsigned)bits;
+                i = (size_t)(end - f) - 1;
+                break;
+            }
+            *bad = f[i];
+            free(f);
+            return -1;
         }
     }
     free(f);
-    return flags;
+    *flags_out = flags;
+    return 0;
 }
 
-static unsigned parse_type_string(const char *raw) {
+static unsigned parse_type_string(const char *raw, int is_64) {
     char *t;
     char *s;
     unsigned type = SHT_PROGBITS;
@@ -319,12 +384,31 @@ static unsigned parse_type_string(const char *raw) {
         s++;
     }
 
+    if (*s == '"') {
+        size_t n;
+
+        s++;
+        n = strlen(s);
+        if (n > 0 && s[n - 1] == '"') {
+            s[n - 1] = '\0';
+        }
+    }
     if (streq_ci(s, "progbits")) {
         type = SHT_PROGBITS;
     } else if (streq_ci(s, "nobits")) {
         type = SHT_NOBITS;
     } else if (streq_ci(s, "note")) {
         type = SHT_NOTE;
+    } else if (streq_ci(s, "init_array")) {
+        type = SHT_INIT_ARRAY;
+    } else if (streq_ci(s, "fini_array")) {
+        type = SHT_FINI_ARRAY;
+    } else if (streq_ci(s, "preinit_array")) {
+        type = SHT_PREINIT_ARRAY;
+    } else if (streq_ci(s, "unwind")) {
+        type = is_64 ? SHT_X86_64_UNWIND : SHT_PROGBITS;
+    } else if (*s >= '0' && *s <= '9') {
+        type = (unsigned)strtoul(s, NULL, 0);
     } else if (streq_ci(s, "rela")) {
         type = SHT_RELA;
     } else if (streq_ci(s, "rel")) {
@@ -335,26 +419,67 @@ static unsigned parse_type_string(const char *raw) {
     return type;
 }
 
-static void infer_section_defaults(const char *name, unsigned *flags, unsigned *type) {
-    unsigned f = SHF_ALLOC;
-    unsigned t = SHT_PROGBITS;
+/*
+ * What a section is when it is opened by name alone.  The names that
+ * mean something have the flags and type GNU as 2.46 gives them; any
+ * other is PROGBITS with no flags -- not allocated, which is to say not
+ * in the program.  It was given "a", and of the names below only .text,
+ * .data, .bss and .rodata were known, so .init and .fini were not code,
+ * .tdata and .tbss not thread-local, and .init_array an array of
+ * nothing in particular that the linker did not run.
+ *
+ * `how` says what of the name is matched: the whole of it; the name and
+ * anything after a dot; or the name as a prefix.
+ */
+enum { SEC_NAME_EXACT, SEC_NAME_DOTTED, SEC_NAME_PREFIX };
 
-    if (name != NULL) {
-        if (strcmp(name, ".text") == 0 || strncmp(name, ".text.", 6) == 0) {
-            f = SHF_ALLOC | SHF_EXECINSTR;
-            t = SHT_PROGBITS;
-        } else if (strcmp(name, ".data") == 0 || strncmp(name, ".data.", 6) == 0) {
-            f = SHF_ALLOC | SHF_WRITE;
-            t = SHT_PROGBITS;
-        } else if (strcmp(name, ".bss") == 0 || strncmp(name, ".bss.", 5) == 0) {
-            f = SHF_ALLOC | SHF_WRITE;
-            t = SHT_NOBITS;
-        } else if (strcmp(name, ".rodata") == 0 || strncmp(name, ".rodata.", 8) == 0) {
-            f = SHF_ALLOC;
-            t = SHT_PROGBITS;
-        } else if (strncmp(name, ".discard", 8) == 0) {
-            f = 0;
-            t = SHT_PROGBITS;
+static void infer_section_defaults(const char *name, unsigned *flags, unsigned *type) {
+    static const struct {
+        const char *name;
+        int how;
+        unsigned type;
+        unsigned flags;
+    } known[] = {
+        {".text", SEC_NAME_DOTTED, SHT_PROGBITS, SHF_ALLOC | SHF_EXECINSTR},
+        {".init", SEC_NAME_EXACT, SHT_PROGBITS, SHF_ALLOC | SHF_EXECINSTR},
+        {".fini", SEC_NAME_EXACT, SHT_PROGBITS, SHF_ALLOC | SHF_EXECINSTR},
+        {".plt", SEC_NAME_EXACT, SHT_PROGBITS, SHF_ALLOC | SHF_EXECINSTR},
+        {".data", SEC_NAME_DOTTED, SHT_PROGBITS, SHF_ALLOC | SHF_WRITE},
+        {".data1", SEC_NAME_EXACT, SHT_PROGBITS, SHF_ALLOC | SHF_WRITE},
+        {".got", SEC_NAME_EXACT, SHT_PROGBITS, SHF_ALLOC | SHF_WRITE},
+        {".persistent", SEC_NAME_EXACT, SHT_PROGBITS, SHF_ALLOC | SHF_WRITE},
+        {".bss", SEC_NAME_DOTTED, SHT_NOBITS, SHF_ALLOC | SHF_WRITE},
+        {".noinit", SEC_NAME_EXACT, SHT_NOBITS, SHF_ALLOC | SHF_WRITE},
+        {".gnu.linkonce.b", SEC_NAME_PREFIX, SHT_NOBITS, SHF_ALLOC | SHF_WRITE},
+        {".rodata", SEC_NAME_DOTTED, SHT_PROGBITS, SHF_ALLOC},
+        {".rodata1", SEC_NAME_EXACT, SHT_PROGBITS, SHF_ALLOC},
+        {".tdata", SEC_NAME_DOTTED, SHT_PROGBITS, SHF_ALLOC | SHF_WRITE | SHF_TLS},
+        {".tbss", SEC_NAME_DOTTED, SHT_NOBITS, SHF_ALLOC | SHF_WRITE | SHF_TLS},
+        {".init_array", SEC_NAME_DOTTED, SHT_INIT_ARRAY, SHF_ALLOC | SHF_WRITE},
+        {".fini_array", SEC_NAME_DOTTED, SHT_FINI_ARRAY, SHF_ALLOC | SHF_WRITE},
+        {".preinit_array", SEC_NAME_DOTTED, SHT_PREINIT_ARRAY, SHF_ALLOC | SHF_WRITE},
+        {".note", SEC_NAME_PREFIX, SHT_NOTE, 0},
+        {".dynamic", SEC_NAME_EXACT, SHT_DYNAMIC, SHF_ALLOC},
+        {".hash", SEC_NAME_EXACT, SHT_HASH, SHF_ALLOC},
+        {".dynstr", SEC_NAME_EXACT, SHT_STRTAB, SHF_ALLOC},
+        {".dynsym", SEC_NAME_EXACT, SHT_DYNSYM, SHF_ALLOC},
+        {".stabstr", SEC_NAME_EXACT, SHT_STRTAB, 0},
+    };
+    unsigned f = 0;
+    unsigned t = SHT_PROGBITS;
+    size_t i;
+
+    for (i = 0; name != NULL && i < sizeof(known) / sizeof(known[0]); ++i) {
+        size_t n = strlen(known[i].name);
+
+        if (strncmp(name, known[i].name, n) != 0) {
+            continue;
+        }
+        if (name[n] == '\0' || known[i].how == SEC_NAME_PREFIX ||
+            (known[i].how == SEC_NAME_DOTTED && name[n] == '.')) {
+            f = known[i].flags;
+            t = known[i].type;
+            break;
         }
     }
 
@@ -414,6 +539,8 @@ static int stack_push(as_section_state_t *s, size_t idx) {
  * assemble out-of-line code in line.
  */
 #define SEC_NO_SUBSECTIONS (-2)
+/* The handler has said what is wrong. */
+#define SEC_SAID (-3)
 
 static int process_section_like(sec_ctx_t *ctx, const as_stmt_t *st, int do_push) {
     const as_directive_t *d = &st->u.directive;
@@ -424,6 +551,10 @@ static int process_section_like(sec_ctx_t *ctx, const as_stmt_t *st, int do_push
     unsigned type;
     ssize_t existing = -1;
     long long subsection_number;
+    int join_group = 0;
+    char *joined_group = NULL;
+    int joined_comdat = 0;
+    size_t next_arg;
 
     if (d->arg_count < 1) {
         return -1;
@@ -467,30 +598,83 @@ static int process_section_like(sec_ctx_t *ctx, const as_stmt_t *st, int do_push
         return 0;
     }
     if (d->arg_count >= 2) {
-        flags = parse_flags_string(d->args[1]);
+        char bad;
+
+        int rc = parse_flags_string(d->args[1], &flags, &join_group, &bad);
+
+        /* `l`, a large section, is of 64-bit objects alone. */
+        if (rc == 0 && (flags & SHF_X86_64_LARGE) != 0 && !s->elf64 && d->args[1] != NULL &&
+            strchr(d->args[1], 'l') != NULL) {
+            bad = 'l';
+            rc = -1;
+        }
+        if (rc != 0) {
+            set_err(ctx, "%s:%u: %s %s: '%c' is not a section flag (a, w, x, M, S, G, T, o, e, R, l, ? or a number)",
+                    st->file != NULL ? st->file : "<input>", st->line, d->name, name, bad != '\0' ? bad : '?');
+            free(name);
+            return SEC_SAID;
+        }
+        /*
+         * A section is what it was first said to be.  Flags that are
+         * not those it has were written over them, so that whichever
+         * directive came last decided: GNU as refuses the change, and so
+         * does this.
+         */
+        if (existing >= 0 && s->items[existing].flags != (flags | (s->items[existing].flags & SHF_GROUP)) &&
+            s->items[existing].flags != flags) {
+            set_err(ctx, "%s:%u: %s %s: the section has other flags already",
+                    st->file != NULL ? st->file : "<input>", st->line, d->name, name);
+            free(name);
+            return SEC_SAID;
+        }
     } else if (existing >= 0) {
         flags = s->items[existing].flags;
     } else {
         infer_section_defaults(name, &flags, NULL);
     }
 
-    if (d->arg_count >= 3) {
-        type = parse_type_string(d->args[2]);
+    if (d->arg_count >= 3 && d->args[2] != NULL && d->args[2][0] != '\0') {
+        type = parse_type_string(d->args[2], s->elf64);
     } else if (existing >= 0) {
         type = s->items[existing].type;
     } else {
         infer_section_defaults(name, NULL, &type);
     }
 
+    /* `?`: of the group the directive is written in, if it is in one. */
+    if (join_group && s->items[s->current_index].group != NULL) {
+        joined_group = trim_copy(s->items[s->current_index].group);
+        joined_comdat = s->items[s->current_index].comdat;
+        if (joined_group == NULL) {
+            free(name);
+            return -1;
+        }
+    }
+
     if (switch_section(ctx, name, 0, flags, type, 1) != 0) {
+        free(joined_group);
         free(name);
         return -1;
     }
-    if ((flags & SHF_MERGE) != 0 && d->arg_count >= 4 &&
-        parse_u32_arg(d->args[3], &s->items[s->current_index].entsize) == 0) {
-        group = NULL;
-    } else if (d->arg_count >= 4) {
-        group = trim_copy(d->args[3]);
+    /* After the type: the size of an entry if the section is of them
+     * (M), the symbol it is ordered by (o), and its group (G). */
+    next_arg = 3;
+    if ((flags & SHF_MERGE) != 0 && d->arg_count > next_arg &&
+        parse_u32_arg(d->args[next_arg], &s->items[s->current_index].entsize) == 0) {
+        next_arg++;
+    }
+    if ((flags & SHF_LINK_ORDER) != 0 && d->arg_count > next_arg) {
+        next_arg++;
+    }
+    /* Entries to be merged have a size, or are not merged. */
+    if ((flags & SHF_MERGE) != 0 && s->items[s->current_index].entsize == 0 &&
+        (existing < 0 || s->items[existing].entsize == 0)) {
+        s->items[s->current_index].flags &= ~(unsigned)SHF_MERGE;
+    }
+    if (joined_group != NULL) {
+        group = joined_group;
+    } else if (d->arg_count > next_arg) {
+        group = trim_copy(d->args[next_arg]);
         if (group == NULL) {
             free(name);
             return -1;
@@ -504,8 +688,10 @@ static int process_section_like(sec_ctx_t *ctx, const as_stmt_t *st, int do_push
     }
     free(s->items[s->current_index].group);
     s->items[s->current_index].group = group;
-    if (d->arg_count >= 5) {
-        char *f = trim_copy(d->args[4]);
+    if (joined_group != NULL) {
+        s->items[s->current_index].comdat = joined_comdat;
+    } else if (d->arg_count > next_arg + 1) {
+        char *f = trim_copy(d->args[next_arg + 1]);
         if (f == NULL) {
             free(name);
             return -1;
@@ -1193,6 +1379,8 @@ int as_sections_build(const as_parse_result_t *parsed, as_section_state_t *out,
         switch (process_directive(&ctx, st)) {
         case 0:
             break;
+        case SEC_SAID:
+            return -1;
         case SEC_NO_SUBSECTIONS:
             set_err(&ctx, "%s:%u: %s: subsections other than 0 are not supported",
                     st->file, st->line, st->u.directive.name);
