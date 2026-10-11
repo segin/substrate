@@ -1231,6 +1231,78 @@ static int eval_abs_mem_disp(const as_expr_t *expr, long long *disp_out) {
     return -1;
 }
 
+/*
+ * ModRM and what follows it for an address of 16-bit registers, which
+ * has a table of its own: %bx or %bp with %si or %di, or one of the
+ * four alone, and a displacement of one byte or two.  The x87, SSE and
+ * VEX emitters had no such table: `movaps (%bx), %xmm0` and `fldl
+ * (%bx)` were refused.  (The prefix that says the address is of 16 bits
+ * is put on by the statement's encoder.)
+ */
+static int emit_i386_modrm16(unsigned reg_field, const as_mem_operand_t *mem, unsigned char *out, size_t out_cap,
+                             size_t *pos_io) {
+    const as_x86_reg_info_t *base = mem->base_reg != NULL ? as_x86_reg_find(mem->base_reg) : NULL;
+    const as_x86_reg_info_t *index = mem->index_reg != NULL ? as_x86_reg_find(mem->index_reg) : NULL;
+    size_t pos = *pos_io;
+    unsigned rm;
+    unsigned mod;
+    long long disp = 0;
+    int symbolic = 0;
+
+    if (base == NULL || base->cls != AS_X86_REGCLASS_GENERAL || base->width != 16 ||
+        (mem->index_reg != NULL &&
+         (index == NULL || index->cls != AS_X86_REGCLASS_GENERAL || index->width != 16 || mem->scale > 1))) {
+        return -1;
+    }
+    /* %bx is 3, %bp 5, %si 6, %di 7. */
+    if (index != NULL) {
+        if ((base->number != 3 && base->number != 5) || (index->number != 6 && index->number != 7)) {
+            return -1;
+        }
+        rm = (base->number == 5 ? 2u : 0u) + (index->number == 7 ? 1u : 0u);
+    } else {
+        switch (base->number) {
+        case 6: rm = 4; break;
+        case 7: rm = 5; break;
+        case 5: rm = 6; break;
+        case 3: rm = 7; break;
+        default: return -1;
+        }
+    }
+    if (mem->disp != NULL && eval_expr_const(mem->disp, &disp) != 0) {
+        if (!expr_has_symbol(mem->disp)) {
+            return -1;
+        }
+        symbolic = 1;
+        disp = 0;
+    }
+    if (symbolic) {
+        mod = 2;
+    } else if (disp == 0 && rm != 6) {
+        mod = 0;
+    } else if (disp >= -128 && disp <= 127) {
+        /* (%bp alone with no displacement is an address with no
+         * register, so it is given one of nothing.) */
+        mod = 1;
+    } else if (disp >= -32768 && disp <= 65535) {
+        mod = 2;
+    } else {
+        return -1;
+    }
+    if (pos + 3 > out_cap) {
+        return -1;
+    }
+    out[pos++] = (unsigned char)((mod << 6) | ((reg_field & 7u) << 3) | rm);
+    if (mod == 1) {
+        out[pos++] = (unsigned char)(disp & 0xff);
+    } else if (mod == 2) {
+        out[pos++] = (unsigned char)(disp & 0xff);
+        out[pos++] = (unsigned char)((disp >> 8) & 0xff);
+    }
+    *pos_io = pos;
+    return 0;
+}
+
 static int emit_i386_modrm_rm_operand(unsigned reg_field, const as_operand_t *rm_op,
                                       unsigned char *out, size_t out_cap, size_t *pos_io) {
     unsigned rm_reg;
@@ -1297,6 +1369,10 @@ static int emit_i386_modrm_rm_operand(unsigned reg_field, const as_operand_t *rm
         int has_disp = 0;
         long long disp = 0;
 
+        if ((mem->base_reg != NULL && x86_reg_width_bits(mem->base_reg) == 16) ||
+            (mem->index_reg != NULL && x86_reg_width_bits(mem->index_reg) == 16)) {
+            return emit_i386_modrm16(reg_field, mem, out, out_cap, pos_io);
+        }
         if (mem->base_reg != NULL) {
             if (parse_x86_reg(mem->base_reg, &base) != 0 || ((unsigned)base & 8u) != 0u) {
                 return -1;
@@ -4629,10 +4705,11 @@ static int x86_segment_form_is_16bit(const as_instruction_t *insn, const char *m
  * statement and write none: x87, the moves to and from %xmm and the
  * segment registers, VEX and EVEX.  Without it `fldl (%eax)` loaded
  * through all of %rax.  It goes after a segment override, where GNU as
- * has it.
+ * has it.  In 32-bit code the same prefix is of an address through
+ * 16-bit registers; `width` is the one that wants it.
  */
-static int x86_prepend_addr32(const as_instruction_t *insn, unsigned char *code, size_t code_cap,
-                              size_t *code_len) {
+static int x86_prepend_addr_size(const as_instruction_t *insn, int width, unsigned char *code, size_t code_cap,
+                                 size_t *code_len) {
     size_t i;
     size_t at = 0;
     int need = 0;
@@ -4646,8 +4723,13 @@ static int x86_prepend_addr32(const as_instruction_t *insn, unsigned char *code,
         if (op->kind != AS_OPERAND_MEMORY) {
             continue;
         }
-        if ((op->u.mem.base_reg != NULL && x86_reg_width_bits(op->u.mem.base_reg) == 32) ||
-            (op->u.mem.index_reg != NULL && x86_reg_width_bits(op->u.mem.index_reg) == 32)) {
+        /* (`(%dx)` is how a port is written, and no address.) */
+        if (width == 16 && op->u.mem.base_reg != NULL && op->u.mem.index_reg == NULL &&
+            (streq_ci(op->u.mem.base_reg, "dx") || streq_ci(op->u.mem.base_reg, "%dx"))) {
+            continue;
+        }
+        if ((op->u.mem.base_reg != NULL && x86_reg_width_bits(op->u.mem.base_reg) == width) ||
+            (op->u.mem.index_reg != NULL && x86_reg_width_bits(op->u.mem.index_reg) == width)) {
             need = 1;
         }
     }
@@ -4706,13 +4788,21 @@ static int x86_mnemonic_is_64bit_by_default(const char *mn) {
  */
 #define X86_PSEUDO_DISP (AS_PSEUDO_DISP8 | AS_PSEUDO_DISP32)
 #define X86_PSEUDO_FORMS (X86_PSEUDO_DISP | AS_PSEUDO_LOAD | AS_PSEUDO_STORE | AS_PSEUDO_REX)
+
+/*
+ * Set while a statement with an address of 16-bit registers that the
+ * encoders had no instruction for is given to the emitters after all:
+ * x87, SSE and the rest, which write that address by
+ * emit_i386_modrm16().  See encode_x86_stmt_either().
+ */
+static int x86_addr16_by_emitters;
 static int x86_stmt_is_the_encoders(const as_elf_cfg_t *cfg, const as_instruction_t *insn, unsigned pseudo_mask) {
     size_t i;
 
     if ((insn->pseudo & pseudo_mask) != 0) {
         return 1;
     }
-    if (cfg->is_64 || cfg->x86_code_bits == 16u) {
+    if (cfg->is_64 || cfg->x86_code_bits == 16u || x86_addr16_by_emitters) {
         return 0;
     }
     for (i = 0; i < insn->operand_count; ++i) {
@@ -4813,7 +4903,7 @@ static int x86_stmt_outer_prefixes(const as_elf_cfg_t *cfg, const as_instruction
         size_t len = *code_len - 1;
 
         if (x86_prepend_segment(insn, code + 1, code_cap - 1, &len) != 0 ||
-            (cfg->is_64 && x86_prepend_addr32(insn, code + 1, code_cap - 1, &len) != 0)) {
+            (cfg->is_64 && x86_prepend_addr_size(insn, 32, code + 1, code_cap - 1, &len) != 0)) {
             return -1;
         }
         *code_len = len + 1;
@@ -4822,7 +4912,7 @@ static int x86_stmt_outer_prefixes(const as_elf_cfg_t *cfg, const as_instruction
     if (x86_prepend_segment(insn, code, code_cap, code_len) != 0) {
         return -1;
     }
-    return cfg->is_64 ? x86_prepend_addr32(insn, code, code_cap, code_len) : 0;
+    return cfg->is_64 ? x86_prepend_addr_size(insn, 32, code, code_cap, code_len) : 0;
 }
 
 static int x86_prepend_opsize(unsigned char *code, size_t code_cap, size_t *code_len) {
@@ -10064,6 +10154,12 @@ static int try_encode_x86_sse3(const as_x86_insn_t *in, unsigned char *code, siz
         s3.src = in->ops[1];
     }
     if (streq_ci(in->mnemonic, "fisttp")) {
+        /* (With an address of 16-bit registers it is the x87 emitter's,
+         * which knows `fisttp` with no suffix from `fisttpl`: this has
+         * lost the suffix, and would make the first the second.) */
+        if (in->op_count >= 1 && in->ops[0].kind == AS_X86_OP_MEM && in->ops[0].u.mem.addr_bits == 16u) {
+            return -1;
+        }
         if (in->operand_size_override) s3.width_bits = 16;
         else if (in->rex_w) s3.width_bits = 64;
         else s3.width_bits = 32;
@@ -11788,6 +11884,63 @@ static void x86_shorten_accumulator_move(const as_elf_cfg_t *cfg, const as_stmt_
     (*code_len)--;
 }
 
+/*
+ * The statement's bytes, by the encoders or by the emitters.  A
+ * statement of 32-bit code with an address of 16-bit registers is the
+ * encoders', which have that address's table; but they have no x87 and
+ * little SSE, and `fldl (%bx)` and `movaps (%bx), %xmm0` were
+ * "unsupported mnemonic".  What they refuse is given to the emitters.
+ */
+static int encode_x86_stmt_either(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_stmt_t *st, unsigned char *code,
+                                  size_t code_cap, size_t *code_len, char *encerr, size_t encerr_sz) {
+    char first[256];
+    int rc = encode_x86_stmt_body(ctx, cfg, st, code, code_cap, code_len, encerr, encerr_sz);
+
+    if (rc == 0 || cfg == NULL || st == NULL || st->kind != AS_STMT_INSTRUCTION || cfg->is_64 ||
+        !x86_stmt_is_the_encoders(cfg, &st->u.instr, 0)) {
+        return rc;
+    }
+    snprintf(first, sizeof(first), "%s", encerr != NULL ? encerr : "");
+    x86_addr16_by_emitters = 1;
+    rc = encode_x86_stmt_body(ctx, cfg, st, code, code_cap, code_len, encerr, encerr_sz);
+    x86_addr16_by_emitters = 0;
+    if (rc != 0 && encerr != NULL && encerr_sz != 0) {
+        snprintf(encerr, encerr_sz, "%s", first);
+    }
+    return rc;
+}
+
+/*
+ * In 32-bit code, the prefix of an address through 16-bit registers,
+ * where the emitter that wrote the instruction has not put it on.
+ */
+static int x86_addr16_prefix(const as_elf_cfg_t *cfg, const as_stmt_t *st, unsigned char *code, size_t code_cap,
+                             size_t *code_len) {
+    size_t skip;
+    size_t len;
+    size_t i;
+
+    if (cfg == NULL || st == NULL || st->kind != AS_STMT_INSTRUCTION || cfg->is_64 || cfg->x86_code_bits == 16) {
+        return 0;
+    }
+    /* (A wait is an instruction of its own, and the prefix is of the
+     * one after it.) */
+    skip = (*code_len > 1 && code[0] == 0x9b) ? 1 : 0;
+    for (i = skip; i < *code_len && (code[i] == 0x26 || code[i] == 0x2e || code[i] == 0x36 || code[i] == 0x3e ||
+                                     code[i] == 0x64 || code[i] == 0x65 || code[i] == 0x66 || code[i] == 0x67 ||
+                                     code[i] == 0xf0 || code[i] == 0xf2 || code[i] == 0xf3); ++i) {
+        if (code[i] == 0x67) {
+            return 0;
+        }
+    }
+    len = *code_len - skip;
+    if (x86_prepend_addr_size(&st->u.instr, 16, code + skip, code_cap - skip, &len) != 0) {
+        return -1;
+    }
+    *code_len = len + skip;
+    return 0;
+}
+
 static int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_stmt_t *st, unsigned char *code,
                            size_t code_cap, size_t *code_len, char *encerr, size_t encerr_sz) {
     as_stmt_t bare;
@@ -11849,7 +12002,10 @@ static int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_st
                 set_x86_isa_requirement(encerr, encerr_sz, st->u.instr.mnemonic, 4);
                 return -1;
             }
-            return x86_stmt_outer_prefixes(cfg, &st->u.instr, code, code_cap, code_len);
+            if (x86_stmt_outer_prefixes(cfg, &st->u.instr, code, code_cap, code_len) != 0) {
+                return -1;
+            }
+            return x86_addr16_prefix(cfg, st, code, code_cap, code_len);
         }
     }
 
@@ -11998,10 +12154,11 @@ static int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_st
     }
 
     if (st == NULL || st->kind != AS_STMT_INSTRUCTION || (st->u.instr.prefixes & AS_PREFIX_DATA16) == 0) {
-        int rc = encode_x86_stmt_body(ctx, cfg, st, code, code_cap, code_len, encerr, encerr_sz);
+        int rc = encode_x86_stmt_either(ctx, cfg, st, code, code_cap, code_len, encerr, encerr_sz);
 
         if (rc == 0) {
             x86_shorten_accumulator_move(cfg, st, code, code_len);
+            rc = x86_addr16_prefix(cfg, st, code, code_cap, code_len);
         }
 
         /*
@@ -12036,7 +12193,7 @@ static int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_st
     }
     bare = *st;
     bare.u.instr.prefixes &= ~AS_PREFIX_DATA16;
-    if (encode_x86_stmt_body(ctx, cfg, &bare, code, code_cap, code_len, encerr, encerr_sz) != 0) {
+    if (encode_x86_stmt_either(ctx, cfg, &bare, code, code_cap, code_len, encerr, encerr_sz) != 0) {
         return -1;
     }
     for (i = 0; i < *code_len && (code[i] == 0x26 || code[i] == 0x2e || code[i] == 0x36 || code[i] == 0x3e ||
@@ -12048,7 +12205,10 @@ static int encode_x86_stmt(emit_ctx_t *ctx, const as_elf_cfg_t *cfg, const as_st
         }
     }
     x86_shorten_accumulator_move(cfg, st, code, code_len);
-    return x86_prepend_opsize(code, code_cap, code_len);
+    if (x86_prepend_opsize(code, code_cap, code_len) != 0) {
+        return -1;
+    }
+    return x86_addr16_prefix(cfg, st, code, code_cap, code_len);
 }
 
 static int eval_local_rel_expr_virtual(emit_ctx_t *ctx, const char *section_name, const as_stmt_t *base_st, uint64_t base_off,
@@ -17403,6 +17563,10 @@ static int x86_disp16_offset(const unsigned char *code, size_t len, size_t *off_
     unsigned mod;
     unsigned rm;
 
+    /* A wait before an x87 instruction is not part of it. */
+    if (len > 1 && code[0] == 0x9b) {
+        i = 1;
+    }
     while (i < len && (code[i] == 0x66 || code[i] == 0x67 || code[i] == 0xf0 || code[i] == 0xf2 ||
                        code[i] == 0xf3 || code[i] == 0x2e || code[i] == 0x36 || code[i] == 0x3e ||
                        code[i] == 0x26 || code[i] == 0x64 || code[i] == 0x65)) {
@@ -17414,7 +17578,15 @@ static int x86_disp16_offset(const unsigned char *code, size_t len, size_t *off_
     if (!addr16 || i >= len) {
         return -1;
     }
-    if (code[i] == 0x0f) {
+    /* VEX and EVEX, which in 32-bit code are told from les, lds and
+     * bound by the two top bits of the next byte. */
+    if (i + 1 < len && code[i] == 0xc5 && (code[i + 1] & 0xc0u) == 0xc0u) {
+        i += 2;
+    } else if (i + 1 < len && code[i] == 0xc4 && (code[i + 1] & 0xc0u) == 0xc0u) {
+        i += 3;
+    } else if (i + 1 < len && code[i] == 0x62 && (code[i + 1] & 0xc0u) == 0xc0u) {
+        i += 4;
+    } else if (code[i] == 0x0f) {
         i++;
         if (i < len && (code[i] == 0x38 || code[i] == 0x3a)) {
             i++;

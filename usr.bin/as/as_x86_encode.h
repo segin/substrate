@@ -159,6 +159,78 @@ size_t as_x86_outer_prefixes(const as_x86_insn_t *insn, uint8_t out[AS_X86_OUTER
 int as_x86_encode_ext(as_x86_ext_encode_fn fn, const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
                       size_t *out_len, char *errbuf, size_t errbuf_sz);
 
+/*
+ * ModRM and the displacement after it for an address of 16-bit
+ * registers, which has a table of its own: %bx or %bp with %si or %di,
+ * or one of the four alone, and a displacement of one byte or two.
+ * `reg_field` is ModRM's middle three bits.  `disp8` is 0 where a
+ * displacement of one byte is not that byte (EVEX scales it), and two
+ * are written.  The bytes, at most three, go to `out` and their number
+ * to `n`; -1 if the address is not one of that table.
+ *
+ * The encoders of the extensions each write ModRM themselves, and none
+ * of them had this table: given `vaddps (%bx,%si), %xmm0, %xmm1` in
+ * 32-bit code they wrote a SIB byte of %ebx and %esi.  They all come
+ * here for such an address -- and each is a file that is built and
+ * tested by itself, which is why this is in the header.
+ */
+static inline int as_x86_modrm16(const as_x86_mem_t *m, unsigned reg_field, int disp8, uint8_t out[3], size_t *n) {
+    unsigned rm;
+    unsigned mod;
+    int32_t disp;
+
+    if (m == NULL || out == NULL || n == NULL || m->rip_relative || (m->scale != 0 && m->scale != 1)) {
+        return -1;
+    }
+    disp = m->has_disp || m->disp_only ? m->disp : 0;
+    if (m->disp_only) {
+        /* No register: mod 00 and r/m 110, and two bytes. */
+        out[0] = (uint8_t)(((reg_field & 7u) << 3) | 6u);
+        out[1] = (uint8_t)(disp & 0xff);
+        out[2] = (uint8_t)((disp >> 8) & 0xff);
+        *n = 3;
+        return 0;
+    }
+    if (m->has_base && m->has_index && (m->base == AS_X86_REG_RBX || m->base == AS_X86_REG_RBP) &&
+        (m->index == AS_X86_REG_RSI || m->index == AS_X86_REG_RDI)) {
+        rm = (m->base == AS_X86_REG_RBP ? 2u : 0u) + (m->index == AS_X86_REG_RDI ? 1u : 0u);
+    } else if (!m->has_base || m->has_index) {
+        return -1;
+    } else if (m->base == AS_X86_REG_RSI) {
+        rm = 4;
+    } else if (m->base == AS_X86_REG_RDI) {
+        rm = 5;
+    } else if (m->base == AS_X86_REG_RBP) {
+        rm = 6;
+    } else if (m->base == AS_X86_REG_RBX) {
+        rm = 7;
+    } else {
+        return -1;
+    }
+    if (m->force_disp32) {
+        mod = 2;
+    } else if (disp == 0 && rm != 6) {
+        mod = 0;
+    } else if (disp8 && disp >= -128 && disp <= 127) {
+        /* (%bp alone with no displacement would be the address with
+         * no register, and is given a displacement of nothing.) */
+        mod = 1;
+    } else if (disp >= -32768 && disp <= 65535) {
+        mod = 2;
+    } else {
+        return -1;
+    }
+    out[0] = (uint8_t)((mod << 6) | ((reg_field & 7u) << 3) | rm);
+    *n = 1;
+    if (mod == 1) {
+        out[(*n)++] = (uint8_t)(disp & 0xff);
+    } else if (mod == 2) {
+        out[(*n)++] = (uint8_t)(disp & 0xff);
+        out[(*n)++] = (uint8_t)((disp >> 8) & 0xff);
+    }
+    return 0;
+}
+
 #ifdef __cplusplus
 }
 #endif

@@ -118,6 +118,23 @@ static int modrm_sib_disp64(s41_ctx_t *ctx, as_x86_reg_t reg_field, const as_x86
         uint8_t sib = 0;
         int needs_sib = 0;
 
+        /* An address of 16-bit registers has a table of its own. */
+        if (m->addr_bits == 16u) {
+            uint8_t bytes16[3];
+            size_t n16 = 0;
+            size_t k16;
+
+            if (as_x86_modrm16(m, reg_low3(reg_field), 1, bytes16, &n16) != 0) {
+                return -1;
+            }
+            for (k16 = 0; k16 < n16; ++k16) {
+                if (emit8(ctx, bytes16[k16]) != 0) {
+                    return -1;
+                }
+            }
+            return 0;
+        }
+
         if (m->scale != 0 && m->scale != 1 && m->scale != 2 && m->scale != 4 && m->scale != 8) {
             set_err(ctx, "invalid scale %u", m->scale);
             return -1;

@@ -641,10 +641,12 @@ one table of templates; there is one ModRM/SIB/prefix emitter.
 
 ### D.2 Address size
 
-- [ ] **AS-T-176** When the base or index register of a memory operand is of a width other than the mode's address size, the assembler shall emit the `67` prefix, or refuse where no encoding exists.
+- [x] **AS-T-176** When the base or index register of a memory operand is of a width other than the mode's address size, the assembler shall emit the `67` prefix, or refuse where no encoding exists.
   Trace: AS-SEL-010.  Verify: T — `movaps (%bx),%xmm0` in 32-bit mode (16-bit ModRM with `67`), `fldl (%eax)` in 64-bit mode (`67 dd 00`), `movl (%rax),%ebx` in 32-bit mode refused.  After: 162.
   Mostly done, ahead of 162, for being silent.  64-bit code had no `67` on anything: `movl (%eax),%ecx` read through `%rax`.  Every encoder and emitter now has it, after a segment override as GNU has it, and a symbol's displacement behind it is found and is `R_X86_64_32`.  A 16-bit address in 64-bit code and a 64-bit one in 32-bit code are refused.  In 32-bit code the main encoder's 16-bit addresses had a symbol's relocation written four bytes wide over the instruction (`movl %eax,sym(%bx)` was `67 00 00 00 00`); it is two bytes and `R_386_16`.  `test_address_size.sh`, 68 cases; 290 more lines of the corpora are GNU's.  With it: `leal sym(%rax),%edx` has GNU's `R_X86_64_32`.
   Left, and why this is not ticked: the x87, SSE and VEX emitters have no 16-bit ModRM table, so `movaps (%bx),%xmm0` and `fldl (%bx)` in 32-bit code -- which they wrote as `(%ebx)` -- are refused where GNU assembles them.  That wants the one emitter of 162.
+  Done, without waiting for 162.  The table is in two places, one for each kind of operand the emitters are handed: `emit_i386_modrm16()` for the statement's own, and `as_x86_modrm16()` for the encoders', which the nine writers of ModRM in the extension encoders all go to.  A statement with such an address is still the main encoder's first; what it has no instruction for is given to the emitters, and the prefix is put on after a wait and a segment override, as GNU has it.  A symbol's displacement there is two bytes and `R_386_16`, behind a wait or a VEX prefix too.  `test_address_size.sh` has 52 more cases, 120 in all; of 2,291 lines of the 32-bit corpus rewritten to 16-bit addresses, 2,227 are GNU's bytes (2,049 before), 51 are a longer form of the same meaning, and none is wrong.
+  Open, and small: `vmovaps`, `vmovd`, `vmovss`, `vextractf128` and `vcvtph2ps` with a 16-bit address are refused still; an EVEX instruction with one has a two-byte displacement where GNU scales one byte (319's); and `movaps 0x10000(%bx),%xmm0`, whose displacement GNU cuts down to 16 bits, is refused.
 - [x] **AS-T-177** If the base and index of a memory operand are of different widths, then the assembler shall refuse the operand, but for a vector index.
   Trace: AS-SEL-010, AS-EXT-009.  Verify: T — `(%eax,%rbx)` refused; `(%rax,%xmm2,4)` accepted for a gather.  After: 162.
   Done, ahead of 162: `(%eax,%rbx)` was refused already, and so was every gather, a vector register being a width that the base's was not.  A vector index makes no width, and is taken for an instruction that gathers or scatters and for no other -- `movl (%rax,%xmm1),%ecx` is refused where, the width check gone, it would have been `(%rax,%rcx)`.  `vgatherdps`, `vpgatherdd`, `vgatherqpd` and the EVEX `vgatherdps` with a mask are GNU's in both modes (`test_addressing_forms.sh`).  Not done: a scatter, whose mask is written on its memory operand and is refused there.
@@ -1215,5 +1217,5 @@ is not to be done, 370 is ticked with "removed" and the rest struck.
 | AS-EXT-009 | 185, 325, 332–337 |
 | AS-EXT-010 | 040, 171, 338, 339 (339 closes all of AS-EXT) |
 
-351 tasks: 200 done, 151 open.  Numbers run to 400, with gaps left between
+351 tasks: 201 done, 150 open.  Numbers run to 400, with gaps left between
 sections for tasks found along the way.

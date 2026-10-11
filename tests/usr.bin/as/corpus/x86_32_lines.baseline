@@ -23,8 +23,6 @@ movl sym@TLSGD(%ebx),%ecx
 leal sym@TLSGD(%ebx),%edx
 movl %eax,sym@TLSDESC(%ebx)
 movl sym@TLSDESC(%ebx),%ecx
-fldl (%bp,%di)
-fldl (%bp,%si)
 movb $1,sym@GOTTPOFF(%ebx)
 movw $0x1234,sym@GOTTPOFF(%ebx)
 movl $0x12345678,sym@GOTTPOFF(%ebx)
@@ -447,7 +445,6 @@ fnstenvl (%eax)
 .code16 | movw $0x1234,sym
 .code16 | movw %fs:sym,%ax
 .code16 | bswap %eax
-.code16 | flds (%bx)
 .code16 | nop | .code32 | movl sym,%eax | .code16 | movw sym,%ax
 .code16 | movl sym(%eax),%ebx
 .code16 | pushl $sym
@@ -463,4 +460,3 @@ fnstenvl (%eax)
 addr16 movl sym,%eax
 addr16 movl %eax,sym
 addr16 loop 1f | 1:
-fldl (%bx)
