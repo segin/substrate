@@ -28,6 +28,7 @@
 .Op Fl -max-token-length Ar n
 .Op Fl -max-macro-depth Ar n
 .Op Fl -max-include-depth Ar n
+.Op Fl -max-expansion-bytes Ar n
 .Op Fl o Ar output
 .Op Ar file ...
 .Sh DESCRIPTION
@@ -175,24 +176,36 @@ through, so this is what such an option arrives as.
 .It Fl -gdwarf- Ns Ar N , Fl -noexecstack
 Accepted, with no effect: compilers' drivers pass them.
 .It Fl -max-input-bytes Ar n
-Reject source larger than
+Refuse a source of more than
 .Ar n
-bytes.
+bytes, as it is read and before anything in it is expanded.
 .It Fl -max-line-bytes Ar n
-Reject logical lines larger than
+Refuse a source with a line of more than
 .Ar n
-bytes.
+bytes, not counting the newline that ends it.
 .It Fl -max-token-length Ar n
-Reject tokens larger than
+Refuse a source in which more than
 .Ar n
-bytes.
+bytes stand together with no white space between them.
 .It Fl -max-macro-depth Ar n
-Reject macro nesting deeper than
-.Ar n .
+Refuse a source whose macros are expanded more than
+.Ar n
+deep, one calling the next; 64 if not given.
+It is what stops a macro that calls itself without end.
 .It Fl -max-include-depth Ar n
-Reject include nesting deeper than
-.Ar n .
+Refuse a source whose
+.Cm .include
+directives are nested more than
+.Ar n
+deep.
+.It Fl -max-expansion-bytes Ar n
+Refuse a source that comes to more than
+.Ar n
+bytes once its macros and repeats are expanded; 256 MiB if not given.
 .El
+.Pp
+Each limit is a positive decimal number; zero, a negative number and
+anything else are refused.
 .Pp
 An option that is none of these is an error: the assembler names it,
 assembles nothing, and exits with status 1.

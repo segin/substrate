@@ -411,34 +411,48 @@ with a symbol table.
 
 ### C.2 Macros and repeats
 
-- [ ] **AS-T-109** If a macro is defined twice, then the assembler shall fail and name both definitions.
+- [x] **AS-T-109** If a macro is defined twice, then the assembler shall fail and name both definitions.
   Trace: AS-FE-008.  Verify: T — as GNU; `.purgem` then a new definition is accepted.
-- [ ] **AS-T-110** When `.purgem` is assembled, the assembler shall remove the macro.
+  Done, with 110 to 117, in the pass that expands macros (`expand_gas_macro_statement`); `test_macro_forms.sh`, 121 cases, the bytes GNU's.  The second definition replaced the first without a word.  It is refused, at its line, with the file and line of the first.
+- [x] **AS-T-110** When `.purgem` is assembled, the assembler shall remove the macro.
   Trace: AS-FE-010.  Verify: T.
-- [ ] **AS-T-111** When `.exitm` is assembled, the assembler shall end the innermost macro expansion.
+  Done: it was not a directive.  Of a name that is no macro it says nothing, as GNU.
+- [x] **AS-T-111** When `.exitm` is assembled, the assembler shall end the innermost macro expansion.
   Trace: AS-FE-010.  Verify: T — a recursive macro that ends itself with `.if` / `.exitm` terminates.
-- [ ] **AS-T-112** When a macro parameter is declared `:req`, and the macro is called without it, the assembler shall fail.
+  Done, and with it what it stands on: a macro that called itself could not end, by `.if` or by `.exitm`, because macros were expanded before any conditional was looked at -- it went 64 deep and failed.  The pass now follows the conditionals of what it writes (the state machine of 107) and does not expand a call, define a macro or act on `.exitm` in a branch not taken.  `.exitm` ends the expansion it is in and closes the conditionals that expansion had opened.
+- [x] **AS-T-112** When a macro parameter is declared `:req`, and the macro is called without it, the assembler shall fail.
   Trace: AS-FE-012.  Verify: T.
-- [ ] **AS-T-113** When a macro's last parameter is declared `:vararg`, the assembler shall give it all remaining arguments with their commas.
+  Done: what stood after a parameter's colon was thrown away, and a call without the argument failed only where the empty text happened not to assemble.  It is refused by name: "macro m is called without b, which it requires".
+- [x] **AS-T-113** When a macro's last parameter is declared `:vararg`, the assembler shall give it all remaining arguments with their commas.
   Trace: AS-FE-012.  Verify: T.
-- [ ] **AS-T-114** When a macro argument is quoted, the assembler shall pass it as GNU `as` passes it.
+  Done: it took the first of them and the rest were dropped.
+- [x] **AS-T-114** When a macro argument is quoted, the assembler shall pass it as GNU `as` passes it.
   Trace: AS-FE-012.  Verify: T — `m "a b"` used as `.ascii \x` and as an operand.
-- [ ] **AS-T-115** When `\@` is expanded, the assembler shall give the count of macro expansions so far, starting at 0.
+  It was as GNU's already: the quotes are taken off, so `.ascii "\x"` is the text and `movl \x, %eax` with `m "$5"` is `movl $5, %eax`.  One thing GNU refuses is taken here: `.ascii \x` then being `.ascii a b`, with no quotes, which stores the letters -- a string directive does not insist on a string.
+- [x] **AS-T-115** When `\@` is expanded, the assembler shall give the count of macro expansions so far, starting at 0.
   Trace: AS-FE-012.  Verify: T.
-- [ ] **AS-T-116** When a `.macro` is written inside a macro body, the assembler shall match each `.endm` to its own `.macro`.
+  Done: it began at 1.  It is the number of expansions begun before this one, so an inner macro's is higher than its caller's, and the caller's is unchanged after it.
+- [x] **AS-T-116** When a `.macro` is written inside a macro body, the assembler shall match each `.endm` to its own `.macro`.
   Trace: AS-FE-012.  Verify: T — a macro that defines a macro.
-- [ ] **AS-T-117** If the input ends inside `.macro`, `.rept`, `.irp` or `.irpc`, then the assembler shall fail and name the line where it began.
+  Done: the outer body ended at the first `.endm`, and the inner definition was never made.  The lines of a body are counted through, and a `.macro` in what an expansion writes defines a macro, with the caller's arguments in its name and body.
+- [x] **AS-T-117** If the input ends inside `.macro`, `.rept`, `.irp` or `.irpc`, then the assembler shall fail and name the line where it began.
   Trace: AS-FE-012.  Verify: T — each.
-- [ ] **AS-T-118** When `.altmacro` is written, the assembler shall implement it or fail.
+  Done: each was assembled as far as it went -- a `.macro` with no `.endm` defined nothing and said nothing, a `.rept` repeated to the end of the file.  "the .rept here has no .endr", at the line it began on.
+- [x] **AS-T-118** When `.altmacro` is written, the assembler shall implement it or fail.
   Trace: AS-FE-010.  Verify: T — exit 1 with "not supported" is acceptable.
-- [ ] **AS-T-119** When `.string`, `.ascii` or `.asciz` is given adjacent strings, the assembler shall concatenate them with nothing between.
+  It fails, since 074: "unknown directive .altmacro", exit 1.  `.noaltmacro`, which asks for what is done anyway, is taken.
+- [x] **AS-T-119** When `.string`, `.ascii` or `.asciz` is given adjacent strings, the assembler shall concatenate them with nothing between.
   Trace: AS-FE-012, AS-OBJ-016.  Verify: T — `.ascii "a" "b"` is `61 62`.
-- [ ] **AS-T-120** If expansion would exceed `--max-expansion-bytes` (a new limit, default 256 MiB of statements), then the assembler shall fail.
+  Done in the parser, where an argument is made of its tokens: several strings and nothing else are joined with nothing between, where a space was put and stored.  `.string "a" "b"` is `ab` and one NUL.
+- [x] **AS-T-120** If expansion would exceed `--max-expansion-bytes` (a new limit, default 256 MiB of statements), then the assembler shall fail.
   Trace: AS-FE-022.  Verify: T — `.rept 0x7fffffff` / `.endr` and two nested `.rept 200000` fail within a second; `as(1)` documents the option.  After: 091.
-- [ ] **AS-T-121** If macro expansion nests deeper than `--max-macro-depth`, then the assembler shall fail and name the macro.
+  Done.  The limit is on the bytes of the expanded source, and a repeat is measured before it is begun -- its body's bytes, the repeats inside it counted as many times as they say, times its count -- so both of the Verify's cases fail at once and not after 256 MiB have been written.  A repeat of an empty body is nothing, however many times.  `test_macro_forms.sh`; as(1).
+- [x] **AS-T-121** If macro expansion nests deeper than `--max-macro-depth`, then the assembler shall fail and name the macro.
   Trace: AS-FE-023.  Verify: T — the option, not a constant 64, is the limit.
-- [ ] **AS-T-122** The limits `--max-line-bytes`, `--max-token-length` and `--max-include-depth` shall each mean what `as(1)` says, and shall refuse a value that is not a positive number.
+  Done: the option is the limit, and 64 where it is not given.  The message gives the line of the call and the limit; it does not name the macro.
+- [x] **AS-T-122** The limits `--max-line-bytes`, `--max-token-length` and `--max-include-depth` shall each mean what `as(1)` says, and shall refuse a value that is not a positive number.
   Trace: AS-FE-023.  Verify: T — a line of exactly the limit passes and one more fails; `--max-line-bytes=-1` is refused; the man page states each definition.
+  Done.  `-1` was read as the largest number there is and 0 as no limit; each, and anything not a number, is refused.  A line was counted with its newline, so one of exactly the limit failed.  as(1) says what each of the six counts.
 
 ### C.3 Includes
 
@@ -1132,5 +1146,5 @@ is not to be done, 370 is ticked with "removed" and the rest struck.
 | AS-EXT-009 | 185, 325, 332–337 |
 | AS-EXT-010 | 040, 171, 338, 339 (339 closes all of AS-EXT) |
 
-351 tasks: 132 done, 219 open.  Numbers run to 400, with gaps left between
+351 tasks: 146 done, 205 open.  Numbers run to 400, with gaps left between
 sections for tasks found along the way.

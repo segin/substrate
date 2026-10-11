@@ -34,6 +34,13 @@
 #define SUBSTRATE_TC_MAX_ENV "SUBSTRATE_TC_MAX_DEPTH"
 #define SUBSTRATE_TC_DEFAULT_MAX 64
 
+/* How large a source may grow as its macros and repeats are expanded,
+ * where --max-expansion-bytes does not say: 256 MiB. */
+#define AS_EXPANSION_BYTES_DEFAULT (256ull * 1024 * 1024)
+
+/* How deep macros may be expanded, where --max-macro-depth does not say. */
+#define AS_MACRO_DEPTH_DEFAULT 64
+
 /* What the standard input is called in a message, as GNU as calls it. */
 #define AS_STDIN_NAME "{standard input}"
 
@@ -255,6 +262,9 @@ static int directive_is_known(const char *name) {
         ".extern", ".arch", ".loc_mark_labels", ".line", ".ln", ".eject", ".list", ".nolist", ".title",
         ".sbttl", ".psize", ".stabs", ".stabn", ".stabd", ".version", ".gnu_attribute", ".addrsig",
         ".addrsig_sym", ".sse_check", ".operand_check",
+        /* The way macros are read unless .altmacro says otherwise, and
+         * .altmacro is not taken. */
+        ".noaltmacro",
     };
     size_t i;
 
@@ -621,7 +631,10 @@ static int preflight_source_limits(const as_ctx_t *ctx) {
             preflight_done(fp, ctx);
             return -1;
         }
-        if (ctx->max_line_bytes > 0 && (unsigned long long)nread > ctx->max_line_bytes) {
+        /* The bytes of the line, without the newline that ends it: a
+         * line of exactly the limit passes. */
+        if (ctx->max_line_bytes > 0 &&
+            (unsigned long long)(nread > 0 && line[nread - 1] == '\n' ? nread - 1 : nread) > ctx->max_line_bytes) {
             as_diag(AS_E_LIMIT, "%s:%llu: line exceeds --max-line-bytes=%llu", ctx->in_path, lineno,
                     ctx->max_line_bytes);
             free(line);
@@ -1053,6 +1066,13 @@ typedef struct as_text {
     int mid_line;
 } as_text_t;
 
+/* The expansion of macros and repeats says what is wrong here, for
+ * whoever called it to report: a pass has no other way to. */
+static char expand_err[256];
+
+/* The most bytes a source may come to, expanded (--max-expansion-bytes). */
+static unsigned long long text_limit = AS_EXPANSION_BYTES_DEFAULT;
+
 static void text_free(as_text_t *t) {
     if (t == NULL) {
         return;
@@ -1076,6 +1096,16 @@ static int text_set_file(char **slot, const char *name) {
 
 static int text_reserve(as_text_t *t, size_t more) {
     if (t->failed) {
+        return -1;
+    }
+    /* `.rept 0x7fffffff` and a repeat inside a repeat ask for more than
+     * there is, and were given it until the machine had none. */
+    if (t->origin != NULL && (unsigned long long)t->len + more > text_limit) {
+        if (expand_err[0] == '\0') {
+            snprintf(expand_err, sizeof(expand_err),
+                     "the source expands to more than %llu bytes (--max-expansion-bytes)", text_limit);
+        }
+        t->failed = 1;
         return -1;
     }
     if (t->len + more + 1 > t->cap) {
@@ -1145,8 +1175,23 @@ static void text_putc(int c, as_text_t *t) {
 }
 
 static void text_puts(const char *s, as_text_t *t) {
-    for (; *s != '\0'; ++s) {
-        text_putc((unsigned char)*s, t);
+    /* A line at a time, not a character: an expansion may be of many
+     * millions of them. */
+    while (*s != '\0') {
+        const char *nl = strchr(s, '\n');
+        size_t n = nl != NULL ? (size_t)(nl - s) + 1 : strlen(s);
+
+        if (!t->mid_line) {
+            text_begin_line(t);
+        }
+        text_put_raw(t, s, n);
+        if (nl != NULL) {
+            t->out_line++;
+            t->mid_line = 0;
+        } else {
+            t->mid_line = 1;
+        }
+        s += n;
     }
 }
 
@@ -1239,6 +1284,7 @@ static ssize_t text_getline(char **line, size_t *cap, as_text_t *t) {
     }
 }
 
+
 /* Read it again from its first line. */
 static void text_rewind(as_text_t *t) {
     t->pos = 0;
@@ -1329,6 +1375,8 @@ static int expand_irp_block(as_text_t *in, as_text_t *out, const char *header, i
     size_t cap = 0;
     strvec_t body = {0};
     int rc = -1;
+    int closed = 0;
+    unsigned begun = in->line;
 
     spec = xstrdup(header);
     if (spec == NULL) {
@@ -1340,13 +1388,18 @@ static int expand_irp_block(as_text_t *in, as_text_t *out, const char *header, i
     }
     var = trim_in_place(var);
     comma = strchr(var, ',');
+    /* With no values the body is assembled once, the name standing for
+     * nothing. */
     if (comma == NULL) {
-        goto out;
+        vals = var + strlen(var);
+    } else {
+        *comma = '\0';
+        vals = trim_in_place(comma + 1);
     }
-    *comma = '\0';
-    vals = trim_in_place(comma + 1);
     var = trim_in_place(var);
     if (var == NULL || *var == '\0' || vals == NULL) {
+        snprintf(expand_err, sizeof(expand_err), "%s:%u: %s: no name to stand for the values",
+                 in->file != NULL ? in->file : "<input>", in->line, chars_mode ? ".irpc" : ".irp");
         goto out;
     }
     if (*vals == '"' || *vals == '\'') {
@@ -1359,11 +1412,28 @@ static int expand_irp_block(as_text_t *in, as_text_t *out, const char *header, i
 
     while (text_getline(&line, &cap, in) >= 0) {
         if (line_starts_with_directive(line, ".endr")) {
+            closed = 1;
             break;
         }
         if (strvec_push(&body, line) != 0) {
             goto out;
         }
+    }
+    if (!closed) {
+        snprintf(expand_err, sizeof(expand_err), "%s:%u: the %s here has no .endr",
+                 in->file != NULL ? in->file : "<input>", begun, chars_mode ? ".irpc" : ".irp");
+        goto out;
+    }
+    if (!chars_mode && *vals == '\0') {
+        size_t i;
+
+        for (i = 0; i < body.count; ++i) {
+            if (write_substituted_line(out, body.items[i], var, "") != 0) {
+                goto out;
+            }
+        }
+        rc = 0;
+        goto out;
     }
 
     if (chars_mode) {
@@ -1418,6 +1488,46 @@ static int eval_rept_count(const char *s, long *out) {
     return 0;
 }
 
+/*
+ * How many bytes the body of a repeat comes to, the repeats inside it
+ * counted as many times as they say: what two nested `.rept 200000`
+ * would be is known from their two lines, not from writing it.  Capped,
+ * so that it cannot wrap.
+ */
+static unsigned long long rept_body_bytes(const strvec_t *body) {
+    const unsigned long long cap = 1ull << 60;
+    unsigned long long times[32];
+    size_t depth = 0;
+    unsigned long long factor = 1;
+    unsigned long long bytes = 0;
+    size_t k;
+
+    for (k = 0; k < body->count; ++k) {
+        const char *d = line_start_directive(body->items[k]);
+        unsigned long long len = strlen(body->items[k]);
+        long n;
+
+        if (line_starts_with_directive(d, ".endr")) {
+            if (depth > 0) {
+                factor = times[--depth];
+            }
+            continue;
+        }
+        if (line_starts_with_directive(d, ".rept") && depth < sizeof(times) / sizeof(times[0])) {
+            times[depth++] = factor;
+            if (eval_rept_count(d + 5, &n) == 0 && n >= 0) {
+                factor = (unsigned long long)n > cap / (factor != 0 ? factor : 1) ? cap : factor * (unsigned long long)n;
+            }
+            continue;
+        }
+        bytes += len > cap / (factor != 0 ? factor : 1) ? cap : len * factor;
+        if (bytes > cap) {
+            bytes = cap;
+        }
+    }
+    return bytes;
+}
+
 static int expand_rept_block(as_text_t *in, as_text_t *out, const char *header) {
     char *line = NULL;
     size_t cap = 0;
@@ -1426,6 +1536,7 @@ static int expand_rept_block(as_text_t *in, as_text_t *out, const char *header) 
     long iter;
     int nested = 0;
     int rc = -1;
+    int closed = 0;
     unsigned first_line = in->line + 1;
     unsigned end_line;
 
@@ -1438,6 +1549,7 @@ static int expand_rept_block(as_text_t *in, as_text_t *out, const char *header) 
             nested++;
         } else if (line_starts_with_directive(d, ".endr")) {
             if (nested == 0) {
+                closed = 1;
                 break;
             }
             nested--;
@@ -1448,7 +1560,28 @@ static int expand_rept_block(as_text_t *in, as_text_t *out, const char *header) 
     }
     /* Each copy of a line is of the line it was written on, which is
      * where a message about it should point. */
+    if (!closed) {
+        snprintf(expand_err, sizeof(expand_err), "%s:%u: the .rept here has no .endr",
+                 in->file != NULL ? in->file : "<input>", first_line - 1);
+        goto out;
+    }
     end_line = in->line;
+    /* A body of nothing, however many times, is nothing. */
+    if (body.count == 0) {
+        count = 0;
+    }
+    /* And one that would come to more than a source may is refused
+     * before it is begun, not when the last byte of it is reached. */
+    {
+        unsigned long long bytes = rept_body_bytes(&body);
+
+        if (count > 0 && bytes > text_limit / (unsigned long long)count) {
+            snprintf(expand_err, sizeof(expand_err),
+                     "%s:%u: this .rept expands to more than %llu bytes (--max-expansion-bytes)",
+                     in->file != NULL ? in->file : "<input>", first_line - 1, text_limit);
+            goto out;
+        }
+    }
     for (iter = 0; iter < count; ++iter) {
         size_t i;
         for (i = 0; i < body.count; ++i) {
@@ -1506,6 +1639,14 @@ static int expand_rept_file(as_text_t *in, as_text_t *out) {
     rc = 0;
 
 out:
+    /* Where it went wrong, if what says so does not say where. */
+    if (rc != 0 && expand_err[0] != '\0' && in->file != NULL &&
+        strncmp(expand_err, in->file, strlen(in->file)) != 0) {
+        char said[sizeof(expand_err)];
+
+        snprintf(said, sizeof(said), "%s", expand_err);
+        snprintf(expand_err, sizeof(expand_err), "%s:%u: %.180s", in->file, in->line, said);
+    }
     free(line);
     return rc;
 }
@@ -1514,14 +1655,35 @@ typedef struct {
     char *name;
     strvec_t params;
     strvec_t defaults;
+    /* What each parameter was declared as, after its colon: "", "req"
+     * for one that must be given, "vararg" for one that takes the rest. */
+    strvec_t kinds;
     strvec_t body;
+    /* Where it was defined, to be named if it is defined again. */
+    char *def_file;
+    unsigned def_line;
 } gas_macro_t;
+
+struct macro_cond;
 
 typedef struct {
     gas_macro_t *items;
     size_t count;
     size_t cap;
+    /* How many expansions have been begun: what \@ is in the next. */
     unsigned long serial;
+    /* How deep an expansion may go (--max-macro-depth). */
+    unsigned long max_depth;
+    /* The conditionals of what has been written, and the text. */
+    struct macro_cond *conds;
+    /* A macro being defined: the lines up to its own .endm are its
+     * body, and `def_nesting` counts the .macro lines among them. */
+    int defining;
+    unsigned def_nesting;
+    gas_macro_t def;
+    /* Where the line being expanded is from. */
+    const char *file;
+    unsigned line;
 } gas_macro_vec_t;
 
 static void gas_macro_free(gas_macro_t *m) {
@@ -1529,8 +1691,10 @@ static void gas_macro_free(gas_macro_t *m) {
         return;
     }
     free(m->name);
+    free(m->def_file);
     strvec_free(&m->params);
     strvec_free(&m->defaults);
+    strvec_free(&m->kinds);
     strvec_free(&m->body);
     memset(m, 0, sizeof(*m));
 }
@@ -1545,6 +1709,7 @@ static void gas_macro_vec_free(gas_macro_vec_t *v) {
         gas_macro_free(&v->items[i]);
     }
     free(v->items);
+    gas_macro_free(&v->def);
     memset(v, 0, sizeof(*v));
 }
 
@@ -1772,6 +1937,8 @@ static int parse_gas_macro_header(const char *header, gas_macro_t *m) {
         char *eq = strchr(spec, '=');
         char *colon;
         char *def = "";
+        char *kind = "";
+        size_t k;
         if (eq != NULL) {
             *eq = '\0';
             def = trim_in_place(eq + 1);
@@ -1779,10 +1946,22 @@ static int parse_gas_macro_header(const char *header, gas_macro_t *m) {
         colon = strchr(spec, ':');
         if (colon != NULL) {
             *colon = '\0';
+            kind = trim_in_place(colon + 1);
         }
         spec = trim_in_place(spec);
+        /* A parameter named twice is refused, as GNU as refuses it. */
+        for (k = 0; spec != NULL && k < m->params.count; ++k) {
+            if (strcmp(m->params.items[k], spec) == 0) {
+                snprintf(expand_err, sizeof(expand_err), "macro %s: the parameter %s is named twice", m->name, spec);
+                free(tmp);
+                strvec_free(&specs);
+                gas_macro_free(m);
+                return -1;
+            }
+        }
         if (spec != NULL && *spec != '\0') {
-            if (strvec_push(&m->params, spec) != 0 || strvec_push(&m->defaults, def) != 0) {
+            if (strvec_push(&m->params, spec) != 0 || strvec_push(&m->defaults, def) != 0 ||
+                strvec_push(&m->kinds, kind) != 0) {
                 free(tmp);
                 strvec_free(&specs);
                 gas_macro_free(m);
@@ -1909,6 +2088,14 @@ static char *macro_named_arg_eq(char *arg) {
 }
 
 static int expand_gas_macro_statement(as_text_t *out, gas_macro_vec_t *macros, const char *line, unsigned depth);
+static int macro_cond_active(struct macro_cond *mc, const as_text_t *written);
+static size_t macro_cond_depth(struct macro_cond *mc, const as_text_t *written);
+
+/* What expand_gas_macro_statement returns for an .exitm: neither done
+ * nor failed, but the end of the expansion it is in. */
+#define MACRO_EXIT 2
+/* The parameters of one macro that are known to have been given. */
+#define MACRO_PARAMS_TRACKED 64
 
 static int expand_split_statement(as_text_t *out, gas_macro_vec_t *macros, const char *line, unsigned depth) {
     size_t i;
@@ -1970,9 +2157,92 @@ static int expand_gas_macro_statement(as_text_t *out, gas_macro_vec_t *macros, c
     strvec_t args = {0};
     size_t i;
     int rc = -1;
+    const char *directive = line_start_directive(line);
+    unsigned char given[MACRO_PARAMS_TRACKED] = {0};
 
-    if (depth > 64) {
+    /* The body of a macro being defined, to its own .endm.  Its lines
+     * are kept as they are written, not expanded and not split. */
+    if (macros->defining) {
+        if (line_starts_with_directive(directive, ".endm")) {
+            if (macros->def_nesting == 0) {
+                macros->defining = 0;
+                if (gas_macro_vec_push(macros, &macros->def) != 0) {
+                    gas_macro_free(&macros->def);
+                    return -1;
+                }
+                memset(&macros->def, 0, sizeof(macros->def));
+                return 0;
+            }
+            macros->def_nesting--;
+        } else if (line_starts_with_directive(directive, ".macro")) {
+            macros->def_nesting++;
+        }
+        return strvec_push(&macros->def.body, line) != 0 ? -1 : 0;
+    }
+    if (depth > macros->max_depth) {
+        snprintf(expand_err, sizeof(expand_err),
+                 "macros are expanded more than %lu deep (--max-macro-depth): one calls itself without end, or the "
+                 "limit is too low",
+                 macros->max_depth);
         return -1;
+    }
+    /* In a branch of a conditional that is not taken nothing is defined,
+     * removed or expanded: the line goes on as it is, to be left out
+     * with the branch. */
+    if (macros->conds != NULL &&
+        (line_starts_with_directive(directive, ".macro") || line_starts_with_directive(directive, ".purgem") ||
+         line_starts_with_directive(directive, ".exitm")) &&
+        !macro_cond_active(macros->conds, out)) {
+        return write_split_asm_line(out, line);
+    }
+    if (line_starts_with_directive(directive, ".macro")) {
+        gas_macro_t *old;
+
+        if (parse_gas_macro_header(directive + 6, &macros->def) != 0) {
+            if (expand_err[0] == '\0') {
+                snprintf(expand_err, sizeof(expand_err), ".macro: no name, or parameters that cannot be read");
+            }
+            return -1;
+        }
+        old = find_gas_macro(macros, macros->def.name);
+        if (old != NULL) {
+            snprintf(expand_err, sizeof(expand_err), "macro %s is defined already, at %s:%u", old->name,
+                     old->def_file != NULL ? old->def_file : "<input>", old->def_line);
+            gas_macro_free(&macros->def);
+            return -1;
+        }
+        macros->def.def_file = xstrdup(macros->file != NULL ? macros->file : "<input>");
+        macros->def.def_line = macros->line;
+        macros->defining = 1;
+        macros->def_nesting = 0;
+        return 0;
+    }
+    if (line_starts_with_directive(directive, ".purgem")) {
+        char gone[128];
+        size_t k = 0;
+        const char *q = directive + 7;
+        gas_macro_t *old;
+
+        while (isspace((unsigned char)*q)) {
+            q++;
+        }
+        while (*q != '\0' && !isspace((unsigned char)*q) && k + 1 < sizeof(gone)) {
+            gone[k++] = *q++;
+        }
+        gone[k] = '\0';
+        old = find_gas_macro(macros, gone);
+        /* One that is not defined is nothing to remove, and GNU as says
+         * nothing of it. */
+        if (old != NULL) {
+            gas_macro_free(old);
+            *old = macros->items[--macros->count];
+        }
+        return 0;
+    }
+    if (line_starts_with_directive(directive, ".exitm")) {
+        /* For the expansion this is a line of to end; outside one it is
+         * a directive of no meaning, and is passed on to be refused. */
+        return depth > 0 ? MACRO_EXIT : write_split_asm_line(out, line);
     }
     {
         int split_rc = expand_split_statement(out, macros, line, depth);
@@ -2030,6 +2300,11 @@ static int expand_gas_macro_statement(as_text_t *out, gas_macro_vec_t *macros, c
     if (n == 0 || (m = find_gas_macro(macros, name)) == NULL) {
         return write_split_asm_line(out, line);
     }
+    /* A call in a branch not taken is not expanded: it is how a macro
+     * that calls itself comes to an end. */
+    if (macros->conds != NULL && !macro_cond_active(macros->conds, out)) {
+        return write_split_asm_line(out, line);
+    }
     values = (char **)calloc(m->params.count, sizeof(*values));
     if (values == NULL) {
         return -1;
@@ -2055,29 +2330,89 @@ static int expand_gas_macro_statement(as_text_t *out, gas_macro_vec_t *macros, c
                         if (macro_arg_assign(&values[k], trim_in_place(eq + 1)) != 0) {
                             goto out;
                         }
+                        if (k < MACRO_PARAMS_TRACKED) {
+                            given[k] = 1;
+                        }
                         break;
                     }
                 }
             } else if (pos < m->params.count) {
+                /* The last parameter, if it is :vararg, takes this
+                 * argument and all that follow, with their commas. */
+                if (pos + 1 == m->params.count && pos < m->kinds.count &&
+                    strcmp(m->kinds.items[pos], "vararg") == 0) {
+                    size_t total = 1;
+                    size_t k;
+                    char *rest;
+
+                    for (k = i; k < args.count; ++k) {
+                        total += strlen(args.items[k]) + 2;
+                    }
+                    rest = (char *)malloc(total);
+                    if (rest == NULL) {
+                        goto out;
+                    }
+                    rest[0] = '\0';
+                    for (k = i; k < args.count; ++k) {
+                        size_t at = strlen(rest);
+
+                        snprintf(rest + at, total - at, "%s%s", k == i ? "" : ", ", trim_in_place(args.items[k]));
+                    }
+                    free(values[pos]);
+                    values[pos] = rest;
+                    given[pos] = 1;
+                    break;
+                }
                 if (macro_arg_assign(&values[pos], trim_in_place(args.items[i])) != 0) {
                     goto out;
+                }
+                if (pos < MACRO_PARAMS_TRACKED) {
+                    given[pos] = 1;
                 }
                 pos++;
             }
         }
     }
+    for (i = 0; i < m->params.count && i < m->kinds.count; ++i) {
+        if (strcmp(m->kinds.items[i], "req") == 0 && (i >= MACRO_PARAMS_TRACKED || !given[i]) &&
+            values[i][0] == '\0') {
+            snprintf(expand_err, sizeof(expand_err), "macro %s is called without %s, which it requires", m->name,
+                     m->params.items[i]);
+            goto out;
+        }
+    }
     {
-        unsigned long macro_serial = ++macros->serial;
+        /* \@ is how many expansions were begun before this one. */
+        unsigned long macro_serial = macros->serial++;
+        size_t entry_depth = macros->conds != NULL ? macro_cond_depth(macros->conds, out) : 0;
+
         for (i = 0; i < m->body.count; ++i) {
             char *expanded = expand_gas_macro_line_text(m->body.items[i], m, values, macro_serial);
-        if (expanded == NULL) {
-            goto out;
-        }
-        if (expand_gas_macro_statement(out, macros, expanded, depth + 1) != 0) {
+            int step;
+
+            if (expanded == NULL) {
+                goto out;
+            }
+            step = expand_gas_macro_statement(out, macros, expanded, depth + 1);
             free(expanded);
-            goto out;
+            if (step == MACRO_EXIT) {
+                /* .exitm: the rest of the body is not expanded, and the
+                 * conditionals it opened are closed for it. */
+                size_t now = macros->conds != NULL ? macro_cond_depth(macros->conds, out) : entry_depth;
+
+                for (; now > entry_depth; --now) {
+                    text_puts(".endif\n", out);
+                }
+                break;
+            }
+            if (step != 0) {
+                goto out;
+            }
         }
-        free(expanded);
+        if (macros->defining && depth == 0) {
+            snprintf(expand_err, sizeof(expand_err), "macro %s: the .macro it defines, %s, has no .endm", m->name,
+                     macros->def.name != NULL ? macros->def.name : "?");
+            goto out;
         }
     }
     rc = 0;
@@ -2102,6 +2437,7 @@ static int expand_rept_block_with_macros(as_text_t *in, as_text_t *out, gas_macr
     long iter;
     int nested = 0;
     int rc = -1;
+    int closed = 0;
     unsigned first_line = in->line + 1;
     unsigned end_line;
 
@@ -2114,6 +2450,7 @@ static int expand_rept_block_with_macros(as_text_t *in, as_text_t *out, gas_macr
             nested++;
         } else if (line_starts_with_directive(d, ".endr")) {
             if (nested == 0) {
+                closed = 1;
                 break;
             }
             nested--;
@@ -2122,7 +2459,28 @@ static int expand_rept_block_with_macros(as_text_t *in, as_text_t *out, gas_macr
             goto out;
         }
     }
+    if (!closed) {
+        snprintf(expand_err, sizeof(expand_err), "%s:%u: the .rept here has no .endr",
+                 in->file != NULL ? in->file : "<input>", first_line - 1);
+        goto out;
+    }
     end_line = in->line;
+    /* A body of nothing, however many times, is nothing. */
+    if (body.count == 0) {
+        count = 0;
+    }
+    /* And one that would come to more than a source may is refused
+     * before it is begun, not when the last byte of it is reached. */
+    {
+        unsigned long long bytes = rept_body_bytes(&body);
+
+        if (count > 0 && bytes > text_limit / (unsigned long long)count) {
+            snprintf(expand_err, sizeof(expand_err),
+                     "%s:%u: this .rept expands to more than %llu bytes (--max-expansion-bytes)",
+                     in->file != NULL ? in->file : "<input>", first_line - 1, text_limit);
+            goto out;
+        }
+    }
     for (iter = 0; iter < count; ++iter) {
         size_t i;
         for (i = 0; i < body.count; ++i) {
@@ -2169,36 +2527,37 @@ static int expand_gas_source_controls(const as_ctx_t *ctx, as_text_t *in, as_tex
         return -1;
     }
     out->origin = in;
+    macros.conds = conds;
+    macros.max_depth = ctx != NULL && ctx->max_macro_depth > 0 ? (unsigned long)ctx->max_macro_depth
+                                                                : AS_MACRO_DEPTH_DEFAULT;
+    expand_err[0] = '\0';
 
     while (text_getline(&line, &cap, in) >= 0) {
         const char *d = line_start_directive(line);
 
-        if (line_starts_with_directive(d, ".macro") && !macro_cond_active(conds, out)) {
-            /* Not defined: passed over to its .endm. */
-            while (text_getline(&line, &cap, in) >= 0) {
-                if (line_starts_with_directive(line_start_directive(line), ".endm")) {
-                    break;
-                }
+        macros.file = in->file;
+        macros.line = in->line;
+        /* The lines of a macro being defined are its body, whatever
+         * they are. */
+        if (macros.defining) {
+            if (expand_gas_macro_statement(out, &macros, line, 0) != 0) {
+                goto out;
             }
             continue;
         }
-        if (line_starts_with_directive(d, ".macro")) {
-            gas_macro_t m;
-            if (parse_gas_macro_header(d + 6, &m) != 0) {
-                goto out;
-            }
+        /* A .macro in a branch not taken is not defined: passed over,
+         * to its own .endm. */
+        if (line_starts_with_directive(d, ".macro") && !macro_cond_active(conds, out)) {
+            unsigned nesting = 0;
+
             while (text_getline(&line, &cap, in) >= 0) {
-                if (line_starts_with_directive(line_start_directive(line), ".endm")) {
+                const char *b = line_start_directive(line);
+
+                if (line_starts_with_directive(b, ".macro")) {
+                    nesting++;
+                } else if (line_starts_with_directive(b, ".endm") && nesting-- == 0) {
                     break;
                 }
-                if (strvec_push(&m.body, line) != 0) {
-                    gas_macro_free(&m);
-                    goto out;
-                }
-            }
-            if (gas_macro_vec_push(&macros, &m) != 0) {
-                gas_macro_free(&m);
-                goto out;
             }
             continue;
         }
@@ -2225,12 +2584,27 @@ static int expand_gas_source_controls(const as_ctx_t *ctx, as_text_t *in, as_tex
         }
     }
 
+    if (macros.defining) {
+        macros.line = macros.def.def_line;
+        snprintf(expand_err, sizeof(expand_err), "the .macro %s here has no .endm",
+                 macros.def.name != NULL ? macros.def.name : "");
+        goto out;
+    }
     if (out->failed) {
         goto out;
     }
     rc = 0;
 
 out:
+    /* Where it went wrong, for whoever reports it. */
+    if (rc != 0 && expand_err[0] != '\0' &&
+        (in->file == NULL || strncmp(expand_err, in->file, strlen(in->file)) != 0)) {
+        char said[sizeof(expand_err)];
+
+        snprintf(said, sizeof(said), "%s", expand_err);
+        snprintf(expand_err, sizeof(expand_err), "%s:%u: %.180s", in->file != NULL ? in->file : "<input>",
+                 macros.defining ? macros.line : in->line, said);
+    }
     free(line);
     gas_macro_vec_free(&macros);
     macro_cond_free(conds);
@@ -2854,6 +3228,12 @@ static int macro_cond_active(struct macro_cond *mc, const as_text_t *written) {
     return mc->cs.active;
 }
 
+/* How many conditionals what has been written leaves open. */
+static size_t macro_cond_depth(struct macro_cond *mc, const as_text_t *written) {
+    (void)macro_cond_active(mc, written);
+    return mc->cs.depth;
+}
+
 static int filter_gas_conditionals(const as_ctx_t *ctx, as_text_t *in, as_text_t *out) {
     cond_state_t *cs;
     char *line = NULL;
@@ -2980,11 +3360,12 @@ static int run_native_backend(const as_ctx_t *ctx) {
     }
 
     if (expand_gas_source_controls(ctx, source, &text_expanded) != 0) {
-        as_diag(AS_E_BACKEND, "macro/control expansion stage failed");
+        as_diag(AS_E_BACKEND, "%s", expand_err[0] != '\0' ? expand_err : "macro/control expansion stage failed");
         goto out;
     }
+    expand_err[0] = '\0';
     if (expand_rept_file(&text_expanded, &text_rept) != 0) {
-        as_diag(AS_E_BACKEND, "repeat expansion stage failed");
+        as_diag(AS_E_BACKEND, "%s", expand_err[0] != '\0' ? expand_err : "repeat expansion stage failed");
         goto out;
     }
     /* It says what is wrong itself. */
@@ -3566,7 +3947,7 @@ static int as_run(int argc, char **argv, strvec_t *inputs) {
         }
         if (strcmp(arg, "--max-input-bytes") == 0 || strcmp(arg, "--max-line-bytes") == 0 ||
             strcmp(arg, "--max-token-length") == 0 || strcmp(arg, "--max-macro-depth") == 0 ||
-            strcmp(arg, "--max-include-depth") == 0) {
+            strcmp(arg, "--max-include-depth") == 0 || strcmp(arg, "--max-expansion-bytes") == 0) {
             if (i + 1 >= argc) {
                 usage(argv[0]);
                 strvec_free(&ctx.gcc_opts);
@@ -3584,15 +3965,21 @@ static int as_run(int argc, char **argv, strvec_t *inputs) {
             val = arg + 18;
         } else if (strncmp(arg, "--max-include-depth=", 20) == 0) {
             val = arg + 20;
+        } else if (strncmp(arg, "--max-expansion-bytes=", 22) == 0) {
+            val = arg + 22;
         }
         if (val != NULL) {
-            if (parse_u64(val, &parsed) != 0) {
-                as_diag(AS_E_USAGE, "invalid numeric value: %s", val);
+            /* A limit is a positive number.  `-1` was read as the
+             * largest there is, and 0 as no limit at all. */
+            if (!isdigit((unsigned char)val[0]) || parse_u64(val, &parsed) != 0 || parsed == 0) {
+                as_diag(AS_E_USAGE, "%s: a limit is a positive number", arg);
                 strvec_free(&ctx.gcc_opts);
                 strvec_free(&ctx.as_opts);
                 return 2;
             }
-            if (strncmp(arg, "--max-input-bytes", 17) == 0) {
+            if (strncmp(arg, "--max-expansion-bytes", 21) == 0) {
+                text_limit = parsed;
+            } else if (strncmp(arg, "--max-input-bytes", 17) == 0) {
                 ctx.max_input_bytes = parsed;
             } else if (strncmp(arg, "--max-line-bytes", 16) == 0) {
                 ctx.max_line_bytes = parsed;

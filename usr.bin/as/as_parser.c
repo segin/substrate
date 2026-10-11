@@ -1849,7 +1849,33 @@ static int parse_directive(const as_token_t *tokv, size_t n, as_stmt_t *st) {
     for (i = 1; i <= n; ++i) {
         if (i == n || (tokv[i].kind == AS_TOK_PUNCT && strcmp(tokv[i].text, ",") == 0)) {
             if (i > start) {
-                char *arg = join_tokens(tokv + start, i - start, 0);
+                char *arg = NULL;
+                size_t k;
+                size_t total = 1;
+
+                /*
+                 * Strings written one after another with no comma
+                 * between are one string: `.ascii "a" "b"` is ab, and
+                 * `.string "a" "b"` is ab and one NUL.  Joined like any
+                 * other tokens they had a space put between them, which
+                 * was stored.
+                 */
+                for (k = start; k < i && tokv[k].kind == AS_TOK_STRING; ++k) {
+                    total += strlen(tokv[k].text);
+                }
+                if (k == i && i - start > 1) {
+                    arg = (char *)malloc(total);
+                    if (arg != NULL) {
+                        arg[0] = '\0';
+                        for (k = start; k < i; ++k) {
+                            size_t at = strlen(arg);
+
+                            memcpy(arg + at, tokv[k].text, strlen(tokv[k].text) + 1);
+                        }
+                    }
+                } else {
+                    arg = join_tokens(tokv + start, i - start, 0);
+                }
                 if (arg == NULL || add_directive_arg(&st->u.directive, arg) != 0) {
                     free(arg);
                     return -1;
