@@ -67,14 +67,19 @@ placed where it belongs.
   Done, in `xfail.list` and not a file of its own, since that is the file `run-suite.sh` enforces: each of the 21 failing tests has its cause and task there, and the header names the six whose expectations were stale.
 - [ ] **AS-T-013** If a restored test fails because its expectation is stale, then the expectation shall be corrected against GNU `as`.
   Trace: AS-TST-002.  Verify: T — the test passes; the commit names the GNU version used.  After: 012.
-- [ ] **AS-T-014** The test suite shall hold a differential harness that assembles each line of a corpus with this assembler and with GNU `as` and reports every difference in section bytes or relocations.
+  In part (GNU as 2.46).  The three tests that were not run because they built in the source tree and asserted the Makefile of April -- `test_build_matrix.sh`, `test_integration_rollout.sh`, `test_integration_matrix.sh` -- are rewritten to build nothing, are run, and pass; the second now assembles, links and *runs* a `_start` for each of 32 and 64 bits and checks its exit status.  `test_x86_32_corpus_intel_roundtrip.sh` leaves out the 206 lines of its corpus that GNU refuses (MPX and the FS/GS-base instructions in 32-bit code).  Not done: the second half of the two round-trip tests, which assembles Intel source made from objdump's listing, is not something GNU passes either (`repz add`, a suffix on `jo`); both tests fail in their first half for faults of the assembler (176, 172), and the second half is to be rewritten when the first passes.
+- [x] **AS-T-014** The test suite shall hold a differential harness that assembles each line of a corpus with this assembler and with GNU `as` and reports every difference in section bytes or relocations.
   Trace: AS-TST-001.  Verify: D — run over the audit's corpora (kept in the job scratch, `aud/x86/c32.txt`, `c64.txt`, `aud/ext/`) it reproduces the audit's counts within 1 %.
-- [ ] **AS-T-015** Where GNU `as` is not installed, the differential harness shall report that it was skipped and shall not fail.
+  Done: `gnu-diff.py`, and the audit's two instruction corpora brought into the tree as `corpus/x86_32_lines.txt` (11,706 lines) and `corpus/x86_64_lines.txt` (18,072).  It reads each object itself -- `.text` and the relocations' place, type, symbol and addend -- and needs neither objdump nor readelf.  The audit's counts cannot be reproduced now, the assembler having been mended since; today 2,160 and 2,509 lines differ, counting a line that both refuse as agreeing.  The extension corpora of `aud/ext/` are 16 MB and stay out of the tree; the AVX lines of the corpora already here serve.
+- [x] **AS-T-015** Where GNU `as` is not installed, the differential harness shall report that it was skipped and shall not fail.
   Trace: AS-TST-001.  Verify: T — run with `PATH` emptied of `as`.  After: 014.
-- [ ] **AS-T-016** The differential harness shall keep a baseline of known differences and shall fail when a line not in the baseline differs.
+  Done: it looks for `GNU assembler` in the version of `$GNU_AS` or of `as`, and exits 77 with "skipped: GNU as is not installed"; `test_gnu_differential.sh` then passes and says it was skipped.  Tried with `GNU_AS=/nonexistent`.
+- [x] **AS-T-016** The differential harness shall keep a baseline of known differences and shall fail when a line not in the baseline differs.
   Trace: AS-TST-001.  Verify: T — a deliberately broken encoder makes it fail; a mended line is removed from the baseline by the commit that mends it.  After: 014.
-- [ ] **AS-T-017** The test suite shall run its corpora through a build of the assembler made with AddressSanitizer and UndefinedBehaviorSanitizer.
+  Done: `corpus/*.baseline`, and `test_gnu_differential.sh` in the suite.  It fails when a line outside the baseline differs and also when a line inside it no longer does, which is what makes a commit take the lines it mends out; `gnu-diff.py --write-baseline` rewrites the file.  Tried with a build of two commits before, which fails both ways.  The two corpora take 52 s together on eight processors.
+- [x] **AS-T-017** The test suite shall run its corpora through a build of the assembler made with AddressSanitizer and UndefinedBehaviorSanitizer.
   Trace: AS-TST-001.  Verify: D — the run reports the null dereference of AS-X86-040 until 022 is done.
+  Done: `test_sanitizer_sweep.sh`, which had the sanitizer build and its own generated lines, now runs the two corpora through it as well: 42,288 lines, 28,644 of them assembled, and nothing reported.  (022 was done before this, so the dereference is not there to be found; the test's own canary shows that the sanitizers do report.)
 - [x] **AS-T-018** The `ci` workflow shall run the whole of `tests/usr.bin/as` on every push.
   Trace: AS-TST-001.  Verify: I — `gh run view` shows the restored tests in the job log.  After: 011.
   Done: the "Assembler tests" step of the `host-tests` job; green at `5e3157d0c` on the Ubuntu runner (dash, mawk, a gcc that writes `endbr64`).
@@ -529,8 +534,9 @@ one table of templates; there is one ModRM/SIB/prefix emitter.
 - [x] **AS-T-174** When a 16-bit operand is used with an instruction encoded from the SIMD-era tables, the assembler shall emit the `66` prefix.
   Done.  In 32-bit code the emitter of these wrote no operand-size prefix, and every one was the 32-bit instruction: `bsf`, `bsr`, the `bt` family, `shld`, `shrd`, `cmpxchg`, `popcnt`, `lzcnt`, `tzcnt`, `movbe`, `rdrand`, `rdseed`, `str`, `sldt`.  The prefix now goes before what that emitter writes, when the statement has been found to be a 16-bit one.  Not for a move with a segment register, nor for a selector in memory, which GNU leaves bare.  `test_insn_forms.sh`, 42 cases; 65 more lines of the 32-bit corpus.  Left to others: `shldw`, `shrdw` and `movbew` are not mnemonics (172); in 64-bit code `tzcnt %ax,%bx`, `rdrand` and `rdseed` are refused.
   Trace: AS-SEL-005, AS-EXT-008.  Verify: T — `bsfw`, `bsrw`, `popcnt %ax,%bx`, `lzcnt`, `tzcnt`, `btw`, `cmpxchg %bx,(%eax)`, `shld $4,%ax,%bx`, `movbe (%eax),%bx`, `sldtw`, `smsw %ax`, `rdrand %ax`, `pushw %fs`, `movw %cs,%ax`: GNU.  After: 168.
-- [ ] **AS-T-175** When `cmpxchg` is written with `%ah`, `%bh`, `%ch` or `%dh`, the assembler shall encode the 8-bit form.
+- [x] **AS-T-175** When `cmpxchg` is written with `%ah`, `%bh`, `%ch` or `%dh`, the assembler shall encode the 8-bit form.
   Trace: AS-SEL-005.  Verify: T.  After: 168.
+  Done, and with it what a sweep of the four registers through every byte instruction found: an immediate moved to one went to another register -- `mov $1,%ah` was `mov $1,%al` in 32-bit code and `mov $1,%r8b` in 64-bit.  `test_insn_forms.sh`, 41 cases.
 
 ### D.2 Address size
 
@@ -1075,5 +1081,5 @@ is not to be done, 370 is ticked with "removed" and the rest struck.
 | AS-EXT-009 | 185, 325, 332–337 |
 | AS-EXT-010 | 040, 171, 338, 339 (339 closes all of AS-EXT) |
 
-350 tasks: 80 done, 270 open.  Numbers run to 399, with gaps left between
+350 tasks: 85 done, 265 open.  Numbers run to 399, with gaps left between
 sections for tasks found along the way.

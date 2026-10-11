@@ -170,6 +170,15 @@ for mode in -32 -64; do
 done > certain
 cut -f2- certain >> jobs
 
+# And the two instruction corpora of the differential test, each line in
+# its mode: some thirty thousand lines that are instructions, where the
+# sets above are mostly refused.  A line of several statements has ` | `
+# between them.
+for bits in 32 64; do
+    grep -v '^#' "$here/corpus/x86_${bits}_lines.txt" | grep . | sed 's/ | /; /g' |
+        awk -v m="-$bits" '{ printf "%s\tn\t%s\n", m, $0 }'
+done >> jobs
+
 # --- the sweep -----------------------------------------------------------
 workers=$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)
 [ "$workers" -ge 1 ] 2>/dev/null || workers=2
@@ -203,9 +212,9 @@ done < certain
 oks=$(grep -c '^ok' results)
 refusals=$(grep -c '^refused' results)
 # Each mnemonic is given fifteen sets of operands and takes one or two
-# of them at most: far more are refused than assembled, and of some six
-# hundred mnemonics hundreds of lines are assembled.
-if [ "$oks" -lt 300 ] || [ "$refusals" -lt "$oks" ]; then
+# of them at most, so thousands of those lines are refused; and most of
+# the corpora's thirty thousand are assembled.
+if [ "$oks" -lt 20000 ] || [ "$refusals" -lt 5000 ]; then
     echo "FAIL: $oks lines assembled and $refusals refused: the sweep is not reaching the encoder"
     fail=1
 fi

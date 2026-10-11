@@ -2,10 +2,10 @@
 # this: a test named here is expected to fail, and the suite fails if it
 # passes, so the line goes in the commit that mends the cause.
 #
-# name <white space> reason.  Every one is a defect of the assembler but
-# those marked SKIP; AS-T-nnn is the task in docs/as-tasks.md that mends
-# it.  A reason beginning SKIP means the test is not run: these build
-# inside the source tree and `make clean` it.
+# name <white space> reason.  AS-T-nnn is the task in docs/as-tasks.md
+# that mends it.  A reason beginning SKIP means the test is not run; none
+# is so marked now -- the three that built inside the source tree were
+# rewritten to build nothing.
 #
 # Each line was checked by running the test with GNU as in this
 # assembler's place: a test GNU passes fails here for a fault of this
@@ -22,16 +22,13 @@
 # resolved, not relocated), test_lexer_core (string tokens are raw),
 # test_output_binary (code is padded with NOPs), test_testing_fuzz_perf
 # (the object is the assembler's own, not GNU's byte for byte).
-test_build_matrix.sh	SKIP builds with NATIVE_BUILD=1 in usr.bin/as and asserts the Makefile's text of April; to be rewritten (AS-T-013)
-test_integration_matrix.sh	SKIP builds with NATIVE_BUILD=1 in usr.bin/as (AS-T-013)
-test_integration_rollout.sh	SKIP runs make clean in usr.bin/as and builds there twice (AS-T-013)
 test_branch_relax_exact.sh	a branch is made long up to three bytes before it need be, where instructions lie between it and its label or another branch does (AS-T-221)
 test_branch_relax_label.sh	a branch to an ordinary label of its own section is always long, and left to the linker with a relocation (AS-T-187)
 test_complex_control_32_64.sh	a ; inside a comment begins a statement: gcc -fverbose-asm writes "# for (i = 0; i < 32; i++)" (AS-T-093)
 test_diagnostics_determinism.sh	a message names the temporary file and its line, not the user's (AS-T-090, AS-T-147)
 test_fuzz_matrix.sh	runs test_testing_fuzz_perf.sh
 test_i386_encoding.sh	`add %eax, %xmm0` is assembled: a register's class is not checked (AS-T-171)
-test_i8086_corpus.sh	16-bit code: refused at a line with an empty message (AS-T-347, AS-T-147)
+test_i8086_corpus.sh	16-bit code: the first corpus assembles, to the wrong bytes; the second stops at a .set (AS-T-347)
 test_i8086_elf_object.sh	16-bit code, as above (AS-T-347)
 test_i8086_realmode_core.sh	16-bit code, as above (AS-T-347)
 test_isa_heavy_64.sh	vmovdqu is not a mnemonic (AS-T-332)
@@ -42,7 +39,7 @@ test_sections_symbols_expr_32_64.sh	--64: "failed to emit relocations" for a dat
 test_source_model_32_64.sh	the first error ends the run: a source with three bad lines gets one message, where GNU gives three (AS-T-388)
 test_testing_fuzz_perf.sh	runs test_relocations_elf_32_64.sh
 test_unit_matrix.sh	runs test_i8086_corpus.sh
-test_x86_32_corpus_intel_roundtrip.sh	the corpus is not one GNU as passes, and this assembler stops where GNU first does: line 1809, `bnd callw` (GNU: "bnd is not supported on i386"); GNU refuses line 2817 as well, wrgsbase in 32-bit code.  The corpus wants mending before the test says anything of the assembler
-test_x86_64_corpus_intel_roundtrip.sh	the test is not yet one GNU as passes: the Intel source it generates has lines GNU refuses, and this assembler stops at one of them, `lock nop` (line 4754 of the generated source), as GNU does; GNU's first is a suffix on jg
+test_x86_32_corpus_intel_roundtrip.sh	stops at line 251 of the corpus, `fcoms -0x6f70(%bx,%si)`: an x87 instruction with a 16-bit address is refused (AS-T-176).  The test now leaves out the 206 lines of the corpus that GNU as 2.46 refuses, and GNU assembles the rest; its second half, the Intel source made from objdump's listing, GNU does not take either (`repz add`), and wants rewriting when the first half passes
+test_x86_64_corpus_intel_roundtrip.sh	stops at line 4750 of the corpus, `jow`: a suffix on a conditional jump is not taken (AS-T-172).  GNU as assembles the corpus; the Intel source the test then makes from objdump's listing it refuses, at the same suffixes (`jow` in Intel syntax), so the second half wants rewriting when the first passes
 test_x86_avx512f_core.sh	EVEX vaddpd is encoded with W = 0 (AS-T-339)
 test_x86_avx_core.sh	vpermilps is not encoded (AS-T-327)

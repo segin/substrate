@@ -147,7 +147,14 @@ PY
 
 check_corpus() {
     name=$1
-    att_src=$2
+    att_src="$TMP/${name}.att.s"
+    # The corpus was written for an assembler that took MPX in 32-bit
+    # code.  GNU as 2.46 does not ("`bndldx' is not supported on
+    # `i386'"), nor the FS and GS base instructions there, nor a data16
+    # or repnz before a PadLock instruction: 206 lines of the two files,
+    # which are left out so that the corpus is one GNU as assembles.
+    grep -Ev '^[[:space:]]*(bnd[a-z]*|[rw][dr][fg]sbase|(data16|repnz)[[:space:]]+(xstore-rng|montmul))[[:space:]]' "$2" \
+        > "$att_src"
     att_obj="$TMP/${name}.att.o"
     intel_src="$TMP/${name}.intel.s"
     intel_obj="$TMP/${name}.intel.o"

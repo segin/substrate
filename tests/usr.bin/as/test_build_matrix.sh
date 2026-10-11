@@ -1,33 +1,40 @@
 #!/bin/sh
+# The names the assembler is installed under.  The Makefile makes four
+# links to it beside it and in $(BINDIR) -- as.x86, as.x64, arm-as,
+# aarch64-as -- and the assembler must run under each.
+#
+# This test used to run `make NATIVE_BUILD=1` and `make install` in the
+# source directory, which left a host binary where the target's is
+# built, and to look in the Makefile for lines it has not had since the
+# object library became a shared one.  It builds nothing now: it reads
+# the rules for the links, and runs the assembler it is given under
+# each name.
 set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)
+AS=${AS:-"$ROOT/usr.bin/as/as"}
+case $AS in /*) ;; *) AS=$(pwd)/$AS ;; esac
 TMP=${TMPDIR:-/tmp}/as-build-matrix-$$
-DEST="$TMP/dest"
 trap 'rm -rf "$TMP"' EXIT INT TERM
 mkdir -p "$TMP"
 
-# Recursive Makefile host build path.
-make -C "$ROOT/usr.bin/as" NATIVE_BUILD=1
-
-# Build-tree multi-call aliases.
+mk="$ROOT/usr.bin/as/Makefile"
 for link in as.x86 as.x64 arm-as aarch64-as; do
-    test -L "$ROOT/usr.bin/as/$link"
-    test "$(readlink "$ROOT/usr.bin/as/$link")" = "as"
+    # shellcheck disable=SC2016
+    grep -q "ln -sf \$(PROG) $link\$" "$mk" ||
+        { echo "FAIL: the Makefile does not link $link beside the assembler"; exit 1; }
+    # shellcheck disable=SC2016
+    grep -q "ln -sf as \$(BINDIR)/$link\$" "$mk" ||
+        { echo "FAIL: the Makefile does not install $link"; exit 1; }
 done
 
-# install -> $(DESTDIR)/usr/bin/as plus aliases.
-make -C "$ROOT/usr.bin/as" NATIVE_BUILD=1 DESTDIR="$DEST" install
-
-test -x "$DEST/usr/bin/as"
+printf '\t.text\n\tnop\n' > "$TMP/nop.s"
 for link in as.x86 as.x64 arm-as aarch64-as; do
-    test -L "$DEST/usr/bin/$link"
-    test "$(readlink "$DEST/usr/bin/$link")" = "as"
+    ln -s "$AS" "$TMP/$link"
+    "$TMP/$link" -32 -o "$TMP/$link.o" "$TMP/nop.s" ||
+        { echo "FAIL: the assembler does not run as $link"; exit 1; }
+    [ "$(objcopy -O binary --only-section=.text "$TMP/$link.o" /dev/stdout | od -An -tx1 | tr -d ' \n')" = 90 ] ||
+        { echo "FAIL: as $link, nop is not the byte 90"; exit 1; }
 done
-
-# libelfobj static dependency contract.
-grep -q 'LDADD += ../../usr.lib/elfobj/libelfobj.a' "$ROOT/usr.bin/as/Makefile"
-grep -q '\$(PROG): ../../usr.lib/elfobj/libelfobj.a' "$ROOT/usr.bin/as/Makefile"
-test -f "$ROOT/usr.lib/elfobj/libelfobj.a"
 
 echo "ok: build matrix"
