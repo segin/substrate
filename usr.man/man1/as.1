@@ -450,6 +450,12 @@ begins with the program's name and the word
 .Pp
 When an assembly fails no object is written, and a file of the output's
 name left by an earlier run is removed.
+Ended by
+.Dv SIGINT ,
+.Dv SIGTERM
+or
+.Dv SIGHUP ,
+the assembler removes what it had begun to write and dies of the signal.
 .Sh SEE ALSO
 Li cc(1) ,
 Li cpp(1) ,

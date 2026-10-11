@@ -1325,6 +1325,9 @@ elf_err_t elf_open_memory_with_options(const void *buf, size_t size, uint32_t fl
                                        elfobj_t **out);
 elf_err_t elf_open_memory_nocopy(const void *buf, size_t size, elfobj_t **out);
 elf_err_t elf_write_file(elfobj_t *obj, const char *path);
+/* The temporary file elf_write_file() is writing at this moment, or
+ * NULL: for a signal handler to unlink.  Async-signal-safe. */
+const char *elf_write_pending_path(void);
 void elf_close(elfobj_t *obj);
 int elf_uses_mmap(const elfobj_t *obj);
 int elf_is_lazy_parse_enabled(const elfobj_t *obj);

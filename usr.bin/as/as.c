@@ -10,6 +10,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
+#include <signal.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -4667,11 +4668,35 @@ static int as_run(int argc, char **argv, strvec_t *inputs) {
     return 0;
 }
 
+/*
+ * Ended by a signal: the one file the assembler may have made and not
+ * finished, the output's temporary, is removed, and then the signal
+ * does what it does.  Only what a signal handler may call is called.
+ */
+static void end_by_signal(int sig) {
+    const char *pending = elf_write_pending_path();
+
+    if (pending != NULL) {
+        (void)unlink(pending);
+    }
+    (void)signal(sig, SIG_DFL);
+    (void)raise(sig);
+}
+
 int main(int argc, char **argv) {
     strvec_t args;
     strvec_t inputs;
     int i;
     int rc;
+
+    /* One that is ignored already -- a job run with nohup -- stays so. */
+    for (i = 0; i < 3; ++i) {
+        static const int signals[] = {SIGINT, SIGTERM, SIGHUP};
+
+        if (signal(signals[i], end_by_signal) == SIG_IGN) {
+            (void)signal(signals[i], SIG_IGN);
+        }
+    }
 
     /* `-Wa,a,b` and `-Wa a,b` are the arguments a and b. */
     memset(&args, 0, sizeof(args));

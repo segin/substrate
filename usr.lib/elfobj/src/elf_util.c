@@ -334,6 +334,18 @@ static int write_full(int fd, const uint8_t *buf, size_t size) {
 
 #define TMP_SUFFIX ".tmpXXXXXX"
 
+/*
+ * The temporary file an output is being written to, from before it is
+ * created until it has become the output or is removed: for a program
+ * that is ended by a signal in that time to remove.  Read from a signal
+ * handler, so it is a pointer that is stored whole.
+ */
+static const char *volatile elf__pending_path;
+
+const char *elf_write_pending_path(void) {
+    return elf__pending_path;
+}
+
 elf_err_t elf__write_file_atomic(const char *path, const void *buf, size_t size) {
     const char *slash;
     const char *base;
@@ -389,8 +401,12 @@ elf_err_t elf__write_file_atomic(const char *path, const void *buf, size_t size)
 
     snprintf(tmp_path, tmp_len, "%.*s.%s.tmpXXXXXX", (int)dir_len, path, base);
 
+    /* Known before the file is there: removing a name that is not a
+     * file's does nothing, and a file nobody knows the name of stays. */
+    elf__pending_path = tmp_path;
     fd = mkstemp(tmp_path);
     if (fd < 0) {
+        elf__pending_path = NULL;
         free(tmp_path);
         return ELF_ERR_IO;
     }
@@ -398,6 +414,7 @@ elf_err_t elf__write_file_atomic(const char *path, const void *buf, size_t size)
         saved_errno = errno;
         close(fd);
         unlink(tmp_path);
+        elf__pending_path = NULL;
         free(tmp_path);
         errno = saved_errno;
         return ELF_ERR_IO;
@@ -405,6 +422,7 @@ elf_err_t elf__write_file_atomic(const char *path, const void *buf, size_t size)
     if (close(fd) != 0) {
         saved_errno = errno;
         unlink(tmp_path);
+        elf__pending_path = NULL;
         free(tmp_path);
         errno = saved_errno;
         return ELF_ERR_IO;
@@ -412,11 +430,13 @@ elf_err_t elf__write_file_atomic(const char *path, const void *buf, size_t size)
     if (rename(tmp_path, path) != 0) {
         saved_errno = errno;
         unlink(tmp_path);
+        elf__pending_path = NULL;
         free(tmp_path);
         errno = saved_errno;
         return ELF_ERR_IO;
     }
 
+    elf__pending_path = NULL;
     free(tmp_path);
     return ELF_OK;
 }

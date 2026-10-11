@@ -10,7 +10,9 @@
 # - And it leaves nothing else: nothing in $TMPDIR, nothing beside the
 #   output.
 #
-# GNU as passes this test.
+# GNU as passes this test but for the last part: it creates its output
+# before it reads its source, and a signal that ends it leaves the
+# output it had begun.
 set -u
 
 here=$(cd "$(dirname "$0")" && pwd)
@@ -81,6 +83,32 @@ rm -f out err f.o three.o
 left=$(ls | grep -v '\.s$' | grep -v '^good\.o$' | tr '\n' ' ')
 [ -z "$left" ] || { echo "FAIL: left beside the output: $left"; fail=1; }
 [ -z "$(ls "$TMPDIR")" ] || { echo "FAIL: left in TMPDIR: $(ls "$TMPDIR" | tr '\n' ' ')"; fail=1; }
+
+# Ended by a signal, it dies of the signal and leaves nothing.  (The
+# source is a pipe nothing is written to, so that it is still reading
+# when the signal comes.  Not SIGINT: a shell has it ignored in what it
+# runs in the background, and what is ignored stays ignored.)
+for sig in TERM HUP; do
+    cases=$((cases + 1))
+    rm -f pipe sig.o
+    mkfifo pipe
+    exec 9<> pipe
+    "$AS" --32 -o sig.o pipe > /dev/null 2>&1 &
+    pid=$!
+    # Until it has the pipe open, and so has begun.
+    n=0
+    while [ "$n" -lt 200 ] && ! ls -l "/proc/$pid/fd" 2> /dev/null | grep -q 'src/pipe$'; do n=$((n + 1)); done
+    kill "-$sig" "$pid" 2> /dev/null
+    { wait "$pid"; } 2> /dev/null
+    status=$?
+    exec 9>&-
+    rm -f pipe
+    [ "$status" -gt 128 ] || { echo "FAIL SIG$sig: exit status $status, not death by the signal"; fail=1; }
+    [ ! -e sig.o ] || { echo "FAIL SIG$sig: an object was left"; fail=1; }
+    left=$(ls -A | grep -v '\.s$' | grep -v '^good\.o$' | tr '\n' ' ')
+    [ -z "$left" ] || { echo "FAIL SIG$sig: left beside the output: $left"; fail=1; }
+    [ -z "$(ls -A "$TMPDIR")" ] || { echo "FAIL SIG$sig: left in TMPDIR"; fail=1; }
+done
 
 [ "$fail" -eq 0 ] && echo "ok: error reports ($cases cases)"
 exit "$fail"

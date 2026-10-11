@@ -25,6 +25,7 @@
 .Nm elf_init_alpha ,
 .Nm elf_init_ia64 ,
 .Nm elf_write_file ,
+.Nm elf_write_pending_path ,
 .Nm elf_finalize ,
 .Nm elf_close ,
 .Nm elf_set_type ,
@@ -111,6 +112,8 @@
 .Fn elf_init_ia64 void
 .Ft elf_err_t
 .Fn elf_write_file "elfobj_t *obj" "const char *path"
+.Ft const char *
+.Fn elf_write_pending_path void
 .Ft elf_err_t
 .Fn elf_finalize "elfobj_t *obj"
 .Ft void
@@ -194,6 +197,23 @@ Objects created by
 are mutable until finalized.
 Objects returned by open APIs are parsed from existing bytes and are effectively
 read-only for structural mutation calls.
+.Pp
+.Fn elf_write_file
+writes to a temporary file beside
+.Fa path
+and renames it to
+.Fa path
+when it is complete, so that
+.Fa path
+is never a part of an object.
+.Fn elf_write_pending_path
+returns the name of that temporary file while there is one and
+.Dv NULL
+otherwise.
+It may be called from a signal handler, which is what it is for: a
+program that is ended by a signal while it writes can
+.Xr unlink 2
+the name it returns and leave nothing behind.
 .Pp
 Open flags:
 .Bl -tag -width ELFOBJ_OPEN_LAZY_PARSE

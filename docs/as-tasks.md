@@ -564,9 +564,10 @@ with a symbol table.
 - [x] **AS-T-149** When the assembler fails, it shall remove the output file it was asked to write.
   Trace: AS-FE-032.  Verify: T — an old `out.o` is gone after a failed run, as with GNU.
   Done: the object of an earlier run was left where it was.  An ordinary file of the output's name is removed when the run fails; `/dev/null` and its like are left alone.  `test_error_reports.sh`.
-- [ ] **AS-T-150** When the assembler ends by any path, including a signal it can catch, it shall leave no file it created but the output.
+- [x] **AS-T-150** When the assembler ends by any path, including a signal it can catch, it shall leave no file it created but the output.
   Trace: AS-FE-024.  Verify: T — `SIGINT`, `SIGTERM` and an error exit, with `TMPDIR` pointing at an empty directory that is empty afterwards.
   In part: since 091 it creates no file but the output and, beside it for the moment it is written, the output's temporary, which the object library makes and renames.  A run that fails or succeeds leaves `$TMPDIR` and the output's directory as they were (`test_error_reports.sh`).  Not done: no signal is caught, so one that arrives in that moment leaves the temporary; the library that makes it would have to give up its name.
+  Done: the library gives up the name (`elf_write_pending_path`, in elfobj(3), which a signal handler may call), and on `SIGINT`, `SIGTERM` and `SIGHUP` the assembler removes that file and then dies of the signal; one that was ignored when it started stays ignored.  `test_error_reports.sh` ends it with `SIGTERM` and `SIGHUP` while it reads, and finds death by the signal and nothing left.  Not tested: a signal in the moment the temporary exists, which a test cannot time; and `SIGINT`, which a shell ignores in what it runs in the background.
 - [ ] **AS-T-151** Where the assembler needs a temporary file, it shall create it in `$TMPDIR`, or in `/tmp` when that is unset.
   Trace: AS-FE-024.  Verify: T.
 - [ ] **AS-T-152** Every error path of the parser shall free what it allocated.
@@ -1169,5 +1170,5 @@ is not to be done, 370 is ticked with "removed" and the rest struck.
 | AS-EXT-009 | 185, 325, 332–337 |
 | AS-EXT-010 | 040, 171, 338, 339 (339 closes all of AS-EXT) |
 
-351 tasks: 165 done, 186 open.  Numbers run to 400, with gaps left between
+351 tasks: 166 done, 185 open.  Numbers run to 400, with gaps left between
 sections for tasks found along the way.
