@@ -432,14 +432,34 @@ which the linker reads.
 .It Debug/CFI
 .Cm .file , .loc , .cfi_*
 .Pp
-These are taken and nothing is made of them: there is no line table
-for
-.Cm .loc ,
-and no
+The
+.Cm .cfi_*
+directives are made the call frame information of
+.Ql .eh_frame ,
+or of
+.Ql .debug_frame
+where
+.Cm .cfi_sections
+asks for it: a CIE for the procedures that begin alike and an FDE for
+each, with a relocation for each address.
+.Cm .cfi_startproc , .cfi_endproc , .cfi_def_cfa , .cfi_def_cfa_register ,
+.Cm .cfi_def_cfa_offset , .cfi_adjust_cfa_offset , .cfi_offset ,
+.Cm .cfi_rel_offset , .cfi_val_offset , .cfi_register , .cfi_restore ,
+.Cm .cfi_undefined , .cfi_same_value , .cfi_remember_state ,
+.Cm .cfi_restore_state , .cfi_return_column , .cfi_signal_frame ,
+.Cm .cfi_escape , .cfi_personality , .cfi_lsda , .cfi_window_save
+and
+.Cm .cfi_sections
+are those there are; any other is refused by its name.
+An offset is a number, and a register is one by its name or by its
+DWARF number.
+.Pp
+.Cm .file
+and
+.Cm .loc
+are taken and nothing is made of them: there is no line table and no
 .Ql .debug_line
-section, and no unwinding information for
-.Cm .cfi_* .
-A compiler that is to have either writes it as data.
+section, and a compiler that is to have one writes it as data.
 A file number that
 .Cm .file
 has given to one file is refused for another.

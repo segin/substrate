@@ -966,14 +966,15 @@ one table of templates; there is one ModRM/SIB/prefix emitter.
 
 ## H. The object file
 
-- [ ] **AS-T-290** When `.cfi_startproc` … `.cfi_endproc` and the `.cfi_*` directives between them are assembled, the assembler shall emit `.eh_frame` with a CIE and an FDE that encode them, and the relocations of the FDE.
+- [x] **AS-T-290** When `.cfi_startproc` … `.cfi_endproc` and the `.cfi_*` directives between them are assembled, the assembler shall emit `.eh_frame` with a CIE and an FDE that encode them, and the relocations of the FDE.
   Trace: AS-OBJ-010.  Verify: T — `readelf --debug-dump=frames` of our object equals GNU's for the output of `gcc -S` at `-O0` and `-O2`, both modes; D — a C++ program built with this assembler throws through and catches in such code.  After: 070, 220.
-- [ ] **AS-T-291** Each of `.cfi_def_cfa`, `.cfi_def_cfa_register`, `.cfi_def_cfa_offset`, `.cfi_adjust_cfa_offset`, `.cfi_offset`, `.cfi_rel_offset`, `.cfi_register`, `.cfi_restore`, `.cfi_undefined`, `.cfi_same_value`, `.cfi_remember_state`, `.cfi_restore_state`, `.cfi_return_column`, `.cfi_signal_frame`, `.cfi_escape`, `.cfi_personality`, `.cfi_lsda`, `.cfi_sections` and `.cfi_window_save` shall be encoded or refused by name.
+  Done, 2026-10-11, with 291 and 293.  The directives were taken and nothing made of them: the object had an `.eh_frame` with no bytes in it.  `as_cfi.c` makes the CIEs and FDEs of them, from where the emitter says each directive stands, and hands back the bytes and the places a relocation fills; the emitter writes `.eh_frame`, and `.debug_frame` where `.cfi_sections` asks.  They are GNU as 2.46's byte for byte, which took its three habits: an entry of `.eh_frame` is a number of four bytes whatever the code, and the last is filled out to the section's eight; the instructions of a frame that stand before any that moves on are the CIE's, and a frame that begins as a CIE does has it; `.debug_frame` keeps a signal frame's `S` and nothing else of the augmentation.  `test_cfi_frames.sh`: a source with every directive in both modes, held to GNU's bytes and relocations in both sections; ten misuses refused; `gcc -O0` and `-O2` in both modes, whose frames are GNU's; and a C++ program at `-O0`, `-O2` and `-O2 -fPIC` that throws through three frames with destructors and is caught (it does at `-m32` too, with and without `-fPIC`, by hand).  Refused by name: `.cfi_val_encoded_addr`, `.cfi_label`, `.cfi_negate_ra_state`, `.cfi_inline_lsda`.  An offset is a number, not an expression.
+- [x] **AS-T-291** Each of `.cfi_def_cfa`, `.cfi_def_cfa_register`, `.cfi_def_cfa_offset`, `.cfi_adjust_cfa_offset`, `.cfi_offset`, `.cfi_rel_offset`, `.cfi_register`, `.cfi_restore`, `.cfi_undefined`, `.cfi_same_value`, `.cfi_remember_state`, `.cfi_restore_state`, `.cfi_return_column`, `.cfi_signal_frame`, `.cfi_escape`, `.cfi_personality`, `.cfi_lsda`, `.cfi_sections` and `.cfi_window_save` shall be encoded or refused by name.
   Trace: AS-OBJ-010.  Verify: T — one case each.  After: 290.
 - [x] **AS-T-292** The assembler shall not emit `.eh_frame_hdr` in a relocatable object.
   Trace: AS-OBJ-010.  Verify: T.
   Done: none is made.  `test_object_basics.sh`; `test_elf_emit_core.c` asked for one and asks that there be none.
-- [ ] **AS-T-293** When `.cfi_sections .debug_frame` is given, the assembler shall emit `.debug_frame`.
+- [x] **AS-T-293** When `.cfi_sections .debug_frame` is given, the assembler shall emit `.debug_frame`.
   Trace: AS-OBJ-010.  Verify: T.  After: 290.
 - [ ] **AS-T-294** When `.file N "name"` and `.loc` directives are assembled, the assembler shall emit a `.debug_line` program that `readelf --debug-dump=decodedline` reads as the same rows GNU's does.
   Trace: AS-OBJ-010.  Verify: T — the output of `gcc -g -S`.  After: 220.
@@ -1287,5 +1288,5 @@ is not to be done, 370 is ticked with "removed" and the rest struck.
 | AS-EXT-009 | 185, 325, 332–337 |
 | AS-EXT-010 | 040, 171, 338, 339 (339 closes all of AS-EXT) |
 
-351 tasks: 296 done, 55 open.  Numbers run to 400, with gaps left between
+351 tasks: 299 done, 52 open.  Numbers run to 400, with gaps left between
 sections for tasks found along the way.

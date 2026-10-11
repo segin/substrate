@@ -2,6 +2,7 @@
 #include "as_x86_encode.h"
 #include "as_x86_regs.h"
 #include "as_reloc_op.h"
+#include "as_cfi.h"
 #include "as_x86_vec.h"
 #include "as_x86_vex.h"
 #include "as_x86_avx.h"
@@ -16816,6 +16817,125 @@ static int ensure_section_exists(emit_ctx_t *ctx, const char *name, uint32_t typ
     return 0;
 }
 
+static int machine_relocation_addend_is_in_place(unsigned machine);
+static int64_t local_label_addend(emit_ctx_t *ctx, const char *name);
+static int add_reloc_for_symbol_ex(emit_ctx_t *ctx, elf_section_t *sec, const char *name, uint64_t offset,
+                                   uint32_t fallback_type, int64_t addend);
+
+/*
+ * One section of call frame information, `.eh_frame` or `.debug_frame`,
+ * from the `.cfi_*` directives and where each stands: its bytes, and a
+ * relocation for each address in them.
+ */
+static int emit_frame_section(emit_ctx_t *ctx, const as_cfi_event_t *events, size_t count, int debug_frame) {
+    const char *name = debug_frame ? ".debug_frame" : ".eh_frame";
+    int is_64 = ctx->cfg->is_64 != 0;
+    unsigned machine = ctx->cfg->machine;
+    as_cfi_frames_t frames;
+    elf_section_t *sec;
+    char why[256];
+    size_t i;
+    int rc = -1;
+
+    if (as_cfi_build(events, count, is_64, debug_frame, &frames, why, sizeof(why)) != 0) {
+        set_err(ctx, "%s", why);
+        return -1;
+    }
+    /* (No .eh_frame_hdr: that is the linker's to make, of the frames
+     * of every object, and there is none in an object.) */
+    if (ensure_section_exists(ctx, name, SHT_PROGBITS, debug_frame ? 0 : SHF_ALLOC, is_64 ? 8 : 4, NULL, 0) != 0 ||
+        (sec = elf_find_section(ctx->obj, name)) == NULL) {
+        set_err(ctx, "failed to emit %s", name);
+        goto out;
+    }
+    for (i = 0; i < frames.fixup_count; ++i) {
+        const as_cfi_fixup_t *f = &frames.fixups[i];
+        uint32_t type;
+
+        if (machine == EM_X86_64) {
+            type = f->pcrel ? (f->width == 8 ? R_X86_64_PC64 : f->width == 2 ? R_X86_64_PC16 : R_X86_64_PC32)
+                            : (f->width == 8 ? R_X86_64_64 : f->width == 2 ? R_X86_64_16 : R_X86_64_32);
+        } else {
+            if (f->width == 8) {
+                set_err(ctx, "%s: a pointer of eight bytes, which an ELF32 object has no relocation for", name);
+                goto out;
+            }
+            type = f->pcrel ? (f->width == 2 ? R_386_PC16 : R_386_PC32) : (f->width == 2 ? R_386_16 : R_386_32);
+        }
+        if (machine_relocation_addend_is_in_place(machine)) {
+            write_u64_le_at(frames.bytes + f->offset, (uint64_t)(f->addend + local_label_addend(ctx, f->symbol)),
+                            f->width);
+        }
+        if (add_reloc_for_symbol_ex(ctx, sec, f->symbol, f->offset, type, f->addend) != 0) {
+            set_err(ctx, "%s: no relocation could be made against '%s'", name, f->symbol);
+            goto out;
+        }
+    }
+    if (frames.len != 0 && elf_section_set_data(sec, frames.bytes, frames.len) != ELF_OK) {
+        set_err(ctx, "failed to emit %s", name);
+        goto out;
+    }
+    rc = 0;
+out:
+    as_cfi_frames_free(&frames);
+    return rc;
+}
+
+/* The call frame information of the source: every `.cfi_*` directive
+ * with the place it stands at, and the sections made of them. */
+static int emit_call_frames(emit_ctx_t *ctx, const as_parse_result_t *parsed) {
+    as_cfi_event_t *events = NULL;
+    size_t count = 0;
+    size_t cap = 0;
+    int eh_frame = 0;
+    int debug_frame = 0;
+    size_t i;
+    int rc = -1;
+
+    for (i = 0; i < parsed->count; ++i) {
+        const as_stmt_t *st = &parsed->items[i];
+        const char *section = NULL;
+        uint64_t off = 0;
+
+        if (st->kind != AS_STMT_DIRECTIVE || st->u.directive.name == NULL ||
+            strncmp(st->u.directive.name, ".cfi_", 5) != 0) {
+            continue;
+        }
+        if (strcmp(st->u.directive.name, ".cfi_sections") != 0 &&
+            find_stmt_virtual_location(ctx, st, &section, &off) != 0) {
+            set_err(ctx, "%s:%u: %s: where it stands could not be found", st->file != NULL ? st->file : "<input>",
+                    st->line, st->u.directive.name);
+            goto out;
+        }
+        if (count == cap) {
+            size_t ncap = cap != 0 ? cap * 2 : 64;
+            as_cfi_event_t *grown = (as_cfi_event_t *)realloc(events, ncap * sizeof(events[0]));
+
+            if (grown == NULL) {
+                set_err(ctx, "out of memory");
+                goto out;
+            }
+            events = grown;
+            cap = ncap;
+        }
+        events[count].d = &st->u.directive;
+        events[count].section = section != NULL ? section : "";
+        events[count].offset = off;
+        events[count].file = st->file;
+        events[count].line = st->line;
+        count++;
+    }
+    as_cfi_sections(events, count, &eh_frame, &debug_frame);
+    if ((eh_frame && emit_frame_section(ctx, events, count, 0) != 0) ||
+        (debug_frame && emit_frame_section(ctx, events, count, 1) != 0)) {
+        goto out;
+    }
+    rc = 0;
+out:
+    free(events);
+    return rc;
+}
+
 /* The text of a directive's argument that is a string in quotes: its
  * bytes, with the escapes worked out.  NULL if it is not one. */
 static char *directive_string(const as_directive_t *d, size_t i, size_t *len_out) {
@@ -21221,13 +21341,8 @@ int as_elf_emit_file(const as_parse_result_t *parsed,
     if (has_file_loc && check_file_numbers(&ctx, parsed) != 0) {
         goto fail;
     }
-    if (has_cfi) {
-        /* (No .eh_frame_hdr: that is the linker's to make, of the
-         * frames of every object, and there is none in an object.) */
-        if (ensure_section_exists(&ctx, ".eh_frame", SHT_PROGBITS, SHF_ALLOC, 4, NULL, 0) != 0) {
-            set_err(&ctx, "failed to emit .eh_frame");
-            goto fail;
-        }
+    if (has_cfi && emit_call_frames(&ctx, parsed) != 0) {
+        goto fail;
     }
 
     if (elf_finalize(ctx.obj) != ELF_OK) {
